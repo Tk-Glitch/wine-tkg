@@ -1,0 +1,6 @@
+MODULE    = mshta.exe
+
+EXTRADLLFLAGS = -mwindows -municode -mno-cygwin
+
+C_SRCS = \
+	main.c

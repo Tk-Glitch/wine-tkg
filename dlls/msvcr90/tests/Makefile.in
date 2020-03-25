@@ -1,0 +1,7 @@
+TESTDLL   = msvcr90.dll
+
+C_SRCS = \
+	msvcr90.c
+
+RC_SRCS = \
+	msvcr90.rc

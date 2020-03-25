@@ -1,0 +1,8 @@
+MODULE    = net.exe
+IMPORTS   = netapi32 user32 advapi32
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = net.c
+
+RC_SRCS = net.rc

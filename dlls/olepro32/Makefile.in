@@ -1,0 +1,11 @@
+MODULE    = olepro32.dll
+IMPORTLIB = olepro32
+IMPORTS   = oleaut32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = olepro32stubs.c
+
+IDL_SRCS = olepro.idl
+
+RC_SRCS = version.rc

@@ -1,0 +1,14 @@
+MODULE    = cmd.exe
+IMPORTS   = shell32 user32 advapi32
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = \
+	batch.c \
+	builtins.c \
+	directory.c \
+	wcmdmain.c
+
+RC_SRCS = cmd.rc
+
+SVG_SRCS = wcmd.svg

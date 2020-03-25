@@ -1,0 +1,12 @@
+MODULE    = reg.exe
+IMPORTS   = advapi32
+DELAYIMPORTS = user32
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = \
+	export.c \
+	import.c \
+	reg.c
+
+RC_SRCS = reg.rc

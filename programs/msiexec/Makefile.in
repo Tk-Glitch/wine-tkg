@@ -1,0 +1,14 @@
+MODULE    = msiexec.exe
+IMPORTS   = msi ole32 advapi32 user32
+
+EXTRADLLFLAGS = -mwindows -mno-cygwin
+
+C_SRCS = \
+	msiexec.c \
+	service.c
+
+RC_SRCS = rsrc.rc
+
+MANPAGES = msiexec.man.in
+
+SVG_SRCS = msiexec.svg

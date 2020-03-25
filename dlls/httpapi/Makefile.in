@@ -1,0 +1,8 @@
+MODULE    = httpapi.dll
+IMPORTLIB = httpapi
+IMPORTS   = advapi32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	httpapi_main.c

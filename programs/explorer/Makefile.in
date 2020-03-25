@@ -1,0 +1,14 @@
+MODULE    = explorer.exe
+IMPORTS   = rpcrt4 user32 gdi32 advapi32
+DELAYIMPORTS = comctl32 shell32 oleaut32 ole32 shlwapi
+
+EXTRADLLFLAGS = -mwindows -municode -mno-cygwin
+
+C_SRCS = \
+	appbar.c \
+	desktop.c \
+	explorer.c \
+	startmenu.c \
+	systray.c
+
+RC_SRCS = explorer.rc

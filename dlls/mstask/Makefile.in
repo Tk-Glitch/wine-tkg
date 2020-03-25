@@ -1,0 +1,15 @@
+MODULE    = mstask.dll
+IMPORTS   = rpcrt4 ole32 oleaut32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	factory.c \
+	mstask_main.c \
+	task.c \
+	task_scheduler.c \
+	task_trigger.c
+
+IDL_SRCS = \
+	atsvc.idl \
+	mstask_local.idl

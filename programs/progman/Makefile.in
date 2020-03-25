@@ -1,0 +1,14 @@
+MODULE    = progman.exe
+IMPORTS   = shell32 comdlg32 user32 gdi32
+
+EXTRADLLFLAGS = -mwindows -mno-cygwin
+
+C_SRCS = \
+	dialog.c \
+	group.c \
+	grpfile.c \
+	main.c \
+	program.c \
+	string.c
+
+RC_SRCS = progman.rc

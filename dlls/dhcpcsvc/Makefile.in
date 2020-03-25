@@ -1,0 +1,6 @@
+MODULE = dhcpcsvc.dll
+IMPORTLIB = dhcpcsvc
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = dhcpcsvc.c

@@ -1,0 +1,10 @@
+MODULE    = uninstaller.exe
+IMPORTS   = advapi32
+DELAYIMPORTS = shlwapi shell32 user32 gdi32
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = \
+	main.c
+
+RC_SRCS = uninstaller.rc

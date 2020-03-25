@@ -1,0 +1,23 @@
+MODULE    = regedit.exe
+IMPORTS   = advapi32
+DELAYIMPORTS = shlwapi shell32 comdlg32 comctl32 user32 gdi32
+
+EXTRADLLFLAGS = -mwindows -municode -mno-cygwin
+
+C_SRCS = \
+	about.c \
+	childwnd.c \
+	edit.c \
+	framewnd.c \
+	hexedit.c \
+	listview.c \
+	main.c \
+	regedit.c \
+	regproc.c \
+	treeview.c
+
+RC_SRCS = regedit.rc
+
+MANPAGES = regedit.man.in
+
+SVG_SRCS = regedit.svg

@@ -1,0 +1,5 @@
+MODULE    = winaspi.dll16
+IMPORTS   = wnaspi32 advapi32
+EXTRADLLFLAGS = -m16 -mno-cygwin -Wb,--main-module,wnaspi32.dll
+
+C_SRCS = winaspi.c

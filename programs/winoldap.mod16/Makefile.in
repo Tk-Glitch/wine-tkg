@@ -1,0 +1,5 @@
+MODULE    = winoldap.mod16
+
+EXTRADLLFLAGS = -mconsole -m16 -mno-cygwin
+
+C_SRCS = winoldap.c

@@ -1,0 +1,7 @@
+MODULE    = faultrep.dll
+IMPORTLIB = faultrep
+IMPORTS   = advapi32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = faultrep.c

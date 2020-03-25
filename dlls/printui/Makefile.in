@@ -1,0 +1,9 @@
+MODULE    = printui.dll
+IMPORTS   = shell32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	printui.c
+
+RC_SRCS = printui.rc

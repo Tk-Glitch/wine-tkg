@@ -1,0 +1,8 @@
+TESTDLL   = kernelbase.dll
+
+C_SRCS = \
+	path.c \
+	sync.c
+
+RC_SRCS = \
+	rsrc.rc

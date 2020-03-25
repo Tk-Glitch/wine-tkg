@@ -1,0 +1,24 @@
+MODULE    = gdiplus.dll
+IMPORTLIB = gdiplus
+IMPORTS   = uuid shlwapi ole32 user32 gdi32 ucrtbase
+DELAYIMPORTS = windowscodecs
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	brush.c \
+	customlinecap.c \
+	font.c \
+	gdiplus.c \
+	graphics.c \
+	graphicspath.c \
+	image.c \
+	imageattributes.c \
+	matrix.c \
+	metafile.c \
+	pathiterator.c \
+	pen.c \
+	region.c \
+	stringformat.c
+
+RC_SRCS = gdiplus.rc

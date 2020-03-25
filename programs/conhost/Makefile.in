@@ -1,0 +1,7 @@
+MODULE    = conhost.exe
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = conhost.c
+
+RC_SRCS = version.rc

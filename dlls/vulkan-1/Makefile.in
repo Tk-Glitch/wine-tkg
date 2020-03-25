@@ -1,0 +1,10 @@
+MODULE    = vulkan-1.dll
+IMPORTS   = winevulkan
+IMPORTLIB = vulkan-1
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	vulkan.c
+
+RC_SRCS = version.rc

@@ -1,0 +1,8 @@
+MODULE = wpc.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	wpc.c
+
+IDL_SRCS = wpc_classes.idl

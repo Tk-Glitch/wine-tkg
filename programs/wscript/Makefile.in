@@ -1,0 +1,14 @@
+MODULE    = wscript.exe
+IMPORTS   = uuid shell32 oleaut32 ole32 user32 advapi32
+
+EXTRADLLFLAGS = -mwindows -municode -mno-cygwin
+
+RC_SRCS = \
+	rsrc.rc
+
+C_SRCS = \
+	arguments.c \
+	host.c \
+	main.c
+
+IDL_SRCS = ihost.idl

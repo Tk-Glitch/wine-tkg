@@ -1,0 +1,9 @@
+MODULE    = dmusic32.dll
+IMPORTS   = uuid
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	dmusic32_main.c
+
+RC_SRCS = version.rc

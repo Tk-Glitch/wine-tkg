@@ -1,0 +1,7 @@
+MODULE    = msimg32.dll
+IMPORTLIB = msimg32
+IMPORTS   = gdi32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = msimg32_main.c

@@ -1,0 +1,10 @@
+MODULE    = hh.exe
+
+EXTRADLLFLAGS = -mwindows -mno-cygwin
+
+C_SRCS = \
+	main.c
+
+RC_SRCS = hh.rc
+
+SVG_SRCS = winhelp.svg

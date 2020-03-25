@@ -1,0 +1,4 @@
+TESTDLL   = msvcr110.dll
+
+C_SRCS = \
+	msvcr110.c

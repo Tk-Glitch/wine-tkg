@@ -1,0 +1,8 @@
+MODULE    = netstat.exe
+IMPORTS   = iphlpapi user32 ws2_32
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = netstat.c
+
+RC_SRCS = netstat.rc

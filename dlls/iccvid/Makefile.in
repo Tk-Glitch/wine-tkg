@@ -1,0 +1,9 @@
+MODULE    = iccvid.dll
+IMPORTS   = user32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	iccvid.c
+
+RC_SRCS = iccvid.rc

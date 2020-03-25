@@ -1,0 +1,8 @@
+TESTDLL   = version.dll
+IMPORTS   = version shell32
+
+C_SRCS = \
+	info.c \
+	install.c
+
+RC_SRCS = version.rc

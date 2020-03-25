@@ -1,0 +1,33 @@
+MODULE    = winemac.drv
+IMPORTS   = uuid setupapi rpcrt4 user32 gdi32 advapi32
+DELAYIMPORTS = ole32 shell32 imm32
+EXTRALIBS = -framework AppKit -framework Carbon -framework Security -framework OpenGL -framework IOKit -framework CoreVideo $(METAL_LIBS)
+
+C_SRCS = \
+	clipboard.c \
+	display.c \
+	dragdrop.c \
+	event.c \
+	gdi.c \
+	image.c \
+	ime.c \
+	keyboard.c \
+	macdrv_main.c \
+	mouse.c \
+	opengl.c \
+	surface.c \
+	systray.c \
+	vulkan.c \
+	window.c
+
+OBJC_SRCS = \
+	cocoa_app.m \
+	cocoa_clipboard.m \
+	cocoa_display.m \
+	cocoa_event.m \
+	cocoa_main.m \
+	cocoa_opengl.m \
+	cocoa_status_item.m \
+	cocoa_window.m
+
+RC_SRCS = winemac.rc

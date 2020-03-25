@@ -1,0 +1,17 @@
+MODULE    = sapi.dll
+IMPORTS   = uuid ole32 user32 advapi32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	automation.c \
+	main.c \
+	token.c \
+	tts.c
+
+IDL_SRCS = \
+	sapi_classes.idl \
+	sapi_typelib.idl
+
+RC_SRCS = \
+	sapi.rc

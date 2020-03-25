@@ -1,0 +1,9 @@
+MODULE    = cryptdlg.dll
+IMPORTS   = cryptui crypt32 wintrust user32 advapi32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	main.c
+
+RC_SRCS = cryptdlg.rc

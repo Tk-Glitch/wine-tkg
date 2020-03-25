@@ -1,0 +1,7 @@
+MODULE    = sfc.dll
+IMPORTLIB = sfc
+IMPORTS   = sfc_os
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = sfc_main.c

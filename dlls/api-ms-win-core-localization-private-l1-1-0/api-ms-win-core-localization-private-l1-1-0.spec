@@ -1,0 +1,11 @@
+@ stub GetCPFileNameFromRegistry
+@ stub LoadStringByReference
+@ stub NlsCheckPolicy
+@ stub NlsEventDataDescCreate
+@ stub NlsGetCacheUpdateCount
+@ stub NlsUpdateLocale
+@ stub NlsUpdateSystemLocale
+@ stub NlsWriteEtwEvent
+@ stub _AddMUIStringToCache
+@ stub _GetMUIStringFromCache
+@ stub _OpenMuiStringCache

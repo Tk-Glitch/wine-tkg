@@ -1,0 +1,18 @@
+MODULE    = winhlp32.exe
+IMPORTS   = user32 gdi32
+DELAYIMPORTS = shell32 comctl32 comdlg32
+
+EXTRADLLFLAGS = -mwindows -mno-cygwin
+
+C_SRCS = \
+	callback.c \
+	hlpfile.c \
+	macro.c \
+	string.c \
+	winhelp.c
+
+LEX_SRCS = macro.lex.l
+
+RC_SRCS = winhlp32.rc
+
+SVG_SRCS = winhelp.svg

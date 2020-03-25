@@ -1,0 +1,14 @@
+MODULE    = adsldp.dll
+IMPORTS   = ole32 oleaut32 secur32 activeds uuid
+DELAYIMPORTS = netapi32 wldap32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	adsldp.c \
+	ldap.c
+
+IDL_SRCS = \
+	adsldp.idl
+
+RC_SRCS = rsrc.rc

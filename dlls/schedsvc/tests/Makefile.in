@@ -1,0 +1,10 @@
+TESTDLL   = schedsvc.dll
+IMPORTS   = rpcrt4 ole32
+
+C_SRCS = \
+	atsvcapi.c \
+	rpcapi.c
+
+IDL_SRCS = \
+	atsvc.idl \
+	schrpc.idl

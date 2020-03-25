@@ -1,0 +1,8 @@
+MODULE    = wmplayer.exe
+
+EXTRADLLFLAGS = -mwindows -municode -mno-cygwin
+
+RC_SRCS = version.rc
+
+C_SRCS = \
+	main.c

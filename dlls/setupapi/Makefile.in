@@ -1,0 +1,24 @@
+EXTRADEFS = -D_SETUPAPI_
+MODULE    = setupapi.dll
+IMPORTLIB = setupapi
+IMPORTS   = uuid version advapi32 rpcrt4
+DELAYIMPORTS = shell32 wintrust ole32 winspool.drv comdlg32 user32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	devinst.c \
+	dialog.c \
+	dirid.c \
+	diskspace.c \
+	fakedll.c \
+	install.c \
+	misc.c \
+	parser.c \
+	query.c \
+	queue.c \
+	setupcab.c \
+	stringtable.c \
+	stubs.c
+
+RC_SRCS = setupapi.rc

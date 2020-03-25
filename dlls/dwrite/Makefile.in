@@ -1,0 +1,20 @@
+MODULE    = dwrite.dll
+IMPORTLIB = dwrite
+IMPORTS   = user32 gdi32 advapi32
+EXTRAINCL = $(FREETYPE_CFLAGS)
+
+C_SRCS = \
+	analyzer.c \
+	bidi.c \
+	bracket.c \
+	direction.c \
+	font.c \
+	freetype.c \
+	gdiinterop.c \
+	layout.c \
+	linebreak.c \
+	main.c \
+	mirror.c \
+	opentype.c \
+	scripts.c \
+	shape.c

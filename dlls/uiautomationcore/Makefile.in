@@ -1,0 +1,8 @@
+MODULE = uiautomationcore.dll
+IMPORTLIB = uiautomationcore
+IMPORTS   = uuid
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	uia_main.c

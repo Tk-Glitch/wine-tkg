@@ -1,0 +1,36 @@
+EXTRADEFS = -D_CRYPT32_
+MODULE    = crypt32.dll
+IMPORTLIB = crypt32
+IMPORTS   = user32 advapi32 bcrypt
+DELAYIMPORTS = cryptnet
+EXTRALIBS = $(SECURITY_LIBS)
+EXTRAINCL = $(GNUTLS_CFLAGS)
+
+C_SRCS = \
+	base64.c \
+	cert.c \
+	chain.c \
+	collectionstore.c \
+	context.c \
+	crl.c \
+	ctl.c \
+	decode.c \
+	encode.c \
+	filestore.c \
+	main.c \
+	message.c \
+	msg.c \
+	object.c \
+	oid.c \
+	pfx.c \
+	proplist.c \
+	protectdata.c \
+	provstore.c \
+	regstore.c \
+	rootstore.c \
+	serialize.c \
+	sip.c \
+	store.c \
+	str.c
+
+RC_SRCS = crypt32.rc

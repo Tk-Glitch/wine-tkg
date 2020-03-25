@@ -1,0 +1,4 @@
+MODULE    = toolhelp.dll16
+EXTRADLLFLAGS = -m16 -mno-cygwin
+
+C_SRCS = toolhelp.c

@@ -1,0 +1,9 @@
+MODULE    = view.exe
+IMPORTS   = comdlg32 user32 gdi32
+
+EXTRADLLFLAGS = -mwindows -municode -mno-cygwin
+
+C_SRCS = \
+	view.c
+
+RC_SRCS = view.rc

@@ -1,0 +1,6 @@
+MODULE    = winepath.exe
+APPMODE   = -mconsole -municode
+
+C_SRCS = winepath.c
+
+MANPAGES = winepath.man.in

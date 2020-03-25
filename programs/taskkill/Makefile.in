@@ -1,0 +1,8 @@
+MODULE    = taskkill.exe
+IMPORTS   = user32
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = taskkill.c
+
+RC_SRCS = taskkill.rc

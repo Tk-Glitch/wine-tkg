@@ -1,0 +1,7 @@
+TESTDLL   = mfplat.dll
+IMPORTS   = ole32 mfplat mfuuid propsys uuid
+
+C_SRCS = \
+	mfplat.c
+
+RC_SRCS = resource.rc

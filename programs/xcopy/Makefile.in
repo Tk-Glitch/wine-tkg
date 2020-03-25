@@ -1,0 +1,9 @@
+MODULE    = xcopy.exe
+IMPORTS   = shell32 user32
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = \
+	xcopy.c
+
+RC_SRCS = xcopy.rc

@@ -1,0 +1,16 @@
+MODULE    = wintrust.dll
+IMPORTLIB = wintrust
+IMPORTS   = crypt32 user32 advapi32
+DELAYIMPORTS = cryptui imagehlp
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	asn.c \
+	crypt.c \
+	register.c \
+	softpub.c \
+	wintrust_main.c
+
+RC_SRCS = \
+	version.rc

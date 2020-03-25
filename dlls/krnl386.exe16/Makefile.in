@@ -1,0 +1,44 @@
+MODULE    = krnl386.exe16
+IMPORTLIB = kernel
+IMPORTS   = winecrt0 kernel32 ntdll
+DELAYIMPORTS = dsound user32
+EXTRADLLFLAGS = -m16 -nodefaultlibs -Wb,--dll-name,kernel
+
+C_SRCS = \
+	atom.c \
+	dma.c \
+	dosmem.c \
+	dosvm.c \
+	error.c \
+	file.c \
+	fpu.c \
+	global.c \
+	instr.c \
+	int13.c \
+	int15.c \
+	int21.c \
+	int25.c \
+	int26.c \
+	int2f.c \
+	int31.c \
+	int67.c \
+	interrupts.c \
+	ioports.c \
+	kernel.c \
+	local.c \
+	ne_module.c \
+	ne_segment.c \
+	registry.c \
+	relay.c \
+	resource.c \
+	selector.c \
+	snoop.c \
+	soundblaster.c \
+	syslevel.c \
+	task.c \
+	thunk.c \
+	utthunk.c \
+	vxd.c \
+	wowthunk.c
+
+RC_SRCS = version.rc

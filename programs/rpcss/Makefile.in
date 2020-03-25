@@ -1,0 +1,14 @@
+MODULE    = rpcss.exe
+IMPORTS   = rpcrt4 advapi32
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = \
+	epmp.c \
+	irotp.c \
+	rpcss_main.c
+
+IDL_SRCS = \
+	epm.idl \
+	irot.idl \
+	irpcss.idl

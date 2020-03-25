@@ -1,0 +1,8 @@
+MODULE    = userenv.dll
+IMPORTS   = advapi32
+IMPORTLIB = userenv
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	userenv_main.c

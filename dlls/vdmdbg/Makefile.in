@@ -1,0 +1,7 @@
+MODULE    = vdmdbg.dll
+IMPORTLIB = vdmdbg
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	vdmdbg.c

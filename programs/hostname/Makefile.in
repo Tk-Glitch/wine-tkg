@@ -1,0 +1,8 @@
+MODULE    = hostname.exe
+DELAYIMPORTS = user32
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = hostname.c
+
+RC_SRCS = hostname.rc

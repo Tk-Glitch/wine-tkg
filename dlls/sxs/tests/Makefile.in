@@ -1,0 +1,10 @@
+TESTDLL   = sxs.dll
+IMPORTS   = sxs shlwapi
+
+C_SRCS = \
+	cache.c \
+	name.c \
+	sxs.c
+
+RC_SRCS = resource.rc
+IDL_SRCS = interfaces.idl
