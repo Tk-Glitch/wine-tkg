@@ -1,4 +1,4 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sun 29 Mar 2020 10:33:39 AM CEST :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sun 29 Mar 2020 12:14:53 PM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
