@@ -445,12 +445,6 @@ static wine_signal_handler handlers[256];
 extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
 extern NTSTATUS WINAPI __syscall_NtGetContextThread( HANDLE handle, CONTEXT *context );
 
-/* convert from straight ASCII to Unicode without depending on the current codepage */
-static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
-{
-    while (len--) *dst++ = (unsigned char)*src++;
-}
-
 static void* WINAPI __wine_fakedll_dispatcher( const char *module, ULONG ord )
 {
     UNICODE_STRING name;

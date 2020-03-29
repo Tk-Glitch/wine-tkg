@@ -343,9 +343,9 @@ static BOOL get_nt_registry_version( RTL_OSVERSIONINFOEXW *version )
             {
                 WCHAR *str = (WCHAR *)info->Data;
                 str[info->DataLength / sizeof(WCHAR)] = 0;
-                if (!strcmpiW( str, WinNTW )) version->wProductType = VER_NT_WORKSTATION;
-                else if (!strcmpiW( str, LanmanNTW )) version->wProductType = VER_NT_DOMAIN_CONTROLLER;
-                else if (!strcmpiW( str, ServerNTW )) version->wProductType = VER_NT_SERVER;
+                if (!wcsicmp( str, WinNTW )) version->wProductType = VER_NT_WORKSTATION;
+                else if (!wcsicmp( str, LanmanNTW )) version->wProductType = VER_NT_DOMAIN_CONTROLLER;
+                else if (!wcsicmp( str, ServerNTW )) version->wProductType = VER_NT_SERVER;
             }
             NtClose( hkey2 );
         }
@@ -482,7 +482,6 @@ void version_init(void)
     BOOL got_win_ver = FALSE;
     const WCHAR *p, *appname = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
     WCHAR appversion[MAX_PATH+20];
-    SYSTEM_BASIC_INFORMATION sbi;
 
     current_version = &VersionData[WIN10];
 
@@ -547,9 +546,6 @@ done:
     user_shared_data->NtMajorVersion     = current_version->dwMajorVersion;
     user_shared_data->NtMinorVersion     = current_version->dwMinorVersion;
     user_shared_data->SuiteMask          = current_version->wSuiteMask;
-
-    virtual_get_system_info(&sbi);
-    user_shared_data->NumberOfPhysicalPages = sbi.MmNumberOfPhysicalPages;
 
     TRACE( "got %d.%d platform %d build %x name %s service pack %d.%d product %d\n",
            current_version->dwMajorVersion, current_version->dwMinorVersion,

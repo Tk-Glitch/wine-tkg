@@ -37,9 +37,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 const WCHAR        S_ElfW[]         = {'<','e','l','f','>','\0'};
 const WCHAR        S_WineLoaderW[]  = {'<','w','i','n','e','-','l','o','a','d','e','r','>','\0'};
 static const WCHAR S_DotSoW[]       = {'.','s','o','\0'};
-static const WCHAR S_DotDylibW[]    = {'.','d','y','l','i','b','\0'};
-static const WCHAR S_DotPdbW[]      = {'.','p','d','b','\0'};
-static const WCHAR S_DotDbgW[]      = {'.','d','b','g','\0'};
 const WCHAR        S_SlashW[]       = {'/','\0'};
 
 static const WCHAR S_AcmW[] = {'.','a','c','m','\0'};
@@ -190,7 +187,7 @@ static const char*      get_module_type(enum module_type type, BOOL virtual)
 struct module* module_new(struct process* pcs, const WCHAR* name,
                           enum module_type type, BOOL virtual,
                           DWORD64 mod_addr, DWORD64 size,
-                          unsigned long stamp, unsigned long checksum)
+                          ULONG_PTR stamp, ULONG_PTR checksum)
 {
     struct module*      module;
     unsigned            i;
@@ -374,12 +371,8 @@ BOOL module_get_debug(struct module_pair* pair)
         BOOL ret;
         
         if (pair->effective->is_virtual) ret = FALSE;
-        else switch (pair->effective->type)
+        else if (pair->effective->type == DMT_PE)
         {
-        case DMT_ELF:
-            ret = elf_load_debug_info(pair->effective);
-            break;
-        case DMT_PE:
             idslW64.SizeOfStruct = sizeof(idslW64);
             idslW64.BaseOfImage = pair->effective->module.BaseOfImage;
             idslW64.CheckSum = pair->effective->module.CheckSum;
@@ -394,14 +387,9 @@ BOOL module_get_debug(struct module_pair* pair)
             pcs_callback(pair->pcs,
                          ret ? CBA_DEFERRED_SYMBOL_LOAD_COMPLETE : CBA_DEFERRED_SYMBOL_LOAD_FAILURE,
                          &idslW64);
-            break;
-        case DMT_MACHO:
-            ret = macho_load_debug_info(pair->pcs, pair->effective);
-            break;
-        default:
-            ret = FALSE;
-            break;
         }
+        else ret = pair->pcs->loader->load_debug_info(pair->pcs, pair->effective);
+
         if (!ret) pair->effective->module.SymType = SymNone;
         assert(pair->effective->module.SymType != SymDeferred);
         pair->effective->module.NumSyms = pair->effective->ht_symbols.num_elts;
@@ -474,59 +462,6 @@ static BOOL module_is_container_loaded(const struct process* pcs,
     /* likely a native PE module */
     WARN("Couldn't find container for %s\n", debugstr_w(ImageName));
     return FALSE;
-}
-
-/******************************************************************
- *		module_get_type_by_name
- *
- * Guesses a filename type from its extension
- */
-enum module_type module_get_type_by_name(const WCHAR* name)
-{
-    int len = strlenW(name);
-
-    /* Skip all version extensions (.[digits]) regex: "(\.\d+)*$" */
-    do
-    {
-        int i = len;
-
-        while (i && name[i - 1] >= '0' && name[i - 1] <= '9') i--;
-
-        if (i && name[i - 1] == '.')
-            len = i - 1;
-        else
-            break;
-    } while (len);
-
-    /* check for terminating .so or .so.[digit] */
-    /* FIXME: Can't rely solely on extension; have to check magic or
-     *        stop using .so on Mac OS X.  For now, base on platform. */
-    if (len > 3 && !memcmp(name + len - 3, S_DotSoW, 3))
-#ifdef __APPLE__
-        return DMT_MACHO;
-#else
-        return DMT_ELF;
-#endif
-
-    if (len > 6 && !strncmpiW(name + len - 6, S_DotDylibW, 6))
-        return DMT_MACHO;
-
-    if (len > 4 && !strncmpiW(name + len - 4, S_DotPdbW, 4))
-        return DMT_PDB;
-
-    if (len > 4 && !strncmpiW(name + len - 4, S_DotDbgW, 4))
-        return DMT_DBG;
-
-    /* wine is also a native module (Mach-O on Mac OS X, ELF elsewhere) */
-    if (is_wine_loader(name))
-    {
-#ifdef __APPLE__
-        return DMT_MACHO;
-#else
-        return DMT_ELF;
-#endif
-    }
-    return DMT_PE;
 }
 
 static BOOL image_check_debug_link(const WCHAR* file, struct image_file_map* fmap, DWORD link_crc)
@@ -855,8 +790,7 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
     if (Flags & SLMFLAG_VIRTUAL)
     {
         if (!wImageName) return FALSE;
-        module = module_new(pcs, wImageName, module_get_type_by_name(wImageName),
-                            TRUE, BaseOfDll, SizeOfDll, 0, 0);
+        module = module_new(pcs, wImageName, DMT_PE, TRUE, BaseOfDll, SizeOfDll, 0, 0);
         if (!module) return FALSE;
         if (wModuleName) module_set_module(module, wModuleName);
         module->module.SymType = SymVirtual;
@@ -890,18 +824,7 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
             wImageName)
         {
             /* and finally an ELF or Mach-O module */
-            switch (module_get_type_by_name(wImageName))
-            {
-                case DMT_ELF:
-                    module = elf_load_module(pcs, wImageName, BaseOfDll);
-                    break;
-                case DMT_MACHO:
-                    module = macho_load_module(pcs, wImageName, BaseOfDll);
-                    break;
-                default:
-                    /* Ignored */
-                    break;
-            }
+            module = pcs->loader->load_module(pcs, wImageName, BaseOfDll);
         }
     }
     if (!module)
@@ -1431,6 +1354,21 @@ static BOOL native_synchronize_module_list(struct process* pcs)
     return FALSE;
 }
 
+static struct module* native_load_module(struct process* pcs, const WCHAR* name, ULONG_PTR addr)
+{
+    return NULL;
+}
+
+static BOOL native_load_debug_info(struct process* process, struct module* module)
+{
+    return FALSE;
+}
+
+static BOOL native_enum_modules(struct process *process, enum_modules_cb cb, void* user)
+{
+    return FALSE;
+}
+
 static BOOL native_fetch_file_info(struct process* process, const WCHAR* name, ULONG_PTR load_addr, DWORD_PTR* base,
                                    DWORD* size, DWORD* checksum)
 {
@@ -1440,5 +1378,8 @@ static BOOL native_fetch_file_info(struct process* process, const WCHAR* name, U
 const struct loader_ops no_loader_ops =
 {
     native_synchronize_module_list,
+    native_load_module,
+    native_load_debug_info,
+    native_enum_modules,
     native_fetch_file_info,
 };

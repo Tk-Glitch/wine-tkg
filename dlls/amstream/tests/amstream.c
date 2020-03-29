@@ -305,25 +305,46 @@ error:
 }
 
 static const GUID test_mspid = {0x88888888};
-static IAMMediaStream teststream;
-static LONG teststream_refcount = 1;
-static IAMMultiMediaStream *teststream_mmstream;
-static IMediaStreamFilter *teststream_filter;
-static IFilterGraph *teststream_graph;
+
+struct teststream
+{
+    IAMMediaStream IAMMediaStream_iface;
+    IPin IPin_iface;
+    LONG refcount;
+    GUID mspid;
+    IAMMultiMediaStream *mmstream;
+    IMediaStreamFilter *filter;
+    IFilterGraph *graph;
+    FILTER_STATE state;
+    HRESULT set_state_result;
+};
+
+static struct teststream *impl_from_IAMMediaStream(IAMMediaStream *iface)
+{
+    return CONTAINING_RECORD(iface, struct teststream, IAMMediaStream_iface);
+}
+
+static struct teststream *impl_from_IPin(IPin *iface)
+{
+    return CONTAINING_RECORD(iface, struct teststream, IPin_iface);
+}
 
 static HRESULT WINAPI pin_QueryInterface(IPin *iface, REFIID iid, void **out)
 {
-    return IAMMediaStream_QueryInterface(&teststream, iid, out);
+    struct teststream *stream = impl_from_IPin(iface);
+    return IAMMediaStream_QueryInterface(&stream->IAMMediaStream_iface, iid, out);
 }
 
 static ULONG WINAPI pin_AddRef(IPin *iface)
 {
-    return IAMMediaStream_AddRef(&teststream);
+    struct teststream *stream = impl_from_IPin(iface);
+    return IAMMediaStream_AddRef(&stream->IAMMediaStream_iface);
 }
 
 static ULONG WINAPI pin_Release(IPin *iface)
 {
-    return IAMMediaStream_Release(&teststream);
+    struct teststream *stream = impl_from_IPin(iface);
+    return IAMMediaStream_Release(&stream->IAMMediaStream_iface);
 }
 
 static HRESULT WINAPI pin_Connect(IPin *iface, IPin *peer, const AM_MEDIA_TYPE *mt)
@@ -439,10 +460,10 @@ static const IPinVtbl pin_vtbl =
     pin_NewSegment
 };
 
-static IPin testpin = {&pin_vtbl};
-
 static HRESULT WINAPI stream_QueryInterface(IAMMediaStream *iface, REFIID iid, void **out)
 {
+    struct teststream *stream = impl_from_IAMMediaStream(iface);
+
     if (winetest_debug > 1) trace("QueryInterface(%s)\n", wine_dbgstr_guid(iid));
 
     if (IsEqualGUID(iid, &IID_IUnknown) || IsEqualGUID(iid, &IID_IMediaStream) || IsEqualGUID(iid, &IID_IAMMediaStream))
@@ -454,7 +475,7 @@ static HRESULT WINAPI stream_QueryInterface(IAMMediaStream *iface, REFIID iid, v
     else if (IsEqualGUID(iid, &IID_IPin))
     {
         IAMMediaStream_AddRef(iface);
-        *out = &testpin;
+        *out = &stream->IPin_iface;
         return S_OK;
     }
 
@@ -464,12 +485,14 @@ static HRESULT WINAPI stream_QueryInterface(IAMMediaStream *iface, REFIID iid, v
 
 static ULONG WINAPI stream_AddRef(IAMMediaStream *iface)
 {
-    return InterlockedIncrement(&teststream_refcount);
+    struct teststream *stream = impl_from_IAMMediaStream(iface);
+    return InterlockedIncrement(&stream->refcount);
 }
 
 static ULONG WINAPI stream_Release(IAMMediaStream *iface)
 {
-    return InterlockedDecrement(&teststream_refcount);
+    struct teststream *stream = impl_from_IAMMediaStream(iface);
+    return InterlockedDecrement(&stream->refcount);
 }
 
 static HRESULT WINAPI stream_GetMultiMediaStream(IAMMediaStream *iface, IMultiMediaStream **mmstream)
@@ -480,9 +503,12 @@ static HRESULT WINAPI stream_GetMultiMediaStream(IAMMediaStream *iface, IMultiMe
 
 static HRESULT WINAPI stream_GetInformation(IAMMediaStream *iface, MSPID *id, STREAM_TYPE *type)
 {
+    struct teststream *stream = impl_from_IAMMediaStream(iface);
     if (winetest_debug > 1) trace("GetInformation(%p, %p)\n", id, type);
-    *id = test_mspid;
-    ok(!type, "Got unexpected type %p.\n", type);
+    if (id)
+        *id = stream->mspid;
+    if (type)
+        *type = STREAMTYPE_READ;
     return S_OK;
 }
 
@@ -520,28 +546,34 @@ static HRESULT WINAPI stream_Initialize(IAMMediaStream *iface, IUnknown *source,
 
 static HRESULT WINAPI stream_SetState(IAMMediaStream *iface, FILTER_STATE state)
 {
-    ok(0, "Unexpected call.\n");
-    return E_NOTIMPL;
+    struct teststream *stream = impl_from_IAMMediaStream(iface);
+    if (winetest_debug > 1) trace("SetState(%#x)\n", state);
+    if (SUCCEEDED(stream->set_state_result))
+        stream->state = state;
+    return stream->set_state_result;
 }
 
 static HRESULT WINAPI stream_JoinAMMultiMediaStream(IAMMediaStream *iface, IAMMultiMediaStream *mmstream)
 {
+    struct teststream *stream = impl_from_IAMMediaStream(iface);
     if (winetest_debug > 1) trace("JoinAMMultiMediaStream(%p)\n", mmstream);
-    teststream_mmstream = mmstream;
+    stream->mmstream = mmstream;
     return S_OK;
 }
 
 static HRESULT WINAPI stream_JoinFilter(IAMMediaStream *iface, IMediaStreamFilter *filter)
 {
+    struct teststream *stream = impl_from_IAMMediaStream(iface);
     if (winetest_debug > 1) trace("JoinFilter(%p)\n", filter);
-    teststream_filter = filter;
+    stream->filter = filter;
     return S_OK;
 }
 
 static HRESULT WINAPI stream_JoinFilterGraph(IAMMediaStream *iface, IFilterGraph *graph)
 {
+    struct teststream *stream = impl_from_IAMMediaStream(iface);
     if (winetest_debug > 1) trace("JoinFilterGraph(%p)\n", graph);
-    teststream_graph = graph;
+    stream->graph = graph;
     return S_OK;
 }
 
@@ -563,7 +595,15 @@ static const IAMMediaStreamVtbl stream_vtbl =
     stream_JoinFilterGraph,
 };
 
-static IAMMediaStream teststream = {&stream_vtbl};
+static void teststream_init(struct teststream *stream)
+{
+    memset(stream, 0, sizeof(*stream));
+    stream->IAMMediaStream_iface.lpVtbl = &stream_vtbl;
+    stream->IPin_iface.lpVtbl = &pin_vtbl;
+    stream->refcount = 1;
+    stream->mspid = test_mspid;
+    stream->set_state_result = S_OK;
+}
 
 #define check_enum_stream(a,b,c,d) check_enum_stream_(__LINE__,a,b,c,d)
 static void check_enum_stream_(int line, IAMMultiMediaStream *mmstream,
@@ -616,6 +656,7 @@ static void test_add_stream(void)
     IMediaStream *video_stream, *audio_stream, *stream;
     IDirectDrawMediaStream *ddraw_stream;
     IMediaStreamFilter *stream_filter;
+    struct teststream teststream;
     IDirectDraw *ddraw, *ddraw2;
     IEnumFilters *enum_filters;
     IBaseFilter *filters[3];
@@ -623,6 +664,8 @@ static void test_add_stream(void)
     ULONG ref, count;
     CLSID clsid;
     HRESULT hr;
+
+    teststream_init(&teststream);
 
     hr = IAMMultiMediaStream_GetFilter(mmstream, &stream_filter);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -684,21 +727,21 @@ static void test_add_stream(void)
     ok(hr == MS_E_PURPOSEID, "Got hr %#x.\n", hr);
 
     hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)&teststream, &test_mspid, 0, &stream);
-    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(stream == (IMediaStream *)&teststream, "Streams didn't match.\n");
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(stream == (IMediaStream *)&teststream, "Streams didn't match.\n");
     if (hr == S_OK) IMediaStream_Release(stream);
-    todo_wine ok(teststream_mmstream == mmstream, "IAMMultiMediaStream objects didn't match.\n");
-    todo_wine ok(teststream_filter == stream_filter, "IMediaStreamFilter objects didn't match.\n");
-    todo_wine ok(!!teststream_graph, "Expected a non-NULL graph.\n");
+    todo_wine ok(teststream.mmstream == mmstream, "IAMMultiMediaStream objects didn't match.\n");
+    ok(teststream.filter == stream_filter, "IMediaStreamFilter objects didn't match.\n");
+    todo_wine ok(!!teststream.graph, "Expected a non-NULL graph.\n");
 
     check_enum_stream(mmstream, stream_filter, 0, video_stream);
     check_enum_stream(mmstream, stream_filter, 1, audio_stream);
-    todo_wine check_enum_stream(mmstream, stream_filter, 2, (IMediaStream *)&teststream);
+    check_enum_stream(mmstream, stream_filter, 2, (IMediaStream *)&teststream);
     check_enum_stream(mmstream, stream_filter, 3, NULL);
 
     check_get_stream(mmstream, stream_filter, &MSPID_PrimaryVideo, video_stream);
     check_get_stream(mmstream, stream_filter, &MSPID_PrimaryAudio, audio_stream);
-    todo_wine check_get_stream(mmstream, stream_filter, &test_mspid, (IMediaStream *)&teststream);
+    check_get_stream(mmstream, stream_filter, &test_mspid, (IMediaStream *)&teststream);
 
     hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryVideo, 0, &stream);
     ok(hr == MS_E_PURPOSEID, "Got hr %#x.\n", hr);
@@ -725,7 +768,7 @@ static void test_add_stream(void)
     ok(!ref, "Got outstanding refcount %d.\n", ref);
     ref = IMediaStream_Release(audio_stream);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
-    ok(teststream_refcount == 1, "Got outstanding refcount %d.\n", ref);
+    ok(teststream.refcount == 1, "Got outstanding refcount %d.\n", teststream.refcount);
 
     /* The return parameter is optional. */
 
@@ -839,7 +882,7 @@ static void test_add_stream(void)
     ok(hr == MS_E_PURPOSEID, "Got hr %#x.\n", hr);
     hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &test_mspid,
             AMMSF_ADDDEFAULTRENDERER, &audio_stream);
-    todo_wine ok(hr == E_INVALIDARG, "Got hr %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got hr %#x.\n", hr);
 
     IMediaStreamFilter_Release(stream_filter);
     ref = IAMMultiMediaStream_Release(mmstream);
@@ -2737,6 +2780,141 @@ static void test_audiostream_receive_connection(void)
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
+void test_mediastreamfilter_get_state(void)
+{
+    IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    IMediaStreamFilter *filter;
+    FILTER_STATE state;
+    HRESULT hr;
+    ULONG ref;
+
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilter(mmstream, &filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!!filter, "Expected non-null filter.\n");
+
+    /* Crashes on native. */
+    if (0)
+    {
+        hr = IMediaStreamFilter_GetState(filter, 0, NULL);
+        ok(hr == E_POINTER, "Got hr %#x.\n", hr);
+    }
+
+    state = 0xcc;
+    hr = IMediaStreamFilter_GetState(filter, 0, &state);
+    ok(state == State_Stopped, "Got state %#x.\n", state);
+
+    ref = IAMMultiMediaStream_Release(mmstream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IMediaStreamFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
+void check_mediastreamfilter_state(FILTER_STATE expected_state, HRESULT (*set_state)(IMediaStreamFilter *),
+        HRESULT (*reset_state)(IMediaStreamFilter *))
+{
+    IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    struct teststream teststream, teststream2;
+    IMediaStreamFilter *filter;
+    FILTER_STATE state;
+    HRESULT hr;
+    ULONG ref;
+
+    teststream_init(&teststream);
+    teststream_init(&teststream2);
+
+    teststream2.mspid.Data2 = 1;
+
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)&teststream, &teststream.mspid, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)&teststream2, &teststream2.mspid, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilter(mmstream, &filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(filter != NULL, "Expected non-null filter\n");
+
+    hr = reset_state(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    teststream.state = 0xcc;
+    teststream2.state = 0xcc;
+    hr = set_state(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(teststream.state == expected_state, "Got state %#x.\n", teststream.state);
+    ok(teststream2.state == expected_state, "Got state %#x.\n", teststream2.state);
+    hr = IMediaStreamFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == expected_state, "Got state %#x.\n", state);
+
+    teststream.state = 0xcc;
+    teststream2.state = 0xcc;
+    hr = set_state(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(teststream.state == 0xcc, "Got state %#x.\n", teststream.state);
+    ok(teststream2.state == 0xcc, "Got state %#x.\n", teststream2.state);
+
+    hr = reset_state(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    teststream.set_state_result = E_FAIL;
+    teststream.state = 0xcc;
+    teststream2.state = 0xcc;
+    hr = set_state(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(teststream.state == 0xcc, "Got state %#x.\n", teststream.state);
+    ok(teststream2.state == expected_state, "Got state %#x.\n", teststream2.state);
+    hr = IMediaStreamFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == expected_state, "Got state %#x.\n", state);
+
+    hr = reset_state(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    teststream.set_state_result = E_FAIL;
+    teststream2.set_state_result = E_FAIL;
+    teststream.state = 0xcc;
+    teststream2.state = 0xcc;
+    hr = set_state(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(teststream.state == 0xcc, "Got state %#x.\n", teststream.state);
+    ok(teststream2.state == 0xcc, "Got state %#x.\n", teststream2.state);
+    hr = IMediaStreamFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == expected_state, "Got state %#x.\n", state);
+
+    ref = IAMMultiMediaStream_Release(mmstream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IMediaStreamFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ok(teststream.refcount == 1, "Got outstanding refcount %d.\n", teststream.refcount);
+    ok(teststream2.refcount == 1, "Got outstanding refcount %d.\n", teststream2.refcount);
+}
+
+static HRESULT mediastreamfilter_stop(IMediaStreamFilter *filter)
+{
+    return IMediaStreamFilter_Stop(filter);
+}
+
+static HRESULT mediastreamfilter_pause(IMediaStreamFilter *filter)
+{
+    return IMediaStreamFilter_Pause(filter);
+}
+
+static HRESULT mediastreamfilter_run(IMediaStreamFilter *filter)
+{
+    return IMediaStreamFilter_Run(filter, 0);
+}
+
+void test_mediastreamfilter_stop_pause_run(void)
+{
+    check_mediastreamfilter_state(State_Stopped, mediastreamfilter_stop, mediastreamfilter_run);
+    check_mediastreamfilter_state(State_Paused, mediastreamfilter_pause, mediastreamfilter_stop);
+    check_mediastreamfilter_state(State_Running, mediastreamfilter_run, mediastreamfilter_stop);
+}
+
 START_TEST(amstream)
 {
     HANDLE file;
@@ -2773,6 +2951,9 @@ START_TEST(amstream)
     test_audiostream_get_format();
     test_audiostream_set_format();
     test_audiostream_receive_connection();
+
+    test_mediastreamfilter_get_state();
+    test_mediastreamfilter_stop_pause_run();
 
     CoUninitialize();
 }

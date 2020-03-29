@@ -219,14 +219,13 @@ static const BOOL is_case_sensitive = FALSE;
 
 static struct file_identity windir;
 
-static RTL_CRITICAL_SECTION dir_section;
 static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 {
     0, 0, &dir_section,
     { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
       0, 0, { (DWORD_PTR)(__FILE__ ": dir_section") }
 };
-static RTL_CRITICAL_SECTION dir_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+RTL_CRITICAL_SECTION dir_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 
 /* check if a given Unicode char is OK in a DOS short name */
@@ -1296,9 +1295,8 @@ BOOL DIR_is_hidden_file( const char *name )
 /***********************************************************************
  *           hash_short_file_name
  *
- * Transform a Unix file name into a hashed DOS name. If the name is a valid
- * DOS name, it is converted to upper-case; otherwise it is replaced by a
- * hashed version that fits in 8.3 format.
+ * Transform a Unix file name into a hashed DOS name. If the name is not a valid
+ * DOS name, it is replaced by a hashed version that fits in 8.3 format.
  * 'buffer' must be at least 12 characters long.
  * Returns length of short name in bytes; short name is NOT null-terminated.
  */
@@ -1334,7 +1332,7 @@ static ULONG hash_short_file_name( const UNICODE_STRING *name, LPWSTR buffer )
     for (i = 4, p = name->Buffer, dst = buffer; i > 0; i--, p++)
     {
         if (p == end || p == ext) break;
-        *dst++ = is_invalid_dos_char(*p) ? '_' : toupperW(*p);
+        *dst++ = is_invalid_dos_char(*p) ? '_' : *p;
     }
     /* Pad to 5 chars with '~' */
     while (i-- >= 0) *dst++ = '~';
@@ -1349,7 +1347,7 @@ static ULONG hash_short_file_name( const UNICODE_STRING *name, LPWSTR buffer )
     {
         *dst++ = '.';
         for (i = 3, ext++; (i > 0) && ext < end; i--, ext++)
-            *dst++ = is_invalid_dos_char(*ext) ? '_' : toupperW(*ext);
+            *dst++ = is_invalid_dos_char(*ext) ? '_' : *ext;
     }
     return dst - buffer;
 }
@@ -1446,7 +1444,7 @@ static BOOLEAN match_filename( const UNICODE_STRING *name_str, const UNICODE_STR
 static BOOL append_entry( struct dir_data *data, const char *long_name,
                           const char *short_name, const UNICODE_STRING *mask )
 {
-    int i, long_len, short_len;
+    int long_len, short_len;
     WCHAR long_nameW[MAX_DIR_ENTRY_LEN + 1];
     WCHAR short_nameW[13];
     UNICODE_STRING str;
@@ -1463,7 +1461,6 @@ static BOOL append_entry( struct dir_data *data, const char *long_name,
     {
         short_len = ntdll_umbstowcs( short_name, strlen(short_name),
                                      short_nameW, ARRAY_SIZE( short_nameW ) - 1 );
-        for (i = 0; i < short_len; i++) short_nameW[i] = toupperW( short_nameW[i] );
     }
     else  /* generate a short name if necessary */
     {
@@ -1474,6 +1471,7 @@ static BOOL append_entry( struct dir_data *data, const char *long_name,
             short_len = hash_short_file_name( &str, short_nameW );
     }
     short_nameW[short_len] = 0;
+    wcsupr( short_nameW );
 
     TRACE( "long %s short %s mask %s\n",
            debugstr_w( long_nameW ), debugstr_w( short_nameW ), debugstr_us( mask ));
@@ -2097,7 +2095,7 @@ static NTSTATUS find_file_in_dir( char *unix_name, int pos, const WCHAR *name, i
                     {
                         ret = ntdll_umbstowcs( kde[1].d_name, strlen(kde[1].d_name),
                                                buffer, MAX_DIR_ENTRY_LEN );
-                        if (ret == length && !strncmpiW( buffer, name, length))
+                        if (ret == length && !RtlCompareUnicodeStrings( buffer, ret, name, ret, TRUE ))
                         {
                             strcpy( unix_name + pos, kde[1].d_name );
                             RtlLeaveCriticalSection( &dir_section );
@@ -2107,7 +2105,7 @@ static NTSTATUS find_file_in_dir( char *unix_name, int pos, const WCHAR *name, i
                     }
                     ret = ntdll_umbstowcs( kde[0].d_name, strlen(kde[0].d_name),
                                            buffer, MAX_DIR_ENTRY_LEN );
-                    if (ret == length && !strncmpiW( buffer, name, length))
+                    if (ret == length && !RtlCompareUnicodeStrings( buffer, ret, name, ret, TRUE ))
                     {
                         strcpy( unix_name + pos,
                                 kde[1].d_name[0] ? kde[1].d_name : kde[0].d_name );
@@ -2141,7 +2139,7 @@ static NTSTATUS find_file_in_dir( char *unix_name, int pos, const WCHAR *name, i
     while ((de = readdir( dir )))
     {
         ret = ntdll_umbstowcs( de->d_name, strlen(de->d_name), buffer, MAX_DIR_ENTRY_LEN );
-        if (ret == length && !strncmpiW( buffer, name, length ))
+        if (ret == length && !RtlCompareUnicodeStrings( buffer, ret, name, ret, TRUE ))
         {
             strcpy( unix_name + pos, de->d_name );
             closedir( dir );
@@ -2155,7 +2153,7 @@ static NTSTATUS find_file_in_dir( char *unix_name, int pos, const WCHAR *name, i
         {
             WCHAR short_nameW[12];
             ret = hash_short_file_name( &str, short_nameW );
-            if (ret == length && !strncmpiW( short_nameW, name, length ))
+            if (ret == length && !wcsnicmp( short_nameW, name, length ))
             {
                 strcpy( unix_name + pos, de->d_name );
                 closedir( dir );
@@ -2340,7 +2338,7 @@ static NTSTATUS get_dos_device( const WCHAR *name, UINT name_len, ANSI_STRING *u
     strcat( unix_name, "/dosdevices/" );
     dev = unix_name + strlen(unix_name);
 
-    for (i = 0; i < name_len; i++) dev[i] = (char)tolowerW(name[i]);
+    for (i = 0; i < name_len; i++) dev[i] = (name[i] >= 'A' && name[i] <= 'Z' ? name[i] + 32 : name[i]);
     dev[i] = 0;
 
     /* special case for drive devices */
@@ -2404,7 +2402,7 @@ static inline int get_dos_prefix_len( const UNICODE_STRING *name )
         return ARRAY_SIZE( nt_prefixW );
 
     if (name->Length >= sizeof(dosdev_prefixW) &&
-        !strncmpiW( name->Buffer, dosdev_prefixW, ARRAY_SIZE( dosdev_prefixW )))
+        !wcsnicmp( name->Buffer, dosdev_prefixW, ARRAY_SIZE( dosdev_prefixW )))
         return ARRAY_SIZE( dosdev_prefixW );
 
     return 0;
@@ -2759,7 +2757,7 @@ static NTSTATUS nt_to_unix_file_name_internal( const UNICODE_STRING *nameW, ANSI
     struct stat st;
     char *unix_name;
     int pos, ret, name_len, unix_len, prefix_len;
-    WCHAR prefix[MAX_DIR_ENTRY_LEN];
+    WCHAR prefix[MAX_DIR_ENTRY_LEN + 1];
     BOOLEAN is_unix = FALSE;
     BOOLEAN is_pipe = FALSE;
 
@@ -2789,8 +2787,10 @@ static NTSTATUS nt_to_unix_file_name_internal( const UNICODE_STRING *nameW, ANSI
     if (pos == name_len)  /* no subdir, plain DOS device */
         return get_dos_device( name, name_len, unix_name_ret );
 
-    for (prefix_len = 0; prefix_len < pos; prefix_len++)
-        prefix[prefix_len] = tolowerW(name[prefix_len]);
+    prefix_len = pos;
+    memcpy( prefix, name, prefix_len * sizeof(WCHAR) );
+    prefix[prefix_len] = 0;
+    wcslwr( prefix );
 
     name += prefix_len;
     name_len -= prefix_len;

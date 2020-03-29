@@ -124,6 +124,11 @@ static inline struct d3d10_effect_variable *impl_from_ID3D10EffectVariable(ID3D1
     return CONTAINING_RECORD(iface, struct d3d10_effect_variable, ID3D10EffectVariable_iface);
 }
 
+static inline struct d3d10_effect_variable *impl_from_ID3D10EffectShaderVariable(ID3D10EffectShaderVariable *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d10_effect_variable, ID3D10EffectVariable_iface);
+}
+
 struct d3d10_effect_state_property_info
 {
     UINT id;
@@ -2074,6 +2079,28 @@ static HRESULT parse_fx10_local_variable(const char *data, size_t data_size,
         case D3D10_SVT_TEXTURE2DMSARRAY:
         case D3D10_SVT_TEXTURE3D:
         case D3D10_SVT_TEXTURECUBE:
+            if (!v->type->element_count)
+                i = 1;
+            else
+                i = v->type->element_count;
+
+            if (!(v->u.resource.srv = heap_calloc(i, sizeof(*v->u.resource.srv))))
+            {
+                ERR("Failed to allocate shader resource view array memory.\n");
+                return E_OUTOFMEMORY;
+            }
+            v->u.resource.parent = TRUE;
+
+            if (v->elements)
+            {
+                for (i = 0; i < v->type->element_count; ++i)
+                {
+                    v->elements[i].u.resource.srv = &v->u.resource.srv[i];
+                    v->elements[i].u.resource.parent = FALSE;
+                }
+            }
+            break;
+
         case D3D10_SVT_RENDERTARGETVIEW:
         case D3D10_SVT_DEPTHSTENCILVIEW:
         case D3D10_SVT_BUFFER:
@@ -2711,7 +2738,7 @@ static void d3d10_effect_shader_variable_destroy(struct d3d10_effect_shader_vari
 
 static void d3d10_effect_variable_destroy(struct d3d10_effect_variable *v)
 {
-    unsigned int i;
+    unsigned int i, elem_count;
 
     TRACE("variable %p.\n", v);
 
@@ -2772,6 +2799,31 @@ static void d3d10_effect_variable_destroy(struct d3d10_effect_variable *v)
             case D3D10_SVT_SAMPLER:
                 if (v->u.state.object.sampler)
                     ID3D10SamplerState_Release(v->u.state.object.sampler);
+                break;
+
+            case D3D10_SVT_TEXTURE1D:
+            case D3D10_SVT_TEXTURE1DARRAY:
+            case D3D10_SVT_TEXTURE2D:
+            case D3D10_SVT_TEXTURE2DARRAY:
+            case D3D10_SVT_TEXTURE2DMS:
+            case D3D10_SVT_TEXTURE2DMSARRAY:
+            case D3D10_SVT_TEXTURE3D:
+            case D3D10_SVT_TEXTURECUBE:
+                if (!v->u.resource.parent)
+                    break;
+
+                if (!v->type->element_count)
+                    elem_count = 1;
+                else
+                    elem_count = v->type->element_count;
+
+                for (i = 0; i < elem_count; ++i)
+                {
+                    if (v->u.resource.srv[i])
+                        ID3D10ShaderResourceView_Release(v->u.resource.srv[i]);
+                }
+
+                heap_free(v->u.resource.srv);
                 break;
 
             default:
@@ -3614,9 +3666,125 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_pass_GetAnno
     return &null_variable.ID3D10EffectVariable_iface;
 }
 
+static void update_buffer(ID3D10Device *device, struct d3d10_effect_variable *v)
+{
+    struct d3d10_effect_buffer_variable *b = &v->u.buffer;
+
+    if (!b->changed)
+        return;
+
+    ID3D10Device_UpdateSubresource(device, (ID3D10Resource *)b->buffer, 0, NULL,
+            b->local_buffer, v->data_size, 0);
+
+    b->changed = FALSE;
+}
+
+static void apply_shader_resources(ID3D10Device *device, struct ID3D10EffectShaderVariable *variable)
+{
+    struct d3d10_effect_variable *v = impl_from_ID3D10EffectShaderVariable(variable);
+    struct d3d10_effect_shader_variable *sv = &v->u.shader;
+    struct d3d10_effect_shader_resource *sr;
+    struct d3d10_effect_variable *rsrc_v;
+    ID3D10ShaderResourceView **srv;
+    unsigned int i;
+
+    for (i = 0; i < sv->resource_count; ++i)
+    {
+        sr = &sv->resources[i];
+        rsrc_v = sr->variable;
+
+        switch (sr->in_type)
+        {
+            case D3D10_SIT_CBUFFER:
+                update_buffer(device, rsrc_v);
+                switch (v->type->basetype)
+                {
+                    case D3D10_SVT_VERTEXSHADER:
+                        ID3D10Device_VSSetConstantBuffers(device, sr->bind_point, sr->bind_count,
+                                &rsrc_v->u.buffer.buffer);
+                        break;
+
+                    case D3D10_SVT_PIXELSHADER:
+                        ID3D10Device_PSSetConstantBuffers(device, sr->bind_point, sr->bind_count,
+                                &rsrc_v->u.buffer.buffer);
+                        break;
+
+                    case D3D10_SVT_GEOMETRYSHADER:
+                        ID3D10Device_GSSetConstantBuffers(device, sr->bind_point, sr->bind_count,
+                                &rsrc_v->u.buffer.buffer);
+                        break;
+
+                    default:
+                        WARN("Incorrect shader type to bind constant buffer.\n");
+                        break;
+                }
+                break;
+
+            case D3D10_SIT_TBUFFER:
+            case D3D10_SIT_TEXTURE:
+                if (sr->in_type == D3D10_SIT_TBUFFER)
+                {
+                    update_buffer(device, rsrc_v);
+                    srv = &rsrc_v->u.buffer.resource_view;
+                }
+                else
+                    srv = rsrc_v->u.resource.srv;
+
+                switch (v->type->basetype)
+                {
+                    case D3D10_SVT_VERTEXSHADER:
+                        ID3D10Device_VSSetShaderResources(device, sr->bind_point, sr->bind_count, srv);
+                        break;
+
+                    case D3D10_SVT_PIXELSHADER:
+                        ID3D10Device_PSSetShaderResources(device, sr->bind_point, sr->bind_count, srv);
+                        break;
+
+                    case D3D10_SVT_GEOMETRYSHADER:
+                        ID3D10Device_GSSetShaderResources(device, sr->bind_point, sr->bind_count, srv);
+                        break;
+
+                    default:
+                        WARN("Incorrect shader type to bind shader resource view.\n");
+                        break;
+                }
+                break;
+
+            case D3D10_SIT_SAMPLER:
+                switch (v->type->basetype)
+                {
+                    case D3D10_SVT_VERTEXSHADER:
+                        ID3D10Device_VSSetSamplers(device, sr->bind_point, sr->bind_count,
+                                &rsrc_v->u.state.object.sampler);
+                        break;
+
+                    case D3D10_SVT_PIXELSHADER:
+                        ID3D10Device_PSSetSamplers(device, sr->bind_point, sr->bind_count,
+                                &rsrc_v->u.state.object.sampler);
+                        break;
+
+                    case D3D10_SVT_GEOMETRYSHADER:
+                        ID3D10Device_GSSetSamplers(device, sr->bind_point, sr->bind_count,
+                                &rsrc_v->u.state.object.sampler);
+                        break;
+
+                    default:
+                        WARN("Incorrect shader type to bind sampler.\n");
+                        break;
+                }
+                break;
+
+            default:
+                WARN("Unhandled shader resource %#x.\n", sr->in_type);
+                break;
+        }
+    }
+}
+
 static HRESULT STDMETHODCALLTYPE d3d10_effect_pass_Apply(ID3D10EffectPass *iface, UINT flags)
 {
-    struct d3d10_effect_pass *This = impl_from_ID3D10EffectPass(iface);
+    struct d3d10_effect_pass *pass = impl_from_ID3D10EffectPass(iface);
+    ID3D10Device *device = pass->technique->effect->device;
     HRESULT hr = S_OK;
     unsigned int i;
 
@@ -3624,9 +3792,16 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_pass_Apply(ID3D10EffectPass *iface
 
     if (flags) FIXME("Ignoring flags (%#x)\n", flags);
 
-    for (i = 0; i < This->object_count; ++i)
+    if (pass->vs.pShaderVariable != (ID3D10EffectShaderVariable *)&null_shader_variable.ID3D10EffectVariable_iface)
+        apply_shader_resources(device, pass->vs.pShaderVariable);
+    if (pass->gs.pShaderVariable != (ID3D10EffectShaderVariable *)&null_shader_variable.ID3D10EffectVariable_iface)
+        apply_shader_resources(device, pass->gs.pShaderVariable);
+    if (pass->ps.pShaderVariable != (ID3D10EffectShaderVariable *)&null_shader_variable.ID3D10EffectVariable_iface)
+        apply_shader_resources(device, pass->ps.pShaderVariable);
+
+    for (i = 0; i < pass->object_count; ++i)
     {
-        hr = d3d10_effect_object_apply(&This->objects[i]);
+        hr = d3d10_effect_object_apply(&pass->objects[i]);
         if (FAILED(hr)) break;
     }
 
@@ -5802,7 +5977,26 @@ static const struct ID3D10EffectStringVariableVtbl d3d10_effect_string_variable_
     d3d10_effect_string_variable_GetStringArray,
 };
 
+static void set_shader_resource_variable(ID3D10ShaderResourceView **src, ID3D10ShaderResourceView **dst)
+{
+    if (*dst == *src)
+        return;
+
+    if (*src)
+        ID3D10ShaderResourceView_AddRef(*src);
+    if (*dst)
+        ID3D10ShaderResourceView_Release(*dst);
+
+    *dst = *src;
+}
+
 /* ID3D10EffectVariable methods */
+
+static inline struct d3d10_effect_variable *impl_from_ID3D10EffectShaderResourceVariable(
+        ID3D10EffectShaderResourceVariable *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d10_effect_variable, ID3D10EffectVariable_iface);
+}
 
 static BOOL STDMETHODCALLTYPE d3d10_effect_shader_resource_variable_IsValid(ID3D10EffectShaderResourceVariable *iface)
 {
@@ -5960,9 +6154,13 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_resource_variable_GetRawVal
 static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_resource_variable_SetResource(
         ID3D10EffectShaderResourceVariable *iface, ID3D10ShaderResourceView *resource)
 {
-    FIXME("iface %p, resource %p stub!\n", iface, resource);
+    struct d3d10_effect_variable *v = impl_from_ID3D10EffectShaderResourceVariable(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, resource %p.\n", iface, resource);
+
+    set_shader_resource_variable(&resource, v->u.resource.srv);
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_resource_variable_GetResource(
@@ -5976,9 +6174,33 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_resource_variable_GetResour
 static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_resource_variable_SetResourceArray(
         ID3D10EffectShaderResourceVariable *iface, ID3D10ShaderResourceView **resources, UINT offset, UINT count)
 {
-    FIXME("iface %p, resources %p, offset %u, count %u stub!\n", iface, resources, offset, count);
+    struct d3d10_effect_variable *v = impl_from_ID3D10EffectShaderResourceVariable(iface);
+    ID3D10ShaderResourceView **rsrc_view;
+    unsigned int i;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, resources %p, offset %u, count %u.\n", iface, resources, offset, count);
+
+    if (!v->type->element_count)
+        return d3d10_effect_shader_resource_variable_SetResource(iface, *resources);
+
+    if (offset >= v->type->element_count)
+    {
+        WARN("Offset %u larger than element count %u, ignoring.\n", offset, v->type->element_count);
+        return S_OK;
+    }
+
+    if (count > v->type->element_count - offset)
+    {
+        WARN("Offset %u, count %u overruns the variable (element count %u), fixing up.\n",
+             offset, count, v->type->element_count);
+        count = v->type->element_count - offset;
+    }
+
+    rsrc_view = &v->u.resource.srv[offset];
+    for (i = 0; i < count; ++i)
+        set_shader_resource_variable(&resources[i], &rsrc_view[i]);
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_resource_variable_GetResourceArray(
@@ -6639,7 +6861,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_variable_GetShaderDesc(
 static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_variable_GetVertexShader(
         ID3D10EffectShaderVariable *iface, UINT index, ID3D10VertexShader **shader)
 {
-    struct d3d10_effect_variable *v = impl_from_ID3D10EffectVariable((ID3D10EffectVariable *)iface);
+    struct d3d10_effect_variable *v = impl_from_ID3D10EffectShaderVariable(iface);
 
     TRACE("iface %p, index %u, shader %p.\n", iface, index, shader);
 
@@ -6661,7 +6883,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_variable_GetVertexShader(
 static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_variable_GetGeometryShader(
         ID3D10EffectShaderVariable *iface, UINT index, ID3D10GeometryShader **shader)
 {
-    struct d3d10_effect_variable *v = impl_from_ID3D10EffectVariable((ID3D10EffectVariable *)iface);
+    struct d3d10_effect_variable *v = impl_from_ID3D10EffectShaderVariable(iface);
 
     TRACE("iface %p, index %u, shader %p.\n", iface, index, shader);
 
@@ -6683,7 +6905,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_variable_GetGeometryShader(
 static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_variable_GetPixelShader(
         ID3D10EffectShaderVariable *iface, UINT index, ID3D10PixelShader **shader)
 {
-    struct d3d10_effect_variable *v = impl_from_ID3D10EffectVariable((ID3D10EffectVariable *)iface);
+    struct d3d10_effect_variable *v = impl_from_ID3D10EffectShaderVariable(iface);
 
     TRACE("iface %p, index %u, shader %p.\n", iface, index, shader);
 
@@ -6706,7 +6928,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_variable_GetInputSignatureE
         ID3D10EffectShaderVariable *iface, UINT shader_index, UINT element_index,
         D3D10_SIGNATURE_PARAMETER_DESC *desc)
 {
-    struct d3d10_effect_variable *This = (struct d3d10_effect_variable *)iface;
+    struct d3d10_effect_variable *v = impl_from_ID3D10EffectShaderVariable(iface);
     struct d3d10_effect_shader_variable *s;
     D3D10_SIGNATURE_PARAMETER_DESC *d;
 
@@ -6720,13 +6942,13 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_variable_GetInputSignatureE
     }
 
     /* Check shader_index, this crashes on W7/DX10 */
-    if (shader_index >= This->effect->used_shader_count)
+    if (shader_index >= v->effect->used_shader_count)
     {
         WARN("This should crash on W7/DX10!\n");
         return E_FAIL;
     }
 
-    s = &This->effect->used_shaders[shader_index]->u.shader;
+    s = &v->effect->used_shaders[shader_index]->u.shader;
     if (!s->input_signature.signature)
     {
         WARN("No shader signature\n");
@@ -6762,7 +6984,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_variable_GetOutputSignature
         ID3D10EffectShaderVariable *iface, UINT shader_index, UINT element_index,
         D3D10_SIGNATURE_PARAMETER_DESC *desc)
 {
-    struct d3d10_effect_variable *This = (struct d3d10_effect_variable *)iface;
+    struct d3d10_effect_variable *v = impl_from_ID3D10EffectShaderVariable(iface);
     struct d3d10_effect_shader_variable *s;
     D3D10_SIGNATURE_PARAMETER_DESC *d;
 
@@ -6776,13 +6998,13 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_shader_variable_GetOutputSignature
     }
 
     /* Check shader_index, this crashes on W7/DX10 */
-    if (shader_index >= This->effect->used_shader_count)
+    if (shader_index >= v->effect->used_shader_count)
     {
         WARN("This should crash on W7/DX10!\n");
         return E_FAIL;
     }
 
-    s = &This->effect->used_shaders[shader_index]->u.shader;
+    s = &v->effect->used_shaders[shader_index]->u.shader;
     if (!s->output_signature.signature)
     {
         WARN("No shader signature\n");

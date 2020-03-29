@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Francois Gouget
+ * Copyright 2020 Nikolay Sivov for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,24 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_ADSHLP_H
-#define __WINE_ADSHLP_H
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-HRESULT WINAPI ADsBuildEnumerator(IADsContainer*,IEnumVARIANT**);
-HRESULT WINAPI ADsBuildVarArrayStr(LPWSTR*,DWORD,VARIANT*);
-HRESULT WINAPI ADsEnumerateNext(IEnumVARIANT*,ULONG,VARIANT*,ULONG*);
-HRESULT WINAPI ADsGetObject(LPCWSTR,REFIID,VOID**);
-HRESULT WINAPI ADsOpenObject(LPCWSTR,LPCWSTR,LPCWSTR,DWORD,REFIID,VOID**);
-LPWSTR  WINAPI AllocADsStr(LPWSTR);
-BOOL    WINAPI FreeADsMem(LPVOID);
-BOOL    WINAPI FreeADsStr(LPWSTR);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif
+extern HRESULT create_sink_writer_from_stream(IMFByteStream *stream, IMFAttributes *attributes,
+        REFIID riid, void **out) DECLSPEC_HIDDEN;
+extern HRESULT create_sink_writer_from_sink(IMFMediaSink *sink, IMFAttributes *attributes,
+        REFIID riid, void **out) DECLSPEC_HIDDEN;

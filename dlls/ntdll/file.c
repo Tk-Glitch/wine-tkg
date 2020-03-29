@@ -160,8 +160,24 @@ static inline ULONG get_file_attributes( const struct stat *st )
 static BOOL fd_is_mount_point( int fd, const struct stat *st )
 {
     struct stat parent;
-    return S_ISDIR( st->st_mode ) && !fstatat( fd, "..", &parent, 0 )
-            && (parent.st_dev != st->st_dev || parent.st_ino == st->st_ino);
+    BOOL ret = FALSE;
+    int cwd;
+
+    if (!S_ISDIR( st->st_mode )) return FALSE;
+    RtlEnterCriticalSection( &dir_section );
+    if ((cwd = open(".", O_RDONLY) == -1))
+    {
+        RtlLeaveCriticalSection( &dir_section );
+        return FALSE;
+    }
+    if (!fchdir( fd ))
+    {
+        ret = !stat( "..", &parent ) && (parent.st_dev != st->st_dev || parent.st_ino == st->st_ino);
+        if (fchdir( cwd ) == -1) chdir( "/" );
+    }
+    close( cwd );
+    RtlLeaveCriticalSection( &dir_section );
+    return ret;
 }
 
 /* get the stat info and file attributes for a file (by file descriptor) */
@@ -3861,9 +3877,9 @@ NTSTATUS WINAPI NtQueryVolumeInformationFile( HANDLE handle, PIO_STATUS_BLOCK io
             FILE_FS_ATTRIBUTE_INFORMATION *info = buffer;
 
             FIXME( "%p: faking attribute info\n", handle );
-            info->FileSystemAttribute = FILE_SUPPORTS_ENCRYPTION | FILE_FILE_COMPRESSION |
-                                        FILE_PERSISTENT_ACLS | FILE_UNICODE_ON_DISK |
-                                        FILE_CASE_PRESERVED_NAMES | FILE_CASE_SENSITIVE_SEARCH;
+            info->FileSystemAttributes = FILE_SUPPORTS_ENCRYPTION | FILE_FILE_COMPRESSION |
+                                         FILE_PERSISTENT_ACLS | FILE_UNICODE_ON_DISK |
+                                         FILE_CASE_PRESERVED_NAMES | FILE_CASE_SENSITIVE_SEARCH;
             info->MaximumComponentNameLength = MAXIMUM_FILENAME_LENGTH - 1;
             info->FileSystemNameLength = sizeof(ntfsW);
             memcpy(info->FileSystemName, ntfsW, sizeof(ntfsW));

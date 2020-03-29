@@ -176,6 +176,7 @@ extern unsigned int DIR_get_drives_info( struct drive_info info[MAX_DOS_DRIVES] 
 extern NTSTATUS file_id_to_unix_file_name( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *unix_name_ret ) DECLSPEC_HIDDEN;
 extern NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *unix_name_ret,
                                            UINT disposition ) DECLSPEC_HIDDEN;
+extern RTL_CRITICAL_SECTION dir_section DECLSPEC_HIDDEN;
 
 /* virtual memory */
 extern NTSTATUS virtual_alloc_aligned( PVOID *ret, unsigned short zero_bits_64, SIZE_T *size_ptr,
@@ -334,8 +335,41 @@ extern BOOL read_process_time(int unix_pid, int unix_tid, unsigned long clk_tck,
 extern BOOL read_process_memory_stats(int unix_pid, VM_COUNTERS *pvmi) DECLSPEC_HIDDEN;
 
 /* string functions */
-int __cdecl NTDLL_tolower( int c );
-int __cdecl _stricmp( LPCSTR str1, LPCSTR str2 );
+int    __cdecl NTDLL_tolower( int c );
+int    __cdecl _stricmp( LPCSTR str1, LPCSTR str2 );
+int    __cdecl NTDLL__wcsicmp( LPCWSTR str1, LPCWSTR str2 );
+int    __cdecl NTDLL__wcsnicmp( LPCWSTR str1, LPCWSTR str2, size_t n );
+int    __cdecl NTDLL_wcscmp( LPCWSTR str1, LPCWSTR str2 );
+int    __cdecl NTDLL_wcsncmp( LPCWSTR str1, LPCWSTR str2, size_t n );
+WCHAR  __cdecl NTDLL_towlower( WCHAR ch );
+WCHAR  __cdecl NTDLL_towupper( WCHAR ch );
+LPWSTR __cdecl NTDLL__wcslwr( LPWSTR str );
+LPWSTR __cdecl NTDLL__wcsupr( LPWSTR str );
+LPWSTR __cdecl NTDLL_wcscpy( LPWSTR dst, LPCWSTR src );
+LPWSTR __cdecl NTDLL_wcscat( LPWSTR dst, LPCWSTR src );
+LPWSTR __cdecl NTDLL_wcschr( LPCWSTR str, WCHAR ch );
+size_t __cdecl NTDLL_wcslen( LPCWSTR str );
+size_t __cdecl NTDLL_wcscspn( LPCWSTR str, LPCWSTR reject );
+LPWSTR __cdecl NTDLL_wcsncat( LPWSTR s1, LPCWSTR s2, size_t n );
+LPWSTR __cdecl NTDLL_wcsncpy( LPWSTR s1, LPCWSTR s2, size_t n );
+LPWSTR __cdecl NTDLL_wcspbrk( LPCWSTR str, LPCWSTR accept );
+LPWSTR __cdecl NTDLL_wcsrchr( LPCWSTR str, WCHAR ch );
+size_t __cdecl NTDLL_wcsspn( LPCWSTR str, LPCWSTR accept );
+LPWSTR __cdecl NTDLL_wcsstr( LPCWSTR str, LPCWSTR sub );
+LPWSTR __cdecl NTDLL_wcstok( LPWSTR str, LPCWSTR delim );
+LONG   __cdecl NTDLL_wcstol( LPCWSTR s, LPWSTR *end, INT base );
+ULONG  __cdecl NTDLL_wcstoul( LPCWSTR s, LPWSTR *end, INT base );
+
+#define wcsicmp(s1,s2) NTDLL__wcsicmp(s1,s2)
+#define wcsnicmp(s1,s2,n) NTDLL__wcsnicmp(s1,s2,n)
+#define wcslwr(s) NTDLL__wcslwr(s)
+#define wcsupr(s) NTDLL__wcsupr(s)
+
+/* convert from straight ASCII to Unicode without depending on the current codepage */
+static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
+{
+    while (len--) *dst++ = (unsigned char)*src++;
+}
 
 #if defined(__i386__) || defined(__x86_64__)
 NTSTATUS WINAPI __syscall_NtOpenFile( PHANDLE handle, ACCESS_MASK access,

@@ -1288,6 +1288,40 @@ BOOLEAN WINAPI RtlPrefixUnicodeString( const UNICODE_STRING *s1, const UNICODE_S
 }
 
 
+
+/******************************************************************************
+ *	RtlHashUnicodeString   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlHashUnicodeString( const UNICODE_STRING *string, BOOLEAN case_insensitive,
+                                      ULONG alg, ULONG *hash )
+{
+    unsigned int i;
+
+    if (!string || !hash) return STATUS_INVALID_PARAMETER;
+
+    switch (alg)
+    {
+    case HASH_STRING_ALGORITHM_DEFAULT:
+    case HASH_STRING_ALGORITHM_X65599:
+        break;
+    default:
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    *hash = 0;
+    if (!case_insensitive)
+        for (i = 0; i < string->Length / sizeof(WCHAR); i++)
+            *hash = *hash * 65599 + string->Buffer[i];
+    else if (nls_info.UpperCaseTable)
+        for (i = 0; i < string->Length / sizeof(WCHAR); i++)
+            *hash = *hash * 65599 + casemap( nls_info.UpperCaseTable, string->Buffer[i] );
+    else  /* locale not setup yet */
+        for (i = 0; i < string->Length / sizeof(WCHAR); i++)
+            *hash = *hash * 65599 + casemap_ascii( string->Buffer[i] );
+    return STATUS_SUCCESS;
+}
+
+
 /**************************************************************************
  *	RtlCustomCPToUnicodeN   (NTDLL.@)
  */
@@ -1669,13 +1703,13 @@ NTSTATUS WINAPI RtlLocaleNameToLcid( const WCHAR *name, LCID *lcid, ULONG flags 
 
         if (PRIMARYLANGID(id) == LANG_NEUTRAL) continue;
 
-        if (!load_string( LOCALE_SNAME, id, buf, ARRAY_SIZE(buf) ) && !strcmpiW( name, buf ))
+        if (!load_string( LOCALE_SNAME, id, buf, ARRAY_SIZE(buf) ) && !wcsicmp( name, buf ))
         {
             *lcid = MAKELCID( id, SORT_DEFAULT );  /* FIXME: handle sort order */
             goto found;
         }
 
-        if (load_string( LOCALE_SISO639LANGNAME, id, buf, ARRAY_SIZE(buf) ) || strcmpiW( lang, buf ))
+        if (load_string( LOCALE_SISO639LANGNAME, id, buf, ARRAY_SIZE(buf) ) || wcsicmp( lang, buf ))
             continue;
 
         if (script)
@@ -1685,7 +1719,7 @@ NTSTATUS WINAPI RtlLocaleNameToLcid( const WCHAR *name, LCID *lcid, ULONG flags 
             p = buf;
             while (*p)
             {
-                if (!strncmpiW( p, script, len ) && (!p[len] || p[len] == ';')) break;
+                if (!wcsnicmp( p, script, len ) && (!p[len] || p[len] == ';')) break;
                 if (!(p = strchrW( p, ';'))) break;
                 p++;
             }

@@ -33,6 +33,11 @@ static inline struct ddraw_surface *impl_from_IDirectDrawGammaControl(IDirectDra
     return CONTAINING_RECORD(iface, struct ddraw_surface, IDirectDrawGammaControl_iface);
 }
 
+static BOOL ddraw_surface_is_lost(const struct ddraw_surface *surface)
+{
+    return surface->ddraw->device_state != DDRAW_DEVICE_STATE_OK || surface->is_lost;
+}
+
 /* This is slow, of course. Also, in case of locks, we can't prevent other
  * applications from drawing to the screen while we've locked the frontbuffer.
  * We'd like to do this in wined3d instead, but for that to work wined3d needs
@@ -766,7 +771,7 @@ static HRESULT WINAPI ddraw_surface7_GetAttachedSurface(IDirectDrawSurface7 *ifa
 
     TRACE("iface %p, caps %p, attachment %p.\n", iface, caps, surface);
 
-    if (IDirectDrawSurface7_IsLost(&head_surface->IDirectDrawSurface7_iface) != DD_OK)
+    if (ddraw_surface_is_lost(head_surface))
     {
         WARN("Surface %p is lost.\n", head_surface);
 
@@ -1105,6 +1110,12 @@ static HRESULT WINAPI ddraw_surface7_Lock(IDirectDrawSurface7 *iface,
     if (!surface_validate_lock_desc(surface, (DDSURFACEDESC *)surface_desc, &surface_desc_size))
         return DDERR_INVALIDPARAMS;
 
+    if (ddraw_surface_is_lost(surface))
+    {
+        WARN("Surface is lost.\n");
+        return DDERR_SURFACELOST;
+    }
+
     return surface_lock(surface, rect, surface_desc, surface_desc_size, flags, h);
 }
 
@@ -1120,73 +1131,70 @@ static HRESULT WINAPI ddraw_surface4_Lock(IDirectDrawSurface4 *iface, RECT *rect
     if (!surface_validate_lock_desc(surface, (DDSURFACEDESC *)surface_desc, &surface_desc_size))
         return DDERR_INVALIDPARAMS;
 
+    if (ddraw_surface_is_lost(surface))
+    {
+        WARN("Surface is lost.\n");
+        return DDERR_SURFACELOST;
+    }
+
     return surface_lock(surface, rect, surface_desc, surface_desc_size, flags, h);
+}
+
+static HRESULT ddraw_surface_lock_ddsd(struct ddraw_surface *surface, RECT *rect,
+        DDSURFACEDESC *surface_desc, DWORD flags, HANDLE h)
+{
+    unsigned int surface_desc_size;
+    DDSURFACEDESC2 surface_desc2;
+    HRESULT hr;
+
+    if (!surface_validate_lock_desc(surface, surface_desc, &surface_desc_size))
+        return DDERR_INVALIDPARAMS;
+
+    if (ddraw_surface_is_lost(surface))
+    {
+        WARN("Surface is lost.\n");
+        return DDERR_SURFACELOST;
+    }
+
+    surface_desc2.dwSize = surface_desc->dwSize;
+    surface_desc2.dwFlags = 0;
+    hr = surface_lock(surface, rect, &surface_desc2, surface_desc_size, flags, h);
+    DDSD2_to_DDSD(&surface_desc2, surface_desc);
+    surface_desc->dwSize = surface_desc2.dwSize;
+    return hr;
 }
 
 static HRESULT WINAPI ddraw_surface3_Lock(IDirectDrawSurface3 *iface, RECT *rect,
         DDSURFACEDESC *surface_desc, DWORD flags, HANDLE h)
 {
     struct ddraw_surface *surface = impl_from_IDirectDrawSurface3(iface);
-    unsigned int surface_desc_size;
-    DDSURFACEDESC2 surface_desc2;
-    HRESULT hr;
 
     TRACE("iface %p, rect %s, surface_desc %p, flags %#x, h %p.\n",
             iface, wine_dbgstr_rect(rect), surface_desc, flags, h);
 
-    if (!surface_validate_lock_desc(surface, surface_desc, &surface_desc_size))
-        return DDERR_INVALIDPARAMS;
-
-    surface_desc2.dwSize = surface_desc->dwSize;
-    surface_desc2.dwFlags = 0;
-    hr = surface_lock(surface, rect, &surface_desc2, surface_desc_size, flags, h);
-    DDSD2_to_DDSD(&surface_desc2, surface_desc);
-    surface_desc->dwSize = surface_desc2.dwSize;
-    return hr;
+    return ddraw_surface_lock_ddsd(surface, rect, surface_desc, flags, h);
 }
 
 static HRESULT WINAPI ddraw_surface2_Lock(IDirectDrawSurface2 *iface, RECT *rect,
         DDSURFACEDESC *surface_desc, DWORD flags, HANDLE h)
 {
     struct ddraw_surface *surface = impl_from_IDirectDrawSurface2(iface);
-    unsigned int surface_desc_size;
-    DDSURFACEDESC2 surface_desc2;
-    HRESULT hr;
 
     TRACE("iface %p, rect %s, surface_desc %p, flags %#x, h %p.\n",
             iface, wine_dbgstr_rect(rect), surface_desc, flags, h);
 
-    if (!surface_validate_lock_desc(surface, surface_desc, &surface_desc_size))
-        return DDERR_INVALIDPARAMS;
-
-    surface_desc2.dwSize = surface_desc->dwSize;
-    surface_desc2.dwFlags = 0;
-    hr = surface_lock(surface, rect, &surface_desc2, surface_desc_size, flags, h);
-    DDSD2_to_DDSD(&surface_desc2, surface_desc);
-    surface_desc->dwSize = surface_desc2.dwSize;
-    return hr;
+    return ddraw_surface_lock_ddsd(surface, rect, surface_desc, flags, h);
 }
 
 static HRESULT WINAPI ddraw_surface1_Lock(IDirectDrawSurface *iface, RECT *rect,
         DDSURFACEDESC *surface_desc, DWORD flags, HANDLE h)
 {
     struct ddraw_surface *surface = impl_from_IDirectDrawSurface(iface);
-    unsigned int surface_desc_size;
-    DDSURFACEDESC2 surface_desc2;
-    HRESULT hr;
 
     TRACE("iface %p, rect %s, surface_desc %p, flags %#x, h %p.\n",
             iface, wine_dbgstr_rect(rect), surface_desc, flags, h);
 
-    if (!surface_validate_lock_desc(surface, surface_desc, &surface_desc_size))
-        return DDERR_INVALIDPARAMS;
-
-    surface_desc2.dwSize = surface_desc->dwSize;
-    surface_desc2.dwFlags = 0;
-    hr = surface_lock(surface, rect, &surface_desc2, surface_desc_size, flags, h);
-    DDSD2_to_DDSD(&surface_desc2, surface_desc);
-    surface_desc->dwSize = surface_desc2.dwSize;
-    return hr;
+    return ddraw_surface_lock_ddsd(surface, rect, surface_desc, flags, h);
 }
 
 /*****************************************************************************
@@ -1291,7 +1299,7 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface7_Flip(IDirectDrawSurface7 
     if (src == iface || !(dst_impl->surface_desc.ddsCaps.dwCaps & (DDSCAPS_FRONTBUFFER | DDSCAPS_OVERLAY)))
         return DDERR_NOTFLIPPABLE;
 
-    if (IDirectDrawSurface7_IsLost(iface) == DDERR_SURFACELOST)
+    if (ddraw_surface_is_lost(dst_impl))
         return DDERR_SURFACELOST;
 
     wined3d_mutex_lock();
@@ -3681,10 +3689,7 @@ static HRESULT WINAPI ddraw_surface7_IsLost(IDirectDrawSurface7 *iface)
 
     TRACE("iface %p.\n", iface);
 
-    if (surface->ddraw->device_state != DDRAW_DEVICE_STATE_OK || surface->is_lost)
-        return DDERR_SURFACELOST;
-
-    return DD_OK;
+    return ddraw_surface_is_lost(surface) ? DDERR_SURFACELOST : DD_OK;
 }
 
 static HRESULT WINAPI ddraw_surface4_IsLost(IDirectDrawSurface4 *iface)
@@ -3693,7 +3698,7 @@ static HRESULT WINAPI ddraw_surface4_IsLost(IDirectDrawSurface4 *iface)
 
     TRACE("iface %p.\n", iface);
 
-    return ddraw_surface7_IsLost(&surface->IDirectDrawSurface7_iface);
+    return ddraw_surface_is_lost(surface) ? DDERR_SURFACELOST : DD_OK;
 }
 
 static HRESULT WINAPI ddraw_surface3_IsLost(IDirectDrawSurface3 *iface)
@@ -3702,7 +3707,7 @@ static HRESULT WINAPI ddraw_surface3_IsLost(IDirectDrawSurface3 *iface)
 
     TRACE("iface %p.\n", iface);
 
-    return ddraw_surface7_IsLost(&surface->IDirectDrawSurface7_iface);
+    return ddraw_surface_is_lost(surface) ? DDERR_SURFACELOST : DD_OK;
 }
 
 static HRESULT WINAPI ddraw_surface2_IsLost(IDirectDrawSurface2 *iface)
@@ -3711,7 +3716,7 @@ static HRESULT WINAPI ddraw_surface2_IsLost(IDirectDrawSurface2 *iface)
 
     TRACE("iface %p.\n", iface);
 
-    return ddraw_surface7_IsLost(&surface->IDirectDrawSurface7_iface);
+    return ddraw_surface_is_lost(surface) ? DDERR_SURFACELOST : DD_OK;
 }
 
 static HRESULT WINAPI ddraw_surface1_IsLost(IDirectDrawSurface *iface)
@@ -3720,7 +3725,7 @@ static HRESULT WINAPI ddraw_surface1_IsLost(IDirectDrawSurface *iface)
 
     TRACE("iface %p.\n", iface);
 
-    return ddraw_surface7_IsLost(&surface->IDirectDrawSurface7_iface);
+    return ddraw_surface_is_lost(surface) ? DDERR_SURFACELOST : DD_OK;
 }
 
 /*****************************************************************************
@@ -4774,7 +4779,7 @@ static HRESULT WINAPI ddraw_surface7_GetPalette(IDirectDrawSurface7 *iface, IDir
 
     if (!palette)
         return DDERR_INVALIDPARAMS;
-    if (IDirectDrawSurface7_IsLost(iface) == DDERR_SURFACELOST)
+    if (ddraw_surface_is_lost(surface))
     {
         WARN("Surface lost, returning DDERR_SURFACELOST.\n");
         return DDERR_SURFACELOST;
@@ -4970,7 +4975,7 @@ static HRESULT WINAPI ddraw_surface7_SetPalette(IDirectDrawSurface7 *iface, IDir
 
     if (surface->surface_desc.ddsCaps.dwCaps2 & DDSCAPS2_MIPMAPSUBLEVEL)
         return DDERR_NOTONMIPMAPSUBLEVEL;
-    if (IDirectDrawSurface7_IsLost(iface) == DDERR_SURFACELOST)
+    if (ddraw_surface_is_lost(surface))
     {
         WARN("Surface lost, returning DDERR_SURFACELOST.\n");
         return DDERR_SURFACELOST;
@@ -4985,7 +4990,7 @@ static HRESULT WINAPI ddraw_surface4_SetPalette(IDirectDrawSurface4 *iface, IDir
 
     TRACE("iface %p, palette %p.\n", iface, palette);
 
-    if (IDirectDrawSurface4_IsLost(iface) == DDERR_SURFACELOST)
+    if (ddraw_surface_is_lost(surface))
     {
         WARN("Surface lost, returning DDERR_SURFACELOST.\n");
         return DDERR_SURFACELOST;
@@ -5000,7 +5005,7 @@ static HRESULT WINAPI ddraw_surface3_SetPalette(IDirectDrawSurface3 *iface, IDir
 
     TRACE("iface %p, palette %p.\n", iface, palette);
 
-    if (IDirectDrawSurface3_IsLost(iface) == DDERR_SURFACELOST)
+    if (ddraw_surface_is_lost(surface))
     {
         WARN("Surface lost, returning DDERR_SURFACELOST.\n");
         return DDERR_SURFACELOST;
@@ -5015,7 +5020,7 @@ static HRESULT WINAPI ddraw_surface2_SetPalette(IDirectDrawSurface2 *iface, IDir
 
     TRACE("iface %p, palette %p.\n", iface, palette);
 
-    if (IDirectDrawSurface2_IsLost(iface) == DDERR_SURFACELOST)
+    if (ddraw_surface_is_lost(surface))
     {
         WARN("Surface lost, returning DDERR_SURFACELOST.\n");
         return DDERR_SURFACELOST;
@@ -5030,7 +5035,7 @@ static HRESULT WINAPI ddraw_surface1_SetPalette(IDirectDrawSurface *iface, IDire
 
     TRACE("iface %p, palette %p.\n", iface, palette);
 
-    if (IDirectDrawSurface_IsLost(iface) == DDERR_SURFACELOST)
+    if (ddraw_surface_is_lost(surface))
     {
         WARN("Surface lost, returning DDERR_SURFACELOST.\n");
         return DDERR_SURFACELOST;

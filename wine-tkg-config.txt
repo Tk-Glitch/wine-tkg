@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Wed 25 Mar 2020 08:34:16 AM CET :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sun 29 Mar 2020 10:33:39 AM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.4.r306.g9c190f8118
-Using wine-staging patchset (version 5.4.r12.ge5da84dc)
+Wine (plain) version: 5.5.r0.g123c0543e0
+Using wine-staging patchset (version 5.5.r0.g18f71258)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
@@ -42,16 +42,13 @@ proton_fs_hack_integer_scaling.patch -- ( Enable Proton fs hack integer scaling 
 proton-winevulkan.patch -- ( Using Proton winevulkan patches )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 proton-win10-default.patch -- ( Enforce win10 as default wine version )
-dxvk_config_dxgi_support.patch -- ( Add support for dxvk_config library to Wine's dxgi )
 
 Applied your own patch D3D12CreateVersionedRootSignatureDeserializer.mypatch
 Applied your own patch D3D12SerializeVersionedRootSignature.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch GNUTLShack.mypatch
 Applied your own patch amdags.mypatch
-Applied your own patch detroit_BH.mypatch
 Applied your own patch legoisland_168726.mypatch
-Applied your own patch monster_hunter_world_hacky_fix.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
 Applied your own patch winex11-fs-no_above_state.mypatch
 

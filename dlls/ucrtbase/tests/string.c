@@ -150,9 +150,6 @@ static void test__memicmp(void)
     static const char *s2 = "aBd";
     int ret;
 
-    ok(_set_invalid_parameter_handler(test_invalid_parameter_handler) == NULL,
-            "Invalid parameter handler was already set\n");
-
     ret = _memicmp(NULL, NULL, 0);
     ok(!ret, "got %d\n", ret);
 
@@ -182,9 +179,6 @@ static void test__memicmp(void)
 
     ret = _memicmp(s1, s2, 3);
     ok(ret == -1, "got %d\n", ret);
-
-    ok(_set_invalid_parameter_handler(NULL) == test_invalid_parameter_handler,
-            "Cannot reset invalid parameter handler\n");
 }
 
 static void test__memicmp_l(void)
@@ -192,9 +186,6 @@ static void test__memicmp_l(void)
     static const char *s1 = "abc";
     static const char *s2 = "aBd";
     int ret;
-
-    ok(_set_invalid_parameter_handler(test_invalid_parameter_handler) == NULL,
-            "Invalid parameter handler was already set\n");
 
     ret = _memicmp_l(NULL, NULL, 0, NULL);
     ok(!ret, "got %d\n", ret);
@@ -225,9 +216,6 @@ static void test__memicmp_l(void)
 
     ret = _memicmp_l(s1, s2, 3, NULL);
     ok(ret == -1, "got %d\n", ret);
-
-    ok(_set_invalid_parameter_handler(NULL) == test_invalid_parameter_handler,
-            "Cannot reset invalid parameter handler\n");
 }
 
 
@@ -255,17 +243,11 @@ static void test___strncnt(void)
         ok(ret == strncnt_tests[i].ret, "%u: unexpected return value %u.\n", i, (int)ret);
     }
 
-    ok(_set_invalid_parameter_handler(test_invalid_parameter_handler) == NULL,
-            "Invalid parameter handler was already set\n");
-
     if (0) /* crashes */
     {
         ret = __strncnt(NULL, 0);
         ret = __strncnt(NULL, 1);
     }
-
-    ok(_set_invalid_parameter_handler(NULL) == test_invalid_parameter_handler,
-            "Cannot reset invalid parameter handler\n");
 }
 
 static void test_C_locale(void)
@@ -430,8 +412,28 @@ static void test_wcstok(void)
     ok(!token, "expected NULL, got %p\n", token);
 }
 
+static void test__strnicmp(void)
+{
+    static const char str1[] = "TEST";
+    static const char str2[] = "test";
+    int ret;
+
+    SET_EXPECT(invalid_parameter_handler);
+    errno = 0xdeadbeef;
+    ret = _strnicmp(str1, str2, -1);
+    todo_wine CHECK_CALLED(invalid_parameter_handler);
+    todo_wine ok(ret == _NLSCMPERROR, "got %d.\n", ret);
+    todo_wine ok(errno == EINVAL, "Unexpected errno %d.\n", errno);
+
+    ret = _strnicmp(str1, str2, 0x7fffffff);
+    ok(!ret, "got %d.\n", ret);
+}
+
 START_TEST(string)
 {
+    ok(_set_invalid_parameter_handler(test_invalid_parameter_handler) == NULL,
+            "Invalid parameter handler was already set\n");
+
     test_strtod();
     test__memicmp();
     test__memicmp_l();
@@ -439,4 +441,5 @@ START_TEST(string)
     test_C_locale();
     test_mbsspn();
     test_wcstok();
+    test__strnicmp();
 }

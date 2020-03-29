@@ -2597,6 +2597,7 @@ enum wined3d_pci_device
     CARD_NVIDIA_TITANX_PASCAL       = 0x1b00,
     CARD_NVIDIA_TITANV              = 0x1d81,
     CARD_NVIDIA_GEFORCE_GTX1650SUPER= 0x2187,
+    CARD_NVIDIA_GEFORCE_GTX1660SUPER= 0x21c4,
     CARD_NVIDIA_GEFORCE_GTX1660TI   = 0x2182,
     CARD_NVIDIA_GEFORCE_RTX2060     = 0x1f08,
     CARD_NVIDIA_GEFORCE_RTX2070     = 0x1f07,
@@ -2920,7 +2921,6 @@ struct wined3d_output
 struct wined3d_adapter
 {
     unsigned int ordinal;
-    POINT monitor_position;
 
     struct wined3d_gl_info  gl_info;
     struct wined3d_d3d_info d3d_info;
@@ -3192,7 +3192,7 @@ struct wined3d_light_state
 struct wined3d_state
 {
     DWORD flags;
-    const struct wined3d_fb_state *fb;
+    struct wined3d_fb_state fb;
 
     struct wined3d_vertex_declaration *vertex_declaration;
     struct wined3d_stream_output stream_output[WINED3D_MAX_STREAM_OUTPUT_BUFFERS];
@@ -3309,7 +3309,6 @@ struct wined3d_device
     struct wine_rb_tree samplers, rasterizer_states, blend_states;
 
     /* Render Target Support */
-    struct wined3d_fb_state fb;
     struct wined3d_rendertarget_view *auto_depth_stencil_view;
 
     /* Cursor management */
@@ -4015,8 +4014,7 @@ HRESULT wined3d_light_state_set_light(struct wined3d_light_state *state, DWORD l
         const struct wined3d_light *params, struct wined3d_light_info **light_info) DECLSPEC_HIDDEN;
 
 void state_cleanup(struct wined3d_state *state) DECLSPEC_HIDDEN;
-void state_init(struct wined3d_state *state, struct wined3d_fb_state *fb,
-        const struct wined3d_d3d_info *d3d_info, DWORD flags) DECLSPEC_HIDDEN;
+void state_init(struct wined3d_state *state, const struct wined3d_d3d_info *d3d_info, DWORD flags) DECLSPEC_HIDDEN;
 void state_unbind_resources(struct wined3d_state *state) DECLSPEC_HIDDEN;
 
 enum wined3d_cs_queue_id
@@ -4060,7 +4058,6 @@ struct wined3d_cs
 {
     const struct wined3d_cs_ops *ops;
     struct wined3d_device *device;
-    struct wined3d_fb_state fb;
     struct wined3d_state state;
     HMODULE wined3d_module;
     HANDLE thread;
@@ -5338,12 +5335,12 @@ static inline BOOL wined3d_dsv_srv_conflict(const struct wined3d_rendertarget_vi
 static inline BOOL wined3d_resource_check_fbo_attached(const struct wined3d_state *state,
         const struct wined3d_resource *resource, const struct wined3d_format *srv_format)
 {
-    struct wined3d_rendertarget_view * const *rts = &state->fb->render_targets[0];
+    struct wined3d_rendertarget_view * const *rts = &state->fb.render_targets[0];
     const struct wined3d_rendertarget_view *dsv;
     unsigned int i;
 
     if ((resource->bind_flags & WINED3D_BIND_DEPTH_STENCIL)
-            && (dsv = state->fb->depth_stencil) && dsv->resource == resource
+            && (dsv = state->fb.depth_stencil) && dsv->resource == resource
             && wined3d_dsv_srv_conflict(dsv, srv_format))
         return TRUE;
 

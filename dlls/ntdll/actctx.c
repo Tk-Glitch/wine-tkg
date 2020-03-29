@@ -761,7 +761,7 @@ static inline BOOL xmlstr_cmp(const xmlstr_t* xmlstr, const WCHAR *str)
 
 static inline BOOL xmlstr_cmpi(const xmlstr_t* xmlstr, const WCHAR *str)
 {
-    return !strncmpiW(xmlstr->ptr, str, xmlstr->len) && !str[xmlstr->len];
+    return !wcsnicmp(xmlstr->ptr, str, xmlstr->len) && !str[xmlstr->len];
 }
 
 static BOOL xml_attr_cmp( const struct xml_attr *attr, const WCHAR *str )
@@ -1004,7 +1004,7 @@ static void free_entity_array(struct entity_array *array)
 static BOOL is_matching_string( const WCHAR *str1, const WCHAR *str2 )
 {
     if (!str1) return !str2;
-    return str2 && !strcmpiW( str1, str2 );
+    return str2 && !RtlCompareUnicodeStrings( str1, strlenW(str1), str2, strlenW(str2), TRUE );
 }
 
 static BOOL is_matching_identity( const struct assembly_identity *id1,
@@ -1014,7 +1014,7 @@ static BOOL is_matching_identity( const struct assembly_identity *id1,
     if (!is_matching_string( id1->arch, id2->arch )) return FALSE;
     if (!is_matching_string( id1->public_key, id2->public_key )) return FALSE;
 
-    if (id1->language && id2->language && strcmpiW( id1->language, id2->language ))
+    if (id1->language && id2->language && !is_matching_string( id1->language, id2->language ))
     {
         if (strcmpW( wildcardW, id1->language ) && strcmpW( wildcardW, id2->language ))
             return FALSE;
@@ -1845,13 +1845,13 @@ static BOOL parse_typelib_flags(const xmlstr_t *value, struct entity *entity)
         start = str;
         while (*str != ',' && (i++ < value->len)) str++;
 
-        if (!strncmpiW(start, restrictedW, str-start))
+        if (!wcsnicmp(start, restrictedW, str-start))
             *flags |= LIBFLAG_FRESTRICTED;
-        else if (!strncmpiW(start, controlW, str-start))
+        else if (!wcsnicmp(start, controlW, str-start))
             *flags |= LIBFLAG_FCONTROL;
-        else if (!strncmpiW(start, hiddenW, str-start))
+        else if (!wcsnicmp(start, hiddenW, str-start))
             *flags |= LIBFLAG_FHIDDEN;
-        else if (!strncmpiW(start, hasdiskimageW, str-start))
+        else if (!wcsnicmp(start, hasdiskimageW, str-start))
             *flags |= LIBFLAG_FHASDISKIMAGE;
         else
         {
@@ -3103,7 +3103,7 @@ static WCHAR *lookup_manifest_file( HANDLE dir, struct assembly_identity *ai )
     unsigned int data_pos = 0, data_len;
     char buffer[8192];
 
-    if (!lang || !strcmpiW( lang, neutralW )) lang = wildcardW;
+    if (!lang || !wcsicmp( lang, neutralW )) lang = wildcardW;
 
     if (!(lookup = RtlAllocateHeap( GetProcessHeap(), 0,
                                     (strlenW(ai->arch) + strlenW(ai->name)
@@ -3148,7 +3148,7 @@ static WCHAR *lookup_manifest_file( HANDLE dir, struct assembly_identity *ai )
             tmp = strchrW(tmp, '_') + 1;
             tmp = strchrW(tmp, '_') + 1;
             if (dir_info->FileNameLength - (tmp - dir_info->FileName) * sizeof(WCHAR) == sizeof(wine_trailerW) &&
-                !strncmpiW( tmp, wine_trailerW, ARRAY_SIZE( wine_trailerW )))
+                !wcsnicmp( tmp, wine_trailerW, ARRAY_SIZE( wine_trailerW )))
             {
                 /* prefer a non-Wine manifest if we already have one */
                 /* we'll still load the builtin dll if specified through DllOverrides */
@@ -3487,6 +3487,7 @@ static NTSTATUS build_dllredirect_section(ACTIVATION_CONTEXT* actctx, struct str
 static struct string_index *find_string_index(const struct strsection_header *section, const UNICODE_STRING *name)
 {
     struct string_index *iter, *index = NULL;
+    UNICODE_STRING str;
     ULONG hash = 0, i;
 
     RtlHashUnicodeString(name, TRUE, HASH_STRING_ALGORITHM_X65599, &hash);
@@ -3496,9 +3497,9 @@ static struct string_index *find_string_index(const struct strsection_header *se
     {
         if (iter->hash == hash)
         {
-            const WCHAR *nameW = (WCHAR*)((BYTE*)section + iter->name_offset);
-
-            if (!strcmpiW(nameW, name->Buffer))
+            str.Buffer = (WCHAR *)((BYTE *)section + iter->name_offset);
+            str.Length = iter->name_len;
+            if (RtlEqualUnicodeString( &str, name, TRUE ))
             {
                 index = iter;
                 break;
@@ -3732,6 +3733,7 @@ static NTSTATUS find_window_class(ACTIVATION_CONTEXT* actctx, const UNICODE_STRI
 {
     struct string_index *iter, *index = NULL;
     struct wndclass_redirect_data *class;
+    UNICODE_STRING str;
     ULONG hash;
     int i;
 
@@ -3756,9 +3758,9 @@ static NTSTATUS find_window_class(ACTIVATION_CONTEXT* actctx, const UNICODE_STRI
     {
         if (iter->hash == hash)
         {
-            const WCHAR *nameW = (WCHAR*)((BYTE*)actctx->wndclass_section + iter->name_offset);
-
-            if (!strcmpiW(nameW, name->Buffer))
+            str.Buffer = (WCHAR *)((BYTE *)actctx->wndclass_section + iter->name_offset);
+            str.Length = iter->name_len;
+            if (RtlEqualUnicodeString( &str, name, TRUE ))
             {
                 index = iter;
                 break;

@@ -99,8 +99,6 @@ typedef enum
     ADS_SEARCHPREF_EXTENDED_DN
 } ADS_SEARCHPREF_ENUM;
 
-typedef ADS_SEARCHPREF_ENUM *PADS_SEARCHPREF_INFO;
-
 typedef enum
 {
     ADS_STATUS_S_OK,
@@ -140,6 +138,13 @@ typedef enum
     ADSTYPE_DN_WITH_BINARY,
     ADSTYPE_DN_WITH_STRING
 } ADSTYPEENUM;
+
+typedef enum
+{
+    ADS_SCOPE_BASE,
+    ADS_SCOPE_ONELEVEL,
+    ADS_SCOPE_SUBTREE
+} ADS_SCOPEENUM;
 
 typedef enum
 {
@@ -320,7 +325,7 @@ typedef struct _adsvalue
         ADS_NT_SECURITY_DESCRIPTOR SecurityDescriptor;
         PADS_DN_WITH_BINARY pDNWithBinary;
         PADS_DN_WITH_STRING pDNWithString;
-    };
+    } DUMMYUNIONNAME;
 } ADSVALUE, *PADSVALUE;
 
 typedef struct ads_searchpref_info
@@ -328,7 +333,7 @@ typedef struct ads_searchpref_info
     ADS_SEARCHPREF dwSearchPref;
     ADSVALUE vValue;
     ADS_STATUS dwStatus;
-} ADS_SEARCHPREF_INFO;
+} ADS_SEARCHPREF_INFO, *PADS_SEARCHPREF_INFO;
 
 typedef struct ads_search_column
 {

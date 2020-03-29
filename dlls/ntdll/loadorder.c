@@ -65,7 +65,7 @@ static struct loadorder_list env_list;
  */
 static int cmp_sort_func(const void *s1, const void *s2)
 {
-    return strcmpiW(((const module_loadorder_t *)s1)->modulename, ((const module_loadorder_t *)s2)->modulename);
+    return wcsicmp(((const module_loadorder_t *)s1)->modulename, ((const module_loadorder_t *)s2)->modulename);
 }
 
 
@@ -447,7 +447,7 @@ enum loadorder get_load_order( const WCHAR *app_name, const UNICODE_STRING *nt_n
 
     /* Strip path information if the module resides in the system directory
      */
-    if (!strncmpiW( system_dir, path, strlenW( system_dir )))
+    if (!wcsnicmp( system_dir, path, strlenW( system_dir )))
     {
         const WCHAR *p = path + strlenW( system_dir );
         while (*p == '\\' || *p == '/') p++;

@@ -116,13 +116,13 @@ struct elf_thunk_area
 {
     const char*                 symname;
     THUNK_ORDINAL               ordinal;
-    unsigned long               rva_start;
-    unsigned long               rva_end;
+    ULONG_PTR                   rva_start;
+    ULONG_PTR                   rva_end;
 };
 
 struct elf_module_info
 {
-    unsigned long               elf_addr;
+    ULONG_PTR                   elf_addr;
     unsigned short	        elf_mark : 1,
                                 elf_loader : 1;
     struct image_file_map       file_map;
@@ -355,7 +355,7 @@ static BOOL elf_map_file_read(struct image_file_map* fmap, struct elf_map_file_d
         return ReadFile(fmap->u.elf.handle, buf, len, &bytes_read, NULL);
     case from_process:
         return ReadProcessMemory(emfd->u.process.handle,
-                                 (void*)((unsigned long)emfd->u.process.load_addr + (unsigned long)off),
+                                 (void*)((ULONG_PTR)emfd->u.process.load_addr + (ULONG_PTR)off),
                                  buf, len, &dw) && dw == len;
     default:
         assert(0);
@@ -559,7 +559,7 @@ static void elf_module_remove(struct process* pcs, struct module_format* modfmt)
  * Check whether an address lies within one of the thunk area we
  * know of.
  */
-int elf_is_in_thunk_area(unsigned long addr,
+int elf_is_in_thunk_area(ULONG_PTR addr,
                          const struct elf_thunk_area* thunks)
 {
     unsigned i;
@@ -1041,7 +1041,7 @@ static BOOL elf_load_debug_info_from_map(struct module* module,
  *
  * Loads ELF debugging information from the module image file.
  */
-BOOL elf_load_debug_info(struct module* module)
+static BOOL elf_load_debug_info(struct process* process, struct module* module)
 {
     BOOL                        ret = TRUE;
     struct pool                 pool;
@@ -1085,8 +1085,8 @@ static BOOL elf_fetch_file_info(struct process* process, const WCHAR* name, ULON
 }
 
 static BOOL elf_load_file_from_fmap(struct process* pcs, const WCHAR* filename,
-                                    struct image_file_map* fmap, unsigned long load_offset,
-                                    unsigned long dyn_addr, struct elf_info* elf_info)
+                                    struct image_file_map* fmap, ULONG_PTR load_offset,
+                                    ULONG_PTR dyn_addr, struct elf_info* elf_info)
 {
     BOOL        ret = FALSE;
 
@@ -1097,7 +1097,7 @@ static BOOL elf_load_file_from_fmap(struct process* pcs, const WCHAR* filename,
         if (elf_find_section_type(fmap, ".dynamic", SHT_DYNAMIC, &ism))
         {
             char*           ptr = (char*)(ULONG_PTR)fmap->u.elf.sect[ism.sidx].shdr.sh_addr;
-            unsigned long   len;
+            ULONG_PTR       len;
 
             if (load_offset) ptr += load_offset - fmap->u.elf.elf_start;
 
@@ -1154,14 +1154,14 @@ static BOOL elf_load_file_from_fmap(struct process* pcs, const WCHAR* filename,
         struct elf_module_info *elf_module_info;
         struct module_format*   modfmt;
         struct image_section_map ism;
-        unsigned long           modbase = load_offset;
+        ULONG_PTR               modbase = load_offset;
 
         if (elf_find_section_type(fmap, ".dynamic", SHT_DYNAMIC, &ism))
         {
-            unsigned long rva_dyn = elf_get_map_rva(&ism);
+            ULONG_PTR rva_dyn = elf_get_map_rva(&ism);
 
             TRACE("For module %s, got ELF (start=%lx dyn=%lx), link_map (start=%lx dyn=%lx)\n",
-                  debugstr_w(filename), (unsigned long)fmap->u.elf.elf_start, rva_dyn,
+                  debugstr_w(filename), (ULONG_PTR)fmap->u.elf.elf_start, rva_dyn,
                   load_offset, dyn_addr);
             if (dyn_addr && load_offset + rva_dyn != dyn_addr)
             {
@@ -1198,7 +1198,7 @@ static BOOL elf_load_file_from_fmap(struct process* pcs, const WCHAR* filename,
             elf_info->module->module.SymType = SymDeferred;
             ret = TRUE;
         }
-        else ret = elf_load_debug_info(elf_info->module);
+        else ret = elf_load_debug_info(pcs, elf_info->module);
 
         elf_module_info->elf_mark = 1;
         elf_module_info->elf_loader = 0;
@@ -1231,7 +1231,7 @@ static BOOL elf_load_file_from_fmap(struct process* pcs, const WCHAR* filename,
  *	1 on success
  */
 static BOOL elf_load_file(struct process* pcs, const WCHAR* filename,
-                          unsigned long load_offset, unsigned long dyn_addr,
+                          ULONG_PTR load_offset, ULONG_PTR dyn_addr,
                           struct elf_info* elf_info)
 {
     BOOL                        ret = FALSE;
@@ -1279,7 +1279,7 @@ static BOOL elf_load_file_cb(void *param, HANDLE handle, const WCHAR *filename)
  *
  * locate some a value from the debuggee auxiliary vector
  */
-static BOOL elf_search_auxv(const struct process* pcs, unsigned type, unsigned long* val)
+static BOOL elf_search_auxv(const struct process* pcs, unsigned type, ULONG_PTR* val)
 {
     char        buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME];
     SYMBOL_INFO*si = (SYMBOL_INFO*)buffer;
@@ -1350,7 +1350,7 @@ static BOOL elf_search_auxv(const struct process* pcs, unsigned type, unsigned l
  * lookup a file in standard ELF locations, and if found, load it
  */
 static BOOL elf_search_and_load_file(struct process* pcs, const WCHAR* filename,
-                                     unsigned long load_offset, unsigned long dyn_addr,
+                                     ULONG_PTR load_offset, ULONG_PTR dyn_addr,
                                      struct elf_info* elf_info)
 {
     BOOL                ret = FALSE;
@@ -1385,8 +1385,8 @@ static BOOL elf_search_and_load_file(struct process* pcs, const WCHAR* filename,
     return ret;
 }
 
-typedef BOOL (*enum_elf_modules_cb)(const WCHAR*, unsigned long load_addr,
-                                    unsigned long dyn_addr, BOOL is_system, void* user);
+typedef BOOL (*enum_elf_modules_cb)(const WCHAR*, ULONG_PTR load_addr,
+                                    ULONG_PTR dyn_addr, BOOL is_system, void* user);
 
 /******************************************************************
  *		elf_enum_modules_internal
@@ -1428,7 +1428,7 @@ static BOOL elf_enum_modules_internal(const struct process* pcs,
                 bufstr[sizeof(bufstr) - 1] = '\0';
                 MultiByteToWideChar(CP_UNIXCP, 0, bufstr, -1, bufstrW, ARRAY_SIZE(bufstrW));
                 if (main_name && !bufstrW[0]) strcpyW(bufstrW, main_name);
-                if (!cb(bufstrW, (unsigned long)lm.l_addr, (unsigned long)lm.l_ld, FALSE, user))
+                if (!cb(bufstrW, (ULONG_PTR)lm.l_addr, (ULONG_PTR)lm.l_ld, FALSE, user))
                     break;
             }
         }
@@ -1462,7 +1462,7 @@ static BOOL elf_enum_modules_internal(const struct process* pcs,
                 bufstr[sizeof(bufstr) - 1] = '\0';
                 MultiByteToWideChar(CP_UNIXCP, 0, bufstr, -1, bufstrW, ARRAY_SIZE(bufstrW));
                 if (main_name && !bufstrW[0]) strcpyW(bufstrW, main_name);
-                if (!cb(bufstrW, (unsigned long)lm.l_addr, (unsigned long)lm.l_ld, FALSE, user))
+                if (!cb(bufstrW, (ULONG_PTR)lm.l_addr, (ULONG_PTR)lm.l_ld, FALSE, user))
                     break;
             }
         }
@@ -1471,7 +1471,7 @@ static BOOL elf_enum_modules_internal(const struct process* pcs,
 #ifdef AT_SYSINFO_EHDR
     if (!lm_addr)
     {
-        unsigned long ehdr_addr;
+        ULONG_PTR ehdr_addr;
 
         if (elf_search_auxv(pcs, AT_SYSINFO_EHDR, &ehdr_addr))
         {
@@ -1489,8 +1489,8 @@ struct elf_enum_user
     void*               user;
 };
 
-static BOOL elf_enum_modules_translate(const WCHAR* name, unsigned long load_addr,
-                                       unsigned long dyn_addr, BOOL is_system, void* user)
+static BOOL elf_enum_modules_translate(const WCHAR* name, ULONG_PTR load_addr,
+                                       ULONG_PTR dyn_addr, BOOL is_system, void* user)
 {
     struct elf_enum_user*       eeu = user;
     return eeu->cb(name, load_addr, eeu->user);
@@ -1503,7 +1503,7 @@ static BOOL elf_enum_modules_translate(const WCHAR* name, unsigned long load_add
  * This function doesn't require that someone has called SymInitialize
  * on this very process.
  */
-BOOL elf_enum_modules(struct process* process, enum_modules_cb cb, void* user)
+static BOOL elf_enum_modules(struct process* process, enum_modules_cb cb, void* user)
 {
     struct elf_info     elf_info;
     BOOL                ret;
@@ -1532,8 +1532,8 @@ struct elf_load
  * Callback for elf_load_module, used to walk the list of loaded
  * modules.
  */
-static BOOL elf_load_cb(const WCHAR* name, unsigned long load_addr,
-                        unsigned long dyn_addr, BOOL is_system, void* user)
+static BOOL elf_load_cb(const WCHAR* name, ULONG_PTR load_addr,
+                        ULONG_PTR dyn_addr, BOOL is_system, void* user)
 {
     struct elf_load*    el = user;
     BOOL                ret = TRUE;
@@ -1584,7 +1584,7 @@ static BOOL elf_load_cb(const WCHAR* name, unsigned long load_addr,
  * Also, find module real name and load address from
  * the real loaded modules list in pcs address space
  */
-struct module*  elf_load_module(struct process* pcs, const WCHAR* name, unsigned long addr)
+static struct module* elf_load_module(struct process* pcs, const WCHAR* name, ULONG_PTR addr)
 {
     struct elf_load     el;
 
@@ -1662,51 +1662,12 @@ static BOOL elf_synchronize_module_list(struct process* pcs)
     return TRUE;
 }
 
-/******************************************************************
- *		elf_search_loader
- *
- * Lookup in a running ELF process the loader, and sets its ELF link
- * address (for accessing the list of loaded .so libs) in pcs.
- * If flags is ELF_INFO_MODULE, the module for the loader is also
- * added as a module into pcs.
- */
-static BOOL elf_search_loader(struct process* pcs, struct elf_info* elf_info)
-{
-    WCHAR *loader = get_wine_loader_name(pcs);
-    PROCESS_BASIC_INFORMATION pbi;
-    ULONG_PTR base = 0;
-    BOOL ret;
-
-    if (NtQueryInformationProcess( pcs->handle, ProcessBasicInformation,
-                                   &pbi, sizeof(pbi), NULL ))
-        return FALSE;
-
-    if (!pcs->is_64bit)
-    {
-        PEB32 *peb32 = (PEB32 *)pbi.PebBaseAddress;
-        DWORD base32;
-
-        if (!ReadProcessMemory( pcs->handle, &peb32->Reserved[0], &base32,
-                                sizeof(base32), NULL ))
-            return FALSE;
-
-        base = base32;
-    }
-    else
-    {
-        if (!ReadProcessMemory( pcs->handle, &pbi.PebBaseAddress->Reserved[0],
-                                &base, sizeof(base), NULL ))
-            return FALSE;
-    }
-
-    ret = elf_search_and_load_file(pcs, loader, base, 0, elf_info);
-    heap_free(loader);
-    return ret;
-}
-
 static const struct loader_ops elf_loader_ops =
 {
     elf_synchronize_module_list,
+    elf_load_module,
+    elf_load_debug_info,
+    elf_enum_modules,
     elf_fetch_file_info,
 };
 
@@ -1715,12 +1676,19 @@ static const struct loader_ops elf_loader_ops =
  *
  * Try to find a decent wine executable which could have loaded the debuggee
  */
-BOOL elf_read_wine_loader_dbg_info(struct process* pcs)
+BOOL elf_read_wine_loader_dbg_info(struct process* pcs, ULONG_PTR addr)
 {
     struct elf_info     elf_info;
+    WCHAR *loader;
+    BOOL ret;
 
     elf_info.flags = ELF_INFO_DEBUG_HEADER | ELF_INFO_MODULE;
-    if (!elf_search_loader(pcs, &elf_info) || !elf_info.dbg_hdr_addr) return FALSE;
+    loader = get_wine_loader_name(pcs);
+    ret = elf_search_and_load_file(pcs, loader, addr, 0, &elf_info);
+    heap_free(loader);
+    if (!ret || !elf_info.dbg_hdr_addr) return FALSE;
+
+    TRACE("Found ELF debug header %#lx\n", elf_info.dbg_hdr_addr);
     elf_info.module->format_info[DFI_ELF]->u.elf_info->elf_loader = 1;
     module_set_module(elf_info.module, S_WineLoaderW);
     pcs->dbg_hdr_addr = elf_info.dbg_hdr_addr;
@@ -1735,27 +1703,12 @@ BOOL elf_map_handle(HANDLE handle, struct image_file_map* fmap)
     return FALSE;
 }
 
-BOOL elf_read_wine_loader_dbg_info(struct process* pcs)
+BOOL elf_read_wine_loader_dbg_info(struct process* pcs, ULONG_PTR addr)
 {
     return FALSE;
 }
 
-BOOL elf_enum_modules(struct process *process, enum_modules_cb cb, void* user)
-{
-    return FALSE;
-}
-
-struct module*  elf_load_module(struct process* pcs, const WCHAR* name, unsigned long addr)
-{
-    return NULL;
-}
-
-BOOL elf_load_debug_info(struct module* module)
-{
-    return FALSE;
-}
-
-int elf_is_in_thunk_area(unsigned long addr,
+int elf_is_in_thunk_area(ULONG_PTR addr,
                          const struct elf_thunk_area* thunks)
 {
     return -1;

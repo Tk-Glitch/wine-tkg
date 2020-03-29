@@ -1384,6 +1384,7 @@ cards_nvidia_binary[] =
     {"RTX 2070",                    CARD_NVIDIA_GEFORCE_RTX2070},   /* GeForce 2000 - highend */
     {"RTX 2060",                    CARD_NVIDIA_GEFORCE_RTX2060},   /* GeForce 2000 - highend */
     {"GTX 1660 Ti",                 CARD_NVIDIA_GEFORCE_GTX1660TI}, /* GeForce 1600 - highend */
+    {"GTX 1660 SUPER",              CARD_NVIDIA_GEFORCE_GTX1660SUPER}, /* GeForce 1600 - highend */
     {"GTX 1650 SUPER",              CARD_NVIDIA_GEFORCE_GTX1650SUPER}, /* GeForce 1600 - midend high */
     {"TITAN V",                     CARD_NVIDIA_TITANV},            /* GeForce 1000 - highend */
     {"TITAN X (Pascal)",            CARD_NVIDIA_TITANX_PASCAL},     /* GeForce 1000 - highend */
@@ -3446,7 +3447,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter,
         {ARB_STENCIL_TEXTURING,            MAKEDWORD_VERSION(4, 3)},
         {ARB_TEXTURE_BUFFER_RANGE,         MAKEDWORD_VERSION(4, 3)},
         {ARB_TEXTURE_QUERY_LEVELS,         MAKEDWORD_VERSION(4, 3)},
-        {ARB_TEXTURE_STORAGE_MULTISAMPLE,  MAKEDWORD_VERSION(4, 2)},
+        {ARB_TEXTURE_STORAGE_MULTISAMPLE,  MAKEDWORD_VERSION(4, 3)},
         {ARB_TEXTURE_VIEW,                 MAKEDWORD_VERSION(4, 3)},
 
         {ARB_BUFFER_STORAGE,               MAKEDWORD_VERSION(4, 4)},

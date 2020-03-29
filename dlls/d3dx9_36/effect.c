@@ -2202,7 +2202,7 @@ static D3DXHANDLE WINAPI d3dx_effect_GetParameterBySemantic(ID3DXEffect *iface, 
                 continue;
             }
 
-            if (!_strnicmp(temp_param->semantic, semantic, -1))
+            if (!stricmp(temp_param->semantic, semantic))
             {
                 TRACE("Returning parameter %p\n", temp_param);
                 return get_parameter_handle(temp_param);
@@ -2225,7 +2225,7 @@ static D3DXHANDLE WINAPI d3dx_effect_GetParameterBySemantic(ID3DXEffect *iface, 
                 continue;
             }
 
-            if (!_strnicmp(temp_param->semantic, semantic, -1))
+            if (!stricmp(temp_param->semantic, semantic))
             {
                 TRACE("Returning parameter %p\n", temp_param);
                 return get_parameter_handle(temp_param);
@@ -5566,6 +5566,12 @@ static HRESULT d3dx_parse_state(struct d3dx_effect *effect, struct d3dx_state *s
     state->type = ST_CONSTANT;
 
     read_dword(ptr, &state->operation);
+    if (state->operation >= ARRAY_SIZE(state_table))
+    {
+        WARN("Unknown state operation %u.\n", state->operation);
+        return D3DERR_INVALIDCALL;
+    }
+
     TRACE("Operation: %#x (%s)\n", state->operation, state_table[state->operation].name);
 
     read_dword(ptr, &state->index);

@@ -255,7 +255,7 @@ static BOOL WINAPI fetch_pe_module_info_cb(PCWSTR name, DWORD64 base, ULONG size
  *
  * Callback for accumulating in dump_context an host modules set
  */
-static BOOL fetch_host_module_info_cb(const WCHAR* name, unsigned long base,
+static BOOL fetch_host_module_info_cb(const WCHAR* name, ULONG_PTR base,
                                      void* user)
 {
     struct dump_context*        dc = user;
@@ -320,11 +320,7 @@ static void fetch_modules_info(struct dump_context* dc)
      * And it's always a good idea to have a trace of the loaded ELF modules for
      * a given application in a post mortem debugging condition.
      */
-    if (dc->process->dbg_hdr_addr)
-    {
-        elf_enum_modules(dc->process, fetch_host_module_info_cb, dc);
-        macho_enum_modules(dc->process, fetch_host_module_info_cb, dc);
-    }
+    dc->process->loader->enum_modules(dc->process, fetch_host_module_info_cb, dc);
 }
 
 static void fetch_module_versioninfo(LPCWSTR filename, VS_FIXEDFILEINFO* ffi)

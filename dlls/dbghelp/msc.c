@@ -1393,7 +1393,7 @@ static BOOL codeview_parse_type_table(struct codeview_type_parse* ctp)
 /*========================================================================
  * Process CodeView line number information.
  */
-static unsigned long codeview_get_address(const struct msc_debug_info* msc_dbg,
+static ULONG_PTR codeview_get_address(const struct msc_debug_info* msc_dbg,
                                           unsigned seg, unsigned offset);
 
 static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const BYTE* linetab,
@@ -1408,7 +1408,7 @@ static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const B
     const unsigned short*       linenos;
     const struct startend*      start;
     unsigned                    source;
-    unsigned long               addr, func_addr0;
+    ULONG_PTR                   addr, func_addr0;
     struct symt_function*       func;
     const struct codeview_linetab_block* ltb;
 
@@ -1555,7 +1555,7 @@ static unsigned int codeview_map_offset(const struct msc_debug_info* msc_dbg,
     return 0;
 }
 
-static unsigned long codeview_get_address(const struct msc_debug_info* msc_dbg,
+static ULONG_PTR codeview_get_address(const struct msc_debug_info* msc_dbg,
                                           unsigned seg, unsigned offset)
 {
     int			        nsect = msc_dbg->nsect;
@@ -2458,11 +2458,11 @@ static HANDLE map_pdb_file(const struct process* pcs,
     switch (lookup->kind)
     {
     case PDB_JG:
-        ret = path_find_symbol_file(pcs, module, lookup->filename, NULL, lookup->timestamp,
+        ret = path_find_symbol_file(pcs, module, lookup->filename, DMT_PDB, NULL, lookup->timestamp,
                                     lookup->age, dbg_file_path, &module->module.PdbUnmatched);
         break;
     case PDB_DS:
-        ret = path_find_symbol_file(pcs, module, lookup->filename, &lookup->guid, 0,
+        ret = path_find_symbol_file(pcs, module, lookup->filename, DMT_PDB, &lookup->guid, 0,
                                     lookup->age, dbg_file_path, &module->module.PdbUnmatched);
         break;
     }

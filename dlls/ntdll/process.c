@@ -1291,13 +1291,13 @@ static BOOL is_builtin_path( UNICODE_STRING *path, BOOL *is_64bit )
                                    's','y','s','w','o','w','6','4'};
 
     *is_64bit = is_win64;
-    if (path->Length > sizeof(systemW) && !strncmpiW( path->Buffer, systemW, ARRAY_SIZE(systemW) ))
+    if (path->Length > sizeof(systemW) && !wcsnicmp( path->Buffer, systemW, ARRAY_SIZE(systemW) ))
     {
         if (is_wow64 && !ntdll_get_thread_data()->wow64_redir) *is_64bit = TRUE;
         return TRUE;
     }
     if ((is_win64 || is_wow64) && path->Length > sizeof(wow64W) &&
-        !strncmpiW( path->Buffer, wow64W, ARRAY_SIZE(wow64W) ))
+        !wcsnicmp( path->Buffer, wow64W, ARRAY_SIZE(wow64W) ))
     {
         *is_64bit = FALSE;
         return TRUE;
@@ -1626,7 +1626,7 @@ NTSTATUS restart_process( RTL_USER_PROCESS_PARAMETERS *params, NTSTATUS status )
     /* check for .com or .pif extension */
     if (status == STATUS_INVALID_IMAGE_NOT_MZ &&
         (p = strrchrW( params->ImagePathName.Buffer, '.' )) &&
-        (!strcmpiW( p, comW ) || !strcmpiW( p, pifW )))
+        (!wcsicmp( p, comW ) || !wcsicmp( p, pifW )))
         status = STATUS_INVALID_IMAGE_WIN_16;
 
     switch (status)
