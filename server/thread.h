@@ -81,7 +81,6 @@ struct thread
     int                    unix_tid;      /* Unix tid of client */
     context_t             *context;       /* current context if in an exception handler */
     context_t             *suspend_context; /* current context if suspended */
-    context_t             *fake_dbg_ctx;  /* Holds the cached debug registers */
     client_ptr_t           teb;           /* TEB address (in client address space) */
     client_ptr_t           entry_point;   /* entry point (in client address space) */
     affinity_t             affinity;      /* affinity mask */
