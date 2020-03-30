@@ -24,6 +24,7 @@
 #include "wine/port.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -3318,12 +3319,13 @@ static void install_bpf(struct sigaction *sig_act)
        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
     };
     struct sock_fprog prog;
+    int ret;
 
     memset(&prog, 0, sizeof(prog));
     prog.len = ARRAY_SIZE(filter);
     prog.filter = filter;
 
-    if (prctl(PR_GET_SECCOMP, 0, NULL, 0, 0) != 2)
+    if (!(ret = prctl(PR_GET_SECCOMP, 0, NULL, 0, 0)))
     {
         if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0))
         {
@@ -3339,7 +3341,10 @@ static void install_bpf(struct sigaction *sig_act)
     }
     else
     {
-        TRACE("Seccomp filters already installed.\n");
+        if (ret == 2)
+            TRACE("Seccomp filters already installed.\n");
+        else
+            ERR("Seccomp filters cannot be installed, ret %d, error %s.\n", ret, strerror(errno));
     }
 
     sig_act->sa_sigaction = sigsys_handler;

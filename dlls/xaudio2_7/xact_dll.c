@@ -1186,49 +1186,35 @@ static inline void unwrap_notificationdesc(FACTNotificationDescription *fd,
     /* We have to unwrap the FACT object first! */
 
     TRACE("Type %d\n", xd->type);
-    switch (xd->type)
+    /* Supports SoundBank, Cue index, Cue instance */
+    if (xd->type == XACTNOTIFICATIONTYPE_CUEPREPARED || xd->type == XACTNOTIFICATIONTYPE_CUEPLAY ||
+        xd->type == XACTNOTIFICATIONTYPE_CUESTOP || xd->type == XACTNOTIFICATIONTYPE_CUEDESTROYED ||
+        xd->type == XACTNOTIFICATIONTYPE_MARKER || xd->type == XACTNOTIFICATIONTYPE_LOCALVARIABLECHANGED)
     {
-        /* Supports None */
-        case (int)XACTNOTIFICATIONTYPE_GLOBALVARIABLECHANGED:
-        case (int)XACTNOTIFICATIONTYPE_GUICONNECTED:
-        case (int)XACTNOTIFICATIONTYPE_GUIDISCONNECTED:
-            break;
-
-        /* Supports SoundBank, Cue index, Cue instance */
-        case (int)XACTNOTIFICATIONTYPE_CUEPREPARED:
-        case (int)XACTNOTIFICATIONTYPE_CUEPLAY:
-        case (int)XACTNOTIFICATIONTYPE_CUESTOP:
-        case (int)XACTNOTIFICATIONTYPE_CUEDESTROYED:
-        case (int)XACTNOTIFICATIONTYPE_MARKER:
-        case (int)XACTNOTIFICATIONTYPE_LOCALVARIABLECHANGED:
-            flags = NOTIFY_SoundBank | NOTIFY_cueIndex | NOTIFY_Cue;
-            break;
-
-        /* Supports WaveBank */
-        case (int)XACTNOTIFICATIONTYPE_WAVEBANKDESTROYED:
-        case (int)XACTNOTIFICATIONTYPE_WAVEBANKPREPARED:
-        case (int)XACTNOTIFICATIONTYPE_WAVEBANKSTREAMING_INVALIDCONTENT:
-            flags = NOTIFY_WaveBank;
-            break;
-
-        /* Supports NOTIFY_SoundBank */
-        case (int)XACTNOTIFICATIONTYPE_SOUNDBANKDESTROYED:
-            flags = NOTIFY_SoundBank;
-            break;
-
-        /* Supports WaveBank, Wave index, Wave instance */
-        case (int)XACTNOTIFICATIONTYPE_WAVEPREPARED:
-        case (int)XACTNOTIFICATIONTYPE_WAVEDESTROYED:
-            flags = NOTIFY_WaveBank | NOTIFY_waveIndex | NOTIFY_Wave;
-            break;
-
-        /* Supports SoundBank, SoundBank, Cue index, Cue instance, WaveBank, Wave instance */
-        case (int)XACTNOTIFICATIONTYPE_WAVEPLAY:
-        case (int)XACTNOTIFICATIONTYPE_WAVESTOP:
-        case (int)XACTNOTIFICATIONTYPE_WAVELOOPED:
-            flags = NOTIFY_SoundBank | NOTIFY_cueIndex | NOTIFY_Cue | NOTIFY_WaveBank | NOTIFY_Wave;
-            break;
-    };
+        flags = NOTIFY_SoundBank | NOTIFY_cueIndex | NOTIFY_Cue;
+    }
+    /* Supports WaveBank */
+    else if (xd->type == XACTNOTIFICATIONTYPE_WAVEBANKDESTROYED || xd->type == XACTNOTIFICATIONTYPE_WAVEBANKPREPARED ||
+             xd->type == XACTNOTIFICATIONTYPE_WAVEBANKSTREAMING_INVALIDCONTENT)
+    {
+        flags = NOTIFY_WaveBank;
+    }
+    /* Supports NOTIFY_SoundBank */
+    else if (xd->type == XACTNOTIFICATIONTYPE_SOUNDBANKDESTROYED)
+    {
+        flags = NOTIFY_SoundBank;
+    }
+    /* Supports WaveBank, Wave index, Wave instance */
+    else if (xd->type == XACTNOTIFICATIONTYPE_WAVEPREPARED || xd->type == XACTNOTIFICATIONTYPE_WAVEDESTROYED)
+    {
+        flags = NOTIFY_WaveBank | NOTIFY_waveIndex | NOTIFY_Wave;
+    }
+    /* Supports SoundBank, SoundBank, Cue index, Cue instance, WaveBank, Wave instance */
+    else if (xd->type == XACTNOTIFICATIONTYPE_WAVEPLAY || xd->type == XACTNOTIFICATIONTYPE_WAVESTOP ||
+             xd->type == XACTNOTIFICATIONTYPE_WAVELOOPED)
+    {
+        flags = NOTIFY_SoundBank | NOTIFY_cueIndex | NOTIFY_Cue | NOTIFY_WaveBank | NOTIFY_Wave;
+    }
 
     fd->type = xd->type;
     fd->flags = xd->flags;
