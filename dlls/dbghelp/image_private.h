@@ -19,43 +19,83 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef HAVE_ELF_H
-# include <elf.h>
-#endif
-#ifdef HAVE_SYS_ELF32_H
-# include <sys/elf32.h>
-#endif
-#ifdef HAVE_SYS_EXEC_ELF_H
-# include <sys/exec_elf.h>
-#endif
-#if !defined(DT_NUM)
-# if defined(DT_COUNT)
-#  define DT_NUM DT_COUNT
-# else
-/* this seems to be a satisfactory value on Solaris, which doesn't support this AFAICT */
-#  define DT_NUM 24
-# endif
-#endif
-#ifdef HAVE_LINK_H
-# include <link.h>
-#endif
-#ifdef HAVE_SYS_LINK_H
-# include <sys/link.h>
-#endif
-#ifdef HAVE_MACH_O_LOADER_H
-#include <mach-o/loader.h>
-#endif
-
 #define IMAGE_NO_MAP  ((void*)-1)
 
-#ifndef __ELF__
-#ifndef SHT_NULL
-#define SHT_NULL        0
-#endif
-#ifndef NT_GNU_BUILD_ID
-#define NT_GNU_BUILD_ID 3
-#endif
-#endif
+struct elf_header
+{
+    UINT8   e_ident[16];  /* Magic number and other info */
+    UINT16  e_type;       /* Object file type */
+    UINT16  e_machine;    /* Architecture */
+    UINT32  e_version;    /* Object file version */
+    UINT64  e_entry;      /* Entry point virtual address */
+    UINT64  e_phoff;      /* Program header table file offset */
+    UINT64  e_shoff;      /* Section header table file offset */
+    UINT32  e_flags;      /* Processor-specific flags */
+    UINT16  e_ehsize;     /* ELF header size in bytes */
+    UINT16  e_phentsize;  /* Program header table entry size */
+    UINT16  e_phnum;      /* Program header table entry count */
+    UINT16  e_shentsize;  /* Section header table entry size */
+    UINT16  e_shnum;      /* Section header table entry count */
+    UINT16  e_shstrndx;   /* Section header string table index */
+};
+
+struct elf_section_header
+{
+    UINT32  sh_name;       /* Section name (string tbl index) */
+    UINT32  sh_type;       /* Section type */
+    UINT64  sh_flags;      /* Section flags */
+    UINT64  sh_addr;       /* Section virtual addr at execution */
+    UINT64  sh_offset;     /* Section file offset */
+    UINT64  sh_size;       /* Section size in bytes */
+    UINT32  sh_link;       /* Link to another section */
+    UINT32  sh_info;       /* Additional section information */
+    UINT64  sh_addralign;  /* Section alignment */
+    UINT64  sh_entsize;    /* Entry size if section holds table */
+};
+
+struct macho_load_command
+{
+    UINT32  cmd;           /* type of load command */
+    UINT32  cmdsize;       /* total size of command in bytes */
+};
+
+struct macho_uuid_command
+{
+    UINT32  cmd;           /* LC_UUID */
+    UINT32  cmdsize;
+    UINT8   uuid[16];
+};
+
+struct macho_section
+{
+    char    sectname[16];  /* name of this section */
+    char    segname[16];   /* segment this section goes in */
+    UINT64  addr;          /* memory address of this section */
+    UINT64  size;          /* size in bytes of this section */
+    UINT32  offset;        /* file offset of this section */
+    UINT32  align;         /* section alignment (power of 2) */
+    UINT32  reloff;        /* file offset of relocation entries */
+    UINT32  nreloc;        /* number of relocation entries */
+    UINT32  flags;         /* flags (section type and attributes)*/
+    UINT32  reserved1;     /* reserved (for offset or index) */
+    UINT32  reserved2;     /* reserved (for count or sizeof) */
+    UINT32  reserved3;     /* reserved */
+};
+
+struct macho_section32
+{
+    char    sectname[16];  /* name of this section */
+    char    segname[16];   /* segment this section goes in */
+    UINT32  addr;          /* memory address of this section */
+    UINT32  size;          /* size in bytes of this section */
+    UINT32  offset;        /* file offset of this section */
+    UINT32  align;         /* section alignment (power of 2) */
+    UINT32  reloff;        /* file offset of relocation entries */
+    UINT32  nreloc;        /* number of relocation entries */
+    UINT32  flags;         /* flags (section type and attributes)*/
+    UINT32  reserved1;     /* reserved (for offset or index) */
+    UINT32  reserved2;     /* reserved (for count or sizeof) */
+};
 
 /* structure holding information while handling an ELF image
  * allows one by one section mapping for memory savings
@@ -75,14 +115,12 @@ struct image_file_map
             HANDLE                      handle;
             const char*	                shstrtab;
             char*                       target_copy;
-#ifdef __ELF__
-            Elf64_Ehdr                  elfhdr;
+            struct elf_header           elfhdr;
             struct
             {
-                Elf64_Shdr                      shdr;
+                struct elf_section_header       shdr;
                 const char*                     mapped;
             }*                          sect;
-#endif
         } elf;
         struct macho_file_map
         {
@@ -90,12 +128,12 @@ struct image_file_map
             size_t                      segs_start;
             HANDLE                      handle;
             struct image_file_map*      dsym;   /* the debug symbols file associated with this one */
-
-#ifdef HAVE_MACH_O_LOADER_H
-            struct mach_header          mach_header;
             size_t                      header_size; /* size of real header in file */
-            const struct load_command*  load_commands;
-            const struct uuid_command*  uuid;
+            size_t                      commands_size;
+            unsigned int                commands_count;
+
+            const struct macho_load_command*    load_commands;
+            const struct macho_uuid_command*    uuid;
 
             /* The offset in the file which is this architecture.  mach_header was
              * read from arch_offset. */
@@ -104,11 +142,10 @@ struct image_file_map
             int                         num_sections;
             struct
             {
-                struct section_64               section;
+                struct macho_section            section;
                 const char*                     mapped;
                 unsigned int                    ignored : 1;
             }*                          sect;
-#endif
         } macho;
         struct pe_file_map
         {
@@ -131,6 +168,24 @@ struct image_section_map
 {
     struct image_file_map*      fmap;
     LONG_PTR                    sidx;
+};
+
+struct stab_nlist
+{
+    unsigned            n_strx;
+    unsigned char       n_type;
+    char                n_other;
+    short               n_desc;
+    unsigned            n_value;
+};
+
+struct macho64_nlist
+{
+    unsigned            n_strx;
+    unsigned char       n_type;
+    char                n_other;
+    short               n_desc;
+    UINT64              n_value;
 };
 
 BOOL image_check_alternate(struct image_file_map* fmap, const struct module* module) DECLSPEC_HIDDEN;

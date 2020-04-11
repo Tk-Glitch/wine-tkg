@@ -38,7 +38,6 @@
 #include "fsync.h"
 #include "wine/server.h"
 #include "wine/exception.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
@@ -680,7 +679,7 @@ NTSTATUS WINAPI NtOpenSymbolicLinkObject( HANDLE *handle, ACCESS_MASK access,
     /* MSYS2 tries to open \\SYSTEMROOT to check for case-insensitive systems */
     if (!access && !attr->RootDirectory &&
         attr->ObjectName->Length == sizeof(SystemRootW) &&
-        !memicmpW( attr->ObjectName->Buffer, SystemRootW,
+        !wcsnicmp( attr->ObjectName->Buffer, SystemRootW,
                    sizeof(SystemRootW)/sizeof(WCHAR) ))
     {
         TRACE( "returning STATUS_ACCESS_DENIED\n" );

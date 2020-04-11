@@ -1213,13 +1213,33 @@ GpStatus WINGDIPAPI GdipCreatePath(GpFillMode fill, GpPath **path)
 GpStatus WINGDIPAPI GdipCreatePath2(GDIPCONST GpPointF* points,
     GDIPCONST BYTE* types, INT count, GpFillMode fill, GpPath **path)
 {
+    int i;
+
     TRACE("(%p, %p, %d, %d, %p)\n", points, types, count, fill, path);
 
-    if(!path)
+    if(!points || !types || !path)
         return InvalidParameter;
+
+    if(count <= 0) {
+        *path = NULL;
+        return OutOfMemory;
+    }
 
     *path = heap_alloc_zero(sizeof(GpPath));
     if(!*path)  return OutOfMemory;
+
+    for(i = 1; i < count; i++) {
+        if((types[i] & PathPointTypePathTypeMask) == PathPointTypeBezier) {
+            if(i+2 < count &&
+                    (types[i+1] & PathPointTypePathTypeMask) == PathPointTypeBezier &&
+                    (types[i+2] & PathPointTypePathTypeMask) == PathPointTypeBezier)
+                i += 2;
+            else {
+                count = 0;
+                break;
+            }
+        }
+    }
 
     (*path)->pathdata.Points = heap_alloc_zero(count * sizeof(PointF));
     (*path)->pathdata.Types = heap_alloc_zero(count);
@@ -1233,6 +1253,8 @@ GpStatus WINGDIPAPI GdipCreatePath2(GDIPCONST GpPointF* points,
 
     memcpy((*path)->pathdata.Points, points, count * sizeof(PointF));
     memcpy((*path)->pathdata.Types, types, count);
+    if(count > 0)
+        (*path)->pathdata.Types[0] = PathPointTypeStart;
     (*path)->pathdata.Count = count;
     (*path)->datalen = count;
 
@@ -1804,12 +1826,12 @@ GpStatus WINGDIPAPI GdipWarpPath(GpPath *path, GpMatrix* matrix,
 }
 
 static void add_bevel_point(const GpPointF *endpoint, const GpPointF *nextpoint,
-    GpPen *pen, int right_side, path_list_node_t **last_point)
+    REAL pen_width, int right_side, path_list_node_t **last_point)
 {
     REAL segment_dy = nextpoint->Y-endpoint->Y;
     REAL segment_dx = nextpoint->X-endpoint->X;
     REAL segment_length = sqrtf(segment_dy*segment_dy + segment_dx*segment_dx);
-    REAL distance = pen->width/2.0;
+    REAL distance = pen_width / 2.0;
     REAL bevel_dx, bevel_dy;
 
     if (segment_length == 0.0)
@@ -1835,7 +1857,7 @@ static void add_bevel_point(const GpPointF *endpoint, const GpPointF *nextpoint,
 }
 
 static void widen_joint(const GpPointF *p1, const GpPointF *p2, const GpPointF *p3,
-    GpPen* pen, path_list_node_t **last_point)
+    GpPen* pen, REAL pen_width, path_list_node_t **last_point)
 {
     switch (pen->join)
     {
@@ -1843,7 +1865,7 @@ static void widen_joint(const GpPointF *p1, const GpPointF *p2, const GpPointF *
     case LineJoinMiterClipped:
         if ((p2->X - p1->X) * (p3->Y - p1->Y) > (p2->Y - p1->Y) * (p3->X - p1->X))
         {
-            float distance = pen->width/2.0;
+            float distance = pen_width / 2.0;
             float length_0 = sqrtf((p2->X-p1->X)*(p2->X-p1->X)+(p2->Y-p1->Y)*(p2->Y-p1->Y));
             float length_1 = sqrtf((p3->X-p2->X)*(p3->X-p2->X)+(p3->Y-p2->Y)*(p3->Y-p2->Y));
             float dx0 = distance * (p2->X - p1->X) / length_0;
@@ -1870,14 +1892,14 @@ static void widen_joint(const GpPointF *p1, const GpPointF *p2, const GpPointF *
         /* else fall-through */
     default:
     case LineJoinBevel:
-        add_bevel_point(p2, p1, pen, 1, last_point);
-        add_bevel_point(p2, p3, pen, 0, last_point);
+        add_bevel_point(p2, p1, pen_width, 1, last_point);
+        add_bevel_point(p2, p3, pen_width, 0, last_point);
         break;
     }
 }
 
 static void widen_cap(const GpPointF *endpoint, const GpPointF *nextpoint,
-    GpPen *pen, GpLineCap cap, GpCustomLineCap *custom, int add_first_points,
+    REAL pen_width, GpLineCap cap, GpCustomLineCap *custom, int add_first_points,
     int add_last_point, path_list_node_t **last_point)
 {
     switch (cap)
@@ -1885,16 +1907,16 @@ static void widen_cap(const GpPointF *endpoint, const GpPointF *nextpoint,
     default:
     case LineCapFlat:
         if (add_first_points)
-            add_bevel_point(endpoint, nextpoint, pen, 1, last_point);
+            add_bevel_point(endpoint, nextpoint, pen_width, 1, last_point);
         if (add_last_point)
-            add_bevel_point(endpoint, nextpoint, pen, 0, last_point);
+            add_bevel_point(endpoint, nextpoint, pen_width, 0, last_point);
         break;
     case LineCapSquare:
     {
         REAL segment_dy = nextpoint->Y-endpoint->Y;
         REAL segment_dx = nextpoint->X-endpoint->X;
         REAL segment_length = sqrtf(segment_dy*segment_dy + segment_dx*segment_dx);
-        REAL distance = pen->width/2.0;
+        REAL distance = pen_width / 2.0;
         REAL bevel_dx, bevel_dy;
         REAL extend_dx, extend_dy;
 
@@ -1919,7 +1941,7 @@ static void widen_cap(const GpPointF *endpoint, const GpPointF *nextpoint,
         REAL segment_dy = nextpoint->Y-endpoint->Y;
         REAL segment_dx = nextpoint->X-endpoint->X;
         REAL segment_length = sqrtf(segment_dy*segment_dy + segment_dx*segment_dx);
-        REAL distance = pen->width/2.0;
+        REAL distance = pen_width / 2.0;
         REAL dx, dy, dx2, dy2;
         const REAL control_point_distance = 0.5522847498307935; /* 4/3 * (sqrt(2) - 1) */
 
@@ -1956,7 +1978,7 @@ static void widen_cap(const GpPointF *endpoint, const GpPointF *nextpoint,
                 endpoint->Y + dx, PathPointTypeBezier);
         }
         else if (add_last_point)
-            add_bevel_point(endpoint, nextpoint, pen, 0, last_point);
+            add_bevel_point(endpoint, nextpoint, pen_width, 0, last_point);
         break;
     }
     case LineCapTriangle:
@@ -1964,20 +1986,20 @@ static void widen_cap(const GpPointF *endpoint, const GpPointF *nextpoint,
         REAL segment_dy = nextpoint->Y-endpoint->Y;
         REAL segment_dx = nextpoint->X-endpoint->X;
         REAL segment_length = sqrtf(segment_dy*segment_dy + segment_dx*segment_dx);
-        REAL distance = pen->width/2.0;
+        REAL distance = pen_width / 2.0;
         REAL dx, dy;
 
         dx = distance * segment_dx / segment_length;
         dy = distance * segment_dy / segment_length;
 
         if (add_first_points) {
-            add_bevel_point(endpoint, nextpoint, pen, 1, last_point);
+            add_bevel_point(endpoint, nextpoint, pen_width, 1, last_point);
 
             *last_point = add_path_list_node(*last_point, endpoint->X - dx,
                 endpoint->Y - dy, PathPointTypeLine);
         }
         if (add_first_points || add_last_point)
-            add_bevel_point(endpoint, nextpoint, pen, 0, last_point);
+            add_bevel_point(endpoint, nextpoint, pen_width, 0, last_point);
         break;
     }
     }
@@ -2097,60 +2119,60 @@ static void add_anchor(const GpPointF *endpoint, const GpPointF *nextpoint,
     (*last_point)->type |= PathPointTypeCloseSubpath;
 }
 
-static void widen_open_figure(const GpPointF *points, GpPen *pen, int start, int end,
-    GpLineCap start_cap, GpCustomLineCap *start_custom, GpLineCap end_cap,
-    GpCustomLineCap *end_custom, path_list_node_t **last_point)
+static void widen_open_figure(const GpPointF *points, int start, int end,
+    GpPen *pen, REAL pen_width, GpLineCap start_cap, GpCustomLineCap *start_custom,
+    GpLineCap end_cap, GpCustomLineCap *end_custom, path_list_node_t **last_point)
 {
     int i;
     path_list_node_t *prev_point;
 
-    if (end <= start)
+    if (end <= start || pen_width == 0.0)
         return;
 
     prev_point = *last_point;
 
     widen_cap(&points[start], &points[start+1],
-        pen, start_cap, start_custom, FALSE, TRUE, last_point);
+        pen_width, start_cap, start_custom, FALSE, TRUE, last_point);
 
     for (i=start+1; i<end; i++)
-        widen_joint(&points[i-1], &points[i],
-            &points[i+1], pen, last_point);
+        widen_joint(&points[i-1], &points[i], &points[i+1],
+            pen, pen_width, last_point);
 
     widen_cap(&points[end], &points[end-1],
-        pen, end_cap, end_custom, TRUE, TRUE, last_point);
+        pen_width, end_cap, end_custom, TRUE, TRUE, last_point);
 
     for (i=end-1; i>start; i--)
-        widen_joint(&points[i+1], &points[i],
-            &points[i-1], pen, last_point);
+        widen_joint(&points[i+1], &points[i], &points[i-1],
+            pen, pen_width, last_point);
 
     widen_cap(&points[start], &points[start+1],
-        pen, start_cap, start_custom, TRUE, FALSE, last_point);
+        pen_width, start_cap, start_custom, TRUE, FALSE, last_point);
 
     prev_point->next->type = PathPointTypeStart;
     (*last_point)->type |= PathPointTypeCloseSubpath;
 }
 
-static void widen_closed_figure(GpPath *path, GpPen *pen, int start, int end,
-    path_list_node_t **last_point)
+static void widen_closed_figure(GpPath *path, int start, int end,
+    GpPen *pen, REAL pen_width, path_list_node_t **last_point)
 {
     int i;
     path_list_node_t *prev_point;
 
-    if (end <= start)
+    if (end <= start || pen_width == 0.0)
         return;
 
     /* left outline */
     prev_point = *last_point;
 
     widen_joint(&path->pathdata.Points[end], &path->pathdata.Points[start],
-        &path->pathdata.Points[start+1], pen, last_point);
+        &path->pathdata.Points[start+1], pen, pen_width, last_point);
 
     for (i=start+1; i<end; i++)
         widen_joint(&path->pathdata.Points[i-1], &path->pathdata.Points[i],
-            &path->pathdata.Points[i+1], pen, last_point);
+            &path->pathdata.Points[i+1], pen, pen_width, last_point);
 
     widen_joint(&path->pathdata.Points[end-1], &path->pathdata.Points[end],
-        &path->pathdata.Points[start], pen, last_point);
+        &path->pathdata.Points[start], pen, pen_width, last_point);
 
     prev_point->next->type = PathPointTypeStart;
     (*last_point)->type |= PathPointTypeCloseSubpath;
@@ -2159,21 +2181,21 @@ static void widen_closed_figure(GpPath *path, GpPen *pen, int start, int end,
     prev_point = *last_point;
 
     widen_joint(&path->pathdata.Points[start], &path->pathdata.Points[end],
-        &path->pathdata.Points[end-1], pen, last_point);
+        &path->pathdata.Points[end-1], pen, pen_width, last_point);
 
     for (i=end-1; i>start; i--)
         widen_joint(&path->pathdata.Points[i+1], &path->pathdata.Points[i],
-            &path->pathdata.Points[i-1], pen, last_point);
+            &path->pathdata.Points[i-1], pen, pen_width, last_point);
 
     widen_joint(&path->pathdata.Points[start+1], &path->pathdata.Points[start],
-        &path->pathdata.Points[end], pen, last_point);
+        &path->pathdata.Points[end], pen, pen_width, last_point);
 
     prev_point->next->type = PathPointTypeStart;
     (*last_point)->type |= PathPointTypeCloseSubpath;
 }
 
-static void widen_dashed_figure(GpPath *path, GpPen *pen, int start, int end,
-    int closed, path_list_node_t **last_point)
+static void widen_dashed_figure(GpPath *path, int start, int end, int closed,
+    GpPen *pen, REAL pen_width, path_list_node_t **last_point)
 {
     int i, j;
     REAL dash_pos=0.0;
@@ -2190,7 +2212,7 @@ static void widen_dashed_figure(GpPath *path, GpPen *pen, int start, int end,
     int draw_start_cap=0;
     static const REAL dash_dot_dot[6] = { 3.0, 1.0, 1.0, 1.0, 1.0, 1.0 };
 
-    if (end <= start)
+    if (end <= start || pen_width == 0.0)
         return;
 
     switch (pen->dash)
@@ -2267,7 +2289,7 @@ static void widen_dashed_figure(GpPath *path, GpPen *pen, int start, int end,
                     tmp_points[num_tmp_points].X = path->pathdata.Points[i].X + segment_dx * segment_pos / segment_length;
                     tmp_points[num_tmp_points].Y = path->pathdata.Points[i].Y + segment_dy * segment_pos / segment_length;
 
-                    widen_open_figure(tmp_points, pen, 0, num_tmp_points,
+                    widen_open_figure(tmp_points, 0, num_tmp_points, pen, pen_width,
                         draw_start_cap ? pen->startcap : LineCapFlat, pen->customstart,
                         LineCapFlat, NULL, last_point);
                     draw_start_cap = 0;
@@ -2301,7 +2323,7 @@ static void widen_dashed_figure(GpPath *path, GpPen *pen, int start, int end,
     if (dash_index % 2 == 0 && num_tmp_points != 0)
     {
         /* last dash overflows last segment */
-        widen_open_figure(tmp_points, pen, 0, num_tmp_points-1,
+        widen_open_figure(tmp_points, 0, num_tmp_points-1, pen, pen_width,
             draw_start_cap ? pen->startcap : LineCapFlat, pen->customstart,
             closed ? LineCapFlat : pen->endcap, pen->customend, last_point);
     }
@@ -2337,6 +2359,7 @@ GpStatus WINGDIPAPI GdipWidenPath(GpPath *path, GpPen *pen, GpMatrix *matrix,
     if (status == Ok)
     {
         REAL anchor_pen_width = max(pen->width, 2.0);
+        REAL pen_width = (pen->unit == UnitWorld) ? max(pen->width, 1.0) : pen->width;
         BYTE *types = flat_path->pathdata.Types;
 
         last_point = points;
@@ -2364,17 +2387,17 @@ GpStatus WINGDIPAPI GdipWidenPath(GpPath *path, GpPen *pen, GpMatrix *matrix,
             if ((types[i]&PathPointTypeCloseSubpath) == PathPointTypeCloseSubpath)
             {
                 if (pen->dash != DashStyleSolid)
-                    widen_dashed_figure(flat_path, pen, subpath_start, i, 1, &last_point);
+                    widen_dashed_figure(flat_path, subpath_start, i, 1, pen, pen_width, &last_point);
                 else
-                    widen_closed_figure(flat_path, pen, subpath_start, i, &last_point);
+                    widen_closed_figure(flat_path, subpath_start, i, pen, pen_width, &last_point);
             }
             else if (i == flat_path->pathdata.Count-1 ||
                 (types[i+1]&PathPointTypePathTypeMask) == PathPointTypeStart)
             {
                 if (pen->dash != DashStyleSolid)
-                    widen_dashed_figure(flat_path, pen, subpath_start, i, 0, &last_point);
+                    widen_dashed_figure(flat_path, subpath_start, i, 0, pen, pen_width, &last_point);
                 else
-                    widen_open_figure(flat_path->pathdata.Points, pen, subpath_start, i, pen->startcap, pen->customstart, pen->endcap, pen->customend, &last_point);
+                    widen_open_figure(flat_path->pathdata.Points, subpath_start, i, pen, pen_width, pen->startcap, pen->customstart, pen->endcap, pen->customend, &last_point);
             }
         }
 

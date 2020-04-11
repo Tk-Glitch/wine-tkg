@@ -30,7 +30,6 @@
 #include "oaidl.h"
 #include "winnls.h"
 #include "wine/list.h"
-#include "wine/unicode.h"
 #include "wine/rbtree.h"
 
 #include "cvconst.h"
@@ -404,6 +403,7 @@ struct process
     HANDLE                      handle;
     const struct loader_ops*    loader;
     WCHAR*                      search_path;
+    WCHAR*                      environment;
 
     PSYMBOL_REGISTERED_CALLBACK64       reg_cb;
     PSYMBOL_REGISTERED_CALLBACK reg_cb32;
@@ -420,6 +420,11 @@ struct process
 
     BOOL                        is_64bit;
 };
+
+static inline BOOL read_process_memory(const struct process *process, UINT64 addr, void *buf, size_t size)
+{
+    return ReadProcessMemory(process->handle, (void*)(UINT_PTR)addr, buf, size, NULL);
+}
 
 struct line_info
 {
@@ -560,7 +565,7 @@ struct cpu
     void*       (*find_runtime_function)(struct module*, DWORD64 addr);
 
     /* dwarf dedicated information */
-    unsigned    (*map_dwarf_register)(unsigned regno, BOOL eh_frame);
+    unsigned    (*map_dwarf_register)(unsigned regno, const struct module* module, BOOL eh_frame);
 
     /* context related manipulation */
     void *      (*fetch_context_reg)(union ctx *ctx, unsigned regno, unsigned *size);
@@ -601,6 +606,7 @@ extern BOOL         pcs_callback(const struct process* pcs, ULONG action, void* 
 extern void*        fetch_buffer(struct process* pcs, unsigned size) DECLSPEC_HIDDEN;
 extern const char*  wine_dbgstr_addr(const ADDRESS64* addr) DECLSPEC_HIDDEN;
 extern struct cpu*  cpu_find(DWORD) DECLSPEC_HIDDEN;
+extern const WCHAR *process_getenv(const struct process *process, const WCHAR *name);
 extern DWORD calc_crc32(HANDLE handle) DECLSPEC_HIDDEN;
 
 /* elf_module.c */
@@ -666,7 +672,8 @@ extern BOOL         path_find_symbol_file(const struct process* pcs, const struc
                                           PCSTR full_path, enum module_type type, const GUID* guid, DWORD dw1, DWORD dw2,
                                           WCHAR *buffer, BOOL* is_unmatched) DECLSPEC_HIDDEN;
 extern WCHAR *get_dos_file_name(const WCHAR *filename) DECLSPEC_HIDDEN;
-extern BOOL search_dll_path(const WCHAR *name, BOOL (*match)(void*, HANDLE, const WCHAR*), void *param) DECLSPEC_HIDDEN;
+extern BOOL search_dll_path(const struct process* process, const WCHAR *name,
+                            BOOL (*match)(void*, HANDLE, const WCHAR*), void *param) DECLSPEC_HIDDEN;
 extern BOOL search_unix_path(const WCHAR *name, const char *path, BOOL (*match)(void*, HANDLE, const WCHAR*), void *param) DECLSPEC_HIDDEN;
 extern const WCHAR* file_name(const WCHAR* str) DECLSPEC_HIDDEN;
 extern const char* file_nameA(const char* str) DECLSPEC_HIDDEN;
@@ -694,7 +701,7 @@ typedef void (*stabs_def_cb)(struct module* module, ULONG_PTR load_offset,
                                 BOOL is_public, BOOL is_global, unsigned char other,
                                 struct symt_compiland* compiland, void* user);
 extern BOOL         stabs_parse(struct module* module, ULONG_PTR load_offset,
-                                const char* stabs, int stablen,
+                                const char* stabs, size_t nstab, size_t stabsize,
                                 const char* strs, int strtablen,
                                 stabs_def_cb callback, void* user) DECLSPEC_HIDDEN;
 
@@ -716,7 +723,7 @@ extern DWORD64      sw_module_base(struct cpu_stack_walk* csw, DWORD64 addr) DEC
 extern const char*  symt_get_name(const struct symt* sym) DECLSPEC_HIDDEN;
 extern WCHAR*       symt_get_nameW(const struct symt* sym) DECLSPEC_HIDDEN;
 extern BOOL         symt_get_address(const struct symt* type, ULONG64* addr) DECLSPEC_HIDDEN;
-extern int          symt_cmp_addr(const void* p1, const void* p2) DECLSPEC_HIDDEN;
+extern int __cdecl  symt_cmp_addr(const void* p1, const void* p2) DECLSPEC_HIDDEN;
 extern void         copy_symbolW(SYMBOL_INFOW* siw, const SYMBOL_INFO* si) DECLSPEC_HIDDEN;
 extern struct symt_ht*
                     symt_find_nearest(struct module* module, DWORD_PTR addr) DECLSPEC_HIDDEN;

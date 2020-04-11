@@ -304,10 +304,10 @@ static BOOL load_dbus_functions(void)
     void *handle;
     char error[128];
 
-    if (!(handle = wine_dlopen(SONAME_LIBDBUS_1, RTLD_NOW, error, sizeof(error))))
+    if (!(handle = dlopen(SONAME_LIBDBUS_1, RTLD_NOW)))
         goto failed;
 
-#define DO_FUNC(f) if (!(p_##f = wine_dlsym( handle, #f, error, sizeof(error) ))) goto failed
+#define DO_FUNC(f) if (!(p_##f = dlsym( handle, #f ))) goto failed
     DBUS_FUNCS;
 #undef DO_FUNC
     return TRUE;

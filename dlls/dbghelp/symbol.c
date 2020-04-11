@@ -21,8 +21,6 @@
 
 #define NONAMELESSUNION
 
-#include "config.h"
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -53,7 +51,7 @@ static inline int cmp_sorttab_addr(struct module* module, int idx, ULONG64 addr)
     return cmp_addr(ref, addr);
 }
 
-int symt_cmp_addr(const void* p1, const void* p2)
+int __cdecl symt_cmp_addr(const void* p1, const void* p2)
 {
     const struct symt*  sym1 = *(const struct symt* const *)p1;
     const struct symt*  sym2 = *(const struct symt* const *)p2;
@@ -1041,7 +1039,7 @@ static BOOL sym_enum(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR Mask,
     if (BaseOfDll == 0)
     {
         /* do local variables ? */
-        if (!Mask || !(bang = strchrW(Mask, '!')))
+        if (!Mask || !(bang = wcschr(Mask, '!')))
             return symt_enum_locals(pair.pcs, Mask, se);
 
         if (bang == Mask) return FALSE;
@@ -1084,7 +1082,7 @@ static BOOL sym_enum(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR Mask,
         return FALSE;
 
     /* we always ignore module name from Mask when BaseOfDll is defined */
-    if (Mask && (bang = strchrW(Mask, '!')))
+    if (Mask && (bang = wcschr(Mask, '!')))
     {
         if (bang == Mask) return FALSE;
         Mask = bang + 1;
@@ -1843,7 +1841,7 @@ DWORD WINAPI UnDecorateSymbolNameW(const WCHAR *decorated_name, WCHAR *undecorat
         {
             MultiByteToWideChar(CP_ACP, 0, ptr, -1, undecorated_name, undecorated_length);
             undecorated_name[undecorated_length - 1] = 0;
-            ret = strlenW(undecorated_name);
+            ret = lstrlenW(undecorated_name);
             und_free(ptr);
         }
         HeapFree(GetProcessHeap(), 0, buf);
@@ -1866,7 +1864,7 @@ static  int     re_fetch_char(const WCHAR** re)
 
 static inline int  re_match_char(WCHAR ch1, WCHAR ch2, BOOL _case)
 {
-    return _case ? ch1 - ch2 : toupperW(ch1) - toupperW(ch2);
+    return _case ? ch1 - ch2 : towupper(ch1) - towupper(ch2);
 }
 
 static const WCHAR* re_match_one(const WCHAR* string, const WCHAR* elt, BOOL _case)

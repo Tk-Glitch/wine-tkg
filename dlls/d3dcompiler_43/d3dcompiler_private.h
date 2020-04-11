@@ -661,6 +661,12 @@ struct hlsl_ir_node
     struct hlsl_type *data_type;
 
     struct source_location loc;
+
+    /* Liveness ranges. "index" is the index of this instruction. Since this is
+     * essentially an SSA value, the earliest live point is the index. This is
+     * true even for loops, since currently we can't have a reference to a
+     * value generated in an earlier iteration of the loop. */
+    unsigned int index, last_read;
 };
 
 #define HLSL_STORAGE_EXTERN          0x00000001
@@ -699,7 +705,7 @@ struct hlsl_ir_var
     const struct reg_reservation *reg_reservation;
     struct list scope_entry, param_entry;
 
-    struct hlsl_var_allocation *allocation;
+    unsigned int first_write, last_read;
 };
 
 struct hlsl_ir_function
@@ -734,6 +740,7 @@ struct hlsl_ir_loop
     struct hlsl_ir_node node;
     /* loop condition is stored in the body (as "if (!condition) break;") */
     struct list *body;
+    unsigned int next_index; /* liveness index of the end of the loop */
 };
 
 enum hlsl_ir_expr_op {

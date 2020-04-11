@@ -185,6 +185,30 @@ __ASM_GLOBAL_FUNC( rt_sigreturn,
                    "int $0x80" );
 #endif
 
+struct modify_ldt_s
+{
+    unsigned int  entry_number;
+    void         *base_addr;
+    unsigned int  limit;
+    unsigned int  seg_32bit : 1;
+    unsigned int  contents : 2;
+    unsigned int  read_exec_only : 1;
+    unsigned int  limit_in_pages : 1;
+    unsigned int  seg_not_present : 1;
+    unsigned int  usable : 1;
+    unsigned int  garbage : 25;
+};
+
+static inline int modify_ldt( int func, struct modify_ldt_s *ptr, unsigned long count )
+{
+    return syscall( 123 /* SYS_modify_ldt */, func, ptr, count );
+}
+
+static inline int set_thread_area( struct modify_ldt_s *ptr )
+{
+    return syscall( 243 /* SYS_set_thread_area */, ptr );
+}
+
 #elif defined (__BSDI__)
 
 #include <machine/frame.h>
@@ -214,6 +238,8 @@ typedef struct trapframe ucontext_t;
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__DragonFly__)
 
 #include <machine/trap.h>
+#include <machine/segments.h>
+#include <machine/sysarch.h>
 
 #define EAX_sig(context)     ((context)->uc_mcontext.mc_eax)
 #define EBX_sig(context)     ((context)->uc_mcontext.mc_ebx)
@@ -241,6 +267,9 @@ typedef struct trapframe ucontext_t;
 #define FPUX_sig(context)    NULL  /* FIXME */
 
 #elif defined (__OpenBSD__)
+
+#include <machine/segments.h>
+#include <machine/sysarch.h>
 
 #define EAX_sig(context)     ((context)->sc_eax)
 #define EBX_sig(context)     ((context)->sc_ebx)
@@ -318,6 +347,8 @@ typedef struct trapframe ucontext_t;
 
 #elif defined (__APPLE__)
 
+#include <i386/user_ldt.h>
+
 /* work around silly renaming of struct members in OS X 10.5 */
 #if __DARWIN_UNIX03 && defined(_STRUCT_X86_EXCEPTION_STATE32)
 #define EAX_sig(context)     ((context)->uc_mcontext->__ss.__eax)
@@ -365,6 +396,9 @@ typedef struct trapframe ucontext_t;
 
 #elif defined(__NetBSD__)
 
+#include <machine/segments.h>
+#include <machine/sysarch.h>
+
 #define EAX_sig(context)       ((context)->uc_mcontext.__gregs[_REG_EAX])
 #define EBX_sig(context)       ((context)->uc_mcontext.__gregs[_REG_EBX])
 #define ECX_sig(context)       ((context)->uc_mcontext.__gregs[_REG_ECX])
@@ -393,6 +427,9 @@ typedef struct trapframe ucontext_t;
 #define T_XMMFLT T_XMM
 
 #elif defined(__GNU__)
+
+#include <mach/i386/mach_i386.h>
+#include <mach/mach_traps.h>
 
 #define EAX_sig(context)     ((context)->uc_mcontext.gregs[REG_EAX])
 #define EBX_sig(context)     ((context)->uc_mcontext.gregs[REG_EBX])
@@ -439,6 +476,8 @@ typedef int (*wine_signal_handler)(unsigned int sig);
 static const size_t teb_size = 4096;  /* we reserve one page for the TEB */
 static size_t signal_stack_mask;
 static size_t signal_stack_size;
+
+static ULONG first_ldt_entry = 32;
 
 static wine_signal_handler handlers[256];
 
@@ -547,6 +586,13 @@ static inline struct x86_thread_data *x86_thread_data(void)
     return (struct x86_thread_data *)NtCurrentTeb()->SystemReserved2;
 }
 
+static inline WORD get_cs(void) { WORD res; __asm__( "movw %%cs,%0" : "=r" (res) ); return res; }
+static inline WORD get_ds(void) { WORD res; __asm__( "movw %%ds,%0" : "=r" (res) ); return res; }
+static inline WORD get_fs(void) { WORD res; __asm__( "movw %%fs,%0" : "=r" (res) ); return res; }
+static inline WORD get_gs(void) { WORD res; __asm__( "movw %%gs,%0" : "=r" (res) ); return res; }
+static inline void set_fs( WORD val ) { __asm__( "mov %0,%%fs" :: "r" (val)); }
+static inline void set_gs( WORD val ) { __asm__( "mov %0,%%gs" :: "r" (val)); }
+
 /* Exception record for handling exceptions happening inside exception handlers */
 typedef struct
 {
@@ -557,6 +603,22 @@ typedef struct
 extern DWORD EXC_CallHandler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_RECORD *frame,
                               CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher,
                               PEXCEPTION_HANDLER handler, PEXCEPTION_HANDLER nested_handler );
+
+/***********************************************************************
+ *           is_gdt_sel
+ */
+static inline int is_gdt_sel( WORD sel )
+{
+    return !(sel & 4);
+}
+
+/***********************************************************************
+ *           ldt_is_system
+ */
+static inline int ldt_is_system( WORD sel )
+{
+    return is_gdt_sel( sel ) || ((sel >> 3) < first_ldt_entry);
+}
 
 /***********************************************************************
  *           dispatch_signal
@@ -818,8 +880,8 @@ static void wine_sigacthandler( int signal, siginfo_t *siginfo, void *sigcontext
     __asm__ __volatile__("mov %ss,%ax; mov %ax,%ds; mov %ax,%es");
 
     thread_data = (struct x86_thread_data *)get_current_teb()->SystemReserved2;
-    wine_set_fs( thread_data->fs );
-    wine_set_gs( thread_data->gs );
+    set_fs( thread_data->fs );
+    set_gs( thread_data->gs );
 
     libc_sigacthandler( signal, siginfo, sigcontext );
 }
@@ -867,24 +929,23 @@ static inline void *init_handler( const ucontext_t *sigcontext, WORD *fs, WORD *
 #ifdef FS_sig
     *fs = LOWORD(FS_sig(sigcontext));
 #else
-    *fs = wine_get_fs();
+    *fs = get_fs();
 #endif
 #ifdef GS_sig
     *gs = LOWORD(GS_sig(sigcontext));
 #else
-    *gs = wine_get_gs();
+    *gs = get_gs();
 #endif
 
 #ifndef __sun  /* see above for Solaris handling */
     {
         struct x86_thread_data *thread_data = (struct x86_thread_data *)teb->SystemReserved2;
-        wine_set_fs( thread_data->fs );
-        wine_set_gs( thread_data->gs );
+        set_fs( thread_data->fs );
+        set_gs( thread_data->gs );
     }
 #endif
 
-    if (!wine_ldt_is_system(CS_sig(sigcontext)) ||
-        !wine_ldt_is_system(SS_sig(sigcontext)))  /* 16-bit mode */
+    if (!ldt_is_system(CS_sig(sigcontext)) || !ldt_is_system(SS_sig(sigcontext)))  /* 16-bit mode */
     {
         /*
          * Win16 or DOS protected mode. Note that during switch
@@ -1116,12 +1177,12 @@ static inline void restore_context( const CONTEXT *context, ucontext_t *sigconte
 #ifdef GS_sig
     GS_sig(sigcontext)  = context->SegGs;
 #else
-    wine_set_gs( context->SegGs );
+    set_gs( context->SegGs );
 #endif
 #ifdef FS_sig
     FS_sig(sigcontext)  = context->SegFs;
 #else
-    wine_set_fs( context->SegFs );
+    set_fs( context->SegFs );
 #endif
 
     if (fpu) *fpu = context->FloatSave;
@@ -1253,10 +1314,10 @@ void DECLSPEC_HIDDEN set_cpu_context( const CONTEXT *context )
         else
         {
             CONTEXT newcontext = *context;
-            newcontext.SegDs = wine_get_ds();
-            newcontext.SegEs = wine_get_es();
-            newcontext.SegFs = wine_get_fs();
-            newcontext.SegGs = wine_get_gs();
+            newcontext.SegDs = get_ds();
+            newcontext.SegEs = get_ds();
+            newcontext.SegFs = get_fs();
+            newcontext.SegGs = get_gs();
             set_full_cpu_context( &newcontext );
         }
     }
@@ -1500,17 +1561,17 @@ NTSTATUS CDECL DECLSPEC_HIDDEN __regs_NtGetContextThread( DWORD edi, DWORD esi, 
             context->Ebp    = ebp;
             context->Esp    = (DWORD)&retaddr;
             context->Eip    = (DWORD)__syscall_NtGetContextThread + 18;
-            context->SegCs  = wine_get_cs();
-            context->SegSs  = wine_get_ss();
+            context->SegCs  = get_cs();
+            context->SegSs  = get_ds();
             context->EFlags = eflags;
             context->ContextFlags |= CONTEXT_CONTROL;
         }
         if (needed_flags & CONTEXT_SEGMENTS)
         {
-            context->SegDs = wine_get_ds();
-            context->SegEs = wine_get_es();
-            context->SegFs = wine_get_fs();
-            context->SegGs = wine_get_gs();
+            context->SegDs = get_ds();
+            context->SegEs = get_ds();
+            context->SegFs = get_fs();
+            context->SegGs = get_gs();
             context->ContextFlags |= CONTEXT_SEGMENTS;
         }
         if (needed_flags & CONTEXT_FLOATING_POINT) save_fpu( context );
@@ -1574,7 +1635,7 @@ static inline DWORD is_privileged_instr( CONTEXT *context )
     BYTE instr[16];
     unsigned int i, len, prefix_count = 0;
 
-    if (!wine_ldt_is_system( context->SegCs )) return 0;
+    if (!ldt_is_system( context->SegCs )) return 0;
     len = virtual_uninterrupted_read_memory( (BYTE *)context->Eip, instr, sizeof(instr) );
 
     for (i = 0; i < len; i++) switch (instr[i])
@@ -1641,7 +1702,7 @@ static inline BOOL check_invalid_gs( ucontext_t *sigcontext, CONTEXT *context )
     WORD system_gs = x86_thread_data()->gs;
 
     if (context->SegGs == system_gs) return FALSE;
-    if (!wine_ldt_is_system( context->SegCs )) return FALSE;
+    if (!ldt_is_system( context->SegCs )) return FALSE;
     /* only handle faults in system libraries */
     if (virtual_is_valid_code_address( instr, 1 )) return FALSE;
 
@@ -1924,12 +1985,12 @@ static void setup_raise_exception( ucontext_t *sigcontext, struct stack_layout *
     EIP_sig(sigcontext) = (DWORD)raise_generic_exception;
     /* clear single-step, direction, and align check flag */
     EFL_sig(sigcontext) &= ~(0x100|0x400|0x40000);
-    CS_sig(sigcontext)  = wine_get_cs();
-    DS_sig(sigcontext)  = wine_get_ds();
-    ES_sig(sigcontext)  = wine_get_es();
-    FS_sig(sigcontext)  = wine_get_fs();
-    GS_sig(sigcontext)  = wine_get_gs();
-    SS_sig(sigcontext)  = wine_get_ss();
+    CS_sig(sigcontext)  = get_cs();
+    DS_sig(sigcontext)  = get_ds();
+    ES_sig(sigcontext)  = get_ds();
+    FS_sig(sigcontext)  = get_fs();
+    GS_sig(sigcontext)  = get_gs();
+    SS_sig(sigcontext)  = get_ds();
     stack->ret_addr     = (void *)0xdeadbabe;  /* raise_generic_exception must not return */
     stack->rec_ptr      = &stack->rec;         /* arguments for raise_generic_exception */
     stack->context_ptr  = &stack->context;
@@ -2093,7 +2154,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
             stack->rec.NumberParameters = 2;
             stack->rec.ExceptionInformation[0] = 0;
             /* if error contains a LDT selector, use that as fault address */
-            if ((err & 7) == 4 && !wine_ldt_is_system( err | 7 ))
+            if ((err & 7) == 4 && !ldt_is_system( err | 7 ))
                 stack->rec.ExceptionInformation[1] = err & ~7;
             else
             {
@@ -2313,8 +2374,25 @@ int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 
 
 /***********************************************************************
- *           locking for LDT routines
+ *           LDT support
  */
+
+#define LDT_SIZE 8192
+
+#define LDT_FLAGS_DATA      0x13  /* Data segment */
+#define LDT_FLAGS_CODE      0x1b  /* Code segment */
+#define LDT_FLAGS_32BIT     0x40  /* Segment is 32-bit (code or stack) */
+#define LDT_FLAGS_ALLOCATED 0x80  /* Segment is allocated */
+
+struct ldt_copy
+{
+    void         *base[LDT_SIZE];
+    unsigned int  limit[LDT_SIZE];
+    unsigned char flags[LDT_SIZE];
+} __wine_ldt_copy;
+
+static WORD gdt_fs_sel;
+
 static RTL_CRITICAL_SECTION ldt_section;
 static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 {
@@ -2324,6 +2402,8 @@ static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static RTL_CRITICAL_SECTION ldt_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 static sigset_t ldt_sigset;
+
+static const LDT_ENTRY null_entry;
 
 static void ldt_lock(void)
 {
@@ -2345,6 +2425,232 @@ static void ldt_unlock(void)
     else RtlLeaveCriticalSection( &ldt_section );
 }
 
+static inline void *ldt_get_base( LDT_ENTRY ent )
+{
+    return (void *)(ent.BaseLow |
+                    (ULONG_PTR)ent.HighWord.Bits.BaseMid << 16 |
+                    (ULONG_PTR)ent.HighWord.Bits.BaseHi << 24);
+}
+
+static inline unsigned int ldt_get_limit( LDT_ENTRY ent )
+{
+    unsigned int limit = ent.LimitLow | (ent.HighWord.Bits.LimitHi << 16);
+    if (ent.HighWord.Bits.Granularity) limit = (limit << 12) | 0xfff;
+    return limit;
+}
+
+static LDT_ENTRY ldt_make_entry( void *base, unsigned int limit, unsigned char flags )
+{
+    LDT_ENTRY entry;
+
+    entry.BaseLow                   = (WORD)(ULONG_PTR)base;
+    entry.HighWord.Bits.BaseMid     = (BYTE)((ULONG_PTR)base >> 16);
+    entry.HighWord.Bits.BaseHi      = (BYTE)((ULONG_PTR)base >> 24);
+    if ((entry.HighWord.Bits.Granularity = (limit >= 0x100000))) limit >>= 12;
+    entry.LimitLow                  = (WORD)limit;
+    entry.HighWord.Bits.LimitHi     = limit >> 16;
+    entry.HighWord.Bits.Dpl         = 3;
+    entry.HighWord.Bits.Pres        = 1;
+    entry.HighWord.Bits.Type        = flags;
+    entry.HighWord.Bits.Sys         = 0;
+    entry.HighWord.Bits.Reserved_0  = 0;
+    entry.HighWord.Bits.Default_Big = (flags & LDT_FLAGS_32BIT) != 0;
+    return entry;
+}
+
+static void ldt_set_entry( WORD sel, LDT_ENTRY entry )
+{
+    int index = sel >> 3;
+
+#ifdef linux
+    struct modify_ldt_s ldt_info = { index };
+
+    ldt_info.base_addr       = ldt_get_base( entry );
+    ldt_info.limit           = entry.LimitLow | (entry.HighWord.Bits.LimitHi << 16);
+    ldt_info.seg_32bit       = entry.HighWord.Bits.Default_Big;
+    ldt_info.contents        = (entry.HighWord.Bits.Type >> 2) & 3;
+    ldt_info.read_exec_only  = !(entry.HighWord.Bits.Type & 2);
+    ldt_info.limit_in_pages  = entry.HighWord.Bits.Granularity;
+    ldt_info.seg_not_present = !entry.HighWord.Bits.Pres;
+    ldt_info.usable          = entry.HighWord.Bits.Sys;
+    if (modify_ldt( 0x11, &ldt_info, sizeof(ldt_info) ) < 0) perror( "modify_ldt" );
+#elif defined(__NetBSD__) || defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__OpenBSD__) || defined(__DragonFly__)
+    /* The kernel will only let us set LDTs with user priority level */
+    if (entry.HighWord.Bits.Pres && entry.HighWord.Bits.Dpl != 3) entry.HighWord.Bits.Dpl = 3;
+    if (i386_set_ldt(index, (union descriptor *)&entry, 1) < 0)
+    {
+        perror("i386_set_ldt");
+        fprintf( stderr, "Did you reconfigure the kernel with \"options USER_LDT\"?\n" );
+        exit(1);
+    }
+#elif defined(__svr4__) || defined(_SCO_DS)
+    struct ssd ldt_mod;
+
+    ldt_mod.sel  = sel;
+    ldt_mod.bo   = (unsigned long)ldt_get_base( entry );
+    ldt_mod.ls   = entry.LimitLow | (entry.HighWord.Bits.LimitHi << 16);
+    ldt_mod.acc1 = entry.HighWord.Bytes.Flags1;
+    ldt_mod.acc2 = entry.HighWord.Bytes.Flags2 >> 4;
+    if (sysi86(SI86DSCR, &ldt_mod) == -1) perror("sysi86");
+#elif defined(__APPLE__)
+    if (i386_set_ldt(index, (union ldt_entry *)&entry, 1) < 0) perror("i386_set_ldt");
+#elif defined(__GNU__)
+    if (i386_set_ldt(mach_thread_self(), sel, (descriptor_list_t)&entry, 1) != KERN_SUCCESS)
+        perror("i386_set_ldt");
+#else
+    fprintf( stderr, "No LDT support on this platform\n" );
+    exit(1);
+#endif
+
+    __wine_ldt_copy.base[index]  = ldt_get_base( entry );
+    __wine_ldt_copy.limit[index] = ldt_get_limit( entry );
+    __wine_ldt_copy.flags[index] = (entry.HighWord.Bits.Type |
+                                    (entry.HighWord.Bits.Default_Big ? LDT_FLAGS_32BIT : 0) |
+                                    LDT_FLAGS_ALLOCATED);
+}
+
+static void ldt_init(void)
+{
+#ifdef __linux__
+    /* the preloader may have allocated it already */
+    gdt_fs_sel = get_fs();
+    if (!gdt_fs_sel || !is_gdt_sel( gdt_fs_sel ))
+    {
+        struct modify_ldt_s ldt_info = { -1 };
+
+        ldt_info.seg_32bit = 1;
+        ldt_info.usable = 1;
+        if (set_thread_area( &ldt_info ) >= 0) gdt_fs_sel = (ldt_info.entry_number << 3) | 3;
+        else gdt_fs_sel = 0;
+    }
+#elif defined(__FreeBSD__) || defined (__FreeBSD_kernel__)
+    gdt_fs_sel = GSEL( GUFS_SEL, SEL_UPL );
+#endif
+}
+
+WORD ldt_alloc_fs( TEB *teb, int first_thread )
+{
+    LDT_ENTRY entry;
+    int idx;
+
+    if (gdt_fs_sel) return gdt_fs_sel;
+
+    entry = ldt_make_entry( teb, teb_size - 1, LDT_FLAGS_DATA | LDT_FLAGS_32BIT );
+
+    if (first_thread)  /* no locking for first thread */
+    {
+        /* leave some space if libc is using the LDT for %gs */
+        if (!is_gdt_sel( get_gs() )) first_ldt_entry = 512;
+        idx = first_ldt_entry;
+        ldt_set_entry( (idx << 3) | 7, entry );
+    }
+    else
+    {
+        ldt_lock();
+        for (idx = first_ldt_entry; idx < LDT_SIZE; idx++)
+        {
+            if (__wine_ldt_copy.flags[idx]) continue;
+            ldt_set_entry( (idx << 3) | 7, entry );
+            break;
+        }
+        ldt_unlock();
+        if (idx == LDT_SIZE) return 0;
+    }
+    return (idx << 3) | 7;
+}
+
+static void ldt_free_fs( WORD sel )
+{
+    if (sel == gdt_fs_sel) return;
+
+    ldt_lock();
+    __wine_ldt_copy.flags[sel >> 3] = 0;
+    ldt_unlock();
+}
+
+static void ldt_set_fs( WORD sel, TEB *teb )
+{
+    if (sel == gdt_fs_sel)
+    {
+#ifdef __linux__
+        struct modify_ldt_s ldt_info = { sel >> 3 };
+
+        ldt_info.base_addr = teb;
+        ldt_info.limit     = teb_size - 1;
+        ldt_info.seg_32bit = 1;
+        if (set_thread_area( &ldt_info ) < 0) perror( "set_thread_area" );
+#elif defined(__FreeBSD__) || defined (__FreeBSD_kernel__) || defined(__DragonFly__)
+        i386_set_fsbase( teb );
+#endif
+    }
+    set_fs( sel );
+}
+
+
+/**********************************************************************
+ *           get_thread_ldt_entry
+ */
+NTSTATUS get_thread_ldt_entry( HANDLE handle, void *data, ULONG len, ULONG *ret_len )
+{
+    THREAD_DESCRIPTOR_INFORMATION *info = data;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    if (len < sizeof(*info)) return STATUS_INFO_LENGTH_MISMATCH;
+    if (info->Selector >> 16) return STATUS_UNSUCCESSFUL;
+
+    if (is_gdt_sel( info->Selector ))
+    {
+        if (!(info->Selector & ~3))
+            info->Entry = null_entry;
+        else if ((info->Selector | 3) == get_cs())
+            info->Entry = ldt_make_entry( 0, ~0u, LDT_FLAGS_CODE | LDT_FLAGS_32BIT );
+        else if ((info->Selector | 3) == get_ds())
+            info->Entry = ldt_make_entry( 0, ~0u, LDT_FLAGS_DATA | LDT_FLAGS_32BIT );
+        else if ((info->Selector | 3) == get_fs())
+            info->Entry = ldt_make_entry( NtCurrentTeb(), 0xfff, LDT_FLAGS_DATA | LDT_FLAGS_32BIT );
+        else
+            return STATUS_UNSUCCESSFUL;
+    }
+    else
+    {
+        SERVER_START_REQ( get_selector_entry )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            req->entry = info->Selector >> 3;
+            status = wine_server_call( req );
+            if (!status)
+            {
+                if (reply->flags)
+                    info->Entry = ldt_make_entry( (void *)reply->base, reply->limit, reply->flags );
+                else
+                    status = STATUS_UNSUCCESSFUL;
+            }
+        }
+        SERVER_END_REQ;
+    }
+    if (status == STATUS_SUCCESS && ret_len)
+        /* yes, that's a bit strange, but it's the way it is */
+        *ret_len = sizeof(info->Entry);
+
+    return status;
+}
+
+
+/******************************************************************************
+ *           NtSetLdtEntries   (NTDLL.@)
+ *           ZwSetLdtEntries   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSetLdtEntries( ULONG sel1, LDT_ENTRY entry1, ULONG sel2, LDT_ENTRY entry2 )
+{
+    if (sel1 >> 16 || sel2 >> 16) return STATUS_INVALID_LDT_DESCRIPTOR;
+
+    ldt_lock();
+    if (sel1) ldt_set_entry( sel1, entry1 );
+    if (sel2) ldt_set_entry( sel2, entry2 );
+    ldt_unlock();
+   return STATUS_SUCCESS;
+}
+
 
 /**********************************************************************
  *		signal_alloc_thread
@@ -2356,6 +2662,7 @@ NTSTATUS signal_alloc_thread( TEB **teb )
     SIZE_T size;
     void *addr = NULL;
     NTSTATUS status;
+    int first_thread = !sigstack_alignment;
 
     if (!sigstack_alignment)
     {
@@ -2365,6 +2672,7 @@ NTSTATUS signal_alloc_thread( TEB **teb )
         while ((1u << sigstack_alignment) < min_size) sigstack_alignment++;
         signal_stack_mask = (1 << sigstack_alignment) - 1;
         signal_stack_size = (1 << sigstack_alignment) - teb_size;
+        ldt_init();
     }
 
     size = signal_stack_mask + 1;
@@ -2377,7 +2685,7 @@ NTSTATUS signal_alloc_thread( TEB **teb )
         (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
         (*teb)->Spare2 = __wine_fakedll_dispatcher;
         thread_data = (struct x86_thread_data *)(*teb)->SystemReserved2;
-        if (!(thread_data->fs = wine_ldt_alloc_fs()))
+        if (!(thread_data->fs = ldt_alloc_fs( *teb, first_thread )))
         {
             size = 0;
             NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_RELEASE );
@@ -2396,7 +2704,7 @@ void signal_free_thread( TEB *teb )
     SIZE_T size = 0;
     struct x86_thread_data *thread_data = (struct x86_thread_data *)teb->SystemReserved2;
 
-    wine_ldt_free_fs( thread_data->fs );
+    ldt_free_fs( thread_data->fs );
     NtFreeVirtualMemory( NtCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
 }
 
@@ -2408,7 +2716,6 @@ void signal_init_thread( TEB *teb )
 {
     const WORD fpu_cw = 0x27f;
     struct x86_thread_data *thread_data = (struct x86_thread_data *)teb->SystemReserved2;
-    LDT_ENTRY fs_entry;
     stack_t ss;
 
 #ifdef __APPLE__
@@ -2424,11 +2731,8 @@ void signal_init_thread( TEB *teb )
     ss.ss_flags = 0;
     if (sigaltstack(&ss, NULL) == -1) perror( "sigaltstack" );
 
-    wine_ldt_set_base( &fs_entry, teb );
-    wine_ldt_set_limit( &fs_entry, teb_size - 1 );
-    wine_ldt_set_flags( &fs_entry, WINE_LDT_FLAGS_DATA|WINE_LDT_FLAGS_32BIT );
-    wine_ldt_init_fs( thread_data->fs, &fs_entry );
-    thread_data->gs = wine_get_gs();
+    ldt_set_fs( thread_data->fs, teb );
+    thread_data->gs = get_gs();
 
 #ifdef __GNUC__
     __asm__ volatile ("fninit; fldcw %0" : : "m" (fpu_cw));
@@ -2475,8 +2779,6 @@ void signal_init_process(void)
     sig_act.sa_sigaction = trap_handler;
     if (sigaction( SIGTRAP, &sig_act, NULL ) == -1) goto error;
 #endif
-
-    wine_ldt_init_locking( ldt_lock, ldt_unlock );
     return;
 
  error:
@@ -2804,12 +3106,12 @@ void DECLSPEC_HIDDEN call_thread_func( LPTHREAD_START_ROUTINE entry, void *arg )
  */
 static void init_thread_context( CONTEXT *context, LPTHREAD_START_ROUTINE entry, void *arg, void *relay )
 {
-    context->SegCs  = wine_get_cs();
-    context->SegDs  = wine_get_ds();
-    context->SegEs  = wine_get_es();
-    context->SegFs  = wine_get_fs();
-    context->SegGs  = wine_get_gs();
-    context->SegSs  = wine_get_ss();
+    context->SegCs  = get_cs();
+    context->SegDs  = get_ds();
+    context->SegEs  = get_ds();
+    context->SegFs  = get_fs();
+    context->SegGs  = get_gs();
+    context->SegSs  = get_ds();
     context->EFlags = 0x202;
     context->Eax    = (DWORD)entry;
     context->Ebx    = (DWORD)arg;

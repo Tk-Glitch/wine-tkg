@@ -59,6 +59,7 @@ extern NTSTATUS context_to_server( context_t *to, const CONTEXT *from ) DECLSPEC
 extern NTSTATUS context_from_server( CONTEXT *to, const context_t *from ) DECLSPEC_HIDDEN;
 extern NTSTATUS set_thread_context( HANDLE handle, const context_t *context, BOOL *self ) DECLSPEC_HIDDEN;
 extern NTSTATUS get_thread_context( HANDLE handle, context_t *context, unsigned int flags, BOOL *self ) DECLSPEC_HIDDEN;
+extern NTSTATUS get_thread_ldt_entry( HANDLE handle, void *data, ULONG len, ULONG *ret_len ) DECLSPEC_HIDDEN;
 extern LONG WINAPI call_unhandled_exception_filter( PEXCEPTION_POINTERS eptr ) DECLSPEC_HIDDEN;
 
 #if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
@@ -92,6 +93,10 @@ extern void init_locale( HMODULE module ) DECLSPEC_HIDDEN;
 extern void init_user_process_params( SIZE_T data_size ) DECLSPEC_HIDDEN;
 extern char **build_envp( const WCHAR *envW ) DECLSPEC_HIDDEN;
 extern NTSTATUS restart_process( RTL_USER_PROCESS_PARAMETERS *params, NTSTATUS status ) DECLSPEC_HIDDEN;
+
+extern int __wine_main_argc;
+extern char **__wine_main_argv;
+extern WCHAR **__wine_main_wargv;
 
 /* token */
 extern HANDLE CDECL __wine_create_default_token(BOOL admin);
@@ -359,11 +364,24 @@ LPWSTR __cdecl NTDLL_wcsstr( LPCWSTR str, LPCWSTR sub );
 LPWSTR __cdecl NTDLL_wcstok( LPWSTR str, LPCWSTR delim );
 LONG   __cdecl NTDLL_wcstol( LPCWSTR s, LPWSTR *end, INT base );
 ULONG  __cdecl NTDLL_wcstoul( LPCWSTR s, LPWSTR *end, INT base );
+int    WINAPIV NTDLL_swprintf( WCHAR *str, const WCHAR *format, ... );
 
 #define wcsicmp(s1,s2) NTDLL__wcsicmp(s1,s2)
 #define wcsnicmp(s1,s2,n) NTDLL__wcsnicmp(s1,s2,n)
+#define towupper(c) NTDLL_towupper(c)
 #define wcslwr(s) NTDLL__wcslwr(s)
 #define wcsupr(s) NTDLL__wcsupr(s)
+#define wcscpy(d,s) NTDLL_wcscpy(d,s)
+#define wcscat(d,s) NTDLL_wcscat(d,s)
+#define wcschr(s,c) NTDLL_wcschr(s,c)
+#define wcspbrk(s,a) NTDLL_wcspbrk(s,a)
+#define wcsrchr(s,c) NTDLL_wcsrchr(s,c)
+#define wcstoul(s,e,b) NTDLL_wcstoul(s,e,b)
+#define wcslen(s) NTDLL_wcslen(s)
+#define wcscspn(s,r) NTDLL_wcscspn(s,r)
+#define wcsspn(s,a) NTDLL_wcsspn(s,a)
+#define wcscmp(s1,s2) NTDLL_wcscmp(s1,s2)
+#define wcsncmp(s1,s2,n) NTDLL_wcsncmp(s1,s2,n)
 
 /* convert from straight ASCII to Unicode without depending on the current codepage */
 static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )

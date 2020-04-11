@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Mon 30 Mar 2020 03:48:44 PM CEST :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sat 11 Apr 2020 01:07:25 PM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.5.r0.g123c0543e0
-Using wine-staging patchset (version 5.5.r2.g7fe7d87f)
+Wine (plain) version: 5.6.r0.g4cdb7ec829
+Using wine-staging patchset (version 5.6.1.r0.g4c160ec8)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
@@ -15,6 +15,7 @@ use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
 use_clock_monotonic-2.patch -- ( Applied clock_monotonic addon patch for 13e11d3 )
 plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
 FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
+staging-44d1a45-localreverts.patch -- ( Applied local reverts for staging 44d1a45 fshack )
 childwindow.patch -- ( Applied child window for vk patch )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )

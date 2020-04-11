@@ -21,6 +21,7 @@
 %{
 #include "wine/debug.h"
 
+#include <limits.h>
 #include <stdio.h>
 
 #include "d3dcompiler_private.h"
@@ -912,6 +913,22 @@ static const struct hlsl_ir_function_decl *get_overloaded_func(struct wine_rb_tr
         }
         return WINE_RB_ENTRY_VALUE(entry, struct hlsl_ir_function_decl, entry);
     }
+    return NULL;
+}
+
+static struct hlsl_ir_function_decl *get_func_entry(const char *name)
+{
+    struct hlsl_ir_function_decl *decl;
+    struct hlsl_ir_function *func;
+    struct wine_rb_entry *entry;
+
+    if ((entry = wine_rb_get(&hlsl_ctx.functions, name)))
+    {
+        func = WINE_RB_ENTRY_VALUE(entry, struct hlsl_ir_function, entry);
+        WINE_RB_FOR_EACH_ENTRY(decl, &func->overloads, struct hlsl_ir_function_decl, entry)
+            return decl;
+    }
+
     return NULL;
 }
 
@@ -2545,9 +2562,160 @@ static void dump_function(struct wine_rb_entry *entry, void *context)
     wine_rb_for_each_entry(&func->overloads, dump_function_decl, NULL);
 }
 
+/* Allocate a unique, ordered index to each instruction, which will be used for
+ * computing liveness ranges. */
+static unsigned int index_instructions(struct list *instrs, unsigned int index)
+{
+    struct hlsl_ir_node *instr;
+
+    LIST_FOR_EACH_ENTRY(instr, instrs, struct hlsl_ir_node, entry)
+    {
+        instr->index = index++;
+
+        if (instr->type == HLSL_IR_IF)
+        {
+            struct hlsl_ir_if *iff = if_from_node(instr);
+            index = index_instructions(iff->then_instrs, index);
+            if (iff->else_instrs)
+                index = index_instructions(iff->else_instrs, index);
+        }
+        else if (instr->type == HLSL_IR_LOOP)
+        {
+            index = index_instructions(loop_from_node(instr)->body, index);
+            loop_from_node(instr)->next_index = index;
+        }
+    }
+
+    return index;
+}
+
+/* Walk the chain of derefs and retrieve the actual variable we care about. */
+static struct hlsl_ir_var *hlsl_var_from_deref(const struct hlsl_deref *deref)
+{
+    switch (deref->type)
+    {
+        case HLSL_IR_DEREF_VAR:
+            return deref->v.var;
+        case HLSL_IR_DEREF_ARRAY:
+            return hlsl_var_from_deref(&deref_from_node(deref->v.array.array)->src);
+        case HLSL_IR_DEREF_RECORD:
+            return hlsl_var_from_deref(&deref_from_node(deref->v.record.record)->src);
+    }
+    assert(0);
+    return NULL;
+}
+
+/* Compute the earliest and latest liveness for each variable. In the case that
+ * a variable is accessed inside of a loop, we promote its liveness to extend
+ * to at least the range of the entire loop. Note that we don't need to do this
+ * for anonymous nodes, since there's currently no way to use a node which was
+ * calculated in an earlier iteration of the loop. */
+static void compute_liveness_recurse(struct list *instrs, unsigned int loop_first, unsigned int loop_last)
+{
+    struct hlsl_ir_node *instr;
+    struct hlsl_ir_var *var;
+
+    LIST_FOR_EACH_ENTRY(instr, instrs, struct hlsl_ir_node, entry)
+    {
+        switch (instr->type)
+        {
+        case HLSL_IR_ASSIGNMENT:
+        {
+            struct hlsl_ir_assignment *assignment = assignment_from_node(instr);
+            var = hlsl_var_from_deref(&assignment->lhs);
+            if (!var->first_write)
+                var->first_write = loop_first ? min(instr->index, loop_first) : instr->index;
+            assignment->rhs->last_read = instr->index;
+            break;
+        }
+        case HLSL_IR_CONSTANT:
+            break;
+        case HLSL_IR_CONSTRUCTOR:
+        {
+            struct hlsl_ir_constructor *constructor = constructor_from_node(instr);
+            unsigned int i;
+            for (i = 0; i < constructor->args_count; ++i)
+                constructor->args[i]->last_read = instr->index;
+            break;
+        }
+        case HLSL_IR_DEREF:
+        {
+            struct hlsl_ir_deref *deref = deref_from_node(instr);
+            var = hlsl_var_from_deref(&deref->src);
+            var->last_read = loop_last ? max(instr->index, loop_last) : instr->index;
+            if (deref->src.type == HLSL_IR_DEREF_ARRAY)
+                deref->src.v.array.index->last_read = instr->index;
+            break;
+        }
+        case HLSL_IR_EXPR:
+        {
+            struct hlsl_ir_expr *expr = expr_from_node(instr);
+            expr->operands[0]->last_read = instr->index;
+            if (expr->operands[1])
+                expr->operands[1]->last_read = instr->index;
+            if (expr->operands[2])
+                expr->operands[2]->last_read = instr->index;
+            break;
+        }
+        case HLSL_IR_IF:
+        {
+            struct hlsl_ir_if *iff = if_from_node(instr);
+            compute_liveness_recurse(iff->then_instrs, loop_first, loop_last);
+            if (iff->else_instrs)
+                compute_liveness_recurse(iff->else_instrs, loop_first, loop_last);
+            iff->condition->last_read = instr->index;
+            break;
+        }
+        case HLSL_IR_JUMP:
+        {
+            struct hlsl_ir_jump *jump = jump_from_node(instr);
+            if (jump->type == HLSL_IR_JUMP_RETURN && jump->return_value)
+                jump->return_value->last_read = instr->index;
+            break;
+        }
+        case HLSL_IR_LOOP:
+        {
+            struct hlsl_ir_loop *loop = loop_from_node(instr);
+            compute_liveness_recurse(loop->body, loop_first ? loop_first : instr->index,
+                    loop_last ? loop_last : loop->next_index);
+            break;
+        }
+        case HLSL_IR_SWIZZLE:
+        {
+            struct hlsl_ir_swizzle *swizzle = swizzle_from_node(instr);
+            swizzle->val->last_read = instr->index;
+            break;
+        }
+        default:
+            break;
+        }
+    }
+}
+
+static void compute_liveness(struct hlsl_ir_function_decl *entry_func)
+{
+    struct hlsl_ir_var *var;
+
+    LIST_FOR_EACH_ENTRY(var, &hlsl_ctx.globals->vars, struct hlsl_ir_var, scope_entry)
+    {
+        var->first_write = 1;
+    }
+
+    LIST_FOR_EACH_ENTRY(var, entry_func->parameters, struct hlsl_ir_var, param_entry)
+    {
+        if (var->modifiers & HLSL_STORAGE_IN)
+            var->first_write = 1;
+        if (var->modifiers & HLSL_STORAGE_OUT)
+            var->last_read = UINT_MAX;
+    }
+
+    compute_liveness_recurse(entry_func->body, 0, 0);
+}
+
 struct bwriter_shader *parse_hlsl(enum shader_type type, DWORD major, DWORD minor,
         const char *entrypoint, char **messages)
 {
+    struct hlsl_ir_function_decl *entry_func;
     struct hlsl_scope *scope, *next_scope;
     struct hlsl_type *hlsl_type, *next_type;
     struct hlsl_ir_var *var, *next_var;
@@ -2573,12 +2741,6 @@ struct bwriter_shader *parse_hlsl(enum shader_type type, DWORD major, DWORD mino
 
     hlsl_parse();
 
-    if (TRACE_ON(hlsl_parser))
-    {
-        TRACE("IR dump.\n");
-        wine_rb_for_each_entry(&hlsl_ctx.functions, dump_function, NULL);
-    }
-
     TRACE("Compilation status = %d\n", hlsl_ctx.status);
     if (messages)
     {
@@ -2597,6 +2759,27 @@ struct bwriter_shader *parse_hlsl(enum shader_type type, DWORD major, DWORD mino
         d3dcompiler_free((void *)hlsl_ctx.source_files[i]);
     d3dcompiler_free(hlsl_ctx.source_files);
 
+    if (hlsl_ctx.status == PARSE_ERR)
+        goto out;
+
+    if (!(entry_func = get_func_entry(entrypoint)))
+    {
+        hlsl_message("error: entry point %s is not defined\n", debugstr_a(entrypoint));
+        goto out;
+    }
+
+    /* Index 0 means unused; index 1 means function entry, so start at 2. */
+    index_instructions(entry_func->body, 2);
+
+    if (TRACE_ON(hlsl_parser))
+    {
+        TRACE("IR dump.\n");
+        wine_rb_for_each_entry(&hlsl_ctx.functions, dump_function, NULL);
+    }
+
+    compute_liveness(entry_func);
+
+out:
     TRACE("Freeing functions IR.\n");
     wine_rb_destroy(&hlsl_ctx.functions, free_function_rb, NULL);
 

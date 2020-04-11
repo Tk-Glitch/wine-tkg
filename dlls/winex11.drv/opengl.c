@@ -40,7 +40,6 @@
 #include "x11drv.h"
 #include "xcomposite.h"
 #include "winternl.h"
-#include "wine/library.h"
 #include "wine/debug.h"
 
 #ifndef ARRAY_SIZE
@@ -481,12 +480,14 @@ static BOOL X11DRV_WineGL_InitOpenglInfo(void)
     vis = pglXChooseVisual(gdi_display, screen, attribList);
     if (vis) {
 #ifdef __i386__
-        WORD old_fs = wine_get_fs();
+        WORD old_fs, new_fs;
+        __asm__( "mov %%fs,%0" : "=r" (old_fs) );
         /* Create a GLX Context. Without one we can't query GL information */
         ctx = pglXCreateContext(gdi_display, vis, None, GL_TRUE);
-        if (wine_get_fs() != old_fs)
+        __asm__( "mov %%fs,%0" : "=r" (new_fs) );
+        __asm__( "mov %0,%%fs" :: "r" (old_fs) );
+        if (old_fs != new_fs)
         {
-            wine_set_fs( old_fs );
             ERR( "%%fs register corrupted, probably broken ATI driver, disabling OpenGL.\n" );
             ERR( "You need to set the \"UseFastTls\" option to \"2\" in your X config file.\n" );
             goto done;
@@ -586,23 +587,22 @@ static void *opengl_handle;
 
 static BOOL WINAPI init_opengl( INIT_ONCE *once, void *param, void **context )
 {
-    char buffer[200];
     int error_base, event_base;
     unsigned int i;
 
     /* No need to load any other libraries as according to the ABI, libGL should be self-sufficient
        and include all dependencies */
-    opengl_handle = wine_dlopen(SONAME_LIBGL, RTLD_NOW|RTLD_GLOBAL, buffer, sizeof(buffer));
+    opengl_handle = dlopen( SONAME_LIBGL, RTLD_NOW | RTLD_GLOBAL );
     if (opengl_handle == NULL)
     {
-        ERR( "Failed to load libGL: %s\n", buffer );
+        ERR( "Failed to load libGL: %s\n", dlerror() );
         ERR( "OpenGL support is disabled.\n");
         return TRUE;
     }
 
     for (i = 0; i < ARRAY_SIZE( opengl_func_names ); i++)
     {
-        if (!(((void **)&opengl_funcs.gl)[i] = wine_dlsym( opengl_handle, opengl_func_names[i], NULL, 0 )))
+        if (!(((void **)&opengl_funcs.gl)[i] = dlsym( opengl_handle, opengl_func_names[i] )))
         {
             ERR( "%s not found in libGL, disabling OpenGL.\n", opengl_func_names[i] );
             goto failed;
@@ -619,7 +619,7 @@ static BOOL WINAPI init_opengl( INIT_ONCE *once, void *param, void **context )
     REDIRECT( glReadBuffer );
 #undef REDIRECT
 
-    pglXGetProcAddressARB = wine_dlsym(opengl_handle, "glXGetProcAddressARB", NULL, 0);
+    pglXGetProcAddressARB = dlsym(opengl_handle, "glXGetProcAddressARB");
     if (pglXGetProcAddressARB == NULL) {
         ERR("Could not find glXGetProcAddressARB in libGL, disabling OpenGL.\n");
         goto failed;
@@ -797,7 +797,7 @@ static BOOL WINAPI init_opengl( INIT_ONCE *once, void *param, void **context )
     return TRUE;
 
 failed:
-    wine_dlclose(opengl_handle, NULL, 0);
+    dlclose(opengl_handle);
     opengl_handle = NULL;
     return TRUE;
 }

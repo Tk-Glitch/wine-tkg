@@ -24,6 +24,7 @@
 
 #include <locale.h>
 #include <langinfo.h>
+#include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -34,9 +35,11 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
+#include "windef.h"
+#include "winbase.h"
+#include "winnls.h"
 #include "ntdll_misc.h"
 #include "wine/library.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nls);
@@ -590,16 +593,16 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
         break;
     case NLS_SECTION_CASEMAP:
         if (id) return STATUS_UNSUCCESSFUL;
-        sprintfW( buffer, keyfmtW, langW );
-        sprintfW( value, langfmtW, LANGIDFROMLCID(system_lcid) );
+        NTDLL_swprintf( buffer, keyfmtW, langW );
+        NTDLL_swprintf( value, langfmtW, LANGIDFROMLCID(system_lcid) );
         break;
     case NLS_SECTION_CODEPAGE:
-        sprintfW( buffer, keyfmtW, cpW );
-        sprintfW( value, cpfmtW, id );
+        NTDLL_swprintf( buffer, keyfmtW, cpW );
+        NTDLL_swprintf( value, cpfmtW, id );
         break;
     case NLS_SECTION_NORMALIZE:
-        sprintfW( buffer, keyfmtW, normW );
-        sprintfW( value, normfmtW, id );
+        NTDLL_swprintf( buffer, keyfmtW, normW );
+        NTDLL_swprintf( value, normfmtW, id );
         break;
     default:
         return STATUS_INVALID_PARAMETER_1;
@@ -635,7 +638,7 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
             name = intlW;
             break;
         case NLS_SECTION_CODEPAGE:
-            sprintfW( buffer, cpdefaultW, id );
+            NTDLL_swprintf( buffer, cpdefaultW, id );
             name = buffer;
             break;
         case NLS_SECTION_NORMALIZE:
@@ -654,10 +657,10 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
 
     /* try to open file in system dir */
 
-    valueW.MaximumLength = (strlenW(name) + strlenW(dir) + 5) * sizeof(WCHAR);
+    valueW.MaximumLength = (wcslen(name) + wcslen(dir) + 5) * sizeof(WCHAR);
     if (!(valueW.Buffer = RtlAllocateHeap( GetProcessHeap(), 0, valueW.MaximumLength )))
         return STATUS_NO_MEMORY;
-    valueW.Length = sprintfW( valueW.Buffer, pathfmtW, dir, name ) * sizeof(WCHAR);
+    valueW.Length = NTDLL_swprintf( valueW.Buffer, pathfmtW, dir, name ) * sizeof(WCHAR);
     InitializeObjectAttributes( &attr, &valueW, 0, 0, NULL );
     status = __syscall_NtOpenFile( file, GENERIC_READ, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
     if (!status) TRACE( "found %s\n", debugstr_w( valueW.Buffer ));
@@ -674,14 +677,14 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
         if (RtlQueryEnvironmentVariable_U( NULL, &nameW, &valueW ) != STATUS_BUFFER_TOO_SMALL)
             return status;
     }
-    valueW.MaximumLength = valueW.Length + sizeof(dataprefixW) + strlenW(name) * sizeof(WCHAR);
+    valueW.MaximumLength = valueW.Length + sizeof(dataprefixW) + wcslen(name) * sizeof(WCHAR);
     if (!(valueW.Buffer = RtlAllocateHeap( GetProcessHeap(), 0, valueW.MaximumLength )))
         return STATUS_NO_MEMORY;
     if (!RtlQueryEnvironmentVariable_U( NULL, &nameW, &valueW ))
     {
-        strcatW( valueW.Buffer, dataprefixW );
-        strcatW( valueW.Buffer, name );
-        valueW.Length = strlenW(valueW.Buffer) * sizeof(WCHAR);
+        wcscat( valueW.Buffer, dataprefixW );
+        wcscat( valueW.Buffer, name );
+        valueW.Length = wcslen(valueW.Buffer) * sizeof(WCHAR);
         InitializeObjectAttributes( &attr, &valueW, 0, 0, NULL );
         status = __syscall_NtOpenFile( file, GENERIC_READ, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
         if (!status) TRACE( "found %s\n", debugstr_w( valueW.Buffer ));
@@ -845,11 +848,11 @@ static LCID unix_locale_to_lcid( const char *unix_name )
     if (len == ARRAY_SIZE(buffer)) return 0;
     buffer[len] = 0;
 
-    if (!(p = strpbrkW( buffer, sepW )))
+    if (!(p = wcspbrk( buffer, sepW )))
     {
-        if (!strcmpW( buffer, posixW ) || !strcmpW( buffer, cW ))
+        if (!wcscmp( buffer, posixW ) || !wcscmp( buffer, cW ))
             return MAKELCID( MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), SORT_DEFAULT );
-        strcpyW( win_name, buffer );
+        wcscpy( win_name, buffer );
     }
     else
     {
@@ -857,13 +860,13 @@ static LCID unix_locale_to_lcid( const char *unix_name )
         {
             *p++ = 0;
             country = p;
-            p = strpbrkW( p, sepW + 1 );
+            p = wcspbrk( p, sepW + 1 );
         }
         if (p && *p == '.')
         {
             *p++ = 0;
             /* charset, ignore */
-            p = strchrW( p, '@' );
+            p = wcschr( p, '@' );
         }
         if (p)
         {
@@ -874,18 +877,18 @@ static LCID unix_locale_to_lcid( const char *unix_name )
 
     /* rebuild a Windows name */
 
-    strcpyW( win_name, buffer );
+    wcscpy( win_name, buffer );
     if (modifier)
     {
-        if (!strcmpW( modifier, latinW )) strcatW( win_name, latnW );
-        else if (!strcmpW( modifier, euroW )) {} /* ignore */
+        if (!wcscmp( modifier, latinW )) wcscat( win_name, latnW );
+        else if (!wcscmp( modifier, euroW )) {} /* ignore */
         else return 0;
     }
     if (country)
     {
-        p = win_name + strlenW(win_name);
+        p = win_name + wcslen(win_name);
         *p++ = '-';
-        strcpyW( p, country );
+        wcscpy( p, country );
     }
 
     if (!RtlLocaleNameToLcid( win_name, &lcid, 0 )) return lcid;
@@ -1496,7 +1499,9 @@ NTSTATUS WINAPI RtlUnicodeToOemN( char *dst, DWORD dstlen, DWORD *reslen,
  */
 WCHAR WINAPI RtlDowncaseUnicodeChar( WCHAR wch )
 {
-    return casemap( nls_info.LowerCaseTable, wch );
+    if (nls_info.LowerCaseTable) return casemap( nls_info.LowerCaseTable, wch );
+    if (wch >= 'A' && wch <= 'Z') wch += 'a' - 'A';
+    return wch;
 }
 
 
@@ -1638,7 +1643,8 @@ WCHAR __cdecl NTDLL_towlower( WCHAR ch )
  */
 WCHAR __cdecl NTDLL_towupper( WCHAR ch )
 {
-    return casemap( nls_info.UpperCaseTable, ch );
+    if (nls_info.UpperCaseTable) return casemap( nls_info.UpperCaseTable, ch );
+    return casemap_ascii( ch );
 }
 
 
@@ -1668,23 +1674,23 @@ NTSTATUS WINAPI RtlLocaleNameToLcid( const WCHAR *name, LCID *lcid, ULONG flags 
         *lcid = LANG_INVARIANT;
         goto found;
     }
-    if (strlenW( name ) >= LOCALE_NAME_MAX_LENGTH) return STATUS_INVALID_PARAMETER_1;
-    strcpyW( lang, name );
+    if (wcslen( name ) >= LOCALE_NAME_MAX_LENGTH) return STATUS_INVALID_PARAMETER_1;
+    wcscpy( lang, name );
 
-    if ((p = strpbrkW( lang, sepW )) && *p == '-')
+    if ((p = wcspbrk( lang, sepW )) && *p == '-')
     {
         *p++ = 0;
         country = p;
-        if ((p = strpbrkW( p, sepW )) && *p == '-')
+        if ((p = wcspbrk( p, sepW )) && *p == '-')
         {
             *p++ = 0;
             script = country;
             country = p;
-            p = strpbrkW( p, sepW );
+            p = wcspbrk( p, sepW );
         }
         if (p) *p = 0;  /* FIXME: modifier is ignored */
         /* second value can be script or country, check length to resolve the ambiguity */
-        if (!script && strlenW( country ) == 4)
+        if (!script && wcslen( country ) == 4)
         {
             script = country;
             country = NULL;
@@ -1714,13 +1720,13 @@ NTSTATUS WINAPI RtlLocaleNameToLcid( const WCHAR *name, LCID *lcid, ULONG flags 
 
         if (script)
         {
-            unsigned int len = strlenW( script );
+            unsigned int len = wcslen( script );
             if (load_string( LOCALE_SSCRIPTS, id, buf, ARRAY_SIZE(buf) )) continue;
             p = buf;
             while (*p)
             {
                 if (!wcsnicmp( p, script, len ) && (!p[len] || p[len] == ';')) break;
-                if (!(p = strchrW( p, ';'))) break;
+                if (!(p = wcschr( p, ';'))) break;
                 p++;
             }
             if (!p || !*p) continue;
@@ -1978,7 +1984,7 @@ NTSTATUS WINAPI RtlIsNormalizedString( ULONG form, const WCHAR *str, INT len, BO
 
     if ((status = load_norm_table( form, &info ))) return status;
 
-    if (len == -1) len = strlenW( str );
+    if (len == -1) len = wcslen( str );
 
     for (i = 0; i < len && result; i += r)
     {
@@ -2029,7 +2035,7 @@ NTSTATUS WINAPI RtlIsNormalizedString( ULONG form, const WCHAR *str, INT len, BO
         WCHAR *buffer = RtlAllocateHeap( GetProcessHeap(), 0, dstlen * sizeof(WCHAR) );
         if (!buffer) return STATUS_NO_MEMORY;
         status = RtlNormalizeString( form, str, len, buffer, &dstlen );
-        result = !status && (dstlen == len) && !strncmpW( buffer, str, len );
+        result = !status && (dstlen == len) && !wcsncmp( buffer, str, len );
         RtlFreeHeap( GetProcessHeap(), 0, buffer );
     }
     *res = result;
@@ -2051,7 +2057,7 @@ NTSTATUS WINAPI RtlNormalizeString( ULONG form, const WCHAR *src, INT src_len, W
 
     if ((status = load_norm_table( form, &info ))) return status;
 
-    if (src_len == -1) src_len = strlenW(src) + 1;
+    if (src_len == -1) src_len = wcslen(src) + 1;
 
     if (!*dst_len)
     {
@@ -2255,7 +2261,7 @@ NTSTATUS WINAPI RtlIdnToNameprepUnicode( DWORD flags, const WCHAR *src, INT srcl
 
     if ((status = load_norm_table( 13, &info ))) return status;
 
-    if (srclen == -1) srclen = strlenW(src) + 1;
+    if (srclen == -1) srclen = wcslen(src) + 1;
 
     for (i = 0; i < srclen; i++) if (src[i] < 0x20 || src[i] >= 0x7f) break;
 
@@ -2322,7 +2328,7 @@ NTSTATUS WINAPI RtlIdnToUnicode( DWORD flags, const WCHAR *src, INT srclen, WCHA
     WCHAR ch;
 
     if (!src || srclen < -1) return STATUS_INVALID_PARAMETER;
-    if (srclen == -1) srclen = strlenW( src ) + 1;
+    if (srclen == -1) srclen = wcslen( src ) + 1;
 
     TRACE( "%x %s %p %d\n", flags, debugstr_wn(src, srclen), dst, *dstlen );
 

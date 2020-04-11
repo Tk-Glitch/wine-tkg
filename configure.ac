@@ -114,7 +114,6 @@ AC_ARG_WITH(xshm,      AS_HELP_STRING([--without-xshm],[do not use XShm (shared 
 AC_ARG_WITH(xslt,      AS_HELP_STRING([--without-xslt],[do not use XSLT]))
 AC_ARG_WITH(xxf86vm,   AS_HELP_STRING([--without-xxf86vm],[do not use XFree video mode extension]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_xf86vmode_h=no; ac_cv_header_X11_extensions_xf86vmproto_h=no; fi])
-AC_ARG_WITH(zlib,      AS_HELP_STRING([--without-zlib],[do not use Zlib (data compression)]))
 AC_ARG_WITH(va,        AS_HELP_STRING([--without-va],[do not use VA (GPU video acceleration)]),
             [if test "x$withval" = "xno"; then ac_cv_header_va_va_x11_h=no; fi])
 
@@ -514,11 +513,9 @@ AC_CHECK_HEADERS(\
 	sys/attr.h \
 	sys/auxv.h \
 	sys/cdio.h \
-	sys/elf32.h \
 	sys/epoll.h \
 	sys/event.h \
 	sys/eventfd.h \
-	sys/exec_elf.h \
 	sys/filio.h \
 	sys/ioctl.h \
 	sys/ipc.h \
@@ -1584,6 +1581,20 @@ then
         AC_DEFINE(HAVE_RESOLV, 1)
         AC_SUBST(RESOLV_LIBS,$ac_cv_have_resolv) ;;
     esac
+
+    if test "x$ac_cv_have_resolv" != "xnot found"
+    then
+        AC_CACHE_CHECK([for res_getservers], ac_cv_have_res_getservers,
+                       [ac_save_LIBS="$LIBS"
+                        LIBS="$RESOLV_LIBS $LIBS"
+                        AC_LINK_IFELSE([AC_LANG_PROGRAM(
+        [[#include <resolv.h>]],[[res_getservers(NULL, NULL, 0);]])],[ac_cv_have_res_getservers=yes],[ac_cv_have_res_getservers=no])
+	                 LIBS="$ac_save_LIBS"])
+        if test "$ac_cv_have_res_getservers" = "yes"
+        then
+          AC_DEFINE(HAVE_RES_GETSERVERS, 1, [Define to 1 if you have the `res_getservers' function.])
+        fi
+    fi
 fi
 
 dnl **** Check for LittleCMS ***
@@ -1645,18 +1656,6 @@ dnl **** Check for pthread functions ****
 WINE_CHECK_LIB_FUNCS(\
         pthread_getthreadid_np,
         [$PTHREAD_LIBS])
-
-dnl **** Check for zlib ****
-if test "x$with_zlib" != "xno"
-then
-    WINE_PACKAGE_FLAGS(Z,[libz],[-lz],,,
-        [AC_CHECK_HEADERS(zlib.h,
-            [AC_CHECK_LIB(z,inflate,
-                          [AC_DEFINE(HAVE_ZLIB,1,[Define to 1 if you have the `z' library (-lz).])],
-                          [Z_LIBS=""],[$Z_LIBS])],
-            [Z_LIBS=""])])
-fi
-WINE_NOTICE_WITH(zlib,[test "x$Z_LIBS" = "x"],[libz ${notice_platform}development files not found, data compression won't be supported.])
 
 dnl **** Check for gettextpo ****
 if test "x$enable_tools" != xno -a "x$with_gettextpo" = xyes
@@ -2088,14 +2087,15 @@ then
   EXTRACFLAGS="-Wall -pipe"
 
   dnl Check for some compiler flags
-  WINE_TRY_CFLAGS([-fcf-protection=none])
-  WINE_TRY_CFLAGS([-fno-stack-protector])
-  WINE_TRY_CFLAGS([-fno-strict-aliasing])
-  WINE_TRY_CFLAGS([-fexcess-precision=standard],[AC_SUBST(EXCESS_PRECISION_CFLAGS,"-fexcess-precision=standard")])
   dnl clang needs to be told to fail on unknown options
   saved_CFLAGS=$CFLAGS
   WINE_TRY_CFLAGS([-Werror=unknown-warning-option],[CFLAGS="$CFLAGS -Werror=unknown-warning-option"])
   WINE_TRY_CFLAGS([-Werror=unused-command-line-argument],[CFLAGS="$CFLAGS -Werror=unused-command-line-argument"])
+  WINE_TRY_CFLAGS([-Werror=ignored-optimization-argument],[CFLAGS="$CFLAGS -Werror=ignored-optimization-argument"])
+  WINE_TRY_CFLAGS([-fcf-protection=none])
+  WINE_TRY_CFLAGS([-fno-stack-protector])
+  WINE_TRY_CFLAGS([-fno-strict-aliasing])
+  WINE_TRY_CFLAGS([-fexcess-precision=standard],[AC_SUBST(EXCESS_PRECISION_CFLAGS,"-fexcess-precision=standard")])
   WINE_TRY_CFLAGS([-Wdeclaration-after-statement])
   WINE_TRY_CFLAGS([-Wempty-body])
   WINE_TRY_CFLAGS([-Wignored-qualifiers])
@@ -2217,7 +2217,6 @@ AC_CHECK_FUNCS(\
         __res_get_state \
         __res_getservers \
 	_spawnvp \
-	dlopen \
 	epoll_create \
 	ffs \
 	finitef \
@@ -2268,10 +2267,7 @@ AC_CHECK_FUNCS(\
 CFLAGS="$ac_save_CFLAGS"
 
 dnl Check for -ldl
-if test "$ac_cv_func_dlopen" = no
-then
-    AC_CHECK_LIB(dl,dlopen,[AC_DEFINE(HAVE_DLOPEN,1) AC_SUBST(DL_LIBS,"-ldl")])
-fi
+AC_SEARCH_LIBS(dlopen, dl)
 WINE_CHECK_LIB_FUNCS(dladdr,[$DL_LIBS])
 
 dnl Check for -lpoll for Mac OS X/Darwin
@@ -2407,14 +2403,6 @@ AC_CHECK_TYPES([struct xinpgen],,,
 #endif
 #ifdef HAVE_NETINET_IN_PCB_H
 #include <netinet/in_pcb.h>
-#endif])
-
-AC_CHECK_TYPES([struct r_debug, struct link_map],,,
-[#ifdef HAVE_LINK_H
-#include <link.h>
-#endif
-#ifdef HAVE_SYS_LINK_H
-#include <sys/link.h>
 #endif])
 
 AC_CHECK_MEMBERS([struct ff_effect.direction],,,
@@ -3332,6 +3320,7 @@ WINE_CONFIG_MAKEFILE(dlls/dsound/tests)
 WINE_CONFIG_MAKEFILE(dlls/dsquery)
 WINE_CONFIG_MAKEFILE(dlls/dssenh)
 WINE_CONFIG_MAKEFILE(dlls/dssenh/tests)
+WINE_CONFIG_MAKEFILE(dlls/dsuiext)
 WINE_CONFIG_MAKEFILE(dlls/dswave)
 WINE_CONFIG_MAKEFILE(dlls/dswave/tests)
 WINE_CONFIG_MAKEFILE(dlls/dwmapi)

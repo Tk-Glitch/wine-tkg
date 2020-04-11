@@ -8722,6 +8722,11 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRenderTargetView(ID3D10Devic
     return S_OK;
 }
 
+static D3D11_DSV_DIMENSION d3d11_dsv_dimension_from_d3d10(D3D10_DSV_DIMENSION dim)
+{
+    return (D3D11_DSV_DIMENSION)dim;
+}
+
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateDepthStencilView(ID3D10Device1 *iface,
         ID3D10Resource *resource, const D3D10_DEPTH_STENCIL_VIEW_DESC *desc, ID3D10DepthStencilView **view)
 {
@@ -8736,7 +8741,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateDepthStencilView(ID3D10Devic
     if (desc)
     {
         d3d11_desc.Format = desc->Format;
-        d3d11_desc.ViewDimension = desc->ViewDimension;
+        d3d11_desc.ViewDimension = d3d11_dsv_dimension_from_d3d10(desc->ViewDimension);
         d3d11_desc.Flags = 0;
         memcpy(&d3d11_desc.u, &desc->u, sizeof(d3d11_desc.u));
     }
@@ -9122,13 +9127,18 @@ static void STDMETHODCALLTYPE d3d10_device_GetTextFilterSize(ID3D10Device1 *ifac
     FIXME("iface %p, width %p, height %p stub!\n", iface, width, height);
 }
 
+static D3D10_FEATURE_LEVEL1 d3d10_feature_level1_from_d3d_feature_level(D3D_FEATURE_LEVEL level)
+{
+    return (D3D10_FEATURE_LEVEL1)level;
+}
+
 static D3D10_FEATURE_LEVEL1 STDMETHODCALLTYPE d3d10_device_GetFeatureLevel(ID3D10Device1 *iface)
 {
     struct d3d_device *device = impl_from_ID3D10Device(iface);
 
     TRACE("iface %p.\n", iface);
 
-    return device->feature_level;
+    return d3d10_feature_level1_from_d3d_feature_level(device->feature_level);
 }
 
 static const struct ID3D10Device1Vtbl d3d10_device1_vtbl =
@@ -9367,6 +9377,11 @@ static inline struct d3d_device *device_from_wined3d_device_parent(struct wined3
     return CONTAINING_RECORD(device_parent, struct d3d_device, device_parent);
 }
 
+static D3D_FEATURE_LEVEL d3d_feature_level_from_wined3d(enum wined3d_feature_level level)
+{
+    return (D3D_FEATURE_LEVEL)level;
+}
+
 static void CDECL device_parent_wined3d_device_created(struct wined3d_device_parent *device_parent,
         struct wined3d_device *wined3d_device)
 {
@@ -9377,7 +9392,7 @@ static void CDECL device_parent_wined3d_device_created(struct wined3d_device_par
     wined3d_device_incref(wined3d_device);
     device->wined3d_device = wined3d_device;
 
-    device->feature_level = wined3d_device_get_feature_level(wined3d_device);
+    device->feature_level = d3d_feature_level_from_wined3d(wined3d_device_get_feature_level(wined3d_device));
 
     set_default_depth_stencil_state(wined3d_device);
 }

@@ -226,6 +226,9 @@ struct wake_up_reply
 typedef __int64 timeout_t;
 #define TIMEOUT_INFINITE (((timeout_t)0x7fffffff) << 32 | 0xffffffff)
 
+/* absolute timeout, negative means that monotonic clock is used */
+typedef __int64 abstime_t;
+
 /* structure for process startup info */
 typedef struct
 {
@@ -515,7 +518,7 @@ typedef union
         enum apc_type    type;     /* APC_TIMER */
         int              __pad;
         client_ptr_t     func;     /* void (__stdcall *func)(void*, unsigned int, unsigned int); */
-        timeout_t        time;     /* absolute time of expiration */
+        abstime_t        time;     /* time of expiration */
         client_ptr_t     arg;      /* user argument */
     } timer;
     struct
@@ -1133,12 +1136,11 @@ struct rawinput_device
 @REQ(select)
     int          flags;        /* wait flags (see below) */
     client_ptr_t cookie;       /* magic cookie to return to client */
-    timeout_t    timeout;      /* timeout */
+    abstime_t    timeout;      /* timeout */
     obj_handle_t prev_apc;     /* handle to previous APC */
     VARARG(result,apc_result); /* result of previous APC */
     VARARG(data,select_op);    /* operation-specific data */
 @REPLY
-    timeout_t    timeout;      /* timeout converted to absolute */
     apc_call_t   call;         /* APC call arguments */
     obj_handle_t apc_handle;   /* handle to next APC */
 @END
@@ -4026,15 +4028,6 @@ struct handle_info
     VARARG(context,context);   /* thread context */
 @END
 
-
-/* Create a new job object */
-@REQ(create_job)
-    unsigned int access;          /* wanted access rights */
-    VARARG(objattr,object_attributes); /* object attributes */
-@REPLY
-    obj_handle_t handle;          /* handle to the job */
-@END
-
 enum fsync_type
 {
     FSYNC_SEMAPHORE = 1,
@@ -4087,6 +4080,15 @@ enum fsync_type
 @REQ(get_fsync_apc_idx)
 @REPLY
     unsigned int shm_idx;
+@END
+
+
+/* Create a new job object */
+@REQ(create_job)
+    unsigned int access;          /* wanted access rights */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;          /* handle to the job */
 @END
 
 

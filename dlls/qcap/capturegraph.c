@@ -499,83 +499,109 @@ end:
     return hr;
 }
 
-static HRESULT find_unconnected_pin(CaptureGraphImpl *This,
-        const GUID *pCategory, const GUID *pType, IUnknown *pSource, IPin **out_pin)
+static HRESULT find_unconnected_source_from_filter(CaptureGraphImpl *capture_graph,
+        const GUID *category, const GUID *majortype, IBaseFilter *filter, IPin **ret);
+
+static HRESULT find_unconnected_source_from_pin(CaptureGraphImpl *capture_graph,
+        const GUID *category, const GUID *majortype, IPin *pin, IPin **ret)
 {
-    int index = 0;
-    IPin *source_out;
+    PIN_DIRECTION dir;
+    PIN_INFO info;
     HRESULT hr;
-    BOOL usedSmartTeePreviewPin = FALSE;
+    IPin *peer;
 
-    /* depth-first search the graph for the first unconnected pin that matches
-     * the given category and type */
-    for(;;){
-        IPin *nextpin;
+    IPin_QueryDirection(pin, &dir);
+    if (dir != PINDIR_OUTPUT)
+        return VFW_E_INVALID_DIRECTION;
 
-        if (pCategory && (IsEqualIID(pCategory, &PIN_CATEGORY_CAPTURE) || IsEqualIID(pCategory, &PIN_CATEGORY_PREVIEW))){
-            IBaseFilter *sourceFilter = NULL;
-            hr = IUnknown_QueryInterface(pSource, &IID_IBaseFilter, (void**)&sourceFilter);
-            if (SUCCEEDED(hr)) {
-                hr = match_smart_tee_pin(This, pCategory, pType, pSource, &source_out);
-                if (hr == VFW_S_NOPREVIEWPIN)
-                    usedSmartTeePreviewPin = TRUE;
-                IBaseFilter_Release(sourceFilter);
-            } else {
-                hr = ICaptureGraphBuilder2_FindPin(&This->ICaptureGraphBuilder2_iface, pSource, PINDIR_OUTPUT, pCategory, pType, FALSE, index, &source_out);
-            }
-            if (FAILED(hr))
-                return E_INVALIDARG;
-        } else {
-            hr = ICaptureGraphBuilder2_FindPin(&This->ICaptureGraphBuilder2_iface, pSource, PINDIR_OUTPUT, pCategory, pType, FALSE, index, &source_out);
-            if (FAILED(hr))
-                return E_INVALIDARG;
-        }
+    if (category && (IsEqualGUID(category, &PIN_CATEGORY_CAPTURE)
+            || IsEqualGUID(category, &PIN_CATEGORY_PREVIEW)))
+    {
+        if (FAILED(hr = match_smart_tee_pin(capture_graph, category, majortype, (IUnknown *)pin, &pin)))
+            return hr;
 
-        hr = IPin_ConnectedTo(source_out, &nextpin);
-        if(SUCCEEDED(hr)){
-            PIN_INFO info;
-
-            IPin_Release(source_out);
-
-            hr = IPin_QueryPinInfo(nextpin, &info);
-            if(FAILED(hr) || !info.pFilter){
-                WARN("QueryPinInfo failed: %08x\n", hr);
-                return hr;
-            }
-
-            hr = find_unconnected_pin(This, pCategory, pType, (IUnknown*)info.pFilter, out_pin);
-
-            IBaseFilter_Release(info.pFilter);
-
-            if(SUCCEEDED(hr))
-                return hr;
-        }else{
-            *out_pin = source_out;
-            if(usedSmartTeePreviewPin)
-                return VFW_S_NOPREVIEWPIN;
+        if (FAILED(IPin_ConnectedTo(pin, &peer)))
+        {
+            *ret = pin;
             return S_OK;
         }
-
-        index++;
     }
+    else
+    {
+        if (FAILED(IPin_ConnectedTo(pin, &peer)))
+        {
+            if (!pin_matches(pin, PINDIR_OUTPUT, category, majortype, FALSE))
+                return E_FAIL;
+
+            IPin_AddRef(*ret = pin);
+            return S_OK;
+        }
+        IPin_AddRef(pin);
+    }
+
+    IPin_QueryPinInfo(peer, &info);
+    hr = find_unconnected_source_from_filter(capture_graph, category, majortype, info.pFilter, ret);
+    IBaseFilter_Release(info.pFilter);
+    IPin_Release(peer);
+    IPin_Release(pin);
+    return hr;
 }
 
-static HRESULT WINAPI
-fnCaptureGraphBuilder2_RenderStream(ICaptureGraphBuilder2 * iface,
-                                    const GUID *pCategory,
-                                    const GUID *pType,
-                                    IUnknown *pSource,
-                                    IBaseFilter *pfCompressor,
-                                    IBaseFilter *pfRenderer)
+static HRESULT find_unconnected_source_from_filter(CaptureGraphImpl *capture_graph,
+        const GUID *category, const GUID *majortype, IBaseFilter *filter, IPin **ret)
+{
+    IEnumPins *enumpins;
+    IPin *pin, *peer;
+    HRESULT hr;
+
+    if (category && (IsEqualGUID(category, &PIN_CATEGORY_CAPTURE)
+            || IsEqualGUID(category, &PIN_CATEGORY_PREVIEW)))
+    {
+        if (FAILED(hr = match_smart_tee_pin(capture_graph, category, majortype, (IUnknown *)filter, &pin)))
+            return hr;
+
+        if (FAILED(IPin_ConnectedTo(pin, &peer)))
+        {
+            *ret = pin;
+            return hr;
+        }
+
+        IPin_Release(peer);
+        IPin_Release(pin);
+        return E_INVALIDARG;
+    }
+
+    if (FAILED(hr = IBaseFilter_EnumPins(filter, &enumpins)))
+        return hr;
+
+    while (IEnumPins_Next(enumpins, 1, &pin, NULL) == S_OK)
+    {
+        if (SUCCEEDED(hr = find_unconnected_source_from_pin(capture_graph, category, majortype, pin, ret)))
+        {
+            IEnumPins_Release(enumpins);
+            IPin_Release(pin);
+            return hr;
+        }
+        IPin_Release(pin);
+    }
+    IEnumPins_Release(enumpins);
+
+    return E_INVALIDARG;
+}
+
+static HRESULT WINAPI fnCaptureGraphBuilder2_RenderStream(ICaptureGraphBuilder2 *iface,
+        const GUID *category, const GUID *majortype, IUnknown *source,
+        IBaseFilter *pfCompressor, IBaseFilter *pfRenderer)
 {
     CaptureGraphImpl *This = impl_from_ICaptureGraphBuilder2(iface);
     IPin *source_out = NULL, *renderer_in;
     BOOL rendererNeedsRelease = FALSE;
     HRESULT hr, return_hr = S_OK;
+    IBaseFilter *filter;
+    IPin *pin;
 
-    FIXME("(%p/%p)->(%s, %s, %p, %p, %p) semi-stub!\n", This, iface,
-          debugstr_guid(pCategory), debugstr_guid(pType),
-          pSource, pfCompressor, pfRenderer);
+    TRACE("graph %p, category %s, majortype %s, source %p, intermediate %p, sink %p.\n",
+            This, debugstr_guid(category), debugstr_guid(majortype), source, pfCompressor, pfRenderer);
 
     if (!This->mygraph)
     {
@@ -583,12 +609,27 @@ fnCaptureGraphBuilder2_RenderStream(ICaptureGraphBuilder2 * iface,
         return E_UNEXPECTED;
     }
 
-    if (pCategory && IsEqualIID(pCategory, &PIN_CATEGORY_VBI)) {
+    if (category && IsEqualGUID(category, &PIN_CATEGORY_VBI))
+    {
         FIXME("Tee/Sink-to-Sink filter not supported\n");
         return E_NOTIMPL;
     }
 
-    hr = find_unconnected_pin(This, pCategory, pType, pSource, &source_out);
+    if (IUnknown_QueryInterface(source, &IID_IPin, (void **)&pin) == S_OK)
+    {
+        hr = find_unconnected_source_from_pin(This, category, majortype, pin, &source_out);
+        IPin_Release(pin);
+    }
+    else if (IUnknown_QueryInterface(source, &IID_IBaseFilter, (void **)&filter) == S_OK)
+    {
+        hr = find_unconnected_source_from_filter(This, category, majortype, filter, &source_out);
+        IBaseFilter_Release(filter);
+    }
+    else
+    {
+        WARN("Source object does not expose IBaseFilter or IPin.\n");
+        return E_INVALIDARG;
+    }
     if (FAILED(hr))
         return hr;
     return_hr = hr;

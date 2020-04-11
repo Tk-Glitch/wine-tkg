@@ -1,4 +1,4 @@
-EXTRALIBS = $(DL_LIBS) $(COREFOUNDATION_LIBS) $(CORESERVICES_LIBS) $(I386_LIBS)
+EXTRALIBS = $(COREFOUNDATION_LIBS) $(CORESERVICES_LIBS) $(I386_LIBS)
 
 C_SRCS = \
 	c_037.c \
@@ -100,7 +100,7 @@ libwine_LDFLAGS = $(LIBWINE_LDFLAGS)
 libwine_DEPS = $(LIBWINE_DEPENDS)
 
 version.c: dummy
-	version=`(echo "wine-5.5.r2.g7fe7d87f") | sed -n -e '$$s/\(.*\)/const char wine_build[] = "\1  ( TkG Staging Esync Fsync Vkd3d )";/p'` && (echo $$version | cmp -s - $@) || echo $$version >$@ || (rm -f $@ && exit 1)
+	version=`(echo "wine-5.6.1.r0.g4c160ec8") | sed -n -e '$$s/\(.*\)/const char wine_build[] = "\1  ( TkG Staging Esync Fsync Vkd3d )";/p'` && (echo $$version | cmp -s - $@) || echo $$version >$@ || (rm -f $@ && exit 1)
 
 dummy:
 .PHONY: dummy

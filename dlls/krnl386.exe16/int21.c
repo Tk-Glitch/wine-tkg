@@ -23,17 +23,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <string.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -45,7 +37,6 @@
 #include "dosexe.h"
 #include "winerror.h"
 #include "winuser.h"
-#include "wine/unicode.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
@@ -264,6 +255,13 @@ typedef struct
 
 static int brk_flag;
 
+static BYTE drive_number( WCHAR letter )
+{
+    if (letter >= 'A' && letter <= 'Z') return letter - 'A';
+    if (letter >= 'a' && letter <= 'z') return letter - 'a';
+    return MAX_DOS_DRIVES;
+}
+
 
 /* Many calls translate a drive argument like this:
    drive number (00h = default, 01h = A:, etc)
@@ -300,8 +298,7 @@ static BYTE INT21_GetCurrentDrive(void)
         TRACE( "Failed to get current drive.\n" );
         return MAX_DOS_DRIVES;
     }
-
-    return toupperW( current_directory[0] ) - 'A';
+    return drive_number( current_directory[0] );
 }
 
 
@@ -636,7 +633,7 @@ static BOOL INT21_GetCurrentDirectory( CONTEXT *context, BOOL islong )
 
     if (!GetCurrentDirectoryW( MAX_PATH, pathW )) return FALSE;
 
-    if (toupperW(pathW[0]) - 'A' != drive || pathW[1] != ':')
+    if (drive_number( pathW[0] ) != drive || pathW[1] != ':')
     {
         /* cwd is not on the requested drive, get the environment string instead */
 
@@ -765,7 +762,7 @@ static BOOL INT21_SetCurrentDirectory( CONTEXT *context )
     result = SetEnvironmentVariableW( env_var, dirW );
 
     /* only set current directory if on the current drive */
-    if (result && (toupperW(dirW[0]) - 'A' == drive)) result = SetCurrentDirectoryW( dirW );
+    if (result && (drive_number( dirW[0] ) == drive)) result = SetCurrentDirectoryW( dirW );
 
     return result;
 }
@@ -3352,7 +3349,7 @@ static BOOL INT21_CreateTempFile( CONTEXT *context )
 
     for (;;)
     {
-        sprintf( p, "wine%04x.%03d", (int)getpid(), counter );
+        sprintf( p, "wine%04x.%03d", GetCurrentThreadId(), counter );
         counter = (counter + 1) % 1000;
 
         SET_AX( context, 
@@ -3417,9 +3414,8 @@ static BOOL INT21_ToDosFCBFormat( LPCWSTR name, LPWSTR buffer )
             buffer[i] = '?';
             break;
         default:
-            if (strchrW( invalid_chars, *p )) return FALSE;
-            buffer[i] = toupperW(*p);
-            p++;
+            if (wcschr( invalid_chars, *p )) return FALSE;
+            buffer[i] = *p++;
             break;
         }
     }
@@ -3454,13 +3450,13 @@ static BOOL INT21_ToDosFCBFormat( LPCWSTR name, LPWSTR buffer )
             buffer[i] = '?';
             break;
         default:
-            if (strchrW( invalid_chars, *p )) return FALSE;
-            buffer[i] = toupperW(*p);
-            p++;
+            if (wcschr( invalid_chars, *p )) return FALSE;
+            buffer[i] = *p++;
             break;
         }
     }
     buffer[11] = '\0';
+    wcsupr( buffer );
 
     /* at most 3 character of the extension are processed
      * is something behind this ?
@@ -3486,8 +3482,8 @@ static BOOL INT21_FindFirst( CONTEXT *context )
     path = CTX_SEG_OFF_TO_LIN(context, context->SegDs, context->Edx);
     MultiByteToWideChar(CP_OEMCP, 0, path, -1, pathW, MAX_PATH);
 
-    p = strrchrW( pathW, '\\');
-    q = strrchrW( pathW, '/');
+    p = wcsrchr( pathW, '\\');
+    q = wcsrchr( pathW, '/');
     if (q>p) p = q;
     if (!p)
     {
@@ -3514,7 +3510,7 @@ static BOOL INT21_FindFirst( CONTEXT *context )
     /* we must have a fully qualified file name in dta->fullPath
      * (we could have a UNC path, but this would lead to some errors later on)
      */
-    dta->drive = toupperW(dta->fullPath[0]) - 'A';
+    dta->drive = drive_number( dta->fullPath[0] );
     dta->count = 0;
     dta->search_attr = CL_reg(context);
     return TRUE;

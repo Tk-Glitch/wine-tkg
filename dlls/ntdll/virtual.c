@@ -56,7 +56,6 @@
 #include "wine/library.h"
 #include "wine/server.h"
 #include "wine/exception.h"
-#include "wine/unicode.h"
 #include "wine/rbtree.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -3445,18 +3444,18 @@ found:
         }
     }
 
-    *res_len = sizeof(MEMORY_SECTION_NAME) + strlenW(symlinkW) * sizeof(WCHAR) +
+    *res_len = sizeof(MEMORY_SECTION_NAME) + wcslen(symlinkW) * sizeof(WCHAR) +
                nt_name.Length - offset * sizeof(WCHAR) + sizeof(WCHAR);
     if (len >= *res_len)
     {
-        info->SectionFileName.Length = strlenW(symlinkW) * sizeof(WCHAR) +
+        info->SectionFileName.Length = wcslen(symlinkW) * sizeof(WCHAR) +
                                        nt_name.Length - offset * sizeof(WCHAR);
         info->SectionFileName.MaximumLength = info->SectionFileName.Length + sizeof(WCHAR);
         info->SectionFileName.Buffer = (WCHAR *)(info + 1);
 
         ptr = (WCHAR *)(info + 1);
-        strcpyW( ptr, symlinkW );
-        ptr += strlenW(symlinkW);
+        wcscpy( ptr, symlinkW );
+        ptr += wcslen(symlinkW);
         memcpy( ptr, nt_name.Buffer + offset, nt_name.Length - offset * sizeof(WCHAR) );
         ptr[ nt_name.Length / sizeof(WCHAR) - offset ] = 0;
     }

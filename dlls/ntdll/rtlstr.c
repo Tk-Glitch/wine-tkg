@@ -32,7 +32,6 @@
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
 
@@ -177,7 +176,7 @@ void WINAPI RtlInitUnicodeString(
 {
     if ((target->Buffer = (PWSTR) source))
     {
-        unsigned int length = strlenW(source) * sizeof(WCHAR);
+        unsigned int length = wcslen(source) * sizeof(WCHAR);
         if (length > 0xfffc)
             length = 0xfffc;
         target->Length = length;
@@ -206,7 +205,7 @@ NTSTATUS WINAPI RtlInitUnicodeStringEx(
     PCWSTR source)          /* [I]   '\0' terminated unicode string used to initialize target */
 {
     if (source != NULL) {
-        unsigned int len = strlenW(source) * sizeof(WCHAR);
+        unsigned int len = wcslen(source) * sizeof(WCHAR);
 
         if (len > 0xFFFC) {
             return STATUS_NAME_TOO_LONG;
@@ -235,7 +234,7 @@ NTSTATUS WINAPI RtlInitUnicodeStringEx(
  */
 BOOLEAN WINAPI RtlCreateUnicodeString( PUNICODE_STRING target, LPCWSTR src )
 {
-    int len = (strlenW(src) + 1) * sizeof(WCHAR);
+    int len = (wcslen(src) + 1) * sizeof(WCHAR);
     if (!(target->Buffer = RtlAllocateHeap( GetProcessHeap(), 0, len ))) return FALSE;
     memcpy( target->Buffer, src, len );
     target->MaximumLength = len;
@@ -1013,7 +1012,7 @@ NTSTATUS WINAPI RtlAppendUnicodeToString(
     LPCWSTR src)          /* [I]   '\0' terminated unicode string to be concatenated */
 {
     if (src != NULL) {
-        unsigned int src_len = strlenW(src) * sizeof(WCHAR);
+        unsigned int src_len = wcslen(src) * sizeof(WCHAR);
         unsigned int dest_len  = src_len + dest->Length;
 
         if (dest_len > dest->MaximumLength) return STATUS_BUFFER_TOO_SMALL;
@@ -1228,7 +1227,7 @@ BOOLEAN WINAPI RtlIsTextUnicode( LPCVOID buf, INT len, INT *pf )
     {
         for (i = 0; i < len; i++)
         {
-            if (strchrW(std_control_chars, s[i]))
+            if (wcschr(std_control_chars, s[i]))
             {
                 out_flags |= IS_TEXT_UNICODE_CONTROLS;
                 break;
@@ -1240,7 +1239,7 @@ BOOLEAN WINAPI RtlIsTextUnicode( LPCVOID buf, INT len, INT *pf )
     {
         for (i = 0; i < len; i++)
         {
-            if (strchrW(byterev_control_chars, s[i]))
+            if (wcschr(byterev_control_chars, s[i]))
             {
                 out_flags |= IS_TEXT_UNICODE_REVERSE_CONTROLS;
                 break;
@@ -1702,7 +1701,7 @@ NTSTATUS WINAPI RtlStringFromGUID(const GUID* guid, UNICODE_STRING *str)
     str->Length = str->MaximumLength = 0;
     return STATUS_NO_MEMORY;
   }
-  sprintfW(str->Buffer, szFormat, guid->Data1, guid->Data2, guid->Data3,
+  NTDLL_swprintf(str->Buffer, szFormat, guid->Data1, guid->Data2, guid->Data3,
           guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
           guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
 

@@ -27,11 +27,6 @@ static inline BaseControlVideo *impl_from_IBasicVideo(IBasicVideo *iface)
     return CONTAINING_RECORD(iface, BaseControlVideo, IBasicVideo_iface);
 }
 
-HRESULT WINAPI BaseControlVideo_Destroy(BaseControlVideo *pControlVideo)
-{
-    return S_OK;
-}
-
 static HRESULT BaseControlVideoImpl_CheckSourceRect(BaseControlVideo *This, RECT *pSourceRect)
 {
     LONG VideoWidth, VideoHeight;
@@ -647,13 +642,11 @@ static const IBasicVideoVtbl basic_video_vtbl =
     basic_video_IsUsingDefaultDestination
 };
 
-HRESULT basic_video_init(BaseControlVideo *video, struct strmbase_filter *filter,
+void basic_video_init(BaseControlVideo *video, struct strmbase_filter *filter,
         struct strmbase_pin *pin, const BaseControlVideoFuncTable *func_table)
 {
     video->IBasicVideo_iface.lpVtbl = &basic_video_vtbl;
     video->pFilter = filter;
     video->pPin = pin;
     video->pFuncsTable = func_table;
-
-    return S_OK;
 }

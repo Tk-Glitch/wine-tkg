@@ -87,22 +87,51 @@ static BOOL compare_vec4(const struct vec4 *vec, float x, float y, float z, floa
             && compare_float(vec->w, w, ulps);
 }
 
+static BOOL compare_uint(unsigned int x, unsigned int y, unsigned int max_diff)
+{
+    unsigned int diff = x > y ? x - y : y - x;
+
+    return diff <= max_diff;
+}
+
 static BOOL compare_color(D3DCOLOR c1, D3DCOLOR c2, BYTE max_diff)
 {
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
-    c1 >>= 8; c2 >>= 8;
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
-    c1 >>= 8; c2 >>= 8;
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
-    c1 >>= 8; c2 >>= 8;
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
-    return TRUE;
+    return compare_uint(c1 & 0xff, c2 & 0xff, max_diff)
+            && compare_uint((c1 >> 8) & 0xff, (c2 >> 8) & 0xff, max_diff)
+            && compare_uint((c1 >> 16) & 0xff, (c2 >> 16) & 0xff, max_diff)
+            && compare_uint((c1 >> 24) & 0xff, (c2 >> 24) & 0xff, max_diff);
 }
 
 static ULONG get_refcount(IUnknown *iface)
 {
     IUnknown_AddRef(iface);
     return IUnknown_Release(iface);
+}
+
+static void get_virtual_rect(RECT *rect)
+{
+    rect->left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    rect->top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    rect->right = rect->left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    rect->bottom = rect->top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+}
+
+/* Try to make sure pending X events have been processed before continuing */
+static void flush_events(void)
+{
+    int diff = 200;
+    DWORD time;
+    MSG msg;
+
+    time = GetTickCount() + diff;
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE, 100, QS_ALLINPUT) == WAIT_TIMEOUT)
+            break;
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+        diff = time - GetTickCount();
+    }
 }
 
 static BOOL ddraw_get_identifier(IDirectDraw7 *ddraw, DDDEVICEIDENTIFIER2 *identifier)
@@ -5705,6 +5734,8 @@ static void test_rt_caps(void)
         const DDPIXELFORMAT *pf;
         DWORD caps_in;
         DWORD caps_out;
+        DWORD caps2_in;
+        DWORD caps2_out;
         HRESULT create_device_hr;
         HRESULT set_rt_hr, alternative_set_rt_hr;
     }
@@ -5714,6 +5745,8 @@ static void test_rt_caps(void)
             NULL,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             D3D_OK,
             D3D_OK,
             D3D_OK,
@@ -5722,6 +5755,8 @@ static void test_rt_caps(void)
             NULL,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             D3D_OK,
             D3D_OK,
             D3D_OK,
@@ -5730,6 +5765,8 @@ static void test_rt_caps(void)
             NULL,
             DDSCAPS_OFFSCREENPLAIN,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
@@ -5738,6 +5775,8 @@ static void test_rt_caps(void)
             NULL,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
+            0,
+            0,
             D3DERR_SURFACENOTINVIDMEM,
             DDERR_INVALIDPARAMS,
             D3D_OK,
@@ -5746,6 +5785,8 @@ static void test_rt_caps(void)
             NULL,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
@@ -5754,6 +5795,8 @@ static void test_rt_caps(void)
             NULL,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             D3D_OK,
             D3D_OK,
             D3D_OK,
@@ -5762,6 +5805,8 @@ static void test_rt_caps(void)
             NULL,
             DDSCAPS_3DDEVICE,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             D3D_OK,
             D3D_OK,
             D3D_OK,
@@ -5770,6 +5815,8 @@ static void test_rt_caps(void)
             NULL,
             0,
             DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
@@ -5778,6 +5825,8 @@ static void test_rt_caps(void)
             NULL,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
+            0,
+            0,
             D3DERR_SURFACENOTINVIDMEM,
             DDERR_INVALIDPARAMS,
             D3D_OK,
@@ -5786,14 +5835,38 @@ static void test_rt_caps(void)
             NULL,
             DDSCAPS_SYSTEMMEMORY,
             DDSCAPS_SYSTEMMEMORY,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
         },
         {
+            NULL,
+            DDSCAPS_TEXTURE | DDSCAPS_3DDEVICE,
+            DDSCAPS_TEXTURE | DDSCAPS_3DDEVICE | DDSCAPS_SYSTEMMEMORY,
+            DDSCAPS2_TEXTUREMANAGE,
+            DDSCAPS2_TEXTUREMANAGE,
+            D3DERR_SURFACENOTINVIDMEM,
+            DDERR_INVALIDPARAMS,
+            D3D_OK,
+        },
+        {
+            NULL,
+            DDSCAPS_TEXTURE | DDSCAPS_3DDEVICE,
+            DDSCAPS_TEXTURE | DDSCAPS_3DDEVICE | DDSCAPS_SYSTEMMEMORY,
+            DDSCAPS2_D3DTEXTUREMANAGE,
+            DDSCAPS2_D3DTEXTUREMANAGE,
+            D3DERR_SURFACENOTINVIDMEM,
+            DDERR_INVALIDPARAMS,
+            D3D_OK,
+        },
+        {
             &p8_fmt,
             0,
             DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
@@ -5802,6 +5875,8 @@ static void test_rt_caps(void)
             &p8_fmt,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE,
             ~0U /* AMD r200 */,
+            0,
+            0,
             DDERR_NOPALETTEATTACHED,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
@@ -5810,6 +5885,8 @@ static void test_rt_caps(void)
             &p8_fmt,
             DDSCAPS_OFFSCREENPLAIN,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
@@ -5818,6 +5895,8 @@ static void test_rt_caps(void)
             &p8_fmt,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
+            0,
+            0,
             DDERR_NOPALETTEATTACHED,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
@@ -5826,6 +5905,8 @@ static void test_rt_caps(void)
             &p8_fmt,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
@@ -5834,6 +5915,8 @@ static void test_rt_caps(void)
             &z_fmt,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_ZBUFFER,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_ZBUFFER | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDPIXELFORMAT,
             DDERR_INVALIDPIXELFORMAT,
@@ -5842,6 +5925,8 @@ static void test_rt_caps(void)
             &z_fmt,
             DDSCAPS_3DDEVICE | DDSCAPS_ZBUFFER,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_ZBUFFER | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDPIXELFORMAT,
             DDERR_INVALIDPIXELFORMAT,
@@ -5850,6 +5935,8 @@ static void test_rt_caps(void)
             &z_fmt,
             DDSCAPS_ZBUFFER,
             DDSCAPS_VIDEOMEMORY | DDSCAPS_ZBUFFER | DDSCAPS_LOCALVIDMEM,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
@@ -5858,6 +5945,8 @@ static void test_rt_caps(void)
             &z_fmt,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE | DDSCAPS_ZBUFFER,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE | DDSCAPS_ZBUFFER,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDPARAMS,
             DDERR_INVALIDPIXELFORMAT,
@@ -5866,6 +5955,8 @@ static void test_rt_caps(void)
             &z_fmt,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_ZBUFFER,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_ZBUFFER,
+            0,
+            0,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
             DDERR_INVALIDCAPS,
@@ -5912,6 +6003,7 @@ static void test_rt_caps(void)
         surface_desc.dwSize = sizeof(surface_desc);
         surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
         surface_desc.ddsCaps.dwCaps = test_data[i].caps_in;
+        surface_desc.ddsCaps.dwCaps2 = test_data[i].caps2_in;
         if (test_data[i].pf)
         {
             surface_desc.dwFlags |= DDSD_PIXELFORMAT;
@@ -5920,8 +6012,8 @@ static void test_rt_caps(void)
         surface_desc.dwWidth = 640;
         surface_desc.dwHeight = 480;
         hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &surface, NULL);
-        ok(SUCCEEDED(hr), "Test %u: Failed to create surface with caps %#x, hr %#x.\n",
-                i, test_data[i].caps_in, hr);
+        ok(SUCCEEDED(hr), "Test %u: Failed to create surface with caps %#x and caps2 %#x, hr %#x.\n",
+           i, test_data[i].caps_in, test_data[i].caps2_in, hr);
 
         memset(&surface_desc, 0, sizeof(surface_desc));
         surface_desc.dwSize = sizeof(surface_desc);
@@ -5930,6 +6022,9 @@ static void test_rt_caps(void)
         ok(test_data[i].caps_out == ~0U || surface_desc.ddsCaps.dwCaps == test_data[i].caps_out,
                 "Test %u: Got unexpected caps %#x, expected %#x.\n",
                 i, surface_desc.ddsCaps.dwCaps, test_data[i].caps_out);
+        ok(surface_desc.ddsCaps.dwCaps2 == test_data[i].caps2_out,
+           "Test %u: Got unexpected caps2 %#x, expected %#x.\n",
+           i, surface_desc.ddsCaps.dwCaps2, test_data[i].caps2_out);
 
         hr = IDirect3D7_CreateDevice(d3d, devtype, surface, &device);
         ok(hr == test_data[i].create_device_hr, "Test %u: Got unexpected hr %#x, expected %#x.\n",
@@ -5965,6 +6060,7 @@ static void test_rt_caps(void)
         surface_desc.dwSize = sizeof(surface_desc);
         surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
         surface_desc.ddsCaps.dwCaps = test_data[i].caps_in;
+        surface_desc.ddsCaps.dwCaps2 = test_data[i].caps2_in;
         if (test_data[i].pf)
         {
             surface_desc.dwFlags |= DDSD_PIXELFORMAT;
@@ -14744,11 +14840,11 @@ static void test_depth_readback(void)
                  * Arx Fatalis is broken on the Geforce 9 in the same way it was broken in Wine (bug 43654).
                  * The !tests[i].s_depth is supposed to rule out D16 on GF9 and D24X8 on GF7. */
                 todo_wine_if(tests[i].todo)
-                    ok(abs(expected_depth - depth) <= max_diff
+                    ok(compare_uint(expected_depth, depth, max_diff)
                             || (ddraw_is_nvidia(ddraw) && (all_zero || all_one || !tests[i].s_depth)),
                             "Test %u: Got depth 0x%08x (diff %d), expected 0x%08x+/-%u, at %u, %u.\n",
                             i, depth, expected_depth - depth, expected_depth, max_diff, x, y);
-                if (abs(expected_depth - depth) > max_diff)
+                if (!compare_uint(expected_depth, depth, max_diff))
                     all_pass = FALSE;
 
                 hr = IDirectDrawSurface7_Unlock(ds, &r);
@@ -17250,6 +17346,142 @@ static void test_compressed_surface_stretch(void)
     DestroyWindow(window);
 }
 
+struct find_different_mode_param
+{
+    unsigned int old_width;
+    unsigned int old_height;
+    unsigned int new_width;
+    unsigned int new_height;
+};
+
+static HRESULT CALLBACK find_different_mode_callback(DDSURFACEDESC2 *surface_desc, void *context)
+{
+    struct find_different_mode_param *param = context;
+
+    if (U1(U4(*surface_desc).ddpfPixelFormat).dwRGBBitCount != registry_mode.dmBitsPerPel)
+        return DDENUMRET_OK;
+
+    if (surface_desc->dwWidth != param->old_width && surface_desc->dwHeight != param->old_height)
+    {
+        param->new_width = surface_desc->dwWidth;
+        param->new_height = surface_desc->dwHeight;
+        return DDENUMRET_CANCEL;
+    }
+
+    return DDENUMRET_OK;
+}
+
+static void test_cursor_clipping(void)
+{
+    struct find_different_mode_param param;
+    DDSURFACEDESC2 surface_desc;
+    RECT rect, clip_rect;
+    IDirectDraw7 *ddraw;
+    HWND window;
+    HRESULT hr;
+
+    window = create_window();
+    ok(!!window, "Failed to create a window.\n");
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDraw7_GetDisplayMode(ddraw, &surface_desc);
+    ok(hr == DD_OK, "GetDisplayMode failed, hr %#x.\n", hr);
+
+    memset(&param, 0, sizeof(param));
+    param.old_width = surface_desc.dwWidth;
+    param.old_height = surface_desc.dwHeight;
+    hr = IDirectDraw7_EnumDisplayModes(ddraw, 0, NULL, &param, find_different_mode_callback);
+    ok(hr == DD_OK, "EnumDisplayModes failed, hr %#x.\n", hr);
+    if (!(param.new_width && param.new_height))
+    {
+        skip("Failed to find a different mode than %ux%u.\n", param.old_width, param.old_height);
+        goto done;
+    }
+
+    ok(ClipCursor(NULL), "ClipCursor failed, error %#x.\n", GetLastError());
+    get_virtual_rect(&rect);
+    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
+            wine_dbgstr_rect(&clip_rect));
+
+    /* Set cooperative level to normal */
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+    flush_events();
+    get_virtual_rect(&rect);
+    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
+            wine_dbgstr_rect(&clip_rect));
+
+    hr = set_display_mode(ddraw, param.new_width, param.new_height);
+    ok(hr == DD_OK || hr == DDERR_UNSUPPORTED, "SetDisplayMode failed, hr %#x.\n", hr);
+    if (FAILED(hr))
+    {
+        win_skip("SetDisplayMode failed, hr %#x.\n", hr);
+        goto done;
+    }
+    flush_events();
+    get_virtual_rect(&rect);
+    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
+            wine_dbgstr_rect(&clip_rect));
+
+    hr = IDirectDraw7_RestoreDisplayMode(ddraw);
+    ok(hr == DD_OK, "RestoreDisplayMode failed, hr %#x.\n", hr);
+    flush_events();
+    get_virtual_rect(&rect);
+    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
+            wine_dbgstr_rect(&clip_rect));
+
+    /* Switch to full screen cooperative level */
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+    flush_events();
+    SetRect(&rect, 0, 0, param.old_width, param.old_height);
+    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
+            wine_dbgstr_rect(&clip_rect));
+
+    hr = set_display_mode(ddraw, param.new_width, param.new_height);
+    ok(hr == DD_OK || hr == DDERR_UNSUPPORTED, "SetDisplayMode failed, hr %#x.\n", hr);
+    if (FAILED(hr))
+    {
+        win_skip("SetDisplayMode failed, hr %#x.\n", hr);
+        goto done;
+    }
+    flush_events();
+    SetRect(&rect, 0, 0, param.new_width, param.new_height);
+    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
+            wine_dbgstr_rect(&clip_rect));
+
+    /* Restore display mode */
+    hr = IDirectDraw7_RestoreDisplayMode(ddraw);
+    ok(hr == DD_OK, "RestoreDisplayMode failed, hr %#x.\n", hr);
+    flush_events();
+    SetRect(&rect, 0, 0, param.old_width, param.old_height);
+    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
+            wine_dbgstr_rect(&clip_rect));
+
+    /* Switch to normal cooperative level */
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+    flush_events();
+    get_virtual_rect(&rect);
+    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
+            wine_dbgstr_rect(&clip_rect));
+
+done:
+    IDirectDraw7_Release(ddraw);
+    DestroyWindow(window);
+}
+
 START_TEST(ddraw7)
 {
     DDDEVICEIDENTIFIER2 identifier;
@@ -17400,4 +17632,5 @@ START_TEST(ddraw7)
     test_d32_support();
     test_surface_format_conversion_alpha();
     test_compressed_surface_stretch();
+    test_cursor_clipping();
 }

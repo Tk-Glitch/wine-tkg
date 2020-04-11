@@ -1262,6 +1262,23 @@ void signal_exit_process( int status )
 }
 
 /**********************************************************************
+ *           get_thread_ldt_entry
+ */
+NTSTATUS get_thread_ldt_entry( HANDLE handle, void *data, ULONG len, ULONG *ret_len )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ *           NtSetLdtEntries   (NTDLL.@)
+ *           ZwSetLdtEntries   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSetLdtEntries( ULONG sel1, LDT_ENTRY entry1, ULONG sel2, LDT_ENTRY entry2 )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/**********************************************************************
  *              DbgBreakPoint   (NTDLL.@)
  */
 void WINAPI DbgBreakPoint(void)

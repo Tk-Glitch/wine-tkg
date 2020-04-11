@@ -29,61 +29,38 @@
  *     available (hopefully) from http://sources.redhat.com/gdb/onlinedocs
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <sys/types.h>
 #include <fcntl.h>
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
-#ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
-#endif
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 #include <stdio.h>
 #include <assert.h>
 #include <stdarg.h>
-
-#ifdef HAVE_MACH_O_NLIST_H
-# include <mach-o/nlist.h>
-#endif
 
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
 
 #include "dbghelp_private.h"
+#include "image_private.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_stabs);
 
 /* Masks for n_type field */
-#ifndef N_STAB
 #define N_STAB		0xe0
-#endif
-#ifndef N_TYPE
+#define N_PEXT		0x10
 #define N_TYPE		0x1e
-#endif
-#ifndef N_EXT
 #define N_EXT		0x01
-#endif
 
 /* Values for (n_type & N_TYPE) */
-#ifndef N_UNDF
 #define N_UNDF		0x00
-#endif
-#ifndef N_ABS
 #define N_ABS		0x02
-#endif
-
+#define N_INDR		0x0a
+#define N_SECT		0x0e
 #define N_GSYM		0x20
 #define N_FUN		0x24
 #define N_STSYM		0x26
@@ -105,15 +82,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_stabs);
 #define N_LBRAC		0xc0
 #define N_EXCL		0xc2
 #define N_RBRAC		0xe0
-
-struct stab_nlist
-{
-    unsigned            n_strx;
-    unsigned char       n_type;
-    char                n_other;
-    short               n_desc;
-    unsigned            n_value;
-};
 
 static void stab_strcpy(char* dest, int sz, const char* source)
 {
@@ -1262,7 +1230,7 @@ static inline void stabbuf_append(char **buf, unsigned *buf_size, const char *st
 }
 
 BOOL stabs_parse(struct module* module, ULONG_PTR load_offset,
-                 const char* pv_stab_ptr, int stablen,
+                 const char* pv_stab_ptr, size_t nstab, size_t stabsize,
                  const char* strs, int strtablen,
                  stabs_def_cb callback, void* user)
 {
@@ -1271,7 +1239,6 @@ BOOL stabs_parse(struct module* module, ULONG_PTR load_offset,
     struct symt_compiland*      compiland = NULL;
     char*                       srcpath = NULL;
     int                         i;
-    int                         nstab;
     const char*                 ptr;
     char*                       stabbuff;
     unsigned int                stabbufflen;
@@ -1287,14 +1254,8 @@ BOOL stabs_parse(struct module* module, ULONG_PTR load_offset,
     BOOL                        ret = TRUE;
     struct location             loc;
     unsigned char               type;
-    size_t                      stabsize = sizeof(struct stab_nlist);
     uint64_t                    n_value;
 
-#ifdef __APPLE__
-    if (module->process->is_64bit)
-        stabsize = sizeof(struct nlist_64);
-#endif
-    nstab = stablen / stabsize;
     strs_end = strs + strtablen;
 
     memset(stabs_basic, 0, sizeof(stabs_basic));
@@ -1313,11 +1274,7 @@ BOOL stabs_parse(struct module* module, ULONG_PTR load_offset,
     for (i = 0; i < nstab; i++)
     {
         stab_ptr = (struct stab_nlist *)(pv_stab_ptr + i * stabsize);
-        n_value = stab_ptr->n_value;
-#ifdef __APPLE__
-        if (module->process->is_64bit)
-            n_value = ((struct nlist_64 *)stab_ptr)->n_value;
-#endif
+        n_value = stabsize == sizeof(struct macho64_nlist) ? ((struct macho64_nlist *)stab_ptr)->n_value : stab_ptr->n_value;
         ptr = strs + stab_ptr->n_strx;
         if ((ptr > strs_end) || (ptr + strlen(ptr) > strs_end))
         {
@@ -1343,7 +1300,10 @@ BOOL stabs_parse(struct module* module, ULONG_PTR load_offset,
         if (stab_ptr->n_type & N_STAB)
             type = stab_ptr->n_type;
         else
+        {
             type = (stab_ptr->n_type & N_TYPE);
+            if (module->type == DMT_MACHO) type &= ~N_PEXT;
+        }
 
         /* only symbol entries contain a typedef */
         switch (type)
@@ -1640,19 +1600,17 @@ BOOL stabs_parse(struct module* module, ULONG_PTR load_offset,
         case N_BNSYM:
         case N_ENSYM:
         case N_OSO:
+        case N_INDR:
             /* Always ignore these, they seem to be used only on Darwin. */
             break;
         case N_ABS:
-#ifdef N_SECT
         case N_SECT:
-#endif
             /* FIXME: Other definition types (N_TEXT, N_DATA, N_BSS, ...)? */
             if (callback)
             {
                 BOOL is_public = (stab_ptr->n_type & N_EXT);
                 BOOL is_global = is_public;
 
-#ifdef N_PEXT
                 /* "private extern"; shared among compilation units in a shared
                  * library, but not accessible from outside the library. */
                 if (stab_ptr->n_type & N_PEXT)
@@ -1660,7 +1618,6 @@ BOOL stabs_parse(struct module* module, ULONG_PTR load_offset,
                     is_public = FALSE;
                     is_global = TRUE;
                 }
-#endif
 
                 if (*ptr == '_') ptr++;
                 stab_strcpy(symname, sizeof(symname), ptr);

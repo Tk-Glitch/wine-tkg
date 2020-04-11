@@ -21,66 +21,50 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
-#ifdef HAVE_MACH_O_LOADER_H
-#include <CoreFoundation/CFString.h>
-#define LoadResource mac_LoadResource
-#define GetCurrentThread mac_GetCurrentThread
-#include <CoreServices/CoreServices.h>
-#undef LoadResource
-#undef GetCurrentThread
-#endif
-
 #include <stdio.h>
 #include <assert.h>
 #include <stdarg.h>
 #include <errno.h>
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
-#ifdef HAVE_SYS_MMAN_H
-# include <sys/mman.h>
-#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "dbghelp_private.h"
-#include "winternl.h"
-#include "wine/debug.h"
-#include "wine/heap.h"
 #include "image_private.h"
 
-#ifdef HAVE_MACH_O_LOADER_H
+#include "winternl.h"
+#include "winioctl.h"
+#define WINE_MOUNTMGR_EXTENSIONS
+#include "ddk/mountmgr.h"
 
-#include <mach-o/fat.h>
-#include <mach-o/loader.h>
-#include <mach-o/nlist.h>
-#include <mach-o/dyld.h>
+#include "wine/debug.h"
+#include "wine/heap.h"
 
-struct dyld_image_info32 {
-    uint32_t /* const struct mach_header* */    imageLoadAddress;
-    uint32_t /* const char* */                  imageFilePath;
-    uint32_t /* uintptr_t */                    imageFileModDate;
+struct dyld_image_info32
+{
+    UINT32  imageLoadAddress;  /* const struct mach_header* */
+    UINT32  imageFilePath;     /* const char* */
+    UINT32  imageFileModDate;  /* uintptr_t */
 };
 
-struct dyld_all_image_infos32 {
-    uint32_t                                        version;
-    uint32_t                                        infoArrayCount;
-    uint32_t /* const struct dyld_image_info* */    infoArray;
+struct dyld_all_image_infos32
+{
+    UINT32  version;
+    UINT32  infoArrayCount;
+    UINT32  infoArray;         /* const struct dyld_image_info* */
 };
 
-struct dyld_image_info64 {
-    uint64_t /* const struct mach_header* */    imageLoadAddress;
-    uint64_t /* const char* */                  imageFilePath;
-    uint64_t /* uintptr_t */                    imageFileModDate;
+struct dyld_image_info64
+{
+    UINT64  imageLoadAddress;  /* const struct mach_header* */
+    UINT64  imageFilePath;     /* const char* */
+    UINT64  imageFileModDate;  /* uintptr_t */
 };
 
-struct dyld_all_image_infos64 {
-    uint32_t                                        version;
-    uint32_t                                        infoArrayCount;
-    uint64_t /* const struct dyld_image_info* */    infoArray;
+struct dyld_all_image_infos64
+{
+    UINT32  version;
+    UINT32  infoArrayCount;
+    UINT64  infoArray;         /* const struct dyld_image_info* */
 };
 
 union wine_image_info {
@@ -91,6 +75,58 @@ union wine_image_info {
 union wine_all_image_infos {
     struct dyld_all_image_infos32 infos32;
     struct dyld_all_image_infos64 infos64;
+};
+
+struct macho_header
+{
+    UINT32  magic;       /* mach magic number identifier */
+    UINT32  cputype;     /* cpu specifier */
+    UINT32  cpusubtype;  /* machine specifier */
+    UINT32  filetype;    /* type of file */
+    UINT32  ncmds;       /* number of load commands */
+    UINT32  sizeofcmds;  /* the size of all the load commands */
+    UINT32  flags;       /* flags */
+    UINT32  reserved;    /* reserved */
+};
+
+struct macho_segment_command
+{
+    UINT32  cmd;          /* LC_SEGMENT_64 */
+    UINT32  cmdsize;      /* includes sizeof section_64 structs */
+    char    segname[16];  /* segment name */
+    UINT64  vmaddr;       /* memory address of this segment */
+    UINT64  vmsize;       /* memory size of this segment */
+    UINT64  fileoff;      /* file offset of this segment */
+    UINT64  filesize;     /* amount to map from the file */
+    UINT32  maxprot;      /* maximum VM protection */
+    UINT32  initprot;     /* initial VM protection */
+    UINT32  nsects;       /* number of sections in segment */
+    UINT32  flags;        /* flags */
+};
+
+struct macho_segment_command32
+{
+    UINT32  cmd;          /* LC_SEGMENT */
+    UINT32  cmdsize;      /* includes sizeof section structs */
+    char    segname[16];  /* segment name */
+    UINT32  vmaddr;       /* memory address of this segment */
+    UINT32  vmsize;       /* memory size of this segment */
+    UINT32  fileoff;      /* file offset of this segment */
+    UINT32  filesize;     /* amount to map from the file */
+    UINT32  maxprot;      /* maximum VM protection */
+    UINT32  initprot;     /* initial VM protection */
+    UINT32  nsects;       /* number of sections in segment */
+    UINT32  flags;        /* flags */
+};
+
+struct macho_symtab_command
+{
+    UINT32  cmd;          /* LC_SYMTAB */
+    UINT32  cmdsize;      /* sizeof(struct symtab_command) */
+    UINT32  symoff;       /* symbol table offset */
+    UINT32  nsyms;        /* number of symbol table entries */
+    UINT32  stroff;       /* string table offset */
+    UINT32  strsize;      /* string table size in bytes */
 };
 
 #ifdef WORDS_BIGENDIAN
@@ -111,6 +147,27 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_macho);
    memory by dyld. */
 #define MACHO_DYLD_IN_SHARED_CACHE 0x80000000
 
+#define MACHO_FAT_MAGIC    0xcafebabe
+#define MACHO_MH_MAGIC_32  0xfeedface
+#define MACHO_MH_MAGIC_64  0xfeedfacf
+
+#define MACHO_CPU_TYPE_X86     0x00000007
+#define MACHO_CPU_TYPE_X86_64  0x01000007
+
+#define MACHO_MH_EXECUTE   0x2
+#define MACHO_MH_DYLIB     0x6
+#define MACHO_MH_DYLINKER  0x7
+#define MACHO_MH_BUNDLE    0x8
+#define MACHO_MH_DSYM      0xa
+
+#define MACHO_LC_SEGMENT     0x01
+#define MACHO_LC_SYMTAB      0x02
+#define MACHO_LC_SEGMENT_64  0x19
+#define MACHO_LC_UUID        0x1b
+
+#define MACHO_SECTION_TYPE              0x000000ff
+#define MACHO_S_ATTR_PURE_INSTRUCTIONS  0x80000000
+#define MACHO_S_ATTR_SOME_INSTRUCTIONS  0x00000400
 
 #define UUID_STRING_LEN 37 /* 16 bytes at 2 hex digits apiece, 4 dashes, and the null terminator */
 
@@ -141,7 +198,7 @@ struct macho_info
 
 static void macho_unmap_file(struct image_file_map* fmap);
 
-static char* format_uuid(const uint8_t uuid[16], char out[UUID_STRING_LEN])
+static char* format_uuid(const UINT8 uuid[16], char out[UUID_STRING_LEN])
 {
     sprintf(out, "%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
             uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7],
@@ -443,12 +500,12 @@ static const struct image_file_map_ops macho_file_map_ops =
  *
  * Maps the load commands from a Mach-O file into memory
  */
-static const struct load_command* macho_map_load_commands(struct macho_file_map* fmap)
+static const struct macho_load_command* macho_map_load_commands(struct macho_file_map* fmap)
 {
     if (fmap->load_commands == IMAGE_NO_MAP)
     {
-        fmap->load_commands = (const struct load_command*) macho_map_range(
-                fmap, fmap->header_size, fmap->mach_header.sizeofcmds, NULL);
+        fmap->load_commands = (const struct macho_load_command*) macho_map_range(
+                fmap, fmap->header_size, fmap->commands_size, NULL);
         TRACE("Mapped load commands: %p\n", fmap->load_commands);
     }
 
@@ -466,7 +523,7 @@ static void macho_unmap_load_commands(struct macho_file_map* fmap)
     {
         TRACE("Unmapping load commands: %p\n", fmap->load_commands);
         macho_unmap_range(NULL, (const void**)&fmap->load_commands, fmap,
-                    fmap->header_size, fmap->mach_header.sizeofcmds);
+                    fmap->header_size, fmap->commands_size);
     }
 }
 
@@ -475,9 +532,9 @@ static void macho_unmap_load_commands(struct macho_file_map* fmap)
  *
  * Advance to the next load command
  */
-static const struct load_command* macho_next_load_command(const struct load_command* lc)
+static const struct macho_load_command* macho_next_load_command(const struct macho_load_command* lc)
 {
-    return (const struct load_command*)((const char*)lc + lc->cmdsize);
+    return (const struct macho_load_command*)((const char*)lc + lc->cmdsize);
 }
 
 /******************************************************************
@@ -492,11 +549,11 @@ static const struct load_command* macho_next_load_command(const struct load_comm
  * processed.
  */
 static int macho_enum_load_commands(struct image_file_map *ifm, unsigned cmd,
-                                    int (*cb)(struct image_file_map*, const struct load_command*, void*),
+                                    int (*cb)(struct image_file_map*, const struct macho_load_command*, void*),
                                     void* user)
 {
     struct macho_file_map* fmap = &ifm->u.macho;
-    const struct load_command* lc;
+    const struct macho_load_command* lc;
     int i;
     int count = 0;
 
@@ -504,9 +561,9 @@ static int macho_enum_load_commands(struct image_file_map *ifm, unsigned cmd,
 
     if ((lc = macho_map_load_commands(fmap)) == IMAGE_NO_MAP) return -1;
 
-    TRACE("%d total commands\n", fmap->mach_header.ncmds);
+    TRACE("%u total commands\n", fmap->commands_count);
 
-    for (i = 0; i < fmap->mach_header.ncmds; i++, lc = macho_next_load_command(lc))
+    for (i = 0; i < fmap->commands_count; i++, lc = macho_next_load_command(lc))
     {
         int result;
 
@@ -528,20 +585,20 @@ static int macho_enum_load_commands(struct image_file_map *ifm, unsigned cmd,
  * significant sections in a Mach-O file.  All commands are
  * expected to be of LC_SEGMENT[_64] type.
  */
-static int macho_count_sections(struct image_file_map* ifm, const struct load_command* lc, void* user)
+static int macho_count_sections(struct image_file_map* ifm, const struct macho_load_command* lc, void* user)
 {
     char segname[16];
-    uint32_t nsects;
+    size_t nsects;
 
     if (ifm->addr_size == 32)
     {
-        const struct segment_command *sc = (const struct segment_command *)lc;
+        const struct macho_segment_command32 *sc = (const struct macho_segment_command32 *)lc;
         memcpy(segname, sc->segname, sizeof(segname));
         nsects = sc->nsects;
     }
     else
     {
-        const struct segment_command_64 *sc = (const struct segment_command_64 *)lc;
+        const struct macho_segment_command *sc = (const struct macho_segment_command *)lc;
         memcpy(segname, sc->segname, sizeof(segname));
         nsects = sc->nsects;
     }
@@ -560,21 +617,21 @@ static int macho_count_sections(struct image_file_map* ifm, const struct load_co
  * range covered by the segments of a Mach-O file and builds the
  * section map.  All commands are expected to be of LC_SEGMENT[_64] type.
  */
-static int macho_load_section_info(struct image_file_map* ifm, const struct load_command* lc, void* user)
+static int macho_load_section_info(struct image_file_map* ifm, const struct macho_load_command* lc, void* user)
 {
     struct macho_file_map*          fmap = &ifm->u.macho;
     struct section_info*            info = user;
     BOOL                            ignore;
     int                             i;
     ULONG_PTR                       tmp, page_mask = sysinfo.dwPageSize - 1;
-    uint64_t vmaddr, vmsize;
+    UINT64 vmaddr, vmsize;
     char segname[16];
-    uint32_t nsects;
+    size_t nsects;
     const void *sections;
 
     if (ifm->addr_size == 32)
     {
-        const struct segment_command *sc = (const struct segment_command *)lc;
+        const struct macho_segment_command32 *sc = (const struct macho_segment_command32 *)lc;
         vmaddr = sc->vmaddr;
         vmsize = sc->vmsize;
         memcpy(segname, sc->segname, sizeof(segname));
@@ -583,7 +640,7 @@ static int macho_load_section_info(struct image_file_map* ifm, const struct load
     }
     else
     {
-        const struct segment_command_64 *sc = (const struct segment_command_64 *)lc;
+        const struct macho_segment_command *sc = (const struct macho_segment_command *)lc;
         vmaddr = sc->vmaddr;
         vmsize = sc->vmsize;
         memcpy(segname, sc->segname, sizeof(segname));
@@ -599,7 +656,7 @@ static int macho_load_section_info(struct image_file_map* ifm, const struct load
     /* Images in the dyld shared cache have their segments mapped non-contiguously.
        We don't know how to properly locate any of the segments other than __TEXT,
        so ignore them. */
-    ignore = (info->split_segs && strcmp(segname, SEG_TEXT));
+    ignore = (info->split_segs && strcmp(segname, "__TEXT"));
 
     if (!strncmp(segname, "WINE_", 5))
         TRACE("Ignoring special Wine segment %s\n", debugstr_an(segname, sizeof(segname)));
@@ -624,7 +681,7 @@ static int macho_load_section_info(struct image_file_map* ifm, const struct load
     {
         if (ifm->addr_size == 32)
         {
-            const struct section *section = &((const struct section *)sections)[i];
+            const struct macho_section32 *section = &((const struct macho_section32 *)sections)[i];
             memcpy(fmap->sect[info->section_index].section.sectname, section->sectname, sizeof(section->sectname));
             memcpy(fmap->sect[info->section_index].section.segname,  section->segname,  sizeof(section->segname));
             fmap->sect[info->section_index].section.addr      = section->addr;
@@ -636,7 +693,7 @@ static int macho_load_section_info(struct image_file_map* ifm, const struct load
             fmap->sect[info->section_index].section.flags     = section->flags;
         }
         else
-            fmap->sect[info->section_index].section = ((const struct section_64 *)sections)[i];
+            fmap->sect[info->section_index].section = ((const struct macho_section *)sections)[i];
 
         fmap->sect[info->section_index].mapped = IMAGE_NO_MAP;
         fmap->sect[info->section_index].ignored = ignore;
@@ -652,9 +709,9 @@ static int macho_load_section_info(struct image_file_map* ifm, const struct load
  * Callback for macho_enum_load_commands.  Records the UUID load
  * command of a Mach-O file.
  */
-static int find_uuid(struct image_file_map* ifm, const struct load_command* lc, void* user)
+static int find_uuid(struct image_file_map* ifm, const struct macho_load_command* lc, void* user)
 {
-    ifm->u.macho.uuid = (const struct uuid_command*)lc;
+    ifm->u.macho.uuid = (const struct macho_uuid_command*)lc;
     return 1;
 }
 
@@ -682,15 +739,21 @@ static BOOL macho_map_file(struct process *pcs, const WCHAR *filenameW,
     BOOL split_segs, struct image_file_map* ifm)
 {
     struct macho_file_map* fmap = &ifm->u.macho;
-    struct fat_header   fat_header;
+    struct macho_header mach_header;
     int                 i;
     WCHAR*              filename;
     struct section_info info;
     BOOL                ret = FALSE;
-    cpu_type_t target_cpu = (pcs->is_64bit) ? CPU_TYPE_X86_64 : CPU_TYPE_X86;
-    uint32_t target_magic = (pcs->is_64bit) ? MH_MAGIC_64 : MH_MAGIC;
-    uint32_t target_cmd   = (pcs->is_64bit) ? LC_SEGMENT_64 : LC_SEGMENT;
+    UINT32 target_cpu = (pcs->is_64bit) ? MACHO_CPU_TYPE_X86_64 : MACHO_CPU_TYPE_X86;
+    UINT32 target_magic = (pcs->is_64bit) ? MACHO_MH_MAGIC_64 : MACHO_MH_MAGIC_32;
+    UINT32 target_cmd   = (pcs->is_64bit) ? MACHO_LC_SEGMENT_64 : MACHO_LC_SEGMENT;
     DWORD bytes_read;
+
+    struct
+    {
+        UINT32  magic;      /* FAT_MAGIC or FAT_MAGIC_64 */
+        UINT32  nfat_arch;  /* number of structs that follow */
+    } fat_header;
 
     TRACE("(%s, %p)\n", debugstr_w(filenameW), fmap);
 
@@ -700,7 +763,7 @@ static BOOL macho_map_file(struct process *pcs, const WCHAR *filenameW,
     ifm->ops = &macho_file_map_ops;
     ifm->alternate = NULL;
     ifm->addr_size = (pcs->is_64bit) ? 64 : 32;
-    fmap->header_size = (pcs->is_64bit) ? sizeof(struct mach_header_64) : sizeof(struct mach_header);
+    fmap->header_size = (pcs->is_64bit) ? sizeof(struct macho_header) : FIELD_OFFSET(struct macho_header, reserved);
 
     if (!(filename = get_dos_file_name(filenameW))) return FALSE;
 
@@ -720,12 +783,20 @@ static BOOL macho_map_file(struct process *pcs, const WCHAR *filenameW,
     TRACE("... got possible fat header\n");
 
     /* Fat header is always in big-endian order. */
-    if (swap_ulong_be_to_host(fat_header.magic) == FAT_MAGIC)
+    if (swap_ulong_be_to_host(fat_header.magic) == MACHO_FAT_MAGIC)
     {
         int narch = swap_ulong_be_to_host(fat_header.nfat_arch);
         for (i = 0; i < narch; i++)
         {
-            struct fat_arch fat_arch;
+            struct
+            {
+                UINT32  cputype;     /* cpu specifier (int) */
+                UINT32  cpusubtype;  /* machine specifier (int) */
+                UINT32  offset;      /* file offset to this object file */
+                UINT32  size;        /* size of this object file */
+                UINT32  align;       /* alignment as a power of 2 */
+            } fat_arch;
+
             if (!ReadFile(fmap->handle, &fat_arch, sizeof(fat_arch), &bytes_read, NULL) || bytes_read != sizeof(fat_arch))
                 goto done;
             if (swap_ulong_be_to_host(fat_arch.cputype) == target_cpu)
@@ -745,21 +816,22 @@ static BOOL macho_map_file(struct process *pcs, const WCHAR *filenameW,
 
     /* Individual architecture (standalone or within a fat file) is in its native byte order. */
     SetFilePointer(fmap->handle, fmap->arch_offset, 0, FILE_BEGIN);
-    if (!ReadFile(fmap->handle, &fmap->mach_header, sizeof(fmap->mach_header), &bytes_read, NULL)
-        || bytes_read != sizeof(fmap->mach_header))
+    if (!ReadFile(fmap->handle, &mach_header, fmap->header_size, &bytes_read, NULL)
+        || bytes_read != fmap->header_size)
         goto done;
     TRACE("... got possible Mach header\n");
     /* and check for a Mach-O header */
-    if (fmap->mach_header.magic != target_magic ||
-        fmap->mach_header.cputype != target_cpu) goto done;
+    if (mach_header.magic != target_magic || mach_header.cputype != target_cpu) goto done;
+    fmap->commands_size = mach_header.sizeofcmds;
+    fmap->commands_count = mach_header.ncmds;
     /* Make sure the file type is one of the ones we expect. */
-    switch (fmap->mach_header.filetype)
+    switch (mach_header.filetype)
     {
-        case MH_EXECUTE:
-        case MH_DYLIB:
-        case MH_DYLINKER:
-        case MH_BUNDLE:
-        case MH_DSYM:
+        case MACHO_MH_EXECUTE:
+        case MACHO_MH_DYLIB:
+        case MACHO_MH_DYLINKER:
+        case MACHO_MH_BUNDLE:
+        case MACHO_MH_DSYM:
             break;
         default:
             goto done;
@@ -790,7 +862,7 @@ static BOOL macho_map_file(struct process *pcs, const WCHAR *filenameW,
     TRACE("segs_start: 0x%08lx, segs_size: 0x%08lx\n", (ULONG_PTR)fmap->segs_start,
             (ULONG_PTR)fmap->segs_size);
 
-    if (macho_enum_load_commands(ifm, LC_UUID, find_uuid, NULL) < 0)
+    if (macho_enum_load_commands(ifm, MACHO_LC_UUID, find_uuid, NULL) < 0)
         goto done;
     if (fmap->uuid)
     {
@@ -863,8 +935,8 @@ static BOOL macho_sect_is_code(struct macho_file_map* fmap, unsigned char sectid
     sectidx--; /* convert from 1-based to 0-based */
     if (sectidx >= fmap->num_sections || fmap->sect[sectidx].ignored) return FALSE;
 
-    ret = (!(fmap->sect[sectidx].section.flags & SECTION_TYPE) &&
-           (fmap->sect[sectidx].section.flags & (S_ATTR_PURE_INSTRUCTIONS|S_ATTR_SOME_INSTRUCTIONS)));
+    ret = (!(fmap->sect[sectidx].section.flags & MACHO_SECTION_TYPE) &&
+           (fmap->sect[sectidx].section.flags & (MACHO_S_ATTR_PURE_INSTRUCTIONS | MACHO_S_ATTR_SOME_INSTRUCTIONS)));
     TRACE("-> %d\n", ret);
     return ret;
 }
@@ -925,14 +997,14 @@ static void macho_stabs_def_cb(struct module* module, ULONG_PTR load_offset,
  * load commands from the Mach-O file.
  */
 static int macho_parse_symtab(struct image_file_map* ifm,
-                              const struct load_command* lc, void* user)
+                              const struct macho_load_command* lc, void* user)
 {
     struct macho_file_map* fmap = &ifm->u.macho;
-    const struct symtab_command*    sc = (const struct symtab_command*)lc;
+    const struct macho_symtab_command* sc = (const struct macho_symtab_command*)lc;
     struct macho_debug_info*        mdi = user;
     const char*                     stabstr;
     int                             ret = 0;
-    size_t stabsize = (ifm->addr_size == 32) ? sizeof(struct nlist) : sizeof(struct nlist_64);
+    size_t stabsize = (ifm->addr_size == 32) ? sizeof(struct stab_nlist) : sizeof(struct macho64_nlist);
     const char *stab;
 
     TRACE("(%p/%p, %p, %p) %u syms at 0x%08x, strings 0x%08x - 0x%08x\n", fmap, fmap->handle, lc,
@@ -944,7 +1016,7 @@ static int macho_parse_symtab(struct image_file_map* ifm,
 
     if (!stabs_parse(mdi->module,
                      mdi->module->format_info[DFI_MACHO]->u.macho_info->load_addr - fmap->segs_start,
-                     stab, sc->nsyms * stabsize,
+                     stab, sc->nsyms, stabsize,
                      stabstr, sc->strsize, macho_stabs_def_cb, mdi))
         ret = -1;
 
@@ -1160,6 +1232,48 @@ static BOOL try_dsym(struct process *pcs, const WCHAR* path, struct macho_file_m
     return FALSE;
 }
 
+static const WCHAR dsym_subpath[] = {'\\','C','o','n','t','e','n','t','s',
+                                     '\\','R','e','s','o','u','r','c','e','s',
+                                     '\\','D','W','A','R','F','\\',0};
+
+static WCHAR *query_dsym(const GUID *uuid, const WCHAR *filename)
+{
+    MOUNTMGR_TARGET_NAME *query;
+    WCHAR *ret = NULL;
+    char buf[1024];
+    HANDLE mgr;
+    BOOL res;
+
+    mgr = CreateFileW(MOUNTMGR_DOS_DEVICE_NAME, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL,
+                      OPEN_EXISTING, 0, 0);
+    if (mgr == INVALID_HANDLE_VALUE) return NULL;
+
+    query = (void *)buf;
+    res = DeviceIoControl( mgr, IOCTL_MOUNTMGR_QUERY_SYMBOL_FILE, (void*)uuid, sizeof(*uuid), query, sizeof(buf), NULL, NULL );
+    if (!res && GetLastError() == ERROR_MORE_DATA)
+    {
+        size_t size = FIELD_OFFSET(MOUNTMGR_TARGET_NAME, DeviceName[query->DeviceNameLength]);
+        query = HeapAlloc(GetProcessHeap(), 0, size);
+        if (query)
+            res = DeviceIoControl( mgr, IOCTL_MOUNTMGR_QUERY_SYMBOL_FILE, (void*)uuid, sizeof(*uuid), query, size, NULL, NULL );
+    }
+    CloseHandle(mgr);
+
+    if (res && (ret = HeapAlloc(GetProcessHeap(), 0,
+                                query->DeviceNameLength + sizeof(dsym_subpath) + lstrlenW(filename) * sizeof(WCHAR))))
+    {
+        WCHAR *p = ret;
+        memcpy(p, query->DeviceName, query->DeviceNameLength);
+        p += query->DeviceNameLength / sizeof(WCHAR);
+        memcpy(p, dsym_subpath, sizeof(dsym_subpath));
+        p += ARRAY_SIZE(dsym_subpath) - 1;
+        lstrcpyW(p, filename);
+    }
+
+    if (query != (void *)buf) HeapFree(GetProcessHeap(), 0, query);
+    return ret;
+}
+
 /******************************************************************
  *              find_and_map_dsym
  *
@@ -1174,16 +1288,11 @@ static BOOL try_dsym(struct process *pcs, const WCHAR* path, struct macho_file_m
 static void find_and_map_dsym(struct process *pcs, struct module* module)
 {
     static const WCHAR dot_dsym[] = {'.','d','S','Y','M',0};
-    static const WCHAR dsym_subpath[] = {'/','C','o','n','t','e','n','t','s','/','R','e','s','o','u','r','c','e','s','/','D','W','A','R','F','/',0};
     static const WCHAR dot_dwarf[] = {'.','d','w','a','r','f',0};
     struct macho_file_map* fmap = &module->format_info[DFI_MACHO]->u.macho_info->file_map.u.macho;
     const WCHAR* p;
     size_t len;
     WCHAR* path = NULL;
-    char uuid_string[UUID_STRING_LEN];
-    CFStringRef uuid_cfstring;
-    CFStringRef query_string;
-    MDQueryRef query = NULL;
 
     /* Without a UUID, we can't verify that any debug info file we find corresponds
        to this file.  Better to have no debug info than incorrect debug info. */
@@ -1191,56 +1300,28 @@ static void find_and_map_dsym(struct process *pcs, struct module* module)
         return;
 
     p = file_name(module->module.LoadedImageName);
-    len = strlenW(module->module.LoadedImageName) + strlenW(dot_dsym) + strlenW(dsym_subpath) + strlenW(p) + 1;
+    len = lstrlenW(module->module.LoadedImageName) + lstrlenW(dot_dsym) + lstrlenW(dsym_subpath) + lstrlenW(p) + 1;
     path = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
     if (!path)
         return;
-    strcpyW(path, module->module.LoadedImageName);
-    strcatW(path, dot_dsym);
-    strcatW(path, dsym_subpath);
-    strcatW(path, p);
+    lstrcpyW(path, module->module.LoadedImageName);
+    lstrcatW(path, dot_dsym);
+    lstrcatW(path, dsym_subpath);
+    lstrcatW(path, p);
 
     if (try_dsym(pcs, path, fmap))
         goto found;
 
-    strcpyW(path + strlenW(module->module.LoadedImageName), dot_dwarf);
+    lstrcpyW(path + lstrlenW(module->module.LoadedImageName), dot_dwarf);
 
     if (try_dsym(pcs, path, fmap))
         goto found;
 
-    format_uuid(fmap->uuid->uuid, uuid_string);
-    uuid_cfstring = CFStringCreateWithCString(NULL, uuid_string, kCFStringEncodingASCII);
-    query_string = CFStringCreateWithFormat(NULL, NULL, CFSTR("com_apple_xcode_dsym_uuids == \"%@\""), uuid_cfstring);
-    CFRelease(uuid_cfstring);
-    query = MDQueryCreate(NULL, query_string, NULL, NULL);
-    CFRelease(query_string);
-    MDQuerySetMaxCount(query, 1);
-    if (MDQueryExecute(query, kMDQuerySynchronous) && MDQueryGetResultCount(query) >= 1)
-    {
-        MDItemRef item = (MDItemRef)MDQueryGetResultAtIndex(query, 0);
-        CFStringRef item_path = MDItemCopyAttribute(item, kMDItemPath);
-        if (item_path)
-        {
-            CFIndex item_path_len = CFStringGetLength(item_path);
-            if (item_path_len + strlenW(dsym_subpath) + strlenW(p) >= len)
-            {
-                HeapFree(GetProcessHeap(), 0, path);
-                len = item_path_len + strlenW(dsym_subpath) + strlenW(p) + 1;
-                path = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-            }
-            CFStringGetCharacters(item_path, CFRangeMake(0, item_path_len), (UniChar*)path);
-            strcpyW(path + item_path_len, dsym_subpath);
-            strcatW(path, p);
-            CFRelease(item_path);
-
-            if (try_dsym(pcs, path, fmap))
-                goto found;
-        }
-    }
+    HeapFree(GetProcessHeap(), 0, path);
+    if ((path = query_dsym((const GUID *)fmap->uuid->uuid, p))) try_dsym(pcs, path, fmap);
 
 found:
     HeapFree(GetProcessHeap(), 0, path);
-    if (query) CFRelease(query);
 }
 
 /******************************************************************
@@ -1259,11 +1340,11 @@ static BOOL image_uses_split_segs(struct process* process, ULONG_PTR load_addr)
 
     if (load_addr)
     {
-        cpu_type_t target_cpu = (process->is_64bit) ? CPU_TYPE_X86_64 : CPU_TYPE_X86;
-        uint32_t target_magic = (process->is_64bit) ? MH_MAGIC_64 : MH_MAGIC;
-        struct mach_header header;
+        UINT32 target_cpu = (process->is_64bit) ? MACHO_CPU_TYPE_X86_64 : MACHO_CPU_TYPE_X86;
+        UINT32 target_magic = (process->is_64bit) ? MACHO_MH_MAGIC_64 : MACHO_MH_MAGIC_32;
+        struct macho_header header;
 
-        if (ReadProcessMemory(process->handle, (void*)load_addr, &header, sizeof(header), NULL) &&
+        if (read_process_memory(process, load_addr, &header, FIELD_OFFSET(struct macho_header, reserved)) &&
             header.magic == target_magic && header.cputype == target_cpu &&
             header.flags & MACHO_DYLD_IN_SHARED_CACHE)
         {
@@ -1313,7 +1394,7 @@ static BOOL macho_load_debug_info(struct process *pcs, struct module* module)
     mdi.module = module;
     pool_init(&mdi.pool, 65536);
     hash_table_init(&mdi.pool, &mdi.ht_symtab, 256);
-    result = macho_enum_load_commands(ifm, LC_SYMTAB, macho_parse_symtab, &mdi);
+    result = macho_enum_load_commands(ifm, MACHO_LC_SYMTAB, macho_parse_symtab, &mdi);
     if (result > 0)
         ret = TRUE;
     else if (result < 0)
@@ -1322,7 +1403,7 @@ static BOOL macho_load_debug_info(struct process *pcs, struct module* module)
     if (!(dbghelp_options & SYMOPT_PUBLICS_ONLY) && fmap->dsym)
     {
         mdi.fmap = &fmap->dsym->u.macho;
-        result = macho_enum_load_commands(fmap->dsym, LC_SYMTAB, macho_parse_symtab, &mdi);
+        result = macho_enum_load_commands(fmap->dsym, MACHO_LC_SYMTAB, macho_parse_symtab, &mdi);
         if (result > 0)
             ret = TRUE;
         else if (result < 0)
@@ -1364,41 +1445,6 @@ static void macho_module_remove(struct process* pcs, struct module_format* modfm
 {
     macho_unmap_file(&modfmt->u.macho_info->file_map);
     HeapFree(GetProcessHeap(), 0, modfmt);
-}
-
-/******************************************************************
- *              get_dyld_image_info_address
- */
-static ULONG_PTR get_dyld_image_info_address(struct process* pcs)
-{
-    ULONG_PTR dyld_image_info_address = 0;
-
-#ifndef __LP64__ /* No reading the symtab with nlist(3) in LP64 */
-    if (!dyld_image_info_address)
-    {
-        static void* dyld_all_image_infos_addr;
-
-        /* Our next best guess is that dyld was loaded at its base address
-           and we can find the dyld image infos address by looking up its symbol. */
-        if (!dyld_all_image_infos_addr)
-        {
-            struct nlist nl[2];
-            memset(nl, 0, sizeof(nl));
-            nl[0].n_un.n_name = (char*)"_dyld_all_image_infos";
-            if (!nlist("/usr/lib/dyld", nl))
-                dyld_all_image_infos_addr = (void*)nl[0].n_value;
-        }
-
-        if (dyld_all_image_infos_addr)
-        {
-            TRACE("got dyld_image_info_address %p from /usr/lib/dyld symbol table\n",
-                  dyld_all_image_infos_addr);
-            dyld_image_info_address = (ULONG_PTR)dyld_all_image_infos_addr;
-        }
-    }
-#endif
-
-    return dyld_image_info_address;
 }
 
 /******************************************************************
@@ -1468,7 +1514,7 @@ static BOOL macho_load_file(struct process* pcs, const WCHAR* filename,
         ptr = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(filename) + 1) * sizeof(WCHAR));
         if (ptr)
         {
-            strcpyW(ptr, filename);
+            lstrcpyW(ptr, filename);
             macho_info->module_name = ptr;
         }
         else ret = FALSE;
@@ -1520,21 +1566,15 @@ static BOOL macho_search_and_load_file(struct process* pcs, const WCHAR* filenam
         return module->module.SymType;
     }
 
-    if (strstrW(filename, S_libstdcPPW)) return FALSE; /* We know we can't do it */
+    if (wcsstr(filename, S_libstdcPPW)) return FALSE; /* We know we can't do it */
 
     load_params.process    = pcs;
     load_params.load_addr  = load_addr;
     load_params.macho_info = macho_info;
 
-    /* If has no directories, try PATH first. */
+    /* Try DYLD_LIBRARY_PATH first. */
     p = file_name(filename);
-    if (p == filename)
-    {
-        ret = search_unix_path(filename, getenv("PATH"), macho_load_file_cb, &load_params);
-    }
-    /* Try DYLD_LIBRARY_PATH, with just the filename (no directories). */
-    if (!ret)
-        ret = search_unix_path(p, getenv("DYLD_LIBRARY_PATH"), macho_load_file_cb, &load_params);
+    ret = search_unix_path(p, getenv("DYLD_LIBRARY_PATH"), macho_load_file_cb, &load_params);
 
     /* Try the path as given. */
     if (!ret)
@@ -1548,7 +1588,7 @@ static BOOL macho_search_and_load_file(struct process* pcs, const WCHAR* filenam
         ret = search_unix_path(p, fallback, macho_load_file_cb, &load_params);
     }
     if (!ret && p == filename)
-        ret = search_dll_path(filename, macho_load_file_cb, &load_params);
+        ret = search_dll_path(pcs, filename, macho_load_file_cb, &load_params);
 
     return ret;
 }
@@ -1578,8 +1618,7 @@ static BOOL macho_enum_modules_internal(const struct process* pcs,
     else
         len = sizeof(image_infos.infos32);
     if (!pcs->dbg_hdr_addr ||
-        !ReadProcessMemory(pcs->handle, (void*)pcs->dbg_hdr_addr,
-                           &image_infos, len, NULL))
+        !read_process_memory(pcs, pcs->dbg_hdr_addr, &image_infos, len))
         goto done;
     if (!pcs->is_64bit)
     {
@@ -1589,7 +1628,7 @@ static BOOL macho_enum_modules_internal(const struct process* pcs,
     }
     if (!image_infos.infos64.infoArray)
         goto done;
-    TRACE("Process has %u image infos at %p\n", image_infos.infos64.infoArrayCount, (void*)image_infos.infos64.infoArray);
+    TRACE("Process has %u image infos at %s\n", image_infos.infos64.infoArrayCount, wine_dbgstr_longlong(image_infos.infos64.infoArray));
 
     if (pcs->is_64bit)
         len = sizeof(info_array->info64);
@@ -1598,8 +1637,7 @@ static BOOL macho_enum_modules_internal(const struct process* pcs,
     len *= image_infos.infos64.infoArrayCount;
     info_array = HeapAlloc(GetProcessHeap(), 0, len);
     if (!info_array ||
-        !ReadProcessMemory(pcs->handle, (void*)image_infos.infos64.infoArray,
-                           info_array, len, NULL))
+        !read_process_memory(pcs, image_infos.infos64.infoArray, info_array, len))
         goto done;
     TRACE("... read image infos\n");
 
@@ -1615,12 +1653,12 @@ static BOOL macho_enum_modules_internal(const struct process* pcs,
             info.imageFilePath = info32->imageFilePath;
         }
         if (info.imageFilePath &&
-            ReadProcessMemory(pcs->handle, (void*)info.imageFilePath, bufstr, sizeof(bufstr), NULL))
+            read_process_memory(pcs, info.imageFilePath, bufstr, sizeof(bufstr)))
         {
             bufstr[sizeof(bufstr) - 1] = '\0';
             TRACE("[%d] image file %s\n", i, debugstr_a(bufstr));
             MultiByteToWideChar(CP_UNIXCP, 0, bufstr, -1, bufstrW, ARRAY_SIZE(bufstrW));
-            if (main_name && !bufstrW[0]) strcpyW(bufstrW, main_name);
+            if (main_name && !bufstrW[0]) lstrcpyW(bufstrW, main_name);
             if (!cb(bufstrW, info.imageLoadAddress, user)) break;
         }
     }
@@ -1702,6 +1740,7 @@ static BOOL macho_enum_modules(struct process* process, enum_modules_cb cb, void
 
     TRACE("(%p, %p, %p)\n", process->handle, cb, user);
     macho_info.flags = MACHO_INFO_NAME;
+    macho_info.module_name = NULL;
     ret = macho_enum_modules_internal(process, macho_info.module_name, cb, user);
     HeapFree(GetProcessHeap(), 0, (char*)macho_info.module_name);
     return ret;
@@ -1791,16 +1830,15 @@ static BOOL macho_search_loader(struct process* pcs, struct macho_info* macho_in
     BOOL ret = FALSE;
     union wine_all_image_infos image_infos;
     union wine_image_info image_info;
-    uint32_t len;
-    char path[PATH_MAX];
+    unsigned int len;
+    char path[1024];
     BOOL got_path = FALSE;
 
     if (pcs->is_64bit)
         len = sizeof(image_infos.infos64);
     else
         len = sizeof(image_infos.infos32);
-    if (pcs->dbg_hdr_addr &&
-        ReadProcessMemory(pcs->handle, (void*)pcs->dbg_hdr_addr, &image_infos, len, NULL))
+    if (read_process_memory(pcs, pcs->dbg_hdr_addr, &image_infos, len))
     {
         if (pcs->is_64bit)
             len = sizeof(image_info.info64);
@@ -1812,7 +1850,7 @@ static BOOL macho_search_loader(struct process* pcs, struct macho_info* macho_in
             len = sizeof(image_info.info32);
         }
         if (image_infos.infos64.infoArray && image_infos.infos64.infoArrayCount &&
-            ReadProcessMemory(pcs->handle, (void*)image_infos.infos64.infoArray, &image_info, len, NULL))
+            read_process_memory(pcs, image_infos.infos64.infoArray, &image_info, len))
         {
             if (!pcs->is_64bit)
             {
@@ -1822,7 +1860,7 @@ static BOOL macho_search_loader(struct process* pcs, struct macho_info* macho_in
             }
             for (len = sizeof(path); image_info.info64.imageFilePath && len > 0; len /= 2)
             {
-                if (ReadProcessMemory(pcs->handle, (void*)image_info.info64.imageFilePath, path, len, NULL))
+                if (read_process_memory(pcs, image_info.info64.imageFilePath, path, len))
                 {
                     path[len - 1] = 0;
                     got_path = TRUE;
@@ -1830,18 +1868,6 @@ static BOOL macho_search_loader(struct process* pcs, struct macho_info* macho_in
                     break;
                 }
             }
-        }
-    }
-
-    /* If we couldn't get the executable path from the target process, try our
-       own.  It will almost always be the same. */
-    if (!got_path)
-    {
-        len = sizeof(path);
-        if (!_NSGetExecutablePath(path, &len))
-        {
-            got_path = TRUE;
-            TRACE("using own executable path: %s\n", debugstr_a(path));
         }
     }
 
@@ -1887,7 +1913,7 @@ BOOL macho_read_wine_loader_dbg_info(struct process* pcs, ULONG_PTR addr)
     struct macho_info     macho_info;
 
     TRACE("(%p/%p)\n", pcs, pcs->handle);
-    pcs->dbg_hdr_addr = addr ? addr : get_dyld_image_info_address(pcs);
+    pcs->dbg_hdr_addr = addr;
     macho_info.flags = MACHO_INFO_MODULE;
     if (!macho_search_loader(pcs, &macho_info)) return FALSE;
     macho_info.module->format_info[DFI_MACHO]->u.macho_info->is_loader = 1;
@@ -1896,12 +1922,3 @@ BOOL macho_read_wine_loader_dbg_info(struct process* pcs, ULONG_PTR addr)
     TRACE("Found macho debug header %#lx\n", pcs->dbg_hdr_addr);
     return TRUE;
 }
-
-#else  /* HAVE_MACH_O_LOADER_H */
-
-BOOL macho_read_wine_loader_dbg_info(struct process* pcs, ULONG_PTR addr)
-{
-    return FALSE;
-}
-
-#endif  /* HAVE_MACH_O_LOADER_H */

@@ -62,6 +62,7 @@ SOURCES = \
 	cmdbas.idl \
 	cmdtxt.idl \
 	cmnquery.idl \
+	codecapi.h \
 	colinf.idl \
 	colordlg.h \
 	comcat.idl \
@@ -234,6 +235,7 @@ SOURCES = \
 	dplobby8.h \
 	dpnathlp.h \
 	drmexternals.idl \
+	dsclient.h \
 	dsconf.h \
 	dsgetdc.h \
 	dshow.h \
@@ -634,6 +636,7 @@ SOURCES = \
 	slpublic.h \
 	snmp.h \
 	softpub.h \
+	spatialaudioclient.idl \
 	sperror.h \
 	sql.h \
 	sqlext.h \

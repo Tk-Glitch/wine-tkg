@@ -1216,6 +1216,9 @@ void wined3d_buffer_copy(struct wined3d_buffer *dst_buffer, unsigned int dst_off
     struct wined3d_context *context;
     DWORD dst_location;
 
+    TRACE("dst_buffer %p, dst_offset %u, src_buffer %p, src_offset %u, size %u.\n",
+            dst_buffer, dst_offset, src_buffer, src_offset, size);
+
     buffer_mark_used(dst_buffer);
     buffer_mark_used(src_buffer);
 
@@ -1511,6 +1514,9 @@ static void wined3d_buffer_gl_upload_ranges(struct wined3d_buffer *buffer, struc
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const struct wined3d_range *range;
 
+    TRACE("buffer %p, context %p, data %p, data_offset %u, range_count %u, ranges %p.\n",
+            buffer, context, data, data_offset, range_count, ranges);
+
     wined3d_buffer_gl_bind(buffer_gl, context_gl);
 
     while (range_count--)
@@ -1530,6 +1536,9 @@ static void wined3d_buffer_gl_download_ranges(struct wined3d_buffer *buffer, str
     struct wined3d_buffer_gl *buffer_gl = wined3d_buffer_gl(buffer);
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const struct wined3d_range *range;
+
+    TRACE("buffer %p, context %p, data %p, data_offset %u, range_count %u, ranges %p.\n",
+            buffer, context, data, data_offset, range_count, ranges);
 
     wined3d_buffer_gl_bind(buffer_gl, context_gl);
 

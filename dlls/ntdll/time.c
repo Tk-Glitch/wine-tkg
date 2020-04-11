@@ -47,7 +47,6 @@
 #include "windef.h"
 #include "winternl.h"
 #include "wine/exception.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
 
@@ -662,7 +661,7 @@ static int compare_tz_key(const void *a, const void *b)
     const struct tz_name_map *map_a, *map_b;
     map_a = (const struct tz_name_map *)a;
     map_b = (const struct tz_name_map *)b;
-    return strcmpW(map_a->key_name, map_b->key_name);
+    return wcscmp(map_a->key_name, map_b->key_name);
 }
 
 static BOOL match_tz_name(const char* tz_name,
@@ -684,7 +683,7 @@ static BOOL match_tz_name(const char* tz_name,
     if (reg_tzi->DaylightDate.wMonth)
         return TRUE;
 
-    strcpyW(key.key_name, reg_tzi->TimeZoneKeyName);
+    wcscpy(key.key_name, reg_tzi->TimeZoneKeyName);
     match = bsearch(&key, mapping, ARRAY_SIZE(mapping), sizeof(mapping[0]), compare_tz_key);
     if (!match)
         return TRUE;
@@ -729,7 +728,7 @@ static void find_reg_tz_info(RTL_DYNAMIC_TIME_ZONE_INFORMATION *tzi, const char*
     UNICODE_STRING nameW, nameDynamicW;
     WCHAR buf[128], yearW[16];
 
-    sprintfW(yearW, fmtW, year);
+    NTDLL_swprintf(yearW, fmtW, year);
 
     attrDynamic.Length = sizeof(attrDynamic);
     attrDynamic.RootDirectory = 0; /* will be replaced later */

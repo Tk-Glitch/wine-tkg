@@ -75,6 +75,14 @@ static int get_refcount(IUnknown *object)
     return IUnknown_Release( object );
 }
 
+static void get_virtual_rect(RECT *rect)
+{
+    rect->left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    rect->top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    rect->right = rect->left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    rect->bottom = rect->top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+}
+
 static HWND create_window(void)
 {
     RECT r = {0, 0, 640, 480};
@@ -931,15 +939,29 @@ cleanup:
 
 static void test_cursor(void)
 {
+    unsigned int adapter_idx, adapter_count, test_idx;
     IDirect3DSurface8 *cursor = NULL;
+    struct device_desc device_desc;
+    unsigned int width, height;
     IDirect3DDevice8 *device;
+    HRESULT expected_hr, hr;
+    D3DDISPLAYMODE mode;
     CURSORINFO info;
     IDirect3D8 *d3d;
     ULONG refcount;
     HCURSOR cur;
     HWND window;
-    HRESULT hr;
     BOOL ret;
+
+    static const DWORD device_flags[] = {0, CREATE_DEVICE_FULLSCREEN};
+    static const SIZE cursor_sizes[] =
+    {
+        {1, 1},
+        {2, 4},
+        {3, 2},
+        {2, 3},
+        {6, 6},
+    };
 
     window = create_window();
     ok(!!window, "Failed to create a window.\n");
@@ -1001,8 +1023,88 @@ static void test_cursor(void)
     ok(info.flags & (CURSOR_SHOWING|CURSOR_SUPPRESSED), "The gdi cursor is hidden (%08x)\n", info.flags);
     ok(info.hCursor != cur, "The cursor handle is %p\n", info.hCursor);
 
+    /* Cursor dimensions must all be powers of two */
+    for (test_idx = 0; test_idx < ARRAY_SIZE(cursor_sizes); ++test_idx)
+    {
+        width = cursor_sizes[test_idx].cx;
+        height = cursor_sizes[test_idx].cy;
+        hr = IDirect3DDevice8_CreateImageSurface(device, width, height, D3DFMT_A8R8G8B8, &cursor);
+        ok(hr == D3D_OK, "Test %u: CreateImageSurface failed, hr %#x.\n", test_idx, hr);
+        hr = IDirect3DDevice8_SetCursorProperties(device, 0, 0, cursor);
+        if (width && !(width & (width - 1)) && height && !(height & (height - 1)))
+            expected_hr = D3D_OK;
+        else
+            expected_hr = D3DERR_INVALIDCALL;
+        ok(hr == expected_hr, "Test %u: Expect SetCursorProperties return %#x, got %#x.\n",
+                test_idx, expected_hr, hr);
+        IDirect3DSurface8_Release(cursor);
+    }
+
     refcount = IDirect3DDevice8_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
+
+    /* Cursor dimensions must not exceed adapter display mode */
+    device_desc.device_window = window;
+    device_desc.width = 640;
+    device_desc.height = 480;
+
+    adapter_count = IDirect3D8_GetAdapterCount(d3d);
+    for (adapter_idx = 0; adapter_idx < adapter_count; ++adapter_idx)
+    {
+        for (test_idx = 0; test_idx < ARRAY_SIZE(device_flags); ++test_idx)
+        {
+            device_desc.adapter_ordinal = adapter_idx;
+            device_desc.flags = device_flags[test_idx];
+            if (!(device = create_device(d3d, window, &device_desc)))
+            {
+                skip("Adapter %u test %u: Failed to create a D3D device.\n", adapter_idx, test_idx);
+                break;
+            }
+
+            hr = IDirect3D8_GetAdapterDisplayMode(d3d, adapter_idx, &mode);
+            ok(hr == D3D_OK, "Adapter %u test %u: GetAdapterDisplayMode failed, hr %#x.\n",
+                    adapter_idx, test_idx, hr);
+
+            /* Find the largest width and height that are powers of two and less than the display mode */
+            width = 1;
+            height = 1;
+            while (width * 2 <= mode.Width)
+                width *= 2;
+            while (height * 2 <= mode.Height)
+                height *= 2;
+
+            hr = IDirect3DDevice8_CreateImageSurface(device, width, height, D3DFMT_A8R8G8B8, &cursor);
+            ok(hr == D3D_OK, "Adapter %u test %u: CreateImageSurface failed, hr %#x.\n",
+                    adapter_idx, test_idx, hr);
+            hr = IDirect3DDevice8_SetCursorProperties(device, 0, 0, cursor);
+            ok(hr == D3D_OK, "Adapter %u test %u: SetCursorProperties failed, hr %#x.\n",
+                    adapter_idx, test_idx, hr);
+            IDirect3DSurface8_Release(cursor);
+
+            hr = IDirect3DDevice8_CreateImageSurface(device, width * 2, height, D3DFMT_A8R8G8B8,
+                    &cursor);
+            ok(hr == D3D_OK, "Adapter %u test %u: CreateImageSurface failed, hr %#x.\n",
+                    adapter_idx, test_idx, hr);
+            hr = IDirect3DDevice8_SetCursorProperties(device, 0, 0, cursor);
+            ok(hr == D3DERR_INVALIDCALL,
+                    "Adapter %u test %u: Expect SetCursorProperties return %#x, got %#x.\n",
+                    adapter_idx, test_idx, D3DERR_INVALIDCALL, hr);
+            IDirect3DSurface8_Release(cursor);
+
+            hr = IDirect3DDevice8_CreateImageSurface(device, width, height * 2, D3DFMT_A8R8G8B8,
+                    &cursor);
+            ok(hr == D3D_OK, "Adapter %u test %u: CreateImageSurface failed, hr %#x.\n",
+                    adapter_idx, test_idx, hr);
+            hr = IDirect3DDevice8_SetCursorProperties(device, 0, 0, cursor);
+            ok(hr == D3DERR_INVALIDCALL,
+                    "Adapter %u test %u: Expect SetCursorProperties return %#x, got %#x.\n",
+                    adapter_idx, test_idx, D3DERR_INVALIDCALL, hr);
+            IDirect3DSurface8_Release(cursor);
+
+            refcount = IDirect3DDevice8_Release(device);
+            ok(!refcount, "Adapter %u: Device has %u references left.\n", adapter_idx, refcount);
+        }
+    }
 cleanup:
     IDirect3D8_Release(d3d);
     DestroyWindow(window);
@@ -1294,8 +1396,8 @@ static int compare_mode(const void *a, const void *b)
 {
     const struct mode *mode_a = a;
     const struct mode *mode_b = b;
-    unsigned int w = mode_a->w - mode_b->w;
-    unsigned int h = mode_a->h - mode_b->h;
+    int w = mode_a->w - mode_b->w;
+    int h = mode_a->h - mode_b->h;
     return abs(w) >= abs(h) ? -w : -h;
 }
 
@@ -2662,6 +2764,7 @@ static void test_wndproc(void)
 {
     struct wndproc_thread_param thread_params;
     struct device_desc device_desc;
+    static WINDOWPOS windowpos;
     IDirect3DDevice8 *device;
     WNDCLASSA wc = {0};
     IDirect3D8 *d3d8;
@@ -2677,7 +2780,6 @@ static void test_wndproc(void)
     DEVMODEW devmode;
     LONG change_ret, device_style;
     BOOL ret;
-    WINDOWPOS windowpos;
 
     static const struct message create_messages[] =
     {
@@ -2777,7 +2879,7 @@ static void test_wndproc(void)
         {WM_SIZE,               FOCUS_WINDOW,   TRUE,   SIZE_MAXIMIZED},
         {0,                     0,              FALSE,  0},
     };
-    struct message mode_change_messages[] =
+    static const struct message mode_change_messages[] =
     {
         {WM_WINDOWPOSCHANGING,  DEVICE_WINDOW,  FALSE,  0},
         {WM_WINDOWPOSCHANGED,   DEVICE_WINDOW,  FALSE,  0},
@@ -2790,7 +2892,7 @@ static void test_wndproc(void)
          * ShowWindow does not send such a message because the window is already visible. */
         {0,                     0,              FALSE,  0},
     };
-    struct message mode_change_messages_hidden[] =
+    static const struct message mode_change_messages_hidden[] =
     {
         {WM_WINDOWPOSCHANGING,  DEVICE_WINDOW,  FALSE,  0},
         {WM_WINDOWPOSCHANGED,   DEVICE_WINDOW,  FALSE,  0},
@@ -2856,6 +2958,9 @@ static void test_wndproc(void)
         IDirect3D8_Release(d3d8);
         return;
     }
+
+    filter_messages = NULL;
+    expect_messages = NULL;
 
     wc.lpfnWndProc = test_proc;
     wc.lpszClassName = "d3d8_test_wndproc_wc";
@@ -3200,6 +3305,7 @@ static void test_wndproc(void)
     flush_events();
     ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it, i=%u.\n",
             expect_messages->message, expect_messages->window, i);
+    expect_messages = NULL;
 
     /* World of Warplanes hides the window by removing WS_VISIBLE and expects Reset() to show it again. */
     device_style = GetWindowLongA(device_window, GWL_STYLE);
@@ -3219,6 +3325,7 @@ static void test_wndproc(void)
     flush_events();
     ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it.\n",
             expect_messages->message, expect_messages->window);
+    expect_messages = NULL;
 
     ok(windowpos.hwnd == device_window && !windowpos.hwndInsertAfter
             && !windowpos.x && !windowpos.y && !windowpos.cx && !windowpos.cy
@@ -3242,6 +3349,7 @@ static void test_wndproc(void)
 
 done:
     filter_messages = NULL;
+    expect_messages = NULL;
     IDirect3D8_Release(d3d8);
 
     SetEvent(thread_params.test_finished);
@@ -3271,6 +3379,9 @@ static void test_wndproc_windowed(void)
 
     d3d8 = Direct3DCreate8(D3D_SDK_VERSION);
     ok(!!d3d8, "Failed to create a D3D object.\n");
+
+    filter_messages = NULL;
+    expect_messages = NULL;
 
     wc.lpfnWndProc = test_proc;
     wc.lpszClassName = "d3d8_test_wndproc_wc";
@@ -4176,6 +4287,9 @@ static void test_device_window_reset(void)
     LONG_PTR proc;
     HRESULT hr;
     ULONG ref;
+
+    filter_messages = NULL;
+    expect_messages = NULL;
 
     wc.lpfnWndProc = test_proc;
     wc.lpszClassName = "d3d8_test_wndproc_wc";
@@ -9980,6 +10094,80 @@ static void test_creation_parameters(void)
     DestroyWindow(window);
 }
 
+static void test_cursor_clipping(void)
+{
+    unsigned int adapter_idx, adapter_count, mode_idx;
+    D3DDISPLAYMODE mode, current_mode;
+    struct device_desc device_desc;
+    RECT virtual_rect, clip_rect;
+    IDirect3DDevice8 *device;
+    IDirect3D8 *d3d;
+    HWND window;
+    HRESULT hr;
+
+    window = create_window();
+    ok(!!window, "Failed to create a window.\n");
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+
+    device_desc.device_window = window;
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
+
+    adapter_count = IDirect3D8_GetAdapterCount(d3d);
+    for (adapter_idx = 0; adapter_idx < adapter_count; ++adapter_idx)
+    {
+        hr = IDirect3D8_GetAdapterDisplayMode(d3d, adapter_idx, &current_mode);
+        ok(hr == D3D_OK, "Adapter %u: GetAdapterDisplayMode failed, hr %#x.\n", adapter_idx, hr);
+        for (mode_idx = 0; SUCCEEDED(IDirect3D8_EnumAdapterModes(d3d, adapter_idx, mode_idx, &mode));
+                ++mode_idx)
+        {
+            if (mode.Format != D3DFMT_X8R8G8B8)
+                continue;
+            if (mode.Width < 640 || mode.Height < 480)
+                continue;
+            if (mode.Width != current_mode.Width && mode.Height != current_mode.Height)
+                break;
+        }
+        ok(mode.Width != current_mode.Width && mode.Height != current_mode.Height,
+                "Adapter %u: Failed to find a different mode than %ux%u.\n", adapter_idx,
+                current_mode.Width, current_mode.Height);
+
+        ok(ClipCursor(NULL), "Adapter %u: ClipCursor failed, error %#x.\n", adapter_idx,
+                GetLastError());
+        get_virtual_rect(&virtual_rect);
+        ok(GetClipCursor(&clip_rect), "Adapter %u: GetClipCursor failed, error %#x.\n", adapter_idx,
+                GetLastError());
+        ok(EqualRect(&clip_rect, &virtual_rect), "Adapter %u: Expect clip rect %s, got %s.\n",
+                adapter_idx, wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&clip_rect));
+
+        device_desc.adapter_ordinal = adapter_idx;
+        device_desc.width = mode.Width;
+        device_desc.height = mode.Height;
+        if (!(device = create_device(d3d, window, &device_desc)))
+        {
+            skip("Adapter %u: Failed to create a D3D device.\n", adapter_idx);
+            break;
+        }
+        flush_events();
+        get_virtual_rect(&virtual_rect);
+        ok(GetClipCursor(&clip_rect), "Adapter %u: GetClipCursor failed, error %#x.\n", adapter_idx,
+                GetLastError());
+        ok(EqualRect(&clip_rect, &virtual_rect), "Adapter %u: Expect clip rect %s, got %s.\n",
+                adapter_idx, wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&clip_rect));
+
+        IDirect3DDevice8_Release(device);
+        flush_events();
+        get_virtual_rect(&virtual_rect);
+        ok(GetClipCursor(&clip_rect), "Adapter %u: GetClipCursor failed, error %#x.\n", adapter_idx,
+                GetLastError());
+        ok(EqualRect(&clip_rect, &virtual_rect), "Adapter %u: Expect clip rect %s, got %s.\n",
+                adapter_idx, wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&clip_rect));
+    }
+
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
+}
+
 START_TEST(device)
 {
     HMODULE d3d8_handle = GetModuleHandleA("d3d8.dll");
@@ -10098,6 +10286,7 @@ START_TEST(device)
     test_get_display_mode();
     test_multi_adapter();
     test_creation_parameters();
+    test_cursor_clipping();
 
     UnregisterClassA("d3d8_test_wc", GetModuleHandleA(NULL));
 }

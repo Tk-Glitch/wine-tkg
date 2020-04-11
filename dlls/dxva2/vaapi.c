@@ -71,7 +71,7 @@ MAKE_FUNCPTR(vaUnmapBuffer);
 #undef MAKE_FUNCPTR
 
 #define LOAD_FUNCPTR(f) \
-    if(!(p##f = wine_dlsym(handle, #f, NULL, 0))) \
+    if(!(p##f = dlsym(handle, #f))) \
     { \
         WARN("Can't find symbol %s.\n", #f); \
         goto error; \
@@ -79,7 +79,7 @@ MAKE_FUNCPTR(vaUnmapBuffer);
 
 static void *load_libva( void )
 {
-    void *handle = wine_dlopen(SONAME_LIBVA, RTLD_NOW, NULL, 0);
+    void *handle = dlopen(SONAME_LIBVA, RTLD_NOW);
     if (!handle)
     {
         FIXME("Wine cannot find the %s library.\n", SONAME_LIBVA);
@@ -115,13 +115,13 @@ static void *load_libva( void )
     return handle;
 
 error:
-    wine_dlclose(handle, NULL, 0);
+    dlclose(handle);
     return NULL;
 }
 
 static void *load_libva_x11( void )
 {
-    void *handle = wine_dlopen(SONAME_LIBVA_X11, RTLD_NOW, NULL, 0);
+    void *handle = dlopen(SONAME_LIBVA_X11, RTLD_NOW);
     if (!handle)
     {
         FIXME("Wine cannot find the %s library.\n", SONAME_LIBVA_X11);
@@ -132,13 +132,13 @@ static void *load_libva_x11( void )
     return handle;
 
 error:
-    wine_dlclose(handle, NULL, 0);
+    dlclose(handle);
     return NULL;
 }
 
 static void *load_libva_drm( void )
 {
-    void *handle = wine_dlopen(SONAME_LIBVA_DRM, RTLD_NOW, NULL, 0);
+    void *handle = dlopen(SONAME_LIBVA_DRM, RTLD_NOW);
     if (!handle)
     {
         FIXME("Wine cannot find the %s library.\n", SONAME_LIBVA_DRM);
@@ -149,13 +149,13 @@ static void *load_libva_drm( void )
     return handle;
 
 error:
-    wine_dlclose(handle, NULL, 0);
+    dlclose(handle);
     return NULL;
 }
 
 static void *load_libx11( void )
 {
-    void *handle = wine_dlopen(SONAME_LIBX11, RTLD_NOW, NULL, 0);
+    void *handle = dlopen(SONAME_LIBX11, RTLD_NOW);
     if (!handle)
     {
         FIXME("Wine cannot find the %s library.\n", SONAME_LIBX11);
@@ -167,7 +167,7 @@ static void *load_libx11( void )
     return handle;
 
 error:
-    wine_dlclose(handle, NULL, 0);
+    dlclose(handle);
     return NULL;
 }
 
@@ -501,15 +501,15 @@ static ULONG WINAPI WineVideoService_Release( IWineVideoService *iface )
         if (This->x11_display)
             pXCloseDisplay(This->x11_display);
         if (This->x11_handle)
-            wine_dlclose(This->x11_handle, NULL, 0);
+            dlclose(This->x11_handle);
         if (This->drm_fd > 0)
             close(This->drm_fd);
         if (This->va_drm_handle)
-            wine_dlclose(This->va_drm_handle, NULL, 0);
+            dlclose(This->va_drm_handle);
         if (This->va_x11_handle)
-            wine_dlclose(This->va_x11_handle, NULL, 0);
+            dlclose(This->va_x11_handle);
         if (This->va_handle)
-            wine_dlclose(This->va_handle, NULL, 0);
+            dlclose(This->va_handle);
 
         CoTaskMemFree(This);
     }
@@ -799,15 +799,15 @@ err:
     if (videoservice->x11_display)
         pXCloseDisplay(videoservice->x11_display);
     if (videoservice->x11_handle)
-        wine_dlclose(videoservice->x11_handle, NULL, 0);
+        dlclose(videoservice->x11_handle);
     if (videoservice->drm_fd > 0)
         close(videoservice->drm_fd);
     if (videoservice->va_drm_handle)
-        wine_dlclose(videoservice->va_drm_handle, NULL, 0);
+        dlclose(videoservice->va_drm_handle);
     if (videoservice->va_x11_handle)
-        wine_dlclose(videoservice->va_x11_handle, NULL, 0);
+        dlclose(videoservice->va_x11_handle);
     if (videoservice->va_handle)
-        wine_dlclose(videoservice->va_handle, NULL, 0);
+        dlclose(videoservice->va_handle);
 
     CoTaskMemFree(videoservice);
     return NULL;

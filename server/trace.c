@@ -88,6 +88,12 @@ static void dump_timeout( const char *prefix, const timeout_t *time )
     fprintf( stderr, "%s%s", prefix, get_timeout_str(*time) );
 }
 
+static void dump_abstime( const char *prefix, const abstime_t *when )
+{
+    timeout_t timeout = abstime_to_timeout( *when );
+    dump_timeout( prefix, &timeout );
+}
+
 static void dump_uint64( const char *prefix, const unsigned __int64 *val )
 {
     if ((unsigned int)*val != *val)
@@ -1592,7 +1598,7 @@ static void dump_select_request( const struct select_request *req )
 {
     fprintf( stderr, " flags=%d", req->flags );
     dump_uint64( ", cookie=", &req->cookie );
-    dump_timeout( ", timeout=", &req->timeout );
+    dump_abstime( ", timeout=", &req->timeout );
     fprintf( stderr, ", prev_apc=%04x", req->prev_apc );
     dump_varargs_apc_result( ", result=", cur_size );
     dump_varargs_select_op( ", data=", cur_size );
@@ -1600,8 +1606,7 @@ static void dump_select_request( const struct select_request *req )
 
 static void dump_select_reply( const struct select_reply *req )
 {
-    dump_timeout( " timeout=", &req->timeout );
-    dump_apc_call( ", call=", &req->call );
+    dump_apc_call( " call=", &req->call );
     fprintf( stderr, ", apc_handle=%04x", req->apc_handle );
 }
 
@@ -4664,17 +4669,6 @@ static void dump_set_suspend_context_request( const struct set_suspend_context_r
     dump_varargs_context( " context=", cur_size );
 }
 
-static void dump_create_job_request( const struct create_job_request *req )
-{
-    fprintf( stderr, " access=%08x", req->access );
-    dump_varargs_object_attributes( ", objattr=", cur_size );
-}
-
-static void dump_create_job_reply( const struct create_job_reply *req )
-{
-    fprintf( stderr, " handle=%04x", req->handle );
-}
-
 static void dump_create_fsync_request( const struct create_fsync_request *req )
 {
     fprintf( stderr, " access=%08x", req->access );
@@ -4730,6 +4724,17 @@ static void dump_get_fsync_apc_idx_request( const struct get_fsync_apc_idx_reque
 static void dump_get_fsync_apc_idx_reply( const struct get_fsync_apc_idx_reply *req )
 {
     fprintf( stderr, " shm_idx=%08x", req->shm_idx );
+}
+
+static void dump_create_job_request( const struct create_job_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
+}
+
+static void dump_create_job_reply( const struct create_job_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
 }
 
 static void dump_open_job_request( const struct open_job_request *req )
@@ -5162,12 +5167,12 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_rawinput_devices_request,
     (dump_func)dump_get_suspend_context_request,
     (dump_func)dump_set_suspend_context_request,
-    (dump_func)dump_create_job_request,
     (dump_func)dump_create_fsync_request,
     (dump_func)dump_open_fsync_request,
     (dump_func)dump_get_fsync_idx_request,
     (dump_func)dump_fsync_msgwait_request,
     (dump_func)dump_get_fsync_apc_idx_request,
+    (dump_func)dump_create_job_request,
     (dump_func)dump_open_job_request,
     (dump_func)dump_assign_job_request,
     (dump_func)dump_process_in_job_request,
@@ -5487,12 +5492,12 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_rawinput_devices_reply,
     (dump_func)dump_get_suspend_context_reply,
     NULL,
-    (dump_func)dump_create_job_reply,
     (dump_func)dump_create_fsync_reply,
     (dump_func)dump_open_fsync_reply,
     (dump_func)dump_get_fsync_idx_reply,
     NULL,
     (dump_func)dump_get_fsync_apc_idx_reply,
+    (dump_func)dump_create_job_reply,
     (dump_func)dump_open_job_reply,
     NULL,
     NULL,
@@ -5812,12 +5817,12 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_rawinput_devices",
     "get_suspend_context",
     "set_suspend_context",
-    "create_job",
     "create_fsync",
     "open_fsync",
     "get_fsync_idx",
     "fsync_msgwait",
     "get_fsync_apc_idx",
+    "create_job",
     "open_job",
     "assign_job",
     "process_in_job",

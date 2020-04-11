@@ -104,7 +104,6 @@
 #include "winternl.h"
 #include "ddk/wdm.h"
 #include "ntdll_misc.h"
-#include "wine/unicode.h"
 #include "wine/server.h"
 #include "wine/list.h"
 #include "wine/library.h"
@@ -233,7 +232,7 @@ static inline BOOL is_invalid_dos_char( WCHAR ch )
 {
     static const WCHAR invalid_chars[] = { INVALID_DOS_CHARS,'~','.',0 };
     if (ch > 0x7f) return TRUE;
-    return strchrW( invalid_chars, ch ) != NULL;
+    return wcschr( invalid_chars, ch ) != NULL;
 }
 
 /* check if the device can be a mounted volume */
@@ -304,9 +303,12 @@ static inline unsigned int dir_info_size( FILE_INFORMATION_CLASS class, unsigned
 
 static inline BOOL has_wildcard( const UNICODE_STRING *mask )
 {
-    return (!mask ||
-            memchrW( mask->Buffer, '*', mask->Length / sizeof(WCHAR) ) ||
-            memchrW( mask->Buffer, '?', mask->Length / sizeof(WCHAR) ));
+    int i;
+
+    if (!mask) return TRUE;
+    for (i = 0; i < mask->Length / sizeof(WCHAR); i++)
+        if (mask->Buffer[i] == '*' || mask->Buffer[i] == '?') return TRUE;
+    return FALSE;
 }
 
 /* get space from the current directory data buffer, allocating a new one if necessary */
@@ -343,8 +345,8 @@ static const char *add_dir_data_nameA( struct dir_data *data, const char *name )
 /* add a Unicode string to the directory data buffer */
 static const WCHAR *add_dir_data_nameW( struct dir_data *data, const WCHAR *name )
 {
-    WCHAR *ptr = get_dir_data_space( data, (strlenW( name ) + 1) * sizeof(WCHAR) );
-    if (ptr) strcpyW( ptr, name );
+    WCHAR *ptr = get_dir_data_space( data, (wcslen( name ) + 1) * sizeof(WCHAR) );
+    if (ptr) wcscpy( ptr, name );
     return ptr;
 }
 
@@ -1315,8 +1317,8 @@ static ULONG hash_short_file_name( const UNICODE_STRING *name, LPWSTR buffer )
     if (!is_case_sensitive)
     {
         for (p = name->Buffer, hash = 0xbeef; p < end - 1; p++)
-            hash = (hash<<3) ^ (hash>>5) ^ tolowerW(*p) ^ (tolowerW(p[1]) << 8);
-        hash = (hash<<3) ^ (hash>>5) ^ tolowerW(*p); /* Last character */
+            hash = (hash<<3) ^ (hash>>5) ^ RtlDowncaseUnicodeChar(*p) ^ (RtlDowncaseUnicodeChar(p[1]) << 8);
+        hash = (hash<<3) ^ (hash>>5) ^ RtlDowncaseUnicodeChar(*p); /* Last character */
     }
     else
     {
@@ -1393,7 +1395,7 @@ static BOOLEAN match_filename( const UNICODE_STRING *name_str, const UNICODE_STR
             if (is_case_sensitive)
                 while (name < name_end && (*name != *mask)) name++;
             else
-                while (name < name_end && (toupperW(*name) != toupperW(*mask))) name++;
+                while (name < name_end && (towupper(*name) != towupper(*mask))) name++;
             next_to_retry = name;
             break;
         case '?':
@@ -1402,7 +1404,7 @@ static BOOLEAN match_filename( const UNICODE_STRING *name_str, const UNICODE_STR
             break;
         default:
             if (is_case_sensitive) mismatch = (*mask != *name);
-            else mismatch = (toupperW(*mask) != toupperW(*name));
+            else mismatch = (towupper(*mask) != towupper(*name));
 
             if (!mismatch)
             {
@@ -1518,7 +1520,7 @@ static NTSTATUS get_dir_data_entry( struct dir_data *dir_data, void *info_ptr, I
     if (start + dir_size > max_length) return STATUS_MORE_ENTRIES;
 
     max_length -= start + dir_size;
-    name_len = strlenW( names->long_name ) * sizeof(WCHAR);
+    name_len = wcslen( names->long_name ) * sizeof(WCHAR);
     /* if this is not the first entry, fail; the first entry is always returned (but truncated) */
     if (*last_info && name_len > max_length) return STATUS_MORE_ENTRIES;
 
@@ -1551,14 +1553,14 @@ static NTSTATUS get_dir_data_entry( struct dir_data *dir_data, void *info_ptr, I
 
     case FileBothDirectoryInformation:
         info->both.EaSize = 0; /* FIXME */
-        info->both.ShortNameLength = strlenW( names->short_name ) * sizeof(WCHAR);
+        info->both.ShortNameLength = wcslen( names->short_name ) * sizeof(WCHAR);
         memcpy( info->both.ShortName, names->short_name, info->both.ShortNameLength );
         info->both.FileNameLength = name_len;
         break;
 
     case FileIdBothDirectoryInformation:
         info->id_both.EaSize = 0; /* FIXME */
-        info->id_both.ShortNameLength = strlenW( names->short_name ) * sizeof(WCHAR);
+        info->id_both.ShortNameLength = wcslen( names->short_name ) * sizeof(WCHAR);
         memcpy( info->id_both.ShortName, names->short_name, info->id_both.ShortNameLength );
         info->id_both.FileNameLength = name_len;
         break;
@@ -1809,9 +1811,9 @@ static int name_compare( const void *a, const void *b )
 {
     const struct dir_data_names *file_a = (const struct dir_data_names *)a;
     const struct dir_data_names *file_b = (const struct dir_data_names *)b;
-    int ret = RtlCompareUnicodeStrings( file_a->long_name, strlenW(file_a->long_name),
-                                        file_b->long_name, strlenW(file_b->long_name), TRUE );
-    if (!ret) ret = strcmpW( file_a->long_name, file_b->long_name );
+    int ret = RtlCompareUnicodeStrings( file_a->long_name, wcslen(file_a->long_name),
+                                        file_b->long_name, wcslen(file_b->long_name), TRUE );
+    if (!ret) ret = wcscmp( file_a->long_name, file_b->long_name );
     return ret;
 }
 
@@ -2239,29 +2241,24 @@ static int match_redirect( const WCHAR *path, int len, const WCHAR *redir, BOOLE
 {
     int i = 0;
 
-    while (i < len && *redir)
+    while (i < len)
     {
-        if (IS_SEPARATOR(path[i]))
+        int start = i;
+        while (i < len && !IS_SEPARATOR(path[i])) i++;
+        if (check_case)
         {
-            if (*redir++ != '\\') return 0;
-            while (i < len && IS_SEPARATOR(path[i])) i++;
-            continue;  /* move on to next path component */
-        }
-        else if (check_case)
-        {
-            if (path[i] != *redir) return 0;
+            if (wcsncmp( path + start, redir, i - start )) return 0;
         }
         else
         {
-            if (tolowerW(path[i]) != tolowerW(*redir)) return 0;
+            if (wcsnicmp( path + start, redir, i - start )) return 0;
         }
-        i++;
-        redir++;
+        redir += i - start;
+        while (i < len && IS_SEPARATOR(path[i])) i++;
+        if (!*redir) return i;
+        if (*redir++ != '\\') return 0;
     }
-    if (*redir) return 0;
-    if (i < len && !IS_SEPARATOR(path[i])) return 0;
-    while (i < len && IS_SEPARATOR(path[i])) i++;
-    return i;
+    return 0;
 }
 
 
@@ -2694,7 +2691,7 @@ NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *
 
     /* check for invalid characters */
     for (p = name; p < name + name_len; p++)
-        if (*p < 32 || strchrW( invalid_charsW, *p )) return STATUS_OBJECT_NAME_INVALID;
+        if (*p < 32 || wcschr( invalid_charsW, *p )) return STATUS_OBJECT_NAME_INVALID;
 
     unix_len = name_len * 3 + MAX_DIR_ENTRY_LEN + 3;
     if (!(unix_name = RtlAllocateHeap( GetProcessHeap(), 0, unix_len )))
@@ -2778,7 +2775,7 @@ static NTSTATUS nt_to_unix_file_name_internal( const UNICODE_STRING *nameW, ANSI
     for (pos = 0; pos < name_len; pos++)
     {
         if (IS_SEPARATOR(name[pos])) break;
-        if (name[pos] < 32 || strchrW( invalid_charsW, name[pos] ))
+        if (name[pos] < 32 || wcschr( invalid_charsW, name[pos] ))
             return STATUS_OBJECT_NAME_INVALID;
     }
     if (pos > MAX_DIR_ENTRY_LEN)
@@ -2810,7 +2807,7 @@ static NTSTATUS nt_to_unix_file_name_internal( const UNICODE_STRING *nameW, ANSI
     else
     {
         for (p = name; p < name + name_len; p++)
-            if (*p < 32 || strchrW( invalid_charsW, *p )) return STATUS_OBJECT_NAME_INVALID;
+            if (*p < 32 || wcschr( invalid_charsW, *p )) return STATUS_OBJECT_NAME_INVALID;
     }
 
     unix_len = (prefix_len + name_len) * 3 + MAX_DIR_ENTRY_LEN + 3;
@@ -2915,7 +2912,7 @@ static NTSTATUS nt_to_dos_device( WCHAR *name, size_t length, WCHAR *device_ret 
     while (!NtQueryDirectoryObject( handle, info, sizeof(data), TRUE, FALSE, &ctx, NULL ))
     {
         if (read_nt_symlink( handle, &info->ObjectName, symlinkW, MAX_DIR_ENTRY_LEN )) continue;
-        if (strlenW( symlinkW ) != length || memicmpW( symlinkW, name, length )) continue;
+        if (wcsnicmp( symlinkW, name, length )) continue;
         if (info->ObjectName.Length != 2 * sizeof(WCHAR) || info->ObjectName.Buffer[1] != ':') continue;
 
         *device_ret = info->ObjectName.Buffer[0];
@@ -2939,24 +2936,22 @@ static NTSTATUS nt_to_dos_device( WCHAR *name, size_t length, WCHAR *device_ret 
 NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
                                           UINT disposition, BOOLEAN check_case )
 {
-    static const WCHAR systemrootW[] = {'\\','S','y','s','t','e','m','R','o','o','t','\\'};
+    static const WCHAR systemrootW[] = {'\\','S','y','s','t','e','m','R','o','o','t','\\',0};
     static const WCHAR dosprefixW[] = {'\\','?','?','\\'};
-    static const WCHAR deviceW[] = {'\\','D','e','v','i','c','e','\\'};
+    static const WCHAR deviceW[] = {'\\','D','e','v','i','c','e','\\',0};
     WCHAR *name, *ptr, *prefix, buffer[3] = {'c',':',0};
     UNICODE_STRING dospathW;
     size_t offset, name_len;
     NTSTATUS status;
 
-    if (nameW->Length >= sizeof(deviceW) &&
-        !memicmpW( nameW->Buffer, deviceW, sizeof(deviceW) / sizeof(WCHAR) ))
+    if (!wcsnicmp( nameW->Buffer, deviceW, nameW->Length / sizeof(WCHAR) ))
     {
         offset = sizeof(deviceW) / sizeof(WCHAR);
         while (offset * sizeof(WCHAR) < nameW->Length && nameW->Buffer[ offset ] != '\\') offset++;
         if ((status = nt_to_dos_device( nameW->Buffer, offset, buffer ))) return status;
         prefix = buffer;
     }
-    else if (nameW->Length >= sizeof(systemrootW) &&
-             !memicmpW( nameW->Buffer, systemrootW, sizeof(systemrootW) / sizeof(WCHAR) ))
+    else if (!wcsnicmp( nameW->Buffer, systemrootW, nameW->Length / sizeof(WCHAR) ))
     {
         offset = (sizeof(systemrootW) - 1) / sizeof(WCHAR);
         prefix = user_shared_data->NtSystemRoot;
@@ -2964,7 +2959,7 @@ NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRI
     else
         return nt_to_unix_file_name_internal( nameW, unix_name_ret, disposition, check_case );
 
-    name_len = sizeof(dosprefixW) + strlenW(prefix) * sizeof(WCHAR) +
+    name_len = sizeof(dosprefixW) + wcslen(prefix) * sizeof(WCHAR) +
                nameW->Length - offset * sizeof(WCHAR) + sizeof(WCHAR);
     if (!(name = RtlAllocateHeap( GetProcessHeap(), 0, name_len )))
         return STATUS_NO_MEMORY;
@@ -2972,8 +2967,8 @@ NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRI
     ptr = name;
     memcpy( ptr, dosprefixW, sizeof(dosprefixW) );
     ptr += sizeof(dosprefixW) / sizeof(WCHAR);
-    strcpyW( ptr, prefix );
-    ptr += strlenW(ptr);
+    wcscpy( ptr, prefix );
+    ptr += wcslen(ptr);
     memcpy( ptr, nameW->Buffer + offset, nameW->Length - offset * sizeof(WCHAR) );
     ptr[ nameW->Length / sizeof(WCHAR) - offset ] = 0;
 

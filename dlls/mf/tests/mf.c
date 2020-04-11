@@ -38,6 +38,9 @@ DEFINE_GUID(MFVideoFormat_ABGR32, 0x00000020, 0x0000, 0x0010, 0x80, 0x00, 0x00, 
 #include "mfapi.h"
 #include "mferror.h"
 #include "mfidl.h"
+#include "initguid.h"
+#include "mmdeviceapi.h"
+#include "audioclient.h"
 
 #include "wine/test.h"
 
@@ -2631,14 +2634,21 @@ static void test_quality_manager(void)
 
 static void test_sar(void)
 {
+    IMFPresentationClock *present_clock, *present_clock2;
+    IMFMediaTypeHandler *handler, *handler2;
     IMFPresentationTimeSource *time_source;
+    IMFMediaType *mediatype, *mediatype2;
     IMFClockStateSink *state_sink;
     IMFMediaSink *sink, *sink2;
+    IMFStreamSink *stream_sink;
+    IMFAttributes *attributes;
+    DWORD id, flags, count;
     IMFActivate *activate;
     MFCLOCK_STATE state;
     IMFClock *clock;
-    DWORD flags;
+    IUnknown *unk;
     HRESULT hr;
+    GUID guid;
 
     hr = CoInitialize(NULL);
     ok(hr == S_OK, "Failed to initialize, hr %#x.\n", hr);
@@ -2650,15 +2660,20 @@ static void test_sar(void)
         CoUninitialize();
         return;
     }
-
-todo_wine
     ok(hr == S_OK, "Failed to create renderer, hr %#x.\n", hr);
+
+    hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
+    ok(hr == S_OK, "Startup failure, hr %#x.\n", hr);
+
+    hr = MFCreatePresentationClock(&present_clock);
+    ok(hr == S_OK, "Failed to create presentation clock, hr %#x.\n", hr);
+
+    hr = IMFMediaSink_QueryInterface(sink, &IID_IMFPresentationTimeSource, (void **)&time_source);
+todo_wine
+    ok(hr == S_OK, "Failed to get time source interface, hr %#x.\n", hr);
 
 if (SUCCEEDED(hr))
 {
-    hr = IMFMediaSink_QueryInterface(sink, &IID_IMFPresentationTimeSource, (void **)&time_source);
-    ok(hr == S_OK, "Failed to get time source interface, hr %#x.\n", hr);
-
     hr = IMFPresentationTimeSource_GetUnderlyingClock(time_source, &clock);
     ok(hr == MF_E_NO_CLOCK, "Unexpected hr %#x.\n", hr);
 
@@ -2679,19 +2694,224 @@ if (SUCCEEDED(hr))
     IMFClockStateSink_Release(state_sink);
 
     IMFPresentationTimeSource_Release(time_source);
+}
+    hr = IMFMediaSink_AddStreamSink(sink, 123, NULL, &stream_sink);
+    ok(hr == MF_E_STREAMSINKS_FIXED, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_RemoveStreamSink(sink, 0);
+    ok(hr == MF_E_STREAMSINKS_FIXED, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_GetStreamSinkCount(sink, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_GetStreamSinkCount(sink, &count);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(count == 1, "Unexpected count %u.\n", count);
+
+    hr = IMFMediaSink_GetCharacteristics(sink, &flags);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(flags == (MEDIASINK_FIXED_STREAMS | MEDIASINK_CAN_PREROLL), "Unexpected flags %#x.\n", flags);
+
+    hr = IMFMediaSink_QueryInterface(sink, &IID_IMFMediaSinkPreroll, (void **)&unk);
+    ok(hr == S_OK, "Failed to get interface, hr %#x.\n", hr);
+    IUnknown_Release(unk);
+
+    /* Events */
+    hr = IMFMediaSink_QueryInterface(sink, &IID_IMFMediaEventGenerator, (void **)&unk);
+    ok(hr == S_OK, "Failed to get interface, hr %#x.\n", hr);
+    IUnknown_Release(unk);
+
+    /* Clock */
+    hr = IMFMediaSink_QueryInterface(sink, &IID_IMFClockStateSink, (void **)&unk);
+    ok(hr == S_OK, "Failed to get interface, hr %#x.\n", hr);
+    IUnknown_Release(unk);
+
+    hr = IMFMediaSink_SetPresentationClock(sink, NULL);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_SetPresentationClock(sink, present_clock);
+todo_wine
+    ok(hr == MF_E_CLOCK_NO_TIME_SOURCE, "Unexpected hr %#x.\n", hr);
+
+    hr = MFCreateSystemTimeSource(&time_source);
+    ok(hr == S_OK, "Failed to create time source, hr %#x.\n", hr);
+
+    hr = IMFPresentationClock_SetTimeSource(present_clock, time_source);
+    ok(hr == S_OK, "Failed to set time source, hr %#x.\n", hr);
+    IMFPresentationTimeSource_Release(time_source);
+
+    hr = IMFMediaSink_SetPresentationClock(sink, present_clock);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_GetPresentationClock(sink, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_GetPresentationClock(sink, &present_clock2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(present_clock == present_clock2, "Unexpected instance.\n");
+    IMFPresentationClock_Release(present_clock2);
+
+    /* Stream */
+    hr = IMFMediaSink_GetStreamSinkByIndex(sink, 0, &stream_sink);
+    ok(hr == S_OK, "Failed to get a stream, hr %#x.\n", hr);
+
+    hr = IMFStreamSink_GetIdentifier(stream_sink, &id);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!id, "Unexpected id.\n");
+
+    hr = IMFStreamSink_GetMediaSink(stream_sink, &sink2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(sink == sink2, "Unexpected object.\n");
+    IMFMediaSink_Release(sink2);
+
+    hr = IMFStreamSink_GetMediaTypeHandler(stream_sink, &handler);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFStreamSink_QueryInterface(stream_sink, &IID_IMFMediaTypeHandler, (void **)&handler2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(handler2 == handler, "Unexpected instance.\n");
+    IMFMediaTypeHandler_Release(handler2);
+
+    hr = IMFMediaTypeHandler_GetMajorType(handler, &guid);
+    ok(hr == S_OK, "Failed to get major type, hr %#x.\n", hr);
+    ok(IsEqualGUID(&guid, &MFMediaType_Audio), "Unexpected type %s.\n", wine_dbgstr_guid(&guid));
+
+    count = 0;
+    hr = IMFMediaTypeHandler_GetMediaTypeCount(handler, &count);
+todo_wine {
+    ok(hr == S_OK, "Failed to get type count, hr %#x.\n", hr);
+    ok(!!count, "Unexpected type count %u.\n", count);
+}
+
+if (SUCCEEDED(hr))
+{
+    hr = IMFMediaTypeHandler_GetCurrentMediaType(handler, &mediatype);
+    ok(hr == MF_E_NOT_INITIALIZED, "Unexpected hr %#x.\n", hr);
+
+    hr = MFCreateMediaType(&mediatype);
+    ok(hr == S_OK, "Failed to create media type, hr %#x.\n", hr);
+
+    hr = IMFMediaTypeHandler_IsMediaTypeSupported(handler, mediatype, NULL);
+    ok(hr == MF_E_ATTRIBUTENOTFOUND, "Unexpected hr %#x.\n", hr);
+
+    IMFMediaType_SetGUID(mediatype, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
+    hr = IMFMediaTypeHandler_IsMediaTypeSupported(handler, mediatype, NULL);
+    ok(hr == MF_E_INVALIDMEDIATYPE, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaTypeHandler_SetCurrentMediaType(handler, mediatype);
+    ok(hr == MF_E_INVALIDMEDIATYPE, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaTypeHandler_GetMediaTypeByIndex(handler, 0, &mediatype2);
+    ok(hr == S_OK, "Failed to get media type, hr %#x.\n", hr);
+
+    hr = IMFMediaTypeHandler_IsMediaTypeSupported(handler, mediatype2, NULL);
+    ok(hr == MF_E_INVALIDMEDIATYPE, "Unexpected hr %#x.\n", hr);
+
+    IMFMediaType_Release(mediatype);
+
+    hr = IMFMediaTypeHandler_SetCurrentMediaType(handler, mediatype2);
+    ok(hr == S_OK, "Failed to set current type, hr %#x.\n", hr);
+
+    hr = IMFMediaTypeHandler_GetCurrentMediaType(handler, &mediatype);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(mediatype == mediatype2, "Unexpected instance.\n");
+    IMFMediaType_Release(mediatype);
+
+    IMFMediaType_Release(mediatype2);
+
+    /* Set partial type. */
+    hr = MFCreateMediaType(&mediatype);
+    ok(hr == S_OK, "Failed to create media type, hr %#x.\n", hr);
+
+    hr = IMFMediaType_GetGUID(mediatype2, &MF_MT_SUBTYPE, &guid);
+    ok(hr == S_OK, "Failed to get attribute, hr %#x.\n", hr);
+
+    hr = IMFMediaType_SetGUID(mediatype, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
+    ok(hr == S_OK, "Failed to set attribute, hr %#x.\n", hr);
+
+    hr = IMFMediaType_SetGUID(mediatype, &MF_MT_SUBTYPE, &guid);
+    ok(hr == S_OK, "Failed to set attribute, hr %#x.\n", hr);
+
+    hr = IMFMediaTypeHandler_SetCurrentMediaType(handler, mediatype);
+    ok(hr == S_OK, "Failed to set current type, hr %#x.\n", hr);
+
+    hr = IMFMediaTypeHandler_GetCurrentMediaType(handler, &mediatype2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(mediatype == mediatype2, "Unexpected instance.\n");
+    IMFMediaType_Release(mediatype2);
+
+    hr = IMFMediaType_GetCount(mediatype, &count);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(count == 2, "Unexpected attribute count %u.\n", count);
+
+    IMFMediaType_Release(mediatype);
+
+    /* Reset back to uninitialized state. */
+    hr = IMFMediaTypeHandler_SetCurrentMediaType(handler, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+
+    IMFMediaTypeHandler_Release(handler);
+}
+    IMFStreamSink_Release(stream_sink);
+
+    /* Volume control */
+    hr = MFGetService((IUnknown *)sink, &MR_POLICY_VOLUME_SERVICE, &IID_IMFSimpleAudioVolume, (void **)&unk);
+    ok(hr == S_OK, "Failed to get interface, hr %#x.\n", hr);
+    IUnknown_Release(unk);
+
+    hr = MFGetService((IUnknown *)sink, &MR_STREAM_VOLUME_SERVICE, &IID_IMFAudioStreamVolume, (void **)&unk);
+    ok(hr == S_OK, "Failed to get interface, hr %#x.\n", hr);
+    IUnknown_Release(unk);
+
+    hr = MFGetService((IUnknown *)sink, &MR_AUDIO_POLICY_SERVICE, &IID_IMFAudioPolicy, (void **)&unk);
+todo_wine
+    ok(hr == MF_E_NOT_INITIALIZED, "Failed to get interface, hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+        IUnknown_Release(unk);
+
+    /* Shutdown */
+    hr = IMFMediaSink_Shutdown(sink);
+    ok(hr == S_OK, "Failed to shut down, hr %#x.\n", hr);
+
+    hr = IMFMediaSink_Shutdown(sink);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_AddStreamSink(sink, 123, NULL, &stream_sink);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_RemoveStreamSink(sink, 0);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_GetStreamSinkCount(sink, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_GetStreamSinkCount(sink, &count);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_GetCharacteristics(sink, &flags);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_SetPresentationClock(sink, NULL);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_SetPresentationClock(sink, present_clock);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_GetPresentationClock(sink, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaSink_GetPresentationClock(sink, &present_clock2);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     IMFMediaSink_Release(sink);
-}
+
     /* Activation */
     hr = MFCreateAudioRendererActivate(&activate);
     ok(hr == S_OK, "Failed to create activation object, hr %#x.\n", hr);
 
     hr = IMFActivate_ActivateObject(activate, &IID_IMFMediaSink, (void **)&sink);
-todo_wine
     ok(hr == S_OK, "Failed to activate, hr %#x.\n", hr);
 
-if (hr == S_OK)
-{
     hr = IMFActivate_ActivateObject(activate, &IID_IMFMediaSink, (void **)&sink2);
     ok(hr == S_OK, "Failed to activate, hr %#x.\n", hr);
     ok(sink == sink2, "Unexpected instance.\n");
@@ -2704,6 +2924,7 @@ if (hr == S_OK)
     ok(hr == S_OK, "Failed to shut down, hr %#x.\n", hr);
 
     hr = IMFMediaSink_GetCharacteristics(sink, &flags);
+todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     IMFMediaSink_Release(sink);
@@ -2712,14 +2933,45 @@ if (hr == S_OK)
     ok(hr == S_OK, "Failed to activate, hr %#x.\n", hr);
 
     hr = IMFMediaSink_GetCharacteristics(sink, &flags);
+todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     IMFMediaSink_Release(sink);
 
     hr = IMFActivate_DetachObject(activate);
     ok(hr == E_NOTIMPL, "Unexpected hr %#x.\n", hr);
-}
+
     IMFActivate_Release(activate);
+
+    IMFPresentationClock_Release(present_clock);
+
+    hr = MFShutdown();
+    ok(hr == S_OK, "Shutdown failure, hr %#x.\n", hr);
+
+    /* SAR attributes */
+    hr = MFCreateAttributes(&attributes, 0);
+    ok(hr == S_OK, "Failed to create attributes, hr %#x.\n", hr);
+
+    /* Specify role. */
+    hr = IMFAttributes_SetUINT32(attributes, &MF_AUDIO_RENDERER_ATTRIBUTE_ENDPOINT_ROLE, eMultimedia);
+    ok(hr == S_OK, "Failed to set attribute, hr %#x.\n", hr);
+
+    hr = MFCreateAudioRenderer(attributes, &sink);
+    ok(hr == S_OK, "Failed to create a sink, hr %#x.\n", hr);
+    IMFMediaSink_Release(sink);
+
+    /* Invalid endpoint. */
+    hr = IMFAttributes_SetString(attributes, &MF_AUDIO_RENDERER_ATTRIBUTE_ENDPOINT_ID, L"endpoint");
+    ok(hr == S_OK, "Failed to set attribute, hr %#x.\n", hr);
+
+    hr = MFCreateAudioRenderer(attributes, &sink);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFAttributes_DeleteItem(attributes, &MF_AUDIO_RENDERER_ATTRIBUTE_ENDPOINT_ROLE);
+    ok(hr == S_OK, "Failed to remove attribute, hr %#x.\n", hr);
+
+    hr = MFCreateAudioRenderer(attributes, &sink);
+    ok(hr == MF_E_NO_AUDIO_PLAYBACK_DEVICE, "Failed to create a sink, hr %#x.\n", hr);
 
     CoUninitialize();
 }

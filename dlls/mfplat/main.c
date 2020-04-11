@@ -1647,6 +1647,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_TOPOLOGY_ENUMERATE_SOURCE_TYPES),
         X(MF_MT_VIDEO_NO_FRAME_ORDERING),
         X(MF_MT_VIDEO_CHROMA_SITING),
+        X(MF_AUDIO_RENDERER_ATTRIBUTE_STREAM_CATEGORY),
         X(MFSampleExtension_3DVideo_SampleFormat),
         X(MF_MT_H264_RESOLUTION_SCALING),
         X(MF_MT_MPEG2_LEVEL),
@@ -1749,6 +1750,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_MT_SPATIAL_AUDIO_OBJECT_METADATA_FORMAT_ID),
         X(MF_SAMPLEGRABBERSINK_IGNORE_CLOCK),
         X(MF_MT_PAN_SCAN_ENABLED),
+        X(MF_AUDIO_RENDERER_ATTRIBUTE_ENDPOINT_ID),
         X(MF_MT_DV_VAUX_CTRL_PACK),
         X(MFSampleExtension_ForwardedDecodeUnitType),
         X(MF_MT_AUDIO_AVG_BYTES_PER_SECOND),
@@ -1782,6 +1784,8 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_TOPOLOGY_RESOLUTION_STATUS),
         X(MF_MT_ORIGINAL_4CC),
         X(MF_PD_AUDIO_ISVARIABLEBITRATE),
+        X(MF_AUDIO_RENDERER_ATTRIBUTE_FLAGS),
+        X(MF_AUDIO_RENDERER_ATTRIBUTE_SESSION_ID),
         X(MF_MT_MPEG2_CONTENT_PACKET),
         X(MFT_PROCESS_LOCAL_Attribute),
         X(MFT_PROCESS_LOCAL_Attribute),
@@ -1830,6 +1834,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MFT_FIELDOFUSE_UNLOCK_Attribute),
         X(MF_TOPONODE_ERROR_SUBTYPE),
         X(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE),
+        X(MF_AUDIO_RENDERER_ATTRIBUTE_ENDPOINT_ROLE),
         X(MF_MT_VIDEO_3D_LEFT_IS_BASE),
         X(MF_TOPONODE_WORKQUEUE_MMCSS_TASKID),
 #undef X
@@ -8058,15 +8063,35 @@ static HRESULT WINAPI system_time_source_sink_OnClockStart(IMFClockStateSink *if
         LONGLONG start_offset)
 {
     struct system_time_source *source = impl_from_IMFClockStateSink(iface);
+    MFCLOCK_STATE state;
     HRESULT hr;
 
     TRACE("%p, %s, %s.\n", iface, debugstr_time(system_time), debugstr_time(start_offset));
 
     EnterCriticalSection(&source->cs);
+    state = source->state;
     if (SUCCEEDED(hr = system_time_source_change_state(source, CLOCK_CMD_START)))
     {
         system_time_source_apply_rate(source, &system_time);
-        source->start_offset = -system_time + start_offset;
+        if (start_offset == PRESENTATION_CURRENT_POSITION)
+        {
+            switch (state)
+            {
+                case MFCLOCK_STATE_RUNNING:
+                    break;
+                case MFCLOCK_STATE_PAUSED:
+                    source->start_offset -= system_time;
+                    break;
+                default:
+                    source->start_offset = -system_time;
+                    break;
+                    ;
+            }
+        }
+        else
+        {
+            source->start_offset = -system_time + start_offset;
+        }
     }
     LeaveCriticalSection(&source->cs);
 

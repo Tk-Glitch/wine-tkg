@@ -174,6 +174,108 @@ static void test_getpathdata(void)
     GdipDeletePath(path);
 }
 
+static void test_createpath2(void)
+{
+    GpStatus status;
+    GpPath* path = NULL;
+    GpPathData data;
+    INT i, count, expect_count;
+
+    PointF test_line_points[] = {{1.0,1.0}, {2.0,1.0}};
+    BYTE test_line_types[] = {PathPointTypeStart, PathPointTypeLine};
+
+    PointF test_bez_points[] = {{1.0,1.0}, {2.0,1.0}, {3.0,1.0}, {4.0,1.0},
+            {5.0,1.0}, {6.0,1.0}, {7.0,1.0}};
+    BYTE test_bez_types[] = {PathPointTypeStart, PathPointTypeBezier,
+            PathPointTypeBezier, PathPointTypeBezier, PathPointTypeBezier,
+            PathPointTypeBezier, PathPointTypeBezier};
+
+    status = GdipCreatePath2(test_line_points, test_line_types, 2, FillModeAlternate, &path);
+    expect(Ok, status);
+    status = GdipGetPointCount(path, &count);
+    expect(Ok, status);
+    expect(2, count);
+    GdipDeletePath(path);
+
+    status = GdipCreatePath2(test_line_points, test_line_types, 1, FillModeAlternate, &path);
+    expect(Ok, status);
+    status = GdipGetPointCount(path, &count);
+    expect(Ok, status);
+    expect(1, count);
+    GdipDeletePath(path);
+
+    path = (void *)0xdeadbeef;
+    status = GdipCreatePath2(test_line_points, test_line_types, 0, FillModeAlternate, &path);
+    expect(OutOfMemory, status);
+    ok(!path, "Expected NULL, got %p\n", path);
+    if(path && path != (void *)0xdeadbeef)
+        GdipDeletePath(path);
+
+    path = (void *)0xdeadbeef;
+    status = GdipCreatePath2(test_line_points, test_line_types, -1, FillModeAlternate, &path);
+    expect(OutOfMemory, status);
+    ok(!path, "Expected NULL, got %p\n", path);
+    if(path && path != (void *)0xdeadbeef)
+        GdipDeletePath(path);
+
+    path = (void *)0xdeadbeef;
+    status = GdipCreatePath2(NULL, test_line_types, 2, FillModeAlternate, &path);
+    expect(InvalidParameter, status);
+    ok(path == (void *)0xdeadbeef, "Expected %p, got %p\n", (void *)0xdeadbeef, path);
+    if(path && path != (void *)0xdeadbeef)
+        GdipDeletePath(path);
+
+    path = (void *)0xdeadbeef;
+    status = GdipCreatePath2(test_line_points, NULL, 2, FillModeAlternate, &path);
+    expect(InvalidParameter, status);
+    ok(path == (void *)0xdeadbeef, "Expected %p, got %p\n", (void *)0xdeadbeef, path);
+    if(path && path != (void *)0xdeadbeef)
+        GdipDeletePath(path);
+
+    status = GdipCreatePath2(test_line_points, test_line_types, 2, FillModeAlternate, NULL);
+    expect(InvalidParameter, status);
+
+    /* Zero-length line points do not get altered */
+    path = NULL;
+    test_line_points[1].X = test_line_points[0].X;
+    test_line_points[1].Y = test_line_points[0].Y;
+    status = GdipCreatePath2(test_line_points, test_line_types, 2, FillModeAlternate, &path);
+    expect(Ok, status);
+    status = GdipGetPointCount(path, &count);
+    expect(Ok, status);
+    expect(2, count);
+    GdipDeletePath(path);
+
+    /* The type of the first point is always converted to PathPointTypeStart */
+    test_line_types[0] = PathPointTypeLine;
+    status = GdipCreatePath2(test_line_points, test_line_types, 1, FillModeAlternate, &path);
+    expect(Ok, status);
+    status = GdipGetPointCount(path, &count);
+    expect(Ok, status);
+    expect(1, count);
+    data.Count  = count;
+    data.Types  = GdipAlloc(sizeof(BYTE) * count);
+    data.Points = GdipAlloc(sizeof(PointF) * count);
+    status = GdipGetPathData(path, &data);
+    expect(Ok, status);
+    expect((data.Points[0].X == 1.0) && (data.Points[0].Y == 1.0), TRUE);
+    expect(data.Types[0], PathPointTypeStart);
+    GdipFree(data.Points);
+    GdipFree(data.Types);
+    GdipDeletePath(path);
+
+    /* Bezier points must come in groups of three */
+    for(i = 2; i <= 7; i++) {
+        expect_count = (i % 3 == 1) ? i : 0;
+        status = GdipCreatePath2(test_bez_points, test_bez_types, i, FillModeAlternate, &path);
+        expect(Ok, status);
+        status = GdipGetPointCount(path, &count);
+        expect(Ok, status);
+        expect(expect_count, count);
+        GdipDeletePath(path);
+    }
+}
+
 static path_test_t line2_path[] = {
     {0.0, 50.0, PathPointTypeStart, 0, 0}, /*0*/
     {5.0, 45.0, PathPointTypeLine, 0, 0}, /*1*/
@@ -1077,6 +1179,13 @@ static path_test_t widenline_dash_path[] = {
     {45.0, 10.0,  PathPointTypeLine|PathPointTypeCloseSubpath,  0, 0}, /*7*/
     };
 
+static path_test_t widenline_unit_path[] = {
+    {5.0, 9.5,   PathPointTypeStart, 0, 0}, /*0*/
+    {50.0, 9.5,  PathPointTypeLine,  0, 0}, /*1*/
+    {50.0, 10.5, PathPointTypeLine,  0, 0}, /*2*/
+    {5.0, 10.5,  PathPointTypeLine|PathPointTypeCloseSubpath,  0, 0} /*3*/
+    };
+
 static void test_widen(void)
 {
     GpStatus status;
@@ -1239,7 +1348,24 @@ static void test_widen(void)
 
     status = GdipGetPointCount(path, &count);
     expect(Ok, status);
-    todo_wine expect(0, count);
+    expect(0, count);
+
+    /* pen width = 0 pixels, UnitWorld - result is a path 1 unit wide */
+    GdipDeletePen(pen);
+    status = GdipCreatePen1(0xffffffff, 0.0, UnitWorld, &pen);
+    expect(Ok, status);
+
+    status = GdipResetPath(path);
+    expect(Ok, status);
+    status = GdipAddPathLine(path, 5.0, 10.0, 50.0, 10.0);
+    expect(Ok, status);
+
+    status = GdipWidenPath(path, pen, m, 1.0);
+    expect(Ok, status);
+
+    status = GdipGetPointCount(path, &count);
+    expect(Ok, status);
+    ok_path_fudge(path, widenline_unit_path, ARRAY_SIZE(widenline_unit_path), FALSE, 0.000005);
 
     GdipDeleteMatrix(m);
     GdipDeletePen(pen);
@@ -1365,7 +1491,7 @@ static path_test_t widenline_caparrowanchor_path[] = {
     };
 
 static path_test_t widenline_capsquareanchor_thin_path[] = {
-    {6.414213, 8.585786,   PathPointTypeStart, 4, 0}, /*0*/
+    {6.414213, 8.585786,   PathPointTypeStart, 0, 0}, /*0*/
     {6.414213, 11.414213,  PathPointTypeLine,  0, 0}, /*1*/
     {3.585786, 11.414213,  PathPointTypeLine,  0, 0}, /*2*/
     {3.585786, 8.585786,   PathPointTypeLine|PathPointTypeCloseSubpath, 0, 0}, /*3*/
@@ -1453,7 +1579,7 @@ static void test_widen_cap(void)
         { LineCapArrowAnchor, 10.0, widenline_caparrowanchor_path,
                 ARRAY_SIZE(widenline_caparrowanchor_path), FALSE, TRUE },
         { LineCapSquareAnchor, 0.0, widenline_capsquareanchor_thin_path,
-                ARRAY_SIZE(widenline_capsquareanchor_thin_path), FALSE, TRUE },
+                ARRAY_SIZE(widenline_capsquareanchor_thin_path) },
         { LineCapSquareAnchor, 10.0, widenline_capsquareanchor_dashed_path,
                 ARRAY_SIZE(widenline_capsquareanchor_dashed_path), TRUE },
     };
@@ -1639,6 +1765,7 @@ START_TEST(graphicspath)
 
     test_constructor_destructor();
     test_getpathdata();
+    test_createpath2();
     test_line2();
     test_arc();
     test_worldbounds();

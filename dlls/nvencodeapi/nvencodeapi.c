@@ -372,7 +372,7 @@ static BOOL load_nvencode(void)
 
     for (i = 0; i < sizeof(libname)/sizeof(libname[0]); i++)
     {
-        libnvidia_encode_handle = wine_dlopen(libname[i], RTLD_NOW, NULL, 0);
+        libnvidia_encode_handle = dlopen(libname[i], RTLD_NOW);
         if (libnvidia_encode_handle) break;
     }
 
@@ -382,7 +382,7 @@ static BOOL load_nvencode(void)
         return FALSE;
     }
 
-    pNvEncodeAPICreateInstance = wine_dlsym(libnvidia_encode_handle, "NvEncodeAPICreateInstance", NULL, 0);
+    pNvEncodeAPICreateInstance = dlsym(libnvidia_encode_handle, "NvEncodeAPICreateInstance");
     if (!pNvEncodeAPICreateInstance)
     {
         FIXME("Can't find symbol NvEncodeAPICreateInstance.\n");
@@ -405,7 +405,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         case DLL_PROCESS_DETACH:
             if (reserved) break;
             if (libnvidia_encode_handle)
-                wine_dlclose(libnvidia_encode_handle, NULL, 0);
+                dlclose(libnvidia_encode_handle);
             break;
     }
 

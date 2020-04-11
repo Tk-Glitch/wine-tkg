@@ -21,9 +21,6 @@
  *
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -130,7 +127,7 @@ static BOOL pe_find_section(struct image_file_map* fmap, const char* name,
             sectname = memcpy(tmp, sectname, IMAGE_SIZEOF_SHORT_NAME);
             tmp[IMAGE_SIZEOF_SHORT_NAME] = '\0';
         }
-        if (!_strnicmp(sectname, name, -1))
+        if (!stricmp(sectname, name))
         {
             ism->fmap = fmap;
             ism->sidx = i;
@@ -500,7 +497,7 @@ static BOOL pe_load_stabs(const struct process* pcs, struct module* module)
         {
             ret = stabs_parse(module,
                               module->module.BaseOfImage - fmap->u.pe.ntheader.OptionalHeader.ImageBase,
-                              stab, image_get_map_size(&sect_stabs),
+                              stab, image_get_map_size(&sect_stabs) / sizeof(struct stab_nlist), sizeof(struct stab_nlist),
                               stabstr, image_get_map_size(&sect_stabstr),
                               NULL, NULL);
         }
@@ -780,7 +777,7 @@ struct module* pe_load_native_module(struct process* pcs, const WCHAR* name,
             return NULL;
         opened = TRUE;
     }
-    else if (name) strcpyW(loaded_name, name);
+    else if (name) lstrcpyW(loaded_name, name);
     else if (dbghelp_options & SYMOPT_DEFERRED_LOADS)
         FIXME("Trouble ahead (no module name passed in deferred mode)\n");
     if (!(modfmt = HeapAlloc(GetProcessHeap(), 0, sizeof(struct module_format) + sizeof(struct pe_module_info))))
@@ -789,7 +786,7 @@ struct module* pe_load_native_module(struct process* pcs, const WCHAR* name,
     if (pe_map_file(hFile, &modfmt->u.pe_info->fmap, DMT_PE))
     {
         struct builtin_search builtin = { NULL };
-        if (modfmt->u.pe_info->fmap.u.pe.builtin && search_dll_path(loaded_name, search_builtin_pe, &builtin))
+        if (modfmt->u.pe_info->fmap.u.pe.builtin && search_dll_path(pcs, loaded_name, search_builtin_pe, &builtin))
         {
             TRACE("reloaded %s from %s\n", debugstr_w(loaded_name), debugstr_w(builtin.path));
             image_unmap_file(&modfmt->u.pe_info->fmap);

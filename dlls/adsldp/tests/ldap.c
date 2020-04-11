@@ -106,11 +106,23 @@ static void test_LDAP(void)
             IDispatch_Release(disp);
 
         hr = ADsOpenObject(path, user, password, test[i].flags, &IID_IADs, (void **)&ads);
+        if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
+        {
+            SysFreeString(path);
+            skip("server is down\n");
+            break;
+        }
         ok(hr == test[i].hr || hr == test[i].hr_ads_get, "%d: got %#x, expected %#x\n", i, hr, test[i].hr);
         if (hr == S_OK)
             IADs_Release(ads);
 
         hr = ADsGetObject(path, &IID_IDispatch, (void **)&disp);
+        if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
+        {
+            SysFreeString(path);
+            skip("server is down\n");
+            break;
+        }
         ok(hr == test[i].hr || hr == test[i].hr_ads_get, "%d: got %#x, expected %#x\n", i, hr, test[i].hr);
         if (hr == S_OK)
             IDispatch_Release(disp);
@@ -259,6 +271,8 @@ static void do_search(const struct search *s)
 
             for (i = 0; i < col.dwNumValues; i++)
             {
+                ok(col.pADsValues[i].dwType == col.dwADsType, "%u: got %d for %s\n", i, col.pADsValues[i].dwType, wine_dbgstr_w(name));
+
                 ok(res->values[i] != NULL, "expected to have more values for %s\n", wine_dbgstr_w(name));
                 if (!res->values[i]) break;
 
@@ -332,13 +346,19 @@ static void test_DirectorySearch(void)
     ADS_SEARCH_COLUMN col;
     LPWSTR name;
 
+    hr = ADsGetObject(L"LDAP:", &IID_IDirectorySearch, (void **)&ds);
+    ok(hr == E_NOINTERFACE, "got %#x\n", hr);
+
     hr = ADsGetObject(L"LDAP://ldap.forumsys.com/rootDSE", &IID_IDirectorySearch, (void **)&ds);
-todo_wine
     ok(hr == E_NOINTERFACE, "got %#x\n", hr);
 
     hr = ADsGetObject(L"LDAP://ldap.forumsys.com", &IID_IDirectorySearch, (void **)&ds);
+    if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
+    {
+        skip("server is down\n");
+        return;
+    }
     ok(hr == S_OK, "got %#x\n", hr);
-    if (hr != S_OK) return;
 
     pref.dwSearchPref = ADS_SEARCHPREF_SEARCH_SCOPE;
     pref.vValue.dwType = ADSTYPE_INTEGER;
@@ -386,7 +406,6 @@ todo_wine
             }
 
             hr = IDirectorySearch_FreeColumn(ds, &col);
-todo_wine
             ok(hr == S_OK, "got %#x\n", hr);
         }
 
@@ -418,6 +437,18 @@ todo_wine
     ok(hr == E_ADS_BAD_PARAMETER, "got %#x\n", hr);
     }
 
+    hr = IDirectorySearch_GetFirstRow(ds, sh);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    memset(&col, 0x55, sizeof(col));
+    hr = IDirectorySearch_GetColumn(ds, sh, (WCHAR *)L"deadbeef", &col);
+    ok(hr == E_ADS_COLUMN_NOT_SET, "got %#x\n", hr);
+    ok(!col.pszAttrName || broken(col.pszAttrName != NULL) /* XP */, "got %p\n", col.pszAttrName);
+    ok(col.dwADsType == ADSTYPE_INVALID || broken(col.dwADsType != ADSTYPE_INVALID) /* XP */, "got %d\n", col.dwADsType);
+    ok(!col.pADsValues, "got %p\n", col.pADsValues);
+    ok(!col.dwNumValues, "got %u\n", col.dwNumValues);
+    ok(!col.hReserved, "got %p\n", col.hReserved);
+
     hr = IDirectorySearch_CloseSearchHandle(ds, sh);
     ok(hr == S_OK, "got %#x\n", hr);
 
@@ -426,6 +457,66 @@ todo_wine
     do_search(&root_base);
     do_search(&scientists_base);
     do_search(&scientists_subtree);
+}
+
+static void test_DirectoryObject(void)
+{
+    HRESULT hr;
+    IDirectoryObject *dirobj;
+    IUnknown *unk;
+    IDirectorySearch *ds;
+    ADS_SEARCHPREF_INFO pref[2];
+    ADS_SEARCH_HANDLE sh;
+    ADS_SEARCH_COLUMN col;
+
+    hr = ADsGetObject(L"LDAP://ldap.forumsys.com/OU=scientists,DC=example,DC=com", &IID_IDirectoryObject, (void **)&dirobj);
+    if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
+    {
+        skip("server is down\n");
+        return;
+    }
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    hr = IDirectoryObject_QueryInterface(dirobj, &IID_IADsOpenDSObject, (void **)&unk);
+todo_wine
+    ok(hr == E_NOINTERFACE, "got %#x\n", hr);
+    hr = IDirectoryObject_QueryInterface(dirobj, &IID_IDispatch, (void **)&unk);
+    ok(hr == S_OK, "got %#x\n", hr);
+    IUnknown_Release(unk);
+    hr = IDirectoryObject_QueryInterface(dirobj, &IID_IADs, (void **)&unk);
+    ok(hr == S_OK, "got %#x\n", hr);
+    IUnknown_Release(unk);
+    hr = IDirectoryObject_QueryInterface(dirobj, &IID_IDirectorySearch, (void **)&ds);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    pref[0].dwSearchPref = ADS_SEARCHPREF_SEARCH_SCOPE;
+    pref[0].vValue.dwType = ADSTYPE_INTEGER;
+    pref[0].vValue.Integer = ADS_SCOPE_BASE;
+    pref[0].dwStatus = 0xdeadbeef;
+    pref[1].dwSearchPref = ADS_SEARCHPREF_SECURITY_MASK;
+    pref[1].vValue.dwType = ADSTYPE_INTEGER;
+    pref[1].vValue.Integer = ADS_SECURITY_INFO_OWNER | ADS_SECURITY_INFO_GROUP | ADS_SECURITY_INFO_DACL;
+    pref[1].dwStatus = 0xdeadbeef;
+    hr = IDirectorySearch_SetSearchPreference(ds, pref, ARRAY_SIZE(pref));
+    ok(hr == S_ADS_ERRORSOCCURRED, "got %#x\n", hr);
+    ok(pref[0].dwStatus == ADS_STATUS_S_OK, "got %d\n", pref[0].dwStatus);
+    /* ldap.forumsys.com doesn't support NT security, real ADs DC - does  */
+    ok(pref[1].dwStatus == ADS_STATUS_INVALID_SEARCHPREF, "got %d\n", pref[1].dwStatus);
+
+    hr = IDirectorySearch_ExecuteSearch(ds, (WCHAR *)L"(objectClass=*)", NULL, ~0, &sh);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    hr = IDirectorySearch_GetNextRow(ds, sh);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    hr = IDirectorySearch_GetColumn(ds, sh, (WCHAR *)L"nTSecurityDescriptor", &col);
+    ok(hr == E_ADS_COLUMN_NOT_SET, "got %#x\n", hr);
+
+    hr = IDirectorySearch_CloseSearchHandle(ds, sh);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    IDirectorySearch_Release(ds);
+    IDirectoryObject_Release(dirobj);
 }
 
 START_TEST(ldap)
@@ -438,6 +529,7 @@ START_TEST(ldap)
     test_LDAP();
     test_ParseDisplayName();
     test_DirectorySearch();
+    test_DirectoryObject();
 
     CoUninitialize();
 }

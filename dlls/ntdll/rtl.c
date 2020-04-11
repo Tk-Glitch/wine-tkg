@@ -42,7 +42,6 @@
 #include "winternl.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
-#include "wine/unicode.h"
 #include "ntdll_misc.h"
 #include "inaddr.h"
 #include "in6addr.h"
@@ -1079,8 +1078,9 @@ static BOOL parse_ipv6_component(const WCHAR **str, int base, ULONG *value)
 {
     WCHAR *terminator;
     if (**str >= ARRAY_SIZE(hex_table) || hex_table[**str] == -1) return FALSE;
-    *value = min(strtoulW(*str, &terminator, base), 0x7FFFFFFF);
-    if (terminator == *str) return FALSE;
+    *value = min(wcstoul(*str, &terminator, base), 0x7FFFFFFF);
+    if (*terminator == '0') terminator++; /* "0x" but nothing valid after */
+    else if (terminator == *str) return FALSE;
     *str = terminator;
     return TRUE;
 }
@@ -1233,6 +1233,7 @@ error:
 NTSTATUS NTAPI RtlIpv6StringToAddressExW(const WCHAR *str, IN6_ADDR *address, ULONG *scope, USHORT *port)
 {
     TRACE("(%s, %p, %p, %p)\n", debugstr_w(str), address, scope, port);
+    if (!str || !address || !scope || !port) return STATUS_INVALID_PARAMETER;
     return ipv6_string_to_address(str, TRUE, NULL, address, scope, port);
 }
 
@@ -1308,15 +1309,15 @@ NTSTATUS WINAPI RtlIpv4AddressToStringExW(const IN_ADDR *pin, USHORT port, LPWST
 
     TRACE("(%p:0x%x, %d, %p, %p:%d)\n", pin, pin->S_un.S_addr, port, buffer, psize, *psize);
 
-    needed = sprintfW(tmp_ip, fmt_ip,
+    needed = NTDLL_swprintf(tmp_ip, fmt_ip,
                       pin->S_un.S_un_b.s_b1, pin->S_un.S_un_b.s_b2,
                       pin->S_un.S_un_b.s_b3, pin->S_un.S_un_b.s_b4);
 
-    if (port) needed += sprintfW(tmp_ip + needed, fmt_port, ntohs(port));
+    if (port) needed += NTDLL_swprintf(tmp_ip + needed, fmt_port, ntohs(port));
 
     if (*psize > needed) {
         *psize = needed + 1;
-        strcpyW(buffer, tmp_ip);
+        wcscpy(buffer, tmp_ip);
         return STATUS_SUCCESS;
     }
 

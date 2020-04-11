@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdio.h>
 
 #include "wine/winbase16.h"
@@ -280,7 +278,7 @@ BOOL DOSVM_EmulateInterruptPM( CONTEXT *context, BYTE intnum )
                               DOSVM_IntProcRelay, 
                               DOSVM_GetBuiltinHandler(intnum) );
     }
-    else if (wine_ldt_is_system(context->SegCs))
+    else if (ldt_is_system(context->SegCs))
     {
         INTPROC proc;
         if (intnum >= ARRAY_SIZE(DOSVM_VectorsBuiltin)) return FALSE;

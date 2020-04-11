@@ -30,6 +30,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(opencl);
 
+#define CL_SILENCE_DEPRECATION
 #if defined(HAVE_CL_CL_H)
 #define CL_USE_DEPRECATED_OPENCL_1_1_APIS
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
@@ -285,7 +286,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
 
     case DLL_PROCESS_DETACH:
         if (reserved) break;
-        if (opencl_handle) wine_dlclose(opencl_handle, NULL, 0);
+        if (opencl_handle) dlclose(opencl_handle);
     }
 
     return TRUE;
@@ -306,7 +307,7 @@ static BOOL init_opencl(void)
 #ifdef SONAME_LIBOPENCL
     char error[256];
 
-    opencl_handle = wine_dlopen(SONAME_LIBOPENCL, RTLD_NOW, error, sizeof(error));
+    opencl_handle = dlopen(SONAME_LIBOPENCL, RTLD_NOW);
     if (opencl_handle != NULL)
     {
         TRACE("Opened library %s\n", SONAME_LIBOPENCL);
@@ -332,14 +333,14 @@ static BOOL init_opencl(void)
  */
 static BOOL load_opencl_func(void)
 {
-    char error[256];
+
 
     if (opencl_handle == NULL)
         return FALSE;
 
 #define LOAD_FUNCPTR(f) \
-    if (!(p##f = wine_dlsym(opencl_handle, #f, error, sizeof(error)))) \
-    WARN("%s not found in %s (%s)\n", #f, SONAME_LIBOPENCL, error);
+    if (!(p##f = dlsym(opencl_handle, #f))) \
+    WARN("%s not found in %s\n", #f, SONAME_LIBOPENCL);
 
     /* Platform API */
     LOAD_FUNCPTR(clGetPlatformIDs);

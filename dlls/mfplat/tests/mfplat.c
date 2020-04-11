@@ -42,6 +42,8 @@
 #include "initguid.h"
 #include "d3d11_4.h"
 #include "d3d9types.h"
+#include "ks.h"
+#include "ksmedia.h"
 
 DEFINE_GUID(DUMMY_CLSID, 0x12345678,0x1234,0x1234,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19);
 DEFINE_GUID(DUMMY_GUID1, 0x12345678,0x1234,0x1234,0x21,0x21,0x21,0x21,0x21,0x21,0x21,0x21);
@@ -76,8 +78,6 @@ static HRESULT (WINAPI *pMFCopyImage)(BYTE *dest, LONG deststride, const BYTE *s
 static HRESULT (WINAPI *pMFCreateDXGIDeviceManager)(UINT *token, IMFDXGIDeviceManager **manager);
 static HRESULT (WINAPI *pMFCreateSourceResolver)(IMFSourceResolver **resolver);
 static HRESULT (WINAPI *pMFCreateMFByteStreamOnStream)(IStream *stream, IMFByteStream **bytestream);
-static void*   (WINAPI *pMFHeapAlloc)(SIZE_T size, ULONG flags, char *file, int line, EAllocationType type);
-static void    (WINAPI *pMFHeapFree)(void *p);
 static HRESULT (WINAPI *pMFPutWaitingWorkItem)(HANDLE event, LONG priority, IMFAsyncResult *result, MFWORKITEM_KEY *key);
 static HRESULT (WINAPI *pMFAllocateSerialWorkQueue)(DWORD queue, DWORD *serial_queue);
 static HRESULT (WINAPI *pMFAddPeriodicCallback)(MFPERIODICCALLBACK callback, IUnknown *context, DWORD *key);
@@ -678,8 +678,6 @@ static void init_functions(void)
     X(MFCreateTransformActivate);
     X(MFGetPlaneSize);
     X(MFGetStrideForBitmapInfoHeader);
-    X(MFHeapAlloc);
-    X(MFHeapFree);
     X(MFPutWaitingWorkItem);
     X(MFRegisterLocalByteStreamHandler);
     X(MFRegisterLocalSchemeHandler);
@@ -2483,16 +2481,10 @@ static void test_MFHeapAlloc(void)
 {
     void *res;
 
-    if (!pMFHeapAlloc)
-    {
-        win_skip("MFHeapAlloc() is not available.\n");
-        return;
-    }
-
-    res = pMFHeapAlloc(16, 0, NULL, 0, eAllocationTypeIgnore);
+    res = MFHeapAlloc(16, 0, NULL, 0, eAllocationTypeIgnore);
     ok(res != NULL, "MFHeapAlloc failed.\n");
 
-    pMFHeapFree(res);
+    MFHeapFree(res);
 }
 
 static void test_scheduled_items(void)
@@ -3127,7 +3119,6 @@ static void test_system_time_source(void)
     hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
     ok(hr == S_OK, "Failed to get time %#x.\n", hr);
     ok(time == 0, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time), wine_dbgstr_longlong(systime));
-    IMFClockStateSink_Release(statesink);
 
     hr = IMFClockStateSink_OnClockStart(statesink, 10, 0);
     ok(hr == S_OK, "Failed to start source, hr %#x.\n", hr);
@@ -3172,6 +3163,114 @@ static void test_system_time_source(void)
     ok(time == -6, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
             wine_dbgstr_longlong(systime));
 
+    IMFClockStateSink_Release(statesink);
+    IMFPresentationTimeSource_Release(time_source);
+
+    /* PRESENTATION_CURRENT_POSITION */
+    hr = MFCreateSystemTimeSource(&time_source);
+    ok(hr == S_OK, "Failed to create time source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_QueryInterface(time_source, &IID_IMFClockStateSink, (void **)&statesink);
+    ok(hr == S_OK, "Failed to get sink interface, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(!time && systime, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    /* INVALID -> RUNNING */
+    hr = IMFClockStateSink_OnClockStart(statesink, 10, PRESENTATION_CURRENT_POSITION);
+    ok(hr == S_OK, "Failed to start source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(time == systime - 10, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    /* RUNNING -> RUNNING */
+    hr = IMFClockStateSink_OnClockStart(statesink, 20, PRESENTATION_CURRENT_POSITION);
+    ok(hr == S_OK, "Failed to start source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(time == systime - 10, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    hr = IMFClockStateSink_OnClockStart(statesink, 0, PRESENTATION_CURRENT_POSITION);
+    ok(hr == S_OK, "Failed to start source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(time == systime - 10, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    hr = IMFClockStateSink_OnClockStart(statesink, 0, 0);
+    ok(hr == S_OK, "Failed to start source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(time == systime, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    hr = IMFClockStateSink_OnClockStart(statesink, 30, PRESENTATION_CURRENT_POSITION);
+    ok(hr == S_OK, "Failed to start source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(time == systime, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    /* STOPPED -> RUNNING */
+    hr = IMFClockStateSink_OnClockStop(statesink, 567);
+    ok(hr == S_OK, "Failed to stop source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(!time && systime != 0, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    hr = IMFClockStateSink_OnClockStart(statesink, 30, PRESENTATION_CURRENT_POSITION);
+    ok(hr == S_OK, "Failed to start source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(time == systime - 30, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    /* PAUSED -> RUNNING */
+    hr = IMFClockStateSink_OnClockPause(statesink, 8);
+    ok(hr == S_OK, "Failed to pause source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(time == (-30 + 8) && systime != 0, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    hr = IMFClockStateSink_OnClockStart(statesink, 40, PRESENTATION_CURRENT_POSITION);
+    ok(hr == S_OK, "Failed to start source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(time == systime + (-30 + 8 - 40), "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    hr = IMFClockStateSink_OnClockPause(statesink, 7);
+    ok(hr == S_OK, "Failed to pause source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(time == (-30 + 8 - 40 + 7) && systime != 0, "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    hr = IMFClockStateSink_OnClockStart(statesink, 50, 7);
+    ok(hr == S_OK, "Failed to start source, hr %#x.\n", hr);
+
+    hr = IMFPresentationTimeSource_GetCorrelatedTime(time_source, 0, &time, &systime);
+    ok(hr == S_OK, "Failed to get time %#x.\n", hr);
+    ok(time == systime + (-50 + 7), "Unexpected time stamp %s, %s.\n", wine_dbgstr_longlong(time),
+            wine_dbgstr_longlong(systime));
+
+    IMFClockStateSink_Release(statesink);
     IMFPresentationTimeSource_Release(time_source);
 }
 
@@ -4987,6 +5086,157 @@ static void test_MFCreateMediaBufferFromMediaType(void)
     IMFMediaType_Release(media_type);
 }
 
+static void validate_media_type(IMFMediaType *mediatype, const WAVEFORMATEX *format)
+{
+    GUID guid, subtype;
+    UINT32 value;
+    HRESULT hr;
+
+    hr = IMFMediaType_GetMajorType(mediatype, &guid);
+    ok(hr == S_OK, "Failed to get major type, hr %#x.\n", hr);
+    ok(IsEqualGUID(&guid, &MFMediaType_Audio), "Unexpected major type %s.\n", wine_dbgstr_guid(&guid));
+
+    hr = IMFMediaType_GetGUID(mediatype, &MF_MT_SUBTYPE, &guid);
+    ok(hr == S_OK, "Failed to get subtype, hr %#x.\n", hr);
+
+    if (format->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
+    {
+        const WAVEFORMATEXTENSIBLE *fex = (const WAVEFORMATEXTENSIBLE *)format;
+        ok(IsEqualGUID(&guid, &fex->SubFormat), "Unexpected subtype %s.\n", wine_dbgstr_guid(&guid));
+
+        if (fex->dwChannelMask)
+        {
+            hr = IMFMediaType_GetUINT32(mediatype, &MF_MT_AUDIO_CHANNEL_MASK, &value);
+            ok(hr == S_OK, "Failed to get attribute, hr %#x.\n", hr);
+            ok(value == fex->dwChannelMask, "Unexpected CHANNEL_MASK %#x.\n", value);
+        }
+
+        if (format->wBitsPerSample && fex->Samples.wValidBitsPerSample)
+        {
+            hr = IMFMediaType_GetUINT32(mediatype, &MF_MT_AUDIO_VALID_BITS_PER_SAMPLE, &value);
+            ok(hr == S_OK, "Failed to get attribute, hr %#x.\n", hr);
+            ok(value == fex->Samples.wValidBitsPerSample, "Unexpected VALID_BITS_PER_SAMPLE %#x.\n", value);
+        }
+    }
+    else
+    {
+        memcpy(&subtype, &MFAudioFormat_Base, sizeof(subtype));
+        subtype.Data1 = format->wFormatTag;
+        ok(IsEqualGUID(&guid, &subtype), "Unexpected subtype %s.\n", wine_dbgstr_guid(&guid));
+
+        hr = IMFMediaType_GetUINT32(mediatype, &MF_MT_AUDIO_PREFER_WAVEFORMATEX, &value);
+        ok(hr == S_OK, "Failed to get attribute, hr %#x.\n", hr);
+        ok(value, "Unexpected value.\n");
+    }
+
+    if (format->nChannels)
+    {
+        hr = IMFMediaType_GetUINT32(mediatype, &MF_MT_AUDIO_NUM_CHANNELS, &value);
+        ok(hr == S_OK, "Failed to get attribute, hr %#x.\n", hr);
+        ok(value == format->nChannels, "Unexpected NUM_CHANNELS %u.\n", value);
+    }
+
+    if (format->nSamplesPerSec)
+    {
+        hr = IMFMediaType_GetUINT32(mediatype, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &value);
+        ok(hr == S_OK, "Failed to get attribute, hr %#x.\n", hr);
+        ok(value == format->nSamplesPerSec, "Unexpected SAMPLES_PER_SECOND %u.\n", value);
+    }
+
+    if (format->nAvgBytesPerSec)
+    {
+        hr = IMFMediaType_GetUINT32(mediatype, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, &value);
+        ok(hr == S_OK, "Failed to get attribute, hr %#x.\n", hr);
+        ok(value == format->nAvgBytesPerSec, "Unexpected AVG_BYTES_PER_SECOND %u.\n", value);
+    }
+
+    if (format->nBlockAlign)
+    {
+        hr = IMFMediaType_GetUINT32(mediatype, &MF_MT_AUDIO_BLOCK_ALIGNMENT, &value);
+        ok(hr == S_OK, "Failed to get attribute, hr %#x.\n", hr);
+        ok(value == format->nBlockAlign, "Unexpected BLOCK_ALIGNMENT %u.\n", value);
+    }
+
+    if (format->wBitsPerSample)
+    {
+        hr = IMFMediaType_GetUINT32(mediatype, &MF_MT_AUDIO_BITS_PER_SAMPLE, &value);
+        ok(hr == S_OK, "Failed to get attribute, hr %#x.\n", hr);
+        ok(value == format->wBitsPerSample, "Unexpected BITS_PER_SAMPLE %u.\n", value);
+    }
+
+    /* Only set for uncompressed formats. */
+    hr = IMFMediaType_GetUINT32(mediatype, &MF_MT_ALL_SAMPLES_INDEPENDENT, &value);
+    if (IsEqualGUID(&guid, &MFAudioFormat_Float) ||
+            IsEqualGUID(&guid, &MFAudioFormat_PCM))
+    {
+        ok(hr == S_OK, "Failed to get attribute, hr %#x.\n", hr);
+        ok(value, "Unexpected ALL_SAMPLES_INDEPENDENT value.\n");
+    }
+    else
+        ok(FAILED(hr), "Unexpected ALL_SAMPLES_INDEPENDENT.\n");
+}
+
+static void test_MFInitMediaTypeFromWaveFormatEx(void)
+{
+    static const WAVEFORMATEX waveformatex_tests[] =
+    {
+        { WAVE_FORMAT_PCM, 2, 44100, 0, 2, 8 },
+        { WAVE_FORMAT_PCM, 2, 44100, 1, 2, 8 },
+        { WAVE_FORMAT_PCM, 0, 44100, 0, 0, 0 },
+        { WAVE_FORMAT_PCM, 0,     0, 0, 0, 0 },
+        { WAVE_FORMAT_IEEE_FLOAT, 2, 44100, 1, 2, 8 },
+        { 1234, 0,     0, 0, 0, 0 },
+        { WAVE_FORMAT_ALAW },
+        { WAVE_FORMAT_CREATIVE_ADPCM },
+        { WAVE_FORMAT_MPEGLAYER3 },
+        { WAVE_FORMAT_MPEG_ADTS_AAC },
+        { WAVE_FORMAT_ALAC },
+        { WAVE_FORMAT_AMR_NB },
+        { WAVE_FORMAT_AMR_WB },
+        { WAVE_FORMAT_AMR_WP },
+        { WAVE_FORMAT_DOLBY_AC3_SPDIF },
+        { WAVE_FORMAT_DRM },
+        { WAVE_FORMAT_DTS },
+        { WAVE_FORMAT_FLAC },
+        { WAVE_FORMAT_MPEG },
+        { WAVE_FORMAT_WMAVOICE9 },
+        { WAVE_FORMAT_OPUS },
+        { WAVE_FORMAT_WMAUDIO2 },
+        { WAVE_FORMAT_WMAUDIO3 },
+        { WAVE_FORMAT_WMAUDIO_LOSSLESS },
+        { WAVE_FORMAT_WMASPDIF },
+    };
+    WAVEFORMATEXTENSIBLE waveformatext;
+    IMFMediaType *mediatype;
+    unsigned int i;
+    HRESULT hr;
+
+    hr = MFCreateMediaType(&mediatype);
+    ok(hr == S_OK, "Failed to create mediatype, hr %#x.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(waveformatex_tests); ++i)
+    {
+        hr = MFInitMediaTypeFromWaveFormatEx(mediatype, &waveformatex_tests[i], sizeof(waveformatex_tests[i]));
+        ok(hr == S_OK, "%d: format %#x, failed to initialize media type, hr %#x.\n", i, waveformatex_tests[i].wFormatTag, hr);
+
+        validate_media_type(mediatype, &waveformatex_tests[i]);
+
+        waveformatext.Format = waveformatex_tests[i];
+        waveformatext.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+        waveformatext.Format.cbSize = sizeof(waveformatext) - sizeof(waveformatext.Format);
+        waveformatext.Samples.wSamplesPerBlock = 123;
+        waveformatext.dwChannelMask = 0x8;
+        memcpy(&waveformatext.SubFormat, &MFAudioFormat_Base, sizeof(waveformatext.SubFormat));
+        waveformatext.SubFormat.Data1 = waveformatex_tests[i].wFormatTag;
+        hr = MFInitMediaTypeFromWaveFormatEx(mediatype, &waveformatext.Format, sizeof(waveformatext));
+        ok(hr == S_OK, "Failed to initialize media type, hr %#x.\n", hr);
+
+        validate_media_type(mediatype, &waveformatext.Format);
+    }
+
+    IMFMediaType_Release(mediatype);
+}
+
 START_TEST(mfplat)
 {
     char **argv;
@@ -5041,6 +5291,7 @@ START_TEST(mfplat)
     test_MFGetStrideForBitmapInfoHeader();
     test_MFCreate2DMediaBuffer();
     test_MFCreateMediaBufferFromMediaType();
+    test_MFInitMediaTypeFromWaveFormatEx();
 
     CoUninitialize();
 }

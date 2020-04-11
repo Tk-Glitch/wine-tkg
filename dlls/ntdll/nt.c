@@ -71,12 +71,10 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "windef.h"
 #include "winternl.h"
 #include "ntdll_misc.h"
 #include "wine/server.h"
-#include "wine/library.h"
 #include "ddk/wdm.h"
 
 #ifdef __APPLE__
@@ -2814,10 +2812,10 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                         procname[wine_server_reply_size(reply) / sizeof(WCHAR)] = 0;
 
                         /* Get only the executable name, not the path */
-                        if ((exename = strrchrW(procname, '\\')) != NULL) exename++;
+                        if ((exename = wcsrchr(procname, '\\')) != NULL) exename++;
                         else exename = procname;
 
-                        wlen = (strlenW(exename) + 1) * sizeof(WCHAR);
+                        wlen = (wcslen(exename) + 1) * sizeof(WCHAR);
 
                         procstructlen = sizeof(*spi) + wlen + ((reply->threads - 1) * sizeof(SYSTEM_THREAD_INFORMATION));
 
@@ -3976,41 +3974,4 @@ NTSTATUS WINAPI NtSystemDebugControl(SYSDBG_COMMAND command, PVOID inbuffer, ULO
     FIXME("(%d, %p, %d, %p, %d, %p), stub\n", command, inbuffer, inbuflength, outbuffer, outbuflength, retlength);
 
     return STATUS_NOT_IMPLEMENTED;
-}
-
-/******************************************************************************
- *  NtSetLdtEntries   (NTDLL.@)
- *  ZwSetLdtEntries   (NTDLL.@)
- */
-NTSTATUS WINAPI NtSetLdtEntries(ULONG selector1, ULONG entry1_low, ULONG entry1_high,
-                                ULONG selector2, ULONG entry2_low, ULONG entry2_high)
-{
-#ifdef __i386__
-    union
-    {
-        LDT_ENTRY entry;
-        ULONG dw[2];
-    } sel;
-
-    TRACE("(%x,%x,%x,%x,%x,%x)\n", selector1, entry1_low, entry1_high, selector2, entry2_low, entry2_high);
-
-    if (selector1)
-    {
-        sel.dw[0] = entry1_low;
-        sel.dw[1] = entry1_high;
-        if (wine_ldt_set_entry(selector1, &sel.entry) < 0)
-            return STATUS_ACCESS_DENIED;
-    }
-    if (selector2)
-    {
-        sel.dw[0] = entry2_low;
-        sel.dw[1] = entry2_high;
-        if (wine_ldt_set_entry(selector2, &sel.entry) < 0)
-            return STATUS_ACCESS_DENIED;
-    }
-    return STATUS_SUCCESS;
-#else
-    FIXME("(%x,%x,%x,%x,%x,%x): stub\n", selector1, entry1_low, entry1_high, selector2, entry2_low, entry2_high);
-    return STATUS_NOT_IMPLEMENTED;
-#endif
 }

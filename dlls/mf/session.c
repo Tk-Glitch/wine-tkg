@@ -539,10 +539,18 @@ static void session_set_topo_status(struct media_session *session, HRESULT statu
     if (topo_status == MF_TOPOSTATUS_INVALID)
         return;
 
+    if (list_empty(&session->topologies))
+    {
+        FIXME("Unexpectedly empty topology queue.\n");
+        return;
+    }
+
     if (topo_status > session->presentation.topo_status)
     {
+        struct queued_topology *topology = LIST_ENTRY(list_head(&session->topologies), struct queued_topology, entry);
+
         param.vt = VT_UNKNOWN;
-        param.punkVal = (IUnknown *)session->presentation.current_topology;
+        param.punkVal = (IUnknown *)topology->topology;
 
         if (FAILED(MFCreateMediaEvent(MESessionTopologyStatus, &GUID_NULL, status, &param, &event)))
             return;
@@ -1240,6 +1248,7 @@ static HRESULT session_set_current_topology(struct media_session *session, IMFTo
 
 static void session_set_topology(struct media_session *session, DWORD flags, IMFTopology *topology)
 {
+    IMFTopology *resolved_topology = NULL;
     HRESULT hr = S_OK;
 
     /* Resolve unless claimed to be full. */
@@ -1247,8 +1256,6 @@ static void session_set_topology(struct media_session *session, DWORD flags, IMF
     {
         if (!(flags & MFSESSION_SETTOPOLOGY_NORESOLUTION))
         {
-            IMFTopology *resolved_topology = NULL;
-
             hr = session_bind_output_nodes(topology);
 
             if (SUCCEEDED(hr))
@@ -1286,27 +1293,27 @@ static void session_set_topology(struct media_session *session, DWORD flags, IMF
     /* With no current topology set it right away, otherwise queue. */
     if (topology)
     {
+        struct queued_topology *queued_topology;
+
+        if ((queued_topology = heap_alloc_zero(sizeof(*queued_topology))))
+        {
+            queued_topology->topology = topology;
+            IMFTopology_AddRef(queued_topology->topology);
+
+            list_add_tail(&session->topologies, &queued_topology->entry);
+        }
+
         if (session->presentation.topo_status == MF_TOPOSTATUS_INVALID)
         {
             hr = session_set_current_topology(session, topology);
-        }
-        else
-        {
-            struct queued_topology *queued_topology;
-
-            if ((queued_topology = heap_alloc_zero(sizeof(*queued_topology))))
-            {
-                queued_topology->topology = topology;
-                IMFTopology_AddRef(queued_topology->topology);
-
-                list_add_tail(&session->topologies, &queued_topology->entry);
-            }
+            session_set_topo_status(session, hr, MF_TOPOSTATUS_READY);
         }
     }
 
-    session_set_topo_status(session, hr, MF_TOPOSTATUS_READY);
-
     LeaveCriticalSection(&session->cs);
+
+    if (resolved_topology)
+        IMFTopology_Release(resolved_topology);
 }
 
 static HRESULT WINAPI mfsession_QueryInterface(IMFMediaSession *iface, REFIID riid, void **out)

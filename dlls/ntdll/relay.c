@@ -33,7 +33,6 @@
 #include "winternl.h"
 #include "wine/exception.h"
 #include "ntdll_misc.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(relay);
@@ -104,24 +103,24 @@ static const WCHAR **build_list( const WCHAR *buffer )
     const WCHAR *p = buffer;
     const WCHAR **ret;
 
-    while ((p = strchrW( p, ';' )))
+    while ((p = wcschr( p, ';' )))
     {
         count++;
         p++;
     }
     /* allocate count+1 pointers, plus the space for a copy of the string */
     if ((ret = RtlAllocateHeap( GetProcessHeap(), 0,
-                                (count+1) * sizeof(WCHAR*) + (strlenW(buffer)+1) * sizeof(WCHAR) )))
+                                (count+1) * sizeof(WCHAR*) + (wcslen(buffer)+1) * sizeof(WCHAR) )))
     {
         WCHAR *str = (WCHAR *)(ret + count + 1);
         WCHAR *q = str;
 
-        strcpyW( str, buffer );
+        wcscpy( str, buffer );
         count = 0;
         for (;;)
         {
             ret[count++] = q;
-            if (!(q = strchrW( q, ';' ))) break;
+            if (!(q = wcschr( q, ';' ))) break;
             *q++ = 0;
         }
         ret[count++] = NULL;
@@ -223,7 +222,7 @@ static BOOL check_list( const WCHAR *module, int ordinal, const char *func, cons
     sprintf( ord_str, "%d", ordinal );
     for(; *list; list++)
     {
-        const WCHAR *p = strrchrW( *list, '.' );
+        const WCHAR *p = wcsrchr( *list, '.' );
         if (p && p > *list)  /* check module and function */
         {
             int len = p - *list;
@@ -284,7 +283,7 @@ static BOOL check_from_module( const WCHAR **includelist, const WCHAR **excludel
         int len;
 
         if (!wcsicmp( *listitem, module )) return !show;
-        len = strlenW( *listitem );
+        len = wcslen( *listitem );
         if (!wcsnicmp( *listitem, module, len ) && !wcsicmp( module + len, dllW ))
             return !show;
     }

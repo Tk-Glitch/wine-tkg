@@ -54,7 +54,7 @@ extern int receive_fd( struct process *process );
 extern int send_client_fd( struct process *process, int fd, obj_handle_t handle );
 extern void read_request( struct thread *thread );
 extern void write_reply( struct thread *thread );
-extern unsigned int get_tick_count(void);
+extern timeout_t monotonic_counter(void);
 extern void open_master_socket(void);
 extern void close_master_socket( timeout_t timeout );
 extern void shutdown_master_socket(void);
@@ -65,6 +65,12 @@ extern int server_dir_fd, config_dir_fd;
 
 extern void trace_request(void);
 extern void trace_reply( enum request req, const union generic_reply *reply );
+
+/* get current tick count to return to client */
+static inline unsigned int get_tick_count(void)
+{
+    return monotonic_counter() / 10000;
+}
 
 /* get the request vararg data */
 static inline const void *get_req_data(void)
@@ -414,12 +420,12 @@ DECL_HANDLER(update_rawinput_devices);
 DECL_HANDLER(get_rawinput_devices);
 DECL_HANDLER(get_suspend_context);
 DECL_HANDLER(set_suspend_context);
-DECL_HANDLER(create_job);
 DECL_HANDLER(create_fsync);
 DECL_HANDLER(open_fsync);
 DECL_HANDLER(get_fsync_idx);
 DECL_HANDLER(fsync_msgwait);
 DECL_HANDLER(get_fsync_apc_idx);
+DECL_HANDLER(create_job);
 DECL_HANDLER(open_job);
 DECL_HANDLER(assign_job);
 DECL_HANDLER(process_in_job);
@@ -742,12 +748,12 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_rawinput_devices,
     (req_handler)req_get_suspend_context,
     (req_handler)req_set_suspend_context,
-    (req_handler)req_create_job,
     (req_handler)req_create_fsync,
     (req_handler)req_open_fsync,
     (req_handler)req_get_fsync_idx,
     (req_handler)req_fsync_msgwait,
     (req_handler)req_get_fsync_apc_idx,
+    (req_handler)req_create_job,
     (req_handler)req_open_job,
     (req_handler)req_assign_job,
     (req_handler)req_process_in_job,
@@ -765,6 +771,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_esync_msgwait,
 };
 
+C_ASSERT( sizeof(abstime_t) == 8 );
 C_ASSERT( sizeof(affinity_t) == 8 );
 C_ASSERT( sizeof(apc_call_t) == 40 );
 C_ASSERT( sizeof(apc_param_t) == 8 );
@@ -987,10 +994,9 @@ C_ASSERT( FIELD_OFFSET(struct select_request, cookie) == 16 );
 C_ASSERT( FIELD_OFFSET(struct select_request, timeout) == 24 );
 C_ASSERT( FIELD_OFFSET(struct select_request, prev_apc) == 32 );
 C_ASSERT( sizeof(struct select_request) == 40 );
-C_ASSERT( FIELD_OFFSET(struct select_reply, timeout) == 8 );
-C_ASSERT( FIELD_OFFSET(struct select_reply, call) == 16 );
-C_ASSERT( FIELD_OFFSET(struct select_reply, apc_handle) == 56 );
-C_ASSERT( sizeof(struct select_reply) == 64 );
+C_ASSERT( FIELD_OFFSET(struct select_reply, call) == 8 );
+C_ASSERT( FIELD_OFFSET(struct select_reply, apc_handle) == 48 );
+C_ASSERT( sizeof(struct select_reply) == 56 );
 C_ASSERT( FIELD_OFFSET(struct create_event_request, access) == 12 );
 C_ASSERT( FIELD_OFFSET(struct create_event_request, manual_reset) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_event_request, initial_state) == 20 );
@@ -2517,10 +2523,6 @@ C_ASSERT( sizeof(struct get_rawinput_devices_reply) == 16 );
 C_ASSERT( sizeof(struct get_suspend_context_request) == 16 );
 C_ASSERT( sizeof(struct get_suspend_context_reply) == 8 );
 C_ASSERT( sizeof(struct set_suspend_context_request) == 16 );
-C_ASSERT( FIELD_OFFSET(struct create_job_request, access) == 12 );
-C_ASSERT( sizeof(struct create_job_request) == 16 );
-C_ASSERT( FIELD_OFFSET(struct create_job_reply, handle) == 8 );
-C_ASSERT( sizeof(struct create_job_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_fsync_request, access) == 12 );
 C_ASSERT( FIELD_OFFSET(struct create_fsync_request, low) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_fsync_request, high) == 20 );
@@ -2549,6 +2551,10 @@ C_ASSERT( sizeof(struct fsync_msgwait_request) == 16 );
 C_ASSERT( sizeof(struct get_fsync_apc_idx_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_fsync_apc_idx_reply, shm_idx) == 8 );
 C_ASSERT( sizeof(struct get_fsync_apc_idx_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct create_job_request, access) == 12 );
+C_ASSERT( sizeof(struct create_job_request) == 16 );
+C_ASSERT( FIELD_OFFSET(struct create_job_reply, handle) == 8 );
+C_ASSERT( sizeof(struct create_job_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct open_job_request, access) == 12 );
 C_ASSERT( FIELD_OFFSET(struct open_job_request, attributes) == 16 );
 C_ASSERT( FIELD_OFFSET(struct open_job_request, rootdir) == 20 );

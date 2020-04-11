@@ -369,4 +369,14 @@ static inline unsigned int wined3d_bind_flags_from_d3d8_usage(DWORD usage)
     return bind_flags;
 }
 
+static inline D3DMULTISAMPLE_TYPE d3dmultisample_type_from_wined3d(enum wined3d_multisample_type type)
+{
+    return (D3DMULTISAMPLE_TYPE)type;
+}
+
+static inline enum wined3d_device_type wined3d_device_type_from_d3d(D3DDEVTYPE type)
+{
+    return (enum wined3d_device_type)type;
+}
+
 #endif /* __WINE_D3DX8_PRIVATE_H */

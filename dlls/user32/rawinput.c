@@ -37,28 +37,31 @@
 
 #include "user_private.h"
 
+#include "initguid.h"
+#include "ntddmou.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(rawinput);
 
-struct hid_device
+struct device
 {
     WCHAR *path;
     HANDLE file;
     HANDLE handle;
-    RID_DEVICE_INFO_HID info;
+    RID_DEVICE_INFO info;
     PHIDP_PREPARSED_DATA data;
 };
 
-static struct hid_device *hid_devices;
-static unsigned int hid_devices_count, hid_devices_max;
+static struct device *rawinput_devices;
+static unsigned int rawinput_devices_count, rawinput_devices_max;
 
-static CRITICAL_SECTION hid_devices_cs;
-static CRITICAL_SECTION_DEBUG hid_devices_cs_debug =
+static CRITICAL_SECTION rawinput_devices_cs;
+static CRITICAL_SECTION_DEBUG rawinput_devices_cs_debug =
 {
-    0, 0, &hid_devices_cs,
-    { &hid_devices_cs_debug.ProcessLocksList, &hid_devices_cs_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": hid_devices_cs") }
+    0, 0, &rawinput_devices_cs,
+    { &rawinput_devices_cs_debug.ProcessLocksList, &rawinput_devices_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": rawinput_devices_cs") }
 };
-static CRITICAL_SECTION hid_devices_cs = { &hid_devices_cs_debug, -1, 0, 0, 0, 0 };
+static CRITICAL_SECTION rawinput_devices_cs = { &rawinput_devices_cs_debug, -1, 0, 0, 0, 0 };
 
 static BOOL array_reserve(void **elements, unsigned int *capacity, unsigned int count, unsigned int size)
 {
@@ -87,10 +90,10 @@ static BOOL array_reserve(void **elements, unsigned int *capacity, unsigned int 
     return TRUE;
 }
 
-static struct hid_device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
+static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
 {
     SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail;
-    struct hid_device *device;
+    struct device *device;
     HANDLE file;
     WCHAR *path;
     DWORD size;
@@ -128,7 +131,8 @@ static struct hid_device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *ifa
         return NULL;
     }
 
-    if (!array_reserve((void **)&hid_devices, &hid_devices_max, hid_devices_count + 1, sizeof(*hid_devices)))
+    if (!array_reserve((void **)&rawinput_devices, &rawinput_devices_max,
+            rawinput_devices_count + 1, sizeof(*rawinput_devices)))
     {
         ERR("Failed to allocate memory.\n");
         CloseHandle(file);
@@ -136,16 +140,17 @@ static struct hid_device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *ifa
         return NULL;
     }
 
-    device = &hid_devices[hid_devices_count++];
+    device = &rawinput_devices[rawinput_devices_count++];
     device->path = path;
     device->file = file;
+    device->info.cbSize = sizeof(RID_DEVICE_INFO);
     device->handle = INVALID_HANDLE_VALUE;
 
     return device;
 }
 
 extern DWORD WINAPI GetFinalPathNameByHandleW(HANDLE file, LPWSTR path, DWORD charcount, DWORD flags);
-static void find_hid_devices(BOOL);
+static void find_devices(BOOL);
 
 HANDLE rawinput_handle_from_device_handle(HANDLE device, BOOL rescan)
 {
@@ -153,41 +158,41 @@ HANDLE rawinput_handle_from_device_handle(HANDLE device, BOOL rescan)
     OBJECT_NAME_INFORMATION *info = (OBJECT_NAME_INFORMATION*)&buffer;
     ULONG dummy;
     unsigned int i;
-
-    for (i = 0; i < hid_devices_count; ++i)
+ 
+    for (i = 0; i < rawinput_devices_count; ++i)
     {
-        if (hid_devices[i].handle == device)
-            return &hid_devices[i];
+        if (rawinput_devices[i].handle == device)
+            return &rawinput_devices[i];
     }
 
     if (NtQueryObject( device, ObjectNameInformation, &buffer, sizeof(buffer) - sizeof(WCHAR), &dummy ) || !info->Name.Buffer)
         return NULL;
 
-    /* replace \??\ with \\?\ to match hid_devices paths */
+    /* replace \??\ with \\?\ to match rawinput_devices paths */
     if (info->Name.Length > 1 && info->Name.Buffer[0] == '\\' && info->Name.Buffer[1] == '?')
         info->Name.Buffer[1] = '\\';
 
-    for (i = 0; i < hid_devices_count; ++i)
+    for (i = 0; i < rawinput_devices_count; ++i)
     {
-        if (strcmpW(hid_devices[i].path, info->Name.Buffer) == 0)
+        if (strcmpW(rawinput_devices[i].path, info->Name.Buffer) == 0)
         {
-            hid_devices[i].handle = device;
-            return &hid_devices[i];
+            rawinput_devices[i].handle = device;
+            return &rawinput_devices[i];
         }
     }
 
     if (!rescan)
         return NULL;
 
-    find_hid_devices(TRUE);
+    find_devices(TRUE);
 
     return rawinput_handle_from_device_handle(device, FALSE);
 }
 
-static void find_hid_devices_by_guid(const GUID *guid)
+static void find_devices_by_guid(const GUID *guid)
 {
     SP_DEVICE_INTERFACE_DATA iface = { sizeof(iface) };
-    struct hid_device *device;
+    struct device *device;
     HIDD_ATTRIBUTES attr;
     HIDP_CAPS caps;
     HDEVINFO set;
@@ -203,9 +208,11 @@ static void find_hid_devices_by_guid(const GUID *guid)
         attr.Size = sizeof(HIDD_ATTRIBUTES);
         if (!HidD_GetAttributes(device->file, &attr))
             WARN("Failed to get attributes.\n");
-        device->info.dwVendorId = attr.VendorID;
-        device->info.dwProductId = attr.ProductID;
-        device->info.dwVersionNumber = attr.VersionNumber;
+
+        device->info.dwType = RIM_TYPEHID;
+        device->info.u.hid.dwVendorId = attr.VendorID;
+        device->info.u.hid.dwProductId = attr.ProductID;
+        device->info.u.hid.dwVersionNumber = attr.VersionNumber;
 
         if (!HidD_GetPreparsedData(device->file, &device->data))
             WARN("Failed to get preparsed data.\n");
@@ -213,14 +220,30 @@ static void find_hid_devices_by_guid(const GUID *guid)
         if (!HidP_GetCaps(device->data, &caps))
             WARN("Failed to get caps.\n");
 
-        device->info.usUsagePage = caps.UsagePage;
-        device->info.usUsage = caps.Usage;
+        device->info.u.hid.usUsagePage = caps.UsagePage;
+        device->info.u.hid.usUsage = caps.Usage;
     }
 
     SetupDiDestroyDeviceInfoList(set);
+
+    set = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_MOUSE, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
+
+    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_MOUSE, idx, &iface); ++idx)
+    {
+        static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
+
+        if (!(device = add_device(set, &iface)))
+            continue;
+
+        device->info.dwType = RIM_TYPEMOUSE;
+        device->info.u.mouse = mouse_info;
+    }
+
+    SetupDiDestroyDeviceInfoList(set);
+
 }
 
-static void find_hid_devices(BOOL force)
+static void find_devices(BOOL force)
 {
     static ULONGLONG last_check;
 
@@ -232,32 +255,32 @@ static void find_hid_devices(BOOL force)
 
     HidD_GetHidGuid(&hid_guid);
 
-    EnterCriticalSection(&hid_devices_cs);
+    EnterCriticalSection(&rawinput_devices_cs);
 
     if (!force && GetTickCount64() - last_check < 2000)
     {
-        LeaveCriticalSection(&hid_devices_cs);
+        LeaveCriticalSection(&rawinput_devices_cs);
         return;
     }
 
     last_check = GetTickCount64();
 
     /* destroy previous list */
-    for (idx = 0; idx < hid_devices_count; ++idx)
+    for (idx = 0; idx < rawinput_devices_count; ++idx)
     {
-        CloseHandle(hid_devices[idx].file);
-        heap_free(hid_devices[idx].path);
+        CloseHandle(rawinput_devices[idx].file);
+        heap_free(rawinput_devices[idx].path);
     }
 
-    hid_devices_count = 0;
+    rawinput_devices_count = 0;
 
-    find_hid_devices_by_guid(&hid_guid);
+    find_devices_by_guid(&hid_guid);
 
     /* HACK: also look up the xinput-specific devices */
     hid_guid.Data4[7]++;
-    find_hid_devices_by_guid(&hid_guid);
+    find_devices_by_guid(&hid_guid);
 
-    LeaveCriticalSection(&hid_devices_cs);
+    LeaveCriticalSection(&rawinput_devices_cs);
 }
 
 /***********************************************************************
@@ -281,18 +304,18 @@ UINT WINAPI GetRawInputDeviceList(RAWINPUTDEVICELIST *devices, UINT *device_coun
         return ~0U;
     }
 
-    find_hid_devices(FALSE);
+    find_devices(FALSE);
 
     if (!devices)
     {
-        *device_count = 2 + hid_devices_count;
+        *device_count = 2 + rawinput_devices_count;
         return 0;
     }
 
-    if (*device_count < 2 + hid_devices_count)
+    if (*device_count < 2 + rawinput_devices_count)
     {
         SetLastError(ERROR_INSUFFICIENT_BUFFER);
-        *device_count = 2 + hid_devices_count;
+        *device_count = 2 + rawinput_devices_count;
         return ~0U;
     }
 
@@ -301,13 +324,13 @@ UINT WINAPI GetRawInputDeviceList(RAWINPUTDEVICELIST *devices, UINT *device_coun
     devices[1].hDevice = WINE_KEYBOARD_HANDLE;
     devices[1].dwType = RIM_TYPEKEYBOARD;
 
-    for (i = 0; i < hid_devices_count; ++i)
+    for (i = 0; i < rawinput_devices_count; ++i)
     {
-        devices[2 + i].hDevice = &hid_devices[i];
-        devices[2 + i].dwType = RIM_TYPEHID;
+        devices[2 + i].hDevice = &rawinput_devices[i];
+        devices[2 + i].dwType = rawinput_devices[i].info.dwType;
     }
 
-    return 2 + hid_devices_count;
+    return 2 + rawinput_devices_count;
 }
 
 /***********************************************************************
@@ -460,7 +483,7 @@ UINT WINAPI GetRawInputDeviceInfoA(HANDLE device, UINT command, void *data, UINT
 /***********************************************************************
  *              GetRawInputDeviceInfoW   (USER32.@)
  */
-UINT WINAPI GetRawInputDeviceInfoW(HANDLE device, UINT command, void *data, UINT *data_size)
+UINT WINAPI GetRawInputDeviceInfoW(HANDLE handle, UINT command, void *data, UINT *data_size)
 {
     /* FIXME: Most of this is made up. */
     static const WCHAR keyboard_name[] = {'\\','\\','?','\\','W','I','N','E','_','K','E','Y','B','O','A','R','D',0};
@@ -469,12 +492,12 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE device, UINT command, void *data, UINT
     static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
 
     RID_DEVICE_INFO info;
-    struct hid_device *hid_device = device;
+    struct device *device = handle;
     const void *to_copy;
     UINT to_copy_bytes, avail_bytes;
 
-    TRACE("device %p, command %#x, data %p, data_size %p.\n",
-            device, command, data, data_size);
+    TRACE("handle %p, command %#x, data %p, data_size %p.\n",
+            handle, command, data, data_size);
 
     if (!data_size) return ~0U;
     if (!device) return ~0U;
@@ -490,20 +513,20 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE device, UINT command, void *data, UINT
     case RIDI_DEVICENAME:
         /* for RIDI_DEVICENAME, data_size is in characters, not bytes */
         avail_bytes = *data_size * sizeof(WCHAR);
-        if (device == WINE_MOUSE_HANDLE)
+        if (handle == WINE_MOUSE_HANDLE)
         {
             *data_size = ARRAY_SIZE(mouse_name);
             to_copy = mouse_name;
         }
-        else if (device == WINE_KEYBOARD_HANDLE)
+        else if (handle == WINE_KEYBOARD_HANDLE)
         {
             *data_size = ARRAY_SIZE(keyboard_name);
             to_copy = keyboard_name;
         }
         else
         {
-            *data_size = strlenW(hid_device->path) + 1;
-            to_copy = hid_device->path;
+            *data_size = strlenW(device->path) + 1;
+            to_copy = device->path;
         }
         to_copy_bytes = *data_size * sizeof(WCHAR);
         break;
@@ -511,20 +534,19 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE device, UINT command, void *data, UINT
     case RIDI_DEVICEINFO:
         avail_bytes = *data_size;
         info.cbSize = sizeof(info);
-        if (device == WINE_MOUSE_HANDLE)
+        if (handle == WINE_MOUSE_HANDLE)
         {
             info.dwType = RIM_TYPEMOUSE;
             info.u.mouse = mouse_info;
         }
-        else if (device == WINE_KEYBOARD_HANDLE)
+        else if (handle == WINE_KEYBOARD_HANDLE)
         {
             info.dwType = RIM_TYPEKEYBOARD;
             info.u.keyboard = keyboard_info;
         }
         else
         {
-            info.dwType = RIM_TYPEHID;
-            info.u.hid = hid_device->info;
+            info = device->info;
         }
         to_copy_bytes = sizeof(info);
         *data_size = to_copy_bytes;
@@ -533,8 +555,7 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE device, UINT command, void *data, UINT
 
     case RIDI_PREPARSEDDATA:
         avail_bytes = *data_size;
-        if (device == WINE_MOUSE_HANDLE ||
-                device == WINE_KEYBOARD_HANDLE)
+        if (handle == WINE_MOUSE_HANDLE || handle == WINE_KEYBOARD_HANDLE)
         {
             to_copy_bytes = 0;
             *data_size = 0;
@@ -542,9 +563,9 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE device, UINT command, void *data, UINT
         }
         else
         {
-            to_copy_bytes = ((WINE_HIDP_PREPARSED_DATA*)hid_device->data)->dwSize;
+            to_copy_bytes = ((WINE_HIDP_PREPARSED_DATA*)device->data)->dwSize;
             *data_size = to_copy_bytes;
-            to_copy = hid_device->data;
+            to_copy = device->data;
         }
         break;
 

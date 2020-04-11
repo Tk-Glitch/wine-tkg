@@ -470,130 +470,6 @@ const char *wine_get_build_dir(void)
     return build_dir;
 }
 
-const char *wine_libs[] = {
-#ifdef SONAME_LIBCAIRO
-    SONAME_LIBCAIRO,
-#endif
-#ifdef SONAME_LIBCAPI20
-    SONAME_LIBCAPI20,
-#endif
-#ifdef SONAME_LIBCUPS
-    SONAME_LIBCUPS,
-#endif
-#ifdef SONAME_LIBCURSES
-    SONAME_LIBCURSES,
-#endif
-#ifdef SONAME_LIBDBUS_1
-    SONAME_LIBDBUS_1,
-#endif
-#ifdef SONAME_LIBFONTCONFIG
-    SONAME_LIBFONTCONFIG,
-#endif
-#ifdef SONAME_LIBFREETYPE
-    SONAME_LIBFREETYPE,
-#endif
-#ifdef SONAME_LIBGL
-    SONAME_LIBGL,
-#endif
-#ifdef SONAME_LIBGNUTLS
-    SONAME_LIBGNUTLS,
-#endif
-#ifdef SONAME_LIBGOBJECT_2_0
-    SONAME_LIBGOBJECT_2_0,
-#endif
-#ifdef SONAME_LIBGSM
-    SONAME_LIBGSM,
-#endif
-#ifdef SONAME_LIBGTK_3
-    SONAME_LIBGTK_3,
-#endif
-#ifdef SONAME_LIBHAL
-    SONAME_LIBHAL,
-#endif
-#ifdef SONAME_LIBJPEG
-    SONAME_LIBJPEG,
-#endif
-#ifdef SONAME_LIBNCURSES
-    SONAME_LIBNCURSES,
-#endif
-#ifdef SONAME_LIBNETAPI
-    SONAME_LIBNETAPI,
-#endif
-#ifdef SONAME_LIBODBC
-    SONAME_LIBODBC,
-#endif
-#ifdef SONAME_LIBOSMESA
-    SONAME_LIBOSMESA,
-#endif
-#ifdef SONAME_LIBPCAP
-    SONAME_LIBPCAP,
-#endif
-#ifdef SONAME_LIBPNG
-    SONAME_LIBPNG,
-#endif
-#ifdef SONAME_LIBSANE
-    SONAME_LIBSANE,
-#endif
-#ifdef SONAME_LIBTIFF
-    SONAME_LIBTIFF,
-#endif
-#ifdef SONAME_LIBTXC_DXTN
-    SONAME_LIBTXC_DXTN,
-#endif
-#ifdef SONAME_LIBV4L1
-    SONAME_LIBV4L1,
-#endif
-#ifdef SONAME_LIBVA
-    SONAME_LIBVA,
-#endif
-#ifdef SONAME_LIBVA_DRM
-    SONAME_LIBVA_DRM,
-#endif
-#ifdef SONAME_LIBVA_X11
-    SONAME_LIBVA_X11,
-#endif
-#ifdef SONAME_LIBX11
-    SONAME_LIBX11,
-#endif
-#ifdef SONAME_LIBX11_XCB
-    SONAME_LIBX11_XCB,
-#endif
-#ifdef SONAME_LIBXCOMPOSITE
-    SONAME_LIBXCOMPOSITE,
-#endif
-#ifdef SONAME_LIBXCURSOR
-    SONAME_LIBXCURSOR,
-#endif
-#ifdef SONAME_LIBXEXT
-    SONAME_LIBXEXT,
-#endif
-#ifdef SONAME_LIBXI
-    SONAME_LIBXI,
-#endif
-#ifdef SONAME_LIBXINERAMA
-    SONAME_LIBXINERAMA,
-#endif
-#ifdef SONAME_LIBXRANDR
-    SONAME_LIBXRANDR,
-#endif
-#ifdef SONAME_LIBXRENDER
-    SONAME_LIBXRENDER,
-#endif
-#ifdef SONAME_LIBXSLT
-    SONAME_LIBXSLT,
-#endif
-#ifdef SONAME_LIBXXF86VM
-    SONAME_LIBXXF86VM,
-#endif
-    NULL
-};
-
-/* return the list of shared libs used by wine */
-const char **wine_get_libs(void)
-{
-    return &wine_libs[0];
-}
-
 /* return the full name of the server directory (the one containing the socket) */
 const char *wine_get_server_dir(void)
 {
@@ -695,6 +571,7 @@ wine_patch_data[] =
     { "Alistair Leslie-Hughes", "msctf: Added ITfActiveLanguageProfileNotifySink support in ITfSource.", 1 },
     { "Alistair Leslie-Hughes", "mshtml: Improve IOleInPlaceActiveObject TranslateAccelerator.", 1 },
     { "Alistair Leslie-Hughes", "oleaut32: Implement semi-stub for CreateTypeLib.", 1 },
+    { "Alistair Leslie-Hughes", "secur32: Add schan_imp_get_application_protocol for macos.", 1 },
     { "Alistair Leslie-Hughes", "shlwapi: Support ./ in UrlCanonicalize.", 1 },
     { "Alistair Leslie-Hughes", "user32/msgbox: Support WM_COPY Message.", 1 },
     { "Alistair Leslie-Hughes", "user32/msgbox: Use a windows hook to trap Ctrl+C.", 1 },
@@ -706,7 +583,6 @@ wine_patch_data[] =
     { "Alistair Leslie-Hughes", "winex11: Handle negative orAltitude values.", 1 },
     { "Alistair Leslie-Hughes", "winex11: Specify a default vulkan driver if one not found at build time.", 1 },
     { "Alistair Leslie-Hughes", "winex11: Support WTI_STATUS in WTInfo.", 1 },
-    { "Alistair Leslie-Hughes", "winmm: Use _lopen instead of OpenFile.", 1 },
     { "Alistair Leslie-Hughes", "wintab32: Set lcSysExtX/Y for the first index of WTI_DDCTXS.", 1 },
     { "Alistair Leslie-Hughes", "wintrust: Add parameter check in WTHelperGetProvCertFromChain.", 1 },
     { "Alistair Leslie-Hughes", "xaudio2_7/tests: Add more tests.", 1 },
@@ -1053,8 +929,6 @@ wine_patch_data[] =
     { "Michael Müller", "krnl386.exe16: Really translate all invalid console handles into usable DOS handles.", 1 },
     { "Michael Müller", "libs/wine: Use same file alignment for fake and builtin DLLs.", 1 },
     { "Michael Müller", "libwine: Add process specific debug channels.", 1 },
-    { "Michael Müller", "loader: Add commandline option --check-libs.", 1 },
-    { "Michael Müller", "loader: Print library paths for --check-libs on Mac OS X.", 1 },
     { "Michael Müller", "mmsystem.dll16: Refcount midihdr to work around buggy application which unprepares buffer during a callback.", 1 },
     { "Michael Müller", "mmsystem.dll16: Translate MidiIn messages.", 1 },
     { "Michael Müller", "mountmgr.sys: Write usable device paths into HKLM\\SYSTEM\\MountedDevices.", 1 },
@@ -1184,6 +1058,7 @@ wine_patch_data[] =
     { "Michael Müller", "wininet: Strip filename if no path is set in cookie.", 1 },
     { "Michael Müller", "winmm: Delay import ole32 msacm32 to workaround bug when loading multiple winmm versions.", 1 },
     { "Michael Müller", "winmm: Do not crash in Win 9X mode when an invalid device ptr is passed to MCI_OPEN.", 1 },
+    { "Myah Caron", "ntdll: Cache LDR_IMAGE_IS_DLL for InitDLL.", 1 },
     { "Nakarin Khankham", "opencl: Add OpenCL 1.0 function pointer loader.", 1 },
     { "Nakarin Khankham", "opencl: Add OpenCL 1.1 implementation.", 1 },
     { "Nakarin Khankham", "opencl: Add OpenCL 1.2 implementation.", 1 },
@@ -1220,6 +1095,7 @@ wine_patch_data[] =
     { "Qian Hong", "ntdll: Initialize mod_name to zero.", 1 },
     { "Qian Hong", "ntdll: Set EOF on file which has a memory mapping should fail.", 1 },
     { "Qian Hong", "server: Do not allow to set disposition on file which has a file mapping.", 1 },
+    { "Ryan S. Northrup (RyNo)", "user32: Semi-stub GetMouseMovePointsEx.", 2 },
     { "Sebastian Lackner", "advapi32/tests: Add ACL inheritance tests for creating subdirectories with NtCreateFile.", 1 },
     { "Sebastian Lackner", "advapi32/tests: Add tests for ACL inheritance in CreateDirectoryA.", 1 },
     { "Sebastian Lackner", "advapi: Trigger write watches before passing userdata pointer to read syscall.", 1 },
@@ -1255,7 +1131,6 @@ wine_patch_data[] =
     { "Sebastian Lackner", "ntdll: Add back SS segment prefixes in set_full_cpu_context.", 1 },
     { "Sebastian Lackner", "ntdll: Add helper function to delete free blocks.", 1 },
     { "Sebastian Lackner", "ntdll: Add inline versions of RtlEnterCriticalSection / RtlLeaveCriticalSections.", 1 },
-    { "Sebastian Lackner", "ntdll: Add semi-stub for FileFsVolumeInformation information class.", 1 },
     { "Sebastian Lackner", "ntdll: Add semi-stub for TokenLinkedToken info class.", 1 },
     { "Sebastian Lackner", "ntdll: Add special handling for \\SystemRoot to satisfy MSYS2 case-insensitive system check.", 1 },
     { "Sebastian Lackner", "ntdll: Add support for hiding wine version information from applications.", 1 },

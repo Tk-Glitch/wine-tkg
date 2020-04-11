@@ -102,7 +102,7 @@ static void *pcap_handle = NULL;
 
 static BOOL load_functions(void)
 {
-    pcap_handle = wine_dlopen(SONAME_LIBPCAP, RTLD_NOW, NULL, 0);
+    pcap_handle = dlopen(SONAME_LIBPCAP, RTLD_NOW);
 
     if (!pcap_handle)
     {
@@ -110,7 +110,7 @@ static BOOL load_functions(void)
         return FALSE;
     }
 
-    #define LOAD_FUNCPTR(f) if((p##f = wine_dlsym(pcap_handle, #f, NULL, 0)) == NULL){WARN("Can't find symbol %s\n", #f); return FALSE;}
+    #define LOAD_FUNCPTR(f) if((p##f = dlsym(pcap_handle, #f)) == NULL){WARN("Can't find symbol %s\n", #f); return FALSE;}
     LOAD_FUNCPTR(pcap_breakloop);
     LOAD_FUNCPTR(pcap_close);
     LOAD_FUNCPTR(pcap_compile);
@@ -495,7 +495,7 @@ BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             break;
         case DLL_PROCESS_DETACH:
             if (lpvReserved) break;
-            if (pcap_handle) wine_dlclose(pcap_handle, NULL, 0);
+            if (pcap_handle) dlclose(pcap_handle);
             break;
     }
 

@@ -380,7 +380,7 @@
 @ stdcall NtSetInformationToken(long long ptr long)
 @ stdcall NtSetIntervalProfile(long long)
 @ stdcall NtSetIoCompletion(ptr long long long long)
-@ stdcall NtSetLdtEntries(long long long long long long)
+@ stdcall NtSetLdtEntries(long int64 long int64)
 @ stub NtSetLowEventPair
 @ stub NtSetLowWaitHighEventPair
 @ stub NtSetLowWaitHighThread
@@ -1351,7 +1351,7 @@
 @ stdcall -private ZwSetInformationToken(long long ptr long) NtSetInformationToken
 @ stdcall -private ZwSetIntervalProfile(long long) NtSetIntervalProfile
 @ stdcall -private ZwSetIoCompletion(ptr long long long long) NtSetIoCompletion
-@ stdcall -private ZwSetLdtEntries(long long long long long long) NtSetLdtEntries
+@ stdcall -private ZwSetLdtEntries(long int64 long int64) NtSetLdtEntries
 @ stub ZwSetLowEventPair
 @ stub ZwSetLowWaitHighEventPair
 @ stub ZwSetLowWaitHighThread
@@ -1562,6 +1562,7 @@
 @ cdecl wine_server_release_fd(long long)
 @ cdecl wine_server_send_fd(long)
 @ cdecl __wine_make_process_system()
+@ extern -arch=i386 __wine_ldt_copy
 
 # Debugging
 @ cdecl -norelay __wine_dbg_get_channel_flags(ptr)

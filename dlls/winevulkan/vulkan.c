@@ -22,6 +22,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winreg.h"
 #include "winuser.h"
 
 #include "vulkan_private.h"
@@ -60,6 +61,7 @@ static void wine_vk_exchange_pnext_(VkBaseOutStructure *a, VkBaseOutStructure *b
 
 static void *wine_vk_get_global_proc_addr(const char *name);
 
+static HINSTANCE hinstance;
 static const struct vulkan_funcs *vk_funcs;
 static VkResult (*p_vkEnumerateInstanceVersion)(uint32_t *version);
 
@@ -1069,6 +1071,59 @@ VkResult WINAPI wine_vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t *supporte
     return VK_SUCCESS;
 }
 
+/* VK_EXT_full_screen_exclusive */
+
+VkResult WINAPI wine_vkGetPhysicalDeviceSurfacePresentModes2EXT(
+    VkPhysicalDevice                            physicalDevice,
+    const VkPhysicalDeviceSurfaceInfo2KHR*      pSurfaceInfo,
+    uint32_t*                                   pPresentModeCount,
+    VkPresentModeKHR*                           pPresentModes)
+{
+    TRACE("%p, %p, %p, %p", physicalDevice, pSurfaceInfo, pPresentModeCount, pPresentModes);
+    return thunk_vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, pSurfaceInfo->surface, pPresentModeCount, pPresentModes);
+}
+
+VkResult WINAPI wine_vkGetDeviceGroupSurfacePresentModes2EXT(
+    VkDevice                                    device,
+    const VkPhysicalDeviceSurfaceInfo2KHR*      pSurfaceInfo,
+    VkDeviceGroupPresentModeFlagsKHR*           pModes)
+{
+    TRACE("%p, %p, %p", device, pSurfaceInfo, pModes);
+    return thunk_vkGetDeviceGroupSurfacePresentModesKHR(device, pSurfaceInfo->surface, pModes);
+}
+
+VkResult WINAPI wine_vkAcquireFullScreenExclusiveModeEXT(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain)
+{
+    /* don't care */
+    TRACE("%p, %s", device, wine_dbgstr_longlong(swapchain));
+
+    return VK_SUCCESS;
+}
+
+VkResult WINAPI wine_vkReleaseFullScreenExclusiveModeEXT(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain)
+{
+    /* don't care */
+    TRACE("%p, %s", device, wine_dbgstr_longlong(swapchain));
+
+    return VK_SUCCESS;
+}
+
+/* extra crap we moved to private thunks */
+
+VkResult WINAPI wine_vkGetDeviceGroupSurfacePresentModesKHR(VkDevice device, VkSurfaceKHR surface, VkDeviceGroupPresentModeFlagsKHR *pModes)
+{
+    return thunk_vkGetDeviceGroupSurfacePresentModesKHR(device, surface, pModes);
+}
+
+VkResult WINAPI wine_vkGetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t *pPresentModeCount, VkPresentModeKHR *pPresentModes)
+{
+    return thunk_vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, pPresentModeCount, pPresentModes);
+}
+
 VkResult WINAPI wine_vkQueueSubmit(VkQueue queue, uint32_t count,
         const VkSubmitInfo *submits, VkFence fence)
 {
@@ -1342,6 +1397,7 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
     switch (reason)
     {
         case DLL_PROCESS_ATTACH:
+            hinstance = hinst;
             DisableThreadLibraryCalls(hinst);
             return wine_vk_init();
     }
@@ -1380,6 +1436,66 @@ static void *wine_vk_get_global_proc_addr(const char *name)
 void *native_vkGetInstanceProcAddrWINE(VkInstance instance, const char *name)
 {
     return vk_funcs->p_vkGetInstanceProcAddr(instance, name);
+}
+
+
+static const WCHAR winevulkan_json_resW[] = {'w','i','n','e','v','u','l','k','a','n','_','j','s','o','n',0};
+static const WCHAR winevulkan_json_pathW[] = {'\\','w','i','n','e','v','u','l','k','a','n','.','j','s','o','n',0};
+static const WCHAR vulkan_driversW[] = {'S','o','f','t','w','a','r','e','\\','K','h','r','o','n','o','s','\\',
+                                        'V','u','l','k','a','n','\\','D','r','i','v','e','r','s',0};
+
+HRESULT WINAPI DllRegisterServer(void)
+{
+    WCHAR json_path[MAX_PATH];
+    HRSRC rsrc;
+    const char *data;
+    DWORD datalen, written, zero = 0;
+    HANDLE file;
+    HKEY key;
+
+    /* Create the JSON manifest and registry key to register this ICD with the official Vulkan loader. */
+    TRACE("\n");
+    rsrc = FindResourceW(hinstance, winevulkan_json_resW, (const WCHAR *)RT_RCDATA);
+    data = LockResource(LoadResource(hinstance, rsrc));
+    datalen = SizeofResource(hinstance, rsrc);
+
+    GetSystemDirectoryW(json_path, ARRAY_SIZE(json_path));
+    lstrcatW(json_path, winevulkan_json_pathW);
+    file = CreateFileW(json_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        ERR("Unable to create JSON manifest.\n");
+        return E_UNEXPECTED;
+    }
+    WriteFile(file, data, datalen, &written, NULL);
+    CloseHandle(file);
+
+    if (!RegCreateKeyExW(HKEY_LOCAL_MACHINE, vulkan_driversW, 0, NULL, 0, KEY_SET_VALUE, NULL, &key, NULL))
+    {
+        RegSetValueExW(key, json_path, 0, REG_DWORD, (const BYTE *)&zero, sizeof(zero));
+        RegCloseKey(key);
+    }
+    return S_OK;
+}
+
+HRESULT WINAPI DllUnregisterServer(void)
+{
+    WCHAR json_path[MAX_PATH];
+    HKEY key;
+
+    /* Remove the JSON manifest and registry key */
+    TRACE("\n");
+    GetSystemDirectoryW(json_path, ARRAY_SIZE(json_path));
+    lstrcatW(json_path, winevulkan_json_pathW);
+    DeleteFileW(json_path);
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, vulkan_driversW, 0, KEY_SET_VALUE, &key) == ERROR_SUCCESS)
+    {
+        RegDeleteValueW(key, json_path);
+        RegCloseKey(key);
+    }
+
+    return S_OK;
 }
 
 VkResult WINAPI wine_vkAcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t *pImageIndex)
@@ -2749,107 +2865,6 @@ VkResult WINAPI wine_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pP
 
     return res;
 
-}
-
-/* VK_KHR_get_surface_capabilities2 */
- 
-VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(
-    VkPhysicalDevice                            physicalDevice,
-    const VkPhysicalDeviceSurfaceInfo2KHR*      pSurfaceInfo,
-    VkSurfaceCapabilities2KHR*                  pSurfaceCapabilities)
-{
-    VkResult res;
-    VkSurfaceCapabilitiesFullScreenExclusiveEXT* full_screen_exclusive_caps;
-
-    /* Toss out VkSurfaceFullScreenExclusiveInfoEXT
-     * and VkSurfaceFullScreenExclusiveWin32InfoEXT */
-    VkPhysicalDeviceSurfaceInfo2KHR surface_info;
-    surface_info.sType   = pSurfaceInfo->sType;
-    surface_info.pNext   = NULL;
-    surface_info.surface = pSurfaceInfo->surface;
-
-    TRACE("%p, %p, %p\n", physicalDevice, pSurfaceInfo, pSurfaceCapabilities);
-
-    res = thunk_vkGetPhysicalDeviceSurfaceCapabilities2KHR(physicalDevice, &surface_info, pSurfaceCapabilities);
-
-    /* lie and say we support this.... */
-    if ((full_screen_exclusive_caps = wine_vk_find_struct(pSurfaceInfo, SURFACE_CAPABILITIES_FULL_SCREEN_EXCLUSIVE_EXT)))
-    {
-        full_screen_exclusive_caps->fullScreenExclusiveSupported = VK_TRUE;
-    }
-
-    return res;
-}
-
-VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceFormats2KHR(
-    VkPhysicalDevice                            physicalDevice,
-    const VkPhysicalDeviceSurfaceInfo2KHR*      pSurfaceInfo,
-    uint32_t*                                   pSurfaceFormatCount,
-    VkSurfaceFormat2KHR*                        pSurfaceFormats)
-{
-    /* Toss out VkSurfaceFullScreenExclusiveInfoEXT
-     * and VkSurfaceFullScreenExclusiveWin32InfoEXT */
-    VkPhysicalDeviceSurfaceInfo2KHR surface_info;
-    surface_info.sType   = pSurfaceInfo->sType;
-    surface_info.pNext   = NULL;
-    surface_info.surface = pSurfaceInfo->surface;
-
-    TRACE("%p, %p, %p, %p\n", physicalDevice, pSurfaceInfo, pSurfaceFormatCount, pSurfaceFormats);
-
-    return thunk_vkGetPhysicalDeviceSurfaceFormats2KHR(physicalDevice, &surface_info, pSurfaceFormatCount, pSurfaceFormats);
-}
-
-/* VK_EXT_full_screen_exclusive */
-
-VkResult WINAPI wine_vkGetPhysicalDeviceSurfacePresentModes2EXT(
-    VkPhysicalDevice                            physicalDevice,
-    const VkPhysicalDeviceSurfaceInfo2KHR*      pSurfaceInfo,
-    uint32_t*                                   pPresentModeCount,
-    VkPresentModeKHR*                           pPresentModes)
-{
-    TRACE("%p, %p, %p, %p", physicalDevice, pSurfaceInfo, pPresentModeCount, pPresentModes);
-    return thunk_vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, pSurfaceInfo->surface, pPresentModeCount, pPresentModes);
-}
-
-VkResult WINAPI wine_vkGetDeviceGroupSurfacePresentModes2EXT(
-    VkDevice                                    device,
-    const VkPhysicalDeviceSurfaceInfo2KHR*      pSurfaceInfo,
-    VkDeviceGroupPresentModeFlagsKHR*           pModes)
-{
-    TRACE("%p, %p, %p", device, pSurfaceInfo, pModes);
-    return thunk_vkGetDeviceGroupSurfacePresentModesKHR(device, pSurfaceInfo->surface, pModes);
-}
-
-VkResult WINAPI wine_vkAcquireFullScreenExclusiveModeEXT(
-    VkDevice                                    device,
-    VkSwapchainKHR                              swapchain)
-{
-    /* don't care */
-    TRACE("%p, %s", device, wine_dbgstr_longlong(swapchain));
-
-    return VK_SUCCESS;
-}
-
-VkResult WINAPI wine_vkReleaseFullScreenExclusiveModeEXT(
-    VkDevice                                    device,
-    VkSwapchainKHR                              swapchain)
-{
-    /* don't care */
-    TRACE("%p, %s", device, wine_dbgstr_longlong(swapchain));
-
-    return VK_SUCCESS;
-}
-
-/* extra crap we moved to private thunks */
-
-VkResult WINAPI wine_vkGetDeviceGroupSurfacePresentModesKHR(VkDevice device, VkSurfaceKHR surface, VkDeviceGroupPresentModeFlagsKHR *pModes)
-{
-    return thunk_vkGetDeviceGroupSurfacePresentModesKHR(device, surface, pModes);
-}
-
-VkResult WINAPI wine_vkGetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t *pPresentModeCount, VkPresentModeKHR *pPresentModes)
-{
-    return thunk_vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, pPresentModeCount, pPresentModes);
 }
 
 VkDevice WINAPI __wine_get_native_VkDevice(VkDevice device)

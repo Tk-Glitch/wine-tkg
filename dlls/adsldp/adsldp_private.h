@@ -50,13 +50,14 @@ struct attribute_type
 {
     WCHAR *oid;
     WCHAR *name;
+    ULONG name_count;
     WCHAR *syntax;
     int single_value;
 };
 
 DWORD map_ldap_error(DWORD) DECLSPEC_HIDDEN;
-struct attribute_type *load_schema(LDAP *ld, ULONG *) DECLSPEC_HIDDEN;
-ADSTYPEENUM get_schema_type(const WCHAR *, const struct attribute_type *, ULONG) DECLSPEC_HIDDEN;
+struct attribute_type *load_schema(LDAP *ld, ULONG *, ULONG *) DECLSPEC_HIDDEN;
+ADSTYPEENUM get_schema_type(const WCHAR *, const struct attribute_type *, ULONG, ULONG) DECLSPEC_HIDDEN;
 void free_attribute_types(struct attribute_type *, ULONG) DECLSPEC_HIDDEN;
 
 #endif

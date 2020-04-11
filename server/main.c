@@ -45,7 +45,6 @@ int foreground = 0;
 timeout_t master_socket_timeout = 0; /* master socket timeout, default is 3 seconds */
 const char *server_argv0;
 
-
 /* parse-line args */
 
 static void usage( FILE *fh )
@@ -150,6 +149,7 @@ int main( int argc, char *argv[] )
         esync_init();
 
     if (debug_level) fprintf( stderr, "wineserver: starting (pid=%ld)\n", (long) getpid() );
+    set_current_time();
     init_scheduler();
     init_signals();
     init_directories();

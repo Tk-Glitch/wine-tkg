@@ -428,7 +428,7 @@ static BOOL load_functions(void)
 
     for (i = 0; i < sizeof(libname)/sizeof(libname[0]); i++)
     {
-        cuda_handle = wine_dlopen(libname[i], RTLD_NOW, NULL, 0);
+        cuda_handle = dlopen(libname[i], RTLD_NOW);
         if (cuda_handle) break;
     }
 
@@ -438,8 +438,8 @@ static BOOL load_functions(void)
         return FALSE;
     }
 
-    #define LOAD_FUNCPTR(f) if((p##f = wine_dlsym(cuda_handle, #f, NULL, 0)) == NULL){FIXME("Can't find symbol %s\n", #f); return FALSE;}
-    #define TRY_LOAD_FUNCPTR(f) p##f = wine_dlsym(cuda_handle, #f, NULL, 0)
+    #define LOAD_FUNCPTR(f) if((p##f = dlsym(cuda_handle, #f)) == NULL){FIXME("Can't find symbol %s\n", #f); return FALSE;}
+    #define TRY_LOAD_FUNCPTR(f) p##f = dlsym(cuda_handle, #f)
 
     LOAD_FUNCPTR(cuArray3DCreate);
     LOAD_FUNCPTR(cuArray3DCreate_v2);
@@ -2977,7 +2977,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
             break;
         case DLL_PROCESS_DETACH:
             if (reserved) break;
-            if (cuda_handle) wine_dlclose(cuda_handle, NULL, 0);
+            if (cuda_handle) dlclose(cuda_handle);
             break;
         case DLL_THREAD_ATTACH:
         case DLL_THREAD_DETACH:

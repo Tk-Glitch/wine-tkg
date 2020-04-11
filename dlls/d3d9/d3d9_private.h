@@ -337,6 +337,16 @@ static inline D3DPOOL d3dpool_from_wined3daccess(unsigned int access, unsigned i
     }
 }
 
+static inline D3DMULTISAMPLE_TYPE d3dmultisample_type_from_wined3d(enum wined3d_multisample_type type)
+{
+    return (D3DMULTISAMPLE_TYPE)type;
+}
+
+static inline D3DSCANLINEORDERING d3dscanlineordering_from_wined3d(enum wined3d_scanline_ordering ordering)
+{
+    return (D3DSCANLINEORDERING)ordering;
+}
+
 static inline unsigned int map_access_from_usage(unsigned int usage)
 {
     if (usage & D3DUSAGE_WRITEONLY)
@@ -383,6 +393,21 @@ static inline unsigned int wined3d_bind_flags_from_d3d9_usage(DWORD usage)
 static inline DWORD wined3dusage_from_d3dusage(unsigned int usage)
 {
     return usage & WINED3DUSAGE_MASK;
+}
+
+static inline enum wined3d_multisample_type wined3d_multisample_type_from_d3d(D3DMULTISAMPLE_TYPE type)
+{
+    return (enum wined3d_multisample_type)type;
+}
+
+static inline enum wined3d_device_type wined3d_device_type_from_d3d(D3DDEVTYPE type)
+{
+    return (enum wined3d_device_type)type;
+}
+
+static inline enum wined3d_scanline_ordering wined3d_scanline_ordering_from_d3d(D3DSCANLINEORDERING ordering)
+{
+    return (enum wined3d_scanline_ordering)ordering;
 }
 
 #endif /* __WINE_D3D9_PRIVATE_H */

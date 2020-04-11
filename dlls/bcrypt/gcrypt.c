@@ -45,14 +45,14 @@ MAKE_FUNCPTR(gcry_sexp_nth_mpi);
 
 BOOL gcrypt_initialize(void)
 {
-    if (!(libgcrypt_handle = wine_dlopen( SONAME_LIBGCRYPT, RTLD_NOW, NULL, 0 )))
+    if (!(libgcrypt_handle = dlopen( SONAME_LIBGCRYPT, RTLD_NOW)))
     {
         ERR_(winediag)( "failed to load libgcrypt, no support for diffie hellman key exchange\n" );
         return FALSE;
     }
 
 #define LOAD_FUNCPTR(f) \
-    if (!(p##f = wine_dlsym( libgcrypt_handle, #f, NULL, 0 ))) \
+    if (!(p##f = dlsym( libgcrypt_handle, #f))) \
     { \
         ERR( "failed to load %s\n", #f ); \
         goto fail; \
@@ -74,7 +74,7 @@ BOOL gcrypt_initialize(void)
     return TRUE;
 
 fail:
-    wine_dlclose( libgcrypt_handle, NULL, 0 );
+    dlclose( libgcrypt_handle);
     libgcrypt_handle = NULL;
     return FALSE;
 }
@@ -82,7 +82,7 @@ fail:
 
 void gcrypt_uninitialize(void)
 {
-    wine_dlclose( libgcrypt_handle, NULL, 0 );
+    dlclose( libgcrypt_handle);
     libgcrypt_handle = NULL;
 }
 

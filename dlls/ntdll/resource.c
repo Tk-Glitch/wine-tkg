@@ -43,7 +43,6 @@
 #include "ntdll_misc.h"
 #include "wine/asm.h"
 #include "wine/exception.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(resource);
@@ -145,14 +144,14 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_by_name( const IMAGE_RESOURCE_
 
     if (IS_INTRESOURCE(name)) return find_entry_by_id( dir, LOWORD(name), root, want_dir );
     entry = (const IMAGE_RESOURCE_DIRECTORY_ENTRY *)(dir + 1);
-    namelen = strlenW(name);
+    namelen = wcslen(name);
     min = 0;
     max = dir->NumberOfNamedEntries - 1;
     while (min <= max)
     {
         pos = (min + max) / 2;
         str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const char *)root + entry[pos].u.s.NameOffset);
-        res = strncmpW( name, str->NameString, str->Length );
+        res = wcsncmp( name, str->NameString, str->Length );
         if (!res && namelen == str->Length)
         {
             if (!entry[pos].u2.s2.DataIsDirectory == !want_dir)

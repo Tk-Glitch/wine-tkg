@@ -633,10 +633,18 @@ unsigned int server_select( const select_op_t *select_op, data_size_t size, UINT
     obj_handle_t apc_handle = 0;
     apc_call_t call;
     apc_result_t result;
-    timeout_t abs_timeout = timeout ? timeout->QuadPart : TIMEOUT_INFINITE;
+    abstime_t abs_timeout = timeout ? timeout->QuadPart : TIMEOUT_INFINITE;
     sigset_t old_set;
 
     memset( &result, 0, sizeof(result) );
+
+    if (abs_timeout < 0)
+    {
+        LARGE_INTEGER now;
+
+        RtlQueryPerformanceCounter(&now);
+        abs_timeout -= now.QuadPart;
+    }
 
     do
     {
@@ -652,7 +660,6 @@ unsigned int server_select( const select_op_t *select_op, data_size_t size, UINT
                 wine_server_add_data( req, &result, sizeof(result) );
                 wine_server_add_data( req, select_op, size );
                 ret = server_call_unlocked( req );
-                abs_timeout = reply->timeout;
                 apc_handle  = reply->apc_handle;
                 call        = reply->call;
             }
@@ -1609,6 +1616,9 @@ void server_init_process(void)
  */
 void server_init_process_done(void)
 {
+#ifdef __i386__
+    extern struct ldt_copy __wine_ldt_copy;
+#endif
     PEB *peb = NtCurrentTeb()->Peb;
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( peb->ImageBaseAddress );
     void *entry = (char *)peb->ImageBaseAddress + nt->OptionalHeader.AddressOfEntryPoint;
@@ -1632,7 +1642,7 @@ void server_init_process_done(void)
     {
         req->module   = wine_server_client_ptr( peb->ImageBaseAddress );
 #ifdef __i386__
-        req->ldt_copy = wine_server_client_ptr( &wine_ldt_copy );
+        req->ldt_copy = wine_server_client_ptr( &__wine_ldt_copy );
 #endif
         req->entry    = wine_server_client_ptr( entry );
         req->gui      = (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI);

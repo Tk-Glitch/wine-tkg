@@ -1298,7 +1298,12 @@ TrackMouseEvent (TRACKMOUSEEVENT *ptme)
  *     Success: count of point set in the buffer
  *     Failure: -1
  */
-int WINAPI GetMouseMovePointsEx(UINT size, LPMOUSEMOVEPOINT ptin, LPMOUSEMOVEPOINT ptout, int count, DWORD res) {
+int WINAPI GetMouseMovePointsEx(UINT size, LPMOUSEMOVEPOINT ptin, LPMOUSEMOVEPOINT ptout, int count, DWORD res)
+{
+    POINT pos;
+    static BOOL once;
+    static INT last_x = 0;
+    static INT last_y = 0;
 
     if((size != sizeof(MOUSEMOVEPOINT)) || (count < 0) || (count > 64)) {
         SetLastError(ERROR_INVALID_PARAMETER);
@@ -1310,10 +1315,40 @@ int WINAPI GetMouseMovePointsEx(UINT size, LPMOUSEMOVEPOINT ptin, LPMOUSEMOVEPOI
         return -1;
     }
 
-    FIXME("(%d %p %p %d %d) stub\n", size, ptin, ptout, count, res);
+    if (!once++)
+        FIXME("(%d %p %p %d %d) semi-stub\n", size, ptin, ptout, count, res);
+    else
+        TRACE("(%d %p %p %d %d) semi-stub\n", size, ptin, ptout, count, res);
 
-    SetLastError(ERROR_POINT_NOT_FOUND);
-    return -1;
+    TRACE("    ptin: %d %d\n", ptin->x, ptin->y);
+
+    if (res == GMMP_USE_HIGH_RESOLUTION_POINTS)
+    {
+        WARN("GMMP_USE_HIGH_RESOLUTION_POINTS not supported");
+        SetLastError(ERROR_POINT_NOT_FOUND);
+        return -1;
+    }
+
+    GetCursorPos(&pos);
+    
+    ptout[0].x = pos.x;
+    ptout[0].y = pos.y;
+    ptout[0].time = GetTickCount();
+    ptout[0].dwExtraInfo = 0;
+    TRACE("    ptout[0]: %d %d\n", pos.x, pos.y);
+    
+    if (count > 1) {
+        ptout[1].x = last_x;
+        ptout[1].y = last_y;
+        ptout[1].time = GetTickCount();
+        ptout[1].dwExtraInfo = 0;
+        TRACE("    ptout[1]: %d %d\n", last_x, last_y);
+    }
+    
+    last_x = pos.x;
+    last_y = pos.y;
+        
+    return count > 1 ? 2 : 1;
 }
 
 /***********************************************************************

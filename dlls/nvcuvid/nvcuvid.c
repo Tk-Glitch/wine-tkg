@@ -61,7 +61,7 @@ static void *cuvid_handle = NULL;
 
 static BOOL load_functions(void)
 {
-    cuvid_handle = wine_dlopen("libnvcuvid.so", RTLD_NOW, NULL, 0);
+    cuvid_handle = dlopen("libnvcuvid.so", RTLD_NOW);
 
     if (!cuvid_handle)
     {
@@ -69,7 +69,7 @@ static BOOL load_functions(void)
         return FALSE;
     }
 
-    #define LOAD_FUNCPTR(f) if((p##f = wine_dlsym(cuvid_handle, #f, NULL, 0)) == NULL){FIXME("Can't find symbol %s\n", #f); return FALSE;}
+    #define LOAD_FUNCPTR(f) if((p##f = dlsym(cuvid_handle, #f)) == NULL){FIXME("Can't find symbol %s\n", #f); return FALSE;}
 
     LOAD_FUNCPTR(cuvidCreateDecoder);
     LOAD_FUNCPTR(cuvidCreateVideoParser);
@@ -529,7 +529,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
             break;
         case DLL_PROCESS_DETACH:
             if (reserved) break;
-            if (cuvid_handle) wine_dlclose(cuvid_handle, NULL, 0);
+            if (cuvid_handle) dlclose(cuvid_handle);
             break;
     }
 
