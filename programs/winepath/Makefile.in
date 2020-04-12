@@ -1,6 +1,5 @@
 MODULE    = winepath.exe
-
-EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+APPMODE   = -mconsole -municode
 
 C_SRCS = winepath.c
 

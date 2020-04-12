@@ -1,4 +1,4 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sat 11 Apr 2020 01:07:25 PM CEST :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sun 12 Apr 2020 11:34:53 AM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
@@ -7,6 +7,9 @@ Using wine-staging patchset (version 5.6.1.r0.g4c160ec8)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
+
+e22bcac706be3afac67f4faac3aca79fd67c3d6f reverted
+( Don't build winepath with msvcrt to prevent breakage )
 
 2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted
 ( FS hack unbreak revert applied )
@@ -22,6 +25,7 @@ CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
 Staging overrides, if any: -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-nolegacy -W user32-rawinput-mouse-experimental -W user32-rawinput-hid -W winex11-key_translation
 
+leagueoflolfix.patch -- ( Applied LoL 9.20+ fix - Requires vdso32 disabled (echo 0 > /proc/sys/abi/vsyscall32) )
 assettocorsa_hud_perf.patch -- ( Applied Assetto Corsa HUD performance fix )
 fsync-staging.patch -- ( Applied fsync, an experimental replacement for esync (staging) )
 fsync-staging-no_alloc_handle.patch -- ( Added no_alloc_handle object method to fsync )
