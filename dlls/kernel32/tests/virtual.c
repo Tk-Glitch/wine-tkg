@@ -2882,8 +2882,8 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     success = VirtualProtect( base, size, PAGE_READWRITE, &old_prot );
     ok( success, "VirtualProtect failed %u\n", GetLastError() );
 
-    ret = (DWORD_PTR)atl5_test_func;
-    ret = call_proc_excpt( (void *)base, &ret - 1 );
+    results[1] = atl5_test_func;
+    ret = call_proc_excpt( (void *)base, results );
     /* FIXME: We don't check the content of the registers EAX/ECX yet */
     ok( ret == 44, "call returned wrong result, expected 44, got %d\n", ret );
     ok( num_guard_page_calls == 0, "expected no STATUS_GUARD_PAGE_VIOLATION exception, got %d exceptions\n", num_guard_page_calls );
@@ -3589,9 +3589,7 @@ static void test_CreateFileMapping_protection(void)
                 SetLastError(0xdeadbeef);
                 ret = VirtualQuery(base, &info, sizeof(info));
                 ok(ret, "VirtualQuery failed %d\n", GetLastError());
-                /* FIXME: remove the condition below once Wine is fixed */
-                todo_wine_if (td[i].prot == PAGE_WRITECOPY || td[i].prot == PAGE_EXECUTE_WRITECOPY)
-                    ok(info.Protect == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot_after_write);
+                ok(info.Protect == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot_after_write);
             }
         }
         else
@@ -3605,9 +3603,7 @@ static void test_CreateFileMapping_protection(void)
         SetLastError(0xdeadbeef);
         ret = VirtualProtect(base, si.dwPageSize, PAGE_NOACCESS, &old_prot);
         ok(ret, "%d: VirtualProtect error %d\n", i, GetLastError());
-        /* FIXME: remove the condition below once Wine is fixed */
-        todo_wine_if (td[i].prot == PAGE_WRITECOPY || td[i].prot == PAGE_EXECUTE_WRITECOPY)
-            ok(old_prot == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, old_prot, td[i].prot_after_write);
+        ok(old_prot == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, old_prot, td[i].prot_after_write);
 
         UnmapViewOfFile(base);
     }
@@ -3960,15 +3956,12 @@ static void test_mapping( HANDLE hfile, DWORD sec_flags, BOOL readonly )
                         continue;
                     }
 
-                    todo_wine_if(readonly && page_prot[k] == PAGE_WRITECOPY && view[j].prot != PAGE_WRITECOPY)
                     ok(ret, "VirtualProtect error %d, map %#x, view %#x, requested prot %#x\n", GetLastError(), page_prot[i], view[j].prot, page_prot[k]);
-                    todo_wine_if(readonly && page_prot[k] == PAGE_WRITECOPY && view[j].prot != PAGE_WRITECOPY)
                     ok(old_prot == prev_prot, "got %#x, expected %#x\n", old_prot, prev_prot);
                     prev_prot = actual_prot;
 
                     ret = VirtualQuery(base, &info, sizeof(info));
                     ok(ret, "%d: VirtualQuery failed %d\n", j, GetLastError());
-                    todo_wine_if(readonly && page_prot[k] == PAGE_WRITECOPY && view[j].prot != PAGE_WRITECOPY)
                     ok(info.Protect == actual_prot,
                        "VirtualProtect wrong prot, map %#x, view %#x, requested prot %#x got %#x\n",
                        page_prot[i], view[j].prot, page_prot[k], info.Protect );
@@ -4023,15 +4016,12 @@ static void test_mapping( HANDLE hfile, DWORD sec_flags, BOOL readonly )
             if (!anon_mapping && is_compatible_protection(alloc_prot, PAGE_WRITECOPY))
             {
                 ret = VirtualProtect(base, sec_flags & SEC_IMAGE ? si.dwPageSize : 2*si.dwPageSize, PAGE_WRITECOPY, &old_prot);
-                todo_wine_if(readonly && view[j].prot != PAGE_WRITECOPY)
                 ok(ret, "VirtualProtect error %d, map %#x, view %#x\n", GetLastError(), page_prot[i], view[j].prot);
                 if (ret) *(DWORD*)base = 0xdeadbeef;
                 ret = VirtualQuery(base, &info, sizeof(info));
                 ok(ret, "%d: VirtualQuery failed %d\n", j, GetLastError());
-                todo_wine
                 ok(info.Protect == PAGE_READWRITE, "VirtualProtect wrong prot, map %#x, view %#x got %#x\n",
                    page_prot[i], view[j].prot, info.Protect );
-                todo_wine_if (!(sec_flags & SEC_IMAGE))
                 ok(info.RegionSize == si.dwPageSize, "wrong region size %#lx after write, map %#x, view %#x got %#x\n",
                    info.RegionSize, page_prot[i], view[j].prot, info.Protect );
 
@@ -4042,7 +4032,6 @@ static void test_mapping( HANDLE hfile, DWORD sec_flags, BOOL readonly )
                 {
                     ret = VirtualQuery((char*)base + si.dwPageSize, &info, sizeof(info));
                     ok(ret, "%d: VirtualQuery failed %d\n", j, GetLastError());
-                    todo_wine_if(readonly && view[j].prot != PAGE_WRITECOPY)
                     ok(info.Protect == PAGE_WRITECOPY, "wrong prot, map %#x, view %#x got %#x\n",
                        page_prot[i], view[j].prot, info.Protect);
                 }
@@ -4062,14 +4051,11 @@ static void test_mapping( HANDLE hfile, DWORD sec_flags, BOOL readonly )
                             continue;
                         }
 
-                        todo_wine_if(readonly && page_prot[k] == PAGE_WRITECOPY && view[j].prot != PAGE_WRITECOPY)
                         ok(ret, "VirtualProtect error %d, map %#x, view %#x, requested prot %#x\n", GetLastError(), page_prot[i], view[j].prot, page_prot[k]);
-                        todo_wine_if(readonly && page_prot[k] == PAGE_WRITECOPY && view[j].prot != PAGE_WRITECOPY)
                         ok(old_prot == prev_prot, "got %#x, expected %#x\n", old_prot, prev_prot);
 
                         ret = VirtualQuery(base, &info, sizeof(info));
                         ok(ret, "%d: VirtualQuery failed %d\n", j, GetLastError());
-                        todo_wine_if( map_prot_written( page_prot[k] ) != actual_prot )
                         ok(info.Protect == map_prot_written( page_prot[k] ),
                            "VirtualProtect wrong prot, map %#x, view %#x, requested prot %#x got %#x\n",
                            page_prot[i], view[j].prot, page_prot[k], info.Protect );
@@ -4110,7 +4096,6 @@ static void test_mappings(void)
     SetFilePointer(hfile, 0, NULL, FILE_BEGIN);
     ok(ReadFile(hfile, &data, sizeof(data), &num_bytes, NULL), "ReadFile failed\n");
     ok(num_bytes == sizeof(data), "num_bytes = %d\n", num_bytes);
-    todo_wine
     ok(!data, "data = %x\n", data);
 
     CloseHandle( hfile );

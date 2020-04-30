@@ -321,6 +321,11 @@ static void test_query_process(void)
     int i = 0, k = 0;
     BOOL is_nt = FALSE;
     SYSTEM_BASIC_INFORMATION sbi;
+    PROCESS_BASIC_INFORMATION pbi;
+    THREAD_BASIC_INFORMATION tbi;
+    OBJECT_ATTRIBUTES attr;
+    CLIENT_ID cid;
+    HANDLE handle;
 
     /* Copy of our winternl.h structure turned into a private one */
     typedef struct _SYSTEM_PROCESS_INFORMATION_PRIVATE {
@@ -403,13 +408,19 @@ static void test_query_process(void)
         
         if (!is_nt)
         {
+            DWORD_PTR tid;
             DWORD j;
+
+            ok(!(last_pid & 3), "Unexpected PID low bits: %p\n", spi->UniqueProcessId);
             for ( j = 0; j < spi->dwThreadCount; j++) 
             {
                 k++;
                 ok ( spi->ti[j].ClientId.UniqueProcess == spi->UniqueProcessId,
                      "The owning pid of the thread (%p) doesn't equal the pid (%p) of the process\n",
                      spi->ti[j].ClientId.UniqueProcess, spi->UniqueProcessId);
+
+                tid = (DWORD_PTR)spi->ti[j].ClientId.UniqueThread;
+                ok(!(tid & 3), "Unexpected TID low bits: %p\n", spi->ti[j].ClientId.UniqueThread);
             }
         }
 
@@ -425,6 +436,50 @@ static void test_query_process(void)
     if (one_before_last_pid == 0) one_before_last_pid = last_pid;
 
     HeapFree( GetProcessHeap(), 0, spi_buf);
+
+    if (is_nt)
+    {
+        win_skip("skipping ptids low bits tests\n");
+        return;
+    }
+
+    for (i = 1; i < 4; ++i)
+    {
+        InitializeObjectAttributes( &attr, NULL, 0, NULL, NULL );
+        cid.UniqueProcess = ULongToHandle(GetCurrentProcessId() + i);
+        cid.UniqueThread = 0;
+
+        status = NtOpenProcess( &handle, PROCESS_QUERY_LIMITED_INFORMATION, &attr, &cid );
+        ok( status == STATUS_SUCCESS || broken( status == STATUS_ACCESS_DENIED ) /* wxppro */,
+            "NtOpenProcess returned:%x\n", status );
+        if (status != STATUS_SUCCESS) continue;
+
+        status = pNtQueryInformationProcess( handle, ProcessBasicInformation, &pbi, sizeof(pbi), NULL );
+        ok( status == STATUS_SUCCESS, "NtQueryInformationProcess returned:%x\n", status );
+        ok( pbi.UniqueProcessId == GetCurrentProcessId(),
+            "Expected pid %p, got %p\n", ULongToHandle(GetCurrentProcessId()), ULongToHandle(pbi.UniqueProcessId) );
+
+        NtClose( handle );
+    }
+
+    for (i = 1; i < 4; ++i)
+    {
+        InitializeObjectAttributes( &attr, NULL, 0, NULL, NULL );
+        cid.UniqueProcess = 0;
+        cid.UniqueThread = ULongToHandle(GetCurrentThreadId() + i);
+
+        status = NtOpenThread( &handle, THREAD_QUERY_LIMITED_INFORMATION, &attr, &cid );
+        ok( status == STATUS_SUCCESS || broken( status == STATUS_ACCESS_DENIED ) /* wxppro */,
+            "NtOpenThread returned:%x\n", status );
+        if (status != STATUS_SUCCESS) continue;
+
+        status = pNtQueryInformationThread( handle, ThreadBasicInformation, &tbi, sizeof(tbi), NULL );
+        ok( status == STATUS_SUCCESS, "NtQueryInformationThread returned:%x\n", status );
+        ok( tbi.ClientId.UniqueThread == ULongToHandle(GetCurrentThreadId()),
+            "Expected tid %p, got %p\n", ULongToHandle(GetCurrentThreadId()), tbi.ClientId.UniqueThread );
+
+        NtClose( handle );
+    }
 }
 
 static void test_query_procperf(void)

@@ -16,6 +16,8 @@ C_SRCS = \
 	lsa.c \
 	registry.c \
 	security.c \
+	service.c \
 	wmi.c
+
 
 RC_SRCS = version.rc

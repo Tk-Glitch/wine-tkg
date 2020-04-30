@@ -1,15 +1,12 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sun 12 Apr 2020 11:34:53 AM CEST :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Thu 30 Apr 2020 06:11:19 PM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.6.r0.g4cdb7ec829
-Using wine-staging patchset (version 5.6.1.r0.g4c160ec8)
+Wine (plain) version: 5.7.r118.gcf8a6eb276
+Using wine-staging patchset (version 5.7.r6.g7b0b95ee)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
-
-e22bcac706be3afac67f4faac3aca79fd67c3d6f reverted
-( Don't build winepath with msvcrt to prevent breakage )
 
 2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted
 ( FS hack unbreak revert applied )
@@ -36,23 +33,26 @@ proton-rawinput.patch -- ( Using rawinput patchset )
 0001-winex11-Match-keyboard-in-Unicode.patch -- ( Applied proton friendly winex11-Match-keyboard-in-Unicode )
 0002-winex11-Fix-more-key-translation.patch -- ( Applied proton friendly winex11-Fix-more-key-translation )
 0003-winex11.drv-Fix-main-Russian-keyboard-layout.patch -- ( Applied proton friendly winex11.drv-Fix-main-Russian-keyboard-layout )
-proton_mf_hacks.patch -- ( Applied proton mf hacks patch )
 LAA-staging.patch -- ( Applied large address aware override support )
 proton-staging_winex11-MWM_Decorations.patch -- ( Applied proton friendly winex11-MWM_Decorations )
 
-proton-tkg-staging-rpc.patch -- ( Using Steam-specific Proton-tkg patches (staging) 1/3 )
 proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 2/3 )
+proton-pa-staging.patch -- ( Enable Proton's PA additions )
 proton-vk-bits-4.5.patch -- ( Enable Proton vulkan bits for 4.5+ )
 proton_fs_hack_integer_scaling.patch -- ( Enable Proton fs hack integer scaling )
 proton-winevulkan.patch -- ( Using Proton winevulkan patches )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 proton-win10-default.patch -- ( Enforce win10 as default wine version )
 
+Applied reverting hotfix /home/tk/Dev/Dev/PKGBUILDS/wine-tkg-git/wine-tkg-git/wine-tkg-patches/hotfixes/fd7992972b252ed262d33ef604e9e1235d2108c5-5.myrevert
+Applied your own patch 0001-Add-some-semi-stubs-in-user32.mypatch
 Applied your own patch D3D12CreateVersionedRootSignatureDeserializer.mypatch
 Applied your own patch D3D12SerializeVersionedRootSignature.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch GNUTLShack.mypatch
 Applied your own patch amdags.mypatch
+Applied your own patch guy1524_mfplat_WIP.mypatch
+Applied your own patch legoisland_168726.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
 Applied your own patch winex11-fs-no_above_state.mypatch
 

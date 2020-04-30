@@ -3068,7 +3068,10 @@ static void test_CoWaitForMultipleHandles(void)
 static void test_CoGetMalloc(void)
 {
     IMalloc *imalloc;
+    SIZE_T size;
     HRESULT hr;
+    char *ptr;
+    int ret;
 
     if (0) /* crashes on native */
         hr = CoGetMalloc(0, NULL);
@@ -3102,6 +3105,32 @@ static void test_CoGetMalloc(void)
     hr = CoGetMalloc(MEMCTX_TASK, &imalloc);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(imalloc != NULL, "got %p\n", imalloc);
+
+    /* DidAlloc() */
+    ptr = IMalloc_Alloc(imalloc, 16);
+    ok(!!ptr, "Failed to allocate block.\n");
+
+    ret = IMalloc_DidAlloc(imalloc, ptr);
+    ok(ret == 1, "Unexpected return value %d.\n", ret);
+
+    ret = IMalloc_DidAlloc(imalloc, NULL);
+    ok(ret == -1, "Unexpected return value %d.\n", ret);
+
+    ret = IMalloc_DidAlloc(imalloc, (void *)0x1);
+    ok(ret == 0, "Unexpected return value %d.\n", ret);
+
+    ret = IMalloc_DidAlloc(imalloc, ptr + 4);
+    ok(ret == 0, "Unexpected return value %d.\n", ret);
+
+    /* GetSize() */
+    size = IMalloc_GetSize(imalloc, NULL);
+    ok(size == (SIZE_T)-1, "Unexpected return value.\n");
+
+    size = IMalloc_GetSize(imalloc, ptr);
+    ok(size == 16, "Unexpected return value.\n");
+
+    IMalloc_Free(imalloc, ptr);
+
     IMalloc_Release(imalloc);
 }
 

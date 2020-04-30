@@ -1094,6 +1094,12 @@ struct d3d12_swapchain
     IDXGIOutput *target;
     DXGI_SWAP_CHAIN_DESC1 desc;
     DXGI_SWAP_CHAIN_FULLSCREEN_DESC fullscreen_desc;
+
+    ID3D12Fence *frame_latency_fence;
+    HANDLE frame_latency_event;
+
+    uint64_t frame_number;
+    uint32_t frame_latency;
 };
 
 static DXGI_FORMAT dxgi_format_from_vk_format(VkFormat vk_format)
@@ -1887,6 +1893,12 @@ static void d3d12_swapchain_destroy(struct d3d12_swapchain *swapchain)
 
     d3d12_swapchain_destroy_buffers(swapchain, TRUE);
 
+    if (swapchain->frame_latency_event)
+        CloseHandle(swapchain->frame_latency_event);
+
+    if (swapchain->frame_latency_fence)
+        ID3D12Fence_Release(swapchain->frame_latency_fence);
+
     if (swapchain->command_queue)
         ID3D12CommandQueue_Release(swapchain->command_queue);
 
@@ -2095,6 +2107,7 @@ static VkResult d3d12_swapchain_queue_present(struct d3d12_swapchain *swapchain,
 static HRESULT d3d12_swapchain_present(struct d3d12_swapchain *swapchain,
         unsigned int sync_interval, unsigned int flags)
 {
+    HANDLE frame_latency_event;
     VkQueue vk_queue;
     VkResult vr;
     HRESULT hr;
@@ -2155,6 +2168,25 @@ static HRESULT d3d12_swapchain_present(struct d3d12_swapchain *swapchain,
     {
         ERR("Failed to queue present, vr %d.\n", vr);
         return hresult_from_vk_result(vr);
+    }
+
+    if ((frame_latency_event = swapchain->frame_latency_event))
+    {
+        ++swapchain->frame_number;
+
+        if (FAILED(hr = ID3D12CommandQueue_Signal(swapchain->command_queue,
+                swapchain->frame_latency_fence, swapchain->frame_number)))
+        {
+            ERR("Failed to signal frame latency fence, hr %#x.\n", hr);
+            return hr;
+        }
+
+        if (FAILED(hr = ID3D12Fence_SetEventOnCompletion(swapchain->frame_latency_fence,
+                swapchain->frame_number - swapchain->frame_latency, frame_latency_event)))
+        {
+            ERR("Failed to enqueue frame latency event, hr %#x.\n", hr);
+            return hr;
+        }
     }
 
     swapchain->current_buffer_index = (swapchain->current_buffer_index + 1) % swapchain->desc.BufferCount;
@@ -2576,23 +2608,49 @@ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_GetSourceSize(IDXGISwapChain3 *
 
 static HRESULT STDMETHODCALLTYPE d3d12_swapchain_SetMaximumFrameLatency(IDXGISwapChain3 *iface, UINT max_latency)
 {
-    FIXME("iface %p, max_latency %u stub!\n", iface, max_latency);
+    struct d3d12_swapchain *swapchain = d3d12_swapchain_from_IDXGISwapChain3(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, max_latency %u.\n", iface, max_latency);
+
+    if (!(swapchain->desc.Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT))
+    {
+        WARN("DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT not set for swap chain %p.\n", iface);
+        return DXGI_ERROR_INVALID_CALL;
+    }
+
+    if (!max_latency)
+    {
+        WARN("Invalid maximum frame latency %u.\n", max_latency);
+        return DXGI_ERROR_INVALID_CALL;
+    }
+
+    swapchain->frame_latency = max_latency;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d12_swapchain_GetMaximumFrameLatency(IDXGISwapChain3 *iface, UINT *max_latency)
 {
-    FIXME("iface %p, max_latency %p stub!\n", iface, max_latency);
+    struct d3d12_swapchain *swapchain = d3d12_swapchain_from_IDXGISwapChain3(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, max_latency %p.\n", iface, max_latency);
+
+    if (!(swapchain->desc.Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT))
+    {
+        WARN("DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT not set for swap chain %p.\n", iface);
+        return DXGI_ERROR_INVALID_CALL;
+    }
+
+    *max_latency = swapchain->frame_latency;
+    return S_OK;
 }
 
 static HANDLE STDMETHODCALLTYPE d3d12_swapchain_GetFrameLatencyWaitableObject(IDXGISwapChain3 *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d12_swapchain *swapchain = d3d12_swapchain_from_IDXGISwapChain3(iface);
 
-    return NULL;
+    TRACE("iface %p.\n", iface);
+
+    return swapchain->frame_latency_event;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d12_swapchain_SetMatrixTransform(IDXGISwapChain3 *iface,
@@ -2627,18 +2685,33 @@ static UINT STDMETHODCALLTYPE d3d12_swapchain_GetCurrentBackBufferIndex(IDXGISwa
 static HRESULT STDMETHODCALLTYPE d3d12_swapchain_CheckColorSpaceSupport(IDXGISwapChain3 *iface,
         DXGI_COLOR_SPACE_TYPE colour_space, UINT *colour_space_support)
 {
-    FIXME("iface %p, colour_space %#x, colour_space_support %p stub!\n",
+    UINT support_flags = 0;
+
+    FIXME("iface %p, colour_space %#x, colour_space_support %p semi-stub!\n",
             iface, colour_space, colour_space_support);
 
-    return E_NOTIMPL;
+    if (!colour_space_support)
+        return E_INVALIDARG;
+
+    if (colour_space == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)
+      support_flags |= DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT;
+
+    *colour_space_support = support_flags;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d12_swapchain_SetColorSpace1(IDXGISwapChain3 *iface,
         DXGI_COLOR_SPACE_TYPE colour_space)
 {
-    FIXME("iface %p, colour_space %#x stub!\n", iface, colour_space);
+    FIXME("iface %p, colour_space %#x semi-stub!\n", iface, colour_space);
 
-    return E_NOTIMPL;
+    if (colour_space != DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)
+    {
+        WARN("Colour space %u not supported.\n", colour_space);
+        return E_INVALIDARG;
+    }
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d12_swapchain_ResizeBuffers1(IDXGISwapChain3 *iface,
@@ -2906,7 +2979,7 @@ static HRESULT d3d12_swapchain_init(struct d3d12_swapchain *swapchain, IWineDXGI
         FIXME("Ignoring scaling %#x.\n", swapchain_desc->Scaling);
     if (swapchain_desc->AlphaMode && swapchain_desc->AlphaMode != DXGI_ALPHA_MODE_IGNORE)
         FIXME("Ignoring alpha mode %#x.\n", swapchain_desc->AlphaMode);
-    if (swapchain_desc->Flags)
+    if (swapchain_desc->Flags & ~(DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT))
         FIXME("Ignoring swapchain flags %#x.\n", swapchain_desc->Flags);
 
     if (fullscreen_desc->RefreshRate.Numerator || fullscreen_desc->RefreshRate.Denominator)
@@ -2981,6 +3054,28 @@ static HRESULT d3d12_swapchain_init(struct d3d12_swapchain *swapchain, IWineDXGI
     {
         d3d12_swapchain_destroy(swapchain);
         return hresult_from_vk_result(vr);
+    }
+
+    if (swapchain_desc->Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)
+    {
+        swapchain->frame_number = DXGI_MAX_SWAP_CHAIN_BUFFERS;
+        swapchain->frame_latency = 1;
+
+        if (FAILED(hr = ID3D12Device_CreateFence(device, DXGI_MAX_SWAP_CHAIN_BUFFERS,
+                0, &IID_ID3D12Fence, (void **)&swapchain->frame_latency_fence)))
+        {
+            WARN("Failed to create frame latency fence, hr %#x.\n", hr);
+            d3d12_swapchain_destroy(swapchain);
+            return hr;
+        }
+
+        if (!(swapchain->frame_latency_event = CreateEventW(NULL, FALSE, TRUE, NULL)))
+        {
+            hr = HRESULT_FROM_WIN32(GetLastError());
+            WARN("Failed to create frame latency event, hr %#x.\n", hr);
+            d3d12_swapchain_destroy(swapchain);
+            return hr;
+        }
     }
 
     IWineDXGIFactory_AddRef(swapchain->factory = factory);

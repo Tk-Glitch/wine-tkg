@@ -21980,6 +21980,18 @@ static void test_indexed_vertex_blending(void)
     d3d = Direct3DCreate9(D3D_SDK_VERSION);
     ok(!!d3d, "Failed to create a D3D object.\n");
 
+    memset(&caps, 0, sizeof(caps));
+    hr = IDirect3D9_GetDeviceCaps(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &caps);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(caps.MaxVertexBlendMatrices == 4 && !caps.MaxVertexBlendMatrixIndex,
+            "Got unexpected MaxVertexBlendMatrices %u, MaxVertexBlendMatrixIndex %u.\n",
+            caps.MaxVertexBlendMatrices, caps.MaxVertexBlendMatrixIndex);
+    hr = IDirect3D9_GetDeviceCaps(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_REF, &caps);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(caps.MaxVertexBlendMatrices == 4 && caps.MaxVertexBlendMatrixIndex == 255,
+            "Got unexpected MaxVertexBlendMatrices %u, MaxVertexBlendMatrixIndex %u.\n",
+            caps.MaxVertexBlendMatrices, caps.MaxVertexBlendMatrixIndex);
+
     present_parameters.Windowed = TRUE;
     present_parameters.hDeviceWindow = window;
     present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;

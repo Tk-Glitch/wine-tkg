@@ -2520,18 +2520,12 @@ todo_wine
             void* value;
             SetLastError(0xdeadbeef);
             value = pFlsGetValue(fls_index);
-            todo_wine
-            {
-                ok(broken(value == (void*) 0x31415) || /* Win2k3 */
-                   value == NULL, "FlsGetValue returned %p, expected NULL\n", value);
-            }
+            ok(broken(value == (void*) 0x31415) || /* Win2k3 */
+               value == NULL, "FlsGetValue returned %p, expected NULL\n", value);
             ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %u\n", GetLastError());
-            todo_wine
-            {
-                ok(broken(fls_callback_count == thread_detach_count) || /* Win2k3 */
-                   fls_callback_count == thread_detach_count + 1,
-                   "wrong FLS callback count %d, expected %d\n", fls_callback_count, thread_detach_count + 1);
-            }
+            ok(broken(fls_callback_count == thread_detach_count) || /* Win2k3 */
+               fls_callback_count == thread_detach_count + 1,
+               "wrong FLS callback count %d, expected %d\n", fls_callback_count, thread_detach_count + 1);
         }
         if (pFlsFree)
         {
@@ -2540,11 +2534,8 @@ todo_wine
             ret = pFlsFree(fls_index);
             ok(ret, "FlsFree failed with error %u\n", GetLastError());
             fls_index = FLS_OUT_OF_INDEXES;
-            todo_wine
-            {
-                ok(fls_callback_count == fls_count,
-                   "wrong FLS callback count %d, expected %d\n", fls_callback_count, fls_count);
-            }
+            ok(fls_callback_count == fls_count,
+               "wrong FLS callback count %d, expected %d\n", fls_callback_count, fls_count);
         }
 
         ok(attached_thread_count >= 2, "attached thread count should be >= 2\n");
@@ -2726,8 +2717,7 @@ todo_wine
             SetLastError(0xdeadbeef);
             value = pFlsGetValue(fls_index);
             ok(!value, "FlsGetValue returned %p, expected NULL\n", value);
-            todo_wine
-                ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %u\n", GetLastError());
+            ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %u\n", GetLastError());
             ret = pFlsSetValue(fls_index, (void*) 0x31415);
             ok(ret, "FlsSetValue failed\n");
             fls_count++;
@@ -2757,11 +2747,8 @@ todo_wine
             void* value;
             SetLastError(0xdeadbeef);
             value = pFlsGetValue(fls_index);
-            todo_wine
-            {
-                ok(broken(value == (void*) 0x31415) || /* Win2k3 */
-                   !value, "FlsGetValue returned %p, expected NULL\n", value);
-            }
+            ok(broken(value == (void*) 0x31415) || /* Win2k3 */
+               !value, "FlsGetValue returned %p, expected NULL\n", value);
             ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %u\n", GetLastError());
         }
 
@@ -3938,7 +3925,7 @@ static void test_InMemoryOrderModuleList(void)
     PEB_LDR_DATA *ldr = NtCurrentTeb()->Peb->LdrData;
     LIST_ENTRY *entry1, *mark1 = &ldr->InLoadOrderModuleList;
     LIST_ENTRY *entry2, *mark2 = &ldr->InMemoryOrderModuleList;
-    LDR_MODULE *module1, *module2;
+    LDR_DATA_TABLE_ENTRY *module1, *module2;
 
     ok(ldr->Initialized == TRUE, "expected TRUE, got %u\n", ldr->Initialized);
 
@@ -3946,8 +3933,8 @@ static void test_InMemoryOrderModuleList(void)
          entry1 != mark1 && entry2 != mark2;
          entry1 = entry1->Flink, entry2 = entry2->Flink)
     {
-        module1 = CONTAINING_RECORD(entry1, LDR_MODULE, InLoadOrderModuleList);
-        module2 = CONTAINING_RECORD(entry2, LDR_MODULE, InMemoryOrderModuleList);
+        module1 = CONTAINING_RECORD(entry1, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
+        module2 = CONTAINING_RECORD(entry2, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
         ok(module1 == module2, "expected module1 == module2, got %p and %p\n", module1, module2);
     }
     ok(entry1 == mark1, "expected entry1 == mark1, got %p and %p\n", entry1, mark1);
@@ -4100,13 +4087,13 @@ static void test_HashLinks(void)
     static WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
 
     LIST_ENTRY *hash_map, *entry, *mark;
-    LDR_MODULE *module;
+    LDR_DATA_TABLE_ENTRY *module;
     BOOL found;
 
     entry = &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList;
     entry = entry->Flink;
 
-    module = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
+    module = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
     entry = module->HashLinks.Blink;
 
     hash_map = entry - hash_basename(module->BaseDllName.Buffer);
@@ -4115,7 +4102,7 @@ static void test_HashLinks(void)
     found = FALSE;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        module = CONTAINING_RECORD(entry, LDR_MODULE, HashLinks);
+        module = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, HashLinks);
         if (!lstrcmpiW(module->BaseDllName.Buffer, ntdllW))
         {
             found = TRUE;
@@ -4128,7 +4115,7 @@ static void test_HashLinks(void)
     found = FALSE;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        module = CONTAINING_RECORD(entry, LDR_MODULE, HashLinks);
+        module = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, HashLinks);
         if (!lstrcmpiW(module->BaseDllName.Buffer, kernel32W))
         {
             found = TRUE;

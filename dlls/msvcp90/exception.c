@@ -969,7 +969,7 @@ void __cdecl __ExceptionPtrCreate(exception_ptr *ep)
     ep->ref = NULL;
 }
 
-#if defined(__i386__) && !defined(__MINGW32__)
+#ifdef __ASM_USE_THISCALL_WRAPPER
 extern void call_dtor(const cxx_exception_type *type, void *func, void *object);
 
 __ASM_GLOBAL_FUNC( call_dtor,
@@ -1021,9 +1021,7 @@ void __cdecl __ExceptionPtrDestroy(exception_ptr *ep)
 #define EXCEPTION_VTABLE(name,funcs) __ASM_VTABLE(name,funcs VTABLE_ADD_FUNC(MSVCP_exception__Doraise))
 #endif
 
-#ifndef __GNUC__
-void __asm_dummy_vtables(void) {
-#endif
+__ASM_BLOCK_BEGIN(exception_vtables)
     __ASM_VTABLE(type_info,
             VTABLE_ADD_FUNC(MSVCP_type_info_vector_dtor));
     EXCEPTION_VTABLE(exception,
@@ -1066,9 +1064,7 @@ void __asm_dummy_vtables(void) {
     EXCEPTION_VTABLE(range_error,
             VTABLE_ADD_FUNC(MSVCP_runtime_error_vector_dtor)
             VTABLE_ADD_FUNC(MSVCP_runtime_error_what));
-#ifndef __GNUC__
-}
-#endif
+__ASM_BLOCK_END
 
 /* Internal: throws selected exception */
 void throw_exception(exception_type et, const char *str)

@@ -576,6 +576,9 @@ static struct list *declare_vars(struct hlsl_type *basic_type, DWORD modifiers, 
     BOOL ret, local = TRUE;
     struct list *statements_list = d3dcompiler_alloc(sizeof(*statements_list));
 
+    if (basic_type->type == HLSL_CLASS_MATRIX)
+        assert(basic_type->modifiers & HLSL_MODIFIERS_MAJORITY_MASK);
+
     if (!statements_list)
     {
         ERR("Out of memory.\n");
@@ -717,18 +720,46 @@ static BOOL add_struct_field(struct list *fields, struct hlsl_struct_field *fiel
     return TRUE;
 }
 
-static struct hlsl_type *apply_type_modifiers(struct hlsl_type *type, DWORD *modifiers, struct source_location loc)
+BOOL is_row_major(const struct hlsl_type *type)
 {
+    /* Default to column-major if the majority isn't explicitly set, which can
+     * happen for anonymous nodes. */
+    return !!(type->modifiers & HLSL_MODIFIER_ROW_MAJOR);
+}
+
+static struct hlsl_type *apply_type_modifiers(struct hlsl_type *type,
+        unsigned int *modifiers, struct source_location loc)
+{
+    unsigned int default_majority = 0;
     struct hlsl_type *new_type;
 
-    if (!(*modifiers & HLSL_TYPE_MODIFIERS_MASK))
+    /* This function is only used for declarations (i.e. variables and struct
+     * fields), which should inherit the matrix majority. We only explicitly set
+     * the default majority for declarations—typedefs depend on this—but we
+     * want to always set it, so that an hlsl_type object is never used to
+     * represent two different majorities (and thus can be used to store its
+     * register size, etc.) */
+    if (!(*modifiers & HLSL_MODIFIERS_MAJORITY_MASK)
+            && !(type->modifiers & HLSL_MODIFIERS_MAJORITY_MASK)
+            && type->type == HLSL_CLASS_MATRIX)
+    {
+        if (hlsl_ctx.matrix_majority == HLSL_COLUMN_MAJOR)
+            default_majority = HLSL_MODIFIER_COLUMN_MAJOR;
+        else
+            default_majority = HLSL_MODIFIER_ROW_MAJOR;
+    }
+
+    if (!default_majority && !(*modifiers & HLSL_TYPE_MODIFIERS_MASK))
         return type;
 
-    if (!(new_type = clone_hlsl_type(type)))
+    if (!(new_type = clone_hlsl_type(type, default_majority)))
         return NULL;
 
     new_type->modifiers = add_modifiers(new_type->modifiers, *modifiers, loc);
     *modifiers &= ~HLSL_TYPE_MODIFIERS_MASK;
+
+    if (new_type->type == HLSL_CLASS_MATRIX)
+        new_type->reg_size = is_row_major(new_type) ? new_type->dimy : new_type->dimx;
     return new_type;
 }
 
@@ -737,6 +768,9 @@ static struct list *gen_struct_fields(struct hlsl_type *type, DWORD modifiers, s
     struct parse_variable_def *v, *v_next;
     struct hlsl_struct_field *field;
     struct list *list;
+
+    if (type->type == HLSL_CLASS_MATRIX)
+        assert(type->modifiers & HLSL_MODIFIERS_MAJORITY_MASK);
 
     list = d3dcompiler_alloc(sizeof(*list));
     if (!list)
@@ -774,6 +808,8 @@ static struct list *gen_struct_fields(struct hlsl_type *type, DWORD modifiers, s
 static struct hlsl_type *new_struct_type(const char *name, struct list *fields)
 {
     struct hlsl_type *type = d3dcompiler_alloc(sizeof(*type));
+    struct hlsl_struct_field *field;
+    unsigned int reg_size = 0;
 
     if (!type)
     {
@@ -784,6 +820,13 @@ static struct hlsl_type *new_struct_type(const char *name, struct list *fields)
     type->name = name;
     type->dimx = type->dimy = 1;
     type->e.elements = fields;
+
+    LIST_FOR_EACH_ENTRY(field, fields, struct hlsl_struct_field, entry)
+    {
+        field->reg_offset = reg_size;
+        reg_size += field->type->reg_size;
+    }
+    type->reg_size = reg_size;
 
     list_add_tail(&hlsl_ctx.types, &type->entry);
 
@@ -801,7 +844,7 @@ static BOOL add_typedef(DWORD modifiers, struct hlsl_type *orig_type, struct lis
         if (v->array_size)
             type = new_array_type(orig_type, v->array_size);
         else
-            type = clone_hlsl_type(orig_type);
+            type = clone_hlsl_type(orig_type, 0);
         if (!type)
         {
             ERR("Out of memory\n");
@@ -813,6 +856,12 @@ static BOOL add_typedef(DWORD modifiers, struct hlsl_type *orig_type, struct lis
 
         if (type->type != HLSL_CLASS_MATRIX)
             check_invalid_matrix_modifiers(type->modifiers, v->loc);
+        else
+            type->reg_size = is_row_major(type) ? type->dimy : type->dimx;
+
+        if ((type->modifiers & HLSL_MODIFIER_COLUMN_MAJOR)
+                && (type->modifiers & HLSL_MODIFIER_ROW_MAJOR))
+            hlsl_report_message(v->loc, HLSL_LEVEL_ERROR, "more than one matrix majority keyword");
 
         ret = add_type_to_scope(hlsl_ctx.cur_scope, type);
         if (!ret)
@@ -829,6 +878,9 @@ static BOOL add_typedef(DWORD modifiers, struct hlsl_type *orig_type, struct lis
 static BOOL add_func_parameter(struct list *list, struct parse_parameter *param, const struct source_location loc)
 {
     struct hlsl_ir_var *decl = d3dcompiler_alloc(sizeof(*decl));
+
+    if (param->type->type == HLSL_CLASS_MATRIX)
+        assert(param->type->modifiers & HLSL_MODIFIERS_MAJORITY_MASK);
 
     if (!decl)
     {
@@ -1983,7 +2035,7 @@ primary_expr:             C_FLOAT
                                     YYABORT;
                                 }
                                 c->node.type = HLSL_IR_CONSTANT;
-                                c->node.loc = get_location(&yylloc);
+                                c->node.loc = get_location(&@1);
                                 c->node.data_type = new_hlsl_type(d3dcompiler_strdup("float"), HLSL_CLASS_SCALAR, HLSL_TYPE_FLOAT, 1, 1);
                                 c->v.value.f[0] = $1;
                                 if (!($$ = make_list(&c->node)))
@@ -1998,7 +2050,7 @@ primary_expr:             C_FLOAT
                                     YYABORT;
                                 }
                                 c->node.type = HLSL_IR_CONSTANT;
-                                c->node.loc = get_location(&yylloc);
+                                c->node.loc = get_location(&@1);
                                 c->node.data_type = new_hlsl_type(d3dcompiler_strdup("int"), HLSL_CLASS_SCALAR, HLSL_TYPE_INT, 1, 1);
                                 c->v.value.i[0] = $1;
                                 if (!($$ = make_list(&c->node)))
@@ -2013,7 +2065,7 @@ primary_expr:             C_FLOAT
                                     YYABORT;
                                 }
                                 c->node.type = HLSL_IR_CONSTANT;
-                                c->node.loc = get_location(&yylloc);
+                                c->node.loc = get_location(&@1);
                                 c->node.data_type = new_hlsl_type(d3dcompiler_strdup("bool"), HLSL_CLASS_SCALAR, HLSL_TYPE_BOOL, 1, 1);
                                 c->v.value.b[0] = $1;
                                 if (!($$ = make_list(&c->node)))
@@ -2062,7 +2114,7 @@ postfix_expr:             primary_expr
                                 }
                                 inc = new_unary_expr(HLSL_IR_UNOP_POSTINC, node_from_list($1), loc);
                                 /* Post increment/decrement expressions are considered const */
-                                inc->data_type = clone_hlsl_type(inc->data_type);
+                                inc->data_type = clone_hlsl_type(inc->data_type, 0);
                                 inc->data_type->modifiers |= HLSL_MODIFIER_CONST;
                                 $$ = append_unop($1, inc);
                             }
@@ -2079,7 +2131,7 @@ postfix_expr:             primary_expr
                                 }
                                 inc = new_unary_expr(HLSL_IR_UNOP_POSTDEC, node_from_list($1), loc);
                                 /* Post increment/decrement expressions are considered const */
-                                inc->data_type = clone_hlsl_type(inc->data_type);
+                                inc->data_type = clone_hlsl_type(inc->data_type, 0);
                                 inc->data_type->modifiers |= HLSL_MODIFIER_CONST;
                                 $$ = append_unop($1, inc);
                             }

@@ -711,7 +711,7 @@ unsigned int __cdecl _Random_device(void)
 #endif
 
 #if _MSVCP_VER >= 110
-#if defined(__i386__) && !defined(__MINGW32__)
+#ifdef __ASM_USE_THISCALL_WRAPPER
 
 extern void *call_thiscall_func;
 __ASM_GLOBAL_FUNC(call_thiscall_func,
@@ -2391,9 +2391,7 @@ void __thiscall _Concurrent_vector_base_v4__Internal_swap(
 }
 #endif
 
-#ifndef __GNUC__
-void __asm_dummy_vtables(void) {
-#endif
+__ASM_BLOCK_BEGIN(vtables)
 #if _MSVCP_VER == 100
     __ASM_VTABLE(iostream_category,
             VTABLE_ADD_FUNC(custom_category_vector_dtor)
@@ -2434,9 +2432,7 @@ void __asm_dummy_vtables(void) {
     __ASM_VTABLE(_Pad,
             VTABLE_ADD_FUNC(_Pad__Go));
 #endif
-#ifndef __GNUC__
-}
-#endif
+__ASM_BLOCK_END
 
 /*********************************************************************
  *  __crtInitializeCriticalSectionEx (MSVCP140.@)

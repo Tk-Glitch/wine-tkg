@@ -2331,12 +2331,74 @@ typedef struct _PS_ATTRIBUTE_LIST {
  *
  * Those are not part of standard Winternl.h
  */
-typedef struct _LDR_MODULE
+
+typedef struct _LDR_SERVICE_TAG_RECORD
 {
-    LIST_ENTRY          InLoadOrderModuleList;
-    LIST_ENTRY          InMemoryOrderModuleList;
-    LIST_ENTRY          InInitializationOrderModuleList;
-    void*               BaseAddress;
+    struct _LDR_SERVICE_TAG_RECORD *Next;
+    ULONG ServiceTag;
+} LDR_SERVICE_TAG_RECORD, *PLDR_SERVICE_TAG_RECORD;
+
+typedef struct _LDRP_CSLIST
+{
+    SINGLE_LIST_ENTRY *Tail;
+} LDRP_CSLIST, *PLDRP_CSLIST;
+
+typedef enum _LDR_DDAG_STATE
+{
+    LdrModulesMerged = -5,
+    LdrModulesInitError = -4,
+    LdrModulesSnapError = -3,
+    LdrModulesUnloaded = -2,
+    LdrModulesUnloading = -1,
+    LdrModulesPlaceHolder = 0,
+    LdrModulesMapping = 1,
+    LdrModulesMapped = 2,
+    LdrModulesWaitingForDependencies = 3,
+    LdrModulesSnapping = 4,
+    LdrModulesSnapped = 5,
+    LdrModulesCondensed = 6,
+    LdrModulesReadyToInit = 7,
+    LdrModulesInitializing = 8,
+    LdrModulesReadyToRun = 9,
+} LDR_DDAG_STATE;
+
+typedef struct _LDR_DDAG_NODE
+{
+    LIST_ENTRY Modules;
+    LDR_SERVICE_TAG_RECORD *ServiceTagList;
+    ULONG LoadCount;
+    ULONG ReferenceCount;
+    ULONG DependencyCount;
+    union
+    {
+        LDRP_CSLIST Dependencies;
+        SINGLE_LIST_ENTRY RemovalLink;
+    };
+    LDRP_CSLIST IncomingDependencies;
+    LDR_DDAG_STATE State;
+    SINGLE_LIST_ENTRY CondenseLink;
+    ULONG PreorderNumber;
+    ULONG LowestLink;
+} LDR_DDAG_NODE, *PLDR_DDAG_NODE;
+
+typedef enum _LDR_DLL_LOAD_REASON
+{
+    LoadReasonStaticDependency,
+    LoadReasonStaticForwarderDependency,
+    LoadReasonDynamicForwarderDependency,
+    LoadReasonDelayloadDependency,
+    LoadReasonDynamicLoad,
+    LoadReasonAsImageLoad,
+    LoadReasonAsDataLoad,
+    LoadReasonUnknown = -1
+} LDR_DLL_LOAD_REASON, *PLDR_DLL_LOAD_REASON;
+
+typedef struct _LDR_DATA_TABLE_ENTRY
+{
+    LIST_ENTRY          InLoadOrderLinks;
+    LIST_ENTRY          InMemoryOrderLinks;
+    LIST_ENTRY          InInitializationOrderLinks;
+    void*               DllBase;
     void*               EntryPoint;
     ULONG               SizeOfImage;
     UNICODE_STRING      FullDllName;
@@ -2348,17 +2410,21 @@ typedef struct _LDR_MODULE
     LIST_ENTRY          HashLinks;
     ULONG               TimeDateStamp;
     HANDLE              ActivationContext;
-    PVOID               PatchInformation;
-    LIST_ENTRY          ForwarderLinks;
-    LIST_ENTRY          ServiceTagLinks;
-    LIST_ENTRY          StaticLinks;
-    PVOID               ContextInformation;
+    void*               Lock;
+    LDR_DDAG_NODE*      DdagNode;
+    LIST_ENTRY          NodeModuleLink;
+    struct _LDRP_LOAD_CONTEXT *LoadContext;
+    void*               ParentDllBase;
+    void*               SwitchBackContext;
+    RTL_BALANCED_NODE   BaseAddressIndexNode;
+    RTL_BALANCED_NODE   MappingInfoIndexNode;
     ULONG_PTR           OriginalBase;
     LARGE_INTEGER       LoadTime;
-
-    /* Not part of Win7 but used by Wine */
-    HANDLE              SectionHandle;
-} LDR_MODULE, *PLDR_MODULE;
+    ULONG               BaseNameHashValue;
+    LDR_DLL_LOAD_REASON LoadReason;
+    ULONG               ImplicitPathOptions;
+    ULONG               ReferenceCount;
+} LDR_DATA_TABLE_ENTRY, *PLDR_DATA_TABLE_ENTRY;
 
 typedef struct _LDR_DLL_LOADED_NOTIFICATION_DATA
 {
@@ -2386,7 +2452,7 @@ typedef union _LDR_DLL_NOTIFICATION_DATA
 
 typedef void (CALLBACK *PLDR_DLL_NOTIFICATION_FUNCTION)(ULONG, LDR_DLL_NOTIFICATION_DATA*, void*);
 
-/* those defines are (some of the) regular LDR_MODULE.Flags values */
+/* those defines are (some of the) regular LDR_DATA_TABLE_ENTRY.Flags values */
 #define LDR_IMAGE_IS_DLL                0x00000004
 #define LDR_LOAD_IN_PROGRESS            0x00001000
 #define LDR_UNLOAD_IN_PROGRESS          0x00002000
@@ -2446,6 +2512,8 @@ typedef struct _SYSTEM_MODULE_INFORMATION_EX
 
 typedef LONG (CALLBACK *PRTL_EXCEPTION_FILTER)(PEXCEPTION_POINTERS);
 
+typedef void (CALLBACK *PTP_IO_CALLBACK)(PTP_CALLBACK_INSTANCE,void*,void*,IO_STATUS_BLOCK*,PTP_IO);
+
 /***********************************************************************
  * Function declarations
  */
@@ -2460,7 +2528,7 @@ NTSYSAPI NTSTATUS  WINAPI LdrAccessResource(HMODULE,const IMAGE_RESOURCE_DATA_EN
 NTSYSAPI NTSTATUS  WINAPI LdrAddDllDirectory(const UNICODE_STRING*,void**);
 NTSYSAPI NTSTATUS  WINAPI LdrAddRefDll(ULONG,HMODULE);
 NTSYSAPI NTSTATUS  WINAPI LdrDisableThreadCalloutsForDll(HMODULE);
-NTSYSAPI NTSTATUS  WINAPI LdrFindEntryForAddress(const void*, PLDR_MODULE*);
+NTSYSAPI NTSTATUS  WINAPI LdrFindEntryForAddress(const void*, PLDR_DATA_TABLE_ENTRY*);
 NTSYSAPI NTSTATUS  WINAPI LdrFindResourceDirectory_U(HMODULE,const LDR_RESOURCE_INFO*,ULONG,const IMAGE_RESOURCE_DIRECTORY**);
 NTSYSAPI NTSTATUS  WINAPI LdrFindResource_U(HMODULE,const LDR_RESOURCE_INFO*,ULONG,const IMAGE_RESOURCE_DATA_ENTRY**);
 NTSYSAPI NTSTATUS  WINAPI LdrGetDllDirectory(UNICODE_STRING*);
@@ -3109,6 +3177,7 @@ NTSYSAPI NTSTATUS  WINAPI RtlLargeIntegerToChar(const ULONGLONG *,ULONG,ULONG,PC
 /* Threadpool functions */
 
 NTSYSAPI NTSTATUS  WINAPI TpAllocCleanupGroup(TP_CLEANUP_GROUP **);
+NTSYSAPI NTSTATUS  WINAPI TpAllocIoCompletion(TP_IO **,HANDLE,PTP_IO_CALLBACK,void *,TP_CALLBACK_ENVIRON *);
 NTSYSAPI NTSTATUS  WINAPI TpAllocPool(TP_POOL **,PVOID);
 NTSYSAPI NTSTATUS  WINAPI TpAllocTimer(TP_TIMER **,PTP_TIMER_CALLBACK,PVOID,TP_CALLBACK_ENVIRON *);
 NTSYSAPI NTSTATUS  WINAPI TpAllocWait(TP_WAIT **,PTP_WAIT_CALLBACK,PVOID,TP_CALLBACK_ENVIRON *);
@@ -3119,23 +3188,26 @@ NTSYSAPI void      WINAPI TpCallbackReleaseMutexOnCompletion(TP_CALLBACK_INSTANC
 NTSYSAPI void      WINAPI TpCallbackReleaseSemaphoreOnCompletion(TP_CALLBACK_INSTANCE *,HANDLE,DWORD);
 NTSYSAPI void      WINAPI TpCallbackSetEventOnCompletion(TP_CALLBACK_INSTANCE *,HANDLE);
 NTSYSAPI void      WINAPI TpCallbackUnloadDllOnCompletion(TP_CALLBACK_INSTANCE *,HMODULE);
+NTSYSAPI void      WINAPI TpCancelAsyncIoOperation(TP_IO *);
 NTSYSAPI void      WINAPI TpDisassociateCallback(TP_CALLBACK_INSTANCE *);
 NTSYSAPI BOOL      WINAPI TpIsTimerSet(TP_TIMER *);
 NTSYSAPI void      WINAPI TpPostWork(TP_WORK *);
 NTSYSAPI NTSTATUS  WINAPI TpQueryPoolStackInformation(TP_POOL *, TP_POOL_STACK_INFORMATION *stack_info);
 NTSYSAPI void      WINAPI TpReleaseCleanupGroup(TP_CLEANUP_GROUP *);
 NTSYSAPI void      WINAPI TpReleaseCleanupGroupMembers(TP_CLEANUP_GROUP *,BOOL,PVOID);
+NTSYSAPI void      WINAPI TpReleaseIoCompletion(TP_IO *);
 NTSYSAPI void      WINAPI TpReleasePool(TP_POOL *);
 NTSYSAPI void      WINAPI TpReleaseTimer(TP_TIMER *);
 NTSYSAPI void      WINAPI TpReleaseWait(TP_WAIT *);
 NTSYSAPI void      WINAPI TpReleaseWork(TP_WORK *);
-NTSYSAPI void      WINAPI TpStartAsyncIoOperation(TP_IO *);
 NTSYSAPI void      WINAPI TpSetPoolMaxThreads(TP_POOL *,DWORD);
 NTSYSAPI BOOL      WINAPI TpSetPoolMinThreads(TP_POOL *,DWORD);
 NTSYSAPI NTSTATUS  WINAPI TpSetPoolStackInformation(TP_POOL *, TP_POOL_STACK_INFORMATION *stack_info);
 NTSYSAPI void      WINAPI TpSetTimer(TP_TIMER *, LARGE_INTEGER *,LONG,LONG);
 NTSYSAPI void      WINAPI TpSetWait(TP_WAIT *,HANDLE,LARGE_INTEGER *);
 NTSYSAPI NTSTATUS  WINAPI TpSimpleTryPost(PTP_SIMPLE_CALLBACK,PVOID,TP_CALLBACK_ENVIRON *);
+NTSYSAPI void      WINAPI TpStartAsyncIoOperation(TP_IO *);
+NTSYSAPI void      WINAPI TpWaitForIoCompletion(TP_IO *,BOOL);
 NTSYSAPI void      WINAPI TpWaitForTimer(TP_TIMER *,BOOL);
 NTSYSAPI void      WINAPI TpWaitForWait(TP_WAIT *,BOOL);
 NTSYSAPI void      WINAPI TpWaitForWork(TP_WORK *,BOOL);

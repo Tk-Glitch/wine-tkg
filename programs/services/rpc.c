@@ -60,8 +60,7 @@ typedef enum
     SC_HTYPE_DONT_CARE = 0,
     SC_HTYPE_MANAGER,
     SC_HTYPE_SERVICE,
-    SC_HTYPE_NOTIFY,
-    SC_HTYPE_DEV_NOTIFY
+    SC_HTYPE_NOTIFY
 } SC_HANDLE_TYPE;
 
 struct sc_handle
@@ -83,23 +82,6 @@ struct sc_notify_handle
     DWORD notify_mask;
     LONG ref;
     SC_RPC_NOTIFY_PARAMS_LIST *params_list;
-};
-
-struct devnotify_event
-{
-    struct list entry;
-    DWORD code;
-    BYTE *data;
-    DWORD data_size;
-};
-
-struct sc_dev_notify_handle
-{
-    struct sc_handle hdr;
-    struct list entry;
-    HANDLE event;
-    CRITICAL_SECTION cs;
-    struct list event_list;
 };
 
 struct sc_service_handle       /* service handle */
@@ -135,9 +117,6 @@ struct sc_lock
 static const WCHAR emptyW[] = {0};
 static PTP_CLEANUP_GROUP cleanup_group;
 HANDLE exit_event;
-
-static struct list devnotify_listeners = LIST_INIT(devnotify_listeners);
-CRITICAL_SECTION device_notifications_cs;
 
 static void CALLBACK group_cancel_callback(void *object, void *userdata)
 {
@@ -286,15 +265,6 @@ static DWORD validate_notify_handle(SC_RPC_HANDLE handle, DWORD needed_access, s
     return err;
 }
 
-static DWORD validate_dev_notify_handle(SC_RPC_HANDLE handle, DWORD needed_access, struct sc_dev_notify_handle **notify)
-{
-    struct sc_handle *hdr;
-    DWORD err = validate_context_handle(handle, SC_HTYPE_DEV_NOTIFY, needed_access, &hdr);
-    if (err == ERROR_SUCCESS)
-        *notify = (struct sc_dev_notify_handle *)hdr;
-    return err;
-}
-
 DWORD __cdecl svcctl_OpenSCManagerW(
     MACHINE_HANDLEW MachineName, /* Note: this parameter is ignored */
     LPCWSTR DatabaseName,
@@ -352,28 +322,6 @@ static void SC_RPC_HANDLE_destroy(SC_RPC_HANDLE handle)
             service_unlock(service->service_entry);
             release_service(service->service_entry);
             HeapFree(GetProcessHeap(), 0, service);
-            break;
-        }
-        case SC_HTYPE_DEV_NOTIFY:
-        {
-            struct devnotify_event *event, *next;
-            struct sc_dev_notify_handle *listener = (struct sc_dev_notify_handle *)hdr;
-
-            /* Destroy this handle and stop sending events to this caller */
-            EnterCriticalSection(&device_notifications_cs);
-            WINE_TRACE("Removing device notification listener from list (%p)\n", listener);
-            list_remove(&listener->entry);
-            LeaveCriticalSection(&device_notifications_cs);
-
-            LIST_FOR_EACH_ENTRY_SAFE(event, next, &listener->event_list, struct devnotify_event, entry)
-            {
-                list_remove(&event->entry);
-                MIDL_user_free(event->data);
-                HeapFree(GetProcessHeap(), 0, event);
-            }
-
-            CloseHandle(listener->event);
-            HeapFree(GetProcessHeap(), 0, listener);
             break;
         }
         default:
@@ -1417,55 +1365,23 @@ DWORD __cdecl svcctl_CloseServiceHandle(
     return ERROR_SUCCESS;
 }
 
-static void SC_RPC_LOCK_destroy(SC_RPC_LOCK hLock)
-{
-    struct sc_lock *lock = hLock;
-    scmdatabase_unlock_startup(lock->db);
-    HeapFree(GetProcessHeap(), 0, lock);
-}
-
 void __RPC_USER SC_RPC_LOCK_rundown(SC_RPC_LOCK hLock)
 {
-    SC_RPC_LOCK_destroy(hLock);
 }
 
-DWORD __cdecl svcctl_LockServiceDatabase(
-    SC_RPC_HANDLE hSCManager,
-    SC_RPC_LOCK *phLock)
+DWORD __cdecl svcctl_LockServiceDatabase(SC_RPC_HANDLE manager, SC_RPC_LOCK *lock)
 {
-    struct sc_manager_handle *manager;
-    struct sc_lock *lock;
-    DWORD err;
+    TRACE("(%p, %p)\n", manager, lock);
 
-    WINE_TRACE("(%p, %p)\n", hSCManager, phLock);
-
-    if ((err = validate_scm_handle(hSCManager, SC_MANAGER_LOCK, &manager)) != ERROR_SUCCESS)
-        return err;
-
-    if (!scmdatabase_lock_startup(manager->db, 0))
-        return ERROR_SERVICE_DATABASE_LOCKED;
-
-    lock = HeapAlloc(GetProcessHeap(), 0, sizeof(struct sc_lock));
-    if (!lock)
-    {
-        scmdatabase_unlock_startup(manager->db);
-        return ERROR_NOT_ENOUGH_SERVER_MEMORY;
-    }
-
-    lock->db = manager->db;
-    *phLock = lock;
-
+    *lock = (SC_RPC_LOCK)0xdeadbeef;
     return ERROR_SUCCESS;
 }
 
-DWORD __cdecl svcctl_UnlockServiceDatabase(
-    SC_RPC_LOCK *phLock)
+DWORD __cdecl svcctl_UnlockServiceDatabase(SC_RPC_LOCK *lock)
 {
-    WINE_TRACE("(&%p)\n", *phLock);
+    TRACE("(&%p)\n", *lock);
 
-    SC_RPC_LOCK_destroy(*phLock);
-    *phLock = NULL;
-
+    *lock = NULL;
     return ERROR_SUCCESS;
 }
 
@@ -2189,122 +2105,11 @@ DWORD __cdecl svcctl_QueryServiceConfig2A(
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_OpenDeviceNotificationHandle(
-    MACHINE_HANDLEW MachineName, /* Note: this parameter is ignored */
-    SC_DEV_NOTIFY_RPC_HANDLE *handle)
-{
-    struct sc_dev_notify_handle *listener;
-
-    if (!(listener = HeapAlloc(GetProcessHeap(), 0, sizeof(*listener))))
-        return ERROR_NOT_ENOUGH_SERVER_MEMORY;
-
-    listener->hdr.type = SC_HTYPE_DEV_NOTIFY;
-    listener->hdr.access = 0;
-
-    InitializeCriticalSection(&listener->cs);
-    listener->event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    list_init(&listener->event_list);
-
-    WINE_TRACE("Adding listener to list (%p)\n", listener);
-    EnterCriticalSection(&device_notifications_cs);
-    list_add_tail(&devnotify_listeners, &listener->entry);
-    LeaveCriticalSection(&device_notifications_cs);
-
-    *handle = &listener->hdr;
-    return ERROR_SUCCESS;
-}
-
-DWORD __cdecl svcctl_GetDeviceNotificationResults(
-    SC_DEV_NOTIFY_RPC_HANDLE handle,
-    LPDWORD code,
-    BYTE **event_dest,
-    LPDWORD event_dest_size)
-{
-    struct devnotify_event *event;
-    struct sc_dev_notify_handle *listener;
-    DWORD err;
-
-    if ((err = validate_dev_notify_handle(handle, 0, &listener)) != 0)
-        return err;
-
-    if (!event_dest || !event_dest_size || !code)
-        return ERROR_INVALID_PARAMETER;
-
-    do
-    {
-        /* block until there is a result */
-        WaitForSingleObject(listener->event, INFINITE);
-
-        EnterCriticalSection(&listener->cs);
-        if ((event = LIST_ENTRY(list_head(&listener->event_list), struct devnotify_event, entry)))
-            list_remove(&event->entry);
-        else
-            ResetEvent(listener->event);
-        LeaveCriticalSection(&listener->cs);
-    } while (!event);
-
-    WINE_TRACE("Got an event (%p)\n", event);
-    *code = event->code;
-
-    *event_dest = event->data;
-    *event_dest_size = event->data_size;
-
-    HeapFree(GetProcessHeap(), 0, event);
-    return ERROR_SUCCESS;
-}
-
-DWORD __cdecl svcctl_SendDeviceNotification(
-    MACHINE_HANDLEW MachineName, /* Note: this parameter is ignored */
-    DWORD code,
-    const BYTE *event_buf,
-    DWORD event_buf_size)
-{
-    struct sc_dev_notify_handle *listener;
-    struct devnotify_event *event;
-
-    if (!event_buf)
-        return ERROR_INVALID_PARAMETER;
-
-    EnterCriticalSection(&device_notifications_cs);
-    LIST_FOR_EACH_ENTRY(listener, &devnotify_listeners, struct sc_dev_notify_handle, entry)
-    {
-        WINE_TRACE("Triggering listener %p\n", listener);
-
-        event = HeapAlloc(GetProcessHeap(), 0, sizeof(struct devnotify_event));
-        if (event)
-            event->data = MIDL_user_allocate(event_buf_size);
-
-        if (!event || !event->data)
-        {
-            HeapFree(GetProcessHeap(), 0, event);
-
-            LeaveCriticalSection(&device_notifications_cs);
-            return ERROR_NOT_ENOUGH_SERVER_MEMORY;
-        }
-
-        event->code = code;
-        memcpy(event->data, event_buf, event_buf_size);
-        event->data_size = event_buf_size;
-
-        EnterCriticalSection(&listener->cs);
-        list_add_tail(&listener->event_list, &event->entry);
-        LeaveCriticalSection(&listener->cs);
-
-        SetEvent(listener->event);
-    }
-    WINE_TRACE("Done triggering registrations\n");
-    LeaveCriticalSection(&device_notifications_cs);
-
-    return ERROR_SUCCESS;
-}
-
 DWORD RPC_Init(void)
 {
     WCHAR transport[] = SVCCTL_TRANSPORT;
     WCHAR endpoint[] = SVCCTL_ENDPOINT;
     DWORD err;
-
-    InitializeCriticalSection(&device_notifications_cs);
 
     if (!(cleanup_group = CreateThreadpoolCleanupGroup()))
     {
@@ -2351,10 +2156,6 @@ void __RPC_USER SC_RPC_HANDLE_rundown(SC_RPC_HANDLE handle)
 }
 
 void __RPC_USER SC_NOTIFY_RPC_HANDLE_rundown(SC_NOTIFY_RPC_HANDLE handle)
-{
-}
-
-void __RPC_USER SC_DEV_NOTIFY_RPC_HANDLE_rundown(SC_DEV_NOTIFY_RPC_HANDLE handle)
 {
 }
 

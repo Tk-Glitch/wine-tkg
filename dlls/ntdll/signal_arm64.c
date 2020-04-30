@@ -111,7 +111,6 @@ static DWORD64 get_fault_esr( ucontext_t *sigcontext )
 #endif /* linux */
 
 static const size_t teb_size = 0x2000;  /* we reserve two pages for the TEB */
-static const size_t signal_stack_size = max( MINSIGSTKSZ, 8192 );
 
 /* stack layout when calling an exception raise function */
 struct stack_layout
@@ -597,8 +596,10 @@ static NTSTATUS libunwind_virtual_unwind( ULONG_PTR ip, ULONG_PTR *frame, CONTEX
           context->u.s.X24, context->u.s.X25, context->u.s.X26, context->u.s.X27 );
     TRACE(" x28=%016lx  fp=%016lx  lr=%016lx  sp=%016lx\n",
           context->u.s.X28, context->u.s.Fp, context->u.s.Lr, context->Sp );
-#endif
     return STATUS_SUCCESS;
+#else
+    return STATUS_INVALID_DISPOSITION;
+#endif
 }
 
 
@@ -607,7 +608,7 @@ static NTSTATUS libunwind_virtual_unwind( ULONG_PTR ip, ULONG_PTR *frame, CONTEX
  */
 static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context )
 {
-    LDR_MODULE *module;
+    LDR_DATA_TABLE_ENTRY *module;
     NTSTATUS status;
 
     dispatch->ImageBase        = 0;
@@ -645,7 +646,11 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
             return STATUS_SUCCESS;
         }
     }
-    else WARN( "exception data not found in %s\n", debugstr_w(module->BaseDllName.Buffer) );
+    else
+    {
+        WARN( "exception data not found in %s\n", debugstr_w(module->BaseDllName.Buffer) );
+        return STATUS_INVALID_DISPOSITION;
+    }
 
     dispatch->EstablisherFrame = context->u.s.Fp;
     dispatch->LanguageHandler = NULL;
@@ -1245,22 +1250,20 @@ int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 
 
 /**********************************************************************
+ *             signal_init_threading
+ */
+void signal_init_threading(void)
+{
+    pthread_key_create( &teb_key, NULL );
+}
+
+
+/**********************************************************************
  *             signal_alloc_thread
  */
-NTSTATUS signal_alloc_thread( TEB **teb )
+NTSTATUS signal_alloc_thread( TEB *teb )
 {
-    SIZE_T size;
-    NTSTATUS status;
-
-    size = teb_size + max( MINSIGSTKSZ, 8192 );
-    *teb = NULL;
-    if (!(status = virtual_alloc_aligned( (void **)teb, 0, &size, MEM_COMMIT | MEM_TOP_DOWN,
-                                          PAGE_READWRITE, 13 )))
-    {
-        (*teb)->Tib.Self = &(*teb)->Tib;
-        (*teb)->Tib.ExceptionList = (void *)~0UL;
-    }
-    return status;
+    return STATUS_SUCCESS;
 }
 
 
@@ -1269,9 +1272,6 @@ NTSTATUS signal_alloc_thread( TEB **teb )
  */
 void signal_free_thread( TEB *teb )
 {
-    SIZE_T size = 0;
-
-    NtFreeVirtualMemory( NtCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
 }
 
 
@@ -1280,14 +1280,7 @@ void signal_free_thread( TEB *teb )
  */
 void signal_init_thread( TEB *teb )
 {
-    static BOOL init_done;
     stack_t ss;
-
-    if (!init_done)
-    {
-        pthread_key_create( &teb_key, NULL );
-        init_done = TRUE;
-    }
 
     ss.ss_sp    = (char *)teb + teb_size;
     ss.ss_size  = signal_stack_size;

@@ -235,8 +235,12 @@ static void do_search(const struct search *s)
     trace("search DN %s\n", wine_dbgstr_w(s->dn));
 
     hr = ADsGetObject(s->dn, &IID_IDirectorySearch, (void **)&ds);
+    if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
+    {
+        skip("server is down\n");
+        return;
+    }
     ok(hr == S_OK, "got %#x\n", hr);
-    if (hr != S_OK) return;
 
     pref.dwSearchPref = ADS_SEARCHPREF_SEARCH_SCOPE;
     pref.vValue.dwType = ADSTYPE_INTEGER;
@@ -282,6 +286,7 @@ static void do_search(const struct search *s)
 
             ok(!res->values[i], "expected extra value %s\n", wine_dbgstr_w(res->values[i]));
 
+            IDirectorySearch_FreeColumn(ds, &col);
             FreeADsMem(name);
             res++;
         }
@@ -350,6 +355,11 @@ static void test_DirectorySearch(void)
     ok(hr == E_NOINTERFACE, "got %#x\n", hr);
 
     hr = ADsGetObject(L"LDAP://ldap.forumsys.com/rootDSE", &IID_IDirectorySearch, (void **)&ds);
+    if (hr == HRESULT_FROM_WIN32(ERROR_DS_SERVER_DOWN))
+    {
+        skip("server is down\n");
+        return;
+    }
     ok(hr == E_NOINTERFACE, "got %#x\n", hr);
 
     hr = ADsGetObject(L"LDAP://ldap.forumsys.com", &IID_IDirectorySearch, (void **)&ds);
@@ -480,6 +490,7 @@ static void test_DirectoryObject(void)
     hr = IDirectoryObject_QueryInterface(dirobj, &IID_IADsOpenDSObject, (void **)&unk);
 todo_wine
     ok(hr == E_NOINTERFACE, "got %#x\n", hr);
+    if (hr == S_OK) IUnknown_Release(unk);
     hr = IDirectoryObject_QueryInterface(dirobj, &IID_IDispatch, (void **)&unk);
     ok(hr == S_OK, "got %#x\n", hr);
     IUnknown_Release(unk);
@@ -514,6 +525,25 @@ todo_wine
 
     hr = IDirectorySearch_CloseSearchHandle(ds, sh);
     ok(hr == S_OK, "got %#x\n", hr);
+
+    pref[0].dwSearchPref = ADS_SEARCHPREF_TOMBSTONE;
+    pref[0].vValue.dwType = ADSTYPE_BOOLEAN;
+    pref[0].vValue.Integer = 1;
+    pref[0].dwStatus = 0xdeadbeef;
+    hr = IDirectorySearch_SetSearchPreference(ds, pref, 1);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(pref[0].dwStatus == ADS_STATUS_S_OK, "got %d\n", pref[0].dwStatus);
+
+    hr = IDirectorySearch_ExecuteSearch(ds, (WCHAR *)L"(objectClass=*)", NULL, ~0, &sh);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_DS_UNAVAILABLE_CRIT_EXTENSION) || broken(hr == S_OK) /* XP */, "got %#x\n", hr);
+    if (hr == S_OK)
+    {
+        hr = IDirectorySearch_GetNextRow(ds, sh);
+        ok(hr == HRESULT_FROM_WIN32(ERROR_DS_UNAVAILABLE_CRIT_EXTENSION), "got %#x\n", hr);
+
+        hr = IDirectorySearch_CloseSearchHandle(ds, sh);
+        ok(hr == S_OK, "got %#x\n", hr);
+    }
 
     IDirectorySearch_Release(ds);
     IDirectoryObject_Release(dirobj);

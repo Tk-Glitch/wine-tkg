@@ -1176,6 +1176,20 @@ static void test_SetThreadContext(void)
     CloseHandle( thread );
 }
 
+static void test_GetThreadContext(void)
+{
+    CONTEXT ctx;
+    BOOL ret;
+
+    memset(&ctx, 0xcc, sizeof(ctx));
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    ret = GetThreadContext(GetCurrentThread(), &ctx);
+    ok(ret, "GetThreadContext failed: %u\n", GetLastError());
+    ok(ctx.ContextFlags == CONTEXT_DEBUG_REGISTERS, "ContextFlags = %x\n", ctx.ContextFlags);
+    ok(!ctx.Dr0, "Dr0 = %x\n", ctx.Dr0);
+    ok(!ctx.Dr1, "Dr0 = %x\n", ctx.Dr0);
+}
+
 static void test_GetThreadSelectorEntry(void)
 {
     LDT_ENTRY entry;
@@ -2435,7 +2449,6 @@ START_TEST(thread)
        }
        return;
    }
-
    test_thread_info();
    test_reserved_tls();
    test_CreateRemoteThread();
@@ -2453,6 +2466,7 @@ START_TEST(thread)
 #ifdef __i386__
    test_SetThreadContext();
    test_GetThreadSelectorEntry();
+   test_GetThreadContext();
    test_NtSetLdtEntries();
 #endif
    test_QueueUserWorkItem();
@@ -2463,6 +2477,5 @@ START_TEST(thread)
    test_thread_fpu_cw();
    test_thread_actctx();
    test_thread_description();
-
    test_threadpool();
 }

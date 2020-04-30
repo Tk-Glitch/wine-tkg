@@ -290,7 +290,6 @@ enum i386_trap_code
 };
 
 static const size_t teb_size = 0x2000;  /* we reserve two pages for the TEB */
-static size_t signal_stack_size;
 
 typedef void (*raise_func)( EXCEPTION_RECORD *rec, CONTEXT *context );
 
@@ -1587,7 +1586,7 @@ static NTSTATUS libunwind_virtual_unwind( ULONG64 ip, BOOL* got_info, ULONG64 *f
  */
 static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context )
 {
-    LDR_MODULE *module;
+    LDR_DATA_TABLE_ENTRY *module;
     NTSTATUS status;
 
     dispatch->ImageBase = 0;
@@ -2891,6 +2890,29 @@ static inline BOOL handle_interrupt( ucontext_t *sigcontext, struct stack_layout
 
 
 /**********************************************************************
+ *    segv_handler_early
+ *
+ * Handler for SIGSEGV and related errors. Used only during the initialization
+ * of the process to handle virtual faults.
+ */
+static void segv_handler_early( int signal, siginfo_t *siginfo, void *sigcontext )
+{
+    ucontext_t *ucontext = sigcontext;
+
+    switch(TRAP_sig(ucontext))
+    {
+    case TRAP_x86_PAGEFLT:  /* Page fault */
+        if (!virtual_handle_fault( siginfo->si_addr, (ERROR_sig(ucontext) >> 1) & 0x09, TRUE ))
+            return;
+        /* fall-through */
+    default:
+        WINE_ERR( "Got unexpected trap %lld during process initialization\n", TRAP_sig(ucontext) );
+        abort_thread(1);
+        break;
+    }
+}
+
+/**********************************************************************
  *		segv_handler
  *
  * Handler for SIGSEGV and related errors.
@@ -3159,34 +3181,20 @@ int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 
 
 /**********************************************************************
+ *             signal_init_threading
+ */
+void signal_init_threading(void)
+{
+}
+
+
+/**********************************************************************
  *		signal_alloc_thread
  */
-NTSTATUS signal_alloc_thread( TEB **teb )
+NTSTATUS signal_alloc_thread( TEB *teb )
 {
-    static size_t sigstack_alignment;
-    SIZE_T size;
-    NTSTATUS status;
-
-    if (!sigstack_alignment)
-    {
-        size_t min_size = teb_size + max( MINSIGSTKSZ, 8192 );
-        /* find the first power of two not smaller than min_size */
-        sigstack_alignment = 12;
-        while ((1u << sigstack_alignment) < min_size) sigstack_alignment++;
-        signal_stack_size = (1 << sigstack_alignment) - teb_size;
-        assert( sizeof(TEB) <= teb_size );
-    }
-
-    size = 1 << sigstack_alignment;
-    *teb = NULL;
-    if (!(status = virtual_alloc_aligned( (void **)teb, 0, &size, MEM_COMMIT | MEM_TOP_DOWN,
-                                          PAGE_READWRITE, sigstack_alignment )))
-    {
-        (*teb)->Tib.Self = &(*teb)->Tib;
-        (*teb)->Tib.ExceptionList = (void *)~0UL;
-        (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
-    }
-    return status;
+    teb->WOW32Reserved = __wine_syscall_dispatcher;
+    return STATUS_SUCCESS;
 }
 
 
@@ -3195,9 +3203,6 @@ NTSTATUS signal_alloc_thread( TEB **teb )
  */
 void signal_free_thread( TEB *teb )
 {
-    SIZE_T size = 0;
-
-    NtFreeVirtualMemory( NtCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
 }
 
 #ifdef __APPLE__
@@ -3315,9 +3320,27 @@ void signal_init_thread( TEB *teb )
 #endif
 }
 
+#ifdef HAVE_SECCOMP
+static int sc_seccomp(unsigned int operation, unsigned int flags, void *args)
+{
+#ifndef __NR_seccomp
+#   define __NR_seccomp 317
+#endif
+    return syscall(__NR_seccomp, operation, flags, args);
+}
+#endif
+
 static void install_bpf(struct sigaction *sig_act)
 {
 #ifdef HAVE_SECCOMP
+#   ifndef SECCOMP_FILTER_FLAG_SPEC_ALLOW
+#       define SECCOMP_FILTER_FLAG_SPEC_ALLOW (1UL << 2)
+#   endif
+
+#   ifndef SECCOMP_SET_MODE_FILTER
+#       define SECCOMP_SET_MODE_FILTER 1
+#   endif
+    static const unsigned int flags = SECCOMP_FILTER_FLAG_SPEC_ALLOW;
     static struct sock_filter filter[] =
     {
        BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
@@ -3341,7 +3364,8 @@ static void install_bpf(struct sigaction *sig_act)
             exit(1);
         }
 
-        if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0))
+        if (sc_seccomp(SECCOMP_SET_MODE_FILTER, flags, &prog))
+
         {
             perror("prctl(PR_SET_SECCOMP, ...)");
             exit(1);
@@ -3409,6 +3433,23 @@ void signal_init_process(void)
  */
 void signal_init_early(void)
 {
+    struct sigaction sig_act;
+
+    sig_act.sa_mask = server_block_set;
+    sig_act.sa_flags = SA_RESTART | SA_SIGINFO | SA_ONSTACK;
+
+    sig_act.sa_sigaction = segv_handler_early;
+    if (sigaction( SIGSEGV, &sig_act, NULL ) == -1) goto error;
+    if (sigaction( SIGILL, &sig_act, NULL ) == -1) goto error;
+#ifdef SIGBUS
+    if (sigaction( SIGBUS, &sig_act, NULL ) == -1) goto error;
+#endif
+
+    return;
+
+ error:
+    perror("sigaction");
+    exit(1);
 }
 
 static ULONG64 get_int_reg( CONTEXT *context, int reg )

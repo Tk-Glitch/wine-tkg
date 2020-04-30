@@ -1755,7 +1755,7 @@ HRESULT CDECL wined3d_check_device_type(const struct wined3d *wined3d,
             debug_d3dformat(backbuffer_format), windowed);
 
     /* The task of this function is to check whether a certain display / backbuffer format
-     * combination is available on the given adapter. In fullscreen mode microsoft specified
+     * combination is available on the given output. In fullscreen mode microsoft specified
      * that the display format shouldn't provide alpha and that ignoring alpha the backbuffer
      * and display format should match exactly.
      * In windowed mode format conversion can occur and this depends on the driver. */
@@ -2088,9 +2088,9 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d_adapter *adapter,
     caps->MaxUserClipPlanes                = vertex_caps.max_user_clip_planes;
     caps->MaxActiveLights                  = vertex_caps.max_active_lights;
     caps->MaxVertexBlendMatrices           = vertex_caps.max_vertex_blend_matrices;
-    caps->MaxVertexBlendMatrixIndex        = vertex_caps.max_vertex_blend_matrix_index;
-    if (caps->DeviceType == WINED3D_DEVICE_TYPE_HAL)
-        caps->MaxVertexBlendMatrixIndex = min(caps->MaxVertexBlendMatrixIndex, 8);
+    caps->MaxVertexBlendMatrixIndex = caps->DeviceType == WINED3D_DEVICE_TYPE_HAL ? 0
+            : vertex_caps.max_vertex_blend_matrix_index;
+
     caps->VertexProcessingCaps             = vertex_caps.vertex_processing_caps;
     caps->FVFCaps                          = vertex_caps.fvf_caps;
     caps->RasterCaps                      |= vertex_caps.raster_caps;
@@ -2296,6 +2296,177 @@ HRESULT CDECL wined3d_device_create(struct wined3d *wined3d, struct wined3d_adap
     return WINED3D_OK;
 }
 
+static const struct wined3d_state_entry_template misc_state_template_no3d[] =
+{
+    {STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_VERTEX),   {STATE_VDECL}},
+    {STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_HULL),     {STATE_VDECL}},
+    {STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_DOMAIN),   {STATE_VDECL}},
+    {STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_GEOMETRY), {STATE_VDECL}},
+    {STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_PIXEL),    {STATE_VDECL}},
+    {STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_COMPUTE),  {STATE_VDECL}},
+    {STATE_GRAPHICS_SHADER_RESOURCE_BINDING,              {STATE_VDECL}},
+    {STATE_GRAPHICS_UNORDERED_ACCESS_VIEW_BINDING,        {STATE_VDECL}},
+    {STATE_COMPUTE_SHADER_RESOURCE_BINDING,               {STATE_VDECL}},
+    {STATE_COMPUTE_UNORDERED_ACCESS_VIEW_BINDING,         {STATE_VDECL}},
+    {STATE_STREAM_OUTPUT,                                 {STATE_VDECL}},
+    {STATE_BLEND,                                         {STATE_VDECL}},
+    {STATE_BLEND_FACTOR,                                  {STATE_VDECL}},
+    {STATE_STREAMSRC,                                     {STATE_VDECL}},
+    {STATE_VDECL,                                         {STATE_VDECL, state_nop}},
+    {STATE_RASTERIZER,                                    {STATE_VDECL}},
+    {STATE_SCISSORRECT,                                   {STATE_VDECL}},
+    {STATE_POINTSPRITECOORDORIGIN,                        {STATE_VDECL}},
+
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT00),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT01),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT10),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_MAT11),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT00),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT01),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT10),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_MAT11),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT00),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT01),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT10),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_MAT11),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT00),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT01),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT10),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_MAT11),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT00),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT01),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT10),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_MAT11),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT00),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT01),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT10),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_MAT11),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT00),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT01),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT10),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_MAT11),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT00),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT01),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT10),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_MAT11),    {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_LSCALE),   {STATE_VDECL}},
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_LOFFSET),  {STATE_VDECL}},
+
+    {STATE_VIEWPORT,                                      {STATE_VDECL}},
+    {STATE_INDEXBUFFER,                                   {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ANTIALIAS),                  {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_TEXTUREPERSPECTIVE),         {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ZENABLE),                    {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAPU),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAPV),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_LINEPATTERN),                {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_MONOENABLE),                 {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ROP2),                       {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_PLANEMASK),                  {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ZWRITEENABLE),               {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_LASTPIXEL),                  {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ZFUNC),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_DITHERENABLE),               {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_SUBPIXEL),                   {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_SUBPIXELX),                  {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_STIPPLEDALPHA),              {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_STIPPLEENABLE),              {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_MIPMAPLODBIAS),              {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ANISOTROPY),                 {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_FLUSHBATCH),                 {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_TRANSLUCENTSORTINDEPENDENT), {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_STENCILENABLE),              {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_STENCILFAIL),                {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_STENCILZFAIL),               {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_STENCILPASS),                {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_STENCILFUNC),                {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_STENCILREF),                 {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_STENCILMASK),                {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_STENCILWRITEMASK),           {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_TWOSIDEDSTENCILMODE),        {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_BACK_STENCILFAIL),           {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_BACK_STENCILZFAIL),          {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_BACK_STENCILPASS),           {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_BACK_STENCILFUNC),           {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP0),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP1),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP2),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP3),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP4),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP5),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP6),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP7),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP8),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP9),                      {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP10),                     {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP11),                     {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP12),                     {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP13),                     {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP14),                     {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_WRAP15),                     {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_EXTENTS),                    {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_COLORKEYBLENDENABLE),        {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_SOFTWAREVERTEXPROCESSING),   {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_PATCHEDGESTYLE),             {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_PATCHSEGMENTS),              {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_POSITIONDEGREE),             {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_NORMALDEGREE),               {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_MINTESSELLATIONLEVEL),       {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_MAXTESSELLATIONLEVEL),       {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ADAPTIVETESS_X),             {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ADAPTIVETESS_Y),             {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ADAPTIVETESS_Z),             {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ADAPTIVETESS_W),             {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ENABLEADAPTIVETESSELLATION), {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_MULTISAMPLEANTIALIAS),       {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_MULTISAMPLEMASK),            {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_DEBUGMONITORTOKEN),          {STATE_VDECL}},
+    {STATE_RENDER(WINED3D_RS_ZVISIBLE),                   {STATE_VDECL}},
+    /* Samplers */
+    {STATE_SAMPLER(0),                                    {STATE_VDECL}},
+    {STATE_SAMPLER(1),                                    {STATE_VDECL}},
+    {STATE_SAMPLER(2),                                    {STATE_VDECL}},
+    {STATE_SAMPLER(3),                                    {STATE_VDECL}},
+    {STATE_SAMPLER(4),                                    {STATE_VDECL}},
+    {STATE_SAMPLER(5),                                    {STATE_VDECL}},
+    {STATE_SAMPLER(6),                                    {STATE_VDECL}},
+    {STATE_SAMPLER(7),                                    {STATE_VDECL}},
+    {STATE_SAMPLER(8),                                    {STATE_VDECL}},
+    {STATE_SAMPLER(9),                                    {STATE_VDECL}},
+    {STATE_SAMPLER(10),                                   {STATE_VDECL}},
+    {STATE_SAMPLER(11),                                   {STATE_VDECL}},
+    {STATE_SAMPLER(12),                                   {STATE_VDECL}},
+    {STATE_SAMPLER(13),                                   {STATE_VDECL}},
+    {STATE_SAMPLER(14),                                   {STATE_VDECL}},
+    {STATE_SAMPLER(15),                                   {STATE_VDECL}},
+    {STATE_SAMPLER(16), /* Vertex sampler 0 */            {STATE_VDECL}},
+    {STATE_SAMPLER(17), /* Vertex sampler 1 */            {STATE_VDECL}},
+    {STATE_SAMPLER(18), /* Vertex sampler 2 */            {STATE_VDECL}},
+    {STATE_SAMPLER(19), /* Vertex sampler 3 */            {STATE_VDECL}},
+    {STATE_BASEVERTEXINDEX,                               {STATE_VDECL}},
+    {STATE_FRAMEBUFFER,                                   {STATE_VDECL}},
+    {STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),             {STATE_VDECL}},
+    {STATE_SHADER(WINED3D_SHADER_TYPE_HULL),              {STATE_VDECL}},
+    {STATE_SHADER(WINED3D_SHADER_TYPE_DOMAIN),            {STATE_VDECL}},
+    {STATE_SHADER(WINED3D_SHADER_TYPE_GEOMETRY),          {STATE_VDECL}},
+    {STATE_SHADER(WINED3D_SHADER_TYPE_COMPUTE),           {STATE_VDECL}},
+    {0}, /* Terminate */
+};
+
 static void adapter_no3d_destroy(struct wined3d_adapter *adapter)
 {
     wined3d_adapter_cleanup(adapter);
@@ -2408,7 +2579,7 @@ static void adapter_no3d_uninit_3d(struct wined3d_device *device)
 }
 
 static void *adapter_no3d_map_bo_address(struct wined3d_context *context,
-        const struct wined3d_bo_address *data, size_t size, uint32_t bind_flags, uint32_t map_flags)
+        const struct wined3d_bo_address *data, size_t size, uint32_t map_flags)
 {
     if (data->buffer_object)
     {
@@ -2419,16 +2590,15 @@ static void *adapter_no3d_map_bo_address(struct wined3d_context *context,
     return data->addr;
 }
 
-static void adapter_no3d_unmap_bo_address(struct wined3d_context *context, const struct wined3d_bo_address *data,
-        uint32_t bind_flags, unsigned int range_count, const struct wined3d_range *ranges)
+static void adapter_no3d_unmap_bo_address(struct wined3d_context *context,
+        const struct wined3d_bo_address *data, unsigned int range_count, const struct wined3d_range *ranges)
 {
     if (data->buffer_object)
         ERR("Unsupported buffer object %#lx.\n", data->buffer_object);
 }
 
 static void adapter_no3d_copy_bo_address(struct wined3d_context *context,
-        const struct wined3d_bo_address *dst, uint32_t dst_bind_flags,
-        const struct wined3d_bo_address *src, uint32_t src_bind_flags, size_t size)
+        const struct wined3d_bo_address *dst, const struct wined3d_bo_address *src, size_t size)
 {
     if (dst->buffer_object)
         ERR("Unsupported dst buffer object %#lx.\n", dst->buffer_object);
@@ -2674,6 +2844,18 @@ static void adapter_no3d_flush_context(struct wined3d_context *context)
     TRACE("context %p.\n", context);
 }
 
+static void adapter_no3d_draw_primitive(struct wined3d_device *device,
+        const struct wined3d_state *state, const struct wined3d_draw_parameters *parameters)
+{
+    ERR("device %p, state %p, parameters %p.\n", device, state, parameters);
+}
+
+static void adapter_no3d_dispatch_compute(struct wined3d_device *device,
+        const struct wined3d_state *state, const struct wined3d_dispatch_parameters *parameters)
+{
+    ERR("device %p, state %p, parameters %p.\n", device, state, parameters);
+}
+
 void adapter_no3d_clear_uav(struct wined3d_context *context,
         struct wined3d_unordered_access_view *view, const struct wined3d_uvec4 *clear_value)
 {
@@ -2682,36 +2864,38 @@ void adapter_no3d_clear_uav(struct wined3d_context *context,
 
 static const struct wined3d_adapter_ops wined3d_adapter_no3d_ops =
 {
-    adapter_no3d_destroy,
-    adapter_no3d_create_device,
-    adapter_no3d_destroy_device,
-    adapter_no3d_acquire_context,
-    adapter_no3d_release_context,
-    adapter_no3d_get_wined3d_caps,
-    adapter_no3d_check_format,
-    adapter_no3d_init_3d,
-    adapter_no3d_uninit_3d,
-    adapter_no3d_map_bo_address,
-    adapter_no3d_unmap_bo_address,
-    adapter_no3d_copy_bo_address,
-    adapter_no3d_create_swapchain,
-    adapter_no3d_destroy_swapchain,
-    adapter_no3d_create_buffer,
-    adapter_no3d_destroy_buffer,
-    adapter_no3d_create_texture,
-    adapter_no3d_destroy_texture,
-    adapter_no3d_create_rendertarget_view,
-    adapter_no3d_destroy_rendertarget_view,
-    adapter_no3d_create_shader_resource_view,
-    adapter_no3d_destroy_shader_resource_view,
-    adapter_no3d_create_unordered_access_view,
-    adapter_no3d_destroy_unordered_access_view,
-    adapter_no3d_create_sampler,
-    adapter_no3d_destroy_sampler,
-    adapter_no3d_create_query,
-    adapter_no3d_destroy_query,
-    adapter_no3d_flush_context,
-    adapter_no3d_clear_uav,
+    .adapter_destroy = adapter_no3d_destroy,
+    .adapter_create_device = adapter_no3d_create_device,
+    .adapter_destroy_device = adapter_no3d_destroy_device,
+    .adapter_acquire_context = adapter_no3d_acquire_context,
+    .adapter_release_context = adapter_no3d_release_context,
+    .adapter_get_wined3d_caps = adapter_no3d_get_wined3d_caps,
+    .adapter_check_format = adapter_no3d_check_format,
+    .adapter_init_3d = adapter_no3d_init_3d,
+    .adapter_uninit_3d = adapter_no3d_uninit_3d,
+    .adapter_map_bo_address = adapter_no3d_map_bo_address,
+    .adapter_unmap_bo_address = adapter_no3d_unmap_bo_address,
+    .adapter_copy_bo_address = adapter_no3d_copy_bo_address,
+    .adapter_create_swapchain = adapter_no3d_create_swapchain,
+    .adapter_destroy_swapchain = adapter_no3d_destroy_swapchain,
+    .adapter_create_buffer = adapter_no3d_create_buffer,
+    .adapter_destroy_buffer = adapter_no3d_destroy_buffer,
+    .adapter_create_texture = adapter_no3d_create_texture,
+    .adapter_destroy_texture = adapter_no3d_destroy_texture,
+    .adapter_create_rendertarget_view = adapter_no3d_create_rendertarget_view,
+    .adapter_destroy_rendertarget_view = adapter_no3d_destroy_rendertarget_view,
+    .adapter_create_shader_resource_view = adapter_no3d_create_shader_resource_view,
+    .adapter_destroy_shader_resource_view = adapter_no3d_destroy_shader_resource_view,
+    .adapter_create_unordered_access_view = adapter_no3d_create_unordered_access_view,
+    .adapter_destroy_unordered_access_view = adapter_no3d_destroy_unordered_access_view,
+    .adapter_create_sampler = adapter_no3d_create_sampler,
+    .adapter_destroy_sampler = adapter_no3d_destroy_sampler,
+    .adapter_create_query = adapter_no3d_create_query,
+    .adapter_destroy_query = adapter_no3d_destroy_query,
+    .adapter_flush_context = adapter_no3d_flush_context,
+    .adapter_draw_primitive = adapter_no3d_draw_primitive,
+    .adapter_dispatch_compute = adapter_no3d_dispatch_compute,
+    .adapter_clear_uav = adapter_no3d_clear_uav,
 };
 
 static void wined3d_adapter_no3d_init_d3d_info(struct wined3d_adapter *adapter, unsigned int wined3d_creation_flags)
@@ -2755,6 +2939,7 @@ static struct wined3d_adapter *wined3d_adapter_no3d_create(unsigned int ordinal,
 
     adapter->vertex_pipe = &none_vertex_pipe;
     adapter->fragment_pipe = &none_fragment_pipe;
+    adapter->misc_state_template = misc_state_template_no3d;
     adapter->shader_backend = &none_shader_backend;
 
     wined3d_adapter_no3d_init_d3d_info(adapter, wined3d_creation_flags);

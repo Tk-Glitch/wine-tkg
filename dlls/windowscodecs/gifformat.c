@@ -1727,7 +1727,7 @@ static HRESULT WINAPI GifFrameEncode_WriteSource(IWICBitmapFrameEncode *iface, I
         hr = configure_write_source(iface, source, rc, format,
                                     This->width, This->height, This->xres, This->yres);
         if (hr == S_OK)
-            hr = write_source(iface, source, rc, format, 8, FALSE /* FIXME */, This->width, This->height);
+            hr = write_source(iface, source, rc, format, 8, !This->colors, This->width, This->height);
     }
     else
         hr = WINCODEC_ERR_WRONGSTATE;

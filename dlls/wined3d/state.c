@@ -1798,12 +1798,9 @@ static void state_msaa(struct wined3d_context *context, const struct wined3d_sta
     }
 }
 
-static void state_line_antialias(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void line_antialias(const struct wined3d_rasterizer_state *r, const struct wined3d_gl_info *gl_info)
 {
-    const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
-    const struct wined3d_rasterizer_state *r = state->rasterizer_state;
-
-    if (state->render_states[WINED3D_RS_EDGEANTIALIAS] || (r && r->desc.line_antialias))
+    if (r && r->desc.line_antialias)
     {
         gl_info->gl_ops.gl.p_glEnable(GL_LINE_SMOOTH);
         checkGLcall("glEnable(GL_LINE_SMOOTH)");
@@ -4391,7 +4388,7 @@ static void indexbuffer(struct wined3d_context *context, const struct wined3d_st
     if (!ib || !stream_info->all_vbo)
         GL_EXTCALL(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0));
     else
-        GL_EXTCALL(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ib->buffer_object));
+        GL_EXTCALL(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, wined3d_buffer_gl_const(ib)->bo.id));
 }
 
 static void depth_clip(const struct wined3d_rasterizer_state *r, const struct wined3d_gl_info *gl_info)
@@ -4427,7 +4424,7 @@ static void rasterizer(struct wined3d_context *context, const struct wined3d_sta
     cullmode(r, gl_info);
     depth_clip(r, gl_info);
     scissor(r, gl_info);
-    state_line_antialias(context, state, STATE_RENDER(WINED3D_RS_ANTIALIASEDLINEENABLE));
+    line_antialias(r, gl_info);
 }
 
 static void rasterizer_cc(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
@@ -4445,7 +4442,7 @@ static void rasterizer_cc(struct wined3d_context *context, const struct wined3d_
     cullmode(r, gl_info);
     depth_clip(r, gl_info);
     scissor(r, gl_info);
-    state_line_antialias(context, state, STATE_RENDER(WINED3D_RS_ANTIALIASEDLINEENABLE));
+    line_antialias(r, gl_info);
 }
 
 static void psorigin_w(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
@@ -4503,7 +4500,7 @@ static void state_cb(struct wined3d_context *context, const struct wined3d_state
     for (i = 0; i < count; ++i)
     {
         buffer = state->cb[shader_type][i];
-        GL_EXTCALL(glBindBufferBase(GL_UNIFORM_BUFFER, base + i, buffer ? buffer->buffer_object : 0));
+        GL_EXTCALL(glBindBufferBase(GL_UNIFORM_BUFFER, base + i, buffer ? wined3d_buffer_gl(buffer)->bo.id : 0));
     }
     checkGLcall("bind constant buffers");
 }
@@ -4575,7 +4572,7 @@ static void state_so(struct wined3d_context *context, const struct wined3d_state
             offset = 0;
         }
         size = buffer->resource.size - offset;
-        GL_EXTCALL(glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, i, buffer->buffer_object, offset, size));
+        GL_EXTCALL(glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, i, wined3d_buffer_gl(buffer)->bo.id, offset, size));
     }
     checkGLcall("bind transform feedback buffers");
 }
@@ -4585,7 +4582,7 @@ static void state_so_warn(struct wined3d_context *context, const struct wined3d_
     WARN("Transform feedback not supported.\n");
 }
 
-const struct wined3d_state_entry_template misc_state_template[] =
+const struct wined3d_state_entry_template misc_state_template_gl[] =
 {
     { STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_VERTEX),  { STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_VERTEX),  state_cb,           }, ARB_UNIFORM_BUFFER_OBJECT       },
     { STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_VERTEX),  { STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_VERTEX),  state_cb_warn,      }, WINED3D_GL_EXT_NONE             },
@@ -4607,7 +4604,6 @@ const struct wined3d_state_entry_template misc_state_template[] =
     { STATE_COMPUTE_UNORDERED_ACCESS_VIEW_BINDING,        { STATE_COMPUTE_UNORDERED_ACCESS_VIEW_BINDING,        state_uav_warn      }, WINED3D_GL_EXT_NONE             },
     { STATE_STREAM_OUTPUT,                                { STATE_STREAM_OUTPUT,                                state_so,           }, WINED3D_GL_VERSION_3_2          },
     { STATE_STREAM_OUTPUT,                                { STATE_STREAM_OUTPUT,                                state_so_warn,      }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_EDGEANTIALIAS),             { STATE_RENDER(WINED3D_RS_EDGEANTIALIAS),             state_line_antialias}, WINED3D_GL_EXT_NONE             },
     { STATE_BLEND,                                        { STATE_BLEND,                                        blend_dbb           }, ARB_DRAW_BUFFERS_BLEND          },
     { STATE_BLEND,                                        { STATE_BLEND,                                        blend_db2           }, EXT_DRAW_BUFFERS2               },
     { STATE_BLEND,                                        { STATE_BLEND,                                        blend               }, WINED3D_GL_EXT_NONE             },
@@ -5510,6 +5506,7 @@ static void validate_state_table(struct wined3d_state_entry *state_table)
         {  8,   8},
         { 17,  22},
         { 27,  27},
+        { 40,  40},
         { 42,  45},
         { 47,  47},
         { 61, 127},

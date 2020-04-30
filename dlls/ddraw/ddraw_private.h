@@ -195,8 +195,9 @@ struct ddraw_surface
     /* You can't traverse the tree upwards. Only a flag for Surface::Release because it's needed there,
      * but no pointer to prevent temptations to traverse it in the wrong direction.
      */
-    BOOL                    is_complex_root;
-    BOOL is_lost;
+    unsigned int is_complex_root : 1;
+    unsigned int is_lost : 1;
+    unsigned int sysmem_fallback : 1;
 
     /* Surface description, for GetAttachedSurface */
     DDSURFACEDESC2          surface_desc;
@@ -334,6 +335,10 @@ struct d3d_device
     struct list viewport_list;
     struct d3d_viewport *current_viewport;
     D3DVIEWPORT7 active_viewport;
+
+    /* Pick data */
+    D3DPICKRECORD* pick_records;
+    DWORD pick_record_count;
 
     /* Required to keep track which of two available texture blending modes in d3ddevice3 is used */
     BOOL legacyTextureBlending;
@@ -568,7 +573,7 @@ struct d3d_execute_buffer *unsafe_impl_from_IDirect3DExecuteBuffer(IDirect3DExec
 
 /* The execute function */
 HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *execute_buffer,
-        struct d3d_device *device) DECLSPEC_HIDDEN;
+        struct d3d_device *device, D3DRECT* pick_rect) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * IDirect3DVertexBuffer
@@ -636,6 +641,19 @@ static inline BOOL format_is_paletteindexed(const DDPIXELFORMAT *fmt)
     DWORD flags = DDPF_PALETTEINDEXED1 | DDPF_PALETTEINDEXED2 | DDPF_PALETTEINDEXED4
             | DDPF_PALETTEINDEXED8 | DDPF_PALETTEINDEXEDTO8;
     return !!(fmt->dwFlags & flags);
+}
+
+static inline BOOL ddraw_surface_can_be_lost(const struct ddraw_surface *surface)
+{
+    DWORD caps = surface->surface_desc.ddsCaps.dwCaps;
+
+    /* Testing with DDCREATE_EMULATIONONLY showed that primary surfaces and Z buffers can
+     * be lost even if created with explicit DDCAPS_SYSTEMMEMORY. Textures can or cannot be lost
+     * depending on whether _SYSTEMMEMORY was given explicitly by the application. */
+    if (!(caps & DDSCAPS_SYSTEMMEMORY) || caps & (DDSCAPS_PRIMARYSURFACE | DDSCAPS_ZBUFFER))
+        return TRUE;
+
+    return surface->sysmem_fallback;
 }
 
 /* Used for generic dumping */

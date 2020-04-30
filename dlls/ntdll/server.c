@@ -34,6 +34,9 @@
 #ifdef HAVE_PTHREAD_NP_H
 # include <pthread_np.h>
 #endif
+#ifdef HAVE_PWD_H
+# include <pwd.h>
+#endif
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -77,6 +80,13 @@
 #endif
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
+#endif
+#ifdef __APPLE__
+#include <crt_externs.h>
+#include <spawn.h>
+#ifndef _POSIX_SPAWN_DISABLE_ASLR
+#define _POSIX_SPAWN_DISABLE_ASLR 0x0100
+#endif
 #endif
 
 #include "ntstatus.h"
@@ -133,6 +143,23 @@ static const enum cpu_type client_cpu = CPU_ARM64;
 #else
 #error Unsupported CPU
 #endif
+
+#if defined(linux) || defined(__APPLE__)
+static const BOOL use_preloader = TRUE;
+#else
+static const BOOL use_preloader = FALSE;
+#endif
+
+static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
+
+const char *build_dir = NULL;
+const char *data_dir = NULL;
+const char *config_dir = NULL;
+const char **dll_paths = NULL;
+size_t dll_path_maxlen = 0;
+static const char *server_dir;
+static const char *bin_dir;
+static const char *argv0;
 
 unsigned int server_cpus = 0;
 BOOL is_wow64 = FALSE;
@@ -195,6 +222,46 @@ static void fatal_perror( const char *err, ... )
     exit(1);
 }
 
+/* canonicalize path and return its directory name */
+static char *realpath_dirname( const char *name )
+{
+    char *p, *fullpath = realpath( name, NULL );
+
+    if (fullpath)
+    {
+        p = strrchr( fullpath, '/' );
+        if (p == fullpath) p++;
+        if (p) *p = 0;
+    }
+    return fullpath;
+}
+
+/* if string ends with tail, remove it */
+static char *remove_tail( const char *str, const char *tail )
+{
+    size_t len = strlen( str );
+    size_t tail_len = strlen( tail );
+    char *ret;
+
+    if (len < tail_len) return NULL;
+    if (strcmp( str + len - tail_len, tail )) return NULL;
+    ret = malloc( len - tail_len + 1 );
+    memcpy( ret, str, len - tail_len );
+    ret[len - tail_len] = 0;
+    return ret;
+}
+
+/* build a path from the specified dir and name */
+static char *build_path( const char *dir, const char *name )
+{
+    size_t len = strlen( dir );
+    char *ret = malloc( len + strlen( name ) + 2 );
+
+    memcpy( ret, dir, len );
+    if (len && ret[len - 1] != '/') ret[len++] = '/';
+    strcpy( ret + len, name );
+    return ret;
+}
 
 /***********************************************************************
  *           server_protocol_error
@@ -382,7 +449,7 @@ void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sig
  *
  * Wait for a reply on the waiting pipe of the current thread.
  */
-int wait_select_reply( void *cookie )
+static int wait_select_reply( void *cookie )
 {
     int signaled;
     struct wake_up_reply reply;
@@ -414,13 +481,36 @@ int wait_select_reply( void *cookie )
 }
 
 
+static void invoke_apc( const user_apc_t *apc )
+{
+    switch( apc->type )
+    {
+    case APC_USER:
+    {
+        void (WINAPI *func)(ULONG_PTR,ULONG_PTR,ULONG_PTR) = wine_server_get_ptr( apc->user.func );
+        func( apc->user.args[0], apc->user.args[1], apc->user.args[2] );
+        break;
+    }
+    case APC_TIMER:
+    {
+        void (WINAPI *func)(void*, unsigned int, unsigned int) = wine_server_get_ptr( apc->user.func );
+        func( wine_server_get_ptr( apc->user.args[1] ),
+              (DWORD)apc->timer.time, (DWORD)(apc->timer.time >> 32) );
+        break;
+    }
+    default:
+        server_protocol_error( "get_apc_request: bad type %d\n", apc->type );
+        break;
+    }
+}
+
 /***********************************************************************
  *              invoke_apc
  *
  * Invoke a single APC.
  *
  */
-void invoke_apc( const apc_call_t *call, apc_result_t *result )
+static void invoke_system_apc( const apc_call_t *call, apc_result_t *result )
 {
     SIZE_T size;
     void *addr;
@@ -432,19 +522,6 @@ void invoke_apc( const apc_call_t *call, apc_result_t *result )
     {
     case APC_NONE:
         break;
-    case APC_USER:
-    {
-        void (WINAPI *func)(ULONG_PTR,ULONG_PTR,ULONG_PTR) = wine_server_get_ptr( call->user.func );
-        func( call->user.args[0], call->user.args[1], call->user.args[2] );
-        break;
-    }
-    case APC_TIMER:
-    {
-        void (WINAPI *func)(void*, unsigned int, unsigned int) = wine_server_get_ptr( call->timer.func );
-        func( wine_server_get_ptr( call->timer.arg ),
-              (DWORD)call->timer.time, (DWORD)(call->timer.time >> 32) );
-        break;
-    }
     case APC_ASYNC_IO:
     {
         IO_STATUS_BLOCK *iosb = wine_server_get_ptr( call->async_io.sb );
@@ -625,25 +702,22 @@ void invoke_apc( const apc_call_t *call, apc_result_t *result )
  *              server_select
  */
 unsigned int server_select( const select_op_t *select_op, data_size_t size, UINT flags,
-                            const LARGE_INTEGER *timeout )
+                            timeout_t abs_timeout, CONTEXT *context, RTL_CRITICAL_SECTION *cs, user_apc_t *user_apc )
 {
     unsigned int ret;
     int cookie;
-    BOOL user_apc = FALSE;
     obj_handle_t apc_handle = 0;
+    context_t server_context;
+    BOOL suspend_context = FALSE;
     apc_call_t call;
     apc_result_t result;
-    abstime_t abs_timeout = timeout ? timeout->QuadPart : TIMEOUT_INFINITE;
     sigset_t old_set;
 
     memset( &result, 0, sizeof(result) );
-
-    if (abs_timeout < 0)
+    if (context)
     {
-        LARGE_INTEGER now;
-
-        RtlQueryPerformanceCounter(&now);
-        abs_timeout -= now.QuadPart;
+        suspend_context = TRUE;
+        context_to_server( &server_context, context );
     }
 
     do
@@ -657,36 +731,85 @@ unsigned int server_select( const select_op_t *select_op, data_size_t size, UINT
                 req->cookie   = wine_server_client_ptr( &cookie );
                 req->prev_apc = apc_handle;
                 req->timeout  = abs_timeout;
+                req->size     = size;
                 wine_server_add_data( req, &result, sizeof(result) );
                 wine_server_add_data( req, select_op, size );
+                if (suspend_context)
+                {
+                    wine_server_add_data( req, &server_context, sizeof(server_context) );
+                    suspend_context = FALSE; /* server owns the context now */
+                }
+                if (context) wine_server_set_reply( req, &server_context, sizeof(server_context) );
                 ret = server_call_unlocked( req );
                 apc_handle  = reply->apc_handle;
                 call        = reply->call;
+                if (wine_server_reply_size( reply ))
+                {
+                    DWORD context_flags = context->ContextFlags; /* unchanged registers are still available */
+                    context_from_server( context, &server_context );
+                    context->ContextFlags |= context_flags;
+                }
             }
             SERVER_END_REQ;
+
+            if (ret != STATUS_KERNEL_APC) break;
+            invoke_system_apc( &call, &result );
 
             /* don't signal multiple times */
             if (size >= sizeof(select_op->signal_and_wait) && select_op->op == SELECT_SIGNAL_AND_WAIT)
                 size = offsetof( select_op_t, signal_and_wait.signal );
-
-            if (ret != STATUS_KERNEL_APC) break;
-            invoke_apc( &call, &result );
         }
         pthread_sigmask( SIG_SETMASK, &old_set, NULL );
-
-        if (ret == STATUS_USER_APC)
+        if (cs)
         {
-            invoke_apc( &call, &result );
-            /* if we ran a user apc we have to check once more if additional apcs are queued,
-             * but we don't want to wait */
-            abs_timeout = 0;
-            user_apc = TRUE;
-            size = 0;
+            RtlLeaveCriticalSection( cs );
+            cs = NULL;
         }
+        if (ret != STATUS_PENDING) break;
 
-        if (ret == STATUS_PENDING) ret = wait_select_reply( &cookie );
+        ret = wait_select_reply( &cookie );
     }
     while (ret == STATUS_USER_APC || ret == STATUS_KERNEL_APC);
+
+    if (ret == STATUS_USER_APC) *user_apc = call.user;
+    return ret;
+}
+
+
+/***********************************************************************
+ *              server_wait
+ */
+unsigned int server_wait( const select_op_t *select_op, data_size_t size, UINT flags,
+                          const LARGE_INTEGER *timeout )
+{
+    timeout_t abs_timeout = timeout ? timeout->QuadPart : TIMEOUT_INFINITE;
+    BOOL user_apc = FALSE;
+    unsigned int ret;
+    user_apc_t apc;
+
+    if (abs_timeout < 0)
+    {
+        LARGE_INTEGER now;
+
+        RtlQueryPerformanceCounter(&now);
+        abs_timeout -= now.QuadPart;
+    }
+
+    for (;;)
+    {
+        ret = server_select( select_op, size, flags, abs_timeout, NULL, NULL, &apc );
+        if (ret != STATUS_USER_APC) break;
+        invoke_apc( &apc );
+
+        /* if we ran a user apc we have to check once more if additional apcs are queued,
+         * but we don't want to wait */
+        abs_timeout = 0;
+        user_apc = TRUE;
+        size = 0;
+        /* don't signal multiple times */
+        if (size >= sizeof(select_op->signal_and_wait) && select_op->op == SELECT_SIGNAL_AND_WAIT)
+            size = offsetof( select_op_t, signal_and_wait.signal );
+    }
 
     if (ret == STATUS_TIMEOUT && user_apc) ret = STATUS_USER_APC;
 
@@ -725,7 +848,7 @@ unsigned int server_queue_process_apc( HANDLE process, const apc_call_t *call, a
 
         if (self)
         {
-            invoke_apc( call, result );
+            invoke_system_apc( call, result );
         }
         else
         {
@@ -1248,6 +1371,164 @@ int server_pipe( int fd[2] )
 
 
 /***********************************************************************
+ *           preloader_exec
+ */
+static void preloader_exec( char **argv )
+{
+    if (use_preloader)
+    {
+        static const char *preloader = "wine-preloader";
+        char *p;
+
+        if (!(p = strrchr( argv[1], '/' ))) p = argv[1];
+        else p++;
+
+        if (strlen(p) > 2 && !strcmp( p + strlen(p) - 2, "64" )) preloader = "wine64-preloader";
+        argv[0] = malloc( p - argv[1] + strlen(preloader) + 1 );
+        memcpy( argv[0], argv[1], p - argv[1] );
+        strcpy( argv[0] + (p - argv[1]), preloader );
+
+#ifdef __APPLE__
+        {
+            posix_spawnattr_t attr;
+            posix_spawnattr_init( &attr );
+            posix_spawnattr_setflags( &attr, POSIX_SPAWN_SETEXEC | _POSIX_SPAWN_DISABLE_ASLR );
+            posix_spawn( NULL, argv[0], NULL, &attr, argv, *_NSGetEnviron() );
+            posix_spawnattr_destroy( &attr );
+        }
+#endif
+        execv( argv[0], argv );
+        free( argv[0] );
+    }
+    execv( argv[1], argv + 1 );
+}
+
+
+/***********************************************************************
+ *           exec_wineloader
+ *
+ * argv[0] and argv[1] must be reserved for the preloader and loader respectively.
+ */
+NTSTATUS exec_wineloader( char **argv, int socketfd, const pe_image_info_t *pe_info )
+{
+    const int is_child_64bit = (pe_info->cpu == CPU_x86_64 || pe_info->cpu == CPU_ARM64);
+    const char *path, *loader = argv0;
+    const char *loader_env = getenv( "WINELOADER" );
+    char *p, preloader_reserve[64], socket_env[64];
+    ULONGLONG res_start = pe_info->base;
+    ULONGLONG res_end   = pe_info->base + pe_info->map_size;
+
+    if (!is_win64 ^ !is_child_64bit)
+    {
+        /* remap WINELOADER to the alternate 32/64-bit version if necessary */
+        if (loader_env)
+        {
+            int len = strlen( loader_env );
+            char *env = malloc( sizeof("WINELOADER=") + len + 2 );
+
+            if (!env) return STATUS_NO_MEMORY;
+            strcpy( env, "WINELOADER=" );
+            strcat( env, loader_env );
+            if (is_child_64bit)
+            {
+                strcat( env, "64" );
+            }
+            else
+            {
+                len += sizeof("WINELOADER=") - 1;
+                if (!strcmp( env + len - 2, "64" )) env[len - 2] = 0;
+            }
+            loader = env;
+            putenv( env );
+        }
+        else loader = is_child_64bit ? "wine64" : "wine";
+    }
+
+    signal( SIGPIPE, SIG_DFL );
+
+    sprintf( socket_env, "WINESERVERSOCKET=%u", socketfd );
+    sprintf( preloader_reserve, "WINEPRELOADRESERVE=%x%08x-%x%08x",
+             (ULONG)(res_start >> 32), (ULONG)res_start, (ULONG)(res_end >> 32), (ULONG)res_end );
+
+    putenv( preloader_reserve );
+    putenv( socket_env );
+
+    if (build_dir)
+    {
+        argv[1] = build_path( build_dir, is_child_64bit ? "loader/wine64" : "loader/wine" );
+        preloader_exec( argv );
+        return STATUS_INVALID_IMAGE_FORMAT;
+    }
+
+    if ((p = strrchr( loader, '/' ))) loader = p + 1;
+
+    argv[1] = build_path( bin_dir, loader );
+    preloader_exec( argv );
+
+    argv[1] = getenv( "WINELOADER" );
+    if (argv[1]) preloader_exec( argv );
+
+    if ((path = getenv( "PATH" )))
+    {
+        for (p = strtok( strdup( path ), ":" ); p; p = strtok( NULL, ":" ))
+        {
+            argv[1] = build_path( p, loader );
+            preloader_exec( argv );
+        }
+    }
+
+    argv[1] = build_path( BINDIR, loader );
+    preloader_exec( argv );
+    return STATUS_INVALID_IMAGE_FORMAT;
+}
+
+
+/***********************************************************************
+ *           exec_wineserver
+ *
+ * Exec a new wine server.
+ */
+static void exec_wineserver( char **argv )
+{
+    char *path;
+
+    if (build_dir)
+    {
+        if (!is_win64)  /* look for 64-bit server */
+        {
+            char *loader = realpath_dirname( build_path( build_dir, "loader/wine64" ));
+            if (loader)
+            {
+                argv[0] = build_path( loader, "../server/wineserver" );
+                execv( argv[0], argv );
+            }
+        }
+        argv[0] = build_path( build_dir, "server/wineserver" );
+        execv( argv[0], argv );
+        return;
+    }
+
+    argv[0] = build_path( bin_dir, "wineserver" );
+    execv( argv[0], argv );
+
+    argv[0] = getenv( "WINESERVER" );
+    if (argv[0]) execv( argv[0], argv );
+
+    if ((path = getenv( "PATH" )))
+    {
+        for (path = strtok( strdup( path ), ":" ); path; path = strtok( NULL, ":" ))
+        {
+            argv[0] = build_path( path, "wineserver" );
+            execvp( argv[0], argv );
+        }
+    }
+
+    argv[0] = build_path( BINDIR, "wineserver" );
+    execv( argv[0], argv );
+}
+
+
+/***********************************************************************
  *           start_server
  *
  * Start a new wine server.
@@ -1256,7 +1537,6 @@ static void start_server(void)
 {
     static BOOL started;  /* we only try once */
     char *argv[3];
-    static char wineserver[] = "server/wineserver";
     static char debug[] = "-d";
 
     if (!started)
@@ -1266,10 +1546,9 @@ static void start_server(void)
         if (pid == -1) fatal_perror( "fork" );
         if (!pid)
         {
-            argv[0] = wineserver;
             argv[1] = TRACE_ON(server) ? debug : NULL;
             argv[2] = NULL;
-            wine_exec_wine_binary( argv[0], argv, getenv("WINESERVER") );
+            exec_wineserver( argv );
             fatal_error( "could not exec wineserver\n" );
         }
         waitpid( pid, &status, 0 );
@@ -1278,6 +1557,138 @@ static void start_server(void)
         if (status) exit(status);  /* server failed */
         started = TRUE;
     }
+}
+
+
+/***********************************************************************
+ *           init_server_dir
+ */
+static const char *init_server_dir( dev_t dev, ino_t ino )
+{
+    char *p, *dir;
+    size_t len = sizeof("/server-") + 2 * sizeof(dev) + 2 * sizeof(ino) + 2;
+
+#ifdef __ANDROID__  /* there's no /tmp dir on Android */
+    len += strlen( config_dir ) + sizeof("/.wineserver");
+    dir = malloc( len );
+    strcpy( dir, config_dir );
+    strcat( dir, "/.wineserver/server-" );
+#else
+    len += sizeof("/tmp/.wine-") + 12;
+    dir = malloc( len );
+    sprintf( dir, "/tmp/.wine-%u/server-", getuid() );
+#endif
+    p = dir + strlen( dir );
+    if (dev != (unsigned long)dev)
+        p += sprintf( p, "%lx%08lx-", (unsigned long)((unsigned long long)dev >> 32), (unsigned long)dev );
+    else
+        p += sprintf( p, "%lx-", (unsigned long)dev );
+
+    if (ino != (unsigned long)ino)
+        sprintf( p, "%lx%08lx", (unsigned long)((unsigned long long)ino >> 32), (unsigned long)ino );
+    else
+        sprintf( p, "%lx", (unsigned long)ino );
+    return dir;
+}
+
+
+/***********************************************************************
+ *           init_config_dir
+ */
+static const char *init_config_dir(void)
+{
+    char *p, *dir;
+    const char *prefix = getenv( "WINEPREFIX" );
+
+    if (prefix)
+    {
+        if (prefix[0] != '/')
+            fatal_error( "invalid directory %s in WINEPREFIX: not an absolute path\n", prefix );
+        dir = strdup( prefix );
+        for (p = dir + strlen(dir) - 1; p > dir && *p == '/'; p--) *p = 0;
+    }
+    else
+    {
+        const char *home = getenv( "HOME" );
+        if (!home)
+        {
+            struct passwd *pwd = getpwuid( getuid() );
+            if (pwd) home = pwd->pw_dir;
+        }
+        if (!home) fatal_error( "could not determine your home directory\n" );
+        if (home[0] != '/') fatal_error( "your home directory %s is not an absolute path\n", home );
+        dir = build_path( home, ".wine" );
+    }
+    return dir;
+}
+
+
+/***********************************************************************
+ *           build_dll_path
+ */
+static void build_dll_path( const char *dll_dir )
+{
+    const char *default_dlldir = DLLDIR;
+    char *p, *path = getenv( "WINEDLLPATH" );
+    int i, count = 0;
+
+    if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
+
+    dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
+    count = 0;
+
+    if (!build_dir && dll_dir) dll_paths[count++] = dll_dir;
+
+    if (path)
+    {
+        path = strdup(path);
+        for (p = strtok( path, ":" ); p; p = strtok( NULL, ":" )) dll_paths[count++] = strdup( p );
+        free( path );
+    }
+
+    if (!build_dir && !dll_dir) dll_paths[count++] = default_dlldir;
+
+    for (i = 0; i < count; i++) dll_path_maxlen = max( dll_path_maxlen, strlen(dll_paths[i]) );
+    dll_paths[count] = NULL;
+}
+
+
+/***********************************************************************
+ *           init_paths
+ */
+void init_paths(void)
+{
+    const char *dll_dir = NULL;
+
+#ifdef HAVE_DLADDR
+    Dl_info info;
+
+    if (dladdr( init_paths, &info ) && info.dli_fname[0] == '/')
+        dll_dir = realpath_dirname( info.dli_fname );
+#endif
+
+    argv0 = strdup( __wine_main_argv[0] );
+
+#if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
+    bin_dir = realpath_dirname( "/proc/self/exe" );
+#elif defined (__FreeBSD__) || defined(__DragonFly__)
+    bin_dir = realpath_dirname( "/proc/curproc/file" );
+#else
+    bin_dir = realpath_dirname( argv0 );
+#endif
+
+    if (dll_dir) build_dir = remove_tail( dll_dir, "/dlls/ntdll" );
+    else if (bin_dir) build_dir = remove_tail( bin_dir, "/loader" );
+
+    if (!build_dir)
+    {
+        if (!bin_dir) bin_dir = dll_dir ? build_path( dll_dir, DLL_TO_BINDIR ) : BINDIR;
+        else if (!dll_dir) dll_dir = build_path( bin_dir, BIN_TO_DLLDIR );
+        data_dir = build_path( bin_dir, BIN_TO_DATADIR );
+    }
+
+    build_dll_path( dll_dir );
+    config_dir = init_config_dir();
 }
 
 
@@ -1310,47 +1721,41 @@ static void set_case_insensitive(const char *dir)
  */
 static int setup_config_dir(void)
 {
-    const char *p, *config_dir = wine_get_config_dir();
+    char *p;
+    struct stat st;
     int fd_cwd = open( ".", O_RDONLY );
 
     if (chdir( config_dir ) == -1)
     {
-        if (errno != ENOENT) fatal_perror( "chdir to %s", config_dir );
-
+        if (errno != ENOENT) fatal_perror( "cannot use directory %s", config_dir );
         if ((p = strrchr( config_dir, '/' )) && p != config_dir)
         {
-            struct stat st;
-            char *tmp_dir;
-
-            if (!(tmp_dir = malloc( p + 1 - config_dir ))) fatal_error( "out of memory\n" );
-            memcpy( tmp_dir, config_dir, p - config_dir );
-            tmp_dir[p - config_dir] = 0;
-            if (!stat( tmp_dir, &st ) && st.st_uid != getuid())
+            while (p > config_dir + 1 && p[-1] == '/') p--;
+            *p = 0;
+            if (!stat( config_dir, &st ) && st.st_uid != getuid())
                 fatal_error( "'%s' is not owned by you, refusing to create a configuration directory there\n",
-                             tmp_dir );
-            free( tmp_dir );
+                             config_dir );
+            *p = '/';
         }
-
         mkdir( config_dir, 0777 );
         if (chdir( config_dir ) == -1) fatal_perror( "chdir to %s", config_dir );
-
         MESSAGE( "wine: created the configuration directory '%s'\n", config_dir );
     }
 
-    if (mkdir( "dosdevices", 0777 ) == -1)
+    if (stat( ".", &st ) == -1) fatal_perror( "stat %s", config_dir );
+    if (st.st_uid != getuid()) fatal_error( "'%s' is not owned by you\n", config_dir );
+
+    server_dir = init_server_dir( st.st_dev, st.st_ino );
+
+    if (!mkdir( "dosdevices", 0777 ))
     {
-        if (errno == EEXIST) goto done;
-        fatal_perror( "cannot create %s/dosdevices", config_dir );
+        mkdir( "drive_c", 0777 );
+        set_case_insensitive( "drive_c" );
+        symlink( "../drive_c", "dosdevices/c:" );
+        symlink( "/", "dosdevices/z:" );
     }
+    else if (errno != EEXIST) fatal_perror( "cannot create %s/dosdevices", config_dir );
 
-    /* create the drive symlinks */
-
-    mkdir( "drive_c", 0777 );
-    set_case_insensitive( "drive_c" );
-    symlink( "../drive_c", "dosdevices/c:" );
-    symlink( "/", "dosdevices/z:" );
-
-done:
     if (fd_cwd == -1) fd_cwd = open( "dosdevices/c:", O_RDONLY );
     fcntl( fd_cwd, F_SETFD, FD_CLOEXEC );
     return fd_cwd;
@@ -1398,26 +1803,24 @@ static void server_connect_error( const char *serverdir )
  */
 static int server_connect(void)
 {
-    const char *serverdir;
     struct sockaddr_un addr;
     struct stat st;
     int s, slen, retry, fd_cwd;
 
     fd_cwd = setup_config_dir();
-    serverdir = wine_get_server_dir();
 
     /* chdir to the server directory */
-    if (chdir( serverdir ) == -1)
+    if (chdir( server_dir ) == -1)
     {
-        if (errno != ENOENT) fatal_perror( "chdir to %s", serverdir );
+        if (errno != ENOENT) fatal_perror( "chdir to %s", server_dir );
         start_server();
-        if (chdir( serverdir ) == -1) fatal_perror( "chdir to %s", serverdir );
+        if (chdir( server_dir ) == -1) fatal_perror( "chdir to %s", server_dir );
     }
 
     /* make sure we are at the right place */
-    if (stat( ".", &st ) == -1) fatal_perror( "stat %s", serverdir );
-    if (st.st_uid != getuid()) fatal_error( "'%s' is not owned by you\n", serverdir );
-    if (st.st_mode & 077) fatal_error( "'%s' must not be accessible by other users\n", serverdir );
+    if (stat( ".", &st ) == -1) fatal_perror( "stat %s", server_dir );
+    if (st.st_uid != getuid()) fatal_error( "'%s' is not owned by you\n", server_dir );
+    if (st.st_mode & 077) fatal_error( "'%s' must not be accessible by other users\n", server_dir );
 
     for (retry = 0; retry < 6; retry++)
     {
@@ -1430,16 +1833,16 @@ static int server_connect(void)
         }
         else if (lstat( SOCKETNAME, &st ) == -1) /* check for an already existing socket */
         {
-            if (errno != ENOENT) fatal_perror( "lstat %s/%s", serverdir, SOCKETNAME );
+            if (errno != ENOENT) fatal_perror( "lstat %s/%s", server_dir, SOCKETNAME );
             start_server();
             if (lstat( SOCKETNAME, &st ) == -1) continue;  /* still no socket, wait a bit more */
         }
 
         /* make sure the socket is sane (ISFIFO needed for Solaris) */
         if (!S_ISSOCK(st.st_mode) && !S_ISFIFO(st.st_mode))
-            fatal_error( "'%s/%s' is not a socket\n", serverdir, SOCKETNAME );
+            fatal_error( "'%s/%s' is not a socket\n", server_dir, SOCKETNAME );
         if (st.st_uid != getuid())
-            fatal_error( "'%s/%s' is not owned by you\n", serverdir, SOCKETNAME );
+            fatal_error( "'%s/%s' is not owned by you\n", server_dir, SOCKETNAME );
 
         /* try to connect to it */
         addr.sun_family = AF_UNIX;
@@ -1469,7 +1872,7 @@ static int server_connect(void)
         }
         close( s );
     }
-    server_connect_error( serverdir );
+    server_connect_error( server_dir );
 }
 
 
@@ -1492,7 +1895,7 @@ static void send_server_task_port(void)
 
     if (task_get_bootstrap_port(mach_task_self(), &bootstrap_port) != KERN_SUCCESS) return;
 
-    kret = bootstrap_look_up(bootstrap_port, (char*)wine_get_server_dir(), &wineserver_port);
+    kret = bootstrap_look_up(bootstrap_port, server_dir, &wineserver_port);
     if (kret != KERN_SUCCESS)
         fatal_error( "cannot find the server port: 0x%08x\n", kret );
 
@@ -1664,7 +2067,6 @@ void server_init_process_done(void)
 size_t server_init_thread( void *entry_point, BOOL *suspend )
 {
     static const char *cpu_names[] = { "x86", "x86_64", "PowerPC", "ARM", "ARM64" };
-    static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
     const char *arch = getenv( "WINEARCH" );
     int ret;
     int reply_pipe[2];
@@ -1719,19 +2121,15 @@ size_t server_init_thread( void *entry_point, BOOL *suspend )
         if (arch)
         {
             if (!strcmp( arch, "win32" ) && (is_win64 || is_wow64))
-                fatal_error( "WINEARCH set to win32 but '%s' is a 64-bit installation.\n",
-                             wine_get_config_dir() );
+                fatal_error( "WINEARCH set to win32 but '%s' is a 64-bit installation.\n", config_dir );
             if (!strcmp( arch, "win64" ) && !is_win64 && !is_wow64)
-                fatal_error( "WINEARCH set to win64 but '%s' is a 32-bit installation.\n",
-                             wine_get_config_dir() );
+                fatal_error( "WINEARCH set to win64 but '%s' is a 32-bit installation.\n", config_dir );
         }
         return info_size;
     case STATUS_INVALID_IMAGE_WIN_64:
-        fatal_error( "'%s' is a 32-bit installation, it cannot support 64-bit applications.\n",
-                     wine_get_config_dir() );
+        fatal_error( "'%s' is a 32-bit installation, it cannot support 64-bit applications.\n", config_dir );
     case STATUS_NOT_SUPPORTED:
-        fatal_error( "'%s' is a 64-bit installation, it cannot be used with a 32-bit wineserver.\n",
-                     wine_get_config_dir() );
+        fatal_error( "'%s' is a 64-bit installation, it cannot be used with a 32-bit wineserver.\n", config_dir );
     case STATUS_INVALID_IMAGE_FORMAT:
         fatal_error( "wineserver doesn't support the %s architecture\n", cpu_names[client_cpu] );
     default:

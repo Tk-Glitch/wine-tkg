@@ -392,8 +392,8 @@ void fsync_init(void)
         return;
     }
 
-    if (stat( wine_get_config_dir(), &st ) == -1)
-        ERR("Cannot stat %s\n", wine_get_config_dir());
+    if (stat( config_dir, &st ) == -1)
+        ERR("Cannot stat %s\n", config_dir);
 
     if (st.st_ino != (unsigned long)st.st_ino)
         sprintf( shm_name, "/wine-%lx%08lx-fsync", (unsigned long)((unsigned long long)st.st_ino >> 32), (unsigned long)st.st_ino );
@@ -1213,8 +1213,8 @@ userapc:
     TRACE("Woken up by user APC.\n");
 
     /* We have to make a server call anyway to get the APC to execute, so just
-     * delegate down to server_select(). */
-    ret = server_select( NULL, 0, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE, &zero );
+     * delegate down to server_wait(). */
+    ret = server_wait( NULL, 0, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE, &zero );
 
     /* This can happen if we received a system APC, and the APC fd was woken up
      * before we got SIGUSR1. poll() doesn't return EINTR in that case. The

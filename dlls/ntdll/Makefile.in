@@ -3,7 +3,7 @@ MODULE    = ntdll.dll
 IMPORTLIB = ntdll
 IMPORTS   = winecrt0
 EXTRAINCL = $(UNWIND_CFLAGS)
-EXTRALIBS = $(IOKIT_LIBS) $(RT_LIBS) $(PTHREAD_LIBS) $(UNWIND_LIBS)
+EXTRALIBS = -lwine $(IOKIT_LIBS) $(RT_LIBS) $(PTHREAD_LIBS) $(UNWIND_LIBS)
 EXTRADLLFLAGS = -nodefaultlibs -Wl,--image-base,0x7bc00000
 
 C_SRCS = \
@@ -58,3 +58,10 @@ C_SRCS = \
 	wcstring.c
 
 RC_SRCS = version.rc
+
+server_EXTRADEFS = \
+	-DBINDIR=\"${bindir}\" \
+	-DDLLDIR=\"${dlldir}\" \
+	-DBIN_TO_DLLDIR=\"`$(MAKEDEP) -R ${bindir} ${dlldir}`\" \
+	-DDLL_TO_BINDIR=\"`$(MAKEDEP) -R ${dlldir} ${bindir}`\" \
+	-DBIN_TO_DATADIR=\"`$(MAKEDEP) -R ${bindir} ${datadir}/wine`\"

@@ -388,11 +388,7 @@ extern "C" {
 
 /* Compile time assertion */
 
-#if defined(_MSC_VER)
-# define C_ASSERT(e) typedef char __C_ASSERT__[(e)?1:-1]
-#else
-# define C_ASSERT(e) extern void __C_ASSERT__(int [(e)?1:-1])
-#endif
+#define C_ASSERT(e) extern void __C_ASSERT__(int [(e)?1:-1])
 
 /* Eliminate Microsoft C/C++ compiler warning 4715 */
 #if defined(_MSC_VER) && (_MSC_VER > 1200)
@@ -2673,6 +2669,7 @@ static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
     return teb;
 }
 #elif defined(__x86_64__) && defined(_MSC_VER)
+unsigned __int64 __readgsqword(unsigned long);
 #pragma intrinsic(__readgsqword)
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {

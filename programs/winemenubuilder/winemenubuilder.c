@@ -93,7 +93,6 @@
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
-#include "wine/library.h"
 #include "wine/list.h"
 #include "wine/rbtree.h"
 
@@ -1460,6 +1459,8 @@ static BOOL write_desktop_entry(const char *unix_link, const char *location, con
                                 const char *workdir, const char *icon, const char *wmclass)
 {
     FILE *file;
+    const char *prefix = getenv("WINEPREFIX");
+    const char *home = getenv("HOME");
 
     WINE_TRACE("(%s,%s,%s,%s,%s,%s,%s,%s,%s)\n", wine_dbgstr_a(unix_link), wine_dbgstr_a(location),
                wine_dbgstr_a(linkname), wine_dbgstr_a(path), wine_dbgstr_a(args),
@@ -1472,8 +1473,13 @@ static BOOL write_desktop_entry(const char *unix_link, const char *location, con
 
     fprintf(file, "[Desktop Entry]\n");
     fprintf(file, "Name=%s\n", linkname);
-    fprintf(file, "Exec=env WINEPREFIX=\"%s\" %s %s %s\n",
-            wine_get_config_dir(), wine_path, path, args);
+    if (prefix)
+        fprintf(file, "Exec=env WINEPREFIX=\"%s\" wine %s %s\n", prefix, wine_path, args);
+    else if (home)
+        fprintf(file, "Exec=env WINEPREFIX=\"%s/.wine\" wine %s %s\n", home, wine_path, args);
+    else
+        fprintf(file, "Exec=wine %s %s\n", wine_path, args);
+
     fprintf(file, "Type=Application\n");
     fprintf(file, "StartupNotify=true\n");
     if (descr && *descr)
@@ -2537,6 +2543,8 @@ static BOOL write_freedesktop_association_entry(const char *desktopPath, const c
 {
     BOOL ret = FALSE;
     FILE *desktop;
+    const char *prefix = getenv("WINEPREFIX");
+    const char *home = getenv("HOME");
 
     WINE_TRACE("writing association for file type %s, friendlyAppName=%s, MIME type %s, progID=%s, icon=%s to file %s\n",
                wine_dbgstr_a(dot_extension), wine_dbgstr_a(friendlyAppName), wine_dbgstr_a(mimeType),
@@ -2549,8 +2557,12 @@ static BOOL write_freedesktop_association_entry(const char *desktopPath, const c
         fprintf(desktop, "Type=Application\n");
         fprintf(desktop, "Name=%s\n", friendlyAppName);
         fprintf(desktop, "MimeType=%s;\n", mimeType);
-        fprintf(desktop, "Exec=env WINEPREFIX=\"%s\" %s start /ProgIDOpen %s %%f\n",
-                wine_get_config_dir(), wine_path, progId);
+        if (prefix)
+            fprintf(desktop, "Exec=env WINEPREFIX=\"%s\" %s start /ProgIDOpen %s %%f\n", prefix, wine_path, progId);
+        else if (home)
+            fprintf(desktop, "Exec=env WINEPREFIX=\"%s/.wine\" %s start /ProgIDOpen %s %%f\n", home, wine_path, progId);
+        else
+            fprintf(desktop, "Exec=%s start /ProgIDOpen %s %%f\n", wine_path, progId);
         fprintf(desktop, "NoDisplay=true\n");
         fprintf(desktop, "StartupNotify=true\n");
         if (openWithIcon)

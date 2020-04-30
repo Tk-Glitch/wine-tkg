@@ -44,7 +44,7 @@ static const WCHAR driver_link[] = {'\\','D','o','s','D','e','v','i','c','e','s'
 
 static DRIVER_OBJECT *driver_obj;
 static DEVICE_OBJECT *lower_device, *upper_device;
-static LDR_MODULE *ldr_module;
+static LDR_DATA_TABLE_ENTRY *ldr_module;
 
 static HANDLE okfile;
 static LONG successes;
@@ -1717,24 +1717,24 @@ static void test_default_modules(void)
     BOOL win32k = FALSE, dxgkrnl = FALSE, dxgmms1 = FALSE;
     LIST_ENTRY *start, *entry;
     ANSI_STRING name_a;
-    LDR_MODULE *mod;
+    LDR_DATA_TABLE_ENTRY *mod;
     NTSTATUS status;
 
     /* Try to find start of the InLoadOrderModuleList list */
-    for (start = ldr_module->InLoadOrderModuleList.Flink; ; start = start->Flink)
+    for (start = ldr_module->InLoadOrderLinks.Flink; ; start = start->Flink)
     {
-        mod = CONTAINING_RECORD(start, LDR_MODULE, InLoadOrderModuleList);
+        mod = CONTAINING_RECORD(start, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
 
-        if (!MmIsAddressValid(&mod->BaseAddress) || !mod->BaseAddress) break;
+        if (!MmIsAddressValid(&mod->DllBase) || !mod->DllBase) break;
         if (!MmIsAddressValid(&mod->LoadCount) || !mod->LoadCount) break;
         if (!MmIsAddressValid(&mod->SizeOfImage) || !mod->SizeOfImage) break;
-        if (!MmIsAddressValid(&mod->EntryPoint) || mod->EntryPoint < mod->BaseAddress ||
-            (DWORD_PTR)mod->EntryPoint > (DWORD_PTR)mod->BaseAddress + mod->SizeOfImage) break;
+        if (!MmIsAddressValid(&mod->EntryPoint) || mod->EntryPoint < mod->DllBase ||
+            (DWORD_PTR)mod->EntryPoint > (DWORD_PTR)mod->DllBase + mod->SizeOfImage) break;
     }
 
     for (entry = start->Flink; entry != start; entry = entry->Flink)
     {
-        mod = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
 
         status = RtlUnicodeStringToAnsiString(&name_a, &mod->BaseDllName, TRUE);
         ok(!status, "RtlUnicodeStringToAnsiString failed with %08x\n", status);
@@ -2055,7 +2055,7 @@ NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, PUNICODE_STRING registry)
     DbgPrint("loading driver\n");
 
     driver_obj = driver;
-    ldr_module = (LDR_MODULE *)driver->DriverSection;
+    ldr_module = (LDR_DATA_TABLE_ENTRY *)driver->DriverSection;
 
     /* Allow unloading of the driver */
     driver->DriverUnload = driver_Unload;

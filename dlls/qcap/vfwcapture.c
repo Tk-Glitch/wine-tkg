@@ -167,7 +167,6 @@ static const struct strmbase_filter_ops filter_ops =
     .filter_cleanup_stream = vfw_capture_cleanup_stream,
 };
 
-/* AMStreamConfig interface, we only need to implement {G,S}etFormat */
 static HRESULT WINAPI AMStreamConfig_QueryInterface(IAMStreamConfig *iface, REFIID iid, void **out)
 {
     VfwCapture *filter = impl_from_IAMStreamConfig(iface);
@@ -207,6 +206,9 @@ AMStreamConfig_SetFormat(IAMStreamConfig *iface, AM_MEDIA_TYPE *pmt)
         return E_POINTER;
     }
 
+    if (!IsEqualGUID(&pmt->majortype, &MEDIATYPE_Video))
+        return E_FAIL;
+
     if (This->source.pin.peer)
     {
         hr = IPin_QueryAccept(This->source.pin.peer, pmt);
@@ -239,21 +241,30 @@ AMStreamConfig_GetFormat( IAMStreamConfig *iface, AM_MEDIA_TYPE **pmt )
     return hr;
 }
 
-static HRESULT WINAPI
-AMStreamConfig_GetNumberOfCapabilities( IAMStreamConfig *iface, int *piCount,
-                                        int *piSize )
+static HRESULT WINAPI AMStreamConfig_GetNumberOfCapabilities(IAMStreamConfig *iface,
+        int *count, int *size)
 {
-    FIXME("%p: %p %p - stub, intentional\n", iface, piCount, piSize);
-    *piCount = 0;
-    return E_NOTIMPL; /* Not implemented for this interface */
+    VfwCapture *filter = impl_from_IAMStreamConfig(iface);
+
+    TRACE("filter %p, count %p, size %p.\n", filter, count, size);
+
+    if (!count || !size)
+        return E_POINTER;
+
+    *count = qcap_driver_get_caps_count(filter->driver_info);
+    *size = sizeof(VIDEO_STREAM_CONFIG_CAPS);
+
+    return S_OK;
 }
 
-static HRESULT WINAPI
-AMStreamConfig_GetStreamCaps( IAMStreamConfig *iface, int iIndex,
-                              AM_MEDIA_TYPE **pmt, BYTE *pSCC )
+static HRESULT WINAPI AMStreamConfig_GetStreamCaps(IAMStreamConfig *iface,
+        int index, AM_MEDIA_TYPE **pmt, BYTE *vscc)
 {
-    FIXME("%p: %d %p %p - stub, intentional\n", iface, iIndex, pmt, pSCC);
-    return E_NOTIMPL; /* Not implemented for this interface */
+    VfwCapture *filter = impl_from_IAMStreamConfig(iface);
+
+    TRACE("filter %p, index %d, pmt %p, vscc %p.\n", filter, index, pmt, vscc);
+
+    return qcap_driver_get_caps(filter->driver_info, index, pmt, (VIDEO_STREAM_CONFIG_CAPS *)vscc);
 }
 
 static const IAMStreamConfigVtbl IAMStreamConfig_VTable =
@@ -504,16 +515,16 @@ static HRESULT source_query_accept(struct strmbase_pin *pin, const AM_MEDIA_TYPE
 }
 
 static HRESULT source_get_media_type(struct strmbase_pin *pin,
-        unsigned int iPosition, AM_MEDIA_TYPE *pmt)
+        unsigned int index, AM_MEDIA_TYPE *pmt)
 {
     VfwCapture *filter = impl_from_strmbase_pin(pin);
     AM_MEDIA_TYPE *vfw_pmt;
     HRESULT hr;
 
-    if (iPosition > 0)
+    if (index >= qcap_driver_get_caps_count(filter->driver_info))
         return VFW_S_NO_MORE_ITEMS;
 
-    hr = qcap_driver_get_format(filter->driver_info, &vfw_pmt);
+    hr = qcap_driver_get_caps(filter->driver_info, index, &vfw_pmt, NULL);
     if (SUCCEEDED(hr)) {
         CopyMediaType(pmt, vfw_pmt);
         DeleteMediaType(vfw_pmt);

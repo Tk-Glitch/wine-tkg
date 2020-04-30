@@ -210,7 +210,7 @@
 @ stdcall -import CancelIo(long)
 @ stdcall -import CancelIoEx(long ptr)
 @ stdcall -import CancelSynchronousIo(long)
-# @ stub CancelThreadpoolIo
+@ stdcall CancelThreadpoolIo(ptr) ntdll.TpCancelAsyncIoOperation
 @ stdcall CancelTimerQueueTimer(ptr ptr)
 @ stdcall -import CancelWaitableTimer(long)
 @ stdcall -import ChangeTimerQueueTimer(ptr ptr long long)
@@ -230,7 +230,7 @@
 @ stdcall CloseThreadpool(ptr) ntdll.TpReleasePool
 @ stdcall CloseThreadpoolCleanupGroup(ptr) ntdll.TpReleaseCleanupGroup
 @ stdcall CloseThreadpoolCleanupGroupMembers(ptr long ptr) ntdll.TpReleaseCleanupGroupMembers
-# @ stub CloseThreadpoolIo
+@ stdcall CloseThreadpoolIo(ptr) ntdll.TpReleaseIoCompletion
 @ stdcall CloseThreadpoolTimer(ptr) ntdll.TpReleaseTimer
 @ stdcall CloseThreadpoolWait(ptr) ntdll.TpReleaseWait
 @ stdcall CloseThreadpoolWork(ptr) ntdll.TpReleaseWork
@@ -731,8 +731,8 @@
 # @ stub GetNamedPipeClientComputerNameW
 @ stdcall GetNamedPipeClientProcessId(long ptr)
 @ stdcall GetNamedPipeClientSessionId(long ptr)
-@ stdcall GetNamedPipeHandleStateA(long ptr ptr ptr ptr str long)
-@ stdcall GetNamedPipeHandleStateW(long ptr ptr ptr ptr wstr long)
+@ stdcall GetNamedPipeHandleStateA(long ptr ptr ptr ptr ptr long)
+@ stdcall -import GetNamedPipeHandleStateW(long ptr ptr ptr ptr ptr long)
 @ stdcall -import GetNamedPipeInfo(long ptr ptr ptr ptr)
 @ stdcall GetNamedPipeServerProcessId(long ptr)
 @ stdcall GetNamedPipeServerSessionId(long ptr)
@@ -1044,7 +1044,7 @@
 @ stdcall LZStart()
 @ stdcall LeaveCriticalSection(ptr) ntdll.RtlLeaveCriticalSection
 @ stdcall LeaveCriticalSectionWhenCallbackReturns(ptr ptr) ntdll.TpCallbackLeaveCriticalSectionOnCompletion
-# @ stub LoadAppInitDlls
+@ stdcall -import LoadAppInitDlls()
 @ stdcall -import LoadLibraryA(str)
 @ stdcall -import LoadLibraryExA( str long long)
 @ stdcall -import LoadLibraryExW(wstr long long)
@@ -1581,7 +1581,7 @@
 @ stdcall -import WaitForMultipleObjectsEx(long ptr long long long)
 @ stdcall -import WaitForSingleObject(long long)
 @ stdcall -import WaitForSingleObjectEx(long long long)
-# @ stub WaitForThreadpoolIoCallbacks
+@ stdcall WaitForThreadpoolIoCallbacks(ptr) ntdll.TpWaitForIoCompletion
 @ stdcall WaitForThreadpoolTimerCallbacks(ptr long) ntdll.TpWaitForTimer
 @ stdcall WaitForThreadpoolWaitCallbacks(ptr long) ntdll.TpWaitForWait
 @ stdcall WaitForThreadpoolWorkCallbacks(ptr long) ntdll.TpWaitForWork

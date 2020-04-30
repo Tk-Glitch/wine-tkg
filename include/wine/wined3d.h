@@ -312,7 +312,6 @@ enum wined3d_render_state
     WINED3D_RS_FOGEND                       = 37,
     WINED3D_RS_FOGDENSITY                   = 38,
     WINED3D_RS_STIPPLEENABLE                = 39,
-    WINED3D_RS_EDGEANTIALIAS                = 40,
     WINED3D_RS_COLORKEYENABLE               = 41,
     WINED3D_RS_MIPMAPLODBIAS                = 46,
     WINED3D_RS_RANGEFOGENABLE               = 48,
@@ -1211,7 +1210,6 @@ enum wined3d_shader_type
 #define WINED3DPRASTERCAPS_STIPPLE                              0x00000200
 #define WINED3DPRASTERCAPS_ANTIALIASSORTDEPENDENT               0x00000400
 #define WINED3DPRASTERCAPS_ANTIALIASSORTINDEPENDENT             0x00000800
-#define WINED3DPRASTERCAPS_ANTIALIASEDGES                       0x00001000
 #define WINED3DPRASTERCAPS_MIPMAPLODBIAS                        0x00002000
 #define WINED3DPRASTERCAPS_ZBUFFERLESSHSR                       0x00008000
 #define WINED3DPRASTERCAPS_FOGRANGE                             0x00010000

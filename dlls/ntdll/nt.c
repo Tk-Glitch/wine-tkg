@@ -2662,15 +2662,15 @@ static void get_ntdll_system_module(SYSTEM_MODULE *sm)
     char *ptr;
     ANSI_STRING str;
     PLIST_ENTRY entry;
-    PLDR_MODULE mod;
+    LDR_DATA_TABLE_ENTRY *mod;
 
     /* The first entry must be ntdll. */
     entry = NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList.Flink;
-    mod = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
+    mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
 
     sm->Section = 0;
     sm->MappedBaseAddress = 0;
-    sm->ImageBaseAddress = mod->BaseAddress;
+    sm->ImageBaseAddress = mod->DllBase;
     sm->ImageSize = mod->SizeOfImage;
     sm->Flags = mod->Flags;
     sm->LoadOrderIndex = 0;

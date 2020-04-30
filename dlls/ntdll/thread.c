@@ -348,11 +348,10 @@ TEB *thread_init(void)
 
     /* allocate and initialize the initial TEB */
 
-    signal_alloc_thread( &teb );
+    signal_init_threading();
+    virtual_alloc_teb( &teb );
     teb->Peb = peb;
     teb->Tib.StackBase = (void *)~0UL;
-    teb->StaticUnicodeString.Buffer = teb->StaticUnicodeBuffer;
-    teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
 
     thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
     thread_data->request_fd = -1;
@@ -366,6 +365,7 @@ TEB *thread_init(void)
     signal_init_thread( teb );
     virtual_init_threading();
     debug_init();
+    init_paths();
     set_process_name( __wine_main_argc, __wine_main_argv );
 
 	/* initialize user_shared_data */
@@ -488,28 +488,6 @@ BOOL read_process_memory_stats(int unix_pid, VM_COUNTERS *pvmi)
 }
 
 /***********************************************************************
- *           free_thread_data
- */
-static void free_thread_data( TEB *teb )
-{
-    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
-    SIZE_T size;
-
-    if (teb->DeallocationStack)
-    {
-        size = 0;
-        NtFreeVirtualMemory( GetCurrentProcess(), &teb->DeallocationStack, &size, MEM_RELEASE );
-    }
-    if (thread_data->start_stack)
-    {
-        size = 0;
-        NtFreeVirtualMemory( GetCurrentProcess(), &thread_data->start_stack, &size, MEM_RELEASE );
-    }
-    signal_free_thread( teb );
-}
-
-
-/***********************************************************************
  *           abort_thread
  */
 void abort_thread( int status )
@@ -576,7 +554,7 @@ void WINAPI RtlExitUserThread( ULONG status )
         if (thread_data->pthread_id)
         {
             pthread_join( thread_data->pthread_id, NULL );
-            free_thread_data( teb );
+            virtual_free_teb( teb );
         }
     }
 
@@ -722,13 +700,11 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT
 
     pthread_sigmask( SIG_BLOCK, &server_block_set, &sigset );
 
-    if ((status = signal_alloc_thread( &teb ))) goto error;
+    if ((status = virtual_alloc_teb( &teb ))) goto error;
 
     teb->Peb = NtCurrentTeb()->Peb;
     teb->ClientId.UniqueProcess = ULongToHandle(GetCurrentProcessId());
     teb->ClientId.UniqueThread  = ULongToHandle(tid);
-    teb->StaticUnicodeString.Buffer        = teb->StaticUnicodeBuffer;
-    teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
 
     /* create default activation context frame for new thread */
     RtlGetActiveActivationContext(&actctx);
@@ -788,7 +764,7 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT
     return STATUS_SUCCESS;
 
 error:
-    if (teb) free_thread_data( teb );
+    if (teb) virtual_free_teb( teb );
     if (handle) NtClose( handle );
     pthread_sigmask( SIG_SETMASK, &sigset, NULL );
     close( request_pipe[1] );
@@ -1045,11 +1021,11 @@ NTSTATUS WINAPI NtQueueApcThread( HANDLE handle, PNTAPCFUNC func, ULONG_PTR arg1
         req->handle = wine_server_obj_handle( handle );
         if (func)
         {
-            req->call.type         = APC_USER;
-            req->call.user.func    = wine_server_client_ptr( func );
-            req->call.user.args[0] = arg1;
-            req->call.user.args[1] = arg2;
-            req->call.user.args[2] = arg3;
+            req->call.type              = APC_USER;
+            req->call.user.user.func    = wine_server_client_ptr( func );
+            req->call.user.user.args[0] = arg1;
+            req->call.user.user.args[1] = arg2;
+            req->call.user.user.args[2] = arg3;
         }
         else req->call.type = APC_NONE;  /* wake up only */
         ret = wine_server_call( req );
@@ -1093,41 +1069,15 @@ TEB_ACTIVE_FRAME * WINAPI RtlGetFrame(void)
 NTSTATUS set_thread_context( HANDLE handle, const context_t *context, BOOL *self )
 {
     NTSTATUS ret;
-    DWORD dummy, i;
 
     SERVER_START_REQ( set_thread_context )
     {
         req->handle  = wine_server_obj_handle( handle );
-        req->suspend = 1;
         wine_server_add_data( req, context, sizeof(*context) );
         ret = wine_server_call( req );
         *self = reply->self;
     }
     SERVER_END_REQ;
-
-    if (ret == STATUS_PENDING)
-    {
-        for (i = 0; i < 100; i++)
-        {
-            SERVER_START_REQ( set_thread_context )
-            {
-                req->handle  = wine_server_obj_handle( handle );
-                req->suspend = 0;
-                wine_server_add_data( req, context, sizeof(*context) );
-                ret = wine_server_call( req );
-            }
-            SERVER_END_REQ;
-            if (ret == STATUS_PENDING)
-            {
-                LARGE_INTEGER timeout;
-                timeout.QuadPart = -10000;
-                NtDelayExecution( FALSE, &timeout );
-            }
-            else break;
-        }
-        NtResumeThread( handle, &dummy );
-        if (ret == STATUS_PENDING) ret = STATUS_ACCESS_DENIED;
-    }
 
     return ret;
 }
@@ -1139,42 +1089,35 @@ NTSTATUS set_thread_context( HANDLE handle, const context_t *context, BOOL *self
 NTSTATUS get_thread_context( HANDLE handle, context_t *context, unsigned int flags, BOOL *self )
 {
     NTSTATUS ret;
-    DWORD dummy, i;
 
     SERVER_START_REQ( get_thread_context )
     {
         req->handle  = wine_server_obj_handle( handle );
         req->flags   = flags;
-        req->suspend = 1;
         wine_server_set_reply( req, context, sizeof(*context) );
         ret = wine_server_call( req );
         *self = reply->self;
+        handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
 
     if (ret == STATUS_PENDING)
     {
-        for (i = 0; i < 100; i++)
+        LARGE_INTEGER timeout;
+        timeout.QuadPart = -1000000;
+        if (NtWaitForSingleObject( handle, FALSE, &timeout ))
         {
-            SERVER_START_REQ( get_thread_context )
-            {
-                req->handle  = wine_server_obj_handle( handle );
-                req->flags   = flags;
-                req->suspend = 0;
-                wine_server_set_reply( req, context, sizeof(*context) );
-                ret = wine_server_call( req );
-            }
-            SERVER_END_REQ;
-            if (ret == STATUS_PENDING)
-            {
-                LARGE_INTEGER timeout;
-                timeout.QuadPart = -10000;
-                NtDelayExecution( FALSE, &timeout );
-            }
-            else break;
+            NtClose( handle );
+            return STATUS_ACCESS_DENIED;
         }
-        NtResumeThread( handle, &dummy );
-        if (ret == STATUS_PENDING) ret = STATUS_ACCESS_DENIED;
+        SERVER_START_REQ( get_thread_context )
+        {
+            req->handle  = wine_server_obj_handle( handle );
+            req->flags   = flags;
+            wine_server_set_reply( req, context, sizeof(*context) );
+            ret = wine_server_call( req );
+        }
+        SERVER_END_REQ;
     }
     return ret;
 }

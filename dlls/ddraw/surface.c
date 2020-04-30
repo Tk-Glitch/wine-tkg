@@ -35,7 +35,8 @@ static inline struct ddraw_surface *impl_from_IDirectDrawGammaControl(IDirectDra
 
 static BOOL ddraw_surface_is_lost(const struct ddraw_surface *surface)
 {
-    return surface->ddraw->device_state != DDRAW_DEVICE_STATE_OK || surface->is_lost;
+    return ddraw_surface_can_be_lost(surface)
+            && (surface->ddraw->device_state != DDRAW_DEVICE_STATE_OK || surface->is_lost);
 }
 
 /* This is slow, of course. Also, in case of locks, we can't prevent other
@@ -3930,14 +3931,7 @@ static HRESULT WINAPI ddraw_surface7_UpdateOverlay(IDirectDrawSurface7 *iface, R
             src_rect, dst_wined3d_texture, dst_sub_resource_idx, dst_rect, flags);
     wined3d_mutex_unlock();
 
-    switch (hr)
-    {
-        case WINED3DERR_INVALIDCALL:        return DDERR_INVALIDPARAMS;
-        case WINEDDERR_NOTAOVERLAYSURFACE:  return DDERR_NOTAOVERLAYSURFACE;
-        case WINEDDERR_OVERLAYNOTVISIBLE:   return DDERR_OVERLAYNOTVISIBLE;
-        default:
-            return hr;
-    }
+    return hr_ddraw_from_wined3d(hr);
 }
 
 static HRESULT WINAPI ddraw_surface4_UpdateOverlay(IDirectDrawSurface4 *iface, RECT *src_rect,
@@ -5421,6 +5415,7 @@ static HRESULT WINAPI d3d_texture1_Load(IDirect3DTexture *iface, IDirect3DTextur
  * The VTable
  *****************************************************************************/
 
+/* Some windowed mode wrappers expect this vtbl to be writable. */
 static struct IDirectDrawSurface7Vtbl ddraw_surface7_vtbl =
 {
     /* IUnknown */
@@ -5480,6 +5475,7 @@ static struct IDirectDrawSurface7Vtbl ddraw_surface7_vtbl =
     ddraw_surface7_GetLOD,
 };
 
+/* Some windowed mode wrappers expect this vtbl to be writable. */
 static struct IDirectDrawSurface4Vtbl ddraw_surface4_vtbl =
 {
     /* IUnknown */
@@ -5534,6 +5530,7 @@ static struct IDirectDrawSurface4Vtbl ddraw_surface4_vtbl =
     ddraw_surface4_ChangeUniquenessValue,
 };
 
+/* Some windowed mode wrappers expect this vtbl to be writable. */
 static struct IDirectDrawSurface3Vtbl ddraw_surface3_vtbl =
 {
     /* IUnknown */
@@ -5582,6 +5579,7 @@ static struct IDirectDrawSurface3Vtbl ddraw_surface3_vtbl =
     ddraw_surface3_SetSurfaceDesc,
 };
 
+/* Some windowed mode wrappers expect this vtbl to be writable. */
 static struct IDirectDrawSurface2Vtbl ddraw_surface2_vtbl =
 {
     /* IUnknown */
@@ -5628,6 +5626,7 @@ static struct IDirectDrawSurface2Vtbl ddraw_surface2_vtbl =
     ddraw_surface2_PageUnlock,
 };
 
+/* Bad Mojo Redux expects this vtbl to be writable. */
 static struct IDirectDrawSurfaceVtbl ddraw_surface1_vtbl =
 {
     /* IUnknown */
@@ -5900,6 +5899,7 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
     struct wined3d_display_mode mode;
     DDSURFACEDESC2 *desc, *mip_desc;
     struct ddraw_texture *texture;
+    BOOL sysmem_fallback = FALSE;
     unsigned int layers = 1;
     unsigned int pitch = 0;
     BOOL reserve_memory;
@@ -6222,9 +6222,14 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
             if (!(ddraw->flags & DDRAW_NO3D) && SUCCEEDED(hr = wined3d_check_device_format(ddraw->wined3d,
                     ddraw->wined3d_adapter, WINED3D_DEVICE_TYPE_HAL, mode.format_id,
                     usage, bind_flags, WINED3D_RTYPE_TEXTURE_2D, wined3d_desc.format)))
+            {
                 desc->ddsCaps.dwCaps |= DDSCAPS_VIDEOMEMORY;
+            }
             else
+            {
                 desc->ddsCaps.dwCaps |= DDSCAPS_SYSTEMMEMORY;
+                sysmem_fallback = TRUE;
+            }
         }
         else if (!(desc->ddsCaps.dwCaps & DDSCAPS_TEXTURE))
         {
@@ -6433,6 +6438,7 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
     root = wined3d_texture_get_sub_resource_parent(wined3d_texture, 0);
     wined3d_texture_decref(wined3d_texture);
     root->is_complex_root = TRUE;
+    root->sysmem_fallback = sysmem_fallback;
     texture->root = root;
     wined3d_device_incref(texture->wined3d_device = ddraw->wined3d_device);
 
@@ -6456,6 +6462,7 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
         for (j = 0; j < levels; ++j)
         {
             mip = wined3d_texture_get_sub_resource_parent(wined3d_texture, i * levels + j);
+            mip->sysmem_fallback = sysmem_fallback;
             mip_desc = &mip->surface_desc;
             if (desc->ddsCaps.dwCaps & DDSCAPS_MIPMAP)
                 mip_desc->u2.dwMipMapCount = levels - j;
@@ -6564,6 +6571,7 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
             }
 
             last = wined3d_texture_get_sub_resource_parent(wined3d_texture, 0);
+            last->sysmem_fallback = sysmem_fallback;
             wined3d_texture_decref(wined3d_texture);
             texture->root = last;
             wined3d_device_incref(texture->wined3d_device = ddraw->wined3d_device);

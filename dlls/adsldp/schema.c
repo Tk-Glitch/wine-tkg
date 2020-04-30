@@ -96,7 +96,7 @@ ADSTYPEENUM get_schema_type(const WCHAR *name, const struct attribute_type *at, 
     if (!wcscmp(type->syntax, L"1.3.6.1.4.1.1466.115.121.1.24"))
         return ADSTYPE_UTC_TIME;
     if (!wcscmp(type->syntax, L"1.3.6.1.4.1.1466.115.121.1.26"))
-        return ADSTYPE_CASE_EXACT_STRING;
+        return ADSTYPE_CASE_IGNORE_STRING;
     if (!wcscmp(type->syntax, L"1.3.6.1.4.1.1466.115.121.1.27"))
         return ADSTYPE_INTEGER;
     if (!wcscmp(type->syntax, L"1.3.6.1.4.1.1466.115.121.1.38"))
@@ -227,7 +227,7 @@ static WCHAR *parse_name(WCHAR **str, ULONG *name_count)
 
     if (*p != '\'')
     {
-        FIXME("not suported NAME start at %s\n", debugstr_w(p));
+        FIXME("not supported NAME start at %s\n", debugstr_w(p));
         return NULL;
     }
 
@@ -433,6 +433,7 @@ struct attribute_type *load_schema(LDAP *ld, ULONG *at_single_count, ULONG *at_m
     }
 
 exit:
+    ldap_value_freeW(schema);
     ldap_msgfree(res);
     if (at)
     {

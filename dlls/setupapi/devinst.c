@@ -736,6 +736,7 @@ static void delete_device(struct device *device)
 
     RegCloseKey(device->key);
     heap_free(device->instanceId);
+    heap_free(device->drivers);
 
     LIST_FOR_EACH_ENTRY_SAFE(iface, next, &device->interfaces,
             struct device_iface, entry)
@@ -4266,7 +4267,11 @@ BOOL WINAPI SetupDiGetINFClassW(PCWSTR inf, LPGUID class_guid, PWSTR class_name,
     have_name = 0 < dret;
 
     if (dret >= MAX_PATH -1) FIXME("buffer might be too small\n");
-    if (have_guid && !have_name) FIXME("class name lookup via guid not implemented\n");
+    if (have_guid && !have_name)
+    {
+        class_name[0] = '\0';
+        FIXME("class name lookup via guid not implemented\n");
+    }
 
     if (have_name)
     {
@@ -4309,6 +4314,7 @@ static LSTATUS get_device_property(struct device *device, const DEVPROPKEY *prop
     {
         value_size = prop_buff_size;
         ls = RegQueryValueExW(hkey, NULL, NULL, &value_type, prop_buff, &value_size);
+        RegCloseKey(hkey);
     }
 
     switch (ls)
@@ -4793,7 +4799,8 @@ BOOL WINAPI SetupDiEnumDriverInfoA(HDEVINFO devinfo, SP_DEVINFO_DATA *device_dat
 
     driver_dataW.cbSize = sizeof(driver_dataW);
     ret = SetupDiEnumDriverInfoW(devinfo, device_data, type, index, &driver_dataW);
-    driver_data_wtoa(driver_data, &driver_dataW);
+    if (ret) driver_data_wtoa(driver_data, &driver_dataW);
+
     return ret;
 }
 
@@ -4964,7 +4971,10 @@ BOOL WINAPI SetupDiGetDriverInfoDetailA(HDEVINFO devinfo, SP_DEVINFO_DATA *devic
     if (ret_size)
         *ret_size = size_needed;
     if (!detail_data)
+    {
+        SetupCloseInfFile(hinf);
         return TRUE;
+    }
 
     detail_data->CompatIDsLength = detail_data->CompatIDsOffset = 0;
     detail_data->HardwareID[0] = 0;

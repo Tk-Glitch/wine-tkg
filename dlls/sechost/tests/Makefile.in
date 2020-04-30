@@ -1,5 +1,0 @@
-TESTDLL   = sechost.dll
-IMPORTS   = sechost
-
-C_SRCS = \
-	devnotify.c

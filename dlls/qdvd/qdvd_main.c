@@ -1,7 +1,7 @@
 /*
- * Win32 libwine stubs
+ * DirectShow DVD support
  *
- * Copyright 2019 Alexandre Julliard
+ * Copyright 2009 Austin English
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,42 +18,30 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef _WIN32
-
-#include "config.h"
-
-#include <stdlib.h>
+#include <stdarg.h>
 #include "windef.h"
+#include "winbase.h"
+#include "wine/debug.h"
 
-int __wine_main_argc = 0;
-char **__wine_main_argv = NULL;
-WCHAR **__wine_main_wargv = NULL;
+WINE_DEFAULT_DEBUG_CHANNEL(qdvd);
 
-const char *wine_get_config_dir(void)
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 {
-    const char *ret = getenv( "WINEPREFIX" );
-    if (!ret) ret = getenv( "USERPROFILE" );
-    return ret;
+    if (reason == DLL_WINE_PREATTACH)
+        return FALSE; /* prefer native version */
+
+    if (reason == DLL_PROCESS_ATTACH)
+        DisableThreadLibraryCalls(instance);
+    return TRUE;
 }
 
-const char *wine_get_data_dir(void)
+HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
 {
-    return NULL;
+    FIXME("clsid %s, iid %s, out %p, stub!\n", debugstr_guid(clsid), debugstr_guid(iid), out);
+    return CLASS_E_CLASSNOTAVAILABLE;
 }
 
-const char *wine_get_build_dir(void)
+HRESULT WINAPI DllCanUnloadNow(void)
 {
-    return NULL;
+    return S_FALSE;
 }
-
-const char *wine_get_user_name(void)
-{
-    return getenv( "USERNAME" );
-}
-
-const char *wine_dll_enum_load_path( unsigned int index )
-{
-    return NULL;
-}
-
-#endif  /* _WIN32 */

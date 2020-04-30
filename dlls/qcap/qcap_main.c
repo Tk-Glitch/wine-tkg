@@ -129,6 +129,7 @@ static struct class_factory audio_record_cf = {{&class_factory_vtbl}, audio_reco
 static struct class_factory avi_compressor_cf = {{&class_factory_vtbl}, avi_compressor_create};
 static struct class_factory avi_mux_cf = {{&class_factory_vtbl}, avi_mux_create};
 static struct class_factory capture_graph_cf = {{&class_factory_vtbl}, capture_graph_create};
+static struct class_factory file_writer_cf = {{&class_factory_vtbl}, file_writer_create};
 static struct class_factory smart_tee_cf = {{&class_factory_vtbl}, smart_tee_create};
 static struct class_factory vfw_capture_cf = {{&class_factory_vtbl}, vfw_capture_create};
 
@@ -158,6 +159,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
         factory = &capture_graph_cf;
     else if (IsEqualGUID(clsid, &CLSID_CaptureGraphBuilder2))
         factory = &capture_graph_cf;
+    else if (IsEqualGUID(clsid, &CLSID_FileWriter))
+        factory = &file_writer_cf;
     else if (IsEqualGUID(clsid, &CLSID_SmartTee))
         factory = &smart_tee_cf;
     else if (IsEqualGUID(clsid, &CLSID_VfwCapture))
@@ -221,12 +224,32 @@ static const REGFILTER2 reg_smart_tee =
     .u.s2.rgPins2 = reg_smart_tee_pins,
 };
 
+static const REGPINTYPES reg_file_writer_sink_mt = {&GUID_NULL, &GUID_NULL};
+
+static const REGFILTERPINS2 reg_file_writer_pins[1] =
+{
+    {
+        .cInstances = 1,
+        .nMediaTypes = 1,
+        .lpMediaType = &reg_file_writer_sink_mt,
+    },
+};
+
+static const REGFILTER2 reg_file_writer =
+{
+    .dwVersion = 2,
+    .dwMerit = MERIT_DO_NOT_USE,
+    .u.s2.cPins2 = 1,
+    .u.s2.rgPins2 = reg_file_writer_pins,
+};
+
 /***********************************************************************
  *    DllRegisterServer (QCAP.@)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
     static const WCHAR avi_muxW[] = {'A','V','I',' ','M','u','x',0};
+    static const WCHAR file_writerW[] = {'F','i','l','e',' ','w','r','i','t','e','r',0};
     static const WCHAR smart_teeW[] = {'S','m','a','r','t',' ','T','e','e',0};
     IFilterMapper2 *mapper;
     HRESULT hr;
@@ -240,6 +263,8 @@ HRESULT WINAPI DllRegisterServer(void)
 
     IFilterMapper2_RegisterFilter(mapper, &CLSID_AviDest, avi_muxW,
             NULL, NULL, NULL, &reg_avi_mux);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_FileWriter, file_writerW,
+            NULL, NULL, NULL, &reg_file_writer);
     IFilterMapper2_RegisterFilter(mapper, &CLSID_SmartTee, smart_teeW,
             NULL, NULL, NULL, &reg_smart_tee);
 
@@ -263,6 +288,7 @@ HRESULT WINAPI DllUnregisterServer(void)
         return hr;
 
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_AviDest);
+    IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_FileWriter);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_SmartTee);
 
     IFilterMapper2_Release(mapper);

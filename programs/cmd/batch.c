@@ -301,60 +301,8 @@ WCHAR *WCMD_fgets(WCHAR *buf, DWORD noChars, HANDLE h)
   return buf;
 }
 
-/* WCMD_splitpath - copied from winefile as no obvious way to use it otherwise */
-void WCMD_splitpath(const WCHAR* path, WCHAR* drv, WCHAR* dir, WCHAR* name, WCHAR* ext)
-{
-        const WCHAR* end; /* end of processed string */
-	const WCHAR* p;	 /* search pointer */
-	const WCHAR* s;	 /* copy pointer */
-
-	/* extract drive name */
-	if (path[0] && path[1]==':') {
-		if (drv) {
-			*drv++ = *path++;
-			*drv++ = *path++;
-			*drv = '\0';
-		}
-	} else if (drv)
-		*drv = '\0';
-
-        end = path + lstrlenW(path);
-
-	/* search for begin of file extension */
-	for(p=end; p>path && *--p!='\\' && *p!='/'; )
-		if (*p == '.') {
-			end = p;
-			break;
-		}
-
-	if (ext)
-		for(s=end; (*ext=*s++); )
-			ext++;
-
-	/* search for end of directory name */
-	for(p=end; p>path; )
-		if (*--p=='\\' || *p=='/') {
-			p++;
-			break;
-		}
-
-	if (name) {
-		for(s=p; s<end; )
-			*name++ = *s++;
-
-		*name = '\0';
-	}
-
-	if (dir) {
-		for(s=path; s<p; )
-			*dir++ = *s++;
-
-		*dir = '\0';
-	}
-}
-
 /****************************************************************************
- * WCMD_HandleTildaModifiers
+ * WCMD_HandleTildeModifiers
  *
  * Handle the ~ modifiers when expanding %0-9 or (%a-z/A-Z in for command)
  *    %~xxxxxV  (V=0-9 or A-Z, a-z)
@@ -385,7 +333,7 @@ void WCMD_splitpath(const WCHAR* path, WCHAR* drv, WCHAR* dir, WCHAR* name, WCHA
  *  Hence search forwards until find an invalid modifier, and then
  *  backwards until find for variable or 0-9
  */
-void WCMD_HandleTildaModifiers(WCHAR **start, BOOL atExecute)
+void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
 {
 
 #define NUMMODIFIERS 11
@@ -627,7 +575,7 @@ void WCMD_HandleTildaModifiers(WCHAR **start, BOOL atExecute)
       BOOL addSpace = (finaloutput[0] != 0x00);
 
       /* Split into components */
-      WCMD_splitpath(fullfilename, drive, dir, fname, ext);
+      _wsplitpath(fullfilename, drive, dir, fname, ext);
 
       /* 5. Handle 'd' : Drive Letter */
       if (wmemchr(firstModifier, 'd', modifierLen) != NULL) {

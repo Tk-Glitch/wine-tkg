@@ -106,9 +106,11 @@ DirectShow
 M:	Zebediah Figura <z.figura12@gmail.com>
 P:	Andrew Eikum <aeikum@codeweavers.com>
 F:	dlls/amstream/
+F:	dlls/devenum/
 F:	dlls/mciqtz32/
 F:	dlls/qasf/
 F:	dlls/qcap/
+F:	dlls/qdvd/
 F:	dlls/qedit/
 F:	dlls/quartz/
 F:	dlls/strmbase/
@@ -278,6 +280,17 @@ M:	Hans Leidekker <hans@codeweavers.com>
 F:	dlls/wbemdisp/
 F:	dlls/wbemprox/
 F:	dlls/wmiutils/
+
+Windows Media Foundation
+M:	Nikolay Sivov <nsivov@codeweavers.com>
+F:	dlls/mf/
+F:	dlls/mferror/
+F:	dlls/mfmediaengine/
+F:	dlls/mfplat/
+F:	dlls/mfplay/
+F:	dlls/mfreadwrite/
+F:	dlls/mfuuid/
+F:	dlls/rtworkq/
 
 Wine server, IPC
 M:	Alexandre Julliard <julliard@winehq.org>

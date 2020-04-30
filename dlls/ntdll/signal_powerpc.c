@@ -1014,31 +1014,20 @@ int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 
 
 /**********************************************************************
+ *             signal_init_threading
+ */
+void signal_init_threading(void)
+{
+    pthread_key_create( &teb_key, NULL );
+}
+
+
+/**********************************************************************
  *		signal_alloc_thread
  */
-NTSTATUS signal_alloc_thread( TEB **teb )
+NTSTATUS signal_alloc_thread( TEB *teb )
 {
-    static size_t sigstack_alignment;
-    SIZE_T size;
-    NTSTATUS status;
-
-    if (!sigstack_alignment)
-    {
-        size_t min_size = page_size;  /* this is just for the TEB, we don't use a signal stack yet */
-        /* find the first power of two not smaller than min_size */
-        while ((1u << sigstack_alignment) < min_size) sigstack_alignment++;
-        assert( sizeof(TEB) <= min_size );
-    }
-
-    size = 1 << sigstack_alignment;
-    *teb = NULL;
-    if (!(status = virtual_alloc_aligned( (void **)teb, 0, &size, MEM_COMMIT | MEM_TOP_DOWN,
-                                          PAGE_READWRITE, sigstack_alignment )))
-    {
-        (*teb)->Tib.Self = &(*teb)->Tib;
-        (*teb)->Tib.ExceptionList = (void *)~0UL;
-    }
-    return status;
+    return STATUS_SUCCESS;
 }
 
 
@@ -1047,9 +1036,6 @@ NTSTATUS signal_alloc_thread( TEB **teb )
  */
 void signal_free_thread( TEB *teb )
 {
-    SIZE_T size = 0;
-
-    NtFreeVirtualMemory( NtCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
 }
 
 
@@ -1058,13 +1044,6 @@ void signal_free_thread( TEB *teb )
  */
 void signal_init_thread( TEB *teb )
 {
-    static BOOL init_done;
-
-    if (!init_done)
-    {
-        pthread_key_create( &teb_key, NULL );
-        init_done = TRUE;
-    }
     pthread_setspecific( teb_key, teb );
 }
 

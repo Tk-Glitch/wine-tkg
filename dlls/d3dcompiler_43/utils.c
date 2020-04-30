@@ -820,6 +820,10 @@ struct hlsl_type *new_hlsl_type(const char *name, enum hlsl_type_class type_clas
     type->base_type = base_type;
     type->dimx = dimx;
     type->dimy = dimy;
+    if (type_class == HLSL_CLASS_MATRIX)
+        type->reg_size = is_row_major(type) ? dimy : dimx;
+    else
+        type->reg_size = 1;
 
     list_add_tail(&hlsl_ctx.types, &type->entry);
 
@@ -836,6 +840,7 @@ struct hlsl_type *new_array_type(struct hlsl_type *basic_type, unsigned int arra
     type->modifiers = basic_type->modifiers;
     type->e.array.elements_count = array_size;
     type->e.array.type = basic_type;
+    type->reg_size = basic_type->reg_size * array_size;
     return type;
 }
 
@@ -927,7 +932,7 @@ BOOL compare_hlsl_types(const struct hlsl_type *t1, const struct hlsl_type *t2)
     return TRUE;
 }
 
-struct hlsl_type *clone_hlsl_type(struct hlsl_type *old)
+struct hlsl_type *clone_hlsl_type(struct hlsl_type *old, unsigned int default_majority)
 {
     struct hlsl_type *type;
     struct hlsl_struct_field *old_field, *field;
@@ -952,14 +957,21 @@ struct hlsl_type *clone_hlsl_type(struct hlsl_type *old)
     type->dimx = old->dimx;
     type->dimy = old->dimy;
     type->modifiers = old->modifiers;
+    if (!(type->modifiers & HLSL_MODIFIERS_MAJORITY_MASK))
+        type->modifiers |= default_majority;
     type->sampler_dim = old->sampler_dim;
     switch (old->type)
     {
         case HLSL_CLASS_ARRAY:
-            type->e.array.type = old->e.array.type;
+            type->e.array.type = clone_hlsl_type(old->e.array.type, default_majority);
             type->e.array.elements_count = old->e.array.elements_count;
+            type->reg_size = type->e.array.elements_count * type->e.array.type->reg_size;
             break;
+
         case HLSL_CLASS_STRUCT:
+        {
+            unsigned int reg_size = 0;
+
             type->e.elements = d3dcompiler_alloc(sizeof(*type->e.elements));
             if (!type->e.elements)
             {
@@ -984,15 +996,25 @@ struct hlsl_type *clone_hlsl_type(struct hlsl_type *old)
                     d3dcompiler_free(type);
                     return NULL;
                 }
-                field->type = clone_hlsl_type(old_field->type);
+                field->type = clone_hlsl_type(old_field->type, default_majority);
                 field->name = d3dcompiler_strdup(old_field->name);
                 if (old_field->semantic)
                     field->semantic = d3dcompiler_strdup(old_field->semantic);
                 field->modifiers = old_field->modifiers;
+                field->reg_offset = reg_size;
+                reg_size += field->type->reg_size;
                 list_add_tail(type->e.elements, &field->entry);
             }
+            type->reg_size = reg_size;
             break;
+        }
+
+        case HLSL_CLASS_MATRIX:
+            type->reg_size = is_row_major(type) ? type->dimy : type->dimx;
+            break;
+
         default:
+            type->reg_size = 1;
             break;
     }
 
@@ -1882,7 +1904,10 @@ static void debug_dump_instr_list(const struct list *list)
 
 static void debug_dump_src(const struct hlsl_ir_node *node)
 {
-    wine_dbg_printf("%p", node);
+    if (node->index)
+        wine_dbg_printf("@%u", node->index);
+    else
+        wine_dbg_printf("%p", node);
 }
 
 static void debug_dump_ir_var(const struct hlsl_ir_var *var)
@@ -2156,7 +2181,10 @@ static void debug_dump_ir_loop(const struct hlsl_ir_loop *loop)
 
 static void debug_dump_instr(const struct hlsl_ir_node *instr)
 {
-    wine_dbg_printf("%4u: %p: ", instr->index, instr);
+    if (instr->index)
+        wine_dbg_printf("%4u: ", instr->index);
+    else
+        wine_dbg_printf("%p: ", instr);
     switch (instr->type)
     {
         case HLSL_IR_EXPR:

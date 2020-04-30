@@ -485,6 +485,21 @@ static XRRCrtcInfo *xrandr12_get_primary_crtc_info( XRRScreenResources *resource
     return NULL;
 }
 
+static unsigned int get_frequency( const XRRModeInfo *mode )
+{
+    unsigned int dots = mode->hTotal * mode->vTotal;
+
+    if (!dots)
+        return 0;
+
+    if (mode->modeFlags & RR_DoubleScan)
+        dots *= 2;
+    if (mode->modeFlags & RR_Interlace)
+        dots /= 2;
+
+    return (mode->dotClock + dots / 2) / dots;
+}
+
 static int xrandr12_init_modes(void)
 {
     unsigned int only_one_resolution = 1, mode_count, primary_width, primary_height;
@@ -568,19 +583,10 @@ static int xrandr12_init_modes(void)
         primary_height = tmp;
     }
 
-    int limit = 53; // required by nier_automata (55), sekiro (53), dark_souls3 (53)
-    int capped_resources_nmode = 1;
-
-    if (resources->nmode > limit) {
-        capped_resources_nmode = limit;
-    } else {
-        capped_resources_nmode = resources->nmode;
-    }
-    
     xrandr_mode_count = 0;
     for (i = 0; i < output_info->nmode; ++i)
     {
-        for (j = 0; j < capped_resources_nmode; ++j)
+        for (j = 0; j < resources->nmode; ++j)
         {
             XRRModeInfo *mode = &resources->modes[j];
 
@@ -811,7 +817,7 @@ static BOOL xrandr14_get_adapters( ULONG_PTR gpu_id, struct x11drv_adapter **new
     XRRScreenResources *screen_resources = NULL;
     XRRProviderInfo *provider_info = NULL;
     XRRCrtcInfo *enum_crtc_info, *crtc_info = NULL;
-    XRROutputInfo *output_info = NULL;
+    XRROutputInfo *enum_output_info, *output_info = NULL;
     RROutput *outputs;
     INT crtc_count, output_count;
     INT primary_adapter = 0;
@@ -875,24 +881,34 @@ static BOOL xrandr14_get_adapters( ULONG_PTR gpu_id, struct x11drv_adapter **new
         if (!output_info->crtc || !crtc_info->mode)
             detached = TRUE;
 
-        /* Ignore crtc mirroring slaves because mirrored monitors are under the same adapter */
+        /* Ignore mirroring output slaves because mirrored monitors are under the same adapter */
         mirrored = FALSE;
         if (!detached)
         {
-            for (j = 0; j < screen_resources->ncrtc; ++j)
+            for (j = 0; j < screen_resources->noutput; ++j)
             {
-                enum_crtc_info = pXRRGetCrtcInfo( gdi_display, screen_resources, screen_resources->crtcs[j] );
-                if (!enum_crtc_info)
-                    goto done;
+                enum_output_info = pXRRGetOutputInfo( gdi_display, screen_resources, screen_resources->outputs[j] );
+                if (!enum_output_info)
+                    continue;
 
-                /* Some crtcs on different providers may have the same coordinates, aka mirrored.
-                 * Choose the crtc with the lowest value as primary and the rest will then be slaves
-                 * in a mirroring set */
+                if (enum_output_info->connection != RR_Connected || !enum_output_info->crtc)
+                {
+                    pXRRFreeOutputInfo( enum_output_info );
+                    continue;
+                }
+
+                enum_crtc_info = pXRRGetCrtcInfo( gdi_display, screen_resources, enum_output_info->crtc );
+                pXRRFreeOutputInfo( enum_output_info );
+                if (!enum_crtc_info)
+                    continue;
+
+                /* Some outputs may have the same coordinates, aka mirrored. Choose the output with
+                 * the lowest value as primary and the rest will then be slaves in a mirroring set */
                 if (crtc_info->x == enum_crtc_info->x &&
                     crtc_info->y == enum_crtc_info->y &&
                     crtc_info->width == enum_crtc_info->width &&
                     crtc_info->height == enum_crtc_info->height &&
-                    output_info->crtc > screen_resources->crtcs[j])
+                    outputs[i] > screen_resources->outputs[j])
                 {
                     mirrored = TRUE;
                     pXRRFreeCrtcInfo( enum_crtc_info );

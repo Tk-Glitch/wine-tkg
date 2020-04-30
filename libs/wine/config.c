@@ -40,25 +40,18 @@
 #define _POSIX_SPAWN_DISABLE_ASLR 0x0100
 #endif
 #endif
+#include "wine/asm.h"
 #include "wine/library.h"
-
-static const char server_config_dir[] = "/.wine";        /* config dir relative to $HOME */
-static const char server_root_prefix[] = "/tmp/.wine";   /* prefix for server root dir */
-static const char server_dir_prefix[] = "/server-";      /* prefix for server dir */
 
 static char *bindir;
 static char *dlldir;
 static char *datadir;
-static char *config_dir;
-static char *server_dir;
-static char *build_dir;
-static char *user_name;
+const char *build_dir;
 static char *argv0_name;
 static char *wineserver64;
 
 #ifdef __GNUC__
 static void fatal_error( const char *err, ... )  __attribute__((noreturn,format(printf,1,2)));
-static void fatal_perror( const char *err, ... )  __attribute__((noreturn,format(printf,1,2)));
 #endif
 
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
@@ -77,19 +70,6 @@ static void fatal_error( const char *err, ... )
     va_start( args, err );
     fprintf( stderr, "wine: " );
     vfprintf( stderr, err, args );
-    va_end( args );
-    exit(1);
-}
-
-/* die on a fatal error */
-static void fatal_perror( const char *err, ... )
-{
-    va_list args;
-
-    va_start( args, err );
-    fprintf( stderr, "wine: " );
-    vfprintf( stderr, err, args );
-    perror( " " );
     va_end( args );
     exit(1);
 }
@@ -119,13 +99,6 @@ static inline int strendswith( const char* str, const char* end )
     size_t len = strlen( str );
     size_t tail = strlen( end );
     return len >= tail && !strcmp( str + len - tail, end );
-}
-
-/* remove all trailing slashes from a path name */
-static inline void remove_trailing_slashes( char *path )
-{
-    int len = strlen( path );
-    while (len > 1 && path[len-1] == '/') path[--len] = 0;
 }
 
 /* build a path from the specified dir and name */
@@ -221,96 +194,11 @@ static char *get_runtime_argvdir( const char *argv0 )
     return bindir;
 }
 
-/* initialize the server directory value */
-static void init_server_dir( dev_t dev, ino_t ino )
-{
-    char *p, *root;
-
-#ifdef __ANDROID__  /* there's no /tmp dir on Android */
-    root = build_path( config_dir, ".wineserver" );
-#else
-    root = xmalloc( sizeof(server_root_prefix) + 12 );
-    sprintf( root, "%s-%u", server_root_prefix, getuid() );
-#endif
-
-    server_dir = xmalloc( strlen(root) + sizeof(server_dir_prefix) + 2*sizeof(dev) + 2*sizeof(ino) + 2 );
-    strcpy( server_dir, root );
-    strcat( server_dir, server_dir_prefix );
-    p = server_dir + strlen(server_dir);
-
-    if (dev != (unsigned long)dev)
-        p += sprintf( p, "%lx%08lx-", (unsigned long)((unsigned long long)dev >> 32), (unsigned long)dev );
-    else
-        p += sprintf( p, "%lx-", (unsigned long)dev );
-
-    if (ino != (unsigned long)ino)
-        sprintf( p, "%lx%08lx", (unsigned long)((unsigned long long)ino >> 32), (unsigned long)ino );
-    else
-        sprintf( p, "%lx", (unsigned long)ino );
-    free( root );
-}
-
 /* retrieve the default dll dir */
 const char *get_dlldir( const char **default_dlldir )
 {
     *default_dlldir = DLLDIR;
     return dlldir;
-}
-
-/* initialize all the paths values */
-static void init_paths(void)
-{
-    struct stat st;
-
-    const char *home = getenv( "HOME" );
-    const char *user = NULL;
-    const char *prefix = getenv( "WINEPREFIX" );
-    char uid_str[32];
-    struct passwd *pwd = getpwuid( getuid() );
-
-    if (pwd)
-    {
-        user = pwd->pw_name;
-        if (!home) home = pwd->pw_dir;
-    }
-    if (!user)
-    {
-        sprintf( uid_str, "%lu", (unsigned long)getuid() );
-        user = uid_str;
-    }
-    user_name = xstrdup( user );
-
-    /* build config_dir */
-
-    if (prefix)
-    {
-        config_dir = xstrdup( prefix );
-        remove_trailing_slashes( config_dir );
-        if (config_dir[0] != '/')
-            fatal_error( "invalid directory %s in WINEPREFIX: not an absolute path\n", prefix );
-        if (stat( config_dir, &st ) == -1)
-        {
-            if (errno == ENOENT) return;  /* will be created later on */
-            fatal_perror( "cannot open %s as specified in WINEPREFIX", config_dir );
-        }
-    }
-    else
-    {
-        if (!home) fatal_error( "could not determine your home directory\n" );
-        if (home[0] != '/') fatal_error( "your home directory %s is not an absolute path\n", home );
-        config_dir = xmalloc( strlen(home) + sizeof(server_config_dir) );
-        strcpy( config_dir, home );
-        remove_trailing_slashes( config_dir );
-        strcat( config_dir, server_config_dir );
-        if (stat( config_dir, &st ) == -1)
-        {
-            if (errno == ENOENT) return;  /* will be created later on */
-            fatal_perror( "cannot open %s", config_dir );
-        }
-    }
-    if (!S_ISDIR(st.st_mode)) fatal_error( "%s is not a directory\n", config_dir );
-    if (st.st_uid != getuid()) fatal_error( "%s is not owned by you\n", config_dir );
-    init_server_dir( st.st_dev, st.st_ino );
 }
 
 /* check if bindir is valid by checking for wineserver */
@@ -451,27 +339,142 @@ done:
     }
 }
 
+#ifdef __ASM_OBSOLETE
+
+static const char server_config_dir[] = "/.wine";        /* config dir relative to $HOME */
+static const char server_root_prefix[] = "/tmp/.wine";   /* prefix for server root dir */
+static const char server_dir_prefix[] = "/server-";      /* prefix for server dir */
+
+static char *config_dir;
+static char *server_dir;
+static char *user_name;
+
+/* remove all trailing slashes from a path name */
+static inline void remove_trailing_slashes( char *path )
+{
+    int len = strlen( path );
+    while (len > 1 && path[len-1] == '/') path[--len] = 0;
+}
+
+/* die on a fatal error */
+static void fatal_perror( const char *err, ... )
+{
+    va_list args;
+
+    va_start( args, err );
+    fprintf( stderr, "wine: " );
+    vfprintf( stderr, err, args );
+    perror( " " );
+    va_end( args );
+    exit(1);
+}
+
+/* initialize the server directory value */
+static void init_server_dir( dev_t dev, ino_t ino )
+{
+    char *p, *root;
+
+#ifdef __ANDROID__  /* there's no /tmp dir on Android */
+    root = build_path( config_dir, ".wineserver" );
+#else
+    root = xmalloc( sizeof(server_root_prefix) + 12 );
+    sprintf( root, "%s-%u", server_root_prefix, getuid() );
+#endif
+
+    server_dir = xmalloc( strlen(root) + sizeof(server_dir_prefix) + 2*sizeof(dev) + 2*sizeof(ino) + 2 );
+    strcpy( server_dir, root );
+    strcat( server_dir, server_dir_prefix );
+    p = server_dir + strlen(server_dir);
+
+    if (dev != (unsigned long)dev)
+        p += sprintf( p, "%lx%08lx-", (unsigned long)((unsigned long long)dev >> 32), (unsigned long)dev );
+    else
+        p += sprintf( p, "%lx-", (unsigned long)dev );
+
+    if (ino != (unsigned long)ino)
+        sprintf( p, "%lx%08lx", (unsigned long)((unsigned long long)ino >> 32), (unsigned long)ino );
+    else
+        sprintf( p, "%lx", (unsigned long)ino );
+    free( root );
+}
+
+/* initialize all the paths values */
+static void init_paths(void)
+{
+    struct stat st;
+
+    const char *home = getenv( "HOME" );
+    const char *user = NULL;
+    const char *prefix = getenv( "WINEPREFIX" );
+    char uid_str[32];
+    struct passwd *pwd = getpwuid( getuid() );
+
+    if (pwd)
+    {
+        user = pwd->pw_name;
+        if (!home) home = pwd->pw_dir;
+    }
+    if (!user)
+    {
+        sprintf( uid_str, "%lu", (unsigned long)getuid() );
+        user = uid_str;
+    }
+    user_name = xstrdup( user );
+
+    /* build config_dir */
+
+    if (prefix)
+    {
+        config_dir = xstrdup( prefix );
+        remove_trailing_slashes( config_dir );
+        if (config_dir[0] != '/')
+            fatal_error( "invalid directory %s in WINEPREFIX: not an absolute path\n", prefix );
+        if (stat( config_dir, &st ) == -1)
+        {
+            if (errno == ENOENT) return;  /* will be created later on */
+            fatal_perror( "cannot open %s as specified in WINEPREFIX", config_dir );
+        }
+    }
+    else
+    {
+        if (!home) fatal_error( "could not determine your home directory\n" );
+        if (home[0] != '/') fatal_error( "your home directory %s is not an absolute path\n", home );
+        config_dir = xmalloc( strlen(home) + sizeof(server_config_dir) );
+        strcpy( config_dir, home );
+        remove_trailing_slashes( config_dir );
+        strcat( config_dir, server_config_dir );
+        if (stat( config_dir, &st ) == -1)
+        {
+            if (errno == ENOENT) return;  /* will be created later on */
+            fatal_perror( "cannot open %s", config_dir );
+        }
+    }
+    if (!S_ISDIR(st.st_mode)) fatal_error( "%s is not a directory\n", config_dir );
+    if (st.st_uid != getuid()) fatal_error( "%s is not owned by you\n", config_dir );
+    init_server_dir( st.st_dev, st.st_ino );
+}
+
 /* return the configuration directory ($WINEPREFIX or $HOME/.wine) */
-const char *wine_get_config_dir(void)
+const char *wine_get_config_dir_obsolete(void)
 {
     if (!config_dir) init_paths();
     return config_dir;
 }
 
 /* retrieve the wine data dir */
-const char *wine_get_data_dir(void)
+const char *wine_get_data_dir_obsolete(void)
 {
     return datadir;
 }
 
 /* retrieve the wine build dir (if we are running from there) */
-const char *wine_get_build_dir(void)
+const char *wine_get_build_dir_obsolete(void)
 {
     return build_dir;
 }
 
 /* return the full name of the server directory (the one containing the socket) */
-const char *wine_get_server_dir(void)
+const char *wine_get_server_dir_obsolete(void)
 {
     if (!server_dir)
     {
@@ -492,11 +495,19 @@ const char *wine_get_server_dir(void)
 }
 
 /* return the current user name */
-const char *wine_get_user_name(void)
+const char *wine_get_user_name_obsolete(void)
 {
     if (!user_name) init_paths();
     return user_name;
 }
+
+__ASM_OBSOLETE(wine_get_build_dir);
+__ASM_OBSOLETE(wine_get_config_dir);
+__ASM_OBSOLETE(wine_get_data_dir);
+__ASM_OBSOLETE(wine_get_server_dir);
+__ASM_OBSOLETE(wine_get_user_name);
+
+#endif /* __ASM_OBSOLETE */
 
 /* return the standard version string */
 const char *wine_get_version(void)
@@ -522,7 +533,6 @@ wine_patch_data[] =
     { "Alexander E. Patrakov", "dsound: Add a linear resampler for use with a large number of mixing buffers.", 2 },
     { "Alistair Leslie-Hughes", "Revert \"dxva2: Build with msvcrt.\".", 1 },
     { "Alistair Leslie-Hughes", "d3dx9: Implement D3DXComputeTangent.", 1 },
-    { "Alistair Leslie-Hughes", "ddraw: Allow writing to vtable for surface and palette.", 1 },
     { "Alistair Leslie-Hughes", "dinput: Allow mapping of controls based of Genre type.", 1 },
     { "Alistair Leslie-Hughes", "dinput: Dont allow Fixed actions to be changed.", 1 },
     { "Alistair Leslie-Hughes", "dinput: Improved tracing of Semantic value.", 1 },
@@ -571,7 +581,6 @@ wine_patch_data[] =
     { "Alistair Leslie-Hughes", "msctf: Added ITfActiveLanguageProfileNotifySink support in ITfSource.", 1 },
     { "Alistair Leslie-Hughes", "mshtml: Improve IOleInPlaceActiveObject TranslateAccelerator.", 1 },
     { "Alistair Leslie-Hughes", "oleaut32: Implement semi-stub for CreateTypeLib.", 1 },
-    { "Alistair Leslie-Hughes", "secur32: Add schan_imp_get_application_protocol for macos.", 1 },
     { "Alistair Leslie-Hughes", "shlwapi: Support ./ in UrlCanonicalize.", 1 },
     { "Alistair Leslie-Hughes", "user32/msgbox: Support WM_COPY Message.", 1 },
     { "Alistair Leslie-Hughes", "user32/msgbox: Use a windows hook to trap Ctrl+C.", 1 },
@@ -605,10 +614,16 @@ wine_patch_data[] =
     { "Andrew Eikum", "winepulse: Fix local buffer offset wrapping.", 1 },
     { "Andrew Eikum", "winepulse: Fix up recording.", 1 },
     { "Andrew Eikum", "winepulse: Update last time on underrun.", 1 },
+    { "Andrew Wesie", "kernel32/tests, psapi/tests: Update tests.", 1 },
     { "Andrew Wesie", "ntdll/tests: Test updating TickCount in user_shared_data.", 1 },
     { "Andrew Wesie", "ntdll: Add stub for NtQuerySystemInformation(SystemModuleInformationEx).", 1 },
+    { "Andrew Wesie", "ntdll: Always enable WRITECOPY support.", 1 },
+    { "Andrew Wesie", "ntdll: Fallback to copy pages for WRITECOPY.", 1 },
     { "Andrew Wesie", "ntdll: Refactor RtlCreateUserThread into NtCreateThreadEx.", 1 },
+    { "Andrew Wesie", "ntdll: Report unmodified WRITECOPY pages as shared.", 1 },
     { "Andrew Wesie", "ntdll: Return ntdll.dll as the first entry for SystemModuleInformation.", 1 },
+    { "Andrew Wesie", "ntdll: Support WRITECOPY on x64.", 1 },
+    { "Andrew Wesie", "ntdll: Track if a WRITECOPY page has been modified.", 1 },
     { "Andrew Wesie", "ntdll: Use NtContinue to continue execution after exceptions.", 1 },
     { "Andrew Wesie", "wined3d: Use glReadPixels for RT texture download.", 1 },
     { "Andrey Gusev", "d3dx9_*: Add D3DXSHProjectCubeMap stub.", 1 },
@@ -620,7 +635,6 @@ wine_patch_data[] =
     { "Charles Davis", "crypt32: Skip unknown item when decoding a CMS certificate.", 1 },
     { "Christian Costa", "d3dx9: Return D3DFMT_A8R8G8B8 in D3DXGetImageInfoFromFileInMemory for 32 bpp BMP with alpha.", 1 },
     { "Christian Costa", "d3dx9_36/tests: Add additional tests for special cases.", 1 },
-    { "Christian Costa", "d3dx9_36/tests: Remove useless \\n within some ok messages.", 1 },
     { "Christian Costa", "d3dx9_36: Add format description for X8L8V8U8 for format conversions.", 1 },
     { "Christian Costa", "d3dx9_36: Add semi-stub for D3DXOptimizeVertices.", 1 },
     { "Christian Costa", "d3dx9_36: Add support for FOURCC surface to save_dds_surface_to_memory.", 1 },
@@ -712,21 +726,6 @@ wine_patch_data[] =
     { "Dmitry Timoshkov", "widl: Write SLTG blocks according to the index order.", 1 },
     { "Dmitry Timoshkov", "widl: Write correct syskind by SLTG typelib generator.", 1 },
     { "Dmitry Timoshkov", "widl: Write correct typekind to the SLTG typeinfo block.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs/tests: Add the tests for GIF encoder and decoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Add initial implementation of the GIF encoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Add registration of the GIF encoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Add some tests for various TIFF color formats.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Add support for 128bppRGBAFloat format to TIFF decoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Add support for 12bpp RGB format to TIFF decoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Add support for 16bpp RGBA format to TIFF decoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Add support for 16bppGray and 32bppGrayFloat formats to TIFF decoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Add support for 32bppCMYK and 64bppCMYK formats to TIFF decoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Add support for 3bps RGB format to TIFF decoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Add support for 4bpp RGBA format to TIFF decoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Better follow the GIF spec and don't specify the local color table size if there is no local palette.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Correctly indicate that the global info was written even without the global palette.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Fix IWICBitmapDecoder::CopyPalette for a not initialized case in the GIF decoder.", 1 },
-    { "Dmitry Timoshkov", "windowscodecs: Initialize empty property bag in GIF encoder's CreateNewFrame implementation.", 1 },
     { "Dmitry Timoshkov", "windowscodecs: Tolerate partial reads in the IFD metadata loader.", 1 },
     { "Dmitry Timoshkov", "wine.inf: Add 'Counters' to the perflib key as an alias for 'Counter'.", 1 },
     { "Dmitry Timoshkov", "wineps.drv: Add support for GETFACENAME and DOWNLOADFACE escapes.", 1 },
@@ -895,7 +894,6 @@ wine_patch_data[] =
     { "Michael Müller", "ddraw: Create rendering targets in video memory if possible.", 1 },
     { "Michael Müller", "ddraw: Don't set HWTRANSFORMANDLIGHT flag on d3d7 RGB device.", 1 },
     { "Michael Müller", "ddraw: Implement DDENUMSURFACES_CANBECREATED flag in ddraw7_EnumSurfaces.", 1 },
-    { "Michael Müller", "ddraw: Remove const from ddraw1_vtbl and ddraw_surface1_vtbl.", 1 },
     { "Michael Müller", "ddraw: Set dwZBufferBitDepth in ddraw7_GetCaps.", 1 },
     { "Michael Müller", "dxdiagn: Calling GetChildContainer with an empty string on a leaf container returns the object itself.", 1 },
     { "Michael Müller", "dxdiagn: Enumerate DirectSound devices and add some basic properties.", 1 },
@@ -916,7 +914,6 @@ wine_patch_data[] =
     { "Michael Müller", "ext-ms-win-xaml-pal-l1-1-0: Add stub for GetThemeServices.", 1 },
     { "Michael Müller", "fsutil: Add fsutil program with support for creating hard links.", 1 },
     { "Michael Müller", "iertutil: Add dll and add stub for ordinal 811.", 1 },
-    { "Michael Müller", "include: Update LDR_MODULE to more recent windows versions.", 1 },
     { "Michael Müller", "inseng: Implement CIF reader and download functions.", 1 },
     { "Michael Müller", "kernel32/tests: Add basic tests for fake dlls.", 1 },
     { "Michael Müller", "kernel32/tests: Add tests for FindFirstFileA with invalid characters.", 1 },
@@ -988,7 +985,6 @@ wine_patch_data[] =
     { "Michael Müller", "nvencodeapi: Add debian specific paths to native library.", 1 },
     { "Michael Müller", "nvencodeapi: Add support for version 6.0.", 1 },
     { "Michael Müller", "nvencodeapi: First implementation.", 1 },
-    { "Michael Müller", "opengl32: Treat invalid pixel types as PFD_TYPE_RGBA in wglChoosePixelFormat.", 1 },
     { "Michael Müller", "programs/runas: Basic implementation for starting processes with a different trustlevel.", 1 },
     { "Michael Müller", "programs/winedbg: Print process arguments in info threads.", 1 },
     { "Michael Müller", "programs/winedevice: Load some common drivers and fix ldr order.", 1 },
@@ -1044,7 +1040,6 @@ wine_patch_data[] =
     { "Michael Müller", "winebuild: Use multipass label system to generate fake dlls.", 1 },
     { "Michael Müller", "winecfg: Add option to enable/disable GTK3 theming.", 1 },
     { "Michael Müller", "winecfg: Add staging tab for CSMT.", 1 },
-    { "Michael Müller", "winecfg: Show unmounted devices and allow changing the device value.", 1 },
     { "Michael Müller", "wined3d: Add wined3d_resource_map_info function.", 1 },
     { "Michael Müller", "wined3d: Improve wined3d_cs_emit_update_sub_resource.", 1 },
     { "Michael Müller", "wined3d: Use real values for memory accounting on NVIDIA cards.", 1 },
@@ -1058,7 +1053,6 @@ wine_patch_data[] =
     { "Michael Müller", "wininet: Strip filename if no path is set in cookie.", 1 },
     { "Michael Müller", "winmm: Delay import ole32 msacm32 to workaround bug when loading multiple winmm versions.", 1 },
     { "Michael Müller", "winmm: Do not crash in Win 9X mode when an invalid device ptr is passed to MCI_OPEN.", 1 },
-    { "Myah Caron", "ntdll: Cache LDR_IMAGE_IS_DLL for InitDLL.", 1 },
     { "Nakarin Khankham", "opencl: Add OpenCL 1.0 function pointer loader.", 1 },
     { "Nakarin Khankham", "opencl: Add OpenCL 1.1 implementation.", 1 },
     { "Nakarin Khankham", "opencl: Add OpenCL 1.2 implementation.", 1 },
@@ -1071,7 +1065,13 @@ wine_patch_data[] =
     { "Paul Gofman", "d3d9/tests: Add test for indexed vertex blending.", 1 },
     { "Paul Gofman", "d3d9: Support SWVP vertex shader float constants limits.", 1 },
     { "Paul Gofman", "ddraw: Allow setting texture without DDSCAPS_TEXTURE for software device.", 1 },
+    { "Paul Gofman", "kernelbase: Call FLS callbacks from DeleteFiber().", 1 },
+    { "Paul Gofman", "kernelbase: Call FLS callbacks from FlsFree().", 1 },
+    { "Paul Gofman", "kernelbase: Don't use PEB lock for FLS data.", 1 },
+    { "Paul Gofman", "kernelbase: Maintain FLS storage list in PEB.", 1 },
+    { "Paul Gofman", "kernelbase: Zero all FLS slots instances in FlsFree().", 1 },
     { "Paul Gofman", "libs/wine: Add functions for managing free area list.", 1 },
+    { "Paul Gofman", "ntdll: Call FLS callbacks on thread shutdown.", 1 },
     { "Paul Gofman", "ntdll: Call NtOpenFile through syscall thunk.", 1 },
     { "Paul Gofman", "ntdll: Force bottom up allocation order for 64 bit arch unless top down is requested.", 1 },
     { "Paul Gofman", "ntdll: Increase step after failed map attempt in try_map_free_area().", 1 },
@@ -1268,9 +1268,6 @@ wine_patch_data[] =
     { "Zebediah Figura", "ntdll: Fix growing the shm_addrs array.", 1 },
     { "Zebediah Figura", "ntdll: Get rid of the per-event spinlock for auto-reset events.", 1 },
     { "Zebediah Figura", "ntdll: Go through the server if necessary when performing event/semaphore/mutex ops.", 1 },
-    { "Zebediah Figura", "ntdll: Handle unaligned SRW locks when using futexes.", 1 },
-    { "Zebediah Figura", "ntdll: Handle unaligned SRW locks when using keyed events.", 1 },
-    { "Zebediah Figura", "ntdll: Handle unaligned condition variables when using futexes.", 1 },
     { "Zebediah Figura", "ntdll: Ignore pseudo-handles.", 1 },
     { "Zebediah Figura", "ntdll: Implement NtOpenEvent().", 1 },
     { "Zebediah Figura", "ntdll: Implement NtOpenMutant().", 1 },

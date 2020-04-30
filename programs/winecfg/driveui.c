@@ -176,12 +176,14 @@ static void enable_labelserial_box(HWND dialog, int mode)
     {
         case BOX_MODE_DEVICE:
             /* FIXME: enable device editing */
+            disable(IDC_EDIT_DEVICE);
             disable(IDC_BUTTON_BROWSE_DEVICE);
             disable(IDC_EDIT_SERIAL);
             disable(IDC_EDIT_LABEL);
             break;
 
         case BOX_MODE_NORMAL:
+            disable(IDC_EDIT_DEVICE);
             disable(IDC_BUTTON_BROWSE_DEVICE);
             enable(IDC_EDIT_SERIAL);
             enable(IDC_EDIT_LABEL);
@@ -232,7 +234,7 @@ static int fill_drives_list(HWND dialog)
         lv_insert_item(dialog, &item);
         HeapFree(GetProcessHeap(), 0, item.pszText);
 
-        path = strdupU2W(drives[i].unixpath ? drives[i].unixpath : "");
+        path = strdupU2W(drives[i].unixpath);
         lv_set_item_text(dialog, count, 1, path);
         HeapFree(GetProcessHeap(), 0, path);
 
@@ -430,7 +432,7 @@ static void update_controls(HWND dialog)
 
     /* path */
     WINE_TRACE("set path control text to '%s'\n", current_drive->unixpath);
-    path = strdupU2W(current_drive->unixpath ? current_drive->unixpath : "");
+    path = strdupU2W(current_drive->unixpath);
     set_textW(dialog, IDC_EDIT_PATH, path);
     HeapFree(GetProcessHeap(), 0, path);
 
@@ -514,11 +516,11 @@ static void on_edit_changed(HWND dialog, WORD id)
             else
             {
                 path = NULL;
-                wpath = strdupU2W("");
+                wpath = strdupU2W("drive_c");
             }
 
             HeapFree(GetProcessHeap(), 0, current_drive->unixpath);
-            current_drive->unixpath = path;
+            current_drive->unixpath = path ? path : strdupA("drive_c");
             current_drive->modified = TRUE;
 
             WINE_TRACE("set path to %s\n", current_drive->unixpath);
@@ -550,20 +552,9 @@ static void on_edit_changed(HWND dialog, WORD id)
 
         case IDC_EDIT_DEVICE:
         {
-            WCHAR *wdevice = get_textW(dialog, id);
-            char *device;
-            int lenW;
-
-            HeapFree(GetProcessHeap(), 0, current_drive->device);
-
-            if ((lenW = WideCharToMultiByte(CP_UNIXCP, 0, wdevice, -1, NULL, 0, NULL, NULL)))
-            {
-                device = HeapAlloc(GetProcessHeap(), 0, lenW);
-                WideCharToMultiByte(CP_UNIXCP, 0, wdevice, -1, device, lenW, NULL, NULL);
-                current_drive->device = device;
-            }
-            else
-                current_drive->device = NULL;
+            char *device = get_text(dialog, id);
+            /* TODO: handle device if/when it makes sense to do so.... */
+            HeapFree(GetProcessHeap(), 0, device);
             break;
         }
     }
@@ -677,7 +668,6 @@ DriveDlgProc (HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam)
                 ShowWindow( GetDlgItem( dialog, IDC_LIST_DRIVES ), SW_HIDE );
                 ShowWindow( GetDlgItem( dialog, IDC_BUTTON_ADD ), SW_HIDE );
                 ShowWindow( GetDlgItem( dialog, IDC_BUTTON_REMOVE ), SW_HIDE );
-                ShowWindow( GetDlgItem( dialog, IDC_BUTTON_AUTODETECT ), SW_HIDE );
                 ShowWindow( GetDlgItem( dialog, IDC_STATIC_PATH ), SW_HIDE );
                 ShowWindow( GetDlgItem( dialog, IDC_EDIT_PATH ), SW_HIDE );
                 ShowWindow( GetDlgItem( dialog, IDC_BUTTON_BROWSE_PATH ), SW_HIDE );
@@ -739,12 +729,6 @@ DriveDlgProc (HWND dialog, UINT msg, WPARAM wParam, LPARAM lParam)
                     if (HIWORD(wParam) != BN_CLICKED) break;
                     item = SendMessageW(GetDlgItem(dialog, IDC_LIST_DRIVES),  LB_GETCURSEL, 0, 0);
                     SendMessageW(GetDlgItem(dialog, IDC_LIST_DRIVES), LB_GETITEMDATA, item, 0);
-                    break;
-
-                case IDC_BUTTON_AUTODETECT:
-                    autodetect_drives();
-                    fill_drives_list(dialog);
-                    SendMessageW(GetParent(dialog), PSM_CHANGED, 0, 0);
                     break;
 
                 case IDC_BUTTON_SHOW_HIDE_ADVANCED:

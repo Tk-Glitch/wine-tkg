@@ -26,7 +26,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcp);
 
-#if defined(__i386__) && !defined(__MINGW32__)
+#ifdef __ASM_USE_THISCALL_WRAPPER
 
 #define DEFINE_VTBL_WRAPPER(off)            \
     __ASM_GLOBAL_FUNC(vtbl_wrapper_ ## off, \
@@ -225,8 +225,3 @@ __int64 * __cdecl std_Fpz_func(void)
 {
     return &std_Fpz;
 }
-
-#if defined(__MINGW32__) && _MSVCP_VER >= 80 && _MSVCP_VER <= 90
-/* Hack: prevent Mingw from importing mingw_helpers.o which conflicts with encode/decode_pointer */
-int mingw_app_type = 0;
-#endif

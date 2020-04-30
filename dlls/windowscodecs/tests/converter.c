@@ -1277,6 +1277,8 @@ static void test_multi_encoder(const struct bitmap_data **srcs, const CLSID* cls
         container_format = &GUID_ContainerFormatTiff;
     else if (IsEqualGUID(clsid_encoder, &CLSID_WICJpegEncoder))
         container_format = &GUID_ContainerFormatJpeg;
+    else if (IsEqualGUID(clsid_encoder, &CLSID_WICGifEncoder))
+        container_format = &GUID_ContainerFormatGif;
     else
         ok(0, "Unknown encoder %s.\n", wine_dbgstr_guid(clsid_encoder));
 

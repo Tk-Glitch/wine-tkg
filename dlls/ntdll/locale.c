@@ -39,7 +39,6 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "ntdll_misc.h"
-#include "wine/library.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nls);
@@ -665,7 +664,7 @@ static NTSTATUS open_nls_data_file( ULONG type, ULONG id, HANDLE *file )
     status = __syscall_NtOpenFile( file, GENERIC_READ, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
     if (!status) TRACE( "found %s\n", debugstr_w( valueW.Buffer ));
     RtlFreeUnicodeString( &valueW );
-    if (status != STATUS_OBJECT_NAME_NOT_FOUND) return status;
+    if (status != STATUS_OBJECT_NAME_NOT_FOUND && status != STATUS_OBJECT_PATH_NOT_FOUND) return status;
 
     /* not found, try in build or data dir */
 
@@ -758,8 +757,6 @@ static const struct { const char *name; UINT cp; } charset_names[] =
 
 static void load_unix_cptable( unsigned int cp )
 {
-    const char *build_dir = wine_get_build_dir();
-    const char *data_dir = wine_get_data_dir();
     const char *dir = build_dir ? build_dir : data_dir;
     struct stat st;
     char *name;

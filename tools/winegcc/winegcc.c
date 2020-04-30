@@ -532,20 +532,8 @@ static strarray *get_link_args( struct options *opts, const char *output_name )
     strarray_add( link_args, "-Wl,-Bsymbolic" );
     if (!opts->noshortwchar && opts->target_cpu == CPU_ARM)
         strarray_add( flags, "-Wl,--no-wchar-size-warning" );
-
-    /* Try all options first - this is likely to succeed on modern compilers */
-    if (!try_link( opts->prefix, link_args, "-Wl,-z,defs -Wl,-init,__wine_spec_init,-fini,_wine_spec_fini" ))
-    {
+    if (!try_link( opts->prefix, link_args, "-Wl,-z,defs" ))
         strarray_add( flags, "-Wl,-z,defs" );
-        strarray_add( flags, "-Wl,-init,__wine_spec_init,-fini,__wine_spec_fini" );
-    }
-    else /* otherwise figure out which ones are allowed */
-    {
-        if (!try_link( opts->prefix, link_args, "-Wl,-z,defs" ))
-            strarray_add( flags, "-Wl,-z,defs" );
-        if (!try_link( opts->prefix, link_args, "-Wl,-init,__wine_spec_init,-fini,_wine_spec_fini" ))
-            strarray_add( flags, "-Wl,-init,__wine_spec_init,-fini,__wine_spec_fini" );
-    }
 
     strarray_addall( link_args, flags );
     return link_args;
@@ -946,6 +934,16 @@ static strarray *get_winebuild_args(struct options *opts)
     return spec_args;
 }
 
+static void fixup_constructors( struct options *opts, const char *file )
+{
+    strarray *args = get_winebuild_args( opts );
+
+    strarray_add( args, "--fixup-ctors" );
+    strarray_add( args, file );
+    spawn( opts->prefix, args, 0 );
+    strarray_free( args );
+}
+
 static void make_wine_builtin( struct options *opts, const char *file )
 {
     strarray *args = get_winebuild_args( opts );
@@ -1182,24 +1180,20 @@ static void build(struct options* opts)
         add_library(opts, lib_dirs, files, "kernel32");
         add_library(opts, lib_dirs, files, "ntdll");
     }
-    if (!opts->nostdlib && !is_pe) add_library(opts, lib_dirs, files, "wine");
 
     /* set default entry point, if needed */
     if (!opts->entry_point)
     {
-        if (is_pe)
+        if (opts->subsystem && !strcmp( opts->subsystem, "native" ))
+            entry_point = (is_pe && opts->target_cpu == CPU_x86) ? "_DriverEntry@8" : "DriverEntry";
+        else if (opts->use_msvcrt && !opts->shared && !opts->win16_app)
         {
-            if (opts->subsystem && !strcmp( opts->subsystem, "native" ))
-                entry_point = opts->target_cpu == CPU_x86 ? "_DriverEntry@8" : "DriverEntry";
-            else if(opts->use_msvcrt && !opts->shared && !opts->win16_app)
-            {
-                if (opts->unicode_app)
-                    entry_point = opts->target_cpu == CPU_x86 ? "_wmainCRTStartup" : "wmainCRTStartup";
-                else
-                    entry_point = opts->target_cpu == CPU_x86 ? "_mainCRTStartup" : "mainCRTStartup";
-            }
+            if (opts->unicode_app)
+                entry_point = (is_pe && opts->target_cpu == CPU_x86) ? "_wmainCRTStartup" : "wmainCRTStartup";
+            else
+                entry_point = (is_pe && opts->target_cpu == CPU_x86) ? "_mainCRTStartup" : "mainCRTStartup";
         }
-        else if (!opts->shared && opts->unicode_app)
+        else if (!is_pe && !opts->shared && opts->unicode_app)
             entry_point = "__wine_spec_exe_wentry";
     }
     else entry_point = opts->entry_point;
@@ -1367,8 +1361,6 @@ static void build(struct options* opts)
     spawn(opts->prefix, link_args, 0);
     strarray_free (link_args);
 
-    if (is_pe && opts->wine_builtin) make_wine_builtin( opts, output_path );
-
     /* set the base address with prelink if linker support is not present */
     if (opts->prelink && !opts->target)
     {
@@ -1383,6 +1375,9 @@ static void build(struct options* opts)
             strarray_free(prelink_args);
         }
     }
+
+    if (!is_pe) fixup_constructors( opts, output_path );
+    else if (opts->wine_builtin) make_wine_builtin( opts, output_path );
 
     /* create the loader script */
     if (generate_app_loader)

@@ -2877,6 +2877,10 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,gecko\plugin,npmshtml.dll
 11,Speech\Common,sapi.dll
 11,wbem,mofcomp.exe
+11,wbem,wbemdisp.dll
+11,wbem,wbemprox.dll
+11,wbem,wmic.exe
+11,wbem,wmiutils.dll
 11,WindowsPowerShell\v1.0,powershell.exe
 10,syswow64,stdole2.tlb
 11,,iexplore.exe
@@ -2890,6 +2894,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 12,,tdi.sys,-
 12,,winebus.sys,-
 12,,winehid.sys,-
+12,,wineusb.sys,-
 ; skip .NET fake dlls in Wine Mono package
 11,,aspnet_regiis.exe,-
 11,,ngen.exe,-
@@ -2943,6 +2948,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 12,,tdi.sys
 12,,winebus.sys
 12,,winehid.sys
+12,,wineusb.sys
 ; skip .NET fake dlls in Wine Mono package
 11,,aspnet_regiis.exe,-
 11,,ngen.exe,-
@@ -4154,6 +4160,7 @@ HKCU,Software\Wine\DllOverrides,"vcruntime140",0x2,"native,builtin"
 [InfFiles]
 winebus.inf
 winehid.inf
+wineusb.inf
 
 [NlsFiles]
 c_037.nls

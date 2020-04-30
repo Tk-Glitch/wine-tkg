@@ -21,6 +21,7 @@
 #define COBJMACROS
 #include "dshow.h"
 #include "wine/test.h"
+#include "wine/strmbase.h"
 
 static void test_media_types(IPin *pin)
 {
@@ -59,6 +60,105 @@ static void test_media_types(IPin *pin)
     ok(hr != S_OK, "Got hr %#x.\n", hr);
 }
 
+static void test_stream_config(IPin *pin)
+{
+    VIDEOINFOHEADER *video_info, *video_info2;
+    AM_MEDIA_TYPE *format, *format2;
+    VIDEO_STREAM_CONFIG_CAPS vscc;
+    IAMStreamConfig *stream_config;
+    LONG depth, compression;
+    LONG count, size;
+    HRESULT hr;
+
+    hr = IPin_QueryInterface(pin, &IID_IAMStreamConfig, (void **)&stream_config);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMStreamConfig_GetFormat(stream_config, &format);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&format->majortype, &MEDIATYPE_Video), "Got wrong majortype: %s.\n",
+            debugstr_guid(&format->majortype));
+
+    hr = IAMStreamConfig_SetFormat(stream_config, format);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    format->majortype = MEDIATYPE_Audio;
+    hr = IAMStreamConfig_SetFormat(stream_config, format);
+    ok(hr == E_FAIL, "Got hr %#x.\n", hr);
+
+    format->majortype = MEDIATYPE_Video;
+    video_info = (VIDEOINFOHEADER *)format->pbFormat;
+    video_info->bmiHeader.biWidth--;
+    video_info->bmiHeader.biHeight--;
+    hr = IAMStreamConfig_SetFormat(stream_config, format);
+    ok(hr == E_FAIL, "Got hr %#x.\n", hr);
+
+    depth = video_info->bmiHeader.biBitCount;
+    compression = video_info->bmiHeader.biCompression;
+    video_info->bmiHeader.biWidth++;
+    video_info->bmiHeader.biHeight++;
+    video_info->bmiHeader.biBitCount = 0;
+    video_info->bmiHeader.biCompression = 0;
+    hr = IAMStreamConfig_SetFormat(stream_config, format);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMStreamConfig_GetFormat(stream_config, &format2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&format2->majortype, &MEDIATYPE_Video), "Got wrong majortype: %s.\n",
+            debugstr_guid(&format2->majortype));
+    video_info2 = (VIDEOINFOHEADER *)format2->pbFormat;
+    ok(video_info2->bmiHeader.biBitCount == depth, "Got wrong depth: %d.\n",
+            video_info2->bmiHeader.biBitCount);
+    ok(video_info2->bmiHeader.biCompression == compression,
+            "Got wrong compression: %d.\n", video_info2->bmiHeader.biCompression);
+    FreeMediaType(format2);
+
+    video_info->bmiHeader.biWidth = 10000000;
+    video_info->bmiHeader.biHeight = 10000000;
+    hr = IAMStreamConfig_SetFormat(stream_config, format);
+    ok(hr == E_FAIL, "Got hr %#x.\n", hr);
+    FreeMediaType(format);
+
+    count = 0xdeadbeef;
+    size = 0xdeadbeef;
+    /* Crash on Windows */
+    if (0)
+    {
+        hr = IAMStreamConfig_GetNumberOfCapabilities(stream_config, &count, NULL);
+        ok(hr == E_POINTER, "Got hr %#x.\n", hr);
+
+        hr = IAMStreamConfig_GetNumberOfCapabilities(stream_config, NULL, &size);
+        ok(hr == E_POINTER, "Got hr %#x.\n", hr);
+
+        hr = IAMStreamConfig_GetStreamCaps(stream_config, 0, NULL, (BYTE *)&vscc);
+        ok(hr == E_POINTER, "Got hr %#x.\n", hr);
+
+        hr = IAMStreamConfig_GetStreamCaps(stream_config, 0, &format, NULL);
+        ok(hr == E_POINTER, "Got hr %#x.\n", hr);
+    }
+
+    hr = IAMStreamConfig_GetNumberOfCapabilities(stream_config, &count, &size);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(count != 0xdeadbeef, "Got wrong count: %d.\n", count);
+    ok(size == sizeof(VIDEO_STREAM_CONFIG_CAPS), "Got wrong size: %d.\n", size);
+
+    hr = IAMStreamConfig_GetStreamCaps(stream_config, 100000, NULL, NULL);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    hr = IAMStreamConfig_GetStreamCaps(stream_config, 100000, &format, (BYTE *)&vscc);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    hr = IAMStreamConfig_GetStreamCaps(stream_config, 0, &format, (BYTE *)&vscc);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&format->majortype, &MEDIATYPE_Video), "Got wrong majortype: %s.\n",
+            debugstr_guid(&MEDIATYPE_Video));
+    ok(IsEqualGUID(&vscc.guid, &FORMAT_VideoInfo)
+            || IsEqualGUID(&vscc.guid, &FORMAT_VideoInfo2), "Got wrong guid: %s.\n",
+            debugstr_guid(&vscc.guid));
+    FreeMediaType(format);
+
+    IAMStreamConfig_Release(stream_config);
+}
+
 static void test_capture(IBaseFilter *filter)
 {
     IEnumPins *enum_pins;
@@ -73,7 +173,10 @@ static void test_capture(IBaseFilter *filter)
         PIN_DIRECTION pin_direction;
         IPin_QueryDirection(pin, &pin_direction);
         if (pin_direction == PINDIR_OUTPUT)
+        {
             test_media_types(pin);
+            test_stream_config(pin);
+        }
         IPin_Release(pin);
     }
 

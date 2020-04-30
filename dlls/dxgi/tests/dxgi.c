@@ -6188,6 +6188,230 @@ static void test_factory_check_feature_support(void)
     ok(!ref_count, "Factory has %u references left.\n", ref_count);
 }
 
+static void test_frame_latency_event(IUnknown *device, BOOL is_d3d12)
+{
+    DXGI_SWAP_CHAIN_DESC1 swapchain_desc;
+    IDXGISwapChain2 *swapchain2;
+    IDXGISwapChain1 *swapchain1;
+    IDXGIFactory2 *factory2;
+    IDXGIFactory *factory;
+    UINT frame_latency;
+    DWORD wait_result;
+    ULONG ref_count;
+    unsigned int i;
+    HANDLE event;
+    HWND window;
+    HRESULT hr;
+
+    get_factory(device, is_d3d12, &factory);
+
+    hr = IDXGIFactory_QueryInterface(factory, &IID_IDXGIFactory2, (void**)&factory2);
+    IDXGIFactory_Release(factory);
+    if (FAILED(hr))
+    {
+        win_skip("IDXGIFactory2 not available.\n");
+        return;
+    }
+
+    window = create_window();
+
+    swapchain_desc.Width = 640;
+    swapchain_desc.Height = 480;
+    swapchain_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapchain_desc.Stereo = FALSE;
+    swapchain_desc.SampleDesc.Count = 1;
+    swapchain_desc.SampleDesc.Quality = 0;
+    swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapchain_desc.BufferCount = 2;
+    swapchain_desc.Scaling = DXGI_SCALING_STRETCH;
+    swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swapchain_desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+    swapchain_desc.Flags = 0;
+
+    hr = IDXGIFactory2_CreateSwapChainForHwnd(factory2, device,
+            window, &swapchain_desc, NULL, NULL, &swapchain1);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDXGISwapChain1_QueryInterface(swapchain1, &IID_IDXGISwapChain2, (void**)&swapchain2);
+    IDXGISwapChain1_Release(swapchain1);
+    if (FAILED(hr))
+    {
+        win_skip("IDXGISwapChain2 not available.\n");
+        IDXGIFactory2_Release(factory2);
+        DestroyWindow(window);
+        return;
+    }
+
+    /* test swap chain without waitable object */
+    frame_latency = 0xdeadbeef;
+    hr = IDXGISwapChain2_GetMaximumFrameLatency(swapchain2, &frame_latency);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    ok(frame_latency == 0xdeadbeef, "Got unexpected frame latency %#x.\n", frame_latency);
+    hr = IDXGISwapChain2_SetMaximumFrameLatency(swapchain2, 1);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    event = IDXGISwapChain2_GetFrameLatencyWaitableObject(swapchain2);
+    ok(!event, "Got unexpected event %p.\n", event);
+
+    ref_count = IDXGISwapChain2_Release(swapchain2);
+    ok(!ref_count, "Swap chain has %u references left.\n", ref_count);
+
+    /* test swap chain with waitable object */
+    swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+
+    hr = IDXGIFactory2_CreateSwapChainForHwnd(factory2, device,
+            window, &swapchain_desc, NULL, NULL, &swapchain1);
+    ok(hr == S_OK, "Failed to create swap chain, hr %#x.\n", hr);
+    hr = IDXGISwapChain1_QueryInterface(swapchain1, &IID_IDXGISwapChain2, (void**)&swapchain2);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    IDXGISwapChain1_Release(swapchain1);
+
+    event = IDXGISwapChain2_GetFrameLatencyWaitableObject(swapchain2);
+    ok(!!event, "Got unexpected event %p.\n", event);
+
+    /* auto-reset event */
+    wait_result = WaitForSingleObject(event, 0);
+    ok(!wait_result, "Got unexpected wait result %#x.\n", wait_result);
+    wait_result = WaitForSingleObject(event, 0);
+    ok(wait_result == WAIT_TIMEOUT, "Got unexpected wait result %#x.\n", wait_result);
+
+    hr = IDXGISwapChain2_GetMaximumFrameLatency(swapchain2, &frame_latency);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(frame_latency == 1, "Got unexpected frame latency %#x.\n", frame_latency);
+
+    hr = IDXGISwapChain2_SetMaximumFrameLatency(swapchain2, 0);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain2_GetMaximumFrameLatency(swapchain2, &frame_latency);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(frame_latency == 1, "Got unexpected frame latency %#x.\n", frame_latency);
+
+    hr = IDXGISwapChain2_SetMaximumFrameLatency(swapchain2, 2);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain2_GetMaximumFrameLatency(swapchain2, &frame_latency);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(frame_latency == 2, "Got unexpected frame latency %#x.\n", frame_latency);
+
+    for (i = 0; i < 5; i++)
+    {
+        hr = IDXGISwapChain2_Present(swapchain2, 0, 0);
+        ok(hr == S_OK, "Present %u failed with hr %#x.\n", i, hr);
+    }
+
+    wait_result = WaitForSingleObject(event, 1000);
+    ok(!wait_result, "Got unexpected wait result %#x.\n", wait_result);
+
+    ref_count = IDXGISwapChain2_Release(swapchain2);
+    ok(!ref_count, "Swap chain has %u references left.\n", ref_count);
+    DestroyWindow(window);
+    ref_count = IDXGIFactory2_Release(factory2);
+    ok(ref_count == !is_d3d12, "Factory has %u references left.\n", ref_count);
+}
+
+static void test_colour_space_support(IUnknown *device, BOOL is_d3d12)
+{
+    DXGI_SWAP_CHAIN_DESC1 swapchain_desc;
+    IDXGISwapChain3 *swapchain3;
+    IDXGISwapChain1 *swapchain1;
+    IDXGIFactory2 *factory2;
+    IDXGIFactory *factory;
+    ULONG ref_count;
+    unsigned int i;
+    UINT support;
+    HWND window;
+    HRESULT hr;
+
+    static const DXGI_COLOR_SPACE_TYPE colour_spaces[] =
+    {
+        DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+        DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
+        DXGI_COLOR_SPACE_RGB_STUDIO_G22_NONE_P709,
+        DXGI_COLOR_SPACE_RGB_STUDIO_G22_NONE_P2020,
+        DXGI_COLOR_SPACE_RESERVED,
+        DXGI_COLOR_SPACE_YCBCR_FULL_G22_NONE_P709_X601,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P601,
+        DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
+        DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P2020,
+        DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020,
+        DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
+        DXGI_COLOR_SPACE_RGB_STUDIO_G2084_NONE_P2020,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_TOPLEFT_P2020,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_TOPLEFT_P2020,
+        DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P2020,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020,
+        DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
+    };
+
+    get_factory(device, is_d3d12, &factory);
+
+    hr = IDXGIFactory_QueryInterface(factory, &IID_IDXGIFactory2, (void**)&factory2);
+    IDXGIFactory_Release(factory);
+    if (FAILED(hr))
+    {
+        win_skip("IDXGIFactory2 not available.\n");
+        return;
+    }
+
+    window = create_window();
+
+    swapchain_desc.Width = 640;
+    swapchain_desc.Height = 480;
+    swapchain_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapchain_desc.Stereo = FALSE;
+    swapchain_desc.SampleDesc.Count = 1;
+    swapchain_desc.SampleDesc.Quality = 0;
+    swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapchain_desc.BufferCount = 2;
+    swapchain_desc.Scaling = DXGI_SCALING_STRETCH;
+    swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swapchain_desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+    swapchain_desc.Flags = 0;
+
+    hr = IDXGIFactory2_CreateSwapChainForHwnd(factory2, device,
+            window, &swapchain_desc, NULL, NULL, &swapchain1);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDXGISwapChain1_QueryInterface(swapchain1, &IID_IDXGISwapChain3, (void**)&swapchain3);
+    IDXGISwapChain1_Release(swapchain1);
+    if (FAILED(hr))
+    {
+        win_skip("IDXGISwapChain3 not available.\n");
+        IDXGIFactory2_Release(factory2);
+        DestroyWindow(window);
+        return;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(colour_spaces); ++i)
+    {
+        support = 0xdeadbeef;
+        hr = IDXGISwapChain3_CheckColorSpaceSupport(swapchain3, colour_spaces[i], &support);
+        ok(hr == S_OK, "Got unexpected hr %#x for test %u.\n", hr, i);
+        ok(!(support & ~DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT),
+                "Got unexpected support flags %#x for test %u.\n", support, i);
+
+        if (colour_spaces[i] == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)
+        {
+            ok(support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT,
+                    "Required colour space not supported for test %u.\n", i);
+        }
+        else if (colour_spaces[i] == DXGI_COLOR_SPACE_RESERVED)
+        {
+            ok(!support, "Invalid colour space supported for test %u.\n", i);
+        }
+
+        hr = IDXGISwapChain3_SetColorSpace1(swapchain3, colour_spaces[i]);
+        ok(hr == (support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) ? S_OK : E_INVALIDARG,
+                "Got unexpected hr %#x for text %u.\n", hr, i);
+    }
+
+    ref_count = IDXGISwapChain3_Release(swapchain3);
+    ok(!ref_count, "Swap chain has %u references left.\n", ref_count);
+    DestroyWindow(window);
+    ref_count = IDXGIFactory2_Release(factory2);
+    ok(ref_count == !is_d3d12, "Factory has %u references left.\n", ref_count);
+}
+
 static void run_on_d3d10(void (*test_func)(IUnknown *device, BOOL is_d3d12))
 {
     IDXGIDevice *device;
@@ -6325,6 +6549,8 @@ START_TEST(dxgi)
     run_on_d3d12(test_swapchain_formats);
     run_on_d3d12(test_output_ownership);
     run_on_d3d12(test_cursor_clipping);
+    run_on_d3d12(test_frame_latency_event);
+    run_on_d3d12(test_colour_space_support);
 
     FreeLibrary(d3d12_module);
 }

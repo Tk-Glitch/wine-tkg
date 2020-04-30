@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/types.h>
 #ifdef HAVE_SYS_SOCKET_H
 # include <sys/socket.h>
@@ -58,7 +59,6 @@
 #include "wine/exception.h"
 #include "wine/rbtree.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "ntdll_misc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(virtual);
@@ -85,7 +85,7 @@ struct file_view
 #define VPROT_GUARD      0x10
 #define VPROT_COMMITTED  0x20
 #define VPROT_WRITEWATCH 0x40
-#define VPROT_COPIED     0x80
+#define VPROT_WRITTEN    0x80
 /* per-mapping protection flags */
 #define VPROT_SYSTEM     0x0200  /* system view (underlying mmap not under our control) */
 
@@ -163,6 +163,10 @@ static void *working_set_limit;
 static void *address_space_start = (void *)0x10000;
 #endif  /* __i386__ */
 static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
+
+SIZE_T signal_stack_size = 0;
+SIZE_T signal_stack_mask = 0;
+static SIZE_T signal_stack_align;
 
 #define ROUND_ADDR(addr,mask) \
    ((void *)((UINT_PTR)(addr) & ~(UINT_PTR)(mask)))
@@ -319,27 +323,10 @@ static const char *VIRTUAL_GetProtStr( BYTE prot )
     buffer[0] = (prot & VPROT_COMMITTED) ? 'c' : '-';
     buffer[1] = (prot & VPROT_GUARD) ? 'g' : ((prot & VPROT_WRITEWATCH) ? 'H' : '-');
     buffer[2] = (prot & VPROT_READ) ? 'r' : '-';
-    buffer[3] = (prot & VPROT_WRITECOPY) ? (prot & VPROT_COPIED ? 'w' : 'W')
-        : ((prot & VPROT_WRITE) ? 'w' : '-');
+    buffer[3] = (prot & VPROT_WRITECOPY) ? 'W' : ((prot & VPROT_WRITE) ? 'w' : '-');
     buffer[4] = (prot & VPROT_EXEC) ? 'x' : '-';
     buffer[5] = 0;
     return buffer;
-}
-
-/* This might look like a hack, but it actually isn't - the 'experimental' version
- * is correct, but it already has revealed a couple of additional Wine bugs, which
- * were not triggered before, and there are probably some more.
- * To avoid breaking Wine for everyone, the new correct implementation has to be
- * manually enabled, until it is tested a bit more. */
-static inline BOOL experimental_WRITECOPY( void )
-{
-    static int enabled = -1;
-    if (enabled == -1)
-    {
-        const char *str = getenv("STAGING_WRITECOPY");
-        enabled = str && (atoi(str) != 0);
-    }
-    return enabled;
 }
 
 /***********************************************************************
@@ -355,13 +342,13 @@ static int VIRTUAL_GetUnixProt( BYTE vprot )
         if (vprot & VPROT_READ) prot |= PROT_READ;
         if (vprot & VPROT_WRITE) prot |= PROT_WRITE | PROT_READ;
         if (vprot & VPROT_EXEC) prot |= PROT_EXEC | PROT_READ;
-#if defined(__i386__)
+#if defined(__i386__) || defined(__x86_64__)
         if (vprot & VPROT_WRITECOPY)
         {
-            if (experimental_WRITECOPY())
-                prot = (prot & ~PROT_WRITE) | PROT_READ;
-            else
+            if (vprot & VPROT_WRITTEN)
                 prot |= PROT_WRITE | PROT_READ;
+            else
+                prot = (prot & ~PROT_WRITE) | PROT_READ;
         }
 #else
         /* FIXME: Architecture needs implementation of signal_init_early. */
@@ -923,7 +910,7 @@ static DWORD VIRTUAL_GetWin32Prot( BYTE vprot, unsigned int map_prot )
 {
     DWORD ret;
 
-    if ((vprot & (VPROT_COPIED | VPROT_WRITECOPY)) == (VPROT_COPIED | VPROT_WRITECOPY))
+    if ((vprot & VPROT_WRITECOPY) && (vprot & VPROT_WRITTEN))
         vprot = (vprot & ~VPROT_WRITECOPY) | VPROT_WRITE;
     ret = VIRTUAL_Win32Flags[vprot & 0x0f];
     if (vprot & VPROT_GUARD) ret |= PAGE_GUARD;
@@ -1049,7 +1036,7 @@ static BOOL VIRTUAL_SetProt( struct file_view *view, /* [in] Pointer to view */
     if (view->protect & VPROT_WRITEWATCH)
     {
         /* each page may need different protections depending on write watch flag */
-        set_page_vprot_bits( base, size, vprot & ~VPROT_WRITEWATCH, ~vprot & ~VPROT_WRITEWATCH );
+        set_page_vprot_bits( base, size, vprot & ~VPROT_WRITEWATCH, ~vprot & ~(VPROT_WRITEWATCH|VPROT_WRITTEN) );
         mprotect_range( base, size, 0, 0 );
         return TRUE;
     }
@@ -1065,10 +1052,19 @@ static BOOL VIRTUAL_SetProt( struct file_view *view, /* [in] Pointer to view */
         return TRUE;
     }
 
+    /* check that we can map this memory with PROT_WRITE since we cannot fail later,
+     * but we fallback to copying pages for read-only mappings in virtual_handle_fault */
+    if ((vprot & VPROT_WRITECOPY) && (view->protect & VPROT_WRITECOPY))
+        unix_prot |= PROT_WRITE;
+
     if (mprotect_exec( base, size, unix_prot )) /* FIXME: last error */
         return FALSE;
 
-    set_page_vprot( base, size, vprot );
+    /* each page may need different protections depending on writecopy */
+    set_page_vprot_bits( base, size, vprot, ~vprot & ~VPROT_WRITTEN );
+    if (vprot & VPROT_WRITECOPY)
+        mprotect_range( base, size, 0, 0 );
+
     return TRUE;
 }
 
@@ -1785,6 +1781,8 @@ static NTSTATUS map_image( HANDLE hmapping, ACCESS_MASK access, int fd, int top_
                            ptr + sec->VirtualAddress + file_size,
                            ptr + sec->VirtualAddress + end );
             memset( ptr + sec->VirtualAddress + file_size, 0, end - file_size );
+            /* clear WRITTEN mark so QueryVirtualMemory returns correct values */
+            set_page_vprot_bits( ptr + sec->VirtualAddress + file_size, 1, 0, VPROT_WRITTEN );
         }
     }
 
@@ -2067,6 +2065,13 @@ void virtual_init(void)
         }
     }
 
+    size = ROUND_SIZE( 0, sizeof(TEB) ) + max( MINSIGSTKSZ, 8192 );
+    /* find the first power of two not smaller than size */
+    signal_stack_align = page_shift;
+    while ((1u << signal_stack_align) < size) signal_stack_align++;
+    signal_stack_mask = (1 << signal_stack_align) - 1;
+    signal_stack_size = (1 << signal_stack_align) - ROUND_SIZE( 0, sizeof(TEB) );
+
     /* try to find space in a reserved area for the views and pages protection table */
 #ifdef _WIN64
     pages_vprot_size = ((size_t)address_space_limit >> page_shift >> pages_vprot_shift) + 1;
@@ -2174,6 +2179,58 @@ NTSTATUS virtual_create_builtin_view( void *module )
     }
     server_leave_uninterrupted_section( &csVirtual, &sigset );
     return status;
+}
+
+
+/***********************************************************************
+ *           virtual_alloc_teb
+ */
+NTSTATUS virtual_alloc_teb( TEB **ret_teb )
+{
+    SIZE_T size = signal_stack_mask + 1;
+    void *addr = NULL;
+    TEB *teb;
+    NTSTATUS status;
+
+    if ((status = virtual_alloc_aligned( &addr, 0, &size, MEM_COMMIT | MEM_TOP_DOWN,
+                                         PAGE_READWRITE, signal_stack_align )))
+        return status;
+
+    *ret_teb = teb = addr;
+    teb->Tib.Self = &teb->Tib;
+    teb->Tib.ExceptionList = (void *)~0UL;
+    teb->StaticUnicodeString.Buffer = teb->StaticUnicodeBuffer;
+    teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
+    if ((status = signal_alloc_thread( teb )))
+    {
+        size = 0;
+        NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_RELEASE );
+    }
+    return status;
+}
+
+
+/***********************************************************************
+ *           virtual_free_teb
+ */
+void virtual_free_teb( TEB *teb )
+{
+    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
+    SIZE_T size;
+
+    signal_free_thread( teb );
+    if (teb->DeallocationStack)
+    {
+        size = 0;
+        NtFreeVirtualMemory( GetCurrentProcess(), &teb->DeallocationStack, &size, MEM_RELEASE );
+    }
+    if (thread_data->start_stack)
+    {
+        size = 0;
+        NtFreeVirtualMemory( GetCurrentProcess(), &thread_data->start_stack, &size, MEM_RELEASE );
+    }
+    size = 0;
+    NtFreeVirtualMemory( NtCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
 }
 
 
@@ -2324,10 +2381,26 @@ NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err, BOOL on_signal_stack )
             set_page_vprot_bits( page, page_size, 0, VPROT_WRITEWATCH );
             mprotect_range( page, page_size, 0, 0 );
         }
-        if (vprot & VPROT_WRITECOPY)
+        if ((vprot & VPROT_WRITECOPY) && (vprot & VPROT_COMMITTED))
         {
-            set_page_vprot_bits( page, page_size, VPROT_WRITE, VPROT_WRITECOPY );
-            mprotect_range( page, page_size, 0, 0 );
+            struct file_view *view = VIRTUAL_FindView( page, 0 );
+
+            set_page_vprot_bits( page, page_size, VPROT_WRITE | VPROT_WRITTEN, VPROT_WRITECOPY );
+            if (view->protect & VPROT_WRITECOPY)
+            {
+                mprotect_range( page, page_size, 0, 0 );
+            }
+            else
+            {
+                static BYTE *temp_page = NULL;
+                if (!temp_page)
+                    temp_page = wine_anon_mmap( NULL, page_size, PROT_READ | PROT_WRITE, 0 );
+
+                /* original mapping is shared, replace with a private page */
+                memcpy( temp_page, page, page_size );
+                wine_anon_mmap( page, page_size, VIRTUAL_GetUnixProt(vprot | VPROT_WRITE | VPROT_WRITTEN), MAP_FIXED );
+                memcpy( page, temp_page, page_size );
+            }
         }
         /* ignore fault if page is writable now */
         if (VIRTUAL_GetUnixProt( get_page_vprot( page )) & PROT_WRITE) ret = STATUS_SUCCESS;
@@ -3104,24 +3177,6 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH NtProtectVirtualMemory( HANDLE process, PVOID 
         {
             old = VIRTUAL_GetWin32Prot( vprot, view->protect );
             status = set_protection( view, base, size, new_prot );
-
-            /* GTA5 HACK: Mark first page as copied. */
-            if (status == STATUS_SUCCESS && (view->protect & SEC_IMAGE) &&
-                    base == (void*)NtCurrentTeb()->Peb->ImageBaseAddress)
-            {
-                const WCHAR gta5W[] = { 'g','t','a','5','.','e','x','e',0 };
-                WCHAR *name, *p;
-
-                name = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
-                p = strrchrW(name, '\\');
-                p = p ? p+1 : name;
-
-                if(!strcmpiW(p, gta5W))
-                {
-                    FIXME("HACK: changing GTA5.exe vprot\n");
-                    set_page_vprot_bits(base, page_size, VPROT_COPIED, 0);
-                }
-            }
         }
         else status = STATUS_NOT_COMMITTED;
     }
@@ -3291,7 +3346,7 @@ static NTSTATUS get_basic_memory_info( HANDLE process, LPCVOID addr,
         else if (view->protect & (SEC_FILE | SEC_RESERVE | SEC_COMMIT)) info->Type = MEM_MAPPED;
         else info->Type = MEM_PRIVATE;
         for (ptr = base; ptr < base + range_size; ptr += page_size)
-            if ((get_page_vprot( ptr ) ^ vprot) & ~VPROT_WRITEWATCH) break;
+            if ((get_page_vprot( ptr ) ^ vprot) & ~(VPROT_WRITEWATCH|VPROT_WRITTEN)) break;
         info->RegionSize = ptr - base;
     }
     server_leave_uninterrupted_section( &csVirtual, &sigset );
@@ -3342,7 +3397,7 @@ static NTSTATUS get_working_set_ex( HANDLE process, LPCVOID addr,
                 (vprot & VPROT_COMMITTED))
         {
             p->VirtualAttributes.Valid = !(vprot & VPROT_GUARD) && (vprot & 0x0f) && (pagemap >> 63);
-            p->VirtualAttributes.Shared = !is_view_valloc( view ) && ((pagemap >> 61) & 1);
+            p->VirtualAttributes.Shared = (!is_view_valloc( view ) && ((pagemap >> 61) & 1)) || ((view->protect & VPROT_WRITECOPY) && !(vprot & VPROT_WRITTEN));
             if (p->VirtualAttributes.Shared && p->VirtualAttributes.Valid)
                 p->VirtualAttributes.ShareCount = 1; /* FIXME */
             if (p->VirtualAttributes.Valid)

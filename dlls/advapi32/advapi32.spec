@@ -102,14 +102,14 @@
 @ stdcall CloseEventLog (long)
 @ stdcall -import CloseServiceHandle(long)
 # @ stub CloseThreadWaitChainSession
-@ stdcall CloseTrace(int64)
+@ stdcall -import CloseTrace(int64)
 @ stdcall CommandLineFromMsiDescriptor(wstr ptr ptr)
 # @ stub ComputeAccessTokenFromCodeAuthzLevel
 @ stdcall -import ControlService(long long ptr)
 # @ stub ControlServiceExA
 # @ stub ControlServiceExW
-@ stdcall ControlTraceA(int64 str ptr long)
-@ stdcall ControlTraceW(int64 wstr ptr long)
+@ stdcall -import ControlTraceA(int64 str ptr long)
+@ stdcall -import ControlTraceW(int64 wstr ptr long)
 # @ stub ConvertAccessToSecurityDescriptorA
 # @ stub ConvertAccessToSecurityDescriptorW
 # @ stub ConvertSDToStringSDDomainW
@@ -265,20 +265,20 @@
 @ stub ElfReportEventW
 @ stdcall EnableTrace(long long long ptr int64)
 @ stdcall EnableTraceEx(ptr ptr int64 long long int64 int64 long ptr)
-@ stdcall EnableTraceEx2(int64 ptr long long int64 int64 long ptr)
+@ stdcall -import EnableTraceEx2(int64 ptr long long int64 int64 long ptr)
 @ stdcall EncryptFileA(str)
 @ stdcall EncryptFileW(wstr)
 # @ stub EncryptedFileKeyInfo
 # @ stub EncryptionDisable
-@ stdcall -import EnumDependentServicesA(long long ptr long ptr ptr)
+@ stdcall EnumDependentServicesA(long long ptr long ptr ptr)
 @ stdcall -import EnumDependentServicesW(long long ptr long ptr ptr)
 @ stdcall -import EnumDynamicTimeZoneInformation(long ptr)
 @ stub EnumServiceGroupA
 @ stub EnumServiceGroupW
-@ stdcall -import EnumServicesStatusA (long long long ptr long ptr ptr ptr)
-@ stdcall -import EnumServicesStatusExA(long long long long ptr long ptr ptr ptr str)
+@ stdcall EnumServicesStatusA (long long long ptr long ptr ptr ptr)
+@ stdcall EnumServicesStatusExA(long long long long ptr long ptr ptr ptr str)
 @ stdcall -import EnumServicesStatusExW(long long long long ptr long ptr ptr ptr wstr)
-@ stdcall -import EnumServicesStatusW (long long long ptr long ptr ptr ptr)
+@ stdcall EnumServicesStatusW (long long long ptr long ptr ptr ptr)
 @ stdcall EnumerateTraceGuids(ptr long ptr)
 # @ stub EnumerateTraceGuidsEx
 @ stdcall -import EqualDomainSid(ptr ptr ptr)
@@ -360,9 +360,9 @@
 @ stdcall GetSecurityInfo (long long long ptr ptr ptr ptr ptr)
 @ stdcall GetSecurityInfoExA (long long long str str ptr ptr ptr ptr)
 @ stdcall GetSecurityInfoExW (long long long wstr wstr ptr ptr ptr ptr)
-@ stdcall -import GetServiceDisplayNameA(ptr str ptr ptr)
+@ stdcall GetServiceDisplayNameA(ptr str ptr ptr)
 @ stdcall -import GetServiceDisplayNameW(ptr wstr ptr ptr)
-@ stdcall -import GetServiceKeyNameA(long str ptr ptr)
+@ stdcall GetServiceKeyNameA(long str ptr ptr)
 @ stdcall -import GetServiceKeyNameW(long wstr ptr ptr)
 @ stdcall -import GetSidIdentifierAuthority(ptr)
 @ stdcall -import GetSidLengthRequired(long)
@@ -421,7 +421,7 @@
 @ stdcall -import IsValidSecurityDescriptor(ptr)
 @ stdcall -import IsValidSid(ptr)
 @ stdcall -import IsWellKnownSid(ptr long)
-@ stdcall -import LockServiceDatabase(ptr)
+@ stdcall LockServiceDatabase(ptr)
 @ stdcall LogonUserA(str str str long long ptr)
 # @ stub LogonUserExA
 # @ stub LogonUserExExW
@@ -550,7 +550,7 @@
 @ stdcall -import OpenThreadToken(long long long ptr)
 # @ stub OpenThreadWaitChainSession
 @ stdcall -ret64 OpenTraceA(ptr)
-@ stdcall -ret64 OpenTraceW(ptr)
+@ stdcall -ret64 -import OpenTraceW(ptr)
 # @ stub OperationEnd
 # @ stub OperationStart
 # @ stub PerfAddCounters
@@ -587,9 +587,9 @@
 @ stdcall -import PrivilegedServiceAuditAlarmW(wstr wstr long ptr long)
 # @ stub ProcessIdleTasks
 # @ stub ProcessIdleTasksW
-@ stdcall ProcessTrace(ptr long ptr ptr)
-@ stdcall QueryAllTracesA(ptr long ptr)
-@ stdcall QueryAllTracesW(ptr long ptr)
+@ stdcall -import ProcessTrace(ptr long ptr ptr)
+@ stdcall -import QueryAllTracesA(ptr long ptr)
+@ stdcall -import QueryAllTracesW(ptr long ptr)
 # @ stub QueryLocalUserServiceName
 # @ stub QueryRecoveryAgentsOnEncryptedFile
 # @ stub QuerySecurityAccessMask
@@ -598,8 +598,8 @@
 @ stdcall -import QueryServiceConfigA(long ptr long ptr)
 @ stdcall -import QueryServiceConfigW(long ptr long ptr)
 # @ stub QueryServiceDynamicInformation
-@ stdcall -import QueryServiceLockStatusA(long ptr long ptr)
-@ stdcall -import QueryServiceLockStatusW(long ptr long ptr)
+@ stdcall QueryServiceLockStatusA(long ptr long ptr)
+@ stdcall QueryServiceLockStatusW(long ptr long ptr)
 @ stdcall -import QueryServiceObjectSecurity(long long ptr long ptr)
 @ stdcall -import QueryServiceStatus(long ptr)
 @ stdcall -import QueryServiceStatusEx (long long ptr long ptr)
@@ -760,7 +760,7 @@
 @ stdcall SetSecurityInfo (long long long ptr ptr ptr ptr)
 # @ stub SetSecurityInfoExA
 # @ stub SetSecurityInfoExW
-@ stdcall -import SetServiceBits(long long long long)
+@ stdcall SetServiceBits(long long long long)
 @ stdcall -import SetServiceObjectSecurity(long long ptr)
 @ stdcall -import SetServiceStatus(long ptr)
 @ stdcall -import SetThreadToken(ptr ptr)
@@ -772,10 +772,10 @@
 @ stdcall -import StartServiceCtrlDispatcherA(ptr)
 @ stdcall -import StartServiceCtrlDispatcherW(ptr)
 @ stdcall -import StartServiceW(long long ptr)
-@ stdcall StartTraceA(ptr str ptr)
-@ stdcall StartTraceW(ptr wstr ptr)
+@ stdcall -import StartTraceA(ptr str ptr)
+@ stdcall -import StartTraceW(ptr wstr ptr)
 @ stdcall StopTraceA(int64 str ptr)
-@ stdcall StopTraceW(int64 wstr ptr)
+@ stdcall -import StopTraceW(int64 wstr ptr)
 @ stdcall SynchronizeWindows31FilesAndWindowsNTRegistry(long long long long)
 @ stdcall SystemFunction001(ptr ptr ptr)
 @ stdcall SystemFunction002(ptr ptr ptr)
@@ -820,7 +820,7 @@
 @ varargs TraceMessage(int64 long ptr long) ntdll.EtwTraceMessage
 @ stdcall TraceMessageVa(int64 long ptr long ptr) ntdll.EtwTraceMessageVa
 # @ stub TraceQueryInformation
-@ stdcall TraceSetInformation(int64 long ptr long)
+@ stdcall -import TraceSetInformation(int64 long ptr long)
 # @ stub TreeResetNamedSecurityInfoA
 @ stdcall TreeResetNamedSecurityInfoW(wstr long long ptr ptr ptr ptr long ptr long ptr)
 # @ stub TreeSetNamedSecurityInfoA
@@ -828,7 +828,7 @@
 # @ stub TrusteeAccessToObjectA
 # @ stub TrusteeAccessToObjectW
 # @ stub UninstallApplication
-@ stdcall -import UnlockServiceDatabase (ptr)
+@ stdcall UnlockServiceDatabase (ptr)
 # @ stub UnregisterIdleTask
 @ stdcall UnregisterTraceGuids(int64) ntdll.EtwUnregisterTraceGuids
 @ stub UpdateTraceA

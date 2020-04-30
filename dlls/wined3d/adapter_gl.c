@@ -4652,41 +4652,21 @@ static void adapter_gl_uninit_3d(struct wined3d_device *device)
 }
 
 static void *adapter_gl_map_bo_address(struct wined3d_context *context,
-        const struct wined3d_bo_address *data, size_t size, uint32_t bind_flags, uint32_t map_flags)
+        const struct wined3d_bo_address *data, size_t size, uint32_t map_flags)
 {
-    struct wined3d_context_gl *context_gl;
-    GLenum binding;
-
-    context_gl = wined3d_context_gl(context);
-    binding = wined3d_buffer_gl_binding_from_bind_flags(context_gl->gl_info, bind_flags);
-
-    return wined3d_context_gl_map_bo_address(context_gl, data, size, binding, map_flags);
+    return wined3d_context_gl_map_bo_address(wined3d_context_gl(context), data, size, map_flags);
 }
 
-static void adapter_gl_unmap_bo_address(struct wined3d_context *context, const struct wined3d_bo_address *data,
-        uint32_t bind_flags, unsigned int range_count, const struct wined3d_range *ranges)
+static void adapter_gl_unmap_bo_address(struct wined3d_context *context,
+        const struct wined3d_bo_address *data, unsigned int range_count, const struct wined3d_range *ranges)
 {
-    struct wined3d_context_gl *context_gl;
-    GLenum binding;
-
-    context_gl = wined3d_context_gl(context);
-    binding = wined3d_buffer_gl_binding_from_bind_flags(context_gl->gl_info, bind_flags);
-
-    wined3d_context_gl_unmap_bo_address(context_gl, data, binding, range_count, ranges);
+    wined3d_context_gl_unmap_bo_address(wined3d_context_gl(context), data, range_count, ranges);
 }
 
 static void adapter_gl_copy_bo_address(struct wined3d_context *context,
-        const struct wined3d_bo_address *dst, uint32_t dst_bind_flags,
-        const struct wined3d_bo_address *src, uint32_t src_bind_flags, size_t size)
+        const struct wined3d_bo_address *dst, const struct wined3d_bo_address *src, size_t size)
 {
-    struct wined3d_context_gl *context_gl;
-    GLenum dst_binding, src_binding;
-
-    context_gl = wined3d_context_gl(context);
-    dst_binding = wined3d_buffer_gl_binding_from_bind_flags(context_gl->gl_info, dst_bind_flags);
-    src_binding = wined3d_buffer_gl_binding_from_bind_flags(context_gl->gl_info, src_bind_flags);
-
-    wined3d_context_gl_copy_bo_address(context_gl, dst, dst_binding, src, src_binding, size);
+    wined3d_context_gl_copy_bo_address(wined3d_context_gl(context), dst, src, size);
 }
 
 static HRESULT adapter_gl_create_swapchain(struct wined3d_device *device, struct wined3d_swapchain_desc *desc,
@@ -4850,7 +4830,7 @@ struct wined3d_view_gl_destroy_ctx
 {
     struct wined3d_device *device;
     const struct wined3d_gl_view *gl_view;
-    GLuint *counter_bo;
+    struct wined3d_bo_gl *counter_bo;
     void *object;
     struct wined3d_view_gl_destroy_ctx *free;
 };
@@ -4861,10 +4841,12 @@ static void wined3d_view_gl_destroy_object(void *object)
     const struct wined3d_gl_info *gl_info;
     struct wined3d_context *context;
     struct wined3d_device *device;
+    GLuint counter_id;
 
     device = ctx->device;
 
-    if (ctx->gl_view->name || ctx->counter_bo)
+    counter_id = ctx->counter_bo ? ctx->counter_bo->id : 0;
+    if (ctx->gl_view->name || counter_id)
     {
         context = context_acquire(device, NULL, 0);
         gl_info = wined3d_context_gl(context)->gl_info;
@@ -4873,8 +4855,8 @@ static void wined3d_view_gl_destroy_object(void *object)
             context_gl_resource_released(device, ctx->gl_view->name, FALSE);
             gl_info->gl_ops.gl.p_glDeleteTextures(1, &ctx->gl_view->name);
         }
-        if (ctx->counter_bo)
-            GL_EXTCALL(glDeleteBuffers(1, ctx->counter_bo));
+        if (counter_id)
+            GL_EXTCALL(glDeleteBuffers(1, &counter_id));
         checkGLcall("delete resources");
         context_release(context);
     }
@@ -4884,7 +4866,7 @@ static void wined3d_view_gl_destroy_object(void *object)
 }
 
 static void wined3d_view_gl_destroy(struct wined3d_device *device,
-        const struct wined3d_gl_view *gl_view, GLuint *counter_bo, void *object)
+        const struct wined3d_gl_view *gl_view, struct wined3d_bo_gl *counter_bo, void *object)
 {
     struct wined3d_view_gl_destroy_ctx *ctx, c;
 
@@ -5115,36 +5097,38 @@ void adapter_gl_clear_uav(struct wined3d_context *context,
 
 static const struct wined3d_adapter_ops wined3d_adapter_gl_ops =
 {
-    adapter_gl_destroy,
-    adapter_gl_create_device,
-    adapter_gl_destroy_device,
-    adapter_gl_acquire_context,
-    adapter_gl_release_context,
-    adapter_gl_get_wined3d_caps,
-    adapter_gl_check_format,
-    adapter_gl_init_3d,
-    adapter_gl_uninit_3d,
-    adapter_gl_map_bo_address,
-    adapter_gl_unmap_bo_address,
-    adapter_gl_copy_bo_address,
-    adapter_gl_create_swapchain,
-    adapter_gl_destroy_swapchain,
-    adapter_gl_create_buffer,
-    adapter_gl_destroy_buffer,
-    adapter_gl_create_texture,
-    adapter_gl_destroy_texture,
-    adapter_gl_create_rendertarget_view,
-    adapter_gl_destroy_rendertarget_view,
-    adapter_gl_create_shader_resource_view,
-    adapter_gl_destroy_shader_resource_view,
-    adapter_gl_create_unordered_access_view,
-    adapter_gl_destroy_unordered_access_view,
-    adapter_gl_create_sampler,
-    adapter_gl_destroy_sampler,
-    adapter_gl_create_query,
-    adapter_gl_destroy_query,
-    adapter_gl_flush_context,
-    adapter_gl_clear_uav,
+    .adapter_destroy = adapter_gl_destroy,
+    .adapter_create_device = adapter_gl_create_device,
+    .adapter_destroy_device = adapter_gl_destroy_device,
+    .adapter_acquire_context = adapter_gl_acquire_context,
+    .adapter_release_context = adapter_gl_release_context,
+    .adapter_get_wined3d_caps = adapter_gl_get_wined3d_caps,
+    .adapter_check_format = adapter_gl_check_format,
+    .adapter_init_3d = adapter_gl_init_3d,
+    .adapter_uninit_3d = adapter_gl_uninit_3d,
+    .adapter_map_bo_address = adapter_gl_map_bo_address,
+    .adapter_unmap_bo_address = adapter_gl_unmap_bo_address,
+    .adapter_copy_bo_address = adapter_gl_copy_bo_address,
+    .adapter_create_swapchain = adapter_gl_create_swapchain,
+    .adapter_destroy_swapchain = adapter_gl_destroy_swapchain,
+    .adapter_create_buffer = adapter_gl_create_buffer,
+    .adapter_destroy_buffer = adapter_gl_destroy_buffer,
+    .adapter_create_texture = adapter_gl_create_texture,
+    .adapter_destroy_texture = adapter_gl_destroy_texture,
+    .adapter_create_rendertarget_view = adapter_gl_create_rendertarget_view,
+    .adapter_destroy_rendertarget_view = adapter_gl_destroy_rendertarget_view,
+    .adapter_create_shader_resource_view = adapter_gl_create_shader_resource_view,
+    .adapter_destroy_shader_resource_view = adapter_gl_destroy_shader_resource_view,
+    .adapter_create_unordered_access_view = adapter_gl_create_unordered_access_view,
+    .adapter_destroy_unordered_access_view = adapter_gl_destroy_unordered_access_view,
+    .adapter_create_sampler = adapter_gl_create_sampler,
+    .adapter_destroy_sampler = adapter_gl_destroy_sampler,
+    .adapter_create_query = adapter_gl_create_query,
+    .adapter_destroy_query = adapter_gl_destroy_query,
+    .adapter_flush_context = adapter_gl_flush_context,
+    .adapter_draw_primitive = draw_primitive,
+    .adapter_dispatch_compute = dispatch_compute,
+    .adapter_clear_uav = adapter_gl_clear_uav,
 };
 
 static void wined3d_adapter_gl_init_d3d_info(struct wined3d_adapter_gl *adapter_gl, uint32_t wined3d_creation_flags)
@@ -5158,6 +5142,7 @@ static void wined3d_adapter_gl_init_d3d_info(struct wined3d_adapter_gl *adapter_
 
     adapter_gl->a.shader_backend->shader_get_caps(&adapter_gl->a, &shader_caps);
     adapter_gl->a.vertex_pipe->vp_get_caps(&adapter_gl->a, &vertex_caps);
+    adapter_gl->a.misc_state_template = misc_state_template_gl;
     adapter_gl->a.fragment_pipe->get_caps(&adapter_gl->a, &fragment_caps);
 
     d3d_info->limits.vs_version = shader_caps.vs_version;

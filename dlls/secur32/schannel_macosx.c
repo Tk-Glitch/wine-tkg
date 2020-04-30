@@ -849,24 +849,6 @@ void schan_imp_set_session_target(schan_imp_session session, const char *target)
     SSLSetPeerDomainName( s->context, target, strlen(target) );
 }
 
-void schan_imp_set_application_protocols(schan_imp_session session, unsigned char *buffer, unsigned int buflen)
-{
-    struct mac_session *s = (struct mac_session*)session;
-
-    TRACE("(%p/%p, %p, %d)\n", s, s->context, buffer, buflen);
-}
-
-SECURITY_STATUS schan_imp_get_application_protocol(schan_imp_session session,
-                                                   SecPkgContext_ApplicationProtocol *protocol)
-{
-    struct mac_session *s = (struct mac_session*)session;
-
-    TRACE("(%p/%p, %p)\n", s, s->context, protocol);
-
-    memset(protocol, 0, sizeof(*protocol));
-    return SEC_E_OK;
-}
-
 SECURITY_STATUS schan_imp_handshake(schan_imp_session session)
 {
     struct mac_session *s = (struct mac_session*)session;
@@ -1210,6 +1192,18 @@ BOOL schan_imp_allocate_certificate_credentials(schan_credentials *c, const CERT
 
 void schan_imp_free_certificate_credentials(schan_credentials *c)
 {
+}
+
+void schan_imp_set_application_protocols(schan_imp_session session, unsigned char *buffer, unsigned int buflen)
+{
+    FIXME("no support for application protocols on this platform\n");
+}
+
+SECURITY_STATUS schan_imp_get_application_protocol(schan_imp_session session,
+                                                   SecPkgContext_ApplicationProtocol *protocol)
+{
+    FIXME("no support for application protocols on this platform\n");
+    return SEC_E_UNSUPPORTED_FUNCTION;
 }
 
 BOOL schan_imp_init(void)

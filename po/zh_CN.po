@@ -572,7 +572,7 @@ msgstr "字体(&F)："
 msgid "Font St&yle:"
 msgstr "字体样式(&Y)："
 
-#: comdlg32.rc:260 comdlg32.rc:439 winecfg.rc:293
+#: comdlg32.rc:260 comdlg32.rc:439 winecfg.rc:292
 msgid "&Size:"
 msgstr "大小(&S)："
 
@@ -588,7 +588,7 @@ msgstr "删除线(&K)"
 msgid "&Underline"
 msgstr "下划线(&U)"
 
-#: comdlg32.rc:270 winecfg.rc:291
+#: comdlg32.rc:270 winecfg.rc:290
 msgid "&Color:"
 msgstr "配色(&C)："
 
@@ -614,7 +614,7 @@ msgstr "自定义颜色(&C)："
 
 #: comdlg32.rc:289
 msgid "|S&olid"
-msgstr ""
+msgstr "|纯色(&O)"
 
 #: comdlg32.rc:290
 msgid "&Red:"
@@ -651,11 +651,9 @@ msgid "&Define Custom Colors >>"
 msgstr "定义自定义颜色(&D) >>"
 
 #: comdlg32.rc:312
-#, fuzzy
-#| msgid "&No"
 msgctxt "Solid"
 msgid "&o"
-msgstr "否(&N)"
+msgstr "&o"
 
 #: comdlg32.rc:318 regedit.rc:275 regedit.rc:285
 msgid "Find"
@@ -762,7 +760,7 @@ msgstr "份数(&C)："
 msgid "C&ollate"
 msgstr "逐份打印(&O)"
 
-#: comdlg32.rc:414 winecfg.rc:299
+#: comdlg32.rc:414 winecfg.rc:298
 msgid "Si&ze:"
 msgstr "大小(&Z):"
 
@@ -2232,7 +2230,7 @@ msgstr ""
 msgid "&File name:"
 msgstr "文件名(&F)："
 
-#: cryptui.rc:301 cryptui.rc:323 cryptui.rc:437 winecfg.rc:312
+#: cryptui.rc:301 cryptui.rc:323 cryptui.rc:437 winecfg.rc:311
 msgid "B&rowse..."
 msgstr "浏览(&R)..."
 
@@ -3659,17 +3657,15 @@ msgstr "期望 '@'"
 
 #: jscript.rc:75
 msgid "Microsoft JScript compilation error"
-msgstr ""
+msgstr "Microsoft JScript 编译错误"
 
 #: jscript.rc:76
 msgid "Microsoft JScript runtime error"
-msgstr ""
+msgstr "Microsoft JScript 运行时错误"
 
 #: jscript.rc:77
-#, fuzzy
-#| msgid "Unknown error"
 msgid "Unknown runtime error"
-msgstr "未知错误"
+msgstr "未知运行时错误"
 
 #: jscript.rc:54
 msgid "Number expected"
@@ -3717,7 +3713,7 @@ msgstr "正则表达式中出现语法错误"
 
 #: jscript.rc:63
 msgid "Exception thrown and not caught"
-msgstr ""
+msgstr "发生异常且未被捕捉"
 
 #: jscript.rc:65
 msgid "URI to be encoded contains invalid characters"
@@ -6791,10 +6787,8 @@ msgid "Sink has not been finalized.\n"
 msgstr "池尚未完成。\n"
 
 #: mferror.mc:732
-#, fuzzy
-#| msgid "Sink was already stopped.\n"
 msgid "Clock was stopped\n"
-msgstr "池已被停止。\n"
+msgstr "时钟已停止\n"
 
 #: mferror.mc:32
 msgid "Media Foundation platform is not initialized.\n"
@@ -7173,10 +7167,8 @@ msgid "Clock state was already set.\n"
 msgstr "已设置时钟状态。\n"
 
 #: mferror.mc:725
-#, fuzzy
-#| msgid "Clock is not available.\n"
 msgid "Clock is not simple\n"
-msgstr "时钟不可用。\n"
+msgstr "非简单时钟\n"
 
 #: mpr.rc:35 wininet.rc:37
 msgid "Enter Network Password"
@@ -7230,7 +7222,7 @@ msgstr "超链接"
 msgid "Hyperlink Information"
 msgstr "超链接信息"
 
-#: mshtml.rc:43 winecfg.rc:244
+#: mshtml.rc:43 winecfg.rc:243
 msgid "&Type:"
 msgstr "类型(&T)："
 
@@ -8266,206 +8258,158 @@ msgid "Off"
 msgstr "关"
 
 #: version.rc:56
-#, fuzzy
-#| msgid "video"
 msgid "Provider"
-msgstr "视频"
+msgstr "提供者"
 
 #: version.rc:59
-#, fuzzy
-#| msgid "Select the format you want to use:"
 msgid "Select the data you want to connect to:"
-msgstr "选择您希望使用的格式："
+msgstr "选择您想要连接的数据源："
 
 #: version.rc:66
-#, fuzzy
-#| msgid "Connections"
 msgid "Connection"
 msgstr "连接"
 
 #: version.rc:69
-#, fuzzy
-#| msgid "Select the format you want to use:"
 msgid "Specify the following to connect to ODBC data:"
-msgstr "选择您希望使用的格式："
+msgstr "指定以下内容以连接到 ODBC 数据源："
 
 #: version.rc:70
 msgid "1. Specify the source of data:"
-msgstr ""
+msgstr "1. 指定数据源："
 
 #: version.rc:71
-#, fuzzy
-#| msgid "Please enter your name"
 msgid "Use &data source name"
-msgstr "请输入你的名字"
+msgstr "使用数据源名称(&D)"
 
 #: version.rc:74
-#, fuzzy
-#| msgid "Reset Connections"
 msgid "Use c&onnection string"
-msgstr "连接重置次数"
+msgstr "使用连接字符串(&O)"
 
 #: version.rc:75
-#, fuzzy
-#| msgid "Connections"
 msgid "&Connection string:"
-msgstr "连接"
+msgstr "连接字符串(&C)："
 
 #: version.rc:77
-#, fuzzy
-#| msgid "A&dd..."
 msgid "B&uild..."
-msgstr "添加(&D)..."
+msgstr "构建(&U)..."
 
 #: version.rc:78
 msgid "2. Enter information to log on to the server"
-msgstr ""
+msgstr "2. 输入服务器登录信息"
 
 #: version.rc:79
-#, fuzzy
-#| msgid "&User name:"
 msgid "User &name:"
-msgstr "用户名(&U)："
+msgstr "用户名(&N)："
 
 #: version.rc:83
-#, fuzzy
-#| msgid "&Blank page"
 msgid "&Blank password"
-msgstr "空白页面(&B)"
+msgstr "空密码(&B)"
 
 #: version.rc:84
-#, fuzzy
-#| msgid "Wrong password.\n"
 msgid "Allow &saving password"
-msgstr "密码错误。\n"
+msgstr "允许保存密码(&S)"
 
 #: version.rc:85
 msgid "3. Enter the &initial catalog to use:"
-msgstr ""
+msgstr "3. 输入要使用的初始目录："
 
 #: version.rc:87
-#, fuzzy
-#| msgid "Reset Connections"
 msgid "&Test Connection"
-msgstr "连接重置次数"
+msgstr "测试连接(&T)"
 
 #: version.rc:92 winemine.rc:65
 msgid "Advanced"
 msgstr "高级"
 
 #: version.rc:95
-#, fuzzy
-#| msgid "Network share"
 msgid "Network settings"
-msgstr "网络共享文件夹"
+msgstr "网络设置"
 
 #: version.rc:96
-#, fuzzy
-#| msgid "Bad impersonation level.\n"
 msgid "&Impersonation level:"
-msgstr "无效的模拟级别。\n"
+msgstr "模拟级别(&I)："
 
 #: version.rc:98
 msgid "P&rotection level:"
-msgstr ""
+msgstr "保护级别(&R)："
 
 #: version.rc:101
-#, fuzzy
-#| msgid "Connected"
 msgid "Connect:"
-msgstr "已连接"
+msgstr "连接："
 
 #: version.rc:103
-#, fuzzy
-#| msgid "seconds"
 msgid "seconds."
-msgstr "秒"
+msgstr "秒。"
 
 #: version.rc:104
-#, fuzzy
-#| msgid "Success"
 msgid "A&ccess:"
-msgstr "成功"
+msgstr "访问(&A)："
 
 #: version.rc:110
-#, fuzzy
-#| msgid "&All"
 msgid "All"
-msgstr "全部(&A)"
+msgstr "全部"
 
 #: version.rc:114
 msgid ""
 "These are the initialization properties for this type of data. To edit a "
 "value, select a property, then choose Edit Value below."
 msgstr ""
+"该数据类型定义了数种初始化属性。要编辑属性值，选择一项属性，然后点选“编辑数"
+"据”。"
 
 #: version.rc:115
-#, fuzzy
-#| msgid "&Edit..."
 msgid "&Edit Value..."
-msgstr "编辑(&E)..."
+msgstr "编辑数据(&E)..."
 
 #: version.rc:49
-#, fuzzy
-#| msgid "Properties"
 msgid "Data Link Error"
-msgstr "属性"
+msgstr "数据链错误"
 
 #: version.rc:50
-#, fuzzy
-#| msgid "Please select a file."
 msgid "Please select a provider."
-msgstr "请选择一个文件。"
+msgstr "请选择提供者。"
 
 #: version.rc:51
 msgid ""
 "Provider is no longer available. Ensure that the provider is installed "
 "properly."
-msgstr ""
+msgstr "提供者已不再可用。请确保提供者已正确安装。"
 
 #: version.rc:36
-#, fuzzy
-#| msgid "Properties"
 msgid "Data Link Properties"
-msgstr "属性"
+msgstr "数据链路属性"
 
 #: version.rc:37
 msgid "OLE DB Provider(s)"
-msgstr ""
+msgstr "OLE DB 提供者"
 
 #: version.rc:41
-#, fuzzy
-#| msgid "Ready"
 msgid "Read"
-msgstr "待命"
+msgstr "读取"
 
 #: version.rc:42
-#, fuzzy
-#| msgid "Readme:"
 msgid "ReadWrite"
-msgstr "产品说明："
+msgstr "读写"
 
 #: version.rc:43
 msgid "Share Deny None"
-msgstr ""
+msgstr "共享 拒绝 无"
 
 #: version.rc:44
 msgid "Share Deny Read"
-msgstr ""
+msgstr "共享 拒绝 可读"
 
 #: version.rc:45
 msgid "Share Deny Write"
-msgstr ""
+msgstr "共享 拒绝 可写"
 
 #: version.rc:46
 msgid "Share Exclusive"
-msgstr ""
+msgstr "共享互斥锁"
 
 #: version.rc:47
-#, fuzzy
-#| msgid "I/O Writes"
 msgid "Write"
-msgstr "I/O 写入"
+msgstr "写入"
 
 #: oledlg.rc:55
 msgid "Insert Object"
@@ -9147,7 +9091,7 @@ msgstr "输入程序，目录，文件或者Internet资源名，Wine将为您打
 msgid "&Open:"
 msgstr "打开(&O)："
 
-#: shell32.rc:343 progman.rc:182 progman.rc:201 progman.rc:218 winecfg.rc:242
+#: shell32.rc:343 progman.rc:182 progman.rc:201 progman.rc:218 winecfg.rc:241
 #: winefile.rc:129
 msgid "&Browse..."
 msgstr "浏览(&B)..."
@@ -9644,16 +9588,12 @@ msgid "Cape Verde Daylight Time"
 msgstr "佛得角夏令时"
 
 #: tzres.rc:120
-#, fuzzy
-#| msgid "Hawaiian Standard Time"
 msgid "Haiti Standard Time"
-msgstr "夏威夷标准时间"
+msgstr "海地标准时间"
 
 #: tzres.rc:121
-#, fuzzy
-#| msgid "Hawaiian Daylight Time"
 msgid "Haiti Daylight Time"
-msgstr "夏威夷夏令时"
+msgstr "海地夏令时"
 
 #: tzres.rc:78
 msgid "Central European Standard Time"
@@ -9864,16 +9804,12 @@ msgid "Argentina Daylight Time"
 msgstr "阿根廷夏令时"
 
 #: tzres.rc:142
-#, fuzzy
-#| msgid "Mauritius Standard Time"
 msgid "Marquesas Standard Time"
-msgstr "毛里求斯标准时间"
+msgstr "马克萨斯标准时间"
 
 #: tzres.rc:143
-#, fuzzy
-#| msgid "Mauritius Daylight Time"
 msgid "Marquesas Daylight Time"
-msgstr "毛里求斯夏令时"
+msgstr "马克萨斯夏令时"
 
 #: tzres.rc:156
 msgid "Myanmar Standard Time"
@@ -10248,16 +10184,12 @@ msgid "Venezuela Daylight Time"
 msgstr "委内瑞拉夏令时"
 
 #: tzres.rc:60
-#, fuzzy
-#| msgid "Mountain Standard Time"
 msgid "Bougainville Standard Time"
-msgstr "山地标准时间"
+msgstr "布干维尔标准时间"
 
 #: tzres.rc:61
-#, fuzzy
-#| msgid "Mountain Daylight Time"
 msgid "Bougainville Daylight Time"
-msgstr "山地夏令时"
+msgstr "布干维尔夏令时"
 
 #: tzres.rc:122
 msgid "Hawaiian Standard Time"
@@ -10284,16 +10216,12 @@ msgid "New Zealand Daylight Time"
 msgstr "新西兰夏令时"
 
 #: tzres.rc:34
-#, fuzzy
-#| msgid "Argentina Standard Time"
 msgid "Aleutian Standard Time"
-msgstr "阿根廷标准时间"
+msgstr "阿留申标准时间"
 
 #: tzres.rc:35
-#, fuzzy
-#| msgid "Argentina Daylight Time"
 msgid "Aleutian Daylight Time"
-msgstr "阿根廷夏令时"
+msgstr "阿留申夏令时"
 
 #: tzres.rc:74
 msgid "Central Brazilian Standard Time"
@@ -10376,16 +10304,12 @@ msgid "Korea Daylight Time"
 msgstr "韩国夏令时"
 
 #: tzres.rc:86
-#, fuzzy
-#| msgid "Easter Island Standard Time"
 msgid "Chatham Islands Standard Time"
-msgstr "复活节岛标准时间"
+msgstr "查塔姆标准时间"
 
 #: tzres.rc:87
-#, fuzzy
-#| msgid "Easter Island Daylight Time"
 msgid "Chatham Islands Daylight Time"
-msgstr "复活节岛夏令时"
+msgstr "查塔姆夏令时"
 
 #: tzres.rc:92
 msgid "E. Africa Standard Time"
@@ -11514,7 +11438,7 @@ msgstr "模拟时钟(&L)"
 msgid "Digi&tal"
 msgstr "数字时钟(&T)"
 
-#: clock.rc:35 notepad.rc:53 winecfg.rc:306 winefile.rc:63 wordpad.rc:84
+#: clock.rc:35 notepad.rc:53 winecfg.rc:305 winefile.rc:63 wordpad.rc:84
 msgid "&Font..."
 msgstr "字体(&F)..."
 
@@ -15392,107 +15316,103 @@ msgstr "无法连接到挂载管理器；不能修改驱动器配置。"
 msgid "A&dd..."
 msgstr "添加(&D)..."
 
-#: winecfg.rc:237
-msgid "Aut&odetect"
-msgstr "自动侦测(&O)"
-
-#: winecfg.rc:240
+#: winecfg.rc:239
 msgid "&Path:"
 msgstr "路径(&P)："
 
-#: winecfg.rc:247 winecfg.rc:37
+#: winecfg.rc:246 winecfg.rc:37
 msgid "Show Advan&ced"
 msgstr "显示高级选项(&C)"
 
-#: winecfg.rc:248
+#: winecfg.rc:247
 msgid "De&vice:"
 msgstr "设备(&V)："
 
-#: winecfg.rc:250
+#: winecfg.rc:249
 msgid "Bro&wse..."
 msgstr "浏览(&W)..."
 
-#: winecfg.rc:252
+#: winecfg.rc:251
 msgid "&Label:"
 msgstr "卷标(&L)："
 
-#: winecfg.rc:254
+#: winecfg.rc:253
 msgid "S&erial:"
 msgstr "序列号(&E)："
 
-#: winecfg.rc:257
+#: winecfg.rc:256
 msgid "&Show dot files"
 msgstr "显示隐藏文件(&S)"
 
-#: winecfg.rc:264
+#: winecfg.rc:263
 msgid "Driver diagnostics"
 msgstr "驱动程序诊断"
 
-#: winecfg.rc:266
+#: winecfg.rc:265
 msgid "Defaults"
 msgstr "默认值"
 
-#: winecfg.rc:267
+#: winecfg.rc:266
 msgid "Output device:"
 msgstr "输出设备："
 
-#: winecfg.rc:268
+#: winecfg.rc:267
 msgid "Voice output device:"
 msgstr "语音输出设备："
 
-#: winecfg.rc:269
+#: winecfg.rc:268
 msgid "Input device:"
 msgstr "输入设备："
 
-#: winecfg.rc:270
+#: winecfg.rc:269
 msgid "Voice input device:"
 msgstr "语音输入设备："
 
-#: winecfg.rc:275
+#: winecfg.rc:274
 msgid "&Test Sound"
 msgstr "测试音频(&T)"
 
-#: winecfg.rc:276 winecfg.rc:89
+#: winecfg.rc:275 winecfg.rc:89
 msgid "Speaker configuration"
 msgstr "扬声器设置"
 
-#: winecfg.rc:279
+#: winecfg.rc:278
 msgid "Speakers:"
 msgstr "扬声器："
 
-#: winecfg.rc:287
+#: winecfg.rc:286
 msgid "Appearance"
 msgstr "外观"
 
-#: winecfg.rc:288
+#: winecfg.rc:287
 msgid "&Theme:"
 msgstr "主题(&T)："
 
-#: winecfg.rc:290
+#: winecfg.rc:289
 msgid "&Install theme..."
 msgstr "安装主题(&I)..."
 
-#: winecfg.rc:295
+#: winecfg.rc:294
 msgid "It&em:"
 msgstr "物件(&E)："
 
-#: winecfg.rc:297
+#: winecfg.rc:296
 msgid "C&olor:"
 msgstr "颜色(&O)："
 
-#: winecfg.rc:303
+#: winecfg.rc:302
 msgid "MIME types"
 msgstr "MIME 类型"
 
-#: winecfg.rc:304
+#: winecfg.rc:303
 msgid "Manage file &associations"
 msgstr "管理文件关联(&A)"
 
-#: winecfg.rc:307
+#: winecfg.rc:306
 msgid "Folders"
 msgstr "文件夹"
 
-#: winecfg.rc:310
+#: winecfg.rc:309
 msgid "&Link to:"
 msgstr "映射至(&L)："
 

@@ -390,7 +390,7 @@ typedef struct _UNICODE_STRING32
   DWORD  Buffer;
 } UNICODE_STRING32;
 
-typedef struct _LDR_MODULE32
+typedef struct _LDR_DATA_TABLE_ENTRY32
 {
     LIST_ENTRY32        InLoadOrderModuleList;
     LIST_ENTRY32        InMemoryOrderModuleList;
@@ -400,14 +400,14 @@ typedef struct _LDR_MODULE32
     ULONG               SizeOfImage;
     UNICODE_STRING32    FullDllName;
     UNICODE_STRING32    BaseDllName;
-} LDR_MODULE32;
+} LDR_DATA_TABLE_ENTRY32;
 
 typedef struct {
     HANDLE process;
     PLIST_ENTRY head, current;
-    LDR_MODULE ldr_module;
+    LDR_DATA_TABLE_ENTRY ldr_module;
     BOOL wow64;
-    LDR_MODULE32 ldr_module32;
+    LDR_DATA_TABLE_ENTRY32 ldr_module32;
 } MODULE_ITERATOR;
 
 static BOOL init_module_iterator(MODULE_ITERATOR *iter, HANDLE process)
@@ -479,7 +479,7 @@ static int module_iterator_next(MODULE_ITERATOR *iter)
         LIST_ENTRY32 *entry32 = (LIST_ENTRY32 *)iter->current;
 
         if (!ReadProcessMemory(iter->process,
-                               CONTAINING_RECORD(entry32, LDR_MODULE32, InLoadOrderModuleList),
+                               CONTAINING_RECORD(entry32, LDR_DATA_TABLE_ENTRY32, InLoadOrderModuleList),
                                &iter->ldr_module32, sizeof(iter->ldr_module32), NULL))
             return -1;
 
@@ -488,15 +488,15 @@ static int module_iterator_next(MODULE_ITERATOR *iter)
     }
 
     if (!ReadProcessMemory(iter->process,
-                           CONTAINING_RECORD(iter->current, LDR_MODULE, InLoadOrderModuleList),
+                           CONTAINING_RECORD(iter->current, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks),
                            &iter->ldr_module, sizeof(iter->ldr_module), NULL))
          return -1;
 
-    iter->current = iter->ldr_module.InLoadOrderModuleList.Flink;
+    iter->current = iter->ldr_module.InLoadOrderLinks.Flink;
     return 1;
 }
 
-static BOOL get_ldr_module(HANDLE process, HMODULE module, LDR_MODULE *ldr_module)
+static BOOL get_ldr_module(HANDLE process, HMODULE module, LDR_DATA_TABLE_ENTRY *ldr_module)
 {
     MODULE_ITERATOR iter;
     INT ret;
@@ -507,7 +507,7 @@ static BOOL get_ldr_module(HANDLE process, HMODULE module, LDR_MODULE *ldr_modul
     while ((ret = module_iterator_next(&iter)) > 0)
         /* When hModule is NULL we return the process image - which will be
          * the first module since our iterator uses InLoadOrderModuleList */
-        if (!module || module == iter.ldr_module.BaseAddress)
+        if (!module || module == iter.ldr_module.DllBase)
         {
             *ldr_module = iter.ldr_module;
             return TRUE;
@@ -519,7 +519,7 @@ static BOOL get_ldr_module(HANDLE process, HMODULE module, LDR_MODULE *ldr_modul
     return FALSE;
 }
 
-static BOOL get_ldr_module32(HANDLE process, HMODULE module, LDR_MODULE32 *ldr_module)
+static BOOL get_ldr_module32(HANDLE process, HMODULE module, LDR_DATA_TABLE_ENTRY32 *ldr_module)
 {
     MODULE_ITERATOR iter;
     INT ret;
@@ -568,11 +568,11 @@ BOOL WINAPI K32EnumProcessModules(HANDLE process, HMODULE *lphModule,
         }
         while (entry != head)
         {
-            PLDR_MODULE table_entry = (PLDR_MODULE)
-                ((PBYTE)entry - offsetof(LDR_MODULE, InLoadOrderModuleList));
+            PLDR_DATA_TABLE_ENTRY table_entry = (PLDR_DATA_TABLE_ENTRY)
+                ((PBYTE)entry - offsetof(LDR_DATA_TABLE_ENTRY, InLoadOrderLinks));
             if (cb >= sizeof(HMODULE))
             {
-                *lphModule++ = table_entry->BaseAddress;
+                *lphModule++ = table_entry->DllBase;
                 cb -= sizeof(HMODULE);
             }
             size += sizeof(HMODULE);
@@ -605,7 +605,7 @@ BOOL WINAPI K32EnumProcessModules(HANDLE process, HMODULE *lphModule,
             if (sizeof(void *) == 8 && iter.wow64)
                 *lphModule++ = (HMODULE) (DWORD_PTR)iter.ldr_module32.BaseAddress;
             else
-                *lphModule++ = iter.ldr_module.BaseAddress;
+                *lphModule++ = iter.ldr_module.DllBase;
             cb -= sizeof(HMODULE);
         }
         size += sizeof(HMODULE);
@@ -641,7 +641,7 @@ BOOL WINAPI K32EnumProcessModulesEx(HANDLE process, HMODULE *lphModule,
 DWORD WINAPI K32GetModuleBaseNameW(HANDLE process, HMODULE module,
                                    LPWSTR base_name, DWORD size)
 {
-    LDR_MODULE ldr_module;
+    LDR_DATA_TABLE_ENTRY ldr_module;
     BOOL wow64;
 
     if (!IsWow64Process(process, &wow64))
@@ -649,7 +649,7 @@ DWORD WINAPI K32GetModuleBaseNameW(HANDLE process, HMODULE module,
 
     if (sizeof(void *) == 8 && wow64)
     {
-        LDR_MODULE32 ldr_module32;
+        LDR_DATA_TABLE_ENTRY32 ldr_module32;
 
         if (!get_ldr_module32(process, module, &ldr_module32))
             return 0;
@@ -710,7 +710,7 @@ DWORD WINAPI K32GetModuleBaseNameA(HANDLE process, HMODULE module,
 DWORD WINAPI K32GetModuleFileNameExW(HANDLE process, HMODULE module,
                                      LPWSTR file_name, DWORD size)
 {
-    LDR_MODULE ldr_module;
+    LDR_DATA_TABLE_ENTRY ldr_module;
     BOOL wow64;
     DWORD len;
 
@@ -721,7 +721,7 @@ DWORD WINAPI K32GetModuleFileNameExW(HANDLE process, HMODULE module,
 
     if (sizeof(void *) == 8 && wow64)
     {
-        LDR_MODULE32 ldr_module32;
+        LDR_DATA_TABLE_ENTRY32 ldr_module32;
 
         if (!get_ldr_module32(process, module, &ldr_module32))
             return 0;
@@ -805,7 +805,7 @@ DWORD WINAPI K32GetModuleFileNameExA(HANDLE process, HMODULE module,
 BOOL WINAPI K32GetModuleInformation(HANDLE process, HMODULE module,
                                     MODULEINFO *modinfo, DWORD cb)
 {
-    LDR_MODULE ldr_module;
+    LDR_DATA_TABLE_ENTRY ldr_module;
     BOOL wow64;
 
     if (cb < sizeof(MODULEINFO))
@@ -819,7 +819,7 @@ BOOL WINAPI K32GetModuleInformation(HANDLE process, HMODULE module,
 
     if (sizeof(void *) == 8 && wow64)
     {
-        LDR_MODULE32 ldr_module32;
+        LDR_DATA_TABLE_ENTRY32 ldr_module32;
 
         if (!get_ldr_module32(process, module, &ldr_module32))
             return FALSE;
@@ -833,7 +833,7 @@ BOOL WINAPI K32GetModuleInformation(HANDLE process, HMODULE module,
         if (!get_ldr_module(process, module, &ldr_module))
             return FALSE;
 
-        modinfo->lpBaseOfDll = ldr_module.BaseAddress;
+        modinfo->lpBaseOfDll = ldr_module.DllBase;
         modinfo->SizeOfImage = ldr_module.SizeOfImage;
         modinfo->EntryPoint  = ldr_module.EntryPoint;
     }

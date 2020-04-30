@@ -126,7 +126,7 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
     static const WCHAR dxgmms1W[]  = {'d','x','g','m','m','s','1','.','s','y','s',0};
     static const WCHAR *stubs[] = { win32kW, dxgkrnlW, dxgmms1W };
     const WCHAR *service_group = (argc >= 2) ? argv[1] : argv[0];
-    LDR_MODULE *ldr;
+    LDR_DATA_TABLE_ENTRY *ldr;
     ULONG_PTR magic;
     int i;
 
@@ -141,10 +141,10 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
     LdrLockLoaderLock( 0, NULL, &magic );
     if (!LdrFindEntryForAddress( GetModuleHandleW( ntoskrnlW ), &ldr ))
     {
-        RemoveEntryList( &ldr->InLoadOrderModuleList );
-        InsertHeadList( &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList, &ldr->InLoadOrderModuleList );
-        RemoveEntryList( &ldr->InMemoryOrderModuleList);
-        InsertHeadList( &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList, &ldr->InMemoryOrderModuleList );
+        RemoveEntryList( &ldr->InLoadOrderLinks );
+        InsertHeadList( &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList, &ldr->InLoadOrderLinks );
+        RemoveEntryList( &ldr->InMemoryOrderLinks );
+        InsertHeadList( &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList, &ldr->InMemoryOrderLinks );
     }
     LdrUnlockLoaderLock( 0, magic );
 

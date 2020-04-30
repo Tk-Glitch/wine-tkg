@@ -4,7 +4,6 @@
  * Copyright 1995 Thomas Sandford
  * Copyright 1997 Marcus Meissner
  * Copyright 1998 Turchanov Sergey
- * Copyright 2019 Micah N Gorrell for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -31,7 +30,6 @@
 #include "wingdi.h"
 #include "controls.h"
 #include "user_private.h"
-#include "winsvc.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -244,17 +242,6 @@ DWORD WINAPI SetLogonNotifyWindow(HWINSTA hwinsta,HWND hwnd)
 }
 
 /***********************************************************************
- *              QueryDisplayConfig (USER32.@)
- */
-LONG WINAPI QueryDisplayConfig(UINT32 flags, UINT32 *numpathelements, DISPLAYCONFIG_PATH_INFO *pathinfo,
-                               UINT32 *numinfoelements, DISPLAYCONFIG_MODE_INFO *modeinfo,
-                               DISPLAYCONFIG_TOPOLOGY_ID *topologyid)
-{
-   FIXME("(%08x %p %p %p %p %p)\n", flags, numpathelements, pathinfo, numinfoelements, modeinfo, topologyid);
-   return ERROR_CALL_NOT_IMPLEMENTED;
-}
-
-/***********************************************************************
  *		RegisterSystemThread (USER32.@)
  */
 void WINAPI RegisterSystemThread(DWORD flags, DWORD reserved)
@@ -291,39 +278,17 @@ DWORD WINAPI RegisterTasklist (DWORD x)
     return TRUE;
 }
 
-static DWORD CALLBACK devnotify_window_callback(HANDLE hRecipient, DWORD flags, DEV_BROADCAST_HDR *dbh)
-{
-    SendMessageTimeoutW(hRecipient, WM_DEVICECHANGE, flags,
-        (LPARAM) dbh, SMTO_ABORTIFHUNG, 2000, NULL);
-    return 0;
-}
-
-static DWORD CALLBACK devnotify_service_callback(HANDLE hRecipient, DWORD flags, DEV_BROADCAST_HDR *dbh)
-{
-    FIXME("Support for service handles is not yet implemented!\n");
-    ControlService(hRecipient, SERVICE_CONTROL_DEVICEEVENT, NULL);
-    return 0;
-}
-
-static DWORD CALLBACK devnotify_null_callback(HANDLE hRecipient, DWORD flags, DEV_BROADCAST_HDR *dbh)
-{
-    /* The WM_DEVICECHANGE event is broadcast directly from ntoskrnl.exe so
-     * nothing needs to be done here. */
-    return 0;
-}
 
 /***********************************************************************
  *		RegisterDeviceNotificationA (USER32.@)
  *
  * See RegisterDeviceNotificationW.
  */
-HDEVNOTIFY WINAPI RegisterDeviceNotificationA(HANDLE hRecipient, LPVOID pNotificationFilter, DWORD dwFlags)
+HDEVNOTIFY WINAPI RegisterDeviceNotificationA(HANDLE hnd, LPVOID notifyfilter, DWORD flags)
 {
-    TRACE("(hwnd=%p, filter=%p,flags=0x%08x)\n",
-        hRecipient,pNotificationFilter,dwFlags);
-    if (pNotificationFilter)
-        FIXME("The notification filter will requires an A->W when filter support is implemented\n");
-    return RegisterDeviceNotificationW(hRecipient, pNotificationFilter, dwFlags);
+    FIXME("(hwnd=%p, filter=%p,flags=0x%08x) returns a fake device notification handle!\n",
+          hnd,notifyfilter,flags );
+    return (HDEVNOTIFY) 0xcafecafe;
 }
 
 /***********************************************************************
@@ -351,48 +316,19 @@ HDEVNOTIFY WINAPI RegisterDeviceNotificationA(HANDLE hRecipient, LPVOID pNotific
  */
 HDEVNOTIFY WINAPI RegisterDeviceNotificationW(HANDLE hRecipient, LPVOID pNotificationFilter, DWORD dwFlags)
 {
-    DEVICE_NOTIFICATION_DETAILS details;
-
-    TRACE("(hwnd=%p, filter=%p,flags=0x%08x)\n",
-        hRecipient,pNotificationFilter,dwFlags);
-
-    if (dwFlags & DEVICE_NOTIFY_ALL_INTERFACE_CLASSES)
-    {
-        dwFlags &= ~DEVICE_NOTIFY_ALL_INTERFACE_CLASSES;
-        pNotificationFilter = NULL;
-    }
-
-    details.hRecipient = hRecipient;
-
-    switch (dwFlags) {
-    case DEVICE_NOTIFY_WINDOW_HANDLE:
-        details.pNotificationCallback = devnotify_window_callback;
-        break;
-
-    case DEVICE_NOTIFY_SERVICE_HANDLE:
-        details.pNotificationCallback = devnotify_service_callback;
-        break;
-
-    default:
-        SetLastError(ERROR_INVALID_FLAGS);
-        return 0;
-    }
-
-    if (!hRecipient)
-        details.pNotificationCallback = devnotify_null_callback;
-
-    return I_ScRegisterDeviceNotification(&details, pNotificationFilter, 0);
+    FIXME("(hwnd=%p, filter=%p,flags=0x%08x) returns a fake device notification handle!\n",
+          hRecipient,pNotificationFilter,dwFlags );
+    return (HDEVNOTIFY) 0xcafeaffe;
 }
 
 /***********************************************************************
  *		UnregisterDeviceNotification (USER32.@)
  *
  */
-BOOL WINAPI UnregisterDeviceNotification(HDEVNOTIFY hnd)
+BOOL  WINAPI UnregisterDeviceNotification(HDEVNOTIFY hnd)
 {
-    TRACE("(hnd=%p)\n", hnd);
-
-    return I_ScUnregisterDeviceNotification(hnd);
+    FIXME("(handle=%p), STUB!\n", hnd);
+    return TRUE;
 }
 
 /***********************************************************************
@@ -598,21 +534,6 @@ BOOL WINAPI IsWindowRedirectedForPrint( HWND hwnd )
 {
     FIXME("(%p): stub\n", hwnd);
     return FALSE;
-}
-
-/**********************************************************************
- * GetDisplayConfigBufferSizes [USER32.@]
- */
-LONG WINAPI GetDisplayConfigBufferSizes(UINT32 flags, UINT32 *num_path_info, UINT32 *num_mode_info)
-{
-    FIXME("(0x%x %p %p): stub\n", flags, num_path_info, num_mode_info);
-
-    if (!num_path_info || !num_mode_info)
-        return ERROR_INVALID_PARAMETER;
-
-    *num_path_info = 0;
-    *num_mode_info = 0;
-    return ERROR_NOT_SUPPORTED;
 }
 
 /**********************************************************************
