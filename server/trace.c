@@ -1322,6 +1322,7 @@ static void dump_init_process_done_request( const struct init_process_done_reque
     dump_uint64( ", module=", &req->module );
     dump_uint64( ", ldt_copy=", &req->ldt_copy );
     dump_uint64( ", entry=", &req->entry );
+    dump_varargs_bytes( ", usd=", cur_size );
 }
 
 static void dump_init_process_done_reply( const struct init_process_done_reply *req )

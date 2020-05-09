@@ -1711,16 +1711,16 @@ DWORD WINAPI RtlRunOnceBeginInitialize( RTL_RUN_ONCE *once, ULONG flags, void **
         switch (val & 3)
         {
         case 0:  /* first time */
-            if (!interlocked_cmpxchg_ptr( &once->Ptr,
-                                          (flags & RTL_RUN_ONCE_ASYNC) ? (void *)3 : (void *)1, 0 ))
+            if (!InterlockedCompareExchangePointer( &once->Ptr,
+                                                    (flags & RTL_RUN_ONCE_ASYNC) ? (void *)3 : (void *)1, 0 ))
                 return STATUS_PENDING;
             break;
 
         case 1:  /* in progress, wait */
             if (flags & RTL_RUN_ONCE_ASYNC) return STATUS_INVALID_PARAMETER;
             next = val & ~3;
-            if (interlocked_cmpxchg_ptr( &once->Ptr, (void *)((ULONG_PTR)&next | 1),
-                                         (void *)val ) == (void *)val)
+            if (InterlockedCompareExchangePointer( &once->Ptr, (void *)((ULONG_PTR)&next | 1),
+                                                   (void *)val ) == (void *)val)
                 NtWaitForKeyedEvent( 0, &next, FALSE, NULL );
             break;
 
@@ -1756,7 +1756,7 @@ DWORD WINAPI RtlRunOnceComplete( RTL_RUN_ONCE *once, ULONG flags, void *context 
         switch (val & 3)
         {
         case 1:  /* in progress */
-            if (interlocked_cmpxchg_ptr( &once->Ptr, context, (void *)val ) != (void *)val) break;
+            if (InterlockedCompareExchangePointer( &once->Ptr, context, (void *)val ) != (void *)val) break;
             val &= ~3;
             while (val)
             {
@@ -1768,7 +1768,7 @@ DWORD WINAPI RtlRunOnceComplete( RTL_RUN_ONCE *once, ULONG flags, void *context 
 
         case 3:  /* in progress, async */
             if (!(flags & RTL_RUN_ONCE_ASYNC)) return STATUS_INVALID_PARAMETER;
-            if (interlocked_cmpxchg_ptr( &once->Ptr, context, (void *)val ) != (void *)val) break;
+            if (InterlockedCompareExchangePointer( &once->Ptr, context, (void *)val ) != (void *)val) break;
             return STATUS_SUCCESS;
 
         default:
@@ -1853,7 +1853,7 @@ static NTSTATUS fast_try_acquire_srw_exclusive( RTL_SRWLOCK *lock )
             new = old;
             ret = STATUS_TIMEOUT;
         }
-    } while (interlocked_cmpxchg( futex, new, old ) != old);
+    } while (InterlockedCompareExchange( futex, new, old ) != old);
 
     return ret;
 }
@@ -1874,7 +1874,7 @@ static NTSTATUS fast_acquire_srw_exclusive( RTL_SRWLOCK *lock )
         old = *futex;
         new = old + SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_INC;
         assert(new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK);
-    } while (interlocked_cmpxchg( futex, new, old ) != old);
+    } while (InterlockedCompareExchange( futex, new, old ) != old);
 
     for (;;)
     {
@@ -1896,7 +1896,7 @@ static NTSTATUS fast_acquire_srw_exclusive( RTL_SRWLOCK *lock )
                 new = old;
                 wait = TRUE;
             }
-        } while (interlocked_cmpxchg( futex, new, old ) != old);
+        } while (InterlockedCompareExchange( futex, new, old ) != old);
 
         if (!wait)
             return STATUS_SUCCESS;
@@ -1935,7 +1935,7 @@ static NTSTATUS fast_try_acquire_srw_shared( RTL_SRWLOCK *lock )
             new = old;
             ret = STATUS_TIMEOUT;
         }
-    } while (interlocked_cmpxchg( futex, new, old ) != old);
+    } while (InterlockedCompareExchange( futex, new, old ) != old);
 
     return ret;
 }
@@ -1970,7 +1970,7 @@ static NTSTATUS fast_acquire_srw_shared( RTL_SRWLOCK *lock )
                 new = old | SRWLOCK_FUTEX_SHARED_WAITERS_BIT;
                 wait = TRUE;
             }
-        } while (interlocked_cmpxchg( futex, new, old ) != old);
+        } while (InterlockedCompareExchange( futex, new, old ) != old);
 
         if (!wait)
             return STATUS_SUCCESS;
@@ -2004,7 +2004,7 @@ static NTSTATUS fast_release_srw_exclusive( RTL_SRWLOCK *lock )
 
         if (!(new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK))
             new &= ~SRWLOCK_FUTEX_SHARED_WAITERS_BIT;
-    } while (interlocked_cmpxchg( futex, new, old ) != old);
+    } while (InterlockedCompareExchange( futex, new, old ) != old);
 
     if (new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK)
         futex_wake_bitset( futex, 1, SRWLOCK_FUTEX_BITSET_EXCLUSIVE );
@@ -2039,7 +2039,7 @@ static NTSTATUS fast_release_srw_shared( RTL_SRWLOCK *lock )
         }
 
         new = old - SRWLOCK_FUTEX_SHARED_OWNERS_INC;
-    } while (interlocked_cmpxchg( futex, new, old ) != old);
+    } while (InterlockedCompareExchange( futex, new, old ) != old);
 
     /* Optimization: only bother waking if there are actually exclusive waiters. */
     if (!(new & SRWLOCK_FUTEX_SHARED_OWNERS_MASK) && (new & SRWLOCK_FUTEX_EXCLUSIVE_WAITERS_MASK))
@@ -2155,7 +2155,7 @@ static inline unsigned int srwlock_lock_exclusive( unsigned int *dest, int incr 
         srwlock_check_invalid( tmp );
         if ((tmp & SRWLOCK_MASK_EXCLUSIVE_QUEUE) && !(tmp & SRWLOCK_MASK_SHARED_QUEUE))
             tmp |= SRWLOCK_MASK_IN_EXCLUSIVE;
-        if ((tmp = interlocked_cmpxchg( (int *)dest, tmp, val )) == val)
+        if ((tmp = InterlockedCompareExchange( (int *)dest, tmp, val )) == val)
             break;
     }
     return val;
@@ -2174,7 +2174,7 @@ static inline unsigned int srwlock_unlock_exclusive( unsigned int *dest, int inc
         srwlock_check_invalid( tmp );
         if (!(tmp & SRWLOCK_MASK_EXCLUSIVE_QUEUE))
             tmp &= SRWLOCK_MASK_SHARED_QUEUE;
-        if ((tmp = interlocked_cmpxchg( (int *)dest, tmp, val )) == val)
+        if ((tmp = InterlockedCompareExchange( (int *)dest, tmp, val )) == val)
             break;
     }
     return val;
@@ -2257,7 +2257,7 @@ void WINAPI RtlAcquireSRWLockShared( RTL_SRWLOCK *lock )
             tmp = val + SRWLOCK_RES_EXCLUSIVE;
         else
             tmp = val + SRWLOCK_RES_SHARED;
-        if ((tmp = interlocked_cmpxchg( (int *)&lock->Ptr, tmp, val )) == val)
+        if ((tmp = InterlockedCompareExchange( (int *)&lock->Ptr, tmp, val )) == val)
             break;
     }
 
@@ -2312,8 +2312,8 @@ BOOLEAN WINAPI RtlTryAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
     if ((ret = fast_try_acquire_srw_exclusive( lock )) != STATUS_NOT_IMPLEMENTED)
         return (ret == STATUS_SUCCESS);
 
-    return interlocked_cmpxchg( (int *)&lock->Ptr, SRWLOCK_MASK_IN_EXCLUSIVE |
-                                SRWLOCK_RES_EXCLUSIVE, 0 ) == 0;
+    return InterlockedCompareExchange( (int *)&lock->Ptr, SRWLOCK_MASK_IN_EXCLUSIVE |
+                                       SRWLOCK_RES_EXCLUSIVE, 0 ) == 0;
 }
 
 /***********************************************************************
@@ -2331,7 +2331,7 @@ BOOLEAN WINAPI RtlTryAcquireSRWLockShared( RTL_SRWLOCK *lock )
     {
         if (val & SRWLOCK_MASK_EXCLUSIVE_QUEUE)
             return FALSE;
-        if ((tmp = interlocked_cmpxchg( (int *)&lock->Ptr, val + SRWLOCK_RES_SHARED, val )) == val)
+        if ((tmp = InterlockedCompareExchange( (int *)&lock->Ptr, val + SRWLOCK_RES_SHARED, val )) == val)
             break;
     }
     return TRUE;
@@ -2413,7 +2413,7 @@ static NTSTATUS fast_wake_cv( RTL_CONDITION_VARIABLE *variable, int count )
     if (!(futex = get_futex( &variable->Ptr )))
         return STATUS_NOT_IMPLEMENTED;
 
-    interlocked_xchg_add( futex, 1 );
+    InterlockedIncrement( futex );
     futex_wake( futex, count );
     return STATUS_SUCCESS;
 }
@@ -2426,11 +2426,6 @@ static NTSTATUS fast_sleep_srw_cv( RTL_CONDITION_VARIABLE *variable,
 
 static NTSTATUS fast_sleep_cs_cv( RTL_CONDITION_VARIABLE *variable,
         RTL_CRITICAL_SECTION *cs, const LARGE_INTEGER *timeout )
-{
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS fast_wait_cv( RTL_CONDITION_VARIABLE *variable, int val, const LARGE_INTEGER *timeout )
 {
     return STATUS_NOT_IMPLEMENTED;
 }
@@ -2476,7 +2471,7 @@ void WINAPI RtlWakeConditionVariable( RTL_CONDITION_VARIABLE *variable )
 {
     if (fast_wake_cv( variable, 1 ) == STATUS_NOT_IMPLEMENTED)
     {
-        interlocked_xchg_add( (int *)&variable->Ptr, 1 );
+        InterlockedIncrement( (int *)&variable->Ptr );
         RtlWakeAddressSingle( variable );
     }
 }
@@ -2490,7 +2485,7 @@ void WINAPI RtlWakeAllConditionVariable( RTL_CONDITION_VARIABLE *variable )
 {
     if (fast_wake_cv( variable, INT_MAX ) == STATUS_NOT_IMPLEMENTED)
     {
-        interlocked_xchg_add( (int *)&variable->Ptr, 1 );
+        InterlockedIncrement( (int *)&variable->Ptr );
         RtlWakeAddressAll( variable );
     }
 }
@@ -2629,7 +2624,7 @@ static inline NTSTATUS fast_wait_addr( const void *addr, const void *cmp, SIZE_T
      * now and waiting on the futex, we know that val will have changed.
      * Use an atomic load so that memory accesses are ordered between this read
      * and the increment below. */
-    val = interlocked_cmpxchg( futex, 0, 0 );
+    val = InterlockedCompareExchange( futex, 0, 0 );
     if (!compare_addr( addr, cmp, size ))
         return STATUS_SUCCESS;
 
@@ -2655,7 +2650,7 @@ static inline NTSTATUS fast_wake_addr( const void *addr )
 
     futex = hash_addr( addr );
 
-    interlocked_xchg_add( futex, 1 );
+    InterlockedIncrement( futex );
 
     futex_wake( futex, INT_MAX );
     return STATUS_SUCCESS;

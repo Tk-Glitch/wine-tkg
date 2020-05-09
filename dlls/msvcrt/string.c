@@ -549,8 +549,10 @@ static double strtod16(MSVCRT_wchar_t get(void *ctx), void unget(void *ctx),
         }
         if(nch>='0' && nch<='9') {
             while(nch>='0' && nch<='9') {
-                if(e>INT_MAX/10 || (e=e*10+nch-'0')<0)
+                if(e>INT_MAX/10 || e*10>INT_MAX-nch+'0')
                     e = INT_MAX;
+                else
+                    e = e*10+nch-'0';
                 nch = get(ctx);
             }
             if((nch!=MSVCRT_WEOF) && (nch < '0' || nch > '9')) unget(ctx);
@@ -742,7 +744,10 @@ double parse_double(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
     }
 #endif
 
-    while(nch == '0') nch = get(ctx);
+    while(nch == '0') {
+        found_digit = TRUE;
+        nch = get(ctx);
+    }
 
     b.data[0] = 0;
     b.b = 0;
@@ -827,8 +832,10 @@ double parse_double(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
 
         if(nch>='0' && nch<='9') {
             while(nch>='0' && nch<='9') {
-                if(e>INT_MAX/10 || (e=e*10+nch-'0')<0)
+                if(e>INT_MAX/10 || e*10>INT_MAX-nch+'0')
                     e = INT_MAX;
+                else
+                    e = e*10+nch-'0';
                 nch = get(ctx);
             }
             if(nch != MSVCRT_WEOF) unget(ctx);

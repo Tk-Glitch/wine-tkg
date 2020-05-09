@@ -24,6 +24,9 @@
 #include "wine/list.h"
 #include "wine/unicode.h"
 
+#define MS_GSUB_TAG DWRITE_MAKE_OPENTYPE_TAG('G','S','U','B')
+#define MS_GPOS_TAG DWRITE_MAKE_OPENTYPE_TAG('G','P','O','S')
+
 static const DWRITE_MATRIX identity =
 {
     1.0f, 0.0f,
@@ -434,19 +437,22 @@ enum SCRIPT_JUSTIFY
     SCRIPT_JUSTIFY_ARABIC_SEEN_M
 };
 
+struct ot_gsubgpos_table
+{
+    struct dwrite_fonttable table;
+    unsigned int script_list;
+    unsigned int feature_list;
+    unsigned int lookup_list;
+};
+
 struct scriptshaping_cache
 {
     const struct shaping_font_ops *font;
     void *context;
     UINT16 upem;
 
-    struct
-    {
-        struct dwrite_fonttable table;
-        unsigned int script_list;
-        unsigned int feature_list;
-        unsigned int lookup_list;
-    } gpos;
+    struct ot_gsubgpos_table gsub;
+    struct ot_gsubgpos_table gpos;
 
     struct
     {
@@ -463,6 +469,7 @@ struct scriptshaping_context
     const WCHAR *text;
     unsigned int length;
     BOOL is_rtl;
+    BOOL is_sideways;
 
     union
     {
@@ -471,6 +478,12 @@ struct scriptshaping_context
             const UINT16 *glyphs;
             const DWRITE_SHAPING_GLYPH_PROPERTIES *glyph_props;
         } pos;
+        struct
+        {
+            UINT16 *glyphs;
+            DWRITE_SHAPING_GLYPH_PROPERTIES *glyph_props;
+            unsigned int max_glyph_count;
+        } subst;
     } u;
 
     unsigned int glyph_count;
@@ -492,10 +505,16 @@ extern struct scriptshaping_cache *create_scriptshaping_cache(void *context,
 extern void release_scriptshaping_cache(struct scriptshaping_cache*) DECLSPEC_HIDDEN;
 extern struct scriptshaping_cache *fontface_get_shaping_cache(struct dwrite_fontface *fontface) DECLSPEC_HIDDEN;
 
+struct shaping_feature
+{
+    unsigned int tag;
+};
+
 struct shaping_features
 {
-    const DWORD *tags;
-    unsigned int count;
+    struct shaping_feature *features;
+    size_t count;
+    size_t capacity;
 };
 
 extern void opentype_layout_scriptshaping_cache_init(struct scriptshaping_cache *cache) DECLSPEC_HIDDEN;
@@ -503,6 +522,8 @@ extern DWORD opentype_layout_find_script(const struct scriptshaping_cache *cache
         unsigned int *script_index) DECLSPEC_HIDDEN;
 extern DWORD opentype_layout_find_language(const struct scriptshaping_cache *cache, DWORD kind, DWORD tag,
         unsigned int script_index, unsigned int *language_index) DECLSPEC_HIDDEN;
+extern HRESULT opentype_layout_apply_gsub_features(struct scriptshaping_context *context, unsigned int script_index,
+        unsigned int language_index, const struct shaping_features *features) DECLSPEC_HIDDEN;
 extern void opentype_layout_apply_gpos_features(struct scriptshaping_context *context, unsigned int script_index,
         unsigned int language_index, const struct shaping_features *features) DECLSPEC_HIDDEN;
 
@@ -515,7 +536,6 @@ struct scriptshaping_ops
 };
 
 extern const struct scriptshaping_ops default_shaping_ops DECLSPEC_HIDDEN;
-extern const struct scriptshaping_ops latn_shaping_ops DECLSPEC_HIDDEN;
 
-extern HRESULT shape_get_positions(struct scriptshaping_context *context, const DWORD *scripts,
-        const struct shaping_features *features) DECLSPEC_HIDDEN;
+extern HRESULT shape_get_glyphs(struct scriptshaping_context *context, const unsigned int *scripts) DECLSPEC_HIDDEN;
+extern HRESULT shape_get_positions(struct scriptshaping_context *context, const unsigned int *scripts) DECLSPEC_HIDDEN;

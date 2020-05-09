@@ -521,7 +521,7 @@ static void release_fileio( struct async_fileio *io )
     {
         struct async_fileio *next = fileio_freelist;
         io->next = next;
-        if (interlocked_cmpxchg_ptr( (void **)&fileio_freelist, io, next ) == next) return;
+        if (InterlockedCompareExchangePointer( (void **)&fileio_freelist, io, next ) == next) return;
     }
 }
 
@@ -529,7 +529,7 @@ static struct async_fileio *alloc_fileio( DWORD size, async_callback_t callback,
 {
     /* first free remaining previous fileinfos */
 
-    struct async_fileio *old_io = interlocked_xchg_ptr( (void **)&fileio_freelist, NULL );
+    struct async_fileio *old_io = InterlockedExchangePointer( (void **)&fileio_freelist, NULL );
     struct async_fileio *io = NULL;
 
     while (old_io)

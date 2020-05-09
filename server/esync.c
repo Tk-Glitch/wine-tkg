@@ -215,7 +215,7 @@ static void *get_shm( unsigned int idx )
         if (debug_level)
             fprintf( stderr, "esync: Mapping page %d at %p.\n", entry, addr );
 
-        if (interlocked_cmpxchg_ptr( &shm_addrs[entry], addr, 0 ))
+        if (InterlockedCompareExchangePointer( &shm_addrs[entry], addr, 0 ))
             munmap( addr, pagesize ); /* someone beat us to it */
     }
 
@@ -409,11 +409,11 @@ void esync_set_event( struct esync *esync )
     if (esync->type == ESYNC_MANUAL_EVENT)
     {
         /* Acquire the spinlock. */
-        while (interlocked_cmpxchg( &event->locked, 1, 0 ))
+        while (InterlockedCompareExchange( &event->locked, 1, 0 ))
             small_pause();
     }
 
-    if (!interlocked_xchg( &event->signaled, 1 ))
+    if (!InterlockedExchange( &event->signaled, 1 ))
     {
         if (write( esync->fd, &value, sizeof(value) ) == -1)
             perror( "esync: write" );
@@ -440,12 +440,12 @@ void esync_reset_event( struct esync *esync )
     if (esync->type == ESYNC_MANUAL_EVENT)
     {
         /* Acquire the spinlock. */
-        while (interlocked_cmpxchg( &event->locked, 1, 0 ))
+        while (InterlockedCompareExchange( &event->locked, 1, 0 ))
             small_pause();
     }
 
     /* Only bother signaling the fd if we weren't already signaled. */
-    if (interlocked_xchg( &event->signaled, 0 ))
+    if (InterlockedExchange( &event->signaled, 0 ))
     {
         /* we don't care about the return value */
         read( esync->fd, &value, sizeof(value) );

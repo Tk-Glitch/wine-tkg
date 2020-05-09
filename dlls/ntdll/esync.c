@@ -189,7 +189,7 @@ static void *get_shm( unsigned int idx )
 
         TRACE("Mapping page %d at %p.\n", entry, addr);
 
-        if (interlocked_cmpxchg_ptr( &shm_addrs[entry], addr, 0 ))
+        if (InterlockedCompareExchangePointer( &shm_addrs[entry], addr, 0 ))
             munmap( addr, pagesize ); /* someone beat us to it */
     }
 
@@ -238,7 +238,7 @@ static struct esync *add_to_list( HANDLE handle, enum esync_type type, int fd, v
         }
     }
 
-    if (!interlocked_cmpxchg((int *)&esync_list[entry][idx].type, type, 0))
+    if (!InterlockedCompareExchange((int *)&esync_list[entry][idx].type, type, 0))
     {
         esync_list[entry][idx].fd = fd;
         esync_list[entry][idx].shm = shm;
@@ -333,7 +333,7 @@ NTSTATUS esync_close( HANDLE handle )
 
     if (entry < ESYNC_LIST_ENTRIES && esync_list[entry])
     {
-        if (interlocked_xchg((int *)&esync_list[entry][idx].type, 0))
+        if (InterlockedExchange((int *)&esync_list[entry][idx].type, 0))
         {
             close( esync_list[entry][idx].fd );
             return STATUS_SUCCESS;
@@ -465,7 +465,7 @@ NTSTATUS esync_release_semaphore( HANDLE handle, ULONG count, ULONG *prev )
 
         if (count + current > semaphore->max)
             return STATUS_SEMAPHORE_LIMIT_EXCEEDED;
-    } while (interlocked_cmpxchg( &semaphore->count, count + current, current ) != current);
+    } while (InterlockedCompareExchange( &semaphore->count, count + current, current ) != current);
 
     if (prev) *prev = current;
 
@@ -602,7 +602,7 @@ NTSTATUS esync_set_event( HANDLE handle, LONG *prev )
     if (obj->type == ESYNC_MANUAL_EVENT)
     {
         /* Acquire the spinlock. */
-        while (interlocked_cmpxchg( &event->locked, 1, 0 ))
+        while (InterlockedCompareExchange( &event->locked, 1, 0 ))
             small_pause();
     }
 
@@ -616,7 +616,7 @@ NTSTATUS esync_set_event( HANDLE handle, LONG *prev )
      * *must* signal the fd now, or any waiting threads will never wake up. */
 
     /* Only bother signaling the fd if we weren't already signaled. */
-    if (!(current = interlocked_xchg( &event->signaled, 1 )) || obj->type == ESYNC_AUTO_EVENT)
+    if (!(current = InterlockedExchange( &event->signaled, 1 )) || obj->type == ESYNC_AUTO_EVENT)
     {
         if (write( obj->fd, &value, sizeof(value) ) == -1)
             ERR("write: %s\n", strerror(errno));
@@ -649,7 +649,7 @@ NTSTATUS esync_reset_event( HANDLE handle, LONG *prev )
     if (obj->type == ESYNC_MANUAL_EVENT)
     {
         /* Acquire the spinlock. */
-        while (interlocked_cmpxchg( &event->locked, 1, 0 ))
+        while (InterlockedCompareExchange( &event->locked, 1, 0 ))
             small_pause();
     }
 
@@ -659,7 +659,7 @@ NTSTATUS esync_reset_event( HANDLE handle, LONG *prev )
      * For auto-reset events, we have no guarantee that the previous "signaled"
      * state is actually correct. We need to leave both states unsignaled after
      * leaving this function, so we always have to read(). */
-    if ((current = interlocked_xchg( &event->signaled, 0 )) || obj->type == ESYNC_AUTO_EVENT)
+    if ((current = InterlockedExchange( &event->signaled, 0 )) || obj->type == ESYNC_AUTO_EVENT)
     {
         if (read( obj->fd, &value, sizeof(value) ) == -1 && errno != EWOULDBLOCK && errno != EAGAIN)
         {
@@ -692,7 +692,7 @@ NTSTATUS esync_pulse_event( HANDLE handle, LONG *prev )
     event = obj->shm;
 
     /* Acquire the spinlock. */
-    while (interlocked_cmpxchg( &event->locked, 1, 0 ))
+    while (InterlockedCompareExchange( &event->locked, 1, 0 ))
         small_pause();
 
     /* This isn't really correct; an application could miss the write.
@@ -707,7 +707,7 @@ NTSTATUS esync_pulse_event( HANDLE handle, LONG *prev )
 
     read( obj->fd, &value, sizeof(value) );
 
-    current = interlocked_xchg( &event->signaled, 0 );
+    current = InterlockedExchange( &event->signaled, 0 );
     if (prev) *prev = current;
 
     /* Release the spinlock. */
@@ -888,7 +888,7 @@ static BOOL update_grabbed_object( struct esync *obj )
          * fact that we were able to grab it at all means the count is nonzero,
          * and if someone else grabbed it then the count must have been >= 2,
          * etc. */
-        interlocked_xchg_add( &semaphore->count, -1 );
+        InterlockedDecrement( &semaphore->count );
     }
     else if (obj->type == ESYNC_AUTO_EVENT)
     {
@@ -1056,7 +1056,7 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles,
                         if ((size = read( obj->fd, &value, sizeof(value) )) == sizeof(value))
                         {
                             TRACE("Woken up by handle %p [%d].\n", handles[i], i);
-                            interlocked_xchg_add( &semaphore->count, -1 );
+                            InterlockedDecrement( &semaphore->count );
                             return i;
                         }
                     }

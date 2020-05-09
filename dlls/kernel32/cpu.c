@@ -47,61 +47,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(reg);
 
 /***********************************************************************
- *           K32GetPerformanceInfo (KERNEL32.@)
- */
-BOOL WINAPI K32GetPerformanceInfo(PPERFORMANCE_INFORMATION info, DWORD size)
-{
-    SYSTEM_PERFORMANCE_INFORMATION perf;
-    SYSTEM_BASIC_INFORMATION basic;
-    DWORD info_size;
-    NTSTATUS status;
-
-    TRACE( "(%p, %d)\n", info, size );
-
-    if (size < sizeof(*info))
-    {
-        SetLastError( ERROR_BAD_LENGTH );
-        return FALSE;
-    }
-
-    status = NtQuerySystemInformation( SystemPerformanceInformation, &perf, sizeof(perf), NULL );
-    if (status) goto err;
-    status = NtQuerySystemInformation( SystemBasicInformation, &basic, sizeof(basic), NULL );
-    if (status) goto err;
-
-    info->cb                 = sizeof(*info);
-    info->CommitTotal        = perf.TotalCommittedPages;
-    info->CommitLimit        = perf.TotalCommitLimit;
-    info->CommitPeak         = perf.PeakCommitment;
-    info->PhysicalTotal      = basic.MmNumberOfPhysicalPages;
-    info->PhysicalAvailable  = perf.AvailablePages;
-    info->SystemCache        = 0;
-    info->KernelTotal        = perf.PagedPoolUsage + perf.NonPagedPoolUsage;
-    info->KernelPaged        = perf.PagedPoolUsage;
-    info->KernelNonpaged     = perf.NonPagedPoolUsage;
-    info->PageSize           = basic.PageSize;
-
-    SERVER_START_REQ( get_system_info )
-    {
-        status = wine_server_call( req );
-        if (!status)
-        {
-            info->ProcessCount = reply->processes;
-            info->HandleCount = reply->handles;
-            info->ThreadCount = reply->threads;
-        }
-    }
-    SERVER_END_REQ;
-
-    if (status) goto err;
-    return TRUE;
-
-err:
-    SetLastError( RtlNtStatusToDosError( status ) );
-    return FALSE;
-}
-
-/***********************************************************************
  *           GetActiveProcessorGroupCount (KERNEL32.@)
  */
 WORD WINAPI GetActiveProcessorGroupCount(void)

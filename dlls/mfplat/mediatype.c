@@ -1790,7 +1790,9 @@ static const struct uncompressed_video_format video_formats[] =
     { &MFVideoFormat_A2R10G10B10,   4, 3, 1, 0 },
     { &MFVideoFormat_RGB8,          1, 3, 1, 0 },
     { &MFVideoFormat_L8,            1, 3, 1, 0 },
+    { &MFVideoFormat_I420,          1, 0, 0, 1 },
     { &MFVideoFormat_AYUV,          4, 3, 0, 1 },
+    { &MFVideoFormat_I420,          1, 0, 0, 1 },
     { &MFVideoFormat_IMC1,          2, 3, 0, 1 },
     { &MFVideoFormat_IMC2,          1, 0, 0, 1 },
     { &MFVideoFormat_IMC3,          2, 3, 0, 1 },
@@ -1876,6 +1878,7 @@ HRESULT WINAPI MFCalculateImageSize(REFGUID subtype, UINT32 width, UINT32 height
         case MAKEFOURCC('I','M','C','4'):
         case MAKEFOURCC('N','V','1','2'):
         case MAKEFOURCC('Y','V','1','2'):
+        case MAKEFOURCC('I','4','2','0'):
             /* 2 x 2 block, interleaving UV for half the height */
             *size = ((width + 1) & ~1) * height * 3 / 2;
             break;
@@ -1917,6 +1920,7 @@ HRESULT WINAPI MFGetPlaneSize(DWORD fourcc, DWORD width, DWORD height, DWORD *si
         case MAKEFOURCC('I','M','C','4'):
         case MAKEFOURCC('N','V','1','2'):
         case MAKEFOURCC('Y','V','1','2'):
+        case MAKEFOURCC('I','4','2','0'):
             *size = stride * height * 3 / 2;
             break;
         default:

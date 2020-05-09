@@ -55,7 +55,6 @@ struct media_stream
         STREAM_SHUTDOWN,
     } state;
     BOOL eos;
-    CRITICAL_SECTION cs;
 };
 
 enum source_async_op
@@ -352,8 +351,6 @@ static HRESULT wait_on_sample(struct media_stream *stream, IUnknown *token)
 
     TRACE("%p, %p\n", stream, token);
 
-    EnterCriticalSection(&stream->cs);
-
     g_object_get(stream->appsink, "eos", &stream->eos, NULL);
     if (stream->eos)
     {
@@ -361,7 +358,6 @@ static HRESULT wait_on_sample(struct media_stream *stream, IUnknown *token)
             IUnknown_Release(token);
         IMFMediaEventQueue_QueueEventParamVar(stream->event_queue, MEEndOfStream, &GUID_NULL, S_OK, &empty_var);
         dispatch_end_of_presentation(stream->parent_source);
-        LeaveCriticalSection(&stream->cs);
         return S_OK;
     }
 
@@ -396,8 +392,6 @@ static HRESULT wait_on_sample(struct media_stream *stream, IUnknown *token)
         IMFSample_SetUnknown(sample, &MFSampleExtension_Token, token);
 
     IMFMediaEventQueue_QueueEventParamUnk(stream->event_queue, MEMediaSample, &GUID_NULL, S_OK, (IUnknown *)sample);
-
-    LeaveCriticalSection(&stream->cs);
 
     return S_OK;
 }
@@ -447,8 +441,6 @@ static GstFlowReturn stream_new_sample(GstElement *appsink, gpointer user)
 {
     struct media_stream *stream = (struct media_stream *) user;
 
-    EnterCriticalSection(&stream->cs);
-
     if (stream->state == STREAM_INACTIVE)
     {
         GstSample *discard_sample;
@@ -456,7 +448,6 @@ static GstFlowReturn stream_new_sample(GstElement *appsink, gpointer user)
         gst_sample_unref(discard_sample);
     }
 
-    LeaveCriticalSection(&stream->cs);
     return GST_FLOW_OK;
 }
 
@@ -791,8 +782,6 @@ static ULONG WINAPI media_stream_Release(IMFMediaStream *iface)
         if (stream->parent_source)
             IMFMediaSource_Release(&stream->parent_source->IMFMediaSource_iface);
 
-        DeleteCriticalSection(&stream->cs);
-
         heap_free(stream);
     }
 
@@ -1034,7 +1023,6 @@ static HRESULT media_stream_constructor(struct media_source *source, GstPad *pad
 
     object->state = STREAM_INACTIVE;
     object->eos = FALSE;
-    InitializeCriticalSection(&object->cs);
 
     if (FAILED(hr = MFCreateEventQueue(&object->event_queue)))
         goto fail;
@@ -1049,6 +1037,7 @@ static HRESULT media_stream_constructor(struct media_source *source, GstPad *pad
     g_object_set(object->appsink, "emit-signals", TRUE, NULL);
     g_object_set(object->appsink, "sync", FALSE, NULL);
     g_object_set(object->appsink, "async", FALSE, NULL); /* <- This allows us interact with the bin w/o prerolling */
+    g_object_set(object->appsink, "wait-on-eos", FALSE, NULL);
     g_signal_connect(object->appsink, "new-sample", G_CALLBACK(stream_new_sample_wrapper), object);
 
     if (FAILED(hr = media_stream_align_with_mf(object, &stream_type)))
@@ -1441,6 +1430,7 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, enum source_t
         source_descs[type].bytestream_caps);
 
     struct media_source *object = heap_alloc_zero(sizeof(*object));
+    BOOL video_selected = FALSE, audio_selected = FALSE;
     GList *demuxer_list_one, *demuxer_list_two;
     GstElementFactory *demuxer_factory = NULL;
     IMFStreamDescriptor **descriptors = NULL;
@@ -1538,15 +1528,34 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, enum source_t
     descriptors = heap_alloc(object->stream_count * sizeof(IMFStreamDescriptor*));
     for (unsigned int i = 0; i < object->stream_count; i++)
     {
-        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[i]);
+        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[object->stream_count - 1 - i]);
     }
 
     if (FAILED(MFCreatePresentationDescriptor(object->stream_count, descriptors, &object->pres_desc)))
         goto fail;
 
+    /* Select one of each major type. */
     for (unsigned int i = 0; i < object->stream_count; i++)
     {
-        IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
+        IMFMediaTypeHandler *handler;
+        GUID major_type;
+        BOOL select_stream = FALSE;
+
+        IMFStreamDescriptor_GetMediaTypeHandler(descriptors[i], &handler);
+        IMFMediaTypeHandler_GetMajorType(handler, &major_type);
+        if (IsEqualGUID(&major_type, &MFMediaType_Video) && !video_selected)
+        {
+            select_stream = TRUE;
+            video_selected = TRUE;
+        }
+        if (IsEqualGUID(&major_type, &MFMediaType_Audio) && !audio_selected)
+        {
+            select_stream = TRUE;
+            audio_selected = TRUE;
+        }
+        if (select_stream)
+            IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
+        IMFMediaTypeHandler_Release(handler);
         IMFStreamDescriptor_Release(descriptors[i]);
     }
     heap_free(descriptors);

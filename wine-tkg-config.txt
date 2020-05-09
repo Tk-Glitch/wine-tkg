@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Thu 30 Apr 2020 06:11:19 PM CEST :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sat 09 May 2020 03:38:02 PM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.7.r118.gcf8a6eb276
-Using wine-staging patchset (version 5.7.r6.g7b0b95ee)
+Wine (plain) version: 5.8.r0.gbf1abbac0c
+Using wine-staging patchset (version 5.8.r0.g7d92cd31)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
@@ -45,7 +45,6 @@ msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then buil
 proton-win10-default.patch -- ( Enforce win10 as default wine version )
 
 Applied reverting hotfix /home/tk/Dev/Dev/PKGBUILDS/wine-tkg-git/wine-tkg-git/wine-tkg-patches/hotfixes/fd7992972b252ed262d33ef604e9e1235d2108c5-5.myrevert
-Applied your own patch 0001-Add-some-semi-stubs-in-user32.mypatch
 Applied your own patch D3D12CreateVersionedRootSignatureDeserializer.mypatch
 Applied your own patch D3D12SerializeVersionedRootSignature.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch

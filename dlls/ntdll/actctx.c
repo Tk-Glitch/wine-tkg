@@ -1180,12 +1180,12 @@ static ACTIVATION_CONTEXT *check_actctx( HANDLE h )
 
 static inline void actctx_addref( ACTIVATION_CONTEXT *actctx )
 {
-    interlocked_xchg_add( &actctx->ref_count, 1 );
+    InterlockedIncrement( &actctx->ref_count );
 }
 
 static void actctx_release( ACTIVATION_CONTEXT *actctx )
 {
-    if (interlocked_xchg_add( &actctx->ref_count, -1 ) == 1)
+    if (!InterlockedDecrement( &actctx->ref_count ))
     {
         unsigned int i, j;
 
@@ -3555,7 +3555,7 @@ static NTSTATUS find_dll_redirection(ACTIVATION_CONTEXT* actctx, const UNICODE_S
         NTSTATUS status = build_dllredirect_section(actctx, &section);
         if (status) return status;
 
-        if (interlocked_cmpxchg_ptr((void**)&actctx->dllredirect_section, section, NULL))
+        if (InterlockedCompareExchangePointer((void**)&actctx->dllredirect_section, section, NULL))
             RtlFreeHeap(GetProcessHeap(), 0, section);
     }
 
@@ -3748,7 +3748,7 @@ static NTSTATUS find_window_class(ACTIVATION_CONTEXT* actctx, const UNICODE_STRI
         NTSTATUS status = build_wndclass_section(actctx, &section);
         if (status) return status;
 
-        if (interlocked_cmpxchg_ptr((void**)&actctx->wndclass_section, section, NULL))
+        if (InterlockedCompareExchangePointer((void**)&actctx->wndclass_section, section, NULL))
             RtlFreeHeap(GetProcessHeap(), 0, section);
     }
 
@@ -3939,7 +3939,7 @@ static NTSTATUS find_tlib_redirection(ACTIVATION_CONTEXT* actctx, const GUID *gu
         NTSTATUS status = build_tlib_section(actctx, &section);
         if (status) return status;
 
-        if (interlocked_cmpxchg_ptr((void**)&actctx->tlib_section, section, NULL))
+        if (InterlockedCompareExchangePointer((void**)&actctx->tlib_section, section, NULL))
             RtlFreeHeap(GetProcessHeap(), 0, section);
     }
 
@@ -4274,7 +4274,7 @@ static NTSTATUS find_comserver_redirection(ACTIVATION_CONTEXT* actctx, const GUI
         NTSTATUS status = build_comserver_section(actctx, &section);
         if (status) return status;
 
-        if (interlocked_cmpxchg_ptr((void**)&actctx->comserver_section, section, NULL))
+        if (InterlockedCompareExchangePointer((void**)&actctx->comserver_section, section, NULL))
             RtlFreeHeap(GetProcessHeap(), 0, section);
     }
 
@@ -4464,7 +4464,7 @@ static NTSTATUS find_cominterface_redirection(ACTIVATION_CONTEXT* actctx, const 
         NTSTATUS status = build_ifaceps_section(actctx, &section);
         if (status) return status;
 
-        if (interlocked_cmpxchg_ptr((void**)&actctx->ifaceps_section, section, NULL))
+        if (InterlockedCompareExchangePointer((void**)&actctx->ifaceps_section, section, NULL))
             RtlFreeHeap(GetProcessHeap(), 0, section);
     }
 
@@ -4612,7 +4612,7 @@ static NTSTATUS find_clr_surrogate(ACTIVATION_CONTEXT* actctx, const GUID *guid,
         NTSTATUS status = build_clr_surrogate_section(actctx, &section);
         if (status) return status;
 
-        if (interlocked_cmpxchg_ptr((void**)&actctx->clrsurrogate_section, section, NULL))
+        if (InterlockedCompareExchangePointer((void**)&actctx->clrsurrogate_section, section, NULL))
             RtlFreeHeap(GetProcessHeap(), 0, section);
     }
 
@@ -4815,7 +4815,7 @@ static NTSTATUS find_progid_redirection(ACTIVATION_CONTEXT* actctx, const UNICOD
         NTSTATUS status = build_comserver_section(actctx, &section);
         if (status) return status;
 
-        if (interlocked_cmpxchg_ptr((void**)&actctx->comserver_section, section, NULL))
+        if (InterlockedCompareExchangePointer((void**)&actctx->comserver_section, section, NULL))
             RtlFreeHeap(GetProcessHeap(), 0, section);
     }
 
@@ -4826,7 +4826,7 @@ static NTSTATUS find_progid_redirection(ACTIVATION_CONTEXT* actctx, const UNICOD
         NTSTATUS status = build_progid_section(actctx, &section);
         if (status) return status;
 
-        if (interlocked_cmpxchg_ptr((void**)&actctx->progid_section, section, NULL))
+        if (InterlockedCompareExchangePointer((void**)&actctx->progid_section, section, NULL))
             RtlFreeHeap(GetProcessHeap(), 0, section);
     }
 

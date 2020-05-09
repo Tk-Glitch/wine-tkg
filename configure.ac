@@ -1054,7 +1054,7 @@ enable_winemac_drv=${enable_winemac_drv:-no}
 test "$ac_cv_header_linux_joystick_h" = "yes" -o "$ac_cv_header_IOKit_hid_IOHIDLib_h" = "yes" || enable_winejoystick_drv=${enable_winejoystick_drv:-no}
 
 dnl Check for cross compiler to build test programs
-AC_SUBST(CROSSTARGET,"")
+AC_SUBST(CROSSTARGET)
 if test "x$with_mingw" != xno
 then
     case "x$with_mingw" in
@@ -1088,6 +1088,7 @@ then
 
             dnl Check if cross compiler supports -target argument
             llvm_target=$CROSSTARGET
+            llvm_cflags="-fuse-ld=lld"
             if test -z "$llvm_target"
             then
                 case $host_cpu in
@@ -1095,10 +1096,14 @@ then
                 *) llvm_target=$host_cpu-windows-gnu ;;
                 esac
             fi
-            WINE_TRY_CROSSCFLAGS([-target $llvm_target -fuse-ld=lld],
+            case $llvm_target in
+            *windows) llvm_cflags="$llvm_cflags -Wl,-subsystem:console" ;;
+            esac
+            WINE_TRY_CROSSCFLAGS([-target $llvm_target $llvm_cflags],
                                  [CROSSTARGET=$llvm_target
                                   EXTRACROSSCFLAGS="$EXTRACROSSCFLAGS -target $CROSSTARGET"
-                                  CFLAGS="$CFLAGS -fuse-ld=lld"])
+                                  AC_SUBST(DELAYLOADFLAG,["-Wl,-delayload,"])
+                                  CFLAGS="$CFLAGS $llvm_cflags"])
         fi
         WINE_TRY_CROSSCFLAGS([-fno-strict-aliasing])
         dnl clang needs to be told to fail on unknown options
@@ -1133,8 +1138,6 @@ then
                 WINE_TRY_CROSSCFLAGS([-gstrict-dwarf]) ;;
           esac
         done
-
-        WINE_TRY_CROSSCFLAGS([-Wl,-delayload,autoconftest.dll], [AC_SUBST(DELAYLOADFLAG,["-Wl,-delayload,"])])
 
         if test "x$enable_werror" = "xyes"
         then
@@ -1493,7 +1496,7 @@ fi
 dnl **** Check for libgnutls ****
 if test "x$with_gnutls" != "xno"
 then
-    WINE_PACKAGE_FLAGS(GNUTLS,[gnutls],,,,
+    WINE_PACKAGE_FLAGS(GNUTLS,[gnutls],[-lgnutls],,,
         [AC_CHECK_HEADER(gnutls/gnutls.h,
             [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>]], [[static typeof(gnutls_mac_get_key_size) *func; if (func) return 0;]])],
@@ -3554,6 +3557,7 @@ WINE_CONFIG_MAKEFILE(dlls/msado15)
 WINE_CONFIG_MAKEFILE(dlls/msado15/tests)
 WINE_CONFIG_MAKEFILE(dlls/msadp32.acm)
 WINE_CONFIG_MAKEFILE(dlls/msasn1)
+WINE_CONFIG_MAKEFILE(dlls/msasn1/tests)
 WINE_CONFIG_MAKEFILE(dlls/mscat32)
 WINE_CONFIG_MAKEFILE(dlls/mscms)
 WINE_CONFIG_MAKEFILE(dlls/mscms/tests)

@@ -95,7 +95,6 @@ extern void debug_init(void) DECLSPEC_HIDDEN;
 extern TEB *thread_init(void) DECLSPEC_HIDDEN;
 extern void actctx_init(void) DECLSPEC_HIDDEN;
 extern void virtual_init(void) DECLSPEC_HIDDEN;
-extern void virtual_init_threading(void) DECLSPEC_HIDDEN;
 extern void fill_cpu_info(void) DECLSPEC_HIDDEN;
 extern void heap_set_debug_flags( HANDLE handle ) DECLSPEC_HIDDEN;
 extern void init_unix_codepage(void) DECLSPEC_HIDDEN;
@@ -201,14 +200,15 @@ extern NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_S
 extern RTL_CRITICAL_SECTION dir_section DECLSPEC_HIDDEN;
 
 /* virtual memory */
-extern NTSTATUS virtual_alloc_aligned( PVOID *ret, unsigned short zero_bits_64, SIZE_T *size_ptr,
-                                       ULONG type, ULONG protect, ULONG alignment ) DECLSPEC_HIDDEN;
+extern NTSTATUS virtual_alloc( PVOID *ret, unsigned short zero_bits_64, SIZE_T *size_ptr,
+                               ULONG type, ULONG protect ) DECLSPEC_HIDDEN;
 extern NTSTATUS read_nt_symlink( HANDLE root, UNICODE_STRING *name, WCHAR *target, size_t length ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_map_section( HANDLE handle, PVOID *addr_ptr, unsigned short zero_bits_64, SIZE_T commit_size,
                                      const LARGE_INTEGER *offset_ptr, SIZE_T *size_ptr, ULONG alloc_type,
                                      ULONG protect, pe_image_info_t *image_info ) DECLSPEC_HIDDEN;
 extern void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_create_builtin_view( void *base ) DECLSPEC_HIDDEN;
+extern TEB * virtual_alloc_first_teb(void) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_alloc_teb( TEB **teb ) DECLSPEC_HIDDEN;
 extern void virtual_free_teb( TEB *teb ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, SIZE_T reserve_size,
@@ -231,9 +231,7 @@ extern void virtual_set_large_address_space( BOOL force ) DECLSPEC_HIDDEN;
 extern void virtual_fill_image_information( const pe_image_info_t *pe_info,
                                             SECTION_IMAGE_INFORMATION *info ) DECLSPEC_HIDDEN;
 extern struct _KUSER_SHARED_DATA *user_shared_data DECLSPEC_HIDDEN;
-extern struct _KUSER_SHARED_DATA *user_shared_data_external DECLSPEC_HIDDEN;
-extern void create_user_shared_data_thread(void) DECLSPEC_HIDDEN;
-extern BYTE* CDECL __wine_user_shared_data(void);
+extern size_t user_shared_data_size DECLSPEC_HIDDEN;
 
 /* completion */
 extern NTSTATUS NTDLL_AddCompletion( HANDLE hFile, ULONG_PTR CompletionValue,
@@ -252,7 +250,7 @@ extern int CDECL NTDLL__vsnwprintf( WCHAR *str, SIZE_T len, const WCHAR *format,
 /* inline version of RtlEnterCriticalSection */
 static inline void enter_critical_section( RTL_CRITICAL_SECTION *crit )
 {
-    if (interlocked_inc( &crit->LockCount ))
+    if (InterlockedIncrement( &crit->LockCount ))
     {
         if (crit->OwningThread == ULongToHandle(GetCurrentThreadId()))
         {
@@ -271,13 +269,13 @@ static inline void leave_critical_section( RTL_CRITICAL_SECTION *crit )
     WINE_DECLARE_DEBUG_CHANNEL(ntdll);
     if (--crit->RecursionCount)
     {
-        if (crit->RecursionCount > 0) interlocked_dec( &crit->LockCount );
+        if (crit->RecursionCount > 0) InterlockedDecrement( &crit->LockCount );
         else ERR_(ntdll)( "section %p is not acquired\n", crit );
     }
     else
     {
         crit->OwningThread = 0;
-        if (interlocked_dec( &crit->LockCount ) >= 0)
+        if (InterlockedDecrement( &crit->LockCount ) >= 0)
             RtlpUnWaitCriticalSection( crit );
     }
 }
@@ -347,6 +345,10 @@ extern SYSTEM_CPU_INFORMATION cpu_info DECLSPEC_HIDDEN;
 
 NTSTATUS WINAPI RtlHashUnicodeString(PCUNICODE_STRING,BOOLEAN,ULONG,ULONG*);
 void     WINAPI LdrInitializeThunk(CONTEXT*,void**,ULONG_PTR,ULONG_PTR);
+
+#ifndef __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8
+#define InterlockedCompareExchange64(dest,xchg,cmp) RtlInterlockedCompareExchange64(dest,xchg,cmp)
+#endif
 
 /* version */
 extern const char * CDECL NTDLL_wine_get_version(void);

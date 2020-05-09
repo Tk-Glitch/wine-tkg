@@ -872,13 +872,14 @@ static HRESULT wined3d_swapchain_init(struct wined3d_swapchain *swapchain, struc
         const struct wined3d_swapchain_ops *swapchain_ops)
 {
     struct wined3d_resource_desc texture_desc;
+    struct wined3d_output_desc output_desc;
     struct wined3d_output *output;
     BOOL displaymode_set = FALSE;
     DWORD texture_flags = 0;
+    HRESULT hr = E_FAIL;
     RECT client_rect;
     unsigned int i;
     HWND window;
-    HRESULT hr;
 
     wined3d_mutex_lock();
 
@@ -895,7 +896,10 @@ static HRESULT wined3d_swapchain_init(struct wined3d_swapchain *swapchain, struc
 
     window = desc->device_window ? desc->device_window : device->create_parms.focus_window;
     if (FAILED(hr = wined3d_swapchain_state_init(&swapchain->state, desc, window, device->wined3d)))
-        return hr;
+    {
+        ERR("Failed to initialise swapchain state, hr %#x.\n", hr);
+        goto err;
+    }
 
     swapchain->swapchain_ops = swapchain_ops;
     swapchain->device = device;
@@ -930,8 +934,21 @@ static HRESULT wined3d_swapchain_init(struct wined3d_swapchain *swapchain, struc
     }
     else
     {
-        wined3d_swapchain_state_setup_fullscreen(&swapchain->state,
-                window, desc->backbuffer_width, desc->backbuffer_height);
+        if (!(output = wined3d_swapchain_get_output(swapchain)))
+        {
+            ERR("Failed to get output from swapchain %p.\n", swapchain);
+            goto err;
+        }
+
+        if (FAILED(hr = wined3d_output_get_desc(output, &output_desc)))
+        {
+            ERR("Failed to get output description, hr %#x.\n", hr);
+            goto err;
+        }
+
+        wined3d_swapchain_state_setup_fullscreen(&swapchain->state, window,
+                output_desc.desktop_rect.left, output_desc.desktop_rect.top, desc->backbuffer_width,
+                desc->backbuffer_height);
     }
     swapchain->state.desc = *desc;
     wined3d_swapchain_apply_sample_count_override(swapchain, swapchain->state.desc.backbuffer_format,
@@ -1472,7 +1489,9 @@ HRESULT CDECL wined3d_swapchain_state_resize_target(struct wined3d_swapchain_sta
         struct wined3d_output *output, const struct wined3d_display_mode *mode)
 {
     struct wined3d_display_mode actual_mode;
+    struct wined3d_output_desc output_desc;
     RECT original_window_rect, window_rect;
+    int x, y, width, height;
     HWND window;
     HRESULT hr;
 
@@ -1488,37 +1507,42 @@ HRESULT CDECL wined3d_swapchain_state_resize_target(struct wined3d_swapchain_sta
         AdjustWindowRectEx(&window_rect,
                 GetWindowLongW(window, GWL_STYLE), FALSE,
                 GetWindowLongW(window, GWL_EXSTYLE));
-        SetRect(&window_rect, 0, 0,
-                window_rect.right - window_rect.left, window_rect.bottom - window_rect.top);
         GetWindowRect(window, &original_window_rect);
-        OffsetRect(&window_rect, original_window_rect.left, original_window_rect.top);
-    }
-    else if (state->desc.flags & WINED3D_SWAPCHAIN_ALLOW_MODE_SWITCH)
-    {
-        actual_mode = *mode;
-        if (FAILED(hr = wined3d_swapchain_state_set_display_mode(state, output, &actual_mode)))
-        {
-            wined3d_mutex_unlock();
-            return hr;
-        }
-        SetRect(&window_rect, 0, 0, actual_mode.width, actual_mode.height);
+
+        x = original_window_rect.left;
+        y = original_window_rect.top;
+        width = window_rect.right - window_rect.left;
+        height = window_rect.bottom - window_rect.top;
     }
     else
     {
-        if (FAILED(hr = wined3d_output_get_display_mode(output, &actual_mode, NULL)))
+        if (state->desc.flags & WINED3D_SWAPCHAIN_ALLOW_MODE_SWITCH)
         {
-            ERR("Failed to get display mode, hr %#x.\n", hr);
+            actual_mode = *mode;
+            if (FAILED(hr = wined3d_swapchain_state_set_display_mode(state, output, &actual_mode)))
+            {
+                ERR("Failed to set display mode, hr %#x.\n", hr);
+                wined3d_mutex_unlock();
+                return hr;
+            }
+        }
+
+        if (FAILED(hr = wined3d_output_get_desc(output, &output_desc)))
+        {
+            ERR("Failed to get output description, hr %#x.\n", hr);
             wined3d_mutex_unlock();
             return hr;
         }
 
-        SetRect(&window_rect, 0, 0, actual_mode.width, actual_mode.height);
+        x = output_desc.desktop_rect.left;
+        y = output_desc.desktop_rect.top;
+        width = output_desc.desktop_rect.right - output_desc.desktop_rect.left;
+        height = output_desc.desktop_rect.bottom - output_desc.desktop_rect.top;
     }
 
     wined3d_mutex_unlock();
 
-    MoveWindow(window, window_rect.left, window_rect.top,
-            window_rect.right - window_rect.left, window_rect.bottom - window_rect.top, TRUE);
+    MoveWindow(window, x, y, width, height, TRUE);
 
     return WINED3D_OK;
 }
@@ -1541,7 +1565,7 @@ static LONG fullscreen_exstyle(LONG exstyle)
 }
 
 HRESULT wined3d_swapchain_state_setup_fullscreen(struct wined3d_swapchain_state *state,
-        HWND window, unsigned int w, unsigned int h)
+        HWND window, int x, int y, int width, int height)
 {
     LONG style, exstyle;
     BOOL filter;
@@ -1573,7 +1597,8 @@ HRESULT wined3d_swapchain_state_setup_fullscreen(struct wined3d_swapchain_state 
 
     SetWindowLongW(window, GWL_STYLE, style);
     SetWindowLongW(window, GWL_EXSTYLE, exstyle);
-    SetWindowPos(window, HWND_TOPMOST, 0, 0, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    SetWindowPos(window, HWND_TOPMOST, x, y, width, height,
+            SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
 
     wined3d_filter_messages(window, filter);
 
@@ -1637,6 +1662,7 @@ HRESULT CDECL wined3d_swapchain_state_set_fullscreen(struct wined3d_swapchain_st
         const struct wined3d_display_mode *mode)
 {
     struct wined3d_display_mode actual_mode;
+    struct wined3d_output_desc output_desc;
     HRESULT hr;
 
     TRACE("state %p, swapchain_desc %p, output %p, mode %p.\n",
@@ -1685,10 +1711,17 @@ HRESULT CDECL wined3d_swapchain_state_set_fullscreen(struct wined3d_swapchain_st
         unsigned int width = actual_mode.width;
         unsigned int height = actual_mode.height;
 
+        if (FAILED(hr = wined3d_output_get_desc(output, &output_desc)))
+        {
+            ERR("Failed to get output description, hr %#x.\n", hr);
+            return hr;
+        }
+
         if (state->desc.windowed)
         {
             /* Switch from windowed to fullscreen */
-            if (FAILED(hr = wined3d_swapchain_state_setup_fullscreen(state, state->device_window, width, height)))
+            if (FAILED(hr = wined3d_swapchain_state_setup_fullscreen(state, state->device_window,
+                    output_desc.desktop_rect.left, output_desc.desktop_rect.top, width, height)))
                 return hr;
         }
         else
@@ -1698,7 +1731,8 @@ HRESULT CDECL wined3d_swapchain_state_set_fullscreen(struct wined3d_swapchain_st
 
             /* Fullscreen -> fullscreen mode change */
             filter = wined3d_filter_messages(window, TRUE);
-            MoveWindow(window, 0, 0, width, height, TRUE);
+            MoveWindow(window, output_desc.desktop_rect.left, output_desc.desktop_rect.top, width,
+                    height, TRUE);
             ShowWindow(window, SW_SHOW);
             wined3d_filter_messages(window, filter);
         }

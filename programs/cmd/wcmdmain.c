@@ -1045,6 +1045,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
   WCHAR  pathext[MAXSTRING];
   WCHAR *firstParam;
   BOOL  extensionsupplied = FALSE;
+  BOOL  explicit_path = FALSE;
   BOOL  status;
   DWORD len;
   static const WCHAR envPath[] = {'P','A','T','H','\0'};
@@ -1084,6 +1085,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
     /* Reduce pathtosearch to a path with trailing '\' to support c:\a.bat and
        c:\windows\a.bat syntax                                                 */
     if (lastSlash) *(lastSlash + 1) = 0x00;
+    explicit_path = TRUE;
   }
 
   /* Now extract PATHEXT */
@@ -1103,37 +1105,48 @@ void WCMD_run_program (WCHAR *command, BOOL called)
     BOOL  found             = FALSE;
     BOOL inside_quotes      = FALSE;
 
-    /* Work on the first directory on the search path */
-    pos = pathposn;
-    while ((inside_quotes || *pos != ';') && *pos != 0)
+    if (explicit_path)
     {
-        if (*pos == '"')
-            inside_quotes = !inside_quotes;
-        pos++;
+        lstrcpyW(thisDir, pathposn);
+        pathposn = NULL;
     }
-
-    if (*pos) { /* Reached semicolon */
-      memcpy(thisDir, pathposn, (pos-pathposn) * sizeof(WCHAR));
-      thisDir[(pos-pathposn)] = 0x00;
-      pathposn = pos+1;
-    } else {    /* Reached string end */
-      lstrcpyW(thisDir, pathposn);
-      pathposn = NULL;
-    }
-
-    /* Remove quotes */
-    length = lstrlenW(thisDir);
-    if (thisDir[length - 1] == '"')
-        thisDir[length - 1] = 0;
-
-    if (*thisDir != '"')
-        lstrcpyW(temp, thisDir);
     else
-        lstrcpyW(temp, thisDir + 1);
+    {
+        /* Work on the next directory on the search path */
+        pos = pathposn;
+        while ((inside_quotes || *pos != ';') && *pos != 0)
+        {
+            if (*pos == '"')
+                inside_quotes = !inside_quotes;
+            pos++;
+        }
 
-    /* Since you can have eg. ..\.. on the path, need to expand
-       to full information                                      */
-    GetFullPathNameW(temp, MAX_PATH, thisDir, NULL);
+        if (*pos)  /* Reached semicolon */
+        {
+            memcpy(thisDir, pathposn, (pos-pathposn) * sizeof(WCHAR));
+            thisDir[(pos-pathposn)] = 0x00;
+            pathposn = pos+1;
+        }
+        else       /* Reached string end */
+        {
+            lstrcpyW(thisDir, pathposn);
+            pathposn = NULL;
+        }
+
+        /* Remove quotes */
+        length = lstrlenW(thisDir);
+        if (thisDir[length - 1] == '"')
+            thisDir[length - 1] = 0;
+
+        if (*thisDir != '"')
+            lstrcpyW(temp, thisDir);
+        else
+            lstrcpyW(temp, thisDir + 1);
+
+        /* Since you can have eg. ..\.. on the path, need to expand
+           to full information                                      */
+        GetFullPathNameW(temp, MAX_PATH, thisDir, NULL);
+    }
 
     /* 1. If extension supplied, see if that file exists */
     lstrcatW(thisDir, slashW);
@@ -2015,8 +2028,6 @@ WCHAR *WCMD_ReadAndParseLine(const WCHAR *optionalcmd, CMD_LIST **output, HANDLE
            To be able to handle ('s in the condition part take as much as evaluate_if_condition
            would take and skip parsing it here. */
         } else if (WCMD_keyword_ws_found(ifCmd, ARRAY_SIZE(ifCmd), curPos)) {
-          static const WCHAR parmI[]   = {'/','I','\0'};
-          static const WCHAR notW[]    = {'n','o','t','\0'};
           int negate; /* Negate condition */
           int test;   /* Condition evaluation result */
           WCHAR *p, *command;
@@ -2024,17 +2035,18 @@ WCHAR *WCMD_ReadAndParseLine(const WCHAR *optionalcmd, CMD_LIST **output, HANDLE
           inIf = TRUE;
 
           p = curPos+(ARRAY_SIZE(ifCmd));
-          while (*p == ' ' || *p == '\t') {
+          while (*p == ' ' || *p == '\t')
             p++;
-            if (lstrcmpiW(WCMD_parameter(p, 0, NULL, TRUE, FALSE), notW) == 0)
-              p += lstrlenW(notW);
-            if (lstrcmpiW(WCMD_parameter(p, 0, NULL, TRUE, FALSE), parmI) == 0)
-              p += lstrlenW(parmI);
-          }
+          WCMD_parse (p, quals, param1, param2);
 
+          /* Function evaluate_if_condition relies on the global variables quals, param1 and param2
+             set in a call to WCMD_parse before */
           if (evaluate_if_condition(p, &command, &test, &negate) != -1)
           {
               int if_condition_len = command - curPos;
+              WINE_TRACE("p: %s, quals: %s, param1: %s, param2: %s, command: %s, if_condition_len: %d\n",
+                         wine_dbgstr_w(p), wine_dbgstr_w(quals), wine_dbgstr_w(param1),
+                         wine_dbgstr_w(param2), wine_dbgstr_w(command), if_condition_len);
               memcpy(&curCopyTo[*curLen], curPos, if_condition_len*sizeof(WCHAR));
               (*curLen)+=if_condition_len;
               curPos+=if_condition_len;

@@ -31,13 +31,13 @@
 @ stdcall ControlTraceA(int64 str ptr long)
 @ stdcall ControlTraceW(int64 wstr ptr long)
 @ stub ConvertSDToStringSDRootDomainW
-@ stdcall ConvertSecurityDescriptorToStringSecurityDescriptorW(ptr long long ptr ptr) advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW
-@ stdcall ConvertSidToStringSidW(ptr ptr) advapi32.ConvertSidToStringSidW
+@ stdcall ConvertSecurityDescriptorToStringSecurityDescriptorW(ptr long long ptr ptr)
+@ stdcall ConvertSidToStringSidW(ptr ptr)
 @ stub ConvertStringSDToSDDomainA
 @ stub ConvertStringSDToSDDomainW
 @ stub ConvertStringSDToSDRootDomainW
-@ stdcall ConvertStringSecurityDescriptorToSecurityDescriptorW(wstr long ptr ptr) advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW
-@ stdcall ConvertStringSidToSidW(ptr ptr) advapi32.ConvertStringSidToSidW
+@ stdcall ConvertStringSecurityDescriptorToSecurityDescriptorW(wstr long ptr ptr)
+@ stdcall ConvertStringSidToSidW(ptr ptr)
 @ stdcall CreateServiceA(long str str long long long long str str ptr str str str)
 @ stub CreateServiceEx
 @ stdcall CreateServiceW(long wstr wstr long long long long wstr wstr ptr wstr wstr wstr)
@@ -108,14 +108,14 @@
 @ stub I_ScIsSecurityProcess
 @ stub I_ScPnPGetServiceName
 @ stub I_ScQueryServiceConfig
-@ stub I_ScRegisterDeviceNotification
+@ stdcall I_ScRegisterDeviceNotification(ptr ptr long)
 @ stub I_ScRegisterPreshutdownRestart
 @ stub I_ScReparseServiceDatabase
 @ stub I_ScRpcBindA
 @ stub I_ScRpcBindW
 @ stub I_ScSendPnPMessage
 @ stub I_ScSendTSMessage
-@ stub I_ScUnregisterDeviceNotification
+@ stdcall I_ScUnregisterDeviceNotification(ptr)
 @ stub I_ScValidatePnPService
 @ stub LocalGetConditionForString
 @ stub LocalGetReferencedTokenTypesForCondition

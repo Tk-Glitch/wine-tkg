@@ -553,6 +553,7 @@ static HRESULT WINAPI audio_renderer_clock_sink_OnClockStart(IMFClockStateSink *
             if (FAILED(hr = IAudioClient_Start(renderer->audio_client)))
                 WARN("Failed to start audio client, hr %#x.\n", hr);
             renderer->state = STREAM_STATE_RUNNING;
+            IMFStreamSink_QueueEvent(&renderer->IMFStreamSink_iface, MEStreamSinkRequestSample, &GUID_NULL, S_OK, NULL);
         }
     }
     else
@@ -1239,7 +1240,16 @@ static HRESULT WINAPI audio_renderer_stream_GetMediaTypeHandler(IMFStreamSink *i
 
 static HRESULT WINAPI audio_renderer_stream_ProcessSample(IMFStreamSink *iface, IMFSample *sample)
 {
+    struct audio_renderer *renderer = impl_from_IMFStreamSink(iface);
+
     FIXME("%p, %p.\n", iface, sample);
+
+    EnterCriticalSection(&renderer->cs);
+
+    if (renderer->state == STREAM_STATE_RUNNING && sample)
+        IMFStreamSink_QueueEvent(&renderer->IMFStreamSink_iface, MEStreamSinkRequestSample, &GUID_NULL, S_OK, NULL);
+
+    LeaveCriticalSection(&renderer->cs);
 
     return E_NOTIMPL;
 }
@@ -1247,7 +1257,16 @@ static HRESULT WINAPI audio_renderer_stream_ProcessSample(IMFStreamSink *iface, 
 static HRESULT WINAPI audio_renderer_stream_PlaceMarker(IMFStreamSink *iface, MFSTREAMSINK_MARKER_TYPE marker_type,
         const PROPVARIANT *marker_value, const PROPVARIANT *context_value)
 {
+    struct audio_renderer *renderer = impl_from_IMFStreamSink(iface);
+
     FIXME("%p, %d, %p, %p.\n", iface, marker_type, marker_value, context_value);
+
+    EnterCriticalSection(&renderer->cs);
+
+    if (renderer->state == STREAM_STATE_RUNNING)
+        IMFStreamSink_QueueEvent(&renderer->IMFStreamSink_iface, MEStreamSinkMarker, &GUID_NULL, S_OK, context_value);
+
+    LeaveCriticalSection(&renderer->cs);
 
     return E_NOTIMPL;
 }

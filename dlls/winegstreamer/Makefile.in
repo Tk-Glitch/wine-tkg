@@ -6,6 +6,7 @@ EXTRALIBS = $(GSTREAMER_LIBS) $(PTHREAD_LIBS)
 PARENTSRC = ../strmbase ../mf
 
 C_SRCS = \
+	colorconvert.c \
 	filter.c \
 	gst_cbs.c \
 	gstdemux.c \

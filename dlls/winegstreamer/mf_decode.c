@@ -20,6 +20,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
+/* keep in sync with mfplat.c's mft registrations */
+
 const GUID *h264_input_types[] = {&MFVideoFormat_H264};
 const GUID *h264_output_types[] = {&MFVideoFormat_I420, &MFVideoFormat_IYUV, &MFVideoFormat_NV12, &MFVideoFormat_YUY2, &MFVideoFormat_YV12};
 
@@ -110,8 +112,8 @@ static HRESULT WINAPI mf_decoder_QueryInterface (IMFTransform *iface, REFIID rii
 
 static ULONG WINAPI mf_decoder_AddRef(IMFTransform *iface)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
-    ULONG refcount = InterlockedIncrement(&This->refcount);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
+    ULONG refcount = InterlockedIncrement(&decoder->refcount);
 
     TRACE("%p, refcount %u.\n", iface, refcount);
 
@@ -121,14 +123,14 @@ static ULONG WINAPI mf_decoder_AddRef(IMFTransform *iface)
 static void mf_decoder_destroy(struct mf_decoder *decoder);
 static ULONG WINAPI mf_decoder_Release(IMFTransform *iface)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
-    ULONG refcount = InterlockedDecrement(&This->refcount);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
+    ULONG refcount = InterlockedDecrement(&decoder->refcount);
 
     TRACE("%p, refcount %u.\n", iface, refcount);
 
     if (!refcount)
     {
-        mf_decoder_destroy(This);
+        mf_decoder_destroy(decoder);
     }
 
     return refcount;
@@ -164,9 +166,9 @@ static HRESULT WINAPI mf_decoder_GetStreamIDs(IMFTransform *iface, DWORD input_s
 
 static HRESULT WINAPI mf_decoder_GetInputStreamInfo(IMFTransform *iface, DWORD id, MFT_INPUT_STREAM_INFO *info)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
 
-    TRACE("%p %u %p\n", This, id, info);
+    TRACE("%p %u %p\n", decoder, id, info);
 
     if (id != 0)
         return MF_E_INVALIDSTREAMNUMBER;
@@ -182,10 +184,10 @@ static HRESULT WINAPI mf_decoder_GetInputStreamInfo(IMFTransform *iface, DWORD i
 
 static HRESULT WINAPI mf_decoder_GetOutputStreamInfo(IMFTransform *iface, DWORD id, MFT_OUTPUT_STREAM_INFO *info)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
     MFT_OUTPUT_STREAM_INFO stream_info = {};
 
-    TRACE("%p %u %p\n", This, id, info);
+    TRACE("%p %u %p\n", decoder, id, info);
 
     if (id != 0)
         return MF_E_INVALIDSTREAMNUMBER;
@@ -239,28 +241,28 @@ static HRESULT WINAPI mf_decoder_AddInputStreams(IMFTransform *iface, DWORD stre
 static HRESULT WINAPI mf_decoder_GetInputAvailableType(IMFTransform *iface, DWORD id, DWORD index,
         IMFMediaType **type)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
     IMFMediaType *input_type;
     HRESULT hr;
 
-    TRACE("%p, %u, %u, %p\n", This, id, index, type);
+    TRACE("%p, %u, %u, %p\n", decoder, id, index, type);
 
     if (id != 0)
         return MF_E_INVALIDSTREAMNUMBER;
 
-    if (index >= decoder_descs[This->type].input_types_count)
+    if (index >= decoder_descs[decoder->type].input_types_count)
         return MF_E_NO_MORE_TYPES;
 
     if (FAILED(hr = MFCreateMediaType(&input_type)))
         return hr;
 
-    if (FAILED(hr = IMFMediaType_SetGUID(input_type, &MF_MT_MAJOR_TYPE, decoder_descs[This->type].major_type)))
+    if (FAILED(hr = IMFMediaType_SetGUID(input_type, &MF_MT_MAJOR_TYPE, decoder_descs[decoder->type].major_type)))
     {
         IMFMediaType_Release(input_type);
         return hr;
     }
 
-    if (FAILED(hr = IMFMediaType_SetGUID(input_type, &MF_MT_SUBTYPE, decoder_descs[This->type].input_types[index])))
+    if (FAILED(hr = IMFMediaType_SetGUID(input_type, &MF_MT_SUBTYPE, decoder_descs[decoder->type].input_types[index])))
     {
         IMFMediaType_Release(input_type);
         return hr;
@@ -284,40 +286,44 @@ static void copy_attr(IMFMediaType *target, IMFMediaType *source, const GUID *ke
 static HRESULT WINAPI mf_decoder_GetOutputAvailableType(IMFTransform *iface, DWORD id, DWORD index,
         IMFMediaType **type)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
     IMFMediaType *output_type;
     HRESULT hr;
 
-    TRACE("%p, %u, %u, %p\n", This, id, index, type);
+    TRACE("%p, %u, %u, %p\n", decoder, id, index, type);
 
     if (id != 0)
         return MF_E_INVALIDSTREAMNUMBER;
 
-    if (!(This->input_type))
+    if (!(decoder->input_type))
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
-    if (index >= decoder_descs[This->type].output_types_count)
+    if (index >= decoder_descs[decoder->type].output_types_count)
         return MF_E_NO_MORE_TYPES;
 
     if (FAILED(hr = MFCreateMediaType(&output_type)))
         return hr;
 
-    copy_attr(output_type, This->input_type, &MF_MT_MAJOR_TYPE);
-    copy_attr(output_type, This->input_type, &MF_MT_FRAME_SIZE);
-    copy_attr(output_type, This->input_type, &MF_MT_FRAME_RATE);
-    copy_attr(output_type, This->input_type, &MF_MT_AUDIO_NUM_CHANNELS);
-    copy_attr(output_type, This->input_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND);
+    copy_attr(output_type, decoder->input_type, &MF_MT_FRAME_SIZE);
+    copy_attr(output_type, decoder->input_type, &MF_MT_FRAME_RATE);
+    copy_attr(output_type, decoder->input_type, &MF_MT_AUDIO_NUM_CHANNELS);
+    copy_attr(output_type, decoder->input_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND);
 
-    if (FAILED(hr = IMFMediaType_SetGUID(output_type, &MF_MT_MAJOR_TYPE, decoder_descs[This->type].major_type)))
+    if (FAILED(hr = IMFMediaType_SetGUID(output_type, &MF_MT_MAJOR_TYPE, decoder_descs[decoder->type].major_type)))
     {
         IMFMediaType_Release(output_type);
         return hr;
     }
 
-    if (FAILED(hr = IMFMediaType_SetGUID(output_type, &MF_MT_SUBTYPE, decoder_descs[This->type].output_types[index])))
+    if (FAILED(hr = IMFMediaType_SetGUID(output_type, &MF_MT_SUBTYPE, decoder_descs[decoder->type].output_types[index])))
     {
         IMFMediaType_Release(output_type);
         return hr;
+    }
+
+    if (IsEqualGUID(decoder_descs[decoder->type].output_types[index], &MFAudioFormat_PCM))
+    {
+        IMFMediaType_SetUINT32(output_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
     }
 
     *type = output_type;
@@ -340,15 +346,15 @@ static gboolean activate_push_mode(GstPad *pad, GstObject *parent, GstPadMode mo
 
 static gboolean query_input_src(GstPad *pad, GstObject *parent, GstQuery *query)
 {
-    struct mf_decoder *This = gst_pad_get_element_private(pad);
+    struct mf_decoder *decoder = gst_pad_get_element_private(pad);
 
-    TRACE("GStreamer queries MFT Input Pad %p for %s\n", This, GST_QUERY_TYPE_NAME(query));
+    TRACE("GStreamer queries MFT Input Pad %p for %s\n", decoder, GST_QUERY_TYPE_NAME(query));
 
     switch (GST_QUERY_TYPE(query))
     {
         case GST_QUERY_CAPS:
         {
-            gst_query_set_caps_result(query, caps_from_mf_media_type(This->input_type));
+            gst_query_set_caps_result(query, caps_from_mf_media_type(decoder->input_type));
             return TRUE;
         }
         case GST_QUERY_SCHEDULING:
@@ -376,7 +382,7 @@ static gboolean query_input_src(GstPad *pad, GstObject *parent, GstQuery *query)
         }
         default:
         {
-            ERR("Unhandled query type %s on MFT Input Pad %p\n", GST_QUERY_TYPE_NAME(query), This);
+            ERR("Unhandled query type %s on MFT Input Pad %p\n", GST_QUERY_TYPE_NAME(query), decoder);
             return gst_pad_query_default (pad, parent, query);
         }
     }
@@ -384,17 +390,19 @@ static gboolean query_input_src(GstPad *pad, GstObject *parent, GstQuery *query)
 
 static GstFlowReturn decoder_new_sample(GstElement *appsink, gpointer user)
 {
-    struct mf_decoder *This = (struct mf_decoder *) user;
+    struct mf_decoder *decoder = (struct mf_decoder *) user;
 
-    if (This->flushing)
+    TRACE("new sample decoder=%p appsink=%p\n", decoder, appsink);
+
+    if (decoder->flushing)
     {
         GstSample *sample;
-        g_signal_emit_by_name(This->appsink, "pull-sample", &sample);
+        g_signal_emit_by_name(decoder->appsink, "pull-sample", &sample);
         gst_sample_unref(sample);
         return GST_FLOW_OK;
     }
 
-    This->output_counter++;
+    decoder->output_counter++;
 
     return GST_FLOW_OK;
 }
@@ -488,7 +496,7 @@ static BOOL find_decoder_from_caps(GstCaps *input_caps, GstElement **decoder, Gs
     return ret;
 }
 
-static void decoder_update_pipeline(struct mf_decoder *This)
+static void decoder_update_pipeline(struct mf_decoder *decoder)
 {
     GstCaps *input_caps = NULL;
     RECT target_size = {0};
@@ -496,53 +504,53 @@ static void decoder_update_pipeline(struct mf_decoder *This)
     UINT32 aperture_size;
     GstSegment *segment;
 
-    This->valid_state = FALSE;
+    decoder->valid_state = FALSE;
 
     /* tear down current pipeline */
-    gst_element_set_state(This->container, GST_STATE_READY);
-    if (gst_element_get_state(This->container, NULL, NULL, -1) == GST_STATE_CHANGE_FAILURE)
+    gst_element_set_state(decoder->container, GST_STATE_READY);
+    if (gst_element_get_state(decoder->container, NULL, NULL, -1) == GST_STATE_CHANGE_FAILURE)
     {
         ERR("Failed to stop container\n");
     }
 
-    g_object_set(This->appsink, "caps", gst_caps_new_empty(), NULL);
+    g_object_set(decoder->appsink, "caps", gst_caps_new_empty(), NULL);
 
-    if (This->input_src)
+    if (decoder->input_src)
     {
-        gst_pad_unlink(This->input_src, This->their_sink);
-        gst_object_unref(G_OBJECT(This->input_src));
-        This->input_src = NULL;
+        gst_pad_unlink(decoder->input_src, decoder->their_sink);
+        gst_object_unref(G_OBJECT(decoder->input_src));
+        decoder->input_src = NULL;
     }
 
-    if (This->their_sink)
+    if (decoder->their_sink)
     {
-        gst_object_unref(G_OBJECT(This->their_sink));
-        This->their_sink = NULL;
+        gst_object_unref(G_OBJECT(decoder->their_sink));
+        decoder->their_sink = NULL;
     }
 
-    if (This->parser)
+    if (decoder->parser)
     {
-        gst_element_unlink(This->parser, This->decoder);
-        gst_bin_remove(GST_BIN(This->container), This->parser);
-        This->parser = NULL;
+        gst_element_unlink(decoder->parser, decoder->decoder);
+        gst_bin_remove(GST_BIN(decoder->container), decoder->parser);
+        decoder->parser = NULL;
     }
-    if (This->decoder)
+    if (decoder->decoder)
     {
-        gst_element_unlink(This->decoder, This->post_process_start);
-        gst_bin_remove(GST_BIN(This->container), This->decoder);
-        This->decoder = NULL;
+        gst_element_unlink(decoder->decoder, decoder->post_process_start);
+        gst_bin_remove(GST_BIN(decoder->container), decoder->decoder);
+        decoder->decoder = NULL;
     }
 
     /* we can only have a valid state if an input and output type is present */
-    if (!This->input_type || !This->output_type)
+    if (!decoder->input_type || !decoder->output_type)
         return;
 
     /* We do leave a lot of unfreed objects here when we failure,
        but it will be cleaned up on the next call */
 
-    input_caps = caps_from_mf_media_type(This->input_type);
+    input_caps = caps_from_mf_media_type(decoder->input_type);
 
-    if (!(This->input_src = gst_pad_new_from_template(gst_pad_template_new(
+    if (!(decoder->input_src = gst_pad_new_from_template(gst_pad_template_new(
         "mf_src",
         GST_PAD_SRC,
         GST_PAD_ALWAYS,
@@ -553,34 +561,34 @@ static void decoder_update_pipeline(struct mf_decoder *This)
         goto done;
     }
 
-    gst_pad_set_activatemode_function(This->input_src, activate_push_mode_wrapper);
-    gst_pad_set_query_function(This->input_src, query_input_src_wrapper);
-    gst_pad_set_element_private(This->input_src, This);
+    gst_pad_set_activatemode_function(decoder->input_src, activate_push_mode_wrapper);
+    gst_pad_set_query_function(decoder->input_src, query_input_src_wrapper);
+    gst_pad_set_element_private(decoder->input_src, decoder);
 
-    if (!(find_decoder_from_caps(input_caps, &This->decoder, &This->parser)))
+    if (!(find_decoder_from_caps(input_caps, &decoder->decoder, &decoder->parser)))
     {
         goto done;
     }
 
-    gst_bin_add(GST_BIN(This->container), This->decoder);
-    if (This->parser)
+    gst_bin_add(GST_BIN(decoder->container), decoder->decoder);
+    if (decoder->parser)
     {
-        gst_bin_add(GST_BIN(This->container), This->parser);
+        gst_bin_add(GST_BIN(decoder->container), decoder->parser);
     }
 
-    if (!(This->their_sink = gst_element_get_static_pad(This->parser ? This->parser : This->decoder, "sink")))
+    if (!(decoder->their_sink = gst_element_get_static_pad(decoder->parser ? decoder->parser : decoder->decoder, "sink")))
     {
         goto done;
     }
 
-    if (SUCCEEDED(IMFMediaType_GetAllocatedBlob(This->output_type, &MF_MT_MINIMUM_DISPLAY_APERTURE, (UINT8 **) &aperture, &aperture_size)))
+    if (SUCCEEDED(IMFMediaType_GetAllocatedBlob(decoder->output_type, &MF_MT_MINIMUM_DISPLAY_APERTURE, (UINT8 **) &aperture, &aperture_size)))
     {
         UINT64 frame_size;
 
         TRACE("x: %u %u/65536, y: %u %u/65536, area: %u x %u\n", aperture->OffsetX.value, aperture->OffsetX.fract,
             aperture->OffsetY.value, aperture->OffsetY.fract, aperture->Area.cx, aperture->Area.cy);
 
-        if (SUCCEEDED(IMFMediaType_GetUINT64(This->output_type, &MF_MT_FRAME_SIZE, &frame_size)))
+        if (SUCCEEDED(IMFMediaType_GetUINT64(decoder->output_type, &MF_MT_FRAME_SIZE, &frame_size)))
         {
             DWORD width = frame_size >> 32;
             DWORD height = frame_size;
@@ -596,46 +604,46 @@ static void decoder_update_pipeline(struct mf_decoder *This)
         CoTaskMemFree(aperture);
     }
 
-    if (This->videobox)
+    if (decoder->videobox)
     {
-        g_object_set(This->videobox, "top", target_size.top, NULL);
-        g_object_set(This->videobox, "bottom", target_size.bottom, NULL);
-        g_object_set(This->videobox, "left", target_size.left, NULL);
-        g_object_set(This->videobox, "right", target_size.right, NULL);
+        g_object_set(decoder->videobox, "top", target_size.top, NULL);
+        g_object_set(decoder->videobox, "bottom", target_size.bottom, NULL);
+        g_object_set(decoder->videobox, "left", target_size.left, NULL);
+        g_object_set(decoder->videobox, "right", target_size.right, NULL);
     }
 
-    g_object_set(This->appsink, "caps", caps_from_mf_media_type(This->output_type), NULL);
+    g_object_set(decoder->appsink, "caps", caps_from_mf_media_type(decoder->output_type), NULL);
 
-    if (gst_pad_link(This->input_src, This->their_sink) != GST_PAD_LINK_OK)
+    if (gst_pad_link(decoder->input_src, decoder->their_sink) != GST_PAD_LINK_OK)
     {
         ERR("Failed to link input source to decoder sink\n");
         return;
     }
 
-    if (This->parser && !(gst_element_link(This->parser, This->decoder)))
+    if (decoder->parser && !(gst_element_link(decoder->parser, decoder->decoder)))
     {
         ERR("Failed to link parser to decoder\n");
         goto done;
     }
 
-    if (!(gst_element_link(This->decoder, This->post_process_start)))
+    if (!(gst_element_link(decoder->decoder, decoder->post_process_start)))
     {
         ERR("Failed to link decoder to first element in post processing chain\n");
         goto done;
     }
 
-    gst_element_set_state(This->container, GST_STATE_PLAYING);
+    gst_element_set_state(decoder->container, GST_STATE_PLAYING);
 
-    gst_pad_set_active(This->input_src, 1);
-    gst_pad_push_event(This->input_src, gst_event_new_stream_start("decoder-stream"));
-    gst_pad_push_event(This->input_src, gst_event_new_caps(caps_from_mf_media_type(This->input_type)));
+    gst_pad_set_active(decoder->input_src, 1);
+    gst_pad_push_event(decoder->input_src, gst_event_new_stream_start("decoder-stream"));
+    gst_pad_push_event(decoder->input_src, gst_event_new_caps(caps_from_mf_media_type(decoder->input_type)));
     segment = gst_segment_new();
     gst_segment_init(segment, GST_FORMAT_DEFAULT);
-    gst_pad_push_event(This->input_src, gst_event_new_segment(segment));
+    gst_pad_push_event(decoder->input_src, gst_event_new_segment(segment));
 
-    gst_element_get_state(This->container, NULL, NULL, -1);
+    gst_element_get_state(decoder->container, NULL, NULL, -1);
 
-    This->valid_state = TRUE;
+    decoder->valid_state = TRUE;
     done:
     if (input_caps)
         gst_caps_unref(input_caps);
@@ -644,10 +652,10 @@ static void decoder_update_pipeline(struct mf_decoder *This)
 
 static HRESULT WINAPI mf_decoder_SetInputType(IMFTransform *iface, DWORD id, IMFMediaType *type, DWORD flags)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
     HRESULT hr = S_OK;
 
-    TRACE("%p, %u, %p, %#x\n", This, id, type, flags);
+    TRACE("%p, %u, %p, %#x\n", decoder, id, type, flags);
 
     if (id != 0)
         return MF_E_INVALIDSTREAMNUMBER;
@@ -655,33 +663,29 @@ static HRESULT WINAPI mf_decoder_SetInputType(IMFTransform *iface, DWORD id, IMF
     if (type)
     {
         GUID major_type, subtype;
-        BOOL found = FALSE;
+        UINT64 unused;
 
         if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major_type)))
             return hr;
         if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype)))
             return hr;
 
-        for (unsigned int i = 0; i < decoder_descs[This->type].input_types_count; i++)
+        if (!(IsEqualGUID(&major_type, decoder_descs[decoder->type].major_type)))
+            return MF_E_INVALIDTYPE;
+
+        if (decoder->video)
         {
-            UINT64 unused;
-
-            if (IsEqualGUID(&major_type, decoder_descs[This->type].major_type) &&
-                IsEqualGUID(&subtype, decoder_descs[This->type].input_types[i]))
-            {
-                if (This->video)
-                {
-                    if (FAILED(hr = IMFMediaType_GetUINT64(type, &MF_MT_FRAME_SIZE, &unused)))
-                        return hr;
-                }
-
-                found = TRUE;
-                break;
-            }
+            if (FAILED(hr = IMFMediaType_GetUINT64(type, &MF_MT_FRAME_SIZE, &unused)))
+                return hr;
         }
 
-        if (!found)
-            return MF_E_INVALIDTYPE;
+        for (unsigned int i = 0; i < decoder_descs[decoder->type].input_types_count; i++)
+        {
+            if (IsEqualGUID(&subtype, decoder_descs[decoder->type].input_types[i]))
+                break;
+            if (i == decoder_descs[decoder->type].input_types_count)
+                return MF_E_INVALIDTYPE;
+        }
     }
 
     if (flags & MFT_SET_TYPE_TEST_ONLY)
@@ -689,66 +693,67 @@ static HRESULT WINAPI mf_decoder_SetInputType(IMFTransform *iface, DWORD id, IMF
         return S_OK;
     }
 
-    EnterCriticalSection(&This->state_cs);
+    EnterCriticalSection(&decoder->state_cs);
 
     if (type)
     {
-        if (!This->input_type)
-            if (FAILED(hr = MFCreateMediaType(&This->input_type)))
+        if (!decoder->input_type)
+            if (FAILED(hr = MFCreateMediaType(&decoder->input_type)))
                 goto done;
 
-        if (FAILED(hr = IMFMediaType_CopyAllItems(type, (IMFAttributes*) This->input_type)))
+        if (FAILED(hr = IMFMediaType_CopyAllItems(type, (IMFAttributes*) decoder->input_type)))
             goto done;
     }
-    else if (This->input_type)
+    else if (decoder->input_type)
     {
-        IMFMediaType_Release(This->input_type);
-        This->input_type = NULL;
+        IMFMediaType_Release(decoder->input_type);
+        decoder->input_type = NULL;
     }
 
-    decoder_update_pipeline(This);
+    decoder_update_pipeline(decoder);
 
     done:
-    LeaveCriticalSection(&This->state_cs);
-    WakeAllConditionVariable(&This->state_cv);
+    LeaveCriticalSection(&decoder->state_cs);
+    WakeAllConditionVariable(&decoder->state_cv);
     return hr;
 }
 
 static HRESULT WINAPI mf_decoder_SetOutputType(IMFTransform *iface, DWORD id, IMFMediaType *type, DWORD flags)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
     HRESULT hr = S_OK;
 
-    TRACE("%p, %u, %p, %#x\n", This, id, type, flags);
+    TRACE("%p, %u, %p, %#x\n", decoder, id, type, flags);
 
     if (id != 0)
         return MF_E_INVALIDSTREAMNUMBER;
 
     if (type)
     {
+        GUID major_type, subtype;
+        UINT64 unused;
+
         /* validate the type */
+        if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major_type)))
+            return MF_E_INVALIDTYPE;
+        if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype)))
+            return MF_E_INVALIDTYPE;
 
-        for (unsigned int i = 0; i < decoder_descs[This->type].output_types_count; i++)
+        if (!(IsEqualGUID(&major_type, decoder_descs[decoder->type].major_type)))
+            return MF_E_INVALIDTYPE;
+
+        if (decoder->video)
         {
-            GUID major_type, subtype;
-            UINT64 unused;
+            if (FAILED(hr = IMFMediaType_GetUINT64(type, &MF_MT_FRAME_SIZE, &unused)))
+                return MF_E_INVALIDTYPE;
+        }
 
-            if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major_type)))
-                return hr;
-            if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype)))
-                return hr;
-
-            if (IsEqualGUID(&major_type, decoder_descs[This->type].major_type) &&
-                IsEqualGUID(&subtype, decoder_descs[This->type].output_types[i]))
-            {
-                if (This->video)
-                {
-                    if (FAILED(hr = IMFMediaType_GetUINT64(type, &MF_MT_FRAME_SIZE, &unused)))
-                        return hr;
-                }
-
+        for (unsigned int i = 0; i < decoder_descs[decoder->type].output_types_count; i++)
+        {
+            if (IsEqualGUID(&subtype, decoder_descs[decoder->type].output_types[i]))
                 break;
-            }
+            if (i == decoder_descs[decoder->type].output_types_count)
+                return MF_E_INVALIDTYPE;
         }
     }
 
@@ -757,27 +762,27 @@ static HRESULT WINAPI mf_decoder_SetOutputType(IMFTransform *iface, DWORD id, IM
         return S_OK;
     }
 
-    EnterCriticalSection(&This->state_cs);
+    EnterCriticalSection(&decoder->state_cs);
     if (type)
     {
-        if (!This->output_type)
-            if (FAILED(hr = MFCreateMediaType(&This->output_type)))
+        if (!decoder->output_type)
+            if (FAILED(hr = MFCreateMediaType(&decoder->output_type)))
                 goto done;
 
-        if (FAILED(hr = IMFMediaType_CopyAllItems(type, (IMFAttributes*) This->output_type)))
+        if (FAILED(hr = IMFMediaType_CopyAllItems(type, (IMFAttributes*) decoder->output_type)))
             goto done;
     }
-    else if (This->output_type)
+    else if (decoder->output_type)
     {
-        IMFMediaType_Release(This->output_type);
-        This->output_type = NULL;
+        IMFMediaType_Release(decoder->output_type);
+        decoder->output_type = NULL;
     }
 
-    decoder_update_pipeline(This);
+    decoder_update_pipeline(decoder);
 
     done:
-    LeaveCriticalSection(&This->state_cs);
-    WakeAllConditionVariable(&This->state_cv);
+    LeaveCriticalSection(&decoder->state_cs);
+    WakeAllConditionVariable(&decoder->state_cv);
     return hr;
 }
 
@@ -797,22 +802,22 @@ static HRESULT WINAPI mf_decoder_GetOutputCurrentType(IMFTransform *iface, DWORD
 
 static HRESULT WINAPI mf_decoder_GetInputStatus(IMFTransform *iface, DWORD id, DWORD *flags)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
 
-    TRACE("%p, %u, %p\n", This, id, flags);
+    TRACE("%p, %u, %p\n", decoder, id, flags);
 
-    *flags = This->output_counter ? MFT_INPUT_STATUS_ACCEPT_DATA : 0;
+    *flags = decoder->output_counter ? MFT_INPUT_STATUS_ACCEPT_DATA : 0;
 
     return S_OK;
 }
 
 static HRESULT WINAPI mf_decoder_GetOutputStatus(IMFTransform *iface, DWORD *flags)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
 
-    TRACE("%p, %p.\n", This, flags);
+    TRACE("%p, %p.\n", decoder, flags);
 
-    *flags = This->output_counter ? MFT_OUTPUT_STATUS_SAMPLE_READY : 0;
+    *flags = decoder->output_counter ? MFT_OUTPUT_STATUS_SAMPLE_READY : 0;
 
     return S_OK;
 }
@@ -871,7 +876,7 @@ const GUID WINE_MFT_MESSAGE_TYPE = {0xd09998bf, 0x102f, 0x4efa, {0x8f,0x84,0x06,
 
 static HRESULT WINAPI decoder_process_message_callback_Invoke(IMFAsyncCallback *iface, IMFAsyncResult *result)
 {
-    struct mf_decoder *This = impl_from_message_callback_IMFAsyncCallback(iface);
+    struct mf_decoder *decoder = impl_from_message_callback_IMFAsyncCallback(iface);
     IUnknown *state;
     IMFAttributes *async_param;
     MFT_MESSAGE_TYPE message_type;
@@ -896,18 +901,18 @@ static HRESULT WINAPI decoder_process_message_callback_Invoke(IMFAsyncCallback *
             GstSegment *segment = gst_segment_new();
             gst_segment_init(segment, GST_FORMAT_DEFAULT);
 
-            EnterCriticalSection(&This->state_cs);
-            This->draining = TRUE;
-            WakeAllConditionVariable(&This->state_cv);
-            LeaveCriticalSection(&This->state_cs);
-            gst_pad_push_event(This->input_src, gst_event_new_eos());
+            EnterCriticalSection(&decoder->state_cs);
+            decoder->draining = TRUE;
+            WakeAllConditionVariable(&decoder->state_cv);
+            LeaveCriticalSection(&decoder->state_cs);
+            gst_pad_push_event(decoder->input_src, gst_event_new_eos());
 
-            EnterCriticalSection(&This->state_cs);
-            while(This->draining)
-                SleepConditionVariableCS(&This->state_cv, &This->state_cs, INFINITE);
-            gst_pad_push_event(This->input_src, gst_event_new_flush_stop(0));
-            gst_pad_push_event(This->input_src, gst_event_new_segment(segment));
-            LeaveCriticalSection(&This->state_cs);
+            EnterCriticalSection(&decoder->state_cs);
+            while(decoder->draining)
+                SleepConditionVariableCS(&decoder->state_cv, &decoder->state_cs, INFINITE);
+            gst_pad_push_event(decoder->input_src, gst_event_new_flush_stop(0));
+            gst_pad_push_event(decoder->input_src, gst_event_new_segment(segment));
+            LeaveCriticalSection(&decoder->state_cs);
             return S_OK;
         }
         default:
@@ -926,11 +931,11 @@ static const IMFAsyncCallbackVtbl process_message_callback_vtbl =
 
 static HRESULT WINAPI mf_decoder_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_TYPE message, ULONG_PTR param)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
     IMFAttributes *async_param;
     HRESULT hr;
 
-    TRACE("%p, %u %lu.\n", This, message, param);
+    TRACE("%p, %x %lu.\n", decoder, message, param);
 
     if (FAILED(hr = MFCreateAttributes(&async_param, 1)))
         return hr;
@@ -942,31 +947,31 @@ static HRESULT WINAPI mf_decoder_ProcessMessage(IMFTransform *iface, MFT_MESSAGE
             GstSegment *segment = gst_segment_new();
             gst_segment_init(segment, GST_FORMAT_DEFAULT);
 
-            EnterCriticalSection(&This->state_cs);
-            This->flushing = TRUE;
+            EnterCriticalSection(&decoder->state_cs);
+            decoder->flushing = TRUE;
 
-            while (This->output_counter)
+            while (decoder->output_counter)
             {
                 GstSample *sample;
-                g_signal_emit_by_name(This->appsink, "pull-sample", &sample);
+                g_signal_emit_by_name(decoder->appsink, "pull-sample", &sample);
                 gst_sample_unref(sample);
-                This->output_counter--;
+                decoder->output_counter--;
             }
 
-            gst_pad_push_event(This->input_src, gst_event_new_flush_start());
-            gst_pad_push_event(This->input_src, gst_event_new_flush_stop(0));
-            gst_pad_push_event(This->input_src, gst_event_new_segment(segment));
-            gst_element_set_state(This->container, GST_STATE_PLAYING);
+            gst_pad_push_event(decoder->input_src, gst_event_new_flush_start());
+            gst_pad_push_event(decoder->input_src, gst_event_new_flush_stop(0));
+            gst_pad_push_event(decoder->input_src, gst_event_new_segment(segment));
+            gst_element_set_state(decoder->container, GST_STATE_PLAYING);
 
-            This->flushing = FALSE;
-            LeaveCriticalSection(&This->state_cs);
+            decoder->flushing = FALSE;
+            LeaveCriticalSection(&decoder->state_cs);
 
             hr = S_OK;
             break;
         }
         case MFT_MESSAGE_COMMAND_DRAIN:
         {
-            if (This->draining)
+            if (decoder->draining)
             {
                 hr = S_OK;
                 break;
@@ -974,11 +979,11 @@ static HRESULT WINAPI mf_decoder_ProcessMessage(IMFTransform *iface, MFT_MESSAGE
 
             IMFAttributes_SetUINT32(async_param, &WINE_MFT_MESSAGE_TYPE, message);
 
-            EnterCriticalSection(&This->state_cs);
-            MFPutWorkItem(This->message_queue, &This->process_message_callback, (IUnknown *)async_param);
-            while (!This->draining)
-                SleepConditionVariableCS(&This->state_cv, &This->state_cs, INFINITE);
-            LeaveCriticalSection(&This->state_cs);
+            EnterCriticalSection(&decoder->state_cs);
+            MFPutWorkItem(decoder->message_queue, &decoder->process_message_callback, (IUnknown *)async_param);
+            while (!decoder->draining)
+                SleepConditionVariableCS(&decoder->state_cv, &decoder->state_cs, INFINITE);
+            LeaveCriticalSection(&decoder->state_cs);
 
             hr = S_OK;
             break;
@@ -990,7 +995,7 @@ static HRESULT WINAPI mf_decoder_ProcessMessage(IMFTransform *iface, MFT_MESSAGE
         }
         default:
         {
-            ERR("Unhandled message type %u.\n", message);
+            ERR("Unhandled message type %x.\n", message);
             hr = E_FAIL;
             break;
         }
@@ -1002,13 +1007,13 @@ static HRESULT WINAPI mf_decoder_ProcessMessage(IMFTransform *iface, MFT_MESSAGE
 
 static HRESULT WINAPI mf_decoder_ProcessInput(IMFTransform *iface, DWORD id, IMFSample *sample, DWORD flags)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
     GstBuffer *gst_buffer;
     GstFlowReturn ret;
     HRESULT hr = S_OK;
     GstQuery *drain;
 
-    TRACE("%p, %u, %p, %#x\n", This, id, sample, flags);
+    TRACE("%p, %u, %p, %#x\n", decoder, id, sample, flags);
 
     if (flags)
         WARN("Unsupported flags %#x\n", flags);
@@ -1016,15 +1021,15 @@ static HRESULT WINAPI mf_decoder_ProcessInput(IMFTransform *iface, DWORD id, IMF
     if (id != 0)
         return MF_E_INVALIDSTREAMNUMBER;
 
-    if (!This->valid_state)
+    if (!decoder->valid_state)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
-    EnterCriticalSection(&This->state_cs);
+    EnterCriticalSection(&decoder->state_cs);
 
     drain = gst_query_new_drain();
-    gst_pad_peer_query(This->input_src, drain);
+    gst_pad_peer_query(decoder->input_src, drain);
 
-    if (This->output_counter || This->draining)
+    if (decoder->output_counter || decoder->draining)
     {
         hr = MF_E_NOTACCEPTING;
         goto done;
@@ -1036,7 +1041,7 @@ static HRESULT WINAPI mf_decoder_ProcessInput(IMFTransform *iface, DWORD id, IMF
         goto done;
     }
 
-    ret = gst_pad_push(This->input_src, gst_buffer);
+    ret = gst_pad_push(decoder->input_src, gst_buffer);
     if (ret != GST_FLOW_OK)
     {
         ERR("Couldn't process input ret = %d\n", ret);
@@ -1045,25 +1050,23 @@ static HRESULT WINAPI mf_decoder_ProcessInput(IMFTransform *iface, DWORD id, IMF
     }
 
     done:
-    LeaveCriticalSection(&This->state_cs);
+    LeaveCriticalSection(&decoder->state_cs);
     return hr;
 }
 
 static HRESULT WINAPI mf_decoder_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
         MFT_OUTPUT_DATA_BUFFER *samples, DWORD *status)
 {
-    struct mf_decoder *This = impl_mf_decoder_from_IMFTransform(iface);
+    struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
     MFT_OUTPUT_DATA_BUFFER *relevant_buffer = NULL;
     GstSample *buffer;
 
     TRACE("%p, %#x, %u, %p, %p,\n", iface, flags, count, samples, status);
 
     if (flags)
-    {
         WARN("Unsupported flags %#x\n", flags);
-    }
 
-    if (!This->valid_state)
+    if (!decoder->valid_state)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
     for (unsigned int i = 0; i < count; i++)
@@ -1082,27 +1085,27 @@ static HRESULT WINAPI mf_decoder_ProcessOutput(IMFTransform *iface, DWORD flags,
     if (!relevant_buffer)
         return S_OK;
 
-    EnterCriticalSection(&This->state_cs);
+    EnterCriticalSection(&decoder->state_cs);
 
-    if (!This->output_counter && !This->draining)
+    if (!decoder->output_counter && !decoder->draining)
     {
-        LeaveCriticalSection(&This->state_cs);
+        LeaveCriticalSection(&decoder->state_cs);
         return MF_E_TRANSFORM_NEED_MORE_INPUT;
     }
-    TRACE("%u\n", This->output_counter);
+    TRACE("%u\n", decoder->output_counter);
 
-    g_signal_emit_by_name(This->appsink, "pull-sample", &buffer);
-    if (This->draining && !buffer)
+    g_signal_emit_by_name(decoder->appsink, "pull-sample", &buffer);
+    if (decoder->draining && !buffer)
     {
-        This->output_counter = 0;
-        This->draining = FALSE;
-        LeaveCriticalSection(&This->state_cs);
-        WakeAllConditionVariable(&This->state_cv);
+        decoder->output_counter = 0;
+        decoder->draining = FALSE;
+        LeaveCriticalSection(&decoder->state_cs);
+        WakeAllConditionVariable(&decoder->state_cv);
         return MF_E_TRANSFORM_NEED_MORE_INPUT;
     }
-    This->output_counter--;
+    decoder->output_counter--;
 
-    LeaveCriticalSection(&This->state_cs);
+    LeaveCriticalSection(&decoder->state_cs);
 
     relevant_buffer->pSample = mf_sample_from_gst_buffer(gst_sample_get_buffer(buffer));
     gst_sample_unref(buffer);
@@ -1144,11 +1147,11 @@ static const IMFTransformVtbl mf_decoder_vtbl =
 
 GstBusSyncReply watch_decoder_bus(GstBus *bus, GstMessage *message, gpointer user_data)
 {
-    struct mf_decoder *This = user_data;
+    struct mf_decoder *decoder = user_data;
     GError *err = NULL;
     gchar *dbg_info = NULL;
 
-    TRACE("decoder %p message type %s\n", This, GST_MESSAGE_TYPE_NAME(message));
+    TRACE("decoder %p message type %s\n", decoder, GST_MESSAGE_TYPE_NAME(message));
 
     switch (message->type)
     {
@@ -1175,96 +1178,96 @@ GstBusSyncReply watch_decoder_bus(GstBus *bus, GstMessage *message, gpointer use
     return GST_BUS_DROP;
 }
 
-static void mf_decoder_destroy(struct mf_decoder *This)
+static void mf_decoder_destroy(struct mf_decoder *decoder)
 {
-    if (This->input_type)
+    if (decoder->input_type)
     {
-        IMFMediaType_Release(This->input_type);
-        This->input_type = NULL;
+        IMFMediaType_Release(decoder->input_type);
+        decoder->input_type = NULL;
     }
 
-    if (This->output_type)
+    if (decoder->output_type)
     {
-        IMFMediaType_Release(This->output_type);
-        This->output_type = NULL;
+        IMFMediaType_Release(decoder->output_type);
+        decoder->output_type = NULL;
     }
 
-    decoder_update_pipeline(This);
+    decoder_update_pipeline(decoder);
 
-    if (This->their_sink)
-        gst_object_unref(G_OBJECT(This->their_sink));
+    if (decoder->their_sink)
+        gst_object_unref(G_OBJECT(decoder->their_sink));
 
-    if (This->container)
-        gst_object_unref(G_OBJECT(This->container));
+    if (decoder->container)
+        gst_object_unref(G_OBJECT(decoder->container));
 
-    if (This->bus)
-        gst_object_unref(G_OBJECT(This->bus));
+    if (decoder->bus)
+        gst_object_unref(G_OBJECT(decoder->bus));
 
-    DeleteCriticalSection(&This->state_cs);
+    DeleteCriticalSection(&decoder->state_cs);
 
-    MFUnlockWorkQueue(This->message_queue);
+    MFUnlockWorkQueue(decoder->message_queue);
 
-    heap_free(This);
+    heap_free(decoder);
 }
 
 HRESULT generic_decoder_construct(REFIID riid, void **obj, enum decoder_type type)
 {
-    struct mf_decoder *This;
+    struct mf_decoder *object;
     GstElement *converter;
     HRESULT hr = S_OK;
 
     TRACE("%s, %p %u.\n", debugstr_guid(riid), obj, type);
 
-    if (!(This = heap_alloc_zero(sizeof(*This))))
+    if (!(object = heap_alloc_zero(sizeof(*object))))
         return E_OUTOFMEMORY;
-    This->type = type;
-    This->video = decoder_descs[type].major_type == &MFMediaType_Video;
-    MFAllocateWorkQueue(&This->message_queue);
+    object->type = type;
+    object->video = decoder_descs[type].major_type == &MFMediaType_Video;
+    MFAllocateWorkQueue(&object->message_queue);
 
-    InitializeCriticalSection(&This->state_cs);
-    InitializeConditionVariable(&This->state_cv);
+    InitializeCriticalSection(&object->state_cs);
+    InitializeConditionVariable(&object->state_cv);
 
-    This->container = gst_bin_new(NULL);
-    This->bus = gst_bus_new();
-    gst_bus_set_sync_handler(This->bus, watch_decoder_bus_wrapper, This, NULL);
-    gst_element_set_bus(This->container, This->bus);
+    object->container = gst_bin_new(NULL);
+    object->bus = gst_bus_new();
+    gst_bus_set_sync_handler(object->bus, watch_decoder_bus_wrapper, object, NULL);
+    gst_element_set_bus(object->container, object->bus);
 
-    if (This->video)
+    if (object->video)
     {
-        if (!(This->videobox = gst_element_factory_make("videobox", NULL)))
+        if (!(object->videobox = gst_element_factory_make("videobox", NULL)))
         {
             ERR("Failed to create videobox\n");
             hr = E_FAIL;
             goto fail;
         }
-        gst_bin_add(GST_BIN(This->container), This->videobox);
+        gst_bin_add(GST_BIN(object->container), object->videobox);
     }
 
-    if (!(converter = gst_element_factory_make(This->video ? "videoconvert" : "audioconvert", NULL)))
+    if (!(converter = gst_element_factory_make(object->video ? "videoconvert" : "audioconvert", NULL)))
     {
         ERR("Failed to create converter\n");
         hr = E_FAIL;
         goto fail;
     }
-    gst_bin_add(GST_BIN(This->container), converter);
+    gst_bin_add(GST_BIN(object->container), converter);
 
-    if (!(This->appsink = gst_element_factory_make("appsink", NULL)))
+    if (!(object->appsink = gst_element_factory_make("appsink", NULL)))
     {
         ERR("Failed to create appsink\n");
         hr = E_FAIL;
         goto fail;
     }
-    gst_bin_add(GST_BIN(This->container), This->appsink);
+    gst_bin_add(GST_BIN(object->container), object->appsink);
 
-    g_object_set(This->appsink, "emit-signals", TRUE, NULL);
-    g_object_set(This->appsink, "sync", FALSE, NULL);
-    g_object_set(This->appsink, "async", FALSE, NULL);
-    g_signal_connect(This->appsink, "new-sample", G_CALLBACK(decoder_new_sample_wrapper), This);
+    g_object_set(object->appsink, "emit-signals", TRUE, NULL);
+    g_object_set(object->appsink, "sync", FALSE, NULL);
+    g_object_set(object->appsink, "async", FALSE, NULL);
+    g_signal_connect(object->appsink, "new-sample", G_CALLBACK(decoder_new_sample_wrapper), object);
 
 
-    if (This->videobox)
+    if (object->videobox)
     {
-        if (!(gst_element_link(This->videobox, converter)))
+        if (!(gst_element_link(object->videobox, converter)))
         {
             ERR("Failed to link videobox to converter\n");
             hr = E_FAIL;
@@ -1272,26 +1275,26 @@ HRESULT generic_decoder_construct(REFIID riid, void **obj, enum decoder_type typ
         }
     }
 
-    if (!(gst_element_link(converter, This->appsink)))
+    if (!(gst_element_link(converter, object->appsink)))
     {
         ERR("Failed to link converter appsink");
         hr = E_FAIL;
         goto fail;
     }
 
-    This->post_process_start = This->videobox ? This->videobox : converter;
+    object->post_process_start = object->videobox ? object->videobox : converter;
 
-    This->process_message_callback.lpVtbl = &process_message_callback_vtbl;
+    object->process_message_callback.lpVtbl = &process_message_callback_vtbl;
 
-    This->IMFTransform_iface.lpVtbl = &mf_decoder_vtbl;
-    This->refcount = 1;
+    object->IMFTransform_iface.lpVtbl = &mf_decoder_vtbl;
+    object->refcount = 1;
 
-    *obj = This;
+    *obj = object;
     return S_OK;
 
     fail:
     ERR("Failed to create Decoder MFT type %u, hr = %#x\n", type, hr);
-    mf_decoder_destroy(This);
+    mf_decoder_destroy(object);
     return hr;
 }
 

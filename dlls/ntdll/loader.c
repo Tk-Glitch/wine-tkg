@@ -1132,7 +1132,7 @@ static SHORT alloc_tls_slot( LDR_DATA_TABLE_ENTRY *mod )
                (ULONG_PTR)teb->ClientId.UniqueThread, i, size, dir->SizeOfZeroFill, new_ptr );
 
         RtlFreeHeap( GetProcessHeap(), 0,
-                     interlocked_xchg_ptr( (void **)teb->ThreadLocalStoragePointer + i, new_ptr ));
+                     InterlockedExchangePointer( (void **)teb->ThreadLocalStoragePointer + i, new_ptr ));
     }
 
     *(DWORD *)dir->AddressOfIndex = i;
@@ -4321,36 +4321,6 @@ PIMAGE_NT_HEADERS WINAPI RtlImageNtHeader(HMODULE hModule)
 }
 
 
-/***********************************************************************
- *           user_shared_data_init
- *
- * Initializes a user shared
- */
-static void user_shared_data_init(void)
-{
-    void *addr = user_shared_data_external;
-    SIZE_T data_size = page_size;
-    ULONG old_prot;
-
-    /* initialize time fields */
-    __wine_user_shared_data();
-
-    /* invalidate high times to prevent race conditions */
-    user_shared_data->SystemTime.High2Time = 0;
-    user_shared_data->SystemTime.High1Time = -1;
-
-    user_shared_data->InterruptTime.High2Time = 0;
-    user_shared_data->InterruptTime.High1Time = -1;
-
-    user_shared_data->u.TickCount.High2Time  = 0;
-    user_shared_data->u.TickCount.High1Time  = -1;
-
-    /* copy to correct address and make it non accessible */
-    memcpy(user_shared_data_external, user_shared_data, sizeof(*user_shared_data));
-    NtProtectVirtualMemory( NtCurrentProcess(), &addr, &data_size, PAGE_NOACCESS, &old_prot );
-}
-
-
 /******************************************************************
  *		LdrInitializeThunk (NTDLL.@)
  *
@@ -4802,7 +4772,7 @@ NTSTATUS WINAPI RtlSetSearchPathMode( ULONG flags )
         val = 0;
         break;
     case BASE_SEARCH_PATH_ENABLE_SAFE_SEARCHMODE | BASE_SEARCH_PATH_PERMANENT:
-        interlocked_xchg( (int *)&path_safe_mode, 2 );
+        InterlockedExchange( (int *)&path_safe_mode, 2 );
         return STATUS_SUCCESS;
     default:
         return STATUS_INVALID_PARAMETER;
@@ -4812,7 +4782,7 @@ NTSTATUS WINAPI RtlSetSearchPathMode( ULONG flags )
     {
         int prev = path_safe_mode;
         if (prev == 2) break;  /* permanently set */
-        if (interlocked_cmpxchg( (int *)&path_safe_mode, val, prev ) == prev) return STATUS_SUCCESS;
+        if (InterlockedCompareExchange( (int *)&path_safe_mode, val, prev ) == prev) return STATUS_SUCCESS;
     }
     return STATUS_ACCESS_DENIED;
 }
@@ -5024,7 +4994,6 @@ void __wine_process_init(void)
         NtTerminateProcess( GetCurrentProcess(), status );
     }
 
-    user_shared_data_init();
     hidden_exports_init( wm->ldr.FullDllName.Buffer );
 
     virtual_set_large_address_space(needs_override_large_address_aware(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer));

@@ -216,14 +216,14 @@
 @ stub ASN1PEREncUnsignedShort
 @ stub ASN1PEREncZero
 @ stub ASN1PERFreeSeqOf
-@ stub ASN1_CloseDecoder
+@ stdcall ASN1_CloseDecoder(ptr)
 @ stub ASN1_CloseEncoder2
-@ stub ASN1_CloseEncoder
-@ stub ASN1_CloseModule
-@ stub ASN1_CreateDecoder
+@ stdcall ASN1_CloseEncoder(ptr)
+@ stdcall ASN1_CloseModule(ptr)
+@ stdcall ASN1_CreateDecoder(ptr ptr ptr long ptr)
 @ stub ASN1_CreateDecoderEx
-@ stub ASN1_CreateEncoder
-@ stub ASN1_CreateModule
+@ stdcall ASN1_CreateEncoder(ptr ptr ptr long ptr)
+@ stdcall ASN1_CreateModule(long long long long ptr ptr ptr ptr long)
 @ stub ASN1_Decode
 @ stub ASN1_Encode
 @ stub ASN1_FreeDecoded

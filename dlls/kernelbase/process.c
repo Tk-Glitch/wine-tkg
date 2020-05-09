@@ -655,6 +655,17 @@ BOOL WINAPI DECLSPEC_HOTPATCH FlushInstructionCache( HANDLE process, LPCVOID add
 
 
 /***********************************************************************
+ *           GetApplicationRestartSettings   (kernelbase.@)
+ */
+HRESULT WINAPI /* DECLSPEC_HOTPATCH */ GetApplicationRestartSettings( HANDLE process, WCHAR *cmdline,
+                                                                      DWORD *size, DWORD *flags )
+{
+    FIXME( "%p, %p, %p, %p)\n", process, cmdline, size, flags );
+    return E_NOTIMPL;
+}
+
+
+/***********************************************************************
  *           GetCurrentProcess   (kernelbase.@)
  */
 HANDLE WINAPI kernelbase_GetCurrentProcess(void)
@@ -895,6 +906,29 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenProcess( DWORD access, BOOL inherit, DWORD i
 
 
 /***********************************************************************
+ *           ProcessIdToSessionId   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH ProcessIdToSessionId( DWORD procid, DWORD *sessionid )
+{
+    if (procid != GetCurrentProcessId()) FIXME( "Unsupported for other process %x\n", procid );
+    *sessionid = NtCurrentTeb()->Peb->SessionId;
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           QueryProcessCycleTime   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH QueryProcessCycleTime( HANDLE process, ULONG64 *cycle )
+{
+    static int once;
+    if (!once++) FIXME( "(%p,%p): stub!\n", process, cycle );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+
+/***********************************************************************
  *           SetErrorMode   (kernelbase.@)
  */
 UINT WINAPI DECLSPEC_HOTPATCH SetErrorMode( UINT mode )
@@ -1068,6 +1102,17 @@ void init_startup_info( RTL_USER_PROCESS_PARAMETERS *params )
 
     command_lineW = params->CommandLine.Buffer;
     if (!RtlUnicodeStringToAnsiString( &ansi, &params->CommandLine, TRUE )) command_lineA = ansi.Buffer;
+}
+
+
+/**********************************************************************
+ *           BaseFlushAppcompatCache   (kernelbase.@)
+ */
+BOOL WINAPI BaseFlushAppcompatCache(void)
+{
+    FIXME( "stub\n" );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
 }
 
 
@@ -1255,6 +1300,72 @@ LPWSTR WINAPI DECLSPEC_HOTPATCH GetEnvironmentStringsW(void)
         memcpy( ret, NtCurrentTeb()->Peb->ProcessParameters->Environment, len );
     RtlReleasePebLock();
     return ret;
+}
+
+
+/***********************************************************************
+ *           SetEnvironmentStringsA   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetEnvironmentStringsA( char *env )
+{
+    WCHAR *envW;
+    const char *p = env;
+    DWORD len;
+    BOOL ret;
+
+    for (p = env; *p; p += strlen( p ) + 1);
+
+    len = MultiByteToWideChar( CP_ACP, 0, env, p - env, NULL, 0 );
+    if (!(envW = HeapAlloc( GetProcessHeap(), 0, len )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return FALSE;
+    }
+    MultiByteToWideChar( CP_ACP, 0, env, p - env, envW, len );
+    ret = SetEnvironmentStringsW( envW );
+    HeapFree( GetProcessHeap(), 0, envW );
+    return ret;
+}
+
+
+/***********************************************************************
+ *           SetEnvironmentStringsW   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetEnvironmentStringsW( WCHAR *env )
+{
+    WCHAR *p;
+    WCHAR *new_env;
+    NTSTATUS status;
+
+    for (p = env; *p; p += wcslen( p ) + 1)
+    {
+        const WCHAR *eq = wcschr( p, '=' );
+        if (!eq || eq == p)
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
+    }
+
+    if ((status = RtlCreateEnvironment( FALSE, &new_env )))
+        return set_ntstatus( status );
+
+    for (p = env; *p; p += wcslen( p ) + 1)
+    {
+        const WCHAR *eq = wcschr( p, '=' );
+        UNICODE_STRING var, value;
+        var.Buffer = p;
+        var.Length = (eq - p) * sizeof(WCHAR);
+        RtlInitUnicodeString( &value, eq + 1 );
+        if ((status = RtlSetEnvironmentVariable( &new_env, &var, &value )))
+        {
+            RtlDestroyEnvironment( new_env );
+            return set_ntstatus( status );
+        }
+    }
+
+    RtlSetCurrentEnvironment( new_env, NULL );
+    return TRUE;
 }
 
 

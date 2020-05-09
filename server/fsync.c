@@ -231,7 +231,7 @@ static void *get_shm( unsigned int idx )
         if (debug_level)
             fprintf( stderr, "fsync: Mapping page %d at %p.\n", entry, addr );
 
-        if (interlocked_cmpxchg_ptr( &shm_addrs[entry], addr, 0 ))
+        if (InterlockedCompareExchangePointer( &shm_addrs[entry], addr, 0 ))
             munmap( addr, pagesize ); /* someone beat us to it */
     }
 

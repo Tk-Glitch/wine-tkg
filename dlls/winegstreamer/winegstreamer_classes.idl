@@ -85,3 +85,9 @@ coclass ASFByteStreamHandler {}
     uuid(82d353df-90bd-4382-8bc2-3f6192b76e34)
 ]
 coclass CLSID_CWMVDecMediaObject {}
+
+[
+    threading(both),
+    uuid(98230571-0087-4204-b020-3282538e57d3)
+]
+coclass CColorConvertDMO { }

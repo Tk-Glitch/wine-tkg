@@ -181,14 +181,15 @@ static const struct
     enum target_platform platform;
 } platform_names[] =
 {
-    { "macos",   PLATFORM_APPLE },
-    { "darwin",  PLATFORM_APPLE },
-    { "android", PLATFORM_ANDROID },
-    { "solaris", PLATFORM_SOLARIS },
-    { "cygwin",  PLATFORM_CYGWIN },
-    { "mingw32", PLATFORM_WINDOWS },
-    { "windows", PLATFORM_WINDOWS },
-    { "winnt",   PLATFORM_WINDOWS }
+    { "macos",       PLATFORM_APPLE },
+    { "darwin",      PLATFORM_APPLE },
+    { "android",     PLATFORM_ANDROID },
+    { "solaris",     PLATFORM_SOLARIS },
+    { "cygwin",      PLATFORM_CYGWIN },
+    { "mingw32",     PLATFORM_MINGW },
+    { "windows-gnu", PLATFORM_MINGW },
+    { "windows",     PLATFORM_WINDOWS },
+    { "winnt",       PLATFORM_MINGW }
 };
 
 struct options
@@ -258,7 +259,7 @@ static enum target_platform build_platform = PLATFORM_SOLARIS;
 #elif defined(__CYGWIN__)
 static enum target_platform build_platform = PLATFORM_CYGWIN;
 #elif defined(_WIN32)
-static enum target_platform build_platform = PLATFORM_WINDOWS;
+static enum target_platform build_platform = PLATFORM_MINGW;
 #else
 static enum target_platform build_platform = PLATFORM_UNSPECIFIED;
 #endif
@@ -486,7 +487,7 @@ static strarray *get_link_args( struct options *opts, const char *output_name )
         strarray_add( flags, strmake( "-Wl,-soname,%s.so", output_name ));
         break;
 
-    case PLATFORM_WINDOWS:
+    case PLATFORM_MINGW:
     case PLATFORM_CYGWIN:
         if (opts->shared || opts->win16_app)
         {
@@ -509,6 +510,24 @@ static strarray *get_link_args( struct options *opts, const char *output_name )
 
         /* make sure we don't need a libgcc_s dll on Windows */
         strarray_add( flags, "-static-libgcc" );
+
+        strarray_addall( link_args, flags );
+        return link_args;
+
+    case PLATFORM_WINDOWS:
+        if (opts->shared || opts->win16_app)
+        {
+            strarray_add( flags, "-shared" );
+            strarray_add( flags, "-Wl,-kill-at" );
+        }
+        if (opts->unicode_app) strarray_add( flags, "-municode" );
+        if (opts->nodefaultlibs || opts->use_msvcrt) strarray_add( flags, "-nodefaultlibs" );
+        if (opts->nostartfiles || opts->use_msvcrt) strarray_add( flags, "-nostartfiles" );
+        if (opts->image_base) strarray_add( flags, strmake("-Wl,-base:%s", opts->image_base ));
+        if (opts->subsystem)
+            strarray_add( flags, strmake("-Wl,-subsystem:%s", opts->subsystem ));
+        else
+            strarray_add( flags, strmake("-Wl,-subsystem:%s", opts->gui_app ? "windows" : "console" ));
 
         strarray_addall( link_args, flags );
         return link_args;
@@ -729,7 +748,7 @@ static void compile(struct options* opts, const char* lang)
             break;
     }
 
-    if (opts->target_platform == PLATFORM_WINDOWS || opts->target_platform == PLATFORM_CYGWIN)
+    if (opts->target_platform == PLATFORM_WINDOWS || opts->target_platform == PLATFORM_CYGWIN || opts->target_platform == PLATFORM_MINGW)
         goto no_compat_defines;
 
     if (opts->processor != proc_cpp)
@@ -1043,7 +1062,7 @@ static void build(struct options* opts)
     int generate_app_loader = 1;
     const char *crt_lib = NULL, *entry_point = NULL;
     int fake_module = 0;
-    int is_pe = (opts->target_platform == PLATFORM_WINDOWS || opts->target_platform == PLATFORM_CYGWIN);
+    int is_pe = (opts->target_platform == PLATFORM_WINDOWS || opts->target_platform == PLATFORM_CYGWIN || opts->target_platform == PLATFORM_MINGW);
     unsigned int j;
 
     /* NOTE: for the files array we'll use the following convention:
@@ -1185,14 +1204,9 @@ static void build(struct options* opts)
     if (!opts->entry_point)
     {
         if (opts->subsystem && !strcmp( opts->subsystem, "native" ))
-            entry_point = (is_pe && opts->target_cpu == CPU_x86) ? "_DriverEntry@8" : "DriverEntry";
+            entry_point = (is_pe && opts->target_cpu == CPU_x86) ? "DriverEntry@8" : "DriverEntry";
         else if (opts->use_msvcrt && !opts->shared && !opts->win16_app)
-        {
-            if (opts->unicode_app)
-                entry_point = (is_pe && opts->target_cpu == CPU_x86) ? "_wmainCRTStartup" : "wmainCRTStartup";
-            else
-                entry_point = (is_pe && opts->target_cpu == CPU_x86) ? "_mainCRTStartup" : "mainCRTStartup";
-        }
+            entry_point = opts->unicode_app ? "wmainCRTStartup" : "mainCRTStartup";
         else if (!is_pe && !opts->shared && opts->unicode_app)
             entry_point = "__wine_spec_exe_wentry";
     }
@@ -1235,6 +1249,8 @@ static void build(struct options* opts)
         strarray_add(spec_args, opts->gui_app ? "windows" : "console");
         if (opts->large_address_aware) strarray_add( spec_args, "--large-address-aware" );
     }
+
+    if (opts->target_platform == PLATFORM_WINDOWS) strarray_add(spec_args, "--safeseh");
 
     if (entry_point)
     {
@@ -1285,7 +1301,7 @@ static void build(struct options* opts)
     /* link everything together now */
     link_args = get_link_args( opts, output_name );
 
-    if ((opts->nodefaultlibs || opts->use_msvcrt) && is_pe)
+    if ((opts->nodefaultlibs || opts->use_msvcrt) && opts->target_platform == PLATFORM_MINGW)
     {
         libgcc = find_libgcc(opts->prefix, link_args);
         if (!libgcc) libgcc = "-lgcc";
@@ -1297,14 +1313,30 @@ static void build(struct options* opts)
     for ( j = 0; j < lib_dirs->size; j++ )
 	strarray_add(link_args, strmake("-L%s", lib_dirs->base[j]));
 
-    if (is_pe && entry_point) strarray_add(link_args, strmake("-Wl,--entry,%s", entry_point));
+    if (is_pe && opts->use_msvcrt && !entry_point && (opts->shared || opts->win16_app))
+        entry_point = opts->target_cpu == CPU_x86 ? "DllMainCRTStartup@12" : "DllMainCRTStartup";
+
+    if (is_pe && entry_point)
+    {
+        if (opts->target_platform == PLATFORM_WINDOWS)
+            strarray_add(link_args, strmake("-Wl,-entry:%s", entry_point));
+        else
+            strarray_add(link_args, strmake("-Wl,--entry,%s%s",
+                                            is_pe && opts->target_cpu == CPU_x86 ? "_" : "",
+                                            entry_point));
+    }
 
     strarray_add(link_args, spec_o_name);
 
     if (is_pe)
     {
         for (j = 0; j < opts->delayimports->size; j++)
-            strarray_add(link_args, strmake("-Wl,-delayload,%s", opts->delayimports->base[j]));
+        {
+            if (opts->target_platform == PLATFORM_WINDOWS)
+                strarray_add(link_args, strmake("-Wl,-delayload:%s", opts->delayimports->base[j]));
+            else
+                strarray_add(link_args, strmake("-Wl,-delayload,%s",opts->delayimports->base[j]));
+        }
     }
 
     for ( j = 0; j < files->size; j++ )

@@ -452,7 +452,7 @@ typedef VOID           *PVOID64;
 typedef BYTE            BOOLEAN,    *PBOOLEAN;
 typedef char            CHAR,       *PCHAR;
 typedef short           SHORT,      *PSHORT;
-#ifdef _MSC_VER
+#ifdef WINE_USE_LONG
 typedef long            LONG,       *PLONG;
 #else
 typedef int             LONG,       *PLONG;
@@ -3823,33 +3823,17 @@ typedef struct _IMAGE_RESOURCE_DIRECTORY {
 typedef struct _IMAGE_RESOURCE_DIRECTORY_ENTRY {
 	union {
 		struct {
-#ifdef BITFIELDS_BIGENDIAN
-			unsigned NameIsString:1;
-			unsigned NameOffset:31;
-#else
 			unsigned NameOffset:31;
 			unsigned NameIsString:1;
-#endif
 		} DUMMYSTRUCTNAME;
 		DWORD   Name;
-#ifdef WORDS_BIGENDIAN
-		WORD    __pad;
 		WORD    Id;
-#else
-		WORD    Id;
-		WORD    __pad;
-#endif
 	} DUMMYUNIONNAME;
 	union {
 		DWORD   OffsetToData;
 		struct {
-#ifdef BITFIELDS_BIGENDIAN
-			unsigned DataIsDirectory:1;
-			unsigned OffsetToDirectory:31;
-#else
 			unsigned OffsetToDirectory:31;
 			unsigned DataIsDirectory:1;
-#endif
 		} DUMMYSTRUCTNAME2;
 	} DUMMYUNIONNAME2;
 } IMAGE_RESOURCE_DIRECTORY_ENTRY,*PIMAGE_RESOURCE_DIRECTORY_ENTRY;

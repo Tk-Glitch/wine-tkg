@@ -62,11 +62,6 @@ extern BOOL WINAPI Internal_EnumTimeFormats( TIMEFMT_ENUMPROCW proc, LCID lcid, 
 extern BOOL WINAPI Internal_EnumUILanguages( UILANGUAGE_ENUMPROCW proc, DWORD flags,
                                              LONG_PTR param, BOOL unicode );
 
-static inline unsigned short get_table_entry( const unsigned short *table, WCHAR ch )
-{
-    return table[table[table[ch >> 8] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
-}
-
 /***********************************************************************
  *		get_lcid_codepage
  *
@@ -538,32 +533,4 @@ INT WINAPI GetGeoInfoA(GEOID geoid, GEOTYPE geotype, LPSTR data, int data_len, L
     if (data_len < len)
         SetLastError(ERROR_INSUFFICIENT_BUFFER);
     return data_len < len ? 0 : len;
-}
-
-
-/******************************************************************************
- *           GetFileMUIPath (KERNEL32.@)
- */
-
-BOOL WINAPI GetFileMUIPath(DWORD flags, PCWSTR filepath, PWSTR language, PULONG languagelen,
-                           PWSTR muipath, PULONG muipathlen, PULONGLONG enumerator)
-{
-    FIXME("stub: 0x%x, %s, %s, %p, %p, %p, %p\n", flags, debugstr_w(filepath),
-           debugstr_w(language), languagelen, muipath, muipathlen, enumerator);
-
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-
-    return FALSE;
-}
-
-/******************************************************************************
- *           GetFileMUIInfo (KERNEL32.@)
- */
-
-BOOL WINAPI GetFileMUIInfo(DWORD flags, PCWSTR path, FILEMUIINFO *info, DWORD *size)
-{
-    FIXME("stub: %u, %s, %p, %p\n", flags, debugstr_w(path), info, size);
-
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
 }

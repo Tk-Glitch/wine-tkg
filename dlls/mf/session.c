@@ -923,6 +923,7 @@ static void session_close(struct media_session *session)
             session->presentation.flags |= SESSION_FLAG_FINALIZE_SINKS;
             if (SUCCEEDED(hr = IMFPresentationClock_Stop(session->clock)))
                 session->state = SESSION_STATE_STOPPING_SINKS;
+            hr = session_finalize_sinks(session);
             break;
         case SESSION_STATE_CLOSED:
             hr = MF_E_INVALIDREQUEST;
@@ -2511,7 +2512,7 @@ static void session_deliver_sample_to_node(struct media_session *session, IMFTop
                     WARN("Drain command failed for transform, hr %#x.\n", hr);
             }
 
-            if (transform_node_pull_samples(topo_node) == MF_E_TRANSFORM_NEED_MORE_INPUT)
+            if (transform_node_pull_samples(topo_node) == MF_E_TRANSFORM_NEED_MORE_INPUT && !drain)
             {
                 IMFTopologyNode *upstream_node;
                 DWORD upstream_output;
@@ -4102,15 +4103,19 @@ static HRESULT WINAPI present_clock_timer_SetTimer(IMFTimer *iface, DWORD flags,
         hr = MF_S_CLOCK_STOPPED;
 
     if (SUCCEEDED(hr))
+    {
         list_add_tail(&clock->timers, &clock_timer->entry);
+        if (cancel_key)
+        {
+            *cancel_key = &clock_timer->IUnknown_iface;
+            IUnknown_AddRef(*cancel_key);
+        }
+    }
 
     LeaveCriticalSection(&clock->cs);
 
-    if (SUCCEEDED(hr) && cancel_key)
-    {
-        *cancel_key = &clock_timer->IUnknown_iface;
-        IUnknown_AddRef(*cancel_key);
-    }
+    if (FAILED(hr))
+        IUnknown_Release(&clock_timer->IUnknown_iface);
 
     return hr;
 }
@@ -4298,6 +4303,7 @@ static HRESULT WINAPI present_clock_timer_callback_Invoke(IMFAsyncCallback *ifac
 
     EnterCriticalSection(&clock->cs);
     list_remove(&timer->entry);
+    IUnknown_Release(&timer->IUnknown_iface);
     LeaveCriticalSection(&clock->cs);
 
     IMFAsyncCallback_Invoke(timer->callback, timer->result);

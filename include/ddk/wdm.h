@@ -1608,6 +1608,9 @@ void      WINAPI IoGetStackLimits(ULONG_PTR*,ULONG_PTR*);
 void      WINAPI IoInitializeIrp(IRP*,USHORT,CCHAR);
 VOID      WINAPI IoInitializeRemoveLockEx(PIO_REMOVE_LOCK,ULONG,ULONG,ULONG,ULONG);
 void      WINAPI IoInvalidateDeviceRelations(PDEVICE_OBJECT,DEVICE_RELATION_TYPE);
+#ifdef _WIN64
+BOOLEAN   WINAPI IoIs32bitProcess(IRP*);
+#endif
 NTSTATUS  WINAPI IoOpenDeviceRegistryKey(DEVICE_OBJECT*,ULONG,ACCESS_MASK,HANDLE*);
 void      WINAPI IoQueueWorkItem(PIO_WORKITEM,PIO_WORKITEM_ROUTINE,WORK_QUEUE_TYPE,void*);
 NTSTATUS  WINAPI IoRegisterDeviceInterface(PDEVICE_OBJECT,const GUID*,PUNICODE_STRING,PUNICODE_STRING);
@@ -1696,6 +1699,11 @@ HANDLE    WINAPI PsGetProcessInheritedFromUniqueProcessId(PEPROCESS);
 BOOLEAN   WINAPI PsGetVersion(ULONG*,ULONG*,ULONG*,UNICODE_STRING*);
 NTSTATUS  WINAPI PsTerminateSystemThread(NTSTATUS);
 
+#ifdef __x86_64__
+void      WINAPI RtlCopyMemoryNonTemporal(void*,const void*,SIZE_T);
+#else
+#define RtlCopyMemoryNonTemporal RtlCopyMemory
+#endif
 BOOLEAN   WINAPI RtlIsNtDdiVersionAvailable(ULONG);
 
 NTSTATUS  WINAPI ZwAddBootEntry(PUNICODE_STRING,PUNICODE_STRING);

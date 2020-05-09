@@ -97,6 +97,7 @@
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
+#include "ddk/wdm.h"
 #include "esync.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(server);
@@ -183,10 +184,10 @@ RTL_CRITICAL_SECTION fd_cache_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 static inline LONG64 interlocked_xchg64( LONG64 *dest, LONG64 val )
 {
 #ifdef _WIN64
-    return (LONG64)interlocked_xchg_ptr( (void **)dest, (void *)val );
+    return (LONG64)InterlockedExchangePointer( (void **)dest, (void *)val );
 #else
     LONG64 tmp = *dest;
-    while (interlocked_cmpxchg64( dest, val, tmp ) != tmp) tmp = *dest;
+    while (InterlockedCompareExchange64( dest, val, tmp ) != tmp) tmp = *dest;
     return tmp;
 #endif
 }
@@ -538,11 +539,9 @@ static void invoke_system_apc( const apc_call_t *call, apc_result_t *result )
         size = call->virtual_alloc.size;
         if ((ULONG_PTR)addr == call->virtual_alloc.addr && size == call->virtual_alloc.size)
         {
-            result->virtual_alloc.status = virtual_alloc_aligned( &addr,
-                                                                  call->virtual_alloc.zero_bits_64, &size,
-                                                                  call->virtual_alloc.op_type,
-                                                                  call->virtual_alloc.prot,
-                                                                  0 );
+            result->virtual_alloc.status = virtual_alloc( &addr, call->virtual_alloc.zero_bits_64, &size,
+                                                          call->virtual_alloc.op_type,
+                                                          call->virtual_alloc.prot );
             result->virtual_alloc.addr = wine_server_client_ptr( addr );
             result->virtual_alloc.size = size;
         }
@@ -1067,7 +1066,7 @@ static inline NTSTATUS get_cached_fd( HANDLE handle, int *fd, enum server_fd_typ
 
     if (entry >= FD_CACHE_ENTRIES || !fd_cache[entry]) return STATUS_INVALID_HANDLE;
 
-    cache.data = interlocked_cmpxchg64( &fd_cache[entry][idx].data, 0, 0 );
+    cache.data = InterlockedCompareExchange64( &fd_cache[entry][idx].data, 0, 0 );
     if (!cache.data) return STATUS_INVALID_HANDLE;
 
     /* if fd type is invalid, fd stores an error value */
@@ -1115,9 +1114,9 @@ void CDECL wine_server_close_fds_by_type( enum server_fd_type type )
         if (!fd_cache[entry]) continue;
         for (idx = 0; idx < FD_CACHE_BLOCK_SIZE; idx++)
         {
-            cache.data = interlocked_cmpxchg64( &fd_cache[entry][idx].data, 0, 0 );
+            cache.data = InterlockedCompareExchange64( &fd_cache[entry][idx].data, 0, 0 );
             if (cache.s.type != type || cache.s.fd == 0) continue;
-            if (interlocked_cmpxchg64( &fd_cache[entry][idx].data, 0, cache.data ) != cache.data) continue;
+            if (InterlockedCompareExchange64( &fd_cache[entry][idx].data, 0, cache.data ) != cache.data) continue;
             close( cache.s.fd - 1 );
         }
     }
@@ -2025,8 +2024,15 @@ void server_init_process_done(void)
     PEB *peb = NtCurrentTeb()->Peb;
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( peb->ImageBaseAddress );
     void *entry = (char *)peb->ImageBaseAddress + nt->OptionalHeader.AddressOfEntryPoint;
+    obj_handle_t usd_handle;
     NTSTATUS status;
-    int suspend;
+    int suspend, usd_fd = -1;
+    sigset_t old_set;
+    SIZE_T size = user_shared_data_size;
+    void *addr = user_shared_data;
+    ULONG old_prot;
+
+    NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, PAGE_READONLY, &old_prot );
 
 #ifdef __APPLE__
     send_server_task_port();
@@ -2041,6 +2047,7 @@ void server_init_process_done(void)
     signal_init_process();
 
     /* Signal the parent process to continue */
+    pthread_sigmask( SIG_BLOCK, &server_block_set, &old_set );
     SERVER_START_REQ( init_process_done )
     {
         req->module   = wine_server_client_ptr( peb->ImageBaseAddress );
@@ -2049,10 +2056,21 @@ void server_init_process_done(void)
 #endif
         req->entry    = wine_server_client_ptr( entry );
         req->gui      = (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI);
-        status = wine_server_call( req );
+        wine_server_add_data( req, user_shared_data, sizeof(*user_shared_data) );
+        status = server_call_unlocked( req );
         suspend = reply->suspend;
     }
     SERVER_END_REQ;
+    if (!status) usd_fd = receive_fd( &usd_handle );
+    pthread_sigmask( SIG_SETMASK, &old_set, NULL );
+
+    if (usd_fd != -1)
+    {
+        if (user_shared_data != mmap( user_shared_data, 0x1000,
+                                      PROT_READ, MAP_SHARED | MAP_FIXED, usd_fd, 0 ))
+            fatal_error( "failed to remap the process user shared data\n" );
+        close( usd_fd );
+    }
 
     assert( !status );
     signal_start_process( entry, suspend );

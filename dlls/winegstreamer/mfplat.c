@@ -429,6 +429,8 @@ static HRESULT asf_stream_handler_create(REFIID riid, void **ret)
     return container_stream_handler_construct(riid, ret, SOURCE_TYPE_ASF);
 }
 
+static GUID CLSID_CColorConvertDMO = {0x98230571,0x0087,0x4204,{0xb0,0x20,0x32,0x82,0x53,0x8e,0x57,0xd3}};
+
 static const struct class_object
 {
     const GUID *clsid;
@@ -442,6 +444,7 @@ class_objects[] =
     { &CLSID_CWMVDecMediaObject, &wmv_decoder_create },
     { &CLSID_MPEG4ByteStreamHandler, &mp4_stream_handler_create },
     { &CLSID_ASFByteStreamHandler, &asf_stream_handler_create },
+    { &CLSID_CColorConvertDMO, &color_converter_create },
 };
 
 HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
@@ -473,125 +476,74 @@ HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 
-struct register_type_info
+static WCHAR color_converterW[] = {'C','o','l','o','r',' ','C','o','n','v','e','r','t','e','r',0};
+
+const GUID *color_converter_supported_types[] =
 {
-    const GUID *major_type;
-    const GUID *sub_type;
+    &MFVideoFormat_RGB24,
+    &MFVideoFormat_RGB32,
+    &MFVideoFormat_RGB555,
+    &MFVideoFormat_RGB8,
+    &MFVideoFormat_AYUV,
+    &MFVideoFormat_I420,
+    &MFVideoFormat_IYUV,
+    &MFVideoFormat_NV11,
+    &MFVideoFormat_NV12,
+    &MFVideoFormat_UYVY,
+    &MFVideoFormat_v216,
+    &MFVideoFormat_v410,
+    &MFVideoFormat_YUY2,
+    &MFVideoFormat_YVYU,
+    &MFVideoFormat_YVYU,
 };
 
 static WCHAR h264decoderW[] = {'H','.','2','6','4',' ','D','e','c','o','d','e','r',0};
-const struct register_type_info h264_decoder_input_types[] =
+const GUID *h264_decoder_input_types[] =
 {
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_H264
-    }
+    &MFVideoFormat_H264,
 };
-const struct register_type_info h264_decoder_output_types[] =
+const GUID *h264_decoder_output_types[] =
 {
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_I420
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_IYUV
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_NV12
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_YUY2,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_YV12,
-    }
+    &MFVideoFormat_I420,
+    &MFVideoFormat_IYUV,
+    &MFVideoFormat_NV12,
+    &MFVideoFormat_YUY2,
+    &MFVideoFormat_YV12,
 };
 
 static WCHAR aacdecoderW[] = {'A','A','C',' ','D','e','c','o','d','e','r',0};
-const struct register_type_info aac_decoder_input_types[] =
+const GUID *aac_decoder_input_types[] =
 {
-    {
-        &MFMediaType_Audio,
-        &MFAudioFormat_AAC
-    }
+    &MFAudioFormat_AAC,
 };
 
-const struct register_type_info aac_decoder_output_types[] =
+const GUID *aac_decoder_output_types[] =
 {
-    {
-        &MFMediaType_Audio,
-        &MFAudioFormat_Float
-    },
-    {
-        &MFMediaType_Audio,
-        &MFAudioFormat_PCM
-    }
+    &MFAudioFormat_Float,
+    &MFAudioFormat_PCM,
 };
 
 static WCHAR wmvdecoderW[] = {'W','M','V','i','d','e','o',' ','D','e','c','o','d','e','r',' ','M','F','T',0};
 
-const struct register_type_info wmv_decoder_input_types[] =
+const GUID *wmv_decoder_input_types[] =
 {
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_WMV3,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_WVC1,
-    }
+    &MFVideoFormat_WMV3,
+    &MFVideoFormat_WVC1,
 };
 
-const struct register_type_info wmv_decoder_output_types[] =
+const GUID *wmv_decoder_output_types[] =
 {
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_NV12,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_YV12,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_YUY2,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_UYVY,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_YVYU,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_NV11,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_RGB32,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_RGB24,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_RGB565,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_RGB555,
-    },
-    {
-        &MFMediaType_Video,
-        &MFVideoFormat_RGB8,
-    },
+    &MFVideoFormat_NV12,
+    &MFVideoFormat_YV12,
+    &MFVideoFormat_YUY2,
+    &MFVideoFormat_UYVY,
+    &MFVideoFormat_YVYU,
+    &MFVideoFormat_NV11,
+    &MFVideoFormat_RGB32,
+    &MFVideoFormat_RGB24,
+    &MFVideoFormat_RGB565,
+    &MFVideoFormat_RGB555,
+    &MFVideoFormat_RGB8,
 };
 
 static const struct mft
@@ -600,19 +552,33 @@ static const struct mft
     const GUID *category;
     LPWSTR name;
     const UINT32 flags;
+    const GUID *major_type;
     const UINT32 input_types_count;
-    const struct register_type_info *input_types;
+    const GUID **input_types;
     const UINT32 output_types_count;
-    const struct register_type_info *output_types;
+    const GUID **output_types;
     IMFAttributes *attributes;
 }
 mfts[] =
 {
     {
+        &CLSID_CColorConvertDMO,
+        &MFT_CATEGORY_VIDEO_EFFECT,
+        color_converterW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Video,
+        ARRAY_SIZE(color_converter_supported_types),
+        color_converter_supported_types,
+        ARRAY_SIZE(color_converter_supported_types),
+        color_converter_supported_types,
+        NULL
+    },
+    {
         &CLSID_CMSH264DecoderMFT,
         &MFT_CATEGORY_VIDEO_DECODER,
         h264decoderW,
         MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Video,
         ARRAY_SIZE(h264_decoder_input_types),
         h264_decoder_input_types,
         ARRAY_SIZE(h264_decoder_output_types),
@@ -624,6 +590,7 @@ mfts[] =
         &MFT_CATEGORY_AUDIO_DECODER,
         aacdecoderW,
         MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Audio,
         ARRAY_SIZE(aac_decoder_input_types),
         aac_decoder_input_types,
         ARRAY_SIZE(aac_decoder_output_types),
@@ -635,6 +602,7 @@ mfts[] =
         &MFT_CATEGORY_VIDEO_DECODER,
         wmvdecoderW,
         MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Video,
         ARRAY_SIZE(wmv_decoder_input_types),
         wmv_decoder_input_types,
         ARRAY_SIZE(wmv_decoder_output_types),
@@ -656,13 +624,13 @@ HRESULT mfplat_DllRegisterServer(void)
         output_types = heap_alloc(cur->output_types_count * sizeof(output_types[0]));
         for (unsigned int i = 0; i < cur->input_types_count; i++)
         {
-            input_types[i].guidMajorType = *(cur->input_types[i].major_type);
-            input_types[i].guidSubtype = *(cur->input_types[i].sub_type);
+            input_types[i].guidMajorType = *(cur->major_type);
+            input_types[i].guidSubtype = *(cur->input_types[i]);
         }
         for (unsigned int i = 0; i < cur->output_types_count; i++)
         {
-            output_types[i].guidMajorType = *(cur->output_types[i].major_type);
-            output_types[i].guidSubtype = *(cur->output_types[i].sub_type);
+            output_types[i].guidMajorType = *(cur->major_type);
+            output_types[i].guidSubtype = *(cur->output_types[i]);
         }
 
         hr = MFTRegister(*(cur->clsid), *(cur->category), cur->name, cur->flags, cur->input_types_count,
@@ -1047,7 +1015,7 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
                         user_data->profile_level_indication = profile_level_indication;
                     }
 
-                    IMFMediaType_SetBlob(media_type, &MF_MT_USER_DATA, (BYTE *)user_data, sizeof(user_data) + asc_size);
+                    IMFMediaType_SetBlob(media_type, &MF_MT_USER_DATA, (BYTE *)user_data, sizeof(*user_data) + asc_size);
                     heap_free(user_data);
                     break;
                 }
@@ -1140,26 +1108,23 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
         /* Check if type is uncompressed */
         if (SUCCEEDED(MFCalculateImageSize(&subtype, 100, 100, &unused)))
         {
-            DWORD fourcc;
             GstVideoFormat format = GST_VIDEO_FORMAT_UNKNOWN;
             unsigned int i;
 
             output = gst_caps_new_empty_simple("video/x-raw");
 
-            fourcc = subtype.Data1;
-            subtype.Data1 = 0;
-            if (IsEqualGUID(&subtype, &MFVideoFormat_Base))
-                format = gst_video_format_from_fourcc(fourcc);
-            else
+            for (i = 0; i < ARRAY_SIZE(uncompressed_formats); i++)
             {
-                for (i = 0; i < ARRAY_SIZE(uncompressed_formats); i++)
+                if (IsEqualGUID(uncompressed_formats[i].subtype, &subtype))
                 {
-                    if (IsEqualGUID(uncompressed_formats[i].subtype, &subtype))
-                    {
-                        format = uncompressed_formats[i].format;
-                        break;
-                    }
+                    format = uncompressed_formats[i].format;
+                    break;
                 }
+            }
+
+            if (format == GST_VIDEO_FORMAT_UNKNOWN)
+            {
+                format = gst_video_format_from_fourcc(subtype.Data1);
             }
 
             if (format == GST_VIDEO_FORMAT_UNKNOWN)
@@ -1345,7 +1310,7 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
 
             if (SUCCEEDED(IMFMediaType_GetAllocatedBlob(type, &MF_MT_USER_DATA, (BYTE **) &user_data, &user_data_size)))
             {
-                if (user_data_size > sizeof(sizeof(*user_data)))
+                if (user_data_size > sizeof(*user_data))
                 {
                     GstBuffer *audio_specific_config = gst_buffer_new_allocate(NULL, user_data_size - sizeof(*user_data), NULL);
                     gst_buffer_fill(audio_specific_config, 0, user_data + 1, user_data_size - sizeof(*user_data));

@@ -4534,6 +4534,24 @@ HRESULT wined3d_texture_no3d_init(struct wined3d_texture *texture_no3d, struct w
             flags, device, parent, parent_ops, &texture_no3d[1], &wined3d_texture_no3d_ops);
 }
 
+void wined3d_vk_swizzle_from_color_fixup(VkComponentMapping *mapping, struct color_fixup_desc fixup)
+{
+    static const VkComponentSwizzle swizzle_source[] =
+    {
+        VK_COMPONENT_SWIZZLE_ZERO,  /* CHANNEL_SOURCE_ZERO */
+        VK_COMPONENT_SWIZZLE_ONE,   /* CHANNEL_SOURCE_ONE */
+        VK_COMPONENT_SWIZZLE_R,     /* CHANNEL_SOURCE_X */
+        VK_COMPONENT_SWIZZLE_G,     /* CHANNEL_SOURCE_Y */
+        VK_COMPONENT_SWIZZLE_B,     /* CHANNEL_SOURCE_Z */
+        VK_COMPONENT_SWIZZLE_A,     /* CHANNEL_SOURCE_W */
+    };
+
+    mapping->r = swizzle_source[fixup.x_source];
+    mapping->g = swizzle_source[fixup.y_source];
+    mapping->b = swizzle_source[fixup.z_source];
+    mapping->a = swizzle_source[fixup.w_source];
+}
+
 const VkDescriptorImageInfo *wined3d_texture_vk_get_default_image_info(struct wined3d_texture_vk *texture_vk,
         struct wined3d_context_vk *context_vk)
 {
@@ -4541,6 +4559,7 @@ const VkDescriptorImageInfo *wined3d_texture_vk_get_default_image_info(struct wi
     const struct wined3d_vk_info *vk_info;
     struct wined3d_device_vk *device_vk;
     VkImageViewCreateInfo create_info;
+    struct color_fixup_desc fixup;
     uint32_t flags = 0;
     VkResult vr;
 
@@ -4561,10 +4580,18 @@ const VkDescriptorImageInfo *wined3d_texture_vk_get_default_image_info(struct wi
     create_info.image = texture_vk->vk_image;
     create_info.viewType = vk_image_view_type_from_wined3d(texture_vk->t.resource.type, flags);
     create_info.format = format_vk->vk_format;
-    create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    fixup = format_vk->f.color_fixup;
+    if (is_identity_fixup(fixup) || !can_use_texture_swizzle(context_vk->c.d3d_info, &format_vk->f))
+    {
+        create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    }
+    else
+    {
+        wined3d_vk_swizzle_from_color_fixup(&create_info.components, fixup);
+    }
     create_info.subresourceRange.aspectMask = vk_aspect_mask_from_format(&format_vk->f);
     create_info.subresourceRange.baseMipLevel = 0;
     create_info.subresourceRange.levelCount = texture_vk->t.level_count;

@@ -47,7 +47,6 @@
 #include "wine/library.h"
 #include "wine/server.h"
 #include "wine/debug.h"
-#include "winbase.h"
 #include "ntdll_misc.h"
 #include "ddk/wdm.h"
 #include "wine/exception.h"
@@ -58,9 +57,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(thread);
 #define PTHREAD_STACK_MIN 16384
 #endif
 
-static struct _KUSER_SHARED_DATA user_shared_data_internal;
-struct _KUSER_SHARED_DATA *user_shared_data_external;
-struct _KUSER_SHARED_DATA *user_shared_data = &user_shared_data_internal;
+struct _KUSER_SHARED_DATA *user_shared_data = NULL;
+size_t user_shared_data_size = 0;
 static const WCHAR default_windirW[] = {'C',':','\\','w','i','n','d','o','w','s',0};
 
 extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
@@ -281,6 +279,7 @@ TEB *thread_init(void)
     TEB *teb;
     void *addr;
     SIZE_T size;
+    LARGE_INTEGER now;
     NTSTATUS status;
     struct ntdll_thread_data *thread_data;
 
@@ -298,16 +297,14 @@ TEB *thread_init(void)
         MESSAGE( "wine: failed to map the shared user data: %08x\n", status );
         exit(1);
     }
-	user_shared_data_external = addr;
+    user_shared_data = addr;
+    user_shared_data_size = size;
     memcpy( user_shared_data->NtSystemRoot, default_windirW, sizeof(default_windirW) );
 
-    /* allocate and initialize the PEB */
+    /* allocate and initialize the PEB and initial TEB */
 
-    addr = NULL;
-    size = sizeof(*peb);
-    virtual_alloc_aligned( &addr, 0, &size, MEM_COMMIT | MEM_TOP_DOWN, PAGE_READWRITE, 1 );
-    peb = addr;
-
+    teb = virtual_alloc_first_teb();
+    peb = teb->Peb;
     peb->FastPebLock        = &peb_lock;
     peb->ApiSetMap          = &apiset_map;
     peb->TlsBitmap          = &tls_bitmap;
@@ -333,25 +330,18 @@ TEB *thread_init(void)
     *(ULONG_PTR *)peb->Reserved = get_image_addr();
 
 #if defined(__APPLE__) && defined(__x86_64__)
-    *((DWORD*)((char*)user_shared_data_external + 0x1000)) = __wine_syscall_dispatcher;
+    *((DWORD*)((char*)user_shared_data + 0x1000)) = __wine_syscall_dispatcher;
 #endif
+
     /* Pretend we don't support the SYSCALL instruction on x86-64. Needed for
      * Chromium; see output_syscall_thunks_x64() in winebuild. */
     user_shared_data->SystemCallPad[0] = 1;
-    user_shared_data_external->SystemCallPad[0] = 1;
 
     /*
      * Starting with Vista, the first user to log on has session id 1.
      * Session id 0 is for processes that don't interact with the user (like services).
      */
     peb->SessionId = 1;
-
-    /* allocate and initialize the initial TEB */
-
-    signal_init_threading();
-    virtual_alloc_teb( &teb );
-    teb->Peb = peb;
-    teb->Tib.StackBase = (void *)~0UL;
 
     thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
     thread_data->request_fd = -1;
@@ -362,92 +352,24 @@ TEB *thread_init(void)
     thread_data->esync_apc_fd = -1;
     thread_data->fsync_apc_futex = NULL;
 
-    signal_init_thread( teb );
-    virtual_init_threading();
     debug_init();
     init_paths();
     set_process_name( __wine_main_argc, __wine_main_argv );
 
-	/* initialize user_shared_data */
-    __wine_user_shared_data();
+    /* initialize time values in user_shared_data */
+    NtQuerySystemTime( &now );
+    user_shared_data->SystemTime.LowPart = now.u.LowPart;
+    user_shared_data->SystemTime.High1Time = user_shared_data->SystemTime.High2Time = now.u.HighPart;
+    user_shared_data->u.TickCountQuad = (now.QuadPart - server_start_time) / 10000;
+    user_shared_data->u.TickCount.High2Time = user_shared_data->u.TickCount.High1Time;
+    user_shared_data->TickCountLowDeprecated = user_shared_data->u.TickCount.LowPart;
+    user_shared_data->TickCountMultiplier = 1 << 24;
     fill_cpu_info();
 
     virtual_get_system_info( &sbi );
     user_shared_data->NumberOfPhysicalPages = sbi.MmNumberOfPhysicalPages;
 
     return teb;
-}
-
-
-
-/**************************************************************************
- *  __wine_user_shared_data   (NTDLL.@)
- *
- * Update user shared data and return the address of the structure.
- */
-BYTE* CDECL __wine_user_shared_data(void)
-{
-    static int spinlock;
-    ULARGE_INTEGER interrupt;
-     LARGE_INTEGER now;
-
-    while (interlocked_cmpxchg( &spinlock, 1, 0 ) != 0);
-
-    NtQuerySystemTime( &now );
-    user_shared_data->SystemTime.High2Time = now.u.HighPart;
-    user_shared_data->SystemTime.LowPart   = now.u.LowPart;
-    user_shared_data->SystemTime.High1Time = now.u.HighPart;
-
-    RtlQueryUnbiasedInterruptTime( &interrupt.QuadPart );
-    user_shared_data->InterruptTime.High2Time = interrupt.HighPart;
-    user_shared_data->InterruptTime.LowPart   = interrupt.LowPart;
-    user_shared_data->InterruptTime.High1Time = interrupt.HighPart;
-
-    interrupt.QuadPart /= 10000;
-    user_shared_data->u.TickCount.High2Time  = interrupt.HighPart;
-    user_shared_data->u.TickCount.LowPart    = interrupt.LowPart;
-    user_shared_data->u.TickCount.High1Time  = interrupt.HighPart;
-    user_shared_data->TickCountLowDeprecated = interrupt.LowPart;
-    user_shared_data->TickCountMultiplier = 1 << 24;
-
-    spinlock = 0;
-    return (BYTE *)user_shared_data;
-}
-
-static void *user_shared_data_thread(void *arg)
-{
-    struct timeval tv;
-
-    while (TRUE)
-    {
-        __wine_user_shared_data();
-
-        tv.tv_sec = 0;
-        tv.tv_usec = 15600;
-        select(0, NULL, NULL, NULL, &tv);
-    }
-    return NULL;
-}
-
-
-void create_user_shared_data_thread(void)
-{
-    static int thread_created;
-    pthread_attr_t attr;
-    pthread_t thread;
-
-    if (interlocked_cmpxchg(&thread_created, 1, 0) != 0)
-        return;
-
-    TRACE("Creating user shared data update thread.\n");
-
-    user_shared_data = user_shared_data_external;
-    __wine_user_shared_data();
-
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 0x10000);
-    pthread_create(&thread, &attr, user_shared_data_thread, NULL);
-    pthread_attr_destroy(&attr);
 }
 
 BOOL read_process_memory_stats(int unix_pid, VM_COUNTERS *pvmi)
@@ -493,7 +415,7 @@ BOOL read_process_memory_stats(int unix_pid, VM_COUNTERS *pvmi)
 void abort_thread( int status )
 {
     pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
-    if (interlocked_xchg_add( &nb_threads, -1 ) <= 1) _exit( get_unix_exit_code( status ));
+    if (InterlockedDecrement( &nb_threads ) <= 0) _exit( get_unix_exit_code( status ));
     signal_exit_thread( status );
 }
 
@@ -532,7 +454,7 @@ void WINAPI RtlExitUserThread( ULONG status )
         SERVER_END_REQ;
     }
 
-    if (interlocked_xchg_add( &nb_threads, 0 ) <= 1)
+    if (InterlockedCompareExchange( &nb_threads, 0, 0 ) <= 0)
     {
         LdrShutdownProcess();
         pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
@@ -542,12 +464,12 @@ void WINAPI RtlExitUserThread( ULONG status )
     LdrShutdownThread();
     RtlFreeThreadActivationContextStack();
 
-    shmlocal = interlocked_xchg_ptr( &NtCurrentTeb()->Reserved5[2], NULL );
+    shmlocal = InterlockedExchangePointer( &NtCurrentTeb()->Reserved5[2], NULL );
     if (shmlocal) NtUnmapViewOfSection( NtCurrentProcess(), shmlocal );
 
     pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
 
-    if ((teb = interlocked_xchg_ptr( &prev_teb, NtCurrentTeb() )))
+    if ((teb = InterlockedExchangePointer( &prev_teb, NtCurrentTeb() )))
     {
         struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
 
@@ -561,7 +483,7 @@ void WINAPI RtlExitUserThread( ULONG status )
     sigemptyset( &sigset );
     sigaddset( &sigset, SIGQUIT );
     pthread_sigmask( SIG_BLOCK, &sigset, NULL );
-    if (interlocked_xchg_add( &nb_threads, -1 ) <= 1) _exit( status );
+    if (!InterlockedDecrement( &nb_threads )) _exit( status );
 
     signal_exit_thread( status );
 }
@@ -702,7 +624,6 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT
 
     if ((status = virtual_alloc_teb( &teb ))) goto error;
 
-    teb->Peb = NtCurrentTeb()->Peb;
     teb->ClientId.UniqueProcess = ULongToHandle(GetCurrentProcessId());
     teb->ClientId.UniqueThread  = ULongToHandle(tid);
 
@@ -746,10 +667,10 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT
                          (char *)teb->Tib.StackBase + extra_stack - (char *)teb->DeallocationStack );
     pthread_attr_setguardsize( &pthread_attr, 0 );
     pthread_attr_setscope( &pthread_attr, PTHREAD_SCOPE_SYSTEM ); /* force creating a kernel thread */
-    interlocked_xchg_add( &nb_threads, 1 );
+    InterlockedIncrement( &nb_threads );
     if (pthread_create( &pthread_id, &pthread_attr, (void * (*)(void *))start_thread, info ))
     {
-        interlocked_xchg_add( &nb_threads, -1 );
+        InterlockedDecrement( &nb_threads );
         pthread_attr_destroy( &pthread_attr );
         status = STATUS_NO_MEMORY;
         goto error;

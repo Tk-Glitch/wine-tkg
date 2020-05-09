@@ -3402,80 +3402,6 @@ LONG WINAPI ChangeDisplaySettingsExW( LPCWSTR devname, LPDEVMODEW devmode, HWND 
 }
 
 
-typedef struct DISPLAYCONFIG_SOURCE_DEVICE_NAME {
-  DISPLAYCONFIG_DEVICE_INFO_HEADER header;
-  WCHAR                            viewGdiDeviceName[CCHDEVICENAME];
-} DISPLAYCONFIG_SOURCE_DEVICE_NAME;
-
-typedef struct DISPLAYCONFIG_TARGET_DEVICE_NAME_FLAGS {
-  union {
-    struct {
-      UINT32 friendlyNameFromEdid : 1;
-      UINT32 friendlyNameForced : 1;
-      UINT32 edidIdsValid : 1;
-      UINT32 reserved : 29;
-    } DUMMYSTRUCTNAME;
-    UINT32 value;
-  } DUMMYUNIONNAME;
-} DISPLAYCONFIG_TARGET_DEVICE_NAME_FLAGS;
-
-typedef struct DISPLAYCONFIG_TARGET_DEVICE_NAME {
-  DISPLAYCONFIG_DEVICE_INFO_HEADER       header;
-  DISPLAYCONFIG_TARGET_DEVICE_NAME_FLAGS flags;
-  DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY  outputTechnology;
-  UINT16                                 edidManufactureId;
-  UINT16                                 edidProductCodeId;
-  UINT32                                 connectorInstance;
-  WCHAR                                  monitorFriendlyDeviceName[64];
-  WCHAR                                  monitorDevicePath[128];
-} DISPLAYCONFIG_TARGET_DEVICE_NAME;
-
-/***********************************************************************
- *              DisplayConfigGetDeviceInfo (USER32.@)
- */
-LONG WINAPI DisplayConfigGetDeviceInfo(DISPLAYCONFIG_DEVICE_INFO_HEADER *packet)
-{
-    static const WCHAR testW[] = {'t','e','s','t',0};
-
-    TRACE("packet type: %u\n", packet->type);
-
-    switch(packet->type)
-    {
-        case DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME:
-        {
-            DISPLAYCONFIG_SOURCE_DEVICE_NAME *src_device_name = (DISPLAYCONFIG_SOURCE_DEVICE_NAME*) packet;
-            if (packet->size < sizeof(*src_device_name))
-            {
-                return ERROR_INSUFFICIENT_BUFFER;
-            }
-
-            memcpy(src_device_name->viewGdiDeviceName, testW, sizeof(testW));
-
-            return ERROR_SUCCESS;
-        }
-        case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME:
-        {
-            DISPLAYCONFIG_TARGET_DEVICE_NAME *dst_device_name = (DISPLAYCONFIG_TARGET_DEVICE_NAME*) packet;
-            if (packet->size < sizeof(*dst_device_name))
-            {
-                TRACE("%u, %lu\n", packet->size, sizeof(*dst_device_name));
-                return ERROR_INSUFFICIENT_BUFFER;
-            }
-
-            dst_device_name->flags.DUMMYUNIONNAME.value = 0;
-            dst_device_name->outputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI;
-            dst_device_name->connectorInstance = 0;
-
-            memcpy(dst_device_name->monitorFriendlyDeviceName, testW, sizeof(testW));
-            memcpy(dst_device_name->monitorDevicePath, testW, sizeof(testW));
-
-            return ERROR_SUCCESS;
-        }
-        default:
-            return ERROR_NOT_SUPPORTED;
-    }
-}
-
 /***********************************************************************
  *		EnumDisplaySettingsW (USER32.@)
  *
@@ -4248,28 +4174,34 @@ static BOOL CALLBACK enum_mon_callback( HMONITOR monitor, HDC hdc, LPRECT rect, 
 
 BOOL CDECL nulldrv_EnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc, LPARAM lp )
 {
-    RECT default_rect = {0, 0, 640, 480};
-    DWORD i;
+    RECT monitor_rect;
+    DWORD i = 0;
 
     TRACE("(%p, %p, %p, 0x%lx)\n", hdc, rect, proc, lp);
 
     if (update_monitor_cache())
     {
-        EnterCriticalSection( &monitors_section );
-        for (i = 0; i < monitor_count; i++)
+        while (TRUE)
         {
-            if (!proc( (HMONITOR)(UINT_PTR)(i + 1), hdc, &monitors[i].rcMonitor, lp ))
+            EnterCriticalSection( &monitors_section );
+            if (i >= monitor_count)
             {
                 LeaveCriticalSection( &monitors_section );
-                return FALSE;
+                return TRUE;
             }
+            monitor_rect = monitors[i].rcMonitor;
+            LeaveCriticalSection( &monitors_section );
+
+            if (!proc( (HMONITOR)(UINT_PTR)(i + 1), hdc, &monitor_rect, lp ))
+                return FALSE;
+
+            ++i;
         }
-        LeaveCriticalSection( &monitors_section );
-        return TRUE;
     }
 
     /* Fallback to report one monitor if using SetupAPI failed */
-    if (!proc( NULLDRV_DEFAULT_HMONITOR, hdc, &default_rect, lp ))
+    SetRect( &monitor_rect, 0, 0, 640, 480 );
+    if (!proc( NULLDRV_DEFAULT_HMONITOR, hdc, &monitor_rect, lp ))
         return FALSE;
     return TRUE;
 }
@@ -4612,113 +4544,94 @@ BOOL WINAPI PhysicalToLogicalPoint( HWND hwnd, POINT *point )
 }
 
 /**********************************************************************
- * GetDisplayConfigBufferSizes [USER32.@]
+ *              GetDisplayConfigBufferSizes (USER32.@)
  */
 LONG WINAPI GetDisplayConfigBufferSizes(UINT32 flags, UINT32 *num_path_info, UINT32 *num_mode_info)
 {
-    TRACE("0x%x %p %p\n", flags, num_path_info, num_mode_info);
+    FIXME("(0x%x %p %p): stub\n", flags, num_path_info, num_mode_info);
 
     if (!num_path_info || !num_mode_info)
         return ERROR_INVALID_PARAMETER;
 
-    *num_path_info = 1;
-    *num_mode_info = 2;
-    return ERROR_SUCCESS;
+    *num_path_info = 0;
+    *num_mode_info = 0;
+    return ERROR_NOT_SUPPORTED;
 }
-
-#define D3DKMDT_VSS_NTSC_M          0x6
-#define DISPLAYCONFIG_SOURCE_IN_USE 0x1
-#define DISPLAYCONFIG_TARGET_IN_USE 0x1
-#define DISPLAYCONFIG_PATH_ACTIVE   0x1
 
 /***********************************************************************
  *              QueryDisplayConfig (USER32.@)
- * TODO: support multiple monitors
  */
 LONG WINAPI QueryDisplayConfig(UINT32 flags, UINT32 *numpathelements, DISPLAYCONFIG_PATH_INFO *pathinfo,
                                UINT32 *numinfoelements, DISPLAYCONFIG_MODE_INFO *modeinfo,
                                DISPLAYCONFIG_TOPOLOGY_ID *topologyid)
 {
-    LUID adapter_id;
-    POINT origin;
-    HMONITOR monitor;
-    MONITORINFOEXW monitor_info;
-    DEVMODEW mode;
-    DISPLAYCONFIG_SOURCE_MODE *source_mode = &modeinfo[0].DUMMYUNIONNAME.sourceMode;
-    DISPLAYCONFIG_TARGET_MODE *target_mode = &modeinfo[1].DUMMYUNIONNAME.targetMode;
-    DISPLAYCONFIG_PATH_SOURCE_INFO *source_info = &pathinfo[0].sourceInfo;
-    DISPLAYCONFIG_PATH_TARGET_INFO *target_info = &pathinfo[0].targetInfo;
+    FIXME("(%08x %p %p %p %p %p)\n", flags, numpathelements, pathinfo, numinfoelements, modeinfo, topologyid);
 
-    TRACE("(%08x %p %p %p %p %p)\n", flags, numpathelements, pathinfo, numinfoelements, modeinfo, topologyid);
+    if (!numpathelements || !numinfoelements)
+        return ERROR_INVALID_PARAMETER;
 
-    if (*numpathelements < 1 || *numinfoelements < 2)
-        return ERROR_INSUFFICIENT_BUFFER;
+    if (!*numpathelements || !*numinfoelements)
+        return ERROR_INVALID_PARAMETER;
 
-    origin.x = 0;
-    origin.y = 0;
-    monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
-    monitor_info.cbSize = sizeof(monitor_info);
-    if (!(GetMonitorInfoW(monitor, (MONITORINFO*) &monitor_info)))
-    {
+    if (!flags)
+        return ERROR_INVALID_PARAMETER;
+
+    return ERROR_NOT_SUPPORTED;
+}
+
+/***********************************************************************
+ *              DisplayConfigGetDeviceInfo (USER32.@)
+ */
+LONG WINAPI DisplayConfigGetDeviceInfo(DISPLAYCONFIG_DEVICE_INFO_HEADER *packet)
+{
+    FIXME("stub: %p\n", packet);
+
+    if (!packet || packet->size < sizeof(*packet))
         return ERROR_GEN_FAILURE;
-    }
-    if (!(EnumDisplaySettingsW(monitor_info.szDevice, 0, &mode)))
+
+    switch (packet->type)
     {
-        return ERROR_GEN_FAILURE;
-    }
-
-    AllocateLocallyUniqueId(&adapter_id);
-
-    source_mode->width = mode.dmPelsWidth;
-    source_mode->height = mode.dmPelsHeight;
-    source_mode->pixelFormat = DISPLAYCONFIG_PIXELFORMAT_32BPP;
-    source_mode->position.x = 0;
-    source_mode->position.y = 0;
-
-    /* no idea what pixel rate is */
-    target_mode->targetVideoSignalInfo.pixelRate = 0xdeadbeef;
-    target_mode->targetVideoSignalInfo.hSyncFreq.Numerator = mode.dmDisplayFrequency * mode.dmPelsHeight;
-    target_mode->targetVideoSignalInfo.hSyncFreq.Denominator = 1;
-    target_mode->targetVideoSignalInfo.vSyncFreq.Numerator = mode.dmDisplayFrequency;
-    target_mode->targetVideoSignalInfo.vSyncFreq.Denominator = 1;
-    target_mode->targetVideoSignalInfo.activeSize.cx = mode.dmPelsWidth;
-    target_mode->targetVideoSignalInfo.activeSize.cy = mode.dmPelsHeight;
-    target_mode->targetVideoSignalInfo.totalSize.cx = mode.dmPelsWidth;
-    target_mode->targetVideoSignalInfo.totalSize.cy = mode.dmPelsHeight;
-    target_mode->targetVideoSignalInfo.DUMMYUNIONNAME.videoStandard = D3DKMDT_VSS_NTSC_M;
-    target_mode->targetVideoSignalInfo.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_UNSPECIFIED;
-
-    modeinfo[0].infoType = DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;
-    modeinfo[0].id = 0;
-    modeinfo[0].adapterId = adapter_id;
-    modeinfo[1].infoType = DISPLAYCONFIG_MODE_INFO_TYPE_TARGET;
-    modeinfo[1].id = 0;
-    modeinfo[1].adapterId = adapter_id;
-
-    source_info->adapterId = adapter_id;
-    source_info->id = 0;
-    source_info->DUMMYUNIONNAME.modeInfoIdx = 0;
-    source_info->statusFlags = DISPLAYCONFIG_SOURCE_IN_USE;
-
-    target_info->adapterId = adapter_id;
-    target_info->id = 0;
-
-    target_info->DUMMYUNIONNAME.modeInfoIdx = 1;
-    target_info->outputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI;
-    target_info->rotation = DISPLAYCONFIG_ROTATION_IDENTITY;
-    target_info->scaling = DISPLAYCONFIG_SCALING_IDENTITY;
-    target_info->refreshRate.Numerator = mode.dmDisplayFrequency;
-    target_info->refreshRate.Denominator = 1;
-    target_info->scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_UNSPECIFIED;
-    target_info->targetAvailable = TRUE;
-    target_info->statusFlags = DISPLAYCONFIG_TARGET_IN_USE;
-
-    pathinfo[0].flags = DISPLAYCONFIG_PATH_ACTIVE;
-
-    if (flags == QDC_DATABASE_CURRENT && topologyid)
+    case DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME:
     {
-        *topologyid = DISPLAYCONFIG_TOPOLOGY_INTERNAL;
-    }
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME *source_name = (DISPLAYCONFIG_SOURCE_DEVICE_NAME *)packet;
+        if (packet->size < sizeof(*source_name))
+            return ERROR_INVALID_PARAMETER;
 
-    return ERROR_SUCCESS;
+        return ERROR_NOT_SUPPORTED;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME:
+    {
+        DISPLAYCONFIG_TARGET_DEVICE_NAME *target_name = (DISPLAYCONFIG_TARGET_DEVICE_NAME *)packet;
+        if (packet->size < sizeof(*target_name))
+            return ERROR_INVALID_PARAMETER;
+
+        return ERROR_NOT_SUPPORTED;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE:
+    {
+        DISPLAYCONFIG_TARGET_PREFERRED_MODE *preferred_mode = (DISPLAYCONFIG_TARGET_PREFERRED_MODE *)packet;
+        if (packet->size < sizeof(*preferred_mode))
+            return ERROR_INVALID_PARAMETER;
+
+        return ERROR_NOT_SUPPORTED;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME:
+    {
+        DISPLAYCONFIG_ADAPTER_NAME *adapter_name = (DISPLAYCONFIG_ADAPTER_NAME *)packet;
+        if (packet->size < sizeof(*adapter_name))
+            return ERROR_INVALID_PARAMETER;
+
+        return ERROR_NOT_SUPPORTED;
+    }
+    case DISPLAYCONFIG_DEVICE_INFO_SET_TARGET_PERSISTENCE:
+    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_BASE_TYPE:
+    case DISPLAYCONFIG_DEVICE_INFO_GET_SUPPORT_VIRTUAL_RESOLUTION:
+    case DISPLAYCONFIG_DEVICE_INFO_SET_SUPPORT_VIRTUAL_RESOLUTION:
+    case DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO:
+    case DISPLAYCONFIG_DEVICE_INFO_SET_ADVANCED_COLOR_STATE:
+    case DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL:
+    default:
+        FIXME("Unimplemented packet type: %u\n", packet->type);
+        return ERROR_INVALID_PARAMETER;
+    }
 }

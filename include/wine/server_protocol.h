@@ -903,6 +903,7 @@ struct init_process_done_request
     mod_handle_t module;
     client_ptr_t ldt_copy;
     client_ptr_t entry;
+    /* VARARG(usd,bytes); */
 };
 struct init_process_done_reply
 {

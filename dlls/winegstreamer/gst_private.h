@@ -76,4 +76,6 @@ enum source_type
 };
 HRESULT container_stream_handler_construct(REFIID riid, void **obj, enum source_type);
 
+HRESULT color_converter_create(REFIID riid, void **ret);
+
 #endif /* __GST_PRIVATE_INCLUDED__ */

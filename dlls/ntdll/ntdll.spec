@@ -212,6 +212,7 @@
 @ stdcall NtFlushBuffersFile(long ptr)
 @ stdcall NtFlushInstructionCache(long ptr long)
 @ stdcall NtFlushKey(long)
+@ stdcall NtFlushProcessWriteBuffers()
 @ stdcall NtFlushVirtualMemory(long ptr ptr long)
 @ stub NtFlushWriteBuffer
 # @ stub NtFreeUserPhysicalPages
@@ -526,6 +527,7 @@
 @ stdcall RtlCopyLuid(ptr ptr)
 @ stdcall RtlCopyLuidAndAttributesArray(long ptr ptr)
 @ stdcall -arch=x86_64 RtlCopyMemory(ptr ptr long)
+@ stdcall -arch=x86_64 RtlCopyMemoryNonTemporal(ptr ptr long) RtlCopyMemory
 # @ stub RtlCopyMemoryStreamTo
 # @ stub RtlCopyOutOfProcessMemoryStreamTo
 # @ stub RtlCopyRangeList
@@ -1412,7 +1414,7 @@
 @ cdecl -private -arch=i386 _CIsin() NTDLL__CIsin
 @ cdecl -private -arch=i386 _CIsqrt() NTDLL__CIsqrt
 @ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr)
-@ stdcall -private -arch=arm,x86_64 -norelay __chkstk()
+@ cdecl -arch=arm,x86_64 -norelay __chkstk()
 @ cdecl __isascii(long) NTDLL___isascii
 @ cdecl __iscsym(long) NTDLL___iscsym
 @ cdecl __iscsymf(long) NTDLL___iscsymf
@@ -1429,7 +1431,7 @@
 @ stdcall -arch=i386 -norelay _aulldvrm(int64 int64)
 @ stdcall -arch=i386 -ret64 _aullrem(int64 int64)
 @ stdcall -arch=i386 -ret64 _aullshr(int64 long)
-@ stdcall -private -arch=i386 -norelay _chkstk()
+@ cdecl -arch=i386 -norelay _chkstk()
 @ stub _fltused
 @ cdecl -arch=i386 -ret64 _ftol() NTDLL__ftol
 @ cdecl _i64toa(int64 ptr long)
@@ -1596,6 +1598,3 @@
 # Filesystem
 @ cdecl wine_nt_to_unix_file_name(ptr ptr long long)
 @ cdecl wine_unix_to_nt_file_name(ptr ptr)
-
-# User shared data
-@ cdecl __wine_user_shared_data()
