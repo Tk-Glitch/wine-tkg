@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <stdint.h>
 #define COBJMACROS
 #include "ocidl.h"
 #include "olectl.h"
@@ -58,7 +59,7 @@ static HRESULT set_mixing_mode(IBaseFilter *filter, DWORD count)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IVMRFilterConfig9_SetNumberOfStreams(config, count);
-    todo_wine_if (count != 1) ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     IVMRFilterConfig9_Release(config);
     return hr;
@@ -68,6 +69,22 @@ static inline BOOL compare_media_types(const AM_MEDIA_TYPE *a, const AM_MEDIA_TY
 {
     return !memcmp(a, b, offsetof(AM_MEDIA_TYPE, pbFormat))
         && !memcmp(a->pbFormat, b->pbFormat, a->cbFormat);
+}
+
+static BOOL compare_double(double f, double g, unsigned int ulps)
+{
+    int64_t x = *(int64_t *)&f;
+    int64_t y = *(int64_t *)&g;
+
+    if (x < 0)
+        x = INT64_MIN - x;
+    if (y < 0)
+        y = INT64_MIN - y;
+
+    if (abs(x - y) > ulps)
+        return FALSE;
+
+    return TRUE;
 }
 
 static IFilterGraph2 *create_graph(void)
@@ -153,16 +170,14 @@ static void test_filter_config(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IVMRFilterConfig9_GetNumberOfStreams(config, &count);
-    todo_wine ok(hr == VFW_E_VMR_NOT_IN_MIXER_MODE, "Got hr %#x.\n", hr);
+    ok(hr == VFW_E_VMR_NOT_IN_MIXER_MODE, "Got hr %#x.\n", hr);
 
     hr = IVMRFilterConfig9_SetNumberOfStreams(config, 3);
-    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IVMRFilterConfig9_GetNumberOfStreams(config, &count);
-    todo_wine {
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
-        ok(count == 3, "Got count %u.\n", count);
-    }
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(count == 3, "Got count %u.\n", count);
 
     hr = IVMRFilterConfig9_GetRenderingMode(config, &mode);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -178,10 +193,8 @@ static void test_filter_config(void)
     ok(mode == VMR9Mode_Windowless, "Got mode %#x.\n", mode);
 
     hr = IVMRFilterConfig9_GetNumberOfStreams(config, &count);
-    todo_wine {
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
-        ok(count == 3, "Got count %u.\n", count);
-    }
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(count == 3, "Got count %u.\n", count);
 
     ref = IVMRFilterConfig9_Release(config);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
@@ -315,24 +328,22 @@ static void test_interfaces(void)
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 
     filter = create_vmr9(VMR9Mode_Windowed);
-    if (SUCCEEDED(set_mixing_mode(filter, 1)))
-    {
-        test_common_interfaces(filter);
+    set_mixing_mode(filter, 1);
+    test_common_interfaces(filter);
 
-        check_interface(filter, &IID_IBasicVideo, TRUE);
-        todo_wine check_interface(filter, &IID_IBasicVideo2, TRUE);
-        check_interface(filter, &IID_IVideoWindow, TRUE);
-        todo_wine check_interface(filter, &IID_IVMRMixerControl9, TRUE);
-        /* IVMRMonitorConfig9 may not be available if the d3d9 device has
-         * insufficient support. */
-        check_interface_broken(filter, &IID_IVMRMonitorConfig9, TRUE);
+    check_interface(filter, &IID_IBasicVideo, TRUE);
+    todo_wine check_interface(filter, &IID_IBasicVideo2, TRUE);
+    check_interface(filter, &IID_IVideoWindow, TRUE);
+    check_interface(filter, &IID_IVMRMixerControl9, TRUE);
+    /* IVMRMonitorConfig9 may not be available if the d3d9 device has
+     * insufficient support. */
+    check_interface_broken(filter, &IID_IVMRMonitorConfig9, TRUE);
 
-        check_interface(filter, &IID_IVMRSurfaceAllocatorNotify9, FALSE);
-        check_interface(filter, &IID_IVMRWindowlessControl9, FALSE);
+    check_interface(filter, &IID_IVMRSurfaceAllocatorNotify9, FALSE);
+    check_interface(filter, &IID_IVMRWindowlessControl9, FALSE);
 
-        ref = IBaseFilter_Release(filter);
-        ok(!ref, "Got outstanding refcount %d.\n", ref);
-    }
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
 static const GUID test_iid = {0x33333333};
@@ -515,43 +526,42 @@ static void test_enum_pins(void)
 
     IEnumPins_Release(enum2);
 
-    if (SUCCEEDED(set_mixing_mode(filter, 2)))
-    {
-        hr = IEnumPins_Next(enum1, 1, pins, NULL);
-        ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    set_mixing_mode(filter, 2);
 
-        hr = IEnumPins_Reset(enum1);
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IEnumPins_Next(enum1, 1, pins, NULL);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
 
-        hr = IEnumPins_Next(enum1, 1, pins, NULL);
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
-        IPin_Release(pins[0]);
+    hr = IEnumPins_Reset(enum1);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-        hr = IEnumPins_Next(enum1, 1, pins, NULL);
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
-        IPin_Release(pins[0]);
+    hr = IEnumPins_Next(enum1, 1, pins, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    IPin_Release(pins[0]);
 
-        hr = IEnumPins_Next(enum1, 1, pins, NULL);
-        ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    hr = IEnumPins_Next(enum1, 1, pins, NULL);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    if (hr == S_OK) IPin_Release(pins[0]);
 
-        hr = IEnumPins_Reset(enum1);
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IEnumPins_Next(enum1, 1, pins, NULL);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
 
-        hr = IEnumPins_Next(enum1, 2, pins, &count);
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
-        ok(count == 2, "Got count %u.\n", count);
-        IPin_Release(pins[0]);
-        IPin_Release(pins[1]);
+    hr = IEnumPins_Reset(enum1);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-        hr = IEnumPins_Reset(enum1);
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IEnumPins_Next(enum1, 2, pins, &count);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(count == 2, "Got count %u.\n", count);
+    IPin_Release(pins[0]);
+    if (count > 1) IPin_Release(pins[1]);
 
-        hr = IEnumPins_Next(enum1, 3, pins, &count);
-        ok(hr == S_FALSE, "Got hr %#x.\n", hr);
-        ok(count == 2, "Got count %u.\n", count);
-        IPin_Release(pins[0]);
-        IPin_Release(pins[1]);
-    }
+    hr = IEnumPins_Reset(enum1);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IEnumPins_Next(enum1, 3, pins, &count);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    todo_wine ok(count == 2, "Got count %u.\n", count);
+    IPin_Release(pins[0]);
+    if (count > 1) IPin_Release(pins[1]);
 
     IEnumPins_Release(enum1);
     ref = IBaseFilter_Release(filter);
@@ -585,29 +595,31 @@ static void test_find_pin(void)
     hr = IBaseFilter_FindPin(filter, L"VMR Input1", &pin);
     ok(hr == VFW_E_NOT_FOUND, "Got hr %#x.\n", hr);
 
-    if (SUCCEEDED(set_mixing_mode(filter, 2)))
+    set_mixing_mode(filter, 2);
+
+    IEnumPins_Reset(enum_pins);
+
+    hr = IBaseFilter_FindPin(filter, L"VMR Input0", &pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IEnumPins_Next(enum_pins, 1, &pin2, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(pin == pin2, "Pins did not match.\n");
+    IPin_Release(pin);
+    IPin_Release(pin2);
+
+    hr = IBaseFilter_FindPin(filter, L"VMR Input1", &pin);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    if (hr == S_OK)
     {
-        IEnumPins_Reset(enum_pins);
-
-        hr = IBaseFilter_FindPin(filter, L"VMR Input0", &pin);
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
         hr = IEnumPins_Next(enum_pins, 1, &pin2, NULL);
         ok(hr == S_OK, "Got hr %#x.\n", hr);
         ok(pin == pin2, "Pins did not match.\n");
         IPin_Release(pin);
         IPin_Release(pin2);
-
-        hr = IBaseFilter_FindPin(filter, L"VMR Input1", &pin);
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
-        hr = IEnumPins_Next(enum_pins, 1, &pin2, NULL);
-        ok(hr == S_OK, "Got hr %#x.\n", hr);
-        ok(pin == pin2, "Pins did not match.\n");
-        IPin_Release(pin);
-        IPin_Release(pin2);
-
-        hr = IBaseFilter_FindPin(filter, L"VMR Input2", &pin);
-        ok(hr == VFW_E_NOT_FOUND, "Got hr %#x.\n", hr);
     }
+
+    hr = IBaseFilter_FindPin(filter, L"VMR Input2", &pin);
+    ok(hr == VFW_E_NOT_FOUND, "Got hr %#x.\n", hr);
 
     IEnumPins_Release(enum_pins);
     ref = IBaseFilter_Release(filter);
@@ -645,9 +657,12 @@ static void test_pin_info(void)
 
     IPin_Release(pin);
 
-    if (SUCCEEDED(set_mixing_mode(filter, 2)))
+    set_mixing_mode(filter, 2);
+
+    hr = IBaseFilter_FindPin(filter, L"VMR Input1", &pin);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    if (hr == S_OK)
     {
-        IBaseFilter_FindPin(filter, L"VMR Input1", &pin);
         hr = IPin_QueryPinInfo(pin, &info);
         ok(info.pFilter == filter, "Expected filter %p, got %p.\n", filter, info.pFilter);
         ok(info.dir == PINDIR_INPUT, "Got direction %d.\n", info.dir);
@@ -1500,11 +1515,8 @@ static void test_current_image(IBaseFilter *filter, IMemInputPin *input,
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(size == sizeof(buffer), "Got size %d.\n", size);
     ok(!memcmp(bih, &expect_bih, sizeof(BITMAPINFOHEADER)), "Bitmap headers didn't match.\n");
-    if (0) /* FIXME: Rendering is currently broken on Wine. */
-    {
-        for (i = 0; i < 32 * 16; ++i)
-            ok((data[i] & 0xffffff) == 0x7f007f, "Got unexpected color %08x at %u.\n", data[i], i);
-    }
+    for (i = 0; i < 32 * 16; ++i)
+        ok((data[i] & 0xffffff) == 0x7f007f, "Got unexpected color %08x at %u.\n", data[i], i);
 
     hr = IMediaControl_Run(control);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -1516,11 +1528,8 @@ static void test_current_image(IBaseFilter *filter, IMemInputPin *input,
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(size == sizeof(buffer), "Got size %d.\n", size);
     ok(!memcmp(bih, &expect_bih, sizeof(BITMAPINFOHEADER)), "Bitmap headers didn't match.\n");
-    if (0) /* FIXME: Rendering is currently broken on Wine. */
-    {
-        for (i = 0; i < 32 * 16; ++i)
-            ok((data[i] & 0xffffff) == 0x7f007f, "Got unexpected color %08x at %u.\n", data[i], i);
-    }
+    for (i = 0; i < 32 * 16; ++i)
+        ok((data[i] & 0xffffff) == 0x7f007f, "Got unexpected color %08x at %u.\n", data[i], i);
 
     hr = IMediaControl_Stop(control);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -1723,8 +1732,8 @@ static void test_overlay(void)
 
     hwnd = (HWND)0xdeadbeef;
     hr = IOverlay_GetWindowHandle(overlay, &hwnd);
-    todo_wine ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
-    todo_wine ok(hwnd == (HWND)0xdeadbeef, "Got invalid window %p.\n", hwnd);
+    ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
+    ok(hwnd == (HWND)0xdeadbeef, "Got window %p.\n", hwnd);
 
     IOverlay_Release(overlay);
     IPin_Release(pin);
@@ -1739,8 +1748,8 @@ static void test_overlay(void)
 
     hwnd = (HWND)0xdeadbeef;
     hr = IOverlay_GetWindowHandle(overlay, &hwnd);
-    todo_wine ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
-    todo_wine ok(hwnd == (HWND)0xdeadbeef, "Got invalid window %p.\n", hwnd);
+    ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
+    ok(hwnd == (HWND)0xdeadbeef, "Got window %p.\n", hwnd);
 
     IOverlay_Release(overlay);
     IPin_Release(pin);
@@ -2613,17 +2622,21 @@ static void test_allocate_surface_helper(void)
     HRESULT hr;
     ULONG ref;
 
+    AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+    window = CreateWindowA("static", "quartz_test", WS_OVERLAPPEDWINDOW, 0, 0,
+            rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, NULL, NULL);
+    if (!(device = create_device(window)))
+    {
+        IBaseFilter_Release(filter);
+        DestroyWindow(window);
+        return;
+    }
+
     IBaseFilter_QueryInterface(filter, &IID_IVMRSurfaceAllocatorNotify9, (void **)&notify);
 
     count = 2;
     hr = IVMRSurfaceAllocatorNotify9_AllocateSurfaceHelper(notify, &info, &count, surfaces);
     todo_wine ok(hr == E_FAIL, "Got hr %#x.\n", hr);
-
-    AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
-    window = CreateWindowA("static", "quartz_test", WS_OVERLAPPEDWINDOW, 0, 0,
-            rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, NULL, NULL);
-    if (!(device = create_device(window)))
-        goto out;
 
     hr = IVMRSurfaceAllocatorNotify9_SetD3DDevice(notify, device, MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY));
     if (hr == E_NOINTERFACE)
@@ -2966,14 +2979,14 @@ static void test_renderless_formats(void)
         .pbFormat = (BYTE *)&vih,
     };
     ALLOCATOR_PROPERTIES req_props = {5, 32 * 16 * 4, 1, 0}, ret_props;
-    IBaseFilter *filter = create_vmr9(VMR9Mode_Renderless);
-    IFilterGraph2 *graph = create_graph();
     IVMRSurfaceAllocatorNotify9 *notify;
     RECT rect = {0, 0, 640, 480};
     struct testfilter source;
     IDirect3DDevice9 *device;
     IMemAllocator *allocator;
+    IFilterGraph2 *graph;
     IMemInputPin *input;
+    IBaseFilter *filter;
     unsigned int i;
     HWND window;
     HRESULT hr;
@@ -3007,13 +3020,17 @@ static void test_renderless_formats(void)
         {&MEDIASUBTYPE_YV12, MAKEFOURCC('Y','V','1','2'), VMR9AllocFlag_OffscreenSurface},
     };
 
-    IBaseFilter_QueryInterface(filter, &IID_IVMRSurfaceAllocatorNotify9, (void **)&notify);
-
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
     window = CreateWindowA("static", "quartz_test", WS_OVERLAPPEDWINDOW, 0, 0,
             rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, NULL, NULL);
     if (!(device = create_device(window)))
-        goto out;
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    filter = create_vmr9(VMR9Mode_Renderless);
+    IBaseFilter_QueryInterface(filter, &IID_IVMRSurfaceAllocatorNotify9, (void **)&notify);
 
     hr = IVMRSurfaceAllocatorNotify9_SetD3DDevice(notify, device, MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY));
     if (hr == E_NOINTERFACE)
@@ -3029,6 +3046,7 @@ static void test_renderless_formats(void)
     allocator_notify = notify;
 
     testfilter_init(&source);
+    graph = create_graph();
     IFilterGraph2_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
     IFilterGraph2_AddFilter(graph, filter, NULL);
     IBaseFilter_FindPin(filter, L"VMR Input0", &pin);
@@ -3134,26 +3152,25 @@ static void test_mixing_mode(void)
         ok(hr == E_NOINTERFACE, "Got hr %#x.\n", hr);
 
         hr = IVMRFilterConfig9_GetNumberOfStreams(config, &stream_count);
-        todo_wine ok(hr == VFW_E_VMR_NOT_IN_MIXER_MODE, "Got hr %#x.\n", hr);
+        ok(hr == VFW_E_VMR_NOT_IN_MIXER_MODE, "Got hr %#x.\n", hr);
 
         hr = IVMRFilterConfig9_SetNumberOfStreams(config, 1);
         ok(hr == S_OK, "Got hr %#x.\n", hr);
 
         hr = IVMRFilterConfig9_GetNumberOfStreams(config, &stream_count);
-        todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
-        todo_wine ok(stream_count == 1, "Got %u streams.\n", stream_count);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+        ok(stream_count == 1, "Got %u streams.\n", stream_count);
 
         hr = IBaseFilter_QueryInterface(filter, &IID_IVMRMixerControl9, (void **)&mixer_control);
-        todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
-        if (hr == S_OK)
-            IVMRMixerControl9_Release(mixer_control);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+        IVMRMixerControl9_Release(mixer_control);
 
         hr = IVMRFilterConfig9_SetNumberOfStreams(config, 2);
-        todo_wine ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
+        ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
 
         hr = IVMRFilterConfig9_GetNumberOfStreams(config, &stream_count);
-        todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
-        todo_wine ok(stream_count == 1, "Got %u streams.\n", stream_count);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+        ok(stream_count == 1, "Got %u streams.\n", stream_count);
 
         IVMRFilterConfig9_Release(config);
         ref = IBaseFilter_Release(filter);
@@ -3170,20 +3187,19 @@ static void test_mixing_mode(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IVMRFilterConfig9_GetNumberOfStreams(config, &stream_count);
-    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(stream_count == 4, "Got %u streams.\n", stream_count);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(stream_count == 4, "Got %u streams.\n", stream_count);
 
     hr = IBaseFilter_QueryInterface(filter, &IID_IVMRMixerControl9, (void **)&mixer_control);
-    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
-    if (hr == S_OK)
-        IVMRMixerControl9_Release(mixer_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    IVMRMixerControl9_Release(mixer_control);
 
     hr = IVMRFilterConfig9_SetNumberOfStreams(config, 2);
-    todo_wine ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
+    ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
 
     hr = IVMRFilterConfig9_GetNumberOfStreams(config, &stream_count);
-    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(stream_count == 4, "Got %u streams.\n", stream_count);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(stream_count == 4, "Got %u streams.\n", stream_count);
 
     IVMRWindowlessControl9_Release(windowless_control);
     IVMRFilterConfig9_Release(config);
@@ -3693,7 +3709,7 @@ static void test_basic_video(void)
     reftime = 0.0;
     hr = IBasicVideo_get_AvgTimePerFrame(video, &reftime);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(reftime == 0.02, "Got frame rate %.16e.\n", reftime);
+    todo_wine ok(compare_double(reftime, 0.02, 1 << 28), "Got frame rate %.16e.\n", reftime);
 
     l = 0xdeadbeef;
     hr = IBasicVideo_get_BitRate(video, &l);
@@ -3729,6 +3745,137 @@ out:
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
+static void test_windowless_size(void)
+{
+    ALLOCATOR_PROPERTIES req_props = {1, 32 * 16 * 4, 1, 0}, ret_props;
+    VIDEOINFOHEADER vih =
+    {
+        .bmiHeader.biSize = sizeof(BITMAPINFOHEADER),
+        .bmiHeader.biWidth = 32,
+        .bmiHeader.biHeight = 16,
+        .bmiHeader.biBitCount = 32,
+        .bmiHeader.biPlanes = 1,
+    };
+    AM_MEDIA_TYPE mt =
+    {
+        .majortype = MEDIATYPE_Video,
+        .subtype = MEDIASUBTYPE_RGB32,
+        .formattype = FORMAT_VideoInfo,
+        .cbFormat = sizeof(vih),
+        .pbFormat = (BYTE *)&vih,
+    };
+    IBaseFilter *filter = create_vmr9(VMR9Mode_Windowless);
+    LONG width, height, aspect_width, aspect_height;
+    IVMRWindowlessControl9 *windowless_control;
+    IFilterGraph2 *graph = create_graph();
+    struct testfilter source;
+    IMemAllocator *allocator;
+    RECT src, dst, expect;
+    IMemInputPin *input;
+    HWND window;
+    HRESULT hr;
+    ULONG ref;
+    IPin *pin;
+
+    IBaseFilter_QueryInterface(filter, &IID_IVMRWindowlessControl9, (void **)&windowless_control);
+    IBaseFilter_FindPin(filter, L"VMR Input0", &pin);
+    IPin_QueryInterface(pin, &IID_IMemInputPin, (void **)&input);
+    testfilter_init(&source);
+    IFilterGraph2_AddFilter(graph, &source.filter.IBaseFilter_iface, L"source");
+    IFilterGraph2_AddFilter(graph, filter, L"vmr9");
+    window = CreateWindowA("static", "quartz_test", WS_OVERLAPPEDWINDOW, 0, 0, 640, 480, 0, 0, 0, 0);
+    ok(!!window, "Failed to create a window.\n");
+
+    hr = IVMRWindowlessControl9_SetVideoClippingWindow(windowless_control, window);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IFilterGraph2_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMemInputPin_GetAllocator(input, &allocator);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    if (hr == S_OK)
+    {
+        hr = IMemAllocator_SetProperties(allocator, &req_props, &ret_props);
+        IMemAllocator_Release(allocator);
+        if (hr == E_FAIL)
+        {
+            skip("Got E_FAIL when setting allocator properties.\n");
+            goto out;
+        }
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+        ok(!memcmp(&ret_props, &req_props, sizeof(req_props)), "Properties did not match.\n");
+    }
+
+    hr = IVMRWindowlessControl9_GetNativeVideoSize(windowless_control, NULL, &height, &aspect_width, &aspect_height);
+    ok(hr == E_POINTER, "Got hr %#x.\n", hr);
+    hr = IVMRWindowlessControl9_GetNativeVideoSize(windowless_control, &width, NULL, &aspect_width, &aspect_height);
+    ok(hr == E_POINTER, "Got hr %#x.\n", hr);
+
+    width = height = 0xdeadbeef;
+    hr = IVMRWindowlessControl9_GetNativeVideoSize(windowless_control, &width, &height, NULL, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(width == 32, "Got width %d.\n", width);
+    ok(height == 16, "Got height %d.\n", height);
+
+    aspect_width = aspect_height = 0xdeadbeef;
+    hr = IVMRWindowlessControl9_GetNativeVideoSize(windowless_control, &width, &height, &aspect_width, &aspect_height);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(aspect_width == 32, "Got width %d.\n", aspect_width);
+    ok(aspect_height == 16, "Got height %d.\n", aspect_height);
+
+    memset(&src, 0xcc, sizeof(src));
+    hr = IVMRWindowlessControl9_GetVideoPosition(windowless_control, &src, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    SetRect(&expect, 0, 0, 32, 16);
+    ok(EqualRect(&src, &expect), "Got source rect %s.\n", wine_dbgstr_rect(&src));
+
+    memset(&dst, 0xcc, sizeof(dst));
+    hr = IVMRWindowlessControl9_GetVideoPosition(windowless_control, NULL, &dst);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    SetRect(&expect, 0, 0, 0, 0);
+    todo_wine ok(EqualRect(&dst, &expect), "Got dest rect %s.\n", wine_dbgstr_rect(&dst));
+
+    SetRect(&src, 4, 6, 16, 12);
+    hr = IVMRWindowlessControl9_SetVideoPosition(windowless_control, &src, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    memset(&src, 0xcc, sizeof(src));
+    memset(&dst, 0xcc, sizeof(dst));
+    hr = IVMRWindowlessControl9_GetVideoPosition(windowless_control, &src, &dst);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    SetRect(&expect, 4, 6, 16, 12);
+    ok(EqualRect(&src, &expect), "Got source rect %s.\n", wine_dbgstr_rect(&src));
+    SetRect(&expect, 0, 0, 0, 0);
+    todo_wine ok(EqualRect(&dst, &expect), "Got dest rect %s.\n", wine_dbgstr_rect(&dst));
+
+    SetRect(&dst, 40, 60, 120, 160);
+    hr = IVMRWindowlessControl9_SetVideoPosition(windowless_control, NULL, &dst);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    memset(&src, 0xcc, sizeof(src));
+    memset(&dst, 0xcc, sizeof(dst));
+    hr = IVMRWindowlessControl9_GetVideoPosition(windowless_control, &src, &dst);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    SetRect(&expect, 4, 6, 16, 12);
+    ok(EqualRect(&src, &expect), "Got source rect %s.\n", wine_dbgstr_rect(&src));
+    SetRect(&expect, 40, 60, 120, 160);
+    ok(EqualRect(&dst, &expect), "Got dest rect %s.\n", wine_dbgstr_rect(&dst));
+
+    GetWindowRect(window, &src);
+    SetRect(&expect, 0, 0, 640, 480);
+    ok(EqualRect(&src, &expect), "Got window rect %s.\n", wine_dbgstr_rect(&src));
+
+out:
+    ref = IFilterGraph2_Release(graph);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IMemInputPin_Release(input);
+    IPin_Release(pin);
+    IVMRWindowlessControl9_Release(windowless_control);
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    DestroyWindow(window);
+}
+
 START_TEST(vmr9)
 {
     IBaseFilter *filter;
@@ -3762,6 +3909,7 @@ START_TEST(vmr9)
     test_clipping_window();
     test_surface_allocator_notify_refcount();
     test_basic_video();
+    test_windowless_size();
 
     CoUninitialize();
 }

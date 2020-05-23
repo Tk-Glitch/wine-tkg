@@ -23,6 +23,7 @@
 
 #include <basetsd.h>
 #include <guiddef.h>
+#include <winapifamily.h>
 
 #ifndef RC_INVOKED
 #include <ctype.h>
@@ -802,6 +803,7 @@ typedef struct _MEMORY_BASIC_INFORMATION
    ((type *)((PCHAR)(address) - offsetof(type, field)))
 #endif
 
+#define ARRAYSIZE(x) (sizeof(x) / sizeof((x)[0]))
 #ifdef __WINESRC__
 # define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #endif
@@ -928,6 +930,10 @@ typedef enum _HEAP_INFORMATION_CLASS {
 #define PF_ARM_V8_INSTRUCTIONS_AVAILABLE        29
 #define PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE 30
 #define PF_ARM_V8_CRC32_INSTRUCTIONS_AVAILABLE  31
+#define PF_RDTSCP_INSTRUCTION_AVAILABLE         32
+#define PF_RDPID_INSTRUCTION_AVAILABLE          33
+#define PF_ARM_V81_ATOMIC_INSTRUCTIONS_AVAILABLE 34
+#define PF_MONITORX_INSTRUCTION_AVAILABLE       35
 
 
 /* Execution state flags */

@@ -67,6 +67,8 @@ enum decoder_type
     DECODER_TYPE_H264,
     DECODER_TYPE_AAC,
     DECODER_TYPE_WMV,
+    DECODER_TYPE_WMA,
+    DECODER_TYPE_M4S2,
 };
 HRESULT generic_decoder_construct(REFIID riid, void **obj, enum decoder_type);
 enum source_type

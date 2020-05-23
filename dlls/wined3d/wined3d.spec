@@ -53,6 +53,7 @@
 @ cdecl wined3d_device_draw_primitive_instanced_indirect(ptr ptr long)
 @ cdecl wined3d_device_end_scene(ptr)
 @ cdecl wined3d_device_evict_managed_resources(ptr)
+@ cdecl wined3d_device_flush(ptr)
 @ cdecl wined3d_device_get_available_texture_mem(ptr)
 @ cdecl wined3d_device_get_blend_state(ptr ptr)
 @ cdecl wined3d_device_get_clip_status(ptr ptr)
@@ -283,10 +284,10 @@
 @ cdecl wined3d_swapchain_set_palette(ptr ptr)
 @ cdecl wined3d_swapchain_set_window(ptr ptr)
 
-@ cdecl wined3d_swapchain_state_create(ptr ptr ptr ptr)
+@ cdecl wined3d_swapchain_state_create(ptr ptr ptr)
 @ cdecl wined3d_swapchain_state_destroy(ptr)
-@ cdecl wined3d_swapchain_state_resize_target(ptr ptr ptr)
-@ cdecl wined3d_swapchain_state_set_fullscreen(ptr ptr ptr ptr)
+@ cdecl wined3d_swapchain_state_resize_target(ptr ptr)
+@ cdecl wined3d_swapchain_state_set_fullscreen(ptr ptr ptr)
 
 @ cdecl wined3d_texture_add_dirty_region(ptr long ptr)
 @ cdecl wined3d_texture_blt(ptr long ptr ptr long ptr long ptr long)

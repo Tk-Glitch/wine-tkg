@@ -179,14 +179,12 @@ static void test_user_shared_data_time(void)
     {
         t1 = GetTickCount();
         if (user_shared_data->NtMajorVersion <= 5 && user_shared_data->NtMinorVersion <= 1)
-            t2 = ((ULONG64)user_shared_data->TickCountLowDeprecated * user_shared_data->TickCountMultiplier) >> 24;
+            t2 = (*(volatile ULONG*)&user_shared_data->TickCountLowDeprecated * (ULONG64)user_shared_data->TickCountMultiplier) >> 24;
         else
             t2 = (read_ksystem_time(&user_shared_data->u.TickCount) * user_shared_data->TickCountMultiplier) >> 24;
         t3 = GetTickCount();
     } while(t3 < t1 && i++ < 1); /* allow for wrap, but only once */
 
-    /* FIXME: not always in order, but should be close */
-    todo_wine_if(t1 > t2 && t1 - t2 < 50)
     ok(t1 <= t2, "USD TickCount / GetTickCount are out of order: %s %s\n",
        wine_dbgstr_longlong(t1), wine_dbgstr_longlong(t2));
     ok(t2 <= t3, "USD TickCount / GetTickCount are out of order: %s %s\n",
@@ -222,8 +220,6 @@ static void test_user_shared_data_time(void)
             pRtlQueryUnbiasedInterruptTime(&t3);
         } while(t3 < t1 && i++ < 1); /* allow for wrap, but only once */
 
-        /* FIXME: not always in order, but should be close */
-        todo_wine_if(t1 > t2 && t1 - t2 < 50 * TICKSPERMSEC)
         ok(t1 <= t2, "USD InterruptTime / RtlQueryUnbiasedInterruptTime are out of order %s %s\n",
            wine_dbgstr_longlong(t1), wine_dbgstr_longlong(t2));
         ok(t2 <= t3 || broken(t2 == t3 + 82410089070) /* w864 has some weird offset on testbot */,

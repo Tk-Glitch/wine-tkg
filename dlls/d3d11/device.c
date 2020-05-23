@@ -3958,7 +3958,13 @@ static void STDMETHODCALLTYPE d3d11_immediate_context_ClearState(ID3D11DeviceCon
 
 static void STDMETHODCALLTYPE d3d11_immediate_context_Flush(ID3D11DeviceContext1 *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_device *device = device_from_immediate_ID3D11DeviceContext1(iface);
+
+    TRACE("iface %p.\n", iface);
+
+    wined3d_mutex_lock();
+    wined3d_device_flush(device->wined3d_device);
+    wined3d_mutex_unlock();
 }
 
 static D3D11_DEVICE_CONTEXT_TYPE STDMETHODCALLTYPE d3d11_immediate_context_GetType(ID3D11DeviceContext1 *iface)
@@ -3970,7 +3976,7 @@ static D3D11_DEVICE_CONTEXT_TYPE STDMETHODCALLTYPE d3d11_immediate_context_GetTy
 
 static UINT STDMETHODCALLTYPE d3d11_immediate_context_GetContextFlags(ID3D11DeviceContext1 *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    TRACE("iface %p.\n", iface);
 
     return 0;
 }
@@ -3978,9 +3984,9 @@ static UINT STDMETHODCALLTYPE d3d11_immediate_context_GetContextFlags(ID3D11Devi
 static HRESULT STDMETHODCALLTYPE d3d11_immediate_context_FinishCommandList(ID3D11DeviceContext1 *iface,
         BOOL restore, ID3D11CommandList **command_list)
 {
-    FIXME("iface %p, restore %#x, command_list %p stub!\n", iface, restore, command_list);
+    TRACE("iface %p, restore %#x, command_list %p.\n", iface, restore, command_list);
 
-    return E_NOTIMPL;
+    return DXGI_ERROR_INVALID_CALL;
 }
 
 static void STDMETHODCALLTYPE d3d11_immediate_context_CopySubresourceRegion1(ID3D11DeviceContext1 *iface,
@@ -8540,7 +8546,13 @@ static void STDMETHODCALLTYPE d3d10_device_ClearState(ID3D10Device1 *iface)
 
 static void STDMETHODCALLTYPE d3d10_device_Flush(ID3D10Device1 *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
+
+    TRACE("iface %p.\n", iface);
+
+    wined3d_mutex_lock();
+    wined3d_device_flush(device->wined3d_device);
+    wined3d_mutex_unlock();
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateBuffer(ID3D10Device1 *iface,

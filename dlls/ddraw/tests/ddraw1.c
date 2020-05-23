@@ -13633,127 +13633,102 @@ static void test_vtbl_protection(void)
     DestroyWindow(window);
 }
 
-static void test_pick(void)
+static BOOL CALLBACK test_window_position_cb(HMONITOR monitor, HDC hdc, RECT *monitor_rect,
+        LPARAM lparam)
 {
-    static D3DTLVERTEX tquad[] =
-    {
-        {{320.0f}, {480.0f}, { 1.5f}, {1.0f}, {0xff00ff00}, {0x00000000}, {0.0f}, {0.0f}},
-        {{  0.0f}, {480.0f}, {-0.5f}, {1.0f}, {0xff00ff00}, {0x00000000}, {0.0f}, {0.0f}},
-        {{320.0f}, {  0.0f}, { 1.5f}, {1.0f}, {0xff00ff00}, {0x00000000}, {0.0f}, {0.0f}},
-        {{  0.0f}, {  0.0f}, {-0.5f}, {1.0f}, {0xff00ff00}, {0x00000000}, {0.0f}, {0.0f}},
-    };
-    IDirect3DExecuteBuffer *execute_buffer;
-    D3DEXECUTEBUFFERDESC exec_desc;
-    IDirect3DViewport *viewport;
-    IDirect3DDevice *device;
+    RECT primary_rect, window_rect;
     IDirectDraw *ddraw;
-    UINT inst_length;
     HWND window;
     HRESULT hr;
-    void *ptr;
-    DWORD rec_count;
-    D3DRECT pick_rect;
-    UINT screen_width = 640;
-    UINT screen_height = 480;
-    UINT hits = 0;
-    UINT nohits = 0;
+    BOOL ret;
 
-    window = create_window();
     ddraw = create_ddraw();
     ok(!!ddraw, "Failed to create a ddraw object.\n");
-    if (!(device = create_device(ddraw, window, DDSCL_NORMAL)))
-    {
-        skip("Failed to create a 3D device, skipping test.\n");
-        IDirectDraw_Release(ddraw);
-        DestroyWindow(window);
-        return;
-    }
+    window = CreateWindowA("static", "ddraw_test", WS_POPUP | WS_VISIBLE, monitor_rect->left,
+            monitor_rect->top, monitor_rect->right - monitor_rect->left,
+            monitor_rect->bottom - monitor_rect->top, NULL, NULL, NULL, NULL);
+    ok(!!window, "Failed to create a window.\n");
+    flush_events();
 
-    viewport = create_viewport(device, 0, 0, screen_width, screen_height);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+    flush_events();
+    ret = GetWindowRect(window, &window_rect);
+    ok(ret, "GetWindowRect failed, error %#x.\n", GetLastError());
+    SetRect(&primary_rect, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+    ok(EqualRect(&window_rect, &primary_rect), "Expect window rect %s, got %s.\n",
+            wine_dbgstr_rect(&primary_rect), wine_dbgstr_rect(&window_rect));
 
-    memset(&exec_desc, 0, sizeof(exec_desc));
-    exec_desc.dwSize = sizeof(exec_desc);
-    exec_desc.dwFlags = D3DDEB_BUFSIZE | D3DDEB_CAPS;
-    exec_desc.dwBufferSize = 1024;
-    exec_desc.dwCaps = D3DDEBCAPS_SYSTEMMEMORY;
+    /* Window activation should restore the window to fit the whole primary monitor */
+    ret = SetWindowPos(window, 0, monitor_rect->left, monitor_rect->top, 0, 0,
+            SWP_NOZORDER | SWP_NOSIZE);
+    ok(ret, "SetWindowPos failed, error %#x.\n", GetLastError());
+    ret = SetForegroundWindow(GetDesktopWindow());
+    ok(ret, "Failed to set foreground window.\n");
+    flush_events();
+    ret = ShowWindow(window, SW_RESTORE);
+    ok(ret, "Failed to restore window, error %#x.\n", GetLastError());
+    flush_events();
+    ret = SetForegroundWindow(window);
+    ok(ret, "SetForegroundWindow failed, error %#x.\n", GetLastError());
+    flush_events();
+    ret = GetWindowRect(window, &window_rect);
+    ok(ret, "GetWindowRect failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&window_rect, &primary_rect), "Expect window rect %s, got %s.\n",
+            wine_dbgstr_rect(&primary_rect), wine_dbgstr_rect(&window_rect));
 
-    hr = IDirect3DDevice_CreateExecuteBuffer(device, &exec_desc, &execute_buffer, NULL);
-    ok(SUCCEEDED(hr), "Failed to create execute buffer, hr %#x.\n", hr);
-    hr = IDirect3DExecuteBuffer_Lock(execute_buffer, &exec_desc);
-    ok(SUCCEEDED(hr), "Failed to lock execute buffer, hr %#x.\n", hr);
-    memcpy(exec_desc.lpData, tquad, sizeof(tquad));
-    ptr = ((BYTE *)exec_desc.lpData) + sizeof(tquad);
-    emit_process_vertices(&ptr, D3DPROCESSVERTICES_COPY, 0, 4);
-    emit_tquad(&ptr, 0);
-    emit_end(&ptr);
-    inst_length = (BYTE *)ptr - (BYTE *)exec_desc.lpData;
-    inst_length -= sizeof(tquad);
-    hr = IDirect3DExecuteBuffer_Unlock(execute_buffer);
-    ok(SUCCEEDED(hr), "Failed to unlock execute buffer, hr %#x.\n", hr);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+    ret = GetWindowRect(window, &window_rect);
+    ok(ret, "GetWindowRect failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&window_rect, &primary_rect), "Expect window rect %s, got %s.\n",
+            wine_dbgstr_rect(&primary_rect), wine_dbgstr_rect(&window_rect));
 
-    set_execute_data(execute_buffer, 4, sizeof(tquad), inst_length);
-
-    /* Perform a number of picks, we should have a specific amount by the end */
-    for (int i=0;i<screen_width;i+=80)
-    {
-        for (int j=0;j<screen_height;j+=60)
-        {
-            pick_rect.x1 = i;
-            pick_rect.y1 = j;
-
-            hr = IDirect3DDevice_Pick(device, execute_buffer, viewport, 0, &pick_rect);
-            ok(SUCCEEDED(hr), "Failed to perform pick, hr %#x.\n", hr);
-            hr = IDirect3DDevice_GetPickRecords(device, &rec_count, NULL);
-            ok(SUCCEEDED(hr), "Failed to get pick records, hr %#x.\n", hr);
-            if (rec_count > 0)
-                hits++;
-            else
-                nohits++;
-        }
-    }
-
-    /*
-        We should have gotten precisely equal numbers of hits and no hits since our quad
-        covers exactly half the screen
-    */
-    ok(hits == nohits, "Got a non-equal amount of pick successes/failures: %i vs %i.\n", hits, nohits);
-
-    /* Try some specific pixel picks */
-    pick_rect.x1 = 480;
-    pick_rect.y1 = 360;
-    hr = IDirect3DDevice_Pick(device, execute_buffer, viewport, 0, &pick_rect);
-    ok(SUCCEEDED(hr), "Failed to perform pick, hr %#x.\n", hr);
-    hr = IDirect3DDevice_GetPickRecords(device, &rec_count, NULL);
-    ok(SUCCEEDED(hr), "Failed to get pick records, hr %#x.\n", hr);
-    ok(rec_count == 0, "Got incorrect number of pick records (expected 0): %i.\n", rec_count);
-
-    pick_rect.x1 = 240;
-    pick_rect.y1 = 120;
-    hr = IDirect3DDevice_Pick(device, execute_buffer, viewport, 0, &pick_rect);
-    ok(SUCCEEDED(hr), "Failed to perform pick, hr %#x.\n", hr);
-    hr = IDirect3DDevice_GetPickRecords(device, &rec_count, NULL);
-    ok(SUCCEEDED(hr), "Failed to get pick records, hr %#x.\n", hr);
-    ok(rec_count == 1, "Got incorrect number of pick records (expected 1): %i.\n", rec_count);
-
-    if (rec_count == 1)
-    {
-        D3DPICKRECORD record;
-
-        hr = IDirect3DDevice_GetPickRecords(device, &rec_count, &record);
-        ok(SUCCEEDED(hr), "Failed to get pick records, hr %#x.\n", hr);
-
-        /* Tests D3DPICKRECORD for correct information */
-        ok(record.bOpcode == 3, "Got incorrect bOpcode: %i.\n", record.bOpcode);
-        ok(record.bPad == 0, "Got incorrect bPad: %i.\n", record.bPad);
-        ok(record.dwOffset == 24, "Got incorrect dwOffset: %i.\n", record.dwOffset);
-        ok(record.dvZ > 0.99 && record.dvZ < 1.01, "Got incorrect dvZ: %f.\n", record.dvZ);
-    }
-
-    destroy_viewport(device, viewport);
-    IDirect3DExecuteBuffer_Release(execute_buffer);
-    IDirect3DDevice_Release(device);
-    IDirectDraw_Release(ddraw);
     DestroyWindow(window);
+    IDirectDraw_Release(ddraw);
+    return TRUE;
+}
+
+static void test_window_position(void)
+{
+    EnumDisplayMonitors(NULL, NULL, test_window_position_cb, 0);
+}
+
+static BOOL CALLBACK test_get_display_mode_cb(HMONITOR monitor, HDC hdc, RECT *monitor_rect,
+        LPARAM lparam)
+{
+    DDSURFACEDESC surface_desc;
+    IDirectDraw *ddraw;
+    HWND window;
+    HRESULT hr;
+    BOOL ret;
+
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    window = create_window();
+    ok(!!window, "Failed to create a window.\n");
+
+    /* Test that DirectDraw doesn't use the device window to determine which monitor to use */
+    ret = SetWindowPos(window, 0, monitor_rect->left, monitor_rect->top, 0, 0,
+            SWP_NOZORDER | SWP_NOSIZE);
+    ok(ret, "SetWindowPos failed, error %#x.\n", GetLastError());
+
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDraw_GetDisplayMode(ddraw, &surface_desc);
+    ok(hr == DD_OK, "GetDisplayMode failed, hr %#x.\n", hr);
+    ok(surface_desc.dwWidth == GetSystemMetrics(SM_CXSCREEN), "Expect width %d, got %d.\n",
+            GetSystemMetrics(SM_CXSCREEN), surface_desc.dwWidth);
+    ok(surface_desc.dwHeight == GetSystemMetrics(SM_CYSCREEN), "Expect height %d, got %d.\n",
+            GetSystemMetrics(SM_CYSCREEN), surface_desc.dwHeight);
+
+    DestroyWindow(window);
+    IDirectDraw_Release(ddraw);
+    return TRUE;
+}
+
+static void test_get_display_mode(void)
+{
+    EnumDisplayMonitors(NULL, NULL, test_get_display_mode_cb, 0);
 }
 
 START_TEST(ddraw1)
@@ -13868,7 +13843,8 @@ START_TEST(ddraw1)
     test_clipper_refcount();
     test_caps();
     test_d32_support();
-    test_pick();
     test_cursor_clipping();
     test_vtbl_protection();
+    test_window_position();
+    test_get_display_mode();
 }

@@ -243,7 +243,7 @@ static const struct column col_operatingsystem[] =
     { L"OSProductSuite",          CIM_UINT32 },
     { L"OSType",                  CIM_UINT16 },
     { L"Primary",                 CIM_BOOLEAN },
-    { L"SerialNumber",            CIM_STRING },
+    { L"SerialNumber",            CIM_STRING|COL_FLAG_DYNAMIC },
     { L"ServicePackMajorVersion", CIM_UINT16 },
     { L"ServicePackMinorVersion", CIM_UINT16 },
     { L"SuiteMask",               CIM_UINT32 },
@@ -375,6 +375,7 @@ static const struct column col_sounddevice[] =
     { L"Name",        CIM_STRING },
     { L"ProductName", CIM_STRING },
     { L"StatusInfo",  CIM_UINT16 },
+    { L"Manufacturer", CIM_STRING },
 };
 static const struct column col_stdregprov[] =
 {
@@ -760,6 +761,7 @@ struct record_sounddevice
     const WCHAR *name;
     const WCHAR *productname;
     UINT16       statusinfo;
+    const WCHAR *manufacturer;
 };
 struct record_stdregprov
 {
@@ -877,7 +879,7 @@ static const struct record_quickfixengineering data_quickfixengineering[] =
 };
 static const struct record_sounddevice data_sounddevice[] =
 {
-    { L"Wine Audio Device", L"Wine Audio Device", 3 /* enabled */ }
+    { L"Wine Audio Device", L"Wine Audio Device", 3 /* enabled */, L"The Wine Project" }
 };
 static const struct record_stdregprov data_stdregprov[] =
 {
@@ -2869,11 +2871,11 @@ static enum fill_status fill_physicalmemory( struct table *table, const struct e
 
     rec = (struct record_physicalmemory *)table->data;
     rec->capacity             = get_total_physical_memory();
-    rec->configuredclockspeed = 0;
+    rec->configuredclockspeed = 1600;
     rec->devicelocator        = L"DIMM 0";
     rec->formfactor           = 8; /* DIMM */
     rec->memorytype           = 9; /* RAM */
-    rec->partnumber           = NULL;
+    rec->partnumber           = L"BLS8G3D1609DS1S00";
     if (!match_row( table, row, cond, &status )) free_row_values( table, row );
     else row++;
 
@@ -3360,6 +3362,27 @@ static WCHAR *get_osname( const WCHAR *caption )
     memcpy( ret + len, partitionW, sizeof(partitionW) );
     return ret;
 }
+static WCHAR *get_osserialnumber(void)
+{
+    HKEY hkey = 0;
+    DWORD size, type;
+    WCHAR *ret = NULL;
+
+    if (!RegOpenKeyExW( HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_READ, &hkey ) &&
+        !RegQueryValueExW( hkey, L"ProductId", NULL, &type, NULL, &size ) && type == REG_SZ &&
+        (ret = heap_alloc( size + sizeof(WCHAR) )))
+    {
+        size += sizeof(WCHAR);
+        if (RegQueryValueExW( hkey, L"ProductId", NULL, NULL, (BYTE *)ret, &size ))
+        {
+            heap_free( ret );
+            ret = NULL;
+        }
+    }
+    if (hkey) RegCloseKey( hkey );
+    if (!ret) return heap_strdupW( L"12345-OEM-1234567-12345" );
+    return ret;
+}
 static WCHAR *get_osversion( OSVERSIONINFOEXW *ver )
 {
     WCHAR *ret = heap_alloc( 33 * sizeof(WCHAR) );
@@ -3414,7 +3437,7 @@ static enum fill_status fill_operatingsystem( struct table *table, const struct 
     rec->osproductsuite         = 2461140; /* Windows XP Professional  */
     rec->ostype                 = 18;      /* WINNT */
     rec->primary                = -1;
-    rec->serialnumber           = L"12345-OEM-1234567-12345";
+    rec->serialnumber           = get_osserialnumber();
     rec->servicepackmajor       = ver.wServicePackMajor;
     rec->servicepackminor       = ver.wServicePackMinor;
     rec->suitemask              = 272;     /* Single User + Terminal */
@@ -3761,7 +3784,7 @@ static enum fill_status fill_systemenclosure( struct table *table, const struct 
 
 static WCHAR *get_pnpdeviceid( DXGI_ADAPTER_DESC *desc )
 {
-    static const WCHAR *fmtW = L"PCI\\VEN_%04X&DEV_%04X&SUBSYS_%08X&REV_%02X\\0&DEADBEEF&0&DEAD";
+    static const WCHAR fmtW[] = L"PCI\\VEN_%04X&DEV_%04X&SUBSYS_%08X&REV_%02X\\0&DEADBEEF&0&DEAD";
     UINT len = sizeof(fmtW) + 2;
     WCHAR *ret;
 

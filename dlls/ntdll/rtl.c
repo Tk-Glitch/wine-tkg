@@ -97,6 +97,16 @@ static const DWORD CRC_table[256] =
     0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
 };
 
+static const int hex_table[] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* 0x00-0x0F */
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* 0x10-0x1F */
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* 0x20-0x2F */
+     0,  1,  2,  3,  4,  5,  6,  7,  8,  9, -1, -1, -1, -1, -1, -1, /* 0x30-0x3F */
+    -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* 0x40-0x4F */
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* 0x50-0x5F */
+    -1, 10, 11, 12, 13, 14, 15                                      /* 0x60-0x66 */
+};
+
 #if defined(_WIN64) && !defined(_MSC_VER)
 static inline unsigned char _InterlockedCompareExchange128(__int64 *dest, __int64 xchg_high, __int64 xchg_low, __int64 *compare)
 {
@@ -108,22 +118,12 @@ static inline unsigned char _InterlockedCompareExchange128(__int64 *dest, __int6
                           : "m" (dest[0]), "m" (dest[1]), "3" (compare[0]), "4" (compare[1]),
                             "c" (xchg_high), "b" (xchg_low) );
 #else
-    ret = __sync_bool_compare_and_swap( (__int128 *)dest, (__int128 *)compare,
+    ret = __sync_bool_compare_and_swap( (__int128 *)dest, *(__int128 *)compare,
                                         ((__int128)xchg_high << 64) | xchg_low );
 #endif
     return ret;
 }
 #endif
-
-static const int hex_table[] = {
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* 0x00-0x0F */
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* 0x10-0x1F */
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* 0x20-0x2F */
-     0,  1,  2,  3,  4,  5,  6,  7,  8,  9, -1, -1, -1, -1, -1, -1, /* 0x30-0x3F */
-    -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* 0x40-0x4F */
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* 0x50-0x5F */
-    -1, 10, 11, 12, 13, 14, 15                                      /* 0x60-0x66 */
-};
 
 /*
  *	resource functions
@@ -1410,109 +1410,6 @@ CHAR * WINAPI RtlIpv4AddressToStringA(const IN_ADDR *pin, LPSTR buffer)
 
     if (RtlIpv4AddressToStringExA(pin, 0, buffer, &size)) size = 0;
     return buffer + size - 1;
-}
-
-/***********************************************************************
- * RtlIpv6AddressToStringExA [NTDLL.@]
- */
-NTSTATUS WINAPI RtlIpv6AddressToStringExA(const IN6_ADDR *address, ULONG scope, USHORT port, char *str, ULONG *len)
-{
-    char buffer[64];
-    int buffer_len;
-    NTSTATUS ret;
-
-    FIXME("(%p %u %u %p %p): semi-stub\n", address, scope, port, str, len);
-
-    if (!address || !str || !len)
-        return STATUS_INVALID_PARAMETER;
-
-    if (scope && port)
-    {
-        buffer_len = sprintf(buffer, "[%x:%x:%x:%x:%x:%x:%x:%x%%%u]:%u",
-                             ntohs(address->u.Word[0]), ntohs(address->u.Word[1]),
-                             ntohs(address->u.Word[2]), ntohs(address->u.Word[3]),
-                             ntohs(address->u.Word[4]), ntohs(address->u.Word[5]),
-                             ntohs(address->u.Word[6]), ntohs(address->u.Word[7]),
-                             scope, ntohs(port));
-    }
-    else if (scope)
-    {
-        buffer_len = sprintf(buffer, "%x:%x:%x:%x:%x:%x:%x:%x%%%u",
-                             ntohs(address->u.Word[0]), ntohs(address->u.Word[1]),
-                             ntohs(address->u.Word[2]), ntohs(address->u.Word[3]),
-                             ntohs(address->u.Word[4]), ntohs(address->u.Word[5]),
-                             ntohs(address->u.Word[6]), ntohs(address->u.Word[7]),
-                             scope);
-    }
-    else if (port)
-    {
-        buffer_len = sprintf(buffer, "[%x:%x:%x:%x:%x:%x:%x:%x]:%u",
-                             ntohs(address->u.Word[0]), ntohs(address->u.Word[1]),
-                             ntohs(address->u.Word[2]), ntohs(address->u.Word[3]),
-                             ntohs(address->u.Word[4]), ntohs(address->u.Word[5]),
-                             ntohs(address->u.Word[6]), ntohs(address->u.Word[7]),
-                             ntohs(port));
-    }
-    else
-    {
-        buffer_len = sprintf(buffer, "%x:%x:%x:%x:%x:%x:%x:%x",
-                             ntohs(address->u.Word[0]), ntohs(address->u.Word[1]),
-                             ntohs(address->u.Word[2]), ntohs(address->u.Word[3]),
-                             ntohs(address->u.Word[4]), ntohs(address->u.Word[5]),
-                             ntohs(address->u.Word[6]), ntohs(address->u.Word[7]));
-    }
-    buffer[buffer_len] = 0;
-    buffer_len++;
-
-    if (buffer_len <= *len)
-    {
-        strcpy(str, buffer);
-        ret = STATUS_SUCCESS;
-    }
-    else
-    {
-        ret = STATUS_INVALID_PARAMETER;
-    }
-
-    *len = buffer_len;
-    return ret;
-}
-
-/***********************************************************************
- * RtlIpv6AddressToStringA [NTDLL.@]
- */
-char * WINAPI RtlIpv6AddressToStringA(const IN6_ADDR *address, char *str)
-{
-    ULONG len = 46;
-    if (!address || !str) return str;
-    str[45] = 0;
-    if (FAILED(RtlIpv6AddressToStringExA(address, 0, 0, str, &len)))
-        return str;
-    return str + len - 1;
-}
-
-/***********************************************************************
- * RtlIpv6AddressToStringExW [NTDLL.@]
- */
-NTSTATUS WINAPI RtlIpv6AddressToStringExW(const IN6_ADDR *address, ULONG scope, USHORT port, WCHAR *str, ULONG *len)
-{
-    char cstr[64];
-    NTSTATUS ret = RtlIpv6AddressToStringExA(address, scope, port, cstr, len);
-    if (SUCCEEDED(ret)) RtlMultiByteToUnicodeN(str, *len * sizeof(WCHAR), NULL, cstr, *len);
-    return ret;
-}
-
-/***********************************************************************
- * RtlIpv6AddressToStringW [NTDLL.@]
- */
-WCHAR * WINAPI RtlIpv6AddressToStringW(const IN6_ADDR *address, WCHAR *str)
-{
-    ULONG len = 46;
-    if (!address || !str) return str;
-    str[45] = 0;
-    if (FAILED(RtlIpv6AddressToStringExW(address, 0, 0, str, &len)))
-        return str;
-    return str + len - 1;
 }
 
 /***********************************************************************

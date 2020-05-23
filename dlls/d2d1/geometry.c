@@ -409,6 +409,16 @@ static void d2d_point_normalise(D2D1_POINT_2F *p)
         d2d_point_scale(p, 1.0f / l);
 }
 
+static BOOL d2d_vertex_type_is_bezier(enum d2d_vertex_type t)
+{
+    return (t == D2D_VERTEX_TYPE_BEZIER || t == D2D_VERTEX_TYPE_SPLIT_BEZIER);
+}
+
+static BOOL d2d_vertex_type_is_split_bezier(enum d2d_vertex_type t)
+{
+    return t == D2D_VERTEX_TYPE_SPLIT_BEZIER;
+}
+
 /* This implementation is based on the paper "Adaptive Precision
  * Floating-Point Arithmetic and Fast Robust Geometric Predicates" and
  * associated (Public Domain) code by Jonathan Richard Shewchuk. */
@@ -613,33 +623,35 @@ static BOOL d2d_figure_add_vertex(struct d2d_figure *figure, D2D1_POINT_2F verte
     return TRUE;
 }
 
-static BOOL d2d_figure_insert_bezier_control(struct d2d_figure *figure, size_t idx, const D2D1_POINT_2F *p)
+static BOOL d2d_figure_insert_bezier_controls(struct d2d_figure *figure,
+        size_t idx, size_t count, const D2D1_POINT_2F *p)
 {
     if (!d2d_array_reserve((void **)&figure->bezier_controls, &figure->bezier_controls_size,
-            figure->bezier_control_count + 1, sizeof(*figure->bezier_controls)))
+            figure->bezier_control_count + count, sizeof(*figure->bezier_controls)))
     {
         ERR("Failed to grow bezier controls array.\n");
         return FALSE;
     }
 
-    memmove(&figure->bezier_controls[idx + 1], &figure->bezier_controls[idx],
+    memmove(&figure->bezier_controls[idx + count], &figure->bezier_controls[idx],
             (figure->bezier_control_count - idx) * sizeof(*figure->bezier_controls));
-    figure->bezier_controls[idx] = *p;
-    ++figure->bezier_control_count;
+    memcpy(&figure->bezier_controls[idx], p, count * sizeof(*figure->bezier_controls));
+    figure->bezier_control_count += count;
 
     return TRUE;
 }
 
-static BOOL d2d_figure_add_bezier_control(struct d2d_figure *figure, const D2D1_POINT_2F *p)
+static BOOL d2d_figure_add_bezier_controls(struct d2d_figure *figure, size_t count, const D2D1_POINT_2F *p)
 {
     if (!d2d_array_reserve((void **)&figure->bezier_controls, &figure->bezier_controls_size,
-            figure->bezier_control_count + 1, sizeof(*figure->bezier_controls)))
+            figure->bezier_control_count + count, sizeof(*figure->bezier_controls)))
     {
         ERR("Failed to grow bezier controls array.\n");
         return FALSE;
     }
 
-    figure->bezier_controls[figure->bezier_control_count++] = *p;
+    memcpy(&figure->bezier_controls[figure->bezier_control_count], p, count * sizeof(*figure->bezier_controls));
+    figure->bezier_control_count += count;
 
     return TRUE;
 }
@@ -1875,7 +1887,7 @@ static BOOL d2d_geometry_apply_intersections(struct d2d_geometry *geometry,
 
         figure = &geometry->u.path.figures[inter->figure_idx];
         vertex_type = figure->vertex_types[inter->vertex_idx + vertex_offset];
-        if (vertex_type != D2D_VERTEX_TYPE_BEZIER && vertex_type != D2D_VERTEX_TYPE_SPLIT_BEZIER)
+        if (!d2d_vertex_type_is_bezier(vertex_type))
         {
             if (!d2d_figure_insert_vertex(&geometry->u.path.figures[inter->figure_idx],
                     inter->vertex_idx + vertex_offset + 1, inter->p))
@@ -1908,7 +1920,7 @@ static BOOL d2d_geometry_apply_intersections(struct d2d_geometry *geometry,
         d2d_point_lerp(&q[1], p[1], p[2], t);
 
         figure->bezier_controls[inter->control_idx + control_offset] = q[0];
-        if (!(d2d_figure_insert_bezier_control(figure, inter->control_idx + control_offset + 1, &q[1])))
+        if (!(d2d_figure_insert_bezier_controls(figure, inter->control_idx + control_offset + 1, 1, &q[1])))
             return FALSE;
         ++control_offset;
 
@@ -1961,9 +1973,9 @@ static BOOL d2d_geometry_intersect_self(struct d2d_geometry *geometry)
                 for (idx_q.vertex_idx = 0; idx_q.vertex_idx < max_q; ++idx_q.vertex_idx)
                 {
                     type_q = figure_q->vertex_types[idx_q.vertex_idx];
-                    if (type_q == D2D_VERTEX_TYPE_BEZIER)
+                    if (d2d_vertex_type_is_bezier(type_q))
                     {
-                        if (type_p == D2D_VERTEX_TYPE_BEZIER)
+                        if (d2d_vertex_type_is_bezier(type_p))
                         {
                             if (!d2d_geometry_intersect_bezier_bezier(geometry, &intersections,
                                     &idx_p, 0.0f, 1.0f, &idx_q, 0.0f, 1.0f))
@@ -1978,7 +1990,7 @@ static BOOL d2d_geometry_intersect_self(struct d2d_geometry *geometry)
                     }
                     else
                     {
-                        if (type_p == D2D_VERTEX_TYPE_BEZIER)
+                        if (d2d_vertex_type_is_bezier(type_p))
                         {
                             if (!d2d_geometry_intersect_bezier_line(geometry, &intersections, &idx_p, &idx_q))
                                 goto done;
@@ -1991,7 +2003,7 @@ static BOOL d2d_geometry_intersect_self(struct d2d_geometry *geometry)
                     }
                 }
             }
-            if (type_p == D2D_VERTEX_TYPE_BEZIER)
+            if (d2d_vertex_type_is_bezier(type_p))
                 ++idx_p.control_idx;
         }
     }
@@ -2328,7 +2340,7 @@ static BOOL d2d_geometry_add_figure_outline(struct d2d_geometry *geometry,
         if (!i)
         {
             prev_type = figure->vertex_types[figure->vertex_count - 1];
-            if (prev_type == D2D_VERTEX_TYPE_BEZIER)
+            if (d2d_vertex_type_is_bezier(prev_type))
                 prev = &figure->bezier_controls[figure->bezier_control_count - 1];
             else
                 prev = &figure->vertices[figure->vertex_count - 1];
@@ -2336,13 +2348,13 @@ static BOOL d2d_geometry_add_figure_outline(struct d2d_geometry *geometry,
         else
         {
             prev_type = figure->vertex_types[i - 1];
-            if (prev_type == D2D_VERTEX_TYPE_BEZIER)
+            if (d2d_vertex_type_is_bezier(prev_type))
                 prev = &figure->bezier_controls[bezier_idx - 1];
             else
                 prev = &figure->vertices[i - 1];
         }
 
-        if (type == D2D_VERTEX_TYPE_BEZIER)
+        if (d2d_vertex_type_is_bezier(type))
             next = &figure->bezier_controls[bezier_idx++];
         else if (i == figure->vertex_count - 1)
             next = &figure->vertices[0];
@@ -2372,7 +2384,7 @@ static BOOL d2d_geometry_add_figure_outline(struct d2d_geometry *geometry,
             ERR("Failed to add line segment.\n");
             return FALSE;
         }
-        else if (type == D2D_VERTEX_TYPE_BEZIER)
+        else if (d2d_vertex_type_is_bezier(type))
         {
             const D2D1_POINT_2F *p2;
 
@@ -2586,7 +2598,7 @@ static void STDMETHODCALLTYPE d2d_geometry_sink_AddBeziers(ID2D1GeometrySink *if
         d2d_rect_get_bezier_bounds(&bezier_bounds, &figure->vertices[figure->vertex_count - 1],
                 &p, &beziers[i].point3);
 
-        if (!d2d_figure_add_bezier_control(figure, &p))
+        if (!d2d_figure_add_bezier_controls(figure, 1, &p))
         {
             ERR("Failed to add bezier control.\n");
             geometry->u.path.state = D2D_GEOMETRY_STATE_ERROR;
@@ -2674,8 +2686,7 @@ static BOOL d2d_geometry_get_bezier_segment_idx(struct d2d_geometry *geometry, s
 
         for (; idx->vertex_idx < figure->vertex_count; ++idx->vertex_idx)
         {
-            if (figure->vertex_types[idx->vertex_idx] == D2D_VERTEX_TYPE_BEZIER
-                    || figure->vertex_types[idx->vertex_idx] == D2D_VERTEX_TYPE_SPLIT_BEZIER)
+            if (d2d_vertex_type_is_bezier(figure->vertex_types[idx->vertex_idx]))
                 return TRUE;
         }
     }
@@ -2815,7 +2826,7 @@ static BOOL d2d_geometry_split_bezier(struct d2d_geometry *geometry, const struc
     d2d_point_lerp(&q[2], &q[0], &q[1], 0.5f);
 
     figure->bezier_controls[idx->control_idx] = q[0];
-    if (!(d2d_figure_insert_bezier_control(figure, idx->control_idx + 1, &q[1])))
+    if (!(d2d_figure_insert_bezier_controls(figure, idx->control_idx + 1, 1, &q[1])))
         return FALSE;
     if (!(d2d_figure_insert_vertex(figure, idx->vertex_idx + 1, q[2])))
         return FALSE;
@@ -3003,7 +3014,7 @@ static void STDMETHODCALLTYPE d2d_geometry_sink_AddQuadraticBeziers(ID2D1Geometr
                 &beziers[i].point1, &beziers[i].point2);
 
         figure->vertex_types[figure->vertex_count - 1] = D2D_VERTEX_TYPE_BEZIER;
-        if (!d2d_figure_add_bezier_control(figure, &beziers[i].point1))
+        if (!d2d_figure_add_bezier_controls(figure, 1, &beziers[i].point1))
         {
             ERR("Failed to add bezier.\n");
             geometry->u.path.state = D2D_GEOMETRY_STATE_ERROR;
@@ -3198,7 +3209,7 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_GetBounds(ID2D1PathGeometry *
         for (bezier_idx = 0, ++j; j < figure->vertex_count; ++j)
         {
             if (figure->vertex_types[j] == D2D_VERTEX_TYPE_NONE
-                    || figure->vertex_types[j] == D2D_VERTEX_TYPE_SPLIT_BEZIER)
+                    || d2d_vertex_type_is_split_bezier(figure->vertex_types[j]))
                 continue;
 
             switch (type)
@@ -3230,7 +3241,7 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_GetBounds(ID2D1PathGeometry *
             type = figure->vertex_types[j];
         }
 
-        if (type == D2D_VERTEX_TYPE_BEZIER)
+        if (d2d_vertex_type_is_bezier(type))
         {
             p1 = figure->original_bezier_controls[bezier_idx++];
             d2d_point_transform(&p1, transform, p1.x, p1.y);
@@ -3401,7 +3412,7 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Simplify(ID2D1PathGeometry *i
         for (bezier_idx = 0, ++j; j < figure->vertex_count; ++j)
         {
             if (figure->vertex_types[j] == D2D_VERTEX_TYPE_NONE
-                    || figure->vertex_types[j] == D2D_VERTEX_TYPE_SPLIT_BEZIER)
+                    || d2d_vertex_type_is_split_bezier(figure->vertex_types[j]))
                 continue;
 
             switch (type)
@@ -3436,7 +3447,7 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Simplify(ID2D1PathGeometry *i
             type = figure->vertex_types[j];
         }
 
-        if (type == D2D_VERTEX_TYPE_BEZIER)
+        if (d2d_vertex_type_is_bezier(type))
         {
             p1 = figure->original_bezier_controls[bezier_idx++];
             if (transform)

@@ -30,9 +30,6 @@
 #ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
 #endif
-#ifdef HAVE_SYS_PRCTL_H
-# include <sys/prctl.h>
-#endif
 #ifdef HAVE_SYS_TIMES_H
 #include <sys/times.h>
 #endif
@@ -58,8 +55,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(thread);
 #endif
 
 struct _KUSER_SHARED_DATA *user_shared_data = NULL;
-size_t user_shared_data_size = 0;
-static const WCHAR default_windirW[] = {'C',':','\\','w','i','n','d','o','w','s',0};
 
 extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
 
@@ -205,66 +200,153 @@ BOOL read_process_time(int unix_pid, int unix_tid, unsigned long clk_tck,
 
 
 /***********************************************************************
- *           set_process_name
+ *		__wine_dbg_get_channel_flags  (NTDLL.@)
  *
- * Change the process name in the ps output.
+ * Get the flags to use for a given channel, possibly setting them too in case of lazy init
  */
-static void set_process_name( int argc, char *argv[] )
+unsigned char __cdecl __wine_dbg_get_channel_flags( struct __wine_debug_channel *channel )
 {
-    BOOL shift_strings;
-    char *p, *name;
-    int i;
-
-#ifdef HAVE_SETPROCTITLE
-    setproctitle("-%s", argv[1]);
-    shift_strings = FALSE;
-#else
-    p = argv[0];
-
-    shift_strings = (argc >= 2);
-    for (i = 1; i < argc; i++)
-    {
-        p += strlen(p) + 1;
-        if (p != argv[i])
-        {
-            shift_strings = FALSE;
-            break;
-        }
-    }
-#endif
-
-    if (shift_strings)
-    {
-        int offset = argv[1] - argv[0];
-        char *end = argv[argc-1] + strlen(argv[argc-1]) + 1;
-        memmove( argv[0], argv[1], end - argv[1] );
-        memset( end - offset, 0, offset );
-        for (i = 1; i < argc; i++)
-            argv[i-1] = argv[i] - offset;
-        argv[i-1] = NULL;
-    }
-    else
-    {
-        /* remove argv[0] */
-        memmove( argv, argv + 1, argc * sizeof(argv[0]) );
-    }
-
-    name = argv[0];
-    if ((p = strrchr( name, '\\' ))) name = p + 1;
-    if ((p = strrchr( name, '/' ))) name = p + 1;
-
-#if defined(HAVE_SETPROGNAME)
-    setprogname( name );
-#endif
-
-#ifdef HAVE_PRCTL
-#ifndef PR_SET_NAME
-# define PR_SET_NAME 15
-#endif
-    prctl( PR_SET_NAME, name );
-#endif  /* HAVE_PRCTL */
+    return unix_funcs->dbg_get_channel_flags( channel );
 }
 
+/***********************************************************************
+ *		__wine_dbg_strdup  (NTDLL.@)
+ */
+const char * __cdecl __wine_dbg_strdup( const char *str )
+{
+    return unix_funcs->dbg_strdup( str );
+}
+
+/***********************************************************************
+ *		__wine_dbg_header  (NTDLL.@)
+ */
+int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
+                               const char *function )
+{
+    return unix_funcs->dbg_header( cls, channel, function );
+}
+
+/***********************************************************************
+ *		__wine_dbg_output  (NTDLL.@)
+ */
+int __cdecl __wine_dbg_output( const char *str )
+{
+    return unix_funcs->dbg_output( str );
+}
+
+static void fill_user_shared_data( struct _KUSER_SHARED_DATA *data )
+{
+    RTL_OSVERSIONINFOEXW version;
+    SYSTEM_CPU_INFORMATION sci;
+    SYSTEM_BASIC_INFORMATION sbi;
+    BOOLEAN *features = data->ProcessorFeatures;
+
+    version.dwOSVersionInfoSize = sizeof(version);
+    RtlGetVersion( &version );
+    virtual_get_system_info( &sbi );
+    NtQuerySystemInformation( SystemCpuInformation, &sci, sizeof(sci), NULL );
+
+    data->TickCountMultiplier         = 1 << 24;
+    data->LargePageMinimum            = 2 * 1024 * 1024;
+    data->NtBuildNumber               = version.dwBuildNumber;
+    data->NtProductType               = version.wProductType;
+    data->ProductTypeIsValid          = TRUE;
+    data->NativeProcessorArchitecture = sci.Architecture;
+    data->NtMajorVersion              = version.dwMajorVersion;
+    data->NtMinorVersion              = version.dwMinorVersion;
+    data->SuiteMask                   = version.wSuiteMask;
+    data->NumberOfPhysicalPages       = sbi.MmNumberOfPhysicalPages;
+    wcscpy( data->NtSystemRoot, windows_dir );
+
+    /* Pretend we don't support the SYSCALL instruction on x86-64. Needed for
+     * Chromium; see output_syscall_thunks_x64() in winebuild. */
+    data->SystemCallPad[0] = 1;
+
+    switch (sci.Architecture)
+    {
+    case PROCESSOR_ARCHITECTURE_INTEL:
+    case PROCESSOR_ARCHITECTURE_AMD64:
+        features[PF_COMPARE_EXCHANGE_DOUBLE]              = !!(sci.FeatureSet & CPU_FEATURE_CX8);
+        features[PF_MMX_INSTRUCTIONS_AVAILABLE]           = !!(sci.FeatureSet & CPU_FEATURE_MMX);
+        features[PF_XMMI_INSTRUCTIONS_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_SSE);
+        features[PF_3DNOW_INSTRUCTIONS_AVAILABLE]         = !!(sci.FeatureSet & CPU_FEATURE_3DNOW);
+        features[PF_RDTSC_INSTRUCTION_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_TSC);
+        features[PF_PAE_ENABLED]                          = !!(sci.FeatureSet & CPU_FEATURE_PAE);
+        features[PF_XMMI64_INSTRUCTIONS_AVAILABLE]        = !!(sci.FeatureSet & CPU_FEATURE_SSE2);
+        features[PF_SSE3_INSTRUCTIONS_AVAILABLE]          = !!(sci.FeatureSet & CPU_FEATURE_SSE3);
+        features[PF_XSAVE_ENABLED]                        = !!(sci.FeatureSet & CPU_FEATURE_XSAVE);
+        features[PF_COMPARE_EXCHANGE128]                  = !!(sci.FeatureSet & CPU_FEATURE_CX128);
+        features[PF_SSE_DAZ_MODE_AVAILABLE]               = !!(sci.FeatureSet & CPU_FEATURE_DAZ);
+        features[PF_NX_ENABLED]                           = !!(sci.FeatureSet & CPU_FEATURE_NX);
+        features[PF_SECOND_LEVEL_ADDRESS_TRANSLATION]     = !!(sci.FeatureSet & CPU_FEATURE_2NDLEV);
+        features[PF_VIRT_FIRMWARE_ENABLED]                = !!(sci.FeatureSet & CPU_FEATURE_VIRT);
+        features[PF_RDWRFSGSBASE_AVAILABLE]               = !!(sci.FeatureSet & CPU_FEATURE_RDFS);
+        features[PF_FASTFAIL_AVAILABLE]                   = TRUE;
+        break;
+    case PROCESSOR_ARCHITECTURE_ARM:
+        features[PF_ARM_VFP_32_REGISTERS_AVAILABLE]       = !!(sci.FeatureSet & CPU_FEATURE_ARM_VFP_32);
+        features[PF_ARM_NEON_INSTRUCTIONS_AVAILABLE]      = !!(sci.FeatureSet & CPU_FEATURE_ARM_NEON);
+        features[PF_ARM_V8_INSTRUCTIONS_AVAILABLE]        = (sci.Level >= 8);
+        break;
+    case PROCESSOR_ARCHITECTURE_ARM64:
+        features[PF_ARM_V8_INSTRUCTIONS_AVAILABLE]        = TRUE;
+        features[PF_ARM_V8_CRC32_INSTRUCTIONS_AVAILABLE]  = !!(sci.FeatureSet & CPU_FEATURE_ARM_V8_CRC32);
+        features[PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE] = !!(sci.FeatureSet & CPU_FEATURE_ARM_V8_CRYPTO);
+        break;
+    }
+}
+
+HANDLE user_shared_data_init_done(void)
+{
+    static const WCHAR wine_usdW[] = {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s',
+                                      '\\','_','_','w','i','n','e','_','u','s','e','r','_','s','h','a','r','e','d','_','d','a','t','a',0};
+    OBJECT_ATTRIBUTES attr = {sizeof(attr)};
+    UNICODE_STRING wine_usd_str;
+    LARGE_INTEGER section_size;
+    NTSTATUS status;
+    HANDLE section;
+    SIZE_T size;
+    void *addr;
+    int res, fd, needs_close;
+
+    section_size.QuadPart = sizeof(*user_shared_data);
+
+    RtlInitUnicodeString( &wine_usd_str, wine_usdW );
+    InitializeObjectAttributes( &attr, &wine_usd_str, OBJ_OPENIF, NULL, NULL );
+    if ((status = NtCreateSection( &section, SECTION_ALL_ACCESS, &attr,
+                                   &section_size, PAGE_READWRITE, SEC_COMMIT, NULL )) &&
+        status != STATUS_OBJECT_NAME_EXISTS)
+    {
+        MESSAGE( "wine: failed to create or open the USD section: %08x\n", status );
+        exit(1);
+    }
+
+    if (status != STATUS_OBJECT_NAME_EXISTS)
+    {
+        addr = NULL;
+        size = sizeof(*user_shared_data);
+        if ((status = NtMapViewOfSection( section, NtCurrentProcess(), &addr, 0, 0, 0,
+                                          &size, 0, 0, PAGE_READWRITE )))
+        {
+            MESSAGE( "wine: failed to initialize the USD section: %08x\n", status );
+            exit(1);
+        }
+
+        fill_user_shared_data( addr );
+        NtUnmapViewOfSection( NtCurrentProcess(), addr );
+    }
+
+    if ((res = server_get_unix_fd( section, 0, &fd, &needs_close, NULL, NULL )) ||
+        (user_shared_data != mmap( user_shared_data, sizeof(*user_shared_data),
+                                   PROT_READ, MAP_SHARED | MAP_FIXED, fd, 0 )))
+    {
+        MESSAGE( "wine: failed to remap the process USD: %d\n", res );
+        exit(1);
+    }
+    if (needs_close) close( fd );
+
+    return section;
+}
 
 /***********************************************************************
  *           thread_init
@@ -275,11 +357,9 @@ static void set_process_name( int argc, char *argv[] )
  */
 TEB *thread_init(void)
 {
-    SYSTEM_BASIC_INFORMATION sbi;
     TEB *teb;
     void *addr;
     SIZE_T size;
-    LARGE_INTEGER now;
     NTSTATUS status;
     struct ntdll_thread_data *thread_data;
 
@@ -289,7 +369,7 @@ TEB *thread_init(void)
     /* reserve space for shared user data */
 
     addr = (void *)0x7ffe0000;
-    size = 0x10000;
+    size = 0x2000;
     status = NtAllocateVirtualMemory( NtCurrentProcess(), &addr, 0, &size,
                                       MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE );
     if (status)
@@ -298,8 +378,13 @@ TEB *thread_init(void)
         exit(1);
     }
     user_shared_data = addr;
-    user_shared_data_size = size;
-    memcpy( user_shared_data->NtSystemRoot, default_windirW, sizeof(default_windirW) );
+
+#if defined(__APPLE__) && defined(__x86_64__)
+    *((DWORD*)((char*)user_shared_data + 0x1000)) = __wine_syscall_dispatcher;
+#endif
+
+    /* Init this field early for x86_64 syscall thunks. */
+    user_shared_data->SystemCallPad[0] = 1;
 
     /* allocate and initialize the PEB and initial TEB */
 
@@ -329,14 +414,6 @@ TEB *thread_init(void)
     InitializeListHead( &ldr.InInitializationOrderModuleList );
     *(ULONG_PTR *)peb->Reserved = get_image_addr();
 
-#if defined(__APPLE__) && defined(__x86_64__)
-    *((DWORD*)((char*)user_shared_data + 0x1000)) = __wine_syscall_dispatcher;
-#endif
-
-    /* Pretend we don't support the SYSCALL instruction on x86-64. Needed for
-     * Chromium; see output_syscall_thunks_x64() in winebuild. */
-    user_shared_data->SystemCallPad[0] = 1;
-
     /*
      * Starting with Vista, the first user to log on has session id 1.
      * Session id 0 is for processes that don't interact with the user (like services).
@@ -352,23 +429,9 @@ TEB *thread_init(void)
     thread_data->esync_apc_fd = -1;
     thread_data->fsync_apc_futex = NULL;
 
-    debug_init();
-    init_paths();
-    set_process_name( __wine_main_argc, __wine_main_argv );
-
-    /* initialize time values in user_shared_data */
-    NtQuerySystemTime( &now );
-    user_shared_data->SystemTime.LowPart = now.u.LowPart;
-    user_shared_data->SystemTime.High1Time = user_shared_data->SystemTime.High2Time = now.u.HighPart;
-    user_shared_data->u.TickCountQuad = (now.QuadPart - server_start_time) / 10000;
-    user_shared_data->u.TickCount.High2Time = user_shared_data->u.TickCount.High1Time;
-    user_shared_data->TickCountLowDeprecated = user_shared_data->u.TickCount.LowPart;
-    user_shared_data->TickCountMultiplier = 1 << 24;
+    unix_funcs->dbg_init();
+    unix_funcs->get_paths( &build_dir, &data_dir, &config_dir );
     fill_cpu_info();
-
-    virtual_get_system_info( &sbi );
-    user_shared_data->NumberOfPhysicalPages = sbi.MmNumberOfPhysicalPages;
-
     return teb;
 }
 

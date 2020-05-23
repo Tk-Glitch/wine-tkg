@@ -106,9 +106,12 @@ static void test_GetSetEnvironmentVariableA(void)
        GetLastError());
 
     /* Try to retrieve the environment variable we just set */
+    SetLastError(0xdeadbeef);
     ret_size = GetEnvironmentVariableA(name, NULL, 0);
     ok(ret_size == strlen(value) + 1,
        "should return length with terminating 0 ret_size=%d\n", ret_size);
+    ok(GetLastError() == 0xdeadbeef,
+       "should not fail with zero size but GetLastError=%d\n", GetLastError());
 
     lstrcpyA(buf, "foo");
     ret_size = GetEnvironmentVariableA(name, buf, lstrlenA(value));
@@ -157,13 +160,23 @@ static void test_GetSetEnvironmentVariableA(void)
        "should not fail with empty value but GetLastError=%d\n", GetLastError());
 
     lstrcpyA(buf, "foo");
-    SetLastError(0);
+    SetLastError(0xdeadbeef);
     ret_size = GetEnvironmentVariableA(name, buf, lstrlenA(value) + 1);
     ok(ret_size == 0 &&
-       ((GetLastError() == 0 && lstrcmpA(buf, "") == 0) ||
+       ((GetLastError() == 0xdeadbeef && lstrcmpA(buf, "") == 0) ||
         (GetLastError() == ERROR_ENVVAR_NOT_FOUND)),
        "%s should be set to \"\" (NT) or removed (Win9x) but ret_size=%d GetLastError=%d and buf=%s\n",
        name, ret_size, GetLastError(), buf);
+
+    SetLastError(0xdeadbeef);
+    ret_size = GetEnvironmentVariableA(name, NULL, 0);
+    ok(ret_size == 1 ||
+       broken(ret_size == 0), /* XP */
+       "should return 1 for empty string but ret_size=%d GetLastError=%d\n",
+       ret_size, GetLastError());
+    ok(GetLastError() == 0xdeadbeef ||
+       broken(GetLastError() == ERROR_MORE_DATA), /* XP */
+       "should not fail with zero size but GetLastError=%d\n", GetLastError());
 
     /* Test the limits */
     SetLastError(0xdeadbeef);
@@ -208,10 +221,13 @@ static void test_GetSetEnvironmentVariableW(void)
        GetLastError());
 
     /* Try to retrieve the environment variable we just set */
+    SetLastError(0xdeadbeef);
     ret_size = GetEnvironmentVariableW(name, NULL, 0);
     ok(ret_size == lstrlenW(value) + 1,
        "should return length with terminating 0 ret_size=%d\n",
        ret_size);
+    ok(GetLastError() == 0xdeadbeef,
+       "should not fail with zero size but GetLastError=%d\n", GetLastError());
 
     lstrcpyW(buf, fooW);
     ret_size = GetEnvironmentVariableW(name, buf, lstrlenW(value));
@@ -262,14 +278,24 @@ static void test_GetSetEnvironmentVariableW(void)
     ok(ret == TRUE, "should not fail with empty value but GetLastError=%d\n", GetLastError());
 
     lstrcpyW(buf, fooW);
-    SetLastError(0);
+    SetLastError(0xdeadbeef);
     ret_size = GetEnvironmentVariableW(name, buf, lstrlenW(value) + 1);
     ok(ret_size == 0 &&
-       ((GetLastError() == 0 && lstrcmpW(buf, empty_strW) == 0) ||
+       ((GetLastError() == 0xdeadbeef && lstrcmpW(buf, empty_strW) == 0) ||
         (GetLastError() == ERROR_ENVVAR_NOT_FOUND)),
        "should be set to \"\" (NT) or removed (Win9x) but ret_size=%d GetLastError=%d\n",
        ret_size, GetLastError());
     ok(lstrcmpW(buf, empty_strW) == 0, "should copy an empty string\n");
+
+    SetLastError(0xdeadbeef);
+    ret_size = GetEnvironmentVariableW(name, NULL, 0);
+    ok(ret_size == 1 ||
+       broken(ret_size == 0), /* XP */
+       "should return 1 for empty string but ret_size=%d GetLastError=%d\n",
+       ret_size, GetLastError());
+    ok(GetLastError() == 0xdeadbeef ||
+       broken(GetLastError() == ERROR_MORE_DATA), /* XP */
+       "should not fail with zero size but GetLastError=%d\n", GetLastError());
 
     /* Test the limits */
     SetLastError(0xdeadbeef);

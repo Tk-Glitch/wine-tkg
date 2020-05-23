@@ -54,6 +54,7 @@ struct moniker
     IPropertyBag IPropertyBag_iface;
 };
 
+HRESULT create_filter_data(VARIANT *var, REGFILTER2 *rgf) DECLSPEC_HIDDEN;
 struct moniker *dmo_moniker_create(const GUID class, const GUID clsid) DECLSPEC_HIDDEN;
 struct moniker *codec_moniker_create(const GUID *class, const WCHAR *name) DECLSPEC_HIDDEN;
 struct moniker *filter_moniker_create(const GUID *class, const WCHAR *name) DECLSPEC_HIDDEN;
@@ -61,19 +62,3 @@ HRESULT enum_moniker_create(REFCLSID class, IEnumMoniker **enum_mon) DECLSPEC_HI
 
 extern ICreateDevEnum devenum_factory DECLSPEC_HIDDEN;
 extern IParseDisplayName devenum_parser DECLSPEC_HIDDEN;
-
-/**********************************************************************
- * Global string constant declarations
- */
-
-static const WCHAR backslashW[] = {'\\',0};
-static const WCHAR clsidW[] = {'C','L','S','I','D',0};
-static const WCHAR instanceW[] = {'\\','I','n','s','t','a','n','c','e',0};
-static const WCHAR wszActiveMovieKey[] = {'S','o','f','t','w','a','r','e','\\',
-                                          'M','i','c','r','o','s','o','f','t','\\',
-                                          'A','c','t','i','v','e','M','o','v','i','e','\\',
-                                          'd','e','v','e','n','u','m','\\',0};
-static const WCHAR deviceW[] = {'@','d','e','v','i','c','e',':',0};
-static const WCHAR dmoW[] = {'d','m','o',':',0};
-static const WCHAR swW[] = {'s','w',':',0};
-static const WCHAR cmW[] = {'c','m',':',0};

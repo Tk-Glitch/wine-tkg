@@ -778,7 +778,7 @@ typedef struct {
 enum TT_NAME_WINDOWS_ENCODING_ID
 {
     TT_NAME_WINDOWS_ENCODING_SYMBOL = 0,
-    TT_NAME_WINDOWS_ENCODING_UCS2,
+    TT_NAME_WINDOWS_ENCODING_UNICODE_BMP,
     TT_NAME_WINDOWS_ENCODING_SJIS,
     TT_NAME_WINDOWS_ENCODING_PRC,
     TT_NAME_WINDOWS_ENCODING_BIG5,
@@ -787,7 +787,7 @@ enum TT_NAME_WINDOWS_ENCODING_ID
     TT_NAME_WINDOWS_ENCODING_RESERVED1,
     TT_NAME_WINDOWS_ENCODING_RESERVED2,
     TT_NAME_WINDOWS_ENCODING_RESERVED3,
-    TT_NAME_WINDOWS_ENCODING_UCS4
+    TT_NAME_WINDOWS_ENCODING_UNICODE_FULL
 };
 
 enum TT_NAME_MAC_ENCODING_ID
@@ -1972,7 +1972,8 @@ static UINT get_name_record_codepage(enum OPENTYPE_PLATFORM_ID platform, USHORT 
         switch (encoding)
         {
             case TT_NAME_WINDOWS_ENCODING_SYMBOL:
-            case TT_NAME_WINDOWS_ENCODING_UCS2:
+            case TT_NAME_WINDOWS_ENCODING_UNICODE_BMP:
+            case TT_NAME_WINDOWS_ENCODING_UNICODE_FULL:
                 break;
             case TT_NAME_WINDOWS_ENCODING_SJIS:
                 codepage = 932;
@@ -3210,6 +3211,36 @@ static inline unsigned int dwrite_popcount(unsigned int x)
 #endif
 }
 
+static inline unsigned int dwrite_log2i(unsigned int x)
+{
+#if defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
+    return __builtin_clz(x) ^ 0x1f;
+#else
+    static const unsigned int l[] =
+    {
+        ~0u, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
+          4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+          5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+          5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+          6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+          6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+          6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+          6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+          7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+          7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+          7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+          7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+          7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+          7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+          7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+          7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    };
+    unsigned int i;
+
+    return (i = x >> 16) ? (x = i >> 8) ? l[x] + 24 : l[i] + 16 : (i = x >> 8) ? l[i] + 8 : l[x];
+#endif
+}
+
 static float opentype_scale_gpos_be_value(WORD value, float emsize, UINT16 upem)
 {
     return (short)GET_BE_WORD(value) * emsize / upem;
@@ -3333,7 +3364,7 @@ static unsigned int opentype_layout_get_gsub_subtable(const struct scriptshaping
     return lookup_offset + subtable_offset;
 }
 
-struct lookup
+struct ot_lookup
 {
     unsigned int offset;
     unsigned int subtable_count;
@@ -3406,7 +3437,7 @@ static BOOL glyph_iterator_prev(struct glyph_iterator *iter)
 }
 
 static BOOL opentype_layout_apply_gpos_single_adjustment(struct scriptshaping_context *context,
-        struct glyph_iterator *iter, const struct lookup *lookup)
+        struct glyph_iterator *iter, const struct ot_lookup *lookup)
 {
     struct scriptshaping_cache *cache = context->cache;
     WORD format, value_format, value_len, coverage;
@@ -3469,7 +3500,7 @@ static int gpos_pair_adjustment_compare_format1(const void *g, const void *r)
 }
 
 static BOOL opentype_layout_apply_gpos_pair_adjustment(struct scriptshaping_context *context,
-        struct glyph_iterator *iter, const struct lookup *lookup)
+        struct glyph_iterator *iter, const struct ot_lookup *lookup)
 {
     struct scriptshaping_cache *cache = context->cache;
     unsigned int i, first_glyph, second_glyph;
@@ -3676,7 +3707,7 @@ static void opentype_layout_gpos_get_anchor(const struct scriptshaping_context *
 }
 
 static BOOL opentype_layout_apply_gpos_cursive_attachment(struct scriptshaping_context *context,
-        struct glyph_iterator *iter, const struct lookup *lookup)
+        struct glyph_iterator *iter, const struct ot_lookup *lookup)
 {
     struct scriptshaping_cache *cache = context->cache;
     unsigned int i;
@@ -3760,7 +3791,7 @@ static BOOL opentype_layout_apply_gpos_cursive_attachment(struct scriptshaping_c
 }
 
 static BOOL opentype_layout_apply_gpos_mark_to_base_attachment(struct scriptshaping_context *context,
-        struct glyph_iterator *iter, const struct lookup *lookup)
+        struct glyph_iterator *iter, const struct ot_lookup *lookup)
 {
     struct scriptshaping_cache *cache = context->cache;
     unsigned int i;
@@ -3843,7 +3874,7 @@ static BOOL opentype_layout_apply_gpos_mark_to_base_attachment(struct scriptshap
 }
 
 static BOOL opentype_layout_apply_gpos_mark_to_lig_attachment(struct scriptshaping_context *context,
-        struct glyph_iterator *iter, const struct lookup *lookup)
+        struct glyph_iterator *iter, const struct ot_lookup *lookup)
 {
     struct scriptshaping_cache *cache = context->cache;
     unsigned int i;
@@ -3889,7 +3920,7 @@ static BOOL opentype_layout_apply_gpos_mark_to_lig_attachment(struct scriptshapi
 }
 
 static BOOL opentype_layout_apply_gpos_mark_to_mark_attachment(struct scriptshaping_context *context,
-        struct glyph_iterator *iter, const struct lookup *lookup)
+        struct glyph_iterator *iter, const struct ot_lookup *lookup)
 {
     struct scriptshaping_cache *cache = context->cache;
     unsigned int i;
@@ -3974,13 +4005,13 @@ static BOOL opentype_layout_apply_gpos_mark_to_mark_attachment(struct scriptshap
 }
 
 static BOOL opentype_layout_apply_gpos_contextual_positioning(const struct scriptshaping_context *context,
-        struct glyph_iterator *iter, const struct lookup *lookup)
+        struct glyph_iterator *iter, const struct ot_lookup *lookup)
 {
     return FALSE;
 }
 
 static BOOL opentype_layout_apply_gpos_chaining_contextual_positioning(const struct scriptshaping_context *context,
-        struct glyph_iterator *iter, const struct lookup *lookup)
+        struct glyph_iterator *iter, const struct ot_lookup *lookup)
 {
     return FALSE;
 }
@@ -3990,7 +4021,7 @@ static void opentype_layout_apply_gpos_lookup(struct scriptshaping_context *cont
     struct scriptshaping_cache *cache = context->cache;
     const struct ot_lookup_table *lookup_table;
     struct glyph_iterator iter;
-    struct lookup lookup;
+    struct ot_lookup lookup;
     WORD lookup_type;
 
     lookup.offset = table_read_be_word(&cache->gpos.table, cache->gpos.lookup_list +
@@ -4081,17 +4112,67 @@ static void opentype_layout_apply_gpos_lookup(struct scriptshaping_context *cont
     }
 }
 
+struct lookup
+{
+    unsigned short index;
+    unsigned int mask;
+};
+
 struct lookups
 {
-    int *indexes;
+    struct lookup *lookups;
     size_t capacity;
     size_t count;
 };
 
-static int lookups_sorting_compare(const void *left, const void *right)
+static int lookups_sorting_compare(const void *a, const void *b)
 {
-    return *(int *)left - *(int *)right;
+    const struct lookup *left = (const struct lookup *)a;
+    const struct lookup *right = (const struct lookup *)b;
+    return left->index < right->index ? -1 : left->index > right->index ? 1 : 0;
 };
+
+static void opentype_layout_add_lookups(const struct ot_feature_list *feature_list, UINT16 total_lookup_count,
+        struct ot_gsubgpos_table *table, struct shaping_feature *feature, struct lookups *lookups)
+{
+    UINT16 feature_offset, lookup_count;
+    unsigned int i, j;
+
+    /* Feature wasn't found */
+    if (feature->index == 0xffff)
+        return;
+
+    /* FIXME: skip non-global ones for now. */
+    if (!(feature->flags & FEATURE_GLOBAL))
+        return;
+
+    feature_offset = GET_BE_WORD(feature_list->features[feature->index].offset);
+
+    lookup_count = table_read_be_word(&table->table, table->feature_list + feature_offset +
+            FIELD_OFFSET(struct ot_feature, lookup_count));
+    if (!lookup_count)
+        return;
+
+    if (!dwrite_array_reserve((void **)&lookups->lookups, &lookups->capacity, lookups->count + lookup_count,
+            sizeof(*lookups->lookups)))
+    {
+        return;
+    }
+
+    for (i = 0; i < lookup_count; ++i)
+    {
+        UINT16 lookup_index = table_read_be_word(&table->table, table->feature_list + feature_offset +
+                FIELD_OFFSET(struct ot_feature, lookuplist_index[i]));
+
+        if (lookup_index >= total_lookup_count)
+            continue;
+
+        j = lookups->count;
+        lookups->lookups[j].index = lookup_index;
+        lookups->lookups[j].mask = feature->mask;
+        lookups->count++;
+    }
+}
 
 static void opentype_layout_collect_lookups(struct scriptshaping_context *context, unsigned int script_index,
         unsigned int language_index, const struct shaping_features *features, struct ot_gsubgpos_table *table,
@@ -4099,7 +4180,15 @@ static void opentype_layout_collect_lookups(struct scriptshaping_context *contex
 {
     UINT16 table_offset, langsys_offset, script_feature_count, total_feature_count, total_lookup_count;
     const struct ot_feature_list *feature_list;
-    unsigned int i, j, l;
+    unsigned int last_num_lookups = 0, stage;
+    struct shaping_feature *feature;
+    unsigned int i, j, next_bit;
+    unsigned int global_bit_shift = 1;
+    unsigned int global_bit_mask = 1;
+    UINT16 feature_index;
+
+    if (!table->table.data)
+        return;
 
     /* ScriptTable offset. */
     table_offset = table_read_be_word(&table->table, table->script_list + FIELD_OFFSET(struct ot_script_list, scripts) +
@@ -4132,48 +4221,145 @@ static void opentype_layout_collect_lookups(struct scriptshaping_context *contex
     if (!feature_list)
         return;
 
-    /* Collect lookups for all given features. */
+    context->global_mask = global_bit_mask;
+    next_bit = global_bit_shift + 1;
     for (i = 0; i < features->count; ++i)
     {
+        unsigned int bits_needed;
+        BOOL found = FALSE;
+
+        feature = &features->features[i];
+
+        feature->index = 0xffff;
+
+        if ((feature->flags & FEATURE_GLOBAL) && feature->max_value == 1)
+            bits_needed = 0;
+        else
+            bits_needed = min(8, dwrite_log2i(feature->max_value));
+
+        if (!feature->max_value || next_bit + bits_needed > 8 * sizeof (feature->mask))
+            continue;
+
         for (j = 0; j < script_feature_count; ++j)
         {
-            UINT16 feature_index = table_read_be_word(&table->table, table->script_list + table_offset +
+            feature_index = table_read_be_word(&table->table, table->script_list + table_offset +
                     langsys_offset + FIELD_OFFSET(struct ot_langsys, feature_index[j]));
             if (feature_index >= total_feature_count)
                 continue;
-
-            if (feature_list->features[feature_index].tag == features->features[i].tag)
+            if ((found = feature_list->features[feature_index].tag == feature->tag))
             {
-                WORD feature_offset = GET_BE_WORD(feature_list->features[feature_index].offset);
-                WORD lookup_count;
+                feature->index = feature_index;
+                break;
+            }
+        }
 
-                lookup_count = table_read_be_word(&table->table, table->feature_list + feature_offset +
-                        FIELD_OFFSET(struct ot_feature, lookup_count));
-                if (!lookup_count)
-                    continue;
-
-                if (!dwrite_array_reserve((void **)&lookups->indexes, &lookups->capacity, lookups->count + lookup_count,
-                        sizeof(*lookups->indexes)))
+        if (!found && (features->features[i].flags & FEATURE_GLOBAL_SEARCH))
+        {
+            for (j = 0; j < total_feature_count; ++j)
+            {
+                if ((found = (feature_list->features[j].tag == feature->tag)))
                 {
-                    return;
-                }
-
-                for (l = 0; l < lookup_count; ++l)
-                {
-                    UINT16 lookup_index = table_read_be_word(&table->table, table->feature_list + feature_offset +
-                            FIELD_OFFSET(struct ot_feature, lookuplist_index[l]));
-
-                    if (lookup_index >= total_lookup_count)
-                        continue;
-
-                    lookups->indexes[lookups->count++] = lookup_index;
+                    feature->index = j;
+                    break;
                 }
             }
         }
+
+        if (!found)
+            continue;
+
+        if (feature->flags & FEATURE_GLOBAL && feature->max_value == 1)
+        {
+            feature->shift = global_bit_shift;
+            feature->mask = global_bit_mask;
+        }
+        else
+        {
+            feature->shift = next_bit;
+            feature->mask = (1 << (next_bit + bits_needed)) - (1 << next_bit);
+            next_bit += bits_needed;
+            context->global_mask |= (feature->default_value << feature->shift) & feature->mask;
+        }
     }
 
-    /* Sort lookups. */
-    qsort(lookups->indexes, lookups->count, sizeof(*lookups->indexes), lookups_sorting_compare);
+    for (stage = 0; stage <= features->stage; ++stage)
+    {
+        for (i = 0; i < features->count; ++i)
+        {
+            if (features->features[i].stage == stage)
+                opentype_layout_add_lookups(feature_list, total_lookup_count, table, &features->features[i], lookups);
+        }
+
+        /* Sort and merge lookups for current stage. */
+        if (last_num_lookups < lookups->count)
+        {
+            qsort(lookups->lookups + last_num_lookups, lookups->count - last_num_lookups, sizeof(*lookups->lookups),
+                    lookups_sorting_compare);
+
+            j = last_num_lookups;
+            for (i = j + 1; i < lookups->count; ++i)
+            {
+                if (lookups->lookups[i].index != lookups->lookups[j].index)
+                {
+                    lookups->lookups[++j] = lookups->lookups[i];
+                }
+                else
+                {
+                    lookups->lookups[j].mask |= lookups->lookups[i].mask;
+                }
+            }
+            lookups->count = j + 1;
+        }
+
+        last_num_lookups = lookups->count;
+    }
+}
+
+static int feature_search_compare(const void *a, const void* b)
+{
+    unsigned int tag = *(unsigned int *)a;
+    const struct shaping_feature *feature = b;
+
+    return tag < feature->tag ? -1 : tag > feature->tag ? 1 : 0;
+}
+
+static unsigned int shaping_features_get_mask(const struct shaping_features *features, unsigned int tag, unsigned int *shift)
+{
+    struct shaping_feature *feature;
+
+    feature = bsearch(&tag, features->features, features->count, sizeof(*features->features), feature_search_compare);
+
+    if (!feature || feature->index == 0xffff)
+        return 0;
+
+    if (shift) *shift = feature->shift;
+    return feature->mask;
+}
+
+static void opentype_layout_set_glyph_masks(struct scriptshaping_context *context, const struct shaping_features *features)
+{
+   const DWRITE_TYPOGRAPHIC_FEATURES **user_features = context->user_features.features;
+   unsigned int f, r, g, start_glyph = 0, mask, shift, value;
+
+   for (g = 0; g < context->glyph_count; ++g)
+       context->glyph_infos[g].mask = context->global_mask;
+
+   /* FIXME: set shaper masks */
+
+   for (r = 0; r < context->user_features.range_count; ++r)
+   {
+       for (f = 0; f < user_features[r]->featureCount; ++f)
+       {
+           mask = shaping_features_get_mask(features, user_features[r]->features[f].nameTag, &shift);
+           if (!mask)
+               continue;
+
+           value = (user_features[r]->features[f].parameter << shift) & mask;
+           for (g = 0; g < context->user_features.range_lengths[r]; ++g)
+               context->glyph_infos[g + start_glyph].mask = (context->glyph_infos[g + start_glyph].mask & ~mask) | value;
+           start_glyph += context->user_features.range_lengths[r];
+       }
+   }
 }
 
 void opentype_layout_apply_gpos_features(struct scriptshaping_context *context, unsigned int script_index,
@@ -4184,19 +4370,15 @@ void opentype_layout_apply_gpos_features(struct scriptshaping_context *context, 
 
     opentype_layout_collect_lookups(context, script_index, language_index, features, &context->cache->gpos, &lookups);
 
+    opentype_layout_set_glyph_masks(context, features);
+
     for (i = 0; i < lookups.count; ++i)
-    {
-        /* Skip duplicates. */
-        if (i && lookups.indexes[i] == lookups.indexes[i - 1])
-            continue;
+        opentype_layout_apply_gpos_lookup(context, lookups.lookups[i].index);
 
-        opentype_layout_apply_gpos_lookup(context, lookups.indexes[i]);
-    }
-
-    heap_free(lookups.indexes);
+    heap_free(lookups.lookups);
 }
 
-static BOOL opentype_layout_apply_gsub_single_substitution(struct glyph_iterator *iter, const struct lookup *lookup)
+static BOOL opentype_layout_apply_gsub_single_substitution(struct glyph_iterator *iter, const struct ot_lookup *lookup)
 {
     struct scriptshaping_cache *cache = iter->context->cache;
     UINT16 format, coverage;
@@ -4342,7 +4524,7 @@ static BOOL opentype_layout_apply_gsub_chain_context_lookup(struct glyph_iterato
             opentype_layout_context_gsub_apply_lookup(iter, input_count, lookup_count, lookup_records);
 }
 
-static BOOL opentype_layout_apply_gsub_chain_context_substitution(struct glyph_iterator *iter, const struct lookup *lookup)
+static BOOL opentype_layout_apply_gsub_chain_context_substitution(struct glyph_iterator *iter, const struct ot_lookup *lookup)
 {
     struct scriptshaping_cache *cache = iter->context->cache;
     UINT16 format, coverage;
@@ -4434,7 +4616,7 @@ static void opentype_layout_apply_gsub_lookup(struct scriptshaping_context *cont
     struct ot_gsubgpos_table *table = &context->cache->gsub;
     const struct ot_lookup_table *lookup_table;
     struct glyph_iterator iter;
-    struct lookup lookup;
+    struct ot_lookup lookup;
     WORD lookup_type;
 
     lookup.offset = table_read_be_word(&table->table, table->lookup_list + FIELD_OFFSET(struct ot_lookup_list, lookup[lookup_index]));
@@ -4478,6 +4660,7 @@ static void opentype_layout_apply_gsub_lookup(struct scriptshaping_context *cont
             case GSUB_LOOKUP_LIGATURE_SUBST:
             case GSUB_LOOKUP_CONTEXTUAL_SUBST:
             case GSUB_LOOKUP_REVERSE_CHAINING_CONTEXTUAL_SUBST:
+                ret = FALSE;
                 WARN("Unimplemented lookup %d.\n", lookup_type);
                 break;
             default:
@@ -4491,6 +4674,67 @@ static void opentype_layout_apply_gsub_lookup(struct scriptshaping_context *cont
     }
 }
 
+static unsigned int unicode_get_mirrored_char(unsigned int codepoint)
+{
+    extern const WCHAR wine_mirror_map[] DECLSPEC_HIDDEN;
+    WCHAR mirror;
+    /* TODO: check if mirroring for higher planes makes sense at all */
+    if (codepoint > 0xffff) return codepoint;
+    mirror = get_table_entry(wine_mirror_map, codepoint);
+    return mirror ? mirror : codepoint;
+}
+
+static void opentype_get_nominal_glyphs(struct scriptshaping_context *context, const struct shaping_features *features)
+{
+    unsigned int rtlm_mask = shaping_features_get_mask(features, DWRITE_MAKE_OPENTYPE_TAG('r','t','l','m'), NULL);
+    const struct shaping_font_ops *font = context->cache->font;
+    UINT16 *clustermap = context->u.subst.clustermap;
+    const WCHAR *text = context->text;
+    unsigned int i, g, c, codepoint;
+    BOOL bmp;
+
+    memset(context->u.subst.glyph_props, 0, context->u.subst.max_glyph_count * sizeof(*context->u.subst.glyph_props));
+
+    for (i = 0; i < context->length; ++i)
+    {
+        g = context->glyph_count;
+
+        if ((bmp = !(IS_HIGH_SURROGATE(text[i]) && (i < context->length - 1) && IS_LOW_SURROGATE(text[i + 1]))))
+        {
+            codepoint = text[i];
+        }
+        else
+        {
+            codepoint = 0x10000 + ((text[i] - 0xd800) << 10) + (text[i + 1] - 0xdc00);
+        }
+
+        if (context->is_rtl)
+        {
+            c = unicode_get_mirrored_char(codepoint);
+            if (c != codepoint && font->has_glyph(context->cache->context, c))
+                codepoint = c;
+            else
+                context->glyph_infos[i].mask |= rtlm_mask;
+        }
+
+        /* TODO: should this check for glyph availability? */
+        if (*context->u.subst.digits && codepoint >= '0' && codepoint <= '9')
+            codepoint = context->u.subst.digits[codepoint - '0'];
+
+        context->u.subst.glyphs[g] = font->get_glyph(context->cache->context, codepoint);
+        context->u.subst.glyph_props[g].justification = SCRIPT_JUSTIFY_CHARACTER;
+        context->u.subst.glyph_props[g].isClusterStart = 1;
+        context->glyph_count++;
+
+        clustermap[i] = i;
+        if (!bmp)
+        {
+            clustermap[i + 1] = i;
+            ++i;
+        }
+    }
+}
+
 HRESULT opentype_layout_apply_gsub_features(struct scriptshaping_context *context, unsigned int script_index,
         unsigned int language_index, const struct shaping_features *features)
 {
@@ -4499,16 +4743,13 @@ HRESULT opentype_layout_apply_gsub_features(struct scriptshaping_context *contex
 
     opentype_layout_collect_lookups(context, script_index, language_index, features, &context->cache->gsub, &lookups);
 
+    opentype_get_nominal_glyphs(context, features);
+    opentype_layout_set_glyph_masks(context, features);
+
     for (i = 0; i < lookups.count; ++i)
-    {
-        /* Skip duplicates. */
-        if (i && lookups.indexes[i] == lookups.indexes[i - 1])
-            continue;
+        opentype_layout_apply_gsub_lookup(context, 0, context->glyph_count, lookups.lookups[i].index);
 
-        opentype_layout_apply_gsub_lookup(context, 0, context->glyph_count, lookups.indexes[i]);
-    }
-
-    heap_free(lookups.indexes);
+    heap_free(lookups.lookups);
 
     return S_OK;
 }

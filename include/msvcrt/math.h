@@ -101,6 +101,9 @@ long __cdecl lrintf(float);
 long __cdecl lround(double);
 long __cdecl lroundf(float);
 
+_ACRTIMP double __cdecl scalbn(double,int);
+_ACRTIMP float  __cdecl scalbnf(float,int);
+
 double __cdecl _copysign (double, double);
 double __cdecl _chgsign (double);
 double __cdecl _scalb(double, __msvcrt_long);
@@ -182,8 +185,13 @@ static inline int   _fpclassf(float x) { return _fpclass(x); }
 
 static inline float ldexpf(float x, int y) { return ldexp(x, y); }
 
+#ifdef _UCRT
+_ACRTIMP double __cdecl copysign(double, double);
+_ACRTIMP float  __cdecl copysignf(float, float);
+#else
 #define copysign(x,y)  _copysign(x,y)
 #define copysignf(x,y) _copysignf(x,y)
+#endif
 
 double __cdecl nearbyint(double);
 float __cdecl nearbyintf(float);

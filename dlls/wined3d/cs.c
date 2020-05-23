@@ -21,6 +21,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
+WINE_DECLARE_DEBUG_CHANNEL(fps);
 
 #define WINED3D_INITIAL_CS_SIZE 4096
 
@@ -121,7 +122,7 @@ struct wined3d_cs_dispatch
 struct wined3d_cs_draw
 {
     enum wined3d_cs_op opcode;
-    GLenum primitive_type;
+    enum wined3d_primitive_type primitive_type;
     GLint patch_vertex_count;
     struct wined3d_draw_parameters parameters;
 };
@@ -530,6 +531,21 @@ static void wined3d_cs_exec_present(struct wined3d_cs *cs, const void *data)
 
     swapchain->swapchain_ops->swapchain_present(swapchain, &op->src_rect, &op->dst_rect, op->swap_interval, op->flags);
 
+    if (TRACE_ON(fps))
+    {
+        DWORD time = GetTickCount();
+        ++swapchain->frames;
+
+        /* every 1.5 seconds */
+        if (time - swapchain->prev_time > 1500)
+        {
+            TRACE_(fps)("%p @ approx %.2ffps\n",
+                    swapchain, 1000.0 * swapchain->frames / (time - swapchain->prev_time));
+            swapchain->prev_time = time;
+            swapchain->frames = 0;
+        }
+    }
+
     wined3d_resource_release(&swapchain->front_buffer->resource);
     for (i = 0; i < swapchain->state.desc.backbuffer_count; ++i)
     {
@@ -786,7 +802,10 @@ static void wined3d_cs_exec_dispatch(struct wined3d_cs *cs, const void *data)
     const struct wined3d_cs_dispatch *op = data;
     struct wined3d_state *state = &cs->state;
 
-    cs->device->adapter->adapter_ops->adapter_dispatch_compute(cs->device, state, &op->parameters);
+    if (!state->shader[WINED3D_SHADER_TYPE_COMPUTE])
+        WARN("No compute shader bound, skipping dispatch.\n");
+    else
+        cs->device->adapter->adapter_ops->adapter_dispatch_compute(cs->device, state, &op->parameters);
 
     if (op->parameters.indirect)
         wined3d_resource_release(&op->parameters.u.indirect.buffer->resource);
@@ -879,15 +898,15 @@ static void wined3d_cs_exec_draw(struct wined3d_cs *cs, const void *data)
         device_invalidate_state(cs->device, STATE_BASEVERTEXINDEX);
     }
 
-    if (state->gl_primitive_type != op->primitive_type)
+    if (state->primitive_type != op->primitive_type)
     {
         if ((geometry_shader = state->shader[WINED3D_SHADER_TYPE_GEOMETRY]) && !geometry_shader->function)
             device_invalidate_state(cs->device, STATE_SHADER(WINED3D_SHADER_TYPE_GEOMETRY));
-        if (state->gl_primitive_type == GL_POINTS || op->primitive_type == GL_POINTS)
+        if (state->primitive_type == WINED3D_PT_POINTLIST || op->primitive_type == WINED3D_PT_POINTLIST)
             device_invalidate_state(cs->device, STATE_POINT_ENABLE);
-        state->gl_primitive_type = op->primitive_type;
+        state->primitive_type = op->primitive_type;
     }
-    state->gl_patch_vertices = op->patch_vertex_count;
+    state->patch_vertex_count = op->patch_vertex_count;
 
     cs->device->adapter->adapter_ops->adapter_draw_primitive(cs->device, state, &op->parameters);
 
@@ -960,9 +979,9 @@ static void acquire_graphics_pipeline_resources(const struct wined3d_state *stat
             state->unordered_access_view[WINED3D_PIPELINE_GRAPHICS]);
 }
 
-void wined3d_cs_emit_draw(struct wined3d_cs *cs, GLenum primitive_type, unsigned int patch_vertex_count,
-        int base_vertex_idx, unsigned int start_idx, unsigned int index_count,
-        unsigned int start_instance, unsigned int instance_count, BOOL indexed)
+void wined3d_cs_emit_draw(struct wined3d_cs *cs, enum wined3d_primitive_type primitive_type,
+        unsigned int patch_vertex_count, int base_vertex_idx, unsigned int start_idx,
+        unsigned int index_count, unsigned int start_instance, unsigned int instance_count, bool indexed)
 {
     const struct wined3d_d3d_info *d3d_info = &cs->device->adapter->d3d_info;
     const struct wined3d_state *state = &cs->device->state;
@@ -985,8 +1004,8 @@ void wined3d_cs_emit_draw(struct wined3d_cs *cs, GLenum primitive_type, unsigned
     wined3d_cs_submit(cs, WINED3D_CS_QUEUE_DEFAULT);
 }
 
-void wined3d_cs_emit_draw_indirect(struct wined3d_cs *cs, GLenum primitive_type, unsigned int patch_vertex_count,
-        struct wined3d_buffer *buffer, unsigned int offset, BOOL indexed)
+void wined3d_cs_emit_draw_indirect(struct wined3d_cs *cs, enum wined3d_primitive_type primitive_type,
+        unsigned int patch_vertex_count, struct wined3d_buffer *buffer, unsigned int offset, bool indexed)
 {
     const struct wined3d_d3d_info *d3d_info = &cs->device->adapter->d3d_info;
     const struct wined3d_state *state = &cs->device->state;

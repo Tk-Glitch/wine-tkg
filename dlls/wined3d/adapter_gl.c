@@ -3776,6 +3776,11 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter,
         WARN("Disabling ARB_texture_multisample because immutable storage is not supported.\n");
         gl_info->supported[ARB_TEXTURE_MULTISAMPLE] = FALSE;
     }
+    if (gl_info->supported[ARB_FRAMEBUFFER_OBJECT] && !gl_info->supported[EXT_PACKED_DEPTH_STENCIL])
+    {
+        TRACE(" IMPLIED: GL_EXT_packed_depth_stencil (by GL_ARB_framebuffer_object).\n");
+        gl_info->supported[EXT_PACKED_DEPTH_STENCIL] = TRUE;
+    }
 
     wined3d_adapter_init_limits(gl_info);
 
@@ -4332,8 +4337,8 @@ static HRESULT adapter_gl_create_device(struct wined3d *wined3d, const struct wi
     if (!(device_gl = heap_alloc_zero(sizeof(*device_gl))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = wined3d_device_init(&device_gl->d, wined3d, adapter->ordinal, device_type,
-            focus_window, flags, surface_alignment, levels, level_count, device_parent)))
+    if (FAILED(hr = wined3d_device_init(&device_gl->d, wined3d, adapter->ordinal, device_type, focus_window,
+            flags, surface_alignment, levels, level_count, adapter->gl_info.supported, device_parent)))
     {
         WARN("Failed to initialize device, hr %#x.\n", hr);
         heap_free(device_gl);

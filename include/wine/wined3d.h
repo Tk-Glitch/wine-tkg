@@ -1760,6 +1760,7 @@ struct wined3d_adapter_identifier
 
 struct wined3d_swapchain_desc
 {
+    struct wined3d_output *output;
     unsigned int backbuffer_width;
     unsigned int backbuffer_height;
     enum wined3d_format_id backbuffer_format;
@@ -2031,7 +2032,7 @@ struct wined3d_blend_state_desc
 {
     BOOL alpha_to_coverage;
     BOOL independent;
-    struct
+    struct wined3d_rendertarget_blend_state_desc
     {
         BOOL enable;
         enum wined3d_blend src;
@@ -2344,6 +2345,7 @@ void __cdecl wined3d_device_draw_primitive_instanced_indirect(struct wined3d_dev
         struct wined3d_buffer *buffer, unsigned int offset);
 HRESULT __cdecl wined3d_device_end_scene(struct wined3d_device *device);
 void __cdecl wined3d_device_evict_managed_resources(struct wined3d_device *device);
+void __cdecl wined3d_device_flush(struct wined3d_device *device);
 UINT __cdecl wined3d_device_get_available_texture_mem(const struct wined3d_device *device);
 struct wined3d_blend_state * __cdecl wined3d_device_get_blend_state(const struct wined3d_device *device,
         struct wined3d_color *blend_factor);
@@ -2783,13 +2785,12 @@ void __cdecl wined3d_swapchain_set_palette(struct wined3d_swapchain *swapchain, 
 void __cdecl wined3d_swapchain_set_window(struct wined3d_swapchain *swapchain, HWND window);
 
 HRESULT __cdecl wined3d_swapchain_state_create(const struct wined3d_swapchain_desc *desc,
-        HWND window, struct wined3d *wined3d, struct wined3d_swapchain_state **state);
+        HWND window, struct wined3d_swapchain_state **state);
 void __cdecl wined3d_swapchain_state_destroy(struct wined3d_swapchain_state *state);
 HRESULT __cdecl wined3d_swapchain_state_resize_target(struct wined3d_swapchain_state *state,
-        struct wined3d_output *output, const struct wined3d_display_mode *mode);
-HRESULT __cdecl wined3d_swapchain_state_set_fullscreen(struct wined3d_swapchain_state *state,
-        const struct wined3d_swapchain_desc *desc, struct wined3d_output *output,
         const struct wined3d_display_mode *mode);
+HRESULT __cdecl wined3d_swapchain_state_set_fullscreen(struct wined3d_swapchain_state *state,
+        const struct wined3d_swapchain_desc *desc, const struct wined3d_display_mode *mode);
 
 HRESULT __cdecl wined3d_texture_add_dirty_region(struct wined3d_texture *texture,
         UINT layer, const struct wined3d_box *dirty_region);

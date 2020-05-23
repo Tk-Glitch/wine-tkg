@@ -76,6 +76,12 @@ coclass CMSAACDecMFT { }
 
 [
     threading(both),
+    uuid(5686a0d9-fe39-409f-9dff-3fdbc849f9f5)
+]
+coclass CMpeg4sDecMFT { }
+
+[
+    threading(both),
     uuid(41457294-644c-4298-a28a-BD69F2C0CF3B)
 ]
 coclass ASFByteStreamHandler {}
@@ -85,6 +91,12 @@ coclass ASFByteStreamHandler {}
     uuid(82d353df-90bd-4382-8bc2-3f6192b76e34)
 ]
 coclass CLSID_CWMVDecMediaObject {}
+
+[
+    threading(both),
+    uuid(2eeb4adf-4578-4d10-bca7-bb955f56320a)
+]
+coclass CLSID_CWMADecMediaObject {}
 
 [
     threading(both),

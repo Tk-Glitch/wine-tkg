@@ -1202,6 +1202,7 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
 
         if(regs2[3] & (1 << 3 )) info->FeatureSet |= CPU_FEATURE_PSE;
         if(regs2[3] & (1 << 4 )) info->FeatureSet |= CPU_FEATURE_TSC;
+        if(regs2[3] & (1 << 6 )) info->FeatureSet |= CPU_FEATURE_PAE;
         if(regs2[3] & (1 << 8 )) info->FeatureSet |= CPU_FEATURE_CX8;
         if(regs2[3] & (1 << 11)) info->FeatureSet |= CPU_FEATURE_SEP;
         if(regs2[3] & (1 << 12)) info->FeatureSet |= CPU_FEATURE_MTRR;
@@ -1211,20 +1212,12 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
         if(regs2[3] & (1 << 24)) info->FeatureSet |= CPU_FEATURE_FXSR;
         if(regs2[3] & (1 << 25)) info->FeatureSet |= CPU_FEATURE_SSE;
         if(regs2[3] & (1 << 26)) info->FeatureSet |= CPU_FEATURE_SSE2;
+        if(regs2[2] & (1 << 0 )) info->FeatureSet |= CPU_FEATURE_SSE3;
+        if(regs2[2] & (1 << 13)) info->FeatureSet |= CPU_FEATURE_CX128;
+        if(regs2[2] & (1 << 27)) info->FeatureSet |= CPU_FEATURE_XSAVE;
 
-        user_shared_data->ProcessorFeatures[PF_FLOATING_POINT_EMULATED]       = !(regs2[3] & 1);
-        user_shared_data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE]   = (regs2[3] >> 4) & 1;
-        user_shared_data->ProcessorFeatures[PF_PAE_ENABLED]                   = (regs2[3] >> 6) & 1;
-        user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE_DOUBLE]       = (regs2[3] >> 8) & 1;
-        user_shared_data->ProcessorFeatures[PF_MMX_INSTRUCTIONS_AVAILABLE]    = (regs2[3] >> 23) & 1;
-        user_shared_data->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE]   = (regs2[3] >> 25) & 1;
-        user_shared_data->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE] = (regs2[3] >> 26) & 1;
-        user_shared_data->ProcessorFeatures[PF_SSE3_INSTRUCTIONS_AVAILABLE]   = regs2[2] & 1;
-        user_shared_data->ProcessorFeatures[PF_XSAVE_ENABLED]                 = (regs2[2] >> 27) & 1;
-        user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE128]           = (regs2[2] >> 13) & 1;
-
-        if((regs2[3] & (1 << 26)) && (regs2[3] & (1 << 24))) /* has SSE2 and FXSAVE/FXRSTOR */
-            user_shared_data->ProcessorFeatures[PF_SSE_DAZ_MODE_AVAILABLE] = have_sse_daz_mode();
+        if((regs2[3] & (1 << 26)) && (regs2[3] & (1 << 24)) && have_sse_daz_mode()) /* has SSE2 and FXSAVE/FXRSTOR */
+            info->FeatureSet |= CPU_FEATURE_DAZ;
 
         if (regs[1] == AUTH && regs[3] == ENTI && regs[2] == CAMD)
         {
@@ -1241,11 +1234,10 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
             if (regs[0] >= 0x80000001)
             {
                 do_cpuid(0x80000001, regs2);  /* get vendor features */
-                user_shared_data->ProcessorFeatures[PF_VIRT_FIRMWARE_ENABLED]        = (regs2[2] >> 2) & 1;
-                user_shared_data->ProcessorFeatures[PF_NX_ENABLED]                   = (regs2[3] >> 20) & 1;
-                user_shared_data->ProcessorFeatures[PF_3DNOW_INSTRUCTIONS_AVAILABLE] = (regs2[3] >> 31) & 1;
-                user_shared_data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE] = (regs2[3] >> 27) & 1;
-                if (regs2[3] >> 31) info->FeatureSet |= CPU_FEATURE_3DNOW;
+                if (regs2[2] & (1 << 2))   info->FeatureSet |= CPU_FEATURE_VIRT;
+                if (regs2[3] & (1 << 20))  info->FeatureSet |= CPU_FEATURE_NX;
+                if (regs2[3] & (1 << 27))  info->FeatureSet |= CPU_FEATURE_TSC;
+                if (regs2[3] & (1u << 31)) info->FeatureSet |= CPU_FEATURE_3DNOW;
             }
         }
         else if (regs[1] == GENU && regs[3] == INEI && regs[2] == NTEL)
@@ -1258,15 +1250,15 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
             info->Revision |= ((regs2[0] >> 4 ) & 0xf) << 8;  /* model          */
             info->Revision |= regs2[0] & 0xf;                 /* stepping       */
 
+            if(regs2[2] & (1 << 5))  info->FeatureSet |= CPU_FEATURE_VIRT;
             if(regs2[3] & (1 << 21)) info->FeatureSet |= CPU_FEATURE_DS;
-            user_shared_data->ProcessorFeatures[PF_VIRT_FIRMWARE_ENABLED] = (regs2[2] >> 5) & 1;
 
             do_cpuid(0x80000000, regs);  /* get vendor cpuid level */
             if (regs[0] >= 0x80000001)
             {
                 do_cpuid(0x80000001, regs2);  /* get vendor features */
-                user_shared_data->ProcessorFeatures[PF_NX_ENABLED] = (regs2[3] >> 20) & 1;
-                user_shared_data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE] = (regs2[3] >> 27) & 1;
+                if (regs2[3] & (1 << 20))  info->FeatureSet |= CPU_FEATURE_NX;
+                if (regs2[3] & (1 << 27))  info->FeatureSet |= CPU_FEATURE_TSC;
             }
         }
         else
@@ -1287,10 +1279,6 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
 #ifdef __APPLE__
     size_t valSize;
     int value;
-
-    valSize = sizeof(value);
-    if (sysctlbyname("hw.optional.floatingpoint", &value, &valSize, NULL, 0) == 0)
-        user_shared_data->ProcessorFeatures[PF_FLOATING_POINT_EMULATED] = !value;
 
     valSize = sizeof(value);
     if (sysctlbyname("hw.cpusubtype", &value, &valSize, NULL, 0) == 0)
@@ -1358,10 +1346,8 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
             }
             if (!_stricmp(line, "features"))
             {
-                if (strstr(value, "vfpv3"))
-                    user_shared_data->ProcessorFeatures[PF_ARM_VFP_32_REGISTERS_AVAILABLE] = TRUE;
-                if (strstr(value, "neon"))
-                    user_shared_data->ProcessorFeatures[PF_ARM_NEON_INSTRUCTIONS_AVAILABLE] = TRUE;
+                if (strstr(value, "vfpv3")) info->FeatureSet |= CPU_FEATURE_ARM_VFP_32;
+                if (strstr(value, "neon"))  info->FeatureSet |= CPU_FEATURE_ARM_NEON;
                 continue;
             }
         }
@@ -1379,12 +1365,10 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
 
     valsize = sizeof(value);
     if (!sysctlbyname("hw.floatingpoint", &value, &valsize, NULL, 0))
-        user_shared_data->ProcessorFeatures[PF_ARM_VFP_32_REGISTERS_AVAILABLE] = value;
+        info->FeatureSet |= CPU_FEATURE_ARM_VFP_32;
 #else
     FIXME("CPU Feature detection not implemented.\n");
 #endif
-    if (info->Level >= 8)
-        user_shared_data->ProcessorFeatures[PF_ARM_V8_INSTRUCTIONS_AVAILABLE] = TRUE;
     info->Architecture = PROCESSOR_ARCHITECTURE_ARM;
 }
 
@@ -1426,10 +1410,8 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
             }
             if (!_stricmp(line, "Features"))
             {
-                if (strstr(value, "crc32"))
-                    user_shared_data->ProcessorFeatures[PF_ARM_V8_CRC32_INSTRUCTIONS_AVAILABLE] = TRUE;
-                if (strstr(value, "aes"))
-                    user_shared_data->ProcessorFeatures[PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE] = TRUE;
+                if (strstr(value, "crc32")) info->FeatureSet |= CPU_FEATURE_ARM_V8_CRC32;
+                if (strstr(value, "aes"))   info->FeatureSet |= CPU_FEATURE_ARM_V8_CRYPTO;
                 continue;
             }
         }
@@ -1439,7 +1421,6 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
     FIXME("CPU Feature detection not implemented.\n");
 #endif
     info->Level = max(info->Level, 8);
-    user_shared_data->ProcessorFeatures[PF_ARM_V8_INSTRUCTIONS_AVAILABLE] = TRUE;
     info->Architecture = PROCESSOR_ARCHITECTURE_ARM64;
 }
 
@@ -2302,19 +2283,21 @@ static NTSTATUS get_firmware_info(SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, ULONG
 
             *required_len = sizeof(struct smbios_prologue);
 
+#define L(l) (l + (l ? 1 : 0))
             *required_len += sizeof(struct smbios_bios);
-            *required_len += max(bios_vendor_len + bios_version_len + bios_date_len + 4, 2);
+            *required_len += max(L(bios_vendor_len) + L(bios_version_len) + L(bios_date_len) + 1, 2);
 
             *required_len += sizeof(struct smbios_system);
-            *required_len += max(system_vendor_len + system_product_len + system_version_len +
-                                 system_serial_len + system_sku_len + system_family_len + 7, 2);
+            *required_len += max(L(system_vendor_len) + L(system_product_len) + L(system_version_len) +
+                                 L(system_serial_len) + L(system_sku_len) + L(system_family_len) + 1, 2);
 
             *required_len += sizeof(struct smbios_board);
-            *required_len += max(board_vendor_len + board_product_len + board_version_len + board_serial_len + 5, 2);
+            *required_len += max(L(board_vendor_len) + L(board_product_len) + L(board_version_len) + L(board_serial_len) + 1, 2);
 
             *required_len += sizeof(struct smbios_chassis);
-            *required_len += max(chassis_vendor_len + chassis_version_len + chassis_serial_len +
-                                 chassis_asset_tag_len + 5, 2);
+            *required_len += max(L(chassis_vendor_len) + L(chassis_version_len) + L(chassis_serial_len) +
+                                 L(chassis_asset_tag_len) + 1, 2);
+#undef L
 
             sfti->TableBufferLength = *required_len;
 
@@ -3204,6 +3187,19 @@ NTSTATUS WINAPI NtQuerySystemInformation(
             FIXME("info_class SYSTEM_INTERRUPT_INFORMATION\n");
         }
         break;
+    case SystemTimeAdjustmentInformation:
+        {
+            SYSTEM_TIME_ADJUSTMENT_QUERY query = { 156250, 156250, TRUE };
+
+            len = sizeof(query);
+            if (Length == len)
+            {
+                if (!SystemInformation) ret = STATUS_ACCESS_VIOLATION;
+                else memcpy( SystemInformation, &query, len );
+            }
+            else ret = STATUS_INFO_LENGTH_MISMATCH;
+        }
+        break;
     case SystemKernelDebuggerInformation:
         {
             SYSTEM_KERNEL_DEBUGGER_INFORMATION skdi;
@@ -3282,7 +3278,14 @@ NTSTATUS WINAPI NtQuerySystemInformation(
             if (Length >= len)
             {
                 if (!SystemInformation) ret = STATUS_ACCESS_VIOLATION;
-                else *((DWORD *)SystemInformation) = 64;
+                else
+                {
+#ifdef __arm__
+                    *((DWORD *)SystemInformation) = 32;
+#else
+                    *((DWORD *)SystemInformation) = 64;
+#endif
+                }
             }
             else ret = STATUS_INFO_LENGTH_MISMATCH;
         }
@@ -3314,6 +3317,27 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         memset(SystemInformation, 0, Length);
         ret = STATUS_SUCCESS;
         break;
+    case SystemCodeIntegrityInformation:
+    {
+        SYSTEM_CODEINTEGRITY_INFORMATION *info = (SYSTEM_CODEINTEGRITY_INFORMATION*)SystemInformation;
+
+        FIXME("SystemCodeIntegrityInformation, len %u, buffer %p, stub!\n", Length, info);
+
+        if (Length < sizeof(SYSTEM_CODEINTEGRITY_INFORMATION))
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+
+        if (!SystemInformation)
+        {
+            ret = STATUS_ACCESS_VIOLATION;
+            break;
+        }
+
+        info->CodeIntegrityOptions = CODEINTEGRITY_OPTION_ENABLED;
+        break;
+    }
     default:
 	FIXME("(0x%08x,%p,0x%08x,%p) stub\n",
 	      SystemInformationClass,SystemInformation,Length,ResultLength);

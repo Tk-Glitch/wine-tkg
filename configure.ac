@@ -758,7 +758,8 @@ case $host_os in
     DLLEXT=""
     dnl Disable stdcall fixups to catch prototype mismatches
     case $host_cpu in
-      *i[[3456]]86*) LDDLLFLAGS="-Wl,--disable-stdcall-fixup" ;;
+      *i[[3456]]86*) WINE_TRY_CFLAGS([-Wl,--disable-stdcall-fixup],
+                                     [LDDLLFLAGS="-Wl,--disable-stdcall-fixup"]) ;;
     esac
     dnl Disable modules that can't be used on Windows
     enable_iphlpapi=${enable_iphlpapi:-no}
@@ -1108,6 +1109,7 @@ then
         WINE_TRY_CROSSCFLAGS([-fno-strict-aliasing])
         dnl clang needs to be told to fail on unknown options
         WINE_TRY_CROSSCFLAGS([-Werror=unknown-warning-option],[CFLAGS="$CFLAGS -Werror=unknown-warning-option"])
+        WINE_TRY_CROSSCFLAGS([-Werror=ignored-optimization-argument],[CFLAGS="$CFLAGS -Werror=ignored-optimization-argument"])
         WINE_TRY_CROSSCFLAGS([-Wdeclaration-after-statement])
         WINE_TRY_CROSSCFLAGS([-Wempty-body])
         WINE_TRY_CROSSCFLAGS([-Wignored-qualifiers])
@@ -1121,8 +1123,6 @@ then
         WINE_TRY_CROSSCFLAGS([-Wwrite-strings])
         WINE_TRY_CROSSCFLAGS([-Wpointer-arith])
         WINE_TRY_CROSSCFLAGS([-Wlogical-op])
-        WINE_TRY_CROSSCFLAGS([-Wincompatible-library-redeclaration],
-                             [EXTRACROSSCFLAGS="$EXTRACROSSCFLAGS -Wno-incompatible-library-redeclaration"])
 
         case $host_cpu in
           *i[[3456789]]86*) WINE_TRY_CROSSCFLAGS([-fno-omit-frame-pointer]) ;;
@@ -1131,13 +1131,25 @@ then
                   WINE_TRY_CROSSCFLAGS([-Wnonnull]) ;;
         esac
 
-        dnl Default to dwarf-2 debug info
-        for ac_flag in $CROSSCFLAGS; do
-          case $ac_flag in
-            -g) WINE_TRY_CROSSCFLAGS([-gdwarf-2])
-                WINE_TRY_CROSSCFLAGS([-gstrict-dwarf]) ;;
-          esac
-        done
+        dnl Determine debug info format
+        AC_SUBST(CROSSDEBUG)
+        if test -z "$CROSSDEBUG"
+        then
+          for ac_flag in $CROSSCFLAGS; do
+            case $ac_flag in
+             -gdwarf*)    CROSSDEBUG=dwarf ;;
+             -gcodeview)  CROSSDEBUG=pdb ;;
+             -g)          CROSSDEBUG=${CROSSDEBUG:-dwarf} ;;
+            esac
+          done
+        fi
+        case $CROSSDEBUG in
+          *dwarf)  WINE_TRY_CROSSCFLAGS([-gdwarf-2])
+                   WINE_TRY_CROSSCFLAGS([-gstrict-dwarf]) ;;
+          pdb)     WINE_TRY_CROSSCFLAGS([-gcodeview]) ;;
+        esac
+
+        WINE_TRY_CROSSCFLAGS([-fexcess-precision=standard],[AC_SUBST(EXCESS_PRECISION_CFLAGS,"-fexcess-precision=standard")])
 
         if test "x$enable_werror" = "xyes"
         then
@@ -2121,7 +2133,6 @@ then
   WINE_TRY_CFLAGS([-fcf-protection=none])
   WINE_TRY_CFLAGS([-fno-stack-protector])
   WINE_TRY_CFLAGS([-fno-strict-aliasing])
-  WINE_TRY_CFLAGS([-fexcess-precision=standard],[AC_SUBST(EXCESS_PRECISION_CFLAGS,"-fexcess-precision=standard")])
   WINE_TRY_CFLAGS([-Wdeclaration-after-statement])
   WINE_TRY_CFLAGS([-Wempty-body])
   WINE_TRY_CFLAGS([-Wignored-qualifiers])
@@ -2133,6 +2144,11 @@ then
   WINE_TRY_CFLAGS([-Wunused-but-set-parameter])
   WINE_TRY_CFLAGS([-Wvla])
   WINE_TRY_CFLAGS([-Wwrite-strings])
+
+  if test -z "$CROSSTARGET"
+  then
+    WINE_TRY_CFLAGS([-fexcess-precision=standard],[AC_SUBST(EXCESS_PRECISION_CFLAGS,"-fexcess-precision=standard")])
+  fi
 
   dnl Check for noisy string.h
   WINE_TRY_CFLAGS([-Wpointer-arith],
@@ -2322,7 +2338,6 @@ AC_CHECK_FUNCS(\
 	inet_addr \
 	inet_network \
 	inet_ntop \
-	inet_pton \
 )
 
 dnl Check for clock_gettime which may be in -lrt
@@ -3441,6 +3456,7 @@ WINE_CONFIG_MAKEFILE(dlls/gdi32)
 WINE_CONFIG_MAKEFILE(dlls/gdi32/tests)
 WINE_CONFIG_MAKEFILE(dlls/gdiplus)
 WINE_CONFIG_MAKEFILE(dlls/gdiplus/tests)
+WINE_CONFIG_MAKEFILE(dlls/gfesdk)
 WINE_CONFIG_MAKEFILE(dlls/glu32)
 WINE_CONFIG_MAKEFILE(dlls/gphoto2.ds)
 WINE_CONFIG_MAKEFILE(dlls/gpkcsp)

@@ -1011,12 +1011,32 @@ HRESULT wined3d_shader_resource_view_gl_init(struct wined3d_shader_resource_view
     return hr;
 }
 
+void wined3d_shader_resource_view_vk_update(struct wined3d_shader_resource_view_vk *srv_vk,
+        struct wined3d_context_vk *context_vk)
+{
+    const struct wined3d_format_vk *view_format_vk = wined3d_format_vk(srv_vk->v.format);
+    const struct wined3d_view_desc *desc = &srv_vk->v.desc;
+    struct wined3d_resource *resource = srv_vk->v.resource;
+    struct wined3d_view_vk *view_vk = &srv_vk->view_vk;
+    struct wined3d_buffer_vk *buffer_vk;
+    VkBufferView vk_buffer_view;
+
+    buffer_vk = wined3d_buffer_vk(buffer_from_resource(resource));
+    wined3d_context_vk_destroy_buffer_view(context_vk, view_vk->u.vk_buffer_view, view_vk->command_buffer_id);
+    if ((vk_buffer_view = wined3d_view_vk_create_buffer_view(context_vk, desc, buffer_vk, view_format_vk)))
+    {
+        view_vk->u.vk_buffer_view = vk_buffer_view;
+        view_vk->bo_user.valid = true;
+    }
+}
+
 static void wined3d_shader_resource_view_vk_cs_init(void *object)
 {
     struct wined3d_shader_resource_view_vk *srv_vk = object;
     struct wined3d_view_desc *desc = &srv_vk->v.desc;
     struct wined3d_texture_vk *texture_vk;
     const struct wined3d_format *format;
+    struct wined3d_buffer_vk *buffer_vk;
     struct wined3d_resource *resource;
     struct wined3d_context *context;
     VkBufferView vk_buffer_view;
@@ -1028,9 +1048,11 @@ static void wined3d_shader_resource_view_vk_cs_init(void *object)
 
     if (resource->type == WINED3D_RTYPE_BUFFER)
     {
+        buffer_vk = wined3d_buffer_vk(buffer_from_resource(resource));
+
         context = context_acquire(resource->device, NULL, 0);
         vk_buffer_view = wined3d_view_vk_create_buffer_view(wined3d_context_vk(context),
-                desc, wined3d_buffer_vk(buffer_from_resource(resource)), wined3d_format_vk(format));
+                desc, buffer_vk, wined3d_format_vk(format));
         context_release(context);
 
         if (!vk_buffer_view)
@@ -1039,6 +1061,8 @@ static void wined3d_shader_resource_view_vk_cs_init(void *object)
         TRACE("Created buffer view 0x%s.\n", wine_dbgstr_longlong(vk_buffer_view));
 
         srv_vk->view_vk.u.vk_buffer_view = vk_buffer_view;
+        srv_vk->view_vk.bo_user.valid = true;
+        list_add_head(&buffer_vk->bo.users, &srv_vk->view_vk.bo_user.entry);
 
         return;
     }
@@ -1087,6 +1111,7 @@ HRESULT wined3d_shader_resource_view_vk_init(struct wined3d_shader_resource_view
     if (FAILED(hr = wined3d_shader_resource_view_init(&view_vk->v, desc, resource, parent, parent_ops)))
         return hr;
 
+    list_init(&view_vk->view_vk.bo_user.entry);
     wined3d_cs_init_object(resource->device->cs, wined3d_shader_resource_view_vk_cs_init, view_vk);
 
     return hr;
@@ -1453,6 +1478,25 @@ HRESULT wined3d_unordered_access_view_gl_init(struct wined3d_unordered_access_vi
     return hr;
 }
 
+void wined3d_unordered_access_view_vk_update(struct wined3d_unordered_access_view_vk *uav_vk,
+        struct wined3d_context_vk *context_vk)
+{
+    const struct wined3d_format_vk *view_format_vk = wined3d_format_vk(uav_vk->v.format);
+    const struct wined3d_view_desc *desc = &uav_vk->v.desc;
+    struct wined3d_resource *resource = uav_vk->v.resource;
+    struct wined3d_view_vk *view_vk = &uav_vk->view_vk;
+    struct wined3d_buffer_vk *buffer_vk;
+    VkBufferView vk_buffer_view;
+
+    buffer_vk = wined3d_buffer_vk(buffer_from_resource(resource));
+    wined3d_context_vk_destroy_buffer_view(context_vk, view_vk->u.vk_buffer_view, view_vk->command_buffer_id);
+    if ((vk_buffer_view = wined3d_view_vk_create_buffer_view(context_vk, desc, buffer_vk, view_format_vk)))
+    {
+        view_vk->u.vk_buffer_view = vk_buffer_view;
+        view_vk->bo_user.valid = true;
+    }
+}
+
 static void wined3d_unordered_access_view_vk_cs_init(void *object)
 {
     struct wined3d_unordered_access_view_vk *uav_vk = object;
@@ -1463,6 +1507,7 @@ static void wined3d_unordered_access_view_vk_cs_init(void *object)
     struct wined3d_texture_vk *texture_vk;
     struct wined3d_context_vk *context_vk;
     struct wined3d_device_vk *device_vk;
+    struct wined3d_buffer_vk *buffer_vk;
     VkBufferViewCreateInfo create_info;
     struct wined3d_resource *resource;
     VkBufferView vk_buffer_view;
@@ -1476,15 +1521,18 @@ static void wined3d_unordered_access_view_vk_cs_init(void *object)
 
     if (resource->type == WINED3D_RTYPE_BUFFER)
     {
+        buffer_vk = wined3d_buffer_vk(buffer_from_resource(resource));
+
         context_vk = wined3d_context_vk(context_acquire(&device_vk->d, NULL, 0));
         vk_info = context_vk->vk_info;
 
-        if ((vk_buffer_view = wined3d_view_vk_create_buffer_view(context_vk,
-                desc, wined3d_buffer_vk(buffer_from_resource(resource)), format_vk)))
+        if ((vk_buffer_view = wined3d_view_vk_create_buffer_view(context_vk, desc, buffer_vk, format_vk)))
         {
             TRACE("Created buffer view 0x%s.\n", wine_dbgstr_longlong(vk_buffer_view));
 
             uav_vk->view_vk.u.vk_buffer_view = vk_buffer_view;
+            uav_vk->view_vk.bo_user.valid = true;
+            list_add_head(&buffer_vk->bo.users, &view_vk->bo_user.entry);
         }
 
         if (desc->flags & (WINED3D_VIEW_BUFFER_COUNTER | WINED3D_VIEW_BUFFER_APPEND))
@@ -1499,6 +1547,7 @@ static void wined3d_unordered_access_view_vk_cs_init(void *object)
                 return;
             }
 
+            wined3d_context_vk_end_current_render_pass(context_vk);
             VK_CALL(vkCmdFillBuffer(wined3d_context_vk_get_command_buffer(context_vk),
                     uav_vk->counter_bo.vk_buffer, uav_vk->counter_bo.buffer_offset, sizeof(uint32_t), 0));
             wined3d_context_vk_reference_bo(context_vk, &uav_vk->counter_bo);
@@ -1572,6 +1621,7 @@ HRESULT wined3d_unordered_access_view_vk_init(struct wined3d_unordered_access_vi
     if (FAILED(hr = wined3d_unordered_access_view_init(&view_vk->v, desc, resource, parent, parent_ops)))
         return hr;
 
+    list_init(&view_vk->view_vk.bo_user.entry);
     wined3d_cs_init_object(resource->device->cs, wined3d_unordered_access_view_vk_cs_init, view_vk);
 
     return hr;

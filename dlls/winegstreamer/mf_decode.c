@@ -31,6 +31,12 @@ const GUID *aac_output_types[] = {&MFAudioFormat_Float, &MFAudioFormat_PCM};
 const GUID *wmv_input_types[] = {&MFVideoFormat_WMV3, &MFVideoFormat_WVC1};
 const GUID *wmv_output_types[] = {&MFVideoFormat_NV12, &MFVideoFormat_YV12, &MFVideoFormat_YUY2, &MFVideoFormat_UYVY, &MFVideoFormat_YVYU, &MFVideoFormat_NV11, &MFVideoFormat_RGB32, &MFVideoFormat_RGB24, &MFVideoFormat_RGB555, &MFVideoFormat_RGB8};
 
+const GUID *wma_input_types[] = {&MFAudioFormat_WMAudioV8, &MFAudioFormat_WMAudioV9};
+const GUID *wma_output_types[] = {&MFAudioFormat_Float, &MFAudioFormat_PCM};
+
+const GUID *m4s2_input_types[] = {&MFVideoFormat_MPEG2};
+const GUID *m4s2_output_types[] = {&MFVideoFormat_I420, &MFVideoFormat_IYUV, &MFVideoFormat_NV12, &MFVideoFormat_YUY2, &MFVideoFormat_YV12};
+
 static struct decoder_desc
 {
     const GUID *major_type;
@@ -60,6 +66,20 @@ static struct decoder_desc
         ARRAY_SIZE(wmv_input_types),
         wmv_output_types,
         ARRAY_SIZE(wmv_output_types),
+    },
+    { /* DECODER_TYPE_WMA */
+        &MFMediaType_Audio,
+        wma_input_types,
+        ARRAY_SIZE(wma_input_types),
+        wma_output_types,
+        ARRAY_SIZE(wma_output_types),
+    },
+    { /* DECODER_TYPE_M4S2 */
+        &MFMediaType_Video,
+        m4s2_input_types,
+        ARRAY_SIZE(m4s2_input_types),
+        m4s2_output_types,
+        ARRAY_SIZE(m4s2_output_types),
     }
 };
 
@@ -638,7 +658,7 @@ static void decoder_update_pipeline(struct mf_decoder *decoder)
     gst_pad_push_event(decoder->input_src, gst_event_new_stream_start("decoder-stream"));
     gst_pad_push_event(decoder->input_src, gst_event_new_caps(caps_from_mf_media_type(decoder->input_type)));
     segment = gst_segment_new();
-    gst_segment_init(segment, GST_FORMAT_DEFAULT);
+    gst_segment_init(segment, GST_FORMAT_TIME);
     gst_pad_push_event(decoder->input_src, gst_event_new_segment(segment));
 
     gst_element_get_state(decoder->container, NULL, NULL, -1);
@@ -899,7 +919,7 @@ static HRESULT WINAPI decoder_process_message_callback_Invoke(IMFAsyncCallback *
         case MFT_MESSAGE_COMMAND_DRAIN:
         {
             GstSegment *segment = gst_segment_new();
-            gst_segment_init(segment, GST_FORMAT_DEFAULT);
+            gst_segment_init(segment, GST_FORMAT_TIME);
 
             EnterCriticalSection(&decoder->state_cs);
             decoder->draining = TRUE;
@@ -945,7 +965,7 @@ static HRESULT WINAPI mf_decoder_ProcessMessage(IMFTransform *iface, MFT_MESSAGE
         case MFT_MESSAGE_COMMAND_FLUSH:
         {
             GstSegment *segment = gst_segment_new();
-            gst_segment_init(segment, GST_FORMAT_DEFAULT);
+            gst_segment_init(segment, GST_FORMAT_TIME);
 
             EnterCriticalSection(&decoder->state_cs);
             decoder->flushing = TRUE;

@@ -159,24 +159,8 @@ static inline ULONG get_file_attributes( const struct stat *st )
 static BOOL fd_is_mount_point( int fd, const struct stat *st )
 {
     struct stat parent;
-    BOOL ret = FALSE;
-    int cwd;
-
-    if (!S_ISDIR( st->st_mode )) return FALSE;
-    RtlEnterCriticalSection( &dir_section );
-    if ((cwd = open(".", O_RDONLY) == -1))
-    {
-        RtlLeaveCriticalSection( &dir_section );
-        return FALSE;
-    }
-    if (!fchdir( fd ))
-    {
-        ret = !stat( "..", &parent ) && (parent.st_dev != st->st_dev || parent.st_ino == st->st_ino);
-        if (fchdir( cwd ) == -1) chdir( "/" );
-    }
-    close( cwd );
-    RtlLeaveCriticalSection( &dir_section );
-    return ret;
+    return S_ISDIR( st->st_mode ) && !fstatat( fd, "..", &parent, 0 )
+            && (parent.st_dev != st->st_dev || parent.st_ino == st->st_ino);
 }
 
 /* get the stat info and file attributes for a file (by file descriptor) */

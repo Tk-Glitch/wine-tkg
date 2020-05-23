@@ -1335,19 +1335,16 @@ void make_window_embedded( struct x11drv_win_data *data )
 
 
 /***********************************************************************
- *		X11DRV_window_to_X_rect
- *
- * Convert a rect from client to X window coordinates
+ *     get_decoration_rect
  */
-static void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect,
-                                     const RECT *window_rect, const RECT *client_rect )
+static void get_decoration_rect( struct x11drv_win_data *data, RECT *rect,
+                                 const RECT *window_rect, const RECT *client_rect )
 {
     DWORD style, ex_style, style_mask = 0, ex_style_mask = 0;
     unsigned long decor;
-    RECT rc;
 
+    SetRectEmpty( rect );
     if (!data->managed) return;
-    if (IsRectEmpty( rect )) return;
 
     style = GetWindowLongW( data->hwnd, GWL_STYLE );
     ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
@@ -1360,9 +1357,23 @@ static void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect,
         ex_style_mask |= WS_EX_DLGMODALFRAME;
     }
 
-    SetRectEmpty( &rc );
-    AdjustWindowRectEx( &rc, style & style_mask, FALSE, ex_style & ex_style_mask );
+    AdjustWindowRectEx( rect, style & style_mask, FALSE, ex_style & ex_style_mask );
+}
 
+
+/***********************************************************************
+ *		X11DRV_window_to_X_rect
+ *
+ * Convert a rect from client to X window coordinates
+ */
+static void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect,
+                                     const RECT *window_rect, const RECT *client_rect )
+{
+    RECT rc;
+
+    if (IsRectEmpty( rect )) return;
+
+    get_decoration_rect( data, &rc, window_rect, client_rect );
     rect->left   -= rc.left;
     rect->right  -= rc.right;
     rect->top    -= rc.top;
@@ -1379,12 +1390,16 @@ static void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect,
  */
 void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect, int x, int y, int cx, int cy )
 {
-    x += data->window_rect.left - data->whole_rect.left;
-    y += data->window_rect.top - data->whole_rect.top;
-    cx += (data->window_rect.right - data->window_rect.left) -
-          (data->whole_rect.right - data->whole_rect.left);
-    cy += (data->window_rect.bottom - data->window_rect.top) -
-          (data->whole_rect.bottom - data->whole_rect.top);
+    RECT rc;
+
+    get_decoration_rect( data, &rc, &data->window_rect, &data->client_rect );
+
+    x += min( data->window_rect.left - data->whole_rect.left, rc.left );
+    y += min( data->window_rect.top - data->whole_rect.top, rc.top );
+    cx += max( (data->window_rect.right - data->window_rect.left) -
+               (data->whole_rect.right - data->whole_rect.left), rc.right - rc.left );
+    cy += max( (data->window_rect.bottom - data->window_rect.top) -
+               (data->whole_rect.bottom - data->whole_rect.top), rc.bottom - rc.top );
     SetRect( rect, x, y, x + cx, y + cy );
 }
 

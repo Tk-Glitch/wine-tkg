@@ -50,15 +50,6 @@ static void *wine_vk_find_struct_(void *s, VkStructureType t)
     return NULL;
 }
 
-#define wine_vk_exchange_pnext(a, b) wine_vk_exchange_pnext_((VkBaseOutStructure *)a, (VkBaseOutStructure *)b)
-static void wine_vk_exchange_pnext_(VkBaseOutStructure *a, VkBaseOutStructure *b)
-{
-    b->pNext = a->pNext;
-    a->pNext = b;
-}
-
-#define wine_vk_copy_pnext(a, ctype, stype, b) do { ctype* lookup = wine_vk_find_struct(a, stype); if (lookup) { b = *lookup; wine_vk_exchange_pnext(a, &b); } } while (0)
-
 static void *wine_vk_get_global_proc_addr(const char *name);
 
 static HINSTANCE hinstance;
@@ -132,8 +123,6 @@ static struct VkPhysicalDevice_T *wine_vk_physical_device_alloc(struct VkInstanc
         }
     }
 
-    num_properties += wine_vk_device_extension_faked_count();
-
     TRACE("Host supported extensions %u, Wine supported extensions %u\n", num_host_properties, num_properties);
 
     if (!(object->extensions = heap_calloc(num_properties, sizeof(*object->extensions))))
@@ -150,22 +139,7 @@ static struct VkPhysicalDevice_T *wine_vk_physical_device_alloc(struct VkInstanc
             j++;
         }
     }
-
-    for (i = 0; i < wine_vk_device_extension_faked_count(); i++)
-    {
-        const VkExtensionProperties *e = wine_vk_device_extension_faked_idx(i);
-
-        if(!strcmp(e->extensionName, "VK_EXT_full_screen_exclusive") &&
-                (!vk_funcs->p_vkGetPhysicalDeviceSurfaceCapabilities2KHR ||
-                 !vk_funcs->p_vkGetPhysicalDeviceSurfaceFormats2KHR)){
-            /* ignore */
-        }else{
-            object->extensions[j] = *e;
-            j++;
-        }
-    }
-
-    object->extension_count = j;
+    object->extension_count = num_properties;
 
     heap_free(host_properties);
     return object;
@@ -245,8 +219,6 @@ static void wine_vk_device_free_create_info(VkDeviceCreateInfo *create_info)
         heap_free((void *)group_info->pPhysicalDevices);
     }
 
-    heap_free((void *)create_info->ppEnabledExtensionNames);
-
     free_VkDeviceCreateInfo_struct_chain(create_info);
 }
 
@@ -256,7 +228,6 @@ static VkResult wine_vk_device_convert_create_info(const VkDeviceCreateInfo *src
     VkDeviceGroupDeviceCreateInfo *group_info;
     unsigned int i;
     VkResult res;
-    const char** extensions;
 
     *dst = *src;
 
@@ -281,18 +252,6 @@ static VkResult wine_vk_device_convert_create_info(const VkDeviceCreateInfo *src
             physical_devices[i] = group_info->pPhysicalDevices[i]->phys_dev;
         }
         group_info->pPhysicalDevices = physical_devices;
-    }
-
-    extensions = heap_alloc(sizeof(const char*) * src->enabledExtensionCount);
-    dst->ppEnabledExtensionNames = extensions;
-    dst->enabledExtensionCount = 0;
-    for (i = 0; i < src->enabledExtensionCount; i++) {
-        const char *extension_name = src->ppEnabledExtensionNames[i];
-
-        if (!wine_vk_device_extension_faked(extension_name)) {
-            extensions[dst->enabledExtensionCount] = extension_name;
-            dst->enabledExtensionCount++;
-        }
     }
 
     /* Should be filtered out by loader as ICDs don't support layers. */
@@ -565,12 +524,26 @@ void WINAPI wine_vkCmdExecuteCommands(VkCommandBuffer buffer, uint32_t count,
 
     TRACE("%p %u %p\n", buffer, count, buffers);
 
-    tmp_buffers = WINEVULKAN_ALLOCA(count * sizeof(*tmp_buffers));
+    if (!buffers || !count)
+        return;
+
+    /* Unfortunately we need a temporary buffer as our command buffers are wrapped.
+     * This call is called often and if a performance concern, we may want to use
+     * alloca as we shouldn't need much memory and it needs to be cleaned up after
+     * the call anyway.
+     */
+    if (!(tmp_buffers = heap_alloc(count * sizeof(*tmp_buffers))))
+    {
+        ERR("Failed to allocate memory for temporary command buffers\n");
+        return;
+    }
 
     for (i = 0; i < count; i++)
         tmp_buffers[i] = buffers[i]->command_buffer;
 
     buffer->device->funcs.p_vkCmdExecuteCommands(buffer->command_buffer, count, tmp_buffers);
+
+    heap_free(tmp_buffers);
 }
 
 VkResult WINAPI wine_vkCreateDevice(VkPhysicalDevice phys_dev,
@@ -831,14 +804,7 @@ VkResult WINAPI wine_vkEnumerateInstanceExtensionProperties(const char *layer_na
     for (i = 0; i < num_host_properties; i++)
     {
         if (wine_vk_instance_extension_supported(host_properties[i].extensionName))
-        {
-            if(!strcmp(host_properties[i].extensionName, "VK_KHR_get_physical_device_properties2") &&
-                    (!vk_funcs->p_vkGetPhysicalDeviceSurfaceCapabilities2KHR ||
-                     !vk_funcs->p_vkGetPhysicalDeviceSurfaceFormats2KHR)){
-                /* ignore - outdated vulkan loader */
-            }else
-                num_properties++;
-        }
+            num_properties++;
         else
             TRACE("Instance extension '%s' is not supported.\n", host_properties[i].extensionName);
     }
@@ -855,14 +821,8 @@ VkResult WINAPI wine_vkEnumerateInstanceExtensionProperties(const char *layer_na
     {
         if (wine_vk_instance_extension_supported(host_properties[i].extensionName))
         {
-            if(!strcmp(host_properties[i].extensionName, "VK_KHR_get_physical_device_properties2") &&
-                    (!vk_funcs->p_vkGetPhysicalDeviceSurfaceCapabilities2KHR ||
-                     !vk_funcs->p_vkGetPhysicalDeviceSurfaceFormats2KHR)){
-                /* ignore - outdated vulkan loader */
-            }else{
-                TRACE("Enabling extension '%s'.\n", host_properties[i].extensionName);
-                properties[j++] = host_properties[i];
-            }
+            TRACE("Enabling extension '%s'.\n", host_properties[i].extensionName);
+            properties[j++] = host_properties[i];
         }
     }
     *count = min(*count, num_properties);
@@ -1069,59 +1029,6 @@ VkResult WINAPI wine_vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t *supporte
     TRACE("Loader requested ICD version %u, returning %u\n", req_version, *supported_version);
 
     return VK_SUCCESS;
-}
-
-/* VK_EXT_full_screen_exclusive */
-
-VkResult WINAPI wine_vkGetPhysicalDeviceSurfacePresentModes2EXT(
-    VkPhysicalDevice                            physicalDevice,
-    const VkPhysicalDeviceSurfaceInfo2KHR*      pSurfaceInfo,
-    uint32_t*                                   pPresentModeCount,
-    VkPresentModeKHR*                           pPresentModes)
-{
-    TRACE("%p, %p, %p, %p", physicalDevice, pSurfaceInfo, pPresentModeCount, pPresentModes);
-    return thunk_vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, pSurfaceInfo->surface, pPresentModeCount, pPresentModes);
-}
-
-VkResult WINAPI wine_vkGetDeviceGroupSurfacePresentModes2EXT(
-    VkDevice                                    device,
-    const VkPhysicalDeviceSurfaceInfo2KHR*      pSurfaceInfo,
-    VkDeviceGroupPresentModeFlagsKHR*           pModes)
-{
-    TRACE("%p, %p, %p", device, pSurfaceInfo, pModes);
-    return thunk_vkGetDeviceGroupSurfacePresentModesKHR(device, pSurfaceInfo->surface, pModes);
-}
-
-VkResult WINAPI wine_vkAcquireFullScreenExclusiveModeEXT(
-    VkDevice                                    device,
-    VkSwapchainKHR                              swapchain)
-{
-    /* don't care */
-    TRACE("%p, %s", device, wine_dbgstr_longlong(swapchain));
-
-    return VK_SUCCESS;
-}
-
-VkResult WINAPI wine_vkReleaseFullScreenExclusiveModeEXT(
-    VkDevice                                    device,
-    VkSwapchainKHR                              swapchain)
-{
-    /* don't care */
-    TRACE("%p, %s", device, wine_dbgstr_longlong(swapchain));
-
-    return VK_SUCCESS;
-}
-
-/* extra crap we moved to private thunks */
-
-VkResult WINAPI wine_vkGetDeviceGroupSurfacePresentModesKHR(VkDevice device, VkSurfaceKHR surface, VkDeviceGroupPresentModeFlagsKHR *pModes)
-{
-    return thunk_vkGetDeviceGroupSurfacePresentModesKHR(device, surface, pModes);
-}
-
-VkResult WINAPI wine_vkGetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t *pPresentModeCount, VkPresentModeKHR *pPresentModes)
-{
-    return thunk_vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, pPresentModeCount, pPresentModes);
 }
 
 VkResult WINAPI wine_vkQueueSubmit(VkQueue queue, uint32_t count,
@@ -1537,7 +1444,7 @@ static inline void convert_VkSwapchainCreateInfoKHR_win_to_host(const VkSwapchai
 #version 450
 
 layout(binding = 0) uniform sampler2D texSampler;
-layout(binding = 1) uniform writeonly image2D outImage;
+layout(binding = 1, rgba8) uniform writeonly image2D outImage;
 layout(push_constant) uniform pushConstants {
     //both in real image coords
     vec2 offset;
@@ -1550,45 +1457,57 @@ void main()
 {
     vec2 texcoord = (vec2(gl_GlobalInvocationID.xy) - constants.offset) / constants.extents;
     vec4 c = texture(texSampler, texcoord);
-    imageStore(outImage, ivec2(gl_GlobalInvocationID.xy), c);
+    imageStore(outImage, ivec2(gl_GlobalInvocationID.xy), c.bgra);
 }
 */
 const uint32_t blit_comp_spv[] = {
-    0x07230203, 0x00010000, 0x00080008, 0x00000036, 0x00000000, 0x00020011, 0x00000001, 0x00020011, 0x00000038,
-    0x0006000B, 0x00000001, 0x4C534C47, 0x6474732E, 0x3035342E, 0x00000000, 0x0003000E, 0x00000000, 0x00000001,
-    0x0006000F, 0x00000005, 0x00000004, 0x6E69616D, 0x00000000, 0x0000000D, 0x00060010, 0x00000004, 0x00000011,
-    0x00000008, 0x00000008, 0x00000001, 0x00030003, 0x00000002, 0x000001C2, 0x00040005, 0x00000004, 0x6E69616D,
-    0x00000000, 0x00080005, 0x0000000D, 0x475F6C67, 0x61626F6C, 0x766E496C, 0x7461636F, 0x496E6F69, 0x00000044,
-    0x00060005, 0x00000012, 0x68737570, 0x736E6F43, 0x746E6174, 0x00000073, 0x00050006, 0x00000012, 0x00000000,
-    0x7366666F, 0x00007465, 0x00050006, 0x00000012, 0x00000001, 0x65747865, 0x0073746E, 0x00050005, 0x00000014,
-    0x736E6F63, 0x746E6174, 0x00000073, 0x00050005, 0x00000025, 0x53786574, 0x6C706D61, 0x00007265, 0x00050005,
-    0x0000002C, 0x4974756F, 0x6567616D, 0x00000000, 0x00040047, 0x0000000D, 0x0000000B, 0x0000001C, 0x00050048,
-    0x00000012, 0x00000000, 0x00000023, 0x00000000, 0x00050048, 0x00000012, 0x00000001, 0x00000023, 0x00000008,
-    0x00030047, 0x00000012, 0x00000002, 0x00040047, 0x00000025, 0x00000022, 0x00000000, 0x00040047, 0x00000025,
-    0x00000021, 0x00000000, 0x00040047, 0x0000002C, 0x00000022, 0x00000000, 0x00040047, 0x0000002C, 0x00000021,
-    0x00000001, 0x00030047, 0x0000002C, 0x00000019, 0x00040047, 0x00000035, 0x0000000B, 0x00000019, 0x00020013,
-    0x00000002, 0x00030021, 0x00000003, 0x00000002, 0x00030016, 0x00000006, 0x00000020, 0x00040017, 0x00000007,
-    0x00000006, 0x00000002, 0x00040015, 0x0000000A, 0x00000020, 0x00000000, 0x00040017, 0x0000000B, 0x0000000A,
-    0x00000003, 0x00040020, 0x0000000C, 0x00000001, 0x0000000B, 0x0004003B, 0x0000000C, 0x0000000D, 0x00000001,
-    0x00040017, 0x0000000E, 0x0000000A, 0x00000002, 0x0004001E, 0x00000012, 0x00000007, 0x00000007, 0x00040020,
-    0x00000013, 0x00000009, 0x00000012, 0x0004003B, 0x00000013, 0x00000014, 0x00000009, 0x00040015, 0x00000015,
-    0x00000020, 0x00000001, 0x0004002B, 0x00000015, 0x00000016, 0x00000000, 0x00040020, 0x00000017, 0x00000009,
-    0x00000007, 0x0004002B, 0x00000015, 0x0000001B, 0x00000001, 0x00040017, 0x0000001F, 0x00000006, 0x00000004,
-    0x00090019, 0x00000022, 0x00000006, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000000,
-    0x0003001B, 0x00000023, 0x00000022, 0x00040020, 0x00000024, 0x00000000, 0x00000023, 0x0004003B, 0x00000024,
-    0x00000025, 0x00000000, 0x0004002B, 0x00000006, 0x00000028, 0x00000000, 0x00090019, 0x0000002A, 0x00000006,
-    0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000002, 0x00000000, 0x00040020, 0x0000002B, 0x00000000,
-    0x0000002A, 0x0004003B, 0x0000002B, 0x0000002C, 0x00000000, 0x00040017, 0x00000030, 0x00000015, 0x00000002,
-    0x0004002B, 0x0000000A, 0x00000033, 0x00000008, 0x0004002B, 0x0000000A, 0x00000034, 0x00000001, 0x0006002C,
-    0x0000000B, 0x00000035, 0x00000033, 0x00000033, 0x00000034, 0x00050036, 0x00000002, 0x00000004, 0x00000000,
-    0x00000003, 0x000200F8, 0x00000005, 0x0004003D, 0x0000000B, 0x0000000F, 0x0000000D, 0x0007004F, 0x0000000E,
-    0x00000010, 0x0000000F, 0x0000000F, 0x00000000, 0x00000001, 0x00040070, 0x00000007, 0x00000011, 0x00000010,
-    0x00050041, 0x00000017, 0x00000018, 0x00000014, 0x00000016, 0x0004003D, 0x00000007, 0x00000019, 0x00000018,
-    0x00050083, 0x00000007, 0x0000001A, 0x00000011, 0x00000019, 0x00050041, 0x00000017, 0x0000001C, 0x00000014,
-    0x0000001B, 0x0004003D, 0x00000007, 0x0000001D, 0x0000001C, 0x00050088, 0x00000007, 0x0000001E, 0x0000001A,
-    0x0000001D, 0x0004003D, 0x00000023, 0x00000026, 0x00000025, 0x00070058, 0x0000001F, 0x00000029, 0x00000026,
-    0x0000001E, 0x00000002, 0x00000028, 0x0004003D, 0x0000002A, 0x0000002D, 0x0000002C, 0x0004007C, 0x00000030,
-    0x00000031, 0x00000010, 0x00040063, 0x0000002D, 0x00000031, 0x00000029, 0x000100FD, 0x00010038
+	0x07230203,0x00010000,0x00080006,0x00000037,0x00000000,0x00020011,0x00000001,0x0006000b,
+	0x00000001,0x4c534c47,0x6474732e,0x3035342e,0x00000000,0x0003000e,0x00000000,0x00000001,
+	0x0006000f,0x00000005,0x00000004,0x6e69616d,0x00000000,0x0000000d,0x00060010,0x00000004,
+	0x00000011,0x00000008,0x00000008,0x00000001,0x00030003,0x00000002,0x000001c2,0x00040005,
+	0x00000004,0x6e69616d,0x00000000,0x00050005,0x00000009,0x63786574,0x64726f6f,0x00000000,
+	0x00080005,0x0000000d,0x475f6c67,0x61626f6c,0x766e496c,0x7461636f,0x496e6f69,0x00000044,
+	0x00060005,0x00000012,0x68737570,0x736e6f43,0x746e6174,0x00000073,0x00050006,0x00000012,
+	0x00000000,0x7366666f,0x00007465,0x00050006,0x00000012,0x00000001,0x65747865,0x0073746e,
+	0x00050005,0x00000014,0x736e6f63,0x746e6174,0x00000073,0x00030005,0x00000021,0x00000063,
+	0x00050005,0x00000025,0x53786574,0x6c706d61,0x00007265,0x00050005,0x0000002c,0x4974756f,
+	0x6567616d,0x00000000,0x00040047,0x0000000d,0x0000000b,0x0000001c,0x00050048,0x00000012,
+	0x00000000,0x00000023,0x00000000,0x00050048,0x00000012,0x00000001,0x00000023,0x00000008,
+	0x00030047,0x00000012,0x00000002,0x00040047,0x00000025,0x00000022,0x00000000,0x00040047,
+	0x00000025,0x00000021,0x00000000,0x00040047,0x0000002c,0x00000022,0x00000000,0x00040047,
+	0x0000002c,0x00000021,0x00000001,0x00030047,0x0000002c,0x00000019,0x00040047,0x00000036,
+	0x0000000b,0x00000019,0x00020013,0x00000002,0x00030021,0x00000003,0x00000002,0x00030016,
+	0x00000006,0x00000020,0x00040017,0x00000007,0x00000006,0x00000002,0x00040020,0x00000008,
+	0x00000007,0x00000007,0x00040015,0x0000000a,0x00000020,0x00000000,0x00040017,0x0000000b,
+	0x0000000a,0x00000003,0x00040020,0x0000000c,0x00000001,0x0000000b,0x0004003b,0x0000000c,
+	0x0000000d,0x00000001,0x00040017,0x0000000e,0x0000000a,0x00000002,0x0004001e,0x00000012,
+	0x00000007,0x00000007,0x00040020,0x00000013,0x00000009,0x00000012,0x0004003b,0x00000013,
+	0x00000014,0x00000009,0x00040015,0x00000015,0x00000020,0x00000001,0x0004002b,0x00000015,
+	0x00000016,0x00000000,0x00040020,0x00000017,0x00000009,0x00000007,0x0004002b,0x00000015,
+	0x0000001b,0x00000001,0x00040017,0x0000001f,0x00000006,0x00000004,0x00040020,0x00000020,
+	0x00000007,0x0000001f,0x00090019,0x00000022,0x00000006,0x00000001,0x00000000,0x00000000,
+	0x00000000,0x00000001,0x00000000,0x0003001b,0x00000023,0x00000022,0x00040020,0x00000024,
+	0x00000000,0x00000023,0x0004003b,0x00000024,0x00000025,0x00000000,0x0004002b,0x00000006,
+	0x00000028,0x00000000,0x00090019,0x0000002a,0x00000006,0x00000001,0x00000000,0x00000000,
+	0x00000000,0x00000002,0x00000004,0x00040020,0x0000002b,0x00000000,0x0000002a,0x0004003b,
+	0x0000002b,0x0000002c,0x00000000,0x00040017,0x00000030,0x00000015,0x00000002,0x0004002b,
+	0x0000000a,0x00000034,0x00000008,0x0004002b,0x0000000a,0x00000035,0x00000001,0x0006002c,
+	0x0000000b,0x00000036,0x00000034,0x00000034,0x00000035,0x00050036,0x00000002,0x00000004,
+	0x00000000,0x00000003,0x000200f8,0x00000005,0x0004003b,0x00000008,0x00000009,0x00000007,
+	0x0004003b,0x00000020,0x00000021,0x00000007,0x0004003d,0x0000000b,0x0000000f,0x0000000d,
+	0x0007004f,0x0000000e,0x00000010,0x0000000f,0x0000000f,0x00000000,0x00000001,0x00040070,
+	0x00000007,0x00000011,0x00000010,0x00050041,0x00000017,0x00000018,0x00000014,0x00000016,
+	0x0004003d,0x00000007,0x00000019,0x00000018,0x00050083,0x00000007,0x0000001a,0x00000011,
+	0x00000019,0x00050041,0x00000017,0x0000001c,0x00000014,0x0000001b,0x0004003d,0x00000007,
+	0x0000001d,0x0000001c,0x00050088,0x00000007,0x0000001e,0x0000001a,0x0000001d,0x0003003e,
+	0x00000009,0x0000001e,0x0004003d,0x00000023,0x00000026,0x00000025,0x0004003d,0x00000007,
+	0x00000027,0x00000009,0x00070058,0x0000001f,0x00000029,0x00000026,0x00000027,0x00000002,
+	0x00000028,0x0003003e,0x00000021,0x00000029,0x0004003d,0x0000002a,0x0000002d,0x0000002c,
+	0x0004003d,0x0000000b,0x0000002e,0x0000000d,0x0007004f,0x0000000e,0x0000002f,0x0000002e,
+	0x0000002e,0x00000000,0x00000001,0x0004007c,0x00000030,0x00000031,0x0000002f,0x0004003d,
+	0x0000001f,0x00000032,0x00000021,0x0009004f,0x0000001f,0x00000033,0x00000032,0x00000032,
+	0x00000002,0x00000001,0x00000000,0x00000003,0x00040063,0x0000002d,0x00000031,0x00000033,
+	0x000100fd,0x00010038
 };
 
 static VkResult create_pipeline(VkDevice device, struct VkSwapchainKHR_T *swapchain, VkShaderModule shaderModule)
@@ -1857,9 +1776,6 @@ VkResult WINAPI wine_vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCrea
 #else
     VkSwapchainCreateInfoKHR our_createinfo;
 #endif
-    VkDeviceGroupSwapchainCreateInfoKHR  our_device_group_swapchain_create_info;
-    VkImageFormatListCreateInfo       our_image_format_list_create_info;
-
     VkExtent2D user_sz;
     struct VkSwapchainKHR_T *object;
     uint32_t i;
@@ -1874,19 +1790,6 @@ VkResult WINAPI wine_vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCrea
     object->base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
 
     convert_VkSwapchainCreateInfoKHR_win_to_host(pCreateInfo, &our_createinfo);
-
-    our_createinfo.pNext = NULL;
-
-    wine_vk_copy_pnext(&our_createinfo, VkDeviceGroupSwapchainCreateInfoKHR, DEVICE_GROUP_SWAPCHAIN_CREATE_INFO_KHR, our_device_group_swapchain_create_info);
-
-    wine_vk_copy_pnext(&our_createinfo, VkImageFormatListCreateInfo, IMAGE_FORMAT_LIST_CREATE_INFO, our_image_format_list_create_info);
-
-    // VkSwapchainCounterCreateInfoEXT is not in our version of WineVulkan
-    // Come back to me when this gets into Proton Wine!
-
-    // Ignoring VkSurfaceFullScreenExclusiveInfoEXT and VkSurfaceFullScreenExclusiveWin32InfoEXT
-    // as we want to nuke those
-    // and VkSwapchainDisplayNativeHdrCreateInfoAMD (blacklisted for HDR for now)
 
     if(our_createinfo.oldSwapchain)
         our_createinfo.oldSwapchain = ((struct VkSwapchainKHR_T *)(UINT_PTR)our_createinfo.oldSwapchain)->swapchain;
@@ -1917,13 +1820,12 @@ VkResult WINAPI wine_vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCrea
         TRACE("surface usage flags: 0x%x\n", object->surface_usage);
 
         our_createinfo.imageExtent = object->real_extent;
-        our_createinfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT | (object->surface_usage & VK_IMAGE_USAGE_STORAGE_BIT); /* XXX: check if supported by surface */
+        our_createinfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT; /* XXX: check if supported by surface */
 
         if(our_createinfo.imageFormat != VK_FORMAT_B8G8R8A8_UNORM &&
                 our_createinfo.imageFormat != VK_FORMAT_B8G8R8A8_SRGB){
             FIXME("swapchain image format is not BGRA8 UNORM/SRGB. Things may go badly. %d\n", our_createinfo.imageFormat);
         }
-        object->imageFormat = our_createinfo.imageFormat;
 
         object->fs_hack_enabled = TRUE;
     }
@@ -2231,7 +2133,7 @@ static VkResult init_blit_images(VkDevice device, struct VkSwapchainKHR_T *swapc
             imageInfo.extent.depth = 1;
             imageInfo.mipLevels = 1;
             imageInfo.arrayLayers = 1;
-            imageInfo.format = swapchain->imageFormat;
+            imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
             imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
             imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -2309,7 +2211,7 @@ static VkResult init_blit_images(VkDevice device, struct VkSwapchainKHR_T *swapc
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = hack->blit_image ? hack->blit_image : hack->swapchain_image;
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = swapchain->imageFormat;
+        viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
         viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         viewInfo.subresourceRange.baseMipLevel = 0;
         viewInfo.subresourceRange.levelCount = 1;
@@ -2854,7 +2756,11 @@ VkResult WINAPI wine_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pP
         our_presentInfo.pWaitSemaphores = &blit_sema;
     }
 
-    arr = WINEVULKAN_ALLOCA(our_presentInfo.swapchainCount * sizeof(VkSwapchainKHR));
+    arr = heap_alloc(our_presentInfo.swapchainCount * sizeof(VkSwapchainKHR));
+    if(!arr){
+        ERR("Failed to allocate memory for swapchain array\n");
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
 
     for(i = 0; i < our_presentInfo.swapchainCount; ++i)
         arr[i] = ((struct VkSwapchainKHR_T *)(UINT_PTR)our_presentInfo.pSwapchains[i])->swapchain;
@@ -2862,6 +2768,8 @@ VkResult WINAPI wine_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pP
     our_presentInfo.pSwapchains = arr;
 
     res = queue->device->funcs.p_vkQueuePresentKHR(queue->queue, &our_presentInfo);
+
+    heap_free(arr);
 
     return res;
 

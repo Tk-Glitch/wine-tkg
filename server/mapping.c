@@ -663,7 +663,7 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
         } opt;
     } nt;
     off_t pos;
-    int size;
+    int size, opt_size;
     size_t mz_size, clr_va, clr_size;
     unsigned int i, cpu_mask = get_supported_cpu_mask();
 
@@ -676,12 +676,12 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
     mz_size = size;
     pos = mz.dos.e_lfanew;
 
-    /* zero out Optional header in the case it's not present or partial */
-    memset( &nt, 0, sizeof(nt) );
-
     size = pread( unix_fd, &nt, sizeof(nt), pos );
     if (size < sizeof(nt.Signature) + sizeof(nt.FileHeader)) return STATUS_INVALID_IMAGE_PROTECT;
-
+    /* zero out Optional header in the case it's not present or partial */
+    opt_size = max( nt.FileHeader.SizeOfOptionalHeader, offsetof( IMAGE_OPTIONAL_HEADER32, CheckSum ));
+    size = min( size, sizeof(nt.Signature) + sizeof(nt.FileHeader) + opt_size );
+    if (size < sizeof(nt)) memset( (char *)&nt + size, 0, sizeof(nt) - size );
     if (nt.Signature != IMAGE_NT_SIGNATURE)
     {
         IMAGE_OS2_HEADER *os2 = (IMAGE_OS2_HEADER *)&nt;
@@ -694,10 +694,6 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
     switch (nt.opt.hdr32.Magic)
     {
     case IMAGE_NT_OPTIONAL_HDR32_MAGIC:
-        /* All fields up to CheckSum are mandatory regardless of SizeOfOptionalHeader value */
-        size = max( nt.FileHeader.SizeOfOptionalHeader, offsetof(IMAGE_OPTIONAL_HEADER32, CheckSum) );
-        if (size < sizeof(nt.opt.hdr32)) memset( (char *)&nt.opt.hdr32 + size, 0, sizeof(nt.opt.hdr32) - size );
-
         switch (nt.FileHeader.Machine)
         {
         case IMAGE_FILE_MACHINE_I386:
@@ -743,10 +739,6 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
         break;
 
     case IMAGE_NT_OPTIONAL_HDR64_MAGIC:
-        /* All fields up to CheckSum are mandatory regardless of SizeOfOptionalHeader value */
-        size = max( nt.FileHeader.SizeOfOptionalHeader, offsetof(IMAGE_OPTIONAL_HEADER64, CheckSum) );
-        if (size < sizeof(nt.opt.hdr64)) memset( (char *)&nt.opt.hdr64 + size, 0, sizeof(nt.opt.hdr64) - size );
-
         if (!(cpu_mask & CPU_64BIT_MASK)) return STATUS_INVALID_IMAGE_WIN_64;
         switch (nt.FileHeader.Machine)
         {
@@ -1035,8 +1027,7 @@ int get_page_size(void)
     return page_mask + 1;
 }
 
-static int kusd_fd;
-static KSHARED_USER_DATA *kusd;
+static KSHARED_USER_DATA *kusd = MAP_FAILED;
 static const timeout_t kusd_timeout = 16 * -TICKS_PER_SEC / 1000;
 
 static void kusd_set_current_time( void *private )
@@ -1051,7 +1042,24 @@ static void kusd_set_current_time( void *private )
 
     add_timeout_user( kusd_timeout, kusd_set_current_time, NULL );
 
-#if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 7)))
+    /* on X86 there should be total store order guarantees, so volatile is enough
+     * to ensure the stores aren't reordered by the compiler, and then they will
+     * always be seen in-order from other CPUs. On other archs, we need atomic
+     * intrinsics to guarantee that. */
+#if defined(__i386__) || defined(__x86_64__)
+    ptr->SystemTime.High2Time = system_time_high;
+    ptr->SystemTime.LowPart = system_time_low;
+    ptr->SystemTime.High1Time = system_time_high;
+
+    ptr->InterruptTime.High2Time = interrupt_time_high;
+    ptr->InterruptTime.LowPart = interrupt_time_low;
+    ptr->InterruptTime.High1Time = interrupt_time_high;
+
+    ptr->TickCount.High2Time = tick_count_high;
+    ptr->TickCount.LowPart = tick_count_low;
+    ptr->TickCount.High1Time = tick_count_high;
+    *(volatile ULONG *)&ptr->TickCountLowDeprecated = tick_count_low;
+#else
     __atomic_store_n(&ptr->SystemTime.High2Time, system_time_high, __ATOMIC_SEQ_CST);
     __atomic_store_n(&ptr->SystemTime.LowPart, system_time_low, __ATOMIC_SEQ_CST);
     __atomic_store_n(&ptr->SystemTime.High1Time, system_time_high, __ATOMIC_SEQ_CST);
@@ -1064,43 +1072,21 @@ static void kusd_set_current_time( void *private )
     __atomic_store_n(&ptr->TickCount.LowPart, tick_count_low, __ATOMIC_SEQ_CST);
     __atomic_store_n(&ptr->TickCount.High1Time, tick_count_high, __ATOMIC_SEQ_CST);
     __atomic_store_n(&ptr->TickCountLowDeprecated, tick_count_low, __ATOMIC_SEQ_CST);
-#else
-    ptr->SystemTime.High2Time = system_time_high;
-    ptr->SystemTime.LowPart = system_time_low;
-    ptr->SystemTime.High1Time = system_time_high;
-
-    ptr->InterruptTime.High2Time = interrupt_time_high;
-    ptr->InterruptTime.LowPart = interrupt_time_low;
-    ptr->InterruptTime.High1Time = interrupt_time_high;
-
-    ptr->TickCount.High2Time = tick_count_high;
-    ptr->TickCount.LowPart = tick_count_low;
-    ptr->TickCount.High1Time = tick_count_high;
-    ptr->TickCountLowDeprecated = tick_count_low;
 #endif
 }
 
-int get_user_shared_data_fd( const void *usd_init, data_size_t usd_size )
+void init_kusd_mapping( struct mapping *mapping )
 {
-    /* keep it the same as user_shared_data_size in ntdll */
-    size_t size = 0x10000;
+    if (kusd != MAP_FAILED) return;
 
-    if (sizeof(*kusd) != usd_size) return -1;
-    if (kusd) return kusd_fd;
+    grab_object( mapping );
+    make_object_static( &mapping->obj );
 
-    if ((kusd_fd = create_temp_file( size )) == -1)
-        return -1;
-
-    if ((kusd = mmap( NULL, size, PROT_WRITE, MAP_SHARED, kusd_fd, 0 )) == MAP_FAILED)
-    {
-        close( kusd_fd );
-        return -1;
-    }
-
-    memcpy( kusd, usd_init, usd_size );
-
-    kusd_set_current_time( NULL );
-    return kusd_fd;
+    if ((kusd = mmap( NULL, mapping->size, PROT_WRITE, MAP_SHARED,
+                      get_unix_fd( mapping->fd ), 0 )) == MAP_FAILED)
+        set_error( STATUS_NO_MEMORY );
+    else
+        kusd_set_current_time( NULL );
 }
 
 /* create a file mapping */

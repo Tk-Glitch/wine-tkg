@@ -667,7 +667,8 @@
 @ stub RtlFlushPropertySet
 # @ stub RtlFlushSecureMemoryCache
 @ stdcall RtlFormatCurrentUserKeyPath(ptr)
-@ stdcall RtlFormatMessage(ptr long long long long ptr ptr long)
+@ stdcall RtlFormatMessage(ptr long long long long ptr ptr long ptr)
+@ stdcall RtlFormatMessageEx(ptr long long long long ptr ptr long ptr long)
 @ stdcall RtlFreeAnsiString(ptr)
 @ stdcall RtlFreeHandle(ptr ptr)
 @ stdcall RtlFreeHeap(long long ptr)
@@ -710,15 +711,19 @@
 @ stdcall RtlGetOwnerSecurityDescriptor(ptr ptr ptr)
 @ stdcall RtlGetProductInfo(long long long long ptr)
 @ stdcall RtlGetProcessHeaps(long ptr)
+@ stdcall RtlGetProcessPreferredUILanguages(long ptr ptr ptr)
 @ stdcall RtlGetSaclSecurityDescriptor(ptr ptr ptr ptr)
 @ stdcall RtlGetSearchPath(ptr)
 # @ stub RtlGetSecurityDescriptorRMControl
 # @ stub RtlGetSetBootStatusData
+@ stdcall RtlGetSystemPreferredUILanguages(long long ptr ptr ptr)
 @ stdcall -ret64 RtlGetSystemTimePrecise()
 @ stdcall RtlGetThreadErrorMode()
+@ stdcall RtlGetThreadPreferredUILanguages(long ptr ptr ptr)
 @ stdcall RtlGetUnloadEventTrace()
 @ stdcall RtlGetUnloadEventTraceEx(ptr ptr ptr)
 @ stub RtlGetUserInfoHeap
+@ stdcall RtlGetUserPreferredUILanguages(long long ptr ptr ptr)
 @ stdcall RtlGetVersion(ptr)
 @ stdcall -arch=arm,arm64,x86_64 RtlGrowFunctionTable(ptr long)
 @ stub RtlGuidToPropertySetName
@@ -779,10 +784,10 @@
 @ stdcall RtlIpv4StringToAddressExA(str long ptr ptr)
 @ stdcall RtlIpv4StringToAddressExW(wstr long ptr ptr)
 @ stdcall RtlIpv4StringToAddressW(wstr long ptr ptr)
-@ stdcall RtlIpv6AddressToStringA(ptr ptr)
-@ stdcall RtlIpv6AddressToStringExA(ptr long long ptr ptr)
-@ stdcall RtlIpv6AddressToStringExW(ptr long long ptr ptr)
-@ stdcall RtlIpv6AddressToStringW(ptr ptr)
+# @ stub RtlIpv6AddressToStringA
+# @ stub RtlIpv6AddressToStringExA
+# @ stub RtlIpv6AddressToStringExW
+# @ stub RtlIpv6AddressToStringW
 @ stdcall RtlIpv6StringToAddressA(str ptr ptr)
 @ stdcall RtlIpv6StringToAddressExA(str ptr ptr ptr)
 @ stdcall RtlIpv6StringToAddressExW(wstr ptr ptr ptr)
@@ -862,6 +867,7 @@
 @ stdcall RtlQueryDepthSList(ptr)
 @ stdcall RtlQueryDynamicTimeZoneInformation(ptr)
 @ stdcall RtlQueryEnvironmentVariable_U(ptr ptr ptr)
+@ stdcall RtlQueryEnvironmentVariable(ptr ptr long ptr long ptr)
 @ stdcall RtlQueryHeapInformation(long long ptr long ptr)
 @ stdcall RtlQueryInformationAcl(ptr ptr long long)
 @ stdcall RtlQueryInformationActivationContext(long long ptr long ptr long ptr)
@@ -940,6 +946,7 @@
 # @ stub RtlSetMemoryStreamSize
 @ stdcall RtlSetOwnerSecurityDescriptor(ptr ptr long)
 # @ stub RtlSetProcessIsCritical
+@ stdcall RtlSetProcessPreferredUILanguages(long ptr ptr)
 @ stub RtlSetProperties
 @ stub RtlSetPropertyClassId
 @ stub RtlSetPropertyNames
@@ -951,6 +958,7 @@
 # @ stub RtlSetSecurityObjectEx
 @ stdcall RtlSetThreadErrorMode(long ptr)
 # @ stub RtlSetThreadIsCritical
+@ stdcall RtlSetThreadPreferredUILanguages(long ptr ptr)
 # @ stub RtlSetThreadPoolStartFunc
 @ stdcall RtlSetTimeZoneInformation(ptr)
 # @ stub RtlSetTimer
@@ -1445,8 +1453,10 @@
 @ cdecl _memccpy(ptr ptr long long)
 @ cdecl _memicmp(str str long)
 @ varargs _snprintf(ptr long str) NTDLL__snprintf
-@ varargs _snprintf_s(ptr long long str) _snprintf_s
+@ varargs _snprintf_s(ptr long long str)
 @ varargs _snwprintf(ptr long wstr) NTDLL__snwprintf
+@ varargs _snwprintf_s(ptr long long wstr)
+@ varargs _swprintf(ptr wstr) NTDLL_swprintf
 @ cdecl _splitpath(str ptr ptr ptr ptr)
 @ cdecl _strcmpi(str str) _stricmp
 @ cdecl _stricmp(str str)
@@ -1460,8 +1470,10 @@
 @ cdecl _ultoa(long ptr long)
 @ cdecl _ultow(long ptr long)
 @ cdecl -norelay _vsnprintf(ptr long str ptr) NTDLL__vsnprintf
-@ cdecl _vsnprintf_s(ptr long str ptr) _vsnprintf_s
+@ cdecl _vsnprintf_s(ptr long str ptr)
 @ cdecl _vsnwprintf(ptr long wstr ptr) NTDLL__vsnwprintf
+@ cdecl _vsnwprintf_s(ptr long long wstr ptr)
+@ cdecl _vswprintf(ptr wstr ptr) NTDLL__vswprintf
 @ cdecl _wcsicmp(wstr wstr) NTDLL__wcsicmp
 @ cdecl _wcslwr(wstr) NTDLL__wcslwr
 @ cdecl _wcsnicmp(wstr wstr long) NTDLL__wcsnicmp
@@ -1507,6 +1519,7 @@
 @ cdecl qsort(ptr long long ptr) NTDLL_qsort
 @ cdecl sin(double) NTDLL_sin
 @ varargs sprintf(ptr str) NTDLL_sprintf
+@ varargs sprintf_s(ptr long str)
 @ cdecl sqrt(double) NTDLL_sqrt
 @ varargs sscanf(str str) NTDLL_sscanf
 @ cdecl strcat(str str) NTDLL_strcat
@@ -1526,6 +1539,7 @@
 @ cdecl strtol(str ptr long) NTDLL_strtol
 @ cdecl strtoul(str ptr long) NTDLL_strtoul
 @ varargs swprintf(ptr wstr) NTDLL_swprintf
+@ varargs swprintf_s(ptr long wstr)
 @ cdecl tan(double) NTDLL_tan
 @ cdecl tolower(long) NTDLL_tolower
 @ cdecl toupper(long) NTDLL_toupper
@@ -1534,6 +1548,8 @@
 @ stdcall vDbgPrintEx(long long str ptr)
 @ stdcall vDbgPrintExWithPrefix(str long long str ptr)
 @ cdecl vsprintf(ptr str ptr) NTDLL_vsprintf
+@ cdecl vsprintf_s(ptr long str ptr)
+@ cdecl vswprintf_s(ptr long wstr ptr)
 @ cdecl wcscat(wstr wstr) NTDLL_wcscat
 @ cdecl wcschr(wstr long) NTDLL_wcschr
 @ cdecl wcscmp(wstr wstr) NTDLL_wcscmp
@@ -1568,6 +1584,7 @@
 @ cdecl wine_server_release_fd(long long)
 @ cdecl wine_server_send_fd(long)
 @ cdecl __wine_make_process_system()
+@ cdecl __wine_set_unix_funcs(long ptr)
 @ extern -arch=i386 __wine_ldt_copy
 
 # Debugging
@@ -1585,7 +1602,6 @@
 
 # Version
 @ cdecl wine_get_version() NTDLL_wine_get_version
-@ cdecl wine_get_patches() NTDLL_wine_get_patches
 @ cdecl wine_get_build_id() NTDLL_wine_get_build_id
 @ cdecl wine_get_host_version(ptr ptr) NTDLL_wine_get_host_version
 

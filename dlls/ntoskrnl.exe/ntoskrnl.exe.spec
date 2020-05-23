@@ -1016,7 +1016,7 @@
 @ stub RtlCreateSystemVolumeInformationFolder
 @ stdcall RtlCreateUnicodeString(ptr wstr)
 @ stdcall RtlCreateUserThread(long ptr long ptr long long ptr ptr ptr ptr)
-@ stdcall RtlCustomCPToUnicodeN(ptr ptr long ptr str long) ntdll.RtlCustomCPToUnicodeN
+@ stdcall RtlCustomCPToUnicodeN(ptr ptr long ptr str long)
 @ stdcall RtlDecompressBuffer(long ptr long ptr long ptr)
 @ stub RtlDecompressChunks
 @ stdcall RtlDecompressFragment(long ptr long ptr long long ptr ptr)
@@ -1069,7 +1069,8 @@
 @ stub RtlFindUnicodePrefix
 @ stdcall RtlFirstFreeAce(ptr ptr)
 @ stdcall RtlFormatCurrentUserKeyPath(ptr)
-@ stdcall RtlFormatMessage(ptr long long long long ptr ptr long)
+@ stdcall RtlFormatMessage(ptr long long long long ptr ptr long ptr)
+@ stdcall RtlFormatMessageEx(ptr long long long long ptr ptr long ptr long)
 @ stdcall RtlFreeAnsiString(ptr)
 @ stdcall RtlFreeHeap(long long ptr)
 @ stdcall RtlFreeOemString(ptr)
@@ -1103,7 +1104,7 @@
 @ stdcall RtlImageNtHeader(long)
 @ stdcall RtlInitAnsiString(ptr str)
 @ stdcall RtlInitAnsiStringEx(ptr str)
-@ stdcall RtlInitCodePageTable(ptr ptr) ntdll.RtlInitCodePageTable
+@ stdcall RtlInitCodePageTable(ptr ptr)
 @ stdcall RtlInitString(ptr str)
 @ stdcall RtlInitUnicodeString(ptr wstr)
 @ stdcall RtlInitUnicodeStringEx(ptr wstr)
@@ -1127,18 +1128,18 @@
 @ stdcall RtlIpv4AddressToStringExA(ptr long ptr ptr)
 @ stdcall RtlIpv4AddressToStringExW(ptr long ptr ptr)
 @ stdcall RtlIpv4AddressToStringW(ptr ptr)
-@ stdcall RtlIpv4StringToAddressA(str long ptr ptr) ntdll.RtlIpv4StringToAddressA
-@ stdcall RtlIpv4StringToAddressExA(str long ptr ptr) ntdll.RtlIpv4StringToAddressExA
+@ stdcall RtlIpv4StringToAddressA(str long ptr ptr)
+@ stdcall RtlIpv4StringToAddressExA(str long ptr ptr)
 @ stdcall RtlIpv4StringToAddressExW(wstr long ptr ptr)
 @ stdcall RtlIpv4StringToAddressW(wstr long ptr ptr)
 @ stub RtlIpv6AddressToStringA
 @ stub RtlIpv6AddressToStringExA
 @ stub RtlIpv6AddressToStringExW
 @ stub RtlIpv6AddressToStringW
-@ stub RtlIpv6StringToAddressA
-@ stub RtlIpv6StringToAddressExA
+@ stdcall RtlIpv6StringToAddressA(str ptr ptr)
+@ stdcall RtlIpv6StringToAddressExA(str ptr ptr ptr)
 @ stdcall RtlIpv6StringToAddressExW(wstr ptr ptr ptr)
-@ stub RtlIpv6StringToAddressW
+@ stdcall RtlIpv6StringToAddressW(wstr ptr ptr)
 @ stub RtlIsGenericTableEmpty
 @ stub RtlIsGenericTableEmptyAvl
 @ stdcall RtlIsNameLegalDOS8Dot3(ptr ptr ptr)
@@ -1249,7 +1250,7 @@
 @ stdcall RtlUnicodeStringToInteger(ptr long ptr)
 @ stdcall RtlUnicodeStringToOemSize(ptr)
 @ stdcall RtlUnicodeStringToOemString(ptr ptr long)
-@ stdcall RtlUnicodeToCustomCPN(ptr ptr long ptr wstr long) ntdll.RtlUnicodeToCustomCPN
+@ stdcall RtlUnicodeToCustomCPN(ptr ptr long ptr wstr long)
 @ stdcall RtlUnicodeToMultiByteN(ptr long ptr ptr long)
 @ stdcall RtlUnicodeToMultiByteSize(ptr ptr long)
 @ stdcall RtlUnicodeToOemN(ptr long ptr ptr long)
@@ -1262,7 +1263,7 @@
 @ stdcall RtlUpcaseUnicodeStringToAnsiString(ptr ptr long)
 @ stdcall RtlUpcaseUnicodeStringToCountedOemString(ptr ptr long)
 @ stdcall RtlUpcaseUnicodeStringToOemString(ptr ptr long)
-@ stdcall RtlUpcaseUnicodeToCustomCPN(ptr ptr long ptr wstr long) ntdll.RtlUpcaseUnicodeToCustomCPN
+@ stdcall RtlUpcaseUnicodeToCustomCPN(ptr ptr long ptr wstr long)
 @ stdcall RtlUpcaseUnicodeToMultiByteN(ptr long ptr ptr long)
 @ stdcall RtlUpcaseUnicodeToOemN(ptr long ptr ptr long)
 @ stdcall RtlUpperChar(long)

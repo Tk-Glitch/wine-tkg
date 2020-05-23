@@ -24,6 +24,7 @@
 
 static NTSTATUS (WINAPI * pRtlDowncaseUnicodeString)(UNICODE_STRING *, const UNICODE_STRING *, BOOLEAN);
 static NTSTATUS (WINAPI * pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
+static NTSTATUS (WINAPI * pNtSetSystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG);
 static NTSTATUS (WINAPI * pRtlGetNativeSystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 static NTSTATUS (WINAPI * pNtQuerySystemInformationEx)(SYSTEM_INFORMATION_CLASS, void*, ULONG, void*, ULONG, ULONG*);
 static NTSTATUS (WINAPI * pNtPowerInformation)(POWER_INFORMATION_LEVEL, PVOID, ULONG, PVOID, ULONG);
@@ -78,6 +79,7 @@ static BOOL InitFunctionPtrs(void)
 
     NTDLL_GET_PROC(RtlDowncaseUnicodeString);
     NTDLL_GET_PROC(NtQuerySystemInformation);
+    NTDLL_GET_PROC(NtSetSystemInformation);
     NTDLL_GET_PROC(RtlGetNativeSystemInformation);
     NTDLL_GET_PROC(NtPowerInformation);
     NTDLL_GET_PROC(NtQueryInformationProcess);
@@ -796,6 +798,40 @@ static void test_query_interrupt(void)
     */
 
     HeapFree( GetProcessHeap(), 0, sii);
+}
+
+static void test_time_adjustment(void)
+{
+    SYSTEM_TIME_ADJUSTMENT_QUERY query;
+    SYSTEM_TIME_ADJUSTMENT adjust;
+    NTSTATUS status;
+    ULONG len;
+
+    memset( &query, 0xcc, sizeof(query) );
+    status = pNtQuerySystemInformation( SystemTimeAdjustmentInformation, &query, sizeof(query), &len );
+    ok( status == STATUS_SUCCESS, "got %08x\n", status );
+    ok( len == sizeof(query) || broken(!len) /* winxp */, "wrong len %u\n", len );
+    ok( query.TimeAdjustmentDisabled == TRUE || query.TimeAdjustmentDisabled == FALSE,
+        "wrong value %x\n", query.TimeAdjustmentDisabled );
+
+    status = pNtQuerySystemInformation( SystemTimeAdjustmentInformation, &query, sizeof(query)-1, &len );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "got %08x\n", status );
+    ok( len == sizeof(query) || broken(!len) /* winxp */, "wrong len %u\n", len );
+
+    status = pNtQuerySystemInformation( SystemTimeAdjustmentInformation, &query, sizeof(query)+1, &len );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "got %08x\n", status );
+    ok( len == sizeof(query) || broken(!len) /* winxp */, "wrong len %u\n", len );
+
+    adjust.TimeAdjustment = query.TimeAdjustment;
+    adjust.TimeAdjustmentDisabled = query.TimeAdjustmentDisabled;
+    status = pNtSetSystemInformation( SystemTimeAdjustmentInformation, &adjust, sizeof(adjust) );
+    ok( status == STATUS_SUCCESS || status == STATUS_PRIVILEGE_NOT_HELD, "got %08x\n", status );
+    status = pNtSetSystemInformation( SystemTimeAdjustmentInformation, &adjust, sizeof(adjust)-1 );
+    todo_wine
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "got %08x\n", status );
+    status = pNtSetSystemInformation( SystemTimeAdjustmentInformation, &adjust, sizeof(adjust)+1 );
+    todo_wine
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "got %08x\n", status );
 }
 
 static void test_query_kerndebug(void)
@@ -2240,6 +2276,7 @@ static void test_queryvirtualmemory(void)
     MEMORY_BASIC_INFORMATION mbi;
     char stackbuf[42];
     HMODULE module;
+    void *user_shared_data = (void *)0x7ffe0000;
     char buffer_name[sizeof(MEMORY_SECTION_NAME) + MAX_PATH * sizeof(WCHAR)];
     MEMORY_SECTION_NAME *msn = (MEMORY_SECTION_NAME *)buffer_name;
     BOOL found;
@@ -2317,6 +2354,17 @@ static void test_queryvirtualmemory(void)
             "mbi.Protect is 0x%x\n", mbi.Protect);
     }
     else skip( "bss is outside of module\n" );  /* this can happen on Mac OS */
+
+    trace("Check flags of user shared data at %p\n", user_shared_data);
+    status = pNtQueryVirtualMemory(NtCurrentProcess(), user_shared_data, MemoryBasicInformation, &mbi, sizeof(MEMORY_BASIC_INFORMATION), &readcount);
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status);
+    ok(readcount == sizeof(MEMORY_BASIC_INFORMATION), "Expected to read %d bytes, got %ld\n",(int)sizeof(MEMORY_BASIC_INFORMATION),readcount);
+    ok(mbi.AllocationBase == user_shared_data, "mbi.AllocationBase is 0x%p, expected 0x%p\n", mbi.AllocationBase, user_shared_data);
+    ok(mbi.AllocationProtect == PAGE_READONLY, "mbi.AllocationProtect is 0x%x, expected 0x%x\n", mbi.AllocationProtect, PAGE_READONLY);
+    ok(mbi.State == MEM_COMMIT, "mbi.State is 0x%x, expected 0x%X\n", mbi.State, MEM_COMMIT);
+    ok(mbi.Protect == PAGE_READONLY, "mbi.Protect is 0x%x\n", mbi.Protect);
+    ok(mbi.Type == MEM_PRIVATE, "mbi.Type is 0x%x, expected 0x%x\n", mbi.Type, MEM_PRIVATE);
+    ok(mbi.RegionSize == 0x1000, "mbi.RegionSize is 0x%lx, expected 0x%x\n", mbi.RegionSize, 0x1000);
 
     /* check error code when addr is higher than working set limit */
     status = pNtQueryVirtualMemory(NtCurrentProcess(), (void *)~0, MemoryBasicInformation, &mbi, sizeof(mbi), &readcount);
@@ -2605,7 +2653,11 @@ static void test_query_data_alignment(void)
     status = pNtQuerySystemInformation(SystemRecommendedSharedDataAlignment, &value, sizeof(value), &ReturnLength);
     ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status);
     ok(sizeof(value) == ReturnLength, "Inconsistent length %u\n", ReturnLength);
+#ifdef __arm__
+    ok(value == 32, "Expected 32, got %u\n", value);
+#else
     ok(value == 64, "Expected 64, got %u\n", value);
+#endif
 }
 
 static void test_thread_lookup(void)
@@ -2719,6 +2771,10 @@ START_TEST(info)
     /* 0x17 SystemInterruptInformation */
     trace("Starting test_query_interrupt()\n");
     test_query_interrupt();
+
+    /* 0x1c SystemTimeAdjustmentInformation */
+    trace("Starting test_time_adjustment()\n");
+    test_time_adjustment();
 
     /* 0x23 SystemKernelDebuggerInformation */
     trace("Starting test_query_kerndebug()\n");

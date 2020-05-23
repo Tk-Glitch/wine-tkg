@@ -44,6 +44,10 @@ static NTSTATUS (WINAPI *pD3DKMTCheckVidPnExclusiveOwnership)(const D3DKMT_CHECK
 static NTSTATUS (WINAPI *pD3DKMTCloseAdapter)(const D3DKMT_CLOSEADAPTER *desc);
 static NTSTATUS (WINAPI *pD3DKMTOpenAdapterFromGdiDisplayName)(D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME *desc);
 
+static HRESULT (WINAPI *pD3D11CreateDevice)(IDXGIAdapter *adapter, D3D_DRIVER_TYPE driver_type, HMODULE swrast, UINT flags,
+        const D3D_FEATURE_LEVEL *feature_levels, UINT levels, UINT sdk_version, ID3D11Device **device_out,
+        D3D_FEATURE_LEVEL *obtained_feature_level, ID3D11DeviceContext **immediate_context);
+
 static PFN_D3D12_CREATE_DEVICE pD3D12CreateDevice;
 static PFN_D3D12_GET_DEBUG_INTERFACE pD3D12GetDebugInterface;
 
@@ -624,6 +628,39 @@ success:
     return dxgi_device;
 }
 
+static IDXGIDevice *create_d3d11_device(void)
+{
+    static const D3D_FEATURE_LEVEL feature_level[] =
+    {
+        D3D_FEATURE_LEVEL_11_0,
+    };
+    unsigned int feature_level_count = ARRAY_SIZE(feature_level);
+    IDXGIDevice *device = NULL;
+    ID3D11Device *d3d_device;
+    HRESULT hr;
+
+    if (!pD3D11CreateDevice)
+        return NULL;
+
+    hr = pD3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0, feature_level, feature_level_count,
+            D3D11_SDK_VERSION, &d3d_device, NULL, NULL);
+    if (FAILED(hr))
+        hr = pD3D11CreateDevice(NULL, D3D_DRIVER_TYPE_WARP, NULL, 0, feature_level, feature_level_count,
+                D3D11_SDK_VERSION, &d3d_device, NULL, NULL);
+    if (FAILED(hr))
+        hr = pD3D11CreateDevice(NULL, D3D_DRIVER_TYPE_REFERENCE, NULL, 0, feature_level, feature_level_count,
+                D3D11_SDK_VERSION, &d3d_device, NULL, NULL);
+
+    if (SUCCEEDED(hr))
+    {
+        hr = ID3D11Device_QueryInterface(d3d_device, &IID_IDXGIDevice, (void **)&device);
+        ok(SUCCEEDED(hr), "Created device does not implement IDXGIDevice.\n");
+        ID3D11Device_Release(d3d_device);
+    }
+
+    return device;
+}
+
 static ID3D12Device *create_d3d12_device(void)
 {
     IDXGIAdapter *adapter;
@@ -1079,6 +1116,7 @@ static void test_check_interface_support(void)
 
 static void test_create_surface(void)
 {
+    ID3D11Texture2D *texture2d;
     DXGI_SURFACE_DESC desc;
     IDXGISurface *surface;
     IDXGIDevice *device;
@@ -1107,6 +1145,40 @@ static void test_create_surface(void)
     check_interface(surface, &IID_IDXGISurface1, TRUE, TRUE);
 
     IDXGISurface_Release(surface);
+    refcount = IDXGIDevice_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+
+    /* DXGI_USAGE_UNORDERED_ACCESS */
+    if (!(device = create_d3d11_device()))
+    {
+        skip("Failed to create D3D11 device.\n");
+        return;
+    }
+
+    surface = NULL;
+    hr = IDXGIDevice_CreateSurface(device, &desc, 1, DXGI_USAGE_UNORDERED_ACCESS, NULL, &surface);
+    ok(SUCCEEDED(hr), "Failed to create a dxgi surface, hr %#x\n", hr);
+
+    if (surface)
+    {
+        ID3D11UnorderedAccessView *uav;
+        ID3D11Device *d3d_device;
+
+        hr = IDXGISurface_QueryInterface(surface, &IID_ID3D11Texture2D, (void **)&texture2d);
+        ok(SUCCEEDED(hr), "Failed to get texture interface, hr %#x.\n", hr);
+
+        ID3D11Texture2D_GetDevice(texture2d, &d3d_device);
+
+        hr = ID3D11Device_CreateUnorderedAccessView(d3d_device, (ID3D11Resource *)texture2d, NULL, &uav);
+        ok(SUCCEEDED(hr), "Failed to create unordered access view, hr %#x.\n", hr);
+        ID3D11UnorderedAccessView_Release(uav);
+
+        ID3D11Device_Release(d3d_device);
+        ID3D11Texture2D_Release(texture2d);
+
+        IDXGISurface_Release(surface);
+    }
+
     refcount = IDXGIDevice_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
 }
@@ -2023,9 +2095,9 @@ static HMONITOR get_primary_if_right_side_secondary(const DXGI_OUTPUT_DESC *outp
 static void test_get_containing_output(void)
 {
     unsigned int adapter_idx, output_idx, output_count;
+    DXGI_OUTPUT_DESC output_desc, output_desc2;
     DXGI_SWAP_CHAIN_DESC swapchain_desc;
     IDXGIOutput *output, *output2;
-    DXGI_OUTPUT_DESC output_desc;
     MONITORINFOEXW monitor_info;
     IDXGISwapChain *swapchain;
     IDXGIFactory *factory;
@@ -2296,6 +2368,93 @@ static void test_get_containing_output(void)
     IDXGIOutput_Release(output2);
     hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
     ok(hr == S_OK, "SetFullscreenState failed, hr %#x.\n", hr);
+
+    /* Test GetContainingOutput after a full screen swapchain is made windowed by pressing
+     * Alt+Enter, then move it to another output and use Alt+Enter to enter full screen */
+    output = NULL;
+    output2 = NULL;
+    for (adapter_idx = 0; SUCCEEDED(IDXGIFactory_EnumAdapters(factory, adapter_idx, &adapter));
+            ++adapter_idx)
+    {
+        for (output_idx = 0; SUCCEEDED(IDXGIAdapter_EnumOutputs(adapter, output_idx,
+                output ? &output2 : &output)); ++output_idx)
+        {
+            if (output2)
+                break;
+        }
+
+        IDXGIAdapter_Release(adapter);
+        if (output2)
+            break;
+    }
+
+    if (output && output2)
+    {
+        hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, output);
+        IDXGIOutput_Release(output);
+        if (FAILED(hr))
+        {
+            skip("SetFullscreenState failed, hr %#x.\n", hr);
+            IDXGIOutput_Release(output2);
+            goto done;
+        }
+
+        /* Post an Alt + VK_RETURN WM_SYSKEYDOWN to leave full screen on the first output */
+        PostMessageA(swapchain_desc.OutputWindow, WM_SYSKEYDOWN, VK_RETURN,
+                (MapVirtualKeyA(VK_RETURN, MAPVK_VK_TO_VSC) << 16) | 0x20000001);
+        flush_events();
+        hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
+        ok(hr == S_OK, "GetFullscreenState failed, hr %#x.\n", hr);
+        ok(!fullscreen, "Expect swapchain not full screen.\n");
+
+        /* Move the swapchain output window to the second output */
+        hr = IDXGIOutput_GetDesc(output2, &output_desc2);
+        ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+        ret = SetWindowPos(swapchain_desc.OutputWindow, 0, output_desc2.DesktopCoordinates.left,
+                output_desc2.DesktopCoordinates.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+        ok(ret, "SetWindowPos failed.\n");
+
+        /* Post an Alt + VK_RETURN WM_SYSKEYDOWN to enter full screen on the second output */
+        PostMessageA(swapchain_desc.OutputWindow, WM_SYSKEYDOWN, VK_RETURN,
+                (MapVirtualKeyA(VK_RETURN, MAPVK_VK_TO_VSC) << 16) | 0x20000001);
+        flush_events();
+        output = NULL;
+        hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, &output);
+        ok(hr == S_OK, "GetFullscreenState failed, hr %#x.\n", hr);
+        ok(fullscreen, "Expect swapchain full screen.\n");
+        ok(!!output, "Expect output not NULL.\n");
+        hr = IDXGIOutput_GetDesc(output, &output_desc);
+        ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+        hr = IDXGIOutput_GetDesc(output2, &output_desc2);
+        ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+        todo_wine ok(!lstrcmpW(output_desc.DeviceName, output_desc2.DeviceName),
+                "Expect device name %s, got %s.\n", wine_dbgstr_w(output_desc2.DeviceName),
+                wine_dbgstr_w(output_desc.DeviceName));
+        IDXGIOutput_Release(output);
+
+        output = NULL;
+        hr = IDXGISwapChain_GetContainingOutput(swapchain, &output);
+        ok(hr == S_OK, "GetContainingOutput failed, hr %#x.\n", hr);
+        hr = IDXGIOutput_GetDesc(output, &output_desc);
+        ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+        hr = IDXGIOutput_GetDesc(output2, &output_desc2);
+        ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+        todo_wine ok(!lstrcmpW(output_desc.DeviceName, output_desc2.DeviceName),
+                "Expect device name %s, got %s.\n", wine_dbgstr_w(output_desc2.DeviceName),
+                wine_dbgstr_w(output_desc.DeviceName));
+
+        hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+        ok(hr == S_OK, "SetFullscreenState failed, hr %#x.\n", hr);
+    }
+    else
+    {
+        skip("This test requires two outputs.\n");
+    }
+
+    if (output)
+        IDXGIOutput_Release(output);
+    if (output2)
+        IDXGIOutput_Release(output2);
 
 done:
     refcount = IDXGISwapChain_Release(swapchain);
@@ -6624,7 +6783,7 @@ static void run_on_d3d12(void (*test_func)(IUnknown *device, BOOL is_d3d12))
 
 START_TEST(dxgi)
 {
-    HMODULE dxgi_module, d3d12_module, gdi32_module;
+    HMODULE dxgi_module, d3d11_module, d3d12_module, gdi32_module;
     BOOL enable_debug_layer = FALSE;
     unsigned int argc, i;
     ID3D12Debug *debug;
@@ -6638,6 +6797,9 @@ START_TEST(dxgi)
     pD3DKMTCheckVidPnExclusiveOwnership = (void *)GetProcAddress(gdi32_module, "D3DKMTCheckVidPnExclusiveOwnership");
     pD3DKMTCloseAdapter = (void *)GetProcAddress(gdi32_module, "D3DKMTCloseAdapter");
     pD3DKMTOpenAdapterFromGdiDisplayName = (void *)GetProcAddress(gdi32_module, "D3DKMTOpenAdapterFromGdiDisplayName");
+
+    d3d11_module = LoadLibraryA("d3d11.dll");
+    pD3D11CreateDevice = (void *)GetProcAddress(d3d11_module, "D3D11CreateDevice");
 
     registry_mode.dmSize = sizeof(registry_mode);
     ok(EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &registry_mode), "Failed to get display mode.\n");

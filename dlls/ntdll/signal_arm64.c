@@ -265,8 +265,7 @@ __ASM_STDCALL_FUNC( RtlCaptureContext, 8,
                     "stp x23, x24, [x0, #0xc0]\n\t"  /* context->X23,X24 */
                     "stp x25, x26, [x0, #0xd0]\n\t"  /* context->X25,X26 */
                     "stp x27, x28, [x0, #0xe0]\n\t"  /* context->X27,X28 */
-                    "ldp x1, x2, [x29]\n\t"
-                    "stp x1, x2, [x0, #0xf0]\n\t"    /* context->Fp,Lr */
+                    "stp x29, x30, [x0, #0xf0]\n\t"   /* context->Fp,Lr */
                     "add x1, x29, #0x10\n\t"
                     "stp x1, x30, [x0, #0x100]\n\t"  /* context->Sp,Pc */
                     "mov w1, #0x400000\n\t"          /* CONTEXT_ARM64 */
@@ -545,7 +544,6 @@ static NTSTATUS libunwind_virtual_unwind( ULONG_PTR ip, ULONG_PTR *frame, CONTEX
     *handler = (void *)info.handler;
     *handler_data = (void *)info.lsda;
     *frame = context->Sp;
-    context->Pc = context->u.s.Lr;
     unw_get_reg( &cursor, UNW_AARCH64_X0,  (unw_word_t *)&context->u.s.X0 );
     unw_get_reg( &cursor, UNW_AARCH64_X1,  (unw_word_t *)&context->u.s.X1 );
     unw_get_reg( &cursor, UNW_AARCH64_X2,  (unw_word_t *)&context->u.s.X2 );
@@ -578,6 +576,7 @@ static NTSTATUS libunwind_virtual_unwind( ULONG_PTR ip, ULONG_PTR *frame, CONTEX
     unw_get_reg( &cursor, UNW_AARCH64_X29, (unw_word_t *)&context->u.s.Fp );
     unw_get_reg( &cursor, UNW_AARCH64_X30, (unw_word_t *)&context->u.s.Lr );
     unw_get_reg( &cursor, UNW_AARCH64_SP,  (unw_word_t *)&context->Sp );
+    context->Pc = context->u.s.Lr;
 
     TRACE( "next function pc=%016lx%s\n", context->Pc, rc ? "" : " (last frame)" );
     TRACE("  x0=%016lx  x1=%016lx  x2=%016lx  x3=%016lx\n",
@@ -1565,7 +1564,12 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
 
     if (!skip)
     {
-        if (func->u.s.CR == 3) restore_regs( 29, 2, 0, context, ptrs );
+        if (func->u.s.CR == 3)
+        {
+            DWORD64 *fp = (DWORD64 *) context->u.s.Fp; /* u.X[29] */
+            context->u.X[29] = fp[0];
+            context->u.X[30] = fp[1];
+        }
         context->Sp += local_size;
         if (fp_size) restore_fpregs( 8, fp_size / 8, int_size, context, ptrs );
         if (func->u.s.CR == 1) restore_regs( 30, 1, int_size - 8, context, ptrs );
@@ -1850,7 +1854,8 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
                 dispatch.ContextRecord = context;
                 RtlVirtualUnwind( UNW_FLAG_NHANDLER, dispatch.ImageBase,
                                   dispatch.ControlPc, dispatch.FunctionEntry,
-                                  &new_context, NULL, &frame, NULL );
+                                  &new_context, &dispatch.HandlerData, &frame,
+                                  NULL );
                 rec->ExceptionFlags |= EH_COLLIDED_UNWIND;
                 goto unwind_done;
             }
@@ -1873,7 +1878,8 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
                     dispatch.ContextRecord = context;
                     RtlVirtualUnwind( UNW_FLAG_NHANDLER, dispatch.ImageBase,
                                       dispatch.ControlPc, dispatch.FunctionEntry,
-                                      &new_context, NULL, &frame, NULL );
+                                      &new_context, &dispatch.HandlerData,
+                                      &frame, NULL );
                     rec->ExceptionFlags |= EH_COLLIDED_UNWIND;
                     goto unwind_done;
                 }

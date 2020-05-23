@@ -42,6 +42,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(sync);
 
+static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)0x7ffe0000;
+
 /* check if current version is NT or Win95 */
 static inline BOOL is_version_nt(void)
 {
@@ -118,6 +120,89 @@ static BOOL get_open_object_attributes( OBJECT_ATTRIBUTES *attr, UNICODE_STRING 
     BaseGetNamedObjectDirectory( &dir );
     InitializeObjectAttributes( attr, nameW, inherit ? OBJ_INHERIT : 0, dir, NULL );
     return TRUE;
+}
+
+
+/***********************************************************************
+ * Time functions
+ ***********************************************************************/
+
+
+/*********************************************************************
+ *           GetSystemTimes   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH GetSystemTimes( FILETIME *idle, FILETIME *kernel, FILETIME *user )
+{
+    LARGE_INTEGER idle_time, kernel_time, user_time;
+    SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *info;
+    ULONG ret_size;
+    DWORD i, cpus = NtCurrentTeb()->Peb->NumberOfProcessors;
+
+    if (!(info = HeapAlloc( GetProcessHeap(), 0, sizeof(*info) * cpus )))
+    {
+        SetLastError( ERROR_OUTOFMEMORY );
+        return FALSE;
+    }
+    if (!set_ntstatus( NtQuerySystemInformation( SystemProcessorPerformanceInformation, info,
+                                                 sizeof(*info) * cpus, &ret_size )))
+    {
+        HeapFree( GetProcessHeap(), 0, info );
+        return FALSE;
+    }
+    idle_time.QuadPart = 0;
+    kernel_time.QuadPart = 0;
+    user_time.QuadPart = 0;
+    for (i = 0; i < cpus; i++)
+    {
+        idle_time.QuadPart += info[i].IdleTime.QuadPart;
+        kernel_time.QuadPart += info[i].KernelTime.QuadPart;
+        user_time.QuadPart += info[i].UserTime.QuadPart;
+    }
+    if (idle)
+    {
+        idle->dwLowDateTime  = idle_time.u.LowPart;
+        idle->dwHighDateTime = idle_time.u.HighPart;
+    }
+    if (kernel)
+    {
+        kernel->dwLowDateTime  = kernel_time.u.LowPart;
+        kernel->dwHighDateTime = kernel_time.u.HighPart;
+    }
+    if (user)
+    {
+        user->dwLowDateTime  = user_time.u.LowPart;
+        user->dwHighDateTime = user_time.u.HighPart;
+    }
+    HeapFree( GetProcessHeap(), 0, info );
+    return TRUE;
+}
+
+
+/******************************************************************************
+ *           GetTickCount   (kernelbase.@)
+ */
+ULONG WINAPI DECLSPEC_HOTPATCH GetTickCount(void)
+{
+    /* note: we ignore TickCountMultiplier */
+    return user_shared_data->u.TickCount.LowPart;
+}
+
+
+/******************************************************************************
+ *           GetTickCount64   (kernelbase.@)
+ */
+ULONGLONG WINAPI DECLSPEC_HOTPATCH GetTickCount64(void)
+{
+    ULONG high, low;
+
+    do
+    {
+        high = user_shared_data->u.TickCount.High1Time;
+        low = user_shared_data->u.TickCount.LowPart;
+    }
+    while (high != user_shared_data->u.TickCount.High2Time);
+    /* note: we ignore TickCountMultiplier */
+    return (ULONGLONG)high << 32 | low;
 }
 
 
@@ -283,6 +368,22 @@ DWORD WINAPI DECLSPEC_HOTPATCH WaitForMultipleObjectsEx( DWORD count, const HAND
         status = WAIT_FAILED;
     }
     return status;
+}
+
+
+/***********************************************************************
+ *           WaitOnAddress   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH WaitOnAddress( volatile void *addr, void *cmp, SIZE_T size, DWORD timeout )
+{
+    LARGE_INTEGER to;
+
+    if (timeout != INFINITE)
+    {
+        to.QuadPart = -(LONGLONG)timeout * 10000;
+        return set_ntstatus( RtlWaitOnAddress( (const void *)addr, cmp, size, &to ));
+    }
+    return set_ntstatus( RtlWaitOnAddress( (const void *)addr, cmp, size, NULL ));
 }
 
 

@@ -665,7 +665,7 @@ static void process_dump( struct object *obj, int verbose )
 
 static struct object_type *process_get_type( struct object *obj )
 {
-    static const struct unicode_str str = { type_Job, sizeof(type_Job) };
+    static const struct unicode_str str = { type_Process, sizeof(type_Process) };
     return get_object_type( &str );
 }
 
@@ -1432,7 +1432,7 @@ DECL_HANDLER(init_process_done)
 {
     struct process_dll *dll;
     struct process *process = current->process;
-    int usd_fd;
+    struct mapping *mapping;
 
     if (is_process_init_done(process))
     {
@@ -1444,13 +1444,13 @@ DECL_HANDLER(init_process_done)
         set_error( STATUS_DLL_NOT_FOUND );
         return;
     }
-    if ((usd_fd = get_user_shared_data_fd( get_req_data(), get_req_data_size() )) == -1)
+    if (!(mapping = get_mapping_obj( current->process, req->usd_handle, SECTION_MAP_WRITE )))
     {
-        set_error( STATUS_NO_MEMORY );
+        set_error( STATUS_INVALID_PARAMETER );
         return;
     }
-
-    send_client_fd( process, usd_fd, -1 );
+    init_kusd_mapping( mapping );
+    release_object( mapping );
 
     /* main exe is the first in the dll list */
     list_remove( &dll->entry );

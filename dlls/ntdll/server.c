@@ -145,22 +145,12 @@ static const enum cpu_type client_cpu = CPU_ARM64;
 #error Unsupported CPU
 #endif
 
-#if defined(linux) || defined(__APPLE__)
-static const BOOL use_preloader = TRUE;
-#else
-static const BOOL use_preloader = FALSE;
-#endif
-
 static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
 
 const char *build_dir = NULL;
 const char *data_dir = NULL;
 const char *config_dir = NULL;
-const char **dll_paths = NULL;
-size_t dll_path_maxlen = 0;
 static const char *server_dir;
-static const char *bin_dir;
-static const char *argv0;
 
 unsigned int server_cpus = 0;
 BOOL is_wow64 = FALSE;
@@ -221,47 +211,6 @@ static void fatal_perror( const char *err, ... )
     perror( " " );
     va_end( args );
     exit(1);
-}
-
-/* canonicalize path and return its directory name */
-static char *realpath_dirname( const char *name )
-{
-    char *p, *fullpath = realpath( name, NULL );
-
-    if (fullpath)
-    {
-        p = strrchr( fullpath, '/' );
-        if (p == fullpath) p++;
-        if (p) *p = 0;
-    }
-    return fullpath;
-}
-
-/* if string ends with tail, remove it */
-static char *remove_tail( const char *str, const char *tail )
-{
-    size_t len = strlen( str );
-    size_t tail_len = strlen( tail );
-    char *ret;
-
-    if (len < tail_len) return NULL;
-    if (strcmp( str + len - tail_len, tail )) return NULL;
-    ret = malloc( len - tail_len + 1 );
-    memcpy( ret, str, len - tail_len );
-    ret[len - tail_len] = 0;
-    return ret;
-}
-
-/* build a path from the specified dir and name */
-static char *build_path( const char *dir, const char *name )
-{
-    size_t len = strlen( dir );
-    char *ret = malloc( len + strlen( name ) + 2 );
-
-    memcpy( ret, dir, len );
-    if (len && ret[len - 1] != '/') ret[len++] = '/';
-    strcpy( ret + len, name );
-    return ret;
 }
 
 /***********************************************************************
@@ -1370,196 +1319,6 @@ int server_pipe( int fd[2] )
 
 
 /***********************************************************************
- *           preloader_exec
- */
-static void preloader_exec( char **argv )
-{
-    if (use_preloader)
-    {
-        static const char *preloader = "wine-preloader";
-        char *p;
-
-        if (!(p = strrchr( argv[1], '/' ))) p = argv[1];
-        else p++;
-
-        if (strlen(p) > 2 && !strcmp( p + strlen(p) - 2, "64" )) preloader = "wine64-preloader";
-        argv[0] = malloc( p - argv[1] + strlen(preloader) + 1 );
-        memcpy( argv[0], argv[1], p - argv[1] );
-        strcpy( argv[0] + (p - argv[1]), preloader );
-
-#ifdef __APPLE__
-        {
-            posix_spawnattr_t attr;
-            posix_spawnattr_init( &attr );
-            posix_spawnattr_setflags( &attr, POSIX_SPAWN_SETEXEC | _POSIX_SPAWN_DISABLE_ASLR );
-            posix_spawn( NULL, argv[0], NULL, &attr, argv, *_NSGetEnviron() );
-            posix_spawnattr_destroy( &attr );
-        }
-#endif
-        execv( argv[0], argv );
-        free( argv[0] );
-    }
-    execv( argv[1], argv + 1 );
-}
-
-
-/***********************************************************************
- *           exec_wineloader
- *
- * argv[0] and argv[1] must be reserved for the preloader and loader respectively.
- */
-NTSTATUS exec_wineloader( char **argv, int socketfd, const pe_image_info_t *pe_info )
-{
-    const int is_child_64bit = (pe_info->cpu == CPU_x86_64 || pe_info->cpu == CPU_ARM64);
-    const char *path, *loader = argv0;
-    const char *loader_env = getenv( "WINELOADER" );
-    char *p, preloader_reserve[64], socket_env[64];
-    ULONGLONG res_start = pe_info->base;
-    ULONGLONG res_end   = pe_info->base + pe_info->map_size;
-
-    if (!is_win64 ^ !is_child_64bit)
-    {
-        /* remap WINELOADER to the alternate 32/64-bit version if necessary */
-        if (loader_env)
-        {
-            int len = strlen( loader_env );
-            char *env = malloc( sizeof("WINELOADER=") + len + 2 );
-
-            if (!env) return STATUS_NO_MEMORY;
-            strcpy( env, "WINELOADER=" );
-            strcat( env, loader_env );
-            if (is_child_64bit)
-            {
-                strcat( env, "64" );
-            }
-            else
-            {
-                len += sizeof("WINELOADER=") - 1;
-                if (!strcmp( env + len - 2, "64" )) env[len - 2] = 0;
-            }
-            loader = env;
-            putenv( env );
-        }
-        else loader = is_child_64bit ? "wine64" : "wine";
-    }
-
-    signal( SIGPIPE, SIG_DFL );
-
-    sprintf( socket_env, "WINESERVERSOCKET=%u", socketfd );
-    sprintf( preloader_reserve, "WINEPRELOADRESERVE=%x%08x-%x%08x",
-             (ULONG)(res_start >> 32), (ULONG)res_start, (ULONG)(res_end >> 32), (ULONG)res_end );
-
-    putenv( preloader_reserve );
-    putenv( socket_env );
-
-    if (build_dir)
-    {
-        argv[1] = build_path( build_dir, is_child_64bit ? "loader/wine64" : "loader/wine" );
-        preloader_exec( argv );
-        return STATUS_INVALID_IMAGE_FORMAT;
-    }
-
-    if ((p = strrchr( loader, '/' ))) loader = p + 1;
-
-    argv[1] = build_path( bin_dir, loader );
-    preloader_exec( argv );
-
-    argv[1] = getenv( "WINELOADER" );
-    if (argv[1]) preloader_exec( argv );
-
-    if ((path = getenv( "PATH" )))
-    {
-        for (p = strtok( strdup( path ), ":" ); p; p = strtok( NULL, ":" ))
-        {
-            argv[1] = build_path( p, loader );
-            preloader_exec( argv );
-        }
-    }
-
-    argv[1] = build_path( BINDIR, loader );
-    preloader_exec( argv );
-    return STATUS_INVALID_IMAGE_FORMAT;
-}
-
-
-/***********************************************************************
- *           exec_wineserver
- *
- * Exec a new wine server.
- */
-static void exec_wineserver( char **argv )
-{
-    char *path;
-
-    if (build_dir)
-    {
-        if (!is_win64)  /* look for 64-bit server */
-        {
-            char *loader = realpath_dirname( build_path( build_dir, "loader/wine64" ));
-            if (loader)
-            {
-                argv[0] = build_path( loader, "../server/wineserver" );
-                execv( argv[0], argv );
-            }
-        }
-        argv[0] = build_path( build_dir, "server/wineserver" );
-        execv( argv[0], argv );
-        return;
-    }
-
-    argv[0] = build_path( bin_dir, "wineserver" );
-    execv( argv[0], argv );
-
-    argv[0] = getenv( "WINESERVER" );
-    if (argv[0]) execv( argv[0], argv );
-
-    if ((path = getenv( "PATH" )))
-    {
-        for (path = strtok( strdup( path ), ":" ); path; path = strtok( NULL, ":" ))
-        {
-            argv[0] = build_path( path, "wineserver" );
-            execvp( argv[0], argv );
-        }
-    }
-
-    argv[0] = build_path( BINDIR, "wineserver" );
-    execv( argv[0], argv );
-}
-
-
-/***********************************************************************
- *           start_server
- *
- * Start a new wine server.
- */
-static void start_server(void)
-{
-    static BOOL started;  /* we only try once */
-    char *argv[3];
-    static char debug[] = "-d";
-
-    if (!started)
-    {
-        int status;
-        int pid = fork();
-        if (pid == -1) fatal_perror( "fork" );
-        if (!pid)
-        {
-            argv[1] = TRACE_ON(server) ? debug : NULL;
-            argv[2] = NULL;
-            exec_wineserver( argv );
-            fatal_error( "could not exec wineserver\n" );
-        }
-        waitpid( pid, &status, 0 );
-        status = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
-        if (status == 2) return;  /* server lock held by someone else, will retry later */
-        if (status) exit(status);  /* server failed */
-        started = TRUE;
-    }
-}
-
-
-/***********************************************************************
  *           init_server_dir
  */
 static const char *init_server_dir( dev_t dev, ino_t ino )
@@ -1588,106 +1347,6 @@ static const char *init_server_dir( dev_t dev, ino_t ino )
     else
         sprintf( p, "%lx", (unsigned long)ino );
     return dir;
-}
-
-
-/***********************************************************************
- *           init_config_dir
- */
-static const char *init_config_dir(void)
-{
-    char *p, *dir;
-    const char *prefix = getenv( "WINEPREFIX" );
-
-    if (prefix)
-    {
-        if (prefix[0] != '/')
-            fatal_error( "invalid directory %s in WINEPREFIX: not an absolute path\n", prefix );
-        dir = strdup( prefix );
-        for (p = dir + strlen(dir) - 1; p > dir && *p == '/'; p--) *p = 0;
-    }
-    else
-    {
-        const char *home = getenv( "HOME" );
-        if (!home)
-        {
-            struct passwd *pwd = getpwuid( getuid() );
-            if (pwd) home = pwd->pw_dir;
-        }
-        if (!home) fatal_error( "could not determine your home directory\n" );
-        if (home[0] != '/') fatal_error( "your home directory %s is not an absolute path\n", home );
-        dir = build_path( home, ".wine" );
-    }
-    return dir;
-}
-
-
-/***********************************************************************
- *           build_dll_path
- */
-static void build_dll_path( const char *dll_dir )
-{
-    const char *default_dlldir = DLLDIR;
-    char *p, *path = getenv( "WINEDLLPATH" );
-    int i, count = 0;
-
-    if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
-
-    dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
-    count = 0;
-
-    if (!build_dir && dll_dir) dll_paths[count++] = dll_dir;
-
-    if (path)
-    {
-        path = strdup(path);
-        for (p = strtok( path, ":" ); p; p = strtok( NULL, ":" )) dll_paths[count++] = strdup( p );
-        free( path );
-    }
-
-    if (!build_dir && !dll_dir) dll_paths[count++] = default_dlldir;
-
-    for (i = 0; i < count; i++) dll_path_maxlen = max( dll_path_maxlen, strlen(dll_paths[i]) );
-    dll_paths[count] = NULL;
-}
-
-
-/***********************************************************************
- *           init_paths
- */
-void init_paths(void)
-{
-    const char *dll_dir = NULL;
-
-#ifdef HAVE_DLADDR
-    Dl_info info;
-
-    if (dladdr( init_paths, &info ) && info.dli_fname[0] == '/')
-        dll_dir = realpath_dirname( info.dli_fname );
-#endif
-
-    argv0 = strdup( __wine_main_argv[0] );
-
-#if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
-    bin_dir = realpath_dirname( "/proc/self/exe" );
-#elif defined (__FreeBSD__) || defined(__DragonFly__)
-    bin_dir = realpath_dirname( "/proc/curproc/file" );
-#else
-    bin_dir = realpath_dirname( argv0 );
-#endif
-
-    if (dll_dir) build_dir = remove_tail( dll_dir, "/dlls/ntdll" );
-    else if (bin_dir) build_dir = remove_tail( bin_dir, "/loader" );
-
-    if (!build_dir)
-    {
-        if (!bin_dir) bin_dir = dll_dir ? build_path( dll_dir, DLL_TO_BINDIR ) : BINDIR;
-        else if (!dll_dir) dll_dir = build_path( bin_dir, BIN_TO_DLLDIR );
-        data_dir = build_path( bin_dir, BIN_TO_DATADIR );
-    }
-
-    build_dll_path( dll_dir );
-    config_dir = init_config_dir();
 }
 
 
@@ -1812,7 +1471,7 @@ static int server_connect(void)
     if (chdir( server_dir ) == -1)
     {
         if (errno != ENOENT) fatal_perror( "chdir to %s", server_dir );
-        start_server();
+        unix_funcs->start_server( TRACE_ON(server) );
         if (chdir( server_dir ) == -1) fatal_perror( "chdir to %s", server_dir );
     }
 
@@ -1827,13 +1486,13 @@ static int server_connect(void)
         if (retry)
         {
             usleep( 100000 * retry * retry );
-            start_server();
+            unix_funcs->start_server( TRACE_ON(server) );
             if (lstat( SOCKETNAME, &st ) == -1) continue;  /* still no socket, wait a bit more */
         }
         else if (lstat( SOCKETNAME, &st ) == -1) /* check for an already existing socket */
         {
             if (errno != ENOENT) fatal_perror( "lstat %s/%s", server_dir, SOCKETNAME );
-            start_server();
+            unix_funcs->start_server( TRACE_ON(server) );
             if (lstat( SOCKETNAME, &st ) == -1) continue;  /* still no socket, wait a bit more */
         }
 
@@ -1894,6 +1553,12 @@ static void send_server_task_port(void)
 
     if (task_get_bootstrap_port(mach_task_self(), &bootstrap_port) != KERN_SUCCESS) return;
 
+    if (!server_dir)
+    {
+        struct stat st;
+        stat( config_dir, &st );
+        server_dir = init_server_dir( st.st_dev, st.st_ino );
+    }
     kret = bootstrap_look_up(bootstrap_port, server_dir, &wineserver_port);
     if (kret != KERN_SUCCESS)
         fatal_error( "cannot find the server port: 0x%08x\n", kret );
@@ -2024,15 +1689,9 @@ void server_init_process_done(void)
     PEB *peb = NtCurrentTeb()->Peb;
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( peb->ImageBaseAddress );
     void *entry = (char *)peb->ImageBaseAddress + nt->OptionalHeader.AddressOfEntryPoint;
-    obj_handle_t usd_handle;
     NTSTATUS status;
-    int suspend, usd_fd = -1;
-    sigset_t old_set;
-    SIZE_T size = user_shared_data_size;
-    void *addr = user_shared_data;
-    ULONG old_prot;
-
-    NtProtectVirtualMemory( NtCurrentProcess(), &addr, &size, PAGE_READONLY, &old_prot );
+    HANDLE usd_handle = user_shared_data_init_done();
+    int suspend;
 
 #ifdef __APPLE__
     send_server_task_port();
@@ -2047,7 +1706,6 @@ void server_init_process_done(void)
     signal_init_process();
 
     /* Signal the parent process to continue */
-    pthread_sigmask( SIG_BLOCK, &server_block_set, &old_set );
     SERVER_START_REQ( init_process_done )
     {
         req->module   = wine_server_client_ptr( peb->ImageBaseAddress );
@@ -2056,21 +1714,12 @@ void server_init_process_done(void)
 #endif
         req->entry    = wine_server_client_ptr( entry );
         req->gui      = (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI);
-        wine_server_add_data( req, user_shared_data, sizeof(*user_shared_data) );
-        status = server_call_unlocked( req );
+        req->usd_handle = wine_server_obj_handle( usd_handle );
+        status = wine_server_call( req );
         suspend = reply->suspend;
     }
     SERVER_END_REQ;
-    if (!status) usd_fd = receive_fd( &usd_handle );
-    pthread_sigmask( SIG_SETMASK, &old_set, NULL );
-
-    if (usd_fd != -1)
-    {
-        if (user_shared_data != mmap( user_shared_data, 0x1000,
-                                      PROT_READ, MAP_SHARED | MAP_FIXED, usd_fd, 0 ))
-            fatal_error( "failed to remap the process user shared data\n" );
-        close( usd_fd );
-    }
+    NtClose( usd_handle );
 
     assert( !status );
     signal_start_process( entry, suspend );

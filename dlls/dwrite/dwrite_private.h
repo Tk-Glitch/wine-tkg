@@ -300,6 +300,8 @@ extern void factory_unlock(IDWriteFactory7 *factory) DECLSPEC_HIDDEN;
 extern HRESULT create_inmemory_fileloader(IDWriteFontFileLoader**) DECLSPEC_HIDDEN;
 extern HRESULT create_font_resource(IDWriteFactory7 *factory, IDWriteFontFile *file, UINT32 face_index,
         IDWriteFontResource **resource) DECLSPEC_HIDDEN;
+extern HRESULT fontface_get_glyphs(struct dwrite_fontface *fontface, UINT32 const *codepoints,
+        UINT32 count, UINT16 *glyphs);
 
 struct dwrite_fontface;
 
@@ -378,7 +380,6 @@ extern unsigned int opentype_get_gasp_flags(const struct dwrite_fonttable *gasp,
 
 /* BiDi helpers */
 extern HRESULT bidi_computelevels(const WCHAR*,UINT32,UINT8,UINT8*,UINT8*) DECLSPEC_HIDDEN;
-extern WCHAR bidi_get_mirrored_char(WCHAR) DECLSPEC_HIDDEN;
 
 /* FreeType integration */
 struct dwrite_glyphbitmap
@@ -461,6 +462,11 @@ struct scriptshaping_cache
     } gdef;
 };
 
+struct shaping_glyph_info
+{
+    unsigned int mask;
+};
+
 struct scriptshaping_context
 {
     struct scriptshaping_cache *cache;
@@ -482,9 +488,20 @@ struct scriptshaping_context
         {
             UINT16 *glyphs;
             DWRITE_SHAPING_GLYPH_PROPERTIES *glyph_props;
+            UINT16 *clustermap;
             unsigned int max_glyph_count;
+            const WCHAR *digits;
         } subst;
     } u;
+
+    struct
+    {
+        const DWRITE_TYPOGRAPHIC_FEATURES **features;
+        const unsigned int *range_lengths;
+        unsigned int range_count;
+    } user_features;
+    unsigned int global_mask;
+    struct shaping_glyph_info *glyph_infos;
 
     unsigned int glyph_count;
     float emsize;
@@ -498,6 +515,8 @@ struct shaping_font_ops
     void (*grab_font_table)(void *context, UINT32 table, const BYTE **data, UINT32 *size, void **data_context);
     void (*release_font_table)(void *context, void *data_context);
     UINT16 (*get_font_upem)(void *context);
+    BOOL (*has_glyph)(void *context, unsigned int codepoint);
+    UINT16 (*get_glyph)(void *context, unsigned int codepoint);
 };
 
 extern struct scriptshaping_cache *create_scriptshaping_cache(void *context,
@@ -505,9 +524,22 @@ extern struct scriptshaping_cache *create_scriptshaping_cache(void *context,
 extern void release_scriptshaping_cache(struct scriptshaping_cache*) DECLSPEC_HIDDEN;
 extern struct scriptshaping_cache *fontface_get_shaping_cache(struct dwrite_fontface *fontface) DECLSPEC_HIDDEN;
 
+enum shaping_feature_flags
+{
+    FEATURE_GLOBAL = 0x1,
+    FEATURE_GLOBAL_SEARCH = 0x2,
+};
+
 struct shaping_feature
 {
     unsigned int tag;
+    unsigned int index;
+    unsigned int flags;
+    unsigned int max_value;
+    unsigned int default_value;
+    unsigned int mask;
+    unsigned int shift;
+    unsigned int stage;
 };
 
 struct shaping_features
@@ -515,6 +547,7 @@ struct shaping_features
     struct shaping_feature *features;
     size_t count;
     size_t capacity;
+    unsigned int stage;
 };
 
 extern void opentype_layout_scriptshaping_cache_init(struct scriptshaping_cache *cache) DECLSPEC_HIDDEN;

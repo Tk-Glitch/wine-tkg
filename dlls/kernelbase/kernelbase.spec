@@ -387,8 +387,8 @@
 @ stdcall FoldStringW(long wstr long ptr long)
 # @ stub ForceSyncFgPolicyInternal
 # @ stub FormatApplicationUserModelId
-@ stdcall FormatMessageA(long ptr long long ptr long ptr) kernel32.FormatMessageA
-@ stdcall FormatMessageW(long ptr long long ptr long ptr) kernel32.FormatMessageW
+@ stdcall FormatMessageA(long ptr long long ptr long ptr)
+@ stdcall FormatMessageW(long ptr long long ptr long ptr)
 @ stdcall FreeConsole()
 @ stdcall FreeEnvironmentStringsA(ptr) FreeEnvironmentStringsW
 @ stdcall FreeEnvironmentStringsW(ptr)
@@ -632,10 +632,10 @@
 # @ stub GetProcessInformation
 # @ stub GetProcessMemoryInfo
 @ stdcall GetProcessMitigationPolicy(long long ptr long)
-@ stdcall GetProcessPreferredUILanguages(long ptr ptr ptr) kernel32.GetProcessPreferredUILanguages
+@ stdcall GetProcessPreferredUILanguages(long ptr ptr ptr)
 @ stdcall GetProcessPriorityBoost(long ptr)
 @ stdcall GetProcessShutdownParameters(ptr ptr)
-@ stdcall GetProcessTimes(long ptr ptr ptr ptr) kernel32.GetProcessTimes
+@ stdcall GetProcessTimes(long ptr ptr ptr ptr)
 @ stdcall GetProcessVersion(long) kernel32.GetProcessVersion
 @ stdcall GetProcessWorkingSetSizeEx(long ptr ptr ptr)
 # @ stub GetProcessorSystemCycleTime
@@ -692,13 +692,13 @@
 # @ stub GetSystemMetadataPath
 # @ stub GetSystemMetadataPathForPackage
 # @ stub GetSystemMetadataPathForPackageFamily
-@ stdcall GetSystemPreferredUILanguages(long ptr ptr ptr) kernel32.GetSystemPreferredUILanguages
+@ stdcall GetSystemPreferredUILanguages(long ptr ptr ptr)
 # @ stub GetSystemStateRootFolder
 @ stdcall GetSystemTime(ptr)
-@ stdcall GetSystemTimeAdjustment(ptr ptr ptr) kernel32.GetSystemTimeAdjustment
+@ stdcall GetSystemTimeAdjustment(ptr ptr ptr)
 @ stdcall GetSystemTimeAsFileTime(ptr)
 @ stdcall GetSystemTimePreciseAsFileTime(ptr)
-@ stdcall GetSystemTimes(ptr ptr ptr) kernel32.GetSystemTimes
+@ stdcall GetSystemTimes(ptr ptr ptr)
 @ stdcall GetSystemWindowsDirectoryA(ptr long)
 @ stdcall GetSystemWindowsDirectoryW(ptr long)
 @ stdcall GetSystemWow64Directory2A(ptr long long)
@@ -719,14 +719,14 @@
 @ stdcall GetThreadIdealProcessorEx(long ptr)
 # @ stub GetThreadInformation
 @ stdcall GetThreadLocale()
-@ stdcall GetThreadPreferredUILanguages(long ptr ptr ptr) kernel32.GetThreadPreferredUILanguages
+@ stdcall GetThreadPreferredUILanguages(long ptr ptr ptr)
 @ stdcall GetThreadPriority(long)
 @ stdcall GetThreadPriorityBoost(long ptr)
 # @ stub GetThreadSelectedCpuSets
 @ stdcall GetThreadTimes(long ptr ptr ptr ptr)
 @ stdcall GetThreadUILanguage()
-@ stdcall GetTickCount() kernel32.GetTickCount
-@ stdcall -ret64 GetTickCount64() kernel32.GetTickCount64
+@ stdcall GetTickCount()
+@ stdcall -ret64 GetTickCount64()
 @ stdcall GetTimeFormatA(long long ptr str ptr long) kernel32.GetTimeFormatA
 @ stdcall GetTimeFormatEx(wstr long ptr wstr ptr long) kernel32.GetTimeFormatEx
 @ stdcall GetTimeFormatW(long long ptr wstr ptr long) kernel32.GetTimeFormatW
@@ -748,7 +748,7 @@
 @ stub GetUserInfoWord
 # @ stub GetUserOverrideString
 # @ stub GetUserOverrideWord
-@ stdcall GetUserPreferredUILanguages(long ptr ptr ptr) kernel32.GetUserPreferredUILanguages
+@ stdcall GetUserPreferredUILanguages(long ptr ptr ptr)
 @ stdcall GetVersion()
 @ stdcall GetVersionExA(ptr)
 @ stdcall GetVersionExW(ptr)
@@ -1458,7 +1458,7 @@
 # @ stub SetProcessGroupAffinity
 # @ stub SetProcessInformation
 @ stdcall SetProcessMitigationPolicy(long ptr long)
-@ stdcall SetProcessPreferredUILanguages(long ptr ptr) kernel32.SetProcessPreferredUILanguages
+@ stdcall SetProcessPreferredUILanguages(long ptr ptr)
 @ stdcall SetProcessPriorityBoost(long long)
 @ stdcall SetProcessShutdownParameters(long long)
 # @ stub SetProcessValidCallTargets
@@ -1477,7 +1477,7 @@
 @ stdcall SetStdHandleEx(long long ptr)
 @ stdcall SetSystemFileCacheSize(long long long)
 @ stdcall SetSystemTime(ptr)
-@ stdcall SetSystemTimeAdjustment(long long) kernel32.SetSystemTimeAdjustment
+@ stdcall SetSystemTimeAdjustment(long long)
 @ stdcall SetThreadContext(long ptr)
 @ stdcall SetThreadDescription(ptr wstr)
 @ stdcall SetThreadErrorMode(long ptr)
@@ -1486,7 +1486,7 @@
 @ stdcall SetThreadIdealProcessorEx(long ptr ptr)
 # @ stub SetThreadInformation
 @ stdcall SetThreadLocale(long)
-@ stdcall SetThreadPreferredUILanguages(long ptr ptr) kernel32.SetThreadPreferredUILanguages
+@ stdcall SetThreadPreferredUILanguages(long ptr ptr)
 @ stdcall SetThreadPriority(long long)
 @ stdcall SetThreadPriorityBoost(long long)
 # @ stub SetThreadSelectedCpuSets

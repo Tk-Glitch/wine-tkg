@@ -1,0 +1,7 @@
+MODULE = gfesdk.dll
+IMPORTLIB = gfesdk
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+    gfesdk_main.c

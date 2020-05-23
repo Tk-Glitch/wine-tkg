@@ -17443,6 +17443,104 @@ done:
     DestroyWindow(window);
 }
 
+static BOOL CALLBACK test_window_position_cb(HMONITOR monitor, HDC hdc, RECT *monitor_rect,
+        LPARAM lparam)
+{
+    RECT primary_rect, window_rect;
+    IDirectDraw4 *ddraw;
+    HWND window;
+    HRESULT hr;
+    BOOL ret;
+
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    window = CreateWindowA("static", "ddraw_test", WS_POPUP | WS_VISIBLE, monitor_rect->left,
+            monitor_rect->top, monitor_rect->right - monitor_rect->left,
+            monitor_rect->bottom - monitor_rect->top, NULL, NULL, NULL, NULL);
+    ok(!!window, "Failed to create a window.\n");
+    flush_events();
+
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+    flush_events();
+    ret = GetWindowRect(window, &window_rect);
+    ok(ret, "GetWindowRect failed, error %#x.\n", GetLastError());
+    SetRect(&primary_rect, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+    ok(EqualRect(&window_rect, &primary_rect), "Expect window rect %s, got %s.\n",
+            wine_dbgstr_rect(&primary_rect), wine_dbgstr_rect(&window_rect));
+
+    /* Window activation should restore the window to fit the whole primary monitor */
+    ret = SetWindowPos(window, 0, monitor_rect->left, monitor_rect->top, 0, 0,
+            SWP_NOZORDER | SWP_NOSIZE);
+    ok(ret, "SetWindowPos failed, error %#x.\n", GetLastError());
+    ret = SetForegroundWindow(GetDesktopWindow());
+    ok(ret, "Failed to set foreground window.\n");
+    flush_events();
+    ret = ShowWindow(window, SW_RESTORE);
+    ok(ret, "Failed to restore window, error %#x.\n", GetLastError());
+    flush_events();
+    ret = SetForegroundWindow(window);
+    ok(ret, "SetForegroundWindow failed, error %#x.\n", GetLastError());
+    flush_events();
+    ret = GetWindowRect(window, &window_rect);
+    ok(ret, "GetWindowRect failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&window_rect, &primary_rect), "Expect window rect %s, got %s.\n",
+            wine_dbgstr_rect(&primary_rect), wine_dbgstr_rect(&window_rect));
+
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+    ret = GetWindowRect(window, &window_rect);
+    ok(ret, "GetWindowRect failed, error %#x.\n", GetLastError());
+    ok(EqualRect(&window_rect, &primary_rect), "Expect window rect %s, got %s.\n",
+            wine_dbgstr_rect(&primary_rect), wine_dbgstr_rect(&window_rect));
+
+    DestroyWindow(window);
+    IDirectDraw4_Release(ddraw);
+    return TRUE;
+}
+
+static void test_window_position(void)
+{
+    EnumDisplayMonitors(NULL, NULL, test_window_position_cb, 0);
+}
+
+static BOOL CALLBACK test_get_display_mode_cb(HMONITOR monitor, HDC hdc, RECT *monitor_rect,
+        LPARAM lparam)
+{
+    DDSURFACEDESC2 surface_desc;
+    IDirectDraw4 *ddraw;
+    HWND window;
+    HRESULT hr;
+    BOOL ret;
+
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    window = create_window();
+    ok(!!window, "Failed to create a window.\n");
+
+    /* Test that DirectDraw doesn't use the device window to determine which monitor to use */
+    ret = SetWindowPos(window, 0, monitor_rect->left, monitor_rect->top, 0, 0,
+            SWP_NOZORDER | SWP_NOSIZE);
+    ok(ret, "SetWindowPos failed, error %#x.\n", GetLastError());
+
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDraw4_GetDisplayMode(ddraw, &surface_desc);
+    ok(hr == DD_OK, "GetDisplayMode failed, hr %#x.\n", hr);
+    ok(surface_desc.dwWidth == GetSystemMetrics(SM_CXSCREEN), "Expect width %d, got %d.\n",
+            GetSystemMetrics(SM_CXSCREEN), surface_desc.dwWidth);
+    ok(surface_desc.dwHeight == GetSystemMetrics(SM_CYSCREEN), "Expect height %d, got %d.\n",
+            GetSystemMetrics(SM_CYSCREEN), surface_desc.dwHeight);
+
+    DestroyWindow(window);
+    IDirectDraw4_Release(ddraw);
+    return TRUE;
+}
+
+static void test_get_display_mode(void)
+{
+    EnumDisplayMonitors(NULL, NULL, test_get_display_mode_cb, 0);
+}
+
 static void test_texture_wrong_caps_(BOOL software)
 {
     static struct
@@ -17690,4 +17788,6 @@ START_TEST(ddraw4)
     test_d32_support();
     test_surface_format_conversion_alpha();
     test_cursor_clipping();
+    test_window_position();
+    test_get_display_mode();
 }

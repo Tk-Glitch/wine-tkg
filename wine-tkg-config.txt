@@ -1,18 +1,19 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sat 09 May 2020 03:38:02 PM CEST :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sat 23 May 2020 04:23:15 PM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.8.r0.gbf1abbac0c
-Using wine-staging patchset (version 5.8.r0.g7d92cd31)
+Wine (plain) version: 5.9.r0.g056c9df854
+Using wine-staging patchset (version 5.9.r0.g7b5a0e5a)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
 
-2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted
-( FS hack unbreak revert applied )
+26b26a2e0efcb776e7b0115f15580d2507b10400 reverted 
+fd6f50c0d3e96947846ca82ed0c9bd79fd8e5b80 reverted 
+2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted 
+( FS hack unbreak reverts applied )
 
 use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
-use_clock_monotonic-2.patch -- ( Applied clock_monotonic addon patch for 13e11d3 )
 plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
 FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
 staging-44d1a45-localreverts.patch -- ( Applied local reverts for staging 44d1a45 fshack )
@@ -23,7 +24,7 @@ CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 Staging overrides, if any: -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-nolegacy -W user32-rawinput-mouse-experimental -W user32-rawinput-hid -W winex11-key_translation
 
 leagueoflolfix.patch -- ( Applied LoL 9.20+ fix - Requires vdso32 disabled (echo 0 > /proc/sys/abi/vsyscall32) )
-assettocorsa_hud_perf.patch -- ( Applied Assetto Corsa HUD performance fix )
+mk11.patch -- ( Applied Mortal Kombat 11 fix )
 fsync-staging.patch -- ( Applied fsync, an experimental replacement for esync (staging) )
 fsync-staging-no_alloc_handle.patch -- ( Added no_alloc_handle object method to fsync )
 fsync-spincounts.patch -- ( Add a configurable spin count to fsync )
@@ -40,18 +41,15 @@ proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 
 proton-pa-staging.patch -- ( Enable Proton's PA additions )
 proton-vk-bits-4.5.patch -- ( Enable Proton vulkan bits for 4.5+ )
 proton_fs_hack_integer_scaling.patch -- ( Enable Proton fs hack integer scaling )
-proton-winevulkan.patch -- ( Using Proton winevulkan patches )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 proton-win10-default.patch -- ( Enforce win10 as default wine version )
 
-Applied reverting hotfix /home/tk/Dev/Dev/PKGBUILDS/wine-tkg-git/wine-tkg-git/wine-tkg-patches/hotfixes/fd7992972b252ed262d33ef604e9e1235d2108c5-5.myrevert
-Applied your own patch D3D12CreateVersionedRootSignatureDeserializer.mypatch
-Applied your own patch D3D12SerializeVersionedRootSignature.mypatch
+Applied reverting hotfix /home/tk/Dev/Dev/PKGBUILDS/wine-tkg-git/wine-tkg-git/wine-tkg-patches/hotfixes/fd7992972b252ed262d33ef604e9e1235d2108c5-6.myrevert
+Applied your own patch 0001-Add-some-semi-stubs-in-user32.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch GNUTLShack.mypatch
 Applied your own patch amdags.mypatch
 Applied your own patch guy1524_mfplat_WIP.mypatch
-Applied your own patch legoisland_168726.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
 Applied your own patch winex11-fs-no_above_state.mypatch
 

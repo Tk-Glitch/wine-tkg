@@ -201,13 +201,77 @@ static DWORD shape_select_language(const struct scriptshaping_cache *cache, DWOR
     return 0;
 }
 
-static void shape_add_feature(struct shaping_features *features, unsigned int tag)
+static void shape_add_feature_full(struct shaping_features *features, unsigned int tag, unsigned int flags, unsigned int value)
 {
+    unsigned int i = features->count;
+
     if (!dwrite_array_reserve((void **)&features->features, &features->capacity, features->count + 1,
             sizeof(*features->features)))
         return;
 
-    features->features[features->count++].tag = tag;
+    features->features[i].tag = tag;
+    features->features[i].flags = flags;
+    features->features[i].max_value = value;
+    features->features[i].default_value = flags & FEATURE_GLOBAL ? value : 0;
+    features->features[i].stage = features->stage;
+    features->count++;
+}
+
+static void shape_add_feature(struct shaping_features *features, unsigned int tag)
+{
+    shape_add_feature_full(features, tag, FEATURE_GLOBAL, 1);
+}
+
+static int features_sorting_compare(const void *a, const void *b)
+{
+    const struct shaping_feature *left = a, *right = b;
+    return left->tag != right->tag ? (left->tag < right->tag ? -1 : 1) : 0;
+};
+
+static void shape_merge_features(struct scriptshaping_context *context, struct shaping_features *features)
+{
+    const DWRITE_TYPOGRAPHIC_FEATURES **user_features = context->user_features.features;
+    unsigned int j = 0, i;
+
+    /* For now only consider global, enabled user features. */
+    if (user_features && context->user_features.range_lengths)
+    {
+        unsigned int flags = context->user_features.range_count == 1 &&
+                context->user_features.range_lengths[0] == context->length ? FEATURE_GLOBAL : 0;
+
+        for (i = 0; i < context->user_features.range_count; ++i)
+        {
+            for (j = 0; j < user_features[i]->featureCount; ++j)
+                shape_add_feature_full(features, user_features[i]->features[j].nameTag, flags,
+                        user_features[i]->features[j].parameter);
+        }
+    }
+
+    /* Sort and merge duplicates. */
+    qsort(features->features, features->count, sizeof(*features->features), features_sorting_compare);
+
+    for (i = 1; i < features->count; ++i)
+    {
+        if (features->features[i].tag != features->features[j].tag)
+            features->features[++j] = features->features[i];
+        else
+        {
+            if (features->features[i].flags & FEATURE_GLOBAL)
+            {
+                features->features[j].flags |= FEATURE_GLOBAL;
+                features->features[j].max_value = features->features[i].max_value;
+                features->features[j].default_value = features->features[i].default_value;
+            }
+            else
+            {
+                if (features->features[j].flags & FEATURE_GLOBAL)
+                    features->features[j].flags ^= FEATURE_GLOBAL;
+                features->features[j].max_value = max(features->features[j].max_value, features->features[i].max_value);
+            }
+            features->features[j].stage = min(features->features[j].stage, features->features[i].stage);
+        }
+    }
+    features->count = j + 1;
 }
 
 HRESULT shape_get_positions(struct scriptshaping_context *context, const unsigned int *scripts)
@@ -238,6 +302,8 @@ HRESULT shape_get_positions(struct scriptshaping_context *context, const unsigne
         for (i = 0; i < ARRAY_SIZE(horizontal_features); ++i)
             shape_add_feature(&features, horizontal_features[i]);
     }
+
+    shape_merge_features(context, &features);
 
     /* Resolve script tag to actually supported script. */
     if (cache->gpos.table.data)
@@ -296,15 +362,17 @@ HRESULT shape_get_glyphs(struct scriptshaping_context *context, const unsigned i
         DWRITE_MAKE_OPENTYPE_TAG('l','i','g','a'),
         DWRITE_MAKE_OPENTYPE_TAG('r','c','l','t'),
     };
-    struct scriptshaping_cache *cache = context->cache;
-    unsigned int script_index, language_index, script;
+    unsigned int script_index, language_index;
     struct shaping_features features = { 0 };
     unsigned int i;
 
     if (!context->is_sideways)
     {
         if (context->is_rtl)
+        {
             shape_add_feature(&features, DWRITE_MAKE_OPENTYPE_TAG('r','t','l','a'));
+            shape_add_feature_full(&features, DWRITE_MAKE_OPENTYPE_TAG('r','t','l','m'), 0, 1);
+        }
         else
         {
             shape_add_feature(&features, DWRITE_MAKE_OPENTYPE_TAG('l','t','r','a'));
@@ -321,15 +389,14 @@ HRESULT shape_get_glyphs(struct scriptshaping_context *context, const unsigned i
         for (i = 0; i < ARRAY_SIZE(horizontal_features); ++i)
             shape_add_feature(&features, horizontal_features[i]);
     }
+    else
+        shape_add_feature_full(&features, DWRITE_MAKE_OPENTYPE_TAG('v','e','r','t'), FEATURE_GLOBAL | FEATURE_GLOBAL_SEARCH, 1);
+
+    shape_merge_features(context, &features);
 
     /* Resolve script tag to actually supported script. */
-    if (cache->gsub.table.data)
-    {
-        if ((script = shape_get_script_lang_index(context, scripts, MS_GSUB_TAG, &script_index, &language_index)))
-        {
-            opentype_layout_apply_gsub_features(context, script_index, language_index, &features);
-        }
-    }
+    shape_get_script_lang_index(context, scripts, MS_GSUB_TAG, &script_index, &language_index);
+    opentype_layout_apply_gsub_features(context, script_index, language_index, &features);
 
     heap_free(features.features);
 

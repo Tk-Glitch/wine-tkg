@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 #include "wine/port.h"
 
@@ -30,7 +34,6 @@
 #endif
 
 #include "wine/debug.h"
-#include "wine/library.h"
 #include "ntdll_misc.h"
 
 WINE_DECLARE_DEBUG_CHANNEL(pid);
@@ -104,22 +107,10 @@ static void add_option( const char *name, unsigned char set, unsigned char clear
     nb_debug_options++;
 }
 
-/* get name of the current process */
-static const char *get_process_name( void )
-{
-    const char *ret, *tmp;
-    if (__wine_main_argc < 2) return NULL;
-    ret = __wine_main_argv[1];
-    if ((tmp = strrchr(ret, '/'))) ret = ++tmp;
-    if ((tmp = strrchr(ret, '\\'))) ret = ++tmp;
-    return ret;
-}
-
 /* parse a set of debugging option specifications and add them to the option list */
 static void parse_options( const char *str )
 {
-    char *opt, *next, *popt, *options;
-    const char *process = get_process_name();
+    char *opt, *next, *options;
     unsigned int i;
 
     if (!(options = strdup(str))) return;
@@ -129,17 +120,6 @@ static void parse_options( const char *str )
         unsigned char set = 0, clear = 0;
 
         if ((next = strchr( opt, ',' ))) *next++ = 0;
-
-        if ((popt = strchr( opt, ':' )))
-        {
-            unsigned int inv = 0;
-            *popt = 0;
-            if (!process) continue;
-            if (*opt == '-' || *opt == '+')
-                inv = (*opt++ == '-');
-            if (inv == !strcmp( opt, process )) continue;
-            opt = ++popt;
-        }
 
         p = opt + strcspn( opt, "+-" );
         if (!p[0]) p = opt;  /* assume it's a debug channel name */
@@ -181,7 +161,7 @@ static void debug_usage(void)
 {
     static const char usage[] =
         "Syntax of the WINEDEBUG variable:\n"
-        "  WINEDEBUG=[+process:][class]+xxx,[-process:][class]-yyy,...\n\n"
+        "  WINEDEBUG=[class]+xxx,[class]-yyy,...\n\n"
         "Example: WINEDEBUG=+relay,warn-heap\n"
         "    turns on relay traces, disable heap warnings\n"
         "Available message classes: err, warn, fixme, trace\n";
@@ -304,9 +284,9 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
 }
 
 /***********************************************************************
- *		debug_init
+ *		dbg_init
  */
-void debug_init(void)
+void CDECL dbg_init(void)
 {
     setbuf( stdout, NULL );
     setbuf( stderr, NULL );

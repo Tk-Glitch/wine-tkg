@@ -355,7 +355,7 @@ gboolean activate_bytestream_pad_mode_wrapper(GstPad *pad, GstObject *parent, Gs
 
     call_cb(&cbdata);
 
-    return cbdata.u.query_function_data.ret;
+    return cbdata.u.activate_mode_data.ret;
 }
 
 gboolean process_bytestream_pad_event_wrapper(GstPad *pad, GstObject *parent, GstEvent *event)

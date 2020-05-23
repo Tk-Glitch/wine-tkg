@@ -419,6 +419,16 @@ static HRESULT wmv_decoder_create(REFIID riid, void **ret)
     return generic_decoder_construct(riid, ret, DECODER_TYPE_WMV);
 }
 
+static HRESULT wma_decoder_create(REFIID riid, void **ret)
+{
+    return generic_decoder_construct(riid, ret, DECODER_TYPE_WMA);
+}
+
+static HRESULT m4s2_decoder_create(REFIID riid, void **ret)
+{
+    return generic_decoder_construct(riid, ret, DECODER_TYPE_M4S2);
+}
+
 static HRESULT mp4_stream_handler_create(REFIID riid, void **ret)
 {
     return container_stream_handler_construct(riid, ret, SOURCE_TYPE_MPEG_4);
@@ -442,6 +452,8 @@ class_objects[] =
     { &CLSID_CMSH264DecoderMFT, &h264_decoder_create },
     { &CLSID_CMSAACDecMFT, &aac_decoder_create },
     { &CLSID_CWMVDecMediaObject, &wmv_decoder_create },
+    { &CLSID_CWMADecMediaObject, &wma_decoder_create },
+    { &CLSID_CMpeg4sDecMFT, m4s2_decoder_create },
     { &CLSID_MPEG4ByteStreamHandler, &mp4_stream_handler_create },
     { &CLSID_ASFByteStreamHandler, &asf_stream_handler_create },
     { &CLSID_CColorConvertDMO, &color_converter_create },
@@ -546,6 +558,36 @@ const GUID *wmv_decoder_output_types[] =
     &MFVideoFormat_RGB8,
 };
 
+static WCHAR wmadecoderW[] = {'W','M','A','u','d','i','o',' ','D','e','c','o','d','e','r',' ','M','F','T',0};
+
+const GUID *wma_decoder_input_types[] =
+{
+    &MFAudioFormat_WMAudioV8,
+    &MFAudioFormat_WMAudioV9,
+};
+
+const GUID *wma_decoder_output_types[] =
+{
+    &MFAudioFormat_Float,
+    &MFAudioFormat_PCM,
+};
+
+static WCHAR m4s2decoderW[] = {'M','p','e','g','4','s',' ','D','e','c','o','d','e','r',' ','M','F','T',0};
+
+const GUID *m4s2_decoder_input_types[] =
+{
+    &MFVideoFormat_M4S2,
+};
+
+const GUID *m4s2_decoder_output_types[] =
+{
+    &MFVideoFormat_I420,
+    &MFVideoFormat_IYUV,
+    &MFVideoFormat_NV12,
+    &MFVideoFormat_YUY2,
+    &MFVideoFormat_YV12,
+};
+
 static const struct mft
 {
     const GUID *clsid;
@@ -608,6 +650,30 @@ mfts[] =
         ARRAY_SIZE(wmv_decoder_output_types),
         wmv_decoder_output_types,
         NULL
+    },
+    {
+        &CLSID_CWMADecMediaObject,
+        &MFT_CATEGORY_AUDIO_DECODER,
+        wmadecoderW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Audio,
+        ARRAY_SIZE(wma_decoder_input_types),
+        wma_decoder_input_types,
+        ARRAY_SIZE(wma_decoder_output_types),
+        wma_decoder_output_types,
+        NULL
+    },
+    {
+        &CLSID_CMpeg4sDecMFT,
+        &MFT_CATEGORY_VIDEO_DECODER,
+        m4s2decoderW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Video,
+        ARRAY_SIZE(m4s2_decoder_input_types),
+        m4s2_decoder_input_types,
+        ARRAY_SIZE(m4s2_decoder_output_types),
+        m4s2_decoder_output_types,
+        NULL
     }
 };
 
@@ -669,6 +735,24 @@ struct aac_user_data
     WORD reserved;
   /* audio-specific-config is stored here */
 };
+
+static void codec_data_to_user_data(GstStructure *structure, IMFMediaType *type)
+{
+    const GValue *codec_data;
+
+    if ((codec_data = gst_structure_get_value(structure, "codec_data")))
+    {
+        GstBuffer *codec_data_buffer = gst_value_get_buffer(codec_data);
+        if (codec_data_buffer)
+        {
+            gsize codec_data_size = gst_buffer_get_size(codec_data_buffer);
+            gpointer codec_data_raw = heap_alloc(codec_data_size);
+            gst_buffer_extract(codec_data_buffer, 0, codec_data_raw, codec_data_size);
+            IMFMediaType_SetBlob(type, &MF_MT_USER_DATA, codec_data_raw, codec_data_size);
+            heap_free(codec_data_raw);
+        }
+    }
+}
 
 /* caps will be modified to represent the exact type needed for the format */
 static IMFMediaType* transform_to_media_type(GstCaps *caps)
@@ -803,7 +887,6 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
         {
             gint wmv_version;
             const char *format;
-            const GValue *codec_data;
 
             if (gst_structure_get_int(info, "wmvversion", &wmv_version))
             {
@@ -831,39 +914,40 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
                     FIXME("Unrecognized format %s\n", format);
             }
 
-            if ((codec_data = gst_structure_get_value(info, "codec_data")))
-            {
-                GstBuffer *codec_data_buffer = gst_value_get_buffer(codec_data);
-                if (codec_data_buffer)
-                {
-                    gsize codec_data_size = gst_buffer_get_size(codec_data_buffer);
-                    gpointer codec_data_raw = heap_alloc(codec_data_size);
-                    gst_buffer_extract(codec_data_buffer, 0, codec_data_raw, codec_data_size);
-                    IMFMediaType_SetBlob(media_type, &MF_MT_USER_DATA, codec_data_raw, codec_data_size);
-                }
-            }
+            codec_data_to_user_data(info, media_type);
         }
         else if (!(strcmp(mime_type, "video/mpeg")))
         {
             gint mpegversion;
             if (gst_structure_get_int(info, "mpegversion", &mpegversion))
             {
-                switch (mpegversion)
+                if (mpegversion == 4)
                 {
-                    case 1: IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_MPG1); break;
-                    case 2: IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_MPEG2); break;
-                    case 4: IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_M4S2); break;
-                    default: FIXME("Unrecognized mpeg version %d\n", mpegversion);
+                    IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_M4S2);
+                    IMFMediaType_SetUINT32(media_type, &MF_MT_COMPRESSED, TRUE);
+
+                    codec_data_to_user_data(info, media_type);
                 }
+                else
+                    FIXME("Unrecognized mpeg version %d\n", mpegversion);
             }
-            IMFMediaType_SetUINT32(media_type, &MF_MT_COMPRESSED, TRUE);
         }
         else
             FIXME("Unrecognized video format %s\n", mime_type);
     }
     else if (!(strncmp(mime_type, "audio", 5)))
     {
+        gint rate, channels, bitrate;
         IMFMediaType_SetGUID(media_type, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
+
+        if (gst_structure_get_int(info, "rate", &rate))
+            IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, rate);
+
+        if (gst_structure_get_int(info, "channels", &channels))
+            IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_NUM_CHANNELS, channels);
+
+        if (gst_structure_get_int(info, "bitrate", &bitrate))
+            IMFMediaType_SetUINT32(media_type, &MF_MT_AVG_BITRATE, bitrate);
 
         if (!(strcmp(mime_type, "audio/x-raw")))
         {
@@ -957,17 +1041,6 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
                     if (!user_data)
                         user_data = heap_alloc_zero(sizeof(*user_data));
 
-                    {
-                        int rate;
-                        if (gst_structure_get_int(info, "rate", &rate))
-                            IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, rate);
-                    }
-                    {
-                        int channels;
-                        if (gst_structure_get_int(info, "channels", &channels))
-                            IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_NUM_CHANNELS, channels);
-                    }
-
                     if ((format = gst_structure_get_string(info, "stream-format")))
                     {
                         DWORD payload_type = -1;
@@ -1023,6 +1096,30 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
                     FIXME("Unhandled mpegversion %d\n", mpeg_version);
             }
         }
+        else if (!(strcmp(mime_type, "audio/x-wma")))
+        {
+            gint wma_version, block_align;
+
+            if (gst_structure_get_int(info, "wmaversion", &wma_version))
+            {
+                switch (wma_version)
+                {
+                    case 2:
+                        IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_WMAudioV8);
+                        break;
+                    case 3:
+                        IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_WMAudioV9);
+                        break;
+                    default:
+                        FIXME("Unrecognized wmaversion %d\n", wma_version);
+                }
+            }
+
+            if (gst_structure_get_int(info, "block_align", &block_align))
+                IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, block_align);
+
+            codec_data_to_user_data(info, media_type);
+        }
         else
             FIXME("Unrecognized audio format %s\n", mime_type);
     }
@@ -1070,6 +1167,21 @@ GstCaps *make_mf_compatible_caps(GstCaps *caps)
     }
 
     return ret;
+}
+
+static void user_data_to_codec_data(IMFMediaType *type, GstCaps *caps)
+{
+    BYTE *user_data;
+    DWORD user_data_size;
+
+    if (SUCCEEDED(IMFMediaType_GetAllocatedBlob(type, &MF_MT_USER_DATA, &user_data, &user_data_size)))
+    {
+        GstBuffer *codec_data_buffer = gst_buffer_new_allocate(NULL, user_data_size, NULL);
+        gst_buffer_fill(codec_data_buffer, 0, user_data, user_data_size);
+        gst_caps_set_simple(caps, "codec_data", GST_TYPE_BUFFER, codec_data_buffer, NULL);
+        gst_buffer_unref(codec_data_buffer);
+        CoTaskMemFree(user_data);
+    }
 }
 
 GstCaps *caps_from_mf_media_type(IMFMediaType *type)
@@ -1191,21 +1303,19 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
         }
         else if (IsEqualGUID(&subtype, &MFVideoFormat_WVC1))
         {
-            BYTE *user_data;
-            DWORD user_data_size;
             output = gst_caps_new_empty_simple("video/x-wmv");
             gst_caps_set_simple(output, "format", G_TYPE_STRING, "WVC1", NULL);
 
             gst_caps_set_simple(output, "wmvversion", G_TYPE_INT, 3, NULL);
 
-            if (SUCCEEDED(IMFMediaType_GetAllocatedBlob(type, &MF_MT_USER_DATA, &user_data, &user_data_size)))
-            {
-                GstBuffer *codec_data_buffer = gst_buffer_new_allocate(NULL, user_data_size, NULL);
-                gst_buffer_fill(codec_data_buffer, 0, user_data, user_data_size);
-                gst_caps_set_simple(output, "codec_data", GST_TYPE_BUFFER, codec_data_buffer, NULL);
-                gst_buffer_unref(codec_data_buffer);
-                CoTaskMemFree(user_data);
-            }
+            user_data_to_codec_data(type, output);
+        }
+        else if (IsEqualGUID(&subtype, &MFVideoFormat_M4S2))
+        {
+            output = gst_caps_new_empty_simple("video/mpeg");
+            gst_caps_set_simple(output, "mpegversion", G_TYPE_INT, 4, NULL);
+
+            user_data_to_codec_data(type, output);
         }
         else {
             FIXME("Unrecognized subtype %s\n", debugstr_guid(&subtype));
@@ -1224,13 +1334,14 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
     }
     else if (IsEqualGUID(&major_type, &MFMediaType_Audio))
     {
-        DWORD rate, channels;
+        DWORD rate, channels, bitrate;
 
         if (IsEqualGUID(&subtype, &MFAudioFormat_Float))
         {
             output = gst_caps_new_empty_simple("audio/x-raw");
 
             gst_caps_set_simple(output, "format", G_TYPE_STRING, "F32LE", NULL);
+            gst_caps_set_simple(output, "layout", G_TYPE_STRING, "interleaved", NULL);
         }
         else if (IsEqualGUID(&subtype, &MFAudioFormat_PCM))
         {
@@ -1321,6 +1432,21 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
                 CoTaskMemFree(user_data);
             }
         }
+        else if (IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV9) ||
+                 IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV8))
+        {
+            DWORD block_align;
+
+            output = gst_caps_new_empty_simple("audio/x-wma");
+
+            gst_caps_set_simple(output, "wmaversion", G_TYPE_INT,
+                IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV9) ? 3 : 2, NULL);
+
+            if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, &block_align)))
+                gst_caps_set_simple(output, "block_align", G_TYPE_INT, block_align, NULL);
+
+            user_data_to_codec_data(type, output);
+        }
         else
         {
             FIXME("Unrecognized subtype %s\n", debugstr_guid(&subtype));
@@ -1334,6 +1460,11 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
         if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_NUM_CHANNELS, &channels)))
         {
             gst_caps_set_simple(output, "channels", G_TYPE_INT, channels, NULL);
+        }
+
+        if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AVG_BITRATE, &bitrate)))
+        {
+            gst_caps_set_simple(output, "bitrate", G_TYPE_INT, bitrate, NULL);
         }
 
         return output;

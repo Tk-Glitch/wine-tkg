@@ -40,6 +40,7 @@
     VK_INSTANCE_PFN(vkGetPhysicalDeviceQueueFamilyProperties) \
     VK_INSTANCE_PFN(vkGetPhysicalDeviceSparseImageFormatProperties) \
     /* Vulkan 1.1 */ \
+    VK_INSTANCE_EXT_PFN(vkGetPhysicalDeviceFeatures2) \
     VK_INSTANCE_EXT_PFN(vkGetPhysicalDeviceProperties2)
 
 #define VK_DEVICE_FUNCS() \
@@ -181,6 +182,12 @@ struct vulkan_ops
     PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
 };
 
+enum wined3d_vk_extension
+{
+    WINED3D_VK_EXT_NONE,
+    WINED3D_VK_EXT_COUNT,
+};
+
 struct wined3d_vk_info
 {
     struct vulkan_ops vk_ops;
@@ -188,6 +195,7 @@ struct wined3d_vk_info
     VkInstance instance;
     unsigned int api_version;
 
+    BOOL supported[WINED3D_VK_EXT_COUNT];
 #ifdef USE_WIN32_VULKAN
     HMODULE vulkan_lib;
 #endif
