@@ -546,10 +546,10 @@ SIZE_T WINAPI RtlCompareMemory( const VOID *Source1, const VOID *Source2, SIZE_T
  * RETURNS
  *  The byte position of the first byte at which Source1 is not dwVal.
  */
-SIZE_T WINAPI RtlCompareMemoryUlong(const ULONG *Source1, SIZE_T Length, ULONG dwVal)
+SIZE_T WINAPI RtlCompareMemoryUlong(VOID *Source1, SIZE_T Length, ULONG dwVal)
 {
     SIZE_T i;
-    for(i = 0; i < Length/sizeof(ULONG) && Source1[i] == dwVal; i++);
+    for(i = 0; i < Length/sizeof(ULONG) && ((ULONG *)Source1)[i] == dwVal; i++);
     return i * sizeof(ULONG);
 }
 
@@ -1269,7 +1269,7 @@ NTSTATUS WINAPI RtlIpv6StringToAddressW(const WCHAR *str, const WCHAR **terminat
  */
 NTSTATUS WINAPI RtlIpv6StringToAddressExA(const char *str, IN6_ADDR *address, ULONG *scope, USHORT *port)
 {
-    WCHAR wstr[64];
+    WCHAR wstr[128];
 
     TRACE("(%s, %p, %p, %p)\n", debugstr_a(str), address, scope, port);
 
@@ -1286,7 +1286,7 @@ NTSTATUS WINAPI RtlIpv6StringToAddressExA(const char *str, IN6_ADDR *address, UL
  */
 NTSTATUS WINAPI RtlIpv6StringToAddressA(const char *str, const char **terminator, IN6_ADDR *address)
 {
-    WCHAR wstr[64];
+    WCHAR wstr[128];
     const WCHAR *wterminator = NULL;
     NTSTATUS ret;
 
@@ -1410,6 +1410,135 @@ CHAR * WINAPI RtlIpv4AddressToStringA(const IN_ADDR *pin, LPSTR buffer)
 
     if (RtlIpv4AddressToStringExA(pin, 0, buffer, &size)) size = 0;
     return buffer + size - 1;
+}
+
+static BOOL is_ipv4_in_ipv6(const IN6_ADDR *address)
+{
+    if (address->s6_words[5] == htons(0x5efe) && (address->s6_words[4] & ~htons(0x200)) == 0)
+        return TRUE;
+    if (*(UINT64 *)address != 0)
+        return FALSE;
+    if (address->s6_words[4] != 0 && address->s6_words[4] != 0xffff)
+        return FALSE;
+    if (address->s6_words[4] == 0 && address->s6_words[5] != 0 && address->s6_words[5] != 0xffff)
+        return FALSE;
+    if (address->s6_words[4] == 0xffff && address->s6_words[5] != 0)
+        return FALSE;
+    if (address->s6_words[6] == 0)
+        return FALSE;
+    return TRUE;
+}
+
+/***********************************************************************
+ * RtlIpv6AddressToStringExA [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlIpv6AddressToStringExA(const IN6_ADDR *address, ULONG scope, USHORT port, char *str, ULONG *size)
+{
+    char buffer[64], *p = buffer;
+    int i, len, gap = -1, gap_len = 1, ipv6_end = 8;
+    ULONG needed;
+    NTSTATUS ret;
+
+    TRACE("(%p %u %u %p %p)\n", address, scope, port, str, size);
+
+    if (!address || !str || !size)
+        return STATUS_INVALID_PARAMETER;
+
+    if (is_ipv4_in_ipv6(address))
+        ipv6_end = 6;
+
+    for (i = 0; i < ipv6_end; i++)
+    {
+        len = 0;
+        while (!address->s6_words[i] && i < ipv6_end)
+        {
+            i++;
+            len++;
+        }
+        if (len > gap_len)
+        {
+            gap = i - len;
+            gap_len = len;
+        }
+    }
+
+    if (port) p += sprintf(p, "[");
+
+    i = 0;
+    while (i < ipv6_end)
+    {
+        if (i == gap)
+        {
+            p += sprintf(p, ":");
+            i += gap_len;
+            if (i == ipv6_end) p += sprintf(p, ":");
+            continue;
+        }
+        if (i > 0) p += sprintf(p, ":");
+        p += sprintf(p, "%x", ntohs(address->s6_words[i]));
+        i++;
+    }
+
+    if (ipv6_end == 6)
+    {
+        if (p[-1] != ':') p += sprintf(p, ":");
+        p = RtlIpv4AddressToStringA((IN_ADDR *)(address->s6_words + 6), p);
+    }
+
+    if (scope) p += sprintf(p, "%%%u", scope);
+
+    if (port) p += sprintf(p, "]:%u", ntohs(port));
+
+    needed = p - buffer + 1;
+
+    if (*size >= needed)
+    {
+        strcpy(str, buffer);
+        ret = STATUS_SUCCESS;
+    }
+    else
+    {
+        ret = STATUS_INVALID_PARAMETER;
+    }
+
+    *size = needed;
+    return ret;
+}
+
+/***********************************************************************
+ * RtlIpv6AddressToStringA [NTDLL.@]
+ */
+char * WINAPI RtlIpv6AddressToStringA(const IN6_ADDR *address, char *str)
+{
+    ULONG size = 46;
+    if (!address || !str) return str - 1;
+    str[45] = 0; /* this byte is set even though the string is always shorter */
+    RtlIpv6AddressToStringExA(address, 0, 0, str, &size);
+    return str + size - 1;
+}
+
+/***********************************************************************
+ * RtlIpv6AddressToStringExW [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlIpv6AddressToStringExW(const IN6_ADDR *address, ULONG scope, USHORT port, WCHAR *str, ULONG *size)
+{
+    char cstr[64];
+    NTSTATUS ret = RtlIpv6AddressToStringExA(address, scope, port, cstr, size);
+    if (ret == STATUS_SUCCESS) RtlMultiByteToUnicodeN(str, *size * sizeof(WCHAR), NULL, cstr, *size);
+    return ret;
+}
+
+/***********************************************************************
+ * RtlIpv6AddressToStringW [NTDLL.@]
+ */
+WCHAR * WINAPI RtlIpv6AddressToStringW(const IN6_ADDR *address, WCHAR *str)
+{
+    ULONG size = 46;
+    if (!address || !str) return str;
+    str[45] = 0; /* this word is set even though the string is always shorter */
+    if (RtlIpv6AddressToStringExW(address, 0, 0, str, &size) != STATUS_SUCCESS)
+        return str;
+    return str + size - 1;
 }
 
 /***********************************************************************

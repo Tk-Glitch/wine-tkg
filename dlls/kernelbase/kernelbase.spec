@@ -234,7 +234,7 @@
 @ stdcall CreateWaitableTimerExW(ptr wstr long long)
 @ stdcall CreateWaitableTimerW(ptr long wstr)
 @ stdcall CreateWellKnownSid(long ptr ptr ptr)
-# @ stub CtrlRoutine
+@ stdcall CtrlRoutine(ptr)
 # @ stub CveEventWrite
 @ stdcall DeactivateActCtx(long long)
 @ stdcall DebugActiveProcess(long)
@@ -591,7 +591,7 @@
 # @ stub GetPackageApplicationPropertyString
 # @ stub GetPackageApplicationResourcesContext
 # @ stub GetPackageContext
-# @ stub GetPackageFamilyName
+@ stdcall GetPackageFamilyName(long ptr ptr)
 # @ stub GetPackageFamilyNameFromToken
 @ stdcall GetPackageFullName(long ptr ptr)
 # @ stub GetPackageFullNameFromToken
@@ -636,7 +636,7 @@
 @ stdcall GetProcessPriorityBoost(long ptr)
 @ stdcall GetProcessShutdownParameters(ptr ptr)
 @ stdcall GetProcessTimes(long ptr ptr ptr ptr)
-@ stdcall GetProcessVersion(long) kernel32.GetProcessVersion
+@ stdcall GetProcessVersion(long)
 @ stdcall GetProcessWorkingSetSizeEx(long ptr ptr ptr)
 # @ stub GetProcessorSystemCycleTime
 @ stdcall GetProductInfo(long long long long ptr)
@@ -1404,7 +1404,7 @@
 @ stdcall SetComputerNameW(wstr)
 @ stdcall SetConsoleActiveScreenBuffer(long)
 @ stdcall SetConsoleCP(long)
-@ stdcall SetConsoleCtrlHandler(ptr long) kernel32.SetConsoleCtrlHandler
+@ stdcall SetConsoleCtrlHandler(ptr long)
 @ stdcall SetConsoleCursorInfo(long ptr)
 @ stdcall SetConsoleCursorPosition(long long)
 @ stdcall SetConsoleInputExeNameA(str)

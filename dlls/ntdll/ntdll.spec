@@ -784,10 +784,10 @@
 @ stdcall RtlIpv4StringToAddressExA(str long ptr ptr)
 @ stdcall RtlIpv4StringToAddressExW(wstr long ptr ptr)
 @ stdcall RtlIpv4StringToAddressW(wstr long ptr ptr)
-# @ stub RtlIpv6AddressToStringA
-# @ stub RtlIpv6AddressToStringExA
-# @ stub RtlIpv6AddressToStringExW
-# @ stub RtlIpv6AddressToStringW
+@ stdcall RtlIpv6AddressToStringA(ptr ptr)
+@ stdcall RtlIpv6AddressToStringExA(ptr long long ptr ptr)
+@ stdcall RtlIpv6AddressToStringExW(ptr long long ptr ptr)
+@ stdcall RtlIpv6AddressToStringW(ptr ptr)
 @ stdcall RtlIpv6StringToAddressA(str ptr ptr)
 @ stdcall RtlIpv6StringToAddressExA(str ptr ptr ptr)
 @ stdcall RtlIpv6StringToAddressExW(wstr ptr ptr ptr)
@@ -884,6 +884,7 @@
 @ stub RtlQueryPropertyNames
 @ stub RtlQueryPropertySet
 @ stdcall RtlQueryRegistryValues(long ptr ptr ptr ptr)
+@ stdcall RtlQueryRegistryValuesEx(long ptr ptr ptr ptr)
 @ stub RtlQuerySecurityObject
 @ stub RtlQueryTagHeap
 @ stdcall RtlQueryTimeZoneInformation(ptr)
@@ -913,7 +914,7 @@
 @ stdcall RtlRemoveVectoredContinueHandler(ptr)
 @ stdcall RtlRemoveVectoredExceptionHandler(ptr)
 @ stdcall RtlResetRtlTranslations(ptr)
-@ cdecl -arch=x86_64 RtlRestoreContext(ptr ptr)
+@ cdecl -arch=arm64,x86_64 RtlRestoreContext(ptr ptr)
 @ stdcall RtlRestoreLastWin32Error(long) RtlSetLastWin32Error
 @ stub RtlRevertMemoryStream
 @ stub RtlRunDecodeUnicodeString

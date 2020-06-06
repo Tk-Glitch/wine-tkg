@@ -69,6 +69,29 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 static pthread_key_t teb_key;
 
+/* layering violation: the setjmp buffer is defined in msvcrt, but used by RtlUnwindEx */
+struct MSVCRT_JUMP_BUFFER
+{
+    unsigned __int64 Frame;
+    unsigned __int64 Reserved;
+    unsigned __int64 X19;
+    unsigned __int64 X20;
+    unsigned __int64 X21;
+    unsigned __int64 X22;
+    unsigned __int64 X23;
+    unsigned __int64 X24;
+    unsigned __int64 X25;
+    unsigned __int64 X26;
+    unsigned __int64 X27;
+    unsigned __int64 X28;
+    unsigned __int64 Fp;
+    unsigned __int64 Lr;
+    unsigned __int64 Sp;
+    unsigned long Fpcr;
+    unsigned long Fpsr;
+    double D[8];
+};
+
 /***********************************************************************
  * signal context platform-specific definitions
  */
@@ -111,6 +134,8 @@ static DWORD64 get_fault_esr( ucontext_t *sigcontext )
 #endif /* linux */
 
 static const size_t teb_size = 0x2000;  /* we reserve two pages for the TEB */
+
+typedef void (*raise_func)( EXCEPTION_RECORD *rec, CONTEXT *context );
 
 /* stack layout when calling an exception raise function */
 struct stack_layout
@@ -265,8 +290,8 @@ __ASM_STDCALL_FUNC( RtlCaptureContext, 8,
                     "stp x23, x24, [x0, #0xc0]\n\t"  /* context->X23,X24 */
                     "stp x25, x26, [x0, #0xd0]\n\t"  /* context->X25,X26 */
                     "stp x27, x28, [x0, #0xe0]\n\t"  /* context->X27,X28 */
-                    "stp x29, x30, [x0, #0xf0]\n\t"   /* context->Fp,Lr */
-                    "add x1, x29, #0x10\n\t"
+                    "stp x29, x30, [x0, #0xf0]\n\t"  /* context->Fp,Lr */
+                    "mov x1, sp\n\t"
                     "stp x1, x30, [x0, #0x100]\n\t"  /* context->Sp,Pc */
                     "mov w1, #0x400000\n\t"          /* CONTEXT_ARM64 */
                     "add w1, w1, #0x3\n\t"           /* CONTEXT_FULL */
@@ -527,6 +552,7 @@ static NTSTATUS libunwind_virtual_unwind( ULONG_PTR ip, ULONG_PTR *frame, CONTEX
         *frame = context->Sp;
         context->Pc = context->u.s.Lr;
         context->Sp = context->Sp + sizeof(ULONG64);
+        context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
         return STATUS_SUCCESS;
     }
 
@@ -577,6 +603,7 @@ static NTSTATUS libunwind_virtual_unwind( ULONG_PTR ip, ULONG_PTR *frame, CONTEX
     unw_get_reg( &cursor, UNW_AARCH64_X30, (unw_word_t *)&context->u.s.Lr );
     unw_get_reg( &cursor, UNW_AARCH64_SP,  (unw_word_t *)&context->Sp );
     context->Pc = context->u.s.Lr;
+    context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
 
     TRACE( "next function pc=%016lx%s\n", context->Pc, rc ? "" : " (last frame)" );
     TRACE("  x0=%016lx  x1=%016lx  x2=%016lx  x3=%016lx\n",
@@ -614,10 +641,17 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
     dispatch->ScopeIndex       = 0;
     dispatch->EstablisherFrame = 0;
     dispatch->ControlPc        = context->Pc;
+    /*
+     * TODO: CONTEXT_UNWOUND_TO_CALL should be cleared if unwound past a
+     * signal frame.
+     */
+    dispatch->ControlPcIsUnwound = (context->ContextFlags & CONTEXT_UNWOUND_TO_CALL) != 0;
 
     /* first look for PE exception information */
 
-    if ((dispatch->FunctionEntry = lookup_function_info( context->Pc, &dispatch->ImageBase, &module )))
+    if ((dispatch->FunctionEntry = lookup_function_info(
+             context->Pc - (dispatch->ControlPcIsUnwound ? 4 : 0),
+             &dispatch->ImageBase, &module )))
     {
         dispatch->LanguageHandler = RtlVirtualUnwind( type, dispatch->ImageBase, context->Pc,
                                                       dispatch->FunctionEntry, context,
@@ -654,6 +688,7 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
     dispatch->EstablisherFrame = context->u.s.Fp;
     dispatch->LanguageHandler = NULL;
     context->Pc = context->u.s.Lr;
+    context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
     return STATUS_SUCCESS;
 }
 
@@ -816,14 +851,16 @@ static NTSTATUS call_function_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_con
     EXCEPTION_REGISTRATION_RECORD *teb_frame = NtCurrentTeb()->Tib.ExceptionList;
     UNWIND_HISTORY_TABLE table;
     DISPATCHER_CONTEXT dispatch;
-    CONTEXT context;
+    CONTEXT context, prev_context;
     NTSTATUS status;
 
     context = *orig_context;
     dispatch.TargetPc      = 0;
     dispatch.ContextRecord = &context;
     dispatch.HistoryTable  = &table;
-    dispatch.NonVolatileRegisters = (BYTE *)&context.u.s.X19;
+    prev_context = context;
+    dispatch.NonVolatileRegisters = (BYTE *)&prev_context.u.s.X19;
+
     for (;;)
     {
         status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context );
@@ -859,7 +896,7 @@ static NTSTATUS call_function_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_con
                 dispatch.ContextRecord = &context;
                 RtlVirtualUnwind( UNW_FLAG_NHANDLER, dispatch.ImageBase,
                                   dispatch.ControlPc, dispatch.FunctionEntry,
-                                  &context, NULL, &frame, NULL );
+                                  &context, &dispatch.HandlerData, &frame, NULL );
                 goto unwind_done;
             }
             default:
@@ -889,7 +926,7 @@ static NTSTATUS call_function_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_con
                 dispatch.ContextRecord = &context;
                 RtlVirtualUnwind( UNW_FLAG_NHANDLER, dispatch.ImageBase,
                                   dispatch.ControlPc, dispatch.FunctionEntry,
-                                  &context, NULL, &frame, NULL );
+                                  &context, &dispatch.HandlerData, &frame, NULL );
                 teb_frame = teb_frame->Prev;
                 goto unwind_done;
             }
@@ -900,6 +937,7 @@ static NTSTATUS call_function_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_con
         }
 
         if (context.Sp == (ULONG64)NtCurrentTeb()->Tib.StackBase) break;
+        prev_context = context;
     }
     return STATUS_UNHANDLED_EXCEPTION;
 }
@@ -1010,6 +1048,24 @@ static void WINAPI raise_generic_exception( EXCEPTION_RECORD *rec, CONTEXT *cont
     raise_status( status, rec );
 }
 
+extern void raise_func_trampoline( EXCEPTION_RECORD *rec, CONTEXT *context, raise_func func, void *sp );
+__ASM_GLOBAL_FUNC( raise_func_trampoline,
+                   __ASM_CFI(".cfi_signal_frame\n\t")
+                   "stp x29, x30, [sp, #-0x20]!\n\t"
+                   __ASM_CFI(".cfi_def_cfa_offset 32\n\t")
+                   __ASM_CFI(".cfi_offset 29, -32\n\t")
+                   __ASM_CFI(".cfi_offset 30, -24\n\t")
+                   "mov x29, sp\n\t"
+                   __ASM_CFI(".cfi_def_cfa_register 29\n\t")
+                   "str x3, [sp, 0x10]\n\t"
+                   __ASM_CFI(".cfi_remember_state\n\t")
+                   __ASM_CFI(".cfi_escape 0x0f,0x03,0x8d,0x10,0x06\n\t") /* CFA */
+                   __ASM_CFI(".cfi_escape 0x10,0x1d,0x02,0x8d,0x00\n\t") /* x29 */
+                   __ASM_CFI(".cfi_escape 0x10,0x1e,0x02,0x8d,0x08\n\t") /* x30 */
+                   "blr x2\n\t"
+                   __ASM_CFI(".cfi_restore_state\n\t")
+                   "brk #1")
+
 /***********************************************************************
  *           setup_raise_exception
  *
@@ -1024,10 +1080,13 @@ static void setup_raise_exception( ucontext_t *sigcontext, struct stack_layout *
         restore_context( &stack->context, sigcontext );
         return;
     }
+    REGn_sig(3, sigcontext) = SP_sig(sigcontext); /* original stack pointer, fourth arg for raise_func_trampoline */
     SP_sig(sigcontext) = (ULONG_PTR)stack;
-    PC_sig(sigcontext) = (ULONG_PTR)raise_generic_exception;
+    LR_sig(sigcontext) = PC_sig(sigcontext);
+    PC_sig(sigcontext) = (ULONG_PTR)raise_func_trampoline; /* raise_generic_exception; */
     REGn_sig(0, sigcontext) = (ULONG_PTR)&stack->rec;  /* first arg for raise_generic_exception */
     REGn_sig(1, sigcontext) = (ULONG_PTR)&stack->context; /* second arg for raise_generic_exception */
+    REGn_sig(2, sigcontext) = (ULONG_PTR)raise_generic_exception; /* third arg for raise_func_trampoline */
     REGn_sig(18, sigcontext) = (ULONG_PTR)NtCurrentTeb();
 }
 
@@ -1473,7 +1532,10 @@ static void process_unwind_codes( BYTE *ptr, BYTE *end, CONTEXT *context,
         else if (*ptr < 0xd6)  /* save_reg_x */
             restore_regs( 19 + ((val >> 5) & 0xf), 1, -(val & 0x1f) - 1, context, ptrs );
         else if (*ptr < 0xd8)  /* save_lrpair */
-            restore_regs( 19 + ((val >> 6) & 0x7), 2, val & 0x3f, context, ptrs );
+        {
+            restore_regs( 19 + 2 * ((val >> 6) & 0x7), 1, val & 0x3f, context, ptrs );
+            restore_regs( 30, 1, (val & 0x3f) + 1, context, ptrs );
+        }
         else if (*ptr < 0xda)  /* save_fregp */
             restore_fpregs( 8 + ((val >> 6) & 0x7), save_next, val & 0x3f, context, ptrs );
         else if (*ptr < 0xdc)  /* save_fregp_x */
@@ -1520,6 +1582,7 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
     int i;
     unsigned int len, offset, skip = 0;
     unsigned int int_size = func->u.s.RegI * 8, fp_size = func->u.s.RegF * 8, regsave, local_size;
+    unsigned int int_regs, fp_regs, saved_regs, local_size_regs;
 
     TRACE( "function %lx-%lx: len=%#x flag=%x regF=%u regI=%u H=%u CR=%u frame=%x\n",
            base + func->BeginAddress, base + func->BeginAddress + func->u.s.FunctionLength * 4,
@@ -1531,6 +1594,11 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
 
     regsave = ((int_size + fp_size + 8 * 8 * func->u.s.H) + 0xf) & ~0xf;
     local_size = func->u.s.FrameSize * 16 - regsave;
+
+    int_regs = int_size / 8;
+    fp_regs = fp_size / 8;
+    saved_regs = regsave / 8;
+    local_size_regs = local_size / 8;
 
     /* check for prolog/epilog */
     if (func->u.s.Flag == 1)
@@ -1571,9 +1639,9 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
             context->u.X[30] = fp[1];
         }
         context->Sp += local_size;
-        if (fp_size) restore_fpregs( 8, fp_size / 8, int_size, context, ptrs );
-        if (func->u.s.CR == 1) restore_regs( 30, 1, int_size - 8, context, ptrs );
-        restore_regs( 19, func->u.s.RegI, -regsave, context, ptrs );
+        if (fp_size) restore_fpregs( 8, fp_regs, int_regs, context, ptrs );
+        if (func->u.s.CR == 1) restore_regs( 30, 1, int_regs - 1, context, ptrs );
+        restore_regs( 19, func->u.s.RegI, -saved_regs, context, ptrs );
     }
     else
     {
@@ -1585,7 +1653,7 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
             if (local_size <= 512)
             {
                 /* stp x29,lr,[sp,-#local_size]! */
-                if (pos++ > skip) restore_regs( 29, 2, -local_size, context, ptrs );
+                if (pos++ > skip) restore_regs( 29, 2, -local_size_regs, context, ptrs );
                 break;
             }
             /* stp x29,lr,[sp,0] */
@@ -1606,16 +1674,16 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
         {
             if (func->u.s.RegF % 2 == 0 && pos++ > skip)
                 /* str d%u,[sp,#fp_size] */
-                restore_fpregs( 8 + func->u.s.RegF, 1, int_size + fp_size - 8, context, ptrs );
+                restore_fpregs( 8 + func->u.s.RegF, 1, int_regs + fp_regs - 1, context, ptrs );
             for (i = func->u.s.RegF / 2 - 1; i >= 0; i--)
             {
                 if (pos++ <= skip) continue;
                 if (!i && !int_size)
                      /* stp d8,d9,[sp,-#regsave]! */
-                    restore_fpregs( 8, 2, -regsave, context, ptrs );
+                    restore_fpregs( 8, 2, -saved_regs, context, ptrs );
                 else
                      /* stp dn,dn+1,[sp,#offset] */
-                    restore_fpregs( 8 + 2 * i, 2, int_size + 16 * i, context, ptrs );
+                    restore_fpregs( 8 + 2 * i, 2, int_regs + 2 * i, context, ptrs );
             }
         }
 
@@ -1624,15 +1692,15 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
             if (func->u.s.RegI % 2)
             {
                 /* stp xn,lr,[sp,#offset] */
-                if (func->u.s.CR == 1) restore_regs( 30, 1, int_size - 8, context, ptrs );
+                if (func->u.s.CR == 1) restore_regs( 30, 1, int_regs - 1, context, ptrs );
                 /* str xn,[sp,#offset] */
                 restore_regs( 18 + func->u.s.RegI, 1,
-                              (func->u.s.RegI > 1) ? 8 * func->u.s.RegI - 8 : -regsave,
+                              (func->u.s.RegI > 1) ? func->u.s.RegI - 1 : -saved_regs,
                               context, ptrs );
             }
             else if (func->u.s.CR == 1)
                 /* str lr,[sp,#offset] */
-                restore_regs( 30, 1, func->u.s.RegI ? int_size - 8 : -regsave, context, ptrs );
+                restore_regs( 30, 1, func->u.s.RegI ? int_regs - 1 : -saved_regs, context, ptrs );
         }
 
         for (i = func->u.s.RegI / 2 - 1; i >= 0; i--)
@@ -1640,10 +1708,10 @@ static void *unwind_packed_data( ULONG_PTR base, ULONG_PTR pc, RUNTIME_FUNCTION 
             if (pos++ <= skip) continue;
             if (i)
                 /* stp xn,xn+1,[sp,#offset] */
-                restore_regs( 19 + 2 * i, 2, 16 * i, context, ptrs );
+                restore_regs( 19 + 2 * i, 2, 2 * i, context, ptrs );
             else
                 /* stp x19,x20,[sp,-#regsave]! */
-                restore_regs( 19, 2, -regsave, context, ptrs );
+                restore_regs( 19, 2, -saved_regs, context, ptrs );
         }
     }
     return NULL;
@@ -1755,10 +1823,120 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG_PTR base, ULONG_PTR pc,
 
     TRACE( "ret: lr=%lx sp=%lx handler=%p\n", context->u.s.Lr, context->Sp, handler );
     context->Pc = context->u.s.Lr;
+    context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
     *frame_ret = context->Sp;
     return handler;
 }
 
+/**********************************************************************
+ *           call_consolidate_callback
+ *
+ * Wrapper function to call a consolidate callback from a fake frame.
+ * If the callback executes RtlUnwindEx (like for example done in C++ handlers),
+ * we have to skip all frames which were already processed. To do that we
+ * trick the unwinding functions into thinking the call came from somewhere
+ * else. All CFI instructions are either DW_CFA_def_cfa_expression or
+ * DW_CFA_expression, and the expressions have the following format:
+ *
+ * DW_OP_breg29; sleb128 0x10           | Load x29 + 0x10
+ * DW_OP_deref                          | Get *(x29 + 0x10) == context
+ * DW_OP_plus_uconst; uleb128 <OFFSET>  | Add offset to get struct member
+ * [DW_OP_deref]                        | Dereference, only for CFA
+ */
+extern void * WINAPI call_consolidate_callback( CONTEXT *context,
+                                                void *(CALLBACK *callback)(EXCEPTION_RECORD *),
+                                                EXCEPTION_RECORD *rec,
+                                                TEB *teb );
+__ASM_GLOBAL_FUNC( call_consolidate_callback,
+                   "stp x29, x30, [sp, #-0x20]!\n\t"
+                   __ASM_CFI(".cfi_def_cfa_offset 32\n\t")
+                   __ASM_CFI(".cfi_offset 29, -32\n\t")
+                   __ASM_CFI(".cfi_offset 30, -24\n\t")
+                   "mov x29, sp\n\t"
+                   __ASM_CFI(".cfi_def_cfa_register 29\n\t")
+                   "str x0, [sp, 0x10]\n\t"
+                   __ASM_CFI(".cfi_remember_state\n\t")
+                   __ASM_CFI(".cfi_escape 0x0f,0x07,0x8d,0x10,0x06,0x23,0x80,0x02,0x06\n\t") /* CFA */
+                   __ASM_CFI(".cfi_escape 0x10,0x13,0x06,0x8d,0x10,0x06,0x23,0xa0,0x01\n\t") /* x19 */
+                   __ASM_CFI(".cfi_escape 0x10,0x14,0x06,0x8d,0x10,0x06,0x23,0xa8,0x01\n\t") /* x20 */
+                   __ASM_CFI(".cfi_escape 0x10,0x15,0x06,0x8d,0x10,0x06,0x23,0xb0,0x01\n\t") /* x21 */
+                   __ASM_CFI(".cfi_escape 0x10,0x16,0x06,0x8d,0x10,0x06,0x23,0xb8,0x01\n\t") /* x22 */
+                   __ASM_CFI(".cfi_escape 0x10,0x17,0x06,0x8d,0x10,0x06,0x23,0xc0,0x01\n\t") /* x23 */
+                   __ASM_CFI(".cfi_escape 0x10,0x18,0x06,0x8d,0x10,0x06,0x23,0xc8,0x01\n\t") /* x24 */
+                   __ASM_CFI(".cfi_escape 0x10,0x19,0x06,0x8d,0x10,0x06,0x23,0xd0,0x01\n\t") /* x25 */
+                   __ASM_CFI(".cfi_escape 0x10,0x1a,0x06,0x8d,0x10,0x06,0x23,0xd8,0x01\n\t") /* x26 */
+                   __ASM_CFI(".cfi_escape 0x10,0x1b,0x06,0x8d,0x10,0x06,0x23,0xe0,0x01\n\t") /* x27 */
+                   __ASM_CFI(".cfi_escape 0x10,0x1c,0x06,0x8d,0x10,0x06,0x23,0xe8,0x01\n\t") /* x28 */
+                   __ASM_CFI(".cfi_escape 0x10,0x1d,0x06,0x8d,0x10,0x06,0x23,0xf0,0x01\n\t") /* x29 */
+                   __ASM_CFI(".cfi_escape 0x10,0x1e,0x06,0x8d,0x10,0x06,0x23,0xf8,0x01\n\t") /* x30 */
+                   __ASM_CFI(".cfi_escape 0x10,0x48,0x06,0x8d,0x10,0x06,0x23,0x90,0x03\n\t") /* d8  */
+                   __ASM_CFI(".cfi_escape 0x10,0x49,0x06,0x8d,0x10,0x06,0x23,0xa0,0x03\n\t") /* d9  */
+                   __ASM_CFI(".cfi_escape 0x10,0x4a,0x06,0x8d,0x10,0x06,0x23,0xb0,0x03\n\t") /* d10 */
+                   __ASM_CFI(".cfi_escape 0x10,0x4b,0x06,0x8d,0x10,0x06,0x23,0xc0,0x03\n\t") /* d11 */
+                   __ASM_CFI(".cfi_escape 0x10,0x4c,0x06,0x8d,0x10,0x06,0x23,0xd0,0x03\n\t") /* d12 */
+                   __ASM_CFI(".cfi_escape 0x10,0x4d,0x06,0x8d,0x10,0x06,0x23,0xe0,0x03\n\t") /* d13 */
+                   __ASM_CFI(".cfi_escape 0x10,0x4e,0x06,0x8d,0x10,0x06,0x23,0xf0,0x03\n\t") /* d14 */
+                   __ASM_CFI(".cfi_escape 0x10,0x4f,0x06,0x8d,0x10,0x06,0x23,0x80,0x04\n\t") /* d15 */
+                   "mov x0,  x2\n\t"
+                   "mov x18, x3\n\t"
+                   "blr x1\n\t"
+                   __ASM_CFI(".cfi_restore_state\n\t")
+                   "ldp x29, x30, [sp], #32\n\t"
+                   __ASM_CFI(".cfi_restore 30\n\t")
+                   __ASM_CFI(".cfi_restore 29\n\t")
+                   __ASM_CFI(".cfi_def_cfa 31, 0\n\t")
+                   "ret")
+
+/*******************************************************************
+ *              RtlRestoreContext (NTDLL.@)
+ */
+void CDECL RtlRestoreContext( CONTEXT *context, EXCEPTION_RECORD *rec )
+{
+    EXCEPTION_REGISTRATION_RECORD *teb_frame = NtCurrentTeb()->Tib.ExceptionList;
+
+    if (rec && rec->ExceptionCode == STATUS_LONGJUMP && rec->NumberParameters >= 1)
+    {
+        struct MSVCRT_JUMP_BUFFER *jmp = (struct MSVCRT_JUMP_BUFFER *)rec->ExceptionInformation[0];
+        int i;
+
+        context->u.s.X19 = jmp->X19;
+        context->u.s.X20 = jmp->X20;
+        context->u.s.X21 = jmp->X21;
+        context->u.s.X22 = jmp->X22;
+        context->u.s.X23 = jmp->X23;
+        context->u.s.X24 = jmp->X24;
+        context->u.s.X25 = jmp->X25;
+        context->u.s.X26 = jmp->X26;
+        context->u.s.X27 = jmp->X27;
+        context->u.s.X28 = jmp->X28;
+        context->u.s.Fp  = jmp->Fp;
+        context->u.s.Lr  = jmp->Lr;
+        context->Sp      = jmp->Sp;
+        context->Fpcr    = jmp->Fpcr;
+        context->Fpsr    = jmp->Fpsr;
+
+        for (i = 0; i < 8; i++)
+            context->V[8+i].D[0] = jmp->D[0];
+    }
+    else if (rec && rec->ExceptionCode == STATUS_UNWIND_CONSOLIDATE && rec->NumberParameters >= 1)
+    {
+        PVOID (CALLBACK *consolidate)(EXCEPTION_RECORD *) = (void *)rec->ExceptionInformation[0];
+        TRACE( "calling consolidate callback %p (rec=%p)\n", consolidate, rec );
+        rec->ExceptionInformation[10] = (ULONG_PTR)&context->u.s.X19;
+
+        context->Pc = (ULONG64)call_consolidate_callback( context, consolidate, rec, NtCurrentTeb() );
+    }
+
+    /* hack: remove no longer accessible TEB frames */
+    while ((ULONG64)teb_frame < context->Sp)
+    {
+        TRACE( "removing TEB frame: %p\n", teb_frame );
+        teb_frame = __wine_pop_frame( teb_frame );
+    }
+
+    TRACE( "returning to %lx stack %lx\n", context->Pc, context->Sp );
+    set_cpu_context( context );
+}
 
 /*******************************************************************
  *		RtlUnwindEx (NTDLL.@)
@@ -1895,7 +2073,7 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
 
     context->u.s.X0 = (ULONG64)retval;
     context->Pc     = (ULONG64)target_ip;
-    set_cpu_context( context );
+    RtlRestoreContext(context, rec);
 }
 
 
@@ -1925,14 +2103,29 @@ NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL 
 /***********************************************************************
  *		RtlRaiseException (NTDLL.@)
  */
-void WINAPI RtlRaiseException( EXCEPTION_RECORD *rec )
-{
-    CONTEXT context;
-
-    RtlCaptureContext( &context );
-    rec->ExceptionAddress = (LPVOID)context.Pc;
-    RtlRaiseStatus( NtRaiseException( rec, &context, TRUE ));
-}
+__ASM_STDCALL_FUNC( RtlRaiseException, 4,
+                   "sub sp, sp, #0x3b0\n\t" /* 0x390 (context) + 0x20 */
+                   "stp x29, x30, [sp]\n\t"
+                   __ASM_CFI(".cfi_def_cfa x29, 944\n\t")
+                   __ASM_CFI(".cfi_offset x30, -936\n\t")
+                   __ASM_CFI(".cfi_offset x29, -944\n\t")
+                   "mov x29, sp\n\t"
+                   "str x0,  [sp, #0x10]\n\t"
+                   "add x0,  sp, #0x20\n\t"
+                   "bl " __ASM_NAME("RtlCaptureContext") "\n\t"
+                   "add x1,  sp, #0x20\n\t"      /* context pointer */
+                   "add x2,  sp, #0x3b0\n\t"     /* orig stack pointer */
+                   "str x2,  [x1, #0x100]\n\t"   /* context->Sp */
+                   "ldr x0,  [sp, #0x10]\n\t"    /* original first parameter */
+                   "str x0,  [x1, #0x08]\n\t"    /* context->X0 */
+                   "ldp x4, x5, [sp]\n\t"        /* frame pointer, return address */
+                   "stp x4, x5, [x1, #0xf0]\n\t" /* context->Fp, Lr */
+                   "str  x5, [x1, #0x108]\n\t"   /* context->Pc */
+                   "str  x5, [x1, #0x108]\n\t"   /* context->Pc */
+                   "str  x5, [x0, #0x10]\n\t"    /* rec->ExceptionAddress */
+                   "mov  x2, #1\n\t"
+                   "bl " __ASM_NAME("NtRaiseException") "\n\t"
+                   "bl " __ASM_NAME("RtlRaiseStatus") /* does not return */ );
 
 /*************************************************************************
  *             RtlCaptureStackBackTrace (NTDLL.@)

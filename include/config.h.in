@@ -305,17 +305,8 @@
 /* Define to 1 if you have the `ilogbf' function. */
 #undef HAVE_ILOGBF
 
-/* Define to 1 if you have the `inet_addr' function. */
-#undef HAVE_INET_ADDR
-
 /* Define to 1 if you have the <inet/mib2.h> header file. */
 #undef HAVE_INET_MIB2_H
-
-/* Define to 1 if you have the `inet_network' function. */
-#undef HAVE_INET_NETWORK
-
-/* Define to 1 if you have the `inet_ntop' function. */
-#undef HAVE_INET_NTOP
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
@@ -559,9 +550,6 @@
 
 /* Define to 1 if you have the <machine/cpu.h> header file. */
 #undef HAVE_MACHINE_CPU_H
-
-/* Define to 1 if you have the <machine/limits.h> header file. */
-#undef HAVE_MACHINE_LIMITS_H
 
 /* Define to 1 if you have the <machine/sysarch.h> header file. */
 #undef HAVE_MACHINE_SYSARCH_H
@@ -1060,9 +1048,6 @@
 /* Define to 1 if you have the <sys/ipc.h> header file. */
 #undef HAVE_SYS_IPC_H
 
-/* Define to 1 if you have the <sys/limits.h> header file. */
-#undef HAVE_SYS_LIMITS_H
-
 /* Define to 1 if you have the <sys/link.h> header file. */
 #undef HAVE_SYS_LINK_H
 
@@ -1203,9 +1188,6 @@
 
 /* Define to 1 if you have the <tiffio.h> header file. */
 #undef HAVE_TIFFIO_H
-
-/* Define to 1 if you have the `timegm' function. */
-#undef HAVE_TIMEGM
 
 /* Define to 1 if you have the `trunc' function. */
 #undef HAVE_TRUNC

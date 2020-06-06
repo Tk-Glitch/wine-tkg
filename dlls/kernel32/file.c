@@ -336,13 +336,10 @@ BOOL WINAPI SetFileCompletionNotificationModes( HANDLE file, UCHAR flags )
 {
     FILE_IO_COMPLETION_NOTIFICATION_INFORMATION info;
     IO_STATUS_BLOCK io;
-    NTSTATUS status;
 
     info.Flags = flags;
-    status = NtSetInformationFile( file, &io, &info, sizeof(info), FileIoCompletionNotificationInformation );
-    if (status == STATUS_SUCCESS) return TRUE;
-    SetLastError( RtlNtStatusToDosError(status) );
-    return FALSE;
+    return set_ntstatus( NtSetInformationFile( file, &io, &info, sizeof(info),
+                                               FileIoCompletionNotificationInformation ));
 }
 
 
@@ -407,6 +404,55 @@ BOOL WINAPI KERNEL32_FlushFileBuffers( HANDLE file )
     if (is_console_handle( file )) return FlushConsoleInputBuffer( file );
 
     return set_ntstatus( NtFlushBuffersFile( file, &iosb ));
+}
+
+
+/***********************************************************************
+ *           DosDateTimeToFileTime   (KERNEL32.@)
+ */
+BOOL WINAPI DosDateTimeToFileTime( WORD fatdate, WORD fattime, FILETIME *ft )
+{
+    TIME_FIELDS fields;
+    LARGE_INTEGER time;
+
+    fields.Year         = (fatdate >> 9) + 1980;
+    fields.Month        = ((fatdate >> 5) & 0x0f);
+    fields.Day          = (fatdate & 0x1f);
+    fields.Hour         = (fattime >> 11);
+    fields.Minute       = (fattime >> 5) & 0x3f;
+    fields.Second       = (fattime & 0x1f) * 2;
+    fields.Milliseconds = 0;
+    if (!RtlTimeFieldsToTime( &fields, &time )) return FALSE;
+    ft->dwLowDateTime  = time.u.LowPart;
+    ft->dwHighDateTime = time.u.HighPart;
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           FileTimeToDosDateTime   (KERNEL32.@)
+ */
+BOOL WINAPI FileTimeToDosDateTime( const FILETIME *ft, WORD *fatdate, WORD *fattime )
+{
+    TIME_FIELDS fields;
+    LARGE_INTEGER time;
+
+    if (!fatdate || !fattime)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    time.u.LowPart  = ft->dwLowDateTime;
+    time.u.HighPart = ft->dwHighDateTime;
+    RtlTimeToTimeFields( &time, &fields );
+    if (fields.Year < 1980)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    *fattime = (fields.Hour << 11) + (fields.Minute << 5) + (fields.Second / 2);
+    *fatdate = ((fields.Year - 1980) << 9) + (fields.Month << 5) + fields.Day;
+    return TRUE;
 }
 
 
@@ -534,8 +580,7 @@ BOOL WINAPI DeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode,
                                            lpvOutBuffer, cbOutBuffer);
         if (lpcbBytesReturned) *lpcbBytesReturned = iosb.Information;
     }
-    if (status) SetLastError( RtlNtStatusToDosError(status) );
-    return !status;
+    return set_ntstatus( status );
 }
 
 

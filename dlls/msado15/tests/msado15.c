@@ -20,6 +20,7 @@
 #define COBJMACROS
 #include <initguid.h>
 #include <oledb.h>
+#include <olectl.h>
 #include <msado15_backcompat.h>
 #include "wine/test.h"
 
@@ -666,6 +667,7 @@ static void test_Connection(void)
     _Connection *connection;
     IRunnableObject *runtime;
     ISupportErrorInfo *errorinfo;
+    IConnectionPointContainer *pointcontainer;
     LONG state, timeout;
     BSTR str, str2;
 
@@ -678,6 +680,10 @@ static void test_Connection(void)
     hr = _Connection_QueryInterface(connection, &IID_ISupportErrorInfo, (void**)&errorinfo);
     ok(hr == S_OK, "Failed to get ISupportErrorInfo interface\n");
     ISupportErrorInfo_Release(errorinfo);
+
+    hr = _Connection_QueryInterface(connection, &IID_IConnectionPointContainer, (void**)&pointcontainer);
+    ok(hr == S_OK, "Failed to get IConnectionPointContainer interface %08x\n", hr);
+    IConnectionPointContainer_Release(pointcontainer);
 
 if (0)   /* Crashes on windows */
 {
@@ -742,6 +748,8 @@ static void test_Command(void)
     _ADO *ado;
     Command15 *command15;
     Command25 *command25;
+    CommandTypeEnum cmd_type = adCmdUnspecified;
+    BSTR cmd_text = (BSTR)"test";
 
     hr = CoCreateInstance( &CLSID_Command, NULL, CLSCTX_INPROC_SERVER, &IID__Command, (void **)&command );
     ok( hr == S_OK, "got %08x\n", hr );
@@ -758,13 +766,76 @@ static void test_Command(void)
     ok( hr == S_OK, "got %08x\n", hr );
     Command25_Release( command25 );
 
+    hr = _Command_get_CommandType( command, &cmd_type );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( cmd_type == adCmdUnknown, "got %08x\n", cmd_type );
+
+    _Command_put_CommandType( command, adCmdText );
+    hr = _Command_get_CommandType( command, &cmd_type );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( cmd_type == adCmdText, "got %08x\n", cmd_type );
+
+    hr = _Command_put_CommandType( command, 0xdeadbeef );
+    ok( hr == MAKE_ADO_HRESULT( adErrInvalidArgument ), "got %08x\n", hr );
+
+    hr = _Command_get_CommandText( command, &cmd_text );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( !cmd_text, "got %s\n", wine_dbgstr_w( cmd_text ));
+
+    hr = _Command_put_CommandText( command, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    cmd_text = SysAllocString( L"" );
+    hr = _Command_put_CommandText( command, cmd_text );
+    ok( hr == S_OK, "got %08x\n", hr );
+    SysFreeString( cmd_text );
+
+    hr = _Command_get_CommandText( command,  &cmd_text );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( cmd_text && !*cmd_text, "got %p\n", cmd_text );
+
+    cmd_text = SysAllocString( L"test" );
+    hr = _Command_put_CommandText( command, cmd_text );
+    ok( hr == S_OK, "got %08x\n", hr );
+    SysFreeString( cmd_text );
+
+    hr = _Command_get_CommandText( command,  &cmd_text );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( !wcscmp( L"test", cmd_text ), "got %p\n", wine_dbgstr_w( cmd_text ) );
+
     _Command_Release( command );
+}
+
+static void test_ConnectionPoint(void)
+{
+    HRESULT hr;
+    ULONG refs;
+    IConnectionPoint *point;
+    IConnectionPointContainer *pointcontainer;
+
+    hr = CoCreateInstance( &CLSID_Connection, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IConnectionPointContainer, (void**)&pointcontainer );
+
+    hr = IConnectionPointContainer_FindConnectionPoint( pointcontainer, &DIID_ConnectionEvents, NULL );
+    ok( hr == E_POINTER, "got %08x\n", hr );
+
+    hr = IConnectionPointContainer_FindConnectionPoint( pointcontainer, &DIID_RecordsetEvents, &point );
+    ok( hr == CONNECT_E_NOCONNECTION, "got %08x\n", hr );
+
+    hr = IConnectionPointContainer_FindConnectionPoint( pointcontainer, &DIID_ConnectionEvents, &point );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    refs = IConnectionPoint_Release( point );
+    ok( refs == 1, "got %u", refs );
+
+    IConnectionPointContainer_Release( pointcontainer );
 }
 
 START_TEST(msado15)
 {
     CoInitialize( NULL );
     test_Connection();
+    test_ConnectionPoint();
     test_Fields();
     test_Recordset();
     test_Stream();

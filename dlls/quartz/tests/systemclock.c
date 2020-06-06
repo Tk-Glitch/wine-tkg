@@ -24,6 +24,12 @@
 
 static ULONGLONG (WINAPI *pGetTickCount64)(void);
 
+static BOOL compare_time(REFERENCE_TIME x, REFERENCE_TIME y, unsigned int max_diff)
+{
+    REFERENCE_TIME diff = x > y ? x - y : y - x;
+    return diff <= max_diff;
+}
+
 static IReferenceClock *create_system_clock(void)
 {
     IReferenceClock *clock = NULL;
@@ -177,11 +183,11 @@ static void test_get_time(void)
     if (pGetTickCount64)
         time2 = pGetTickCount64() * 10000;
     else
-        time2 = GetTickCount() * 10000;
+        time2 = (REFERENCE_TIME)GetTickCount() * 10000;
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(time1 % 10000 == 0, "Expected no less than 1ms coarseness, but got time %s.\n",
             wine_dbgstr_longlong(time1));
-    ok(abs(time1 - time2) < 20 * 10000, "Expected about %s, got %s.\n",
+    ok(compare_time(time1, time2, 20 * 10000), "Expected about %s, got %s.\n",
             wine_dbgstr_longlong(time2), wine_dbgstr_longlong(time1));
 
     hr = IReferenceClock_GetTime(clock, &time2);

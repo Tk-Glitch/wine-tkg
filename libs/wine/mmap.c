@@ -52,9 +52,7 @@ struct reserved_area
     size_t      size;
 };
 
-static struct list reserved_areas_list = LIST_INIT(reserved_areas_list);
-static struct list free_areas_list = LIST_INIT(free_areas_list);
-
+static struct list reserved_areas = LIST_INIT(reserved_areas);
 #ifndef __APPLE__
 static const unsigned int granularity_mask = 0xffff;  /* reserved areas have 64k granularity */
 #endif
@@ -217,7 +215,7 @@ void *wine_anon_mmap( void *start, size_t size, int prot, int flags )
         /* If available, this will attempt a fixed mapping in-kernel */
         flags |= MAP_TRYFIXED;
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
-        if ( start && mmap( start, size, prot, flags | MAP_FIXED | MAP_EXCL, get_fdzero(), 0 ) )
+        if ( start && mmap( start, size, prot, flags | MAP_FIXED | MAP_EXCL, get_fdzero(), 0 ) != MAP_FAILED )
             return start;
 #elif defined(__svr4__) || defined(__NetBSD__) || defined(__APPLE__)
         if ( try_mmap_fixed( start, size, prot, flags, get_fdzero(), 0 ) )
@@ -432,7 +430,7 @@ void mmap_init(void)
 
     reserve_malloc_space( 8 * 1024 * 1024 );
 
-    if (!list_head( &reserved_areas_list ))
+    if (!list_head( &reserved_areas ))
     {
         /* if we don't have a preloader, try to reserve some space below 2Gb */
         reserve_area( (void *)0x00110000, (void *)0x40000000 );
@@ -440,7 +438,7 @@ void mmap_init(void)
 
     /* check for a reserved area starting at the user space limit */
     /* to avoid wasting time trying to allocate it again */
-    LIST_FOR_EACH( ptr, &reserved_areas_list )
+    LIST_FOR_EACH( ptr, &reserved_areas )
     {
         area = LIST_ENTRY( ptr, struct reserved_area, entry );
         if ((char *)area->base > user_space_limit) break;
@@ -471,7 +469,7 @@ void mmap_init(void)
 
     /* reserve the DOS area if not already done */
 
-    ptr = list_head( &reserved_areas_list );
+    ptr = list_head( &reserved_areas );
     if (ptr)
     {
         area = LIST_ENTRY( ptr, struct reserved_area, entry );
@@ -481,7 +479,7 @@ void mmap_init(void)
 
 #elif defined(__x86_64__) || defined(__aarch64__)
 
-    if (!list_head( &reserved_areas_list ))
+    if (!list_head( &reserved_areas ))
     {
         /* if we don't have a preloader, try to reserve the space now */
         reserve_area( (void *)0x000000010000, (void *)0x000068000000 );
@@ -502,14 +500,14 @@ void mmap_init(void)
  * Note: the reserved areas functions are not reentrant, caller is
  * responsible for proper locking.
  */
-static void wine_mmap_add_area( struct list *areas, void *addr, size_t size )
+void wine_mmap_add_reserved_area( void *addr, size_t size )
 {
     struct reserved_area *area;
     struct list *ptr;
 
     if (!((char *)addr + size)) size--;  /* avoid wrap-around */
 
-    LIST_FOR_EACH( ptr, areas )
+    LIST_FOR_EACH( ptr, &reserved_areas )
     {
         area = LIST_ENTRY( ptr, struct reserved_area, entry );
         if (area->base > addr)
@@ -529,7 +527,7 @@ static void wine_mmap_add_area( struct list *areas, void *addr, size_t size )
             area->size += size;
 
             /* try to merge with the next one too */
-            if ((ptr = list_next( areas, ptr )))
+            if ((ptr = list_next( &reserved_areas, ptr )))
             {
                 struct reserved_area *next = LIST_ENTRY( ptr, struct reserved_area, entry );
                 if ((char *)addr + size == (char *)next->base)
@@ -551,15 +549,6 @@ static void wine_mmap_add_area( struct list *areas, void *addr, size_t size )
     }
 }
 
-void wine_mmap_add_reserved_area( void *addr, size_t size )
-{
-    wine_mmap_add_area(&reserved_areas_list, addr, size);
-}
-
-void wine_mmap_add_free_area( void *addr, size_t size )
-{
-    wine_mmap_add_area(&free_areas_list, addr, size);
-}
 
 /***********************************************************************
  *           wine_mmap_remove_reserved_area
@@ -570,14 +559,14 @@ void wine_mmap_add_free_area( void *addr, size_t size )
  * Note: the reserved areas functions are not reentrant, caller is
  * responsible for proper locking.
  */
-static void wine_mmap_remove_area( struct list *areas, void *addr, size_t size, int unmap )
+void wine_mmap_remove_reserved_area( void *addr, size_t size, int unmap )
 {
     struct reserved_area *area;
     struct list *ptr;
 
     if (!((char *)addr + size)) size--;  /* avoid wrap-around */
 
-    ptr = list_head( areas );
+    ptr = list_head( &reserved_areas );
     /* find the first area covering address */
     while (ptr)
     {
@@ -598,7 +587,7 @@ static void wine_mmap_remove_area( struct list *areas, void *addr, size_t size, 
                 else
                 {
                     /* range contains the whole area -> remove area completely */
-                    ptr = list_next( areas, ptr );
+                    ptr = list_next( &reserved_areas, ptr );
                     if (unmap) munmap( area->base, area->size );
                     list_remove( &area->entry );
                     free( area );
@@ -630,19 +619,10 @@ static void wine_mmap_remove_area( struct list *areas, void *addr, size_t size, 
                 }
             }
         }
-        ptr = list_next( areas, ptr );
+        ptr = list_next( &reserved_areas, ptr );
     }
 }
 
-void wine_mmap_remove_reserved_area( void *addr, size_t size, int unmap )
-{
-    wine_mmap_remove_area(&reserved_areas_list, addr, size, unmap);
-}
-
-void wine_mmap_remove_free_area( void *addr, size_t size, int unmap )
-{
-    wine_mmap_remove_area(&free_areas_list, addr, size, unmap);
-}
 
 /***********************************************************************
  *           wine_mmap_is_in_reserved_area
@@ -654,12 +634,12 @@ void wine_mmap_remove_free_area( void *addr, size_t size, int unmap )
  * Note: the reserved areas functions are not reentrant, caller is
  * responsible for proper locking.
  */
-static int wine_mmap_is_in_area( struct list *areas, void *addr, size_t size )
+int wine_mmap_is_in_reserved_area( void *addr, size_t size )
 {
     struct reserved_area *area;
     struct list *ptr;
 
-    LIST_FOR_EACH( ptr, areas )
+    LIST_FOR_EACH( ptr, &reserved_areas )
     {
         area = LIST_ENTRY( ptr, struct reserved_area, entry );
         if (area->base > addr) break;
@@ -671,15 +651,6 @@ static int wine_mmap_is_in_area( struct list *areas, void *addr, size_t size )
     return 0;
 }
 
-int wine_mmap_is_in_reserved_area( void *addr, size_t size )
-{
-    return wine_mmap_is_in_area( &reserved_areas_list, addr, size );
-}
-
-int wine_mmap_is_in_free_area( void *addr, size_t size )
-{
-    return wine_mmap_is_in_area( &free_areas_list, addr, size );
-}
 
 /***********************************************************************
  *           wine_mmap_enum_reserved_areas
@@ -690,7 +661,7 @@ int wine_mmap_is_in_free_area( void *addr, size_t size )
  * Note: the reserved areas functions are not reentrant, caller is
  * responsible for proper locking.
  */
-int wine_mmap_enum_areas( struct list *areas, int (*enum_func)(void *base, size_t size, void *arg), void *arg,
+int wine_mmap_enum_reserved_areas( int (*enum_func)(void *base, size_t size, void *arg), void *arg,
                                    int top_down )
 {
     int ret = 0;
@@ -698,7 +669,7 @@ int wine_mmap_enum_areas( struct list *areas, int (*enum_func)(void *base, size_
 
     if (top_down)
     {
-        for (ptr = areas->prev; ptr != areas; ptr = ptr->prev)
+        for (ptr = reserved_areas.prev; ptr != &reserved_areas; ptr = ptr->prev)
         {
             struct reserved_area *area = LIST_ENTRY( ptr, struct reserved_area, entry );
             if ((ret = enum_func( area->base, area->size, arg ))) break;
@@ -706,23 +677,11 @@ int wine_mmap_enum_areas( struct list *areas, int (*enum_func)(void *base, size_
     }
     else
     {
-        for (ptr = areas->next; ptr != areas; ptr = ptr->next)
+        for (ptr = reserved_areas.next; ptr != &reserved_areas; ptr = ptr->next)
         {
             struct reserved_area *area = LIST_ENTRY( ptr, struct reserved_area, entry );
             if ((ret = enum_func( area->base, area->size, arg ))) break;
         }
     }
     return ret;
-}
-
-int wine_mmap_enum_reserved_areas( int (*enum_func)(void *base, size_t size, void *arg), void *arg,
-                                   int top_down )
-{
-    return wine_mmap_enum_areas(&reserved_areas_list, enum_func, arg, top_down);
-}
-
-int wine_mmap_enum_free_areas( int (*enum_func)(void *base, size_t size, void *arg), void *arg,
-                                   int top_down )
-{
-    return wine_mmap_enum_areas(&free_areas_list, enum_func, arg, top_down);
 }

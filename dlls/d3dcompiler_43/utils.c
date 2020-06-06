@@ -1403,29 +1403,29 @@ static enum hlsl_ir_expr_op op_from_assignment(enum parse_assign_op op)
     return ops[op];
 }
 
-static unsigned int invert_swizzle(unsigned int *swizzle, unsigned int writemask)
+static BOOL invert_swizzle(unsigned int *swizzle, unsigned int *writemask, unsigned int *ret_width)
 {
-    unsigned int i, j, bit = 0, inverted = 0, components, new_writemask = 0, new_swizzle = 0;
+    unsigned int i, j, bit = 0, inverted = 0, width, new_writemask = 0, new_swizzle = 0;
 
     /* Apply the writemask to the swizzle to get a new writemask and swizzle. */
     for (i = 0; i < 4; ++i)
     {
-        if (writemask & (1 << i))
+        if (*writemask & (1 << i))
         {
             unsigned int s = (*swizzle >> (i * 2)) & 3;
             new_swizzle |= s << (bit++ * 2);
             if (new_writemask & (1 << s))
-                return 0;
+                return FALSE;
             new_writemask |= 1 << s;
         }
     }
-    components = bit;
+    width = bit;
 
     /* Invert the swizzle. */
     bit = 0;
     for (i = 0; i < 4; ++i)
     {
-        for (j = 0; j < components; ++j)
+        for (j = 0; j < width; ++j)
         {
             unsigned int s = (new_swizzle >> (j * 2)) & 3;
             if (s == i)
@@ -1434,38 +1434,26 @@ static unsigned int invert_swizzle(unsigned int *swizzle, unsigned int writemask
     }
 
     *swizzle = inverted;
-    return new_writemask;
-}
-
-static BOOL validate_lhs_deref(const struct hlsl_ir_node *lhs)
-{
-    struct hlsl_ir_deref *deref;
-
-    if (lhs->type != HLSL_IR_DEREF)
-    {
-        hlsl_report_message(lhs->loc, HLSL_LEVEL_ERROR, "invalid lvalue");
-        return FALSE;
-    }
-
-    deref = deref_from_node(lhs);
-
-    if (deref->src.type == HLSL_IR_DEREF_VAR)
-        return TRUE;
-    if (deref->src.type == HLSL_IR_DEREF_ARRAY)
-        return validate_lhs_deref(deref->src.v.array.array);
-    if (deref->src.type == HLSL_IR_DEREF_RECORD)
-        return validate_lhs_deref(deref->src.v.record.record);
-
-    assert(0);
-    return FALSE;
+    *writemask = new_writemask;
+    *ret_width = width;
+    return TRUE;
 }
 
 struct hlsl_ir_node *make_assignment(struct hlsl_ir_node *lhs, enum parse_assign_op assign_op,
         struct hlsl_ir_node *rhs)
 {
     struct hlsl_ir_assignment *assign = d3dcompiler_alloc(sizeof(*assign));
-    DWORD writemask = (1 << lhs->data_type->dimx) - 1;
-    struct hlsl_type *type;
+    struct hlsl_type *lhs_type;
+    DWORD writemask = 0;
+
+    lhs_type = lhs->data_type;
+    if (lhs_type->type <= HLSL_CLASS_LAST_NUMERIC)
+    {
+        writemask = (1 << lhs_type->dimx) - 1;
+
+        if (!(rhs = implicit_conversion(rhs, lhs_type, &rhs->loc)))
+            return NULL;
+    }
 
     if (!assign)
     {
@@ -1473,7 +1461,7 @@ struct hlsl_ir_node *make_assignment(struct hlsl_ir_node *lhs, enum parse_assign
         return NULL;
     }
 
-    while (lhs->type != HLSL_IR_DEREF)
+    while (lhs->type != HLSL_IR_LOAD)
     {
         struct hlsl_ir_node *lhs_inner;
 
@@ -1486,6 +1474,8 @@ struct hlsl_ir_node *make_assignment(struct hlsl_ir_node *lhs, enum parse_assign
         else if (lhs->type == HLSL_IR_SWIZZLE)
         {
             struct hlsl_ir_swizzle *swizzle = swizzle_from_node(lhs);
+            const struct hlsl_type *swizzle_type = swizzle->node.data_type;
+            unsigned int width;
 
             if (lhs->data_type->type == HLSL_CLASS_MATRIX)
                 FIXME("Assignments with writemasks and matrices on lhs are not supported yet.\n");
@@ -1495,11 +1485,22 @@ struct hlsl_ir_node *make_assignment(struct hlsl_ir_node *lhs, enum parse_assign
 
             list_add_after(&rhs->entry, &lhs->entry);
             swizzle->val = rhs;
-            if (!(writemask = invert_swizzle(&swizzle->swizzle, writemask)))
+            if (!invert_swizzle(&swizzle->swizzle, &writemask, &width))
             {
                 hlsl_report_message(lhs->loc, HLSL_LEVEL_ERROR, "invalid writemask");
                 d3dcompiler_free(assign);
                 return NULL;
+            }
+            assert(swizzle_type->type == HLSL_CLASS_VECTOR);
+            if (swizzle_type->dimx != width)
+            {
+                struct hlsl_type *type;
+                if (!(type = new_hlsl_type(NULL, HLSL_CLASS_VECTOR, swizzle_type->base_type, width, 1)))
+                {
+                    d3dcompiler_free(assign);
+                    return NULL;
+                }
+                swizzle->node.data_type = type;
             }
             rhs = &swizzle->node;
         }
@@ -1513,75 +1514,20 @@ struct hlsl_ir_node *make_assignment(struct hlsl_ir_node *lhs, enum parse_assign
         lhs = lhs_inner;
     }
 
-    if (!validate_lhs_deref(lhs))
-    {
-        d3dcompiler_free(assign);
-        return NULL;
-    }
-
-    TRACE("Creating proper assignment expression.\n");
-    if (writemask == BWRITERSP_WRITEMASK_ALL)
-        type = lhs->data_type;
-    else
-    {
-        unsigned int dimx = 0;
-        DWORD bitmask;
-        enum hlsl_type_class type_class;
-
-        if (lhs->data_type->type > HLSL_CLASS_LAST_NUMERIC)
-        {
-            hlsl_report_message(lhs->loc, HLSL_LEVEL_ERROR,
-                    "writemask on a non scalar/vector/matrix type");
-            d3dcompiler_free(assign);
-            return NULL;
-        }
-        bitmask = writemask & ((1 << lhs->data_type->dimx) - 1);
-        while (bitmask)
-        {
-            if (bitmask & 1)
-                dimx++;
-            bitmask >>= 1;
-        }
-        if (lhs->data_type->type == HLSL_CLASS_MATRIX)
-            FIXME("Assignments with writemasks and matrices on lhs are not supported yet.\n");
-        if (dimx == 1)
-            type_class = HLSL_CLASS_SCALAR;
-        else
-            type_class = lhs->data_type->type;
-        type = new_hlsl_type(NULL, type_class, lhs->data_type->base_type, dimx, 1);
-    }
-
-    init_node(&assign->node, HLSL_IR_ASSIGNMENT, type, lhs->loc);
+    init_node(&assign->node, HLSL_IR_ASSIGNMENT, lhs_type, lhs->loc);
     assign->writemask = writemask;
-
-    rhs = implicit_conversion(rhs, type, &rhs->loc);
-
-    assign->lhs = deref_from_node(lhs)->src;
+    assign->lhs = load_from_node(lhs)->src;
     if (assign_op != ASSIGN_OP_ASSIGN)
     {
         enum hlsl_ir_expr_op op = op_from_assignment(assign_op);
         struct hlsl_ir_node *expr;
 
-        if (assign->lhs.type != HLSL_IR_DEREF_VAR)
-        {
-            FIXME("LHS expression not supported in compound assignments yet.\n");
-            assign->rhs = rhs;
-        }
-        else
-        {
-            TRACE("Adding an expression for the compound assignment.\n");
-            expr = new_binary_expr(op, lhs, rhs, lhs->loc);
-            list_add_after(&rhs->entry, &expr->entry);
-            assign->rhs = expr;
-        }
+        TRACE("Adding an expression for the compound assignment.\n");
+        expr = new_binary_expr(op, lhs, rhs, lhs->loc);
+        list_add_after(&rhs->entry, &expr->entry);
+        rhs = expr;
     }
-    else
-    {
-        list_remove(&lhs->entry);
-        /* Don't recursively free the deref; we just copied its members. */
-        d3dcompiler_free(lhs);
-        assign->rhs = rhs;
-    }
+    assign->rhs = rhs;
 
     return &assign->node;
 }
@@ -1628,22 +1574,6 @@ BOOL pop_scope(struct hlsl_parse_ctx *ctx)
     TRACE("Popping current scope\n");
     ctx->cur_scope = prev_scope;
     return TRUE;
-}
-
-struct hlsl_ir_function_decl *new_func_decl(struct hlsl_type *return_type, struct list *parameters)
-{
-    struct hlsl_ir_function_decl *decl;
-
-    decl = d3dcompiler_alloc(sizeof(*decl));
-    if (!decl)
-    {
-        ERR("Out of memory.\n");
-        return NULL;
-    }
-    decl->return_type = return_type;
-    decl->parameters = parameters;
-
-    return decl;
 }
 
 static int compare_param_hlsl_types(const struct hlsl_type *t1, const struct hlsl_type *t2)
@@ -1834,9 +1764,9 @@ const char *debug_node_type(enum hlsl_ir_node_type type)
         "HLSL_IR_ASSIGNMENT",
         "HLSL_IR_CONSTANT",
         "HLSL_IR_CONSTRUCTOR",
-        "HLSL_IR_DEREF",
         "HLSL_IR_EXPR",
         "HLSL_IR_IF",
+        "HLSL_IR_LOAD",
         "HLSL_IR_LOOP",
         "HLSL_IR_JUMP",
         "HLSL_IR_SWIZZLE",
@@ -1879,23 +1809,14 @@ static void debug_dump_ir_var(const struct hlsl_ir_var *var)
 
 static void debug_dump_deref(const struct hlsl_deref *deref)
 {
-    switch (deref->type)
+    wine_dbg_printf("deref(");
+    debug_dump_ir_var(deref->var);
+    wine_dbg_printf(")");
+    if (deref->offset)
     {
-        case HLSL_IR_DEREF_VAR:
-            wine_dbg_printf("deref(");
-            debug_dump_ir_var(deref->v.var);
-            wine_dbg_printf(")");
-            break;
-        case HLSL_IR_DEREF_ARRAY:
-            debug_dump_src(deref->v.array.array);
-            wine_dbg_printf("[");
-            debug_dump_src(deref->v.array.index);
-            wine_dbg_printf("]");
-            break;
-        case HLSL_IR_DEREF_RECORD:
-            debug_dump_src(deref->v.record.record);
-            wine_dbg_printf(".%s", debugstr_a(deref->v.record.field->name));
-            break;
+        wine_dbg_printf("[");
+        debug_dump_src(deref->offset);
+        wine_dbg_printf("]");
     }
 }
 
@@ -2107,10 +2028,7 @@ static void debug_dump_ir_jump(const struct hlsl_ir_jump *jump)
             wine_dbg_printf("discard");
             break;
         case HLSL_IR_JUMP_RETURN:
-            wine_dbg_printf("return ");
-            if (jump->return_value)
-                debug_dump_src(jump->return_value);
-            wine_dbg_printf(";");
+            wine_dbg_printf("return");
             break;
     }
 }
@@ -2148,8 +2066,8 @@ static void debug_dump_instr(const struct hlsl_ir_node *instr)
         case HLSL_IR_EXPR:
             debug_dump_ir_expr(expr_from_node(instr));
             break;
-        case HLSL_IR_DEREF:
-            debug_dump_deref(&deref_from_node(instr)->src);
+        case HLSL_IR_LOAD:
+            debug_dump_deref(&load_from_node(instr)->src);
             break;
         case HLSL_IR_CONSTANT:
             debug_dump_ir_constant(constant_from_node(instr));
@@ -2247,9 +2165,9 @@ static void free_ir_constant(struct hlsl_ir_constant *constant)
     d3dcompiler_free(constant);
 }
 
-static void free_ir_deref(struct hlsl_ir_deref *deref)
+static void free_ir_load(struct hlsl_ir_load *load)
 {
-    d3dcompiler_free(deref);
+    d3dcompiler_free(load);
 }
 
 static void free_ir_swizzle(struct hlsl_ir_swizzle *swizzle)
@@ -2297,8 +2215,8 @@ void free_instr(struct hlsl_ir_node *node)
         case HLSL_IR_CONSTANT:
             free_ir_constant(constant_from_node(node));
             break;
-        case HLSL_IR_DEREF:
-            free_ir_deref(deref_from_node(node));
+        case HLSL_IR_LOAD:
+            free_ir_load(load_from_node(node));
             break;
         case HLSL_IR_SWIZZLE:
             free_ir_swizzle(swizzle_from_node(node));

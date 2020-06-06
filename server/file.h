@@ -22,6 +22,7 @@
 #define __WINE_SERVER_FILE_H
 
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #include "object.h"
 
@@ -82,6 +83,7 @@ extern struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t 
                            unsigned int access, unsigned int sharing, unsigned int options );
 extern struct fd *create_anonymous_fd( const struct fd_ops *fd_user_ops,
                                        int unix_fd, struct object *user, unsigned int options );
+extern void set_unix_name_of_fd( struct fd *fd, const struct stat *fd_st );
 extern struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sharing,
                                  unsigned int options );
 extern struct fd *get_fd_object_for_mapping( struct fd *fd, unsigned int access, unsigned int sharing );
@@ -132,6 +134,7 @@ static inline struct fd *get_obj_fd( struct object *obj ) { return obj->ops->get
 struct timeout_user;
 extern timeout_t current_time;
 extern timeout_t monotonic_time;
+extern struct _KUSER_SHARED_DATA *user_shared_data;
 
 #define TICKS_PER_SEC 10000000
 
@@ -176,6 +179,7 @@ extern struct mapping *get_mapping_obj( struct process *process, obj_handle_t ha
                                         unsigned int access );
 extern struct file *get_mapping_file( struct process *process, client_ptr_t base,
                                       unsigned int access, unsigned int sharing );
+extern const pe_image_info_t *get_mapping_image_info( struct process *process, client_ptr_t base );
 extern void free_mapped_views( struct process *process );
 extern int get_page_size(void);
 

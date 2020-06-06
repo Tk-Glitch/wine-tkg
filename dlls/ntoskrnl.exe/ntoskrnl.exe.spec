@@ -59,6 +59,9 @@
 @ stub KeSetTimeUpdateNotifyRoutine
 @ stub KefAcquireSpinLockAtDpcLevel
 @ stub KefReleaseSpinLockFromDpcLevel
+@ stdcall KeGenericCallDpc(ptr ptr)
+@ stdcall KeSignalCallDpcDone(ptr)
+@ stdcall KeSignalCallDpcSynchronize(ptr)
 @ stub KiAcquireSpinLock
 @ stub KiReleaseSpinLock
 @ stdcall -fastcall ObfDereferenceObject(ptr)
@@ -180,7 +183,7 @@
 @ stub ExRaiseException
 @ stub ExRaiseHardError
 @ stub ExRaiseStatus
-@ stub ExRegisterCallback
+@ stdcall ExRegisterCallback(ptr ptr ptr)
 @ stub ExReinitializeResourceLite
 @ stdcall ExReleaseResourceForThreadLite(ptr long)
 @ extern ExSemaphoreObjectType
@@ -188,7 +191,7 @@
 @ stdcall ExSetTimerResolution(long long)
 @ stub ExSystemExceptionFilter
 @ stdcall ExSystemTimeToLocalTime(ptr ptr) RtlSystemTimeToLocalTime
-@ stub ExUnregisterCallback
+@ stdcall ExUnregisterCallback(ptr)
 @ stdcall ExUuidCreate(ptr)
 @ stub ExVerifySuite
 @ stub ExWindowStationObjectType
@@ -459,7 +462,7 @@
 @ stub IoReportTargetDeviceChange
 @ stub IoReportTargetDeviceChangeAsynchronous
 @ stub IoRequestDeviceEject
-@ stub IoReuseIrp
+@ stdcall IoReuseIrp(ptr long)
 @ stub IoSetCompletionRoutineEx
 @ stdcall IoSetDeviceInterfaceState(ptr long)
 @ stub IoSetDeviceToVerify
@@ -517,6 +520,7 @@
 @ stub KdEnteredDebugger
 @ stub KdPollBreakIn
 @ stub KdPowerTransition
+@ stdcall KdRefreshDebuggerNotPresent()
 @ stub Ke386CallBios
 @ stdcall Ke386IoSetAccessProcess(ptr long)
 @ stub Ke386QueryIoAccessMap
@@ -545,6 +549,7 @@
 @ stub KeFindConfigurationNextEntry
 @ stub KeFlushEntireTb
 @ stdcall KeFlushQueuedDpcs()
+@ stdcall KeGetCurrentProcessorNumber() NtGetCurrentProcessorNumber
 @ stdcall KeGetCurrentThread()
 @ stub KeGetPreviousMode
 @ stub KeGetRecommendedSharedDataAlignment
@@ -586,6 +591,7 @@
 @ stub KeProfileInterruptWithSource
 @ stub KePulseEvent
 @ stdcall KeQueryActiveProcessors()
+@ stdcall KeQueryActiveProcessorCountEx(long)
 @ stdcall KeQueryInterruptTime()
 @ stub KeQueryPriorityThread
 @ stub KeQueryRuntimeThread
@@ -617,6 +623,7 @@
 @ stdcall KeResetEvent(ptr)
 @ stub KeRestoreFloatingPointState
 @ stdcall KeRevertToUserAffinityThread()
+@ stdcall KeRevertToUserAffinityThreadEx(long)
 @ stub KeRundownQueue
 @ stub KeSaveFloatingPointState
 @ stub KeSaveStateForHibernate
@@ -632,15 +639,16 @@
 @ stdcall KeSetPriorityThread(ptr long)
 @ stub KeSetProfileIrql
 @ stdcall KeSetSystemAffinityThread(long)
+@ stdcall KeSetSystemAffinityThreadEx(long)
 @ stdcall KeSetTargetProcessorDpc(ptr long)
 @ stub KeSetTimeIncrement
-@ stub KeSetTimer
+@ stdcall KeSetTimer(ptr int64 ptr)
 @ stdcall KeSetTimerEx(ptr int64 long ptr)
-@ stub KeStackAttachProcess
+@ stdcall KeStackAttachProcess(ptr ptr)
 @ stub KeSynchronizeExecution
 @ stub KeTerminateThread
 @ extern KeTickCount
-@ stub KeUnstackDetachProcess
+@ stdcall KeUnstackDetachProcess(ptr)
 @ stub KeUpdateRunTime
 @ stub KeUpdateSystemTime
 @ stub KeUserModeCallback
@@ -896,7 +904,7 @@
 @ stub PsGetProcessJob
 @ stub PsGetProcessPeb
 @ stub PsGetProcessPriorityClass
-@ stub PsGetProcessSectionBaseAddress
+@ stdcall PsGetProcessSectionBaseAddress(ptr)
 @ stub PsGetProcessSecurityPort
 @ stub PsGetProcessSessionId
 @ stub PsGetProcessWin32Process
@@ -1132,10 +1140,10 @@
 @ stdcall RtlIpv4StringToAddressExA(str long ptr ptr)
 @ stdcall RtlIpv4StringToAddressExW(wstr long ptr ptr)
 @ stdcall RtlIpv4StringToAddressW(wstr long ptr ptr)
-@ stub RtlIpv6AddressToStringA
-@ stub RtlIpv6AddressToStringExA
-@ stub RtlIpv6AddressToStringExW
-@ stub RtlIpv6AddressToStringW
+@ stdcall RtlIpv6AddressToStringA(ptr ptr)
+@ stdcall RtlIpv6AddressToStringExA(ptr long long ptr ptr)
+@ stdcall RtlIpv6AddressToStringExW(ptr long long ptr ptr)
+@ stdcall RtlIpv6AddressToStringW(ptr ptr)
 @ stdcall RtlIpv6StringToAddressA(str ptr ptr)
 @ stdcall RtlIpv6StringToAddressExA(str ptr ptr ptr)
 @ stdcall RtlIpv6StringToAddressExW(wstr ptr ptr ptr)

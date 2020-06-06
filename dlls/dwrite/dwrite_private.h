@@ -459,12 +459,26 @@ struct scriptshaping_cache
     {
         struct dwrite_fonttable table;
         unsigned int classdef;
+        unsigned int markattachclassdef;
+        unsigned int markglyphsetdef;
     } gdef;
 };
 
 struct shaping_glyph_info
 {
     unsigned int mask;
+    unsigned int props;
+};
+
+struct shaping_glyph_properties
+{
+    UINT16 justification : 4;
+    UINT16 isClusterStart : 1;
+    UINT16 isDiacritic : 1;
+    UINT16 isZeroWidthSpace : 1;
+    UINT16 reserved : 1;
+    UINT16 components : 4;
+    UINT16 reserved2 : 4;
 };
 
 struct scriptshaping_context
@@ -483,6 +497,7 @@ struct scriptshaping_context
         {
             const UINT16 *glyphs;
             const DWRITE_SHAPING_GLYPH_PROPERTIES *glyph_props;
+            const UINT16 *clustermap;
         } pos;
         struct
         {
@@ -490,10 +505,18 @@ struct scriptshaping_context
             DWRITE_SHAPING_GLYPH_PROPERTIES *glyph_props;
             UINT16 *clustermap;
             unsigned int max_glyph_count;
+            unsigned int capacity;
             const WCHAR *digits;
         } subst;
+        struct
+        {
+            UINT16 *glyphs;
+            struct shaping_glyph_properties *glyph_props;
+            UINT16 *clustermap;
+        } buffer;
     } u;
 
+    const struct ot_gsubgpos_table *table; /* Either GSUB or GPOS. */
     struct
     {
         const DWRITE_TYPOGRAPHIC_FEATURES **features;
@@ -503,6 +526,7 @@ struct scriptshaping_context
     unsigned int global_mask;
     struct shaping_glyph_info *glyph_infos;
 
+    unsigned int cur;
     unsigned int glyph_count;
     float emsize;
     DWRITE_MEASURING_MODE measuring_mode;
@@ -555,20 +579,10 @@ extern DWORD opentype_layout_find_script(const struct scriptshaping_cache *cache
         unsigned int *script_index) DECLSPEC_HIDDEN;
 extern DWORD opentype_layout_find_language(const struct scriptshaping_cache *cache, DWORD kind, DWORD tag,
         unsigned int script_index, unsigned int *language_index) DECLSPEC_HIDDEN;
-extern HRESULT opentype_layout_apply_gsub_features(struct scriptshaping_context *context, unsigned int script_index,
+extern void opentype_layout_apply_gsub_features(struct scriptshaping_context *context, unsigned int script_index,
         unsigned int language_index, const struct shaping_features *features) DECLSPEC_HIDDEN;
 extern void opentype_layout_apply_gpos_features(struct scriptshaping_context *context, unsigned int script_index,
         unsigned int language_index, const struct shaping_features *features) DECLSPEC_HIDDEN;
-
-struct scriptshaping_ops
-{
-    HRESULT (*contextual_shaping)(struct scriptshaping_context *context, UINT16 *clustermap, UINT16 *glyph_indices, UINT32* actual_glyph_count);
-    HRESULT (*set_text_glyphs_props)(struct scriptshaping_context *context, UINT16 *clustermap, UINT16 *glyph_indices,
-                                     UINT32 glyphcount, DWRITE_SHAPING_TEXT_PROPERTIES *text_props, DWRITE_SHAPING_GLYPH_PROPERTIES *glyph_props);
-    const struct shaping_features *gpos_features;
-};
-
-extern const struct scriptshaping_ops default_shaping_ops DECLSPEC_HIDDEN;
 
 extern HRESULT shape_get_glyphs(struct scriptshaping_context *context, const unsigned int *scripts) DECLSPEC_HIDDEN;
 extern HRESULT shape_get_positions(struct scriptshaping_context *context, const unsigned int *scripts) DECLSPEC_HIDDEN;

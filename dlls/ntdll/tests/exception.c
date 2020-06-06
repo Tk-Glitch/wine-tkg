@@ -1640,8 +1640,8 @@ static void test_thread_context(void)
     ok( context.Esp == expect.Esp - 12 || context.Esp == expect.Esp - 16,
         "wrong Esp %08x/%08x\n", context.Esp, expect.Esp );
     /* Eip is somewhere close to the NtGetContextThread implementation */
-    ok( (char *)context.Eip >= (char *)pNtGetContextThread - 0x10000 &&
-        (char *)context.Eip <= (char *)pNtGetContextThread + 0x10000,
+    ok( (char *)context.Eip >= (char *)pNtGetContextThread - 0x40000 &&
+        (char *)context.Eip <= (char *)pNtGetContextThread + 0x40000,
         "wrong Eip %08x/%08x\n", context.Eip, (DWORD)pNtGetContextThread );
     ok( *(WORD *)context.Eip == 0xc483 || *(WORD *)context.Eip == 0x08c2 || *(WORD *)context.Eip == 0x8dc3,
         "expected 0xc483 or 0x08c2 or 0x8dc3, got %04x\n", *(WORD *)context.Eip );

@@ -595,6 +595,7 @@ enum hlsl_sampler_dim
    HLSL_SAMPLER_DIM_2D,
    HLSL_SAMPLER_DIM_3D,
    HLSL_SAMPLER_DIM_CUBE,
+   HLSL_SAMPLER_DIM_MAX = HLSL_SAMPLER_DIM_CUBE
 };
 
 enum hlsl_matrix_majority
@@ -648,9 +649,9 @@ enum hlsl_ir_node_type
     HLSL_IR_ASSIGNMENT = 0,
     HLSL_IR_CONSTANT,
     HLSL_IR_CONSTRUCTOR,
-    HLSL_IR_DEREF,
     HLSL_IR_EXPR,
     HLSL_IR_IF,
+    HLSL_IR_LOAD,
     HLSL_IR_LOOP,
     HLSL_IR_JUMP,
     HLSL_IR_SWIZZLE,
@@ -721,6 +722,7 @@ struct hlsl_ir_function
 struct hlsl_ir_function_decl
 {
     struct hlsl_type *return_type;
+    struct hlsl_ir_var *return_var;
     struct source_location loc;
     struct wine_rb_entry entry;
     struct hlsl_ir_function *func;
@@ -831,7 +833,6 @@ struct hlsl_ir_jump
 {
     struct hlsl_ir_node node;
     enum hlsl_ir_jump_type type;
-    struct hlsl_ir_node *return_value;
 };
 
 struct hlsl_ir_swizzle
@@ -841,33 +842,13 @@ struct hlsl_ir_swizzle
     DWORD swizzle;
 };
 
-enum hlsl_ir_deref_type
-{
-    HLSL_IR_DEREF_VAR,
-    HLSL_IR_DEREF_ARRAY,
-    HLSL_IR_DEREF_RECORD,
-};
-
 struct hlsl_deref
 {
-    enum hlsl_ir_deref_type type;
-    union
-    {
-        struct hlsl_ir_var *var;
-        struct
-        {
-            struct hlsl_ir_node *array;
-            struct hlsl_ir_node *index;
-        } array;
-        struct
-        {
-            struct hlsl_ir_node *record;
-            struct hlsl_struct_field *field;
-        } record;
-    } v;
+    struct hlsl_ir_var *var;
+    struct hlsl_ir_node *offset;
 };
 
-struct hlsl_ir_deref
+struct hlsl_ir_load
 {
     struct hlsl_ir_node node;
     struct hlsl_deref src;
@@ -1003,6 +984,13 @@ struct hlsl_parse_ctx
     const struct hlsl_ir_function_decl *cur_function;
 
     enum hlsl_matrix_majority matrix_majority;
+
+    struct
+    {
+        struct hlsl_type *scalar[HLSL_TYPE_LAST_SCALAR + 1];
+        struct hlsl_type *sampler[HLSL_SAMPLER_DIM_MAX + 1];
+        struct hlsl_type *Void;
+    } builtin_types;
 };
 
 extern struct hlsl_parse_ctx hlsl_ctx DECLSPEC_HIDDEN;
@@ -1024,10 +1012,10 @@ static inline struct hlsl_ir_expr *expr_from_node(const struct hlsl_ir_node *nod
     return CONTAINING_RECORD(node, struct hlsl_ir_expr, node);
 }
 
-static inline struct hlsl_ir_deref *deref_from_node(const struct hlsl_ir_node *node)
+static inline struct hlsl_ir_load *load_from_node(const struct hlsl_ir_node *node)
 {
-    assert(node->type == HLSL_IR_DEREF);
-    return CONTAINING_RECORD(node, struct hlsl_ir_deref, node);
+    assert(node->type == HLSL_IR_LOAD);
+    return CONTAINING_RECORD(node, struct hlsl_ir_load, node);
 }
 
 static inline struct hlsl_ir_constant *constant_from_node(const struct hlsl_ir_node *node)
@@ -1108,7 +1096,6 @@ struct hlsl_ir_node *make_assignment(struct hlsl_ir_node *left, enum parse_assig
         struct hlsl_ir_node *right) DECLSPEC_HIDDEN;
 void push_scope(struct hlsl_parse_ctx *ctx) DECLSPEC_HIDDEN;
 BOOL pop_scope(struct hlsl_parse_ctx *ctx) DECLSPEC_HIDDEN;
-struct hlsl_ir_function_decl *new_func_decl(struct hlsl_type *return_type, struct list *parameters) DECLSPEC_HIDDEN;
 void init_functions_tree(struct wine_rb_tree *funcs) DECLSPEC_HIDDEN;
 void add_function_decl(struct wine_rb_tree *funcs, char *name, struct hlsl_ir_function_decl *decl,
         BOOL intrinsic) DECLSPEC_HIDDEN;

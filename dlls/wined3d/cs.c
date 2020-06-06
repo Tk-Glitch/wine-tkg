@@ -522,14 +522,66 @@ static void wined3d_cs_exec_nop(struct wined3d_cs *cs, const void *data)
 
 static void wined3d_cs_exec_present(struct wined3d_cs *cs, const void *data)
 {
+    struct wined3d_texture *logo_texture, *cursor_texture, *back_buffer;
+    struct wined3d_rendertarget_view *dsv = cs->state.fb.depth_stencil;
     const struct wined3d_cs_present *op = data;
+    const struct wined3d_swapchain_desc *desc;
     struct wined3d_swapchain *swapchain;
     unsigned int i;
 
     swapchain = op->swapchain;
+    desc = &swapchain->state.desc;
+    back_buffer = swapchain->back_buffers[0];
     wined3d_swapchain_set_window(swapchain, op->dst_window_override);
 
+    if ((logo_texture = swapchain->device->logo_texture))
+    {
+        RECT rect = {0, 0, logo_texture->resource.width, logo_texture->resource.height};
+
+        /* Blit the logo into the upper left corner of the back-buffer. */
+        wined3d_texture_blt(back_buffer, 0, &rect, logo_texture, 0,
+                &rect, WINED3D_BLT_SRC_CKEY, NULL, WINED3D_TEXF_POINT);
+    }
+
+    if ((cursor_texture = swapchain->device->cursor_texture)
+            && swapchain->device->bCursorVisible && !swapchain->device->hardwareCursor)
+    {
+        RECT dst_rect =
+        {
+            swapchain->device->xScreenSpace - swapchain->device->xHotSpot,
+            swapchain->device->yScreenSpace - swapchain->device->yHotSpot,
+            swapchain->device->xScreenSpace + swapchain->device->cursorWidth - swapchain->device->xHotSpot,
+            swapchain->device->yScreenSpace + swapchain->device->cursorHeight - swapchain->device->yHotSpot,
+        };
+        RECT src_rect =
+        {
+            0, 0, cursor_texture->resource.width, cursor_texture->resource.height
+        };
+        const RECT clip_rect = {0, 0, back_buffer->resource.width, back_buffer->resource.height};
+
+        TRACE("Rendering the software cursor.\n");
+
+        if (desc->windowed)
+            MapWindowPoints(NULL, swapchain->win_handle, (POINT *)&dst_rect, 2);
+        if (wined3d_clip_blit(&clip_rect, &dst_rect, &src_rect))
+            wined3d_texture_blt(back_buffer, 0, &dst_rect, cursor_texture, 0,
+                    &src_rect, WINED3D_BLT_ALPHA_TEST, NULL, WINED3D_TEXF_POINT);
+    }
+
     swapchain->swapchain_ops->swapchain_present(swapchain, &op->src_rect, &op->dst_rect, op->swap_interval, op->flags);
+
+    /* Discard buffers if the swap effect allows it. */
+    back_buffer = swapchain->back_buffers[desc->backbuffer_count - 1];
+    if (desc->swap_effect == WINED3D_SWAP_EFFECT_DISCARD || desc->swap_effect == WINED3D_SWAP_EFFECT_FLIP_DISCARD)
+        wined3d_texture_validate_location(back_buffer, 0, WINED3D_LOCATION_DISCARDED);
+
+    if (dsv && dsv->resource->type != WINED3D_RTYPE_BUFFER)
+    {
+        struct wined3d_texture *ds = texture_from_resource(dsv->resource);
+
+        if ((desc->flags & WINED3D_SWAPCHAIN_DISCARD_DEPTHSTENCIL || ds->flags & WINED3D_TEXTURE_DISCARD))
+            wined3d_rendertarget_view_validate_location(dsv, WINED3D_LOCATION_DISCARDED);
+    }
 
     if (TRACE_ON(fps))
     {
@@ -547,7 +599,7 @@ static void wined3d_cs_exec_present(struct wined3d_cs *cs, const void *data)
     }
 
     wined3d_resource_release(&swapchain->front_buffer->resource);
-    for (i = 0; i < swapchain->state.desc.backbuffer_count; ++i)
+    for (i = 0; i < desc->backbuffer_count; ++i)
     {
         wined3d_resource_release(&swapchain->back_buffers[i]->resource);
     }

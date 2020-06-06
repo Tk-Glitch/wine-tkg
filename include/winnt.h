@@ -1869,6 +1869,8 @@ NTSYSAPI PVOID WINAPI RtlVirtualUnwind(DWORD,DWORD,DWORD,RUNTIME_FUNCTION*,CONTE
 #define CONTEXT_FLOATING_POINT  (CONTEXT_ARM64 | 0x00000004)
 #define CONTEXT_DEBUG_REGISTERS (CONTEXT_ARM64 | 0x00000008)
 
+#define CONTEXT_UNWOUND_TO_CALL 0x20000000
+
 #define CONTEXT_FULL (CONTEXT_CONTROL | CONTEXT_INTEGER)
 #define CONTEXT_ALL  (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT | CONTEXT_DEBUG_REGISTERS)
 
@@ -2680,6 +2682,13 @@ unsigned __int64 __readgsqword(unsigned long);
 static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     return (struct _TEB *)__readgsqword(FIELD_OFFSET(NT_TIB, Self));
+}
+#elif defined(__arm__) && defined(__MINGW32__)
+static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
+{
+    struct _TEB *teb;
+    __asm__("mrc p15, 0, %0, c13, c0, 2" : "=r" (teb));
+    return teb;
 }
 #else
 extern struct _TEB * WINAPI NtCurrentTeb(void);
@@ -6045,6 +6054,7 @@ typedef enum _CM_ERROR_CONTROL_TYPE
 } SERVICE_ERROR_TYPE;
 
 NTSYSAPI SIZE_T WINAPI RtlCompareMemory(const VOID*, const VOID*, SIZE_T);
+NTSYSAPI SIZE_T WINAPI RtlCompareMemoryUlong(VOID*, SIZE_T, ULONG);
 
 #define RtlEqualMemory(Destination, Source, Length) (!memcmp((Destination),(Source),(Length)))
 #define RtlMoveMemory(Destination, Source, Length) memmove((Destination),(Source),(Length))

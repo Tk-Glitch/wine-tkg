@@ -106,6 +106,7 @@
 
 #include "winternl.h"
 #include "winioctl.h"
+#include "ddk/wdm.h"
 
 #if !defined(O_SYMLINK) && defined(O_PATH)
 # define O_SYMLINK (O_NOFOLLOW | O_PATH)
@@ -394,6 +395,46 @@ static struct list rel_timeout_list = LIST_INIT(rel_timeout_list); /* sorted rel
 timeout_t current_time;
 timeout_t monotonic_time;
 
+struct _KUSER_SHARED_DATA *user_shared_data = NULL;
+static const int user_shared_data_timeout = 16;
+
+static void set_user_shared_data_time(void)
+{
+    timeout_t tick_count = monotonic_time / 10000;
+
+    /* on X86 there should be total store order guarantees, so volatile is enough
+     * to ensure the stores aren't reordered by the compiler, and then they will
+     * always be seen in-order from other CPUs. On other archs, we need atomic
+     * intrinsics to guarantee that. */
+#if defined(__i386__) || defined(__x86_64__)
+    user_shared_data->SystemTime.High2Time = current_time >> 32;
+    user_shared_data->SystemTime.LowPart   = current_time;
+    user_shared_data->SystemTime.High1Time = current_time >> 32;
+
+    user_shared_data->InterruptTime.High2Time = monotonic_time >> 32;
+    user_shared_data->InterruptTime.LowPart   = monotonic_time;
+    user_shared_data->InterruptTime.High1Time = monotonic_time >> 32;
+
+    user_shared_data->TickCount.High2Time = tick_count >> 32;
+    user_shared_data->TickCount.LowPart   = tick_count;
+    user_shared_data->TickCount.High1Time = tick_count >> 32;
+    *(volatile ULONG *)&user_shared_data->TickCountLowDeprecated = tick_count;
+#else
+    __atomic_store_n(&user_shared_data->SystemTime.High2Time, current_time >> 32, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->SystemTime.LowPart, current_time, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->SystemTime.High1Time, current_time >> 32, __ATOMIC_SEQ_CST);
+
+    __atomic_store_n(&user_shared_data->InterruptTime.High2Time, monotonic_time >> 32, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->InterruptTime.LowPart, monotonic_time, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->InterruptTime.High1Time, monotonic_time >> 32, __ATOMIC_SEQ_CST);
+
+    __atomic_store_n(&user_shared_data->TickCount.High2Time, tick_count >> 32, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->TickCount.LowPart, tick_count, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->TickCount.High1Time, tick_count >> 32, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->TickCountLowDeprecated, tick_count, __ATOMIC_SEQ_CST);
+#endif
+}
+
 void set_current_time(void)
 {
     static const timeout_t ticks_1601_to_1970 = (timeout_t)86400 * (369 * 365 + 89) * TICKS_PER_SEC;
@@ -401,6 +442,7 @@ void set_current_time(void)
     gettimeofday( &now, NULL );
     current_time = (timeout_t)now.tv_sec * TICKS_PER_SEC + now.tv_usec * 10 + ticks_1601_to_1970;
     monotonic_time = monotonic_counter();
+    if (user_shared_data) set_user_shared_data_time();
 }
 
 /* add a timeout user */
@@ -885,10 +927,11 @@ static void remove_poll_user( struct fd *fd, int user )
 /* process pending timeouts and return the time until the next timeout, in milliseconds */
 static int get_next_timeout(void)
 {
+    int ret = user_shared_data ? user_shared_data_timeout : -1;
+
     if (!list_empty( &abs_timeout_list ) || !list_empty( &rel_timeout_list ))
     {
         struct list expired_list, *ptr;
-        int ret = -1;
 
         /* first remove all expired timers from the list */
 
@@ -931,7 +974,7 @@ static int get_next_timeout(void)
             struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
             int diff = (timeout->when - current_time + 9999) / 10000;
             if (diff < 0) diff = 0;
-            ret = diff;
+            if (ret == -1 || diff < ret) ret = diff;
         }
 
         if ((ptr = list_head( &rel_timeout_list )) != NULL)
@@ -941,9 +984,8 @@ static int get_next_timeout(void)
             if (diff < 0) diff = 0;
             if (ret == -1 || diff < ret) ret = diff;
         }
-        return ret;
     }
-    return -1;  /* no pending timeouts */
+    return ret;
 }
 
 /* server main poll() loop */
@@ -2090,6 +2132,45 @@ struct fd *create_anonymous_fd( const struct fd_ops *fd_user_ops, int unix_fd, s
     }
     close( unix_fd );
     return NULL;
+}
+
+void set_unix_name_of_fd( struct fd *fd, const struct stat *fd_st )
+{
+#ifdef __linux__
+    static const char procfs_fmt[] = "/proc/self/fd/%d";
+
+    char path[PATH_MAX], procfs_path[sizeof(procfs_fmt) - 2 /* %d */ + 11];
+    struct stat path_st;
+    ssize_t len;
+
+    sprintf( procfs_path, procfs_fmt, fd->unix_fd );
+    len = readlink( procfs_path, path, sizeof(path) );
+    if (len == -1 || len >= sizeof(path) )
+        return;
+    path[len] = '\0';
+
+    /* Make sure it's an absolute path, has at least one hardlink, and the same inode */
+    if (path[0] != '/' || stat( path, &path_st ) || path_st.st_nlink < 1 ||
+        path_st.st_dev != fd_st->st_dev || path_st.st_ino != fd_st->st_ino)
+        return;
+
+    if (!(fd->unix_name = mem_alloc( len + 1 )))
+        return;
+    memcpy( fd->unix_name, path, len + 1 );
+
+#elif defined(F_GETPATH)
+    char path[PATH_MAX];
+    size_t size;
+
+    if (fcntl( fd->unix_fd, F_GETPATH, path ) == -1 || path[0] != '/')
+        return;
+
+    size = strlen(path) + 1;
+    if (!(fd->unix_name = mem_alloc( size )))
+        return;
+    memcpy( fd->unix_name, path, size );
+
+#endif
 }
 
 /* retrieve the object that is using an fd */

@@ -62,25 +62,12 @@ typedef struct {
     } u;
 } exprval_t;
 
+static const size_t stack_size = 0x4000;
+
 static HRESULT stack_push(script_ctx_t *ctx, jsval_t v)
 {
-    if(!ctx->stack_size) {
-        ctx->stack = heap_alloc(16*sizeof(*ctx->stack));
-        if(!ctx->stack)
-            return E_OUTOFMEMORY;
-        ctx->stack_size = 16;
-    }else if(ctx->stack_size == ctx->stack_top) {
-        jsval_t *new_stack;
-
-        new_stack = heap_realloc(ctx->stack, ctx->stack_size*2*sizeof(*new_stack));
-        if(!new_stack) {
-            jsval_release(v);
-            return E_OUTOFMEMORY;
-        }
-
-        ctx->stack = new_stack;
-        ctx->stack_size *= 2;
-    }
+    if(ctx->stack_top == stack_size)
+        return JS_E_STACK_OVERFLOW;
 
     ctx->stack[ctx->stack_top++] = v;
     return S_OK;
@@ -1734,20 +1721,26 @@ static HRESULT interp_in(script_ctx_t *ctx)
 }
 
 /* ECMA-262 3rd Edition    11.6.1 */
-static HRESULT add_eval(script_ctx_t *ctx, jsval_t lval, jsval_t rval, jsval_t *ret)
+static HRESULT interp_add(script_ctx_t *ctx)
 {
-    jsval_t r, l;
+    jsval_t l, r, lval, rval, ret;
     HRESULT hres;
 
+    rval = stack_pop(ctx);
+    lval = stack_pop(ctx);
+
+    TRACE("%s + %s\n", debugstr_jsval(lval), debugstr_jsval(rval));
+
     hres = to_primitive(ctx, lval, &l, NO_HINT);
+    if(SUCCEEDED(hres)) {
+        hres = to_primitive(ctx, rval, &r, NO_HINT);
+        if(FAILED(hres))
+            jsval_release(l);
+    }
+    jsval_release(lval);
+    jsval_release(rval);
     if(FAILED(hres))
         return hres;
-
-    hres = to_primitive(ctx, rval, &r, NO_HINT);
-    if(FAILED(hres)) {
-        jsval_release(l);
-        return hres;
-    }
 
     if(is_string(l) || is_string(r)) {
         jsstr_t *lstr, *rstr = NULL;
@@ -1761,7 +1754,7 @@ static HRESULT add_eval(script_ctx_t *ctx, jsval_t lval, jsval_t rval, jsval_t *
 
             ret_str = jsstr_concat(lstr, rstr);
             if(ret_str)
-                *ret = jsval_string(ret_str);
+                ret = jsval_string(ret_str);
             else
                 hres = E_OUTOFMEMORY;
         }
@@ -1776,29 +1769,12 @@ static HRESULT add_eval(script_ctx_t *ctx, jsval_t lval, jsval_t rval, jsval_t *
         if(SUCCEEDED(hres)) {
             hres = to_number(ctx, r, &nr);
             if(SUCCEEDED(hres))
-                *ret = jsval_number(nl+nr);
+                ret = jsval_number(nl+nr);
         }
     }
 
     jsval_release(r);
     jsval_release(l);
-    return hres;
-}
-
-/* ECMA-262 3rd Edition    11.6.1 */
-static HRESULT interp_add(script_ctx_t *ctx)
-{
-    jsval_t l, r, ret;
-    HRESULT hres;
-
-    r = stack_pop(ctx);
-    l = stack_pop(ctx);
-
-    TRACE("%s + %s\n", debugstr_jsval(l), debugstr_jsval(r));
-
-    hres = add_eval(ctx, l, r, &ret);
-    jsval_release(l);
-    jsval_release(r);
     if(FAILED(hres))
         return hres;
 
@@ -3016,6 +2992,12 @@ HRESULT exec_source(script_ctx_t *ctx, DWORD flags, bytecode_t *bytecode, functi
     call_frame_t *frame;
     unsigned i;
     HRESULT hres;
+
+    if(!ctx->stack) {
+        ctx->stack = heap_alloc(stack_size * sizeof(*ctx->stack));
+        if(!ctx->stack)
+            return E_OUTOFMEMORY;
+    }
 
     if(bytecode->named_item) {
         if(!bytecode->named_item->script_obj) {

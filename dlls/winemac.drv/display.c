@@ -52,6 +52,8 @@ struct display_mode_descriptor
 BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode, LPDEVMODEW devmode, DWORD flags);
 
 DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
+DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_GPU_LUID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 1);
+DEFINE_DEVPROPKEY(DEVPROPKEY_MONITOR_OUTPUT_ID, 0xca085853, 0x16ce, 0x48aa, 0xb1, 0x14, 0xde, 0x9c, 0x72, 0x33, 0x42, 0x23, 2);
 
 /* Wine specific monitor properties */
 DEFINE_DEVPROPKEY(WINE_DEVPROPKEY_MONITOR_STATEFLAGS, 0x233a9ef3, 0xafc4, 0x4abd, 0xb5, 0x64, 0xc3, 0x2f, 0x21, 0xf1, 0x53, 0x5b, 2);
@@ -747,6 +749,32 @@ void check_retina_status(void)
     }
 }
 
+static BOOL get_primary_adapter(WCHAR *name)
+{
+    DISPLAY_DEVICEW dd;
+    DWORD i;
+
+    dd.cb = sizeof(dd);
+    for (i = 0; EnumDisplayDevicesW(NULL, i, &dd, 0); ++i)
+    {
+        if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
+        {
+            lstrcpyW(name, dd.DeviceName);
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+static BOOL is_detached_mode(const DEVMODEW *mode)
+{
+    return mode->dmFields & DM_POSITION &&
+           mode->dmFields & DM_PELSWIDTH &&
+           mode->dmFields & DM_PELSHEIGHT &&
+           mode->dmPelsWidth == 0 &&
+           mode->dmPelsHeight == 0;
+}
 
 /***********************************************************************
  *              ChangeDisplaySettingsEx  (MACDRV.@)
@@ -755,7 +783,9 @@ void check_retina_status(void)
 LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
                                           HWND hwnd, DWORD flags, LPVOID lpvoid)
 {
+    WCHAR primary_adapter[CCHDEVICENAME];
     LONG ret = DISP_CHANGE_BADMODE;
+    DEVMODEW default_mode;
     int bpp;
     struct macdrv_display *displays;
     int num_displays;
@@ -769,6 +799,34 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
     TRACE("%s %p %p 0x%08x %p\n", debugstr_w(devname), devmode, hwnd, flags, lpvoid);
 
     init_original_display_mode();
+
+    if (!get_primary_adapter(primary_adapter))
+        return DISP_CHANGE_FAILED;
+
+    if (!devname && !devmode)
+    {
+        default_mode.dmSize = sizeof(default_mode);
+        if (!EnumDisplaySettingsExW(primary_adapter, ENUM_REGISTRY_SETTINGS, &default_mode, 0))
+        {
+            ERR("Default mode not found for %s!\n", wine_dbgstr_w(primary_adapter));
+            return DISP_CHANGE_BADMODE;
+        }
+
+        devname = primary_adapter;
+        devmode = &default_mode;
+    }
+
+    if (lstrcmpiW(primary_adapter, devname))
+    {
+        FIXME("Changing non-primary adapter settings is currently unsupported.\n");
+        return DISP_CHANGE_SUCCESSFUL;
+    }
+
+    if (is_detached_mode(devmode))
+    {
+        FIXME("Detaching adapters is currently unsupported.\n");
+        return DISP_CHANGE_SUCCESSFUL;
+    }
 
     if (macdrv_get_displays(&displays, &num_displays))
         return DISP_CHANGE_FAILED;
@@ -1305,12 +1363,13 @@ void macdrv_displays_changed(const macdrv_event *event)
 /***********************************************************************
  *              macdrv_init_gpu
  *
- * Initialize a GPU instance and return its GUID string in guid_string and driver value in driver parameter.
+ * Initialize a GPU instance.
+ * Return its GUID string in guid_string, driver value in driver parameter and LUID in gpu_luid.
  *
  * Return FALSE on failure and TRUE on success.
  */
 static BOOL macdrv_init_gpu(HDEVINFO devinfo, const struct macdrv_gpu *gpu, int gpu_index, WCHAR *guid_string,
-                            WCHAR *driver)
+                            WCHAR *driver, LUID *gpu_luid)
 {
     static const BOOL present = TRUE;
     SP_DEVINFO_DATA device_data = {sizeof(device_data)};
@@ -1358,6 +1417,7 @@ static BOOL macdrv_init_gpu(HDEVINFO devinfo, const struct macdrv_gpu *gpu, int 
                                        DEVPROP_TYPE_UINT64, (const BYTE *)&luid, sizeof(luid), 0))
             goto done;
     }
+    *gpu_luid = luid;
     TRACE("GPU id:0x%s name:%s LUID:%08x:%08x.\n", wine_dbgstr_longlong(gpu->id), gpu->name,
           luid.HighPart, luid.LowPart);
 
@@ -1485,7 +1545,7 @@ done:
  * Return FALSE on failure and TRUE on success.
  */
 static BOOL macdrv_init_monitor(HDEVINFO devinfo, const struct macdrv_monitor *monitor, int monitor_index,
-                                 int video_index)
+                                 int video_index, const LUID *gpu_luid)
 {
     SP_DEVINFO_DATA device_data = {sizeof(SP_DEVINFO_DATA)};
     WCHAR nameW[MAX_PATH];
@@ -1504,6 +1564,16 @@ static BOOL macdrv_init_monitor(HDEVINFO devinfo, const struct macdrv_monitor *m
     /* Write HardwareID registry property */
     if (!SetupDiSetDeviceRegistryPropertyW(devinfo, &device_data, SPDRP_HARDWAREID,
                                            (const BYTE *)monitor_hardware_idW, sizeof(monitor_hardware_idW)))
+        goto done;
+
+    /* Write DEVPROPKEY_MONITOR_GPU_LUID */
+    if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_MONITOR_GPU_LUID,
+                                   DEVPROP_TYPE_INT64, (const BYTE *)gpu_luid, sizeof(*gpu_luid), 0))
+        goto done;
+
+    /* Write DEVPROPKEY_MONITOR_OUTPUT_ID */
+    if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_MONITOR_OUTPUT_ID,
+                                   DEVPROP_TYPE_UINT32, (const BYTE *)&video_index, sizeof(video_index), 0))
         goto done;
 
     /* Create driver key */
@@ -1614,6 +1684,7 @@ void macdrv_init_display_devices(BOOL force)
     DWORD disposition = 0;
     WCHAR guidW[40];
     WCHAR driverW[1024];
+    LUID gpu_luid;
 
     mutex = CreateMutexW(NULL, FALSE, init_mutexW);
     WaitForSingleObject(mutex, INFINITE);
@@ -1643,7 +1714,7 @@ void macdrv_init_display_devices(BOOL force)
 
     for (gpu = 0; gpu < gpu_count; gpu++)
     {
-        if (!macdrv_init_gpu(gpu_devinfo, &gpus[gpu], gpu, guidW, driverW))
+        if (!macdrv_init_gpu(gpu_devinfo, &gpus[gpu], gpu, guidW, driverW, &gpu_luid))
             goto done;
 
         /* Initialize adapters */
@@ -1665,7 +1736,7 @@ void macdrv_init_display_devices(BOOL force)
             for (monitor = 0; monitor < monitor_count; monitor++)
             {
                 TRACE("monitor: %#x %s\n", monitor, monitors[monitor].name);
-                if (!macdrv_init_monitor(monitor_devinfo, &monitors[monitor], monitor, video_index))
+                if (!macdrv_init_monitor(monitor_devinfo, &monitors[monitor], monitor, video_index, &gpu_luid))
                     goto done;
             }
 

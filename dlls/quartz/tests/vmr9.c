@@ -73,18 +73,19 @@ static inline BOOL compare_media_types(const AM_MEDIA_TYPE *a, const AM_MEDIA_TY
 
 static BOOL compare_double(double f, double g, unsigned int ulps)
 {
-    int64_t x = *(int64_t *)&f;
-    int64_t y = *(int64_t *)&g;
+    uint64_t x = *(ULONGLONG *)&f;
+    uint64_t y = *(ULONGLONG *)&g;
 
-    if (x < 0)
-        x = INT64_MIN - x;
-    if (y < 0)
-        y = INT64_MIN - y;
+    if (f < 0)
+        x = ~x + 1;
+    else
+        x |= ((ULONGLONG)1)<<63;
+    if (g < 0)
+        y = ~y + 1;
+    else
+        y |= ((ULONGLONG)1)<<63;
 
-    if (abs(x - y) > ulps)
-        return FALSE;
-
-    return TRUE;
+    return (x>y ? x-y : y-x) <= ulps;
 }
 
 static IFilterGraph2 *create_graph(void)
@@ -2852,6 +2853,7 @@ static HRESULT WINAPI allocator_QueryInterface(IVMRSurfaceAllocator9 *iface, REF
         IVMRImagePresenter9_AddRef(&presenter_iface);
         return S_OK;
     }
+    ok(!IsEqualGUID(iid, &IID_IVMRSurfaceAllocatorEx9), "Unexpected query for IVMRSurfaceAllocatorEx9.\n");
     *out = NULL;
     return E_NOTIMPL;
 }
@@ -3876,6 +3878,38 @@ out:
     DestroyWindow(window);
 }
 
+static void test_mixing_prefs(void)
+{
+    IBaseFilter *filter = create_vmr9(VMR9Mode_Windowed);
+    IVMRMixerControl9 *mixer_control;
+    DWORD flags;
+    HRESULT hr;
+    ULONG ref;
+
+    set_mixing_mode(filter, 1);
+
+    hr = IBaseFilter_QueryInterface(filter, &IID_IVMRMixerControl9, (void **)&mixer_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IVMRMixerControl9_GetMixingPrefs(mixer_control, &flags);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(flags == (MixerPref9_NoDecimation | MixerPref9_ARAdjustXorY | MixerPref9_BiLinearFiltering
+            | MixerPref9_RenderTargetRGB), "Got flags %#x.\n", flags);
+
+    hr = IVMRMixerControl9_SetMixingPrefs(mixer_control, MixerPref9_NoDecimation
+            | MixerPref9_ARAdjustXorY | MixerPref9_PointFiltering | MixerPref9_RenderTargetRGB);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IVMRMixerControl9_GetMixingPrefs(mixer_control, &flags);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(flags == (MixerPref9_NoDecimation | MixerPref9_ARAdjustXorY | MixerPref9_PointFiltering
+            | MixerPref9_RenderTargetRGB), "Got flags %#x.\n", flags);
+
+    IVMRMixerControl9_Release(mixer_control);
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
 START_TEST(vmr9)
 {
     IBaseFilter *filter;
@@ -3910,6 +3944,7 @@ START_TEST(vmr9)
     test_surface_allocator_notify_refcount();
     test_basic_video();
     test_windowless_size();
+    test_mixing_prefs();
 
     CoUninitialize();
 }

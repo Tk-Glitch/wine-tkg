@@ -54,7 +54,6 @@
 #include "winreg.h"
 #include "psapi.h"
 #include "wine/exception.h"
-#include "wine/library.h"
 #include "wine/server.h"
 #include "wine/unicode.h"
 #include "wine/asm.h"
@@ -131,6 +130,7 @@ static inline DWORD call_process_entry( PEB *peb, LPTHREAD_START_ROUTINE entry )
 }
 #endif
 
+extern const char * CDECL wine_get_version(void);
 /***********************************************************************
  *           __wine_start_process
  *
@@ -159,7 +159,7 @@ void CDECL __wine_start_process( LPTHREAD_START_ROUTINE entry, PEB *peb )
         if (CreateEventA(0, 0, 0, "__winestaging_warn_event") && GetLastError() != ERROR_ALREADY_EXISTS)
         {
             FIXME_(winediag)("Wine TkG %s is a testing version containing experimental patches.\n", wine_get_version());
-            FIXME_(winediag)("Please don't report bugs about it on winehq.org and use https://github.com/Tk-Glitch/PKGBUILDS/issues instead.\n");
+            FIXME_(winediag)("Please don't report bugs about it on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead.\n");
         }
         else
             WARN_(winediag)("Wine TkG %s is a testing version containing experimental patches.\n", wine_get_version());
@@ -465,61 +465,6 @@ BOOL WINAPI GetProcessAffinityMask( HANDLE hProcess, PDWORD_PTR process_mask, PD
 
 
 /***********************************************************************
- *           GetProcessVersion    (KERNEL32.@)
- */
-DWORD WINAPI GetProcessVersion( DWORD pid )
-{
-    HANDLE process;
-    NTSTATUS status;
-    PROCESS_BASIC_INFORMATION pbi;
-    SIZE_T count;
-    PEB peb;
-    IMAGE_DOS_HEADER dos;
-    IMAGE_NT_HEADERS nt;
-    DWORD ver = 0;
-
-    if (!pid || pid == GetCurrentProcessId())
-    {
-        IMAGE_NT_HEADERS *pnt;
-
-        if ((pnt = RtlImageNtHeader( NtCurrentTeb()->Peb->ImageBaseAddress )))
-            return ((pnt->OptionalHeader.MajorSubsystemVersion << 16) |
-                    pnt->OptionalHeader.MinorSubsystemVersion);
-        return 0;
-    }
-
-    process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid);
-    if (!process) return 0;
-
-    status = NtQueryInformationProcess(process, ProcessBasicInformation, &pbi, sizeof(pbi), NULL);
-    if (status) goto err;
-
-    status = NtReadVirtualMemory(process, pbi.PebBaseAddress, &peb, sizeof(peb), &count);
-    if (status || count != sizeof(peb)) goto err;
-
-    memset(&dos, 0, sizeof(dos));
-    status = NtReadVirtualMemory(process, peb.ImageBaseAddress, &dos, sizeof(dos), &count);
-    if (status || count != sizeof(dos)) goto err;
-    if (dos.e_magic != IMAGE_DOS_SIGNATURE) goto err;
-
-    memset(&nt, 0, sizeof(nt));
-    status = NtReadVirtualMemory(process, (char *)peb.ImageBaseAddress + dos.e_lfanew, &nt, sizeof(nt), &count);
-    if (status || count != sizeof(nt)) goto err;
-    if (nt.Signature != IMAGE_NT_SIGNATURE) goto err;
-
-    ver = MAKELONG(nt.OptionalHeader.MinorSubsystemVersion, nt.OptionalHeader.MajorSubsystemVersion);
-
-err:
-    CloseHandle(process);
-
-    if (status != STATUS_SUCCESS)
-        SetLastError(RtlNtStatusToDosError(status));
-
-    return ver;
-}
-
-
-/***********************************************************************
  *		SetProcessWorkingSetSize	[KERNEL32.@]
  * Sets the min/max working set sizes for a specified process.
  *
@@ -582,6 +527,107 @@ HANDLE WINAPI KERNEL32_GetCurrentProcess(void)
 {
     return (HANDLE)~(ULONG_PTR)0;
 }
+
+
+/***********************************************************************
+ *           CreateActCtxA   (KERNEL32.@)
+ */
+HANDLE WINAPI DECLSPEC_HOTPATCH CreateActCtxA( const ACTCTXA *actctx )
+{
+    ACTCTXW actw;
+    SIZE_T len;
+    HANDLE ret = INVALID_HANDLE_VALUE;
+    LPWSTR src = NULL, assdir = NULL, resname = NULL, appname = NULL;
+
+    TRACE("%p %08x\n", actctx, actctx ? actctx->dwFlags : 0);
+
+    if (!actctx || actctx->cbSize != sizeof(*actctx))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    actw.cbSize = sizeof(actw);
+    actw.dwFlags = actctx->dwFlags;
+    if (actctx->lpSource)
+    {
+        len = MultiByteToWideChar(CP_ACP, 0, actctx->lpSource, -1, NULL, 0);
+        src = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        if (!src) return INVALID_HANDLE_VALUE;
+        MultiByteToWideChar(CP_ACP, 0, actctx->lpSource, -1, src, len);
+    }
+    actw.lpSource = src;
+
+    if (actw.dwFlags & ACTCTX_FLAG_PROCESSOR_ARCHITECTURE_VALID)
+        actw.wProcessorArchitecture = actctx->wProcessorArchitecture;
+    if (actw.dwFlags & ACTCTX_FLAG_LANGID_VALID)
+        actw.wLangId = actctx->wLangId;
+    if (actw.dwFlags & ACTCTX_FLAG_ASSEMBLY_DIRECTORY_VALID)
+    {
+        len = MultiByteToWideChar(CP_ACP, 0, actctx->lpAssemblyDirectory, -1, NULL, 0);
+        assdir = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        if (!assdir) goto done;
+        MultiByteToWideChar(CP_ACP, 0, actctx->lpAssemblyDirectory, -1, assdir, len);
+        actw.lpAssemblyDirectory = assdir;
+    }
+    if (actw.dwFlags & ACTCTX_FLAG_RESOURCE_NAME_VALID)
+    {
+        if ((ULONG_PTR)actctx->lpResourceName >> 16)
+        {
+            len = MultiByteToWideChar(CP_ACP, 0, actctx->lpResourceName, -1, NULL, 0);
+            resname = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+            if (!resname) goto done;
+            MultiByteToWideChar(CP_ACP, 0, actctx->lpResourceName, -1, resname, len);
+            actw.lpResourceName = resname;
+        }
+        else actw.lpResourceName = (LPCWSTR)actctx->lpResourceName;
+    }
+    if (actw.dwFlags & ACTCTX_FLAG_APPLICATION_NAME_VALID)
+    {
+        len = MultiByteToWideChar(CP_ACP, 0, actctx->lpApplicationName, -1, NULL, 0);
+        appname = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        if (!appname) goto done;
+        MultiByteToWideChar(CP_ACP, 0, actctx->lpApplicationName, -1, appname, len);
+        actw.lpApplicationName = appname;
+    }
+    if (actw.dwFlags & ACTCTX_FLAG_HMODULE_VALID)
+        actw.hModule = actctx->hModule;
+
+    ret = CreateActCtxW(&actw);
+
+done:
+    HeapFree(GetProcessHeap(), 0, src);
+    HeapFree(GetProcessHeap(), 0, assdir);
+    HeapFree(GetProcessHeap(), 0, resname);
+    HeapFree(GetProcessHeap(), 0, appname);
+    return ret;
+}
+
+/***********************************************************************
+ *           FindActCtxSectionStringA   (KERNEL32.@)
+ */
+BOOL WINAPI FindActCtxSectionStringA( DWORD flags, const GUID *guid, ULONG id, const char *search,
+                                      ACTCTX_SECTION_KEYED_DATA *info )
+{
+    LPWSTR searchW;
+    DWORD len;
+    BOOL ret;
+
+    TRACE("%08x %s %u %s %p\n", flags, debugstr_guid(guid), id, debugstr_a(search), info);
+
+    if (!search || !info)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    len = MultiByteToWideChar(CP_ACP, 0, search, -1, NULL, 0);
+    searchW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, search, -1, searchW, len);
+    ret = FindActCtxSectionStringW( flags, guid, id, searchW, info );
+    HeapFree(GetProcessHeap(), 0, searchW);
+    return ret;
+}
+
 
 /***********************************************************************
  *           CmdBatNotification   (KERNEL32.@)
@@ -760,6 +806,84 @@ HRESULT WINAPI RegisterApplicationRecoveryCallback(APPLICATION_RECOVERY_CALLBACK
     return S_OK;
 }
 
+/***********************************************************************
+ *           GetActiveProcessorGroupCount (KERNEL32.@)
+ */
+WORD WINAPI GetActiveProcessorGroupCount(void)
+{
+    TRACE("()\n");
+
+    /* systems with less than 64 logical processors only have group 0 */
+    return 1;
+}
+
+/***********************************************************************
+ *           GetActiveProcessorCount (KERNEL32.@)
+ */
+DWORD WINAPI GetActiveProcessorCount(WORD group)
+{
+    TRACE("(%u)\n", group);
+
+    if (group && group != ALL_PROCESSOR_GROUPS)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    return system_info.NumberOfProcessors;
+}
+
+/***********************************************************************
+ *           GetMaximumProcessorCount (KERNEL32.@)
+ */
+DWORD WINAPI GetMaximumProcessorCount(WORD group)
+{
+    DWORD cpus = system_info.NumberOfProcessors;
+
+    FIXME("semi-stub, returning %u\n", cpus);
+    return cpus;
+}
+
+/***********************************************************************
+ *           GetMaximumProcessorGroupCount (KERNEL32.@)
+ */
+WORD WINAPI GetMaximumProcessorGroupCount(void)
+{
+    TRACE("()\n");
+
+    /* systems with less than 64 logical processors only have group 0 */
+    return 1;
+}
+
+
+/***********************************************************************
+ *           GetEnabledXStateFeatures (KERNEL32.@)
+ */
+DWORD64 WINAPI GetEnabledXStateFeatures(void)
+{
+    FIXME("\n");
+    return 0;
+}
+
+/***********************************************************************
+ *           GetFirmwareEnvironmentVariableA     (KERNEL32.@)
+ */
+DWORD WINAPI GetFirmwareEnvironmentVariableA(LPCSTR name, LPCSTR guid, PVOID buffer, DWORD size)
+{
+    FIXME("stub: %s %s %p %u\n", debugstr_a(name), debugstr_a(guid), buffer, size);
+    SetLastError(ERROR_INVALID_FUNCTION);
+    return 0;
+}
+
+/***********************************************************************
+ *           GetFirmwareEnvironmentVariableW     (KERNEL32.@)
+ */
+DWORD WINAPI GetFirmwareEnvironmentVariableW(LPCWSTR name, LPCWSTR guid, PVOID buffer, DWORD size)
+{
+    FIXME("stub: %s %s %p %u\n", debugstr_w(name), debugstr_w(guid), buffer, size);
+    SetLastError(ERROR_INVALID_FUNCTION);
+    return 0;
+}
+
 /**********************************************************************
  *           GetNumaNodeProcessorMask     (KERNEL32.@)
  */
@@ -795,12 +919,9 @@ BOOL WINAPI GetNumaAvailableMemoryNodeEx(USHORT node, PULONGLONG available_bytes
  */
 BOOL WINAPI GetNumaProcessorNode(UCHAR processor, PUCHAR node)
 {
-    SYSTEM_INFO si;
-
     TRACE("(%d, %p)\n", processor, node);
 
-    GetSystemInfo( &si );
-    if (processor < si.dwNumberOfProcessors)
+    if (processor < system_info.NumberOfProcessors)
     {
         *node = 0;
         return TRUE;

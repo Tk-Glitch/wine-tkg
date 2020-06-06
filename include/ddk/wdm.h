@@ -52,6 +52,7 @@ struct _KAPC;
 struct _IRP;
 struct _DEVICE_OBJECT;
 struct _DRIVER_OBJECT;
+struct _KPROCESS;
 
 typedef VOID (WINAPI *PKDEFERRED_ROUTINE)(struct _KDPC *, PVOID, PVOID, PVOID);
 typedef VOID (WINAPI *PKSTART_ROUTINE)(PVOID);
@@ -121,6 +122,12 @@ typedef struct _KMUTANT {
     BOOLEAN Abandoned;
     UCHAR ApcDisable;
 } KMUTANT, *PKMUTANT, *RESTRICTED_POINTER PRKMUTANT, KMUTEX, *PKMUTEX, *RESTRICTED_POINTER PRKMUTEX;
+
+typedef struct _DEFERRED_REVERSE_BARRIER
+{
+    ULONG Barrier;
+    ULONG TotalProcessors;
+} DEFERRED_REVERSE_BARRIER;
 
 typedef enum _KWAIT_REASON
 {
@@ -218,11 +225,21 @@ typedef struct _IO_TIMER_ROUTINE *PIO_TIMER_ROUTINE;
 typedef struct _ETHREAD *PETHREAD;
 typedef struct _KTHREAD *PKTHREAD, *PRKTHREAD;
 typedef struct _EPROCESS *PEPROCESS;
+typedef struct _KPROCESS KPROCESS, *PKPROCESS, *PRKPROCESS;
 typedef struct _IO_WORKITEM *PIO_WORKITEM;
 typedef struct _OBJECT_TYPE *POBJECT_TYPE;
 typedef struct _OBJECT_HANDLE_INFORMATION *POBJECT_HANDLE_INFORMATION;
 typedef struct _ZONE_HEADER *PZONE_HEADER;
 typedef struct _LOOKASIDE_LIST_EX *PLOOKASIDE_LIST_EX;
+
+typedef struct _KAPC_STATE
+{
+     LIST_ENTRY ApcListHead[2];
+     PKPROCESS Process;
+     UCHAR KernelApcInProgress;
+     UCHAR KernelApcPending;
+     UCHAR UserApcPending;
+} KAPC_STATE, *PKAPC_STATE;
 
 #define FM_LOCK_BIT 0x1
 
@@ -1258,8 +1275,6 @@ typedef struct _KUSER_SHARED_DATA {
     ULONG EnclaveFeatureMask[4];                           /* 0x36c */
     ULONG TelemetryCoverageRound;                          /* 0x37c */
     USHORT UserModeGlobalLogger[16];                       /* 0x380 */
-    ULONG HeapTracingPid[2];                               /* 0x390 */
-    ULONG CritSecTracingPid[2];                            /* 0x398 */
     ULONG ImageFileExecutionOptions;                       /* 0x3a0 */
     ULONG LangGenerationCount;                             /* 0x3a4 */
     ULONG ActiveProcessorAffinity;                         /* 0x3a8 */
@@ -1352,6 +1367,7 @@ typedef void * (NTAPI *PALLOCATE_FUNCTION)(POOL_TYPE, SIZE_T, ULONG);
 typedef void * (NTAPI *PALLOCATE_FUNCTION_EX)(POOL_TYPE, SIZE_T, ULONG, PLOOKASIDE_LIST_EX);
 typedef void (NTAPI *PFREE_FUNCTION)(void *);
 typedef void (NTAPI *PFREE_FUNCTION_EX)(void *, PLOOKASIDE_LIST_EX);
+typedef void (NTAPI *PCALLBACK_FUNCTION)(void *, void *, void *);
 
 #ifdef _WIN64
 #define LOOKASIDE_ALIGN DECLSPEC_CACHEALIGN
@@ -1623,9 +1639,11 @@ PSLIST_ENTRY WINAPI ExInterlockedPushEntrySList(PSLIST_HEADER,PSLIST_ENTRY,PKSPI
 LIST_ENTRY * WINAPI ExInterlockedRemoveHeadList(LIST_ENTRY*,KSPIN_LOCK*);
 BOOLEAN   WINAPI ExIsResourceAcquiredExclusiveLite(ERESOURCE*);
 ULONG     WINAPI ExIsResourceAcquiredSharedLite(ERESOURCE*);
+void *    WINAPI ExRegisterCallback(PCALLBACK_OBJECT,PCALLBACK_FUNCTION,void*);
 void    FASTCALL ExReleaseFastMutexUnsafe(PFAST_MUTEX);
 void      WINAPI ExReleaseResourceForThreadLite(ERESOURCE*,ERESOURCE_THREAD);
 ULONG     WINAPI ExSetTimerResolution(ULONG,BOOLEAN);
+void      WINAPI ExUnregisterCallback(void*);
 
 void      WINAPI IoAcquireCancelSpinLock(KIRQL*);
 NTSTATUS  WINAPI IoAcquireRemoveLockEx(IO_REMOVE_LOCK*,void*,const char*,ULONG, ULONG);
@@ -1672,6 +1690,7 @@ NTSTATUS  WINAPI IoRegisterDeviceInterface(PDEVICE_OBJECT,const GUID*,PUNICODE_S
 void      WINAPI IoReleaseCancelSpinLock(KIRQL);
 void      WINAPI IoReleaseRemoveLockAndWaitEx(IO_REMOVE_LOCK*,void*,ULONG);
 void      WINAPI IoReleaseRemoveLockEx(IO_REMOVE_LOCK*,void*,ULONG);
+void      WINAPI IoReuseIrp(IRP*,NTSTATUS);
 NTSTATUS  WINAPI IoSetDeviceInterfaceState(UNICODE_STRING*,BOOLEAN);
 NTSTATUS  WINAPI IoWMIRegistrationControl(PDEVICE_OBJECT,ULONG);
 
@@ -1688,7 +1707,10 @@ BOOLEAN   WINAPI KeCancelTimer(KTIMER*);
 void      WINAPI KeClearEvent(PRKEVENT);
 NTSTATUS  WINAPI KeDelayExecutionThread(KPROCESSOR_MODE,BOOLEAN,LARGE_INTEGER*);
 void      WINAPI KeEnterCriticalRegion(void);
+void      WINAPI KeGenericCallDpc(PKDEFERRED_ROUTINE,PVOID);
+ULONG     WINAPI KeGetCurrentProcessorNumber(void);
 PKTHREAD  WINAPI KeGetCurrentThread(void);
+void      WINAPI KeInitializeDpc(KDPC*,PKDEFERRED_ROUTINE,void*);
 void      WINAPI KeInitializeEvent(PRKEVENT,EVENT_TYPE,BOOLEAN);
 void      WINAPI KeInitializeMutex(PRKMUTEX,ULONG);
 void      WINAPI KeInitializeSemaphore(PRKSEMAPHORE,LONG,LONG);
@@ -1696,6 +1718,8 @@ void      WINAPI KeInitializeSpinLock(KSPIN_LOCK*);
 void      WINAPI KeInitializeTimerEx(PKTIMER,TIMER_TYPE);
 void      WINAPI KeInitializeTimer(KTIMER*);
 void      WINAPI KeLeaveCriticalRegion(void);
+ULONG     WINAPI KeQueryActiveProcessorCountEx(USHORT);
+KAFFINITY WINAPI KeQueryActiveProcessors(void);
 void      WINAPI KeQuerySystemTime(LARGE_INTEGER*);
 void      WINAPI KeQueryTickCount(LARGE_INTEGER*);
 ULONG     WINAPI KeQueryTimeIncrement(void);
@@ -1706,10 +1730,15 @@ void      WINAPI KeReleaseSpinLock(KSPIN_LOCK*,KIRQL);
 void      WINAPI KeReleaseSpinLockFromDpcLevel(KSPIN_LOCK*);
 LONG      WINAPI KeResetEvent(PRKEVENT);
 void      WINAPI KeRevertToUserAffinityThread(void);
+void      WINAPI KeRevertToUserAffinityThreadEx(KAFFINITY affinity);
 LONG      WINAPI KeSetEvent(PRKEVENT,KPRIORITY,BOOLEAN);
 KPRIORITY WINAPI KeSetPriorityThread(PKTHREAD,KPRIORITY);
 void      WINAPI KeSetSystemAffinityThread(KAFFINITY);
+KAFFINITY WINAPI KeSetSystemAffinityThreadEx(KAFFINITY affinity);
+BOOLEAN   WINAPI KeSetTimer(KTIMER*,LARGE_INTEGER,KDPC*);
 BOOLEAN   WINAPI KeSetTimerEx(KTIMER*,LARGE_INTEGER,LONG,KDPC*);
+void      WINAPI KeSignalCallDpcDone(void*);
+BOOLEAN   WINAPI KeSignalCallDpcSynchronize(void*);
 NTSTATUS  WINAPI KeWaitForMultipleObjects(ULONG,void*[],WAIT_TYPE,KWAIT_REASON,KPROCESSOR_MODE,BOOLEAN,LARGE_INTEGER*,KWAIT_BLOCK*);
 NTSTATUS  WINAPI KeWaitForSingleObject(void*,KWAIT_REASON,KPROCESSOR_MODE,BOOLEAN,LARGE_INTEGER*);
 
@@ -1717,6 +1746,7 @@ PVOID     WINAPI MmAllocateContiguousMemory(SIZE_T,PHYSICAL_ADDRESS);
 PVOID     WINAPI MmAllocateNonCachedMemory(SIZE_T);
 PMDL      WINAPI MmAllocatePagesForMdl(PHYSICAL_ADDRESS,PHYSICAL_ADDRESS,PHYSICAL_ADDRESS,SIZE_T);
 void      WINAPI MmBuildMdlForNonPagedPool(MDL*);
+NTSTATUS  WINAPI MmCopyVirtualMemory(PEPROCESS,void*,PEPROCESS,void*,SIZE_T,KPROCESSOR_MODE,SIZE_T*);
 void      WINAPI MmFreeNonCachedMemory(PVOID,SIZE_T);
 void *    WINAPI MmGetSystemRoutineAddress(UNICODE_STRING*);
 PVOID     WINAPI MmMapLockedPagesSpecifyCache(PMDLX,KPROCESSOR_MODE,MEMORY_CACHING_TYPE,PVOID,ULONG,MM_PAGE_PRIORITY);
@@ -1735,7 +1765,7 @@ static inline void *MmGetSystemAddressForMdlSafe(MDL *mdl, ULONG priority)
 void    FASTCALL ObfReferenceObject(void*);
 void      WINAPI ObDereferenceObject(void*);
 USHORT    WINAPI ObGetFilterVersion(void);
-NTSTATUS  WINAPI ObRegisterCallbacks(POB_CALLBACK_REGISTRATION*, void**);
+NTSTATUS  WINAPI ObRegisterCallbacks(POB_CALLBACK_REGISTRATION, void**);
 NTSTATUS  WINAPI ObReferenceObjectByHandle(HANDLE,ACCESS_MASK,POBJECT_TYPE,KPROCESSOR_MODE,PVOID*,POBJECT_HANDLE_INFORMATION);
 NTSTATUS  WINAPI ObReferenceObjectByName(UNICODE_STRING*,ULONG,ACCESS_STATE*,ACCESS_MASK,POBJECT_TYPE,KPROCESSOR_MODE,void*,void**);
 NTSTATUS  WINAPI ObReferenceObjectByPointer(void*,ACCESS_MASK,POBJECT_TYPE,KPROCESSOR_MODE);

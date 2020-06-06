@@ -829,6 +829,68 @@ static void test_css_style_declaration(IHTMLCSSStyleDeclaration *css_style)
     VariantClear(&v);
 }
 
+static void test_css_style_declaration2(IHTMLCSSStyleDeclaration2 *css_style)
+{
+    BSTR str;
+    HRESULT hres;
+
+    str = SysAllocString(L"translate(30px, 20px)");
+    hres = IHTMLCSSStyleDeclaration2_put_transform(css_style, str);
+    ok(hres == S_OK, "put_transform failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_transform(css_style, &str);
+    ok(hres == S_OK, "get_transform failed: %08x\n", hres);
+    ok(!lstrcmpW(str, L"translate(30px, 20px)"), "transform = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    str = SysAllocString(L"none");
+    hres = IHTMLCSSStyleDeclaration2_put_transform(css_style, str);
+    ok(hres == S_OK, "put_transform failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_transform(css_style, &str);
+    ok(hres == S_OK, "get_transform failed: %08x\n", hres);
+    ok(!lstrcmpW(str, L"none"), "transform = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_animationName(css_style, &str);
+    ok(hres == S_OK, "get_animationName failed: %08x\n", hres);
+    ok(!str, "animationName = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    str = SysAllocString(L"none");
+    hres = IHTMLCSSStyleDeclaration2_put_animationName(css_style, str);
+    ok(hres == S_OK, "put_animationName failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_animationName(css_style, &str);
+    ok(hres == S_OK, "get_animationName failed: %08x\n", hres);
+    ok(!lstrcmpW(str, L"none"), "animationName = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_transition(css_style, &str);
+    ok(hres == S_OK, "get_transition failed: %08x\n", hres);
+    ok(!str, "transition = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    str = SysAllocString(L"marigin-right 1s ease-out");
+    hres = IHTMLCSSStyleDeclaration2_put_transition(css_style, str);
+    ok(hres == S_OK, "put_transition failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_transition(css_style, &str);
+    ok(hres == S_OK, "get_transition failed: %08x\n", hres);
+    ok(!wcsncmp(str, L"marigin-right 1s", wcslen(L"marigin-right 1s")), "transition = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+}
+
 static void test_body_style(IHTMLStyle *style)
 {
     IHTMLCSSStyleDeclaration *css_style;
@@ -2977,8 +3039,11 @@ static void test_body_style(IHTMLStyle *style)
         win_skip("IHTMLStyle6 not available\n");
     }
 
-    if(compat_mode >= COMPAT_IE9)
+    if(compat_mode >= COMPAT_IE9) {
         test_css_style_declaration(css_style);
+        if(css_style2)
+            test_css_style_declaration2(css_style2);
+    }
 
     if(css_style2)
         IHTMLCSSStyleDeclaration2_Release(css_style2);

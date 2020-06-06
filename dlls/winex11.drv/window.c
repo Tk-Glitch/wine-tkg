@@ -141,6 +141,8 @@ static int detect_wm(Display *dpy)
                         cached = WINE_WM_X11_MUTTER;
                     else if(strcmp(wm_name, "steamcompmgr") == 0)
                         cached = WINE_WM_X11_STEAMCOMPMGR;
+                    else if(strcmp(wm_name, "KWin") == 0)
+                        cached = WINE_WM_X11_KDE;
                     else
                         cached = WINE_WM_UNKNOWN;
 
@@ -165,6 +167,11 @@ static int detect_wm(Display *dpy)
 BOOL wm_is_mutter(Display *display)
 {
     return detect_wm(display) == WINE_WM_X11_MUTTER;
+}
+
+BOOL wm_is_kde(Display *display)
+{
+    return detect_wm(display) == WINE_WM_X11_KDE;
 }
 
 BOOL wm_is_steamcompmgr(Display *display)
@@ -1122,7 +1129,18 @@ void update_net_wm_states( struct x11drv_win_data *data )
 
     ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
     if ((ex_style & WS_EX_TOPMOST) &&
-            !(new_state & (1 << NET_WM_STATE_FULLSCREEN)))
+            /* mutter < 3.31 has a bug where a FULLSCREEN and ABOVE window when
+             * minimized will incorrectly show a black window.  this workaround
+             * should be removed when the fix is widely distributed.  see
+             * mutter issue #306. */
+            !(wm_is_mutter(data->display) && (new_state & (1 << NET_WM_STATE_FULLSCREEN))) &&
+
+            /* KDE refuses to allow alt-tabbing out of fullscreen+above
+             * windows. Other WMs (XFCE) don't make fullscreen (without above)
+             * windows appear above their panels. KDE still does the right
+             * thing with fullscreen-only windows, so let's comprimise by not
+             * setting above on KDE. */
+            !wm_is_kde(data->display))
         new_state |= (1 << NET_WM_STATE_ABOVE);
     if (ex_style & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE))
         new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER);

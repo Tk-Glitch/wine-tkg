@@ -48,19 +48,6 @@ struct wined3d_rect_f
     float b;
 };
 
-static bool texture2d_is_full_rect(const struct wined3d_texture *texture, unsigned int level, const RECT *r)
-{
-    unsigned int t;
-
-    t = wined3d_texture_get_level_width(texture, level);
-    if ((r->left && r->right) || abs(r->right - r->left) != t)
-        return false;
-    t = wined3d_texture_get_level_height(texture, level);
-    if ((r->top && r->bottom) || abs(r->bottom - r->top) != t)
-        return false;
-    return true;
-}
-
 static BOOL wined3d_texture_use_pbo(const struct wined3d_texture *texture, const struct wined3d_gl_info *gl_info)
 {
     if (!gl_info->supported[ARB_PIXEL_BUFFER_OBJECT]
@@ -310,9 +297,9 @@ static bool fbo_blitter_supported(enum wined3d_blit_op blit_op, const struct win
             break;
 
         case WINED3D_BLIT_OP_DEPTH_BLIT:
-            if (!(src_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)))
+            if (!(src_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_DEPTH_STENCIL))
                 return false;
-            if (!(dst_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)))
+            if (!(dst_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_DEPTH_STENCIL))
                 return false;
             /* Accept pure swizzle fixups for depth formats. In general we
              * ignore the stencil component (if present) at the moment and the
@@ -366,7 +353,7 @@ static void texture2d_blt_fbo(struct wined3d_device *device, struct wined3d_cont
      * in fact harmful if we're being called by surface_load_location() with
      * the purpose of loading the destination surface.) */
     wined3d_texture_load_location(src_texture, src_sub_resource_idx, context, src_location);
-    if (!texture2d_is_full_rect(dst_texture, dst_sub_resource_idx % dst_texture->level_count, dst_rect))
+    if (!wined3d_texture_is_full_rect(dst_texture, dst_sub_resource_idx % dst_texture->level_count, dst_rect))
         wined3d_texture_load_location(dst_texture, dst_sub_resource_idx, context, dst_location);
     else
         wined3d_texture_prepare_location(dst_texture, dst_sub_resource_idx, context, dst_location);
@@ -463,7 +450,7 @@ static void texture2d_depth_blt_fbo(const struct wined3d_device *device, struct 
 {
     struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
-    DWORD src_mask, dst_mask;
+    GLbitfield src_mask, dst_mask;
     GLbitfield gl_mask;
 
     TRACE("device %p, src_texture %p, src_sub_resource_idx %u, src_location %s, src_rect %s, "
@@ -471,8 +458,17 @@ static void texture2d_depth_blt_fbo(const struct wined3d_device *device, struct 
             src_texture, src_sub_resource_idx, wined3d_debug_location(src_location), wine_dbgstr_rect(src_rect),
             dst_texture, dst_sub_resource_idx, wined3d_debug_location(dst_location), wine_dbgstr_rect(dst_rect));
 
-    src_mask = src_texture->resource.format_flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL);
-    dst_mask = dst_texture->resource.format_flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL);
+    src_mask = 0;
+    if (src_texture->resource.format->depth_size)
+        src_mask |= GL_DEPTH_BUFFER_BIT;
+    if (src_texture->resource.format->stencil_size)
+        src_mask |= GL_STENCIL_BUFFER_BIT;
+
+    dst_mask = 0;
+    if (dst_texture->resource.format->depth_size)
+        dst_mask |= GL_DEPTH_BUFFER_BIT;
+    if (dst_texture->resource.format->stencil_size)
+        dst_mask |= GL_STENCIL_BUFFER_BIT;
 
     if (src_mask != dst_mask)
     {
@@ -488,17 +484,12 @@ static void texture2d_depth_blt_fbo(const struct wined3d_device *device, struct 
                 debug_d3dformat(src_texture->resource.format->id));
         return;
     }
-
-    gl_mask = 0;
-    if (src_mask & WINED3DFMT_FLAG_DEPTH)
-        gl_mask |= GL_DEPTH_BUFFER_BIT;
-    if (src_mask & WINED3DFMT_FLAG_STENCIL)
-        gl_mask |= GL_STENCIL_BUFFER_BIT;
+    gl_mask = src_mask;
 
     /* Make sure the locations are up-to-date. Loading the destination
      * surface isn't required if the entire surface is overwritten. */
     wined3d_texture_load_location(src_texture, src_sub_resource_idx, context, src_location);
-    if (!texture2d_is_full_rect(dst_texture, dst_sub_resource_idx % dst_texture->level_count, dst_rect))
+    if (!wined3d_texture_is_full_rect(dst_texture, dst_sub_resource_idx % dst_texture->level_count, dst_rect))
         wined3d_texture_load_location(dst_texture, dst_sub_resource_idx, context, dst_location);
     else
         wined3d_texture_prepare_location(dst_texture, dst_sub_resource_idx, context, dst_location);
@@ -782,11 +773,10 @@ static void wined3d_texture_update_map_binding(struct wined3d_texture *texture)
     unsigned int sub_count = texture->level_count * texture->layer_count;
     struct wined3d_device *device = texture->resource.device;
     DWORD map_binding = texture->update_map_binding;
-    struct wined3d_context *context = NULL;
+    struct wined3d_context *context;
     unsigned int i;
 
-    if (device->d3d_initialized)
-        context = context_acquire(device, NULL, 0);
+    context = context_acquire(device, NULL, 0);
 
     for (i = 0; i < sub_count; ++i)
     {
@@ -797,8 +787,7 @@ static void wined3d_texture_update_map_binding(struct wined3d_texture *texture)
             wined3d_texture_remove_buffer_object(texture, i, wined3d_context_gl(context)->gl_info);
     }
 
-    if (context)
-        context_release(context);
+    context_release(context);
 
     texture->resource.map_binding = map_binding;
     texture->update_map_binding = 0;
@@ -3894,7 +3883,6 @@ HRESULT CDECL wined3d_texture_blt(struct wined3d_texture *dst_texture, unsigned 
 {
     struct wined3d_box src_box = {src_rect->left, src_rect->top, src_rect->right, src_rect->bottom, 0, 1};
     struct wined3d_box dst_box = {dst_rect->left, dst_rect->top, dst_rect->right, dst_rect->bottom, 0, 1};
-    unsigned int dst_format_flags, src_format_flags = 0;
     HRESULT hr;
 
     TRACE("dst_texture %p, dst_sub_resource_idx %u, dst_rect %s, src_texture %p, "
@@ -3914,12 +3902,10 @@ HRESULT CDECL wined3d_texture_blt(struct wined3d_texture *dst_texture, unsigned 
             && filter != WINED3D_TEXF_LINEAR)
         return WINED3DERR_INVALIDCALL;
 
-    dst_format_flags = dst_texture->resource.format_flags;
     if (FAILED(hr = wined3d_texture_check_box_dimensions(dst_texture,
             dst_sub_resource_idx % dst_texture->level_count, &dst_box)))
         return hr;
 
-    src_format_flags = src_texture->resource.format_flags;
     if (FAILED(hr = wined3d_texture_check_box_dimensions(src_texture,
             src_sub_resource_idx % src_texture->level_count, &src_box)))
         return hr;
@@ -3931,8 +3917,8 @@ HRESULT CDECL wined3d_texture_blt(struct wined3d_texture *dst_texture, unsigned 
         return WINEDDERR_SURFACEBUSY;
     }
 
-    if ((src_format_flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))
-            != (dst_format_flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)))
+    if (!src_texture->resource.format->depth_size != !dst_texture->resource.format->depth_size
+            || !src_texture->resource.format->stencil_size != !dst_texture->resource.format->stencil_size)
     {
         WARN("Rejecting depth/stencil blit between incompatible formats.\n");
         return WINED3DERR_INVALIDCALL;
@@ -5276,7 +5262,7 @@ static bool ffp_blit_supported(enum wined3d_blit_op blit_op, const struct wined3
 
     if (blit_op == WINED3D_BLIT_OP_RAW_BLIT && dst_format->id == src_format->id)
     {
-        if (dst_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))
+        if (dst_format->depth_size || dst_format->stencil_size)
             blit_op = WINED3D_BLIT_OP_DEPTH_BLIT;
         else
             blit_op = WINED3D_BLIT_OP_COLOR_BLIT;
@@ -5923,7 +5909,7 @@ static DWORD fbo_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_blit
 
     if (blit_op == WINED3D_BLIT_OP_RAW_BLIT && dst_resource->format->id == src_resource->format->id)
     {
-        if (dst_resource->format_flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))
+        if (dst_resource->format->depth_size || dst_resource->format->stencil_size)
             blit_op = WINED3D_BLIT_OP_DEPTH_BLIT;
         else
             blit_op = WINED3D_BLIT_OP_COLOR_BLIT;
@@ -6069,7 +6055,7 @@ static DWORD raw_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_blit
     if (!location)
         location = dst_texture->flags & WINED3D_TEXTURE_IS_SRGB
                 ? WINED3D_LOCATION_TEXTURE_SRGB : WINED3D_LOCATION_TEXTURE_RGB;
-    if (texture2d_is_full_rect(dst_texture, dst_level, dst_rect))
+    if (wined3d_texture_is_full_rect(dst_texture, dst_level, dst_rect))
     {
         if (!wined3d_texture_prepare_location(dst_texture, dst_sub_resource_idx, context, location))
             ERR("Failed to prepare the destination sub-resource into %s.\n", wined3d_debug_location(location));
@@ -6541,7 +6527,7 @@ static DWORD vk_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_blit_
     if (!wined3d_texture_load_location(src_texture, src_sub_resource_idx, context, WINED3D_LOCATION_TEXTURE_RGB))
         ERR("Failed to load the source sub-resource.\n");
 
-    if (texture2d_is_full_rect(dst_texture, dst_level, dst_rect))
+    if (wined3d_texture_is_full_rect(dst_texture, dst_level, dst_rect))
     {
         if (!wined3d_texture_prepare_location(dst_texture,
                 dst_sub_resource_idx, context, WINED3D_LOCATION_TEXTURE_RGB))

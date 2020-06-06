@@ -29,6 +29,26 @@
 #include "ksmedia.h"
 #include "wine/strmbase.h"
 
+static const WAVEFORMATEX audio_format =
+{
+    .wFormatTag = WAVE_FORMAT_PCM,
+    .nChannels = 1,
+    .nSamplesPerSec = 11025,
+    .wBitsPerSample = 16,
+    .nBlockAlign = 2,
+    .nAvgBytesPerSec = 2 * 11025,
+};
+
+static const AM_MEDIA_TYPE audio_mt =
+{
+    /* MEDIATYPE_Audio, MEDIASUBTYPE_PCM, FORMAT_WaveFormatEx */
+    .majortype = {0x73647561, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}},
+    .subtype = {0x00000001, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}},
+    .formattype = {0x05589f81, 0xc356, 0x11ce, {0xbf, 0x01, 0x00, 0xaa, 0x00, 0x55, 0x59, 0x5a}},
+    .cbFormat = sizeof(WAVEFORMATEX),
+    .pbFormat = (BYTE *)&audio_format,
+};
+
 static const WCHAR primary_video_sink_id[] = L"I{A35FF56A-9FDA-11D0-8FDF-00C04FD9189D}";
 static const WCHAR primary_audio_sink_id[] = L"I{A35FF56B-9FDA-11D0-8FDF-00C04FD9189D}";
 
@@ -224,8 +244,12 @@ static void test_openfile(void)
     if (pgraph)
         IGraphBuilder_Release(pgraph);
 
+    check_interface(pams, &IID_IMediaSeeking, FALSE);
+
     hr = IAMMultiMediaStream_OpenFile(pams, L"test.avi", 0);
     ok(hr==S_OK, "IAMMultiMediaStream_OpenFile returned: %x\n", hr);
+
+    check_interface(pams, &IID_IMediaSeeking, TRUE);
 
     hr = IAMMultiMediaStream_GetFilterGraph(pams, &pgraph);
     ok(hr==S_OK, "IAMMultiMediaStream_GetFilterGraph returned: %x\n", hr);
@@ -730,7 +754,7 @@ static void test_add_stream(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(stream == (IMediaStream *)&teststream, "Streams didn't match.\n");
     if (hr == S_OK) IMediaStream_Release(stream);
-    todo_wine ok(teststream.mmstream == mmstream, "IAMMultiMediaStream objects didn't match.\n");
+    ok(teststream.mmstream == mmstream, "IAMMultiMediaStream objects didn't match.\n");
     ok(teststream.filter == stream_filter, "IMediaStreamFilter objects didn't match.\n");
     todo_wine ok(!!teststream.graph, "Expected a non-NULL graph.\n");
 
@@ -2348,6 +2372,11 @@ struct testfilter
 {
     struct strmbase_filter filter;
     struct strmbase_source source;
+    IMediaSeeking IMediaSeeking_iface;
+    LONGLONG current_position;
+    LONGLONG stop_position;
+    HRESULT get_duration_hr;
+    HRESULT set_positions_hr;
 };
 
 static inline struct testfilter *impl_from_BaseFilter(struct strmbase_filter *iface)
@@ -2394,6 +2423,25 @@ static const struct strmbase_filter_ops testfilter_ops =
     .filter_cleanup_stream = testfilter_cleanup_stream,
 };
 
+static inline struct testfilter *impl_from_base_pin(struct strmbase_pin *iface)
+{
+    return CONTAINING_RECORD(iface, struct testfilter, source.pin);
+}
+
+static HRESULT testsource_query_interface(struct strmbase_pin *iface, REFIID iid, void **out)
+{
+    struct testfilter *filter = impl_from_base_pin(iface);
+
+    if (IsEqualGUID(iid, &IID_IMediaSeeking) && filter->IMediaSeeking_iface.lpVtbl)
+        *out = &filter->IMediaSeeking_iface;
+    else
+        return E_NOINTERFACE;
+
+    IUnknown_AddRef((IUnknown *)*out);
+
+    return S_OK;
+}
+
 static HRESULT WINAPI testsource_DecideBufferSize(struct strmbase_source *iface,
         IMemAllocator *alloc, ALLOCATOR_PROPERTIES *requested)
 {
@@ -2413,6 +2461,7 @@ static HRESULT WINAPI testsource_DecideBufferSize(struct strmbase_source *iface,
 
 static const struct strmbase_source_ops testsource_ops =
 {
+    .base.pin_query_interface = testsource_query_interface,
     .pfnAttemptConnection = BaseOutputPinImpl_AttemptConnection,
     .pfnDecideBufferSize = testsource_DecideBufferSize,
     .pfnDecideAllocator = BaseOutputPinImpl_DecideAllocator,
@@ -2421,9 +2470,176 @@ static const struct strmbase_source_ops testsource_ops =
 static void testfilter_init(struct testfilter *filter)
 {
     static const GUID clsid = {0xabacab};
+    memset(filter, 0, sizeof(*filter));
     strmbase_filter_init(&filter->filter, NULL, &clsid, &testfilter_ops);
     strmbase_source_init(&filter->source, &filter->filter, L"", &testsource_ops);
+    filter->stop_position = 0x8000000000000000ULL;
 }
+
+static inline struct testfilter *impl_from_IMediaSeeking(IMediaSeeking *iface)
+{
+    return CONTAINING_RECORD(iface, struct testfilter, IMediaSeeking_iface);
+}
+
+static HRESULT WINAPI testsource_seeking_QueryInterface(IMediaSeeking *iface, REFIID iid, void **out)
+{
+    struct testfilter *filter = impl_from_IMediaSeeking(iface);
+    return IBaseFilter_QueryInterface(&filter->filter.IBaseFilter_iface, iid, out);
+}
+
+static ULONG WINAPI testsource_seeking_AddRef(IMediaSeeking *iface)
+{
+    struct testfilter *filter = impl_from_IMediaSeeking(iface);
+    return IBaseFilter_AddRef(&filter->filter.IBaseFilter_iface);
+}
+
+static ULONG WINAPI testsource_seeking_Release(IMediaSeeking *iface)
+{
+    struct testfilter *filter = impl_from_IMediaSeeking(iface);
+    return IBaseFilter_Release(&filter->filter.IBaseFilter_iface);
+}
+
+static HRESULT WINAPI testsource_seeking_GetCapabilities(IMediaSeeking *iface, DWORD *capabilities)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_CheckCapabilities(IMediaSeeking *iface, DWORD *capabilities)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_IsFormatSupported(IMediaSeeking *iface, const GUID *format)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_QueryPreferredFormat(IMediaSeeking *iface, GUID *format)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_GetTimeFormat(IMediaSeeking *iface, GUID *format)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_IsUsingTimeFormat(IMediaSeeking *iface, const GUID *format)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_SetTimeFormat(IMediaSeeking *iface, const GUID *format)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_GetDuration(IMediaSeeking *iface, LONGLONG *duration)
+{
+    struct testfilter *filter = impl_from_IMediaSeeking(iface);
+
+    if (SUCCEEDED(filter->get_duration_hr))
+        *duration = 0x8000000000000000ULL;
+
+    return filter->get_duration_hr;
+}
+
+static HRESULT WINAPI testsource_seeking_GetStopPosition(IMediaSeeking *iface, LONGLONG *stop)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_GetCurrentPosition(IMediaSeeking *iface, LONGLONG *current)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_ConvertTimeFormat(IMediaSeeking *iface, LONGLONG *target,
+        const GUID *target_format, LONGLONG source, const GUID *source_format)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_SetPositions(IMediaSeeking *iface, LONGLONG *current_ptr, DWORD current_flags,
+        LONGLONG *stop_ptr, DWORD stop_flags)
+{
+    struct testfilter *filter = impl_from_IMediaSeeking(iface);
+
+    if (SUCCEEDED(filter->set_positions_hr))
+    {
+        if (current_ptr)
+            filter->current_position = *current_ptr;
+
+        if (stop_ptr)
+            filter->stop_position = *stop_ptr;
+    }
+
+    return filter->set_positions_hr;
+}
+
+static HRESULT WINAPI testsource_seeking_GetPositions(IMediaSeeking *iface, LONGLONG *current, LONGLONG *stop)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_GetAvailable(IMediaSeeking *iface, LONGLONG *earliest, LONGLONG *latest)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_SetRate(IMediaSeeking *iface, double rate)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_GetRate(IMediaSeeking *iface, double *rate)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testsource_seeking_GetPreroll(IMediaSeeking *iface, LONGLONG *preroll)
+{
+    ok(0, "Unexpected call.\n");
+    return E_NOTIMPL;
+}
+
+static const IMediaSeekingVtbl testsource_seeking_vtbl =
+{
+    testsource_seeking_QueryInterface,
+    testsource_seeking_AddRef,
+    testsource_seeking_Release,
+    testsource_seeking_GetCapabilities,
+    testsource_seeking_CheckCapabilities,
+    testsource_seeking_IsFormatSupported,
+    testsource_seeking_QueryPreferredFormat,
+    testsource_seeking_GetTimeFormat,
+    testsource_seeking_IsUsingTimeFormat,
+    testsource_seeking_SetTimeFormat,
+    testsource_seeking_GetDuration,
+    testsource_seeking_GetStopPosition,
+    testsource_seeking_GetCurrentPosition,
+    testsource_seeking_ConvertTimeFormat,
+    testsource_seeking_SetPositions,
+    testsource_seeking_GetPositions,
+    testsource_seeking_GetAvailable,
+    testsource_seeking_SetRate,
+    testsource_seeking_GetRate,
+    testsource_seeking_GetPreroll,
+};
 
 static void test_audiostream_get_format(void)
 {
@@ -2692,25 +2908,6 @@ static void test_audiostream_set_format(void)
 
 static void test_audiostream_receive_connection(void)
 {
-    static const WAVEFORMATEX valid_format =
-    {
-        .wFormatTag = WAVE_FORMAT_PCM,
-        .nChannels = 2,
-        .nSamplesPerSec = 44100,
-        .wBitsPerSample = 16,
-        .nBlockAlign = 4,
-        .nAvgBytesPerSec = 4 * 44100,
-    };
-
-    const AM_MEDIA_TYPE valid_mt =
-    {
-        .majortype = MEDIATYPE_Audio,
-        .subtype = MEDIASUBTYPE_PCM,
-        .formattype = FORMAT_WaveFormatEx,
-        .cbFormat = sizeof(WAVEFORMATEX),
-        .pbFormat = (BYTE *)&valid_format,
-    };
-
     WAVEFORMATEXTENSIBLE extensible_format;
     IAudioMediaStream *audio_stream;
     IAMMultiMediaStream *mmstream;
@@ -2737,56 +2934,56 @@ static void test_audiostream_receive_connection(void)
     hr = IGraphBuilder_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &valid_mt);
+    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &audio_mt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     IGraphBuilder_Disconnect(graph, pin);
     IGraphBuilder_Disconnect(graph, &source.source.pin.IPin_iface);
 
-    mt = valid_mt;
+    mt = audio_mt;
     mt.majortype = GUID_NULL;
     hr = IPin_ReceiveConnection(pin, &source.source.pin.IPin_iface, &mt);
     ok(hr == VFW_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
 
-    mt = valid_mt;
+    mt = audio_mt;
     mt.subtype = MEDIASUBTYPE_RGB24;
     hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     IGraphBuilder_Disconnect(graph, pin);
     IGraphBuilder_Disconnect(graph, &source.source.pin.IPin_iface);
 
-    mt = valid_mt;
+    mt = audio_mt;
     mt.formattype = GUID_NULL;
     hr = IPin_ReceiveConnection(pin, &source.source.pin.IPin_iface, &mt);
     ok(hr == VFW_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
 
-    mt = valid_mt;
+    mt = audio_mt;
     mt.cbFormat = sizeof(WAVEFORMATEX) - 1;
     hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
     ok(hr == VFW_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
 
-    extensible_format.Format = valid_format;
+    extensible_format.Format = audio_format;
     extensible_format.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
     extensible_format.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
-    extensible_format.Samples.wValidBitsPerSample = valid_format.wBitsPerSample;
+    extensible_format.Samples.wValidBitsPerSample = audio_format.wBitsPerSample;
     extensible_format.dwChannelMask = KSAUDIO_SPEAKER_STEREO;
     extensible_format.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
-    mt = valid_mt;
+    mt = audio_mt;
     mt.cbFormat = sizeof(extensible_format);
     mt.pbFormat = (BYTE *)&extensible_format;
     hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
     ok(hr == E_INVALIDARG, "Got hr %#x.\n", hr);
 
-    hr = IAudioMediaStream_SetFormat(audio_stream, &valid_format);
+    hr = IAudioMediaStream_SetFormat(audio_stream, &audio_format);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    format = valid_format;
-    format.nChannels = 1;
-    mt = valid_mt;
+    format = audio_format;
+    format.nChannels = 2;
+    mt = audio_mt;
     mt.pbFormat = (BYTE *)&format;
     hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
     ok(hr == E_INVALIDARG, "Got hr %#x.\n", hr);
 
-    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &valid_mt);
+    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &audio_mt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     IGraphBuilder_Disconnect(graph, pin);
     IGraphBuilder_Disconnect(graph, &source.source.pin.IPin_iface);
@@ -2839,25 +3036,6 @@ static void test_audiostream_set_state(void)
 
 void test_audiostream_end_of_stream(void)
 {
-    static const WAVEFORMATEX format =
-    {
-        .wFormatTag = WAVE_FORMAT_PCM,
-        .nChannels = 1,
-        .nSamplesPerSec = 11025,
-        .wBitsPerSample = 16,
-        .nBlockAlign = 2,
-        .nAvgBytesPerSec = 2 * 11025,
-    };
-
-    const AM_MEDIA_TYPE mt =
-    {
-        .majortype = MEDIATYPE_Audio,
-        .subtype = MEDIASUBTYPE_PCM,
-        .formattype = FORMAT_WaveFormatEx,
-        .cbFormat = sizeof(WAVEFORMATEX),
-        .pbFormat = (BYTE *)&format,
-    };
-
     IAMMultiMediaStream *mmstream = create_ammultimediastream();
     struct testfilter source;
     IGraphBuilder *graph;
@@ -2879,7 +3057,7 @@ void test_audiostream_end_of_stream(void)
     hr = IGraphBuilder_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
+    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &audio_mt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IPin_EndOfStream(pin);
@@ -2917,25 +3095,6 @@ void test_audiostream_end_of_stream(void)
 
 static void test_audiostream_receive(void)
 {
-    static const WAVEFORMATEX format =
-    {
-        .wFormatTag = WAVE_FORMAT_PCM,
-        .nChannels = 1,
-        .nSamplesPerSec = 11025,
-        .wBitsPerSample = 16,
-        .nBlockAlign = 2,
-        .nAvgBytesPerSec = 2 * 11025,
-    };
-
-    const AM_MEDIA_TYPE mt =
-    {
-        .majortype = MEDIATYPE_Audio,
-        .subtype = MEDIASUBTYPE_PCM,
-        .formattype = FORMAT_WaveFormatEx,
-        .cbFormat = sizeof(WAVEFORMATEX),
-        .pbFormat = (BYTE *)&format,
-    };
-
     ALLOCATOR_PROPERTIES properties =
     {
         .cBuffers = 3,
@@ -2975,7 +3134,7 @@ static void test_audiostream_receive(void)
     hr = IMemAllocator_Commit(allocator);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
+    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &audio_mt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IMemAllocator_GetBuffer(allocator, &sample1, NULL, NULL, 0);
@@ -3046,6 +3205,148 @@ static void test_audiostream_receive(void)
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
+static void test_audiostream_initialize(void)
+{
+    IAMMediaStream *stream;
+    STREAM_TYPE type;
+    MSPID mspid;
+    HRESULT hr;
+    ULONG ref;
+
+    hr = CoCreateInstance(&CLSID_AMAudioStream, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* Crashes on native. */
+    if (0)
+    {
+        hr = IAMMediaStream_Initialize(stream, NULL, 0, NULL, STREAMTYPE_WRITE);
+        ok(hr == E_POINTER, "Got hr %#x.\n", hr);
+    }
+
+    hr = IAMMediaStream_Initialize(stream, NULL, 0, &test_mspid, STREAMTYPE_WRITE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMediaStream_GetInformation(stream, &mspid, &type);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&mspid, &test_mspid), "Got mspid %s.\n", wine_dbgstr_guid(&mspid));
+    ok(type == STREAMTYPE_WRITE, "Got type %u.\n", type);
+
+    hr = IAMMediaStream_Initialize(stream, NULL, 0, &MSPID_PrimaryAudio, STREAMTYPE_READ);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMediaStream_GetInformation(stream, &mspid, &type);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&mspid, &MSPID_PrimaryAudio), "Got mspid %s.\n", wine_dbgstr_guid(&mspid));
+    ok(type == STREAMTYPE_READ, "Got type %u.\n", type);
+
+    ref = IAMMediaStream_Release(stream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
+static void test_audiostream_begin_flush_end_flush(void)
+{
+    IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    IAudioStreamSample *stream_sample;
+    IAudioMediaStream *audio_stream;
+    IMediaSample *media_sample;
+    struct testfilter source;
+    IAudioData *audio_data;
+    IGraphBuilder *graph;
+    IMediaStream *stream;
+    HRESULT hr;
+    ULONG ref;
+    IPin *pin;
+
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryAudio, 0, &stream);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStream_QueryInterface(stream, &IID_IAudioMediaStream, (void **)&audio_stream);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStream_QueryInterface(stream, &IID_IPin, (void **)&pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilterGraph(mmstream, &graph);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(graph != NULL, "Expected non-NULL graph.\n");
+    testfilter_init(&source);
+    hr = IGraphBuilder_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = CoCreateInstance(&CLSID_AMAudioData, NULL, CLSCTX_INPROC_SERVER, &IID_IAudioData, (void **)&audio_data);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAudioData_SetBuffer(audio_data, 16, NULL, 0);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAudioMediaStream_CreateSample(audio_stream, audio_data, 0, &stream_sample);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &audio_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = BaseOutputPinImpl_GetDeliveryBuffer(&source.source, &media_sample, NULL, NULL, 0);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMemInputPin_Receive(source.source.pMemInputPin, media_sample);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ref = get_refcount(media_sample);
+    ok(ref == 2, "Got unexpected refcount %d.\n", ref);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ref = IMediaSample_Release(media_sample);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+
+    hr = BaseOutputPinImpl_GetDeliveryBuffer(&source.source, &media_sample, NULL, NULL, 0);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMemInputPin_Receive(source.source.pMemInputPin, media_sample);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    ref = IMediaSample_Release(media_sample);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+
+    hr = IAudioStreamSample_Update(stream_sample, SSUPDATE_ASYNC, NULL, NULL, 0);
+    ok(hr == MS_S_PENDING, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == E_FAIL, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = BaseOutputPinImpl_GetDeliveryBuffer(&source.source, &media_sample, NULL, NULL, 0);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMemInputPin_Receive(source.source.pMemInputPin, media_sample);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ref = IMediaSample_Release(media_sample);
+    ok(ref == 1, "Got outstanding refcount %d.\n", ref);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    IGraphBuilder_Disconnect(graph, pin);
+    IGraphBuilder_Disconnect(graph, &source.source.pin.IPin_iface);
+
+    ref = IAudioStreamSample_Release(stream_sample);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IAudioData_Release(audio_data);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IAMMultiMediaStream_Release(mmstream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IGraphBuilder_Release(graph);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin);
+    IAudioMediaStream_Release(audio_stream);
+    ref = IMediaStream_Release(stream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
 static void CALLBACK apc_func(ULONG_PTR param)
 {
 }
@@ -3098,25 +3399,6 @@ static DWORD CALLBACK audiostream_receive(void *param)
 
 static void test_audiostreamsample_update(void)
 {
-    static const WAVEFORMATEX format =
-    {
-        .wFormatTag = WAVE_FORMAT_PCM,
-        .nChannels = 1,
-        .nSamplesPerSec = 11025,
-        .wBitsPerSample = 16,
-        .nBlockAlign = 2,
-        .nAvgBytesPerSec = 2 * 11025,
-    };
-
-    const AM_MEDIA_TYPE mt =
-    {
-        .majortype = MEDIATYPE_Audio,
-        .subtype = MEDIASUBTYPE_PCM,
-        .formattype = FORMAT_WaveFormatEx,
-        .cbFormat = sizeof(WAVEFORMATEX),
-        .pbFormat = (BYTE *)&format,
-    };
-
     static const BYTE test_data[] = { 0, 1, 2, 3, 4, 5, 6, 7 };
     IAMMultiMediaStream *mmstream = create_ammultimediastream();
     IAudioStreamSample *stream_sample;
@@ -3185,7 +3467,7 @@ static void test_audiostreamsample_update(void)
 
     hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
+    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &audio_mt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -3340,25 +3622,6 @@ static void test_audiostreamsample_update(void)
 
 void test_audiostreamsample_completion_status(void)
 {
-    static const WAVEFORMATEX format =
-    {
-        .wFormatTag = WAVE_FORMAT_PCM,
-        .nChannels = 1,
-        .nSamplesPerSec = 11025,
-        .wBitsPerSample = 16,
-        .nBlockAlign = 2,
-        .nAvgBytesPerSec = 2 * 11025,
-    };
-
-    const AM_MEDIA_TYPE mt =
-    {
-        .majortype = MEDIATYPE_Audio,
-        .subtype = MEDIASUBTYPE_PCM,
-        .formattype = FORMAT_WaveFormatEx,
-        .cbFormat = sizeof(WAVEFORMATEX),
-        .pbFormat = (BYTE *)&format,
-    };
-
     static const BYTE test_data[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
     IAMMultiMediaStream *mmstream = create_ammultimediastream();
     IAudioStreamSample *stream_sample1;
@@ -3405,7 +3668,7 @@ void test_audiostreamsample_completion_status(void)
     hr = IAudioMediaStream_CreateSample(audio_stream, audio_data2, 0, &stream_sample2);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
+    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &audio_mt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -3505,6 +3768,106 @@ void test_audiostreamsample_completion_status(void)
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 
     CloseHandle(event);
+}
+
+static void test_ddrawstream_initialize(void)
+{
+    IDirectDrawMediaStream *ddraw_stream;
+    IAMMediaStream *stream;
+    IDirectDraw *ddraw2;
+    IDirectDraw *ddraw;
+    STREAM_TYPE type;
+    MSPID mspid;
+    HRESULT hr;
+    ULONG ref;
+
+    hr = DirectDrawCreate(NULL, &ddraw, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = CoCreateInstance(&CLSID_AMDirectDrawStream, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMediaStream_QueryInterface(stream, &IID_IDirectDrawMediaStream, (void **)&ddraw_stream);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* Crashes on native. */
+    if (0)
+    {
+        hr = IAMMediaStream_Initialize(stream, NULL, 0, NULL, STREAMTYPE_WRITE);
+        ok(hr == E_POINTER, "Got hr %#x.\n", hr);
+    }
+
+    hr = IAMMediaStream_Initialize(stream, NULL, 0, &test_mspid, STREAMTYPE_WRITE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMediaStream_GetInformation(stream, &mspid, &type);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&mspid, &test_mspid), "Got mspid %s.\n", wine_dbgstr_guid(&mspid));
+    ok(type == STREAMTYPE_WRITE, "Got type %u.\n", type);
+
+    hr = IAMMediaStream_Initialize(stream, (IUnknown *)ddraw, 0, &MSPID_PrimaryAudio, STREAMTYPE_READ);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMediaStream_GetInformation(stream, &mspid, &type);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&mspid, &MSPID_PrimaryAudio), "Got mspid %s.\n", wine_dbgstr_guid(&mspid));
+    ok(type == STREAMTYPE_READ, "Got type %u.\n", type);
+
+    hr = IDirectDrawMediaStream_GetDirectDraw(ddraw_stream, &ddraw2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(ddraw2 == ddraw, "Expected ddraw %p, got %p.\n", ddraw, ddraw2);
+
+    IDirectDrawMediaStream_Release(ddraw_stream);
+    ref = IAMMediaStream_Release(stream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IDirectDraw_Release(ddraw2);
+    ref = IDirectDraw_Release(ddraw);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
+static void check_ammediastream_join_am_multi_media_stream(const CLSID *clsid)
+{
+    IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    IMultiMediaStream *mmstream2;
+    IAMMediaStream *stream;
+    HRESULT hr;
+    ULONG mmstream_ref;
+    ULONG ref;
+
+    hr = CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    mmstream_ref = get_refcount(mmstream);
+
+    hr = IAMMediaStream_JoinAMMultiMediaStream(stream, mmstream);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ref = get_refcount(mmstream);
+    ok(ref == mmstream_ref, "Expected outstanding refcount %d, got %d.\n", mmstream_ref, ref);
+
+    hr = IAMMediaStream_GetMultiMediaStream(stream, &mmstream2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(mmstream2 == (IMultiMediaStream *)mmstream, "Expected mmstream %p, got %p.\n", mmstream, mmstream2);
+
+    IMultiMediaStream_Release(mmstream2);
+
+    hr = IAMMediaStream_JoinAMMultiMediaStream(stream, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMediaStream_GetMultiMediaStream(stream, &mmstream2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(mmstream2 == NULL, "Got mmstream %p.\n", mmstream2);
+
+    ref = IAMMediaStream_Release(stream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IAMMultiMediaStream_Release(mmstream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
+static void test_ammediastream_join_am_multi_media_stream(void)
+{
+    check_ammediastream_join_am_multi_media_stream(&CLSID_AMAudioStream);
+    check_ammediastream_join_am_multi_media_stream(&CLSID_AMDirectDrawStream);
 }
 
 void test_mediastreamfilter_get_state(void)
@@ -3642,6 +4005,331 @@ void test_mediastreamfilter_stop_pause_run(void)
     check_mediastreamfilter_state(State_Running, mediastreamfilter_run, mediastreamfilter_stop);
 }
 
+static void test_mediastreamfilter_support_seeking(void)
+{
+    IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    static const MSPID mspid1 = {0x88888888, 1};
+    static const MSPID mspid2 = {0x88888888, 2};
+    static const MSPID mspid3 = {0x88888888, 3};
+    struct testfilter source1, source2, source3;
+    IAMMediaStream *stream1, *stream2, *stream3;
+    IMediaStreamFilter *filter;
+    IPin *pin1, *pin2, *pin3;
+    ULONG ref, seeking_ref;
+    IGraphBuilder *graph;
+    HRESULT hr;
+
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = CoCreateInstance(&CLSID_AMAudioStream, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream1);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = CoCreateInstance(&CLSID_AMAudioStream, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = CoCreateInstance(&CLSID_AMAudioStream, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream3);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_Initialize(stream1, NULL, 0, &mspid1, STREAMTYPE_READ);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_Initialize(stream2, NULL, 0, &mspid2, STREAMTYPE_READ);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_Initialize(stream3, NULL, 0, &mspid3, STREAMTYPE_READ);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)stream1, &mspid1, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)stream2, &mspid2, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)stream3, &mspid3, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_QueryInterface(stream1, &IID_IPin, (void **)&pin1);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_QueryInterface(stream2, &IID_IPin, (void **)&pin2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_QueryInterface(stream3, &IID_IPin, (void **)&pin3);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilter(mmstream, &filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilterGraph(mmstream, &graph);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(graph != NULL, "Expected non-NULL graph.\n");
+    testfilter_init(&source1);
+    testfilter_init(&source2);
+    testfilter_init(&source3);
+    source2.IMediaSeeking_iface.lpVtbl = &testsource_seeking_vtbl;
+    source3.IMediaSeeking_iface.lpVtbl = &testsource_seeking_vtbl;
+    hr = IGraphBuilder_AddFilter(graph, &source1.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IGraphBuilder_AddFilter(graph, &source2.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IGraphBuilder_AddFilter(graph, &source3.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
+    ok(hr == E_NOINTERFACE, "Got hr %#x.\n", hr);
+
+    hr = IGraphBuilder_ConnectDirect(graph, &source1.source.pin.IPin_iface, pin1, &audio_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    source2.get_duration_hr = E_FAIL;
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
+    ok(hr == E_NOINTERFACE, "Got hr %#x.\n", hr);
+
+    hr = IGraphBuilder_ConnectDirect(graph, &source2.source.pin.IPin_iface, pin2, &audio_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
+    ok(hr == E_NOINTERFACE, "Got hr %#x.\n", hr);
+
+    hr = IGraphBuilder_ConnectDirect(graph, &source3.source.pin.IPin_iface, pin3, &audio_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    check_interface(filter, &IID_IMediaSeeking, FALSE);
+
+    seeking_ref = get_refcount(&source3.IMediaSeeking_iface);
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    check_interface(filter, &IID_IMediaSeeking, TRUE);
+
+    ref = get_refcount(&source3.IMediaSeeking_iface);
+    ok(ref == seeking_ref, "Expected outstanding refcount %d, got %d.\n", seeking_ref, ref);
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_ALREADY_INITIALIZED), "Got hr %#x.\n", hr);
+
+    IGraphBuilder_Disconnect(graph, pin1);
+    IGraphBuilder_Disconnect(graph, &source1.source.pin.IPin_iface);
+
+    IGraphBuilder_Disconnect(graph, pin2);
+    IGraphBuilder_Disconnect(graph, &source2.source.pin.IPin_iface);
+
+    IGraphBuilder_Disconnect(graph, pin3);
+    IGraphBuilder_Disconnect(graph, &source3.source.pin.IPin_iface);
+
+    ref = IAMMultiMediaStream_Release(mmstream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IGraphBuilder_Release(graph);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IMediaStreamFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin1);
+    ref = IAMMediaStream_Release(stream1);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin2);
+    ref = IAMMediaStream_Release(stream2);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin3);
+    ref = IAMMediaStream_Release(stream3);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
+static void test_mediastreamfilter_set_positions(void)
+{
+    IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    static const MSPID mspid1 = {0x88888888, 1};
+    static const MSPID mspid2 = {0x88888888, 2};
+    static const MSPID mspid3 = {0x88888888, 3};
+    IMediaStreamFilter *filter;
+    struct testfilter source1;
+    struct testfilter source2;
+    struct testfilter source3;
+    LONGLONG current_position;
+    IAMMediaStream *stream1;
+    IAMMediaStream *stream2;
+    IAMMediaStream *stream3;
+    LONGLONG stop_position;
+    IMediaSeeking *seeking;
+    IGraphBuilder *graph;
+    IPin *pin1;
+    IPin *pin2;
+    IPin *pin3;
+    HRESULT hr;
+    ULONG ref;
+
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = CoCreateInstance(&CLSID_AMAudioStream, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream1);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = CoCreateInstance(&CLSID_AMAudioStream, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = CoCreateInstance(&CLSID_AMAudioStream, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream3);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_Initialize(stream1, NULL, 0, &mspid1, STREAMTYPE_READ);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_Initialize(stream2, NULL, 0, &mspid2, STREAMTYPE_READ);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_Initialize(stream3, NULL, 0, &mspid3, STREAMTYPE_READ);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)stream1, &mspid1, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)stream2, &mspid2, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)stream3, &mspid3, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_QueryInterface(stream1, &IID_IPin, (void **)&pin1);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_QueryInterface(stream2, &IID_IPin, (void **)&pin2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_QueryInterface(stream3, &IID_IPin, (void **)&pin3);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilter(mmstream, &filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilterGraph(mmstream, &graph);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(graph != NULL, "Expected non-NULL graph.\n");
+    testfilter_init(&source1);
+    testfilter_init(&source2);
+    testfilter_init(&source3);
+    source1.IMediaSeeking_iface.lpVtbl = &testsource_seeking_vtbl;
+    source2.IMediaSeeking_iface.lpVtbl = &testsource_seeking_vtbl;
+    source3.IMediaSeeking_iface.lpVtbl = &testsource_seeking_vtbl;
+    hr = IGraphBuilder_AddFilter(graph, &source1.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IGraphBuilder_AddFilter(graph, &source2.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IGraphBuilder_AddFilter(graph, &source3.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IGraphBuilder_ConnectDirect(graph, &source2.source.pin.IPin_iface, pin2, &audio_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IGraphBuilder_ConnectDirect(graph, &source3.source.pin.IPin_iface, pin3, &audio_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IGraphBuilder_ConnectDirect(graph, &source1.source.pin.IPin_iface, pin1, &audio_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_QueryInterface(filter, &IID_IMediaSeeking, (void **)&seeking);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    current_position = 12345678;
+    stop_position = 87654321;
+    source1.current_position = 0xdeadbeefdeadbeefULL;
+    source1.stop_position = 0xdeadbeefdeadbeefULL;
+    source2.current_position = 0xdeadbeefdeadbeefULL;
+    source2.stop_position = 0xdeadbeefdeadbeefULL;
+    source3.current_position = 0xdeadbeefdeadbeefULL;
+    source3.stop_position = 0xdeadbeefdeadbeefULL;
+    hr = IMediaSeeking_SetPositions(seeking, &current_position, AM_SEEKING_AbsolutePositioning,
+            &stop_position, AM_SEEKING_AbsolutePositioning);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(source1.current_position == 0xdeadbeefdeadbeefULL, "Got current position %s.\n",
+            wine_dbgstr_longlong(source1.current_position));
+    ok(source1.stop_position == 0xdeadbeefdeadbeefULL, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source1.stop_position));
+    ok(source2.current_position == 12345678, "Got current position %s.\n",
+            wine_dbgstr_longlong(source2.current_position));
+    ok(source2.stop_position == 87654321, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source2.stop_position));
+    ok(source3.current_position == 0xdeadbeefdeadbeefULL, "Got current position %s.\n",
+            wine_dbgstr_longlong(source3.current_position));
+    ok(source3.stop_position == 0xdeadbeefdeadbeefULL, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source3.stop_position));
+
+    source2.set_positions_hr = E_FAIL;
+    source1.current_position = 0xdeadbeefdeadbeefULL;
+    source1.stop_position = 0xdeadbeefdeadbeefULL;
+    source3.current_position = 0xdeadbeefdeadbeefULL;
+    source3.stop_position = 0xdeadbeefdeadbeefULL;
+    current_position = 12345678;
+    stop_position = 87654321;
+    hr = IMediaSeeking_SetPositions(seeking, &current_position, AM_SEEKING_AbsolutePositioning,
+            &stop_position, AM_SEEKING_AbsolutePositioning);
+    ok(hr == E_FAIL, "Got hr %#x.\n", hr);
+    ok(source1.current_position == 0xdeadbeefdeadbeefULL, "Got current position %s.\n",
+            wine_dbgstr_longlong(source1.current_position));
+    ok(source1.stop_position == 0xdeadbeefdeadbeefULL, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source1.stop_position));
+    ok(source3.current_position == 0xdeadbeefdeadbeefULL, "Got current position %s.\n",
+            wine_dbgstr_longlong(source3.current_position));
+    ok(source3.stop_position == 0xdeadbeefdeadbeefULL, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source3.stop_position));
+
+    source2.set_positions_hr = E_NOTIMPL;
+    source1.current_position = 0xdeadbeefdeadbeefULL;
+    source1.stop_position = 0xdeadbeefdeadbeefULL;
+    source3.current_position = 0xdeadbeefdeadbeefULL;
+    source3.stop_position = 0xdeadbeefdeadbeefULL;
+    current_position = 12345678;
+    stop_position = 87654321;
+    hr = IMediaSeeking_SetPositions(seeking, &current_position, AM_SEEKING_AbsolutePositioning,
+            &stop_position, AM_SEEKING_AbsolutePositioning);
+    ok(hr == E_NOTIMPL, "Got hr %#x.\n", hr);
+    ok(source1.current_position == 0xdeadbeefdeadbeefULL, "Got current position %s.\n",
+            wine_dbgstr_longlong(source1.current_position));
+    ok(source1.stop_position == 0xdeadbeefdeadbeefULL, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source1.stop_position));
+    ok(source3.current_position == 0xdeadbeefdeadbeefULL, "Got current position %s.\n",
+            wine_dbgstr_longlong(source3.current_position));
+    ok(source3.stop_position == 0xdeadbeefdeadbeefULL, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source3.stop_position));
+
+    source2.IMediaSeeking_iface.lpVtbl = NULL;
+    source1.current_position = 0xdeadbeefdeadbeefULL;
+    source1.stop_position = 0xdeadbeefdeadbeefULL;
+    source3.current_position = 0xdeadbeefdeadbeefULL;
+    source3.stop_position = 0xdeadbeefdeadbeefULL;
+    current_position = 12345678;
+    stop_position = 87654321;
+    hr = IMediaSeeking_SetPositions(seeking, &current_position, AM_SEEKING_AbsolutePositioning,
+            &stop_position, AM_SEEKING_AbsolutePositioning);
+    ok(hr == E_NOTIMPL, "Got hr %#x.\n", hr);
+    ok(source1.current_position == 0xdeadbeefdeadbeefULL, "Got current position %s.\n",
+            wine_dbgstr_longlong(source1.current_position));
+    ok(source1.stop_position == 0xdeadbeefdeadbeefULL, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source1.stop_position));
+    ok(source3.current_position == 0xdeadbeefdeadbeefULL, "Got current position %s.\n",
+            wine_dbgstr_longlong(source3.current_position));
+    ok(source3.stop_position == 0xdeadbeefdeadbeefULL, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source3.stop_position));
+
+    IGraphBuilder_Disconnect(graph, pin2);
+    IGraphBuilder_Disconnect(graph, &source2.source.pin.IPin_iface);
+
+    source2.IMediaSeeking_iface.lpVtbl = NULL;
+    source1.current_position = 0xdeadbeefdeadbeefULL;
+    source1.stop_position = 0xdeadbeefdeadbeefULL;
+    source3.current_position = 0xdeadbeefdeadbeefULL;
+    source3.stop_position = 0xdeadbeefdeadbeefULL;
+    current_position = 12345678;
+    stop_position = 87654321;
+    hr = IMediaSeeking_SetPositions(seeking, &current_position, AM_SEEKING_AbsolutePositioning,
+            &stop_position, AM_SEEKING_AbsolutePositioning);
+    ok(hr == E_NOTIMPL, "Got hr %#x.\n", hr);
+    ok(source1.current_position == 0xdeadbeefdeadbeefULL, "Got current position %s.\n",
+            wine_dbgstr_longlong(source1.current_position));
+    ok(source1.stop_position == 0xdeadbeefdeadbeefULL, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source1.stop_position));
+    ok(source3.current_position == 0xdeadbeefdeadbeefULL, "Got current position %s.\n",
+            wine_dbgstr_longlong(source3.current_position));
+    ok(source3.stop_position == 0xdeadbeefdeadbeefULL, "Got stop position %s.\n",
+            wine_dbgstr_longlong(source3.stop_position));
+
+    IGraphBuilder_Disconnect(graph, pin2);
+    IGraphBuilder_Disconnect(graph, &source2.source.pin.IPin_iface);
+    IGraphBuilder_Disconnect(graph, pin3);
+    IGraphBuilder_Disconnect(graph, &source3.source.pin.IPin_iface);
+
+    ref = IAMMultiMediaStream_Release(mmstream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IGraphBuilder_Release(graph);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IMediaSeeking_Release(seeking);
+    ref = IMediaStreamFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin1);
+    ref = IAMMediaStream_Release(stream1);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin2);
+    ref = IAMMediaStream_Release(stream2);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin3);
+    ref = IAMMediaStream_Release(stream3);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
 START_TEST(amstream)
 {
     HANDLE file;
@@ -3681,12 +4369,20 @@ START_TEST(amstream)
     test_audiostream_set_state();
     test_audiostream_end_of_stream();
     test_audiostream_receive();
+    test_audiostream_initialize();
+    test_audiostream_begin_flush_end_flush();
 
     test_audiostreamsample_update();
     test_audiostreamsample_completion_status();
 
+    test_ddrawstream_initialize();
+
+    test_ammediastream_join_am_multi_media_stream();
+
     test_mediastreamfilter_get_state();
     test_mediastreamfilter_stop_pause_run();
+    test_mediastreamfilter_support_seeking();
+    test_mediastreamfilter_set_positions();
 
     CoUninitialize();
 }

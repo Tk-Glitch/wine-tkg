@@ -23,6 +23,20 @@
 extern "C" {
 #endif
 
+char * WINAPI RtlIpv4AddressToStringA(const IN_ADDR *address, char *str);
+WCHAR * WINAPI RtlIpv4AddressToStringW(const IN_ADDR *address, WCHAR *str);
+#define RtlIpv4AddressToString WINELIB_NAME_AW(RtlIpv4AddressToString)
+NTSTATUS WINAPI RtlIpv4AddressToStringExA(const IN_ADDR *address, USHORT port, char *str, ULONG *size);
+NTSTATUS WINAPI RtlIpv4AddressToStringExW(const IN_ADDR *address, USHORT port, WCHAR *str, ULONG *size);
+#define RtlIpv4AddressToStringEx WINELIB_NAME_AW(RtlIpv4AddressToStringEx)
+
+char * WINAPI RtlIpv6AddressToStringA(const IN6_ADDR *address, char *str);
+WCHAR * WINAPI RtlIpv6AddressToStringW(const IN6_ADDR *address, WCHAR *str);
+#define RtlIpv6AddressToString WINELIB_NAME_AW(RtlIpv6AddressToString)
+NTSTATUS WINAPI RtlIpv6AddressToStringExA(const IN6_ADDR *address, LONG scope, USHORT port, char *str, ULONG *size);
+NTSTATUS WINAPI RtlIpv6AddressToStringExW(const IN6_ADDR *address, LONG scope, USHORT port, WCHAR *str, ULONG *size);
+#define RtlIpv6AddressToStringEx WINELIB_NAME_AW(RtlIpv6AddressToStringEx)
+
 NTSTATUS WINAPI RtlIpv4StringToAddressA(const char *str, BOOLEAN strict, const char **terminator, IN_ADDR *address);
 NTSTATUS WINAPI RtlIpv4StringToAddressW(const WCHAR *str, BOOLEAN strict, const WCHAR **terminator, IN_ADDR *address);
 #define RtlIpv4StringToAddress WINELIB_NAME_AW(RtlIpv4StringToAddress)

@@ -479,8 +479,6 @@ static wine_signal_handler handlers[256];
 extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
 extern NTSTATUS WINAPI __syscall_NtGetContextThread( HANDLE handle, CONTEXT *context );
 
-static int wine_cs;
-
 static void* WINAPI __wine_fakedll_dispatcher( const char *module, ULONG ord )
 {
     UNICODE_STRING name;
@@ -942,7 +940,7 @@ static inline void *init_handler( const ucontext_t *sigcontext, WORD *fs, WORD *
     }
 #endif
 
-    if ((CS_sig(sigcontext) != wine_cs && !ldt_is_system(CS_sig(sigcontext))) || !ldt_is_system(SS_sig(sigcontext)))
+    if (!ldt_is_system(CS_sig(sigcontext)) || !ldt_is_system(SS_sig(sigcontext)))  /* 16-bit mode */
     {
         /*
          * Win16 or DOS protected mode. Note that during switch
@@ -1632,7 +1630,7 @@ static inline DWORD is_privileged_instr( CONTEXT *context )
     BYTE instr[16];
     unsigned int i, len, prefix_count = 0;
 
-    if (context->SegCs != wine_cs && !ldt_is_system( context->SegCs )) return 0;
+    if (!ldt_is_system( context->SegCs )) return 0;
     len = virtual_uninterrupted_read_memory( (BYTE *)context->Eip, instr, sizeof(instr) );
 
     for (i = 0; i < len; i++) switch (instr[i])
@@ -1699,7 +1697,7 @@ static inline BOOL check_invalid_gs( ucontext_t *sigcontext, CONTEXT *context )
     WORD system_gs = x86_thread_data()->gs;
 
     if (context->SegGs == system_gs) return FALSE;
-    if (context->SegCs != wine_cs && !ldt_is_system( context->SegCs )) return 0;
+    if (!ldt_is_system( context->SegCs )) return FALSE;
     /* only handle faults in system libraries */
     if (virtual_is_valid_code_address( instr, 1 )) return FALSE;
 
@@ -1982,7 +1980,7 @@ static void setup_raise_exception( ucontext_t *sigcontext, struct stack_layout *
     EIP_sig(sigcontext) = (DWORD)raise_generic_exception;
     /* clear single-step, direction, and align check flag */
     EFL_sig(sigcontext) &= ~(0x100|0x400|0x40000);
-    CS_sig(sigcontext)  = wine_cs;
+    CS_sig(sigcontext)  = get_cs();
     DS_sig(sigcontext)  = get_ds();
     ES_sig(sigcontext)  = get_ds();
     FS_sig(sigcontext)  = get_fs();
@@ -2503,21 +2501,6 @@ static void ldt_set_fs( WORD sel, TEB *teb )
     set_fs( sel );
 }
 
-void signal_init_cs(void)
-{
-    LDT_ENTRY entry;
-
-    if (!wine_cs)
-        wine_cs = wine_ldt_alloc_entries( 1 );
-
-    wine_ldt_set_base( &entry, 0 );
-    wine_ldt_set_limit( &entry, (UINT_PTR)-1 );
-    wine_ldt_set_flags( &entry, WINE_LDT_FLAGS_CODE|WINE_LDT_FLAGS_32BIT );
-    wine_ldt_set_entry( wine_cs, &entry );
-
-    wine_set_cs( wine_cs );
-}
-
 
 /**********************************************************************
  *           get_thread_ldt_entry
@@ -2649,8 +2632,6 @@ NTSTATUS signal_alloc_thread( TEB *teb )
 
     teb->WOW32Reserved = __wine_syscall_dispatcher;
     teb->Spare2 = __wine_fakedll_dispatcher;
-
-    signal_init_cs();
 
     return STATUS_SUCCESS;
 }

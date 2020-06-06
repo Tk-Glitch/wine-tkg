@@ -1785,67 +1785,67 @@ static const struct wined3d_format_texture_info format_texture_info[] =
     /* Depth stencil formats */
     {WINED3DFMT_D16_LOCKABLE,           GL_DEPTH_COMPONENT,               GL_DEPTH_COMPONENT,                     0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_SHORT,                0,
-            WINED3DFMT_FLAG_DEPTH,
+            WINED3DFMT_FLAG_DEPTH_STENCIL,
             WINED3D_GL_EXT_NONE,        NULL},
     {WINED3DFMT_D16_LOCKABLE,           GL_DEPTH_COMPONENT16,             GL_DEPTH_COMPONENT16,                   0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_SHORT,                0,
-            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_SHADOW,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             ARB_DEPTH_TEXTURE,          NULL},
     {WINED3DFMT_S1_UINT_D15_UNORM,      GL_DEPTH_COMPONENT16,             GL_DEPTH_COMPONENT16,                   0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_SHORT,                0,
-            WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_SHADOW,
+            WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             ARB_DEPTH_TEXTURE,          NULL},
     {WINED3DFMT_S1_UINT_D15_UNORM,      GL_DEPTH24_STENCIL8,              GL_DEPTH24_STENCIL8,                    0,
             GL_DEPTH_STENCIL,           GL_UNSIGNED_INT_24_8,             4,
-            WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL | WINED3DFMT_FLAG_SHADOW,
+            WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             EXT_PACKED_DEPTH_STENCIL,   convert_s1_uint_d15_unorm},
     {WINED3DFMT_D24_UNORM_S8_UINT,      GL_DEPTH_COMPONENT24_ARB,         GL_DEPTH_COMPONENT24_ARB,               0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_INT,                  0,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
-            | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_SHADOW,
+            | WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             ARB_DEPTH_TEXTURE,          NULL},
     {WINED3DFMT_D24_UNORM_S8_UINT,      GL_DEPTH24_STENCIL8,              GL_DEPTH24_STENCIL8,                    0,
             GL_DEPTH_STENCIL,           GL_UNSIGNED_INT_24_8,             0,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
-            | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL | WINED3DFMT_FLAG_SHADOW,
+            | WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             EXT_PACKED_DEPTH_STENCIL,   NULL},
     {WINED3DFMT_X8D24_UNORM,            GL_DEPTH_COMPONENT,               GL_DEPTH_COMPONENT,                     0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_INT,                  4,
-            WINED3DFMT_FLAG_DEPTH,
+            WINED3DFMT_FLAG_DEPTH_STENCIL,
             WINED3D_GL_EXT_NONE,        x8_d24_unorm_upload,              x8_d24_unorm_download},
     {WINED3DFMT_X8D24_UNORM,            GL_DEPTH_COMPONENT24_ARB,         GL_DEPTH_COMPONENT24_ARB,               0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_INT,                  4,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
-            | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_SHADOW,
+            | WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             ARB_DEPTH_TEXTURE,          x8_d24_unorm_upload,              x8_d24_unorm_download},
     {WINED3DFMT_S4X4_UINT_D24_UNORM,    GL_DEPTH_COMPONENT24_ARB,         GL_DEPTH_COMPONENT24_ARB,               0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_INT,                  0,
-            WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_SHADOW,
+            WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             ARB_DEPTH_TEXTURE,          NULL},
     {WINED3DFMT_S4X4_UINT_D24_UNORM,    GL_DEPTH24_STENCIL8,              GL_DEPTH24_STENCIL8,                    0,
             GL_DEPTH_STENCIL,           GL_UNSIGNED_INT_24_8,             4,
-            WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL | WINED3DFMT_FLAG_SHADOW,
+            WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             EXT_PACKED_DEPTH_STENCIL,   convert_s4x4_uint_d24_unorm},
     {WINED3DFMT_D16_UNORM,              GL_DEPTH_COMPONENT,               GL_DEPTH_COMPONENT,                     0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_SHORT,                0,
-            WINED3DFMT_FLAG_DEPTH,
+            WINED3DFMT_FLAG_DEPTH_STENCIL,
             WINED3D_GL_EXT_NONE,        NULL},
     {WINED3DFMT_D16_UNORM,              GL_DEPTH_COMPONENT16,             GL_DEPTH_COMPONENT16,                   0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_SHORT,                0,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
-            | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_SHADOW,
+            | WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             ARB_DEPTH_TEXTURE,          NULL},
     {WINED3DFMT_D32_FLOAT,              GL_DEPTH_COMPONENT32F,            GL_DEPTH_COMPONENT32F,                  0,
             GL_DEPTH_COMPONENT,         GL_FLOAT,                         0,
-            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_SHADOW,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             ARB_DEPTH_BUFFER_FLOAT,     NULL},
     {WINED3DFMT_D32_FLOAT_S8X24_UINT,   GL_DEPTH32F_STENCIL8,             GL_DEPTH32F_STENCIL8,                   0,
             GL_DEPTH_STENCIL,           GL_FLOAT_32_UNSIGNED_INT_24_8_REV, 0,
-            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL | WINED3DFMT_FLAG_SHADOW,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             ARB_DEPTH_BUFFER_FLOAT,     NULL},
     {WINED3DFMT_S8_UINT_D24_FLOAT,      GL_DEPTH32F_STENCIL8,             GL_DEPTH32F_STENCIL8,                   0,
             GL_DEPTH_STENCIL,           GL_FLOAT_32_UNSIGNED_INT_24_8_REV, 8,
-            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL | WINED3DFMT_FLAG_SHADOW,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_DEPTH_STENCIL | WINED3DFMT_FLAG_SHADOW,
             ARB_DEPTH_BUFFER_FLOAT,     convert_s8_uint_d24_float},
     {WINED3DFMT_R32G32B32A32_UINT,      GL_RGBA32UI,                      GL_RGBA32UI,                            0,
             GL_RGBA_INTEGER,            GL_UNSIGNED_INT,                  0,
@@ -1875,7 +1875,7 @@ static const struct wined3d_format_texture_info format_texture_info[] =
     {WINED3DFMT_INTZ,                   GL_DEPTH24_STENCIL8,              GL_DEPTH24_STENCIL8,                    0,
             GL_DEPTH_STENCIL,           GL_UNSIGNED_INT_24_8,             0,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
-            | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL,
+            | WINED3DFMT_FLAG_DEPTH_STENCIL,
             EXT_PACKED_DEPTH_STENCIL,   NULL},
     {WINED3DFMT_NULL,                   0,                                0,                                      0,
             GL_RGBA,                    GL_UNSIGNED_INT_8_8_8_8_REV,      0,
@@ -2236,13 +2236,15 @@ static void delete_fbo_attachment(const struct wined3d_gl_info *gl_info,
     }
 }
 
-/* Context activation is done by the caller. */
-static void create_and_bind_fbo_attachment(const struct wined3d_gl_info *gl_info, unsigned int flags,
-        enum wined3d_gl_resource_type d3d_type, GLuint *object, GLenum internal, GLenum format, GLenum type)
+static void create_and_bind_fbo_attachment(const struct wined3d_gl_info *gl_info,
+        const struct wined3d_format_gl *format_gl,
+        enum wined3d_gl_resource_type d3d_type, GLuint *object, GLenum internal)
 {
-    GLenum attach_type = flags & WINED3DFMT_FLAG_DEPTH ?
-            GL_DEPTH_ATTACHMENT : GL_COLOR_ATTACHMENT0;
+    GLenum format = format_gl->format;
+    GLenum type = format_gl->type;
+    GLenum attach_type;
 
+    attach_type = format_gl->f.depth_size ? GL_DEPTH_ATTACHMENT : GL_COLOR_ATTACHMENT0;
     switch (d3d_type)
     {
         case WINED3D_GL_RES_TYPE_TEX_1D:
@@ -2252,11 +2254,10 @@ static void create_and_bind_fbo_attachment(const struct wined3d_gl_info *gl_info
             gl_info->gl_ops.gl.p_glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             gl_info->gl_ops.gl.p_glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-            gl_info->fbo_ops.glFramebufferTexture1D(GL_FRAMEBUFFER, attach_type, GL_TEXTURE_1D,
-                    *object, 0);
-            if (flags & WINED3DFMT_FLAG_STENCIL)
-                gl_info->fbo_ops.glFramebufferTexture1D(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_TEXTURE_1D,
-                        *object, 0);
+            gl_info->fbo_ops.glFramebufferTexture1D(GL_FRAMEBUFFER, attach_type, GL_TEXTURE_1D, *object, 0);
+            if (format_gl->f.stencil_size)
+                gl_info->fbo_ops.glFramebufferTexture1D(GL_FRAMEBUFFER,
+                        GL_STENCIL_ATTACHMENT, GL_TEXTURE_1D, *object, 0);
             break;
 
         case WINED3D_GL_RES_TYPE_TEX_2D:
@@ -2270,7 +2271,7 @@ static void create_and_bind_fbo_attachment(const struct wined3d_gl_info *gl_info
 
             gl_info->fbo_ops.glFramebufferTexture2D(GL_FRAMEBUFFER, attach_type,
                     wined3d_gl_type_to_enum(d3d_type), *object, 0);
-            if (flags & WINED3DFMT_FLAG_STENCIL)
+            if (format_gl->f.stencil_size)
                 gl_info->fbo_ops.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
                         wined3d_gl_type_to_enum(d3d_type), *object, 0);
             break;
@@ -2282,11 +2283,10 @@ static void create_and_bind_fbo_attachment(const struct wined3d_gl_info *gl_info
             gl_info->gl_ops.gl.p_glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             gl_info->gl_ops.gl.p_glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-            gl_info->fbo_ops.glFramebufferTexture3D(GL_FRAMEBUFFER, attach_type,
-                    GL_TEXTURE_3D, *object, 0, 0);
-            if (flags & WINED3DFMT_FLAG_STENCIL)
-                gl_info->fbo_ops.glFramebufferTexture3D(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
-                        GL_TEXTURE_3D, *object, 0, 0);
+            gl_info->fbo_ops.glFramebufferTexture3D(GL_FRAMEBUFFER, attach_type, GL_TEXTURE_3D, *object, 0, 0);
+            if (format_gl->f.stencil_size)
+                gl_info->fbo_ops.glFramebufferTexture3D(GL_FRAMEBUFFER,
+                        GL_STENCIL_ATTACHMENT, GL_TEXTURE_3D, *object, 0, 0);
             break;
 
         case WINED3D_GL_RES_TYPE_TEX_CUBE:
@@ -2309,7 +2309,7 @@ static void create_and_bind_fbo_attachment(const struct wined3d_gl_info *gl_info
 
             gl_info->fbo_ops.glFramebufferTexture2D(GL_FRAMEBUFFER, attach_type,
                     GL_TEXTURE_CUBE_MAP_POSITIVE_X_ARB, *object, 0);
-            if (flags & WINED3DFMT_FLAG_STENCIL)
+            if (format_gl->f.stencil_size)
                 gl_info->fbo_ops.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
                         GL_TEXTURE_CUBE_MAP_POSITIVE_X_ARB, *object, 0);
             break;
@@ -2318,11 +2318,10 @@ static void create_and_bind_fbo_attachment(const struct wined3d_gl_info *gl_info
             gl_info->fbo_ops.glGenRenderbuffers(1, object);
             gl_info->fbo_ops.glBindRenderbuffer(GL_RENDERBUFFER, *object);
             gl_info->fbo_ops.glRenderbufferStorage(GL_RENDERBUFFER, internal, 16, 16);
-            gl_info->fbo_ops.glFramebufferRenderbuffer(GL_FRAMEBUFFER, attach_type, GL_RENDERBUFFER,
-                    *object);
-            if (flags & WINED3DFMT_FLAG_STENCIL)
-                gl_info->fbo_ops.glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
-                        *object);
+            gl_info->fbo_ops.glFramebufferRenderbuffer(GL_FRAMEBUFFER, attach_type, GL_RENDERBUFFER, *object);
+            if (format_gl->f.stencil_size)
+                gl_info->fbo_ops.glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                        GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, *object);
             break;
 
         case WINED3D_GL_RES_TYPE_BUFFER:
@@ -2484,10 +2483,9 @@ static void check_fbo_compat(struct wined3d_caps_gl_ctx *ctx, struct wined3d_for
         if (type == WINED3D_GL_RES_TYPE_BUFFER)
             continue;
 
-        create_and_bind_fbo_attachment(gl_info, format->f.flags[type], type,
-                &object, format->internal, format->format, format->type);
+        create_and_bind_fbo_attachment(gl_info, format, type, &object, format->internal);
 
-        if (format->f.flags[type] & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))
+        if (format->f.flags[type] & WINED3DFMT_FLAG_DEPTH_STENCIL)
         {
             gl_info->fbo_ops.glGenRenderbuffers(1, &color_rb);
             gl_info->fbo_ops.glBindRenderbuffer(GL_RENDERBUFFER, color_rb);
@@ -2517,11 +2515,11 @@ static void check_fbo_compat(struct wined3d_caps_gl_ctx *ctx, struct wined3d_for
         {
             if (!rt_internal)
             {
-                if (format->f.flags[type] & WINED3DFMT_FLAG_RENDERTARGET)
+                if (format->f.flags[type] & (WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_DEPTH_STENCIL))
                 {
                     WARN("Format %s with rendertarget flag is not supported as FBO color attachment (type %u),"
                             " and no fallback specified.\n", debug_d3dformat(format->f.id), type);
-                    format->f.flags[type] &= ~WINED3DFMT_FLAG_RENDERTARGET;
+                    format->f.flags[type] &= ~(WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_DEPTH_STENCIL);
                 }
                 else
                 {
@@ -2539,8 +2537,7 @@ static void check_fbo_compat(struct wined3d_caps_gl_ctx *ctx, struct wined3d_for
                 while (gl_info->gl_ops.gl.p_glGetError());
 
                 delete_fbo_attachment(gl_info, type, object);
-                create_and_bind_fbo_attachment(gl_info, format->f.flags[type], type,
-                        &object, format->rt_internal, format->format, format->type);
+                create_and_bind_fbo_attachment(gl_info, format, type, &object, format->rt_internal);
 
                 status = gl_info->fbo_ops.glCheckFramebufferStatus(GL_FRAMEBUFFER);
                 checkGLcall("Framebuffer format check");
@@ -2555,7 +2552,7 @@ static void check_fbo_compat(struct wined3d_caps_gl_ctx *ctx, struct wined3d_for
                 {
                     WARN("Format %s rtInternal format is not supported as FBO %s attachment, type %u.\n",
                             debug_d3dformat(format->f.id), type_string, type);
-                    format->f.flags[type] &= ~WINED3DFMT_FLAG_RENDERTARGET;
+                    format->f.flags[type] &= ~(WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_DEPTH_STENCIL);
                 }
             }
         }
@@ -2691,8 +2688,7 @@ static void check_fbo_compat(struct wined3d_caps_gl_ctx *ctx, struct wined3d_for
         if (format->internal != format->srgb_internal)
         {
             delete_fbo_attachment(gl_info, type, object);
-            create_and_bind_fbo_attachment(gl_info, format->f.flags[type], type, &object, format->srgb_internal,
-                    format->format, format->type);
+            create_and_bind_fbo_attachment(gl_info, format, type, &object, format->srgb_internal);
 
             status = gl_info->fbo_ops.glCheckFramebufferStatus(GL_FRAMEBUFFER);
             checkGLcall("Framebuffer format check");
@@ -2715,7 +2711,7 @@ static void check_fbo_compat(struct wined3d_caps_gl_ctx *ctx, struct wined3d_for
         else if (status == GL_FRAMEBUFFER_COMPLETE)
             format->f.flags[type] |= WINED3DFMT_FLAG_FBO_ATTACHABLE_SRGB;
 
-        if (format->f.flags[type] & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))
+        if (format->f.flags[type] & WINED3DFMT_FLAG_DEPTH_STENCIL)
         {
             gl_info->fbo_ops.glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, 0);
             gl_info->fbo_ops.glDeleteRenderbuffers(1, &color_rb);
@@ -2729,8 +2725,9 @@ static void check_fbo_compat(struct wined3d_caps_gl_ctx *ctx, struct wined3d_for
     {
         FIXME("Format %s needs different render target formats for different resource types.\n",
                 debug_d3dformat(format->f.id));
-        format_clear_flag(&format->f, WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_FBO_ATTACHABLE
-                | WINED3DFMT_FLAG_FBO_ATTACHABLE_SRGB | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING);
+        format_clear_flag(&format->f, WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_DEPTH_STENCIL
+                | WINED3DFMT_FLAG_FBO_ATTACHABLE | WINED3DFMT_FLAG_FBO_ATTACHABLE_SRGB
+                | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING);
     }
 }
 
@@ -3100,8 +3097,7 @@ static void query_internal_format(struct wined3d_adapter *adapter,
         if ((format->f.flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_SRGB_WRITE) && !srgb_write_supported)
             format_clear_flag(&format->f, WINED3DFMT_FLAG_SRGB_WRITE);
 
-        if (!gl_info->supported[ARB_DEPTH_TEXTURE]
-                && texture_info->flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))
+        if (!gl_info->supported[ARB_DEPTH_TEXTURE] && (format->f.depth_size || format->f.stencil_size))
         {
             format->f.flags[WINED3D_GL_RES_TYPE_TEX_1D] &= ~WINED3DFMT_FLAG_TEXTURE;
             format->f.flags[WINED3D_GL_RES_TYPE_TEX_2D] &= ~WINED3DFMT_FLAG_TEXTURE;
@@ -3114,7 +3110,7 @@ static void query_internal_format(struct wined3d_adapter *adapter,
     query_view_class(format);
 
     if (format->internal && format->f.flags[WINED3D_GL_RES_TYPE_RB]
-            & (WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))
+            & (WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_DEPTH_STENCIL))
     {
         if (gl_info->supported[ARB_INTERNALFORMAT_QUERY])
         {
@@ -3192,8 +3188,7 @@ static BOOL init_format_texture_info(struct wined3d_adapter *adapter, struct win
 
         /* GL_ARB_depth_texture does not support 3D textures. It also says "cube textures are
          * problematic", but doesn't explicitly mandate that an error is generated. */
-        if (gl_info->supported[EXT_TEXTURE3D]
-                && !(format_texture_info[i].flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)))
+        if (gl_info->supported[EXT_TEXTURE3D] && !(format_texture_info[i].flags & WINED3DFMT_FLAG_DEPTH_STENCIL))
             format->f.flags[WINED3D_GL_RES_TYPE_TEX_3D] |= format_texture_info[i].flags | WINED3DFMT_FLAG_BLIT;
 
         if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
@@ -3797,7 +3792,7 @@ static BOOL init_typeless_formats(const struct wined3d_adapter *adapter)
         for (j = 0; j < ARRAY_SIZE(typeless_ds_format->flags); ++j)
         {
             typeless_ds_format->flags[j] = typeless_format->flags[j];
-            typeless_format->flags[j] &= ~(WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL);
+            typeless_format->flags[j] &= ~WINED3DFMT_FLAG_DEPTH_STENCIL;
         }
 
         if ((format_id = typeless_depth_stencil_formats[i].depth_view_id)
@@ -3993,7 +3988,7 @@ static void init_format_depth_bias_scale(struct wined3d_adapter *adapter,
     {
         struct wined3d_format_gl *format = get_format_gl_by_idx(adapter, i);
 
-        if (format->f.flags[WINED3D_GL_RES_TYPE_RB] & WINED3DFMT_FLAG_DEPTH)
+        if (format->f.depth_size && (format->f.flags[WINED3D_GL_RES_TYPE_RB] & WINED3DFMT_FLAG_DEPTH_STENCIL))
         {
             TRACE("Testing depth bias scale for format %s.\n", debug_d3dformat(format->f.id));
             format->f.depth_bias_scale = wined3d_adapter_find_polyoffset_scale(ctx, format->internal);
@@ -4239,6 +4234,10 @@ static void init_vulkan_format_info(struct wined3d_format_vk *format,
     if (texture_flags & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT)
     {
         flags |= WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING;
+    }
+    if (texture_flags & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
+    {
+        flags |= WINED3DFMT_FLAG_DEPTH_STENCIL;
     }
     if (texture_flags & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)
     {

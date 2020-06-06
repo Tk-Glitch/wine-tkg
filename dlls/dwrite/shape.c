@@ -55,105 +55,6 @@ void release_scriptshaping_cache(struct scriptshaping_cache *cache)
     heap_free(cache);
 }
 
-static void shape_update_clusters_from_glyphprop(UINT32 glyphcount, UINT32 text_len, UINT16 *clustermap, DWRITE_SHAPING_GLYPH_PROPERTIES *glyph_props)
-{
-    UINT32 i;
-
-    for (i = 0; i < glyphcount; i++) {
-        if (!glyph_props[i].isClusterStart) {
-            UINT32 j;
-
-            for (j = 0; j < text_len; j++) {
-                if (clustermap[j] == i) {
-                    int k = j;
-                    while (k >= 0 && k < text_len && !glyph_props[clustermap[k]].isClusterStart)
-                        k--;
-
-                    if (k >= 0 && k < text_len && glyph_props[clustermap[k]].isClusterStart)
-                        clustermap[j] = clustermap[k];
-                }
-            }
-        }
-    }
-}
-
-static int compare_clustersearch(const void *a, const void* b)
-{
-    UINT16 target = *(UINT16*)a;
-    UINT16 index = *(UINT16*)b;
-    int ret = 0;
-
-    if (target > index)
-        ret = 1;
-    else if (target < index)
-        ret = -1;
-
-    return ret;
-}
-
-/* Maps given glyph position in glyph indices array to text index this glyph represents.
-   Lowest possible index is returned.
-
-   clustermap [I] Text index to index in glyph indices array map
-   len        [I] Clustermap size
-   target     [I] Index in glyph indices array to map
- */
-static INT32 map_glyph_to_text_pos(const UINT16 *clustermap, UINT32 len, UINT16 target)
-{
-    UINT16 *ptr;
-    INT32 k;
-
-    ptr = bsearch(&target, clustermap, len, sizeof(UINT16), compare_clustersearch);
-    if (!ptr)
-        return -1;
-
-    /* get to the beginning */
-    for (k = (ptr - clustermap) - 1; k >= 0 && clustermap[k] == target; k--)
-        ;
-    k++;
-
-    return k;
-}
-
-static HRESULT default_set_text_glyphs_props(struct scriptshaping_context *context, UINT16 *clustermap, UINT16 *glyph_indices,
-                                     UINT32 glyphcount, DWRITE_SHAPING_TEXT_PROPERTIES *text_props, DWRITE_SHAPING_GLYPH_PROPERTIES *glyph_props)
-{
-    UINT32 i;
-
-    for (i = 0; i < glyphcount; i++) {
-        UINT32 char_index[20];
-        UINT32 char_count = 0;
-        INT32 k;
-
-        k = map_glyph_to_text_pos(clustermap, context->length, i);
-        if (k >= 0) {
-            for (; k < context->length && clustermap[k] == i; k++)
-                char_index[char_count++] = k;
-        }
-
-        if (char_count == 0)
-            continue;
-
-        if (char_count == 1 && isspaceW(context->text[char_index[0]])) {
-            glyph_props[i].justification = SCRIPT_JUSTIFY_BLANK;
-            text_props[char_index[0]].isShapedAlone = context->text[char_index[0]] == ' ';
-        }
-        else
-            glyph_props[i].justification = SCRIPT_JUSTIFY_CHARACTER;
-    }
-
-    /* FIXME: update properties using GDEF table */
-    shape_update_clusters_from_glyphprop(glyphcount, context->length, clustermap, glyph_props);
-
-    return S_OK;
-}
-
-const struct scriptshaping_ops default_shaping_ops =
-{
-    NULL,
-    default_set_text_glyphs_props
-};
-
 static unsigned int shape_select_script(const struct scriptshaping_cache *cache, DWORD kind, const DWORD *scripts,
         unsigned int *script_index)
 {
@@ -231,7 +132,7 @@ static int features_sorting_compare(const void *a, const void *b)
 static void shape_merge_features(struct scriptshaping_context *context, struct shaping_features *features)
 {
     const DWRITE_TYPOGRAPHIC_FEATURES **user_features = context->user_features.features;
-    unsigned int j = 0, i;
+    unsigned int i, j;
 
     /* For now only consider global, enabled user features. */
     if (user_features && context->user_features.range_lengths)
@@ -250,7 +151,7 @@ static void shape_merge_features(struct scriptshaping_context *context, struct s
     /* Sort and merge duplicates. */
     qsort(features->features, features->count, sizeof(*features->features), features_sorting_compare);
 
-    for (i = 1; i < features->count; ++i)
+    for (i = 1, j = 0; i < features->count; ++i)
     {
         if (features->features[i].tag != features->features[j].tag)
             features->features[++j] = features->features[i];
@@ -400,5 +301,5 @@ HRESULT shape_get_glyphs(struct scriptshaping_context *context, const unsigned i
 
     heap_free(features.features);
 
-    return S_OK;
+    return (context->glyph_count <= context->u.subst.max_glyph_count) ? S_OK : E_NOT_SUFFICIENT_BUFFER;
 }

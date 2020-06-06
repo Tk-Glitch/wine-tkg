@@ -969,7 +969,7 @@ struct terminate_thread_reply
 {
     struct reply_header __header;
     int          self;
-    int          last;
+    char __pad_12[4];
 };
 
 
@@ -993,6 +993,7 @@ struct get_process_info_reply
     client_cpu_t cpu;
     short int    debugger_present;
     short int    debug_children;
+    /* VARARG(image,pe_image_info); */
 };
 
 
@@ -7173,7 +7174,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 605
+#define SERVER_PROTOCOL_VERSION 607
 
 /* ### protocol_version end ### */
 

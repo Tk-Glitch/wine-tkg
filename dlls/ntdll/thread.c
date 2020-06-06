@@ -258,10 +258,6 @@ static void fill_user_shared_data( struct _KUSER_SHARED_DATA *data )
     data->NumberOfPhysicalPages       = sbi.MmNumberOfPhysicalPages;
     wcscpy( data->NtSystemRoot, windows_dir );
 
-    /* Pretend we don't support the SYSCALL instruction on x86-64. Needed for
-     * Chromium; see output_syscall_thunks_x64() in winebuild. */
-    data->SystemCallPad[0] = 1;
-
     switch (sci.Architecture)
     {
     case PROCESSOR_ARCHITECTURE_INTEL:
@@ -294,6 +290,8 @@ static void fill_user_shared_data( struct _KUSER_SHARED_DATA *data )
         features[PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE] = !!(sci.FeatureSet & CPU_FEATURE_ARM_V8_CRYPTO);
         break;
     }
+    data->ActiveProcessorCount = NtCurrentTeb()->Peb->NumberOfProcessors;
+    data->ActiveGroupCount = 1;
 }
 
 HANDLE user_shared_data_init_done(void)
@@ -977,17 +975,19 @@ NTSTATUS WINAPI NtAlertThread( HANDLE handle )
 NTSTATUS WINAPI NtTerminateThread( HANDLE handle, LONG exit_code )
 {
     NTSTATUS ret;
-    BOOL self;
+    BOOL self = (handle == GetCurrentThread());
 
-    SERVER_START_REQ( terminate_thread )
+    if (!self || exit_code)
     {
-        req->handle    = wine_server_obj_handle( handle );
-        req->exit_code = exit_code;
-        ret = wine_server_call( req );
-        self = !ret && reply->self;
+        SERVER_START_REQ( terminate_thread )
+        {
+            req->handle    = wine_server_obj_handle( handle );
+            req->exit_code = exit_code;
+            ret = wine_server_call( req );
+            self = !ret && reply->self;
+        }
+        SERVER_END_REQ;
     }
-    SERVER_END_REQ;
-
     if (self) abort_thread( exit_code );
     return ret;
 }

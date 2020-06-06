@@ -1,18 +1,55 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sat 23 May 2020 04:23:15 PM CEST :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sat 06 Jun 2020 03:03:03 PM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.9.r0.g056c9df854
-Using wine-staging patchset (version 5.9.r0.g7b5a0e5a)
+Wine (plain) version: 5.10.r0.g3cc3b44575
+Using wine-staging patchset (version 5.10.r0.g8648971f)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
 
+8e5d3042786917c04d3065755d81e7f8a751e529 reverted (hotfix)
+245efd04e1456a71a6962acbb8ebc279481e9ffa reverted (hotfix)
+33c750f50ff8b6f1eae63140e8287c49a5130a60 reverted (hotfix)
+39e7f25e0918d23e5b9ef5fc5049948b6f56525e reverted (hotfix)
+ca3ca7b046ae94a152b1367ca982774345887e55 reverted (hotfix)
+cdfc45859c299aa629482ee06614c9819346b444 reverted (hotfix)
+f1276b25ae72e81cf044134bae92db6ef73be3a1 reverted (hotfix)
+65edacf93484faf1dc3d11e555081d69556ccbc3 reverted (hotfix)
+8b87d6b81408e5d6fe34f9e9fda1df2f4f2e5cd0 reverted (hotfix)
+efd59e378c2ba8cae98fa664ae98521027e96b81 reverted (hotfix)
+39915c9bc42f17619b1d2c46e6b3aea485c471a0 reverted (hotfix)
+a18444984171ee86503d1250094965fb50a198ee reverted (hotfix)
+4ffe39573b537d638e4b39c9b5990c6566d62b09 reverted (hotfix)
+cd0c5988020acc92ff98260e3304967bf31e4e87 reverted (hotfix)
+f1d40d4824b568389cbc328cebb5734430b52e44 reverted (hotfix)
+35b063a404457fdf956d1913738a3c8a66266cb4 reverted (hotfix)
+be0eb9c92eb7a4fcd9d0d48568c8ed5e8326ef0b reverted (hotfix)
+9fe61171e515e7c77720675ecbe69731219b549c reverted (hotfix)
+c96ef78b6d6d9184d8ec4cd18924a3049d388583 reverted (hotfix)
+7c32b2dd9368137eca3cf0202360bbe0db62efbf reverted (hotfix)
+ac90898f72b02bbc226a95deb40555c1fb8ac3a3 reverted (hotfix)
+87fa906a84621295a76035d73dd6305c9cd2ea4a reverted (hotfix)
+c0319e0eabbad87a3e153c23f2461c881153b984 reverted (hotfix)
+b925dd78b813decf386139a15aa7bc6863ee7ae5 reverted (hotfix)
+3e9f8c87e5a2acaa80f8bbb1d50fa82147942143 reverted (hotfix)
+704975f58d7947721f530d202022721c16df466a reverted (hotfix)
+04f41e87a369828a698f62c32cabad34ed34a3e7 reverted (hotfix)
+01150d7f8d27ad5efdb824da938c4a9fa562a036 reverted (hotfix)
+1a743c9af39d0224b65ae504ae7e24d9fad56c2b reverted (hotfix)
+8a63b688ac49f19c259066fd100407edf3747f95 reverted (hotfix)
+e6e2f2325a0a4eb14f10dd6df319b068761e9600 reverted (hotfix)
+e854ea34cc481658ec61f4603d0438e075608c98 reverted (hotfix)
+707fcb99a60015fcbb20c83e9031bc5be7a58618 reverted 
+8cd6245b7633abccd68f73928544ae4de6f76d52 reverted 
 26b26a2e0efcb776e7b0115f15580d2507b10400 reverted 
 fd6f50c0d3e96947846ca82ed0c9bd79fd8e5b80 reverted 
 2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted 
 ( FS hack unbreak reverts applied )
 
+Applied reverting hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-9.mystagingrevert
+Applied hotfix 934a09585a15e8491e422b43624ffe632b02bd3c-3.mystagingpatch
+Applied your own patch staging.mystagingpatch
 use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
 plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
 FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
@@ -21,12 +58,12 @@ childwindow.patch -- ( Applied child window for vk patch )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-nolegacy -W user32-rawinput-mouse-experimental -W user32-rawinput-hid -W winex11-key_translation
+Staging overrides, if any: -W ntdll-ForceBottomUpAlloc -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-nolegacy -W user32-rawinput-mouse-experimental -W user32-rawinput-hid -W winex11-key_translation
 
-leagueoflolfix.patch -- ( Applied LoL 9.20+ fix - Requires vdso32 disabled (echo 0 > /proc/sys/abi/vsyscall32) )
 mk11.patch -- ( Applied Mortal Kombat 11 fix )
 fsync-staging.patch -- ( Applied fsync, an experimental replacement for esync (staging) )
 fsync-staging-no_alloc_handle.patch -- ( Added no_alloc_handle object method to fsync )
+server_Abort_waiting_on_a_completion_port_when_closing_it-no_alloc_handle.patch -- ( Added Abort waiting on a completion port when closing it Proton patch (no_alloc_handle edition) )
 fsync-spincounts.patch -- ( Add a configurable spin count to fsync )
 
 valve_proton_fullscreen_hack-staging.patch -- ( Applied Proton fullscreen hack patch (staging) )
@@ -44,13 +81,14 @@ proton_fs_hack_integer_scaling.patch -- ( Enable Proton fs hack integer scaling 
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 proton-win10-default.patch -- ( Enforce win10 as default wine version )
 
-Applied reverting hotfix /home/tk/Dev/Dev/PKGBUILDS/wine-tkg-git/wine-tkg-git/wine-tkg-patches/hotfixes/fd7992972b252ed262d33ef604e9e1235d2108c5-6.myrevert
+Applied reverting hotfix fd7992972b252ed262d33ef604e9e1235d2108c5-6.myrevert
 Applied your own patch 0001-Add-some-semi-stubs-in-user32.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch GNUTLShack.mypatch
 Applied your own patch amdags.mypatch
 Applied your own patch guy1524_mfplat_WIP.mypatch
+Applied your own patch legoisland_168726.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
-Applied your own patch winex11-fs-no_above_state.mypatch
+Applied your own patch starcitizen_voip_fix.mypatch
 
-wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Tk-Glitch/PKGBUILDS/issues instead. )
+wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

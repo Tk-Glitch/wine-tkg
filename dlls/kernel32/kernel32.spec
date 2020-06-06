@@ -345,7 +345,7 @@
 @ stdcall CreateWaitableTimerExA(ptr str long long)
 @ stdcall -import CreateWaitableTimerExW(ptr wstr long long)
 @ stdcall -import CreateWaitableTimerW(ptr long wstr)
-# @ stub CtrlRoutine
+@ stdcall CtrlRoutine(ptr) kernelbase.CtrlRoutine
 @ stdcall -import DeactivateActCtx(long long)
 @ stdcall -import DebugActiveProcess(long)
 @ stdcall -import DebugActiveProcessStop(long)
@@ -762,6 +762,7 @@
 @ stdcall -import GetOverlappedResult(long ptr ptr long)
 @ stdcall -import GetOverlappedResultEx(long ptr ptr long long)
 @ stdcall -import GetUserPreferredUILanguages(long ptr ptr ptr)
+@ stdcall GetPackageFamilyName(long ptr ptr) kernelbase.GetPackageFamilyName
 @ stdcall GetPackageFullName(long ptr ptr) kernelbase.GetPackageFullName
 @ stdcall -import GetPhysicallyInstalledSystemMemory(ptr)
 @ stdcall -import GetPriorityClass(long)
@@ -793,7 +794,7 @@
 # @ stub GetProcessorSystemCycleTime
 @ stdcall -import GetProcessTimes(long ptr ptr ptr ptr)
 # @ stub GetProcessUserModeExceptionPolicy
-@ stdcall GetProcessVersion(long)
+@ stdcall -import GetProcessVersion(long)
 @ stdcall GetProcessWorkingSetSize(long ptr ptr)
 @ stdcall -import GetProcessWorkingSetSizeEx(long ptr ptr ptr)
 @ stdcall -import GetProductInfo(long long long long ptr)
@@ -1348,7 +1349,7 @@
 @ stdcall -import SetConsoleCP(long)
 # @ stub SetConsoleHistoryInfo
 @ stub SetConsoleCommandHistoryMode
-@ stdcall SetConsoleCtrlHandler(ptr long)
+@ stdcall -import SetConsoleCtrlHandler(ptr long)
 @ stub SetConsoleCursor
 @ stdcall -import SetConsoleCursorInfo(long ptr)
 @ stub SetConsoleCursorMode

@@ -44,19 +44,6 @@ static void get_color_masks(const struct wined3d_format *format, DWORD *masks)
     masks[2] = ((1u << format->blue_size) - 1) << format->blue_offset;
 }
 
-static BOOL texture2d_is_full_rect(const struct wined3d_texture *texture, unsigned int level, const RECT *r)
-{
-    unsigned int t;
-
-    t = wined3d_texture_get_level_width(texture, level);
-    if ((r->left && r->right) || abs(r->right - r->left) != t)
-        return FALSE;
-    t = wined3d_texture_get_level_height(texture, level);
-    if ((r->top && r->bottom) || abs(r->bottom - r->top) != t)
-        return FALSE;
-    return TRUE;
-}
-
 /* See also float_16_to_32() in wined3d_private.h */
 static inline unsigned short float_32_to_16(const float *in)
 {
@@ -353,7 +340,7 @@ static struct wined3d_texture *surface_convert_format(struct wined3d_texture *sr
     struct wined3d_context *context;
     DWORD map_binding;
 
-    if (!(conv = find_converter(src_format->id, dst_format->id)) && (!device->d3d_initialized
+    if (!(conv = find_converter(src_format->id, dst_format->id)) && ((device->wined3d->flags & WINED3D_NO3D)
             || !is_identity_fixup(src_format->color_fixup) || src_format->conv_byte_count
             || !is_identity_fixup(dst_format->color_fixup) || dst_format->conv_byte_count
             || ((src_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_COMPRESSED)
@@ -1493,6 +1480,20 @@ struct wined3d_blitter *wined3d_cpu_blitter_create(void)
     return blitter;
 }
 
+static bool wined3d_is_colour_blit(enum wined3d_blit_op blit_op)
+{
+    switch (blit_op)
+    {
+        case WINED3D_BLIT_OP_COLOR_BLIT:
+        case WINED3D_BLIT_OP_COLOR_BLIT_ALPHATEST:
+        case WINED3D_BLIT_OP_COLOR_BLIT_CKEY:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
 HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_resource_idx,
         const struct wined3d_box *dst_box, struct wined3d_texture *src_texture, unsigned int src_sub_resource_idx,
         const struct wined3d_box *src_box, DWORD flags, const struct wined3d_blt_fx *fx,
@@ -1503,11 +1504,11 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
     struct wined3d_swapchain *src_swapchain, *dst_swapchain;
     const struct wined3d_color_key *colour_key = NULL;
     DWORD src_location, dst_location, valid_locations;
-    DWORD src_ds_flags, dst_ds_flags;
     struct wined3d_context *context;
     enum wined3d_blit_op blit_op;
     BOOL scale, convert, resolve;
     RECT src_rect, dst_rect;
+    bool src_ds, dst_ds;
 
     static const DWORD simple_blit = WINED3D_BLT_SRC_CKEY
             | WINED3D_BLT_SRC_CKEY_OVERRIDE
@@ -1557,12 +1558,6 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
 
     flags &= ~(WINED3D_BLT_SYNCHRONOUS | WINED3D_BLT_DO_NOT_WAIT | WINED3D_BLT_WAIT);
 
-    if (!device->d3d_initialized)
-    {
-        WARN("D3D not initialized, using CPU blit fallback.\n");
-        goto cpu;
-    }
-
     if (flags & ~simple_blit)
     {
         WARN_(d3d_perf)("Using CPU fallback for complex blit (%#x).\n", flags);
@@ -1587,12 +1582,10 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
     convert = src_texture->resource.format->id != dst_texture->resource.format->id;
     resolve = src_texture->resource.multisample_type != dst_texture->resource.multisample_type;
 
-    dst_ds_flags = dst_texture->resource.format_flags
-            & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL);
-    src_ds_flags = src_texture->resource.format_flags
-            & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL);
+    dst_ds = dst_texture->resource.format->depth_size || dst_texture->resource.format->stencil_size;
+    src_ds = src_texture->resource.format->depth_size || src_texture->resource.format->stencil_size;
 
-    if (src_ds_flags || dst_ds_flags)
+    if (src_ds || dst_ds)
     {
         TRACE("Depth/stencil blit.\n");
 
@@ -1649,7 +1642,8 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
         blit_op = WINED3D_BLIT_OP_COLOR_BLIT_ALPHATEST;
     }
     else if ((src_sub_resource->locations & surface_simple_locations)
-            && !(dst_sub_resource->locations & surface_simple_locations))
+            && !(dst_sub_resource->locations & surface_simple_locations)
+            && (dst_texture->resource.access & WINED3D_RESOURCE_ACCESS_GPU))
     {
         /* Upload */
         if (scale)
@@ -1685,9 +1679,9 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
             TRACE("Not doing download because the source format needs conversion.\n");
         else if (!(src_texture->flags & WINED3D_TEXTURE_DOWNLOADABLE))
             TRACE("Not doing download because texture is not downloadable.\n");
-        else if (!texture2d_is_full_rect(src_texture, src_sub_resource_idx % src_texture->level_count, &src_rect))
+        else if (!wined3d_texture_is_full_rect(src_texture, src_sub_resource_idx % src_texture->level_count, &src_rect))
             TRACE("Not doing download because of partial download (src).\n");
-        else if (!texture2d_is_full_rect(dst_texture, dst_sub_resource_idx % dst_texture->level_count, &dst_rect))
+        else if (!wined3d_texture_is_full_rect(dst_texture, dst_sub_resource_idx % dst_texture->level_count, &dst_rect))
             TRACE("Not doing download because of partial download (dst).\n");
         else
         {
@@ -1727,7 +1721,7 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
 
     if (src_texture->resource.multisample_type != WINED3D_MULTISAMPLE_NONE
             && ((scale && !context->d3d_info->scaled_resolve)
-            || convert || blit_op != WINED3D_BLIT_OP_COLOR_BLIT))
+            || convert || !wined3d_is_colour_blit(blit_op)))
         src_location = WINED3D_LOCATION_RB_RESOLVED;
     else
         src_location = src_texture->resource.draw_binding;
@@ -1735,7 +1729,7 @@ HRESULT texture2d_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_
     if (!(dst_texture->resource.access & WINED3D_RESOURCE_ACCESS_GPU))
         dst_location = dst_texture->resource.map_binding;
     else if (dst_texture->resource.multisample_type != WINED3D_MULTISAMPLE_NONE
-            && (scale || convert || blit_op != WINED3D_BLIT_OP_COLOR_BLIT))
+            && (scale || convert || !wined3d_is_colour_blit(blit_op)))
         dst_location = WINED3D_LOCATION_RB_RESOLVED;
     else
         dst_location = dst_texture->resource.draw_binding;
