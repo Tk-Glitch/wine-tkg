@@ -34,6 +34,7 @@ struct queued_receive
     DWORD length;
     BYTE *pointer;
     DWORD position;
+    STREAM_TIME start_time;
 };
 
 struct audio_stream
@@ -55,6 +56,7 @@ struct audio_stream
     AM_MEDIA_TYPE mt;
     WAVEFORMATEX format;
     FILTER_STATE state;
+    REFERENCE_TIME segment_start;
     BOOL eos;
     BOOL flushing;
     struct list receive_queue;
@@ -66,6 +68,8 @@ typedef struct {
     LONG ref;
     struct audio_stream *parent;
     IAudioData *audio_data;
+    STREAM_TIME start_time;
+    STREAM_TIME end_time;
     HANDLE update_event;
 
     struct list entry;
@@ -102,6 +106,12 @@ static void flush_receive_queue(struct audio_stream *stream)
         remove_queued_receive(LIST_ENTRY(entry, struct queued_receive, entry));
 }
 
+static STREAM_TIME stream_time_from_position(struct audio_stream *stream, struct queued_receive *receive)
+{
+    const WAVEFORMATEX *format = (WAVEFORMATEX *)stream->mt.pbFormat;
+    return receive->start_time + (receive->position * 10000000 + format->nAvgBytesPerSec / 2) / format->nAvgBytesPerSec;
+}
+
 static void process_update(IAudioStreamSampleImpl *sample, struct queued_receive *receive)
 {
     DWORD advance;
@@ -109,8 +119,13 @@ static void process_update(IAudioStreamSampleImpl *sample, struct queued_receive
     advance = min(receive->length - receive->position, sample->length - sample->position);
     memcpy(&sample->pointer[sample->position], &receive->pointer[receive->position], advance);
 
+    if (!sample->position)
+        sample->start_time = stream_time_from_position(sample->parent, receive);
+
     receive->position += advance;
     sample->position += advance;
+
+    sample->end_time = stream_time_from_position(sample->parent, receive);
 
     sample->update_hr = (sample->position == sample->length) ? S_OK : MS_S_PENDING;
 }
@@ -204,9 +219,19 @@ static HRESULT WINAPI IAudioStreamSampleImpl_GetMediaStream(IAudioStreamSample *
 static HRESULT WINAPI IAudioStreamSampleImpl_GetSampleTimes(IAudioStreamSample *iface, STREAM_TIME *start_time,
                                                                  STREAM_TIME *end_time, STREAM_TIME *current_time)
 {
-    FIXME("(%p)->(%p,%p,%p): stub\n", iface, start_time, end_time, current_time);
+    IAudioStreamSampleImpl *sample = impl_from_IAudioStreamSample(iface);
 
-    return E_NOTIMPL;
+    TRACE("sample %p, start_time %p, end_time %p, current_time %p.\n", sample, start_time, end_time, current_time);
+
+    if (current_time)
+        IMediaStreamFilter_GetCurrentStreamTime(sample->parent->filter, current_time);
+
+    if (start_time)
+        *start_time = sample->start_time;
+    if (end_time)
+        *end_time = sample->end_time;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IAudioStreamSampleImpl_SetSampleTimes(IAudioStreamSample *iface, const STREAM_TIME *start_time,
@@ -1134,9 +1159,18 @@ static HRESULT WINAPI audio_sink_EndFlush(IPin *iface)
 
 static HRESULT WINAPI audio_sink_NewSegment(IPin *iface, REFERENCE_TIME start, REFERENCE_TIME stop, double rate)
 {
-    FIXME("iface %p, start %s, stop %s, rate %0.16e, stub!\n",
-            iface, wine_dbgstr_longlong(start), wine_dbgstr_longlong(stop), rate);
-    return E_NOTIMPL;
+    struct audio_stream *stream = impl_from_IPin(iface);
+
+    TRACE("stream %p, start %s, stop %s, rate %0.16e\n",
+            stream, wine_dbgstr_longlong(start), wine_dbgstr_longlong(stop), rate);
+
+    EnterCriticalSection(&stream->cs);
+
+    stream->segment_start = start;
+
+    LeaveCriticalSection(&stream->cs);
+
+    return S_OK;
 }
 
 static const IPinVtbl audio_sink_vtbl =
@@ -1228,6 +1262,8 @@ static HRESULT WINAPI audio_meminput_Receive(IMemInputPin *iface, IMediaSample *
 {
     struct audio_stream *stream = impl_from_IMemInputPin(iface);
     struct queued_receive *receive;
+    REFERENCE_TIME start_time = 0;
+    REFERENCE_TIME end_time = 0;
     BYTE *pointer;
     HRESULT hr;
 
@@ -1253,6 +1289,8 @@ static HRESULT WINAPI audio_meminput_Receive(IMemInputPin *iface, IMediaSample *
         return hr;
     }
 
+    IMediaSample_GetTime(sample, &start_time, &end_time);
+
     receive = calloc(1, sizeof(*receive));
     if (!receive)
     {
@@ -1263,6 +1301,7 @@ static HRESULT WINAPI audio_meminput_Receive(IMemInputPin *iface, IMediaSample *
     receive->length = IMediaSample_GetActualDataLength(sample);
     receive->pointer = pointer;
     receive->sample = sample;
+    receive->start_time = start_time + stream->segment_start;
     IMediaSample_AddRef(receive->sample);
     list_add_tail(&stream->receive_queue, &receive->entry);
 

@@ -1807,9 +1807,7 @@ static void test_RegisterRawInputDevices(void)
 
     SetLastError(0xdeadbeef);
     res = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), sizeof(RAWINPUTDEVICE));
-    todo_wine
     ok(res == FALSE, "RegisterRawInputDevices failed\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_PARAMETER, "RegisterRawInputDevices returned %08x\n", GetLastError());
 
     raw_devices[0].hwndTarget = hwnd;

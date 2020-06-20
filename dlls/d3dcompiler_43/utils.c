@@ -1294,6 +1294,10 @@ static struct hlsl_type *expr_common_type(struct hlsl_type *t1, struct hlsl_type
         }
     }
 
+    if (type == HLSL_CLASS_SCALAR)
+        return hlsl_ctx.builtin_types.scalar[base];
+    if (type == HLSL_CLASS_VECTOR)
+        return hlsl_ctx.builtin_types.vector[base][dimx - 1];
     return new_hlsl_type(NULL, type, base, dimx, dimy);
 }
 
@@ -1493,15 +1497,7 @@ struct hlsl_ir_node *make_assignment(struct hlsl_ir_node *lhs, enum parse_assign
             }
             assert(swizzle_type->type == HLSL_CLASS_VECTOR);
             if (swizzle_type->dimx != width)
-            {
-                struct hlsl_type *type;
-                if (!(type = new_hlsl_type(NULL, HLSL_CLASS_VECTOR, swizzle_type->base_type, width, 1)))
-                {
-                    d3dcompiler_free(assign);
-                    return NULL;
-                }
-                swizzle->node.data_type = type;
-            }
+                swizzle->node.data_type = hlsl_ctx.builtin_types.vector[swizzle_type->base_type][width - 1];
             rhs = &swizzle->node;
         }
         else
@@ -1763,7 +1759,6 @@ const char *debug_node_type(enum hlsl_ir_node_type type)
     {
         "HLSL_IR_ASSIGNMENT",
         "HLSL_IR_CONSTANT",
-        "HLSL_IR_CONSTRUCTOR",
         "HLSL_IR_EXPR",
         "HLSL_IR_IF",
         "HLSL_IR_LOAD",
@@ -1836,19 +1831,19 @@ static void debug_dump_ir_constant(const struct hlsl_ir_constant *constant)
             switch (type->base_type)
             {
                 case HLSL_TYPE_FLOAT:
-                    wine_dbg_printf("%g ", (double)constant->v.value.f[y * type->dimx + x]);
+                    wine_dbg_printf("%.8e ", constant->value.f[y * type->dimx + x]);
                     break;
                 case HLSL_TYPE_DOUBLE:
-                    wine_dbg_printf("%g ", constant->v.value.d[y * type->dimx + x]);
+                    wine_dbg_printf("%.16e ", constant->value.d[y * type->dimx + x]);
                     break;
                 case HLSL_TYPE_INT:
-                    wine_dbg_printf("%d ", constant->v.value.i[y * type->dimx + x]);
+                    wine_dbg_printf("%d ", constant->value.i[y * type->dimx + x]);
                     break;
                 case HLSL_TYPE_UINT:
-                    wine_dbg_printf("%u ", constant->v.value.u[y * type->dimx + x]);
+                    wine_dbg_printf("%u ", constant->value.u[y * type->dimx + x]);
                     break;
                 case HLSL_TYPE_BOOL:
-                    wine_dbg_printf("%s ", constant->v.value.b[y * type->dimx + x] == FALSE ? "false" : "true");
+                    wine_dbg_printf("%s ", constant->value.b[y * type->dimx + x] == FALSE ? "false" : "true");
                     break;
                 default:
                     wine_dbg_printf("Constants of type %s not supported\n", debug_base_type(type));
@@ -1946,19 +1941,6 @@ static void debug_dump_ir_expr(const struct hlsl_ir_expr *expr)
     for (i = 0; i < 3 && expr->operands[i]; ++i)
     {
         debug_dump_src(expr->operands[i]);
-        wine_dbg_printf(" ");
-    }
-    wine_dbg_printf(")");
-}
-
-static void debug_dump_ir_constructor(const struct hlsl_ir_constructor *constructor)
-{
-    unsigned int i;
-
-    wine_dbg_printf("%s (", debug_hlsl_type(constructor->node.data_type));
-    for (i = 0; i < constructor->args_count; ++i)
-    {
-        debug_dump_src(constructor->args[i]);
         wine_dbg_printf(" ");
     }
     wine_dbg_printf(")");
@@ -2078,9 +2060,6 @@ static void debug_dump_instr(const struct hlsl_ir_node *instr)
         case HLSL_IR_SWIZZLE:
             debug_dump_ir_swizzle(swizzle_from_node(instr));
             break;
-        case HLSL_IR_CONSTRUCTOR:
-            debug_dump_ir_constructor(constructor_from_node(instr));
-            break;
         case HLSL_IR_JUMP:
             debug_dump_ir_jump(jump_from_node(instr));
             break;
@@ -2144,24 +2123,6 @@ void free_instr_list(struct list *list)
 
 static void free_ir_constant(struct hlsl_ir_constant *constant)
 {
-    struct hlsl_type *type = constant->node.data_type;
-    unsigned int i;
-    struct hlsl_ir_constant *field, *next_field;
-
-    switch (type->type)
-    {
-        case HLSL_CLASS_ARRAY:
-            for (i = 0; i < type->e.array.elements_count; ++i)
-                free_ir_constant(&constant->v.array_elements[i]);
-            d3dcompiler_free(constant->v.array_elements);
-            break;
-        case HLSL_CLASS_STRUCT:
-            LIST_FOR_EACH_ENTRY_SAFE(field, next_field, constant->v.struct_elements, struct hlsl_ir_constant, node.entry)
-                free_ir_constant(field);
-            break;
-        default:
-            break;
-    }
     d3dcompiler_free(constant);
 }
 
@@ -2173,11 +2134,6 @@ static void free_ir_load(struct hlsl_ir_load *load)
 static void free_ir_swizzle(struct hlsl_ir_swizzle *swizzle)
 {
     d3dcompiler_free(swizzle);
-}
-
-static void free_ir_constructor(struct hlsl_ir_constructor *constructor)
-{
-    d3dcompiler_free(constructor);
 }
 
 static void free_ir_expr(struct hlsl_ir_expr *expr)
@@ -2220,9 +2176,6 @@ void free_instr(struct hlsl_ir_node *node)
             break;
         case HLSL_IR_SWIZZLE:
             free_ir_swizzle(swizzle_from_node(node));
-            break;
-        case HLSL_IR_CONSTRUCTOR:
-            free_ir_constructor(constructor_from_node(node));
             break;
         case HLSL_IR_EXPR:
             free_ir_expr(expr_from_node(node));

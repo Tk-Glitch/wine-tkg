@@ -19,7 +19,6 @@
 #define COBJMACROS
 #define CONST_VTABLE
 
-#include <wine/test.h>
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -29,6 +28,7 @@
 #include "mshtml.h"
 #include "mshtmhst.h"
 #include "docobj.h"
+#include "wine/test.h"
 
 static BOOL is_ie9plus;
 
@@ -831,6 +831,7 @@ static void test_css_style_declaration(IHTMLCSSStyleDeclaration *css_style)
 
 static void test_css_style_declaration2(IHTMLCSSStyleDeclaration2 *css_style)
 {
+    VARIANT v;
     BSTR str;
     HRESULT hres;
 
@@ -889,6 +890,222 @@ static void test_css_style_declaration2(IHTMLCSSStyleDeclaration2 *css_style)
     ok(hres == S_OK, "get_transition failed: %08x\n", hres);
     ok(!wcsncmp(str, L"marigin-right 1s", wcslen(L"marigin-right 1s")), "transition = %s\n", wine_dbgstr_w(str));
     SysFreeString(str);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnCount(css_style, &v);
+    ok(hres == S_OK, "get_columnCount failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR && !V_BSTR(&v), "columnCount = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 2;
+    hres = IHTMLCSSStyleDeclaration2_put_columnCount(css_style, v);
+    ok(hres == S_OK, "put_columnCount failed: %08x\n", hres);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnCount(css_style, &v);
+    ok(hres == S_OK, "get_columnCount failed: %08x\n", hres);
+    todo_wine
+    ok(V_VT(&v) == VT_BSTR && V_BSTR(&v) && !lstrcmpW(V_BSTR(&v), L"2"), "columnCount = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(L"auto");
+    hres = IHTMLCSSStyleDeclaration2_put_columnCount(css_style, v);
+    ok(hres == S_OK, "put_columnCount failed: %08x\n", hres);
+    VariantClear(&v);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnCount(css_style, &v);
+    ok(hres == S_OK, "get_columnCount failed: %08x\n", hres);
+    todo_wine
+    ok(V_VT(&v) == VT_BSTR && V_BSTR(&v) && !lstrcmpW(V_BSTR(&v), L"auto"), "columnCount = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnWidth(css_style, &v);
+    ok(hres == S_OK, "get_columnWidth failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR && !V_BSTR(&v), "columnWidth = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 20;
+    hres = IHTMLCSSStyleDeclaration2_put_columnWidth(css_style, v);
+    ok(hres == S_OK, "put_columnWidth failed: %08x\n", hres);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnWidth(css_style, &v);
+    ok(hres == S_OK, "get_columnWidth failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR && !V_BSTR(&v), "columnWidth = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(L"20px");
+    hres = IHTMLCSSStyleDeclaration2_put_columnWidth(css_style, v);
+    ok(hres == S_OK, "put_columnWidth failed: %08x\n", hres);
+    VariantClear(&v);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnWidth(css_style, &v);
+    ok(hres == S_OK, "get_columnWidth failed: %08x\n", hres);
+    todo_wine
+    ok(V_VT(&v) == VT_BSTR && V_BSTR(&v) && !lstrcmpW(V_BSTR(&v), L"20px"), "columnWidth = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnGap(css_style, &v);
+    ok(hres == S_OK, "get_columnGap failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR && !V_BSTR(&v), "columnGap = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 20;
+    hres = IHTMLCSSStyleDeclaration2_put_columnGap(css_style, v);
+    ok(hres == S_OK, "put_columnGap failed: %08x\n", hres);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnGap(css_style, &v);
+    ok(hres == S_OK, "get_columnGap failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR && !V_BSTR(&v), "columnGap = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(L"20px");
+    hres = IHTMLCSSStyleDeclaration2_put_columnGap(css_style, v);
+    ok(hres == S_OK, "put_columnGap failed: %08x\n", hres);
+    VariantClear(&v);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnGap(css_style, &v);
+    ok(hres == S_OK, "get_columnGap failed: %08x\n", hres);
+    todo_wine
+    ok(V_VT(&v) == VT_BSTR && V_BSTR(&v) && !lstrcmpW(V_BSTR(&v), L"20px"), "columnGap = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_columnFill(css_style, &str);
+    ok(hres == S_OK, "get_columnFill failed: %08x\n", hres);
+    ok(!str, "columnFill = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    str = SysAllocString(L"auto");
+    hres = IHTMLCSSStyleDeclaration2_put_columnFill(css_style, str);
+    ok(hres == S_OK, "put_columnFill failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_columnFill(css_style, &str);
+    ok(hres == S_OK, "get_columnFill failed: %08x\n", hres);
+    todo_wine
+    ok(str && !lstrcmpW(str, L"auto"), "columnFill = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_columnSpan(css_style, &str);
+    ok(hres == S_OK, "get_columnSpan failed: %08x\n", hres);
+    ok(!str, "columnSpan = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    str = SysAllocString(L"all");
+    hres = IHTMLCSSStyleDeclaration2_put_columnSpan(css_style, str);
+    ok(hres == S_OK, "put_columnSpan failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_columnSpan(css_style, &str);
+    ok(hres == S_OK, "get_columnSpan failed: %08x\n", hres);
+    todo_wine
+    ok(str && !lstrcmpW(str, L"all"), "columnSpan = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnRuleColor(css_style, &v);
+    ok(hres == S_OK, "get_columnRuleColor failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR && !V_BSTR(&v), "columnRuleColor = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(L"red");
+    hres = IHTMLCSSStyleDeclaration2_put_columnRuleColor(css_style, v);
+    ok(hres == S_OK, "put_columnRuleColor failed: %08x\n", hres);
+    VariantClear(&v);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnRuleColor(css_style, &v);
+    ok(hres == S_OK, "get_columnRuleColor failed: %08x\n", hres);
+    todo_wine
+    ok(V_VT(&v) == VT_BSTR && V_BSTR(&v) && !lstrcmpW(V_BSTR(&v), L"red"), "columnRuleColor = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_columnRuleStyle(css_style, &str);
+    ok(hres == S_OK, "get_columnRuleStyle failed: %08x\n", hres);
+    ok(!str, "columnRuleStyle = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    str = SysAllocString(L"solid");
+    hres = IHTMLCSSStyleDeclaration2_put_columnRuleStyle(css_style, str);
+    ok(hres == S_OK, "put_columnRuleStyle failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_columnRuleStyle(css_style, &str);
+    ok(hres == S_OK, "get_columnRuleStyle failed: %08x\n", hres);
+    todo_wine
+    ok(str && !lstrcmpW(str, L"solid"), "columnRuleStyle = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnRuleWidth(css_style, &v);
+    ok(hres == S_OK, "get_columnRuleWidth failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR && !V_BSTR(&v), "columnRuleWidth = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(L"10px");
+    hres = IHTMLCSSStyleDeclaration2_put_columnRuleWidth(css_style, v);
+    ok(hres == S_OK, "put_columnRuleWidth failed: %08x\n", hres);
+    VariantClear(&v);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_columnRuleWidth(css_style, &v);
+    ok(hres == S_OK, "get_columnRuleWidth failed: %08x\n", hres);
+    todo_wine
+    ok(V_VT(&v) == VT_BSTR && V_BSTR(&v) && !lstrcmpW(V_BSTR(&v), L"10px"), "columnRuleWidth = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    str = NULL;
+    hres = IHTMLCSSStyleDeclaration2_get_columnRule(css_style, &str);
+    ok(hres == S_OK, "get_columnRule failed: %08x\n", hres);
+    todo_wine
+    ok(str && !lstrcmpW(str, L"10px solid red"), "columnRule = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    hres = IHTMLCSSStyleDeclaration2_put_columnRule(css_style, NULL);
+    ok(hres == S_OK, "put_columnRule failed: %08x\n", hres);
+
+    str = (void*)0xdeadbeef;
+    hres = IHTMLCSSStyleDeclaration2_get_columnRule(css_style, &str);
+    ok(hres == S_OK, "get_columnRule failed: %08x\n", hres);
+    ok(!str, "columnRule = %s\n", wine_dbgstr_w(str));
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_perspective(css_style, &v);
+    ok(hres == S_OK, "get_perspective failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR && !V_BSTR(&v), "perspective = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(L"100px");
+    hres = IHTMLCSSStyleDeclaration2_put_perspective(css_style, v);
+    ok(hres == S_OK, "put_perspective failed: %08x\n", hres);
+    VariantClear(&v);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLCSSStyleDeclaration2_get_perspective(css_style, &v);
+    ok(hres == S_OK, "get_perspective failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR && V_BSTR(&v) && !lstrcmpW(V_BSTR(&v), L"100px"), "perspective = %s\n", wine_dbgstr_variant(&v));
+    VariantClear(&v);
 }
 
 static void test_body_style(IHTMLStyle *style)

@@ -4765,8 +4765,8 @@ static void dump_get_job_info_request( const struct get_job_info_request *req )
 
 static void dump_get_job_info_reply( const struct get_job_info_reply *req )
 {
-    fprintf( stderr, " total_processes=%08x", req->total_processes );
-    fprintf( stderr, ", active_processes=%08x", req->active_processes );
+    fprintf( stderr, " total_processes=%d", req->total_processes );
+    fprintf( stderr, ", active_processes=%d", req->active_processes );
 }
 
 static void dump_terminate_job_request( const struct terminate_job_request *req )

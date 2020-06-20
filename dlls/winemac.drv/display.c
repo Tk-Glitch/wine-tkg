@@ -71,6 +71,7 @@ static const WCHAR video_idW[] = {'V','i','d','e','o','I','D',0};
 static const WCHAR symbolic_link_valueW[]= {'S','y','m','b','o','l','i','c','L','i','n','k','V','a','l','u','e',0};
 static const WCHAR gpu_idW[] = {'G','P','U','I','D',0};
 static const WCHAR mointor_id_fmtW[] = {'M','o','n','i','t','o','r','I','D','%','d',0};
+static const WCHAR adapter_prefixW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
 static const WCHAR adapter_name_fmtW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y','%','d',0};
 static const WCHAR state_flagsW[] = {'S','t','a','t','e','F','l','a','g','s',0};
 static const WCHAR guid_fmtW[] = {
@@ -136,44 +137,73 @@ static CRITICAL_SECTION modes_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static BOOL inited_original_display_mode;
 
-static BOOL get_display_device_reg_key(char *key, unsigned len)
+static HANDLE get_display_device_init_mutex(void)
 {
-    static const char display_device_guid_prop[] = "__wine_display_device_guid";
-    static const char video_path[] = "System\\CurrentControlSet\\Control\\Video\\{";
-    static const char display0[] = "}\\0000";
-    ATOM guid_atom;
+    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
+    HANDLE mutex = CreateMutexW(NULL, FALSE, init_mutexW);
 
-    assert(len >= sizeof(video_path) + sizeof(display0) + 40);
+    WaitForSingleObject(mutex, INFINITE);
+    return mutex;
+}
 
-    guid_atom = HandleToULong(GetPropA(GetDesktopWindow(), display_device_guid_prop));
-    if (!guid_atom) return FALSE;
+static void release_display_device_init_mutex(HANDLE mutex)
+{
+    ReleaseMutex(mutex);
+    CloseHandle(mutex);
+}
 
-    memcpy(key, video_path, sizeof(video_path));
+static BOOL get_display_device_reg_key(const WCHAR *device_name, WCHAR *key, unsigned len)
+{
+    WCHAR value_name[MAX_PATH], buffer[MAX_PATH], *end_ptr;
+    DWORD adapter_index, size;
 
-    if (!GlobalGetAtomNameA(guid_atom, key + strlen(key), 40))
+    /* Device name has to be \\.\DISPLAY%d */
+    if (strncmpiW(device_name, adapter_prefixW, ARRAY_SIZE(adapter_prefixW)))
         return FALSE;
 
-    strcat(key, display0);
+    /* Parse \\.\DISPLAY* */
+    adapter_index = strtolW(device_name + ARRAY_SIZE(adapter_prefixW), &end_ptr, 10) - 1;
+    if (*end_ptr)
+        return FALSE;
 
-    TRACE("display device key %s\n", wine_dbgstr_a(key));
+    /* Open \Device\Video* in HKLM\HARDWARE\DEVICEMAP\VIDEO\ */
+    sprintfW(value_name, device_video_fmtW, adapter_index);
+    size = sizeof(buffer);
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, video_keyW, value_name, RRF_RT_REG_SZ, NULL, buffer, &size))
+        return FALSE;
+
+    if (len < lstrlenW(buffer + 18) + 1)
+        return FALSE;
+
+    /* Skip \Registry\Machine\ prefix */
+    lstrcpyW(key, buffer + 18);
+    TRACE("display device %s registry settings key %s.\n", wine_dbgstr_w(device_name), wine_dbgstr_w(key));
     return TRUE;
 }
 
 
-static BOOL read_registry_settings(DEVMODEW *dm)
+static BOOL read_registry_settings(const WCHAR *device_name, DEVMODEW *dm)
 {
-    char wine_mac_reg_key[128];
+    WCHAR wine_mac_reg_key[MAX_PATH];
+    HANDLE mutex;
     HKEY hkey;
     DWORD type, size;
     BOOL ret = TRUE;
 
     dm->dmFields = 0;
 
-    if (!get_display_device_reg_key(wine_mac_reg_key, sizeof(wine_mac_reg_key)))
+    mutex = get_display_device_init_mutex();
+    if (!get_display_device_reg_key(device_name, wine_mac_reg_key, ARRAY_SIZE(wine_mac_reg_key)))
+    {
+        release_display_device_init_mutex(mutex);
         return FALSE;
+    }
 
-    if (RegOpenKeyExA(HKEY_CURRENT_CONFIG, wine_mac_reg_key, 0, KEY_READ, &hkey))
+    if (RegOpenKeyExW(HKEY_CURRENT_CONFIG, wine_mac_reg_key, 0, KEY_READ, &hkey))
+    {
+        release_display_device_init_mutex(mutex);
         return FALSE;
+    }
 
 #define query_value(name, data) \
     size = sizeof(DWORD); \
@@ -193,28 +223,39 @@ static BOOL read_registry_settings(DEVMODEW *dm)
     dm->dmFields |= DM_DISPLAYFLAGS;
     query_value("DefaultSettings.XPanning", &dm->dmPosition.x);
     query_value("DefaultSettings.YPanning", &dm->dmPosition.y);
+    dm->dmFields |= DM_POSITION;
     query_value("DefaultSettings.Orientation", &dm->dmDisplayOrientation);
+    dm->dmFields |= DM_DISPLAYORIENTATION;
     query_value("DefaultSettings.FixedOutput", &dm->dmDisplayFixedOutput);
 
 #undef query_value
 
     RegCloseKey(hkey);
+    release_display_device_init_mutex(mutex);
     return ret;
 }
 
 
-static BOOL write_registry_settings(const DEVMODEW *dm)
+static BOOL write_registry_settings(const WCHAR *device_name, const DEVMODEW *dm)
 {
-    char wine_mac_reg_key[128];
+    WCHAR wine_mac_reg_key[MAX_PATH];
+    HANDLE mutex;
     HKEY hkey;
     BOOL ret = TRUE;
 
-    if (!get_display_device_reg_key(wine_mac_reg_key, sizeof(wine_mac_reg_key)))
+    mutex = get_display_device_init_mutex();
+    if (!get_display_device_reg_key(device_name, wine_mac_reg_key, ARRAY_SIZE(wine_mac_reg_key)))
+    {
+        release_display_device_init_mutex(mutex);
         return FALSE;
+    }
 
-    if (RegCreateKeyExA(HKEY_CURRENT_CONFIG, wine_mac_reg_key, 0, NULL,
+    if (RegCreateKeyExW(HKEY_CURRENT_CONFIG, wine_mac_reg_key, 0, NULL,
                         REG_OPTION_VOLATILE, KEY_WRITE, NULL, &hkey, NULL))
+    {
+        release_display_device_init_mutex(mutex);
         return FALSE;
+    }
 
 #define set_value(name, data) \
     if (RegSetValueExA(hkey, name, 0, REG_DWORD, (const BYTE*)(data), sizeof(DWORD))) \
@@ -233,6 +274,7 @@ static BOOL write_registry_settings(const DEVMODEW *dm)
 #undef set_value
 
     RegCloseKey(hkey);
+    release_display_device_init_mutex(mutex);
     return ret;
 }
 
@@ -816,12 +858,6 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
         devmode = &default_mode;
     }
 
-    if (lstrcmpiW(primary_adapter, devname))
-    {
-        FIXME("Changing non-primary adapter settings is currently unsupported.\n");
-        return DISP_CHANGE_SUCCESSFUL;
-    }
-
     if (is_detached_mode(devmode))
     {
         FIXME("Detaching adapters is currently unsupported.\n");
@@ -891,7 +927,9 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
             if (devmode->dmPelsHeight != height)
                 continue;
         }
-        if ((devmode->dmFields & DM_DISPLAYFREQUENCY) && devmode->dmDisplayFrequency != 0)
+        if ((devmode->dmFields & DM_DISPLAYFREQUENCY) &&
+            devmode->dmDisplayFrequency != 0 &&
+            devmode->dmDisplayFrequency != 1)
         {
             double refresh_rate = CGDisplayModeGetRefreshRate(display_mode);
             if (!refresh_rate)
@@ -939,13 +977,18 @@ better:
         /* we have a valid mode */
         TRACE("Requested display settings match mode %ld\n", best);
 
-        if ((flags & CDS_UPDATEREGISTRY) && !write_registry_settings(devmode))
+        if ((flags & CDS_UPDATEREGISTRY) && !write_registry_settings(devname, devmode))
         {
             WARN("Failed to update registry\n");
             ret = DISP_CHANGE_NOTUPDATED;
         }
         else if (flags & (CDS_TEST | CDS_NORESET))
             ret = DISP_CHANGE_SUCCESSFUL;
+        else if (lstrcmpiW(primary_adapter, devname))
+        {
+            FIXME("Changing non-primary adapter settings is currently unsupported.\n");
+            ret = DISP_CHANGE_SUCCESSFUL;
+        }
         else if (macdrv_set_display_mode(&displays[0], best_display_mode))
         {
             int mode_bpp = display_mode_bits_per_pixel(best_display_mode);
@@ -1015,7 +1058,7 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
     if (mode == ENUM_REGISTRY_SETTINGS)
     {
         TRACE("mode %d (registry) -- getting default mode\n", mode);
-        return read_registry_settings(devmode);
+        return read_registry_settings(devname, devmode);
     }
 
     if (macdrv_get_displays(&displays, &num_displays))
@@ -1545,7 +1588,7 @@ done:
  * Return FALSE on failure and TRUE on success.
  */
 static BOOL macdrv_init_monitor(HDEVINFO devinfo, const struct macdrv_monitor *monitor, int monitor_index,
-                                 int video_index, const LUID *gpu_luid)
+                                 int video_index, const LUID *gpu_luid, UINT output_id)
 {
     SP_DEVINFO_DATA device_data = {sizeof(SP_DEVINFO_DATA)};
     WCHAR nameW[MAX_PATH];
@@ -1573,7 +1616,7 @@ static BOOL macdrv_init_monitor(HDEVINFO devinfo, const struct macdrv_monitor *m
 
     /* Write DEVPROPKEY_MONITOR_OUTPUT_ID */
     if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_MONITOR_OUTPUT_ID,
-                                   DEVPROP_TYPE_UINT32, (const BYTE *)&video_index, sizeof(video_index), 0))
+                                   DEVPROP_TYPE_UINT32, (const BYTE *)&output_id, sizeof(output_id), 0))
         goto done;
 
     /* Create driver key */
@@ -1671,7 +1714,6 @@ static void cleanup_devices(void)
  */
 void macdrv_init_display_devices(BOOL force)
 {
-    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
     HANDLE mutex;
     struct macdrv_gpu *gpus = NULL;
     struct macdrv_adapter *adapters = NULL;
@@ -1685,9 +1727,9 @@ void macdrv_init_display_devices(BOOL force)
     WCHAR guidW[40];
     WCHAR driverW[1024];
     LUID gpu_luid;
+    UINT output_id = 0;
 
-    mutex = CreateMutexW(NULL, FALSE, init_mutexW);
-    WaitForSingleObject(mutex, INFINITE);
+    mutex = get_display_device_init_mutex();
 
     if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, video_keyW, 0, NULL, REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &video_hkey,
                         &disposition))
@@ -1736,7 +1778,7 @@ void macdrv_init_display_devices(BOOL force)
             for (monitor = 0; monitor < monitor_count; monitor++)
             {
                 TRACE("monitor: %#x %s\n", monitor, monitors[monitor].name);
-                if (!macdrv_init_monitor(monitor_devinfo, &monitors[monitor], monitor, video_index, &gpu_luid))
+                if (!macdrv_init_monitor(monitor_devinfo, &monitors[monitor], monitor, video_index, &gpu_luid, output_id++))
                     goto done;
             }
 
@@ -1755,8 +1797,7 @@ done:
     SetupDiDestroyDeviceInfoList(gpu_devinfo);
     RegCloseKey(video_hkey);
 
-    ReleaseMutex(mutex);
-    CloseHandle(mutex);
+    release_display_device_init_mutex(mutex);
 
     macdrv_free_gpus(gpus);
     macdrv_free_adapters(adapters);

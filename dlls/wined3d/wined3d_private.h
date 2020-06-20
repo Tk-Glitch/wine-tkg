@@ -64,7 +64,6 @@
 
 /* Driver quirks */
 #define WINED3D_QUIRK_ARB_VS_OFFSET_LIMIT       0x00000001
-#define WINED3D_QUIRK_SET_TEXCOORD_W            0x00000002
 #define WINED3D_QUIRK_GLSL_CLIP_VARYING         0x00000004
 #define WINED3D_QUIRK_ALLOWS_SPECULAR_ALPHA     0x00000008
 #define WINED3D_QUIRK_NV_CLIP_BROKEN            0x00000010
@@ -4013,7 +4012,6 @@ void wined3d_resource_update_draw_binding(struct wined3d_resource *resource) DEC
 
 #define WINED3D_LOCATION_DISCARDED      0x00000001
 #define WINED3D_LOCATION_SYSMEM         0x00000002
-#define WINED3D_LOCATION_USER_MEMORY    0x00000004
 #define WINED3D_LOCATION_BUFFER         0x00000008
 #define WINED3D_LOCATION_TEXTURE_RGB    0x00000010
 #define WINED3D_LOCATION_TEXTURE_SRGB   0x00000020
@@ -4085,7 +4083,6 @@ struct wined3d_texture
     DWORD flags;
     DWORD update_map_binding;
 
-    void *user_memory;
     unsigned int row_pitch;
     unsigned int slice_pitch;
 
@@ -4138,6 +4135,8 @@ struct wined3d_texture
         uint32_t map_flags;
         DWORD locations;
         struct wined3d_bo_gl bo;
+
+        void *user_memory;
     } *sub_resources;
 };
 

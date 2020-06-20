@@ -1288,11 +1288,12 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface7_Flip(IDirectDrawSurface7 
 {
     struct ddraw_surface *dst_impl = impl_from_IDirectDrawSurface7(iface);
     struct ddraw_surface *src_impl = unsafe_impl_from_IDirectDrawSurface7(src);
+    struct ddraw_texture *dst_ddraw_texture, *src_ddraw_texture;
     struct wined3d_rendertarget_view *tmp_rtv, *src_rtv, *rtv;
-    struct ddraw_texture *ddraw_texture, *prev_ddraw_texture;
     DDSCAPS2 caps = {DDSCAPS_FLIP, 0, 0, {0}};
     struct wined3d_texture *texture;
     IDirectDrawSurface7 *current;
+    void *texture_memory;
     HRESULT hr;
 
     TRACE("iface %p, src %p, flags %#x.\n", iface, src, flags);
@@ -1318,7 +1319,8 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface7_Flip(IDirectDrawSurface7 
         ERR("Invalid sub-resource index %u on surface %p.\n", dst_impl->sub_resource_idx, dst_impl);
     texture = dst_impl->wined3d_texture;
     rtv = wined3d_device_get_rendertarget_view(dst_impl->ddraw->wined3d_device, 0);
-    ddraw_texture = wined3d_texture_get_parent(dst_impl->wined3d_texture);
+    dst_ddraw_texture = wined3d_texture_get_parent(dst_impl->wined3d_texture);
+    texture_memory = dst_ddraw_texture->texture_memory;
 
     if (src_impl)
     {
@@ -1345,12 +1347,13 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface7_Flip(IDirectDrawSurface7 
         wined3d_rendertarget_view_set_parent(src_rtv, dst_impl);
         dst_impl->wined3d_rtv = src_rtv;
         wined3d_texture_set_sub_resource_parent(src_impl->wined3d_texture, 0, dst_impl);
-        prev_ddraw_texture = wined3d_texture_get_parent(src_impl->wined3d_texture);
-        wined3d_resource_set_parent(wined3d_texture_get_resource(src_impl->wined3d_texture), ddraw_texture);
+        src_ddraw_texture = wined3d_texture_get_parent(src_impl->wined3d_texture);
+        dst_ddraw_texture->texture_memory = src_ddraw_texture->texture_memory;
+        wined3d_resource_set_parent(wined3d_texture_get_resource(src_impl->wined3d_texture), dst_ddraw_texture);
+        dst_ddraw_texture = src_ddraw_texture;
         if (src_impl->sub_resource_idx)
             ERR("Invalid sub-resource index %u on surface %p.\n", src_impl->sub_resource_idx, src_impl);
         dst_impl->wined3d_texture = src_impl->wined3d_texture;
-        ddraw_texture = prev_ddraw_texture;
     }
     else
     {
@@ -1376,9 +1379,10 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface7_Flip(IDirectDrawSurface7 
             wined3d_rendertarget_view_set_parent(src_rtv, dst_impl);
             dst_impl->wined3d_rtv = src_rtv;
             wined3d_texture_set_sub_resource_parent(src_impl->wined3d_texture, 0, dst_impl);
-            prev_ddraw_texture = wined3d_texture_get_parent(src_impl->wined3d_texture);
-            wined3d_resource_set_parent(wined3d_texture_get_resource(src_impl->wined3d_texture), ddraw_texture);
-            ddraw_texture = prev_ddraw_texture;
+            src_ddraw_texture = wined3d_texture_get_parent(src_impl->wined3d_texture);
+            dst_ddraw_texture->texture_memory = src_ddraw_texture->texture_memory;
+            wined3d_resource_set_parent(wined3d_texture_get_resource(src_impl->wined3d_texture), dst_ddraw_texture);
+            dst_ddraw_texture = src_ddraw_texture;
             if (src_impl->sub_resource_idx)
                 ERR("Invalid sub-resource index %u on surface %p.\n", src_impl->sub_resource_idx, src_impl);
             dst_impl->wined3d_texture = src_impl->wined3d_texture;
@@ -1393,7 +1397,8 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface7_Flip(IDirectDrawSurface7 
     wined3d_rendertarget_view_set_parent(tmp_rtv, src_impl);
     src_impl->wined3d_rtv = tmp_rtv;
     wined3d_texture_set_sub_resource_parent(texture, 0, src_impl);
-    wined3d_resource_set_parent(wined3d_texture_get_resource(texture), ddraw_texture);
+    dst_ddraw_texture->texture_memory = texture_memory;
+    wined3d_resource_set_parent(wined3d_texture_get_resource(texture), dst_ddraw_texture);
     src_impl->wined3d_texture = texture;
 
     if (flags & ~(DDFLIP_NOVSYNC | DDFLIP_INTERVAL2 | DDFLIP_INTERVAL3 | DDFLIP_INTERVAL4))
@@ -4605,7 +4610,7 @@ static HRESULT WINAPI ddraw_surface1_SetClipper(IDirectDrawSurface *iface, IDire
  *****************************************************************************/
 static HRESULT WINAPI ddraw_surface7_SetSurfaceDesc(IDirectDrawSurface7 *iface, DDSURFACEDESC2 *DDSD, DWORD Flags)
 {
-    struct ddraw_surface *This = impl_from_IDirectDrawSurface7(iface);
+    struct ddraw_surface *surface = impl_from_IDirectDrawSurface7(iface);
     HRESULT hr;
     const DWORD allowed_flags = DDSD_LPSURFACE | DDSD_PIXELFORMAT | DDSD_WIDTH
             | DDSD_HEIGHT | DDSD_PITCH | DDSD_CAPS;
@@ -4624,9 +4629,9 @@ static HRESULT WINAPI ddraw_surface7_SetSurfaceDesc(IDirectDrawSurface7 *iface, 
         WARN("Flags is %x, returning DDERR_INVALIDPARAMS\n", Flags);
         return DDERR_INVALIDPARAMS;
     }
-    if (!(This->surface_desc.ddsCaps.dwCaps & DDSCAPS_SYSTEMMEMORY)
-            || This->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE
-            || This->surface_desc.ddsCaps.dwCaps2 & (DDSCAPS2_TEXTUREMANAGE | DDSCAPS2_D3DTEXTUREMANAGE))
+    if (!(surface->surface_desc.ddsCaps.dwCaps & DDSCAPS_SYSTEMMEMORY)
+            || surface->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE
+            || surface->surface_desc.ddsCaps.dwCaps2 & (DDSCAPS2_TEXTUREMANAGE | DDSCAPS2_D3DTEXTUREMANAGE))
     {
         WARN("Surface is not in system memory, returning DDERR_INVALIDSURFACETYPE.\n");
         return DDERR_INVALIDSURFACETYPE;
@@ -4662,10 +4667,10 @@ static HRESULT WINAPI ddraw_surface7_SetSurfaceDesc(IDirectDrawSurface7 *iface, 
                     DDSD->u1.lPitch, DDSD->dwWidth);
             return DDERR_INVALIDPARAMS;
         }
-        if (DDSD->dwWidth != This->surface_desc.dwWidth)
-            TRACE("Surface width changed from %u to %u.\n", This->surface_desc.dwWidth, DDSD->dwWidth);
-        if (DDSD->u1.lPitch != This->surface_desc.u1.lPitch)
-            TRACE("Surface pitch changed from %u to %u.\n", This->surface_desc.u1.lPitch, DDSD->u1.lPitch);
+        if (DDSD->dwWidth != surface->surface_desc.dwWidth)
+            TRACE("Surface width changed from %u to %u.\n", surface->surface_desc.dwWidth, DDSD->dwWidth);
+        if (DDSD->u1.lPitch != surface->surface_desc.u1.lPitch)
+            TRACE("Surface pitch changed from %u to %u.\n", surface->surface_desc.u1.lPitch, DDSD->u1.lPitch);
         pitch = DDSD->u1.lPitch;
         width = DDSD->dwWidth;
     }
@@ -4676,8 +4681,8 @@ static HRESULT WINAPI ddraw_surface7_SetSurfaceDesc(IDirectDrawSurface7 *iface, 
     }
     else
     {
-        pitch = This->surface_desc.u1.lPitch;
-        width = This->surface_desc.dwWidth;
+        pitch = surface->surface_desc.u1.lPitch;
+        width = surface->surface_desc.dwWidth;
     }
 
     if (DDSD->dwFlags & DDSD_HEIGHT)
@@ -4687,13 +4692,13 @@ static HRESULT WINAPI ddraw_surface7_SetSurfaceDesc(IDirectDrawSurface7 *iface, 
             WARN("Height is 0, returning DDERR_INVALIDPARAMS.\n");
             return DDERR_INVALIDPARAMS;
         }
-        if (DDSD->dwHeight != This->surface_desc.dwHeight)
-            TRACE("Surface height changed from %u to %u.\n", This->surface_desc.dwHeight, DDSD->dwHeight);
+        if (DDSD->dwHeight != surface->surface_desc.dwHeight)
+            TRACE("Surface height changed from %u to %u.\n", surface->surface_desc.dwHeight, DDSD->dwHeight);
         height = DDSD->dwHeight;
     }
     else
     {
-        height = This->surface_desc.dwHeight;
+        height = surface->surface_desc.dwHeight;
     }
 
     wined3d_mutex_lock();
@@ -4708,17 +4713,17 @@ static HRESULT WINAPI ddraw_surface7_SetSurfaceDesc(IDirectDrawSurface7 *iface, 
             wined3d_mutex_unlock();
             return DDERR_INVALIDPARAMS;
         }
-        current_format_id = wined3dformat_from_ddrawformat(&This->surface_desc.u4.ddpfPixelFormat);
+        current_format_id = wined3dformat_from_ddrawformat(&surface->surface_desc.u4.ddpfPixelFormat);
         if (format_id != current_format_id)
             TRACE("Surface format changed from %#x to %#x.\n", current_format_id, format_id);
     }
     else
     {
-        format_id = wined3dformat_from_ddrawformat(&This->surface_desc.u4.ddpfPixelFormat);
+        format_id = wined3dformat_from_ddrawformat(&surface->surface_desc.u4.ddpfPixelFormat);
     }
 
-    if (FAILED(hr = wined3d_texture_update_desc(This->wined3d_texture, width, height,
-            format_id, WINED3D_MULTISAMPLE_NONE, 0, DDSD->lpSurface, pitch)))
+    if (FAILED(hr = wined3d_texture_update_desc(surface->wined3d_texture, surface->sub_resource_idx,
+            width, height, format_id, WINED3D_MULTISAMPLE_NONE, 0, DDSD->lpSurface, pitch)))
     {
         WARN("Failed to update surface desc, hr %#x.\n", hr);
         wined3d_mutex_unlock();
@@ -4726,13 +4731,13 @@ static HRESULT WINAPI ddraw_surface7_SetSurfaceDesc(IDirectDrawSurface7 *iface, 
     }
 
     if (DDSD->dwFlags & DDSD_WIDTH)
-        This->surface_desc.dwWidth = width;
+        surface->surface_desc.dwWidth = width;
     if (DDSD->dwFlags & DDSD_PITCH)
-        This->surface_desc.u1.lPitch = DDSD->u1.lPitch;
+        surface->surface_desc.u1.lPitch = DDSD->u1.lPitch;
     if (DDSD->dwFlags & DDSD_HEIGHT)
-        This->surface_desc.dwHeight = height;
+        surface->surface_desc.dwHeight = height;
     if (DDSD->dwFlags & DDSD_PIXELFORMAT)
-        This->surface_desc.u4.ddpfPixelFormat = DDSD->u4.ddpfPixelFormat;
+        surface->surface_desc.u4.ddpfPixelFormat = DDSD->u4.ddpfPixelFormat;
 
     wined3d_mutex_unlock();
 
@@ -5863,28 +5868,40 @@ static HRESULT ddraw_surface_reserve_memory(struct wined3d_texture *wined3d_text
     static const unsigned int extra_size = 0x10000;
 
     struct ddraw_texture *texture = wined3d_texture_get_parent(wined3d_texture);
-    struct wined3d_resource_desc desc;
+    struct wined3d_resource_desc resource_desc;
+    struct wined3d_sub_resource_desc desc;
     unsigned int pitch, slice_pitch;
-    HRESULT hr;
+    unsigned int sub_resource_idx;
+    HRESULT hr = WINED3D_OK;
+    unsigned int offset;
 
-    wined3d_resource_get_desc(wined3d_texture_get_resource(wined3d_texture), &desc);
-    if (!(texture->texture_memory = heap_alloc_zero(desc.size + extra_size)))
+    wined3d_resource_get_desc(wined3d_texture_get_resource(wined3d_texture), &resource_desc);
+    if (!(texture->texture_memory = heap_alloc_zero(resource_desc.size + extra_size)))
     {
         ERR("Out of memory.\n");
         return E_OUTOFMEMORY;
     }
     TRACE("texture->texture_memory %p.\n", texture->texture_memory);
 
-    wined3d_texture_get_pitch(wined3d_texture, 0, &pitch, &slice_pitch);
-
-    if (FAILED(hr = wined3d_texture_update_desc(wined3d_texture,
-            desc.width, desc.height, desc.format,
-            WINED3D_MULTISAMPLE_NONE, 0, texture->texture_memory, pitch)))
+    offset = 0;
+    sub_resource_idx = 0;
+    while (wined3d_texture_get_sub_resource_desc(wined3d_texture, sub_resource_idx, &desc)
+            == WINED3D_OK)
     {
-        heap_free(texture->texture_memory);
-        texture->texture_memory = NULL;
-    }
+        wined3d_texture_get_pitch(wined3d_texture, sub_resource_idx, &pitch, &slice_pitch);
 
+        if (FAILED(hr = wined3d_texture_update_desc(wined3d_texture, sub_resource_idx,
+                desc.width, desc.height, resource_desc.format,
+                desc.multisample_type, desc.multisample_quality,
+                (BYTE *)texture->texture_memory + offset, pitch)))
+        {
+            heap_free(texture->texture_memory);
+            texture->texture_memory = NULL;
+            break;
+        }
+        ++sub_resource_idx;
+        offset += desc.size;
+    }
     return hr;
 }
 
@@ -6516,7 +6533,7 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
         }
     }
 
-    if ((desc->dwFlags & DDSD_LPSURFACE) && FAILED(hr = wined3d_texture_update_desc(wined3d_texture,
+    if ((desc->dwFlags & DDSD_LPSURFACE) && FAILED(hr = wined3d_texture_update_desc(wined3d_texture, 0,
             wined3d_desc.width, wined3d_desc.height, wined3d_desc.format,
             WINED3D_MULTISAMPLE_NONE, 0, desc->lpSurface, pitch)))
     {

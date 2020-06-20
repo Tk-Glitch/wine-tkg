@@ -114,7 +114,20 @@ static COLORREF get_gdi_brush_color(const GpBrush *brush)
     return ARGB2COLORREF(argb);
 }
 
-static HBITMAP create_hatch_bitmap(const GpHatch *hatch)
+static ARGB blend_colors(ARGB start, ARGB end, REAL position);
+
+static void init_hatch_palette(ARGB *hatch_palette, ARGB fore_color, ARGB back_color)
+{
+    /* Pass the center of a 45-degree diagonal line with width of one unit through the
+     * center of a unit square, and the portion of the square that will be covered will
+     * equal sqrt(2) - 1/2.  The covered portion for adjacent squares will be 1/4. */
+    hatch_palette[0] = back_color;
+    hatch_palette[1] = blend_colors(back_color, fore_color, 0.25);
+    hatch_palette[2] = blend_colors(back_color, fore_color, sqrt(2.0) - 0.5);
+    hatch_palette[3] = fore_color;
+}
+
+static HBITMAP create_hatch_bitmap(const GpHatch *hatch, INT origin_x, INT origin_y)
 {
     HBITMAP hbmp;
     BITMAPINFOHEADER bmih;
@@ -132,18 +145,32 @@ static HBITMAP create_hatch_bitmap(const GpHatch *hatch)
     hbmp = CreateDIBSection(0, (BITMAPINFO *)&bmih, DIB_RGB_COLORS, (void **)&bits, NULL, 0);
     if (hbmp)
     {
-        const char *hatch_data;
+        const unsigned char *hatch_data;
 
         if (get_hatch_data(hatch->hatchstyle, &hatch_data) == Ok)
         {
+            ARGB hatch_palette[4];
+            init_hatch_palette(hatch_palette, hatch->forecol, hatch->backcol);
+
+            /* Anti-aliasing is only specified for diagonal hatch patterns.
+             * This implementation repeats the pattern, shifts as needed,
+             * then uses bitmask 1 to check the pixel value, and the 0x82
+             * bitmask to check the adjacent pixel values, to determine the
+             * degree of shading needed. */
             for (y = 0; y < 8; y++)
             {
-                for (x = 0; x < 8; x++)
+                const int hy = (((y + origin_y) % 8) + 8) % 8;
+                const int hx = ((origin_x % 8) + 8) % 8;
+                unsigned int row = (0x10101 * hatch_data[hy]) >> hx;
+
+                for (x = 0; x < 8; x++, row >>= 1)
                 {
-                    if (hatch_data[y] & (0x80 >> x))
-                        bits[y * 8 + x] = hatch->forecol;
+                    int index;
+                    if (hatch_data[8])
+                        index = (row & 1) ? 2 : (row & 0x82) ? 1 : 0;
                     else
-                        bits[y * 8 + x] = hatch->backcol;
+                        index = (row & 1) ? 3 : 0;
+                    bits[y * 8 + 7 - x] = hatch_palette[index];
                 }
             }
         }
@@ -159,7 +186,7 @@ static HBITMAP create_hatch_bitmap(const GpHatch *hatch)
     return hbmp;
 }
 
-static GpStatus create_gdi_logbrush(const GpBrush *brush, LOGBRUSH *lb)
+static GpStatus create_gdi_logbrush(const GpBrush *brush, LOGBRUSH *lb, INT origin_x, INT origin_y)
 {
     switch (brush->bt)
     {
@@ -177,7 +204,7 @@ static GpStatus create_gdi_logbrush(const GpBrush *brush, LOGBRUSH *lb)
             const GpHatch *hatch = (const GpHatch *)brush;
             HBITMAP hbmp;
 
-            hbmp = create_hatch_bitmap(hatch);
+            hbmp = create_hatch_bitmap(hatch, origin_x, origin_y);
             if (!hbmp) return OutOfMemory;
 
             lb->lbStyle = BS_PATTERN;
@@ -206,12 +233,12 @@ static GpStatus free_gdi_logbrush(LOGBRUSH *lb)
     return Ok;
 }
 
-static HBRUSH create_gdi_brush(const GpBrush *brush)
+static HBRUSH create_gdi_brush(const GpBrush *brush, INT origin_x, INT origin_y)
 {
     LOGBRUSH lb;
     HBRUSH gdibrush;
 
-    if (create_gdi_logbrush(brush, &lb) != Ok) return 0;
+    if (create_gdi_logbrush(brush, &lb, origin_x, origin_y) != Ok) return 0;
 
     gdibrush = CreateBrushIndirect(&lb);
     free_gdi_logbrush(&lb);
@@ -268,14 +295,14 @@ static INT prepare_dc(GpGraphics *graphics, GpPen *pen)
         }
         TRACE("\n and the pen style is %x\n", pen->style);
 
-        create_gdi_logbrush(pen->brush, &lb);
+        create_gdi_logbrush(pen->brush, &lb, graphics->origin_x, graphics->origin_y);
         gdipen = ExtCreatePen(pen->style, gdip_round(width), &lb,
                               numdashes, dash_array);
         free_gdi_logbrush(&lb);
     }
     else
     {
-        create_gdi_logbrush(pen->brush, &lb);
+        create_gdi_logbrush(pen->brush, &lb, graphics->origin_x, graphics->origin_y);
         gdipen = ExtCreatePen(pen->style, gdip_round(width), &lb, 0, NULL);
         free_gdi_logbrush(&lb);
     }
@@ -1194,7 +1221,7 @@ static GpStatus brush_fill_path(GpGraphics *graphics, GpBrush *brush)
     {
         HBRUSH gdibrush, old_brush;
 
-        gdibrush = create_gdi_brush(brush);
+        gdibrush = create_gdi_brush(brush, graphics->origin_x, graphics->origin_y);
         if (!gdibrush)
         {
             status = OutOfMemory;
@@ -1245,25 +1272,33 @@ static GpStatus brush_fill_pixels(GpGraphics *graphics, GpBrush *brush,
     {
         int x, y;
         GpHatch *fill = (GpHatch*)brush;
-        const char *hatch_data;
+        const unsigned char *hatch_data;
+        ARGB hatch_palette[4];
 
         if (get_hatch_data(fill->hatchstyle, &hatch_data) != Ok)
             return NotImplemented;
 
-        for (x=0; x<fill_area->Width; x++)
-            for (y=0; y<fill_area->Height; y++)
+        init_hatch_palette(hatch_palette, fill->forecol, fill->backcol);
+
+        /* See create_hatch_bitmap for an explanation of how index is derived. */
+        for (y = 0; y < fill_area->Height; y++, argb_pixels += cdwStride)
+        {
+            const int hy = (7 - ((y + fill_area->Y - graphics->origin_y) % 8)) % 8;
+            const int hx = ((graphics->origin_x % 8) + 8) % 8;
+            const unsigned int row = (0x10101 * hatch_data[hy]) >> hx;
+
+            for (x = 0; x < fill_area->Width; x++)
             {
-                int hx, hy;
-
-                /* FIXME: Account for the rendering origin */
-                hx = (x + fill_area->X) % 8;
-                hy = (y + fill_area->Y) % 8;
-
-                if ((hatch_data[7-hy] & (0x80 >> hx)) != 0)
-                    argb_pixels[x + y*cdwStride] = fill->forecol;
+                const unsigned int srow = row >> (7 - ((x + fill_area->X) % 8));
+                int index;
+                if (hatch_data[8])
+                    index = (srow & 1) ? 2 : (srow & 0x82) ? 1 : 0;
                 else
-                    argb_pixels[x + y*cdwStride] = fill->backcol;
+                    index = (srow & 1) ? 3 : 0;
+
+                argb_pixels[x] = hatch_palette[index];
             }
+        }
 
         return Ok;
     }
@@ -6267,12 +6302,7 @@ GpStatus WINGDIPAPI GdipSetPixelOffsetMode(GpGraphics *graphics, PixelOffsetMode
 
 GpStatus WINGDIPAPI GdipSetRenderingOrigin(GpGraphics *graphics, INT x, INT y)
 {
-    static int calls;
-
     TRACE("(%p,%i,%i)\n", graphics, x, y);
-
-    if (!(calls++))
-        FIXME("value is unused in rendering\n");
 
     if (!graphics)
         return InvalidParameter;

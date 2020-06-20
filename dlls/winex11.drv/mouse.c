@@ -365,6 +365,8 @@ void X11DRV_XInput2_Enable(void)
     {
         XISetMask( mask_bits, XI_RawButtonPress );
         XISetMask( mask_bits, XI_RawButtonRelease );
+        XISetMask( mask_bits, XI_RawKeyPress );
+        XISetMask( mask_bits, XI_RawKeyRelease );
         data->xi2_rawinput_only = TRUE;
     }
     else
@@ -1890,9 +1892,11 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
 
     virtual_rect = get_virtual_screen_rect();
     if (x_pos->min < x_pos->max)
-        x_scale = (virtual_rect.right - virtual_rect.left) / (x_pos->max - x_pos->min);
+        x_scale = (x_pos->mode == XIModeAbsolute ? 65535 : (virtual_rect.right - virtual_rect.left)) /
+                  (x_pos->max - x_pos->min);
     if (y_pos->min < y_pos->max)
-        y_scale = (virtual_rect.bottom - virtual_rect.top) / (y_pos->max - y_pos->min);
+        y_scale = (y_pos->mode == XIModeAbsolute ? 65535 : (virtual_rect.bottom - virtual_rect.top)) /
+                  (y_pos->max - y_pos->min);
 
     for (i = 0; i <= max( x_pos->number, y_pos->number ); i++)
     {
@@ -1903,10 +1907,9 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
         {
             dx = val;
             raw_dx = raw_val;
-            input.u.mi.dwFlags |= (x_pos->min < x_pos->max ? MOUSEEVENTF_VIRTUALDESK : 0) |
-                                  (x_pos->mode == XIModeAbsolute ? MOUSEEVENTF_ABSOLUTE : 0);
+            input.u.mi.dwFlags |= (x_pos->mode == XIModeAbsolute ? MOUSEEVENTF_ABSOLUTE : 0);
             if (x_pos->mode == XIModeAbsolute)
-                x_accum = virtual_rect.left + (dx - x_pos->min) * x_scale;
+                x_accum = (dx - x_pos->min) * x_scale;
             else
                 x_accum += dx * x_scale;
         }
@@ -1914,10 +1917,9 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
         {
             dy = val;
             raw_dy = raw_val;
-            input.u.mi.dwFlags |= (y_pos->min < y_pos->max ? MOUSEEVENTF_VIRTUALDESK : 0) |
-                                  (y_pos->mode == XIModeAbsolute ? MOUSEEVENTF_ABSOLUTE : 0);
+            input.u.mi.dwFlags |= (y_pos->mode == XIModeAbsolute ? MOUSEEVENTF_ABSOLUTE : 0);
             if (y_pos->mode == XIModeAbsolute)
-                y_accum = virtual_rect.top + (dy - y_pos->min) * y_scale;
+                y_accum = (dy - y_pos->min) * y_scale;
             else
                 y_accum += dy * y_scale;
         }
@@ -1938,14 +1940,14 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
         return FALSE;
     }
 
+    x_pos->value = x_accum - input.u.mi.dx;
+    y_pos->value = y_accum - input.u.mi.dy;
+
     pt.x = input.u.mi.dx;
     pt.y = input.u.mi.dy;
     fs_hack_scale_real_to_user(&pt);
     input.u.mi.dx = pt.x;
     input.u.mi.dy = pt.y;
-
-    x_pos->value = x_accum - input.u.mi.dx;
-    y_pos->value = y_accum - input.u.mi.dy;
 
     if (x_pos->mode == XIModeAbsolute)
     {
@@ -2130,6 +2132,10 @@ BOOL X11DRV_GenericEvent( HWND hwnd, XEvent *xev )
     case XI_RawButtonPress:
     case XI_RawButtonRelease:
         ret = X11DRV_RawButtonEvent( event );
+        break;
+    case XI_RawKeyPress:
+    case XI_RawKeyRelease:
+        ret = X11DRV_RawKeyEvent( event );
         break;
 
     default:

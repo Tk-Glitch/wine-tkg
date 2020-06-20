@@ -1506,14 +1506,6 @@ static BOOL wined3d_check_depth_stencil_format(const struct wined3d_adapter *ada
     if (!ds_format->depth_size && !ds_format->stencil_size)
         return FALSE;
 
-    /* Blacklist formats not supported on Windows */
-    if (ds_format->id == WINED3DFMT_S1_UINT_D15_UNORM /* Breaks the shadowvol2 dx7 sdk sample */
-            || ds_format->id == WINED3DFMT_S4X4_UINT_D24_UNORM)
-    {
-        TRACE("Format %s is blacklisted.\n", debug_d3dformat(ds_format->id));
-        return FALSE;
-    }
-
     return adapter->adapter_ops->adapter_check_format(adapter, adapter_format, NULL, ds_format);
 }
 
@@ -1679,13 +1671,6 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
 
     for (; gl_type <= gl_type_end; ++gl_type)
     {
-        if ((format->flags[gl_type] & format_flags) != format_flags)
-        {
-            TRACE("Requested format flags %#x, but format %s only has %#x.\n",
-                    format_flags, debug_d3dformat(check_format_id), format->flags[gl_type]);
-            return WINED3DERR_NOTAVAILABLE;
-        }
-
         if ((bind_flags & WINED3D_BIND_RENDER_TARGET)
                 && !adapter->adapter_ops->adapter_check_format(adapter, adapter_format, format, NULL))
         {
@@ -1703,6 +1688,13 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
         {
             TRACE("Requested WINED3D_BIND_DEPTH_STENCIL, but format %s is not supported for depth/stencil buffers.\n",
                     debug_d3dformat(check_format_id));
+            return WINED3DERR_NOTAVAILABLE;
+        }
+
+        if ((format->flags[gl_type] & format_flags) != format_flags)
+        {
+            TRACE("Requested format flags %#x, but format %s only has %#x.\n",
+                    format_flags, debug_d3dformat(check_format_id), format->flags[gl_type]);
             return WINED3DERR_NOTAVAILABLE;
         }
 

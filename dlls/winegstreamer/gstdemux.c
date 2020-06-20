@@ -79,7 +79,7 @@ struct gstdemux_source
     GstPad *their_src, *post_sink, *post_src, *my_sink;
     GstElement *flip;
     AM_MEDIA_TYPE mt;
-    HANDLE caps_event;
+    HANDLE caps_event, eos_event;
     GstSegment *segment;
     SourceSeeking seek;
 };
@@ -416,8 +416,8 @@ static GstCaps *amt_to_gst_caps_video(const AM_MEDIA_TYPE *mt)
         /* Clear some fields that shouldn't prevent us from connecting. */
         for (i = 0; i < gst_caps_get_size(caps); ++i)
         {
-            gst_structure_remove_field(gst_caps_get_structure(caps, i), "framerate");
-            gst_structure_remove_field(gst_caps_get_structure(caps, i), "pixel-aspect-ratio");
+            gst_structure_remove_fields(gst_caps_get_structure(caps, i),
+                    "framerate", "pixel-aspect-ratio", "colorimetry", "chroma-site", NULL);
         }
     }
     return caps;
@@ -699,6 +699,8 @@ static gboolean event_sink(GstPad *pad, GstObject *parent, GstEvent *event)
         case GST_EVENT_EOS:
             if (pin->pin.pin.peer)
                 IPin_EndOfStream(pin->pin.pin.peer);
+            else
+                SetEvent(pin->eos_event);
             return TRUE;
         case GST_EVENT_FLUSH_START:
             if (impl_from_strmbase_filter(pin->pin.pin.filter)->ignore_flush) {
@@ -1139,21 +1141,23 @@ static gboolean query_function(GstPad *pad, GstObject *parent, GstQuery *query)
 {
     struct gstdemux *This = gst_pad_get_element_private(pad);
     GstFormat format;
-    int ret;
-    LONGLONG duration;
 
     TRACE("filter %p, type %s.\n", This, GST_QUERY_TYPE_NAME(query));
 
     switch (GST_QUERY_TYPE(query)) {
         case GST_QUERY_DURATION:
-            gst_query_parse_duration (query, &format, NULL);
-            if (format == GST_FORMAT_PERCENT) {
-                gst_query_set_duration (query, GST_FORMAT_PERCENT, GST_FORMAT_PERCENT_MAX);
+            gst_query_parse_duration(query, &format, NULL);
+            if (format == GST_FORMAT_PERCENT)
+            {
+                gst_query_set_duration(query, GST_FORMAT_PERCENT, GST_FORMAT_PERCENT_MAX);
                 return TRUE;
             }
-            ret = gst_pad_query_convert (pad, GST_FORMAT_BYTES, This->filesize, format, &duration);
-            gst_query_set_duration(query, format, duration);
-            return ret;
+            else if (format == GST_FORMAT_BYTES)
+            {
+                gst_query_set_duration(query, GST_FORMAT_BYTES, This->filesize);
+                return TRUE;
+            }
+            return FALSE;
         case GST_QUERY_SEEKING:
             gst_query_parse_seeking (query, &format, NULL, NULL, NULL);
             if (format != GST_FORMAT_BYTES)
@@ -1322,6 +1326,26 @@ static HRESULT GST_Connect(struct gstdemux *This, IPin *pConnectPin)
     return S_OK;
 }
 
+static LONGLONG query_duration(GstPad *pad)
+{
+    gint64 duration, byte_length;
+
+    if (gst_pad_query_duration(pad, GST_FORMAT_TIME, &duration))
+        return duration / 100;
+
+    WARN("Failed to query time duration; trying to convert from byte length.\n");
+
+    /* To accurately get a duration for the stream, we want to only consider the
+     * length of that stream. Hence, query for the pad duration, instead of
+     * using the file duration. */
+    if (gst_pad_query_duration(pad, GST_FORMAT_BYTES, &byte_length)
+            && gst_pad_query_convert(pad, GST_FORMAT_BYTES, byte_length, GST_FORMAT_TIME, &duration))
+        return duration / 100;
+
+    ERR("Failed to query duration.\n");
+    return 0;
+}
+
 static inline struct gstdemux_source *impl_from_IMediaSeeking(IMediaSeeking *iface)
 {
     return CONTAINING_RECORD(iface, struct gstdemux_source, seek.IMediaSeeking_iface);
@@ -1391,6 +1415,15 @@ static HRESULT gstdemux_init_stream(struct strmbase_filter *iface)
     if (!filter->container)
         return VFW_E_NOT_CONNECTED;
 
+    for (i = 0; i < filter->source_count; ++i)
+    {
+        if (SUCCEEDED(pin_hr = BaseOutputPinImpl_Active(&filter->sources[i]->pin)))
+            hr = pin_hr;
+    }
+
+    if (FAILED(hr))
+        return hr;
+
     if (filter->no_more_pads_event)
         ResetEvent(filter->no_more_pads_event);
 
@@ -1422,11 +1455,6 @@ static HRESULT gstdemux_init_stream(struct strmbase_filter *iface)
                 stop_type, seeking->llStop * 100));
     }
 
-    for (i = 0; i < filter->source_count; ++i)
-    {
-        if (SUCCEEDED(pin_hr = BaseOutputPinImpl_Active(&filter->sources[i]->pin)))
-            hr = pin_hr;
-    }
     return hr;
 }
 
@@ -1577,7 +1605,6 @@ static const struct strmbase_sink_ops sink_ops =
 static BOOL gstdecoder_init_gst(struct gstdemux *filter)
 {
     GstElement *element = gst_element_factory_make("decodebin", NULL);
-    LONGLONG duration;
     unsigned int i;
     int ret;
 
@@ -1615,14 +1642,12 @@ static BOOL gstdecoder_init_gst(struct gstdemux *filter)
 
     WaitForSingleObject(filter->no_more_pads_event, INFINITE);
 
-    if (!gst_pad_query_duration(filter->sources[0]->their_src, GST_FORMAT_TIME, &duration))
-        ERR("Failed to query duration.\n");
     for (i = 0; i < filter->source_count; ++i)
     {
         struct gstdemux_source *pin = filter->sources[i];
         const HANDLE events[2] = {pin->caps_event, filter->error_event};
 
-        pin->seek.llDuration = pin->seek.llStop = duration / 100;
+        pin->seek.llDuration = pin->seek.llStop = query_duration(pin->their_src);
         pin->seek.llCurrent = 0;
         if (WaitForMultipleObjects(2, events, FALSE, INFINITE))
             return FALSE;
@@ -2106,6 +2131,7 @@ static void free_source_pin(struct gstdemux_source *pin)
     }
     gst_object_unref(pin->my_sink);
     CloseHandle(pin->caps_event);
+    CloseHandle(pin->eos_event);
     FreeMediaType(&pin->mt);
     gst_segment_free(pin->segment);
 
@@ -2138,6 +2164,7 @@ static struct gstdemux_source *create_pin(struct gstdemux *filter, const WCHAR *
 
     strmbase_source_init(&pin->pin, &filter->filter, name, &source_ops);
     pin->caps_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    pin->eos_event = CreateEventW(NULL, FALSE, FALSE, NULL);
     pin->segment = gst_segment_new();
     gst_segment_init(pin->segment, GST_FORMAT_TIME);
     pin->IQualityControl_iface.lpVtbl = &GSTOutPin_QualityControl_Vtbl;
@@ -2308,7 +2335,6 @@ static BOOL wave_parser_init_gst(struct gstdemux *filter)
     static const WCHAR source_name[] = {'o','u','t','p','u','t',0};
     struct gstdemux_source *pin;
     GstElement *element;
-    LONGLONG duration;
     HANDLE events[2];
     int ret;
 
@@ -2347,9 +2373,7 @@ static BOOL wave_parser_init_gst(struct gstdemux *filter)
         return FALSE;
     }
 
-    if (!gst_pad_query_duration(pin->their_src, GST_FORMAT_TIME, &duration))
-        ERR("Failed to query duration.\n");
-    pin->seek.llDuration = pin->seek.llStop = duration / 100;
+    pin->seek.llDuration = pin->seek.llStop = query_duration(pin->their_src);
     pin->seek.llCurrent = 0;
 
     events[0] = pin->caps_event;
@@ -2422,7 +2446,6 @@ static const struct strmbase_sink_ops avi_splitter_sink_ops =
 static BOOL avi_splitter_init_gst(struct gstdemux *filter)
 {
     GstElement *element = gst_element_factory_make("avidemux", NULL);
-    LONGLONG duration;
     unsigned int i;
     int ret;
 
@@ -2458,14 +2481,12 @@ static BOOL avi_splitter_init_gst(struct gstdemux *filter)
 
     WaitForSingleObject(filter->no_more_pads_event, INFINITE);
 
-    if (!gst_pad_query_duration(filter->sources[0]->their_src, GST_FORMAT_TIME, &duration))
-        ERR("Failed to query duration.\n");
     for (i = 0; i < filter->source_count; ++i)
     {
         struct gstdemux_source *pin = filter->sources[i];
         const HANDLE events[2] = {pin->caps_event, filter->error_event};
 
-        pin->seek.llDuration = pin->seek.llStop = duration / 100;
+        pin->seek.llDuration = pin->seek.llStop = query_duration(pin->their_src);
         pin->seek.llCurrent = 0;
         if (WaitForMultipleObjects(2, events, FALSE, INFINITE))
             return FALSE;
@@ -2544,8 +2565,8 @@ static BOOL mpeg_splitter_init_gst(struct gstdemux *filter)
     static const WCHAR source_name[] = {'A','u','d','i','o',0};
     struct gstdemux_source *pin;
     GstElement *element;
-    LONGLONG duration;
-    HANDLE events[2];
+    HANDLE events[3];
+    DWORD res;
     int ret;
 
     if (!(element = gst_element_factory_make("mpegaudioparse", NULL)))
@@ -2584,12 +2605,12 @@ static BOOL mpeg_splitter_init_gst(struct gstdemux *filter)
 
     events[0] = filter->duration_event;
     events[1] = filter->error_event;
-    if (WaitForMultipleObjects(2, events, FALSE, INFINITE))
+    events[2] = pin->eos_event;
+    res = WaitForMultipleObjects(3, events, FALSE, INFINITE);
+    if (res == 1)
         return FALSE;
 
-    if (!gst_pad_query_duration(pin->their_src, GST_FORMAT_TIME, &duration))
-        ERR("Failed to query duration.\n");
-    pin->seek.llDuration = pin->seek.llStop = duration / 100;
+    pin->seek.llDuration = pin->seek.llStop = query_duration(pin->their_src);
     pin->seek.llCurrent = 0;
 
     events[0] = pin->caps_event;

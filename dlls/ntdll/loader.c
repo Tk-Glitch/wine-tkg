@@ -1458,8 +1458,10 @@ static void call_constructors( WINE_MODREF *wm )
     {
         caddr_t relocbase = (caddr_t)map->l_addr;
 
-#ifdef __FreeBSD__  /* FreeBSD doesn't relocate l_addr */
-        if (!get_relocbase(map->l_addr, &relocbase)) return;
+#ifdef __FreeBSD__
+        /* On older FreeBSD versions, l_addr was the absolute load address, now it's the relocation offset. */
+        if (!dlsym(RTLD_DEFAULT, "_rtld_version_laddr_offset"))
+            if (!get_relocbase(map->l_addr, &relocbase)) return;
 #endif
         switch (dyn->d_tag)
         {
@@ -2608,8 +2610,8 @@ static const WCHAR *get_basename( const WCHAR *name )
     const WCHAR *ptr;
 
     if (name[0] && name[1] == ':') name += 2;  /* strip drive specification */
-    if ((ptr = strrchrW( name, '\\' ))) name = ptr + 1;
-    if ((ptr = strrchrW( name, '/' ))) name = ptr + 1;
+    if ((ptr = wcsrchr( name, '\\' ))) name = ptr + 1;
+    if ((ptr = wcsrchr( name, '/' ))) name = ptr + 1;
     return name;
 }
 
@@ -2678,10 +2680,10 @@ static BOOL needs_override_large_address_aware(const WCHAR *exename)
     if (app_key != (HANDLE)-1) return TRUE;
 
     str = RtlAllocateHeap( GetProcessHeap(), 0,
-                           sizeof(AppDefaultsW) + strlenW(exename) * sizeof(WCHAR) );
+                           sizeof(AppDefaultsW) + wcslen(exename) * sizeof(WCHAR) );
     if (!str) return FALSE;
-    strcpyW( str, AppDefaultsW );
-    strcatW( str, exename );
+    wcscpy( str, AppDefaultsW );
+    wcscat( str, exename );
 
     RtlOpenCurrentUser( KEY_ALL_ACCESS, &root );
     attr.Length = sizeof(attr);

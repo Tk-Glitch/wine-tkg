@@ -1196,7 +1196,7 @@ DECL_HANDLER(get_mapping_file)
     if (view->fd && (file = create_file_for_fd_obj( view->fd, GENERIC_READ,
                                                     FILE_SHARE_READ | FILE_SHARE_WRITE )))
     {
-        reply->handle = alloc_handle( current->process, file, GENERIC_READ, 0 );
+        reply->handle = alloc_handle( process, file, GENERIC_READ, 0 );
         release_object( file );
     }
 

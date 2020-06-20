@@ -648,7 +648,6 @@ enum hlsl_ir_node_type
 {
     HLSL_IR_ASSIGNMENT = 0,
     HLSL_IR_CONSTANT,
-    HLSL_IR_CONSTRUCTOR,
     HLSL_IR_EXPR,
     HLSL_IR_IF,
     HLSL_IR_LOAD,
@@ -867,24 +866,12 @@ struct hlsl_ir_constant
     struct hlsl_ir_node node;
     union
     {
-        union
-        {
-            unsigned u[16];
-            int i[16];
-            float f[16];
-            double d[16];
-            BOOL b[16];
-        } value;
-        struct hlsl_ir_constant *array_elements;
-        struct list *struct_elements;
-    } v;
-};
-
-struct hlsl_ir_constructor
-{
-    struct hlsl_ir_node node;
-    struct hlsl_ir_node *args[16];
-    unsigned int args_count;
+        unsigned u[16];
+        int i[16];
+        float f[16];
+        double d[16];
+        BOOL b[16];
+    } value;
 };
 
 struct hlsl_scope
@@ -988,6 +975,7 @@ struct hlsl_parse_ctx
     struct
     {
         struct hlsl_type *scalar[HLSL_TYPE_LAST_SCALAR + 1];
+        struct hlsl_type *vector[HLSL_TYPE_LAST_SCALAR + 1][4];
         struct hlsl_type *sampler[HLSL_SAMPLER_DIM_MAX + 1];
         struct hlsl_type *Void;
     } builtin_types;
@@ -1042,12 +1030,6 @@ static inline struct hlsl_ir_swizzle *swizzle_from_node(const struct hlsl_ir_nod
     return CONTAINING_RECORD(node, struct hlsl_ir_swizzle, node);
 }
 
-static inline struct hlsl_ir_constructor *constructor_from_node(const struct hlsl_ir_node *node)
-{
-    assert(node->type == HLSL_IR_CONSTRUCTOR);
-    return CONTAINING_RECORD(node, struct hlsl_ir_constructor, node);
-}
-
 static inline struct hlsl_ir_if *if_from_node(const struct hlsl_ir_node *node)
 {
     assert(node->type == HLSL_IR_IF);
@@ -1099,8 +1081,8 @@ BOOL pop_scope(struct hlsl_parse_ctx *ctx) DECLSPEC_HIDDEN;
 void init_functions_tree(struct wine_rb_tree *funcs) DECLSPEC_HIDDEN;
 void add_function_decl(struct wine_rb_tree *funcs, char *name, struct hlsl_ir_function_decl *decl,
         BOOL intrinsic) DECLSPEC_HIDDEN;
-struct bwriter_shader *parse_hlsl_shader(const char *text, enum shader_type type, DWORD major, DWORD minor,
-        const char *entrypoint, char **messages) DECLSPEC_HIDDEN;
+HRESULT parse_hlsl_shader(const char *text, enum shader_type type, DWORD major, DWORD minor,
+        const char *entrypoint, ID3D10Blob **shader, char **messages) DECLSPEC_HIDDEN;
 
 const char *debug_base_type(const struct hlsl_type *type) DECLSPEC_HIDDEN;
 const char *debug_hlsl_type(const struct hlsl_type *type) DECLSPEC_HIDDEN;

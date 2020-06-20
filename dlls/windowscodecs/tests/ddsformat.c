@@ -120,20 +120,67 @@ static BYTE test_dds_array[] = {
     0xCC, 0x55, 0xCC, 0x55, 0x0E, 0x84, 0x0E, 0x84, 0x00, 0x00, 0x00, 0x00
 };
 
+/* 12x12 compressed(DXT3) texture array, arraySize=2, mipMapCount=4 */
+static BYTE test_dds_dxt3[] = {
+    'D',  'D',  'S',  ' ',  0x7C, 0x00, 0x00, 0x00, 0x07, 0x10, 0x0A, 0x00, 0x0C, 0x00, 0x00, 0x00,
+    0x0C, 0x00, 0x00, 0x00, 0x90, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 'D',  'X',  '1',  '0',  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x10, 0x40, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x4A, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xB5, 0xA7, 0xAD, 0x83,
+    0x60, 0x60, 0xE0, 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x12, 0x96, 0x6B, 0x72,
+    0xD5, 0xD5, 0xAF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x30, 0x8D, 0x89, 0x69,
+    0x57, 0x5F, 0x5E, 0xF8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xB4, 0xA7, 0xAD, 0x83,
+    0x00, 0xAA, 0xFF, 0x55, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF3, 0x9E, 0x6D, 0x83,
+    0x00, 0x00, 0xAA, 0x55, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x12, 0x96, 0xCD, 0x83,
+    0x5C, 0xF8, 0xAA, 0xAF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xEC, 0x7A, 0xC9, 0x71,
+    0x80, 0x60, 0x60, 0x60, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x4A, 0x72, 0xA8, 0x68,
+    0x28, 0xBE, 0xD7, 0xD7, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAF, 0x8C, 0xEA, 0x71,
+    0x0B, 0xAB, 0xAD, 0xBD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x54, 0x9F, 0xCC, 0x7A,
+    0x5C, 0xA8, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x50, 0x8D, 0x49, 0x69,
+    0x77, 0xEE, 0x88, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x0C, 0x7B, 0x08, 0x69,
+    0xF8, 0x58, 0xF8, 0x58, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x4E, 0x84, 0x6B, 0x72,
+    0x33, 0x99, 0x33, 0x99, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x14, 0x9F, 0x0A, 0x72,
+    0xDC, 0xAA, 0x75, 0xAA, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x0E, 0x84, 0x0E, 0x84,
+    0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xB5, 0xA7, 0xAD, 0x83,
+    0x60, 0x60, 0xE0, 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x12, 0x96, 0x6B, 0x72,
+    0xD5, 0xD5, 0xAF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x30, 0x8D, 0x89, 0x69,
+    0x57, 0x5F, 0x5E, 0xF8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xB4, 0xA7, 0xAD, 0x83,
+    0x00, 0xAA, 0xFF, 0x55, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF3, 0x9E, 0x6D, 0x83,
+    0x00, 0x00, 0xAA, 0x55, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x12, 0x96, 0xCD, 0x83,
+    0x5C, 0xF8, 0xAA, 0xAF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xEC, 0x7A, 0xC9, 0x71,
+    0x80, 0x60, 0x60, 0x60, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x4A, 0x72, 0xA8, 0x68,
+    0x28, 0xBE, 0xD7, 0xD7, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAF, 0x8C, 0xEA, 0x71,
+    0x0B, 0xAB, 0xAD, 0xBD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x54, 0x9F, 0xCC, 0x7A,
+    0x5C, 0xA8, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x50, 0x8D, 0x49, 0x69,
+    0x77, 0xEE, 0x88, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x0C, 0x7B, 0x08, 0x69,
+    0xF8, 0x58, 0xF8, 0x58, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x4E, 0x84, 0x6B, 0x72,
+    0x33, 0x99, 0x33, 0x99, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x14, 0x9F, 0x0A, 0x72,
+    0xDC, 0xAA, 0x75, 0xAA, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x0E, 0x84, 0x0E, 0x84,
+    0x00, 0x00, 0x00, 0x00
+};
+
 static struct test_data {
     BYTE *data;
     UINT size;
     UINT expected_frame_count;
+    const GUID *expected_pixel_format;
     WICDdsParameters expected_parameters;
 } test_data[] = {
-    { test_dds_image,   sizeof(test_dds_image),   1,
-      { 4, 4, 1, 1, 1, DXGI_FORMAT_BC1_UNORM, WICDdsTexture2D, WICDdsAlphaModePremultiplied } },
-    { test_dds_mipmaps, sizeof(test_dds_mipmaps), 3,
-      { 4, 4, 1, 3, 1, DXGI_FORMAT_BC1_UNORM, WICDdsTexture2D, WICDdsAlphaModePremultiplied } },
-    { test_dds_volume,  sizeof(test_dds_volume),  7,
-      { 4, 4, 4, 3, 1, DXGI_FORMAT_BC1_UNORM, WICDdsTexture3D, WICDdsAlphaModePremultiplied } },
-    { test_dds_array,   sizeof(test_dds_array),   9,
-      { 4, 4, 1, 3, 3, DXGI_FORMAT_BC1_UNORM, WICDdsTexture2D, WICDdsAlphaModeUnknown } },
+    { test_dds_image,   sizeof(test_dds_image),   1, &GUID_WICPixelFormat32bppPBGRA,
+      { 4,  4,  1, 1, 1, DXGI_FORMAT_BC1_UNORM, WICDdsTexture2D, WICDdsAlphaModePremultiplied } },
+    { test_dds_mipmaps, sizeof(test_dds_mipmaps), 3, &GUID_WICPixelFormat32bppPBGRA,
+      { 4,  4,  1, 3, 1, DXGI_FORMAT_BC1_UNORM, WICDdsTexture2D, WICDdsAlphaModePremultiplied } },
+    { test_dds_volume,  sizeof(test_dds_volume),  7, &GUID_WICPixelFormat32bppPBGRA,
+      { 4,  4,  4, 3, 1, DXGI_FORMAT_BC1_UNORM, WICDdsTexture3D, WICDdsAlphaModePremultiplied } },
+    { test_dds_array,   sizeof(test_dds_array),   9, &GUID_WICPixelFormat32bppBGRA,
+      { 4,  4,  1, 3, 3, DXGI_FORMAT_BC1_UNORM, WICDdsTexture2D, WICDdsAlphaModeUnknown } },
+    { test_dds_dxt3,    sizeof(test_dds_dxt3),    8, &GUID_WICPixelFormat32bppBGRA,
+      { 12, 12, 1, 4, 2, DXGI_FORMAT_BC2_UNORM, WICDdsTexture2D, WICDdsAlphaModeUnknown } },
 };
 
 static IWICImagingFactory *factory = NULL;
@@ -237,6 +284,7 @@ static void test_dds_decoder_initialize(void)
         { test_dds_cube,         sizeof(test_dds_cube),         WINCODEC_ERR_BADHEADER },
         { test_dds_volume,       sizeof(test_dds_volume),       S_OK },
         { test_dds_array,        sizeof(test_dds_array),        S_OK },
+        { test_dds_dxt3,         sizeof(test_dds_dxt3),         S_OK },
         { test_dds_bad_magic,  sizeof(test_dds_bad_magic),  WINCODEC_ERR_UNKNOWNIMAGEFORMAT },
         { test_dds_bad_header, sizeof(test_dds_bad_header), WINCODEC_ERR_BADHEADER },
         { &byte,   sizeof(byte),   WINCODEC_ERR_STREAMREAD },
@@ -399,6 +447,7 @@ static void test_dds_decoder_frame_properties(IWICBitmapFrameDecode *frame_decod
     UINT width, height ,expected_width, expected_height, slice_index, depth;
     UINT width_in_blocks, height_in_blocks, expected_width_in_blocks, expected_height_in_blocks;
     WICDdsFormatInfo format_info;
+    GUID pixel_format;
 
     /* frame size tests */
 
@@ -464,6 +513,15 @@ static void test_dds_decoder_frame_properties(IWICBitmapFrameDecode *frame_decod
     ok (height_in_blocks == expected_height_in_blocks,
         "%d: [frame %d] Expected height in blocks %d, got %d\n", i, frame_index, expected_height_in_blocks, height_in_blocks);
 
+    /* pixel format tests */
+
+    hr = IWICBitmapFrameDecode_GetPixelFormat(frame_decode, NULL);
+    todo_wine ok (hr == E_INVALIDARG, "[%d, frame %d] GetPixelFormat got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_GetPixelFormat(frame_decode, &pixel_format);
+    todo_wine ok (hr == S_OK, "[%d, frame %d] GetPixelFormat failed\n", i, frame_index);
+    if (hr != S_OK) return;
+    todo_wine ok (IsEqualGUID(&pixel_format, test_data[i].expected_pixel_format),
+        "[%d, frame %d] Got unexpected pixel format %s\n", i, frame_index, debugstr_guid(&pixel_format));
 }
 
 static void test_dds_decoder_frame_data(IWICDdsFrameDecode *dds_frame, UINT frame_count, WICDdsParameters *params,
@@ -472,9 +530,9 @@ static void test_dds_decoder_frame_data(IWICDdsFrameDecode *dds_frame, UINT fram
     HRESULT hr;
     WICDdsFormatInfo format_info;
     WICRect rect = { 0, 0, 1, 1 }, rect_test_a = { 0, 0, 0, 0 }, rect_test_b = { 0, 0, 0xdeadbeaf, 0xdeadbeaf };
-    WICRect rect_test_c = { -0xdeadbeaf, -0xdeadbeaf, 1, 1 }, rect_test_d = { 1, 1, 1, 1 };
-    BYTE buffer[32];
-    UINT stride, width_in_blocks, height_in_blocks;
+    WICRect rect_test_c = { -0xdeadbeaf, -0xdeadbeaf, 1, 1 }, rect_test_d = { 0xdeadbeaf, 0xdeadbeaf, 1, 1 };
+    BYTE buffer[256];
+    UINT stride, frame_stride, frame_size, width_in_blocks, height_in_blocks;
     UINT width, height, depth, array_index;
     UINT block_offset;
     int slice_index;
@@ -482,43 +540,54 @@ static void test_dds_decoder_frame_data(IWICDdsFrameDecode *dds_frame, UINT fram
     hr = IWICDdsFrameDecode_GetFormatInfo(dds_frame, &format_info);
     ok (hr == S_OK, "%d: [frame %d] GetFormatInfo failed, hr=%x\n", i, frame_index, hr);
     if (hr != S_OK) return;
+    hr = IWICDdsFrameDecode_GetSizeInBlocks(dds_frame, &width_in_blocks, &height_in_blocks);
+    ok (hr == S_OK, "%d: [frame %d] GetSizeInBlocks failed, hr=%x\n", i, frame_index, hr);
+    if (hr != S_OK) return;
     stride = rect.Width * format_info.BytesPerBlock;
-
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect_test_a, stride, sizeof(buffer), buffer);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect_test_b, stride, sizeof(buffer), buffer);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect_test_c, stride, sizeof(buffer), buffer);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect_test_d, stride, sizeof(buffer), buffer);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, stride, sizeof(buffer), buffer);
-    todo_wine ok (hr == S_OK, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, 0, sizeof(buffer), buffer);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride - 1, sizeof(buffer), buffer);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride * 2, sizeof(buffer), buffer);
-    todo_wine ok (hr == S_OK, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, 0, buffer);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, 1, buffer);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, stride * rect.Height - 1, buffer);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, stride * rect.Height, buffer);
-    todo_wine ok (hr == S_OK, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, sizeof(buffer), NULL);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    frame_stride = width_in_blocks * format_info.BytesPerBlock;
+    frame_size = frame_stride * height_in_blocks;
 
     hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, 0, 0, NULL);
-    todo_wine ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
-    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, sizeof(buffer), buffer);
-    todo_wine ok (hr == S_OK, "%d: [frame %d] CopyBlocks failed, hr=%x\n", i, frame_index, hr);
-    if (hr != S_OK) return;
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect_test_a, stride, sizeof(buffer), buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect_test_b, stride, sizeof(buffer), buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect_test_c, stride, sizeof(buffer), buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect_test_d, stride, sizeof(buffer), buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, frame_stride - 1, sizeof(buffer), buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, frame_stride * 2, sizeof(buffer), buffer);
+    ok (hr == S_OK, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, frame_stride, sizeof(buffer), buffer);
+    ok (hr == S_OK, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, frame_stride, frame_stride * height_in_blocks - 1, buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, frame_stride, frame_stride * height_in_blocks, buffer);
+    ok (hr == S_OK, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, 0, sizeof(buffer), buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride - 1, sizeof(buffer), buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride * 2, sizeof(buffer), buffer);
+    ok (hr == S_OK, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, 0, buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, 1, buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, stride * rect.Height - 1, buffer);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, stride * rect.Height, buffer);
+    ok (hr == S_OK, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
+
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, sizeof(buffer), NULL);
+    ok (hr == E_INVALIDARG, "%d: [frame %d] Got unexpected hr %x\n", i, frame_index, hr);
 
     block_offset = 128; /* DDS magic and header */
     if (has_extended_header(test_data[i].data)) block_offset += 20; /* DDS extended header */
@@ -540,7 +609,23 @@ static void test_dds_decoder_frame_data(IWICDdsFrameDecode *dds_frame, UINT fram
         slice_index -= depth;
         if (depth > 1) depth /= 2;
     }
+
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, sizeof(buffer), buffer);
+    ok (hr == S_OK, "%d: [frame %d] CopyBlocks failed, hr=%x\n", i, frame_index, hr);
+    if (hr != S_OK) return;
     ok (!strncmp((const char *)test_data[i].data + block_offset, (const char *)buffer, format_info.BytesPerBlock),
+        "%d: [frame %d] Block data mismatch\n", i, frame_index);
+
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, frame_stride, sizeof(buffer), buffer);
+    ok (hr == S_OK, "%d: [frame %d] CopyBlocks failed, hr=%x\n", i, frame_index, hr);
+    if (hr != S_OK) return;
+    ok (!strncmp((const char *)test_data[i].data + block_offset, (const char *)buffer, frame_size),
+        "%d: [frame %d] Block data mismatch\n", i, frame_index);
+
+    hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, frame_stride * 2, sizeof(buffer), buffer);
+    ok (hr == S_OK, "%d: [frame %d] CopyBlocks failed, hr=%x\n", i, frame_index, hr);
+    if (hr != S_OK) return;
+    ok (!strncmp((const char *)test_data[i].data + block_offset, (const char *)buffer, frame_size),
         "%d: [frame %d] Block data mismatch\n", i, frame_index);
 }
 

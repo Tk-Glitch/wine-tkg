@@ -69,6 +69,7 @@ struct message_result
     void                  *data;          /* message reply data */
     unsigned int           data_size;     /* size of message reply data */
     struct timeout_user   *timeout;       /* result timeout */
+    struct hook           *hook;          /* target hook of the message */
 };
 
 struct message
@@ -772,6 +773,13 @@ static void result_timeout( void *private )
     if (result->msg)  /* not received yet */
     {
         struct message *msg = result->msg;
+
+        /* hook timed out, remove it */
+        if (msg->type == MSG_HOOK_LL && result->hook)
+        {
+            fprintf(stderr, "wineserver: hook %x timeout, removing it\n", result->hook);
+            remove_hook( result->hook );
+        }
 
         result->msg = NULL;
         msg->result = NULL;
@@ -1755,13 +1763,15 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
 static int send_hook_ll_message( struct desktop *desktop, struct message *hardware_msg,
                                  const hw_input_t *input, struct msg_queue *sender )
 {
+    struct hook *hook;
     struct thread *hook_thread;
     struct msg_queue *queue;
     struct message *msg;
     timeout_t timeout = 2000 * -10000;  /* FIXME: load from registry */
     int id = (input->type == HW_INPUT_MOUSE) ? WH_MOUSE_LL : WH_KEYBOARD_LL;
 
-    if (!(hook_thread = get_first_global_hook( id ))) return 0;
+    if (!(hook = get_first_global_hook( id ))) return 0;
+    if (!(hook_thread = get_hook_thread( hook ))) return 0;
     if (!(queue = hook_thread->queue)) return 0;
     if (is_queue_hung( queue )) return 0;
 
@@ -1793,6 +1803,7 @@ static int send_hook_ll_message( struct desktop *desktop, struct message *hardwa
     }
     msg->result->hardware_msg = hardware_msg;
     msg->result->desktop = (struct desktop *)grab_object( desktop );
+    msg->result->hook = hook;
     list_add_tail( &queue->msg_list[SEND_MESSAGE], &msg->entry );
     set_queue_bits( queue, QS_SENDMESSAGE );
     return 1;
@@ -1819,6 +1830,7 @@ static int queue_rawinput_message( struct process* process, void* user )
     struct thread *thread = NULL, *foreground = NULL;
     struct message *msg;
     struct hardware_msg_data *msg_data;
+    int wparam = RIM_INPUT;
 
     if (raw_msg->data.rawinput.type == RIM_TYPEMOUSE)
         device = process->rawinput_mouse;
@@ -1841,10 +1853,12 @@ static int queue_rawinput_message( struct process* process, void* user )
         process != thread->process)
         goto done;
 
-    /* FIXME: Implement RIDEV_INPUTSINK */
     if (!desktop->foreground_input || !(foreground = get_window_thread( desktop->foreground_input->active )) ||
         thread->process != foreground->process)
-        goto done;
+    {
+        if (!(device->flags & RIDEV_INPUTSINK)) goto done;
+        wparam = RIM_INPUTSINK;
+    }
 
     if (!(msg = alloc_hardware_message( raw_msg->data.info, raw_msg->source, raw_msg->time, raw_msg->extra_len )))
         goto done;
@@ -1852,7 +1866,7 @@ static int queue_rawinput_message( struct process* process, void* user )
 
     msg->win    = device->target;
     msg->msg    = WM_INPUT;
-    msg->wparam = RIM_INPUT;
+    msg->wparam = wparam;
     msg->lparam = 0;
 
     memcpy( msg_data, &raw_msg->data, sizeof(*msg_data) );

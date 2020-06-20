@@ -125,7 +125,7 @@ static CRITICAL_SECTION_DEBUG screen_critsect_debug =
 };
 static CRITICAL_SECTION screen_section = {&screen_critsect_debug, -1, 0, 0, 0, 0};
 
-static HANDLE get_display_device_init_mutex(void)
+HANDLE get_display_device_init_mutex(void)
 {
     static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
     HANDLE mutex = CreateMutexW(NULL, FALSE, init_mutexW);
@@ -134,7 +134,7 @@ static HANDLE get_display_device_init_mutex(void)
     return mutex;
 }
 
-static void release_display_device_init_mutex(HANDLE mutex)
+void release_display_device_init_mutex(HANDLE mutex)
 {
     ReleaseMutex(mutex);
     CloseHandle(mutex);
@@ -508,7 +508,7 @@ done:
 }
 
 static BOOL X11DRV_InitMonitor(HDEVINFO devinfo, const struct x11drv_monitor *monitor, int monitor_index,
-                               int video_index, const LUID *gpu_luid)
+                               int video_index, const LUID *gpu_luid, UINT output_id)
 {
     SP_DEVICE_INTERFACE_DATA iface_data = {sizeof(iface_data)};
     SP_DEVINFO_DATA device_data = {sizeof(SP_DEVINFO_DATA)};
@@ -541,7 +541,7 @@ static BOOL X11DRV_InitMonitor(HDEVINFO devinfo, const struct x11drv_monitor *mo
 
     /* Write DEVPROPKEY_MONITOR_OUTPUT_ID */
     if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_MONITOR_OUTPUT_ID,
-                                   DEVPROP_TYPE_UINT32, (const BYTE *)&video_index, sizeof(video_index), 0))
+                                   DEVPROP_TYPE_UINT32, (const BYTE *)&output_id, sizeof(output_id), 0))
         goto done;
 
     /* Create driver key */
@@ -646,6 +646,7 @@ void X11DRV_DisplayDevices_Init(BOOL force)
     WCHAR guidW[40];
     WCHAR driverW[1024];
     LUID gpu_luid;
+    UINT output_id = 0;
 
     mutex = get_display_device_init_mutex();
 
@@ -696,7 +697,7 @@ void X11DRV_DisplayDevices_Init(BOOL force)
             for (monitor = 0; monitor < monitor_count; monitor++)
             {
                 TRACE("monitor: %#x %s\n", monitor, wine_dbgstr_w(monitors[monitor].name));
-                if (!X11DRV_InitMonitor(monitor_devinfo, &monitors[monitor], monitor, video_index, &gpu_luid))
+                if (!X11DRV_InitMonitor(monitor_devinfo, &monitors[monitor], monitor, video_index, &gpu_luid, output_id++))
                     goto done;
             }
 

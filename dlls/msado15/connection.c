@@ -40,6 +40,8 @@ struct connection_point
     IConnectionPoint   IConnectionPoint_iface;
     struct connection *conn;
     const IID         *riid;
+    IUnknown          **sinks;
+    ULONG              sinks_size;
 };
 
 struct connection
@@ -84,9 +86,16 @@ static ULONG WINAPI connection_Release( _Connection *iface )
 {
     struct connection *connection = impl_from_Connection( iface );
     LONG refs = InterlockedDecrement( &connection->refs );
+    ULONG i;
     if (!refs)
     {
         TRACE( "destroying %p\n", connection );
+        for (i = 0; i < connection->cp_connev.sinks_size; ++i)
+        {
+            if (connection->cp_connev.sinks[i])
+                IUnknown_Release( connection->cp_connev.sinks[i] );
+        }
+        heap_free( connection->cp_connev.sinks );
         heap_free( connection->datasource );
         heap_free( connection );
     }
@@ -97,6 +106,8 @@ static HRESULT WINAPI connection_QueryInterface( _Connection *iface, REFIID riid
 {
     struct connection *connection = impl_from_Connection( iface );
     TRACE( "%p, %s, %p\n", connection, debugstr_guid(riid), obj );
+
+    *obj = NULL;
 
     if (IsEqualGUID( riid, &IID__Connection ) || IsEqualGUID( riid, &IID_IDispatch ) ||
         IsEqualGUID( riid, &IID_IUnknown ))
@@ -110,6 +121,11 @@ static HRESULT WINAPI connection_QueryInterface( _Connection *iface, REFIID riid
     else if (IsEqualGUID( riid, &IID_IConnectionPointContainer ))
     {
         *obj = &connection->IConnectionPointContainer_iface;
+    }
+    else if (IsEqualGUID( riid, &IID_IRunnableObject ))
+    {
+        TRACE("IID_IRunnableObject not supported returning NULL\n");
+        return E_NOINTERFACE;
     }
     else
     {
@@ -214,8 +230,14 @@ static HRESULT WINAPI connection_get_Version( _Connection *iface, BSTR *str )
 
 static HRESULT WINAPI connection_Close( _Connection *iface )
 {
-    FIXME( "%p\n", iface );
-    return E_NOTIMPL;
+    struct connection *connection = impl_from_Connection( iface );
+
+    TRACE( "%p\n", connection );
+
+    if (connection->state == adStateClosed) return MAKE_ADO_HRESULT( adErrObjectClosed );
+
+    connection->state = adStateClosed;
+    return S_OK;
 }
 
 static HRESULT WINAPI connection_Execute( _Connection *iface, BSTR command, VARIANT *records_affected,
@@ -246,9 +268,14 @@ static HRESULT WINAPI connection_RollbackTrans( _Connection *iface )
 static HRESULT WINAPI connection_Open( _Connection *iface, BSTR connect_str, BSTR userid, BSTR password,
                                        LONG options )
 {
+    struct connection *connection = impl_from_Connection( iface );
     FIXME( "%p, %s, %s, %p, %08x\n", iface, debugstr_w(connect_str), debugstr_w(userid),
            password, options );
-    return E_NOTIMPL;
+
+    if (connection->state == adStateOpen) return MAKE_ADO_HRESULT( adErrObjectOpen );
+
+    connection->state = adStateOpen;
+    return S_OK;
 }
 
 static HRESULT WINAPI connection_get_Errors( _Connection *iface, Errors **obj )
@@ -530,15 +557,61 @@ static HRESULT WINAPI connpoint_Advise( IConnectionPoint *iface, IUnknown *unk_s
         DWORD *cookie )
 {
     struct connection_point *connpoint = impl_from_IConnectionPoint( iface );
-    FIXME( "%p, %p, %p\n", connpoint, unk_sink, cookie );
-    return E_NOTIMPL;
+    IUnknown *sink, **tmp;
+    ULONG new_size;
+    HRESULT hr;
+    DWORD i;
+
+    TRACE( "%p, %p, %p\n", iface, unk_sink, cookie );
+
+    if (!unk_sink || !cookie) return E_FAIL;
+
+    if (FAILED(hr = IUnknown_QueryInterface( unk_sink, &IID_ConnectionEventsVt, (void**)&sink )))
+    {
+        *cookie = 0;
+        return E_FAIL;
+    }
+
+    if (connpoint->sinks)
+    {
+        for (i = 0; i < connpoint->sinks_size; ++i)
+        {
+            if (!connpoint->sinks[i])
+                break;
+        }
+
+        if (i == connpoint->sinks_size)
+        {
+            new_size = connpoint->sinks_size * 2;
+            if (!(tmp = heap_realloc_zero( connpoint->sinks, new_size * sizeof(*connpoint->sinks) )))
+                return E_OUTOFMEMORY;
+            connpoint->sinks = tmp;
+            connpoint->sinks_size = new_size;
+        }
+    }
+    else
+    {
+        if (!(connpoint->sinks = heap_alloc_zero( sizeof(*connpoint->sinks) ))) return E_OUTOFMEMORY;
+        connpoint->sinks_size = 1;
+        i = 0;
+    }
+
+    connpoint->sinks[i] = sink;
+    *cookie = i + 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI connpoint_Unadvise( IConnectionPoint *iface, DWORD cookie )
 {
     struct connection_point *connpoint = impl_from_IConnectionPoint( iface );
-    FIXME( "%p, %d\n", connpoint, cookie );
-    return E_NOTIMPL;
+    TRACE( "%p, %u\n", connpoint, cookie );
+
+    if (!cookie || cookie > connpoint->sinks_size || !connpoint->sinks || !connpoint->sinks[cookie - 1])
+        return E_FAIL;
+
+    IUnknown_Release( connpoint->sinks[cookie - 1] );
+    connpoint->sinks[cookie - 1] = NULL;
+    return S_OK;
 }
 
 static HRESULT WINAPI connpoint_EnumConnections( IConnectionPoint *iface,
@@ -577,6 +650,8 @@ HRESULT Connection_create( void **obj )
     connection->cp_connev.conn = connection;
     connection->cp_connev.riid = &DIID_ConnectionEvents;
     connection->cp_connev.IConnectionPoint_iface.lpVtbl = &connpoint_vtbl;
+    connection->cp_connev.sinks = NULL;
+    connection->cp_connev.sinks_size = 0;
 
     *obj = &connection->Connection_iface;
     TRACE( "returning iface %p\n", *obj );

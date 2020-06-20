@@ -244,9 +244,7 @@ enum comclass_miscfields
 struct comclassredirect_data
 {
     ULONG size;
-    BYTE  res;
-    BYTE  miscmask;
-    BYTE  res1[2];
+    ULONG flags;
     DWORD model;
     GUID  clsid;
     GUID  alias;
@@ -1782,12 +1780,40 @@ static BOOL parse_nummethods(const xmlstr_t *str, struct entity *entity)
     return TRUE;
 }
 
+static void parse_add_interface_class( xmlbuf_t *xmlbuf, struct entity_array *entities,
+        struct actctx_loader *acl, WCHAR *clsid )
+{
+    struct entity *entity;
+    WCHAR *str;
+
+    if (!clsid) return;
+
+    if (!(str = strdupW(clsid)))
+    {
+        set_error( xmlbuf );
+        return;
+    }
+
+    if (!(entity = add_entity(entities, ACTIVATION_CONTEXT_SECTION_COM_SERVER_REDIRECTION)))
+    {
+        RtlFreeHeap(GetProcessHeap(), 0, str);
+        set_error( xmlbuf );
+        return;
+    }
+
+    entity->u.comclass.clsid = str;
+    entity->u.comclass.model = ThreadingModel_Both;
+
+    acl->actctx->sections |= SERVERREDIRECT_SECTION;
+}
+
 static void parse_cominterface_proxy_stub_elem( xmlbuf_t *xmlbuf, struct dll_redirect *dll,
                                                 struct actctx_loader *acl, const struct xml_elem *parent )
 {
+    WCHAR *psclsid = NULL;
+    struct entity *entity;
     struct xml_attr attr;
     BOOL end = FALSE;
-    struct entity*      entity;
 
     if (!(entity = add_entity(&dll->entities, ACTIVATION_CONTEXT_SECTION_COM_INTERFACE_REDIRECTION)))
     {
@@ -1819,8 +1845,12 @@ static void parse_cominterface_proxy_stub_elem( xmlbuf_t *xmlbuf, struct dll_red
         {
             if (!(entity->u.ifaceps.tlib = xmlstrdupW(&attr.value))) set_error( xmlbuf );
         }
+        else if (xml_attr_cmp(&attr, proxyStubClsid32W))
+        {
+            if (!(psclsid = xmlstrdupW(&attr.value))) set_error( xmlbuf );
+        }
         /* not used */
-        else if (xml_attr_cmp(&attr, proxyStubClsid32W) || xml_attr_cmp(&attr, threadingmodelW))
+        else if (xml_attr_cmp(&attr, threadingmodelW))
         {
         }
         else if (!is_xmlns_attr( &attr ))
@@ -1831,6 +1861,10 @@ static void parse_cominterface_proxy_stub_elem( xmlbuf_t *xmlbuf, struct dll_red
 
     acl->actctx->sections |= IFACEREDIRECT_SECTION;
     if (!end) parse_expect_end_elem(xmlbuf, parent);
+
+    parse_add_interface_class(xmlbuf, &dll->entities, acl, psclsid ? psclsid : entity->u.ifaceps.iid);
+
+    RtlFreeHeap(GetProcessHeap(), 0, psclsid);
 }
 
 static BOOL parse_typelib_flags(const xmlstr_t *value, struct entity *entity)
@@ -4038,7 +4072,7 @@ static void add_comserver_record(const struct guidsection_header *section, const
         struct entity *entity = &entities->base[i];
         if (entity->kind == ACTIVATION_CONTEXT_SECTION_COM_SERVER_REDIRECTION)
         {
-            ULONG module_len, progid_len, str_len = 0;
+            ULONG module_len, progid_len, str_len = 0, miscmask;
             struct comclassredirect_data *data;
             struct guid_index *alias_index;
             struct clrclass_data *clrdata;
@@ -4072,9 +4106,6 @@ static void add_comserver_record(const struct guidsection_header *section, const
             /* setup data */
             data = (struct comclassredirect_data*)((BYTE*)section + (*index)->data_offset);
             data->size = sizeof(*data);
-            data->res = 0;
-            data->res1[0] = 0;
-            data->res1[1] = 0;
             data->model = entity->u.comclass.model;
             data->clsid = (*index)->guid;
             data->alias = alias_index->guid;
@@ -4099,17 +4130,18 @@ static void add_comserver_record(const struct guidsection_header *section, const
             data->miscstatusdocprint = entity->u.comclass.miscstatusdocprint;
 
             /* mask describes which misc* data is available */
-            data->miscmask = 0;
+            miscmask = 0;
             if (data->miscstatus)
-                data->miscmask |= MiscStatus;
+                miscmask |= MiscStatus;
             if (data->miscstatuscontent)
-                data->miscmask |= MiscStatusContent;
+                miscmask |= MiscStatusContent;
             if (data->miscstatusthumbnail)
-                data->miscmask |= MiscStatusThumbnail;
+                miscmask |= MiscStatusThumbnail;
             if (data->miscstatusicon)
-                data->miscmask |= MiscStatusIcon;
+                miscmask |= MiscStatusIcon;
             if (data->miscstatusdocprint)
-                data->miscmask |= MiscStatusDocPrint;
+                miscmask |= MiscStatusDocPrint;
+            data->flags = miscmask << 8;
 
             if (data->clrdata_offset)
             {

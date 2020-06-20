@@ -516,9 +516,9 @@ const GUID *h264_decoder_input_types[] =
 };
 const GUID *h264_decoder_output_types[] =
 {
+    &MFVideoFormat_NV12,
     &MFVideoFormat_I420,
     &MFVideoFormat_IYUV,
-    &MFVideoFormat_NV12,
     &MFVideoFormat_YUY2,
     &MFVideoFormat_YV12,
 };
@@ -910,6 +910,8 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
             {
                 if (!(strcmp(format, "WVC1")))
                     IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_WVC1);
+                else if (!(strcmp(format, "WMV3")))
+                    IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_WMV3);
                 else
                     FIXME("Unrecognized format %s\n", format);
             }
@@ -1314,6 +1316,15 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
         {
             output = gst_caps_new_empty_simple("video/mpeg");
             gst_caps_set_simple(output, "mpegversion", G_TYPE_INT, 4, NULL);
+
+            user_data_to_codec_data(type, output);
+        }
+        else if (IsEqualGUID(&subtype, &MFVideoFormat_WMV3))
+        {
+            output = gst_caps_new_empty_simple("video/x-wmv");
+            gst_caps_set_simple(output, "format", G_TYPE_STRING, "WMV3", NULL);
+
+            gst_caps_set_simple(output, "wmvversion", G_TYPE_INT, 3, NULL);
 
             user_data_to_codec_data(type, output);
         }

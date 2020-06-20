@@ -648,6 +648,137 @@ static void test_printf_natural_string(void)
     ok(!lstrcmpW(wbuffer, wide_out), "buffer wrong, got=%s\n", wine_dbgstr_w(wbuffer));
 }
 
+static void test_printf_fp(void)
+{
+    static const int flags[] = {
+        0,
+        _CRT_INTERNAL_PRINTF_LEGACY_MSVCRT_COMPATIBILITY,
+        _CRT_INTERNAL_PRINTF_LEGACY_THREE_DIGIT_EXPONENTS,
+        _CRT_INTERNAL_PRINTF_LEGACY_MSVCRT_COMPATIBILITY
+            | _CRT_INTERNAL_PRINTF_LEGACY_THREE_DIGIT_EXPONENTS
+    };
+    const struct {
+        const char *fmt;
+        double d;
+        const char *res[ARRAY_SIZE(flags)];
+    } tests[] = {
+        { "%a", NAN, { "nan", "0x1.#QNAN00000000p+0", "nan", "0x1.#QNAN00000000p+0" }},
+        { "%A", NAN, { "NAN", "0X1.#QNAN00000000P+0", "NAN", "0X1.#QNAN00000000P+0" }},
+        { "%e", NAN, { "nan", "1.#QNAN0e+00", "nan", "1.#QNAN0e+000" }},
+        { "%E", NAN, { "NAN", "1.#QNAN0E+00", "NAN", "1.#QNAN0E+000" }},
+        { "%g", NAN, { "nan", "1.#QNAN", "nan", "1.#QNAN" }},
+        { "%G", NAN, { "NAN", "1.#QNAN", "NAN", "1.#QNAN" }},
+        { "%21a", NAN, { "                  nan", " 0x1.#QNAN00000000p+0", "                  nan", " 0x1.#QNAN00000000p+0" }},
+        { "%20e", NAN, { "                 nan", "        1.#QNAN0e+00", "                 nan", "       1.#QNAN0e+000" }},
+        { "%20g", NAN, { "                 nan", "             1.#QNAN", "                 nan", "             1.#QNAN" }},
+        { "%.21a", NAN, { "nan", "0x1.#QNAN0000000000000000p+0", "nan", "0x1.#QNAN0000000000000000p+0" }},
+        { "%.20e", NAN, { "nan", "1.#QNAN000000000000000e+00", "nan", "1.#QNAN000000000000000e+000" }},
+        { "%.20g", NAN, { "nan", "1.#QNAN", "nan", "1.#QNAN" }},
+        { "%.021a", NAN, { "nan", "0x1.#QNAN0000000000000000p+0", "nan", "0x1.#QNAN0000000000000000p+0" }},
+        { "%.020e", NAN, { "nan", "1.#QNAN000000000000000e+00", "nan", "1.#QNAN000000000000000e+000" }},
+        { "%.020g", NAN, { "nan", "1.#QNAN", "nan", "1.#QNAN" }},
+        { "%#.21a", NAN, { "nan", "0x1.#QNAN0000000000000000p+0", "nan", "0x1.#QNAN0000000000000000p+0" }},
+        { "%#.20e", NAN, { "nan", "1.#QNAN000000000000000e+00", "nan", "1.#QNAN000000000000000e+000" }},
+        { "%#.20g", NAN, { "nan", "1.#QNAN00000000000000", "nan", "1.#QNAN00000000000000" }},
+        { "%.1g", NAN, { "nan", "1", "nan", "1" }},
+        { "%.2g", NAN, { "nan", "1.$", "nan", "1.$" }},
+        { "%.3g", NAN, { "nan", "1.#R", "nan", "1.#R" }},
+
+        { "%a", IND, { "-nan(ind)", "-0x1.#IND000000000p+0", "-nan(ind)", "-0x1.#IND000000000p+0" }},
+        { "%e", IND, { "-nan(ind)", "-1.#IND00e+00", "-nan(ind)", "-1.#IND00e+000" }},
+        { "%g", IND, { "-nan(ind)", "-1.#IND", "-nan(ind)", "-1.#IND" }},
+        { "%21a", IND, { "            -nan(ind)", "-0x1.#IND000000000p+0", "            -nan(ind)", "-0x1.#IND000000000p+0" }},
+        { "%20e", IND, { "           -nan(ind)", "       -1.#IND00e+00", "           -nan(ind)", "      -1.#IND00e+000" }},
+        { "%20g", IND, { "           -nan(ind)", "             -1.#IND", "           -nan(ind)", "             -1.#IND" }},
+        { "%.21a", IND, { "-nan(ind)", "-0x1.#IND00000000000000000p+0", "-nan(ind)", "-0x1.#IND00000000000000000p+0" }},
+        { "%.20e", IND, { "-nan(ind)", "-1.#IND0000000000000000e+00", "-nan(ind)", "-1.#IND0000000000000000e+000" }},
+        { "%.20g", IND, { "-nan(ind)", "-1.#IND", "-nan(ind)", "-1.#IND" }},
+        { "%.021a", IND, { "-nan(ind)", "-0x1.#IND00000000000000000p+0", "-nan(ind)", "-0x1.#IND00000000000000000p+0" }},
+        { "%.020e", IND, { "-nan(ind)", "-1.#IND0000000000000000e+00", "-nan(ind)", "-1.#IND0000000000000000e+000" }},
+        { "%.020g", IND, { "-nan(ind)", "-1.#IND", "-nan(ind)", "-1.#IND" }},
+        { "%#.21a", IND, { "-nan(ind)", "-0x1.#IND00000000000000000p+0", "-nan(ind)", "-0x1.#IND00000000000000000p+0" }},
+        { "%#.20e", IND, { "-nan(ind)", "-1.#IND0000000000000000e+00", "-nan(ind)", "-1.#IND0000000000000000e+000" }},
+        { "%#.20g", IND, { "-nan(ind)", "-1.#IND000000000000000", "-nan(ind)", "-1.#IND000000000000000" }},
+
+        { "%a", INFINITY, { "inf", "0x1.#INF000000000p+0", "inf", "0x1.#INF000000000p+0" }},
+        { "%e", INFINITY, { "inf", "1.#INF00e+00", "inf", "1.#INF00e+000" }},
+        { "%g", INFINITY, { "inf", "1.#INF", "inf", "1.#INF" }},
+        { "%21a", INFINITY, { "                  inf", " 0x1.#INF000000000p+0", "                  inf", " 0x1.#INF000000000p+0" }},
+        { "%20e", INFINITY, { "                 inf", "        1.#INF00e+00", "                 inf", "       1.#INF00e+000" }},
+        { "%20g", INFINITY, { "                 inf", "              1.#INF", "                 inf", "              1.#INF" }},
+        { "%.21a", INFINITY, { "inf", "0x1.#INF00000000000000000p+0", "inf", "0x1.#INF00000000000000000p+0" }},
+        { "%.20e", INFINITY, { "inf", "1.#INF0000000000000000e+00", "inf", "1.#INF0000000000000000e+000" }},
+        { "%.20g", INFINITY, { "inf", "1.#INF", "inf", "1.#INF" }},
+        { "%.021a", INFINITY, { "inf", "0x1.#INF00000000000000000p+0", "inf", "0x1.#INF00000000000000000p+0" }},
+        { "%.020e", INFINITY, { "inf", "1.#INF0000000000000000e+00", "inf", "1.#INF0000000000000000e+000" }},
+        { "%.020g", INFINITY, { "inf", "1.#INF", "inf", "1.#INF" }},
+        { "%#.21a", INFINITY, { "inf", "0x1.#INF00000000000000000p+0", "inf", "0x1.#INF00000000000000000p+0" }},
+        { "%#.20e", INFINITY, { "inf", "1.#INF0000000000000000e+00", "inf", "1.#INF0000000000000000e+000" }},
+        { "%#.20g", INFINITY, { "inf", "1.#INF000000000000000", "inf", "1.#INF000000000000000" }},
+
+        { "%a", -INFINITY, { "-inf", "-0x1.#INF000000000p+0", "-inf", "-0x1.#INF000000000p+0" }},
+        { "%e", -INFINITY, { "-inf", "-1.#INF00e+00", "-inf", "-1.#INF00e+000" }},
+        { "%g", -INFINITY, { "-inf", "-1.#INF", "-inf", "-1.#INF" }},
+        { "%21a", -INFINITY, { "                 -inf", "-0x1.#INF000000000p+0", "                 -inf", "-0x1.#INF000000000p+0" }},
+        { "%20e", -INFINITY, { "                -inf", "       -1.#INF00e+00", "                -inf", "      -1.#INF00e+000" }},
+        { "%20g", -INFINITY, { "                -inf", "             -1.#INF", "                -inf", "             -1.#INF" }},
+        { "%.21a", -INFINITY, { "-inf", "-0x1.#INF00000000000000000p+0", "-inf", "-0x1.#INF00000000000000000p+0" }},
+        { "%.20e", -INFINITY, { "-inf", "-1.#INF0000000000000000e+00", "-inf", "-1.#INF0000000000000000e+000" }},
+        { "%.20g", -INFINITY, { "-inf", "-1.#INF", "-inf", "-1.#INF" }},
+        { "%.021a", -INFINITY, { "-inf", "-0x1.#INF00000000000000000p+0", "-inf", "-0x1.#INF00000000000000000p+0" }},
+        { "%.020e", -INFINITY, { "-inf", "-1.#INF0000000000000000e+00", "-inf", "-1.#INF0000000000000000e+000" }},
+        { "%.020g", -INFINITY, { "-inf", "-1.#INF", "-inf", "-1.#INF" }},
+        { "%#.21a", -INFINITY, { "-inf", "-0x1.#INF00000000000000000p+0", "-inf", "-0x1.#INF00000000000000000p+0" }},
+        { "%#.20e", -INFINITY, { "-inf", "-1.#INF0000000000000000e+00", "-inf", "-1.#INF0000000000000000e+000" }},
+        { "%#.20g", -INFINITY, { "-inf", "-1.#INF000000000000000", "-inf", "-1.#INF000000000000000" }},
+
+        { "%a", 0, { "0x0.0000000000000p+0" }},
+        { "%A", 0, { "0X0.0000000000000P+0" }},
+        { "%a", 0.5, { "0x1.0000000000000p-1" }},
+        { "%a", 1, { "0x1.0000000000000p+0" }},
+        { "%a", 20, { "0x1.4000000000000p+4" }},
+        { "%a", -1, { "-0x1.0000000000000p+0" }},
+        { "%a", 0.1, { "0x1.999999999999ap-4" }},
+        { "%24a", 0.1, { "    0x1.999999999999ap-4" }},
+        { "%024a", 0.1, { "0x00001.999999999999ap-4" }},
+        { "%.2a", 0.1, { "0x1.9ap-4" }},
+        { "%.20a", 0.1, { "0x1.999999999999a0000000p-4" }},
+        { "%.a", 0.1e-20, { "0x1p-70" }},
+        { "%a", 0.1e-20, { "0x1.2e3b40a0e9b4fp-70" }},
+        { "%a", 4.9406564584124654e-324, { "0x0.0000000000001p-1022" }},
+        { "%.0a", -1.5, { "-0x1p+0" }},
+        { "%.0a", -0.5, { "-0x1p-1" }},
+        { "%.0a", 0.5, { "0x1p-1" }},
+        { "%.0a", 1.5, { "0x1p+0" }},
+        { "%.0a", 1.99, { "0x2p+0" }},
+        { "%.0a", 2, { "0x1p+1" }},
+        { "%.0a", 9.5, { "0x1p+3" }},
+        { "%.0a", 10.5, { "0x1p+3" }},
+        { "%#.0a", -1.5, { "-0x1.p+0" }},
+        { "%#.0a", -0.5, { "-0x1.p-1" }},
+        { "%#.0a", 0.5, { "0x1.p-1" }},
+        { "%#.0a", 1.5, { "0x1.p+0" }},
+    };
+
+    const char *res = NULL;
+    char buf[100];
+    int i, j, r;
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
+        for (j = 0; j < ARRAY_SIZE(flags); j++)
+        {
+            if (tests[i].res[j]) res = tests[i].res[j];
+
+            r = vsprintf_wrapper(flags[j], buf, sizeof(buf), tests[i].fmt, tests[i].d);
+            ok(r == strlen(res), "%d,%d) r = %d, expected %d\n",
+                    i, j, r, strlen(res));
+            ok(!strcmp(buf, res), "%d,%d) buf = %s, expected %s\n",
+                    i, j, buf, res);
+        }
+    }
+}
+
 START_TEST(printf)
 {
     ok(_set_invalid_parameter_handler(test_invalid_parameter_handler) == NULL,
@@ -664,4 +795,5 @@ START_TEST(printf)
     test_printf_legacy_three_digit_exp();
     test_printf_c99();
     test_printf_natural_string();
+    test_printf_fp();
 }

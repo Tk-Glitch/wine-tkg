@@ -119,6 +119,7 @@ static HRESULT WINAPI enum_media_types_Next(IEnumMediaTypes *iface, ULONG count,
         AM_MEDIA_TYPE **mts, ULONG *ret_count)
 {
     struct enum_media_types *enummt = impl_from_IEnumMediaTypes(iface);
+    AM_MEDIA_TYPE mt;
     unsigned int i;
     HRESULT hr;
 
@@ -133,10 +134,14 @@ static HRESULT WINAPI enum_media_types_Next(IEnumMediaTypes *iface, ULONG count,
 
     for (i = 0; i < count; ++i)
     {
-        if ((mts[i] = CoTaskMemAlloc(sizeof(AM_MEDIA_TYPE))))
-            hr = enummt->pin->ops->pin_get_media_type(enummt->pin, enummt->index + i, mts[i]);
-        else
-            hr = E_OUTOFMEMORY;
+        hr = enummt->pin->ops->pin_get_media_type(enummt->pin, enummt->index + i, &mt);
+        if (hr == S_OK)
+        {
+            if ((mts[i] = CoTaskMemAlloc(sizeof(AM_MEDIA_TYPE))))
+                *mts[i] = mt;
+            else
+                hr = E_OUTOFMEMORY;
+        }
         if (FAILED(hr))
         {
             while (i--)
@@ -589,6 +594,13 @@ static HRESULT WINAPI source_Disconnect(IPin *iface)
             IMemInputPin_Release(This->pMemInputPin);
             This->pMemInputPin = NULL;
         }
+
+        if (This->pAllocator)
+        {
+            IMemAllocator_Release(This->pAllocator);
+            This->pAllocator = NULL;
+        }
+
         if (This->pin.peer)
         {
             IPin_Release(This->pin.peer);
@@ -924,6 +936,12 @@ static HRESULT WINAPI sink_Disconnect(IPin *iface)
     {
         if (pin->pFuncsTable->sink_disconnect)
             pin->pFuncsTable->sink_disconnect(pin);
+
+        if (pin->pAllocator)
+        {
+            IMemAllocator_Release(pin->pAllocator);
+            pin->pAllocator = NULL;
+        }
 
         IPin_Release(pin->pin.peer);
         pin->pin.peer = NULL;

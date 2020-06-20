@@ -23,7 +23,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 /* keep in sync with mfplat.c's mft registrations */
 
 const GUID *h264_input_types[] = {&MFVideoFormat_H264};
-const GUID *h264_output_types[] = {&MFVideoFormat_I420, &MFVideoFormat_IYUV, &MFVideoFormat_NV12, &MFVideoFormat_YUY2, &MFVideoFormat_YV12};
+const GUID *h264_output_types[] = {&MFVideoFormat_NV12, &MFVideoFormat_I420, &MFVideoFormat_IYUV, &MFVideoFormat_YUY2, &MFVideoFormat_YV12};
 
 const GUID *aac_input_types[] = {&MFAudioFormat_AAC};
 const GUID *aac_output_types[] = {&MFAudioFormat_Float, &MFAudioFormat_PCM};

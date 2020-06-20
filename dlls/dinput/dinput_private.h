@@ -42,12 +42,10 @@ struct IDirectInputImpl
     LONG                        ref;
 
     BOOL                        initialized;
-    CRITICAL_SECTION            crit;
     struct list                 entry;          /* entry into list of all IDirectInputs */
 
     DWORD                       evsequence;     /* unique sequence number for events */
     DWORD                       dwVersion;      /* direct input version number */
-    struct list                 devices_list;   /* list of all created dinput devices */
     struct list                 device_players; /* device instance guid to player name */
 };
 
@@ -71,9 +69,19 @@ extern const struct dinput_device joystick_linux_device DECLSPEC_HIDDEN;
 extern const struct dinput_device joystick_linuxinput_device DECLSPEC_HIDDEN;
 extern const struct dinput_device joystick_osx_device DECLSPEC_HIDDEN;
 
+struct IDirectInputDeviceImpl;
+extern void dinput_hooks_insert_mouse(struct IDirectInputDeviceImpl *device, BOOL rawinput);
+extern void dinput_hooks_remove_mouse(struct IDirectInputDeviceImpl *device, BOOL rawinput);
+extern int dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam );
+extern void dinput_mouse_rawinput_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam, RAWINPUT *raw );
+
+extern void dinput_hooks_insert_keyboard(struct IDirectInputDeviceImpl *device, BOOL rawinput);
+extern void dinput_hooks_remove_keyboard(struct IDirectInputDeviceImpl *device, BOOL rawinput);
+extern int dinput_keyboard_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam );
+extern void dinput_keyboard_rawinput_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam, RAWINPUT *raw );
+
 extern void check_dinput_hooks(LPDIRECTINPUTDEVICE8W, BOOL) DECLSPEC_HIDDEN;
 extern void check_dinput_events(void) DECLSPEC_HIDDEN;
-typedef int (*DI_EVENT_PROC)(LPDIRECTINPUTDEVICE8A, WPARAM, LPARAM);
 
 extern void _copy_diactionformatAtoW(LPDIACTIONFORMATW, LPDIACTIONFORMATA) DECLSPEC_HIDDEN;
 extern void _copy_diactionformatWtoA(LPDIACTIONFORMATA, LPDIACTIONFORMATW) DECLSPEC_HIDDEN;

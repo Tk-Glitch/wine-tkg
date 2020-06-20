@@ -660,15 +660,10 @@ static void test_mouse_keyboard(void)
     raw_devices_count = ARRAY_SIZE(raw_devices);
     memset(raw_devices, 0, sizeof(raw_devices));
     hr = GetRegisteredRawInputDevices(raw_devices, &raw_devices_count, sizeof(RAWINPUTDEVICE));
-    todo_wine
     ok(hr == 1, "GetRegisteredRawInputDevices returned %d, raw_devices_count: %d\n", hr, raw_devices_count);
-    todo_wine
     ok(raw_devices[0].usUsagePage == 1, "Unexpected raw device usage page: %x\n", raw_devices[0].usUsagePage);
-    todo_wine
     ok(raw_devices[0].usUsage == 6, "Unexpected raw device usage: %x\n", raw_devices[0].usUsage);
-    todo_wine
     ok(raw_devices[0].dwFlags == RIDEV_INPUTSINK, "Unexpected raw device flags: %x\n", raw_devices[0].dwFlags);
-    todo_wine
     ok(raw_devices[0].hwndTarget != NULL, "Unexpected raw device target: %p\n", raw_devices[0].hwndTarget);
     hr = IDirectInputDevice8_Unacquire(di_keyboard);
     ok(SUCCEEDED(hr), "IDirectInputDevice8_Acquire failed: %08x\n", hr);
@@ -760,9 +755,7 @@ static void test_mouse_keyboard(void)
     ok(raw_devices[2].usUsagePage == 1, "Unexpected raw device usage page: %x\n", raw_devices[1].usUsagePage);
     todo_wine
     ok(raw_devices[2].usUsage == 6, "Unexpected raw device usage: %x\n", raw_devices[1].usUsage);
-    todo_wine
     ok(raw_devices[2].dwFlags == RIDEV_INPUTSINK, "Unexpected raw device flags: %x\n", raw_devices[1].dwFlags);
-    todo_wine
     ok(raw_devices[2].hwndTarget == di_hwnd, "Unexpected raw device target: %p\n", raw_devices[1].hwndTarget);
     hr = IDirectInputDevice8_Unacquire(di_keyboard);
     ok(SUCCEEDED(hr), "IDirectInputDevice8_Acquire failed: %08x\n", hr);

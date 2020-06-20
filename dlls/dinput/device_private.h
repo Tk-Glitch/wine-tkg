@@ -68,7 +68,7 @@ struct IDirectInputDeviceImpl
     DWORD                       dwCoopLevel;
     HWND                        win;
     int                         acquired;
-    DI_EVENT_PROC               event_proc;  /* function to receive mouse & keyboard events */
+    int                         inputlost;
 
     BOOL                        use_raw_input; /* use raw input instead of low-level messages */
     RAWINPUTDEVICE              raw_device;    /* raw device to (un)register */

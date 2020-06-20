@@ -859,6 +859,137 @@ static void test_majority(void)
     release_test_context(&test_context);
 }
 
+static void test_struct_assignment(void)
+{
+    struct test_context test_context;
+    ID3D10Blob *ps_code = NULL;
+    struct vec4 v;
+
+    static const char ps_source[] =
+        "struct apple\n"
+        "{\n"
+        "    struct\n"
+        "    {\n"
+        "        float4 a;\n"
+        "    } m;\n"
+        "    float4 b;\n"
+        "};\n"
+        "float4 main() : COLOR\n"
+        "{\n"
+        "    struct apple q, r, s;\n"
+        "    q.m.a = float4(0.1, 0.2, 0.3, 0.4);\n"
+        "    q.b = float4(0.5, 0.1, 0.4, 0.5);\n"
+        "    s = r = q;\n"
+        "    return s.m.a + s.b;\n"
+        "}";
+
+    if (!init_test_context(&test_context))
+        return;
+
+    todo_wine ps_code = compile_shader(ps_source, "ps_2_0");
+    if (ps_code)
+    {
+        draw_quad(test_context.device, ps_code);
+
+        v = get_color_vec4(test_context.device, 0, 0);
+        ok(compare_vec4(&v, 0.6f, 0.3f, 0.7f, 0.9f, 1),
+                "Got unexpected value {%.8e, %.8e, %.8e, %.8e}.\n", v.x, v.y, v.z, v.w);
+
+        ID3D10Blob_Release(ps_code);
+    }
+    release_test_context(&test_context);
+}
+
+static void test_struct_semantics(void)
+{
+    struct test_context test_context;
+    ID3D10Blob *ps_code = NULL;
+    struct vec4 v;
+
+    static const char ps_source[] =
+        "struct input\n"
+        "{\n"
+        "    struct\n"
+        "    {\n"
+        "        float4 texcoord : TEXCOORD0;\n"
+        "    } m;\n"
+        "};\n"
+        "struct output\n"
+        "{\n"
+        "    struct\n"
+        "    {\n"
+        "        float4 color : COLOR;\n"
+        "    } m;\n"
+        "};\n"
+        "struct output main(struct input i)\n"
+        "{\n"
+        "    struct output o;\n"
+        "    o.m.color = i.m.texcoord;\n"
+        "    return o;\n"
+        "}";
+
+    if (!init_test_context(&test_context))
+        return;
+
+    todo_wine ps_code = compile_shader(ps_source, "ps_2_0");
+    if (ps_code)
+    {
+        draw_quad(test_context.device, ps_code);
+
+        v = get_color_vec4(test_context.device, 64, 48);
+        todo_wine ok(compare_vec4(&v, 0.1f, 0.1f, 0.0f, 0.0f, 4096),
+                "Got unexpected value {%.8e, %.8e, %.8e, %.8e}.\n", v.x, v.y, v.z, v.w);
+        v = get_color_vec4(test_context.device, 320, 240);
+        todo_wine ok(compare_vec4(&v, 0.5f, 0.5f, 0.0f, 0.0f, 4096),
+                "Got unexpected value {%.8e, %.8e, %.8e, %.8e}.\n", v.x, v.y, v.z, v.w);
+
+        ID3D10Blob_Release(ps_code);
+    }
+    release_test_context(&test_context);
+}
+
+static void test_global_initializer(void)
+{
+    struct test_context test_context;
+    ID3DXConstantTable *constants;
+    ID3D10Blob *ps_code = NULL;
+    struct vec4 v;
+    HRESULT hr;
+
+    static const char ps_source[] =
+        "float myfunc()\n"
+        "{\n"
+        "    return 0.6;\n"
+        "}\n"
+        "static float sf = myfunc() + 0.2;\n"
+        "uniform float uf = 0.2;\n"
+        "float4 main() : COLOR\n"
+        "{\n"
+        "    return float4(sf, uf, 0, 0);\n"
+        "}";
+
+    if (!init_test_context(&test_context))
+        return;
+
+    todo_wine ps_code = compile_shader(ps_source, "ps_2_0");
+    if (ps_code)
+    {
+        hr = pD3DXGetShaderConstantTable(ID3D10Blob_GetBufferPointer(ps_code), &constants);
+        ok(hr == D3D_OK, "Failed to get constant table, hr %#x.\n", hr);
+        hr = ID3DXConstantTable_SetDefaults(constants, test_context.device);
+        ok(hr == D3D_OK, "Failed to get constant table, hr %#x.\n", hr);
+        ID3DXConstantTable_Release(constants);
+        draw_quad(test_context.device, ps_code);
+
+        v = get_color_vec4(test_context.device, 0, 0);
+        todo_wine ok(compare_vec4(&v, 0.8f, 0.2f, 0.0f, 0.0f, 4096),
+                "Got unexpected value {%.8e, %.8e, %.8e, %.8e}.\n", v.x, v.y, v.z, v.w);
+
+        ID3D10Blob_Release(ps_code);
+    }
+    release_test_context(&test_context);
+}
+
 static void check_constant_desc(const char *prefix, const D3DXCONSTANT_DESC *desc,
         const D3DXCONSTANT_DESC *expect, BOOL nonzero_defaultvalue)
 {
@@ -879,7 +1010,7 @@ static void test_constant_table(void)
 {
     static const char *source =
         "typedef float3x3 matrix_t;\n"
-        "struct matrix_record { float3x3 a; };\n"
+        "struct matrix_record { float3x3 a; } dummy;\n"
         "uniform float4 a;\n"
         "uniform float b;\n"
         "uniform float unused;\n"
@@ -1092,6 +1223,24 @@ static void test_fail(void)
         "{\n"
         "    return float4(0, 0, 0, 0);\n"
         "}",
+
+        /* 15 */
+        "float4 test()\n"
+        "{\n"
+        "    return float4(0, 0, 0, 0);\n"
+        "}",
+
+        "float4 test(out float4 o : SV_TARGET)\n"
+        "{\n"
+        "    o = float4(1, 1, 1, 1);\n"
+        "    return float4(0, 0, 0, 0);\n"
+        "}",
+
+        "struct {float4 a;};\n"
+        "float4 test() : SV_TARGET\n"
+        "{\n"
+        "    return float4(0, 0, 0, 0);\n"
+        "}",
     };
 
     static const char *targets[] = {"ps_2_0", "ps_3_0", "ps_4_0"};
@@ -1106,7 +1255,7 @@ static void test_fail(void)
         {
             compiled = errors = NULL;
             hr = ppD3DCompile(tests[i], strlen(tests[i]), NULL, NULL, NULL, "test", targets[j], 0, 0, &compiled, &errors);
-            todo_wine ok(hr == E_FAIL, "Test %u, target %s, got unexpected hr %#x.\n", i, targets[j], hr);
+            ok(hr == E_FAIL, "Test %u, target %s, got unexpected hr %#x.\n", i, targets[j], hr);
             ok(!!errors, "Test %u, target %s, expected non-NULL error blob.\n", i, targets[j]);
             ok(!compiled, "Test %u, target %s, expected no compiled shader blob.\n", i, targets[j]);
             ID3D10Blob_Release(errors);
@@ -1154,6 +1303,9 @@ START_TEST(hlsl_d3d9)
     test_return();
     test_array_dimensions();
     test_majority();
+    test_struct_assignment();
+    test_struct_semantics();
+    test_global_initializer();
 
     test_constant_table();
     test_fail();

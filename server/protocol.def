@@ -4124,12 +4124,13 @@ enum fsync_type
     client_ptr_t key;             /* key to send with completion messages */
 @END
 
+
 /* Retrieve information about a job */
 @REQ(get_job_info)
-    obj_handle_t handle;
+    obj_handle_t handle;          /* handle to the job */
 @REPLY
-    unsigned int total_processes;
-    unsigned int active_processes;
+    int total_processes;          /* total count of processes */
+    int active_processes;         /* count of running processes */
 @END
 
 
