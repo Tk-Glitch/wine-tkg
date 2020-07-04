@@ -112,6 +112,7 @@ typedef struct EventTarget EventTarget;
     XDIID(DispHTMLLinkElement) \
     XDIID(DispHTMLLocation) \
     XDIID(DispHTMLMetaElement) \
+    XDIID(DispHTMLNamespaceCollection) \
     XDIID(DispHTMLNavigator) \
     XDIID(DispHTMLObjectElement) \
     XDIID(DispHTMLOptionElement) \
@@ -210,6 +211,7 @@ typedef struct EventTarget EventTarget;
     XIID(IHTMLLocation) \
     XIID(IHTMLMetaElement) \
     XIID(IHTMLMimeTypesCollection) \
+    XIID(IHTMLNamespaceCollection) \
     XIID(IHTMLObjectElement) \
     XIID(IHTMLObjectElement2) \
     XIID(IHTMLOptionElement) \
@@ -870,6 +872,7 @@ struct HTMLDocumentNode {
     BOOL content_ready;
 
     IHTMLDOMImplementation *dom_implementation;
+    IHTMLNamespaceCollection *namespaces;
 
     ICatInformation *catmgr;
     nsDocumentEventListener *nsevent_listener;
@@ -908,6 +911,7 @@ IOmNavigator *OmNavigator_Create(void) DECLSPEC_HIDDEN;
 HRESULT HTMLScreen_Create(IHTMLScreen**) DECLSPEC_HIDDEN;
 HRESULT create_performance(IHTMLPerformance**) DECLSPEC_HIDDEN;
 HRESULT create_history(HTMLInnerWindow*,OmHistory**) DECLSPEC_HIDDEN;
+HRESULT create_namespace_collection(IHTMLNamespaceCollection**) DECLSPEC_HIDDEN;
 HRESULT create_dom_implementation(HTMLDocumentNode*,IHTMLDOMImplementation**) DECLSPEC_HIDDEN;
 void detach_dom_implementation(IHTMLDOMImplementation*) DECLSPEC_HIDDEN;
 
@@ -1014,6 +1018,7 @@ HRESULT HTMLTxtRange_Create(HTMLDocumentNode*,nsIDOMRange*,IHTMLTxtRange**) DECL
 IHTMLStyleSheet *HTMLStyleSheet_Create(nsIDOMStyleSheet*) DECLSPEC_HIDDEN;
 IHTMLStyleSheetsCollection *HTMLStyleSheetsCollection_Create(nsIDOMStyleSheetList*) DECLSPEC_HIDDEN;
 HRESULT HTMLDOMRange_Create(nsIDOMRange*,IHTMLDOMRange**) DECLSPEC_HIDDEN;
+HRESULT create_markup_pointer(IMarkupPointer**) DECLSPEC_HIDDEN;
 
 void detach_document_node(HTMLDocumentNode*) DECLSPEC_HIDDEN;
 void detach_selection(HTMLDocumentNode*) DECLSPEC_HIDDEN;

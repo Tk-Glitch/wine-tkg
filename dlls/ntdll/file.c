@@ -1843,7 +1843,7 @@ NTSTATUS FILE_CreateSymlink(HANDLE handle, REPARSE_DATA_BUFFER *buffer)
     }
 
     nt_dest_allocated = TRUE;
-    status = wine_nt_to_unix_file_name( &nt_dest, &unix_dest, FILE_WINE_PATH, FALSE );
+    status = wine_nt_to_unix_file_name( &nt_dest, &unix_dest, FILE_WINE_PATH );
     if (status != STATUS_SUCCESS && status != STATUS_NO_SUCH_FILE)
         goto cleanup;
     dest_allocated = TRUE;
@@ -4249,7 +4249,15 @@ NTSTATUS WINAPI NtFlushBuffersFile( HANDLE hFile, IO_STATUS_BLOCK *io )
     if (ret == STATUS_ACCESS_DENIED)
         ret = server_get_unix_fd( hFile, FILE_APPEND_DATA, &fd, &needs_close, &type, NULL );
 
-    if (!ret && type == FD_TYPE_SERIAL)
+    if (!ret && (type == FD_TYPE_FILE || type == FD_TYPE_DIR || type == FD_TYPE_CHAR))
+    {
+        if (fsync(fd))
+            ret = FILE_GetNtStatus();
+
+        io->u.Status    = ret;
+        io->Information = 0;
+    }
+    else if (!ret && type == FD_TYPE_SERIAL)
     {
         ret = COMM_FlushBuffersFile( fd );
     }

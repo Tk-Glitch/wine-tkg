@@ -159,8 +159,8 @@ static HBITMAP create_hatch_bitmap(const GpHatch *hatch, INT origin_x, INT origi
              * degree of shading needed. */
             for (y = 0; y < 8; y++)
             {
-                const int hy = (((y + origin_y) % 8) + 8) % 8;
-                const int hx = ((origin_x % 8) + 8) % 8;
+                const int hy = (y + origin_y) & 7;
+                const int hx = origin_x & 7;
                 unsigned int row = (0x10101 * hatch_data[hy]) >> hx;
 
                 for (x = 0; x < 8; x++, row >>= 1)
@@ -1283,13 +1283,13 @@ static GpStatus brush_fill_pixels(GpGraphics *graphics, GpBrush *brush,
         /* See create_hatch_bitmap for an explanation of how index is derived. */
         for (y = 0; y < fill_area->Height; y++, argb_pixels += cdwStride)
         {
-            const int hy = (7 - ((y + fill_area->Y - graphics->origin_y) % 8)) % 8;
-            const int hx = ((graphics->origin_x % 8) + 8) % 8;
+            const int hy = ~(y + fill_area->Y - graphics->origin_y) & 7;
+            const int hx = graphics->origin_x & 7;
             const unsigned int row = (0x10101 * hatch_data[hy]) >> hx;
 
             for (x = 0; x < fill_area->Width; x++)
             {
-                const unsigned int srow = row >> (7 - ((x + fill_area->X) % 8));
+                const unsigned int srow = row >> (~(x + fill_area->X) & 7);
                 int index;
                 if (hatch_data[8])
                     index = (srow & 1) ? 2 : (srow & 0x82) ? 1 : 0;
@@ -2619,6 +2619,12 @@ GpStatus WINGDIPAPI GdipDeleteGraphics(GpGraphics *graphics)
         stat = METAFILE_GraphicsDeleted((GpMetafile*)graphics->image);
         if (stat != Ok)
             return stat;
+    }
+
+    if (graphics->temp_hdc)
+    {
+        DeleteDC(graphics->temp_hdc);
+        graphics->temp_hdc = NULL;
     }
 
     if(graphics->owndc)
@@ -6769,7 +6775,15 @@ GpStatus WINGDIPAPI GdipGetDC(GpGraphics *graphics, HDC *hdc)
         if (!hbitmap)
             return GenericError;
 
-        temp_hdc = CreateCompatibleDC(0);
+        if (!graphics->temp_hdc)
+        {
+            temp_hdc = CreateCompatibleDC(0);
+        }
+        else
+        {
+            temp_hdc = graphics->temp_hdc;
+        }
+
         if (!temp_hdc)
         {
             DeleteObject(hbitmap);
@@ -6830,9 +6844,7 @@ GpStatus WINGDIPAPI GdipReleaseDC(GpGraphics *graphics, HDC hdc)
             graphics->temp_hbitmap_width * 4, PixelFormat32bppARGB);
 
         /* Clean up. */
-        DeleteDC(graphics->temp_hdc);
         DeleteObject(graphics->temp_hbitmap);
-        graphics->temp_hdc = NULL;
         graphics->temp_hbitmap = NULL;
     }
     else if (hdc != graphics->hdc)
@@ -6884,6 +6896,7 @@ GpStatus gdi_transform_acquire(GpGraphics *graphics)
     if (graphics->gdi_transform_acquire_count == 0 && graphics->hdc)
     {
         graphics->gdi_transform_save = SaveDC(graphics->hdc);
+        ModifyWorldTransform(graphics->hdc, NULL, MWT_IDENTITY);
         SetGraphicsMode(graphics->hdc, GM_COMPATIBLE);
         SetMapMode(graphics->hdc, MM_TEXT);
         SetWindowOrgEx(graphics->hdc, 0, 0, NULL);

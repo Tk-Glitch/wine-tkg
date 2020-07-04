@@ -1,7 +1,7 @@
 /*
  * WSK (Winsock Kernel) driver library.
  *
- * Copyright 2020 Paul Gofman <pgofman@codeweavers.com> for Codeweavers
+ * Copyright 2020 Paul Gofman <pgofman@codeweavers.com> for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -46,6 +46,7 @@ struct _WSK_CLIENT
 
 struct listen_socket_callback_context
 {
+    SOCKADDR *local_address;
     SOCKADDR *remote_address;
     const void *client_dispatch;
     void *client_context;
@@ -59,6 +60,7 @@ struct wsk_pending_io
 {
     OVERLAPPED ovr;
     TP_WAIT *tp_wait;
+    void *callback;
     IRP *irp;
 };
 
@@ -72,6 +74,7 @@ struct wsk_socket_internal
     ADDRESS_FAMILY address_family;
     USHORT socket_type;
     ULONG protocol;
+    BOOL bound;
 
     CRITICAL_SECTION cs_socket;
 
@@ -85,6 +88,9 @@ struct wsk_socket_internal
 };
 
 static LPFN_ACCEPTEX pAcceptEx;
+static LPFN_GETACCEPTEXSOCKADDRS pGetAcceptExSockaddrs;
+static LPFN_CONNECTEX pConnectEx;
+
 static const WSK_PROVIDER_CONNECTION_DISPATCH wsk_provider_connection_dispatch;
 
 static inline struct wsk_socket_internal *wsk_socket_internal_from_wsk_socket(WSK_SOCKET *wsk_socket)
@@ -159,27 +165,41 @@ static struct wsk_pending_io *allocate_pending_io(struct wsk_socket_internal *so
         PTP_WAIT_CALLBACK socket_async_callback, IRP *irp)
 {
     struct wsk_pending_io *io = socket->pending_io;
-    unsigned int i;
+    unsigned int i, io_index;
 
+    io_index = ~0u;
     for (i = 0; i < ARRAY_SIZE(socket->pending_io); ++i)
+    {
         if (!io[i].irp)
-            break;
+        {
+            if (io[i].callback == socket_async_callback)
+            {
+                io[i].irp = irp;
+                return &io[i];
+            }
 
-    if (i == ARRAY_SIZE(socket->pending_io))
+            if (io_index == ~0u)
+                io_index = i;
+        }
+    }
+
+    if (io_index == ~0u)
     {
         FIXME("Pending io requests count exceeds limit.\n");
         return NULL;
     }
 
-    io[i].irp = irp;
+    io[io_index].irp = irp;
 
-    if (io[i].tp_wait)
-        return &io[i];
+    if (io[io_index].tp_wait)
+        CloseThreadpoolWait(io[io_index].tp_wait);
+    else
+        io[io_index].ovr.hEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
 
-    io[i].ovr.hEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
-    io[i].tp_wait = CreateThreadpoolWait(socket_async_callback, socket, NULL);
+    io[io_index].tp_wait = CreateThreadpoolWait(socket_async_callback, socket, NULL);
+    io[io_index].callback = socket_async_callback;
 
-    return &io[i];
+    return &io[io_index];
 }
 
 static struct wsk_pending_io *find_pending_io(struct wsk_socket_internal *socket, TP_WAIT *tp_wait)
@@ -279,6 +299,9 @@ static NTSTATUS WINAPI wsk_bind(WSK_SOCKET *socket, SOCKADDR *local_address, ULO
     else
         status = STATUS_SUCCESS;
 
+    if (status == STATUS_SUCCESS)
+        s->bound = TRUE;
+
     TRACE("status %#x.\n", status);
     irp->IoStatus.Information = 0;
     dispatch_irp(irp, status);
@@ -289,6 +312,8 @@ static void create_accept_socket(struct wsk_socket_internal *socket, struct wsk_
 {
     struct listen_socket_callback_context *context
             = &socket->callback_context.listen_socket_callback_context;
+    INT local_address_len, remote_address_len;
+    SOCKADDR *local_address, *remote_address;
     struct wsk_socket_internal *accept_socket;
 
     if (!(accept_socket = heap_alloc_zero(sizeof(*accept_socket))))
@@ -308,7 +333,17 @@ static void create_accept_socket(struct wsk_socket_internal *socket, struct wsk_
         accept_socket->protocol = socket->protocol;
         accept_socket->flags = WSK_FLAG_CONNECTION_SOCKET;
         socket_init(accept_socket);
-        /* TODO: fill local and remote addresses. */
+
+        pGetAcceptExSockaddrs(context->addr_buffer, 0, sizeof(SOCKADDR) + 16, sizeof(SOCKADDR) + 16,
+                &local_address, &local_address_len, &remote_address, &remote_address_len);
+
+        if (context->local_address)
+            memcpy(context->local_address, local_address,
+                    min(sizeof(*context->local_address), local_address_len));
+
+        if (context->remote_address)
+            memcpy(context->remote_address, remote_address,
+                    min(sizeof(*context->remote_address), remote_address_len));
 
         dispatch_pending_io(io, STATUS_SUCCESS, (ULONG_PTR)&accept_socket->wsk_socket);
     }
@@ -343,6 +378,7 @@ static void WINAPI accept_callback(TP_CALLBACK_INSTANCE *instance, void *socket_
 
 static BOOL WINAPI init_accept_functions(INIT_ONCE *once, void *param, void **context)
 {
+    GUID get_acceptex_guid = WSAID_GETACCEPTEXSOCKADDRS;
     GUID acceptex_guid = WSAID_ACCEPTEX;
     SOCKET s = (SOCKET)param;
     DWORD size;
@@ -353,6 +389,14 @@ static BOOL WINAPI init_accept_functions(INIT_ONCE *once, void *param, void **co
         ERR("Could not get AcceptEx address, error %u.\n", WSAGetLastError());
         return FALSE;
     }
+
+    if (WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, &get_acceptex_guid, sizeof(get_acceptex_guid),
+            &pGetAcceptExSockaddrs, sizeof(pGetAcceptExSockaddrs), &size, NULL, NULL))
+    {
+        ERR("Could not get AcceptEx address, error %u.\n", WSAGetLastError());
+        return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -400,6 +444,7 @@ static NTSTATUS WINAPI wsk_accept(WSK_SOCKET *listen_socket, ULONG flags, void *
         return STATUS_PENDING;
     }
 
+    context->local_address = local_address;
     context->remote_address = remote_address;
     context->client_dispatch = accept_socket_dispatch;
     context->client_context = accept_socket_context;
@@ -453,11 +498,84 @@ static const WSK_PROVIDER_LISTEN_DISPATCH wsk_provider_listen_dispatch =
     wsk_get_local_address,
 };
 
+static void WINAPI connect_callback(TP_CALLBACK_INSTANCE *instance, void *socket_, TP_WAIT *wait,
+        TP_WAIT_RESULT wait_result)
+{
+    struct wsk_socket_internal *socket = socket_;
+    struct wsk_pending_io *io;
+    DWORD size;
+
+    TRACE("instance %p, socket %p, wait %p, wait_result %#x.\n", instance, socket, wait, wait_result);
+
+    lock_socket(socket);
+    io = find_pending_io(socket, wait);
+
+    GetOverlappedResult((HANDLE)socket->s, &io->ovr, &size, FALSE);
+    dispatch_pending_io(io, io->ovr.Internal, 0);
+    unlock_socket(socket);
+}
+
+static BOOL WINAPI init_connect_functions(INIT_ONCE *once, void *param, void **context)
+{
+    GUID connectex_guid = WSAID_CONNECTEX;
+    SOCKET s = (SOCKET)param;
+    DWORD size;
+
+    if (WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, &connectex_guid, sizeof(connectex_guid),
+            &pConnectEx, sizeof(pConnectEx), &size, NULL, NULL))
+    {
+        ERR("Could not get AcceptEx address, error %u.\n", WSAGetLastError());
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static NTSTATUS WINAPI wsk_connect(WSK_SOCKET *socket, SOCKADDR *remote_address, ULONG flags, IRP *irp)
 {
-    FIXME("socket %p, remote_address %p, flags %#x, irp %p stub.\n", socket, remote_address, flags, irp);
+    struct wsk_socket_internal *s = wsk_socket_internal_from_wsk_socket(socket);
+    static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
+    struct wsk_pending_io *io;
+    int error;
 
-    return STATUS_NOT_IMPLEMENTED;
+    TRACE("socket %p, remote_address %p, flags %#x, irp %p.\n",
+            socket, remote_address, flags, irp);
+
+    if (!irp)
+        return STATUS_INVALID_PARAMETER;
+
+    if (!InitOnceExecuteOnce(&init_once, init_connect_functions, (void *)s->s, NULL))
+    {
+        dispatch_irp(irp, STATUS_UNSUCCESSFUL);
+        return STATUS_PENDING;
+    }
+
+    lock_socket(s);
+
+    if (!(io = allocate_pending_io(s, connect_callback, irp)))
+    {
+        irp->IoStatus.Information = 0;
+        dispatch_irp(irp, STATUS_UNSUCCESSFUL);
+        unlock_socket(s);
+        return STATUS_PENDING;
+    }
+
+    if (!s->bound)
+    {
+        dispatch_pending_io(io, STATUS_INVALID_DEVICE_STATE, 0);
+        unlock_socket(s);
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    if (pConnectEx(s->s, remote_address, sizeof(*remote_address), NULL, 0, NULL, &io->ovr))
+        dispatch_pending_io(io, STATUS_SUCCESS, 0);
+    else if ((error = WSAGetLastError()) == ERROR_IO_PENDING)
+        SetThreadpoolWait(io->tp_wait, io->ovr.hEvent, NULL);
+    else
+        dispatch_pending_io(io, sock_error_to_ntstatus(error), 0);
+
+    unlock_socket(s);
+
+    return STATUS_PENDING;
 }
 
 static NTSTATUS WINAPI wsk_get_remote_address(WSK_SOCKET *socket, SOCKADDR *remote_address, IRP *irp)
@@ -487,7 +605,7 @@ static void WINAPI send_receive_callback(TP_CALLBACK_INSTANCE *instance, void *s
     unlock_socket(socket);
 }
 
-static NTSTATUS WINAPI do_send_receive(WSK_SOCKET *socket, WSK_BUF *wsk_buf, ULONG flags, IRP *irp, BOOL is_send)
+static NTSTATUS do_send_receive(WSK_SOCKET *socket, WSK_BUF *wsk_buf, ULONG flags, IRP *irp, BOOL is_send)
 {
     struct wsk_socket_internal *s = wsk_socket_internal_from_wsk_socket(socket);
     struct wsk_pending_io *io;

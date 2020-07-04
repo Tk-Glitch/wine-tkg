@@ -150,7 +150,7 @@
 @ stdcall AddVectoredContinueHandler(long ptr) ntdll.RtlAddVectoredContinueHandler
 @ stdcall AddVectoredExceptionHandler(long ptr) ntdll.RtlAddVectoredExceptionHandler
 # @ stub AdjustCalendarDate
-@ stdcall AllocConsole()
+@ stdcall -import AllocConsole()
 @ stub -i386 AllocLSCallback
 @ stdcall -i386 -private AllocSLCallback(ptr ptr) krnl386.exe16.AllocSLCallback
 @ stdcall -import AllocateUserPhysicalPages(long ptr ptr)
@@ -524,7 +524,7 @@
 @ stdcall -import FoldStringW(long wstr long ptr long)
 @ stdcall -import FormatMessageA(long ptr long long ptr long ptr)
 @ stdcall -import FormatMessageW(long ptr long long ptr long ptr)
-@ stdcall FreeConsole()
+@ stdcall -import FreeConsole()
 @ stdcall -import FreeEnvironmentStringsA(ptr)
 @ stdcall -import FreeEnvironmentStringsW(ptr)
 @ stub -i386 FreeLSCallback
@@ -999,6 +999,7 @@
 @ stdcall -import IsValidNLSVersion(long wstr ptr)
 # @ stub IsValidUILanguage
 @ stdcall -import IsWow64Process(ptr ptr)
+@ stdcall -import IsWow64Process2(ptr ptr ptr)
 @ stdcall -import K32EmptyWorkingSet(long)
 @ stdcall -import K32EnumDeviceDrivers(ptr long ptr)
 @ stdcall -import K32EnumPageFilesA(ptr ptr)

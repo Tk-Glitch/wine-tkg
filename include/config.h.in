@@ -1207,20 +1207,11 @@
 /* Define to 1 if you have the <utime.h> header file. */
 #undef HAVE_UTIME_H
 
-/* Define if you have the libva development files */
-#undef HAVE_VAAPI
-
 /* Define to 1 if you have the <valgrind/memcheck.h> header file. */
 #undef HAVE_VALGRIND_MEMCHECK_H
 
 /* Define to 1 if you have the <valgrind/valgrind.h> header file. */
 #undef HAVE_VALGRIND_VALGRIND_H
-
-/* Define to 1 if you have the <va/va_drm.h> header file. */
-#undef HAVE_VA_VA_DRM_H
-
-/* Define to 1 if you have the <va/va_x11.h> header file. */
-#undef HAVE_VA_VA_X11_H
 
 /* Define to 1 if you have the <X11/extensions/shape.h> header file. */
 #undef HAVE_X11_EXTENSIONS_SHAPE_H
@@ -1461,15 +1452,6 @@
 
 /* Define to the soname of the libv4l2 library. */
 #undef SONAME_LIBV4L2
-
-/* Define to the soname of the libva library. */
-#undef SONAME_LIBVA
-
-/* Define to the soname of the libva-drm library. */
-#undef SONAME_LIBVA_DRM
-
-/* Define to the soname of the libva-x11 library. */
-#undef SONAME_LIBVA_X11
 
 /* Define to the soname of the libvkd3d library. */
 #undef SONAME_LIBVKD3D

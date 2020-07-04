@@ -246,7 +246,6 @@ HINTERNET WINAPI WinHttpOpen( LPCWSTR agent, DWORD access, LPCWSTR proxy, LPCWST
     session->hdr.flags = flags;
     session->hdr.refs = 1;
     session->hdr.redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
-    list_init( &session->hdr.children );
     session->resolve_timeout = DEFAULT_RESOLVE_TIMEOUT;
     session->connect_timeout = DEFAULT_CONNECT_TIMEOUT;
     session->send_timeout = DEFAULT_SEND_TIMEOUT;
@@ -283,8 +282,7 @@ HINTERNET WINAPI WinHttpOpen( LPCWSTR agent, DWORD access, LPCWSTR proxy, LPCWST
         if (bypass && !(session->proxy_bypass = strdupW( bypass ))) goto end;
     }
 
-    if (!(handle = alloc_handle( &session->hdr ))) goto end;
-    session->hdr.handle = handle;
+    handle = alloc_handle( &session->hdr );
 
 end:
     release_object( &session->hdr );
@@ -552,20 +550,18 @@ HINTERNET WINAPI WinHttpConnect( HINTERNET hsession, LPCWSTR server, INTERNET_PO
     connect->hdr.notify_mask = session->hdr.notify_mask;
     connect->hdr.context = session->hdr.context;
     connect->hdr.redirect_policy = session->hdr.redirect_policy;
-    list_init( &connect->hdr.children );
 
     addref_object( &session->hdr );
     connect->session = session;
-    list_add_head( &session->hdr.children, &connect->hdr.entry );
 
     if (!(connect->hostname = strdupW( server ))) goto end;
     connect->hostport = port;
     if (!set_server_for_hostname( connect, server, port )) goto end;
 
-    if (!(hconnect = alloc_handle( &connect->hdr ))) goto end;
-    connect->hdr.handle = hconnect;
-
-    send_callback( &session->hdr, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, &hconnect, sizeof(hconnect) );
+    if ((hconnect = alloc_handle( &connect->hdr )))
+    {
+        send_callback( &session->hdr, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, &hconnect, sizeof(hconnect) );
+    }
 
 end:
     release_object( &connect->hdr );
@@ -582,13 +578,7 @@ static void request_destroy( struct object_header *hdr )
 
     TRACE("%p\n", request);
 
-    if (request->task_proc_running)
-    {
-        /* Signal to the task proc to quit. It will call this again when it does. */
-        request->task_proc_running = FALSE;
-        SetEvent( request->task_cancel );
-        return;
-    }
+    stop_queue( &request->queue );
     release_object( &request->connect->hdr );
 
     if (request->cred_handle_initialized) FreeCredentialsHandle( &request->cred_handle );
@@ -617,6 +607,7 @@ static void request_destroy( struct object_header *hdr )
             heap_free( request->creds[i][j].password );
         }
     }
+
     heap_free( request );
 }
 
@@ -829,6 +820,11 @@ static BOOL request_query_option( struct object_header *hdr, DWORD option, void 
         str_to_buffer( buffer, request->connect->session->proxy_password, buflen );
         return TRUE;
 
+    case WINHTTP_OPTION_MAX_HTTP_AUTOMATIC_REDIRECTS:
+        *(DWORD *)buffer = request->max_redirects;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+
     default:
         FIXME("unimplemented option %u\n", option);
         SetLastError( ERROR_INVALID_PARAMETER );
@@ -1037,6 +1033,17 @@ static BOOL request_set_option( struct object_header *hdr, DWORD option, void *b
         FIXME("WINHTTP_OPTION_CONNECT_RETRIES\n");
         return TRUE;
 
+    case WINHTTP_OPTION_MAX_HTTP_AUTOMATIC_REDIRECTS:
+        if (buflen == sizeof(DWORD))
+        {
+            request->max_redirects = *(DWORD *)buffer;
+            SetLastError(NO_ERROR);
+            return TRUE;
+        }
+
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+
     default:
         FIXME("unimplemented option %u\n", option);
         SetLastError( ERROR_WINHTTP_INVALID_OPTION );
@@ -1121,18 +1128,16 @@ HINTERNET WINAPI WinHttpOpenRequest( HINTERNET hconnect, LPCWSTR verb, LPCWSTR o
     request->hdr.notify_mask = connect->hdr.notify_mask;
     request->hdr.context = connect->hdr.context;
     request->hdr.redirect_policy = connect->hdr.redirect_policy;
-    list_init( &request->hdr.children );
-    list_init( &request->task_queue );
 
     addref_object( &connect->hdr );
     request->connect = connect;
-    list_add_head( &connect->hdr.children, &request->hdr.entry );
 
     request->resolve_timeout = connect->session->resolve_timeout;
     request->connect_timeout = connect->session->connect_timeout;
     request->send_timeout = connect->session->send_timeout;
     request->receive_timeout = connect->session->receive_timeout;
     request->receive_response_timeout = connect->session->receive_response_timeout;
+    request->max_redirects = 10;
 
     if (!verb || !verb[0]) verb = L"GET";
     if (!(request->verb = strdupW( verb ))) goto end;
@@ -1142,10 +1147,10 @@ HINTERNET WINAPI WinHttpOpenRequest( HINTERNET hconnect, LPCWSTR verb, LPCWSTR o
     if (!(request->version = strdupW( version ))) goto end;
     if (!(add_accept_types_header( request, types ))) goto end;
 
-    if (!(hrequest = alloc_handle( &request->hdr ))) goto end;
-    request->hdr.handle = hrequest;
-
-    send_callback( &request->hdr, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, &hrequest, sizeof(hrequest) );
+    if ((hrequest = alloc_handle( &request->hdr )))
+    {
+        send_callback( &request->hdr, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, &hrequest, sizeof(hrequest) );
+    }
 
 end:
     release_object( &request->hdr );
@@ -2028,6 +2033,113 @@ BOOL WINAPI WinHttpSetDefaultProxyConfiguration( WINHTTP_PROXY_INFO *info )
     }
     if (ret) SetLastError( ERROR_SUCCESS );
     return ret;
+}
+
+/***********************************************************************
+ *          WinHttpCreateProxyResolver (winhttp.@)
+ */
+DWORD WINAPI WinHttpCreateProxyResolver( HINTERNET hsession, HINTERNET *hresolver )
+{
+    FIXME("%p, %p\n", hsession, hresolver);
+    return ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR;
+}
+
+/***********************************************************************
+ *          WinHttpFreeProxyResult (winhttp.@)
+ */
+void WINAPI WinHttpFreeProxyResult( WINHTTP_PROXY_RESULT *result )
+{
+    FIXME("%p\n", result);
+}
+
+/***********************************************************************
+ *          WinHttpFreeProxyResultEx (winhttp.@)
+ */
+void WINAPI WinHttpFreeProxyResultEx( WINHTTP_PROXY_RESULT_EX *result )
+{
+    FIXME("%p\n", result);
+}
+
+/***********************************************************************
+ *          WinHttpFreeProxySettings (winhttp.@)
+ */
+void WINAPI WinHttpFreeProxySettings( WINHTTP_PROXY_SETTINGS *settings )
+{
+    FIXME("%p\n", settings);
+}
+
+/***********************************************************************
+ *          WinHttpGetProxyForUrlEx (winhttp.@)
+ */
+DWORD WINAPI WinHttpGetProxyForUrlEx( HINTERNET hresolver, const WCHAR *url, WINHTTP_AUTOPROXY_OPTIONS *options,
+                                      DWORD_PTR ctx )
+{
+    FIXME("%p, %s, %p, %lx\n", hresolver, debugstr_w(url), options, ctx);
+    return ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR;
+}
+
+/***********************************************************************
+ *          WinHttpGetProxyForUrlEx2 (winhttp.@)
+ */
+DWORD WINAPI WinHttpGetProxyForUrlEx2( HINTERNET hresolver, const WCHAR *url, WINHTTP_AUTOPROXY_OPTIONS *options,
+                                       DWORD selection_len, BYTE *selection, DWORD_PTR ctx )
+{
+    FIXME("%p, %s, %p, %u, %p, %lx\n", hresolver, debugstr_w(url), options, selection_len, selection, ctx);
+    return ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR;
+}
+
+/***********************************************************************
+ *          WinHttpGetProxyResult (winhttp.@)
+ */
+DWORD WINAPI WinHttpGetProxyResult( HINTERNET hresolver, WINHTTP_PROXY_RESULT *result )
+{
+    FIXME("%p, %p\n", hresolver, result);
+    return ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR;
+}
+
+/***********************************************************************
+ *          WinHttpGetProxyResultEx (winhttp.@)
+ */
+DWORD WINAPI WinHttpGetProxyResultEx( HINTERNET hresolver, WINHTTP_PROXY_RESULT_EX *result )
+{
+    FIXME("%p, %p\n", hresolver, result);
+    return ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR;
+}
+
+/***********************************************************************
+ *          WinHttpGetProxySettingsVersion (winhttp.@)
+ */
+DWORD WINAPI WinHttpGetProxySettingsVersion( HINTERNET hsession, DWORD *version )
+{
+    FIXME("%p, %p\n", hsession, version);
+    return ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR;
+}
+
+/***********************************************************************
+ *          WinHttpReadProxySettings (winhttp.@)
+ */
+DWORD WINAPI WinHttpReadProxySettings( HINTERNET hsession, const WCHAR *connection, BOOL use_defaults,
+                                       BOOL set_autodiscover, DWORD *version, BOOL *defaults_returned,
+                                       WINHTTP_PROXY_SETTINGS *settings)
+{
+    FIXME("%p, %s, %d, %d, %p, %p, %p\n", hsession, debugstr_w(connection), use_defaults, set_autodiscover,
+          version, defaults_returned, settings);
+    return ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR;
+}
+
+/***********************************************************************
+ *          WinHttpResetAutoProxy (winhttp.@)
+ */
+DWORD WINAPI WinHttpResetAutoProxy( HINTERNET hsession, DWORD flags )
+{
+    FIXME("%p, %08x\n", hsession, flags);
+    return ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR;
+}
+
+DWORD WINAPI WinHttpWriteProxySettings( HINTERNET hsession, BOOL force, WINHTTP_PROXY_SETTINGS *settings )
+{
+    FIXME("%p, %d, %p\n", hsession, force, settings);
+    return ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR;
 }
 
 /***********************************************************************

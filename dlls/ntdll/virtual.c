@@ -1399,9 +1399,7 @@ static int CDECL alloc_area_in_reserved_or_between_callback( void *start, SIZE_T
     else
     {
         if (area->map_area_end <= (char *)start)
-        {
             return 1;
-        }
 
         if (area->map_area_start >= (char *)end)
             return 0;
@@ -1524,7 +1522,7 @@ static void *alloc_free_area(void *limit, size_t size, BOOL top_down, int unix_p
         TRACE("range %p-%p.\n", base, end);
 
         if (base < (char *)address_space_start) base = (char *)address_space_start;
-        if (end > (char *)limit + granularity_mask + 1) end = (char *)limit + granularity_mask + 1;
+        if (end > (char *)ROUND_ADDR(limit, granularity_mask)) end = ROUND_ADDR(limit, granularity_mask);
 
         if (reserve_end >= base)
         {
@@ -2403,8 +2401,8 @@ void virtual_init(void)
     pages_vprot = (void *)((char *)alloc_views.base + 2 * view_block_size);
     wine_rb_init( &views_tree, compare_view );
 
-    free_ranges[0].base = address_space_start;
-    free_ranges[0].end = address_space_limit;
+    free_ranges[0].base = (void *)0;
+    free_ranges[0].end = (void *)~0;
     free_ranges_end = free_ranges + 1;
 
     /* make the DOS area accessible (except the low 64K) to hide bugs in broken apps like Excel 2003 */

@@ -29,7 +29,7 @@
 @ stdcall AddVectoredExceptionHandler(long ptr) ntdll.RtlAddVectoredExceptionHandler
 @ stdcall AdjustTokenGroups(long long ptr long ptr ptr)
 @ stdcall AdjustTokenPrivileges(long long ptr long ptr ptr)
-@ stdcall AllocConsole() kernel32.AllocConsole
+@ stdcall AllocConsole()
 @ stdcall AllocateAndInitializeSid(ptr long long long long long long long long long ptr)
 @ stdcall AllocateLocallyUniqueId(ptr)
 @ stdcall AllocateUserPhysicalPages(long ptr ptr)
@@ -884,7 +884,7 @@
 @ stdcall IsValidSid(ptr)
 @ stdcall IsWellKnownSid(ptr long)
 @ stdcall IsWow64Process(ptr ptr)
-# @ stub IsWow64Process2
+@ stdcall IsWow64Process2(ptr ptr ptr)
 @ stdcall K32EmptyWorkingSet(long)
 @ stdcall K32EnumDeviceDrivers(ptr long ptr)
 @ stdcall K32EnumPageFilesA(ptr ptr)

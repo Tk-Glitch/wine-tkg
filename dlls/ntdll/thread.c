@@ -1344,11 +1344,6 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
                 *ret_len = sizeof(*info) + desc_len;
         }
         return status;
-    case ThreadHideFromDebugger:
-        if (length != sizeof(BOOLEAN)) return STATUS_INFO_LENGTH_MISMATCH;
-        *(BOOLEAN *)data = TRUE;
-        if (ret_len) *ret_len = sizeof(BOOLEAN);
-        return STATUS_SUCCESS;
     case ThreadPriority:
     case ThreadBasePriority:
     case ThreadImpersonationToken:

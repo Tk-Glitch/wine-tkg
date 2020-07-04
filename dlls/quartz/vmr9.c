@@ -207,89 +207,41 @@ static inline struct quartz_vmr *impl_from_IBaseFilter(IBaseFilter *iface)
     return CONTAINING_RECORD(iface, struct quartz_vmr, renderer.filter.IBaseFilter_iface);
 }
 
-static DWORD VMR9_SendSampleData(struct quartz_vmr *This, VMR9PresentationInfo *info, LPBYTE data,
-                                 DWORD size)
+static HRESULT WINAPI VMR9_DoRenderSample(struct strmbase_renderer *iface, IMediaSample *sample)
 {
-    const BITMAPINFOHEADER *bmiHeader = get_bitmap_header(&This->renderer.sink.pin.mt);
-    HRESULT hr = S_OK;
-    int width;
-    int height;
-    D3DLOCKED_RECT lock;
-
-    TRACE("%p %p %d\n", This, data, size);
-
-    width = bmiHeader->biWidth;
-    height = bmiHeader->biHeight;
-
-    hr = IDirect3DSurface9_LockRect(info->lpSurf, &lock, NULL, D3DLOCK_DISCARD);
-    if (FAILED(hr))
-    {
-        ERR("IDirect3DSurface9_LockRect failed (%x)\n",hr);
-        return hr;
-    }
-
-    if (height > 0) {
-        /* Bottom up image needs inverting */
-        lock.pBits = (char *)lock.pBits + (height * lock.Pitch);
-        while (height--)
-        {
-            lock.pBits = (char *)lock.pBits - lock.Pitch;
-            memcpy(lock.pBits, data, width * bmiHeader->biBitCount / 8);
-            data = data + width * bmiHeader->biBitCount / 8;
-        }
-    }
-    else if (lock.Pitch != width * bmiHeader->biBitCount / 8)
-    {
-        WARN("Slow path! %u/%u\n", lock.Pitch, width * bmiHeader->biBitCount/8);
-
-        while (height--)
-        {
-            memcpy(lock.pBits, data, width * bmiHeader->biBitCount / 8);
-            data = data + width * bmiHeader->biBitCount / 8;
-            lock.pBits = (char *)lock.pBits + lock.Pitch;
-        }
-    }
-    else memcpy(lock.pBits, data, size);
-
-    IDirect3DSurface9_UnlockRect(info->lpSurf);
-
-    hr = IVMRImagePresenter9_PresentImage(This->presenter, This->cookie, info);
-    return hr;
-}
-
-static HRESULT WINAPI VMR9_DoRenderSample(struct strmbase_renderer *iface, IMediaSample *pSample)
-{
-    struct quartz_vmr *This = impl_from_IBaseFilter(&iface->filter.IBaseFilter_iface);
-    const HANDLE events[2] = {This->run_event, This->renderer.flush_event};
+    struct quartz_vmr *filter = impl_from_IBaseFilter(&iface->filter.IBaseFilter_iface);
+    const HANDLE events[2] = {filter->run_event, filter->renderer.flush_event};
+    unsigned int data_size, width, depth, src_pitch;
+    const BITMAPINFOHEADER *bitmap_header;
+    REFERENCE_TIME start_time, end_time;
     VMR9PresentationInfo info = {};
-    LPBYTE pbSrcStream = NULL;
-    long cbSrcStream = 0;
-    REFERENCE_TIME tStart, tStop;
+    D3DLOCKED_RECT locked_rect;
+    BYTE *data = NULL;
     HRESULT hr;
+    int height;
 
-    TRACE("%p %p\n", iface, pSample);
+    TRACE("filter %p, sample %p.\n", filter, sample);
 
     /* It is possible that there is no device at this point */
 
-    if (!This->allocator || !This->presenter)
+    if (!filter->allocator || !filter->presenter)
     {
         ERR("NO PRESENTER!!\n");
         return S_FALSE;
     }
 
-    hr = IMediaSample_GetTime(pSample, &tStart, &tStop);
-    if (FAILED(hr))
-        info.dwFlags = VMR9Sample_SrcDstRectsValid;
-    else
-        info.dwFlags = VMR9Sample_SrcDstRectsValid | VMR9Sample_TimeValid;
+    info.dwFlags = VMR9Sample_SrcDstRectsValid;
 
-    if (IMediaSample_IsDiscontinuity(pSample) == S_OK)
+    if (SUCCEEDED(hr = IMediaSample_GetTime(sample, &start_time, &end_time)))
+        info.dwFlags |= VMR9Sample_TimeValid;
+
+    if (IMediaSample_IsDiscontinuity(sample) == S_OK)
         info.dwFlags |= VMR9Sample_Discontinuity;
 
-    if (IMediaSample_IsPreroll(pSample) == S_OK)
+    if (IMediaSample_IsPreroll(sample) == S_OK)
         info.dwFlags |= VMR9Sample_Preroll;
 
-    if (IMediaSample_IsSyncPoint(pSample) == S_OK)
+    if (IMediaSample_IsSyncPoint(sample) == S_OK)
         info.dwFlags |= VMR9Sample_SyncPoint;
 
     /* If we render ourselves, and this is a preroll sample, discard it */
@@ -298,28 +250,80 @@ static HRESULT WINAPI VMR9_DoRenderSample(struct strmbase_renderer *iface, IMedi
         return S_OK;
     }
 
-    hr = IMediaSample_GetPointer(pSample, &pbSrcStream);
-    if (FAILED(hr))
+    if (FAILED(hr = IMediaSample_GetPointer(sample, &data)))
     {
-        ERR("Cannot get pointer to sample data (%x)\n", hr);
+        ERR("Failed to get pointer to sample data, hr %#x.\n", hr);
+        return hr;
+    }
+    data_size = IMediaSample_GetActualDataLength(sample);
+
+    bitmap_header = get_bitmap_header(&filter->renderer.sink.pin.mt);
+    width = bitmap_header->biWidth;
+    height = bitmap_header->biHeight;
+    depth = bitmap_header->biBitCount;
+    if (bitmap_header->biCompression == mmioFOURCC('N','V','1','2')
+            || bitmap_header->biCompression == mmioFOURCC('Y','V','1','2'))
+        src_pitch = width;
+    else /* packed YUV (UYVY or YUY2) or RGB */
+        src_pitch = ((width * depth / 8) + 3) & ~3;
+
+    info.rtStart = start_time;
+    info.rtEnd = end_time;
+    info.szAspectRatio.cx = width;
+    info.szAspectRatio.cy = height;
+    info.lpSurf = filter->surfaces[(++filter->cur_surface) % filter->num_surfaces];
+
+    if (FAILED(hr = IDirect3DSurface9_LockRect(info.lpSurf, &locked_rect, NULL, D3DLOCK_DISCARD)))
+    {
+        ERR("Failed to lock surface, hr %#x.\n", hr);
         return hr;
     }
 
-    cbSrcStream = IMediaSample_GetActualDataLength(pSample);
-
-    info.rtStart = tStart;
-    info.rtEnd = tStop;
-    info.szAspectRatio.cx = This->bmiheader.biWidth;
-    info.szAspectRatio.cy = This->bmiheader.biHeight;
-    info.lpSurf = This->surfaces[(++This->cur_surface) % This->num_surfaces];
-
-    VMR9_SendSampleData(This, &info, pbSrcStream, cbSrcStream);
-
-    if (This->renderer.filter.state == State_Paused)
+    if (height > 0 && bitmap_header->biCompression == BI_RGB)
     {
-        LeaveCriticalSection(&This->renderer.csRenderLock);
+        BYTE *dst = (BYTE *)locked_rect.pBits + (height * locked_rect.Pitch);
+        const BYTE *src = data;
+
+        TRACE("Inverting image.\n");
+
+        while (height--)
+        {
+            dst -= locked_rect.Pitch;
+            memcpy(dst, src, width * depth / 8);
+            src += src_pitch;
+        }
+    }
+    else if (locked_rect.Pitch != src_pitch)
+    {
+        BYTE *dst = locked_rect.pBits;
+        const BYTE *src = data;
+
+        height = abs(height);
+
+        TRACE("Source pitch %u does not match dest pitch %u; copying manually.\n",
+                src_pitch, locked_rect.Pitch);
+
+        while (height--)
+        {
+            memcpy(dst, src, width * depth / 8);
+            src += src_pitch;
+            dst += locked_rect.Pitch;
+        }
+    }
+    else
+    {
+        memcpy(locked_rect.pBits, data, data_size);
+    }
+
+    IDirect3DSurface9_UnlockRect(info.lpSurf);
+
+    hr = IVMRImagePresenter9_PresentImage(filter->presenter, filter->cookie, &info);
+
+    if (filter->renderer.filter.state == State_Paused)
+    {
+        LeaveCriticalSection(&filter->renderer.csRenderLock);
         WaitForMultipleObjects(2, events, FALSE, INFINITE);
-        EnterCriticalSection(&This->renderer.csRenderLock);
+        EnterCriticalSection(&filter->renderer.csRenderLock);
     }
 
     return hr;
@@ -334,8 +338,6 @@ static HRESULT WINAPI VMR9_CheckMediaType(struct strmbase_renderer *iface, const
             && !IsEqualGUID(&mt->formattype, &FORMAT_VideoInfo2))
         return S_FALSE;
 
-    if (get_bitmap_header(mt)->biCompression != BI_RGB)
-        return S_FALSE;
     return S_OK;
 }
 
@@ -415,20 +417,38 @@ static HRESULT allocate_surfaces(struct quartz_vmr *filter, const AM_MEDIA_TYPE 
 
     if (!is_vmr9(filter))
     {
-        switch (filter->bmiheader.biBitCount)
+        switch (filter->bmiheader.biCompression)
         {
-            case 8: info.Format = D3DFMT_R3G3B2; break;
-            case 15: info.Format = D3DFMT_X1R5G5B5; break;
-            case 16: info.Format = D3DFMT_R5G6B5; break;
-            case 24: info.Format = D3DFMT_R8G8B8; break;
-            case 32: info.Format = D3DFMT_X8R8G8B8; break;
-            default:
-                FIXME("Unhandled bit depth %u.\n", filter->bmiheader.biBitCount);
-                return E_INVALIDARG;
-        }
+        case BI_RGB:
+            switch (filter->bmiheader.biBitCount)
+            {
+                case 24: info.Format = D3DFMT_R8G8B8; break;
+                case 32: info.Format = D3DFMT_X8R8G8B8; break;
+                default:
+                    FIXME("Unhandled bit depth %u.\n", filter->bmiheader.biBitCount);
+                    free(filter->surfaces);
+                    return VFW_E_TYPE_NOT_ACCEPTED;
+            }
 
-        info.dwFlags = VMR9AllocFlag_TextureSurface;
-        return initialize_device(filter, &info, count);
+            info.dwFlags = VMR9AllocFlag_TextureSurface;
+            break;
+
+        case mmioFOURCC('N','V','1','2'):
+        case mmioFOURCC('U','Y','V','Y'):
+        case mmioFOURCC('Y','U','Y','2'):
+        case mmioFOURCC('Y','V','1','2'):
+            info.Format = filter->bmiheader.biCompression;
+            info.dwFlags = VMR9AllocFlag_OffscreenSurface;
+            break;
+
+        default:
+            WARN("Unhandled video compression %#x.\n", filter->bmiheader.biCompression);
+            free(filter->surfaces);
+            return VFW_E_TYPE_NOT_ACCEPTED;
+        }
+        if (FAILED(hr = initialize_device(filter, &info, count)))
+            free(filter->surfaces);
+        return hr;
     }
 
     for (i = 0; i < ARRAY_SIZE(formats); ++i)
@@ -453,7 +473,8 @@ static HRESULT allocate_surfaces(struct quartz_vmr *filter, const AM_MEDIA_TYPE 
         }
     }
 
-    return hr;
+    free(filter->surfaces);
+    return VFW_E_TYPE_NOT_ACCEPTED;
 }
 
 static void vmr_start_stream(struct strmbase_renderer *iface)
@@ -498,12 +519,13 @@ static HRESULT vmr_connect(struct strmbase_renderer *iface, const AM_MEDIA_TYPE 
     filter->VideoWidth = bitmap_header->biWidth;
     filter->VideoHeight = bitmap_header->biHeight;
     SetRect(&rect, 0, 0, filter->VideoWidth, filter->VideoHeight);
-    filter->window.src = filter->window.dst = rect;
+    filter->window.src = rect;
 
     AdjustWindowRectEx(&rect, GetWindowLongW(window, GWL_STYLE), FALSE,
             GetWindowLongW(window, GWL_EXSTYLE));
     SetWindowPos(window, NULL, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    GetClientRect(window, &filter->window.dst);
 
     if (filter->mode
             || SUCCEEDED(hr = IVMRFilterConfig9_SetRenderingMode(&filter->IVMRFilterConfig9_iface, VMR9Mode_Windowed)))

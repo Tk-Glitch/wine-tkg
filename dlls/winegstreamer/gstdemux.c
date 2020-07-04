@@ -78,7 +78,6 @@ struct gstdemux_source
 
     GstPad *their_src, *post_sink, *post_src, *my_sink;
     GstElement *flip;
-    AM_MEDIA_TYPE mt;
     HANDLE caps_event, eos_event;
     GstSegment *segment;
     SourceSeeking seek;
@@ -99,15 +98,11 @@ static HRESULT WINAPI GST_ChangeCurrent(IMediaSeeking *iface);
 static HRESULT WINAPI GST_ChangeStop(IMediaSeeking *iface);
 static HRESULT WINAPI GST_ChangeRate(IMediaSeeking *iface);
 
-static gboolean amt_from_gst_caps_audio_raw(const GstCaps *caps, AM_MEDIA_TYPE *amt)
+static gboolean amt_from_gst_audio_info(const GstAudioInfo *info, AM_MEDIA_TYPE *amt)
 {
     WAVEFORMATEXTENSIBLE *wfe;
     WAVEFORMATEX *wfx;
     gint32 depth, bpp;
-    GstAudioInfo ainfo;
-
-    if (!gst_audio_info_from_caps (&ainfo, caps))
-        return FALSE;
 
     wfe = CoTaskMemAlloc(sizeof(*wfe));
     wfx = (WAVEFORMATEX*)wfe;
@@ -122,10 +117,10 @@ static gboolean amt_from_gst_caps_audio_raw(const GstCaps *caps, AM_MEDIA_TYPE *
 
     wfx->wFormatTag = WAVE_FORMAT_EXTENSIBLE;
 
-    wfx->nChannels = ainfo.channels;
-    wfx->nSamplesPerSec = ainfo.rate;
-    depth = GST_AUDIO_INFO_WIDTH(&ainfo);
-    bpp = GST_AUDIO_INFO_DEPTH(&ainfo);
+    wfx->nChannels = info->channels;
+    wfx->nSamplesPerSec = info->rate;
+    depth = GST_AUDIO_INFO_WIDTH(info);
+    bpp = GST_AUDIO_INFO_DEPTH(info);
 
     if (!depth || depth > 32 || depth % 8)
         depth = bpp;
@@ -144,7 +139,8 @@ static gboolean amt_from_gst_caps_audio_raw(const GstCaps *caps, AM_MEDIA_TYPE *
         default:
         wfe->dwChannelMask = 0;
     }
-    if (GST_AUDIO_INFO_IS_FLOAT(&ainfo)) {
+    if (GST_AUDIO_INFO_IS_FLOAT(info))
+    {
         amt->subtype = MEDIASUBTYPE_IEEE_FLOAT;
         wfe->SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
     } else {
@@ -207,7 +203,7 @@ static gboolean amt_from_gst_video_info(const GstVideoInfo *info, AM_MEDIA_TYPE 
             bih->biBitCount = 16;
             break;
         default:
-            FIXME("Unhandled type %s.\n", GST_VIDEO_INFO_NAME(info));
+            WARN("Cannot convert %s to a DirectShow type.\n", GST_VIDEO_INFO_NAME(info));
             CoTaskMemFree(vih);
             return FALSE;
         }
@@ -314,8 +310,16 @@ static gboolean amt_from_gst_caps(const GstCaps *caps, AM_MEDIA_TYPE *mt)
     const char *type = gst_structure_get_name(gst_caps_get_structure(caps, 0));
     GstStructure *structure = gst_caps_get_structure(caps, 0);
 
+    memset(mt, 0, sizeof(AM_MEDIA_TYPE));
+
     if (!strcmp(type, "audio/x-raw"))
-        return amt_from_gst_caps_audio_raw(caps, mt);
+    {
+        GstAudioInfo info;
+
+        if (!(gst_audio_info_from_caps(&info, caps)))
+            return FALSE;
+        return amt_from_gst_audio_info(&info, mt);
+    }
     else if (!strcmp(type, "video/x-raw"))
     {
         GstVideoInfo info;
@@ -331,7 +335,6 @@ static gboolean amt_from_gst_caps(const GstCaps *caps, AM_MEDIA_TYPE *mt)
         VIDEOINFOHEADER *vih;
         gint i;
 
-        memset(mt, 0, sizeof(AM_MEDIA_TYPE));
         mt->majortype = MEDIATYPE_Video;
         mt->subtype = MEDIASUBTYPE_CVID;
         mt->bTemporalCompression = TRUE;
@@ -464,24 +467,6 @@ static GstCaps *amt_to_gst_caps(const AM_MEDIA_TYPE *mt)
 
     FIXME("Unknown major type %s.\n", debugstr_guid(&mt->majortype));
     return NULL;
-}
-
-static gboolean setcaps_sink(GstPad *pad, GstCaps *caps)
-{
-    struct gstdemux_source *pin = gst_pad_get_element_private(pad);
-    struct gstdemux *filter = impl_from_strmbase_filter(pin->pin.pin.filter);
-    gchar *caps_str = gst_caps_to_string(caps);
-
-    TRACE("filter %p, caps %s.\n", filter, debugstr_a(caps_str));
-    g_free(caps_str);
-
-    FreeMediaType(&pin->mt);
-
-    if (!amt_from_gst_caps(caps, &pin->mt))
-        return FALSE;
-
-    SetEvent(pin->caps_event);
-    return TRUE;
 }
 
 static gboolean query_sink(GstPad *pad, GstObject *parent, GstQuery *query)
@@ -662,6 +647,7 @@ static gboolean event_src(GstPad *pad, GstObject *parent, GstEvent *event)
 static gboolean event_sink(GstPad *pad, GstObject *parent, GstEvent *event)
 {
     struct gstdemux_source *pin = gst_pad_get_element_private(pad);
+    gboolean ret;
 
     TRACE("pin %p, type \"%s\".\n", pin, GST_EVENT_TYPE_NAME(event));
 
@@ -722,11 +708,10 @@ static gboolean event_sink(GstPad *pad, GstObject *parent, GstEvent *event)
             if (pin->pin.pin.peer)
                 IPin_EndFlush(pin->pin.pin.peer);
             return TRUE;
-        case GST_EVENT_CAPS: {
-            GstCaps *caps;
-            gst_event_parse_caps(event, &caps);
-            return setcaps_sink(pad, caps);
-        }
+        case GST_EVENT_CAPS:
+            ret = gst_pad_event_default(pad, parent, event);
+            SetEvent(pin->caps_event);
+            return ret;
         default:
             WARN("Ignoring \"%s\" event.\n", GST_EVENT_TYPE_NAME(event));
             return gst_pad_event_default(pad, parent, event);
@@ -1010,7 +995,16 @@ static void init_new_decoded_pad(GstElement *bin, GstPad *pad, struct gstdemux *
 
     if (!strcmp(typename, "video/x-raw"))
     {
-        GstElement *vconv, *flip;
+        GstElement *vconv, *flip, *deinterlace;
+
+        /* DirectShow can express interlaced video, but downstream filters can't
+         * necessarily consume it. In particular, the video renderer can't. */
+        if (!(deinterlace = gst_element_factory_make("deinterlace", NULL)))
+        {
+            ERR("Failed to create deinterlace, are %u-bit GStreamer \"base\" plugins installed?\n",
+                    8 * (int)sizeof(void *));
+            goto out;
+        }
 
         /* decodebin considers many YUV formats to be "raw", but some quartz
          * filters can't handle those. Also, videoflip can't handle all "raw"
@@ -1022,6 +1016,9 @@ static void init_new_decoded_pad(GstElement *bin, GstPad *pad, struct gstdemux *
             goto out;
         }
 
+        /* Avoid expensive color matrix conversions. */
+        gst_util_set_object_arg(G_OBJECT(vconv), "matrix-mode", "none");
+
         /* GStreamer outputs RGB video top-down, but DirectShow expects bottom-up. */
         if (!(flip = gst_element_factory_make("videoflip", NULL)))
         {
@@ -1030,14 +1027,18 @@ static void init_new_decoded_pad(GstElement *bin, GstPad *pad, struct gstdemux *
             goto out;
         }
 
-        gst_bin_add(GST_BIN(This->container), vconv); /* bin takes ownership */
+        /* The bin takes ownership of these elements. */
+        gst_bin_add(GST_BIN(This->container), deinterlace);
+        gst_element_sync_state_with_parent(deinterlace);
+        gst_bin_add(GST_BIN(This->container), vconv);
         gst_element_sync_state_with_parent(vconv);
-        gst_bin_add(GST_BIN(This->container), flip); /* bin takes ownership */
+        gst_bin_add(GST_BIN(This->container), flip);
         gst_element_sync_state_with_parent(flip);
 
+        gst_element_link(deinterlace, vconv);
         gst_element_link(vconv, flip);
 
-        pin->post_sink = gst_element_get_static_pad(vconv, "sink");
+        pin->post_sink = gst_element_get_static_pad(deinterlace, "sink");
         pin->post_src = gst_element_get_static_pad(flip, "src");
         pin->flip = flip;
     }
@@ -1675,57 +1676,69 @@ static HRESULT gstdecoder_source_query_accept(struct gstdemux_source *pin, const
 static HRESULT gstdecoder_source_get_media_type(struct gstdemux_source *pin,
         unsigned int index, AM_MEDIA_TYPE *mt)
 {
+    GstCaps *caps = gst_pad_get_current_caps(pin->my_sink);
+    const GstStructure *structure;
+    const char *type;
+
     static const GstVideoFormat video_formats[] =
     {
-        /* Roughly ordered by preference from videoflip. */
+        /* Try to prefer YUV formats over RGB ones. Most decoders output in the
+         * YUV color space, and it's generally much less expensive for
+         * videoconvert to do YUV -> YUV transformations. */
         GST_VIDEO_FORMAT_AYUV,
-        GST_VIDEO_FORMAT_BGRA,
-        GST_VIDEO_FORMAT_BGRx,
-        GST_VIDEO_FORMAT_BGR,
         GST_VIDEO_FORMAT_I420,
         GST_VIDEO_FORMAT_YV12,
         GST_VIDEO_FORMAT_YUY2,
         GST_VIDEO_FORMAT_UYVY,
         GST_VIDEO_FORMAT_YVYU,
         GST_VIDEO_FORMAT_NV12,
+        GST_VIDEO_FORMAT_BGRA,
+        GST_VIDEO_FORMAT_BGRx,
+        GST_VIDEO_FORMAT_BGR,
     };
 
-    if (!index)
+    assert(caps); /* We shouldn't be able to get here if caps haven't been set. */
+    structure = gst_caps_get_structure(caps, 0);
+    type = gst_structure_get_name(structure);
+
+    memset(mt, 0, sizeof(AM_MEDIA_TYPE));
+
+    if (amt_from_gst_caps(caps, mt))
     {
-        CopyMediaType(mt, &pin->mt);
-        return S_OK;
+        if (!index--)
+        {
+            gst_caps_unref(caps);
+            return S_OK;
+        }
     }
-    else if (IsEqualGUID(&pin->mt.majortype, &MEDIATYPE_Video)
-            && index - 1 < ARRAY_SIZE(video_formats))
+
+    if (!strcmp(type, "video/x-raw") && index < ARRAY_SIZE(video_formats))
     {
-        const VIDEOINFOHEADER *vih = (VIDEOINFOHEADER *)pin->mt.pbFormat;
+        gint width, height;
         GstVideoInfo info;
 
-        gst_video_info_set_format(&info, video_formats[index - 1],
-                vih->bmiHeader.biWidth, vih->bmiHeader.biHeight);
+        gst_caps_unref(caps);
+        gst_structure_get_int(structure, "width", &width);
+        gst_structure_get_int(structure, "height", &height);
+        gst_video_info_set_format(&info, video_formats[index], width, height);
         if (!amt_from_gst_video_info(&info, mt))
             return E_OUTOFMEMORY;
         return S_OK;
     }
-    else if (IsEqualGUID(&pin->mt.majortype, &MEDIATYPE_Audio) && index == 1)
+    else if (!strcmp(type, "audio/x-raw") && !index)
     {
-        const WAVEFORMATEX *our_format = (WAVEFORMATEX *)pin->mt.pbFormat;
-        WAVEFORMATEX *format;
+        GstAudioInfo info;
+        gint rate;
 
-        *mt = pin->mt;
-        mt->subtype = MEDIASUBTYPE_PCM;
-        mt->pbFormat = CoTaskMemAlloc(sizeof(WAVEFORMATEX));
-        format = (WAVEFORMATEX *)mt->pbFormat;
-        format->wFormatTag = WAVE_FORMAT_PCM;
-        format->nChannels = 2;
-        format->nSamplesPerSec = our_format->nSamplesPerSec;
-        format->wBitsPerSample = 16;
-        format->nBlockAlign = 4;
-        format->nAvgBytesPerSec = format->nSamplesPerSec * 4;
-        format->cbSize = 0;
+        gst_caps_unref(caps);
+        gst_structure_get_int(structure, "rate", &rate);
+        gst_audio_info_set_format(&info, GST_AUDIO_FORMAT_S16LE, rate, 2, NULL);
+        if (!amt_from_gst_audio_info(&info, mt))
+            return E_OUTOFMEMORY;
         return S_OK;
     }
 
+    gst_caps_unref(caps);
     return VFW_S_NO_MORE_ITEMS;
 }
 
@@ -2132,7 +2145,6 @@ static void free_source_pin(struct gstdemux_source *pin)
     gst_object_unref(pin->my_sink);
     CloseHandle(pin->caps_event);
     CloseHandle(pin->eos_event);
-    FreeMediaType(&pin->mt);
     gst_segment_free(pin->segment);
 
     strmbase_seeking_cleanup(&pin->seek);
@@ -2389,9 +2401,24 @@ static BOOL wave_parser_init_gst(struct gstdemux *filter)
     return TRUE;
 }
 
+static gboolean get_source_amt(const struct gstdemux_source *pin, AM_MEDIA_TYPE *mt)
+{
+    GstCaps *caps = gst_pad_get_current_caps(pin->my_sink);
+    gboolean ret = amt_from_gst_caps(caps, mt);
+    gst_caps_unref(caps);
+    return ret;
+}
+
 static HRESULT wave_parser_source_query_accept(struct gstdemux_source *pin, const AM_MEDIA_TYPE *mt)
 {
-    return compare_media_types(mt, &pin->mt) ? S_OK : S_FALSE;
+    AM_MEDIA_TYPE pad_mt;
+    HRESULT hr;
+
+    if (!get_source_amt(pin, &pad_mt))
+        return E_OUTOFMEMORY;
+    hr = compare_media_types(mt, &pad_mt) ? S_OK : S_FALSE;
+    FreeMediaType(&pad_mt);
+    return hr;
 }
 
 static HRESULT wave_parser_source_get_media_type(struct gstdemux_source *pin,
@@ -2399,7 +2426,8 @@ static HRESULT wave_parser_source_get_media_type(struct gstdemux_source *pin,
 {
     if (index > 0)
         return VFW_S_NO_MORE_ITEMS;
-    CopyMediaType(mt, &pin->mt);
+    if (!get_source_amt(pin, mt))
+        return E_OUTOFMEMORY;
     return S_OK;
 }
 
@@ -2502,7 +2530,14 @@ static BOOL avi_splitter_init_gst(struct gstdemux *filter)
 
 static HRESULT avi_splitter_source_query_accept(struct gstdemux_source *pin, const AM_MEDIA_TYPE *mt)
 {
-    return compare_media_types(mt, &pin->mt) ? S_OK : S_FALSE;
+    AM_MEDIA_TYPE pad_mt;
+    HRESULT hr;
+
+    if (!get_source_amt(pin, &pad_mt))
+        return E_OUTOFMEMORY;
+    hr = compare_media_types(mt, &pad_mt) ? S_OK : S_FALSE;
+    FreeMediaType(&pad_mt);
+    return hr;
 }
 
 static HRESULT avi_splitter_source_get_media_type(struct gstdemux_source *pin,
@@ -2510,7 +2545,8 @@ static HRESULT avi_splitter_source_get_media_type(struct gstdemux_source *pin,
 {
     if (index > 0)
         return VFW_S_NO_MORE_ITEMS;
-    CopyMediaType(mt, &pin->mt);
+    if (!get_source_amt(pin, mt))
+        return E_OUTOFMEMORY;
     return S_OK;
 }
 
@@ -2627,7 +2663,14 @@ static BOOL mpeg_splitter_init_gst(struct gstdemux *filter)
 
 static HRESULT mpeg_splitter_source_query_accept(struct gstdemux_source *pin, const AM_MEDIA_TYPE *mt)
 {
-    return compare_media_types(mt, &pin->mt) ? S_OK : S_FALSE;
+    AM_MEDIA_TYPE pad_mt;
+    HRESULT hr;
+
+    if (!get_source_amt(pin, &pad_mt))
+        return E_OUTOFMEMORY;
+    hr = compare_media_types(mt, &pad_mt) ? S_OK : S_FALSE;
+    FreeMediaType(&pad_mt);
+    return hr;
 }
 
 static HRESULT mpeg_splitter_source_get_media_type(struct gstdemux_source *pin,
@@ -2635,7 +2678,8 @@ static HRESULT mpeg_splitter_source_get_media_type(struct gstdemux_source *pin,
 {
     if (index > 0)
         return VFW_S_NO_MORE_ITEMS;
-    CopyMediaType(mt, &pin->mt);
+    if (!get_source_amt(pin, mt))
+        return E_OUTOFMEMORY;
     return S_OK;
 }
 

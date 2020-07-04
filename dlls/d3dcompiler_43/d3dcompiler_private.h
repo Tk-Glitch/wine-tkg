@@ -662,6 +662,8 @@ struct hlsl_ir_node
     enum hlsl_ir_node_type type;
     struct hlsl_type *data_type;
 
+    struct list uses;
+
     struct source_location loc;
 
     /* Liveness ranges. "index" is the index of this instruction. Since this is
@@ -669,6 +671,12 @@ struct hlsl_ir_node
      * true even for loops, since currently we can't have a reference to a
      * value generated in an earlier iteration of the loop. */
     unsigned int index, last_read;
+};
+
+struct hlsl_src
+{
+    struct hlsl_ir_node *node;
+    struct list entry;
 };
 
 #define HLSL_STORAGE_EXTERN          0x00000001
@@ -733,7 +741,7 @@ struct hlsl_ir_function_decl
 struct hlsl_ir_if
 {
     struct hlsl_ir_node node;
-    struct hlsl_ir_node *condition;
+    struct hlsl_src condition;
     struct list *then_instrs;
     struct list *else_instrs;
 };
@@ -817,7 +825,7 @@ struct hlsl_ir_expr
 {
     struct hlsl_ir_node node;
     enum hlsl_ir_expr_op op;
-    struct hlsl_ir_node *operands[3];
+    struct hlsl_src operands[3];
 };
 
 enum hlsl_ir_jump_type
@@ -837,14 +845,14 @@ struct hlsl_ir_jump
 struct hlsl_ir_swizzle
 {
     struct hlsl_ir_node node;
-    struct hlsl_ir_node *val;
+    struct hlsl_src val;
     DWORD swizzle;
 };
 
 struct hlsl_deref
 {
     struct hlsl_ir_var *var;
-    struct hlsl_ir_node *offset;
+    struct hlsl_src offset;
 };
 
 struct hlsl_ir_load
@@ -857,7 +865,7 @@ struct hlsl_ir_assignment
 {
     struct hlsl_ir_node node;
     struct hlsl_deref lhs;
-    struct hlsl_ir_node *rhs;
+    struct hlsl_src rhs;
     unsigned char writemask;
 };
 
@@ -979,6 +987,8 @@ struct hlsl_parse_ctx
         struct hlsl_type *sampler[HLSL_SAMPLER_DIM_MAX + 1];
         struct hlsl_type *Void;
     } builtin_types;
+
+    struct list static_initializers;
 };
 
 extern struct hlsl_parse_ctx hlsl_ctx DECLSPEC_HIDDEN;
@@ -1053,7 +1063,36 @@ static inline void init_node(struct hlsl_ir_node *node, enum hlsl_ir_node_type t
     node->type = type;
     node->data_type = data_type;
     node->loc = loc;
+    list_init(&node->uses);
 }
+
+static inline void hlsl_src_from_node(struct hlsl_src *src, struct hlsl_ir_node *node)
+{
+    src->node = node;
+    if (node)
+        list_add_tail(&node->uses, &src->entry);
+}
+
+static inline void hlsl_src_remove(struct hlsl_src *src)
+{
+    if (src->node)
+        list_remove(&src->entry);
+    src->node = NULL;
+}
+
+struct hlsl_ir_node *add_assignment(struct list *instrs, struct hlsl_ir_node *lhs,
+        enum parse_assign_op assign_op, struct hlsl_ir_node *rhs) DECLSPEC_HIDDEN;
+struct hlsl_ir_expr *add_expr(struct list *instrs, enum hlsl_ir_expr_op op, struct hlsl_ir_node *operands[3],
+        struct source_location *loc) DECLSPEC_HIDDEN;
+struct hlsl_ir_node *add_implicit_conversion(struct list *instrs, struct hlsl_ir_node *node, struct hlsl_type *type,
+        struct source_location *loc) DECLSPEC_HIDDEN;
+
+struct hlsl_ir_expr *new_cast(struct hlsl_ir_node *node, struct hlsl_type *type,
+        struct source_location *loc) DECLSPEC_HIDDEN;
+struct hlsl_ir_node *new_binary_expr(enum hlsl_ir_expr_op op, struct hlsl_ir_node *arg1,
+        struct hlsl_ir_node *arg2) DECLSPEC_HIDDEN;
+struct hlsl_ir_node *new_unary_expr(enum hlsl_ir_expr_op op, struct hlsl_ir_node *arg,
+        struct source_location loc) DECLSPEC_HIDDEN;
 
 BOOL add_declaration(struct hlsl_scope *scope, struct hlsl_ir_var *decl, BOOL local_var) DECLSPEC_HIDDEN;
 struct hlsl_ir_var *get_variable(struct hlsl_scope *scope, const char *name) DECLSPEC_HIDDEN;
@@ -1068,14 +1107,6 @@ BOOL find_function(const char *name) DECLSPEC_HIDDEN;
 unsigned int components_count_type(struct hlsl_type *type) DECLSPEC_HIDDEN;
 BOOL compare_hlsl_types(const struct hlsl_type *t1, const struct hlsl_type *t2) DECLSPEC_HIDDEN;
 BOOL compatible_data_types(struct hlsl_type *s1, struct hlsl_type *s2) DECLSPEC_HIDDEN;
-struct hlsl_ir_expr *new_expr(enum hlsl_ir_expr_op op, struct hlsl_ir_node **operands,
-        struct source_location *loc) DECLSPEC_HIDDEN;
-struct hlsl_ir_expr *new_cast(struct hlsl_ir_node *node, struct hlsl_type *type,
-	struct source_location *loc) DECLSPEC_HIDDEN;
-struct hlsl_ir_node *implicit_conversion(struct hlsl_ir_node *node, struct hlsl_type *type,
-        struct source_location *loc) DECLSPEC_HIDDEN;
-struct hlsl_ir_node *make_assignment(struct hlsl_ir_node *left, enum parse_assign_op assign_op,
-        struct hlsl_ir_node *right) DECLSPEC_HIDDEN;
 void push_scope(struct hlsl_parse_ctx *ctx) DECLSPEC_HIDDEN;
 BOOL pop_scope(struct hlsl_parse_ctx *ctx) DECLSPEC_HIDDEN;
 void init_functions_tree(struct wine_rb_tree *funcs) DECLSPEC_HIDDEN;
@@ -1094,20 +1125,6 @@ void free_hlsl_type(struct hlsl_type *type) DECLSPEC_HIDDEN;
 void free_instr(struct hlsl_ir_node *node) DECLSPEC_HIDDEN;
 void free_instr_list(struct list *list) DECLSPEC_HIDDEN;
 void free_function_rb(struct wine_rb_entry *entry, void *context) DECLSPEC_HIDDEN;
-
-static inline struct hlsl_ir_node *new_unary_expr(enum hlsl_ir_expr_op op,
-        struct hlsl_ir_node *op1, struct source_location loc)
-{
-    struct hlsl_ir_node *operands[3] = {op1};
-    return &new_expr(op, operands, &loc)->node;
-}
-
-static inline struct hlsl_ir_node *new_binary_expr(enum hlsl_ir_expr_op op,
-        struct hlsl_ir_node *op1, struct hlsl_ir_node *op2, struct source_location loc)
-{
-    struct hlsl_ir_node *operands[3] = {op1, op2};
-    return &new_expr(op, operands, &loc)->node;
-}
 
 #define MAKE_TAG(ch0, ch1, ch2, ch3) \
     ((DWORD)(ch0) | ((DWORD)(ch1) << 8) | \

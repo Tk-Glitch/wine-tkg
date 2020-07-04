@@ -4540,7 +4540,7 @@ UINT_PTR WINAPI SetCoalescableTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMER
 
     if (proc) winproc = WINPROC_AllocProc( (WNDPROC)proc, FALSE );
 
-    timeout = min( max( 5, timeout ), USER_TIMER_MAXIMUM );
+    timeout = min( max( USER_TIMER_MINIMUM, timeout ), USER_TIMER_MAXIMUM );
 
     SERVER_START_REQ( set_win_timer )
     {
@@ -4582,7 +4582,7 @@ UINT_PTR WINAPI SetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC 
 
     if (proc) winproc = WINPROC_AllocProc( (WNDPROC)proc, FALSE );
 
-    timeout = min( max( USER_TIMER_MINIMUM, timeout ), USER_TIMER_MAXIMUM );
+    timeout = min( max( 5, timeout ), USER_TIMER_MAXIMUM );
 
     SERVER_START_REQ( set_win_timer )
     {

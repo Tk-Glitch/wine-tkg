@@ -53,6 +53,8 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION console_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
+static HANDLE console_wait_event;
+
 static WCHAR input_exe[MAX_PATH + 1];
 
 struct ctrl_handler
@@ -172,32 +174,6 @@ static COORD get_largest_console_window_size( HANDLE handle )
     return c;
 }
 
-/* helper function to replace OpenConsoleW */
-HANDLE open_console( BOOL output, DWORD access, SECURITY_ATTRIBUTES *sa, DWORD creation )
-{
-    HANDLE ret;
-
-    if (creation != OPEN_EXISTING)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return INVALID_HANDLE_VALUE;
-    }
-
-    SERVER_START_REQ( open_console )
-    {
-        req->from       = wine_server_obj_handle( ULongToHandle( output ));
-        req->access     = access;
-        req->attributes = sa && sa->bInheritHandle ? OBJ_INHERIT : 0;
-        req->share      = FILE_SHARE_READ | FILE_SHARE_WRITE;
-        wine_server_call_err( req );
-        ret = wine_server_ptr_handle( reply->handle );
-    }
-    SERVER_END_REQ;
-    if (ret) ret = console_handle_map( ret );
-    return ret;
-}
-
-
 /******************************************************************
  *	AttachConsole   (kernelbase.@)
  */
@@ -219,6 +195,112 @@ BOOL WINAPI DECLSPEC_HOTPATCH AttachConsole( DWORD pid )
     }
     SERVER_END_REQ;
     return ret;
+}
+
+
+/******************************************************************
+ *      AllocConsole   (kernelbase.@)
+ */
+BOOL WINAPI AllocConsole(void)
+{
+    SECURITY_ATTRIBUTES inheritable_attr = { sizeof(inheritable_attr), NULL, TRUE };
+    HANDLE std_in  = INVALID_HANDLE_VALUE;
+    HANDLE std_out = INVALID_HANDLE_VALUE;
+    HANDLE std_err = INVALID_HANDLE_VALUE;
+    STARTUPINFOW app_si, console_si;
+    WCHAR buffer[1024], cmd[256];
+    PROCESS_INFORMATION pi;
+    HANDLE event;
+    DWORD mode;
+    BOOL ret;
+
+    TRACE("()\n");
+
+    std_in = CreateFileW( L"CONIN$", GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, 0, NULL, OPEN_EXISTING, 0, 0 );
+    if (GetConsoleMode( std_in, &mode ))
+    {
+        /* we already have a console opened on this process, don't create a new one */
+        CloseHandle( std_in );
+        return FALSE;
+    }
+
+    GetStartupInfoW(&app_si);
+
+    memset(&console_si, 0, sizeof(console_si));
+    console_si.cb = sizeof(console_si);
+    /* setup a view arguments for wineconsole (it'll use them as default values)  */
+    if (app_si.dwFlags & STARTF_USECOUNTCHARS)
+    {
+        console_si.dwFlags |= STARTF_USECOUNTCHARS;
+        console_si.dwXCountChars = app_si.dwXCountChars;
+        console_si.dwYCountChars = app_si.dwYCountChars;
+    }
+    if (app_si.dwFlags & STARTF_USEFILLATTRIBUTE)
+    {
+        console_si.dwFlags |= STARTF_USEFILLATTRIBUTE;
+        console_si.dwFillAttribute = app_si.dwFillAttribute;
+    }
+    if (app_si.dwFlags & STARTF_USESHOWWINDOW)
+    {
+        console_si.dwFlags |= STARTF_USESHOWWINDOW;
+        console_si.wShowWindow = app_si.wShowWindow;
+    }
+    if (app_si.lpTitle)
+        console_si.lpTitle = app_si.lpTitle;
+    else if (GetModuleFileNameW(0, buffer, ARRAY_SIZE(buffer)))
+    {
+        buffer[ARRAY_SIZE(buffer) - 1] = 0;
+        console_si.lpTitle = buffer;
+    }
+
+    if (!(event = CreateEventW( &inheritable_attr, TRUE, FALSE, NULL ))) return FALSE;
+
+    swprintf( cmd, ARRAY_SIZE(cmd),  L"wineconsole --use-event=%ld", (DWORD_PTR)event );
+    if ((ret = CreateProcessW( NULL, cmd, NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &console_si, &pi )))
+    {
+        HANDLE wait_handles[2] = { event, pi.hProcess };
+        ret = WaitForMultipleObjects( ARRAY_SIZE(wait_handles), wait_handles, FALSE, INFINITE ) == WAIT_OBJECT_0;
+        CloseHandle( pi.hThread );
+        CloseHandle( pi.hProcess );
+    }
+    CloseHandle( event );
+    if (!ret) goto error;
+    TRACE( "Started wineconsole pid=%08x tid=%08x\n", pi.dwProcessId, pi.dwThreadId );
+
+    if (!(app_si.dwFlags & STARTF_USESTDHANDLES))
+    {
+
+        std_in = CreateFileW( L"CONIN$", GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, 0, &inheritable_attr,
+                              OPEN_EXISTING, 0, 0);
+        if (std_in == INVALID_HANDLE_VALUE) goto error;
+
+        std_out = CreateFileW( L"CONOUT$", GENERIC_READ | GENERIC_WRITE, 0, &inheritable_attr, OPEN_EXISTING, 0, 0);
+        if (std_out == INVALID_HANDLE_VALUE) goto error;
+
+        if (!DuplicateHandle( GetCurrentProcess(), std_out, GetCurrentProcess(),
+                              &std_err, 0, TRUE, DUPLICATE_SAME_ACCESS) )
+            goto error;
+    }
+    else
+    {
+        std_in  = app_si.hStdInput;
+        std_out = app_si.hStdOutput;
+        std_err = app_si.hStdError;
+    }
+
+    SetStdHandle( STD_INPUT_HANDLE,  std_in );
+    SetStdHandle( STD_OUTPUT_HANDLE, std_out );
+    SetStdHandle( STD_ERROR_HANDLE,  std_err );
+    SetLastError( ERROR_SUCCESS );
+    return TRUE;
+
+error:
+    ERR("Can't allocate console\n");
+    if (std_in != INVALID_HANDLE_VALUE)  CloseHandle(std_in);
+    if (std_out != INVALID_HANDLE_VALUE) CloseHandle(std_out);
+    if (std_err != INVALID_HANDLE_VALUE) CloseHandle(std_err);
+    FreeConsole();
+    return FALSE;
 }
 
 
@@ -371,12 +453,31 @@ BOOL WINAPI DECLSPEC_HOTPATCH FillConsoleOutputCharacterW( HANDLE handle, WCHAR 
     return ret;
 }
 
+HANDLE get_console_wait_handle( HANDLE handle )
+{
+    HANDLE event = 0;
+
+    SERVER_START_REQ( get_console_wait_event )
+    {
+        req->handle = wine_server_obj_handle( console_handle_map( handle ));
+        if (!wine_server_call( req )) event = wine_server_ptr_handle( reply->event );
+    }
+    SERVER_END_REQ;
+    if (event)
+    {
+        if (InterlockedCompareExchangePointer( &console_wait_event, event, 0 )) NtClose( event );
+        handle = console_wait_event;
+    }
+    return handle;
+}
+
 
 /***********************************************************************
  *	FreeConsole   (kernelbase.@)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH FreeConsole(void)
 {
+    HANDLE event;
     BOOL ret;
 
     SERVER_START_REQ( free_console )
@@ -384,6 +485,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH FreeConsole(void)
         ret = !wine_server_call_err( req );
     }
     SERVER_END_REQ;
+    if ((event = InterlockedExchangePointer( &console_wait_event, NULL ))) NtClose( event );
     return ret;
 }
 

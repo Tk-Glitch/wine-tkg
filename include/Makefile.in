@@ -122,6 +122,7 @@ SOURCES = \
 	d3dcommon.idl \
 	d3dcompiler.h \
 	d3dhal.h \
+	d3dkmdt.h \
 	d3drm.h \
 	d3drmdef.h \
 	d3drmobj.h \
@@ -279,6 +280,7 @@ SOURCES = \
 	evntprov.h \
 	evntrace.h \
 	evr.idl \
+	evr9.idl \
 	excpt.h \
 	exdisp.idl \
 	exdispid.h \
@@ -810,7 +812,7 @@ SOURCES = \
 	wtypes.idl \
 	wuapi.idl \
 	x3daudio.h \
-	xact3.idl \
+	xact3.h \
 	xact3wb.h \
 	xapo.idl \
 	xapofx.h \

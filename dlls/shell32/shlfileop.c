@@ -1242,7 +1242,7 @@ static int copy_files(FILE_OPERATION *op, BOOL multidest, const FILE_LIST *flFro
         fileDest = &flTo->feFiles[0];
     }
 
-    if (multidest)
+    if (multidest && flTo->dwNumFiles > 1)
     {
         if (flFrom->bAnyFromWildcard)
             return ERROR_CANCELLED;

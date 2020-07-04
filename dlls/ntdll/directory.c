@@ -2627,7 +2627,6 @@ NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *
     char *unix_name;
     int name_len, unix_len;
     NTSTATUS status;
-    BOOLEAN check_case = !(attr->Attributes & OBJ_CASE_INSENSITIVE);
 
     if (!attr->ObjectName->Buffer && attr->ObjectName->Length)
         return STATUS_ACCESS_VIOLATION;
@@ -2637,7 +2636,7 @@ NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *
         if (!attr->ObjectName->Buffer)
             return STATUS_OBJECT_PATH_SYNTAX_BAD;
 
-        return wine_nt_to_unix_file_name( attr->ObjectName, unix_name_ret, disposition, check_case );
+        return wine_nt_to_unix_file_name( attr->ObjectName, unix_name_ret, disposition );
     }
 
     name     = attr->ObjectName->Buffer;
@@ -2667,7 +2666,7 @@ NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *
             if ((old_cwd = open( ".", O_RDONLY )) != -1 && fchdir( root_fd ) != -1)
             {
                 status = lookup_unix_name( name, name_len, &unix_name, unix_len, 1,
-                                           disposition, check_case );
+                                           disposition, FALSE );
                 if (fchdir( old_cwd ) == -1) chdir( "/" );
             }
             else status = FILE_GetNtStatus();
@@ -2698,7 +2697,7 @@ NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *
  *           nt_to_unix_file_name_internal
  */
 static NTSTATUS nt_to_unix_file_name_internal( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
-                                               UINT disposition, BOOLEAN check_case )
+                                               UINT disposition )
 {
     static const WCHAR unixW[] = {'u','n','i','x'};
     static const WCHAR pipeW[] = {'p','i','p','e'};
@@ -2710,6 +2709,7 @@ static NTSTATUS nt_to_unix_file_name_internal( const UNICODE_STRING *nameW, ANSI
     char *unix_name;
     int pos, ret, name_len, unix_len, prefix_len;
     WCHAR prefix[MAX_DIR_ENTRY_LEN + 1];
+    BOOLEAN check_case = FALSE;
     BOOLEAN is_unix = FALSE;
     BOOLEAN is_pipe = FALSE;
 
@@ -2889,7 +2889,7 @@ static NTSTATUS nt_to_dos_device( WCHAR *name, size_t length, WCHAR *device_ret 
  * returned, but the unix name is still filled in properly.
  */
 NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
-                                          UINT disposition, BOOLEAN check_case )
+                                          UINT disposition )
 {
     static const WCHAR systemrootW[] = {'\\','S','y','s','t','e','m','R','o','o','t','\\',0};
     static const WCHAR dosprefixW[] = {'\\','?','?','\\'};
@@ -2912,7 +2912,7 @@ NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRI
         prefix = user_shared_data->NtSystemRoot;
     }
     else
-        return nt_to_unix_file_name_internal( nameW, unix_name_ret, disposition, check_case );
+        return nt_to_unix_file_name_internal( nameW, unix_name_ret, disposition );
 
     name_len = sizeof(dosprefixW) + wcslen(prefix) * sizeof(WCHAR) +
                nameW->Length - offset * sizeof(WCHAR) + sizeof(WCHAR);
@@ -2928,7 +2928,7 @@ NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRI
     ptr[ nameW->Length / sizeof(WCHAR) - offset ] = 0;
 
     RtlInitUnicodeString( &dospathW, name );
-    status = nt_to_unix_file_name_internal( &dospathW, unix_name_ret, disposition, check_case );
+    status = nt_to_unix_file_name_internal( &dospathW, unix_name_ret, disposition );
 
     RtlFreeHeap( GetProcessHeap(), 0, name );
     return status;

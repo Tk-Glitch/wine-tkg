@@ -18,29 +18,7 @@
  *
  */
 
-#define COBJMACROS
-
-#include "config.h"
-#include <stdarg.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "wtypes.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "dshow.h"
-
-#include "qcap_main.h"
-#include "wine/debug.h"
-
-#include "capture.h"
-#include "uuids.h"
-#include "vfwmsgs.h"
-#include "amvideo.h"
-#include "strmif.h"
-#include "ddraw.h"
-#include "ocidl.h"
-#include "oleauto.h"
+#include "qcap_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(qcap);
 
@@ -53,7 +31,8 @@ typedef struct VfwCapture
     IAMFilterMiscFlags IAMFilterMiscFlags_iface;
     IPersistPropertyBag IPersistPropertyBag_iface;
     BOOL init;
-    Capture *driver_info;
+
+    struct video_capture_device *device;
 
     struct strmbase_source source;
     IKsPropertySet IKsPropertySet_iface;
@@ -106,8 +85,8 @@ static void vfw_capture_destroy(struct strmbase_filter *iface)
     if (filter->init)
     {
         if (filter->filter.state != State_Stopped)
-            qcap_driver_stop_stream(filter->driver_info);
-        qcap_driver_destroy(filter->driver_info);
+            filter->device->ops->stop_stream(filter->device);
+        filter->device->ops->destroy(filter->device);
     }
 
     if (filter->source.pin.peer)
@@ -144,7 +123,7 @@ static HRESULT vfw_capture_init_stream(struct strmbase_filter *iface)
 {
     VfwCapture *filter = impl_from_strmbase_filter(iface);
 
-    qcap_driver_init_stream(filter->driver_info);
+    filter->device->ops->init_stream(filter->device);
     return VFW_S_CANT_CUE;
 }
 
@@ -152,7 +131,7 @@ static HRESULT vfw_capture_start_stream(struct strmbase_filter *iface, REFERENCE
 {
     VfwCapture *filter = impl_from_strmbase_filter(iface);
 
-    qcap_driver_start_stream(filter->driver_info);
+    filter->device->ops->start_stream(filter->device);
     return S_OK;
 }
 
@@ -160,7 +139,7 @@ static HRESULT vfw_capture_stop_stream(struct strmbase_filter *iface)
 {
     VfwCapture *filter = impl_from_strmbase_filter(iface);
 
-    qcap_driver_stop_stream(filter->driver_info);
+    filter->device->ops->stop_stream(filter->device);
     return VFW_S_CANT_CUE;
 }
 
@@ -168,7 +147,7 @@ static HRESULT vfw_capture_cleanup_stream(struct strmbase_filter *iface)
 {
     VfwCapture *filter = impl_from_strmbase_filter(iface);
 
-    qcap_driver_cleanup_stream(filter->driver_info);
+    filter->device->ops->cleanup_stream(filter->device);
     return S_OK;
 }
 
@@ -233,7 +212,7 @@ AMStreamConfig_SetFormat(IAMStreamConfig *iface, AM_MEDIA_TYPE *pmt)
             return VFW_E_INVALIDMEDIATYPE;
     }
 
-    hr = qcap_driver_set_format(This->driver_info, pmt);
+    hr = This->device->ops->set_format(This->device, pmt);
     if (SUCCEEDED(hr) && This->filter.graph && This->source.pin.peer)
     {
         hr = IFilterGraph_Reconnect(This->filter.graph, &This->source.pin.IPin_iface);
@@ -244,16 +223,18 @@ AMStreamConfig_SetFormat(IAMStreamConfig *iface, AM_MEDIA_TYPE *pmt)
     return hr;
 }
 
-static HRESULT WINAPI
-AMStreamConfig_GetFormat( IAMStreamConfig *iface, AM_MEDIA_TYPE **pmt )
+static HRESULT WINAPI AMStreamConfig_GetFormat(IAMStreamConfig *iface, AM_MEDIA_TYPE **mt)
 {
-    VfwCapture *This = impl_from_IAMStreamConfig(iface);
+    VfwCapture *filter = impl_from_IAMStreamConfig(iface);
     HRESULT hr;
 
-    TRACE("%p -> (%p)\n", iface, pmt);
-    hr = qcap_driver_get_format(This->driver_info, pmt);
-    if (SUCCEEDED(hr))
-        strmbase_dump_media_type(*pmt);
+    TRACE("filter %p, mt %p.\n", filter, mt);
+
+    if (!(*mt = CoTaskMemAlloc(sizeof(**mt))))
+        return E_OUTOFMEMORY;
+
+    if (SUCCEEDED(hr = filter->device->ops->get_format(filter->device, *mt)))
+        strmbase_dump_media_type(*mt);
     return hr;
 }
 
@@ -267,7 +248,7 @@ static HRESULT WINAPI AMStreamConfig_GetNumberOfCapabilities(IAMStreamConfig *if
     if (!count || !size)
         return E_POINTER;
 
-    *count = qcap_driver_get_caps_count(filter->driver_info);
+    *count = filter->device->ops->get_caps_count(filter->device);
     *size = sizeof(VIDEO_STREAM_CONFIG_CAPS);
 
     return S_OK;
@@ -280,7 +261,7 @@ static HRESULT WINAPI AMStreamConfig_GetStreamCaps(IAMStreamConfig *iface,
 
     TRACE("filter %p, index %d, pmt %p, vscc %p.\n", filter, index, pmt, vscc);
 
-    return qcap_driver_get_caps(filter->driver_info, index, pmt, (VIDEO_STREAM_CONFIG_CAPS *)vscc);
+    return filter->device->ops->get_caps(filter->device, index, pmt, (VIDEO_STREAM_CONFIG_CAPS *)vscc);
 }
 
 static const IAMStreamConfigVtbl IAMStreamConfig_VTable =
@@ -316,32 +297,36 @@ static ULONG WINAPI AMVideoProcAmp_Release(IAMVideoProcAmp * iface)
     return IUnknown_Release(This->filter.outer_unk);
 }
 
-static HRESULT WINAPI
-AMVideoProcAmp_GetRange( IAMVideoProcAmp * iface, LONG Property, LONG *pMin,
-        LONG *pMax, LONG *pSteppingDelta, LONG *pDefault, LONG *pCapsFlags )
+static HRESULT WINAPI AMVideoProcAmp_GetRange(IAMVideoProcAmp *iface, LONG property,
+        LONG *min, LONG *max, LONG *step, LONG *default_value, LONG *flags)
 {
-    VfwCapture *This = impl_from_IAMVideoProcAmp(iface);
+    VfwCapture *filter = impl_from_IAMVideoProcAmp(iface);
 
-    return qcap_driver_get_prop_range( This->driver_info, Property, pMin, pMax,
-                   pSteppingDelta, pDefault, pCapsFlags );
+    TRACE("filter %p, property %#x, min %p, max %p, step %p, default_value %p, flags %p.\n",
+            filter, property, min, max, step, default_value, flags);
+
+    return filter->device->ops->get_prop_range(filter->device, property, min,
+            max, step, default_value, flags);
 }
 
-static HRESULT WINAPI
-AMVideoProcAmp_Set( IAMVideoProcAmp * iface, LONG Property, LONG lValue,
-                    LONG Flags )
+static HRESULT WINAPI AMVideoProcAmp_Set(IAMVideoProcAmp *iface, LONG property,
+        LONG value, LONG flags)
 {
-    VfwCapture *This = impl_from_IAMVideoProcAmp(iface);
+    VfwCapture *filter = impl_from_IAMVideoProcAmp(iface);
 
-    return qcap_driver_set_prop(This->driver_info, Property, lValue, Flags);
+    TRACE("filter %p, property %#x, value %d, flags %#x.\n", filter, property, value, flags);
+
+    return filter->device->ops->set_prop(filter->device, property, value, flags);
 }
 
-static HRESULT WINAPI
-AMVideoProcAmp_Get( IAMVideoProcAmp * iface, LONG Property, LONG *lValue,
-                    LONG *Flags )
+static HRESULT WINAPI AMVideoProcAmp_Get(IAMVideoProcAmp *iface, LONG property,
+        LONG *value, LONG *flags)
 {
-    VfwCapture *This = impl_from_IAMVideoProcAmp(iface);
+    VfwCapture *filter = impl_from_IAMVideoProcAmp(iface);
 
-    return qcap_driver_get_prop(This->driver_info, Property, lValue, Flags);
+    TRACE("filter %p, property %#x, value %p, flags %p.\n", filter, property, value, flags);
+
+    return filter->device->ops->get_prop(filter->device, property, value, flags);
 }
 
 static const IAMVideoProcAmpVtbl IAMVideoProcAmp_VTable =
@@ -410,8 +395,7 @@ PPB_Load( IPersistPropertyBag * iface, IPropertyBag *pPropBag,
 
     if (SUCCEEDED(hr))
     {
-        This->driver_info = qcap_driver_init(&This->source, V_I4(&var));
-        if (This->driver_info)
+        if ((This->device = v4l_device_create(&This->source, V_I4(&var))))
         {
             This->init = TRUE;
             hr = S_OK;
@@ -527,7 +511,7 @@ static inline VfwCapture *impl_from_strmbase_pin(struct strmbase_pin *pin)
 static HRESULT source_query_accept(struct strmbase_pin *pin, const AM_MEDIA_TYPE *mt)
 {
     VfwCapture *filter = impl_from_strmbase_pin(pin);
-    return qcap_driver_check_format(filter->driver_info, mt);
+    return filter->device->ops->check_format(filter->device, mt);
 }
 
 static HRESULT source_get_media_type(struct strmbase_pin *pin,
@@ -537,11 +521,11 @@ static HRESULT source_get_media_type(struct strmbase_pin *pin,
     AM_MEDIA_TYPE *vfw_pmt;
     HRESULT hr;
 
-    if (index >= qcap_driver_get_caps_count(filter->driver_info))
+    if (index >= filter->device->ops->get_caps_count(filter->device))
         return VFW_S_NO_MORE_ITEMS;
 
-    hr = qcap_driver_get_caps(filter->driver_info, index, &vfw_pmt, NULL);
-    if (SUCCEEDED(hr)) {
+    if (SUCCEEDED(hr = filter->device->ops->get_caps(filter->device, index, &vfw_pmt, NULL)))
+    {
         CopyMediaType(pmt, vfw_pmt);
         DeleteMediaType(vfw_pmt);
     }

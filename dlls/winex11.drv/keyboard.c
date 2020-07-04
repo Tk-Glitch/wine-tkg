@@ -1421,43 +1421,6 @@ BOOL X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     return TRUE;
 }
 
-
-#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
-/***********************************************************************
- *           X11DRV_KeyEvent
- *
- * Handle a raw XInput2 key event for background windows
- */
-BOOL X11DRV_RawKeyEvent( XGenericEventCookie *cookie )
-{
-    XIRawEvent *event = cookie->data;
-    DWORD flags;
-    WORD vkey, scan;
-    INPUT input;
-
-    vkey = keyc2vkey[event->detail];
-    scan = keyc2scan[event->detail];
-
-    flags = 0;
-    if ( event->evtype == XI_RawKeyRelease ) flags |= KEYEVENTF_KEYUP;
-    if ( vkey & 0x100 ) flags |= KEYEVENTF_EXTENDEDKEY;
-
-    TRACE_(key)( "vkey=%04x scan=%04x flags=%04x\n", vkey, scan, flags );
-
-    input.type             = INPUT_KEYBOARD;
-    input.u.ki.wVk         = vkey & 0xff;
-    input.u.ki.wScan       = scan & 0xff;
-    input.u.ki.dwFlags     = flags;
-    input.u.ki.time        = EVENT_x11_time_to_win32_time(event->time);
-    input.u.ki.dwExtraInfo = 0;
-
-    __wine_send_input( 0, &input, SEND_HWMSG_RAWINPUT );
-
-    return TRUE;
-}
-#endif
-
-
 static WCHAR translate_keysym( Display *display, KeySym keysym )
 {
 #ifdef HAVE_XKB
@@ -1506,6 +1469,43 @@ static WCHAR translate_keysym( Display *display, KeySym keysym )
 
     return ret;
 }
+
+
+#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+/***********************************************************************
+ *           X11DRV_KeyEvent
+ *
+ * Handle a raw XInput2 key event for background windows
+ */
+BOOL X11DRV_RawKeyEvent( XGenericEventCookie *cookie )
+{
+    XIRawEvent *event = cookie->data;
+    DWORD flags;
+    WORD vkey, scan;
+    INPUT input;
+
+    vkey = keyc2vkey[event->detail];
+    scan = keyc2scan[event->detail];
+
+    flags = 0;
+    if ( event->evtype == XI_RawKeyRelease ) flags |= KEYEVENTF_KEYUP;
+    if ( vkey & 0x100 ) flags |= KEYEVENTF_EXTENDEDKEY;
+
+    TRACE_(key)( "vkey=%04x scan=%04x flags=%04x\n", vkey, scan, flags );
+
+    input.type             = INPUT_KEYBOARD;
+    input.u.ki.wVk         = vkey & 0xff;
+    input.u.ki.wScan       = scan & 0xff;
+    input.u.ki.dwFlags     = flags;
+    input.u.ki.time        = EVENT_x11_time_to_win32_time(event->time);
+    input.u.ki.dwExtraInfo = 0;
+
+    __wine_send_input( 0, &input, SEND_HWMSG_RAWINPUT );
+
+    return TRUE;
+}
+#endif
+
 
 /**********************************************************************
  *		X11DRV_KEYBOARD_DetectLayout

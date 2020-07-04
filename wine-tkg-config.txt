@@ -1,13 +1,77 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sat 20 Jun 2020 07:05:20 AM CEST :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sat 04 Jul 2020 08:30:58 PM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.11.r0.g16ac83bcbf
-Using wine-staging patchset (version 5.11.r0.g3d9a9272)
+Wine (plain) version: 5.12.r0.g51dd1ba02e
+Using wine-staging patchset (version 5.12.r1.g3f3a05f9)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
 
+b64208df0d8e94259783081084c5a731e0839542 reverted (hotfix)
+e9951dbe37c9fb018e677d872df9f563a0861295 reverted (hotfix)
+a07cff77d3bd452c3c4b99bf93503f727bf768cb reverted (hotfix)
+72fc2ceaa6ae472a809b4d5c02be98c44388c1b7 reverted (hotfix)
+c02b63fb60458ec750e5991a7491235861c40061 reverted (hotfix)
+69b6572338396134a3e20189cb35445d68757ebb reverted (hotfix)
+25d6abb951e111fd4da1130fef16749ae6981540 reverted (hotfix)
+887332f9c7bf0d75f53f88a9739b77b12463d636 reverted (hotfix)
+21f1fa82a8c7bd1b077f0289141972ed619c5a5f reverted (hotfix)
+520040dc4a287fd62d7d5161c083cee990c3d6e6 reverted (hotfix)
+8885a51347a768d8a9125d573963d12ac67d4715 reverted (hotfix)
+2d5bd21f31e2a608120ba262ba2af245526905d3 reverted (hotfix)
+acc52bc90ef1d3cdfc3eef97bb3ac84bfc96cb4c reverted (hotfix)
+3a9edf9aad43c3e8ba724571da5381f821f1dc56 reverted (hotfix)
+b6722aa7527abc71cb46ab75e4b875c288408d52 reverted (hotfix)
+d324014d42bc759b6a6faa594bdecce054e294c1 reverted (hotfix)
+3df16c0b70f734f5260bfde0f68239976d6a5842 reverted (hotfix)
+70fceaa2fe581ed41408faa368ff3f6833fd463c reverted (hotfix)
+cfc9da22f58659e57d20d76c1c45b91da9dca789 reverted (hotfix)
+4478ba258e45559ac97353ab27951e84dd9865c1 reverted (hotfix)
+8a169390c9ef4d8a43b604558c4194a052473c0c reverted (hotfix)
+f89f7a54c25eb202e70225713ed39687be048e26 reverted (hotfix)
+4fcf20d1d120985a6056ef8e1861738c2e903660 reverted (hotfix)
+64731a8e9fce07a7c34374dc0a6bb6ed8b5f6183 reverted (hotfix)
+e1e34cdc375baf2d1d5a2266ae0faa885987ab37 reverted (hotfix)
+eef527723f02abcdb301b02cae059b123f277d26 reverted (hotfix)
+43be3507c04b56938e985047f2ab55147ed8ddd2 reverted (hotfix)
+83a4549e9baa252d0fb92d14e5a39119b8583813 reverted (hotfix)
+15c3eaafbb3a376998e9c5eb36cb24816dad5447 reverted (hotfix)
+f1ff598e2aca810c3a0540d6a764787d31890741 reverted (hotfix)
+2334f4e64582a518e4d5a7627472a0d817b147ef reverted (hotfix)
+067648cd2bdc4776cb69c6554ee9d799e0b201c7 reverted (hotfix)
+bc8745851e3005fd98c45fe06fc9d4d92c68fa53 reverted (hotfix)
+716cf7d342466235d3117db5da788704cbf2853d reverted (hotfix)
+38c78a968259963d29559096dda575237039c561 reverted (hotfix)
+b9f531a0e81ebf7a0dfeac00d557632546b12f56 reverted (hotfix)
+ed566a87232fddde73481efe2dfcefceca5e49e4 reverted (hotfix)
+69e9651c1ae0542e52f5ea924b9e286584446607 reverted (hotfix)
+847b93c7400f82225057e8b71938eb8ccd5d23be reverted (hotfix)
+18f83c12a04f934eda74fed77055073075bc4275 reverted (hotfix)
+52c04e1e390e0008580eca7343f5c04aed3d1323 reverted (hotfix)
+bededeccc51cc766ed48ce861a2a411ad8d22a87 reverted (hotfix)
+6898bdca94cde73bd8d8b88d99153a731f6a7a6b reverted (hotfix)
+dde38fda6eacf453cb48f75b7579647ceb75e9fd reverted (hotfix)
+e60591919850a79a483ec3c138fce96f8e1edb57 reverted (hotfix)
+b8dc6b241204f5348563a23f51765234ef19f044 reverted (hotfix)
+13c1f008c0d8beca934ebfd347dc8354f4c9db05 reverted (hotfix)
+7161dcd42653452a2373a7595a7020d0a59722f4 reverted (hotfix)
+c031662fd0bf1bc366185fe85a342bf60a9fc0bc reverted (hotfix)
+10dbd1edd19008bc8eaeb55446e1e5fd87a12814 reverted (hotfix)
+438abad27c797ca806938188f725fb0e36aa9fb9 reverted (hotfix)
+36e55720b66743d161330183693949e4f8503cc7 reverted (hotfix)
+01143089f08c662a75f5af47fc2a8a3f8ae2afd6 reverted (hotfix)
+9b9845e43e08e357588bb6a2ca6bfc15ce2dcd73 reverted (hotfix)
+577b3924408cd1ffa7d2559999751a9ced597882 reverted (hotfix)
+31538a79a90653afb8bc7744506989c8811a800d reverted (hotfix)
+99649d78927bb911b8a9022c8f362e0a7d9c7ea9 reverted (hotfix)
+b7ccb9d06a897a384b71ccb959b431168ca07e03 reverted (hotfix)
+537bb7a8aee278d285cb77669fd9258dfaa3222f reverted (hotfix)
+67949d96a7c49b95801723e8cfdf327e907822cb reverted (hotfix)
+9e3893cc29dbcfd53d89abc679d0207cf2492999 reverted (hotfix)
+251335cdf35d4ff1fcae9c73f77136c9b85e7d96 reverted (hotfix)
+6ff0bb786c43ac3348dec6a977feb36af8bc4bcf reverted (hotfix)
+c468a36903aea9ddac12b25c93cc5b65f293d6b9 reverted (hotfix)
 a2c890c1e104140f83209c8d1e8ee298b346e38d reverted (hotfix)
 5f9f827fd4effe08d544964db349b56519952da6 reverted (hotfix)
 78532a0c09c33a24715ae5ff7f446f1de488a24b reverted (hotfix)
@@ -85,9 +149,6 @@ b925dd78b813decf386139a15aa7bc6863ee7ae5 reverted (hotfix)
 e6e2f2325a0a4eb14f10dd6df319b068761e9600 reverted (hotfix)
 e854ea34cc481658ec61f4603d0438e075608c98 reverted (hotfix)
 
-3078f10d43d834b0498358fe0accb565191b7020 reverted 
-( Origin unbreak revert applied )
-
 6f9d20806e821ab07c8adf81ae6630fae94b00ef reverted 
 145cfce1135a7e59cc4c89cd05b572403f188161 reverted 
 e3eb89d5ebb759e975698b97ed8b547a9de3853f reverted 
@@ -98,22 +159,17 @@ fd6f50c0d3e96947846ca82ed0c9bd79fd8e5b80 reverted
 2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted 
 ( FS hack unbreak reverts applied )
 
-306c40e67319cae8e4c448ec8fc8d3996f87943f reverted 
-26c1131201f8fd9918a01231a7eb6f1989400858 reverted 
-( Proton rawinput unbreak reverts applied )
-
-Applied reverting hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-24.mystagingrevert
+Applied reverting hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-38.mystagingrevert
 Applied hotfix 934a09585a15e8491e422b43624ffe632b02bd3c-3.mystagingpatch
-Applied hotfix ntdll-ForceBottomUpAlloc-044cb93.mystagingpatch
+Applied hotfix ntdll-ForceBottomUpAlloc-97fbe3f.mystagingpatch
 use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
 plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
 FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
-staging-44d1a45-localreverts.patch -- ( Applied local reverts for staging 44d1a45 fshack )
 childwindow.patch -- ( Applied child window for vk patch )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-nolegacy -W user32-rawinput-mouse-experimental -W user32-rawinput-hid -W winex11-key_translation
+Staging overrides, if any: -W winevulkan-vkGetPhysicalDeviceSurfaceCapabilitiesKHR -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-mouse-experimental -W user32-rawinput-hid
 
 mk11.patch -- ( Applied Mortal Kombat 11 fix )
 fsync-staging.patch -- ( Applied fsync, an experimental replacement for esync (staging) )
@@ -123,9 +179,6 @@ fsync-spincounts.patch -- ( Add a configurable spin count to fsync )
 
 valve_proton_fullscreen_hack-staging.patch -- ( Applied Proton fullscreen hack patch (staging) )
 proton-rawinput.patch -- ( Using rawinput patchset )
-0001-winex11-Match-keyboard-in-Unicode.patch -- ( Applied proton friendly winex11-Match-keyboard-in-Unicode )
-0002-winex11-Fix-more-key-translation.patch -- ( Applied proton friendly winex11-Fix-more-key-translation )
-0003-winex11.drv-Fix-main-Russian-keyboard-layout.patch -- ( Applied proton friendly winex11.drv-Fix-main-Russian-keyboard-layout )
 LAA-staging.patch -- ( Applied large address aware override support )
 proton-staging_winex11-MWM_Decorations.patch -- ( Applied proton friendly winex11-MWM_Decorations )
 
@@ -136,9 +189,8 @@ proton_fs_hack_integer_scaling.patch -- ( Enable Proton fs hack integer scaling 
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 proton-win10-default.patch -- ( Enforce win10 as default wine version )
 
-Applied reverting hotfix fd7992972b252ed262d33ef604e9e1235d2108c5-6.myrevert
 Applied hotfix d8d6a6b2e639d2e29e166a3faf988b81388ae191.mypatch
-Applied your own patch 0001-Add-some-semi-stubs-in-user32.mypatch
+Applied hotfix origin_3078f10d_fix.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch GNUTLShack.mypatch
 Applied your own patch amdags.mypatch

@@ -34,7 +34,7 @@
 @ stdcall MFCompareFullToPartialMediaType(ptr ptr)
 @ stub MFCompareSockaddrAddresses
 @ stub MFConvertColorInfoFromDXVA
-@ stub MFConvertColorInfoToDXVA
+@ stdcall MFConvertColorInfoToDXVA(ptr ptr)
 @ stub MFConvertFromFP16Array
 @ stub MFConvertToFP16Array
 @ stdcall MFCopyImage(ptr long ptr long long long)
@@ -52,7 +52,7 @@
 @ stdcall MFCreateMFByteStreamOnStream(ptr ptr)
 @ stdcall MFCreateMFByteStreamOnStreamEx(ptr ptr)
 @ stdcall MFCreateMFByteStreamWrapper(ptr ptr)
-@ stub MFCreateMFVideoFormatFromMFMediaType
+@ stdcall MFCreateMFVideoFormatFromMFMediaType(ptr ptr ptr)
 @ stdcall MFCreateMediaBufferFromMediaType(ptr int64 long long ptr)
 @ stub MFCreateMediaBufferWrapper
 @ stdcall MFCreateMediaEvent(long ptr long ptr ptr)
@@ -70,13 +70,14 @@
 @ stdcall MFCreateSystemTimeSource(ptr)
 @ stub MFCreateSystemUnderlyingClock
 @ stub MFCreateTempFile
+@ stdcall MFCreateTrackedSample(ptr)
 @ stdcall MFCreateTransformActivate(ptr)
 @ stub MFCreateURLFromPath
 @ stub MFCreateUdpSockets
 @ stub MFCreateVideoMediaType
 @ stub MFCreateVideoMediaTypeFromBitMapInfoHeader
 @ stub MFCreateVideoMediaTypeFromBitMapInfoHeaderEx
-@ stub MFCreateVideoMediaTypeFromSubtype
+@ stdcall MFCreateVideoMediaTypeFromSubtype(ptr ptr)
 @ stub MFCreateVideoMediaTypeFromVideoInfoHeader2
 @ stub MFCreateVideoMediaTypeFromVideoInfoHeader
 @ stdcall MFCreateWaveFormatExFromMFMediaType(ptr ptr ptr long)

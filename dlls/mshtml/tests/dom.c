@@ -5144,6 +5144,7 @@ static void test_elem_bounding_client_rect(IUnknown *unk)
     IHTMLRectCollection *rects;
     IHTMLRect *rect, *rect2;
     IHTMLElement2 *elem2;
+    VARIANT v, index;
     LONG l;
     HRESULT hres;
 
@@ -5184,6 +5185,19 @@ static void test_elem_bounding_client_rect(IUnknown *unk)
     ok(hres == S_OK, "getClientRects failed: %08x\n", hres);
 
     test_disp((IUnknown*)rects, &IID_IHTMLRectCollection, NULL, L"[object]");
+
+    hres = IHTMLRectCollection_get_length(rects, &l);
+    ok(hres == S_OK, "get_length failed: %08x\n", hres);
+    ok(l == 1, "length = %u\n", l);
+
+    V_VT(&index) = VT_I4;
+    V_I4(&index) = 0;
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLRectCollection_item(rects, &index, &v);
+    ok(hres == S_OK, "item failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+    test_disp((IUnknown*)V_DISPATCH(&v), &IID_IHTMLRect, NULL, L"[object]");
+    VariantClear(&v);
 
     IHTMLRectCollection_Release(rects);
     IHTMLElement2_Release(elem2);
@@ -5868,6 +5882,27 @@ static void test_txtrange(IHTMLDocument2 *doc)
     IHTMLTxtRange_Release(range);
 }
 
+static void test_markup_services(IHTMLDocument2 *doc)
+{
+    IMarkupServices *markup_services;
+    IMarkupPointer *markup_pointer;
+    IMarkupPointer2 *markup_pointer2;
+    HRESULT hres;
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IMarkupServices, (void**)&markup_services);
+    ok(hres == S_OK, "Could not get IMarkupServices iface: %08x\n", hres);
+
+    hres = IMarkupServices_CreateMarkupPointer(markup_services, &markup_pointer);
+    ok(hres == S_OK, "CreateMarkupPointer failed: %08x\n", hres);
+
+    hres = IMarkupPointer_QueryInterface(markup_pointer, &IID_IMarkupPointer2, (void**)&markup_pointer2);
+    ok(hres == S_OK, "Could not get IMarkupPointer2 iface: %08x\n", hres);
+
+    IMarkupPointer_Release(markup_pointer);
+    IMarkupPointer2_Release(markup_pointer2);
+    IMarkupServices_Release(markup_services);
+}
+
 static void test_range(IHTMLDocument2 *doc)
 {
     if(is_ie9plus) {
@@ -5891,6 +5926,7 @@ static void test_range(IHTMLDocument2 *doc)
     }
 
     test_txtrange(doc);
+    test_markup_services(doc);
 }
 
 #define test_compatmode(a,b) _test_compatmode(__LINE__,a,b)
@@ -6563,9 +6599,13 @@ static void test_unique_id(IHTMLDocument2 *doc, IHTMLElement *elem)
 
 static void test_doc_elem(IHTMLDocument2 *doc)
 {
+    IHTMLNamespaceCollection *namespaces;
     IHTMLDocument2 *doc_node, *owner_doc;
+    IHTMLDocument4 *doc4;
     IHTMLElement *elem;
     IHTMLDocument3 *doc3;
+    IDispatch *disp;
+    LONG l;
     HRESULT hres;
     BSTR bstr;
 
@@ -6600,6 +6640,25 @@ static void test_doc_elem(IHTMLDocument2 *doc)
     test_doc_dir(doc);
 
     IHTMLElement_Release(elem);
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument4, (void**)&doc4);
+    ok(hres == S_OK, "QueryInterface(IID_IHTMLDocument4) failed: %08x\n", hres);
+
+    hres = IHTMLDocument4_get_namespaces(doc4, &disp);
+    ok(hres == S_OK, "get_namespaces failed: %08x\n", hres);
+
+    test_disp((IUnknown*)disp, &DIID_DispHTMLNamespaceCollection, NULL, L"[object]");
+
+    hres = IDispatch_QueryInterface(disp, &IID_IHTMLNamespaceCollection, (void**)&namespaces);
+    ok(hres == S_OK, "Could not get IHTMLNamespaceCollection iface: %08x\n", hres);
+
+    hres = IHTMLNamespaceCollection_get_length(namespaces, &l);
+    ok(hres == S_OK, "get_length failed: %08x\n", hres);
+    ok(l == 0, "length = %d\n", l);
+
+    IHTMLNamespaceCollection_Release(namespaces);
+    IDispatch_Release(disp);
+    IHTMLDocument4_Release(doc4);
 }
 
 static void test_default_body(IHTMLBodyElement *body)
@@ -7276,6 +7335,11 @@ static void test_defaults(IHTMLDocument2 *doc)
     test_default_selection(doc);
     test_doc_title(doc, L"");
     test_dom_implementation(doc);
+
+    str = (BSTR)0xdeadbeef;
+    hres = IHTMLDocument2_get_cookie(doc, &str);
+    ok(hres == S_OK, "get_cookie failed: %08x\n", hres);
+    ok(!str, "cookie = %s\n", wine_dbgstr_w(str));
 }
 
 #define test_button_name(a,b) _test_button_name(__LINE__,a,b)
@@ -8205,12 +8269,13 @@ static void _set_iframe_width(unsigned line, IHTMLElement *elem, const WCHAR *va
 static void test_iframe_elem(IHTMLElement *elem)
 {
     IHTMLDocument2 *content_doc, *owner_doc;
+    IHTMLIFrameElement2 *iframe2;
     IHTMLIFrameElement3 *iframe3;
     IHTMLElementCollection *col;
     IHTMLWindow2 *content_window;
     IHTMLElement *body;
     IDispatch *disp;
-    VARIANT errv;
+    VARIANT errv, v;
     BSTR str;
     HRESULT hres;
 
@@ -8244,16 +8309,30 @@ static void test_iframe_elem(IHTMLElement *elem)
         win_skip("IHTMLIFrameElement3 not supported\n");
     }
 
+    iframe2 = get_iframe2_iface((IUnknown*)elem);
+
     test_iframe_height(elem, NULL);
     set_iframe_height(elem, L"100px");
     set_iframe_height(elem, L"50%");
     test_iframe_height(elem, L"50%");
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 100;
+    hres = IHTMLIFrameElement2_put_height(iframe2, v);
+    ok(hres == S_OK, "put_height failed: %08x\n", hres);
+    test_iframe_height(elem, L"100");
 
     test_iframe_width(elem, NULL);
     set_iframe_width(elem, L"150px");
     set_iframe_width(elem, L"70%");
     test_iframe_width(elem, L"70%");
     test_framebase_src(elem, L"about:blank");
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 110;
+    hres = IHTMLIFrameElement2_put_width(iframe2, v);
+    ok(hres == S_OK, "put_height failed: %08x\n", hres);
+    test_iframe_width(elem, L"110");
 
     str = SysAllocString(L"text/html");
     V_VT(&errv) = VT_ERROR;
@@ -8279,6 +8358,7 @@ static void test_iframe_elem(IHTMLElement *elem)
     test_elem_attr(body, L"i4val", L"4");
     test_elem_attr(body, L"r8val", L"3.14");
     IHTMLElement_Release(body);
+    IHTMLIFrameElement2_Release(iframe2);
 
     hres = IHTMLDocument2_close(content_doc);
     ok(hres == S_OK, "close failed: %08x\n", hres);

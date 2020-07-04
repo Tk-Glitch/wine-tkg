@@ -1922,7 +1922,7 @@ static BOOL get_unix_path(ANSI_STRING *unix_name, const char *filename)
         return FALSE;
     }
 
-    status = wine_nt_to_unix_file_name(&ntpathW, unix_name, FILE_OPEN, FALSE);
+    status = wine_nt_to_unix_file_name(&ntpathW, unix_name, FILE_OPEN);
 
     RtlFreeUnicodeString(&ntpathW);
     RtlFreeUnicodeString(&dospathW);

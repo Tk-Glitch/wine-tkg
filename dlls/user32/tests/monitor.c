@@ -1126,15 +1126,6 @@ static void test_GetDisplayConfigBufferSizes(void)
     ok(ret == ERROR_INVALID_PARAMETER, "got %d\n", ret);
     ok(modes == 100, "got %u\n", modes);
 
-    paths = modes = 0;
-    ret = pGetDisplayConfigBufferSizes(QDC_ALL_PATHS, &paths, &modes);
-    if (!ret)
-        ok(paths > 0 && modes > 0, "got %u, %u\n", paths, modes);
-    else
-        ok(ret == ERROR_NOT_SUPPORTED, "got %d\n", ret);
-
-    /* Invalid flags, non-zero invalid flags validation is version (or driver?) dependent,
-       it's unreliable to use in tests. */
     ret = pGetDisplayConfigBufferSizes(0, NULL, NULL);
     ok(ret == ERROR_INVALID_PARAMETER, "got %d\n", ret);
 
@@ -1148,10 +1139,38 @@ static void test_GetDisplayConfigBufferSizes(void)
     ok(ret == ERROR_INVALID_PARAMETER, "got %d\n", ret);
     ok(modes == 100, "got %u\n", modes);
 
+    /* Flag validation on Windows is driver-dependent */
     paths = modes = 100;
     ret = pGetDisplayConfigBufferSizes(0, &paths, &modes);
     ok(ret == ERROR_INVALID_PARAMETER || ret == ERROR_NOT_SUPPORTED, "got %d\n", ret);
     ok((modes == 0 || modes == 100) && paths == 0, "got %u, %u\n", modes, paths);
+
+    paths = modes = 100;
+    ret = pGetDisplayConfigBufferSizes(0xFF, &paths, &modes);
+    ok(ret == ERROR_INVALID_PARAMETER || ret == ERROR_NOT_SUPPORTED, "got %d\n", ret);
+    ok((modes == 0 || modes == 100) && paths == 0, "got %u, %u\n", modes, paths);
+
+    /* Test success */
+    paths = modes = 0;
+    ret = pGetDisplayConfigBufferSizes(QDC_ALL_PATHS, &paths, &modes);
+    if (!ret)
+        ok(paths > 0 && modes > 0, "got %u, %u\n", paths, modes);
+    else
+        ok(ret == ERROR_NOT_SUPPORTED, "got %d\n", ret);
+
+    paths = modes = 0;
+    ret = pGetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &paths, &modes);
+    if (!ret)
+        ok(paths > 0 && modes > 0, "got %u, %u\n", paths, modes);
+    else
+        ok(ret == ERROR_NOT_SUPPORTED, "got %d\n", ret);
+
+    paths = modes = 0;
+    ret = pGetDisplayConfigBufferSizes(QDC_DATABASE_CURRENT, &paths, &modes);
+    if (!ret)
+        ok(paths > 0 && modes > 0, "got %u, %u\n", paths, modes);
+    else
+        ok(ret == ERROR_NOT_SUPPORTED, "got %d\n", ret);
 }
 
 static BOOL CALLBACK test_EnumDisplayMonitors_normal_cb(HMONITOR monitor, HDC hdc, LPRECT rect,
@@ -1269,7 +1288,8 @@ static void test_EnumDisplayMonitors(void)
     }
 }
 
-static void test_QueryDisplayConfig_result(UINT32 paths, const DISPLAYCONFIG_PATH_INFO *pi, UINT32 modes, const DISPLAYCONFIG_MODE_INFO *mi)
+static void test_QueryDisplayConfig_result(UINT32 flags,
+        UINT32 paths, const DISPLAYCONFIG_PATH_INFO *pi, UINT32 modes, const DISPLAYCONFIG_MODE_INFO *mi)
 {
     UINT32 i;
     LONG ret;
@@ -1280,6 +1300,7 @@ static void test_QueryDisplayConfig_result(UINT32 paths, const DISPLAYCONFIG_PAT
 
     for (i = 0; i < paths; i++)
     {
+        todo_wine {
         source_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
         source_name.header.size = sizeof(source_name);
         source_name.header.adapterId = pi[i].sourceInfo.adapterId;
@@ -1288,7 +1309,9 @@ static void test_QueryDisplayConfig_result(UINT32 paths, const DISPLAYCONFIG_PAT
         ret = pDisplayConfigGetDeviceInfo(&source_name.header);
         ok(!ret, "Expected 0, got %d\n", ret);
         ok(source_name.viewGdiDeviceName[0] != '\0', "Expected GDI device name, got empty string\n");
+        }
 
+        todo_wine {
         target_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
         target_name.header.size = sizeof(target_name);
         target_name.header.adapterId = pi[i].targetInfo.adapterId;
@@ -1297,7 +1320,9 @@ static void test_QueryDisplayConfig_result(UINT32 paths, const DISPLAYCONFIG_PAT
         ret = pDisplayConfigGetDeviceInfo(&target_name.header);
         ok(!ret, "Expected 0, got %d\n", ret);
         ok(target_name.monitorDevicePath[0] != '\0', "Expected monitor device path, got empty string\n");
+        }
 
+        todo_wine {
         preferred_mode.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE;
         preferred_mode.header.size = sizeof(preferred_mode);
         preferred_mode.header.adapterId = pi[i].targetInfo.adapterId;
@@ -1307,7 +1332,9 @@ static void test_QueryDisplayConfig_result(UINT32 paths, const DISPLAYCONFIG_PAT
         ok(!ret, "Expected 0, got %d\n", ret);
         ok(preferred_mode.width > 0 && preferred_mode.height > 0, "Expected non-zero height/width, got %ux%u\n",
                 preferred_mode.width, preferred_mode.height);
+        }
 
+        todo_wine {
         adapter_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME;
         adapter_name.header.size = sizeof(adapter_name);
         adapter_name.header.adapterId = pi[i].sourceInfo.adapterId;
@@ -1315,6 +1342,7 @@ static void test_QueryDisplayConfig_result(UINT32 paths, const DISPLAYCONFIG_PAT
         ret = pDisplayConfigGetDeviceInfo(&adapter_name.header);
         ok(!ret, "Expected 0, got %d\n", ret);
         ok(adapter_name.adapterDevicePath[0] != '\0', "Expected adapter device path, got empty string\n");
+        }
 
         /* Check corresponding modes */
         if (pi[i].sourceInfo.modeInfoIdx == DISPLAYCONFIG_PATH_MODE_IDX_INVALID)
@@ -1358,6 +1386,24 @@ static void test_QueryDisplayConfig_result(UINT32 paths, const DISPLAYCONFIG_PAT
                 "Expected LUID %08x:%08x, got %08x:%08x\n",
                 pi[i].targetInfo.adapterId.HighPart, pi[i].targetInfo.adapterId.LowPart,
                 mi[pi[i].targetInfo.modeInfoIdx].adapterId.HighPart, mi[pi[i].targetInfo.modeInfoIdx].adapterId.LowPart);
+        ok(mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.activeSize.cx > 0 &&
+           mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.activeSize.cy > 0,
+                "Expected non-zero height/width, got %ux%u\n",
+                mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.activeSize.cx,
+                mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.activeSize.cy);
+
+        if (flags == QDC_DATABASE_CURRENT)
+            ok(mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.totalSize.cx == 0 &&
+               mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.totalSize.cy == 0,
+                    "Expected zero height/width, got %ux%u\n",
+                    mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.totalSize.cx,
+                    mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.totalSize.cy);
+        else
+            ok(mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.totalSize.cx > 0 &&
+               mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.totalSize.cy > 0,
+                    "Expected non-zero height/width, got %ux%u\n",
+                    mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.totalSize.cx,
+                    mi[pi[i].targetInfo.modeInfoIdx].targetMode.targetVideoSignalInfo.totalSize.cy);
     }
 }
 
@@ -1366,6 +1412,7 @@ static void test_QueryDisplayConfig(void)
     UINT32 paths, modes;
     DISPLAYCONFIG_PATH_INFO pi[10];
     DISPLAYCONFIG_MODE_INFO mi[20];
+    DISPLAYCONFIG_TOPOLOGY_ID topologyid;
     LONG ret;
 
     ret = pQueryDisplayConfig(QDC_ALL_PATHS, NULL, NULL, NULL, NULL, NULL);
@@ -1408,6 +1455,18 @@ static void test_QueryDisplayConfig(void)
     ret = pQueryDisplayConfig(0, &paths, pi, &modes, mi, NULL);
     ok(ret == ERROR_INVALID_PARAMETER, "got %d\n", ret);
 
+    paths = modes = 1;
+    ret = pQueryDisplayConfig(0xFF, &paths, pi, &modes, mi, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "got %d\n", ret);
+
+    paths = modes = 1;
+    ret = pQueryDisplayConfig(QDC_DATABASE_CURRENT, &paths, pi, &modes, mi, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "got %d\n", ret);
+
+    paths = modes = 1;
+    ret = pQueryDisplayConfig(QDC_ALL_PATHS, &paths, pi, &modes, mi, &topologyid);
+    ok(ret == ERROR_INVALID_PARAMETER, "got %d\n", ret);
+
     /* Below this point, test functionality that requires a WDDM driver on Windows */
     paths = modes = 1;
     memset(pi, 0xFF, sizeof(pi[0]));
@@ -1431,7 +1490,18 @@ static void test_QueryDisplayConfig(void)
     ok(!ret, "got %d\n", ret);
     ok(paths > 0 && modes > 0, "got %u, %u\n", paths, modes);
     if (!ret && paths > 0 && modes > 0)
-        test_QueryDisplayConfig_result(paths, pi, modes, mi);
+        test_QueryDisplayConfig_result(QDC_ONLY_ACTIVE_PATHS, paths, pi, modes, mi);
+
+    paths = ARRAY_SIZE(pi);
+    modes = ARRAY_SIZE(mi);
+    memset(pi, 0xFF, sizeof(pi));
+    memset(mi, 0xFF, sizeof(mi));
+    topologyid = 0xFF;
+    ret = pQueryDisplayConfig(QDC_DATABASE_CURRENT, &paths, pi, &modes, mi, &topologyid);
+    ok(!ret, "got %d\n", ret);
+    ok(topologyid != 0xFF, "expected topologyid to be set, got %d\n", topologyid);
+    if (!ret && paths > 0 && modes > 0)
+        test_QueryDisplayConfig_result(QDC_DATABASE_CURRENT, paths, pi, modes, mi);
 }
 
 static void test_DisplayConfigGetDeviceInfo(void)

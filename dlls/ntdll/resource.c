@@ -310,7 +310,7 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH LdrFindResource_U( HMODULE hmod, const LDR_RES
 }
 
 
-/* don't penalize other platforms stuff needed on i386 for compatibility */
+/* don't penalize other platforms with stuff needed on i386 for compatibility */
 #ifdef __i386__
 NTSTATUS WINAPI DECLSPEC_HIDDEN access_resource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY *entry,
                                                  void **ptr, ULONG *size )
@@ -367,7 +367,7 @@ __ASM_STDCALL_FUNC( LdrAccessResource, 16,
     "pushl 16(%ebp)\n\t"
     "pushl 12(%ebp)\n\t"
     "pushl 8(%ebp)\n\t"
-    "call " __ASM_NAME("access_resource") "\n\t"
+    "call " __ASM_STDCALL("access_resource",16) "\n\t"
     "leave\n\t"
     "ret $16"
 )

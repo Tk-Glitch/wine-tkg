@@ -23,6 +23,7 @@
 #include "initguid.h"
 #include "ks.h"
 #include "ksmedia.h"
+#include "dxva2api.h"
 
 #include "wine/debug.h"
 
@@ -37,6 +38,8 @@ struct media_type
 {
     struct attributes attributes;
     IMFMediaType IMFMediaType_iface;
+    IMFVideoMediaType IMFVideoMediaType_iface;
+    MFVIDEOFORMAT *video_format;
 };
 
 struct stream_desc
@@ -66,9 +69,14 @@ struct presentation_desc
 
 static HRESULT presentation_descriptor_init(struct presentation_desc *object, DWORD count);
 
-static inline struct media_type *impl_from_IMFMediaType(IMFMediaType *iface)
+static struct media_type *impl_from_IMFMediaType(IMFMediaType *iface)
 {
     return CONTAINING_RECORD(iface, struct media_type, IMFMediaType_iface);
+}
+
+static struct media_type *impl_from_IMFVideoMediaType(IMFVideoMediaType *iface)
+{
+    return CONTAINING_RECORD(iface, struct media_type, IMFVideoMediaType_iface);
 }
 
 static inline struct stream_desc *impl_from_IMFStreamDescriptor(IMFStreamDescriptor *iface)
@@ -413,12 +421,9 @@ static HRESULT WINAPI mediatype_GetMajorType(IMFMediaType *iface, GUID *guid)
     return attributes_GetGUID(&media_type->attributes, &MF_MT_MAJOR_TYPE, guid);
 }
 
-static HRESULT WINAPI mediatype_IsCompressedFormat(IMFMediaType *iface, BOOL *compressed)
+static HRESULT mediatype_is_compressed(struct media_type *media_type, BOOL *compressed)
 {
-    struct media_type *media_type = impl_from_IMFMediaType(iface);
     UINT32 value;
-
-    TRACE("%p, %p.\n", iface, compressed);
 
     if (FAILED(attributes_GetUINT32(&media_type->attributes, &MF_MT_ALL_SAMPLES_INDEPENDENT, &value)))
     {
@@ -430,11 +435,19 @@ static HRESULT WINAPI mediatype_IsCompressedFormat(IMFMediaType *iface, BOOL *co
     return S_OK;
 }
 
-static HRESULT WINAPI mediatype_IsEqual(IMFMediaType *iface, IMFMediaType *type, DWORD *flags)
+static HRESULT WINAPI mediatype_IsCompressedFormat(IMFMediaType *iface, BOOL *compressed)
+{
+    struct media_type *media_type = impl_from_IMFMediaType(iface);
+
+    TRACE("%p, %p.\n", iface, compressed);
+
+    return mediatype_is_compressed(media_type, compressed);
+}
+
+static HRESULT media_type_is_equal(struct media_type *media_type, IMFMediaType *type, DWORD *flags)
 {
     const DWORD full_equality_flags = MF_MEDIATYPE_EQUAL_MAJOR_TYPES | MF_MEDIATYPE_EQUAL_FORMAT_TYPES |
             MF_MEDIATYPE_EQUAL_FORMAT_DATA | MF_MEDIATYPE_EQUAL_FORMAT_USER_DATA;
-    struct media_type *media_type = impl_from_IMFMediaType(iface);
     struct comparand
     {
         IMFAttributes *type;
@@ -445,8 +458,6 @@ static HRESULT WINAPI mediatype_IsEqual(IMFMediaType *iface, IMFMediaType *type,
     } left, right, swp;
     unsigned int i;
     BOOL result;
-
-    TRACE("%p, %p, %p.\n", iface, type, flags);
 
     *flags = 0;
 
@@ -535,6 +546,15 @@ static HRESULT WINAPI mediatype_IsEqual(IMFMediaType *iface, IMFMediaType *type,
     return *flags == full_equality_flags ? S_OK : S_FALSE;
 }
 
+static HRESULT WINAPI mediatype_IsEqual(IMFMediaType *iface, IMFMediaType *type, DWORD *flags)
+{
+    struct media_type *media_type = impl_from_IMFMediaType(iface);
+
+    TRACE("%p, %p, %p.\n", iface, type, flags);
+
+    return media_type_is_equal(media_type, type, flags);
+}
+
 static HRESULT WINAPI mediatype_GetRepresentation(IMFMediaType *iface, GUID guid, void **representation)
 {
     FIXME("%p, %s, %p.\n", iface, debugstr_guid(&guid), representation);
@@ -589,6 +609,434 @@ static const IMFMediaTypeVtbl mediatypevtbl =
     mediatype_IsEqual,
     mediatype_GetRepresentation,
     mediatype_FreeRepresentation
+};
+
+static HRESULT WINAPI video_mediatype_QueryInterface(IMFVideoMediaType *iface, REFIID riid, void **out)
+{
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), out);
+
+    if (IsEqualIID(riid, &IID_IMFVideoMediaType) ||
+            IsEqualIID(riid, &IID_IMFMediaType) ||
+            IsEqualIID(riid, &IID_IMFAttributes) ||
+            IsEqualIID(riid, &IID_IUnknown))
+    {
+        *out = iface;
+        IMFVideoMediaType_AddRef(iface);
+        return S_OK;
+    }
+
+    WARN("Unsupported %s.\n", debugstr_guid(riid));
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI video_mediatype_AddRef(IMFVideoMediaType *iface)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+    ULONG refcount = InterlockedIncrement(&media_type->attributes.ref);
+
+    TRACE("%p, refcount %u.\n", iface, refcount);
+
+    return refcount;
+}
+
+static ULONG WINAPI video_mediatype_Release(IMFVideoMediaType *iface)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+    ULONG refcount = InterlockedDecrement(&media_type->attributes.ref);
+
+    TRACE("%p, refcount %u.\n", iface, refcount);
+
+    if (!refcount)
+    {
+        clear_attributes_object(&media_type->attributes);
+        CoTaskMemFree(media_type->video_format);
+        heap_free(media_type);
+    }
+
+    return refcount;
+}
+
+static HRESULT WINAPI video_mediatype_GetItem(IMFVideoMediaType *iface, REFGUID key, PROPVARIANT *value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
+
+    return attributes_GetItem(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_GetItemType(IMFVideoMediaType *iface, REFGUID key, MF_ATTRIBUTE_TYPE *type)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), type);
+
+    return attributes_GetItemType(&media_type->attributes, key, type);
+}
+
+static HRESULT WINAPI video_mediatype_CompareItem(IMFVideoMediaType *iface, REFGUID key, REFPROPVARIANT value, BOOL *result)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %s, %p.\n", iface, debugstr_attr(key), debugstr_propvar(value), result);
+
+    return attributes_CompareItem(&media_type->attributes, key, value, result);
+}
+
+static HRESULT WINAPI video_mediatype_Compare(IMFVideoMediaType *iface, IMFAttributes *attrs,
+        MF_ATTRIBUTES_MATCH_TYPE type, BOOL *result)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %p, %d, %p.\n", iface, attrs, type, result);
+
+    return attributes_Compare(&media_type->attributes, attrs, type, result);
+}
+
+static HRESULT WINAPI video_mediatype_GetUINT32(IMFVideoMediaType *iface, REFGUID key, UINT32 *value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
+
+    return attributes_GetUINT32(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_GetUINT64(IMFVideoMediaType *iface, REFGUID key, UINT64 *value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
+
+    return attributes_GetUINT64(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_GetDouble(IMFVideoMediaType *iface, REFGUID key, double *value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
+
+    return attributes_GetDouble(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_GetGUID(IMFVideoMediaType *iface, REFGUID key, GUID *value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
+
+    return attributes_GetGUID(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_GetStringLength(IMFVideoMediaType *iface, REFGUID key, UINT32 *length)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), length);
+
+    return attributes_GetStringLength(&media_type->attributes, key, length);
+}
+
+static HRESULT WINAPI video_mediatype_GetString(IMFVideoMediaType *iface, REFGUID key, WCHAR *value,
+        UINT32 size, UINT32 *length)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p, %u, %p.\n", iface, debugstr_attr(key), value, size, length);
+
+    return attributes_GetString(&media_type->attributes, key, value, size, length);
+}
+
+static HRESULT WINAPI video_mediatype_GetAllocatedString(IMFVideoMediaType *iface, REFGUID key,
+        WCHAR **value, UINT32 *length)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p, %p.\n", iface, debugstr_attr(key), value, length);
+
+    return attributes_GetAllocatedString(&media_type->attributes, key, value, length);
+}
+
+static HRESULT WINAPI video_mediatype_GetBlobSize(IMFVideoMediaType *iface, REFGUID key, UINT32 *size)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), size);
+
+    return attributes_GetBlobSize(&media_type->attributes, key, size);
+}
+
+static HRESULT WINAPI video_mediatype_GetBlob(IMFVideoMediaType *iface, REFGUID key, UINT8 *buf,
+        UINT32 bufsize, UINT32 *blobsize)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p, %u, %p.\n", iface, debugstr_attr(key), buf, bufsize, blobsize);
+
+    return attributes_GetBlob(&media_type->attributes, key, buf, bufsize, blobsize);
+}
+
+static HRESULT WINAPI video_mediatype_GetAllocatedBlob(IMFVideoMediaType *iface, REFGUID key, UINT8 **buf, UINT32 *size)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p, %p.\n", iface, debugstr_attr(key), buf, size);
+
+    return attributes_GetAllocatedBlob(&media_type->attributes, key, buf, size);
+}
+
+static HRESULT WINAPI video_mediatype_GetUnknown(IMFVideoMediaType *iface, REFGUID key, REFIID riid, void **obj)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %s, %p.\n", iface, debugstr_attr(key), debugstr_guid(riid), obj);
+
+    return attributes_GetUnknown(&media_type->attributes, key, riid, obj);
+}
+
+static HRESULT WINAPI video_mediatype_SetItem(IMFVideoMediaType *iface, REFGUID key, REFPROPVARIANT value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %s.\n", iface, debugstr_attr(key), debugstr_propvar(value));
+
+    return attributes_SetItem(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_DeleteItem(IMFVideoMediaType *iface, REFGUID key)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s.\n", iface, debugstr_attr(key));
+
+    return attributes_DeleteItem(&media_type->attributes, key);
+}
+
+static HRESULT WINAPI video_mediatype_DeleteAllItems(IMFVideoMediaType *iface)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p.\n", iface);
+
+    return attributes_DeleteAllItems(&media_type->attributes);
+}
+
+static HRESULT WINAPI video_mediatype_SetUINT32(IMFVideoMediaType *iface, REFGUID key, UINT32 value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %u.\n", iface, debugstr_attr(key), value);
+
+    return attributes_SetUINT32(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_SetUINT64(IMFVideoMediaType *iface, REFGUID key, UINT64 value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %s.\n", iface, debugstr_attr(key), wine_dbgstr_longlong(value));
+
+    return attributes_SetUINT64(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_SetDouble(IMFVideoMediaType *iface, REFGUID key, double value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %f.\n", iface, debugstr_attr(key), value);
+
+    return attributes_SetDouble(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_SetGUID(IMFVideoMediaType *iface, REFGUID key, REFGUID value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %s.\n", iface, debugstr_attr(key), debugstr_mf_guid(value));
+
+    return attributes_SetGUID(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_SetString(IMFVideoMediaType *iface, REFGUID key, const WCHAR *value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %s.\n", iface, debugstr_attr(key), debugstr_w(value));
+
+    return attributes_SetString(&media_type->attributes, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_SetBlob(IMFVideoMediaType *iface, REFGUID key, const UINT8 *buf, UINT32 size)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p, %u.\n", iface, debugstr_attr(key), buf, size);
+
+    return attributes_SetBlob(&media_type->attributes, key, buf, size);
+}
+
+static HRESULT WINAPI video_mediatype_SetUnknown(IMFVideoMediaType *iface, REFGUID key, IUnknown *unknown)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), unknown);
+
+    return attributes_SetUnknown(&media_type->attributes, key, unknown);
+}
+
+static HRESULT WINAPI video_mediatype_LockStore(IMFVideoMediaType *iface)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p.\n", iface);
+
+    return attributes_LockStore(&media_type->attributes);
+}
+
+static HRESULT WINAPI video_mediatype_UnlockStore(IMFVideoMediaType *iface)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p.\n", iface);
+
+    return attributes_UnlockStore(&media_type->attributes);
+}
+
+static HRESULT WINAPI video_mediatype_GetCount(IMFVideoMediaType *iface, UINT32 *count)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %p.\n", iface, count);
+
+    return attributes_GetCount(&media_type->attributes, count);
+}
+
+static HRESULT WINAPI video_mediatype_GetItemByIndex(IMFVideoMediaType *iface, UINT32 index, GUID *key, PROPVARIANT *value)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %u, %p, %p.\n", iface, index, key, value);
+
+    return attributes_GetItemByIndex(&media_type->attributes, index, key, value);
+}
+
+static HRESULT WINAPI video_mediatype_CopyAllItems(IMFVideoMediaType *iface, IMFAttributes *dest)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %p.\n", iface, dest);
+
+    return attributes_CopyAllItems(&media_type->attributes, dest);
+}
+
+static HRESULT WINAPI video_mediatype_GetMajorType(IMFVideoMediaType *iface, GUID *guid)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %p.\n", iface, guid);
+
+    return attributes_GetGUID(&media_type->attributes, &MF_MT_MAJOR_TYPE, guid);
+}
+
+static HRESULT WINAPI video_mediatype_IsCompressedFormat(IMFVideoMediaType *iface, BOOL *compressed)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %p.\n", iface, compressed);
+
+    return mediatype_is_compressed(media_type, compressed);
+}
+
+static HRESULT WINAPI video_mediatype_IsEqual(IMFVideoMediaType *iface, IMFMediaType *type, DWORD *flags)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+
+    TRACE("%p, %p, %p.\n", iface, type, flags);
+
+    return media_type_is_equal(media_type, type, flags);
+}
+
+static HRESULT WINAPI video_mediatype_GetRepresentation(IMFVideoMediaType *iface, GUID guid, void **representation)
+{
+    FIXME("%p, %s, %p.\n", iface, debugstr_guid(&guid), representation);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI video_mediatype_FreeRepresentation(IMFVideoMediaType *iface, GUID guid, void *representation)
+{
+    FIXME("%p, %s, %p.\n", iface, debugstr_guid(&guid), representation);
+
+    return E_NOTIMPL;
+}
+
+static const MFVIDEOFORMAT * WINAPI video_mediatype_GetVideoFormat(IMFVideoMediaType *iface)
+{
+    struct media_type *media_type = impl_from_IMFVideoMediaType(iface);
+    unsigned int size;
+    HRESULT hr;
+
+    TRACE("%p.\n", iface);
+
+    CoTaskMemFree(media_type->video_format);
+    if (FAILED(hr = MFCreateMFVideoFormatFromMFMediaType((IMFMediaType *)iface, &media_type->video_format, &size)))
+        WARN("Failed to create format description, hr %#x.\n", hr);
+
+    return media_type->video_format;
+}
+
+static HRESULT WINAPI video_mediatype_GetVideoRepresentation(IMFVideoMediaType *iface, GUID representation,
+        void **data, LONG stride)
+{
+    FIXME("%p, %s, %p, %d.\n", iface, debugstr_guid(&representation), data, stride);
+
+    return E_NOTIMPL;
+}
+
+static const IMFVideoMediaTypeVtbl videomediatypevtbl =
+{
+    video_mediatype_QueryInterface,
+    video_mediatype_AddRef,
+    video_mediatype_Release,
+    video_mediatype_GetItem,
+    video_mediatype_GetItemType,
+    video_mediatype_CompareItem,
+    video_mediatype_Compare,
+    video_mediatype_GetUINT32,
+    video_mediatype_GetUINT64,
+    video_mediatype_GetDouble,
+    video_mediatype_GetGUID,
+    video_mediatype_GetStringLength,
+    video_mediatype_GetString,
+    video_mediatype_GetAllocatedString,
+    video_mediatype_GetBlobSize,
+    video_mediatype_GetBlob,
+    video_mediatype_GetAllocatedBlob,
+    video_mediatype_GetUnknown,
+    video_mediatype_SetItem,
+    video_mediatype_DeleteItem,
+    video_mediatype_DeleteAllItems,
+    video_mediatype_SetUINT32,
+    video_mediatype_SetUINT64,
+    video_mediatype_SetDouble,
+    video_mediatype_SetGUID,
+    video_mediatype_SetString,
+    video_mediatype_SetBlob,
+    video_mediatype_SetUnknown,
+    video_mediatype_LockStore,
+    video_mediatype_UnlockStore,
+    video_mediatype_GetCount,
+    video_mediatype_GetItemByIndex,
+    video_mediatype_CopyAllItems,
+    video_mediatype_GetMajorType,
+    video_mediatype_IsCompressedFormat,
+    video_mediatype_IsEqual,
+    video_mediatype_GetRepresentation,
+    video_mediatype_FreeRepresentation,
+    video_mediatype_GetVideoFormat,
+    video_mediatype_GetVideoRepresentation,
 };
 
 /***********************************************************************
@@ -2171,4 +2619,167 @@ HRESULT WINAPI MFInitMediaTypeFromWaveFormatEx(IMFMediaType *mediatype, const WA
     }
 
     return hr;
+}
+
+/***********************************************************************
+ *      MFCreateVideoMediaTypeFromSubtype (mfplat.@)
+ */
+HRESULT WINAPI MFCreateVideoMediaTypeFromSubtype(const GUID *subtype, IMFVideoMediaType **media_type)
+{
+    struct media_type *object;
+    HRESULT hr;
+
+    TRACE("%s, %p.\n", debugstr_guid(subtype), media_type);
+
+    if (!media_type)
+        return E_INVALIDARG;
+
+    object = heap_alloc(sizeof(*object));
+    if (!object)
+        return E_OUTOFMEMORY;
+
+    if (FAILED(hr = init_attributes_object(&object->attributes, 0)))
+    {
+        heap_free(object);
+        return hr;
+    }
+    object->IMFVideoMediaType_iface.lpVtbl = &videomediatypevtbl;
+
+    IMFVideoMediaType_SetGUID(&object->IMFVideoMediaType_iface, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
+    IMFVideoMediaType_SetGUID(&object->IMFVideoMediaType_iface, &MF_MT_SUBTYPE, subtype);
+
+    *media_type = &object->IMFVideoMediaType_iface;
+
+    return S_OK;
+}
+
+static void media_type_get_ratio(UINT64 value, UINT32 *numerator, UINT32 *denominator)
+{
+    *numerator = value >> 32;
+    *denominator = value;
+}
+
+/***********************************************************************
+ *      MFCreateMFVideoFormatFromMFMediaType (mfplat.@)
+ */
+HRESULT WINAPI MFCreateMFVideoFormatFromMFMediaType(IMFMediaType *media_type, MFVIDEOFORMAT **video_format, UINT32 *size)
+{
+    UINT32 flags, palette_size = 0, avgrate;
+    MFVIDEOFORMAT *format;
+    UINT64 value;
+    INT32 stride;
+    GUID guid;
+
+    TRACE("%p, %p, %p.\n", media_type, video_format, size);
+
+    *size = sizeof(*format);
+
+    if (SUCCEEDED(IMFMediaType_GetBlobSize(media_type, &MF_MT_PALETTE, &palette_size)))
+        *size += palette_size;
+
+    if (!(format = CoTaskMemAlloc(*size)))
+        return E_OUTOFMEMORY;
+
+    *video_format = format;
+
+    memset(format, 0, sizeof(*format));
+    format->dwSize = *size;
+
+    if (SUCCEEDED(IMFMediaType_GetGUID(media_type, &MF_MT_SUBTYPE, &guid)))
+    {
+        memcpy(&format->guidFormat, &guid, sizeof(guid));
+        format->surfaceInfo.Format = guid.Data1;
+    }
+
+    if (SUCCEEDED(IMFMediaType_GetUINT64(media_type, &MF_MT_FRAME_SIZE, &value)))
+        media_type_get_ratio(value, &format->videoInfo.dwWidth, &format->videoInfo.dwHeight);
+
+    if (SUCCEEDED(IMFMediaType_GetUINT64(media_type, &MF_MT_PIXEL_ASPECT_RATIO, &value)))
+    {
+        media_type_get_ratio(value, &format->videoInfo.PixelAspectRatio.Numerator,
+                &format->videoInfo.PixelAspectRatio.Denominator);
+    }
+
+    IMFMediaType_GetUINT32(media_type, &MF_MT_VIDEO_CHROMA_SITING, &format->videoInfo.SourceChromaSubsampling);
+    IMFMediaType_GetUINT32(media_type, &MF_MT_INTERLACE_MODE, &format->videoInfo.InterlaceMode);
+    IMFMediaType_GetUINT32(media_type, &MF_MT_TRANSFER_FUNCTION, &format->videoInfo.TransferFunction);
+    IMFMediaType_GetUINT32(media_type, &MF_MT_VIDEO_PRIMARIES, &format->videoInfo.ColorPrimaries);
+    IMFMediaType_GetUINT32(media_type, &MF_MT_YUV_MATRIX, &format->videoInfo.TransferMatrix);
+    IMFMediaType_GetUINT32(media_type, &MF_MT_VIDEO_LIGHTING, &format->videoInfo.SourceLighting);
+
+    if (SUCCEEDED(IMFMediaType_GetUINT64(media_type, &MF_MT_FRAME_RATE, &value)))
+    {
+        media_type_get_ratio(value, &format->videoInfo.FramesPerSecond.Numerator,
+                &format->videoInfo.FramesPerSecond.Denominator);
+    }
+
+    IMFMediaType_GetUINT32(media_type, &MF_MT_VIDEO_NOMINAL_RANGE, &format->videoInfo.NominalRange);
+    IMFMediaType_GetBlob(media_type, &MF_MT_GEOMETRIC_APERTURE, (UINT8 *)&format->videoInfo.GeometricAperture,
+           sizeof(format->videoInfo.GeometricAperture), NULL);
+    IMFMediaType_GetBlob(media_type, &MF_MT_MINIMUM_DISPLAY_APERTURE, (UINT8 *)&format->videoInfo.MinimumDisplayAperture,
+           sizeof(format->videoInfo.MinimumDisplayAperture), NULL);
+
+    /* Video flags. */
+    if (SUCCEEDED(IMFMediaType_GetUINT32(media_type, &MF_MT_PAD_CONTROL_FLAGS, &flags)))
+        format->videoInfo.VideoFlags |= flags;
+    if (SUCCEEDED(IMFMediaType_GetUINT32(media_type, &MF_MT_SOURCE_CONTENT_HINT, &flags)))
+        format->videoInfo.VideoFlags |= flags;
+    if (SUCCEEDED(IMFMediaType_GetUINT32(media_type, &MF_MT_DRM_FLAGS, &flags)))
+        format->videoInfo.VideoFlags |= flags;
+    if (SUCCEEDED(IMFMediaType_GetUINT32(media_type, &MF_MT_PAN_SCAN_ENABLED, &flags)) && !!flags)
+    {
+        format->videoInfo.VideoFlags |= MFVideoFlag_PanScanEnabled;
+        IMFMediaType_GetBlob(media_type, &MF_MT_PAN_SCAN_APERTURE, (UINT8 *)&format->videoInfo.PanScanAperture,
+               sizeof(format->videoInfo.PanScanAperture), NULL);
+    }
+    if (SUCCEEDED(IMFMediaType_GetUINT32(media_type, &MF_MT_DEFAULT_STRIDE, (UINT32 *)&stride)) && stride < 0)
+        format->videoInfo.VideoFlags |= MFVideoFlag_BottomUpLinearRep;
+
+    if (SUCCEEDED(IMFMediaType_GetUINT32(media_type, &MF_MT_AVG_BITRATE, &avgrate)))
+        format->compressedInfo.AvgBitrate = avgrate;
+    if (SUCCEEDED(IMFMediaType_GetUINT32(media_type, &MF_MT_AVG_BIT_ERROR_RATE, &avgrate)))
+        format->compressedInfo.AvgBitErrorRate = avgrate;
+    IMFMediaType_GetUINT32(media_type, &MF_MT_MAX_KEYFRAME_SPACING, &format->compressedInfo.MaxKeyFrameSpacing);
+
+    /* Palette. */
+    if (palette_size)
+    {
+        format->surfaceInfo.PaletteEntries = palette_size / sizeof(*format->surfaceInfo.Palette);
+        IMFMediaType_GetBlob(media_type, &MF_MT_PALETTE, (UINT8 *)format->surfaceInfo.Palette, palette_size, NULL);
+    }
+
+    return S_OK;
+}
+
+/***********************************************************************
+ *      MFConvertColorInfoToDXVA (mfplat.@)
+ */
+HRESULT WINAPI MFConvertColorInfoToDXVA(DWORD *dxva_info, const MFVIDEOFORMAT *format)
+{
+    struct
+    {
+        UINT SampleFormat           : 8;
+        UINT VideoChromaSubsampling : 4;
+        UINT NominalRange           : 3;
+        UINT VideoTransferMatrix    : 3;
+        UINT VideoLighting          : 4;
+        UINT VideoPrimaries         : 5;
+        UINT VideoTransferFunction  : 5;
+    } *dxva_format = (void *)dxva_info;
+
+    TRACE("%p, %p.\n", dxva_info, format);
+
+    if (format->videoInfo.InterlaceMode == MFVideoInterlace_MixedInterlaceOrProgressive)
+        dxva_format->SampleFormat = DXVA2_SampleFieldInterleavedEvenFirst;
+    else
+        dxva_format->SampleFormat = format->videoInfo.InterlaceMode;
+
+    dxva_format->VideoChromaSubsampling = format->videoInfo.SourceChromaSubsampling;
+    dxva_format->NominalRange = format->videoInfo.NominalRange;
+    dxva_format->VideoTransferMatrix = format->videoInfo.TransferMatrix;
+    dxva_format->VideoLighting = format->videoInfo.SourceLighting;
+    dxva_format->VideoPrimaries = format->videoInfo.ColorPrimaries;
+    dxva_format->VideoTransferFunction = format->videoInfo.TransferFunction;
+
+    return S_OK;
 }

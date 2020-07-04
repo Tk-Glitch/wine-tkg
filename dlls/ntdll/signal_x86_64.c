@@ -4457,11 +4457,15 @@ NTSTATUS WINAPI NtSetLdtEntries( ULONG sel1, LDT_ENTRY entry1, ULONG sel2, LDT_E
 /**********************************************************************
  *		DbgBreakPoint   (NTDLL.@)
  */
-__ASM_STDCALL_FUNC( DbgBreakPoint, 0, "int $3; ret")
+__ASM_STDCALL_FUNC( DbgBreakPoint, 0, "int $3; ret"
+                    "\n\tnop; nop; nop; nop; nop; nop; nop; nop"
+                    "\n\tnop; nop; nop; nop; nop; nop" );
 
 /**********************************************************************
  *		DbgUserBreakPoint   (NTDLL.@)
  */
-__ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "int $3; ret")
+__ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "int $3; ret"
+                    "\n\tnop; nop; nop; nop; nop; nop; nop; nop"
+                    "\n\tnop; nop; nop; nop; nop; nop" );
 
 #endif  /* __x86_64__ */

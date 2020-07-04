@@ -1474,11 +1474,11 @@ static BOOL write_desktop_entry(const char *unix_link, const char *location, con
     fprintf(file, "[Desktop Entry]\n");
     fprintf(file, "Name=%s\n", linkname);
     if (prefix)
-        fprintf(file, "Exec=env WINEPREFIX=\"%s\" wine %s %s\n", prefix, wine_path, args);
+        fprintf(file, "Exec=env WINEPREFIX=\"%s\" %s %s %s\n", prefix, wine_path, path, args);
     else if (home)
-        fprintf(file, "Exec=env WINEPREFIX=\"%s/.wine\" wine %s %s\n", home, wine_path, args);
+        fprintf(file, "Exec=env WINEPREFIX=\"%s/.wine\" %s %s %s\n", home, wine_path, path, args);
     else
-        fprintf(file, "Exec=wine %s %s\n", wine_path, args);
+        fprintf(file, "Exec=%s %s %s\n", wine_path, path, args);
 
     fprintf(file, "Type=Application\n");
     fprintf(file, "StartupNotify=true\n");
