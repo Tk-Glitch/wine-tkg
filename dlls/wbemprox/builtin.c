@@ -270,12 +270,15 @@ static const struct column col_physicalmedia[] =
 };
 static const struct column col_physicalmemory[] =
 {
+    { L"BankLabel",            CIM_STRING },
     { L"Capacity",             CIM_UINT64 },
+    { L"Caption",              CIM_STRING },
     { L"ConfiguredClockSpeed", CIM_UINT32 },
     { L"DeviceLocator",        CIM_STRING },
     { L"FormFactor",           CIM_UINT16 },
     { L"MemoryType",           CIM_UINT16 },
     { L"PartNumber",           CIM_STRING },
+    { L"SerialNumber",         CIM_STRING },
 };
 static const struct column col_pnpentity[] =
 {
@@ -373,10 +376,10 @@ static const struct column col_sid[] =
 };
 static const struct column col_sounddevice[] =
 {
-    { L"Name",        CIM_STRING },
-    { L"ProductName", CIM_STRING },
-    { L"StatusInfo",  CIM_UINT16 },
     { L"Manufacturer", CIM_STRING },
+    { L"Name",         CIM_STRING },
+    { L"ProductName",  CIM_STRING },
+    { L"StatusInfo",   CIM_UINT16 },
 };
 static const struct column col_stdregprov[] =
 {
@@ -656,12 +659,15 @@ struct record_physicalmedia
 };
 struct record_physicalmemory
 {
+    const WCHAR *banklabel;
     UINT64       capacity;
+    const WCHAR *caption;
     UINT32       configuredclockspeed;
     const WCHAR *devicelocator;
     UINT16       formfactor;
     UINT16       memorytype;
     const WCHAR *partnumber;
+    const WCHAR *serial;
 };
 struct record_pnpentity
 {
@@ -759,10 +765,10 @@ struct record_sid
 };
 struct record_sounddevice
 {
+    const WCHAR *manufacturer;
     const WCHAR *name;
     const WCHAR *productname;
     UINT16       statusinfo;
-    const WCHAR *manufacturer;
 };
 struct record_stdregprov
 {
@@ -880,7 +886,7 @@ static const struct record_quickfixengineering data_quickfixengineering[] =
 };
 static const struct record_sounddevice data_sounddevice[] =
 {
-    { L"Wine Audio Device", L"Wine Audio Device", 3 /* enabled */, L"The Wine Project" }
+    { L"The Wine Project", L"Wine Audio Device", L"Wine Audio Device", 3 /* enabled */ }
 };
 static const struct record_stdregprov data_stdregprov[] =
 {
@@ -2907,12 +2913,15 @@ static enum fill_status fill_physicalmemory( struct table *table, const struct e
     if (!resize_table( table, 1, sizeof(*rec) )) return FILL_STATUS_FAILED;
 
     rec = (struct record_physicalmemory *)table->data;
+    rec->banklabel            = L"BANK 0";
     rec->capacity             = get_total_physical_memory();
+    rec->caption              = L"Physical Memory";
     rec->configuredclockspeed = 1600;
     rec->devicelocator        = L"DIMM 0";
     rec->formfactor           = 8; /* DIMM */
     rec->memorytype           = 9; /* RAM */
     rec->partnumber           = L"BLS8G3D1609DS1S00";
+    rec->serial               = NULL;
     if (!match_row( table, row, cond, &status )) free_row_values( table, row );
     else row++;
 

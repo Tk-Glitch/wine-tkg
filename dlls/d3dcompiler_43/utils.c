@@ -1823,41 +1823,34 @@ static void debug_dump_deref(const struct hlsl_deref *deref)
 static void debug_dump_ir_constant(const struct hlsl_ir_constant *constant)
 {
     struct hlsl_type *type = constant->node.data_type;
-    unsigned int x, y;
+    unsigned int x;
 
-    if (type->dimy != 1)
+    if (type->dimx != 1)
         wine_dbg_printf("{");
-    for (y = 0; y < type->dimy; ++y)
+    for (x = 0; x < type->dimx; ++x)
     {
-        if (type->dimx != 1)
-            wine_dbg_printf("{");
-        for (x = 0; x < type->dimx; ++x)
+        switch (type->base_type)
         {
-            switch (type->base_type)
-            {
-                case HLSL_TYPE_FLOAT:
-                    wine_dbg_printf("%.8e ", constant->value.f[y * type->dimx + x]);
-                    break;
-                case HLSL_TYPE_DOUBLE:
-                    wine_dbg_printf("%.16e ", constant->value.d[y * type->dimx + x]);
-                    break;
-                case HLSL_TYPE_INT:
-                    wine_dbg_printf("%d ", constant->value.i[y * type->dimx + x]);
-                    break;
-                case HLSL_TYPE_UINT:
-                    wine_dbg_printf("%u ", constant->value.u[y * type->dimx + x]);
-                    break;
-                case HLSL_TYPE_BOOL:
-                    wine_dbg_printf("%s ", constant->value.b[y * type->dimx + x] == FALSE ? "false" : "true");
-                    break;
-                default:
-                    wine_dbg_printf("Constants of type %s not supported\n", debug_base_type(type));
-            }
+            case HLSL_TYPE_FLOAT:
+                wine_dbg_printf("%.8e ", constant->value.f[x]);
+                break;
+            case HLSL_TYPE_DOUBLE:
+                wine_dbg_printf("%.16e ", constant->value.d[x]);
+                break;
+            case HLSL_TYPE_INT:
+                wine_dbg_printf("%d ", constant->value.i[x]);
+                break;
+            case HLSL_TYPE_UINT:
+                wine_dbg_printf("%u ", constant->value.u[x]);
+                break;
+            case HLSL_TYPE_BOOL:
+                wine_dbg_printf("%s ", constant->value.b[x] ? "true" : "false");
+                break;
+            default:
+                wine_dbg_printf("Constants of type %s not supported\n", debug_base_type(type));
         }
-        if (type->dimx != 1)
-            wine_dbg_printf("}");
     }
-    if (type->dimy != 1)
+    if (type->dimx != 1)
         wine_dbg_printf("}");
 }
 
@@ -2025,20 +2018,16 @@ static void debug_dump_ir_if(const struct hlsl_ir_if *if_node)
     wine_dbg_printf("if (");
     debug_dump_src(&if_node->condition);
     wine_dbg_printf(")\n{\n");
-    debug_dump_instr_list(if_node->then_instrs);
+    debug_dump_instr_list(&if_node->then_instrs);
+    wine_dbg_printf("}\nelse\n{\n");
+    debug_dump_instr_list(&if_node->else_instrs);
     wine_dbg_printf("}\n");
-    if (if_node->else_instrs)
-    {
-        wine_dbg_printf("else\n{\n");
-        debug_dump_instr_list(if_node->else_instrs);
-        wine_dbg_printf("}\n");
-    }
 }
 
 static void debug_dump_ir_loop(const struct hlsl_ir_loop *loop)
 {
     wine_dbg_printf("for (;;)\n{\n");
-    debug_dump_instr_list(loop->body);
+    debug_dump_instr_list(&loop->body);
     wine_dbg_printf("}\n");
 }
 
@@ -2164,15 +2153,22 @@ static void free_ir_assignment(struct hlsl_ir_assignment *assignment)
 
 static void free_ir_if(struct hlsl_ir_if *if_node)
 {
-    free_instr_list(if_node->then_instrs);
-    free_instr_list(if_node->else_instrs);
+    struct hlsl_ir_node *node, *next_node;
+
+    LIST_FOR_EACH_ENTRY_SAFE(node, next_node, &if_node->then_instrs, struct hlsl_ir_node, entry)
+        free_instr(node);
+    LIST_FOR_EACH_ENTRY_SAFE(node, next_node, &if_node->else_instrs, struct hlsl_ir_node, entry)
+        free_instr(node);
     hlsl_src_remove(&if_node->condition);
     d3dcompiler_free(if_node);
 }
 
 static void free_ir_loop(struct hlsl_ir_loop *loop)
 {
-    free_instr_list(loop->body);
+    struct hlsl_ir_node *node, *next_node;
+
+    LIST_FOR_EACH_ENTRY_SAFE(node, next_node, &loop->body, struct hlsl_ir_node, entry)
+        free_instr(node);
     d3dcompiler_free(loop);
 }
 

@@ -3034,15 +3034,17 @@ static void query_internal_format(struct wined3d_adapter *adapter,
 
         if ((format->f.flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_SRGB_WRITE) && !srgb_write_supported)
             format_clear_flag(&format->f, WINED3DFMT_FLAG_SRGB_WRITE);
+    }
 
-        if (!gl_info->supported[ARB_DEPTH_TEXTURE] && (format->f.depth_size || format->f.stencil_size))
-        {
-            format->f.flags[WINED3D_GL_RES_TYPE_TEX_1D] &= ~WINED3DFMT_FLAG_TEXTURE;
-            format->f.flags[WINED3D_GL_RES_TYPE_TEX_2D] &= ~WINED3DFMT_FLAG_TEXTURE;
-            format->f.flags[WINED3D_GL_RES_TYPE_TEX_3D] &= ~WINED3DFMT_FLAG_TEXTURE;
-            format->f.flags[WINED3D_GL_RES_TYPE_TEX_CUBE] &= ~WINED3DFMT_FLAG_TEXTURE;
-            format->f.flags[WINED3D_GL_RES_TYPE_TEX_RECT] &= ~WINED3DFMT_FLAG_TEXTURE;
-        }
+    if ((!gl_info->supported[ARB_DEPTH_TEXTURE] || wined3d_settings.offscreen_rendering_mode != ORM_FBO)
+            && (format->f.depth_size || format->f.stencil_size))
+    {
+        TRACE("Disabling texturing support for depth / stencil format %s.\n", debug_d3dformat(format->f.id));
+        format->f.flags[WINED3D_GL_RES_TYPE_TEX_1D] &= ~WINED3DFMT_FLAG_TEXTURE;
+        format->f.flags[WINED3D_GL_RES_TYPE_TEX_2D] &= ~WINED3DFMT_FLAG_TEXTURE;
+        format->f.flags[WINED3D_GL_RES_TYPE_TEX_3D] &= ~WINED3DFMT_FLAG_TEXTURE;
+        format->f.flags[WINED3D_GL_RES_TYPE_TEX_CUBE] &= ~WINED3DFMT_FLAG_TEXTURE;
+        format->f.flags[WINED3D_GL_RES_TYPE_TEX_RECT] &= ~WINED3DFMT_FLAG_TEXTURE;
     }
 
     query_view_class(format);
@@ -5715,6 +5717,41 @@ void get_fog_start_end(const struct wined3d_context *context, const struct wined
             *start = 0.0f;
             *end = 0.0f;
     }
+}
+
+static BOOL wined3d_get_primary_display(WCHAR *display)
+{
+    DISPLAY_DEVICEW display_device;
+    DWORD device_idx = 0;
+
+    display_device.cb = sizeof(display_device);
+    while (EnumDisplayDevicesW(NULL, device_idx++, &display_device, 0))
+    {
+        if (display_device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
+        {
+            lstrcpyW(display, display_device.DeviceName);
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+BOOL wined3d_get_primary_adapter_luid(LUID *luid)
+{
+    D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME open_adapter_param;
+    D3DKMT_CLOSEADAPTER close_adapter_param;
+
+    if (!wined3d_get_primary_display(open_adapter_param.DeviceName))
+        return FALSE;
+
+    if (D3DKMTOpenAdapterFromGdiDisplayName(&open_adapter_param))
+        return FALSE;
+
+    *luid = open_adapter_param.AdapterLuid;
+    close_adapter_param.hAdapter = open_adapter_param.hAdapter;
+    D3DKMTCloseAdapter(&close_adapter_param);
+    return TRUE;
 }
 
 /* Note: It's the caller's responsibility to ensure values can be expressed

@@ -100,7 +100,7 @@ libwine_LDFLAGS = $(LIBWINE_LDFLAGS)
 libwine_DEPS = $(LIBWINE_DEPENDS)
 
 version.c: dummy
-	version=`(echo "wine-5.12.r1.g3f3a05f9") | sed -n -e '$$s/\(.*\)/const char wine_build[] = "\1  ( TkG Staging Esync Fsync Vkd3d )";/p'` && (echo $$version | cmp -s - $@) || echo $$version >$@ || (rm -f $@ && exit 1)
+	version=`(echo "wine-5.13.r1.g26d3815d") | sed -n -e '$$s/\(.*\)/const char wine_build[] = "\1  ( TkG Staging Esync Fsync Vkd3d )";/p'` && (echo $$version | cmp -s - $@) || echo $$version >$@ || (rm -f $@ && exit 1)
 
 dummy:
 .PHONY: dummy

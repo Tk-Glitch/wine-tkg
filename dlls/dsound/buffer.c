@@ -1127,7 +1127,7 @@ HRESULT secondarybuffer_create(DirectSoundDevice *device, const DSBUFFERDESC *ds
 	} else
 		DSOUND_RecalcVolPan(&(dsb->volpan));
 
-    InitializeSRWLock(&dsb->lock);
+        InitializeSRWLock(&dsb->lock);
 	if (dsb->device->eax.using_eax)
 		init_eax_buffer(dsb);
 

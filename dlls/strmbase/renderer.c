@@ -27,14 +27,6 @@ static inline struct strmbase_renderer *impl_from_strmbase_filter(struct strmbas
     return CONTAINING_RECORD(iface, struct strmbase_renderer, filter);
 }
 
-static const IQualityControlVtbl Renderer_QualityControl_Vtbl = {
-    QualityControlImpl_QueryInterface,
-    QualityControlImpl_AddRef,
-    QualityControlImpl_Release,
-    QualityControlImpl_Notify,
-    QualityControlImpl_SetSink
-};
-
 static inline struct strmbase_renderer *impl_from_IPin(IPin *iface)
 {
     return CONTAINING_RECORD(iface, struct strmbase_renderer, sink.pin.IPin_iface);
@@ -71,7 +63,7 @@ static HRESULT renderer_query_interface(struct strmbase_filter *iface, REFIID ii
     else if (IsEqualGUID(iid, &IID_IMediaSeeking))
         *out = &filter->passthrough.IMediaSeeking_iface;
     else if (IsEqualGUID(iid, &IID_IQualityControl))
-        *out = &filter->qcimpl->IQualityControl_iface;
+        *out = &filter->qc.IQualityControl_iface;
     else
         return E_NOINTERFACE;
 
@@ -101,7 +93,7 @@ static HRESULT renderer_start_stream(struct strmbase_filter *iface, REFERENCE_TI
     SetEvent(filter->state_event);
     if (filter->sink.pin.peer)
         filter->eos = FALSE;
-    QualityControlRender_Start(filter->qcimpl, filter->stream_start);
+    QualityControlRender_Start(&filter->qc, filter->stream_start);
     if (filter->sink.pin.peer && filter->pFuncsTable->renderer_start_stream)
         filter->pFuncsTable->renderer_start_stream(filter);
 
@@ -242,7 +234,7 @@ static HRESULT sink_end_flush(struct strmbase_sink *iface)
     EnterCriticalSection(&filter->csRenderLock);
 
     filter->eos = FALSE;
-    QualityControlRender_Start(filter->qcimpl, filter->stream_start);
+    QualityControlRender_Start(&filter->qc, filter->stream_start);
     strmbase_passthrough_invalidate_time(&filter->passthrough);
     ResetEvent(filter->flush_event);
 
@@ -280,7 +272,6 @@ void strmbase_renderer_cleanup(struct strmbase_renderer *filter)
     CloseHandle(filter->state_event);
     CloseHandle(filter->advise_event);
     CloseHandle(filter->flush_event);
-    QualityControlImpl_Destroy(filter->qcimpl);
     strmbase_filter_cleanup(&filter->filter);
 }
 
@@ -375,12 +366,12 @@ HRESULT WINAPI BaseRendererImpl_Receive(struct strmbase_renderer *This, IMediaSa
 
     if (SUCCEEDED(hr))
     {
-        QualityControlRender_BeginRender(This->qcimpl, start, stop);
+        QualityControlRender_BeginRender(&This->qc, start, stop);
         hr = This->pFuncsTable->pfnDoRenderSample(This, pSample);
-        QualityControlRender_EndRender(This->qcimpl);
+        QualityControlRender_EndRender(&This->qc);
     }
 
-    QualityControlRender_DoQOS(This->qcimpl);
+    QualityControlRender_DoQOS(&This->qc);
 
     LeaveCriticalSection(&This->csRenderLock);
 
@@ -394,6 +385,7 @@ void strmbase_renderer_init(struct strmbase_renderer *filter, IUnknown *outer,
     strmbase_filter_init(&filter->filter, outer, clsid, &filter_ops);
     strmbase_passthrough_init(&filter->passthrough, (IUnknown *)&filter->filter.IBaseFilter_iface);
     ISeekingPassThru_Init(&filter->passthrough.ISeekingPassThru_iface, TRUE, &filter->sink.pin.IPin_iface);
+    strmbase_qc_init(&filter->qc, &filter->sink.pin);
 
     filter->pFuncsTable = ops;
 
@@ -404,7 +396,4 @@ void strmbase_renderer_init(struct strmbase_renderer *filter, IUnknown *outer,
     filter->state_event = CreateEventW(NULL, TRUE, TRUE, NULL);
     filter->advise_event = CreateEventW(NULL, FALSE, FALSE, NULL);
     filter->flush_event = CreateEventW(NULL, TRUE, TRUE, NULL);
-
-    QualityControlImpl_Create(&filter->sink.pin, &filter->qcimpl);
-    filter->qcimpl->IQualityControl_iface.lpVtbl = &Renderer_QualityControl_Vtbl;
 }

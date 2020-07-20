@@ -728,11 +728,11 @@ static BOOL ReverbDeviceUpdate(DirectSoundDevice *dev)
 {
     int i;
 
-    RtlAcquireResourceShared(&dev->buffer_list_lock, TRUE);
+    AcquireSRWLockShared(&dev->buffer_list_lock);
     for (i = 0; i < dev->nrofbuffers; i++) {
         dev->buffers[i]->eax.reverb_update = TRUE;
     }
-    RtlReleaseResource(&dev->buffer_list_lock);
+    ReleaseSRWLockShared(&dev->buffer_list_lock);
 
     return TRUE;
 }

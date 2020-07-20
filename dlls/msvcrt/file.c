@@ -1611,7 +1611,7 @@ static int msvcrt_get_flags(const MSVCRT_wchar_t* mode, int *open_flags, int* st
 
     mode++;
     while(*mode == ' ') mode++;
-    if(!MSVCRT_CHECK_PMT(!strncmpW(ccs, mode, ARRAY_SIZE(ccs))))
+    if(!MSVCRT_CHECK_PMT(!MSVCRT_wcsncmp(ccs, mode, ARRAY_SIZE(ccs))))
       return -1;
     mode += ARRAY_SIZE(ccs);
     while(*mode == ' ') mode++;
@@ -1620,17 +1620,17 @@ static int msvcrt_get_flags(const MSVCRT_wchar_t* mode, int *open_flags, int* st
     mode++;
     while(*mode == ' ') mode++;
 
-    if(!strncmpiW(utf8, mode, ARRAY_SIZE(utf8)))
+    if(!MSVCRT__wcsnicmp(utf8, mode, ARRAY_SIZE(utf8)))
     {
       *open_flags |= MSVCRT__O_U8TEXT;
       mode += ARRAY_SIZE(utf8);
     }
-    else if(!strncmpiW(utf16le, mode, ARRAY_SIZE(utf16le)))
+    else if(!MSVCRT__wcsnicmp(utf16le, mode, ARRAY_SIZE(utf16le)))
     {
       *open_flags |= MSVCRT__O_U16TEXT;
       mode += ARRAY_SIZE(utf16le);
     }
-    else if(!strncmpiW(unicode, mode, ARRAY_SIZE(unicode)))
+    else if(!MSVCRT__wcsnicmp(unicode, mode, ARRAY_SIZE(unicode)))
     {
       *open_flags |= MSVCRT__O_WTEXT;
       mode += ARRAY_SIZE(unicode);
@@ -3166,7 +3166,7 @@ int CDECL MSVCRT__wstat64(const MSVCRT_wchar_t* path, struct MSVCRT__stat64 * bu
 
   /* FIXME: rdev isn't drive num, despite what the docs says-what is it? */
   if (MSVCRT_iswalpha(*path) && path[1] == ':')
-    buf->st_dev = buf->st_rdev = toupperW(*path) - 'A'; /* drive num */
+    buf->st_dev = buf->st_rdev = MSVCRT_towupper(*path) - 'A'; /* drive num */
   else
     buf->st_dev = buf->st_rdev = MSVCRT__getdrive() - 1;
 
@@ -3179,8 +3179,8 @@ int CDECL MSVCRT__wstat64(const MSVCRT_wchar_t* path, struct MSVCRT__stat64 * bu
     /* executable? */
     if (plen > 6 && path[plen-4] == '.')  /* shortest exe: "\x.exe" */
     {
-      ULONGLONG ext = tolowerW(path[plen-1]) | (tolowerW(path[plen-2]) << 16) |
-                               ((ULONGLONG)tolowerW(path[plen-3]) << 32);
+      ULONGLONG ext = MSVCRT_towlower(path[plen-1]) | (MSVCRT_towlower(path[plen-2]) << 16) |
+                               ((ULONGLONG)MSVCRT_towlower(path[plen-3]) << 32);
       if (ext == WCEXE || ext == WCBAT || ext == WCCMD || ext == WCCOM)
         mode |= ALL_S_IEXEC;
     }

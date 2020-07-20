@@ -633,7 +633,7 @@
 @ stub _ismbbkalnum(long)
 @ stub _ismbbkalnum_l
 @ cdecl _ismbbkana(long)
-@ stub _ismbbkana_l
+@ cdecl _ismbbkana_l(long ptr)
 @ stub _ismbbkprint(long)
 @ stub _ismbbkprint_l
 @ stub _ismbbkpunct(long)
@@ -647,13 +647,13 @@
 @ cdecl _ismbbtrail(long)
 @ cdecl _ismbbtrail_l(long ptr)
 @ cdecl _ismbcalnum(long)
-@ stub _ismbcalnum_l
+@ cdecl _ismbcalnum_l(long ptr)
 @ cdecl _ismbcalpha(long)
-@ stub _ismbcalpha_l
+@ cdecl _ismbcalpha_l(long ptr)
 @ cdecl _ismbcdigit(long)
-@ stub _ismbcdigit_l
+@ cdecl _ismbcdigit_l(long ptr)
 @ cdecl _ismbcgraph(long)
-@ stub _ismbcgraph_l
+@ cdecl _ismbcgraph_l(long ptr)
 @ cdecl _ismbchira(long)
 @ stub _ismbchira_l
 @ cdecl _ismbckata(long)
@@ -667,17 +667,17 @@
 @ cdecl _ismbclegal(long)
 @ cdecl _ismbclegal_l(long ptr)
 @ cdecl _ismbclower(long)
-@ stub _ismbclower_l
+@ cdecl _ismbclower_l(long ptr)
 @ cdecl _ismbcprint(long)
-@ stub _ismbcprint_l
+@ cdecl _ismbcprint_l(long ptr)
 @ cdecl _ismbcpunct(long)
-@ stub _ismbcpunct_l
+@ cdecl _ismbcpunct_l(long ptr)
 @ cdecl _ismbcspace(long)
-@ stub _ismbcspace_l
+@ cdecl _ismbcspace_l(long ptr)
 @ cdecl _ismbcsymbol(long)
 @ stub _ismbcsymbol_l
 @ cdecl _ismbcupper(long)
-@ stub _ismbcupper_l
+@ cdecl _ismbcupper_l(long ptr)
 @ cdecl _ismbslead(ptr ptr)
 @ stub _ismbslead_l
 @ cdecl _ismbstrail(ptr ptr)
@@ -1413,7 +1413,7 @@
 @ cdecl isxdigit(long) MSVCRT_isxdigit
 @ cdecl labs(long) MSVCRT_labs
 @ cdecl ldexp(double long) MSVCRT_ldexp
-@ cdecl ldiv(long long) MSVCRT_ldiv
+@ cdecl -ret64 ldiv(long long) MSVCRT_ldiv
 @ cdecl localeconv() MSVCRT_localeconv
 @ cdecl log(double) MSVCRT_log
 @ cdecl -arch=!i386 logf(float) MSVCRT_logf

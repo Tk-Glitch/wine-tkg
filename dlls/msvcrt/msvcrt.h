@@ -1130,6 +1130,7 @@ void __cdecl MSVCRT__free_locale(MSVCRT__locale_t);
 void free_locinfo(MSVCRT_pthreadlocinfo) DECLSPEC_HIDDEN;
 void free_mbcinfo(MSVCRT_pthreadmbcinfo) DECLSPEC_HIDDEN;
 int _setmbcp_l(int, LCID, MSVCRT_pthreadmbcinfo) DECLSPEC_HIDDEN;
+int __cdecl __crtLCMapStringA(LCID, DWORD, const char*, int, char*, int, unsigned int, int) DECLSPEC_HIDDEN;
 
 #ifndef __WINE_MSVCRT_TEST
 int            __cdecl MSVCRT__write(int,const void*,unsigned int);
@@ -1196,6 +1197,18 @@ unsigned int __cdecl MSVCRT__get_output_format(void);
 char* __cdecl MSVCRT_strtok_s(char*, const char*, char**);
 char* __cdecl MSVCRT__itoa(int, char*, int);
 double parse_double(MSVCRT_wchar_t (*)(void*), void (*)(void*), void*, MSVCRT_pthreadlocinfo, int*);
+int __cdecl MSVCRT_wcsncmp(const MSVCRT_wchar_t*, const MSVCRT_wchar_t*, MSVCRT_size_t);
+int __cdecl MSVCRT__wcsnicmp(const MSVCRT_wchar_t*, const MSVCRT_wchar_t*, MSVCRT_size_t);
+int __cdecl MSVCRT_towlower(MSVCRT_wint_t);
+int __cdecl MSVCRT_towupper(MSVCRT_wint_t);
+int __cdecl MSVCRT__iswalnum_l(MSVCRT_wchar_t, MSVCRT__locale_t);
+int __cdecl MSVCRT__iswdigit_l(MSVCRT_wchar_t, MSVCRT__locale_t);
+int __cdecl MSVCRT__iswgraph_l(MSVCRT_wchar_t, MSVCRT__locale_t);
+int __cdecl MSVCRT__iswalpha_l(MSVCRT_wchar_t, MSVCRT__locale_t);
+int __cdecl MSVCRT__iswlower_l(MSVCRT_wchar_t, MSVCRT__locale_t);
+int __cdecl MSVCRT__iswupper_l(MSVCRT_wchar_t, MSVCRT__locale_t);
+int __cdecl MSVCRT__iswprint_l(MSVCRT_wchar_t, MSVCRT__locale_t);
+int __cdecl MSVCRT__iswpunct_l(MSVCRT_wchar_t, MSVCRT__locale_t);
 
 /* Maybe one day we'll enable the invalid parameter handlers with the full set of information (msvcrXXd)
  *      #define MSVCRT_INVALID_PMT(x) MSVCRT_call_invalid_parameter_handler(x, __FUNCTION__, __FILE__, __LINE__, 0)

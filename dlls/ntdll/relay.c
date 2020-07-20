@@ -308,14 +308,14 @@ static const char *func_name( struct relay_private_data *data, unsigned int ordi
 
 static void trace_string_a( INT_PTR ptr )
 {
-    if (!IS_INTARG( ptr )) TRACE( "%08lx %s", ptr, debugstr_a( (char *)ptr ));
-    else TRACE( "%08lx", ptr );
+    if (!IS_INTARG( ptr )) TRACE( "%08Ix %s", ptr, debugstr_a( (char *)ptr ));
+    else TRACE( "%08Ix", ptr );
 }
 
 static void trace_string_w( INT_PTR ptr )
 {
-    if (!IS_INTARG( ptr )) TRACE( "%08lx %s", ptr, debugstr_w( (WCHAR *)ptr ));
-    else TRACE( "%08lx", ptr );
+    if (!IS_INTARG( ptr )) TRACE( "%08Ix %s", ptr, debugstr_w( (WCHAR *)ptr ));
+    else TRACE( "%08Ix", ptr );
 }
 
 #ifdef __i386__
@@ -638,13 +638,13 @@ DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsi
             break;
         case 'i': /* long */
         default:
-            TRACE( "%08lx", stack[i] );
+            TRACE( "%08zx", stack[i] );
             break;
         }
         if (!is_ret_val( arg_types[i + 1] )) TRACE( "," );
     }
     *nb_args = i;
-    TRACE( ") ret=%08lx\n", stack[-1] );
+    TRACE( ") ret=%08zx\n", stack[-1] );
     return entry_point->orig_func;
 }
 
@@ -654,7 +654,7 @@ DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsi
 DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
                                               INT_PTR retaddr, INT_PTR retval )
 {
-    TRACE( "\1Ret  %s() retval=%08lx ret=%08lx\n",
+    TRACE( "\1Ret  %s() retval=%08zx ret=%08zx\n",
            func_name( descr->private, LOWORD(idx) ), retval, retaddr );
 }
 
@@ -748,13 +748,13 @@ DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsi
             break;
         case 'i': /* long */
         default:
-            TRACE( "%08lx", stack[i] );
+            TRACE( "%08zx", stack[i] );
             break;
         }
         if (!is_ret_val( arg_types[i+1] )) TRACE( "," );
     }
     *nb_args = i;
-    TRACE( ") ret=%08lx\n", stack[-1] );
+    TRACE( ") ret=%08zx\n", stack[-1] );
     return entry_point->orig_func;
 }
 
@@ -764,7 +764,7 @@ DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsi
 DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
                                               INT_PTR retaddr, INT_PTR retval )
 {
-    TRACE( "\1Ret  %s() retval=%08lx ret=%08lx\n",
+    TRACE( "\1Ret  %s() retval=%08zx ret=%08zx\n",
            func_name( descr->private, LOWORD(idx) ), retval, retaddr );
 }
 

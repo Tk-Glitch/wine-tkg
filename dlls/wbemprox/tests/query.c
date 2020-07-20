@@ -1159,10 +1159,14 @@ static void test_Win32_PhysicalMemory( IWbemServices *services )
 
     if (count > 0)
     {
+        check_property( obj, L"BankLabel", VT_BSTR, CIM_STRING );
         check_property( obj, L"Capacity", VT_BSTR, CIM_UINT64 );
+        check_property( obj, L"Caption", VT_BSTR, CIM_STRING );
         check_property( obj, L"DeviceLocator", VT_BSTR, CIM_STRING );
         check_property( obj, L"FormFactor", VT_I4, CIM_UINT16 );
         check_property( obj, L"MemoryType", VT_I4, CIM_UINT16 );
+        check_property( obj, L"PartNumber", VT_NULL, CIM_STRING );
+        check_property( obj, L"SerialNumber", VT_NULL, CIM_STRING );
         IWbemClassObject_Release( obj );
     }
     IEnumWbemClassObject_Release( result );
@@ -1547,6 +1551,35 @@ static void test_Win32_QuickFixEngineering( IWbemServices *services )
     SysFreeString( wql );
 }
 
+static void test_Win32_SoundDevice( IWbemServices *services )
+{
+    BSTR wql = SysAllocString( L"wql" );
+    BSTR query = SysAllocString( L"SELECT * FROM Win32_SoundDevice" );
+    IEnumWbemClassObject *result;
+    IWbemClassObject *obj;
+    HRESULT hr;
+    DWORD count;
+
+    hr = IWbemServices_ExecQuery( services, wql, query, 0, NULL, &result );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    for (;;)
+    {
+        hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj, &count );
+        if (hr != S_OK) break;
+
+        check_property( obj, L"Name", VT_BSTR, CIM_STRING );
+        check_property( obj, L"ProductName", VT_BSTR, CIM_STRING );
+        check_property( obj, L"StatusInfo", VT_I4, CIM_UINT16 );
+        check_property( obj, L"Manufacturer", VT_BSTR, CIM_STRING );
+        IWbemClassObject_Release( obj );
+    }
+
+    IEnumWbemClassObject_Release( result );
+    SysFreeString( query );
+    SysFreeString( wql );
+}
+
 START_TEST(query)
 {
     BSTR path = SysAllocString( L"ROOT\\CIMV2" );
@@ -1598,6 +1631,7 @@ START_TEST(query)
     test_Win32_Processor( services );
     test_Win32_QuickFixEngineering( services );
     test_Win32_Service( services );
+    test_Win32_SoundDevice( services );
     test_Win32_SystemEnclosure( services );
     test_Win32_VideoController( services );
     test_Win32_WinSAT( services );

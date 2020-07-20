@@ -2819,6 +2819,7 @@ enum wined3d_pci_device
     CARD_AMD_RADEON_RX_480          = 0x67df,
     CARD_AMD_RADEON_RX_VEGA_10      = 0x687f,
     CARD_AMD_RADEON_RX_VEGA_12      = 0x69af,
+    CARD_AMD_RADEON_RAVEN           = 0x15dd,
     CARD_AMD_RADEON_RX_VEGA_20      = 0x66af,
     CARD_AMD_RADEON_RX_NAVI_10      = 0x731f,
 
@@ -3165,6 +3166,8 @@ enum wined3d_display_driver
     DRIVER_NVIDIA_GEFORCEFX,
     DRIVER_NVIDIA_GEFORCE6,
     DRIVER_NVIDIA_GEFORCE8,
+    DRIVER_NVIDIA_FERMI,
+    DRIVER_NVIDIA_KEPLER,
     DRIVER_REDHAT_VIRGL,
     DRIVER_VMWARE,
     DRIVER_WINE,
@@ -3203,7 +3206,7 @@ struct wined3d_driver_info
 };
 
 void wined3d_driver_info_init(struct wined3d_driver_info *driver_info,
-        const struct wined3d_gpu_description *gpu_description,
+        const struct wined3d_gpu_description *gpu_description, enum wined3d_feature_level feature_level,
         UINT64 vram_bytes, UINT64 sysmem_bytes) DECLSPEC_HIDDEN;
 
 struct wined3d_adapter_ops
@@ -3306,9 +3309,10 @@ struct wined3d_adapter
     const struct wined3d_adapter_ops *adapter_ops;
 };
 
-BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal,
+BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal, const LUID *luid,
         const struct wined3d_adapter_ops *adapter_ops) DECLSPEC_HIDDEN;
 void wined3d_adapter_cleanup(struct wined3d_adapter *adapter) DECLSPEC_HIDDEN;
+BOOL wined3d_get_primary_adapter_luid(LUID *luid) DECLSPEC_HIDDEN;
 
 struct wined3d_adapter_gl
 {
@@ -3363,6 +3367,9 @@ struct wined3d_caps_gl_ctx
     const struct wined3d_gl_info *gl_info;
     GLuint test_vbo;
     GLuint test_program_id;
+
+    const struct wined3d_gpu_description *gpu_description;
+    UINT64 vram_bytes;
 };
 
 BOOL wined3d_adapter_gl_init_format_info(struct wined3d_adapter *adapter,

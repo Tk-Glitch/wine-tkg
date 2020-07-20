@@ -1938,6 +1938,7 @@ static void test__strtod(void)
         const char *str;
         int len;
         double ret;
+        int err;
     } tests[] = {
         { "12.1", 4, 12.1 },
         { "-13.721", 7, -13.721 },
@@ -1953,9 +1954,14 @@ static void test__strtod(void)
         { "0.82181281288121", 16, 0.82181281288121 },
         { "21921922352523587651128218821", 29, 21921922352523587651128218821.0 },
         { "0.1d238", 7, 0.1e238 },
-        { "0.1D-4736", 9, 0 },
+        { "0.1D-4736", 9, 0, ERANGE },
         { "3.4028234663852887e38", 21, FLT_MAX },
+        { "1.1754943508222875e-38", 22, FLT_MIN },
         { "1.7976931348623158e+308", 23, DBL_MAX },
+        { "1.7976931348623159e+308", 23, INFINITY, ERANGE },
+        { "2.2250738585072014e-308", 23, DBL_MIN },
+        { "-1.7976931348623158e+308", 24, -DBL_MAX },
+        { "-1.7976931348623159e+308", 24, -INFINITY, ERANGE },
         { "00", 2, 0 },
         { "00.", 3, 0 },
         { ".00", 3, 0 },
@@ -1975,7 +1981,7 @@ static void test__strtod(void)
         ok(d == tests[i].ret, "%d) d = %.16e\n", i, d);
         ok(end == tests[i].str + tests[i].len, "%d) len = %d\n",
                 i, (int)(end - tests[i].str));
-        ok(errno = 0xdeadbeef, "%d) errno = %d\n", i, errno);
+        ok(errno == tests[i].err, "%d) errno = %d\n", i, errno);
     }
 
     if (!p__strtod_l)
@@ -4210,6 +4216,20 @@ static void test_iswdigit(void)
     }
 }
 
+static void test_wcscmp(void)
+{
+    int r;
+
+    r = wcscmp(L"a", L"z");
+    ok(r == -1, "wcscmp returned %d\n", r);
+
+    r = wcscmp(L"z", L"a");
+    ok(r == 1, "wcscmp returned %d\n", r);
+
+    r = wcscmp(L"f", L"f");
+    ok(!r, "wcscmp returned %d\n", r);
+}
+
 START_TEST(string)
 {
     char mem[100];
@@ -4359,4 +4379,5 @@ START_TEST(string)
     test_C_locale();
     test_strstr();
     test_iswdigit();
+    test_wcscmp();
 }

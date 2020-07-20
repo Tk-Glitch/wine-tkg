@@ -18,9 +18,7 @@
 
 #define COBJMACROS
 
-#include "mfapi.h"
 #include "mfidl.h"
-#include "mferror.h"
 #include "mf_private.h"
 
 #include "wine/debug.h"

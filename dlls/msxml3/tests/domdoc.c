@@ -37,8 +37,11 @@
 #include "dispex.h"
 #include "objsafe.h"
 #include "mshtml.h"
+#include "docobj.h"
+#include "xmlparser.h"
 #include "initguid.h"
 #include "asptlb.h"
+#include "shlwapi.h"
 
 #include "wine/heap.h"
 #include "wine/test.h"
@@ -699,6 +702,36 @@ static void _expect_list_len(IXMLDOMNodeList *list, LONG len, int line)
 
 #define EXPECT_HR(hr,hr_exp) \
     ok(hr == hr_exp, "got 0x%08x, expected 0x%08x\n", hr, hr_exp)
+
+#define EXPECT_PARSE_ERROR(doc, hr_exp, hr_todo) _expect_parse_error(doc, hr_exp, hr_todo, __LINE__)
+static void _expect_parse_error(IXMLDOMDocument *doc, HRESULT hr_exp, BOOL hr_todo, int line)
+{
+    IXMLDOMParseError *error;
+    HRESULT hr;
+    LONG code;
+
+    error = NULL;
+    hr = IXMLDOMDocument_get_parseError(doc, &error);
+    ok_(__FILE__,line)(hr == S_OK, "got 0x%08x\n", hr);
+    ok_(__FILE__,line)(!!error, "got NULL parseError\n");
+
+    code = 0xdeadbeef;
+    hr = IXMLDOMParseError_get_errorCode(error, &code);
+    if (FAILED(hr_exp))
+    {
+        ok_(__FILE__,line)(hr == S_OK, "got 0x%08x\n", hr);
+        ok_(__FILE__,line)(FAILED(code), "expected failure HRESULT\n");
+        todo_wine_if(hr_todo)
+        ok_(__FILE__,line)(hr_exp == code, "expected 0x%08x, got 0x%08x\n", hr_exp, code);
+    }
+    else
+    {
+        ok_(__FILE__,line)(hr == S_FALSE, "got 0x%08x\n", hr);
+        ok_(__FILE__,line)(SUCCEEDED(code), "expected successful HRESULT\n");
+    }
+
+    IXMLDOMParseError_Release(error);
+}
 
 static const WCHAR szEmpty[] = { 0 };
 static const WCHAR szIncomplete[] = {
@@ -2149,6 +2182,7 @@ static void test_persiststream(void)
     IXMLDOMDocument *doc;
     ULARGE_INTEGER size;
     IPersist *persist;
+    IStream *istream;
     HRESULT hr;
     CLSID clsid;
 
@@ -2182,6 +2216,21 @@ static void test_persiststream(void)
     ok(IsEqualGUID(&clsid, &CLSID_DOMDocument2), "wrong clsid %s\n", wine_dbgstr_guid(&clsid));
 
     IPersistStream_Release(stream);
+
+    /* test Load */
+    istream = SHCreateMemStream((const BYTE*)complete4A, strlen(complete4A));
+    hr = IPersistStreamInit_Load(streaminit, istream);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IStream_Release(istream);
+    EXPECT_PARSE_ERROR(doc, S_OK, FALSE);
+
+    istream = SHCreateMemStream((const BYTE*)"", 0);
+    hr = IPersistStreamInit_Load(streaminit, istream);
+    todo_wine ok(hr == XML_E_MISSINGROOT, "got 0x%08x\n", hr);
+    ok(FAILED(hr), "got success\n");
+    IStream_Release(istream);
+    EXPECT_PARSE_ERROR(doc, XML_E_MISSINGROOT, TRUE);
+
     IPersistStreamInit_Release(streaminit);
     IXMLDOMDocument_Release(doc);
 }
@@ -10242,6 +10291,7 @@ static void test_load(void)
     IXMLDOMNodeList *list;
     IXMLDOMDocument *doc;
     BSTR bstr1, bstr2;
+    IStream *stream;
     VARIANT_BOOL b;
     VARIANT src;
     HRESULT hr;
@@ -10419,6 +10469,29 @@ static void test_load(void)
     ok(b == VARIANT_FALSE, "got %d\n", b);
 
     VariantClear(&src);
+
+    /* test istream with empty content */
+    stream = SHCreateMemStream((const BYTE*)nocontent, strlen(nocontent));
+    V_VT(&src) = VT_UNKNOWN;
+    V_UNKNOWN(&src) = (IUnknown*)stream;
+    b = VARIANT_TRUE;
+    hr = IXMLDOMDocument_load(doc, src, &b);
+    todo_wine ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(b == VARIANT_FALSE, "got %d\n", b);
+    EXPECT_PARSE_ERROR(doc, XML_E_INVALIDATROOTLEVEL, TRUE);
+    VariantClear(&src);
+
+    /* test istream with valid xml */
+    stream = SHCreateMemStream((const BYTE*)complete4A, strlen(complete4A));
+    V_VT(&src) = VT_UNKNOWN;
+    V_UNKNOWN(&src) = (IUnknown*)stream;
+    b = VARIANT_FALSE;
+    hr = IXMLDOMDocument_load(doc, src, &b);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(b == VARIANT_TRUE, "got %d\n", b);
+    EXPECT_PARSE_ERROR(doc, S_OK, FALSE);
+    VariantClear(&src);
+
     IXMLDOMDocument_Release(doc);
 
     free_bstrs();
@@ -13042,6 +13115,140 @@ static void test_namespaces_as_attributes(void)
     free_bstrs();
 }
 
+static const IID *qi_list[32];
+static int qi_count;
+
+static BOOL qi_list_contains(REFIID iid)
+{
+    int i;
+
+    for (i = 0; i < qi_count; i++)
+    {
+        if (IsEqualGUID(qi_list[i], iid))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+static BOOL qi_list_contains_service(REFIID service, REFIID iid)
+{
+    int i;
+
+    for (i = 0; i < qi_count; i++)
+    {
+        if (IsEqualGUID(qi_list[i], service) && IsEqualGUID(qi_list[i + 1], iid))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+static HRESULT WINAPI sp_QueryInterface(IServiceProvider *iface, REFIID iid, void **ppv)
+{
+    if (qi_count < ARRAY_SIZE(qi_list))
+        qi_list[qi_count++] = iid;
+    else
+        ok(0, "qi_list overflow: %d\n", qi_count);
+
+    if (IsEqualGUID(iid, &IID_IUnknown) ||
+        IsEqualGUID(iid, &IID_IServiceProvider))
+    {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI sp_AddRef(IServiceProvider *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI sp_Release(IServiceProvider *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI sp_QueryService(IServiceProvider *iface, REFGUID service,
+                                      REFIID iid, void **ppv)
+{
+    if (IsEqualGUID(service, &SID_SContainerDispatch) ||
+        IsEqualGUID(service, &SID_SInternetHostSecurityManager))
+    {
+        if (qi_count + 1 < ARRAY_SIZE(qi_list))
+        {
+            qi_list[qi_count++] = service;
+            qi_list[qi_count++] = iid;
+        }
+        else
+            ok(0, "qi_list overflow: %d\n", qi_count);
+    }
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static const IServiceProviderVtbl sp_vtbl =
+{
+    sp_QueryInterface,
+    sp_AddRef,
+    sp_Release,
+    sp_QueryService
+};
+
+static IServiceProvider sp = { &sp_vtbl };
+
+static void test_load_with_site(void)
+{
+    char path[MAX_PATH];
+    IXMLDOMDocument2 *doc;
+    IObjectWithSite *site;
+    VARIANT var;
+    VARIANT_BOOL b;
+    HRESULT hr;
+
+    GetTempPathA(MAX_PATH, path);
+    strcat(path, "winetest.xml");
+    write_to_file(path, win1252xml);
+
+    doc = create_document(&IID_IXMLDOMDocument2);
+
+    hr = IXMLDOMDocument2_QueryInterface(doc, &IID_IObjectWithSite, (void **)&site);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    qi_count = 0;
+    hr = IObjectWithSite_SetSite(site, (IUnknown *)&sp);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(qi_count != 0, "got %d QI calls\n", qi_count);
+todo_wine
+    ok(qi_list_contains(&IID_IXMLDOMDocument), "QI(IID_IXMLDOMDocument) was not called\n");
+    ok(qi_list_contains(&IID_IHTMLDocument2), "QI(IID_IHTMLDocument2) was not called\n");
+    ok(qi_list_contains(&IID_IServiceProvider), "QI(IID_IServiceProvider) was not called\n");
+todo_wine
+    ok(qi_list_contains(&IID_IOleClientSite), "QI(IID_IOleClientSite) was not called\n");
+    ok(qi_list_contains_service(&SID_SContainerDispatch, &IID_IHTMLDocument2),
+       "QI(SID_SContainerDispatch, IID_IHTMLDocument2) was not called\n");
+todo_wine
+    ok(qi_list_contains_service(&SID_SInternetHostSecurityManager, &IID_IXMLDOMDocument),
+       "QI(SID_SInternetHostSecurityManager, IID_IXMLDOMDocument) was not called\n");
+
+    qi_count = 0;
+    V_VT(&var) = VT_BSTR;
+    V_BSTR(&var) = _bstr_(path);
+    hr = IXMLDOMDocument2_load(doc, var, &b);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(b == VARIANT_TRUE, "got %d\n", b);
+    ok(qi_count == 0, "got %d QI calls\n", qi_count);
+    SysFreeString(V_BSTR(&var));
+
+    IXMLDOMDocument2_Release(doc);
+
+    DeleteFileA(path);
+}
+
 START_TEST(domdoc)
 {
     HRESULT hr;
@@ -13058,6 +13265,7 @@ START_TEST(domdoc)
         return;
     }
 
+    test_load_with_site();
     test_domdoc();
     test_persiststream();
     test_domnode();

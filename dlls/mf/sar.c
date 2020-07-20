@@ -20,7 +20,6 @@
 
 #include "mfapi.h"
 #include "mfidl.h"
-#include "mferror.h"
 #include "mf_private.h"
 #include "initguid.h"
 #include "mmdeviceapi.h"
@@ -1892,15 +1891,10 @@ static void sar_shutdown_object(void *user_context, IUnknown *obj)
     }
 }
 
-static void sar_free_private(void *user_context)
-{
-}
-
 static const struct activate_funcs sar_activate_funcs =
 {
-    sar_create_object,
-    sar_shutdown_object,
-    sar_free_private,
+    .create_object = sar_create_object,
+    .shutdown_object = sar_shutdown_object,
 };
 
 /***********************************************************************

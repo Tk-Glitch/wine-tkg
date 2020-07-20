@@ -717,6 +717,8 @@ HKLM,%MciExtStr%,"wmx",,"MPEGVideo"
 HKLM,%MciExtStr%,"wvx",,"MPEGVideo"
 
 [Misc]
+HKLM,Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.Input.Gamepad,"DllPath",2,"Windows.Gaming.Input.dll"
+HKLM,Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.Input.RawGameController,"DllPath",2,"Windows.Gaming.Input.dll"
 HKLM,Software\Borland\Database Engine\Settings\SYSTEM\INIT,SHAREDMEMLOCATION,,9000
 HKLM,Software\Clients\Mail,,2,"Native Mail Client"
 HKLM,Software\Clients\Mail\Native Mail Client,,2,"Native Mail Client"
@@ -4031,8 +4033,8 @@ HKLM,"System\CurrentControlSet\Services\Winsock2\Parameters\Protocol_Catalog9\Ca
 [VersionInfo]
 HKLM,%CurrentVersionNT%,"CurrentVersion",2,"10.0"
 HKLM,%CurrentVersionNT%,"CSDVersion",2,""
-HKLM,%CurrentVersionNT%,"CurrentBuild",2,"17134"
-HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"17134"
+HKLM,%CurrentVersionNT%,"CurrentBuild",2,"17763"
+HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"17763"
 HKLM,%CurrentVersionNT%,"CurrentType",2,"Uniprocessor Free"
 HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
@@ -4049,8 +4051,8 @@ HKLM,%Control%\Session Manager\Environment,"OS",2,"Windows_NT"
 [VersionInfo.ntamd64]
 HKLM,%CurrentVersionNT%,"CurrentVersion",2,"10.0"
 HKLM,%CurrentVersionNT%,"CSDVersion",2,""
-HKLM,%CurrentVersionNT%,"CurrentBuild",2,"17134"
-HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"17134"
+HKLM,%CurrentVersionNT%,"CurrentBuild",2,"17763"
+HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"17763"
 HKLM,%CurrentVersionNT%,"CurrentType",2,"Uniprocessor Free"
 HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\

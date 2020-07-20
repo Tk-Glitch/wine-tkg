@@ -378,6 +378,17 @@ typedef struct EmfPlusImageAttributes
     DWORD Reserved2;
 } EmfPlusImageAttributes;
 
+typedef struct EmfPlusFont
+{
+    DWORD Version;
+    float EmSize;
+    DWORD SizeUnit;
+    DWORD FontStyleFlags;
+    DWORD Reserved;
+    DWORD Length;
+    WCHAR FamilyName[1];
+} EmfPlusFont;
+
 typedef struct EmfPlusObject
 {
     EmfPlusRecordHeader Header;
@@ -389,6 +400,7 @@ typedef struct EmfPlusObject
         EmfPlusRegion region;
         EmfPlusImage image;
         EmfPlusImageAttributes image_attributes;
+        EmfPlusFont font;
     } ObjectData;
 } EmfPlusObject;
 
@@ -537,16 +549,19 @@ typedef struct EmfPlusFillPie
     } RectData;
 } EmfPlusFillPie;
 
-typedef struct EmfPlusFont
+typedef struct EmfPlusDrawDriverString
 {
-    DWORD Version;
-    float EmSize;
-    DWORD SizeUnit;
-    DWORD FontStyleFlags;
-    DWORD Reserved;
-    DWORD Length;
-    WCHAR FamilyName[1];
-} EmfPlusFont;
+    EmfPlusRecordHeader Header;
+    union
+    {
+        DWORD BrushId;
+        ARGB Color;
+    } brush;
+    DWORD DriverStringOptionsFlags;
+    DWORD MatrixPresent;
+    DWORD GlyphCount;
+    BYTE VariableData[1];
+} EmfPlusDrawDriverString;
 
 static void metafile_free_object_table_entry(GpMetafile *metafile, BYTE id)
 {
@@ -1001,7 +1016,7 @@ static BOOL is_integer_rect(const GpRectF *rect)
     return TRUE;
 }
 
-static GpStatus METAFILE_PrepareBrushData(GpBrush *brush, DWORD *size)
+static GpStatus METAFILE_PrepareBrushData(GDIPCONST GpBrush *brush, DWORD *size)
 {
     switch (brush->bt)
     {
@@ -1019,7 +1034,7 @@ static GpStatus METAFILE_PrepareBrushData(GpBrush *brush, DWORD *size)
     return Ok;
 }
 
-static void METAFILE_FillBrushData(GpBrush *brush, EmfPlusBrush *data)
+static void METAFILE_FillBrushData(GDIPCONST GpBrush *brush, EmfPlusBrush *data)
 {
     data->Version = VERSION_MAGIC2;
     data->Type = brush->bt;
@@ -1045,7 +1060,7 @@ static void METAFILE_FillBrushData(GpBrush *brush, EmfPlusBrush *data)
     }
 }
 
-static GpStatus METAFILE_AddBrushObject(GpMetafile *metafile, GpBrush *brush, DWORD *id)
+static GpStatus METAFILE_AddBrushObject(GpMetafile *metafile, GDIPCONST GpBrush *brush, DWORD *id)
 {
     EmfPlusObject *object_record;
     GpStatus stat;
@@ -3333,6 +3348,91 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
             GdipFree(rects);
             return stat;
         }
+        case EmfPlusRecordTypeDrawDriverString:
+        {
+            GpBrush *brush;
+            DWORD expected_size;
+            UINT16 *text;
+            PointF *positions;
+            GpSolidFill *solidfill = NULL;
+            void* alignedmem = NULL;
+            GpMatrix *matrix = NULL;
+            BYTE font = flags & 0xff;
+            EmfPlusDrawDriverString *draw = (EmfPlusDrawDriverString*)header;
+
+            if (font >= EmfPlusObjectTableSize ||
+                    real_metafile->objtable[font].type != ObjectTypeFont)
+                return InvalidParameter;
+
+            expected_size = FIELD_OFFSET(EmfPlusDrawDriverString, VariableData) -
+                sizeof(EmfPlusRecordHeader);
+            if (dataSize < expected_size || draw->GlyphCount <= 0)
+                return InvalidParameter;
+
+            expected_size += draw->GlyphCount * (sizeof(*text) + sizeof(*positions));
+            if (draw->MatrixPresent)
+                expected_size += sizeof(*matrix);
+
+            /* Pad expected size to DWORD alignment. */
+            expected_size = (expected_size + 3) & ~3;
+
+            if (dataSize != expected_size)
+                return InvalidParameter;
+
+            if (flags & 0x8000)
+            {
+                stat = GdipCreateSolidFill(draw->brush.Color, (GpSolidFill**)&solidfill);
+
+                if (stat != Ok)
+                    return InvalidParameter;
+
+                brush = (GpBrush*)solidfill;
+            }
+            else
+            {
+                if (draw->brush.BrushId >= EmfPlusObjectTableSize ||
+                        real_metafile->objtable[draw->brush.BrushId].type != ObjectTypeBrush)
+                    return InvalidParameter;
+
+                brush = real_metafile->objtable[draw->brush.BrushId].u.brush;
+            }
+
+            text = (UINT16*)&draw->VariableData[0];
+
+            /* If GlyphCount is odd, all subsequent fields will be 2-byte
+               aligned rather than 4-byte aligned, which may lead to access
+               issues. Handle this case by making our own copy of positions. */
+            if (draw->GlyphCount % 2)
+            {
+                SIZE_T alloc_size = draw->GlyphCount * sizeof(*positions);
+
+                if (draw->MatrixPresent)
+                    alloc_size += sizeof(*matrix);
+
+                positions = alignedmem = heap_alloc(alloc_size);
+                if (!positions)
+                {
+                    GdipDeleteBrush((GpBrush*)solidfill);
+                    return OutOfMemory;
+                }
+
+                memcpy(positions, &text[draw->GlyphCount], alloc_size);
+            }
+            else
+                positions = (PointF*)&text[draw->GlyphCount];
+
+            if (draw->MatrixPresent)
+                matrix = (GpMatrix*)&positions[draw->GlyphCount];
+
+            stat = GdipDrawDriverString(real_metafile->playback_graphics, text, draw->GlyphCount,
+                    real_metafile->objtable[font].u.font, brush, positions,
+                    draw->DriverStringOptionsFlags, matrix);
+
+            GdipDeleteBrush((GpBrush*)solidfill);
+            heap_free(alignedmem);
+
+            return stat;
+        }
         default:
             FIXME("Not implemented for record type %x\n", recordType);
             return NotImplemented;
@@ -4542,5 +4642,164 @@ GpStatus METAFILE_FillPath(GpMetafile *metafile, GpBrush *brush, GpPath *path)
     }
 
     METAFILE_WriteRecords(metafile);
+    return Ok;
+}
+
+static GpStatus METAFILE_AddFontObject(GpMetafile *metafile, GDIPCONST GpFont *font, DWORD *id)
+{
+    EmfPlusObject *object_record;
+    EmfPlusFont *font_record;
+    GpStatus stat;
+    INT fn_len;
+    INT style;
+
+    *id = -1;
+
+    if (metafile->metafile_type != MetafileTypeEmfPlusOnly &&
+            metafile->metafile_type != MetafileTypeEmfPlusDual)
+        return Ok;
+
+    /* The following cast is ugly, but GdipGetFontStyle does treat
+       its first parameter as const. */
+    stat = GdipGetFontStyle((GpFont*)font, &style);
+    if (stat != Ok)
+        return stat;
+
+    fn_len = lstrlenW(font->family->FamilyName);
+    stat = METAFILE_AllocateRecord(metafile,
+        FIELD_OFFSET(EmfPlusObject, ObjectData.font.FamilyName[(fn_len + 1) & ~1]),
+        (void**)&object_record);
+    if (stat != Ok)
+        return stat;
+
+    *id = METAFILE_AddObjectId(metafile);
+
+    object_record->Header.Type = EmfPlusRecordTypeObject;
+    object_record->Header.Flags = *id | ObjectTypeFont << 8;
+
+    font_record = &object_record->ObjectData.font;
+    font_record->Version = VERSION_MAGIC2;
+    font_record->EmSize = font->emSize;
+    font_record->SizeUnit = font->unit;
+    font_record->FontStyleFlags = style;
+    font_record->Reserved = 0;
+    font_record->Length = fn_len;
+
+    memcpy(font_record->FamilyName, font->family->FamilyName,
+        fn_len * sizeof(*font->family->FamilyName));
+
+    return Ok;
+}
+
+GpStatus METAFILE_DrawDriverString(GpMetafile *metafile, GDIPCONST UINT16 *text, INT length,
+    GDIPCONST GpFont *font, GDIPCONST GpStringFormat *format, GDIPCONST GpBrush *brush,
+    GDIPCONST PointF *positions, INT flags, GDIPCONST GpMatrix *matrix)
+{
+    DWORD brush_id;
+    DWORD font_id;
+    DWORD alloc_size;
+    GpStatus stat;
+    EmfPlusDrawDriverString *draw_string_record;
+    BYTE *cursor;
+    BOOL inline_color;
+    BOOL include_matrix = FALSE;
+
+    if (length <= 0)
+        return InvalidParameter;
+
+    if (metafile->metafile_type != MetafileTypeEmfPlusOnly &&
+            metafile->metafile_type != MetafileTypeEmfPlusDual)
+    {
+        FIXME("metafile type not supported: %i\n", metafile->metafile_type);
+        return NotImplemented;
+    }
+
+    stat = METAFILE_AddFontObject(metafile, font, &font_id);
+    if (stat != Ok)
+        return stat;
+
+    inline_color = (brush->bt == BrushTypeSolidColor);
+    if (!inline_color)
+    {
+        stat = METAFILE_AddBrushObject(metafile, brush, &brush_id);
+        if (stat != Ok)
+            return stat;
+    }
+
+    if (matrix)
+    {
+        BOOL identity;
+
+        stat = GdipIsMatrixIdentity(matrix, &identity);
+        if (stat != Ok)
+           return stat;
+
+        include_matrix = !identity;
+    }
+
+    alloc_size = FIELD_OFFSET(EmfPlusDrawDriverString, VariableData) +
+        length * (sizeof(*text) + sizeof(*positions));
+
+    if (include_matrix)
+        alloc_size += sizeof(*matrix);
+
+    /* Pad record to DWORD alignment. */
+    alloc_size = (alloc_size + 3) & ~3;
+
+    stat = METAFILE_AllocateRecord(metafile, alloc_size, (void**)&draw_string_record);
+    if (stat != Ok)
+        return stat;
+
+    draw_string_record->Header.Type = EmfPlusRecordTypeDrawDriverString;
+    draw_string_record->Header.Flags = font_id;
+    draw_string_record->DriverStringOptionsFlags = flags;
+    draw_string_record->MatrixPresent = include_matrix;
+    draw_string_record->GlyphCount = length;
+
+    if (inline_color)
+    {
+        draw_string_record->Header.Flags |= 0x8000;
+        draw_string_record->brush.Color = ((GpSolidFill*)brush)->color;
+    }
+    else
+        draw_string_record->brush.BrushId = brush_id;
+
+    cursor = &draw_string_record->VariableData[0];
+
+    memcpy(cursor, text, length * sizeof(*text));
+    cursor += length * sizeof(*text);
+
+    if (flags & DriverStringOptionsRealizedAdvance)
+    {
+        static BOOL fixme_written = FALSE;
+
+        /* Native never writes DriverStringOptionsRealizedAdvance. Instead,
+           in the case of RealizedAdvance, each glyph position is computed
+           and serialized.
+
+           While native GDI+ is capable of playing back metafiles with this
+           flag set, it is possible that some application might rely on
+           metafiles produced from GDI+ not setting this flag. Ideally we
+           would also compute the position of each glyph here, serialize those
+           values, and not set DriverStringOptionsRealizedAdvance. */
+        if (!fixme_written)
+        {
+            fixme_written = TRUE;
+            FIXME("serializing RealizedAdvance flag and single GlyphPos with padding\n");
+        }
+
+        *((PointF*)cursor) = *positions;
+    }
+    else
+        memcpy(cursor, positions, length * sizeof(*positions));
+
+    if (include_matrix)
+    {
+        cursor += length * sizeof(*positions);
+        memcpy(cursor, matrix, sizeof(*matrix));
+    }
+
+    METAFILE_WriteRecords(metafile);
+
     return Ok;
 }

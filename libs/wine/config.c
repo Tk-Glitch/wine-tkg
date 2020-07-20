@@ -633,6 +633,7 @@ wine_patch_data[] =
     { "David Torok", "user32: AddInternalGetWindowIcon stub.", 1 },
     { "Derek Lesho", "bcrypt: Implement BCRYPT_KDF_HASH.", 1 },
     { "Derek Lesho", "bcrypt: Implement BCryptSecretAgreement with libgcrypt.", 1 },
+    { "Derek Lesho", "user32: Implement QueryDisplayConfig.", 1 },
     { "Dmitry Timoshkov", "comctl32: Bump version to 6.0.", 1 },
     { "Dmitry Timoshkov", "comdlg32: Postpone setting ofn->lpstrFileTitle to work around an application bug.", 1 },
     { "Dmitry Timoshkov", "cryptext: Implement CryptExtOpenCER.", 1 },

@@ -742,15 +742,15 @@ struct hlsl_ir_if
 {
     struct hlsl_ir_node node;
     struct hlsl_src condition;
-    struct list *then_instrs;
-    struct list *else_instrs;
+    struct list then_instrs;
+    struct list else_instrs;
 };
 
 struct hlsl_ir_loop
 {
     struct hlsl_ir_node node;
     /* loop condition is stored in the body (as "if (!condition) break;") */
-    struct list *body;
+    struct list body;
     unsigned int next_index; /* liveness index of the end of the loop */
 };
 
@@ -874,11 +874,11 @@ struct hlsl_ir_constant
     struct hlsl_ir_node node;
     union
     {
-        unsigned u[16];
-        int i[16];
-        float f[16];
-        double d[16];
-        BOOL b[16];
+        unsigned u[4];
+        int i[4];
+        float f[4];
+        double d[4];
+        BOOL b[4];
     } value;
 };
 

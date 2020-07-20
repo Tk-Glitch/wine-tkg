@@ -1162,6 +1162,7 @@ int CDECL __control87_2( unsigned int newval, unsigned int mask,
 #ifdef __GNUC__
     unsigned long fpword;
     unsigned int flags;
+    unsigned int old_flags;
 
     if (x86_cw)
     {
@@ -1251,29 +1252,34 @@ int CDECL __control87_2( unsigned int newval, unsigned int mask,
         TRACE( "sse2 flags=%08x newval=%08x mask=%08x\n", flags, newval, mask );
         if (mask)
         {
+            old_flags = flags;
+            mask &= MSVCRT__MCW_EM | MSVCRT__MCW_RC | MSVCRT__MCW_DN;
             flags = (flags & ~mask) | (newval & mask);
 
-            /* Convert (masked) value back to fp word */
-            fpword = 0;
-            if (flags & MSVCRT__EM_INVALID)    fpword |= 0x80;
-            if (flags & MSVCRT__EM_DENORMAL)   fpword |= 0x100;
-            if (flags & MSVCRT__EM_ZERODIVIDE) fpword |= 0x200;
-            if (flags & MSVCRT__EM_OVERFLOW)   fpword |= 0x400;
-            if (flags & MSVCRT__EM_UNDERFLOW)  fpword |= 0x800;
-            if (flags & MSVCRT__EM_INEXACT)    fpword |= 0x1000;
-            switch (flags & MSVCRT__MCW_RC)
+            if (flags != old_flags)
             {
-            case MSVCRT__RC_UP|MSVCRT__RC_DOWN: fpword |= 0x6000; break;
-            case MSVCRT__RC_UP:                 fpword |= 0x4000; break;
-            case MSVCRT__RC_DOWN:               fpword |= 0x2000; break;
+                /* Convert (masked) value back to fp word */
+                fpword = 0;
+                if (flags & MSVCRT__EM_INVALID)    fpword |= 0x80;
+                if (flags & MSVCRT__EM_DENORMAL)   fpword |= 0x100;
+                if (flags & MSVCRT__EM_ZERODIVIDE) fpword |= 0x200;
+                if (flags & MSVCRT__EM_OVERFLOW)   fpword |= 0x400;
+                if (flags & MSVCRT__EM_UNDERFLOW)  fpword |= 0x800;
+                if (flags & MSVCRT__EM_INEXACT)    fpword |= 0x1000;
+                switch (flags & MSVCRT__MCW_RC)
+                {
+                case MSVCRT__RC_UP|MSVCRT__RC_DOWN: fpword |= 0x6000; break;
+                case MSVCRT__RC_UP:                 fpword |= 0x4000; break;
+                case MSVCRT__RC_DOWN:               fpword |= 0x2000; break;
+                }
+                switch (flags & MSVCRT__MCW_DN)
+                {
+                case MSVCRT__DN_FLUSH_OPERANDS_SAVE_RESULTS: fpword |= 0x0040; break;
+                case MSVCRT__DN_SAVE_OPERANDS_FLUSH_RESULTS: fpword |= 0x8000; break;
+                case MSVCRT__DN_FLUSH:                       fpword |= 0x8040; break;
+                }
+                __asm__ __volatile__( "ldmxcsr %0" : : "m" (fpword) );
             }
-            switch (flags & MSVCRT__MCW_DN)
-            {
-            case MSVCRT__DN_FLUSH_OPERANDS_SAVE_RESULTS: fpword |= 0x0040; break;
-            case MSVCRT__DN_SAVE_OPERANDS_FLUSH_RESULTS: fpword |= 0x8000; break;
-            case MSVCRT__DN_FLUSH:                       fpword |= 0x8040; break;
-            }
-            __asm__ __volatile__( "ldmxcsr %0" : : "m" (fpword) );
         }
         *sse2_cw = flags;
     }
@@ -1299,8 +1305,10 @@ unsigned int CDECL _control87(unsigned int newval, unsigned int mask)
     __control87_2( newval, mask, &flags, &sse2_cw );
 
     if ((flags ^ sse2_cw) & (MSVCRT__MCW_EM | MSVCRT__MCW_RC)) flags |= MSVCRT__EM_AMBIGUOUS;
+    flags |= sse2_cw;
 #elif defined(__x86_64__)
     unsigned long fpword;
+    unsigned int old_flags;
 
     __asm__ __volatile__( "stmxcsr %0" : "=m" (fpword) );
     if (fpword & 0x80)   flags |= MSVCRT__EM_INVALID;
@@ -1321,27 +1329,32 @@ unsigned int CDECL _control87(unsigned int newval, unsigned int mask)
     case 0x8000: flags |= MSVCRT__DN_SAVE_OPERANDS_FLUSH_RESULTS; break;
     case 0x8040: flags |= MSVCRT__DN_FLUSH; break;
     }
+    old_flags = flags;
+    mask &= MSVCRT__MCW_EM | MSVCRT__MCW_RC | MSVCRT__MCW_DN;
     flags = (flags & ~mask) | (newval & mask);
-    fpword = 0;
-    if (flags & MSVCRT__EM_INVALID)    fpword |= 0x80;
-    if (flags & MSVCRT__EM_DENORMAL)   fpword |= 0x100;
-    if (flags & MSVCRT__EM_ZERODIVIDE) fpword |= 0x200;
-    if (flags & MSVCRT__EM_OVERFLOW)   fpword |= 0x400;
-    if (flags & MSVCRT__EM_UNDERFLOW)  fpword |= 0x800;
-    if (flags & MSVCRT__EM_INEXACT)    fpword |= 0x1000;
-    switch (flags & MSVCRT__MCW_RC)
+    if (flags != old_flags)
     {
-    case MSVCRT__RC_CHOP: fpword |= 0x6000; break;
-    case MSVCRT__RC_UP:   fpword |= 0x4000; break;
-    case MSVCRT__RC_DOWN: fpword |= 0x2000; break;
+        fpword = 0;
+        if (flags & MSVCRT__EM_INVALID)    fpword |= 0x80;
+        if (flags & MSVCRT__EM_DENORMAL)   fpword |= 0x100;
+        if (flags & MSVCRT__EM_ZERODIVIDE) fpword |= 0x200;
+        if (flags & MSVCRT__EM_OVERFLOW)   fpword |= 0x400;
+        if (flags & MSVCRT__EM_UNDERFLOW)  fpword |= 0x800;
+        if (flags & MSVCRT__EM_INEXACT)    fpword |= 0x1000;
+        switch (flags & MSVCRT__MCW_RC)
+        {
+        case MSVCRT__RC_CHOP: fpword |= 0x6000; break;
+        case MSVCRT__RC_UP:   fpword |= 0x4000; break;
+        case MSVCRT__RC_DOWN: fpword |= 0x2000; break;
+        }
+        switch (flags & MSVCRT__MCW_DN)
+        {
+        case MSVCRT__DN_FLUSH_OPERANDS_SAVE_RESULTS: fpword |= 0x0040; break;
+        case MSVCRT__DN_SAVE_OPERANDS_FLUSH_RESULTS: fpword |= 0x8000; break;
+        case MSVCRT__DN_FLUSH:                       fpword |= 0x8040; break;
+        }
+        __asm__ __volatile__( "ldmxcsr %0" :: "m" (fpword) );
     }
-    switch (flags & MSVCRT__MCW_DN)
-    {
-    case MSVCRT__DN_FLUSH_OPERANDS_SAVE_RESULTS: fpword |= 0x0040; break;
-    case MSVCRT__DN_SAVE_OPERANDS_FLUSH_RESULTS: fpword |= 0x8000; break;
-    case MSVCRT__DN_FLUSH:                       fpword |= 0x8040; break;
-    }
-    __asm__ __volatile__( "ldmxcsr %0" :: "m" (fpword) );
 #elif defined(__aarch64__)
     unsigned long fpcr;
 
@@ -2156,11 +2169,12 @@ MSVCRT_ldiv_t CDECL MSVCRT_ldiv(MSVCRT_long num, MSVCRT_long denom)
 /*********************************************************************
  *		lldiv (MSVCR100.@)
  */
-MSVCRT_lldiv_t* CDECL MSVCRT_lldiv(MSVCRT_lldiv_t *ret,
-        MSVCRT_longlong num, MSVCRT_longlong denom)
+MSVCRT_lldiv_t CDECL MSVCRT_lldiv(MSVCRT_longlong num, MSVCRT_longlong denom)
 {
-  ret->quot = num / denom;
-  ret->rem = num % denom;
+  MSVCRT_lldiv_t ret;
+
+  ret.quot = num / denom;
+  ret.rem = num % denom;
 
   return ret;
 }

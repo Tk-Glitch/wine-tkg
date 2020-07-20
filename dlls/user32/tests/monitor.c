@@ -1300,7 +1300,6 @@ static void test_QueryDisplayConfig_result(UINT32 flags,
 
     for (i = 0; i < paths; i++)
     {
-        todo_wine {
         source_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
         source_name.header.size = sizeof(source_name);
         source_name.header.adapterId = pi[i].sourceInfo.adapterId;
@@ -1309,7 +1308,15 @@ static void test_QueryDisplayConfig_result(UINT32 flags,
         ret = pDisplayConfigGetDeviceInfo(&source_name.header);
         ok(!ret, "Expected 0, got %d\n", ret);
         ok(source_name.viewGdiDeviceName[0] != '\0', "Expected GDI device name, got empty string\n");
-        }
+
+        /* Test with an invalid adapter LUID */
+        source_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+        source_name.header.size = sizeof(source_name);
+        source_name.header.adapterId.LowPart = 0xFFFF;
+        source_name.header.adapterId.HighPart = 0xFFFF;
+        source_name.header.id = pi[i].sourceInfo.id;
+        ret = pDisplayConfigGetDeviceInfo(&source_name.header);
+        ok(ret == ERROR_GEN_FAILURE, "Expected GEN_FAILURE, got %d\n", ret);
 
         todo_wine {
         target_name.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;

@@ -1213,7 +1213,7 @@
 @ cdecl _ismbbkalnum(long) msvcr120._ismbbkalnum
 @ stub _ismbbkalnum_l
 @ cdecl _ismbbkana(long) msvcr120._ismbbkana
-@ stub _ismbbkana_l
+@ cdecl _ismbbkana_l(long ptr) msvcr120._ismbbkana_l
 @ cdecl _ismbbkprint(long) msvcr120._ismbbkprint
 @ stub _ismbbkprint_l
 @ cdecl _ismbbkpunct(long) msvcr120._ismbbkpunct
@@ -1905,7 +1905,7 @@
 @ cdecl isxdigit(long) msvcr120.isxdigit
 @ cdecl labs(long) msvcr120.labs
 @ cdecl ldexp(double long) msvcr120.ldexp
-@ cdecl ldiv(long long) msvcr120.ldiv
+@ cdecl -ret64 ldiv(long long) msvcr120.ldiv
 @ cdecl lgamma(double) msvcr120.lgamma
 @ cdecl lgammaf(float) msvcr120.lgammaf
 @ cdecl lgammal(double) msvcr120.lgammal

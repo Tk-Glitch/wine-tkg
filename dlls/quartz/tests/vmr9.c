@@ -1308,7 +1308,7 @@ static void test_eos(IPin *pin, IMemInputPin *input, IMediaControl *control)
 
     commit_allocator(input);
     hr = IMediaControl_Run(control);
-    todo_wine ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
     hr = join_thread(send_frame(input));
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMediaControl_GetState(control, 1000, &state);
@@ -1332,7 +1332,7 @@ static void test_eos(IPin *pin, IMemInputPin *input, IMediaControl *control)
 
     commit_allocator(input);
     hr = IMediaControl_Run(control);
-    todo_wine ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
     hr = join_thread(send_frame(input));
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
@@ -1352,7 +1352,7 @@ static void test_eos(IPin *pin, IMemInputPin *input, IMediaControl *control)
 
     commit_allocator(input);
     hr = IMediaControl_Run(control);
-    todo_wine ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
     hr = join_thread(send_frame(input));
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMediaControl_GetState(control, 1000, &state);
@@ -2376,14 +2376,14 @@ static void test_video_window_autoshow(IVideoWindow *window, IFilterGraph2 *grap
 
     hr = IVideoWindow_get_Visible(window, &l);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(l == OATRUE, "Got %d.\n", l);
+    ok(l == OATRUE, "Got %d.\n", l);
 
     hr = IMediaControl_Stop(control);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IVideoWindow_get_Visible(window, &l);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(l == OATRUE, "Got %d.\n", l);
+    ok(l == OATRUE, "Got %d.\n", l);
 
     hr = IVideoWindow_put_AutoShow(window, OAFALSE);
     ok(hr == S_OK, "Got hr %#x.\n", hr);

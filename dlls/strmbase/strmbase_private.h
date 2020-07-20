@@ -53,32 +53,10 @@ static inline const char *debugstr_time(REFERENCE_TIME time)
     return wine_dbg_sprintf("%s", rev);
 }
 
-/* Quality Control */
-typedef struct QualityControlImpl {
-    IQualityControl IQualityControl_iface;
-    struct strmbase_pin *pin;
-    IQualityControl *tonotify;
-
-    /* Render stuff */
-    REFERENCE_TIME last_in_time, last_left, avg_duration, avg_pt, avg_render, start, stop;
-    REFERENCE_TIME current_jitter, current_rstart, current_rstop, clockstart;
-    double avg_rate;
-    LONG64 rendered, dropped;
-    BOOL qos_handled, is_dropped;
-} QualityControlImpl;
-
-HRESULT QualityControlImpl_Create(struct strmbase_pin *pin, QualityControlImpl **out);
-void QualityControlImpl_Destroy(QualityControlImpl *This);
-HRESULT WINAPI QualityControlImpl_QueryInterface(IQualityControl *iface, REFIID riid, void **ppv);
-ULONG WINAPI QualityControlImpl_AddRef(IQualityControl *iface);
-ULONG WINAPI QualityControlImpl_Release(IQualityControl *iface);
-HRESULT WINAPI QualityControlImpl_Notify(IQualityControl *iface, IBaseFilter *sender, Quality qm);
-HRESULT WINAPI QualityControlImpl_SetSink(IQualityControl *iface, IQualityControl *tonotify);
-
-void QualityControlRender_Start(QualityControlImpl *This, REFERENCE_TIME tStart);
-void QualityControlRender_DoQOS(QualityControlImpl *priv);
-void QualityControlRender_BeginRender(QualityControlImpl *This, REFERENCE_TIME start, REFERENCE_TIME stop);
-void QualityControlRender_EndRender(QualityControlImpl *This);
+void QualityControlRender_Start(struct strmbase_qc *This, REFERENCE_TIME tStart);
+void QualityControlRender_DoQOS(struct strmbase_qc *priv);
+void QualityControlRender_BeginRender(struct strmbase_qc *This, REFERENCE_TIME start, REFERENCE_TIME stop);
+void QualityControlRender_EndRender(struct strmbase_qc *This);
 
 void strmbase_passthrough_update_time(struct strmbase_passthrough *passthrough, REFERENCE_TIME time);
 void strmbase_passthrough_invalidate_time(struct strmbase_passthrough *passthrough);

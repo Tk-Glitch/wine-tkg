@@ -134,10 +134,15 @@ extern "C" {
 #define _CW_DEFAULT (_RC_NEAR + _PC_64 + _EM_INVALID + _EM_ZERODIVIDE + _EM_OVERFLOW + _EM_UNDERFLOW + _EM_INEXACT + _EM_DENORMAL)
 #endif
 
+unsigned int __cdecl _clearfp(void);
+unsigned int __cdecl _statusfp(void);
 _ACRTIMP int __cdecl __fpe_flt_rounds(void);
 unsigned int __cdecl _control87(unsigned int, unsigned int);
 unsigned int __cdecl _controlfp(unsigned int, unsigned int);
 errno_t __cdecl _controlfp_s(unsigned int *, unsigned int, unsigned int);
+#ifdef __i386__
+int __cdecl __control87_2(unsigned int, unsigned int, unsigned int *, unsigned int *);
+#endif
 
 double __cdecl _copysign (double, double);
 double __cdecl _chgsign (double);
