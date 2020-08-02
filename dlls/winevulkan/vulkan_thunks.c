@@ -1889,6 +1889,33 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
             break;
         }
 
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT:
+        {
+            const VkPhysicalDeviceShaderAtomicFloatFeaturesEXT *in = (const VkPhysicalDeviceShaderAtomicFloatFeaturesEXT *)in_header;
+            VkPhysicalDeviceShaderAtomicFloatFeaturesEXT *out;
+
+            if (!(out = heap_alloc(sizeof(*out)))) goto out_of_memory;
+
+            out->sType = in->sType;
+            out->pNext = NULL;
+            out->shaderBufferFloat32Atomics = in->shaderBufferFloat32Atomics;
+            out->shaderBufferFloat32AtomicAdd = in->shaderBufferFloat32AtomicAdd;
+            out->shaderBufferFloat64Atomics = in->shaderBufferFloat64Atomics;
+            out->shaderBufferFloat64AtomicAdd = in->shaderBufferFloat64AtomicAdd;
+            out->shaderSharedFloat32Atomics = in->shaderSharedFloat32Atomics;
+            out->shaderSharedFloat32AtomicAdd = in->shaderSharedFloat32AtomicAdd;
+            out->shaderSharedFloat64Atomics = in->shaderSharedFloat64Atomics;
+            out->shaderSharedFloat64AtomicAdd = in->shaderSharedFloat64AtomicAdd;
+            out->shaderImageFloat32Atomics = in->shaderImageFloat32Atomics;
+            out->shaderImageFloat32AtomicAdd = in->shaderImageFloat32AtomicAdd;
+            out->sparseImageFloat32Atomics = in->sparseImageFloat32Atomics;
+            out->sparseImageFloat32AtomicAdd = in->sparseImageFloat32AtomicAdd;
+
+            out_header->pNext = (VkBaseOutStructure *)out;
+            out_header = out_header->pNext;
+            break;
+        }
+
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT:
         {
             const VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT *in = (const VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT *)in_header;
@@ -2114,6 +2141,22 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
             out->fragmentDensityMap = in->fragmentDensityMap;
             out->fragmentDensityMapDynamic = in->fragmentDensityMapDynamic;
             out->fragmentDensityMapNonSubsampledImages = in->fragmentDensityMapNonSubsampledImages;
+
+            out_header->pNext = (VkBaseOutStructure *)out;
+            out_header = out_header->pNext;
+            break;
+        }
+
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_2_FEATURES_EXT:
+        {
+            const VkPhysicalDeviceFragmentDensityMap2FeaturesEXT *in = (const VkPhysicalDeviceFragmentDensityMap2FeaturesEXT *)in_header;
+            VkPhysicalDeviceFragmentDensityMap2FeaturesEXT *out;
+
+            if (!(out = heap_alloc(sizeof(*out)))) goto out_of_memory;
+
+            out->sType = in->sType;
+            out->pNext = NULL;
+            out->fragmentDensityMapDeferred = in->fragmentDensityMapDeferred;
 
             out_header->pNext = (VkBaseOutStructure *)out;
             out_header = out_header->pNext;
@@ -2701,6 +2744,22 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
             out->robustBufferAccess2 = in->robustBufferAccess2;
             out->robustImageAccess2 = in->robustImageAccess2;
             out->nullDescriptor = in->nullDescriptor;
+
+            out_header->pNext = (VkBaseOutStructure *)out;
+            out_header = out_header->pNext;
+            break;
+        }
+
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT:
+        {
+            const VkPhysicalDeviceImageRobustnessFeaturesEXT *in = (const VkPhysicalDeviceImageRobustnessFeaturesEXT *)in_header;
+            VkPhysicalDeviceImageRobustnessFeaturesEXT *out;
+
+            if (!(out = heap_alloc(sizeof(*out)))) goto out_of_memory;
+
+            out->sType = in->sType;
+            out->pNext = NULL;
+            out->robustImageAccess = in->robustImageAccess;
 
             out_header->pNext = (VkBaseOutStructure *)out;
             out_header = out_header->pNext;
@@ -4886,19 +4945,16 @@ static VkResult WINAPI wine_vkGetPhysicalDeviceSupportedFramebufferMixedSamplesC
     return physicalDevice->instance->funcs.p_vkGetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV(physicalDevice->phys_dev, pCombinationCount, pCombinations);
 }
 
-VkResult WINAPI wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo, VkSurfaceCapabilities2KHR *pSurfaceCapabilities)
+VkResult thunk_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo, VkSurfaceCapabilities2KHR *pSurfaceCapabilities)
 {
 #if defined(USE_STRUCT_CONVERSION)
     VkResult result;
     VkPhysicalDeviceSurfaceInfo2KHR_host pSurfaceInfo_host;
-    TRACE("%p, %p, %p\n", physicalDevice, pSurfaceInfo, pSurfaceCapabilities);
-
     convert_VkPhysicalDeviceSurfaceInfo2KHR_win_to_host(pSurfaceInfo, &pSurfaceInfo_host);
     result = physicalDevice->instance->funcs.p_vkGetPhysicalDeviceSurfaceCapabilities2KHR(physicalDevice->phys_dev, &pSurfaceInfo_host, pSurfaceCapabilities);
 
     return result;
 #else
-    TRACE("%p, %p, %p\n", physicalDevice, pSurfaceInfo, pSurfaceCapabilities);
     return physicalDevice->instance->funcs.p_vkGetPhysicalDeviceSurfaceCapabilities2KHR(physicalDevice->phys_dev, pSurfaceInfo, pSurfaceCapabilities);
 #endif
 }
@@ -5497,6 +5553,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetBufferMemoryRequirements2KHR", &wine_vkGetBufferMemoryRequirements2KHR},
     {"vkGetBufferOpaqueCaptureAddress", &wine_vkGetBufferOpaqueCaptureAddress},
     {"vkGetBufferOpaqueCaptureAddressKHR", &wine_vkGetBufferOpaqueCaptureAddressKHR},
+    {"vkGetCalibratedTimestampsEXT", &wine_vkGetCalibratedTimestampsEXT},
     {"vkGetDescriptorSetLayoutSupport", &wine_vkGetDescriptorSetLayoutSupport},
     {"vkGetDescriptorSetLayoutSupportKHR", &wine_vkGetDescriptorSetLayoutSupportKHR},
     {"vkGetDeviceGroupPeerMemoryFeatures", &wine_vkGetDeviceGroupPeerMemoryFeatures},
@@ -5583,6 +5640,7 @@ static const struct vulkan_func vk_instance_dispatch_table[] =
     {"vkEnumeratePhysicalDeviceGroupsKHR", &wine_vkEnumeratePhysicalDeviceGroupsKHR},
     {"vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR", &wine_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR},
     {"vkEnumeratePhysicalDevices", &wine_vkEnumeratePhysicalDevices},
+    {"vkGetPhysicalDeviceCalibrateableTimeDomainsEXT", &wine_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT},
     {"vkGetPhysicalDeviceCooperativeMatrixPropertiesNV", &wine_vkGetPhysicalDeviceCooperativeMatrixPropertiesNV},
     {"vkGetPhysicalDeviceExternalBufferProperties", &wine_vkGetPhysicalDeviceExternalBufferProperties},
     {"vkGetPhysicalDeviceExternalBufferPropertiesKHR", &wine_vkGetPhysicalDeviceExternalBufferPropertiesKHR},
@@ -5678,6 +5736,7 @@ static const char * const vk_device_extensions[] =
     "VK_EXT_astc_decode_mode",
     "VK_EXT_blend_operation_advanced",
     "VK_EXT_buffer_device_address",
+    "VK_EXT_calibrated_timestamps",
     "VK_EXT_conditional_rendering",
     "VK_EXT_conservative_rasterization",
     "VK_EXT_custom_border_color",
@@ -5689,9 +5748,11 @@ static const char * const vk_device_extensions[] =
     "VK_EXT_external_memory_host",
     "VK_EXT_filter_cubic",
     "VK_EXT_fragment_density_map",
+    "VK_EXT_fragment_density_map2",
     "VK_EXT_fragment_shader_interlock",
     "VK_EXT_global_priority",
     "VK_EXT_host_query_reset",
+    "VK_EXT_image_robustness",
     "VK_EXT_index_type_uint8",
     "VK_EXT_inline_uniform_block",
     "VK_EXT_line_rasterization",
@@ -5707,6 +5768,7 @@ static const char * const vk_device_extensions[] =
     "VK_EXT_sampler_filter_minmax",
     "VK_EXT_scalar_block_layout",
     "VK_EXT_separate_stencil_usage",
+    "VK_EXT_shader_atomic_float",
     "VK_EXT_shader_demote_to_helper_invocation",
     "VK_EXT_shader_stencil_export",
     "VK_EXT_shader_subgroup_ballot",

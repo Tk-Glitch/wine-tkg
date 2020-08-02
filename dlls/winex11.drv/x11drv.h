@@ -405,7 +405,6 @@ extern BOOL private_color_map DECLSPEC_HIDDEN;
 extern int primary_monitor DECLSPEC_HIDDEN;
 extern int copy_default_colors DECLSPEC_HIDDEN;
 extern int alloc_system_colors DECLSPEC_HIDDEN;
-extern int default_display_frequency DECLSPEC_HIDDEN;
 extern int xrender_error_base DECLSPEC_HIDDEN;
 extern HMODULE x11drv_module DECLSPEC_HIDDEN;
 extern char *process_name DECLSPEC_HIDDEN;

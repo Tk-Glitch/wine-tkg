@@ -1843,65 +1843,61 @@ NTSTATUS WINAPI BCryptDeriveKeyPBKDF2( BCRYPT_ALG_HANDLE handle, UCHAR *pwd, ULO
     return STATUS_SUCCESS;
 }
 
-NTSTATUS WINAPI BCryptSecretAgreement(BCRYPT_KEY_HANDLE hPrivKey, BCRYPT_KEY_HANDLE hPubKey, BCRYPT_SECRET_HANDLE *secret_out, ULONG flags)
+NTSTATUS WINAPI BCryptSecretAgreement(BCRYPT_KEY_HANDLE privatekey, BCRYPT_KEY_HANDLE publickey, BCRYPT_SECRET_HANDLE *handle, ULONG flags)
 {
-    struct key *privkey = hPrivKey;
-    struct key *pubkey = hPubKey;
+    struct key *privkey = privatekey;
+    struct key *pubkey = publickey;
     struct secret *secret;
     NTSTATUS status;
 
-    TRACE( "%p, %p, %p, %08x\n", hPrivKey, hPubKey, secret_out, flags );
+    TRACE( "%p, %p, %p, %08x\n", privatekey, publickey, handle, flags );
 
-    secret = heap_alloc( sizeof(*secret) );
+    if (!privkey || privkey->hdr.magic != MAGIC_KEY) return STATUS_INVALID_HANDLE;
+    if (!pubkey || pubkey->hdr.magic != MAGIC_KEY) return STATUS_INVALID_HANDLE;
+    if (!handle) return STATUS_INVALID_PARAMETER;
 
-    if ((status = compute_secret_ecc(privkey, pubkey, secret)))
+    if (!(secret = heap_alloc_zero( sizeof(*secret) ))) return STATUS_NO_MEMORY;
+    secret->hdr.magic = MAGIC_SECRET;
+
+    if ((status = compute_secret_ecc( privkey, pubkey, secret )))
     {
-        heap_free(secret);
-        *secret_out = NULL;
+        heap_free( secret );
+        *handle = NULL;
     }
     else
     {
-        *secret_out = secret;
+        *handle = secret;
     }
-
-    return status;
-}
-
-NTSTATUS WINAPI BCryptDestroySecret(BCRYPT_SECRET_HANDLE hSecret)
-{
-    struct secret *secret = hSecret;
-
-    TRACE( "%p\n", hSecret );
-
-    if (!hSecret)
-    {
-        return STATUS_INVALID_HANDLE;
-    }
-
-    heap_free(secret->data);
-    heap_free(secret);
 
     return STATUS_SUCCESS;
 }
 
-NTSTATUS WINAPI BCryptDeriveKey(BCRYPT_SECRET_HANDLE hSecret, LPCWSTR deriv_func, BCryptBufferDesc *parameter,
+NTSTATUS WINAPI BCryptDestroySecret(BCRYPT_SECRET_HANDLE handle)
+{
+    struct secret *secret = handle;
+
+    TRACE( "%p\n", handle );
+
+    if (!secret || secret->hdr.magic != MAGIC_SECRET) return STATUS_INVALID_HANDLE;
+    secret->hdr.magic = 0;
+    heap_free( secret->data );
+    heap_free( secret );
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI BCryptDeriveKey(BCRYPT_SECRET_HANDLE handle, LPCWSTR kdf, BCryptBufferDesc *parameter,
         PUCHAR derived, ULONG derived_size, ULONG *result, ULONG flags)
 {
-    struct secret *secret = hSecret;
+    struct secret *secret = handle;
 
-    TRACE( "%p, %s, %p, %p, %d, %p, %08x\n", secret, debugstr_w(deriv_func), parameter, derived, derived_size, result, flags );
+    TRACE( "%p, %s, %p, %p, %d, %p, %08x\n", secret, debugstr_w(kdf), parameter, derived, derived_size, result, flags );
 
-    if (!hSecret)
-    {
-        return STATUS_INVALID_HANDLE;
-    }
+    if (!secret || secret->hdr.magic != MAGIC_SECRET) return STATUS_INVALID_HANDLE;
+    if (!kdf) return STATUS_INVALID_PARAMETER;
 
-    if (flags)
-    {
-        FIXME("flags ignored: %08x\n", flags);
-    }
+    if (flags) FIXME("flags ignored: %08x\n", flags);
 
-    if (!(strcmpW(deriv_func, BCRYPT_KDF_HASH)))
+    if (!(strcmpW( kdf, BCRYPT_KDF_HASH )))
     {
         unsigned int i;
         BCryptBuffer *hash_algorithm = NULL;
@@ -2005,8 +2001,7 @@ NTSTATUS WINAPI BCryptDeriveKey(BCRYPT_SECRET_HANDLE hSecret, LPCWSTR deriv_func
 
         return STATUS_SUCCESS;
     }
-    else
-    if (!(strcmpW(deriv_func, BCRYPT_KDF_RAW_SECRET)))
+    else if (!(strcmpW( kdf, BCRYPT_KDF_RAW_SECRET )))
     {
         ULONG n;
         ULONG secret_length = secret->len;
@@ -2026,7 +2021,7 @@ NTSTATUS WINAPI BCryptDeriveKey(BCRYPT_SECRET_HANDLE hSecret, LPCWSTR deriv_func
         *result = n;
         return STATUS_SUCCESS;
     }
-    FIXME( "Derivation function %s not supported.\n", debugstr_w(deriv_func) );
+    FIXME( "Derivation function %s not supported.\n", debugstr_w(kdf) );
     return STATUS_NOT_IMPLEMENTED;
 }
 

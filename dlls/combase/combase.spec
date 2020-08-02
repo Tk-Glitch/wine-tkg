@@ -181,6 +181,18 @@
 @ stdcall GetHGlobalFromStream(ptr ptr) ole32.GetHGlobalFromStream
 @ stub GetHookInterface
 @ stdcall GetRestrictedErrorInfo(ptr)
+@ stdcall HDC_UserFree(ptr ptr)
+@ stdcall HDC_UserMarshal(ptr ptr ptr)
+@ stdcall HDC_UserSize(ptr long ptr)
+@ stdcall HDC_UserUnmarshal(ptr ptr ptr)
+@ stdcall HICON_UserFree(ptr ptr)
+@ stdcall HICON_UserMarshal(ptr ptr ptr)
+@ stdcall HICON_UserSize(ptr long ptr)
+@ stdcall HICON_UserUnmarshal(ptr ptr ptr)
+@ stdcall HMENU_UserFree(ptr ptr)
+@ stdcall HMENU_UserMarshal(ptr ptr ptr)
+@ stdcall HMENU_UserSize(ptr long ptr)
+@ stdcall HMENU_UserUnmarshal(ptr ptr ptr)
 @ stub HSTRING_UserFree
 @ stub HSTRING_UserFree64
 @ stub HSTRING_UserMarshal
@@ -189,6 +201,10 @@
 @ stub HSTRING_UserSize64
 @ stub HSTRING_UserUnmarshal
 @ stub HSTRING_UserUnmarshal64
+@ stdcall HWND_UserFree(ptr ptr)
+@ stdcall HWND_UserMarshal(ptr ptr ptr)
+@ stdcall HWND_UserSize(ptr long ptr)
+@ stdcall HWND_UserUnmarshal(ptr ptr ptr)
 @ stub HkOleRegisterObject
 @ stdcall IIDFromString(wstr ptr) ole32.IIDFromString
 @ stub InternalAppInvokeExceptionFilter
@@ -281,11 +297,13 @@
 @ stdcall StringFromGUID2(ptr ptr long) ole32.StringFromGUID2
 @ stdcall StringFromIID(ptr ptr) ole32.StringFromIID
 @ stub UpdateDCOMSettings
-@ stdcall WdtpInterfacePointer_UserMarshal(ptr long ptr ptr ptr) ole32.WdtpInterfacePointer_UserMarshal
+@ stdcall WdtpInterfacePointer_UserFree(ptr)
+@ stub WdtpInterfacePointer_UserFree64
+@ stdcall WdtpInterfacePointer_UserMarshal(ptr long ptr ptr ptr)
 @ stub WdtpInterfacePointer_UserMarshal64
-@ stdcall WdtpInterfacePointer_UserSize(ptr long long ptr ptr) ole32.WdtpInterfacePointer_UserSize
+@ stdcall WdtpInterfacePointer_UserSize(ptr long long ptr ptr)
 @ stub WdtpInterfacePointer_UserSize64
-@ stdcall WdtpInterfacePointer_UserUnmarshal(ptr ptr ptr ptr) ole32.WdtpInterfacePointer_UserUnmarshal
+@ stdcall WdtpInterfacePointer_UserUnmarshal(ptr ptr ptr ptr)
 @ stub WdtpInterfacePointer_UserUnmarshal64
 @ stdcall WindowsCompareStringOrdinal(ptr ptr ptr)
 @ stdcall WindowsConcatString(ptr ptr ptr)

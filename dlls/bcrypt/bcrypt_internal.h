@@ -114,6 +114,7 @@ VOID WINAPI A_SHAFinal(SHA_CTX *ctx, PULONG result);
 #define MAGIC_ALG  (('A' << 24) | ('L' << 16) | ('G' << 8) | '0')
 #define MAGIC_HASH (('H' << 24) | ('A' << 16) | ('S' << 8) | 'H')
 #define MAGIC_KEY  (('K' << 24) | ('E' << 16) | ('Y' << 8) | '0')
+#define MAGIC_SECRET (('S' << 24) | ('C' << 16) | ('R' << 8) | 'T')
 struct object
 {
     ULONG magic;
@@ -162,12 +163,6 @@ struct algorithm
     enum alg_id   id;
     enum mode_id  mode;
     ULONG         flags;
-};
-
-struct secret
-{
-    UCHAR *data;
-    ULONG len;
 };
 
 #if defined(HAVE_GNUTLS_CIPHER_INIT)
@@ -248,6 +243,13 @@ struct key
 };
 #endif
 
+struct secret
+{
+    struct object hdr;
+    UCHAR *data;
+    ULONG len;
+};
+
 NTSTATUS get_alg_property( const struct algorithm *, const WCHAR *, UCHAR *, ULONG, ULONG * ) DECLSPEC_HIDDEN;
 
 NTSTATUS key_set_property( struct key *, const WCHAR *, UCHAR *, ULONG, ULONG ) DECLSPEC_HIDDEN;
@@ -274,8 +276,5 @@ BOOL is_equal_vector( const UCHAR *, ULONG, const UCHAR *, ULONG ) DECLSPEC_HIDD
 
 BOOL gnutls_initialize(void) DECLSPEC_HIDDEN;
 void gnutls_uninitialize(void) DECLSPEC_HIDDEN;
-
-BOOL gcrypt_initialize(void) DECLSPEC_HIDDEN;
-void gcrypt_uninitialize(void) DECLSPEC_HIDDEN;
 
 #endif /* __BCRYPT_INTERNAL_H */

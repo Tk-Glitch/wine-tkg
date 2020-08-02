@@ -169,7 +169,7 @@ script_ranges[] =
     /* Control Pictures : U+2400 –U+243f */
     /* Optical Character Recognition : U+2440 –U+245f */
     /* Enclosed Alphanumerics : U+2460 –U+24ff */
-    /* Box Drawing : U+2500 –U+25ff */
+    /* Box Drawing : U+2500 –U+257f */
     /* Block Elements : U+2580 –U+259f */
     /* Geometric Shapes : U+25a0 –U+25ff */
     /* Miscellaneous Symbols : U+2600 –U+26ff */
@@ -3607,10 +3607,10 @@ HRESULT WINAPI ScriptTextOut(const HDC hdc, SCRIPT_CACHE *psc, int x, int y, UIN
     if (!hdc || !psc) return E_INVALIDARG;
     if (!piAdvance || !psa || !pwGlyphs) return E_INVALIDARG;
 
-    fuOptions &= ETO_CLIPPED + ETO_OPAQUE;
+    fuOptions &= ETO_CLIPPED | ETO_OPAQUE;
     fuOptions |= ETO_IGNORELANGUAGE;
-    if  (!psa->fNoGlyphIndex)                                     /* Have Glyphs?                      */
-        fuOptions |= ETO_GLYPH_INDEX;                             /* Say don't do translation to glyph */
+    if (!psa->fNoGlyphIndex && *psc && ((ScriptCache *)*psc)->sfnt)
+        fuOptions |= ETO_GLYPH_INDEX; /* We do actually have glyph indices */
 
     if (!(lpDx = heap_calloc(cGlyphs, 2 * sizeof(*lpDx))))
         return E_OUTOFMEMORY;

@@ -85,7 +85,6 @@ BOOL client_side_with_render = TRUE;
 BOOL shape_layered_windows = TRUE;
 int copy_default_colors = 128;
 int alloc_system_colors = 256;
-int default_display_frequency = 0;
 DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
 int xrender_error_base = 0;
 HMODULE x11drv_module = 0;
@@ -446,9 +445,6 @@ static void setup_options(void)
 
     if (!get_config_key( hkey, appkey, "AllocSystemColors", buffer, sizeof(buffer) ))
         alloc_system_colors = atoi(buffer);
-
-    if (!get_config_key( hkey, appkey, "DefaultDisplayFrequency", buffer, sizeof(buffer) ))
-        default_display_frequency = atoi(buffer);
 
     get_config_key( hkey, appkey, "InputStyle", input_style, sizeof(input_style) );
 

@@ -244,12 +244,6 @@ static HRESULT WINAPI VMR9_DoRenderSample(struct strmbase_renderer *iface, IMedi
     if (IMediaSample_IsSyncPoint(sample) == S_OK)
         info.dwFlags |= VMR9Sample_SyncPoint;
 
-    /* If we render ourselves, and this is a preroll sample, discard it */
-    if (info.dwFlags & VMR9Sample_Preroll)
-    {
-        return S_OK;
-    }
-
     if (FAILED(hr = IMediaSample_GetPointer(sample, &data)))
     {
         ERR("Failed to get pointer to sample data, hr %#x.\n", hr);
@@ -321,6 +315,7 @@ static HRESULT WINAPI VMR9_DoRenderSample(struct strmbase_renderer *iface, IMedi
 
     if (filter->renderer.filter.state == State_Paused)
     {
+        SetEvent(filter->renderer.state_event);
         LeaveCriticalSection(&filter->renderer.csRenderLock);
         WaitForMultipleObjects(2, events, FALSE, INFINITE);
         EnterCriticalSection(&filter->renderer.csRenderLock);
@@ -504,15 +499,6 @@ static void vmr_stop_stream(struct strmbase_renderer *iface)
     ResetEvent(This->run_event);
 }
 
-static HRESULT WINAPI VMR9_ShouldDrawSampleNow(struct strmbase_renderer *iface,
-        IMediaSample *pSample, REFERENCE_TIME *start, REFERENCE_TIME *end)
-{
-    /* Preroll means the sample isn't shown, this is used for key frames and things like that */
-    if (IMediaSample_IsPreroll(pSample) == S_OK)
-        return E_FAIL;
-    return S_FALSE;
-}
-
 static HRESULT vmr_connect(struct strmbase_renderer *iface, const AM_MEDIA_TYPE *mt)
 {
     struct quartz_vmr *filter = impl_from_IBaseFilter(&iface->filter.IBaseFilter_iface);
@@ -668,7 +654,6 @@ static const struct strmbase_renderer_ops renderer_ops =
     .renderer_init_stream = vmr_init_stream,
     .renderer_start_stream = vmr_start_stream,
     .renderer_stop_stream = vmr_stop_stream,
-    .pfnShouldDrawSampleNow = VMR9_ShouldDrawSampleNow,
     .renderer_connect = vmr_connect,
     .pfnBreakConnect = VMR9_BreakConnect,
     .renderer_destroy = vmr_destroy,
@@ -1997,20 +1982,37 @@ static HRESULT WINAPI VMR9SurfaceAllocatorNotify_AdviseSurfaceAllocator(
         IVMRSurfaceAllocatorNotify9 *iface, DWORD_PTR cookie, IVMRSurfaceAllocator9 *allocator)
 {
     struct quartz_vmr *filter = impl_from_IVMRSurfaceAllocatorNotify9(iface);
+    IVMRImagePresenter9 *presenter;
 
     TRACE("filter %p, cookie %#Ix, allocator %p.\n", filter, cookie, allocator);
 
+    EnterCriticalSection(&filter->renderer.filter.csFilter);
+
     filter->cookie = cookie;
 
-    if (filter->presenter)
+    if (filter->renderer.sink.pin.peer)
+    {
+        LeaveCriticalSection(&filter->renderer.filter.csFilter);
+        WARN("Attempt to set allocator while connected; returning VFW_E_WRONG_STATE.\n");
         return VFW_E_WRONG_STATE;
+    }
 
-    if (FAILED(IVMRSurfaceAllocator9_QueryInterface(allocator, &IID_IVMRImagePresenter9, (void **)&filter->presenter)))
+    if (FAILED(IVMRSurfaceAllocator9_QueryInterface(allocator, &IID_IVMRImagePresenter9, (void **)&presenter)))
+    {
+        LeaveCriticalSection(&filter->renderer.filter.csFilter);
         return E_NOINTERFACE;
+    }
 
+    if (filter->allocator)
+    {
+        IVMRImagePresenter9_Release(filter->presenter);
+        IVMRSurfaceAllocator9_Release(filter->allocator);
+    }
     filter->allocator = allocator;
+    filter->presenter = presenter;
     IVMRSurfaceAllocator9_AddRef(allocator);
 
+    LeaveCriticalSection(&filter->renderer.filter.csFilter);
     return S_OK;
 }
 
@@ -2056,6 +2058,13 @@ static HRESULT WINAPI VMR9SurfaceAllocatorNotify_AllocateSurfaceHelper(IVMRSurfa
     TRACE("Flags %#x, size %ux%u, format %u (%#x), pool %u, minimum buffers %u.\n",
             allocinfo->dwFlags, allocinfo->dwWidth, allocinfo->dwHeight,
             allocinfo->Format, allocinfo->Format, allocinfo->Pool, allocinfo->MinBuffers);
+
+    if ((allocinfo->dwFlags & VMR9AllocFlag_TextureSurface)
+            && (allocinfo->dwFlags & VMR9AllocFlag_OffscreenSurface))
+    {
+        WARN("Invalid flags specified; returning E_INVALIDARG.\n");
+        return E_INVALIDARG;
+    }
 
     if (!allocinfo->Format)
     {

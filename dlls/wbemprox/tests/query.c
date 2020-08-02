@@ -25,6 +25,7 @@
 #include "initguid.h"
 #include "objidl.h"
 #include "wbemcli.h"
+#include "wine/heap.h"
 #include "wine/test.h"
 
 static HRESULT exec_query( IWbemServices *services, const WCHAR *str, IEnumWbemClassObject **result )
@@ -156,6 +157,70 @@ static void test_associators( IWbemServices *services )
         ok( hr == S_OK, "query %u failed: %08x\n", i, hr );
         if (result) IEnumWbemClassObject_Release( result );
     }
+}
+
+static void test_IEnumWbemClassObject_Next( IWbemServices *services )
+{
+    BSTR wql = SysAllocString( L"wql" ), query = SysAllocString( L"SELECT * FROM Win32_IP4RouteTable" );
+    IWbemClassObject **obj, *obj1;
+    IEnumWbemClassObject *result;
+    DWORD count, num_objects = 0;
+    HRESULT hr;
+    int i;
+
+    hr = IWbemServices_ExecQuery( services, wql, query, 0, NULL, &result );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    count = 2;
+    hr = IEnumWbemClassObject_Next( result, 10000, 1, NULL, &count );
+    ok( hr == WBEM_E_INVALID_PARAMETER, "got %08x\n", hr );
+    ok( count == 2, "expected 0, got %u\n", count );
+
+    hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj1, NULL );
+    ok( hr == WBEM_E_INVALID_PARAMETER, "got %08x\n", hr );
+
+    count = 2;
+    hr = IEnumWbemClassObject_Next( result, 10000, 0, &obj1, &count );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( count == 0, "expected 0, got %u\n", count );
+
+    for (;;)
+    {
+        hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj1, &count );
+        if (hr != S_OK) break;
+        num_objects++;
+        IWbemClassObject_Release(obj1);
+    }
+
+    hr = IEnumWbemClassObject_Reset( result );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    obj = heap_alloc( num_objects * sizeof( IWbemClassObject * ) );
+
+    count = 0;
+    hr = IEnumWbemClassObject_Next( result, 10000, num_objects, obj, &count );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( count == num_objects, "expected %u, got %u\n", num_objects, count );
+
+    for (i = 0; i < count; i++)
+        IWbemClassObject_Release( obj[i] );
+
+    hr = IEnumWbemClassObject_Reset( result );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    count = 0;
+    hr = IEnumWbemClassObject_Next( result, 10000, num_objects + 1, obj, &count );
+    ok( hr == S_FALSE, "got %08x\n", hr );
+    ok( count == num_objects, "expected %u, got %u\n", num_objects, count );
+
+    for (i = 0; i < count; i++)
+        IWbemClassObject_Release( obj[i] );
+
+    heap_free( obj );
+
+    IEnumWbemClassObject_Release( result );
+    SysFreeString( query );
+    SysFreeString( wql );
 }
 
 static void _check_property( ULONG line, IWbemClassObject *obj, const WCHAR *prop, VARTYPE vartype, CIMTYPE cimtype )
@@ -1144,8 +1209,10 @@ static void test_Win32_PhysicalMemory( IWbemServices *services )
     BSTR wql = SysAllocString( L"wql" ), query = SysAllocString( L"SELECT * FROM Win32_PhysicalMemory" );
     IEnumWbemClassObject *result;
     IWbemClassObject *obj;
-    HRESULT hr;
+    CIMTYPE type;
+    VARIANT val;
     DWORD count;
+    HRESULT hr;
 
     hr = IWbemServices_ExecQuery( services, wql, query, 0, NULL, &result );
     if (hr != S_OK)
@@ -1154,21 +1221,50 @@ static void test_Win32_PhysicalMemory( IWbemServices *services )
         return;
     }
 
-    hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj, &count );
-    ok( hr == S_OK, "got %08x\n", hr );
-
-    if (count > 0)
+    for (;;)
     {
+        hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj, &count );
+        if (hr != S_OK) break;
+
         check_property( obj, L"BankLabel", VT_BSTR, CIM_STRING );
         check_property( obj, L"Capacity", VT_BSTR, CIM_UINT64 );
         check_property( obj, L"Caption", VT_BSTR, CIM_STRING );
         check_property( obj, L"DeviceLocator", VT_BSTR, CIM_STRING );
         check_property( obj, L"FormFactor", VT_I4, CIM_UINT16 );
         check_property( obj, L"MemoryType", VT_I4, CIM_UINT16 );
-        check_property( obj, L"PartNumber", VT_NULL, CIM_STRING );
-        check_property( obj, L"SerialNumber", VT_NULL, CIM_STRING );
+
+        type = 0xdeadbeef;
+        VariantInit( &val );
+        hr = IWbemClassObject_Get( obj, L"ConfiguredClockSpeed", 0, &val, &type, NULL );
+        ok( hr == S_OK || broken(hr == WBEM_E_NOT_FOUND) /* < win10 */, "got %08x\n", hr );
+        if (hr == S_OK)
+        {
+            ok( V_VT( &val ) == VT_I4, "unexpected variant type 0x%x\n", V_VT( &val ) );
+            ok( type == CIM_UINT32, "unexpected type 0x%x\n", type );
+            trace( "ConfiguredClockSpeed %u\n", V_I4( &val ) );
+        }
+
+        type = 0xdeadbeef;
+        VariantInit( &val );
+        hr = IWbemClassObject_Get( obj, L"PartNumber", 0, &val, &type, NULL );
+        ok( hr == S_OK, "got %08x\n", hr );
+        ok( V_VT( &val ) == VT_BSTR || V_VT( &val ) == VT_NULL, "unexpected variant type 0x%x\n", V_VT( &val ) );
+        ok( type == CIM_STRING, "unexpected type 0x%x\n", type );
+        trace( "PartNumber %s\n", wine_dbgstr_w(V_BSTR( &val )) );
+        VariantClear( &val );
+
+        type = 0xdeadbeef;
+        VariantInit( &val );
+        hr = IWbemClassObject_Get( obj, L"SerialNumber", 0, &val, &type, NULL );
+        ok( hr == S_OK, "got %08x\n", hr );
+        ok( V_VT( &val ) == VT_BSTR || V_VT( &val ) == VT_NULL, "unexpected variant type 0x%x\n", V_VT( &val ) );
+        ok( type == CIM_STRING, "unexpected type 0x%x\n", type );
+        trace( "SerialNumber %s\n", wine_dbgstr_w(V_BSTR( &val )) );
+        VariantClear( &val );
+
         IWbemClassObject_Release( obj );
     }
+
     IEnumWbemClassObject_Release( result );
     SysFreeString( query );
     SysFreeString( wql );
@@ -1605,6 +1701,7 @@ START_TEST(query)
     ok( hr == S_OK, "failed to set proxy blanket %08x\n", hr );
 
     test_GetNames( services );
+    test_IEnumWbemClassObject_Next( services );
     test_associators( services );
     test_notification_query_async( services );
     test_query_async( services );

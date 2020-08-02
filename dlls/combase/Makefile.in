@@ -6,4 +6,5 @@ EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	roapi.c \
-	string.c
+	string.c \
+	usrmarshal.c

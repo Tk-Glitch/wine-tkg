@@ -336,7 +336,7 @@
 @ cdecl _atoi_l(str ptr) MSVCRT__atoi_l
 @ cdecl _atol_l(str ptr) MSVCRT__atol_l
 @ cdecl _atoldbl(ptr str) MSVCRT__atoldbl
-# stub _atoldbl_l(ptr str ptr)
+@ cdecl _atoldbl_l(ptr str ptr) MSVCRT__atoldbl_l
 @ cdecl _beep(long long) MSVCRT__beep
 @ cdecl _beginthread (ptr long ptr)
 @ cdecl _beginthreadex (ptr long ptr ptr long ptr)
@@ -862,7 +862,7 @@
 @ cdecl _putw(long ptr) MSVCRT__putw
 @ cdecl _putwch(long)
 @ cdecl _putws(wstr) MSVCRT__putws
-# extern _pwctype
+@ extern _pwctype MSVCRT__pwctype
 @ cdecl _read(long ptr long) MSVCRT__read
 # stub _realloc_dbg(ptr long long str long)
 @ cdecl _resetstkoflw() MSVCRT__resetstkoflw
@@ -1141,7 +1141,7 @@
 @ cdecl _wctime64_s(ptr long ptr) MSVCRT__wctime64_s
 @ cdecl _wctomb_l(ptr long ptr) MSVCRT__wctomb_l
 @ cdecl _wctomb_s_l(ptr ptr long long ptr) MSVCRT__wctomb_s_l
-# extern _wctype
+@ extern _wctype MSVCRT__wctype
 @ extern _wenviron MSVCRT__wenviron
 @ varargs _wexecl(wstr wstr)
 @ varargs _wexecle(wstr wstr)
@@ -1417,7 +1417,7 @@
 @ cdecl srand(long) MSVCRT_srand
 @ varargs sscanf(str str) MSVCRT_sscanf
 @ varargs sscanf_s(str str) MSVCRT_sscanf_s
-@ cdecl strcat(str str) ntdll.strcat
+@ cdecl strcat(str str) MSVCRT_strcat
 @ cdecl strcat_s(str long str) MSVCRT_strcat_s
 @ cdecl strchr(str long) MSVCRT_strchr
 @ cdecl strcmp(str str) MSVCRT_strcmp
@@ -1481,12 +1481,12 @@
 @ cdecl vwprintf_s(wstr ptr) MSVCRT_vwprintf_s
 @ cdecl wcrtomb(ptr long ptr) MSVCRT_wcrtomb
 @ cdecl wcrtomb_s(ptr ptr long long ptr) MSVCRT_wcrtomb_s
-@ cdecl wcscat(wstr wstr) ntdll.wcscat
+@ cdecl wcscat(wstr wstr) MSVCRT_wcscat
 @ cdecl wcscat_s(wstr long wstr) MSVCRT_wcscat_s
 @ cdecl wcschr(wstr long) MSVCRT_wcschr
 @ cdecl wcscmp(wstr wstr) MSVCRT_wcscmp
 @ cdecl wcscoll(wstr wstr) MSVCRT_wcscoll
-@ cdecl wcscpy(ptr wstr) ntdll.wcscpy
+@ cdecl wcscpy(ptr wstr) MSVCRT_wcscpy
 @ cdecl wcscpy_s(ptr long wstr) MSVCRT_wcscpy_s
 @ cdecl wcscspn(wstr wstr) ntdll.wcscspn
 @ cdecl wcsftime(ptr long wstr ptr) MSVCRT_wcsftime

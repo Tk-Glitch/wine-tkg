@@ -419,8 +419,8 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
         return hres;
     }
     case PROP_PROTREF:
-        return invoke_prop_func(This->prototype, jsthis, This->prototype->props+prop->u.ref,
-                flags, argc, argv, r, caller);
+        return invoke_prop_func(This->prototype, jsthis ? jsthis : (IDispatch *)&This->IDispatchEx_iface,
+                                This->prototype->props+prop->u.ref, flags, argc, argv, r, caller);
     case PROP_JSVAL: {
         if(!is_object_instance(prop->u.val)) {
             FIXME("invoke %s\n", debugstr_jsval(prop->u.val));
@@ -429,7 +429,9 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
 
         TRACE("call %s %p\n", debugstr_w(prop->name), get_object(prop->u.val));
 
-        return disp_call_value(This->ctx, get_object(prop->u.val), jsthis, flags, argc, argv, r);
+        return disp_call_value(This->ctx, get_object(prop->u.val),
+                               jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface,
+                               flags, argc, argv, r);
     }
     case PROP_ACCESSOR:
         FIXME("accessor\n");
@@ -2095,12 +2097,14 @@ HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, W
         dp.rgdispidNamedArgs = NULL;
     }
 
-    if(argc > ARRAY_SIZE(buf) && !(args = heap_alloc(argc * sizeof(VARIANT))))
+    if(dp.cArgs > ARRAY_SIZE(buf) && !(args = heap_alloc(dp.cArgs * sizeof(VARIANT))))
         return E_OUTOFMEMORY;
     dp.rgvarg = args;
 
-    V_VT(dp.rgvarg) = VT_DISPATCH;
-    V_DISPATCH(dp.rgvarg) = jsthis;
+    if(jsthis) {
+        V_VT(dp.rgvarg) = VT_DISPATCH;
+        V_DISPATCH(dp.rgvarg) = jsthis;
+    }
 
     for(i=0; SUCCEEDED(hres) && i < argc; i++)
         hres = jsval_to_variant(argv[i], dp.rgvarg+dp.cArgs-i-1);
@@ -2110,7 +2114,7 @@ HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, W
         hres = disp_invoke(ctx, disp, DISPID_VALUE, flags, &dp, r ? &retv : NULL);
     }
 
-    for(i = 0; i < argc&&0; i++)
+    for(i = 0; i < argc; i++)
         VariantClear(dp.rgvarg + dp.cArgs - i - 1);
     if(args != buf)
         heap_free(args);

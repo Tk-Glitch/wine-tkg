@@ -14,6 +14,16 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ *
+ *
+ * Note:
+ *
+ * Uncompressed image:
+ *     For uncompressed formats, a block is equivalent to a pixel.
+ *
+ * Cube map:
+ *     A cube map is equivalent to a 2D texture array which has 6 textures.
+ *     A cube map array is equivalent to a 2D texture array which has cubeCount*6 textures.
  */
 
 #include "config.h"
@@ -104,8 +114,7 @@ typedef struct dds_info {
     UINT array_size;
     UINT frame_count;
     UINT data_offset;
-    UINT bytes_per_block;
-    BOOL compressed;
+    UINT bytes_per_block; /* for uncompressed format, this means bytes per pixel*/
     DXGI_FORMAT format;
     WICDdsDimension dimension;
     WICDdsAlphaMode alpha_mode;
@@ -116,7 +125,7 @@ typedef struct dds_frame_info {
     UINT width;
     UINT height;
     DXGI_FORMAT format;
-    UINT bytes_per_block;
+    UINT bytes_per_block; /* for uncompressed format, this means bytes per pixel*/
     UINT block_width;
     UINT block_height;
     UINT width_in_blocks;
@@ -142,6 +151,60 @@ typedef struct DdsFrameDecode {
     BYTE *data;
     dds_frame_info info;
 } DdsFrameDecode;
+
+static struct dds_format {
+    DDS_PIXELFORMAT pixel_format;
+    DXGI_FORMAT dxgi_format;
+} dds_formats[] = {
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '1'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC1_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '2'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC2_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '3'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC2_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '4'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC3_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '5'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC3_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '4', 'U'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC4_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '4', 'S'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC4_SNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '5', 'U'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC5_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '5', 'S'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC5_SNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('A', 'T', 'I', '1'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC4_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('A', 'T', 'I', '2'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC5_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('R', 'G', 'B', 'G'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_R8G8_B8G8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('G', 'R', 'G', 'B'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_G8R8_G8B8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', '1', '0'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_UNKNOWN },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x24, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R16G16B16A16_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x6E, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R16G16B16A16_SNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x6F, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R16_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x70, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R16G16_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x71, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R16G16B16A16_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x72, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R32_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x73, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R32G32_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x74, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R32G32B32A32_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0xFF,0xFF00,0xFF0000,0xFF000000 },     DXGI_FORMAT_R8G8B8A8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0xFF0000,0xFF00,0xFF,0xFF000000 },     DXGI_FORMAT_B8G8R8A8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0xFF0000,0xFF00,0xFF,0 },              DXGI_FORMAT_B8G8R8X8_UNORM },
+    /* The red and blue masks are swapped for DXGI_FORMAT_R10G10B10A2_UNORM.
+     * For "correct" one, the RGB masks should be 0x3FF00000,0xFFC00,0x3FF.
+     * see: https://walbourn.github.io/dds-update-and-1010102-problems */
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0x3FF,0xFFC00,0x3FF00000,0xC0000000 }, DXGI_FORMAT_R10G10B10A2_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB ,      0, 32, 0xFFFF,0xFFFF0000,0,0 },               DXGI_FORMAT_R16G16_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB ,      0, 32, 0xFFFFFFFF,0,0,0 },                    DXGI_FORMAT_R32_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 16, 0xF800,0x7E0,0x1F,0 },                 DXGI_FORMAT_B5G6R5_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 16, 0x7C00,0x3E0,0x1F,0x8000 },            DXGI_FORMAT_B5G5R5A1_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 16, 0xF00,0xF0,0xF,0xF000 },               DXGI_FORMAT_B4G4R4A4_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_ALPHA,     0, 8,  0,0,0,0xFF },                          DXGI_FORMAT_A8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_LUMINANCE, 0, 16, 0xFFFF,0,0,0 },                        DXGI_FORMAT_R16_UNORM  },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_LUMINANCE, 0, 16, 0xFF,0,0,0xFF00 },                     DXGI_FORMAT_R8G8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_LUMINANCE, 0, 8,  0xFF,0,0,0 },                          DXGI_FORMAT_R8_UNORM }
+};
+
+static DXGI_FORMAT compressed_formats[] = {
+    DXGI_FORMAT_BC1_TYPELESS,  DXGI_FORMAT_BC1_UNORM, DXGI_FORMAT_BC1_UNORM_SRGB,
+    DXGI_FORMAT_BC2_TYPELESS,  DXGI_FORMAT_BC2_UNORM, DXGI_FORMAT_BC2_UNORM_SRGB,
+    DXGI_FORMAT_BC3_TYPELESS,  DXGI_FORMAT_BC3_UNORM, DXGI_FORMAT_BC3_UNORM_SRGB,
+    DXGI_FORMAT_BC4_TYPELESS,  DXGI_FORMAT_BC4_UNORM, DXGI_FORMAT_BC4_SNORM,
+    DXGI_FORMAT_BC5_TYPELESS,  DXGI_FORMAT_BC5_UNORM, DXGI_FORMAT_BC5_SNORM,
+    DXGI_FORMAT_BC6H_TYPELESS, DXGI_FORMAT_BC6H_UF16, DXGI_FORMAT_BC6H_SF16,
+    DXGI_FORMAT_BC7_TYPELESS,  DXGI_FORMAT_BC7_UNORM, DXGI_FORMAT_BC7_UNORM_SRGB
+};
 
 static HRESULT WINAPI DdsDecoder_Dds_GetFrame(IWICDdsDecoder *, UINT, UINT, UINT, IWICBitmapFrameDecode **);
 
@@ -173,57 +236,147 @@ static WICDdsDimension get_dimension(DDS_HEADER *header, DDS_HEADER_DXT10 *heade
     }
 }
 
-static DXGI_FORMAT get_format_from_fourcc(DWORD fourcc)
+static DXGI_FORMAT get_dxgi_format(DDS_PIXELFORMAT *pixel_format)
 {
-    switch (fourcc)
+    UINT i;
+
+    for (i = 0; i < ARRAY_SIZE(dds_formats); i++)
     {
-    case MAKEFOURCC('D', 'X', 'T', '1'):
-        return DXGI_FORMAT_BC1_UNORM;
-    case MAKEFOURCC('D', 'X', 'T', '2'):
-    case MAKEFOURCC('D', 'X', 'T', '3'):
-        return DXGI_FORMAT_BC2_UNORM;
-    case MAKEFOURCC('D', 'X', 'T', '4'):
-    case MAKEFOURCC('D', 'X', 'T', '5'):
-        return DXGI_FORMAT_BC3_UNORM;
-    case MAKEFOURCC('D', 'X', '1', '0'):
-        /* format is indicated in extended header */
-        return DXGI_FORMAT_UNKNOWN;
-    default:
-        /* there are DDS files where fourCC is set directly to DXGI_FORMAT enumeration value */
-        return fourcc;
+        if ((pixel_format->flags & dds_formats[i].pixel_format.flags) &&
+            (pixel_format->fourCC == dds_formats[i].pixel_format.fourCC) &&
+            (pixel_format->rgbBitCount == dds_formats[i].pixel_format.rgbBitCount) &&
+            (pixel_format->rBitMask == dds_formats[i].pixel_format.rBitMask) &&
+            (pixel_format->gBitMask == dds_formats[i].pixel_format.gBitMask) &&
+            (pixel_format->bBitMask == dds_formats[i].pixel_format.bBitMask) &&
+            (pixel_format->aBitMask == dds_formats[i].pixel_format.aBitMask))
+            return dds_formats[i].dxgi_format;
     }
+
+    return DXGI_FORMAT_UNKNOWN;
 }
 
 static WICDdsAlphaMode get_alpha_mode_from_fourcc(DWORD fourcc)
 {
     switch (fourcc)
     {
-    case MAKEFOURCC('D', 'X', 'T', '1'):
-    case MAKEFOURCC('D', 'X', 'T', '2'):
-    case MAKEFOURCC('D', 'X', 'T', '4'):
-        return WICDdsAlphaModePremultiplied;
-    case MAKEFOURCC('D', 'X', 'T', '3'):
-    case MAKEFOURCC('D', 'X', 'T', '5'):
-        return WICDdsAlphaModeStraight;
-    default:
-        return WICDdsAlphaModeUnknown;
+        case MAKEFOURCC('D', 'X', 'T', '1'):
+        case MAKEFOURCC('D', 'X', 'T', '2'):
+        case MAKEFOURCC('D', 'X', 'T', '4'):
+            return WICDdsAlphaModePremultiplied;
+        default:
+            return WICDdsAlphaModeUnknown;
     }
 }
 
 static UINT get_bytes_per_block_from_format(DXGI_FORMAT format)
 {
+    /* for uncompressed format, return bytes per pixel*/
     switch (format)
     {
+        case DXGI_FORMAT_R8_TYPELESS:
+        case DXGI_FORMAT_R8_UNORM:
+        case DXGI_FORMAT_R8_UINT:
+        case DXGI_FORMAT_R8_SNORM:
+        case DXGI_FORMAT_R8_SINT:
+        case DXGI_FORMAT_A8_UNORM:
+            return 1;
+        case DXGI_FORMAT_R8G8_TYPELESS:
+        case DXGI_FORMAT_R8G8_UNORM:
+        case DXGI_FORMAT_R8G8_UINT:
+        case DXGI_FORMAT_R8G8_SNORM:
+        case DXGI_FORMAT_R8G8_SINT:
+        case DXGI_FORMAT_R16_TYPELESS:
+        case DXGI_FORMAT_R16_FLOAT:
+        case DXGI_FORMAT_D16_UNORM:
+        case DXGI_FORMAT_R16_UNORM:
+        case DXGI_FORMAT_R16_UINT:
+        case DXGI_FORMAT_R16_SNORM:
+        case DXGI_FORMAT_R16_SINT:
+        case DXGI_FORMAT_B5G6R5_UNORM:
+        case DXGI_FORMAT_B5G5R5A1_UNORM:
+        case DXGI_FORMAT_B4G4R4A4_UNORM:
+            return 2;
+        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+        case DXGI_FORMAT_R10G10B10A2_UNORM:
+        case DXGI_FORMAT_R10G10B10A2_UINT:
+        case DXGI_FORMAT_R11G11B10_FLOAT:
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        case DXGI_FORMAT_R8G8B8A8_UINT:
+        case DXGI_FORMAT_R8G8B8A8_SNORM:
+        case DXGI_FORMAT_R8G8B8A8_SINT:
+        case DXGI_FORMAT_R16G16_TYPELESS:
+        case DXGI_FORMAT_R16G16_FLOAT:
+        case DXGI_FORMAT_R16G16_UNORM:
+        case DXGI_FORMAT_R16G16_UINT:
+        case DXGI_FORMAT_R16G16_SNORM:
+        case DXGI_FORMAT_R16G16_SINT:
+        case DXGI_FORMAT_R32_TYPELESS:
+        case DXGI_FORMAT_D32_FLOAT:
+        case DXGI_FORMAT_R32_FLOAT:
+        case DXGI_FORMAT_R32_UINT:
+        case DXGI_FORMAT_R32_SINT:
+        case DXGI_FORMAT_R24G8_TYPELESS:
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:
+        case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+        case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+        case DXGI_FORMAT_R9G9B9E5_SHAREDEXP:
+        case DXGI_FORMAT_R8G8_B8G8_UNORM:
+        case DXGI_FORMAT_G8R8_G8B8_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+        case DXGI_FORMAT_B8G8R8X8_UNORM:
+        case DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+            return 4;
         case DXGI_FORMAT_BC1_UNORM:
         case DXGI_FORMAT_BC1_TYPELESS:
         case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_BC4_TYPELESS:
+        case DXGI_FORMAT_BC4_UNORM:
+        case DXGI_FORMAT_BC4_SNORM:
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+        case DXGI_FORMAT_R16G16B16A16_UINT:
+        case DXGI_FORMAT_R16G16B16A16_SNORM:
+        case DXGI_FORMAT_R16G16B16A16_SINT:
+        case DXGI_FORMAT_R32G32_TYPELESS:
+        case DXGI_FORMAT_R32G32_FLOAT:
+        case DXGI_FORMAT_R32G32_UINT:
+        case DXGI_FORMAT_R32G32_SINT:
+        case DXGI_FORMAT_R32G8X24_TYPELESS:
+        case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+        case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+        case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
             return 8;
+        case DXGI_FORMAT_R32G32B32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32_FLOAT:
+        case DXGI_FORMAT_R32G32B32_UINT:
+        case DXGI_FORMAT_R32G32B32_SINT:
+            return 12;
         case DXGI_FORMAT_BC2_UNORM:
         case DXGI_FORMAT_BC2_TYPELESS:
         case DXGI_FORMAT_BC2_UNORM_SRGB:
         case DXGI_FORMAT_BC3_UNORM:
         case DXGI_FORMAT_BC3_TYPELESS:
         case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC5_TYPELESS:
+        case DXGI_FORMAT_BC5_UNORM:
+        case DXGI_FORMAT_BC5_SNORM:
+        case DXGI_FORMAT_BC6H_TYPELESS:
+        case DXGI_FORMAT_BC6H_UF16:
+        case DXGI_FORMAT_BC6H_SF16:
+        case DXGI_FORMAT_BC7_TYPELESS:
+        case DXGI_FORMAT_BC7_UNORM:
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+        case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32A32_FLOAT:
+        case DXGI_FORMAT_R32G32B32A32_UINT:
+        case DXGI_FORMAT_R32G32B32A32_SINT:
             return 16;
         default:
             WARN("DXGI format 0x%x is not supported in DDS decoder\n", format);
@@ -231,12 +384,21 @@ static UINT get_bytes_per_block_from_format(DXGI_FORMAT format)
     }
 }
 
+static BOOL is_compressed(DXGI_FORMAT format)
+{
+    UINT i;
+
+    for (i = 0; i < ARRAY_SIZE(compressed_formats); i++)
+    {
+        if (format == compressed_formats[i]) return TRUE;
+    }
+    return FALSE;
+}
+
 static void get_dds_info(dds_info* info, DDS_HEADER *header, DDS_HEADER_DXT10 *header_dxt10)
 {
     int i;
     UINT depth;
-
-    info->compressed = !(header->ddspf.flags & (DDPF_RGB | DDPF_LUMINANCE));
 
     info->width = header->width;
     info->height = header->height;
@@ -253,11 +415,7 @@ static void get_dds_info(dds_info* info, DDS_HEADER *header, DDS_HEADER_DXT10 *h
         info->alpha_mode = header_dxt10->miscFlags2 & 0x00000008;
         info->data_offset = sizeof(DWORD) + sizeof(*header) + sizeof(*header_dxt10);
     } else {
-        if (info->compressed) {
-            info->format = get_format_from_fourcc(header->ddspf.fourCC);
-        } else {
-            info->format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        }
+        info->format = get_dxgi_format(&header->ddspf);
         info->dimension = get_dimension(header, NULL);
         info->alpha_mode = get_alpha_mode_from_fourcc(header->ddspf.fourCC);
         info->data_offset = sizeof(DWORD) + sizeof(*header);
@@ -265,10 +423,10 @@ static void get_dds_info(dds_info* info, DDS_HEADER *header, DDS_HEADER_DXT10 *h
     info->pixel_format = (info->alpha_mode == WICDdsAlphaModePremultiplied) ?
                          &GUID_WICPixelFormat32bppPBGRA : &GUID_WICPixelFormat32bppBGRA;
 
-    if (info->compressed) {
-        info->bytes_per_block = get_bytes_per_block_from_format(info->format);
-    } else {
+    if (header->ddspf.flags & (DDPF_RGB | DDPF_ALPHA | DDPF_LUMINANCE)) {
         info->bytes_per_block = header->ddspf.rgbBitCount / 8;
+    } else {
+        info->bytes_per_block = get_bytes_per_block_from_format(info->format);
     }
 
     /* get frame count */
@@ -285,6 +443,7 @@ static void get_dds_info(dds_info* info, DDS_HEADER *header, DDS_HEADER_DXT10 *h
         }
         info->frame_count *= info->array_size;
     }
+    if (info->dimension == WICDdsTextureCube) info->frame_count *= 6;
 }
 
 static inline DdsDecoder *impl_from_IWICBitmapDecoder(IWICBitmapDecoder *iface)
@@ -647,7 +806,10 @@ static HRESULT WINAPI DdsDecoder_Initialize(IWICBitmapDecoder *iface, IStream *p
     hr = IWICWineDecoder_Initialize(&This->IWICWineDecoder_iface, pIStream, cacheOptions);
     if (FAILED(hr)) goto end;
 
-    if (!This->info.compressed || This->info.dimension == WICDdsTextureCube) {
+    if (This->info.dimension == WICDdsTextureCube ||
+        (This->info.format != DXGI_FORMAT_BC1_UNORM &&
+         This->info.format != DXGI_FORMAT_BC2_UNORM &&
+         This->info.format != DXGI_FORMAT_BC3_UNORM)) {
         IStream_Release(pIStream);
         This->stream = NULL;
         This->initialized = FALSE;
@@ -756,7 +918,11 @@ static HRESULT WINAPI DdsDecoder_GetFrame(IWICBitmapDecoder *iface,
         return WINCODEC_ERR_WRONGSTATE;
     }
 
-    frame_per_texture = This->info.frame_count / This->info.array_size;
+    if (This->info.dimension == WICDdsTextureCube) {
+        frame_per_texture = This->info.mip_levels;
+    } else {
+        frame_per_texture = This->info.frame_count / This->info.array_size;
+    }
     array_index = index / frame_per_texture;
     slice_index = index % frame_per_texture;
     depth = This->info.depth;
@@ -867,19 +1033,23 @@ static HRESULT WINAPI DdsDecoder_Dds_GetFrame(IWICDdsDecoder *iface,
         hr = WINCODEC_ERR_WRONGSTATE;
         goto end;
     }
-    if (arrayIndex >= This->info.array_size || mipLevel >= This->info.mip_levels || sliceIndex >= This->info.depth) {
+
+    if ((arrayIndex >= This->info.array_size && This->info.dimension != WICDdsTextureCube) ||
+        (arrayIndex >= This->info.array_size * 6) ||
+        (mipLevel   >= This->info.mip_levels) ||
+        (sliceIndex >= This->info.depth)) {
         hr = E_INVALIDARG;
         goto end;
     }
 
-    bytes_per_block = This->info.bytes_per_block;
-    if (This->info.compressed) {
+    if (is_compressed(This->info.format)) {
         block_width = DDS_BLOCK_WIDTH;
         block_height = DDS_BLOCK_HEIGHT;
     } else {
         block_width = 1;
         block_height = 1;
     }
+    bytes_per_block = This->info.bytes_per_block;
     seek.QuadPart = This->info.data_offset;
 
     width = This->info.width;

@@ -858,25 +858,6 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetObjectInPath(IDirectSoundBuffer8
 	if (!ppObject)
 		return E_INVALIDARG;
 
-    if(dwIndex == 0 && !IsEqualGUID(rguidObject, &GUID_All_Objects))
-    {
-        int i;
-
-        for(i = 0; i < This->num_filters; i++)
-        {
-            if(IsEqualGUID(rguidObject, &This->filters[i].guid))
-            {
-                if (SUCCEEDED(IMediaObject_QueryInterface(This->filters[i].obj, rguidInterface, ppObject)))
-                    return DS_OK;
-
-                return E_NOINTERFACE;
-            }
-        }
-
-        WARN("control unavailable\n");
-		return DSERR_OBJECTNOTFOUND;
-    }
-
 	if (IsEqualGUID(rguidObject, &This->filters[dwIndex].guid) || IsEqualGUID(rguidObject, &GUID_All_Objects)) {
 		if (SUCCEEDED(IMediaObject_QueryInterface(This->filters[dwIndex].obj, rguidInterface, ppObject)))
 			return DS_OK;

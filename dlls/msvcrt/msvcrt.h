@@ -53,6 +53,8 @@
 #define MSVCRT_FLT_MIN_10_EXP (-37)
 #define MSVCRT_DBL_MAX_10_EXP 308
 #define MSVCRT_DBL_MIN_10_EXP (-307)
+#define DBL80_MAX_10_EXP 4932
+#define DBL80_MIN_10_EXP -4951
 #define MSVCRT_DBL_DIG 15
 #ifdef _WIN64
 #define MSVCRT_SIZE_MAX MSVCRT_UI64_MAX
@@ -314,6 +316,7 @@ extern unsigned int MSVCRT___lc_codepage;
 extern int MSVCRT___lc_collate_cp;
 extern WORD MSVCRT__ctype [257];
 extern BOOL initial_locale DECLSPEC_HIDDEN;
+extern WORD *MSVCRT__pwctype;
 
 void msvcrt_set_errno(int) DECLSPEC_HIDDEN;
 #if _MSVCR_VER >= 80
@@ -1196,7 +1199,6 @@ char* __cdecl    MSVCRT_strstr(const char*, const char*);
 unsigned int __cdecl MSVCRT__get_output_format(void);
 char* __cdecl MSVCRT_strtok_s(char*, const char*, char**);
 char* __cdecl MSVCRT__itoa(int, char*, int);
-double parse_double(MSVCRT_wchar_t (*)(void*), void (*)(void*), void*, MSVCRT_pthreadlocinfo, int*);
 int __cdecl MSVCRT_wcsncmp(const MSVCRT_wchar_t*, const MSVCRT_wchar_t*, MSVCRT_size_t);
 int __cdecl MSVCRT__wcsnicmp(const MSVCRT_wchar_t*, const MSVCRT_wchar_t*, MSVCRT_size_t);
 int __cdecl MSVCRT_towlower(MSVCRT_wint_t);
@@ -1209,7 +1211,29 @@ int __cdecl MSVCRT__iswlower_l(MSVCRT_wchar_t, MSVCRT__locale_t);
 int __cdecl MSVCRT__iswupper_l(MSVCRT_wchar_t, MSVCRT__locale_t);
 int __cdecl MSVCRT__iswprint_l(MSVCRT_wchar_t, MSVCRT__locale_t);
 int __cdecl MSVCRT__iswpunct_l(MSVCRT_wchar_t, MSVCRT__locale_t);
+MSVCRT_size_t __cdecl MSVCRT_wcslen(const MSVCRT_wchar_t*);
+MSVCRT_wchar_t* __cdecl MSVCRT_wcscpy(MSVCRT_wchar_t*, const MSVCRT_wchar_t*);
+MSVCRT_wchar_t* __cdecl MSVCRT_wcschr(const MSVCRT_wchar_t*, MSVCRT_wchar_t);
+MSVCRT_wchar_t* __cdecl MSVCRT_wcscat(MSVCRT_wchar_t*, const MSVCRT_wchar_t*);
 
+enum fpmod {
+    FP_ROUND_ZERO, /* only used when dropped part contains only zeros */
+    FP_ROUND_DOWN,
+    FP_ROUND_EVEN,
+    FP_ROUND_UP,
+    FP_VAL_INFINITY,
+    FP_VAL_NAN
+};
+
+struct fpnum {
+    int sign;
+    int exp;
+    ULONGLONG m;
+    enum fpmod mod;
+};
+struct fpnum fpnum_parse(MSVCRT_wchar_t (*)(void*), void (*)(void*),
+        void*, MSVCRT_pthreadlocinfo, BOOL) DECLSPEC_HIDDEN;
+int fpnum_double(struct fpnum*, double*) DECLSPEC_HIDDEN;
 /* Maybe one day we'll enable the invalid parameter handlers with the full set of information (msvcrXXd)
  *      #define MSVCRT_INVALID_PMT(x) MSVCRT_call_invalid_parameter_handler(x, __FUNCTION__, __FILE__, __LINE__, 0)
  *      #define MSVCRT_CHECK_PMT(x)   ((x) ? TRUE : MSVCRT_INVALID_PMT(#x),FALSE)

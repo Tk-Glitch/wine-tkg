@@ -271,6 +271,10 @@ struct strmbase_passthrough
 void strmbase_passthrough_init(struct strmbase_passthrough *passthrough, IUnknown *outer);
 void strmbase_passthrough_cleanup(struct strmbase_passthrough *passthrough);
 
+void strmbase_passthrough_eos(struct strmbase_passthrough *passthrough);
+void strmbase_passthrough_invalidate_time(struct strmbase_passthrough *passthrough);
+void strmbase_passthrough_update_time(struct strmbase_passthrough *passthrough, REFERENCE_TIME time);
+
 struct strmbase_qc
 {
     IQualityControl IQualityControl_iface;
@@ -314,12 +318,6 @@ struct strmbase_renderer
 
 typedef HRESULT (WINAPI *BaseRenderer_CheckMediaType)(struct strmbase_renderer *iface, const AM_MEDIA_TYPE *mt);
 typedef HRESULT (WINAPI *BaseRenderer_DoRenderSample)(struct strmbase_renderer *iface, IMediaSample *sample);
-typedef HRESULT (WINAPI *BaseRenderer_ShouldDrawSampleNow)(struct strmbase_renderer *iface,
-        IMediaSample *sample, REFERENCE_TIME *start, REFERENCE_TIME *end);
-typedef HRESULT (WINAPI *BaseRenderer_PrepareReceive)(struct strmbase_renderer *iface, IMediaSample *sample);
-typedef HRESULT (WINAPI *BaseRenderer_EndOfStream)(struct strmbase_renderer *iface);
-typedef HRESULT (WINAPI *BaseRenderer_BeginFlush) (struct strmbase_renderer *iface);
-typedef HRESULT (WINAPI *BaseRenderer_EndFlush) (struct strmbase_renderer *iface);
 typedef HRESULT (WINAPI *BaseRenderer_BreakConnect) (struct strmbase_renderer *iface);
 
 struct strmbase_renderer_ops
@@ -329,18 +327,12 @@ struct strmbase_renderer_ops
     void (*renderer_init_stream)(struct strmbase_renderer *iface);
     void (*renderer_start_stream)(struct strmbase_renderer *iface);
     void (*renderer_stop_stream)(struct strmbase_renderer *iface);
-    BaseRenderer_ShouldDrawSampleNow  pfnShouldDrawSampleNow;
-    BaseRenderer_PrepareReceive pfnPrepareReceive;
     HRESULT (*renderer_connect)(struct strmbase_renderer *iface, const AM_MEDIA_TYPE *mt);
     BaseRenderer_BreakConnect pfnBreakConnect;
-    BaseRenderer_EndOfStream pfnEndOfStream;
-    BaseRenderer_EndFlush pfnEndFlush;
     void (*renderer_destroy)(struct strmbase_renderer *iface);
     HRESULT (*renderer_query_interface)(struct strmbase_renderer *iface, REFIID iid, void **out);
     HRESULT (*renderer_pin_query_interface)(struct strmbase_renderer *iface, REFIID iid, void **out);
 };
-
-HRESULT WINAPI BaseRendererImpl_Receive(struct strmbase_renderer *filter, IMediaSample *sample);
 
 void strmbase_renderer_init(struct strmbase_renderer *filter, IUnknown *outer,
         const CLSID *clsid, const WCHAR *sink_name, const struct strmbase_renderer_ops *ops);

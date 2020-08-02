@@ -797,6 +797,9 @@ static HANDLE send_frame_time(IMemInputPin *sink, REFERENCE_TIME start_time, uns
     hr = IMediaSample_SetTime(sample, &start_time, &end_time);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
+    hr = IMediaSample_SetPreroll(sample, TRUE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
     params->sink = sink;
     params->sample = sample;
     thread = CreateThread(NULL, 0, frame_thread, params, 0, NULL);
@@ -2699,7 +2702,7 @@ static void test_basic_video(void)
     reftime = 0.0;
     hr = IBasicVideo_get_AvgTimePerFrame(video, &reftime);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(reftime == 0.02, "Got frame rate %.16e.\n", reftime);
+    ok(reftime == 0.02, "Got frame rate %.16e.\n", reftime);
 
     l = 0xdeadbeef;
     hr = IBasicVideo_get_BitRate(video, &l);

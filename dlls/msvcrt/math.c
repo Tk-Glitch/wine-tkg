@@ -2114,8 +2114,14 @@ int CDECL MSVCRT__gcvt_s(char *buff, MSVCRT_size_t size, double number, int digi
 #ifdef __i386__
 unsigned __int64 CDECL MSVCRT_div(int num, int denom)
 {
-  div_t dt = div(num,denom);
-  return ((unsigned __int64)dt.rem << 32) | (unsigned int)dt.quot;
+    union {
+        MSVCRT_div_t div;
+        unsigned __int64 uint64;
+    } ret;
+
+    ret.div.quot = num / denom;
+    ret.div.rem = num % denom;
+    return ret.uint64;
 }
 #else
 /*********************************************************************
@@ -2125,13 +2131,11 @@ unsigned __int64 CDECL MSVCRT_div(int num, int denom)
  */
 MSVCRT_div_t CDECL MSVCRT_div(int num, int denom)
 {
-  div_t dt = div(num,denom);
-  MSVCRT_div_t     ret;
-  ret.quot = dt.quot;
-  ret.rem = dt.rem;
+    MSVCRT_div_t ret;
 
-  return ret;
-
+    ret.quot = num / denom;
+    ret.rem = num % denom;
+    return ret;
 }
 #endif /* ifdef __i386__ */
 
@@ -2144,8 +2148,14 @@ MSVCRT_div_t CDECL MSVCRT_div(int num, int denom)
 #ifdef __i386__
 unsigned __int64 CDECL MSVCRT_ldiv(MSVCRT_long num, MSVCRT_long denom)
 {
-  ldiv_t ldt = ldiv(num,denom);
-  return ((unsigned __int64)ldt.rem << 32) | (MSVCRT_ulong)ldt.quot;
+    union {
+        MSVCRT_ldiv_t ldiv;
+        unsigned __int64 uint64;
+    } ret;
+
+    ret.ldiv.quot = num / denom;
+    ret.ldiv.rem = num % denom;
+    return ret.uint64;
 }
 #else
 /*********************************************************************
@@ -2155,13 +2165,11 @@ unsigned __int64 CDECL MSVCRT_ldiv(MSVCRT_long num, MSVCRT_long denom)
  */
 MSVCRT_ldiv_t CDECL MSVCRT_ldiv(MSVCRT_long num, MSVCRT_long denom)
 {
-  ldiv_t result = ldiv(num,denom);
+    MSVCRT_ldiv_t ret;
 
-  MSVCRT_ldiv_t ret;
-  ret.quot = result.quot;
-  ret.rem = result.rem;
-
-  return ret;
+    ret.quot = num / denom;
+    ret.rem = num % denom;
+    return ret;
 }
 #endif /* ifdef __i386__ */
 

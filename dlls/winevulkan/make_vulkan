@@ -64,7 +64,7 @@ from enum import Enum
 LOGGER = logging.Logger("vulkan")
 LOGGER.addHandler(logging.StreamHandler())
 
-VK_XML_VERSION = "1.2.145"
+VK_XML_VERSION = "1.2.148"
 WINE_VK_VERSION = (1, 2)
 
 # Filenames to create.
@@ -100,7 +100,6 @@ UNSUPPORTED_EXTENSIONS = [
 
     # Device extensions
     "VK_AMD_display_native_hdr",
-    "VK_EXT_calibrated_timestamps",
     "VK_EXT_display_control", # Requires VK_EXT_display_surface_counter
     "VK_EXT_full_screen_exclusive",
     "VK_EXT_hdr_metadata", # Needs WSI work.
@@ -189,7 +188,7 @@ FUNCTION_OVERRIDES = {
     "vkGetPhysicalDeviceSurfacePresentModesKHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
 
     # VK_KHR_get_surface_capabilities2
-    "vkGetPhysicalDeviceSurfaceCapabilities2KHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
+    "vkGetPhysicalDeviceSurfaceCapabilities2KHR" : {"dispatch" : True, "driver" : True, "thunk" : False, "private_thunk" : True},
     "vkGetPhysicalDeviceSurfaceFormats2KHR" : {"dispatch" : True, "driver" : True, "thunk" : True},
 
     # VK_KHR_win32_surface
@@ -223,6 +222,10 @@ FUNCTION_OVERRIDES = {
     # VK_EXT_private_data
     "vkGetPrivateDataEXT" : {"dispatch": True, "driver" : False, "thunk" : False},
     "vkSetPrivateDataEXT" : {"dispatch": True, "driver" : False, "thunk" : False},
+
+    # VK_EXT_calibrated_timestamps
+    "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT" : {"dispatch" : True, "driver" : False, "thunk" : False},
+    "vkGetCalibratedTimestampsEXT" : {"dispatch" : True, "driver" : False, "thunk" : False},
 }
 
 STRUCT_CHAIN_CONVERSIONS = [
@@ -3206,7 +3209,7 @@ def set_working_directory():
     os.chdir(path)
 
 def download_vk_xml(filename):
-    url = "https://raw.github.com/KhronosGroup/Vulkan-Docs/v{0}/xml/vk.xml".format(VK_XML_VERSION)
+    url = "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Docs/v{0}/xml/vk.xml".format(VK_XML_VERSION)
     if not os.path.isfile(filename):
         urllib.request.urlretrieve(url, filename)
 

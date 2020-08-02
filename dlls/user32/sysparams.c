@@ -590,6 +590,21 @@ static BOOL get_primary_adapter(WCHAR *name)
     return FALSE;
 }
 
+static BOOL is_valid_adapter_name(const WCHAR *name)
+{
+    long int adapter_idx;
+    WCHAR *end;
+
+    if (strncmpiW(name, ADAPTER_PREFIX, ARRAY_SIZE(ADAPTER_PREFIX)))
+        return FALSE;
+
+    adapter_idx = strtolW(name + ARRAY_SIZE(ADAPTER_PREFIX), &end, 10);
+    if (*end || adapter_idx < 1)
+        return FALSE;
+
+    return TRUE;
+}
+
 /* get text metrics and/or "average" char width of the specified logfont 
  * for the specified dc */
 static void get_text_metr_size( HDC hdc, LOGFONTW *plf, TEXTMETRICW * ptm, UINT *psz)
@@ -3367,12 +3382,18 @@ LONG WINAPI ChangeDisplaySettingsExW( LPCWSTR devname, LPDEVMODEW devmode, HWND 
     WCHAR primary_adapter[CCHDEVICENAME];
     BOOL def_mode = TRUE;
     DEVMODEW dm;
+    LONG ret;
 
     TRACE("%s %p %p %#x %p\n", debugstr_w(devname), devmode, hwnd, flags, lparam);
     TRACE("flags=%s\n", _CDS_flags(flags));
 
     if (!devname && !devmode)
-        return USER_Driver->pChangeDisplaySettingsEx(NULL, NULL, hwnd, flags, lparam);
+    {
+        ret = USER_Driver->pChangeDisplaySettingsEx(NULL, NULL, hwnd, flags, lparam);
+        if (ret != DISP_CHANGE_SUCCESSFUL)
+            ERR("Restoring all displays to their registry settings returned %d.\n", ret);
+        return ret;
+    }
 
     if (!devname && devmode)
     {
@@ -3380,6 +3401,12 @@ LONG WINAPI ChangeDisplaySettingsExW( LPCWSTR devname, LPDEVMODEW devmode, HWND 
             return DISP_CHANGE_FAILED;
 
         devname = primary_adapter;
+    }
+
+    if (!is_valid_adapter_name(devname))
+    {
+        ERR("Invalid device name %s.\n", wine_dbgstr_w(devname));
+        return DISP_CHANGE_BADPARAM;
     }
 
     if (devmode)
@@ -3416,7 +3443,10 @@ LONG WINAPI ChangeDisplaySettingsExW( LPCWSTR devname, LPDEVMODEW devmode, HWND 
         return DISP_CHANGE_BADMODE;
     }
 
-    return USER_Driver->pChangeDisplaySettingsEx(devname, devmode, hwnd, flags, lparam);
+    ret = USER_Driver->pChangeDisplaySettingsEx(devname, devmode, hwnd, flags, lparam);
+    if (ret != DISP_CHANGE_SUCCESSFUL)
+        ERR("Changing %s display settings returned %d.\n", wine_dbgstr_w(devname), ret);
+    return ret;
 }
 
 
@@ -3488,8 +3518,9 @@ BOOL WINAPI EnumDisplaySettingsExW(LPCWSTR lpszDeviceName, DWORD iModeNum,
                                    LPDEVMODEW lpDevMode, DWORD dwFlags)
 {
     WCHAR primary_adapter[CCHDEVICENAME];
+    BOOL ret;
 
-    TRACE("%s %u %p %#x\n", wine_dbgstr_w(lpszDeviceName), iModeNum, lpDevMode, dwFlags);
+    TRACE("%s %#x %p %#x\n", wine_dbgstr_w(lpszDeviceName), iModeNum, lpDevMode, dwFlags);
 
     if (!lpszDeviceName)
     {
@@ -3499,7 +3530,22 @@ BOOL WINAPI EnumDisplaySettingsExW(LPCWSTR lpszDeviceName, DWORD iModeNum,
         lpszDeviceName = primary_adapter;
     }
 
-    return USER_Driver->pEnumDisplaySettingsEx(lpszDeviceName, iModeNum, lpDevMode, dwFlags);
+    if (!is_valid_adapter_name(lpszDeviceName))
+    {
+        ERR("Invalid device name %s.\n", wine_dbgstr_w(lpszDeviceName));
+        return FALSE;
+    }
+
+    ret = USER_Driver->pEnumDisplaySettingsEx(lpszDeviceName, iModeNum, lpDevMode, dwFlags);
+    if (ret)
+        TRACE("device:%s mode index:%#x position:(%d,%d) resolution:%ux%u frequency:%uHz "
+              "depth:%ubits orientation:%#x.\n", wine_dbgstr_w(lpszDeviceName), iModeNum,
+              lpDevMode->u1.s2.dmPosition.x, lpDevMode->u1.s2.dmPosition.y, lpDevMode->dmPelsWidth,
+              lpDevMode->dmPelsHeight, lpDevMode->dmDisplayFrequency, lpDevMode->dmBitsPerPel,
+              lpDevMode->u1.s2.dmDisplayOrientation);
+    else
+        WARN("Failed to query %s display settings.\n", wine_dbgstr_w(lpszDeviceName));
+    return ret;
 }
 
 

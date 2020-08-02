@@ -259,7 +259,6 @@ static const WCHAR Previous_NamesW[] = {'P','r','e','v','i','o','u','s',' ','N',
 static const WCHAR Print_ProcessorW[] = {'P','r','i','n','t',' ','P','r','o','c','e','s','s','o','r',0};
 static const WCHAR Printer_DriverW[] = {'P','r','i','n','t','e','r',' ','D','r','i','v','e','r',0};
 static const WCHAR PrinterDriverDataW[] = {'P','r','i','n','t','e','r','D','r','i','v','e','r','D','a','t','a',0};
-static const WCHAR PrinterPortsW[] = {'P','r','i','n','t','e','r','P','o','r','t','s',0};
 static const WCHAR PriorityW[] = {'P','r','i','o','r','i','t','y',0};
 static const WCHAR ProviderW[] = {'P','r','o','v','i','d','e','r',0};
 static const WCHAR Separator_FileW[] = {'S','e','p','a','r','a','t','o','r',' ','F','i','l','e',0};
@@ -270,7 +269,6 @@ static const WCHAR txTimeoutW[] = {'t','x','T','i','m','e','o','u','t',0};
 static const WCHAR UntilTimeW[] = {'U','n','t','i','l','T','i','m','e',0};
 static       WCHAR WinPrintW[] = {'W','i','n','P','r','i','n','t',0};
 static const WCHAR deviceW[]  = {'d','e','v','i','c','e',0};
-static const WCHAR devicesW[] = {'d','e','v','i','c','e','s',0};
 static const WCHAR windowsW[] = {'w','i','n','d','o','w','s',0};
 static       WCHAR rawW[] = {'R','A','W',0};
 static       WCHAR driver_9x[] = {'w','i','n','e','p','s','1','6','.','d','r','v',0};
@@ -555,30 +553,18 @@ static DWORD WINSPOOL_GetOpenedPrinterRegKey(HANDLE hPrinter, HKEY *phkey)
     return open_printer_reg_key( name, phkey );
 }
 
-static void
-WINSPOOL_SetDefaultPrinter(const char *devname, const char *name, BOOL force) {
-    char qbuf[200];
+static void set_default_printer(const char *devname, const char *name)
+{
+    char *buf = HeapAlloc(GetProcessHeap(), 0, strlen(name)+strlen(devname)+strlen(",WINEPS.DRV,LPR:")+1);
+    HKEY hkey;
 
-    /* If forcing, or no profile string entry for device yet, set the entry
-     *
-     * The always change entry if not WINEPS yet is discussable.
-     */
-    if (force								||
-	!GetProfileStringA("windows","device","*",qbuf,sizeof(qbuf))	||
-	!strcmp(qbuf,"*")						||
-	!strstr(qbuf,"WINEPS.DRV")
-    ) {
-    	char *buf = HeapAlloc(GetProcessHeap(),0,strlen(name)+strlen(devname)+strlen(",WINEPS.DRV,LPR:")+1);
-        HKEY hkey;
-
-	sprintf(buf,"%s,WINEPS.DRV,LPR:%s",devname,name);
-	WriteProfileStringA("windows","device",buf);
-        if(RegCreateKeyW(HKEY_CURRENT_USER, user_default_reg_key, &hkey) == ERROR_SUCCESS) {
-            RegSetValueExA(hkey, "Device", 0, REG_SZ, (LPBYTE)buf, strlen(buf) + 1);
-            RegCloseKey(hkey);
-        }
-	HeapFree(GetProcessHeap(),0,buf);
+    sprintf(buf, "%s,WINEPS.DRV,LPR:%s", devname, name);
+    if (!RegCreateKeyW(HKEY_CURRENT_USER, user_default_reg_key, &hkey))
+    {
+        RegSetValueExA(hkey, "Device", 0, REG_SZ, (BYTE *)buf, strlen(buf) + 1);
+        RegCloseKey(hkey);
     }
+    HeapFree(GetProcessHeap(), 0, buf);
 }
 
 static BOOL add_printer_driver(const WCHAR *name, WCHAR *ppd)
@@ -1273,7 +1259,7 @@ static BOOL PRINTCAP_ParseEntry( const char *pent, BOOL isfirst )
     }
 
     if (isfirst || set_default)
-        WINSPOOL_SetDefaultPrinter(devname,name,TRUE);
+        set_default_printer(devname, name);
 
  end:
     if (hkeyPrinters) RegCloseKey( hkeyPrinters );
@@ -3177,7 +3163,6 @@ static void set_devices_and_printerports(PRINTER_INFO_2W *pi)
         lstrcatW(devline, pi->pPortName);
 
         TRACE("using %s\n", debugstr_w(devline));
-        WriteProfileStringW(devicesW, pi->pPrinterName, devline);
         if (!RegCreateKeyW(HKEY_CURRENT_USER, user_printers_reg_key, &hkey)) {
             RegSetValueExW(hkey, pi->pPrinterName, 0, REG_SZ, (LPBYTE)devline,
                             (lstrlenW(devline) + 1) * sizeof(WCHAR));
@@ -3185,7 +3170,6 @@ static void set_devices_and_printerports(PRINTER_INFO_2W *pi)
         }
 
         lstrcatW(devline, timeout_15_45);
-        WriteProfileStringW(PrinterPortsW, pi->pPrinterName, devline);
         if (!RegCreateKeyW(HKEY_CURRENT_USER, WinNT_CV_PrinterPortsW, &hkey)) {
             RegSetValueExW(hkey, pi->pPrinterName, 0, REG_SZ, (LPBYTE)devline,
                             (lstrlenW(devline) + 1) * sizeof(WCHAR));
@@ -3441,8 +3425,6 @@ BOOL WINAPI DeletePrinter(HANDLE hPrinter)
         RegDeleteTreeW(hkeyPrinters, lpNameW);
         RegCloseKey(hkeyPrinters);
     }
-    WriteProfileStringW(devicesW, lpNameW, NULL);
-    WriteProfileStringW(PrinterPortsW, lpNameW, NULL);
 
     if(RegCreateKeyW(HKEY_CURRENT_USER, user_printers_reg_key, &hkey) == ERROR_SUCCESS) {
         RegDeleteValueW(hkey, lpNameW);
@@ -3456,7 +3438,6 @@ BOOL WINAPI DeletePrinter(HANDLE hPrinter)
 
     if (GetDefaultPrinterW( def, &size ) && !strcmpW( def, lpNameW ))
     {
-        WriteProfileStringW( windowsW, deviceW, NULL );
         if (!RegCreateKeyW( HKEY_CURRENT_USER, user_default_reg_key, &hkey ))
         {
             RegDeleteValueW( hkey, deviceW );
@@ -6089,20 +6070,12 @@ BOOL WINAPI SetDefaultPrinterW(LPCWSTR pszPrinter)
     size = ((MAX_PATH * 2) + 2) * sizeof(WCHAR); /* driver,port and a 0 */
     lres = RegQueryValueExW(hreg, pszPrinter, NULL, NULL, (LPBYTE) (&buffer[namelen]), &size);
     if (!lres) {
-        TRACE("set device to %s\n", debugstr_w(buffer));
+        HKEY hdev;
 
-        if (!WriteProfileStringW(windowsW, deviceW, buffer)) {
-            TRACE("failed to set the device entry: %d\n", GetLastError());
-            lres = ERROR_INVALID_PRINTER_NAME;
-        }
-
-        /* remove the next section, when INIFileMapping is implemented */
+        if (!RegCreateKeyW(HKEY_CURRENT_USER, user_default_reg_key, &hdev))
         {
-            HKEY hdev;
-            if (!RegCreateKeyW(HKEY_CURRENT_USER, user_default_reg_key, &hdev)) {
-                RegSetValueExW(hdev, deviceW, 0, REG_SZ, (LPBYTE)buffer, (lstrlenW(buffer) + 1) * sizeof(WCHAR));
-                RegCloseKey(hdev);
-            }
+            RegSetValueExW(hdev, deviceW, 0, REG_SZ, (BYTE *)buffer, (lstrlenW(buffer) + 1) * sizeof(WCHAR));
+            RegCloseKey(hdev);
         }
     }
     else

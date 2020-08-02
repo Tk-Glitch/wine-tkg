@@ -1011,6 +1011,9 @@ static HANDLE send_frame_time(IMemInputPin *sink, REFERENCE_TIME start_time, DWO
     hr = IMediaSample_SetTime(sample, &start_time, &end_time);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
+    hr = IMediaSample_SetPreroll(sample, TRUE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
     params->sink = sink;
     params->sample = sample;
     thread = CreateThread(NULL, 0, frame_thread, params, 0, NULL);
@@ -2757,6 +2760,13 @@ static void test_allocate_surface_helper(void)
 
     IDirect3DSurface9_Release(surfaces[0]);
 
+    info.Format = D3DFMT_A8R8G8B8;
+    info.dwFlags = VMR9AllocFlag_OffscreenSurface | VMR9AllocFlag_TextureSurface;
+    count = 1;
+    hr = IVMRSurfaceAllocatorNotify9_AllocateSurfaceHelper(notify, &info, &count, surfaces);
+    ok(hr == E_INVALIDARG, "Got hr %#x.\n", hr);
+    ok(count == 1, "Got count %u.\n", count);
+
 out:
     IVMRSurfaceAllocatorNotify9_Release(notify);
     ref = IBaseFilter_Release(filter);
@@ -2766,28 +2776,40 @@ out:
     DestroyWindow(window);
 }
 
-static IVMRSurfaceAllocator9 allocator_iface;
-static IVMRImagePresenter9 presenter_iface;
-static LONG allocator_refcount = 1;
-static D3DFORMAT allocator_format;
-static DWORD allocator_accept_flags;
-static IDirect3DSurface9 *allocator_surfaces[5];
-static IVMRSurfaceAllocatorNotify9 *allocator_notify;
-static unsigned int allocator_got_PresentImage, allocator_got_TerminateDevice;
+struct presenter
+{
+    IVMRSurfaceAllocator9 IVMRSurfaceAllocator9_iface;
+    IVMRImagePresenter9 IVMRImagePresenter9_iface;
+    LONG refcount;
+
+    D3DFORMAT format;
+    DWORD accept_flags;
+    IDirect3DSurface9 *surfaces[5];
+    IVMRSurfaceAllocatorNotify9 *notify;
+    unsigned int got_PresentImage, got_TerminateDevice;
+};
+
+static struct presenter *impl_from_IVMRImagePresenter9(IVMRImagePresenter9 *iface)
+{
+    return CONTAINING_RECORD(iface, struct presenter, IVMRImagePresenter9_iface);
+}
 
 static HRESULT WINAPI presenter_QueryInterface(IVMRImagePresenter9 *iface, REFIID iid, void **out)
 {
-    return IVMRSurfaceAllocator9_QueryInterface(&allocator_iface, iid, out);
+    struct presenter *presenter = impl_from_IVMRImagePresenter9(iface);
+    return IVMRSurfaceAllocator9_QueryInterface(&presenter->IVMRSurfaceAllocator9_iface, iid, out);
 }
 
 static ULONG WINAPI presenter_AddRef(IVMRImagePresenter9 *iface)
 {
-    return IVMRSurfaceAllocator9_AddRef(&allocator_iface);
+    struct presenter *presenter = impl_from_IVMRImagePresenter9(iface);
+    return IVMRSurfaceAllocator9_AddRef(&presenter->IVMRSurfaceAllocator9_iface);
 }
 
 static ULONG WINAPI presenter_Release(IVMRImagePresenter9 *iface)
 {
-    return IVMRSurfaceAllocator9_Release(&allocator_iface);
+    struct presenter *presenter = impl_from_IVMRImagePresenter9(iface);
+    return IVMRSurfaceAllocator9_Release(&presenter->IVMRSurfaceAllocator9_iface);
 }
 
 static HRESULT WINAPI presenter_StartPresenting(IVMRImagePresenter9 *iface, DWORD_PTR cookie)
@@ -2806,7 +2828,9 @@ static HRESULT WINAPI presenter_StopPresenting(IVMRImagePresenter9 *iface, DWORD
 
 static HRESULT WINAPI presenter_PresentImage(IVMRImagePresenter9 *iface, DWORD_PTR cookie, VMR9PresentationInfo *info)
 {
+    struct presenter *presenter = impl_from_IVMRImagePresenter9(iface);
     static const RECT rect;
+
     if (winetest_debug > 1) trace("PresentImage()\n");
     ok(cookie == 0xabacab, "Got cookie %#lx.\n", cookie);
     todo_wine ok(info->dwFlags == VMR9Sample_TimeValid, "Got flags %#x.\n", info->dwFlags);
@@ -2819,7 +2843,7 @@ static HRESULT WINAPI presenter_PresentImage(IVMRImagePresenter9 *iface, DWORD_P
     ok(!info->dwReserved1, "Got dwReserved1 %#x.\n", info->dwReserved1);
     ok(!info->dwReserved2, "Got dwReserved2 %#x.\n", info->dwReserved2);
 
-    ++allocator_got_PresentImage;
+    ++presenter->got_PresentImage;
     return S_OK;
 }
 
@@ -2833,14 +2857,21 @@ static const IVMRImagePresenter9Vtbl presenter_vtbl =
     presenter_PresentImage,
 };
 
+static struct presenter *impl_from_IVMRSurfaceAllocator9(IVMRSurfaceAllocator9 *iface)
+{
+    return CONTAINING_RECORD(iface, struct presenter, IVMRSurfaceAllocator9_iface);
+}
+
 static HRESULT WINAPI allocator_QueryInterface(IVMRSurfaceAllocator9 *iface, REFIID iid, void **out)
 {
+    struct presenter *presenter = impl_from_IVMRSurfaceAllocator9(iface);
+
     if (winetest_debug > 1) trace("QueryInterface(%s)\n", wine_dbgstr_guid(iid));
 
     if (IsEqualGUID(iid, &IID_IVMRImagePresenter9))
     {
-        *out = &presenter_iface;
-        IVMRImagePresenter9_AddRef(&presenter_iface);
+        *out = &presenter->IVMRImagePresenter9_iface;
+        IVMRImagePresenter9_AddRef(&presenter->IVMRImagePresenter9_iface);
         return S_OK;
     }
     ok(!IsEqualGUID(iid, &IID_IVMRSurfaceAllocatorEx9), "Unexpected query for IVMRSurfaceAllocatorEx9.\n");
@@ -2850,17 +2881,21 @@ static HRESULT WINAPI allocator_QueryInterface(IVMRSurfaceAllocator9 *iface, REF
 
 static ULONG WINAPI allocator_AddRef(IVMRSurfaceAllocator9 *iface)
 {
-    return InterlockedIncrement(&allocator_refcount);
+    struct presenter *presenter = impl_from_IVMRSurfaceAllocator9(iface);
+    return InterlockedIncrement(&presenter->refcount);
 }
 
 static ULONG WINAPI allocator_Release(IVMRSurfaceAllocator9 *iface)
 {
-    return InterlockedDecrement(&allocator_refcount);
+    struct presenter *presenter = impl_from_IVMRSurfaceAllocator9(iface);
+    return InterlockedDecrement(&presenter->refcount);
 }
 
 static HRESULT WINAPI allocator_InitializeDevice(IVMRSurfaceAllocator9 *iface,
         DWORD_PTR cookie, VMR9AllocationInfo *info, DWORD *buffer_count)
 {
+    struct presenter *presenter = impl_from_IVMRSurfaceAllocator9(iface);
+
     if (winetest_debug > 1) trace("InitializeDevice(flags %#x, format %u)\n",
             info->dwFlags, info->Format);
     ok(cookie == 0xabacab, "Got cookie %#lx.\n", cookie);
@@ -2874,33 +2909,37 @@ static HRESULT WINAPI allocator_InitializeDevice(IVMRSurfaceAllocator9 *iface,
     ok(info->szNativeSize.cy == 16, "Got native height %d.\n", info->szNativeSize.cy);
     todo_wine ok(*buffer_count == 5, "Got buffer count %u.\n", *buffer_count);
 
-    allocator_format = info->Format;
+    presenter->format = info->Format;
 
-    if (info->dwFlags != allocator_accept_flags)
+    if (info->dwFlags != presenter->accept_flags)
         return 0xdeadbeef;
-    return IVMRSurfaceAllocatorNotify9_AllocateSurfaceHelper(allocator_notify,
-            info, buffer_count, allocator_surfaces);
+    return IVMRSurfaceAllocatorNotify9_AllocateSurfaceHelper(presenter->notify,
+            info, buffer_count, presenter->surfaces);
 }
 
 static HRESULT WINAPI allocator_TerminateDevice(IVMRSurfaceAllocator9 *iface, DWORD_PTR cookie)
 {
+    struct presenter *presenter = impl_from_IVMRSurfaceAllocator9(iface);
+
     if (winetest_debug > 1) trace("TerminateDevice()\n");
     ok(cookie == 0xabacab, "Got cookie %#lx.\n", cookie);
     /* Don't dereference the surfaces here, to mimic How to Survive. */
-    ++allocator_got_TerminateDevice;
+    ++presenter->got_TerminateDevice;
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI allocator_GetSurface(IVMRSurfaceAllocator9 *iface,
         DWORD_PTR cookie, DWORD index, DWORD flags, IDirect3DSurface9 **surface)
 {
+    struct presenter *presenter = impl_from_IVMRSurfaceAllocator9(iface);
+
     if (winetest_debug > 1) trace("GetSurface(index %u)\n", index);
     ok(cookie == 0xabacab, "Got cookie %#lx.\n", cookie);
     ok(!flags, "Got flags %#x.\n", flags);
     ok(index < 5, "Got index %u.\n", index);
 
     /* Don't reference the surface here, to mimic How to Survive. */
-    *surface = allocator_surfaces[index];
+    *surface = presenter->surfaces[index];
     return S_OK;
 }
 
@@ -2921,10 +2960,8 @@ static const IVMRSurfaceAllocator9Vtbl allocator_vtbl =
     allocator_AdviseNotify,
 };
 
-static IVMRSurfaceAllocator9 allocator_iface = {&allocator_vtbl};
-static IVMRImagePresenter9 presenter_iface = {&presenter_vtbl};
-
-static void test_renderless_present(IFilterGraph2 *graph, IMemInputPin *input)
+static void test_renderless_present(struct presenter *presenter,
+        IFilterGraph2 *graph, IMemInputPin *input)
 {
     IMediaControl *control;
     OAFilterState state;
@@ -2933,19 +2970,24 @@ static void test_renderless_present(IFilterGraph2 *graph, IMemInputPin *input)
 
     IFilterGraph2_QueryInterface(graph, &IID_IMediaControl, (void **)&control);
 
-    allocator_got_PresentImage = 0;
+    presenter->got_PresentImage = 0;
 
     hr = IMediaControl_Pause(control);
     ok(hr == S_FALSE, "Got hr %#x.\n", hr);
     thread = send_frame(input);
     hr = IMediaControl_GetState(control, 1000, &state);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
+    /* Atelier Sophie uses the VMR in renderless mode, calls
+     * IMediaControl::Run() from a stopped state and expects that
+     * IMediaControl::GetState() returns S_OK only after PresentImage() has
+     * been called. */
+    ok(presenter->got_PresentImage == 1, "Got %u calls to PresentImage().\n", presenter->got_PresentImage);
 
     hr = IMediaControl_Run(control);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = join_thread(thread);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(allocator_got_PresentImage == 1, "Got %u calls to PresentImage().\n", allocator_got_PresentImage);
+    ok(presenter->got_PresentImage == 1, "Got %u calls to PresentImage().\n", presenter->got_PresentImage);
 
     hr = IMediaControl_Stop(control);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -2971,6 +3013,13 @@ static void test_renderless_formats(void)
         .pbFormat = (BYTE *)&vih,
     };
     ALLOCATOR_PROPERTIES req_props = {5, 32 * 16 * 4, 1, 0}, ret_props;
+    struct presenter presenter =
+    {
+        .IVMRSurfaceAllocator9_iface.lpVtbl = &allocator_vtbl,
+        .IVMRImagePresenter9_iface.lpVtbl = &presenter_vtbl,
+        .refcount = 1,
+    };
+    struct presenter presenter2 = presenter;
     IVMRSurfaceAllocatorNotify9 *notify;
     RECT rect = {0, 0, 640, 480};
     struct testfilter source;
@@ -3032,10 +3081,11 @@ static void test_renderless_formats(void)
     }
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IVMRSurfaceAllocatorNotify9_AdviseSurfaceAllocator(notify, 0xabacab, &allocator_iface);
+    hr = IVMRSurfaceAllocatorNotify9_AdviseSurfaceAllocator(notify, 0xabacab,
+            &presenter.IVMRSurfaceAllocator9_iface);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    allocator_notify = notify;
+    presenter.notify = notify;
 
     testfilter_init(&source);
     graph = create_graph();
@@ -3047,7 +3097,7 @@ static void test_renderless_formats(void)
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
         req_mt.subtype = *tests[i].subtype;
-        allocator_accept_flags = tests[i].flags;
+        presenter.accept_flags = tests[i].flags;
 
         hr = IFilterGraph2_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &req_mt);
         /* Connection never fails on Native, but Wine currently creates D3D
@@ -3085,10 +3135,14 @@ static void test_renderless_formats(void)
         hr = IMemAllocator_Commit(allocator);
         ok(hr == S_OK, "Test %u: Got hr %#x.\n", i, hr);
 
-        ok(allocator_format == tests[i].format, "Test %u: Got format %u (%#x).\n",
-                i, allocator_format, allocator_format);
+        hr = IVMRSurfaceAllocatorNotify9_AdviseSurfaceAllocator(notify, 0xabacab,
+                &presenter2.IVMRSurfaceAllocator9_iface);
+        ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
 
-        test_renderless_present(graph, input);
+        ok(presenter.format == tests[i].format, "Test %u: Got format %u (%#x).\n",
+                i, presenter.format, presenter.format);
+
+        test_renderless_present(&presenter, graph, input);
 
         hr = IMemAllocator_Decommit(allocator);
         ok(hr == S_OK, "Test %u: Got hr %#x.\n", i, hr);
@@ -3100,6 +3154,9 @@ static void test_renderless_formats(void)
         ok(hr == S_OK, "Test %u: Got hr %#x.\n", i, hr);
     }
 
+    hr = IVMRSurfaceAllocatorNotify9_AdviseSurfaceAllocator(notify, 0xabacab, &presenter2.IVMRSurfaceAllocator9_iface);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
     ref = IFilterGraph2_Release(graph);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
     IMemInputPin_Release(input);
@@ -3109,7 +3166,8 @@ out:
     IVMRSurfaceAllocatorNotify9_Release(notify);
     ref = IBaseFilter_Release(filter);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
-    ok(allocator_refcount == 1, "Got outstanding refcount %d.\n", allocator_refcount);
+    ok(presenter.refcount == 1, "Got outstanding refcount %d.\n", presenter.refcount);
+    ok(presenter2.refcount == 1, "Got outstanding refcount %d.\n", presenter2.refcount);
     ref = IDirect3DDevice9_Release(device);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
     DestroyWindow(window);
@@ -3264,25 +3322,30 @@ static void test_clipping_window(void)
 
 static void test_surface_allocator_notify_refcount(void)
 {
+    struct presenter presenter =
+    {
+        .IVMRSurfaceAllocator9_iface.lpVtbl = &allocator_vtbl,
+        .IVMRImagePresenter9_iface.lpVtbl = &presenter_vtbl,
+        .refcount = 1,
+    };
     IBaseFilter *filter = create_vmr9(VMR9Mode_Renderless);
     IVMRSurfaceAllocatorNotify9 *notify;
     HRESULT hr;
     ULONG ref;
 
-    allocator_got_TerminateDevice = 0;
-
     set_mixing_mode(filter, 2);
 
     IBaseFilter_QueryInterface(filter, &IID_IVMRSurfaceAllocatorNotify9, (void **)&notify);
 
-    hr = IVMRSurfaceAllocatorNotify9_AdviseSurfaceAllocator(notify, 0xabacab, &allocator_iface);
+    hr = IVMRSurfaceAllocatorNotify9_AdviseSurfaceAllocator(notify, 0xabacab,
+            &presenter.IVMRSurfaceAllocator9_iface);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     ref = IBaseFilter_Release(filter);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
-    ok(allocator_got_TerminateDevice == 1, "Got %u calls to TerminateDevice().\n",
-            allocator_got_TerminateDevice);
-    ok(allocator_refcount == 1, "Got outstanding refcount %d.\n", allocator_refcount);
+    ok(presenter.got_TerminateDevice == 1, "Got %u calls to TerminateDevice().\n",
+            presenter.got_TerminateDevice);
+    ok(presenter.refcount == 1, "Got outstanding refcount %d.\n", presenter.refcount);
 
     ref = IVMRSurfaceAllocatorNotify9_Release(notify);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
@@ -3702,7 +3765,7 @@ static void test_basic_video(void)
     reftime = 0.0;
     hr = IBasicVideo_get_AvgTimePerFrame(video, &reftime);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(compare_double(reftime, 0.02, 1 << 28), "Got frame rate %.16e.\n", reftime);
+    ok(compare_double(reftime, 0.02, 1 << 28), "Got frame rate %.16e.\n", reftime);
 
     l = 0xdeadbeef;
     hr = IBasicVideo_get_BitRate(video, &l);

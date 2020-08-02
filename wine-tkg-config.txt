@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Mon 20 Jul 2020 11:51:35 PM CEST :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sun 02 Aug 2020 01:47:40 PM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.13.r0.g536aec5116
-Using wine-staging patchset (version 5.13.r1.g26d3815d)
+Wine (plain) version: 5.14.r0.g70b735760e
+Using wine-staging patchset (version 5.14.r0.gb71d588d)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
@@ -11,6 +11,23 @@ Using VKD3D for d3d12 translation
 Hotfix: 3a9edf9aad43c3e8ba724571da5381f821f1dc56 revert path used
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
+b45c04f4c352ef81df5312684008839f4eeee03d reverted 
+9c99d9bceba34559a32f1e5906a6fcbcf91b0004 reverted 
+2116b49717f26802b51e2904de8d74651da33545 reverted 
+5491e939bc22f0ab479aec6b8a525be9c5ff5e35 reverted 
+d13b61b7385a6a380fb91720c511b194926fa0ca reverted 
+4a2481631331e2743476ea4e1b0005f8f5024242 reverted 
+0d42388095e4fd5c7702a61824b01ce0f9fc4d74 reverted 
+7dd52f6d24f372f08ab71f0acbb0a2b028d390ba reverted 
+9905a5a81d6baf59e992c5b2a8ea92ee4054e5d6 reverted 
+45d991d54138523e5278db5618eb458100982294 reverted 
+f5e6c086f91749e9e302c1abf858807535bc9775 reverted 
+a8b4cf7f2d3d1fbd79308a106a84e753cdac69e8 reverted 
+2a6de8d7f7d6f5ac018d8e330cfa580fc0c3b9e5 reverted 
+6f305dd881e16f77f9eb183684d04b0b8746b769 reverted 
+679ff720902b8e5d5d750b980084bdcdc9a051ed reverted 
+0b0ac41981006514616abdd4c4b6922cf66be7b6 reverted 
+dd13b274104b561f05873e8acdc4bfd34bbe796e reverted 
 3a3c7cbd209e23cc6ee88299b3ba877ab20a767f reverted 
 6f9d20806e821ab07c8adf81ae6630fae94b00ef reverted 
 145cfce1135a7e59cc4c89cd05b572403f188161 reverted 
@@ -22,7 +39,7 @@ fd6f50c0d3e96947846ca82ed0c9bd79fd8e5b80 reverted
 2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted 
 ( FS hack unbreak reverts applied )
 
-Applied reverting hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-58.mystagingrevert
+Applied reverting hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-64.mystagingrevert
 Applied hotfix 934a09585a15e8491e422b43624ffe632b02bd3c-3.mystagingpatch
 Applied hotfix ntdll-ForceBottomUpAlloc-97fbe3f.mystagingpatch
 use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
@@ -58,6 +75,7 @@ Applied hotfix origin_3078f10d_fix.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch GNUTLShack.mypatch
 Applied your own patch amdags.mypatch
+Applied your own patch guy1524_mfplat_WIP.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
 
 wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

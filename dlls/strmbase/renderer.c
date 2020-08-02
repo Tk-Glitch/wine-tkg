@@ -169,7 +169,88 @@ static HRESULT sink_query_interface(struct strmbase_pin *iface, REFIID iid, void
 static HRESULT WINAPI BaseRenderer_Receive(struct strmbase_sink *pin, IMediaSample *sample)
 {
     struct strmbase_renderer *filter = impl_from_IPin(&pin->pin.IPin_iface);
-    return BaseRendererImpl_Receive(filter, sample);
+    REFERENCE_TIME start, stop;
+    BOOL need_wait = FALSE;
+    FILTER_STATE state;
+    HRESULT hr = S_OK;
+    AM_MEDIA_TYPE *mt;
+
+    if (filter->eos || filter->sink.flushing)
+        return S_FALSE;
+
+    state = filter->filter.state;
+    if (state == State_Stopped)
+        return VFW_E_WRONG_STATE;
+
+    if (IMediaSample_GetMediaType(sample, &mt) == S_OK)
+    {
+        TRACE("Format change.\n");
+        strmbase_dump_media_type(mt);
+
+        if (FAILED(filter->pFuncsTable->pfnCheckMediaType(filter, mt)))
+            return VFW_E_TYPE_NOT_ACCEPTED;
+        DeleteMediaType(mt);
+    }
+
+    EnterCriticalSection(&filter->csRenderLock);
+
+    if (filter->filter.clock && SUCCEEDED(IMediaSample_GetTime(sample, &start, &stop)))
+    {
+        strmbase_passthrough_update_time(&filter->passthrough, start);
+        need_wait = TRUE;
+    }
+    else
+        start = stop = -1;
+
+    if (state == State_Paused)
+    {
+        QualityControlRender_BeginRender(&filter->qc, start, stop);
+        hr = filter->pFuncsTable->pfnDoRenderSample(filter, sample);
+        QualityControlRender_EndRender(&filter->qc);
+    }
+
+    if (need_wait)
+    {
+        REFERENCE_TIME now;
+        DWORD_PTR cookie;
+
+        IReferenceClock_GetTime(filter->filter.clock, &now);
+
+        if (now - filter->stream_start - start <= -10000)
+        {
+            HANDLE handles[2] = {filter->advise_event, filter->flush_event};
+            DWORD ret;
+
+            IReferenceClock_AdviseTime(filter->filter.clock, filter->stream_start,
+                    start, (HEVENT)filter->advise_event, &cookie);
+
+            LeaveCriticalSection(&filter->csRenderLock);
+
+            ret = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
+            IReferenceClock_Unadvise(filter->filter.clock, cookie);
+
+            if (ret == 1)
+            {
+                TRACE("Flush signaled; discarding current sample.\n");
+                return S_OK;
+            }
+
+            EnterCriticalSection(&filter->csRenderLock);
+        }
+    }
+
+    if (state == State_Running)
+    {
+        QualityControlRender_BeginRender(&filter->qc, start, stop);
+        hr = filter->pFuncsTable->pfnDoRenderSample(filter, sample);
+        QualityControlRender_EndRender(&filter->qc);
+    }
+
+    QualityControlRender_DoQOS(&filter->qc);
+
+    LeaveCriticalSection(&filter->csRenderLock);
+
+    return hr;
 }
 
 static HRESULT sink_connect(struct strmbase_sink *iface, IPin *peer, const AM_MEDIA_TYPE *mt)
@@ -194,7 +275,6 @@ static HRESULT sink_eos(struct strmbase_sink *iface)
     struct strmbase_renderer *filter = impl_from_IPin(&iface->pin.IPin_iface);
     IFilterGraph *graph = filter->filter.graph;
     IMediaEventSink *event_sink;
-    HRESULT hr = S_OK;
 
     EnterCriticalSection(&filter->csRenderLock);
 
@@ -210,11 +290,8 @@ static HRESULT sink_eos(struct strmbase_sink *iface)
     strmbase_passthrough_eos(&filter->passthrough);
     SetEvent(filter->state_event);
 
-    if (filter->pFuncsTable->pfnEndOfStream)
-        hr = filter->pFuncsTable->pfnEndOfStream(filter);
-
     LeaveCriticalSection(&filter->csRenderLock);
-    return hr;
+    return S_OK;
 }
 
 static HRESULT sink_begin_flush(struct strmbase_sink *iface)
@@ -229,7 +306,6 @@ static HRESULT sink_begin_flush(struct strmbase_sink *iface)
 static HRESULT sink_end_flush(struct strmbase_sink *iface)
 {
     struct strmbase_renderer *filter = impl_from_IPin(&iface->pin.IPin_iface);
-    HRESULT hr = S_OK;
 
     EnterCriticalSection(&filter->csRenderLock);
 
@@ -238,11 +314,8 @@ static HRESULT sink_end_flush(struct strmbase_sink *iface)
     strmbase_passthrough_invalidate_time(&filter->passthrough);
     ResetEvent(filter->flush_event);
 
-    if (filter->pFuncsTable->pfnEndFlush)
-        hr = filter->pFuncsTable->pfnEndFlush(filter);
-
     LeaveCriticalSection(&filter->csRenderLock);
-    return hr;
+    return S_OK;
 }
 
 static const struct strmbase_sink_ops sink_ops =
@@ -273,109 +346,6 @@ void strmbase_renderer_cleanup(struct strmbase_renderer *filter)
     CloseHandle(filter->advise_event);
     CloseHandle(filter->flush_event);
     strmbase_filter_cleanup(&filter->filter);
-}
-
-HRESULT WINAPI BaseRendererImpl_Receive(struct strmbase_renderer *This, IMediaSample *pSample)
-{
-    HRESULT hr = S_OK;
-    REFERENCE_TIME start, stop;
-    AM_MEDIA_TYPE *pmt;
-
-    TRACE("(%p)->%p\n", This, pSample);
-
-    if (This->eos || This->sink.flushing)
-        return S_FALSE;
-
-    if (This->filter.state == State_Stopped)
-        return VFW_E_WRONG_STATE;
-
-    if (IMediaSample_GetMediaType(pSample, &pmt) == S_OK)
-    {
-        TRACE("Format change.\n");
-        strmbase_dump_media_type(pmt);
-
-        if (FAILED(This->pFuncsTable->pfnCheckMediaType(This, pmt)))
-        {
-            return VFW_E_TYPE_NOT_ACCEPTED;
-        }
-        DeleteMediaType(pmt);
-    }
-
-    if (This->pFuncsTable->pfnPrepareReceive)
-        hr = This->pFuncsTable->pfnPrepareReceive(This, pSample);
-    if (FAILED(hr))
-    {
-        if (hr == VFW_E_SAMPLE_REJECTED)
-            return S_OK;
-        else
-            return hr;
-    }
-
-    EnterCriticalSection(&This->csRenderLock);
-    if (This->filter.state == State_Paused)
-        SetEvent(This->state_event);
-
-    /* Wait for render Time */
-    if (This->filter.clock && SUCCEEDED(IMediaSample_GetTime(pSample, &start, &stop)))
-    {
-        hr = S_FALSE;
-        strmbase_passthrough_update_time(&This->passthrough, start);
-        if (This->pFuncsTable->pfnShouldDrawSampleNow)
-            hr = This->pFuncsTable->pfnShouldDrawSampleNow(This, pSample, &start, &stop);
-
-        if (hr == S_OK)
-            ;/* Do not wait: drop through */
-        else if (hr == S_FALSE)
-        {
-            REFERENCE_TIME now;
-            DWORD_PTR cookie;
-
-            IReferenceClock_GetTime(This->filter.clock, &now);
-
-            if (now - This->stream_start - start <= -10000)
-            {
-                HANDLE handles[2] = {This->advise_event, This->flush_event};
-                DWORD ret;
-
-                IReferenceClock_AdviseTime(This->filter.clock, This->stream_start,
-                        start, (HEVENT)This->advise_event, &cookie);
-
-                LeaveCriticalSection(&This->csRenderLock);
-
-                ret = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
-                IReferenceClock_Unadvise(This->filter.clock, cookie);
-
-                if (ret == 1)
-                {
-                    TRACE("Flush signaled, discarding current sample.\n");
-                    return S_OK;
-                }
-
-                EnterCriticalSection(&This->csRenderLock);
-            }
-        }
-        else
-        {
-            LeaveCriticalSection(&This->csRenderLock);
-            /* Drop Sample */
-            return S_OK;
-        }
-    }
-    else
-        start = stop = -1;
-
-    if (SUCCEEDED(hr))
-    {
-        QualityControlRender_BeginRender(&This->qc, start, stop);
-        hr = This->pFuncsTable->pfnDoRenderSample(This, pSample);
-        QualityControlRender_EndRender(&This->qc);
-    }
-
-    QualityControlRender_DoQOS(&This->qc);
-
-    LeaveCriticalSection(&This->csRenderLock);
-
-    return hr;
 }
 
 void strmbase_renderer_init(struct strmbase_renderer *filter, IUnknown *outer,

@@ -223,6 +223,7 @@ struct options
     const char* output_name;
     const char* image_base;
     const char* section_align;
+    const char* file_align;
     const char* sysroot;
     const char* isysroot;
     const char* lib_suffix;
@@ -521,6 +522,15 @@ static strarray *get_link_args( struct options *opts, const char *output_name )
         if (opts->debug_file && strendswith(opts->debug_file, ".pdb"))
             strarray_add(link_args, strmake("-Wl,-pdb,%s", opts->debug_file));
 
+        if (!try_link( opts->prefix, link_args, "-Wl,--file-alignment,0x1000" ))
+            strarray_add( link_args, strmake( "-Wl,--file-alignment,%s",
+                                              opts->file_align ? opts->file_align : "0x1000" ));
+        else if (!try_link( opts->prefix, link_args, "-Wl,-Xlink=-filealign:0x1000" ))
+            /* lld from llvm 10 does not support mingw style --file-alignment,
+             * but it's possible to use msvc syntax */
+            strarray_add( link_args, strmake( "-Wl,-Xlink=-filealign:%s",
+                                              opts->file_align ? opts->file_align : "0x1000" ));
+
         strarray_addall( link_args, flags );
         return link_args;
 
@@ -546,6 +556,7 @@ static strarray *get_link_args( struct options *opts, const char *output_name )
         }
         else if (!opts->strip)
             strarray_add(link_args, "-Wl,-debug:dwarf");
+        strarray_add( link_args, strmake( "-Wl,-filealign:%s", opts->file_align ? opts->file_align : "0x1000" ));
 
         strarray_addall( link_args, flags );
         return link_args;
@@ -1913,6 +1924,11 @@ int main(int argc, char **argv)
                             if (!strcmp(Wl->base[j], "--section-alignment") && j < Wl->size - 1)
                             {
                                 opts.section_align = strdup( Wl->base[++j] );
+                                continue;
+                            }
+                            if (!strcmp(Wl->base[j], "--file-alignment") && j < Wl->size - 1)
+                            {
+                                opts.file_align = strdup( Wl->base[++j] );
                                 continue;
                             }
                             if (!strcmp(Wl->base[j], "--large-address-aware"))

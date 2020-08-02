@@ -135,10 +135,10 @@
 @ stdcall HBRUSH_UserMarshal(ptr ptr ptr)
 @ stdcall HBRUSH_UserSize(ptr long ptr)
 @ stdcall HBRUSH_UserUnmarshal(ptr ptr ptr)
-@ stdcall HDC_UserFree(ptr ptr)
-@ stdcall HDC_UserMarshal(ptr ptr ptr)
-@ stdcall HDC_UserSize(ptr long ptr)
-@ stdcall HDC_UserUnmarshal(ptr ptr ptr)
+@ stdcall HDC_UserFree(ptr ptr) combase.HDC_UserFree
+@ stdcall HDC_UserMarshal(ptr ptr ptr) combase.HDC_UserMarshal
+@ stdcall HDC_UserSize(ptr long ptr) combase.HDC_UserSize
+@ stdcall HDC_UserUnmarshal(ptr ptr ptr) combase.HDC_UserUnmarshal
 @ stdcall HENHMETAFILE_UserFree(ptr ptr)
 @ stdcall HENHMETAFILE_UserMarshal(ptr ptr ptr)
 @ stdcall HENHMETAFILE_UserSize(ptr long ptr)
@@ -147,14 +147,14 @@
 @ stdcall HGLOBAL_UserMarshal(ptr ptr ptr)
 @ stdcall HGLOBAL_UserSize(ptr long ptr)
 @ stdcall HGLOBAL_UserUnmarshal(ptr ptr ptr)
-@ stdcall HICON_UserFree(ptr ptr)
-@ stdcall HICON_UserMarshal(ptr ptr ptr)
-@ stdcall HICON_UserSize(ptr long ptr)
-@ stdcall HICON_UserUnmarshal(ptr ptr ptr)
-@ stdcall HMENU_UserFree(ptr ptr)
-@ stdcall HMENU_UserMarshal(ptr ptr ptr)
-@ stdcall HMENU_UserSize(ptr long ptr)
-@ stdcall HMENU_UserUnmarshal(ptr ptr ptr)
+@ stdcall HICON_UserFree(ptr ptr) combase.HICON_UserFree
+@ stdcall HICON_UserMarshal(ptr ptr ptr) combase.HICON_UserMarshal
+@ stdcall HICON_UserSize(ptr long ptr) combase.HICON_UserSize
+@ stdcall HICON_UserUnmarshal(ptr ptr ptr) combase.HICON_UserUnmarshal
+@ stdcall HMENU_UserFree(ptr ptr) combase.HMENU_UserFree
+@ stdcall HMENU_UserMarshal(ptr ptr ptr) combase.HMENU_UserMarshal
+@ stdcall HMENU_UserSize(ptr long ptr) combase.HMENU_UserSize
+@ stdcall HMENU_UserUnmarshal(ptr ptr ptr) combase.HMENU_UserUnmarshal
 @ stdcall HMETAFILEPICT_UserFree(ptr ptr)
 @ stdcall HMETAFILEPICT_UserMarshal(ptr ptr ptr)
 @ stdcall HMETAFILEPICT_UserSize(ptr long ptr)
@@ -167,10 +167,10 @@
 @ stdcall HPALETTE_UserMarshal(ptr ptr ptr)
 @ stdcall HPALETTE_UserSize(ptr long ptr)
 @ stdcall HPALETTE_UserUnmarshal(ptr ptr ptr)
-@ stdcall HWND_UserFree(ptr ptr)
-@ stdcall HWND_UserMarshal(ptr ptr ptr)
-@ stdcall HWND_UserSize(ptr long ptr)
-@ stdcall HWND_UserUnmarshal(ptr ptr ptr)
+@ stdcall HWND_UserFree(ptr ptr) combase.HWND_UserFree
+@ stdcall HWND_UserMarshal(ptr ptr ptr) combase.HWND_UserMarshal
+@ stdcall HWND_UserSize(ptr long ptr) combase.HWND_UserSize
+@ stdcall HWND_UserUnmarshal(ptr ptr ptr) combase.HWND_UserUnmarshal
 @ stdcall IIDFromString(wstr ptr)
 @ stub I_RemoteMain
 @ stdcall IsAccelerator(long long ptr ptr)
@@ -287,10 +287,10 @@
 @ stub UtConvertDvtd32toDvtd16
 @ stub UtGetDvtd16Info
 @ stub UtGetDvtd32Info
-@ stdcall WdtpInterfacePointer_UserFree(ptr)
-@ stdcall WdtpInterfacePointer_UserMarshal(ptr long ptr ptr ptr)
-@ stdcall WdtpInterfacePointer_UserSize(ptr long long ptr ptr)
-@ stdcall WdtpInterfacePointer_UserUnmarshal(ptr ptr ptr ptr)
+@ stdcall WdtpInterfacePointer_UserFree(ptr) combase.WdtpInterfacePointer_UserFree
+@ stdcall WdtpInterfacePointer_UserMarshal(ptr long ptr ptr ptr) combase.WdtpInterfacePointer_UserMarshal
+@ stdcall WdtpInterfacePointer_UserSize(ptr long long ptr ptr) combase.WdtpInterfacePointer_UserSize
+@ stdcall WdtpInterfacePointer_UserUnmarshal(ptr ptr ptr ptr) combase.WdtpInterfacePointer_UserUnmarshal
 @ stdcall WriteClassStg(ptr ptr)
 @ stdcall WriteClassStm(ptr ptr)
 @ stdcall WriteFmtUserTypeStg(ptr long ptr)

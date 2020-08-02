@@ -463,7 +463,7 @@
 @ cdecl sqrt(double) MSVCRT_sqrt
 @ cdecl srand(long) MSVCRT_srand
 @ varargs sscanf(str str) MSVCRT_sscanf
-@ cdecl strcat(str str) ntdll.strcat
+@ cdecl strcat(str str) MSVCRT_strcat
 @ cdecl strchr(str long) MSVCRT_strchr
 @ cdecl strcmp(str str) MSVCRT_strcmp
 @ cdecl strcoll(str str) MSVCRT_strcoll
@@ -504,11 +504,11 @@
 @ cdecl vsprintf(ptr str ptr) MSVCRT_vsprintf
 @ cdecl vswprintf(ptr wstr ptr) MSVCRT_vswprintf
 @ cdecl vwprintf(wstr ptr) MSVCRT_vwprintf
-@ cdecl wcscat(wstr wstr) ntdll.wcscat
+@ cdecl wcscat(wstr wstr) MSVCRT_wcscat
 @ cdecl wcschr(wstr long) MSVCRT_wcschr
 @ cdecl wcscmp(wstr wstr) MSVCRT_wcscmp
 @ cdecl wcscoll(wstr wstr) MSVCRT_wcscoll
-@ cdecl wcscpy(ptr wstr) ntdll.wcscpy
+@ cdecl wcscpy(ptr wstr) MSVCRT_wcscpy
 @ cdecl wcscspn(wstr wstr) ntdll.wcscspn
 @ cdecl wcsftime(ptr long wstr ptr) MSVCRT_wcsftime
 @ cdecl wcslen(wstr) MSVCRT_wcslen

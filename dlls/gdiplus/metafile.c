@@ -563,6 +563,16 @@ typedef struct EmfPlusDrawDriverString
     BYTE VariableData[1];
 } EmfPlusDrawDriverString;
 
+typedef struct EmfPlusFillRegion
+{
+    EmfPlusRecordHeader Header;
+    union
+    {
+        DWORD BrushId;
+        EmfPlusARGB Color;
+    } data;
+} EmfPlusFillRegion;
+
 static void metafile_free_object_table_entry(GpMetafile *metafile, BYTE id)
 {
     struct emfplus_object *object = &metafile->objtable[id];
@@ -1026,6 +1036,26 @@ static GpStatus METAFILE_PrepareBrushData(GDIPCONST GpBrush *brush, DWORD *size)
     case BrushTypeHatchFill:
         *size = FIELD_OFFSET(EmfPlusBrush, BrushData) + sizeof(EmfPlusHatchBrushData);
         break;
+    case BrushTypeLinearGradient:
+    {
+        BOOL ignore_xform;
+        GpLineGradient *gradient = (GpLineGradient*)brush;
+
+        *size = FIELD_OFFSET(EmfPlusBrush, BrushData.lineargradient.OptionalData);
+
+        GdipIsMatrixIdentity(&gradient->transform, &ignore_xform);
+        if (!ignore_xform)
+            *size += sizeof(gradient->transform);
+
+        if (gradient->pblendcount > 1 && gradient->pblendcolor && gradient->pblendpos)
+            *size += sizeof(DWORD) + gradient->pblendcount *
+                (sizeof(*gradient->pblendcolor) + sizeof(*gradient->pblendpos));
+        else if (gradient->blendcount > 1 && gradient->blendfac && gradient->blendpos)
+            *size += sizeof(DWORD) + gradient->blendcount *
+                (sizeof(*gradient->blendfac) + sizeof(*gradient->blendpos));
+
+        break;
+    }
     default:
         FIXME("unsupported brush type: %d\n", brush->bt);
         return NotImplemented;
@@ -1053,6 +1083,67 @@ static void METAFILE_FillBrushData(GDIPCONST GpBrush *brush, EmfPlusBrush *data)
         data->BrushData.hatch.HatchStyle = hatch->hatchstyle;
         data->BrushData.hatch.ForeColor = hatch->forecol;
         data->BrushData.hatch.BackColor = hatch->backcol;
+        break;
+    }
+    case BrushTypeLinearGradient:
+    {
+        BYTE *cursor;
+        BOOL ignore_xform;
+        GpLineGradient *gradient = (GpLineGradient*)brush;
+
+        data->BrushData.lineargradient.BrushDataFlags = 0;
+        data->BrushData.lineargradient.WrapMode = gradient->wrap;
+        data->BrushData.lineargradient.RectF.X = gradient->rect.X;
+        data->BrushData.lineargradient.RectF.Y = gradient->rect.Y;
+        data->BrushData.lineargradient.RectF.Width = gradient->rect.Width;
+        data->BrushData.lineargradient.RectF.Height = gradient->rect.Height;
+        data->BrushData.lineargradient.StartColor = gradient->startcolor;
+        data->BrushData.lineargradient.EndColor = gradient->endcolor;
+        data->BrushData.lineargradient.Reserved1 = gradient->startcolor;
+        data->BrushData.lineargradient.Reserved2 = gradient->endcolor;
+
+        if (gradient->gamma)
+            data->BrushData.lineargradient.BrushDataFlags |= BrushDataIsGammaCorrected;
+
+        cursor = &data->BrushData.lineargradient.OptionalData[0];
+
+        GdipIsMatrixIdentity(&gradient->transform, &ignore_xform);
+        if (!ignore_xform)
+        {
+            data->BrushData.lineargradient.BrushDataFlags |= BrushDataTransform;
+            memcpy(cursor, &gradient->transform, sizeof(gradient->transform));
+            cursor += sizeof(gradient->transform);
+        }
+
+        if (gradient->pblendcount > 1 && gradient->pblendcolor && gradient->pblendpos)
+        {
+            const DWORD count = gradient->pblendcount;
+
+            data->BrushData.lineargradient.BrushDataFlags |= BrushDataPresetColors;
+
+            memcpy(cursor, &count, sizeof(count));
+            cursor += sizeof(count);
+
+            memcpy(cursor, gradient->pblendpos, count * sizeof(*gradient->pblendpos));
+            cursor += count * sizeof(*gradient->pblendpos);
+
+            memcpy(cursor, gradient->pblendcolor, count * sizeof(*gradient->pblendcolor));
+        }
+        else if (gradient->blendcount > 1 && gradient->blendfac && gradient->blendpos)
+        {
+            const DWORD count = gradient->blendcount;
+
+            data->BrushData.lineargradient.BrushDataFlags |= BrushDataBlendFactorsH;
+
+            memcpy(cursor, &count, sizeof(count));
+            cursor += sizeof(count);
+
+            memcpy(cursor, gradient->blendpos, count * sizeof(*gradient->blendpos));
+            cursor += count * sizeof(*gradient->blendpos);
+
+            memcpy(cursor, gradient->blendfac, count * sizeof(*gradient->blendfac));
+        }
+
         break;
     }
     default:
@@ -2111,11 +2202,11 @@ static GpStatus metafile_deserialize_brush(const BYTE *record_data, UINT data_si
     case BrushTypeLinearGradient:
     {
         GpLineGradient *gradient = NULL;
-        GpPointF startpoint, endpoint;
+        GpRectF rect;
         UINT position_count = 0;
 
         offset = header_size + FIELD_OFFSET(EmfPlusLinearGradientBrushData, OptionalData);
-        if (data_size <= offset)
+        if (data_size < offset)
             return InvalidParameter;
 
         brushflags = data->BrushData.lineargradient.BrushDataFlags;
@@ -2124,7 +2215,7 @@ static GpStatus metafile_deserialize_brush(const BYTE *record_data, UINT data_si
 
         if (brushflags & BrushDataTransform)
         {
-            if (data_size <= offset + sizeof(EmfPlusTransformMatrix))
+            if (data_size < offset + sizeof(EmfPlusTransformMatrix))
                 return InvalidParameter;
             transform = (EmfPlusTransformMatrix *)(record_data + offset);
             offset += sizeof(EmfPlusTransformMatrix);
@@ -2149,13 +2240,14 @@ static GpStatus metafile_deserialize_brush(const BYTE *record_data, UINT data_si
                 return InvalidParameter;
         }
 
-        startpoint.X = data->BrushData.lineargradient.RectF.X;
-        startpoint.Y = data->BrushData.lineargradient.RectF.Y;
-        endpoint.X = startpoint.X + data->BrushData.lineargradient.RectF.Width;
-        endpoint.Y = startpoint.Y + data->BrushData.lineargradient.RectF.Height;
+        rect.X = data->BrushData.lineargradient.RectF.X;
+        rect.Y = data->BrushData.lineargradient.RectF.Y;
+        rect.Width = data->BrushData.lineargradient.RectF.Width;
+        rect.Height = data->BrushData.lineargradient.RectF.Height;
 
-        status = GdipCreateLineBrush(&startpoint, &endpoint, data->BrushData.lineargradient.StartColor,
-            data->BrushData.lineargradient.EndColor, data->BrushData.lineargradient.WrapMode, &gradient);
+        status = GdipCreateLineBrushFromRect(&rect, data->BrushData.lineargradient.StartColor,
+            data->BrushData.lineargradient.EndColor, LinearGradientModeHorizontal,
+            data->BrushData.lineargradient.WrapMode, &gradient);
         if (status == Ok)
         {
             if (transform)
@@ -2440,8 +2532,13 @@ static GpStatus METAFILE_PlaybackObject(GpMetafile *metafile, UINT flags, UINT d
 
         status = GdipCreateFontFamilyFromName(familyname, NULL, &family);
         GdipFree(familyname);
+
+        /* If a font family cannot be created from family name, native
+           falls back to a sans serif font. */
         if (status != Ok)
-            return InvalidParameter;
+            status = GdipGetGenericFontFamilySansSerif(&family);
+        if (status != Ok)
+            return status;
 
         status = GdipCreateFont(family, data->EmSize, data->FontStyleFlags, data->SizeUnit, (GpFont **)&object);
         GdipDeleteFontFamily(family);
@@ -3430,6 +3527,42 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
 
             GdipDeleteBrush((GpBrush*)solidfill);
             heap_free(alignedmem);
+
+            return stat;
+        }
+        case EmfPlusRecordTypeFillRegion:
+        {
+            EmfPlusFillRegion * const fill = (EmfPlusFillRegion*)header;
+            GpSolidFill *solidfill = NULL;
+            GpBrush *brush;
+            BYTE region = flags & 0xff;
+
+            if (dataSize != sizeof(EmfPlusFillRegion) - sizeof(EmfPlusRecordHeader))
+                return InvalidParameter;
+
+            if (region >= EmfPlusObjectTableSize ||
+                    real_metafile->objtable[region].type != ObjectTypeRegion)
+                return InvalidParameter;
+
+            if (flags & 0x8000)
+            {
+                stat = GdipCreateSolidFill(fill->data.Color, &solidfill);
+                if (stat != Ok)
+                    return stat;
+                brush = (GpBrush*)solidfill;
+            }
+            else
+            {
+                if (fill->data.BrushId >= EmfPlusObjectTableSize ||
+                        real_metafile->objtable[fill->data.BrushId].type != ObjectTypeBrush)
+                    return InvalidParameter;
+
+                brush = real_metafile->objtable[fill->data.BrushId].u.brush;
+            }
+
+            stat = GdipFillRegion(real_metafile->playback_graphics, brush,
+                real_metafile->objtable[region].u.region);
+            GdipDeleteBrush((GpBrush*)solidfill);
 
             return stat;
         }
@@ -4798,6 +4931,54 @@ GpStatus METAFILE_DrawDriverString(GpMetafile *metafile, GDIPCONST UINT16 *text,
         cursor += length * sizeof(*positions);
         memcpy(cursor, matrix, sizeof(*matrix));
     }
+
+    METAFILE_WriteRecords(metafile);
+
+    return Ok;
+}
+
+GpStatus METAFILE_FillRegion(GpMetafile* metafile, GpBrush* brush, GpRegion* region)
+{
+    GpStatus stat;
+    DWORD brush_id;
+    DWORD region_id;
+    EmfPlusFillRegion *fill_region_record;
+    BOOL inline_color;
+
+    if (metafile->metafile_type != MetafileTypeEmfPlusOnly &&
+            metafile->metafile_type != MetafileTypeEmfPlusDual)
+    {
+        FIXME("metafile type not supported: %i\n", metafile->metafile_type);
+        return NotImplemented;
+    }
+
+    inline_color = (brush->bt == BrushTypeSolidColor);
+    if (!inline_color)
+    {
+        stat = METAFILE_AddBrushObject(metafile, brush, &brush_id);
+        if (stat != Ok)
+            return stat;
+    }
+
+    stat = METAFILE_AddRegionObject(metafile, region, &region_id);
+    if (stat != Ok)
+        return stat;
+
+    stat = METAFILE_AllocateRecord(metafile, sizeof(EmfPlusFillRegion),
+        (void**)&fill_region_record);
+    if (stat != Ok)
+        return stat;
+
+    fill_region_record->Header.Type = EmfPlusRecordTypeFillRegion;
+    fill_region_record->Header.Flags = region_id;
+
+    if (inline_color)
+    {
+        fill_region_record->Header.Flags |= 0x8000;
+        fill_region_record->data.Color = ((GpSolidFill*)brush)->color;
+    }
+    else
+        fill_region_record->data.BrushId = brush_id;
 
     METAFILE_WriteRecords(metafile);
 

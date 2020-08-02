@@ -610,6 +610,10 @@ static HRESULT WINAPI OleObject_Close(IOleObject *iface, DWORD dwSaveOption)
         IOleClientSite_AddRef(This->client);
     hres = IOleObject_SetClientSite(iface, NULL);
     This->client_closed = client;
+
+    if(This->advise_holder)
+        IOleAdviseHolder_SendOnClose(This->advise_holder);
+
     return hres;
 }
 
@@ -719,11 +723,14 @@ static HRESULT WINAPI OleObject_IsUpToDate(IOleObject *iface)
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI OleObject_GetUserClassID(IOleObject *iface, CLSID* pClsid)
+static HRESULT WINAPI OleObject_GetUserClassID(IOleObject *iface, CLSID *pClsid)
 {
     WebBrowser *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%p)\n", This, pClsid);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, pClsid);
+
+    *pClsid = This->version == 1 ? CLSID_WebBrowser_V1 : CLSID_WebBrowser;
+    return S_OK;
 }
 
 static HRESULT WINAPI OleObject_GetUserType(IOleObject *iface, DWORD dwFormOfType,
@@ -757,25 +764,50 @@ static HRESULT WINAPI OleObject_GetExtent(IOleObject *iface, DWORD dwDrawAspect,
 }
 
 static HRESULT WINAPI OleObject_Advise(IOleObject *iface, IAdviseSink *pAdvSink,
-        DWORD* pdwConnection)
+        DWORD *pdwConnection)
 {
     WebBrowser *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%p, %p)\n", This, pAdvSink, pdwConnection);
-    return E_NOTIMPL;
+    HRESULT hr = S_OK;
+
+    TRACE("(%p)->(%p, %p)\n", This, pAdvSink, pdwConnection);
+
+    if(!pdwConnection)
+        return E_INVALIDARG;
+
+    *pdwConnection = 0;
+
+    if(!pAdvSink)
+        return E_INVALIDARG;
+
+    if(!This->advise_holder)
+        hr = CreateOleAdviseHolder(&This->advise_holder);
+
+    if(hr == S_OK)
+        hr = IOleAdviseHolder_Advise(This->advise_holder, pAdvSink, pdwConnection);
+
+    return hr;
 }
 
 static HRESULT WINAPI OleObject_Unadvise(IOleObject *iface, DWORD dwConnection)
 {
     WebBrowser *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%d)\n", This, dwConnection);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%d)\n", This, dwConnection);
+
+    if(!This->advise_holder)
+        return OLE_E_NOCONNECTION;
+
+    return IOleAdviseHolder_Unadvise(This->advise_holder, dwConnection);
 }
 
 static HRESULT WINAPI OleObject_EnumAdvise(IOleObject *iface, IEnumSTATDATA **ppenumAdvise)
 {
     WebBrowser *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%p)\n", This, ppenumAdvise);
-    return S_OK;
+
+    TRACE("(%p)->(%p): returning E_NOTIMPL\n", This, ppenumAdvise);
+
+    *ppenumAdvise = NULL;
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI OleObject_GetMiscStatus(IOleObject *iface, DWORD dwAspect, DWORD *pdwStatus)

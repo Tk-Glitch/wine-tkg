@@ -153,7 +153,11 @@ static HRESULT WINAPI multimedia_stream_SetState(IAMMultiMediaStream *iface, STR
     TRACE("(%p/%p)->(%u)\n", This, iface, new_state);
 
     if (new_state == STREAMSTATE_RUN)
+    {
         hr = IMediaControl_Run(This->media_control);
+        if (SUCCEEDED(hr))
+            hr = S_OK;
+    }
     else if (new_state == STREAMSTATE_STOP)
         hr = IMediaControl_Stop(This->media_control);
 
@@ -169,13 +173,15 @@ static HRESULT WINAPI multimedia_stream_GetTime(IAMMultiMediaStream *iface, STRE
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI multimedia_stream_GetDuration(IAMMultiMediaStream *iface, STREAM_TIME *pDuration)
+static HRESULT WINAPI multimedia_stream_GetDuration(IAMMultiMediaStream *iface, STREAM_TIME *duration)
 {
-    struct multimedia_stream *This = impl_from_IAMMultiMediaStream(iface);
+    struct multimedia_stream *mmstream = impl_from_IAMMultiMediaStream(iface);
 
-    FIXME("(%p/%p)->(%p) stub!\n", This, iface, pDuration);
+    TRACE("mmstream %p, duration %p.\n", mmstream, duration);
 
-    return E_NOTIMPL;
+    if (!mmstream->media_seeking)
+        return E_NOINTERFACE;
+    return IMediaSeeking_GetDuration(mmstream->media_seeking, duration);
 }
 
 static HRESULT WINAPI multimedia_stream_Seek(IAMMultiMediaStream *iface, STREAM_TIME seek_time)
@@ -444,6 +450,9 @@ static HRESULT WINAPI multimedia_stream_OpenFile(IAMMultiMediaStream *iface,
         ret = IGraphBuilder_Render(This->graph, This->ipin);
 
     IMediaStreamFilter_SupportSeeking(This->filter, This->type == STREAMTYPE_READ);
+
+    if (SUCCEEDED(ret) && (flags & AMMSF_RUN))
+        ret = IAMMultiMediaStream_SetState(iface, STREAMSTATE_RUN);
 
     if (EnumPins)
         IEnumPins_Release(EnumPins);

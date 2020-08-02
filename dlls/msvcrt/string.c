@@ -345,101 +345,255 @@ void CDECL MSVCRT__swab(char* src, char* dst, int len)
   }
 }
 
-enum round {
-    ROUND_ZERO, /* only used when dropped part contains only zeros */
-    ROUND_DOWN,
-    ROUND_EVEN,
-    ROUND_UP
-};
+static struct fpnum fpnum(int sign, int exp, ULONGLONG m, enum fpmod mod)
+{
+    struct fpnum ret;
 
-static double make_double(int sign, int exp, ULONGLONG m, enum round round, int *err)
+    ret.sign = sign;
+    ret.exp = exp;
+    ret.m = m;
+    ret.mod = mod;
+    return ret;
+}
+
+int fpnum_double(struct fpnum *fp, double *d)
 {
     ULONGLONG bits = 0;
 
-    TRACE("%c %s *2^%d (round %d)\n", sign == -1 ? '-' : '+', wine_dbgstr_longlong(m), exp, round);
-    if (!m) return sign * 0.0;
+    if (fp->mod == FP_VAL_INFINITY)
+    {
+        *d = fp->sign * INFINITY;
+        return 0;
+    }
+
+    if (fp->mod == FP_VAL_NAN)
+    {
+        bits = ~0;
+        if (fp->sign == 1)
+            bits &= ~((ULONGLONG)1 << (MANT_BITS + EXP_BITS - 1));
+        *d = *(double*)&bits;
+        return 0;
+    }
+
+    TRACE("%c %s *2^%d (round %d)\n", fp->sign == -1 ? '-' : '+',
+            wine_dbgstr_longlong(fp->m), fp->exp, fp->mod);
+    if (!fp->m)
+    {
+        *d = fp->sign * 0.0;
+        return 0;
+    }
 
     /* make sure that we don't overflow modifying exponent */
-    if (exp > 1<<EXP_BITS)
+    if (fp->exp > 1<<EXP_BITS)
     {
-        if (err) *err = MSVCRT_ERANGE;
-        return sign * INFINITY;
+        *d = fp->sign * INFINITY;
+        return MSVCRT_ERANGE;
     }
-    if (exp < -(1<<EXP_BITS))
+    if (fp->exp < -(1<<EXP_BITS))
     {
-        if (err) *err = MSVCRT_ERANGE;
-        return sign * 0.0;
+        *d = fp->sign * 0.0;
+        return MSVCRT_ERANGE;
     }
-    exp += MANT_BITS - 1;
+    fp->exp += MANT_BITS - 1;
 
     /* normalize mantissa */
-    while(m < (ULONGLONG)1 << (MANT_BITS-1))
+    while(fp->m < (ULONGLONG)1 << (MANT_BITS-1))
     {
-        m <<= 1;
-        exp--;
+        fp->m <<= 1;
+        fp->exp--;
     }
-    while(m >= (ULONGLONG)1 << MANT_BITS)
+    while(fp->m >= (ULONGLONG)1 << MANT_BITS)
     {
-        if (m & 1 || round != ROUND_ZERO)
+        if (fp->m & 1 || fp->mod != FP_ROUND_ZERO)
         {
-            if (!(m & 1)) round = ROUND_DOWN;
-            else if(round == ROUND_ZERO) round = ROUND_EVEN;
-            else round = ROUND_UP;
+            if (!(fp->m & 1)) fp->mod = FP_ROUND_DOWN;
+            else if(fp->mod == FP_ROUND_ZERO) fp->mod = FP_ROUND_EVEN;
+            else fp->mod = FP_ROUND_UP;
         }
-        m >>= 1;
-        exp++;
+        fp->m >>= 1;
+        fp->exp++;
     }
-
-    /* handle subnormal that falls into regular range due to rounding */
-    exp += (1 << (EXP_BITS-1)) - 1;
-    if (!exp && (round == ROUND_UP || (round == ROUND_EVEN && m & 1)))
-    {
-        if (m + 1 >= (ULONGLONG)1 << MANT_BITS)
-        {
-            m++;
-            m >>= 1;
-            exp++;
-            round = ROUND_DOWN;
-        }
-    }
+    fp->exp += (1 << (EXP_BITS-1)) - 1;
 
     /* handle subnormals */
-    if (exp <= 0)
-        m >>= 1;
-    while(m && exp<0)
+    if (fp->exp <= 0)
     {
-        m >>= 1;
-        exp++;
+        if (fp->m & 1 && fp->mod == FP_ROUND_ZERO) fp->mod = FP_ROUND_EVEN;
+        else if (fp->m & 1) fp->mod = FP_ROUND_UP;
+        else if (fp->mod != FP_ROUND_ZERO) fp->mod = FP_ROUND_DOWN;
+        fp->m >>= 1;
+    }
+    while(fp->m && fp->exp<0)
+    {
+        if (fp->m & 1 && fp->mod == FP_ROUND_ZERO) fp->mod = FP_ROUND_EVEN;
+        else if (fp->m & 1) fp->mod = FP_ROUND_UP;
+        else if (fp->mod != FP_ROUND_ZERO) fp->mod = FP_ROUND_DOWN;
+        fp->m >>= 1;
+        fp->exp++;
     }
 
     /* round mantissa */
-    if (round == ROUND_UP || (round == ROUND_EVEN && m & 1))
+    if (fp->mod == FP_ROUND_UP || (fp->mod == FP_ROUND_EVEN && fp->m & 1))
     {
-        m++;
-        if (m >= (ULONGLONG)1 << MANT_BITS)
+        fp->m++;
+
+        /* handle subnormal that falls into regular range due to rounding */
+        if (fp->m == (ULONGLONG)1 << (MANT_BITS - 1))
         {
-            exp++;
-            m >>= 1;
+            fp->exp++;
+        }
+        else if (fp->m >= (ULONGLONG)1 << MANT_BITS)
+        {
+            fp->exp++;
+            fp->m >>= 1;
         }
     }
 
-    if (exp >= (1<<EXP_BITS)-1)
+    if (fp->exp >= (1<<EXP_BITS)-1)
     {
-        if (err) *err = MSVCRT_ERANGE;
-        return sign * INFINITY;
+        *d = fp->sign * INFINITY;
+        return MSVCRT_ERANGE;
     }
-    if (!m || exp < 0)
+    if (!fp->m || fp->exp < 0)
     {
-        if (err) *err = MSVCRT_ERANGE;
-        return sign * 0.0;
+        *d = fp->sign * 0.0;
+        return MSVCRT_ERANGE;
     }
 
-    if (sign == -1) bits |= (ULONGLONG)1 << (MANT_BITS + EXP_BITS - 1);
-    bits |= (ULONGLONG)exp << (MANT_BITS - 1);
-    bits |= m & (((ULONGLONG)1 << (MANT_BITS - 1)) - 1);
+    if (fp->sign == -1)
+        bits |= (ULONGLONG)1 << (MANT_BITS + EXP_BITS - 1);
+    bits |= (ULONGLONG)fp->exp << (MANT_BITS - 1);
+    bits |= fp->m & (((ULONGLONG)1 << (MANT_BITS - 1)) - 1);
 
     TRACE("returning %s\n", wine_dbgstr_longlong(bits));
-    return *((double*)&bits);
+    *d = *(double*)&bits;
+    return 0;
+}
+
+#define LDBL_EXP_BITS 15
+#define LDBL_MANT_BITS 64
+int fpnum_ldouble(struct fpnum *fp, MSVCRT__LDOUBLE *d)
+{
+    if (fp->mod == FP_VAL_INFINITY)
+    {
+        d->x80[0] = 0;
+        d->x80[1] = 0x80000000;
+        d->x80[2] = (1 << LDBL_EXP_BITS) - 1;
+        if (fp->sign == -1)
+            d->x80[2] |= 1 << LDBL_EXP_BITS;
+        return 0;
+    }
+
+    if (fp->mod == FP_VAL_NAN)
+    {
+        d->x80[0] = ~0;
+        d->x80[1] = ~0;
+        d->x80[2] = (1 << LDBL_EXP_BITS) - 1;
+        if (fp->sign == -1)
+            d->x80[2] |= 1 << LDBL_EXP_BITS;
+        return 0;
+    }
+
+    TRACE("%c %s *2^%d (round %d)\n", fp->sign == -1 ? '-' : '+',
+            wine_dbgstr_longlong(fp->m), fp->exp, fp->mod);
+    if (!fp->m)
+    {
+        d->x80[0] = 0;
+        d->x80[1] = 0;
+        d->x80[2] = 0;
+        if (fp->sign == -1)
+            d->x80[2] |= 1 << LDBL_EXP_BITS;
+        return 0;
+    }
+
+    /* make sure that we don't overflow modifying exponent */
+    if (fp->exp > 1<<LDBL_EXP_BITS)
+    {
+        d->x80[0] = 0;
+        d->x80[1] = 0x80000000;
+        d->x80[2] = (1 << LDBL_EXP_BITS) - 1;
+        if (fp->sign == -1)
+            d->x80[2] |= 1 << LDBL_EXP_BITS;
+        return MSVCRT_ERANGE;
+    }
+    if (fp->exp < -(1<<LDBL_EXP_BITS))
+    {
+        d->x80[0] = 0;
+        d->x80[1] = 0;
+        d->x80[2] = 0;
+        if (fp->sign == -1)
+            d->x80[2] |= 1 << LDBL_EXP_BITS;
+        return MSVCRT_ERANGE;
+    }
+    fp->exp += LDBL_MANT_BITS - 1;
+
+    /* normalize mantissa */
+    while(fp->m < (ULONGLONG)1 << (LDBL_MANT_BITS-1))
+    {
+        fp->m <<= 1;
+        fp->exp--;
+    }
+    fp->exp += (1 << (LDBL_EXP_BITS-1)) - 1;
+
+    /* handle subnormals */
+    if (fp->exp <= 0)
+    {
+        if (fp->m & 1 && fp->mod == FP_ROUND_ZERO) fp->mod = FP_ROUND_EVEN;
+        else if (fp->m & 1) fp->mod = FP_ROUND_UP;
+        else if (fp->mod != FP_ROUND_ZERO) fp->mod = FP_ROUND_DOWN;
+        fp->m >>= 1;
+    }
+    while(fp->m && fp->exp<0)
+    {
+        if (fp->m & 1 && fp->mod == FP_ROUND_ZERO) fp->mod = FP_ROUND_EVEN;
+        else if (fp->m & 1) fp->mod = FP_ROUND_UP;
+        else if (fp->mod != FP_ROUND_ZERO) fp->mod = FP_ROUND_DOWN;
+        fp->m >>= 1;
+        fp->exp++;
+    }
+
+    /* round mantissa */
+    if (fp->mod == FP_ROUND_UP || (fp->mod == FP_ROUND_EVEN && fp->m & 1))
+    {
+        if (fp->m == MSVCRT_UI64_MAX)
+        {
+            fp->m = (ULONGLONG)1 << (LDBL_MANT_BITS - 1);
+            fp->exp++;
+        }
+        else
+        {
+            fp->m++;
+
+            /* handle subnormal that falls into regular range due to rounding */
+            if ((fp->m ^ (fp->m - 1)) & ((ULONGLONG)1 << (LDBL_MANT_BITS - 1))) fp->exp++;
+        }
+    }
+
+    if (fp->exp >= (1<<LDBL_EXP_BITS)-1)
+    {
+        d->x80[0] = 0;
+        d->x80[1] = 0x80000000;
+        d->x80[2] = (1 << LDBL_EXP_BITS) - 1;
+        if (fp->sign == -1)
+            d->x80[2] |= 1 << LDBL_EXP_BITS;
+        return MSVCRT_ERANGE;
+    }
+    if (!fp->m || fp->exp < 0)
+    {
+        d->x80[0] = 0;
+        d->x80[1] = 0;
+        d->x80[2] = 0;
+        if (fp->sign == -1)
+            d->x80[2] |= 1 << LDBL_EXP_BITS;
+        return MSVCRT_ERANGE;
+    }
+
+    d->x80[0] = fp->m;
+    d->x80[1] = fp->m >> 32;
+    d->x80[2] = fp->exp;
+    if (fp->sign == -1)
+        d->x80[2] |= 1 << LDBL_EXP_BITS;
+    return 0;
 }
 
 #if _MSVCR_VER >= 140
@@ -455,11 +609,11 @@ static inline int hex2int(char c)
     return -1;
 }
 
-static double strtod16(MSVCRT_wchar_t get(void *ctx), void unget(void *ctx),
-        void *ctx, int sign, MSVCRT_pthreadlocinfo locinfo, int *err)
+static struct fpnum fpnum_parse16(MSVCRT_wchar_t get(void *ctx), void unget(void *ctx),
+        void *ctx, int sign, MSVCRT_pthreadlocinfo locinfo)
 {
     BOOL found_digit = FALSE, found_dp = FALSE;
-    enum round round = ROUND_ZERO;
+    enum fpmod round = FP_ROUND_ZERO;
     MSVCRT_wchar_t nch;
     ULONGLONG m = 0;
     int val, exp = 0;
@@ -481,11 +635,11 @@ static double strtod16(MSVCRT_wchar_t get(void *ctx), void unget(void *ctx),
         nch = get(ctx);
         exp += 4;
 
-        if (val || round != ROUND_ZERO)
+        if (val || round != FP_ROUND_ZERO)
         {
-            if (val < 8) round = ROUND_DOWN;
-            else if (val == 8 && round == ROUND_ZERO) round = ROUND_EVEN;
-            else round = ROUND_UP;
+            if (val < 8) round = FP_ROUND_DOWN;
+            else if (val == 8 && round == FP_ROUND_ZERO) round = FP_ROUND_EVEN;
+            else round = FP_ROUND_UP;
         }
     }
 
@@ -498,7 +652,7 @@ static double strtod16(MSVCRT_wchar_t get(void *ctx), void unget(void *ctx),
     {
         if(nch!=MSVCRT_WEOF) unget(ctx);
         unget(ctx);
-        return 0.0;
+        return fpnum(0, 0, 0, 0);
     }
 
     while(m <= MSVCRT_UI64_MAX/16)
@@ -517,11 +671,11 @@ static double strtod16(MSVCRT_wchar_t get(void *ctx), void unget(void *ctx),
         if (val == -1) break;
         nch = get(ctx);
 
-        if (val || round != ROUND_ZERO)
+        if (val || round != FP_ROUND_ZERO)
         {
-            if (val < 8) round = ROUND_DOWN;
-            else if (val == 8 && round == ROUND_ZERO) round = ROUND_EVEN;
-            else round = ROUND_UP;
+            if (val < 8) round = FP_ROUND_DOWN;
+            else if (val == 8 && round == FP_ROUND_ZERO) round = FP_ROUND_EVEN;
+            else round = FP_ROUND_UP;
         }
     }
 
@@ -530,7 +684,7 @@ static double strtod16(MSVCRT_wchar_t get(void *ctx), void unget(void *ctx),
         if (nch != MSVCRT_WEOF) unget(ctx);
         if (found_dp) unget(ctx);
         unget(ctx);
-        return 0.0;
+        return fpnum(0, 0, 0, 0);
     }
 
     if(nch=='p' || nch=='P') {
@@ -567,12 +721,27 @@ static double strtod16(MSVCRT_wchar_t get(void *ctx), void unget(void *ctx),
         }
     }
 
-    return make_double(sign, exp, m, round, err);
+    return fpnum(sign, exp, m, round);
 }
 #endif
 
-double parse_double(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
-        void *ctx, MSVCRT_pthreadlocinfo locinfo, int *err)
+/* Converts first 3 limbs to ULONGLONG */
+/* Return FALSE on overflow */
+static inline BOOL bnum_to_mant(struct bnum *b, ULONGLONG *m)
+{
+    if(MSVCRT_UI64_MAX / LIMB_MAX / LIMB_MAX < b->data[bnum_idx(b, b->e-1)]) return FALSE;
+    *m = (ULONGLONG)b->data[bnum_idx(b, b->e-1)] * LIMB_MAX * LIMB_MAX;
+    if(b->b == b->e-1) return TRUE;
+    if(MSVCRT_UI64_MAX - *m < (ULONGLONG)b->data[bnum_idx(b, b->e-2)] * LIMB_MAX) return FALSE;
+    *m += (ULONGLONG)b->data[bnum_idx(b, b->e-2)] * LIMB_MAX;
+    if(b->b == b->e-2) return TRUE;
+    if(MSVCRT_UI64_MAX - *m < b->data[bnum_idx(b, b->e-3)]) return FALSE;
+    *m += b->data[bnum_idx(b, b->e-3)];
+    return TRUE;
+}
+
+static struct fpnum fpnum_parse_bnum(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
+        void *ctx, MSVCRT_pthreadlocinfo locinfo, BOOL ldouble, struct bnum *b)
 {
 #if _MSVCR_VER >= 140
     MSVCRT_wchar_t _infinity[] = { 'i', 'n', 'f', 'i', 'n', 'i', 't', 'y', 0 };
@@ -582,9 +751,9 @@ double parse_double(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
 #endif
     BOOL found_digit = FALSE, found_dp = FALSE, found_sign = FALSE;
     int e2 = 0, dp=0, sign=1, off, limb_digits = 0, i;
-    enum round round = ROUND_ZERO;
+    enum fpmod round = FP_ROUND_ZERO;
     MSVCRT_wchar_t nch;
-    struct bnum b;
+    ULONGLONG m;
 
     nch = get(ctx);
     if(nch == '-') {
@@ -615,20 +784,22 @@ double parse_double(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
             unget(ctx);
         }
         if(keep) {
-            if (str_match == _infinity) return sign*INFINITY;
-            if (str_match == _nan) return sign*NAN;
+            if (str_match == _infinity)
+                return fpnum(sign, 0, 0, FP_VAL_INFINITY);
+            if (str_match == _nan)
+                return fpnum(sign, 0, 0, FP_VAL_NAN);
         } else if(found_sign) {
             unget(ctx);
         }
 
-        return 0.0;
+        return fpnum(0, 0, 0, 0);
     }
 
     if(nch == '0') {
         found_digit = TRUE;
         nch = get(ctx);
         if(nch == 'x' || nch == 'X')
-            return strtod16(get, unget, ctx, sign, locinfo, err);
+            return fpnum_parse16(get, unget, ctx, sign, locinfo);
     }
 #endif
 
@@ -637,27 +808,27 @@ double parse_double(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
         nch = get(ctx);
     }
 
-    b.data[0] = 0;
-    b.b = 0;
-    b.e = 1;
+    b->b = 0;
+    b->e = 1;
+    b->data[0] = 0;
     while(nch>='0' && nch<='9') {
         found_digit = TRUE;
         if(limb_digits == LIMB_DIGITS) {
-            if(BNUM_IDX(b.b-1) == BNUM_IDX(b.e)) break;
+            if(bnum_idx(b, b->b-1) == bnum_idx(b, b->e)) break;
             else {
-                b.b--;
-                b.data[BNUM_IDX(b.b)] = 0;
+                b->b--;
+                b->data[bnum_idx(b, b->b)] = 0;
                 limb_digits = 0;
             }
         }
 
-        b.data[BNUM_IDX(b.b)] = b.data[BNUM_IDX(b.b)] * 10 + nch - '0';
+        b->data[bnum_idx(b, b->b)] = b->data[bnum_idx(b, b->b)] * 10 + nch - '0';
         limb_digits++;
         nch = get(ctx);
         dp++;
     }
     while(nch>='0' && nch<='9') {
-        if(nch != '0') b.data[BNUM_IDX(b.b)] |= 1;
+        if(nch != '0') b->data[bnum_idx(b, b->b)] |= 1;
         nch = get(ctx);
         dp++;
     }
@@ -668,7 +839,7 @@ double parse_double(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
     }
 
     /* skip leading '0' */
-    if(nch=='0' && !limb_digits && !b.b) {
+    if(nch=='0' && !limb_digits && !b->b) {
         found_digit = TRUE;
         while(nch == '0') {
             nch = get(ctx);
@@ -679,33 +850,28 @@ double parse_double(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
     while(nch>='0' && nch<='9') {
         found_digit = TRUE;
         if(limb_digits == LIMB_DIGITS) {
-            if(BNUM_IDX(b.b-1) == BNUM_IDX(b.e)) break;
+            if(bnum_idx(b, b->b-1) == bnum_idx(b, b->e)) break;
             else {
-                b.b--;
-                b.data[BNUM_IDX(b.b)] = 0;
+                b->b--;
+                b->data[bnum_idx(b, b->b)] = 0;
                 limb_digits = 0;
             }
         }
 
-        b.data[BNUM_IDX(b.b)] = b.data[BNUM_IDX(b.b)] * 10 + nch - '0';
+        b->data[bnum_idx(b, b->b)] = b->data[bnum_idx(b, b->b)] * 10 + nch - '0';
         limb_digits++;
         nch = get(ctx);
     }
     while(nch>='0' && nch<='9') {
-        if(nch != '0') b.data[BNUM_IDX(b.b)] |= 1;
+        if(nch != '0') b->data[bnum_idx(b, b->b)] |= 1;
         nch = get(ctx);
     }
-
-    if(!err) err = MSVCRT__errno();
-#if _MSVCR_VER == 0
-    *err = 0;
-#endif
 
     if(!found_digit) {
         if(nch != MSVCRT_WEOF) unget(ctx);
         if(found_dp) unget(ctx);
         if(found_sign) unget(ctx);
-        return 0.0;
+        return fpnum(0, 0, 0, 0);
     }
 
     if(nch=='e' || nch=='E' || nch=='d' || nch=='D') {
@@ -746,53 +912,82 @@ double parse_double(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
         unget(ctx);
     }
 
-    if(!b.data[BNUM_IDX(b.e-1)]) return make_double(sign, 0, 0, ROUND_ZERO, err);
+    if(!b->data[bnum_idx(b, b->e-1)])
+        return fpnum(sign, 0, 0, 0);
 
     /* Fill last limb with 0 if needed */
-    if(b.b+1 != b.e) {
+    if(b->b+1 != b->e) {
         for(; limb_digits != LIMB_DIGITS; limb_digits++)
-            b.data[BNUM_IDX(b.b)] *= 10;
+            b->data[bnum_idx(b, b->b)] *= 10;
     }
-    for(; BNUM_IDX(b.b) < BNUM_IDX(b.e); b.b++) {
-        if(b.data[BNUM_IDX(b.b)]) break;
+    for(; bnum_idx(b, b->b) < bnum_idx(b, b->e); b->b++) {
+        if(b->data[bnum_idx(b, b->b)]) break;
     }
 
     /* move decimal point to limb boundary */
-    if(limb_digits==dp && b.b==b.e-1)
-        return make_double(sign, 0, b.data[BNUM_IDX(b.e-1)], ROUND_ZERO, err);
+    if(limb_digits==dp && b->b==b->e-1)
+        return fpnum(sign, 0, b->data[bnum_idx(b, b->e-1)], FP_ROUND_ZERO);
     off = (dp - limb_digits) % LIMB_DIGITS;
     if(off < 0) off += LIMB_DIGITS;
-    if(off) bnum_mult(&b, p10s[off]);
+    if(off) bnum_mult(b, p10s[off]);
 
-    if(dp-1 > MSVCRT_DBL_MAX_10_EXP)
-        return make_double(sign, INT_MAX, 1, ROUND_ZERO, err);
+    if(dp-1 > (ldouble ? DBL80_MAX_10_EXP : MSVCRT_DBL_MAX_10_EXP))
+        return fpnum(sign, INT_MAX, 1, FP_ROUND_ZERO);
     /* Count part of exponent stored in denormalized mantissa. */
     /* Increase exponent range to handle subnormals. */
-    if(dp-1 < MSVCRT_DBL_MIN_10_EXP-MSVCRT_DBL_DIG-18)
-        return make_double(sign, INT_MIN, 1, ROUND_ZERO, err);
+    if(dp-1 < (ldouble ? DBL80_MIN_10_EXP : MSVCRT_DBL_MIN_10_EXP-MSVCRT_DBL_DIG-18))
+        return fpnum(sign, INT_MIN, 1, FP_ROUND_ZERO);
 
-    while(dp > 2*LIMB_DIGITS) {
-        if(bnum_rshift(&b, 9)) dp -= LIMB_DIGITS;
+    while(dp > 3*LIMB_DIGITS) {
+        if(bnum_rshift(b, 9)) dp -= LIMB_DIGITS;
         e2 += 9;
     }
-    while(dp <= LIMB_DIGITS) {
-        if(bnum_lshift(&b, 29)) dp += LIMB_DIGITS;
+    while(dp <= 2*LIMB_DIGITS) {
+        if(bnum_lshift(b, 29)) dp += LIMB_DIGITS;
         e2 -= 29;
     }
-    while(b.data[BNUM_IDX(b.e-1)] < LIMB_MAX/10) {
-        bnum_lshift(&b, 1);
+    /* Make sure most significant mantissa bit will be set */
+    while(b->data[bnum_idx(b, b->e-1)] <= 9) {
+        bnum_lshift(b, 1);
         e2--;
     }
-
-    /* Check if fractional part is non-zero */
-    /* Caution: it's only correct because bnum_to_mant returns more than 53 bits */
-    for(i=b.e-3; i>=b.b; i--) {
-        if (!b.data[BNUM_IDX(b.b)]) continue;
-        round = ROUND_DOWN;
-        break;
+    while(!bnum_to_mant(b, &m)) {
+        bnum_rshift(b, 1);
+        e2++;
     }
 
-    return make_double(sign, e2, bnum_to_mant(&b), round, err);
+    if(b->e-4 >= b->b && b->data[bnum_idx(b, b->e-4)]) {
+        if(b->data[bnum_idx(b, b->e-4)] > LIMB_MAX/2) round = FP_ROUND_UP;
+        else if(b->data[bnum_idx(b, b->e-4)] == LIMB_MAX/2) round = FP_ROUND_EVEN;
+        else round = FP_ROUND_DOWN;
+    }
+    if(round == FP_ROUND_ZERO || round == FP_ROUND_EVEN) {
+        for(i=b->e-5; i>=b->b; i--) {
+            if(!b->data[bnum_idx(b, b->b)]) continue;
+            if(round == FP_ROUND_EVEN) round = FP_ROUND_UP;
+            else round = FP_ROUND_DOWN;
+        }
+    }
+
+    return fpnum(sign, e2, m, round);
+}
+
+struct fpnum fpnum_parse(MSVCRT_wchar_t (*get)(void *ctx), void (*unget)(void *ctx),
+       void *ctx, MSVCRT_pthreadlocinfo locinfo, BOOL ldouble)
+{
+    if(!ldouble) {
+        BYTE bnum_data[FIELD_OFFSET(struct bnum, data[BNUM_PREC64])];
+        struct bnum *b = (struct bnum*)bnum_data;
+
+        b->size = BNUM_PREC64;
+        return fpnum_parse_bnum(get, unget, ctx, locinfo, ldouble, b);
+    } else {
+        BYTE bnum_data[FIELD_OFFSET(struct bnum, data[BNUM_PREC80])];
+        struct bnum *b = (struct bnum*)bnum_data;
+
+        b->size = BNUM_PREC80;
+        return fpnum_parse_bnum(get, unget, ctx, locinfo, ldouble, b);
+    }
 }
 
 static MSVCRT_wchar_t strtod_str_get(void *ctx)
@@ -808,13 +1003,19 @@ static void strtod_str_unget(void *ctx)
     (*p)--;
 }
 
-static inline double strtod_helper(const char *str, char **end, MSVCRT__locale_t locale, int *err)
+static inline double strtod_helper(const char *str, char **end, MSVCRT__locale_t locale, int *perr)
 {
     MSVCRT_pthreadlocinfo locinfo;
     const char *beg, *p;
+    struct fpnum fp;
     double ret;
+    int err;
 
-    if (err) *err = 0;
+    if (perr) *perr = 0;
+#if _MSVCR_VER == 0
+    else *MSVCRT__errno() = 0;
+#endif
+
     if (!MSVCRT_CHECK_PMT(str != NULL)) {
         if (end) *end = NULL;
         return 0;
@@ -830,8 +1031,12 @@ static inline double strtod_helper(const char *str, char **end, MSVCRT__locale_t
         p++;
     beg = p;
 
-    ret = parse_double(strtod_str_get, strtod_str_unget, &p, locinfo, err);
+    fp = fpnum_parse(strtod_str_get, strtod_str_unget, &p, locinfo, FALSE);
     if (end) *end = (p == beg ? (char*)str : (char*)p);
+
+    err = fpnum_double(&fp, &ret);
+    if (perr) *perr = err;
+    else if(err) *MSVCRT__errno() = err;
     return ret;
 }
 
@@ -1117,6 +1322,17 @@ int CDECL MSVCRT_strcat_s( char* dst, MSVCRT_size_t elem, const char* src )
 }
 
 /*********************************************************************
+ *      strcat (MSVCRT.@)
+ */
+char* __cdecl MSVCRT_strcat( char *dst, const char *src )
+{
+    char *d = dst;
+    while (*d) d++;
+    while ((*d++ = *src++));
+    return dst;
+}
+
+/*********************************************************************
  *      strncat_s (MSVCRT.@)
  */
 int CDECL MSVCRT_strncat_s( char* dst, MSVCRT_size_t elem, const char* src, MSVCRT_size_t count )
@@ -1160,7 +1376,11 @@ int CDECL MSVCRT_strncat_s( char* dst, MSVCRT_size_t elem, const char* src, MSVC
  */
 char* __cdecl MSVCRT_strncat(char *dst, const char *src, MSVCRT_size_t len)
 {
-    return strncat(dst, src, len);
+    char *d = dst;
+    while (*d) d++;
+    for ( ; len && *src; d++, src++, len--) *d = *src;
+    *d = 0;
+    return dst;
 }
 
 /*********************************************************************
@@ -1218,36 +1438,65 @@ MSVCRT_size_t CDECL MSVCRT_strxfrm( char *dest, const char *src, MSVCRT_size_t l
 }
 
 /********************************************************************
+ *		__STRINGTOLD_L (MSVCR80.@)
+ */
+int CDECL __STRINGTOLD_L( MSVCRT__LDOUBLE *value, char **endptr,
+        const char *str, int flags, MSVCRT__locale_t locale )
+{
+    MSVCRT_pthreadlocinfo locinfo;
+    const char *beg, *p;
+    int err, ret = 0;
+    struct fpnum fp;
+
+    if (flags) FIXME("flags not supported: %x\n", flags);
+
+    if (!locale)
+        locinfo = get_locinfo();
+    else
+        locinfo = locale->locinfo;
+
+    p = str;
+    while (MSVCRT__isspace_l((unsigned char)*p, locale))
+        p++;
+    beg = p;
+
+    fp = fpnum_parse(strtod_str_get, strtod_str_unget, &p, locinfo, TRUE);
+    if (endptr) *endptr = (p == beg ? (char*)str : (char*)p);
+    if (p == beg) ret = 4;
+
+    err = fpnum_ldouble(&fp, value);
+    if (err) ret = (value->x80[2] & 0x7fff ? 2 : 1);
+    return ret;
+}
+
+/********************************************************************
+ *              __STRINGTOLD (MSVCRT.@)
+ */
+int CDECL __STRINGTOLD( MSVCRT__LDOUBLE *value, char **endptr, const char *str, int flags )
+{
+    return __STRINGTOLD_L( value, endptr, str, flags, NULL );
+}
+
+/********************************************************************
+ *              _atoldbl_l (MSVCRT.@)
+ */
+int CDECL MSVCRT__atoldbl_l( MSVCRT__LDOUBLE *value, const char *str, MSVCRT__locale_t locale )
+{
+    char *endptr;
+    switch(__STRINGTOLD_L( value, &endptr, str, 0, locale ))
+    {
+    case 1: return MSVCRT__UNDERFLOW;
+    case 2: return MSVCRT__OVERFLOW;
+    default: return 0;
+    }
+}
+
+/********************************************************************
  *		_atoldbl (MSVCRT.@)
  */
 int CDECL MSVCRT__atoldbl(MSVCRT__LDOUBLE *value, const char *str)
 {
-  /* FIXME needs error checking for huge/small values */
-#ifdef HAVE_STRTOLD
-  long double ld;
-  TRACE("str %s value %p\n",str,value);
-  ld = strtold(str,0);
-  memcpy(value, &ld, 10);
-#else
-  FIXME("stub, str %s value %p\n",str,value);
-#endif
-  return 0;
-}
-
-/********************************************************************
- *		__STRINGTOLD (MSVCRT.@)
- */
-int CDECL __STRINGTOLD( MSVCRT__LDOUBLE *value, char **endptr, const char *str, int flags )
-{
-#ifdef HAVE_STRTOLD
-    long double ld;
-    FIXME("%p %p %s %x partial stub\n", value, endptr, str, flags );
-    ld = strtold(str,0);
-    memcpy(value, &ld, 10);
-#else
-    FIXME("%p %p %s %x stub\n", value, endptr, str, flags );
-#endif
-    return 0;
+    return MSVCRT__atoldbl_l( value, str, NULL );
 }
 
 /*********************************************************************
@@ -1255,7 +1504,9 @@ int CDECL __STRINGTOLD( MSVCRT__LDOUBLE *value, char **endptr, const char *str, 
  */
 MSVCRT_size_t __cdecl MSVCRT_strlen(const char *str)
 {
-    return strlen(str);
+    const char *s = str;
+    while (*s) s++;
+    return s - str;
 }
 
 /******************************************************************
@@ -2219,15 +2470,14 @@ int CDECL MSVCRT_I10_OUTPUT(MSVCRT__LDOUBLE ld80, int prec, int flag, struct _I1
  */
 int __cdecl MSVCRT_memcmp(const void *ptr1, const void *ptr2, MSVCRT_size_t n)
 {
-    return memcmp(ptr1, ptr2, n);
-}
+    const unsigned char *p1, *p2;
 
-/*********************************************************************
- *                  memcpy   (MSVCRT.@)
- */
-void * __cdecl MSVCRT_memcpy(void *dst, const void *src, MSVCRT_size_t n)
-{
-    return memmove(dst, src, n);
+    for (p1 = ptr1, p2 = ptr2; n; n--, p1++, p2++)
+    {
+        if (*p1 < *p2) return -1;
+        if (*p1 > *p2) return 1;
+    }
+    return 0;
 }
 
 /*********************************************************************
@@ -2235,7 +2485,28 @@ void * __cdecl MSVCRT_memcpy(void *dst, const void *src, MSVCRT_size_t n)
  */
 void * __cdecl MSVCRT_memmove(void *dst, const void *src, MSVCRT_size_t n)
 {
-    return memmove(dst, src, n);
+    volatile unsigned char *d = dst;  /* avoid gcc optimizations */
+    const unsigned char *s = src;
+
+    if ((MSVCRT_size_t)dst - (MSVCRT_size_t)src >= n)
+    {
+        while (n--) *d++ = *s++;
+    }
+    else
+    {
+        d += n - 1;
+        s += n - 1;
+        while (n--) *d-- = *s--;
+    }
+    return dst;
+}
+
+/*********************************************************************
+ *                  memcpy   (MSVCRT.@)
+ */
+void * __cdecl MSVCRT_memcpy(void *dst, const void *src, MSVCRT_size_t n)
+{
+    return MSVCRT_memmove(dst, src, n);
 }
 
 /*********************************************************************
@@ -2243,7 +2514,9 @@ void * __cdecl MSVCRT_memmove(void *dst, const void *src, MSVCRT_size_t n)
  */
 void* __cdecl MSVCRT_memset(void *dst, int c, MSVCRT_size_t n)
 {
-    return memset(dst, c, n);
+    volatile unsigned char *d = dst;  /* avoid gcc optimizations */
+    while (n--) *d++ = c;
+    return dst;
 }
 
 /*********************************************************************
@@ -2251,7 +2524,11 @@ void* __cdecl MSVCRT_memset(void *dst, int c, MSVCRT_size_t n)
  */
 char* __cdecl MSVCRT_strchr(const char *str, int c)
 {
-    return strchr(str, c);
+    do
+    {
+        if (*str == (char)c) return (char*)str;
+    } while (*str++);
+    return NULL;
 }
 
 /*********************************************************************
@@ -2259,7 +2536,9 @@ char* __cdecl MSVCRT_strchr(const char *str, int c)
  */
 char* __cdecl MSVCRT_strrchr(const char *str, int c)
 {
-    return strrchr(str, c);
+    char *ret = NULL;
+    do { if (*str == (char)c) ret = (char*)str; } while (*str++);
+    return ret;
 }
 
 /*********************************************************************
@@ -2267,7 +2546,10 @@ char* __cdecl MSVCRT_strrchr(const char *str, int c)
  */
 void* __cdecl MSVCRT_memchr(const void *ptr, int c, MSVCRT_size_t n)
 {
-    return memchr(ptr, c, n);
+    const unsigned char *p = ptr;
+
+    for (p = ptr; n; n--, p++) if (*p == c) return (void *)(ULONG_PTR)p;
+    return NULL;
 }
 
 /*********************************************************************
@@ -2459,7 +2741,8 @@ MSVCRT_size_t __cdecl MSVCRT_strcspn(const char *str, const char *reject)
  */
 char* __cdecl MSVCRT_strpbrk(const char *str, const char *accept)
 {
-    return strpbrk(str, accept);
+    for (; *str; str++) if (strchr( accept, *str )) return (char*)str;
+    return NULL;
 }
 
 /*********************************************************************

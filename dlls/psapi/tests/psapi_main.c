@@ -798,7 +798,7 @@ free_page:
 }
 
 static void check_QueryWorkingSetEx(PVOID addr, const char *desc, DWORD expected_valid,
-    DWORD expected_protection, DWORD expected_shared, BOOL todo)
+                                    DWORD expected_protection, DWORD expected_shared, BOOL todo)
 {
     PSAPI_WORKING_SET_EX_INFORMATION info;
     BOOL ret;
@@ -861,15 +861,7 @@ static void test_QueryWorkingSetEx(void)
 
     ret = VirtualProtect(addr, 0x1000, PAGE_EXECUTE_READWRITE, &prot);
     ok(ret, "VirtualProtect failed with %d\n", GetLastError());
-    check_QueryWorkingSetEx(addr, "exe,readwrite1", 1, PAGE_EXECUTE_WRITECOPY, 1, FALSE);
-
-    *(volatile char *)addr = 1;
-    check_QueryWorkingSetEx(addr, "exe,readwrite2", 1, PAGE_EXECUTE_READWRITE, 0, FALSE);
-
-    *(volatile char *)&tmp_data[0x1000];
-    check_QueryWorkingSetEx(tmp_data + 0x1000, "exe,data1", 1, PAGE_WRITECOPY, 1, FALSE);
-    tmp_data[0x1000] = 1;
-    check_QueryWorkingSetEx(tmp_data + 0x1000, "exe,data2", 1, PAGE_READWRITE, 0, FALSE);
+    check_QueryWorkingSetEx(addr, "exe,readonly2", 1, PAGE_READONLY, 1, FALSE);
 
     addr = VirtualAlloc(NULL, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     ok(addr != NULL, "VirtualAlloc failed with %d\n", GetLastError());
