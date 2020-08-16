@@ -75,6 +75,7 @@ SOURCES = \
 	commoncontrols.idl \
 	compobj.h \
 	comsvcs.idl \
+	consoleapi.h \
 	control.idl \
 	cor.idl \
 	cordebug.idl \
@@ -112,6 +113,7 @@ SOURCES = \
 	d3d11sdklayers.idl \
 	d3d11shader.h \
 	d3d12.idl \
+	d3d12shader.idl \
 	d3d8.h \
 	d3d8caps.h \
 	d3d8types.h \
@@ -476,6 +478,7 @@ SOURCES = \
 	msvcrt/setjmp.h \
 	msvcrt/share.h \
 	msvcrt/signal.h \
+	msvcrt/stdbool.h \
 	msvcrt/stddef.h \
 	msvcrt/stdint.h \
 	msvcrt/stdio.h \
@@ -732,6 +735,7 @@ SOURCES = \
 	wincodec.idl \
 	wincodecsdk.idl \
 	wincon.h \
+	wincontypes.h \
 	wincred.h \
 	wincrypt.h \
 	windef.h \
@@ -744,6 +748,7 @@ SOURCES = \
 	wine/fil_data.idl \
 	wine/itss.idl \
 	wine/library.h \
+	wine/orpc.idl \
 	wine/svcctl.idl \
 	wine/winedxgi.idl \
 	winerror.h \

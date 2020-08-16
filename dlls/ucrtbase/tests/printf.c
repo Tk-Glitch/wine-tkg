@@ -655,12 +655,16 @@ static void test_printf_fp(void)
         _CRT_INTERNAL_PRINTF_LEGACY_MSVCRT_COMPATIBILITY,
         _CRT_INTERNAL_PRINTF_LEGACY_THREE_DIGIT_EXPONENTS,
         _CRT_INTERNAL_PRINTF_LEGACY_MSVCRT_COMPATIBILITY
+            | _CRT_INTERNAL_PRINTF_LEGACY_THREE_DIGIT_EXPONENTS,
+        _CRT_INTERNAL_PRINTF_LEGACY_MSVCRT_COMPATIBILITY
             | _CRT_INTERNAL_PRINTF_LEGACY_THREE_DIGIT_EXPONENTS
+            | _CRT_INTERNAL_PRINTF_STANDARD_ROUNDING
     };
     const struct {
         const char *fmt;
         double d;
         const char *res[ARRAY_SIZE(flags)];
+        const char *broken[ARRAY_SIZE(flags)];
     } tests[] = {
         { "%a", NAN, { "nan", "0x1.#QNAN00000000p+0", "nan", "0x1.#QNAN00000000p+0" }},
         { "%A", NAN, { "NAN", "0X1.#QNAN00000000P+0", "NAN", "0X1.#QNAN00000000P+0" }},
@@ -746,18 +750,21 @@ static void test_printf_fp(void)
         { "%.a", 0.1e-20, { "0x1p-70" }},
         { "%a", 0.1e-20, { "0x1.2e3b40a0e9b4fp-70" }},
         { "%a", 4.9406564584124654e-324, { "0x0.0000000000001p-1022" }},
-        { "%.0a", -1.5, { "-0x1p+0" }},
+        { "%.0a", -1.5, { "-0x2p+0" }, { "-0x1p+0" }},
         { "%.0a", -0.5, { "-0x1p-1" }},
         { "%.0a", 0.5, { "0x1p-1" }},
-        { "%.0a", 1.5, { "0x1p+0" }},
+        { "%.0a", 1.5, { "0x2p+0" }, { "0x1p+0" }},
         { "%.0a", 1.99, { "0x2p+0" }},
         { "%.0a", 2, { "0x1p+1" }},
         { "%.0a", 9.5, { "0x1p+3" }},
         { "%.0a", 10.5, { "0x1p+3" }},
-        { "%#.0a", -1.5, { "-0x1.p+0" }},
+        { "%#.0a", -1.5, { "-0x2.p+0" }, { "-0x1.p+0" }},
         { "%#.0a", -0.5, { "-0x1.p-1" }},
         { "%#.0a", 0.5, { "0x1.p-1" }},
-        { "%#.0a", 1.5, { "0x1.p+0" }},
+        { "%#.0a", 1.5, { "0x2.p+0" }, { "0x1.p+0" }},
+        { "%#.1a", 1.03125, { "0x1.1p+0", NULL, NULL, NULL, "0x1.0p+0" }, { "0x1.0p+0" }},
+        { "%#.1a", 1.09375, { "0x1.2p+0" }, { "0x1.1p+0" }},
+        { "%#.1a", 1.15625, { "0x1.3p+0", NULL, NULL, NULL, "0x1.2p+0" }, { "0x1.2p+0" }},
 
         { "%f", 0, { "0.000000" }},
         { "%e", 0, { "0.000000e+00", NULL, "0.000000e+000" }},
@@ -773,7 +780,7 @@ static void test_printf_fp(void)
         { "%.020g", 0, { "0" }},
         { "%#.21f", 0, { "0.000000000000000000000" }},
         { "%#.20e", 0, { "0.00000000000000000000e+00", NULL, "0.00000000000000000000e+000" }},
-        { "%#.20g", 0, { "0.00000000000000000000" }},
+        { "%#.20g", 0, { "0.0000000000000000000" }, { "0.00000000000000000000" }},
 
         { "%f", 123, { "123.000000" }},
         { "%e", 123, { "1.230000e+02", NULL, "1.230000e+002" }},
@@ -809,23 +816,30 @@ static void test_printf_fp(void)
         { "%.30f", 1.0/3.0, { "0.333333333333333314829616256247" }},
         { "%.30lf", sqrt(2), { "1.414213562373095145474621858739" }},
         { "%.0g", 9.8949714229143402e-05, { "0.0001" }},
+        { "%.0f", 0.5, { "1", NULL, NULL, NULL, "0" }, {NULL, NULL, NULL, NULL, "1" }},
+        { "%.0f", 1.5, { "2" }},
+        { "%.0f", 2.5, { "3", NULL, NULL, NULL, "2" }, {NULL, NULL, NULL, NULL, "3" }},
     };
 
     const char *res = NULL;
+    const char *broken_res;
     char buf[100];
     int i, j, r;
 
     for (i = 0; i < ARRAY_SIZE(tests); i++)
     {
+        broken_res = NULL;
+
         for (j = 0; j < ARRAY_SIZE(flags); j++)
         {
             if (tests[i].res[j]) res = tests[i].res[j];
+            if (tests[i].broken[j]) broken_res = tests[i].broken[j];
 
             r = vsprintf_wrapper(flags[j], buf, sizeof(buf), tests[i].fmt, tests[i].d);
-            ok(r == strlen(res), "%d,%d) r = %d, expected %d\n",
-                    i, j, r, strlen(res));
-            ok(!strcmp(buf, res), "%d,%d) buf = %s, expected %s\n",
-                    i, j, buf, res);
+            ok(r == strlen(res) || broken(broken_res && r == strlen(broken_res)),
+                    "%d,%d) r = %d, expected %d\n", i, j, r, strlen(res));
+            ok(!strcmp(buf, res) || broken(broken_res && !strcmp(buf, broken_res)),
+                    "%d,%d) buf = %s, expected %s\n", i, j, buf, res);
         }
     }
 }

@@ -62,21 +62,26 @@
 @ stub RoFailFastWithErrorContextInternal2
 @ stub RoFailFastWithErrorContextInternal
 @ stub UpdateProcessTracing
+@ stdcall CLIPFORMAT_UserFree(ptr ptr)
+@ stdcall CLIPFORMAT_UserMarshal(ptr ptr ptr)
+@ stdcall CLIPFORMAT_UserSize(ptr long ptr)
+@ stdcall CLIPFORMAT_UserUnmarshal(ptr ptr ptr)
 @ stub CLSIDFromOle1Class
-@ stdcall CLSIDFromProgID(wstr ptr) ole32.CLSIDFromProgID
-@ stdcall CLSIDFromString(wstr ptr) ole32.CLSIDFromString
+@ stdcall CLSIDFromProgID(wstr ptr)
+@ stdcall CLSIDFromProgIDEx(wstr ptr)
+@ stdcall CLSIDFromString(wstr ptr)
 @ stub CleanupOleStateInAllTls
 @ stdcall CleanupTlsOleState(ptr)
 @ stub ClearCleanupFlag
 @ stdcall CoAddRefServerProcess() ole32.CoAddRefServerProcess
 @ stub CoAllowUnmarshalerCLSID
 @ stub CoCancelCall
-@ stdcall CoCopyProxy(ptr ptr) ole32.CoCopyProxy
-@ stub CoCreateErrorInfo
-@ stdcall CoCreateFreeThreadedMarshaler(ptr ptr) ole32.CoCreateFreeThreadedMarshaler
-@ stdcall CoCreateGuid(ptr) ole32.CoCreateGuid
-@ stdcall CoCreateInstance(ptr ptr long ptr ptr) ole32.CoCreateInstance
-@ stdcall CoCreateInstanceEx(ptr ptr long ptr long ptr) ole32.CoCreateInstanceEx
+@ stdcall CoCopyProxy(ptr ptr)
+@ stdcall CoCreateErrorInfo(ptr) CreateErrorInfo
+@ stdcall CoCreateFreeThreadedMarshaler(ptr ptr)
+@ stdcall CoCreateGuid(ptr)
+@ stdcall CoCreateInstance(ptr ptr long ptr ptr)
+@ stdcall CoCreateInstanceEx(ptr ptr long ptr long ptr)
 @ stub CoCreateInstanceFromApp
 @ stub CoCreateObjectInContext
 @ stub CoDeactivateObject
@@ -86,13 +91,14 @@
 @ stub CoDisconnectContext
 @ stdcall CoDisconnectObject(ptr long) ole32.CoDisconnectObject
 @ stdcall CoEnableCallCancellation(ptr) ole32.CoEnableCallCancellation
-@ stdcall CoFreeUnusedLibraries() ole32.CoFreeUnusedLibraries
+@ stdcall CoFileTimeNow(ptr)
+@ stdcall CoFreeUnusedLibraries()
 @ stdcall CoFreeUnusedLibrariesEx(long long) ole32.CoFreeUnusedLibrariesEx
-@ stdcall CoGetActivationState(int128 long ptr) ole32.CoGetActivationState
+@ stdcall CoGetActivationState(int128 long ptr)
 @ stub CoGetApartmentID
 @ stdcall CoGetApartmentType(ptr ptr) ole32.CoGetApartmentType
 @ stdcall CoGetCallContext(ptr ptr) ole32.CoGetCallContext
-@ stdcall CoGetCallState(long ptr) ole32.CoGetCallState
+@ stdcall CoGetCallState(long ptr)
 @ stdcall CoGetCallerTID(ptr) ole32.CoGetCallerTID
 @ stub CoGetCancelObject
 @ stdcall CoGetClassObject(ptr long ptr ptr ptr) ole32.CoGetClassObject
@@ -100,42 +106,42 @@
 @ stdcall CoGetContextToken(ptr) ole32.CoGetContextToken
 @ stdcall CoGetCurrentLogicalThreadId(ptr) ole32.CoGetCurrentLogicalThreadId
 @ stdcall CoGetCurrentProcess() ole32.CoGetCurrentProcess
-@ stdcall CoGetDefaultContext(long ptr ptr) ole32.CoGetDefaultContext
+@ stdcall CoGetDefaultContext(long ptr ptr)
 @ stub CoGetErrorInfo
-@ stdcall CoGetInstanceFromFile(ptr ptr ptr long long wstr long ptr) ole32.CoGetInstanceFromFile
-@ stdcall CoGetInstanceFromIStorage(ptr ptr ptr long ptr long ptr) ole32.CoGetInstanceFromIStorage
-@ stdcall CoGetInterfaceAndReleaseStream(ptr ptr ptr) ole32.CoGetInterfaceAndReleaseStream
-@ stdcall CoGetMalloc(long ptr) ole32.CoGetMalloc
-@ stdcall CoGetMarshalSizeMax(ptr ptr ptr long ptr long) ole32.CoGetMarshalSizeMax
+@ stdcall CoGetInstanceFromFile(ptr ptr ptr long long wstr long ptr)
+@ stdcall CoGetInstanceFromIStorage(ptr ptr ptr long ptr long ptr)
+@ stdcall CoGetInterfaceAndReleaseStream(ptr ptr ptr)
+@ stdcall CoGetMalloc(long ptr)
+@ stdcall CoGetMarshalSizeMax(ptr ptr ptr long ptr long)
 @ stub CoGetModuleType
-@ stdcall CoGetObjectContext(ptr ptr) ole32.CoGetObjectContext
+@ stdcall CoGetObjectContext(ptr ptr)
 @ stdcall CoGetPSClsid(ptr ptr) ole32.CoGetPSClsid
 @ stub CoGetProcessIdentifier
 @ stdcall CoGetStandardMarshal(ptr ptr long ptr long ptr) ole32.CoGetStandardMarshal
 @ stub CoGetStdMarshalEx
 @ stub CoGetSystemSecurityPermissions
-@ stdcall CoGetTreatAsClass(ptr ptr) ole32.CoGetTreatAsClass
-@ stdcall CoImpersonateClient() ole32.CoImpersonateClient
+@ stdcall CoGetTreatAsClass(ptr ptr)
+@ stdcall CoImpersonateClient()
 @ stdcall CoIncrementMTAUsage(ptr) ole32.CoIncrementMTAUsage
 @ stdcall CoInitializeEx(ptr long) ole32.CoInitializeEx
-@ stdcall CoInitializeSecurity(ptr long ptr ptr long long ptr long ptr) ole32.CoInitializeSecurity
+@ stdcall CoInitializeSecurity(ptr long ptr ptr long long ptr long ptr)
 @ stdcall CoInitializeWOW(long long) ole32.CoInitializeWOW
 @ stub CoInvalidateRemoteMachineBindings
 @ stdcall CoIsHandlerConnected(ptr) ole32.CoIsHandlerConnected
 @ stdcall CoLockObjectExternal(ptr long long) ole32.CoLockObjectExternal
-@ stdcall CoMarshalHresult(ptr long) ole32.CoMarshalHresult
-@ stdcall CoMarshalInterThreadInterfaceInStream(ptr ptr ptr) ole32.CoMarshalInterThreadInterfaceInStream
-@ stdcall CoMarshalInterface(ptr ptr ptr long ptr long) ole32.CoMarshalInterface
+@ stdcall CoMarshalHresult(ptr long)
+@ stdcall CoMarshalInterThreadInterfaceInStream(ptr ptr ptr)
+@ stdcall CoMarshalInterface(ptr ptr ptr long ptr long)
 @ stub CoPopServiceDomain
 @ stub CoPushServiceDomain
 @ stub CoQueryAuthenticationServices
-@ stdcall CoQueryClientBlanket(ptr ptr ptr ptr ptr ptr ptr) ole32.CoQueryClientBlanket
-@ stdcall CoQueryProxyBlanket(ptr ptr ptr ptr ptr ptr ptr ptr) ole32.CoQueryProxyBlanket
+@ stdcall CoQueryClientBlanket(ptr ptr ptr ptr ptr ptr ptr)
+@ stdcall CoQueryProxyBlanket(ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stub CoReactivateObject
 @ stub CoRegisterActivationFilter
 @ stdcall CoRegisterClassObject(ptr ptr long long ptr) ole32.CoRegisterClassObject
 @ stdcall CoRegisterInitializeSpy(ptr ptr) ole32.CoRegisterInitializeSpy
-@ stdcall CoRegisterMallocSpy(ptr) ole32.CoRegisterMallocSpy
+@ stdcall CoRegisterMallocSpy(ptr)
 @ stdcall CoRegisterMessageFilter(ptr ptr) ole32.CoRegisterMessageFilter
 @ stdcall CoRegisterPSClsid(ptr ptr) ole32.CoRegisterPSClsid
 @ stdcall CoRegisterSurrogate(ptr) ole32.CoRegisterSurrogate
@@ -144,36 +150,36 @@
 @ stdcall CoReleaseServerProcess() ole32.CoReleaseServerProcess
 @ stdcall CoResumeClassObjects() ole32.CoResumeClassObjects
 @ stub CoRetireServer
-@ stdcall CoRevertToSelf() ole32.CoRevertToSelf
+@ stdcall CoRevertToSelf()
 @ stdcall CoRevokeClassObject(long) ole32.CoRevokeClassObject
 @ stdcall CoRevokeInitializeSpy(int64) ole32.CoRevokeInitializeSpy
-@ stdcall CoRevokeMallocSpy() ole32.CoRevokeMallocSpy
+@ stdcall CoRevokeMallocSpy()
 @ stub CoSetCancelObject
 @ stub CoSetErrorInfo
-@ stdcall CoSetProxyBlanket(ptr long long ptr long long ptr long) ole32.CoSetProxyBlanket
+@ stdcall CoSetProxyBlanket(ptr long long ptr long long ptr long)
 @ stdcall CoSuspendClassObjects() ole32.CoSuspendClassObjects
 @ stdcall CoSwitchCallContext(ptr ptr) ole32.CoSwitchCallContext
-@ stdcall CoTaskMemAlloc(long) ole32.CoTaskMemAlloc
-@ stdcall CoTaskMemFree(ptr) ole32.CoTaskMemFree
-@ stdcall CoTaskMemRealloc(ptr long) ole32.CoTaskMemRealloc
+@ stdcall CoTaskMemAlloc(long)
+@ stdcall CoTaskMemFree(ptr)
+@ stdcall CoTaskMemRealloc(ptr long)
 @ stub CoTestCancel
 @ stdcall CoUninitialize() ole32.CoUninitialize
 @ stub CoUnloadingWOW
-@ stdcall CoUnmarshalHresult(ptr ptr) ole32.CoUnmarshalHresult
+@ stdcall CoUnmarshalHresult(ptr ptr)
 @ stdcall CoUnmarshalInterface(ptr ptr ptr) ole32.CoUnmarshalInterface
 @ stub CoVrfCheckThreadState
 @ stub CoVrfGetThreadState
 @ stub CoVrfReleaseThreadState
 @ stdcall CoWaitForMultipleHandles(long long long ptr ptr) ole32.CoWaitForMultipleHandles
 @ stub CoWaitForMultipleObjects
-@ stdcall CreateErrorInfo(ptr) ole32.CreateErrorInfo
+@ stdcall CreateErrorInfo(ptr)
 @ stdcall CreateStreamOnHGlobal(ptr long ptr) ole32.CreateStreamOnHGlobal
 @ stub DcomChannelSetHResult
 @ stdcall DllDebugObjectRPCHook(long ptr) ole32.DllDebugObjectRPCHook
 @ stdcall DllGetActivationFactory(ptr ptr)
 @ stdcall -private DllGetClassObject(ptr ptr ptr) ole32.DllGetClassObject
 @ stub EnableHookObject
-@ stdcall FreePropVariantArray(long ptr) ole32.FreePropVariantArray
+@ stdcall FreePropVariantArray(long ptr)
 @ stub FreePropVariantArrayWorker
 @ stub GetCatalogHelper
 @ stdcall GetErrorInfo(long ptr) ole32.GetErrorInfo
@@ -181,10 +187,26 @@
 @ stdcall GetHGlobalFromStream(ptr ptr) ole32.GetHGlobalFromStream
 @ stub GetHookInterface
 @ stdcall GetRestrictedErrorInfo(ptr)
+@ stdcall HACCEL_UserFree(ptr ptr)
+@ stdcall HACCEL_UserMarshal(ptr ptr ptr)
+@ stdcall HACCEL_UserSize(ptr long ptr)
+@ stdcall HACCEL_UserUnmarshal(ptr ptr ptr)
+@ stdcall HBITMAP_UserFree(ptr ptr)
+@ stdcall HBITMAP_UserMarshal(ptr ptr ptr)
+@ stdcall HBITMAP_UserSize(ptr long ptr)
+@ stdcall HBITMAP_UserUnmarshal(ptr ptr ptr)
+@ stdcall HBRUSH_UserFree(ptr ptr)
+@ stdcall HBRUSH_UserMarshal(ptr ptr ptr)
+@ stdcall HBRUSH_UserSize(ptr long ptr)
+@ stdcall HBRUSH_UserUnmarshal(ptr ptr ptr)
 @ stdcall HDC_UserFree(ptr ptr)
 @ stdcall HDC_UserMarshal(ptr ptr ptr)
 @ stdcall HDC_UserSize(ptr long ptr)
 @ stdcall HDC_UserUnmarshal(ptr ptr ptr)
+@ stdcall HGLOBAL_UserFree(ptr ptr)
+@ stdcall HGLOBAL_UserMarshal(ptr ptr ptr)
+@ stdcall HGLOBAL_UserSize(ptr long ptr)
+@ stdcall HGLOBAL_UserUnmarshal(ptr ptr ptr)
 @ stdcall HICON_UserFree(ptr ptr)
 @ stdcall HICON_UserMarshal(ptr ptr ptr)
 @ stdcall HICON_UserSize(ptr long ptr)
@@ -193,20 +215,24 @@
 @ stdcall HMENU_UserMarshal(ptr ptr ptr)
 @ stdcall HMENU_UserSize(ptr long ptr)
 @ stdcall HMENU_UserUnmarshal(ptr ptr ptr)
+@ stdcall HPALETTE_UserFree(ptr ptr)
+@ stdcall HPALETTE_UserMarshal(ptr ptr ptr)
+@ stdcall HPALETTE_UserSize(ptr long ptr)
+@ stdcall HPALETTE_UserUnmarshal(ptr ptr ptr)
 @ stub HSTRING_UserFree
-@ stub HSTRING_UserFree64
+@ stub -arch=win64 HSTRING_UserFree64
 @ stub HSTRING_UserMarshal
-@ stub HSTRING_UserMarshal64
+@ stub -arch=win64 HSTRING_UserMarshal64
 @ stub HSTRING_UserSize
-@ stub HSTRING_UserSize64
+@ stub -arch=win64 HSTRING_UserSize64
 @ stub HSTRING_UserUnmarshal
-@ stub HSTRING_UserUnmarshal64
+@ stub -arch=win64 HSTRING_UserUnmarshal64
 @ stdcall HWND_UserFree(ptr ptr)
 @ stdcall HWND_UserMarshal(ptr ptr ptr)
 @ stdcall HWND_UserSize(ptr long ptr)
 @ stdcall HWND_UserUnmarshal(ptr ptr ptr)
 @ stub HkOleRegisterObject
-@ stdcall IIDFromString(wstr ptr) ole32.IIDFromString
+@ stdcall IIDFromString(wstr ptr)
 @ stub InternalAppInvokeExceptionFilter
 @ stub InternalCCFreeUnused
 @ stub InternalCCGetClassInformationForDde
@@ -254,9 +280,9 @@
 @ stub NdrExtStubInitialize
 @ stub NdrOleDllGetClassObject
 @ stub NdrpFindInterface
-@ stdcall ProgIDFromCLSID(ptr ptr) ole32.ProgIDFromCLSID
-@ stdcall PropVariantClear(ptr) ole32.PropVariantClear
-@ stdcall PropVariantCopy(ptr ptr) ole32.PropVariantCopy
+@ stdcall ProgIDFromCLSID(ptr ptr)
+@ stdcall PropVariantClear(ptr)
+@ stdcall PropVariantCopy(ptr ptr)
 @ stub ReleaseFuncDescs
 @ stdcall RoActivateInstance(ptr ptr)
 @ stub RoCaptureErrorContext
@@ -293,18 +319,18 @@
 @ stub SetCleanupFlag
 @ stdcall SetErrorInfo(long ptr) ole32.SetErrorInfo
 @ stub SetRestrictedErrorInfo
-@ stdcall StringFromCLSID(ptr ptr) ole32.StringFromCLSID
-@ stdcall StringFromGUID2(ptr ptr long) ole32.StringFromGUID2
-@ stdcall StringFromIID(ptr ptr) ole32.StringFromIID
+@ stdcall StringFromCLSID(ptr ptr)
+@ stdcall StringFromGUID2(ptr ptr long)
+@ stdcall StringFromIID(ptr ptr) StringFromCLSID
 @ stub UpdateDCOMSettings
 @ stdcall WdtpInterfacePointer_UserFree(ptr)
-@ stub WdtpInterfacePointer_UserFree64
+@ stub -arch=win64 WdtpInterfacePointer_UserFree64
 @ stdcall WdtpInterfacePointer_UserMarshal(ptr long ptr ptr ptr)
-@ stub WdtpInterfacePointer_UserMarshal64
+@ stub -arch=win64 WdtpInterfacePointer_UserMarshal64
 @ stdcall WdtpInterfacePointer_UserSize(ptr long long ptr ptr)
-@ stub WdtpInterfacePointer_UserSize64
+@ stub -arch=win64 WdtpInterfacePointer_UserSize64
 @ stdcall WdtpInterfacePointer_UserUnmarshal(ptr ptr ptr ptr)
-@ stub WdtpInterfacePointer_UserUnmarshal64
+@ stub -arch=win64 WdtpInterfacePointer_UserUnmarshal64
 @ stdcall WindowsCompareStringOrdinal(ptr ptr ptr)
 @ stdcall WindowsConcatString(ptr ptr ptr)
 @ stdcall WindowsCreateString(wstr long ptr)

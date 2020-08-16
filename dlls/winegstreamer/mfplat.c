@@ -680,23 +680,25 @@ mfts[] =
 HRESULT mfplat_DllRegisterServer(void)
 {
     HRESULT hr;
+    unsigned int i;
 
-    for (unsigned int i = 0; i < ARRAY_SIZE(mfts); i++)
+    for (i = 0; i < ARRAY_SIZE(mfts); i++)
     {
         const struct mft *cur = &mfts[i];
+        unsigned int j, k;
 
         MFT_REGISTER_TYPE_INFO *input_types, *output_types;
         input_types = heap_alloc(cur->input_types_count * sizeof(input_types[0]));
         output_types = heap_alloc(cur->output_types_count * sizeof(output_types[0]));
-        for (unsigned int i = 0; i < cur->input_types_count; i++)
+        for (j = 0; j < cur->input_types_count; j++)
         {
-            input_types[i].guidMajorType = *(cur->major_type);
-            input_types[i].guidSubtype = *(cur->input_types[i]);
+            input_types[j].guidMajorType = *(cur->major_type);
+            input_types[j].guidSubtype = *(cur->input_types[i]);
         }
-        for (unsigned int i = 0; i < cur->output_types_count; i++)
+        for (k = 0; k < cur->output_types_count; k++)
         {
-            output_types[i].guidMajorType = *(cur->major_type);
-            output_types[i].guidSubtype = *(cur->output_types[i]);
+            output_types[k].guidMajorType = *(cur->major_type);
+            output_types[k].guidSubtype = *(cur->output_types[i]);
         }
 
         hr = MFTRegister(*(cur->clsid), *(cur->category), cur->name, cur->flags, cur->input_types_count,
@@ -820,6 +822,7 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
         else if (!(strcmp(mime_type, "video/x-h264")))
         {
             const char *profile, *level;
+            unsigned int i;
 
             IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_H264);
             IMFMediaType_SetUINT32(media_type, &MF_MT_COMPRESSED, TRUE);
@@ -877,7 +880,7 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
             }
             gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
             gst_caps_set_simple(caps, "alignment", G_TYPE_STRING, "au", NULL);
-            for (unsigned int i = 0; i < gst_caps_get_size(caps); i++)
+            for (i = 0; i < gst_caps_get_size(caps); i++)
             {
                 GstStructure *structure = gst_caps_get_structure (caps, i);
                 gst_structure_remove_field(structure, "codec_data");
@@ -1500,6 +1503,7 @@ IMFSample* mf_sample_from_gst_buffer(GstBuffer *gst_buffer)
     LONGLONG duration, time;
     int buffer_count;
     HRESULT hr;
+    unsigned int i;
 
     if (FAILED(hr = MFCreateSample(&out)))
         goto fail;
@@ -1515,7 +1519,7 @@ IMFSample* mf_sample_from_gst_buffer(GstBuffer *gst_buffer)
 
     buffer_count = gst_buffer_n_memory(gst_buffer);
 
-    for (unsigned int i = 0; i < buffer_count; i++)
+    for (i = 0; i < buffer_count; i++)
     {
         GstMemory *memory = gst_buffer_get_memory(gst_buffer, i);
         IMFMediaBuffer *mf_buffer = NULL;
@@ -1582,6 +1586,7 @@ GstBuffer* gst_buffer_from_mf_sample(IMFSample *mf_sample)
     LONGLONG duration, time;
     DWORD buffer_count;
     HRESULT hr;
+    unsigned int i;
 
     if (FAILED(hr = IMFSample_GetSampleDuration(mf_sample, &duration)))
         goto fail;
@@ -1595,7 +1600,7 @@ GstBuffer* gst_buffer_from_mf_sample(IMFSample *mf_sample)
     if (FAILED(hr = IMFSample_GetBufferCount(mf_sample, &buffer_count)))
         goto fail;
 
-    for (unsigned int i = 0; i < buffer_count; i++)
+    for (i = 0; i < buffer_count; i++)
     {
         DWORD buffer_max_size, buffer_size;
         GstMapInfo map_info;

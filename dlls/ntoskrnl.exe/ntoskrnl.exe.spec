@@ -529,6 +529,7 @@
 @ stdcall KeAcquireSpinLockAtDpcLevel(ptr)
 @ stdcall -arch=!i386 KeAcquireSpinLockRaiseToDpc(ptr)
 @ stub KeAddSystemServiceTable
+@ stdcall KeAlertThread(ptr long)
 @ stdcall KeAreApcsDisabled()
 @ stub KeAttachProcess
 @ stdcall KeBugCheck(long)
@@ -564,7 +565,7 @@
 @ stub KeI386ReleaseLid
 @ stub KeI386SetGdtSelector
 @ stub KeIcacheFlushCount
-@ stub KeInitializeApc
+@ stdcall KeInitializeApc(ptr ptr long ptr ptr ptr long ptr)
 @ stub KeInitializeDeviceQueue
 @ stdcall KeInitializeDpc(ptr ptr ptr)
 @ stdcall KeInitializeEvent(ptr long long)
@@ -599,7 +600,7 @@
 @ stdcall KeQueryTickCount(ptr)
 @ stdcall KeQueryTimeIncrement()
 @ stub KeRaiseUserException
-@ stub KeReadStateEvent
+@ stdcall KeReadStateEvent(ptr)
 @ stub KeReadStateMutant
 @ stub KeReadStateMutex
 @ stub KeReadStateQueue
@@ -647,6 +648,7 @@
 @ stdcall KeStackAttachProcess(ptr ptr)
 @ stub KeSynchronizeExecution
 @ stub KeTerminateThread
+@ stdcall KeTestAlertThread(long)
 @ extern KeTickCount
 @ stdcall KeUnstackDetachProcess(ptr)
 @ stub KeUpdateRunTime
@@ -835,7 +837,7 @@
 @ stub ObInsertObject
 @ stub ObLogSecurityDescriptor
 @ stub ObMakeTemporaryObject
-@ stub ObOpenObjectByName
+@ stdcall ObOpenObjectByName(ptr ptr long ptr long ptr ptr)
 @ stdcall ObOpenObjectByPointer(ptr long ptr long ptr long ptr)
 @ stdcall ObQueryNameString(ptr ptr long ptr)
 @ stub ObQueryObjectAuditingByHandle

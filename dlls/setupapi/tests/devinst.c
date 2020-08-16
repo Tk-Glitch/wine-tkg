@@ -2708,7 +2708,10 @@ static void test_class_installer(void)
     ok(*coinst_last_message == DIF_REMOVE, "Got unexpected message %#x.\n", *coinst_last_message);
     *coinst_callback_count = 0;
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     ok(*coinst_callback_count == 1, "Got %d callbacks.\n", *coinst_callback_count);
     ok(*coinst_last_message == DIF_DESTROYPRIVATEDATA, "Got unexpected message %#x.\n", *coinst_last_message);
@@ -2727,20 +2730,23 @@ static void test_class_installer(void)
 
     ret = SetupDiCallClassInstaller(DIF_ALLOW_INSTALL, set, &device);
     ok(!ret, "Expected failure.\n");
-    ok(GetLastError() == 0xdeadbeef, "Got unexpected error %#x.\n", GetLastError());
+    ok(GetLastError() == 0xdeadc0de, "Got unexpected error %#x.\n", GetLastError());
 
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
     ret = SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, &device);
     ok(!ret, "Expected failure.\n");
-    ok(GetLastError() == 0xdeadbeef, "Got unexpected error %#x.\n", GetLastError());
+    ok(GetLastError() == 0xdeadc0de, "Got unexpected error %#x.\n", GetLastError());
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
 
     ret = SetupDiCallClassInstaller(DIF_REMOVE, set, &device);
     ok(!ret, "Expected failure.\n");
-    ok(GetLastError() == 0xdeadbeef, "Got unexpected error %#x.\n", GetLastError());
+    ok(GetLastError() == 0xdeadc0de, "Got unexpected error %#x.\n", GetLastError());
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     /* Test returning ERROR_DI_DO_DEFAULT. */
 
@@ -2766,7 +2772,10 @@ static void test_class_installer(void)
     ok(ret, "Failed to call class installer, error %#x.\n", GetLastError());
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     /* The default entry point is ClassInstall(). */
 
@@ -2786,7 +2795,10 @@ static void test_class_installer(void)
     ok(*coinst_last_message == DIF_ALLOW_INSTALL, "Got unexpected message %#x.\n", *coinst_last_message);
     *coinst_callback_count = 0;
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     ok(*coinst_callback_count == 1, "Got %d callbacks.\n", *coinst_callback_count);
     ok(*coinst_last_message == DIF_DESTROYPRIVATEDATA, "Got unexpected message %#x.\n", *coinst_last_message);
@@ -2854,7 +2866,10 @@ static void test_class_coinstaller(void)
     ok(*coinst_last_message == DIF_REMOVE, "Got unexpected message %#x.\n", *coinst_last_message);
     *coinst_callback_count = 0;
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     todo_wine ok(*coinst_callback_count == 1, "Got %d callbacks.\n", *coinst_callback_count);
     todo_wine ok(*coinst_last_message == DIF_DESTROYPRIVATEDATA, "Got unexpected message %#x.\n", *coinst_last_message);
@@ -2875,15 +2890,18 @@ static void test_class_coinstaller(void)
 
     ret = SetupDiCallClassInstaller(DIF_ALLOW_INSTALL, set, &device);
     ok(!ret, "Expected failure.\n");
-    ok(GetLastError() == 0xdeadbeef, "Got unexpected error %#x.\n", GetLastError());
+    ok(GetLastError() == 0xdeadc0de, "Got unexpected error %#x.\n", GetLastError());
 
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
     ret = SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, &device);
     ok(!ret, "Expected failure.\n");
-    ok(GetLastError() == 0xdeadbeef, "Got unexpected error %#x.\n", GetLastError());
+    ok(GetLastError() == 0xdeadc0de, "Got unexpected error %#x.\n", GetLastError());
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     /* The default entry point is CoDeviceInstall(). */
 
@@ -2906,7 +2924,10 @@ static void test_class_coinstaller(void)
     ok(*coinst_last_message == DIF_ALLOW_INSTALL, "Got unexpected message %#x.\n", *coinst_last_message);
     *coinst_callback_count = 0;
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     ok(*coinst_callback_count == 1, "Got %d callbacks.\n", *coinst_callback_count);
     ok(*coinst_last_message == DIF_DESTROYPRIVATEDATA, "Got unexpected message %#x.\n", *coinst_last_message);
@@ -2954,7 +2975,10 @@ static void test_call_class_installer(void)
     ok(ret, "Failed to call class installer, error %#x.\n", GetLastError());
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     load_resource("coinst.dll", "C:\\windows\\system32\\winetest_coinst.dll");
 

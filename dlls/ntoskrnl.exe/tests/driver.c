@@ -468,7 +468,13 @@ static void test_sync(void)
     ret = wait_single(&manual_event, 0);
     ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
 
+    ret = KeReadStateEvent(&manual_event);
+    ok(ret == 0, "got %d\n", ret);
+
     KeSetEvent(&manual_event, 0, FALSE);
+
+    ret = KeReadStateEvent(&manual_event);
+    ok(ret == 1, "got %d\n", ret);
 
     ret = wait_single(&manual_event, 0);
     ok(ret == 0, "got %#x\n", ret);
@@ -562,9 +568,14 @@ static void test_sync(void)
     ret = ObReferenceObjectByHandle(handle, SYNCHRONIZE, *pExEventObjectType, KernelMode, (void **)&event, NULL);
     ok(!ret, "ObReferenceObjectByHandle failed: %#x\n", ret);
 
+
     ret = wait_single(event, 0);
     ok(ret == 0, "got %#x\n", ret);
+    ret = KeReadStateEvent(event);
+    ok(ret == 1, "got %d\n", ret);
     KeResetEvent(event);
+    ret = KeReadStateEvent(event);
+    ok(ret == 0, "got %d\n", ret);
     ret = wait_single(event, 0);
     ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
     ret = wait_single_handle(handle, 0);
@@ -1616,7 +1627,7 @@ static void test_completion(void)
     IoSetCompletionRoutine(irp, completion_cb, NULL, TRUE, TRUE, TRUE);
     ret = IoCallDriver(upper_device, irp);
     ok(ret == STATUS_SUCCESS, "IoCallDriver returned %#x\n", ret);
-    ok(got_completion == 2, "got %u calls to completion routine\n");
+    ok(got_completion == 2, "got %u calls to completion routine\n", got_completion);
 }
 
 static void test_IoAttachDeviceToDeviceStack(void)

@@ -684,6 +684,7 @@ static HRESULT WINAPI mf_decoder_SetInputType(IMFTransform *iface, DWORD id, IMF
     {
         GUID major_type, subtype;
         UINT64 unused;
+        unsigned int i;
 
         if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major_type)))
             return hr;
@@ -699,7 +700,7 @@ static HRESULT WINAPI mf_decoder_SetInputType(IMFTransform *iface, DWORD id, IMF
                 return hr;
         }
 
-        for (unsigned int i = 0; i < decoder_descs[decoder->type].input_types_count; i++)
+        for (i = 0; i < decoder_descs[decoder->type].input_types_count; i++)
         {
             if (IsEqualGUID(&subtype, decoder_descs[decoder->type].input_types[i]))
                 break;
@@ -752,6 +753,7 @@ static HRESULT WINAPI mf_decoder_SetOutputType(IMFTransform *iface, DWORD id, IM
     {
         GUID major_type, subtype;
         UINT64 unused;
+        unsigned int i;
 
         /* validate the type */
         if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major_type)))
@@ -768,7 +770,7 @@ static HRESULT WINAPI mf_decoder_SetOutputType(IMFTransform *iface, DWORD id, IM
                 return MF_E_INVALIDTYPE;
         }
 
-        for (unsigned int i = 0; i < decoder_descs[decoder->type].output_types_count; i++)
+        for (i = 0; i < decoder_descs[decoder->type].output_types_count; i++)
         {
             if (IsEqualGUID(&subtype, decoder_descs[decoder->type].output_types[i]))
                 break;
@@ -1048,6 +1050,7 @@ static HRESULT WINAPI mf_decoder_ProcessInput(IMFTransform *iface, DWORD id, IMF
 
     drain = gst_query_new_drain();
     gst_pad_peer_query(decoder->input_src, drain);
+    gst_query_unref(drain);
 
     if (decoder->output_counter || decoder->draining)
     {
@@ -1080,6 +1083,7 @@ static HRESULT WINAPI mf_decoder_ProcessOutput(IMFTransform *iface, DWORD flags,
     struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
     MFT_OUTPUT_DATA_BUFFER *relevant_buffer = NULL;
     GstSample *buffer;
+    unsigned int i;
 
     TRACE("%p, %#x, %u, %p, %p,\n", iface, flags, count, samples, status);
 
@@ -1089,7 +1093,7 @@ static HRESULT WINAPI mf_decoder_ProcessOutput(IMFTransform *iface, DWORD flags,
     if (!decoder->valid_state)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
-    for (unsigned int i = 0; i < count; i++)
+    for (i = 0; i < count; i++)
     {
         MFT_OUTPUT_DATA_BUFFER *out_buffer = &samples[i];
 

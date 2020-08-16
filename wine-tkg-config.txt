@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sun 02 Aug 2020 01:47:40 PM CEST :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sun 16 Aug 2020 09:30:11 PM CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.14.r0.g70b735760e
-Using wine-staging patchset (version 5.14.r0.gb71d588d)
+Wine (plain) version: 5.15.r0.g019fcaa364
+Using wine-staging patchset (version 5.15.2.r2.g68c50a8f)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
@@ -11,6 +11,7 @@ Using VKD3D for d3d12 translation
 Hotfix: 3a9edf9aad43c3e8ba724571da5381f821f1dc56 revert path used
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
+440fab3870b3c9ea778031ec51db69f8c3a687f5 reverted 
 b45c04f4c352ef81df5312684008839f4eeee03d reverted 
 9c99d9bceba34559a32f1e5906a6fcbcf91b0004 reverted 
 2116b49717f26802b51e2904de8d74651da33545 reverted 
@@ -39,7 +40,7 @@ fd6f50c0d3e96947846ca82ed0c9bd79fd8e5b80 reverted
 2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted 
 ( FS hack unbreak reverts applied )
 
-Applied reverting hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-64.mystagingrevert
+Applied hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-70.mystagingpatch
 Applied hotfix 934a09585a15e8491e422b43624ffe632b02bd3c-3.mystagingpatch
 Applied hotfix ntdll-ForceBottomUpAlloc-97fbe3f.mystagingpatch
 use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
@@ -49,7 +50,7 @@ childwindow.patch -- ( Applied child window for vk patch )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W ntdll-SystemRoot_Symlink -W winevulkan-vkGetPhysicalDeviceSurfaceCapabilitiesKHR -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-mouse-experimental -W user32-rawinput-hid
+Staging overrides, if any: -W ntdll-SystemRoot_Symlink -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-mouse-experimental -W user32-rawinput-hid
 
 mk11.patch -- ( Applied Mortal Kombat 11 fix )
 fsync-staging.patch -- ( Applied fsync, an experimental replacement for esync (staging) )
@@ -72,10 +73,11 @@ proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (s
 
 Applied hotfix d8d6a6b2e639d2e29e166a3faf988b81388ae191.mypatch
 Applied hotfix origin_3078f10d_fix.mypatch
+Applied hotfix 001-SMBIOS-0720c6cf.mypatch
+Applied hotfix 002-SMBIOS-d29c33a3.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch GNUTLShack.mypatch
 Applied your own patch amdags.mypatch
-Applied your own patch guy1524_mfplat_WIP.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
 
 wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

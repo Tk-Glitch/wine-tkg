@@ -54,23 +54,23 @@
  * Test helper macros
  */
 
-#define TEST_TYPE_SIZE(type, size)             C_ASSERT(sizeof(type) == size);
+#define TEST_TYPE_SIZE(type, size)              C_ASSERT(sizeof(type) == size);
 
 #ifdef TYPE_ALIGNMENT
-# define TEST_TYPE_ALIGN(type, align)          C_ASSERT(TYPE_ALIGNMENT(type) == align);
+# define TEST_TYPE_ALIGN(type, align)           C_ASSERT(TYPE_ALIGNMENT(type) == align);
 #else
 # define TEST_TYPE_ALIGN(type, align)
 #endif
 
 #ifdef _TYPE_ALIGNMENT
-# define TEST_TARGET_ALIGN(type, align)        C_ASSERT(_TYPE_ALIGNMENT(*(type)0) == align);
-# define TEST_FIELD_ALIGN(type, field, align)  C_ASSERT(_TYPE_ALIGNMENT(((type*)0)->field) == align);
+# define TEST_TARGET_ALIGN(type, align)         C_ASSERT(_TYPE_ALIGNMENT(*(type)0) == align);
+# define TEST_FIELD_ALIGN(type, field, align)   C_ASSERT(_TYPE_ALIGNMENT(((type*)0)->field) == align);
 #else
 # define TEST_TARGET_ALIGN(type, align)
 # define TEST_FIELD_ALIGN(type, field, align)
 #endif
 
-#define TEST_FIELD_OFFSET(type, field, offset) C_ASSERT(FIELD_OFFSET(type, field) == offset);
+#define TEST_FIELD_OFFSET(type, field, offset)  C_ASSERT(FIELD_OFFSET(type, field) == offset);
 
 #define TEST_TARGET_SIZE(type, size)            TEST_TYPE_SIZE(*(type)0, size)
 #define TEST_FIELD_SIZE(type, field, size)      TEST_TYPE_SIZE((((type*)0)->field), size)
@@ -360,6 +360,7 @@ static void test_pack_OLECHAR(void)
     /* OLECHAR */
     TEST_TYPE_SIZE   (OLECHAR, 2)
     TEST_TYPE_ALIGN  (OLECHAR, 2)
+    TEST_TYPE_UNSIGNED(OLECHAR)
 }
 
 static void test_pack_PROPID(void)
@@ -367,6 +368,7 @@ static void test_pack_PROPID(void)
     /* PROPID */
     TEST_TYPE_SIZE   (PROPID, 4)
     TEST_TYPE_ALIGN  (PROPID, 4)
+    TEST_TYPE_UNSIGNED(PROPID)
 }
 
 static void test_pack_RemHBITMAP(void)
@@ -451,6 +453,7 @@ static void test_pack_SCODE(void)
     /* SCODE */
     TEST_TYPE_SIZE   (SCODE, 4)
     TEST_TYPE_ALIGN  (SCODE, 4)
+    TEST_TYPE_SIGNED (SCODE)
 }
 
 static void test_pack_UP_BYTE_BLOB(void)
@@ -485,7 +488,7 @@ static void test_pack_VARIANT_BOOL(void)
     /* VARIANT_BOOL */
     TEST_TYPE_SIZE   (VARIANT_BOOL, 2)
     TEST_TYPE_ALIGN  (VARIANT_BOOL, 2)
-    TEST_TYPE_SIGNED(VARIANT_BOOL)
+    TEST_TYPE_SIGNED (VARIANT_BOOL)
 }
 
 static void test_pack_VARTYPE(void)
@@ -2178,6 +2181,7 @@ static void test_pack_OLECHAR(void)
     /* OLECHAR */
     TEST_TYPE_SIZE   (OLECHAR, 2)
     TEST_TYPE_ALIGN  (OLECHAR, 2)
+    TEST_TYPE_UNSIGNED(OLECHAR)
 }
 
 static void test_pack_PROPID(void)
@@ -2185,6 +2189,7 @@ static void test_pack_PROPID(void)
     /* PROPID */
     TEST_TYPE_SIZE   (PROPID, 4)
     TEST_TYPE_ALIGN  (PROPID, 4)
+    TEST_TYPE_UNSIGNED(PROPID)
 }
 
 static void test_pack_RemHBITMAP(void)
@@ -2269,6 +2274,7 @@ static void test_pack_SCODE(void)
     /* SCODE */
     TEST_TYPE_SIZE   (SCODE, 4)
     TEST_TYPE_ALIGN  (SCODE, 4)
+    TEST_TYPE_SIGNED (SCODE)
 }
 
 static void test_pack_UP_BYTE_BLOB(void)
@@ -2303,7 +2309,7 @@ static void test_pack_VARIANT_BOOL(void)
     /* VARIANT_BOOL */
     TEST_TYPE_SIZE   (VARIANT_BOOL, 2)
     TEST_TYPE_ALIGN  (VARIANT_BOOL, 2)
-    TEST_TYPE_SIGNED(VARIANT_BOOL)
+    TEST_TYPE_SIGNED (VARIANT_BOOL)
 }
 
 static void test_pack_VARTYPE(void)

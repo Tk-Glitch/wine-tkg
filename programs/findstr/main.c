@@ -117,7 +117,7 @@ static void write_to_stdout(const WCHAR *str)
 
 static BOOL run_find_for_line(const WCHAR *line, const WCHAR *tofind)
 {
-    void *found;
+    WCHAR *found;
     WCHAR lineending[] = {'\r', '\n', 0};
 
     if (lstrlenW(line) == 0 || lstrlenW(tofind) == 0)
@@ -145,17 +145,18 @@ static void output_resource_message(int id)
 int __cdecl wmain(int argc, WCHAR *argv[])
 {
     WCHAR *line;
-    WCHAR *tofind_pattern = NULL; WCHAR *tofind = NULL;
+    WCHAR *pattern = NULL; WCHAR *tofind = NULL;
     int i;
     int exitcode;
     int file_paths_len = 0;
     int file_paths_max = 0;
     WCHAR** file_paths = NULL;
+    BOOL exact_match = FALSE;
 
     TRACE("running find:");
     for (i = 0; i < argc; i++)
     {
-        TRACE(" %s", wine_dbgstr_w(argv[i]));
+        FIXME(" %s", wine_dbgstr_w(argv[i]));
     }
     TRACE("\n");
 
@@ -168,13 +169,21 @@ int __cdecl wmain(int argc, WCHAR *argv[])
             case '?':
                 output_resource_message(IDS_USAGE);
                 return 0;
+            case 'C':
+            case 'c':
+                 if (argv[i][2] == ':')
+                 {
+                     pattern = argv[i] + 3;
+                     exact_match = TRUE;
+                 }
+                 break;
             default:
-                WINE_FIXME("options not supported\n");
+                ;
             }
         }
-        else if (tofind_pattern == NULL)
+        else if (pattern == NULL)
         {
-            tofind_pattern = argv[i];
+            pattern = argv[i];
         }
         else
         {
@@ -187,7 +196,7 @@ int __cdecl wmain(int argc, WCHAR *argv[])
         }
     }
 
-    if (tofind_pattern == NULL)
+    if (pattern == NULL)
     {
         output_resource_message(IDS_INVALID_PARAMETER);
         return 2;
@@ -218,16 +227,18 @@ int __cdecl wmain(int argc, WCHAR *argv[])
                 write_to_stdout(message);
                 continue;
             }
-
             while ((line = read_line_from_handle(input)) != NULL)
             {
-                tofind = _wcstok (tofind_pattern, L" |");   /* break up search pattern like "foo bar" or "foo | bar" into "foo" and "bar" */
-                while (tofind != NULL && exitcode != 0)
-                {
-                    if (run_find_for_line(line, tofind))
-                        exitcode = 0;
-                    tofind = _wcstok (NULL, L" |");
-                }
+                tofind = _wcstok (pattern, exact_match ? L"" : L" |" ); /* break up (if necessary) search pattern like "foo bar" or "foo | bar" into "foo" and "bar" */
+                    while (tofind != NULL)
+                    {
+                        if (run_find_for_line(line, tofind))
+                        {
+                            exitcode = 0;
+                            break;
+                        }
+                        tofind = _wcstok (NULL, L" |");
+                     }
             heap_free(line);
             }
             CloseHandle(input);
@@ -238,13 +249,16 @@ int __cdecl wmain(int argc, WCHAR *argv[])
         HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
         while ((line = read_line_from_handle(input)) != NULL)
         {
-            tofind = _wcstok (tofind_pattern, L" |");   /* break up search pattern like "foo bar" or "foo | bar" into "foo" and "bar" */
-            while (tofind != NULL && exitcode != 0)
+            tofind = _wcstok (pattern, exact_match ? L"" : L" |" ); /* break up (if necessary) search pattern like "foo bar" or "foo | bar" into "foo" and "bar" */
+            while (tofind != NULL)
             {
                 if (run_find_for_line(line, tofind))
+                {
                     exitcode = 0;
+                    break;
+                }
                 tofind = _wcstok (NULL, L" |");
-            }
+             }
         heap_free(line);
         }
     }

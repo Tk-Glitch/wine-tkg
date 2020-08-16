@@ -167,7 +167,8 @@ HANDLE WINAPI Icmp6CreateFile(VOID)
     int sid=socket(AF_INET6,SOCK_RAW,IPPROTO_ICMPV6);
     if (sid < 0)
     {
-        /* Mac OS X supports non-privileged ICMP via SOCK_DGRAM type. */
+        /* Some systems (e.g. Linux 3.0+ and Mac OS X) support
+           non-privileged ICMP via SOCK_DGRAM type. */
         sid=socket(AF_INET6,SOCK_DGRAM,IPPROTO_ICMPV6);
     }
     if (sid < 0) {
@@ -225,7 +226,8 @@ HANDLE WINAPI IcmpCreateFile(VOID)
     int sid=socket(AF_INET,SOCK_RAW,IPPROTO_ICMP);
     if (sid < 0)
     {
-        /* Mac OS X supports non-privileged ICMP via SOCK_DGRAM type. */
+        /* Some systems (e.g. Linux 3.0+ and Mac OS X) support
+           non-privileged ICMP via SOCK_DGRAM type. */
         sid=socket(AF_INET,SOCK_DGRAM,IPPROTO_ICMP);
     }
     if (sid < 0 && !once++) {

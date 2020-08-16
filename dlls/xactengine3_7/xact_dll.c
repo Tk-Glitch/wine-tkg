@@ -15,130 +15,28 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-#ifdef XACT3_VER
 
 #include "config.h"
 
 #include <stdarg.h>
+#include <FACT.h>
 
 #define NONAMELESSUNION
 #define COBJMACROS
 
-#include "xaudio_private.h"
-
 #include "initguid.h"
 #include "xact3.h"
-#include <xact_classes.h>
-
 #include "rpcproxy.h"
 #include "wine/debug.h"
-
-#include <FACT.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(xact3);
 
 static HINSTANCE instance;
 
-#if XACT3_VER >= 0x0301 && XACT3_VER <= 0x304
-DEFINE_GUID(IID_IXACT3Engine301, 0xe72c1b9a, 0xd717, 0x41c0, 0x81, 0xa6, 0x50, 0xeb, 0x56, 0xe8, 0x06, 0x49);
-#endif
-
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
-{
-    TRACE("(%p, %d, %p)\n", hinstDLL, reason, pReserved);
-
-    switch (reason)
-    {
-    case DLL_PROCESS_ATTACH:
-        instance = hinstDLL;
-        DisableThreadLibraryCalls( hinstDLL );
-
-#ifdef HAVE_FAUDIOLINKEDVERSION
-        TRACE("Using FAudio version %d\n", FAudioLinkedVersion() );
-#endif
-        break;
-    }
-    return TRUE;
-}
-
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-HRESULT WINAPI DllRegisterServer(void)
-{
-    TRACE("\n");
-    return __wine_register_resources(instance);
-}
-
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    TRACE("\n");
-    return __wine_unregister_resources(instance);
-}
-
 typedef struct _XACT3CueImpl {
     IXACT3Cue IXACT3Cue_iface;
-
     FACTCue *fact_cue;
 } XACT3CueImpl;
-
-typedef struct _XACT3WaveImpl {
-    IXACT3Wave IXACT3Wave_iface;
-
-    FACTWave *fact_wave;
-} XACT3WaveImpl;
-
-typedef struct _XACT3SoundBankImpl {
-    IXACT3SoundBank IXACT3SoundBank_iface;
-
-    FACTSoundBank *fact_soundbank;
-} XACT3SoundBankImpl;
-
-typedef struct _XACT3WaveBankImpl {
-    IXACT3WaveBank IXACT3WaveBank_iface;
-
-    FACTWaveBank *fact_wavebank;
-} XACT3WaveBankImpl;
-
-typedef struct _XACT3EngineImpl {
-    IXACT3Engine IXACT3Engine_iface;
-
-    FACTAudioEngine *fact_engine;
-
-    XACT_READFILE_CALLBACK pReadFile;
-    XACT_GETOVERLAPPEDRESULT_CALLBACK pGetOverlappedResult;
-    XACT_NOTIFICATION_CALLBACK notification_callback;
-} XACT3EngineImpl;
-
-typedef struct wrap_readfile_struct {
-    XACT3EngineImpl *engine;
-    HANDLE file;
-} wrap_readfile_struct;
-
-static int32_t FACTCALL wrap_readfile(
-    void* hFile,
-    void* lpBuffer,
-    uint32_t nNumberOfBytesRead,
-    uint32_t *lpNumberOfBytesRead,
-    FACTOverlapped *lpOverlapped
-) {
-    wrap_readfile_struct *wrap = (wrap_readfile_struct*) hFile;
-    return wrap->engine->pReadFile(wrap->file, lpBuffer, nNumberOfBytesRead,
-            lpNumberOfBytesRead, lpOverlapped);
-}
-
-static int32_t FACTCALL wrap_getoverlappedresult(
-    void* hFile,
-    FACTOverlapped *lpOverlapped,
-    uint32_t *lpNumberOfBytesTransferred,
-    int32_t bWait
-) {
-    wrap_readfile_struct *wrap = (wrap_readfile_struct*) hFile;
-    return wrap->engine->pGetOverlappedResult(wrap->file, lpOverlapped,
-            lpNumberOfBytesTransferred, bWait);
-}
 
 static inline XACT3CueImpl *impl_from_IXACT3Cue(IXACT3Cue *iface)
 {
@@ -175,7 +73,6 @@ static HRESULT WINAPI IXACT3CueImpl_GetState(IXACT3Cue *iface, DWORD *pdwState)
 static HRESULT WINAPI IXACT3CueImpl_Destroy(IXACT3Cue *iface)
 {
     XACT3CueImpl *This = impl_from_IXACT3Cue(iface);
-#if XACT3_VER > 0x0304
     HRESULT hr;
 
     TRACE("(%p)\n", iface);
@@ -183,13 +80,6 @@ static HRESULT WINAPI IXACT3CueImpl_Destroy(IXACT3Cue *iface)
     hr = FACTCue_Destroy(This->fact_cue);
     HeapFree(GetProcessHeap(), 0, This);
     return hr;
-#else
-    TRACE("(%p)\n", iface);
-
-    FACTCue_Destroy(This->fact_cue);
-    HeapFree(GetProcessHeap(), 0, This);
-    return S_OK;
-#endif
 }
 
 static HRESULT WINAPI IXACT3CueImpl_SetMatrixCoefficients(IXACT3Cue *iface,
@@ -265,7 +155,7 @@ static HRESULT WINAPI IXACT3CueImpl_SetOutputVoices(IXACT3Cue *iface,
         const XAUDIO2_VOICE_SENDS *pSendList)
 {
     XACT3CueImpl *This = impl_from_IXACT3Cue(iface);
-    FIXME("(%p): stub!\n", This);
+    FIXME("(%p)->(%p): stub!\n", This, pSendList);
     return S_OK;
 }
 
@@ -274,7 +164,8 @@ static HRESULT WINAPI IXACT3CueImpl_SetOutputVoiceMatrix(IXACT3Cue *iface,
         UINT32 DestinationChannels, const float *pLevelMatrix)
 {
     XACT3CueImpl *This = impl_from_IXACT3Cue(iface);
-    FIXME("(%p): stub!\n", This);
+    FIXME("(%p)->(%p %u %u %p): stub!\n", This, pDestinationVoice, SourceChannels,
+            DestinationChannels, pLevelMatrix);
     return S_OK;
 }
 
@@ -293,6 +184,176 @@ static const IXACT3CueVtbl XACT3Cue_Vtbl =
     IXACT3CueImpl_SetOutputVoices,
     IXACT3CueImpl_SetOutputVoiceMatrix
 };
+
+typedef struct _XACT3SoundBankImpl {
+    IXACT3SoundBank IXACT3SoundBank_iface;
+
+    FACTSoundBank *fact_soundbank;
+} XACT3SoundBankImpl;
+
+static inline XACT3SoundBankImpl *impl_from_IXACT3SoundBank(IXACT3SoundBank *iface)
+{
+    return CONTAINING_RECORD(iface, XACT3SoundBankImpl, IXACT3SoundBank_iface);
+}
+
+static XACTINDEX WINAPI IXACT3SoundBankImpl_GetCueIndex(IXACT3SoundBank *iface,
+        PCSTR szFriendlyName)
+{
+    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
+
+    TRACE("(%p)->(%s)\n", This, szFriendlyName);
+
+    return FACTSoundBank_GetCueIndex(This->fact_soundbank, szFriendlyName);
+}
+
+static HRESULT WINAPI IXACT3SoundBankImpl_GetNumCues(IXACT3SoundBank *iface,
+        XACTINDEX *pnNumCues)
+{
+    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
+
+    TRACE("(%p)->(%p)\n", This, pnNumCues);
+
+    return FACTSoundBank_GetNumCues(This->fact_soundbank, pnNumCues);
+}
+
+static HRESULT WINAPI IXACT3SoundBankImpl_GetCueProperties(IXACT3SoundBank *iface,
+        XACTINDEX nCueIndex, XACT_CUE_PROPERTIES *pProperties)
+{
+    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
+
+    TRACE("(%p)->(%u, %p)\n", This, nCueIndex, pProperties);
+
+    return FACTSoundBank_GetCueProperties(This->fact_soundbank, nCueIndex,
+            (FACTCueProperties*) pProperties);
+}
+
+static HRESULT WINAPI IXACT3SoundBankImpl_Prepare(IXACT3SoundBank *iface,
+        XACTINDEX nCueIndex, DWORD dwFlags, XACTTIME timeOffset,
+        IXACT3Cue** ppCue)
+{
+    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
+    XACT3CueImpl *cue;
+    FACTCue *fcue;
+    UINT ret;
+
+    TRACE("(%p)->(%u, 0x%x, %u, %p)\n", This, nCueIndex, dwFlags, timeOffset,
+            ppCue);
+
+    ret = FACTSoundBank_Prepare(This->fact_soundbank, nCueIndex, dwFlags,
+            timeOffset, &fcue);
+    if(ret != 0)
+    {
+        ERR("Failed to CreateCue: %d\n", ret);
+        return E_FAIL;
+    }
+
+    cue = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*cue));
+    if (!cue)
+    {
+        FACTCue_Destroy(fcue);
+        ERR("Failed to allocate XACT3CueImpl!");
+        return E_OUTOFMEMORY;
+    }
+
+    cue->IXACT3Cue_iface.lpVtbl = &XACT3Cue_Vtbl;
+    cue->fact_cue = fcue;
+    *ppCue = (IXACT3Cue*)&cue->IXACT3Cue_iface;
+
+    TRACE("Created Cue: %p\n", cue);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI IXACT3SoundBankImpl_Play(IXACT3SoundBank *iface,
+        XACTINDEX nCueIndex, DWORD dwFlags, XACTTIME timeOffset,
+        IXACT3Cue** ppCue)
+{
+    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
+    XACT3CueImpl *cue;
+    FACTCue *fcue;
+    HRESULT hr;
+
+    TRACE("(%p)->(%u, 0x%x, %u, %p)\n", This, nCueIndex, dwFlags, timeOffset,
+            ppCue);
+
+    /* If the application doesn't want a handle, don't generate one at all.
+     * Let the engine handle that memory instead.
+     * -flibit
+     */
+    if (ppCue == NULL){
+        hr = FACTSoundBank_Play(This->fact_soundbank, nCueIndex, dwFlags,
+                timeOffset, NULL);
+    }else{
+        hr = FACTSoundBank_Play(This->fact_soundbank, nCueIndex, dwFlags,
+                timeOffset, &fcue);
+        if(FAILED(hr))
+            return hr;
+
+        cue = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*cue));
+        if (!cue)
+        {
+            FACTCue_Destroy(fcue);
+            ERR("Failed to allocate XACT3CueImpl!");
+            return E_OUTOFMEMORY;
+        }
+
+        cue->IXACT3Cue_iface.lpVtbl = &XACT3Cue_Vtbl;
+        cue->fact_cue = fcue;
+        *ppCue = (IXACT3Cue*)&cue->IXACT3Cue_iface;
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI IXACT3SoundBankImpl_Stop(IXACT3SoundBank *iface,
+        XACTINDEX nCueIndex, DWORD dwFlags)
+{
+    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
+
+    TRACE("(%p)->(%u)\n", This, dwFlags);
+
+    return FACTSoundBank_Stop(This->fact_soundbank, nCueIndex, dwFlags);
+}
+
+static HRESULT WINAPI IXACT3SoundBankImpl_Destroy(IXACT3SoundBank *iface)
+{
+    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
+    HRESULT hr;
+
+    TRACE("(%p)\n", This);
+
+    hr = FACTSoundBank_Destroy(This->fact_soundbank);
+    HeapFree(GetProcessHeap(), 0, This);
+    return hr;
+}
+
+static HRESULT WINAPI IXACT3SoundBankImpl_GetState(IXACT3SoundBank *iface,
+        DWORD *pdwState)
+{
+    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
+
+    TRACE("(%p)->(%p)\n", This, pdwState);
+
+    return FACTSoundBank_GetState(This->fact_soundbank, pdwState);
+}
+
+static const IXACT3SoundBankVtbl XACT3SoundBank_Vtbl =
+{
+    IXACT3SoundBankImpl_GetCueIndex,
+    IXACT3SoundBankImpl_GetNumCues,
+    IXACT3SoundBankImpl_GetCueProperties,
+    IXACT3SoundBankImpl_Prepare,
+    IXACT3SoundBankImpl_Play,
+    IXACT3SoundBankImpl_Stop,
+    IXACT3SoundBankImpl_Destroy,
+    IXACT3SoundBankImpl_GetState
+};
+
+typedef struct _XACT3WaveImpl {
+    IXACT3Wave IXACT3Wave_iface;
+
+    FACTWave *fact_wave;
+} XACT3WaveImpl;
 
 static inline XACT3WaveImpl *impl_from_IXACT3Wave(IXACT3Wave *iface)
 {
@@ -402,158 +463,11 @@ static const IXACT3WaveVtbl XACT3Wave_Vtbl =
     IXACT3WaveImpl_GetProperties
 };
 
-static inline XACT3SoundBankImpl *impl_from_IXACT3SoundBank(IXACT3SoundBank *iface)
-{
-    return CONTAINING_RECORD(iface, XACT3SoundBankImpl, IXACT3SoundBank_iface);
-}
+typedef struct _XACT3WaveBankImpl {
+    IXACT3WaveBank IXACT3WaveBank_iface;
 
-static XACTINDEX WINAPI IXACT3SoundBankImpl_GetCueIndex(IXACT3SoundBank *iface,
-        PCSTR szFriendlyName)
-{
-    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
-
-    TRACE("(%p)->(%s)\n", This, szFriendlyName);
-
-    return FACTSoundBank_GetCueIndex(This->fact_soundbank, szFriendlyName);
-}
-
-static HRESULT WINAPI IXACT3SoundBankImpl_GetNumCues(IXACT3SoundBank *iface,
-        XACTINDEX *pnNumCues)
-{
-    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
-
-    TRACE("(%p)->(%p)\n", This, pnNumCues);
-
-    return FACTSoundBank_GetNumCues(This->fact_soundbank, pnNumCues);
-}
-
-static HRESULT WINAPI IXACT3SoundBankImpl_GetCueProperties(IXACT3SoundBank *iface,
-        XACTINDEX nCueIndex, XACT_CUE_PROPERTIES *pProperties)
-{
-    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
-
-    TRACE("(%p)->(%u, %p)\n", This, nCueIndex, pProperties);
-
-    return FACTSoundBank_GetCueProperties(This->fact_soundbank, nCueIndex,
-            (FACTCueProperties*) pProperties);
-}
-
-static HRESULT WINAPI IXACT3SoundBankImpl_Prepare(IXACT3SoundBank *iface,
-        XACTINDEX nCueIndex, DWORD dwFlags, XACTTIME timeOffset,
-        IXACT3Cue** ppCue)
-{
-    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
-    XACT3CueImpl *cue;
-    FACTCue *fcue;
-    HRESULT hr;
-
-    TRACE("(%p)->(%u, 0x%x, %u, %p)\n", This, nCueIndex, dwFlags, timeOffset,
-            ppCue);
-
-    hr = FACTSoundBank_Prepare(This->fact_soundbank, nCueIndex, dwFlags,
-            timeOffset, &fcue);
-    if(FAILED(hr))
-        return hr;
-
-    cue = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*cue));
-    if (!cue){
-        FACTCue_Destroy(fcue);
-        ERR("Failed to allocate XACT3CueImpl!");
-        return hr;
-    }
-
-    cue->IXACT3Cue_iface.lpVtbl = &XACT3Cue_Vtbl;
-    cue->fact_cue = fcue;
-    *ppCue = (IXACT3Cue*)&cue->IXACT3Cue_iface;
-
-    TRACE("Created Cue: %p\n", cue);
-
-    return hr;
-}
-
-static HRESULT WINAPI IXACT3SoundBankImpl_Play(IXACT3SoundBank *iface,
-        XACTINDEX nCueIndex, DWORD dwFlags, XACTTIME timeOffset,
-        IXACT3Cue** ppCue)
-{
-    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
-    XACT3CueImpl *cue;
-    FACTCue *fcue;
-    HRESULT hr;
-
-    TRACE("(%p)->(%u, 0x%x, %u, %p)\n", This, nCueIndex, dwFlags, timeOffset,
-            ppCue);
-
-    /* If the application doesn't want a handle, don't generate one at all.
-     * Let the engine handle that memory instead.
-     * -flibit
-     */
-    if (ppCue == NULL){
-        hr = FACTSoundBank_Play(This->fact_soundbank, nCueIndex, dwFlags,
-                timeOffset, NULL);
-    }else{
-        hr = FACTSoundBank_Play(This->fact_soundbank, nCueIndex, dwFlags,
-                timeOffset, &fcue);
-        if(FAILED(hr))
-            return hr;
-
-        cue = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*cue));
-        if (!cue){
-            FACTCue_Destroy(fcue);
-            ERR("Failed to allocate XACT3CueImpl!");
-            return hr;
-        }
-
-        cue->IXACT3Cue_iface.lpVtbl = &XACT3Cue_Vtbl;
-        cue->fact_cue = fcue;
-        *ppCue = (IXACT3Cue*)&cue->IXACT3Cue_iface;
-    }
-
-    return hr;
-}
-
-static HRESULT WINAPI IXACT3SoundBankImpl_Stop(IXACT3SoundBank *iface,
-        XACTINDEX nCueIndex, DWORD dwFlags)
-{
-    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
-
-    TRACE("(%p)->(%u)\n", This, dwFlags);
-
-    return FACTSoundBank_Stop(This->fact_soundbank, nCueIndex, dwFlags);
-}
-
-static HRESULT WINAPI IXACT3SoundBankImpl_Destroy(IXACT3SoundBank *iface)
-{
-    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
-    HRESULT hr;
-
-    TRACE("(%p)\n", This);
-
-    hr = FACTSoundBank_Destroy(This->fact_soundbank);
-    HeapFree(GetProcessHeap(), 0, This);
-    return hr;
-}
-
-static HRESULT WINAPI IXACT3SoundBankImpl_GetState(IXACT3SoundBank *iface,
-        DWORD *pdwState)
-{
-    XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
-
-    TRACE("(%p)->(%p)\n", This, pdwState);
-
-    return FACTSoundBank_GetState(This->fact_soundbank, pdwState);
-}
-
-static const IXACT3SoundBankVtbl XACT3SoundBank_Vtbl =
-{
-    IXACT3SoundBankImpl_GetCueIndex,
-    IXACT3SoundBankImpl_GetNumCues,
-    IXACT3SoundBankImpl_GetCueProperties,
-    IXACT3SoundBankImpl_Prepare,
-    IXACT3SoundBankImpl_Play,
-    IXACT3SoundBankImpl_Stop,
-    IXACT3SoundBankImpl_Destroy,
-    IXACT3SoundBankImpl_GetState
-};
+    FACTWaveBank *fact_wavebank;
+} XACT3WaveBankImpl;
 
 static inline XACT3WaveBankImpl *impl_from_IXACT3WaveBank(IXACT3WaveBank *iface)
 {
@@ -610,21 +524,25 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Prepare(IXACT3WaveBank *iface,
     XACT3WaveBankImpl *This = impl_from_IXACT3WaveBank(iface);
     XACT3WaveImpl *wave;
     FACTWave *fwave;
-    HRESULT hr;
+    UINT ret;
 
     TRACE("(%p)->(0x%x, %u, 0x%x, %u, %p)\n", This, nWaveIndex, dwFlags,
             dwPlayOffset, nLoopCount, ppWave);
 
-    hr = FACTWaveBank_Prepare(This->fact_wavebank, nWaveIndex, dwFlags,
+    ret = FACTWaveBank_Prepare(This->fact_wavebank, nWaveIndex, dwFlags,
             dwPlayOffset, nLoopCount, &fwave);
-    if(FAILED(hr))
-        return hr;
+    if(ret != 0)
+    {
+        ERR("Failed to CreateWave: %d\n", ret);
+        return E_FAIL;
+    }
 
     wave = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wave));
-    if (!wave){
+    if (!wave)
+    {
         FACTWave_Destroy(fwave);
         ERR("Failed to allocate XACT3WaveImpl!");
-        return hr;
+        return E_OUTOFMEMORY;
     }
 
     wave->IXACT3Wave_iface.lpVtbl = &XACT3Wave_Vtbl;
@@ -633,7 +551,7 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Prepare(IXACT3WaveBank *iface,
 
     TRACE("Created Wave: %p\n", wave);
 
-    return hr;
+    return S_OK;
 }
 
 static HRESULT WINAPI IXACT3WaveBankImpl_Play(IXACT3WaveBank *iface,
@@ -662,17 +580,16 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Play(IXACT3WaveBank *iface,
             return hr;
 
         wave = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wave));
-        if (!wave){
+        if (!wave)
+        {
             FACTWave_Destroy(fwave);
             ERR("Failed to allocate XACT3WaveImpl!");
-            return hr;
+            return E_OUTOFMEMORY;
         }
 
         wave->IXACT3Wave_iface.lpVtbl = &XACT3Wave_Vtbl;
         wave->fact_wave = fwave;
         *ppWave = &wave->IXACT3Wave_iface;
-
-        TRACE("Created Wave: %p\n", wave);
     }
 
     return hr;
@@ -710,6 +627,44 @@ static const IXACT3WaveBankVtbl XACT3WaveBank_Vtbl =
     IXACT3WaveBankImpl_GetState
 };
 
+typedef struct _XACT3EngineImpl {
+    IXACT3Engine IXACT3Engine_iface;
+
+    FACTAudioEngine *fact_engine;
+
+    XACT_READFILE_CALLBACK pReadFile;
+    XACT_GETOVERLAPPEDRESULT_CALLBACK pGetOverlappedResult;
+    XACT_NOTIFICATION_CALLBACK notification_callback;
+} XACT3EngineImpl;
+
+typedef struct wrap_readfile_struct {
+    XACT3EngineImpl *engine;
+    HANDLE file;
+} wrap_readfile_struct;
+
+static int32_t FACTCALL wrap_readfile(
+    void* hFile,
+    void* lpBuffer,
+    uint32_t nNumberOfBytesRead,
+    uint32_t *lpNumberOfBytesRead,
+    FACTOverlapped *lpOverlapped)
+{
+    wrap_readfile_struct *wrap = (wrap_readfile_struct*) hFile;
+    return wrap->engine->pReadFile(wrap->file, lpBuffer, nNumberOfBytesRead,
+            lpNumberOfBytesRead, (LPOVERLAPPED)lpOverlapped);
+}
+
+static int32_t FACTCALL wrap_getoverlappedresult(
+    void* hFile,
+    FACTOverlapped *lpOverlapped,
+    uint32_t *lpNumberOfBytesTransferred,
+    int32_t bWait)
+{
+    wrap_readfile_struct *wrap = (wrap_readfile_struct*) hFile;
+    return wrap->engine->pGetOverlappedResult(wrap->file, (LPOVERLAPPED)lpOverlapped,
+            lpNumberOfBytesTransferred, bWait);
+}
+
 static inline XACT3EngineImpl *impl_from_IXACT3Engine(IXACT3Engine *iface)
 {
     return CONTAINING_RECORD(iface, XACT3EngineImpl, IXACT3Engine_iface);
@@ -723,12 +678,7 @@ static HRESULT WINAPI IXACT3EngineImpl_QueryInterface(IXACT3Engine *iface,
     TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), ppvObject);
 
     if(IsEqualGUID(riid, &IID_IUnknown) ||
-#if XACT3_VER >= 0x0301 && XACT3_VER <= 0x304
-            IsEqualGUID(riid, &IID_IXACT3Engine301)
-#else
-            IsEqualGUID(riid, &IID_IXACT3Engine)
-#endif
-        ){
+            IsEqualGUID(riid, &IID_IXACT3Engine)){
         *ppvObject = &This->IXACT3Engine_iface;
     }
     else
@@ -796,9 +746,9 @@ static HRESULT WINAPI IXACT3EngineImpl_GetFinalMixFormat(IXACT3Engine *iface,
             (FAudioWaveFormatExtensible*) pFinalMixFormat);
 }
 
-static void FACTCALL fact_notification_cb(const FACTNotification *pNotification)
+static void FACTCALL fact_notification_cb(const FACTNotification *notification)
 {
-    XACT3EngineImpl *engine = (XACT3EngineImpl *)pNotification->pvContext;
+    XACT3EngineImpl *engine = (XACT3EngineImpl *)notification->pvContext;
 
     /* Older versions of FAudio don't pass through the context */
     if (!engine)
@@ -807,12 +757,12 @@ static void FACTCALL fact_notification_cb(const FACTNotification *pNotification)
         return;
     }
 
-    if (pNotification->type == XACTNOTIFICATIONTYPE_SOUNDBANKDESTROYED)
+    if (notification->type == XACTNOTIFICATIONTYPE_SOUNDBANKDESTROYED)
     {
         FIXME("Callback XACTNOTIFICATIONTYPE_SOUNDBANKDESTROYED\n");
     }
     else
-        FIXME("Unsupported callback type %d\n", pNotification->type);
+        FIXME("Unsupported callback type %d\n", notification->type);
 }
 
 static HRESULT WINAPI IXACT3EngineImpl_Initialize(IXACT3Engine *iface,
@@ -864,7 +814,7 @@ static HRESULT WINAPI IXACT3EngineImpl_Initialize(IXACT3Engine *iface,
 
     ret = FACTAudioEngine_Initialize(This->fact_engine, &params);
     if (ret != 0)
-        FIXME("FACTAudioEngine_Initialize returned %d\n", ret);
+        WARN("FACTAudioEngine_Initialize returned %d\n", ret);
 
     return !ret ? S_OK : E_FAIL;
 }
@@ -896,18 +846,20 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateSoundBank(IXACT3Engine *iface,
     FACTSoundBank *fsb;
     UINT ret;
 
-    TRACE("(%p)->(%p, %u, 0x%x, 0x%x, %p)\n", This, pvBuffer, dwSize, dwFlags,
+    TRACE("(%p)->(%p, %u, 0x%x, 0x%x, %p): stub!\n", This, pvBuffer, dwSize, dwFlags,
             dwAllocAttributes, ppSoundBank);
 
     ret = FACTAudioEngine_CreateSoundBank(This->fact_engine, pvBuffer, dwSize,
             dwFlags, dwAllocAttributes, &fsb);
-    if (ret != 0) {
+    if(ret != 0)
+    {
         ERR("Failed to CreateSoundBank: %d\n", ret);
         return E_FAIL;
     }
 
     sb = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*sb));
-    if (!sb){
+    if (!sb)
+    {
         FACTSoundBank_Destroy(fsb);
         ERR("Failed to allocate XACT3SoundBankImpl!");
         return E_OUTOFMEMORY;
@@ -936,13 +888,15 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateInMemoryWaveBank(IXACT3Engine *ifac
 
     ret = FACTAudioEngine_CreateInMemoryWaveBank(This->fact_engine, pvBuffer,
             dwSize, dwFlags, dwAllocAttributes, &fwb);
-    if (ret != 0) {
-        ERR("Failed to CreateInMemoryWaveBank: %d\n", ret);
+    if(ret != 0)
+    {
+        ERR("Failed to CreateWaveBank: %d\n", ret);
         return E_FAIL;
     }
 
     wb = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wb));
-    if (!wb){
+    if (!wb)
+    {
         FACTWaveBank_Destroy(fwb);
         ERR("Failed to allocate XACT3WaveBankImpl!");
         return E_OUTOFMEMORY;
@@ -958,7 +912,7 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateInMemoryWaveBank(IXACT3Engine *ifac
 }
 
 static HRESULT WINAPI IXACT3EngineImpl_CreateStreamingWaveBank(IXACT3Engine *iface,
-        const XACT_STREAMING_PARAMETERS *pParms,
+        const XACT_WAVEBANK_STREAMING_PARAMETERS *pParms,
         IXACT3WaveBank **ppWaveBank)
 {
     XACT3EngineImpl *This = impl_from_IXACT3Engine(iface);
@@ -966,7 +920,7 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateStreamingWaveBank(IXACT3Engine *ifa
     wrap_readfile_struct *fake;
     XACT3WaveBankImpl *wb;
     FACTWaveBank *fwb;
-    HRESULT hr;
+    UINT ret;
 
     TRACE("(%p)->(%p, %p)\n", This, pParms, ppWaveBank);
 
@@ -980,16 +934,20 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateStreamingWaveBank(IXACT3Engine *ifa
     fakeParms.offset = pParms->offset;
     fakeParms.packetSize = pParms->packetSize;
 
-    hr = FACTAudioEngine_CreateStreamingWaveBank(This->fact_engine, &fakeParms,
+    ret = FACTAudioEngine_CreateStreamingWaveBank(This->fact_engine, &fakeParms,
             &fwb);
-    if(FAILED(hr))
-        return hr;
+    if(ret != 0)
+    {
+        ERR("Failed to CreateWaveBank: %d\n", ret);
+        return E_FAIL;
+    }
 
     wb = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wb));
-    if (!wb){
+    if (!wb)
+    {
         FACTWaveBank_Destroy(fwb);
         ERR("Failed to allocate XACT3WaveBankImpl!");
-        return hr;
+        return E_OUTOFMEMORY;
     }
 
     wb->IXACT3WaveBank_iface.lpVtbl = &XACT3WaveBank_Vtbl;
@@ -998,16 +956,6 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateStreamingWaveBank(IXACT3Engine *ifa
 
     TRACE("Created streaming WaveBank: %p\n", wb);
 
-    return hr;
-}
-
-static HRESULT WINAPI IXACT3EngineImpl_PrepareWave(IXACT3Engine *iface,
-        DWORD dwFlags, PCSTR szWavePath, WORD wStreamingPacketSize,
-        DWORD dwAlignment, DWORD dwPlayOffset, XACTLOOPCOUNT nLoopCount,
-        IXACT3Wave **ppWave)
-{
-    XACT3EngineImpl *This = impl_from_IXACT3Engine(iface);
-    FIXME("(%p): stub!\n", This);
     return S_OK;
 }
 
@@ -1018,7 +966,7 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareInMemoryWave(IXACT3Engine *iface,
 {
     XACT3EngineImpl *This = impl_from_IXACT3Engine(iface);
     FIXME("(%p): stub!\n", This);
-    return S_OK;
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI IXACT3EngineImpl_PrepareStreamingWave(IXACT3Engine *iface,
@@ -1029,24 +977,37 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareStreamingWave(IXACT3Engine *iface,
 {
     XACT3EngineImpl *This = impl_from_IXACT3Engine(iface);
     FIXME("(%p): stub!\n", This);
-    return S_OK;
+    return E_NOTIMPL;
 }
 
-enum { NOTIFY_SoundBank = 0x01,
-    NOTIFY_WaveBank     = 0x02,
-    NOTIFY_Cue          = 0x04,
-    NOTIFY_Wave         = 0x08,
-    NOTIFY_cueIndex     = 0x10,
-    NOTIFY_waveIndex    = 0x20 };
+static HRESULT WINAPI IXACT3EngineImpl_PrepareWave(IXACT3Engine *iface,
+        DWORD dwFlags, PCSTR szWavePath, WORD wStreamingPacketSize,
+        DWORD dwAlignment, DWORD dwPlayOffset, XACTLOOPCOUNT nLoopCount,
+        IXACT3Wave **ppWave)
+{
+    XACT3EngineImpl *This = impl_from_IXACT3Engine(iface);
+    FIXME("(%p): stub!\n", This);
+    return E_NOTIMPL;
+}
+
+enum {
+    NOTIFY_SoundBank = 0x01,
+    NOTIFY_WaveBank  = 0x02,
+    NOTIFY_Cue       = 0x04,
+    NOTIFY_Wave      = 0x08,
+    NOTIFY_cueIndex  = 0x10,
+    NOTIFY_waveIndex = 0x20
+};
 
 static inline void unwrap_notificationdesc(FACTNotificationDescription *fd,
         const XACT_NOTIFICATION_DESCRIPTION *xd)
 {
     DWORD flags = 0;
-    memset(fd, 0, sizeof(*fd));
-    /* We have to unwrap the FACT object first! */
 
     TRACE("Type %d\n", xd->type);
+
+    memset(fd, 0, sizeof(*fd));
+
     /* Supports SoundBank, Cue index, Cue instance */
     if (xd->type == XACTNOTIFICATIONTYPE_CUEPREPARED || xd->type == XACTNOTIFICATIONTYPE_CUEPLAY ||
         xd->type == XACTNOTIFICATIONTYPE_CUESTOP || xd->type == XACTNOTIFICATIONTYPE_CUEDESTROYED ||
@@ -1077,10 +1038,10 @@ static inline void unwrap_notificationdesc(FACTNotificationDescription *fd,
         flags = NOTIFY_SoundBank | NOTIFY_cueIndex | NOTIFY_Cue | NOTIFY_WaveBank | NOTIFY_Wave;
     }
 
+    /* We have to unwrap the FACT object first! */
     fd->type = xd->type;
     fd->flags = xd->flags;
     fd->pvContext = xd->pvContext;
-
     if (flags & NOTIFY_cueIndex)
         fd->cueIndex = xd->cueIndex;
     if (flags & NOTIFY_waveIndex)
@@ -1088,9 +1049,9 @@ static inline void unwrap_notificationdesc(FACTNotificationDescription *fd,
 
     if (flags & NOTIFY_Cue && xd->pCue != NULL)
     {
-        XACT3CueImpl *cur = impl_from_IXACT3Cue(xd->pCue);
-        if (cur)
-            fd->pCue = cur->fact_cue;
+        XACT3CueImpl *cue = impl_from_IXACT3Cue(xd->pCue);
+        if (cue)
+            fd->pCue = cue->fact_cue;
     }
 
     if (flags & NOTIFY_SoundBank && xd->pSoundBank != NULL)
@@ -1110,11 +1071,8 @@ static inline void unwrap_notificationdesc(FACTNotificationDescription *fd,
     if (flags & NOTIFY_Wave && xd->pWave != NULL)
     {
         XACT3WaveImpl *wave = impl_from_IXACT3Wave(xd->pWave);
-        FIXME("Wave %p\n", wave);
         if (wave)
-        {
             fd->pWave = wave->fact_wave;
-        }
     }
 }
 
@@ -1243,6 +1201,21 @@ static const IXACT3EngineVtbl XACT3Engine_Vtbl =
     IXACT3EngineImpl_GetGlobalVariable
 };
 
+void* XACT_Internal_Malloc(size_t size)
+{
+    return CoTaskMemAlloc(size);
+}
+
+void XACT_Internal_Free(void* ptr)
+{
+    return CoTaskMemFree(ptr);
+}
+
+void* XACT_Internal_Realloc(void* ptr, size_t size)
+{
+    return CoTaskMemRealloc(ptr, size);
+}
+
 static HRESULT WINAPI XACT3CF_QueryInterface(IClassFactory *iface, REFIID riid, void **ppobj)
 {
     if(IsEqualGUID(riid, &IID_IUnknown) ||
@@ -1289,9 +1262,9 @@ static HRESULT WINAPI XACT3CF_CreateInstance(IClassFactory *iface, IUnknown *pOu
     FACTCreateEngineWithCustomAllocatorEXT(
         0,
         &object->fact_engine,
-        XAudio_Internal_Malloc,
-        XAudio_Internal_Free,
-        XAudio_Internal_Realloc
+        XACT_Internal_Malloc,
+        XACT_Internal_Free,
+        XACT_Internal_Realloc
     );
 
     hr = IXACT3Engine_QueryInterface(&object->IXACT3Engine_iface, riid, ppobj);
@@ -1299,8 +1272,6 @@ static HRESULT WINAPI XACT3CF_CreateInstance(IClassFactory *iface, IUnknown *pOu
         HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
-
-    TRACE("Created XACT version 0x%04x: %p\n", XACT3_VER, object);
 
     return hr;
 }
@@ -1322,30 +1293,48 @@ static const IClassFactoryVtbl XACT3CF_Vtbl =
 
 static IClassFactory XACTFactory = { &XACT3CF_Vtbl };
 
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
+{
+    TRACE("(%p, %d, %p)\n", hinstDLL, reason, pReserved);
+
+    switch (reason)
+    {
+    case DLL_PROCESS_ATTACH:
+        instance = hinstDLL;
+        DisableThreadLibraryCalls( hinstDLL );
+
+#ifdef HAVE_FAUDIOLINKEDVERSION
+        TRACE("Using FAudio version %d\n", FAudioLinkedVersion() );
+#endif
+
+        break;
+    }
+    return TRUE;
+}
+
+HRESULT WINAPI DllCanUnloadNow(void)
+{
+    return S_FALSE;
+}
+
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
 {
-    TRACE("(%s, %s, %p)\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
-
-#if XACT3_VER == 0x0300
-    if (IsEqualGUID(rclsid, &CLSID_XACTEngine30))
-#elif XACT3_VER == 0x0301
-    if (IsEqualGUID(rclsid, &CLSID_XACTEngine31))
-#elif XACT3_VER == 0x0302
-    if (IsEqualGUID(rclsid, &CLSID_XACTEngine32))
-#elif XACT3_VER == 0x0303
-    if (IsEqualGUID(rclsid, &CLSID_XACTEngine33))
-#elif XACT3_VER == 0x0304
-    if (IsEqualGUID(rclsid, &CLSID_XACTEngine34))
-#elif XACT3_VER == 0x0305
-    if (IsEqualGUID(rclsid, &CLSID_XACTEngine35))
-#elif XACT3_VER == 0x0306
-    if (IsEqualGUID(rclsid, &CLSID_XACTEngine36))
-#elif XACT3_VER == 0x0307
-    if (IsEqualGUID(rclsid, &CLSID_XACTEngine37))
-#endif
+    if (IsEqualGUID(rclsid, &CLSID_XACTEngine))
+    {
+        TRACE("(%s, %s, %p)\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
         return IClassFactory_QueryInterface(&XACTFactory, riid, ppv);
+    }
 
+    FIXME("Unknown class %s\n", debugstr_guid(rclsid));
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 
-#endif
+HRESULT WINAPI DllRegisterServer(void)
+{
+    return __wine_register_resources(instance);
+}
+
+HRESULT WINAPI DllUnregisterServer(void)
+{
+    return __wine_unregister_resources(instance);
+}

@@ -240,11 +240,12 @@ static IMFStreamDescriptor *stream_descriptor_from_id(IMFPresentationDescriptor 
 {
     ULONG sd_count;
     IMFStreamDescriptor *ret;
+    unsigned int i;
 
     if (FAILED(IMFPresentationDescriptor_GetStreamDescriptorCount(pres_desc, &sd_count)))
         return NULL;
 
-    for (unsigned int i = 0; i < sd_count; i++)
+    for (i = 0; i < sd_count; i++)
     {
         DWORD stream_id;
 
@@ -263,6 +264,7 @@ static HRESULT start_pipeline(struct media_source *source, struct source_async_c
 {
     PROPVARIANT *position = &command->u.start.position;
     BOOL seek_message = source->state != SOURCE_STOPPED && position->vt != VT_EMPTY;
+    unsigned int i;
 
     /* we can't seek until the pipeline is in a valid state */
     gst_element_set_state(source->container, GST_STATE_PAUSED);
@@ -272,7 +274,7 @@ static HRESULT start_pipeline(struct media_source *source, struct source_async_c
         WaitForSingleObject(source->all_streams_event, INFINITE);
     }
 
-    for (unsigned int i = 0; i < source->stream_count; i++)
+    for (i = 0; i < source->stream_count; i++)
     {
         struct media_stream *stream;
         IMFStreamDescriptor *sd;
@@ -329,7 +331,9 @@ static HRESULT start_pipeline(struct media_source *source, struct source_async_c
 
 static void stop_pipeline(struct media_source *source)
 {
-    for (unsigned int i = 0; i < source->stream_count; i++)
+    unsigned int i;
+
+    for (i = 0; i < source->stream_count; i++)
     {
         struct media_stream *stream = source->streams[i];
         if (stream->state != STREAM_INACTIVE)
@@ -347,9 +351,10 @@ static void stop_pipeline(struct media_source *source)
 static void dispatch_end_of_presentation(struct media_source *source)
 {
     PROPVARIANT empty = {.vt = VT_EMPTY};
+    unsigned int i;
 
     /* A stream has ended, check whether all have */
-    for (unsigned int i = 0; i < source->stream_count; i++)
+    for (i = 0; i < source->stream_count; i++)
     {
         struct media_stream *stream = source->streams[i];
 
@@ -369,6 +374,39 @@ static HRESULT wait_on_sample(struct media_stream *stream, IUnknown *token)
 
     TRACE("%p, %p\n", stream, token);
 
+    g_signal_emit_by_name(stream->appsink, "pull-sample", &gst_sample);
+    if (gst_sample)
+    {
+        buffer = gst_sample_get_buffer(gst_sample);
+
+        if (TRACE_ON(mfplat))
+        {
+            const GstCaps *sample_caps = gst_sample_get_caps(gst_sample);
+            const GstStructure *sample_info = gst_sample_get_info(gst_sample);
+            if (sample_caps)
+            {
+                gchar *sample_caps_str = gst_caps_to_string(sample_caps);
+                TRACE("sample caps %s\n", debugstr_a(sample_caps_str));
+                g_free(sample_caps_str);
+            }
+            if (sample_info)
+            {
+                gchar *sample_info_str = gst_structure_to_string(sample_info);
+                TRACE("sample info %s\n", debugstr_a(sample_info_str));
+                g_free(sample_info_str);
+            }
+            TRACE("PTS = %lu DTS = %llu\n", GST_BUFFER_PTS(buffer), GST_BUFFER_DTS(buffer));
+        }
+
+        sample = mf_sample_from_gst_buffer(buffer);
+        gst_sample_unref(gst_sample);
+
+        if (token)
+            IMFSample_SetUnknown(sample, &MFSampleExtension_Token, token);
+
+        IMFMediaEventQueue_QueueEventParamUnk(stream->event_queue, MEMediaSample, &GUID_NULL, S_OK, (IUnknown *)sample);
+    }
+
     g_object_get(stream->appsink, "eos", &stream->eos, NULL);
     if (stream->eos)
     {
@@ -378,38 +416,6 @@ static HRESULT wait_on_sample(struct media_stream *stream, IUnknown *token)
         dispatch_end_of_presentation(stream->parent_source);
         return S_OK;
     }
-
-    g_signal_emit_by_name(stream->appsink, "pull-sample", &gst_sample);
-    assert(gst_sample);
-
-    buffer = gst_sample_get_buffer(gst_sample);
-
-    if (TRACE_ON(mfplat))
-    {
-        const GstCaps *sample_caps = gst_sample_get_caps(gst_sample);
-        const GstStructure *sample_info = gst_sample_get_info(gst_sample);
-        if (sample_caps)
-        {
-            gchar *sample_caps_str = gst_caps_to_string(sample_caps);
-            TRACE("sample caps %s\n", debugstr_a(sample_caps_str));
-            g_free(sample_caps_str);
-        }
-        if (sample_info)
-        {
-            gchar *sample_info_str = gst_structure_to_string(sample_info);
-            TRACE("sample info %s\n", debugstr_a(sample_info_str));
-            g_free(sample_info_str);
-        }
-        TRACE("PTS = %lu DTS = %lu\n", GST_BUFFER_PTS(buffer), GST_BUFFER_DTS(buffer));
-    }
-
-    sample = mf_sample_from_gst_buffer(buffer);
-    gst_sample_unref(gst_sample);
-
-    if (token)
-        IMFSample_SetUnknown(sample, &MFSampleExtension_Token, token);
-
-    IMFMediaEventQueue_QueueEventParamUnk(stream->event_queue, MEMediaSample, &GUID_NULL, S_OK, (IUnknown *)sample);
 
     return S_OK;
 }
@@ -659,6 +665,7 @@ static void source_stream_added(GstElement *element, GstPad *pad, gpointer user)
     struct media_stream *stream;
     gchar *g_stream_id;
     DWORD stream_id;
+    unsigned int i;
 
     /* Most/All seen randomly calculate the initial part of the stream id, the last three digits are the only deterministic part */
     g_stream_id = gst_pad_get_stream_id(pad);
@@ -668,7 +675,7 @@ static void source_stream_added(GstElement *element, GstPad *pad, gpointer user)
     TRACE("stream-id: %u\n", stream_id);
 
     /* find existing stream */
-    for (unsigned int i = 0; i < source->stream_count; i++)
+    for (i = 0; i < source->stream_count; i++)
     {
         DWORD existing_stream_id;
         IMFStreamDescriptor *descriptor = source->streams[i]->descriptor;
@@ -1293,6 +1300,8 @@ static HRESULT WINAPI media_source_Pause(IMFMediaSource *iface)
 
 static HRESULT media_source_teardown(struct media_source *source)
 {
+    unsigned int i;
+
     if (source->my_src)
         gst_object_unref(GST_OBJECT(source->my_src));
     if (source->their_sink)
@@ -1309,7 +1318,7 @@ static HRESULT media_source_teardown(struct media_source *source)
     if (source->byte_stream)
         IMFByteStream_Release(source->byte_stream);
 
-    for (unsigned int i = 0; i < source->stream_count; i++)
+    for (i = 0; i < source->stream_count; i++)
     {
         source->streams[i]->state = STREAM_SHUTDOWN;
         IMFMediaStream_Release(&source->streams[i]->IMFMediaStream_iface);
@@ -1449,6 +1458,7 @@ static const IMFSeekInfoVtbl IMFSeekInfo_vtbl =
 
 static HRESULT media_source_constructor(IMFByteStream *bytestream, enum source_type type, struct media_source **out_media_source)
 {
+    unsigned int i;
     GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
         "mf_src",
         GST_PAD_SRC,
@@ -1552,7 +1562,7 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, enum source_t
     /* init presentation descriptor */
 
     descriptors = heap_alloc(object->stream_count * sizeof(IMFStreamDescriptor*));
-    for (unsigned int i = 0; i < object->stream_count; i++)
+    for (i = 0; i < object->stream_count; i++)
     {
         IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[object->stream_count - 1 - i]);
     }
@@ -1561,7 +1571,7 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, enum source_t
         goto fail;
 
     /* Select one of each major type. */
-    for (unsigned int i = 0; i < object->stream_count; i++)
+    for (i = 0; i < object->stream_count; i++)
     {
         IMFMediaTypeHandler *handler;
         GUID major_type;
@@ -1603,8 +1613,7 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, enum source_t
             IMFAttributes_Release(byte_stream_attributes);
         }
 
-        /* TODO: consider streams which don't start at T=0 */
-        for (unsigned int i = 0; i < object->stream_count; i++)
+        for (i = 0; i < object->stream_count; i++)
         {
             GstQuery *query = gst_query_new_duration(GST_FORMAT_TIME);
             if (gst_pad_query(object->streams[i]->their_src, query))

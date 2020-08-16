@@ -429,6 +429,40 @@ Call ok(x = 8, "InStr returned " & x)
 x = InStr(1, "abc" & Chr(0) & "ABC", Chr(0) & "a", 1)
 Call ok(x = 4, "InStr returned " & x)
 
+x = InStr(1, 23456, 45, 0)
+Call ok(x = 3, "InStr returned " & x)
+
+x = InStr(1, "23456", 34, 1)
+Call ok(x = 2, "InStr returned " & x)
+
+x = InStr(2, "", "abcd", 0)
+Call ok(x = 0, "InStr returned " & x)
+
+x = InStr(4, "abcdef", "", 0)
+Call ok(x = 4, "InStr returned " & x)
+
+x = InStr(20, "abcdef", "", 0)
+Call ok(x = 0, "InStr returned " & x)
+
+x = InStr(4, "", "", 0)
+Call ok(x = 0, "InStr returned " & x)
+
+Sub testInStrError(arg1, arg2, arg3, arg4, error_num)
+    on error resume next
+    Dim x
+
+    Call Err.clear()
+    x = InStr(arg1, arg2, arg3, arg4)
+    Call ok(Err.number = error_num, "Err.number = " & Err.number)
+End Sub
+
+call testInStrError(2, "abcd", null, 0, 0)
+call testInStrError(2, Null, "abcd", 0, 0)
+call testInStrError(Null, "abcd", "abcd", 0, 94)
+call testInStrError(2, "abcd", "abcd", null, 94)
+call testInStrError(-20, "abcd", "abcd", 1, 5)
+Call testInStrError(2, "abcd", "abcd", 10, 5)
+
 
 x = InStrRev("bcabcd", "bc")
 Call ok(x = 4, "InStrRev returned " & x)
@@ -474,18 +508,57 @@ Call ok(x = 3, "InStrRev returned " & x)
 x = InStrRev(1234, 34)
 Call ok(x = 3, "InStrRev returned " & x)
 
-Sub testInStrRevError(arg1, arg2, arg3, error_num)
+x = InStrRev("abcd", "A", 1, 0)
+Call ok(x = 0, "InStrRev returned " & x)
+
+x = InStrRev("abcd", "A", 1, 1)
+Call ok(x = 1, "InStrRev returned " & x)
+
+x = InStrRev("abcd", "Ab", 1, 1)
+Call ok(x = 0, "InStrRev returned " & x)
+
+x = InStrRev("abcd", "Ab", -1, 1)
+Call ok(x = 1, "InStrRev returned " & x)
+
+x = InStrRev("abcd", "cd", 3, 1)
+Call ok(x = 0, "InStrRev returned " & x)
+
+x = InStrRev("abcd", "cd", 4, 1)
+Call ok(x = 3, "InStrRev returned " & x)
+
+x = InStrRev("abcd", "cd", 5, 1)
+Call ok(x = 0, "InStrRev returned " & x)
+
+x = InStrRev("abc" & Chr(0) & "A" & Chr(0) & "BC", "c", 8, 0)
+Call ok(x = 3, "InStrRev returned " & x)
+
+x = InStrRev("abc" & Chr(0) & "ABC", Chr(0) & "a", 6, 1)
+Call ok(x = 4, "InStrRev returned " & x)
+
+x = InStrRev("", "hi", 1, 0)
+Call ok(x = 0, "InStrRev returned " & x)
+
+x = InStrRev("abcd", "", 3, 1)
+Call ok(x = 3, "InStrRev returned " & x)
+
+x = InStrRev("", "", 3, 0)
+Call ok(x = 0, "InStrRev returned " & x)
+
+Sub testInStrRevError(arg1, arg2, arg3, arg4, error_num)
     on error resume next
     Dim x
 
     Call Err.clear()
-    x = InStrRev(arg1, arg2, arg3)
+    x = InStrRev(arg1, arg2, arg3, arg4)
     Call ok(Err.number = error_num, "Err.number = " & Err.number)
 End Sub
 
-call testInStrRevError("abcd", null, 2, 94)
-call testInStrRevError(null, "abcd", 2, 94)
-call testInStrRevError("abcd", "abcd", null, 94)
+call testInStrRevError("abcd", null, 2, 0, 94)
+call testInStrRevError(null, "abcd", 2, 0, 94)
+call testInStrRevError("abcd", "abcd", null, 0, 94)
+call testInStrRevError("abcd", "abcd", 2, null, 94)
+call testInStrRevError("abcd", "abcd", -20, 1, 5)
+Call testInStrRevError("abcd", "abcd", 2, 10, 5)
 
 Sub TestMid(str, start, len, ex)
     x = Mid(str, start, len)

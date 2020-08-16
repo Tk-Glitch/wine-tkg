@@ -464,6 +464,13 @@ typedef struct _DRIVER_OBJECT *PDRIVER_OBJECT;
 /* Irp definitions */
 typedef UCHAR KIRQL, *PKIRQL;
 typedef CCHAR KPROCESSOR_MODE;
+typedef enum _KAPC_ENVIRONMENT
+{
+    OriginalApcEnvironment,
+    AttachedApcEnvironment,
+    CurrentApcEnvironment,
+    InsertApcEnvironment
+} KAPC_ENVIRONMENT, *PKAPC_ENVIRONMENT;
 
 typedef VOID (WINAPI *PDRIVER_CANCEL)(
   IN struct _DEVICE_OBJECT  *DeviceObject,
@@ -1731,6 +1738,7 @@ KAFFINITY WINAPI KeQueryActiveProcessors(void);
 void      WINAPI KeQuerySystemTime(LARGE_INTEGER*);
 void      WINAPI KeQueryTickCount(LARGE_INTEGER*);
 ULONG     WINAPI KeQueryTimeIncrement(void);
+LONG      WINAPI KeReadStateEvent(PRKEVENT);
 void    FASTCALL KeReleaseInStackQueuedSpinLockFromDpcLevel(KLOCK_QUEUE_HANDLE*);
 LONG      WINAPI KeReleaseMutex(PRKMUTEX,BOOLEAN);
 LONG      WINAPI KeReleaseSemaphore(PRKSEMAPHORE,KPRIORITY,LONG,BOOLEAN);

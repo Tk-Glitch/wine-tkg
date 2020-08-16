@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Alistair Leslie-Hughes
+ * Copyright 2020 Brendan Shanks for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -15,8 +15,17 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#ifndef __WINE_STDBOOL_H
+#define __WINE_STDBOOL_H
 
-#include "windef.h"
+#ifndef __cplusplus
 
-/* @makedep: globals.xgs*/
-globals.xgs RCDATA "globals.xgs"
+#define bool    _Bool
+#define true    1
+#define false   0
+
+#endif
+
+#define __bool_true_false_are_defined 1
+
+#endif /* __WINE_STDBOOL_H */

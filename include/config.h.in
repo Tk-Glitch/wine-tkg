@@ -155,6 +155,10 @@
 /* Define to 1 if you have the `fallocate' function. */
 #undef HAVE_FALLOCATE
 
+/* Define to 1 if you have the `FAudioCreateReverb9WithCustomAllocatorEXT'
+   function. */
+#undef HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
+
 /* Define to 1 if you have the `FAudioLinkedVersion' function. */
 #undef HAVE_FAUDIOLINKEDVERSION
 
@@ -166,6 +170,9 @@
 
 /* Define to 1 if you have the `ffs' function. */
 #undef HAVE_FFS
+
+/* Define to 1 if you have the `finite' function. */
+#undef HAVE_FINITE
 
 /* Define to 1 if you have the `finitef' function. */
 #undef HAVE_FINITEF

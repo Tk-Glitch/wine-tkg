@@ -829,12 +829,88 @@ static HRESULT compile_shader(const char *preproc_shader, const char *target, co
     return hr;
 }
 
+static HRESULT WINAPI d3dcompiler_include_from_file_open(ID3DInclude *iface, D3D_INCLUDE_TYPE include_type,
+        const char *filename, const void *parent_data, const void **data, UINT *bytes)
+{
+    char *fullpath, *buffer = NULL, current_dir[MAX_PATH + 1];
+    const char *initial_dir;
+    SIZE_T size;
+    HANDLE file;
+    ULONG read;
+    DWORD len;
+
+    if ((initial_dir = strrchr(initial_filename, '\\')))
+    {
+        len = initial_dir - initial_filename + 1;
+        initial_dir = initial_filename;
+    }
+    else
+    {
+        len = GetCurrentDirectoryA(MAX_PATH, current_dir);
+        current_dir[len] = '\\';
+        len++;
+        initial_dir = current_dir;
+    }
+    fullpath = heap_alloc(len + strlen(filename) + 1);
+    if (!fullpath)
+        return E_OUTOFMEMORY;
+    memcpy(fullpath, initial_dir, len);
+    strcpy(fullpath + len, filename);
+
+    file = CreateFileA(fullpath, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+    if (file == INVALID_HANDLE_VALUE)
+        goto error;
+
+    TRACE("Include file found at %s.\n", debugstr_a(fullpath));
+
+    size = GetFileSize(file, NULL);
+    if (size == INVALID_FILE_SIZE)
+        goto error;
+    buffer = heap_alloc(size);
+    if (!buffer)
+        goto error;
+    if (!ReadFile(file, buffer, size, &read, NULL) || read != size)
+        goto error;
+
+    *bytes = size;
+    *data = buffer;
+
+    heap_free(fullpath);
+    CloseHandle(file);
+    return S_OK;
+
+error:
+    heap_free(fullpath);
+    heap_free(buffer);
+    CloseHandle(file);
+    WARN("Returning E_FAIL.\n");
+    return E_FAIL;
+}
+
+static HRESULT WINAPI d3dcompiler_include_from_file_close(ID3DInclude *iface, const void *data)
+{
+    heap_free((void *)data);
+    return S_OK;
+}
+
+const struct ID3DIncludeVtbl d3dcompiler_include_from_file_vtbl =
+{
+    d3dcompiler_include_from_file_open,
+    d3dcompiler_include_from_file_close
+};
+
+struct d3dcompiler_include_from_file
+{
+    ID3DInclude ID3DInclude_iface;
+};
+
 HRESULT WINAPI D3DCompile2(const void *data, SIZE_T data_size, const char *filename,
         const D3D_SHADER_MACRO *defines, ID3DInclude *include, const char *entrypoint,
         const char *target, UINT sflags, UINT eflags, UINT secondary_flags,
         const void *secondary_data, SIZE_T secondary_data_size, ID3DBlob **shader,
         ID3DBlob **error_messages)
 {
+    struct d3dcompiler_include_from_file include_from_file;
     HRESULT hr;
 
     TRACE("data %p, data_size %lu, filename %s, defines %p, include %p, entrypoint %s, "
@@ -849,6 +925,12 @@ HRESULT WINAPI D3DCompile2(const void *data, SIZE_T data_size, const char *filen
 
     if (shader) *shader = NULL;
     if (error_messages) *error_messages = NULL;
+
+    if (include == D3D_COMPILE_STANDARD_FILE_INCLUDE)
+    {
+        include_from_file.ID3DInclude_iface.lpVtbl = &d3dcompiler_include_from_file_vtbl;
+        include = &include_from_file.ID3DInclude_iface;
+    }
 
     EnterCriticalSection(&wpp_mutex);
 
@@ -921,13 +1003,51 @@ HRESULT WINAPI D3DDisassemble(const void *data, SIZE_T size, UINT flags, const c
     return E_NOTIMPL;
 }
 
-HRESULT WINAPI D3DCompileFromFile(const WCHAR *filename, const D3D_SHADER_MACRO *defines, ID3DInclude *includes,
+HRESULT WINAPI D3DCompileFromFile(const WCHAR *filename, const D3D_SHADER_MACRO *defines, ID3DInclude *include,
         const char *entrypoint, const char *target, UINT flags1, UINT flags2, ID3DBlob **code, ID3DBlob **errors)
 {
-    FIXME("filename %s, defines %p, includes %p, entrypoint %s, target %s, flags1 %x, flags2 %x, code %p, errors %p\n",
-            debugstr_w(filename), defines, includes, debugstr_a(entrypoint), debugstr_a(target), flags1, flags2, code, errors);
+    char filename_a[MAX_PATH], *source = NULL;
+    DWORD source_size, read_size;
+    HANDLE file;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("filename %s, defines %p, include %p, entrypoint %s, target %s, flags1 %#x, flags2 %#x, "
+            "code %p, errors %p.\n", debugstr_w(filename), defines, include, debugstr_a(entrypoint),
+            debugstr_a(target), flags1, flags2, code, errors);
+
+    file = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+        return HRESULT_FROM_WIN32(GetLastError());
+
+    source_size = GetFileSize(file, NULL);
+    if (source_size == INVALID_FILE_SIZE)
+    {
+        hr = HRESULT_FROM_WIN32(GetLastError());
+        goto end;
+    }
+
+    if (!(source = heap_alloc(source_size)))
+    {
+        hr = E_OUTOFMEMORY;
+        goto end;
+    }
+
+    if (!ReadFile(file, source, source_size, &read_size, NULL) || read_size != source_size)
+    {
+        WARN("Failed to read file contents.\n");
+        hr = E_FAIL;
+        goto end;
+    }
+
+    WideCharToMultiByte(CP_ACP, 0, filename, -1, filename_a, sizeof(filename_a), NULL, NULL);
+
+    hr = D3DCompile(source, source_size, filename_a, defines, include, entrypoint, target,
+            flags1, flags2, code, errors);
+
+end:
+    heap_free(source);
+    CloseHandle(file);
+    return hr;
 }
 
 HRESULT WINAPI D3DLoadModule(const void *data, SIZE_T size, ID3D11Module **module)

@@ -6,4 +6,5 @@ EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
 C_SRCS = \
 	main.c
 
-RC_SRCS = findstr.rc
+RC_SRCS = \
+	findstr.rc

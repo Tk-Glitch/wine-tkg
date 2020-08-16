@@ -231,9 +231,10 @@ sub _find_align_kind_size($) {
 	$kind = "float";
 	$size = 4;
     } elsif (/^(?:(signed|unsigned)\s+)?(?:long(?:\s+int)?)$/) {
-	$align = $pointer_size;
+        # 'long' is always 4 bytes on Windows.
+	$align = 4;
 	$kind = defined($1) ? $1 : "signed";
-	$size = $pointer_size;
+	$size = 4;
     } elsif (/^(?:(signed|unsigned)\s+)?__int64$/) {
 	$align = 8;
 	$kind = defined($1) ? $1 : "signed";
@@ -409,7 +410,7 @@ foreach my $file (@files) {
 	my $preprocessor = shift;
 
         #print "found_preprocessor: $begin_line: [$_]\n";
-	if ($preprocessor =~ /^\#\s*include\s+[\"<]pshpack(\d+)\.h[\">]$/) {
+	if ($preprocessor =~ /^\#\s*include\s+[\"<]pshpack(\d)\.h[\">]$/) {
 	    push @packs, $1 unless @ifdefs && !$ifdefs[$#ifdefs];
             #print "found pack $1 on line $begin_line\n";
 	} elsif($preprocessor =~ /^\#\s*include\s+[\"<]poppack\.h[\">]$/) {
@@ -418,8 +419,8 @@ foreach my $file (@files) {
 	} elsif ($preprocessor =~ /^\#\s*ifdef\s+_WIN64/) {
             push @ifdefs, ($pointer_size == 8);
 	} elsif ($preprocessor =~ /^\#\s*ifndef\s+_WIN64/) {
-            push @ifdefs, ($pointer_size == 4);
-	} elsif ($preprocessor =~ /^\#\s*elif\s+defined(_WIN64)/) {
+            push @ifdefs, ($pointer_size != 8);
+	} elsif ($preprocessor =~ /^\#\s*elif\s+defined\s*\(\s*_WIN64\s*\)/) {
             $ifdefs[$#ifdefs] = ($pointer_size == 8);
 	} elsif ($preprocessor =~ /^\#\s*ifdef\s/) {
             push @ifdefs, 2;
@@ -566,23 +567,23 @@ sub output_header($$$) {
     print OUT " * Test helper macros\n";
     print OUT " */\n";
     print OUT "\n";
-    print OUT "#define TEST_TYPE_SIZE(type, size)             C_ASSERT(sizeof(type) == size);\n";
+    print OUT "#define TEST_TYPE_SIZE(type, size)              C_ASSERT(sizeof(type) == size);\n";
     print OUT "\n";
     print OUT "#ifdef TYPE_ALIGNMENT\n";
-    print OUT "# define TEST_TYPE_ALIGN(type, align)          C_ASSERT(TYPE_ALIGNMENT(type) == align);\n";
+    print OUT "# define TEST_TYPE_ALIGN(type, align)           C_ASSERT(TYPE_ALIGNMENT(type) == align);\n";
     print OUT "#else\n";
     print OUT "# define TEST_TYPE_ALIGN(type, align)\n";
     print OUT "#endif\n";
     print OUT "\n";
     print OUT "#ifdef _TYPE_ALIGNMENT\n";
-    print OUT "# define TEST_TARGET_ALIGN(type, align)        C_ASSERT(_TYPE_ALIGNMENT(*(type)0) == align);\n";
-    print OUT "# define TEST_FIELD_ALIGN(type, field, align)  C_ASSERT(_TYPE_ALIGNMENT(((type*)0)->field) == align);\n";
+    print OUT "# define TEST_TARGET_ALIGN(type, align)         C_ASSERT(_TYPE_ALIGNMENT(*(type)0) == align);\n";
+    print OUT "# define TEST_FIELD_ALIGN(type, field, align)   C_ASSERT(_TYPE_ALIGNMENT(((type*)0)->field) == align);\n";
     print OUT "#else\n";
     print OUT "# define TEST_TARGET_ALIGN(type, align)\n";
     print OUT "# define TEST_FIELD_ALIGN(type, field, align)\n";
     print OUT "#endif\n";
     print OUT "\n";
-    print OUT "#define TEST_FIELD_OFFSET(type, field, offset) C_ASSERT(FIELD_OFFSET(type, field) == offset);\n";
+    print OUT "#define TEST_FIELD_OFFSET(type, field, offset)  C_ASSERT(FIELD_OFFSET(type, field) == offset);\n";
     print OUT "\n";
     print OUT "#define TEST_TARGET_SIZE(type, size)            TEST_TYPE_SIZE(*(type)0, size)\n";
     print OUT "#define TEST_FIELD_SIZE(type, field, size)      TEST_TYPE_SIZE((((type*)0)->field), size)\n";
@@ -692,7 +693,7 @@ sub output_test_pack_type($$$$$$) {
 	    }
 	}
     } elsif ($type_kind eq "signed") {
-	print OUT "    TEST_TYPE_SIGNED($type_name)\n";
+        print OUT "    TEST_TYPE_SIGNED ($type_name)\n";
     } elsif ($type_kind eq "unsigned") {
 	print OUT "    TEST_TYPE_UNSIGNED($type_name)\n";
     }

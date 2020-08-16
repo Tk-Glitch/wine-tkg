@@ -1,73 +1,73 @@
 @ stdcall BindMoniker(ptr long ptr ptr)
-@ stdcall CLIPFORMAT_UserFree(ptr ptr)
-@ stdcall CLIPFORMAT_UserMarshal(ptr ptr ptr)
-@ stdcall CLIPFORMAT_UserSize(ptr long ptr)
-@ stdcall CLIPFORMAT_UserUnmarshal(ptr ptr ptr)
-@ stdcall CLSIDFromProgID(wstr ptr)
-@ stdcall CLSIDFromProgIDEx(wstr ptr)
-@ stdcall CLSIDFromString(wstr ptr)
+@ stdcall CLIPFORMAT_UserFree(ptr ptr) combase.CLIPFORMAT_UserFree
+@ stdcall CLIPFORMAT_UserMarshal(ptr ptr ptr) combase.CLIPFORMAT_UserMarshal
+@ stdcall CLIPFORMAT_UserSize(ptr long ptr) combase.CLIPFORMAT_UserSize
+@ stdcall CLIPFORMAT_UserUnmarshal(ptr ptr ptr) combase.CLIPFORMAT_UserUnmarshal
+@ stdcall CLSIDFromProgID(wstr ptr) combase.CLSIDFromProgID
+@ stdcall CLSIDFromProgIDEx(wstr ptr) combase.CLSIDFromProgIDEx
+@ stdcall CLSIDFromString(wstr ptr) combase.CLSIDFromString
 @ stdcall CoAddRefServerProcess()
 @ stdcall CoAllowSetForegroundWindow(ptr ptr)
 @ stdcall CoBuildVersion()
-@ stdcall CoCopyProxy(ptr ptr)
-@ stdcall CoCreateFreeThreadedMarshaler(ptr ptr)
-@ stdcall CoCreateGuid(ptr)
-@ stdcall CoCreateInstance(ptr ptr long ptr ptr)
-@ stdcall CoCreateInstanceEx(ptr ptr long ptr long ptr)
+@ stdcall CoCopyProxy(ptr ptr) combase.CoCopyProxy
+@ stdcall CoCreateFreeThreadedMarshaler(ptr ptr) combase.CoCreateFreeThreadedMarshaler
+@ stdcall CoCreateGuid(ptr) combase.CoCreateGuid
+@ stdcall CoCreateInstance(ptr ptr long ptr ptr) combase.CoCreateInstance
+@ stdcall CoCreateInstanceEx(ptr ptr long ptr long ptr) combase.CoCreateInstanceEx
 @ stdcall CoDecrementMTAUsage(ptr)
 @ stdcall CoDisableCallCancellation(ptr)
 @ stdcall CoDisconnectObject(ptr long)
 @ stdcall CoDosDateTimeToFileTime(long long ptr) kernel32.DosDateTimeToFileTime
 @ stdcall CoEnableCallCancellation(ptr)
-@ stdcall CoFileTimeNow(ptr)
+@ stdcall CoFileTimeNow(ptr) combase.CoFileTimeNow
 @ stdcall CoFileTimeToDosDateTime(ptr ptr ptr) kernel32.FileTimeToDosDateTime
 @ stdcall CoFreeAllLibraries()
 @ stdcall CoFreeLibrary(long)
-@ stdcall CoFreeUnusedLibraries()
+@ stdcall CoFreeUnusedLibraries() combase.CoFreeUnusedLibraries
 @ stdcall CoFreeUnusedLibrariesEx(long long)
-@ stdcall CoGetActivationState(int128 long ptr)
+@ stdcall CoGetActivationState(int128 long ptr) combase.CoGetActivationState
 @ stdcall CoGetApartmentType(ptr ptr)
 @ stdcall CoGetCallContext(ptr ptr)
-@ stdcall CoGetCallState(long ptr)
+@ stdcall CoGetCallState(long ptr) combase.CoGetCallState
 @ stdcall CoGetCallerTID(ptr)
 @ stdcall CoGetClassObject(ptr long ptr ptr ptr)
 @ stdcall CoGetContextToken(ptr)
 @ stdcall CoGetCurrentLogicalThreadId(ptr)
 @ stdcall CoGetCurrentProcess()
-@ stdcall CoGetDefaultContext(long ptr ptr)
-@ stdcall CoGetInstanceFromFile(ptr ptr ptr long long wstr long ptr)
-@ stdcall CoGetInstanceFromIStorage(ptr ptr ptr long ptr long ptr)
-@ stdcall CoGetInterfaceAndReleaseStream(ptr ptr ptr)
-@ stdcall CoGetMalloc(long ptr)
-@ stdcall CoGetMarshalSizeMax(ptr ptr ptr long ptr long)
+@ stdcall CoGetDefaultContext(long ptr ptr) combase.CoGetDefaultContext
+@ stdcall CoGetInstanceFromFile(ptr ptr ptr long long wstr long ptr) combase.CoGetInstanceFromFile
+@ stdcall CoGetInstanceFromIStorage(ptr ptr ptr long ptr long ptr) combase.CoGetInstanceFromIStorage
+@ stdcall CoGetInterfaceAndReleaseStream(ptr ptr ptr) combase.CoGetInterfaceAndReleaseStream
+@ stdcall CoGetMalloc(long ptr) combase.CoGetMalloc
+@ stdcall CoGetMarshalSizeMax(ptr ptr ptr long ptr long) combase.CoGetMarshalSizeMax
 @ stdcall CoGetObject(wstr ptr ptr ptr)
-@ stdcall CoGetObjectContext(ptr ptr)
+@ stdcall CoGetObjectContext(ptr ptr) combase.CoGetObjectContext
 @ stdcall CoGetPSClsid(ptr ptr)
 @ stdcall CoGetStandardMarshal(ptr ptr long ptr long ptr)
 @ stdcall CoGetState(ptr)
 @ stub CoGetTIDFromIPID
-@ stdcall CoGetTreatAsClass(ptr ptr)
-@ stdcall CoImpersonateClient()
+@ stdcall CoGetTreatAsClass(ptr ptr) combase.CoGetTreatAsClass
+@ stdcall CoImpersonateClient() combase.CoImpersonateClient
 @ stdcall CoIncrementMTAUsage(ptr)
 @ stdcall CoInitialize(ptr)
 @ stdcall CoInitializeEx(ptr long)
-@ stdcall CoInitializeSecurity(ptr long ptr ptr long long ptr long ptr)
+@ stdcall CoInitializeSecurity(ptr long ptr ptr long long ptr long ptr) combase.CoInitializeSecurity
 @ stdcall CoInitializeWOW(long long)
 @ stdcall CoIsHandlerConnected(ptr)
 @ stdcall CoIsOle1Class (ptr)
 @ stdcall CoLoadLibrary(wstr long)
 @ stdcall CoLockObjectExternal(ptr long long)
-@ stdcall CoMarshalHresult(ptr long)
-@ stdcall CoMarshalInterThreadInterfaceInStream(ptr ptr ptr)
-@ stdcall CoMarshalInterface(ptr ptr ptr long ptr long)
+@ stdcall CoMarshalHresult(ptr long) combase.CoMarshalHresult
+@ stdcall CoMarshalInterThreadInterfaceInStream(ptr ptr ptr) combase.CoMarshalInterThreadInterfaceInStream
+@ stdcall CoMarshalInterface(ptr ptr ptr long ptr long) combase.CoMarshalInterface
 @ stub CoQueryAuthenticationServices
-@ stdcall CoQueryClientBlanket(ptr ptr ptr ptr ptr ptr ptr)
-@ stdcall CoQueryProxyBlanket(ptr ptr ptr ptr ptr ptr ptr ptr)
+@ stdcall CoQueryClientBlanket(ptr ptr ptr ptr ptr ptr ptr) combase.CoQueryClientBlanket
+@ stdcall CoQueryProxyBlanket(ptr ptr ptr ptr ptr ptr ptr ptr) combase.CoQueryProxyBlanket
 @ stub CoQueryReleaseObject
 @ stdcall CoRegisterChannelHook(ptr ptr)
 @ stdcall CoRegisterClassObject(ptr ptr long long ptr)
 @ stdcall CoRegisterInitializeSpy(ptr ptr)
-@ stdcall CoRegisterMallocSpy (ptr)
+@ stdcall CoRegisterMallocSpy(ptr) combase.CoRegisterMallocSpy
 @ stdcall CoRegisterMessageFilter(ptr ptr)
 @ stdcall CoRegisterPSClsid(ptr ptr)
 @ stdcall CoRegisterSurrogate(ptr)
@@ -75,21 +75,21 @@
 @ stdcall CoReleaseMarshalData(ptr)
 @ stdcall CoReleaseServerProcess()
 @ stdcall CoResumeClassObjects()
-@ stdcall CoRevertToSelf()
+@ stdcall CoRevertToSelf() combase.CoRevertToSelf
 @ stdcall CoRevokeClassObject(long)
 @ stdcall CoRevokeInitializeSpy(int64)
-@ stdcall CoRevokeMallocSpy()
-@ stdcall CoSetProxyBlanket(ptr long long ptr long long ptr long)
+@ stdcall CoRevokeMallocSpy() combase.CoRevokeMallocSpy
+@ stdcall CoSetProxyBlanket(ptr long long ptr long long ptr long) combase.CoSetProxyBlanket
 @ stdcall CoSetState(ptr)
 @ stdcall CoSuspendClassObjects()
 @ stdcall CoSwitchCallContext(ptr ptr)
-@ stdcall CoTaskMemAlloc(long)
-@ stdcall CoTaskMemFree(ptr)
-@ stdcall CoTaskMemRealloc(ptr long)
+@ stdcall CoTaskMemAlloc(long) combase.CoTaskMemAlloc
+@ stdcall CoTaskMemFree(ptr) combase.CoTaskMemFree
+@ stdcall CoTaskMemRealloc(ptr long) combase.CoTaskMemRealloc
 @ stdcall CoTreatAsClass(ptr ptr)
 @ stdcall CoUninitialize()
 @ stub CoUnloadingWOW
-@ stdcall CoUnmarshalHresult(ptr ptr)
+@ stdcall CoUnmarshalHresult(ptr ptr) combase.CoUnmarshalHresult
 @ stdcall CoUnmarshalInterface(ptr ptr ptr)
 @ stdcall CoWaitForMultipleHandles(long long long ptr ptr)
 @ stdcall CreateAntiMoniker(ptr)
@@ -97,7 +97,7 @@
 @ stdcall CreateClassMoniker(ptr ptr)
 @ stdcall CreateDataAdviseHolder(ptr)
 @ stdcall CreateDataCache(ptr ptr ptr ptr)
-@ stdcall CreateErrorInfo(ptr)
+@ stdcall CreateErrorInfo(ptr) combase.CreateErrorInfo
 @ stdcall CreateFileMoniker(wstr ptr)
 @ stdcall CreateGenericComposite(ptr ptr ptr)
 @ stdcall CreateILockBytesOnHGlobal(ptr long ptr)
@@ -114,7 +114,7 @@
 @ stdcall DoDragDrop(ptr ptr long ptr)
 @ stub EnableHookObject
 @ stdcall FmtIdToPropStgName(ptr wstr)
-@ stdcall FreePropVariantArray(long ptr)
+@ stdcall FreePropVariantArray(long ptr) combase.FreePropVariantArray
 @ stdcall GetClassFile(wstr ptr)
 @ stdcall GetConvertStg(ptr)
 @ stub GetDocumentBitStg
@@ -123,18 +123,18 @@
 @ stdcall GetHGlobalFromStream(ptr ptr)
 @ stub GetHookInterface
 @ stdcall GetRunningObjectTable(long ptr)
-@ stdcall HACCEL_UserFree(ptr ptr)
-@ stdcall HACCEL_UserMarshal(ptr ptr ptr)
-@ stdcall HACCEL_UserSize(ptr long ptr)
-@ stdcall HACCEL_UserUnmarshal(ptr ptr ptr)
-@ stdcall HBITMAP_UserFree(ptr ptr)
-@ stdcall HBITMAP_UserMarshal(ptr ptr ptr)
-@ stdcall HBITMAP_UserSize(ptr long ptr)
-@ stdcall HBITMAP_UserUnmarshal(ptr ptr ptr)
-@ stdcall HBRUSH_UserFree(ptr ptr)
-@ stdcall HBRUSH_UserMarshal(ptr ptr ptr)
-@ stdcall HBRUSH_UserSize(ptr long ptr)
-@ stdcall HBRUSH_UserUnmarshal(ptr ptr ptr)
+@ stdcall HACCEL_UserFree(ptr ptr) combase.HACCEL_UserFree
+@ stdcall HACCEL_UserMarshal(ptr ptr ptr) combase.HACCEL_UserMarshal
+@ stdcall HACCEL_UserSize(ptr long ptr) combase.HACCEL_UserSize
+@ stdcall HACCEL_UserUnmarshal(ptr ptr ptr) combase.HACCEL_UserUnmarshal
+@ stdcall HBITMAP_UserFree(ptr ptr) combase.HBITMAP_UserFree
+@ stdcall HBITMAP_UserMarshal(ptr ptr ptr) combase.HBITMAP_UserMarshal
+@ stdcall HBITMAP_UserSize(ptr long ptr) combase.HBITMAP_UserSize
+@ stdcall HBITMAP_UserUnmarshal(ptr ptr ptr) combase.HBITMAP_UserUnmarshal
+@ stdcall HBRUSH_UserFree(ptr ptr) combase.HBRUSH_UserFree
+@ stdcall HBRUSH_UserMarshal(ptr ptr ptr) combase.HBRUSH_UserMarshal
+@ stdcall HBRUSH_UserSize(ptr long ptr) combase.HBRUSH_UserSize
+@ stdcall HBRUSH_UserUnmarshal(ptr ptr ptr) combase.HBRUSH_UserUnmarshal
 @ stdcall HDC_UserFree(ptr ptr) combase.HDC_UserFree
 @ stdcall HDC_UserMarshal(ptr ptr ptr) combase.HDC_UserMarshal
 @ stdcall HDC_UserSize(ptr long ptr) combase.HDC_UserSize
@@ -143,10 +143,10 @@
 @ stdcall HENHMETAFILE_UserMarshal(ptr ptr ptr)
 @ stdcall HENHMETAFILE_UserSize(ptr long ptr)
 @ stdcall HENHMETAFILE_UserUnmarshal(ptr ptr ptr)
-@ stdcall HGLOBAL_UserFree(ptr ptr)
-@ stdcall HGLOBAL_UserMarshal(ptr ptr ptr)
-@ stdcall HGLOBAL_UserSize(ptr long ptr)
-@ stdcall HGLOBAL_UserUnmarshal(ptr ptr ptr)
+@ stdcall HGLOBAL_UserFree(ptr ptr) combase.HGLOBAL_UserFree
+@ stdcall HGLOBAL_UserMarshal(ptr ptr ptr) combase.HGLOBAL_UserMarshal
+@ stdcall HGLOBAL_UserSize(ptr long ptr) combase.HGLOBAL_UserSize
+@ stdcall HGLOBAL_UserUnmarshal(ptr ptr ptr) combase.HGLOBAL_UserUnmarshal
 @ stdcall HICON_UserFree(ptr ptr) combase.HICON_UserFree
 @ stdcall HICON_UserMarshal(ptr ptr ptr) combase.HICON_UserMarshal
 @ stdcall HICON_UserSize(ptr long ptr) combase.HICON_UserSize
@@ -163,15 +163,15 @@
 @ stdcall HMETAFILE_UserMarshal(ptr ptr ptr)
 @ stdcall HMETAFILE_UserSize(ptr long ptr)
 @ stdcall HMETAFILE_UserUnmarshal(ptr ptr ptr)
-@ stdcall HPALETTE_UserFree(ptr ptr)
-@ stdcall HPALETTE_UserMarshal(ptr ptr ptr)
-@ stdcall HPALETTE_UserSize(ptr long ptr)
-@ stdcall HPALETTE_UserUnmarshal(ptr ptr ptr)
+@ stdcall HPALETTE_UserFree(ptr ptr) combase.HPALETTE_UserFree
+@ stdcall HPALETTE_UserMarshal(ptr ptr ptr) combase.HPALETTE_UserMarshal
+@ stdcall HPALETTE_UserSize(ptr long ptr) combase.HPALETTE_UserSize
+@ stdcall HPALETTE_UserUnmarshal(ptr ptr ptr) combase.HPALETTE_UserUnmarshal
 @ stdcall HWND_UserFree(ptr ptr) combase.HWND_UserFree
 @ stdcall HWND_UserMarshal(ptr ptr ptr) combase.HWND_UserMarshal
 @ stdcall HWND_UserSize(ptr long ptr) combase.HWND_UserSize
 @ stdcall HWND_UserUnmarshal(ptr ptr ptr) combase.HWND_UserUnmarshal
-@ stdcall IIDFromString(wstr ptr)
+@ stdcall IIDFromString(wstr ptr) combase.IIDFromString
 @ stub I_RemoteMain
 @ stdcall IsAccelerator(long long ptr ptr)
 @ stdcall IsEqualGUID(ptr ptr)
@@ -182,6 +182,7 @@
 @ stdcall MkParseDisplayName(ptr wstr ptr ptr)
 @ stdcall MonikerCommonPrefixWith(ptr ptr ptr)
 @ stub MonikerRelativePathTo
+@ stdcall Ole32DllGetClassObject(ptr ptr ptr)
 @ stdcall OleBuildVersion()
 @ stdcall OleConvertIStorageToOLESTREAM(ptr ptr)
 @ stub OleConvertIStorageToOLESTREAMEx
@@ -237,12 +238,12 @@
 @ stdcall OleTranslateAccelerator(ptr ptr ptr)
 @ stdcall OleUninitialize()
 @ stub OpenOrCreateStream
-@ stdcall ProgIDFromCLSID(ptr ptr)
+@ stdcall ProgIDFromCLSID(ptr ptr) combase.ProgIDFromCLSID
 @ stdcall PropStgNameToFmtId(wstr ptr)
 @ stdcall PropSysAllocString(wstr)
 @ stdcall PropSysFreeString(wstr)
-@ stdcall PropVariantClear(ptr)
-@ stdcall PropVariantCopy(ptr ptr)
+@ stdcall PropVariantClear(ptr) combase.PropVariantClear
+@ stdcall PropVariantCopy(ptr ptr) combase.PropVariantCopy
 @ stdcall ReadClassStg(ptr ptr)
 @ stdcall ReadClassStm(ptr ptr)
 @ stdcall ReadFmtUserTypeStg(ptr ptr ptr)
@@ -279,9 +280,9 @@
 @ stdcall StgOpenStorageEx(wstr long long long ptr ptr ptr ptr)
 @ stdcall StgOpenStorageOnILockBytes(ptr ptr long ptr long ptr)
 @ stdcall StgSetTimes(wstr ptr ptr ptr )
-@ stdcall StringFromCLSID(ptr ptr)
-@ stdcall StringFromGUID2(ptr ptr long)
-@ stdcall StringFromIID(ptr ptr) StringFromCLSID
+@ stdcall StringFromCLSID(ptr ptr) combase.StringFromCLSID
+@ stdcall StringFromGUID2(ptr ptr long) combase.StringFromGUID2
+@ stdcall StringFromIID(ptr ptr) combase.StringFromIID
 @ stub UpdateDCOMSettings
 @ stub UtConvertDvtd16toDvtd32
 @ stub UtConvertDvtd32toDvtd16

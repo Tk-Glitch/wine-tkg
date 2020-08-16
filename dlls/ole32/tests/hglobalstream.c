@@ -569,8 +569,8 @@ static void test_IStream_Clone(void)
 
     stream_info(stream, &hmem, &size, &pos);
     ok(hmem == orig_hmem, "handles should match\n");
-    ok(size == 0,  "unexpected %d\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
+    ok(size == 0, "unexpected %d\n", size);
+    ok(pos == 0, "unexpected %d\n", pos);
 
     hr = IStream_Clone(stream, &clone);
     ok(hr == S_OK, "unexpected %#x\n", hr);
@@ -579,14 +579,14 @@ static void test_IStream_Clone(void)
     ok(hr == S_OK, "unexpected %#x\n", hr);
 
     stream_info(stream, &hmem, &size, &pos);
-    ok(hmem != 0, "unexpected %p\n", hmem);
-    ok(size == 13,  "unexpected %d\n", size);
-    ok(pos == 13,  "unexpected %d\n", pos);
+    ok(hmem == orig_hmem, "handles should match\n");
+    ok(size == 13, "unexpected %d\n", size);
+    ok(pos == 13, "unexpected %d\n", pos);
 
     stream_info(clone, &hmem_clone, &size, &pos);
     ok(hmem_clone == hmem, "handles should match\n");
-    ok(size == 13,  "unexpected %d\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
+    ok(size == 13, "unexpected %d\n", size);
+    ok(pos == 0, "unexpected %d\n", pos);
 
     buf[0] = 0;
     hr = IStream_Read(clone, buf, sizeof(buf), NULL);
@@ -598,15 +598,14 @@ static void test_IStream_Clone(void)
     ok(hr == S_OK, "unexpected %#x\n", hr);
 
     stream_info(stream, &hmem, &size, &pos);
-    ok(hmem != 0,  "unexpected %p\n", hmem);
-    ok(hmem == orig_hmem,  "unexpected %p\n", hmem);
-    ok(size == 0x8000,  "unexpected %#x\n", size);
-    ok(pos == 13,  "unexpected %d\n", pos);
+    ok(hmem == orig_hmem, "handles should match\n");
+    ok(size == 0x8000, "unexpected %#x\n", size);
+    ok(pos == 13, "unexpected %d\n", pos);
 
     stream_info(clone, &hmem_clone, &size, &pos);
     ok(hmem_clone == hmem, "handles should match\n");
-    ok(size == 0x8000,  "unexpected %#x\n", size);
-    ok(pos == 13,  "unexpected %d\n", pos);
+    ok(size == 0x8000, "unexpected %#x\n", size);
+    ok(pos == 13, "unexpected %d\n", pos);
 
     IStream_Release(clone);
     IStream_Release(stream);
@@ -621,73 +620,34 @@ static void test_IStream_Clone(void)
     ok(hr == S_OK, "unexpected %#x\n", hr);
 
     stream_info(stream, &hmem, &size, &pos);
-    ok(hmem != 0,  "unexpected %p\n", hmem);
-    ok(size == 1,  "unexpected %d\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
+    ok(hmem == orig_hmem, "handles should match\n");
+    ok(size == 1, "unexpected %d\n", size);
+    ok(pos == 0, "unexpected %d\n", pos);
 
     stream_info(clone, &hmem_clone, &size, &pos);
     ok(hmem_clone == hmem, "handles should match\n");
-    ok(size == 1,  "unexpected %d\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
+    ok(size == 1, "unexpected %d\n", size);
+    ok(pos == 0, "unexpected %d\n", pos);
 
     newsize.QuadPart = 0x8000;
     hr = IStream_SetSize(stream, newsize);
     ok(hr == S_OK, "unexpected %#x\n", hr);
 
     stream_info(stream, &hmem, &size, &pos);
-    ok(hmem != 0,  "unexpected %p\n", hmem);
-    ok(hmem != orig_hmem,  "unexpected %p\n", hmem);
-    ok(size == 0x8000,  "unexpected %#x\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
+    ok(hmem != 0, "unexpected %p\n", hmem);
+    ok(hmem != orig_hmem, "unexpected %p\n", hmem);
+    ok(size == 0x8000, "unexpected %#x\n", size);
+    ok(pos == 0, "unexpected %d\n", pos);
 
     stream_info(clone, &hmem_clone, &size, &pos);
     ok(hmem_clone == hmem, "handles should match\n");
-    ok(size == 0x8000,  "unexpected %#x\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
+    ok(size == 0x8000, "unexpected %#x\n", size);
+    ok(pos == 0, "unexpected %d\n", pos);
 
     IStream_Release(stream);
     IStream_Release(clone);
 
-    /* exploit GMEM_FIXED forced move for different base streams */
-    orig_hmem = GlobalAlloc(GMEM_FIXED, 1);
-    ok(orig_hmem != 0, "unexpected %p\n", orig_hmem);
-    hr = CreateStreamOnHGlobal(orig_hmem, TRUE, &stream);
-    ok(hr == S_OK, "unexpected %#x\n", hr);
-
-    hr = CreateStreamOnHGlobal(orig_hmem, TRUE, &clone);
-    ok(hr == S_OK, "unexpected %#x\n", hr);
-
-    stream_info(stream, &hmem, &size, &pos);
-    ok(hmem != 0,  "unexpected %p\n", hmem);
-    ok(size == 1,  "unexpected %d\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
-
-    stream_info(clone, &hmem_clone, &size, &pos);
-    ok(hmem_clone == hmem, "handles should match\n");
-    ok(size == 1,  "unexpected %d\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
-
-    newsize.QuadPart = 0x8000;
-    hr = IStream_SetSize(stream, newsize);
-    ok(hr == S_OK, "unexpected %#x\n", hr);
-
-    stream_info(stream, &hmem, &size, &pos);
-    ok(hmem != 0,  "unexpected %p\n", hmem);
-    ok(hmem != orig_hmem,  "unexpected %p\n", hmem);
-    ok(size == 0x8000,  "unexpected %#x\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
-
-    stream_info(clone, &hmem_clone, &size, &pos);
-    ok(hmem_clone != hmem, "handles should not match\n");
-    ok(size == 1,  "unexpected %#x\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
-
-    IStream_Release(stream);
-    /* releasing clone leads to test termination under windows
-    IStream_Release(clone);
-    */
-
-    /* test Release for a being cloned stream */
+    /* test Release of cloned stream */
     hr = CreateStreamOnHGlobal(0, TRUE, &stream);
     ok(hr == S_OK, "unexpected %#x\n", hr);
 
@@ -695,14 +655,14 @@ static void test_IStream_Clone(void)
     ok(hr == S_OK, "unexpected %#x\n", hr);
 
     stream_info(stream, &hmem, &size, &pos);
-    ok(hmem != 0,  "unexpected %p\n", hmem);
-    ok(size == 0,  "unexpected %d\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
+    ok(hmem != 0, "unexpected %p\n", hmem);
+    ok(size == 0, "unexpected %d\n", size);
+    ok(pos == 0, "unexpected %d\n", pos);
 
     stream_info(clone, &hmem_clone, &size, &pos);
     ok(hmem_clone == hmem, "handles should match\n");
-    ok(size == 0,  "unexpected %#x\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
+    ok(size == 0, "unexpected %#x\n", size);
+    ok(pos == 0, "unexpected %d\n", pos);
 
     ret = IStream_Release(stream);
     ok(ret == 0, "unexpected %d\n", ret);
@@ -713,16 +673,16 @@ static void test_IStream_Clone(void)
 
     stream_info(clone, &hmem_clone, &size, &pos);
     ok(hmem_clone == hmem, "handles should match\n");
-    ok(size == 0x8000,  "unexpected %#x\n", size);
-    ok(pos == 0,  "unexpected %d\n", pos);
+    ok(size == 0x8000, "unexpected %#x\n", size);
+    ok(pos == 0, "unexpected %d\n", pos);
 
     hr = IStream_Write(clone, hello, sizeof(hello), NULL);
     ok(hr == S_OK, "unexpected %#x\n", hr);
 
     stream_info(clone, &hmem_clone, &size, &pos);
     ok(hmem_clone == hmem, "handles should match\n");
-    ok(size == 0x8000,  "unexpected %#x\n", size);
-    ok(pos == 13,  "unexpected %d\n", pos);
+    ok(size == 0x8000, "unexpected %#x\n", size);
+    ok(pos == 13, "unexpected %d\n", pos);
 
     offset.QuadPart = 0;
     hr = IStream_Seek(clone, offset, STREAM_SEEK_SET, NULL);
@@ -735,8 +695,8 @@ static void test_IStream_Clone(void)
 
     stream_info(clone, &hmem_clone, &size, &pos);
     ok(hmem_clone == hmem, "handles should match\n");
-    ok(size == 0x8000,  "unexpected %#x\n", size);
-    ok(pos == 32,  "unexpected %d\n", pos);
+    ok(size == 0x8000, "unexpected %#x\n", size);
+    ok(pos == 32, "unexpected %d\n", pos);
 
     ret = IStream_Release(clone);
     ok(ret == 0, "unexpected %d\n", ret);

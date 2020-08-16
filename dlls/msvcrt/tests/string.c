@@ -1983,7 +1983,8 @@ static void test__strtod(void)
         ok(d == tests[i].ret, "%d) d = %.16e\n", i, d);
         ok(end == tests[i].str + tests[i].len, "%d) len = %d\n",
                 i, (int)(end - tests[i].str));
-        ok(errno == tests[i].err, "%d) errno = %d\n", i, errno);
+        ok(errno == tests[i].err || (!tests[i].err && errno == 0xdeadbeef) /* <= 2003 */,
+                "%d) errno = %d\n", i, errno);
     }
 
     if (!p__strtod_l)
@@ -2105,6 +2106,11 @@ static void test_mbstowcs(void)
     ret = mbstowcs(wOut, mEmpty, 6);
     ok(ret == 0, "mbstowcs did not return 0, got %d\n", (int)ret);
     ok(!memcmp(wOut, wEmpty, sizeof(wEmpty)), "wOut = %s\n", wine_dbgstr_w(wOut));
+
+    errno = 0xdeadbeef;
+    ret = mbstowcs(wOut, mHiragana+1, 5);
+    ok(ret == -1, "mbstowcs did not return -1\n");
+    ok(errno == EILSEQ, "errno = %d\n", errno);
 
     ret = wcstombs(mOut, wHiragana, 6);
     ok(ret == 4, "wcstombs did not return 4\n");

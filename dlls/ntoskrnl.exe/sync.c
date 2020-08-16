@@ -33,6 +33,7 @@
 #include "wine/asm.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
+#include "wine/server.h"
 
 #include "ntoskrnl_private.h"
 
@@ -309,6 +310,28 @@ LONG WINAPI KeResetEvent( PRKEVENT event )
 void WINAPI KeClearEvent( PRKEVENT event )
 {
     KeResetEvent( event );
+}
+
+/***********************************************************************
+ *           KeReadStateEvent (NTOSKRNL.EXE.@)
+ */
+LONG WINAPI KeReadStateEvent( PRKEVENT event )
+{
+    HANDLE handle;
+
+    TRACE("event %p.\n", event);
+
+    if (event->Header.WaitListHead.Blink == INVALID_HANDLE_VALUE)
+    {
+        if (!(ObOpenObjectByPointer( event, OBJ_KERNEL_HANDLE, NULL, EVENT_QUERY_STATE, NULL, KernelMode, &handle )))
+        {
+            EVENT_BASIC_INFORMATION event_info;
+            if (!(NtQueryEvent( handle, EventBasicInformation, &event_info, sizeof(event_info), NULL)))
+                event->Header.SignalState = event_info.EventState;
+            NtClose( handle );
+        }
+    }
+    return event->Header.SignalState;
 }
 
 /***********************************************************************
@@ -640,6 +663,56 @@ void WINAPI KeReleaseInStackQueuedSpinLock( KLOCK_QUEUE_HANDLE *queue )
     KeReleaseInStackQueuedSpinLockFromDpcLevel( queue );
 }
 #endif
+
+/***********************************************************************
+ *           KeInitializeApc (NTOSKRNL.EXE.@)
+ */
+void WINAPI KeInitializeApc(PRKAPC apc, PRKTHREAD thread, KAPC_ENVIRONMENT env, PKKERNEL_ROUTINE krnl_routine,
+                            PKRUNDOWN_ROUTINE rundown_routine, PKNORMAL_ROUTINE normal_routine, KPROCESSOR_MODE apc_mode, PVOID ctx)
+{
+    TRACE("apc %p thread %p env %u krnl_routine %p rundown_routine %p normal_routine %p apc_mode %u ctx %p\n",
+           apc, thread, env, krnl_routine, rundown_routine, normal_routine, apc_mode, ctx);
+
+    if (env != OriginalApcEnvironment)
+        FIXME("Unhandled APC_ENVIRONMENT\n");
+
+    apc->Type = 18;
+    apc->Size = sizeof(*apc);
+    apc->Thread = thread;
+    apc->ApcStateIndex = env;
+    apc->KernelRoutine = krnl_routine;
+    apc->RundownRoutine = rundown_routine;
+    apc->NormalRoutine = normal_routine;
+    apc->Inserted = FALSE;
+    if (apc->NormalRoutine)
+    {
+        apc->ApcMode = apc_mode;
+        apc->NormalContext = ctx;
+    }
+    else
+    {
+        apc->ApcMode = KernelMode;
+        apc->NormalContext = NULL;
+    }
+}
+
+/***********************************************************************
+ *           KeTestAlertThread  (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI KeTestAlertThread(KPROCESSOR_MODE mode)
+{
+    FIXME("stub! %u\n", mode);
+    return TRUE;
+}
+
+/***********************************************************************
+ *           KeAlertThread  (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI KeAlertThread(PKTHREAD thread, KPROCESSOR_MODE mode)
+{
+    FIXME("stub! %p mode %u\n", thread, mode);
+    return TRUE;
+}
 
 static KSPIN_LOCK cancel_lock;
 

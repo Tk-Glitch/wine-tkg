@@ -16,7 +16,19 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ *
+ *
+ * For functions copied from musl (http://www.musl-libc.org/):
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
  */
+
 #include "config.h"
 #include "wine/port.h"
 
@@ -35,6 +47,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
+#ifndef HAVE_FINITE
+#define finite(x) isfinite(x)
+#endif
 #ifndef HAVE_FINITEF
 #define finitef(x) isfinite(x)
 #endif
@@ -117,6 +132,13 @@ void msvcrt_init_math(void)
     sse2_supported = sse2_enabled = IsProcessorFeaturePresent( PF_XMMI64_INSTRUCTIONS_AVAILABLE );
 }
 
+/* Copied from musl: src/internal/libm.h */
+static inline float fp_barrierf(float x)
+{
+    volatile float y = x;
+    return y;
+}
+
 /*********************************************************************
  *      _matherr (CRTDLL.@)
  */
@@ -126,16 +148,14 @@ int CDECL MSVCRT__matherr(struct MSVCRT__exception *e)
 }
 
 
-static void math_error(int type, const char *name, double arg1, double arg2, double retval)
+static double math_error(int type, const char *name, double arg1, double arg2, double retval)
 {
+    struct MSVCRT__exception exception = {type, (char *)name, arg1, arg2, retval};
+
     TRACE("(%d, %s, %g, %g, %g)\n", type, debugstr_a(name), arg1, arg2, retval);
 
-    if (MSVCRT_default_matherr_func)
-    {
-        struct MSVCRT__exception exception = {type, (char *)name, arg1, arg2, retval};
-
-        if (MSVCRT_default_matherr_func(&exception)) return;
-    }
+    if (MSVCRT_default_matherr_func && MSVCRT_default_matherr_func(&exception))
+        return exception.retval;
 
     switch (type)
     {
@@ -152,6 +172,8 @@ static void math_error(int type, const char *name, double arg1, double arg2, dou
     default:
         ERR("Unhandled math error!\n");
     }
+
+    return exception.retval;
 }
 
 /*********************************************************************
@@ -232,8 +254,8 @@ float CDECL MSVCRT__nextafterf( float num, float next )
 float CDECL MSVCRT__logbf( float num )
 {
     float ret = logbf(num);
-    if (isnan(num)) math_error(_DOMAIN, "_logbf", num, 0, ret);
-    else if (!num) math_error(_SING, "_logbf", num, 0, ret);
+    if (isnan(num)) return math_error(_DOMAIN, "_logbf", num, 0, ret);
+    if (!num) return math_error(_SING, "_logbf", num, 0, ret);
     return ret;
 }
 
@@ -262,47 +284,268 @@ INT CDECL MSVCRT__isnanf( float num )
 
 /*********************************************************************
  *      MSVCRT_acosf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/acosf.c
  */
+static float acosf_R(float z)
+{
+    static const float pS0 = 1.6666586697e-01,
+                 pS1 = -4.2743422091e-02,
+                 pS2 = -8.6563630030e-03,
+                 qS1 = -7.0662963390e-01;
+
+    float p, q;
+    p = z * (pS0 + z * (pS1 + z * pS2));
+    q = 1.0f + z * qS1;
+    return p / q;
+}
+
 float CDECL MSVCRT_acosf( float x )
 {
-  /* glibc implements acos() as the FPU equivalent of atan2(sqrt(1 - x ^ 2), x).
-   * asin() uses a similar construction. This is bad because as x gets nearer to
-   * 1 the error in the expression "1 - x^2" can get relatively large due to
-   * cancellation. The sqrt() makes things worse. A safer way to calculate
-   * acos() is to use atan2(sqrt((1 - x) * (1 + x)), x). */
-  float ret = atan2f(sqrtf((1 - x) * (1 + x)), x);
-  if (x < -1.0 || x > 1.0 || !finitef(x)) math_error(_DOMAIN, "acosf", x, 0, ret);
-  return ret;
+    static const float pio2_hi = 1.5707962513e+00,
+                 pio2_lo = 7.5497894159e-08;
+
+    float z, w, s, c, df;
+    unsigned int hx, ix;
+
+    hx = *(unsigned int*)&x;
+    ix = hx & 0x7fffffff;
+    /* |x| >= 1 or nan */
+    if (ix >= 0x3f800000) {
+        if (ix == 0x3f800000) {
+            if (hx >> 31)
+                return 2 * pio2_hi + 7.5231638453e-37;
+            return 0;
+        }
+        if (MSVCRT__isnanf(x)) return x;
+        return math_error(_DOMAIN, "acosf", x, 0, 0 / (x - x));
+    }
+    /* |x| < 0.5 */
+    if (ix < 0x3f000000) {
+        if (ix <= 0x32800000) /* |x| < 2**-26 */
+            return pio2_hi + 7.5231638453e-37;
+        return pio2_hi - (x - (pio2_lo - x * acosf_R(x * x)));
+    }
+    /* x < -0.5 */
+    if (hx >> 31) {
+        z = (1 + x) * 0.5f;
+        s = sqrtf(z);
+        w = acosf_R(z) * s - pio2_lo;
+        return 2 * (pio2_hi - (s + w));
+    }
+    /* x > 0.5 */
+    z = (1 - x) * 0.5f;
+    s = sqrtf(z);
+    hx = *(unsigned int*)&s & 0xfffff000;
+    df = *(float*)&hx;
+    c = (z - df * df) / (s + df);
+    w = acosf_R(z) * s + c;
+    return 2 * (df + w);
 }
 
 /*********************************************************************
  *      MSVCRT_asinf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/asinf.c
  */
+static float asinf_R(float z)
+{
+    /* coefficients for R(x^2) */
+    static const float pS0 =  1.6666586697e-01,
+                 pS1 = -4.2743422091e-02,
+                 pS2 = -8.6563630030e-03,
+                 qS1 = -7.0662963390e-01;
+
+    float_t p, q;
+    p = z * (pS0 + z * (pS1 + z * pS2));
+    q = 1.0f + z * qS1;
+    return p / q;
+}
+
 float CDECL MSVCRT_asinf( float x )
 {
-  float ret = atan2f(x, sqrtf((1 - x) * (1 + x)));
-  if (x < -1.0 || x > 1.0 || !finitef(x)) math_error(_DOMAIN, "asinf", x, 0, ret);
-  return ret;
+    static const double pio2 = 1.570796326794896558e+00;
+
+    double s;
+    float z;
+    unsigned int hx, ix;
+
+    hx = *(unsigned int*)&x;
+    ix = hx & 0x7fffffff;
+    if (ix >= 0x3f800000) {  /* |x| >= 1 */
+        if (ix == 0x3f800000)  /* |x| == 1 */
+            return x * pio2 + 7.5231638453e-37;  /* asin(+-1) = +-pi/2 with inexact */
+        if (MSVCRT__isnanf(x)) return x;
+        return math_error(_DOMAIN, "asinf", x, 0, 0 / (x - x));
+    }
+    if (ix < 0x3f000000) {  /* |x| < 0.5 */
+        /* if 0x1p-126 <= |x| < 0x1p-12, avoid raising underflow */
+        if (ix < 0x39800000 && ix >= 0x00800000)
+            return x;
+        return x + x * asinf_R(x * x);
+    }
+    /* 1 > |x| >= 0.5 */
+    z = (1 - fabsf(x)) * 0.5f;
+    s = sqrt(z);
+    x = pio2 - 2 * (s + s * asinf_R(z));
+    if (hx >> 31)
+        return -x;
+    return x;
 }
 
 /*********************************************************************
  *      MSVCRT_atanf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/atanf.c
  */
 float CDECL MSVCRT_atanf( float x )
 {
-  float ret = atanf(x);
-  if (!finitef(x)) math_error(_DOMAIN, "atanf", x, 0, ret);
-  return ret;
+    static const float atanhi[] = {
+        4.6364760399e-01,
+        7.8539812565e-01,
+        9.8279368877e-01,
+        1.5707962513e+00,
+    };
+    static const float atanlo[] = {
+        5.0121582440e-09,
+        3.7748947079e-08,
+        3.4473217170e-08,
+        7.5497894159e-08,
+    };
+    static const float aT[] = {
+        3.3333328366e-01,
+        -1.9999158382e-01,
+        1.4253635705e-01,
+        -1.0648017377e-01,
+        6.1687607318e-02,
+    };
+
+    float w, s1, s2, z;
+    unsigned int ix, sign;
+    int id;
+
+#if _MSVCR_VER == 0
+    if (MSVCRT__isnanf(x)) return math_error(_DOMAIN, "atanf", x, 0, x);
+#endif
+
+    ix = *(unsigned int*)&x;
+    sign = ix >> 31;
+    ix &= 0x7fffffff;
+    if (ix >= 0x4c800000) {  /* if |x| >= 2**26 */
+        if (MSVCRT__isnanf(x))
+            return x;
+        z = atanhi[3] + 7.5231638453e-37;
+        return sign ? -z : z;
+    }
+    if (ix < 0x3ee00000) {   /* |x| < 0.4375 */
+        if (ix < 0x39800000) {  /* |x| < 2**-12 */
+            if (ix < 0x00800000)
+                /* raise underflow for subnormal x */
+                fp_barrierf(x*x);
+            return x;
+        }
+        id = -1;
+    } else {
+        x = fabsf(x);
+        if (ix < 0x3f980000) {  /* |x| < 1.1875 */
+            if (ix < 0x3f300000) {  /*  7/16 <= |x| < 11/16 */
+                id = 0;
+                x = (2.0f * x - 1.0f) / (2.0f + x);
+            } else {                /* 11/16 <= |x| < 19/16 */
+                id = 1;
+                x = (x - 1.0f) / (x + 1.0f);
+            }
+        } else {
+            if (ix < 0x401c0000) {  /* |x| < 2.4375 */
+                id = 2;
+                x = (x - 1.5f) / (1.0f + 1.5f * x);
+            } else {                /* 2.4375 <= |x| < 2**26 */
+                id = 3;
+                x = -1.0f / x;
+            }
+        }
+    }
+    /* end of argument reduction */
+    z = x * x;
+    w = z * z;
+    /* break sum from i=0 to 10 aT[i]z**(i+1) into odd and even poly */
+    s1 = z * (aT[0] + w * (aT[2] + w * aT[4]));
+    s2 = w * (aT[1] + w * aT[3]);
+    if (id < 0)
+        return x - x * (s1 + s2);
+    z = atanhi[id] - ((x * (s1 + s2) - atanlo[id]) - x);
+    return sign ? -z : z;
 }
 
 /*********************************************************************
  *              MSVCRT_atan2f (MSVCRT.@)
+ *
+ * Copied from musl: src/math/atan2f.c
  */
-float CDECL MSVCRT_atan2f( float x, float y )
+float CDECL MSVCRT_atan2f( float y, float x )
 {
-  float ret = atan2f(x, y);
-  if (isnan(x)) math_error(_DOMAIN, "atan2f", x, y, ret);
-  return ret;
+    static const float pi     = 3.1415927410e+00,
+                 pi_lo  = -8.7422776573e-08;
+
+    float z;
+    unsigned int m, ix, iy;
+
+    if (MSVCRT__isnanf(x) || MSVCRT__isnanf(y))
+        return x + y;
+    ix = *(unsigned int*)&x;
+    iy = *(unsigned int*)&y;
+    if (ix == 0x3f800000)  /* x=1.0 */
+        return atanf(y);
+    m = ((iy >> 31) & 1) | ((ix >> 30) & 2);  /* 2*sign(x)+sign(y) */
+    ix &= 0x7fffffff;
+    iy &= 0x7fffffff;
+
+    /* when y = 0 */
+    if (iy == 0) {
+        switch (m) {
+        case 0:
+        case 1: return y;   /* atan(+-0,+anything)=+-0 */
+        case 2: return pi;  /* atan(+0,-anything) = pi */
+        case 3: return -pi; /* atan(-0,-anything) =-pi */
+        }
+    }
+    /* when x = 0 */
+    if (ix == 0)
+        return m & 1 ? -pi / 2 : pi / 2;
+    /* when x is INF */
+    if (ix == 0x7f800000) {
+        if (iy == 0x7f800000) {
+            switch (m) {
+            case 0: return pi / 4;      /* atan(+INF,+INF) */
+            case 1: return -pi / 4;     /* atan(-INF,+INF) */
+            case 2: return 3 * pi / 4;  /*atan(+INF,-INF)*/
+            case 3: return -3 * pi / 4; /*atan(-INF,-INF)*/
+            }
+        } else {
+            switch (m) {
+            case 0: return 0.0f;    /* atan(+...,+INF) */
+            case 1: return -0.0f;   /* atan(-...,+INF) */
+            case 2: return pi;      /* atan(+...,-INF) */
+            case 3: return -pi;     /* atan(-...,-INF) */
+            }
+        }
+    }
+    /* |y/x| > 0x1p26 */
+    if (ix + (26 << 23) < iy || iy == 0x7f800000)
+        return m & 1 ? -pi / 2 : pi / 2;
+
+    /* z = atan(|y/x|) with correct underflow */
+    if ((m & 2) && iy + (26 << 23) < ix)  /*|y/x| < 0x1p-26, x < 0 */
+        z = 0.0;
+    else
+        z = atanf(fabsf(y / x));
+    switch (m) {
+    case 0: return z;                /* atan(+,+) */
+    case 1: return -z;               /* atan(-,+) */
+    case 2: return pi - (z - pi_lo); /* atan(+,-) */
+    default: /* case 3 */
+        return (z - pi_lo) - pi;     /* atan(-,-) */
+    }
 }
 
 /*********************************************************************
@@ -311,7 +554,7 @@ float CDECL MSVCRT_atan2f( float x, float y )
 float CDECL MSVCRT_cosf( float x )
 {
   float ret = cosf(x);
-  if (!finitef(x)) math_error(_DOMAIN, "cosf", x, 0, ret);
+  if (!finitef(x)) return math_error(_DOMAIN, "cosf", x, 0, ret);
   return ret;
 }
 
@@ -321,7 +564,7 @@ float CDECL MSVCRT_cosf( float x )
 float CDECL MSVCRT_coshf( float x )
 {
   float ret = coshf(x);
-  if (isnan(x)) math_error(_DOMAIN, "coshf", x, 0, ret);
+  if (isnan(x)) return math_error(_DOMAIN, "coshf", x, 0, ret);
   return ret;
 }
 
@@ -331,9 +574,9 @@ float CDECL MSVCRT_coshf( float x )
 float CDECL MSVCRT_expf( float x )
 {
   float ret = expf(x);
-  if (isnan(x)) math_error(_DOMAIN, "expf", x, 0, ret);
-  else if (finitef(x) && !ret) math_error(_UNDERFLOW, "expf", x, 0, ret);
-  else if (finitef(x) && !finitef(ret)) math_error(_OVERFLOW, "expf", x, 0, ret);
+  if (isnan(x)) return math_error(_DOMAIN, "expf", x, 0, ret);
+  if (finitef(x) && !ret) return math_error(_UNDERFLOW, "expf", x, 0, ret);
+  if (finitef(x) && !finitef(ret)) return math_error(_OVERFLOW, "expf", x, 0, ret);
   return ret;
 }
 
@@ -343,7 +586,7 @@ float CDECL MSVCRT_expf( float x )
 float CDECL MSVCRT_fmodf( float x, float y )
 {
   float ret = fmodf(x, y);
-  if (!finitef(x) || !finitef(y)) math_error(_DOMAIN, "fmodf", x, 0, ret);
+  if (!finitef(x) || !finitef(y)) return math_error(_DOMAIN, "fmodf", x, 0, ret);
   return ret;
 }
 
@@ -353,8 +596,8 @@ float CDECL MSVCRT_fmodf( float x, float y )
 float CDECL MSVCRT_logf( float x )
 {
   float ret = logf(x);
-  if (x < 0.0) math_error(_DOMAIN, "logf", x, 0, ret);
-  else if (x == 0.0) math_error(_SING, "logf", x, 0, ret);
+  if (x < 0.0) return math_error(_DOMAIN, "logf", x, 0, ret);
+  if (x == 0.0) return math_error(_SING, "logf", x, 0, ret);
   return ret;
 }
 
@@ -364,8 +607,8 @@ float CDECL MSVCRT_logf( float x )
 float CDECL MSVCRT_log10f( float x )
 {
   float ret = log10f(x);
-  if (x < 0.0) math_error(_DOMAIN, "log10f", x, 0, ret);
-  else if (x == 0.0) math_error(_SING, "log10f", x, 0, ret);
+  if (x < 0.0) return math_error(_DOMAIN, "log10f", x, 0, ret);
+  if (x == 0.0) return math_error(_SING, "log10f", x, 0, ret);
   return ret;
 }
 
@@ -375,10 +618,10 @@ float CDECL MSVCRT_log10f( float x )
 float CDECL MSVCRT_powf( float x, float y )
 {
   float z = powf(x,y);
-  if (x < 0 && y != floorf(y)) math_error(_DOMAIN, "powf", x, y, z);
-  else if (!x && finitef(y) && y < 0) math_error(_SING, "powf", x, y, z);
-  else if (finitef(x) && finitef(y) && !finitef(z)) math_error(_OVERFLOW, "powf", x, y, z);
-  else if (x && finitef(x) && finitef(y) && !z) math_error(_UNDERFLOW, "powf", x, y, z);
+  if (x < 0 && y != floorf(y)) return math_error(_DOMAIN, "powf", x, y, z);
+  if (!x && finitef(y) && y < 0) return math_error(_SING, "powf", x, y, z);
+  if (finitef(x) && finitef(y) && !finitef(z)) return math_error(_OVERFLOW, "powf", x, y, z);
+  if (x && finitef(x) && finitef(y) && !z) return math_error(_UNDERFLOW, "powf", x, y, z);
   return z;
 }
 
@@ -388,7 +631,7 @@ float CDECL MSVCRT_powf( float x, float y )
 float CDECL MSVCRT_sinf( float x )
 {
   float ret = sinf(x);
-  if (!finitef(x)) math_error(_DOMAIN, "sinf", x, 0, ret);
+  if (!finitef(x)) return math_error(_DOMAIN, "sinf", x, 0, ret);
   return ret;
 }
 
@@ -398,18 +641,80 @@ float CDECL MSVCRT_sinf( float x )
 float CDECL MSVCRT_sinhf( float x )
 {
   float ret = sinhf(x);
-  if (isnan(x)) math_error(_DOMAIN, "sinhf", x, 0, ret);
+  if (isnan(x)) return math_error(_DOMAIN, "sinhf", x, 0, ret);
   return ret;
 }
 
 /*********************************************************************
  *      MSVCRT_sqrtf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/sqrtf.c
  */
 float CDECL MSVCRT_sqrtf( float x )
 {
-  float ret = sqrtf(x);
-  if (x < 0.0) math_error(_DOMAIN, "sqrtf", x, 0, ret);
-  return ret;
+    static const float tiny = 1.0e-30;
+
+    float z;
+    int sign = 0x80000000;
+    int ix,s,q,m,t,i;
+    unsigned int r;
+
+    ix = *(int*)&x;
+
+    /* take care of Inf and NaN */
+    if ((ix & 0x7f800000) == 0x7f800000 && (ix == 0x7f800000 || ix & 0x7fffff))
+        return x;
+
+    /* take care of zero */
+    if (ix <= 0) {
+        if ((ix & ~sign) == 0)
+            return x;  /* sqrt(+-0) = +-0 */
+        return math_error(_DOMAIN, "sqrtf", x, 0, (x - x) / (x - x)); /* sqrt(-ve) = sNaN */
+    }
+    /* normalize x */
+    m = ix >> 23;
+    if (m == 0) {  /* subnormal x */
+        for (i = 0; (ix & 0x00800000) == 0; i++)
+            ix <<= 1;
+        m -= i - 1;
+    }
+    m -= 127;  /* unbias exponent */
+    ix = (ix & 0x007fffff) | 0x00800000;
+    if (m & 1)  /* odd m, double x to make it even */
+        ix += ix;
+    m >>= 1;  /* m = [m/2] */
+
+    /* generate sqrt(x) bit by bit */
+    ix += ix;
+    q = s = 0;       /* q = sqrt(x) */
+    r = 0x01000000;  /* r = moving bit from right to left */
+
+    while (r != 0) {
+        t = s + r;
+        if (t <= ix) {
+            s = t + r;
+            ix -= t;
+            q += r;
+        }
+        ix += ix;
+        r >>= 1;
+    }
+
+    /* use floating add to find out rounding direction */
+    if (ix != 0) {
+        z = 1.0f - tiny; /* raise inexact flag */
+        if (z >= 1.0f) {
+            z = 1.0f + tiny;
+            if (z > 1.0f)
+                q += 2;
+            else
+                q += q & 1;
+        }
+    }
+    ix = (q >> 1) + 0x3f000000;
+    r = ix + ((unsigned int)m << 23);
+    z = *(float*)&r;
+    return z;
 }
 
 /*********************************************************************
@@ -418,7 +723,7 @@ float CDECL MSVCRT_sqrtf( float x )
 float CDECL MSVCRT_tanf( float x )
 {
   float ret = tanf(x);
-  if (!finitef(x)) math_error(_DOMAIN, "tanf", x, 0, ret);
+  if (!finitef(x)) return math_error(_DOMAIN, "tanf", x, 0, ret);
   return ret;
 }
 
@@ -428,7 +733,7 @@ float CDECL MSVCRT_tanf( float x )
 float CDECL MSVCRT_tanhf( float x )
 {
   float ret = tanhf(x);
-  if (!finitef(x)) math_error(_DOMAIN, "tanhf", x, 0, ret);
+  if (!finitef(x)) return math_error(_DOMAIN, "tanhf", x, 0, ret);
   return ret;
 }
 
@@ -476,47 +781,311 @@ float CDECL MSVCRT_modff( float x, float *iptr )
 
 /*********************************************************************
  *		MSVCRT_acos (MSVCRT.@)
+ *
+ * Copied from musl: src/math/acos.c
  */
+static double acos_R(double z)
+{
+    static const double pS0 =  1.66666666666666657415e-01,
+                 pS1 = -3.25565818622400915405e-01,
+                 pS2 =  2.01212532134862925881e-01,
+                 pS3 = -4.00555345006794114027e-02,
+                 pS4 =  7.91534994289814532176e-04,
+                 pS5 =  3.47933107596021167570e-05,
+                 qS1 = -2.40339491173441421878e+00,
+                 qS2 =  2.02094576023350569471e+00,
+                 qS3 = -6.88283971605453293030e-01,
+                 qS4 =  7.70381505559019352791e-02;
+
+    double p, q;
+    p = z * (pS0 + z * (pS1 + z * (pS2 + z * (pS3 + z * (pS4 + z * pS5)))));
+    q = 1.0 + z * (qS1 + z * (qS2 + z * (qS3 + z * qS4)));
+    return p/q;
+}
+
 double CDECL MSVCRT_acos( double x )
 {
-  /* glibc implements acos() as the FPU equivalent of atan2(sqrt(1 - x ^ 2), x).
-   * asin() uses a similar construction. This is bad because as x gets nearer to
-   * 1 the error in the expression "1 - x^2" can get relatively large due to
-   * cancellation. The sqrt() makes things worse. A safer way to calculate
-   * acos() is to use atan2(sqrt((1 - x) * (1 + x)), x). */
-  double ret = atan2(sqrt((1 - x) * (1 + x)), x);
-  if (x < -1.0 || x > 1.0 || !isfinite(x)) math_error(_DOMAIN, "acos", x, 0, ret);
-  return ret;
+    static const double pio2_hi = 1.57079632679489655800e+00,
+                 pio2_lo = 6.12323399573676603587e-17;
+
+    double z, w, s, c, df;
+    unsigned int hx, ix;
+    ULONGLONG llx;
+
+    hx = *(ULONGLONG*)&x >> 32;
+    ix = hx & 0x7fffffff;
+    /* |x| >= 1 or nan */
+    if (ix >= 0x3ff00000) {
+        unsigned int lx;
+
+        lx = *(ULONGLONG*)&x;
+        if (((ix - 0x3ff00000) | lx) == 0) {
+            /* acos(1)=0, acos(-1)=pi */
+            if (hx >> 31)
+                return 2 * pio2_hi + 7.5231638452626401e-37;
+            return 0;
+        }
+        if (isnan(x)) return x;
+        return math_error(_DOMAIN, "acos", x, 0, 0 / (x - x));
+    }
+    /* |x| < 0.5 */
+    if (ix < 0x3fe00000) {
+        if (ix <= 0x3c600000)  /* |x| < 2**-57 */
+            return pio2_hi + 7.5231638452626401e-37;
+        return pio2_hi - (x - (pio2_lo - x * acos_R(x * x)));
+    }
+    /* x < -0.5 */
+    if (hx >> 31) {
+        z = (1.0 + x) * 0.5;
+        s = sqrt(z);
+        w = acos_R(z) * s - pio2_lo;
+        return 2 * (pio2_hi - (s + w));
+    }
+    /* x > 0.5 */
+    z = (1.0 - x) * 0.5;
+    s = sqrt(z);
+    df = s;
+    llx = (*(ULONGLONG*)&df >> 32) << 32;
+    df = *(double*)&llx;
+    c = (z - df * df) / (s + df);
+    w = acos_R(z) * s + c;
+    return 2 * (df + w);
 }
 
 /*********************************************************************
  *		MSVCRT_asin (MSVCRT.@)
+ *
+ * Copied from musl: src/math/asin.c
  */
+static double asin_R(double z)
+{
+    /* coefficients for R(x^2) */
+    static const double pS0 =  1.66666666666666657415e-01,
+                 pS1 = -3.25565818622400915405e-01,
+                 pS2 =  2.01212532134862925881e-01,
+                 pS3 = -4.00555345006794114027e-02,
+                 pS4 =  7.91534994289814532176e-04,
+                 pS5 =  3.47933107596021167570e-05,
+                 qS1 = -2.40339491173441421878e+00,
+                 qS2 =  2.02094576023350569471e+00,
+                 qS3 = -6.88283971605453293030e-01,
+                 qS4 =  7.70381505559019352791e-02;
+
+    double p, q;
+    p = z * (pS0 + z * (pS1 + z * (pS2 + z * (pS3 + z * (pS4 + z * pS5)))));
+    q = 1.0 + z * (qS1 + z * (qS2 + z * (qS3 + z * qS4)));
+    return p / q;
+}
+
 double CDECL MSVCRT_asin( double x )
 {
-  double ret = atan2(x, sqrt((1 - x) * (1 + x)));
-  if (x < -1.0 || x > 1.0 || !isfinite(x)) math_error(_DOMAIN, "asin", x, 0, ret);
-  return ret;
+    static const double pio2_hi = 1.57079632679489655800e+00,
+                 pio2_lo = 6.12323399573676603587e-17;
+
+    double z, r, s;
+    unsigned int hx, ix;
+    ULONGLONG llx;
+
+    hx = *(ULONGLONG*)&x >> 32;
+    ix = hx & 0x7fffffff;
+    /* |x| >= 1 or nan */
+    if (ix >= 0x3ff00000) {
+        unsigned int lx;
+        lx = *(ULONGLONG*)&x;
+        if (((ix - 0x3ff00000) | lx) == 0)
+            /* asin(1) = +-pi/2 with inexact */
+            return x * pio2_hi + 7.5231638452626401e-37;
+        if (isnan(x)) return x;
+        return math_error(_DOMAIN, "asin", x, 0, 0 / (x - x));
+    }
+    /* |x| < 0.5 */
+    if (ix < 0x3fe00000) {
+        /* if 0x1p-1022 <= |x| < 0x1p-26, avoid raising underflow */
+        if (ix < 0x3e500000 && ix >= 0x00100000)
+            return x;
+        return x + x * asin_R(x * x);
+    }
+    /* 1 > |x| >= 0.5 */
+    z = (1 - fabs(x)) * 0.5;
+    s = sqrt(z);
+    r = asin_R(z);
+    if (ix >= 0x3fef3333) {  /* if |x| > 0.975 */
+        x = pio2_hi - (2 * (s + s * r) - pio2_lo);
+    } else {
+        double f, c;
+        /* f+c = sqrt(z) */
+        f = s;
+        llx = (*(ULONGLONG*)&f >> 32) << 32;
+        f = *(double*)&llx;
+        c = (z - f * f) / (s + f);
+        x = 0.5 * pio2_hi - (2 * s * r - (pio2_lo - 2 * c) - (0.5 * pio2_hi - 2 * f));
+    }
+    if (hx >> 31)
+        return -x;
+    return x;
 }
 
 /*********************************************************************
  *		MSVCRT_atan (MSVCRT.@)
+ *
+ * Copied from musl: src/math/atan.c
  */
 double CDECL MSVCRT_atan( double x )
 {
-  double ret = atan(x);
-  if (isnan(x)) math_error(_DOMAIN, "atan", x, 0, ret);
-  return ret;
+    static const double atanhi[] = {
+        4.63647609000806093515e-01,
+        7.85398163397448278999e-01,
+        9.82793723247329054082e-01,
+        1.57079632679489655800e+00,
+    };
+    static const double atanlo[] = {
+        2.26987774529616870924e-17,
+        3.06161699786838301793e-17,
+        1.39033110312309984516e-17,
+        6.12323399573676603587e-17,
+    };
+    static const double aT[] = {
+        3.33333333333329318027e-01,
+        -1.99999999998764832476e-01,
+        1.42857142725034663711e-01,
+        -1.11111104054623557880e-01,
+        9.09088713343650656196e-02,
+        -7.69187620504482999495e-02,
+        6.66107313738753120669e-02,
+        -5.83357013379057348645e-02,
+        4.97687799461593236017e-02,
+        -3.65315727442169155270e-02,
+        1.62858201153657823623e-02,
+    };
+
+    double w, s1, s2, z;
+    unsigned int ix, sign;
+    int id;
+
+#if _MSVCR_VER == 0
+    if (isnan(x)) return math_error(_DOMAIN, "atan", x, 0, x);
+#endif
+
+    ix = *(ULONGLONG*)&x >> 32;
+    sign = ix >> 31;
+    ix &= 0x7fffffff;
+    if (ix >= 0x44100000) {   /* if |x| >= 2^66 */
+        if (isnan(x))
+            return x;
+        z = atanhi[3] + 7.5231638452626401e-37;
+        return sign ? -z : z;
+    }
+    if (ix < 0x3fdc0000) {    /* |x| < 0.4375 */
+        if (ix < 0x3e400000) {  /* |x| < 2^-27 */
+            if (ix < 0x00100000)
+                /* raise underflow for subnormal x */
+                fp_barrierf((float)x);
+            return x;
+        }
+        id = -1;
+    } else {
+        x = fabs(x);
+        if (ix < 0x3ff30000) {  /* |x| < 1.1875 */
+            if (ix < 0x3fe60000) {  /*  7/16 <= |x| < 11/16 */
+                id = 0;
+                x = (2.0 * x - 1.0) / (2.0 + x);
+            } else {                /* 11/16 <= |x| < 19/16 */
+                id = 1;
+                x = (x - 1.0) / (x + 1.0);
+            }
+        } else {
+            if (ix < 0x40038000) {  /* |x| < 2.4375 */
+                id = 2;
+                x = (x - 1.5) / (1.0 + 1.5 * x);
+            } else {                /* 2.4375 <= |x| < 2^66 */
+                id = 3;
+                x = -1.0 / x;
+            }
+        }
+    }
+    /* end of argument reduction */
+    z = x * x;
+    w = z * z;
+    /* break sum from i=0 to 10 aT[i]z**(i+1) into odd and even poly */
+    s1 = z * (aT[0] + w * (aT[2] + w * (aT[4] + w * (aT[6] + w * (aT[8] + w * aT[10])))));
+    s2 = w * (aT[1] + w * (aT[3] + w * (aT[5] + w * (aT[7] + w * aT[9]))));
+    if (id < 0)
+        return x - x * (s1 + s2);
+    z = atanhi[id] - (x * (s1 + s2) - atanlo[id] - x);
+    return sign ? -z : z;
 }
 
 /*********************************************************************
  *		MSVCRT_atan2 (MSVCRT.@)
+ *
+ * Copied from musl: src/math/atan2.c
  */
-double CDECL MSVCRT_atan2( double x, double y )
+double CDECL MSVCRT_atan2( double y, double x )
 {
-  double ret = atan2(x, y);
-  if (isnan(x)) math_error(_DOMAIN, "atan2", x, y, ret);
-  return ret;
+    static const double pi     = 3.1415926535897931160E+00,
+                 pi_lo  = 1.2246467991473531772E-16;
+
+    double z;
+    unsigned int m, lx, ly, ix, iy;
+
+    if (isnan(x) || isnan(y))
+        return x+y;
+    ix = *(ULONGLONG*)&x >> 32;
+    lx = *(ULONGLONG*)&x;
+    iy = *(ULONGLONG*)&y >> 32;
+    ly = *(ULONGLONG*)&y;
+    if (((ix - 0x3ff00000) | lx) == 0)  /* x = 1.0 */
+        return atan(y);
+    m = ((iy >> 31) & 1) | ((ix >> 30) & 2);  /* 2*sign(x)+sign(y) */
+    ix = ix & 0x7fffffff;
+    iy = iy & 0x7fffffff;
+
+    /* when y = 0 */
+    if ((iy | ly) == 0) {
+        switch(m) {
+        case 0:
+        case 1: return y;   /* atan(+-0,+anything)=+-0 */
+        case 2: return pi;  /* atan(+0,-anything) = pi */
+        case 3: return -pi; /* atan(-0,-anything) =-pi */
+        }
+    }
+    /* when x = 0 */
+    if ((ix | lx) == 0)
+        return m & 1 ? -pi / 2 : pi / 2;
+    /* when x is INF */
+    if (ix == 0x7ff00000) {
+        if (iy == 0x7ff00000) {
+            switch(m) {
+            case 0: return pi / 4;      /* atan(+INF,+INF) */
+            case 1: return -pi / 4;     /* atan(-INF,+INF) */
+            case 2: return 3 * pi / 4;  /* atan(+INF,-INF) */
+            case 3: return -3 * pi / 4; /* atan(-INF,-INF) */
+            }
+        } else {
+            switch(m) {
+            case 0: return 0.0;  /* atan(+...,+INF) */
+            case 1: return -0.0; /* atan(-...,+INF) */
+            case 2: return pi;   /* atan(+...,-INF) */
+            case 3: return -pi;  /* atan(-...,-INF) */
+            }
+        }
+    }
+    /* |y/x| > 0x1p64 */
+    if (ix + (64 << 20) < iy || iy == 0x7ff00000)
+        return m & 1 ? -pi / 2 : pi / 2;
+
+    /* z = atan(|y/x|) without spurious underflow */
+    if ((m & 2) && iy + (64 << 20) < ix)  /* |y/x| < 0x1p-64, x<0 */
+        z = 0;
+    else
+        z = atan(fabs(y / x));
+    switch (m) {
+    case 0: return z;                /* atan(+,+) */
+    case 1: return -z;               /* atan(-,+) */
+    case 2: return pi - (z - pi_lo); /* atan(+,-) */
+    default: /* case 3 */
+        return (z - pi_lo) - pi;     /* atan(-,-) */
+    }
 }
 
 /*********************************************************************
@@ -525,7 +1094,7 @@ double CDECL MSVCRT_atan2( double x, double y )
 double CDECL MSVCRT_cos( double x )
 {
   double ret = cos(x);
-  if (!isfinite(x)) math_error(_DOMAIN, "cos", x, 0, ret);
+  if (!isfinite(x)) return math_error(_DOMAIN, "cos", x, 0, ret);
   return ret;
 }
 
@@ -535,7 +1104,7 @@ double CDECL MSVCRT_cos( double x )
 double CDECL MSVCRT_cosh( double x )
 {
   double ret = precise_cosh(x);
-  if (isnan(x)) math_error(_DOMAIN, "cosh", x, 0, ret);
+  if (isnan(x)) return math_error(_DOMAIN, "cosh", x, 0, ret);
   return ret;
 }
 
@@ -545,9 +1114,9 @@ double CDECL MSVCRT_cosh( double x )
 double CDECL MSVCRT_exp( double x )
 {
   double ret = precise_exp(x);
-  if (isnan(x)) math_error(_DOMAIN, "exp", x, 0, ret);
-  else if (isfinite(x) && !ret) math_error(_UNDERFLOW, "exp", x, 0, ret);
-  else if (isfinite(x) && !isfinite(ret)) math_error(_OVERFLOW, "exp", x, 0, ret);
+  if (isnan(x)) return math_error(_DOMAIN, "exp", x, 0, ret);
+  if (isfinite(x) && !ret) return math_error(_UNDERFLOW, "exp", x, 0, ret);
+  if (isfinite(x) && !isfinite(ret)) return math_error(_OVERFLOW, "exp", x, 0, ret);
   return ret;
 }
 
@@ -557,7 +1126,7 @@ double CDECL MSVCRT_exp( double x )
 double CDECL MSVCRT_fmod( double x, double y )
 {
   double ret = fmod(x, y);
-  if (!isfinite(x) || !isfinite(y)) math_error(_DOMAIN, "fmod", x, y, ret);
+  if (!isfinite(x) || !isfinite(y)) return math_error(_DOMAIN, "fmod", x, y, ret);
   return ret;
 }
 
@@ -567,8 +1136,8 @@ double CDECL MSVCRT_fmod( double x, double y )
 double CDECL MSVCRT_log( double x )
 {
   double ret = log(x);
-  if (x < 0.0) math_error(_DOMAIN, "log", x, 0, ret);
-  else if (x == 0.0) math_error(_SING, "log", x, 0, ret);
+  if (x < 0.0) return math_error(_DOMAIN, "log", x, 0, ret);
+  if (x == 0.0) return math_error(_SING, "log", x, 0, ret);
   return ret;
 }
 
@@ -578,8 +1147,8 @@ double CDECL MSVCRT_log( double x )
 double CDECL MSVCRT_log10( double x )
 {
   double ret = log10(x);
-  if (x < 0.0) math_error(_DOMAIN, "log10", x, 0, ret);
-  else if (x == 0.0) math_error(_SING, "log10", x, 0, ret);
+  if (x < 0.0) return math_error(_DOMAIN, "log10", x, 0, ret);
+  if (x == 0.0) return math_error(_SING, "log10", x, 0, ret);
   return ret;
 }
 
@@ -588,11 +1157,15 @@ double CDECL MSVCRT_log10( double x )
  */
 double CDECL MSVCRT_pow( double x, double y )
 {
-  double z = precise_pow(x,y);
-  if (x < 0 && y != floor(y)) math_error(_DOMAIN, "pow", x, y, z);
-  else if (!x && isfinite(y) && y < 0) math_error(_SING, "pow", x, y, z);
-  else if (isfinite(x) && isfinite(y) && !isfinite(z)) math_error(_OVERFLOW, "pow", x, y, z);
-  else if (x && isfinite(x) && isfinite(y) && !z) math_error(_UNDERFLOW, "pow", x, y, z);
+  double z = pow(x,y);
+  if (x < 0 && y != floor(y))
+    return math_error(_DOMAIN, "pow", x, y, z);
+  if (!x && isfinite(y) && y < 0)
+    return math_error(_SING, "pow", x, y, z);
+  if (isfinite(x) && isfinite(y) && !isfinite(z))
+    return math_error(_OVERFLOW, "pow", x, y, z);
+  if (x && isfinite(x) && isfinite(y) && !z)
+    return math_error(_UNDERFLOW, "pow", x, y, z);
   return z;
 }
 
@@ -602,7 +1175,7 @@ double CDECL MSVCRT_pow( double x, double y )
 double CDECL MSVCRT_sin( double x )
 {
   double ret = sin(x);
-  if (!isfinite(x)) math_error(_DOMAIN, "sin", x, 0, ret);
+  if (!isfinite(x)) return math_error(_DOMAIN, "sin", x, 0, ret);
   return ret;
 }
 
@@ -612,18 +1185,123 @@ double CDECL MSVCRT_sin( double x )
 double CDECL MSVCRT_sinh( double x )
 {
   double ret = precise_sinh(x);
-  if (isnan(x)) math_error(_DOMAIN, "sinh", x, 0, ret);
+  if (isnan(x)) return math_error(_DOMAIN, "sinh", x, 0, ret);
   return ret;
 }
 
 /*********************************************************************
  *		MSVCRT_sqrt (MSVCRT.@)
+ *
+ * Copied from musl: src/math/sqrt.c
  */
 double CDECL MSVCRT_sqrt( double x )
 {
-  double ret = sqrt(x);
-  if (x < 0.0) math_error(_DOMAIN, "sqrt", x, 0, ret);
-  return ret;
+    static const double tiny = 1.0e-300;
+
+    double z;
+    int sign = 0x80000000;
+    int ix0,s0,q,m,t,i;
+    unsigned int r,t1,s1,ix1,q1;
+    ULONGLONG ix;
+
+    ix = *(ULONGLONG*)&x;
+    ix0 = ix >> 32;
+    ix1 = ix;
+
+    /* take care of Inf and NaN */
+    if (isnan(x) || (isinf(x) && x > 0))
+        return x;
+
+    /* take care of zero */
+    if (ix0 <= 0) {
+        if (((ix0 & ~sign) | ix1) == 0)
+            return x;  /* sqrt(+-0) = +-0 */
+        if (ix0 < 0)
+            return math_error(_DOMAIN, "sqrt", x, 0, (x - x) / (x - x));
+    }
+    /* normalize x */
+    m = ix0 >> 20;
+    if (m == 0) {  /* subnormal x */
+        while (ix0 == 0) {
+            m -= 21;
+            ix0 |= (ix1 >> 11);
+            ix1 <<= 21;
+        }
+        for (i=0; (ix0 & 0x00100000) == 0; i++)
+            ix0 <<= 1;
+        m -= i - 1;
+        ix0 |= ix1 >> (32 - i);
+        ix1 <<= i;
+    }
+    m -= 1023;    /* unbias exponent */
+    ix0 = (ix0 & 0x000fffff) | 0x00100000;
+    if (m & 1) {  /* odd m, double x to make it even */
+        ix0 += ix0 + ((ix1 & sign) >> 31);
+        ix1 += ix1;
+    }
+    m >>= 1;      /* m = [m/2] */
+
+    /* generate sqrt(x) bit by bit */
+    ix0 += ix0 + ((ix1 & sign) >> 31);
+    ix1 += ix1;
+    q = q1 = s0 = s1 = 0;  /* [q,q1] = sqrt(x) */
+    r = 0x00200000;        /* r = moving bit from right to left */
+
+    while (r != 0) {
+        t = s0 + r;
+        if (t <= ix0) {
+            s0   = t + r;
+            ix0 -= t;
+            q   += r;
+        }
+        ix0 += ix0 + ((ix1 & sign) >> 31);
+        ix1 += ix1;
+        r >>= 1;
+    }
+
+    r = sign;
+    while (r != 0) {
+        t1 = s1 + r;
+        t  = s0;
+        if (t < ix0 || (t == ix0 && t1 <= ix1)) {
+            s1 = t1 + r;
+            if ((t1&sign) == sign && (s1 & sign) == 0)
+                s0++;
+            ix0 -= t;
+            if (ix1 < t1)
+                ix0--;
+            ix1 -= t1;
+            q1 += r;
+        }
+        ix0 += ix0 + ((ix1 & sign) >> 31);
+        ix1 += ix1;
+        r >>= 1;
+    }
+
+    /* use floating add to find out rounding direction */
+    if ((ix0 | ix1) != 0) {
+        z = 1.0 - tiny; /* raise inexact flag */
+        if (z >= 1.0) {
+            z = 1.0 + tiny;
+            if (q1 == (unsigned int)0xffffffff) {
+                q1 = 0;
+                q++;
+            } else if (z > 1.0) {
+                if (q1 == (unsigned int)0xfffffffe)
+                    q++;
+                q1 += 2;
+            } else
+                q1 += q1 & 1;
+        }
+    }
+    ix0 = (q >> 1) + 0x3fe00000;
+    ix1 = q1 >> 1;
+    if (q & 1)
+        ix1 |= sign;
+    ix = ix0 + ((unsigned int)m << 20);
+    ix <<= 32;
+    ix |= ix1;
+    return *(double*)&ix;
 }
 
 /*********************************************************************
@@ -632,7 +1310,7 @@ double CDECL MSVCRT_sqrt( double x )
 double CDECL MSVCRT_tan( double x )
 {
   double ret = tan(x);
-  if (!isfinite(x)) math_error(_DOMAIN, "tan", x, 0, ret);
+  if (!isfinite(x)) return math_error(_DOMAIN, "tan", x, 0, ret);
   return ret;
 }
 
@@ -642,7 +1320,7 @@ double CDECL MSVCRT_tan( double x )
 double CDECL MSVCRT_tanh( double x )
 {
   double ret = tanh(x);
-  if (isnan(x)) math_error(_DOMAIN, "tanh", x, 0, ret);
+  if (isnan(x)) return math_error(_DOMAIN, "tanh", x, 0, ret);
   return ret;
 }
 
@@ -893,8 +1571,8 @@ __int64 CDECL _abs64( __int64 n )
 double CDECL MSVCRT__logb(double num)
 {
   double ret = logb(num);
-  if (isnan(num)) math_error(_DOMAIN, "_logb", num, 0, ret);
-  else if (!num) math_error(_SING, "_logb", num, 0, ret);
+  if (isnan(num)) return math_error(_DOMAIN, "_logb", num, 0, ret);
+  if (!num) return math_error(_SING, "_logb", num, 0, ret);
   return ret;
 }
 
@@ -1125,10 +1803,10 @@ double CDECL MSVCRT_ldexp(double num, MSVCRT_long exp)
   double z = ldexp(num,exp);
 
   if (isfinite(num) && !isfinite(z))
-    math_error(_OVERFLOW, "ldexp", num, exp, z);
-  else if (num && isfinite(num) && !z)
-    math_error(_UNDERFLOW, "ldexp", num, exp, z);
-  else if (z == 0 && signbit(z))
+    return math_error(_OVERFLOW, "ldexp", num, exp, z);
+  if (num && isfinite(num) && !z)
+    return math_error(_UNDERFLOW, "ldexp", num, exp, z);
+  if (z == 0 && signbit(z))
     z = 0.0; /* Convert -0 -> +0 */
   return z;
 }

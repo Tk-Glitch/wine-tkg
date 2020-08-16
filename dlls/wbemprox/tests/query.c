@@ -259,7 +259,7 @@ static void test_Win32_Service( IWbemServices *services )
 {
     BSTR class = SysAllocString( L"Win32_Service.Name=\"Spooler\"" ), empty = SysAllocString( L"" ), method;
     IWbemClassObject *service, *out;
-    VARIANT state, retval;
+    VARIANT state, retval, classvar;
     CIMTYPE type;
     HRESULT hr;
 
@@ -267,7 +267,9 @@ static void test_Win32_Service( IWbemServices *services )
     if (hr != S_OK)
     {
         win_skip( "Win32_Service not available\n" );
-        goto out;
+        SysFreeString( empty );
+        SysFreeString( class );
+        return;
     }
 
     check_property( service, L"ProcessID", VT_I4, CIM_UINT32 );
@@ -336,15 +338,30 @@ static void test_Win32_Service( IWbemServices *services )
     service = NULL;
     hr = IWbemServices_GetObject( services, NULL, 0, NULL, &service, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
-    if (service) IWbemClassObject_Release( service );
+    ok( !!service, "expected non-NULL service\n" );
+
+    VariantInit(&classvar);
+    V_VT(&classvar) = VT_BSTR;
+    V_BSTR(&classvar) = SysAllocString(L"MyClass");
+    hr = IWbemClassObject_Put(service, L"__CLASS", 0, &classvar, 0);
+    ok( hr == S_OK, "got %08x\n", hr );
+    VariantClear(&classvar);
+    IWbemClassObject_Release( service );
 
     service = NULL;
     hr = IWbemServices_GetObject( services, empty, 0, NULL, &service, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
-    if (service) IWbemClassObject_Release( service );
+    ok( !!service, "expected non-NULL service\n" );
+    IWbemClassObject_Release( service );
 
-out:
     SysFreeString( empty );
+    SysFreeString( class );
+
+    class = SysAllocString( L"Win32_Service.Name=\"nonexistent\"" );
+    service = (IWbemClassObject *)0xdeadbeef;
+    hr = IWbemServices_GetObject( services, class, 0, NULL, &service, NULL );
+    ok( hr == WBEM_E_NOT_FOUND, "got %#08x\n", hr );
+    ok( service == NULL, "expected NULL service, got %p\n", service );
     SysFreeString( class );
 }
 
@@ -1008,6 +1025,21 @@ static void test_GetNames( IWbemServices *services )
 
         IEnumWbemClassObject_Next( result, 10000, 1, &obj, &count );
         if (!count) break;
+
+        hr = IWbemClassObject_GetNames( obj, NULL, 0, NULL, NULL );
+        ok( hr == WBEM_E_INVALID_PARAMETER, "got %08x\n", hr );
+
+        hr = IWbemClassObject_GetNames( obj, NULL, 0, NULL, &names );
+        ok( hr == S_OK, "got %08x\n", hr );
+        SafeArrayDestroy( names );
+
+        hr = IWbemClassObject_GetNames( obj, NULL, WBEM_FLAG_ALWAYS, NULL, &names );
+        ok( hr == S_OK, "got %08x\n", hr );
+        SafeArrayDestroy( names );
+
+        hr = IWbemClassObject_GetNames( obj, NULL, WBEM_FLAG_ALWAYS | WBEM_MASK_CONDITION_ORIGIN, NULL, &names );
+        ok( hr == S_OK, "got %08x\n", hr );
+        SafeArrayDestroy( names );
 
         VariantInit( &val );
         hr = IWbemClassObject_GetNames( obj, NULL, WBEM_FLAG_NONSYSTEM_ONLY, &val, &names );

@@ -257,7 +257,7 @@ struct vid_mode
 static const struct vid_mode vid_modes_test[] = {
     {1024, 768, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY, 0},
     {1024, 768, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT |                 DM_DISPLAYFREQUENCY, 1},
-    {1024, 768, 0, 1, DM_PELSWIDTH | DM_PELSHEIGHT |                 DM_DISPLAYFREQUENCY, 1},
+    {1024, 768, 0, 1, DM_PELSWIDTH | DM_PELSHEIGHT |                 DM_DISPLAYFREQUENCY, 0},
     {1024, 768, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL                      , 0},
     {1024, 768, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT                                      , 1},
     {1024, 768, 0, 0,                                DM_BITSPERPEL                      , 0},
@@ -545,6 +545,7 @@ static void test_ChangeDisplaySettingsEx(void)
 
         devices[device_count].index = device;
         lstrcpyA(devices[device_count].name, dd.DeviceName);
+        memset(&devices[device_count].original_mode, 0, sizeof(devices[device_count].original_mode));
         devices[device_count].original_mode.dmSize = sizeof(devices[device_count].original_mode);
         res = EnumDisplaySettingsA(dd.DeviceName, ENUM_CURRENT_SETTINGS, &devices[device_count].original_mode);
         ok(res, "EnumDisplaySettingsA %s failed, error %#x\n", dd.DeviceName, GetLastError());

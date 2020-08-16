@@ -2116,9 +2116,9 @@ static WCHAR *get_diskdrive_serialnumber( WCHAR letter )
             heap_free( desc );
             break;
         }
+        size = desc->Size;
         heap_free( desc );
-        if (GetLastError() == ERROR_MORE_DATA) size = desc->Size;
-        else break;
+        if (GetLastError() != ERROR_MORE_DATA) break;
     }
 
 done:
@@ -2920,8 +2920,8 @@ static enum fill_status fill_physicalmemory( struct table *table, const struct e
     rec->devicelocator        = L"DIMM 0";
     rec->formfactor           = 8; /* DIMM */
     rec->memorytype           = 9; /* RAM */
-    rec->partnumber           = L"BLS8G3D1609DS1S00";
-    rec->serial               = NULL;
+    rec->partnumber           = L"";
+    rec->serial               = L"";
     if (!match_row( table, row, cond, &status )) free_row_values( table, row );
     else row++;
 

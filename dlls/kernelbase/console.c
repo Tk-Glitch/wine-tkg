@@ -980,8 +980,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReadConsoleOutputW( HANDLE handle, CHAR_INFO *buff
 /******************************************************************************
  *	ScrollConsoleScreenBufferA   (kernelbase.@)
  */
-BOOL WINAPI DECLSPEC_HOTPATCH ScrollConsoleScreenBufferA( HANDLE handle, SMALL_RECT *scroll,
-                                                          SMALL_RECT *clip, COORD origin, CHAR_INFO *fill )
+BOOL WINAPI DECLSPEC_HOTPATCH ScrollConsoleScreenBufferA( HANDLE handle, const SMALL_RECT *scroll,
+                                                          const SMALL_RECT *clip, COORD origin, const CHAR_INFO *fill )
 {
     CHAR_INFO ciW;
 
@@ -995,9 +995,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH ScrollConsoleScreenBufferA( HANDLE handle, SMALL_R
 /******************************************************************************
  *	ScrollConsoleScreenBufferW   (kernelbase.@)
  */
-BOOL WINAPI DECLSPEC_HOTPATCH ScrollConsoleScreenBufferW( HANDLE handle, SMALL_RECT *scroll,
-                                                          SMALL_RECT *clip_rect, COORD origin,
-                                                          CHAR_INFO *fill )
+BOOL WINAPI DECLSPEC_HOTPATCH ScrollConsoleScreenBufferW( HANDLE handle, const SMALL_RECT *scroll,
+                                                          const SMALL_RECT *clip_rect, COORD origin,
+                                                          const CHAR_INFO *fill )
 {
     CONSOLE_SCREEN_BUFFER_INFO info;
     SMALL_RECT dst, clip;
@@ -1727,4 +1727,30 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteConsoleOutputCharacterW( HANDLE handle, LPCWS
     }
     SERVER_END_REQ;
     return ret;
+}
+
+/******************************************************************************
+ *	CreatePseudoConsole   (kernelbase.@)
+ */
+HRESULT WINAPI CreatePseudoConsole( COORD size, HANDLE input, HANDLE output, DWORD flags, HPCON *ret )
+{
+    FIXME( "(%u,%u) %p %p %x %p\n", size.X, size.Y, input, output, flags, ret );
+    return E_NOTIMPL;
+}
+
+/******************************************************************************
+ *	ClosePseudoConsole   (kernelbase.@)
+ */
+void WINAPI ClosePseudoConsole( HPCON handle )
+{
+    FIXME( "%p\n", handle );
+}
+
+/******************************************************************************
+ *	ResizePseudoConsole   (kernelbase.@)
+ */
+HRESULT WINAPI ResizePseudoConsole( HPCON handle, COORD size )
+{
+    FIXME( "%p (%u,%u)\n", handle, size.X, size.Y );
+    return E_NOTIMPL;
 }
