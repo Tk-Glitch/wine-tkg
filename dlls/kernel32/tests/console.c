@@ -1320,6 +1320,7 @@ static void test_CreateFileW(void)
                           cf_table[index].creation, FILE_ATTRIBUTE_NORMAL, NULL);
         if (!index && ret == INVALID_HANDLE_VALUE)
         {
+            todo_wine
             win_skip("Skipping NT path tests, not supported on this Windows version\n");
             skip_nt = TRUE;
             continue;
@@ -3595,21 +3596,25 @@ static void test_FreeConsole(void)
     ok(ret, "FreeConsole failed: %u\n", GetLastError());
 
     handle = CreateFileA("CONOUT$", GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
+    todo_wine
     ok(handle == INVALID_HANDLE_VALUE &&
        (GetLastError() == ERROR_INVALID_HANDLE || broken(GetLastError() == ERROR_ACCESS_DENIED /* winxp */)),
        "CreateFileA failed: %u\n", GetLastError());
 
     handle = CreateFileA("CONIN$", GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, 0);
+    todo_wine
     ok(handle == INVALID_HANDLE_VALUE &&
        (GetLastError() == ERROR_INVALID_HANDLE || broken(GetLastError() == ERROR_ACCESS_DENIED /* winxp */)),
        "CreateFileA failed: %u\n", GetLastError());
 
     handle = CreateFileA("CON", GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, 0);
+    todo_wine
     ok(handle == INVALID_HANDLE_VALUE &&
        (GetLastError() == ERROR_INVALID_HANDLE || broken(GetLastError() == ERROR_ACCESS_DENIED /* winxp */)),
        "CreateFileA failed: %u\n", GetLastError());
 
     handle = CreateFileA("CON", GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
+    todo_wine
     ok(handle == INVALID_HANDLE_VALUE &&
        (GetLastError() == ERROR_INVALID_HANDLE || broken(GetLastError() == ERROR_FILE_NOT_FOUND /* winxp */)),
        "CreateFileA failed: %u\n", GetLastError());

@@ -961,8 +961,11 @@ static HRESULT Global_IsNumeric(BuiltinDisp *This, VARIANT *arg, unsigned args_c
 
 static HRESULT Global_IsArray(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("(%s)\n", debugstr_variant(arg));
+
+    assert(args_cnt == 1);
+
+    return return_bool(res, V_ISARRAY(arg));
 }
 
 static HRESULT Global_IsObject(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -2200,6 +2203,9 @@ static HRESULT Global_TypeName(BuiltinDisp *This, VARIANT *arg, unsigned args_cn
 
     assert(args_cnt == 1);
 
+    if (V_ISARRAY(arg))
+        return return_string(res, L"Variant()");
+
     switch(V_VT(arg)) {
         case VT_UI1:
             return return_string(res, ByteW);
@@ -2291,21 +2297,171 @@ static HRESULT Global_Join(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, V
     return E_NOTIMPL;
 }
 
-static HRESULT Global_Split(BuiltinDisp *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
+static HRESULT Global_Split(BuiltinDisp *This, VARIANT *args, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    BSTR str, string, delimeter = NULL;
+    int count, max, mode, len, start, end, ret, delimeterlen = 1;
+    int i,*indices = NULL, indices_max = 8;
+    SAFEARRAYBOUND bounds;
+    SAFEARRAY *sa = NULL;
+    VARIANT *data, var;
+    HRESULT hres = S_OK;
+
+    TRACE("%s %u...\n", debugstr_variant(args), args_cnt);
+
+    assert(1 <= args_cnt && args_cnt <= 4);
+
+    if(V_VT(args) == VT_NULL || (args_cnt > 1 && V_VT(args+1) == VT_NULL) || (args_cnt > 2 && V_VT(args+2) == VT_NULL)
+       || (args_cnt == 4 && V_VT(args+3) == VT_NULL))
+        return MAKE_VBSERROR(VBSE_ILLEGAL_NULL_USE);
+
+    if(V_VT(args) != VT_BSTR) {
+        hres = to_string(args, &string);
+        if(FAILED(hres))
+            return hres;
+    }else {
+        string = V_BSTR(args);
+    }
+
+    if(args_cnt > 1) {
+        if(V_VT(args+1) != VT_BSTR) {
+            hres = to_string(args+1, &delimeter);
+            if(FAILED(hres))
+                goto error;
+        }else {
+            delimeter = V_BSTR(args+1);
+        }
+        delimeterlen = SysStringLen(delimeter);
+    }
+
+    if(args_cnt > 2) {
+        hres = to_int(args+2, &max);
+        if(FAILED(hres))
+            goto error;
+        if (max < -1) {
+            hres = MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
+            goto error;
+       }
+    }else {
+        max = -1;
+    }
+
+    if(args_cnt == 4) {
+        hres = to_int(args+3, &mode);
+        if(FAILED(hres))
+            goto error;
+        if (mode != 0 && mode != 1) {
+            hres = MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
+            goto error;
+        }
+    }else {
+        mode = 0;
+    }
+
+    start = 0;
+
+    len = SysStringLen(string);
+    count = 0;
+
+    indices = heap_alloc( indices_max * sizeof(int));
+    if(!indices) {
+        hres = E_OUTOFMEMORY;
+        goto error;
+    }
+
+    while(1) {
+        ret = -1;
+        if (delimeterlen) {
+            ret = FindStringOrdinal(FIND_FROMSTART, string + start, len - start,
+                                    delimeter ? delimeter : L" ", delimeterlen, mode);
+        }
+
+        if (ret == -1) {
+            end = len;
+        }else {
+            end = start + ret;
+        }
+
+        if (count == indices_max) {
+            indices_max *= 2;
+            indices = heap_realloc( indices, indices_max * sizeof(int));
+            if(!indices) {
+                hres = E_OUTOFMEMORY;
+                goto error;
+            }
+        }
+        indices[count++] = end;
+
+        if (ret == -1 || count == max) break;
+        start = start + ret + delimeterlen;
+        if (start > len) break;
+    }
+
+    bounds.lLbound = 0;
+    bounds.cElements = count;
+    sa = SafeArrayCreate( VT_VARIANT, 1, &bounds);
+    if (!sa) {
+        hres = E_OUTOFMEMORY;
+        goto error;
+    }
+    hres = SafeArrayAccessData(sa, (void**)&data);
+    if(FAILED(hres)) {
+        SafeArrayDestroy(sa);
+        goto error;
+    }
+
+    start = 0;
+    for (i = 0; i < count; i++) {
+        str = SysAllocStringLen(string + start, indices[i] - start);
+        if (!str) {
+            hres = E_OUTOFMEMORY;
+            break;
+        }
+        V_VT(&var) = VT_BSTR;
+        V_BSTR(&var) = str;
+
+        hres = VariantCopyInd(data+i, &var);
+        if(FAILED(hres)) {
+            SafeArrayUnaccessData(sa);
+            SafeArrayDestroy(sa);
+            goto error;
+        }
+        start = indices[i]+delimeterlen;
+    }
+    SafeArrayUnaccessData(sa);
+
+error:
+    if(SUCCEEDED(hres) && res) {
+        V_VT(res) = VT_ARRAY|VT_VARIANT;
+        V_ARRAY(res) = sa;
+    }else {
+        if (sa) SafeArrayDestroy(sa);
+    }
+
+    heap_free(indices);
+    if(V_VT(args) != VT_BSTR)
+        SysFreeString(string);
+    if(V_VT(args+1) != VT_BSTR)
+        SysFreeString(delimeter);
+    return hres;
 }
 
 static HRESULT Global_Replace(BuiltinDisp *This, VARIANT *args, unsigned args_cnt, VARIANT *res)
 {
     BSTR string, find = NULL, replace = NULL, ret;
-    int from = 1, cnt = -1;
+    int from = 1, cnt = -1, mode = 0;
     HRESULT hres = S_OK;
 
     TRACE("%s %s %s %u...\n", debugstr_variant(args), debugstr_variant(args+1), debugstr_variant(args+2), args_cnt);
 
     assert(3 <= args_cnt && args_cnt <= 6);
+
+   if(V_VT(args) == VT_NULL || V_VT(args+1) == VT_NULL || (V_VT(args+2) == VT_NULL)
+        || (args_cnt >= 4 && V_VT(args+3) == VT_NULL) || (args_cnt >= 5 && V_VT(args+4) == VT_NULL)
+        || (args_cnt == 6 && V_VT(args+5) == VT_NULL))
+        return MAKE_VBSERROR(VBSE_ILLEGAL_NULL_USE);
+
+
     if(V_VT(args) != VT_BSTR) {
         hres = to_string(args, &string);
         if(FAILED(hres))
@@ -2350,10 +2506,17 @@ static HRESULT Global_Replace(BuiltinDisp *This, VARIANT *args, unsigned args_cn
         }
     }
 
-    if(args_cnt == 6)
-        FIXME("copare argument not supported\n");
+    if(args_cnt == 6) {
+        hres = to_int(args+5, &mode);
+        if(FAILED(hres))
+            goto error;
+        if (mode != 0 && mode != 1) {
+            hres = MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
+            goto error;
+        }
+    }
 
-    ret = string_replace(string, find, replace, from - 1, cnt);
+    ret = string_replace(string, find, replace, from - 1, cnt, mode);
     if(!ret) {
         hres = E_OUTOFMEMORY;
     }else if(res) {

@@ -2822,141 +2822,100 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         break;
     case SystemProcessInformation:
         {
-            SYSTEM_PROCESS_INFORMATION* spi = SystemInformation;
-            SYSTEM_PROCESS_INFORMATION* last = NULL;
-            unsigned long clk_tck = sysconf(_SC_CLK_TCK);
-            HANDLE hSnap = 0;
-            WCHAR procname[1024];
-            WCHAR* exename;
-            DWORD wlen = 0;
-            DWORD procstructlen = 0;
-            int unix_pid = -1;
-
-            SERVER_START_REQ( create_snapshot )
+            unsigned int process_count, i, j;
+            char *buffer = NULL;
+            unsigned int pos = 0;
+            if (Length && !(buffer = RtlAllocateHeap( GetProcessHeap(), 0, Length )))
             {
-                req->flags      = SNAP_PROCESS | SNAP_THREAD;
-                req->attributes = 0;
-                if (!(ret = wine_server_call( req )))
-                    hSnap = wine_server_ptr_handle( reply->handle );
+                ret = STATUS_NO_MEMORY;
+                break;
+            }
+
+            SERVER_START_REQ( list_processes )
+            {
+                wine_server_set_reply( req, buffer, Length );
+                ret = wine_server_call( req );
+                len = reply->info_size;
+                process_count = reply->process_count;
             }
             SERVER_END_REQ;
-            len = 0;
-            while (ret == STATUS_SUCCESS)
+
+            if (ret)
             {
-                SERVER_START_REQ( next_process )
+                RtlFreeHeap( GetProcessHeap(), 0, buffer );
+                break;
+            }
+
+            len = 0;
+
+            for (i = 0; i < process_count; i++)
+            {
+                SYSTEM_PROCESS_INFORMATION *nt_process = (SYSTEM_PROCESS_INFORMATION *)((char *)SystemInformation + len);
+                const struct process_info *server_process;
+                const WCHAR *server_name, *file_part;
+                ULONG proc_len;
+                ULONG name_len = 0;
+
+                pos = (pos + 7) & ~7;
+                server_process = (const struct process_info *)(buffer + pos);
+                pos += sizeof(*server_process);
+
+                server_name = (const WCHAR *)(buffer + pos);
+                file_part = server_name + (server_process->name_len / sizeof(WCHAR));
+                pos += server_process->name_len;
+                while (file_part > server_name && file_part[-1] != '\\')
                 {
-                    req->handle = wine_server_obj_handle( hSnap );
-                    req->reset = (len == 0);
-                    wine_server_set_reply( req, procname, sizeof(procname)-sizeof(WCHAR) );
-                    if (!(ret = wine_server_call( req )))
-                    {
-                        /* Make sure procname is 0 terminated */
-                        procname[wine_server_reply_size(reply) / sizeof(WCHAR)] = 0;
-
-                        /* Get only the executable name, not the path */
-                        if ((exename = wcsrchr(procname, '\\')) != NULL) exename++;
-                        else exename = procname;
-
-                        wlen = (wcslen(exename) + 1) * sizeof(WCHAR);
-
-                        procstructlen = sizeof(*spi) + wlen + ((reply->threads - 1) * sizeof(SYSTEM_THREAD_INFORMATION));
-
-                        if (Length >= len + procstructlen)
-                        {
-                            /* ftCreationTime;
-                             * vmCounters, ioCounters
-                             */
- 
-                            memset(spi, 0, sizeof(*spi));
-
-                            spi->NextEntryOffset = procstructlen - wlen;
-                            spi->dwThreadCount = reply->threads;
-
-                            /* spi->pszProcessName will be set later on */
-
-                            spi->dwBasePriority = reply->priority;
-                            spi->UniqueProcessId = UlongToHandle(reply->pid);
-                            spi->ParentProcessId = UlongToHandle(reply->ppid);
-                            spi->HandleCount = reply->handles;
-                            spi->CreationTime.QuadPart = reply->start_time;
-
-                            /* spi->ti will be set later on */
-
-                            if (reply->unix_pid != -1)
-                            {
-                                read_process_time(reply->unix_pid, -1, clk_tck,
-                                                  &spi->KernelTime, &spi->UserTime);
-                                read_process_memory_stats(reply->unix_pid, &spi->vmCounters);
-                            }
-                            unix_pid = reply->unix_pid;
-                        }
-                        len += procstructlen;
-                    }
-                }
-                SERVER_END_REQ;
- 
-                if (ret != STATUS_SUCCESS)
-                {
-                    if (ret == STATUS_NO_MORE_FILES) ret = STATUS_SUCCESS;
-                    break;
+                    file_part--;
+                    name_len++;
                 }
 
-                if (Length >= len)
+                proc_len = sizeof(*nt_process) + server_process->thread_count * sizeof(SYSTEM_THREAD_INFORMATION)
+                             + (name_len + 1) * sizeof(WCHAR);
+                len += proc_len;
+
+                if (len <= Length)
                 {
-                    int     i, j;
+                    memset(nt_process, 0, sizeof(*nt_process));
+                    if (i < process_count - 1)
+                        nt_process->NextEntryOffset = proc_len;
+                    nt_process->dwThreadCount = server_process->thread_count;
+                    nt_process->dwBasePriority = server_process->priority;
+                    nt_process->UniqueProcessId = UlongToHandle(server_process->pid);
+                    nt_process->ParentProcessId = UlongToHandle(server_process->parent_pid);
+                    nt_process->HandleCount = server_process->handle_count;
+                }
 
-                    /* set thread info */
-                    i = j = 0;
-                    while (ret == STATUS_SUCCESS)
+                pos = (pos + 7) & ~7;
+                for (j = 0; j < server_process->thread_count; j++)
+                {
+                    const struct thread_info *server_thread = (const struct thread_info *)(buffer + pos);
+
+                    if (len <= Length)
                     {
-                        SERVER_START_REQ( next_thread )
-                        {
-                            req->handle = wine_server_obj_handle( hSnap );
-                            req->reset = (j == 0);
-                            if (!(ret = wine_server_call( req )))
-                            {
-                                j++;
-                                if (UlongToHandle(reply->pid) == spi->UniqueProcessId)
-                                {
-                                    /* ftKernelTime, ftUserTime, ftCreateTime;
-                                     * dwTickCount, dwStartAddress
-                                     */
-
-                                    memset(&spi->ti[i], 0, sizeof(spi->ti));
-
-                                    spi->ti[i].CreateTime.QuadPart = reply->creation_time;
-                                    spi->ti[i].ClientId.UniqueProcess = UlongToHandle(reply->pid);
-                                    spi->ti[i].ClientId.UniqueThread  = UlongToHandle(reply->tid);
-                                    spi->ti[i].dwCurrentPriority = reply->base_pri + reply->delta_pri;
-                                    spi->ti[i].dwBasePriority = reply->base_pri;
-
-                                    if (unix_pid != -1 && reply->unix_tid != -1)
-                                        read_process_time(unix_pid, reply->unix_tid, clk_tck,
-                                                          &spi->ti[i].KernelTime, &spi->ti[i].UserTime);
-                                    i++;
-                                }
-                            }
-                        }
-                        SERVER_END_REQ;
+                        nt_process->ti[j].CreateTime.QuadPart = 0xdeadbeef;
+                        nt_process->ti[j].ClientId.UniqueProcess = UlongToHandle(server_process->pid);
+                        nt_process->ti[j].ClientId.UniqueThread = UlongToHandle(server_thread->tid);
+                        nt_process->ti[j].dwCurrentPriority = server_thread->current_priority;
+                        nt_process->ti[j].dwBasePriority = server_thread->base_priority;
                     }
-                    if (ret == STATUS_NO_MORE_FILES) ret = STATUS_SUCCESS;
 
-                    /* now append process name */
-                    spi->ProcessName.Buffer = (WCHAR*)((char*)spi + spi->NextEntryOffset);
-                    spi->ProcessName.Length = wlen - sizeof(WCHAR);
-                    spi->ProcessName.MaximumLength = wlen;
-                    memcpy( spi->ProcessName.Buffer, exename, wlen );
-                    spi->NextEntryOffset += wlen;
+                    pos += sizeof(*server_thread);
+                }
 
-                    last = spi;
-                    spi = (SYSTEM_PROCESS_INFORMATION*)((char*)spi + spi->NextEntryOffset);
+                if (len <= Length)
+                {
+                    nt_process->ProcessName.Buffer = (WCHAR *)&nt_process->ti[server_process->thread_count];
+                    nt_process->ProcessName.Length = name_len * sizeof(WCHAR);
+                    nt_process->ProcessName.MaximumLength = (name_len + 1) * sizeof(WCHAR);
+                    memcpy(nt_process->ProcessName.Buffer, file_part, name_len * sizeof(WCHAR));
+                    nt_process->ProcessName.Buffer[name_len] = 0;
                 }
             }
-            if (ret == STATUS_SUCCESS && last) last->NextEntryOffset = 0;
+
             if (len > Length) ret = STATUS_INFO_LENGTH_MISMATCH;
-            if (hSnap) NtClose(hSnap);
+            RtlFreeHeap( GetProcessHeap(), 0, buffer );
+	    break;
         }
-        break;
     case SystemProcessorPerformanceInformation:
         {
             SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *sppi = NULL;

@@ -6830,6 +6830,12 @@ msgstr "Nätverksanslutningen existerar inte.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Anslutningen återställdes.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "Ej implementerat"
+
 #: winerror.mc:3760
 #, fuzzy
 #| msgid "Message 0x%1 not found in file %2.\n"
@@ -8610,7 +8616,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Återställda anslutningar"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Avancerad"
 
@@ -16844,8 +16850,10 @@ msgid "&Beginner"
 msgstr "Ny&börjare"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Avancerad"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "Gränssnitt"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16874,6 +16882,12 @@ msgstr "Snabbaste tider"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Nybörjare"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "Gränssnitt"
 
 #: winemine.rc:66
 msgid "Expert"

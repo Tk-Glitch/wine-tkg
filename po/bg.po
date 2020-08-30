@@ -6957,6 +6957,12 @@ msgstr "Файлът не съществува.\n"
 msgid "Connection reset by peer.\n"
 msgstr "LAN връзка.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "Не е реализирано"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr ""
@@ -8657,7 +8663,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "LAN връзка"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 #, fuzzy
 msgid "Advanced"
 msgstr "Покажи допълнителните"
@@ -16543,8 +16549,9 @@ msgid "&Beginner"
 msgstr ""
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr ""
+#, fuzzy
+msgid "&Intermediate"
+msgstr "Файлът не е намерен"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16573,6 +16580,11 @@ msgstr ""
 #: winemine.rc:64
 msgid "Beginner"
 msgstr ""
+
+#: winemine.rc:65
+#, fuzzy
+msgid "Intermediate"
+msgstr "Файлът не е намерен"
 
 #: winemine.rc:66
 msgid "Expert"

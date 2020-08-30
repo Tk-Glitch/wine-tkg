@@ -314,7 +314,7 @@ float CDECL MSVCRT_acosf( float x )
     if (ix >= 0x3f800000) {
         if (ix == 0x3f800000) {
             if (hx >> 31)
-                return 2 * pio2_hi + 7.5231638453e-37;
+                return 2 * pio2_lo + 2 * pio2_hi + 7.5231638453e-37;
             return 0;
         }
         if (MSVCRT__isnanf(x)) return x;
@@ -323,7 +323,7 @@ float CDECL MSVCRT_acosf( float x )
     /* |x| < 0.5 */
     if (ix < 0x3f000000) {
         if (ix <= 0x32800000) /* |x| < 2**-26 */
-            return pio2_hi + 7.5231638453e-37;
+            return pio2_lo + pio2_hi + 7.5231638453e-37;
         return pio2_hi - (x - (pio2_lo - x * acosf_R(x * x)));
     }
     /* x < -0.5 */
@@ -2573,6 +2573,7 @@ char * CDECL MSVCRT__fcvt( double number, int ndigits, int *decpt, int *sign )
     int stop, dec1, dec2;
     char *ptr1, *ptr2, *first;
     char buf[80]; /* ought to be enough */
+    char decimal_separator = get_locinfo()->lconv->decimal_point[0];
 
     if (!data->efcvt_buffer)
         data->efcvt_buffer = MSVCRT_malloc( 80 ); /* ought to be enough */
@@ -2604,7 +2605,7 @@ char * CDECL MSVCRT__fcvt( double number, int ndigits, int *decpt, int *sign )
     }
 
     while (*ptr1 == '0') ptr1++; /* Skip leading zeroes */
-    while (*ptr1 != '\0' && *ptr1 != '.') {
+    while (*ptr1 != '\0' && *ptr1 != decimal_separator) {
 	if (!first) first = ptr2;
 	if ((ptr1 - buf) < stop) {
 	    *ptr2++ = *ptr1++;
@@ -2653,6 +2654,7 @@ int CDECL MSVCRT__fcvt_s(char* outbuffer, MSVCRT_size_t size, double number, int
     int stop, dec1, dec2;
     char *ptr1, *ptr2, *first;
     char buf[80]; /* ought to be enough */
+    char decimal_separator = get_locinfo()->lconv->decimal_point[0];
 
     if (!outbuffer || !decpt || !sign || size == 0)
     {
@@ -2687,7 +2689,7 @@ int CDECL MSVCRT__fcvt_s(char* outbuffer, MSVCRT_size_t size, double number, int
     }
 
     while (*ptr1 == '0') ptr1++; /* Skip leading zeroes */
-    while (*ptr1 != '\0' && *ptr1 != '.') {
+    while (*ptr1 != '\0' && *ptr1 != decimal_separator) {
 	if (!first) first = ptr2;
 	if ((ptr1 - buf) < stop) {
 	    if (size > 1) {

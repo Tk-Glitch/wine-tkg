@@ -24,15 +24,30 @@
 #define WIN32_NO_STATUS
 #define USE_COM_CONTEXT_DEF
 #include "objbase.h"
+#include "ctxtcall.h"
 #include "oleauto.h"
+#include "dde.h"
 #include "winternl.h"
+
+#include "combase_private.h"
 
 #include "wine/debug.h"
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
-#define CHARS_IN_GUID 39
+HINSTANCE hProxyDll;
+
+/* Ole32 exports */
+extern void WINAPI DestroyRunningObjectTable(void);
+extern HRESULT WINAPI Ole32DllGetClassObject(REFCLSID rclsid, REFIID riid, void **obj);
+
+/*
+ * Number of times CoInitialize is called. It is decreased every time CoUninitialize is called. When it hits 0, the COM libraries are freed
+ */
+static LONG com_lockcount;
+
+static LONG com_server_process_refcount;
 
 struct comclassredirect_data
 {
@@ -56,12 +71,113 @@ struct comclassredirect_data
     DWORD miscstatusdocprint;
 };
 
+struct ifacepsredirect_data
+{
+    ULONG size;
+    DWORD mask;
+    GUID  iid;
+    ULONG nummethods;
+    GUID  tlbid;
+    GUID  base;
+    ULONG name_len;
+    ULONG name_offset;
+};
+
 struct progidredirect_data
 {
     ULONG size;
     DWORD reserved;
     ULONG clsid_offset;
 };
+
+struct init_spy
+{
+    struct list entry;
+    IInitializeSpy *spy;
+    unsigned int id;
+};
+
+struct registered_ps
+{
+    struct list entry;
+    IID iid;
+    CLSID clsid;
+};
+
+static struct list registered_proxystubs = LIST_INIT(registered_proxystubs);
+
+static CRITICAL_SECTION cs_registered_ps;
+static CRITICAL_SECTION_DEBUG psclsid_cs_debug =
+{
+    0, 0, &cs_registered_ps,
+    { &psclsid_cs_debug.ProcessLocksList, &psclsid_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": cs_registered_psclsid_list") }
+};
+static CRITICAL_SECTION cs_registered_ps = { &psclsid_cs_debug, -1, 0, 0, 0, 0 };
+
+/*
+ * TODO: Make this data structure aware of inter-process communication. This
+ *       means that parts of this will be exported to rpcss.
+ */
+struct registered_class
+{
+    struct list entry;
+    CLSID clsid;
+    OXID apartment_id;
+    IUnknown *object;
+    DWORD clscontext;
+    DWORD flags;
+    DWORD cookie;
+    void *RpcRegistration;
+};
+
+static struct list registered_classes = LIST_INIT(registered_classes);
+
+static CRITICAL_SECTION registered_classes_cs;
+static CRITICAL_SECTION_DEBUG registered_classes_cs_debug =
+{
+    0, 0, &registered_classes_cs,
+    { &registered_classes_cs_debug.ProcessLocksList, &registered_classes_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": registered_classes_cs") }
+};
+static CRITICAL_SECTION registered_classes_cs = { &registered_classes_cs_debug, -1, 0, 0, 0, 0 };
+
+IUnknown * com_get_registered_class_object(const struct apartment *apt, REFCLSID rclsid, DWORD clscontext)
+{
+    struct registered_class *cur;
+    IUnknown *object = NULL;
+
+    EnterCriticalSection(&registered_classes_cs);
+
+    LIST_FOR_EACH_ENTRY(cur, &registered_classes, struct registered_class, entry)
+    {
+        if ((apt->oxid == cur->apartment_id) &&
+            (clscontext & cur->clscontext) &&
+            IsEqualGUID(&cur->clsid, rclsid))
+        {
+            object = cur->object;
+            IUnknown_AddRef(cur->object);
+            break;
+        }
+    }
+
+    LeaveCriticalSection(&registered_classes_cs);
+
+    return object;
+}
+
+static struct init_spy *get_spy_entry(struct tlsdata *tlsdata, unsigned int id)
+{
+    struct init_spy *spy;
+
+    LIST_FOR_EACH_ENTRY(spy, &tlsdata->spies, struct init_spy, entry)
+    {
+        if (id == spy->id && spy->spy)
+            return spy;
+    }
+
+    return NULL;
+}
 
 static NTSTATUS create_key(HKEY *retkey, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr)
 {
@@ -192,7 +308,7 @@ static LSTATUS open_classes_key(HKEY hkey, const WCHAR *name, REGSAM access, HKE
     return RtlNtStatusToDosError(NtOpenKey((HANDLE *)retkey, access, &attr));
 }
 
-static HRESULT open_key_for_clsid(REFCLSID clsid, const WCHAR *keyname, REGSAM access, HKEY *subkey)
+HRESULT open_key_for_clsid(REFCLSID clsid, const WCHAR *keyname, REGSAM access, HKEY *subkey)
 {
     static const WCHAR clsidW[] = L"CLSID\\";
     WCHAR path[CHARS_IN_GUID + ARRAY_SIZE(clsidW) - 1];
@@ -221,6 +337,100 @@ static HRESULT open_key_for_clsid(REFCLSID clsid, const WCHAR *keyname, REGSAM a
         return REGDB_E_READREGDB;
 
     return S_OK;
+}
+
+/* open HKCR\\AppId\\{string form of appid clsid} key */
+HRESULT open_appidkey_from_clsid(REFCLSID clsid, REGSAM access, HKEY *subkey)
+{
+    static const WCHAR appidkeyW[] = L"AppId\\";
+    DWORD res;
+    WCHAR buf[CHARS_IN_GUID];
+    WCHAR keyname[ARRAY_SIZE(appidkeyW) + CHARS_IN_GUID];
+    DWORD size;
+    HKEY hkey;
+    DWORD type;
+    HRESULT hr;
+
+    /* read the AppID value under the class's key */
+    hr = open_key_for_clsid(clsid, NULL, KEY_READ, &hkey);
+    if (FAILED(hr))
+        return hr;
+
+    size = sizeof(buf);
+    res = RegQueryValueExW(hkey, L"AppId", NULL, &type, (LPBYTE)buf, &size);
+    RegCloseKey(hkey);
+    if (res == ERROR_FILE_NOT_FOUND)
+        return REGDB_E_KEYMISSING;
+    else if (res != ERROR_SUCCESS || type!=REG_SZ)
+        return REGDB_E_READREGDB;
+
+    lstrcpyW(keyname, appidkeyW);
+    lstrcatW(keyname, buf);
+    res = open_classes_key(HKEY_CLASSES_ROOT, keyname, access, subkey);
+    if (res == ERROR_FILE_NOT_FOUND)
+        return REGDB_E_KEYMISSING;
+    else if (res != ERROR_SUCCESS)
+        return REGDB_E_READREGDB;
+
+    return S_OK;
+}
+
+/***********************************************************************
+ *           InternalIsProcessInitialized  (combase.@)
+ */
+BOOL WINAPI InternalIsProcessInitialized(void)
+{
+    struct apartment *apt;
+
+    if (!(apt = apartment_get_current_or_mta()))
+        return FALSE;
+    apartment_release(apt);
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *           InternalTlsAllocData    (combase.@)
+ */
+HRESULT WINAPI InternalTlsAllocData(struct tlsdata **data)
+{
+    if (!(*data = heap_alloc_zero(sizeof(**data))))
+        return E_OUTOFMEMORY;
+
+    list_init(&(*data)->spies);
+    NtCurrentTeb()->ReservedForOle = *data;
+
+    return S_OK;
+}
+
+static void com_cleanup_tlsdata(void)
+{
+    struct tlsdata *tlsdata = NtCurrentTeb()->ReservedForOle;
+    struct init_spy *cursor, *cursor2;
+
+    if (!tlsdata)
+        return;
+
+    if (tlsdata->apt)
+        apartment_release(tlsdata->apt);
+    if (tlsdata->errorinfo)
+        IErrorInfo_Release(tlsdata->errorinfo);
+    if (tlsdata->state)
+        IUnknown_Release(tlsdata->state);
+
+    LIST_FOR_EACH_ENTRY_SAFE(cursor, cursor2, &tlsdata->spies, struct init_spy, entry)
+    {
+        list_remove(&cursor->entry);
+        if (cursor->spy)
+            IInitializeSpy_Release(cursor->spy);
+        heap_free(cursor);
+    }
+
+    if (tlsdata->context_token)
+        IObjContext_Release(tlsdata->context_token);
+
+    heap_free(tlsdata);
+    NtCurrentTeb()->ReservedForOle = NULL;
 }
 
 /***********************************************************************
@@ -1365,9 +1575,1420 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstanceEx(REFCLSID rclsid, IUnknown *o
 }
 
 /***********************************************************************
+ *           CoGetClassObject    (combase.@)
+ */
+HRESULT WINAPI DECLSPEC_HOTPATCH CoGetClassObject(REFCLSID rclsid, DWORD clscontext,
+        COSERVERINFO *server_info, REFIID riid, void **obj)
+{
+    struct class_reg_data clsreg = { 0 };
+    HRESULT hr = E_UNEXPECTED;
+    IUnknown *registered_obj;
+    struct apartment *apt;
+
+    TRACE("%s, %s\n", debugstr_guid(rclsid), debugstr_guid(riid));
+
+    if (!obj)
+        return E_INVALIDARG;
+
+    *obj = NULL;
+
+    if (!(apt = apartment_get_current_or_mta()))
+    {
+        ERR("apartment not initialised\n");
+        return CO_E_NOTINITIALIZED;
+    }
+
+    if (server_info)
+        FIXME("server_info name %s, authinfo %p\n", debugstr_w(server_info->pwszName), server_info->pAuthInfo);
+
+    if (clscontext & CLSCTX_INPROC_SERVER)
+    {
+        if (IsEqualCLSID(rclsid, &CLSID_InProcFreeMarshaler) ||
+                IsEqualCLSID(rclsid, &CLSID_GlobalOptions) ||
+                IsEqualCLSID(rclsid, &CLSID_ManualResetEvent) ||
+                IsEqualCLSID(rclsid, &CLSID_StdGlobalInterfaceTable))
+        {
+            apartment_release(apt);
+            return Ole32DllGetClassObject(rclsid, riid, obj);
+        }
+    }
+
+    if (clscontext & CLSCTX_INPROC)
+    {
+        ACTCTX_SECTION_KEYED_DATA data;
+
+        data.cbSize = sizeof(data);
+        /* search activation context first */
+        if (FindActCtxSectionGuid(FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX, NULL,
+                ACTIVATION_CONTEXT_SECTION_COM_SERVER_REDIRECTION, rclsid, &data))
+        {
+            struct comclassredirect_data *comclass = (struct comclassredirect_data *)data.lpData;
+
+            clsreg.u.actctx.module_name = (WCHAR *)((BYTE *)data.lpSectionBase + comclass->name_offset);
+            clsreg.u.actctx.hactctx = data.hActCtx;
+            clsreg.u.actctx.threading_model = comclass->model;
+            clsreg.origin = CLASS_REG_ACTCTX;
+
+            hr = apartment_get_inproc_class_object(apt, &clsreg, &comclass->clsid, riid,
+                    !(clscontext & WINE_CLSCTX_DONT_HOST), obj);
+            ReleaseActCtx(data.hActCtx);
+            apartment_release(apt);
+            return hr;
+        }
+    }
+
+    /*
+     * First, try and see if we can't match the class ID with one of the
+     * registered classes.
+     */
+    if ((registered_obj = com_get_registered_class_object(apt, rclsid, clscontext)))
+    {
+        hr = IUnknown_QueryInterface(registered_obj, riid, obj);
+        IUnknown_Release(registered_obj);
+        apartment_release(apt);
+        return hr;
+    }
+
+    /* First try in-process server */
+    if (clscontext & CLSCTX_INPROC_SERVER)
+    {
+        HKEY hkey;
+
+        hr = open_key_for_clsid(rclsid, L"InprocServer32", KEY_READ, &hkey);
+        if (FAILED(hr))
+        {
+            if (hr == REGDB_E_CLASSNOTREG)
+                ERR("class %s not registered\n", debugstr_guid(rclsid));
+            else if (hr == REGDB_E_KEYMISSING)
+            {
+                WARN("class %s not registered as in-proc server\n", debugstr_guid(rclsid));
+                hr = REGDB_E_CLASSNOTREG;
+            }
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            clsreg.u.hkey = hkey;
+            clsreg.origin = CLASS_REG_REGISTRY;
+
+            hr = apartment_get_inproc_class_object(apt, &clsreg, rclsid, riid, !(clscontext & WINE_CLSCTX_DONT_HOST), obj);
+            RegCloseKey(hkey);
+        }
+
+        /* return if we got a class, otherwise fall through to one of the
+         * other types */
+        if (SUCCEEDED(hr))
+        {
+            apartment_release(apt);
+            return hr;
+        }
+    }
+
+    /* Next try in-process handler */
+    if (clscontext & CLSCTX_INPROC_HANDLER)
+    {
+        HKEY hkey;
+
+        hr = open_key_for_clsid(rclsid, L"InprocHandler32", KEY_READ, &hkey);
+        if (FAILED(hr))
+        {
+            if (hr == REGDB_E_CLASSNOTREG)
+                ERR("class %s not registered\n", debugstr_guid(rclsid));
+            else if (hr == REGDB_E_KEYMISSING)
+            {
+                WARN("class %s not registered in-proc handler\n", debugstr_guid(rclsid));
+                hr = REGDB_E_CLASSNOTREG;
+            }
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            clsreg.u.hkey = hkey;
+            clsreg.origin = CLASS_REG_REGISTRY;
+
+            hr = apartment_get_inproc_class_object(apt, &clsreg, rclsid, riid, !(clscontext & WINE_CLSCTX_DONT_HOST), obj);
+            RegCloseKey(hkey);
+        }
+
+        /* return if we got a class, otherwise fall through to one of the
+         * other types */
+        if (SUCCEEDED(hr))
+        {
+            apartment_release(apt);
+            return hr;
+        }
+    }
+    apartment_release(apt);
+
+    /* Next try out of process */
+    if (clscontext & CLSCTX_LOCAL_SERVER)
+    {
+        hr = rpc_get_local_class_object(rclsid, riid, obj);
+        if (SUCCEEDED(hr))
+            return hr;
+    }
+
+    /* Finally try remote: this requires networked DCOM (a lot of work) */
+    if (clscontext & CLSCTX_REMOTE_SERVER)
+    {
+        FIXME ("CLSCTX_REMOTE_SERVER not supported\n");
+        hr = REGDB_E_CLASSNOTREG;
+    }
+
+    if (FAILED(hr))
+        ERR("no class object %s could be created for context %#x\n", debugstr_guid(rclsid), clscontext);
+
+    return hr;
+}
+
+/***********************************************************************
  *           CoFreeUnusedLibraries    (combase.@)
  */
 void WINAPI DECLSPEC_HOTPATCH CoFreeUnusedLibraries(void)
 {
     CoFreeUnusedLibrariesEx(INFINITE, 0);
+}
+
+/***********************************************************************
+ *           CoGetCallContext        (combase.@)
+ */
+HRESULT WINAPI CoGetCallContext(REFIID riid, void **obj)
+{
+    struct tlsdata *tlsdata;
+    HRESULT hr;
+
+    TRACE("%s, %p\n", debugstr_guid(riid), obj);
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+        return hr;
+
+    if (!tlsdata->call_state)
+        return RPC_E_CALL_COMPLETE;
+
+    return IUnknown_QueryInterface(tlsdata->call_state, riid, obj);
+}
+
+/***********************************************************************
+ *           CoSwitchCallContext    (combase.@)
+ */
+HRESULT WINAPI CoSwitchCallContext(IUnknown *context, IUnknown **old_context)
+{
+    struct tlsdata *tlsdata;
+    HRESULT hr;
+
+    TRACE("%p, %p\n", context, old_context);
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+        return hr;
+
+    /* Reference counts are not touched. */
+    *old_context = tlsdata->call_state;
+    tlsdata->call_state = context;
+
+    return S_OK;
+}
+
+/******************************************************************************
+ *          CoRegisterInitializeSpy    (combase.@)
+ */
+HRESULT WINAPI CoRegisterInitializeSpy(IInitializeSpy *spy, ULARGE_INTEGER *cookie)
+{
+    struct tlsdata *tlsdata;
+    struct init_spy *entry;
+    unsigned int id;
+    HRESULT hr;
+
+    TRACE("%p, %p\n", spy, cookie);
+
+    if (!spy || !cookie)
+        return E_INVALIDARG;
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+        return hr;
+
+    hr = IInitializeSpy_QueryInterface(spy, &IID_IInitializeSpy, (void **)&spy);
+    if (FAILED(hr))
+        return hr;
+
+    entry = heap_alloc(sizeof(*entry));
+    if (!entry)
+    {
+        IInitializeSpy_Release(spy);
+        return E_OUTOFMEMORY;
+    }
+
+    entry->spy = spy;
+
+    id = 0;
+    while (get_spy_entry(tlsdata, id) != NULL)
+    {
+        id++;
+    }
+
+    entry->id = id;
+    list_add_head(&tlsdata->spies, &entry->entry);
+
+    cookie->u.HighPart = GetCurrentThreadId();
+    cookie->u.LowPart = entry->id;
+
+    return S_OK;
+}
+
+/******************************************************************************
+ *          CoRevokeInitializeSpy    (combase.@)
+ */
+HRESULT WINAPI CoRevokeInitializeSpy(ULARGE_INTEGER cookie)
+{
+    struct tlsdata *tlsdata;
+    struct init_spy *spy;
+    HRESULT hr;
+
+    TRACE("%s\n", wine_dbgstr_longlong(cookie.QuadPart));
+
+    if (cookie.u.HighPart != GetCurrentThreadId())
+        return E_INVALIDARG;
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+        return hr;
+
+    if (!(spy = get_spy_entry(tlsdata, cookie.u.LowPart))) return E_INVALIDARG;
+
+    IInitializeSpy_Release(spy->spy);
+    spy->spy = NULL;
+    if (!tlsdata->spies_lock)
+    {
+        list_remove(&spy->entry);
+        heap_free(spy);
+    }
+    return S_OK;
+}
+
+static BOOL com_peek_message(struct apartment *apt, MSG *msg)
+{
+    /* First try to retrieve messages for incoming COM calls to the apartment window */
+    return (apt->win && PeekMessageW(msg, apt->win, 0, 0, PM_REMOVE | PM_NOYIELD)) ||
+            /* Next retrieve other messages necessary for the app to remain responsive */
+            PeekMessageW(msg, NULL, WM_DDE_FIRST, WM_DDE_LAST, PM_REMOVE | PM_NOYIELD) ||
+            PeekMessageW(msg, NULL, 0, 0, PM_QS_PAINT | PM_QS_SENDMESSAGE | PM_REMOVE | PM_NOYIELD);
+}
+
+/***********************************************************************
+ *           CoWaitForMultipleHandles    (combase.@)
+ */
+HRESULT WINAPI CoWaitForMultipleHandles(DWORD flags, DWORD timeout, ULONG handle_count, HANDLE *handles,
+        DWORD *index)
+{
+    BOOL check_apc = !!(flags & COWAIT_ALERTABLE), post_quit = FALSE, message_loop;
+    DWORD start_time, wait_flags = 0;
+    struct tlsdata *tlsdata;
+    struct apartment *apt;
+    UINT exit_code;
+    HRESULT hr;
+
+    TRACE("%#x, %#x, %u, %p, %p\n", flags, timeout, handle_count, handles, index);
+
+    if (!index)
+        return E_INVALIDARG;
+
+    *index = 0;
+
+    if (!handles)
+        return E_INVALIDARG;
+
+    if (!handle_count)
+        return RPC_E_NO_SYNC;
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+        return hr;
+
+    apt = com_get_current_apt();
+    message_loop = apt && !apt->multi_threaded;
+
+    if (flags & COWAIT_WAITALL)
+        wait_flags |= MWMO_WAITALL;
+    if (flags & COWAIT_ALERTABLE)
+        wait_flags |= MWMO_ALERTABLE;
+
+    start_time = GetTickCount();
+
+    while (TRUE)
+    {
+        DWORD now = GetTickCount(), res;
+
+        if (now - start_time > timeout)
+        {
+            hr = RPC_S_CALLPENDING;
+            break;
+        }
+
+        if (message_loop)
+        {
+            TRACE("waiting for rpc completion or window message\n");
+
+            res = WAIT_TIMEOUT;
+
+            if (check_apc)
+            {
+                res = WaitForMultipleObjectsEx(handle_count, handles, !!(flags & COWAIT_WAITALL), 0, TRUE);
+                check_apc = FALSE;
+            }
+
+            if (res == WAIT_TIMEOUT)
+                res = MsgWaitForMultipleObjectsEx(handle_count, handles,
+                        timeout == INFINITE ? INFINITE : start_time + timeout - now,
+                        QS_SENDMESSAGE | QS_ALLPOSTMESSAGE | QS_PAINT, wait_flags);
+
+            if (res == WAIT_OBJECT_0 + handle_count)  /* messages available */
+            {
+                int msg_count = 0;
+                MSG msg;
+
+                /* call message filter */
+
+                if (apt->filter)
+                {
+                    PENDINGTYPE pendingtype = tlsdata->pending_call_count_server ? PENDINGTYPE_NESTED : PENDINGTYPE_TOPLEVEL;
+                    DWORD be_handled = IMessageFilter_MessagePending(apt->filter, 0 /* FIXME */, now - start_time, pendingtype);
+
+                    TRACE("IMessageFilter_MessagePending returned %d\n", be_handled);
+
+                    switch (be_handled)
+                    {
+                    case PENDINGMSG_CANCELCALL:
+                        WARN("call canceled\n");
+                        hr = RPC_E_CALL_CANCELED;
+                        break;
+                    case PENDINGMSG_WAITNOPROCESS:
+                    case PENDINGMSG_WAITDEFPROCESS:
+                    default:
+                        /* FIXME: MSDN is very vague about the difference
+                         * between WAITNOPROCESS and WAITDEFPROCESS - there
+                         * appears to be none, so it is possibly a left-over
+                         * from the 16-bit world. */
+                        break;
+                    }
+                }
+
+                if (!apt->win)
+                {
+                    /* If window is NULL on apartment, peek at messages so that it will not trigger
+                     * MsgWaitForMultipleObjects next time. */
+                    PeekMessageW(NULL, NULL, 0, 0, PM_QS_POSTMESSAGE | PM_NOREMOVE | PM_NOYIELD);
+                }
+
+                /* Some apps (e.g. Visio 2010) don't handle WM_PAINT properly and loop forever,
+                 * so after processing 100 messages we go back to checking the wait handles */
+                while (msg_count++ < 100 && com_peek_message(apt, &msg))
+                {
+                    if (msg.message == WM_QUIT)
+                    {
+                        TRACE("Received WM_QUIT message\n");
+                        post_quit = TRUE;
+                        exit_code = msg.wParam;
+                    }
+                    else
+                    {
+                        TRACE("Received message whilst waiting for RPC: 0x%04x\n", msg.message);
+                        TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                }
+                continue;
+            }
+        }
+        else
+        {
+            TRACE("Waiting for rpc completion\n");
+
+            res = WaitForMultipleObjectsEx(handle_count, handles, !!(flags & COWAIT_WAITALL),
+                    (timeout == INFINITE) ? INFINITE : start_time + timeout - now, !!(flags & COWAIT_ALERTABLE));
+        }
+
+        switch (res)
+        {
+        case WAIT_TIMEOUT:
+            hr = RPC_S_CALLPENDING;
+            break;
+        case WAIT_FAILED:
+            hr = HRESULT_FROM_WIN32(GetLastError());
+            break;
+        default:
+            *index = res;
+            break;
+        }
+        break;
+    }
+    if (post_quit) PostQuitMessage(exit_code);
+
+    TRACE("-- 0x%08x\n", hr);
+
+    return hr;
+}
+
+/******************************************************************************
+ *            CoRegisterMessageFilter        (combase.@)
+ */
+HRESULT WINAPI CoRegisterMessageFilter(IMessageFilter *filter, IMessageFilter **ret_filter)
+{
+    IMessageFilter *old_filter;
+    struct apartment *apt;
+
+    TRACE("%p, %p\n", filter, ret_filter);
+
+    apt = com_get_current_apt();
+
+    /* Can't set a message filter in a multi-threaded apartment */
+    if (!apt || apt->multi_threaded)
+    {
+        WARN("Can't set message filter in MTA or uninitialized apt\n");
+        return CO_E_NOT_SUPPORTED;
+    }
+
+    if (filter)
+        IMessageFilter_AddRef(filter);
+
+    EnterCriticalSection(&apt->cs);
+
+    old_filter = apt->filter;
+    apt->filter = filter;
+
+    LeaveCriticalSection(&apt->cs);
+
+    if (ret_filter)
+        *ret_filter = old_filter;
+    else if (old_filter)
+        IMessageFilter_Release(old_filter);
+
+    return S_OK;
+}
+
+static void com_revoke_all_ps_clsids(void)
+{
+    struct registered_ps *cur, *cur2;
+
+    EnterCriticalSection(&cs_registered_ps);
+
+    LIST_FOR_EACH_ENTRY_SAFE(cur, cur2, &registered_proxystubs, struct registered_ps, entry)
+    {
+        list_remove(&cur->entry);
+        heap_free(cur);
+    }
+
+    LeaveCriticalSection(&cs_registered_ps);
+}
+
+static HRESULT get_ps_clsid_from_registry(const WCHAR* path, REGSAM access, CLSID *pclsid)
+{
+    WCHAR value[CHARS_IN_GUID];
+    HKEY hkey;
+    DWORD len;
+
+    access |= KEY_READ;
+
+    if (open_classes_key(HKEY_CLASSES_ROOT, path, access, &hkey))
+        return REGDB_E_IIDNOTREG;
+
+    len = sizeof(value);
+    if (ERROR_SUCCESS != RegQueryValueExW(hkey, NULL, NULL, NULL, (BYTE *)value, &len))
+        return REGDB_E_IIDNOTREG;
+    RegCloseKey(hkey);
+
+    if (CLSIDFromString(value, pclsid) != NOERROR)
+        return REGDB_E_IIDNOTREG;
+
+    return S_OK;
+}
+
+/*****************************************************************************
+ *             CoGetPSClsid        (combase.@)
+ */
+HRESULT WINAPI CoGetPSClsid(REFIID riid, CLSID *pclsid)
+{
+    static const WCHAR interfaceW[] = L"Interface\\";
+    static const WCHAR psW[] = L"\\ProxyStubClsid32";
+    WCHAR path[ARRAY_SIZE(interfaceW) - 1 + CHARS_IN_GUID - 1 + ARRAY_SIZE(psW)];
+    ACTCTX_SECTION_KEYED_DATA data;
+    struct registered_ps *cur;
+    REGSAM opposite = (sizeof(void*) > sizeof(int)) ? KEY_WOW64_32KEY : KEY_WOW64_64KEY;
+    BOOL is_wow64;
+    HRESULT hr;
+
+    TRACE("%s, %p\n", debugstr_guid(riid), pclsid);
+
+    if (!InternalIsProcessInitialized())
+    {
+        ERR("apartment not initialised\n");
+        return CO_E_NOTINITIALIZED;
+    }
+
+    if (!pclsid)
+        return E_INVALIDARG;
+
+    EnterCriticalSection(&cs_registered_ps);
+
+    LIST_FOR_EACH_ENTRY(cur, &registered_proxystubs, struct registered_ps, entry)
+    {
+        if (IsEqualIID(&cur->iid, riid))
+        {
+            *pclsid = cur->clsid;
+            LeaveCriticalSection(&cs_registered_ps);
+            return S_OK;
+        }
+    }
+
+    LeaveCriticalSection(&cs_registered_ps);
+
+    data.cbSize = sizeof(data);
+    if (FindActCtxSectionGuid(0, NULL, ACTIVATION_CONTEXT_SECTION_COM_INTERFACE_REDIRECTION,
+            riid, &data))
+    {
+        struct ifacepsredirect_data *ifaceps = (struct ifacepsredirect_data *)data.lpData;
+        *pclsid = ifaceps->iid;
+        return S_OK;
+    }
+
+    /* Interface\\{string form of riid}\\ProxyStubClsid32 */
+    lstrcpyW(path, interfaceW);
+    StringFromGUID2(riid, path + ARRAY_SIZE(interfaceW) - 1, CHARS_IN_GUID);
+    lstrcpyW(path + ARRAY_SIZE(interfaceW) - 1 + CHARS_IN_GUID - 1, psW);
+
+    hr = get_ps_clsid_from_registry(path, 0, pclsid);
+    if (FAILED(hr) && (opposite == KEY_WOW64_32KEY || (IsWow64Process(GetCurrentProcess(), &is_wow64) && is_wow64)))
+        hr = get_ps_clsid_from_registry(path, opposite, pclsid);
+
+    if (hr == S_OK)
+        TRACE("() Returning CLSID %s\n", debugstr_guid(pclsid));
+    else
+        WARN("No PSFactoryBuffer object is registered for IID %s\n", debugstr_guid(riid));
+
+    return hr;
+}
+
+/*****************************************************************************
+ *             CoRegisterPSClsid    (combase.@)
+ */
+HRESULT WINAPI CoRegisterPSClsid(REFIID riid, REFCLSID rclsid)
+{
+    struct registered_ps *cur;
+
+    TRACE("%s, %s\n", debugstr_guid(riid), debugstr_guid(rclsid));
+
+    if (!InternalIsProcessInitialized())
+    {
+        ERR("apartment not initialised\n");
+        return CO_E_NOTINITIALIZED;
+    }
+
+    EnterCriticalSection(&cs_registered_ps);
+
+    LIST_FOR_EACH_ENTRY(cur, &registered_proxystubs, struct registered_ps, entry)
+    {
+        if (IsEqualIID(&cur->iid, riid))
+        {
+            cur->clsid = *rclsid;
+            LeaveCriticalSection(&cs_registered_ps);
+            return S_OK;
+        }
+    }
+
+    cur = heap_alloc(sizeof(*cur));
+    if (!cur)
+    {
+        LeaveCriticalSection(&cs_registered_ps);
+        return E_OUTOFMEMORY;
+    }
+
+    cur->iid = *riid;
+    cur->clsid = *rclsid;
+    list_add_head(&registered_proxystubs, &cur->entry);
+
+    LeaveCriticalSection(&cs_registered_ps);
+
+    return S_OK;
+}
+
+struct thread_context
+{
+    IComThreadingInfo IComThreadingInfo_iface;
+    IContextCallback IContextCallback_iface;
+    IObjContext IObjContext_iface;
+    LONG refcount;
+};
+
+static inline struct thread_context *impl_from_IComThreadingInfo(IComThreadingInfo *iface)
+{
+    return CONTAINING_RECORD(iface, struct thread_context, IComThreadingInfo_iface);
+}
+
+static inline struct thread_context *impl_from_IContextCallback(IContextCallback *iface)
+{
+    return CONTAINING_RECORD(iface, struct thread_context, IContextCallback_iface);
+}
+
+static inline struct thread_context *impl_from_IObjContext(IObjContext *iface)
+{
+    return CONTAINING_RECORD(iface, struct thread_context, IObjContext_iface);
+}
+
+static HRESULT WINAPI thread_context_info_QueryInterface(IComThreadingInfo *iface, REFIID riid, void **obj)
+{
+    struct thread_context *context = impl_from_IComThreadingInfo(iface);
+
+    *obj = NULL;
+
+    if (IsEqualIID(riid, &IID_IComThreadingInfo) ||
+        IsEqualIID(riid, &IID_IUnknown))
+    {
+        *obj = &context->IComThreadingInfo_iface;
+    }
+    else if (IsEqualIID(riid, &IID_IContextCallback))
+    {
+        *obj = &context->IContextCallback_iface;
+    }
+    else if (IsEqualIID(riid, &IID_IObjContext))
+    {
+        *obj = &context->IObjContext_iface;
+    }
+
+    if (*obj)
+    {
+        IUnknown_AddRef((IUnknown *)*obj);
+        return S_OK;
+    }
+
+    FIXME("interface not implemented %s\n", debugstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI thread_context_info_AddRef(IComThreadingInfo *iface)
+{
+    struct thread_context *context = impl_from_IComThreadingInfo(iface);
+    return InterlockedIncrement(&context->refcount);
+}
+
+static ULONG WINAPI thread_context_info_Release(IComThreadingInfo *iface)
+{
+    struct thread_context *context = impl_from_IComThreadingInfo(iface);
+
+    /* Context instance is initially created with CoGetContextToken() with refcount set to 0,
+       releasing context while refcount is at 0 destroys it. */
+    if (!context->refcount)
+    {
+        heap_free(context);
+        return 0;
+    }
+
+    return InterlockedDecrement(&context->refcount);
+}
+
+static HRESULT WINAPI thread_context_info_GetCurrentApartmentType(IComThreadingInfo *iface, APTTYPE *apttype)
+{
+    APTTYPEQUALIFIER qualifier;
+
+    TRACE("%p\n", apttype);
+
+    return CoGetApartmentType(apttype, &qualifier);
+}
+
+static HRESULT WINAPI thread_context_info_GetCurrentThreadType(IComThreadingInfo *iface, THDTYPE *thdtype)
+{
+    APTTYPEQUALIFIER qualifier;
+    APTTYPE apttype;
+    HRESULT hr;
+
+    hr = CoGetApartmentType(&apttype, &qualifier);
+    if (FAILED(hr))
+        return hr;
+
+    TRACE("%p\n", thdtype);
+
+    switch (apttype)
+    {
+    case APTTYPE_STA:
+    case APTTYPE_MAINSTA:
+        *thdtype = THDTYPE_PROCESSMESSAGES;
+        break;
+    default:
+        *thdtype = THDTYPE_BLOCKMESSAGES;
+        break;
+    }
+    return S_OK;
+}
+
+static HRESULT WINAPI thread_context_info_GetCurrentLogicalThreadId(IComThreadingInfo *iface, GUID *logical_thread_id)
+{
+    TRACE("%p\n", logical_thread_id);
+
+    return CoGetCurrentLogicalThreadId(logical_thread_id);
+}
+
+static HRESULT WINAPI thread_context_info_SetCurrentLogicalThreadId(IComThreadingInfo *iface, REFGUID logical_thread_id)
+{
+    FIXME("%s stub\n", debugstr_guid(logical_thread_id));
+
+    return E_NOTIMPL;
+}
+
+static const IComThreadingInfoVtbl thread_context_info_vtbl =
+{
+    thread_context_info_QueryInterface,
+    thread_context_info_AddRef,
+    thread_context_info_Release,
+    thread_context_info_GetCurrentApartmentType,
+    thread_context_info_GetCurrentThreadType,
+    thread_context_info_GetCurrentLogicalThreadId,
+    thread_context_info_SetCurrentLogicalThreadId
+};
+
+static HRESULT WINAPI thread_context_callback_QueryInterface(IContextCallback *iface, REFIID riid, void **obj)
+{
+    struct thread_context *context = impl_from_IContextCallback(iface);
+    return IComThreadingInfo_QueryInterface(&context->IComThreadingInfo_iface, riid, obj);
+}
+
+static ULONG WINAPI thread_context_callback_AddRef(IContextCallback *iface)
+{
+    struct thread_context *context = impl_from_IContextCallback(iface);
+    return IComThreadingInfo_AddRef(&context->IComThreadingInfo_iface);
+}
+
+static ULONG WINAPI thread_context_callback_Release(IContextCallback *iface)
+{
+    struct thread_context *context = impl_from_IContextCallback(iface);
+    return IComThreadingInfo_Release(&context->IComThreadingInfo_iface);
+}
+
+static HRESULT WINAPI thread_context_callback_ContextCallback(IContextCallback *iface,
+        PFNCONTEXTCALL callback, ComCallData *param, REFIID riid, int method, IUnknown *punk)
+{
+    FIXME("%p, %p, %p, %s, %d, %p\n", iface, callback, param, debugstr_guid(riid), method, punk);
+
+    return E_NOTIMPL;
+}
+
+static const IContextCallbackVtbl thread_context_callback_vtbl =
+{
+    thread_context_callback_QueryInterface,
+    thread_context_callback_AddRef,
+    thread_context_callback_Release,
+    thread_context_callback_ContextCallback
+};
+
+static HRESULT WINAPI thread_object_context_QueryInterface(IObjContext *iface, REFIID riid, void **obj)
+{
+    struct thread_context *context = impl_from_IObjContext(iface);
+    return IComThreadingInfo_QueryInterface(&context->IComThreadingInfo_iface, riid, obj);
+}
+
+static ULONG WINAPI thread_object_context_AddRef(IObjContext *iface)
+{
+    struct thread_context *context = impl_from_IObjContext(iface);
+    return IComThreadingInfo_AddRef(&context->IComThreadingInfo_iface);
+}
+
+static ULONG WINAPI thread_object_context_Release(IObjContext *iface)
+{
+    struct thread_context *context = impl_from_IObjContext(iface);
+    return IComThreadingInfo_Release(&context->IComThreadingInfo_iface);
+}
+
+static HRESULT WINAPI thread_object_context_SetProperty(IObjContext *iface, REFGUID propid, CPFLAGS flags, IUnknown *punk)
+{
+    FIXME("%p, %s, %x, %p\n", iface, debugstr_guid(propid), flags, punk);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI thread_object_context_RemoveProperty(IObjContext *iface, REFGUID propid)
+{
+    FIXME("%p, %s\n", iface, debugstr_guid(propid));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI thread_object_context_GetProperty(IObjContext *iface, REFGUID propid, CPFLAGS *flags, IUnknown **punk)
+{
+    FIXME("%p, %s, %p, %p\n", iface, debugstr_guid(propid), flags, punk);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI thread_object_context_EnumContextProps(IObjContext *iface, IEnumContextProps **props)
+{
+    FIXME("%p, %p\n", iface, props);
+
+    return E_NOTIMPL;
+}
+
+static void WINAPI thread_object_context_Reserved1(IObjContext *iface)
+{
+    FIXME("%p\n", iface);
+}
+
+static void WINAPI thread_object_context_Reserved2(IObjContext *iface)
+{
+    FIXME("%p\n", iface);
+}
+
+static void WINAPI thread_object_context_Reserved3(IObjContext *iface)
+{
+    FIXME("%p\n", iface);
+}
+
+static void WINAPI thread_object_context_Reserved4(IObjContext *iface)
+{
+    FIXME("%p\n", iface);
+}
+
+static void WINAPI thread_object_context_Reserved5(IObjContext *iface)
+{
+    FIXME("%p\n", iface);
+}
+
+static void WINAPI thread_object_context_Reserved6(IObjContext *iface)
+{
+    FIXME("%p\n", iface);
+}
+
+static void WINAPI thread_object_context_Reserved7(IObjContext *iface)
+{
+    FIXME("%p\n", iface);
+}
+
+static const IObjContextVtbl thread_object_context_vtbl =
+{
+    thread_object_context_QueryInterface,
+    thread_object_context_AddRef,
+    thread_object_context_Release,
+    thread_object_context_SetProperty,
+    thread_object_context_RemoveProperty,
+    thread_object_context_GetProperty,
+    thread_object_context_EnumContextProps,
+    thread_object_context_Reserved1,
+    thread_object_context_Reserved2,
+    thread_object_context_Reserved3,
+    thread_object_context_Reserved4,
+    thread_object_context_Reserved5,
+    thread_object_context_Reserved6,
+    thread_object_context_Reserved7
+};
+
+/***********************************************************************
+ *           CoGetContextToken    (combase.@)
+ */
+HRESULT WINAPI CoGetContextToken(ULONG_PTR *token)
+{
+    struct tlsdata *tlsdata;
+    HRESULT hr;
+
+    TRACE("%p\n", token);
+
+    if (!InternalIsProcessInitialized())
+    {
+        ERR("apartment not initialised\n");
+        return CO_E_NOTINITIALIZED;
+    }
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+        return hr;
+
+    if (!token)
+        return E_POINTER;
+
+    if (!tlsdata->context_token)
+    {
+        struct thread_context *context;
+
+        context = heap_alloc_zero(sizeof(*context));
+        if (!context)
+            return E_OUTOFMEMORY;
+
+        context->IComThreadingInfo_iface.lpVtbl = &thread_context_info_vtbl;
+        context->IContextCallback_iface.lpVtbl = &thread_context_callback_vtbl;
+        context->IObjContext_iface.lpVtbl = &thread_object_context_vtbl;
+        /* Context token does not take a reference, it's always zero until the
+           interface is explicitly requested with CoGetObjectContext(). */
+        context->refcount = 0;
+
+        tlsdata->context_token = &context->IObjContext_iface;
+    }
+
+    *token = (ULONG_PTR)tlsdata->context_token;
+    TRACE("context_token %p\n", tlsdata->context_token);
+
+    return S_OK;
+}
+
+/***********************************************************************
+ *              CoGetCurrentLogicalThreadId    (combase.@)
+ */
+HRESULT WINAPI CoGetCurrentLogicalThreadId(GUID *id)
+{
+    struct tlsdata *tlsdata;
+    HRESULT hr;
+
+    if (!id)
+        return E_INVALIDARG;
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+        return hr;
+
+    if (IsEqualGUID(&tlsdata->causality_id, &GUID_NULL))
+        CoCreateGuid(&tlsdata->causality_id);
+
+    *id = tlsdata->causality_id;
+
+    return S_OK;
+}
+
+/******************************************************************************
+ *              CoGetCurrentProcess        (combase.@)
+ */
+DWORD WINAPI CoGetCurrentProcess(void)
+{
+    struct tlsdata *tlsdata;
+
+    if (FAILED(com_get_tlsdata(&tlsdata)))
+        return 0;
+
+    if (!tlsdata->thread_seqid)
+        rpcss_get_next_seqid(&tlsdata->thread_seqid);
+
+    return tlsdata->thread_seqid;
+}
+
+/***********************************************************************
+ *           CoFreeUnusedLibrariesEx    (combase.@)
+ */
+void WINAPI DECLSPEC_HOTPATCH CoFreeUnusedLibrariesEx(DWORD unload_delay, DWORD reserved)
+{
+    struct apartment *apt = com_get_current_apt();
+    if (!apt)
+    {
+        ERR("apartment not initialised\n");
+        return;
+    }
+
+    apartment_freeunusedlibraries(apt, unload_delay);
+}
+
+/*
+ * When locked, don't modify list (unless we add a new head), so that it's
+ * safe to iterate it. Freeing of list entries is delayed and done on unlock.
+ */
+static inline void lock_init_spies(struct tlsdata *tlsdata)
+{
+    tlsdata->spies_lock++;
+}
+
+static void unlock_init_spies(struct tlsdata *tlsdata)
+{
+    struct init_spy *spy, *next;
+
+    if (--tlsdata->spies_lock) return;
+
+    LIST_FOR_EACH_ENTRY_SAFE(spy, next, &tlsdata->spies, struct init_spy, entry)
+    {
+        if (spy->spy) continue;
+        list_remove(&spy->entry);
+        heap_free(spy);
+    }
+}
+
+/******************************************************************************
+ *                    CoInitializeEx    (combase.@)
+ */
+HRESULT WINAPI DECLSPEC_HOTPATCH CoInitializeEx(void *reserved, DWORD model)
+{
+    struct tlsdata *tlsdata;
+    struct init_spy *cursor;
+    HRESULT hr;
+
+    TRACE("%p, %#x\n", reserved, model);
+
+    if (reserved)
+        WARN("Unexpected reserved argument %p\n", reserved);
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+        return hr;
+
+    if (InterlockedExchangeAdd(&com_lockcount, 1) == 0)
+        TRACE("Initializing the COM libraries\n");
+
+    lock_init_spies(tlsdata);
+    LIST_FOR_EACH_ENTRY(cursor, &tlsdata->spies, struct init_spy, entry)
+    {
+        if (cursor->spy) IInitializeSpy_PreInitialize(cursor->spy, model, tlsdata->inits);
+    }
+    unlock_init_spies(tlsdata);
+
+    hr = enter_apartment(tlsdata, model);
+
+    lock_init_spies(tlsdata);
+    LIST_FOR_EACH_ENTRY(cursor, &tlsdata->spies, struct init_spy, entry)
+    {
+        if (cursor->spy) hr = IInitializeSpy_PostInitialize(cursor->spy, hr, model, tlsdata->inits);
+    }
+    unlock_init_spies(tlsdata);
+
+    return hr;
+}
+
+/***********************************************************************
+ *           CoUninitialize    (combase.@)
+ */
+void WINAPI DECLSPEC_HOTPATCH CoUninitialize(void)
+{
+    struct tlsdata *tlsdata;
+    struct init_spy *cursor, *next;
+    LONG lockcount;
+
+    TRACE("\n");
+
+    if (FAILED(com_get_tlsdata(&tlsdata)))
+        return;
+
+    lock_init_spies(tlsdata);
+    LIST_FOR_EACH_ENTRY_SAFE(cursor, next, &tlsdata->spies, struct init_spy, entry)
+    {
+        if (cursor->spy) IInitializeSpy_PreUninitialize(cursor->spy, tlsdata->inits);
+    }
+    unlock_init_spies(tlsdata);
+
+    /* sanity check */
+    if (!tlsdata->inits)
+    {
+        ERR("Mismatched CoUninitialize\n");
+
+        lock_init_spies(tlsdata);
+        LIST_FOR_EACH_ENTRY_SAFE(cursor, next, &tlsdata->spies, struct init_spy, entry)
+        {
+            if (cursor->spy) IInitializeSpy_PostUninitialize(cursor->spy, tlsdata->inits);
+        }
+        unlock_init_spies(tlsdata);
+
+        return;
+    }
+
+    leave_apartment(tlsdata);
+
+    /*
+     * Decrease the reference count.
+     * If we are back to 0 locks on the COM library, make sure we free
+     * all the associated data structures.
+     */
+    lockcount = InterlockedExchangeAdd(&com_lockcount, -1);
+    if (lockcount == 1)
+    {
+        TRACE("Releasing the COM libraries\n");
+
+        com_revoke_all_ps_clsids();
+        DestroyRunningObjectTable();
+    }
+    else if (lockcount < 1)
+    {
+        ERR("Unbalanced lock count %d\n", lockcount);
+        InterlockedExchangeAdd(&com_lockcount, 1);
+    }
+
+    lock_init_spies(tlsdata);
+    LIST_FOR_EACH_ENTRY(cursor, &tlsdata->spies, struct init_spy, entry)
+    {
+        if (cursor->spy) IInitializeSpy_PostUninitialize(cursor->spy, tlsdata->inits);
+    }
+    unlock_init_spies(tlsdata);
+}
+
+/***********************************************************************
+ *           CoIncrementMTAUsage    (combase.@)
+ */
+HRESULT WINAPI CoIncrementMTAUsage(CO_MTA_USAGE_COOKIE *cookie)
+{
+    TRACE("%p\n", cookie);
+
+    return apartment_increment_mta_usage(cookie);
+}
+
+/***********************************************************************
+ *           CoDecrementMTAUsage    (combase.@)
+ */
+HRESULT WINAPI CoDecrementMTAUsage(CO_MTA_USAGE_COOKIE cookie)
+{
+    TRACE("%p\n", cookie);
+
+    apartment_decrement_mta_usage(cookie);
+    return S_OK;
+}
+
+/***********************************************************************
+ *           CoGetApartmentType    (combase.@)
+ */
+HRESULT WINAPI CoGetApartmentType(APTTYPE *type, APTTYPEQUALIFIER *qualifier)
+{
+    struct tlsdata *tlsdata;
+    struct apartment *apt;
+    HRESULT hr;
+
+    TRACE("%p, %p\n", type, qualifier);
+
+    if (!type || !qualifier)
+        return E_INVALIDARG;
+
+    if (FAILED(hr = com_get_tlsdata(&tlsdata)))
+        return hr;
+
+    if (!tlsdata->apt)
+        *type = APTTYPE_CURRENT;
+    else if (tlsdata->apt->multi_threaded)
+        *type = APTTYPE_MTA;
+    else if (tlsdata->apt->main)
+        *type = APTTYPE_MAINSTA;
+    else
+        *type = APTTYPE_STA;
+
+    *qualifier = APTTYPEQUALIFIER_NONE;
+
+    if (!tlsdata->apt && (apt = apartment_get_mta()))
+    {
+        apartment_release(apt);
+        *type = APTTYPE_MTA;
+        *qualifier = APTTYPEQUALIFIER_IMPLICIT_MTA;
+        return S_OK;
+    }
+
+    return tlsdata->apt ? S_OK : CO_E_NOTINITIALIZED;
+}
+
+/******************************************************************************
+ *        CoRegisterClassObject    (combase.@)
+ * BUGS
+ *  MSDN claims that multiple interface registrations are legal, but we
+ *  can't do that with our current implementation.
+ */
+HRESULT WINAPI CoRegisterClassObject(REFCLSID rclsid, IUnknown *object, DWORD clscontext,
+        DWORD flags, DWORD *cookie)
+{
+    static LONG next_cookie;
+
+    struct registered_class *newclass;
+    IUnknown *found_object;
+    struct apartment *apt;
+    HRESULT hr = S_OK;
+
+    TRACE("%s, %p, %#x, %#x, %p\n", debugstr_guid(rclsid), object, clscontext, flags, cookie);
+
+    if (!cookie || !object)
+        return E_INVALIDARG;
+
+    if (!(apt = apartment_get_current_or_mta()))
+    {
+        ERR("COM was not initialized\n");
+        return CO_E_NOTINITIALIZED;
+    }
+
+    *cookie = 0;
+
+    /* REGCLS_MULTIPLEUSE implies registering as inproc server. This is what
+     * differentiates the flag from REGCLS_MULTI_SEPARATE. */
+    if (flags & REGCLS_MULTIPLEUSE)
+        clscontext |= CLSCTX_INPROC_SERVER;
+
+    /*
+     * First, check if the class is already registered.
+     * If it is, this should cause an error.
+     */
+    if ((found_object = com_get_registered_class_object(apt, rclsid, clscontext)))
+    {
+        if (flags & REGCLS_MULTIPLEUSE)
+        {
+            if (clscontext & CLSCTX_LOCAL_SERVER)
+                hr = CoLockObjectExternal(found_object, TRUE, FALSE);
+            IUnknown_Release(found_object);
+            apartment_release(apt);
+            return hr;
+        }
+
+        IUnknown_Release(found_object);
+        ERR("object already registered for class %s\n", debugstr_guid(rclsid));
+        apartment_release(apt);
+        return CO_E_OBJISREG;
+    }
+
+    newclass = heap_alloc(sizeof(*newclass));
+    if (!newclass)
+    {
+        apartment_release(apt);
+        return E_OUTOFMEMORY;
+    }
+
+    newclass->clsid = *rclsid;
+    newclass->apartment_id = apt->oxid;
+    newclass->clscontext = clscontext;
+    newclass->flags = flags;
+    newclass->RpcRegistration = NULL;
+
+    if (!(newclass->cookie = InterlockedIncrement(&next_cookie)))
+        newclass->cookie = InterlockedIncrement(&next_cookie);
+
+    newclass->object = object;
+    IUnknown_AddRef(newclass->object);
+
+    EnterCriticalSection(&registered_classes_cs);
+    list_add_tail(&registered_classes, &newclass->entry);
+    LeaveCriticalSection(&registered_classes_cs);
+
+    *cookie = newclass->cookie;
+
+    if (clscontext & CLSCTX_LOCAL_SERVER)
+    {
+        IStream *marshal_stream;
+
+        hr = apartment_get_local_server_stream(apt, &marshal_stream);
+        if(FAILED(hr))
+        {
+            apartment_release(apt);
+            return hr;
+        }
+
+        hr = rpc_start_local_server(&newclass->clsid, marshal_stream, flags & (REGCLS_MULTIPLEUSE|REGCLS_MULTI_SEPARATE),
+                &newclass->RpcRegistration);
+        IStream_Release(marshal_stream);
+    }
+
+    apartment_release(apt);
+    return S_OK;
+}
+
+static void com_revoke_class_object(struct registered_class *entry)
+{
+    list_remove(&entry->entry);
+
+    if (entry->clscontext & CLSCTX_LOCAL_SERVER)
+        rpc_stop_local_server(entry->RpcRegistration);
+
+    IUnknown_Release(entry->object);
+    heap_free(entry);
+}
+
+void apartment_revoke_all_classes(const struct apartment *apt)
+{
+    struct registered_class *cur, *cur2;
+
+    EnterCriticalSection(&registered_classes_cs);
+
+    LIST_FOR_EACH_ENTRY_SAFE(cur, cur2, &registered_classes, struct registered_class, entry)
+    {
+        if (cur->apartment_id == apt->oxid)
+            com_revoke_class_object(cur);
+    }
+
+    LeaveCriticalSection(&registered_classes_cs);
+}
+
+/***********************************************************************
+ *           CoRevokeClassObject    (combase.@)
+ */
+HRESULT WINAPI DECLSPEC_HOTPATCH CoRevokeClassObject(DWORD cookie)
+{
+    HRESULT hr = E_INVALIDARG;
+    struct registered_class *cur;
+    struct apartment *apt;
+
+    TRACE("%#x\n", cookie);
+
+    if (!(apt = apartment_get_current_or_mta()))
+    {
+        ERR("COM was not initialized\n");
+        return CO_E_NOTINITIALIZED;
+    }
+
+    EnterCriticalSection(&registered_classes_cs);
+
+    LIST_FOR_EACH_ENTRY(cur, &registered_classes, struct registered_class, entry)
+    {
+        if (cur->cookie != cookie)
+            continue;
+
+        if (cur->apartment_id == apt->oxid)
+        {
+            com_revoke_class_object(cur);
+            hr = S_OK;
+        }
+        else
+        {
+            ERR("called from wrong apartment, should be called from %s\n", wine_dbgstr_longlong(cur->apartment_id));
+            hr = RPC_E_WRONG_THREAD;
+        }
+
+        break;
+    }
+
+    LeaveCriticalSection(&registered_classes_cs);
+    apartment_release(apt);
+
+    return hr;
+}
+
+/***********************************************************************
+ *           CoAddRefServerProcess    (combase.@)
+ */
+ULONG WINAPI CoAddRefServerProcess(void)
+{
+    ULONG refs;
+
+    TRACE("\n");
+
+    EnterCriticalSection(&registered_classes_cs);
+    refs = ++com_server_process_refcount;
+    LeaveCriticalSection(&registered_classes_cs);
+
+    TRACE("refs before: %d\n", refs - 1);
+
+    return refs;
+}
+
+/***********************************************************************
+ *           CoReleaseServerProcess [OLE32.@]
+ */
+ULONG WINAPI CoReleaseServerProcess(void)
+{
+    ULONG refs;
+
+    TRACE("\n");
+
+    EnterCriticalSection(&registered_classes_cs);
+
+    refs = --com_server_process_refcount;
+    /* FIXME: suspend objects */
+
+    LeaveCriticalSection(&registered_classes_cs);
+
+    TRACE("refs after: %d\n", refs);
+
+    return refs;
+}
+
+/***********************************************************************
+ *            DllMain     (combase.@)
+ */
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
+{
+    TRACE("%p 0x%x %p\n", hinstDLL, reason, reserved);
+
+    switch (reason)
+    {
+    case DLL_PROCESS_ATTACH:
+        hProxyDll = hinstDLL;
+        break;
+    case DLL_PROCESS_DETACH:
+        if (reserved) break;
+        apartment_global_cleanup();
+        DeleteCriticalSection(&registered_classes_cs);
+        break;
+    case DLL_THREAD_DETACH:
+        com_cleanup_tlsdata();
+        break;
+    }
+
+    return TRUE;
 }

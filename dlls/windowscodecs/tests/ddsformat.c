@@ -24,6 +24,15 @@
 #include "wincodec.h"
 #include "wine/test.h"
 
+#define GET_RGB565_R(color)   ((BYTE)(((color) >> 11) & 0x1F))
+#define GET_RGB565_G(color)   ((BYTE)(((color) >> 5)  & 0x3F))
+#define GET_RGB565_B(color)   ((BYTE)(((color) >> 0)  & 0x1F))
+#define MAKE_RGB565(r, g, b)  ((WORD)(((BYTE)(r) << 11) | ((BYTE)(g) << 5) | (BYTE)(b)))
+#define MAKE_ARGB(a, r, g, b) (((DWORD)(a) << 24) | ((DWORD)(r) << 16) | ((DWORD)(g) << 8) | (DWORD)(b))
+
+#define BLOCK_WIDTH  4
+#define BLOCK_HEIGHT 4
+
 /* 1x1 uncompressed(Alpha) DDS image */
 static BYTE test_dds_alpha[] = {
     'D',  'D',  'S',  ' ',  0x7C, 0x00, 0x00, 0x00, 0x07, 0x10, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -381,51 +390,52 @@ static struct test_data {
     HRESULT init_hr;
     UINT expected_frame_count;
     UINT expected_bytes_per_block;
+    UINT pixel_format_bpp;
     const GUID *expected_pixel_format;
     WICDdsParameters expected_parameters;
     BOOL wine_init;
 } test_data[] = {
-    { test_dds_alpha,      sizeof(test_dds_alpha),         WINCODEC_ERR_BADHEADER, 1,  1,  &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_alpha,      sizeof(test_dds_alpha),         WINCODEC_ERR_BADHEADER, 1,  1,  8,  &GUID_WICPixelFormat8bppAlpha,
       { 1,  1,  1, 1, 1,   DXGI_FORMAT_A8_UNORM,           WICDdsTexture2D,   WICDdsAlphaModeUnknown },       TRUE },
-    { test_dds_luminance,  sizeof(test_dds_luminance),     WINCODEC_ERR_BADHEADER, 1,  1,  &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_luminance,  sizeof(test_dds_luminance),     WINCODEC_ERR_BADHEADER, 1,  1,  8,  &GUID_WICPixelFormat8bppGray,
       { 1,  1,  1, 1, 1,   DXGI_FORMAT_R8_UNORM,           WICDdsTexture2D,   WICDdsAlphaModeUnknown },       TRUE },
-    { test_dds_rgb565,     sizeof(test_dds_rgb565),        WINCODEC_ERR_BADHEADER, 1,  2,  &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_rgb565,     sizeof(test_dds_rgb565),        WINCODEC_ERR_BADHEADER, 1,  2,  16,  &GUID_WICPixelFormat16bppBGR565,
       { 4,  4,  1, 1, 1,   DXGI_FORMAT_B5G6R5_UNORM,       WICDdsTexture2D,   WICDdsAlphaModeUnknown },       TRUE },
-    { test_dds_24bpp,      sizeof(test_dds_24bpp),         WINCODEC_ERR_BADHEADER, 1,  3,  &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_24bpp,      sizeof(test_dds_24bpp),         WINCODEC_ERR_BADHEADER, 1,  3,  24,  &GUID_WICPixelFormat24bppBGR,
       { 1,  1,  1, 1, 1,   DXGI_FORMAT_UNKNOWN,            WICDdsTexture2D,   WICDdsAlphaModeUnknown },       TRUE },
-    { test_dds_32bpp_xrgb, sizeof(test_dds_32bpp_xrgb),    WINCODEC_ERR_BADHEADER, 1,  4,  &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_32bpp_xrgb, sizeof(test_dds_32bpp_xrgb),    WINCODEC_ERR_BADHEADER, 1,  4,  32,  &GUID_WICPixelFormat32bppBGR,
       { 1,  1,  1, 1, 1,   DXGI_FORMAT_B8G8R8X8_UNORM,     WICDdsTexture2D,   WICDdsAlphaModeUnknown },       TRUE },
-    { test_dds_32bpp_argb, sizeof(test_dds_32bpp_argb),    WINCODEC_ERR_BADHEADER, 1,  4,  &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_32bpp_argb, sizeof(test_dds_32bpp_argb),    WINCODEC_ERR_BADHEADER, 1,  4,  32,  &GUID_WICPixelFormat32bppBGRA,
       { 1,  1,  1, 1, 1,   DXGI_FORMAT_B8G8R8A8_UNORM,     WICDdsTexture2D,   WICDdsAlphaModeUnknown },       TRUE },
-    { test_dds_64bpp,      sizeof(test_dds_64bpp),         WINCODEC_ERR_BADHEADER, 1,  8,  &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_64bpp,      sizeof(test_dds_64bpp),         WINCODEC_ERR_BADHEADER, 1,  8,  64,  &GUID_WICPixelFormat64bppRGBA,
       { 1,  1,  1, 1, 1,   DXGI_FORMAT_R16G16B16A16_UNORM, WICDdsTexture2D,   WICDdsAlphaModeUnknown },       TRUE },
-    { test_dds_96bpp,      sizeof(test_dds_96bpp),         WINCODEC_ERR_BADHEADER, 1,  12, &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_96bpp,      sizeof(test_dds_96bpp),         WINCODEC_ERR_BADHEADER, 1,  12, 96,  &GUID_WICPixelFormat96bppRGBFloat,
       { 1,  1,  1, 1, 1,   DXGI_FORMAT_R32G32B32_FLOAT,    WICDdsTexture2D,   WICDdsAlphaModeUnknown },       TRUE },
-    { test_dds_128bpp,     sizeof(test_dds_128bpp),        WINCODEC_ERR_BADHEADER, 1,  16, &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_128bpp,     sizeof(test_dds_128bpp),        WINCODEC_ERR_BADHEADER, 1,  16, 128, &GUID_WICPixelFormat128bppRGBAFloat,
       { 1,  1,  1, 1, 1,   DXGI_FORMAT_R32G32B32A32_FLOAT, WICDdsTexture2D,   WICDdsAlphaModeUnknown },       TRUE },
-    { test_dds_cube,       sizeof(test_dds_cube),          WINCODEC_ERR_BADHEADER, 18, 8,  &GUID_WICPixelFormat32bppPBGRA,
+    { test_dds_cube,       sizeof(test_dds_cube),          WINCODEC_ERR_BADHEADER, 18, 8,  32,  &GUID_WICPixelFormat32bppPBGRA,
       { 4,  4,  1, 3, 1,   DXGI_FORMAT_BC1_UNORM,          WICDdsTextureCube, WICDdsAlphaModePremultiplied }, TRUE },
-    { test_dds_cube_dx10,  sizeof(test_dds_cube_dx10),     WINCODEC_ERR_BADHEADER, 18, 8,  &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_cube_dx10,  sizeof(test_dds_cube_dx10),     WINCODEC_ERR_BADHEADER, 18, 8,  32,  &GUID_WICPixelFormat32bppBGRA,
       { 4,  4,  1, 3, 1,   DXGI_FORMAT_BC1_UNORM,          WICDdsTextureCube, WICDdsAlphaModeUnknown },       TRUE },
-    { test_dds_mipmaps,    sizeof(test_dds_mipmaps),       S_OK,                   3,  8,  &GUID_WICPixelFormat32bppPBGRA,
+    { test_dds_mipmaps,    sizeof(test_dds_mipmaps),       S_OK,                   3,  8,  32,  &GUID_WICPixelFormat32bppPBGRA,
       { 4,  4,  1, 3, 1,   DXGI_FORMAT_BC1_UNORM,          WICDdsTexture2D,   WICDdsAlphaModePremultiplied } },
-    { test_dds_volume,     sizeof(test_dds_volume),        S_OK,                   7,  8,  &GUID_WICPixelFormat32bppPBGRA,
+    { test_dds_volume,     sizeof(test_dds_volume),        S_OK,                   7,  8,  32,  &GUID_WICPixelFormat32bppPBGRA,
       { 4,  4,  4, 3, 1,   DXGI_FORMAT_BC1_UNORM,          WICDdsTexture3D,   WICDdsAlphaModePremultiplied } },
-    { test_dds_array,      sizeof(test_dds_array),         S_OK,                   9,  8,  &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_array,      sizeof(test_dds_array),         S_OK,                   9,  8,  32,  &GUID_WICPixelFormat32bppBGRA,
       { 4,  4,  1, 3, 3,   DXGI_FORMAT_BC1_UNORM,          WICDdsTexture2D,   WICDdsAlphaModeUnknown } },
-    { test_dds_dxt1c,      sizeof(test_dds_dxt1c),         S_OK,                   1,  8,  &GUID_WICPixelFormat32bppPBGRA,
+    { test_dds_dxt1c,      sizeof(test_dds_dxt1c),         S_OK,                   1,  8,  32,  &GUID_WICPixelFormat32bppPBGRA,
       { 4,  4,  1, 1, 1,   DXGI_FORMAT_BC1_UNORM,          WICDdsTexture2D,   WICDdsAlphaModePremultiplied } },
-    { test_dds_dxt1a,      sizeof(test_dds_dxt1a),         S_OK,                   1,  8,  &GUID_WICPixelFormat32bppPBGRA,
+    { test_dds_dxt1a,      sizeof(test_dds_dxt1a),         S_OK,                   1,  8,  32,  &GUID_WICPixelFormat32bppPBGRA,
       { 4,  4,  1, 1, 1,   DXGI_FORMAT_BC1_UNORM,          WICDdsTexture2D,   WICDdsAlphaModePremultiplied } },
-    { test_dds_dxt2,       sizeof(test_dds_dxt2),          S_OK,                   3,  16, &GUID_WICPixelFormat32bppPBGRA,
+    { test_dds_dxt2,       sizeof(test_dds_dxt2),          S_OK,                   3,  16, 32,  &GUID_WICPixelFormat32bppPBGRA,
       { 4,  4,  1, 3, 1,   DXGI_FORMAT_BC2_UNORM,          WICDdsTexture2D,   WICDdsAlphaModePremultiplied } },
-    { test_dds_dxt3,       sizeof(test_dds_dxt3),          S_OK,                   2,  16, &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_dxt3,       sizeof(test_dds_dxt3),          S_OK,                   2,  16, 32,  &GUID_WICPixelFormat32bppBGRA,
       { 1,  3,  1, 2, 1,   DXGI_FORMAT_BC2_UNORM,          WICDdsTexture2D,   WICDdsAlphaModeUnknown } },
-    { test_dds_dxt4,       sizeof(test_dds_dxt4),          S_OK,                   3,  16, &GUID_WICPixelFormat32bppPBGRA,
+    { test_dds_dxt4,       sizeof(test_dds_dxt4),          S_OK,                   3,  16, 32,  &GUID_WICPixelFormat32bppPBGRA,
       { 4,  4,  1, 3, 1,   DXGI_FORMAT_BC3_UNORM,          WICDdsTexture2D,   WICDdsAlphaModePremultiplied } },
-    { test_dds_dxt5,       sizeof(test_dds_dxt5),          S_OK,                   3,  16, &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_dxt5,       sizeof(test_dds_dxt5),          S_OK,                   3,  16, 32,  &GUID_WICPixelFormat32bppBGRA,
       { 6,  6,  1, 3, 1,   DXGI_FORMAT_BC3_UNORM,          WICDdsTexture2D,   WICDdsAlphaModeUnknown } },
-    { test_dds_12x12,      sizeof(test_dds_12x12),         S_OK,                   8,  16, &GUID_WICPixelFormat32bppBGRA,
+    { test_dds_12x12,      sizeof(test_dds_12x12),         S_OK,                   8,  16, 32,  &GUID_WICPixelFormat32bppBGRA,
       { 12, 12, 1, 4, 2,   DXGI_FORMAT_BC2_UNORM,          WICDdsTexture2D,   WICDdsAlphaModeUnknown } },
     { test_dds_bad_magic,  sizeof(test_dds_bad_magic),     WINCODEC_ERR_UNKNOWNIMAGEFORMAT },
     { test_dds_bad_header, sizeof(test_dds_bad_header),    WINCODEC_ERR_BADHEADER },
@@ -434,6 +444,16 @@ static struct test_data {
     { test_dword,          sizeof(test_dword),             WINCODEC_ERR_UNKNOWNIMAGEFORMAT },
     { test_qword_a,        sizeof(test_qword_a),           WINCODEC_ERR_UNKNOWNIMAGEFORMAT },
     { test_qword_b,        sizeof(test_qword_b),           WINCODEC_ERR_STREAMREAD },
+};
+
+static DXGI_FORMAT compressed_formats[] = {
+    DXGI_FORMAT_BC1_TYPELESS,  DXGI_FORMAT_BC1_UNORM, DXGI_FORMAT_BC1_UNORM_SRGB,
+    DXGI_FORMAT_BC2_TYPELESS,  DXGI_FORMAT_BC2_UNORM, DXGI_FORMAT_BC2_UNORM_SRGB,
+    DXGI_FORMAT_BC3_TYPELESS,  DXGI_FORMAT_BC3_UNORM, DXGI_FORMAT_BC3_UNORM_SRGB,
+    DXGI_FORMAT_BC4_TYPELESS,  DXGI_FORMAT_BC4_UNORM, DXGI_FORMAT_BC4_SNORM,
+    DXGI_FORMAT_BC5_TYPELESS,  DXGI_FORMAT_BC5_UNORM, DXGI_FORMAT_BC5_SNORM,
+    DXGI_FORMAT_BC6H_TYPELESS, DXGI_FORMAT_BC6H_UF16, DXGI_FORMAT_BC6H_SF16,
+    DXGI_FORMAT_BC7_TYPELESS,  DXGI_FORMAT_BC7_UNORM, DXGI_FORMAT_BC7_UNORM_SRGB
 };
 
 static IWICImagingFactory *factory = NULL;
@@ -501,9 +521,174 @@ static HRESULT init_decoder(IWICBitmapDecoder *decoder, IWICStream *stream, HRES
     return hr;
 }
 
+static BOOL is_compressed(DXGI_FORMAT format)
+{
+    UINT i;
+    for (i = 0; i < ARRAY_SIZE(compressed_formats); i++)
+    {
+        if (format == compressed_formats[i]) return TRUE;
+    }
+    return FALSE;
+}
+
 static BOOL has_extended_header(const BYTE *data)
 {
     return data[84] == 'D' && data[85] == 'X' && data[86] == '1' && data[87] == '0';
+}
+
+static DWORD rgb565_to_argb(WORD color, BYTE alpha)
+{
+    return MAKE_ARGB(alpha, (GET_RGB565_R(color) * 0xFF + 0x0F) / 0x1F,
+                            (GET_RGB565_G(color) * 0xFF + 0x1F) / 0x3F,
+                            (GET_RGB565_B(color) * 0xFF + 0x0F) / 0x1F);
+}
+
+static void decode_block(const BYTE *block_data, UINT block_count, DXGI_FORMAT format,
+                         UINT width, UINT height, DWORD *buffer)
+{
+    const BYTE *block, *color_indices, *alpha_indices, *alpha_table;
+    int i, j, x, y, block_x, block_y, color_index, alpha_index;
+    int block_size, color_offset, color_indices_offset;
+    WORD color[4], color_value = 0;
+    BYTE alpha[8], alpha_value = 0;
+
+    if (format == DXGI_FORMAT_BC1_UNORM) {
+        block_size = 8;
+        color_offset = 0;
+        color_indices_offset = 4;
+    } else {
+        block_size = 16;
+        color_offset = 8;
+        color_indices_offset = 12;
+    }
+    block_x = 0;
+    block_y = 0;
+
+    for (i = 0; i < block_count; i++)
+    {
+        block = block_data + i * block_size;
+
+        color[0] = *((WORD *)(block + color_offset));
+        color[1] = *((WORD *)(block + color_offset + 2));
+        color[2] = MAKE_RGB565(((GET_RGB565_R(color[0]) * 2 + GET_RGB565_R(color[1]) + 1) / 3),
+                               ((GET_RGB565_G(color[0]) * 2 + GET_RGB565_G(color[1]) + 1) / 3),
+                               ((GET_RGB565_B(color[0]) * 2 + GET_RGB565_B(color[1]) + 1) / 3));
+        color[3] = MAKE_RGB565(((GET_RGB565_R(color[0]) + GET_RGB565_R(color[1]) * 2 + 1) / 3),
+                               ((GET_RGB565_G(color[0]) + GET_RGB565_G(color[1]) * 2 + 1) / 3),
+                               ((GET_RGB565_B(color[0]) + GET_RGB565_B(color[1]) * 2 + 1) / 3));
+
+        switch (format)
+        {
+            case DXGI_FORMAT_BC1_UNORM:
+                if (color[0] <= color[1]) {
+                    color[2] = MAKE_RGB565(((GET_RGB565_R(color[0]) + GET_RGB565_R(color[1]) + 1) / 2),
+                                           ((GET_RGB565_G(color[0]) + GET_RGB565_G(color[1]) + 1) / 2),
+                                           ((GET_RGB565_B(color[0]) + GET_RGB565_B(color[1]) + 1) / 2));
+                    color[3] = 0;
+                }
+                break;
+            case DXGI_FORMAT_BC2_UNORM:
+                alpha_table = block;
+                break;
+            case DXGI_FORMAT_BC3_UNORM:
+                alpha[0] = *block;
+                alpha[1] = *(block + 1);
+                if (alpha[0] > alpha[1]) {
+                    for (j = 2; j < 8; j++)
+                    {
+                        alpha[j] = (BYTE)((alpha[0] * (8 - j) + alpha[1] * (j - 1) + 3) / 7);
+                    }
+                } else {
+                    for (j = 2; j < 6; j++)
+                    {
+                        alpha[j] = (BYTE)((alpha[0] * (6 - j) + alpha[1] * (j - 1) + 2) / 5);
+                    }
+                    alpha[6] = 0;
+                    alpha[7] = 0xFF;
+                }
+                alpha_indices = block + 2;
+                break;
+            default:
+                break;
+        }
+
+        color_indices = block + color_indices_offset;
+        for (j = 0; j < 16; j++)
+        {
+            x = block_x + j % 4;
+            y = block_y + j / 4;
+            if (x >= width || y >= height) continue;
+
+            color_index = (color_indices[j / 4] >> ((j % 4) * 2)) & 0x3;
+            color_value = color[color_index];
+
+            switch (format)
+            {
+                case DXGI_FORMAT_BC1_UNORM:
+                    if ((color[0] <= color[1]) && !color_value) {
+                        color_value = 0;
+                        alpha_value = 0;
+                    } else {
+                        alpha_value = 0xFF;
+                    }
+                    break;
+                case DXGI_FORMAT_BC2_UNORM:
+                    alpha_value = (alpha_table[j / 2] >> (j % 2) * 4) & 0xF;
+                    alpha_value = (BYTE)((alpha_value * 0xFF + 0x7)/ 0xF);
+                    break;
+                case DXGI_FORMAT_BC3_UNORM:
+                    alpha_index = (*((DWORD *)(alpha_indices + (j / 8) * 3)) >> ((j % 8) * 3)) & 0x7;
+                    alpha_value = alpha[alpha_index];
+                    break;
+                default:
+                    break;
+            }
+            buffer[x + y * width] = rgb565_to_argb(color_value, alpha_value);
+        }
+
+        block_x += BLOCK_WIDTH;
+        if (block_x >= width) {
+            block_x = 0;
+            block_y += BLOCK_HEIGHT;
+        }
+    }
+}
+
+static BOOL color_match(DWORD color_a, DWORD color_b)
+{
+    static const int tolerance = 8;
+
+    const int da = abs((int)((color_a & 0xFF000000) >> 24) - (int)((color_b & 0xFF000000) >> 24));
+    const int dr = abs((int)((color_a & 0x00FF0000) >> 16) - (int)((color_b & 0x00FF0000) >> 16));
+    const int dg = abs((int)((color_a & 0x0000FF00) >> 8)  - (int)((color_b & 0x0000FF00) >> 8));
+    const int db = abs((int)((color_a & 0x000000FF) >> 0)  - (int)((color_b & 0x000000FF) >> 0));
+
+    return (da <= tolerance && dr <= tolerance && dg <= tolerance && db <= tolerance);
+}
+
+static BOOL color_buffer_match(DWORD *color_buffer_a, DWORD *color_buffer_b, UINT color_count)
+{
+    UINT i;
+
+    for (i = 0; i < color_count; i++)
+    {
+        if (!color_match(color_buffer_a[i], color_buffer_b[i])) return FALSE;
+    }
+
+    return TRUE;
+}
+
+static void copy_pixels(void *src_buffer, UINT src_stride, void *dst_buffer, UINT dst_stride, UINT size)
+{
+    char *src = src_buffer, *dst = dst_buffer;
+    UINT i;
+
+    for (i = 0; i < size; i++)
+    {
+        *dst = src[i];
+        if (i % src_stride == src_stride - 1) dst += dst_stride - src_stride;
+        dst ++;
+    }
 }
 
 static void test_dds_decoder_initialize(void)
@@ -702,18 +887,12 @@ static void test_dds_decoder_frame_properties(IWICBitmapFrameDecode *frame_decod
 
     /* frame format information tests */
 
-    if (test_data[i].expected_parameters.DxgiFormat != DXGI_FORMAT_BC1_UNORM &&
-        test_data[i].expected_parameters.DxgiFormat != DXGI_FORMAT_BC2_UNORM &&
-        test_data[i].expected_parameters.DxgiFormat != DXGI_FORMAT_BC3_UNORM &&
-        test_data[i].expected_parameters.DxgiFormat != DXGI_FORMAT_BC4_UNORM &&
-        test_data[i].expected_parameters.DxgiFormat != DXGI_FORMAT_BC4_SNORM &&
-        test_data[i].expected_parameters.DxgiFormat != DXGI_FORMAT_BC5_UNORM &&
-        test_data[i].expected_parameters.DxgiFormat != DXGI_FORMAT_BC5_SNORM) {
+    if (is_compressed(test_data[i].expected_parameters.DxgiFormat)) {
+        expected_block_width = BLOCK_WIDTH;
+        expected_block_height = BLOCK_HEIGHT;
+    } else {
         expected_block_width = 1;
         expected_block_height = 1;
-    } else {
-        expected_block_width = 4;
-        expected_block_height = 4;
     }
 
     hr = IWICDdsFrameDecode_GetFormatInfo(dds_frame, NULL);
@@ -762,24 +941,32 @@ static void test_dds_decoder_frame_properties(IWICBitmapFrameDecode *frame_decod
     hr = IWICBitmapFrameDecode_GetPixelFormat(frame_decode, &pixel_format);
     ok(hr == S_OK, "Test %u, frame %u: GetPixelFormat failed, hr %#x\n", i, frame_index, hr);
     if (hr != S_OK) return;
+    todo_wine_if(IsEqualGUID(test_data[i].expected_pixel_format, &GUID_WICPixelFormat96bppRGBFloat))
     ok(IsEqualGUID(&pixel_format, test_data[i].expected_pixel_format),
        "Test %u, frame %u: Expected pixel format %s, got %s\n",
        i, frame_index, debugstr_guid(test_data[i].expected_pixel_format), debugstr_guid(&pixel_format));
 }
 
-static void test_dds_decoder_frame_data(IWICDdsFrameDecode *dds_frame, UINT frame_count, WICDdsParameters *params,
-                                        int i, int frame_index)
+static void test_dds_decoder_frame_data(IWICBitmapFrameDecode* frame, IWICDdsFrameDecode *dds_frame, UINT frame_count,
+                                        WICDdsParameters *params, int i, int frame_index)
 {
     HRESULT hr;
+    GUID pixel_format;
     WICDdsFormatInfo format_info;
     WICRect rect = { 0, 0, 1, 1 }, rect_test_a = { 0, 0, 0, 0 }, rect_test_b = { 0, 0, 0xdeadbeaf, 0xdeadbeaf };
     WICRect rect_test_c = { -0xdeadbeaf, -0xdeadbeaf, 1, 1 }, rect_test_d = { 0xdeadbeaf, 0xdeadbeaf, 1, 1 };
-    BYTE buffer[256];
-    UINT stride, frame_stride, frame_size, width_in_blocks, height_in_blocks;
+    BYTE buffer[2048], pixels[2048];
+    UINT stride, frame_stride, frame_size, frame_width, frame_height, width_in_blocks, height_in_blocks, bpp;
     UINT width, height, depth, array_index;
     UINT block_offset;
     int slice_index;
 
+    hr = IWICBitmapFrameDecode_GetPixelFormat(frame, &pixel_format);
+    ok(hr == S_OK, "Test %u, frame %u: GetPixelFormat failed, hr %#x\n", i, frame_index, hr);
+    if (hr != S_OK) return;
+    hr = IWICBitmapFrameDecode_GetSize(frame, &frame_width, &frame_height);
+    ok(hr == S_OK, "Test %u, frame %u: GetSize failed, hr %#x\n", i, frame_index, hr);
+    if (hr != S_OK) return;
     hr = IWICDdsFrameDecode_GetFormatInfo(dds_frame, &format_info);
     ok(hr == S_OK, "Test %u, frame %u: GetFormatInfo failed, hr %#x\n", i, frame_index, hr);
     if (hr != S_OK) return;
@@ -789,6 +976,8 @@ static void test_dds_decoder_frame_data(IWICDdsFrameDecode *dds_frame, UINT fram
     stride = rect.Width * format_info.BytesPerBlock;
     frame_stride = width_in_blocks * format_info.BytesPerBlock;
     frame_size = frame_stride * height_in_blocks;
+
+    /* CopyBlocks tests */
 
     hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, 0, 0, NULL);
     ok(hr == E_INVALIDARG, "Test %u, frame %u: CopyBlocks got unexpected hr %#x\n", i, frame_index, hr);
@@ -854,23 +1043,116 @@ static void test_dds_decoder_frame_data(IWICDdsFrameDecode *dds_frame, UINT fram
         if (depth > 1) depth /= 2;
     }
 
+    memset(buffer, 0, sizeof(buffer));
     hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, &rect, stride, sizeof(buffer), buffer);
     ok(hr == S_OK, "Test %u, frame %u: CopyBlocks failed, hr %#x\n", i, frame_index, hr);
     if (hr != S_OK) return;
-    ok(!strncmp((const char *)test_data[i].data + block_offset, (const char *)buffer, format_info.BytesPerBlock),
+    ok(!memcmp(test_data[i].data + block_offset, buffer, format_info.BytesPerBlock),
        "Test %u, frame %u: Block data mismatch\n", i, frame_index);
 
+    memset(buffer, 0, sizeof(buffer));
     hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, frame_stride, sizeof(buffer), buffer);
     ok(hr == S_OK, "Test %u, frame %u: CopyBlocks failed, hr %#x\n", i, frame_index, hr);
     if (hr != S_OK) return;
-    ok(!strncmp((const char *)test_data[i].data + block_offset, (const char *)buffer, frame_size),
+    ok(!memcmp(test_data[i].data + block_offset, buffer, frame_size),
        "Test %u, frame %u: Block data mismatch\n", i, frame_index);
 
+    memset(buffer, 0, sizeof(buffer));
+    memset(pixels, 0, sizeof(pixels));
+    copy_pixels(test_data[i].data + block_offset, frame_stride, pixels, frame_stride * 2, frame_size);
     hr = IWICDdsFrameDecode_CopyBlocks(dds_frame, NULL, frame_stride * 2, sizeof(buffer), buffer);
     ok(hr == S_OK, "Test %u, frame %u: CopyBlocks failed, hr %#x\n", i, frame_index, hr);
     if (hr != S_OK) return;
-    ok(!strncmp((const char *)test_data[i].data + block_offset, (const char *)buffer, frame_size),
+    ok(!memcmp(pixels, buffer, frame_size),
        "Test %u, frame %u: Block data mismatch\n", i, frame_index);
+
+    /* CopyPixels tests */
+
+    bpp = test_data[i].pixel_format_bpp;
+    stride = rect.Width * bpp / 8;
+    frame_stride = frame_width * bpp / 8;
+    frame_size = frame_stride * frame_height;
+
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, NULL, 0, 0, NULL);
+    ok(hr == E_INVALIDARG, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+
+    todo_wine_if(IsEqualGUID(test_data[i].expected_pixel_format, &GUID_WICPixelFormat96bppRGBFloat)) {
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect_test_a, stride, sizeof(buffer), buffer);
+    ok(hr == E_INVALIDARG, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect_test_b, stride, sizeof(buffer), buffer);
+    ok(hr == E_INVALIDARG, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect_test_c, stride, sizeof(buffer), buffer);
+    ok(hr == E_INVALIDARG, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect_test_d, stride, sizeof(buffer), buffer);
+    ok(hr == E_INVALIDARG, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, NULL, frame_stride - 1, sizeof(buffer), buffer);
+    ok(hr == E_INVALIDARG, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, NULL, frame_stride * 2, sizeof(buffer), buffer);
+    ok(hr == S_OK, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, NULL, frame_stride, sizeof(buffer), buffer);
+    ok(hr == S_OK, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, NULL, frame_stride, frame_stride * frame_height - 1, buffer);
+    ok(hr == WINCODEC_ERR_INSUFFICIENTBUFFER, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, NULL, frame_stride, frame_stride * frame_height, buffer);
+    ok(hr == S_OK, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect, 0, sizeof(buffer), buffer);
+    ok(hr == E_INVALIDARG, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect, stride - 1, sizeof(buffer), buffer);
+    ok(hr == E_INVALIDARG, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect, stride * 2, sizeof(buffer), buffer);
+    ok(hr == S_OK, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect, stride, 0, buffer);
+    ok(hr == WINCODEC_ERR_INSUFFICIENTBUFFER, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect, stride, 1, buffer);
+    ok(hr == WINCODEC_ERR_INSUFFICIENTBUFFER || (hr == S_OK && test_data[i].expected_bytes_per_block == 1),
+       "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect, stride, stride * rect.Height - 1, buffer);
+    ok(hr == WINCODEC_ERR_INSUFFICIENTBUFFER, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect, stride, stride * rect.Height, buffer);
+    ok(hr == S_OK, "Test %u, frame %u: CopyPixels got unexpected hr %#x\n", i, frame_index, hr);
+    }
+
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect, stride, sizeof(buffer), NULL);
+    ok(hr == E_INVALIDARG, "Test %u, frame %u: CopyBlocks got unexpected hr %#x\n", i, frame_index, hr);
+
+    memset(buffer, 0, sizeof(pixels));
+    if (is_compressed(format_info.DxgiFormat)) {
+        decode_block(test_data[i].data + block_offset, width_in_blocks * height_in_blocks,
+                     format_info.DxgiFormat, frame_width, frame_height, (DWORD *)pixels);
+    } else {
+        memcpy(pixels, test_data[i].data + block_offset, frame_size);
+    }
+
+    todo_wine_if(IsEqualGUID(test_data[i].expected_pixel_format, &GUID_WICPixelFormat96bppRGBFloat)) {
+    memset(buffer, 0, sizeof(buffer));
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, &rect, stride, sizeof(buffer), buffer);
+    ok(hr == S_OK, "Test %u, frame %u: CopyPixels failed, hr %#x\n", i, frame_index, hr);
+    if (hr == S_OK) {
+        if (is_compressed(format_info.DxgiFormat)) {
+            ok(color_buffer_match((DWORD *)pixels, (DWORD *)buffer, 1),
+               "Test %u, frame %u: Pixels mismatch\n", i, frame_index);
+        } else {
+            ok(!memcmp(pixels, buffer, bpp / 8),
+               "Test %u, frame %u: Pixels mismatch\n", i, frame_index);
+        }
+    }
+
+    memset(buffer, 0, sizeof(buffer));
+    hr = IWICBitmapFrameDecode_CopyPixels(frame, NULL, frame_stride, sizeof(buffer), buffer);
+    ok(hr == S_OK, "Test %u, frame %u: CopyPixels failed, hr %#x\n", i, frame_index, hr);
+    if (hr == S_OK) {
+        if (is_compressed(format_info.DxgiFormat)) {
+            ok(color_buffer_match((DWORD *)pixels, (DWORD *)buffer, frame_size / (bpp / 8)),
+               "Test %u, frame %u: Pixels mismatch\n", i, frame_index);
+        } else {
+            ok(!memcmp(pixels, buffer, frame_size),
+               "Test %u, frame %u: Pixels mismatch\n", i, frame_index);
+        };
+    }
+    }
 }
 
 static void test_dds_decoder_frame(IWICBitmapDecoder *decoder, int i)
@@ -905,7 +1187,7 @@ static void test_dds_decoder_frame(IWICBitmapDecoder *decoder, int i)
         if (hr != S_OK) goto next;
 
         test_dds_decoder_frame_properties(frame_decode, dds_frame, frame_count, &params, i, j);
-        test_dds_decoder_frame_data(dds_frame, frame_count, &params, i, j);
+        test_dds_decoder_frame_data(frame_decode, dds_frame, frame_count, &params, i, j);
 
     next:
         if (frame_decode) IWICBitmapFrameDecode_Release(frame_decode);

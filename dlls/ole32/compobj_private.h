@@ -40,8 +40,6 @@
 #include "winternl.h"
 
 struct apartment;
-typedef struct apartment APARTMENT;
-typedef struct LocalServer LocalServer;
 
 DEFINE_OLEGUID( CLSID_DfMarshal, 0x0000030b, 0, 0 );
 
@@ -89,7 +87,7 @@ struct stub_manager
     struct list       entry;      /* entry in apartment stubmgr list (CS apt->cs) */
     struct list       ifstubs;    /* list of active ifstubs for the object (CS lock) */
     CRITICAL_SECTION  lock;
-    APARTMENT        *apt;        /* owning apt (RO) */
+    struct apartment *apt;        /* owning apt (RO) */
 
     ULONG             extrefs;    /* number of 'external' references (CS lock) */
     ULONG             refs;       /* internal reference count (CS apt->cs) */
@@ -141,7 +139,7 @@ struct apartment
   struct list loaded_dlls; /* list of dlls loaded by this apartment (CS cs) */
   DWORD host_apt_tid;      /* thread ID of apartment hosting objects of differing threading model (CS cs) */
   HWND host_apt_hwnd;      /* handle to apartment window of host apartment (CS cs) */
-  LocalServer *local_server; /* A marshallable object exposing local servers (CS cs) */
+  struct local_server *local_server; /* A marshallable object exposing local servers (CS cs) */
   BOOL being_destroyed;    /* is currently being destroyed */
 
   /* FIXME: OIDs should be given out by RPCSS */
@@ -191,7 +189,6 @@ extern void release_std_git(void) DECLSPEC_HIDDEN;
 extern HRESULT StdGlobalInterfaceTable_GetFactory(LPVOID *ppv) DECLSPEC_HIDDEN;
 
 HRESULT COM_OpenKeyForCLSID(REFCLSID clsid, LPCWSTR keyname, REGSAM access, HKEY *key) DECLSPEC_HIDDEN;
-HRESULT COM_OpenKeyForAppIdFromCLSID(REFCLSID clsid, REGSAM access, HKEY *subkey) DECLSPEC_HIDDEN;
 HRESULT MARSHAL_GetStandardMarshalCF(LPVOID *ppv) DECLSPEC_HIDDEN;
 HRESULT FTMarshalCF_Create(REFIID riid, LPVOID *ppv) DECLSPEC_HIDDEN;
 
@@ -203,17 +200,18 @@ ULONG stub_manager_ext_release(struct stub_manager *m, ULONG refs, BOOL tablewea
 struct ifstub *stub_manager_new_ifstub(struct stub_manager *m, IRpcStubBuffer *sb, REFIID iid,
      DWORD dest_context, void *dest_context_data, MSHLFLAGS flags) DECLSPEC_HIDDEN;
 struct ifstub *stub_manager_find_ifstub(struct stub_manager *m, REFIID iid, MSHLFLAGS flags) DECLSPEC_HIDDEN;
-struct stub_manager *get_stub_manager(APARTMENT *apt, OID oid) DECLSPEC_HIDDEN;
-struct stub_manager *get_stub_manager_from_object(APARTMENT *apt, IUnknown *object, BOOL alloc) DECLSPEC_HIDDEN;
+struct stub_manager *get_stub_manager(struct apartment *apt, OID oid) DECLSPEC_HIDDEN;
+struct stub_manager *get_stub_manager_from_object(struct apartment *apt, IUnknown *object, BOOL alloc) DECLSPEC_HIDDEN;
 BOOL stub_manager_notify_unmarshal(struct stub_manager *m, const IPID *ipid) DECLSPEC_HIDDEN;
 BOOL stub_manager_is_table_marshaled(struct stub_manager *m, const IPID *ipid) DECLSPEC_HIDDEN;
 void stub_manager_release_marshal_data(struct stub_manager *m, ULONG refs, const IPID *ipid, BOOL tableweak) DECLSPEC_HIDDEN;
 void stub_manager_disconnect(struct stub_manager *m) DECLSPEC_HIDDEN;
-HRESULT ipid_get_dispatch_params(const IPID *ipid, APARTMENT **stub_apt, struct stub_manager **manager, IRpcStubBuffer **stub,
+HRESULT ipid_get_dispatch_params(const IPID *ipid, struct apartment **stub_apt, struct stub_manager **manager, IRpcStubBuffer **stub,
                                  IRpcChannelBuffer **chan, IID *iid, IUnknown **iface) DECLSPEC_HIDDEN;
-HRESULT start_apartment_remote_unknown(APARTMENT *apt) DECLSPEC_HIDDEN;
+HRESULT start_apartment_remote_unknown(struct apartment *apt) DECLSPEC_HIDDEN;
 
-HRESULT marshal_object(APARTMENT *apt, STDOBJREF *stdobjref, REFIID riid, IUnknown *obj, DWORD dest_context, void *dest_context_data, MSHLFLAGS mshlflags) DECLSPEC_HIDDEN;
+HRESULT marshal_object(struct apartment *apt, STDOBJREF *stdobjref, REFIID riid, IUnknown *obj, DWORD dest_context,
+        void *dest_context_data, MSHLFLAGS mshlflags) DECLSPEC_HIDDEN;
 
 /* RPC Backend */
 
@@ -223,43 +221,33 @@ void    RPC_StartRemoting(struct apartment *apt) DECLSPEC_HIDDEN;
 HRESULT RPC_CreateClientChannel(const OXID *oxid, const IPID *ipid,
                                 const OXID_INFO *oxid_info, const IID *iid,
                                 DWORD dest_context, void *dest_context_data,
-                                IRpcChannelBuffer **chan, APARTMENT *apt) DECLSPEC_HIDDEN;
+                                IRpcChannelBuffer **chan, struct apartment *apt) DECLSPEC_HIDDEN;
 HRESULT RPC_CreateServerChannel(DWORD dest_context, void *dest_context_data, IRpcChannelBuffer **chan) DECLSPEC_HIDDEN;
-void    RPC_ExecuteCall(struct dispatch_params *params) DECLSPEC_HIDDEN;
 HRESULT RPC_RegisterInterface(REFIID riid) DECLSPEC_HIDDEN;
 void    RPC_UnregisterInterface(REFIID riid, BOOL wait) DECLSPEC_HIDDEN;
-HRESULT RPC_StartLocalServer(REFCLSID clsid, IStream *stream, BOOL multi_use, void **registration) DECLSPEC_HIDDEN;
-void    RPC_StopLocalServer(void *registration) DECLSPEC_HIDDEN;
-HRESULT RPC_GetLocalClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv) DECLSPEC_HIDDEN;
 HRESULT RPC_RegisterChannelHook(REFGUID rguid, IChannelHook *hook) DECLSPEC_HIDDEN;
 void    RPC_UnregisterAllChannelHooks(void) DECLSPEC_HIDDEN;
 HRESULT RPC_ResolveOxid(OXID oxid, OXID_INFO *oxid_info) DECLSPEC_HIDDEN;
-
-/* This function initialize the Running Object Table */
-HRESULT WINAPI RunningObjectTableImpl_Initialize(void) DECLSPEC_HIDDEN;
-
-/* This function uninitialize the Running Object Table */
-HRESULT WINAPI RunningObjectTableImpl_UnInitialize(void) DECLSPEC_HIDDEN;
 
 /* Drag and drop */
 void OLEDD_UnInitialize(void) DECLSPEC_HIDDEN;
 
 /* Apartment Functions */
 
-APARTMENT *apartment_findfromoxid(OXID oxid, BOOL ref) DECLSPEC_HIDDEN;
-APARTMENT *apartment_findfromtid(DWORD tid) DECLSPEC_HIDDEN;
-DWORD apartment_release(struct apartment *apt) DECLSPEC_HIDDEN;
-HRESULT apartment_disconnectproxies(struct apartment *apt) DECLSPEC_HIDDEN;
+extern struct apartment * WINAPI apartment_findfromoxid(OXID oxid) DECLSPEC_HIDDEN;
+extern struct apartment * WINAPI apartment_findfromtid(DWORD tid) DECLSPEC_HIDDEN;
+extern void WINAPI apartment_release(struct apartment *apt) DECLSPEC_HIDDEN;
 static inline HRESULT apartment_getoxid(const struct apartment *apt, OXID *oxid)
 {
     *oxid = apt->oxid;
     return S_OK;
 }
-HRESULT apartment_createwindowifneeded(struct apartment *apt) DECLSPEC_HIDDEN;
-HWND apartment_getwindow(const struct apartment *apt) DECLSPEC_HIDDEN;
-HRESULT enter_apartment(struct oletls *info, DWORD model) DECLSPEC_HIDDEN;
-void leave_apartment(struct oletls *info) DECLSPEC_HIDDEN;
-APARTMENT *apartment_get_current_or_mta(void) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI apartment_createwindowifneeded(struct apartment *apt) DECLSPEC_HIDDEN;
+extern HWND WINAPI apartment_getwindow(const struct apartment *apt) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI enter_apartment(struct oletls *info, DWORD model) DECLSPEC_HIDDEN;
+void WINAPI leave_apartment(struct oletls *info) DECLSPEC_HIDDEN;
+extern struct apartment * WINAPI apartment_get_current_or_mta(void) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI apartment_get_local_server_stream(struct apartment *apt, IStream **ret) DECLSPEC_HIDDEN;
 
 /* DCOM messages used by the apartment window (not compatible with native) */
 #define DM_EXECUTERPC   (WM_USER + 0) /* WPARAM = 0, LPARAM = (struct dispatch_params *) */
@@ -269,33 +257,22 @@ APARTMENT *apartment_get_current_or_mta(void) DECLSPEC_HIDDEN;
  * Per-thread values are stored in the TEB on offset 0xF80
  */
 
+extern HRESULT WINAPI InternalTlsAllocData(struct oletls **tlsdata);
+
 /* will create if necessary */
 static inline struct oletls *COM_CurrentInfo(void)
 {
+    struct oletls *oletls;
+
     if (!NtCurrentTeb()->ReservedForOle)
-    {
-        struct oletls *oletls = heap_alloc_zero(sizeof(*oletls));
-        if (oletls)
-            list_init(&oletls->spies);
-        NtCurrentTeb()->ReservedForOle = oletls;
-    }
+        InternalTlsAllocData(&oletls);
 
     return NtCurrentTeb()->ReservedForOle;
 }
 
-static inline APARTMENT* COM_CurrentApt(void)
+static inline struct apartment * COM_CurrentApt(void)
 {  
     return COM_CurrentInfo()->apt;
-}
-
-static inline GUID COM_CurrentCausalityId(void)
-{
-    struct oletls *info = COM_CurrentInfo();
-    if (!info)
-        return GUID_NULL;
-    if (IsEqualGUID(&info->causality_id, &GUID_NULL))
-        CoCreateGuid(&info->causality_id);
-    return info->causality_id;
 }
 
 /* helpers for debugging */
@@ -363,7 +340,5 @@ static inline HRESULT copy_formatetc(FORMATETC *dst, const FORMATETC *src)
 
 extern HRESULT EnumSTATDATA_Construct(IUnknown *holder, ULONG index, DWORD array_len, STATDATA *data,
                                       BOOL copy, IEnumSTATDATA **ppenum) DECLSPEC_HIDDEN;
-
-extern DWORD rpcss_get_next_seqid(void) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_OLE_COMPOBJ_H */

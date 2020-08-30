@@ -6804,6 +6804,12 @@ msgstr "站臺不存在。\n"
 msgid "Connection reset by peer.\n"
 msgstr "連線被拒。\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "未實作"
+
 #: winerror.mc:3760
 #, fuzzy
 #| msgid "Message 0x%1 not found in file %2.\n"
@@ -8693,7 +8699,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "重置的連線"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "進階"
 
@@ -17127,8 +17133,10 @@ msgid "&Beginner"
 msgstr "初學者(&B)"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "進階(&A)"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "介面"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -17157,6 +17165,12 @@ msgstr "最快時間"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "初學者"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "介面"
 
 #: winemine.rc:66
 msgid "Expert"

@@ -6885,6 +6885,12 @@ msgstr "El sitio no existe.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Conexión rechazada.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "No implementado"
+
 #: winerror.mc:3760
 #, fuzzy
 #| msgid "Message 0x%1 not found in file %2.\n"
@@ -8809,7 +8815,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Conexión LAN"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Avanzado"
 
@@ -17313,8 +17319,10 @@ msgid "&Beginner"
 msgstr "&Principiante"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Avanzado"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "Interfaz"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -17343,6 +17351,12 @@ msgstr "Mejores tiempos"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Principiante"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "Interfaz"
 
 #: winemine.rc:66
 msgid "Expert"

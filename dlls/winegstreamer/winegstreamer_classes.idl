@@ -103,3 +103,9 @@ coclass CLSID_CWMADecMediaObject {}
     uuid(98230571-0087-4204-b020-3282538e57d3)
 ]
 coclass CColorConvertDMO { }
+
+[
+    threading(both),
+    uuid(6a170414-aad9-4693-b806-3a0c47c570d6)
+]
+coclass WINEAudioConverter { }

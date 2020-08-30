@@ -441,6 +441,8 @@ static HRESULT asf_stream_handler_create(REFIID riid, void **ret)
 
 static GUID CLSID_CColorConvertDMO = {0x98230571,0x0087,0x4204,{0xb0,0x20,0x32,0x82,0x53,0x8e,0x57,0xd3}};
 
+static GUID CLSID_WINEAudioConverter = {0x6a170414,0xaad9,0x4693,{0xb8,0x06,0x3a,0x0c,0x47,0xc5,0x70,0xd6}};
+
 static const struct class_object
 {
     const GUID *clsid;
@@ -457,6 +459,7 @@ class_objects[] =
     { &CLSID_MPEG4ByteStreamHandler, &mp4_stream_handler_create },
     { &CLSID_ASFByteStreamHandler, &asf_stream_handler_create },
     { &CLSID_CColorConvertDMO, &color_converter_create },
+    { &CLSID_WINEAudioConverter, &audio_converter_create },
 };
 
 HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
@@ -509,6 +512,14 @@ const GUID *color_converter_supported_types[] =
     &MFVideoFormat_YVYU,
 };
 
+static WCHAR audio_converterW[] = {'A','u','d','i','o',' ','C','o','n','v','e','r','t','e','r',0};
+
+const GUID *audio_converter_supported_types[] =
+{
+    &MFAudioFormat_PCM,
+    &MFAudioFormat_Float,
+};
+
 static WCHAR h264decoderW[] = {'H','.','2','6','4',' ','D','e','c','o','d','e','r',0};
 const GUID *h264_decoder_input_types[] =
 {
@@ -516,9 +527,9 @@ const GUID *h264_decoder_input_types[] =
 };
 const GUID *h264_decoder_output_types[] =
 {
-    &MFVideoFormat_NV12,
     &MFVideoFormat_I420,
     &MFVideoFormat_IYUV,
+    &MFVideoFormat_NV12,
     &MFVideoFormat_YUY2,
     &MFVideoFormat_YV12,
 };
@@ -616,6 +627,18 @@ mfts[] =
         NULL
     },
     {
+        &CLSID_WINEAudioConverter,
+        &MFT_CATEGORY_AUDIO_EFFECT,
+        audio_converterW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Audio,
+        ARRAY_SIZE(audio_converter_supported_types),
+        audio_converter_supported_types,
+        ARRAY_SIZE(audio_converter_supported_types),
+        audio_converter_supported_types,
+        NULL
+    },
+    {
         &CLSID_CMSH264DecoderMFT,
         &MFT_CATEGORY_VIDEO_DECODER,
         h264decoderW,
@@ -680,25 +703,23 @@ mfts[] =
 HRESULT mfplat_DllRegisterServer(void)
 {
     HRESULT hr;
-    unsigned int i;
 
-    for (i = 0; i < ARRAY_SIZE(mfts); i++)
+    for (unsigned int i = 0; i < ARRAY_SIZE(mfts); i++)
     {
         const struct mft *cur = &mfts[i];
-        unsigned int j, k;
 
         MFT_REGISTER_TYPE_INFO *input_types, *output_types;
         input_types = heap_alloc(cur->input_types_count * sizeof(input_types[0]));
         output_types = heap_alloc(cur->output_types_count * sizeof(output_types[0]));
-        for (j = 0; j < cur->input_types_count; j++)
+        for (unsigned int i = 0; i < cur->input_types_count; i++)
         {
-            input_types[j].guidMajorType = *(cur->major_type);
-            input_types[j].guidSubtype = *(cur->input_types[i]);
+            input_types[i].guidMajorType = *(cur->major_type);
+            input_types[i].guidSubtype = *(cur->input_types[i]);
         }
-        for (k = 0; k < cur->output_types_count; k++)
+        for (unsigned int i = 0; i < cur->output_types_count; i++)
         {
-            output_types[k].guidMajorType = *(cur->major_type);
-            output_types[k].guidSubtype = *(cur->output_types[i]);
+            output_types[i].guidMajorType = *(cur->major_type);
+            output_types[i].guidSubtype = *(cur->output_types[i]);
         }
 
         hr = MFTRegister(*(cur->clsid), *(cur->category), cur->name, cur->flags, cur->input_types_count,
@@ -822,7 +843,6 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
         else if (!(strcmp(mime_type, "video/x-h264")))
         {
             const char *profile, *level;
-            unsigned int i;
 
             IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_H264);
             IMFMediaType_SetUINT32(media_type, &MF_MT_COMPRESSED, TRUE);
@@ -880,7 +900,7 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
             }
             gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
             gst_caps_set_simple(caps, "alignment", G_TYPE_STRING, "au", NULL);
-            for (i = 0; i < gst_caps_get_size(caps); i++)
+            for (unsigned int i = 0; i < gst_caps_get_size(caps); i++)
             {
                 GstStructure *structure = gst_caps_get_structure (caps, i);
                 gst_structure_remove_field(structure, "codec_data");
@@ -913,8 +933,6 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
             {
                 if (!(strcmp(format, "WVC1")))
                     IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_WVC1);
-                else if (!(strcmp(format, "WMV3")))
-                    IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_WMV3);
                 else
                     FIXME("Unrecognized format %s\n", format);
             }
@@ -938,11 +956,16 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
             }
         }
         else
+        {
             FIXME("Unrecognized video format %s\n", mime_type);
+            IMFMediaType_Release(media_type);
+            return NULL;
+        }
     }
     else if (!(strncmp(mime_type, "audio", 5)))
     {
         gint rate, channels, bitrate;
+        guint64 channel_mask;
         IMFMediaType_SetGUID(media_type, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
 
         if (gst_structure_get_int(info, "rate", &rate))
@@ -950,6 +973,9 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
 
         if (gst_structure_get_int(info, "channels", &channels))
             IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_NUM_CHANNELS, channels);
+
+        if (gst_structure_get(info, "channel-mask", GST_TYPE_BITMASK, &channel_mask, NULL))
+            IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_CHANNEL_MASK, (DWORD)channel_mask);
 
         if (gst_structure_get_int(info, "bitrate", &bitrate))
             IMFMediaType_SetUINT32(media_type, &MF_MT_AVG_BITRATE, bitrate);
@@ -1126,7 +1152,11 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
             codec_data_to_user_data(info, media_type);
         }
         else
+        {
             FIXME("Unrecognized audio format %s\n", mime_type);
+            IMFMediaType_Release(media_type);
+            return NULL;
+        }
     }
     else
     {
@@ -1306,6 +1336,33 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
                     gst_caps_set_simple(output, "level", G_TYPE_STRING, level, NULL);
             }
         }
+        else if (IsEqualGUID(&subtype, &MFVideoFormat_WMV1))
+        {
+            output = gst_caps_new_empty_simple("video/x-wmv");
+            gst_caps_set_simple(output, "format", G_TYPE_STRING, "WMV1", NULL);
+
+            gst_caps_set_simple(output, "wmvversion", G_TYPE_INT, 1, NULL);
+
+            user_data_to_codec_data(type, output);
+        }
+        else if (IsEqualGUID(&subtype, &MFVideoFormat_WMV2))
+        {
+            output = gst_caps_new_empty_simple("video/x-wmv");
+            gst_caps_set_simple(output, "format", G_TYPE_STRING, "WMV2", NULL);
+
+            gst_caps_set_simple(output, "wmvversion", G_TYPE_INT, 2, NULL);
+
+            user_data_to_codec_data(type, output);
+        }
+        else if (IsEqualGUID(&subtype, &MFVideoFormat_WMV3))
+        {
+            output = gst_caps_new_empty_simple("video/x-wmv");
+            gst_caps_set_simple(output, "format", G_TYPE_STRING, "WMV3", NULL);
+
+            gst_caps_set_simple(output, "wmvversion", G_TYPE_INT, 3, NULL);
+
+            user_data_to_codec_data(type, output);
+        }
         else if (IsEqualGUID(&subtype, &MFVideoFormat_WVC1))
         {
             output = gst_caps_new_empty_simple("video/x-wmv");
@@ -1319,15 +1376,7 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
         {
             output = gst_caps_new_empty_simple("video/mpeg");
             gst_caps_set_simple(output, "mpegversion", G_TYPE_INT, 4, NULL);
-
-            user_data_to_codec_data(type, output);
-        }
-        else if (IsEqualGUID(&subtype, &MFVideoFormat_WMV3))
-        {
-            output = gst_caps_new_empty_simple("video/x-wmv");
-            gst_caps_set_simple(output, "format", G_TYPE_STRING, "WMV3", NULL);
-
-            gst_caps_set_simple(output, "wmvversion", G_TYPE_INT, 3, NULL);
+            gst_caps_set_simple(output, "systemstream", G_TYPE_BOOLEAN, FALSE, NULL);
 
             user_data_to_codec_data(type, output);
         }
@@ -1348,7 +1397,7 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
     }
     else if (IsEqualGUID(&major_type, &MFMediaType_Audio))
     {
-        DWORD rate, channels, bitrate;
+        DWORD rate, channels, channel_mask, bitrate;
 
         if (IsEqualGUID(&subtype, &MFAudioFormat_Float))
         {
@@ -1475,6 +1524,10 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
         {
             gst_caps_set_simple(output, "channels", G_TYPE_INT, channels, NULL);
         }
+        if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_CHANNEL_MASK, &channel_mask)))
+        {
+            gst_caps_set_simple(output, "channel-mask", GST_TYPE_BITMASK, channel_mask, NULL);
+        }
 
         if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AVG_BITRATE, &bitrate)))
         {
@@ -1503,7 +1556,6 @@ IMFSample* mf_sample_from_gst_buffer(GstBuffer *gst_buffer)
     LONGLONG duration, time;
     int buffer_count;
     HRESULT hr;
-    unsigned int i;
 
     if (FAILED(hr = MFCreateSample(&out)))
         goto fail;
@@ -1519,7 +1571,7 @@ IMFSample* mf_sample_from_gst_buffer(GstBuffer *gst_buffer)
 
     buffer_count = gst_buffer_n_memory(gst_buffer);
 
-    for (i = 0; i < buffer_count; i++)
+    for (unsigned int i = 0; i < buffer_count; i++)
     {
         GstMemory *memory = gst_buffer_get_memory(gst_buffer, i);
         IMFMediaBuffer *mf_buffer = NULL;
@@ -1586,7 +1638,6 @@ GstBuffer* gst_buffer_from_mf_sample(IMFSample *mf_sample)
     LONGLONG duration, time;
     DWORD buffer_count;
     HRESULT hr;
-    unsigned int i;
 
     if (FAILED(hr = IMFSample_GetSampleDuration(mf_sample, &duration)))
         goto fail;
@@ -1600,7 +1651,7 @@ GstBuffer* gst_buffer_from_mf_sample(IMFSample *mf_sample)
     if (FAILED(hr = IMFSample_GetBufferCount(mf_sample, &buffer_count)))
         goto fail;
 
-    for (i = 0; i < buffer_count; i++)
+    for (unsigned int i = 0; i < buffer_count; i++)
     {
         DWORD buffer_max_size, buffer_size;
         GstMapInfo map_info;

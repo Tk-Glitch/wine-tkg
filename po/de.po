@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2020-08-14 13:26+0200\n"
+"PO-Revision-Date: 2020-08-28 14:28+0200\n"
 "Last-Translator: Julian Rüger <jr98@gmx.net>\n"
 "Language-Team: German\n"
 "Language: de\n"
@@ -6808,6 +6808,10 @@ msgstr "Diese Netzwerkverbindung existiert nicht.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Verbindung von Gegenstelle zurückgesetzt.\n"
 
+#: winerror.mc:3767
+msgid "Not implemented.\n"
+msgstr "Nicht implementiert.\n"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr "Keine Signatur in Datei gefunden.\n"
@@ -8408,9 +8412,9 @@ msgstr "3. Folgenden &Initialkatalog verwenden:"
 msgid "&Test Connection"
 msgstr "Verbindung &testen"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
-msgstr "Fortgeschrittene"
+msgstr "Erweitert"
 
 #: version.rc:95
 msgid "Network settings"
@@ -16633,7 +16637,7 @@ msgid "&Beginner"
 msgstr "&Anfänger"
 
 #: winemine.rc:45
-msgid "&Advanced"
+msgid "&Intermediate"
 msgstr "&Fortgeschrittene"
 
 #: winemine.rc:46
@@ -16663,6 +16667,10 @@ msgstr "Beste Zeiten"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Anfänger"
+
+#: winemine.rc:65
+msgid "Intermediate"
+msgstr "Fortgeschrittene"
 
 #: winemine.rc:66
 msgid "Expert"

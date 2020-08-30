@@ -23,7 +23,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 /* keep in sync with mfplat.c's mft registrations */
 
 const GUID *h264_input_types[] = {&MFVideoFormat_H264};
-const GUID *h264_output_types[] = {&MFVideoFormat_NV12, &MFVideoFormat_I420, &MFVideoFormat_IYUV, &MFVideoFormat_YUY2, &MFVideoFormat_YV12};
+const GUID *h264_output_types[] = {&MFVideoFormat_I420, &MFVideoFormat_IYUV, &MFVideoFormat_NV12, &MFVideoFormat_YUY2, &MFVideoFormat_YV12};
 
 const GUID *aac_input_types[] = {&MFAudioFormat_AAC};
 const GUID *aac_output_types[] = {&MFAudioFormat_Float, &MFAudioFormat_PCM};
@@ -326,8 +326,10 @@ static HRESULT WINAPI mf_decoder_GetOutputAvailableType(IMFTransform *iface, DWO
 
     copy_attr(output_type, decoder->input_type, &MF_MT_FRAME_SIZE);
     copy_attr(output_type, decoder->input_type, &MF_MT_FRAME_RATE);
-    copy_attr(output_type, decoder->input_type, &MF_MT_AUDIO_NUM_CHANNELS);
     copy_attr(output_type, decoder->input_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND);
+
+    /* TODO: support both stereo folding and matching channels */
+    IMFMediaType_SetUINT32(output_type, &MF_MT_AUDIO_NUM_CHANNELS, 2);
 
     if (FAILED(hr = IMFMediaType_SetGUID(output_type, &MF_MT_MAJOR_TYPE, decoder_descs[decoder->type].major_type)))
     {
@@ -684,7 +686,6 @@ static HRESULT WINAPI mf_decoder_SetInputType(IMFTransform *iface, DWORD id, IMF
     {
         GUID major_type, subtype;
         UINT64 unused;
-        unsigned int i;
 
         if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major_type)))
             return hr;
@@ -700,7 +701,7 @@ static HRESULT WINAPI mf_decoder_SetInputType(IMFTransform *iface, DWORD id, IMF
                 return hr;
         }
 
-        for (i = 0; i < decoder_descs[decoder->type].input_types_count; i++)
+        for (unsigned int i = 0; i < decoder_descs[decoder->type].input_types_count; i++)
         {
             if (IsEqualGUID(&subtype, decoder_descs[decoder->type].input_types[i]))
                 break;
@@ -753,7 +754,6 @@ static HRESULT WINAPI mf_decoder_SetOutputType(IMFTransform *iface, DWORD id, IM
     {
         GUID major_type, subtype;
         UINT64 unused;
-        unsigned int i;
 
         /* validate the type */
         if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major_type)))
@@ -770,7 +770,7 @@ static HRESULT WINAPI mf_decoder_SetOutputType(IMFTransform *iface, DWORD id, IM
                 return MF_E_INVALIDTYPE;
         }
 
-        for (i = 0; i < decoder_descs[decoder->type].output_types_count; i++)
+        for (unsigned int i = 0; i < decoder_descs[decoder->type].output_types_count; i++)
         {
             if (IsEqualGUID(&subtype, decoder_descs[decoder->type].output_types[i]))
                 break;
@@ -1017,7 +1017,7 @@ static HRESULT WINAPI mf_decoder_ProcessMessage(IMFTransform *iface, MFT_MESSAGE
         }
         default:
         {
-            ERR("Unhandled message type %x.\n", message);
+            WARN("Unhandled message type %x.\n", message);
             hr = E_FAIL;
             break;
         }
@@ -1050,7 +1050,6 @@ static HRESULT WINAPI mf_decoder_ProcessInput(IMFTransform *iface, DWORD id, IMF
 
     drain = gst_query_new_drain();
     gst_pad_peer_query(decoder->input_src, drain);
-    gst_query_unref(drain);
 
     if (decoder->output_counter || decoder->draining)
     {
@@ -1083,7 +1082,6 @@ static HRESULT WINAPI mf_decoder_ProcessOutput(IMFTransform *iface, DWORD flags,
     struct mf_decoder *decoder = impl_mf_decoder_from_IMFTransform(iface);
     MFT_OUTPUT_DATA_BUFFER *relevant_buffer = NULL;
     GstSample *buffer;
-    unsigned int i;
 
     TRACE("%p, %#x, %u, %p, %p,\n", iface, flags, count, samples, status);
 
@@ -1093,7 +1091,7 @@ static HRESULT WINAPI mf_decoder_ProcessOutput(IMFTransform *iface, DWORD flags,
     if (!decoder->valid_state)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
-    for (i = 0; i < count; i++)
+    for (unsigned int i = 0; i < count; i++)
     {
         MFT_OUTPUT_DATA_BUFFER *out_buffer = &samples[i];
 

@@ -184,8 +184,8 @@ struct makefile
     struct strarray install_lib;
     struct strarray install_dev;
     struct strarray extra_targets;
-    struct strarray parent_dirs;
     struct strarray extra_imports;
+    struct strarray parent_dirs;
     struct list     sources;
     struct list     includes;
     const char     *base_dir;

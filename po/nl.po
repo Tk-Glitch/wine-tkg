@@ -6876,6 +6876,12 @@ msgstr "De plek bestaat niet.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Verbinding geweigerd.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "Niet geïmplementeerd"
+
 #: winerror.mc:3760
 #, fuzzy
 #| msgid "Message 0x%1 not found in file %2.\n"
@@ -8800,7 +8806,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Opnieuw verbinden"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Gevorderde"
 
@@ -17240,8 +17246,10 @@ msgid "&Beginner"
 msgstr "&Beginner"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Gevorderde"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "Interface"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -17270,6 +17278,12 @@ msgstr "Snelste tijden"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Beginner"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "Interface"
 
 #: winemine.rc:66
 msgid "Expert"

@@ -7204,6 +7204,12 @@ msgstr "Datoteka ne postoji.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Povezivanje na %s.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "Nije jos u programu"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr ""
@@ -8973,7 +8979,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "LAN veza"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 #, fuzzy
 msgid "Advanced"
 msgstr "Pokaži &Napredno"
@@ -17090,8 +17096,9 @@ msgid "&Beginner"
 msgstr ""
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr ""
+#, fuzzy
+msgid "&Intermediate"
+msgstr "Datoteka nije pronađena"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -17123,6 +17130,11 @@ msgstr "Datum brisanja"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr ""
+
+#: winemine.rc:65
+#, fuzzy
+msgid "Intermediate"
+msgstr "Datoteka nije pronađena"
 
 #: winemine.rc:66
 msgid "Expert"

@@ -6790,6 +6790,10 @@ msgstr "Tätä verkkoyhteyttä ei ole.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Vastapuoli nollasi yhteyden.\n"
 
+#: winerror.mc:3767
+msgid "Not implemented.\n"
+msgstr "Ei toteutettu.\n"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr "Tiedostosta ei löytynyt allekirjoitusta.\n"
@@ -8388,7 +8392,7 @@ msgstr "3. Syötä ensiksi käytettävä &katalogi:"
 msgid "&Test Connection"
 msgstr "Testaa y&hteyttä"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Kehittynyt"
 
@@ -12483,6 +12487,9 @@ msgid ""
 "\n"
 "hardlink      hardlink management\n"
 msgstr ""
+"- Tuetut komennot -\n"
+"\n"
+"hardlink      kovan linkin hallinta\n"
 
 #: fsutil.mc:35
 msgid ""
@@ -12490,10 +12497,13 @@ msgid ""
 "\n"
 "create        create a hardlink\n"
 msgstr ""
+"- Hardlink - Tuetut komennot -\n"
+"\n"
+"create        luo kova linkki\n"
 
 #: fsutil.mc:40
 msgid "Syntax: fsutil hardlink create <new> <existing>\n"
-msgstr ""
+msgstr "Syntaksi: fsutil hardlink create <uusi> <entinen>\n"
 
 #: hostname.rc:30
 msgid "Usage: hostname\n"
@@ -16484,8 +16494,8 @@ msgid "&Beginner"
 msgstr "&Aloittelija"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Kehittynyt"
+msgid "&Intermediate"
+msgstr "&Keskitaso"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16514,6 +16524,10 @@ msgstr "Nopeimmat ajat"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Aloittelija"
+
+#: winemine.rc:65
+msgid "Intermediate"
+msgstr "Keskitaso"
 
 #: winemine.rc:66
 msgid "Expert"

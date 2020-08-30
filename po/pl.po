@@ -6847,6 +6847,12 @@ msgstr "Połączenie sieciowe nie istnieje.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Połączenie wyzerowane przez uczestnika.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "Nie zaimplementowane"
+
 #: winerror.mc:3760
 #, fuzzy
 #| msgid "Message 0x%1 not found in file %2.\n"
@@ -8629,7 +8635,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Wyzerowane połączenia"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Zaawansowany"
 
@@ -16886,8 +16892,10 @@ msgid "&Beginner"
 msgstr "&Początkujący"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Zaawansowany"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "Interfejs"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16916,6 +16924,12 @@ msgstr "Najlepsze wyniki"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Początkujący"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "Interfejs"
 
 #: winemine.rc:66
 msgid "Expert"

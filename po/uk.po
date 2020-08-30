@@ -6818,6 +6818,12 @@ msgstr "Цього мережевого з'єднання не існує.\n"
 msgid "Connection reset by peer.\n"
 msgstr "У з'єднанні відмовлено.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "Не реалізовано"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr "Відсутній підпис файла.\n"
@@ -8515,7 +8521,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Скинутих Підключень"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Майстер"
 
@@ -16662,8 +16668,10 @@ msgid "&Beginner"
 msgstr "Н&овачок"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Майстер"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "Інтерфейс"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16692,6 +16700,12 @@ msgstr "Найкращі результати"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Новачок"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "Інтерфейс"
 
 #: winemine.rc:66
 msgid "Expert"

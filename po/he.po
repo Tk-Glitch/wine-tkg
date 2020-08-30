@@ -7089,6 +7089,12 @@ msgstr "הקובץ אינו קיים.\n"
 msgid "Connection reset by peer.\n"
 msgstr "בהליכי התחברות אל %s.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "לא מוטמע"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr ""
@@ -8821,7 +8827,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Reset Connections"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "מתקדמים"
 
@@ -16889,8 +16895,10 @@ msgid "&Beginner"
 msgstr "מ&תחילים"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "מת&קדמים"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "מנשק"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16920,6 +16928,12 @@ msgstr "שיאים"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "מתחילים"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "מנשק"
 
 #: winemine.rc:66
 msgid "Expert"

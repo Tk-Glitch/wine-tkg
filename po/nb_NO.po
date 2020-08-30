@@ -6809,6 +6809,12 @@ msgstr "Denne nettverksforbindelsen finnes ikke.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Tilkobling nullstilt av likemann.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "Ikke implementert"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr "Fant ingen signatur i filen.\n"
@@ -8517,7 +8523,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Tilbakestill tilkoblinger"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Avansert"
 
@@ -16700,8 +16706,10 @@ msgid "&Beginner"
 msgstr "Ny&begynner"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Avansert"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "Grensesnitt"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16730,6 +16738,12 @@ msgstr "Beste tider"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Nybegynner"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "Grensesnitt"
 
 #: winemine.rc:66
 msgid "Expert"

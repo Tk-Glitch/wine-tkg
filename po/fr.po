@@ -6860,6 +6860,12 @@ msgstr "Cette connexion réseau n'existe pas.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Connexion fermée par le pair.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "Non implémenté"
+
 #: winerror.mc:3760
 #, fuzzy
 #| msgid "Message 0x%1 not found in file %2.\n"
@@ -8724,7 +8730,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Connexions réinitialisées"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Avancé"
 
@@ -17241,8 +17247,10 @@ msgid "&Beginner"
 msgstr "&Débutant"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Avancé"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "Interface"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -17271,6 +17279,12 @@ msgstr "Meilleurs temps"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Débutant"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "Interface"
 
 #: winemine.rc:66
 msgid "Expert"

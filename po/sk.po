@@ -6835,6 +6835,12 @@ msgstr "Súbor neexistuje.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Pripojenie je aktícne.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "Neimplementované"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr ""
@@ -8605,7 +8611,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Aktivácia"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Pokročilý"
 
@@ -16491,8 +16497,10 @@ msgid "&Beginner"
 msgstr "&Začiatočník"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Pokročilý"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "Rozhranie"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16521,6 +16529,12 @@ msgstr "Najrýchlejšie časy"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Začiatočník"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "Rozhranie"
 
 #: winemine.rc:66
 msgid "Expert"

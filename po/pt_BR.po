@@ -6821,6 +6821,12 @@ msgstr "Esta conexão de rede não existe.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Conexão redefinida pelo cliente.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "Não implementado"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr "Nenhuma Assinatura encontrada no arquivo.\n"
@@ -8448,7 +8454,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Reiniciar Conexões"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Avançado"
 
@@ -16679,8 +16685,10 @@ msgid "&Beginner"
 msgstr "&Principiante"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Avançado"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "Interface"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16709,6 +16717,12 @@ msgstr "Melhores tempos"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Principiante"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "Interface"
 
 #: winemine.rc:66
 msgid "Expert"

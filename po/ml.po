@@ -6711,6 +6711,10 @@ msgstr ""
 msgid "Connection reset by peer.\n"
 msgstr ""
 
+#: winerror.mc:3767
+msgid "Not implemented.\n"
+msgstr ""
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr ""
@@ -8295,7 +8299,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr ""
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr ""
 
@@ -15850,7 +15854,7 @@ msgid "&Beginner"
 msgstr ""
 
 #: winemine.rc:45
-msgid "&Advanced"
+msgid "&Intermediate"
 msgstr ""
 
 #: winemine.rc:46
@@ -15880,6 +15884,10 @@ msgstr ""
 
 #: winemine.rc:64
 msgid "Beginner"
+msgstr ""
+
+#: winemine.rc:65
+msgid "Intermediate"
 msgstr ""
 
 #: winemine.rc:66

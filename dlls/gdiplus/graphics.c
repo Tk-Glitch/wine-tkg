@@ -4877,18 +4877,25 @@ GpStatus WINGDIPAPI GdipGetClipBounds(GpGraphics *graphics, GpRectF *rect)
  */
 GpStatus WINGDIPAPI GdipGetClipBoundsI(GpGraphics *graphics, GpRect *rect)
 {
+    GpRectF rectf;
+    GpStatus stat;
+
     TRACE("(%p, %p)\n", graphics, rect);
 
-    if(!graphics)
+    if (!rect)
         return InvalidParameter;
 
-    if(graphics->busy)
-        return ObjectBusy;
+    if ((stat = GdipGetClipBounds(graphics, &rectf)) == Ok)
+    {
+        rect->X = gdip_round(rectf.X);
+        rect->Y = gdip_round(rectf.Y);
+        rect->Width  = gdip_round(rectf.Width);
+        rect->Height = gdip_round(rectf.Height);
+    }
 
-    return GdipGetRegionBoundsI(graphics->clip, graphics, rect);
+    return stat;
 }
 
-/* FIXME: Compositing mode is not used anywhere except the getter/setter. */
 GpStatus WINGDIPAPI GdipGetCompositingMode(GpGraphics *graphics,
     CompositingMode *mode)
 {
@@ -5300,7 +5307,14 @@ GpStatus gdip_format_string(HDC hdc,
     }
 
     if (hotkeyprefix_count)
+    {
         hotkeyprefix_offsets = heap_alloc_zero(sizeof(INT) * hotkeyprefix_count);
+        if (!hotkeyprefix_offsets)
+        {
+            heap_free(stringdup);
+            return OutOfMemory;
+        }
+    }
 
     hotkeyprefix_count = 0;
 
@@ -6663,6 +6677,7 @@ GpStatus WINGDIPAPI GdipDrawPolygonI(GpGraphics *graphics,GpPen *pen,GDIPCONST G
 
     if(count<=0)    return InvalidParameter;
     ptf = heap_alloc_zero(sizeof(GpPointF) * count);
+    if (!ptf) return OutOfMemory;
 
     for(i = 0;i < count; i++){
         ptf[i].X = (REAL)points[i].X;

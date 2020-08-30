@@ -3694,7 +3694,7 @@ static void test_Expand(void)
   ITextRange_Release(range);
 }
 
-static void test_MoveEnd(void)
+static void test_MoveEnd_story(void)
 {
   static const char test_text1[] = "Word1 Word2";
   IRichEditOle *reole = NULL;
@@ -3804,6 +3804,210 @@ static void test_MoveEnd(void)
   hr = ITextSelection_MoveEnd(selection, tomStory, 1, &delta);
   ok(hr == CO_E_RELEASED, "got 0x%08x\n", hr);
 
+  ITextSelection_Release(selection);
+  ITextRange_Release(range);
+}
+
+static void test_character_movestart(ITextRange *range, int textlen, int i, int j, LONG target)
+{
+    HRESULT hr;
+    LONG delta = 0;
+    LONG expected_delta;
+    LONG expected_start = target;
+
+    if (expected_start < 0)
+        expected_start = 0;
+    else if (expected_start > textlen)
+        expected_start = textlen;
+    expected_delta = expected_start - i;
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_MoveStart(range, tomCharacter, target - i, &delta);
+    if (expected_start == i) {
+        ok(hr == S_FALSE, "(%d,%d) move by %d got hr=0x%08x\n", i, j, target - i, hr);
+        ok(delta == 0, "(%d,%d) move by %d got delta %d\n", i, j, target - i, delta);
+        CHECK_RANGE(range, i, j);
+    } else {
+        ok(hr == S_OK, "(%d,%d) move by %d got hr=0x%08x\n", i, j, target - i, hr);
+        ok(delta == expected_delta, "(%d,%d) move by %d got delta %d\n", i, j, target - i, delta);
+        if (expected_start <= j)
+            CHECK_RANGE(range, expected_start, j);
+        else
+            CHECK_RANGE(range, expected_start, expected_start);
+    }
+}
+
+static void test_character_moveend(ITextRange *range, int textlen, int i, int j, LONG target)
+{
+    HRESULT hr;
+    LONG delta;
+    LONG expected_delta;
+    LONG expected_end = target;
+
+    if (expected_end < 0)
+        expected_end = 0;
+    else if (expected_end > textlen + 1)
+        expected_end = textlen + 1;
+    expected_delta = expected_end - j;
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_MoveEnd(range, tomCharacter, target - j, &delta);
+    if (expected_end == j) {
+        ok(hr == S_FALSE, "(%d,%d) move by %d got hr=0x%08x\n", i, j, target - j, hr);
+        ok(delta == 0, "(%d,%d) move by %d got delta %d\n", i, j, target - j, delta);
+        CHECK_RANGE(range, i, j);
+    } else {
+        ok(hr == S_OK, "(%d,%d) move by %d got hr=0x%08x\n", i, j, target - j, hr);
+        ok(delta == expected_delta, "(%d,%d) move by %d got delta %d\n", i, j, target - j, delta);
+        if (i <= expected_end)
+            CHECK_RANGE(range, i, expected_end);
+        else
+            CHECK_RANGE(range, expected_end, expected_end);
+    }
+}
+
+static void test_character_move(ITextRange *range, int textlen, int i, int j, LONG target)
+{
+    HRESULT hr;
+    LONG move_by;
+    LONG delta = 0;
+    LONG expected_delta;
+    LONG expected_location = target;
+
+    if (expected_location < 0)
+        expected_location = 0;
+    else if (expected_location > textlen)
+        expected_location = textlen;
+
+    if (target <= i) {
+        move_by = target - i;
+        expected_delta = expected_location - i;
+        if (i != j) {
+            --move_by;
+            --expected_delta;
+        }
+    } else if (j <= target) {
+        move_by = target - j;
+        expected_delta = expected_location - j;
+        if (i != j) {
+            ++move_by;
+            ++expected_delta;
+        }
+    } else {
+        /* There's no way to move to a point between start and end: */
+        return;
+    }
+
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_Move(range, tomCharacter, move_by, &delta);
+    if (expected_delta == 0) {
+        ok(hr == S_FALSE, "(%d,%d) move by %d got hr=0x%08x\n", i, j, move_by, hr);
+        ok(delta == 0, "(%d,%d) move by %d got delta %d\n", i, j, move_by, delta);
+        CHECK_RANGE(range, expected_location, expected_location);
+    } else {
+        ok(hr == S_OK, "(%d,%d) move by %d got hr=0x%08x\n", i, j, move_by, hr);
+        ok(delta == expected_delta, "(%d,%d) move by %d got delta %d\n", i, j, move_by, delta);
+        CHECK_RANGE(range, expected_location, expected_location);
+    }
+}
+
+static void test_character_startof(ITextRange *range, int textlen, int i, int j)
+{
+    HRESULT hr;
+    LONG delta;
+
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_StartOf(range, tomCharacter, tomMove, &delta);
+    if (i == j) {
+        ok(hr == S_FALSE, "(%d,%d) tomMove got hr=0x%08x\n", i, j, hr);
+        ok(delta == 0, "(%d,%d) tomMove got delta %d\n", i, j, delta);
+    } else {
+        ok(hr == S_OK, "(%d,%d) tomMove got hr=0x%08x\n", i, j, hr);
+        ok(delta == -1, "(%d,%d) tomMove got delta %d\n", i, j, delta);
+    }
+    CHECK_RANGE(range, i, i);
+
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_StartOf(range, tomCharacter, tomExtend, &delta);
+    ok(hr == S_FALSE, "(%d,%d) tomExtend got hr=0x%08x\n", i, j, hr);
+    ok(delta == 0, "(%d,%d) tomExtend got delta %d\n", i, j, delta);
+    CHECK_RANGE(range, i, j);
+}
+
+static void test_character_endof(ITextRange *range, int textlen, int i, int j)
+{
+    HRESULT hr;
+    LONG end;
+    LONG delta;
+
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_EndOf(range, tomCharacter, tomMove, &delta);
+
+    /* A character "end", apparently cannot be before the very first character */
+    end = j;
+    if (j == 0)
+        ++end;
+
+    if (i == end) {
+        ok(hr == S_FALSE, "(%d,%d) tomMove got hr=0x%08x\n", i, j, hr);
+        ok(delta == 0, "(%d,%d) tomMove got delta %d\n", i, j, delta);
+    } else {
+        ok(hr == S_OK, "(%d,%d) tomMove got hr=0x%08x\n", i, j, hr);
+        ok(delta == 1, "(%d,%d) tomMove got delta %d\n", i, j, delta);
+    }
+    CHECK_RANGE(range, end, end);
+
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_EndOf(range, tomCharacter, tomExtend, &delta);
+    if (0 < j) {
+        ok(hr == S_FALSE, "(%d,%d) tomExtend got hr=0x%08x\n", i, j, hr);
+        ok(delta == 0, "(%d,%d) tomExtend got delta %d\n", i, j, delta);
+    } else {
+        ok(hr == S_OK, "(%d,%d) tomExtend got hr=0x%08x\n", i, j, hr);
+        ok(delta == 1, "(%d,%d) tomExtend got delta %d\n", i, j, delta);
+    }
+    CHECK_RANGE(range, i, end);
+}
+
+static void test_character_movement(void)
+{
+  static const char test_text1[] = "ab\n c";
+  IRichEditOle *reole = NULL;
+  ITextDocument *doc = NULL;
+  ITextRange *range;
+  ITextSelection *selection;
+  HRESULT hr;
+  HWND hwnd;
+  int i, j;
+  const int textlen = strlen(test_text1);
+
+  create_interfaces(&hwnd, &reole, &doc, &selection);
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)test_text1);
+
+  hr = ITextDocument_Range(doc, 0, 0, &range);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+
+  /* Exhaustive test of every possible combination of (start,end) locations,
+   * against every possible target location to move to. */
+  for (i = 0; i <= textlen; i++) {
+      for (j = i; j <= textlen; j++) {
+          LONG target;
+          for (target = -2; target <= textlen + 3; target++) {
+              test_character_moveend(range, textlen, i, j, target);
+              test_character_movestart(range, textlen, i, j, target);
+              test_character_move(range, textlen, i, j, target);
+          }
+          test_character_startof(range, textlen, i, j);
+          test_character_endof(range, textlen, i, j);
+      }
+  }
+
+  release_interfaces(&hwnd, &reole, &doc, NULL);
   ITextSelection_Release(selection);
   ITextRange_Release(range);
 }
@@ -4116,5 +4320,6 @@ START_TEST(richole)
   test_GetStoryLength();
   test_ITextSelection_GetDuplicate();
   test_Expand();
-  test_MoveEnd();
+  test_MoveEnd_story();
+  test_character_movement();
 }

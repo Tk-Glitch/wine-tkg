@@ -2240,6 +2240,12 @@ static void test_IsWow64Process2(void)
     ok(machine == IMAGE_FILE_MACHINE_UNKNOWN, "got %#x\n", machine);
     ok(native_machine == expect_native, "got %#x\n", native_machine);
 
+    SetLastError(0xdeadbeef);
+    machine = 0xdead;
+    ret = pIsWow64Process2(pi.hProcess, &machine, NULL);
+    ok(ret, "IsWow64Process2 error %u\n", GetLastError());
+    ok(machine == IMAGE_FILE_MACHINE_UNKNOWN, "got %#x\n", machine);
+
     ret = TerminateProcess(pi.hProcess, 0);
     ok(ret, "TerminateProcess error\n");
 
@@ -2265,6 +2271,15 @@ static void test_IsWow64Process2(void)
         ok(machine == IMAGE_FILE_MACHINE_UNKNOWN, "got %#x\n", machine);
         ok(native_machine == expect_native, "got %#x\n", native_machine);
     }
+
+    SetLastError(0xdeadbeef);
+    machine = 0xdead;
+    ret = pIsWow64Process2(GetCurrentProcess(), &machine, NULL);
+    ok(ret, "IsWow64Process2 error %u\n", GetLastError());
+    if (is_wow64)
+        ok(machine == IMAGE_FILE_MACHINE_I386, "got %#x\n", machine);
+    else
+        ok(machine == IMAGE_FILE_MACHINE_UNKNOWN, "got %#x\n", machine);
 }
 
 static void test_SystemInfo(void)

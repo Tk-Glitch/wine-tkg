@@ -1,5 +1,6 @@
 /*
- * Copyright 2019 Nikolay Sivov for CodeWeavers
+ *
+ * Copyright (C) 2020 Alistair Leslie-Hughes
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -15,7 +16,26 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#include <stdarg.h>
 
-#pragma makedep client
+#include "windef.h"
+#include "winbase.h"
+#include "wine/debug.h"
 
-#include "wine/irpcss.idl"
+WINE_DEFAULT_DEBUG_CHANNEL(srvcli);
+
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
+{
+    TRACE("(%p, %u, %p)\n", instance, reason, reserved);
+
+    switch (reason)
+    {
+        case DLL_WINE_PREATTACH:
+            return FALSE;    /* prefer native version */
+        case DLL_PROCESS_ATTACH:
+            DisableThreadLibraryCalls(instance);
+            break;
+    }
+
+    return TRUE;
+}

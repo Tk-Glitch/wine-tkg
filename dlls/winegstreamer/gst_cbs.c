@@ -416,16 +416,17 @@ void source_all_streams_wrapper(GstElement *element, gpointer user)
     call_cb(&cbdata);
 }
 
-GstFlowReturn stream_new_sample_wrapper(GstElement *appsink, gpointer user)
+GstPadProbeReturn caps_listener_wrapper(GstPad *pad, GstPadProbeInfo *info, gpointer user)
 {
-    struct cb_data cbdata = { STREAM_NEW_SAMPLE };
+    struct cb_data cbdata = { STREAM_PAD_EVENT };
 
-    cbdata.u.new_sample_data.appsink = appsink;
-    cbdata.u.new_sample_data.user = user;
+    cbdata.u.pad_probe_data.pad = pad;
+    cbdata.u.pad_probe_data.info = info;
+    cbdata.u.pad_probe_data.user = user;
 
     call_cb(&cbdata);
 
-    return cbdata.u.new_sample_data.ret;
+    return cbdata.u.pad_probe_data.ret;
 }
 
 gboolean activate_push_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate)
@@ -466,17 +467,6 @@ GstBusSyncReply watch_decoder_bus_wrapper(GstBus *bus, GstMessage *message, gpoi
     call_cb(&cbdata);
 
     return cbdata.u.watch_bus_data.ret;
-}
-
-void decoder_pad_added_wrapper(GstElement *element, GstPad *pad, gpointer user)
-{
-    struct cb_data cbdata = { DECODER_PAD_ADDED };
-
-    cbdata.u.pad_added_data.element = element;
-    cbdata.u.pad_added_data.pad = pad;
-    cbdata.u.pad_added_data.user = user;
-
-    call_cb(&cbdata);
 }
 
 GstFlowReturn decoder_new_sample_wrapper(GstElement *appsink, gpointer user)

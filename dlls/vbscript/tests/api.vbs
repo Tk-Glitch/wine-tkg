@@ -223,6 +223,21 @@ arr(0) = 2
 arr(1) = 3
 Call ok(not isNumeric(arr), "isNumeric(arr) is not true?")
 
+Call ok(isArray(arr), "isArray(arr) is not true?")
+x = Array()
+Call ok(isArray(arr), "isArray(Array()) is not true?")
+Call ok(not isArray(Empty), "isArray(empty) is true?")
+Call ok(not isArray(Null), "isArray(Null) is true?")
+Call ok(not isArray(42), "isArray(42) is true?")
+Call ok(not isArray(CSng(3242.4)), "isArray(CSng(3242.4)) is true?")
+Call ok(not isArray(CCur(32768.4)), "isArray(CCur(32768.4)) is true?")
+Call ok(not isArray("44"), "isArray(""44"") is true?")
+Call ok(not isArray("rwrf"), "isArray(""rwrf"") is true?")
+Call ok(not isArray(Nothing), "isArray(Nothing) is true?")
+Call ok(not isArray(New EmptyClass), "isArray(New EmptyClass) is true?")
+Call ok(not isArray(true), "isArray(true) is true?")
+Call ok(not isArray(CByte(32)), "isArray(CByte(32)) is true?")
+
 Call ok(getVT(Array()) = "VT_ARRAY|VT_VARIANT", "getVT(Array()) = " & getVT(Array()))
 x = Array("a1", 2, "a3")
 Call ok(getVT(x) = "VT_ARRAY|VT_VARIANT*", "getVT(array) = " & getVT(x))
@@ -609,6 +624,71 @@ TestLCase 0.123, doubleAsString(0.123)
 TestLCase Empty, ""
 Call ok(getVT(LCase(Null)) = "VT_NULL", "getVT(LCase(Null)) = " & getVT(LCase(Null)))
 
+x=Split("abc")
+Call ok(x(0) = "abc", "Split(""abc"")(0)=" & x(0))
+x = Split("abc def")
+Call ok(x(0) = "abc", "Split(""abc def"")(0)=" & x(0))
+Call ok(x(1) = "def", "Split(""abc def"")(1)=" & x(1))
+x = Split("abc def ghi")
+Call ok(x(0) = "abc", "Split(""abc def ghi"")(0)=" & x(0))
+Call ok(x(1) = "def", "Split(""abc def ghi"")(1)=" & x(1))
+Call ok(x(2) = "ghi", "Split(""abc def ghi"")(2)=" & x(2))
+x = Split("abc def","")
+Call ok(x(0) = "abc def", "Split(""abc def"","""")(0)=" & x(0))
+x = Split("abc-def","-")
+Call ok(x(0) = "abc", "Split(""abc-def"",""-"")(0)=" & x(0))
+Call ok(x(1) = "def", "Split(""abc-def"",""-"")(1)=" & x(1))
+x = Split("abc--def","-")
+Call ok(x(0) = "abc", "Split(""abc--def"",""-"")(0)=" & x(0))
+Call ok(x(1) = "",    "Split(""abc--def"",""-"")(1)=" & x(1))
+Call ok(x(2) = "def", "Split(""abc--def"",""-"")(2)=" & x(2))
+x = Split("abcdefghi","def")
+Call ok(x(0) = "abc", "Split(""abcdefghi"",""def"")(0)=" & x(0))
+Call ok(x(1) = "ghi", "Split(""abcdefghi"",""def"")(1)=" & x(1))
+x = Split("12345",3)
+Call ok(x(0) = "12", "Split(""12345"",3)(0)=" & x(0))
+Call ok(x(1) = "45", "Split(""12345"",3)(1)=" & x(1))
+x = Split("12345",5)
+Call ok(x(0) = "1234", "Split(""12345"",5)(0)=" & x(0))
+Call ok(x(1) = "",     "Split(""12345"",5)(1)=" & x(1))
+x = Split("12345",12)
+Call ok(x(0) = "", "Split(""12345"",12)(0)=" & x(0))
+Call ok(x(1) = "345", "Split(""12345"",12)(1)=" & x(1))
+x = Split("abc-def-ghi","-")
+Call ok(UBound(x) = 2, "UBound(Split(""abc-def-ghi"",""-""))=" & UBound(x))
+x = Split("a b c d e f g h i j k l m n o p q")
+Call ok(UBound(x) = 16, "UBound(Split(""a b c d e f g h i j k l m n o p q""))=" & UBound(x))
+x = Split("abc-def-ghi","-",2)
+Call ok(UBound(x) = 1, "UBound(Split(""abc-def-ghi"",""-"",2))=" & UBound(x))
+x = Split("abc-def-ghi","-",4)
+Call ok(UBound(x) = 2, "UBound(Split(""abc-def-ghi"",""-"",4))="  & UBound(x))
+x = Split("abc-def-ghi","-",-1)
+Call ok(UBound(x) = 2, "UBound(Split(""abc-def-ghi"",""-"",-1))="  & UBound(x))
+x = Split("abc-def-ghi","-",-1)
+Call ok(UBound(x) = 2, "UBound(Split(""abc-def-ghi"",""-"",-42))="  & UBound(x))
+x = Split("abcZdefZghi","Z",3,0)
+Call ok(UBound(x) = 2, "UBound(Split(""abcZdefZghi"",""Z"",3,0))="  & UBound(x))
+x = Split("abcZdefZghi","z",3,0)
+Call ok(UBound(x) = 0, "UBound(Split(""abcZdefZghi"",""z"",3,0))=" & UBound(x))
+x = Split("abcZdefZghi","z",3,1)
+Call ok(UBound(x) = 2, "UBound(Split(""abcZdefZghi"",""z"",3,1))=" & UBound(x))
+
+Sub testSplitError(arg1, arg2, arg3, arg4, error_num)
+    on error resume next
+    Dim x
+
+    Call Err.clear()
+    x = Split(arg1, arg2, arg3, arg4)
+    Call ok(Err.number = error_num, "Err.number = " & Err.number)
+End Sub
+
+call testSplitError("abc-def-ghi", "-", -1, 2, 5)
+call testSplitError("abc-def-ghi", "-", -42, 0, 5)
+call testSplitError(null, "-", -1, 0, 94)
+call testSplitError("abc-def-ghi", null, -1, 0, 94)
+call testSplitError("abc-def-ghi", "-", null, 0, 94)
+call testSplitError("abc-def-ghi", "-", -1, null, 94)
+
 Sub TestStrComp(str_left, str_right, mode, ex)
     x = StrComp(str_left, str_right, mode)
     Call ok(x = ex, "StrComp(" & str_left & ", " & str_right & ", " & mode & ") = " & x & " expected " & ex)
@@ -764,6 +844,7 @@ TestRTrim "", ""
 TestRTrim 123, "123"
 if isEnglishLang then TestRTrim true, "True"
 
+
 sub test_replace(str, find, rep, exp)
     dim r
     r = Replace(str, find, rep)
@@ -785,8 +866,17 @@ sub test_replace_cnt(str, find, rep, from, cnt, exp)
        r & """ expected """ & exp & """"
 end sub
 
+sub test_replace_mode(str, find, rep, from, cnt, mode, exp)
+    dim r
+    r = Replace(str, find, rep, from, cnt, mode)
+    ok r = exp, "Replace(""" & str & """, """ & find & """, """ & rep & """, " & from & ", " & cnt & ", " & mode _
+       & ") = """ & r & """ expected """ & exp & """"
+end sub
+
 test_replace "xx testxx(xx)", "xx", "!", "! test!(!)"
+test_replace "", "x", "y", ""
 test_replace "xxx", "", "y", "xxx"
+test_replace "yxxy", "x", "", "yy"
 test_replace "xxxxx", "xx", "y", "yyx"
 test_replace 123, 2, 6, "163"
 test_replace "xyz" & Chr(0) & "xyz", "y", "Y", "xYz" & Chr(0) & "xYz"
@@ -803,6 +893,12 @@ test_replace_cnt "xx testxx(xx)", "xx", "!", 1, 1, "! testxx(xx)"
 test_replace_cnt "xx testxx(xx)", "xx", "!", 2, 1, "x test!(xx)"
 test_replace_cnt "xx testxx(xx)", "xx", "!", 1, -1, "! test!(!)"
 test_replace_cnt "xx testxx(xx)", "xx", "!", 1, 0, "xx testxx(xx)"
+
+test_replace_mode "Aa testAAa(aa)", "aa", "!", 1, 2, 1, "! test!a(aa)"
+test_replace_mode "aA testaa(aa)", "AA", "!", 1, 1, 1, "! testaa(aa)"
+test_replace_mode "aa testAa(aa)", "aa", "!", 2, 2, 0, "a testAa(!)"
+test_replace_mode "aa testAA(aA)", "Aa", "!", 1, -1, 1, "! test!(!)"
+test_replace_mode "aa testaa(aa)", "A", "!", 1, -1, 1, "!! test!!(!!)"
 
 on error resume next
 Replace "xx", "x", "y", -1
@@ -821,6 +917,24 @@ Replace "xx", "x", "y", 1, -2
 x = err.number
 on error goto 0
 ok x = 5, "err = " & x
+
+Sub testReplaceError(arg1, arg2, arg3, arg4, arg5, arg6, error_num)
+    on error resume next
+    Dim x
+
+    Call Err.clear()
+    x = Replace(arg1, arg2, arg3, arg4, arg5, arg6)
+    Call ok(Err.number = error_num, "Err.number = " & Err.number)
+End Sub
+
+Call testReplaceError(Null, "x", "y", 1, 1, 0, 94)
+Call testReplaceError("xx", null, "y", 1, 1, 0, 94)
+Call testReplaceError("xx", "x", null, 1, 1, 0, 94)
+Call testReplaceError("xx", "x", "y", null, 1, 0, 94)
+Call testReplaceError("xx", "x", "y", 1, null, 0, 94)
+Call testReplaceError("xx", "x", "y", 1, 1, null, 94)
+Call testReplaceError("xx", "x", "y", 1, 1, 8, 5)
+
 
 Sub TestRound(val, exval, vt)
     Call ok(Round(val) = exval, "Round(" & val & ") = " & Round(val))
@@ -1300,6 +1414,8 @@ Call ok(TypeName(CStr(0.5)) = "String", "TypeName(CStr(0.5)) = " & TypeName(CStr
 Call ok(getVT(TypeName(CStr(0.5))) = "VT_BSTR", "getVT(TypeName(CStr(0.5))) = " & getVT(TypeName(CStr(0.5))))
 Call ok(TypeName(True) = "Boolean", "TypeName(True) = " & TypeName(True))
 Call ok(getVT(TypeName(True)) = "VT_BSTR", "getVT(TypeName(True)) = " & getVT(TypeName(True)))
+Call ok(TypeName(arr) = "Variant()", "TypeName(arr) = " & TypeName(arr))
+Call ok(getVT(TypeName(arr)) = "VT_BSTR", "getVT(TypeName(arr)) = " & getVT(TypeName(arr)))
 
 Call ok(VarType(Empty) = vbEmpty, "VarType(Empty) = " & VarType(Empty))
 Call ok(getVT(VarType(Empty)) = "VT_I2", "getVT(VarType(Empty)) = " & getVT(VarType(Empty)))

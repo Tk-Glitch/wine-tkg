@@ -181,7 +181,11 @@ static HRESULT WINAPI multimedia_stream_GetDuration(IAMMultiMediaStream *iface, 
 
     if (!mmstream->media_seeking)
         return E_NOINTERFACE;
-    return IMediaSeeking_GetDuration(mmstream->media_seeking, duration);
+
+    if (IMediaSeeking_GetDuration(mmstream->media_seeking, duration) != S_OK)
+        return S_FALSE;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI multimedia_stream_Seek(IAMMultiMediaStream *iface, STREAM_TIME seek_time)
@@ -447,7 +451,22 @@ static HRESULT WINAPI multimedia_stream_OpenFile(IAMMultiMediaStream *iface,
     }
 
     if (SUCCEEDED(ret) && !(flags & AMMSF_NORENDER))
-        ret = IGraphBuilder_Render(This->graph, This->ipin);
+    {
+        IFilterGraph2 *graph;
+
+        if (SUCCEEDED(ret = IGraphBuilder_QueryInterface(This->graph, &IID_IFilterGraph2, (void **)&graph)))
+        {
+            ret = IFilterGraph2_RenderEx(graph, This->ipin, AM_RENDEREX_RENDERTOEXISTINGRENDERERS, NULL);
+            if (ret == VFW_E_CANNOT_RENDER) ret = VFW_E_CANNOT_CONNECT;
+            else if (ret == VFW_S_PARTIAL_RENDER) ret = S_OK;
+            IFilterGraph2_Release(graph);
+        }
+        else
+        {
+            FIXME("Failed to get IFilterGraph2 interface, hr %#x.\n", ret);
+            ret = IGraphBuilder_Render(This->graph, This->ipin);
+        }
+    }
 
     IMediaStreamFilter_SupportSeeking(This->filter, This->type == STREAMTYPE_READ);
 

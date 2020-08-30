@@ -6788,6 +6788,12 @@ msgstr "네트워크 연결이 없습니다.\n"
 msgid "Connection reset by peer.\n"
 msgstr "피어가 연결을 초기화 했습니다.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "구현되지 않음"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr "서명 또는 인증서를 찾을 수 없습니다.\n"
@@ -8411,7 +8417,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "연결 재설정"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "중급자"
 
@@ -16542,8 +16548,10 @@ msgid "&Beginner"
 msgstr "초보자(&B)"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "중급자(&A)"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "인터페이스"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16572,6 +16580,12 @@ msgstr "최단 시간"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "초보자"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "인터페이스"
 
 #: winemine.rc:66
 msgid "Expert"

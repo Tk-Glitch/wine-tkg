@@ -13,7 +13,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
-const GUID *raw_types[] = {
+static const GUID *raw_types[] = {
     &MFVideoFormat_RGB24,
     &MFVideoFormat_RGB32,
     &MFVideoFormat_RGB555,
@@ -316,7 +316,6 @@ static HRESULT WINAPI color_converter_SetInputType(IMFTransform *iface, DWORD id
     {
         GUID major_type, subtype;
         BOOL found = FALSE;
-        unsigned int i;
 
         if (FAILED(IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major_type)))
             return MF_E_INVALIDTYPE;
@@ -326,7 +325,7 @@ static HRESULT WINAPI color_converter_SetInputType(IMFTransform *iface, DWORD id
         if (!(IsEqualGUID(&major_type, &MFMediaType_Video)))
             return MF_E_INVALIDTYPE;
 
-        for (i = 0; i < ARRAY_SIZE(raw_types); i++)
+        for (unsigned int i = 0; i < ARRAY_SIZE(raw_types); i++)
         {
             UINT64 unused;
 
@@ -389,7 +388,6 @@ static HRESULT WINAPI color_converter_SetOutputType(IMFTransform *iface, DWORD i
 
     if (type)
     {
-        unsigned int i;
         /* validate the type */
 
         if (FAILED(IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major_type)))
@@ -402,7 +400,7 @@ static HRESULT WINAPI color_converter_SetOutputType(IMFTransform *iface, DWORD i
         if (!(IsEqualGUID(&major_type, &MFMediaType_Video)))
             return MF_E_INVALIDTYPE;
 
-        for (i = 0; i < ARRAY_SIZE(raw_types); i++)
+        for (unsigned int i = 0; i < ARRAY_SIZE(raw_types); i++)
         {
             if (IsEqualGUID(&subtype, raw_types[i]))
                 break;
@@ -489,7 +487,7 @@ static HRESULT WINAPI color_converter_ProcessMessage(IMFTransform *iface, MFT_ME
 {
     FIXME("%p, %u.\n", iface, message);
 
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI color_converter_ProcessInput(IMFTransform *iface, DWORD id, IMFSample *sample, DWORD flags)
@@ -551,14 +549,13 @@ static HRESULT WINAPI color_converter_ProcessOutput(IMFTransform *iface, DWORD f
     MFT_OUTPUT_DATA_BUFFER *relevant_buffer = NULL;
     GstSample *sample;
     HRESULT hr = S_OK;
-    unsigned int i;
 
     TRACE("%p, %#x, %u, %p, %p.\n", iface, flags, count, samples, status);
 
     if (flags)
         WARN("Unsupported flags %#x\n", flags);
 
-    for (i = 0; i < count; i++)
+    for (unsigned int i = 0; i < count; i++)
     {
         MFT_OUTPUT_DATA_BUFFER *out_buffer = &samples[i];
 

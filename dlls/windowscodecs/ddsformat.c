@@ -50,6 +50,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(wincodecs);
     ((DWORD)(BYTE)(ch2) << 16) | ((DWORD)(BYTE)(ch3) << 24 ))
 #endif
 
+#define GET_RGB565_R(color)   ((BYTE)(((color) >> 11) & 0x1F))
+#define GET_RGB565_G(color)   ((BYTE)(((color) >> 5)  & 0x3F))
+#define GET_RGB565_B(color)   ((BYTE)(((color) >> 0)  & 0x1F))
+#define MAKE_RGB565(r, g, b)  ((WORD)(((BYTE)(r) << 11) | ((BYTE)(g) << 5) | (BYTE)(b)))
+#define MAKE_ARGB(a, r, g, b) (((DWORD)(a) << 24) | ((DWORD)(r) << 16) | ((DWORD)(g) << 8) | (DWORD)(b))
+
 #define DDPF_ALPHAPIXELS     0x00000001
 #define DDPF_ALPHA           0x00000002
 #define DDPF_FOURCC          0x00000004
@@ -119,6 +125,7 @@ typedef struct dds_info {
     WICDdsDimension dimension;
     WICDdsAlphaMode alpha_mode;
     const GUID *pixel_format;
+    UINT pixel_format_bpp;
 } dds_info;
 
 typedef struct dds_frame_info {
@@ -131,6 +138,7 @@ typedef struct dds_frame_info {
     UINT width_in_blocks;
     UINT height_in_blocks;
     const GUID *pixel_format;
+    UINT pixel_format_bpp;
 } dds_frame_info;
 
 typedef struct DdsDecoder {
@@ -148,52 +156,102 @@ typedef struct DdsFrameDecode {
     IWICBitmapFrameDecode IWICBitmapFrameDecode_iface;
     IWICDdsFrameDecode IWICDdsFrameDecode_iface;
     LONG ref;
-    BYTE *data;
+    BYTE *block_data;
+    BYTE *pixel_data;
+    CRITICAL_SECTION lock;
     dds_frame_info info;
 } DdsFrameDecode;
 
 static struct dds_format {
     DDS_PIXELFORMAT pixel_format;
+    const GUID *wic_format;
+    UINT wic_format_bpp;
     DXGI_FORMAT dxgi_format;
-} dds_formats[] = {
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '1'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC1_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '2'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC2_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '3'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC2_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '4'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC3_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '5'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC3_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '4', 'U'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC4_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '4', 'S'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC4_SNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '5', 'U'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC5_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '5', 'S'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC5_SNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('A', 'T', 'I', '1'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC4_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('A', 'T', 'I', '2'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_BC5_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('R', 'G', 'B', 'G'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_R8G8_B8G8_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('G', 'R', 'G', 'B'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_G8R8_G8B8_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', '1', '0'), 0, 0, 0, 0, 0 }, DXGI_FORMAT_UNKNOWN },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x24, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R16G16B16A16_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x6E, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R16G16B16A16_SNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x6F, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R16_FLOAT },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x70, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R16G16_FLOAT },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x71, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R16G16B16A16_FLOAT },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x72, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R32_FLOAT },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x73, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R32G32_FLOAT },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x74, 0, 0, 0, 0, 0 }, DXGI_FORMAT_R32G32B32A32_FLOAT },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0xFF,0xFF00,0xFF0000,0xFF000000 },     DXGI_FORMAT_R8G8B8A8_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0xFF0000,0xFF00,0xFF,0xFF000000 },     DXGI_FORMAT_B8G8R8A8_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0xFF0000,0xFF00,0xFF,0 },              DXGI_FORMAT_B8G8R8X8_UNORM },
+} dds_format_table[] = {
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '1'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppPBGRA, 32,       DXGI_FORMAT_BC1_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '2'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppPBGRA, 32,       DXGI_FORMAT_BC2_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '3'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppBGRA,  32,       DXGI_FORMAT_BC2_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '4'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppPBGRA, 32,       DXGI_FORMAT_BC3_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '5'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppBGRA,  32,       DXGI_FORMAT_BC3_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '4', 'U'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppBGRA,  32,       DXGI_FORMAT_BC4_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '4', 'S'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppBGRA,  32,       DXGI_FORMAT_BC4_SNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '5', 'U'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppBGRA,  32,       DXGI_FORMAT_BC5_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('B', 'C', '5', 'S'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppBGRA,  32,       DXGI_FORMAT_BC5_SNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('A', 'T', 'I', '1'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppBGRA,  32,       DXGI_FORMAT_BC4_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('A', 'T', 'I', '2'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppBGRA,  32,       DXGI_FORMAT_BC5_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('R', 'G', 'B', 'G'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bpp4Channels, 32,   DXGI_FORMAT_R8G8_B8G8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('G', 'R', 'G', 'B'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bpp4Channels, 32,   DXGI_FORMAT_G8R8_G8B8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', '1', '0'), 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormatUndefined,       0,   DXGI_FORMAT_UNKNOWN },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x24, 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat64bppRGBA,       64,  DXGI_FORMAT_R16G16B16A16_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x6E, 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat64bppRGBA,       64,  DXGI_FORMAT_R16G16B16A16_SNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x6F, 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat16bppGrayHalf,   16,  DXGI_FORMAT_R16_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x70, 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormatUndefined,       0,   DXGI_FORMAT_R16G16_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x71, 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat64bppRGBAHalf,   64,  DXGI_FORMAT_R16G16B16A16_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x72, 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat32bppGrayFloat,  32,  DXGI_FORMAT_R32_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x73, 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormatUndefined,       32,  DXGI_FORMAT_R32G32_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_FOURCC, 0x74, 0, 0, 0, 0, 0 },
+      &GUID_WICPixelFormat128bppRGBAFloat, 128, DXGI_FORMAT_R32G32B32A32_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0xFF,0xFF00,0xFF0000,0xFF000000 },
+      &GUID_WICPixelFormat32bppRGBA,        32, DXGI_FORMAT_R8G8B8A8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0xFF,0xFF00,0xFF0000,0 },
+      &GUID_WICPixelFormat32bppRGB,         32, DXGI_FORMAT_UNKNOWN },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0xFF0000,0xFF00,0xFF,0xFF000000 },
+      &GUID_WICPixelFormat32bppBGRA,        32, DXGI_FORMAT_B8G8R8A8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0xFF0000,0xFF00,0xFF,0 },
+      &GUID_WICPixelFormat32bppBGR,         32, DXGI_FORMAT_B8G8R8X8_UNORM },
     /* The red and blue masks are swapped for DXGI_FORMAT_R10G10B10A2_UNORM.
-     * For "correct" one, the RGB masks should be 0x3FF00000,0xFFC00,0x3FF.
+     * For "correct" one, the RGB masks should be 0x3FF,0xFFC00,0x3FF00000.
      * see: https://walbourn.github.io/dds-update-and-1010102-problems */
-    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0x3FF,0xFFC00,0x3FF00000,0xC0000000 }, DXGI_FORMAT_R10G10B10A2_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB ,      0, 32, 0xFFFF,0xFFFF0000,0,0 },               DXGI_FORMAT_R16G16_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB ,      0, 32, 0xFFFFFFFF,0,0,0 },                    DXGI_FORMAT_R32_FLOAT },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 16, 0xF800,0x7E0,0x1F,0 },                 DXGI_FORMAT_B5G6R5_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 16, 0x7C00,0x3E0,0x1F,0x8000 },            DXGI_FORMAT_B5G5R5A1_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 16, 0xF00,0xF0,0xF,0xF000 },               DXGI_FORMAT_B4G4R4A4_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_ALPHA,     0, 8,  0,0,0,0xFF },                          DXGI_FORMAT_A8_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_LUMINANCE, 0, 16, 0xFFFF,0,0,0 },                        DXGI_FORMAT_R16_UNORM  },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_LUMINANCE, 0, 16, 0xFF,0,0,0xFF00 },                     DXGI_FORMAT_R8G8_UNORM },
-    { { sizeof(DDS_PIXELFORMAT), DDPF_LUMINANCE, 0, 8,  0xFF,0,0,0 },                          DXGI_FORMAT_R8_UNORM }
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0x3FF00000,0xFFC00,0x3FF,0xC0000000 },
+      &GUID_WICPixelFormat32bppR10G10B10A2, 32, DXGI_FORMAT_R10G10B10A2_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 32, 0x3FF,0xFFC00,0x3FF00000,0xC0000000 },
+      &GUID_WICPixelFormat32bppRGBA1010102, 32, DXGI_FORMAT_UNKNOWN },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB ,      0, 32, 0xFFFF,0xFFFF0000,0,0 },
+      &GUID_WICPixelFormatUndefined,        0,  DXGI_FORMAT_R16G16_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB ,      0, 32, 0xFFFFFFFF,0,0,0 },
+      &GUID_WICPixelFormat32bppGrayFloat,   32, DXGI_FORMAT_R32_FLOAT },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB ,      0, 24, 0xFF0000,0x00FF00,0x0000FF,0 },
+      &GUID_WICPixelFormat24bppBGR,         24, DXGI_FORMAT_UNKNOWN },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB ,      0, 24, 0x0000FF,0x00FF00,0xFF0000,0 },
+      &GUID_WICPixelFormat24bppRGB,         24, DXGI_FORMAT_UNKNOWN },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 16, 0xF800,0x7E0,0x1F,0 },
+      &GUID_WICPixelFormat16bppBGR565,      16, DXGI_FORMAT_B5G6R5_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 16, 0x7C00,0x3E0,0x1F,0 },
+      &GUID_WICPixelFormat16bppBGR555,      16, DXGI_FORMAT_UNKNOWN },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 16, 0x7C00,0x3E0,0x1F,0x8000 },
+      &GUID_WICPixelFormat16bppBGRA5551,    16, DXGI_FORMAT_B5G5R5A1_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_RGB,       0, 16, 0xF00,0xF0,0xF,0xF000 },
+      &GUID_WICPixelFormatUndefined,        0,  DXGI_FORMAT_B4G4R4A4_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_ALPHA,     0, 8,  0,0,0,0xFF },
+      &GUID_WICPixelFormat8bppAlpha,        8,  DXGI_FORMAT_A8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_LUMINANCE, 0, 16, 0xFFFF,0,0,0 },
+      &GUID_WICPixelFormat16bppGray,        16, DXGI_FORMAT_R16_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_LUMINANCE, 0, 16, 0xFF,0,0,0xFF00 },
+      &GUID_WICPixelFormatUndefined,        0,  DXGI_FORMAT_R8G8_UNORM },
+    { { sizeof(DDS_PIXELFORMAT), DDPF_LUMINANCE, 0, 8,  0xFF,0,0,0 },
+      &GUID_WICPixelFormat8bppGray,         8,  DXGI_FORMAT_R8_UNORM },
+    { { 0 }, &GUID_WICPixelFormatUndefined, 0,  DXGI_FORMAT_UNKNOWN }
 };
 
 static DXGI_FORMAT compressed_formats[] = {
@@ -207,6 +265,13 @@ static DXGI_FORMAT compressed_formats[] = {
 };
 
 static HRESULT WINAPI DdsDecoder_Dds_GetFrame(IWICDdsDecoder *, UINT, UINT, UINT, IWICBitmapFrameDecode **);
+
+static DWORD rgb565_to_argb(WORD color, BYTE alpha)
+{
+    return MAKE_ARGB(alpha, (GET_RGB565_R(color) * 0xFF + 0x0F) / 0x1F,
+                            (GET_RGB565_G(color) * 0xFF + 0x1F) / 0x3F,
+                            (GET_RGB565_B(color) * 0xFF + 0x0F) / 0x1F);
+}
 
 static inline BOOL has_extended_header(DDS_HEADER *header)
 {
@@ -236,23 +301,23 @@ static WICDdsDimension get_dimension(DDS_HEADER *header, DDS_HEADER_DXT10 *heade
     }
 }
 
-static DXGI_FORMAT get_dxgi_format(DDS_PIXELFORMAT *pixel_format)
+static struct dds_format *get_dds_format(DDS_PIXELFORMAT *pixel_format)
 {
     UINT i;
 
-    for (i = 0; i < ARRAY_SIZE(dds_formats); i++)
+    for (i = 0; i < ARRAY_SIZE(dds_format_table); i++)
     {
-        if ((pixel_format->flags & dds_formats[i].pixel_format.flags) &&
-            (pixel_format->fourCC == dds_formats[i].pixel_format.fourCC) &&
-            (pixel_format->rgbBitCount == dds_formats[i].pixel_format.rgbBitCount) &&
-            (pixel_format->rBitMask == dds_formats[i].pixel_format.rBitMask) &&
-            (pixel_format->gBitMask == dds_formats[i].pixel_format.gBitMask) &&
-            (pixel_format->bBitMask == dds_formats[i].pixel_format.bBitMask) &&
-            (pixel_format->aBitMask == dds_formats[i].pixel_format.aBitMask))
-            return dds_formats[i].dxgi_format;
+        if ((pixel_format->flags & dds_format_table[i].pixel_format.flags) &&
+            (pixel_format->fourCC == dds_format_table[i].pixel_format.fourCC) &&
+            (pixel_format->rgbBitCount == dds_format_table[i].pixel_format.rgbBitCount) &&
+            (pixel_format->rBitMask == dds_format_table[i].pixel_format.rBitMask) &&
+            (pixel_format->gBitMask == dds_format_table[i].pixel_format.gBitMask) &&
+            (pixel_format->bBitMask == dds_format_table[i].pixel_format.bBitMask) &&
+            (pixel_format->aBitMask == dds_format_table[i].pixel_format.aBitMask))
+            return dds_format_table + i;
     }
 
-    return DXGI_FORMAT_UNKNOWN;
+    return dds_format_table + ARRAY_SIZE(dds_format_table) - 1;
 }
 
 static WICDdsAlphaMode get_alpha_mode_from_fourcc(DWORD fourcc)
@@ -399,6 +464,7 @@ static void get_dds_info(dds_info* info, DDS_HEADER *header, DDS_HEADER_DXT10 *h
 {
     int i;
     UINT depth;
+    struct dds_format *format_info;
 
     info->width = header->width;
     info->height = header->height;
@@ -414,14 +480,24 @@ static void get_dds_info(dds_info* info, DDS_HEADER *header, DDS_HEADER_DXT10 *h
         info->dimension = get_dimension(NULL, header_dxt10);
         info->alpha_mode = header_dxt10->miscFlags2 & 0x00000008;
         info->data_offset = sizeof(DWORD) + sizeof(*header) + sizeof(*header_dxt10);
+        if (is_compressed(info->format)) {
+            info->pixel_format = (info->alpha_mode == WICDdsAlphaModePremultiplied) ?
+                                 &GUID_WICPixelFormat32bppPBGRA : &GUID_WICPixelFormat32bppBGRA;
+            info->pixel_format_bpp = 32;
+        } else {
+            info->pixel_format = &GUID_WICPixelFormatUndefined;
+            info->pixel_format_bpp = 0;
+            FIXME("Pixel format is incorrect for uncompressed DDS image with extended header\n");
+        }
     } else {
-        info->format = get_dxgi_format(&header->ddspf);
+        format_info = get_dds_format(&header->ddspf);
+        info->format = format_info->dxgi_format;
         info->dimension = get_dimension(header, NULL);
         info->alpha_mode = get_alpha_mode_from_fourcc(header->ddspf.fourCC);
         info->data_offset = sizeof(DWORD) + sizeof(*header);
+        info->pixel_format = format_info->wic_format;
+        info->pixel_format_bpp = format_info->wic_format_bpp;
     }
-    info->pixel_format = (info->alpha_mode == WICDdsAlphaModePremultiplied) ?
-                         &GUID_WICPixelFormat32bppPBGRA : &GUID_WICPixelFormat32bppBGRA;
 
     if (header->ddspf.flags & (DDPF_RGB | DDPF_ALPHA | DDPF_LUMINANCE)) {
         info->bytes_per_block = header->ddspf.rgbBitCount / 8;
@@ -444,6 +520,117 @@ static void get_dds_info(dds_info* info, DDS_HEADER *header, DDS_HEADER_DXT10 *h
         info->frame_count *= info->array_size;
     }
     if (info->dimension == WICDdsTextureCube) info->frame_count *= 6;
+}
+
+static void decode_block(const BYTE *block_data, UINT block_count, DXGI_FORMAT format,
+                         UINT width, UINT height, DWORD *buffer)
+{
+    const BYTE *block, *color_indices, *alpha_indices, *alpha_table;
+    int i, j, x, y, block_x, block_y, color_index, alpha_index;
+    int block_size, color_offset, color_indices_offset;
+    WORD color[4], color_value = 0;
+    BYTE alpha[8], alpha_value = 0;
+
+    if (format == DXGI_FORMAT_BC1_UNORM) {
+        block_size = 8;
+        color_offset = 0;
+        color_indices_offset = 4;
+    } else {
+        block_size = 16;
+        color_offset = 8;
+        color_indices_offset = 12;
+    }
+    block_x = 0;
+    block_y = 0;
+
+    for (i = 0; i < block_count; i++)
+    {
+        block = block_data + i * block_size;
+
+        color[0] = *((WORD *)(block + color_offset));
+        color[1] = *((WORD *)(block + color_offset + 2));
+        color[2] = MAKE_RGB565(((GET_RGB565_R(color[0]) * 2 + GET_RGB565_R(color[1]) + 1) / 3),
+                               ((GET_RGB565_G(color[0]) * 2 + GET_RGB565_G(color[1]) + 1) / 3),
+                               ((GET_RGB565_B(color[0]) * 2 + GET_RGB565_B(color[1]) + 1) / 3));
+        color[3] = MAKE_RGB565(((GET_RGB565_R(color[0]) + GET_RGB565_R(color[1]) * 2 + 1) / 3),
+                               ((GET_RGB565_G(color[0]) + GET_RGB565_G(color[1]) * 2 + 1) / 3),
+                               ((GET_RGB565_B(color[0]) + GET_RGB565_B(color[1]) * 2 + 1) / 3));
+
+        switch (format)
+        {
+            case DXGI_FORMAT_BC1_UNORM:
+                if (color[0] <= color[1]) {
+                    color[2] = MAKE_RGB565(((GET_RGB565_R(color[0]) + GET_RGB565_R(color[1]) + 1) / 2),
+                                           ((GET_RGB565_G(color[0]) + GET_RGB565_G(color[1]) + 1) / 2),
+                                           ((GET_RGB565_B(color[0]) + GET_RGB565_B(color[1]) + 1) / 2));
+                    color[3] = 0;
+                }
+                break;
+            case DXGI_FORMAT_BC2_UNORM:
+                alpha_table = block;
+                break;
+            case DXGI_FORMAT_BC3_UNORM:
+                alpha[0] = *block;
+                alpha[1] = *(block + 1);
+                if (alpha[0] > alpha[1]) {
+                    for (j = 2; j < 8; j++)
+                    {
+                        alpha[j] = (BYTE)((alpha[0] * (8 - j) + alpha[1] * (j - 1) + 3) / 7);
+                    }
+                } else {
+                    for (j = 2; j < 6; j++)
+                    {
+                        alpha[j] = (BYTE)((alpha[0] * (6 - j) + alpha[1] * (j - 1) + 2) / 5);
+                    }
+                    alpha[6] = 0;
+                    alpha[7] = 0xFF;
+                }
+                alpha_indices = block + 2;
+                break;
+            default:
+                break;
+        }
+
+        color_indices = block + color_indices_offset;
+        for (j = 0; j < 16; j++)
+        {
+            x = block_x + j % 4;
+            y = block_y + j / 4;
+            if (x >= width || y >= height) continue;
+
+            color_index = (color_indices[j / 4] >> ((j % 4) * 2)) & 0x3;
+            color_value = color[color_index];
+
+            switch (format)
+            {
+                case DXGI_FORMAT_BC1_UNORM:
+                    if ((color[0] <= color[1]) && !color_value) {
+                        color_value = 0;
+                        alpha_value = 0;
+                    } else {
+                        alpha_value = 0xFF;
+                    }
+                    break;
+                case DXGI_FORMAT_BC2_UNORM:
+                    alpha_value = (alpha_table[j / 2] >> (j % 2) * 4) & 0xF;
+                    alpha_value = (BYTE)((alpha_value * 0xFF + 0x7)/ 0xF);
+                    break;
+                case DXGI_FORMAT_BC3_UNORM:
+                    alpha_index = (*((DWORD *)(alpha_indices + (j / 8) * 3)) >> ((j % 8) * 3)) & 0x7;
+                    alpha_value = alpha[alpha_index];
+                    break;
+                default:
+                    break;
+            }
+            buffer[x + y * width] = rgb565_to_argb(color_value, alpha_value);
+        }
+
+        block_x += DDS_BLOCK_WIDTH;
+        if (block_x >= width) {
+            block_x = 0;
+            block_y += DDS_BLOCK_HEIGHT;
+        }
+    }
 }
 
 static inline DdsDecoder *impl_from_IWICBitmapDecoder(IWICBitmapDecoder *iface)
@@ -512,7 +699,8 @@ static ULONG WINAPI DdsFrameDecode_Release(IWICBitmapFrameDecode *iface)
     TRACE("(%p) refcount=%u\n", iface, ref);
 
     if (ref == 0) {
-        HeapFree(GetProcessHeap(), 0, This->data);
+        if (This->pixel_data != This->block_data) HeapFree(GetProcessHeap(), 0, This->pixel_data);
+        HeapFree(GetProcessHeap(), 0, This->block_data);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -567,9 +755,60 @@ static HRESULT WINAPI DdsFrameDecode_CopyPalette(IWICBitmapFrameDecode *iface,
 static HRESULT WINAPI DdsFrameDecode_CopyPixels(IWICBitmapFrameDecode *iface,
                                                 const WICRect *prc, UINT cbStride, UINT cbBufferSize, BYTE *pbBuffer)
 {
-    FIXME("(%p,%s,%u,%u,%p): stub.\n", iface, debug_wic_rect(prc), cbStride, cbBufferSize, pbBuffer);
+    DdsFrameDecode *This = impl_from_IWICBitmapFrameDecode(iface);
+    UINT bpp, frame_stride, frame_size;
+    INT x, y, width, height;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("(%p,%s,%u,%u,%p)\n", iface, debug_wic_rect(prc), cbStride, cbBufferSize, pbBuffer);
+
+    if (!pbBuffer) return E_INVALIDARG;
+
+    bpp = This->info.pixel_format_bpp;
+    if (!bpp) return WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT;
+
+    frame_stride = This->info.width * bpp / 8;
+    frame_size = frame_stride * This->info.height;
+    if (!prc) {
+        if (cbStride < frame_stride) return E_INVALIDARG;
+        if (cbBufferSize < frame_size) return WINCODEC_ERR_INSUFFICIENTBUFFER;
+    } else {
+        x = prc->X;
+        y = prc->Y;
+        width = prc->Width;
+        height = prc->Height;
+        if (x < 0 || y < 0 || width <= 0 || height <= 0 ||
+            x + width > This->info.width ||
+            y + height > This->info.height) {
+            return E_INVALIDARG;
+        }
+        if (cbStride < width * bpp / 8) return E_INVALIDARG;
+        if (cbBufferSize < cbStride * height) return WINCODEC_ERR_INSUFFICIENTBUFFER;
+    }
+
+    EnterCriticalSection(&This->lock);
+
+    if (!This->pixel_data) {
+        if (is_compressed(This->info.format)) {
+            This->pixel_data = HeapAlloc(GetProcessHeap(), 0, frame_size);
+            if (!This->pixel_data) {
+                hr = E_OUTOFMEMORY;
+                goto end;
+            }
+            decode_block(This->block_data, This->info.width_in_blocks * This->info.height_in_blocks, This->info.format,
+                         This->info.width, This->info.height, (DWORD *)This->pixel_data);
+        } else {
+            This->pixel_data = This->block_data;
+        }
+    }
+
+    hr = copy_pixels(bpp, This->pixel_data, This->info.width, This->info.height, frame_stride,
+                     prc, cbStride, cbBufferSize, pbBuffer);
+
+end:
+    LeaveCriticalSection(&This->lock);
+
+    return hr;
 }
 
 static HRESULT WINAPI DdsFrameDecode_GetMetadataQueryReader(IWICBitmapFrameDecode *iface,
@@ -668,8 +907,7 @@ static HRESULT WINAPI DdsFrameDecode_Dds_CopyBlocks(IWICDdsFrameDecode *iface,
 {
     DdsFrameDecode *This = impl_from_IWICDdsFrameDecode(iface);
     int x, y, width, height;
-    UINT bytes_per_block, frame_stride, frame_size, i;
-    BYTE *data, *dst_buffer;
+    UINT bytes_per_block, frame_stride, frame_size;
 
     TRACE("(%p,%p,%u,%u,%p)\n", iface, boundsInBlocks, stride, bufferSize, buffer);
 
@@ -678,35 +916,26 @@ static HRESULT WINAPI DdsFrameDecode_Dds_CopyBlocks(IWICDdsFrameDecode *iface,
     bytes_per_block = This->info.bytes_per_block;
     frame_stride = This->info.width_in_blocks * bytes_per_block;
     frame_size = frame_stride * This->info.height_in_blocks;
+
     if (!boundsInBlocks) {
         if (stride < frame_stride) return E_INVALIDARG;
         if (bufferSize < frame_size) return E_INVALIDARG;
-        memcpy(buffer, This->data, frame_size);
-        return S_OK;
+    } else {
+        x = boundsInBlocks->X;
+        y = boundsInBlocks->Y;
+        width = boundsInBlocks->Width;
+        height = boundsInBlocks->Height;
+        if (x < 0 || y < 0 || width <= 0 || height <= 0 ||
+            x + width > This->info.width_in_blocks ||
+            y + height > This->info.height_in_blocks) {
+            return E_INVALIDARG;
+        }
+        if (stride < width * bytes_per_block) return E_INVALIDARG;
+        if (bufferSize < stride * height) return E_INVALIDARG;
     }
 
-    x = boundsInBlocks->X;
-    y = boundsInBlocks->Y;
-    width = boundsInBlocks->Width;
-    height = boundsInBlocks->Height;
-    if (x < 0 || y < 0 || width <= 0 || height <= 0 ||
-        x + width > This->info.width_in_blocks ||
-        y + height > This->info.height_in_blocks) {
-        return E_INVALIDARG;
-    }
-    if (stride < width * bytes_per_block) return E_INVALIDARG;
-    if (bufferSize < stride * height) return E_INVALIDARG;
-
-    data = This->data + (x + y * This->info.width_in_blocks) * bytes_per_block;
-    dst_buffer = buffer;
-    for (i = 0; i < height; i++)
-    {
-        memcpy(dst_buffer, data, (size_t)width * bytes_per_block);
-        data += This->info.width_in_blocks * bytes_per_block;
-        dst_buffer += stride;
-    }
-
-    return S_OK;
+    return copy_pixels(This->info.bytes_per_block * 8, This->block_data, This->info.width_in_blocks,
+                       This->info.height_in_blocks, frame_stride, boundsInBlocks, stride, bufferSize, buffer);
 }
 
 static const IWICDdsFrameDecodeVtbl DdsFrameDecode_Dds_Vtbl = {
@@ -728,6 +957,8 @@ static HRESULT DdsFrameDecode_CreateInstance(DdsFrameDecode **frame_decode)
     result->IWICBitmapFrameDecode_iface.lpVtbl = &DdsFrameDecode_Vtbl;
     result->IWICDdsFrameDecode_iface.lpVtbl = &DdsFrameDecode_Dds_Vtbl;
     result->ref = 1;
+    InitializeCriticalSection(&result->lock);
+    result->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": DdsFrameDecode.lock");
 
     *frame_decode = result;
     return S_OK;
@@ -1090,10 +1321,12 @@ static HRESULT WINAPI DdsDecoder_Dds_GetFrame(IWICDdsDecoder *iface,
     frame_decode->info.width_in_blocks = frame_width_in_blocks;
     frame_decode->info.height_in_blocks = frame_height_in_blocks;
     frame_decode->info.pixel_format = This->info.pixel_format;
-    frame_decode->data = HeapAlloc(GetProcessHeap(), 0, frame_size);
+    frame_decode->info.pixel_format_bpp = This->info.pixel_format_bpp;
+    frame_decode->block_data = HeapAlloc(GetProcessHeap(), 0, frame_size);
+    frame_decode->pixel_data = NULL;
     hr = IStream_Seek(This->stream, seek, SEEK_SET, NULL);
     if (hr != S_OK) goto end;
-    hr = IStream_Read(This->stream, frame_decode->data, frame_size, &bytesread);
+    hr = IStream_Read(This->stream, frame_decode->block_data, frame_size, &bytesread);
     if (hr != S_OK || bytesread != frame_size) {
         hr = WINCODEC_ERR_STREAMREAD;
         goto end;

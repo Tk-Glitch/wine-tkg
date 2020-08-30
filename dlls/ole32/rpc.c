@@ -630,7 +630,7 @@ static HRESULT WINAPI ClientRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface,
     ULONG extension_count;
     IPID ipid;
     HRESULT hr;
-    APARTMENT *apt = NULL;
+    struct apartment *apt = NULL;
 
     TRACE("(%p)->(%p,%s)\n", This, olemsg, debugstr_guid(riid));
 
@@ -659,7 +659,7 @@ static HRESULT WINAPI ClientRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface,
 
     message_state->channel_hook_info.iid = *riid;
     message_state->channel_hook_info.cbSize = sizeof(message_state->channel_hook_info);
-    message_state->channel_hook_info.uCausality = COM_CurrentCausalityId();
+    CoGetCurrentLogicalThreadId(&message_state->channel_hook_info.uCausality);
     message_state->channel_hook_info.dwServerPid = This->server_pid;
     message_state->channel_hook_info.iMethod = msg->ProcNum & ~RPC_FLAGS_VALID_BIT;
     message_state->channel_hook_info.pObject = NULL; /* only present on server-side */
@@ -803,7 +803,7 @@ static DWORD WINAPI rpc_sendreceive_thread(LPVOID param)
     return 0;
 }
 
-static inline HRESULT ClientRpcChannelBuffer_IsCorrectApartment(ClientRpcChannelBuffer *This, APARTMENT *apt)
+static inline HRESULT ClientRpcChannelBuffer_IsCorrectApartment(ClientRpcChannelBuffer *This, struct apartment *apt)
 {
     OXID oxid;
     if (!apt)
@@ -827,7 +827,7 @@ static HRESULT WINAPI ClientRpcChannelBuffer_SendReceive(LPRPCCHANNELBUFFER ifac
     ORPC_EXTENT_ARRAY orpc_ext_array;
     WIRE_ORPC_EXTENT *first_wire_orpc_extent = NULL;
     HRESULT hrFault = S_OK;
-    APARTMENT *apt = apartment_get_current_or_mta();
+    struct apartment *apt = apartment_get_current_or_mta();
 
     TRACE("(%p) iMethod=%d\n", olemsg, olemsg->iMethod);
 
@@ -1095,7 +1095,7 @@ static const IRpcChannelBufferVtbl ServerRpcChannelBufferVtbl =
 HRESULT RPC_CreateClientChannel(const OXID *oxid, const IPID *ipid,
                                 const OXID_INFO *oxid_info, const IID *iid,
                                 DWORD dest_context, void *dest_context_data,
-                                IRpcChannelBuffer **chan, APARTMENT *apt)
+                                IRpcChannelBuffer **chan, struct apartment *apt)
 {
     ClientRpcChannelBuffer *This;
     WCHAR                   endpoint[200];
@@ -1324,7 +1324,7 @@ static HRESULT unmarshal_ORPCTHAT(RPC_MESSAGE *msg, ORPCTHAT *orpcthat,
     return S_OK;
 }
 
-void RPC_ExecuteCall(struct dispatch_params *params)
+void WINAPI Internal_RPC_ExecuteCall(struct dispatch_params *params)
 {
     struct message_state *message_state = NULL;
     RPC_MESSAGE *msg = (RPC_MESSAGE *)params->msg;
@@ -1444,7 +1444,7 @@ static void __RPC_STUB dispatch_rpc(RPC_MESSAGE *msg)
 {
     struct dispatch_params *params;
     struct stub_manager *stub_manager;
-    APARTMENT *apt;
+    struct apartment *apt;
     IPID ipid;
     HRESULT hr;
 
@@ -1504,7 +1504,7 @@ static void __RPC_STUB dispatch_rpc(RPC_MESSAGE *msg)
             enter_apartment(info, COINIT_MULTITHREADED);
             joined = TRUE;
         }
-        RPC_ExecuteCall(params);
+        Internal_RPC_ExecuteCall(params);
         if (joined)
         {
             leave_apartment(info);
@@ -1647,411 +1647,4 @@ void RPC_StartRemoting(struct apartment *apt)
         /* FIXME: move remote unknown exporting into this function */
     }
     start_apartment_remote_unknown(apt);
-}
-
-
-static HRESULT create_server(REFCLSID rclsid, HANDLE *process)
-{
-    static const WCHAR  wszLocalServer32[] = { 'L','o','c','a','l','S','e','r','v','e','r','3','2',0 };
-    static const WCHAR  embedding[] = { ' ', '-','E','m','b','e','d','d','i','n','g',0 };
-    HKEY                key;
-    HRESULT             hres;
-    WCHAR               command[MAX_PATH+ARRAY_SIZE(embedding)];
-    DWORD               size = (MAX_PATH+1) * sizeof(WCHAR);
-    STARTUPINFOW        sinfo;
-    PROCESS_INFORMATION pinfo;
-    LONG ret;
-
-    hres = COM_OpenKeyForCLSID(rclsid, wszLocalServer32, KEY_READ, &key);
-    if (FAILED(hres)) {
-        ERR("class %s not registered\n", debugstr_guid(rclsid));
-        return hres;
-    }
-
-    ret = RegQueryValueExW(key, NULL, NULL, NULL, (LPBYTE)command, &size);
-    RegCloseKey(key);
-    if (ret) {
-        WARN("No default value for LocalServer32 key\n");
-        return REGDB_E_CLASSNOTREG; /* FIXME: check retval */
-    }
-
-    memset(&sinfo,0,sizeof(sinfo));
-    sinfo.cb = sizeof(sinfo);
-
-    /* EXE servers are started with the -Embedding switch. */
-
-    lstrcatW(command, embedding);
-
-    TRACE("activating local server %s for %s\n", debugstr_w(command), debugstr_guid(rclsid));
-
-    /* FIXME: Win2003 supports a ServerExecutable value that is passed into
-     * CreateProcess */
-    if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &sinfo, &pinfo)) {
-        WARN("failed to run local server %s\n", debugstr_w(command));
-        return HRESULT_FROM_WIN32(GetLastError());
-    }
-    *process = pinfo.hProcess;
-    CloseHandle(pinfo.hThread);
-
-    return S_OK;
-}
-
-/*
- * start_local_service()  - start a service given its name and parameters
- */
-static DWORD start_local_service(LPCWSTR name, DWORD num, LPCWSTR *params)
-{
-    SC_HANDLE handle, hsvc;
-    DWORD     r = ERROR_FUNCTION_FAILED;
-
-    TRACE("Starting service %s %d params\n", debugstr_w(name), num);
-
-    handle = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
-    if (!handle)
-        return r;
-    hsvc = OpenServiceW(handle, name, SERVICE_START);
-    if (hsvc)
-    {
-        if(StartServiceW(hsvc, num, params))
-            r = ERROR_SUCCESS;
-        else
-            r = GetLastError();
-        if (r == ERROR_SERVICE_ALREADY_RUNNING)
-            r = ERROR_SUCCESS;
-        CloseServiceHandle(hsvc);
-    }
-    else
-        r = GetLastError();
-    CloseServiceHandle(handle);
-
-    TRACE("StartService returned error %u (%s)\n", r, (r == ERROR_SUCCESS) ? "ok":"failed");
-
-    return r;
-}
-
-/*
- * create_local_service()  - start a COM server in a service
- *
- *   To start a Local Service, we read the AppID value under
- * the class's CLSID key, then open the HKCR\\AppId key specified
- * there and check for a LocalService value.
- *
- * Note:  Local Services are not supported under Windows 9x
- */
-static HRESULT create_local_service(REFCLSID rclsid)
-{
-    HRESULT hres;
-    WCHAR buf[CHARS_IN_GUID];
-    static const WCHAR szLocalService[] = { 'L','o','c','a','l','S','e','r','v','i','c','e',0 };
-    static const WCHAR szServiceParams[] = {'S','e','r','v','i','c','e','P','a','r','a','m','s',0};
-    HKEY hkey;
-    LONG r;
-    DWORD type, sz;
-
-    TRACE("Attempting to start Local service for %s\n", debugstr_guid(rclsid));
-
-    hres = COM_OpenKeyForAppIdFromCLSID(rclsid, KEY_READ, &hkey);
-    if (FAILED(hres))
-        return hres;
-
-    /* read the LocalService and ServiceParameters values from the AppID key */
-    sz = sizeof buf;
-    r = RegQueryValueExW(hkey, szLocalService, NULL, &type, (LPBYTE)buf, &sz);
-    if (r==ERROR_SUCCESS && type==REG_SZ)
-    {
-        DWORD num_args = 0;
-        LPWSTR args[1] = { NULL };
-
-        /*
-         * FIXME: I'm not really sure how to deal with the service parameters.
-         *        I suspect that the string returned from RegQueryValueExW
-         *        should be split into a number of arguments by spaces.
-         *        It would make more sense if ServiceParams contained a
-         *        REG_MULTI_SZ here, but it's a REG_SZ for the services
-         *        that I'm interested in for the moment.
-         */
-        r = RegQueryValueExW(hkey, szServiceParams, NULL, &type, NULL, &sz);
-        if (r == ERROR_SUCCESS && type == REG_SZ && sz)
-        {
-            args[0] = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sz);
-            num_args++;
-            RegQueryValueExW(hkey, szServiceParams, NULL, &type, (LPBYTE)args[0], &sz);
-        }
-        r = start_local_service(buf, num_args, (LPCWSTR *)args);
-        if (r != ERROR_SUCCESS)
-            hres = REGDB_E_CLASSNOTREG; /* FIXME: check retval */
-        HeapFree(GetProcessHeap(),0,args[0]);
-    }
-    else
-    {
-        WARN("No LocalService value\n");
-        hres = REGDB_E_CLASSNOTREG; /* FIXME: check retval */
-    }
-    RegCloseKey(hkey);
-
-    return hres;
-}
-
-
-static void get_localserver_pipe_name(WCHAR *pipefn, REFCLSID rclsid)
-{
-    static const WCHAR wszPipeRef[] = {'\\','\\','.','\\','p','i','p','e','\\',0};
-    lstrcpyW(pipefn, wszPipeRef);
-    StringFromGUID2(rclsid, pipefn + ARRAY_SIZE(wszPipeRef) - 1, CHARS_IN_GUID);
-}
-
-/* FIXME: should call to rpcss instead */
-HRESULT RPC_GetLocalClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
-{
-    HRESULT        hres;
-    HANDLE         hPipe;
-    WCHAR          pipefn[100];
-    DWORD          res, bufferlen;
-    char           marshalbuffer[200];
-    IStream       *pStm;
-    LARGE_INTEGER  seekto;
-    ULARGE_INTEGER newpos;
-    int            tries = 0;
-    IServiceProvider *local_server;
-
-    static const int MAXTRIES = 30; /* 30 seconds */
-
-    TRACE("rclsid=%s, iid=%s\n", debugstr_guid(rclsid), debugstr_guid(iid));
-
-    get_localserver_pipe_name(pipefn, rclsid);
-
-    while (tries++ < MAXTRIES) {
-        TRACE("waiting for %s\n", debugstr_w(pipefn));
-
-        WaitNamedPipeW( pipefn, NMPWAIT_WAIT_FOREVER );
-        hPipe = CreateFileW(pipefn, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
-        if (hPipe == INVALID_HANDLE_VALUE) {
-            DWORD index;
-            DWORD start_ticks;
-            HANDLE process = 0;
-            if (tries == 1) {
-                if ( (hres = create_local_service(rclsid)) &&
-                     (hres = create_server(rclsid, &process)) )
-                    return hres;
-            } else {
-                WARN("Connecting to %s, no response yet, retrying: le is %u\n", debugstr_w(pipefn), GetLastError());
-            }
-            /* wait for one second, even if messages arrive */
-            start_ticks = GetTickCount();
-            do {
-                if (SUCCEEDED(CoWaitForMultipleHandles(0, 1000, (process != 0),
-                                                       &process, &index)) && process && !index)
-                {
-                    WARN( "server for %s failed to start\n", debugstr_guid(rclsid) );
-                    CloseHandle( hPipe );
-                    CloseHandle( process );
-                    return E_NOINTERFACE;
-                }
-            } while (GetTickCount() - start_ticks < 1000);
-            if (process) CloseHandle( process );
-            continue;
-        }
-        bufferlen = 0;
-        if (!ReadFile(hPipe,marshalbuffer,sizeof(marshalbuffer),&bufferlen,NULL)) {
-            FIXME("Failed to read marshal id from classfactory of %s.\n",debugstr_guid(rclsid));
-            CloseHandle(hPipe);
-            Sleep(1000);
-            continue;
-        }
-        TRACE("read marshal id from pipe\n");
-        CloseHandle(hPipe);
-        break;
-    }
-    
-    if (tries >= MAXTRIES)
-        return E_NOINTERFACE;
-    
-    hres = CreateStreamOnHGlobal(0,TRUE,&pStm);
-    if (hres != S_OK) return hres;
-    hres = IStream_Write(pStm,marshalbuffer,bufferlen,&res);
-    if (hres != S_OK) goto out;
-    seekto.u.LowPart = 0;seekto.u.HighPart = 0;
-    hres = IStream_Seek(pStm,seekto,STREAM_SEEK_SET,&newpos);
-    
-    TRACE("unmarshalling local server\n");
-    hres = CoUnmarshalInterface(pStm, &IID_IServiceProvider, (void**)&local_server);
-    if(SUCCEEDED(hres))
-        hres = IServiceProvider_QueryService(local_server, rclsid, iid, ppv);
-    IServiceProvider_Release(local_server);
-out:
-    IStream_Release(pStm);
-    return hres;
-}
-
-
-struct local_server_params
-{
-    CLSID clsid;
-    IStream *stream;
-    HANDLE pipe;
-    HANDLE stop_event;
-    HANDLE thread;
-    BOOL multi_use;
-};
-
-/* FIXME: should call to rpcss instead */
-static DWORD WINAPI local_server_thread(LPVOID param)
-{
-    struct local_server_params * lsp = param;
-    WCHAR 		pipefn[100];
-    HRESULT		hres;
-    IStream		*pStm = lsp->stream;
-    STATSTG		ststg;
-    unsigned char	*buffer;
-    int 		buflen;
-    LARGE_INTEGER	seekto;
-    ULARGE_INTEGER	newpos;
-    ULONG		res;
-    BOOL multi_use = lsp->multi_use;
-    OVERLAPPED ovl;
-    HANDLE pipe_event, hPipe = lsp->pipe, new_pipe;
-    DWORD  bytes;
-
-    TRACE("Starting threader for %s.\n",debugstr_guid(&lsp->clsid));
-
-    memset(&ovl, 0, sizeof(ovl));
-    get_localserver_pipe_name(pipefn, &lsp->clsid);
-    ovl.hEvent = pipe_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-
-    while (1) {
-        if (!ConnectNamedPipe(hPipe, &ovl))
-        {
-            DWORD error = GetLastError();
-            if (error == ERROR_IO_PENDING)
-            {
-                HANDLE handles[2] = { pipe_event, lsp->stop_event };
-                DWORD ret;
-                ret = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
-                if (ret != WAIT_OBJECT_0)
-                    break;
-            }
-            /* client already connected isn't an error */
-            else if (error != ERROR_PIPE_CONNECTED)
-            {
-                ERR("ConnectNamedPipe failed with error %d\n", GetLastError());
-                break;
-            }
-        }
-
-        TRACE("marshalling LocalServer to client\n");
-        
-        hres = IStream_Stat(pStm,&ststg,STATFLAG_NONAME);
-        if (hres != S_OK)
-            break;
-
-        seekto.u.LowPart = 0;
-        seekto.u.HighPart = 0;
-        hres = IStream_Seek(pStm,seekto,STREAM_SEEK_SET,&newpos);
-        if (hres != S_OK) {
-            FIXME("IStream_Seek failed, %x\n",hres);
-            break;
-        }
-
-        buflen = ststg.cbSize.u.LowPart;
-        buffer = HeapAlloc(GetProcessHeap(),0,buflen);
-        
-        hres = IStream_Read(pStm,buffer,buflen,&res);
-        if (hres != S_OK) {
-            FIXME("Stream Read failed, %x\n",hres);
-            HeapFree(GetProcessHeap(),0,buffer);
-            break;
-        }
-        
-        WriteFile(hPipe,buffer,buflen,&res,&ovl);
-        GetOverlappedResult(hPipe, &ovl, &bytes, TRUE);
-        HeapFree(GetProcessHeap(),0,buffer);
-
-        FlushFileBuffers(hPipe);
-        DisconnectNamedPipe(hPipe);
-        TRACE("done marshalling LocalServer\n");
-
-        if (!multi_use)
-        {
-            TRACE("single use object, shutting down pipe %s\n", debugstr_w(pipefn));
-            break;
-        }
-        new_pipe = CreateNamedPipeW( pipefn, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                                     PIPE_TYPE_BYTE|PIPE_WAIT, PIPE_UNLIMITED_INSTANCES,
-                                     4096, 4096, 500 /* 0.5 second timeout */, NULL );
-        if (new_pipe == INVALID_HANDLE_VALUE)
-        {
-            FIXME("pipe creation failed for %s, le is %u\n", debugstr_w(pipefn), GetLastError());
-            break;
-        }
-        CloseHandle(hPipe);
-        hPipe = new_pipe;
-    }
-
-    CloseHandle(pipe_event);
-    CloseHandle(hPipe);
-    return 0;
-}
-
-/* starts listening for a local server */
-HRESULT RPC_StartLocalServer(REFCLSID clsid, IStream *stream, BOOL multi_use, void **registration)
-{
-    DWORD tid, err;
-    struct local_server_params *lsp;
-    WCHAR pipefn[100];
-
-    lsp = HeapAlloc(GetProcessHeap(), 0, sizeof(*lsp));
-    if (!lsp)
-        return E_OUTOFMEMORY;
-
-    lsp->clsid = *clsid;
-    lsp->stream = stream;
-    IStream_AddRef(stream);
-    lsp->stop_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    if (!lsp->stop_event)
-    {
-        HeapFree(GetProcessHeap(), 0, lsp);
-        return HRESULT_FROM_WIN32(GetLastError());
-    }
-    lsp->multi_use = multi_use;
-
-    get_localserver_pipe_name(pipefn, &lsp->clsid);
-    lsp->pipe = CreateNamedPipeW(pipefn, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                                 PIPE_TYPE_BYTE|PIPE_WAIT, PIPE_UNLIMITED_INSTANCES,
-                                 4096, 4096, 500 /* 0.5 second timeout */, NULL);
-    if (lsp->pipe == INVALID_HANDLE_VALUE)
-    {
-        err = GetLastError();
-        FIXME("pipe creation failed for %s, le is %u\n", debugstr_w(pipefn), GetLastError());
-        CloseHandle(lsp->stop_event);
-        HeapFree(GetProcessHeap(), 0, lsp);
-        return HRESULT_FROM_WIN32(err);
-    }
-
-    lsp->thread = CreateThread(NULL, 0, local_server_thread, lsp, 0, &tid);
-    if (!lsp->thread)
-    {
-        CloseHandle(lsp->pipe);
-        CloseHandle(lsp->stop_event);
-        HeapFree(GetProcessHeap(), 0, lsp);
-        return HRESULT_FROM_WIN32(GetLastError());
-    }
-
-    *registration = lsp;
-    return S_OK;
-}
-
-/* stops listening for a local server */
-void RPC_StopLocalServer(void *registration)
-{
-    struct local_server_params *lsp = registration;
-
-    /* signal local_server_thread to stop */
-    SetEvent(lsp->stop_event);
-    /* wait for it to exit */
-    WaitForSingleObject(lsp->thread, INFINITE);
-
-    IStream_Release(lsp->stream);
-    CloseHandle(lsp->stop_event);
-    CloseHandle(lsp->thread);
-    HeapFree(GetProcessHeap(), 0, lsp);
 }

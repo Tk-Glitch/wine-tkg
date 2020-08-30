@@ -52,7 +52,7 @@ enum CB_TYPE {
     SOURCE_STREAM_ADDED,
     SOURCE_STREAM_REMOVED,
     SOURCE_ALL_STREAMS,
-    STREAM_NEW_SAMPLE,
+    STREAM_PAD_EVENT,
     MEDIA_SOURCE_MAX,
     ACTIVATE_PUSH_MODE,
     QUERY_INPUT_SRC,
@@ -144,17 +144,23 @@ struct cb_data {
             GstQuery *query;
             gboolean ret;
         } query_sink_data;
-        struct new_sample_data {
-            GstElement *appsink;
+        struct pad_probe_data {
+            GstPad *pad;
+            GstPadProbeInfo *info;
             gpointer user;
-            GstFlowReturn ret;
-        } new_sample_data;
+            GstPadProbeReturn ret;
+        } pad_probe_data;
         struct chain_data {
             GstPad *pad;
             GstObject *parent;
             GstBuffer *buffer;
             GstFlowReturn ret;
         } chain_data;
+        struct new_sample_data {
+            GstElement *appsink;
+            gpointer user;
+            GstFlowReturn ret;
+        } new_sample_data;
     } u;
 
     int finished;
@@ -191,11 +197,10 @@ GstBusSyncReply watch_source_bus_wrapper(GstBus *bus, GstMessage *message, gpoin
 void source_stream_added_wrapper(GstElement *bin, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
 void source_stream_removed_wrapper(GstElement *element, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
 void source_all_streams_wrapper(GstElement *element, gpointer user) DECLSPEC_HIDDEN;
-GstFlowReturn stream_new_sample_wrapper(GstElement *appsink, gpointer user) DECLSPEC_HIDDEN;
+GstPadProbeReturn caps_listener_wrapper(GstPad *pad, GstPadProbeInfo *info, gpointer user);
 gboolean activate_push_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate) DECLSPEC_HIDDEN;
 gboolean query_input_src_wrapper(GstPad *pad, GstObject *parent, GstQuery *query) DECLSPEC_HIDDEN;
 GstBusSyncReply watch_decoder_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user) DECLSPEC_HIDDEN;
 GstFlowReturn decoder_new_sample_wrapper(GstElement *appsink, gpointer user) DECLSPEC_HIDDEN;
-void decoder_pad_added_wrapper(GstElement *element, GstPad *Pad, gpointer user) DECLSPEC_HIDDEN;
 
 #endif

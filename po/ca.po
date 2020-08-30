@@ -6824,6 +6824,12 @@ msgstr "Aquesta connexió de xarxa no existeix.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Un igual ha restablert la connexió.\n"
 
+#: winerror.mc:3767
+#, fuzzy
+#| msgid "Not implemented"
+msgid "Not implemented.\n"
+msgstr "No implementat"
+
 #: winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr "No s'ha trobat cap signatura en el fitxer.\n"
@@ -8448,7 +8454,7 @@ msgstr ""
 msgid "&Test Connection"
 msgstr "Connexions restablertes"
 
-#: version.rc:92 winemine.rc:65
+#: version.rc:92
 msgid "Advanced"
 msgstr "Avançat"
 
@@ -16720,8 +16726,10 @@ msgid "&Beginner"
 msgstr "&Principiant"
 
 #: winemine.rc:45
-msgid "&Advanced"
-msgstr "&Avançat"
+#, fuzzy
+#| msgid "Interface"
+msgid "&Intermediate"
+msgstr "Interfície"
 
 #: winemine.rc:46
 msgid "&Expert"
@@ -16750,6 +16758,12 @@ msgstr "Millors temps"
 #: winemine.rc:64
 msgid "Beginner"
 msgstr "Principiant"
+
+#: winemine.rc:65
+#, fuzzy
+#| msgid "Interface"
+msgid "Intermediate"
+msgstr "Interfície"
 
 #: winemine.rc:66
 msgid "Expert"

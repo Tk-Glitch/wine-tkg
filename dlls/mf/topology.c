@@ -1961,7 +1961,6 @@ static HRESULT topology_loader_enumerate_output_types(GUID *category, IMFMediaTy
     IMFActivate **activates;
     UINT32 num_activates;
     HRESULT hr;
-    unsigned int i;
 
     if (FAILED(hr = IMFMediaType_GetMajorType(input_type, &major_type)))
         return hr;
@@ -1977,7 +1976,7 @@ static HRESULT topology_loader_enumerate_output_types(GUID *category, IMFMediaTy
 
     hr = E_FAIL;
 
-    for (i = 0; i < num_activates; i++)
+    for (unsigned int i = 0; i < num_activates; i++)
     {
         IMFTransform *mft;
 
@@ -2015,13 +2014,14 @@ HRESULT connect_to_sink(struct available_output_type *type, void *context)
     IMFTopologyNode *node;
     struct connect_to_sink_context *ctx = context;
 
-    if (SUCCEEDED(IMFMediaTypeHandler_SetCurrentMediaType(ctx->sink_mth, type->type)))
+    if (SUCCEEDED(IMFMediaTypeHandler_IsMediaTypeSupported(ctx->sink_mth, type->type, NULL)))
     {
         MFCreateTopologyNode(MF_TOPOLOGY_TRANSFORM_NODE, &node);
         IMFTopologyNode_SetObject(node, (IUnknown *) type->transform);
         IMFTopologyNode_ConnectOutput(ctx->src, 0, node, 0);
         IMFTopologyNode_ConnectOutput(node, 0, ctx->sink, 0);
 
+        IMFMediaTypeHandler_SetCurrentMediaType(ctx->sink_mth, type->type);
         IMFTransform_SetOutputType(type->transform, 0, type->type, 0);
 
         return S_OK;
@@ -2072,8 +2072,9 @@ static HRESULT topology_loader_resolve_branch(IMFTopologyNode *src, IMFMediaType
     IMFTopologyNode_GetObject(sink, (IUnknown **)&streamsink);
     IMFStreamSink_GetMediaTypeHandler(streamsink, &mth);
 
-    if (SUCCEEDED(hr = IMFMediaTypeHandler_SetCurrentMediaType(mth, mediatype)))
+    if (SUCCEEDED(hr = IMFMediaTypeHandler_IsMediaTypeSupported(mth, mediatype, NULL)))
     {
+        IMFMediaTypeHandler_SetCurrentMediaType(mth, mediatype);
         return IMFTopologyNode_ConnectOutput(src, 0, sink, 0);
     }
 
@@ -2232,7 +2233,7 @@ static HRESULT topology_loader_resolve_partial_topology(struct topology_node *sr
         for (method = MF_CONNECT_DIRECT; method <= sink_method; method++)
             if (SUCCEEDED(topology_loader_resolve_branch(clone_src, src_mediatypes[0], clone_sink, method)))
             {
-                TRACE("Successfully connected nodes with method %u\n", src_method);
+                TRACE("Successfully connected nodes with method %u\n", method);
                 topology_loader_add_branch(*full_topology, clone_src, clone_sink);
                 heap_free(src_mediatypes);
                 return S_OK;
@@ -2338,6 +2339,7 @@ static HRESULT WINAPI topology_loader_Load(IMFTopoLoader *iface, IMFTopology *in
 
         if (FAILED(hr = topology_loader_resolve_partial_topology(src, sink, topology, &full_topology)))
         {
+            ERR("Failed to resolve connection between %p and %p. %x\n", src, sink, hr);
             heap_free(node_pairs);
             return hr;
         }
