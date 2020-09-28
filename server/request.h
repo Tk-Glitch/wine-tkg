@@ -142,7 +142,6 @@ DECL_HANDLER(unload_dll);
 DECL_HANDLER(queue_apc);
 DECL_HANDLER(get_apc_result);
 DECL_HANDLER(close_handle);
-DECL_HANDLER(socket_cleanup);
 DECL_HANDLER(set_handle_info);
 DECL_HANDLER(dup_handle);
 DECL_HANDLER(open_process);
@@ -469,7 +468,6 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_queue_apc,
     (req_handler)req_get_apc_result,
     (req_handler)req_close_handle,
-    (req_handler)req_socket_cleanup,
     (req_handler)req_set_handle_info,
     (req_handler)req_dup_handle,
     (req_handler)req_open_process,
@@ -957,7 +955,6 @@ C_ASSERT( FIELD_OFFSET(struct get_apc_result_reply, result) == 8 );
 C_ASSERT( sizeof(struct get_apc_result_reply) == 48 );
 C_ASSERT( FIELD_OFFSET(struct close_handle_request, handle) == 12 );
 C_ASSERT( sizeof(struct close_handle_request) == 16 );
-C_ASSERT( sizeof(struct socket_cleanup_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct set_handle_info_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct set_handle_info_request, flags) == 16 );
 C_ASSERT( FIELD_OFFSET(struct set_handle_info_request, mask) == 20 );

@@ -491,7 +491,7 @@
 @ cdecl _o__mbbtombc(long) ucrtbase._o__mbbtombc
 @ stub _o__mbbtombc_l
 @ cdecl _o__mbbtype(long long) ucrtbase._o__mbbtype
-@ stub _o__mbbtype_l
+@ cdecl _o__mbbtype_l(long long ptr) ucrtbase._o__mbbtype_l
 @ cdecl _o__mbccpy(ptr ptr) ucrtbase._o__mbccpy
 @ cdecl _o__mbccpy_l(ptr ptr ptr) ucrtbase._o__mbccpy_l
 @ cdecl _o__mbccpy_s(ptr long ptr ptr) ucrtbase._o__mbccpy_s
@@ -520,7 +520,7 @@
 @ cdecl _o__mbschr(str long) ucrtbase._o__mbschr
 @ stub _o__mbschr_l
 @ cdecl _o__mbscmp(str str) ucrtbase._o__mbscmp
-@ stub _o__mbscmp_l
+@ cdecl _o__mbscmp_l(str str ptr) ucrtbase._o__mbscmp_l
 @ cdecl _o__mbscoll(str str) ucrtbase._o__mbscoll
 @ cdecl _o__mbscoll_l(str str ptr) ucrtbase._o__mbscoll_l
 @ cdecl _o__mbscpy_s(ptr long str) ucrtbase._o__mbscpy_s
@@ -578,7 +578,7 @@
 @ stub _o__mbsncpy_s
 @ stub _o__mbsncpy_s_l
 @ cdecl _o__mbsnextc(str) ucrtbase._o__mbsnextc
-@ stub _o__mbsnextc_l
+@ cdecl _o__mbsnextc_l(str ptr) ucrtbase._o__mbsnextc_l
 @ cdecl _o__mbsnicmp(str str long) ucrtbase._o__mbsnicmp
 @ stub _o__mbsnicmp_l
 @ stub _o__mbsnicoll

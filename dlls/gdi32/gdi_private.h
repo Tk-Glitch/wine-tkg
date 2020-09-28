@@ -99,7 +99,7 @@ typedef struct tagDC
 
     struct gdi_path *path;
 
-    struct font_gamma_ramp *font_gamma_ramp;
+    const struct font_gamma_ramp *font_gamma_ramp;
 
     UINT          font_code_page;
     WORD          ROPmode;
@@ -620,7 +620,7 @@ static inline void copy_bitmapinfo( BITMAPINFO *dst, const BITMAPINFO *src )
     memcpy( dst, src, get_dib_info_size( src, DIB_RGB_COLORS ));
 }
 
-extern void free_heap_bits( struct gdi_image_bits *bits ) DECLSPEC_HIDDEN;
+extern void CDECL free_heap_bits( struct gdi_image_bits *bits ) DECLSPEC_HIDDEN;
 
 extern HMODULE gdi32_module DECLSPEC_HIDDEN;
 

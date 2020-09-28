@@ -323,16 +323,29 @@ static void round_points(POINT *pti, GpPointF *ptf, INT count)
     int i;
 
     for(i = 0; i < count; i++){
-        pti[i].x = gdip_round(ptf[i].X);
-        pti[i].y = gdip_round(ptf[i].Y);
+        if(isnan(ptf[i].X))
+            pti[i].x = 0;
+        else
+            pti[i].x = gdip_round(ptf[i].X);
+
+        if(isnan(ptf[i].Y))
+            pti[i].y = 0;
+        else
+            pti[i].y = gdip_round(ptf[i].Y);
     }
 }
 
 static void gdi_alpha_blend(GpGraphics *graphics, INT dst_x, INT dst_y, INT dst_width, INT dst_height,
                             HDC hdc, INT src_x, INT src_y, INT src_width, INT src_height)
 {
-    if (GetDeviceCaps(graphics->hdc, TECHNOLOGY) == DT_RASPRINTER &&
-        GetDeviceCaps(graphics->hdc, SHADEBLENDCAPS) == SB_NONE)
+    CompositingMode comp_mode;
+    INT technology = GetDeviceCaps(graphics->hdc, TECHNOLOGY);
+    INT shadeblendcaps  = GetDeviceCaps(graphics->hdc, SHADEBLENDCAPS);
+
+    GdipGetCompositingMode(graphics, &comp_mode);
+
+    if ((technology == DT_RASPRINTER && shadeblendcaps == SB_NONE)
+        || comp_mode == CompositingModeSourceCopy)
     {
         TRACE("alpha blending not supported by device, fallback to StretchBlt\n");
 

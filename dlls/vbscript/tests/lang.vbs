@@ -47,6 +47,8 @@ Call ok(56.789e-2 = 0.56789, "56.789e-2 <> 0.56789")
 Call ok(1e-94938484 = 0, "1e-... <> 0")
 Call ok(34e0 = 34, "34e0 <> 34")
 Call ok(34E1 = 340, "34E0 <> 340")
+Call ok(.5 = 0.5, ".5 <> 0.5")
+Call ok(.5e1 = 5, ".5e1 <> 5")
 Call ok(--1 = 1, "--1 = " & --1)
 Call ok(-empty = 0, "-empty = " & (-empty))
 Call ok(true = -1, "! true = -1")
@@ -64,6 +66,9 @@ Call ok(W = 5, "W = " & W & " expected " & 5)
 
 x = "xx"
 Call ok(x = "xx", "x = " & x & " expected ""xx""")
+
+Dim public1 : public1 = 42
+Call ok(public1 = 42, "public1=" & public1 & " expected & " & 42)
 
 Call ok(true <> false, "true <> false is false")
 Call ok(not (true <> true), "true <> true is true")
@@ -86,6 +91,7 @@ Call ok(getVT(null) = "VT_NULL", "getVT(null) is not VT_NULL")
 Call ok(getVT(0) = "VT_I2", "getVT(0) is not VT_I2")
 Call ok(getVT(1) = "VT_I2", "getVT(1) is not VT_I2")
 Call ok(getVT(0.5) = "VT_R8", "getVT(0.5) is not VT_R8")
+Call ok(getVT(.5) = "VT_R8", "getVT(.5) is not VT_R8")
 Call ok(getVT(0.0) = "VT_R8", "getVT(0.0) is not VT_R8")
 Call ok(getVT(2147483647) = "VT_I4", "getVT(2147483647) is not VT_I4")
 Call ok(getVT(2147483648) = "VT_R8", "getVT(2147483648) is not VT_R8")
@@ -346,6 +352,10 @@ while empty
 wend
 
 x = 0
+WHILE x < 3 : x = x + 1 : Wend
+Call ok(x = 3, "x not equal to 3")
+
+x = 0
 WHILE x < 3 : x = x + 1
 Wend
 Call ok(x = 3, "x not equal to 3")
@@ -370,6 +380,8 @@ call ok((x and y), "x or y is false after while")
 do while false
 loop
 
+do while false : loop
+
 do while true
     exit do
     ok false, "exit do didn't work"
@@ -378,6 +390,10 @@ loop
 x = 0
 Do While x < 2 : x = x + 1
 Loop
+Call ok(x = 2, "x not equal to 2")
+
+x = 0
+Do While x < 2 : x = x + 1: Loop
 Call ok(x = 2, "x not equal to 2")
 
 x = 0
@@ -407,6 +423,10 @@ loop
 x = 0
 Do: :: x = x + 2
 Loop Until x = 4
+Call ok(x = 4, "x not equal to 4")
+
+x = 0
+Do: :: x = x + 2 :::  : Loop Until x = 4
 Call ok(x = 4, "x not equal to 4")
 
 x = 5
@@ -542,6 +562,16 @@ for x = 1 to 5 :
     Call ok(false, "exit for not escaped the loop?")
 next
 
+dim a1(8)
+a1(6)=8
+for x=1 to 8:a1(x)=x-1:next
+Call ok(a1(6) = 5, "colon used in for loop")
+
+a1(6)=8
+for x=1 to 8:y=1
+a1(x)=x-2:next
+Call ok(a1(6) = 4, "colon used in for loop")
+
 do while true
     for x = 1 to 100
         exit do
@@ -573,6 +603,15 @@ next
 Call ok(y = 3, "y = " & y)
 Call ok(z = 6, "z = " & z)
 Call ok(getVT(x) = "VT_EMPTY*", "getVT(x) = " & getVT(x))
+
+Call collectionObj.reset()
+y = 0
+x = 10
+z = 0
+for each x in collectionObj : z = z + 2 : y = y+1 ::
+Call ok(x = y, "x <> y") : next
+Call ok(y = 3, "y = " & y)
+Call ok(z = 6, "z = " & z)
 
 Call collectionObj.reset()
 y = false

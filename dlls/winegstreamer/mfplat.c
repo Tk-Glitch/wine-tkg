@@ -404,6 +404,8 @@ failed:
     return hr;
 }
 
+static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618, 0x5e5a, 0x468a, {0x9f, 0x15, 0xd8, 0x27, 0xa9, 0xa0, 0x81, 0x62}};
+
 static HRESULT h264_decoder_create(REFIID riid, void **ret)
 {
     return generic_decoder_construct(riid, ret, DECODER_TYPE_H264);
@@ -429,16 +431,6 @@ static HRESULT m4s2_decoder_create(REFIID riid, void **ret)
     return generic_decoder_construct(riid, ret, DECODER_TYPE_M4S2);
 }
 
-static HRESULT mp4_stream_handler_create(REFIID riid, void **ret)
-{
-    return container_stream_handler_construct(riid, ret, SOURCE_TYPE_MPEG_4);
-}
-
-static HRESULT asf_stream_handler_create(REFIID riid, void **ret)
-{
-    return container_stream_handler_construct(riid, ret, SOURCE_TYPE_ASF);
-}
-
 static GUID CLSID_CColorConvertDMO = {0x98230571,0x0087,0x4204,{0xb0,0x20,0x32,0x82,0x53,0x8e,0x57,0xd3}};
 
 static GUID CLSID_WINEAudioConverter = {0x6a170414,0xaad9,0x4693,{0xb8,0x06,0x3a,0x0c,0x47,0xc5,0x70,0xd6}};
@@ -451,13 +443,12 @@ static const struct class_object
 class_objects[] =
 {
     { &CLSID_VideoProcessorMFT, &video_processor_create },
+    { &CLSID_GStreamerByteStreamHandler, &winegstreamer_stream_handler_create },
     { &CLSID_CMSH264DecoderMFT, &h264_decoder_create },
     { &CLSID_CMSAACDecMFT, &aac_decoder_create },
     { &CLSID_CWMVDecMediaObject, &wmv_decoder_create },
     { &CLSID_CWMADecMediaObject, &wma_decoder_create },
     { &CLSID_CMpeg4sDecMFT, m4s2_decoder_create },
-    { &CLSID_MPEG4ByteStreamHandler, &mp4_stream_handler_create },
-    { &CLSID_ASFByteStreamHandler, &asf_stream_handler_create },
     { &CLSID_CColorConvertDMO, &color_converter_create },
     { &CLSID_WINEAudioConverter, &audio_converter_create },
 };
@@ -467,9 +458,6 @@ HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
     struct class_factory *factory;
     unsigned int i;
     HRESULT hr;
-
-    if (!(init_gstreamer()))
-        return CLASS_E_CLASSNOTAVAILABLE;
 
     for (i = 0; i < ARRAY_SIZE(class_objects); ++i)
     {
@@ -527,9 +515,9 @@ const GUID *h264_decoder_input_types[] =
 };
 const GUID *h264_decoder_output_types[] =
 {
+    &MFVideoFormat_NV12,
     &MFVideoFormat_I420,
     &MFVideoFormat_IYUV,
-    &MFVideoFormat_NV12,
     &MFVideoFormat_YUY2,
     &MFVideoFormat_YV12,
 };
@@ -737,12 +725,12 @@ HRESULT mfplat_DllRegisterServer(void)
     return S_OK;
 }
 
-const static struct
+static const struct
 {
     const GUID *subtype;
     GstVideoFormat format;
 }
-uncompressed_formats[] =
+uncompressed_video_formats[] =
 {
     {&MFVideoFormat_ARGB32,  GST_VIDEO_FORMAT_BGRA},
     {&MFVideoFormat_RGB32,   GST_VIDEO_FORMAT_BGRx},
@@ -777,8 +765,8 @@ static void codec_data_to_user_data(GstStructure *structure, IMFMediaType *type)
     }
 }
 
-/* caps will be modified to represent the exact type needed for the format */
-static IMFMediaType* transform_to_media_type(GstCaps *caps)
+/* returns NULL if doesn't match exactly */
+IMFMediaType *mf_media_type_from_caps(const GstCaps *caps)
 {
     IMFMediaType *media_type;
     GstStructure *info;
@@ -792,18 +780,16 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
     }
 
     if (FAILED(MFCreateMediaType(&media_type)))
-    {
         return NULL;
-    }
 
     info = gst_caps_get_structure(caps, 0);
     mime_type = gst_structure_get_name(info);
 
-    if (!(strncmp(mime_type, "video", 5)))
+    if (!strncmp(mime_type, "video", 5))
     {
         GstVideoInfo video_info;
 
-        if (!(gst_video_info_from_caps(&video_info, caps)))
+        if (!gst_video_info_from_caps(&video_info, caps))
         {
             return NULL;
         }
@@ -814,7 +800,7 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
 
         IMFMediaType_SetUINT64(media_type, &MF_MT_FRAME_RATE, ((UINT64)video_info.fps_n << 32) | video_info.fps_d);
 
-        if (!(strcmp(mime_type, "video/x-raw")))
+        if (!strcmp(mime_type, "video/x-raw"))
         {
             GUID fourcc_subtype = MFVideoFormat_Base;
             unsigned int i;
@@ -828,22 +814,35 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
             }
             else
             {
-                for (i = 0; i < ARRAY_SIZE(uncompressed_formats); i++)
+                for (i = 0; i < ARRAY_SIZE(uncompressed_video_formats); i++)
                 {
-                    if (uncompressed_formats[i].format == video_info.finfo->format)
+                    if (uncompressed_video_formats[i].format == video_info.finfo->format)
                     {
-                        IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, uncompressed_formats[i].subtype);
+                        IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, uncompressed_video_formats[i].subtype);
                         break;
                     }
                 }
-                if (i == ARRAY_SIZE(uncompressed_formats))
-                    FIXME("Unrecognized format.\n");
+                if (i == ARRAY_SIZE(uncompressed_video_formats))
+                {
+                    FIXME("Unrecognized uncompressed video format %x\n", video_info.finfo->format);
+                    IMFMediaType_Release(media_type);
+                    return NULL;
+                }
             }
         }
         else if (!(strcmp(mime_type, "video/x-h264")))
         {
             const char *profile, *level;
 
+            /* validation */
+            if (strcmp(gst_structure_get_string(info, "stream-format"), "byte-stream"))
+                return NULL;
+            if (strcmp(gst_structure_get_string(info, "alignment"), "au"))
+                return NULL;
+            if (gst_structure_get_value(info, "codec-data"))
+                return NULL;
+
+            /* conversion */
             IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFVideoFormat_H264);
             IMFMediaType_SetUINT32(media_type, &MF_MT_COMPRESSED, TRUE);
 
@@ -855,6 +854,8 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
                     IMFMediaType_SetUINT32(media_type, &MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High);
                 else if (!(strcmp(profile, "high-4:4:4")))
                     IMFMediaType_SetUINT32(media_type, &MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_444);
+                else if (!(strcmp(profile, "constrained-baseline")))
+                    IMFMediaType_SetUINT32(media_type, &MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_ConstrainedBase);
                 else
                     FIXME("Unrecognized profile %s\n", profile);
             }
@@ -897,13 +898,6 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
                 {
                     FIXME("Unrecognized level %s", level);
                 }
-            }
-            gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
-            gst_caps_set_simple(caps, "alignment", G_TYPE_STRING, "au", NULL);
-            for (unsigned int i = 0; i < gst_caps_get_size(caps); i++)
-            {
-                GstStructure *structure = gst_caps_get_structure (caps, i);
-                gst_structure_remove_field(structure, "codec_data");
             }
         }
         else if (!(strcmp(mime_type, "video/x-wmv")))
@@ -958,11 +952,10 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
         else
         {
             FIXME("Unrecognized video format %s\n", mime_type);
-            IMFMediaType_Release(media_type);
             return NULL;
         }
     }
-    else if (!(strncmp(mime_type, "audio", 5)))
+    else if (!strncmp(mime_type, "audio", 5))
     {
         gint rate, channels, bitrate;
         guint64 channel_mask;
@@ -975,57 +968,51 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
             IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_NUM_CHANNELS, channels);
 
         if (gst_structure_get(info, "channel-mask", GST_TYPE_BITMASK, &channel_mask, NULL))
-            IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_CHANNEL_MASK, (DWORD)channel_mask);
+            IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_CHANNEL_MASK, channel_mask);
 
         if (gst_structure_get_int(info, "bitrate", &bitrate))
             IMFMediaType_SetUINT32(media_type, &MF_MT_AVG_BITRATE, bitrate);
 
-        if (!(strcmp(mime_type, "audio/x-raw")))
+        if (!strcmp(mime_type, "audio/x-raw"))
         {
-            const char *format;
-            if ((format = gst_structure_get_string(info, "format")))
+            GstAudioInfo audio_info;
+
+            if (gst_audio_info_from_caps(&audio_info, caps))
             {
-                char type;
-                unsigned int bits_per_sample;
-                char endian[2];
-                char new_format[6];
-                if ((strlen(format) > 5) || (sscanf(format, "%c%u%2c", &type, &bits_per_sample, endian) < 2))
+                DWORD depth = GST_AUDIO_INFO_DEPTH(&audio_info);
+
+                /* validation */
+                if ((audio_info.finfo->flags & GST_AUDIO_FORMAT_FLAG_INTEGER && depth > 8) ||
+                    (audio_info.finfo->flags & GST_AUDIO_FORMAT_FLAG_SIGNED && depth <= 8) ||
+                    (audio_info.finfo->endianness != G_LITTLE_ENDIAN && depth > 8))
                 {
-                    FIXME("Unhandled audio format %s\n", format);
                     IMFMediaType_Release(media_type);
                     return NULL;
                 }
 
-                if (type == 'F')
+                /* conversion */
+                switch (audio_info.finfo->flags)
                 {
-                    IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_Float);
-                }
-                else if (type == 'U' || type == 'S')
-                {
-                    IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
-                    if (bits_per_sample == 8)
-                        type = 'U';
-                    else
-                        type = 'S';
-                }
-                else
-                {
-                    FIXME("Unrecognized audio format: %s\n", format);
-                    IMFMediaType_Release(media_type);
-                    return NULL;
+                    case GST_AUDIO_FORMAT_FLAG_FLOAT:
+                        IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_Float);
+                        break;
+                    case GST_AUDIO_FORMAT_FLAG_INTEGER:
+                    case GST_AUDIO_FORMAT_FLAG_SIGNED:
+                        IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
+                        break;
+                    default:
+                        FIXME("Unrecognized audio format %x\n", audio_info.finfo->format);
+                        IMFMediaType_Release(media_type);
+                        return NULL;
                 }
 
-                IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, bits_per_sample);
-
-                if (endian[0] == 'B')
-                    endian[0] = 'L';
-
-                sprintf(new_format, "%c%u%.2s", type, bits_per_sample, bits_per_sample > 8 ? endian : 0);
-                gst_caps_set_simple(caps, "format", G_TYPE_STRING, new_format, NULL);
+                IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, depth);
             }
             else
             {
-                ERR("Failed to get audio format\n");
+                ERR("Failed to get caps audio info\n");
+                IMFMediaType_Release(media_type);
+                return NULL;
             }
         }
         else if (!(strcmp(mime_type, "audio/mpeg")))
@@ -1167,32 +1154,28 @@ static IMFMediaType* transform_to_media_type(GstCaps *caps)
     return media_type;
 }
 
-/* returns NULL if doesn't match exactly */
-IMFMediaType *mf_media_type_from_caps(GstCaps *caps)
-{
-    GstCaps *writeable_caps;
-    IMFMediaType *ret;
-
-    writeable_caps = gst_caps_copy(caps);
-    ret = transform_to_media_type(writeable_caps);
-
-    if (!(gst_caps_is_equal(caps, writeable_caps)))
-    {
-        IMFMediaType_Release(ret);
-        ret = NULL;
-    }
-    gst_caps_unref(writeable_caps);
-    return ret;
-}
-
 GstCaps *make_mf_compatible_caps(GstCaps *caps)
 {
     GstCaps *ret;
     IMFMediaType *media_type;
+    GstStructure *structure;
+    const char *mime_type;
+
+    if (gst_caps_get_size(caps) != 1)
+        return NULL;
 
     ret = gst_caps_copy(caps);
+    structure = gst_caps_get_structure(ret, 0);
+    mime_type = gst_structure_get_name(structure);
 
-    if ((media_type = transform_to_media_type(ret)))
+    if (!strcmp(mime_type, "video/x-h264"))
+    {
+        gst_caps_set_simple(ret, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
+        gst_caps_set_simple(ret, "alignment", G_TYPE_STRING, "au", NULL);
+        gst_structure_remove_field(structure, "codec_data");
+    }
+
+    if ((media_type = mf_media_type_from_caps(ret)))
         IMFMediaType_Release(media_type);
 
     if (!media_type)
@@ -1260,11 +1243,11 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
 
             output = gst_caps_new_empty_simple("video/x-raw");
 
-            for (i = 0; i < ARRAY_SIZE(uncompressed_formats); i++)
+            for (i = 0; i < ARRAY_SIZE(uncompressed_video_formats); i++)
             {
-                if (IsEqualGUID(uncompressed_formats[i].subtype, &subtype))
+                if (IsEqualGUID(uncompressed_video_formats[i].subtype, &subtype))
                 {
-                    format = uncompressed_formats[i].format;
+                    format = uncompressed_video_formats[i].format;
                     break;
                 }
             }
@@ -1304,6 +1287,7 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
                     case eAVEncH264VProfile_Main: profile = "main"; break;
                     case eAVEncH264VProfile_High: profile = "high"; break;
                     case eAVEncH264VProfile_444: profile = "high-4:4:4"; break;
+                    case eAVEncH264VProfile_ConstrainedBase: profile = "constrained-baseline"; break;
                     default: FIXME("Unknown profile %u\n", h264_profile);
                 }
                 if (profile)
@@ -1526,7 +1510,7 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
         }
         if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_CHANNEL_MASK, &channel_mask)))
         {
-            gst_caps_set_simple(output, "channel-mask", GST_TYPE_BITMASK, channel_mask, NULL);
+            gst_caps_set_simple(output, "channel-mask", GST_TYPE_BITMASK, (guint64) channel_mask, NULL);
         }
 
         if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AVG_BITRATE, &bitrate)))

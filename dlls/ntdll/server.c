@@ -1049,30 +1049,6 @@ int server_remove_fd_from_cache( HANDLE handle )
 
 
 /***********************************************************************
- *           wine_server_close_fds_by_type
- *
- * Needed for a proper implementation of WSACleanup.
- */
-void CDECL wine_server_close_fds_by_type( enum server_fd_type type )
-{
-    union fd_cache_entry cache;
-    unsigned int entry, idx;
-
-    for (entry = 0; entry < FD_CACHE_ENTRIES; entry++)
-    {
-        if (!fd_cache[entry]) continue;
-        for (idx = 0; idx < FD_CACHE_BLOCK_SIZE; idx++)
-        {
-            cache.data = InterlockedCompareExchange64( &fd_cache[entry][idx].data, 0, 0 );
-            if (cache.s.type != type || cache.s.fd == 0) continue;
-            if (InterlockedCompareExchange64( &fd_cache[entry][idx].data, 0, cache.data ) != cache.data) continue;
-            close( cache.s.fd - 1 );
-        }
-    }
-}
-
-
-/***********************************************************************
  *           server_get_unix_fd
  *
  * The returned unix_fd should be closed iff needs_close is non-zero.

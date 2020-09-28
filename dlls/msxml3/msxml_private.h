@@ -40,6 +40,9 @@ typedef enum {
     MSXML6        = 60
 } MSXML_VERSION;
 
+extern const CLSID * DOMDocument_version(MSXML_VERSION v) DECLSPEC_HIDDEN;
+extern const CLSID * SchemaCache_version(MSXML_VERSION v) DECLSPEC_HIDDEN;
+
 /* typelibs */
 typedef enum tid_t {
     NULL_tid,
@@ -498,36 +501,13 @@ extern HRESULT XMLDocument_create(void**) DECLSPEC_HIDDEN;
 extern HRESULT SAXXMLReader_create(MSXML_VERSION, void**) DECLSPEC_HIDDEN;
 extern HRESULT SAXAttributes_create(MSXML_VERSION, void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLHTTPRequest_create(void **) DECLSPEC_HIDDEN;
+extern HRESULT XMLHTTPRequest2_create(void **) DECLSPEC_HIDDEN;
 extern HRESULT ServerXMLHTTP_create(void **) DECLSPEC_HIDDEN;
 extern HRESULT XSLTemplate_create(void**) DECLSPEC_HIDDEN;
 extern HRESULT MXWriter_create(MSXML_VERSION, void**) DECLSPEC_HIDDEN;
 extern HRESULT MXNamespaceManager_create(void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLParser_create(void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLView_create(void**) DECLSPEC_HIDDEN;
-
-static inline const CLSID* DOMDocument_version(MSXML_VERSION v)
-{
-    switch (v)
-    {
-    default:
-    case MSXML_DEFAULT: return &CLSID_DOMDocument;
-    case MSXML3: return &CLSID_DOMDocument30;
-    case MSXML4: return &CLSID_DOMDocument40;
-    case MSXML6: return &CLSID_DOMDocument60;
-    }
-}
-
-static inline const CLSID* SchemaCache_version(MSXML_VERSION v)
-{
-    switch (v)
-    {
-    default:
-    case MSXML_DEFAULT: return &CLSID_XMLSchemaCache;
-    case MSXML3: return &CLSID_XMLSchemaCache30;
-    case MSXML4: return &CLSID_XMLSchemaCache40;
-    case MSXML6: return &CLSID_XMLSchemaCache60;
-    }
-}
 
 typedef struct bsc_t bsc_t;
 

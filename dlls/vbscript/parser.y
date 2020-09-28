@@ -178,8 +178,8 @@ StatementsNl_opt
     | StatementsNl                          { $$ = $1; }
 
 StatementsNl
-    : StatementNl                           { $$ = $1; }
-    | StatementNl StatementsNl              { $$ = link_statements($1, $2); }
+    : SimpleStatement StSep                 { $$ = $1; }
+    | SimpleStatement StSep StatementsNl    { $$ = link_statements($1, $3); }
 
 StatementNl
     : Statement tNL                         { $$ = $1; }
@@ -516,11 +516,16 @@ static void source_add_statement(parser_ctx_t *ctx, statement_t *stat)
     if(!stat)
         return;
 
+    /* concatenate both linked lists */
     if(ctx->stats) {
         ctx->stats_tail->next = stat;
         ctx->stats_tail = stat;
     }else {
         ctx->stats = ctx->stats_tail = stat;
+    }
+    /* find new tail */
+    while(ctx->stats_tail->next) {
+        ctx->stats_tail=ctx->stats_tail->next;
     }
 }
 

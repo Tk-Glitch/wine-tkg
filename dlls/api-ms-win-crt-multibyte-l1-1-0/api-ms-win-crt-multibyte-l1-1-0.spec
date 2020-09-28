@@ -65,7 +65,7 @@
 @ cdecl _mbbtombc(long) ucrtbase._mbbtombc
 @ stub _mbbtombc_l
 @ cdecl _mbbtype(long long) ucrtbase._mbbtype
-@ stub _mbbtype_l
+@ cdecl _mbbtype_l(long long ptr) ucrtbase._mbbtype_l
 @ stub _mbcasemap
 @ cdecl _mbccpy(ptr ptr) ucrtbase._mbccpy
 @ cdecl _mbccpy_l(ptr ptr ptr) ucrtbase._mbccpy_l
@@ -95,7 +95,7 @@
 @ cdecl _mbschr(str long) ucrtbase._mbschr
 @ stub _mbschr_l
 @ cdecl _mbscmp(str str) ucrtbase._mbscmp
-@ stub _mbscmp_l
+@ cdecl _mbscmp_l(str str ptr) ucrtbase._mbscmp_l
 @ cdecl _mbscoll(str str) ucrtbase._mbscoll
 @ cdecl _mbscoll_l(str str ptr) ucrtbase._mbscoll_l
 @ cdecl _mbscpy_s(ptr long str) ucrtbase._mbscpy_s
@@ -154,7 +154,7 @@
 @ stub _mbsncpy_s
 @ stub _mbsncpy_s_l
 @ cdecl _mbsnextc(str) ucrtbase._mbsnextc
-@ stub _mbsnextc_l
+@ cdecl _mbsnextc_l(str ptr) ucrtbase._mbsnextc_l
 @ cdecl _mbsnicmp(str str long) ucrtbase._mbsnicmp
 @ stub _mbsnicmp_l
 @ cdecl _mbsnicoll(str str long) ucrtbase._mbsnicoll

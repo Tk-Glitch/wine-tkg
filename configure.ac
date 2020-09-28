@@ -1728,7 +1728,9 @@ then
               AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gst/gst.h>]],
                                                  [[static int a[sizeof(gint64) > 4 ? 1 : -1]; if (a[0]) return 0;]])],
                 [AC_MSG_RESULT([yes])
-                 AC_CHECK_LIB(gstreamer-1.0,gst_pad_new,[:],,[$GSTREAMER_LIBS])],
+                 AC_CHECK_LIB(gstreamer-1.0,gst_pad_new,[:],,[$GSTREAMER_LIBS])
+                 WINE_CHECK_LIB_FUNCS([gst_structure_get_list], [$GSTREAMER_LIBS])
+                 ],
                 [AC_MSG_RESULT([no])
                  ac_glib2_broken=yes
                  WINE_NOTICE([glib-2.0 pkgconfig configuration is for the wrong architecture, winegstreamer won't be built.])])])])
@@ -2013,6 +2015,17 @@ then
     enable_x3daudio1_5=${enable_x3daudio1_5:-no}
     enable_x3daudio1_6=${enable_x3daudio1_6:-no}
     enable_x3daudio1_7=${enable_x3daudio1_7:-no}
+    enable_xactengine2_0=${enable_xactengine2_0:-no}
+    enable_xactengine2_1=${enable_xactengine2_1:-no}
+    enable_xactengine2_10=${enable_xactengine2_10:-no}
+    enable_xactengine2_2=${enable_xactengine2_2:-no}
+    enable_xactengine2_3=${enable_xactengine2_3:-no}
+    enable_xactengine2_4=${enable_xactengine2_4:-no}
+    enable_xactengine2_5=${enable_xactengine2_5:-no}
+    enable_xactengine2_6=${enable_xactengine2_6:-no}
+    enable_xactengine2_7=${enable_xactengine2_7:-no}
+    enable_xactengine2_8=${enable_xactengine2_8:-no}
+    enable_xactengine2_9=${enable_xactengine2_9:-no}
     enable_xactengine3_0=${enable_xactengine3_0:-no}
     enable_xactengine3_1=${enable_xactengine3_1:-no}
     enable_xactengine3_2=${enable_xactengine3_2:-no}
@@ -2088,6 +2101,8 @@ if test "x$with_vkd3d" != "xno"
 then
     WINE_PACKAGE_FLAGS(VKD3D,[libvkd3d],,,,
         [WINE_CHECK_SONAME(vkd3d,vkd3d_get_dxgi_format,,,[$VKD3D_LIBS])])
+    WINE_PACKAGE_FLAGS(VKD3D_SHADER,[libvkd3d-shader],,,,
+        [WINE_CHECK_SONAME(vkd3d-shader,vkd3d_shader_compile,,,[$VKD3D_SHADER_LIBS])])
 fi
 WINE_NOTICE_WITH(vkd3d,[test "x$ac_cv_lib_soname_vkd3d" = "x"],
                  [vkd3d ${notice_platform}development files not found (or too old), Direct3D 12 won't be supported.])
@@ -2909,6 +2924,7 @@ depend: \$(MAKEDEP) dummy
 WINE_CONFIG_SYMLINK(wine,tools/winewrapper)
 WINE_CONFIG_SYMLINK(wine64,tools/winewrapper,["x$enable_win64" != xno -o -n "$with_wine64"])
 
+WINE_CONFIG_MAKEFILE(color)
 WINE_CONFIG_MAKEFILE(dlls/acledit)
 WINE_CONFIG_MAKEFILE(dlls/aclui)
 WINE_CONFIG_MAKEFILE(dlls/activeds.tlb)
@@ -3665,6 +3681,7 @@ WINE_CONFIG_MAKEFILE(dlls/mtxdm)
 WINE_CONFIG_MAKEFILE(dlls/ncrypt)
 WINE_CONFIG_MAKEFILE(dlls/nddeapi)
 WINE_CONFIG_MAKEFILE(dlls/ndis.sys)
+WINE_CONFIG_MAKEFILE(dlls/ndis.sys/tests)
 WINE_CONFIG_MAKEFILE(dlls/netapi32)
 WINE_CONFIG_MAKEFILE(dlls/netapi32/tests)
 WINE_CONFIG_MAKEFILE(dlls/netcfgx)
@@ -3933,6 +3950,9 @@ WINE_CONFIG_MAKEFILE(dlls/win87em.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/winaspi.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/windebug.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/windows.gaming.input.dll)
+WINE_CONFIG_MAKEFILE(dlls/windows.globalization.dll)
+WINE_CONFIG_MAKEFILE(dlls/windows.media.speech.dll)
+WINE_CONFIG_MAKEFILE(dlls/windows.networking.connectivity.dll)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecs)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecs/tests)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecsext)
@@ -4019,6 +4039,17 @@ WINE_CONFIG_MAKEFILE(dlls/x3daudio1_4)
 WINE_CONFIG_MAKEFILE(dlls/x3daudio1_5)
 WINE_CONFIG_MAKEFILE(dlls/x3daudio1_6)
 WINE_CONFIG_MAKEFILE(dlls/x3daudio1_7)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_0)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_1)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_10)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_2)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_3)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_4)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_5)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_6)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_7)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_8)
+WINE_CONFIG_MAKEFILE(dlls/xactengine2_9)
 WINE_CONFIG_MAKEFILE(dlls/xactengine3_0)
 WINE_CONFIG_MAKEFILE(dlls/xactengine3_1)
 WINE_CONFIG_MAKEFILE(dlls/xactengine3_2)
@@ -4267,6 +4298,7 @@ clean::
 else
     TOP_INSTALL_DEV="$TOP_INSTALL_DEV include"
     TOP_INSTALL_LIB="$TOP_INSTALL_LIB \
+color \
 fonts \
 loader/wine.inf \
 loader/winebus.inf \

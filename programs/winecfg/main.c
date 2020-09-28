@@ -197,9 +197,13 @@ ProcessCmdLine(LPSTR lpCmdLine)
     {
         return -1;
     }
-    if ((lpCmdLine[1] == 'V' || lpCmdLine[1] == 'v') && (lstrlenA(lpCmdLine) > 4))
+    if (lpCmdLine[1] == 'V' || lpCmdLine[1] == 'v')
     {
-        return set_winver_from_string(&lpCmdLine[3]) ? 0 : 1;
+        if (lstrlenA(lpCmdLine) > 4)
+            return set_winver_from_string(&lpCmdLine[3]) ? 0 : 1;
+
+        print_current_winver();
+        return 0;
     }
 
     if (lpCmdLine[1] == '?')
@@ -207,6 +211,7 @@ ProcessCmdLine(LPSTR lpCmdLine)
         printf("Usage: winecfg [options]\n\n");
         printf("Options:\n");
         printf("  [no option] Launch the graphical version of this program.\n");
+        printf("  /v          Display the current global Windows version.\n");
         printf("  /v version  Set global Windows version to 'version'.\n");
         printf("  /?          Display this information and exit.\n\n");
         printf("Valid versions for 'version':\n\n");
@@ -257,13 +262,13 @@ WinMain (HINSTANCE hInstance, HINSTANCE hPrev, LPSTR szCmdLine, int nShow)
         Wow64RevertWow64FsRedirection( redir );
     }
 
-    cmd_ret = ProcessCmdLine(szCmdLine);
-    if (cmd_ret >= 0) return cmd_ret;
-
     if (initialize(hInstance)) {
 	WINE_ERR("initialization failed, aborting\n");
 	ExitProcess(1);
     }
+
+    cmd_ret = ProcessCmdLine(szCmdLine);
+    if (cmd_ret >= 0) return cmd_ret;
 
     /*
      * The next 9 lines should be all that is needed

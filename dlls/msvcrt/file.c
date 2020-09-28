@@ -3447,7 +3447,7 @@ int CDECL MSVCRT__write(int fd, const void* buf, unsigned int count)
     ioinfo *info = get_ioinfo(fd);
     HANDLE hand = info->handle;
     DWORD num_written, i;
-    BOOL console;
+    BOOL console = FALSE;
 
     if (hand == INVALID_HANDLE_VALUE || fd == MSVCRT_NO_CONSOLE_FD)
     {
@@ -3482,7 +3482,7 @@ int CDECL MSVCRT__write(int fd, const void* buf, unsigned int count)
         return num_written;
     }
 
-    console = MSVCRT__isatty(fd);
+    if (MSVCRT__isatty(fd)) console = VerifyConsoleIoHandle(hand);
     for (i = 0; i < count;)
     {
         const char *s = buf;
@@ -3504,7 +3504,8 @@ int CDECL MSVCRT__write(int fd, const void* buf, unsigned int count)
             }
 #endif
 
-            for (;  i < count && j < sizeof(conv)-1; i++, j++, len++)
+            for (; i < count && j < sizeof(conv)-1 &&
+                    len < (sizeof(lfbuf) - 1) / sizeof(WCHAR); i++, j++, len++)
             {
                 if (MSVCRT_isleadbyte((unsigned char)s[i]))
                 {

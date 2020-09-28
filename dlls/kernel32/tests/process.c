@@ -937,6 +937,11 @@ static void test_CommandLine(void)
     release_memory();
     DeleteFileA(resfile);
 
+    GetFullPathNameA(selfname, MAX_PATH, fullpath, &lpFilePart);
+    assert ( lpFilePart != 0);
+    *(lpFilePart -1 ) = 0;
+    SetCurrentDirectoryA( fullpath );
+
     /* Test for Bug1330 to show that XP doesn't change '/' to '\\' in argv[0]
      * and " escaping.
      */
@@ -972,9 +977,6 @@ static void test_CommandLine(void)
     DeleteFileA(resfile);
 
     get_file_name(resfile);
-    GetFullPathNameA(selfname, MAX_PATH, fullpath, &lpFilePart);
-    assert ( lpFilePart != 0);
-    *(lpFilePart -1 ) = 0;
     p = strrchr(fullpath, '\\');
     /* Use exename to avoid buffer containing things like 'C:' */
     if (p) sprintf(buffer, "..%s/%s process dump \"%s\"", p, exename, resfile);
@@ -1012,6 +1014,7 @@ static void test_CommandLine(void)
     okChildStringWA("Arguments", "CommandLineW", buffer2);
     release_memory();
     DeleteFileA(resfile);
+    SetCurrentDirectoryA( base );
 
     if (0) /* Test crashes on NT-based Windows. */
     {
@@ -3773,7 +3776,7 @@ static void test_process_info(HANDLE hproc)
         case ProcessPriorityClass:
         case ProcessPriorityBoost:
         case ProcessLUIDDeviceMapsEnabled:
-        case 33 /* ProcessIoPriority */:
+        case ProcessIoPriority:
         case ProcessIoCounters:
         case ProcessVmCounters:
         case ProcessWow64Information:

@@ -1635,8 +1635,12 @@ static int wined3d_graphics_pipeline_vk_compare(const void *key, const struct wi
     if ((ret = memcmp(&a->rs_desc, &b->rs_desc, sizeof(a->rs_desc))))
         return ret;
 
-    if ((ret = memcmp(&a->ms_desc, &b->ms_desc, sizeof(a->ms_desc))))
-        return ret;
+    if (a->ms_desc.rasterizationSamples != b->ms_desc.rasterizationSamples)
+        return a->ms_desc.rasterizationSamples - b->ms_desc.rasterizationSamples;
+    if (a->ms_desc.alphaToCoverageEnable != b->ms_desc.alphaToCoverageEnable)
+        return a->ms_desc.alphaToCoverageEnable - b->ms_desc.alphaToCoverageEnable;
+    if (a->sample_mask != b->sample_mask)
+        return a->sample_mask - b->sample_mask;
 
     if ((ret = memcmp(&a->ds_desc, &b->ds_desc, sizeof(a->ds_desc))))
         return ret;
@@ -1710,6 +1714,7 @@ static void wined3d_context_vk_init_graphics_pipeline_key(struct wined3d_context
     key->rs_desc.lineWidth = 1.0f;
 
     key->ms_desc.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    key->ms_desc.pSampleMask = &key->sample_mask;
 
     key->ds_desc.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     key->ds_desc.maxDepthBounds = 1.0f;
@@ -2020,18 +2025,28 @@ static bool wined3d_context_vk_update_graphics_pipeline_key(struct wined3d_conte
     }
 
     if (key->ms_desc.rasterizationSamples != context_vk->sample_count
-            || isStateDirty(&context_vk->c, STATE_BLEND))
+            || isStateDirty(&context_vk->c, STATE_BLEND) || isStateDirty(&context_vk->c, STATE_SAMPLE_MASK))
     {
         key->ms_desc.rasterizationSamples = context_vk->sample_count;
         key->ms_desc.alphaToCoverageEnable = state->blend_state && state->blend_state->desc.alpha_to_coverage;
+        key->sample_mask = state->sample_mask;
 
         update = true;
     }
 
-    if (wined3d_context_is_graphics_state_dirty(&context_vk->c, STATE_RENDER(WINED3D_RS_ZENABLE))
+    if (wined3d_context_is_graphics_state_dirty(&context_vk->c, STATE_DEPTH_STENCIL)
             || wined3d_context_is_graphics_state_dirty(&context_vk->c, STATE_FRAMEBUFFER))
     {
-        key->ds_desc.depthTestEnable = !!state->render_states[WINED3D_RS_ZENABLE];
+        const struct wined3d_depth_stencil_state *d = state->depth_stencil_state;
+
+        if (d)
+        {
+            key->ds_desc.depthTestEnable = d->desc.depth;
+        }
+        else
+        {
+            key->ds_desc.depthTestEnable = VK_TRUE;
+        }
         key->ds_desc.depthWriteEnable = !!state->render_states[WINED3D_RS_ZWRITEENABLE];
         key->ds_desc.depthCompareOp = vk_compare_op_from_wined3d(state->render_states[WINED3D_RS_ZFUNC]);
         key->ds_desc.stencilTestEnable = state->fb.depth_stencil && state->render_states[WINED3D_RS_STENCILENABLE];
@@ -2138,8 +2153,7 @@ static bool wined3d_context_vk_begin_render_pass(struct wined3d_context_vk *cont
         ++attachment_count;
     }
 
-    if ((state->render_states[WINED3D_RS_ZWRITEENABLE] || state->render_states[WINED3D_RS_ZENABLE])
-            && (view = state->fb.depth_stencil))
+    if (wined3d_state_uses_depth_buffer(state) && (view = state->fb.depth_stencil))
     {
         rtv_vk = wined3d_rendertarget_view_vk(view);
         vk_views[attachment_count] = wined3d_rendertarget_view_vk_get_image_view(rtv_vk, context_vk);
@@ -2155,8 +2169,7 @@ static bool wined3d_context_vk_begin_render_pass(struct wined3d_context_vk *cont
     }
 
     if (!(context_vk->vk_render_pass = wined3d_context_vk_get_render_pass(context_vk, &state->fb,
-            ARRAY_SIZE(state->fb.render_targets), state->render_states[WINED3D_RS_ZWRITEENABLE]
-            || state->render_states[WINED3D_RS_ZENABLE], 0)))
+            ARRAY_SIZE(state->fb.render_targets), wined3d_state_uses_depth_buffer(state), 0)))
     {
         ERR("Failed to get render pass.\n");
         return false;
@@ -2845,7 +2858,7 @@ VkCommandBuffer wined3d_context_vk_apply_draw_state(struct wined3d_context_vk *c
 
     if ((dsv = state->fb.depth_stencil))
     {
-        if (state->render_states[WINED3D_RS_ZWRITEENABLE] || state->render_states[WINED3D_RS_ZENABLE])
+        if (wined3d_state_uses_depth_buffer(state))
             wined3d_rendertarget_view_load_location(dsv, &context_vk->c, dsv->resource->draw_binding);
         else
             wined3d_rendertarget_view_prepare_location(dsv, &context_vk->c, dsv->resource->draw_binding);

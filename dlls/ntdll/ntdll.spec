@@ -1579,7 +1579,6 @@
 
 # Server interface
 @ cdecl -norelay wine_server_call(ptr)
-@ cdecl wine_server_close_fds_by_type(long)
 @ cdecl wine_server_fd_to_handle(long long long ptr)
 @ cdecl wine_server_handle_to_fd(long long ptr ptr)
 @ cdecl wine_server_release_fd(long long)

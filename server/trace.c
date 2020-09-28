@@ -1576,10 +1576,6 @@ static void dump_close_handle_request( const struct close_handle_request *req )
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
-static void dump_socket_cleanup_request( const struct socket_cleanup_request *req )
-{
-}
-
 static void dump_set_handle_info_request( const struct set_handle_info_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -4921,7 +4917,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_queue_apc_request,
     (dump_func)dump_get_apc_result_request,
     (dump_func)dump_close_handle_request,
-    (dump_func)dump_socket_cleanup_request,
     (dump_func)dump_set_handle_info_request,
     (dump_func)dump_dup_handle_request,
     (dump_func)dump_open_process_request,
@@ -5244,7 +5239,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     (dump_func)dump_queue_apc_reply,
     (dump_func)dump_get_apc_result_reply,
-    NULL,
     NULL,
     (dump_func)dump_set_handle_info_reply,
     (dump_func)dump_dup_handle_reply,
@@ -5569,7 +5563,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "queue_apc",
     "get_apc_result",
     "close_handle",
-    "socket_cleanup",
     "set_handle_info",
     "dup_handle",
     "open_process",

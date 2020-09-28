@@ -54,6 +54,18 @@ file_formats[] =
     { &GUID_ContainerFormatWmp,  D3DX10_IFF_WMP },
 };
 
+static const DXGI_FORMAT to_be_converted_format[] =
+{
+    DXGI_FORMAT_UNKNOWN,
+    DXGI_FORMAT_R8_UNORM,
+    DXGI_FORMAT_R8G8_UNORM,
+    DXGI_FORMAT_B5G6R5_UNORM,
+    DXGI_FORMAT_B4G4R4A4_UNORM,
+    DXGI_FORMAT_B5G5R5A1_UNORM,
+    DXGI_FORMAT_B8G8R8X8_UNORM,
+    DXGI_FORMAT_B8G8R8A8_UNORM
+};
+
 static D3DX10_IMAGE_FILE_FORMAT wic_container_guid_to_file_format(GUID *container_format)
 {
     unsigned int i;
@@ -80,6 +92,18 @@ static D3D10_RESOURCE_DIMENSION wic_dimension_to_d3dx10_dimension(WICDdsDimensio
         default:
             return D3D10_RESOURCE_DIMENSION_UNKNOWN;
     }
+}
+
+static DXGI_FORMAT get_d3dx10_dds_format(DXGI_FORMAT format)
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(to_be_converted_format); ++i)
+    {
+        if (format == to_be_converted_format[i])
+            return DXGI_FORMAT_R8G8B8A8_UNORM;
+    }
+    return format;
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
@@ -273,6 +297,40 @@ HRESULT WINAPI D3DX10GetFeatureLevel1(ID3D10Device *device, ID3D10Device1 **devi
     return ID3D10Device_QueryInterface(device, &IID_ID3D10Device1, (void **)device1);
 }
 
+HRESULT WINAPI D3DX10GetImageInfoFromFileA(const char *src_file, ID3DX10ThreadPump *pump, D3DX10_IMAGE_INFO *info,
+        HRESULT *result)
+{
+    FIXME("src_file %s, pump %p, info %p, result %p\n", debugstr_a(src_file), pump, info, result);
+
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI D3DX10GetImageInfoFromFileW(const WCHAR *src_file, ID3DX10ThreadPump *pump, D3DX10_IMAGE_INFO *info,
+        HRESULT *result)
+{
+    FIXME("src_file %s, pump %p, info %p, result %p\n", debugstr_w(src_file), pump, info, result);
+
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI D3DX10GetImageInfoFromResourceA(HMODULE module, const char *resource, ID3DX10ThreadPump *pump,
+        D3DX10_IMAGE_INFO *info, HRESULT *result)
+{
+    FIXME("module %p, resource %s, pump %p, info %p, result %p\n",
+            module, debugstr_a(resource), pump, info, result);
+
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI D3DX10GetImageInfoFromResourceW(HMODULE module, const WCHAR *resource, ID3DX10ThreadPump *pump,
+        D3DX10_IMAGE_INFO *info, HRESULT *result)
+{
+    FIXME("module %p, resource %s, pump %p, info %p, result %p\n",
+            module, debugstr_w(resource), pump, info, result);
+
+    return E_NOTIMPL;
+}
+
 HRESULT WINAPI D3DX10GetImageInfoFromMemory(const void *src_data, SIZE_T src_data_size, ID3DX10ThreadPump *pump,
         D3DX10_IMAGE_INFO *img_info, HRESULT *hresult)
 {
@@ -339,7 +397,7 @@ HRESULT WINAPI D3DX10GetImageInfoFromMemory(const void *src_data, SIZE_T src_dat
         img_info->Depth = dds_params.Depth;
         img_info->MipLevels = dds_params.MipLevels;
         img_info->ResourceDimension = wic_dimension_to_d3dx10_dimension(dds_params.Dimension);
-        img_info->Format = dds_params.DxgiFormat;
+        img_info->Format = get_d3dx10_dds_format(dds_params.DxgiFormat);
         img_info->MiscFlags = 0;
         if (dds_params.Dimension == WICDdsTextureCube)
         {

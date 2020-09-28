@@ -91,6 +91,7 @@ static const WCHAR vbW[] = {'V','B','S','c','r','i','p','t',0};
 
 DEFINE_EXPECT(CreateInstance);
 DEFINE_EXPECT(SetInterfaceSafetyOptions);
+DEFINE_EXPECT(SetInterfaceSafetyOptions_UseSafeSubset);
 DEFINE_EXPECT(InitNew);
 DEFINE_EXPECT(Close);
 DEFINE_EXPECT(Bind);
@@ -278,12 +279,13 @@ static HRESULT WINAPI ObjectSafety_GetInterfaceSafetyOptions(IObjectSafety *ifac
 static HRESULT WINAPI ObjectSafety_SetInterfaceSafetyOptions(IObjectSafety *iface, REFIID riid,
         DWORD mask, DWORD options)
 {
-    CHECK_EXPECT(SetInterfaceSafetyOptions);
+    if (options == INTERFACESAFE_FOR_UNTRUSTED_DATA)
+        CHECK_EXPECT(SetInterfaceSafetyOptions_UseSafeSubset);
+    else
+        CHECK_EXPECT(SetInterfaceSafetyOptions);
 
     ok(IsEqualGUID(&IID_IActiveScriptParse, riid), "unexpected riid %s\n", wine_dbgstr_guid(riid));
-
     ok(mask == INTERFACESAFE_FOR_UNTRUSTED_DATA, "option mask = %x\n", mask);
-    ok(options == 0, "options = %x\n", options);
 
     return S_OK;
 }
@@ -671,6 +673,10 @@ static HRESULT WINAPI DispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DW
 static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags,
         DISPPARAMS *pdp, VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
 {
+    IServiceProvider *sp;
+    IUnknown *unk;
+    HRESULT hr;
+
     CHECK_EXPECT(InvokeEx);
     ok(lcid == LOCALE_USER_DEFAULT, "unexpected lcid %u.\n", lcid);
     ok(wFlags == DISPATCH_METHOD, "unexpected wFlags %u.\n", wFlags);
@@ -688,6 +694,32 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
             "unexpected second parameter V_VT = %d, V_I4 = %d.\n",
             V_VT(pdp->rgvarg), V_I4(pdp->rgvarg));
     }
+    ok(!!pspCaller, "unexpected NULL pspCaller.\n");
+
+    hr = IActiveScriptSite_QueryInterface(site, &IID_IServiceProvider, (void**)&sp);
+    ok(hr == S_OK, "Failed to retrieve IID_IServiceProvider from script site: 0x%08x.\n", hr);
+    ok(sp != pspCaller, "Same IServiceProvider objects.\n");
+    IServiceProvider_Release(sp);
+
+    hr = IServiceProvider_QueryInterface(pspCaller, &IID_IActiveScriptSite, (void**)&unk);
+    ok(hr == E_NOINTERFACE, "QueryInterface IActiveScriptSite returned: 0x%08x.\n", hr);
+
+    unk = (IUnknown*)0xdeadbeef;
+    hr = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, NULL, (void**)&unk);
+    ok(hr == S_OK, "QueryService failed: 0x%08x.\n", hr);
+    ok(!unk, "unexpected object returned %p.\n", unk);
+    unk = (IUnknown*)0xdeadbeef;
+    hr = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IUnknown, (void**)&unk);
+    ok(hr == S_OK, "QueryService failed: 0x%08x.\n", hr);
+    ok(!unk, "unexpected object returned %p.\n", unk);
+    sp = (IServiceProvider*)0xdeadbeef;
+    hr = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IServiceProvider, (void**)&sp);
+    ok(hr == S_OK, "QueryService failed: 0x%08x.\n", hr);
+    ok(!sp, "unexpected object returned %p.\n", sp);
+    unk = (IUnknown*)0xdeadbeef;
+    hr = IServiceProvider_QueryService(pspCaller, &SID_VariantConversion, &IID_IVariantChangeType, (void**)&unk);
+    ok(hr == E_NOINTERFACE, "QueryService returned: 0x%08x.\n", hr);
+    ok(!unk, "unexpected object returned %p.\n", unk);
 
     V_VT(pvarRes) = VT_I2;
     V_I2(pvarRes) = 42;
@@ -1905,6 +1937,166 @@ static void test_AllowUI(void)
     IScriptControl_Release(sc);
 }
 
+static void test_SitehWnd(void)
+{
+    IScriptControl *sc;
+    LONG site_hwnd;
+    HRESULT hr;
+    HWND hwnd;
+    BSTR str;
+
+    hwnd = CreateWindowA("static", NULL, WS_OVERLAPPEDWINDOW, 50, 50, 100, 100, NULL, NULL, NULL, NULL);
+    ok(hwnd != NULL, "failed to create window, error %08x\n", GetLastError());
+
+    hr = CoCreateInstance(&CLSID_ScriptControl, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
+            &IID_IScriptControl, (void**)&sc);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IScriptControl_get_SitehWnd(sc, NULL);
+    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+
+    site_hwnd = 0xdeadbeef;
+    hr = IScriptControl_get_SitehWnd(sc, &site_hwnd);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!site_hwnd, "got %p\n", (HWND)(LONG_PTR)site_hwnd);
+
+    hr = IScriptControl_put_SitehWnd(sc, 1);
+    ok(hr == CTL_E_INVALIDPROPERTYVALUE, "got 0x%08x\n", hr);
+
+    site_hwnd = 0xdeadbeef;
+    hr = IScriptControl_get_SitehWnd(sc, &site_hwnd);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!site_hwnd, "got %p\n", (HWND)(LONG_PTR)site_hwnd);
+
+    hr = IScriptControl_put_SitehWnd(sc, 0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IScriptControl_put_SitehWnd(sc, (LONG)(LONG_PTR)hwnd);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    str = SysAllocString(L"vbscript");
+    hr = IScriptControl_put_Language(sc, str);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    SysFreeString(str);
+
+    site_hwnd = 0;
+    hr = IScriptControl_get_SitehWnd(sc, &site_hwnd);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok((HWND)(LONG_PTR)site_hwnd == hwnd, "got %p, expected %p\n", (HWND)(LONG_PTR)site_hwnd, hwnd);
+
+    IScriptControl_Release(sc);
+
+    /* custom script engine */
+    if (have_custom_engine)
+    {
+        IActiveScriptSiteWindow *site_window;
+        HWND window;
+
+        hr = CoCreateInstance(&CLSID_ScriptControl, NULL, CLSCTX_INPROC_SERVER | CLSCTX_INPROC_HANDLER,
+                              &IID_IScriptControl, (void **)&sc);
+        ok(hr == S_OK, "Failed to create IScriptControl interface: 0x%08x.\n", hr);
+
+        hr = IScriptControl_put_SitehWnd(sc, (LONG)(LONG_PTR)hwnd);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        SET_EXPECT(CreateInstance);
+        SET_EXPECT(SetInterfaceSafetyOptions);
+        SET_EXPECT(SetScriptSite);
+        SET_EXPECT(QI_IActiveScriptParse);
+        SET_EXPECT(InitNew);
+
+        str = SysAllocString(L"testscript");
+        hr = IScriptControl_put_Language(sc, str);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        SysFreeString(str);
+
+        CHECK_CALLED(CreateInstance);
+        CHECK_CALLED(SetInterfaceSafetyOptions);
+        CHECK_CALLED(SetScriptSite);
+        CHECK_CALLED(QI_IActiveScriptParse);
+        CHECK_CALLED(InitNew);
+
+        hr = IActiveScriptSite_QueryInterface(site, &IID_IActiveScriptSiteWindow, (void**)&site_window);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        site_hwnd = 0;
+        hr = IScriptControl_get_SitehWnd(sc, &site_hwnd);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok((HWND)(LONG_PTR)site_hwnd == hwnd, "got %p, expected %p\n", (HWND)(LONG_PTR)site_hwnd, hwnd);
+
+        window = NULL;
+        hr = IActiveScriptSiteWindow_GetWindow(site_window, NULL);
+        ok(hr == E_POINTER, "got 0x%08x\n", hr);
+        hr = IActiveScriptSiteWindow_GetWindow(site_window, &window);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(window == hwnd, "got %p, expected %p\n", window, hwnd);
+
+        hr = IActiveScriptSiteWindow_EnableModeless(site_window, FALSE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        hr = IActiveScriptSiteWindow_EnableModeless(site_window, TRUE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        site_hwnd = 0xdeadbeef;
+        hr = IScriptControl_put_SitehWnd(sc, 0);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        hr = IScriptControl_get_SitehWnd(sc, &site_hwnd);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(!site_hwnd, "got %p\n", (HWND)(LONG_PTR)site_hwnd);
+
+        window = (HWND)0xdeadbeef;
+        hr = IActiveScriptSiteWindow_GetWindow(site_window, &window);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(!window, "got %p\n", window);
+
+        site_hwnd = 0;
+        hr = IScriptControl_put_SitehWnd(sc, (LONG)(LONG_PTR)hwnd);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        hr = IScriptControl_get_SitehWnd(sc, &site_hwnd);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok((HWND)(LONG_PTR)site_hwnd == hwnd, "got %p, expected %p\n", (HWND)(LONG_PTR)site_hwnd, hwnd);
+
+        window = NULL;
+        hr = IActiveScriptSiteWindow_GetWindow(site_window, &window);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(window == hwnd, "got %p, expected %p\n", window, hwnd);
+
+        hr = IScriptControl_put_AllowUI(sc, VARIANT_FALSE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        hr = IScriptControl_get_SitehWnd(sc, &site_hwnd);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok((HWND)(LONG_PTR)site_hwnd == hwnd, "got %p, expected %p\n", (HWND)(LONG_PTR)site_hwnd, hwnd);
+
+        window = NULL;
+        hr = IActiveScriptSiteWindow_GetWindow(site_window, &window);
+        ok(hr == E_FAIL, "got 0x%08x\n", hr);
+        ok(!window, "got %p\n", window);
+
+        hr = IScriptControl_put_AllowUI(sc, VARIANT_TRUE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        window = NULL;
+        hr = IActiveScriptSiteWindow_GetWindow(site_window, &window);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(window == hwnd, "got %p, expected %p\n", window, hwnd);
+
+        IActiveScriptSite_Release(site);
+
+        SET_EXPECT(Close);
+        IScriptControl_Release(sc);
+        CHECK_CALLED(Close);
+
+        window = NULL;
+        hr = IActiveScriptSiteWindow_GetWindow(site_window, &window);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(window == hwnd, "got %p, expected %p\n", window, hwnd);
+
+        IActiveScriptSiteWindow_Release(site_window);
+    }
+
+    DestroyWindow(hwnd);
+}
+
 static void test_UseSafeSubset(void)
 {
     IScriptControl *sc;
@@ -1940,6 +2132,91 @@ static void test_UseSafeSubset(void)
     ok(use_safe_subset == VARIANT_TRUE, "got %d\n", use_safe_subset);
 
     IScriptControl_Release(sc);
+
+    /* custom script engine */
+    if (have_custom_engine)
+    {
+        hr = CoCreateInstance(&CLSID_ScriptControl, NULL, CLSCTX_INPROC_SERVER | CLSCTX_INPROC_HANDLER,
+                              &IID_IScriptControl, (void **)&sc);
+        ok(hr == S_OK, "Failed to create IScriptControl interface: 0x%08x.\n", hr);
+
+        SET_EXPECT(CreateInstance);
+        SET_EXPECT(SetInterfaceSafetyOptions);
+        SET_EXPECT(SetScriptSite);
+        SET_EXPECT(QI_IActiveScriptParse);
+        SET_EXPECT(InitNew);
+
+        str = SysAllocString(L"testscript");
+        hr = IScriptControl_put_Language(sc, str);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        SysFreeString(str);
+
+        CHECK_CALLED(CreateInstance);
+        CHECK_CALLED(SetInterfaceSafetyOptions);
+        CHECK_CALLED(SetScriptSite);
+        CHECK_CALLED(QI_IActiveScriptParse);
+        CHECK_CALLED(InitNew);
+
+        hr = IScriptControl_get_UseSafeSubset(sc, &use_safe_subset);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(use_safe_subset == VARIANT_FALSE, "got %d\n", use_safe_subset);
+
+        SET_EXPECT(SetInterfaceSafetyOptions_UseSafeSubset);
+        hr = IScriptControl_put_UseSafeSubset(sc, VARIANT_TRUE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        CHECK_CALLED(SetInterfaceSafetyOptions_UseSafeSubset);
+
+        hr = IScriptControl_get_UseSafeSubset(sc, &use_safe_subset);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(use_safe_subset == VARIANT_TRUE, "got %d\n", use_safe_subset);
+
+        hr = IScriptControl_put_UseSafeSubset(sc, VARIANT_TRUE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        SET_EXPECT(SetInterfaceSafetyOptions);
+        hr = IScriptControl_put_UseSafeSubset(sc, VARIANT_FALSE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        CHECK_CALLED(SetInterfaceSafetyOptions);
+
+        hr = IScriptControl_put_UseSafeSubset(sc, VARIANT_FALSE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        IActiveScriptSite_Release(site);
+
+        SET_EXPECT(Close);
+        IScriptControl_Release(sc);
+        CHECK_CALLED(Close);
+
+        hr = CoCreateInstance(&CLSID_ScriptControl, NULL, CLSCTX_INPROC_SERVER | CLSCTX_INPROC_HANDLER,
+                              &IID_IScriptControl, (void **)&sc);
+        ok(hr == S_OK, "Failed to create IScriptControl interface: 0x%08x.\n", hr);
+
+        hr = IScriptControl_put_UseSafeSubset(sc, VARIANT_TRUE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        SET_EXPECT(CreateInstance);
+        SET_EXPECT(SetInterfaceSafetyOptions_UseSafeSubset);
+        SET_EXPECT(SetScriptSite);
+        SET_EXPECT(QI_IActiveScriptParse);
+        SET_EXPECT(InitNew);
+
+        str = SysAllocString(L"testscript");
+        hr = IScriptControl_put_Language(sc, str);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        SysFreeString(str);
+
+        CHECK_CALLED(CreateInstance);
+        CHECK_CALLED(SetInterfaceSafetyOptions_UseSafeSubset);
+        CHECK_CALLED(SetScriptSite);
+        CHECK_CALLED(QI_IActiveScriptParse);
+        CHECK_CALLED(InitNew);
+
+        IActiveScriptSite_Release(site);
+
+        SET_EXPECT(Close);
+        IScriptControl_Release(sc);
+        CHECK_CALLED(Close);
+    }
 }
 
 static void test_State(void)
@@ -4100,6 +4377,7 @@ START_TEST(msscript)
     test_Reset();
     test_AddObject();
     test_AllowUI();
+    test_SitehWnd();
     test_UseSafeSubset();
     test_State();
     test_IScriptControl_Eval();

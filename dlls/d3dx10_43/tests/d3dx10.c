@@ -540,6 +540,8 @@ test_image[] =
     },
 };
 
+static WCHAR temp_dir[MAX_PATH];
+
 static BOOL compare_float(float f, float g, unsigned int ulps)
 {
     int x = *(int *)&f;
@@ -554,6 +556,43 @@ static BOOL compare_float(float f, float g, unsigned int ulps)
         return FALSE;
 
     return TRUE;
+}
+
+static BOOL create_file(const WCHAR *filename, const void *data, unsigned int size, WCHAR *out_path)
+{
+    WCHAR path[MAX_PATH];
+    DWORD written;
+    HANDLE file;
+
+    if (!temp_dir[0])
+        GetTempPathW(ARRAY_SIZE(temp_dir), temp_dir);
+    lstrcpyW(path, temp_dir);
+    lstrcatW(path, filename);
+
+    file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+    if (file == INVALID_HANDLE_VALUE)
+        return FALSE;
+
+    if (WriteFile(file, data, size, &written, NULL))
+    {
+        CloseHandle(file);
+
+        if (out_path)
+            lstrcpyW(out_path, path);
+        return TRUE;
+    }
+
+    CloseHandle(file);
+    return FALSE;
+}
+
+static BOOL delete_file(const WCHAR *filename)
+{
+    WCHAR path[MAX_PATH];
+
+    lstrcpyW(path, temp_dir);
+    lstrcatW(path, filename);
+    return DeleteFileW(path);
 }
 
 static ID3D10Device *create_device(void)
@@ -577,6 +616,37 @@ static ID3D10Device *create_device(void)
         return device;
 
     return NULL;
+}
+
+static void check_image_info(D3DX10_IMAGE_INFO *image_info, unsigned int i, unsigned int line)
+{
+    ok_(__FILE__, line)(image_info->Width == test_image[i].expected.Width,
+            "Test %u: Got unexpected Width %u, expected %u.\n",
+            i, image_info->Width, test_image[i].expected.Width);
+    ok_(__FILE__, line)(image_info->Height == test_image[i].expected.Height,
+            "Test %u: Got unexpected Height %u, expected %u.\n",
+            i, image_info->Height, test_image[i].expected.Height);
+    ok_(__FILE__, line)(image_info->Depth == test_image[i].expected.Depth,
+            "Test %u: Got unexpected Depth %u, expected %u.\n",
+            i, image_info->Depth, test_image[i].expected.Depth);
+    ok_(__FILE__, line)(image_info->ArraySize == test_image[i].expected.ArraySize,
+            "Test %u: Got unexpected ArraySize %u, expected %u.\n",
+            i, image_info->ArraySize, test_image[i].expected.ArraySize);
+    ok_(__FILE__, line)(image_info->MipLevels == test_image[i].expected.MipLevels,
+            "Test %u: Got unexpected MipLevels %u, expected %u.\n",
+            i, image_info->MipLevels, test_image[i].expected.MipLevels);
+    ok_(__FILE__, line)(image_info->MiscFlags == test_image[i].expected.MiscFlags,
+            "Test %u: Got unexpected MiscFlags %#x, expected %#x.\n",
+            i, image_info->MiscFlags, test_image[i].expected.MiscFlags);
+    ok_(__FILE__, line)(image_info->Format == test_image[i].expected.Format,
+            "Test %u: Got unexpected Format %#x, expected %#x.\n",
+            i, image_info->Format, test_image[i].expected.Format);
+    ok_(__FILE__, line)(image_info->ResourceDimension == test_image[i].expected.ResourceDimension,
+            "Test %u: Got unexpected ResourceDimension %u, expected %u.\n",
+            i, image_info->ResourceDimension, test_image[i].expected.ResourceDimension);
+    ok_(__FILE__, line)(image_info->ImageFileFormat == test_image[i].expected.ImageFileFormat,
+            "Test %u: Got unexpected ImageFileFormat %u, expected %u.\n",
+            i, image_info->ImageFileFormat, test_image[i].expected.ImageFileFormat);
 }
 
 static void test_D3DX10UnsetAllDeviceObjects(void)
@@ -1168,28 +1238,9 @@ static void test_D3DX10CreateAsyncMemoryLoader(void)
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
 }
 
-static void create_testfile(WCHAR *path, const void *data, int data_len)
-{
-    static const WCHAR test_filename[] = {'a','s','y','n','c','l','o','a','d','e','r','.','d','a','t','a',0};
-    DWORD written;
-    HANDLE file;
-    BOOL ret;
-
-    GetTempPathW(MAX_PATH, path);
-    lstrcatW(path, test_filename);
-
-    file = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
-    ok(file != INVALID_HANDLE_VALUE, "Test file creation failed, at %s, error %d.\n", wine_dbgstr_w(path),
-        GetLastError());
-
-    ret = WriteFile(file, data, data_len, &written, NULL);
-    ok(ret, "Write to test file failed.\n");
-
-    CloseHandle(file);
-}
-
 static void test_D3DX10CreateAsyncFileLoader(void)
 {
+    static const WCHAR test_filename[] = L"asyncloader.data";
     static const char test_data1[] = "test data";
     static const char test_data2[] = "more test data";
     ID3DX10DataLoader *loader;
@@ -1221,12 +1272,12 @@ static void test_D3DX10CreateAsyncFileLoader(void)
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
 
     /* Test file sharing using dummy empty file. */
-    create_testfile(path, test_data1, sizeof(test_data1));
+    create_file(test_filename, test_data1, sizeof(test_data1), path);
 
     hr = D3DX10CreateAsyncFileLoaderW(path, &loader);
     ok(SUCCEEDED(hr), "Failed to create file loader, hr %#x.\n", hr);
 
-    ret = DeleteFileW(path);
+    ret = delete_file(test_filename);
     ok(ret, "DeleteFile() failed, ret %d, error %d.\n", ret, GetLastError());
 
     /* File was removed before Load(). */
@@ -1234,7 +1285,7 @@ static void test_D3DX10CreateAsyncFileLoader(void)
     ok(hr == D3D10_ERROR_FILE_NOT_FOUND, "Load() returned unexpected result, hr %#x.\n", hr);
 
     /* Create it again. */
-    create_testfile(path, test_data1, sizeof(test_data1));
+    create_file(test_filename, test_data1, sizeof(test_data1), NULL);
     hr = ID3DX10DataLoader_Load(loader);
     ok(SUCCEEDED(hr), "Load() failed, hr %#x.\n", hr);
 
@@ -1242,7 +1293,7 @@ static void test_D3DX10CreateAsyncFileLoader(void)
     hr = ID3DX10DataLoader_Load(loader);
     ok(SUCCEEDED(hr), "Load() failed, hr %#x.\n", hr);
 
-    ret = DeleteFileW(path);
+    ret = delete_file(test_filename);
     ok(ret, "DeleteFile() failed, ret %d, error %d.\n", ret, GetLastError());
 
     /* Already loaded, file removed. */
@@ -1259,7 +1310,7 @@ static void test_D3DX10CreateAsyncFileLoader(void)
         ok(!memcmp(ptr, test_data1, size), "Got unexpected file data.\n");
 
     /* Create it again, with different data. */
-    create_testfile(path, test_data2, sizeof(test_data2));
+    create_file(test_filename, test_data2, sizeof(test_data2), NULL);
 
     hr = ID3DX10DataLoader_Load(loader);
     ok(SUCCEEDED(hr), "Load() failed, hr %#x.\n", hr);
@@ -1275,7 +1326,7 @@ static void test_D3DX10CreateAsyncFileLoader(void)
     hr = ID3DX10DataLoader_Destroy(loader);
     ok(SUCCEEDED(hr), "Destroy() failed, hr %#x.\n", hr);
 
-    ret = DeleteFileW(path);
+    ret = delete_file(test_filename);
     ok(ret, "DeleteFile() failed, ret %d, error %d.\n", ret, GetLastError());
 }
 
@@ -1306,7 +1357,9 @@ static void test_D3DX10CreateAsyncResourceLoader(void)
 
 static void test_get_image_info(void)
 {
+    static const WCHAR test_filename[] = L"image.data";
     D3DX10_IMAGE_INFO image_info;
+    WCHAR path[MAX_PATH];
     unsigned int i;
     DWORD dword;
     HRESULT hr;
@@ -1327,36 +1380,28 @@ static void test_get_image_info(void)
             ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         if (hr != S_OK)
             continue;
+        check_image_info(&image_info, i, __LINE__);
+    }
 
-        ok(image_info.Width == test_image[i].expected.Width,
-                "Test %u: Got unexpected Width %u, expected %u.\n",
-                i, image_info.Width, test_image[i].expected.Width);
-        ok(image_info.Height == test_image[i].expected.Height,
-                "Test %u: Got unexpected Height %u, expected %u.\n",
-                i, image_info.Height, test_image[i].expected.Height);
-        ok(image_info.Depth == test_image[i].expected.Depth,
-                "Test %u: Got unexpected Depth %u, expected %u.\n",
-                i, image_info.Depth, test_image[i].expected.Depth);
-        ok(image_info.ArraySize == test_image[i].expected.ArraySize,
-                "Test %u: Got unexpected ArraySize %u, expected %u.\n",
-                i, image_info.ArraySize, test_image[i].expected.ArraySize);
-        ok(image_info.MipLevels == test_image[i].expected.MipLevels,
-                "Test %u: Got unexpected MipLevels %u, expected %u.\n",
-                i, image_info.MipLevels, test_image[i].expected.MipLevels);
-        ok(image_info.MiscFlags == test_image[i].expected.MiscFlags,
-                "Test %u: Got unexpected MiscFlags %#x, expected %#x.\n",
-                i, image_info.MiscFlags, test_image[i].expected.MiscFlags);
-        todo_wine_if(test_image[i].expected.ImageFileFormat == D3DX10_IFF_DDS
-                && test_image[i].expected.Format == DXGI_FORMAT_R8G8B8A8_UNORM)
-        ok(image_info.Format == test_image[i].expected.Format,
-                "Test %u: Got unexpected Format %#x, expected %#x.\n",
-                i, image_info.Format, test_image[i].expected.Format);
-        ok(image_info.ResourceDimension == test_image[i].expected.ResourceDimension,
-                "Test %u: Got unexpected ResourceDimension %u, expected %u.\n",
-                i, image_info.ResourceDimension, test_image[i].expected.ResourceDimension);
-        ok(image_info.ImageFileFormat == test_image[i].expected.ImageFileFormat,
-                "Test %u: Got unexpected ImageFileFormat %u, expected %u.\n",
-                i, image_info.ImageFileFormat, test_image[i].expected.ImageFileFormat);
+    todo_wine {
+    hr = D3DX10GetImageInfoFromFileW(NULL, NULL, &image_info, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr = D3DX10GetImageInfoFromFileW(L"deadbeaf", NULL, &image_info, NULL);
+    ok(hr == D3D10_ERROR_FILE_NOT_FOUND, "Got unexpected hr %#x.\n", hr);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(test_image); ++i)
+    {
+        create_file(test_filename, test_image[i].data, test_image[i].size, path);
+        hr = D3DX10GetImageInfoFromFileW(path, NULL, &image_info, NULL);
+        delete_file(test_filename);
+
+        todo_wine
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        if (hr != S_OK)
+            continue;
+
+        check_image_info(&image_info, i, __LINE__);
     }
 
     CoUninitialize();

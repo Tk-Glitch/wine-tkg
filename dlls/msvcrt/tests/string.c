@@ -35,6 +35,7 @@
 #undef strncpy
 #include "winbase.h"
 #include "winnls.h"
+#include "winuser.h"
 
 static char *buf_to_string(const unsigned char *bin, int len, int nr)
 {
@@ -114,6 +115,8 @@ static int (__cdecl *p__mbccpy_s)(unsigned char*, size_t, int*, const unsigned c
 static int (__cdecl *p__memicmp)(const char*, const char*, size_t);
 static int (__cdecl *p__memicmp_l)(const char*, const char*, size_t, _locale_t);
 static size_t (__cdecl *p___strncnt)(const char*, size_t);
+static unsigned int (__cdecl *p_mbsnextc_l)(const unsigned char*, _locale_t);
+static int (__cdecl *p_mbscmp_l)(const unsigned char*, const unsigned char*, _locale_t);
 
 int CDECL __STRINGTOLD(_LDOUBLE*, char**, const char*, int);
 
@@ -350,6 +353,11 @@ static void test_mbcp(void)
     expect_eq(_mbsnextc(mbstring), 0xb0b1, int, "%x");
     expect_eq(_mbsnextc(&mbstring[2]), 0xb220, int, "%x");  /* lead + invalid tail */
     expect_eq(_mbsnextc(&mbstring[3]), 0x20, int, "%x");    /* single char */
+
+    if (!p_mbsnextc_l)
+        win_skip("_mbsnextc_l tests\n");
+    else
+        expect_eq(p_mbsnextc_l(mbstring, NULL), 0xb0b1, int, "%x");
 
     /* _mbclen/_mbslen */
     expect_eq(_mbclen(mbstring), 2, int, "%d");
@@ -3719,6 +3727,15 @@ static void test__mbscmp(void)
 
     ret = _mbscmp(b, a);
     ok(ret == 1, "got %d\n", ret);
+
+    if (!p_mbscmp_l)
+    {
+        win_skip("_mbscmp_l tests\n");
+        return;
+    }
+
+    ret = p_mbscmp_l(a, b, NULL);
+    ok(ret == -1, "got %d\n", ret);
 }
 
 static void test__ismbclx(void)
@@ -4380,6 +4397,59 @@ static void test_SpecialCasing(void)
     }
 }
 
+
+static void test__mbbtype(void)
+{
+    static const char *test_locales[] =
+    {
+        "Arabic_Algeria",
+        "Chinese_China",
+        "English_Australia",
+        "French_Belgium",
+        "German_Austria",
+        "Greek",
+        "Hindi",
+        "Japanese",
+        "Korean",
+        "Polish",
+        "Portuguese_Brazil",
+        "Russian",
+        "Spanish_Argentina",
+        "Swedish_Finland",
+        "Ukrainian",
+        "Vietnamese",
+    };
+
+    int expected, ret;
+    unsigned int c, i;
+
+    for (i = 0; i < ARRAY_SIZE(test_locales); ++i)
+    {
+        setlocale(LC_ALL, test_locales[i]);
+        _setmbcp(_MB_CP_LOCALE);
+        for (c = 0; c < 256; ++c)
+        {
+            if (_ismbblead(c))
+                expected = _MBC_LEAD;
+            else if (isprint(c))
+                expected = _MBC_SINGLE;
+            else
+                expected = _MBC_ILLEGAL;
+
+            ret = _mbbtype(c, 0);
+            ok(ret == expected, "test %u, c %#x, got ret %#x, expected %#x.\n", i, c, ret, expected);
+
+            if (_ismbbtrail(c))
+                expected = _MBC_TRAIL;
+            else
+                expected = _MBC_ILLEGAL;
+
+            ret = _mbbtype(c, 1);
+            ok(ret == expected, "test %u, c %#x, got ret %#x, expected %#x.\n", i, c, ret, expected);
+        }
+    }
+}
+
 START_TEST(string)
 {
     char mem[100];
@@ -4451,6 +4521,8 @@ START_TEST(string)
     p__memicmp = (void*)GetProcAddress(hMsvcrt, "_memicmp");
     p__memicmp_l = (void*)GetProcAddress(hMsvcrt, "_memicmp_l");
     p___strncnt = (void*)GetProcAddress(hMsvcrt, "__strncnt");
+    p_mbsnextc_l = (void*)GetProcAddress(hMsvcrt, "_mbsnextc_l");
+    p_mbscmp_l = (void*)GetProcAddress(hMsvcrt, "_mbscmp_l");
 
     /* MSVCRT memcpy behaves like memmove for overlapping moves,
        MFC42 CString::Insert seems to rely on that behaviour */
@@ -4532,4 +4604,5 @@ START_TEST(string)
     test_wcscmp();
     test___STRINGTOLD();
     test_SpecialCasing();
+    test__mbbtype();
 }

@@ -159,7 +159,6 @@ static const struct object_ops sock_ops =
     NULL,                         /* unlink_name */
     no_open_file,                 /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
-    no_alloc_handle,              /* alloc_handle */
     sock_close_handle,            /* close_handle */
     sock_destroy                  /* destroy */
 };
@@ -1011,7 +1010,6 @@ static const struct object_ops ifchange_ops =
     NULL,                    /* unlink_name */
     no_open_file,            /* open_file */
     no_kernel_obj_list,      /* get_kernel_obj_list */
-    no_alloc_handle,         /* alloc_handle */
     no_close_handle,         /* close_handle */
     ifchange_destroy         /* destroy */
 };
@@ -1387,13 +1385,4 @@ DECL_HANDLER(get_socket_info)
     reply->connect_time = -(current_time - sock->connect_time);
 
     release_object( &sock->obj );
-}
-
-DECL_HANDLER(socket_cleanup)
-{
-    unsigned int index = 0;
-    obj_handle_t sock;
-
-    while ((sock = enumerate_handles(current->process, &sock_ops, &index, NULL)))
-        close_handle(current->process, sock);
 }

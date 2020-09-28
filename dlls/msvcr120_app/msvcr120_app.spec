@@ -1380,11 +1380,11 @@
 @ cdecl _setmbcp(long) msvcr120._setmbcp
 @ cdecl _setmode(long long) msvcr120._setmode
 @ varargs _snprintf(ptr long str) msvcr120._snprintf
-@ stub _snprintf_c
-@ stub _snprintf_c_l
+@ varargs _snprintf_c(ptr long str) msvcr120._snprintf_c
+@ varargs _snprintf_c_l(ptr long str ptr) msvcr120._snprintf_c_l
 @ varargs _snprintf_l(ptr long str ptr) msvcr120._snprintf_l
 @ varargs _snprintf_s(ptr long long str) msvcr120._snprintf_s
-@ stub _snprintf_s_l
+@ varargs _snprintf_s_l(ptr long long str ptr) msvcr120._snprintf_s_l
 @ varargs _snscanf(str long str) msvcr120._snscanf
 @ varargs _snscanf_l(str long str ptr) msvcr120._snscanf_l
 @ varargs _snscanf_s(str long str) msvcr120._snscanf_s
@@ -1445,7 +1445,7 @@
 @ cdecl _strtof_l(str ptr ptr) msvcr120._strtof_l
 @ cdecl -ret64 _strtoi64(str ptr long) msvcr120._strtoi64
 @ cdecl -ret64 _strtoi64_l(str ptr long ptr) msvcr120._strtoi64_l
-@ stub _strtoimax_l
+@ cdecl -ret64 _strtoimax_l(str ptr long ptr) msvcr120._strtoimax_l
 @ cdecl _strtol_l(str ptr long ptr) msvcr120._strtol_l
 @ stub _strtold_l
 @ cdecl -ret64 _strtoll_l(str ptr long ptr) msvcr120._strtoll_l
@@ -1453,7 +1453,7 @@
 @ cdecl -ret64 _strtoui64_l(str ptr long ptr) msvcr120._strtoui64_l
 @ cdecl _strtoul_l(str ptr long ptr) msvcr120._strtoul_l
 @ cdecl -ret64 _strtoull_l(str ptr long ptr) msvcr120._strtoull_l
-@ stub _strtoumax_l
+@ cdecl -ret64 _strtoumax_l(str ptr long ptr) msvcr120._strtoumax_l
 @ cdecl _strupr(str) msvcr120._strupr
 @ cdecl _strupr_l(str ptr) msvcr120._strupr_l
 @ cdecl _strupr_s(str long) msvcr120._strupr_s
@@ -1461,8 +1461,8 @@
 @ cdecl _strxfrm_l(ptr str long ptr) msvcr120._strxfrm_l
 @ cdecl _swab(str str long) msvcr120._swab
 @ varargs _swprintf(ptr wstr) msvcr120._swprintf
-@ stub _swprintf_c
-@ stub _swprintf_c_l
+@ varargs _swprintf_c(ptr long str) msvcr120._swprintf_c
+@ varargs _swprintf_c_l(ptr long str ptr) msvcr120._swprintf_c_l
 @ stub _swprintf_p
 @ varargs _swprintf_p_l(ptr long wstr ptr) msvcr120._swprintf_p_l
 @ varargs _swprintf_s_l(ptr long wstr ptr) msvcr120._swprintf_s_l
@@ -1874,7 +1874,7 @@
 @ cdecl ilogb(double) msvcr120.ilogb
 @ cdecl ilogbf(float) msvcr120.ilogbf
 @ cdecl ilogbl(double) msvcr120.ilogbl
-@ stub imaxabs
+@ cdecl -ret64 imaxabs(int64) msvcr120.imaxabs
 @ stub imaxdiv
 @ cdecl isalnum(long) msvcr120.isalnum
 @ cdecl isalpha(long) msvcr120.isalpha
@@ -2050,7 +2050,7 @@
 @ cdecl strstr(str str) msvcr120.strstr
 @ cdecl strtod(str ptr) msvcr120.strtod
 @ cdecl strtof(str ptr) msvcr120.strtof
-@ stub strtoimax
+@ cdecl -ret64 strtoimax(str ptr long) msvcr120.strtoimax
 @ cdecl strtok(str str) msvcr120.strtok
 @ cdecl strtok_s(ptr str ptr) msvcr120.strtok_s
 @ cdecl strtol(str ptr long) msvcr120.strtol
@@ -2058,7 +2058,7 @@
 @ cdecl -ret64 strtoll(str ptr long) msvcr120.strtoll
 @ cdecl strtoul(str ptr long) msvcr120.strtoul
 @ cdecl -ret64 strtoull(str ptr long) msvcr120.strtoull
-@ stub strtoumax
+@ cdecl -ret64 strtoumax(str ptr long) msvcr120.strtoumax
 @ cdecl strxfrm(ptr str long) msvcr120.strxfrm
 @ varargs swprintf_s(ptr long wstr) msvcr120.swprintf_s
 @ varargs swscanf(wstr wstr) msvcr120.swscanf

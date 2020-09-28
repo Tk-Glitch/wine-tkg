@@ -36,8 +36,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(explorer);
 
-extern HANDLE CDECL __wine_make_process_system(void);
-
 #define DESKTOP_CLASS_ATOM ((LPCWSTR)MAKEINTATOM(32769))
 #define DESKTOP_ALL_ACCESS 0x01ff
 
@@ -1082,22 +1080,8 @@ void manage_desktop( WCHAR *arg )
     /* run the desktop message loop */
     if (hwnd)
     {
-        HANDLE exit_event = __wine_make_process_system();
         WINE_TRACE( "desktop message loop starting on hwnd %p\n", hwnd );
-        while (exit_event != NULL && MsgWaitForMultipleObjectsEx( 1,
-               &exit_event, INFINITE, QS_ALLINPUT, 0 ) == WAIT_OBJECT_0 + 1)
-        {
-            while (PeekMessageW( &msg, NULL, 0, 0, PM_REMOVE ))
-            {
-                if (msg.message == WM_QUIT)
-                {
-                    exit_event = NULL;
-                    break;
-                }
-                TranslateMessage( &msg );
-                DispatchMessageW( &msg );
-            }
-        }
+        while (GetMessageW( &msg, 0, 0, 0 )) DispatchMessageW( &msg );
         WINE_TRACE( "desktop message loop exiting for hwnd %p\n", hwnd );
     }
 

@@ -147,6 +147,7 @@ struct ScriptHost {
     IActiveScript *script;
     IActiveScriptParse *parse;
     ScriptError *error;
+    HWND site_hwnd;
     SCRIPTSTATE script_state;
     CLSID clsid;
 
@@ -165,6 +166,7 @@ struct ScriptControl {
     IConnectionPointContainer IConnectionPointContainer_iface;
     LONG ref;
     IOleClientSite *site;
+    HWND site_hwnd;
     SIZEL extent;
     LONG timeout;
     VARIANT_BOOL allow_ui;
@@ -432,6 +434,51 @@ static HRESULT parse_script_text(ScriptModule *module, BSTR script_text, DWORD f
     return hr;
 }
 
+static HRESULT WINAPI sp_caller_QueryInterface(IServiceProvider *iface, REFIID riid, void **obj)
+{
+    if (IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_IServiceProvider, riid))
+        *obj = iface;
+    else
+    {
+        FIXME("(%p)->(%s)\n", iface, debugstr_guid(riid));
+        *obj = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*obj);
+    return S_OK;
+}
+
+static ULONG WINAPI sp_caller_AddRef(IServiceProvider *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI sp_caller_Release(IServiceProvider *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI sp_caller_QueryService(IServiceProvider *iface, REFGUID service, REFIID riid, void **obj)
+{
+    FIXME("(%p)->(%s %s %p): semi-stub\n", iface, debugstr_guid(service), debugstr_guid(riid), obj);
+
+    *obj = NULL;
+    if (IsEqualGUID(&SID_GetCaller, service))
+        return S_OK;
+
+    return E_NOINTERFACE;
+}
+
+static const IServiceProviderVtbl sp_caller_vtbl = {
+    sp_caller_QueryInterface,
+    sp_caller_AddRef,
+    sp_caller_Release,
+    sp_caller_QueryService
+};
+
+static IServiceProvider sp_caller = { &sp_caller_vtbl };
+
 static HRESULT run_procedure(ScriptModule *module, BSTR procedure_name, SAFEARRAY *args, VARIANT *res)
 {
     IDispatchEx *dispex;
@@ -473,7 +520,7 @@ static HRESULT run_procedure(ScriptModule *module, BSTR procedure_name, SAFEARRA
         else
         {
             hr = IDispatchEx_InvokeEx(dispex, dispid, LOCALE_USER_DEFAULT,
-                                      DISPATCH_METHOD, &dp, res, NULL, NULL);
+                                      DISPATCH_METHOD, &dp, res, NULL, &sp_caller);
             IDispatchEx_Release(dispex);
         }
     }
@@ -760,18 +807,22 @@ static HRESULT WINAPI ActiveScriptSiteWindow_GetWindow(IActiveScriptSiteWindow *
 {
     ScriptHost *This = impl_from_IActiveScriptSiteWindow(iface);
 
-    FIXME("(%p, %p)\n", This, hwnd);
+    TRACE("(%p, %p)\n", This, hwnd);
 
-    return E_NOTIMPL;
+    if (!hwnd) return E_POINTER;
+    if (This->site_hwnd == ((HWND)-1)) return E_FAIL;
+
+    *hwnd = This->site_hwnd;
+    return S_OK;
 }
 
 static HRESULT WINAPI ActiveScriptSiteWindow_EnableModeless(IActiveScriptSiteWindow *iface, BOOL enable)
 {
     ScriptHost *This = impl_from_IActiveScriptSiteWindow(iface);
 
-    FIXME("(%p, %d)\n", This, enable);
+    FIXME("(%p, %d): stub\n", This, enable);
 
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static const IActiveScriptSiteWindowVtbl ActiveScriptSiteWindowVtbl = {
@@ -2420,9 +2471,30 @@ static const IScriptErrorVtbl ScriptErrorVtbl = {
     ScriptError_Clear
 };
 
-static HRESULT init_script_host(ScriptControl *control, const CLSID *clsid, ScriptHost **ret)
+static HRESULT set_safety_opts(IActiveScript *script, VARIANT_BOOL use_safe_subset)
 {
     IObjectSafety *objsafety;
+    HRESULT hr;
+
+    hr = IActiveScript_QueryInterface(script, &IID_IObjectSafety, (void**)&objsafety);
+    if (FAILED(hr)) {
+        FIXME("Could not get IObjectSafety, %#x\n", hr);
+        return hr;
+    }
+
+    hr = IObjectSafety_SetInterfaceSafetyOptions(objsafety, &IID_IActiveScriptParse, INTERFACESAFE_FOR_UNTRUSTED_DATA,
+                                                 use_safe_subset ? INTERFACESAFE_FOR_UNTRUSTED_DATA : 0);
+    IObjectSafety_Release(objsafety);
+    if (FAILED(hr)) {
+        FIXME("SetInterfaceSafetyOptions failed, %#x\n", hr);
+        return hr;
+    }
+
+    return hr;
+}
+
+static HRESULT init_script_host(ScriptControl *control, const CLSID *clsid, ScriptHost **ret)
+{
     ScriptHost *host;
     HRESULT hr;
 
@@ -2449,18 +2521,8 @@ static HRESULT init_script_host(ScriptControl *control, const CLSID *clsid, Scri
         goto failed;
     }
 
-    hr = IActiveScript_QueryInterface(host->script, &IID_IObjectSafety, (void**)&objsafety);
-    if (FAILED(hr)) {
-        FIXME("Could not get IObjectSafety, %#x\n", hr);
-        goto failed;
-    }
-
-    hr = IObjectSafety_SetInterfaceSafetyOptions(objsafety, &IID_IActiveScriptParse, INTERFACESAFE_FOR_UNTRUSTED_DATA, 0);
-    IObjectSafety_Release(objsafety);
-    if (FAILED(hr)) {
-        FIXME("SetInterfaceSafetyOptions failed, %#x\n", hr);
-        goto failed;
-    }
+    hr = set_safety_opts(host->script, control->use_safe_subset);
+    if (FAILED(hr)) goto failed;
 
     hr = IActiveScript_SetScriptSite(host->script, &host->IActiveScriptSite_iface);
     if (FAILED(hr)) {
@@ -2480,6 +2542,7 @@ static HRESULT init_script_host(ScriptControl *control, const CLSID *clsid, Scri
         goto failed;
     }
     host->script_state = SCRIPTSTATE_INITIALIZED;
+    host->site_hwnd = control->allow_ui ? control->site_hwnd : ((HWND)-1);
     host->error = control->error;
     IScriptError_AddRef(&host->error->IScriptError_iface);
 
@@ -2751,16 +2814,27 @@ static HRESULT WINAPI ScriptControl_put_SitehWnd(IScriptControl *iface, LONG hwn
 {
     ScriptControl *This = impl_from_IScriptControl(iface);
 
-    FIXME("(%p)->(%x)\n", This, hwnd);
+    TRACE("(%p)->(%x)\n", This, hwnd);
 
+    if (hwnd && !IsWindow(LongToHandle(hwnd)))
+        return CTL_E_INVALIDPROPERTYVALUE;
+
+    This->site_hwnd = LongToHandle(hwnd);
+    if (This->host)
+        This->host->site_hwnd = This->allow_ui ? This->site_hwnd : ((HWND)-1);
     return S_OK;
 }
 
 static HRESULT WINAPI ScriptControl_get_SitehWnd(IScriptControl *iface, LONG *p)
 {
     ScriptControl *This = impl_from_IScriptControl(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if (!p) return E_POINTER;
+
+    *p = HandleToLong(This->site_hwnd);
+    return S_OK;
 }
 
 static HRESULT WINAPI ScriptControl_get_Timeout(IScriptControl *iface, LONG *p)
@@ -2810,6 +2884,8 @@ static HRESULT WINAPI ScriptControl_put_AllowUI(IScriptControl *iface, VARIANT_B
     TRACE("(%p)->(%x)\n", This, allow_ui);
 
     This->allow_ui = allow_ui;
+    if (This->host)
+        This->host->site_hwnd = allow_ui ? This->site_hwnd : ((HWND)-1);
     return S_OK;
 }
 
@@ -2829,6 +2905,9 @@ static HRESULT WINAPI ScriptControl_put_UseSafeSubset(IScriptControl *iface, VAR
 {
     ScriptControl *This = impl_from_IScriptControl(iface);
     TRACE("(%p)->(%x)\n", This, use_safe_subset);
+
+    if (This->host && This->use_safe_subset != use_safe_subset)
+        set_safety_opts(This->host->script, use_safe_subset);
 
     This->use_safe_subset = use_safe_subset;
     return S_OK;

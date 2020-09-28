@@ -108,7 +108,6 @@ static const struct object_ops file_ops =
     NULL,                         /* unlink_name */
     file_open_file,               /* open_file */
     file_get_kernel_obj_list,     /* get_kernel_obj_list */
-    no_alloc_handle,              /* alloc_handle */
     fd_close_handle,              /* close_handle */
     file_destroy                  /* destroy */
 };

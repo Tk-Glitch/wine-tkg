@@ -1091,6 +1091,7 @@ typedef enum _PROCESSINFOCLASS {
     ProcessDebugObjectHandle = 30,
     ProcessDebugFlags = 31,
     ProcessHandleTracing = 32,
+    ProcessIoPriority = 33,
     ProcessExecuteFlags = 34,
     ProcessTlsInformation = 35,
     ProcessCookie = 36,

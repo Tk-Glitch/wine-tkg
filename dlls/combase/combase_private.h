@@ -61,7 +61,6 @@ HRESULT open_appidkey_from_clsid(REFCLSID clsid, REGSAM access, HKEY *subkey) DE
 #define DM_EXECUTERPC   (WM_USER + 0) /* WPARAM = 0, LPARAM = (struct dispatch_params *) */
 #define DM_HOSTOBJECT   (WM_USER + 1) /* WPARAM = 0, LPARAM = (struct host_object_params *) */
 
-#define WINE_CLSCTX_DONT_HOST   0x80000000
 #define CHARS_IN_GUID 39
 
 /* this is what is stored in TEB->ReservedForOle */
@@ -85,6 +84,7 @@ struct tlsdata
     IUnknown         *state;         /* see CoSetState */
     struct list       spies;         /* Spies installed with CoRegisterInitializeSpy */
     DWORD             spies_lock;
+    DWORD             cancelcount;
 };
 
 extern HRESULT WINAPI InternalTlsAllocData(struct tlsdata **data);
@@ -102,16 +102,109 @@ static inline struct apartment* com_get_current_apt(void)
     return tlsdata->apt;
 }
 
-HWND WINAPI apartment_getwindow(const struct apartment *apt) DECLSPEC_HIDDEN;
-HRESULT WINAPI apartment_createwindowifneeded(struct apartment *apt) DECLSPEC_HIDDEN;
+HWND apartment_getwindow(const struct apartment *apt) DECLSPEC_HIDDEN;
+HRESULT apartment_createwindowifneeded(struct apartment *apt) DECLSPEC_HIDDEN;
 void apartment_freeunusedlibraries(struct apartment *apt, DWORD unload_delay) DECLSPEC_HIDDEN;
 void apartment_global_cleanup(void) DECLSPEC_HIDDEN;
+OXID apartment_getoxid(const struct apartment *apt) DECLSPEC_HIDDEN;
+HRESULT apartment_disconnectproxies(struct apartment *apt) DECLSPEC_HIDDEN;
 
 /* RpcSs interface */
 HRESULT rpcss_get_next_seqid(DWORD *id) DECLSPEC_HIDDEN;
 HRESULT rpc_get_local_class_object(REFCLSID rclsid, REFIID riid, void **obj) DECLSPEC_HIDDEN;
-HRESULT rpc_start_local_server(REFCLSID clsid, IStream *stream, BOOL multi_use, void **registration) DECLSPEC_HIDDEN;
-void rpc_stop_local_server(void *registration) DECLSPEC_HIDDEN;
+HRESULT rpc_register_local_server(REFCLSID clsid, IStream *stream, DWORD flags, unsigned int *cookie) DECLSPEC_HIDDEN;
+HRESULT rpc_revoke_local_server(unsigned int cookie) DECLSPEC_HIDDEN;
+HRESULT rpc_create_clientchannel(const OXID *oxid, const IPID *ipid, const OXID_INFO *oxid_info, const IID *iid,
+        DWORD dest_context, void *dest_context_data, IRpcChannelBuffer **chan, struct apartment *apt) DECLSPEC_HIDDEN;
+HRESULT rpc_create_serverchannel(DWORD dest_context, void *dest_context_data, IRpcChannelBuffer **chan) DECLSPEC_HIDDEN;
+HRESULT rpc_register_interface(REFIID riid) DECLSPEC_HIDDEN;
+void rpc_unregister_interface(REFIID riid, BOOL wait) DECLSPEC_HIDDEN;
+HRESULT rpc_resolve_oxid(OXID oxid, OXID_INFO *oxid_info) DECLSPEC_HIDDEN;
+void rpc_start_remoting(struct apartment *apt) DECLSPEC_HIDDEN;
+HRESULT rpc_register_channel_hook(REFGUID rguid, IChannelHook *hook) DECLSPEC_HIDDEN;
+void rpc_unregister_channel_hooks(void) DECLSPEC_HIDDEN;
+
+struct dispatch_params;
+void rpc_execute_call(struct dispatch_params *params);
+
+enum class_reg_data_origin
+{
+    CLASS_REG_ACTCTX,
+    CLASS_REG_REGISTRY,
+};
+
+struct class_reg_data
+{
+    enum class_reg_data_origin origin;
+    union
+    {
+        struct
+        {
+            const WCHAR *module_name;
+            DWORD threading_model;
+            HANDLE hactctx;
+        } actctx;
+        HKEY hkey;
+    } u;
+};
+
+HRESULT enter_apartment(struct tlsdata *data, DWORD model) DECLSPEC_HIDDEN;
+void leave_apartment(struct tlsdata *data) DECLSPEC_HIDDEN;
+void apartment_release(struct apartment *apt) DECLSPEC_HIDDEN;
+struct apartment * apartment_get_current_or_mta(void) DECLSPEC_HIDDEN;
+HRESULT apartment_increment_mta_usage(CO_MTA_USAGE_COOKIE *cookie) DECLSPEC_HIDDEN;
+void apartment_decrement_mta_usage(CO_MTA_USAGE_COOKIE cookie) DECLSPEC_HIDDEN;
+struct apartment * apartment_get_mta(void) DECLSPEC_HIDDEN;
+HRESULT apartment_get_inproc_class_object(struct apartment *apt, const struct class_reg_data *regdata,
+        REFCLSID rclsid, REFIID riid, DWORD class_context, void **ppv) DECLSPEC_HIDDEN;
+HRESULT apartment_get_local_server_stream(struct apartment *apt, IStream **ret) DECLSPEC_HIDDEN;
+IUnknown *com_get_registered_class_object(const struct apartment *apartment, REFCLSID rclsid,
+        DWORD clscontext) DECLSPEC_HIDDEN;
+void apartment_revoke_all_classes(const struct apartment *apt) DECLSPEC_HIDDEN;
+struct apartment * apartment_findfromoxid(OXID oxid) DECLSPEC_HIDDEN;
+struct apartment * apartment_findfromtid(DWORD tid) DECLSPEC_HIDDEN;
+
+HRESULT marshal_object(struct apartment *apt, STDOBJREF *stdobjref, REFIID riid, IUnknown *object,
+        DWORD dest_context, void *dest_context_data, MSHLFLAGS mshlflags) DECLSPEC_HIDDEN;
+
+/* Stub Manager */
+
+/* signal to stub manager that this is a rem unknown object */
+#define MSHLFLAGSP_REMUNKNOWN   0x80000000
+
+/* Thread-safety Annotation Legend:
+ *
+ * RO    - The value is read only. It never changes after creation, so no
+ *         locking is required.
+ * LOCK  - The value is written to only using Interlocked* functions.
+ * CS    - The value is read or written to inside a critical section.
+ *         The identifier following "CS" is the specific critical section that
+ *         must be used.
+ * MUTEX - The value is read or written to with a mutex held.
+ *         The identifier following "MUTEX" is the specific mutex that
+ *         must be used.
+ */
+
+typedef enum ifstub_state
+{
+    STUBSTATE_NORMAL_MARSHALED,
+    STUBSTATE_NORMAL_UNMARSHALED,
+    STUBSTATE_TABLE_WEAK_MARSHALED,
+    STUBSTATE_TABLE_WEAK_UNMARSHALED,
+    STUBSTATE_TABLE_STRONG,
+} STUB_STATE;
+
+/* an interface stub */
+struct ifstub
+{
+    struct list       entry;      /* entry in stub_manager->ifstubs list (CS stub_manager->lock) */
+    IRpcStubBuffer   *stubbuffer; /* RO */
+    IID               iid;        /* RO */
+    IPID              ipid;       /* RO */
+    IUnknown         *iface;      /* RO */
+    MSHLFLAGS         flags;      /* so we can enforce process-local marshalling rules (RO) */
+    IRpcChannelBuffer*chan;       /* channel passed to IRpcStubBuffer::Invoke (RO) */
+};
 
 /* stub managers hold refs on the object and each interface stub */
 struct stub_manager
@@ -141,41 +234,19 @@ struct stub_manager
     BOOL              disconnected; /* CoDisconnectObject has been called (CS lock) */
 };
 
-enum class_reg_data_origin
-{
-    CLASS_REG_ACTCTX,
-    CLASS_REG_REGISTRY,
-};
-
-struct class_reg_data
-{
-    enum class_reg_data_origin origin;
-    union
-    {
-        struct
-        {
-            const WCHAR *module_name;
-            DWORD threading_model;
-            HANDLE hactctx;
-        } actctx;
-        HKEY hkey;
-    } u;
-};
-
-HRESULT WINAPI enter_apartment(struct tlsdata *data, DWORD model);
-void WINAPI leave_apartment(struct tlsdata *data);
-void WINAPI apartment_release(struct apartment *apt);
-struct apartment * WINAPI apartment_get_current_or_mta(void);
-HRESULT apartment_increment_mta_usage(CO_MTA_USAGE_COOKIE *cookie) DECLSPEC_HIDDEN;
-void apartment_decrement_mta_usage(CO_MTA_USAGE_COOKIE cookie) DECLSPEC_HIDDEN;
-struct apartment * apartment_get_mta(void) DECLSPEC_HIDDEN;
-HRESULT apartment_get_inproc_class_object(struct apartment *apt, const struct class_reg_data *regdata,
-        REFCLSID rclsid, REFIID riid, BOOL hostifnecessary, void **ppv) DECLSPEC_HIDDEN;
-HRESULT apartment_get_local_server_stream(struct apartment *apt, IStream **ret) DECLSPEC_HIDDEN;
-IUnknown *com_get_registered_class_object(const struct apartment *apartment, REFCLSID rclsid,
-        DWORD clscontext) DECLSPEC_HIDDEN;
-void apartment_revoke_all_classes(const struct apartment *apt) DECLSPEC_HIDDEN;
-
-/* Stub Manager */
-
-ULONG stub_manager_int_release(struct stub_manager *This) DECLSPEC_HIDDEN;
+ULONG stub_manager_int_release(struct stub_manager *stub_manager) DECLSPEC_HIDDEN;
+struct stub_manager * get_stub_manager_from_object(struct apartment *apt, IUnknown *object, BOOL alloc) DECLSPEC_HIDDEN;
+void stub_manager_disconnect(struct stub_manager *m) DECLSPEC_HIDDEN;
+ULONG stub_manager_ext_addref(struct stub_manager *m, ULONG refs, BOOL tableweak) DECLSPEC_HIDDEN;
+ULONG stub_manager_ext_release(struct stub_manager *m, ULONG refs, BOOL tableweak, BOOL last_unlock_releases) DECLSPEC_HIDDEN;
+struct stub_manager * get_stub_manager(struct apartment *apt, OID oid) DECLSPEC_HIDDEN;
+void stub_manager_release_marshal_data(struct stub_manager *m, ULONG refs, const IPID *ipid, BOOL tableweak) DECLSPEC_HIDDEN;
+BOOL stub_manager_is_table_marshaled(struct stub_manager *m, const IPID *ipid) DECLSPEC_HIDDEN;
+BOOL stub_manager_notify_unmarshal(struct stub_manager *m, const IPID *ipid) DECLSPEC_HIDDEN;
+struct ifstub * stub_manager_find_ifstub(struct stub_manager *m, REFIID iid, MSHLFLAGS flags) DECLSPEC_HIDDEN;
+struct ifstub * stub_manager_new_ifstub(struct stub_manager *m, IRpcStubBuffer *sb, REFIID iid, DWORD dest_context,
+    void *dest_context_data, MSHLFLAGS flags) DECLSPEC_HIDDEN;
+HRESULT ipid_get_dispatch_params(const IPID *ipid, struct apartment **stub_apt,
+        struct stub_manager **manager, IRpcStubBuffer **stub, IRpcChannelBuffer **chan,
+        IID *iid, IUnknown **iface) DECLSPEC_HIDDEN;
+HRESULT start_apartment_remote_unknown(struct apartment *apt) DECLSPEC_HIDDEN;

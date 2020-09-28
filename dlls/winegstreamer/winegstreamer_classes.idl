@@ -56,11 +56,11 @@ coclass Gstreamer_Splitter {}
 coclass VideoProcessorMFT {}
 
 [
-    helpstring("MP4 Byte Stream Handler"),
+    helpstring("Generic Decodebin Byte Stream Handler"),
     threading(both),
-    uuid(271c3902-6095-4c45-a22f-20091816ee9e)
+    uuid(317df618-5e5a-468a-9f15-d827a9a08162)
 ]
-coclass MPEG4ByteStreamHandler {}
+coclass GStreamerByteStreamHandler {}
 
 [
     threading(both),
@@ -79,12 +79,6 @@ coclass CMSAACDecMFT { }
     uuid(5686a0d9-fe39-409f-9dff-3fdbc849f9f5)
 ]
 coclass CMpeg4sDecMFT { }
-
-[
-    threading(both),
-    uuid(41457294-644c-4298-a28a-BD69F2C0CF3B)
-]
-coclass ASFByteStreamHandler {}
 
 [
     threading(both),

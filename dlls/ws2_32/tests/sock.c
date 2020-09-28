@@ -86,6 +86,7 @@ static int   (WINAPI *pWSAEnumNameSpaceProvidersA)(LPDWORD,LPWSANAMESPACE_INFOA)
 static int   (WINAPI *pWSAEnumNameSpaceProvidersW)(LPDWORD,LPWSANAMESPACE_INFOW);
 static int   (WINAPI *pWSAPoll)(WSAPOLLFD *,ULONG,INT);
 static int   (WINAPI *pWSCGetProviderInfo)(LPGUID,WSC_PROVIDER_INFO_TYPE,PBYTE,size_t*,DWORD,LPINT);
+static int   (WINAPI *pWSCGetProviderPath)(LPGUID, LPWSTR, LPINT, LPINT);
 
 /* Function pointers from iphlpapi */
 static DWORD (WINAPI *pGetAdaptersInfo)(PIP_ADAPTER_INFO,PULONG);
@@ -1224,13 +1225,13 @@ static void test_WithWSAStartup(void)
     res = send(pairs[0].src, "TEST", 4, 0);
     error = WSAGetLastError();
     ok(res == SOCKET_ERROR, "send should have failed\n");
-    todo_wine ok(error == WSAENOTSOCK, "expected 10038, got %d\n", error);
+    ok(error == WSAENOTSOCK, "expected 10038, got %d\n", error);
 
     SetLastError(0xdeadbeef);
     res = send(pairs[0].dst, "TEST", 4, 0);
     error = WSAGetLastError();
     ok(res == SOCKET_ERROR, "send should have failed\n");
-    todo_wine ok(error == WSAENOTSOCK, "expected 10038, got %d\n", error);
+    ok(error == WSAENOTSOCK, "expected 10038, got %d\n", error);
 
     /* Check that all sockets were destroyed */
     for (i = 0; i < socks; i++)
@@ -1251,7 +1252,8 @@ static void test_WithWSAStartup(void)
             res = getsockname(sock, (struct sockaddr *)&saddr, &size);
             error = WSAGetLastError();
             ok(res == SOCKET_ERROR, "Test[%d]: getsockname should have failed\n", i);
-            todo_wine ok(error == WSAENOTSOCK, "Test[%d]: expected 10038, got %d\n", i, error);
+            if (res == SOCKET_ERROR)
+                ok(error == WSAENOTSOCK, "Test[%d]: expected 10038, got %d\n", i, error);
         }
     }
 
@@ -1299,6 +1301,7 @@ static void Init (void)
     pWSAEnumNameSpaceProvidersW = (void *)GetProcAddress(hws2_32, "WSAEnumNameSpaceProvidersW");
     pWSAPoll = (void *)GetProcAddress(hws2_32, "WSAPoll");
     pWSCGetProviderInfo = (void *)GetProcAddress(hws2_32, "WSCGetProviderInfo");
+    pWSCGetProviderPath = (void *)GetProcAddress(hws2_32, "WSCGetProviderPath");
 
     hiphlpapi = LoadLibraryA("iphlpapi.dll");
     if (hiphlpapi)
@@ -11376,6 +11379,65 @@ static void test_WSCGetProviderInfo(void)
     ok(errcode == WSANO_RECOVERY, "got %d, expected WSANO_RECOVERY\n", errcode);
 }
 
+static void test_WSCGetProviderPath(void)
+{
+    GUID provider = {};
+    WCHAR buffer[256];
+    INT ret, err, len;
+
+    if (!pWSCGetProviderPath)
+    {
+        skip("WSCGetProviderPath is not available.\n");
+        return;
+    }
+
+    ret = pWSCGetProviderPath(NULL, NULL, NULL, NULL);
+    ok(ret == SOCKET_ERROR, "Got unexpected ret %d.\n", ret);
+
+    ret = pWSCGetProviderPath(&provider, NULL, NULL, NULL);
+    ok(ret == SOCKET_ERROR, "Got unexpected ret %d.\n", ret);
+
+    ret = pWSCGetProviderPath(NULL, buffer, NULL, NULL);
+    ok(ret == SOCKET_ERROR, "Got unexpected ret %d.\n", ret);
+
+    len = -1;
+    ret = pWSCGetProviderPath(NULL, NULL, &len, NULL);
+    ok(ret == SOCKET_ERROR, "Got unexpected ret %d.\n", ret);
+    ok(len == -1, "Got unexpected len %d.\n", len);
+
+    err = 0;
+    ret = pWSCGetProviderPath(NULL, NULL, NULL, &err);
+    ok(ret == SOCKET_ERROR, "Got unexpected ret %d.\n", ret);
+    ok(err == WSAEFAULT, "Got unexpected error %d.\n", err);
+
+    err = 0;
+    ret = pWSCGetProviderPath(&provider, NULL, NULL, &err);
+    ok(ret == SOCKET_ERROR, "Got unexpected ret %d.\n", ret);
+    ok(err == WSAEFAULT, "Got unexpected error %d.\n", err);
+
+    err = 0;
+    len = -1;
+    ret = pWSCGetProviderPath(&provider, NULL, &len, &err);
+    ok(ret == SOCKET_ERROR, "Got unexpected ret %d.\n", ret);
+    ok(err == WSAEINVAL, "Got unexpected error %d.\n", err);
+    ok(len == -1, "Got unexpected len %d.\n", len);
+
+    err = 0;
+    len = 256;
+    ret = pWSCGetProviderPath(&provider, NULL, &len, &err);
+    todo_wine ok(ret == SOCKET_ERROR, "Got unexpected ret %d.\n", ret);
+    todo_wine ok(err == WSAEINVAL, "Got unexpected error %d.\n", err);
+    ok(len == 256, "Got unexpected len %d.\n", len);
+
+    /* Valid pointers and length but invalid GUID */
+    err = 0;
+    len = 256;
+    ret = pWSCGetProviderPath(&provider, buffer, &len, &err);
+    todo_wine ok(ret == SOCKET_ERROR, "Got unexpected ret %d.\n", ret);
+    todo_wine ok(err == WSAEINVAL, "Got unexpected error %d.\n", err);
+    ok(len == 256, "Got unexpected len %d.\n", len);
+}
+
 START_TEST( sock )
 {
     int i;
@@ -11457,6 +11519,7 @@ START_TEST( sock )
     test_address_list_query();
 
     test_WSCGetProviderInfo();
+    test_WSCGetProviderPath();
 
     /* this is an io heavy test, do it at the end so the kernel doesn't start dropping packets */
     test_send();

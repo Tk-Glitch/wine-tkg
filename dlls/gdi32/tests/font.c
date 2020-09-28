@@ -2757,6 +2757,12 @@ struct enum_fullname_data
     ENUMLOGFONTA *elf;
 };
 
+struct enum_fullname_data_w
+{
+    int total, size;
+    ENUMLOGFONTW *elf;
+};
+
 struct enum_font_dataW
 {
     int total, size;
@@ -3106,6 +3112,23 @@ static INT CALLBACK enum_fullname_data_proc(const LOGFONTA *lf, const TEXTMETRIC
         if (!efnd->elf) return 0;
     }
     efnd->elf[efnd->total++] = *(ENUMLOGFONTA *)lf;
+
+    return 1;
+}
+
+static INT CALLBACK enum_fullname_data_proc_w( const LOGFONTW *lf, const TEXTMETRICW *ntm, DWORD type, LPARAM lParam )
+{
+    struct enum_fullname_data_w *efnd = (struct enum_fullname_data_w *)lParam;
+
+    if (type != TRUETYPE_FONTTYPE) return 1;
+
+    if (efnd->total >= efnd->size)
+    {
+        efnd->size = max( (efnd->total + 1) * 2, 256 );
+        efnd->elf = heap_realloc( efnd->elf, efnd->size * sizeof(*efnd->elf) );
+        if (!efnd->elf) return 0;
+    }
+    efnd->elf[efnd->total++] = *(ENUMLOGFONTW *)lf;
 
     return 1;
 }
@@ -6940,6 +6963,314 @@ static void test_long_names(void)
     ReleaseDC(NULL, dc);
 }
 
+static void test_ttf_names(void)
+{
+    struct enum_fullname_data efnd;
+    char ttf_name[MAX_PATH], ttf_name_bold[MAX_PATH];
+    LOGFONTA font = {0};
+    HFONT handle_font;
+    int ret;
+    HDC dc;
+
+    if (!write_ttf_file("wine_ttfnames.ttf", ttf_name))
+    {
+        skip("Failed to create ttf file for testing\n");
+        return;
+    }
+
+    if (!write_ttf_file("wine_ttfnames_bold.ttf", ttf_name_bold))
+    {
+        skip("Failed to create ttf file for testing\n");
+        DeleteFileA(ttf_name);
+        return;
+    }
+
+    ret = AddFontResourceExA(ttf_name, FR_PRIVATE, 0);
+    ok(ret, "AddFontResourceEx() failed\n");
+
+    ret = AddFontResourceExA(ttf_name_bold, FR_PRIVATE, 0);
+    ok(ret, "AddFontResourceEx() failed\n");
+
+    dc = GetDC(NULL);
+
+    strcpy(font.lfFaceName, "Wine_TTF_Names_Long_Family1_Con");
+    memset(&efnd, 0, sizeof(efnd));
+    EnumFontFamiliesExA(dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0);
+    ok(efnd.total == 0, "EnumFontFamiliesExA must not find font.\n");
+
+    /* Windows doesn't match with Typographic/Preferred Family tags */
+    strcpy(font.lfFaceName, "Wine TTF Names Long Family1");
+    memset(&efnd, 0, sizeof(efnd));
+    EnumFontFamiliesExA(dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0);
+    ok(efnd.total == 0, "EnumFontFamiliesExA must not find font.\n");
+
+    strcpy(font.lfFaceName, "Wine TTF Names Long Family1 Ext");
+    memset(&efnd, 0, sizeof(efnd));
+    EnumFontFamiliesExA(dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0);
+    ok(efnd.total == 2, "EnumFontFamiliesExA found %d fonts, expected 2.\n", efnd.total);
+
+    strcpy(font.lfFaceName, "Wine TTF Names Long Family1 Con");
+    memset(&efnd, 0, sizeof(efnd));
+    EnumFontFamiliesExA(dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0);
+    ok(efnd.total == 2, "EnumFontFamiliesExA found %d fonts, expected 2.\n", efnd.total);
+
+    handle_font = CreateFontIndirectA(&font);
+    ok(handle_font != NULL, "CreateFontIndirectA failed\n");
+    DeleteObject(handle_font);
+
+    ret = RemoveFontResourceExA(ttf_name_bold, FR_PRIVATE, 0);
+    ok(ret, "RemoveFontResourceEx() failed\n");
+
+    DeleteFileA(ttf_name_bold);
+
+    ret = RemoveFontResourceExA(ttf_name, FR_PRIVATE, 0);
+    ok(ret, "RemoveFontResourceEx() failed\n");
+
+    DeleteFileA(ttf_name);
+    ReleaseDC(NULL, dc);
+}
+
+static void test_lang_names(void)
+{
+    static const WCHAR name_cond_ja_w[] = {0x30d5,0x30a9,0x30f3,0x30c8,0x540d,' ','C','o','n','d',' ','(','j','a',')',0};
+    static const WCHAR name_cond_ja_reg_w[] = {0x30d5,0x30a9,0x30f3,0x30c8,0x540d,' ','C','o','n','d',' ','(','j','a',')',' ','R','e','g',0};
+    static const WCHAR name_cond_ja_reg_ja_w[] = {0x30d5,0x30a9,0x30f3,0x30c8,0x540d,' ','C','o','n','d',' ','(','j','a',')',' ','R','e','g',' ','(','j','a',')',0};
+    static const WCHAR name_wws_ja_w[] = {0x30d5,0x30a9,0x30f3,0x30c8,0x540d,' ','W','W','S',' ','(','j','a',')',0};
+
+    struct enum_fullname_data efnd;
+    struct enum_fullname_data_w efnd_w;
+    char ttf_name[MAX_PATH], ttf_name2[MAX_PATH], ttf_name3[MAX_PATH];
+    LOGFONTA font = {0};
+    LOGFONTW font_w = {0};
+    int ret, i;
+    HDC dc;
+    const WCHAR *primary_family, *primary_fullname;
+
+    if (PRIMARYLANGID(GetSystemDefaultLangID()) != LANG_ENGLISH && PRIMARYLANGID(GetSystemDefaultLangID()) != LANG_JAPANESE)
+    {
+        skip( "Primary language is neither English nor Japanese, skipping test\n" );
+        return;
+    }
+
+    if (!write_ttf_file( "wine_langnames.ttf", ttf_name ))
+    {
+        skip( "Failed to create ttf file for testing\n" );
+        return;
+    }
+
+    if (!write_ttf_file( "wine_langnames2.ttf", ttf_name2 ))
+    {
+        skip( "Failed to create ttf file for testing\n" );
+        DeleteFileA( ttf_name );
+        return;
+    }
+
+    if (!write_ttf_file( "wine_langnames3.ttf", ttf_name3 ))
+    {
+        skip( "Failed to create ttf file for testing\n" );
+        DeleteFileA( ttf_name2 );
+        DeleteFileA( ttf_name );
+        return;
+    }
+
+    ret = AddFontResourceExA( ttf_name, FR_PRIVATE, 0 );
+    ok( ret, "AddFontResourceEx() failed\n" );
+
+    dc = GetDC( NULL );
+
+    if (PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_ENGLISH)
+    {
+        primary_family = L"Wine Lang Cond (en)";
+        primary_fullname = L"Wine Lang Cond Reg (en)";
+    }
+    else
+    {
+        primary_family = name_cond_ja_w;
+        primary_fullname = name_cond_ja_reg_w;
+    }
+
+    for (i = 0; i < 3; ++i)
+    {
+        /* check that lookup by preferred or WWS family / full names or postscript FontName doesn't work */
+
+        strcpy( font.lfFaceName, "Wine Lang (en)" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        strcpy( font.lfFaceName, "Wine Lang Condensed Bold (ko)" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        wcscpy( font_w.lfFaceName, name_wws_ja_w );
+        memset( &efnd_w, 0, sizeof(efnd_w) );
+        EnumFontFamiliesExW( dc, &font_w, enum_fullname_data_proc_w, (LPARAM)&efnd_w, 0 );
+        ok( efnd_w.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd_w.total );
+
+        strcpy( font.lfFaceName, "Reg WWS (zh-tw)" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        strcpy( font.lfFaceName, "Wine Lang (en) Reg WWS (en)" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        strcpy( font.lfFaceName, "WineLangNamesRegular" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        /* then, the primary ttf family name always works */
+
+        wcscpy( font_w.lfFaceName, primary_family );
+        memset( &efnd_w, 0, sizeof(efnd_w) );
+        EnumFontFamiliesExW( dc, &font_w, enum_fullname_data_proc_w, (LPARAM)&efnd_w, 0 );
+        ok( efnd_w.total == min( 2, i + 1 ), "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd_w.total );
+
+        if (PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_ENGLISH)
+        {
+            wcscpy( font_w.lfFaceName, name_cond_ja_w );
+            memset( &efnd_w, 0, sizeof(efnd_w) );
+            EnumFontFamiliesExW( dc, &font_w, enum_fullname_data_proc_w, (LPARAM)&efnd_w, 0 );
+            ok( efnd_w.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd_w.total );
+        }
+
+        /* if there is no primary ttf family name, the english ttf name, or postscript FamilyName are used instead */
+
+        strcpy( font.lfFaceName, "Wine_Lang_Names" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        if (i == 2)
+            ok( efnd.total == 1, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+        else
+            ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        /* same goes for ttf full names */
+
+        wcscpy( font_w.lfFaceName, primary_fullname );
+        memset( &efnd_w, 0, sizeof(efnd_w) );
+        EnumFontFamiliesExW( dc, &font_w, enum_fullname_data_proc_w, (LPARAM)&efnd_w, 0 );
+        ok( efnd_w.total == 1, "%d: EnumFontFamiliesExW unexpected count %u.\n", i, efnd_w.total );
+
+        if (efnd_w.total >= 1)
+        {
+            ok( !wcscmp( (WCHAR *)efnd_w.elf[0].elfLogFont.lfFaceName, primary_family ),
+                "%d: (%d) unexpected lfFaceName %s\n", i, efnd_w.total, debugstr_w((WCHAR *)efnd_w.elf[0].elfLogFont.lfFaceName) );
+            ok( !wcscmp( (WCHAR *)efnd_w.elf[0].elfFullName, primary_fullname ),
+                "%d: (%d) unexpected elfFullName %s\n", i, efnd_w.total, debugstr_w((WCHAR *)efnd_w.elf[0].elfFullName) );
+            ok( !wcscmp( (WCHAR *)efnd_w.elf[0].elfStyle, PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_ENGLISH ? L"Reg (en)" : L"Reg (ja)" ),
+                "%d: (%d) unexpected elfStyle %s\n", i, efnd_w.total, debugstr_w((WCHAR *)efnd_w.elf[0].elfStyle) );
+        }
+
+        if (PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_ENGLISH)
+        {
+            wcscpy( font_w.lfFaceName, name_cond_ja_reg_w );
+            memset( &efnd_w, 0, sizeof(efnd_w) );
+            EnumFontFamiliesExW( dc, &font_w, enum_fullname_data_proc_w, (LPARAM)&efnd_w, 0 );
+            ok( efnd_w.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd_w.total );
+        }
+
+        wcscpy( font_w.lfFaceName, L"Wine_Lang_Names_Regular" );
+        memset( &efnd_w, 0, sizeof(efnd_w) );
+        EnumFontFamiliesExW( dc, &font_w, enum_fullname_data_proc_w, (LPARAM)&efnd_w, 0 );
+        ok( efnd_w.total == i, "%d: EnumFontFamiliesExW unexpected count %u.\n", i, efnd_w.total );
+
+        while (efnd_w.total--)
+        {
+            ok( !wcscmp( (WCHAR *)efnd_w.elf[efnd_w.total].elfLogFont.lfFaceName, efnd_w.total == 1 ? L"Wine_Lang_Names" : primary_family ),
+                "%d: (%d) unexpected lfFaceName %s\n", i, efnd_w.total, debugstr_w((WCHAR *)efnd_w.elf[efnd_w.total].elfLogFont.lfFaceName) );
+            ok( !wcscmp( (WCHAR *)efnd_w.elf[efnd_w.total].elfFullName, L"Wine_Lang_Names_Regular" ),
+                "%d: (%d) unexpected elfFullName %s\n", i, efnd_w.total, debugstr_w((WCHAR *)efnd_w.elf[efnd_w.total].elfFullName) );
+            if (PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_ENGLISH)
+                ok( !wcscmp( (WCHAR *)efnd_w.elf[efnd_w.total].elfStyle, efnd_w.total == 1 ? L"Regular" : L"Reg (en)" ),
+                    "%d: (%d) unexpected elfStyle %s\n", i, efnd_w.total, debugstr_w((WCHAR *)efnd_w.elf[efnd_w.total].elfStyle) );
+            else
+                ok( !wcscmp( (WCHAR *)efnd_w.elf[0].elfStyle, L"Reg (ja)" ),
+                    "%d: (%d) unexpected elfStyle %s\n", i, efnd_w.total, debugstr_w((WCHAR *)efnd_w.elf[0].elfStyle) );
+        }
+
+        if (PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_ENGLISH)
+        {
+            wcscpy( font_w.lfFaceName, name_cond_ja_reg_ja_w );
+            memset( &efnd_w, 0, sizeof(efnd_w) );
+            EnumFontFamiliesExW( dc, &font_w, enum_fullname_data_proc_w, (LPARAM)&efnd_w, 0 );
+            ok( efnd_w.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd_w.total );
+        }
+
+        /* another language can also be used for lookup, if the primary langid isn't english, then
+           english seems to have priority, otherwise or if english is already the primary langid,
+           the family name with the smallest langid is used as secondary lookup language. */
+
+        strcpy( font.lfFaceName, "Wine Lang Cond (zh-tw)" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        if (PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_ENGLISH)
+            ok( efnd.total == min( 2, i + 1 ), "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+        else /* (zh-tw) doesn't match here probably because there's an (en) name too */
+            ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        strcpy( font.lfFaceName, "Wine Lang Cond (en)" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        /* either because it's the primary language, or because it's a secondary */
+        ok( efnd.total == min( 2, i + 1 ), "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        strcpy( font.lfFaceName, "Wine Lang Cond (fr)" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        /* as wine_langnames3.sfd does not specify (en) name, (fr) is preferred */
+        if (i == 2) ok( efnd.total == 1, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+        else ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        strcpy( font.lfFaceName, "Wine Lang Cond (ko)" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        /* that doesn't apply to full names */
+
+        strcpy( font.lfFaceName, "Wine Lang Cond Reg (zh-tw)" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        strcpy( font.lfFaceName, "Wine Lang Cond Reg (fr)" );
+        memset( &efnd, 0, sizeof(efnd) );
+        EnumFontFamiliesExA( dc, &font, enum_fullname_data_proc, (LPARAM)&efnd, 0 );
+        ok( efnd.total == 0, "%d: EnumFontFamiliesExA unexpected count %u.\n", i, efnd.total );
+
+        if (i == 0)
+        {
+            ret = AddFontResourceExA( ttf_name2, FR_PRIVATE, 0 );
+            ok( ret, "AddFontResourceEx() failed\n" );
+        }
+        else if (i == 1)
+        {
+            ret = AddFontResourceExA( ttf_name3, FR_PRIVATE, 0 );
+            ok( ret, "AddFontResourceEx() failed\n" );
+        }
+    }
+
+    ret = RemoveFontResourceExA( ttf_name3, FR_PRIVATE, 0 );
+    ok( ret, "RemoveFontResourceEx() failed\n" );
+
+    DeleteFileA( ttf_name3 );
+
+    ret = RemoveFontResourceExA( ttf_name2, FR_PRIVATE, 0 );
+    ok( ret, "RemoveFontResourceEx() failed\n" );
+
+    DeleteFileA( ttf_name2 );
+
+    ret = RemoveFontResourceExA( ttf_name, FR_PRIVATE, 0 );
+    ok( ret, "RemoveFontResourceEx() failed\n" );
+
+    DeleteFileA( ttf_name );
+    ReleaseDC( NULL, dc );
+}
+
 typedef struct
 {
     USHORT majorVersion;
@@ -7351,6 +7682,8 @@ START_TEST(font)
     test_bitmap_font_glyph_index();
     test_GetCharWidthI();
     test_long_names();
+    test_ttf_names();
+    test_lang_names();
     test_char_width();
 
     /* These tests should be last test until RemoveFontResource

@@ -3003,6 +3003,7 @@ void WCMD_move (void)
     WCHAR  src[MAX_PATH];
     DWORD attribs;
     BOOL ok = TRUE;
+    DWORD flags = 0;
 
     WINE_TRACE("Processing file '%s'\n", wine_dbgstr_w(fd.cFileName));
 
@@ -3032,15 +3033,28 @@ void WCMD_move (void)
       WCHAR copycmd[MAXSTRING];
       DWORD len;
 
-      /* /-Y has the highest priority, then /Y and finally the COPYCMD env. variable */
+      /* Default whether automatic overwriting is on. If we are interactive then
+         we prompt by default, otherwise we overwrite by default
+         /-Y has the highest priority, then /Y and finally the COPYCMD env. variable */
       if (wcsstr (quals, parmNoY))
         force = FALSE;
       else if (wcsstr (quals, parmY))
         force = TRUE;
       else {
         static const WCHAR copyCmdW[] = {'C','O','P','Y','C','M','D','\0'};
+        /* By default, we will force the overwrite in batch mode and ask for
+         * confirmation in interactive mode. */
+        force = !interactive;
+        /* If COPYCMD is set, then we force the overwrite with /Y and ask for
+         * confirmation with /-Y. If COPYCMD is neither of those, then we use the
+         * default behavior. */
         len = GetEnvironmentVariableW(copyCmdW, copycmd, ARRAY_SIZE(copycmd));
-        force = (len && len < ARRAY_SIZE(copycmd) && !lstrcmpiW(copycmd, parmY));
+        if (len && len < ARRAY_SIZE(copycmd)) {
+          if (!lstrcmpiW (copycmd, parmY))
+            force = TRUE;
+          else if (!lstrcmpiW (copycmd, parmNoY))
+            force = FALSE;
+        }
       }
 
       /* Prompt if overwriting */
@@ -3051,20 +3065,14 @@ void WCMD_move (void)
         question = WCMD_format_string(WCMD_LoadMessage(WCMD_OVERWRITE), dest);
         ok = WCMD_ask_confirm(question, FALSE, NULL);
         LocalFree(question);
-
-        /* So delete the destination prior to the move */
-        if (ok) {
-          if (!DeleteFileW(dest)) {
-            WCMD_print_error ();
-            errorlevel = 1;
-            ok = FALSE;
-          }
-        }
       }
+
+      if (ok)
+        flags |= MOVEFILE_REPLACE_EXISTING;
     }
 
     if (ok) {
-      status = MoveFileW(src, dest);
+      status = MoveFileExW(src, dest, flags);
     } else {
       status = TRUE;
     }

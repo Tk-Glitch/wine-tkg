@@ -2443,8 +2443,7 @@ BOOLEAN WINAPI SystemFunction036(PVOID pbBuffer, ULONG dwLen)
     dev_random = open("/dev/urandom", O_RDONLY);
     if (dev_random != -1)
     {
-        if (!IsBadWritePtr( pbBuffer, dwLen ) &&
-            read(dev_random, pbBuffer, dwLen) == (ssize_t)dwLen)
+        if (read(dev_random, pbBuffer, dwLen) == (ssize_t)dwLen)
         {
             close(dev_random);
             return TRUE;

@@ -86,13 +86,6 @@ typedef struct _DMUS_PRIVATE_TEMPO_ITEM {
   DMUS_IO_TEMPO_ITEM item;
 } DMUS_PRIVATE_TEMPO_ITEM, *LPDMUS_PRIVATE_TEMPO_ITEM;
 
-typedef struct _DMUS_PRIVATE_SEGMENT_ITEM {
-  struct list entry; /* for listing elements */
-  DMUS_IO_SEGMENT_ITEM_HEADER header;
-  IDirectMusicObject* pObject;
-  WCHAR wszName[DMUS_MAX_NAME];
-} DMUS_PRIVATE_SEGMENT_ITEM, *LPDMUS_PRIVATE_SEGMENT_ITEM;
-
 typedef struct _DMUS_PRIVATE_GRAPH_TOOL {
   struct list entry; /* for listing elements */
   DWORD dwIndex;
@@ -113,7 +106,5 @@ static inline void DMIME_UnlockModule(void) { InterlockedDecrement( &DMIME_refCo
 /*****************************************************************************
  * Misc.
  */
-
-#include "dmutils.h"
 
 #endif	/* __WINE_DMIME_PRIVATE_H */

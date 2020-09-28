@@ -414,21 +414,23 @@ static void test_default_mixer(void)
 {
     DWORD input_min, input_max, output_min, output_max;
     IMFAttributes *attributes, *attributes2;
+    IMFVideoMixerControl2 *mixer_control2;
     MFT_OUTPUT_STREAM_INFO output_info;
     MFT_INPUT_STREAM_INFO input_info;
     DWORD input_count, output_count;
     IMFVideoProcessor *processor;
     IMFVideoDeviceID *deviceid;
+    MFVideoNormalizedRect rect;
     DWORD input_id, output_id;
     IMFTransform *transform;
     DXVA2_ValueRange range;
-    DXVA2_Fixed32 value;
+    DXVA2_Fixed32 dxva_value;
+    DWORD flags, value, count;
     IMFGetService *gs;
     COLORREF color;
     unsigned int i;
     DWORD ids[16];
     IUnknown *unk;
-    DWORD count;
     GUID *guids;
     HRESULT hr;
     IID iid;
@@ -454,6 +456,18 @@ static void test_default_mixer(void)
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     IUnknown_Release(unk);
 
+    if (SUCCEEDED(IMFGetService_GetService(gs, &MR_VIDEO_MIXER_SERVICE, &IID_IMFVideoMixerControl2, (void **)&mixer_control2)))
+    {
+        hr = IMFVideoMixerControl2_GetMixingPrefs(mixer_control2, NULL);
+        ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+
+        hr = IMFVideoMixerControl2_GetMixingPrefs(mixer_control2, &flags);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+        ok(!flags, "Unexpected flags %#x.\n", flags);
+
+        IMFVideoMixerControl2_Release(mixer_control2);
+    }
+
     hr = IMFVideoProcessor_GetBackgroundColor(processor, NULL);
     ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
 
@@ -473,7 +487,7 @@ static void test_default_mixer(void)
 todo_wine
     ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#x.\n", hr);
 
-    hr = IMFVideoProcessor_GetFilteringValue(processor, DXVA2_DetailFilterChromaLevel, &value);
+    hr = IMFVideoProcessor_GetFilteringValue(processor, DXVA2_DetailFilterChromaLevel, &dxva_value);
 todo_wine
     ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#x.\n", hr);
 
@@ -507,6 +521,48 @@ todo_wine
 
     hr = IMFTransform_QueryInterface(transform, &IID_IMFVideoDeviceID, (void **)&deviceid);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFTransform_GetAttributes(transform, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFTransform_GetAttributes(transform, &attributes);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFTransform_GetAttributes(transform, &attributes2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(attributes == attributes2, "Unexpected attributes instance.\n");
+    IMFAttributes_Release(attributes2);
+
+    hr = IMFTransform_QueryInterface(transform, &IID_IMFAttributes, (void **)&attributes2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(attributes != attributes2, "Unexpected attributes instance.\n");
+
+    hr = IMFAttributes_QueryInterface(attributes2, &IID_IMFTransform, (void **)&unk);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    IUnknown_Release(unk);
+
+    hr = IMFAttributes_GetCount(attributes2, &count);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(count == 1, "Unexpected attribute count %u.\n", count);
+
+    value = 0;
+    hr = IMFAttributes_GetUINT32(attributes2, &MF_SA_D3D_AWARE, &value);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(value == 1, "Unexpected value %d.\n", value);
+
+    IMFAttributes_Release(attributes2);
+
+    hr = IMFAttributes_GetCount(attributes, &count);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(count == 1, "Unexpected attribute count %u.\n", count);
+
+    memset(&rect, 0, sizeof(rect));
+    hr = IMFAttributes_GetBlob(attributes, &VIDEO_ZOOM_RECT, (UINT8 *)&rect, sizeof(rect), NULL);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(rect.left == 0.0f && rect.top == 0.0f && rect.right == 1.0f && rect.bottom == 1.0f,
+            "Unexpected zoom rect (%f, %f) - (%f, %f).\n", rect.left, rect.top, rect.right, rect.bottom);
+
+    IMFAttributes_Release(attributes);
 
     hr = IMFVideoDeviceID_GetDeviceID(deviceid, NULL);
     ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
@@ -749,11 +805,11 @@ done:
 
 static void test_default_mixer_type_negotiation(void)
 {
+    IMFMediaType *media_type, *media_type2;
     IDirect3DDeviceManager9 *manager;
     DXVA2_VideoProcessorCaps caps;
     IMFVideoMediaType *video_type;
     IMFVideoProcessor *processor;
-    IMFMediaType *media_type;
     IDirect3DDevice9 *device;
     IMFTransform *transform;
     GUID guid, *guids;
@@ -777,6 +833,9 @@ static void test_default_mixer_type_negotiation(void)
     ok(hr == E_NOTIMPL, "Unexpected hr %#x.\n", hr);
 
     hr = IMFTransform_GetInputCurrentType(transform, 0, &media_type);
+    ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFTransform_GetOutputAvailableType(transform, 0, 0, &media_type);
     ok(hr == MF_E_TRANSFORM_TYPE_NOT_SET, "Unexpected hr %#x.\n", hr);
 
     hr = MFCreateMediaType(&media_type);
@@ -834,9 +893,20 @@ static void test_default_mixer_type_negotiation(void)
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     hr = IMFTransform_SetInputType(transform, 0, (IMFMediaType *)video_type, 0);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
+    hr = IMFTransform_GetInputCurrentType(transform, 0, &media_type);
+todo_wine
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+if (hr == S_OK)
+{
+    ok(media_type != (IMFMediaType *)video_type, "Unexpected media type instance.\n");
+    hr = IMFTransform_GetInputCurrentType(transform, 0, &media_type2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(media_type == media_type2, "Unexpected media type instance.\n");
+    IMFMediaType_Release(media_type);
+    IMFMediaType_Release(media_type2);
+}
     hr = IMFTransform_QueryInterface(transform, &IID_IMFVideoProcessor, (void **)&processor);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 

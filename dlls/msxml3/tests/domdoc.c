@@ -3584,8 +3584,9 @@ static void test_get_childNodes(void)
     IXMLDOMNode *node, *node2;
     IXMLDOMElement *element;
     IUnknown *unk1, *unk2;
+    ULONG fetched;
+    VARIANT v[2];
     HRESULT hr;
-    VARIANT v;
     BSTR str;
     LONG len;
 
@@ -3670,18 +3671,57 @@ static void test_get_childNodes(void)
     SysFreeString(str);
     IXMLDOMNode_Release(node);
 
-    V_VT(&v) = VT_EMPTY;
-    hr = IEnumVARIANT_Next(enum1, 1, &v, NULL);
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enum1, 1, &v[0], NULL);
     EXPECT_HR(hr, S_OK);
-    ok(V_VT(&v) == VT_DISPATCH, "got var type %d\n", V_VT(&v));
-    hr = IDispatch_QueryInterface(V_DISPATCH(&v), &IID_IXMLDOMNode, (void**)&node);
+    ok(V_VT(&v[0]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[0]));
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[0]), &IID_IXMLDOMNode, (void**)&node);
     EXPECT_HR(hr, S_OK);
     hr = IXMLDOMNode_get_nodeName(node, &str);
     EXPECT_HR(hr, S_OK);
     ok(!lstrcmpW(str, L"bs"), "got node name %s\n", wine_dbgstr_w(str));
     SysFreeString(str);
     IXMLDOMNode_Release(node);
-    VariantClear(&v);
+    VariantClear(&v[0]);
+
+    V_VT(&v[1]) = VT_EMPTY;
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enum1, 2, v, &fetched);
+    EXPECT_HR(hr, S_OK);
+    ok(V_VT(&v[0]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[0]));
+    ok(V_VT(&v[1]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[1]));
+    ok(fetched == 2, "got %d, expected 2\n", fetched);
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[0]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &str);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(str, L"pr"), "got node name %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+    IXMLDOMNode_Release(node);
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[1]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &str);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(str, L"empty"), "got node name %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+    IXMLDOMNode_Release(node);
+    VariantClear(&v[1]);
+    VariantClear(&v[0]);
+
+    V_VT(&v[1]) = VT_NULL;
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enum1, 2, v, &fetched);
+    EXPECT_HR(hr, S_FALSE);
+    ok(V_VT(&v[0]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[0]));
+    ok(V_VT(&v[1]) == VT_EMPTY, "got var type %d\n", V_VT(&v[1]));
+    ok(fetched == 1, "got %d, expected 1\n", fetched);
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[0]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &str);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(str, L"fo"), "got node name %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+    VariantClear(&v[0]);
 
     hr = IXMLDOMNodeList_nextNode(node_list, &node);
     EXPECT_HR(hr, S_OK);
@@ -9976,9 +10016,9 @@ static void test_selection(void)
     IXMLDOMNode *node;
     IDispatch *disp;
     VARIANT_BOOL b;
+    VARIANT v[3];
     HRESULT hr;
     DISPID did;
-    VARIANT v;
     BSTR name;
     ULONG ret;
     LONG len;
@@ -10148,33 +10188,32 @@ static void test_selection(void)
     EXPECT_HR(hr, S_OK);
 
     /* no-op if zero count */
-    V_VT(&v) = VT_I2;
-    hr = IEnumVARIANT_Next(enum1, 0, &v, NULL);
+    V_VT(&v[0]) = VT_I2;
+    hr = IEnumVARIANT_Next(enum1, 0, &v[0], NULL);
     EXPECT_HR(hr, S_OK);
-    ok(V_VT(&v) == VT_I2, "got var type %d\n", V_VT(&v));
+    ok(V_VT(&v[0]) == VT_I2, "got var type %d\n", V_VT(&v[0]));
 
     /* positive count, null array pointer */
     hr = IEnumVARIANT_Next(enum1, 1, NULL, NULL);
     EXPECT_HR(hr, E_INVALIDARG);
 
-    ret = 1;
     hr = IEnumVARIANT_Next(enum1, 1, NULL, &ret);
     EXPECT_HR(hr, E_INVALIDARG);
     ok(ret == 0, "got %d\n", ret);
 
-    V_VT(&v) = VT_I2;
-    hr = IEnumVARIANT_Next(enum1, 1, &v, NULL);
+    V_VT(&v[0]) = VT_I2;
+    hr = IEnumVARIANT_Next(enum1, 1, &v[0], NULL);
     EXPECT_HR(hr, S_OK);
-    ok(V_VT(&v) == VT_DISPATCH, "got var type %d\n", V_VT(&v));
+    ok(V_VT(&v[0]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[0]));
 
-    hr = IDispatch_QueryInterface(V_DISPATCH(&v), &IID_IXMLDOMNode, (void**)&node);
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[0]), &IID_IXMLDOMNode, (void**)&node);
     EXPECT_HR(hr, S_OK);
     hr = IXMLDOMNode_get_nodeName(node, &name);
     EXPECT_HR(hr, S_OK);
     ok(!lstrcmpW(name, L"a"), "got node name %s\n", wine_dbgstr_w(name));
     SysFreeString(name);
     IXMLDOMNode_Release(node);
-    VariantClear(&v);
+    VariantClear(&v[0]);
 
     /* list cursor is updated */
     hr = IXMLDOMSelection_nextNode(selection, &node);
@@ -10185,19 +10224,18 @@ static void test_selection(void)
     IXMLDOMNode_Release(node);
     SysFreeString(name);
 
-    V_VT(&v) = VT_I2;
-    hr = IEnumVARIANT_Next(enum1, 1, &v, NULL);
+    V_VT(&v[0]) = VT_I2;
+    hr = IEnumVARIANT_Next(enum1, 1, &v[0], NULL);
     EXPECT_HR(hr, S_OK);
-    ok(V_VT(&v) == VT_DISPATCH, "got var type %d\n", V_VT(&v));
-    hr = IDispatch_QueryInterface(V_DISPATCH(&v), &IID_IXMLDOMNode, (void**)&node);
+    ok(V_VT(&v[0]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[0]));
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[0]), &IID_IXMLDOMNode, (void**)&node);
     EXPECT_HR(hr, S_OK);
     hr = IXMLDOMNode_get_nodeName(node, &name);
     EXPECT_HR(hr, S_OK);
     ok(!lstrcmpW(name, L"b"), "got node name %s\n", wine_dbgstr_w(name));
     SysFreeString(name);
     IXMLDOMNode_Release(node);
-    VariantClear(&v);
-    IEnumVARIANT_Release(enum1);
+    VariantClear(&v[0]);
 
     hr = IXMLDOMSelection_nextNode(selection, &node);
     EXPECT_HR(hr, S_OK);
@@ -10206,6 +10244,79 @@ static void test_selection(void)
     ok(!lstrcmpW(name, L"d"), "got node name %s\n", wine_dbgstr_w(name));
     IXMLDOMNode_Release(node);
     SysFreeString(name);
+
+    hr = IEnumVARIANT_Reset(enum1);
+    EXPECT_HR(hr, S_OK);
+
+    /* getting multiple elements */
+    V_VT(&v[1]) = VT_EMPTY;
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enum1, 2, v, &ret);
+    EXPECT_HR(hr, S_OK);
+    ok(ret == 2, "got %d, expected 2\n", ret);
+    ok(V_VT(&v[0]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[0]));
+    ok(V_VT(&v[1]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[1]));
+
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[0]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &name);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(name, L"a"), "got node name %s\n", wine_dbgstr_w(name));
+    SysFreeString(name);
+    IXMLDOMNode_Release(node);
+
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[1]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &name);
+    ok(!lstrcmpW(name, L"b"), "got node name %s\n", wine_dbgstr_w(name));
+    SysFreeString(name);
+    IXMLDOMNode_Release(node);
+
+    VariantClear(&v[1]);
+    VariantClear(&v[0]);
+
+    /* IEnumVARIANT_Next makes the IXMLDOMSelection cursor advance one step more */
+    hr = IXMLDOMSelection_nextNode(selection, &node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &name);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(name, L"d"), "got node name %s\n", wine_dbgstr_w(name));
+    SysFreeString(name);
+    IXMLDOMNode_Release(node);
+
+    /* The IEnumVARIANT cursor is still at position '2', */
+    /* therefore attempting to fetch 4 elements yields 'c' and 'd' */
+    V_VT(&v[2]) = VT_NULL;
+    V_VT(&v[1]) = VT_EMPTY;
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enum1, 4, v, &ret);
+    EXPECT_HR(hr, S_FALSE);
+    ok(ret == 2, "got %d, expected 2\n", ret);
+
+    ok(V_VT(&v[0]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[0]));
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[0]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &name);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(name, L"c"), "got node name %s\n", wine_dbgstr_w(name));
+    SysFreeString(name);
+    IXMLDOMNode_Release(node);
+
+    ok(V_VT(&v[1]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[1]));
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[1]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &name);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(name, L"d"), "got node name %s\n", wine_dbgstr_w(name));
+    SysFreeString(name);
+    IXMLDOMNode_Release(node);
+
+    ok(V_VT(&v[2]) == VT_EMPTY, "got var type %d, expected %d (VT_EMPTY)\n", V_VT(&v[2]), VT_EMPTY);
+
+    VariantClear(&v[1]);
+    VariantClear(&v[0]);
+
+    IEnumVARIANT_Release(enum1);
 
     IXMLDOMSelection_Release(selection);
     IXMLDOMNodeList_Release(list);
@@ -11915,8 +12026,9 @@ static void test_get_namespaces(void)
     IUnknown *unk1, *unk2;
     IXMLDOMNode *node;
     VARIANT_BOOL b;
+    ULONG fetched;
+    VARIANT v[2];
     HRESULT hr;
-    VARIANT v;
     LONG len;
     BSTR s;
 
@@ -11979,9 +12091,9 @@ static void test_get_namespaces(void)
     hr = IXMLDOMDocument2_loadXML(doc2, _bstr_(xsd_schema1_xml), &b);
     EXPECT_HR(hr, S_OK);
 
-    V_VT(&v) = VT_DISPATCH;
-    V_DISPATCH(&v) = (IDispatch*)doc2;
-    hr = IXMLDOMSchemaCollection_add(collection, _bstr_(xsd_schema1_uri), v);
+    V_VT(&v[0]) = VT_DISPATCH;
+    V_DISPATCH(&v[0]) = (IDispatch*)doc2;
+    hr = IXMLDOMSchemaCollection_add(collection, _bstr_(xsd_schema1_uri), v[0]);
     EXPECT_HR(hr, E_FAIL);
 
     hr = IXMLDOMSchemaCollection_get_namespaceURI(collection, 0, &s);
@@ -12018,28 +12130,50 @@ static void test_get_namespaces(void)
     hr = IXMLDOMSchemaCollection_QueryInterface(collection, &IID_IEnumVARIANT, (void**)&enum2);
     EXPECT_HR(hr, E_NOINTERFACE);
 
-    V_VT(&v) = VT_EMPTY;
-    hr = IEnumVARIANT_Next(enumv, 1, &v, NULL);
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enumv, 1, &v[0], NULL);
     EXPECT_HR(hr, S_OK);
-    ok(V_VT(&v) == VT_BSTR, "got %d\n", V_VT(&v));
-    ok(!lstrcmpW(V_BSTR(&v), L"http://blah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v)));
-    VariantClear(&v);
+    ok(V_VT(&v[0]) == VT_BSTR, "got %d\n", V_VT(&v[0]));
+    ok(!lstrcmpW(V_BSTR(&v[0]), L"http://blah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v[0])));
+    VariantClear(&v[0]);
 
-    V_VT(&v) = VT_EMPTY;
-    hr = IEnumVARIANT_Next(enumv, 1, &v, NULL);
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enumv, 1, &v[0], &fetched);
     EXPECT_HR(hr, S_OK);
-    ok(V_VT(&v) == VT_BSTR, "got %d\n", V_VT(&v));
-    ok(!lstrcmpW(V_BSTR(&v), L"http://blahblah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v)));
-    VariantClear(&v);
+    ok(fetched == 1, "got %d, expected 1\n", fetched);
+    ok(V_VT(&v[0]) == VT_BSTR, "got %d\n", V_VT(&v[0]));
+    ok(!lstrcmpW(V_BSTR(&v[0]), L"http://blahblah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v[0])));
+    VariantClear(&v[0]);
 
-    V_VT(&v) = VT_NULL;
-    hr = IEnumVARIANT_Next(enumv, 1, &v, NULL);
+    V_VT(&v[0]) = VT_NULL;
+    hr = IEnumVARIANT_Next(enumv, 1, &v[0], &fetched);
     EXPECT_HR(hr, S_FALSE);
-    ok(V_VT(&v) == VT_EMPTY, "got %d\n", V_VT(&v));
+    ok(fetched == 0, "got %d, expected 0\n", fetched);
+    ok(V_VT(&v[0]) == VT_EMPTY, "got %d\n", V_VT(&v[0]));
+
+    hr = IEnumVARIANT_Reset(enumv);
+    EXPECT_HR(hr, S_OK);
+
+    V_VT(&v[1]) = VT_EMPTY;
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enumv, 2, v, &fetched);
+    EXPECT_HR(hr, S_OK);
+    ok(fetched == 2, "got %d, expected 2\n", fetched);
+    ok(V_VT(&v[0]) == VT_BSTR, "got %d\n", V_VT(&v[0]));
+    ok(V_VT(&v[1]) == VT_BSTR, "got %d\n", V_VT(&v[1]));
+    ok(!lstrcmpW(V_BSTR(&v[0]), L"http://blah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v[0])));
+    ok(!lstrcmpW(V_BSTR(&v[1]), L"http://blahblah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v[1])));
+    VariantClear(&v[1]);
+    VariantClear(&v[0]);
+
+    V_VT(&v[0]) = VT_NULL;
+    hr = IEnumVARIANT_Next(enumv, 1, v, &fetched);
+    EXPECT_HR(hr, S_FALSE);
+    ok(fetched == 0, "got %d, expected 0\n", fetched);
+    ok(V_VT(&v[0]) == VT_EMPTY, "got %d\n", V_VT(&v[0]));
 
     IEnumVARIANT_Release(enumv);
     IXMLDOMSchemaCollection_Release(collection);
-
     IXMLDOMDocument2_Release(doc);
 
     /* now with CLSID_DOMDocument60 */
@@ -12097,9 +12231,9 @@ static void test_get_namespaces(void)
     hr = IXMLDOMDocument2_loadXML(doc2, _bstr_(xsd_schema1_xml), &b);
     EXPECT_HR(hr, S_OK);
 
-    V_VT(&v) = VT_DISPATCH;
-    V_DISPATCH(&v) = (IDispatch*)doc2;
-    hr = IXMLDOMSchemaCollection_add(collection, _bstr_(xsd_schema1_uri), v);
+    V_VT(&v[0]) = VT_DISPATCH;
+    V_DISPATCH(&v[0]) = (IDispatch*)doc2;
+    hr = IXMLDOMSchemaCollection_add(collection, _bstr_(xsd_schema1_uri), v[0]);
     EXPECT_HR(hr, E_FAIL);
     IXMLDOMDocument2_Release(doc2);
 
@@ -12124,24 +12258,45 @@ static void test_get_namespaces(void)
     EXPECT_HR(hr, S_OK);
     ok(enumv != NULL, "got %p\n", enumv);
 
-    V_VT(&v) = VT_EMPTY;
-    hr = IEnumVARIANT_Next(enumv, 1, &v, NULL);
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enumv, 1, &v[0], NULL);
     EXPECT_HR(hr, S_OK);
-    ok(V_VT(&v) == VT_BSTR, "got %d\n", V_VT(&v));
-    ok(!lstrcmpW(V_BSTR(&v), L"http://blah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v)));
-    VariantClear(&v);
+    ok(V_VT(&v[0]) == VT_BSTR, "got %d\n", V_VT(&v[0]));
+    ok(!lstrcmpW(V_BSTR(&v[0]), L"http://blah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v[0])));
+    VariantClear(&v[0]);
 
-    V_VT(&v) = VT_EMPTY;
-    hr = IEnumVARIANT_Next(enumv, 1, &v, NULL);
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enumv, 1, &v[0], NULL);
     EXPECT_HR(hr, S_OK);
-    ok(V_VT(&v) == VT_BSTR, "got %d\n", V_VT(&v));
-    ok(!lstrcmpW(V_BSTR(&v), L"http://blahblah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v)));
-    VariantClear(&v);
+    ok(V_VT(&v[0]) == VT_BSTR, "got %d\n", V_VT(&v[0]));
+    ok(!lstrcmpW(V_BSTR(&v[0]), L"http://blahblah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v[0])));
+    VariantClear(&v[0]);
 
-    V_VT(&v) = VT_NULL;
-    hr = IEnumVARIANT_Next(enumv, 1, &v, NULL);
+    V_VT(&v[0]) = VT_NULL;
+    hr = IEnumVARIANT_Next(enumv, 1, &v[0], NULL);
     EXPECT_HR(hr, S_FALSE);
-    ok(V_VT(&v) == VT_EMPTY, "got %d\n", V_VT(&v));
+    ok(V_VT(&v[0]) == VT_EMPTY, "got %d\n", V_VT(&v[0]));
+
+    hr = IEnumVARIANT_Reset(enumv);
+    EXPECT_HR(hr, S_OK);
+
+    V_VT(&v[1]) = VT_EMPTY;
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enumv, 2, v, &fetched);
+    EXPECT_HR(hr, S_OK);
+    ok(fetched == 2, "got %d, expected 2\n", fetched);
+    ok(V_VT(&v[0]) == VT_BSTR, "got %d\n", V_VT(&v[0]));
+    ok(V_VT(&v[1]) == VT_BSTR, "got %d\n", V_VT(&v[1]));
+    ok(!lstrcmpW(V_BSTR(&v[0]), L"http://blah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v[0])));
+    ok(!lstrcmpW(V_BSTR(&v[1]), L"http://blahblah.org"), "got %s\n", wine_dbgstr_w(V_BSTR(&v[0])));
+    VariantClear(&v[1]);
+    VariantClear(&v[0]);
+
+    V_VT(&v[0]) = VT_NULL;
+    hr = IEnumVARIANT_Next(enumv, 1, v, &fetched);
+    EXPECT_HR(hr, S_FALSE);
+    ok(fetched == 0, "got %d, expected 0\n", fetched);
+    ok(V_VT(&v[0]) == VT_EMPTY, "got %d\n", V_VT(&v[0]));
 
     IEnumVARIANT_Release(enumv);
     IXMLDOMSchemaCollection_Release(collection);
@@ -12487,8 +12642,9 @@ static void test_namedmap_newenum(void)
     IXMLDOMElement *elem;
     IXMLDOMNode *node;
     VARIANT_BOOL b;
+    ULONG fetched;
+    VARIANT v[3];
     HRESULT hr;
-    VARIANT v;
     BSTR str;
 
     doc = create_document(&IID_IXMLDOMDocument);
@@ -12560,18 +12716,18 @@ static void test_namedmap_newenum(void)
     SysFreeString(str);
     IXMLDOMNode_Release(node);
 
-    V_VT(&v) = VT_EMPTY;
-    hr = IEnumVARIANT_Next(enum2, 1, &v, NULL);
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enum2, 1, &v[0], NULL);
     EXPECT_HR(hr, S_OK);
-    ok(V_VT(&v) == VT_DISPATCH, "got var type %d\n", V_VT(&v));
-    hr = IDispatch_QueryInterface(V_DISPATCH(&v), &IID_IXMLDOMNode, (void**)&node);
+    ok(V_VT(&v[0]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[0]));
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[0]), &IID_IXMLDOMNode, (void**)&node);
     EXPECT_HR(hr, S_OK);
     hr = IXMLDOMNode_get_nodeName(node, &str);
     EXPECT_HR(hr, S_OK);
     ok(!lstrcmpW(str, L"attr1"), "got node name %s\n", wine_dbgstr_w(str));
     SysFreeString(str);
     IXMLDOMNode_Release(node);
-    VariantClear(&v);
+    VariantClear(&v[0]);
 
     hr = IXMLDOMNamedNodeMap_nextNode(map, &node);
     EXPECT_HR(hr, S_OK);
@@ -12581,7 +12737,60 @@ static void test_namedmap_newenum(void)
     SysFreeString(str);
     IXMLDOMNode_Release(node);
 
+    hr = IEnumVARIANT_Reset(enum2);
+    EXPECT_HR(hr, S_OK);
+
+    V_VT(&v[1]) = VT_EMPTY;
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enum2, 2, v, &fetched);
+    EXPECT_HR(hr, S_OK);
+    ok(fetched == 2, "got %d, expected 2\n", fetched);
+    ok(V_VT(&v[0]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[0]));
+    ok(V_VT(&v[1]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[1]));
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[0]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &str);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(str, L"attr1"), "got node name %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+    IXMLDOMNode_Release(node);
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[1]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &str);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(str, L"attr2"), "got node name %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+    IXMLDOMNode_Release(node);
+    VariantClear(&v[1]);
+    VariantClear(&v[0]);
+
+    V_VT(&v[2]) = VT_NULL;
+    V_VT(&v[1]) = VT_EMPTY;
+    V_VT(&v[0]) = VT_EMPTY;
+    hr = IEnumVARIANT_Next(enum2, 3, v, &fetched);
+    EXPECT_HR(hr, S_FALSE);
+    ok(fetched == 2, "got %d, expected 2\n", fetched);
+    ok(V_VT(&v[0]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[0]));
+    ok(V_VT(&v[1]) == VT_DISPATCH, "got var type %d\n", V_VT(&v[1]));
+    ok(V_VT(&v[2]) == VT_EMPTY, "got var type %d\n", V_VT(&v[2]));
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[0]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &str);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(str, L"attr3"), "got node name %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+    IXMLDOMNode_Release(node);
+    hr = IDispatch_QueryInterface(V_DISPATCH(&v[1]), &IID_IXMLDOMNode, (void**)&node);
+    EXPECT_HR(hr, S_OK);
+    hr = IXMLDOMNode_get_nodeName(node, &str);
+    EXPECT_HR(hr, S_OK);
+    ok(!lstrcmpW(str, L"attr4"), "got node name %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+    IXMLDOMNode_Release(node);
+    VariantClear(&v[1]);
+    VariantClear(&v[0]);
     IEnumVARIANT_Release(enum2);
+
     IXMLDOMNamedNodeMap_Release(map);
     IXMLDOMDocument_Release(doc);
 }

@@ -315,10 +315,10 @@ gboolean query_sink_wrapper(GstPad *pad, GstObject *parent, GstQuery *query)
     return cbdata.u.query_sink_data.ret;
 }
 
-GstFlowReturn pull_from_bytestream_wrapper(GstPad *pad, GstObject *parent, guint64 ofs, guint len,
+GstFlowReturn bytestream_wrapper_pull_wrapper(GstPad *pad, GstObject *parent, guint64 ofs, guint len,
         GstBuffer **buf)
 {
-    struct cb_data cbdata = { PULL_FROM_BYTESTREAM };
+    struct cb_data cbdata = { BYTESTREAM_WRAPPER_PULL };
 
     cbdata.u.getrange_data.pad = pad;
     cbdata.u.getrange_data.parent = parent;
@@ -331,9 +331,9 @@ GstFlowReturn pull_from_bytestream_wrapper(GstPad *pad, GstObject *parent, guint
     return cbdata.u.getrange_data.ret;
 }
 
-gboolean query_bytestream_wrapper(GstPad *pad, GstObject *parent, GstQuery *query)
+gboolean bytestream_query_wrapper(GstPad *pad, GstObject *parent, GstQuery *query)
 {
-    struct cb_data cbdata = { QUERY_BYTESTREAM };
+    struct cb_data cbdata = { BYTESTREAM_QUERY };
 
     cbdata.u.query_function_data.pad = pad;
     cbdata.u.query_function_data.parent = parent;
@@ -344,9 +344,9 @@ gboolean query_bytestream_wrapper(GstPad *pad, GstObject *parent, GstQuery *quer
     return cbdata.u.query_function_data.ret;
 }
 
-gboolean activate_bytestream_pad_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate)
+gboolean bytestream_pad_mode_activate_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate)
 {
-    struct cb_data cbdata = { ACTIVATE_BYTESTREAM_PAD_MODE };
+    struct cb_data cbdata = { BYTESTREAM_PAD_MODE_ACTIVATE };
 
     cbdata.u.activate_mode_data.pad = pad;
     cbdata.u.activate_mode_data.parent = parent;
@@ -358,9 +358,9 @@ gboolean activate_bytestream_pad_mode_wrapper(GstPad *pad, GstObject *parent, Gs
     return cbdata.u.activate_mode_data.ret;
 }
 
-gboolean process_bytestream_pad_event_wrapper(GstPad *pad, GstObject *parent, GstEvent *event)
+gboolean bytestream_pad_event_process_wrapper(GstPad *pad, GstObject *parent, GstEvent *event)
 {
-    struct cb_data cbdata = { PROCESS_BYTESTREAM_PAD_EVENT };
+    struct cb_data cbdata = { BYTESTREAM_PAD_EVENT_PROCESS };
 
     cbdata.u.event_src_data.pad = pad;
     cbdata.u.event_src_data.parent = parent;
@@ -371,9 +371,9 @@ gboolean process_bytestream_pad_event_wrapper(GstPad *pad, GstObject *parent, Gs
     return cbdata.u.event_src_data.ret;
 }
 
-GstBusSyncReply watch_source_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user)
+GstBusSyncReply mf_src_bus_watch_wrapper(GstBus *bus, GstMessage *message, gpointer user)
 {
-    struct cb_data cbdata = { WATCH_SOURCE_BUS };
+    struct cb_data cbdata = { MF_SRC_BUS_WATCH };
 
     cbdata.u.watch_bus_data.bus = bus;
     cbdata.u.watch_bus_data.msg = message;
@@ -384,9 +384,9 @@ GstBusSyncReply watch_source_bus_wrapper(GstBus *bus, GstMessage *message, gpoin
     return cbdata.u.watch_bus_data.ret;
 }
 
-void source_stream_added_wrapper(GstElement *bin, GstPad *pad, gpointer user)
+void mf_src_stream_added_wrapper(GstElement *bin, GstPad *pad, gpointer user)
 {
-    struct cb_data cbdata = { SOURCE_STREAM_ADDED };
+    struct cb_data cbdata = { MF_SRC_STREAM_ADDED };
 
     cbdata.u.pad_added_data.element = bin;
     cbdata.u.pad_added_data.pad = pad;
@@ -395,9 +395,9 @@ void source_stream_added_wrapper(GstElement *bin, GstPad *pad, gpointer user)
     call_cb(&cbdata);
 }
 
-void source_stream_removed_wrapper(GstElement *element, GstPad *pad, gpointer user)
+void mf_src_stream_removed_wrapper(GstElement *element, GstPad *pad, gpointer user)
 {
-    struct cb_data cbdata = { SOURCE_STREAM_REMOVED };
+    struct cb_data cbdata = { MF_SRC_STREAM_REMOVED };
 
     cbdata.u.pad_removed_data.element = element;
     cbdata.u.pad_removed_data.pad = pad;
@@ -406,27 +406,14 @@ void source_stream_removed_wrapper(GstElement *element, GstPad *pad, gpointer us
     call_cb(&cbdata);
 }
 
-void source_all_streams_wrapper(GstElement *element, gpointer user)
+void mf_src_no_more_pads_wrapper(GstElement *element, gpointer user)
 {
-    struct cb_data cbdata = { SOURCE_ALL_STREAMS };
+    struct cb_data cbdata = { MF_SRC_NO_MORE_PADS };
 
     cbdata.u.no_more_pads_data.element = element;
     cbdata.u.no_more_pads_data.user = user;
 
     call_cb(&cbdata);
-}
-
-GstPadProbeReturn caps_listener_wrapper(GstPad *pad, GstPadProbeInfo *info, gpointer user)
-{
-    struct cb_data cbdata = { STREAM_PAD_EVENT };
-
-    cbdata.u.pad_probe_data.pad = pad;
-    cbdata.u.pad_probe_data.info = info;
-    cbdata.u.pad_probe_data.user = user;
-
-    call_cb(&cbdata);
-
-    return cbdata.u.pad_probe_data.ret;
 }
 
 gboolean activate_push_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate)

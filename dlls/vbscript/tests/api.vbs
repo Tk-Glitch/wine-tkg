@@ -1842,6 +1842,11 @@ call testAsc("   ", 32)
 call testAsc(Chr(255), 255)
 call testAsc(Chr(0), 0)
 if isEnglishLang then testAsc true, 84
+if Asc(Chr(&h81)) = &h8145 then
+    ' Japanese (CP 932)
+    call testAsc(Chr(&h8e8e), -29042)
+    call testAsc(Chr(220), 220)
+end if
 call testAscError()
 
 sub testErrNumber(n)
@@ -1851,13 +1856,29 @@ end sub
 sub testErrRaise()
     on error resume next
     call ok(err.number = 0, "err.number = " & err.number)
+    err.raise 0
+    call ok(err.number = 5, "err.number = " & err.number)
     err.raise 1
     call ok(err.number = 1, "err.number = " & err.number)
     err.raise
     call ok(err.number = 450, "err.number = " & err.number)
     call testErrNumber(450)
+    err.raise &h8000
+    call ok(err.number = -32768, "err.number = " & err.number)
+    err.raise &hffff
+    call ok(err.number = -1, "err.number = " & err.number)
     err.raise &h10000&
     call ok(err.number = 5, "err.number = " & err.number)
+    err.raise -3000000000
+    call ok(err.number = 6, "err.number = " & err.number)
+    err.raise -1
+    call ok(err.number = -1, "err.number = " & err.number)
+    err.raise -20
+    call ok(err.number = -20, "err.number = " & err.number)
+    err.raise -&hfff0
+    call ok(err.number = 16, "err.number = " & err.number)
+    err.raise -&h8000
+    call ok(err.number = 32768, "err.number = " & err.number)
 
     err.clear
     call ok(getVT(err.source) = "VT_BSTR", "err.source = " & err.source)

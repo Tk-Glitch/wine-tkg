@@ -878,13 +878,14 @@ static GstFlowReturn got_data_sink(GstPad *pad, GstObject *parent, GstBuffer *bu
     return GST_FLOW_OK;
 }
 
-static GstFlowReturn request_buffer_src(GstPad *pad, GstObject *parent, guint64 ofs, guint len, GstBuffer **buf)
+static GstFlowReturn request_buffer_src(GstPad *pad, GstObject *parent, guint64 ofs, guint len, GstBuffer **buffer)
 {
     struct gstdemux *This = gst_pad_get_element_private(pad);
+    GstBuffer *new_buffer = NULL;
     HRESULT hr;
     GstMapInfo info;
 
-    TRACE("pad %p, offset %s, length %u, buffer %p.\n", pad, wine_dbgstr_longlong(ofs), len, *buf);
+    TRACE("pad %p, offset %s, length %u, buffer %p.\n", pad, wine_dbgstr_longlong(ofs), len, *buffer);
 
     if (ofs == GST_BUFFER_OFFSET_NONE)
         ofs = This->nextpullofs;
@@ -896,17 +897,19 @@ static GstFlowReturn request_buffer_src(GstPad *pad, GstObject *parent, guint64 
         len = This->filesize - ofs;
     This->nextpullofs = ofs + len;
 
-    if (!*buf)
-        *buf = gst_buffer_new_and_alloc(len);
-    gst_buffer_map(*buf, &info, GST_MAP_WRITE);
+    if (!*buffer)
+        *buffer = new_buffer = gst_buffer_new_and_alloc(len);
+    gst_buffer_map(*buffer, &info, GST_MAP_WRITE);
     hr = IAsyncReader_SyncRead(This->reader, ofs, len, info.data);
-    gst_buffer_unmap(*buf, &info);
-    if (FAILED(hr)) {
-        ERR("Returned %08x\n", hr);
+    gst_buffer_unmap(*buffer, &info);
+    if (FAILED(hr))
+    {
+        ERR("Failed to read data, hr %#x.\n", hr);
+        if (new_buffer)
+            gst_buffer_unref(new_buffer);
         return GST_FLOW_ERROR;
     }
 
-    GST_BUFFER_OFFSET(*buf) = ofs;
     return GST_FLOW_OK;
 }
 
@@ -1280,6 +1283,7 @@ static GstBusSyncReply watch_bus(GstBus *bus, GstMessage *msg, gpointer data)
     default:
         break;
     }
+    gst_message_unref(msg);
     return GST_BUS_DROP;
 }
 
@@ -1713,6 +1717,7 @@ static HRESULT gstdecoder_source_get_media_type(struct gstdemux_source *pin,
             gst_caps_unref(caps);
             return S_OK;
         }
+        FreeMediaType(mt);
     }
 
     if (!strcmp(type, "video/x-raw") && index < ARRAY_SIZE(video_formats))

@@ -915,12 +915,12 @@ BOOL CDECL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
 }
 
 
-static void free_heap_bits( struct gdi_image_bits *bits )
+static void CDECL free_heap_bits( struct gdi_image_bits *bits )
 {
     HeapFree( GetProcessHeap(), 0, bits->ptr );
 }
 
-static void free_ximage_bits( struct gdi_image_bits *bits )
+static void CDECL free_ximage_bits( struct gdi_image_bits *bits )
 {
     XFree( bits->ptr );
 }
@@ -1862,7 +1862,7 @@ failed:
 /***********************************************************************
  *           x11drv_surface_lock
  */
-static void x11drv_surface_lock( struct window_surface *window_surface )
+static void CDECL x11drv_surface_lock( struct window_surface *window_surface )
 {
     struct x11drv_window_surface *surface = get_x11_surface( window_surface );
 
@@ -1872,7 +1872,7 @@ static void x11drv_surface_lock( struct window_surface *window_surface )
 /***********************************************************************
  *           x11drv_surface_unlock
  */
-static void x11drv_surface_unlock( struct window_surface *window_surface )
+static void CDECL x11drv_surface_unlock( struct window_surface *window_surface )
 {
     struct x11drv_window_surface *surface = get_x11_surface( window_surface );
 
@@ -1882,7 +1882,7 @@ static void x11drv_surface_unlock( struct window_surface *window_surface )
 /***********************************************************************
  *           x11drv_surface_get_bitmap_info
  */
-static void *x11drv_surface_get_bitmap_info( struct window_surface *window_surface, BITMAPINFO *info )
+static void *CDECL x11drv_surface_get_bitmap_info( struct window_surface *window_surface, BITMAPINFO *info )
 {
     struct x11drv_window_surface *surface = get_x11_surface( window_surface );
 
@@ -1893,7 +1893,7 @@ static void *x11drv_surface_get_bitmap_info( struct window_surface *window_surfa
 /***********************************************************************
  *           x11drv_surface_get_bounds
  */
-static RECT *x11drv_surface_get_bounds( struct window_surface *window_surface )
+static RECT *CDECL x11drv_surface_get_bounds( struct window_surface *window_surface )
 {
     struct x11drv_window_surface *surface = get_x11_surface( window_surface );
 
@@ -1903,7 +1903,7 @@ static RECT *x11drv_surface_get_bounds( struct window_surface *window_surface )
 /***********************************************************************
  *           x11drv_surface_set_region
  */
-static void x11drv_surface_set_region( struct window_surface *window_surface, HRGN region )
+static void CDECL x11drv_surface_set_region( struct window_surface *window_surface, HRGN region )
 {
     RGNDATA *data;
     struct x11drv_window_surface *surface = get_x11_surface( window_surface );
@@ -1934,7 +1934,7 @@ static void x11drv_surface_set_region( struct window_surface *window_surface, HR
 /***********************************************************************
  *           x11drv_surface_flush
  */
-static void x11drv_surface_flush( struct window_surface *window_surface )
+static void CDECL x11drv_surface_flush( struct window_surface *window_surface )
 {
     struct x11drv_window_surface *surface = get_x11_surface( window_surface );
     unsigned char *src = surface->bits;
@@ -2001,7 +2001,7 @@ static void x11drv_surface_flush( struct window_surface *window_surface )
 /***********************************************************************
  *           x11drv_surface_destroy
  */
-static void x11drv_surface_destroy( struct window_surface *window_surface )
+static void CDECL x11drv_surface_destroy( struct window_surface *window_surface )
 {
     struct x11drv_window_surface *surface = get_x11_surface( window_surface );
 

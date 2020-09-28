@@ -14,11 +14,12 @@
 @ stdcall CoCreateGuid(ptr) combase.CoCreateGuid
 @ stdcall CoCreateInstance(ptr ptr long ptr ptr) combase.CoCreateInstance
 @ stdcall CoCreateInstanceEx(ptr ptr long ptr long ptr) combase.CoCreateInstanceEx
+@ stdcall CoCreateInstanceFromApp(ptr ptr long ptr long ptr) combase.CoCreateInstanceFromApp
 @ stdcall CoDecrementMTAUsage(ptr) combase.CoDecrementMTAUsage
-@ stdcall CoDisableCallCancellation(ptr)
-@ stdcall CoDisconnectObject(ptr long)
+@ stdcall CoDisableCallCancellation(ptr) combase.CoDisableCallCancellation
+@ stdcall CoDisconnectObject(ptr long) combase.CoDisconnectObject
 @ stdcall CoDosDateTimeToFileTime(long long ptr) kernel32.DosDateTimeToFileTime
-@ stdcall CoEnableCallCancellation(ptr)
+@ stdcall CoEnableCallCancellation(ptr) combase.CoEnableCallCancellation
 @ stdcall CoFileTimeNow(ptr) combase.CoFileTimeNow
 @ stdcall CoFileTimeToDosDateTime(ptr ptr ptr) kernel32.FileTimeToDosDateTime
 @ stdcall CoFreeAllLibraries()
@@ -29,7 +30,7 @@
 @ stdcall CoGetApartmentType(ptr ptr) combase.CoGetApartmentType
 @ stdcall CoGetCallContext(ptr ptr) combase.CoGetCallContext
 @ stdcall CoGetCallState(long ptr) combase.CoGetCallState
-@ stdcall CoGetCallerTID(ptr)
+@ stdcall CoGetCallerTID(ptr) combase.CoGetCallerTID
 @ stdcall CoGetClassObject(ptr long ptr ptr ptr) combase.CoGetClassObject
 @ stdcall CoGetContextToken(ptr) combase.CoGetContextToken
 @ stdcall CoGetCurrentLogicalThreadId(ptr) combase.CoGetCurrentLogicalThreadId
@@ -43,7 +44,7 @@
 @ stdcall CoGetObject(wstr ptr ptr ptr)
 @ stdcall CoGetObjectContext(ptr ptr) combase.CoGetObjectContext
 @ stdcall CoGetPSClsid(ptr ptr) combase.CoGetPSClsid
-@ stdcall CoGetStandardMarshal(ptr ptr long ptr long ptr)
+@ stdcall CoGetStandardMarshal(ptr ptr long ptr long ptr) combase.CoGetStandardMarshal
 @ stdcall CoGetState(ptr)
 @ stub CoGetTIDFromIPID
 @ stdcall CoGetTreatAsClass(ptr ptr) combase.CoGetTreatAsClass
@@ -52,11 +53,11 @@
 @ stdcall CoInitialize(ptr)
 @ stdcall CoInitializeEx(ptr long) combase.CoInitializeEx
 @ stdcall CoInitializeSecurity(ptr long ptr ptr long long ptr long ptr) combase.CoInitializeSecurity
-@ stdcall CoInitializeWOW(long long)
-@ stdcall CoIsHandlerConnected(ptr)
+@ stdcall CoInitializeWOW(long long) combase.CoInitializeWOW
+@ stdcall CoIsHandlerConnected(ptr) combase.CoIsHandlerConnected
 @ stdcall CoIsOle1Class (ptr)
 @ stdcall CoLoadLibrary(wstr long)
-@ stdcall CoLockObjectExternal(ptr long long)
+@ stdcall CoLockObjectExternal(ptr long long) combase.CoLockObjectExternal
 @ stdcall CoMarshalHresult(ptr long) combase.CoMarshalHresult
 @ stdcall CoMarshalInterThreadInterfaceInStream(ptr ptr ptr) combase.CoMarshalInterThreadInterfaceInStream
 @ stdcall CoMarshalInterface(ptr ptr ptr long ptr long) combase.CoMarshalInterface
@@ -64,24 +65,24 @@
 @ stdcall CoQueryClientBlanket(ptr ptr ptr ptr ptr ptr ptr) combase.CoQueryClientBlanket
 @ stdcall CoQueryProxyBlanket(ptr ptr ptr ptr ptr ptr ptr ptr) combase.CoQueryProxyBlanket
 @ stub CoQueryReleaseObject
-@ stdcall CoRegisterChannelHook(ptr ptr)
+@ stdcall CoRegisterChannelHook(ptr ptr) combase.CoRegisterChannelHook
 @ stdcall CoRegisterClassObject(ptr ptr long long ptr) combase.CoRegisterClassObject
 @ stdcall CoRegisterInitializeSpy(ptr ptr) combase.CoRegisterInitializeSpy
 @ stdcall CoRegisterMallocSpy(ptr) combase.CoRegisterMallocSpy
 @ stdcall CoRegisterMessageFilter(ptr ptr) combase.CoRegisterMessageFilter
 @ stdcall CoRegisterPSClsid(ptr ptr) combase.CoRegisterPSClsid
-@ stdcall CoRegisterSurrogate(ptr)
-@ stdcall CoRegisterSurrogateEx(ptr ptr)
-@ stdcall CoReleaseMarshalData(ptr)
+@ stdcall CoRegisterSurrogate(ptr) combase.CoRegisterSurrogate
+@ stdcall CoRegisterSurrogateEx(ptr ptr) combase.CoRegisterSurrogateEx
+@ stdcall CoReleaseMarshalData(ptr) combase.CoReleaseMarshalData
 @ stdcall CoReleaseServerProcess() combase.CoReleaseServerProcess
-@ stdcall CoResumeClassObjects()
+@ stdcall CoResumeClassObjects() combase.CoResumeClassObjects
 @ stdcall CoRevertToSelf() combase.CoRevertToSelf
 @ stdcall CoRevokeClassObject(long) combase.CoRevokeClassObject
 @ stdcall CoRevokeInitializeSpy(int64) combase.CoRevokeInitializeSpy
 @ stdcall CoRevokeMallocSpy() combase.CoRevokeMallocSpy
 @ stdcall CoSetProxyBlanket(ptr long long ptr long long ptr long) combase.CoSetProxyBlanket
 @ stdcall CoSetState(ptr)
-@ stdcall CoSuspendClassObjects()
+@ stdcall CoSuspendClassObjects() combase.CoSuspendClassObjects
 @ stdcall CoSwitchCallContext(ptr ptr) combase.CoSwitchCallContext
 @ stdcall CoTaskMemAlloc(long) combase.CoTaskMemAlloc
 @ stdcall CoTaskMemFree(ptr) combase.CoTaskMemFree
@@ -90,7 +91,7 @@
 @ stdcall CoUninitialize() combase.CoUninitialize
 @ stub CoUnloadingWOW
 @ stdcall CoUnmarshalHresult(ptr ptr) combase.CoUnmarshalHresult
-@ stdcall CoUnmarshalInterface(ptr ptr ptr)
+@ stdcall CoUnmarshalInterface(ptr ptr ptr) combase.CoUnmarshalInterface
 @ stdcall CoWaitForMultipleHandles(long long long ptr ptr) combase.CoWaitForMultipleHandles
 @ stdcall CreateAntiMoniker(ptr)
 @ stdcall CreateBindCtx(long ptr)
@@ -105,9 +106,9 @@
 @ stub CreateObjrefMoniker
 @ stdcall CreateOleAdviseHolder(ptr)
 @ stdcall CreatePointerMoniker(ptr ptr)
-@ stdcall CreateStreamOnHGlobal(ptr long ptr)
+@ stdcall CreateStreamOnHGlobal(ptr long ptr) combase.CreateStreamOnHGlobal
 @ stdcall DestroyRunningObjectTable()
-@ stdcall DllDebugObjectRPCHook(long ptr)
+@ stdcall DllDebugObjectRPCHook(long ptr) combase.DllDebugObjectRPCHook
 @ stdcall -private DllGetClassObject (ptr ptr ptr)
 @ stub DllGetClassObjectWOW
 @ stdcall -private DllRegisterServer()
@@ -121,7 +122,7 @@
 @ stub GetDocumentBitStg
 @ stdcall GetErrorInfo(long ptr) combase.GetErrorInfo
 @ stdcall GetHGlobalFromILockBytes(ptr ptr)
-@ stdcall GetHGlobalFromStream(ptr ptr)
+@ stdcall GetHGlobalFromStream(ptr ptr) combase.GetHGlobalFromStream
 @ stub GetHookInterface
 @ stdcall GetRunningObjectTable(long ptr)
 @ stdcall HACCEL_UserFree(ptr ptr) combase.HACCEL_UserFree
@@ -298,6 +299,3 @@
 @ stdcall WriteFmtUserTypeStg(ptr long ptr)
 @ stub WriteOleStg
 @ stub WriteStringStream
-@ stdcall Internal_apartment_disconnectproxies(ptr)
-@ stdcall Internal_RPC_ExecuteCall(ptr)
-@ stdcall Internal_stub_manager_int_release(ptr)

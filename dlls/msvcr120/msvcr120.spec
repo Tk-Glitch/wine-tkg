@@ -1438,7 +1438,7 @@
 @ cdecl _mbbtombc(long)
 @ stub _mbbtombc_l
 @ cdecl _mbbtype(long long)
-@ stub _mbbtype_l
+@ cdecl _mbbtype_l(long long ptr)
 # extern _mbcasemap
 @ cdecl _mbccpy(ptr ptr)
 @ cdecl _mbccpy_l(ptr ptr ptr)
@@ -1469,7 +1469,7 @@
 @ cdecl _mbschr(str long)
 @ stub _mbschr_l
 @ cdecl _mbscmp(str str)
-@ stub _mbscmp_l
+@ cdecl _mbscmp_l(str str ptr)
 @ cdecl _mbscoll(str str)
 @ cdecl _mbscoll_l(str str ptr)
 @ cdecl _mbscpy_s(ptr long str)
@@ -1527,7 +1527,7 @@
 @ stub _mbsncpy_s
 @ stub _mbsncpy_s_l
 @ cdecl _mbsnextc(str)
-@ stub _mbsnextc_l
+@ cdecl _mbsnextc_l(str ptr)
 @ cdecl _mbsnicmp(str str long)
 @ stub _mbsnicmp_l
 @ stub _mbsnicoll(str str long)
@@ -1661,11 +1661,11 @@
 @ stub _setsystime(ptr long)
 @ cdecl _sleep(long) MSVCRT__sleep
 @ varargs _snprintf(ptr long str) MSVCRT__snprintf
-@ stub _snprintf_c
-@ stub _snprintf_c_l
+@ varargs _snprintf_c(ptr long str) MSVCRT_snprintf_c
+@ varargs _snprintf_c_l(ptr long str ptr) MSVCRT_snprintf_c_l
 @ varargs _snprintf_l(ptr long str ptr) MSVCRT__snprintf_l
 @ varargs _snprintf_s(ptr long long str) MSVCRT__snprintf_s
-@ stub _snprintf_s_l
+@ varargs _snprintf_s_l(ptr long long str ptr) MSVCRT_snprintf_s_l
 @ varargs _snscanf(str long str) MSVCRT__snscanf
 @ varargs _snscanf_l(str long str ptr) MSVCRT__snscanf_l
 @ varargs _snscanf_s(str long str) MSVCRT__snscanf_s
@@ -1734,7 +1734,7 @@
 @ cdecl _strtof_l(str ptr ptr) MSVCRT__strtof_l
 @ cdecl -ret64 _strtoi64(str ptr long) MSVCRT_strtoi64
 @ cdecl -ret64 _strtoi64_l(str ptr long ptr) MSVCRT_strtoi64_l
-@ stub _strtoimax_l
+@ cdecl -ret64 _strtoimax_l(str ptr long ptr) MSVCRT_strtoi64_l
 @ cdecl _strtol_l(str ptr long ptr) MSVCRT__strtol_l
 @ stub _strtold_l
 @ cdecl -ret64 _strtoll_l(str ptr long ptr) MSVCRT_strtoi64_l
@@ -1742,7 +1742,7 @@
 @ cdecl -ret64 _strtoui64_l(str ptr long ptr) MSVCRT_strtoui64_l
 @ cdecl _strtoul_l(str ptr long ptr) MSVCRT_strtoul_l
 @ cdecl -ret64 _strtoull_l(str ptr long ptr) MSVCRT_strtoui64_l
-@ stub _strtoumax_l
+@ cdecl -ret64 _strtoumax_l(str ptr long ptr) MSVCRT_strtoui64_l
 @ cdecl _strupr(str) MSVCRT__strupr
 @ cdecl _strupr_l(str ptr) MSVCRT__strupr_l
 @ cdecl _strupr_s(str long) MSVCRT__strupr_s
@@ -1750,8 +1750,8 @@
 @ cdecl _strxfrm_l(ptr str long ptr) MSVCRT__strxfrm_l
 @ cdecl _swab(str str long) MSVCRT__swab
 @ varargs _swprintf(ptr wstr) MSVCRT_swprintf
-@ stub _swprintf_c
-@ stub _swprintf_c_l
+@ varargs _swprintf_c(ptr long str) MSVCRT_swprintf_c
+@ varargs _swprintf_c_l(ptr long str ptr) MSVCRT_swprintf_c_l
 @ stub _swprintf_p
 @ varargs _swprintf_p_l(ptr long wstr ptr) MSVCRT_swprintf_p_l
 @ varargs _swprintf_s_l(ptr long wstr ptr) MSVCRT__swprintf_s_l
@@ -1829,8 +1829,8 @@
 @ cdecl _vscwprintf_p(wstr ptr) MSVCRT__vscwprintf_p
 @ cdecl _vscwprintf_p_l(wstr ptr ptr) MSVCRT__vscwprintf_p_l
 @ cdecl -norelay _vsnprintf(ptr long str ptr) MSVCRT_vsnprintf
-@ cdecl _vsnprintf_c(ptr long str ptr) MSVCRT_vsnprintf
-@ cdecl _vsnprintf_c_l(ptr long str ptr ptr) MSVCRT_vsnprintf_l
+@ cdecl _vsnprintf_c(ptr long str ptr) MSVCRT_vsnprintf_c
+@ cdecl _vsnprintf_c_l(ptr long str ptr ptr) MSVCRT_vsnprintf_c_l
 @ cdecl _vsnprintf_l(ptr long str ptr ptr) MSVCRT_vsnprintf_l
 @ cdecl _vsnprintf_s(ptr long long str ptr) MSVCRT_vsnprintf_s
 @ cdecl _vsnprintf_s_l(ptr long long str ptr ptr) MSVCRT_vsnprintf_s_l
@@ -1843,8 +1843,8 @@
 @ cdecl _vsprintf_p_l(ptr long str ptr ptr) MSVCRT_vsprintf_p_l
 @ cdecl _vsprintf_s_l(ptr long str ptr ptr) MSVCRT_vsprintf_s_l
 @ cdecl _vswprintf(ptr wstr ptr) MSVCRT_vswprintf
-@ cdecl _vswprintf_c(ptr long wstr ptr) MSVCRT_vsnwprintf
-@ cdecl _vswprintf_c_l(ptr long wstr ptr ptr) MSVCRT_vsnwprintf_l
+@ cdecl _vswprintf_c(ptr long wstr ptr) MSVCRT_vswprintf_c
+@ cdecl _vswprintf_c_l(ptr long wstr ptr ptr) MSVCRT_vswprintf_c_l
 @ cdecl _vswprintf_l(ptr wstr ptr ptr) MSVCRT_vswprintf_l
 @ cdecl _vswprintf_p(ptr long wstr ptr) MSVCRT__vswprintf_p
 @ cdecl _vswprintf_p_l(ptr long wstr ptr ptr) MSVCRT_vswprintf_p_l
@@ -2210,7 +2210,7 @@
 @ cdecl ilogb(double) MSVCR120_ilogb
 @ cdecl ilogbf(float) MSVCR120_ilogbf
 @ cdecl ilogbl(double) MSVCR120_ilogbl
-@ stub imaxabs
+@ cdecl -ret64 imaxabs(int64) MSVCRT_imaxabs
 @ stub imaxdiv
 @ cdecl is_wctype(long long) MSVCRT_iswctype
 @ cdecl isalnum(long) MSVCRT_isalnum
@@ -2387,7 +2387,7 @@
 @ cdecl strstr(str str) MSVCRT_strstr
 @ cdecl strtod(str ptr) MSVCRT_strtod
 @ cdecl strtof(str ptr) MSVCRT_strtof
-@ stub strtoimax
+@ cdecl -ret64 strtoimax(str ptr long) MSVCRT_strtoi64
 @ cdecl strtok(str str) MSVCRT_strtok
 @ cdecl strtok_s(ptr str ptr) MSVCRT_strtok_s
 @ cdecl strtol(str ptr long) MSVCRT_strtol
@@ -2395,7 +2395,7 @@
 @ cdecl -ret64 strtoll(str ptr long) MSVCRT_strtoi64
 @ cdecl strtoul(str ptr long) MSVCRT_strtoul
 @ cdecl -ret64 strtoull(str ptr long) MSVCRT_strtoui64
-@ stub strtoumax
+@ cdecl -ret64 strtoumax(str ptr long) MSVCRT_strtoui64
 @ cdecl strxfrm(ptr str long) MSVCRT_strxfrm
 @ varargs swprintf_s(ptr long wstr) MSVCRT_swprintf_s
 @ varargs swscanf(wstr wstr) MSVCRT_swscanf

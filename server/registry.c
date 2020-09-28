@@ -179,7 +179,6 @@ static const struct object_ops key_ops =
     NULL,                    /* unlink_name */
     no_open_file,            /* open_file */
     no_kernel_obj_list,      /* get_kernel_obj_list */
-    no_alloc_handle,         /* alloc_handle */
     key_close_handle,        /* close_handle */
     key_destroy              /* destroy */
 };

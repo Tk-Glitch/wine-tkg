@@ -19,6 +19,7 @@
 #define COBJMACROS
 
 #include <stdarg.h>
+#include <limits.h>
 #include "windef.h"
 #include "winbase.h"
 #include "d3d9.h"
@@ -132,12 +133,40 @@ static ULONG WINAPI device_manager_processor_service_Release(IDirectXVideoProces
 
 static HRESULT WINAPI device_manager_processor_service_CreateSurface(IDirectXVideoProcessorService *iface,
         UINT width, UINT height, UINT backbuffers, D3DFORMAT format, D3DPOOL pool, DWORD usage, DWORD dxvaType,
-        IDirect3DSurface9 **surface, HANDLE *shared_handle)
+        IDirect3DSurface9 **surfaces, HANDLE *shared_handle)
 {
-    FIXME("%p, %u, %u, %u, %u, %u, %u, %u, %p, %p.\n", iface, width, height, backbuffers, format, pool, usage, dxvaType,
-            surface, shared_handle);
+    struct device_manager *manager = impl_from_IDirectXVideoProcessorService(iface);
+    unsigned int i, j;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %u, %u, %u, %u, %u, %u, %u, %p, %p.\n", iface, width, height, backbuffers, format, pool, usage, dxvaType,
+            surfaces, shared_handle);
+
+    if (backbuffers >= UINT_MAX)
+        return E_INVALIDARG;
+
+    memset(surfaces, 0, (backbuffers + 1) * sizeof(*surfaces));
+
+    for (i = 0; i < backbuffers + 1; ++i)
+    {
+        if (FAILED(hr = IDirect3DDevice9_CreateOffscreenPlainSurface(manager->device, width, height, format,
+                pool, &surfaces[i], NULL)))
+            break;
+    }
+
+    if (FAILED(hr))
+    {
+        for (j = 0; j < i; ++j)
+        {
+            if (surfaces[j])
+            {
+                IDirect3DSurface9_Release(surfaces[j]);
+                surfaces[j] = NULL;
+            }
+        }
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI device_manager_processor_service_RegisterVideoProcessorSoftwareDevice(
@@ -151,16 +180,38 @@ static HRESULT WINAPI device_manager_processor_service_RegisterVideoProcessorSof
 static HRESULT WINAPI device_manager_processor_service_GetVideoProcessorDeviceGuids(
         IDirectXVideoProcessorService *iface, const DXVA2_VideoDesc *video_desc, UINT *count, GUID **guids)
 {
-    FIXME("%p, %p, %p, %p.\n", iface, video_desc, count, guids);
+    FIXME("%p, %p, %p, %p semi-stub.\n", iface, video_desc, count, guids);
 
-    return E_NOTIMPL;
+    if (!(*guids = CoTaskMemAlloc(sizeof(**guids))))
+        return E_OUTOFMEMORY;
+
+    memcpy(*guids, &DXVA2_VideoProcSoftwareDevice, sizeof(**guids));
+    *count = 1;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI device_manager_processor_service_GetVideoProcessorRenderTargets(
         IDirectXVideoProcessorService *iface, REFGUID deviceguid, const DXVA2_VideoDesc *video_desc, UINT *count,
         D3DFORMAT **formats)
 {
-    FIXME("%p, %s, %p, %p, %p.\n", iface, debugstr_guid(deviceguid), video_desc, count, formats);
+    TRACE("%p, %s, %p, %p, %p.\n", iface, debugstr_guid(deviceguid), video_desc, count, formats);
+
+    if (IsEqualGUID(deviceguid, &DXVA2_VideoProcSoftwareDevice))
+    {
+        /* FIXME: filter some input formats */
+
+        if (!(*formats = CoTaskMemAlloc(2 * sizeof(**formats))))
+            return E_OUTOFMEMORY;
+
+        *count = 2;
+        (*formats)[0] = D3DFMT_X8R8G8B8;
+        (*formats)[1] = D3DFMT_A8R8G8B8;
+
+        return S_OK;
+    }
+    else
+        FIXME("Unsupported device %s.\n", debugstr_guid(deviceguid));
 
     return E_NOTIMPL;
 }

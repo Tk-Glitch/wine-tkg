@@ -503,6 +503,477 @@ done:
     irp->IoStatus.u.Status = status;
     IoCompleteRequest( irp, IO_NO_INCREMENT );
 }
+
+static inline BOOL check_credential_string( const void *buf, SIZE_T buflen, ULONG size, ULONG offset )
+{
+    const WCHAR *ptr = buf;
+    if (!size || size % sizeof(WCHAR) || offset + size > buflen || ptr[(offset + size) / sizeof(WCHAR) - 1]) return FALSE;
+    return TRUE;
+}
+
+static SecKeychainItemRef find_credential( const WCHAR *name )
+{
+    int status;
+    SecKeychainSearchRef search;
+    SecKeychainItemRef item;
+
+    status = SecKeychainSearchCreateFromAttributes( NULL, kSecGenericPasswordItemClass, NULL, &search );
+    if (status != noErr) return NULL;
+
+    while (SecKeychainSearchCopyNext( search, &item ) == noErr)
+    {
+        SecKeychainAttributeInfo info;
+        SecKeychainAttributeList *attr_list;
+        UInt32 info_tags[] = { kSecServiceItemAttr };
+        WCHAR *itemname;
+        int len;
+
+        info.count = ARRAY_SIZE(info_tags);
+        info.tag = info_tags;
+        info.format = NULL;
+        status = SecKeychainItemCopyAttributesAndData( item, &info, NULL, &attr_list, NULL, NULL );
+        if (status != noErr)
+        {
+            WARN( "SecKeychainItemCopyAttributesAndData returned status %d\n", status );
+            continue;
+        }
+        if (attr_list->count != 1 || attr_list->attr[0].tag != kSecServiceItemAttr)
+        {
+            CFRelease( item );
+            continue;
+        }
+        len = MultiByteToWideChar( CP_UTF8, 0, attr_list->attr[0].data, attr_list->attr[0].length, NULL, 0 );
+        if (!(itemname = RtlAllocateHeap( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) )))
+        {
+            CFRelease( item );
+            CFRelease( search );
+            return NULL;
+        }
+        MultiByteToWideChar( CP_UTF8, 0, attr_list->attr[0].data, attr_list->attr[0].length, itemname, len );
+        itemname[len] = 0;
+        if (strcmpiW( itemname, name ))
+        {
+            CFRelease( item );
+            RtlFreeHeap( GetProcessHeap(), 0, itemname );
+            continue;
+        }
+        RtlFreeHeap( GetProcessHeap(), 0, itemname );
+        SecKeychainItemFreeAttributesAndData( attr_list, NULL );
+        CFRelease( search );
+        return item;
+    }
+
+    CFRelease( search );
+    return NULL;
+}
+
+static NTSTATUS fill_credential( SecKeychainItemRef item, BOOL require_password, void *buf, SIZE_T data_offset,
+                                 SIZE_T buflen, SIZE_T *retlen )
+{
+    struct mountmgr_credential *cred = buf;
+    int status, len;
+    SIZE_T size;
+    UInt32 i, cred_blob_len = 0;
+    void *cred_blob;
+    WCHAR *ptr;
+    BOOL user_name_present = FALSE;
+    SecKeychainAttributeInfo info;
+    SecKeychainAttributeList *attr_list = NULL;
+    UInt32 info_tags[] = { kSecServiceItemAttr, kSecAccountItemAttr, kSecCommentItemAttr, kSecCreationDateItemAttr };
+
+    info.count  = ARRAY_SIZE(info_tags);
+    info.tag    = info_tags;
+    info.format = NULL;
+    status = SecKeychainItemCopyAttributesAndData( item, &info, NULL, &attr_list, &cred_blob_len, &cred_blob );
+    if (status == errSecAuthFailed && !require_password)
+    {
+        cred_blob_len = 0;
+        cred_blob     = NULL;
+        status = SecKeychainItemCopyAttributesAndData( item, &info, NULL, &attr_list, &cred_blob_len, NULL );
+    }
+    if (status != noErr)
+    {
+        WARN( "SecKeychainItemCopyAttributesAndData returned status %d\n", status );
+        return STATUS_NOT_FOUND;
+    }
+    for (i = 0; i < attr_list->count; i++)
+    {
+        if (attr_list->attr[i].tag == kSecAccountItemAttr && attr_list->attr[i].data)
+        {
+            user_name_present = TRUE;
+            break;
+        }
+    }
+    if (!user_name_present)
+    {
+        WARN( "no kSecAccountItemAttr for item\n" );
+        SecKeychainItemFreeAttributesAndData( attr_list, cred_blob );
+        return STATUS_NOT_FOUND;
+    }
+
+    *retlen = sizeof(*cred);
+    for (i = 0; i < attr_list->count; i++)
+    {
+        switch (attr_list->attr[i].tag)
+        {
+            case kSecServiceItemAttr:
+                TRACE( "kSecServiceItemAttr: %.*s\n", (int)attr_list->attr[i].length, (char *)attr_list->attr[i].data );
+                if (cred) cred->targetname_offset = cred->targetname_size = 0;
+                if (!attr_list->attr[i].data) continue;
+
+                len = MultiByteToWideChar( CP_UTF8, 0, attr_list->attr[i].data, attr_list->attr[i].length, NULL, 0 );
+                size = (len + 1) * sizeof(WCHAR);
+                if (cred && *retlen + size <= buflen)
+                {
+                    cred->targetname_offset = data_offset;
+                    cred->targetname_size   = size;
+                    ptr = (WCHAR *)((char *)cred + cred->targetname_offset);
+                    MultiByteToWideChar( CP_UTF8, 0, attr_list->attr[i].data, attr_list->attr[i].length, ptr, len );
+                    ptr[len] = 0;
+                    data_offset += size;
+                }
+                *retlen += size;
+                break;
+            case kSecAccountItemAttr:
+            {
+                TRACE( "kSecAccountItemAttr: %.*s\n", (int)attr_list->attr[i].length, (char *)attr_list->attr[i].data );
+                if (cred) cred->username_offset = cred->username_size = 0;
+                if (!attr_list->attr[i].data) continue;
+
+                len = MultiByteToWideChar( CP_UTF8, 0, attr_list->attr[i].data, attr_list->attr[i].length, NULL, 0 );
+                size = (len + 1) * sizeof(WCHAR);
+                if (cred && *retlen + size <= buflen)
+                {
+                    cred->username_offset = data_offset;
+                    cred->username_size   = size;
+                    ptr = (WCHAR *)((char *)cred + cred->username_offset);
+                    MultiByteToWideChar( CP_UTF8, 0, attr_list->attr[i].data, attr_list->attr[i].length, ptr, len );
+                    ptr[len] = 0;
+                    data_offset += size;
+                }
+                *retlen += size;
+                break;
+            }
+            case kSecCommentItemAttr:
+                TRACE( "kSecCommentItemAttr: %.*s\n", (int)attr_list->attr[i].length, (char *)attr_list->attr[i].data );
+                if (cred) cred->comment_offset = cred->comment_size = 0;
+                if (!attr_list->attr[i].data) continue;
+
+                len = MultiByteToWideChar( CP_UTF8, 0, attr_list->attr[i].data, attr_list->attr[i].length, NULL, 0 );
+                size = (len + 1) * sizeof(WCHAR);
+                if (cred && *retlen + size <= buflen)
+                {
+                    cred->comment_offset = data_offset;
+                    cred->comment_size   = size;
+                    ptr = (WCHAR *)((char *)cred + cred->comment_offset);
+                    len = MultiByteToWideChar( CP_UTF8, 0, attr_list->attr[i].data, attr_list->attr[i].length, ptr, len );
+                    ptr[len] = 0;
+                    data_offset += size;
+                }
+                *retlen += size;
+                break;
+            case kSecCreationDateItemAttr:
+            {
+                LARGE_INTEGER wintime;
+                struct tm tm;
+                time_t time;
+
+                TRACE( "kSecCreationDateItemAttr: %.*s\n", (int)attr_list->attr[i].length, (char *)attr_list->attr[i].data );
+                if (cred) cred->last_written.dwLowDateTime = cred->last_written.dwHighDateTime = 0;
+                if (!attr_list->attr[i].data) continue;
+
+                if (cred)
+                {
+                    memset( &tm, 0, sizeof(tm) );
+                    strptime( attr_list->attr[i].data, "%Y%m%d%H%M%SZ", &tm );
+                    time = mktime( &tm );
+                    RtlSecondsSince1970ToTime( time, &wintime );
+                    cred->last_written.dwLowDateTime = wintime.u.LowPart;
+                    cred->last_written.dwHighDateTime = wintime.u.HighPart;
+                }
+                break;
+            }
+            default:
+                FIXME( "unhandled attribute %u\n", (unsigned)attr_list->attr[i].tag );
+                break;
+        }
+    }
+
+    if (cred)
+    {
+        if (*retlen + cred_blob_len <= buflen)
+        {
+            len = MultiByteToWideChar( CP_UTF8, 0, cred_blob, cred_blob_len, NULL, 0 );
+            cred->blob_offset = data_offset;
+            cred->blob_size   = len * sizeof(WCHAR);
+            ptr = (WCHAR *)((char *)cred + cred->blob_offset);
+            MultiByteToWideChar( CP_UTF8, 0, cred_blob, cred_blob_len, ptr, len );
+        }
+        else cred->blob_offset = cred->blob_size = 0;
+    }
+    *retlen += cred_blob_len;
+
+    if (attr_list) SecKeychainItemFreeAttributesAndData( attr_list, cred_blob );
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS read_credential( void *buff, SIZE_T insize, SIZE_T outsize, IO_STATUS_BLOCK *iosb )
+{
+    struct mountmgr_credential *cred = buff;
+    const WCHAR *targetname;
+    SecKeychainItemRef item;
+    SIZE_T size;
+    NTSTATUS status;
+
+    if (!check_credential_string( buff, insize, cred->targetname_size, cred->targetname_offset ))
+        return STATUS_INVALID_PARAMETER;
+    targetname = (const WCHAR *)((const char *)cred + cred->targetname_offset);
+
+    if (!(item = find_credential( targetname ))) return STATUS_NOT_FOUND;
+
+    status = fill_credential( item, TRUE, cred, sizeof(*cred), outsize, &size );
+    CFRelease( item );
+    if (status != STATUS_SUCCESS) return status;
+
+    iosb->Information = size;
+    return (size > outsize) ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS;
+}
+
+static NTSTATUS write_credential( void *buff, SIZE_T insize, SIZE_T outsize, IO_STATUS_BLOCK *iosb )
+{
+    const struct mountmgr_credential *cred = buff;
+    int status, len, len_password = 0;
+    const WCHAR *ptr;
+    SecKeychainItemRef keychain_item;
+    char *targetname, *username = NULL, *password = NULL;
+    SecKeychainAttribute attrs[1];
+    SecKeychainAttributeList attr_list;
+    NTSTATUS ret = STATUS_NO_MEMORY;
+
+    if (!check_credential_string( buff, insize, cred->targetname_size, cred->targetname_offset ) ||
+        !check_credential_string( buff, insize, cred->username_size, cred->username_offset ) ||
+        ((cred->blob_size && cred->blob_size % sizeof(WCHAR)) || cred->blob_offset + cred->blob_size > insize) ||
+        (cred->comment_size && !check_credential_string( buff, insize, cred->comment_size, cred->comment_offset )) ||
+        sizeof(*cred) + cred->targetname_size + cred->username_size + cred->blob_size + cred->comment_size > insize)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    ptr = (const WCHAR *)((const char *)cred + cred->targetname_offset);
+    len = WideCharToMultiByte( CP_UTF8, 0, ptr, -1, NULL, 0, NULL, NULL );
+    if (!(targetname = RtlAllocateHeap( GetProcessHeap(), 0, len ))) goto error;
+    WideCharToMultiByte( CP_UTF8, 0, ptr, -1, targetname, len, NULL, NULL );
+
+    ptr = (const WCHAR *)((const char *)cred + cred->username_offset);
+    len = WideCharToMultiByte( CP_UTF8, 0, ptr, -1, NULL, 0, NULL, NULL );
+    if (!(username = RtlAllocateHeap( GetProcessHeap(), 0, len ))) goto error;
+    WideCharToMultiByte( CP_UTF8, 0, ptr, -1, username, len, NULL, NULL );
+
+    if (cred->blob_size)
+    {
+        ptr = (const WCHAR *)((const char *)cred + cred->blob_offset);
+        len_password = WideCharToMultiByte( CP_UTF8, 0, ptr, cred->blob_size / sizeof(WCHAR), NULL, 0, NULL, NULL );
+        if (!(password = RtlAllocateHeap( GetProcessHeap(), 0, len_password ))) goto error;
+        WideCharToMultiByte( CP_UTF8, 0, ptr, cred->blob_size / sizeof(WCHAR), password, len_password, NULL, NULL );
+    }
+
+    TRACE("adding target %s, username %s using Keychain\n", targetname, username );
+    status = SecKeychainAddGenericPassword( NULL, strlen(targetname), targetname, strlen(username), username,
+                                            len_password, password, &keychain_item );
+    if (status != noErr) ERR( "SecKeychainAddGenericPassword returned %d\n", status );
+    if (status == errSecDuplicateItem)
+    {
+        status = SecKeychainFindGenericPassword( NULL, strlen(targetname), targetname, strlen(username), username, NULL,
+                                                 NULL, &keychain_item );
+        if (status != noErr) ERR( "SecKeychainFindGenericPassword returned %d\n", status );
+    }
+    RtlFreeHeap( GetProcessHeap(), 0, username );
+    RtlFreeHeap( GetProcessHeap(), 0, targetname );
+    if (status != noErr)
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, password );
+        return STATUS_UNSUCCESSFUL;
+    }
+    if (cred->comment_size)
+    {
+        attr_list.count = 1;
+        attr_list.attr  = attrs;
+        attrs[0].tag    = kSecCommentItemAttr;
+        ptr = (const WCHAR *)((const char *)cred + cred->comment_offset);
+        attrs[0].length = WideCharToMultiByte( CP_UTF8, 0, ptr, -1, NULL, 0, NULL, NULL );
+        if (attrs[0].length) attrs[0].length--;
+        if (!(attrs[0].data = RtlAllocateHeap( GetProcessHeap(), 0, attrs[0].length ))) goto error;
+        WideCharToMultiByte( CP_UTF8, 0, ptr, -1, attrs[0].data, attrs[0].length, NULL, NULL );
+    }
+    else
+    {
+        attr_list.count = 0;
+        attr_list.attr  = NULL;
+    }
+    status = SecKeychainItemModifyAttributesAndData( keychain_item, &attr_list, cred->blob_preserve ? 0 : len_password,
+                                                     cred->blob_preserve ? NULL : password );
+
+    if (cred->comment_size) RtlFreeHeap( GetProcessHeap(), 0, attrs[0].data );
+    RtlFreeHeap( GetProcessHeap(), 0, password );
+    /* FIXME: set TargetAlias attribute */
+    CFRelease( keychain_item );
+    if (status != noErr) return STATUS_UNSUCCESSFUL;
+    return STATUS_SUCCESS;
+
+error:
+    RtlFreeHeap( GetProcessHeap(), 0, username );
+    RtlFreeHeap( GetProcessHeap(), 0, targetname );
+    RtlFreeHeap( GetProcessHeap(), 0, password );
+    return ret;
+}
+
+static NTSTATUS delete_credential( void *buff, SIZE_T insize, SIZE_T outsize, IO_STATUS_BLOCK *iosb )
+{
+    const struct mountmgr_credential *cred = buff;
+    const WCHAR *targetname;
+    SecKeychainItemRef item;
+
+    if (!check_credential_string( buff, insize, cred->targetname_size, cred->targetname_offset ))
+        return STATUS_INVALID_PARAMETER;
+    targetname = (const WCHAR *)((const char *)cred + cred->targetname_offset);
+
+    if (!(item = find_credential( targetname ))) return STATUS_NOT_FOUND;
+
+    SecKeychainItemDelete( item );
+    CFRelease( item );
+    return STATUS_SUCCESS;
+}
+
+static BOOL match_credential( void *data, UInt32 data_len, const WCHAR *filter )
+{
+    int len;
+    WCHAR *targetname;
+    const WCHAR *p;
+    BOOL ret;
+
+    if (!*filter) return TRUE;
+
+    len = MultiByteToWideChar( CP_UTF8, 0, data, data_len, NULL, 0 );
+    if (!(targetname = RtlAllocateHeap( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) ))) return FALSE;
+    MultiByteToWideChar( CP_UTF8, 0, data, data_len, targetname, len );
+    targetname[len] = 0;
+
+    TRACE( "comparing filter %s to target name %s\n", debugstr_w(filter), debugstr_w(targetname) );
+
+    p = strchrW( filter, '*' );
+    ret = CompareStringW( GetThreadLocale(), NORM_IGNORECASE, filter,
+                          (p && !p[1]) ? p - filter : -1, targetname, (p && !p[1]) ? p - filter : -1 ) == CSTR_EQUAL;
+    RtlFreeHeap( GetProcessHeap(), 0, targetname );
+    return ret;
+}
+
+static NTSTATUS search_credentials( const WCHAR *filter, struct mountmgr_credential_list *list, SIZE_T *ret_count, SIZE_T *ret_size )
+{
+    SecKeychainSearchRef search;
+    SecKeychainItemRef item;
+    int status;
+    ULONG i = 0;
+    SIZE_T data_offset, data_size = 0, size;
+    NTSTATUS ret = STATUS_NOT_FOUND;
+
+    status = SecKeychainSearchCreateFromAttributes( NULL, kSecGenericPasswordItemClass, NULL, &search );
+    if (status != noErr)
+    {
+        ERR( "SecKeychainSearchCreateFromAttributes returned status %d\n", status );
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    while (SecKeychainSearchCopyNext( search, &item ) == noErr)
+    {
+        SecKeychainAttributeInfo info;
+        SecKeychainAttributeList *attr_list;
+        UInt32 info_tags[] = { kSecServiceItemAttr };
+        BOOL match;
+
+        info.count  = ARRAY_SIZE(info_tags);
+        info.tag    = info_tags;
+        info.format = NULL;
+        status = SecKeychainItemCopyAttributesAndData( item, &info, NULL, &attr_list, NULL, NULL );
+        if (status != noErr)
+        {
+            WARN( "SecKeychainItemCopyAttributesAndData returned status %d\n", status );
+            CFRelease( item );
+            continue;
+        }
+        if (attr_list->count != 1 || attr_list->attr[0].tag != kSecServiceItemAttr)
+        {
+            SecKeychainItemFreeAttributesAndData( attr_list, NULL );
+            CFRelease( item );
+            continue;
+        }
+        TRACE( "service item: %.*s\n", (int)attr_list->attr[0].length, (char *)attr_list->attr[0].data );
+
+        match = match_credential( attr_list->attr[0].data, attr_list->attr[0].length, filter );
+        SecKeychainItemFreeAttributesAndData( attr_list, NULL );
+        if (!match)
+        {
+            CFRelease( item );
+            continue;
+        }
+
+        if (!list) ret = fill_credential( item, FALSE, NULL, 0, 0, &size );
+        else
+        {
+            data_offset = FIELD_OFFSET( struct mountmgr_credential_list, creds[list->count] ) -
+                          FIELD_OFFSET( struct mountmgr_credential_list, creds[i] ) + data_size;
+            ret = fill_credential( item, FALSE, &list->creds[i], data_offset, list->size - data_offset, &size );
+        }
+
+        CFRelease( item );
+        if (ret == STATUS_NOT_FOUND) continue;
+        if (ret != STATUS_SUCCESS) break;
+        data_size += size - sizeof(struct mountmgr_credential);
+        i++;
+    }
+
+    if (ret_count) *ret_count = i;
+    if (ret_size) *ret_size = FIELD_OFFSET( struct mountmgr_credential_list, creds[i] ) + data_size;
+
+    CFRelease( search );
+    return ret;
+}
+
+static NTSTATUS enumerate_credentials( void *buff, SIZE_T insize, SIZE_T outsize, IO_STATUS_BLOCK *iosb )
+{
+    struct mountmgr_credential_list *list = buff;
+    WCHAR *filter;
+    SIZE_T size, count;
+    Boolean saved_user_interaction_allowed;
+    NTSTATUS status;
+
+    if (!check_credential_string( buff, insize, list->filter_size, list->filter_offset )) return STATUS_INVALID_PARAMETER;
+    if (!(filter = strdupW( (const WCHAR *)((const char *)list + list->filter_offset) ))) return STATUS_NO_MEMORY;
+
+    SecKeychainGetUserInteractionAllowed( &saved_user_interaction_allowed );
+    SecKeychainSetUserInteractionAllowed( false );
+
+    if ((status = search_credentials( filter, NULL, &count, &size )) == STATUS_SUCCESS)
+    {
+
+        if (size > outsize)
+        {
+            if (size >= sizeof(list->size)) list->size = size;
+            iosb->Information = sizeof(list->size);
+            status = STATUS_MORE_ENTRIES;
+        }
+        else
+        {
+            list->size  = size;
+            list->count = count;
+            iosb->Information = size;
+            status = search_credentials( filter, list, NULL, NULL );
+        }
+    }
+
+    SecKeychainSetUserInteractionAllowed( saved_user_interaction_allowed );
+    RtlFreeHeap( GetProcessHeap(), 0, filter );
+    return status;
+}
 #endif /* __APPLE__ */
 
 /* handler for ioctls on the mount manager device */
@@ -570,6 +1041,50 @@ static NTSTATUS WINAPI mountmgr_ioctl( DEVICE_OBJECT *device, IRP *irp )
         }
         if (TrySubmitThreadpoolCallback( query_symbol_file, irp, NULL )) return STATUS_PENDING;
         irp->IoStatus.u.Status = STATUS_NO_MEMORY;
+        break;
+    case IOCTL_MOUNTMGR_READ_CREDENTIAL:
+        if (irpsp->Parameters.DeviceIoControl.InputBufferLength < sizeof(struct mountmgr_credential))
+        {
+            irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        irp->IoStatus.u.Status = read_credential( irp->AssociatedIrp.SystemBuffer,
+                                                  irpsp->Parameters.DeviceIoControl.InputBufferLength,
+                                                  irpsp->Parameters.DeviceIoControl.OutputBufferLength,
+                                                  &irp->IoStatus );
+        break;
+    case IOCTL_MOUNTMGR_WRITE_CREDENTIAL:
+        if (irpsp->Parameters.DeviceIoControl.InputBufferLength < sizeof(struct mountmgr_credential))
+        {
+            irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        irp->IoStatus.u.Status = write_credential( irp->AssociatedIrp.SystemBuffer,
+                                                   irpsp->Parameters.DeviceIoControl.InputBufferLength,
+                                                   irpsp->Parameters.DeviceIoControl.OutputBufferLength,
+                                                   &irp->IoStatus );
+        break;
+    case IOCTL_MOUNTMGR_DELETE_CREDENTIAL:
+        if (irpsp->Parameters.DeviceIoControl.InputBufferLength < sizeof(struct mountmgr_credential))
+        {
+            irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        irp->IoStatus.u.Status = delete_credential( irp->AssociatedIrp.SystemBuffer,
+                                                    irpsp->Parameters.DeviceIoControl.InputBufferLength,
+                                                    irpsp->Parameters.DeviceIoControl.OutputBufferLength,
+                                                    &irp->IoStatus );
+        break;
+    case IOCTL_MOUNTMGR_ENUMERATE_CREDENTIALS:
+        if (irpsp->Parameters.DeviceIoControl.InputBufferLength < sizeof(struct mountmgr_credential_list))
+        {
+            irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        irp->IoStatus.u.Status = enumerate_credentials( irp->AssociatedIrp.SystemBuffer,
+                                                        irpsp->Parameters.DeviceIoControl.InputBufferLength,
+                                                        irpsp->Parameters.DeviceIoControl.OutputBufferLength,
+                                                        &irp->IoStatus );
         break;
 #endif
     default:

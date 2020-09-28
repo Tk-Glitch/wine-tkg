@@ -59,17 +59,14 @@ static BOOL load_desktop_driver( HWND hwnd, HMODULE *module )
     DWORD size;
     WCHAR path[MAX_PATH];
     WCHAR key[ARRAY_SIZE(key_pathW) + ARRAY_SIZE(displayW) + 40];
-    UINT guid_atom = HandleToULong( GetPropW( hwnd, display_device_guid_propW ));
+    UINT guid_atom;
 
     USER_CheckNotLock();
 
     strcpy( driver_load_error, "The explorer process failed to start." );  /* default error */
+    SendMessageW( hwnd, WM_NULL, 0, 0 );  /* wait for the desktop process to be ready */
 
-    if (!guid_atom)
-    {
-        SendMessageW( hwnd, WM_NULL, 0, 0 );  /* wait for the desktop process to be ready */
-        guid_atom = HandleToULong( GetPropW( hwnd, display_device_guid_propW ));
-    }
+    guid_atom = HandleToULong( GetPropW( hwnd, display_device_guid_propW ));
     memcpy( key, key_pathW, sizeof(key_pathW) );
     if (!GlobalGetAtomNameW( guid_atom, key + strlenW(key), 40 )) return 0;
     strcatW( key, displayW );
@@ -287,7 +284,14 @@ static void CDECL nulldrv_UnregisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
 
 static SHORT CDECL nulldrv_VkKeyScanEx( WCHAR ch, HKL layout )
 {
-    return -1;
+    static const short ctrl_vks[] = {
+        0x332, 0x241, 0x242, 0x003, 0x244, 0x245, 0x246, 0x247,
+        0x008, 0x009, 0x20d, 0x24b, 0x24c, 0x00d, 0x24e, 0x24f,
+        0x250, 0x251, 0x252, 0x253, 0x254, 0x255, 0x256, 0x257,
+        0x258, 0x259, 0x25a, 0x01b, 0x2dc, 0x2dd, 0x336, 0x3bd
+    };
+
+    return ch < ARRAY_SIZE(ctrl_vks) ? ctrl_vks[ch] : -1;
 }
 
 static void CDECL nulldrv_DestroyCursorIcon( HCURSOR cursor )

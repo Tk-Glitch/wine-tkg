@@ -93,12 +93,21 @@ struct d3dcompiler_shader_reflection_constant_buffer
     struct d3dcompiler_shader_reflection_variable *variables;
 };
 
+enum D3DCOMPILER_REFLECTION_VERSION
+{
+    D3DCOMPILER_REFLECTION_VERSION_D3D10,
+    D3DCOMPILER_REFLECTION_VERSION_D3D11,
+    D3DCOMPILER_REFLECTION_VERSION_D3D12,
+};
+
 /* ID3D11ShaderReflection */
 struct d3dcompiler_shader_reflection
 {
     ID3D11ShaderReflection ID3D11ShaderReflection_iface;
     ID3D10ShaderReflection ID3D10ShaderReflection_iface;
     LONG refcount;
+
+    enum D3DCOMPILER_REFLECTION_VERSION interface_version;
 
     DWORD target;
     char *creator;
@@ -332,7 +341,8 @@ static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_QueryInterface(ID
     TRACE("iface %p, riid %s, object %p\n", iface, debugstr_guid(riid), object);
 
     if (IsEqualGUID(riid, &IID_ID3D11ShaderReflection)
-            || IsEqualGUID(riid, &IID_IUnknown))
+            || IsEqualGUID(riid, &IID_IUnknown)
+            || (D3D_COMPILER_VERSION >= 47 && IsEqualGUID(riid, &IID_ID3D12ShaderReflection)))
     {
         IUnknown_AddRef(iface);
         *object = iface;
@@ -486,7 +496,9 @@ static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetResourceBindin
         return E_INVALIDARG;
     }
 
-    memcpy(desc, &reflection->bound_resources[index], sizeof(*desc));
+    memcpy(desc, &reflection->bound_resources[index],
+            reflection->interface_version == D3DCOMPILER_REFLECTION_VERSION_D3D12
+            ? sizeof(D3D12_SHADER_INPUT_BIND_DESC) : sizeof(D3D11_SHADER_INPUT_BIND_DESC));
 
     return S_OK;
 }
@@ -583,7 +595,7 @@ static struct ID3D11ShaderReflectionVariable * STDMETHODCALLTYPE d3dcompiler_sha
 static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetResourceBindingDescByName(
         ID3D11ShaderReflection *iface, const char *name, D3D11_SHADER_INPUT_BIND_DESC *desc)
 {
-    struct d3dcompiler_shader_reflection *This = impl_from_ID3D11ShaderReflection(iface);
+    struct d3dcompiler_shader_reflection *reflection = impl_from_ID3D11ShaderReflection(iface);
     unsigned int i;
 
     TRACE("iface %p, name %s, desc %p\n", iface, debugstr_a(name), desc);
@@ -594,14 +606,15 @@ static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetResourceBindin
         return E_INVALIDARG;
     }
 
-    for (i = 0; i < This->bound_resource_count; ++i)
+    for (i = 0; i < reflection->bound_resource_count; ++i)
     {
-        D3D12_SHADER_INPUT_BIND_DESC *d = &This->bound_resources[i];
+        D3D12_SHADER_INPUT_BIND_DESC *d = &reflection->bound_resources[i];
 
         if (!strcmp(d->Name, name))
         {
             TRACE("Returning D3D11_SHADER_INPUT_BIND_DESC %p.\n", d);
-            memcpy(desc, d, sizeof(*desc));
+            memcpy(desc, d, reflection->interface_version == D3DCOMPILER_REFLECTION_VERSION_D3D12
+                    ? sizeof(D3D12_SHADER_INPUT_BIND_DESC) : sizeof(D3D11_SHADER_INPUT_BIND_DESC));
             return S_OK;
         }
     }
@@ -843,6 +856,12 @@ static HRESULT STDMETHODCALLTYPE d3dcompiler_shader_reflection_variable_GetDesc(
     desc->Size = This->size;
     desc->uFlags = This->flags;
     desc->DefaultValue = This->default_value;
+
+    /* TODO test and set proper values for texture. */
+    desc->StartTexture = 0xffffffff;
+    desc->TextureSize = 0;
+    desc->StartSampler = 0xffffffff;
+    desc->SamplerSize = 0;
 
     return S_OK;
 }
@@ -1531,7 +1550,7 @@ static HRESULT d3dcompiler_parse_rdef(struct d3dcompiler_shader_reflection *r, c
             else
             {
                 desc->Space = 0;
-                desc->uID = 0;
+                desc->uID = desc->BindPoint;
             }
         }
     }
@@ -1608,7 +1627,7 @@ err_out:
     return hr;
 }
 
-static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *s, struct dxbc_section *section, DWORD target)
+static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *s, struct dxbc_section *section)
 {
     D3D11_SIGNATURE_PARAMETER_DESC *d;
     unsigned int string_data_offset;
@@ -1690,27 +1709,16 @@ static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *
         d[i].ReadWriteMask = (mask >> 8) & 0xff;
         d[i].Mask = mask & 0xff;
 
-        /* pixel shaders have a special handling for SystemValueType in the output signature */
-        if (((target & D3DCOMPILER_SHADER_TARGET_SHADERTYPE_MASK) == 0xffff0000) && (section->tag == TAG_OSG5 || section->tag == TAG_OSGN))
-        {
-            TRACE("Pixelshader output signature fixup.\n");
-
-            if (d[i].Register == 0xffffffff)
-            {
-                if (!stricmp(d[i].SemanticName, "sv_depth"))
-                    d[i].SystemValueType = D3D_NAME_DEPTH;
-                else if (!stricmp(d[i].SemanticName, "sv_coverage"))
-                    d[i].SystemValueType = D3D_NAME_COVERAGE;
-                else if (!stricmp(d[i].SemanticName, "sv_depthgreaterequal"))
-                    d[i].SystemValueType = D3D_NAME_DEPTH_GREATER_EQUAL;
-                else if (!stricmp(d[i].SemanticName, "sv_depthlessequal"))
-                    d[i].SystemValueType = D3D_NAME_DEPTH_LESS_EQUAL;
-            }
-            else
-            {
-                d[i].SystemValueType = D3D_NAME_TARGET;
-            }
-        }
+        if (!stricmp(d[i].SemanticName, "sv_depth"))
+            d[i].SystemValueType = D3D_NAME_DEPTH;
+        else if (!stricmp(d[i].SemanticName, "sv_coverage"))
+            d[i].SystemValueType = D3D_NAME_COVERAGE;
+        else if (!stricmp(d[i].SemanticName, "sv_depthgreaterequal"))
+            d[i].SystemValueType = D3D_NAME_DEPTH_GREATER_EQUAL;
+        else if (!stricmp(d[i].SemanticName, "sv_depthlessequal"))
+            d[i].SystemValueType = D3D_NAME_DEPTH_LESS_EQUAL;
+        else if (!stricmp(d[i].SemanticName, "sv_target"))
+            d[i].SystemValueType = D3D_NAME_TARGET;
 
         TRACE("semantic: %s, semantic idx: %u, sysval_semantic %#x, "
                 "type %u, register idx: %u, use_mask %#x, input_mask %#x, stream %u\n",
@@ -1777,7 +1785,7 @@ static HRESULT d3dcompiler_shader_reflection_init(struct d3dcompiler_shader_refl
                     goto err_out;
                 }
 
-                hr = d3dcompiler_parse_signature(reflection->isgn, section, reflection->target);
+                hr = d3dcompiler_parse_signature(reflection->isgn, section);
                 if (FAILED(hr))
                 {
                     WARN("Failed to parse section ISGN.\n");
@@ -1795,7 +1803,7 @@ static HRESULT d3dcompiler_shader_reflection_init(struct d3dcompiler_shader_refl
                     goto err_out;
                 }
 
-                hr = d3dcompiler_parse_signature(reflection->osgn, section, reflection->target);
+                hr = d3dcompiler_parse_signature(reflection->osgn, section);
                 if (FAILED(hr))
                 {
                     WARN("Failed to parse section OSGN.\n");
@@ -1812,7 +1820,7 @@ static HRESULT d3dcompiler_shader_reflection_init(struct d3dcompiler_shader_refl
                     goto err_out;
                 }
 
-                hr = d3dcompiler_parse_signature(reflection->pcsg, section, reflection->target);
+                hr = d3dcompiler_parse_signature(reflection->pcsg, section);
                 if (FAILED(hr))
                 {
                     WARN("Failed to parse section PCSG.\n");
@@ -2319,6 +2327,7 @@ HRESULT WINAPI D3D10ReflectShader(const void *data, SIZE_T data_size, ID3D10Shad
     }
 
     object->ID3D10ShaderReflection_iface.lpVtbl = &d3d10_shader_reflection_vtbl;
+    object->interface_version = D3DCOMPILER_REFLECTION_VERSION_D3D10;
     object->refcount = 1;
 
     hr = d3dcompiler_shader_reflection_init(object, data, data_size);
@@ -2361,7 +2370,8 @@ HRESULT WINAPI D3DReflect(const void *data, SIZE_T data_size, REFIID riid, void 
 #endif
     }
 
-    if (!IsEqualGUID(riid, &IID_ID3D11ShaderReflection))
+    if (!IsEqualGUID(riid, &IID_ID3D11ShaderReflection)
+            && (D3D_COMPILER_VERSION < 47 || !IsEqualGUID(riid, &IID_ID3D12ShaderReflection)))
     {
         WARN("Wrong riid %s, accept only %s!\n", debugstr_guid(riid), debugstr_guid(&IID_ID3D11ShaderReflection));
 #if D3D_COMPILER_VERSION >= 46
@@ -2377,6 +2387,8 @@ HRESULT WINAPI D3DReflect(const void *data, SIZE_T data_size, REFIID riid, void 
 
     object->ID3D11ShaderReflection_iface.lpVtbl = &d3dcompiler_shader_reflection_vtbl;
     object->refcount = 1;
+    object->interface_version = IsEqualGUID(riid, &IID_ID3D12ShaderReflection)
+            ? D3DCOMPILER_REFLECTION_VERSION_D3D12 : D3DCOMPILER_REFLECTION_VERSION_D3D11;
 
     hr = d3dcompiler_shader_reflection_init(object, data, data_size);
     if (FAILED(hr))

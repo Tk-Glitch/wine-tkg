@@ -1087,9 +1087,6 @@ struct rawinput_device
     obj_handle_t handle;       /* handle to close */
 @END
 
-/* Close all sockets for the current process */
-@REQ(socket_cleanup)
-@END
 
 /* Set a handle information */
 @REQ(set_handle_info)

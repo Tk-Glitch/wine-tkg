@@ -207,8 +207,9 @@ static unsigned int check_multisample_quality_levels(IDXGIDevice *dxgi_device,
 #define MODE_DESC_IGNORE_FORMAT            0x00000004u
 #define MODE_DESC_IGNORE_SCANLINE_ORDERING 0x00000008u
 #define MODE_DESC_IGNORE_SCALING           0x00000010u
+#define MODE_DESC_IGNORE_EXACT_RESOLUTION  0x00000020u
 
-#define MODE_DESC_CHECK_RESOLUTION         (~MODE_DESC_IGNORE_RESOLUTION)
+#define MODE_DESC_CHECK_RESOLUTION         (~MODE_DESC_IGNORE_RESOLUTION & ~MODE_DESC_IGNORE_EXACT_RESOLUTION)
 #define MODE_DESC_CHECK_FORMAT             (~MODE_DESC_IGNORE_FORMAT)
 
 #define check_mode_desc(a, b, c) check_mode_desc_(__LINE__, a, b, c)
@@ -217,10 +218,16 @@ static void check_mode_desc_(unsigned int line, const DXGI_MODE_DESC *desc,
 {
     if (!(ignore_flags & MODE_DESC_IGNORE_RESOLUTION))
     {
-        ok_(__FILE__, line)(desc->Width == expected_desc->Width
-                && desc->Height == expected_desc->Height,
-                "Got resolution %ux%u, expected %ux%u.\n",
-                desc->Width, desc->Height, expected_desc->Width, expected_desc->Height);
+        if (ignore_flags & MODE_DESC_IGNORE_EXACT_RESOLUTION)
+            ok_(__FILE__, line)(desc->Width * desc->Height ==
+                    expected_desc->Width * expected_desc->Height,
+                    "Got resolution %ux%u, expected %ux%u.\n",
+                    desc->Width, desc->Height, expected_desc->Width, expected_desc->Height);
+        else
+            ok_(__FILE__, line)(desc->Width == expected_desc->Width &&
+                    desc->Height == expected_desc->Height,
+                    "Got resolution %ux%u, expected %ux%u.\n",
+                    desc->Width, desc->Height, expected_desc->Width, expected_desc->Height);
     }
     if (!(ignore_flags & MODE_DESC_IGNORE_REFRESH_RATE))
     {
@@ -541,9 +548,12 @@ static void wait_fullscreen_state_(unsigned int line, IDXGISwapChain *swapchain,
             "Got unexpected state %#x, expected %#x.\n", state, expected);
 }
 
-#define wait_vidpn_exclusive_ownership(a, b, c) wait_vidpn_exclusive_ownership_(__LINE__, a, b, c)
-static void wait_vidpn_exclusive_ownership_(unsigned int line,
-        const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc, NTSTATUS expected, BOOL todo)
+/* VidPN exclusive ownership doesn't change immediately.
+ * This helper is used to wait for the expected status */
+#define get_expected_vidpn_exclusive_ownership(a, b) \
+        get_expected_vidpn_exclusive_ownership_(__LINE__, a, b)
+static NTSTATUS get_expected_vidpn_exclusive_ownership_(unsigned int line,
+        const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc, NTSTATUS expected)
 {
     static const unsigned int wait_timeout = 2000;
     static const unsigned int wait_step = 100;
@@ -558,8 +568,7 @@ static void wait_vidpn_exclusive_ownership_(unsigned int line,
         Sleep(wait_step);
         total_time += wait_step;
     }
-    todo_wine_if(todo) ok_(__FILE__, line)(status == expected,
-            "Got unexpected status %#x, expected %#x.\n", status, expected);
+    return status;
 }
 
 static HWND create_window(void)
@@ -1526,7 +1535,8 @@ static void test_find_closest_matching_mode(void)
         mode.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         hr = IDXGIOutput_FindClosestMatchingMode(output, &mode, &matching_mode, NULL);
         ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-        check_mode_desc(&matching_mode, &modes[i], MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT);
+        check_mode_desc(&matching_mode, &modes[i],
+                (MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT) | MODE_DESC_IGNORE_EXACT_RESOLUTION);
 
         memset(&mode, 0, sizeof(mode));
         mode.Width = modes[i].Width + 1;
@@ -1534,7 +1544,8 @@ static void test_find_closest_matching_mode(void)
         mode.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         hr = IDXGIOutput_FindClosestMatchingMode(output, &mode, &matching_mode, NULL);
         ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-        check_mode_desc(&matching_mode, &modes[i], MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT);
+        check_mode_desc(&matching_mode, &modes[i],
+                (MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT) | MODE_DESC_IGNORE_EXACT_RESOLUTION);
     }
 
     memset(&mode, 0, sizeof(mode));
@@ -4284,66 +4295,79 @@ static void test_swapchain_parameters(void)
     }
     tests[] =
     {
-        {TRUE,   0, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 0 */
         {TRUE,   1, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
         {TRUE,   2, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
-        {TRUE,   0, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   1, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     0},
         {TRUE,   2, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     1},
         {TRUE,   3, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     2},
+        /* 5 */
         {TRUE,   0, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   1, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   2, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   0, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 10 */
         {TRUE,   2, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  1},
         {TRUE,   3, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  2},
         {TRUE,   0, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   1, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   2, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
+        /* 15 */
         {TRUE,   0, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   1, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   2, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,  16, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
         {TRUE,  16, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                    15},
+        /* 20 */
         {TRUE,  16, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL, 15},
         {TRUE,  16, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
-        {TRUE,  17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {TRUE,  17, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,  17, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {TRUE,  17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-
-        {FALSE,  0, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
         {FALSE,  2, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
-        {FALSE,  0, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 25 */
         {FALSE,  1, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     0},
         {FALSE,  2, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     1},
         {FALSE,  3, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     2},
         {FALSE,  0, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 30 */
         {FALSE,  2, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  0, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  2, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  1},
         {FALSE,  3, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  2},
+        /* 35 */
         {FALSE,  0, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  2, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  0, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 40 */
         {FALSE,  2, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE, 16, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
         {FALSE, 16, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                    15},
         {FALSE, 16, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL, 15},
+        {FALSE, 17, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 45 */
+        {FALSE, 17, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+
         /* The following test fails on Nvidia with E_OUTOFMEMORY and leaks device references in the
          * process. Disable it for now.
         {FALSE, 16, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
          */
+
+        /* The following tests crash on Win10 1909
+        {TRUE,   0, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,   0, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,  17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,  17, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,  17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE,  0, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE,  0, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE, 17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE, 17, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {FALSE, 17, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {FALSE, 17, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        */
     };
     static const DXGI_USAGE usage_tests[] =
     {
@@ -4408,11 +4432,10 @@ static void test_swapchain_parameters(void)
         }
 
         expected_usage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_BACK_BUFFER;
-        if (tests[i].swap_effect == DXGI_SWAP_EFFECT_DISCARD)
-            expected_usage |= DXGI_USAGE_DISCARD_ON_PRESENT;
         hr = IDXGIResource_GetUsage(resource, &usage);
         ok(SUCCEEDED(hr), "Failed to get resource usage, hr %#x, test %u.\n", hr, i);
-        ok(usage == expected_usage, "Got usage %x, expected %x, test %u.\n", usage, expected_usage, i);
+        ok((usage & expected_usage) == expected_usage, "Got usage %x, expected %x, test %u.\n",
+                usage, expected_usage, i);
 
         IDXGIResource_Release(resource);
 
@@ -6294,7 +6317,9 @@ static void test_output_ownership(IUnknown *device, BOOL is_d3d12)
 
     check_ownership_desc.hAdapter = open_adapter_gdi_desc.hAdapter;
     check_ownership_desc.VidPnSourceId = open_adapter_gdi_desc.VidPnSourceId;
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#x, expected %#x.\n", status,
+            STATUS_SUCCESS);
 
     swapchain_desc.BufferDesc.Width = 800;
     swapchain_desc.BufferDesc.Height = 600;
@@ -6328,20 +6353,41 @@ static void test_output_ownership(IUnknown *device, BOOL is_d3d12)
     hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     ok(fullscreen, "Got unexpected fullscreen state.\n");
+    /* Win10 1909 doesn't seem to grab output exclusive ownership.
+     * And all output ownership calls return S_OK on D3D10 and D3D12 with 1909. */
     if (is_d3d12)
-        wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS, FALSE);
+    {
+        status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS);
+        ok(status == STATUS_SUCCESS, "Got unexpected status %#x, expected %#x.\n", status,
+                STATUS_SUCCESS);
+    }
     else
-        wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_GRAPHICS_PRESENT_OCCLUDED, TRUE);
+    {
+        status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc,
+                STATUS_GRAPHICS_PRESENT_OCCLUDED);
+        todo_wine ok(status == STATUS_GRAPHICS_PRESENT_OCCLUDED ||
+                broken(status == STATUS_SUCCESS), /* Win10 1909 */
+                "Got unexpected status %#x, expected %#x.\n", status,
+                STATUS_GRAPHICS_PRESENT_OCCLUDED);
+    }
     hr = IDXGIOutput_TakeOwnership(output, NULL, FALSE);
-    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    ok(hr == DXGI_ERROR_INVALID_CALL || broken(hr == S_OK), /* Win10 1909 */
+            "Got unexpected hr %#x.\n", hr);
     hr = IDXGIOutput_TakeOwnership(output, NULL, TRUE);
-    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    ok(hr == DXGI_ERROR_INVALID_CALL || broken(hr == S_OK), /* Win10 1909 */
+            "Got unexpected hr %#x.\n", hr);
     hr = IDXGIOutput_TakeOwnership(output, device, FALSE);
-    todo_wine ok(hr == (is_d3d12 ? E_NOINTERFACE : E_INVALIDARG), "Got unexpected hr %#x.\n", hr);
+    if (is_d3d12)
+        todo_wine ok(hr == E_NOINTERFACE || hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    else
+        todo_wine ok(hr == E_INVALIDARG || broken(hr == S_OK), /* Win10 1909 */
+                "Got unexpected hr %#x.\n", hr);
     hr = IDXGIOutput_TakeOwnership(output, device, TRUE);
-    todo_wine_if(is_d3d12) ok(hr == (is_d3d12 ? E_NOINTERFACE : S_OK), "Got unexpected hr %#x.\n", hr);
+    ok(hr == E_NOINTERFACE || hr == S_OK, "Got unexpected hr %#x.\n", hr);
     IDXGIOutput_ReleaseOwnership(output);
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#x, expected %#x.\n", status,
+            STATUS_SUCCESS);
 
     /* IDXGIOutput_TakeOwnership always returns E_NOINTERFACE for d3d12. Tests
      * finished. */
@@ -6349,16 +6395,21 @@ static void test_output_ownership(IUnknown *device, BOOL is_d3d12)
         goto done;
 
     hr = IDXGIOutput_TakeOwnership(output, device, FALSE);
-    ok(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE || broken(hr == S_OK), /* Win10 1909 */
+            "Got unexpected hr %#x.\n", hr);
     IDXGIOutput_ReleaseOwnership(output);
 
     hr = IDXGIOutput_TakeOwnership(output, device, TRUE);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     /* Note that the "exclusive" parameter to IDXGIOutput_TakeOwnership()
      * seems to behave opposite to what's described by MSDN. */
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_GRAPHICS_PRESENT_OCCLUDED, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc,
+            STATUS_GRAPHICS_PRESENT_OCCLUDED);
+    ok(status == STATUS_GRAPHICS_PRESENT_OCCLUDED ||
+            broken(status == STATUS_SUCCESS), /* Win10 1909 */
+            "Got unexpected status %#x, expected %#x.\n", status, STATUS_GRAPHICS_PRESENT_OCCLUDED);
     hr = IDXGIOutput_TakeOwnership(output, device, FALSE);
-    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ok(hr == E_INVALIDARG || broken(hr == S_OK) /* Win10 1909 */, "Got unexpected hr %#x.\n", hr);
     IDXGIOutput_ReleaseOwnership(output);
 
     /* Swapchain in windowed mode. */
@@ -6368,16 +6419,24 @@ static void test_output_ownership(IUnknown *device, BOOL is_d3d12)
     hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     ok(!fullscreen, "Unexpected fullscreen state.\n");
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#x, expected %#x.\n", status,
+            STATUS_SUCCESS);
 
     hr = IDXGIOutput_TakeOwnership(output, device, FALSE);
-    ok(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE || broken(hr == S_OK), /* Win10 1909 */
+            "Got unexpected hr %#x.\n", hr);
 
     hr = IDXGIOutput_TakeOwnership(output, device, TRUE);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_GRAPHICS_PRESENT_OCCLUDED, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc,
+            STATUS_GRAPHICS_PRESENT_OCCLUDED);
+    ok(status == STATUS_GRAPHICS_PRESENT_OCCLUDED || broken(hr == S_OK), /* Win10 1909 */
+            "Got unexpected status %#x, expected %#x.\n", status, STATUS_GRAPHICS_PRESENT_OCCLUDED);
     IDXGIOutput_ReleaseOwnership(output);
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#x, expected %#x.\n", status,
+            STATUS_SUCCESS);
 
 done:
     IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);

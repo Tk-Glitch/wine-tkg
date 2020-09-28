@@ -2057,6 +2057,50 @@ static void shader_dump_shader_input_sysval_semantic(struct wined3d_string_buffe
     shader_addline(buffer, "unknown_shader_input_sysval_semantic(%#x)", semantic);
 }
 
+static void shader_dump_resource_type(struct wined3d_string_buffer *buffer, enum wined3d_shader_resource_type type)
+{
+    static const char *const resource_type_names[] =
+    {
+        /* WINED3D_SHADER_RESOURCE_NONE                 */ "none",
+        /* WINED3D_SHADER_RESOURCE_BUFFER               */ "buffer",
+        /* WINED3D_SHADER_RESOURCE_TEXTURE_1D           */ "texture1d",
+        /* WINED3D_SHADER_RESOURCE_TEXTURE_2D           */ "texture2d",
+        /* WINED3D_SHADER_RESOURCE_TEXTURE_2DMS         */ "texture2dms",
+        /* WINED3D_SHADER_RESOURCE_TEXTURE_3D           */ "texture3d",
+        /* WINED3D_SHADER_RESOURCE_TEXTURE_CUBE         */ "texturecube",
+        /* WINED3D_SHADER_RESOURCE_TEXTURE_1DARRAY      */ "texture1darray",
+        /* WINED3D_SHADER_RESOURCE_TEXTURE_2DARRAY      */ "texture2darray",
+        /* WINED3D_SHADER_RESOURCE_TEXTURE_2DMSARRAY    */ "texture2dmsarray",
+        /* WINED3D_SHADER_RESOURCE_TEXTURE_CUBEARRAY    */ "texturecubearray",
+    };
+
+    if (type <= ARRAY_SIZE(resource_type_names))
+        shader_addline(buffer, "%s", resource_type_names[type]);
+    else
+        shader_addline(buffer, "unknown");
+}
+
+static void shader_dump_data_type(struct wined3d_string_buffer *buffer, enum wined3d_data_type type)
+{
+    static const char *const data_type_names[] =
+    {
+        /* WINED3D_DATA_FLOAT    */ "(float)",
+        /* WINED3D_DATA_INT      */ "(int)",
+        /* WINED3D_DATA_RESOURCE */ "(resource)",
+        /* WINED3D_DATA_SAMPLER  */ "(sampler)",
+        /* WINED3D_DATA_UAV      */ "(uav)",
+        /* WINED3D_DATA_UINT     */ "(uint)",
+        /* WINED3D_DATA_UNORM    */ "(unorm)",
+        /* WINED3D_DATA_SNORM    */ "(snorm)",
+        /* WINED3D_DATA_OPAQUE   */ "(opaque)",
+    };
+
+    if (type <= ARRAY_SIZE(data_type_names))
+        shader_addline(buffer, "%s", data_type_names[type]);
+    else
+        shader_addline(buffer, "(unknown)");
+}
+
 static void shader_dump_decl_usage(struct wined3d_string_buffer *buffer,
         const struct wined3d_shader_semantic *semantic, unsigned int flags,
         const struct wined3d_shader_version *shader_version)
@@ -2090,80 +2134,10 @@ static void shader_dump_decl_usage(struct wined3d_string_buffer *buffer,
             shader_addline(buffer, "_resource_");
         else
             shader_addline(buffer, "_uav_");
-        switch (semantic->resource_type)
-        {
-            case WINED3D_SHADER_RESOURCE_BUFFER:
-                shader_addline(buffer, "buffer");
-                break;
-
-            case WINED3D_SHADER_RESOURCE_TEXTURE_1D:
-                shader_addline(buffer, "texture1d");
-                break;
-
-            case WINED3D_SHADER_RESOURCE_TEXTURE_2D:
-                shader_addline(buffer, "texture2d");
-                break;
-
-            case WINED3D_SHADER_RESOURCE_TEXTURE_2DMS:
-                shader_addline(buffer, "texture2dms");
-                break;
-
-            case WINED3D_SHADER_RESOURCE_TEXTURE_3D:
-                shader_addline(buffer, "texture3d");
-                break;
-
-            case WINED3D_SHADER_RESOURCE_TEXTURE_CUBE:
-                shader_addline(buffer, "texturecube");
-                break;
-
-            case WINED3D_SHADER_RESOURCE_TEXTURE_1DARRAY:
-                shader_addline(buffer, "texture1darray");
-                break;
-
-            case WINED3D_SHADER_RESOURCE_TEXTURE_2DARRAY:
-                shader_addline(buffer, "texture2darray");
-                break;
-
-            case WINED3D_SHADER_RESOURCE_TEXTURE_2DMSARRAY:
-                shader_addline(buffer, "texture2dmsarray");
-                break;
-
-            case WINED3D_SHADER_RESOURCE_TEXTURE_CUBEARRAY:
-                shader_addline(buffer, "texturecubearray");
-                break;
-
-            default:
-                shader_addline(buffer, "unknown");
-                break;
-        }
+        shader_dump_resource_type(buffer, semantic->resource_type);
         if (semantic->reg.reg.type == WINED3DSPR_UAV)
             shader_dump_uav_flags(buffer, flags);
-        switch (semantic->resource_data_type)
-        {
-            case WINED3D_DATA_FLOAT:
-                shader_addline(buffer, " (float)");
-                break;
-
-            case WINED3D_DATA_INT:
-                shader_addline(buffer, " (int)");
-                break;
-
-            case WINED3D_DATA_UINT:
-                shader_addline(buffer, " (uint)");
-                break;
-
-            case WINED3D_DATA_UNORM:
-                shader_addline(buffer, " (unorm)");
-                break;
-
-            case WINED3D_DATA_SNORM:
-                shader_addline(buffer, " (snorm)");
-                break;
-
-            default:
-                shader_addline(buffer, " (unknown)");
-                break;
-        }
+        shader_dump_data_type(buffer, semantic->resource_data_type);
     }
     else
     {
@@ -3130,6 +3104,16 @@ static void shader_trace_init(const struct wined3d_shader_frontend *fe, void *fe
 
             if (wined3d_shader_instruction_has_texel_offset(&ins))
                 shader_addline(&buffer, "(%d,%d,%d)", ins.texel_offset.u, ins.texel_offset.v, ins.texel_offset.w);
+
+            if (ins.resource_type != WINED3D_SHADER_RESOURCE_NONE)
+            {
+                shader_addline(&buffer, "(");
+                shader_dump_resource_type(&buffer, ins.resource_type);
+                shader_addline(&buffer, ")");
+            }
+
+            if (ins.resource_data_type != WINED3D_DATA_FLOAT)
+                shader_dump_data_type(&buffer, ins.resource_data_type);
 
             for (i = 0; i < ins.dst_count; ++i)
             {

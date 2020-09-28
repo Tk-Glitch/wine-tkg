@@ -21,7 +21,6 @@ C_SRCS = \
 	filemoniker.c \
 	ftmarshal.c \
 	git.c \
-	hglobalstream.c \
 	itemmoniker.c \
 	marshal.c \
 	memlockbytes.c \
@@ -33,11 +32,9 @@ C_SRCS = \
 	oleobj.c \
 	oleproxy.c \
 	pointermoniker.c \
-	rpc.c \
 	stg_prop.c \
 	stg_stream.c \
 	storage32.c \
-	stubmanager.c \
 	usrmarshal.c
 
 RC_SRCS = ole32res.rc

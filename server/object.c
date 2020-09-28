@@ -709,10 +709,6 @@ struct object *no_open_file( struct object *obj, unsigned int access, unsigned i
     return NULL;
 }
 
-void no_alloc_handle( struct object *obj, struct process *process, obj_handle_t handle )
-{
-}
-
 int no_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
 {
     return 1;  /* ok to close */

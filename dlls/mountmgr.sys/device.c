@@ -162,7 +162,7 @@ static char *strdupA( const char *str )
     return ret;
 }
 
-static WCHAR *strdupW( const WCHAR *str )
+WCHAR *strdupW( const WCHAR *str )
 {
     WCHAR *ret;
 

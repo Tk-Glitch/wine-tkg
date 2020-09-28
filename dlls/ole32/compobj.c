@@ -29,8 +29,6 @@
  *
  * TODO list:           (items bunched together depend on each other)
  *
- *   - Implement the service control manager (in rpcss) to keep track
- *     of registered class objects: ISCM::ServerRegisterClsid et al
  *   - Implement the OXID resolver so we don't need magic endpoint names for
  *     clients and servers to meet up
  *
@@ -529,69 +527,6 @@ HRESULT WINAPI CoInitialize(LPVOID lpReserved)
   return CoInitializeEx(lpReserved, COINIT_APARTMENTTHREADED);
 }
 
-/******************************************************************************
- *		CoDisconnectObject	[OLE32.@]
- *
- * Disconnects all connections to this object from remote processes. Dispatches
- * pending RPCs while blocking new RPCs from occurring, and then calls
- * IMarshal::DisconnectObject on the given object.
- *
- * Typically called when the object server is forced to shut down, for instance by
- * the user.
- *
- * PARAMS
- *  lpUnk    [I] The object whose stub should be disconnected.
- *  reserved [I] Reserved. Should be set to 0.
- *
- * RETURNS
- *  Success: S_OK.
- *  Failure: HRESULT code.
- *
- * SEE ALSO
- *  CoMarshalInterface, CoReleaseMarshalData, CoLockObjectExternal
- */
-HRESULT WINAPI CoDisconnectObject( LPUNKNOWN lpUnk, DWORD reserved )
-{
-    struct stub_manager *manager;
-    HRESULT hr;
-    IMarshal *marshal;
-    struct apartment *apt;
-
-    TRACE("(%p, 0x%08x)\n", lpUnk, reserved);
-
-    if (!lpUnk) return E_INVALIDARG;
-
-    hr = IUnknown_QueryInterface(lpUnk, &IID_IMarshal, (void **)&marshal);
-    if (hr == S_OK)
-    {
-        hr = IMarshal_DisconnectObject(marshal, reserved);
-        IMarshal_Release(marshal);
-        return hr;
-    }
-
-    if (!(apt = apartment_get_current_or_mta()))
-    {
-        ERR("apartment not initialised\n");
-        return CO_E_NOTINITIALIZED;
-    }
-
-    manager = get_stub_manager_from_object(apt, lpUnk, FALSE);
-    if (manager) {
-        stub_manager_disconnect(manager);
-        /* Release stub manager twice, to remove the apartment reference. */
-        stub_manager_int_release(manager);
-        stub_manager_int_release(manager);
-    }
-
-    /* Note: native is pretty broken here because it just silently
-     * fails, without returning an appropriate error code if the object was
-     * not found, making apps think that the object was disconnected, when
-     * it actually wasn't */
-
-    apartment_release(apt);
-    return S_OK;
-}
-
 /* open HKCR\\CLSID\\{string form of clsid}\\{keyname} key */
 HRESULT COM_OpenKeyForCLSID(REFCLSID clsid, LPCWSTR keyname, REGSAM access, HKEY *subkey)
 {
@@ -622,21 +557,6 @@ HRESULT COM_OpenKeyForCLSID(REFCLSID clsid, LPCWSTR keyname, REGSAM access, HKEY
         return REGDB_E_READREGDB;
 
     return S_OK;
-}
-
-/***********************************************************************
- *        CoResumeClassObjects (OLE32.@)
- *
- * Resumes all class objects registered with REGCLS_SUSPENDED.
- *
- * RETURNS
- *  Success: S_OK.
- *  Failure: HRESULT code.
- */
-HRESULT WINAPI CoResumeClassObjects(void)
-{
-       FIXME("stub\n");
-	return S_OK;
 }
 
 /***********************************************************************
@@ -696,82 +616,6 @@ void WINAPI CoFreeLibrary(HINSTANCE hLibrary)
 void WINAPI CoFreeAllLibraries(void)
 {
     /* NOP */
-}
-
-/******************************************************************************
- *		CoLockObjectExternal	[OLE32.@]
- *
- * Increments or decrements the external reference count of a stub object.
- *
- * PARAMS
- *  pUnk                [I] Stub object.
- *  fLock               [I] If TRUE then increments the external ref-count,
- *                          otherwise decrements.
- *  fLastUnlockReleases [I] If TRUE then the last unlock has the effect of
- *                          calling CoDisconnectObject.
- *
- * RETURNS
- *  Success: S_OK.
- *  Failure: HRESULT code.
- *
- * NOTES
- *  If fLock is TRUE and an object is passed in that doesn't have a stub
- *  manager then a new stub manager is created for the object.
- */
-HRESULT WINAPI CoLockObjectExternal(
-    LPUNKNOWN pUnk,
-    BOOL fLock,
-    BOOL fLastUnlockReleases)
-{
-    struct stub_manager *stubmgr;
-    struct apartment *apt;
-
-    TRACE("pUnk=%p, fLock=%s, fLastUnlockReleases=%s\n",
-          pUnk, fLock ? "TRUE" : "FALSE", fLastUnlockReleases ? "TRUE" : "FALSE");
-
-    if (!(apt = apartment_get_current_or_mta()))
-    {
-        ERR("apartment not initialised\n");
-        return CO_E_NOTINITIALIZED;
-    }
-
-    stubmgr = get_stub_manager_from_object(apt, pUnk, fLock);
-    if (!stubmgr)
-    {
-        WARN("stub object not found %p\n", pUnk);
-        /* Note: native is pretty broken here because it just silently
-         * fails, without returning an appropriate error code, making apps
-         * think that the object was disconnected, when it actually wasn't */
-        apartment_release(apt);
-        return S_OK;
-    }
-
-    if (fLock)
-        stub_manager_ext_addref(stubmgr, 1, FALSE);
-    else
-        stub_manager_ext_release(stubmgr, 1, FALSE, fLastUnlockReleases);
-
-    stub_manager_int_release(stubmgr);
-    apartment_release(apt);
-    return S_OK;
-}
-
-/***********************************************************************
- *           CoInitializeWOW (OLE32.@)
- *
- * WOW equivalent of CoInitialize?
- *
- * PARAMS
- *  x [I] Unknown.
- *  y [I] Unknown.
- *
- * RETURNS
- *  Unknown.
- */
-HRESULT WINAPI CoInitializeWOW(DWORD x,DWORD y)
-{
-    FIXME("(0x%08x,0x%08x),stub!\n",x,y);
-    return 0;
 }
 
 /***********************************************************************
@@ -956,41 +800,6 @@ BOOL WINAPI IsEqualGUID(
 }
 
 /***********************************************************************
- *           CoSuspendClassObjects [OLE32.@]
- *
- * Suspends all registered class objects to prevent further requests coming in
- * for those objects.
- *
- * RETURNS
- *  Success: S_OK.
- *  Failure: HRESULT code.
- */
-HRESULT WINAPI CoSuspendClassObjects(void)
-{
-    FIXME("\n");
-    return S_OK;
-}
-
-/***********************************************************************
- *           CoIsHandlerConnected [OLE32.@]
- *
- * Determines whether a proxy is connected to a remote stub.
- *
- * PARAMS
- *  pUnk [I] Pointer to object that may or may not be connected.
- *
- * RETURNS
- *  TRUE if pUnk is not a proxy or if pUnk is connected to a remote stub, or
- *  FALSE otherwise.
- */
-BOOL WINAPI CoIsHandlerConnected(IUnknown *pUnk)
-{
-    FIXME("%p\n", pUnk);
-
-    return TRUE;
-}
-
-/***********************************************************************
  *           CoAllowSetForegroundWindow [OLE32.@]
  *
  */
@@ -1049,26 +858,6 @@ HRESULT WINAPI CoGetObject(LPCWSTR pszName, BIND_OPTS *pBindOptions,
         IBindCtx_Release(pbc);
     }
     return hr;
-}
-
-/***********************************************************************
- *           CoRegisterChannelHook [OLE32.@]
- *
- * Registers a process-wide hook that is called during ORPC calls.
- *
- * PARAMS
- *  guidExtension [I] GUID of the channel hook to register.
- *  pChannelHook  [I] Channel hook object to register.
- *
- * RETURNS
- *  Success: S_OK.
- *  Failure: HRESULT code.
- */
-HRESULT WINAPI CoRegisterChannelHook(REFGUID guidExtension, IChannelHook *pChannelHook)
-{
-    TRACE("(%s, %p)\n", debugstr_guid(guidExtension), pChannelHook);
-
-    return RPC_RegisterChannelHook(guidExtension, pChannelHook);
 }
 
 /* Returns expanded dll path from the registry or activation context. */
@@ -1144,46 +933,6 @@ HRESULT Handler_DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     }
 
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/***********************************************************************
- *           CoDisableCallCancellation [OLE32.@]
- */
-HRESULT WINAPI CoDisableCallCancellation(void *reserved)
-{
-    FIXME("(%p): stub\n", reserved);
-
-    return E_NOTIMPL;
-}
-
-/***********************************************************************
- *           CoEnableCallCancellation [OLE32.@]
- */
-HRESULT WINAPI CoEnableCallCancellation(void *reserved)
-{
-    FIXME("(%p): stub\n", reserved);
-
-    return E_NOTIMPL;
-}
-
-/***********************************************************************
- *           CoRegisterSurrogate [OLE32.@]
- */
-HRESULT WINAPI CoRegisterSurrogate(ISurrogate *surrogate)
-{
-    FIXME("(%p): stub\n", surrogate);
-
-    return E_NOTIMPL;
-}
-
-/***********************************************************************
- *           CoRegisterSurrogateEx [OLE32.@]
- */
-HRESULT WINAPI CoRegisterSurrogateEx(REFGUID guid, void *reserved)
-{
-    FIXME("(%s %p): stub\n", debugstr_guid(guid), reserved);
-
-    return E_NOTIMPL;
 }
 
 typedef struct {
@@ -1297,7 +1046,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID reserved)
     case DLL_PROCESS_DETACH:
         if (reserved) break;
         release_std_git();
-        RPC_UnregisterAllChannelHooks();
         break;
     }
     return TRUE;

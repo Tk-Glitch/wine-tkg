@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Sun Aug 30 11:52:21 AM CEST 2020 :
+# Last wine-tkg-staging-fsync-vkd3d-git configuration - Mon Sep 28 01:27:36 PM CEST 2020 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.16.r0.g5bb27d1edb
-Using wine-staging patchset (version 5.16.r2.gf6495b29)
+Wine (plain) version: 5.18.r0.g9a6e5b2329
+Using wine-staging patchset (version 5.18.r3.g9acfa3b8)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Using VKD3D for d3d12 translation
@@ -11,6 +11,10 @@ Using VKD3D for d3d12 translation
 Hotfix: 3a9edf9aad43c3e8ba724571da5381f821f1dc56 revert path used
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
+4a330b29212402b9700828be82939112bd11a786 reverted 
+bbae35f0fb04ea7efb8e1d6e5535e42715ae7766 reverted 
+ec245c7e300f7cb779cf404079872f68c812585e reverted 
+586f68f414924b1e41fec10a72b1aacced068885 reverted 
 d9625e5a01a52496d1fb7f1a9a691fd3ec8332db reverted 
 715a04daabdab616b530ef5a937827df7c2523c3 reverted 
 f04360cfbec574dc37675df141ef8fc14e1302ba reverted 
@@ -46,9 +50,10 @@ fd6f50c0d3e96947846ca82ed0c9bd79fd8e5b80 reverted
 2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted 
 ( FS hack unbreak reverts applied )
 
-Applied hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-78.mystagingpatch
+Applied hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-99.mystagingpatch
 Applied hotfix 934a09585a15e8491e422b43624ffe632b02bd3c-3.mystagingpatch
 Applied hotfix ntdll-ForceBottomUpAlloc-97fbe3f.mystagingpatch
+Applied hotfix 001-8db14f4e18a3770b4ac3cfe6e1ddbe17dec342d7.myearlypatch
 use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
 plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
 FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
@@ -56,12 +61,11 @@ childwindow.patch -- ( Applied child window for vk patch )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W mfplat-streaming-support -W ntdll-SystemRoot_Symlink -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-mouse-experimental -W user32-rawinput-hid
+Staging overrides, if any: -W ntdll-SystemRoot_Symlink -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-mouse-experimental -W user32-rawinput-hid
 
 mk11.patch -- ( Applied Mortal Kombat 11 fix )
 fsync-staging.patch -- ( Applied fsync, an experimental replacement for esync (staging) )
-fsync-staging-no_alloc_handle.patch -- ( Added no_alloc_handle object method to fsync )
-server_Abort_waiting_on_a_completion_port_when_closing_it-no_alloc_handle.patch -- ( Added Abort waiting on a completion port when closing it Proton patch (no_alloc_handle edition) )
+server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
 fsync-spincounts.patch -- ( Add a configurable spin count to fsync )
 
 valve_proton_fullscreen_hack-staging.patch -- ( Applied Proton fullscreen hack patch (staging) )
@@ -74,7 +78,7 @@ proton-pa-staging.patch -- ( Enable Proton's PA additions )
 proton-vk-bits-4.5.patch -- ( Enable Proton vulkan bits for 4.5+ )
 proton_fs_hack_integer_scaling.patch -- ( Enable Proton fs hack integer scaling )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
-josh-flat-theme.patch -- ( Add Josh's better-theme )
+josh-flat-theme-6456973.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
 
 Applied hotfix d8d6a6b2e639d2e29e166a3faf988b81388ae191.mypatch
@@ -85,7 +89,6 @@ Applied hotfix 001-8622eb326fb8120fc038e27947e61677d4124f15-staging.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch GNUTLShack.mypatch
 Applied your own patch amdags.mypatch
-Applied your own patch guy1524_mfplat_WIP.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
 
 wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

@@ -27,6 +27,7 @@ datarootdir     = @datarootdir@
 datadir         = @datadir@
 mandir          = @mandir@
 includedir      = @includedir@
+colordir        = ${datadir}/wine/color
 fontdir         = ${datadir}/wine/fonts
 nlsdir          = ${datadir}/wine/nls
 dlldir          = ${libdir}/wine

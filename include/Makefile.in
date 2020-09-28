@@ -741,6 +741,7 @@ SOURCES = \
 	windef.h \
 	windns.h \
 	windows.foundation.idl \
+	windows.globalization.idl \
 	windows.h \
 	windowsx.h \
 	wine/debug.h \
@@ -817,7 +818,9 @@ SOURCES = \
 	wtypes.idl \
 	wuapi.idl \
 	x3daudio.h \
+	xact.h \
 	xact3.h \
+	xact2wb.h \
 	xact3wb.h \
 	xapo.idl \
 	xapofx.h \

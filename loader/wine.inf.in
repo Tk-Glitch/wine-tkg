@@ -30,7 +30,7 @@ signature="$CHICAGO$"
 RegisterDlls=RegisterDllsSection
 WineFakeDlls=FakeDllsWin32,FakeDlls
 UpdateInis=SystemIni
-CopyFiles=InfFiles,NlsFiles,SortFiles
+CopyFiles=ColorFiles,InfFiles,NlsFiles,SortFiles
 AddReg=\
     Classes,\
     ContentIndex,\
@@ -55,7 +55,7 @@ AddReg=\
 RegisterDlls=RegisterDllsSection
 WineFakeDlls=FakeDllsWin32,FakeDlls
 UpdateInis=SystemIni
-CopyFiles=InfFiles,NlsFiles,SortFiles
+CopyFiles=ColorFiles,InfFiles,NlsFiles,SortFiles
 AddReg=\
     Classes,\
     ContentIndex,\
@@ -82,7 +82,7 @@ RegisterDlls=RegisterDllsSection
 WineFakeDlls=FakeDllsWin64,FakeDlls
 WinePreInstall=Wow64
 UpdateInis=SystemIni
-CopyFiles=InfFiles,NlsFiles,SortFiles
+CopyFiles=ColorFiles,InfFiles,NlsFiles,SortFiles
 AddReg=\
     Classes,\
     ContentIndex,\
@@ -110,7 +110,7 @@ RegisterDlls=RegisterDllsSection
 WineFakeDlls=FakeDllsWin64,FakeDlls
 WinePreInstall=Wow64
 UpdateInis=SystemIni
-CopyFiles=InfFiles,NlsFiles,SortFiles
+CopyFiles=ColorFiles,InfFiles,NlsFiles,SortFiles
 AddReg=\
     Classes,\
     ContentIndex,\
@@ -167,6 +167,7 @@ AddService=FontCache,0,FontCacheService
 AddService=Schedule,0,TaskSchedulerService
 AddService=Winmgmt,0,WinmgmtService
 AddService=wuauserv,0,wuauService
+AddService=NDIS,0x800,NDISService
 
 [DefaultInstall.NT.Services]
 AddService=BITS,0,BITSService
@@ -184,6 +185,7 @@ AddService=FontCache,0,FontCacheService
 AddService=Schedule,0,TaskSchedulerService
 AddService=Winmgmt,0,WinmgmtService
 AddService=wuauserv,0,wuauService
+AddService=NDIS,0x800,NDISService
 
 [DefaultInstall.ntamd64.Services]
 AddService=BITS,0,BITSService
@@ -201,6 +203,7 @@ AddService=FontCache,0,FontCacheService
 AddService=Schedule,0,TaskSchedulerService
 AddService=Winmgmt,0,WinmgmtService
 AddService=wuauserv,0,wuauService
+AddService=NDIS,0x800,NDISService
 
 [DefaultInstall.ntarm64.Services]
 AddService=BITS,0,BITSService
@@ -218,6 +221,7 @@ AddService=FontCache,0,FontCacheService
 AddService=Schedule,0,TaskSchedulerService
 AddService=Winmgmt,0,WinmgmtService
 AddService=wuauserv,0,wuauService
+AddService=NDIS,0x800,NDISService
 
 [Strings]
 MciExtStr="Software\Microsoft\Windows NT\CurrentVersion\MCI Extensions"
@@ -727,6 +731,9 @@ HKLM,%MciExtStr%,"wvx",,"MPEGVideo"
 [Misc]
 HKLM,Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.Input.Gamepad,"DllPath",2,"Windows.Gaming.Input.dll"
 HKLM,Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.Input.RawGameController,"DllPath",2,"Windows.Gaming.Input.dll"
+HKLM,Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Media.SpeechSynthesis.SpeechSynthesizer,"DllPath",2,"Windows.Media.Speech.dll"
+HKLM,Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Networking.Connectivity.NetworkInformation,"DllPath",2,"Windows.Networking.Connectivity.dll"
+HKLM,Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.System.UserProfile.GlobalizationPreferences,"DllPath",2,"Windows.Globalization.dll"
 HKLM,Software\Borland\Database Engine\Settings\SYSTEM\INIT,SHAREDMEMLOCATION,,9000
 HKLM,Software\Clients\Mail,,2,"Native Mail Client"
 HKLM,Software\Clients\Mail\Native Mail Client,,2,"Native Mail Client"
@@ -2944,7 +2951,6 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,catroot,
 11,mui,
 11,tasks,
-11,spool\drivers\color,
 11,spool\printers,
 10,,explorer.exe
 10,,hh.exe
@@ -3908,6 +3914,16 @@ ServiceBinary="%12%\mountmgr.sys"
 ServiceType=1
 StartType=2
 ErrorControl=1
+LoadOrderGroup="System Bus Extender"
+
+[NDISService]
+Description="NDIS service"
+DisplayName="NDIS"
+ServiceBinary="%12%\ndis.sys"
+ServiceType=1
+StartType=2
+ErrorControl=1
+LoadOrderGroup="System Bus Extender"
 
 [RpcSsService]
 Description="RPC service"
@@ -4177,6 +4193,9 @@ HKCU,Software\Wine\DllOverrides,"ucrtbase",0x2,"native,builtin"
 HKCU,Software\Wine\DllOverrides,"vcomp140",0x2,"native,builtin"
 HKCU,Software\Wine\DllOverrides,"vcruntime140",0x2,"native,builtin"
 
+[ColorFiles]
+"sRGB Color Space Profile.icm",sRGB_Color_Space_Profile.icm
+
 [InfFiles]
 winebus.inf
 winehid.inf
@@ -4259,10 +4278,12 @@ normnfkd.nls
 sortdefault.nls
 
 [WineSourceDirs]
+ColorFiles = color
 NlsFiles  = nls
 SortFiles = nls
 
 [DestinationDirs]
+ColorFiles = 11,spool\drivers\color
 InfFiles  = 17
 NlsFiles  = 11
 SortFiles = 10,globalization\sorting

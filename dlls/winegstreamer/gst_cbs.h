@@ -44,15 +44,14 @@ enum CB_TYPE {
     UNKNOWN_TYPE,
     QUERY_SINK,
     GSTDEMUX_MAX,
-    PULL_FROM_BYTESTREAM,
-    QUERY_BYTESTREAM,
-    ACTIVATE_BYTESTREAM_PAD_MODE,
-    PROCESS_BYTESTREAM_PAD_EVENT,
-    WATCH_SOURCE_BUS,
-    SOURCE_STREAM_ADDED,
-    SOURCE_STREAM_REMOVED,
-    SOURCE_ALL_STREAMS,
-    STREAM_PAD_EVENT,
+    BYTESTREAM_WRAPPER_PULL,
+    BYTESTREAM_QUERY,
+    BYTESTREAM_PAD_MODE_ACTIVATE,
+    BYTESTREAM_PAD_EVENT_PROCESS,
+    MF_SRC_BUS_WATCH,
+    MF_SRC_STREAM_ADDED,
+    MF_SRC_STREAM_REMOVED,
+    MF_SRC_NO_MORE_PADS,
     MEDIA_SOURCE_MAX,
     ACTIVATE_PUSH_MODE,
     QUERY_INPUT_SRC,
@@ -144,12 +143,6 @@ struct cb_data {
             GstQuery *query;
             gboolean ret;
         } query_sink_data;
-        struct pad_probe_data {
-            GstPad *pad;
-            GstPadProbeInfo *info;
-            gpointer user;
-            GstPadProbeReturn ret;
-        } pad_probe_data;
         struct chain_data {
             GstPad *pad;
             GstObject *parent;
@@ -189,15 +182,14 @@ GstAutoplugSelectResult autoplug_blacklist_wrapper(GstElement *bin, GstPad *pad,
 void unknown_type_wrapper(GstElement *bin, GstPad *pad, GstCaps *caps, gpointer user) DECLSPEC_HIDDEN;
 void Gstreamer_transform_pad_added_wrapper(GstElement *filter, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
 gboolean query_sink_wrapper(GstPad *pad, GstObject *parent, GstQuery *query) DECLSPEC_HIDDEN;
-GstFlowReturn pull_from_bytestream_wrapper(GstPad *pad, GstObject *parent, guint64 ofs, guint len, GstBuffer **buf) DECLSPEC_HIDDEN;
-gboolean query_bytestream_wrapper(GstPad *pad, GstObject *parent, GstQuery *query) DECLSPEC_HIDDEN;
-gboolean activate_bytestream_pad_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate) DECLSPEC_HIDDEN;
-gboolean process_bytestream_pad_event_wrapper(GstPad *pad, GstObject *parent, GstEvent *event) DECLSPEC_HIDDEN;
-GstBusSyncReply watch_source_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user) DECLSPEC_HIDDEN;
-void source_stream_added_wrapper(GstElement *bin, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
-void source_stream_removed_wrapper(GstElement *element, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
-void source_all_streams_wrapper(GstElement *element, gpointer user) DECLSPEC_HIDDEN;
-GstPadProbeReturn caps_listener_wrapper(GstPad *pad, GstPadProbeInfo *info, gpointer user);
+GstFlowReturn bytestream_wrapper_pull_wrapper(GstPad *pad, GstObject *parent, guint64 ofs, guint len, GstBuffer **buf) DECLSPEC_HIDDEN;
+gboolean bytestream_query_wrapper(GstPad *pad, GstObject *parent, GstQuery *query) DECLSPEC_HIDDEN;
+gboolean bytestream_pad_mode_activate_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate) DECLSPEC_HIDDEN;
+gboolean bytestream_pad_event_process_wrapper(GstPad *pad, GstObject *parent, GstEvent *event) DECLSPEC_HIDDEN;
+GstBusSyncReply mf_src_bus_watch_wrapper(GstBus *bus, GstMessage *message, gpointer user) DECLSPEC_HIDDEN;
+void mf_src_stream_added_wrapper(GstElement *bin, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
+void mf_src_stream_removed_wrapper(GstElement *element, GstPad *pad, gpointer user) DECLSPEC_HIDDEN;
+void mf_src_no_more_pads_wrapper(GstElement *element, gpointer user) DECLSPEC_HIDDEN;
 gboolean activate_push_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate) DECLSPEC_HIDDEN;
 gboolean query_input_src_wrapper(GstPad *pad, GstObject *parent, GstQuery *query) DECLSPEC_HIDDEN;
 GstBusSyncReply watch_decoder_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user) DECLSPEC_HIDDEN;

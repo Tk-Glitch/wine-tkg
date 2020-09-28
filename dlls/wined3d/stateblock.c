@@ -450,7 +450,7 @@ void state_unbind_resources(struct wined3d_state *state)
             if ((srv = state->shader_resource_view[i][j]))
             {
                 state->shader_resource_view[i][j] = NULL;
-                --srv->resource->srv_bind_count_device;
+                wined3d_srv_bind_count_dec(srv);
                 wined3d_shader_resource_view_decref(srv);
             }
         }
@@ -1852,6 +1852,8 @@ static void state_init_default(struct wined3d_state *state, const struct wined3d
     state->blend_factor.g = 1.0f;
     state->blend_factor.b = 1.0f;
     state->blend_factor.a = 1.0f;
+
+    state->sample_mask = 0xffffffff;
 
     for (i = 0; i < WINED3D_MAX_STREAMS; ++i)
         state->streams[i].frequency = 1;
