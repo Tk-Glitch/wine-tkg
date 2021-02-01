@@ -837,6 +837,9 @@ GpStatus WINGDIPAPI GdipRecordMetafile(HDC hdc, EmfType type, GDIPCONST GpRectF 
     (*metafile)->comment_data_length = 0;
     (*metafile)->limit_dpi = 96;
     (*metafile)->hemf = NULL;
+    (*metafile)->printer_display = (GetDeviceCaps(record_dc, TECHNOLOGY) == DT_RASPRINTER);
+    (*metafile)->logical_dpix = (REAL)GetDeviceCaps(record_dc, LOGPIXELSX);
+    (*metafile)->logical_dpiy = (REAL)GetDeviceCaps(record_dc, LOGPIXELSY);
     list_init(&(*metafile)->containers);
 
     if (!frameRect)
@@ -963,8 +966,9 @@ GpStatus METAFILE_GetGraphicsContext(GpMetafile* metafile, GpGraphics **result)
     if (stat == Ok)
     {
         *result = metafile->record_graphics;
-        metafile->record_graphics->xres = 96.0;
-        metafile->record_graphics->yres = 96.0;
+        metafile->record_graphics->xres = metafile->logical_dpix;
+        metafile->record_graphics->yres = metafile->logical_dpiy;
+        metafile->record_graphics->printer_display = metafile->printer_display;
     }
 
     return stat;
@@ -1790,12 +1794,16 @@ static GpStatus METAFILE_PlaybackUpdateWorldTransform(GpMetafile *metafile)
 
     if (stat == Ok)
     {
-        REAL scale = units_to_pixels(1.0, metafile->page_unit, 96.0);
+        REAL scale_x = units_to_pixels(1.0, metafile->page_unit, metafile->logical_dpix, metafile->printer_display);
+        REAL scale_y = units_to_pixels(1.0, metafile->page_unit, metafile->logical_dpiy, metafile->printer_display);
 
         if (metafile->page_unit != UnitDisplay)
-            scale *= metafile->page_scale;
+        {
+            scale_x *= metafile->page_scale;
+            scale_y *= metafile->page_scale;
+        }
 
-        stat = GdipScaleMatrix(real_transform, scale, scale, MatrixOrderPrepend);
+        stat = GdipScaleMatrix(real_transform, scale_x, scale_y, MatrixOrderPrepend);
 
         if (stat == Ok)
             stat = GdipMultiplyMatrix(real_transform, metafile->world_transform, MatrixOrderPrepend);
@@ -2897,8 +2905,8 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
 
             unit = record->Header.Flags & 0xff;
 
-            scale_x = units_to_pixels(1.0, unit, metafile->image.xres);
-            scale_y = units_to_pixels(1.0, unit, metafile->image.yres);
+            scale_x = units_to_pixels(1.0, unit, metafile->image.xres, metafile->printer_display);
+            scale_y = units_to_pixels(1.0, unit, metafile->image.yres, metafile->printer_display);
 
             scaled_srcrect.X = scale_x * record->SrcRect.X;
             scaled_srcrect.Y = scale_y * record->SrcRect.Y;
@@ -3482,7 +3490,7 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
 
             if (flags & 0x8000)
             {
-                stat = GdipCreateSolidFill(draw->brush.Color, (GpSolidFill**)&solidfill);
+                stat = GdipCreateSolidFill(draw->brush.Color, &solidfill);
 
                 if (stat != Ok)
                     return InvalidParameter;
@@ -3838,8 +3846,10 @@ GpStatus WINGDIPAPI GdipEnumerateMetafileDestPoint(GpGraphics *graphics,
 
     destf.X = dest->X;
     destf.Y = dest->Y;
-    destf.Width = units_to_pixels(metafile->bounds.Width, metafile->unit, metafile->image.xres);
-    destf.Height = units_to_pixels(metafile->bounds.Height, metafile->unit, metafile->image.yres);
+    destf.Width = units_to_pixels(metafile->bounds.Width, metafile->unit,
+                                  metafile->image.xres, metafile->printer_display);
+    destf.Height = units_to_pixels(metafile->bounds.Height, metafile->unit,
+                                   metafile->image.yres, metafile->printer_display);
 
     return GdipEnumerateMetafileDestRect(graphics, metafile, &destf, callback, cb_data, attrs);
 }
@@ -4064,6 +4074,11 @@ GpStatus WINGDIPAPI GdipCreateMetafileFromEmf(HENHMETAFILE hemf, BOOL delete,
     (*metafile)->metafile_type = header.Type;
     (*metafile)->hemf = hemf;
     (*metafile)->preserve_hemf = !delete;
+    /* If the 31th bit of EmfPlusFlags was set, metafile was recorded with a DC for a video display.
+     * If clear, metafile was recorded with a DC for a printer */
+    (*metafile)->printer_display = !(header.EmfPlusFlags & (1u << 31));
+    (*metafile)->logical_dpix = header.LogicalDpiX;
+    (*metafile)->logical_dpix = header.LogicalDpiY;
     list_init(&(*metafile)->containers);
 
     TRACE("<-- %p\n", *metafile);
@@ -4512,10 +4527,10 @@ GpStatus METAFILE_DrawImagePointsRect(GpMetafile *metafile, GpImage *image,
     draw_image_record->Header.Flags = image_id;
     draw_image_record->ImageAttributesID = attributes_id;
     draw_image_record->SrcUnit = UnitPixel;
-    draw_image_record->SrcRect.X = units_to_pixels(srcx, srcUnit, metafile->image.xres);
-    draw_image_record->SrcRect.Y = units_to_pixels(srcy, srcUnit, metafile->image.yres);
-    draw_image_record->SrcRect.Width = units_to_pixels(srcwidth, srcUnit, metafile->image.xres);
-    draw_image_record->SrcRect.Height = units_to_pixels(srcheight, srcUnit, metafile->image.yres);
+    draw_image_record->SrcRect.X = units_to_pixels(srcx, srcUnit, metafile->image.xres, metafile->printer_display);
+    draw_image_record->SrcRect.Y = units_to_pixels(srcy, srcUnit, metafile->image.yres, metafile->printer_display);
+    draw_image_record->SrcRect.Width = units_to_pixels(srcwidth, srcUnit, metafile->image.xres, metafile->printer_display);
+    draw_image_record->SrcRect.Height = units_to_pixels(srcheight, srcUnit, metafile->image.yres, metafile->printer_display);
     draw_image_record->count = 3;
     memcpy(draw_image_record->PointData.pointsF, points, 3 * sizeof(*points));
     METAFILE_WriteRecords(metafile);

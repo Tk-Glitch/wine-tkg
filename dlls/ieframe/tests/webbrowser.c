@@ -160,8 +160,6 @@ DEFINE_EXPECT(GetExternal);
 DEFINE_EXPECT(outer_QI_test);
 DEFINE_EXPECT(Advise_OnClose);
 
-static const WCHAR wszItem[] = {'i','t','e','m',0};
-
 static VARIANT_BOOL exvb;
 
 static IWebBrowser2 *wb;
@@ -174,6 +172,15 @@ static HRESULT hr_site_TranslateAccelerator = E_NOTIMPL;
 static const WCHAR *current_url;
 static int wb_version, expect_update_commands_enable, set_update_commands_enable;
 static BOOL nav_back_todo, nav_forward_todo; /* FIXME */
+
+enum SessionOp
+{
+    SESSION_QUERY,
+    SESSION_INCREMENT,
+    SESSION_DECREMENT
+};
+
+static LONG (WINAPI *pSetQueryNetSessionCount)(DWORD);
 
 #define BUSY_FAIL 2
 
@@ -1268,7 +1275,7 @@ static HRESULT WINAPI InPlaceUIWindow_SetActiveObject(IOleInPlaceFrame *iface,
     CHECK_EXPECT(UIWindow_SetActiveObject);
     if(!test_close && !test_hide) {
         ok(pActiveObject != NULL, "pActiveObject = NULL\n");
-        ok(!lstrcmpW(pszObjName, wszItem), "unexpected pszObjName\n");
+        ok(!lstrcmpW(pszObjName, L"item"), "unexpected pszObjName\n");
     } else {
         ok(!pActiveObject, "pActiveObject != NULL\n");
         ok(!pszObjName, "pszObjName != NULL\n");
@@ -1282,7 +1289,7 @@ static HRESULT WINAPI InPlaceFrame_SetActiveObject(IOleInPlaceFrame *iface,
     CHECK_EXPECT(Frame_SetActiveObject);
     if(!test_close && !test_hide) {
         ok(pActiveObject != NULL, "pActiveObject = NULL\n");
-        ok(!lstrcmpW(pszObjName, wszItem), "unexpected pszObjName\n");
+        ok(!lstrcmpW(pszObjName, L"item"), "unexpected pszObjName\n");
     } else {
         ok(!pActiveObject, "pActiveObject != NULL\n");
         ok(!pszObjName, "pszObjName != NULL\n");
@@ -1817,19 +1824,17 @@ static LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 static HWND create_container_window(void)
 {
-    static const WCHAR wszWebBrowserContainer[] =
-        {'W','e','b','B','r','o','w','s','e','r','C','o','n','t','a','i','n','e','r',0};
     static WNDCLASSEXW wndclass = {
         sizeof(WNDCLASSEXW),
         0,
         wnd_proc,
         0, 0, NULL, NULL, NULL, NULL, NULL,
-        wszWebBrowserContainer,
+        L"WebBrowserContainer",
         NULL
     };
 
     RegisterClassExW(&wndclass);
-    return CreateWindowW(wszWebBrowserContainer, wszWebBrowserContainer,
+    return CreateWindowW(L"WebBrowserContainer", L"WebBrowserContainer",
             WS_OVERLAPPEDWINDOW, 10, 10, 600, 600, NULL, NULL, NULL, NULL);
 }
 
@@ -1942,9 +1947,7 @@ static void test_SetHostNames(IOleObject *oleobj)
 {
     HRESULT hres;
 
-    static const WCHAR test_appW[] =  {'t','e','s','t',' ','a','p','p',0};
-
-    hres = IOleObject_SetHostNames(oleobj, test_appW, (void*)0xdeadbeef);
+    hres = IOleObject_SetHostNames(oleobj, L"test app", (void*)0xdeadbeef);
     ok(hres == S_OK, "SetHostNames failed: %08x\n", hres);
 }
 
@@ -1952,6 +1955,7 @@ static void test_ClientSite(IWebBrowser2 *unk, IOleClientSite *client, BOOL stop
 {
     IOleObject *oleobj;
     IOleInPlaceObject *inplace;
+    DWORD session_count;
     HWND hwnd;
     HRESULT hres;
 
@@ -1975,6 +1979,8 @@ static void test_ClientSite(IWebBrowser2 *unk, IOleClientSite *client, BOOL stop
     ok((hwnd == NULL) ^ (client == NULL), "unexpected hwnd %p\n", hwnd);
 
     if(client) {
+        session_count = pSetQueryNetSessionCount(SESSION_QUERY);
+
         SET_EXPECT(GetContainer);
         SET_EXPECT(Site_GetWindow);
         SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
@@ -2001,6 +2007,9 @@ static void test_ClientSite(IWebBrowser2 *unk, IOleClientSite *client, BOOL stop
     ok(hres == S_OK, "SetClientSite failed: %08x\n", hres);
 
     if(client) {
+        DWORD count = pSetQueryNetSessionCount(SESSION_QUERY);
+        ok(count == session_count + 1, "count = %u expected %u\n", count, session_count + 1);
+
         CHECK_CALLED(GetContainer);
         CHECK_CALLED(Site_GetWindow);
         CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
@@ -3843,6 +3852,7 @@ static void test_WebBrowser(DWORD flags, BOOL do_close)
     test_EnumVerbs(webbrowser);
     test_LocationURL(webbrowser, L"");
     test_ConnectionPoint(webbrowser, TRUE);
+
     test_ClientSite(webbrowser, &ClientSite, !do_download);
     test_Extent(webbrowser);
     test_wb_funcs(webbrowser, TRUE);
@@ -4407,6 +4417,29 @@ static void test_SetAdvise(void)
     IWebBrowser2_Release(browser);
 }
 
+static void test_SetQueryNetSessionCount(void)
+{
+    LONG count;
+
+    count = pSetQueryNetSessionCount(SESSION_QUERY);
+    ok(count == 0, "count = %d\n", count);
+
+    count = pSetQueryNetSessionCount(SESSION_INCREMENT);
+    ok(count == 1, "count = %d\n", count);
+
+    count = pSetQueryNetSessionCount(SESSION_QUERY);
+    ok(count == 1, "count = %d\n", count);
+
+    count = pSetQueryNetSessionCount(0xdeadbeef);
+    ok(count == 0, "count = %d\n", count);
+
+    count = pSetQueryNetSessionCount(SESSION_DECREMENT);
+    ok(count == 0, "count = %d\n", count);
+
+    count = pSetQueryNetSessionCount(SESSION_QUERY);
+    ok(count == 0, "count = %d\n", count);
+}
+
 static HRESULT WINAPI outer_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
 {
     if(IsEqualGUID(riid, &outer_test_iid)) {
@@ -4466,7 +4499,13 @@ static void test_com_aggregation(void)
 
 START_TEST(webbrowser)
 {
+    HMODULE ieframe = LoadLibraryW(L"ieframe.dll");
+
+    pSetQueryNetSessionCount = (void*)GetProcAddress(ieframe, "SetQueryNetSessionCount");
+
     OleInitialize(NULL);
+
+    test_SetQueryNetSessionCount();
 
     container_hwnd = create_container_window();
 

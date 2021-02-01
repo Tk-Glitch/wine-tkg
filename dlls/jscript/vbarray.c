@@ -28,12 +28,6 @@ typedef struct {
     SAFEARRAY *safearray;
 } VBArrayInstance;
 
-static const WCHAR dimensionsW[] = {'d','i','m','e','n','s','i','o','n','s',0};
-static const WCHAR getItemW[] = {'g','e','t','I','t','e','m',0};
-static const WCHAR lboundW[] = {'l','b','o','u','n','d',0};
-static const WCHAR toArrayW[] = {'t','o','A','r','r','a','y',0};
-static const WCHAR uboundW[] = {'u','b','o','u','n','d',0};
-
 static inline VBArrayInstance *vbarray_from_jsdisp(jsdisp_t *jsdisp)
 {
     return CONTAINING_RECORD(jsdisp, VBArrayInstance, dispex);
@@ -248,11 +242,11 @@ static void VBArray_destructor(jsdisp_t *dispex)
 }
 
 static const builtin_prop_t VBArray_props[] = {
-    {dimensionsW,           VBArray_dimensions,         PROPF_METHOD},
-    {getItemW,              VBArray_getItem,            PROPF_METHOD|1},
-    {lboundW,               VBArray_lbound,             PROPF_METHOD},
-    {toArrayW,              VBArray_toArray,            PROPF_METHOD},
-    {uboundW,               VBArray_ubound,             PROPF_METHOD}
+    {L"dimensions",         VBArray_dimensions,         PROPF_METHOD},
+    {L"getItem",            VBArray_getItem,            PROPF_METHOD|1},
+    {L"lbound",             VBArray_lbound,             PROPF_METHOD},
+    {L"toArray",            VBArray_toArray,            PROPF_METHOD},
+    {L"ubound",             VBArray_ubound,             PROPF_METHOD}
 };
 
 static const builtin_info_t VBArray_info = {
@@ -332,13 +326,11 @@ HRESULT create_vbarray_constr(script_ctx_t *ctx, jsdisp_t *object_prototype, jsd
     VBArrayInstance *vbarray;
     HRESULT hres;
 
-    static const WCHAR VBArrayW[] = {'V','B','A','r','r','a','y',0};
-
     hres = alloc_vbarray(ctx, object_prototype, &vbarray);
     if(FAILED(hres))
         return hres;
 
-    hres = create_builtin_constructor(ctx, VBArrayConstr_value, VBArrayW, NULL, PROPF_CONSTR|1, &vbarray->dispex, ret);
+    hres = create_builtin_constructor(ctx, VBArrayConstr_value, L"VBArray", NULL, PROPF_CONSTR|1, &vbarray->dispex, ret);
 
     jsdisp_release(&vbarray->dispex);
     return hres;

@@ -28,6 +28,7 @@
 
 #include "initguid.h"
 #include "evr9.h"
+#include "evcode.h"
 
 #include "wine/debug.h"
 #include "wine/heap.h"
@@ -40,14 +41,25 @@ struct input_stream
 {
     unsigned int id;
     IMFAttributes *attributes;
-    IMFVideoMediaType *media_type;
+    IMFMediaType *media_type;
+    MFVideoNormalizedRect rect;
+    unsigned int zorder;
+    IMFSample *sample;
+    unsigned int sample_requested : 1;
+};
+
+struct rt_format
+{
+    GUID device;
+    D3DFORMAT format;
+    IMFMediaType *media_type;
 };
 
 struct output_stream
 {
-    IMFVideoMediaType *media_type;
-    IMFVideoMediaType **media_types;
-    unsigned int type_count;
+    IMFMediaType *media_type;
+    struct rt_format *rt_formats;
+    unsigned int rt_formats_count;
 };
 
 struct video_mixer
@@ -61,6 +73,8 @@ struct video_mixer
     IMFVideoPositionMapper IMFVideoPositionMapper_iface;
     IMFVideoProcessor IMFVideoProcessor_iface;
     IMFAttributes IMFAttributes_iface;
+    IMFQualityAdvise IMFQualityAdvise_iface;
+    IMFClockStateSink IMFClockStateSink_iface;
     IUnknown IUnknown_inner;
     IUnknown *outer_unk;
     LONG refcount;
@@ -70,12 +84,18 @@ struct video_mixer
     unsigned int input_count;
     struct output_stream output;
 
-    COLORREF bkgnd_color;
     IDirect3DDeviceManager9 *device_manager;
+    IDirectXVideoProcessor *processor;
+    HANDLE device_handle;
+
     IMediaEventSink *event_sink;
     IMFAttributes *attributes;
     IMFAttributes *internal_attributes;
     unsigned int mixing_flags;
+    unsigned int is_streaming;
+    COLORREF bkgnd_color;
+    LONGLONG lower_bound;
+    LONGLONG upper_bound;
     CRITICAL_SECTION cs;
 };
 
@@ -129,7 +149,17 @@ static struct video_mixer *impl_from_IMFAttributes(IMFAttributes *iface)
     return CONTAINING_RECORD(iface, struct video_mixer, IMFAttributes_iface);
 }
 
-static int video_mixer_compare_input_id(const void *a, const void *b)
+static struct video_mixer *impl_from_IMFQualityAdvise(IMFQualityAdvise *iface)
+{
+    return CONTAINING_RECORD(iface, struct video_mixer, IMFQualityAdvise_iface);
+}
+
+static struct video_mixer *impl_from_IMFClockStateSink(IMFClockStateSink *iface)
+{
+    return CONTAINING_RECORD(iface, struct video_mixer, IMFClockStateSink_iface);
+}
+
+static int __cdecl video_mixer_compare_input_id(const void *a, const void *b)
 {
     const unsigned int *key = a;
     const struct input_stream *input = b;
@@ -139,15 +169,18 @@ static int video_mixer_compare_input_id(const void *a, const void *b)
     return 0;
 }
 
-static struct input_stream * video_mixer_get_input(const struct video_mixer *mixer, unsigned int id)
+static HRESULT video_mixer_get_input(const struct video_mixer *mixer, unsigned int id, struct input_stream **stream)
 {
-    return bsearch(&id, mixer->inputs, mixer->input_count, sizeof(*mixer->inputs), video_mixer_compare_input_id);
+    *stream = bsearch(&id, mixer->inputs, mixer->input_count, sizeof(*mixer->inputs), video_mixer_compare_input_id);
+    return *stream ? S_OK : MF_E_INVALIDSTREAMNUMBER;
 }
 
 static void video_mixer_init_input(struct input_stream *stream)
 {
     if (SUCCEEDED(MFCreateAttributes(&stream->attributes, 1)))
         IMFAttributes_SetUINT32(stream->attributes, &MF_SA_REQUIRED_SAMPLE_COUNT, 1);
+    stream->rect.left = stream->rect.top = 0.0f;
+    stream->rect.right = stream->rect.bottom = 1.0f;
 }
 
 static void video_mixer_clear_types(struct video_mixer *mixer)
@@ -157,16 +190,19 @@ static void video_mixer_clear_types(struct video_mixer *mixer)
     for (i = 0; i < mixer->input_count; ++i)
     {
         if (mixer->inputs[i].media_type)
-            IMFVideoMediaType_Release(mixer->inputs[i].media_type);
+            IMFMediaType_Release(mixer->inputs[i].media_type);
         mixer->inputs[i].media_type = NULL;
+        if (mixer->inputs[i].sample)
+            IMFSample_Release(mixer->inputs[i].sample);
+        mixer->inputs[i].sample = NULL;
     }
-    for (i = 0; i < mixer->output.type_count; ++i)
+    for (i = 0; i < mixer->output.rt_formats_count; ++i)
     {
-        IMFVideoMediaType_Release(mixer->output.media_types[i]);
+        IMFMediaType_Release(mixer->output.rt_formats[i].media_type);
     }
-    heap_free(mixer->output.media_types);
+    heap_free(mixer->output.rt_formats);
     if (mixer->output.media_type)
-        IMFVideoMediaType_Release(mixer->output.media_type);
+        IMFMediaType_Release(mixer->output.media_type);
     mixer->output.media_type = NULL;
 }
 
@@ -217,6 +253,14 @@ static HRESULT WINAPI video_mixer_inner_QueryInterface(IUnknown *iface, REFIID r
     {
         *obj = &mixer->IMFAttributes_iface;
     }
+    else if (IsEqualIID(riid, &IID_IMFQualityAdvise))
+    {
+        *obj = &mixer->IMFQualityAdvise_iface;
+    }
+    else if (IsEqualIID(riid, &IID_IMFClockStateSink))
+    {
+        *obj = &mixer->IMFClockStateSink_iface;
+    }
     else
     {
         WARN("Unsupported interface %s.\n", debugstr_guid(riid));
@@ -238,6 +282,20 @@ static ULONG WINAPI video_mixer_inner_AddRef(IUnknown *iface)
     return refcount;
 }
 
+static void video_mixer_release_device_manager(struct video_mixer *mixer)
+{
+    if (mixer->processor)
+        IDirectXVideoProcessor_Release(mixer->processor);
+    if (mixer->device_manager)
+    {
+        IDirect3DDeviceManager9_CloseDeviceHandle(mixer->device_manager, mixer->device_handle);
+        IDirect3DDeviceManager9_Release(mixer->device_manager);
+    }
+    mixer->device_handle = NULL;
+    mixer->device_manager = NULL;
+    mixer->processor = NULL;
+}
+
 static ULONG WINAPI video_mixer_inner_Release(IUnknown *iface)
 {
     struct video_mixer *mixer = impl_from_IUnknown(iface);
@@ -254,8 +312,7 @@ static ULONG WINAPI video_mixer_inner_Release(IUnknown *iface)
                 IMFAttributes_Release(mixer->inputs[i].attributes);
         }
         video_mixer_clear_types(mixer);
-        if (mixer->device_manager)
-            IDirect3DDeviceManager9_Release(mixer->device_manager);
+        video_mixer_release_device_manager(mixer);
         if (mixer->attributes)
             IMFAttributes_Release(mixer->attributes);
         if (mixer->internal_attributes)
@@ -342,19 +399,19 @@ static HRESULT WINAPI video_mixer_transform_GetInputStreamInfo(IMFTransform *ifa
 {
     struct video_mixer *mixer = impl_from_IMFTransform(iface);
     struct input_stream *input;
-    HRESULT hr = S_OK;
+    HRESULT hr;
 
     TRACE("%p, %u, %p.\n", iface, id, info);
 
     EnterCriticalSection(&mixer->cs);
-    if (!(input = video_mixer_get_input(mixer, id)))
-        hr = MF_E_INVALIDSTREAMNUMBER;
-    else
+
+    if (SUCCEEDED(hr = video_mixer_get_input(mixer, id, &input)))
     {
         memset(info, 0, sizeof(*info));
         if (id)
             info->dwFlags |= MFT_INPUT_STREAM_REMOVABLE | MFT_INPUT_STREAM_OPTIONAL;
     }
+
     LeaveCriticalSection(&mixer->cs);
 
     return hr;
@@ -392,15 +449,13 @@ static HRESULT WINAPI video_mixer_transform_GetInputStreamAttributes(IMFTransfor
 {
     struct video_mixer *mixer = impl_from_IMFTransform(iface);
     struct input_stream *input;
-    HRESULT hr = S_OK;
+    HRESULT hr;
 
     TRACE("%p, %u, %p.\n", iface, id, attributes);
 
     EnterCriticalSection(&mixer->cs);
 
-    if (!(input = video_mixer_get_input(mixer, id)))
-        hr = MF_E_INVALIDSTREAMNUMBER;
-    else
+    if (SUCCEEDED(hr = video_mixer_get_input(mixer, id, &input)))
     {
         *attributes = input->attributes;
         if (*attributes)
@@ -424,17 +479,18 @@ static HRESULT WINAPI video_mixer_transform_DeleteInputStream(IMFTransform *ifac
 {
     struct video_mixer *mixer = impl_from_IMFTransform(iface);
     struct input_stream *input;
-    HRESULT hr = S_OK;
     unsigned int idx;
+    HRESULT hr;
 
     TRACE("%p, %u.\n", iface, id);
+
+    if (!id)
+        return MF_E_INVALIDSTREAMNUMBER;
 
     EnterCriticalSection(&mixer->cs);
 
     /* Can't delete reference stream. */
-    if (!id || !(input = video_mixer_get_input(mixer, id)))
-        hr = MF_E_INVALIDSTREAMNUMBER;
-    else
+    if (SUCCEEDED(hr = video_mixer_get_input(mixer, id, &input)))
     {
         mixer->input_count--;
         idx = input - mixer->inputs;
@@ -453,7 +509,7 @@ static HRESULT WINAPI video_mixer_transform_DeleteInputStream(IMFTransform *ifac
     return hr;
 }
 
-static int video_mixer_add_input_sort_compare(const void *a, const void *b)
+static int __cdecl video_mixer_add_input_sort_compare(const void *a, const void *b)
 {
     const struct input_stream *left = a, *right = b;
     return left->id != right->id ? (left->id < right->id ? -1 : 1) : 0;
@@ -497,6 +553,8 @@ static HRESULT WINAPI video_mixer_transform_AddInputStreams(IMFTransform *iface,
 
         if (SUCCEEDED(hr))
         {
+            unsigned int zorder = mixer->input_count;
+
             for (i = 0; i < count; ++i)
             {
                 if ((input = bsearch(&ids[i], inputs, len, sizeof(*inputs), video_mixer_compare_input_id)))
@@ -505,6 +563,13 @@ static HRESULT WINAPI video_mixer_transform_AddInputStreams(IMFTransform *iface,
             memcpy(&mixer->input_ids[mixer->input_count], ids, count * sizeof(*ids));
             memcpy(mixer->inputs, inputs, len * sizeof(*inputs));
             mixer->input_count += count;
+
+            for (i = 0; i < count; ++i)
+            {
+                if (SUCCEEDED(video_mixer_get_input(mixer, ids[i], &input)))
+                    input->zorder = zorder;
+                zorder++;
+            }
         }
     }
     LeaveCriticalSection(&mixer->cs);
@@ -535,11 +600,11 @@ static HRESULT WINAPI video_mixer_transform_GetOutputAvailableType(IMFTransform 
 
     if (!mixer->inputs[0].media_type)
         hr = MF_E_TRANSFORM_TYPE_NOT_SET;
-    else if (index >= mixer->output.type_count)
+    else if (index >= mixer->output.rt_formats_count)
         hr = MF_E_NO_MORE_TYPES;
     else
     {
-        *type = (IMFMediaType *)mixer->output.media_types[index];
+        *type = mixer->output.rt_formats[index].media_type;
         IMFMediaType_AddRef(*type);
     }
 
@@ -578,22 +643,24 @@ done:
     return hr;
 }
 
-static int rt_formats_sort_compare(const void *left, const void *right)
+static int __cdecl rt_formats_sort_compare(const void *left, const void *right)
 {
-    D3DFORMAT format1 = *(D3DFORMAT *)left, format2 = *(D3DFORMAT *)right;
+    const struct rt_format *format1 = left, *format2 = right;
 
-    if (format1 < format2) return -1;
-    if (format1 > format2) return 1;
+    if (format1->format < format2->format) return -1;
+    if (format1->format > format2->format) return 1;
     return 0;
 }
 
 static HRESULT video_mixer_collect_output_types(struct video_mixer *mixer, const DXVA2_VideoDesc *video_desc,
-        IDirectXVideoProcessorService *service, unsigned int device_count, const GUID *devices)
+        IMFMediaType *media_type, IDirectXVideoProcessorService *service, unsigned int device_count,
+        const GUID *devices, unsigned int flags)
 {
     unsigned int i, j, format_count, count;
-    D3DFORMAT *rt_formats = NULL, *formats, *ptr;
+    struct rt_format *rt_formats = NULL, *ptr;
+    HRESULT hr = MF_E_INVALIDMEDIATYPE;
+    D3DFORMAT *formats;
     GUID subtype;
-    HRESULT hr;
 
     count = 0;
     for (i = 0; i < device_count; ++i)
@@ -610,21 +677,25 @@ static HRESULT video_mixer_collect_output_types(struct video_mixer *mixer, const
             }
             rt_formats = ptr;
 
-            memcpy(&rt_formats[count], formats, format_count * sizeof(*formats));
+            for (j = 0; j < format_count; ++j)
+            {
+                rt_formats[count + j].format = formats[j];
+                rt_formats[count + j].device = devices[i];
+            }
             count += format_count;
 
             CoTaskMemFree(formats);
         }
     }
 
-    if (count)
+    if (count && !(flags & MFT_SET_TYPE_TEST_ONLY))
     {
         qsort(rt_formats, count, sizeof(*rt_formats), rt_formats_sort_compare);
 
         j = 0;
         for (i = j + 1; i < count; ++i)
         {
-            if (rt_formats[i] != rt_formats[j])
+            if (rt_formats[i].format != rt_formats[j].format)
             {
                 rt_formats[++j] = rt_formats[i];
             }
@@ -632,14 +703,22 @@ static HRESULT video_mixer_collect_output_types(struct video_mixer *mixer, const
         count = j + 1;
 
         memcpy(&subtype, &MFVideoFormat_Base, sizeof(subtype));
-        if ((mixer->output.media_types = heap_calloc(count, sizeof(*mixer->output.media_types))))
+        if ((mixer->output.rt_formats = heap_calloc(count, sizeof(*mixer->output.rt_formats))))
         {
             for (i = 0; i < count; ++i)
             {
-                subtype.Data1 = rt_formats[i];
-                MFCreateVideoMediaTypeFromSubtype(&subtype, &mixer->output.media_types[i]);
+                IMFMediaType *rt_media_type;
+
+                subtype.Data1 = rt_formats[i].format;
+                mixer->output.rt_formats[i] = rt_formats[i];
+
+                MFCreateMediaType(&rt_media_type);
+                IMFMediaType_CopyAllItems(media_type, (IMFAttributes *)rt_media_type);
+                IMFMediaType_SetGUID(rt_media_type, &MF_MT_SUBTYPE, &subtype);
+
+                mixer->output.rt_formats[i].media_type = rt_media_type;
             }
-            mixer->output.type_count = count;
+            mixer->output.rt_formats_count = count;
         }
         else
         {
@@ -653,6 +732,38 @@ static HRESULT video_mixer_collect_output_types(struct video_mixer *mixer, const
     return count ? S_OK : hr;
 }
 
+static HRESULT video_mixer_open_device_handle(struct video_mixer *mixer)
+{
+    IDirect3DDeviceManager9_CloseDeviceHandle(mixer->device_manager, mixer->device_handle);
+    mixer->device_handle = NULL;
+    return IDirect3DDeviceManager9_OpenDeviceHandle(mixer->device_manager, &mixer->device_handle);
+}
+
+static HRESULT video_mixer_get_processor_service(struct video_mixer *mixer, IDirectXVideoProcessorService **service)
+{
+    HRESULT hr;
+
+    if (!mixer->device_handle)
+    {
+        if (FAILED(hr = IDirect3DDeviceManager9_OpenDeviceHandle(mixer->device_manager, &mixer->device_handle)))
+            return hr;
+    }
+
+    for (;;)
+    {
+        hr = IDirect3DDeviceManager9_GetVideoService(mixer->device_manager, mixer->device_handle,
+                &IID_IDirectXVideoProcessorService, (void **)service);
+        if (hr == DXVA2_E_NEW_VIDEO_DEVICE)
+        {
+            if (SUCCEEDED(hr = video_mixer_open_device_handle(mixer)))
+                continue;
+        }
+        break;
+    }
+
+    return hr;
+}
+
 static HRESULT WINAPI video_mixer_transform_SetInputType(IMFTransform *iface, DWORD id, IMFMediaType *media_type, DWORD flags)
 {
     struct video_mixer *mixer = impl_from_IMFTransform(iface);
@@ -660,44 +771,46 @@ static HRESULT WINAPI video_mixer_transform_SetInputType(IMFTransform *iface, DW
     DXVA2_VideoDesc video_desc;
     HRESULT hr = E_NOTIMPL;
     unsigned int count;
-    HANDLE handle;
     GUID *guids;
 
     TRACE("%p, %u, %p, %#x.\n", iface, id, media_type, flags);
 
     EnterCriticalSection(&mixer->cs);
 
-    video_mixer_clear_types(mixer);
+    if (!(flags & MFT_SET_TYPE_TEST_ONLY))
+        video_mixer_clear_types(mixer);
 
     if (!mixer->device_manager)
         hr = MF_E_NOT_INITIALIZED;
     else
     {
-        if (SUCCEEDED(hr = IDirect3DDeviceManager9_OpenDeviceHandle(mixer->device_manager, &handle)))
+        if (SUCCEEDED(hr = video_mixer_get_processor_service(mixer, &service)))
         {
-            if (SUCCEEDED(hr = IDirect3DDeviceManager9_GetVideoService(mixer->device_manager, handle,
-                    &IID_IDirectXVideoProcessorService, (void **)&service)))
+            if (SUCCEEDED(hr = video_mixer_init_dxva_videodesc(media_type, &video_desc)))
             {
-                if (SUCCEEDED(hr = video_mixer_init_dxva_videodesc(media_type, &video_desc)))
+                if (!id)
                 {
-                    if (!id)
+                    if (SUCCEEDED(hr = IDirectXVideoProcessorService_GetVideoProcessorDeviceGuids(service, &video_desc,
+                            &count, &guids)))
                     {
-                        if (SUCCEEDED(hr = IDirectXVideoProcessorService_GetVideoProcessorDeviceGuids(service, &video_desc,
-                                &count, &guids)))
+                        if (SUCCEEDED(hr = video_mixer_collect_output_types(mixer, &video_desc, media_type,
+                                service, count, guids, flags)) && !(flags & MFT_SET_TYPE_TEST_ONLY))
                         {
-                            if (SUCCEEDED(hr = video_mixer_collect_output_types(mixer, &video_desc, service, count, guids)))
-                                FIXME("Set input type.\n");
-                            CoTaskMemFree(guids);
+                            if (mixer->inputs[0].media_type)
+                                IMFMediaType_Release(mixer->inputs[0].media_type);
+                            mixer->inputs[0].media_type = media_type;
+                            IMFMediaType_AddRef(mixer->inputs[0].media_type);
                         }
-                    }
-                    else
-                    {
-                        FIXME("Unimplemented for substreams.\n");
-                        hr = E_NOTIMPL;
+                        CoTaskMemFree(guids);
                     }
                 }
+                else
+                {
+                    FIXME("Unimplemented for substreams.\n");
+                    hr = E_NOTIMPL;
+                }
             }
-            IDirect3DDeviceManager9_CloseDeviceHandle(mixer->device_manager, handle);
+            IDirectXVideoProcessorService_Release(service);
         }
     }
 
@@ -708,22 +821,79 @@ static HRESULT WINAPI video_mixer_transform_SetInputType(IMFTransform *iface, DW
 
 static HRESULT WINAPI video_mixer_transform_SetOutputType(IMFTransform *iface, DWORD id, IMFMediaType *type, DWORD flags)
 {
-    FIXME("%p, %u, %p, %#x.\n", iface, id, type, flags);
+    const unsigned int equality_flags = MF_MEDIATYPE_EQUAL_MAJOR_TYPES |
+            MF_MEDIATYPE_EQUAL_FORMAT_TYPES | MF_MEDIATYPE_EQUAL_FORMAT_DATA;
+    struct video_mixer *mixer = impl_from_IMFTransform(iface);
+    HRESULT hr = MF_E_INVALIDMEDIATYPE;
+    unsigned int i, compare_flags;
 
-    return E_NOTIMPL;
+    TRACE("%p, %u, %p, %#x.\n", iface, id, type, flags);
+
+    if (id)
+        return MF_E_INVALIDSTREAMNUMBER;
+
+    EnterCriticalSection(&mixer->cs);
+
+    for (i = 0; i < mixer->output.rt_formats_count; ++i)
+    {
+        compare_flags = 0;
+        if (FAILED(IMFMediaType_IsEqual(type, mixer->output.rt_formats[i].media_type, &compare_flags)))
+            continue;
+
+        if ((compare_flags & equality_flags) == equality_flags)
+        {
+            hr = S_OK;
+            break;
+        }
+    }
+
+    if (SUCCEEDED(hr) && !(flags & MFT_SET_TYPE_TEST_ONLY))
+    {
+        IDirectXVideoProcessorService *service;
+
+        if (SUCCEEDED(hr = video_mixer_get_processor_service(mixer, &service)))
+        {
+            DXVA2_VideoDesc video_desc;
+            GUID subtype = { 0 };
+            D3DFORMAT rt_format;
+
+            if (mixer->processor)
+                IDirectXVideoProcessor_Release(mixer->processor);
+            mixer->processor = NULL;
+
+            video_mixer_init_dxva_videodesc(mixer->inputs[0].media_type, &video_desc);
+            IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype);
+            rt_format = subtype.Data1;
+
+            if (SUCCEEDED(hr = IDirectXVideoProcessorService_CreateVideoProcessor(service, &mixer->output.rt_formats[i].device,
+                    &video_desc, rt_format, MAX_MIXER_INPUT_STREAMS, &mixer->processor)))
+            {
+                if (mixer->output.media_type)
+                    IMFMediaType_Release(mixer->output.media_type);
+                mixer->output.media_type = type;
+                IMFMediaType_AddRef(mixer->output.media_type);
+            }
+
+            IDirectXVideoProcessorService_Release(service);
+        }
+    }
+
+    LeaveCriticalSection(&mixer->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI video_mixer_transform_GetInputCurrentType(IMFTransform *iface, DWORD id, IMFMediaType **type)
 {
     struct video_mixer *mixer = impl_from_IMFTransform(iface);
     struct input_stream *stream;
-    HRESULT hr = S_OK;
+    HRESULT hr;
 
     TRACE("%p, %u, %p.\n", iface, id, type);
 
     EnterCriticalSection(&mixer->cs);
 
-    if ((stream = video_mixer_get_input(mixer, id)))
+    if (SUCCEEDED(hr = video_mixer_get_input(mixer, id, &stream)))
     {
         if (!stream->media_type)
             hr = MF_E_TRANSFORM_TYPE_NOT_SET;
@@ -733,8 +903,6 @@ static HRESULT WINAPI video_mixer_transform_GetInputCurrentType(IMFTransform *if
             IMFMediaType_AddRef(*type);
         }
     }
-    else
-        hr = MF_E_INVALIDSTREAMNUMBER;
 
     LeaveCriticalSection(&mixer->cs);
 
@@ -766,25 +934,78 @@ static HRESULT WINAPI video_mixer_transform_GetOutputCurrentType(IMFTransform *i
     return hr;
 }
 
-static HRESULT WINAPI video_mixer_transform_GetInputStatus(IMFTransform *iface, DWORD id, DWORD *flags)
+static HRESULT WINAPI video_mixer_transform_GetInputStatus(IMFTransform *iface, DWORD id, DWORD *status)
 {
-    FIXME("%p, %u, %p.\n", iface, id, flags);
+    struct video_mixer *mixer = impl_from_IMFTransform(iface);
+    struct input_stream *stream;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %u, %p.\n", iface, id, status);
+
+    if (!status)
+        return E_POINTER;
+
+    EnterCriticalSection(&mixer->cs);
+
+    if (!mixer->output.media_type)
+        hr = MF_E_TRANSFORM_TYPE_NOT_SET;
+    else if (SUCCEEDED(hr = video_mixer_get_input(mixer, id, &stream)))
+    {
+        *status = stream->sample ? 0 : MFT_INPUT_STATUS_ACCEPT_DATA;
+    }
+
+    LeaveCriticalSection(&mixer->cs);
+
+    return hr;
 }
 
-static HRESULT WINAPI video_mixer_transform_GetOutputStatus(IMFTransform *iface, DWORD *flags)
+static HRESULT WINAPI video_mixer_transform_GetOutputStatus(IMFTransform *iface, DWORD *status)
 {
-    FIXME("%p, %p.\n", iface, flags);
+    struct video_mixer *mixer = impl_from_IMFTransform(iface);
+    HRESULT hr = S_OK;
+    unsigned int i;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p.\n", iface, status);
+
+    if (!status)
+        return E_POINTER;
+
+    EnterCriticalSection(&mixer->cs);
+
+    if (!mixer->output.media_type)
+        hr = MF_E_TRANSFORM_TYPE_NOT_SET;
+    else
+    {
+        *status = MFT_OUTPUT_STATUS_SAMPLE_READY;
+        for (i = 0; i < mixer->input_count; ++i)
+        {
+            if (!mixer->inputs[i].sample)
+            {
+                *status = 0;
+                break;
+            }
+        }
+    }
+
+    LeaveCriticalSection(&mixer->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI video_mixer_transform_SetOutputBounds(IMFTransform *iface, LONGLONG lower, LONGLONG upper)
 {
-    FIXME("%p, %s, %s.\n", iface, wine_dbgstr_longlong(lower), wine_dbgstr_longlong(upper));
+    struct video_mixer *mixer = impl_from_IMFTransform(iface);
 
-    return E_NOTIMPL;
+    TRACE("%p, %s, %s.\n", iface, wine_dbgstr_longlong(lower), wine_dbgstr_longlong(upper));
+
+    EnterCriticalSection(&mixer->cs);
+
+    mixer->lower_bound = lower;
+    mixer->upper_bound = upper;
+
+    LeaveCriticalSection(&mixer->cs);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI video_mixer_transform_ProcessEvent(IMFTransform *iface, DWORD id, IMFMediaEvent *event)
@@ -794,10 +1015,20 @@ static HRESULT WINAPI video_mixer_transform_ProcessEvent(IMFTransform *iface, DW
     return E_NOTIMPL;
 }
 
+static void video_mixer_request_sample(struct video_mixer *mixer, unsigned int idx)
+{
+    if (!mixer->event_sink || mixer->inputs[idx].sample_requested)
+        return;
+
+    IMediaEventSink_Notify(mixer->event_sink, EC_SAMPLE_NEEDED, idx, 0);
+    mixer->inputs[idx].sample_requested = 1;
+}
+
 static HRESULT WINAPI video_mixer_transform_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_TYPE message, ULONG_PTR param)
 {
     struct video_mixer *mixer = impl_from_IMFTransform(iface);
     HRESULT hr = S_OK;
+    unsigned int i;
 
     TRACE("%p, %u, %#lx.\n", iface, message, param);
 
@@ -807,15 +1038,52 @@ static HRESULT WINAPI video_mixer_transform_ProcessMessage(IMFTransform *iface, 
 
             EnterCriticalSection(&mixer->cs);
 
-            if (mixer->device_manager)
-                IDirect3DDeviceManager9_Release(mixer->device_manager);
-            mixer->device_manager = NULL;
+            video_mixer_release_device_manager(mixer);
             if (param)
                 hr = IUnknown_QueryInterface((IUnknown *)param, &IID_IDirect3DDeviceManager9, (void **)&mixer->device_manager);
 
             LeaveCriticalSection(&mixer->cs);
 
             break;
+
+        case MFT_MESSAGE_COMMAND_FLUSH:
+
+            EnterCriticalSection(&mixer->cs);
+
+            for (i = 0; i < mixer->input_count; ++i)
+            {
+                if (mixer->inputs[i].sample)
+                {
+                    IMFSample_Release(mixer->inputs[i].sample);
+                    mixer->inputs[i].sample = NULL;
+                    mixer->inputs[i].sample_requested = 0;
+                }
+            }
+
+            LeaveCriticalSection(&mixer->cs);
+
+            break;
+
+        case MFT_MESSAGE_NOTIFY_BEGIN_STREAMING:
+        case MFT_MESSAGE_NOTIFY_END_STREAMING:
+
+            EnterCriticalSection(&mixer->cs);
+
+            if (!mixer->is_streaming)
+            {
+                for (i = 0; i < mixer->input_count; ++i)
+                    video_mixer_request_sample(mixer, i);
+            }
+
+            mixer->is_streaming = message == MFT_MESSAGE_NOTIFY_BEGIN_STREAMING;
+
+            LeaveCriticalSection(&mixer->cs);
+
+            break;
+
+        case MFT_MESSAGE_COMMAND_DRAIN:
+            break;
+
         default:
             WARN("Message not handled %d.\n", message);
             hr = E_NOTIMPL;
@@ -826,17 +1094,228 @@ static HRESULT WINAPI video_mixer_transform_ProcessMessage(IMFTransform *iface, 
 
 static HRESULT WINAPI video_mixer_transform_ProcessInput(IMFTransform *iface, DWORD id, IMFSample *sample, DWORD flags)
 {
-    FIXME("%p, %u, %p, %#x.\n", iface, id, sample, flags);
+    struct video_mixer *mixer = impl_from_IMFTransform(iface);
+    struct input_stream *input;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %u, %p, %#x.\n", iface, id, sample, flags);
+
+    if (!sample)
+        return E_POINTER;
+
+    EnterCriticalSection(&mixer->cs);
+
+    if (SUCCEEDED(hr = video_mixer_get_input(mixer, id, &input)))
+    {
+        if (!input->media_type || !mixer->output.media_type)
+            hr = MF_E_TRANSFORM_TYPE_NOT_SET;
+        else if (input->sample)
+            hr = MF_E_NOTACCEPTING;
+        else
+        {
+            mixer->is_streaming = 1;
+            input->sample_requested = 0;
+            input->sample = sample;
+            IMFSample_AddRef(input->sample);
+        }
+    }
+
+    LeaveCriticalSection(&mixer->cs);
+
+    return hr;
+}
+
+static HRESULT video_mixer_get_sample_surface(IMFSample *sample, IDirect3DSurface9 **surface)
+{
+    IMFMediaBuffer *buffer;
+    IMFGetService *gs;
+    HRESULT hr;
+
+    if (FAILED(hr = IMFSample_GetBufferByIndex(sample, 0, &buffer)))
+        return hr;
+
+    hr = IMFMediaBuffer_QueryInterface(buffer, &IID_IMFGetService, (void **)&gs);
+    IMFMediaBuffer_Release(buffer);
+    if (FAILED(hr))
+        return hr;
+
+    hr = IMFGetService_GetService(gs, &MR_BUFFER_SERVICE, &IID_IDirect3DSurface9, (void **)surface);
+    IMFGetService_Release(gs);
+    return hr;
+}
+
+static HRESULT video_mixer_get_d3d_device(struct video_mixer *mixer, IDirect3DDevice9 **device)
+{
+    HRESULT hr;
+
+    for (;;)
+    {
+        hr = IDirect3DDeviceManager9_LockDevice(mixer->device_manager, mixer->device_handle,
+                device, TRUE);
+        if (hr == DXVA2_E_NEW_VIDEO_DEVICE)
+        {
+            if (SUCCEEDED(hr = video_mixer_open_device_handle(mixer)))
+                continue;
+        }
+        break;
+    }
+
+    return hr;
+}
+
+static void video_mixer_scale_rect(RECT *rect, unsigned int width, unsigned int height,
+        const MFVideoNormalizedRect *scale)
+{
+    if (rect->left == 0.0f && rect->top == 0.0f && rect->right == 1.0f && rect->bottom == 1.0f)
+    {
+        SetRect(rect, 0, 0, width, height);
+    }
+    else
+    {
+        rect->left = width * scale->left;
+        rect->right = width * scale->right;
+        rect->top = height * scale->top;
+        rect->bottom = height * scale->bottom;
+    }
+}
+
+static void video_mixer_render(struct video_mixer *mixer, IDirect3DSurface9 *rt)
+{
+    DXVA2_VideoSample samples[1] = {{ 0 }};
+    DXVA2_VideoProcessBltParams params = { 0 };
+    MFVideoNormalizedRect zoom_rect;
+    struct input_stream *stream;
+    IDirect3DSurface9 *surface;
+    D3DSURFACE_DESC desc;
+    HRESULT hr;
+
+    IDirect3DSurface9_GetDesc(rt, &desc);
+
+    if (FAILED(IMFAttributes_GetBlob(mixer->attributes, &VIDEO_ZOOM_RECT, (UINT8 *)&zoom_rect,
+            sizeof(zoom_rect), NULL)))
+    {
+        zoom_rect.left = zoom_rect.top = 0.0f;
+        zoom_rect.right = zoom_rect.bottom = 1.0f;
+    }
+
+    video_mixer_scale_rect(&params.TargetRect, desc.Width, desc.Height, &zoom_rect);
+
+    /* FIXME: for now only handle reference stream. */
+
+    video_mixer_get_input(mixer, 0, &stream);
+
+    if (FAILED(hr = video_mixer_get_sample_surface(stream->sample, &surface)))
+    {
+        WARN("Failed to get source surface, hr %#x.\n", hr);
+        return;
+    }
+
+    IDirect3DSurface9_GetDesc(surface, &desc);
+
+    samples[0].SrcSurface = surface;
+    SetRect(&samples[0].SrcRect, 0, 0, desc.Width, desc.Height);
+    video_mixer_scale_rect(&samples[0].DstRect, desc.Width, desc.Height, &stream->rect);
+
+    if (FAILED(hr = IDirectXVideoProcessor_VideoProcessBlt(mixer->processor, rt, &params, samples, 1, NULL)))
+        WARN("Failed to process samples, hr %#x.\n", hr);
+
+    IDirect3DSurface9_Release(surface);
+}
+
+static HRESULT video_mixer_get_sample_desired_time(IMFSample *sample, LONGLONG *timestamp, LONGLONG *duration)
+{
+    IMFDesiredSample *desired;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = IMFSample_QueryInterface(sample, &IID_IMFDesiredSample, (void **)&desired)))
+    {
+        hr = IMFDesiredSample_GetDesiredSampleTimeAndDuration(desired, timestamp, duration);
+        IMFDesiredSample_Release(desired);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI video_mixer_transform_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
-        MFT_OUTPUT_DATA_BUFFER *samples, DWORD *status)
+        MFT_OUTPUT_DATA_BUFFER *buffers, DWORD *status)
 {
-    FIXME("%p, %#x, %u, %p, %p.\n", iface, flags, count, samples, status);
+    struct video_mixer *mixer = impl_from_IMFTransform(iface);
+    LONGLONG timestamp, duration;
+    IDirect3DSurface9 *surface;
+    IDirect3DDevice9 *device;
+    unsigned int i;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %#x, %u, %p, %p.\n", iface, flags, count, buffers, status);
+
+    if (!buffers || !count || count > 1 || !buffers->pSample)
+        return E_INVALIDARG;
+
+    if (buffers->dwStreamID)
+        return MF_E_INVALIDSTREAMNUMBER;
+
+    *status = 0;
+
+    EnterCriticalSection(&mixer->cs);
+
+    if (SUCCEEDED(hr = video_mixer_get_sample_surface(buffers->pSample, &surface)))
+    {
+        if (mixer->is_streaming)
+        {
+            for (i = 0; i < mixer->input_count; ++i)
+            {
+                if (!mixer->inputs[i].sample)
+                {
+                    hr = MF_E_TRANSFORM_NEED_MORE_INPUT;
+                    break;
+                }
+            }
+
+            if (SUCCEEDED(hr))
+            {
+                video_mixer_render(mixer, surface);
+
+                timestamp = duration = 0;
+                if (SUCCEEDED(IMFSample_GetSampleTime(mixer->inputs[0].sample, &timestamp)))
+                {
+                    IMFSample_SetSampleTime(buffers->pSample, timestamp);
+
+                    IMFSample_GetSampleDuration(mixer->inputs[0].sample, &duration);
+                    IMFSample_SetSampleDuration(buffers->pSample, duration);
+                }
+            }
+
+            if (SUCCEEDED(hr))
+            {
+                for (i = 0; i < mixer->input_count; ++i)
+                {
+                    if (mixer->inputs[i].sample)
+                        IMFSample_Release(mixer->inputs[i].sample);
+                    mixer->inputs[i].sample = NULL;
+                    video_mixer_request_sample(mixer, i);
+                }
+            }
+        }
+        else
+        {
+            if (SUCCEEDED(video_mixer_get_sample_desired_time(buffers->pSample, &timestamp, &duration)))
+            {
+                if (SUCCEEDED(hr = video_mixer_get_d3d_device(mixer, &device)))
+                {
+                    IDirect3DDevice9_ColorFill(device, surface, NULL, 0);
+                    IDirect3DDeviceManager9_UnlockDevice(mixer->device_manager, mixer->device_handle, FALSE);
+                    IDirect3DDevice9_Release(device);
+                }
+            }
+            else
+                hr = MF_E_TRANSFORM_NEED_MORE_INPUT;
+        }
+        IDirect3DSurface9_Release(surface);
+    }
+
+    LeaveCriticalSection(&mixer->cs);
+
+    return hr;
 }
 
 static const IMFTransformVtbl video_mixer_transform_vtbl =
@@ -996,34 +1475,105 @@ static ULONG WINAPI video_mixer_control_Release(IMFVideoMixerControl2 *iface)
     return IMFTransform_Release(&mixer->IMFTransform_iface);
 }
 
-static HRESULT WINAPI video_mixer_control_SetStreamZOrder(IMFVideoMixerControl2 *iface, DWORD stream_id, DWORD zorder)
+static HRESULT WINAPI video_mixer_control_SetStreamZOrder(IMFVideoMixerControl2 *iface, DWORD id, DWORD zorder)
 {
-    FIXME("%p, %u, %u.\n", iface, stream_id, zorder);
+    struct video_mixer *mixer = impl_from_IMFVideoMixerControl2(iface);
+    struct input_stream *stream;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %u, %u.\n", iface, id, zorder);
+
+    /* Can't change reference stream. */
+    if (!id && zorder)
+        return E_INVALIDARG;
+
+    EnterCriticalSection(&mixer->cs);
+
+    if (zorder >= mixer->input_count)
+        hr = E_INVALIDARG;
+    else if (SUCCEEDED(hr = video_mixer_get_input(mixer, id, &stream)))
+    {
+        /* Lowest zorder only applies to reference stream. */
+        if (id && !zorder)
+            hr = MF_E_INVALIDREQUEST;
+        else
+            stream->zorder = zorder;
+    }
+
+    LeaveCriticalSection(&mixer->cs);
+
+    return hr;
 }
 
-static HRESULT WINAPI video_mixer_control_GetStreamZOrder(IMFVideoMixerControl2 *iface, DWORD stream_id, DWORD *zorder)
+static HRESULT WINAPI video_mixer_control_GetStreamZOrder(IMFVideoMixerControl2 *iface, DWORD id, DWORD *zorder)
 {
-    FIXME("%p, %u, %p.\n", iface, stream_id, zorder);
+    struct video_mixer *mixer = impl_from_IMFVideoMixerControl2(iface);
+    struct input_stream *stream;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %u, %p.\n", iface, id, zorder);
+
+    if (!zorder)
+        return E_POINTER;
+
+    EnterCriticalSection(&mixer->cs);
+
+    if (SUCCEEDED(hr = video_mixer_get_input(mixer, id, &stream)))
+        *zorder = stream->zorder;
+
+    LeaveCriticalSection(&mixer->cs);
+
+    return hr;
 }
 
-static HRESULT WINAPI video_mixer_control_SetStreamOutputRect(IMFVideoMixerControl2 *iface, DWORD stream_id,
+static HRESULT WINAPI video_mixer_control_SetStreamOutputRect(IMFVideoMixerControl2 *iface, DWORD id,
         const MFVideoNormalizedRect *rect)
 {
-    FIXME("%p, %u, %p.\n", iface, stream_id, rect);
+    struct video_mixer *mixer = impl_from_IMFVideoMixerControl2(iface);
+    struct input_stream *stream;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %u, %p.\n", iface, id, rect);
+
+    if (!rect)
+        return E_POINTER;
+
+    if (rect->left > rect->right || rect->top > rect->bottom ||
+            rect->left < 0.0f || rect->top < 0.0f || rect->right > 1.0f || rect->bottom > 1.0f)
+    {
+        return E_INVALIDARG;
+    }
+
+    EnterCriticalSection(&mixer->cs);
+
+    if (SUCCEEDED(hr = video_mixer_get_input(mixer, id, &stream)))
+        stream->rect = *rect;
+
+    LeaveCriticalSection(&mixer->cs);
+
+    return hr;
 }
 
-static HRESULT WINAPI video_mixer_control_GetStreamOutputRect(IMFVideoMixerControl2 *iface, DWORD stream_id,
+static HRESULT WINAPI video_mixer_control_GetStreamOutputRect(IMFVideoMixerControl2 *iface, DWORD id,
         MFVideoNormalizedRect *rect)
 {
-    FIXME("%p, %u, %p.\n", iface, stream_id, rect);
+    struct video_mixer *mixer = impl_from_IMFVideoMixerControl2(iface);
+    struct input_stream *stream;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %u, %p.\n", iface, id, rect);
+
+    if (!rect)
+        return E_POINTER;
+
+    EnterCriticalSection(&mixer->cs);
+
+    if (SUCCEEDED(hr = video_mixer_get_input(mixer, id, &stream)))
+        *rect = stream->rect;
+
+    LeaveCriticalSection(&mixer->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI video_mixer_control_SetMixingPrefs(IMFVideoMixerControl2 *iface, DWORD flags)
@@ -1100,11 +1650,13 @@ static HRESULT WINAPI video_mixer_getservice_GetService(IMFGetService *iface, RE
         {
             return IMFGetService_QueryInterface(iface, riid, obj);
         }
+
+        return E_NOINTERFACE;
     }
 
     FIXME("Unsupported service %s, riid %s.\n", debugstr_guid(service), debugstr_guid(riid));
 
-    return E_NOTIMPL;
+    return MF_E_UNSUPPORTED_SERVICE;
 }
 
 static const IMFGetServiceVtbl video_mixer_getservice_vtbl =
@@ -1676,6 +2228,142 @@ static const IMFAttributesVtbl video_mixer_attributes_vtbl =
     video_mixer_attributes_CopyAllItems
 };
 
+static HRESULT WINAPI video_mixer_quality_advise_QueryInterface(IMFQualityAdvise *iface, REFIID riid, void **out)
+{
+    struct video_mixer *mixer = impl_from_IMFQualityAdvise(iface);
+    return IMFTransform_QueryInterface(&mixer->IMFTransform_iface, riid, out);
+}
+
+static ULONG WINAPI video_mixer_quality_advise_AddRef(IMFQualityAdvise *iface)
+{
+    struct video_mixer *mixer = impl_from_IMFQualityAdvise(iface);
+    return IMFTransform_AddRef(&mixer->IMFTransform_iface);
+}
+
+static ULONG WINAPI video_mixer_quality_advise_Release(IMFQualityAdvise *iface)
+{
+    struct video_mixer *mixer = impl_from_IMFQualityAdvise(iface);
+    return IMFTransform_Release(&mixer->IMFTransform_iface);
+}
+
+static HRESULT WINAPI video_mixer_quality_advise_SetDropMode(IMFQualityAdvise *iface, MF_QUALITY_DROP_MODE mode)
+{
+    FIXME("%p, %u.\n", iface, mode);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI video_mixer_quality_advise_SetQualityLevel(IMFQualityAdvise *iface, MF_QUALITY_LEVEL level)
+{
+    FIXME("%p, %u.\n", iface, level);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI video_mixer_quality_advise_GetDropMode(IMFQualityAdvise *iface, MF_QUALITY_DROP_MODE *mode)
+{
+    FIXME("%p, %p.\n", iface, mode);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI video_mixer_quality_advise_GetQualityLevel(IMFQualityAdvise *iface, MF_QUALITY_LEVEL *level)
+{
+    FIXME("%p, %p.\n", iface, level);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI video_mixer_quality_advise_DropTime(IMFQualityAdvise *iface, LONGLONG interval)
+{
+    FIXME("%p, %s.\n", iface, wine_dbgstr_longlong(interval));
+
+    return E_NOTIMPL;
+}
+
+static const IMFQualityAdviseVtbl video_mixer_quality_advise_vtbl =
+{
+    video_mixer_quality_advise_QueryInterface,
+    video_mixer_quality_advise_AddRef,
+    video_mixer_quality_advise_Release,
+    video_mixer_quality_advise_SetDropMode,
+    video_mixer_quality_advise_SetQualityLevel,
+    video_mixer_quality_advise_GetDropMode,
+    video_mixer_quality_advise_GetQualityLevel,
+    video_mixer_quality_advise_DropTime,
+};
+
+static HRESULT WINAPI video_mixer_clock_state_sink_QueryInterface(IMFClockStateSink *iface,
+        REFIID riid, void **out)
+{
+    struct video_mixer *mixer = impl_from_IMFClockStateSink(iface);
+    return IMFTransform_QueryInterface(&mixer->IMFTransform_iface, riid, out);
+}
+
+static ULONG WINAPI video_mixer_clock_state_sink_AddRef(IMFClockStateSink *iface)
+{
+    struct video_mixer *mixer = impl_from_IMFClockStateSink(iface);
+    return IMFTransform_AddRef(&mixer->IMFTransform_iface);
+}
+
+static ULONG WINAPI video_mixer_clock_state_sink_Release(IMFClockStateSink *iface)
+{
+    struct video_mixer *mixer = impl_from_IMFClockStateSink(iface);
+    return IMFTransform_Release(&mixer->IMFTransform_iface);
+}
+
+static HRESULT WINAPI video_mixer_clock_state_sink_OnClockStart(IMFClockStateSink *iface,
+        MFTIME systime, LONGLONG offset)
+{
+    FIXME("%p.\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI video_mixer_clock_state_sink_OnClockStop(IMFClockStateSink *iface,
+        MFTIME systime)
+{
+    FIXME("%p.\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI video_mixer_clock_state_sink_OnClockPause(IMFClockStateSink *iface,
+        MFTIME systime)
+{
+    FIXME("%p.\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI video_mixer_clock_state_sink_OnClockRestart(IMFClockStateSink *iface,
+        MFTIME systime)
+{
+    FIXME("%p.\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI video_mixer_clock_state_sink_OnClockSetRate(IMFClockStateSink *iface,
+        MFTIME systime, float rate)
+{
+    FIXME("%p, %f.\n", iface, rate);
+
+    return E_NOTIMPL;
+}
+
+static const IMFClockStateSinkVtbl video_mixer_clock_state_sink_vtbl =
+{
+    video_mixer_clock_state_sink_QueryInterface,
+    video_mixer_clock_state_sink_AddRef,
+    video_mixer_clock_state_sink_Release,
+    video_mixer_clock_state_sink_OnClockStart,
+    video_mixer_clock_state_sink_OnClockStop,
+    video_mixer_clock_state_sink_OnClockPause,
+    video_mixer_clock_state_sink_OnClockRestart,
+    video_mixer_clock_state_sink_OnClockSetRate,
+};
+
 HRESULT WINAPI MFCreateVideoMixer(IUnknown *owner, REFIID riid_device, REFIID riid, void **obj)
 {
     TRACE("%p, %s, %s, %p.\n", owner, debugstr_guid(riid_device), debugstr_guid(riid), obj);
@@ -1706,10 +2394,14 @@ HRESULT evr_mixer_create(IUnknown *outer, void **out)
     object->IMFVideoPositionMapper_iface.lpVtbl = &video_mixer_position_mapper_vtbl;
     object->IMFVideoProcessor_iface.lpVtbl = &video_mixer_processor_vtbl;
     object->IMFAttributes_iface.lpVtbl = &video_mixer_attributes_vtbl;
+    object->IMFQualityAdvise_iface.lpVtbl = &video_mixer_quality_advise_vtbl;
+    object->IMFClockStateSink_iface.lpVtbl = &video_mixer_clock_state_sink_vtbl;
     object->IUnknown_inner.lpVtbl = &video_mixer_inner_vtbl;
     object->outer_unk = outer ? outer : &object->IUnknown_inner;
     object->refcount = 1;
     object->input_count = 1;
+    object->lower_bound = MFT_OUTPUT_BOUND_LOWER_UNBOUNDED;
+    object->upper_bound = MFT_OUTPUT_BOUND_UPPER_UNBOUNDED;
     video_mixer_init_input(&object->inputs[0]);
     InitializeCriticalSection(&object->cs);
     if (FAILED(hr = MFCreateAttributes(&object->attributes, 0)))
@@ -1734,11 +2426,4 @@ HRESULT evr_mixer_create(IUnknown *outer, void **out)
     *out = &object->IUnknown_inner;
 
     return S_OK;
-}
-
-HRESULT WINAPI MFCreateVideoSampleFromSurface(IUnknown *surface, IMFSample **sample)
-{
-    FIXME("%p, %p.\n", surface, sample);
-
-    return E_NOTIMPL;
 }

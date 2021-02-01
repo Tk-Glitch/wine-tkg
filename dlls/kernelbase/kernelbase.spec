@@ -93,7 +93,7 @@
 # @ stub BasepCopyFileCallback
 # @ stub BasepCopyFileExW
 # @ stub BasepNotifyTrackingService
-@ stdcall Beep(long long) kernel32.Beep
+@ stdcall Beep(long long)
 @ stub BemCopyReference
 @ stub BemCreateContractFrom
 @ stub BemCreateReference
@@ -165,7 +165,7 @@
 @ stdcall ConvertThreadToFiber(ptr)
 @ stdcall ConvertThreadToFiberEx(ptr long)
 @ stdcall ConvertToAutoInheritPrivateObjectSecurity(ptr ptr ptr ptr long ptr)
-# @ stub CopyContext
+@ stdcall -arch=i386,x86_64 CopyContext(ptr long ptr)
 # @ stub CopyFile2
 @ stdcall CopyFileExW(wstr wstr ptr ptr ptr long)
 @ stdcall CopyFileW(wstr wstr long)
@@ -381,7 +381,7 @@
 @ stdcall FlsFree(long)
 @ stdcall FlsGetValue(long)
 @ stdcall FlsSetValue(long ptr)
-@ stdcall FlushConsoleInputBuffer(long) kernel32.FlushConsoleInputBuffer
+@ stdcall FlushConsoleInputBuffer(long)
 @ stdcall FlushFileBuffers(long)
 @ stdcall FlushInstructionCache(long long long)
 @ stdcall FlushProcessWriteBuffers() ntdll.NtFlushProcessWriteBuffers
@@ -493,7 +493,7 @@
 # @ stub GetEffectivePackageStatusForUser
 # @ stub GetEightBitStringToUnicodeSizeRoutine
 # @ stub GetEightBitStringToUnicodeStringRoutine
-@ stdcall -ret64 -arch=i386,x86_64 GetEnabledXStateFeatures() kernel32.GetEnabledXStateFeatures
+@ stdcall -ret64 -arch=i386,x86_64 GetEnabledXStateFeatures()
 @ stdcall GetEnvironmentStrings() GetEnvironmentStringsA
 @ stdcall GetEnvironmentStringsA()
 @ stdcall GetEnvironmentStringsW()
@@ -766,7 +766,7 @@
 @ stdcall GetWriteWatch(long ptr long ptr ptr ptr)
 # @ stub GetWsChanges
 # @ stub GetWsChangesEx
-# @ stub GetXStateFeaturesMask
+@ stdcall -arch=i386,x86_64 GetXStateFeaturesMask(ptr ptr)
 @ stdcall GlobalAlloc(long long)
 @ stdcall GlobalFree(long)
 @ stdcall GlobalMemoryStatusEx(ptr)
@@ -801,7 +801,8 @@
 @ stdcall InitOnceInitialize(ptr) ntdll.RtlRunOnceInitialize
 @ stdcall InitializeAcl(ptr long long)
 @ stdcall InitializeConditionVariable(ptr) ntdll.RtlInitializeConditionVariable
-# @ stub InitializeContext
+@ stdcall -arch=i386,x86_64 InitializeContext(ptr long ptr ptr)
+@ stdcall -arch=i386,x86_64 InitializeContext2(ptr long ptr ptr int64)
 @ stdcall InitializeCriticalSection(ptr) ntdll.RtlInitializeCriticalSection
 @ stdcall InitializeCriticalSectionAndSpinCount(ptr long)
 @ stdcall InitializeCriticalSectionEx(ptr long long)
@@ -941,7 +942,7 @@
 @ stdcall LocalReAlloc(long long long)
 @ stdcall LocalUnlock(long)
 @ stdcall LocaleNameToLCID(wstr long)
-# @ stub LocateXStateFeature
+@ stdcall -arch=i386,x86_64 LocateXStateFeature(ptr long ptr)
 @ stdcall LockFile(long long long long long)
 @ stdcall LockFileEx(long long long long long ptr)
 @ stdcall LockResource(long)
@@ -958,7 +959,7 @@
 @ stdcall MoveFileExW(wstr wstr long)
 # @ stub MoveFileWithProgressTransactedW
 @ stdcall MoveFileWithProgressW(wstr wstr ptr ptr long)
-@ stdcall MulDiv(long long long) kernel32.MulDiv
+@ stdcall MulDiv(long long long)
 @ stdcall MultiByteToWideChar(long long str long ptr long)
 # @ stub NamedPipeEventEnum
 # @ stub NamedPipeEventSelect
@@ -1236,17 +1237,17 @@
 @ stdcall RaiseException(long long long ptr)
 # @ stub RaiseFailFastException
 @ stdcall ReOpenFile(ptr long long long)
-@ stdcall ReadConsoleA(long ptr long ptr ptr) kernel32.ReadConsoleA
-@ stdcall ReadConsoleInputA(long ptr long ptr) kernel32.ReadConsoleInputA
+@ stdcall ReadConsoleA(long ptr long ptr ptr)
+@ stdcall ReadConsoleInputA(long ptr long ptr)
 @ stub ReadConsoleInputExA
 @ stub ReadConsoleInputExW
-@ stdcall ReadConsoleInputW(long ptr long ptr) kernel32.ReadConsoleInputW
+@ stdcall ReadConsoleInputW(long ptr long ptr)
 @ stdcall ReadConsoleOutputA(long ptr long long ptr)
 @ stdcall ReadConsoleOutputAttribute(long ptr long long ptr)
 @ stdcall ReadConsoleOutputCharacterA(long ptr long long ptr)
 @ stdcall ReadConsoleOutputCharacterW(long ptr long long ptr)
 @ stdcall ReadConsoleOutputW(long ptr long long ptr)
-@ stdcall ReadConsoleW(long ptr long ptr ptr) kernel32.ReadConsoleW
+@ stdcall ReadConsoleW(long ptr long ptr ptr)
 @ stdcall ReadDirectoryChangesW(long ptr long long long ptr ptr ptr)
 @ stdcall ReadFile(long ptr long ptr ptr)
 @ stdcall ReadFileEx(long ptr long ptr ptr)
@@ -1333,8 +1334,8 @@
 @ stdcall ReleaseSemaphoreWhenCallbackReturns(ptr long long) ntdll.TpCallbackReleaseSemaphoreOnCompletion
 # @ stub ReleaseStateLock
 @ stdcall RemapPredefinedHandleInternal(long long)
-@ stdcall RemoveDirectoryA(str) kernel32.RemoveDirectoryA
-@ stdcall RemoveDirectoryW(wstr) kernel32.RemoveDirectoryW
+@ stdcall RemoveDirectoryA(str)
+@ stdcall RemoveDirectoryW(wstr)
 @ stdcall RemoveDllDirectory(ptr)
 # @ stub RemovePackageStatus
 # @ stub RemovePackageStatusForUser
@@ -1509,7 +1510,7 @@
 @ stdcall SetUserGeoID(long)
 @ stdcall SetWaitableTimer(long ptr long ptr ptr long)
 @ stdcall SetWaitableTimerEx(long ptr long ptr ptr ptr long)
-# @ stub SetXStateFeaturesMask
+@ stdcall -arch=i386,x86_64 SetXStateFeaturesMask(ptr int64)
 @ stdcall SetupComm(long long long)
 # @ stub SharedLocalIsEnabled
 @ stdcall SignalObjectAndWait(long long long long)
@@ -1671,6 +1672,7 @@
 # @ stub VerifyPackageId
 # @ stub VerifyPackageRelativeApplicationId
 # @ stub VerifyScripts
+@ stdcall VirtualAlloc2(long ptr long long long ptr long)
 @ stdcall VirtualAlloc(ptr long long long)
 @ stdcall VirtualAllocEx(long ptr long long long)
 @ stdcall VirtualAllocExNuma(long ptr long long long long)
@@ -1720,7 +1722,7 @@
 @ stdcall Wow64RevertWow64FsRedirection(ptr)
 # @ stub Wow64SetThreadDefaultGuestMachine
 # @ stub -arch=i386 Wow64Transition
-@ stdcall WriteConsoleA(long ptr long ptr ptr) kernel32.WriteConsoleA
+@ stdcall WriteConsoleA(long ptr long ptr ptr)
 @ stdcall WriteConsoleInputA(long ptr long ptr)
 @ stdcall WriteConsoleInputW(long ptr long ptr)
 @ stdcall WriteConsoleOutputA(long ptr long long ptr)
@@ -1728,7 +1730,7 @@
 @ stdcall WriteConsoleOutputCharacterA(long ptr long long ptr)
 @ stdcall WriteConsoleOutputCharacterW(long ptr long long ptr)
 @ stdcall WriteConsoleOutputW(long ptr long long ptr)
-@ stdcall WriteConsoleW(long ptr long ptr ptr) kernel32.WriteConsoleW
+@ stdcall WriteConsoleW(long ptr long ptr ptr)
 @ stdcall WriteFile(long ptr long ptr ptr)
 @ stdcall WriteFileEx(long ptr long ptr ptr)
 @ stdcall WriteFileGather(long ptr long ptr ptr)
@@ -1740,7 +1742,7 @@
 # @ stub _GetMUIStringFromCache
 # @ stub _OpenMuiStringCache
 @ stdcall -arch=x86_64 -private __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
-@ cdecl -arch=arm,x86_64 -norelay __chkstk() ntdll.__chkstk
+@ cdecl -arch=arm,arm64,x86_64 -norelay __chkstk() ntdll.__chkstk
 # @ stub __dllonexit3
 @ stub __misaligned_access
 # @ stub __wgetmainargs

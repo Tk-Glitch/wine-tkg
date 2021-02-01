@@ -323,7 +323,6 @@ void CDECL macdrv_ThreadDetach(void)
     }
 }
 
-extern void __wine_esync_set_queue_fd( int fd );
 
 /***********************************************************************
  *              set_queue_display_fd
@@ -334,8 +333,6 @@ static void set_queue_display_fd(int fd)
 {
     HANDLE handle;
     int ret;
-
-    __wine_esync_set_queue_fd(fd);
 
     if (wine_server_fd_to_handle(fd, GENERIC_READ | SYNCHRONIZE, 0, &handle))
     {

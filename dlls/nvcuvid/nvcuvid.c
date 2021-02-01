@@ -23,8 +23,7 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winternl.h"
-#include "wine/library.h"
+#include "winnls.h"
 #include "wine/debug.h"
 #include "nvcuvid.h"
 
@@ -270,36 +269,12 @@ CUresult WINAPI wine_cuvidCreateVideoParser(CUvideoparser *pObj, CUVIDPARSERPARA
     return CUDA_SUCCESS;
 }
 
-/* FIXME: Should we pay attention to AreFileApisANSI() ? */
-static BOOL get_unix_path(ANSI_STRING *unix_name, const char *filename)
-{
-    UNICODE_STRING dospathW, ntpathW;
-    ANSI_STRING dospath;
-    NTSTATUS status;
-
-    RtlInitAnsiString(&dospath, filename);
-
-    if (RtlAnsiStringToUnicodeString(&dospathW, &dospath, TRUE))
-        return FALSE;
-
-    if (!RtlDosPathNameToNtPathName_U(dospathW.Buffer, &ntpathW, NULL, NULL))
-    {
-        RtlFreeUnicodeString(&dospathW);
-        return FALSE;
-    }
-
-    status = wine_nt_to_unix_file_name(&ntpathW, unix_name, FILE_OPEN);
-
-    RtlFreeUnicodeString(&ntpathW);
-    RtlFreeUnicodeString(&dospathW);
-    return !status;
-}
-
 CUresult WINAPI wine_cuvidCreateVideoSource(CUvideosource *pObj, const char *pszFileName, CUVIDSOURCEPARAMS *pParams)
 {
+    WCHAR filenameW[MAX_PATH];
     struct fake_source *source;
     CUVIDSOURCEPARAMS fake_params;
-    ANSI_STRING unix_name;
+    char *unix_name;
     CUresult ret;
 
     TRACE("(%p, %s, %p)\n", pObj, pszFileName, pParams);
@@ -311,13 +286,13 @@ CUresult WINAPI wine_cuvidCreateVideoSource(CUvideosource *pObj, const char *psz
     if (!pszFileName)
         return CUDA_ERROR_UNKNOWN;
 
-    if (!get_unix_path(&unix_name, pszFileName))
-        return CUDA_ERROR_UNKNOWN;
+    MultiByteToWideChar(CP_ACP, 0, pszFileName, -1, filenameW, ARRAY_SIZE(filenameW));
+    unix_name = wine_get_unix_file_name( filenameW );
 
     source = HeapAlloc(GetProcessHeap(), 0, sizeof(*source));
     if (!source)
     {
-        RtlFreeAnsiString(&unix_name);
+        HeapFree(GetProcessHeap(), 0, &unix_name);
         return CUDA_ERROR_OUT_OF_MEMORY;
     }
 
@@ -338,8 +313,8 @@ CUresult WINAPI wine_cuvidCreateVideoSource(CUvideosource *pObj, const char *psz
     source->orig_data = pParams->pUserData;
     fake_params.pUserData = source;
 
-    ret = pcuvidCreateVideoSource((void *)&source->orig_source, unix_name.Buffer, &fake_params);
-    RtlFreeAnsiString(&unix_name);
+    ret = pcuvidCreateVideoSource((void *)&source->orig_source, unix_name, &fake_params);
+    HeapFree(GetProcessHeap(), 0, &unix_name);
 
     if (ret)
     {

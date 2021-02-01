@@ -8150,6 +8150,7 @@ static void pretransformed_varying_test(void)
         },
     };
     IDirect3DVertexDeclaration9 *decl;
+    D3DADAPTER_IDENTIFIER9 identifier;
     IDirect3DDevice9 *device;
     IDirect3D9 *d3d;
     unsigned int i;
@@ -8173,6 +8174,18 @@ static void pretransformed_varying_test(void)
     if (caps.PixelShaderVersion < D3DPS_VERSION(3, 0) || caps.VertexShaderVersion < D3DVS_VERSION(3, 0))
     {
         skip("No shader model 3 support, skipping tests.\n");
+        IDirect3DDevice9_Release(device);
+        goto done;
+    }
+
+    hr = IDirect3D9_GetAdapterIdentifier(d3d, D3DADAPTER_DEFAULT, 0, &identifier);
+    ok(SUCCEEDED(hr), "Failed to get adapter identifier, hr %#x.\n", hr);
+    if (adapter_is_warp(&identifier) && sizeof(UINT) == sizeof(UINT_PTR))
+    {
+        /* Apparently the "monster" vertex declaration used in this test
+         * overruns some stack buffer (DrawPrimitiveUP crashes with a
+         * 0xc0000409 exception) on 32-bit WARP since Win 10 1809. */
+        skip("Test crashes on recent 32-bit WARP.\n");
         IDirect3DDevice9_Release(device);
         goto done;
     }
@@ -16799,7 +16812,7 @@ static void fp_special_test(void)
         0x0000ffff,                                                             /* end                          */
     };
 
-    struct
+    static const struct
     {
         float x, y, z;
         float s;
@@ -22105,7 +22118,7 @@ static void test_updatetexture(void)
         UINT dst_width, dst_height;
         UINT src_levels, dst_levels;
         D3DFORMAT src_format, dst_format;
-        BOOL broken;
+        BOOL broken_result, broken_updatetex;
     }
     tests[] =
     {
@@ -22123,7 +22136,8 @@ static void test_updatetexture(void)
          * one or something like that). */
         /* {8, 8, 7, 7, 4, 2, D3DFMT_A8R8G8B8, D3DFMT_A8R8G8B8, FALSE}, */
         {8, 8, 8, 8, 1, 4, D3DFMT_A8R8G8B8, D3DFMT_A8R8G8B8, FALSE}, /* 8 */
-        {4, 4, 8, 8, 1, 1, D3DFMT_A8R8G8B8, D3DFMT_A8R8G8B8, FALSE}, /* 9 */
+        /* For this one UpdateTexture() returns failure on WARP on > Win 10 1709. */
+        {4, 4, 8, 8, 1, 1, D3DFMT_A8R8G8B8, D3DFMT_A8R8G8B8, FALSE, TRUE}, /* 9 */
         /* This one causes weird behavior on Windows (it probably writes out
          * of the texture memory). */
         /* {8, 8, 4, 4, 1, 1, D3DFMT_A8R8G8B8, D3DFMT_A8R8G8B8, FALSE}, */
@@ -22366,7 +22380,8 @@ static void test_updatetexture(void)
             hr = IDirect3DDevice9_UpdateTexture(device, src, dst);
             if (FAILED(hr))
             {
-                todo_wine ok(SUCCEEDED(hr), "Failed to update texture, hr %#x, case %u, %u.\n", hr, t, i);
+                todo_wine ok(SUCCEEDED(hr) || broken(tests[i].broken_updatetex),
+                        "Failed to update texture, hr %#x, case %u, %u.\n", hr, t, i);
                 IDirect3DBaseTexture9_Release(src);
                 IDirect3DBaseTexture9_Release(dst);
                 continue;
@@ -22390,7 +22405,7 @@ static void test_updatetexture(void)
                 ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
 
                 color = getPixelColor(device, 320, 240);
-                ok (color_match(color, 0x007f7f00, 3) || broken(tests[i].broken)
+                ok (color_match(color, 0x007f7f00, 3) || broken(tests[i].broken_result)
                         || broken(color == 0x00adbeef), /* WARP device often just breaks down. */
                         "Got unexpected color 0x%08x, case %u, %u.\n", color, t, i);
             }
@@ -25291,6 +25306,7 @@ done:
 
 static void test_null_format(void)
 {
+    static const D3DVIEWPORT9 vp_part_400 = {0, 100, 400, 200, 0.0f, 1.0f};
     static const D3DVIEWPORT9 vp_lower = {0, 60, 640, 420, 0.0f, 1.0f};
     static const D3DVIEWPORT9 vp_560 = {0, 180, 560, 300, 0.0f, 1.0f};
     static const D3DVIEWPORT9 vp_full = {0, 0, 640, 480, 0.0f, 1.0f};
@@ -25344,8 +25360,22 @@ static void test_null_format(void)
         {440, 320, 0x000000ff},
         {520, 320, 0x00000000},
         {600, 320, 0x0000ff00},
+    },
+    expected_small[] =
+    {
+        {100, 100, 0x00ff0000},
+        {200, 100, 0x00ff0000},
+        {300, 100, 0x00ff0000},
+        {100, 150, 0x00000000},
+        {200, 150, 0x00000000},
+        {300, 150, 0x00ff0000},
+        {100, 200, 0x00000000},
+        {200, 200, 0x00000000},
+        {300, 200, 0x00ff0000},
     };
     IDirect3DSurface9 *original_rt, *small_rt, *null_rt, *small_null_rt;
+    IDirect3DSurface9 *original_ds, *small_ds;
+    struct surface_readback rb;
     IDirect3DDevice9 *device;
     IDirect3D9 *d3d;
     unsigned int i;
@@ -25385,6 +25415,12 @@ static void test_null_format(void)
     hr = IDirect3DDevice9_CreateRenderTarget(device, 400, 300, null_fourcc,
             D3DMULTISAMPLE_NONE, 0, FALSE, &small_null_rt, NULL);
     ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_GetDepthStencilSurface(device, &original_ds);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9_CreateDepthStencilSurface(device, 400, 300, D3DFMT_D24S8, 0, 0, FALSE,
+            &small_ds, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
 
     hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
     ok(SUCCEEDED(hr), "Failed to set FVF, hr %#x.\n", hr);
@@ -25461,17 +25497,64 @@ static void test_null_format(void)
     hr = IDirect3DDevice9_EndScene(device);
     ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
 
+    get_rt_readback(original_rt, &rb);
     for (i = 0; i < ARRAY_SIZE(expected_colors); ++i)
     {
-        color = getPixelColor(device, expected_colors[i].x, expected_colors[i].y);
+        color = get_readback_color(&rb, expected_colors[i].x, expected_colors[i].y);
         ok(color_match(color, expected_colors[i].color, 1),
                 "Expected color 0x%08x at (%u, %u), got 0x%08x.\n",
                 expected_colors[i].color, expected_colors[i].x, expected_colors[i].y, color);
     }
+    release_surface_readback(&rb);
 
+    /* Clears and draws on a depth buffer smaller than the "NULL" RT work just
+     * fine. */
+    hr = IDirect3DDevice9_SetRenderTarget(device, 0, null_rt);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetDepthStencilSurface(device, small_ds);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetViewport(device, &vp_full);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_ZBUFFER, 0, 0.6f, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_SetViewport(device, &vp_part_400);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad_partial, sizeof(*quad_partial));
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_SetRenderTarget(device, 0, small_rt);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0, 0.0f, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(*quad));
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9_EndScene(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    get_rt_readback(small_rt, &rb);
+    for (i = 0; i < ARRAY_SIZE(expected_small); ++i)
+    {
+        color = get_readback_color(&rb, expected_small[i].x, expected_small[i].y);
+        ok(color_match(color, expected_small[i].color, 1),
+                "Expected color 0x%08x at (%u, %u), got 0x%08x.\n",
+                expected_small[i].color, expected_small[i].x, expected_small[i].y, color);
+    }
+    release_surface_readback(&rb);
+
+    hr = IDirect3DDevice9_StretchRect(device, small_rt, NULL, original_rt, NULL, D3DTEXF_POINT);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     ok(SUCCEEDED(hr), "Failed to present, hr %#x.\n", hr);
 
+    IDirect3DSurface9_Release(small_ds);
+    IDirect3DSurface9_Release(original_ds);
     IDirect3DSurface9_Release(small_null_rt);
     IDirect3DSurface9_Release(null_rt);
     IDirect3DSurface9_Release(small_rt);

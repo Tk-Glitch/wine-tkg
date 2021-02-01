@@ -140,6 +140,7 @@ static HRESULT wined3d_output_init(struct wined3d_output *output, unsigned int o
     output->ordinal = ordinal;
     lstrcpyW(output->device_name, device_name);
     output->adapter = adapter;
+    output->screen_format = WINED3DFMT_UNKNOWN;
     output->kmt_adapter = open_adapter_desc.hAdapter;
     output->kmt_device = create_device_desc.hDevice;
     output->vidpn_source_id = open_adapter_desc.VidPnSourceId;
@@ -439,8 +440,10 @@ static const struct wined3d_gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1050TI,  "NVIDIA GeForce GTX 1050 Ti",       DRIVER_NVIDIA_KEPLER,  4096},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1060_3GB,"NVIDIA GeForce GTX 1060 3GB",      DRIVER_NVIDIA_KEPLER,  3072},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1060,    "NVIDIA GeForce GTX 1060",          DRIVER_NVIDIA_KEPLER,  6144},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1060M,   "NVIDIA GeForce GTX 1060M",         DRIVER_NVIDIA_KEPLER,  6144},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1070,    "NVIDIA GeForce GTX 1070",          DRIVER_NVIDIA_KEPLER,  8192},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1080,    "NVIDIA GeForce GTX 1080",          DRIVER_NVIDIA_KEPLER,  8192},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1080M,   "NVIDIA GeForce GTX 1080M",         DRIVER_NVIDIA_KEPLER,  8192},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1080TI,  "NVIDIA GeForce GTX 1080 Ti",       DRIVER_NVIDIA_KEPLER,  11264},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_TITANX_PASCAL,      "NVIDIA TITAN X (Pascal)",          DRIVER_NVIDIA_KEPLER,  12288},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_TITANV,             "NVIDIA TITAN V",                   DRIVER_NVIDIA_KEPLER,  12288},
@@ -1001,15 +1004,13 @@ static BOOL CALLBACK enum_monitor_proc(HMONITOR monitor, HDC hdc, RECT *rect, LP
 HRESULT CDECL wined3d_output_get_desc(const struct wined3d_output *output,
         struct wined3d_output_desc *desc)
 {
-    struct wined3d_display_mode mode;
-
     TRACE("output %p, desc %p.\n", output, desc);
 
     memset(desc, 0, sizeof(*desc));
     desc->ordinal = output->ordinal;
     lstrcpyW(desc->device_name, output->device_name);
     EnumDisplayMonitors(NULL, NULL, enum_monitor_proc, (LPARAM)desc);
-    return wined3d_output_get_display_mode(output, &mode, &desc->rotation);
+    return WINED3D_OK;
 }
 
 /* FIXME: GetAdapterModeCount and EnumAdapterModes currently only returns modes
@@ -1319,67 +1320,155 @@ HRESULT CDECL wined3d_output_get_display_mode(const struct wined3d_output *outpu
     return WINED3D_OK;
 }
 
+static BOOL equal_display_mode(const DEVMODEW *mode1, const DEVMODEW *mode2)
+{
+    if (mode1->dmFields & mode2->dmFields & DM_PELSWIDTH
+            && mode1->dmPelsWidth != mode2->dmPelsWidth)
+        return FALSE;
+
+    if (mode1->dmFields & mode2->dmFields & DM_PELSHEIGHT
+            && mode1->dmPelsHeight != mode2->dmPelsHeight)
+        return FALSE;
+
+    if (mode1->dmFields & mode2->dmFields & DM_BITSPERPEL
+            && mode1->dmBitsPerPel != mode2->dmBitsPerPel)
+        return FALSE;
+
+    if (mode1->dmFields & mode2->dmFields & DM_DISPLAYFLAGS
+            && mode1->u2.dmDisplayFlags != mode2->u2.dmDisplayFlags)
+        return FALSE;
+
+    if (mode1->dmFields & mode2->dmFields & DM_DISPLAYFREQUENCY
+            && mode1->dmDisplayFrequency != mode2->dmDisplayFrequency)
+        return FALSE;
+
+    if (mode1->dmFields & mode2->dmFields & DM_DISPLAYORIENTATION
+            && mode1->u1.s2.dmDisplayOrientation != mode2->u1.s2.dmDisplayOrientation)
+        return FALSE;
+
+    if (mode1->dmFields & mode2->dmFields & DM_POSITION
+            && (mode1->u1.s2.dmPosition.x != mode2->u1.s2.dmPosition.x
+            || mode1->u1.s2.dmPosition.y != mode2->u1.s2.dmPosition.y))
+        return FALSE;
+
+    return TRUE;
+}
+
+HRESULT CDECL wined3d_restore_display_modes(struct wined3d *wined3d)
+{
+    unsigned int adapter_idx, output_idx = 0;
+    DEVMODEW current_mode, registry_mode;
+    struct wined3d_adapter *adapter;
+    DISPLAY_DEVICEW display_device;
+    struct wined3d_output *output;
+    BOOL do_mode_change = FALSE;
+    LONG ret;
+
+    TRACE("wined3d %p.\n", wined3d);
+
+    memset(&current_mode, 0, sizeof(current_mode));
+    memset(&registry_mode, 0, sizeof(registry_mode));
+    current_mode.dmSize = sizeof(current_mode);
+    registry_mode.dmSize = sizeof(registry_mode);
+    display_device.cb = sizeof(display_device);
+    while (EnumDisplayDevicesW(NULL, output_idx++, &display_device, 0))
+    {
+        if (!EnumDisplaySettingsExW(display_device.DeviceName, ENUM_CURRENT_SETTINGS, &current_mode, 0))
+        {
+            ERR("Failed to read the current display mode for %s.\n",
+                    wine_dbgstr_w(display_device.DeviceName));
+            return WINED3DERR_NOTAVAILABLE;
+        }
+
+        if (!EnumDisplaySettingsExW(display_device.DeviceName, ENUM_REGISTRY_SETTINGS, &registry_mode, 0))
+        {
+            ERR("Failed to read the registry display mode for %s.\n",
+                    wine_dbgstr_w(display_device.DeviceName));
+            return WINED3DERR_NOTAVAILABLE;
+        }
+
+        if (!equal_display_mode(&current_mode, &registry_mode))
+        {
+            do_mode_change = TRUE;
+            break;
+        }
+    }
+
+    if (do_mode_change)
+    {
+        ret = ChangeDisplaySettingsExW(NULL, NULL, NULL, 0, NULL);
+        if (ret != DISP_CHANGE_SUCCESSFUL)
+        {
+            ERR("Failed to restore all outputs to their registry display settings, error %d.\n", ret);
+            return WINED3DERR_NOTAVAILABLE;
+        }
+    }
+    else
+    {
+        TRACE("Skipping redundant mode setting call.\n");
+    }
+
+    for (adapter_idx = 0; adapter_idx < wined3d->adapter_count; ++adapter_idx)
+    {
+        adapter = wined3d->adapters[adapter_idx];
+        for (output_idx = 0; output_idx < adapter->output_count; ++output_idx)
+        {
+            output = &adapter->outputs[output_idx];
+
+            if (!EnumDisplaySettingsExW(output->device_name, ENUM_CURRENT_SETTINGS, &current_mode, 0))
+            {
+                ERR("Failed to read the current display mode for %s.\n",
+                        wine_dbgstr_w(output->device_name));
+                return WINED3DERR_NOTAVAILABLE;
+            }
+
+            output->screen_format = pixelformat_for_depth(current_mode.dmBitsPerPel);
+        }
+    }
+
+    return WINED3D_OK;
+}
+
 HRESULT CDECL wined3d_output_set_display_mode(struct wined3d_output *output,
         const struct wined3d_display_mode *mode)
 {
+    enum wined3d_format_id new_format_id;
+    const struct wined3d_format *format;
     DEVMODEW new_mode, current_mode;
     LONG ret;
-    enum wined3d_format_id new_format_id;
 
     TRACE("output %p, mode %p.\n", output, mode);
+    TRACE("mode %ux%u@%u %s %#x.\n", mode->width, mode->height, mode->refresh_rate,
+            debug_d3dformat(mode->format_id), mode->scanline_ordering);
 
     memset(&new_mode, 0, sizeof(new_mode));
     new_mode.dmSize = sizeof(new_mode);
     memset(&current_mode, 0, sizeof(current_mode));
     current_mode.dmSize = sizeof(current_mode);
-    if (mode)
+
+    format = wined3d_get_format(output->adapter, mode->format_id, WINED3D_BIND_RENDER_TARGET);
+
+    new_mode.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
+    new_mode.dmBitsPerPel = format->byte_count * CHAR_BIT;
+    new_mode.dmPelsWidth = mode->width;
+    new_mode.dmPelsHeight = mode->height;
+    new_mode.dmDisplayFrequency = mode->refresh_rate;
+    if (mode->refresh_rate)
+        new_mode.dmFields |= DM_DISPLAYFREQUENCY;
+    if (mode->scanline_ordering != WINED3D_SCANLINE_ORDERING_UNKNOWN)
     {
-        const struct wined3d_format *format;
-
-        TRACE("mode %ux%u@%u %s %#x.\n", mode->width, mode->height, mode->refresh_rate,
-                debug_d3dformat(mode->format_id), mode->scanline_ordering);
-
-        format = wined3d_get_format(output->adapter, mode->format_id, WINED3D_BIND_RENDER_TARGET);
-
-        new_mode.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
-        new_mode.dmBitsPerPel = format->byte_count * CHAR_BIT;
-        new_mode.dmPelsWidth = mode->width;
-        new_mode.dmPelsHeight = mode->height;
-
-        new_mode.dmDisplayFrequency = mode->refresh_rate;
-        if (mode->refresh_rate)
-            new_mode.dmFields |= DM_DISPLAYFREQUENCY;
-
-        if (mode->scanline_ordering != WINED3D_SCANLINE_ORDERING_UNKNOWN)
-        {
-            new_mode.dmFields |= DM_DISPLAYFLAGS;
-            if (mode->scanline_ordering == WINED3D_SCANLINE_ORDERING_INTERLACED)
-                new_mode.u2.dmDisplayFlags |= DM_INTERLACED;
-        }
-        new_format_id = mode->format_id;
+        new_mode.dmFields |= DM_DISPLAYFLAGS;
+        if (mode->scanline_ordering == WINED3D_SCANLINE_ORDERING_INTERLACED)
+            new_mode.u2.dmDisplayFlags |= DM_INTERLACED;
     }
-    else
-    {
-        if (!EnumDisplaySettingsW(output->device_name, ENUM_REGISTRY_SETTINGS, &new_mode))
-        {
-            ERR("Failed to read mode from registry.\n");
-            return WINED3DERR_NOTAVAILABLE;
-        }
-        new_format_id = pixelformat_for_depth(new_mode.dmBitsPerPel);
-    }
+    new_format_id = mode->format_id;
 
     /* Only change the mode if necessary. */
     if (!EnumDisplaySettingsW(output->device_name, ENUM_CURRENT_SETTINGS, &current_mode))
     {
         ERR("Failed to get current display mode.\n");
     }
-    else if (current_mode.dmPelsWidth == new_mode.dmPelsWidth
-            && current_mode.dmPelsHeight == new_mode.dmPelsHeight
-            && current_mode.dmBitsPerPel == new_mode.dmBitsPerPel
-            && (current_mode.dmDisplayFrequency == new_mode.dmDisplayFrequency
-            || !(new_mode.dmFields & DM_DISPLAYFREQUENCY))
-            && (current_mode.u2.dmDisplayFlags == new_mode.u2.dmDisplayFlags
-            || !(new_mode.dmFields & DM_DISPLAYFLAGS)))
+    else if (equal_display_mode(&current_mode, &new_mode))
     {
         TRACE("Skipping redundant mode setting call.\n");
         output->screen_format = new_format_id;
@@ -1425,7 +1514,7 @@ HRESULT CDECL wined3d_adapter_get_identifier(const struct wined3d_adapter *adapt
     identifier->device_identifier = IID_D3DDEVICE_D3DUID;
     identifier->driver_uuid = adapter->driver_uuid;
     identifier->device_uuid = adapter->device_uuid;
-    identifier->whql_level = (flags & WINED3DENUM_NO_WHQL_LEVEL) ? 0 : 1;
+    identifier->whql_level = (flags & WINED3DENUM_WHQL_LEVEL) ? 1 : 0;
     identifier->adapter_luid = adapter->luid;
     identifier->video_memory = min(~(SIZE_T)0, adapter->driver_info.vram_bytes);
     identifier->shared_system_memory = min(~(SIZE_T)0, adapter->driver_info.sysmem_bytes);
@@ -1604,10 +1693,10 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
     DWORD format_flags = 0;
     DWORD allowed_usage;
 
-    TRACE("wined3d %p, adapter %p, device_type %s, adapter_format %s, usage %s, %s, "
+    TRACE("wined3d %p, adapter %p, device_type %s, adapter_format %s, usage %s, "
             "bind_flags %s, resource_type %s, check_format %s.\n",
             wined3d, adapter, debug_d3ddevicetype(device_type), debug_d3dformat(adapter_format_id),
-            debug_d3dusage(usage), debug_d3dusagequery(usage), wined3d_debug_bind_flags(bind_flags),
+            debug_d3dusage(usage), wined3d_debug_bind_flags(bind_flags),
             debug_d3dresourcetype(resource_type), debug_d3dformat(check_format_id));
 
     adapter_format = wined3d_get_format(adapter, adapter_format_id, WINED3D_BIND_RENDER_TARGET);
@@ -1618,7 +1707,8 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
         case WINED3D_RTYPE_NONE:
             allowed_usage = 0;
             allowed_bind_flags = WINED3D_BIND_RENDER_TARGET
-                    | WINED3D_BIND_DEPTH_STENCIL;
+                    | WINED3D_BIND_DEPTH_STENCIL
+                    | WINED3D_BIND_UNORDERED_ACCESS;
             gl_type = WINED3D_GL_RES_TYPE_TEX_2D;
             gl_type_end = WINED3D_GL_RES_TYPE_TEX_3D;
             break;
@@ -1633,7 +1723,8 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
                     | WINED3DUSAGE_QUERY_SRGBWRITE
                     | WINED3DUSAGE_QUERY_VERTEXTEXTURE
                     | WINED3DUSAGE_QUERY_WRAPANDMIP;
-            allowed_bind_flags = WINED3D_BIND_SHADER_RESOURCE;
+            allowed_bind_flags = WINED3D_BIND_SHADER_RESOURCE
+                    | WINED3D_BIND_UNORDERED_ACCESS;
             gl_type = gl_type_end = WINED3D_GL_RES_TYPE_TEX_1D;
             break;
 
@@ -1642,7 +1733,8 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
             if (bind_flags & WINED3D_BIND_RENDER_TARGET)
                 allowed_usage |= WINED3DUSAGE_QUERY_SRGBWRITE;
             allowed_bind_flags = WINED3D_BIND_RENDER_TARGET
-                    | WINED3D_BIND_DEPTH_STENCIL;
+                    | WINED3D_BIND_DEPTH_STENCIL
+                    | WINED3D_BIND_UNORDERED_ACCESS;
             if (!(bind_flags & WINED3D_BIND_SHADER_RESOURCE))
             {
                 if (!wined3d_check_surface_format(format))
@@ -1683,7 +1775,8 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
                     | WINED3DUSAGE_QUERY_SRGBWRITE
                     | WINED3DUSAGE_QUERY_VERTEXTEXTURE
                     | WINED3DUSAGE_QUERY_WRAPANDMIP;
-            allowed_bind_flags = WINED3D_BIND_SHADER_RESOURCE;
+            allowed_bind_flags = WINED3D_BIND_SHADER_RESOURCE
+                    | WINED3D_BIND_UNORDERED_ACCESS;
             gl_type = gl_type_end = WINED3D_GL_RES_TYPE_TEX_3D;
             break;
 
@@ -1713,6 +1806,8 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
         format_flags |= WINED3DFMT_FLAG_RENDERTARGET;
     if (bind_flags & WINED3D_BIND_DEPTH_STENCIL)
         format_flags |= WINED3DFMT_FLAG_DEPTH_STENCIL;
+    if (bind_flags & WINED3D_BIND_UNORDERED_ACCESS)
+        format_flags |= WINED3DFMT_FLAG_UNORDERED_ACCESS;
     if (usage & WINED3DUSAGE_QUERY_FILTER)
         format_flags |= WINED3DFMT_FLAG_FILTERING;
     if (usage & WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING)
@@ -1750,6 +1845,13 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d,
                 && !wined3d_check_depth_stencil_format(adapter, adapter_format, format, gl_type))
         {
             TRACE("Requested WINED3D_BIND_DEPTH_STENCIL, but format %s is not supported for depth/stencil buffers.\n",
+                    debug_d3dformat(check_format_id));
+            return WINED3DERR_NOTAVAILABLE;
+        }
+
+        if ((bind_flags & WINED3D_BIND_UNORDERED_ACCESS) && wined3d_format_is_typeless(format))
+        {
+            TRACE("Requested WINED3D_BIND_UNORDERED_ACCESS, but format %s is typeless.\n",
                     debug_d3dformat(check_format_id));
             return WINED3DERR_NOTAVAILABLE;
         }
@@ -2433,7 +2535,6 @@ static const struct wined3d_state_entry_template misc_state_template_no3d[] =
     {STATE_RENDER(WINED3D_RS_MONOENABLE),                 {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_ROP2),                       {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_PLANEMASK),                  {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_ZWRITEENABLE),               {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_LASTPIXEL),                  {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_ZFUNC),                      {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_DITHERENABLE),               {STATE_VDECL}},
@@ -2445,19 +2546,7 @@ static const struct wined3d_state_entry_template misc_state_template_no3d[] =
     {STATE_RENDER(WINED3D_RS_ANISOTROPY),                 {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_FLUSHBATCH),                 {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_TRANSLUCENTSORTINDEPENDENT), {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_STENCILENABLE),              {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_STENCILFAIL),                {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_STENCILZFAIL),               {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_STENCILPASS),                {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_STENCILFUNC),                {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_STENCILREF),                 {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_STENCILMASK),                {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_STENCILWRITEMASK),           {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_TWOSIDEDSTENCILMODE),        {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_BACK_STENCILFAIL),           {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_BACK_STENCILZFAIL),          {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_BACK_STENCILPASS),           {STATE_VDECL}},
-    {STATE_RENDER(WINED3D_RS_BACK_STENCILFUNC),           {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_WRAP0),                      {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_WRAP1),                      {STATE_VDECL}},
     {STATE_RENDER(WINED3D_RS_WRAP2),                      {STATE_VDECL}},
@@ -2666,19 +2755,21 @@ static void adapter_no3d_copy_bo_address(struct wined3d_context *context,
     memcpy(dst->addr, src->addr, size);
 }
 
-static HRESULT adapter_no3d_create_swapchain(struct wined3d_device *device, struct wined3d_swapchain_desc *desc,
+static HRESULT adapter_no3d_create_swapchain(struct wined3d_device *device,
+        struct wined3d_swapchain_desc *desc, struct wined3d_swapchain_state_parent *state_parent,
         void *parent, const struct wined3d_parent_ops *parent_ops, struct wined3d_swapchain **swapchain)
 {
     struct wined3d_swapchain *swapchain_no3d;
     HRESULT hr;
 
-    TRACE("device %p, desc %p, parent %p, parent_ops %p, swapchain %p.\n",
-            device, desc, parent, parent_ops, swapchain);
+    TRACE("device %p, desc %p, state_parent %p, parent %p, parent_ops %p, swapchain %p.\n",
+            device, desc, state_parent, parent, parent_ops, swapchain);
 
     if (!(swapchain_no3d = heap_alloc_zero(sizeof(*swapchain_no3d))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = wined3d_swapchain_no3d_init(swapchain_no3d, device, desc, parent, parent_ops)))
+    if (FAILED(hr = wined3d_swapchain_no3d_init(swapchain_no3d, device, desc, state_parent, parent,
+            parent_ops)))
     {
         WARN("Failed to initialise swapchain, hr %#x.\n", hr);
         heap_free(swapchain_no3d);
@@ -3016,16 +3107,46 @@ static struct wined3d_adapter *wined3d_adapter_no3d_create(unsigned int ordinal,
     return adapter;
 }
 
+static BOOL wined3d_adapter_create_output(struct wined3d_adapter *adapter, const WCHAR *output_name)
+{
+    struct wined3d_output *outputs;
+    HRESULT hr;
+
+    if (!adapter->outputs && !(adapter->outputs = heap_calloc(1, sizeof(*adapter->outputs))))
+    {
+        return FALSE;
+    }
+    else
+    {
+        if (!(outputs = heap_realloc(adapter->outputs,
+                sizeof(*adapter->outputs) * (adapter->output_count + 1))))
+            return FALSE;
+
+        adapter->outputs = outputs;
+    }
+
+    if (FAILED(hr = wined3d_output_init(&adapter->outputs[adapter->output_count],
+            adapter->output_count, adapter, output_name)))
+    {
+        ERR("Failed to initialise output %s, hr %#x.\n", wine_dbgstr_w(output_name), hr);
+        return FALSE;
+    }
+
+    ++adapter->output_count;
+    TRACE("Initialised output %s.\n", wine_dbgstr_w(output_name));
+    return TRUE;
+}
+
 BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal, const LUID *luid,
         const struct wined3d_adapter_ops *adapter_ops)
 {
+    unsigned int output_idx = 0, primary_idx = 0;
     DISPLAY_DEVICEW display_device;
-    unsigned int output_idx;
     BOOL ret = FALSE;
-    HRESULT hr;
 
     adapter->ordinal = ordinal;
     adapter->output_count = 0;
+    adapter->outputs = NULL;
 
     if (luid)
     {
@@ -3043,23 +3164,29 @@ BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal,
     TRACE("adapter %p LUID %08x:%08x.\n", adapter, adapter->luid.HighPart, adapter->luid.LowPart);
 
     display_device.cb = sizeof(display_device);
-    EnumDisplayDevicesW(NULL, ordinal, &display_device, 0);
-    TRACE("Display device: %s.\n", debugstr_w(display_device.DeviceName));
-    strcpyW(adapter->device_name, display_device.DeviceName);
-
-    if (!(adapter->outputs = heap_calloc(1, sizeof(*adapter->outputs))))
+    while (EnumDisplayDevicesW(NULL, output_idx++, &display_device, 0))
     {
-        ERR("Failed to allocate outputs.\n");
-        return FALSE;
-    }
+        /* Detached outputs are not enumerated */
+        if (!(display_device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
+            continue;
 
-    if (FAILED(hr = wined3d_output_init(&adapter->outputs[0], 0, adapter,
-            display_device.DeviceName)))
-    {
-        ERR("Failed to initialise output, hr %#x.\n", hr);
-        goto done;
+        if (display_device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
+            primary_idx = adapter->output_count;
+
+        if (!wined3d_adapter_create_output(adapter, display_device.DeviceName))
+            goto done;
     }
-    adapter->output_count = 1;
+    TRACE("Initialised %d outputs for adapter %p.\n", adapter->output_count, adapter);
+
+    /* Make the primary output first */
+    if (primary_idx)
+    {
+        struct wined3d_output tmp = adapter->outputs[0];
+        adapter->outputs[0] = adapter->outputs[primary_idx];
+        adapter->outputs[0].ordinal = 0;
+        adapter->outputs[primary_idx] = tmp;
+        adapter->outputs[primary_idx].ordinal = primary_idx;
+    }
 
     memset(&adapter->driver_uuid, 0, sizeof(adapter->driver_uuid));
     memset(&adapter->device_uuid, 0, sizeof(adapter->device_uuid));

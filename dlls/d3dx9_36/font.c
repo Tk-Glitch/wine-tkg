@@ -512,7 +512,7 @@ static INT WINAPI ID3DXFontImpl_DrawTextA(ID3DXFont *iface, ID3DXSprite *sprite,
 }
 
 static void word_break(HDC hdc, const WCHAR *str, unsigned int *str_len,
-        unsigned int chars_fit, unsigned int *chars_used, DWORD format, SIZE *size)
+        unsigned int chars_fit, unsigned int *chars_used, SIZE *size)
 {
     SCRIPT_LOGATTR *sla;
     SCRIPT_ANALYSIS sa;
@@ -535,7 +535,7 @@ static void word_break(HDC hdc, const WCHAR *str, unsigned int *str_len,
         --i;
 
     /* If the there is no word that fits put in all characters that do fit */
-    if (!sla[i].fSoftBreak || (format & DT_SINGLELINE))
+    if (!sla[i].fSoftBreak)
         i = chars_fit;
 
     *chars_used = i;
@@ -571,21 +571,13 @@ static const WCHAR *read_line(HDC hdc, const WCHAR *str, unsigned int *count,
     num_fit = 0;
     GetTextExtentExPointW(hdc, dest, *dest_len, width, &num_fit, NULL, size);
 
-    if (num_fit < *dest_len)
+    if (num_fit < *dest_len && (format & DT_WORDBREAK))
     {
-        if (format & DT_WORDBREAK)
-        {
-            unsigned int chars_used;
+        unsigned int chars_used;
 
-            word_break(hdc, dest, dest_len, num_fit, &chars_used, format, size);
-            *count = orig_count - chars_used;
-            i = chars_used;
-        }
-        else if (format & DT_SINGLELINE)
-        {
-            *dest_len = num_fit;
-            *count = 0;
-        }
+        word_break(hdc, dest, dest_len, num_fit, &chars_used, size);
+        *count = orig_count - chars_used;
+        i = chars_used;
     }
 
     if (*count && str[i] == '\n')
@@ -726,7 +718,6 @@ static INT WINAPI ID3DXFontImpl_DrawTextW(ID3DXFont *iface, ID3DXSprite *sprite,
     {
         unsigned int line_len, i;
         GCP_RESULTSW results;
-        D3DXVECTOR3 pos;
 
         string = read_line(font->hdc, string, &count, line, &line_len, width, format, &size);
 
@@ -756,6 +747,7 @@ static INT WINAPI ID3DXFontImpl_DrawTextW(ID3DXFont *iface, ID3DXSprite *sprite,
         for (i = 0; i < results.nGlyphs; ++i)
         {
             IDirect3DTexture9 *texture;
+            D3DXVECTOR3 pos;
             POINT cell_inc;
             RECT black_box;
 
@@ -766,6 +758,22 @@ static INT WINAPI ID3DXFontImpl_DrawTextW(ID3DXFont *iface, ID3DXSprite *sprite,
 
             pos.x = cell_inc.x + x + results.lpCaretPos[i];
             pos.y = cell_inc.y + y;
+            pos.z = 0;
+
+            if (!(format & DT_NOCLIP))
+            {
+                if (pos.x > rect->right)
+                {
+                    IDirect3DTexture9_Release(texture);
+                    continue;
+                }
+
+                if (pos.x + black_box.right - black_box.left > rect->right)
+                    black_box.right = black_box.left + rect->right - pos.x;
+
+                if (pos.y + black_box.bottom - black_box.top > rect->bottom)
+                    black_box.bottom = black_box.top + rect->bottom - pos.y;
+            }
 
             ID3DXSprite_Draw(target, texture, &black_box, NULL, &pos, color);
             IDirect3DTexture9_Release(texture);

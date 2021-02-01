@@ -141,6 +141,24 @@ static void InitFunctionPtrs(void)
     ok(strlen(src) == 15, "Source must be 16 bytes long!\n");
 }
 
+static void test_RtlQueryProcessDebugInformation(void)
+{
+    DEBUG_BUFFER *buffer;
+    NTSTATUS status;
+
+    buffer = RtlCreateQueryDebugBuffer( 0, 0 );
+    ok( buffer != NULL, "RtlCreateQueryDebugBuffer returned NULL" );
+
+    status = RtlQueryProcessDebugInformation( GetCurrentThreadId(), PDI_HEAPS | PDI_HEAP_BLOCKS, buffer );
+    ok( status == STATUS_INVALID_CID, "RtlQueryProcessDebugInformation returned %x\n", status );
+
+    status = RtlQueryProcessDebugInformation( GetCurrentProcessId(), PDI_HEAPS | PDI_HEAP_BLOCKS, buffer );
+    ok( !status, "RtlQueryProcessDebugInformation returned %x\n", status );
+
+    status = RtlDestroyQueryDebugBuffer( buffer );
+    ok( !status, "RtlDestroyQueryDebugBuffer returned %x\n", status );
+}
+
 #define COMP(str1,str2,cmplen,len) size = RtlCompareMemory(str1, str2, cmplen); \
   ok(size == len, "Expected %ld, got %ld\n", size, (SIZE_T)len)
 
@@ -3492,6 +3510,187 @@ static void test_LdrRegisterDllNotification(void)
     pLdrUnregisterDllNotification(cookie);
 }
 
+static BOOL test_dbg_print_except;
+static LONG test_dbg_print_except_ret;
+
+static LONG CALLBACK test_dbg_print_except_handler( EXCEPTION_POINTERS *eptrs )
+{
+    if (eptrs->ExceptionRecord->ExceptionCode == DBG_PRINTEXCEPTION_C)
+    {
+        ok( eptrs->ExceptionRecord->NumberParameters == 2,
+            "Unexpected NumberParameters: %d\n", eptrs->ExceptionRecord->NumberParameters );
+        ok( eptrs->ExceptionRecord->ExceptionInformation[0] == strlen("test_DbgPrint: Hello World") + 1,
+            "Unexpected ExceptionInformation[0]: %d\n", (int)eptrs->ExceptionRecord->ExceptionInformation[0] );
+        ok( !strcmp((char *)eptrs->ExceptionRecord->ExceptionInformation[1], "test_DbgPrint: Hello World"),
+            "Unexpected ExceptionInformation[1]: %s\n", wine_dbgstr_a((char *)eptrs->ExceptionRecord->ExceptionInformation[1]) );
+        test_dbg_print_except = TRUE;
+        return test_dbg_print_except_ret;
+    }
+
+    return (LONG)EXCEPTION_CONTINUE_SEARCH;
+}
+
+static NTSTATUS WINAPIV test_vDbgPrintEx( ULONG id, ULONG level, const char *fmt, ... )
+{
+    NTSTATUS status;
+    __ms_va_list args;
+    __ms_va_start( args, fmt );
+    status = vDbgPrintEx( id, level, fmt, args );
+    __ms_va_end( args );
+    return status;
+}
+
+static NTSTATUS WINAPIV test_vDbgPrintExWithPrefix( const char *prefix, ULONG id, ULONG level, const char *fmt, ... )
+{
+    NTSTATUS status;
+    __ms_va_list args;
+    __ms_va_start( args, fmt );
+    status = vDbgPrintExWithPrefix( prefix, id, level, fmt, args );
+    __ms_va_end( args );
+    return status;
+}
+
+static void test_DbgPrint(void)
+{
+    NTSTATUS status;
+    void *handler = RtlAddVectoredExceptionHandler( TRUE, test_dbg_print_except_handler );
+    PEB *Peb = NtCurrentTeb()->Peb;
+    BOOL debugged = Peb->BeingDebugged;
+
+    test_dbg_print_except = FALSE;
+    test_dbg_print_except_ret = (LONG)EXCEPTION_EXECUTE_HANDLER;
+    status = DbgPrint( "test_DbgPrint: %s", "Hello World" );
+    ok( !status, "DbgPrint returned %x\n", status );
+    ok( !test_dbg_print_except, "DBG_PRINTEXCEPTION_C received\n" );
+
+    Peb->BeingDebugged = TRUE;
+    test_dbg_print_except = FALSE;
+    test_dbg_print_except_ret = (LONG)EXCEPTION_EXECUTE_HANDLER;
+    status = DbgPrint( "test_DbgPrint: %s", "Hello World" );
+    ok( !status, "DbgPrint returned %x\n", status );
+    ok( test_dbg_print_except, "DBG_PRINTEXCEPTION_C not received\n" );
+
+    test_dbg_print_except = FALSE;
+    test_dbg_print_except_ret = (LONG)EXCEPTION_CONTINUE_EXECUTION;
+    status = DbgPrint( "test_DbgPrint: %s", "Hello World" );
+    ok( !status, "DbgPrint returned %x\n", status );
+    ok( test_dbg_print_except, "DBG_PRINTEXCEPTION_C not received\n" );
+
+    test_dbg_print_except = FALSE;
+    test_dbg_print_except_ret = (LONG)EXCEPTION_CONTINUE_SEARCH;
+    status = DbgPrint( "test_DbgPrint: %s", "Hello World" );
+    ok( !status, "DbgPrint returned %x\n", status );
+    ok( test_dbg_print_except, "DBG_PRINTEXCEPTION_C not received\n" );
+
+
+    /* FIXME: NtSetDebugFilterState / DbgSetDebugFilterState are probably what's controlling these */
+
+    test_dbg_print_except = FALSE;
+    test_dbg_print_except_ret = (LONG)EXCEPTION_EXECUTE_HANDLER;
+    status = DbgPrintEx( 0, DPFLTR_ERROR_LEVEL, "test_DbgPrint: %s", "Hello World" );
+    ok( !status, "DbgPrintEx returned %x\n", status );
+    ok( test_dbg_print_except, "DBG_PRINTEXCEPTION_C not received\n" );
+
+    test_dbg_print_except = FALSE;
+    test_dbg_print_except_ret = (LONG)EXCEPTION_EXECUTE_HANDLER;
+    status = DbgPrintEx( 0, DPFLTR_WARNING_LEVEL, "test_DbgPrint: %s", "Hello World" );
+    ok( !status, "DbgPrintEx returned %x\n", status );
+    ok( !test_dbg_print_except, "DBG_PRINTEXCEPTION_C not received\n" );
+
+    test_dbg_print_except = FALSE;
+    test_dbg_print_except_ret = (LONG)EXCEPTION_EXECUTE_HANDLER;
+    status = DbgPrintEx( 0, DPFLTR_MASK|(1 << DPFLTR_ERROR_LEVEL), "test_DbgPrint: %s", "Hello World" );
+    ok( !status, "DbgPrintEx returned %x\n", status );
+    ok( test_dbg_print_except, "DBG_PRINTEXCEPTION_C not received\n" );
+
+    test_dbg_print_except = FALSE;
+    test_dbg_print_except_ret = (LONG)EXCEPTION_EXECUTE_HANDLER;
+    status = DbgPrintEx( 0, DPFLTR_MASK|(1 << DPFLTR_WARNING_LEVEL), "test_DbgPrint: %s", "Hello World" );
+    ok( !status, "DbgPrintEx returned %x\n", status );
+    ok( !test_dbg_print_except, "DBG_PRINTEXCEPTION_C not received\n" );
+
+
+    test_dbg_print_except = FALSE;
+    test_dbg_print_except_ret = (LONG)EXCEPTION_EXECUTE_HANDLER;
+    status = test_vDbgPrintEx( 0, 0xFFFFFFFF, "test_DbgPrint: %s", "Hello World" );
+    ok( !status, "vDbgPrintEx returned %x\n", status );
+    ok( test_dbg_print_except, "DBG_PRINTEXCEPTION_C not received\n" );
+
+    test_dbg_print_except = FALSE;
+    test_dbg_print_except_ret = (LONG)EXCEPTION_EXECUTE_HANDLER;
+    status = test_vDbgPrintExWithPrefix( "test_", 0, 0xFFFFFFFF, "DbgPrint: %s", "Hello World" );
+    ok( !status, "vDbgPrintExWithPrefix returned %x\n", status );
+    ok( test_dbg_print_except, "DBG_PRINTEXCEPTION_C not received\n" );
+
+    Peb->BeingDebugged = debugged;
+    RtlRemoveVectoredExceptionHandler( handler );
+}
+
+static BOOL test_heap_destroy_dbgstr = FALSE;
+static BOOL test_heap_destroy_break = FALSE;
+
+static LONG CALLBACK test_heap_destroy_except_handler( EXCEPTION_POINTERS *eptrs )
+{
+    if (eptrs->ExceptionRecord->ExceptionCode == STATUS_BREAKPOINT)
+    {
+#if defined( __i386__ )
+        eptrs->ContextRecord->Eip += 1;
+        test_heap_destroy_break = TRUE;
+        return (LONG)EXCEPTION_CONTINUE_EXECUTION;
+#elif defined( __x86_64__ )
+        eptrs->ContextRecord->Rip += 1;
+        test_heap_destroy_break = TRUE;
+        return (LONG)EXCEPTION_CONTINUE_EXECUTION;
+#endif
+    }
+
+    if (eptrs->ExceptionRecord->ExceptionCode == DBG_PRINTEXCEPTION_C)
+    {
+        test_heap_destroy_dbgstr = TRUE;
+        return (LONG)EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    return (LONG)EXCEPTION_CONTINUE_SEARCH;
+}
+
+/* partially copied from ntdll/heap.c */
+#define HEAP_VALIDATE_PARAMS 0x40000000
+
+struct heap
+{
+    DWORD_PTR unknown1[2];
+    DWORD     unknown2[2];
+    DWORD_PTR unknown3[4];
+    DWORD     unknown4;
+    DWORD_PTR unknown5[2];
+    DWORD     unknown6[3];
+    DWORD_PTR unknown7[2];
+    DWORD     flags;
+    DWORD     force_flags;
+    DWORD_PTR unknown8[6];
+};
+
+static void test_RtlDestroyHeap(void)
+{
+    const struct heap invalid = {{0, 0}, {0, HEAP_VALIDATE_PARAMS}, {0, 0, 0, 0}, 0, {0, 0}, {0, 0, 0}, {0, 0}, HEAP_VALIDATE_PARAMS, 0, {0}};
+    HANDLE heap = (HANDLE)&invalid, ret;
+    PEB *Peb = NtCurrentTeb()->Peb;
+    BOOL debugged;
+    void *handler = RtlAddVectoredExceptionHandler( TRUE, test_heap_destroy_except_handler );
+
+    test_heap_destroy_dbgstr = FALSE;
+    test_heap_destroy_break = FALSE;
+    debugged = Peb->BeingDebugged;
+    Peb->BeingDebugged = TRUE;
+    ret = RtlDestroyHeap( heap );
+    ok( ret == heap, "RtlDestroyHeap(%p) returned %p\n", heap, ret );
+    ok( test_heap_destroy_dbgstr, "HeapDestroy didn't call OutputDebugStrA\n" );
+    ok( test_heap_destroy_break, "HeapDestroy didn't call DbgBreakPoint\n" );
+    Peb->BeingDebugged = debugged;
+
+    RtlRemoveVectoredExceptionHandler( handler );
+}
+
 static void test_RtlQueryPackageIdentity(void)
 {
     const WCHAR programW[] = {'M','i','c','r','o','s','o','f','t','.','W','i','n','d','o','w','s','.',
@@ -3566,6 +3765,7 @@ START_TEST(rtl)
 {
     InitFunctionPtrs();
 
+    test_RtlQueryProcessDebugInformation();
     test_RtlCompareMemory();
     test_RtlCompareMemoryUlong();
     test_RtlMoveMemory();
@@ -3603,4 +3803,6 @@ START_TEST(rtl)
     test_RtlQueryPackageIdentity();
     test_RtlMakeSelfRelativeSD();
     test_LdrRegisterDllNotification();
+    test_DbgPrint();
+    test_RtlDestroyHeap();
 }

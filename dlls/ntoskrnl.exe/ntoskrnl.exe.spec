@@ -733,7 +733,7 @@
 @ stdcall MmProbeAndLockPages(ptr long long)
 @ stub MmProbeAndLockProcessPages
 @ stub MmProbeAndLockSelectedPages
-@ stub MmProtectMdlSystemAddress
+@ stdcall MmProtectMdlSystemAddress(ptr long)
 @ stdcall MmQuerySystemSize()
 @ stub MmRemovePhysicalMemory
 @ stdcall MmResetDriverPaging(ptr)
@@ -1010,6 +1010,7 @@
 @ stdcall -arch=win32 -ret64 RtlConvertLongToLargeInteger(long)
 @ stdcall RtlConvertSidToUnicodeString(ptr ptr long)
 @ stdcall -arch=win32 -ret64 RtlConvertUlongToLargeInteger(long)
+@ stdcall RtlCopyExtendedContext(ptr long ptr)
 @ stdcall RtlCopyLuid(ptr ptr)
 @ stdcall RtlCopyLuidAndAttributesArray(long ptr ptr)
 @ stdcall -arch=x86_64 RtlCopyMemory(ptr ptr long)
@@ -1096,6 +1097,8 @@
 @ stub RtlGetDefaultCodePage
 @ stub RtlGetElementGenericTable
 @ stub RtlGetElementGenericTableAvl
+@ stdcall RtlGetExtendedContextLength(long ptr)
+@ stdcall RtlGetExtendedContextLength2(long ptr int64)
 @ stub RtlGetFirstRange
 @ stdcall RtlGetGroupSecurityDescriptor(ptr ptr ptr)
 @ stub RtlGetNextRange
@@ -1105,6 +1108,7 @@
 @ stdcall RtlGetProductInfo(long long long long ptr)
 @ stdcall RtlGetSaclSecurityDescriptor(ptr ptr ptr ptr)
 @ stub RtlGetSetBootStatusData
+@ stdcall RtlGetEnabledExtendedFeatures(int64)
 @ stdcall RtlGetVersion(ptr)
 @ stdcall RtlHashUnicodeString(ptr long long ptr)
 @ stdcall RtlIdnToAscii(long wstr long ptr ptr)
@@ -1119,6 +1123,8 @@
 @ stdcall RtlInitUnicodeString(ptr wstr)
 @ stdcall RtlInitUnicodeStringEx(ptr wstr)
 @ stdcall RtlInitializeBitMap(ptr ptr long)
+@ stdcall RtlInitializeExtendedContext(ptr long ptr)
+@ stdcall RtlInitializeExtendedContext2(ptr long ptr int64)
 @ stdcall RtlInitializeGenericTable(ptr ptr ptr ptr ptr)
 @ stdcall RtlInitializeGenericTableAvl(ptr ptr ptr ptr ptr)
 @ stub RtlInitializeRangeList
@@ -1169,6 +1175,9 @@
 @ stdcall RtlLengthSecurityDescriptor(ptr)
 @ stdcall RtlLengthSid(ptr)
 @ stdcall RtlLocalTimeToSystemTime(ptr ptr)
+@ stdcall RtlLocateExtendedFeature(ptr long ptr)
+@ stdcall RtlLocateExtendedFeature2(ptr long ptr ptr)
+@ stdcall RtlLocateLegacyContext(ptr ptr)
 @ stub RtlLockBootStatusData
 @ stdcall RtlLookupAtomInAtomTable(ptr wstr ptr)
 @ stub RtlLookupElementGenericTable
@@ -1203,6 +1212,7 @@
 @ stdcall RtlQueryDynamicTimeZoneInformation(ptr)
 @ stdcall RtlQueryInformationAcl(ptr ptr long long)
 @ stdcall RtlQueryPackageIdentity(long ptr ptr ptr ptr ptr)
+@ stdcall RtlQueryProcessPlaceholderCompatibilityMode() ntdll.RtlQueryProcessPlaceholderCompatibilityMode
 @ stdcall RtlQueryRegistryValues(long ptr ptr ptr ptr)
 @ stdcall RtlQueryTimeZoneInformation(ptr)
 @ stdcall -norelay RtlRaiseException(ptr)
@@ -1227,6 +1237,8 @@
 @ stdcall RtlSetBits(ptr long long)
 @ stdcall RtlSetControlSecurityDescriptor(ptr long long)
 @ stdcall RtlSetDaclSecurityDescriptor(ptr long ptr long)
+@ stdcall -ret64 RtlGetExtendedFeaturesMask(ptr)
+@ stdcall RtlSetExtendedFeaturesMask(ptr int64)
 @ stdcall RtlSetGroupSecurityDescriptor(ptr ptr long)
 @ stdcall RtlSetOwnerSecurityDescriptor(ptr ptr long)
 @ stdcall RtlSetSaclSecurityDescriptor(ptr long ptr long)
@@ -1380,7 +1392,7 @@
 @ stdcall ZwClose(long) NtClose
 @ stub ZwCloseObjectAuditAlarm
 @ stdcall -private ZwConnectPort(ptr ptr ptr ptr ptr ptr ptr ptr) NtConnectPort
-@ stdcall -private ZwCreateDirectoryObject(ptr long ptr) NtCreateDirectoryObject
+@ stdcall ZwCreateDirectoryObject(ptr long ptr) NtCreateDirectoryObject
 @ stdcall ZwCreateEvent(ptr long ptr long long) NtCreateEvent
 @ stdcall ZwCreateFile(ptr long ptr ptr ptr long long long long ptr long) NtCreateFile
 @ stdcall -private ZwCreateIoCompletion(ptr long ptr long) NtCreateIoCompletion
@@ -1414,11 +1426,11 @@
 @ stdcall -private ZwLoadKey(ptr ptr) NtLoadKey
 @ stdcall -private ZwLockFile(long long ptr ptr ptr ptr ptr ptr long long) NtLockFile
 @ stdcall -private ZwLockVirtualMemory(long ptr ptr long) NtLockVirtualMemory
-@ stdcall -private ZwMakeTemporaryObject(long) NtMakeTemporaryObject
+@ stdcall ZwMakeTemporaryObject(long) NtMakeTemporaryObject
 @ stdcall -private ZwMapViewOfSection(long long ptr long long ptr ptr long long long) NtMapViewOfSection
 @ stdcall -private ZwNotifyChangeDirectoryFile(long long ptr ptr ptr ptr long long long) NtNotifyChangeDirectoryFile
 @ stdcall -private ZwNotifyChangeKey(long long ptr ptr ptr long long ptr long long) NtNotifyChangeKey
-@ stdcall -private ZwOpenDirectoryObject(ptr long ptr) NtOpenDirectoryObject
+@ stdcall ZwOpenDirectoryObject(ptr long ptr) NtOpenDirectoryObject
 @ stdcall -private ZwOpenEvent(ptr long ptr) NtOpenEvent
 @ stdcall ZwOpenFile(ptr long ptr ptr long long) NtOpenFile
 @ stdcall -private ZwOpenJobObject(ptr long ptr) NtOpenJobObject
@@ -1511,7 +1523,7 @@
 @ stdcall ZwWriteFile(long long ptr ptr ptr ptr long ptr ptr) NtWriteFile
 @ stdcall -private ZwYieldExecution() NtYieldExecution
 @ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr)
-@ cdecl -arch=arm,x86_64 -norelay __chkstk()
+@ cdecl -arch=arm,arm64,x86_64 -norelay __chkstk()
 @ cdecl -private -arch=i386 _CIcos()
 @ cdecl -private -arch=i386 _CIsin()
 @ cdecl -private -arch=i386 _CIsqrt()

@@ -99,33 +99,20 @@ static void test_BCryptGenRandom(void)
 
 static void test_BCryptGetFipsAlgorithmMode(void)
 {
-    static const WCHAR policyKeyVistaW[] = {
-        'S','y','s','t','e','m','\\',
-        'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-        'C','o','n','t','r','o','l','\\',
-        'L','s','a','\\',
-        'F','I','P','S','A','l','g','o','r','i','t','h','m','P','o','l','i','c','y',0};
-    static const WCHAR policyValueVistaW[] = {'E','n','a','b','l','e','d',0};
-    static const WCHAR policyKeyXPW[] = {
-        'S','y','s','t','e','m','\\',
-        'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-        'C','o','n','t','r','o','l','\\',
-        'L','s','a',0};
-    static const WCHAR policyValueXPW[] = {
-        'F','I','P','S','A','l','g','o','r','i','t','h','m','P','o','l','i','c','y',0};
     HKEY hkey = NULL;
     BOOLEAN expected;
     BOOLEAN enabled;
     DWORD value, count[2] = {sizeof(value), sizeof(value)};
     NTSTATUS ret;
 
-    if (RegOpenKeyW(HKEY_LOCAL_MACHINE, policyKeyVistaW, &hkey) == ERROR_SUCCESS &&
-        RegQueryValueExW(hkey, policyValueVistaW, NULL, NULL, (void *)&value, &count[0]) == ERROR_SUCCESS)
+    if (RegOpenKeyW(HKEY_LOCAL_MACHINE,
+                    L"System\\CurrentControlSet\\Control\\Lsa\\FIPSAlgorithmPolicy", &hkey) == ERROR_SUCCESS &&
+        RegQueryValueExW(hkey, L"Enabled", NULL, NULL, (void *)&value, &count[0]) == ERROR_SUCCESS)
     {
         expected = !!value;
     }
-      else if (RegOpenKeyW(HKEY_LOCAL_MACHINE, policyKeyXPW, &hkey) == ERROR_SUCCESS &&
-               RegQueryValueExW(hkey, policyValueXPW, NULL, NULL, (void *)&value, &count[0]) == ERROR_SUCCESS)
+      else if (RegOpenKeyW(HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\Lsa", &hkey) == ERROR_SUCCESS &&
+               RegQueryValueExW(hkey, L"FIPSAlgorithmPolicy", NULL, NULL, (void *)&value, &count[0]) == ERROR_SUCCESS)
     {
         expected = !!value;
     }
@@ -647,6 +634,67 @@ static void test_aes(void)
     ok(size == 64, "got %u\n", size);
 
     test_alg_name(alg, L"AES");
+
+    ret = pBCryptCloseAlgorithmProvider(alg, 0);
+    ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
+}
+
+static void test_3des(void)
+{
+    BCRYPT_KEY_LENGTHS_STRUCT key_lengths;
+    BCRYPT_ALG_HANDLE alg;
+    ULONG size, len;
+    UCHAR mode[64];
+    NTSTATUS ret;
+
+    alg = NULL;
+    ret = pBCryptOpenAlgorithmProvider(&alg, BCRYPT_3DES_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
+    ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
+    ok(alg != NULL, "alg not set\n");
+
+    len = size = 0;
+    ret = pBCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, (UCHAR *)&len, sizeof(len), &size, 0);
+    ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
+    ok(len, "expected non-zero len\n");
+    ok(size == sizeof(len), "got %u\n", size);
+
+    len = size = 0;
+    ret = pBCryptGetProperty(alg, BCRYPT_BLOCK_LENGTH, (UCHAR *)&len, sizeof(len), &size, 0);
+    ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
+    ok(len == 8, "got %u\n", len);
+    ok(size == sizeof(len), "got %u\n", size);
+
+    size = 0;
+    ret = pBCryptGetProperty(alg, BCRYPT_CHAINING_MODE, mode, 0, &size, 0);
+    ok(ret == STATUS_BUFFER_TOO_SMALL, "got %08x\n", ret);
+    ok(size == 64, "got %u\n", size);
+
+    size = 0;
+    ret = pBCryptGetProperty(alg, BCRYPT_CHAINING_MODE, mode, sizeof(mode) - 1, &size, 0);
+    ok(ret == STATUS_BUFFER_TOO_SMALL, "got %08x\n", ret);
+    ok(size == 64, "got %u\n", size);
+
+    size = 0;
+    memset(mode, 0, sizeof(mode));
+    ret = pBCryptGetProperty(alg, BCRYPT_CHAINING_MODE, mode, sizeof(mode), &size, 0);
+    ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
+    ok(!lstrcmpW((const WCHAR *)mode, BCRYPT_CHAIN_MODE_CBC), "got %s\n", wine_dbgstr_w((const WCHAR *)mode));
+    ok(size == 64, "got %u\n", size);
+
+    size = 0;
+    memset(&key_lengths, 0, sizeof(key_lengths));
+    ret = pBCryptGetProperty(alg, BCRYPT_KEY_LENGTHS, (UCHAR*)&key_lengths, sizeof(key_lengths), &size, 0);
+    ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
+    ok(size == sizeof(key_lengths), "got %u\n", size);
+    ok(key_lengths.dwMinLength == 192, "Expected 192, got %d\n", key_lengths.dwMinLength);
+    ok(key_lengths.dwMaxLength == 192, "Expected 192, got %d\n", key_lengths.dwMaxLength);
+    ok(key_lengths.dwIncrement == 0, "Expected 0, got %d\n", key_lengths.dwIncrement);
+
+    memcpy(mode, BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM));
+    ret = pBCryptSetProperty(alg, BCRYPT_CHAINING_MODE, mode, 0, 0);
+    ok(ret == STATUS_NOT_SUPPORTED, "got %08x\n", ret);
+
+    test_alg_name(alg, L"3DES");
 
     ret = pBCryptCloseAlgorithmProvider(alg, 0);
     ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
@@ -2173,13 +2221,12 @@ static void test_ECDH(void)
 
 static void test_BCryptEnumContextFunctions(void)
 {
-    static const WCHAR sslW[] = {'S','S','L',0};
     CRYPT_CONTEXT_FUNCTIONS *buffer;
     NTSTATUS status;
     ULONG buflen;
 
     buffer = NULL;
-    status = pBCryptEnumContextFunctions( CRYPT_LOCAL, sslW, NCRYPT_SCHANNEL_INTERFACE, &buflen, &buffer );
+    status = pBCryptEnumContextFunctions( CRYPT_LOCAL, L"SSL", NCRYPT_SCHANNEL_INTERFACE, &buflen, &buffer );
     todo_wine ok( status == STATUS_SUCCESS, "got %08x\n", status);
     if (status == STATUS_SUCCESS) pBCryptFreeBuffer( buffer );
 }
@@ -2617,6 +2664,9 @@ static void test_DSA(void)
     ok(!memcmp(dssKey, buf, size), "wrong data\n");
     HeapFree(GetProcessHeap(), 0, buf);
 
+    ret = pBCryptDestroyKey(key);
+    ok(!ret, "got %08x\n", ret);
+
     ret = pBCryptCloseAlgorithmProvider(alg, 0);
     ok(!ret, "got %08x\n", ret);
 }
@@ -2666,7 +2716,6 @@ static void test_SecretAgreement(void)
     ok(status == STATUS_INVALID_PARAMETER, "got %08x\n", status);
 
     status = pBCryptDeriveKey(secret, L"HASH", NULL, NULL, 0, &size, 0);
-    todo_wine
     ok(status == STATUS_SUCCESS, "got %08x\n", status);
 
     status = pBCryptDestroyHash(secret);
@@ -2741,6 +2790,7 @@ START_TEST(bcrypt)
     test_BcryptHash();
     test_BcryptDeriveKeyPBKDF2();
     test_rng();
+    test_3des();
     test_aes();
     test_BCryptGenerateSymmetricKey();
     test_BCryptEncrypt();

@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #include "windef.h"
@@ -34,10 +32,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(uxtheme);
 /***********************************************************************
  * Defines and global variables
  */
-
-static const WCHAR szTextFileResource[] = {
-    'T','E','X','T','F','I','L','E','\0'
-};
 
 typedef struct _UXINI_FILE {
     LPCWSTR lpIni;
@@ -68,7 +62,7 @@ PUXINI_FILE UXINI_LoadINI(HMODULE hTheme, LPCWSTR lpName) {
 
     TRACE("Loading resource INI %s\n", debugstr_w(lpName));
 
-    if((hrsc = FindResourceW(hTheme, lpName, szTextFileResource))) {
+    if((hrsc = FindResourceW(hTheme, lpName, L"TEXTFILE"))) {
         if(!(lpThemesIni = LoadResource(hTheme, hrsc))) {
             TRACE("%s resource not found\n", debugstr_w(lpName));
             return NULL;

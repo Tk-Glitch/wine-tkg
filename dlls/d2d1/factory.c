@@ -713,6 +713,28 @@ HRESULT WINAPI D2D1CreateDevice(IDXGIDevice *dxgi_device,
     return hr;
 }
 
+void WINAPI D2D1SinCos(float angle, float *s, float *c)
+{
+    TRACE("angle %.8e, s %p, c %p.\n", angle, s, c);
+
+    *s = sinf(angle);
+    *c = cosf(angle);
+}
+
+float WINAPI D2D1Tan(float angle)
+{
+    TRACE("angle %.8e.\n", angle);
+
+    return tanf(angle);
+}
+
+float WINAPI D2D1Vec3Length(float x, float y, float z)
+{
+    TRACE("x %.8e, y %.8e, z %.8e.\n", x, y, z);
+
+    return sqrtf(x * x + y * y + z * z);
+}
+
 static BOOL get_config_key_dword(HKEY default_key, HKEY application_key, const char *name, DWORD *value)
 {
     DWORD type, data, size;

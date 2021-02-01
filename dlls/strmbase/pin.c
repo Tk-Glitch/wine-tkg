@@ -265,11 +265,6 @@ static HRESULT SendFurther(struct strmbase_sink *sink, SendPinFunc func, void *a
     return hr;
 }
 
-HRESULT strmbase_pin_get_media_type(struct strmbase_pin *iface, unsigned int index, AM_MEDIA_TYPE *mt)
-{
-    return VFW_S_NO_MORE_ITEMS;
-}
-
 static HRESULT WINAPI pin_QueryInterface(IPin *iface, REFIID iid, void **out)
 {
     struct strmbase_pin *pin = impl_from_IPin(iface);
@@ -313,7 +308,7 @@ static HRESULT WINAPI pin_ConnectedTo(IPin * iface, IPin ** ppPin)
 
     TRACE("pin %p %s:%s, peer %p.\n", This, debugstr_w(This->filter->name), debugstr_w(This->name), ppPin);
 
-    EnterCriticalSection(&This->filter->csFilter);
+    EnterCriticalSection(&This->filter->filter_cs);
     {
         if (This->peer)
         {
@@ -327,7 +322,7 @@ static HRESULT WINAPI pin_ConnectedTo(IPin * iface, IPin ** ppPin)
             *ppPin = NULL;
         }
     }
-    LeaveCriticalSection(&This->filter->csFilter);
+    LeaveCriticalSection(&This->filter->filter_cs);
 
     return hr;
 }
@@ -339,7 +334,7 @@ static HRESULT WINAPI pin_ConnectionMediaType(IPin *iface, AM_MEDIA_TYPE *pmt)
 
     TRACE("pin %p %s:%s, pmt %p.\n", This, debugstr_w(This->filter->name), debugstr_w(This->name), pmt);
 
-    EnterCriticalSection(&This->filter->csFilter);
+    EnterCriticalSection(&This->filter->filter_cs);
     {
         if (This->peer)
         {
@@ -353,7 +348,7 @@ static HRESULT WINAPI pin_ConnectionMediaType(IPin *iface, AM_MEDIA_TYPE *pmt)
             hr = VFW_E_NOT_CONNECTED;
         }
     }
-    LeaveCriticalSection(&This->filter->csFilter);
+    LeaveCriticalSection(&This->filter->filter_cs);
 
     return hr;
 }
@@ -494,18 +489,18 @@ static HRESULT WINAPI source_Connect(IPin *iface, IPin *peer, const AM_MEDIA_TYP
         return VFW_E_INVALID_DIRECTION;
     }
 
-    EnterCriticalSection(&pin->pin.filter->csFilter);
+    EnterCriticalSection(&pin->pin.filter->filter_cs);
 
     if (pin->pin.peer)
     {
-        LeaveCriticalSection(&pin->pin.filter->csFilter);
+        LeaveCriticalSection(&pin->pin.filter->filter_cs);
         WARN("Pin is already connected, returning VFW_E_ALREADY_CONNECTED.\n");
         return VFW_E_ALREADY_CONNECTED;
     }
 
     if (pin->pin.filter->state != State_Stopped)
     {
-        LeaveCriticalSection(&pin->pin.filter->csFilter);
+        LeaveCriticalSection(&pin->pin.filter->filter_cs);
         WARN("Filter is not stopped; returning VFW_E_NOT_STOPPED.\n");
         return VFW_E_NOT_STOPPED;
     }
@@ -517,7 +512,7 @@ static HRESULT WINAPI source_Connect(IPin *iface, IPin *peer, const AM_MEDIA_TYP
             && !IsEqualGUID(&mt->formattype, &GUID_NULL))
     {
         hr = pin->pFuncsTable->pfnAttemptConnection(pin, peer, mt);
-        LeaveCriticalSection(&pin->pin.filter->csFilter);
+        LeaveCriticalSection(&pin->pin.filter->filter_cs);
         return hr;
     }
 
@@ -529,7 +524,7 @@ static HRESULT WINAPI source_Connect(IPin *iface, IPin *peer, const AM_MEDIA_TYP
             if (compare_media_types(mt, &candidate)
                     && pin->pFuncsTable->pfnAttemptConnection(pin, peer, &candidate) == S_OK)
             {
-                LeaveCriticalSection(&pin->pin.filter->csFilter);
+                LeaveCriticalSection(&pin->pin.filter->filter_cs);
                 FreeMediaType(&candidate);
                 return S_OK;
             }
@@ -544,7 +539,7 @@ static HRESULT WINAPI source_Connect(IPin *iface, IPin *peer, const AM_MEDIA_TYP
             if (compare_media_types(mt, candidate_ptr)
                     && pin->pFuncsTable->pfnAttemptConnection(pin, peer, candidate_ptr) == S_OK)
             {
-                LeaveCriticalSection(&pin->pin.filter->csFilter);
+                LeaveCriticalSection(&pin->pin.filter->filter_cs);
                 DeleteMediaType(candidate_ptr);
                 IEnumMediaTypes_Release(enummt);
                 return S_OK;
@@ -555,7 +550,7 @@ static HRESULT WINAPI source_Connect(IPin *iface, IPin *peer, const AM_MEDIA_TYP
         IEnumMediaTypes_Release(enummt);
     }
 
-    LeaveCriticalSection(&pin->pin.filter->csFilter);
+    LeaveCriticalSection(&pin->pin.filter->filter_cs);
 
     return VFW_E_NO_ACCEPTABLE_TYPES;
 }
@@ -577,11 +572,11 @@ static HRESULT WINAPI source_Disconnect(IPin *iface)
 
     TRACE("pin %p %s:%s.\n", This, debugstr_w(This->pin.filter->name), debugstr_w(This->pin.name));
 
-    EnterCriticalSection(&This->pin.filter->csFilter);
+    EnterCriticalSection(&This->pin.filter->filter_cs);
     {
         if (This->pin.filter->state != State_Stopped)
         {
-            LeaveCriticalSection(&This->pin.filter->csFilter);
+            LeaveCriticalSection(&This->pin.filter->filter_cs);
             WARN("Filter is not stopped; returning VFW_E_NOT_STOPPED.\n");
             return VFW_E_NOT_STOPPED;
         }
@@ -612,7 +607,7 @@ static HRESULT WINAPI source_Disconnect(IPin *iface)
         else
             hr = S_FALSE;
     }
-    LeaveCriticalSection(&This->pin.filter->csFilter);
+    LeaveCriticalSection(&This->pin.filter->filter_cs);
 
     return hr;
 }
@@ -699,46 +694,6 @@ HRESULT WINAPI BaseOutputPinImpl_GetDeliveryBuffer(struct strmbase_source *This,
             hr = IMediaSample_SetTime(*ppSample, tStart, tStop);
     }
 
-    return hr;
-}
-
-/* replaces OutputPin_CommitAllocator */
-HRESULT WINAPI BaseOutputPinImpl_Active(struct strmbase_source *This)
-{
-    HRESULT hr;
-
-    TRACE("(%p)->()\n", This);
-
-    EnterCriticalSection(&This->pin.filter->csFilter);
-    {
-        if (!This->pin.peer || !This->pMemInputPin)
-            hr = VFW_E_NOT_CONNECTED;
-        else
-            hr = IMemAllocator_Commit(This->pAllocator);
-    }
-    LeaveCriticalSection(&This->pin.filter->csFilter);
-
-    TRACE("--> %08x\n", hr);
-    return hr;
-}
-
-/* replaces OutputPin_DecommitAllocator */
-HRESULT WINAPI BaseOutputPinImpl_Inactive(struct strmbase_source *This)
-{
-    HRESULT hr;
-
-    TRACE("(%p)->()\n", This);
-
-    EnterCriticalSection(&This->pin.filter->csFilter);
-    {
-        if (!This->pin.peer || !This->pMemInputPin)
-            hr = VFW_E_NOT_CONNECTED;
-        else
-            hr = IMemAllocator_Decommit(This->pAllocator);
-    }
-    LeaveCriticalSection(&This->pin.filter->csFilter);
-
-    TRACE("--> %08x\n", hr);
     return hr;
 }
 
@@ -881,11 +836,11 @@ static HRESULT WINAPI sink_ReceiveConnection(IPin *iface, IPin *pReceivePin, con
     if (!pmt)
         return E_POINTER;
 
-    EnterCriticalSection(&This->pin.filter->csFilter);
+    EnterCriticalSection(&This->pin.filter->filter_cs);
     {
         if (This->pin.filter->state != State_Stopped)
         {
-            LeaveCriticalSection(&This->pin.filter->csFilter);
+            LeaveCriticalSection(&This->pin.filter->filter_cs);
             WARN("Filter is not stopped; returning VFW_E_NOT_STOPPED.\n");
             return VFW_E_NOT_STOPPED;
         }
@@ -918,7 +873,7 @@ static HRESULT WINAPI sink_ReceiveConnection(IPin *iface, IPin *pReceivePin, con
             IPin_AddRef(pReceivePin);
         }
     }
-    LeaveCriticalSection(&This->pin.filter->csFilter);
+    LeaveCriticalSection(&This->pin.filter->filter_cs);
 
     return hr;
 }
@@ -930,7 +885,14 @@ static HRESULT WINAPI sink_Disconnect(IPin *iface)
 
     TRACE("pin %p %s:%s.\n", pin, debugstr_w(pin->pin.filter->name), debugstr_w(pin->pin.name));
 
-    EnterCriticalSection(&pin->pin.filter->csFilter);
+    EnterCriticalSection(&pin->pin.filter->filter_cs);
+
+    if (pin->pin.filter->state != State_Stopped)
+    {
+        LeaveCriticalSection(&pin->pin.filter->filter_cs);
+        WARN("Filter is not stopped; returning VFW_E_NOT_STOPPED.\n");
+        return VFW_E_NOT_STOPPED;
+    }
 
     if (pin->pin.peer)
     {
@@ -952,7 +914,7 @@ static HRESULT WINAPI sink_Disconnect(IPin *iface)
     else
         hr = S_FALSE;
 
-    LeaveCriticalSection(&pin->pin.filter->csFilter);
+    LeaveCriticalSection(&pin->pin.filter->filter_cs);
 
     return hr;
 }
@@ -964,21 +926,26 @@ static HRESULT deliver_endofstream(IPin* pin, LPVOID unused)
 
 static HRESULT WINAPI sink_EndOfStream(IPin *iface)
 {
-    struct strmbase_sink *This = impl_sink_from_IPin(iface);
+    struct strmbase_sink *pin = impl_sink_from_IPin(iface);
     HRESULT hr = S_OK;
 
-    TRACE("pin %p %s:%s.\n", This, debugstr_w(This->pin.filter->name), debugstr_w(This->pin.name));
+    TRACE("pin %p %s:%s.\n", pin, debugstr_w(pin->pin.filter->name), debugstr_w(pin->pin.name));
 
-    if (This->pFuncsTable->sink_eos)
-        return This->pFuncsTable->sink_eos(This);
+    if (pin->pFuncsTable->sink_eos)
+    {
+        EnterCriticalSection(&pin->pin.filter->stream_cs);
+        hr = pin->pFuncsTable->sink_eos(pin);
+        LeaveCriticalSection(&pin->pin.filter->stream_cs);
+        return hr;
+    }
 
-    EnterCriticalSection(&This->pin.filter->csFilter);
-    if (This->flushing)
+    EnterCriticalSection(&pin->pin.filter->filter_cs);
+    if (pin->flushing)
         hr = S_FALSE;
-    LeaveCriticalSection(&This->pin.filter->csFilter);
+    LeaveCriticalSection(&pin->pin.filter->filter_cs);
 
     if (hr == S_OK)
-        hr = SendFurther(This, deliver_endofstream, NULL);
+        hr = SendFurther(pin, deliver_endofstream, NULL);
     return hr;
 }
 
@@ -994,7 +961,7 @@ static HRESULT WINAPI sink_BeginFlush(IPin *iface)
 
     TRACE("pin %p %s:%s.\n", pin, debugstr_w(pin->pin.filter->name), debugstr_w(pin->pin.name));
 
-    EnterCriticalSection(&pin->pin.filter->csFilter);
+    EnterCriticalSection(&pin->pin.filter->filter_cs);
 
     pin->flushing = TRUE;
 
@@ -1003,7 +970,7 @@ static HRESULT WINAPI sink_BeginFlush(IPin *iface)
     else
         hr = SendFurther(pin, deliver_beginflush, NULL);
 
-    LeaveCriticalSection(&pin->pin.filter->csFilter);
+    LeaveCriticalSection(&pin->pin.filter->filter_cs);
 
     return hr;
 }
@@ -1020,7 +987,7 @@ static HRESULT WINAPI sink_EndFlush(IPin * iface)
 
     TRACE("pin %p %s:%s.\n", pin, debugstr_w(pin->pin.filter->name), debugstr_w(pin->pin.name));
 
-    EnterCriticalSection(&pin->pin.filter->csFilter);
+    EnterCriticalSection(&pin->pin.filter->filter_cs);
 
     pin->flushing = FALSE;
 
@@ -1029,7 +996,7 @@ static HRESULT WINAPI sink_EndFlush(IPin * iface)
     else
         hr = SendFurther(pin, deliver_endflush, NULL);
 
-    LeaveCriticalSection(&pin->pin.filter->csFilter);
+    LeaveCriticalSection(&pin->pin.filter->filter_cs);
 
     return hr;
 }
@@ -1178,7 +1145,11 @@ static HRESULT WINAPI MemInputPin_Receive(IMemInputPin *iface, IMediaSample *sam
             debugstr_w(pin->pin.name), sample);
 
     if (pin->pFuncsTable->pfnReceive)
+    {
+        EnterCriticalSection(&pin->pin.filter->stream_cs);
         hr = pin->pFuncsTable->pfnReceive(pin, sample);
+        LeaveCriticalSection(&pin->pin.filter->stream_cs);
+    }
     return hr;
 }
 

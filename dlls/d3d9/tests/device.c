@@ -25,6 +25,7 @@
 #define COBJMACROS
 #include <d3d9.h>
 #include "utils.h"
+#include "wine/heap.h"
 
 struct vec3
 {
@@ -156,6 +157,77 @@ static void flush_events(void)
 static BOOL adapter_is_warp(const D3DADAPTER_IDENTIFIER9 *identifier)
 {
     return !strcmp(identifier->Driver, "d3d10warp.dll");
+}
+
+static BOOL equal_mode_rect(const DEVMODEW *mode1, const DEVMODEW *mode2)
+{
+    return mode1->dmPosition.x == mode2->dmPosition.x
+            && mode1->dmPosition.y == mode2->dmPosition.y
+            && mode1->dmPelsWidth == mode2->dmPelsWidth
+            && mode1->dmPelsHeight == mode2->dmPelsHeight;
+}
+
+/* Free original_modes after finished using it */
+static BOOL save_display_modes(DEVMODEW **original_modes, unsigned int *display_count)
+{
+    unsigned int number, size = 2, count = 0, index = 0;
+    DISPLAY_DEVICEW display_device;
+    DEVMODEW *modes, *tmp;
+
+    if (!(modes = heap_alloc(size * sizeof(*modes))))
+        return FALSE;
+
+    display_device.cb = sizeof(display_device);
+    while (EnumDisplayDevicesW(NULL, index++, &display_device, 0))
+    {
+        /* Skip software devices */
+        if (swscanf(display_device.DeviceName, L"\\\\.\\DISPLAY%u", &number) != 1)
+            continue;
+
+        if (!(display_device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
+            continue;
+
+        if (count >= size)
+        {
+            size *= 2;
+            if (!(tmp = heap_realloc(modes, size * sizeof(*modes))))
+            {
+                heap_free(modes);
+                return FALSE;
+            }
+            modes = tmp;
+        }
+
+        memset(&modes[count], 0, sizeof(modes[count]));
+        modes[count].dmSize = sizeof(modes[count]);
+        if (!EnumDisplaySettingsW(display_device.DeviceName, ENUM_CURRENT_SETTINGS, &modes[count]))
+        {
+            heap_free(modes);
+            return FALSE;
+        }
+
+        lstrcpyW(modes[count++].dmDeviceName, display_device.DeviceName);
+    }
+
+    *original_modes = modes;
+    *display_count = count;
+    return TRUE;
+}
+
+static BOOL restore_display_modes(DEVMODEW *modes, unsigned int count)
+{
+    unsigned int index;
+    LONG ret;
+
+    for (index = 0; index < count; ++index)
+    {
+        ret = ChangeDisplaySettingsExW(modes[index].dmDeviceName, &modes[index], NULL,
+                CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+        if (ret != DISP_CHANGE_SUCCESSFUL)
+            return FALSE;
+    }
+    ret = ChangeDisplaySettingsExW(NULL, NULL, NULL, 0, NULL);
+    return ret == DISP_CHANGE_SUCCESSFUL;
 }
 
 static IDirect3DDevice9 *create_device(IDirect3D9 *d3d9, HWND focus_window, const struct device_desc *desc)
@@ -4435,6 +4507,8 @@ done:
     CloseHandle(thread_params.test_finished);
     CloseHandle(thread_params.window_created);
     UnregisterClassA("d3d9_test_wndproc_wc", GetModuleHandleA(NULL));
+    change_ret = ChangeDisplaySettingsExW(NULL, NULL, NULL, 0, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
 }
 
 static void test_wndproc_windowed(void)
@@ -5196,20 +5270,33 @@ done:
 
 static void test_mode_change(void)
 {
+    DEVMODEW old_devmode, devmode, devmode2, *original_modes = NULL;
+    struct device_desc device_desc, device_desc2;
+    WCHAR second_monitor_name[CCHDEVICENAME];
+    IDirect3DDevice9 *device, *device2;
+    unsigned int display_count = 0;
     RECT d3d_rect, focus_rect, r;
-    struct device_desc device_desc;
     IDirect3DSurface9 *backbuffer;
-    IDirect3DDevice9 *device;
+    MONITORINFOEXW monitor_info;
+    HMONITOR second_monitor;
     D3DSURFACE_DESC desc;
     IDirect3D9 *d3d9;
-    DEVMODEW devmode;
     ULONG refcount;
     UINT adapter_mode_count, i;
     HRESULT hr;
-    DWORD ret;
+    BOOL ret;
     LONG change_ret;
     D3DDISPLAYMODE d3ddm;
     DWORD d3d_width = 0, d3d_height = 0, user32_width = 0, user32_height = 0;
+
+    memset(&devmode, 0, sizeof(devmode));
+    devmode.dmSize = sizeof(devmode);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode, &registry_mode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode, &registry_mode), "Got a different mode.\n");
 
     d3d9 = Direct3DCreate9(D3D_SDK_VERSION);
     ok(!!d3d9, "Failed to create a D3D object.\n");
@@ -5263,6 +5350,9 @@ static void test_mode_change(void)
         return;
     }
 
+    ret = save_display_modes(&original_modes, &display_count);
+    ok(ret, "Failed to save original display modes.\n");
+
     memset(&devmode, 0, sizeof(devmode));
     devmode.dmSize = sizeof(devmode);
     devmode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
@@ -5287,8 +5377,6 @@ static void test_mode_change(void)
     if (!(device = create_device(d3d9, focus_window, &device_desc)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
-        change_ret = ChangeDisplaySettingsW(NULL, CDS_FULLSCREEN);
-        ok(change_ret == DISP_CHANGE_SUCCESSFUL, "Failed to change display mode, ret %#x.\n", change_ret);
         goto done;
     }
 
@@ -5325,7 +5413,7 @@ static void test_mode_change(void)
 
     ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
     ok(ret, "Failed to get display mode.\n");
-    todo_wine ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth
+    ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth
             && devmode.dmPelsHeight == registry_mode.dmPelsHeight,
             "Expected resolution %ux%u, got %ux%u.\n",
             registry_mode.dmPelsWidth, registry_mode.dmPelsHeight, devmode.dmPelsWidth, devmode.dmPelsHeight);
@@ -5342,6 +5430,7 @@ static void test_mode_change(void)
     device_desc.flags = CREATE_DEVICE_FULLSCREEN;
     ok(!!(device = create_device(d3d9, focus_window, &device_desc)), "Failed to create a D3D device.\n");
 
+    devmode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
     devmode.dmPelsWidth = user32_width;
     devmode.dmPelsHeight = user32_height;
     change_ret = ChangeDisplaySettingsW(&devmode, CDS_FULLSCREEN);
@@ -5350,17 +5439,319 @@ static void test_mode_change(void)
     refcount = IDirect3DDevice9_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
 
-    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
+    memset(&devmode2, 0, sizeof(devmode2));
+    devmode2.dmSize = sizeof(devmode2);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
     ok(ret, "Failed to get display mode.\n");
-    ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth
-            && devmode.dmPelsHeight == registry_mode.dmPelsHeight,
-            "Expected resolution %ux%u, got %ux%u.\n",
-            registry_mode.dmPelsWidth, registry_mode.dmPelsHeight, devmode.dmPelsWidth, devmode.dmPelsHeight);
+    ok(devmode2.dmPelsWidth == registry_mode.dmPelsWidth
+            && devmode2.dmPelsHeight == registry_mode.dmPelsHeight,
+            "Expected resolution %ux%u, got %ux%u.\n", registry_mode.dmPelsWidth,
+            registry_mode.dmPelsHeight, devmode2.dmPelsWidth, devmode2.dmPelsHeight);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that no mode restorations if no mode changes happened */
+    change_ret = ChangeDisplaySettingsW(&devmode, CDS_UPDATEREGISTRY | CDS_NORESET);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW failed with %d.\n", change_ret);
+
+    device_desc.adapter_ordinal = D3DADAPTER_DEFAULT;
+    device_desc.device_window = device_window;
+    device_desc.width = d3d_width;
+    device_desc.height = d3d_height;
+    device_desc.flags = 0;
+    device = create_device(d3d9, device_window, &device_desc);
+    ok(!!device, "Failed to create a D3D device.\n");
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &registry_mode), "Got a different mode.\n");
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations use display settings in the registry with a fullscreen device */
+    change_ret = ChangeDisplaySettingsW(&devmode, CDS_UPDATEREGISTRY | CDS_NORESET);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW failed with %d.\n", change_ret);
+
+    device_desc.adapter_ordinal = D3DADAPTER_DEFAULT;
+    device_desc.device_window = device_window;
+    device_desc.width = registry_mode.dmPelsWidth;
+    device_desc.height = registry_mode.dmPelsHeight;
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
+    device = create_device(d3d9, device_window, &device_desc);
+    ok(!!device, "Failed to create a D3D device.\n");
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &devmode), "Got a different mode.\n");
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations use display settings in the registry with a fullscreen device
+     * having the same display mode and then reset to a different mode */
+    change_ret = ChangeDisplaySettingsW(&devmode, CDS_UPDATEREGISTRY | CDS_NORESET);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW failed with %d.\n", change_ret);
+
+    device_desc.adapter_ordinal = D3DADAPTER_DEFAULT;
+    device_desc.device_window = device_window;
+    device_desc.width = registry_mode.dmPelsWidth;
+    device_desc.height = registry_mode.dmPelsHeight;
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
+    device = create_device(d3d9, device_window, &device_desc);
+    ok(!!device, "Failed to create a D3D device.\n");
+
+    device_desc.width = d3d_width;
+    device_desc.height = d3d_height;
+    hr = reset_device(device, &device_desc);
+    ok(hr == D3D_OK, "Failed to reset device, hr %#x.\n", hr);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(devmode2.dmPelsWidth == d3d_width && devmode2.dmPelsHeight == d3d_height,
+            "Expected resolution %ux%u, got %ux%u.\n", d3d_width, d3d_height,
+            devmode2.dmPelsWidth, devmode2.dmPelsHeight);
+
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &devmode), "Got a different mode.\n");
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    if (IDirect3D9_GetAdapterCount(d3d9) < 2)
+    {
+        skip("Following tests require two adapters.\n");
+        goto done;
+    }
+
+    second_monitor = IDirect3D9_GetAdapterMonitor(d3d9, 1);
+    monitor_info.cbSize = sizeof(monitor_info);
+    ret = GetMonitorInfoW(second_monitor, (MONITORINFO *)&monitor_info);
+    ok(ret, "GetMonitorInfoW failed, error %#x.\n", GetLastError());
+    lstrcpyW(second_monitor_name, monitor_info.szDevice);
+
+    memset(&old_devmode, 0, sizeof(old_devmode));
+    old_devmode.dmSize = sizeof(old_devmode);
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &old_devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+
+    i = 0;
+    d3d_width = 0;
+    d3d_height = 0;
+    user32_width = 0;
+    user32_height = 0;
+    while (EnumDisplaySettingsW(second_monitor_name, i++, &devmode))
+    {
+        if (devmode.dmPelsWidth == old_devmode.dmPelsWidth
+                && devmode.dmPelsHeight == old_devmode.dmPelsHeight)
+            continue;
+
+        if (!d3d_width && !d3d_height)
+        {
+            d3d_width = devmode.dmPelsWidth;
+            d3d_height = devmode.dmPelsHeight;
+            continue;
+        }
+
+        if (devmode.dmPelsWidth == d3d_width && devmode.dmPelsHeight == d3d_height)
+            continue;
+
+        user32_width = devmode.dmPelsWidth;
+        user32_height = devmode.dmPelsHeight;
+        break;
+    }
+    if (!user32_width || !user32_height)
+    {
+        skip("Failed to find three different display modes for the second monitor.\n");
+        goto done;
+    }
+
+    /* Test that mode restorations also happen for non-primary monitors on device resets */
+    device_desc.adapter_ordinal = D3DADAPTER_DEFAULT;
+    device_desc.device_window = device_window;
+    device_desc.width = registry_mode.dmPelsWidth;
+    device_desc.height = registry_mode.dmPelsHeight;
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
+    device = create_device(d3d9, device_window, &device_desc);
+    ok(!!device, "Failed to create a D3D device.\n");
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL, CDS_RESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    if (devmode2.dmPelsWidth == old_devmode.dmPelsWidth
+            && devmode2.dmPelsHeight == old_devmode.dmPelsHeight)
+    {
+        skip("Failed to change display settings of the second monitor.\n");
+        refcount = IDirect3DDevice9_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+        goto done;
+    }
+
+    device_desc.flags = 0;
+    hr = reset_device(device, &device_desc);
+    ok(hr == D3D_OK, "Failed to reset device, hr %#x.\n", hr);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    hr = IDirect3D9_GetAdapterDisplayMode(d3d9, 1, &d3ddm);
+    ok(hr == S_OK, "GetAdapterDisplayMode failed, hr %#x.\n", hr);
+    ok(d3ddm.Width == old_devmode.dmPelsWidth, "Expected width %u, got %u.\n",
+            old_devmode.dmPelsWidth, d3ddm.Width);
+    ok(d3ddm.Height == old_devmode.dmPelsHeight, "Expected height %u, got %u.\n",
+            old_devmode.dmPelsHeight, d3ddm.Height);
+
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations happen for non-primary monitors on device releases */
+    device_desc.adapter_ordinal = D3DADAPTER_DEFAULT;
+    device_desc.device_window = device_window;
+    device_desc.width = registry_mode.dmPelsWidth;
+    device_desc.height = registry_mode.dmPelsHeight;
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
+    device = create_device(d3d9, device_window, &device_desc);
+    ok(!!device, "Failed to create a D3D device.\n");
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL, CDS_RESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    hr = IDirect3D9_GetAdapterDisplayMode(d3d9, 1, &d3ddm);
+    ok(hr == S_OK, "GetAdapterDisplayMode failed, hr %#x.\n", hr);
+    ok(d3ddm.Width == old_devmode.dmPelsWidth, "Expected width %u, got %u.\n",
+            old_devmode.dmPelsWidth, d3ddm.Width);
+    ok(d3ddm.Height == old_devmode.dmPelsHeight, "Expected height %u, got %u.\n",
+            old_devmode.dmPelsHeight, d3ddm.Height);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations for non-primary monitors use display settings in the registry */
+    device = create_device(d3d9, device_window, &device_desc);
+    ok(!!device, "Failed to create a D3D device.\n");
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL,
+            CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(devmode2.dmPelsWidth == devmode.dmPelsWidth && devmode2.dmPelsHeight == devmode.dmPelsHeight,
+            "Expected resolution %ux%u, got %ux%u.\n", devmode.dmPelsWidth, devmode.dmPelsHeight,
+            devmode2.dmPelsWidth, devmode2.dmPelsHeight);
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(devmode2.dmPelsWidth == devmode.dmPelsWidth && devmode2.dmPelsHeight == devmode.dmPelsHeight,
+            "Expected resolution %ux%u, got %ux%u.\n", devmode.dmPelsWidth, devmode.dmPelsHeight,
+            devmode2.dmPelsWidth, devmode2.dmPelsHeight);
+    hr = IDirect3D9_GetAdapterDisplayMode(d3d9, 1, &d3ddm);
+    ok(hr == S_OK, "GetAdapterDisplayMode failed, hr %#x.\n", hr);
+    ok(d3ddm.Width == devmode.dmPelsWidth && d3ddm.Height == devmode.dmPelsHeight,
+            "Expected resolution %ux%u, got %ux%u.\n", devmode.dmPelsWidth, devmode.dmPelsHeight,
+            d3ddm.Width, d3ddm.Height);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test mode restorations when there are two fullscreen devices and one of them got reset */
+    device = create_device(d3d9, focus_window, &device_desc);
+    ok(!!device, "Failed to create a D3D device.\n");
+
+    device_desc2.adapter_ordinal = 1;
+    device_desc2.device_window = device_window;
+    device_desc2.width = d3d_width;
+    device_desc2.height = d3d_height;
+    device_desc2.flags = CREATE_DEVICE_FULLSCREEN;
+    device2 = create_device(d3d9, focus_window, &device_desc2);
+    ok(!!device2, "Failed to create a D3D device.\n");
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL, CDS_RESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+
+    device_desc.flags = 0;
+    hr = reset_device(device, &device_desc);
+    ok(hr == D3D_OK, "Failed to reset device, hr %#x.\n", hr);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    hr = IDirect3D9_GetAdapterDisplayMode(d3d9, 1, &d3ddm);
+    ok(hr == S_OK, "GetAdapterDisplayMode failed, hr %#x.\n", hr);
+    ok(d3ddm.Width == old_devmode.dmPelsWidth && d3ddm.Height == old_devmode.dmPelsHeight,
+            "Expected resolution %ux%u, got %ux%u.\n", old_devmode.dmPelsWidth,
+            old_devmode.dmPelsHeight, d3ddm.Width, d3ddm.Height);
+
+    refcount = IDirect3DDevice9_Release(device2);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test mode restoration when there are two fullscreen devices and one of them got released */
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
+    device = create_device(d3d9, focus_window, &device_desc);
+    ok(!!device, "Failed to create a D3D device.\n");
+    device2 = create_device(d3d9, focus_window, &device_desc2);
+    ok(!!device2, "Failed to create a D3D device.\n");
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL, CDS_RESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    hr = IDirect3D9_GetAdapterDisplayMode(d3d9, 1, &d3ddm);
+    ok(hr == S_OK, "GetAdapterDisplayMode failed, hr %#x.\n", hr);
+    ok(d3ddm.Width == old_devmode.dmPelsWidth && d3ddm.Height == old_devmode.dmPelsHeight,
+            "Expected resolution %ux%u, got %ux%u.\n", old_devmode.dmPelsWidth,
+            old_devmode.dmPelsHeight, d3ddm.Width, d3ddm.Height);
+
+    refcount = IDirect3DDevice9_Release(device2);
+    ok(!refcount, "Device has %u references left.\n", refcount);
 
 done:
     DestroyWindow(device_window);
     DestroyWindow(focus_window);
     IDirect3D9_Release(d3d9);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+    heap_free(original_modes);
 }
 
 static void test_device_window_reset(void)
@@ -12768,8 +13159,7 @@ static void test_device_caps(void)
         test_device_caps_adapter_group(&caps, adapter_idx, adapter_count);
         ok(!(caps.Caps & ~D3DCAPS_READ_SCANLINE),
                 "Adapter %u: Caps field has unexpected flags %#x.\n", adapter_idx, caps.Caps);
-        ok(!(caps.Caps2 & ~(D3DCAPS2_NO2DDURING3DSCENE | D3DCAPS2_FULLSCREENGAMMA
-                | D3DCAPS2_CANRENDERWINDOWED | D3DCAPS2_CANCALIBRATEGAMMA | D3DCAPS2_RESERVED
+        ok(!(caps.Caps2 & ~(D3DCAPS2_FULLSCREENGAMMA | D3DCAPS2_CANCALIBRATEGAMMA | D3DCAPS2_RESERVED
                 | D3DCAPS2_CANMANAGERESOURCE | D3DCAPS2_DYNAMICTEXTURES | D3DCAPS2_CANAUTOGENMIPMAP
                 | D3DCAPS2_CANSHARERESOURCE)),
                 "Adapter %u: Caps2 field has unexpected flags %#x.\n", adapter_idx, caps.Caps2);
@@ -13746,9 +14136,8 @@ static void test_multi_adapter(void)
     }
 
     adapter_count = IDirect3D9_GetAdapterCount(d3d);
-    todo_wine_if(expected_adapter_count > 1)
-        ok(adapter_count == expected_adapter_count, "Got unexpected adapter count %u, expected %u.\n",
-                adapter_count, expected_adapter_count);
+    ok(adapter_count == expected_adapter_count, "Got unexpected adapter count %u, expected %u.\n",
+            adapter_count, expected_adapter_count);
 
     for (i = 0; i < adapter_count; ++i)
     {
@@ -13756,8 +14145,8 @@ static void test_multi_adapter(void)
         ok(!!monitor, "Adapter %u: Failed to get monitor.\n", i);
 
         monitor_info.cbSize = sizeof(monitor_info);
-        ok(GetMonitorInfoA(monitor, (MONITORINFO *)&monitor_info),
-                "Adapter %u: Failed to get monitor info, error %#x.\n", i, GetLastError());
+        ret = GetMonitorInfoA(monitor, (MONITORINFO *)&monitor_info);
+        ok(ret, "Adapter %u: Failed to get monitor info, error %#x.\n", i, GetLastError());
 
         if (!i)
             ok(monitor_info.dwFlags == MONITORINFOF_PRIMARY,
@@ -13853,18 +14242,71 @@ struct IDirect3DShaderValidator9
     const struct IDirect3DShaderValidator9Vtbl *vtbl;
 };
 
+#define MAX_VALIDATOR_CB_CALL_COUNT 5
+
+struct test_shader_validator_cb_context
+{
+    unsigned int call_count;
+    const char *file[MAX_VALIDATOR_CB_CALL_COUNT];
+    int line[MAX_VALIDATOR_CB_CALL_COUNT];
+    DWORD_PTR message_id[MAX_VALIDATOR_CB_CALL_COUNT];
+    const char *message[MAX_VALIDATOR_CB_CALL_COUNT];
+};
+
 HRESULT WINAPI test_shader_validator_cb(const char *file, int line, DWORD_PTR arg3,
         DWORD_PTR message_id, const char *message, void *context)
 {
-    ok(0, "Unexpected call.\n");
+    if (context)
+    {
+        struct test_shader_validator_cb_context *c = context;
+
+        c->file[c->call_count] = file;
+        c->line[c->call_count] = line;
+        c->message_id[c->call_count] = message_id;
+        c->message[c->call_count] = message;
+        ++c->call_count;
+    }
+    else
+    {
+        ok(0, "Unexpected call.\n");
+    }
     return S_OK;
 }
 
 static void test_shader_validator(void)
 {
+    static const unsigned int dcl_texcoord_9_9[] = {0x0200001f, 0x80090005, 0x902f0009};   /* dcl_texcoord9_pp v9 */
+    static const unsigned int dcl_texcoord_9_10[] = {0x0200001f, 0x80090005, 0x902f000a};  /* dcl_texcoord9_pp v10 */
+    static const unsigned int dcl_texcoord_10_9[] = {0x0200001f, 0x800a0005, 0x902f0009};  /* dcl_texcoord10_pp v9 */
+    static const unsigned int mov_r2_v9[] = {0x02000001, 0x80220002, 0x90ff0009};          /* mov_pp r2.y, v9.w */
+    static const unsigned int mov_r2_v10[] = {0x02000001, 0x80220002, 0x90ff000a};         /* mov_pp r2.y, v10.w */
+
+    static const unsigned int ps_3_0 = D3DPS_VERSION(3, 0);
+    static const unsigned int end_token = 0x0000ffff;
+    static const char *test_file_name = "test_file";
+    static const struct instruction_test
+    {
+        unsigned int shader_version;
+        const unsigned int *instruction;
+        unsigned int instruction_length;
+        DWORD_PTR message_id;
+        const unsigned int *decl;
+        unsigned int decl_length;
+    }
+    instruction_tests[] =
+    {
+        {D3DPS_VERSION(3, 0), dcl_texcoord_9_9, ARRAY_SIZE(dcl_texcoord_9_9)},
+        {D3DPS_VERSION(3, 0), dcl_texcoord_9_10, ARRAY_SIZE(dcl_texcoord_9_10), 0x12c},
+        {D3DPS_VERSION(3, 0), dcl_texcoord_10_9, ARRAY_SIZE(dcl_texcoord_10_9)},
+        {D3DPS_VERSION(3, 0), mov_r2_v9, ARRAY_SIZE(mov_r2_v9), 0, dcl_texcoord_9_9, ARRAY_SIZE(dcl_texcoord_9_9)},
+        {D3DPS_VERSION(3, 0), mov_r2_v10, ARRAY_SIZE(mov_r2_v10), 0x167},
+    };
+
+    struct test_shader_validator_cb_context context;
     IDirect3DShaderValidator9 *validator;
+    HRESULT expected_hr, hr;
+    unsigned int i;
     ULONG refcount;
-    HRESULT hr;
 
     validator = Direct3DShaderValidatorCreate9();
 
@@ -13886,6 +14328,104 @@ static void test_shader_validator(void)
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     hr = validator->vtbl->End(validator);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = validator->vtbl->Begin(validator, test_shader_validator_cb, &context, 0);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&context, 0, sizeof(context));
+    hr = validator->vtbl->Instruction(validator, test_file_name, 28, &simple_vs[1], 3);
+    todo_wine
+    {
+        ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+        ok(context.call_count == 2, "Got unexpected call_count %u.\n", context.call_count);
+        ok(!!context.message[0], "Got NULL message.\n");
+        ok(!!context.message[1], "Got NULL message.\n");
+        ok(context.message_id[0] == 0xef, "Got unexpected message_id[0] %p.\n", (void *)context.message_id[0]);
+        ok(context.message_id[1] == 0xf0, "Got unexpected message_id[1] %p.\n", (void *)context.message_id[1]);
+        ok(context.line[0] == -1, "Got unexpected line %d.\n", context.line[0]);
+    }
+    ok(!context.file[0], "Got unexpected file[0] %s.\n", context.file[0]);
+    ok(!context.file[1], "Got unexpected file[0] %s.\n", context.file[1]);
+    ok(!context.line[1], "Got unexpected line %d.\n", context.line[1]);
+
+    memset(&context, 0, sizeof(context));
+    hr = validator->vtbl->End(validator);
+    todo_wine ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(!context.call_count, "Got unexpected call_count %u.\n", context.call_count);
+
+    memset(&context, 0, sizeof(context));
+    hr = validator->vtbl->Begin(validator, test_shader_validator_cb, &context, 0);
+    todo_wine
+    {
+        ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+        ok(context.call_count == 1, "Got unexpected call_count %u.\n", context.call_count);
+        ok(context.message_id[0] == 0xeb, "Got unexpected message_id[0] %p.\n", (void *)context.message_id[0]);
+        ok(!!context.message[0], "Got NULL message.\n");
+    }
+    ok(!context.file[0], "Got unexpected file[0] %s.\n", context.file[0]);
+    ok(!context.line[0], "Got unexpected line %d.\n", context.line[0]);
+
+    hr = validator->vtbl->Begin(validator, NULL, &context, 0);
+    todo_wine ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+
+    refcount = validator->vtbl->Release(validator);
+    todo_wine ok(!refcount, "Validator has %u references left.\n", refcount);
+    validator = Direct3DShaderValidatorCreate9();
+
+    hr = validator->vtbl->Begin(validator, NULL, &context, 0);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = validator->vtbl->Instruction(validator, test_file_name, 1, &ps_3_0, 1);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = validator->vtbl->Instruction(validator, test_file_name, 5, &end_token, 1);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = validator->vtbl->End(validator);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(instruction_tests); ++i)
+    {
+        const struct instruction_test *test = &instruction_tests[i];
+
+        hr = validator->vtbl->Begin(validator, test_shader_validator_cb, &context, 0);
+        ok(hr == S_OK, "Got unexpected hr %#x, test %u.\n", hr, i);
+
+        hr = validator->vtbl->Instruction(validator, test_file_name, 1, &test->shader_version, 1);
+        ok(hr == S_OK, "Got unexpected hr %#x, test %u.\n", hr, i);
+
+        if (test->decl)
+        {
+            memset(&context, 0, sizeof(context));
+            hr = validator->vtbl->Instruction(validator, test_file_name, 3, test->decl, test->decl_length);
+            ok(hr == S_OK, "Got unexpected hr %#x, test %u.\n", hr, i);
+            ok(!context.call_count, "Got unexpected call_count %u, test %u.\n", context.call_count, i);
+        }
+
+        memset(&context, 0, sizeof(context));
+        hr = validator->vtbl->Instruction(validator, test_file_name, 3, test->instruction, test->instruction_length);
+        ok(hr == S_OK, "Got unexpected hr %#x, test %u.\n", hr, i);
+        if (test->message_id)
+        {
+            todo_wine
+            {
+                ok(context.call_count == 1, "Got unexpected call_count %u, test %u.\n", context.call_count, i);
+                ok(!!context.message[0], "Got NULL message, test %u.\n", i);
+                ok(context.message_id[0] == test->message_id, "Got unexpected message_id[0] %p, test %u.\n",
+                        (void *)context.message_id[0], i);
+                ok(context.file[0] == test_file_name, "Got unexpected file[0] %s, test %u.\n", context.file[0], i);
+                ok(context.line[0] == 3, "Got unexpected line %d, test %u.\n", context.line[0], i);
+            }
+        }
+        else
+        {
+            ok(!context.call_count, "Got unexpected call_count %u, test %u.\n", context.call_count, i);
+        }
+
+        hr = validator->vtbl->Instruction(validator, test_file_name, 5, &end_token, 1);
+        ok(hr == S_OK, "Got unexpected hr %#x, test %u.\n", hr, i);
+
+        hr = validator->vtbl->End(validator);
+        expected_hr = test->message_id ? E_FAIL : S_OK;
+        todo_wine_if(expected_hr) ok(hr == expected_hr, "Got unexpected hr %#x, test %u.\n", hr, i);
+    }
 
     refcount = validator->vtbl->Release(validator);
     todo_wine ok(!refcount, "Validator has %u references left.\n", refcount);
@@ -13948,6 +14488,7 @@ static void test_cursor_clipping(void)
     IDirect3D9 *d3d;
     HWND window;
     HRESULT hr;
+    BOOL ret;
 
     window = create_window();
     ok(!!window, "Failed to create a window.\n");
@@ -13974,10 +14515,12 @@ static void test_cursor_clipping(void)
                 "Adapter %u: Failed to find a different mode than %ux%u.\n", adapter_idx,
                 current_mode.Width, current_mode.Height);
 
-        ok(ClipCursor(NULL), "Adapter %u: ClipCursor failed, error %#x.\n", adapter_idx,
+        ret = ClipCursor(NULL);
+        ok(ret, "Adapter %u: ClipCursor failed, error %#x.\n", adapter_idx,
                 GetLastError());
         get_virtual_rect(&virtual_rect);
-        ok(GetClipCursor(&clip_rect), "Adapter %u: GetClipCursor failed, error %#x.\n", adapter_idx,
+        ret = GetClipCursor(&clip_rect);
+        ok(ret, "Adapter %u: GetClipCursor failed, error %#x.\n", adapter_idx,
                 GetLastError());
         ok(EqualRect(&clip_rect, &virtual_rect), "Adapter %u: Expect clip rect %s, got %s.\n",
                 adapter_idx, wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&clip_rect));
@@ -13992,7 +14535,8 @@ static void test_cursor_clipping(void)
         }
         flush_events();
         get_virtual_rect(&virtual_rect);
-        ok(GetClipCursor(&clip_rect), "Adapter %u: GetClipCursor failed, error %#x.\n", adapter_idx,
+        ret = GetClipCursor(&clip_rect);
+        ok(ret, "Adapter %u: GetClipCursor failed, error %#x.\n", adapter_idx,
                 GetLastError());
         ok(EqualRect(&clip_rect, &virtual_rect), "Adapter %u: Expect clip rect %s, got %s.\n",
                 adapter_idx, wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&clip_rect));
@@ -14000,7 +14544,8 @@ static void test_cursor_clipping(void)
         IDirect3DDevice9_Release(device);
         flush_events();
         get_virtual_rect(&virtual_rect);
-        ok(GetClipCursor(&clip_rect), "Adapter %u: GetClipCursor failed, error %#x.\n", adapter_idx,
+        ret = GetClipCursor(&clip_rect);
+        ok(ret, "Adapter %u: GetClipCursor failed, error %#x.\n", adapter_idx,
                 GetLastError());
         ok(EqualRect(&clip_rect, &virtual_rect), "Adapter %u: Expect clip rect %s, got %s.\n",
                 adapter_idx, wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&clip_rect));

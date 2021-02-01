@@ -182,7 +182,7 @@
 @ stub BaseProcessInitPostImport
 # @ stub BaseQueryModuleData
 # @ stub BaseSetLastNTError
-# @ stub BaseThreadInitThunk
+@ stdcall -fastcall BaseThreadInitThunk(long ptr ptr)
 @ stub BaseUpdateAppcompatCache
 # @ stub BaseVerifyUnicodeString
 # @ stub Basep8BitStringToDynamicUnicodeString
@@ -195,7 +195,7 @@
 # @ stub BasepFreeActivationContextActivationBlock
 # @ stub BasepFreeAppCompatData
 # @ stub BasepMapModuleHandle
-@ stdcall Beep(long long)
+@ stdcall -import Beep(long long)
 @ stdcall BeginUpdateResourceA(str long)
 @ stdcall BeginUpdateResourceW(wstr long)
 @ stdcall BindIoCompletionCallback(long ptr long)
@@ -256,7 +256,7 @@
 @ stdcall -import ConvertThreadToFiber(ptr)
 @ stdcall -import ConvertThreadToFiberEx(ptr long)
 @ stdcall ConvertToGlobalHandle(long)
-# @ stub CopyContext
+@ stdcall -import -arch=i386,x86_64 CopyContext(ptr long ptr)
 @ stdcall CopyFileA(str str long)
 @ stdcall CopyFileExA (str str ptr ptr ptr long)
 @ stdcall -import CopyFileExW(wstr wstr ptr ptr ptr long)
@@ -517,8 +517,8 @@
 @ stdcall -import FlsFree(long)
 @ stdcall -import FlsGetValue(long)
 @ stdcall -import FlsSetValue(long ptr)
-@ stdcall FlushConsoleInputBuffer(long)
-@ stdcall FlushFileBuffers(long) KERNEL32_FlushFileBuffers
+@ stdcall -import FlushConsoleInputBuffer(long)
+@ stdcall -import FlushFileBuffers(long)
 @ stdcall -import FlushInstructionCache(long long long)
 @ stdcall FlushProcessWriteBuffers() ntdll.NtFlushProcessWriteBuffers
 @ stdcall -import FlushViewOfFile(ptr long)
@@ -659,7 +659,7 @@
 # @ stub GetDurationFormatEx
 @ stdcall -import GetDynamicTimeZoneInformation(ptr)
 @ stdcall -import GetDynamicTimeZoneInformationEffectiveYears(ptr ptr ptr)
-@ stdcall -ret64 -arch=i386,x86_64 GetEnabledXStateFeatures()
+@ stdcall -import -ret64 -arch=i386,x86_64 GetEnabledXStateFeatures()
 @ stdcall -import GetEnvironmentStrings()
 @ stdcall -import GetEnvironmentStringsA()
 @ stdcall -import GetEnvironmentStringsW()
@@ -895,7 +895,8 @@
 @ stdcall -import GetWindowsDirectoryA(ptr long)
 @ stdcall -import GetWindowsDirectoryW(ptr long)
 @ stdcall -import GetWriteWatch(long ptr long ptr ptr ptr)
-# @ stub GetXStateFeaturesMask
+@ stdcall -import -arch=i386,x86_64 GetXStateFeaturesMask(ptr ptr)
+@ stdcall -import -arch=i386,x86_64 SetXStateFeaturesMask(ptr int64)
 @ stdcall GlobalAddAtomA(str)
 @ stdcall GlobalAddAtomW(wstr)
 @ stdcall -import GlobalAlloc(long long)
@@ -950,7 +951,8 @@
 @ stdcall InitOnceExecuteOnce(ptr ptr ptr ptr) kernelbase.InitOnceExecuteOnce
 @ stdcall InitOnceInitialize(ptr) ntdll.RtlRunOnceInitialize
 @ stdcall InitializeConditionVariable(ptr) ntdll.RtlInitializeConditionVariable
-# @ stub InitializeContext
+@ stdcall -import -arch=i386,x86_64 InitializeContext(ptr long ptr ptr)
+@ stdcall -import -arch=i386,x86_64 InitializeContext2(ptr long ptr ptr int64)
 @ stdcall InitializeCriticalSection(ptr) ntdll.RtlInitializeCriticalSection
 @ stdcall -import InitializeCriticalSectionAndSpinCount(ptr long)
 @ stdcall -import InitializeCriticalSectionEx(ptr long long)
@@ -1070,7 +1072,7 @@
 @ stdcall LocalSize(long)
 @ stdcall -import LocalUnlock(long)
 @ stdcall -import LocaleNameToLCID(wstr long)
-# @ stub LocateXStateFeature
+@ stdcall -import -arch=i386,x86_64 LocateXStateFeature(ptr long ptr)
 @ stdcall -import LockFile(long long long long long)
 @ stdcall -import LockFileEx(long long long long long ptr)
 @ stdcall -import LockResource(long)
@@ -1191,19 +1193,19 @@
 @ stdcall -import QueueUserWorkItem(ptr ptr long)
 @ stdcall -import RaiseException(long long long ptr)
 # @ stub RaiseFailFastException
-@ stdcall ReadConsoleA(long ptr long ptr ptr)
-@ stdcall ReadConsoleInputA(long ptr long ptr)
+@ stdcall -import ReadConsoleA(long ptr long ptr ptr)
+@ stdcall -import ReadConsoleInputA(long ptr long ptr)
 @ stub ReadConsoleInputExA
 @ stub ReadConsoleInputExW
-@ stdcall ReadConsoleInputW(long ptr long ptr)
+@ stdcall -import ReadConsoleInputW(long ptr long ptr)
 @ stdcall -import ReadConsoleOutputA(long ptr long long ptr)
 @ stdcall -import ReadConsoleOutputAttribute(long ptr long long ptr)
 @ stdcall -import ReadConsoleOutputCharacterA(long ptr long long ptr)
 @ stdcall -import ReadConsoleOutputCharacterW(long ptr long long ptr)
 @ stdcall -import ReadConsoleOutputW(long ptr long long ptr)
-@ stdcall ReadConsoleW(long ptr long ptr ptr)
+@ stdcall -import ReadConsoleW(long ptr long ptr ptr)
 @ stdcall -import ReadDirectoryChangesW(long ptr long long long ptr ptr ptr)
-@ stdcall ReadFile(long ptr long ptr ptr) KERNEL32_ReadFile
+@ stdcall -import ReadFile(long ptr long ptr ptr)
 @ stdcall -import ReadFileEx(long ptr long ptr ptr)
 @ stdcall -import ReadFileScatter(long ptr long ptr ptr)
 @ stdcall -import ReadProcessMemory(long ptr ptr long ptr)
@@ -1270,8 +1272,8 @@
 @ stdcall ReleaseSemaphoreWhenCallbackReturns(ptr long long) ntdll.TpCallbackReleaseSemaphoreOnCompletion
 @ stdcall ReleaseSRWLockExclusive(ptr) ntdll.RtlReleaseSRWLockExclusive
 @ stdcall ReleaseSRWLockShared(ptr) ntdll.RtlReleaseSRWLockShared
-@ stdcall RemoveDirectoryA(str)
-@ stdcall RemoveDirectoryW(wstr)
+@ stdcall -import RemoveDirectoryA(str)
+@ stdcall -import RemoveDirectoryW(wstr)
 # @ stub RemoveLocalAlternateComputerNameA
 # @ stub RemoveLocalAlternateComputerNameW
 @ stdcall RemoveVectoredContinueHandler(ptr) ntdll.RtlRemoveVectoredContinueHandler
@@ -1617,7 +1619,7 @@
 @ stdcall -import Wow64RevertWow64FsRedirection(ptr)
 @ stdcall Wow64SetThreadContext(long ptr)
 # @ stub Wow64SuspendThread
-@ stdcall WriteConsoleA(long ptr long ptr ptr)
+@ stdcall -import WriteConsoleA(long ptr long ptr ptr)
 @ stdcall -import WriteConsoleInputA(long ptr long ptr)
 @ stub WriteConsoleInputVDMA
 @ stub WriteConsoleInputVDMW
@@ -1627,8 +1629,8 @@
 @ stdcall -import WriteConsoleOutputCharacterA(long ptr long long ptr)
 @ stdcall -import WriteConsoleOutputCharacterW(long ptr long long ptr)
 @ stdcall -import WriteConsoleOutputW(long ptr long long ptr)
-@ stdcall WriteConsoleW(long ptr long ptr ptr)
-@ stdcall WriteFile(long ptr long ptr ptr) KERNEL32_WriteFile
+@ stdcall -import WriteConsoleW(long ptr long ptr ptr)
+@ stdcall -import WriteFile(long ptr long ptr ptr)
 @ stdcall -import WriteFileEx(long ptr long ptr ptr)
 @ stdcall -import WriteFileGather(long ptr long ptr ptr)
 @ stdcall WritePrivateProfileSectionA(str str str)
@@ -1645,7 +1647,7 @@
 @ stdcall WriteTapemark(ptr long long long)
 @ stdcall -import ZombifyActCtx(ptr)
 @ stdcall -arch=x86_64 -private __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
-@ cdecl -arch=arm,x86_64 -norelay __chkstk() ntdll.__chkstk
+@ cdecl -arch=arm,arm64,x86_64 -norelay __chkstk() ntdll.__chkstk
 @ stub _DebugOut
 @ stub _DebugPrintf
 @ stdcall _hread(long ptr long)
@@ -1686,6 +1688,3 @@
 # Unix files
 @ cdecl wine_get_unix_file_name(wstr)
 @ cdecl wine_get_dos_file_name(str)
-
-# Init code
-@ cdecl -norelay -private __wine_start_process()

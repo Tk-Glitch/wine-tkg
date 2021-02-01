@@ -1,59 +1,15 @@
-# Last wine-tkg-staging-fsync-vkd3d-git configuration - Mon Sep 28 01:27:36 PM CEST 2020 :
+# Last wine-tkg-staging-fsync-git configuration - Mon Feb  1 09:00:07 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 5.18.r0.g9a6e5b2329
-Using wine-staging patchset (version 5.18.r3.g9acfa3b8)
+Wine (plain) version: 6.1.r0.g47ac628b4a4
+Using wine-staging patchset (version 6.1.r0.gf6dacd2f)
 
 Disabled the local Esync patchset to use Staging impl instead.
-Using VKD3D for d3d12 translation
+Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
 
-Hotfix: 3a9edf9aad43c3e8ba724571da5381f821f1dc56 revert path used
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
-4a330b29212402b9700828be82939112bd11a786 reverted 
-bbae35f0fb04ea7efb8e1d6e5535e42715ae7766 reverted 
-ec245c7e300f7cb779cf404079872f68c812585e reverted 
-586f68f414924b1e41fec10a72b1aacced068885 reverted 
-d9625e5a01a52496d1fb7f1a9a691fd3ec8332db reverted 
-715a04daabdab616b530ef5a937827df7c2523c3 reverted 
-f04360cfbec574dc37675df141ef8fc14e1302ba reverted 
-1aa7c9af90c340f45e03c6b94525704ad19eb657 reverted 
-fd29fe4ea73d87e39bd3d0ddd791c14f536508b7 reverted 
-2b484b1ac7a5510be54cb5341143d89dc1924b37 reverted 
-440fab3870b3c9ea778031ec51db69f8c3a687f5 reverted 
-b45c04f4c352ef81df5312684008839f4eeee03d reverted 
-9c99d9bceba34559a32f1e5906a6fcbcf91b0004 reverted 
-2116b49717f26802b51e2904de8d74651da33545 reverted 
-5491e939bc22f0ab479aec6b8a525be9c5ff5e35 reverted 
-d13b61b7385a6a380fb91720c511b194926fa0ca reverted 
-4a2481631331e2743476ea4e1b0005f8f5024242 reverted 
-0d42388095e4fd5c7702a61824b01ce0f9fc4d74 reverted 
-7dd52f6d24f372f08ab71f0acbb0a2b028d390ba reverted 
-9905a5a81d6baf59e992c5b2a8ea92ee4054e5d6 reverted 
-45d991d54138523e5278db5618eb458100982294 reverted 
-f5e6c086f91749e9e302c1abf858807535bc9775 reverted 
-a8b4cf7f2d3d1fbd79308a106a84e753cdac69e8 reverted 
-2a6de8d7f7d6f5ac018d8e330cfa580fc0c3b9e5 reverted 
-6f305dd881e16f77f9eb183684d04b0b8746b769 reverted 
-679ff720902b8e5d5d750b980084bdcdc9a051ed reverted 
-0b0ac41981006514616abdd4c4b6922cf66be7b6 reverted 
-dd13b274104b561f05873e8acdc4bfd34bbe796e reverted 
-3a3c7cbd209e23cc6ee88299b3ba877ab20a767f reverted 
-6f9d20806e821ab07c8adf81ae6630fae94b00ef reverted 
-145cfce1135a7e59cc4c89cd05b572403f188161 reverted 
-e3eb89d5ebb759e975698b97ed8b547a9de3853f reverted 
-707fcb99a60015fcbb20c83e9031bc5be7a58618 reverted 
-8cd6245b7633abccd68f73928544ae4de6f76d52 reverted 
-26b26a2e0efcb776e7b0115f15580d2507b10400 reverted 
-fd6f50c0d3e96947846ca82ed0c9bd79fd8e5b80 reverted 
-2538b0100fbbe1223e7c18a52bade5cfe5f8d3e3 reverted 
-( FS hack unbreak reverts applied )
-
-Applied hotfix 06877e55b1100cc49d3726e9a70f31c4dfbe66f8-99.mystagingpatch
-Applied hotfix 934a09585a15e8491e422b43624ffe632b02bd3c-3.mystagingpatch
-Applied hotfix ntdll-ForceBottomUpAlloc-97fbe3f.mystagingpatch
-Applied hotfix 001-8db14f4e18a3770b4ac3cfe6e1ddbe17dec342d7.myearlypatch
 use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
 plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
 FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
@@ -61,34 +17,26 @@ childwindow.patch -- ( Applied child window for vk patch )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W ntdll-SystemRoot_Symlink -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W winex11.drv-mouse-coorrds -W winex11-MWM_Decorations -W user32-rawinput-mouse -W user32-rawinput-mouse-experimental -W user32-rawinput-hid
+Staging overrides, if any: -W ntdll-NtAlertThreadByThreadId
 
 mk11.patch -- ( Applied Mortal Kombat 11 fix )
-fsync-staging.patch -- ( Applied fsync, an experimental replacement for esync (staging) )
+fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
-fsync-spincounts.patch -- ( Add a configurable spin count to fsync )
 
-valve_proton_fullscreen_hack-staging.patch -- ( Applied Proton fullscreen hack patch (staging) )
-proton-rawinput.patch -- ( Using rawinput patchset )
-LAA-staging.patch -- ( Applied large address aware override support )
-proton-staging_winex11-MWM_Decorations.patch -- ( Applied proton friendly winex11-MWM_Decorations )
+LAA-unix-staging.patch -- ( Applied large address aware override support )
 
 proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 2/3 )
 proton-pa-staging.patch -- ( Enable Proton's PA additions )
-proton-vk-bits-4.5.patch -- ( Enable Proton vulkan bits for 4.5+ )
-proton_fs_hack_integer_scaling.patch -- ( Enable Proton fs hack integer scaling )
+proton-cpu-topology-overrides.patch -- ( Enable Proton's CPU topology override support )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
-josh-flat-theme-6456973.patch -- ( Add Josh's better-theme )
+josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
 
-Applied hotfix d8d6a6b2e639d2e29e166a3faf988b81388ae191.mypatch
-Applied hotfix origin_3078f10d_fix.mypatch
-Applied hotfix 001-SMBIOS-0720c6cf.mypatch
-Applied hotfix 002-SMBIOS-d29c33a3.mypatch
-Applied hotfix 001-8622eb326fb8120fc038e27947e61677d4124f15-staging.mypatch
+Applied hotfix mfplat-derek-hotfix.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
-Applied your own patch GNUTLShack.mypatch
 Applied your own patch amdags.mypatch
+Applied your own patch fsync_futex2.mypatch
+Applied your own patch ntdll_Map_top-down_if_dll_characteristics_include_DYNAMIC_BASE.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
 
 wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

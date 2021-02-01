@@ -4,6 +4,8 @@ IMPORTS   = windowscodecs uuid ole32 oleaut32 propsys rpcrt4 shlwapi user32 gdi3
 EXTRAINCL = $(JPEG_CFLAGS) $(PNG_CFLAGS) $(TIFF_CFLAGS)
 EXTRALIBS = $(APPLICATIONSERVICES_LIBS)
 
+EXTRADLLFLAGS = -mno-cygwin
+
 C_SRCS = \
 	bitmap.c \
 	bmpdecode.c \
@@ -14,13 +16,17 @@ C_SRCS = \
 	colortransform.c \
 	converter.c \
 	ddsformat.c \
+	decoder.c \
+	encoder.c \
 	fliprotate.c \
 	gifformat.c \
-	icnsformat.c \
+	icnsencoder.c \
 	icoformat.c \
 	imgfactory.c \
 	info.c \
-	jpegformat.c \
+	libjpeg.c \
+	libpng.c \
+	libtiff.c \
 	main.c \
 	metadatahandler.c \
 	metadataquery.c \
@@ -32,9 +38,11 @@ C_SRCS = \
 	scaler.c \
 	stream.c \
 	tgaformat.c \
-	tiffformat.c \
 	ungif.c \
-	uuid.c
+	unix_iface.c \
+	unix_lib.c \
+	uuid.c \
+	wincodecs_common.c
 
 RC_SRCS = version.rc
 

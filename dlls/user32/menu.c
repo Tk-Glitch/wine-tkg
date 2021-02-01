@@ -39,9 +39,6 @@
  *        - MNS_MODELESS
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 #include <string.h>
 
@@ -52,7 +49,6 @@
 #include "wingdi.h"
 #include "winnls.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
 #include "wine/exception.h"
 #include "win.h"
 #include "controls.h"
@@ -404,9 +400,7 @@ static inline UINT get_scroll_arrow_height(const POPUPMENU *menu)
  */
 static HMENU MENU_CopySysPopup(BOOL mdi)
 {
-    static const WCHAR sysmenuW[] = {'S','Y','S','M','E','N','U',0};
-    static const WCHAR sysmenumdiW[] = {'S','Y','S','M','E','N','U','M','D','I',0};
-    HMENU hMenu = LoadMenuW(user32_module, (mdi ? sysmenumdiW : sysmenuW));
+    HMENU hMenu = LoadMenuW(user32_module, mdi ? L"SYSMENUMDI" : L"SYSMENU");
 
     if( hMenu ) {
         MENUINFO minfo;
@@ -803,11 +797,11 @@ static UINT MENU_FindItemByKey( HWND hwndOwner, HMENU hmenu,
 		    do
 		    {
 			const WCHAR *q = p + 2;
-			p = strchrW (q, '&');
-			if (!p && cjk) p = strchrW (q, '\036'); /* Japanese Win16 */
+			p = wcschr (q, '&');
+			if (!p && cjk) p = wcschr (q, '\036'); /* Japanese Win16 */
 		    }
 		    while (p != NULL && p [1] == '&');
-		    if (p && (toupperW(p[1]) == toupperW(key))) return i;
+		    if (p && (towupper(p[1]) == towupper(key))) return i;
 		}
 	     }
 	}
@@ -983,9 +977,7 @@ static void MENU_DrawBitmapItem( HDC hdc, MENUITEM *lpitem, const RECT *rect,
             /* draw the magic bitmaps using marlett font characters */
             /* FIXME: fontsize and the position (x,y) could probably be better */
             HFONT hfont, hfontsav;
-            LOGFONTW logfont = { 0, 0, 0, 0, FW_NORMAL,
-                0, 0, 0, SYMBOL_CHARSET, 0, 0, 0, 0,
-                { 'M','a','r','l','e','t','t',0 } };
+            LOGFONTW logfont = { 0, 0, 0, 0, FW_NORMAL, 0, 0, 0, SYMBOL_CHARSET, 0, 0, 0, 0, L"Marlett" };
             logfont.lfHeight =  min( h, w) - 5 ;
             TRACE(" height %d rect %s\n", logfont.lfHeight, wine_dbgstr_rect( rect));
             hfont = CreateFontIndirectW( &logfont);
@@ -1134,7 +1126,7 @@ static void MENU_CalcItemSize( HDC hdc, MENUITEM *lpitem, HWND hwndOwner,
                     GetSystemMetrics( SM_CYMENU) - 1);
             lpitem->rect.right +=  2 * menucharsize.cx;
         } else {
-            if ((p = strchrW( lpitem->text, '\t' )) != NULL) {
+            if ((p = wcschr( lpitem->text, '\t' )) != NULL) {
                 RECT tmprc = rc;
                 LONG tmpheight;
                 int n = (int)( p - lpitem->text);
@@ -2216,7 +2208,7 @@ static LPCSTR MENU_ParseResource( LPCSTR res, HMENU hMenu )
             res += sizeof(WORD);
         }
         str = (LPCWSTR)res;
-        res += (strlenW(str) + 1) * sizeof(WCHAR);
+        res += (lstrlenW(str) + 1) * sizeof(WCHAR);
         if (flags & MF_POPUP)
         {
             HMENU hSubMenu = CreatePopupMenu();
@@ -2258,7 +2250,7 @@ static LPCSTR MENUEX_ParseResource( LPCSTR res, HMENU hMenu)
 	/* Align the text on a word boundary.  */
 	res += (~((UINT_PTR)res - 1)) & 1;
 	mii.dwTypeData = (LPWSTR) res;
-	res += (1 + strlenW(mii.dwTypeData)) * sizeof(WCHAR);
+	res += (1 + lstrlenW(mii.dwTypeData)) * sizeof(WCHAR);
 	/* Align the following fields on a dword boundary.  */
 	res += (~((UINT_PTR)res - 1)) & 3;
 
@@ -3833,7 +3825,7 @@ INT WINAPI GetMenuStringW( HMENU hMenu, UINT wItemID,
     item = &menu->items[pos];
 
     if (!str || !nMaxSiz)
-        ret = item->text ? strlenW(item->text) : 0;
+        ret = item->text ? lstrlenW(item->text) : 0;
     else if (!item->text)
     {
         str[0] = 0;
@@ -3842,7 +3834,7 @@ INT WINAPI GetMenuStringW( HMENU hMenu, UINT wItemID,
     else
     {
         lstrcpynW( str, item->text, nMaxSiz );
-        ret = strlenW(str);
+        ret = lstrlenW(str);
     }
     release_menu_ptr(menu);
 
@@ -4785,7 +4777,7 @@ static BOOL GetMenuItemInfo_common ( HMENU hmenu, UINT id, BOOL bypos,
             int len;
             if (unicode)
             {
-                len = strlenW(item->text);
+                len = lstrlenW(item->text);
                 if(lpmii->dwTypeData && lpmii->cch)
                     lstrcpynW(lpmii->dwTypeData, item->text, lpmii->cch);
             }
@@ -4894,8 +4886,8 @@ static inline void set_menu_item_text( MENUITEM *menu, LPCWSTR text, BOOL unicod
         menu->text = NULL;
     else if (unicode)
     {
-        if ((menu->text = HeapAlloc( GetProcessHeap(), 0, (strlenW(text)+1) * sizeof(WCHAR) )))
-            strcpyW( menu->text, text );
+        if ((menu->text = HeapAlloc( GetProcessHeap(), 0, (lstrlenW(text)+1) * sizeof(WCHAR) )))
+            lstrcpyW( menu->text, text );
     }
     else
     {

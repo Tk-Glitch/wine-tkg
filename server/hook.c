@@ -89,6 +89,7 @@ static const struct object_ops hook_table_ops =
     no_map_access,                /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
+    no_get_full_name,             /* get_full_name */
     no_lookup_name,               /* lookup_name */
     no_link_name,                 /* link_name */
     NULL,                         /* unlink_name */
@@ -294,18 +295,12 @@ static void hook_table_destroy( struct object *obj )
 }
 
 /* remove a hook, freeing it if the chain is not in use */
-void remove_hook( struct hook *hook )
+static void remove_hook( struct hook *hook )
 {
     if (hook->table->counts[hook->index])
         hook->proc = 0; /* chain is in use, just mark it and return */
     else
         free_hook( hook );
-}
-
-/* get the owner thread from a hook */
-extern struct thread *get_hook_thread( struct hook *hook )
-{
-    return hook->owner;
 }
 
 /* release a hook chain, removing deleted hooks if the use count drops to 0 */
@@ -380,14 +375,14 @@ unsigned int get_active_hooks(void)
 }
 
 /* return the thread that owns the first global hook */
-struct hook *get_first_global_hook( int id )
+struct thread *get_first_global_hook( int id )
 {
     struct hook *hook;
     struct hook_table *global_hooks = get_global_hooks( current );
 
     if (!global_hooks) return NULL;
     if (!(hook = get_first_valid_hook( global_hooks, id - WH_MINHOOK, EVENT_MIN, 0, 0, 0 ))) return NULL;
-    return hook;
+    return hook->owner;
 }
 
 /* set a window hook */

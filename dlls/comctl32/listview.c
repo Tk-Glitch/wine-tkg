@@ -422,7 +422,7 @@ typedef struct tagLISTVIEW_INFO
   TRACE("hwndSelf=%p, rcList=%s\n", iP->hwndSelf, wine_dbgstr_rect(&iP->rcList)); \
 } while(0)
 
-static const WCHAR themeClass[] = {'L','i','s','t','V','i','e','w',0};
+static const WCHAR themeClass[] = L"ListView";
 
 /*
  * forward declarations
@@ -4731,7 +4731,7 @@ static void LISTVIEW_DrawItemPart(LISTVIEW_INFO *infoPtr, LVITEMW *item, const N
 static BOOL LISTVIEW_DrawItem(LISTVIEW_INFO *infoPtr, HDC hdc, INT nItem, ITERATOR *subitems, POINT pos, DWORD cdmode)
 {
     WCHAR szDispText[DISP_TEXT_SIZE] = { '\0' };
-    static WCHAR callbackW[] = { '(', 'c', 'a', 'l', 'l', 'b', 'a', 'c', 'k', ')', 0 };
+    static WCHAR callbackW[] = L"(callback)";
     DWORD cdsubitemmode = CDRF_DODEFAULT;
     RECT *focus, rcBox;
     NMLVCUSTOMDRAW nmlvcd;

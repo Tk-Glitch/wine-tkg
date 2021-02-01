@@ -106,12 +106,8 @@ struct strmbase_sink_ops
 };
 
 /* Base Pin */
-HRESULT strmbase_pin_get_media_type(struct strmbase_pin *pin, unsigned int index, AM_MEDIA_TYPE *mt);
-
 HRESULT WINAPI BaseOutputPinImpl_GetDeliveryBuffer(struct strmbase_source *pin,
         IMediaSample **sample, REFERENCE_TIME *start, REFERENCE_TIME *stop, DWORD flags);
-HRESULT WINAPI BaseOutputPinImpl_Active(struct strmbase_source *pin);
-HRESULT WINAPI BaseOutputPinImpl_Inactive(struct strmbase_source *pin);
 HRESULT WINAPI BaseOutputPinImpl_InitAllocator(struct strmbase_source *pin, IMemAllocator **allocator);
 HRESULT WINAPI BaseOutputPinImpl_DecideAllocator(struct strmbase_source *pin, IMemInputPin *peer, IMemAllocator **allocator);
 HRESULT WINAPI BaseOutputPinImpl_AttemptConnection(struct strmbase_source *pin, IPin *peer, const AM_MEDIA_TYPE *mt);
@@ -130,7 +126,8 @@ struct strmbase_filter
     IUnknown IUnknown_inner;
     IUnknown *outer_unk;
     LONG refcount;
-    CRITICAL_SECTION csFilter;
+    CRITICAL_SECTION filter_cs;
+    CRITICAL_SECTION stream_cs;
 
     FILTER_STATE state;
     IReferenceClock *clock;
@@ -299,7 +296,6 @@ struct strmbase_renderer
 
     struct strmbase_sink sink;
 
-    CRITICAL_SECTION csRenderLock;
     /* Signaled when the filter has completed a state change. The filter waits
      * for this event in IBaseFilter::GetState(). */
     HANDLE state_event;

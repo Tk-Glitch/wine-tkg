@@ -29,7 +29,6 @@
 #include "oaidl.h"
 #include "initguid.h"
 
-static BOOL   (WINAPI *pIsDebuggerPresent)(void);
 static BOOL   (WINAPI *pQueryActCtxSettingsW)(DWORD,HANDLE,LPCWSTR,LPCWSTR,LPWSTR,SIZE_T,SIZE_T*);
 
 static NTSTATUS(NTAPI *pRtlFindActivationContextSectionString)(DWORD,const GUID *,ULONG,PUNICODE_STRING,PACTCTX_SECTION_KEYED_DATA);
@@ -289,6 +288,13 @@ static const char manifest10[] =
 "        </asmv2:requestedPrivileges>"
 "    </asmv2:security>"
 "</asmv2:trustInfo>"
+"</assembly>";
+
+/* Empty <dependency> element */
+static const char manifest11[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" xmlns:asmv2=\"urn:schemas-microsoft-com:asm.v2\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"<dependency />"
 "</assembly>";
 
 static const char testdep_manifest1[] =
@@ -2016,7 +2022,7 @@ static void test_actctx(void)
         test_detailed_info(handle, &detailed_info1, __LINE__);
         test_info_in_assembly(handle, 1, &manifest1_info, __LINE__);
 
-        if (pIsDebuggerPresent && !pIsDebuggerPresent())
+        if (!IsDebuggerPresent())
         {
             /* CloseHandle will generate an exception if a debugger is present */
             b = CloseHandle(handle);
@@ -2240,6 +2246,18 @@ static void test_actctx(void)
     }
     else
         skip("Could not create manifest file 10\n");
+
+    if (create_manifest_file("test11.manifest", manifest11, -1, NULL, NULL))
+    {
+        handle = test_create("test11.manifest");
+        ok(handle != INVALID_HANDLE_VALUE, "Failed to create activation context for %s, error %u\n",
+                "manifest11", GetLastError());
+        DeleteFileA("test11.manifest");
+        if (handle != INVALID_HANDLE_VALUE)
+            ReleaseActCtx(handle);
+    }
+    else
+        skip("Could not create manifest file 11\n");
 
     trace("manifest4\n");
 
@@ -2710,7 +2728,6 @@ static BOOL init_funcs(void)
     HMODULE hLibrary = GetModuleHandleA("kernel32.dll");
 
 #define X(f) if (!(p##f = (void*)GetProcAddress(hLibrary, #f))) return FALSE;
-    X(IsDebuggerPresent);
     pQueryActCtxSettingsW = (void *)GetProcAddress( hLibrary, "QueryActCtxSettingsW" );
 
     hLibrary = GetModuleHandleA("ntdll.dll");

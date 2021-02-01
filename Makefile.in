@@ -27,12 +27,9 @@ datarootdir     = @datarootdir@
 datadir         = @datadir@
 mandir          = @mandir@
 includedir      = @includedir@
-colordir        = ${datadir}/wine/color
 fontdir         = ${datadir}/wine/fonts
 nlsdir          = ${datadir}/wine/nls
 dlldir          = ${libdir}/wine
-top_srcdir      = @top_srcdir@
-top_builddir    = @top_builddir@
 srcdir          = @srcdir@
 SHELL           = /bin/sh
 CC              = @CC@
@@ -76,9 +73,7 @@ RUNTESTFLAGS    = -q -P wine
 MAKEDEP         = $(TOOLSDIR)/tools/makedep$(TOOLSEXT)
 DELAYLOADFLAG   = @DELAYLOADFLAG@
 PACKAGE_VERSION = @PACKAGE_VERSION@
-SED_CMD         = LC_ALL=C sed -e 's,@bindir\@,${bindir},g' -e 's,@dlldir\@,${dlldir},g' -e 's,@srcdir\@,${srcdir},g' -e 's,@PACKAGE_STRING\@,@PACKAGE_STRING@,g' -e 's,@PACKAGE_VERSION\@,@PACKAGE_VERSION@,g'
-LDRPATH_INSTALL = @LDRPATH_INSTALL@
-LDRPATH_LOCAL   = @LDRPATH_LOCAL@
+SED_CMD         = LC_ALL=C sed -e 's,@bindir\@,${bindir},g' -e 's,@dlldir\@,${dlldir},g' -e 's,@PACKAGE_STRING\@,@PACKAGE_STRING@,g' -e 's,@PACKAGE_VERSION\@,@PACKAGE_VERSION@,g'
 api_manext      = 3w
 WINELOADER_PROGRAMS = @WINELOADER_PROGRAMS@
 WINELOADER_DEPENDS  = @WINELOADER_DEPENDS@
@@ -114,20 +109,24 @@ distclean:: clean
 # Rules for API documentation
 
 install-manpages:: manpages
-	for i in documentation/man$(api_manext)/*.$(api_manext); do $(top_srcdir)/tools/install-sh -m 644 $(INSTALL_DATA_FLAGS) $$i $(DESTDIR)$(mandir)/$$i; done
+	for i in documentation/man$(api_manext)/*.$(api_manext); do $(srcdir)/tools/install-sh -m 644 $(INSTALL_DATA_FLAGS) $$i $(DESTDIR)$(mandir)/$$i; done
 
 .PHONY: install-manpages
 
-# Dependencies between directories
+# Rules for generated source files
 
-# dependencies needed to build any dll or program
-__tooldeps__: libs/wpp
-__builddeps__: __tooldeps__ libs/wine include po
-.PHONY: depend dummy install install-lib install-dev
+dlls/ntdll/unix/version.c: dummy
+	@version=`(echo "wine-6.1.r0.gf6dacd2f") | sed -n -e '$$s/\(.*\)/const char wine_build[] = "\1  ( TkG Staging Esync Fsync )";/p'` && (echo $$version | cmp -s - $@) || echo $$version >$@ || (rm -f $@ && exit 1)
 
-dummy:
-server: include
-libs/port libs/wine libs/wpp: include/config.h
+programs/winetest/build.rc: dummy
+	@build="STRINGTABLE { 1 \"`GIT_DIR=$(srcdir)/.git git rev-parse HEAD 2>/dev/null`\" }" && (echo $$build | cmp -s - $@) || echo $$build >$@ || (rm -f $@ && exit 1)
+
+programs/winetest/build.nfo:
+	@-$(CC) -v 2>$@
+
+dlls/wineandroid.drv/wine-debug.apk: dlls/wineandroid.drv/build.gradle $(srcdir)/dlls/wineandroid.drv/AndroidManifest.xml $(srcdir)/dlls/wineandroid.drv/WineActivity.java $(srcdir)/dlls/wineandroid.drv/wine.svg
+	cd dlls/wineandroid.drv && gradle -q -Psrcdir=$(srcdir) assembleDebug
+	mv dlls/wineandroid.drv/build/outputs/apk/wine-debug.apk $@
 
 # Misc rules
 
@@ -135,8 +134,8 @@ TAGSFLAGS = --langmap='c:+.idl.l.rh,make:(Make*.in)'
 
 TAGS etags:
 	rm -f TAGS
-	(test -d .git && git ls-files || find -L $(top_srcdir) -name '*.[ch]' -print) | xargs etags -a $(TAGSFLAGS)
+	(test -d .git && git ls-files || find -L $(srcdir) -name '*.[ch]' -print) | xargs etags -a $(TAGSFLAGS)
 
 tags ctags:
 	rm -f tags
-	(test -d .git && git ls-files || find -L $(top_srcdir) -name '*.[ch]' -print) | xargs ctags -a $(TAGSFLAGS)
+	(test -d .git && git ls-files || find -L $(srcdir) -name '*.[ch]' -print) | xargs ctags -a $(TAGSFLAGS)

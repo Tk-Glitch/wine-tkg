@@ -52,22 +52,13 @@ struct namespace
 
 #ifdef DEBUG_OBJECTS
 static struct list object_list = LIST_INIT(object_list);
-static struct list static_object_list = LIST_INIT(static_object_list);
 
 void dump_objects(void)
 {
-    struct list *p;
+    struct object *ptr;
 
-    LIST_FOR_EACH( p, &static_object_list )
+    LIST_FOR_EACH_ENTRY( ptr, &object_list, struct object, obj_list )
     {
-        struct object *ptr = LIST_ENTRY( p, struct object, obj_list );
-        fprintf( stderr, "%p:%d: ", ptr, ptr->refcount );
-        dump_object_name( ptr );
-        ptr->ops->dump( ptr, 1 );
-    }
-    LIST_FOR_EACH( p, &object_list )
-    {
-        struct object *ptr = LIST_ENTRY( p, struct object, obj_list );
         fprintf( stderr, "%p:%d: ", ptr, ptr->refcount );
         dump_object_name( ptr );
         ptr->ops->dump( ptr, 1 );
@@ -76,16 +67,20 @@ void dump_objects(void)
 
 void close_objects(void)
 {
-    struct list *ptr;
-
-    /* release the static objects */
-    while ((ptr = list_head( &static_object_list )))
+    /* release the permanent objects */
+    for (;;)
     {
-        struct object *obj = LIST_ENTRY( ptr, struct object, obj_list );
-        /* move it back to the standard list before freeing */
-        list_remove( &obj->obj_list );
-        list_add_head( &object_list, &obj->obj_list );
-        release_object( obj );
+        struct object *obj;
+        int found = 0;
+
+        LIST_FOR_EACH_ENTRY( obj, &object_list, struct object, obj_list )
+        {
+            if (!(found = obj->is_permanent)) continue;
+            obj->is_permanent = 0;
+            release_object( obj );
+            break;
+        }
+        if (!found) break;
     }
 
     dump_objects();  /* dump any remaining objects */
@@ -158,7 +153,7 @@ const WCHAR *get_object_name( struct object *obj, data_size_t *len )
 }
 
 /* get the full path name of an existing object */
-WCHAR *get_object_full_name( struct object *obj, data_size_t *ret_len )
+WCHAR *default_get_full_name( struct object *obj, data_size_t *ret_len )
 {
     static const WCHAR backslash = '\\';
     struct object *ptr = obj;
@@ -194,6 +189,7 @@ void *alloc_object( const struct object_ops *ops )
     {
         obj->refcount     = 1;
         obj->handle_count = 0;
+        obj->is_permanent = 0;
         obj->ops          = ops;
         obj->name         = NULL;
         obj->sd           = NULL;
@@ -245,14 +241,14 @@ struct object *lookup_named_object( struct object *root, const struct unicode_st
         /* skip leading backslash */
         name_tmp.str++;
         name_tmp.len -= sizeof(WCHAR);
-        parent = get_root_directory();
+        parent = root = get_root_directory();
     }
 
     if (!name_tmp.len) ptr = NULL;  /* special case for empty path */
 
     clear_error();
 
-    while ((obj = parent->ops->lookup_name( parent, ptr, attr )))
+    while ((obj = parent->ops->lookup_name( parent, ptr, attr, root )))
     {
         /* move to the next element */
         release_object ( parent );
@@ -278,7 +274,8 @@ data_size_t get_path_element( const WCHAR *name, data_size_t len )
 }
 
 static struct object *create_object( struct object *parent, const struct object_ops *ops,
-                                     const struct unicode_str *name, const struct security_descriptor *sd )
+                                     const struct unicode_str *name, unsigned int attributes,
+                                     const struct security_descriptor *sd )
 {
     struct object *obj;
     struct object_name *name_ptr;
@@ -319,7 +316,7 @@ void *create_named_object( struct object *parent, const struct object_ops *ops,
             free_object( new_obj );
             return NULL;
         }
-        return new_obj;
+        goto done;
     }
 
     if (!(obj = lookup_named_object( parent, name, attributes, &new_name ))) return NULL;
@@ -340,8 +337,15 @@ void *create_named_object( struct object *parent, const struct object_ops *ops,
         return obj;
     }
 
-    new_obj = create_object( obj, ops, &new_name, sd );
+    new_obj = create_object( obj, ops, &new_name, attributes, sd );
     release_object( obj );
+
+done:
+    if (attributes & OBJ_PERMANENT)
+    {
+        make_object_permanent( new_obj );
+        grab_object( new_obj );
+    }
     return new_obj;
 }
 
@@ -396,15 +400,6 @@ void unlink_named_object( struct object *obj )
     obj->ops->unlink_name( obj, name_ptr );
     if (name_ptr->parent) release_object( name_ptr->parent );
     free( name_ptr );
-}
-
-/* mark an object as being stored statically, i.e. only released at shutdown */
-void make_object_static( struct object *obj )
-{
-#ifdef DEBUG_OBJECTS
-    list_remove( &obj->obj_list );
-    list_add_head( &static_object_list, &obj->obj_list );
-#endif
 }
 
 /* grab an object (i.e. increment its refcount) and return the object */
@@ -684,8 +679,13 @@ int default_set_sd( struct object *obj, const struct security_descriptor *sd,
     return set_sd_defaults_from_token( obj, sd, set_info, current->process->token );
 }
 
+WCHAR *no_get_full_name( struct object *obj, data_size_t *ret_len )
+{
+    return NULL;
+}
+
 struct object *no_lookup_name( struct object *obj, struct unicode_str *name,
-                               unsigned int attr )
+                               unsigned int attr, struct object *root )
 {
     if (!name) set_error( STATUS_OBJECT_TYPE_MISMATCH );
     return NULL;

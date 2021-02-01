@@ -28,7 +28,7 @@ dnl Like AC_CHECK_TOOL but without the broken fallback to non-prefixed name
 dnl
 AC_DEFUN([WINE_CHECK_HOST_TOOL],
 [AS_VAR_SET_IF([ac_tool_prefix],
-  AC_CHECK_PROG([$1],[${ac_tool_prefix}$2],[${ac_tool_prefix}$2],,[$4]))
+  [AC_CHECK_PROG([$1],[${ac_tool_prefix}$2],[${ac_tool_prefix}$2],,[$4])])
 AS_VAR_IF([ac_cv_prog_$1],[],
   [AS_VAR_IF([cross_compiling],[yes],[],
     [AS_UNSET([ac_cv_prog_$1])
@@ -121,8 +121,6 @@ ac_save_CPPFLAGS=$CPPFLAGS
 CPPFLAGS="$CPPFLAGS $ac_cflags"
 $6
 CPPFLAGS=$ac_save_CPPFLAGS
-test -z "$ac_cflags" || ac_cflags=`echo " $ac_cflags" | sed 's/ -I\([[^/]]\)/ -I\$(top_builddir)\/\1/g'`
-test -z "$ac_libs" || ac_libs=`echo " $ac_libs" | sed 's/ -L\([[^/]]\)/ -L\$(top_builddir)\/\1/g'`
 AS_VAR_POPDEF([ac_libs])dnl
 AS_VAR_POPDEF([ac_cflags])])dnl
 

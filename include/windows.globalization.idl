@@ -20,8 +20,26 @@
 #pragma winrt ns_prefix
 #endif
 
-import "inspectable.idl";
 import "windows.foundation.idl";
 
 namespace Windows {
+    namespace Globalization {
+        typedef enum DayOfWeek DayOfWeek;
+    }
+}
+
+namespace Windows {
+    namespace Globalization {
+        [contract(Windows.Foundation.UniversalApiContract, 1.0)]
+        enum DayOfWeek
+        {
+            Sunday    = 0,
+            Monday    = 1,
+            Tuesday   = 2,
+            Wednesday = 3,
+            Thursday  = 4,
+            Friday    = 5,
+            Saturday  = 6
+        };
+    }
 }

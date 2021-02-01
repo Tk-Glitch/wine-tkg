@@ -18,21 +18,21 @@
 
 
 #define COBJMACROS
-#include "config.h"
 
 #include <stdarg.h>
 
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "objbase.h"
 
 #include "wincodecs_private.h"
 
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(wincodecs);
-
 extern BOOL WINAPI WIC_DllMain(HINSTANCE, DWORD, LPVOID) DECLSPEC_HIDDEN;
+
+HMODULE windowscodecs_module = 0;
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
@@ -41,6 +41,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     {
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(hinstDLL);
+            windowscodecs_module = hinstDLL;
             break;
         case DLL_PROCESS_DETACH:
             ReleaseComponentInfos();
@@ -53,220 +54,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 HRESULT WINAPI DllCanUnloadNow(void)
 {
     return S_FALSE;
-}
-
-HRESULT copy_pixels(UINT bpp, const BYTE *srcbuffer,
-    UINT srcwidth, UINT srcheight, INT srcstride,
-    const WICRect *rc, UINT dststride, UINT dstbuffersize, BYTE *dstbuffer)
-{
-    UINT bytesperrow;
-    UINT row_offset; /* number of bits into the source rows where the data starts */
-    WICRect rect;
-
-    if (!rc)
-    {
-        rect.X = 0;
-        rect.Y = 0;
-        rect.Width = srcwidth;
-        rect.Height = srcheight;
-        rc = &rect;
-    }
-    else
-    {
-        if (rc->X < 0 || rc->Y < 0 || rc->X+rc->Width > srcwidth || rc->Y+rc->Height > srcheight)
-            return E_INVALIDARG;
-    }
-
-    bytesperrow = ((bpp * rc->Width)+7)/8;
-
-    if (dststride < bytesperrow)
-        return E_INVALIDARG;
-
-    if ((dststride * (rc->Height-1)) + bytesperrow > dstbuffersize)
-        return E_INVALIDARG;
-
-    /* if the whole bitmap is copied and the buffer format matches then it's a matter of a single memcpy */
-    if (rc->X == 0 && rc->Y == 0 && rc->Width == srcwidth && rc->Height == srcheight &&
-        srcstride == dststride && srcstride == bytesperrow)
-    {
-        memcpy(dstbuffer, srcbuffer, srcstride * srcheight);
-        return S_OK;
-    }
-
-    row_offset = rc->X * bpp;
-
-    if (row_offset % 8 == 0)
-    {
-        /* everything lines up on a byte boundary */
-        INT row;
-        const BYTE *src;
-        BYTE *dst;
-
-        src = srcbuffer + (row_offset / 8) + srcstride * rc->Y;
-        dst = dstbuffer;
-        for (row=0; row < rc->Height; row++)
-        {
-            memcpy(dst, src, bytesperrow);
-            src += srcstride;
-            dst += dststride;
-        }
-        return S_OK;
-    }
-    else
-    {
-        /* we have to do a weird bitwise copy. eww. */
-        FIXME("cannot reliably copy bitmap data if bpp < 8\n");
-        return E_FAIL;
-    }
-}
-
-HRESULT configure_write_source(IWICBitmapFrameEncode *iface,
-    IWICBitmapSource *source, const WICRect *prc,
-    const WICPixelFormatGUID *format,
-    INT width, INT height, double xres, double yres)
-{
-    UINT src_width, src_height;
-    HRESULT hr = S_OK;
-
-    if (width == 0 && height == 0)
-    {
-        if (prc)
-        {
-            if (prc->Width <= 0 || prc->Height <= 0) return E_INVALIDARG;
-            width = prc->Width;
-            height = prc->Height;
-        }
-        else
-        {
-            hr = IWICBitmapSource_GetSize(source, &src_width, &src_height);
-            if (FAILED(hr)) return hr;
-            if (src_width == 0 || src_height == 0) return E_INVALIDARG;
-            width = src_width;
-            height = src_height;
-        }
-        hr = IWICBitmapFrameEncode_SetSize(iface, (UINT)width, (UINT)height);
-        if (FAILED(hr)) return hr;
-    }
-    if (width == 0 || height == 0) return E_INVALIDARG;
-
-    if (!format)
-    {
-        WICPixelFormatGUID src_format;
-
-        hr = IWICBitmapSource_GetPixelFormat(source, &src_format);
-        if (FAILED(hr)) return hr;
-
-        hr = IWICBitmapFrameEncode_SetPixelFormat(iface, &src_format);
-        if (FAILED(hr)) return hr;
-    }
-
-    if (xres == 0.0 || yres == 0.0)
-    {
-        hr = IWICBitmapSource_GetResolution(source, &xres, &yres);
-        if (FAILED(hr)) return hr;
-        hr = IWICBitmapFrameEncode_SetResolution(iface, xres, yres);
-        if (FAILED(hr)) return hr;
-    }
-
-    return hr;
-}
-
-HRESULT write_source(IWICBitmapFrameEncode *iface,
-    IWICBitmapSource *source, const WICRect *prc,
-    const WICPixelFormatGUID *format, UINT bpp, BOOL need_palette,
-    INT width, INT height)
-{
-    IWICBitmapSource *converted_source;
-    HRESULT hr=S_OK;
-    WICRect rc;
-    UINT stride;
-    BYTE* pixeldata;
-
-    if (!prc)
-    {
-        UINT src_width, src_height;
-        hr = IWICBitmapSource_GetSize(source, &src_width, &src_height);
-        if (FAILED(hr)) return hr;
-        rc.X = 0;
-        rc.Y = 0;
-        rc.Width = src_width;
-        rc.Height = src_height;
-        prc = &rc;
-    }
-
-    if (prc->Width != width || prc->Height <= 0)
-        return E_INVALIDARG;
-
-    hr = WICConvertBitmapSource(format, source, &converted_source);
-    if (FAILED(hr))
-    {
-        ERR("Failed to convert source, target format %s, %#x\n", debugstr_guid(format), hr);
-        return E_NOTIMPL;
-    }
-
-    if (need_palette)
-    {
-        IWICPalette *palette;
-
-        hr = PaletteImpl_Create(&palette);
-        if (SUCCEEDED(hr))
-        {
-            hr = IWICBitmapSource_CopyPalette(converted_source, palette);
-
-            if (SUCCEEDED(hr))
-                hr = IWICBitmapFrameEncode_SetPalette(iface, palette);
-
-            IWICPalette_Release(palette);
-        }
-
-        if (FAILED(hr))
-        {
-            IWICBitmapSource_Release(converted_source);
-            return hr;
-        }
-    }
-
-    stride = (bpp * width + 7)/8;
-
-    pixeldata = HeapAlloc(GetProcessHeap(), 0, stride * prc->Height);
-    if (!pixeldata)
-    {
-        IWICBitmapSource_Release(converted_source);
-        return E_OUTOFMEMORY;
-    }
-
-    hr = IWICBitmapSource_CopyPixels(converted_source, prc, stride,
-        stride*prc->Height, pixeldata);
-
-    if (SUCCEEDED(hr))
-    {
-        hr = IWICBitmapFrameEncode_WritePixels(iface, prc->Height, stride,
-            stride*prc->Height, pixeldata);
-    }
-
-    HeapFree(GetProcessHeap(), 0, pixeldata);
-    IWICBitmapSource_Release(converted_source);
-
-    return hr;
-}
-
-void reverse_bgr8(UINT bytesperpixel, LPBYTE bits, UINT width, UINT height, INT stride)
-{
-    UINT x, y;
-    BYTE *pixel, temp;
-
-    for (y=0; y<height; y++)
-    {
-        pixel = bits + stride * y;
-
-        for (x=0; x<width; x++)
-        {
-            temp = pixel[2];
-            pixel[2] = pixel[0];
-            pixel[0] = temp;
-            pixel += bytesperpixel;
-        }
-    }
 }
 
 HRESULT get_pixelformat_bpp(const GUID *pixelformat, UINT *bpp)
@@ -289,6 +76,76 @@ HRESULT get_pixelformat_bpp(const GUID *pixelformat, UINT *bpp)
 
         IWICComponentInfo_Release(info);
     }
+
+    return hr;
+}
+
+HRESULT TiffDecoder_CreateInstance(REFIID iid, void** ppv)
+{
+    HRESULT hr;
+    struct decoder *decoder;
+    struct decoder_info decoder_info;
+
+    hr = get_unix_decoder(&CLSID_WICTiffDecoder, &decoder_info, &decoder);
+
+    if (SUCCEEDED(hr))
+        hr = CommonDecoder_CreateInstance(decoder, &decoder_info, iid, ppv);
+
+    return hr;
+}
+
+HRESULT TiffEncoder_CreateInstance(REFIID iid, void** ppv)
+{
+    HRESULT hr;
+    struct encoder *encoder;
+    struct encoder_info encoder_info;
+
+    hr = get_unix_encoder(&CLSID_WICTiffEncoder, &encoder_info, &encoder);
+
+    if (SUCCEEDED(hr))
+        hr = CommonEncoder_CreateInstance(encoder, &encoder_info, iid, ppv);
+
+    return hr;
+}
+
+HRESULT JpegDecoder_CreateInstance(REFIID iid, void** ppv)
+{
+    HRESULT hr;
+    struct decoder *decoder;
+    struct decoder_info decoder_info;
+
+    hr = get_unix_decoder(&CLSID_WICJpegDecoder, &decoder_info, &decoder);
+
+    if (SUCCEEDED(hr))
+        hr = CommonDecoder_CreateInstance(decoder, &decoder_info, iid, ppv);
+
+    return hr;
+}
+
+HRESULT JpegEncoder_CreateInstance(REFIID iid, void** ppv)
+{
+    HRESULT hr;
+    struct encoder *encoder;
+    struct encoder_info encoder_info;
+
+    hr = get_unix_encoder(&CLSID_WICJpegEncoder, &encoder_info, &encoder);
+
+    if (SUCCEEDED(hr))
+        hr = CommonEncoder_CreateInstance(encoder, &encoder_info, iid, ppv);
+
+    return hr;
+}
+
+HRESULT IcnsEncoder_CreateInstance(REFIID iid, void** ppv)
+{
+    HRESULT hr;
+    struct encoder *encoder;
+    struct encoder_info encoder_info;
+
+    hr = get_unix_encoder(&CLSID_WICIcnsEncoder, &encoder_info, &encoder);
+
+    if (SUCCEEDED(hr))
+        hr = CommonEncoder_CreateInstance(encoder, &encoder_info, iid, ppv);
 
     return hr;
 }

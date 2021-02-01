@@ -66,7 +66,7 @@ Colormap default_colormap = None;
 XPixmapFormatValues **pixmap_formats;
 unsigned int screen_bpp;
 Window root_window;
-BOOL usexvidmode = FALSE;
+BOOL usexvidmode = TRUE;
 BOOL usexrandr = TRUE;
 BOOL usexcomposite = TRUE;
 BOOL use_xkb = TRUE;
@@ -89,6 +89,7 @@ DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
 int xrender_error_base = 0;
 HMODULE x11drv_module = 0;
 char *process_name = NULL;
+HANDLE steam_overlay_event;
 
 static x11drv_error_callback err_callback;   /* current callback for error */
 static Display *err_callback_display;        /* display callback is set for */
@@ -137,7 +138,6 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "TEXT",
     "TIMESTAMP",
     "UTF8_STRING",
-    "STRING",
     "RAW_ASCENT",
     "RAW_DESCENT",
     "RAW_CAP_HEIGHT",
@@ -147,17 +147,16 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "Abs Y",
     "WM_PROTOCOLS",
     "WM_DELETE_WINDOW",
-    "WM_NAME",
     "WM_STATE",
     "WM_TAKE_FOCUS",
     "DndProtocol",
     "DndSelection",
     "_ICC_PROFILE",
     "_MOTIF_WM_HINTS",
+    "_NET_ACTIVE_WINDOW",
     "_NET_STARTUP_INFO_BEGIN",
     "_NET_STARTUP_INFO",
     "_NET_SUPPORTED",
-    "_NET_SUPPORTING_WM_CHECK",
     "_NET_SYSTEM_TRAY_OPCODE",
     "_NET_SYSTEM_TRAY_S0",
     "_NET_SYSTEM_TRAY_VISUAL",
@@ -209,7 +208,6 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "WCF_SYLK",
     "WCF_TIFF",
     "WCF_WAVE",
-    "WINDOW",
     "image/bmp",
     "image/gif",
     "image/jpeg",
@@ -311,9 +309,6 @@ static int error_handler( Display *display, XErrorEvent *error_evt )
              error_evt->serial, error_evt->request_code );
         DebugBreak();  /* force an entry in the debugger */
     }
-    TRACE("passing on error %d req %d:%d res 0x%lx\n",
-            error_evt->error_code, error_evt->request_code,
-            error_evt->minor_code, error_evt->resourceid);
     old_error_handler( display, error_evt );
     return 0;
 }
@@ -654,15 +649,12 @@ void CDECL X11DRV_ThreadDetach(void)
     }
 }
 
-extern void __wine_esync_set_queue_fd( int fd );
 
 /* store the display fd into the message queue */
 static void set_queue_display_fd( Display *display )
 {
     HANDLE handle;
     int ret;
-
-    __wine_esync_set_queue_fd( ConnectionNumber(display) );
 
     if (wine_server_fd_to_handle( ConnectionNumber(display), GENERIC_READ | SYNCHRONIZE, 0, &handle ))
     {
@@ -737,6 +729,10 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         DisableThreadLibraryCalls( hinst );
         x11drv_module = hinst;
         ret = process_attach();
+        steam_overlay_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_GameOverlayActivated");
+        break;
+    case DLL_PROCESS_DETACH:
+        CloseHandle(steam_overlay_event);
         break;
     }
     return ret;

@@ -1082,11 +1082,11 @@ HRESULT WINAPI EAX_Set(IDirectSoundBufferImpl *buf, REFGUID guidPropSet,
 
         return S_OK;
     } else if (IsEqualGUID(&DSPROPSETID_EAX20_ListenerProperties, guidPropSet)) {
-        FIXME("Unsupported DSPROPSETID_EAX20_ListenerProperties: %d\n", dwPropID);
-        return E_PROP_ID_UNSUPPORTED;
+        FIXME("Unsupported DSPROPSETID_EAX20_ListenerProperties: %d - Faking Success\n", dwPropID);
+        return S_OK;
     } else if (IsEqualGUID(&DSPROPSETID_EAX20_BufferProperties, guidPropSet)) {
-        FIXME("Unsupported DSPROPSETID_EAX20_BufferProperties: %d\n", dwPropID);
-        return E_PROP_ID_UNSUPPORTED;
+        FIXME("Unsupported DSPROPSETID_EAX20_BufferProperties: %d - Faking Success\n", dwPropID);
+        return S_OK;
     }
 
     FIXME("(%p,%s,%d,%p,%d,%p,%d)\n",

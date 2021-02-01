@@ -56,25 +56,25 @@ struct wined3d_window_hook
     unsigned int count;
 };
 
-struct wined3d_hooked_swapchain
+struct wined3d_registered_swapchain_state
 {
-    struct wined3d_swapchain *swapchain;
+    struct wined3d_swapchain_state *state;
     DWORD thread_id;
 };
 
-struct wined3d_hook_table
+struct wined3d_swapchain_state_table
 {
     struct wined3d_window_hook *hooks;
     SIZE_T hooks_size;
     SIZE_T hook_count;
 
-    struct wined3d_hooked_swapchain *swapchains;
-    SIZE_T swapchains_size;
-    SIZE_T swapchain_count;
+    struct wined3d_registered_swapchain_state *states;
+    SIZE_T states_size;
+    SIZE_T state_count;
 };
 
 static struct wined3d_wndproc_table wndproc_table;
-static struct wined3d_hook_table hook_table;
+static struct wined3d_swapchain_state_table swapchain_state_table;
 
 static CRITICAL_SECTION wined3d_cs;
 static CRITICAL_SECTION_DEBUG wined3d_cs_debug =
@@ -96,11 +96,21 @@ static CRITICAL_SECTION_DEBUG wined3d_wndproc_cs_debug =
 };
 static CRITICAL_SECTION wined3d_wndproc_cs = {&wined3d_wndproc_cs_debug, -1, 0, 0, 0, 0};
 
+CRITICAL_SECTION wined3d_command_cs;
+static CRITICAL_SECTION_DEBUG wined3d_command_cs_debug =
+{
+    0, 0, &wined3d_command_cs,
+    {&wined3d_command_cs_debug.ProcessLocksList,
+    &wined3d_command_cs_debug.ProcessLocksList},
+    0, 0, {(DWORD_PTR)(__FILE__ ": wined3d_command_cs")}
+};
+CRITICAL_SECTION wined3d_command_cs = {&wined3d_command_cs_debug, -1, 0, 0, 0, 0};
+
 /* When updating default value here, make sure to update winecfg as well,
  * where appropriate. */
 struct wined3d_settings wined3d_settings =
 {
-    TRUE,           /* Multithreaded CS by default. */
+    WINED3D_CSMT_ENABLE,     /* Multithreaded CS by default. */
     MAKEDWORD_VERSION(4, 4), /* Default to OpenGL 4.4 */
     ORM_FBO,        /* Use FBOs to do offscreen rendering */
     PCI_VENDOR_NONE,/* PCI Vendor ID */
@@ -285,10 +295,6 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
                 wined3d_settings.shader_backend = WINED3D_SHADER_BACKEND_NONE;
             }
         }
-        else if (!get_config_key(hkey, appkey, "UseGLSL", buffer, size) && !strcmp(buffer, "disabled"))
-        {
-            wined3d_settings.shader_backend = WINED3D_SHADER_BACKEND_ARB;
-        }
         if (wined3d_settings.shader_backend == WINED3D_SHADER_BACKEND_ARB
                 || wined3d_settings.shader_backend == WINED3D_SHADER_BACKEND_NONE)
         {
@@ -428,16 +434,18 @@ static BOOL wined3d_dll_destroy(HINSTANCE hInstDLL)
     }
     heap_free(wndproc_table.entries);
 
-    heap_free(hook_table.swapchains);
-    for (i = 0; i < hook_table.hook_count; ++i)
+    heap_free(swapchain_state_table.states);
+    for (i = 0; i < swapchain_state_table.hook_count; ++i)
     {
-        WARN("Leftover hook table entry %p.\n", &hook_table.hooks[i]);
-        UnhookWindowsHookEx(hook_table.hooks[i].hook);
+        WARN("Leftover swapchain state hook %p.\n", &swapchain_state_table.hooks[i]);
+        UnhookWindowsHookEx(swapchain_state_table.hooks[i].hook);
     }
-    heap_free(hook_table.hooks);
+    heap_free(swapchain_state_table.hooks);
 
     heap_free(wined3d_settings.logo);
     UnregisterClassA(WINED3D_OPENGL_WINDOW_CLASS_NAME, hInstDLL);
+
+    DeleteCriticalSection(&wined3d_command_cs);
 
     DeleteCriticalSection(&wined3d_wndproc_cs);
     DeleteCriticalSection(&wined3d_cs);
@@ -492,9 +500,7 @@ static struct wined3d_output * wined3d_get_output_from_window(const struct wined
         }
     }
 
-    /* Because wined3d only supports one output right now. A window can be on non-primary outputs
-     * and thus fails to get its correct output. In this case, return the primary output for now */
-    return &wined3d->adapters[0]->outputs[0];
+    return NULL;
 }
 
 static struct wined3d_wndproc *wined3d_find_wndproc(HWND window, struct wined3d *wined3d)
@@ -577,7 +583,7 @@ static LRESULT CALLBACK wined3d_wndproc(HWND window, UINT message, WPARAM wparam
 static LRESULT CALLBACK wined3d_hook_proc(int code, WPARAM wparam, LPARAM lparam)
 {
     struct wined3d_swapchain_desc swapchain_desc;
-    struct wined3d_swapchain *swapchain;
+    struct wined3d_swapchain_state *state;
     struct wined3d_wndproc *entry;
     struct wined3d_output *output;
     MSG *msg = (MSG *)lparam;
@@ -589,28 +595,27 @@ static LRESULT CALLBACK wined3d_hook_proc(int code, WPARAM wparam, LPARAM lparam
     {
         wined3d_wndproc_mutex_lock();
 
-        for (i = 0; i < hook_table.swapchain_count; ++i)
+        for (i = 0; i < swapchain_state_table.state_count; ++i)
         {
-            swapchain = hook_table.swapchains[i].swapchain;
+            state = swapchain_state_table.states[i].state;
 
-            if (swapchain->state.device_window != msg->hwnd)
+            if (state->device_window != msg->hwnd)
                 continue;
 
-            if ((entry = wined3d_find_wndproc(msg->hwnd, swapchain->device->wined3d))
+            if ((entry = wined3d_find_wndproc(msg->hwnd, state->wined3d))
                     && (entry->flags & (WINED3D_REGISTER_WINDOW_NO_WINDOW_CHANGES
                     | WINED3D_REGISTER_WINDOW_NO_ALT_ENTER)))
                 continue;
 
-            wined3d_swapchain_get_desc(swapchain, &swapchain_desc);
+            swapchain_desc = state->desc;
             swapchain_desc.windowed = !swapchain_desc.windowed;
-            if (!(output = wined3d_get_output_from_window(swapchain->device->wined3d,
-                    swapchain->state.device_window)))
+            if (!(output = wined3d_get_output_from_window(state->wined3d, state->device_window)))
             {
-                ERR("Failed to get output from window %p.\n", swapchain->state.device_window);
+                ERR("Failed to get output from window %p.\n", state->device_window);
                 break;
             }
             swapchain_desc.output = output;
-            wined3d_swapchain_state_set_fullscreen(&swapchain->state, &swapchain_desc, NULL);
+            wined3d_swapchain_state_set_fullscreen(state, &swapchain_desc, NULL);
 
             wined3d_wndproc_mutex_unlock();
 
@@ -767,87 +772,92 @@ static struct wined3d_window_hook *wined3d_find_hook(DWORD thread_id)
 {
     unsigned int i;
 
-    for (i = 0; i < hook_table.hook_count; ++i)
+    for (i = 0; i < swapchain_state_table.hook_count; ++i)
     {
-        if (hook_table.hooks[i].thread_id == thread_id)
-            return &hook_table.hooks[i];
+        if (swapchain_state_table.hooks[i].thread_id == thread_id)
+            return &swapchain_state_table.hooks[i];
     }
 
     return NULL;
 }
 
-void wined3d_hook_swapchain(struct wined3d_swapchain *swapchain)
+void wined3d_swapchain_state_register(struct wined3d_swapchain_state *state)
 {
-    struct wined3d_hooked_swapchain *swapchain_entry;
+    struct wined3d_registered_swapchain_state *state_entry;
     struct wined3d_window_hook *hook;
 
     wined3d_wndproc_mutex_lock();
 
-    if (!wined3d_array_reserve((void **)&hook_table.swapchains, &hook_table.swapchains_size,
-            hook_table.swapchain_count + 1, sizeof(*swapchain_entry)))
+    if (!wined3d_array_reserve((void **)&swapchain_state_table.states, &swapchain_state_table.states_size,
+            swapchain_state_table.state_count + 1, sizeof(*state_entry)))
     {
         wined3d_wndproc_mutex_unlock();
         return;
     }
 
-    swapchain_entry = &hook_table.swapchains[hook_table.swapchain_count++];
-    swapchain_entry->swapchain = swapchain;
-    swapchain_entry->thread_id = GetWindowThreadProcessId(swapchain->state.device_window, NULL);
+    state_entry = &swapchain_state_table.states[swapchain_state_table.state_count++];
+    state_entry->state = state;
+    state_entry->thread_id = GetWindowThreadProcessId(state->device_window, NULL);
 
-    if ((hook = wined3d_find_hook(swapchain_entry->thread_id)))
+    if ((hook = wined3d_find_hook(state_entry->thread_id)))
     {
         ++hook->count;
         wined3d_wndproc_mutex_unlock();
         return;
     }
 
-    if (!wined3d_array_reserve((void **)&hook_table.hooks, &hook_table.hooks_size,
-            hook_table.hook_count + 1, sizeof(*hook)))
+    if (!wined3d_array_reserve((void **)&swapchain_state_table.hooks, &swapchain_state_table.hooks_size,
+            swapchain_state_table.hook_count + 1, sizeof(*hook)))
     {
-        --hook_table.swapchain_count;
+        --swapchain_state_table.state_count;
         wined3d_wndproc_mutex_unlock();
         return;
     }
 
-    hook = &hook_table.hooks[hook_table.hook_count++];
-    hook->thread_id = swapchain_entry->thread_id;
+    hook = &swapchain_state_table.hooks[swapchain_state_table.hook_count++];
+    hook->thread_id = state_entry->thread_id;
     hook->hook = SetWindowsHookExW(WH_GETMESSAGE, wined3d_hook_proc, 0, hook->thread_id);
     hook->count = 1;
 
     wined3d_wndproc_mutex_unlock();
 }
 
-void wined3d_unhook_swapchain(struct wined3d_swapchain *swapchain)
+static void wined3d_swapchain_state_unregister(struct wined3d_swapchain_state *state)
 {
-    struct wined3d_hooked_swapchain *swapchain_entry, *last_swapchain_entry;
+    struct wined3d_registered_swapchain_state *state_entry, *last_state_entry;
     struct wined3d_window_hook *hook, *last_hook;
     unsigned int i;
 
     wined3d_wndproc_mutex_lock();
 
-    for (i = 0; i < hook_table.swapchain_count; ++i)
+    for (i = 0; i < swapchain_state_table.state_count; ++i)
     {
-        swapchain_entry = &hook_table.swapchains[i];
+        state_entry = &swapchain_state_table.states[i];
 
-        if (swapchain_entry->swapchain != swapchain)
+        if (state_entry->state != state)
             continue;
 
-        if ((hook = wined3d_find_hook(swapchain_entry->thread_id)) && !--hook->count)
+        if ((hook = wined3d_find_hook(state_entry->thread_id)) && !--hook->count)
         {
             UnhookWindowsHookEx(hook->hook);
-            last_hook = &hook_table.hooks[--hook_table.hook_count];
+            last_hook = &swapchain_state_table.hooks[--swapchain_state_table.hook_count];
             if (hook != last_hook)
                 *hook = *last_hook;
         }
 
-        last_swapchain_entry = &hook_table.swapchains[--hook_table.swapchain_count];
-        if (swapchain_entry != last_swapchain_entry)
-            *swapchain_entry = *last_swapchain_entry;
+        last_state_entry = &swapchain_state_table.states[--swapchain_state_table.state_count];
+        if (state_entry != last_state_entry)
+            *state_entry = *last_state_entry;
 
         break;
     }
 
     wined3d_wndproc_mutex_unlock();
+}
+
+void wined3d_swapchain_state_cleanup(struct wined3d_swapchain_state *state)
+{
+    wined3d_swapchain_state_unregister(state);
 }
 
 /* At process attach */

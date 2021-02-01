@@ -18,10 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
-#include <assert.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <string.h>
@@ -34,7 +30,6 @@
 #include "winternl.h"
 
 #include "kernel_private.h"
-#include "console_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
@@ -125,17 +120,9 @@ static void copy_startup_info(void)
  */
 static BOOL process_attach( HMODULE module )
 {
-    RTL_USER_PROCESS_PARAMETERS *params = NtCurrentTeb()->Peb->ProcessParameters;
-
-    kernel32_handle = module;
     RtlSetUnhandledExceptionFilter( UnhandledExceptionFilter );
 
     NtQuerySystemInformation( SystemBasicInformation, &system_info, sizeof(system_info), NULL );
-
-    /* Setup computer name */
-    COMPUTERNAME_Init();
-
-    CONSOLE_Init(params);
 
     copy_startup_info();
 
@@ -152,21 +139,6 @@ static BOOL process_attach( HMODULE module )
         if (LdrFindEntryForAddress( GetModuleHandleW( 0 ), &ldr ) || !(ldr->Flags & LDR_WINE_INTERNAL))
             LoadLibraryA( "krnl386.exe16" );
     }
-
-    /* finish the process initialisation for console bits, if needed */
-    RtlAddVectoredExceptionHandler( FALSE, CONSOLE_HandleCtrlC );
-
-    if (params->ConsoleHandle == KERNEL32_CONSOLE_ALLOC)
-    {
-        HMODULE mod = GetModuleHandleA(0);
-        if (RtlImageNtHeader(mod)->OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_CUI)
-            AllocConsole();
-    }
-    /* else TODO for DETACHED_PROCESS:
-     * 1/ inherit console + handles
-     * 2/ create std handles, if handles are not inherited
-     * TBD when not using wineserver handles for console handles
-     */
 #endif
     return TRUE;
 }
@@ -183,7 +155,6 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         return process_attach( hinst );
     case DLL_PROCESS_DETACH:
         WritePrivateProfileSectionW( NULL, NULL, NULL );
-        CONSOLE_Exit();
         break;
     }
     return TRUE;

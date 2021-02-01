@@ -88,6 +88,7 @@ static const struct object_ops atom_table_ops =
     no_map_access,                /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
+    no_get_full_name,             /* get_full_name */
     no_lookup_name,               /* lookup_name */
     no_link_name,                 /* link_name */
     NULL,                         /* unlink_name */
@@ -305,7 +306,7 @@ static struct atom_table *get_global_table( struct winstation *winstation, int c
             else
             {
                 global_table = table;
-                make_object_static( &global_table->obj );
+                make_object_permanent( &global_table->obj );
             }
         }
         else set_error( STATUS_OBJECT_NAME_NOT_FOUND );

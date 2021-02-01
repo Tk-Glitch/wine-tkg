@@ -1194,39 +1194,6 @@ typedef enum _ALTERNATIVE_ARCHITECTURE_TYPE
 #define NX_SUPPORT_POLICY_OPTIN         2
 #define NX_SUPPORT_POLICY_OPTOUT        3
 
-#define XSTATE_LEGACY_FLOATING_POINT        0
-#define XSTATE_LEGACY_SSE                   1
-#define XSTATE_GSSE                         2
-
-#define XSTATE_MASK_LEGACY_FLOATING_POINT   (1 << XSTATE_LEGACY_FLOATING_POINT)
-#define XSTATE_MASK_LEGACY_SSE              (1 << XSTATE_LEGACY_SSE)
-#define XSTATE_MASK_LEGACY                  (XSTATE_MASK_LEGACY_FLOATING_POINT | XSTATE_MASK_LEGACY_SSE)
-#define XSTATE_MASK_GSSE                    (1 << XSTATE_GSSE)
-
-#define MAXIMUM_XSTATE_FEATURES             64
-
-typedef struct _XSTATE_FEATURE
-{
-    ULONG Offset;
-    ULONG Size;
-} XSTATE_FEATURE, *PXSTATE_FEATURE;
-
-typedef struct _XSTATE_CONFIGURATION
-{
-    ULONG64 EnabledFeatures;
-    ULONG64 EnabledVolatileFeatures;
-    ULONG Size;
-    ULONG OptimizedSave:1;
-    ULONG CompactionEnabled:1;
-    XSTATE_FEATURE Features[MAXIMUM_XSTATE_FEATURES];
-
-    ULONG64 EnabledSupervisorFeatures;
-    ULONG64 AlignedFeatures;
-    ULONG AllFeatureSize;
-    ULONG AllFeatures[MAXIMUM_XSTATE_FEATURES];
-    ULONG64 EnabledUserVisibleSupervisorFeatures;
-} XSTATE_CONFIGURATION, *PXSTATE_CONFIGURATION;
-
 typedef struct _KUSER_SHARED_DATA {
     ULONG TickCountLowDeprecated;                          /* 0x000 */
     ULONG TickCountMultiplier;                             /* 0x004 */
@@ -1261,6 +1228,7 @@ typedef struct _KUSER_SHARED_DATA {
     ULONG SuiteMask;                                       /* 0x2d0 */
     BOOLEAN KdDebuggerEnabled;                             /* 0x2d4 */
     UCHAR NXSupportPolicy;                                 /* 0x2d5 */
+    USHORT CyclesPerYield;                                 /* 0x2d6 */
     volatile ULONG ActiveConsoleId;                        /* 0x2d8 */
     volatile ULONG DismountCount;                          /* 0x2dc */
     ULONG ComPlusPackage;                                  /* 0x2e0 */
@@ -1268,16 +1236,43 @@ typedef struct _KUSER_SHARED_DATA {
     ULONG NumberOfPhysicalPages;                           /* 0x2e8 */
     BOOLEAN SafeBootMode;                                  /* 0x2ec */
     UCHAR VirtualizationFlags;                             /* 0x2ed */
-    ULONG TraceLogging;                                    /* 0x2f0 */
+    union {
+        ULONG SharedDataFlags;                             /* 0x2f0 */
+        struct {
+            ULONG DbgErrorPortPresent       : 1;
+            ULONG DbgElevationEnabed        : 1;
+            ULONG DbgVirtEnabled            : 1;
+            ULONG DbgInstallerDetectEnabled : 1;
+            ULONG DbgLkgEnabled             : 1;
+            ULONG DbgDynProcessorEnabled    : 1;
+            ULONG DbgConsoleBrokerEnabled   : 1;
+            ULONG DbgSecureBootEnabled      : 1;
+            ULONG DbgMultiSessionSku        : 1;
+            ULONG DbgMultiUsersInSessionSku : 1;
+            ULONG DbgStateSeparationEnabled : 1;
+            ULONG SpareBits                 : 21;
+        } DUMMYSTRUCTNAME2;
+    } DUMMYUNIONNAME2;
+    ULONG DataFlagsPad[1];                                 /* 0x2f4 */
     ULONGLONG TestRetInstruction;                          /* 0x2f8 */
-    ULONG SystemCall;                                      /* 0x300 */
-    ULONG SystemCallReturn;                                /* 0x304 */
-    ULONGLONG SystemCallPad[3];                            /* 0x308 */
+    LONGLONG QpcFrequency;                                 /* 0x300 */
+    ULONG SystemCall;                                      /* 0x308 */
+    union {
+        ULONG AllFlags;                                    /* 0x30c */
+        struct {
+            ULONG Win32Process            : 1;
+            ULONG Sgx2Enclave             : 1;
+            ULONG VbsBasicEnclave         : 1;
+            ULONG SpareBits               : 29;
+        } DUMMYSTRUCTNAME;
+    } UserCetAvailableEnvironments;
+    ULONGLONG SystemCallPad[2];                            /* 0x310 */
     union {
         volatile KSYSTEM_TIME TickCount;                   /* 0x320 */
         volatile ULONG64 TickCountQuad;
     } DUMMYUNIONNAME;
     ULONG Cookie;                                          /* 0x330 */
+    ULONG CookiePad[1];                                    /* 0x334 */
     LONGLONG ConsoleSessionForegroundProcessId;            /* 0x338 */
     ULONGLONG TimeUpdateLock;                              /* 0x340 */
     ULONGLONG BaselineSystemTimeQpc;                       /* 0x348 */

@@ -17,4 +17,6 @@ C_SRCS = \
 	mirror.c \
 	opentype.c \
 	scripts.c \
-	shape.c
+	shape.c \
+	shapers/arabic.c \
+	shapers/arabic_table.c

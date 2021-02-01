@@ -876,7 +876,7 @@ enum wined3d_shader_type
 #define WINED3DCOLORWRITEENABLE_ALPHA                           (1u << 3)
 
 #define WINED3DADAPTER_DEFAULT                                  0
-#define WINED3DENUM_NO_WHQL_LEVEL                               2
+#define WINED3DENUM_WHQL_LEVEL                                  2
 
 #define WINED3DTSS_TCI_PASSTHRU                                 0x00000
 #define WINED3DTSS_TCI_CAMERASPACENORMAL                        0x10000
@@ -906,7 +906,7 @@ enum wined3d_shader_type
 #define WINED3D_SWAPCHAIN_RESTORE_WINDOW_RECT                   0x00004000u
 #define WINED3D_SWAPCHAIN_GDI_COMPATIBLE                        0x00008000u
 #define WINED3D_SWAPCHAIN_IMPLICIT                              0x00010000u
-#define WINED3D_SWAPCHAIN_HOOK                                  0x00020000u
+#define WINED3D_SWAPCHAIN_REGISTER_STATE                        0x00020000u
 #define WINED3D_SWAPCHAIN_NO_WINDOW_CHANGES                     0x00040000u
 #define WINED3D_SWAPCHAIN_RESTORE_WINDOW_STATE                  0x00080000u
 
@@ -2047,9 +2047,24 @@ struct wined3d_blend_state_desc
     } rt[WINED3D_MAX_RENDER_TARGETS];
 };
 
+struct wined3d_stencil_op_desc
+{
+    enum wined3d_stencil_op fail_op;
+    enum wined3d_stencil_op depth_fail_op;
+    enum wined3d_stencil_op pass_op;
+    enum wined3d_cmp_func func;
+};
+
 struct wined3d_depth_stencil_state_desc
 {
     BOOL depth;
+    BOOL depth_write;
+    enum wined3d_cmp_func depth_func;
+    BOOL stencil;
+    unsigned int stencil_read_mask;
+    unsigned int stencil_write_mask;
+    struct wined3d_stencil_op_desc front;
+    struct wined3d_stencil_op_desc back;
 };
 
 struct wined3d_rasterizer_state_desc
@@ -2153,7 +2168,6 @@ struct wined3d_output_desc
     WCHAR device_name[CCHDEVICENAME];
     RECT desktop_rect;
     BOOL attached_to_desktop;
-    enum wined3d_display_rotation rotation;
     HMONITOR monitor;
 };
 
@@ -2244,6 +2258,17 @@ struct wined3d_device_parent_ops
             const struct wined3d_resource_desc *desc, DWORD texture_flags, struct wined3d_texture **texture);
 };
 
+struct wined3d_swapchain_state_parent
+{
+    const struct wined3d_swapchain_state_parent_ops *ops;
+};
+
+struct wined3d_swapchain_state_parent_ops
+{
+    void (__cdecl *windowed_state_changed)(struct wined3d_swapchain_state_parent *state_parent,
+            BOOL windowed);
+};
+
 struct wined3d_private_store
 {
     struct list content;
@@ -2298,6 +2323,7 @@ ULONG __cdecl wined3d_incref(struct wined3d *wined3d);
 HRESULT __cdecl wined3d_register_software_device(struct wined3d *wined3d, void *init_function);
 BOOL __cdecl wined3d_register_window(struct wined3d *wined3d, HWND window,
         struct wined3d_device *device, unsigned int flags);
+HRESULT __cdecl wined3d_restore_display_modes(struct wined3d *wined3d);
 void __cdecl wined3d_unregister_windows(struct wined3d *wined3d);
 
 HRESULT __cdecl wined3d_adapter_get_identifier(const struct wined3d_adapter *adapter,
@@ -2774,8 +2800,10 @@ HRESULT __cdecl wined3d_stateblock_set_vs_consts_f(struct wined3d_stateblock *st
 HRESULT __cdecl wined3d_stateblock_set_vs_consts_i(struct wined3d_stateblock *stateblock,
         unsigned int start_idx, unsigned int count, const struct wined3d_ivec4 *constants);
 
-HRESULT __cdecl wined3d_swapchain_create(struct wined3d_device *device, struct wined3d_swapchain_desc *desc,
-        void *parent, const struct wined3d_parent_ops *parent_ops, struct wined3d_swapchain **swapchain);
+HRESULT __cdecl wined3d_swapchain_create(struct wined3d_device *device,
+        struct wined3d_swapchain_desc *desc, struct wined3d_swapchain_state_parent *state_parent,
+        void *parent, const struct wined3d_parent_ops *parent_ops,
+        struct wined3d_swapchain **swapchain);
 ULONG __cdecl wined3d_swapchain_decref(struct wined3d_swapchain *swapchain);
 struct wined3d_texture * __cdecl wined3d_swapchain_get_back_buffer(const struct wined3d_swapchain *swapchain,
         UINT backbuffer_idx);
@@ -2804,8 +2832,10 @@ void __cdecl wined3d_swapchain_set_palette(struct wined3d_swapchain *swapchain, 
 void __cdecl wined3d_swapchain_set_window(struct wined3d_swapchain *swapchain, HWND window);
 
 HRESULT __cdecl wined3d_swapchain_state_create(const struct wined3d_swapchain_desc *desc,
-        HWND window, struct wined3d_swapchain_state **state);
+        HWND window, struct wined3d *wined3d, struct wined3d_swapchain_state_parent *state_parent,
+        struct wined3d_swapchain_state **state);
 void __cdecl wined3d_swapchain_state_destroy(struct wined3d_swapchain_state *state);
+BOOL __cdecl wined3d_swapchain_state_is_windowed(const struct wined3d_swapchain_state *state);
 HRESULT __cdecl wined3d_swapchain_state_resize_target(struct wined3d_swapchain_state *state,
         const struct wined3d_display_mode *mode);
 HRESULT __cdecl wined3d_swapchain_state_set_fullscreen(struct wined3d_swapchain_state *state,

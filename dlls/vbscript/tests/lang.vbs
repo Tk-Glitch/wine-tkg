@@ -60,6 +60,7 @@ Call ok(&hfffe = -2, "&hfffe <> -2")
 Call ok(&hffff& = 65535, "&hffff& <> -1")
 Call ok(&hfffe& = 65534, "&hfffe& <> -2")
 Call ok(&hffffffff& = -1, "&hffffffff& <> -1")
+Call ok((&h01or&h02)=3,"&h01or&h02 <> 3")
 
 W = 5
 Call ok(W = 5, "W = " & W & " expected " & 5)
@@ -69,6 +70,10 @@ Call ok(x = "xx", "x = " & x & " expected ""xx""")
 
 Dim public1 : public1 = 42
 Call ok(public1 = 42, "public1=" & public1 & " expected & " & 42)
+Private priv1 : priv1 = 43
+Call ok(priv1 = 43, "priv1=" & priv1 & " expected & " & 43)
+Public pub1 : pub1 = 44
+Call ok(pub1 = 44, "pub1=" & pub1 & " expected & " & 44)
 
 Call ok(true <> false, "true <> false is false")
 Call ok(not (true <> true), "true <> true is true")
@@ -1408,6 +1413,28 @@ x = 1
 redim x(3)
 ok ubound(x) = 3, "ubound(x) = " & ubound(x)
 
+x(0) = 1
+x(1) = 2
+x(2) = 3
+x(2) = 4
+
+redim preserve x(1)
+ok ubound(x) = 1, "ubound(x) = " & ubound(x)
+ok x(0) = 1, "x(0) = " & x(1)
+ok x(1) = 2, "x(1) = " & x(1)
+
+redim preserve x(2)
+ok ubound(x) = 2, "ubound(x) = " & ubound(x)
+ok x(0) = 1, "x(0) = " & x(0)
+ok x(1) = 2, "x(1) = " & x(1)
+ok x(2) = vbEmpty, "x(2) = " & x(2)
+
+on error resume next
+redim preserve x(2,2)
+e = err.number
+on error goto 0
+ok e = 9, "e = " & e ' VBSE_OUT_OF_BOUNDS, cannot change cDims
+
 x = Array(1, 2)
 redim x(-1)
 ok lbound(x) = 0, "lbound(x) = " & lbound(x)
@@ -1417,6 +1444,40 @@ redim x(3, 2)
 ok ubound(x) = 3, "ubound(x) = " & ubound(x)
 ok ubound(x, 1) = 3, "ubound(x, 1) = " & ubound(x, 1)
 ok ubound(x, 2) = 2, "ubound(x, 2) = " & ubound(x, 2) & " expected 2"
+
+redim x(1, 3)
+x(0,0) = 1.1
+x(0,1) = 1.2
+x(0,2) = 1.3
+x(0,3) = 1.4
+x(1,0) = 2.1
+x(1,1) = 2.2
+x(1,2) = 2.3
+x(1,3) = 2.4
+
+redim preserve x(1,1)
+ok ubound(x, 1) = 1, "ubound(x, 1) = " & ubound(x, 1)
+ok ubound(x, 2) = 1, "ubound(x, 2) = " & ubound(x, 2)
+ok x(0,0) = 1.1, "x(0,0) = " & x(0,0)
+ok x(0,1) = 1.2, "x(0,1) = " & x(0,1)
+ok x(1,0) = 2.1, "x(1,0) = " & x(1,0)
+ok x(1,1) = 2.2, "x(1,1) = " & x(1,1)
+
+redim preserve x(1,2)
+ok ubound(x, 1) = 1, "ubound(x, 1) = " & ubound(x, 1)
+ok ubound(x, 2) = 2, "ubound(x, 2) = " & ubound(x, 2)
+ok x(0,0) = 1.1, "x(0,0) = " & x(0,0)
+ok x(0,1) = 1.2, "x(0,1) = " & x(0,1)
+ok x(1,0) = 2.1, "x(1,0) = " & x(1,0)
+ok x(1,1) = 2.2, "x(1,1) = " & x(1,1)
+ok x(0,2) = vbEmpty, "x(0,2) = " & x(0,2)
+ok x(1,2) = vbEmpty, "x(1,2) = " & x(1,1)
+
+on error resume next
+redim preserve x(2,2)
+e = err.number
+on error goto 0
+ok e = 9, "e = " & e ' VBSE_OUT_OF_BOUNDS, can only change rightmost dimension
 
 dim staticarray(4)
 on error resume next
@@ -1571,8 +1632,43 @@ sub test_identifiers
     Dim step
     step = "xx"
     Call ok(step = "xx", "step = " & step & " expected ""xx""")
+
+    Dim property
+    property = "xx"
+    Call ok(property = "xx", "property = " & property & " expected ""xx""")
 end sub
 call test_identifiers()
+
+Class class_test_identifiers_as_function_name
+    Sub Property ( par )
+    End Sub
+
+    Function Error( par )
+    End Function
+
+    Sub Default ()
+    End Sub
+
+    Function Explicit (par)
+        Explicit = par
+    End Function
+
+    Sub Step ( default )
+    End Sub
+End Class
+
+Class class_test_identifiers_as_property_name
+    Public Property Get Property()
+    End Property
+
+    Public Property Let Error(par)
+        Error = par
+    End Property
+
+    Public Property Set Default(par)
+        Set Default = par
+    End Property
+End Class
 
 sub test_dotIdentifiers
     ' test keywords that can also be an identifier after a dot
@@ -1675,6 +1771,43 @@ class TestPropSyntax
     end property
 end class
 
+Class TestPropParam
+    Public oDict
+    Public gotNothing
+    Public m_obj
+
+    Public Property Set bar(obj)
+        Set m_obj = obj
+    End Property
+    Public Property Set foo(par,obj)
+        Set m_obj = obj
+        if obj is Nothing Then gotNothing = True
+        oDict = par
+    End Property
+    Public Property Let Key(oldKey,newKey)
+        oDict = oldKey & newKey
+    End Property
+    Public Property Let three(uno,due,tre)
+        oDict = uno & due & tre
+    End Property
+    Public Property Let ten(a,b,c,d,e,f,g,h,i,j)
+        oDict = a & b & c & d & e & f & g & h & i & j
+    End Property
+End Class
+
+Set x = new TestPropParam
+x.key("old") = "new"
+call ok(x.oDict = "oldnew","x.oDict = " & x.oDict & " expected oldnew")
+x.three(1,2) = 3
+call ok(x.oDict = "123","x.oDict = " & x.oDict & " expected 123")
+x.ten(1,2,3,4,5,6,7,8,9) = 0
+call ok(x.oDict = "1234567890","x.oDict = " & x.oDict & " expected 1234567890")
+Set x.bar = Nothing
+call ok(x.gotNothing=Empty,"x.gotNothing = " & x.gotNothing  & " expected Empty")
+Set x.foo("123") = Nothing
+call ok(x.oDict = "123","x.oDict = " & x.oDict & " expected 123")
+call ok(x.gotNothing=True,"x.gotNothing = " & x.gotNothing  & " expected true")
+
 set x = new TestPropSyntax
 set x.prop = new TestPropSyntax
 set x.prop.prop = new TestPropSyntax
@@ -1689,6 +1822,36 @@ call ok(x.getprop.getprop().prop is obj, "x.getprop.getprop().prop is not obj (e
 
 ok getVT(x) = "VT_DISPATCH*", "getVT(x) = " & getVT(x)
 todo_wine_ok getVT(x()) = "VT_BSTR", "getVT(x()) = " & getVT(x())
+
+funcCalled = ""
+class DefaultSubTest1
+ Public  default Sub init(a)
+    funcCalled = "init" & a
+ end sub
+end class
+
+Set obj = New DefaultSubTest1
+obj.init(1)
+call ok(funcCalled = "init1","funcCalled=" & funcCalled)
+funcCalled = ""
+obj(2)
+call ok(funcCalled = "init2","funcCalled=" & funcCalled)
+
+class DefaultSubTest2
+ Public Default Function init
+    funcCalled = "init"
+ end function
+end class
+
+Set obj = New DefaultSubTest2
+funcCalled = ""
+obj.init()
+call ok(funcCalled = "init","funcCalled=" & funcCalled)
+funcCalled = ""
+' todo this is not yet supported
+'funcCalled = ""
+'obj()
+'call ok(funcCalled = "init","funcCalled=" & funcCalled)
 
 with nothing
 end with

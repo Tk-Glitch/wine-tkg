@@ -17,8 +17,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #define COBJMACROS
@@ -78,8 +76,6 @@ typedef struct BmpFrameEncode {
     UINT colors;
     BOOL committed;
 } BmpFrameEncode;
-
-static const WCHAR wszEnableV5Header32bppBGRA[] = {'E','n','a','b','l','e','V','5','H','e','a','d','e','r','3','2','b','p','p','B','G','R','A',0};
 
 static inline BmpFrameEncode *impl_from_IWICBitmapFrameEncode(IWICBitmapFrameEncode *iface)
 {
@@ -401,10 +397,16 @@ static HRESULT WINAPI BmpFrameEncode_Commit(IWICBitmapFrameEncode *iface)
 }
 
 static HRESULT WINAPI BmpFrameEncode_GetMetadataQueryWriter(IWICBitmapFrameEncode *iface,
-    IWICMetadataQueryWriter **ppIMetadataQueryWriter)
+        IWICMetadataQueryWriter **query_writer)
 {
-    FIXME("(%p, %p): stub\n", iface, ppIMetadataQueryWriter);
-    return E_NOTIMPL;
+    BmpFrameEncode *encoder = impl_from_IWICBitmapFrameEncode(iface);
+
+    TRACE("iface %p, query_writer %p.\n", iface, query_writer);
+
+    if (!encoder->initialized)
+        return WINCODEC_ERR_NOTINITIALIZED;
+
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
 }
 
 static const IWICBitmapFrameEncodeVtbl BmpFrameEncode_Vtbl = {
@@ -564,7 +566,7 @@ static HRESULT WINAPI BmpEncoder_CreateNewFrame(IWICBitmapEncoder *iface,
     HRESULT hr;
     static const PROPBAG2 opts[1] =
     {
-        { PROPBAG2_TYPE_DATA, VT_BOOL, 0, 0, (LPOLESTR)wszEnableV5Header32bppBGRA },
+        { PROPBAG2_TYPE_DATA, VT_BOOL, 0, 0, (LPOLESTR)L"EnableV5Header32bppBGRA" },
     };
 
     TRACE("(%p,%p,%p)\n", iface, ppIFrameEncode, ppIEncoderOptions);

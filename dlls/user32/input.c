@@ -22,9 +22,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -48,7 +45,6 @@
 #include "dbt.h"
 #include "wine/server.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
@@ -366,10 +362,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReleaseCapture(void)
  */
 HWND WINAPI GetCapture(void)
 {
-    shmlocal_t *shm = wine_get_shmlocal();
     HWND ret = 0;
 
-    if (shm) return wine_server_ptr_handle( shm->input_capture );
     SERVER_START_REQ( get_thread_input )
     {
         req->tid = GetCurrentThreadId();
@@ -480,29 +474,17 @@ DWORD WINAPI GetQueueStatus( UINT flags )
  */
 BOOL WINAPI GetInputState(void)
 {
-    shmlocal_t *shm = wine_get_shmlocal();
     DWORD ret;
 
     check_for_events( QS_INPUT );
-
-    /* req->clear is not set, so we can safely get the
-     * wineserver status without an additional call. */
-    if (shm)
-    {
-        ret = shm->queue_bits;
-        goto done;
-    }
 
     SERVER_START_REQ( get_queue_status )
     {
         req->clear_bits = 0;
         wine_server_call( req );
-        ret = reply->wake_bits;
+        ret = reply->wake_bits & (QS_KEY | QS_MOUSEBUTTON);
     }
     SERVER_END_REQ;
-
-done:
-    ret &= (QS_KEY | QS_MOUSEBUTTON);
     return ret;
 }
 
@@ -513,7 +495,6 @@ done:
 BOOL WINAPI GetLastInputInfo(PLASTINPUTINFO plii)
 {
     BOOL ret;
-    shmglobal_t *shm = wine_get_shmglobal();
 
     TRACE("%p\n", plii);
 
@@ -521,12 +502,6 @@ BOOL WINAPI GetLastInputInfo(PLASTINPUTINFO plii)
     {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
-    }
-
-    if (shm)
-    {
-        plii->dwTime = shm->last_input_time;
-        return TRUE;
     }
 
     SERVER_START_REQ( get_last_input_time )
@@ -1301,57 +1276,64 @@ TrackMouseEvent (TRACKMOUSEEVENT *ptme)
  *     Success: count of point set in the buffer
  *     Failure: -1
  */
-int WINAPI GetMouseMovePointsEx(UINT size, LPMOUSEMOVEPOINT ptin, LPMOUSEMOVEPOINT ptout, int count, DWORD res)
+int WINAPI GetMouseMovePointsEx( UINT size, LPMOUSEMOVEPOINT ptin, LPMOUSEMOVEPOINT ptout, int count, DWORD resolution )
 {
-    POINT pos;
-    static BOOL once;
-    static INT last_x = 0;
-    static INT last_y = 0;
+    cursor_pos_t *pos, positions[64];
+    int copied;
+    unsigned int i;
 
-    if((size != sizeof(MOUSEMOVEPOINT)) || (count < 0) || (count > 64)) {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return -1;
-    }
 
-    if(!ptin || (!ptout && count)) {
-        SetLastError(ERROR_NOACCESS);
-        return -1;
-    }
+    TRACE( "%d, %p, %p, %d, %d\n", size, ptin, ptout, count, resolution );
 
-    if (!once++)
-        FIXME("(%d %p %p %d %d) semi-stub\n", size, ptin, ptout, count, res);
-    else
-        TRACE("(%d %p %p %d %d) semi-stub\n", size, ptin, ptout, count, res);
-
-    TRACE("    ptin: %d %d\n", ptin->x, ptin->y);
-
-    if (res == GMMP_USE_HIGH_RESOLUTION_POINTS)
+    if ((size != sizeof(MOUSEMOVEPOINT)) || (count < 0) || (count > ARRAY_SIZE( positions )))
     {
-        WARN("GMMP_USE_HIGH_RESOLUTION_POINTS not supported");
-        SetLastError(ERROR_POINT_NOT_FOUND);
+        SetLastError( ERROR_INVALID_PARAMETER );
         return -1;
     }
 
-    GetCursorPos(&pos);
-    
-    ptout[0].x = pos.x;
-    ptout[0].y = pos.y;
-    ptout[0].time = GetTickCount();
-    ptout[0].dwExtraInfo = 0;
-    TRACE("    ptout[0]: %d %d\n", pos.x, pos.y);
-    
-    if (count > 1) {
-        ptout[1].x = last_x;
-        ptout[1].y = last_y;
-        ptout[1].time = GetTickCount();
-        ptout[1].dwExtraInfo = 0;
-        TRACE("    ptout[1]: %d %d\n", last_x, last_y);
+    if (!ptin || (!ptout && count))
+    {
+        SetLastError( ERROR_NOACCESS );
+        return -1;
     }
-    
-    last_x = pos.x;
-    last_y = pos.y;
-        
-    return count > 1 ? 2 : 1;
+
+    if (resolution != GMMP_USE_DISPLAY_POINTS)
+    {
+        FIXME( "only GMMP_USE_DISPLAY_POINTS is supported for now\n" );
+        SetLastError( ERROR_POINT_NOT_FOUND );
+        return -1;
+    }
+
+    SERVER_START_REQ( get_cursor_history )
+    {
+        wine_server_set_reply( req, &positions, sizeof(positions) );
+        if (wine_server_call_err( req )) return -1;
+    }
+    SERVER_END_REQ;
+
+    for (i = 0; i < ARRAY_SIZE( positions ); i++)
+    {
+        pos = &positions[i];
+        if (ptin->x == pos->x && ptin->y == pos->y && (!ptin->time || ptin->time == pos->time))
+            break;
+    }
+
+    if (i == ARRAY_SIZE( positions ))
+    {
+        SetLastError( ERROR_POINT_NOT_FOUND );
+        return -1;
+    }
+
+    for (copied = 0; copied < count && i < ARRAY_SIZE( positions ); copied++, i++)
+    {
+        pos = &positions[i];
+        ptout[copied].x = pos->x;
+        ptout[copied].y = pos->y;
+        ptout[copied].time = pos->time;
+        ptout[copied].dwExtraInfo = pos->info;
+    }
+
+    return copied;
 }
 
 /***********************************************************************

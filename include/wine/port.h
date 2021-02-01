@@ -62,16 +62,6 @@ static inline const char *dlerror(void) { return "No dlopen support on Windows";
 
 #ifdef _MSC_VER
 
-#define ftruncate chsize
-#ifndef isfinite
-# define isfinite(x) _finite(x)
-#endif
-#ifndef isinf
-# define isinf(x) (!(_finite(x) || _isnan(x)))
-#endif
-#ifndef isnan
-# define isnan(x) _isnan(x)
-#endif
 #define popen _popen
 #define pclose _pclose
 /* The UCRT headers in the Windows SDK #error out if we #define snprintf.
@@ -86,7 +76,6 @@ static inline const char *dlerror(void) { return "No dlopen support on Windows";
 #define strncasecmp _strnicmp
 #define strcasecmp _stricmp
 
-typedef int mode_t;
 typedef long off_t;
 typedef int pid_t;
 typedef int ssize_t;
@@ -101,18 +90,6 @@ typedef int ssize_t;
 #  else
 #    define __int64 long long
 #  endif
-#endif
-
-#ifndef HAVE_ISFINITE
-int isfinite(double x);
-#endif
-
-#ifndef HAVE_ISINF
-int isinf(double x);
-#endif
-
-#ifndef HAVE_ISNAN
-int isnan(double x);
 #endif
 
 /* Process creation flags */
@@ -130,35 +107,6 @@ extern int _spawnvp(int mode, const char *cmdname, const char * const argv[]);
 #endif  /* _WIN32 */
 
 /****************************************************************
- * Type definitions
- */
-
-#ifndef HAVE_FSBLKCNT_T
-typedef unsigned long fsblkcnt_t;
-#endif
-#ifndef HAVE_FSFILCNT_T
-typedef unsigned long fsfilcnt_t;
-#endif
-
-#ifndef HAVE_STRUCT_STATVFS_F_BLOCKS
-struct statvfs
-{
-    unsigned long f_bsize;
-    unsigned long f_frsize;
-    fsblkcnt_t    f_blocks;
-    fsblkcnt_t    f_bfree;
-    fsblkcnt_t    f_bavail;
-    fsfilcnt_t    f_files;
-    fsfilcnt_t    f_ffree;
-    fsfilcnt_t    f_favail;
-    unsigned long f_fsid;
-    unsigned long f_flag;
-    unsigned long f_namemax;
-};
-#endif /* HAVE_STRUCT_STATVFS_F_BLOCKS */
-
-
-/****************************************************************
  * Macro definitions
  */
 
@@ -174,20 +122,12 @@ struct statvfs
 # define S_ISLNK(mod) (0)
 #endif
 
-#ifndef S_ISSOCK
-# define S_ISSOCK(mod) (0)
-#endif
-
 #ifndef S_ISDIR
 # define S_ISDIR(mod) (((mod) & _S_IFMT) == _S_IFDIR)
 #endif
 
 #ifndef S_ISCHR
 # define S_ISCHR(mod) (((mod) & _S_IFMT) == _S_IFCHR)
-#endif
-
-#ifndef S_ISFIFO
-# define S_ISFIFO(mod) (((mod) & _S_IFMT) == _S_IFIFO)
 #endif
 
 #ifndef S_ISREG
@@ -220,34 +160,10 @@ struct statvfs
 #define M_PI_2 1.570796326794896619
 #endif
 
-#ifndef INFINITY
-static inline float __port_infinity(void)
-{
-    static const unsigned __inf_bytes = 0x7f800000;
-    return *(const float *)&__inf_bytes;
-}
-#define INFINITY __port_infinity()
-#endif
-
-#ifndef NAN
-static inline float __port_nan(void)
-{
-    static const unsigned __nan_bytes = 0x7fc00000;
-    return *(const float *)&__nan_bytes;
-}
-#define NAN __port_nan()
-#endif
-
 
 /****************************************************************
  * Function definitions (only when using libwine_port)
  */
-
-#ifndef NO_LIBWINE_PORT
-
-#ifndef HAVE_FSTATVFS
-int fstatvfs( int fd, struct statvfs *buf );
-#endif
 
 #ifndef HAVE_GETOPT_LONG_ONLY
 extern char *optarg;
@@ -273,26 +189,6 @@ extern int getopt_long_only (int ___argc, char *const *___argv,
                              const char *__shortopts,
                              const struct option *__longopts, int *__longind);
 #endif  /* HAVE_GETOPT_LONG_ONLY */
-
-#ifndef HAVE_FFS
-int ffs( int x );
-#endif
-
-#ifndef HAVE_LLRINT
-__int64 llrint(double x);
-#endif
-
-#ifndef HAVE_LLRINTF
-__int64 llrintf(float x);
-#endif
-
-#ifndef HAVE_LRINT
-long lrint(double x);
-#endif
-
-#ifndef HAVE_LRINTF
-long lrintf(float x);
-#endif
 
 #ifndef HAVE_LSTAT
 int lstat(const char *file_name, struct stat *buf);
@@ -326,72 +222,10 @@ ssize_t pwrite( int fd, const void *buf, size_t count, off_t offset );
 int readlink( const char *path, char *buf, size_t size );
 #endif /* HAVE_READLINK */
 
-#ifndef HAVE_RINT
-double rint(double x);
-#endif
-
-#ifndef HAVE_RINTF
-float rintf(float x);
-#endif
-
-#ifndef RENAME_EXCHANGE
-#define RENAME_EXCHANGE (1 << 1)
-#endif /* RENAME_EXCHANGE */
-
-#ifndef HAVE_RENAMEAT2
-int renameat2( int olddirfd, const char *oldpath, int newdirfd, const char *newpath,
-               unsigned int flags );
-#endif /* HAVE_RENAMEAT2 */
-
-#ifndef HAVE_STATVFS
-int statvfs( const char *path, struct statvfs *buf );
-#endif
-
-#ifndef HAVE_STRNLEN
-size_t strnlen( const char *str, size_t maxlen );
-#endif /* !defined(HAVE_STRNLEN) */
-
 #ifndef HAVE_SYMLINK
 int symlink(const char *from, const char *to);
 #endif
 
-#ifndef HAVE_USLEEP
-int usleep (unsigned int useconds);
-#endif /* !defined(HAVE_USLEEP) */
-
 extern int mkstemps(char *template, int suffix_len);
-
-/* Extended attribute functions */
-
-#ifndef XATTR_USER_PREFIX
-# define XATTR_USER_PREFIX "user."
-#endif
-#ifndef XATTR_SIZE_MAX
-# define XATTR_SIZE_MAX    65536
-#endif
-
-extern int xattr_fget( int filedes, const char *name, void *value, size_t size );
-extern int xattr_fremove( int filedes, const char *name );
-extern int xattr_fset( int filedes, const char *name, void *value, size_t size );
-extern int xattr_get( const char *path, const char *name, void *value, size_t size );
-extern int xattr_remove( const char *path, const char *name );
-extern int xattr_set( const char *path, const char *name, void *value, size_t size );
-
-#else /* NO_LIBWINE_PORT */
-
-#define __WINE_NOT_PORTABLE(func) func##_is_not_portable func##_is_not_portable
-
-#define ffs                     __WINE_NOT_PORTABLE(ffs)
-#define fstatvfs                __WINE_NOT_PORTABLE(fstatvfs)
-#define getopt_long             __WINE_NOT_PORTABLE(getopt_long)
-#define getopt_long_only        __WINE_NOT_PORTABLE(getopt_long_only)
-#define lstat                   __WINE_NOT_PORTABLE(lstat)
-#define pread                   __WINE_NOT_PORTABLE(pread)
-#define pwrite                  __WINE_NOT_PORTABLE(pwrite)
-#define statvfs                 __WINE_NOT_PORTABLE(statvfs)
-#define strnlen                 __WINE_NOT_PORTABLE(strnlen)
-#define usleep                  __WINE_NOT_PORTABLE(usleep)
-
-#endif /* NO_LIBWINE_PORT */
 
 #endif /* !defined(__WINE_WINE_PORT_H) */

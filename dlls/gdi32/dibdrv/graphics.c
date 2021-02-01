@@ -22,7 +22,6 @@
 #include "gdi_private.h"
 #include "dibdrv.h"
 
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dib);
@@ -615,9 +614,9 @@ static DWORD font_cache_hash( struct cached_font *font )
         two_chars = *ptr;
         pwc = (WCHAR *)&two_chars;
         if (!*pwc) break;
-        *pwc = toupperW(*pwc);
+        *pwc = towupper(*pwc);
         pwc++;
-        *pwc = toupperW(*pwc);
+        *pwc = towupper(*pwc);
         hash ^= two_chars;
         if (!*pwc) break;
     }
@@ -630,7 +629,7 @@ static int font_cache_cmp( const struct cached_font *p1, const struct cached_fon
     if (!ret) ret = p1->aa_flags - p2->aa_flags;
     if (!ret) ret = memcmp( &p1->xform, &p2->xform, sizeof(p1->xform) );
     if (!ret) ret = memcmp( &p1->lf, &p2->lf, FIELD_OFFSET( LOGFONTW, lfFaceName ));
-    if (!ret) ret = strcmpiW( p1->lf.lfFaceName, p2->lf.lfFaceName );
+    if (!ret) ret = wcsicmp( p1->lf.lfFaceName, p2->lf.lfFaceName );
     return ret;
 }
 

@@ -41,7 +41,6 @@ static const char *guid_to_string(const GUID *guid)
 static void test_DMOUnregister(void)
 {
     static char buffer[200];
-    static const WCHAR testdmoW[] = {'t','e','s','t','d','m','o',0};
     HRESULT hr;
 
     hr = DMOUnregister(&GUID_unknowndmo, &GUID_unknowncategory);
@@ -51,10 +50,10 @@ static void test_DMOUnregister(void)
     ok(hr == S_FALSE, "got 0x%08x\n", hr);
 
     /* can't register for all categories */
-    hr = DMORegister(testdmoW, &GUID_unknowndmo, &GUID_NULL, 0, 0, NULL, 0, NULL);
+    hr = DMORegister(L"testdmo", &GUID_unknowndmo, &GUID_NULL, 0, 0, NULL, 0, NULL);
     ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
 
-    hr = DMORegister(testdmoW, &GUID_unknowndmo, &GUID_unknowncategory, 0, 0, NULL, 0, NULL);
+    hr = DMORegister(L"testdmo", &GUID_unknowndmo, &GUID_unknowncategory, 0, 0, NULL, 0, NULL);
     if (hr != S_OK) {
         win_skip("Failed to register DMO. Probably user doesn't have persmissions to do so.\n");
         return;
@@ -88,6 +87,9 @@ static void test_DMOGetName(void)
 
 static void test_DMOEnum(void)
 {
+    static const DMO_PARTIAL_MEDIATYPE input_type = {{0x1111}, {0x2222}};
+    static const DMO_PARTIAL_MEDIATYPE wrong_type = {{0x3333}, {0x4444}};
+
     IEnumDMO *enum_dmo;
     HRESULT hr;
     CLSID clsid;
@@ -115,6 +117,47 @@ static void test_DMOEnum(void)
     ok(count == 0, "expected 0, got %d\n", count);
 
     IEnumDMO_Release(enum_dmo);
+
+    hr = DMORegister(L"testdmo", &GUID_unknowndmo, &GUID_unknowncategory, 0, 1, &input_type, 0, NULL);
+    if (hr != S_OK)
+        return;
+
+    hr = DMOEnum(&GUID_unknowncategory, 0, 0, NULL, 0, NULL, &enum_dmo);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IEnumDMO_Next(enum_dmo, 1, &clsid, &name, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&clsid, &GUID_unknowndmo), "Got clsid %s.\n", debugstr_guid(&clsid));
+    ok(!wcscmp(name, L"testdmo"), "Got name %s.\n", debugstr_w(name));
+
+    hr = IEnumDMO_Next(enum_dmo, 1, &clsid, &name, NULL);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    IEnumDMO_Release(enum_dmo);
+
+    hr = DMOEnum(&GUID_unknowncategory, 0, 1, &input_type, 0, NULL, &enum_dmo);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IEnumDMO_Next(enum_dmo, 1, &clsid, &name, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&clsid, &GUID_unknowndmo), "Got clsid %s.\n", debugstr_guid(&clsid));
+    ok(!wcscmp(name, L"testdmo"), "Got name %s.\n", debugstr_w(name));
+
+    hr = IEnumDMO_Next(enum_dmo, 1, &clsid, &name, NULL);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    IEnumDMO_Release(enum_dmo);
+
+    hr = DMOEnum(&GUID_unknowncategory, 0, 1, &wrong_type, 0, NULL, &enum_dmo);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IEnumDMO_Next(enum_dmo, 1, &clsid, &name, NULL);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    IEnumDMO_Release(enum_dmo);
+
+    hr = DMOUnregister(&GUID_unknowndmo, &GUID_unknowncategory);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 }
 
 static void test_DMOGetTypes(void)

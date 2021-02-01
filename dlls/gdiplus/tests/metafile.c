@@ -22,6 +22,7 @@
 
 #include "objbase.h"
 #include "gdiplus.h"
+#include "winspool.h"
 #include "wine/test.h"
 
 #define expect(expected, got) ok(got == expected, "Expected %.8x, got %.8x\n", expected, got)
@@ -30,6 +31,8 @@
 
 static BOOL save_metafiles;
 static BOOL load_metafiles;
+
+static const WCHAR description[] = L"winetest";
 
 typedef struct emfplus_record
 {
@@ -378,7 +381,6 @@ static void test_empty(void)
     MetafileHeader header;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     UINT limit_dpi;
 
     hdc = CreateCompatibleDC(0);
@@ -626,7 +628,6 @@ static void test_getdc(void)
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
     static const GpPointF dst_points_half[3] = {{0.0,0.0},{50.0,0.0},{0.0,50.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     HBRUSH hbrush, holdbrush;
     GpBitmap *bitmap;
     ARGB color;
@@ -784,7 +785,6 @@ static void test_emfonly(void)
     MetafileHeader header;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     HBRUSH hbrush, holdbrush;
     GpBitmap *bitmap;
     ARGB color;
@@ -1081,7 +1081,6 @@ static void test_fillrect(void)
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
     static const GpPointF dst_points_half[3] = {{0.0,0.0},{50.0,0.0},{0.0,50.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpBitmap *bitmap;
     ARGB color;
     GpBrush *brush;
@@ -1194,7 +1193,6 @@ static void test_clear(void)
     HENHMETAFILE hemf;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{10.0,10.0},{20.0,10.0},{10.0,20.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpBitmap *bitmap;
     ARGB color;
 
@@ -1266,7 +1264,6 @@ static void test_nullframerect(void) {
     GpMetafile *metafile;
     GpGraphics *graphics;
     HDC hdc, metafile_dc;
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpBrush *brush;
     HBRUSH hbrush, holdbrush;
     GpRectF bounds;
@@ -1459,7 +1456,6 @@ static void test_pagetransform(void)
     HDC hdc;
     static const GpRectF frame = {0.0, 0.0, 5.0, 5.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpBitmap *bitmap;
     ARGB color;
     GpBrush *brush;
@@ -1664,7 +1660,6 @@ static void test_worldtransform(void)
     HDC hdc;
     static const GpRectF frame = {0.0, 0.0, 5.0, 5.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpBitmap *bitmap;
     ARGB color;
     GpBrush *brush;
@@ -1921,7 +1916,6 @@ static void test_converttoemfplus(void)
     GpStatus (WINAPI *pGdipConvertToEmfPlus)( const GpGraphics *graphics, GpMetafile *metafile, BOOL *succ,
               EmfType emfType, const WCHAR *description, GpMetafile **outmetafile);
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpStatus stat;
     GpMetafile *metafile, *metafile2 = NULL, *emhmeta;
     GpGraphics *graphics;
@@ -2001,7 +1995,6 @@ static void test_frameunit(void)
     GpGraphics *graphics;
     HDC hdc;
     static const GpRectF frame = {0.0, 0.0, 5.0, 5.0};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpUnit unit;
     REAL dpix, dpiy;
     GpRectF bounds;
@@ -2097,7 +2090,6 @@ static void test_containers(void)
     HDC hdc;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GraphicsContainer state1, state2;
     GpRectF srcrect, dstrect;
     REAL dpix, dpiy;
@@ -2293,7 +2285,6 @@ static void test_clipping(void)
     HDC hdc;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GraphicsState state;
 
     hdc = CreateCompatibleDC(0);
@@ -2434,7 +2425,6 @@ static void test_gditransform(void)
     MetafileHeader header;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{40.0,0.0},{0.0,40.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     HBRUSH hbrush, holdbrush;
     GpBitmap *bitmap;
     ARGB color;
@@ -2561,7 +2551,6 @@ static const emfplus_record draw_image_metafile_records[] = {
 
 static void test_drawimage(void)
 {
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     static const GpPointF dst_points[3] = {{10.0,10.0},{85.0,15.0},{10.0,80.0}};
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     const ColorMatrix double_red = {{
@@ -2679,7 +2668,6 @@ static const emfplus_record properties_records[] = {
 
 static void test_properties(void)
 {
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
 
     GpMetafile *metafile;
@@ -2757,7 +2745,6 @@ static const emfplus_record draw_path_records[] = {
 
 static void test_drawpath(void)
 {
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
 
     GpMetafile *metafile;
@@ -2822,9 +2809,7 @@ static const emfplus_record fill_path_records[] = {
 
 static void test_fillpath(void)
 {
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
-    static const WCHAR winetestemfW[] = {'w','i','n','e','t','e','s','t','.','e','m','f',0};
 
     GpMetafile *metafile;
     GpGraphics *graphics;
@@ -2870,7 +2855,7 @@ static void test_fillpath(void)
     check_emfplus(hemf, fill_path_records, "fill path");
 
     /* write to disk */
-    DeleteEnhMetaFile(CopyEnhMetaFileW(hemf, winetestemfW));
+    DeleteEnhMetaFile(CopyEnhMetaFileW(hemf, L"winetest.emf"));
 
     DeleteEnhMetaFile(hemf);
 
@@ -2878,15 +2863,15 @@ static void test_fillpath(void)
     expect(Ok, stat);
 
     /* should succeed when given path to an EMF */
-    stat = GdipCreateMetafileFromWmfFile(winetestemfW, NULL, &metafile);
+    stat = GdipCreateMetafileFromWmfFile(L"winetest.emf", NULL, &metafile);
     expect(Ok, stat);
 
     stat = GdipDisposeImage((GpImage*)metafile);
     expect(Ok, stat);
 
-    DeleteFileW(winetestemfW);
+    DeleteFileW(L"winetest.emf");
 
-    stat = GdipCreateMetafileFromWmfFile(winetestemfW, NULL, &metafile);
+    stat = GdipCreateMetafileFromWmfFile(L"winetest.emf", NULL, &metafile);
     expect(GenericError, stat);
 }
 
@@ -3473,6 +3458,84 @@ static void test_lineargradient(void)
     GdipDisposeImage((GpImage*)metafile);
 }
 
+static HDC create_printer_dc(void)
+{
+    char buffer[260];
+    DWORD len;
+    PRINTER_INFO_2A *pbuf = NULL;
+    DRIVER_INFO_3A *dbuf = NULL;
+    HANDLE hprn = 0;
+    HDC hdc = 0;
+    HMODULE winspool = LoadLibraryA("winspool.drv");
+    BOOL (WINAPI *pOpenPrinterA)(LPSTR, HANDLE *, LPPRINTER_DEFAULTSA);
+    BOOL (WINAPI *pGetDefaultPrinterA)(LPSTR, LPDWORD);
+    BOOL (WINAPI *pGetPrinterA)(HANDLE, DWORD, LPBYTE, DWORD, LPDWORD);
+    BOOL (WINAPI *pGetPrinterDriverA)(HANDLE, LPSTR, DWORD, LPBYTE, DWORD, LPDWORD);
+    BOOL (WINAPI *pClosePrinter)(HANDLE);
+
+    pGetDefaultPrinterA = (void *)GetProcAddress(winspool, "GetDefaultPrinterA");
+    pOpenPrinterA = (void *)GetProcAddress(winspool, "OpenPrinterA");
+    pGetPrinterA = (void *)GetProcAddress(winspool, "GetPrinterA");
+    pGetPrinterDriverA = (void *)GetProcAddress(winspool, "GetPrinterDriverA");
+    pClosePrinter = (void *)GetProcAddress(winspool, "ClosePrinter");
+
+    if (!pGetDefaultPrinterA || !pOpenPrinterA || !pGetPrinterA || !pGetPrinterDriverA || !pClosePrinter)
+        goto done;
+
+    len = sizeof(buffer);
+    if (!pGetDefaultPrinterA(buffer, &len)) goto done;
+    if (!pOpenPrinterA(buffer, &hprn, NULL)) goto done;
+
+    pGetPrinterA(hprn, 2, NULL, 0, &len);
+    pbuf = HeapAlloc(GetProcessHeap(), 0, len);
+    if (!pGetPrinterA(hprn, 2, (LPBYTE)pbuf, len, &len)) goto done;
+
+    pGetPrinterDriverA(hprn, NULL, 3, NULL, 0, &len);
+    dbuf = HeapAlloc(GetProcessHeap(), 0, len);
+    if (!pGetPrinterDriverA(hprn, NULL, 3, (LPBYTE)dbuf, len, &len)) goto done;
+
+    hdc = CreateDCA(dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName, pbuf->pDevMode);
+    trace("hdc %p for driver '%s' printer '%s' port '%s'\n", hdc,
+          dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName);
+done:
+    HeapFree(GetProcessHeap(), 0, dbuf);
+    HeapFree(GetProcessHeap(), 0, pbuf);
+    if (hprn) pClosePrinter(hprn);
+    if (winspool) FreeLibrary(winspool);
+    return hdc;
+}
+
+static void test_printer_dc(void)
+{
+    HDC hdc;
+    Status status;
+    RectF frame = { 0.0, 0.0, 1.0, 1.0 };
+    GpMetafile *metafile;
+    GpGraphics *graphics;
+    REAL dpix, dpiy;
+
+    hdc = create_printer_dc();
+    if (!hdc)
+    {
+        skip("could not create a DC for the default printer\n");
+        return;
+    }
+
+    status = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitInch, L"winetest", &metafile);
+    expect(Ok, status);
+
+    status = GdipGetImageGraphicsContext((GpImage *)metafile, &graphics);
+    expect(Ok, status);
+
+    GdipGetDpiX(graphics, &dpix);
+    GdipGetDpiX(graphics, &dpiy);
+    expectf((REAL)(GetDeviceCaps(hdc, LOGPIXELSX)), dpix);
+    expectf((REAL)(GetDeviceCaps(hdc, LOGPIXELSY)), dpiy);
+
+    GdipDeleteGraphics(graphics);
+    GdipDisposeImage((GpImage *)metafile);
+}
+
 START_TEST(metafile)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -3526,6 +3589,7 @@ START_TEST(metafile)
     test_unknownfontdecode();
     test_fillregion();
     test_lineargradient();
+    test_printer_dc();
 
     GdiplusShutdown(gdiplusToken);
 }

@@ -33,6 +33,7 @@
 #include "ole2.h"
 #include "propsys.h"
 #include "dxgi.h"
+#include "uuids.h"
 
 #include "wine/debug.h"
 #include "wine/list.h"
@@ -623,21 +624,8 @@ HRESULT WINAPI MFCreateTransformActivate(IMFActivate **activate)
     return create_transform_activate(NULL, activate);
 }
 
-static const WCHAR transform_keyW[] = {'M','e','d','i','a','F','o','u','n','d','a','t','i','o','n','\\',
-                                 'T','r','a','n','s','f','o','r','m','s',0};
-static const WCHAR categories_keyW[] = {'M','e','d','i','a','F','o','u','n','d','a','t','i','o','n','\\',
-                                 'T','r','a','n','s','f','o','r','m','s','\\',
-                                 'C','a','t','e','g','o','r','i','e','s',0};
-static const WCHAR inputtypesW[]  = {'I','n','p','u','t','T','y','p','e','s',0};
-static const WCHAR outputtypesW[] = {'O','u','t','p','u','t','T','y','p','e','s',0};
-static const WCHAR attributesW[] = {'A','t','t','r','i','b','u','t','e','s',0};
-static const WCHAR mftflagsW[] = {'M','F','T','F','l','a','g','s',0};
-static const WCHAR szGUIDFmt[] =
-{
-    '%','0','8','x','-','%','0','4','x','-','%','0','4','x','-','%','0',
-    '2','x','%','0','2','x','-','%','0','2','x','%','0','2','x','%','0','2',
-    'x','%','0','2','x','%','0','2','x','%','0','2','x',0
-};
+static const WCHAR transform_keyW[] = L"MediaFoundation\\Transforms";
+static const WCHAR categories_keyW[] = L"MediaFoundation\\Transforms\\Categories";
 
 static const BYTE guid_conv_table[256] =
 {
@@ -652,10 +640,10 @@ static const BYTE guid_conv_table[256] =
 
 static WCHAR* GUIDToString(WCHAR *str, REFGUID guid)
 {
-    swprintf(str, 39, szGUIDFmt, guid->Data1, guid->Data2,
-        guid->Data3, guid->Data4[0], guid->Data4[1],
-        guid->Data4[2], guid->Data4[3], guid->Data4[4],
-        guid->Data4[5], guid->Data4[6], guid->Data4[7]);
+    swprintf(str, 39, L"%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+            guid->Data1, guid->Data2, guid->Data3, guid->Data4[0], guid->Data4[1],
+            guid->Data4[2], guid->Data4[3], guid->Data4[4], guid->Data4[5],
+            guid->Data4[6], guid->Data4[7]);
 
     return str;
 }
@@ -732,7 +720,6 @@ static HRESULT register_transform(const CLSID *clsid, const WCHAR *name, UINT32 
         UINT32 cinput, const MFT_REGISTER_TYPE_INFO *input_types, UINT32 coutput,
         const MFT_REGISTER_TYPE_INFO *output_types, IMFAttributes *attributes)
 {
-    static const WCHAR reg_format[] = {'%','s','\\','%','s',0};
     HRESULT hr = S_OK;
     HKEY hclsid = 0;
     WCHAR buffer[64];
@@ -741,7 +728,7 @@ static HRESULT register_transform(const CLSID *clsid, const WCHAR *name, UINT32 
     UINT8 *blob;
 
     GUIDToString(buffer, clsid);
-    swprintf(str, ARRAY_SIZE(str), reg_format, transform_keyW, buffer);
+    swprintf(str, ARRAY_SIZE(str), L"%s\\%s", transform_keyW, buffer);
 
     if ((ret = RegCreateKeyW(HKEY_CLASSES_ROOT, str, &hclsid)))
         hr = HRESULT_FROM_WIN32(ret);
@@ -756,14 +743,14 @@ static HRESULT register_transform(const CLSID *clsid, const WCHAR *name, UINT32 
     if (SUCCEEDED(hr) && cinput && input_types)
     {
         size = cinput * sizeof(MFT_REGISTER_TYPE_INFO);
-        if ((ret = RegSetValueExW(hclsid, inputtypesW, 0, REG_BINARY, (BYTE *)input_types, size)))
+        if ((ret = RegSetValueExW(hclsid, L"InputTypes", 0, REG_BINARY, (BYTE *)input_types, size)))
             hr = HRESULT_FROM_WIN32(ret);
     }
 
     if (SUCCEEDED(hr) && coutput && output_types)
     {
         size = coutput * sizeof(MFT_REGISTER_TYPE_INFO);
-        if ((ret = RegSetValueExW(hclsid, outputtypesW, 0, REG_BINARY, (BYTE *)output_types, size)))
+        if ((ret = RegSetValueExW(hclsid, L"OutputTypes", 0, REG_BINARY, (BYTE *)output_types, size)))
             hr = HRESULT_FROM_WIN32(ret);
     }
 
@@ -775,7 +762,7 @@ static HRESULT register_transform(const CLSID *clsid, const WCHAR *name, UINT32 
             {
                 if (SUCCEEDED(hr = MFGetAttributesAsBlob(attributes, blob, size)))
                 {
-                    if ((ret = RegSetValueExW(hclsid, attributesW, 0, REG_BINARY, blob, size)))
+                    if ((ret = RegSetValueExW(hclsid, L"Attributes", 0, REG_BINARY, blob, size)))
                         hr = HRESULT_FROM_WIN32(ret);
                 }
                 heap_free(blob);
@@ -787,7 +774,7 @@ static HRESULT register_transform(const CLSID *clsid, const WCHAR *name, UINT32 
 
     if (SUCCEEDED(hr) && flags)
     {
-        if ((ret = RegSetValueExW(hclsid, mftflagsW, 0, REG_DWORD, (BYTE *)&flags, sizeof(flags))))
+        if ((ret = RegSetValueExW(hclsid, L"MFTFlags", 0, REG_DWORD, (BYTE *)&flags, sizeof(flags))))
             hr = HRESULT_FROM_WIN32(ret);
     }
 
@@ -797,7 +784,6 @@ static HRESULT register_transform(const CLSID *clsid, const WCHAR *name, UINT32 
 
 static HRESULT register_category(CLSID *clsid, GUID *category)
 {
-    static const WCHAR reg_format[] = {'%','s','\\','%','s','\\','%','s',0};
     HKEY htmp1;
     WCHAR guid1[64], guid2[64];
     WCHAR str[350];
@@ -805,7 +791,7 @@ static HRESULT register_category(CLSID *clsid, GUID *category)
     GUIDToString(guid1, category);
     GUIDToString(guid2, clsid);
 
-    swprintf(str, ARRAY_SIZE(str), reg_format, categories_keyW, guid1, guid2);
+    swprintf(str, ARRAY_SIZE(str), L"%s\\%s\\%s", categories_keyW, guid1, guid2);
 
     if (RegCreateKeyW(HKEY_CLASSES_ROOT, str, &htmp1))
         return E_FAIL;
@@ -1156,13 +1142,13 @@ static HRESULT mft_collect_machine_reg(struct list *mfts, const GUID *category, 
         if (!GUIDFromString(clsidW, &mft.clsid))
             goto next;
 
-        mft_get_reg_flags(clsidW, mftflagsW, &mft.flags);
+        mft_get_reg_flags(clsidW, L"MFTFlags", &mft.flags);
 
         if (output_type)
-            mft_get_reg_type_info(clsidW, outputtypesW, &mft.output_types, &mft.output_types_count);
+            mft_get_reg_type_info(clsidW, L"OutputTypes", &mft.output_types, &mft.output_types_count);
 
         if (input_type)
-            mft_get_reg_type_info(clsidW, inputtypesW, &mft.input_types, &mft.input_types_count);
+            mft_get_reg_type_info(clsidW, L"InputTypes", &mft.input_types, &mft.input_types_count);
 
         if (!mft_is_type_info_match(&mft, category, flags, plugin_control, input_type, output_type))
         {
@@ -1543,18 +1529,28 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_TOPONODE_MARKIN_HERE),
         X(MF_MT_H264_SUPPORTED_SYNC_FRAME_TYPES),
         X(MF_TOPONODE_MARKOUT_HERE),
+        X(EVRConfig_ForceBob),
         X(MF_TOPONODE_DECODER),
+        X(EVRConfig_AllowDropToBob),
         X(MF_TOPOLOGY_PROJECTSTART),
+        X(EVRConfig_ForceThrottle),
         X(MF_VIDEO_MAX_MB_PER_SEC),
         X(MF_TOPOLOGY_PROJECTSTOP),
         X(MF_SINK_WRITER_ENCODER_CONFIG),
+        X(EVRConfig_AllowDropToThrottle),
         X(MF_TOPOLOGY_NO_MARKIN_MARKOUT),
+        X(EVRConfig_ForceHalfInterlace),
+        X(EVRConfig_AllowDropToHalfInterlace),
+        X(EVRConfig_ForceScaling),
         X(MF_MT_H264_CAPABILITIES),
+        X(EVRConfig_AllowScaling),
         X(MF_SOURCE_READER_ENABLE_TRANSCODE_ONLY_TRANSFORMS),
         X(MFT_PREFERRED_ENCODER_PROFILE),
+        X(EVRConfig_ForceBatching),
+        X(EVRConfig_AllowBatching),
         X(MF_TOPOLOGY_DYNAMIC_CHANGE_NOT_ALLOWED),
-        X(MF_MT_MPEG2_PROFILE),
         X(MF_MT_VIDEO_PROFILE),
+        X(MF_MT_MPEG2_PROFILE),
         X(MF_MT_DV_AAUX_CTRL_PACK_1),
         X(MF_MT_ALPHA_MODE),
         X(MF_MT_MPEG2_TIMECODE),
@@ -1582,7 +1578,6 @@ const char *debugstr_attr(const GUID *guid)
         X(MFT_CONNECTED_TO_HW_STREAM),
         X(MF_SA_D3D_AWARE),
         X(MF_MT_MAX_KEYFRAME_SPACING),
-        X(MFT_TRANSFORM_CLSID_Attribute),
         X(MFT_TRANSFORM_CLSID_Attribute),
         X(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING),
         X(MF_MT_AM_FORMAT_TYPE),
@@ -1743,8 +1738,8 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_TOPONODE_DISABLE_PREROLL),
         X(MF_MT_VIDEO_3D_FORMAT),
         X(MF_EVENT_STREAM_METADATA_KEYDATA),
-        X(MF_SOURCE_READER_D3D_MANAGER),
         X(MF_SINK_WRITER_D3D_MANAGER),
+        X(MF_SOURCE_READER_D3D_MANAGER),
         X(MFSampleExtension_3DVideo),
         X(MF_MT_H264_USAGE),
         X(MF_MEDIA_ENGINE_EME_CALLBACK),
@@ -5750,6 +5745,8 @@ static HRESULT resolver_handler_end_create(struct source_resolver *resolver, enu
     if (!(queued_result = heap_alloc_zero(sizeof(*queued_result))))
         return E_OUTOFMEMORY;
 
+    queued_result->origin = origin;
+
     IRtwqAsyncResult_GetObject(inner_result, &handler.handler);
 
     switch (origin)
@@ -6126,7 +6123,7 @@ static HRESULT resolver_create_scheme_handler(const WCHAR *scheme, DWORD flags, 
 
 static HRESULT resolver_get_scheme_handler(const WCHAR *url, DWORD flags, IMFSchemeHandler **handler)
 {
-    static const WCHAR fileschemeW[] = {'f','i','l','e',':',0};
+    static const WCHAR fileschemeW[] = L"file:";
     const WCHAR *ptr = url;
     unsigned int len;
     WCHAR *scheme;
@@ -8554,17 +8551,42 @@ HRESULT WINAPI CreatePropertyStore(IPropertyStore **store)
     return S_OK;
 }
 
+enum dxgi_device_handle_flags
+{
+    DXGI_DEVICE_HANDLE_FLAG_OPEN = 0x1,
+    DXGI_DEVICE_HANDLE_FLAG_INVALID = 0x2,
+    DXGI_DEVICE_HANDLE_FLAG_LOCKED = 0x4,
+};
+
 struct dxgi_device_manager
 {
     IMFDXGIDeviceManager IMFDXGIDeviceManager_iface;
     LONG refcount;
     UINT token;
     IDXGIDevice *device;
+
+    unsigned int *handles;
+    size_t count;
+    size_t capacity;
+
+    unsigned int locks;
+    unsigned int locking_tid;
+
+    CRITICAL_SECTION cs;
+    CONDITION_VARIABLE lock;
 };
 
 static struct dxgi_device_manager *impl_from_IMFDXGIDeviceManager(IMFDXGIDeviceManager *iface)
 {
     return CONTAINING_RECORD(iface, struct dxgi_device_manager, IMFDXGIDeviceManager_iface);
+}
+
+static HRESULT dxgi_device_manager_get_handle_index(struct dxgi_device_manager *manager, HANDLE hdevice, size_t *idx)
+{
+    if (!hdevice || hdevice > ULongToHandle(manager->count))
+        return E_HANDLE;
+    *idx = (ULONG_PTR)hdevice - 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI dxgi_device_manager_QueryInterface(IMFDXGIDeviceManager *iface, REFIID riid, void **obj)
@@ -8605,78 +8627,265 @@ static ULONG WINAPI dxgi_device_manager_Release(IMFDXGIDeviceManager *iface)
     {
         if (manager->device)
             IDXGIDevice_Release(manager->device);
+        DeleteCriticalSection(&manager->cs);
+        heap_free(manager->handles);
         heap_free(manager);
     }
 
     return refcount;
 }
 
-static HRESULT WINAPI dxgi_device_manager_CloseDeviceHandle(IMFDXGIDeviceManager *iface, HANDLE device)
+static void dxgi_device_manager_lock_handle(struct dxgi_device_manager *manager, size_t idx)
 {
-    FIXME("(%p, %p): stub.\n", iface, device);
+    if (manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_LOCKED)
+        return;
 
-    return E_NOTIMPL;
+    manager->handles[idx] |= DXGI_DEVICE_HANDLE_FLAG_LOCKED;
+    manager->locks++;
 }
 
-static HRESULT WINAPI dxgi_device_manager_GetVideoService(IMFDXGIDeviceManager *iface, HANDLE device,
-                                                          REFIID riid, void **service)
+static void dxgi_device_manager_unlock_handle(struct dxgi_device_manager *manager, size_t idx)
 {
-    FIXME("(%p, %p, %s, %p): stub.\n", iface, device, debugstr_guid(riid), service);
+    if (!(manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_LOCKED))
+        return;
 
-    return E_NOTIMPL;
+    manager->handles[idx] &= ~DXGI_DEVICE_HANDLE_FLAG_LOCKED;
+    if (!--manager->locks)
+        manager->locking_tid = 0;
 }
 
-static HRESULT WINAPI dxgi_device_manager_LockDevice(IMFDXGIDeviceManager *iface, HANDLE device,
-                                                     REFIID riid, void **ppv, BOOL block)
+static HRESULT WINAPI dxgi_device_manager_CloseDeviceHandle(IMFDXGIDeviceManager *iface, HANDLE hdevice)
 {
-    FIXME("(%p, %p, %s, %p, %d): stub.\n", iface, device, wine_dbgstr_guid(riid), ppv, block);
+    struct dxgi_device_manager *manager = impl_from_IMFDXGIDeviceManager(iface);
+    HRESULT hr;
+    size_t idx;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p.\n", iface, hdevice);
+
+    EnterCriticalSection(&manager->cs);
+
+    if (SUCCEEDED(hr = dxgi_device_manager_get_handle_index(manager, hdevice, &idx)))
+    {
+        if (manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_OPEN)
+        {
+            dxgi_device_manager_unlock_handle(manager, idx);
+            manager->handles[idx] = 0;
+            if (idx == manager->count - 1)
+                manager->count--;
+        }
+        else
+            hr = E_HANDLE;
+    }
+
+    LeaveCriticalSection(&manager->cs);
+
+    WakeAllConditionVariable(&manager->lock);
+
+    return hr;
 }
 
-static HRESULT WINAPI dxgi_device_manager_OpenDeviceHandle(IMFDXGIDeviceManager *iface, HANDLE *device)
+static HRESULT WINAPI dxgi_device_manager_GetVideoService(IMFDXGIDeviceManager *iface, HANDLE hdevice,
+        REFIID riid, void **service)
 {
-    FIXME("(%p, %p): stub.\n", iface, device);
+    struct dxgi_device_manager *manager = impl_from_IMFDXGIDeviceManager(iface);
+    HRESULT hr;
+    size_t idx;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p, %s, %p.\n", iface, hdevice, debugstr_guid(riid), service);
+
+    EnterCriticalSection(&manager->cs);
+
+    if (!manager->device)
+        hr = MF_E_DXGI_DEVICE_NOT_INITIALIZED;
+    else if (SUCCEEDED(hr = dxgi_device_manager_get_handle_index(manager, hdevice, &idx)))
+    {
+        if (manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_INVALID)
+            hr = MF_E_DXGI_NEW_VIDEO_DEVICE;
+        else if (manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_OPEN)
+            hr = IDXGIDevice_QueryInterface(manager->device, riid, service);
+        else
+            hr = E_HANDLE;
+    }
+
+    LeaveCriticalSection(&manager->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI dxgi_device_manager_LockDevice(IMFDXGIDeviceManager *iface, HANDLE hdevice,
+        REFIID riid, void **obj, BOOL block)
+{
+    struct dxgi_device_manager *manager = impl_from_IMFDXGIDeviceManager(iface);
+    HRESULT hr;
+    size_t idx;
+
+    TRACE("%p, %p, %s, %p, %d.\n", iface, hdevice, wine_dbgstr_guid(riid), obj, block);
+
+    EnterCriticalSection(&manager->cs);
+
+    if (SUCCEEDED(hr = dxgi_device_manager_get_handle_index(manager, hdevice, &idx)))
+    {
+        if (!manager->device)
+        {
+            hr = MF_E_DXGI_DEVICE_NOT_INITIALIZED;
+        }
+        else if (manager->locking_tid == GetCurrentThreadId())
+        {
+            if (SUCCEEDED(hr = IDXGIDevice_QueryInterface(manager->device, riid, obj)))
+                dxgi_device_manager_lock_handle(manager, idx);
+        }
+        else if (manager->locking_tid && !block)
+        {
+            hr = MF_E_DXGI_VIDEO_DEVICE_LOCKED;
+        }
+        else
+        {
+            while (manager->locking_tid)
+            {
+                SleepConditionVariableCS(&manager->lock, &manager->cs, INFINITE);
+            }
+
+            if (SUCCEEDED(hr = dxgi_device_manager_get_handle_index(manager, hdevice, &idx)))
+            {
+                if (manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_INVALID)
+                    hr = MF_E_DXGI_NEW_VIDEO_DEVICE;
+                else if (SUCCEEDED(hr = IDXGIDevice_QueryInterface(manager->device, riid, obj)))
+                {
+                    manager->locking_tid = GetCurrentThreadId();
+                    dxgi_device_manager_lock_handle(manager, idx);
+                }
+            }
+        }
+    }
+
+    LeaveCriticalSection(&manager->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI dxgi_device_manager_OpenDeviceHandle(IMFDXGIDeviceManager *iface, HANDLE *hdevice)
+{
+    struct dxgi_device_manager *manager = impl_from_IMFDXGIDeviceManager(iface);
+    HRESULT hr = S_OK;
+    size_t i;
+
+    TRACE("%p, %p.\n", iface, hdevice);
+
+    *hdevice = NULL;
+
+    EnterCriticalSection(&manager->cs);
+
+    if (!manager->device)
+        hr = MF_E_DXGI_DEVICE_NOT_INITIALIZED;
+    else
+    {
+        for (i = 0; i < manager->count; ++i)
+        {
+            if (!(manager->handles[i] & DXGI_DEVICE_HANDLE_FLAG_OPEN))
+            {
+                manager->handles[i] |= DXGI_DEVICE_HANDLE_FLAG_OPEN;
+                *hdevice = ULongToHandle(i + 1);
+                break;
+            }
+        }
+
+        if (mf_array_reserve((void **)&manager->handles, &manager->capacity, manager->count + 1,
+                sizeof(*manager->handles)))
+        {
+            *hdevice = ULongToHandle(manager->count + 1);
+            manager->handles[manager->count++] = DXGI_DEVICE_HANDLE_FLAG_OPEN;
+        }
+        else
+            hr = E_OUTOFMEMORY;
+    }
+
+    LeaveCriticalSection(&manager->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI dxgi_device_manager_ResetDevice(IMFDXGIDeviceManager *iface, IUnknown *device, UINT token)
 {
     struct dxgi_device_manager *manager = impl_from_IMFDXGIDeviceManager(iface);
     IDXGIDevice *dxgi_device;
-    HRESULT hr;
+    size_t i;
 
-    TRACE("(%p, %p, %u).\n", iface, device, token);
+    TRACE("%p, %p, %u.\n", iface, device, token);
 
     if (!device || token != manager->token)
         return E_INVALIDARG;
 
-    hr = IUnknown_QueryInterface(device, &IID_IDXGIDevice, (void **)&dxgi_device);
-    if (SUCCEEDED(hr))
+    if (FAILED(IUnknown_QueryInterface(device, &IID_IDXGIDevice, (void **)&dxgi_device)))
+        return E_INVALIDARG;
+
+    EnterCriticalSection(&manager->cs);
+
+    if (manager->device)
     {
-        if (manager->device)
-            IDXGIDevice_Release(manager->device);
-        manager->device = dxgi_device;
+        for (i = 0; i < manager->count; ++i)
+        {
+            manager->handles[i] |= DXGI_DEVICE_HANDLE_FLAG_INVALID;
+            manager->handles[i] &= ~DXGI_DEVICE_HANDLE_FLAG_LOCKED;
+        }
+        manager->locking_tid = 0;
+        manager->locks = 0;
+        IDXGIDevice_Release(manager->device);
     }
-    else
-        hr = E_INVALIDARG;
+    manager->device = dxgi_device;
+
+    LeaveCriticalSection(&manager->cs);
+
+    WakeAllConditionVariable(&manager->lock);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI dxgi_device_manager_TestDevice(IMFDXGIDeviceManager *iface, HANDLE hdevice)
+{
+    struct dxgi_device_manager *manager = impl_from_IMFDXGIDeviceManager(iface);
+    HRESULT hr;
+    size_t idx;
+
+    TRACE("%p, %p.\n", iface, hdevice);
+
+    EnterCriticalSection(&manager->cs);
+
+    if (SUCCEEDED(hr = dxgi_device_manager_get_handle_index(manager, hdevice, &idx)))
+    {
+        if (manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_INVALID)
+            hr = MF_E_DXGI_NEW_VIDEO_DEVICE;
+        else if (!(manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_OPEN))
+            hr = E_HANDLE;
+    }
+
+    LeaveCriticalSection(&manager->cs);
 
     return hr;
 }
 
-static HRESULT WINAPI dxgi_device_manager_TestDevice(IMFDXGIDeviceManager *iface, HANDLE device)
+static HRESULT WINAPI dxgi_device_manager_UnlockDevice(IMFDXGIDeviceManager *iface, HANDLE hdevice,
+         BOOL savestate)
 {
-    FIXME("(%p, %p): stub.\n", iface, device);
+    struct dxgi_device_manager *manager = impl_from_IMFDXGIDeviceManager(iface);
+    HRESULT hr = E_FAIL;
+    size_t idx;
 
-    return E_NOTIMPL;
-}
+    TRACE("%p, %p, %d.\n", iface, hdevice, savestate);
 
-static HRESULT WINAPI dxgi_device_manager_UnlockDevice(IMFDXGIDeviceManager *iface, HANDLE device, BOOL state)
-{
-    FIXME("(%p, %p, %d): stub.\n", iface, device, state);
+    EnterCriticalSection(&manager->cs);
 
-    return E_NOTIMPL;
+    if (SUCCEEDED(dxgi_device_manager_get_handle_index(manager, hdevice, &idx)))
+    {
+        hr = manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_LOCKED ? S_OK : E_INVALIDARG;
+        if (SUCCEEDED(hr))
+            dxgi_device_manager_unlock_handle(manager, idx);
+    }
+
+    LeaveCriticalSection(&manager->cs);
+
+    WakeAllConditionVariable(&manager->lock);
+
+    return hr;
 }
 
 static const IMFDXGIDeviceManagerVtbl dxgi_device_manager_vtbl =
@@ -8697,19 +8906,19 @@ HRESULT WINAPI MFCreateDXGIDeviceManager(UINT *token, IMFDXGIDeviceManager **man
 {
     struct dxgi_device_manager *object;
 
-    TRACE("(%p, %p).\n", token, manager);
+    TRACE("%p, %p.\n", token, manager);
 
     if (!token || !manager)
         return E_POINTER;
 
-    object = heap_alloc(sizeof(*object));
-    if (!object)
+    if (!(object = heap_alloc_zero(sizeof(*object))))
         return E_OUTOFMEMORY;
 
     object->IMFDXGIDeviceManager_iface.lpVtbl = &dxgi_device_manager_vtbl;
     object->refcount = 1;
     object->token = GetTickCount();
-    object->device = NULL;
+    InitializeCriticalSection(&object->cs);
+    InitializeConditionVariable(&object->lock);
 
     TRACE("Created device manager: %p, token: %u.\n", object, object->token);
 

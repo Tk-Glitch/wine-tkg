@@ -18,9 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -28,9 +25,9 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winnls.h"
 #include "winver.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
 #include "wine/asm.h"
 #include "win.h"
 #include "user_private.h"
@@ -44,11 +41,18 @@ WINE_DEFAULT_DEBUG_CHANNEL(win);
 #define NB_USER_HANDLES  ((LAST_USER_HANDLE - FIRST_USER_HANDLE + 1) >> 1)
 #define USER_HANDLE_TO_INDEX(hwnd) ((LOWORD(hwnd) - FIRST_USER_HANDLE) >> 1)
 
-extern HANDLE CDECL __wine_create_default_token(BOOL admin);
-
 static DWORD process_layout = ~0u;
 
 static struct list window_surfaces = LIST_INIT( window_surfaces );
+
+static CRITICAL_SECTION desktop_section;
+static CRITICAL_SECTION_DEBUG desktop_critsect_debug =
+{
+    0, 0, &desktop_section,
+    { &desktop_critsect_debug.ProcessLocksList, &desktop_critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": desktop_section") }
+};
+static CRITICAL_SECTION desktop_section = { &desktop_critsect_debug, -1, 0, 0, 0, 0 };
 
 static CRITICAL_SECTION surfaces_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -214,7 +218,7 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
         req->dpi      = GetDpiForSystem();
         req->awareness = awareness;
         if (!(req->atom = get_int_atom_value( name )) && name)
-            wine_server_add_data( req, name, strlenW(name)*sizeof(WCHAR) );
+            wine_server_add_data( req, name, lstrlenW(name)*sizeof(WCHAR) );
         if (!wine_server_call_err( req ))
         {
             handle      = wine_server_ptr_handle( reply->handle );
@@ -335,7 +339,7 @@ static HWND *list_window_children( HDESK desktop, HWND hwnd, LPCWSTR class, DWOR
             req->parent = wine_server_user_handle( hwnd );
             req->tid = tid;
             req->atom = atom;
-            if (!atom && class) wine_server_add_data( req, class, strlenW(class)*sizeof(WCHAR) );
+            if (!atom && class) wine_server_add_data( req, class, lstrlenW(class)*sizeof(WCHAR) );
             wine_server_set_reply( req, list, (size-1) * sizeof(user_handle_t) );
             if (!wine_server_call( req )) count = reply->count;
         }
@@ -1452,8 +1456,6 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     }
     else
     {
-        static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
-
         if ((cs->style & (WS_CHILD|WS_POPUP)) == WS_CHILD)
         {
             WARN("No parent for child window\n" );
@@ -1463,7 +1465,7 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
 
         /* are we creating the desktop or HWND_MESSAGE parent itself? */
         if (className != (LPCWSTR)DESKTOP_CLASS_ATOM &&
-            (IS_INTRESOURCE(className) || strcmpiW( className, messageW )))
+            (IS_INTRESOURCE(className) || wcsicmp( className, L"Message" )))
         {
             DWORD layout;
             GetProcessDefaultLayout( &layout );
@@ -1609,18 +1611,8 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     if ((cs->style & WS_THICKFRAME) || !(cs->style & (WS_POPUP | WS_CHILD)))
     {
         MINMAXINFO info = WINPOS_GetMinMaxInfo( hwnd );
-
-        /* HACK: This code changes the window's size to fit the display. However,
-         * some games (Bayonetta, Dragon's Dogma) will then have the incorrect
-         * render size. So just let windows be too big to fit the display. */
-        if (__wine_get_window_manager() != WINE_WM_X11_STEAMCOMPMGR)
-        {
-            cx = min( cx, info.ptMaxTrackSize.x );
-            cy = min( cy, info.ptMaxTrackSize.y );
-        }
-
-        cx = max( cx, info.ptMinTrackSize.x );
-        cy = max( cy, info.ptMinTrackSize.y );
+        cx = max( min( cx, info.ptMaxTrackSize.x ), info.ptMinTrackSize.x );
+        cy = max( min( cy, info.ptMaxTrackSize.y ), info.ptMinTrackSize.y );
     }
 
     if (cx < 0) cx = 0;
@@ -1987,7 +1979,7 @@ HWND WINAPI FindWindowExW( HWND parent, HWND child, LPCWSTR className, LPCWSTR t
 
     if (title)
     {
-        len = strlenW(title) + 1;  /* one extra char to check for chars beyond the end */
+        len = lstrlenW(title) + 1;  /* one extra char to check for chars beyond the end */
         if (!(buffer = HeapAlloc( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) ))) return 0;
     }
 
@@ -2007,7 +1999,7 @@ HWND WINAPI FindWindowExW( HWND parent, HWND child, LPCWSTR className, LPCWSTR t
         {
             if (InternalGetWindowText( list[i], buffer, len + 1 ))
             {
-                if (!strcmpiW( buffer, title )) break;
+                if (!wcsicmp( buffer, title )) break;
             }
             else
             {
@@ -2099,16 +2091,13 @@ HWND WINAPI GetDesktopWindow(void)
 
     if (!thread_info->top_window)
     {
-        static const WCHAR explorer[] = {'\\','e','x','p','l','o','r','e','r','.','e','x','e',0};
-        static const WCHAR args[] = {' ','/','d','e','s','k','t','o','p',0};
         STARTUPINFOW si;
         PROCESS_INFORMATION pi;
         WCHAR windir[MAX_PATH];
-        WCHAR app[MAX_PATH + ARRAY_SIZE( explorer )];
-        WCHAR cmdline[MAX_PATH + ARRAY_SIZE( explorer ) + ARRAY_SIZE( args )];
+        WCHAR app[MAX_PATH + ARRAY_SIZE( L"\\explorer.exe" )];
+        WCHAR cmdline[MAX_PATH + ARRAY_SIZE( L"\\explorer.exe /desktop" )];
         WCHAR desktop[MAX_PATH];
         char *ld_preload;
-        HANDLE token;
         void *redir;
 
         SERVER_START_REQ( set_user_object_info )
@@ -2136,23 +2125,57 @@ HWND WINAPI GetDesktopWindow(void)
         si.hStdError  = GetStdHandle( STD_ERROR_HANDLE );
 
         GetSystemDirectoryW( windir, MAX_PATH );
-        strcpyW( app, windir );
-        strcatW( app, explorer );
-        strcpyW( cmdline, app );
-        strcatW( cmdline, args );
-
-        if (!(token = __wine_create_default_token( FALSE )))
-            ERR( "Failed to create limited token\n" );
+        lstrcpyW( app, windir );
+        lstrcatW( app, L"\\explorer.exe" );
+        lstrcpyW( cmdline, app );
+        lstrcatW( cmdline, L" /desktop" );
 
         /* HACK: Unset LD_PRELOAD before executing explorer.exe to disable buggy gameoverlayrenderer.so
-         * It's not going to work through the CreateProcessW env parameter, as it will not be used for the loader execv.
-         */
-        if ((ld_preload = getenv("LD_PRELOAD")))
-            unsetenv("LD_PRELOAD");
+        * It's not going to work through the CreateProcessW env parameter, as it will not be used for the loader execv.
+        */
+        if (have_libpng())
+        {
+            EnterCriticalSection( &desktop_section);
+
+            if ((ld_preload = getenv("LD_PRELOAD")))
+            {
+                static char const gorso[] = "gameoverlayrenderer.so";
+                static unsigned int gorso_len = ARRAY_SIZE(gorso) - 1;
+                char *env, *next, *tmp;
+
+                env = HeapAlloc(GetProcessHeap(), 0, strlen(ld_preload) + 1);
+                strcpy(env, ld_preload);
+
+                tmp = env;
+                do
+                {
+                    if (!(next = strchr(tmp, ':')))
+                        next = tmp + strlen(tmp);
+
+                    if (next - tmp >= gorso_len &&
+                        strncmp(next - gorso_len, gorso, gorso_len) == 0)
+                    {
+                        if (*next)
+                            memmove(tmp, next + 1, strlen(next));
+                        else
+                            *tmp = 0;
+                        next = tmp;
+                    }
+                    else
+                    {
+                        tmp = next + 1;
+                    }
+                }
+                while (*next);
+
+                png_funcs->hack_unix_setenv("LD_PRELOAD", env, 1);
+                HeapFree(GetProcessHeap(), 0, env);
+            }
+        }
 
         Wow64DisableWow64FsRedirection( &redir );
-        if (CreateProcessAsUserW( token, app, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS,
-                                  NULL, windir, &si, &pi ))
+        if (CreateProcessW( app, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS,
+                            NULL, windir, &si, &pi ))
         {
             TRACE( "started explorer pid %04x tid %04x\n", pi.dwProcessId, pi.dwThreadId );
             WaitForInputIdle( pi.hProcess, 10000 );
@@ -2162,10 +2185,13 @@ HWND WINAPI GetDesktopWindow(void)
         else WARN( "failed to start explorer, err %d\n", GetLastError() );
         Wow64RevertWow64FsRedirection( redir );
 
-        if (token) CloseHandle( token );
-
         /* HACK: Restore the previous value, just in case */
-        if (ld_preload) setenv("LD_PRELOAD", ld_preload, 1);
+        if (have_libpng())
+        {
+            if (ld_preload) png_funcs->hack_unix_setenv("LD_PRELOAD", ld_preload, 1);
+
+            LeaveCriticalSection( &desktop_section );
+        }
 
         SERVER_START_REQ( get_desktop_window )
         {
@@ -2949,7 +2975,7 @@ INT WINAPI InternalGetWindowText(HWND hwnd,LPWSTR lpString,INT nMaxCount )
     {
         get_server_window_text( hwnd, lpString, nMaxCount );
     }
-    return strlenW(lpString);
+    return lstrlenW(lpString);
 }
 
 
@@ -2968,7 +2994,7 @@ INT WINAPI GetWindowTextW( HWND hwnd, LPWSTR lpString, INT nMaxCount )
 
     /* when window belongs to other process, don't send a message */
     get_server_window_text( hwnd, lpString, nMaxCount );
-    return strlenW(lpString);
+    return lstrlenW(lpString);
 }
 
 
@@ -4091,11 +4117,6 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
     }
     if (process_layout == ~0u)
     {
-        static const WCHAR translationW[] = { '\\','V','a','r','F','i','l','e','I','n','f','o',
-                                              '\\','T','r','a','n','s','l','a','t','i','o','n', 0 };
-        static const WCHAR filedescW[] = { '\\','S','t','r','i','n','g','F','i','l','e','I','n','f','o',
-                                           '\\','%','0','4','x','%','0','4','x',
-                                           '\\','F','i','l','e','D','e','s','c','r','i','p','t','i','o','n',0 };
         WCHAR *str, buffer[MAX_PATH];
         DWORD i, len, version_layout = 0;
         DWORD user_lang = GetUserDefaultLangID();
@@ -4106,7 +4127,7 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
         if (!(len = GetFileVersionInfoSizeW( buffer, NULL ))) goto done;
         if (!(data = HeapAlloc( GetProcessHeap(), 0, len ))) goto done;
         if (!GetFileVersionInfoW( buffer, 0, len, data )) goto done;
-        if (!VerQueryValueW( data, translationW, (void **)&languages, &len ) || !len) goto done;
+        if (!VerQueryValueW( data, L"\\VarFileInfo\\Translation", (void **)&languages, &len ) || !len) goto done;
 
         len /= sizeof(DWORD);
         for (i = 0; i < len; i++) if (LOWORD(languages[i]) == user_lang) break;
@@ -4115,7 +4136,8 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
                 if (LOWORD(languages[i]) == MAKELANGID( PRIMARYLANGID(user_lang), SUBLANG_NEUTRAL )) break;
         if (i == len) i = 0;  /* default to the first one */
 
-        sprintfW( buffer, filedescW, LOWORD(languages[i]), HIWORD(languages[i]) );
+        swprintf( buffer, ARRAY_SIZE(buffer), L"\\StringFileInfo\\%04x%04x\\FileDescription",
+                  LOWORD(languages[i]), HIWORD(languages[i]) );
         if (!VerQueryValueW( data, buffer, (void **)&str, &len )) goto done;
         TRACE( "found description %s\n", debugstr_w( str ));
         if (str[0] == 0x200e && str[1] == 0x200e) version_layout = LAYOUT_RTL;

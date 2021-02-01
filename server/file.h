@@ -101,7 +101,6 @@ extern obj_handle_t lock_fd( struct fd *fd, file_pos_t offset, file_pos_t count,
 extern void unlock_fd( struct fd *fd, file_pos_t offset, file_pos_t count );
 extern void allow_fd_caching( struct fd *fd );
 extern void set_fd_signaled( struct fd *fd, int signaled );
-extern int is_fd_signaled( struct fd *fd );
 extern char *dup_fd_name( struct fd *root, const char *name );
 
 extern int default_fd_signaled( struct object *obj, struct wait_queue_entry *entry );
@@ -175,30 +174,28 @@ extern struct security_descriptor *get_file_sd( struct object *obj, struct fd *f
 
 /* file mapping functions */
 
-extern struct mapping *get_mapping_obj( struct process *process, obj_handle_t handle,
-                                        unsigned int access );
 extern struct file *get_mapping_file( struct process *process, client_ptr_t base,
                                       unsigned int access, unsigned int sharing );
 extern const pe_image_info_t *get_mapping_image_info( struct process *process, client_ptr_t base );
 extern void free_mapped_views( struct process *process );
 extern int get_page_size(void);
-
-extern void init_kusd_mapping( struct mapping *mapping );
+extern struct mapping *create_fd_mapping( struct object *root, const struct unicode_str *name, struct fd *fd,
+                                          unsigned int attr, const struct security_descriptor *sd );
+extern struct object *create_user_data_mapping( struct object *root, const struct unicode_str *name,
+                                                unsigned int attr, const struct security_descriptor *sd );
 
 /* device functions */
 
-extern struct object *create_named_pipe_device( struct object *root, const struct unicode_str *name );
-extern struct object *create_mailslot_device( struct object *root, const struct unicode_str *name );
+extern struct object *create_named_pipe_device( struct object *root, const struct unicode_str *name,
+                                                unsigned int attr, const struct security_descriptor *sd );
+extern struct object *create_mailslot_device( struct object *root, const struct unicode_str *name,
+                                              unsigned int attr, const struct security_descriptor *sd );
+extern struct object *create_console_device( struct object *root, const struct unicode_str *name,
+                                              unsigned int attr, const struct security_descriptor *sd );
+extern struct object *create_socket_device( struct object *root, const struct unicode_str *name,
+                                              unsigned int attr, const struct security_descriptor *sd );
 extern struct object *create_unix_device( struct object *root, const struct unicode_str *name,
-                                          const char *unix_path );
-
-/* shared memory functions */
-
-extern int allocate_shared_memory( int *fd, void **memory, size_t size );
-extern void release_shared_memory( int fd, void *memory, size_t size );
-extern void init_shared_memory( void );
-extern shmglobal_t *shmglobal;
-extern int          shmglobal_fd;
+                                          unsigned int attr, const struct security_descriptor *sd, const char *unix_path );
 
 /* change notification functions */
 
@@ -235,6 +232,7 @@ extern struct completion *fd_get_completion( struct fd *fd, apc_param_t *p_key )
 extern void fd_copy_completion( struct fd *src, struct fd *dst );
 extern struct iosb *create_iosb( const void *in_data, data_size_t in_size, data_size_t out_size );
 extern struct iosb *async_get_iosb( struct async *async );
+extern struct thread *async_get_thread( struct async *async );
 extern int async_is_blocking( struct async *async );
 extern struct async *find_pending_async( struct async_queue *queue );
 extern void cancel_process_asyncs( struct process *process );

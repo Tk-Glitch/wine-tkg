@@ -26,9 +26,9 @@
 #define NONAMELESSUNION
 #include "dshow.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/strmbase.h"
-#include "wine/unicode.h"
+
+extern HINSTANCE qcap_instance DECLSPEC_HIDDEN;
 
 extern DWORD ObjectRefCount(BOOL increment) DECLSPEC_HIDDEN;
 
@@ -40,30 +40,25 @@ HRESULT file_writer_create(IUnknown *outer, IUnknown **out) DECLSPEC_HIDDEN;
 HRESULT smart_tee_create(IUnknown *outer, IUnknown **out) DECLSPEC_HIDDEN;
 HRESULT vfw_capture_create(IUnknown *outer, IUnknown **out) DECLSPEC_HIDDEN;
 
-struct video_capture_device
+struct video_capture_funcs
 {
-    const struct video_capture_device_ops *ops;
-};
-
-struct video_capture_device_ops
-{
-    void (*destroy)(struct video_capture_device *device);
-    HRESULT (*check_format)(struct video_capture_device *device, const AM_MEDIA_TYPE *mt);
-    HRESULT (*set_format)(struct video_capture_device *device, const AM_MEDIA_TYPE *mt);
-    HRESULT (*get_format)(struct video_capture_device *device, AM_MEDIA_TYPE *mt);
-    HRESULT (*get_media_type)(struct video_capture_device *device, unsigned int index, AM_MEDIA_TYPE *mt);
-    HRESULT (*get_caps)(struct video_capture_device *device, LONG index, AM_MEDIA_TYPE **mt, VIDEO_STREAM_CONFIG_CAPS *caps);
-    LONG (*get_caps_count)(struct video_capture_device *device);
-    HRESULT (*get_prop_range)(struct video_capture_device *device, VideoProcAmpProperty property,
+    struct video_capture_device *(CDECL *create)(USHORT index);
+    void (CDECL *destroy)(struct video_capture_device *device);
+    HRESULT (CDECL *check_format)(struct video_capture_device *device, const AM_MEDIA_TYPE *mt);
+    HRESULT (CDECL *set_format)(struct video_capture_device *device, const AM_MEDIA_TYPE *mt);
+    void (CDECL *get_format)(struct video_capture_device *device, AM_MEDIA_TYPE *mt, VIDEOINFOHEADER *format);
+    HRESULT (CDECL *get_media_type)(struct video_capture_device *device,
+            unsigned int index, AM_MEDIA_TYPE *mt, VIDEOINFOHEADER *format);
+    void (CDECL *get_caps)(struct video_capture_device *device, LONG index, AM_MEDIA_TYPE *mt,
+            VIDEOINFOHEADER *format, VIDEO_STREAM_CONFIG_CAPS *caps);
+    LONG (CDECL *get_caps_count)(struct video_capture_device *device);
+    HRESULT (CDECL *get_prop_range)(struct video_capture_device *device, VideoProcAmpProperty property,
             LONG *min, LONG *max, LONG *step, LONG *default_value, LONG *flags);
-    HRESULT (*get_prop)(struct video_capture_device *device, VideoProcAmpProperty property, LONG *value, LONG *flags);
-    HRESULT (*set_prop)(struct video_capture_device *device, VideoProcAmpProperty property, LONG value, LONG flags);
-    void (*init_stream)(struct video_capture_device *device);
-    void (*start_stream)(struct video_capture_device *device);
-    void (*stop_stream)(struct video_capture_device *device);
-    void (*cleanup_stream)(struct video_capture_device *device);
+    HRESULT (CDECL *get_prop)(struct video_capture_device *device,
+            VideoProcAmpProperty property, LONG *value, LONG *flags);
+    HRESULT (CDECL *set_prop)(struct video_capture_device *device,
+            VideoProcAmpProperty property, LONG value, LONG flags);
+    BOOL (CDECL *read_frame)(struct video_capture_device *device, BYTE *data);
 };
-
-struct video_capture_device *v4l_device_create(struct strmbase_source *pin, USHORT card);
 
 #endif

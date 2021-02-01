@@ -29,7 +29,6 @@
 #include "winreg.h"
 #include "winternl.h"
 #include "wine/heap.h"
-#include "wine/unicode.h"
 
 #define GET_WORD(ptr)  (*(const WORD *)(ptr))
 #define GET_DWORD(ptr) (*(const DWORD *)(ptr))
@@ -98,6 +97,7 @@ typedef struct tagUSER_DRIVER {
     DWORD  (CDECL *pMsgWaitForMultipleObjectsEx)(DWORD,const HANDLE*,DWORD,DWORD,DWORD);
     void   (CDECL *pReleaseDC)(HWND,HDC);
     BOOL   (CDECL *pScrollDC)(HDC,INT,INT,HRGN);
+    void   (CDECL *pSetActiveWindow)(HWND);
     void   (CDECL *pSetCapture)(HWND,UINT);
     void   (CDECL *pSetFocus)(HWND);
     void   (CDECL *pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
@@ -171,7 +171,15 @@ struct wm_char_mapping_data
     MSG  get_msg;
 };
 
-#include <pshpack1.h>
+/* on windows the buffer capacity is quite large as well, enough to */
+/* hold up to 10s of 1kHz mouse rawinput events */
+#define RAWINPUT_BUFFER_SIZE (512*1024)
+
+struct rawinput_thread_data
+{
+    UINT     hw_id;     /* current rawinput message id */
+    RAWINPUT buffer[1]; /* rawinput message data buffer */
+};
 
 /* this is the structure stored in TEB->Win32ClientInfo */
 /* no attempt is made to keep the layout compatible with the Windows one */
@@ -193,16 +201,13 @@ struct user_thread_info
     DWORD                         GetMessageTimeVal;      /* Value for GetMessageTime */
     DWORD                         GetMessagePosVal;       /* Value for GetMessagePos */
     ULONG_PTR                     GetMessageExtraInfoVal; /* Value for GetMessageExtraInfo */
-    DWORD                         last_get_msg;           /* Last time of Get/PeekMessage call */
     struct user_key_state_info   *key_state;              /* Cache of global key state */
     HWND                          top_window;             /* Desktop window */
     HWND                          msg_window;             /* HWND_MESSAGE parent window */
-    RAWINPUT                     *rawinput;
+    struct rawinput_thread_data  *rawinput;               /* RawInput thread local data / buffer */
 };
 
 C_ASSERT( sizeof(struct user_thread_info) <= sizeof(((TEB *)0)->Win32ClientInfo) );
-
-#include <poppack.h>
 
 extern INT global_key_state_counter DECLSPEC_HIDDEN;
 extern BOOL (WINAPI *imm_register_window)(HWND) DECLSPEC_HIDDEN;
@@ -237,6 +242,10 @@ extern HMODULE user32_module DECLSPEC_HIDDEN;
 
 struct dce;
 struct tagWND;
+
+struct hardware_msg_data;
+extern BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hardware_msg_data *msg_data);
+extern struct rawinput_thread_data *rawinput_thread_data(void);
 
 extern void CLIPBOARD_ReleaseOwner( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL FOCUS_MouseActivate( HWND hwnd ) DECLSPEC_HIDDEN;
@@ -364,6 +373,16 @@ typedef struct
 extern int bitmap_info_size( const BITMAPINFO * info, WORD coloruse ) DECLSPEC_HIDDEN;
 extern BOOL get_icon_size( HICON handle, SIZE *size ) DECLSPEC_HIDDEN;
 
+struct png_funcs
+{
+    BOOL (CDECL *get_png_info)(const void *png_data, DWORD size, int *width, int *height, int *bpp);
+    BITMAPINFO * (CDECL *load_png)(const char *png_data, DWORD *size);
+    int (CDECL *hack_unix_setenv)(const char *name, const char *value, int overwrite);
+};
+
+extern BOOL have_libpng(void);
+extern const struct png_funcs *png_funcs;
+
 /* Mingw's assert() imports MessageBoxA and gets confused by user32 exporting it */
 #ifdef __MINGW32__
 #undef assert
@@ -375,11 +394,11 @@ static inline WCHAR *heap_strdupW(const WCHAR *src)
     WCHAR *dst;
     unsigned len;
     if (!src) return NULL;
-    len = (strlenW(src) + 1) * sizeof(WCHAR);
+    len = (lstrlenW(src) + 1) * sizeof(WCHAR);
     if ((dst = heap_alloc(len))) memcpy(dst, src, len);
     return dst;
 }
 
-extern HANDLE rawinput_handle_from_device_handle(HANDLE device, BOOL rescan);
+extern HANDLE rawinput_handle_from_device_handle(HANDLE device);
 
 #endif /* __WINE_USER_PRIVATE_H */

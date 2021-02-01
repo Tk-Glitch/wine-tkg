@@ -18,21 +18,10 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-#include "config.h"
 
 #include <assert.h>
-#include <errno.h>
 #include <stdarg.h>
 #include <sys/types.h>
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
-#ifdef HAVE_PWD_H
-# include <pwd.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -44,7 +33,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(environ);
 
-static WCHAR empty[] = {0};
+static WCHAR empty[] = L"";
 static const UNICODE_STRING empty_str = { 0, sizeof(empty), empty };
 static const UNICODE_STRING null_str = { 0, 0, NULL };
 
@@ -61,24 +50,6 @@ static inline SIZE_T get_env_length( const WCHAR *env )
 
 
 /***********************************************************************
- *           is_special_env_var
- *
- * Check if an environment variable needs to be handled specially when
- * passed through the Unix environment (i.e. prefixed with "WINE").
- */
-static inline BOOL is_special_env_var( const char *var )
-{
-    return (!strncmp( var, "PATH=", sizeof("PATH=")-1 ) ||
-            !strncmp( var, "PWD=", sizeof("PWD=")-1 ) ||
-            !strncmp( var, "HOME=", sizeof("HOME=")-1 ) ||
-            !strncmp( var, "TEMP=", sizeof("TEMP=")-1 ) ||
-            !strncmp( var, "TMP=", sizeof("TMP=")-1 ) ||
-            !strncmp( var, "QT_", sizeof("QT_")-1 ) ||
-            !strncmp( var, "VK_", sizeof("VK_")-1 ));
-}
-
-
-/***********************************************************************
  *           set_env_var
  */
 static void set_env_var( WCHAR **env, const WCHAR *name, const WCHAR *val )
@@ -86,8 +57,12 @@ static void set_env_var( WCHAR **env, const WCHAR *name, const WCHAR *val )
     UNICODE_STRING nameW, valW;
 
     RtlInitUnicodeString( &nameW, name );
-    RtlInitUnicodeString( &valW, val );
-    RtlSetEnvironmentVariable( env, &nameW, &valW );
+    if (val)
+    {
+        RtlInitUnicodeString( &valW, val );
+        RtlSetEnvironmentVariable( env, &nameW, &valW );
+    }
+    else RtlSetEnvironmentVariable( env, &nameW, NULL );
 }
 
 
@@ -101,7 +76,6 @@ static void set_env_var( WCHAR **env, const WCHAR *name, const WCHAR *val )
 static void set_registry_variables( WCHAR **env, HANDLE hkey, ULONG type )
 {
     static const WCHAR pathW[] = {'P','A','T','H'};
-    static const WCHAR sep[] = {';',0};
     UNICODE_STRING env_name, env_value;
     NTSTATUS status;
     DWORD size;
@@ -139,7 +113,7 @@ static void set_registry_variables( WCHAR **env, HANDLE hkey, ULONG type )
             !wcsnicmp( env_name.Buffer, pathW, ARRAY_SIZE( pathW )) &&
             !RtlQueryEnvironmentVariable_U( *env, &env_name, &tmp ))
         {
-            RtlAppendUnicodeToString( &tmp, sep );
+            RtlAppendUnicodeToString( &tmp, L";" );
             if (RtlAppendUnicodeStringToString( &tmp, &env_value )) continue;
             RtlCopyUnicodeString( &env_value, &tmp );
         }
@@ -162,16 +136,6 @@ static void set_registry_variables( WCHAR **env, HANDLE hkey, ULONG type )
  */
 static BOOL set_registry_environment( WCHAR **env, BOOL first_time )
 {
-    static const WCHAR env_keyW[] = {'\\','R','e','g','i','s','t','r','y','\\',
-                                     'M','a','c','h','i','n','e','\\',
-                                     'S','y','s','t','e','m','\\',
-                                     'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-                                     'C','o','n','t','r','o','l','\\',
-                                     'S','e','s','s','i','o','n',' ','M','a','n','a','g','e','r','\\',
-                                     'E','n','v','i','r','o','n','m','e','n','t',0};
-    static const WCHAR envW[] = {'E','n','v','i','r','o','n','m','e','n','t',0};
-    static const WCHAR volatile_envW[] = {'V','o','l','a','t','i','l','e',' ','E','n','v','i','r','o','n','m','e','n','t',0};
-
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
     HANDLE hkey;
@@ -179,7 +143,8 @@ static BOOL set_registry_environment( WCHAR **env, BOOL first_time )
 
     /* first the system environment variables */
     InitializeObjectAttributes( &attr, &nameW, 0, 0, NULL );
-    RtlInitUnicodeString( &nameW, env_keyW );
+    RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\"
+                          "Session Manager\\Environment" );
     if (first_time && !NtOpenKey( &hkey, KEY_READ, &attr ))
     {
         set_registry_variables( env, hkey, REG_SZ );
@@ -190,7 +155,7 @@ static BOOL set_registry_environment( WCHAR **env, BOOL first_time )
 
     /* then the ones for the current user */
     if (RtlOpenCurrentUser( KEY_READ, &attr.RootDirectory ) != STATUS_SUCCESS) return ret;
-    RtlInitUnicodeString( &nameW, envW );
+    RtlInitUnicodeString( &nameW, L"Environment" );
     if (first_time && !NtOpenKey( &hkey, KEY_READ, &attr ))
     {
         set_registry_variables( env, hkey, REG_SZ );
@@ -198,7 +163,7 @@ static BOOL set_registry_environment( WCHAR **env, BOOL first_time )
         NtClose( hkey );
     }
 
-    RtlInitUnicodeString( &nameW, volatile_envW );
+    RtlInitUnicodeString( &nameW, L"Volatile Environment" );
     if (!NtOpenKey( &hkey, KEY_READ, &attr ))
     {
         set_registry_variables( env, hkey, REG_SZ );
@@ -262,26 +227,6 @@ static WCHAR *get_registry_value( WCHAR *env, HKEY hkey, const WCHAR *name )
  */
 static void set_additional_environment( WCHAR **env )
 {
-    static const WCHAR profile_keyW[] = {'\\','R','e','g','i','s','t','r','y','\\',
-                                         'M','a','c','h','i','n','e','\\',
-                                         'S','o','f','t','w','a','r','e','\\',
-                                         'M','i','c','r','o','s','o','f','t','\\',
-                                         'W','i','n','d','o','w','s',' ','N','T','\\',
-                                         'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
-                                         'P','r','o','f','i','l','e','L','i','s','t',0};
-    static const WCHAR computer_keyW[] = {'\\','R','e','g','i','s','t','r','y','\\',
-                                          'M','a','c','h','i','n','e','\\',
-                                          'S','y','s','t','e','m','\\',
-                                          'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-                                          'C','o','n','t','r','o','l','\\',
-                                          'C','o','m','p','u','t','e','r','N','a','m','e','\\',
-                                          'A','c','t','i','v','e','C','o','m','p','u','t','e','r','N','a','m','e',0};
-    static const WCHAR computer_valueW[] = {'C','o','m','p','u','t','e','r','N','a','m','e',0};
-    static const WCHAR public_valueW[] = {'P','u','b','l','i','c',0};
-    static const WCHAR computernameW[] = {'C','O','M','P','U','T','E','R','N','A','M','E',0};
-    static const WCHAR allusersW[] = {'A','L','L','U','S','E','R','S','P','R','O','F','I','L','E',0};
-    static const WCHAR programdataW[] = {'P','r','o','g','r','a','m','D','a','t','a',0};
-    static const WCHAR publicW[] = {'P','U','B','L','I','C',0};
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
     WCHAR *val;
@@ -290,18 +235,19 @@ static void set_additional_environment( WCHAR **env )
     /* set the user profile variables */
 
     InitializeObjectAttributes( &attr, &nameW, 0, 0, NULL );
-    RtlInitUnicodeString( &nameW, profile_keyW );
+    RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Windows NT\\"
+                          "CurrentVersion\\ProfileList" );
     if (!NtOpenKey( &hkey, KEY_READ, &attr ))
     {
-        if ((val = get_registry_value( *env, hkey, programdataW )))
+        if ((val = get_registry_value( *env, hkey, L"ProgramData" )))
         {
-            set_env_var( env, allusersW, val );
-            set_env_var( env, programdataW, val );
+            set_env_var( env, L"ALLUSERSPROFILE", val );
+            set_env_var( env, L"ProgramData", val );
             RtlFreeHeap( GetProcessHeap(), 0, val );
         }
-        if ((val = get_registry_value( *env, hkey, public_valueW )))
+        if ((val = get_registry_value( *env, hkey, L"Public" )))
         {
-            set_env_var( env, publicW, val );
+            set_env_var( env, L"PUBLIC", val );
             RtlFreeHeap( GetProcessHeap(), 0, val );
         }
         NtClose( hkey );
@@ -309,34 +255,17 @@ static void set_additional_environment( WCHAR **env )
 
     /* set the computer name */
 
-    RtlInitUnicodeString( &nameW, computer_keyW );
+    RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\"
+                          "ComputerName\\ActiveComputerName" );
     if (!NtOpenKey( &hkey, KEY_READ, &attr ))
     {
-        if ((val = get_registry_value( *env, hkey, computer_valueW )))
+        if ((val = get_registry_value( *env, hkey, L"ComputerName" )))
         {
-            set_env_var( env, computernameW, val );
+            set_env_var( env, L"COMPUTERNAME", val );
             RtlFreeHeap( GetProcessHeap(), 0, val );
         }
         NtClose( hkey );
     }
-}
-
-
-/* set an environment variable for one of the wine path variables */
-static void set_wine_path_variable( WCHAR **env, const WCHAR *name, const char *unix_path )
-{
-    UNICODE_STRING nt_name, var_name;
-    ANSI_STRING unix_name;
-
-    RtlInitUnicodeString( &var_name, name );
-    if (unix_path)
-    {
-        RtlInitAnsiString( &unix_name, unix_path );
-        if (wine_unix_to_nt_file_name( &unix_name, &nt_name )) return;
-        RtlSetEnvironmentVariable( env, &var_name, &nt_name );
-        RtlFreeUnicodeString( &nt_name );
-    }
-    else RtlSetEnvironmentVariable( env, &var_name, NULL );
 }
 
 
@@ -347,31 +276,8 @@ static void set_wine_path_variable( WCHAR **env, const WCHAR *name, const char *
  */
 static void set_wow64_environment( WCHAR **env )
 {
-    static WCHAR archW[]    = {'P','R','O','C','E','S','S','O','R','_','A','R','C','H','I','T','E','C','T','U','R','E',0};
-    static WCHAR arch6432W[] = {'P','R','O','C','E','S','S','O','R','_','A','R','C','H','I','T','E','W','6','4','3','2',0};
-    static const WCHAR x86W[] = {'x','8','6',0};
-    static const WCHAR versionW[] = {'\\','R','e','g','i','s','t','r','y','\\',
-                                     'M','a','c','h','i','n','e','\\',
-                                     'S','o','f','t','w','a','r','e','\\',
-                                     'M','i','c','r','o','s','o','f','t','\\',
-                                     'W','i','n','d','o','w','s','\\',
-                                     'C','u','r','r','e','n','t','V','e','r','s','i','o','n',0};
-    static const WCHAR progdirW[]   = {'P','r','o','g','r','a','m','F','i','l','e','s','D','i','r',0};
-    static const WCHAR progdir86W[] = {'P','r','o','g','r','a','m','F','i','l','e','s','D','i','r',' ','(','x','8','6',')',0};
-    static const WCHAR progfilesW[] = {'P','r','o','g','r','a','m','F','i','l','e','s',0};
-    static const WCHAR progfiles86W[] = {'P','r','o','g','r','a','m','F','i','l','e','s','(','x','8','6',')',0};
-    static const WCHAR progw6432W[] = {'P','r','o','g','r','a','m','W','6','4','3','2',0};
-    static const WCHAR commondirW[]   = {'C','o','m','m','o','n','F','i','l','e','s','D','i','r',0};
-    static const WCHAR commondir86W[] = {'C','o','m','m','o','n','F','i','l','e','s','D','i','r',' ','(','x','8','6',')',0};
-    static const WCHAR commonfilesW[] = {'C','o','m','m','o','n','P','r','o','g','r','a','m','F','i','l','e','s',0};
-    static const WCHAR commonfiles86W[] = {'C','o','m','m','o','n','P','r','o','g','r','a','m','F','i','l','e','s','(','x','8','6',')',0};
-    static const WCHAR commonw6432W[] = {'C','o','m','m','o','n','P','r','o','g','r','a','m','W','6','4','3','2',0};
-    static const WCHAR winedlldirW[] = {'W','I','N','E','D','L','L','D','I','R','%','u',0};
-    static const WCHAR winehomedirW[] = {'W','I','N','E','H','O','M','E','D','I','R',0};
-    static const WCHAR winedatadirW[] = {'W','I','N','E','D','A','T','A','D','I','R',0};
-    static const WCHAR winebuilddirW[] = {'W','I','N','E','B','U','I','L','D','D','I','R',0};
-    static const WCHAR wineusernameW[] = {'W','I','N','E','U','S','E','R','N','A','M','E',0};
-    static const WCHAR wineconfigdirW[] = {'W','I','N','E','C','O','N','F','I','G','D','I','R',0};
+    static WCHAR archW[]    = L"PROCESSOR_ARCHITECTURE";
+    static WCHAR arch6432W[] = L"PROCESSOR_ARCHITEW6432";
 
     WCHAR buf[256];
     UNICODE_STRING arch_strW = { sizeof(archW) - sizeof(WCHAR), sizeof(archW), archW };
@@ -379,47 +285,23 @@ static void set_wow64_environment( WCHAR **env )
     UNICODE_STRING valW = { 0, sizeof(buf), buf };
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
-    const char *p;
-    const char *home = getenv( "HOME" );
-    const char *name = getenv( "USER" );
-    const char **dll_paths;
-    SIZE_T dll_path_maxlen;
-    WCHAR *val;
     HANDLE hkey;
-    DWORD i;
+    SIZE_T size = 1024;
+    WCHAR *ptr, *val, *p;
 
-    if (!home || !name)
+    for (;;)
     {
-        struct passwd *pwd = getpwuid( getuid() );
-        if (pwd)
-        {
-            if (!home) home = pwd->pw_dir;
-            if (!name) name = pwd->pw_name;
-        }
+        if (!(ptr = RtlAllocateHeap( GetProcessHeap(), 0, size * sizeof(WCHAR) ))) break;
+        if (!unix_funcs->get_dynamic_environment( ptr, &size )) break;
+        RtlFreeHeap( GetProcessHeap(), 0, ptr );
     }
-
-    /* set the Wine paths */
-
-    set_wine_path_variable( env, winedatadirW, data_dir );
-    set_wine_path_variable( env, winehomedirW, home );
-    set_wine_path_variable( env, winebuilddirW, build_dir );
-    set_wine_path_variable( env, wineconfigdirW, config_dir );
-    unix_funcs->get_dll_path( &dll_paths, &dll_path_maxlen );
-    for (i = 0; dll_paths[i]; i++)
+    for (p = ptr; *p; p += wcslen(p) + 1)
     {
-        NTDLL_swprintf( buf, winedlldirW, i );
-        set_wine_path_variable( env, buf, dll_paths[i] );
+        if ((val = wcschr( p, '=' ))) *val++ = 0;
+        set_env_var( env, p, val );
+        if (val) p = val;
     }
-    NTDLL_swprintf( buf, winedlldirW, i );
-    set_wine_path_variable( env, buf, NULL );
-
-    /* set user name */
-
-    if (!name) name = "wine";
-    if ((p = strrchr( name, '/' ))) name = p + 1;
-    if ((p = strrchr( name, '\\' ))) name = p + 1;
-    ntdll_umbstowcs( name, strlen(name) + 1, buf, ARRAY_SIZE(buf) );
-    set_env_var( env, wineusernameW, buf );
+    RtlFreeHeap( GetProcessHeap(), 0, ptr );
 
     /* set the PROCESSOR_ARCHITECTURE variable */
 
@@ -436,42 +318,42 @@ static void set_wow64_environment( WCHAR **env )
         if (is_wow64)
         {
             RtlSetEnvironmentVariable( env, &arch6432_strW, &valW );
-            RtlInitUnicodeString( &nameW, x86W );
+            RtlInitUnicodeString( &nameW, L"x86" );
             RtlSetEnvironmentVariable( env, &arch_strW, &nameW );
         }
     }
 
     InitializeObjectAttributes( &attr, &nameW, 0, 0, NULL );
-    RtlInitUnicodeString( &nameW, versionW );
+    RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Windows\\CurrentVersion" );
     if (NtOpenKey( &hkey, KEY_READ | KEY_WOW64_64KEY, &attr )) return;
 
     /* set the ProgramFiles variables */
 
-    if ((val = get_registry_value( *env, hkey, progdirW )))
+    if ((val = get_registry_value( *env, hkey, L"ProgramFilesDir" )))
     {
-        if (is_win64 || is_wow64) set_env_var( env, progw6432W, val );
-        if (is_win64 || !is_wow64) set_env_var( env, progfilesW, val );
+        if (is_win64 || is_wow64) set_env_var( env, L"ProgramW6432", val );
+        if (is_win64 || !is_wow64) set_env_var( env, L"ProgramFiles", val );
         RtlFreeHeap( GetProcessHeap(), 0, val );
     }
-    if ((val = get_registry_value( *env, hkey, progdir86W )))
+    if ((val = get_registry_value( *env, hkey, L"ProgramFilesDir (x86)" )))
     {
-        if (is_win64 || is_wow64) set_env_var( env, progfiles86W, val );
-        if (is_wow64) set_env_var( env, progfilesW, val );
+        if (is_win64 || is_wow64) set_env_var( env, L"ProgramFiles(x86)", val );
+        if (is_wow64) set_env_var( env, L"ProgramFiles", val );
         RtlFreeHeap( GetProcessHeap(), 0, val );
     }
 
     /* set the CommonProgramFiles variables */
 
-    if ((val = get_registry_value( *env, hkey, commondirW )))
+    if ((val = get_registry_value( *env, hkey, L"CommonFilesDir" )))
     {
-        if (is_win64 || is_wow64) set_env_var( env, commonw6432W, val );
-        if (is_win64 || !is_wow64) set_env_var( env, commonfilesW, val );
+        if (is_win64 || is_wow64) set_env_var( env, L"CommonProgramW6432", val );
+        if (is_win64 || !is_wow64) set_env_var( env, L"CommonProgramFiles", val );
         RtlFreeHeap( GetProcessHeap(), 0, val );
     }
-    if ((val = get_registry_value( *env, hkey, commondir86W )))
+    if ((val = get_registry_value( *env, hkey, L"CommonFilesDir (x86)" )))
     {
-        if (is_win64 || is_wow64) set_env_var( env, commonfiles86W, val );
-        if (is_wow64) set_env_var( env, commonfilesW, val );
+        if (is_win64 || is_wow64) set_env_var( env, L"CommonProgramFiles(x86)", val );
+        if (is_wow64) set_env_var( env, L"CommonProgramFiles", val );
         RtlFreeHeap( GetProcessHeap(), 0, val );
     }
     NtClose( hkey );
@@ -483,111 +365,20 @@ static void set_wow64_environment( WCHAR **env )
  *
  * Build the Win32 environment from the Unix environment
  */
-static WCHAR *build_initial_environment( char **env )
+static WCHAR *build_initial_environment( WCHAR **wargv[] )
 {
-    SIZE_T size = 1;
-    char **e;
-    WCHAR *p, *ptr;
+    SIZE_T size = 1024;
+    WCHAR *ptr;
 
-    /* compute the total size of the Unix environment */
-
-    for (e = env; *e; e++)
+    for (;;)
     {
-        if (is_special_env_var( *e )) continue;
-        size += strlen(*e) + 1;
+        if (!(ptr = RtlAllocateHeap( GetProcessHeap(), 0, size * sizeof(WCHAR) ))) return NULL;
+        if (!unix_funcs->get_initial_environment( wargv, ptr, &size )) break;
+        RtlFreeHeap( GetProcessHeap(), 0, ptr );
     }
-
-    if (!(ptr = RtlAllocateHeap( GetProcessHeap(), 0, size * sizeof(WCHAR) ))) return NULL;
-    p = ptr;
-
-    /* and fill it with the Unix environment */
-
-    for (e = env; *e; e++)
-    {
-        char *str = *e;
-
-        /* skip Unix special variables and use the Wine variants instead */
-        if (!strncmp( str, "WINE", 4 ))
-        {
-            if (is_special_env_var( str + 4 )) str += 4;
-            else if (!strncmp( str, "WINEPRELOADRESERVE=", 19 )) continue;  /* skip it */
-        }
-        else if (is_special_env_var( str )) continue;  /* skip it */
-
-        ntdll_umbstowcs( str, strlen(str) + 1, p, size - (p - ptr) );
-        p += wcslen(p) + 1;
-    }
-    *p = 0;
     first_prefix_start = set_registry_environment( &ptr, TRUE );
     set_additional_environment( &ptr );
     return ptr;
-}
-
-
-/***********************************************************************
- *           build_envp
- *
- * Build the environment of a new child process.
- */
-char **build_envp( const WCHAR *envW )
-{
-    static const char * const unix_vars[] = { "PATH", "TEMP", "TMP", "HOME" };
-    char **envp;
-    char *env, *p;
-    int count = 1, length, lenW;
-    unsigned int i;
-
-    lenW = get_env_length( envW );
-    if (!(env = RtlAllocateHeap( GetProcessHeap(), 0, lenW * 3 ))) return NULL;
-    length = ntdll_wcstoumbs( envW, lenW, env, lenW * 3, FALSE );
-
-    for (p = env; *p; p += strlen(p) + 1, count++)
-        if (is_special_env_var( p )) length += 4; /* prefix it with "WINE" */
-
-    for (i = 0; i < ARRAY_SIZE( unix_vars ); i++)
-    {
-        if (!(p = getenv(unix_vars[i]))) continue;
-        length += strlen(unix_vars[i]) + strlen(p) + 2;
-        count++;
-    }
-
-    if ((envp = RtlAllocateHeap( GetProcessHeap(), 0, count * sizeof(*envp) + length )))
-    {
-        char **envptr = envp;
-        char *dst = (char *)(envp + count);
-
-        /* some variables must not be modified, so we get them directly from the unix env */
-        for (i = 0; i < ARRAY_SIZE( unix_vars ); i++)
-        {
-            if (!(p = getenv( unix_vars[i] ))) continue;
-            *envptr++ = strcpy( dst, unix_vars[i] );
-            strcat( dst, "=" );
-            strcat( dst, p );
-            dst += strlen(dst) + 1;
-        }
-
-        /* now put the Windows environment strings */
-        for (p = env; *p; p += strlen(p) + 1)
-        {
-            if (*p == '=') continue;  /* skip drive curdirs, this crashes some unix apps */
-            if (!strncmp( p, "WINEPRELOADRESERVE=", sizeof("WINEPRELOADRESERVE=")-1 )) continue;
-            if (!strncmp( p, "WINELOADERNOEXEC=", sizeof("WINELOADERNOEXEC=")-1 )) continue;
-            if (!strncmp( p, "WINESERVERSOCKET=", sizeof("WINESERVERSOCKET=")-1 )) continue;
-            if (is_special_env_var( p ))  /* prefix it with "WINE" */
-            {
-                *envptr++ = strcpy( dst, "WINE" );
-                strcat( dst, p );
-            }
-            else
-            {
-                *envptr++ = strcpy( dst, p );
-            }
-            dst += strlen(dst) + 1;
-        }
-        *envptr = 0;
-    }
-    RtlFreeHeap( GetProcessHeap(), 0, env );
-    return envp;
 }
 
 
@@ -598,69 +389,13 @@ char **build_envp( const WCHAR *envW )
  */
 static void get_current_directory( UNICODE_STRING *dir )
 {
-    const char *pwd;
-    char *cwd;
-    int size;
-
-    dir->Length = 0;
-
-    /* try to get it from the Unix cwd */
-
-    for (size = 1024; ; size *= 2)
-    {
-        if (!(cwd = RtlAllocateHeap( GetProcessHeap(), 0, size ))) break;
-        if (getcwd( cwd, size )) break;
-        RtlFreeHeap( GetProcessHeap(), 0, cwd );
-        if (errno == ERANGE) continue;
-        cwd = NULL;
-        break;
-    }
-
-    /* try to use PWD if it is valid, so that we don't resolve symlinks */
-
-    pwd = getenv( "PWD" );
-    if (cwd)
-    {
-        struct stat st1, st2;
-
-        if (!pwd || stat( pwd, &st1 ) == -1 ||
-            (!stat( cwd, &st2 ) && (st1.st_dev != st2.st_dev || st1.st_ino != st2.st_ino)))
-            pwd = cwd;
-    }
-
-    if (pwd)
-    {
-        ANSI_STRING unix_name;
-        UNICODE_STRING nt_name;
-
-        RtlInitAnsiString( &unix_name, pwd );
-        if (!wine_unix_to_nt_file_name( &unix_name, &nt_name ))
-        {
-            /* skip the \??\ prefix */
-            if (nt_name.Length > 6 * sizeof(WCHAR) && nt_name.Buffer[5] == ':')
-            {
-                dir->Length = nt_name.Length - 4 * sizeof(WCHAR);
-                memcpy( dir->Buffer, nt_name.Buffer + 4, dir->Length );
-            }
-            else  /* change \??\ to \\?\ */
-            {
-                dir->Length = nt_name.Length;
-                memcpy( dir->Buffer, nt_name.Buffer, dir->Length );
-                dir->Buffer[1] = '\\';
-            }
-            RtlFreeUnicodeString( &nt_name );
-        }
-    }
+    unix_funcs->get_initial_directory( dir );
 
     if (!dir->Length)  /* still not initialized */
     {
-        MESSAGE("Warning: could not find DOS drive for current working directory '%s', "
-                "starting in the Windows directory.\n", cwd ? cwd : "" );
         dir->Length = wcslen( windows_dir ) * sizeof(WCHAR);
         memcpy( dir->Buffer, windows_dir, dir->Length );
     }
-    RtlFreeHeap( GetProcessHeap(), 0, cwd );
-
     /* add trailing backslash */
     if (dir->Buffer[dir->Length / sizeof(WCHAR) - 1] != '\\')
     {
@@ -687,14 +422,10 @@ static inline BOOL is_path_prefix( const WCHAR *prefix, const WCHAR *path, const
 /***********************************************************************
  *           get_image_path
  */
-static void get_image_path( const char *argv0, UNICODE_STRING *path )
+static void get_image_path( const WCHAR *name, UNICODE_STRING *path )
 {
-    static const WCHAR exeW[] = {'.','e','x','e',0};
-    WCHAR *load_path, *file_part, *name, full_name[MAX_PATH];
-    DWORD len = strlen(argv0) + 1;
-
-    if (!(name = RtlAllocateHeap( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) goto failed;
-    ntdll_umbstowcs( argv0, len, name, len );
+    WCHAR *load_path, *file_part, full_name[MAX_PATH];
+    DWORD len;
 
     if (RtlDetermineDosPathNameType_U( name ) != RELATIVE_PATH ||
         wcschr( name, '/' ) || wcschr( name, '\\' ))
@@ -705,7 +436,7 @@ static void get_image_path( const char *argv0, UNICODE_STRING *path )
         if (RtlDoesFileExists_U( full_name )) goto done;
         if (len < (MAX_PATH - 4) * sizeof(WCHAR) && !wcschr( file_part, '.' ))
         {
-            wcscat( file_part, exeW );
+            wcscat( file_part, L".exe" );
             if (RtlDoesFileExists_U( full_name )) goto done;
         }
         /* check for builtin path inside system directory */
@@ -718,7 +449,7 @@ static void get_image_path( const char *argv0, UNICODE_STRING *path )
     else
     {
         RtlGetExePath( name, &load_path );
-        len = RtlDosSearchPath_U( load_path, name, exeW, sizeof(full_name), full_name, &file_part );
+        len = RtlDosSearchPath_U( load_path, name, L".exe", sizeof(full_name), full_name, &file_part );
         RtlReleasePath( load_path );
         if (!len || len > sizeof(full_name))
         {
@@ -727,53 +458,16 @@ static void get_image_path( const char *argv0, UNICODE_STRING *path )
             if (wcslen( name ) >= MAX_PATH - 4 - len) goto failed;
             wcscpy( full_name, system_dir );
             wcscat( full_name, name );
-            if (!wcschr( name, '.' )) wcscat( full_name, exeW );
+            if (!wcschr( name, '.' )) wcscat( full_name, L".exe" );
         }
     }
 done:
     RtlCreateUnicodeString( path, full_name );
-    RtlFreeHeap( GetProcessHeap(), 0, name );
     return;
 
 failed:
-    MESSAGE( "wine: cannot find '%s'\n", argv0 );
-    RtlExitUserProcess( GetLastError() );
-}
-
-
-/***********************************************************************
- *              set_library_wargv
- *
- * Set the Wine library Unicode argv global variables.
- */
-static void set_library_wargv( char **argv, const UNICODE_STRING *image )
-{
-    int argc;
-    WCHAR *p, **wargv;
-    DWORD total = 0;
-
-    if (image) total += 1 + image->Length / sizeof(WCHAR);
-    for (argc = (image != NULL); argv[argc]; argc++) total += strlen(argv[argc]) + 1;
-
-    wargv = RtlAllocateHeap( GetProcessHeap(), 0,
-                             total * sizeof(WCHAR) + (argc + 1) * sizeof(*wargv) );
-    p = (WCHAR *)(wargv + argc + 1);
-    if (image)
-    {
-        wcscpy( p, image->Buffer );
-        wargv[0] = p;
-        p += 1 + image->Length / sizeof(WCHAR);
-        total -= 1 + image->Length / sizeof(WCHAR);
-    }
-    for (argc = (image != NULL); argv[argc]; argc++)
-    {
-        DWORD reslen = ntdll_umbstowcs( argv[argc], strlen(argv[argc]) + 1, p, total );
-        wargv[argc] = p;
-        p += reslen;
-        total -= reslen;
-    }
-    wargv[argc] = NULL;
-    __wine_main_wargv = wargv;
+    MESSAGE( "wine: cannot find %s\n", debugstr_w(name) );
+    RtlExitUserProcess( STATUS_DLL_NOT_FOUND );
 }
 
 
@@ -866,28 +560,6 @@ static void build_command_line( WCHAR **argv, UNICODE_STRING *cmdline )
     cmdline->MaximumLength = cmdline->Length + sizeof(WCHAR);
 }
 
-
-/******************************************************************************
- *  NtQuerySystemEnvironmentValue		[NTDLL.@]
- */
-NTSYSAPI NTSTATUS WINAPI NtQuerySystemEnvironmentValue(PUNICODE_STRING VariableName,
-                                                       PWCHAR Value,
-                                                       ULONG ValueBufferLength,
-                                                       PULONG RequiredLength)
-{
-    FIXME("(%s, %p, %u, %p), stub\n", debugstr_us(VariableName), Value, ValueBufferLength, RequiredLength);
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-/******************************************************************************
- *  NtQuerySystemEnvironmentValueEx		[NTDLL.@]
- */
-NTSYSAPI NTSTATUS WINAPI NtQuerySystemEnvironmentValueEx(PUNICODE_STRING name, LPGUID vendor,
-                                                         PVOID value, PULONG retlength, PULONG attrib)
-{
-    FIXME("(%s, %s, %p, %p, %p), stub\n", debugstr_us(name), debugstr_guid(vendor), value, retlength, attrib);
-    return STATUS_NOT_IMPLEMENTED;
-}
 
 /******************************************************************************
  *  RtlCreateEnvironment		[NTDLL.@]
@@ -1043,6 +715,7 @@ void WINAPI RtlSetCurrentEnvironment(PWSTR new_env, PWSTR* old_env)
 
     prev = NtCurrentTeb()->Peb->ProcessParameters->Environment;
     NtCurrentTeb()->Peb->ProcessParameters->Environment = new_env;
+    NtCurrentTeb()->Peb->ProcessParameters->EnvironmentSize = RtlSizeHeap( GetProcessHeap(), 0, new_env );
 
     RtlReleasePebLock();
 
@@ -1103,7 +776,7 @@ NTSTATUS WINAPI RtlSetEnvironmentVariable(PWSTR* penv, PUNICODE_STRING name,
 
     if ((old_size + len) * sizeof(WCHAR) > RtlSizeHeap( GetProcessHeap(), 0, env ))
     {
-        SIZE_T new_size = max( old_size * 2, old_size + len ) * sizeof(WCHAR);
+        SIZE_T new_size = (old_size + len) * sizeof(WCHAR);
         LPWSTR new_env = RtlAllocateHeap( GetProcessHeap(), 0, new_size );
 
         if (!new_env)
@@ -1111,13 +784,16 @@ NTSTATUS WINAPI RtlSetEnvironmentVariable(PWSTR* penv, PUNICODE_STRING name,
             nts = STATUS_NO_MEMORY;
             goto done;
         }
-        memmove(new_env, env, (p - env) * sizeof(WCHAR));
-        assert(len > 0);
-        memmove(new_env + (p - env) + len, p, (old_size - (p - env)) * sizeof(WCHAR));
+        memcpy(new_env, env, (p - env) * sizeof(WCHAR));
+        memcpy(new_env + (p - env) + len, p, (old_size - (p - env)) * sizeof(WCHAR));
         p = new_env + (p - env);
 
         RtlDestroyEnvironment(env);
-        if (!penv) NtCurrentTeb()->Peb->ProcessParameters->Environment = new_env;
+        if (!penv)
+        {
+            NtCurrentTeb()->Peb->ProcessParameters->Environment = new_env;
+            NtCurrentTeb()->Peb->ProcessParameters->EnvironmentSize = new_size;
+        }
         else *penv = new_env;
     }
     else
@@ -1351,12 +1027,14 @@ NTSTATUS WINAPI RtlCreateProcessParametersEx( RTL_USER_PROCESS_PARAMETERS **resu
             + ROUND_SIZE( ShellInfo->MaximumLength )
             + ROUND_SIZE( RuntimeInfo->MaximumLength ));
 
-    if ((ptr = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, size + ROUND_SIZE(env_size) )))
+    env_size = ROUND_SIZE( env_size );
+    if ((ptr = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, size + env_size )))
     {
         RTL_USER_PROCESS_PARAMETERS *params = ptr;
-        params->AllocationSize = size;
-        params->Size           = size;
-        params->Flags          = PROCESS_PARAMS_FLAG_NORMALIZED;
+        params->AllocationSize  = size;
+        params->Size            = size;
+        params->Flags           = PROCESS_PARAMS_FLAG_NORMALIZED;
+        params->EnvironmentSize = env_size;
         if (cur_params) params->ConsoleFlags = cur_params->ConsoleFlags;
         /* all other fields are zero */
 
@@ -1422,15 +1100,6 @@ static inline void get_unicode_string( UNICODE_STRING *str, WCHAR **src, UINT le
  */
 static void run_wineboot( WCHAR **env )
 {
-    static const WCHAR wineboot_eventW[] = {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s',
-                                            '\\','_','_','w','i','n','e','b','o','o','t','_','e','v','e','n','t',0};
-    static const WCHAR wineboot[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\',
-                                     's','y','s','t','e','m','3','2','\\',
-                                     'w','i','n','e','b','o','o','t','.','e','x','e',0};
-    static const WCHAR cmdline[] = {'C',':','\\','w','i','n','d','o','w','s','\\',
-                                    's','y','s','t','e','m','3','2','\\',
-                                    'w','i','n','e','b','o','o','t','.','e','x','e',' ',
-                                    '-','-','i','n','i','t',0};
     UNICODE_STRING nameW, cmdlineW, dllpathW;
     RTL_USER_PROCESS_PARAMETERS *params;
     RTL_USER_PROCESS_INFORMATION info;
@@ -1442,7 +1111,7 @@ static void run_wineboot( WCHAR **env )
     ULONG redir = 0;
     int count = 1;
 
-    RtlInitUnicodeString( &nameW, wineboot_eventW );
+    RtlInitUnicodeString( &nameW, L"\\KernelObjects\\__wineboot_event" );
     InitializeObjectAttributes( &attr, &nameW, OBJ_OPENIF, 0, NULL );
 
     status = NtCreateEvent( &handles[0], EVENT_ALL_ACCESS, &attr, NotificationEvent, 0 );
@@ -1452,17 +1121,18 @@ static void run_wineboot( WCHAR **env )
         ERR( "failed to create wineboot event, expect trouble\n" );
         return;
     }
-    LdrGetDllPath( wineboot + 4, LOAD_WITH_ALTERED_SEARCH_PATH, &load_path, &dummy );
-    RtlInitUnicodeString( &nameW, wineboot + 4 );
+    LdrGetDllPath( L"C:\\windows\\system32\\wineboot.exe", LOAD_WITH_ALTERED_SEARCH_PATH,
+                   &load_path, &dummy );
+    RtlInitUnicodeString( &nameW, L"C:\\windows\\system32\\wineboot.exe" );
     RtlInitUnicodeString( &dllpathW, load_path );
-    RtlInitUnicodeString( &cmdlineW, cmdline );
+    RtlInitUnicodeString( &cmdlineW, L"C:\\windows\\system32\\wineboot.exe --init" );
     RtlCreateProcessParametersEx( &params, &nameW, &dllpathW, NULL, &cmdlineW, *env, NULL, NULL,
                                   NULL, NULL, PROCESS_PARAMS_FLAG_NORMALIZED );
     params->hStdInput  = 0;
     params->hStdOutput = 0;
     params->hStdError  = NtCurrentTeb()->Peb->ProcessParameters->hStdError;
 
-    RtlInitUnicodeString( &nameW, wineboot );
+    RtlInitUnicodeString( &nameW, L"\\??\\C:\\windows\\system32\\wineboot.exe" );
     RtlWow64EnableFsRedirectionEx( TRUE, &redir );
     status = RtlCreateUserProcess( &nameW, OBJ_CASE_INSENSITIVE, params,
                                    NULL, NULL, 0, FALSE, 0, 0, &info );
@@ -1496,33 +1166,30 @@ wait:
  *
  * Fill the initial RTL_USER_PROCESS_PARAMETERS structure from the server.
  */
-void init_user_process_params( SIZE_T data_size )
+void init_user_process_params(void)
 {
     WCHAR *src, *load_path, *dummy;
-    SIZE_T info_size, env_size;
-    NTSTATUS status;
+    SIZE_T info_size, env_size, data_size = 0;
     startup_info_t *info = NULL;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     UNICODE_STRING curdir, dllpath, imagepath, cmdline, title, desktop, shellinfo, runtime;
-    int argc;
-    char **argv, **envp;
+    WCHAR **wargv;
 
-    unix_funcs->get_main_args( &argc, &argv, &envp );
-
+    unix_funcs->get_startup_info( NULL, &data_size, &info_size );
     if (!data_size)
     {
         RTL_USER_PROCESS_PARAMETERS initial_params = {0};
         WCHAR *env, curdir_buffer[MAX_PATH];
 
         NtCurrentTeb()->Peb->ProcessParameters = &initial_params;
-        initial_params.Environment = build_initial_environment( envp );
+        initial_params.Environment = build_initial_environment( &wargv );
         curdir.Buffer = curdir_buffer;
         curdir.MaximumLength = sizeof(curdir_buffer);
         get_current_directory( &curdir );
         initial_params.CurrentDirectory.DosPath = curdir;
-        get_image_path( argv[0], &initial_params.ImagePathName );
-        set_library_wargv( argv, &initial_params.ImagePathName );
-        build_command_line( __wine_main_wargv, &cmdline );
+        get_image_path( wargv[0], &initial_params.ImagePathName );
+        wargv[0] = initial_params.ImagePathName.Buffer;
+        build_command_line( wargv, &cmdline );
         LdrGetDllPath( initial_params.ImagePathName.Buffer, 0, &load_path, &dummy );
         RtlInitUnicodeString( &dllpath, load_path );
 
@@ -1539,14 +1206,7 @@ void init_user_process_params( SIZE_T data_size )
         RtlFreeUnicodeString( &cmdline );
         RtlReleasePath( load_path );
 
-        if (isatty(0) || isatty(1) || isatty(2))
-            params->ConsoleHandle = (HANDLE)2; /* see kernel32/kernel_private.h */
-        if (!isatty(0))
-            wine_server_fd_to_handle( 0, GENERIC_READ|SYNCHRONIZE,  OBJ_INHERIT, &params->hStdInput );
-        if (!isatty(1))
-            wine_server_fd_to_handle( 1, GENERIC_WRITE|SYNCHRONIZE, OBJ_INHERIT, &params->hStdOutput );
-        if (!isatty(2))
-            wine_server_fd_to_handle( 2, GENERIC_WRITE|SYNCHRONIZE, OBJ_INHERIT, &params->hStdError );
+        unix_funcs->get_initial_console( params );
         params->wShowWindow = 1; /* SW_SHOWNORMAL */
 
         run_wineboot( &params->Environment );
@@ -1555,18 +1215,7 @@ void init_user_process_params( SIZE_T data_size )
 
     if (!(info = RtlAllocateHeap( GetProcessHeap(), 0, data_size ))) return;
 
-    SERVER_START_REQ( get_startup_info )
-    {
-        wine_server_set_reply( req, info, data_size );
-        if (!(status = wine_server_call( req )))
-        {
-            data_size = wine_server_reply_size( reply );
-            info_size = reply->info_size;
-            env_size  = data_size - info_size;
-        }
-    }
-    SERVER_END_REQ;
-    if (status) goto done;
+    if (unix_funcs->get_startup_info( info, &data_size, &info_size )) goto done;
 
     src = (WCHAR *)(info + 1);
     get_unicode_string( &curdir, &src, info->curdir_len );
@@ -1603,13 +1252,12 @@ void init_user_process_params( SIZE_T data_size )
     params->wShowWindow     = info->show;
 
     /* environment needs to be a separate memory block */
+    env_size = data_size - info_size;
     if ((params->Environment = RtlAllocateHeap( GetProcessHeap(), 0, max( env_size, sizeof(WCHAR) ))))
     {
         if (env_size) memcpy( params->Environment, (char *)info + info_size, env_size );
         else params->Environment[0] = 0;
     }
-
-    set_library_wargv( argv, NULL );
 
 done:
     RtlFreeHeap( GetProcessHeap(), 0, info );
@@ -1620,6 +1268,6 @@ done:
         RtlInitUnicodeString( &curdir, windows_dir );
         RtlSetCurrentDirectory_U( &curdir );
     }
-    if (!params->CurrentDirectory.Handle) chdir("/"); /* avoid locking removable devices */
     set_wow64_environment( &params->Environment );
+    params->EnvironmentSize = RtlSizeHeap( GetProcessHeap(), 0, params->Environment );
 }

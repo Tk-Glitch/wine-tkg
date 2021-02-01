@@ -46,7 +46,7 @@ static call_expression_t *new_call_expression(parser_ctx_t*,expression_t*,expres
 static call_expression_t *make_call_expression(parser_ctx_t*,expression_t*,expression_t*);
 
 static void *new_statement(parser_ctx_t*,statement_type_t,size_t,unsigned);
-static statement_t *new_call_statement(parser_ctx_t*,unsigned,BOOL,expression_t*);
+static statement_t *new_call_statement(parser_ctx_t*,unsigned,expression_t*);
 static statement_t *new_assign_statement(parser_ctx_t*,unsigned,expression_t*,expression_t*);
 static statement_t *new_set_statement(parser_ctx_t*,unsigned,expression_t*,expression_t*);
 static statement_t *new_dim_statement(parser_ctx_t*,unsigned,dim_decl_t*);
@@ -131,6 +131,7 @@ static statement_t *link_statements(statement_t*,statement_t*);
 %token <dbl> tDouble
 
 %type <statement> Statement SimpleStatement StatementNl StatementsNl StatementsNl_opt BodyStatements IfStatement Else_opt
+%type <statement> GlobalDimDeclaration
 %type <expression> Expression LiteralExpression PrimaryExpression EqualityExpression CallExpression ExpressionNl_opt
 %type <expression> ConcatExpression AdditiveExpression ModExpression IntdivExpression MultiplicativeExpression ExpExpression
 %type <expression> NotExpression UnaryExpression AndExpression OrExpression XorExpression EqvExpression SignExpression
@@ -161,8 +162,14 @@ OptionExplicit_opt
 
 SourceElements
     : /* empty */
+    | SourceElements GlobalDimDeclaration StSep
+                                            { source_add_statement(ctx, $2); }
     | SourceElements StatementNl            { source_add_statement(ctx, $2); }
     | SourceElements ClassDeclaration       { source_add_class(ctx, $2); }
+
+GlobalDimDeclaration
+    : tPRIVATE DimDeclList                  { $$ = new_dim_statement(ctx, @$, $2); CHECK_ERROR; }
+    | tPUBLIC  DimDeclList                  { $$ = new_dim_statement(ctx, @$, $2); CHECK_ERROR; }
 
 ExpressionNl_opt
     : /* empty */                           { $$ = NULL; }
@@ -193,8 +200,8 @@ Statement
 
 SimpleStatement
     : CallExpression ArgumentList_opt       { call_expression_t *call_expr = make_call_expression(ctx, $1, $2); CHECK_ERROR;
-                                              $$ = new_call_statement(ctx, @$, FALSE, &call_expr->expr); CHECK_ERROR; };
-    | tCALL UnaryExpression                 { $$ = new_call_statement(ctx, @$, TRUE, $2); CHECK_ERROR; }
+                                              $$ = new_call_statement(ctx, @$, &call_expr->expr); CHECK_ERROR; };
+    | tCALL UnaryExpression                 { $$ = new_call_statement(ctx, @$, $2); CHECK_ERROR; }
     | CallExpression '=' Expression
                                             { $$ = new_assign_statement(ctx, @$, $1, $3); CHECK_ERROR; }
     | tDIM DimDeclList                      { $$ = new_dim_statement(ctx, @$, $2); CHECK_ERROR; }
@@ -445,11 +452,11 @@ ClassBody
     | PropertyDecl StSep ClassBody                { $$ = add_class_function(ctx, $3, $1); CHECK_ERROR; }
 
 PropertyDecl
-    : Storage_opt tPROPERTY tGET tIdentifier ArgumentsDecl_opt StSep BodyStatements tEND tPROPERTY
+    : Storage_opt tPROPERTY tGET Identifier ArgumentsDecl_opt StSep BodyStatements tEND tPROPERTY
                                     { $$ = new_function_decl(ctx, $4, FUNC_PROPGET, $1, $5, $7); CHECK_ERROR; }
-    | Storage_opt tPROPERTY tLET tIdentifier '(' ArgumentDecl ')' StSep BodyStatements tEND tPROPERTY
+    | Storage_opt tPROPERTY tLET Identifier '(' ArgumentDeclList ')' StSep BodyStatements tEND tPROPERTY
                                     { $$ = new_function_decl(ctx, $4, FUNC_PROPLET, $1, $6, $9); CHECK_ERROR; }
-    | Storage_opt tPROPERTY tSET tIdentifier '(' ArgumentDecl ')' StSep BodyStatements tEND tPROPERTY
+    | Storage_opt tPROPERTY tSET Identifier '(' ArgumentDeclList ')' StSep BodyStatements tEND tPROPERTY
                                     { $$ = new_function_decl(ctx, $4, FUNC_PROPSET, $1, $6, $9); CHECK_ERROR; }
 
 FunctionDecl
@@ -483,11 +490,11 @@ ArgumentDecl
 /* these keywords may also be an identifier, depending on context */
 Identifier
     : tIdentifier    { $$ = $1; }
-    | tDEFAULT       { $$ = $1; }
-    | tERROR         { $$ = $1; }
-    | tEXPLICIT      { $$ = $1; }
-    | tPROPERTY      { $$ = $1; }
-    | tSTEP          { $$ = $1; }
+    | tDEFAULT       { ctx->last_token = tIdentifier; $$ = $1; }
+    | tERROR         { ctx->last_token = tIdentifier; $$ = $1; }
+    | tEXPLICIT      { ctx->last_token = tIdentifier; $$ = $1; }
+    | tPROPERTY      { ctx->last_token = tIdentifier; $$ = $1; }
+    | tSTEP          { ctx->last_token = tIdentifier; $$ = $1; }
 
 /* Most statements accept both new line and ':' as separators */
 StSep
@@ -727,7 +734,7 @@ static void *new_statement(parser_ctx_t *ctx, statement_type_t type, size_t size
     return stat;
 }
 
-static statement_t *new_call_statement(parser_ctx_t *ctx, unsigned loc, BOOL is_strict, expression_t *expr)
+static statement_t *new_call_statement(parser_ctx_t *ctx, unsigned loc, expression_t *expr)
 {
     call_expression_t *call_expr = NULL;
     call_statement_t *stat;
@@ -751,7 +758,6 @@ static statement_t *new_call_statement(parser_ctx_t *ctx, unsigned loc, BOOL is_
         return NULL;
 
     stat->expr = call_expr;
-    stat->is_strict = is_strict;
     return &stat->stat;
 }
 
@@ -983,10 +989,11 @@ static function_decl_t *new_function_decl(parser_ctx_t *ctx, const WCHAR *name, 
         unsigned storage_flags, arg_decl_t *arg_decl, statement_t *body)
 {
     function_decl_t *decl;
+    BOOL is_default = FALSE;
 
     if(storage_flags & STORAGE_IS_DEFAULT) {
-        if(type == FUNC_PROPGET) {
-            type = FUNC_DEFGET;
+        if(type == FUNC_PROPGET || type == FUNC_FUNCTION || type == FUNC_SUB) {
+            is_default = TRUE;
         }else {
             FIXME("Invalid default property\n");
             ctx->hres = E_FAIL;
@@ -1001,6 +1008,7 @@ static function_decl_t *new_function_decl(parser_ctx_t *ctx, const WCHAR *name, 
     decl->name = name;
     decl->type = type;
     decl->is_public = !(storage_flags & STORAGE_IS_PRIVATE);
+    decl->is_default = is_default;
     decl->args = arg_decl;
     decl->body = body;
     decl->next = NULL;

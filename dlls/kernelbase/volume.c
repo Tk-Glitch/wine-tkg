@@ -152,7 +152,6 @@ static DWORD get_mountmgr_drive_type( LPCWSTR root )
 /* get the label by reading it from a file at the root of the filesystem */
 static void get_filesystem_label( const UNICODE_STRING *device, WCHAR *label, DWORD len )
 {
-    static const WCHAR labelW[] = {'.','w','i','n','d','o','w','s','-','l','a','b','e','l',0};
     HANDLE handle;
     UNICODE_STRING name;
     IO_STATUS_BLOCK io;
@@ -167,12 +166,12 @@ static void get_filesystem_label( const UNICODE_STRING *device, WCHAR *label, DW
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    name.MaximumLength = device->Length + sizeof(labelW);
+    name.MaximumLength = device->Length + sizeof(L".windows-label");
     name.Length = name.MaximumLength - sizeof(WCHAR);
     if (!(name.Buffer = HeapAlloc( GetProcessHeap(), 0, name.MaximumLength ))) return;
 
     memcpy( name.Buffer, device->Buffer, device->Length );
-    memcpy( name.Buffer + device->Length / sizeof(WCHAR), labelW, sizeof(labelW) );
+    memcpy( name.Buffer + device->Length / sizeof(WCHAR), L".windows-label", sizeof(L".windows-label") );
     if (!NtOpenFile( &handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ|FILE_SHARE_WRITE,
                      FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT ))
     {
@@ -193,7 +192,6 @@ static void get_filesystem_label( const UNICODE_STRING *device, WCHAR *label, DW
 /* get the serial number by reading it from a file at the root of the filesystem */
 static DWORD get_filesystem_serial( const UNICODE_STRING *device )
 {
-    static const WCHAR serialW[] = {'.','w','i','n','d','o','w','s','-','s','e','r','i','a','l',0};
     HANDLE handle;
     UNICODE_STRING name;
     IO_STATUS_BLOCK io;
@@ -207,12 +205,12 @@ static DWORD get_filesystem_serial( const UNICODE_STRING *device )
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    name.MaximumLength = device->Length + sizeof(serialW);
+    name.MaximumLength = device->Length + sizeof(L".windows-serial");
     name.Length = name.MaximumLength - sizeof(WCHAR);
     if (!(name.Buffer = HeapAlloc( GetProcessHeap(), 0, name.MaximumLength ))) return 0;
 
     memcpy( name.Buffer, device->Buffer, device->Length );
-    memcpy( name.Buffer + device->Length / sizeof(WCHAR), serialW, sizeof(serialW) );
+    memcpy( name.Buffer + device->Length / sizeof(WCHAR), L".windows-serial", sizeof(L".windows-serial") );
     if (!NtOpenFile( &handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ|FILE_SHARE_WRITE,
                      FILE_SYNCHRONOUS_IO_NONALERT ))
     {
@@ -972,18 +970,13 @@ BOOL WINAPI DECLSPEC_HOTPATCH DefineDosDeviceW( DWORD flags, const WCHAR *device
 
     lstrcatW( link_name, device );
     RtlInitUnicodeString( &nt_name, link_name );
-    InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
+    InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE | OBJ_PERMANENT, 0, NULL );
     if (flags & DDD_REMOVE_DEFINITION)
     {
         if (!set_ntstatus( NtOpenSymbolicLinkObject( &handle, 0, &attr ) ))
             return FALSE;
 
-        SERVER_START_REQ( unlink_object )
-        {
-            req->handle = wine_server_obj_handle( handle );
-            status = wine_server_call( req );
-        }
-        SERVER_END_REQ;
+        status = NtMakeTemporaryObject( handle );
         NtClose( handle );
 
         return set_ntstatus( status );
@@ -1000,7 +993,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH DefineDosDeviceW( DWORD flags, const WCHAR *device
     else
         RtlInitUnicodeString( &nt_target, target );
 
-    return set_ntstatus( NtCreateSymbolicLinkObject( &handle, SYMBOLIC_LINK_ALL_ACCESS, &attr, &nt_target ) );
+    if (!(status = NtCreateSymbolicLinkObject( &handle, SYMBOLIC_LINK_ALL_ACCESS, &attr, &nt_target )))
+        NtClose( handle );
+    return set_ntstatus( status );
 }
 
 

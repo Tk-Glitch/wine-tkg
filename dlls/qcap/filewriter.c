@@ -109,14 +109,14 @@ static HRESULT file_writer_sink_eos(struct strmbase_sink *iface)
 {
     struct file_writer *filter = impl_from_strmbase_pin(&iface->pin);
 
-    EnterCriticalSection(&filter->filter.csFilter);
+    EnterCriticalSection(&filter->filter.filter_cs);
 
     if (filter->filter.state == State_Running)
         deliver_ec_complete(filter);
     else
         filter->eos = TRUE;
 
-    LeaveCriticalSection(&filter->filter.csFilter);
+    LeaveCriticalSection(&filter->filter.filter_cs);
     return S_OK;
 }
 
@@ -161,10 +161,10 @@ static void file_writer_destroy(struct strmbase_filter *iface)
 {
     struct file_writer *filter = impl_from_strmbase_filter(iface);
 
-    heap_free(filter->filename);
+    free(filter->filename);
     strmbase_sink_cleanup(&filter->sink);
     strmbase_filter_cleanup(&filter->filter);
-    heap_free(filter);
+    free(filter);
 }
 
 static HRESULT file_writer_init_stream(struct strmbase_filter *iface)
@@ -239,17 +239,16 @@ static HRESULT WINAPI filesinkfilter_SetFileName(IFileSinkFilter *iface,
     struct file_writer *filter = impl_from_IFileSinkFilter(iface);
     WCHAR *new_filename;
 
-    TRACE("filter %p, filename %s, mt %p, stub!\n", filter, debugstr_w(filename), mt);
+    TRACE("filter %p, filename %s, mt %p.\n", filter, debugstr_w(filename), mt);
     strmbase_dump_media_type(mt);
 
     if (mt)
         FIXME("Ignoring media type %p.\n", mt);
 
-    if (!(new_filename = heap_alloc((strlenW(filename) + 1) * sizeof(WCHAR))))
+    if (!(new_filename = wcsdup(filename)))
         return E_OUTOFMEMORY;
-    strcpyW(new_filename, filename);
 
-    heap_free(filter->filename);
+    free(filter->filename);
     filter->filename = new_filename;
     return S_OK;
 }
@@ -315,17 +314,16 @@ static const IAMFilterMiscFlagsVtbl misc_flags_vtbl =
 
 HRESULT file_writer_create(IUnknown *outer, IUnknown **out)
 {
-    static const WCHAR sink_name[] = {'i','n',0};
     struct file_writer *object;
 
-    if (!(object = heap_alloc_zero(sizeof(*object))))
+    if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
     strmbase_filter_init(&object->filter, outer, &CLSID_FileWriter, &filter_ops);
     object->IFileSinkFilter_iface.lpVtbl = &filesinkfilter_vtbl;
     object->IAMFilterMiscFlags_iface.lpVtbl = &misc_flags_vtbl;
 
-    strmbase_sink_init(&object->sink, &object->filter, sink_name, &sink_ops, NULL);
+    strmbase_sink_init(&object->sink, &object->filter, L"in", &sink_ops, NULL);
 
     TRACE("Created file writer %p.\n", object);
     *out = &object->filter.IUnknown_inner;

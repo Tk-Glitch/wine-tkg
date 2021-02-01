@@ -505,7 +505,7 @@
 @ stub -arch=arm ?_Copy_str@exception@std@@AAAXPBD@Z
 @ stub -arch=i386 ?_Copy_str@exception@std@@AAEXPBD@Z
 @ stub -arch=win64 ?_Copy_str@exception@std@@AEAAXPEBD@Z
-@ stub ?_CurrentContext@_Context@details@Concurrency@@SA?AV123@XZ
+@ cdecl ?_CurrentContext@_Context@details@Concurrency@@SA?AV123@XZ() msvcr120.?_CurrentContext@_Context@details@Concurrency@@SA?AV123@XZ
 @ stub ?_Current_node@location@Concurrency@@SA?AV12@XZ
 @ stub -arch=arm ?_Destroy@_AsyncTaskCollection@details@Concurrency@@EAAXXZ
 @ stub -arch=i386 ?_Destroy@_AsyncTaskCollection@details@Concurrency@@EAEXXZ
@@ -960,7 +960,7 @@
 @ cdecl __p__wpgmptr() msvcr120.__p__wpgmptr
 @ cdecl __pctype_func() msvcr120.__pctype_func
 @ extern __pioinfo msvcr120.__pioinfo
-@ stub __pwctype_func
+@ cdecl __pwctype_func() msvcr120.__pwctype_func
 @ cdecl __pxcptinfoptrs() msvcr120.__pxcptinfoptrs
 @ stub __report_gsfailure
 @ extern __setlc_active msvcr120.__setlc_active
@@ -1099,7 +1099,7 @@
 @ cdecl _flushall() msvcr120._flushall
 @ extern _fmode msvcr120._fmode
 @ cdecl _fpclass(double) msvcr120._fpclass
-# stub -arch=x86_64 _fpclassf
+@ cdecl -arch=!i386 _fpclassf(float) msvcr120._fpclassf
 @ cdecl -arch=i386,x86_64,arm,arm64 _fpieee_flt(long ptr ptr) msvcr120._fpieee_flt
 @ cdecl _fpreset() msvcr120._fpreset
 @ stub _fprintf_l
@@ -1145,7 +1145,7 @@
 @ varargs _fwscanf_l(ptr wstr ptr) msvcr120._fwscanf_l
 @ varargs _fwscanf_s_l(ptr wstr ptr) msvcr120._fwscanf_s_l
 @ cdecl _gcvt(double long str) msvcr120._gcvt
-@ cdecl _gcvt_s(ptr long  double long) msvcr120._gcvt_s
+@ cdecl _gcvt_s(ptr long double long) msvcr120._gcvt_s
 @ cdecl _get_current_locale() msvcr120._get_current_locale
 @ cdecl _get_daylight(ptr) msvcr120._get_daylight
 @ cdecl _get_doserrno(ptr) msvcr120._get_doserrno
@@ -1447,7 +1447,7 @@
 @ cdecl -ret64 _strtoi64_l(str ptr long ptr) msvcr120._strtoi64_l
 @ cdecl -ret64 _strtoimax_l(str ptr long ptr) msvcr120._strtoimax_l
 @ cdecl _strtol_l(str ptr long ptr) msvcr120._strtol_l
-@ stub _strtold_l
+@ cdecl _strtold_l(str ptr ptr) msvcr120._strtold_l
 @ cdecl -ret64 _strtoll_l(str ptr long ptr) msvcr120._strtoll_l
 @ cdecl -ret64 _strtoui64(str ptr long) msvcr120._strtoui64
 @ cdecl -ret64 _strtoui64_l(str ptr long ptr) msvcr120._strtoui64_l
@@ -1580,13 +1580,13 @@
 @ cdecl _wcsrev(wstr) msvcr120._wcsrev
 @ cdecl _wcsset(wstr long) msvcr120._wcsset
 @ cdecl _wcsset_s(wstr long long) msvcr120._wcsset_s
-@ cdecl _wcstod_l(wstr ptr long) msvcr120._wcstod_l
+@ cdecl _wcstod_l(wstr ptr ptr) msvcr120._wcstod_l
 @ cdecl _wcstof_l(wstr ptr ptr) msvcr120._wcstof_l
 @ cdecl -ret64 _wcstoi64(wstr ptr long) msvcr120._wcstoi64
 @ cdecl -ret64 _wcstoi64_l(wstr ptr long ptr) msvcr120._wcstoi64_l
 @ stub _wcstoimax_l
 @ cdecl _wcstol_l(wstr ptr long ptr) msvcr120._wcstol_l
-@ stub _wcstold_l
+@ cdecl _wcstold_l(wstr ptr ptr) msvcr120._wcstold_l
 @ cdecl -ret64 _wcstoll_l(wstr ptr long ptr) msvcr120._wcstoll_l
 @ cdecl _wcstombs_l(ptr ptr long ptr) msvcr120._wcstombs_l
 @ cdecl _wcstombs_s_l(ptr ptr long wstr long ptr) msvcr120._wcstombs_s_l
@@ -1804,7 +1804,7 @@
 @ cdecl expm1f(float) msvcr120.expm1f
 @ cdecl expm1l(double) msvcr120.expm1l
 @ cdecl fabs(double) msvcr120.fabs
-@ cdecl -arch=!i386 fabsf(float) msvcr120.fabsf
+@ cdecl -arch=arm,arm64 fabsf(float) msvcr120.fabsf
 @ cdecl fclose(ptr) msvcr120.fclose
 @ cdecl fdim(double double) msvcr120.fdim
 @ cdecl fdimf(float float) msvcr120.fdimf
@@ -1910,7 +1910,7 @@
 @ cdecl lgammaf(float) msvcr120.lgammaf
 @ cdecl lgammal(double) msvcr120.lgammal
 @ cdecl -ret64 llabs(int64) msvcr120.llabs
-@ cdecl lldiv(int64 int64) msvcr120.lldiv
+@ cdecl -norelay lldiv(int64 int64) msvcr120.lldiv
 @ cdecl -ret64 llrint(double) msvcr120.llrint
 @ cdecl -ret64 llrintf(float) msvcr120.llrintf
 @ cdecl -ret64 llrintl(double) msvcr120.llrintl
@@ -2054,7 +2054,7 @@
 @ cdecl strtok(str str) msvcr120.strtok
 @ cdecl strtok_s(ptr str ptr) msvcr120.strtok_s
 @ cdecl strtol(str ptr long) msvcr120.strtol
-@ stub strtold
+@ cdecl strtold(str ptr) msvcr120.strtold
 @ cdecl -ret64 strtoll(str ptr long) msvcr120.strtoll
 @ cdecl strtoul(str ptr long) msvcr120.strtoul
 @ cdecl -ret64 strtoull(str ptr long) msvcr120.strtoull
@@ -2137,7 +2137,7 @@
 @ cdecl wcstok(wstr wstr) msvcr120.wcstok
 @ cdecl wcstok_s(ptr wstr ptr) msvcr120.wcstok_s
 @ cdecl wcstol(wstr ptr long) msvcr120.wcstol
-@ stub wcstold
+@ cdecl wcstold(wstr ptr) msvcr120.wcstold
 @ cdecl -ret64 wcstoll(wstr ptr long) msvcr120.wcstoll
 @ cdecl wcstombs(ptr ptr long) msvcr120.wcstombs
 @ cdecl wcstombs_s(ptr ptr long wstr long) msvcr120.wcstombs_s

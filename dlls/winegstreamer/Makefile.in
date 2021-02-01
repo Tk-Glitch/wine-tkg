@@ -19,7 +19,8 @@ C_SRCS = \
 	mfplat.c \
 	pin.c \
 	qualitycontrol.c \
-	seeking.c
+	seeking.c \
+	yuvfixup.c
 
 IDL_SRCS = \
 	winegstreamer_classes.idl

@@ -23,13 +23,14 @@
 #include "wincodecsdk.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 DEFINE_GUID(CLSID_WineTgaDecoder, 0xb11fc79a,0x67cc,0x43e6,0xa9,0xce,0xe3,0xd5,0x49,0x45,0xd3,0x04);
 
 DEFINE_GUID(CLSID_WICIcnsEncoder, 0x312fb6f1,0xb767,0x409d,0x8a,0x6d,0x0f,0xc1,0x54,0xd4,0xf0,0x5c);
 
 DEFINE_GUID(GUID_WineContainerFormatTga, 0x0c44fda1,0xa5c5,0x4298,0x96,0x85,0x47,0x3f,0xc1,0x7c,0xd3,0x22);
+
+DEFINE_GUID(GUID_WineContainerFormatIcns, 0xe4cd3e69,0x4436,0x4363,0x98,0x1d,0xcc,0xf0,0x5a,0x87,0x4c,0x73);
 
 DEFINE_GUID(GUID_VendorWine, 0xddf46da1,0x7dc1,0x404e,0x98,0xf2,0xef,0xa4,0x8d,0xfc,0x95,0x0a);
 
@@ -132,7 +133,7 @@ DECLARE_INTERFACE_(IMILUnknown2,IUnknown)
 };
 #undef INTERFACE
 
-HRESULT create_instance(CLSID *clsid, const IID *iid, void **ppv) DECLSPEC_HIDDEN;
+HRESULT create_instance(const CLSID *clsid, const IID *iid, void **ppv) DECLSPEC_HIDDEN;
 
 typedef HRESULT(*class_constructor)(REFIID,void**);
 extern HRESULT FormatConverter_CreateInstance(REFIID riid, void** ppv) DECLSPEC_HIDDEN;
@@ -229,6 +230,7 @@ extern HRESULT GCEReader_CreateInstance(REFIID iid, void **ppv) DECLSPEC_HIDDEN;
 extern HRESULT APEReader_CreateInstance(REFIID iid, void **ppv) DECLSPEC_HIDDEN;
 extern HRESULT GifCommentReader_CreateInstance(REFIID iid, void **ppv) DECLSPEC_HIDDEN;
 extern HRESULT MetadataQueryReader_CreateInstance(IWICMetadataBlockReader *, const WCHAR *, IWICMetadataQueryReader **) DECLSPEC_HIDDEN;
+extern HRESULT MetadataQueryWriter_CreateInstance(IWICMetadataBlockWriter *, const WCHAR *, IWICMetadataQueryWriter **) DECLSPEC_HIDDEN;
 extern HRESULT stream_initialize_from_filehandle(IWICStream *iface, HANDLE hfile) DECLSPEC_HIDDEN;
 
 static inline WCHAR *heap_strdupW(const WCHAR *src)
@@ -236,7 +238,7 @@ static inline WCHAR *heap_strdupW(const WCHAR *src)
     WCHAR *dst;
     SIZE_T len;
     if (!src) return NULL;
-    len = (strlenW(src) + 1) * sizeof(WCHAR);
+    len = (lstrlenW(src) + 1) * sizeof(WCHAR);
     if ((dst = HeapAlloc(GetProcessHeap(), 0, len))) memcpy(dst, src, len);
     return dst;
 }
@@ -246,5 +248,200 @@ static inline const char *debug_wic_rect(const WICRect *rect)
     if (!rect) return "(null)";
     return wine_dbg_sprintf("(%u,%u)-(%u,%u)", rect->X, rect->Y, rect->Width, rect->Height);
 }
+
+extern HMODULE windowscodecs_module;
+
+HRESULT read_png_chunk(IStream *stream, BYTE *type, BYTE **data, ULONG *data_size);
+
+/* unixlib iface */
+struct decoder_funcs;
+
+struct decoder_info
+{
+    GUID container_format;
+    GUID block_format;
+    CLSID clsid;
+};
+
+#define DECODER_FLAGS_CAPABILITY_MASK 0x1f
+#define DECODER_FLAGS_UNSUPPORTED_COLOR_CONTEXT 0x80000000
+
+struct decoder_stat
+{
+    DWORD flags;
+    DWORD frame_count;
+};
+
+struct decoder_frame
+{
+    CLSID pixel_format;
+    UINT width, height;
+    UINT bpp;
+    DOUBLE dpix, dpiy;
+    DWORD num_color_contexts;
+    DWORD num_colors;
+    WICColor palette[256];
+};
+
+#define DECODER_BLOCK_OPTION_MASK 0x0001000F
+#define DECODER_BLOCK_FULL_STREAM 0x80000000
+#define DECODER_BLOCK_READER_CLSID 0x40000000
+struct decoder_block
+{
+    ULONGLONG offset;
+    ULONGLONG length;
+    DWORD options;
+    GUID reader_clsid;
+};
+
+struct decoder
+{
+    const struct decoder_funcs *vtable;
+};
+
+struct decoder_funcs
+{
+    HRESULT (CDECL *initialize)(struct decoder* This, IStream *stream, struct decoder_stat *st);
+    HRESULT (CDECL *get_frame_info)(struct decoder* This, UINT frame, struct decoder_frame *info);
+    HRESULT (CDECL *copy_pixels)(struct decoder* This, UINT frame, const WICRect *prc,
+        UINT stride, UINT buffersize, BYTE *buffer);
+    HRESULT (CDECL *get_metadata_blocks)(struct decoder* This, UINT frame, UINT *count,
+        struct decoder_block **blocks);
+    HRESULT (CDECL *get_color_context)(struct decoder* This, UINT frame, UINT num,
+        BYTE **data, DWORD *datasize);
+    void (CDECL *destroy)(struct decoder* This);
+};
+
+HRESULT CDECL stream_getsize(IStream *stream, ULONGLONG *size);
+HRESULT CDECL stream_read(IStream *stream, void *buffer, ULONG read, ULONG *bytes_read);
+HRESULT CDECL stream_seek(IStream *stream, LONGLONG ofs, DWORD origin, ULONGLONG *new_position);
+HRESULT CDECL stream_write(IStream *stream, const void *buffer, ULONG write, ULONG *bytes_written);
+
+struct win32_funcs
+{
+    HRESULT (CDECL *stream_getsize)(IStream *stream, ULONGLONG *size);
+    HRESULT (CDECL *stream_read)(IStream *stream, void *buffer, ULONG read, ULONG *bytes_read);
+    HRESULT (CDECL *stream_seek)(IStream *stream, LONGLONG ofs, DWORD origin, ULONGLONG *new_position);
+    HRESULT (CDECL *stream_write)(IStream *stream, const void *buffer, ULONG write, ULONG *bytes_written);
+};
+
+HRESULT CDECL decoder_create(const CLSID *decoder_clsid, struct decoder_info *info, struct decoder **result);
+HRESULT CDECL decoder_initialize(struct decoder *This, IStream *stream, struct decoder_stat *st);
+HRESULT CDECL decoder_get_frame_info(struct decoder* This, UINT frame, struct decoder_frame *info);
+HRESULT CDECL decoder_copy_pixels(struct decoder* This, UINT frame, const WICRect *prc,
+    UINT stride, UINT buffersize, BYTE *buffer);
+HRESULT CDECL decoder_get_metadata_blocks(struct decoder* This, UINT frame, UINT *count,
+    struct decoder_block **blocks);
+HRESULT CDECL decoder_get_color_context(struct decoder* This, UINT frame, UINT num,
+    BYTE **data, DWORD *datasize);
+void CDECL decoder_destroy(struct decoder *This);
+
+struct encoder_funcs;
+
+/* sync with encoder_option_properties */
+enum encoder_option
+{
+    ENCODER_OPTION_INTERLACE,
+    ENCODER_OPTION_FILTER,
+    ENCODER_OPTION_COMPRESSION_METHOD,
+    ENCODER_OPTION_COMPRESSION_QUALITY,
+    ENCODER_OPTION_IMAGE_QUALITY,
+    ENCODER_OPTION_BITMAP_TRANSFORM,
+    ENCODER_OPTION_LUMINANCE,
+    ENCODER_OPTION_CHROMINANCE,
+    ENCODER_OPTION_YCRCB_SUBSAMPLING,
+    ENCODER_OPTION_SUPPRESS_APP0,
+    ENCODER_OPTION_END
+};
+
+#define ENCODER_FLAGS_MULTI_FRAME 0x1
+#define ENCODER_FLAGS_ICNS_SIZE 0x2
+#define ENCODER_FLAGS_SUPPORTS_METADATA 0x4
+
+struct encoder_info
+{
+    DWORD flags;
+    GUID container_format;
+    CLSID clsid;
+    DWORD encoder_options[7];
+};
+
+struct encoder_frame
+{
+    GUID pixel_format;
+    UINT width, height;
+    UINT bpp;
+    BOOL indexed;
+    DOUBLE dpix, dpiy;
+    DWORD num_colors;
+    WICColor palette[256];
+    /* encoder options */
+    BOOL interlace;
+    DWORD filter;
+};
+
+struct encoder
+{
+    const struct encoder_funcs *vtable;
+};
+
+struct encoder_funcs
+{
+    HRESULT (CDECL *initialize)(struct encoder* This, IStream *stream);
+    HRESULT (CDECL *get_supported_format)(struct encoder* This, GUID *pixel_format, DWORD *bpp, BOOL *indexed);
+    HRESULT (CDECL *create_frame)(struct encoder* This, const struct encoder_frame *frame);
+    HRESULT (CDECL *write_lines)(struct encoder* This, BYTE *data, DWORD line_count, DWORD stride);
+    HRESULT (CDECL *commit_frame)(struct encoder* This);
+    HRESULT (CDECL *commit_file)(struct encoder* This);
+    void (CDECL *destroy)(struct encoder* This);
+};
+
+HRESULT CDECL encoder_initialize(struct encoder* This, IStream *stream);
+HRESULT CDECL encoder_get_supported_format(struct encoder* This, GUID *pixel_format, DWORD *bpp, BOOL *indexed);
+HRESULT CDECL encoder_create_frame(struct encoder* This, const struct encoder_frame *frame);
+HRESULT CDECL encoder_write_lines(struct encoder* This, BYTE *data, DWORD line_count, DWORD stride);
+HRESULT CDECL encoder_commit_frame(struct encoder* This);
+HRESULT CDECL encoder_commit_file(struct encoder* This);
+void CDECL encoder_destroy(struct encoder* This);
+
+HRESULT CDECL png_decoder_create(struct decoder_info *info, struct decoder **result);
+HRESULT CDECL tiff_decoder_create(struct decoder_info *info, struct decoder **result);
+HRESULT CDECL jpeg_decoder_create(struct decoder_info *info, struct decoder **result);
+
+HRESULT CDECL png_encoder_create(struct encoder_info *info, struct encoder **result);
+HRESULT CDECL tiff_encoder_create(struct encoder_info *info, struct encoder **result);
+HRESULT CDECL jpeg_encoder_create(struct encoder_info *info, struct encoder **result);
+HRESULT CDECL icns_encoder_create(struct encoder_info *info, struct encoder **result);
+
+struct unix_funcs
+{
+    HRESULT (CDECL *decoder_create)(const CLSID *decoder_clsid, struct decoder_info *info, struct decoder **result);
+    HRESULT (CDECL *decoder_initialize)(struct decoder *This, IStream *stream, struct decoder_stat *st);
+    HRESULT (CDECL *decoder_get_frame_info)(struct decoder* This, UINT frame, struct decoder_frame *info);
+    HRESULT (CDECL *decoder_copy_pixels)(struct decoder* This, UINT frame, const WICRect *prc,
+        UINT stride, UINT buffersize, BYTE *buffer);
+    HRESULT (CDECL *decoder_get_metadata_blocks)(struct decoder* This, UINT frame, UINT *count,
+        struct decoder_block **blocks);
+    HRESULT (CDECL *decoder_get_color_context)(struct decoder* This, UINT frame, UINT num,
+        BYTE **data, DWORD *datasize);
+    void (CDECL *decoder_destroy)(struct decoder* This);
+    HRESULT (CDECL *encoder_create)(const CLSID *encoder_clsid, struct encoder_info *info, struct encoder **result);
+    HRESULT (CDECL *encoder_initialize)(struct encoder* This, IStream *stream);
+    HRESULT (CDECL *encoder_get_supported_format)(struct encoder* This, GUID *pixel_format, DWORD *bpp, BOOL *indexed);
+    HRESULT (CDECL *encoder_create_frame)(struct encoder* This, const struct encoder_frame *frame);
+    HRESULT (CDECL *encoder_write_lines)(struct encoder* This, BYTE *data, DWORD line_count, DWORD stride);
+    HRESULT (CDECL *encoder_commit_frame)(struct encoder* This);
+    HRESULT (CDECL *encoder_commit_file)(struct encoder* This);
+    void (CDECL *encoder_destroy)(struct encoder* This);
+};
+
+HRESULT get_unix_decoder(const CLSID *decoder_clsid, struct decoder_info *info, struct decoder **result);
+HRESULT get_unix_encoder(const CLSID *encoder_clsid, struct encoder_info *info, struct encoder **result);
+
+extern HRESULT CommonDecoder_CreateInstance(struct decoder *decoder,
+    const struct decoder_info *decoder_info, REFIID iid, void** ppv) DECLSPEC_HIDDEN;
+
+extern HRESULT CommonEncoder_CreateInstance(struct encoder *encoder,
+    const struct encoder_info *encoder_info, REFIID iid, void** ppv) DECLSPEC_HIDDEN;
 
 #endif /* WINCODECS_PRIVATE_H */

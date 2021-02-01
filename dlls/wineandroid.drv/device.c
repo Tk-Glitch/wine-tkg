@@ -258,9 +258,11 @@ static inline void wrap_java_call(void)   { __asm__( "mov %0,%%fs" :: "r" (java_
 static inline void unwrap_java_call(void) { __asm__( "mov %0,%%fs" :: "r" (orig_fs) ); }
 static inline void init_java_thread( JavaVM *java_vm )
 {
+    java_fs = *p_java_gdt_sel;
     __asm__( "mov %%fs,%0" : "=r" (orig_fs) );
+    __asm__( "mov %0,%%fs" :: "r" (java_fs) );
     (*java_vm)->AttachCurrentThread( java_vm, &jni_env, 0 );
-    __asm__( "mov %%fs,%0" : "=r" (java_fs) );
+    if (!*p_java_gdt_sel) __asm__( "mov %%fs,%0" : "=r" (java_fs) );
     __asm__( "mov %0,%%fs" :: "r" (orig_fs) );
 }
 
@@ -687,7 +689,7 @@ static int status_to_android_error( NTSTATUS status )
 
 static jobject load_java_method( jmethodID *method, const char *name, const char *args )
 {
-    jobject object = wine_get_java_object();
+    jobject object = *p_java_object;
 
     if (!*method)
     {
@@ -1163,7 +1165,7 @@ static DWORD CALLBACK device_thread( void *arg )
 
     TRACE( "starting process %x\n", GetCurrentProcessId() );
 
-    if (!(java_vm = wine_get_java_vm())) return 0;  /* not running under Java */
+    if (!(java_vm = *p_java_vm)) return 0;  /* not running under Java */
 
     init_java_thread( java_vm );
 

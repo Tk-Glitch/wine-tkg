@@ -17,8 +17,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 #include <math.h>
 
@@ -722,6 +720,15 @@ static HRESULT copypixels_to_32bppBGRA(struct FormatConverter *This, const WICRe
                     pbBuffer[cbStride*y+4*x+3] = 0xff;
         }
         return S_OK;
+    case format_32bppRGBA:
+        if (prc)
+        {
+            HRESULT res;
+            res = IWICBitmapSource_CopyPixels(This->source, prc, cbStride, cbBufferSize, pbBuffer);
+            if (FAILED(res)) return res;
+            reverse_bgr8(4, pbBuffer, prc->Width, prc->Height, cbStride);
+        }
+        return S_OK;
     case format_32bppBGRA:
         if (prc)
             return IWICBitmapSource_CopyPixels(This->source, prc, cbStride, cbBufferSize, pbBuffer);
@@ -859,6 +866,7 @@ static HRESULT copypixels_to_32bppBGRA(struct FormatConverter *This, const WICRe
         }
         return S_OK;
     default:
+        FIXME("Unimplemented conversion path!\n");
         return WINCODEC_ERR_UNSUPPORTEDOPERATION;
     }
 }

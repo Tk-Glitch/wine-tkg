@@ -96,12 +96,9 @@ extern void cleanup_clipboard_thread( struct thread *thread );
 
 /* hook functions */
 
-struct hook;
-extern void remove_hook( struct hook *hook );
 extern void remove_thread_hooks( struct thread *thread );
 extern unsigned int get_active_hooks(void);
-extern struct hook *get_first_global_hook( int id );
-extern struct thread *get_hook_thread( struct hook *hook );
+extern struct thread *get_first_global_hook( int id );
 
 /* queue functions */
 

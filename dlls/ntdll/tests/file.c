@@ -150,15 +150,35 @@ static void create_file_test(void)
     static const char testdata[] = "Hello World";
     static const WCHAR sepW[] = {'\\',0};
     FILE_NETWORK_OPEN_INFORMATION info;
+    UNICODE_STRING nameW, null_string;
     NTSTATUS status;
     HANDLE dir, file;
     WCHAR path[MAX_PATH], temp[MAX_PATH];
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
-    UNICODE_STRING nameW;
     LARGE_INTEGER offset;
     char buf[32];
     DWORD ret;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = NULL;
+    attr.ObjectName = &null_string;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    null_string.Buffer = NULL;
+    null_string.Length = 256;
+
+    /* try various open modes and options on directories */
+    status = pNtCreateFile( &dir, GENERIC_READ|GENERIC_WRITE, &attr, &io, NULL, 0,
+                            FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_OPEN, FILE_DIRECTORY_FILE, NULL, 0 );
+    ok( status == STATUS_ACCESS_VIOLATION, "Got unexpected status %#x.\n",  status );
+
+    null_string.Length = 0;
+    status = pNtCreateFile( &dir, GENERIC_READ|GENERIC_WRITE, &attr, &io, NULL, 0,
+                            FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_OPEN, FILE_DIRECTORY_FILE, NULL, 0 );
+    ok( status == STATUS_OBJECT_PATH_SYNTAX_BAD, "Got unexpected status %#x.\n",  status );
 
     GetCurrentDirectoryW( MAX_PATH, path );
     pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
@@ -424,6 +444,31 @@ static void open_file_test(void)
     ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
     CloseHandle( handle );
     CloseHandle( dir );
+
+    attr.RootDirectory = 0;
+    wcscat( path, L"\\cmd.exe" );
+    pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
+    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
+    ok( status == STATUS_NOT_A_DIRECTORY, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    CloseHandle( handle );
+    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_NON_DIRECTORY_FILE );
+    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    CloseHandle( handle );
+    pRtlFreeUnicodeString( &nameW );
+
+    wcscat( path, L"\\cmd.exe" );
+    pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
+    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
+    todo_wine
+    ok( status == STATUS_OBJECT_PATH_NOT_FOUND, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_NON_DIRECTORY_FILE );
+    todo_wine
+    ok( status == STATUS_OBJECT_PATH_NOT_FOUND, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    pRtlFreeUnicodeString( &nameW );
 
     GetTempPathW( MAX_PATH, path );
     lstrcatW( path, testdirW );
@@ -1353,6 +1398,18 @@ static void test_file_basic_information(void)
     res = pNtSetInformationFile(h, &io, &fbi2, sizeof fbi2, FileBasicInformation);
     ok ( res == STATUS_SUCCESS, "can't set system attribute, NtSetInformationFile returned %x\n", res );
     ok ( U(io).Status == STATUS_SUCCESS, "can't set system attribute, io.Status is %x\n", U(io).Status );
+
+    memset(&fbi2, 0, sizeof(fbi2));
+    fbi2.LastAccessTime.QuadPart = 0x200deadcafebeef;
+    U(io).Status = 0xdeadbeef;
+    res = pNtSetInformationFile(h, &io, &fbi2, sizeof(fbi2), FileBasicInformation);
+    ok ( res == STATUS_SUCCESS, "can't set system attribute, NtSetInformationFile returned %x\n", res );
+    ok ( U(io).Status == STATUS_SUCCESS, "can't set system attribute, io.Status is %x\n", U(io).Status );
+    res = pNtQueryInformationFile(h, &io, &fbi, sizeof(fbi), FileBasicInformation);
+    ok ( res == STATUS_SUCCESS, "can't get system attribute, NtQueryInformationFile returned %x\n", res );
+    ok ( U(io).Status == STATUS_SUCCESS, "can't get system attribute, io.Status is %x\n", U(io).Status );
+    ok ( fbi2.LastAccessTime.QuadPart == fbi.LastAccessTime.QuadPart,
+         "large access time set/get does not match.\n" );
 
     memset(&fbi2, 0, sizeof(fbi2));
     res = pNtQueryInformationFile(h, &io, &fbi2, sizeof fbi2, FileBasicInformation);
@@ -3101,16 +3158,17 @@ todo_wine
     fileDeleted = RemoveDirectoryA( buffer );
     ok( fileDeleted, "Directory should have been deleted\n" );
     fileDeleted = GetFileAttributesA( buffer ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
-todo_wine
     ok( !fileDeleted, "Directory shouldn't have been deleted\n" );
     res = nt_get_file_attrs( buffer, &fdi2 );
 todo_wine
     ok( res == STATUS_DELETE_PENDING, "got %#x\n", res );
     /* can't open the deleted directory */
     handle2 = CreateFileA(buffer, DELETE, FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+todo_wine
     ok( handle2 == INVALID_HANDLE_VALUE, "CreateFile should fail\n" );
 todo_wine
     ok(GetLastError() == ERROR_ACCESS_DENIED, "got %u\n", GetLastError());
+    if (handle2 != INVALID_HANDLE_VALUE) CloseHandle( handle2 );
     CloseHandle( handle );
     fileDeleted = GetFileAttributesA( buffer ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
     ok( fileDeleted, "Directory should have been deleted\n" );
@@ -3872,7 +3930,6 @@ static void test_file_mode(void)
         UNICODE_STRING *file_name;
         ULONG options;
         ULONG mode;
-        BOOL todo;
     } option_tests[] = {
         { &file_name, 0, 0 },
         { &file_name, FILE_NON_DIRECTORY_FILE, 0 },
@@ -3886,7 +3943,7 @@ static void test_file_mode(void)
         { &pipe_dev_name, 0, 0 },
         { &pipe_dev_name, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_ALERT },
         { &mailslot_dev_name, 0, 0 },
-        { &mailslot_dev_name, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_ALERT, TRUE },
+        { &mailslot_dev_name, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_ALERT },
         { &mountmgr_dev_name, 0, 0 },
         { &mountmgr_dev_name, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_ALERT }
     };
@@ -3938,7 +3995,6 @@ static void test_file_mode(void)
         memset(&mode, 0xcc, sizeof(mode));
         status = pNtQueryInformationFile(file, &io, &mode, sizeof(mode), FileModeInformation);
         ok(status == STATUS_SUCCESS, "[%u] can't get FileModeInformation: %x\n", i, status);
-        todo_wine_if(option_tests[i].todo)
         ok(mode.Mode == option_tests[i].mode, "[%u] Mode = %x, expected %x\n",
            i, mode.Mode, option_tests[i].mode);
 
@@ -5213,6 +5269,71 @@ static void test_file_readonly_access(void)
     DeleteFileW(path);
 }
 
+static void test_mailslot_name(void)
+{
+    char buffer[1024] = {0};
+    const FILE_NAME_INFORMATION *name = (const FILE_NAME_INFORMATION *)buffer;
+    HANDLE server, client, device;
+    IO_STATUS_BLOCK io;
+    NTSTATUS ret;
+
+    server = CreateMailslotA( "\\\\.\\mailslot\\winetest", 100, 1000, NULL );
+    ok(server != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
+
+    ret = NtQueryInformationFile( server, &io, buffer, 0, FileNameInformation );
+    ok(ret == STATUS_INFO_LENGTH_MISMATCH, "got %#x\n", ret);
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = NtQueryInformationFile( server, &io, buffer,
+            offsetof(FILE_NAME_INFORMATION, FileName[5]), FileNameInformation );
+    todo_wine ok(ret == STATUS_BUFFER_OVERFLOW, "got %#x\n", ret);
+    if (ret == STATUS_BUFFER_OVERFLOW)
+    {
+        ok(name->FileNameLength == 18, "got length %u\n", name->FileNameLength);
+        ok(!memcmp(name->FileName, L"\\wine", 10), "got %s\n",
+                debugstr_wn(name->FileName, name->FileNameLength / sizeof(WCHAR)));
+    }
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = NtQueryInformationFile( server, &io, buffer, sizeof(buffer), FileNameInformation );
+    todo_wine ok(!ret, "got %#x\n", ret);
+    if (!ret)
+    {
+        ok(name->FileNameLength == 18, "got length %u\n", name->FileNameLength);
+        ok(!memcmp(name->FileName, L"\\winetest", 18), "got %s\n",
+                debugstr_wn(name->FileName, name->FileNameLength / sizeof(WCHAR)));
+    }
+
+    client = CreateFileA( "\\\\.\\mailslot\\winetest", 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL );
+    ok(client != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
+
+    ret = NtQueryInformationFile( client, &io, buffer, 0, FileNameInformation );
+    ok(ret == STATUS_INFO_LENGTH_MISMATCH, "got %#x\n", ret);
+
+    ret = NtQueryInformationFile( client, &io, buffer, sizeof(buffer), FileNameInformation );
+    todo_wine ok(ret == STATUS_INVALID_PARAMETER || !ret /* win8+ */, "got %#x\n", ret);
+    if (!ret)
+    {
+        ok(name->FileNameLength == 18, "got length %u\n", name->FileNameLength);
+        ok(!memcmp(name->FileName, L"\\winetest", 18), "got %s\n",
+                debugstr_wn(name->FileName, name->FileNameLength / sizeof(WCHAR)));
+    }
+
+    CloseHandle( server );
+    CloseHandle( client );
+
+    device = CreateFileA("\\\\.\\mailslot", 0, 0, NULL, OPEN_EXISTING, 0, NULL);
+    ok(device != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
+
+    ret = NtQueryInformationFile( device, &io, buffer, 0, FileNameInformation );
+    ok(ret == STATUS_INFO_LENGTH_MISMATCH, "got %#x\n", ret);
+
+    ret = NtQueryInformationFile( device, &io, buffer, sizeof(buffer), FileNameInformation );
+    todo_wine ok(ret == STATUS_INVALID_PARAMETER, "got %#x\n", ret);
+
+    CloseHandle( device );
+}
+
 static INT build_reparse_buffer(const WCHAR *filename, ULONG tag, ULONG flags,
                                 REPARSE_DATA_BUFFER **pbuffer)
 {
@@ -5275,6 +5396,7 @@ static void test_reparse_points(void)
     static WCHAR volW[] = {'c',':','\\',0};
     REPARSE_GUID_DATA_BUFFER guid_buffer;
     static const WCHAR dotW[] = {'.',0};
+    FILE_ATTRIBUTE_TAG_INFORMATION info;
     REPARSE_DATA_BUFFER *buffer = NULL;
     DWORD dwret, dwLen, dwFlags, err;
     WIN32_FILE_ATTRIBUTE_DATA fad;
@@ -5284,6 +5406,7 @@ static void test_reparse_points(void)
     IO_STATUS_BLOCK iosb;
     UNICODE_STRING nameW;
     TOKEN_PRIVILEGES tp;
+    NTSTATUS status;
     WCHAR *dest;
     LUID luid;
     BOOL bret;
@@ -5458,10 +5581,14 @@ static void test_reparse_points(void)
     handle = CreateFileW(reparse_path, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING,
                          FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
     ok(handle != INVALID_HANDLE_VALUE, "Failed to open symlink file.\n");
-    todo_wine ok(GetFileSize(handle, NULL) == 0, "symlink size is not zero\n");
+    ok(GetFileSize(handle, NULL) == 0, "symlink size is not zero\n");
     bret = ReadFile(handle, &buf, sizeof(buf), &dwLen, NULL);
     ok(bret, "Failed to read data from the symlink.\n");
-    todo_wine ok(dwLen == 0, "Length of symlink data is not zero.\n");
+    ok(dwLen == 0, "Length of symlink data is not zero.\n");
+    memset(&info, 0x0, sizeof(info));
+    status = pNtQueryInformationFile(handle, &iosb, &info, sizeof(info), FileAttributeTagInformation);
+    ok( status == STATUS_SUCCESS, "got %#x\n", status );
+    ok( info.ReparseTag == IO_REPARSE_TAG_SYMLINK, "got reparse tag %#x\n", info.ReparseTag );
     CloseHandle(handle);
 
     /* Check the size/data of the symlink target */
@@ -5668,4 +5795,5 @@ START_TEST(file)
     test_query_ea();
     test_flush_buffers_file();
     test_reparse_points();
+    test_mailslot_name();
 }

@@ -42,20 +42,8 @@
 # include <stdint.h>
 #endif
 
-#include "wine/library.h"
 #include "wine/list.h"
-
-struct reserved_area
-{
-    struct list entry;
-    void       *base;
-    size_t      size;
-};
-
-static struct list reserved_areas = LIST_INIT(reserved_areas);
-#ifndef __APPLE__
-static const unsigned int granularity_mask = 0xffff;  /* reserved areas have 64k granularity */
-#endif
+#include "wine/asm.h"
 
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0
@@ -230,6 +218,21 @@ void *wine_anon_mmap( void *start, size_t size, int prot, int flags )
     return mmap( start, size, prot, flags, get_fdzero(), 0 );
 }
 
+#ifdef __ASM_OBSOLETE
+
+struct reserved_area
+{
+    struct list entry;
+    void       *base;
+    size_t      size;
+};
+
+static struct list reserved_areas = LIST_INIT(reserved_areas);
+#ifndef __APPLE__
+static const unsigned int granularity_mask = 0xffff;  /* reserved areas have 64k granularity */
+#endif
+
+void wine_mmap_add_reserved_area_obsolete( void *addr, size_t size );
 
 #ifdef __APPLE__
 
@@ -280,7 +283,7 @@ static inline void reserve_area( void *addr, void *end )
             ret = mach_vm_map( mach_task_self(), &alloc_address, hole_size, 0, VM_FLAGS_FIXED,
                                MEMORY_OBJECT_NULL, 0, 0, PROT_NONE, VM_PROT_ALL, VM_INHERIT_COPY );
             if (!ret)
-                wine_mmap_add_reserved_area( (void*)hole_address, hole_size );
+                wine_mmap_add_reserved_area_obsolete( (void*)hole_address, hole_size );
             else if (ret == KERN_NO_SPACE)
             {
                 /* something filled (part of) the hole before we could.
@@ -339,7 +342,7 @@ static inline void reserve_area( void *addr, void *end )
         i &= ~granularity_mask;
         if (i && mmap( addr, i, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANON | MAP_NORESERVE,
                        get_fdzero(), 0 ) != (void *)-1)
-            wine_mmap_add_reserved_area( addr, i );
+            wine_mmap_add_reserved_area_obsolete( addr, i );
 
         i += granularity_mask + 1;
         if ((char *)addr + i < (char *)addr) break;  /* overflow */
@@ -352,7 +355,7 @@ static inline void reserve_area( void *addr, void *end )
 
     if (mmap_reserve( addr, size ))
     {
-        wine_mmap_add_reserved_area( addr, size );
+        wine_mmap_add_reserved_area_obsolete( addr, size );
         return;
     }
     size = (size / 2) & ~granularity_mask;
@@ -409,7 +412,7 @@ static inline void reserve_dos_area(void)
     }
     /* now add first page with MAP_FIXED */
     wine_anon_mmap( NULL, first_page, PROT_NONE, MAP_NORESERVE|MAP_FIXED );
-    wine_mmap_add_reserved_area( NULL, dos_area_size );
+    wine_mmap_add_reserved_area_obsolete( NULL, dos_area_size );
 }
 #endif
 
@@ -500,7 +503,7 @@ void mmap_init(void)
  * Note: the reserved areas functions are not reentrant, caller is
  * responsible for proper locking.
  */
-void wine_mmap_add_reserved_area( void *addr, size_t size )
+void wine_mmap_add_reserved_area_obsolete( void *addr, size_t size )
 {
     struct reserved_area *area;
     struct list *ptr;
@@ -559,7 +562,7 @@ void wine_mmap_add_reserved_area( void *addr, size_t size )
  * Note: the reserved areas functions are not reentrant, caller is
  * responsible for proper locking.
  */
-void wine_mmap_remove_reserved_area( void *addr, size_t size, int unmap )
+void wine_mmap_remove_reserved_area_obsolete( void *addr, size_t size, int unmap )
 {
     struct reserved_area *area;
     struct list *ptr;
@@ -634,7 +637,7 @@ void wine_mmap_remove_reserved_area( void *addr, size_t size, int unmap )
  * Note: the reserved areas functions are not reentrant, caller is
  * responsible for proper locking.
  */
-int wine_mmap_is_in_reserved_area( void *addr, size_t size )
+int wine_mmap_is_in_reserved_area_obsolete( void *addr, size_t size )
 {
     struct reserved_area *area;
     struct list *ptr;
@@ -661,8 +664,8 @@ int wine_mmap_is_in_reserved_area( void *addr, size_t size )
  * Note: the reserved areas functions are not reentrant, caller is
  * responsible for proper locking.
  */
-int wine_mmap_enum_reserved_areas( int (*enum_func)(void *base, size_t size, void *arg), void *arg,
-                                   int top_down )
+int wine_mmap_enum_reserved_areas_obsolete( int (*enum_func)(void *base, size_t size, void *arg), void *arg,
+                                            int top_down )
 {
     int ret = 0;
     struct list *ptr;
@@ -685,3 +688,10 @@ int wine_mmap_enum_reserved_areas( int (*enum_func)(void *base, size_t size, voi
     }
     return ret;
 }
+
+__ASM_OBSOLETE(wine_mmap_add_reserved_area);
+__ASM_OBSOLETE(wine_mmap_remove_reserved_area);
+__ASM_OBSOLETE(wine_mmap_is_in_reserved_area);
+__ASM_OBSOLETE(wine_mmap_enum_reserved_areas);
+
+#endif /* __ASM_OBSOLETE */

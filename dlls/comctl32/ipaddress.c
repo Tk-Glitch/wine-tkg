@@ -354,7 +354,7 @@ static BOOL IPADDRESS_SetRange (IPADDRESS_INFO *infoPtr, int index, WORD range)
 }
 
 
-static void IPADDRESS_ClearAddress (const IPADDRESS_INFO *infoPtr)
+static LRESULT IPADDRESS_ClearAddress (const IPADDRESS_INFO *infoPtr)
 {
     int i;
 
@@ -362,6 +362,8 @@ static void IPADDRESS_ClearAddress (const IPADDRESS_INFO *infoPtr)
 
     for (i = 0; i < 4; i++)
         SetWindowTextW (infoPtr->Part[i].EditHwnd, L"");
+
+    return 1;
 }
 
 
@@ -387,13 +389,16 @@ static LRESULT IPADDRESS_SetAddress (const IPADDRESS_INFO *infoPtr, DWORD ip_add
 }
 
 
-static void IPADDRESS_SetFocusToField (const IPADDRESS_INFO *infoPtr, INT index)
+static LRESULT IPADDRESS_SetFocusToField (const IPADDRESS_INFO *infoPtr, INT index)
 {
-    TRACE("(index=%d)\n", index);
+    TRACE("%d\n", index);
 
     if (index > 3 || index < 0) index=0;
 
+    SendMessageW (infoPtr->Part[index].EditHwnd, EM_SETSEL, 0, -1);
     SetFocus (infoPtr->Part[index].EditHwnd);
+
+    return 1;
 }
 
 
@@ -611,8 +616,7 @@ IPADDRESS_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             return 0;
 
         case IPM_CLEARADDRESS:
-            IPADDRESS_ClearAddress (infoPtr);
-	    break;
+            return IPADDRESS_ClearAddress (infoPtr);
 
         case IPM_SETADDRESS:
             return IPADDRESS_SetAddress (infoPtr, (DWORD)lParam);
@@ -623,12 +627,15 @@ IPADDRESS_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	case IPM_SETRANGE:
 	    return IPADDRESS_SetRange (infoPtr, (int)wParam, (WORD)lParam);
 
-	case IPM_SETFOCUS:
-	    IPADDRESS_SetFocusToField (infoPtr, (int)wParam);
-	    break;
+        case IPM_SETFOCUS:
+            return IPADDRESS_SetFocusToField (infoPtr, (int)wParam);
 
 	case IPM_ISBLANK:
 	    return IPADDRESS_IsBlank (infoPtr);
+
+        case WM_SETFOCUS:
+            IPADDRESS_SetFocusToField (infoPtr, 0);
+            break;
 
 	default:
 	    if ((uMsg >= WM_USER) && (uMsg < WM_APP) && !COMCTL32_IsReflectedMessage(uMsg))

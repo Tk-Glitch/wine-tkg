@@ -313,10 +313,9 @@ const struct dinput_device mouse_device = {
  *	SysMouseA (DInput Mouse support)
  */
 
-/* low-level mouse hook */
 void dinput_mouse_rawinput_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam, RAWINPUT *ri )
 {
-    SysMouseImpl* This = impl_from_IDirectInputDevice8A(iface);
+    SysMouseImpl* This = impl_from_IDirectInputDevice8A( iface );
     POINT rel, pt;
     DWORD seq;
     int i, wdata = 0;
@@ -330,21 +329,21 @@ void dinput_mouse_rawinput_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPA
         RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP
     };
 
-    TRACE("(%p) wp %08lx, lp %08lx\n", iface, wparam, lparam);
+    TRACE( "(%p) wp %08lx, lp %08lx\n", iface, wparam, lparam );
 
     if (ri->data.mouse.usFlags & MOUSE_VIRTUAL_DESKTOP)
         FIXME( "Unimplemented MOUSE_VIRTUAL_DESKTOP flag\n" );
     if (ri->data.mouse.usFlags & MOUSE_ATTRIBUTES_CHANGED)
         FIXME( "Unimplemented MOUSE_ATTRIBUTES_CHANGED flag\n" );
 
-    EnterCriticalSection(&This->base.crit);
+    EnterCriticalSection( &This->base.crit );
     seq = This->base.dinput->evsequence++;
 
     rel.x = ri->data.mouse.lLastX;
     rel.y = ri->data.mouse.lLastY;
     if (ri->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)
     {
-        GetCursorPos(&pt);
+        GetCursorPos( &pt );
         rel.x -= pt.x;
         rel.y -= pt.y;
     }
@@ -363,12 +362,12 @@ void dinput_mouse_rawinput_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPA
     }
 
     if (rel.x)
-        queue_event(iface, DIDFT_MAKEINSTANCE(WINE_MOUSE_X_AXIS_INSTANCE) | DIDFT_RELAXIS,
-                    pt.x, GetCurrentTime(), seq);
+        queue_event( iface, DIDFT_MAKEINSTANCE(WINE_MOUSE_X_AXIS_INSTANCE) | DIDFT_RELAXIS,
+                     pt.x, GetCurrentTime(), seq );
 
     if (rel.y)
-        queue_event(iface, DIDFT_MAKEINSTANCE(WINE_MOUSE_Y_AXIS_INSTANCE) | DIDFT_RELAXIS,
-                    pt.y, GetCurrentTime(), seq);
+        queue_event( iface, DIDFT_MAKEINSTANCE(WINE_MOUSE_Y_AXIS_INSTANCE) | DIDFT_RELAXIS,
+                     pt.y, GetCurrentTime(), seq );
 
     if (rel.x || rel.y)
     {
@@ -380,8 +379,8 @@ void dinput_mouse_rawinput_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPA
     if (ri->data.mouse.usButtonFlags & RI_MOUSE_WHEEL)
     {
         This->m_state.lZ += (wdata = (SHORT)ri->data.mouse.usButtonData);
-        queue_event(iface, DIDFT_MAKEINSTANCE(WINE_MOUSE_Z_AXIS_INSTANCE) | DIDFT_RELAXIS,
-                    wdata, GetCurrentTime(), seq);
+        queue_event( iface, DIDFT_MAKEINSTANCE(WINE_MOUSE_Z_AXIS_INSTANCE) | DIDFT_RELAXIS,
+                     wdata, GetCurrentTime(), seq );
     }
 
     for (i = 0; i < ARRAY_SIZE(mouse_button_flags); ++i)
@@ -389,14 +388,15 @@ void dinput_mouse_rawinput_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPA
         if (ri->data.mouse.usButtonFlags & mouse_button_flags[i])
         {
             This->m_state.rgbButtons[i / 2] = 0x80 - (i % 2) * 0x80;
-            queue_event(iface, DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + (i / 2)) | DIDFT_PSHBUTTON,
-                        This->m_state.rgbButtons[i / 2], GetCurrentTime(), seq);
+            queue_event( iface, DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE +(i / 2) ) | DIDFT_PSHBUTTON,
+                         This->m_state.rgbButtons[i / 2], GetCurrentTime(), seq );
         }
     }
 
-    LeaveCriticalSection(&This->base.crit);
+    LeaveCriticalSection( &This->base.crit );
 }
 
+/* low-level mouse hook */
 int dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam )
 {
     MSLLHOOKSTRUCT *hook = (MSLLHOOKSTRUCT *)lparam;
@@ -548,9 +548,6 @@ static HRESULT WINAPI SysMouseWImpl_Acquire(LPDIRECTINPUTDEVICE8W iface)
 
     if ((res = IDirectInputDevice2WImpl_Acquire(iface)) != DI_OK) return res;
 
-    dinput_hooks_insert_mouse(&This->base, This->base.use_raw_input);
-    check_dinput_hooks(iface, TRUE);
-
     /* Init the mouse state */
     GetCursorPos( &point );
     if (This->base.data_format.user_df->dwFlags & DIDF_ABSAXIS)
@@ -605,9 +602,6 @@ static HRESULT WINAPI SysMouseWImpl_Unacquire(LPDIRECTINPUTDEVICE8W iface)
 
     if ((res = IDirectInputDevice2WImpl_Unacquire(iface)) != DI_OK) return res;
 
-    dinput_hooks_remove_mouse(&This->base, This->base.use_raw_input);
-    check_dinput_hooks(iface, FALSE);
-
     if (This->base.dwCoopLevel & DISCL_EXCLUSIVE)
     {
         ClipCursor(NULL);
@@ -645,12 +639,6 @@ static HRESULT WINAPI SysMouseWImpl_GetDeviceState(LPDIRECTINPUTDEVICE8W iface, 
     if(This->base.acquired == 0) return DIERR_NOTACQUIRED;
 
     check_dinput_events();
-
-    if ((This->base.dwCoopLevel & DISCL_FOREGROUND) && This->base.win != GetForegroundWindow())
-    {
-        This->base.acquired = 0;
-        return DIERR_INPUTLOST;
-    }
 
     EnterCriticalSection(&This->base.crit);
     _dump_mouse_state(&This->m_state);

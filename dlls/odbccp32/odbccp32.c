@@ -338,10 +338,40 @@ fail:
     return FALSE;
 }
 
+static WORD map_request(WORD request)
+{
+    switch (request)
+    {
+    case ODBC_ADD_DSN:
+    case ODBC_ADD_SYS_DSN:
+        return ODBC_ADD_DSN;
+
+    case ODBC_CONFIG_DSN:
+    case ODBC_CONFIG_SYS_DSN:
+        return ODBC_CONFIG_DSN;
+
+    case ODBC_REMOVE_DSN:
+    case ODBC_REMOVE_SYS_DSN:
+        return ODBC_REMOVE_DSN;
+
+    default:
+        FIXME("unhandled request %u\n", request);
+        return 0;
+    }
+}
+
+static UWORD get_config_mode(WORD request)
+{
+    if (request == ODBC_ADD_DSN || request == ODBC_CONFIG_DSN || request == ODBC_REMOVE_DSN) return ODBC_USER_DSN;
+    return ODBC_SYSTEM_DSN;
+}
+
 BOOL WINAPI SQLConfigDataSourceW(HWND hwnd, WORD request, LPCWSTR driver, LPCWSTR attributes)
 {
     HMODULE mod;
     BOOL ret = FALSE;
+    UWORD config_mode_prev = config_mode;
+    WORD mapped_request;
 
     TRACE("%p, %d, %s, %s\n", hwnd, request, debugstr_w(driver), debugstr_w(attributes));
     if (TRACE_ON(odbc))
@@ -353,15 +383,23 @@ BOOL WINAPI SQLConfigDataSourceW(HWND hwnd, WORD request, LPCWSTR driver, LPCWST
 
     clear_errors();
 
+    mapped_request = map_request(request);
+    if (!mapped_request)
+        return FALSE;
+
     mod = load_config_driver(driver);
     if (!mod)
         return FALSE;
 
+    config_mode = get_config_mode(request);
+
     pConfigDSNW = (void*)GetProcAddress(mod, "ConfigDSNW");
     if(pConfigDSNW)
-        ret = pConfigDSNW(hwnd, request, driver, attributes);
+        ret = pConfigDSNW(hwnd, mapped_request, driver, attributes);
     else
         ERR("Failed to find ConfigDSNW\n");
+
+    config_mode = config_mode_prev;
 
     if (!ret)
         push_error(ODBC_ERROR_REQUEST_FAILED, odbc_error_request_failed);
@@ -376,6 +414,8 @@ BOOL WINAPI SQLConfigDataSource(HWND hwnd, WORD request, LPCSTR driver, LPCSTR a
     HMODULE mod;
     BOOL ret = FALSE;
     WCHAR *driverW;
+    UWORD config_mode_prev = config_mode;
+    WORD mapped_request;
 
     TRACE("%p, %d, %s, %s\n", hwnd, request, debugstr_a(driver), debugstr_a(attributes));
 
@@ -387,6 +427,10 @@ BOOL WINAPI SQLConfigDataSource(HWND hwnd, WORD request, LPCSTR driver, LPCSTR a
     }
 
     clear_errors();
+
+    mapped_request = map_request(request);
+    if (!mapped_request)
+        return FALSE;
 
     driverW = heap_strdupAtoW(driver);
     if (!driverW)
@@ -402,11 +446,13 @@ BOOL WINAPI SQLConfigDataSource(HWND hwnd, WORD request, LPCSTR driver, LPCSTR a
         return FALSE;
     }
 
+    config_mode = get_config_mode(request);
+
     pConfigDSN = (void*)GetProcAddress(mod, "ConfigDSN");
     if (pConfigDSN)
     {
         TRACE("Calling ConfigDSN\n");
-        ret = pConfigDSN(hwnd, request, driver, attributes);
+        ret = pConfigDSN(hwnd, mapped_request, driver, attributes);
     }
     else
     {
@@ -418,10 +464,12 @@ BOOL WINAPI SQLConfigDataSource(HWND hwnd, WORD request, LPCSTR driver, LPCSTR a
 
             attr = SQLInstall_strdup_multi(attributes);
             if(attr)
-                ret = pConfigDSNW(hwnd, request, driverW, attr);
+                ret = pConfigDSNW(hwnd, mapped_request, driverW, attr);
             heap_free(attr);
         }
     }
+
+    config_mode = config_mode_prev;
 
     if (!ret)
         push_error(ODBC_ERROR_REQUEST_FAILED, odbc_error_request_failed);
@@ -1475,18 +1523,45 @@ BOOL WINAPI SQLRemoveDriverManager(LPDWORD pdwUsageCount)
 
 BOOL WINAPI SQLRemoveDSNFromIniW(LPCWSTR lpszDSN)
 {
+    HKEY hkey;
+
+    TRACE("%s\n", debugstr_w(lpszDSN));
+
     clear_errors();
-    FIXME("%s\n", debugstr_w(lpszDSN));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+
+    if (RegOpenKeyW(HKEY_LOCAL_MACHINE, L"Software\\ODBC\\ODBC.INI\\ODBC Data Sources", &hkey) == ERROR_SUCCESS)
+    {
+        RegDeleteValueW(hkey, lpszDSN);
+        RegCloseKey(hkey);
+    }
+
+    if (RegOpenKeyW(HKEY_LOCAL_MACHINE, L"Software\\ODBC\\ODBC.INI", &hkey) == ERROR_SUCCESS)
+    {
+        RegDeleteTreeW(hkey, lpszDSN);
+        RegCloseKey(hkey);
+    }
+
+    return TRUE;
 }
 
 BOOL WINAPI SQLRemoveDSNFromIni(LPCSTR lpszDSN)
 {
+    BOOL ret = FALSE;
+    WCHAR *dsn;
+
+    TRACE("%s\n", debugstr_a(lpszDSN));
+
     clear_errors();
-    FIXME("%s\n", debugstr_a(lpszDSN));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+
+    dsn = SQLInstall_strdup(lpszDSN);
+    if (dsn)
+        ret = SQLRemoveDSNFromIniW(dsn);
+    else
+        push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
+
+    heap_free(dsn);
+
+    return ret;
 }
 
 BOOL WINAPI SQLRemoveTranslatorW(const WCHAR *translator, DWORD *usage_count)
@@ -1616,16 +1691,102 @@ BOOL WINAPI SQLValidDSN(LPCSTR lpszDSN)
 
 BOOL WINAPI SQLWriteDSNToIniW(LPCWSTR lpszDSN, LPCWSTR lpszDriver)
 {
+    BOOL ret = FALSE;
+    HKEY hkey, hkeydriver;
+    WCHAR *filename = NULL;
+    DWORD size = 0, type;
+
+    TRACE("%s %s\n", debugstr_w(lpszDSN), debugstr_w(lpszDriver));
+
     clear_errors();
-    FIXME("%s %s\n", debugstr_w(lpszDSN), debugstr_w(lpszDriver));
-    return TRUE;
+
+    if (!SQLValidDSNW(lpszDSN))
+    {
+        push_error(ODBC_ERROR_INVALID_DSN, odbc_error_invalid_dsn);
+        return FALSE;
+    }
+
+    /* It doesn't matter if we cannot find the driver, windows just writes a blank value. */
+    if ((ret = RegOpenKeyW(HKEY_LOCAL_MACHINE, odbcini, &hkey)) == ERROR_SUCCESS)
+    {
+        HKEY hkeydriver;
+
+        if ((ret = RegOpenKeyW(hkey, lpszDriver, &hkeydriver)) == ERROR_SUCCESS)
+        {
+            ret = RegGetValueW(hkeydriver, NULL, L"driver", RRF_RT_REG_SZ, &type, NULL, &size);
+            /* Windows ignores the fact the driver key is missing */
+            if(ret == ERROR_SUCCESS && type == REG_SZ && size)
+            {
+                filename = HeapAlloc(GetProcessHeap(), 0, size);
+                if(!filename)
+                {
+                    RegCloseKey(hkeydriver);
+                    RegCloseKey(hkey);
+                    push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
+
+                    return FALSE;
+                }
+                ret = RegGetValueW(hkeydriver, NULL, L"driver", RRF_RT_REG_SZ, &type, filename, &size);
+            }
+
+            RegCloseKey(hkeydriver);
+        }
+
+        RegCloseKey(hkey);
+    }
+
+    if (RegCreateKeyW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ODBC\\ODBC.INI", &hkey) == ERROR_SUCCESS)
+    {
+        HKEY sources;
+
+        if (RegCreateKeyW(hkey, L"ODBC Data Sources", &sources) == ERROR_SUCCESS)
+        {
+            RegSetValueExW(sources, lpszDSN, 0, REG_SZ, (BYTE*)lpszDriver, (lstrlenW(lpszDriver)+1)*sizeof(WCHAR));
+            RegCloseKey(sources);
+        }
+
+        RegDeleteTreeW(hkey, lpszDSN);
+
+        if (RegCreateKeyW(hkey, lpszDSN, &hkeydriver) == ERROR_SUCCESS)
+        {
+            if (filename)
+                RegSetValueExW(sources, L"driver", 0, REG_SZ, (BYTE*)filename, (lstrlenW(filename)+1)*sizeof(WCHAR));
+            else
+                RegSetValueExW(sources, L"driver", 0, REG_SZ, (BYTE*)L"", sizeof(L""));
+
+            RegCloseKey(hkeydriver);
+            ret = TRUE;
+        }
+
+        RegCloseKey(hkey);
+    }
+
+    if (!ret)
+        push_error(ODBC_ERROR_REQUEST_FAILED, odbc_error_request_failed);
+
+    heap_free(filename);
+
+    return ret;
 }
 
 BOOL WINAPI SQLWriteDSNToIni(LPCSTR lpszDSN, LPCSTR lpszDriver)
 {
-    clear_errors();
-    FIXME("%s %s\n", debugstr_a(lpszDSN), debugstr_a(lpszDriver));
-    return TRUE;
+    BOOL ret = FALSE;
+    WCHAR *dsn, *driver;
+
+    TRACE("%s %s\n", debugstr_a(lpszDSN), debugstr_a(lpszDriver));
+
+    dsn = SQLInstall_strdup(lpszDSN);
+    driver = SQLInstall_strdup(lpszDriver);
+    if (dsn && driver)
+        ret = SQLWriteDSNToIniW(dsn, driver);
+    else
+        push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
+
+    heap_free(dsn);
+    heap_free(driver);
+
+    return ret;
 }
 
 BOOL WINAPI SQLWriteFileDSNW(LPCWSTR lpszFileName, LPCWSTR lpszAppName,

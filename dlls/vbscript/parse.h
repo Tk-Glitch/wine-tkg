@@ -140,7 +140,6 @@ typedef struct _statement_t {
 typedef struct {
     statement_t stat;
     call_expression_t *expr;
-    BOOL is_strict;
 } call_statement_t;
 
 typedef struct {
@@ -184,6 +183,7 @@ typedef struct _function_decl_t {
     const WCHAR *name;
     function_type_t type;
     BOOL is_public;
+    BOOL is_default;
     arg_decl_t *args;
     statement_t *body;
     struct _function_decl_t *next;

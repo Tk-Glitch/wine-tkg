@@ -82,17 +82,17 @@ msgstr "Informácie o podpore"
 #: dlls/shlwapi/shlwapi.rc:44 dlls/twain_32/twain.rc:32
 #: dlls/user32/user32.rc:83 dlls/user32/user32.rc:98 dlls/wininet/wininet.rc:62
 #: dlls/wininet/wininet.rc:82 dlls/winspool.drv/winspool.rc:42
-#: programs/net/net.rc:47 programs/notepad/notepad.rc:117
-#: programs/oleview/oleview.rc:161 programs/oleview/oleview.rc:174
-#: programs/progman/progman.rc:106 programs/progman/progman.rc:124
-#: programs/progman/progman.rc:142 programs/progman/progman.rc:158
-#: programs/progman/progman.rc:180 programs/progman/progman.rc:199
-#: programs/progman/progman.rc:216 programs/regedit/regedit.rc:296
-#: programs/regedit/regedit.rc:307 programs/regedit/regedit.rc:320
-#: programs/regedit/regedit.rc:336 programs/regedit/regedit.rc:349
-#: programs/regedit/regedit.rc:362 programs/taskmgr/taskmgr.rc:442
-#: programs/taskmgr/taskmgr.rc:517 programs/winecfg/winecfg.rc:213
-#: programs/winecfg/winecfg.rc:223 programs/wineconsole/wineconsole.rc:135
+#: programs/conhost/conhost.rc:126 programs/net/net.rc:47
+#: programs/notepad/notepad.rc:117 programs/oleview/oleview.rc:161
+#: programs/oleview/oleview.rc:174 programs/progman/progman.rc:106
+#: programs/progman/progman.rc:124 programs/progman/progman.rc:142
+#: programs/progman/progman.rc:158 programs/progman/progman.rc:180
+#: programs/progman/progman.rc:199 programs/progman/progman.rc:216
+#: programs/regedit/regedit.rc:296 programs/regedit/regedit.rc:307
+#: programs/regedit/regedit.rc:320 programs/regedit/regedit.rc:336
+#: programs/regedit/regedit.rc:349 programs/regedit/regedit.rc:362
+#: programs/taskmgr/taskmgr.rc:442 programs/taskmgr/taskmgr.rc:517
+#: programs/winecfg/winecfg.rc:213 programs/winecfg/winecfg.rc:223
 #: programs/winefile/winefile.rc:127 programs/winefile/winefile.rc:150
 #: programs/winefile/winefile.rc:180 programs/winemine/winemine.rc:73
 #: programs/winemine/winemine.rc:84 programs/winemine/winemine.rc:98
@@ -189,18 +189,18 @@ msgstr "&Inštalovať"
 #: dlls/shell32/shell32.rc:342 dlls/shlwapi/shlwapi.rc:45
 #: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:84 dlls/user32/user32.rc:99
 #: dlls/wininet/wininet.rc:63 dlls/wininet/wininet.rc:83
-#: dlls/winspool.drv/winspool.rc:43 programs/notepad/notepad.rc:118
-#: programs/oleview/oleview.rc:162 programs/oleview/oleview.rc:175
-#: programs/progman/progman.rc:107 programs/progman/progman.rc:125
-#: programs/progman/progman.rc:143 programs/progman/progman.rc:159
-#: programs/progman/progman.rc:181 programs/progman/progman.rc:200
-#: programs/progman/progman.rc:217 programs/regedit/regedit.rc:297
-#: programs/regedit/regedit.rc:308 programs/regedit/regedit.rc:321
-#: programs/regedit/regedit.rc:337 programs/regedit/regedit.rc:350
-#: programs/regedit/regedit.rc:363 programs/taskmgr/taskmgr.rc:443
-#: programs/taskmgr/taskmgr.rc:518 programs/wineboot/wineboot.rc:34
-#: programs/winecfg/winecfg.rc:214 programs/winecfg/winecfg.rc:224
-#: programs/wineconsole/wineconsole.rc:136 programs/winefile/winefile.rc:128
+#: dlls/winspool.drv/winspool.rc:43 programs/conhost/conhost.rc:127
+#: programs/notepad/notepad.rc:118 programs/oleview/oleview.rc:162
+#: programs/oleview/oleview.rc:175 programs/progman/progman.rc:107
+#: programs/progman/progman.rc:125 programs/progman/progman.rc:143
+#: programs/progman/progman.rc:159 programs/progman/progman.rc:181
+#: programs/progman/progman.rc:200 programs/progman/progman.rc:217
+#: programs/regedit/regedit.rc:297 programs/regedit/regedit.rc:308
+#: programs/regedit/regedit.rc:321 programs/regedit/regedit.rc:337
+#: programs/regedit/regedit.rc:350 programs/regedit/regedit.rc:363
+#: programs/taskmgr/taskmgr.rc:443 programs/taskmgr/taskmgr.rc:518
+#: programs/wineboot/wineboot.rc:34 programs/winecfg/winecfg.rc:214
+#: programs/winecfg/winecfg.rc:224 programs/winefile/winefile.rc:128
 #: programs/winefile/winefile.rc:151 programs/winefile/winefile.rc:181
 #: programs/winemine/winemine.rc:99 programs/wordpad/wordpad.rc:216
 #: programs/wordpad/wordpad.rc:227 programs/wordpad/wordpad.rc:245
@@ -673,7 +673,7 @@ msgstr "&Formát"
 msgid "&Source"
 msgstr "&Odkiaľ"
 
-#: dlls/comdlg32/comdlg32.rc:251 programs/wineconsole/wineconsole.rc:85
+#: dlls/comdlg32/comdlg32.rc:251 programs/conhost/conhost.rc:76
 msgid "Font"
 msgstr "Písmo"
 
@@ -823,7 +823,7 @@ msgstr "Zameniť vo vý&bere"
 #: dlls/comdlg32/comdlg32.rc:363 dlls/comdlg32/comdlg32.rc:403
 #: dlls/ieframe/ieframe.rc:42 dlls/shdoclc/shdoclc.rc:61
 #: dlls/shell32/shell32.rc:108 programs/clock/clock.rc:31
-#: programs/wineconsole/wineconsole.rc:30
+#: programs/conhost/conhost.rc:34
 msgid "&Properties"
 msgstr "&Vlastnosti"
 
@@ -3286,7 +3286,7 @@ msgstr "Vyst&rihnúť"
 #: dlls/shdoclc/shdoclc.rc:94 dlls/shdoclc/shdoclc.rc:118
 #: dlls/shdoclc/shdoclc.rc:133 dlls/shdoclc/shdoclc.rc:160
 #: dlls/shdoclc/shdoclc.rc:184 dlls/shell32/shell32.rc:102
-#: dlls/user32/user32.rc:61 programs/wineconsole/wineconsole.rc:32
+#: dlls/user32/user32.rc:61 programs/conhost/conhost.rc:36
 #: programs/winhlp32/winhlp32.rc:40 programs/wordpad/wordpad.rc:113
 #, fuzzy
 msgid "&Copy"
@@ -3360,7 +3360,7 @@ msgstr "Domov"
 msgid "Sync"
 msgstr "Synchronizovať"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:50 programs/wineconsole/wineconsole.rc:60
+#: dlls/hhctrl.ocx/hhctrl.rc:50 programs/conhost/conhost.rc:51
 #: programs/wordpad/wordpad.rc:166
 msgid "Options"
 msgstr "Voľby"
@@ -6966,6 +6966,11 @@ msgstr "Pripojenie je aktícne.\n"
 msgid "Not implemented.\n"
 msgstr "Neimplementované"
 
+#: dlls/kernel32/winerror.mc:3788
+#, fuzzy
+msgid "Call failed.\n"
+msgstr "Otvoriť súbor.\n"
+
 #: dlls/kernel32/winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr ""
@@ -8920,7 +8925,7 @@ msgstr "Zdroj:"
 #: dlls/shdoclc/shdoclc.rc:82 dlls/shdoclc/shdoclc.rc:95
 #: dlls/shdoclc/shdoclc.rc:135 dlls/shdoclc/shdoclc.rc:162
 #: dlls/shdoclc/shdoclc.rc:186 dlls/user32/user32.rc:62
-#: programs/wineconsole/wineconsole.rc:33 programs/wordpad/wordpad.rc:114
+#: programs/conhost/conhost.rc:37 programs/wordpad/wordpad.rc:114
 msgid "&Paste"
 msgstr "V&ložiť"
 
@@ -10070,137 +10075,161 @@ msgstr " s"
 msgid "Select Source"
 msgstr "&Označiť všetko"
 
-#: dlls/tzres/tzres.rc:88
+#: dlls/tzres/tzres.rc:90
 msgid "China Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:89
+#: dlls/tzres/tzres.rc:91
 msgid "China Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:170
+#: dlls/tzres/tzres.rc:180
 msgid "North Asia Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:171
+#: dlls/tzres/tzres.rc:181
 msgid "North Asia Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:110
+#: dlls/tzres/tzres.rc:116
 msgid "Georgian Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:111
+#: dlls/tzres/tzres.rc:117
 msgid "Georgian Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:162
+#: dlls/tzres/tzres.rc:172
 msgid "Nepal Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:163
+#: dlls/tzres/tzres.rc:173
 msgid "Nepal Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:64
+#: dlls/tzres/tzres.rc:66
 msgid "Cape Verde Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:65
+#: dlls/tzres/tzres.rc:67
 msgid "Cape Verde Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:120
+#: dlls/tzres/tzres.rc:126
 #, fuzzy
 #| msgid "Date and time"
 msgid "Haiti Standard Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:121
+#: dlls/tzres/tzres.rc:127
 #, fuzzy
 #| msgid "Date and time"
 msgid "Haiti Daylight Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:78
+#: dlls/tzres/tzres.rc:80
 #, fuzzy
 #| msgid "Central European"
 msgid "Central European Standard Time"
 msgstr "Stredná Európa"
 
-#: dlls/tzres/tzres.rc:79
+#: dlls/tzres/tzres.rc:81
 #, fuzzy
 #| msgid "Central European"
 msgid "Central European Daylight Time"
 msgstr "Stredná Európa"
 
-#: dlls/tzres/tzres.rc:150
+#: dlls/tzres/tzres.rc:160
 msgid "Morocco Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:151
+#: dlls/tzres/tzres.rc:161
 msgid "Morocco Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:76
+#: dlls/tzres/tzres.rc:78
 #, fuzzy
 #| msgid "Central European"
 msgid "Central Europe Standard Time"
 msgstr "Stredná Európa"
 
-#: dlls/tzres/tzres.rc:77
+#: dlls/tzres/tzres.rc:79
 #, fuzzy
 #| msgid "Central European"
 msgid "Central Europe Daylight Time"
 msgstr "Stredná Európa"
 
-#: dlls/tzres/tzres.rc:126
+#: dlls/tzres/tzres.rc:132
 msgid "Iran Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:127
+#: dlls/tzres/tzres.rc:133
 msgid "Iran Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:160
+#: dlls/tzres/tzres.rc:204
+#, fuzzy
+#| msgid "Date and time"
+msgid "Saint Pierre Standard Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:205
+#, fuzzy
+#| msgid "Date and time"
+msgid "Saint Pierre Daylight Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:170
 msgid "Namibia Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:161
+#: dlls/tzres/tzres.rc:171
 msgid "Namibia Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:210
+#: dlls/tzres/tzres.rc:226
 msgid "Tonga Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:211
+#: dlls/tzres/tzres.rc:227
 msgid "Tonga Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:154
+#: dlls/tzres/tzres.rc:164
 msgid "Mountain Standard Time (Mexico)"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:155
+#: dlls/tzres/tzres.rc:165
 msgid "Mountain Daylight Time (Mexico)"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:112
+#: dlls/tzres/tzres.rc:118
 msgid "GMT Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:113
+#: dlls/tzres/tzres.rc:119
 msgid "GMT Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:72
+#: dlls/tzres/tzres.rc:74
 msgid "Central Asia Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:73
+#: dlls/tzres/tzres.rc:75
 msgid "Central Asia Daylight Time"
 msgstr ""
+
+#: dlls/tzres/tzres.rc:146
+#, fuzzy
+#| msgid "Date and time"
+msgid "Lord Howe Standard Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:147
+#, fuzzy
+#| msgid "Date and time"
+msgid "Lord Howe Daylight Time"
+msgstr "Dátum a čas"
 
 #: dlls/tzres/tzres.rc:40
 msgid "Arabic Standard Time"
@@ -10210,123 +10239,147 @@ msgstr ""
 msgid "Arabic Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:140
+#: dlls/tzres/tzres.rc:148
 msgid "Magadan Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:141
+#: dlls/tzres/tzres.rc:149
 msgid "Magadan Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:166
+#: dlls/tzres/tzres.rc:176
 msgid "Newfoundland Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:167
+#: dlls/tzres/tzres.rc:177
 msgid "Newfoundland Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:234
+#: dlls/tzres/tzres.rc:250
 msgid "West Pacific Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:235
+#: dlls/tzres/tzres.rc:251
 msgid "West Pacific Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:174
+#: dlls/tzres/tzres.rc:186
 msgid "Pacific Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:175
+#: dlls/tzres/tzres.rc:187
 msgid "Pacific Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:50
+#: dlls/tzres/tzres.rc:52
 msgid "Azerbaijan Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:51
+#: dlls/tzres/tzres.rc:53
 msgid "Azerbaijan Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:192
+#: dlls/tzres/tzres.rc:150
+#, fuzzy
+#| msgid "Date and time"
+msgid "Magallanes Standard Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:151
+#, fuzzy
+#| msgid "Date and time"
+msgid "Magallanes Daylight Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:206
 msgid "Samoa Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:193
+#: dlls/tzres/tzres.rc:207
 msgid "Samoa Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:132
+#: dlls/tzres/tzres.rc:138
 msgid "Kaliningrad Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:133
+#: dlls/tzres/tzres.rc:139
 msgid "Kaliningrad Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:176
+#: dlls/tzres/tzres.rc:188
 msgid "Pacific Standard Time (Mexico)"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:177
+#: dlls/tzres/tzres.rc:189
 msgid "Pacific Daylight Time (Mexico)"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:146
+#: dlls/tzres/tzres.rc:156
 msgid "Middle East Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:147
+#: dlls/tzres/tzres.rc:157
 msgid "Middle East Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:208
+#: dlls/tzres/tzres.rc:224
 msgid "Tokyo Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:209
+#: dlls/tzres/tzres.rc:225
 msgid "Tokyo Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:138
+#: dlls/tzres/tzres.rc:144
 msgid "Line Islands Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:139
+#: dlls/tzres/tzres.rc:145
 msgid "Line Islands Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:130
+#: dlls/tzres/tzres.rc:92
+#, fuzzy
+#| msgid "Date and time"
+msgid "Cuba Standard Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:93
+#, fuzzy
+#| msgid "Date and time"
+msgid "Cuba Daylight Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:136
 msgid "Jordan Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:131
+#: dlls/tzres/tzres.rc:137
 msgid "Jordan Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:82
+#: dlls/tzres/tzres.rc:84
 msgid "Central Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:83
+#: dlls/tzres/tzres.rc:85
 msgid "Central Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:52
+#: dlls/tzres/tzres.rc:54
 msgid "Azores Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:53
+#: dlls/tzres/tzres.rc:55
 msgid "Azores Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:168
+#: dlls/tzres/tzres.rc:178
 msgid "North Asia East Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:169
+#: dlls/tzres/tzres.rc:179
 msgid "North Asia East Daylight Time"
 msgstr ""
 
@@ -10338,139 +10391,139 @@ msgstr ""
 msgid "Argentina Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:142
+#: dlls/tzres/tzres.rc:152
 #, fuzzy
 #| msgid "Date and time"
 msgid "Marquesas Standard Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:143
+#: dlls/tzres/tzres.rc:153
 #, fuzzy
 #| msgid "Date and time"
 msgid "Marquesas Daylight Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:156
+#: dlls/tzres/tzres.rc:166
 msgid "Myanmar Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:157
+#: dlls/tzres/tzres.rc:167
 msgid "Myanmar Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:220 dlls/tzres/tzres.rc:221
+#: dlls/tzres/tzres.rc:236 dlls/tzres/tzres.rc:237
 msgid "Coordinated Universal Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:124
+#: dlls/tzres/tzres.rc:130
 msgid "India Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:125
+#: dlls/tzres/tzres.rc:131
 msgid "India Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:118
+#: dlls/tzres/tzres.rc:124
 msgid "GTB Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:119
+#: dlls/tzres/tzres.rc:125
 msgid "GTB Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:212
+#: dlls/tzres/tzres.rc:228
 msgid "Turkey Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:213
+#: dlls/tzres/tzres.rc:229
 msgid "Turkey Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:106
+#: dlls/tzres/tzres.rc:112
 msgid "Fiji Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:107
+#: dlls/tzres/tzres.rc:113
 msgid "Fiji Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:62
+#: dlls/tzres/tzres.rc:64
 msgid "Canada Central Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:63
+#: dlls/tzres/tzres.rc:65
 msgid "Canada Central Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:204
+#: dlls/tzres/tzres.rc:218
 msgid "Taipei Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:205
+#: dlls/tzres/tzres.rc:219
 msgid "Taipei Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:230
+#: dlls/tzres/tzres.rc:246
 msgid "W. Europe Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:231
+#: dlls/tzres/tzres.rc:247
 msgid "W. Europe Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:148
+#: dlls/tzres/tzres.rc:158
 msgid "Montevideo Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:149
+#: dlls/tzres/tzres.rc:159
 msgid "Montevideo Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:178
+#: dlls/tzres/tzres.rc:190
 msgid "Pakistan Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:179
+#: dlls/tzres/tzres.rc:191
 msgid "Pakistan Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:66
+#: dlls/tzres/tzres.rc:68
 msgid "Caucasus Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:67
+#: dlls/tzres/tzres.rc:69
 msgid "Caucasus Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:48
+#: dlls/tzres/tzres.rc:50
 msgid "AUS Eastern Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:49
+#: dlls/tzres/tzres.rc:51
 msgid "AUS Eastern Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:158
+#: dlls/tzres/tzres.rc:168
 msgid "N. Central Asia Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:159
+#: dlls/tzres/tzres.rc:169
 msgid "N. Central Asia Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:100
+#: dlls/tzres/tzres.rc:104
 msgid "Eastern Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:101
+#: dlls/tzres/tzres.rc:105
 msgid "Eastern Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:84
+#: dlls/tzres/tzres.rc:86
 msgid "Central Standard Time (Mexico)"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:85
+#: dlls/tzres/tzres.rc:87
 msgid "Central Daylight Time (Mexico)"
 msgstr ""
 
@@ -10482,67 +10535,79 @@ msgstr ""
 msgid "Atlantic Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:152
+#: dlls/tzres/tzres.rc:162
 msgid "Mountain Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:153
+#: dlls/tzres/tzres.rc:163
 msgid "Mountain Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:216
+#: dlls/tzres/tzres.rc:232
 msgid "US Eastern Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:217
+#: dlls/tzres/tzres.rc:233
 msgid "US Eastern Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:206
+#: dlls/tzres/tzres.rc:182
+#, fuzzy
+#| msgid "Date and time"
+msgid "North Korea Standard Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:183
+#, fuzzy
+#| msgid "Date and time"
+msgid "North Korea Daylight Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:220
 msgid "Tasmania Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:207
+#: dlls/tzres/tzres.rc:221
 msgid "Tasmania Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:70
+#: dlls/tzres/tzres.rc:72
 msgid "Central America Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:71
+#: dlls/tzres/tzres.rc:73
 msgid "Central America Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:218
+#: dlls/tzres/tzres.rc:234
 msgid "US Mountain Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:219
+#: dlls/tzres/tzres.rc:235
 msgid "US Mountain Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:198
+#: dlls/tzres/tzres.rc:212
 msgid "South Africa Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:199
+#: dlls/tzres/tzres.rc:213
 msgid "South Africa Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:68
+#: dlls/tzres/tzres.rc:70
 msgid "Cen. Australia Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:69
+#: dlls/tzres/tzres.rc:71
 msgid "Cen. Australia Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:200
+#: dlls/tzres/tzres.rc:214
 msgid "Sri Lanka Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:201
+#: dlls/tzres/tzres.rc:215
 msgid "Sri Lanka Daylight Time"
 msgstr ""
 
@@ -10554,19 +10619,19 @@ msgstr ""
 msgid "Afghanistan Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:236
+#: dlls/tzres/tzres.rc:252
 msgid "Yakutsk Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:237
+#: dlls/tzres/tzres.rc:253
 msgid "Yakutsk Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:186
+#: dlls/tzres/tzres.rc:198
 msgid "SA Eastern Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:187
+#: dlls/tzres/tzres.rc:199
 msgid "SA Eastern Daylight Time"
 msgstr ""
 
@@ -10586,35 +10651,59 @@ msgstr ""
 msgid "Arabian Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:184
+#: dlls/tzres/tzres.rc:222
+#, fuzzy
+#| msgid "Date and time"
+msgid "Tocantins Standard Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:223
+#, fuzzy
+#| msgid "Date and time"
+msgid "Tocantins Daylight Time"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:196
 msgid "Russian Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:185
+#: dlls/tzres/tzres.rc:197
 msgid "Russian Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:182
+#: dlls/tzres/tzres.rc:48
+#, fuzzy
+#| msgid "Central European"
+msgid "Aus Central W. Standard Time"
+msgstr "Stredná Európa"
+
+#: dlls/tzres/tzres.rc:49
+#, fuzzy
+#| msgid "Central European"
+msgid "Aus Central W. Daylight Time"
+msgstr "Stredná Európa"
+
+#: dlls/tzres/tzres.rc:194
 msgid "Romance Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:183
+#: dlls/tzres/tzres.rc:195
 msgid "Romance Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:104
+#: dlls/tzres/tzres.rc:110
 msgid "Ekaterinburg Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:105
+#: dlls/tzres/tzres.rc:111
 msgid "Ekaterinburg Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:202
+#: dlls/tzres/tzres.rc:216
 msgid "Syria Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:203
+#: dlls/tzres/tzres.rc:217
 msgid "Syria Daylight Time"
 msgstr ""
 
@@ -10626,51 +10715,51 @@ msgstr ""
 msgid "AUS Central Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:116
+#: dlls/tzres/tzres.rc:122
 msgid "Greenwich Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:117
+#: dlls/tzres/tzres.rc:123
 msgid "Greenwich Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:214
+#: dlls/tzres/tzres.rc:230
 msgid "Ulaanbaatar Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:215
+#: dlls/tzres/tzres.rc:231
 msgid "Ulaanbaatar Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:128
+#: dlls/tzres/tzres.rc:134
 msgid "Israel Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:129
+#: dlls/tzres/tzres.rc:135
 msgid "Israel Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:56
+#: dlls/tzres/tzres.rc:58
 msgid "Bangladesh Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:57
+#: dlls/tzres/tzres.rc:59
 msgid "Bangladesh Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:188
+#: dlls/tzres/tzres.rc:200
 msgid "SA Pacific Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:189
+#: dlls/tzres/tzres.rc:201
 msgid "SA Pacific Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:232
+#: dlls/tzres/tzres.rc:248
 msgid "West Asia Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:233
+#: dlls/tzres/tzres.rc:249
 msgid "West Asia Daylight Time"
 msgstr ""
 
@@ -10682,81 +10771,81 @@ msgstr ""
 msgid "Alaskan Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:180
+#: dlls/tzres/tzres.rc:192
 msgid "Paraguay Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:181
+#: dlls/tzres/tzres.rc:193
 msgid "Paraguay Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:90
+#: dlls/tzres/tzres.rc:94
 #, fuzzy
 #| msgid "Date and time"
 msgid "Dateline Standard Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:91
+#: dlls/tzres/tzres.rc:95
 msgid "Dateline Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:136
+#: dlls/tzres/tzres.rc:142
 msgid "Libya Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:137
+#: dlls/tzres/tzres.rc:143
 msgid "Libya Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:54
+#: dlls/tzres/tzres.rc:56
 msgid "Bahia Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:55
+#: dlls/tzres/tzres.rc:57
 msgid "Bahia Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:222
+#: dlls/tzres/tzres.rc:238
 msgid "Venezuela Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:223
+#: dlls/tzres/tzres.rc:239
 msgid "Venezuela Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:60
+#: dlls/tzres/tzres.rc:62
 #, fuzzy
 #| msgid "Date and time"
 msgid "Bougainville Standard Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:61
+#: dlls/tzres/tzres.rc:63
 #, fuzzy
 #| msgid "Date and time"
 msgid "Bougainville Daylight Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:122
+#: dlls/tzres/tzres.rc:128
 msgid "Hawaiian Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:123
+#: dlls/tzres/tzres.rc:129
 msgid "Hawaiian Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:194
+#: dlls/tzres/tzres.rc:208
 msgid "SE Asia Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:195
+#: dlls/tzres/tzres.rc:209
 msgid "SE Asia Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:164
+#: dlls/tzres/tzres.rc:174
 msgid "New Zealand Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:165
+#: dlls/tzres/tzres.rc:175
 msgid "New Zealand Daylight Time"
 msgstr ""
 
@@ -10772,163 +10861,175 @@ msgstr "Dátum a čas"
 msgid "Aleutian Daylight Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:74
+#: dlls/tzres/tzres.rc:76
 msgid "Central Brazilian Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:75
+#: dlls/tzres/tzres.rc:77
 msgid "Central Brazilian Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:58
+#: dlls/tzres/tzres.rc:60
 msgid "Belarus Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:59
+#: dlls/tzres/tzres.rc:61
 msgid "Belarus Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:190
+#: dlls/tzres/tzres.rc:202
 msgid "SA Western Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:191
+#: dlls/tzres/tzres.rc:203
 msgid "SA Western Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:114
+#: dlls/tzres/tzres.rc:120
 msgid "Greenland Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:115
+#: dlls/tzres/tzres.rc:121
 msgid "Greenland Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:98
+#: dlls/tzres/tzres.rc:102
 #, fuzzy
 #| msgid "Date and time"
 msgid "Easter Island Standard Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:99
+#: dlls/tzres/tzres.rc:103
 #, fuzzy
 #| msgid "Date and time"
 msgid "Easter Island Daylight Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:102
+#: dlls/tzres/tzres.rc:108
 msgid "Egypt Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:103
+#: dlls/tzres/tzres.rc:109
 msgid "Egypt Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:144
+#: dlls/tzres/tzres.rc:106
+#, fuzzy
+#| msgid "Date and time"
+msgid "Eastern Standard Time (Mexico)"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:107
+#, fuzzy
+#| msgid "Date and time"
+msgid "Eastern Daylight Time (Mexico)"
+msgstr "Dátum a čas"
+
+#: dlls/tzres/tzres.rc:154
 msgid "Mauritius Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:145
+#: dlls/tzres/tzres.rc:155
 msgid "Mauritius Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:224
+#: dlls/tzres/tzres.rc:240
 msgid "Vladivostok Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:225
+#: dlls/tzres/tzres.rc:241
 msgid "Vladivostok Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:196
+#: dlls/tzres/tzres.rc:210
 msgid "Singapore Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:197
+#: dlls/tzres/tzres.rc:211
 msgid "Singapore Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:134
+#: dlls/tzres/tzres.rc:140
 msgid "Korea Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:135
+#: dlls/tzres/tzres.rc:141
 msgid "Korea Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:86
+#: dlls/tzres/tzres.rc:88
 #, fuzzy
 #| msgid "Date and time"
 msgid "Chatham Islands Standard Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:87
+#: dlls/tzres/tzres.rc:89
 #, fuzzy
 #| msgid "Date and time"
 msgid "Chatham Islands Daylight Time"
 msgstr "Dátum a čas"
 
-#: dlls/tzres/tzres.rc:92
+#: dlls/tzres/tzres.rc:96
 msgid "E. Africa Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:93
+#: dlls/tzres/tzres.rc:97
 msgid "E. Africa Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:108
+#: dlls/tzres/tzres.rc:114
 msgid "FLE Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:109
+#: dlls/tzres/tzres.rc:115
 msgid "FLE Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:96
+#: dlls/tzres/tzres.rc:100
 msgid "E. South America Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:97
+#: dlls/tzres/tzres.rc:101
 msgid "E. South America Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:80
+#: dlls/tzres/tzres.rc:82
 msgid "Central Pacific Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:81
+#: dlls/tzres/tzres.rc:83
 msgid "Central Pacific Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:228
+#: dlls/tzres/tzres.rc:244
 msgid "W. Central Africa Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:229
+#: dlls/tzres/tzres.rc:245
 msgid "W. Central Africa Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:172
+#: dlls/tzres/tzres.rc:184
 msgid "Pacific SA Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:173
+#: dlls/tzres/tzres.rc:185
 msgid "Pacific SA Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:94
+#: dlls/tzres/tzres.rc:98
 msgid "E. Australia Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:95
+#: dlls/tzres/tzres.rc:99
 msgid "E. Australia Daylight Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:226
+#: dlls/tzres/tzres.rc:242
 msgid "W. Australia Standard Time"
 msgstr ""
 
-#: dlls/tzres/tzres.rc:227
+#: dlls/tzres/tzres.rc:243
 msgid "W. Australia Daylight Time"
 msgstr ""
 
@@ -10980,7 +11081,7 @@ msgid "&Move"
 msgstr "Pre&sunúť"
 
 #: dlls/user32/user32.rc:32 dlls/user32/user32.rc:45
-#: programs/wineconsole/wineconsole.rc:93
+#: programs/conhost/conhost.rc:84
 msgid "&Size"
 msgstr "&Zmeniť veľkosť"
 
@@ -12778,6 +12879,178 @@ msgid ""
 " hexadecimal (0x34) or octal (056).\n"
 msgstr ""
 
+#: programs/conhost/conhost.rc:54
+msgid "Cursor size"
+msgstr ""
+
+#: programs/conhost/conhost.rc:55
+msgid "&Small"
+msgstr ""
+
+#: programs/conhost/conhost.rc:56
+msgid "&Medium"
+msgstr ""
+
+#: programs/conhost/conhost.rc:57
+msgid "&Large"
+msgstr ""
+
+#: programs/conhost/conhost.rc:59
+msgid "Command history"
+msgstr ""
+
+#: programs/conhost/conhost.rc:60
+msgid "&Buffer size:"
+msgstr ""
+
+#: programs/conhost/conhost.rc:63
+#, fuzzy
+msgid "&Remove duplicates"
+msgstr "&Skomentovať..."
+
+#: programs/conhost/conhost.rc:65
+msgid "Popup menu"
+msgstr ""
+
+#: programs/conhost/conhost.rc:66
+msgid "&Control"
+msgstr ""
+
+#: programs/conhost/conhost.rc:67
+msgid "S&hift"
+msgstr ""
+
+#: programs/conhost/conhost.rc:69
+msgid "Console"
+msgstr ""
+
+#: programs/conhost/conhost.rc:70
+msgid "&Quick Edit mode"
+msgstr ""
+
+#: programs/conhost/conhost.rc:71
+#, fuzzy
+#| msgid "&Insert"
+msgid "&Insert mode"
+msgstr "&Vložiť"
+
+#: programs/conhost/conhost.rc:79
+#, fuzzy
+msgid "&Font"
+msgstr "Písma"
+
+#: programs/conhost/conhost.rc:81
+msgid "&Color"
+msgstr ""
+
+#: programs/conhost/conhost.rc:92
+#, fuzzy
+msgid "Configuration"
+msgstr "Informácie"
+
+#: programs/conhost/conhost.rc:95
+msgid "Buffer zone"
+msgstr ""
+
+#: programs/conhost/conhost.rc:96
+msgid "&Width:"
+msgstr ""
+
+#: programs/conhost/conhost.rc:99
+#, fuzzy
+msgid "&Height:"
+msgstr "&Right:"
+
+#: programs/conhost/conhost.rc:103
+msgid "Window size"
+msgstr ""
+
+#: programs/conhost/conhost.rc:104
+msgid "W&idth:"
+msgstr ""
+
+#: programs/conhost/conhost.rc:107
+#, fuzzy
+msgid "H&eight:"
+msgstr "&Right:"
+
+#: programs/conhost/conhost.rc:111
+msgid "End of program"
+msgstr ""
+
+#: programs/conhost/conhost.rc:112
+msgid "&Close console"
+msgstr ""
+
+#: programs/conhost/conhost.rc:114
+#, fuzzy
+msgid "Edition"
+msgstr "&Upraviť"
+
+#: programs/conhost/conhost.rc:120
+msgid "Console parameters"
+msgstr ""
+
+#: programs/conhost/conhost.rc:123
+msgid "Retain these settings for later sessions"
+msgstr ""
+
+#: programs/conhost/conhost.rc:124
+msgid "Modify only current session"
+msgstr ""
+
+#: programs/conhost/conhost.rc:32 programs/notepad/notepad.rc:41
+#: programs/regedit/regedit.rc:43 programs/winhlp32/winhlp32.rc:39
+#: programs/wordpad/wordpad.rc:42
+msgid "&Edit"
+msgstr "&Upraviť"
+
+#: programs/conhost/conhost.rc:33
+msgid "Set &Defaults"
+msgstr ""
+
+#: programs/conhost/conhost.rc:35
+msgid "&Mark"
+msgstr ""
+
+#: programs/conhost/conhost.rc:38
+msgid "&Select all"
+msgstr ""
+
+#: programs/conhost/conhost.rc:39
+msgid "Sc&roll"
+msgstr ""
+
+#: programs/conhost/conhost.rc:40
+msgid "S&earch"
+msgstr ""
+
+#: programs/conhost/conhost.rc:43
+msgid "Setup - Default settings"
+msgstr ""
+
+#: programs/conhost/conhost.rc:44
+msgid "Setup - Current settings"
+msgstr ""
+
+#: programs/conhost/conhost.rc:45
+msgid "Configuration error"
+msgstr ""
+
+#: programs/conhost/conhost.rc:46
+msgid ""
+"The size of the screen buffer must be greater than or equal to the size of "
+"the window."
+msgstr ""
+
+#: programs/conhost/conhost.rc:41
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
+msgstr ""
+
+#: programs/conhost/conhost.rc:42
+msgid "This is a test"
+msgstr ""
+
 #: programs/dxdiag/dxdiag.rc:30
 msgid "DirectX Diagnostic Tool"
 msgstr ""
@@ -13193,12 +13466,6 @@ msgstr "Nastavenia str&any..."
 #: programs/notepad/notepad.rc:37
 msgid "P&rinter Setup..."
 msgstr "N&astavenia tlačiarne..."
-
-#: programs/notepad/notepad.rc:41 programs/regedit/regedit.rc:43
-#: programs/wineconsole/wineconsole.rc:28 programs/winhlp32/winhlp32.rc:39
-#: programs/wordpad/wordpad.rc:42
-msgid "&Edit"
-msgstr "&Upraviť"
 
 #: programs/notepad/notepad.rc:42 programs/wordpad/wordpad.rc:44
 msgid "&Undo\tCtrl+Z"
@@ -16372,222 +16639,10 @@ msgstr ""
 msgid "Menu Bar"
 msgstr ""
 
-#: programs/wineconsole/wineconsole.rc:63
-msgid "Cursor size"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:64
-msgid "&Small"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:65
-msgid "&Medium"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:66
-msgid "&Large"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:68
-msgid "Command history"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:69
-msgid "&Buffer size:"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:72
-#, fuzzy
-msgid "&Remove duplicates"
-msgstr "&Skomentovať..."
-
-#: programs/wineconsole/wineconsole.rc:74
-msgid "Popup menu"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:75
-msgid "&Control"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:76
-msgid "S&hift"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:78
-msgid "Console"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:79
-msgid "&Quick Edit mode"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:80
-#, fuzzy
-#| msgid "&Insert"
-msgid "&Insert mode"
-msgstr "&Vložiť"
-
-#: programs/wineconsole/wineconsole.rc:88
-#, fuzzy
-msgid "&Font"
-msgstr "Písma"
-
-#: programs/wineconsole/wineconsole.rc:90
-msgid "&Color"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:101
-#, fuzzy
-msgid "Configuration"
-msgstr "Informácie"
-
-#: programs/wineconsole/wineconsole.rc:104
-msgid "Buffer zone"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:105
-msgid "&Width:"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:108
-#, fuzzy
-msgid "&Height:"
-msgstr "&Right:"
-
-#: programs/wineconsole/wineconsole.rc:112
-msgid "Window size"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:113
-msgid "W&idth:"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:116
-#, fuzzy
-msgid "H&eight:"
-msgstr "&Right:"
-
-#: programs/wineconsole/wineconsole.rc:120
-msgid "End of program"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:121
-msgid "&Close console"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:123
-#, fuzzy
-msgid "Edition"
-msgstr "&Upraviť"
-
-#: programs/wineconsole/wineconsole.rc:129
-msgid "Console parameters"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:132
-msgid "Retain these settings for later sessions"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:133
-msgid "Modify only current session"
-msgstr ""
-
 #: programs/wineconsole/wineconsole.rc:29
-msgid "Set &Defaults"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:31
-msgid "&Mark"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:34
-msgid "&Select all"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:35
-msgid "Sc&roll"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:36
-msgid "S&earch"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:39
-msgid "Setup - Default settings"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:40
-msgid "Setup - Current settings"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:41
-msgid "Configuration error"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:42
-msgid ""
-"The size of the screen buffer must be greater than or equal to the size of "
-"the window."
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:37
-msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:38
-msgid "This is a test"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:44
-msgid "wineconsole: Couldn't parse event id\n"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:45
-msgid "wineconsole: Invalid backend\n"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:46
-msgid "wineconsole: Unrecognized command line option\n"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:47
-msgid "Starts a program in a Wine console\n"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:48
 msgid ""
 "wineconsole: Starting program %s failed.\n"
 "The command is invalid.\n"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:50
-msgid ""
-"\n"
-"Usage:\n"
-"  wineconsole [options] <command>\n"
-"\n"
-"Options:\n"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:52
-msgid ""
-"  --backend={user|curses}  Choosing user will spawn a new window, curses "
-"will\n"
-"                           try to setup the current terminal as a Wine "
-"console.\n"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:53
-msgid "  <command>                The Wine program to launch in the console.\n"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:54
-msgid ""
-"\n"
-"Example:\n"
-"  wineconsole cmd\n"
-"Starts the Wine command prompt in a Wine console.\n"
-"\n"
 msgstr ""
 
 #: programs/winedbg/winedbg.rc:50 programs/winedbg/winedbg.rc:38

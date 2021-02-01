@@ -19,9 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 
 #include "ntstatus.h"
@@ -380,33 +377,10 @@ LONGLONG WINAPI RtlExtendedMagicDivide(
 /*************************************************************************
  *        RtlInterlockedCompareExchange64   (NTDLL.@)
  */
-#ifdef __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8
 LONGLONG WINAPI RtlInterlockedCompareExchange64( LONGLONG *dest, LONGLONG xchg, LONGLONG compare )
 {
     return __sync_val_compare_and_swap( dest, compare, xchg );
 }
-#else
-__ASM_STDCALL_FUNC(RtlInterlockedCompareExchange64, 20,
-                   "push %ebx\n\t"
-                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                   __ASM_CFI(".cfi_rel_offset %ebx,0\n\t")
-                   "push %esi\n\t"
-                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                   __ASM_CFI(".cfi_rel_offset %esi,0\n\t")
-                   "movl 12(%esp),%esi\n\t"
-                   "movl 16(%esp),%ebx\n\t"
-                   "movl 20(%esp),%ecx\n\t"
-                   "movl 24(%esp),%eax\n\t"
-                   "movl 28(%esp),%edx\n\t"
-                   "lock; cmpxchg8b (%esi)\n\t"
-                   "pop %esi\n\t"
-                   __ASM_CFI(".cfi_same_value %esi\n\t")
-                   __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")
-                   "pop %ebx\n\t"
-                   __ASM_CFI(".cfi_same_value %ebx\n\t")
-                   __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")
-                   "ret $20")
-#endif
 
 #endif  /* _WIN64 */
 
@@ -547,11 +521,11 @@ NTSTATUS WINAPI RtlInt64ToUnicodeString(
 
 /* those builtin functions use stdcall calling convention, but compilers reference them without stdcall declarations */
 #if defined(__MINGW32__) || defined(_MSC_VER)
-LONGLONG WINAPI _alldiv( LONGLONG a, LONGLONG b ) asm("_alldiv");
-LONGLONG WINAPI _allmul( LONGLONG a, LONGLONG b ) asm("_allmul");
-LONGLONG WINAPI _allrem( LONGLONG a, LONGLONG b ) asm("_allrem");
-ULONGLONG WINAPI _aulldiv( ULONGLONG a, ULONGLONG b ) asm("_aulldiv");
-ULONGLONG WINAPI _aullrem( ULONGLONG a, ULONGLONG b ) asm("_aullrem");
+LONGLONG WINAPI _alldiv( LONGLONG a, LONGLONG b ) asm(__ASM_NAME("_alldiv"));
+LONGLONG WINAPI _allmul( LONGLONG a, LONGLONG b ) asm(__ASM_NAME("_allmul"));
+LONGLONG WINAPI _allrem( LONGLONG a, LONGLONG b ) asm(__ASM_NAME("_allrem"));
+ULONGLONG WINAPI _aulldiv( ULONGLONG a, ULONGLONG b ) asm(__ASM_NAME("_aulldiv"));
+ULONGLONG WINAPI _aullrem( ULONGLONG a, ULONGLONG b ) asm(__ASM_NAME("_aullrem"));
 #endif
 
 static ULONGLONG udivmod(ULONGLONG a, ULONGLONG b, ULONGLONG *rem)

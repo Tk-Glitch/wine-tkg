@@ -4280,6 +4280,8 @@ static HRESULT adapter_gl_create_device(struct wined3d *wined3d, const struct wi
     if (!(device_gl = heap_alloc_zero(sizeof(*device_gl))))
         return E_OUTOFMEMORY;
 
+    device_gl->current_fence_id = 1;
+
     if (FAILED(hr = wined3d_device_init(&device_gl->d, wined3d, adapter->ordinal, device_type, focus_window,
             flags, surface_alignment, levels, level_count, adapter->gl_info.supported, device_parent)))
     {
@@ -4615,19 +4617,20 @@ static void adapter_gl_copy_bo_address(struct wined3d_context *context,
     wined3d_context_gl_copy_bo_address(wined3d_context_gl(context), dst, src, size);
 }
 
-static HRESULT adapter_gl_create_swapchain(struct wined3d_device *device, struct wined3d_swapchain_desc *desc,
+static HRESULT adapter_gl_create_swapchain(struct wined3d_device *device,
+        struct wined3d_swapchain_desc *desc, struct wined3d_swapchain_state_parent *state_parent,
         void *parent, const struct wined3d_parent_ops *parent_ops, struct wined3d_swapchain **swapchain)
 {
     struct wined3d_swapchain_gl *swapchain_gl;
     HRESULT hr;
 
-    TRACE("device %p, desc %p, parent %p, parent_ops %p, swapchain %p.\n",
-            device, desc, parent, parent_ops, swapchain);
+    TRACE("device %p, desc %p, state_parent %p, parent %p, parent_ops %p, swapchain %p.\n",
+            device, desc, state_parent, parent, parent_ops, swapchain);
 
     if (!(swapchain_gl = heap_alloc_zero(sizeof(*swapchain_gl))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = wined3d_swapchain_gl_init(swapchain_gl, device, desc, parent, parent_ops)))
+    if (FAILED(hr = wined3d_swapchain_gl_init(swapchain_gl, device, desc, state_parent, parent, parent_ops)))
     {
         WARN("Failed to initialise swapchain, hr %#x.\n", hr);
         heap_free(swapchain_gl);
@@ -4802,7 +4805,7 @@ static void wined3d_view_gl_destroy_object(void *object)
             gl_info->gl_ops.gl.p_glDeleteTextures(1, &ctx->gl_view->name);
         }
         if (counter_id)
-            GL_EXTCALL(glDeleteBuffers(1, &counter_id));
+            wined3d_context_gl_destroy_bo(wined3d_context_gl(context), ctx->counter_bo);
         checkGLcall("delete resources");
         context_release(context);
     }
@@ -4889,6 +4892,7 @@ static void adapter_gl_destroy_shader_resource_view(struct wined3d_shader_resour
      * the refcount on a device that's in the process of being destroyed. */
     if (swapchain_count)
         wined3d_device_incref(device);
+    list_remove(&view_gl->bo_user.entry);
     wined3d_shader_resource_view_cleanup(&view_gl->v);
     wined3d_view_gl_destroy(device, &view_gl->gl_view, NULL, view_gl);
     if (swapchain_count)
@@ -4935,6 +4939,7 @@ static void adapter_gl_destroy_unordered_access_view(struct wined3d_unordered_ac
      * the refcount on a device that's in the process of being destroyed. */
     if (swapchain_count)
         wined3d_device_incref(device);
+    list_remove(&view_gl->bo_user.entry);
     wined3d_unordered_access_view_cleanup(&view_gl->v);
     wined3d_view_gl_destroy(device, &view_gl->gl_view, &view_gl->counter_bo, view_gl);
     if (swapchain_count)
@@ -5032,7 +5037,7 @@ static void adapter_gl_flush_context(struct wined3d_context *context)
         context_gl->gl_info->gl_ops.gl.p_glFlush();
 }
 
-void adapter_gl_clear_uav(struct wined3d_context *context,
+static void adapter_gl_clear_uav(struct wined3d_context *context,
         struct wined3d_unordered_access_view *view, const struct wined3d_uvec4 *clear_value)
 {
     TRACE("context %p, view %p, clear_value %s.\n", context, view, debug_uvec4(clear_value));

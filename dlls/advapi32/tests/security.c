@@ -104,8 +104,6 @@ static DWORD (WINAPI *pSetSecurityInfo)(HANDLE, SE_OBJECT_TYPE, SECURITY_INFORMA
                                         PSID, PSID, PACL, PACL);
 static NTSTATUS (WINAPI *pNtAccessCheck)(PSECURITY_DESCRIPTOR, HANDLE, ACCESS_MASK, PGENERIC_MAPPING,
                                          PPRIVILEGE_SET, PULONG, PULONG, NTSTATUS*);
-static BOOL (WINAPI *pCreateRestrictedToken)(HANDLE, DWORD, DWORD, PSID_AND_ATTRIBUTES, DWORD,
-                                             PLUID_AND_ATTRIBUTES, DWORD, PSID_AND_ATTRIBUTES, PHANDLE);
 static NTSTATUS (WINAPI *pNtSetSecurityObject)(HANDLE,SECURITY_INFORMATION,PSECURITY_DESCRIPTOR);
 static NTSTATUS (WINAPI *pNtCreateFile)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,PVOID,ULONG);
 static BOOL     (WINAPI *pRtlDosPathNameToNtPathName_U)(LPCWSTR,PUNICODE_STRING,PWSTR*,CURDIR*);
@@ -175,7 +173,6 @@ static void init(void)
     pSetEntriesInAclW = (void *)GetProcAddress(hmod, "SetEntriesInAclW");
     pSetSecurityDescriptorControl = (void *)GetProcAddress(hmod, "SetSecurityDescriptorControl");
     pSetSecurityInfo = (void *)GetProcAddress(hmod, "SetSecurityInfo");
-    pCreateRestrictedToken = (void *)GetProcAddress(hmod, "CreateRestrictedToken");
     pGetWindowsAccountDomainSid = (void *)GetProcAddress(hmod, "GetWindowsAccountDomainSid");
     pEqualDomainSid = (void *)GetProcAddress(hmod, "EqualDomainSid");
     pGetSidIdentifierAuthority = (void *)GetProcAddress(hmod, "GetSidIdentifierAuthority");
@@ -5312,19 +5309,19 @@ static void test_CreateRestrictedToken(void)
 {
     HANDLE process_token, token, r_token;
     PTOKEN_GROUPS token_groups, groups2;
+    LUID_AND_ATTRIBUTES lattr;
     SID_AND_ATTRIBUTES sattr;
     SECURITY_IMPERSONATION_LEVEL level;
+    SID *removed_sid = NULL;
+    char privs_buffer[1000];
+    TOKEN_PRIVILEGES *privs = (TOKEN_PRIVILEGES *)privs_buffer;
+    PRIVILEGE_SET priv_set;
     TOKEN_TYPE type;
     BOOL is_member;
     DWORD size;
+    LUID luid = { 0, 0 };
     BOOL ret;
-    DWORD i, j;
-
-    if (!pCreateRestrictedToken)
-    {
-        win_skip("CreateRestrictedToken is not available\n");
-        return;
-    }
+    DWORD i;
 
     ret = OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE|TOKEN_QUERY, &process_token);
     ok(ret, "got error %d\n", GetLastError());
@@ -5333,7 +5330,6 @@ static void test_CreateRestrictedToken(void)
         NULL, SecurityImpersonation, TokenImpersonation, &token);
     ok(ret, "got error %d\n", GetLastError());
 
-    /* groups */
     ret = GetTokenInformation(token, TokenGroups, NULL, 0, &size);
     ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
         "got %d with error %d\n", ret, GetLastError());
@@ -5344,70 +5340,120 @@ static void test_CreateRestrictedToken(void)
     for (i = 0; i < token_groups->GroupCount; i++)
     {
         if (token_groups->Groups[i].Attributes & SE_GROUP_ENABLED)
+        {
+            removed_sid = token_groups->Groups[i].Sid;
             break;
+        }
     }
-
-    if (i == token_groups->GroupCount)
-    {
-        HeapFree(GetProcessHeap(), 0, token_groups);
-        CloseHandle(token);
-        skip("User not a member of any group\n");
-        return;
-    }
+    ok(!!removed_sid, "user is not a member of any group\n");
 
     is_member = FALSE;
-    ret = pCheckTokenMembership(token, token_groups->Groups[i].Sid, &is_member);
+    ret = pCheckTokenMembership(token, removed_sid, &is_member);
     ok(ret, "got error %d\n", GetLastError());
     ok(is_member, "not a member\n");
 
-    /* disable a SID in new token */
-    sattr.Sid = token_groups->Groups[i].Sid;
+    sattr.Sid = removed_sid;
     sattr.Attributes = 0;
     r_token = NULL;
-    ret = pCreateRestrictedToken(token, 0, 1, &sattr, 0, NULL, 0, NULL, &r_token);
+    ret = CreateRestrictedToken(token, 0, 1, &sattr, 0, NULL, 0, NULL, &r_token);
     ok(ret, "got error %d\n", GetLastError());
 
-    if (ret)
+    is_member = TRUE;
+    ret = pCheckTokenMembership(r_token, removed_sid, &is_member);
+    ok(ret, "got error %d\n", GetLastError());
+    ok(!is_member, "not a member\n");
+
+    ret = GetTokenInformation(r_token, TokenGroups, NULL, 0, &size);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "got %d with error %d\n",
+        ret, GetLastError());
+    groups2 = HeapAlloc(GetProcessHeap(), 0, size);
+    ret = GetTokenInformation(r_token, TokenGroups, groups2, size, &size);
+    ok(ret, "got error %d\n", GetLastError());
+
+    for (i = 0; i < groups2->GroupCount; i++)
     {
-        /* check if a SID is enabled */
-        is_member = TRUE;
-        ret = pCheckTokenMembership(r_token, token_groups->Groups[i].Sid, &is_member);
-        ok(ret, "got error %d\n", GetLastError());
-        todo_wine ok(!is_member, "not a member\n");
-
-        ret = GetTokenInformation(r_token, TokenGroups, NULL, 0, &size);
-        ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "got %d with error %d\n",
-            ret, GetLastError());
-        groups2 = HeapAlloc(GetProcessHeap(), 0, size);
-        ret = GetTokenInformation(r_token, TokenGroups, groups2, size, &size);
-        ok(ret, "got error %d\n", GetLastError());
-
-        for (j = 0; j < groups2->GroupCount; j++)
+        if (EqualSid(groups2->Groups[i].Sid, removed_sid))
         {
-            if (EqualSid(groups2->Groups[j].Sid, token_groups->Groups[i].Sid))
-                break;
+            DWORD attr = groups2->Groups[i].Attributes;
+            ok(attr & SE_GROUP_USE_FOR_DENY_ONLY, "got wrong attributes %#x\n", attr);
+            ok(!(attr & SE_GROUP_ENABLED), "got wrong attributes %#x\n", attr);
+            break;
         }
-
-        todo_wine ok(groups2->Groups[j].Attributes & SE_GROUP_USE_FOR_DENY_ONLY,
-            "got wrong attributes\n");
-        todo_wine ok((groups2->Groups[j].Attributes & SE_GROUP_ENABLED) == 0,
-            "got wrong attributes\n");
-
-        HeapFree(GetProcessHeap(), 0, groups2);
-
-        size = sizeof(type);
-        ret = GetTokenInformation(r_token, TokenType, &type, size, &size);
-        ok(ret, "got error %d\n", GetLastError());
-        ok(type == TokenImpersonation, "got type %u\n", type);
-
-        size = sizeof(level);
-        ret = GetTokenInformation(r_token, TokenImpersonationLevel, &level, size, &size);
-        ok(ret, "got error %d\n", GetLastError());
-        ok(level == SecurityImpersonation, "got level %u\n", type);
     }
 
-    HeapFree(GetProcessHeap(), 0, token_groups);
+    HeapFree(GetProcessHeap(), 0, groups2);
+
+    size = sizeof(type);
+    ret = GetTokenInformation(r_token, TokenType, &type, size, &size);
+    ok(ret, "got error %d\n", GetLastError());
+    ok(type == TokenImpersonation, "got type %u\n", type);
+
+    size = sizeof(level);
+    ret = GetTokenInformation(r_token, TokenImpersonationLevel, &level, size, &size);
+    ok(ret, "got error %d\n", GetLastError());
+    ok(level == SecurityImpersonation, "got level %u\n", type);
+
     CloseHandle(r_token);
+
+    r_token = NULL;
+    ret = CreateRestrictedToken(process_token, 0, 1, &sattr, 0, NULL, 0, NULL, &r_token);
+    ok(ret, "got error %u\n", GetLastError());
+
+    size = sizeof(type);
+    ret = GetTokenInformation(r_token, TokenType, &type, size, &size);
+    ok(ret, "got error %u\n", GetLastError());
+    ok(type == TokenPrimary, "got type %u\n", type);
+
+    CloseHandle(r_token);
+
+    ret = GetTokenInformation(token, TokenPrivileges, privs, sizeof(privs_buffer), &size);
+    ok(ret, "got error %u\n", GetLastError());
+
+    for (i = 0; i < privs->PrivilegeCount; i++)
+    {
+        if (privs->Privileges[i].Attributes & SE_PRIVILEGE_ENABLED)
+        {
+            luid = privs->Privileges[i].Luid;
+            break;
+        }
+    }
+    ok(i < privs->PrivilegeCount, "user has no privileges\n");
+
+    lattr.Luid = luid;
+    lattr.Attributes = 0;
+    r_token = NULL;
+    ret = CreateRestrictedToken(token, 0, 0, NULL, 1, &lattr, 0, NULL, &r_token);
+    ok(ret, "got error %u\n", GetLastError());
+
+    priv_set.PrivilegeCount = 1;
+    priv_set.Control = 0;
+    priv_set.Privilege[0].Luid = luid;
+    priv_set.Privilege[0].Attributes = 0;
+    ret = PrivilegeCheck(r_token, &priv_set, &is_member);
+    ok(ret, "got error %u\n", GetLastError());
+    ok(!is_member, "privilege should not be enabled\n");
+
+    ret = GetTokenInformation(r_token, TokenPrivileges, privs, sizeof(privs_buffer), &size);
+    ok(ret, "got error %u\n", GetLastError());
+
+    is_member = FALSE;
+    for (i = 0; i < privs->PrivilegeCount; i++)
+    {
+        if (!memcmp(&privs->Privileges[i].Luid, &luid, sizeof(luid)))
+            is_member = TRUE;
+    }
+    ok(!is_member, "disabled privilege should not be present\n");
+
+    CloseHandle(r_token);
+
+    removed_sid->SubAuthority[0] = 0xdeadbeef;
+    lattr.Luid.LowPart = 0xdeadbeef;
+    r_token = NULL;
+    ret = CreateRestrictedToken(token, 0, 1, &sattr, 1, &lattr, 0, NULL, &r_token);
+    ok(ret, "got error %u\n", GetLastError());
+    CloseHandle(r_token);
+
+    HeapFree(GetProcessHeap(), 0, token_groups);
     CloseHandle(token);
     CloseHandle(process_token);
 }
@@ -7131,19 +7177,13 @@ static void test_token_security_descriptor(void)
 {
     static SID low_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
                             {SECURITY_MANDATORY_LOW_RID}};
-    static SID medium_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
-                               {SECURITY_MANDATORY_MEDIUM_RID}};
-    static SID high_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
-                             {SECURITY_MANDATORY_HIGH_RID}};
     char buffer_sd[SECURITY_DESCRIPTOR_MIN_LENGTH];
-    SECURITY_DESCRIPTOR *sd = (SECURITY_DESCRIPTOR *)&buffer_sd, *sd2, *sd3;
+    SECURITY_DESCRIPTOR *sd = (SECURITY_DESCRIPTOR *)&buffer_sd, *sd2;
     char buffer_acl[256], buffer[MAX_PATH];
-    ACL *acl = (ACL *)&buffer_acl, *acl2, *acl_child, *sacl;
+    ACL *acl = (ACL *)&buffer_acl, *acl2, *acl_child;
     BOOL defaulted, present, ret, found;
-    HANDLE token, token2, token3, token4, token5, token6;
+    HANDLE token, token2, token3;
     EXPLICIT_ACCESSW exp_access;
-    TOKEN_MANDATORY_LABEL *tml;
-    BYTE buffer_integrity[64];
     PROCESS_INFORMATION info;
     DWORD size, index, retd;
     ACCESS_ALLOWED_ACE *ace;
@@ -7229,6 +7269,7 @@ static void test_token_security_descriptor(void)
     defaulted = TRUE;
     ret = GetSecurityDescriptorDacl(sd2, &present, &acl2, &defaulted);
     ok(ret, "GetSecurityDescriptorDacl failed with error %u\n", GetLastError());
+    todo_wine
     ok(present, "DACL not present\n");
 
     if (present)
@@ -7292,185 +7333,6 @@ static void test_token_security_descriptor(void)
     /* The security label is also not inherited */
     if (pAddMandatoryAce)
     {
-        memset(buffer_integrity, 0, sizeof(buffer_integrity));
-        ret = GetTokenInformation(token, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
-        ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
-        tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
-        ok(EqualSid(tml->Label.Sid, &medium_level) || EqualSid(tml->Label.Sid, &high_level),
-           "Expected medium or high integrity level\n");
-
-        if (EqualSid(tml->Label.Sid, &high_level))
-        {
-            DWORD process_id;
-            HANDLE process;
-            HWND shell;
-
-            /* This test tries to get a medium token and then impersonates this token. The
-             * idea is to check whether the sd label of a newly created token depends on the
-             * current active token or the integrity level of the newly created token. */
-
-             /* Steal process token of the explorer.exe process */
-            shell = GetShellWindow();
-            todo_wine ok(shell != NULL, "Failed to get shell window\n");
-            if (!shell) shell = GetDesktopWindow();  /* FIXME: Workaround for Wine */
-            ok(GetWindowThreadProcessId(shell, &process_id),
-               "Failed to get process id of shell window: %u\n", GetLastError());
-            process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, process_id);
-            ok(process != NULL, "Failed to open process: %u\n", GetLastError());
-            ok(OpenProcessToken(process, TOKEN_ALL_ACCESS, &token4),
-               "Failed to open process token: %u\n", GetLastError());
-            CloseHandle(process);
-
-            /* Check TokenIntegrityLevel and LABEL_SECURITY_INFORMATION of explorer.exe token */
-            memset(buffer_integrity, 0, sizeof(buffer_integrity));
-            ret = GetTokenInformation(token4, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
-            ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
-            tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
-            ok(EqualSid(tml->Label.Sid, &medium_level), "Expected medium integrity level\n");
-
-            size = 0;
-            ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
-            ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-               "Unexpected GetKernelObjectSecurity return value %u, error %u\n", ret, GetLastError());
-
-            sd3 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-            ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, sd3, size, &size);
-            ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
-
-            sacl = NULL;
-            ret = GetSecurityDescriptorSacl(sd3, &present, &sacl, &defaulted);
-            ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
-            ok(present, "No SACL in the security descriptor\n");
-            ok(sacl != NULL, "NULL SACL in the security descriptor\n");
-
-            if (sacl)
-            {
-                ret = GetAce(sacl, 0, (void **)&ace);
-                ok(ret, "GetAce failed with error %u\n", GetLastError());
-                ok(ace->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
-                   "Unexpected ACE type %#x\n", ace->Header.AceType);
-                ok(EqualSid(&ace->SidStart, &medium_level),
-                   "Expected medium integrity level\n");
-            }
-
-            HeapFree(GetProcessHeap(), 0, sd3);
-
-            /* Start child process with the explorer.exe token */
-            memset(&startup, 0, sizeof(startup));
-            startup.cb = sizeof(startup);
-            startup.dwFlags = STARTF_USESHOWWINDOW;
-            startup.wShowWindow = SW_SHOWNORMAL;
-
-            sprintf(buffer, "%s tests/security.c test_token_sd_medium", myARGV[0]);
-            ret = CreateProcessAsUserA(token4, NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info);
-            ok(ret || GetLastError() == ERROR_PRIVILEGE_NOT_HELD,
-                "CreateProcess failed with error %u\n", GetLastError());
-            if (ret)
-            {
-                winetest_wait_child_process(info.hProcess);
-                CloseHandle(info.hProcess);
-                CloseHandle(info.hThread);
-            }
-            else
-                win_skip("Skipping test for creating process with medium level token\n");
-
-            ret = DuplicateTokenEx(token4, 0, NULL, SecurityImpersonation, TokenImpersonation, &token5);
-            ok(ret, "DuplicateTokenEx failed with error %u\n", GetLastError());
-            ret = SetThreadToken(NULL, token5);
-            ok(ret, "SetThreadToken failed with error %u\n", GetLastError());
-            CloseHandle(token4);
-
-            /* Restrict current process token while impersonating a medium integrity token */
-            ret = CreateRestrictedToken(token, 0, 0, NULL, 0, NULL, 0, NULL, &token6);
-            ok(ret, "CreateRestrictedToken failed with error %u\n", GetLastError());
-
-            memset(buffer_integrity, 0, sizeof(buffer_integrity));
-            ret = GetTokenInformation(token6, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
-            ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
-            tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
-            ok(EqualSid(tml->Label.Sid, &high_level), "Expected high integrity level\n");
-
-            size = 0;
-            ret = GetKernelObjectSecurity(token6, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
-            ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-               "Unexpected GetKernelObjectSecurity return value %u, error %u\n", ret, GetLastError());
-
-            sd3 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-            ret = GetKernelObjectSecurity(token6, LABEL_SECURITY_INFORMATION, sd3, size, &size);
-            ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
-
-            sacl = NULL;
-            ret = GetSecurityDescriptorSacl(sd3, &present, &sacl, &defaulted);
-            ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
-            ok(present, "No SACL in the security descriptor\n");
-            ok(sacl != NULL, "NULL SACL in the security descriptor\n");
-
-            if (sacl)
-            {
-                ret = GetAce(sacl, 0, (void **)&ace);
-                ok(ret, "GetAce failed with error %u\n", GetLastError());
-                ok(ace->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
-                   "Unexpected ACE type %#x\n", ace->Header.AceType);
-                ok(EqualSid(&ace->SidStart, &medium_level),
-                   "Expected medium integrity level\n");
-            }
-
-            HeapFree(GetProcessHeap(), 0, sd3);
-            RevertToSelf();
-            CloseHandle(token5);
-
-            /* Start child process with the restricted token */
-            sprintf(buffer, "%s tests/security.c test_token_sd_restricted", myARGV[0]);
-            ret = CreateProcessAsUserA(token6, NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info);
-            ok(ret, "CreateProcess failed with error %u\n", GetLastError());
-            winetest_wait_child_process(info.hProcess);
-            CloseHandle(info.hProcess);
-            CloseHandle(info.hThread);
-            CloseHandle(token6);
-
-            /* DuplicateTokenEx should assign security label even when SA points to empty SD */
-            memset(sd, 0, sizeof(buffer_sd));
-            ret = InitializeSecurityDescriptor(sd, SECURITY_DESCRIPTOR_REVISION);
-            ok(ret, "InitializeSecurityDescriptor failed with error %u\n", GetLastError());
-
-            sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-            sa.lpSecurityDescriptor = sd;
-            sa.bInheritHandle = FALSE;
-
-            ret = DuplicateTokenEx(token, 0, &sa, 0, TokenPrimary, &token6);
-            ok(ret, "DuplicateTokenEx failed with error %u\n", GetLastError());
-
-            size = 0;
-            ret = GetKernelObjectSecurity(token6, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
-            ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-               "Unexpected GetKernelObjectSecurity return value %u, error %u\n", ret, GetLastError());
-
-            sd3 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-            ret = GetKernelObjectSecurity(token6, LABEL_SECURITY_INFORMATION, sd3, size, &size);
-            ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
-
-            sacl = NULL;
-            ret = GetSecurityDescriptorSacl(sd3, &present, &sacl, &defaulted);
-            ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
-            ok(present, "No SACL in the security descriptor\n");
-            ok(sacl != NULL, "NULL SACL in the security descriptor\n");
-
-            if (sacl)
-            {
-                ret = GetAce(sacl, 0, (void **)&ace);
-                ok(ret, "GetAce failed with error %u\n", GetLastError());
-                ok(ace->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
-                   "Unexpected ACE type %#x\n", ace->Header.AceType);
-                ok(EqualSid(&ace->SidStart, &high_level),
-                   "Expected high integrity level\n");
-            }
-
-            HeapFree(GetProcessHeap(), 0, sd3);
-            CloseHandle(token6);
-        }
-        else
-            skip("Skipping test, running without admin rights\n");
-
         ret = InitializeAcl(acl, 256, ACL_REVISION);
         ok(ret, "InitializeAcl failed with error %u\n", GetLastError());
 
@@ -7486,90 +7348,6 @@ static void test_token_security_descriptor(void)
 
         ret = SetKernelObjectSecurity(token, LABEL_SECURITY_INFORMATION, sd);
         ok(ret, "SetKernelObjectSecurity failed with error %u\n", GetLastError());
-
-        /* changing the label of the security descriptor does not change the integrity level of the token itself */
-        memset(buffer_integrity, 0, sizeof(buffer_integrity));
-        ret = GetTokenInformation(token, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
-        ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
-        tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
-        ok(EqualSid(tml->Label.Sid, &medium_level) || EqualSid(tml->Label.Sid, &high_level),
-            "Expected medium or high integrity level\n");
-
-        /* restricting / duplicating a token resets the mandatory sd label */
-        ret = CreateRestrictedToken(token, 0, 0, NULL, 0, NULL, 0, NULL, &token4);
-        ok(ret, "CreateRestrictedToken failed with error %u\n", GetLastError());
-
-        memset(buffer_integrity, 0, sizeof(buffer_integrity));
-        ret = GetTokenInformation(token4, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
-        ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
-        tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
-        ok(EqualSid(tml->Label.Sid, &medium_level) || EqualSid(tml->Label.Sid, &high_level),
-            "Expected medium or high integrity level\n");
-
-        size = 0;
-        ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
-        ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-           "Unexpected GetKernelObjectSecurity return value %u, error %u\n", ret, GetLastError());
-
-        sd3 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-        ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, sd3, size, &size);
-        ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
-
-        ret = GetSecurityDescriptorSacl(sd3, &present, &sacl, &defaulted);
-        ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
-        ok(present, "No SACL in the security descriptor\n");
-        ok(sacl != NULL, "NULL SACL in the security descriptor\n");
-
-        if (sacl)
-        {
-            ret = GetAce(sacl, 0, (void **)&ace);
-            ok(ret, "GetAce failed with error %u\n", GetLastError());
-            ok(ace->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
-               "Unexpected ACE type %#x\n", ace->Header.AceType);
-            ok(EqualSid(&ace->SidStart, &medium_level) || EqualSid(&ace->SidStart, &high_level),
-               "Low integrity level should not have been inherited\n");
-        }
-
-        HeapFree(GetProcessHeap(), 0, sd3);
-        CloseHandle(token4);
-
-        ret = DuplicateTokenEx(token, 0, NULL, 0, TokenPrimary, &token4);
-        ok(ret, "DuplicateTokenEx failed with error %u\n", GetLastError());
-
-        memset(buffer_integrity, 0, sizeof(buffer_integrity));
-        ret = GetTokenInformation(token4, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
-        ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
-        tml = (TOKEN_MANDATORY_LABEL*) buffer_integrity;
-        ok(EqualSid(tml->Label.Sid, &medium_level) || EqualSid(tml->Label.Sid, &high_level),
-            "Expected medium or high integrity level\n");
-
-        size = 0;
-        ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
-        ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-           "Unexpected GetKernelObjectSecurity return value %u, error %u\n", ret, GetLastError());
-
-        sd3 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-        ret = GetKernelObjectSecurity(token4, LABEL_SECURITY_INFORMATION, sd3, size, &size);
-        ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
-
-        sacl = NULL;
-        ret = GetSecurityDescriptorSacl(sd3, &present, &sacl, &defaulted);
-        ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
-        ok(present, "No SACL in the security descriptor\n");
-        ok(sacl != NULL, "NULL SACL in the security descriptor\n");
-
-        if (sacl)
-        {
-            ret = GetAce(sacl, 0, (void **)&ace);
-            ok(ret, "GetAce failed with error %u\n", GetLastError());
-            ok(ace->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
-               "Unexpected ACE type %#x\n", ace->Header.AceType);
-            ok(EqualSid(&ace->SidStart, &medium_level) || EqualSid(&ace->SidStart, &high_level),
-               "Low integrity level should not have been inherited\n");
-        }
-
-        HeapFree(GetProcessHeap(), 0, sd3);
-        CloseHandle(token4);
     }
     else
         win_skip("SYSTEM_MANDATORY_LABEL not supported\n");
@@ -7673,116 +7451,6 @@ static void test_child_token_sd(void)
        "Unexpected ACE type %#x\n", ace_label->Header.AceType);
     ok(!EqualSid(&ace_label->SidStart, &low_level),
        "Low integrity level should not have been inherited\n");
-
-    HeapFree(GetProcessHeap(), 0, sd);
-}
-
-static void test_child_token_sd_restricted(void)
-{
-    static SID high_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
-                             {SECURITY_MANDATORY_HIGH_RID}};
-    SYSTEM_MANDATORY_LABEL_ACE *ace_label;
-    BOOL ret, present, defaulted;
-    TOKEN_MANDATORY_LABEL *tml;
-    BYTE buffer_integrity[64];
-    SECURITY_DESCRIPTOR *sd;
-    HANDLE token;
-    DWORD size;
-    ACL *acl;
-
-    if (!pAddMandatoryAce)
-    {
-        win_skip("SYSTEM_MANDATORY_LABEL not supported\n");
-        return;
-    }
-
-    ret = OpenProcessToken(GetCurrentProcess(), MAXIMUM_ALLOWED, &token);
-    ok(ret, "OpenProcessToken failed with error %u\n", GetLastError());
-
-    ret = GetKernelObjectSecurity(token, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
-    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-       "Unexpected GetKernelObjectSecurity return value %d, error %u\n", ret, GetLastError());
-
-    sd = HeapAlloc(GetProcessHeap(), 0, size);
-    ret = GetKernelObjectSecurity(token, LABEL_SECURITY_INFORMATION, sd, size, &size);
-    ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
-
-    acl = NULL;
-    present = FALSE;
-    defaulted = TRUE;
-    ret = GetSecurityDescriptorSacl(sd, &present, &acl, &defaulted);
-    ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
-    ok(present, "SACL not present\n");
-    ok(acl && acl != (void *)0xdeadbeef, "Got invalid SACL\n");
-    ok(!defaulted, "SACL defaulted\n");
-    ok(acl->AceCount == 1, "Expected exactly one ACE\n");
-    ret = GetAce(acl, 0, (void **)&ace_label);
-    ok(ret, "GetAce failed with error %u\n", GetLastError());
-    ok(ace_label->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
-       "Unexpected ACE type %#x\n", ace_label->Header.AceType);
-    ok(EqualSid(&ace_label->SidStart, &high_level),
-       "Expected high integrity level\n");
-
-    memset(buffer_integrity, 0, sizeof(buffer_integrity));
-    ret = GetTokenInformation(token, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
-    ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
-    tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
-    ok(EqualSid(tml->Label.Sid, &high_level), "Expected high integrity level\n");
-
-    HeapFree(GetProcessHeap(), 0, sd);
-}
-
-static void test_child_token_sd_medium(void)
-{
-    static SID medium_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
-                               {SECURITY_MANDATORY_MEDIUM_RID}};
-    SYSTEM_MANDATORY_LABEL_ACE *ace_label;
-    BOOL ret, present, defaulted;
-    TOKEN_MANDATORY_LABEL *tml;
-    BYTE buffer_integrity[64];
-    SECURITY_DESCRIPTOR *sd;
-    HANDLE token;
-    DWORD size;
-    ACL *acl;
-
-    if (!pAddMandatoryAce)
-    {
-        win_skip("SYSTEM_MANDATORY_LABEL not supported\n");
-        return;
-    }
-
-    ret = OpenProcessToken(GetCurrentProcess(), MAXIMUM_ALLOWED, &token);
-    ok(ret, "OpenProcessToken failed with error %u\n", GetLastError());
-
-    ret = GetKernelObjectSecurity(token, LABEL_SECURITY_INFORMATION, NULL, 0, &size);
-    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-       "Unexpected GetKernelObjectSecurity return value %d, error %u\n", ret, GetLastError());
-
-    sd = HeapAlloc(GetProcessHeap(), 0, size);
-    ret = GetKernelObjectSecurity(token, LABEL_SECURITY_INFORMATION, sd, size, &size);
-    ok(ret, "GetKernelObjectSecurity failed with error %u\n", GetLastError());
-
-    acl = NULL;
-    present = FALSE;
-    defaulted = TRUE;
-    ret = GetSecurityDescriptorSacl(sd, &present, &acl, &defaulted);
-    ok(ret, "GetSecurityDescriptorSacl failed with error %u\n", GetLastError());
-    ok(present, "SACL not present\n");
-    ok(acl && acl != (void *)0xdeadbeef, "Got invalid SACL\n");
-    ok(!defaulted, "SACL defaulted\n");
-    ok(acl->AceCount == 1, "Expected exactly one ACE\n");
-    ret = GetAce(acl, 0, (void **)&ace_label);
-    ok(ret, "GetAce failed with error %u\n", GetLastError());
-    ok(ace_label->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE,
-       "Unexpected ACE type %#x\n", ace_label->Header.AceType);
-    ok(EqualSid(&ace_label->SidStart, &medium_level),
-       "Expected medium integrity level\n");
-
-    memset(buffer_integrity, 0, sizeof(buffer_integrity));
-    ret = GetTokenInformation(token, TokenIntegrityLevel, buffer_integrity, sizeof(buffer_integrity), &size);
-    ok(ret, "GetTokenInformation failed with error %u\n", GetLastError());
-    tml = (TOKEN_MANDATORY_LABEL *)buffer_integrity;
-    ok(EqualSid(tml->Label.Sid, &medium_level), "Expected medium integrity level\n");
 
     HeapFree(GetProcessHeap(), 0, sd);
 }
@@ -8031,6 +7699,309 @@ static void test_EqualDomainSid(void)
     FreeSid(domainsid);
 }
 
+static DWORD WINAPI duplicate_handle_access_thread(void *arg)
+{
+    HANDLE event = arg, event2;
+    BOOL ret;
+
+    event2 = OpenEventA(SYNCHRONIZE, FALSE, "test_dup");
+    ok(!!event2, "got error %u\n", GetLastError());
+    CloseHandle(event2);
+
+    event2 = OpenEventA(EVENT_MODIFY_STATE, FALSE, "test_dup");
+    ok(!!event2, "got error %u\n", GetLastError());
+    CloseHandle(event2);
+
+    ret = DuplicateHandle(GetCurrentProcess(), event, GetCurrentProcess(),
+            &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(ret, "got error %u\n", GetLastError());
+    CloseHandle(event2);
+
+    return 0;
+}
+
+static void test_duplicate_handle_access(void)
+{
+    char acl_buffer[200], everyone_sid_buffer[100], local_sid_buffer[100], cmdline[300];
+    HANDLE token, restricted, impersonation, all_event, sync_event, event2, thread;
+    SECURITY_ATTRIBUTES sa = {.nLength = sizeof(sa)};
+    SID *everyone_sid = (SID *)everyone_sid_buffer;
+    SID *local_sid = (SID *)local_sid_buffer;
+    ACL *acl = (ACL *)acl_buffer;
+    SID_AND_ATTRIBUTES sid_attr;
+    SECURITY_DESCRIPTOR sd;
+    PROCESS_INFORMATION pi;
+    STARTUPINFOA si = {0};
+    DWORD size;
+    BOOL ret;
+
+    /* DuplicateHandle() validates access against the calling thread's token and
+     * the target process's token. It does *not* validate access against the
+     * calling process's token, even if the calling thread is not impersonating.
+     */
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, &token);
+    ok(ret, "got error %u\n", GetLastError());
+
+    size = sizeof(everyone_sid_buffer);
+    ret = CreateWellKnownSid(WinWorldSid, NULL, everyone_sid, &size);
+    ok(ret, "got error %u\n", GetLastError());
+    size = sizeof(local_sid_buffer);
+    ret = CreateWellKnownSid(WinLocalSid, NULL, local_sid, &size);
+    ok(ret, "got error %u\n", GetLastError());
+
+    InitializeAcl(acl, sizeof(acl_buffer), ACL_REVISION);
+    ret = AddAccessAllowedAce(acl, ACL_REVISION, SYNCHRONIZE, everyone_sid);
+    ok(ret, "got error %u\n", GetLastError());
+    InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
+    ret = AddAccessAllowedAce(acl, ACL_REVISION, EVENT_MODIFY_STATE, local_sid);
+    ok(ret, "got error %u\n", GetLastError());
+    InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
+    ret = SetSecurityDescriptorDacl(&sd, TRUE, acl, FALSE);
+    ok(ret, "got error %u\n", GetLastError());
+    sa.lpSecurityDescriptor = &sd;
+
+    sid_attr.Sid = local_sid;
+    sid_attr.Attributes = 0;
+    ret = CreateRestrictedToken(token, 0, 1, &sid_attr, 0, NULL, 0, NULL, &restricted);
+    ok(ret, "got error %u\n", GetLastError());
+    ret = DuplicateTokenEx(restricted, TOKEN_IMPERSONATE, NULL,
+            SecurityImpersonation, TokenImpersonation, &impersonation);
+    ok(ret, "got error %u\n", GetLastError());
+
+    all_event = CreateEventA(&sa, TRUE, TRUE, "test_dup");
+    ok(!!all_event, "got error %u\n", GetLastError());
+    sync_event = OpenEventA(SYNCHRONIZE, FALSE, "test_dup");
+    ok(!!sync_event, "got error %u\n", GetLastError());
+
+    event2 = OpenEventA(SYNCHRONIZE, FALSE, "test_dup");
+    ok(!!event2, "got error %u\n", GetLastError());
+    CloseHandle(event2);
+
+    event2 = OpenEventA(EVENT_MODIFY_STATE, FALSE, "test_dup");
+    ok(!!event2, "got error %u\n", GetLastError());
+    CloseHandle(event2);
+
+    ret = DuplicateHandle(GetCurrentProcess(), all_event, GetCurrentProcess(), &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(ret, "got error %u\n", GetLastError());
+    CloseHandle(event2);
+
+    ret = DuplicateHandle(GetCurrentProcess(), sync_event, GetCurrentProcess(), &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(ret, "got error %u\n", GetLastError());
+    CloseHandle(event2);
+
+    ret = SetThreadToken(NULL, impersonation);
+    ok(ret, "got error %u\n", GetLastError());
+
+    thread = CreateThread(NULL, 0, duplicate_handle_access_thread, sync_event, 0, NULL);
+    ret = WaitForSingleObject(thread, 1000);
+    ok(!ret, "wait failed\n");
+
+    event2 = OpenEventA(SYNCHRONIZE, FALSE, "test_dup");
+    ok(!!event2, "got error %u\n", GetLastError());
+    CloseHandle(event2);
+
+    SetLastError(0xdeadbeef);
+    event2 = OpenEventA(EVENT_MODIFY_STATE, FALSE, "test_dup");
+    ok(!event2, "expected failure\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %u\n", GetLastError());
+
+    ret = DuplicateHandle(GetCurrentProcess(), all_event, GetCurrentProcess(), &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(ret, "got error %u\n", GetLastError());
+    CloseHandle(event2);
+
+    SetLastError(0xdeadbeef);
+    ret = DuplicateHandle(GetCurrentProcess(), sync_event, GetCurrentProcess(), &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %u\n", GetLastError());
+
+    ret = RevertToSelf();
+    ok(ret, "got error %u\n", GetLastError());
+
+    sprintf(cmdline, "%s security duplicate %Iu %u %Iu", myARGV[0],
+            (ULONG_PTR)sync_event, GetCurrentProcessId(), (ULONG_PTR)impersonation );
+    ret = CreateProcessAsUserA(restricted, NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = DuplicateHandle(GetCurrentProcess(), all_event, pi.hProcess, &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(ret, "got error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = DuplicateHandle(GetCurrentProcess(), sync_event, pi.hProcess, &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %u\n", GetLastError());
+
+    ret = WaitForSingleObject(pi.hProcess, 1000);
+    ok(!ret, "wait failed\n");
+
+    CloseHandle(impersonation);
+    CloseHandle(restricted);
+    CloseHandle(token);
+    CloseHandle(sync_event);
+    CloseHandle(all_event);
+}
+
+static void test_duplicate_handle_access_child(void)
+{
+    HANDLE event, event2, process, token;
+    BOOL ret;
+
+    event = (HANDLE)(ULONG_PTR)_atoi64(myARGV[3]);
+    process = OpenProcess(PROCESS_DUP_HANDLE, FALSE, atoi(myARGV[4]));
+    ok(!!process, "failed to open process, error %u\n", GetLastError());
+
+    event2 = OpenEventA(SYNCHRONIZE, FALSE, "test_dup");
+    ok(!!event2, "got error %u\n", GetLastError());
+    CloseHandle(event2);
+
+    SetLastError(0xdeadbeef);
+    event2 = OpenEventA(EVENT_MODIFY_STATE, FALSE, "test_dup");
+    ok(!event2, "expected failure\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %u\n", GetLastError());
+
+    ret = DuplicateHandle(process, event, process, &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(ret, "got error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = DuplicateHandle(process, event, GetCurrentProcess(), &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %u\n", GetLastError());
+
+    ret = DuplicateHandle(process, (HANDLE)(ULONG_PTR)_atoi64(myARGV[5]),
+            GetCurrentProcess(), &token, 0, FALSE, DUPLICATE_SAME_ACCESS);
+    ok(ret, "failed to retrieve token, error %u\n", GetLastError());
+    ret = SetThreadToken(NULL, token);
+    ok(ret, "failed to set thread token, error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = DuplicateHandle(process, event, process, &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = DuplicateHandle(process, event, GetCurrentProcess(), &event2, EVENT_MODIFY_STATE, FALSE, 0);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %u\n", GetLastError());
+
+    ret = RevertToSelf();
+    ok(ret, "failed to revert, error %u\n", GetLastError());
+    CloseHandle(token);
+    CloseHandle(process);
+}
+
+#define join_process(a) join_process_(__LINE__, a)
+static void join_process_(int line, const PROCESS_INFORMATION *pi)
+{
+    DWORD ret = WaitForSingleObject(pi->hProcess, 1000);
+    ok_(__FILE__, line)(!ret, "wait failed\n");
+    CloseHandle(pi->hProcess);
+    CloseHandle(pi->hThread);
+}
+
+static void test_create_process_token(void)
+{
+    char cmdline[300], acl_buffer[200], sid_buffer[100];
+    SECURITY_ATTRIBUTES sa = {.nLength = sizeof(sa)};
+    ACL *acl = (ACL *)acl_buffer;
+    SID *sid = (SID *)sid_buffer;
+    SID_AND_ATTRIBUTES sid_attr;
+    HANDLE event, token, token2;
+    PROCESS_INFORMATION pi;
+    SECURITY_DESCRIPTOR sd;
+    STARTUPINFOA si = {0};
+    DWORD size;
+    BOOL ret;
+
+    size = sizeof(sid_buffer);
+    ret = CreateWellKnownSid(WinLocalSid, NULL, sid, &size);
+    ok(ret, "got error %u\n", GetLastError());
+    ret = InitializeAcl(acl, sizeof(acl_buffer), ACL_REVISION);
+    ok(ret, "got error %u\n", GetLastError());
+    ret = AddAccessAllowedAce(acl, ACL_REVISION, EVENT_MODIFY_STATE, sid);
+    ok(ret, "got error %u\n", GetLastError());
+    InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
+    ret = SetSecurityDescriptorDacl(&sd, TRUE, acl, FALSE);
+    ok(ret, "got error %u\n", GetLastError());
+    sa.lpSecurityDescriptor = &sd;
+    event = CreateEventA(&sa, TRUE, TRUE, "test_event");
+    ok(!!event, "got error %u\n", GetLastError());
+
+    sprintf(cmdline, "%s security restricted 0", myARGV[0]);
+
+    ret = CreateProcessAsUserA(NULL, NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret, "got error %u\n", GetLastError());
+    join_process(&pi);
+
+    ret = CreateProcessAsUserA(GetCurrentProcessToken(), NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    todo_wine ok(!ret, "expected failure\n");
+    todo_wine ok(GetLastError() == ERROR_INVALID_HANDLE, "got error %u\n", GetLastError());
+    if (ret) join_process(&pi);
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, &token);
+    ok(ret, "got error %u\n", GetLastError());
+    ret = CreateProcessAsUserA(token, NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret || broken(GetLastError() == ERROR_ACCESS_DENIED) /* < 7 */, "got error %u\n", GetLastError());
+    if (ret) join_process(&pi);
+    CloseHandle(token);
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
+    ok(ret, "got error %u\n", GetLastError());
+    ret = CreateProcessAsUserA(token, NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %u\n", GetLastError());
+    CloseHandle(token);
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_ASSIGN_PRIMARY, &token);
+    ok(ret, "got error %u\n", GetLastError());
+    ret = CreateProcessAsUserA(token, NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %u\n", GetLastError());
+    CloseHandle(token);
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE, &token);
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = DuplicateTokenEx(token, TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, NULL,
+            SecurityImpersonation, TokenImpersonation, &token2);
+    ok(ret, "got error %u\n", GetLastError());
+    ret = CreateProcessAsUserA(token2, NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret || broken(GetLastError() == ERROR_BAD_TOKEN_TYPE) /* < 7 */, "got error %u\n", GetLastError());
+    if (ret) join_process(&pi);
+    CloseHandle(token2);
+
+    sprintf(cmdline, "%s security restricted 1", myARGV[0]);
+    sid_attr.Sid = sid;
+    sid_attr.Attributes = 0;
+    ret = CreateRestrictedToken(token, 0, 1, &sid_attr, 0, NULL, 0, NULL, &token2);
+    ok(ret, "got error %u\n", GetLastError());
+    ret = CreateProcessAsUserA(token2, NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret, "got error %u\n", GetLastError());
+    join_process(&pi);
+    CloseHandle(token2);
+
+    CloseHandle(token);
+
+    CloseHandle(event);
+}
+
+static void test_create_process_token_child(void)
+{
+    HANDLE event;
+
+    SetLastError(0xdeadbeef);
+    event = OpenEventA(EVENT_MODIFY_STATE, FALSE, "test_event");
+    if (!atoi(myARGV[3]))
+    {
+        ok(!!event, "got error %u\n", GetLastError());
+        CloseHandle(event);
+    }
+    else
+    {
+        ok(!event, "expected failure\n");
+        ok(GetLastError() == ERROR_ACCESS_DENIED, "got error %u\n", GetLastError());
+    }
+}
+
 START_TEST(security)
 {
     init();
@@ -8040,12 +8011,12 @@ START_TEST(security)
     {
         if (!strcmp(myARGV[2], "test_token_sd"))
             test_child_token_sd();
-        else if (!strcmp(myARGV[2], "test_token_sd_restricted"))
-            test_child_token_sd_restricted();
-        else if (!strcmp(myARGV[2], "test_token_sd_medium"))
-            test_child_token_sd_medium();
-        else
+        else if (!strcmp(myARGV[2], "test"))
             test_process_security_child();
+        else if (!strcmp(myARGV[2], "duplicate"))
+            test_duplicate_handle_access_child();
+        else if (!strcmp(myARGV[2], "restricted"))
+            test_create_process_token_child();
         return;
     }
     test_kernel_objects_security();
@@ -8091,6 +8062,8 @@ START_TEST(security)
     test_token_label();
     test_GetExplicitEntriesFromAclW();
     test_BuildSecurityDescriptorW();
+    test_duplicate_handle_access();
+    test_create_process_token();
 
     /* Must be the last test, modifies process token */
     test_token_security_descriptor();

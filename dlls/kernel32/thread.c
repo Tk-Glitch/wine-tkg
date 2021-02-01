@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <assert.h>
 #include <stdarg.h>
 #include <sys/types.h>
@@ -31,8 +29,36 @@
 #include "winerror.h"
 #include "winternl.h"
 
+#include "wine/asm.h"
 #include "kernel_private.h"
 
+
+/***********************************************************************
+ *           BaseThreadInitThunk (KERNEL32.@)
+ */
+#ifdef __i386__
+__ASM_FASTCALL_FUNC( BaseThreadInitThunk, 12,
+                    "pushl %ebp\n\t"
+                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                    "movl %esp,%ebp\n\t"
+                    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                    "pushl %ebx\n\t"
+                    __ASM_CFI(".cfi_rel_offset %ebx,-4\n\t")
+                    "movl 8(%ebp),%ebx\n\t"
+                    /* deliberately mis-align the stack by 8, Doom 3 needs this */
+                    "pushl 4(%ebp)\n\t"  /* Driller expects readable address at this offset */
+                    "pushl 4(%ebp)\n\t"
+                    "pushl %ebx\n\t"
+                    "call *%edx\n\t"
+                    "movl %eax,(%esp)\n\t"
+                    "call " __ASM_STDCALL( "RtlExitUserThread", 4 ))
+#else
+void __fastcall BaseThreadInitThunk( DWORD unknown, LPTHREAD_START_ROUTINE entry, void *arg )
+{
+    RtlExitUserThread( entry( arg ) );
+}
+#endif
 
 /***********************************************************************
  *           FreeLibraryAndExitThread (KERNEL32.@)

@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define COBJMACROS
+
 #include <stdio.h>
 
 #include "wine/test.h"
@@ -25,10 +27,17 @@
 #include "wingdi.h"
 #include "imm.h"
 #include "ddk/imm.h"
+#include "initguid.h"
+#include "objbase.h"
+#include "urlmon.h"
 
 static BOOL (WINAPI *pImmAssociateContextEx)(HWND,HIMC,DWORD);
 static BOOL (WINAPI *pImmIsUIMessageA)(HWND,UINT,WPARAM,LPARAM);
 static UINT (WINAPI *pSendInput) (UINT, INPUT*, size_t);
+static HRESULT (WINAPI *pCoGetApartmentType)(APTTYPE *, APTTYPEQUALIFIER *);
+static HRESULT (WINAPI *pCoInitializeEx)(void *, DWORD);
+static void (WINAPI *pCoUninitialize)(void);
+static HRESULT (WINAPI *pCoCreateInstance)(REFCLSID, IUnknown *, DWORD, REFIID, void **);
 
 /*
  * msgspy - record and analyse message traces sent to a certain window
@@ -1099,10 +1108,9 @@ static void test_ImmDefaultHwnd(void)
 
 static BOOL CALLBACK is_ime_window_proc(HWND hWnd, LPARAM param)
 {
-    static const WCHAR imeW[] = {'I','M','E',0};
     WCHAR class_nameW[16];
     HWND *ime_window = (HWND *)param;
-    if (GetClassNameW(hWnd, class_nameW, ARRAY_SIZE(class_nameW)) && !lstrcmpW(class_nameW, imeW))
+    if (GetClassNameW(hWnd, class_nameW, ARRAY_SIZE(class_nameW)) && !lstrcmpW(class_nameW, L"IME"))
     {
         *ime_window = hWnd;
         return FALSE;
@@ -1562,9 +1570,6 @@ static LRESULT CALLBACK processkey_wnd_proc( HWND hWnd, UINT msg, WPARAM wParam,
 
 static void test_ime_processkey(void)
 {
-    WCHAR classNameW[] = {'P','r','o','c','e','s','s', 'K','e','y','T','e','s','t','C','l','a','s','s',0};
-    WCHAR windowNameW[] = {'P','r','o','c','e','s','s', 'K','e','y',0};
-
     MSG msg;
     WNDCLASSW wclass;
     HANDLE hInstance = GetModuleHandleW(NULL);
@@ -1573,7 +1578,7 @@ static void test_ime_processkey(void)
     INT rc;
     HWND hWndTest;
 
-    wclass.lpszClassName = classNameW;
+    wclass.lpszClassName = L"ProcessKeyTestClass";
     wclass.style         = CS_HREDRAW | CS_VREDRAW;
     wclass.lpfnWndProc   = processkey_wnd_proc;
     wclass.hInstance     = hInstance;
@@ -1589,7 +1594,7 @@ static void test_ime_processkey(void)
     }
 
     /* create the test window that will receive the keystrokes */
-    hWndTest = CreateWindowW(wclass.lpszClassName, windowNameW,
+    hWndTest = CreateWindowW(wclass.lpszClassName, L"ProcessKey",
                              WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, 100, 100,
                              NULL, NULL, hInstance, NULL);
 
@@ -1642,6 +1647,8 @@ static void test_ime_processkey(void)
             if(msg.wParam == VK_PROCESSKEY)
                 trace("ProcessKey was correctly found\n");
         }
+        TranslateMessage(&msg);
+        /* test calling TranslateMessage multiple times */
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
@@ -2027,7 +2034,247 @@ static void test_InvalidIMC(void)
     ok(ret == ERROR_INVALID_HANDLE, "wrong last error %08x!\n", ret);
 }
 
-START_TEST(imm32) {
+static LRESULT CALLBACK com_init_test_wndproc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    return DefWindowProcA(hwnd, uMsg, wParam, lParam);
+}
+
+#define COM_INIT_TEST_APTTYPE(apttype) com_init_test_apttype(apttype, __LINE__)
+static void com_init_test_apttype(APTTYPE expected_type, unsigned int line)
+{
+    APTTYPEQUALIFIER apttypequal;
+    HRESULT hr, hr_expected;
+    APTTYPE apttype;
+    IUnknown *unk;
+
+    if (expected_type == -1)
+        hr_expected = CO_E_NOTINITIALIZED;
+    else
+        hr_expected = S_OK;
+
+    hr = pCoCreateInstance(&CLSID_InternetZoneManager, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&unk);
+    ok_(__FILE__, line)(hr == hr_expected, "Unexpected hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+        IUnknown_Release(unk);
+
+    hr = pCoGetApartmentType(&apttype, &apttypequal);
+    ok_(__FILE__, line)(hr == (expected_type == -1 ? CO_E_NOTINITIALIZED : S_OK),
+            "Failed to get apartment type, hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+        ok_(__FILE__, line)(apttype == expected_type && apttypequal == APTTYPEQUALIFIER_NONE,
+                "Unexpected apartment type %u/%u.\n", apttype, apttypequal);
+}
+
+static HWND test_com_create_window(DWORD style)
+{
+    WNDCLASSA clsA;
+    HWND hwnd;
+
+    clsA.style = 0;
+    clsA.lpfnWndProc = com_init_test_wndproc;
+    clsA.cbClsExtra = 0;
+    clsA.cbWndExtra = 0;
+    clsA.hInstance = GetModuleHandleA(NULL);
+    clsA.hIcon = 0;
+    clsA.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
+    clsA.hbrBackground = NULL;
+    clsA.lpszMenuName = NULL;
+    clsA.lpszClassName = "COMInitTest";
+
+    RegisterClassA(&clsA);
+
+    hwnd = CreateWindowExA(0, "COMInitTest", "Test window", WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
+            WS_MAXIMIZEBOX | style, 0, 0, 100, 100, GetDesktopWindow(), NULL, GetModuleHandleA(NULL), NULL);
+    ok(hwnd != NULL, "Failed to create a test window.\n");
+
+    return hwnd;
+}
+
+static void test_com_init(const char *testname)
+{
+    WNDCLASSA clsA;
+    HMODULE hmod;
+    HRESULT hr;
+    HWND hwnd;
+
+    clsA.style = 0;
+    clsA.lpfnWndProc = com_init_test_wndproc;
+    clsA.cbClsExtra = 0;
+    clsA.cbWndExtra = 0;
+    clsA.hInstance = GetModuleHandleA(NULL);
+    clsA.hIcon = 0;
+    clsA.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
+    clsA.hbrBackground = NULL;
+    clsA.lpszMenuName = NULL;
+    clsA.lpszClassName = "COMInitTest";
+
+    RegisterClassA(&clsA);
+
+    hmod = LoadLibraryA("ole32.dll");
+
+    pCoGetApartmentType = (void *)GetProcAddress(hmod, "CoGetApartmentType");
+    pCoInitializeEx = (void *)GetProcAddress(hmod, "CoInitializeEx");
+    pCoUninitialize = (void *)GetProcAddress(hmod, "CoUninitialize");
+    pCoCreateInstance = (void *)GetProcAddress(hmod, "CoCreateInstance");
+
+    if (!strcmp(testname, "visible"))
+    {
+        COM_INIT_TEST_APTTYPE(-1);
+
+        hwnd = test_com_create_window(WS_VISIBLE);
+
+        COM_INIT_TEST_APTTYPE(APTTYPE_MAINSTA);
+
+        hr = pCoInitializeEx(NULL, COINIT_MULTITHREADED);
+        ok(hr == S_OK, "Failed to re-initialize, hr %#x.\n", hr);
+
+        COM_INIT_TEST_APTTYPE(APTTYPE_MTA);
+
+        pCoUninitialize();
+
+        COM_INIT_TEST_APTTYPE(-1);
+
+        DestroyWindow(hwnd);
+    }
+    else if (!strcmp(testname, "invisible"))
+    {
+        COM_INIT_TEST_APTTYPE(-1);
+
+        hwnd = test_com_create_window(0);
+
+        COM_INIT_TEST_APTTYPE(-1);
+
+        ShowWindow(hwnd, SW_SHOW);
+
+        COM_INIT_TEST_APTTYPE(APTTYPE_MAINSTA);
+
+        hr = pCoInitializeEx(NULL, COINIT_MULTITHREADED);
+        ok(hr == S_OK, "Failed to re-initialize, hr %#x.\n", hr);
+
+        COM_INIT_TEST_APTTYPE(APTTYPE_MTA);
+
+        pCoUninitialize();
+
+        COM_INIT_TEST_APTTYPE(-1);
+
+        DestroyWindow(hwnd);
+    }
+    else if (!strcmp(testname, "imedisabled"))
+    {
+        COM_INIT_TEST_APTTYPE(-1);
+
+        ImmDisableIME(-1);
+
+        hwnd = test_com_create_window(WS_VISIBLE);
+
+        COM_INIT_TEST_APTTYPE(-1);
+
+        hr = pCoInitializeEx(NULL, COINIT_MULTITHREADED);
+        ok(hr == S_OK, "Failed to re-initialize, hr %#x.\n", hr);
+
+        COM_INIT_TEST_APTTYPE(APTTYPE_MTA);
+
+        pCoUninitialize();
+
+        COM_INIT_TEST_APTTYPE(-1);
+
+        DestroyWindow(hwnd);
+    }
+    else if (!strcmp(testname, "sta"))
+    {
+        COM_INIT_TEST_APTTYPE(-1);
+
+        hwnd = test_com_create_window(WS_VISIBLE);
+
+        COM_INIT_TEST_APTTYPE(APTTYPE_MAINSTA);
+
+        /* Initialize for STA explicitly, S_OK is forced, with incremented counter. */
+        hr = pCoInitializeEx(0, COINIT_APARTMENTTHREADED);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+        COM_INIT_TEST_APTTYPE(APTTYPE_MAINSTA);
+
+        pCoUninitialize();
+
+        COM_INIT_TEST_APTTYPE(APTTYPE_MAINSTA);
+
+        DestroyWindow(hwnd);
+    }
+    else if (!strcmp(testname, "uninit"))
+    {
+        COM_INIT_TEST_APTTYPE(-1);
+
+        hwnd = test_com_create_window(WS_VISIBLE);
+
+        COM_INIT_TEST_APTTYPE(APTTYPE_MAINSTA);
+
+        pCoUninitialize();
+
+        COM_INIT_TEST_APTTYPE(-1);
+
+        DestroyWindow(hwnd);
+
+        hwnd = test_com_create_window(WS_VISIBLE);
+
+        COM_INIT_TEST_APTTYPE(APTTYPE_MAINSTA);
+
+        DestroyWindow(hwnd);
+    }
+    else
+        ok(0, "Unknown test name %s.\n", testname);
+}
+
+static void test_com_initialization(void)
+{
+    char path_name[MAX_PATH];
+    PROCESS_INFORMATION info;
+    STARTUPINFOA startup;
+    HMODULE hmod;
+    char **argv;
+    int i;
+    static const char *test_params[] =
+    {
+        "imedisabled",
+        "visible",
+        "invisible",
+        "sta",
+        "uninit",
+    };
+
+    hmod = LoadLibraryA("ole32.dll");
+    pCoGetApartmentType = (void *)GetProcAddress(hmod, "CoGetApartmentType");
+    FreeLibrary(hmod);
+    if (!pCoGetApartmentType)
+    {
+        win_skip("Skipping COM initialization tests on older system.\n");
+        return;
+    }
+
+    winetest_get_mainargs( &argv );
+    for (i = 0; i < ARRAY_SIZE(test_params); ++i)
+    {
+        memset( &startup, 0, sizeof(startup) );
+        startup.cb = sizeof( startup );
+        sprintf( path_name, "%s imm32 %s", argv[0], test_params[i] );
+        ok( CreateProcessA( NULL, path_name, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info ),
+            "CreateProcess failed.\n" );
+        winetest_wait_child_process( info.hProcess );
+        CloseHandle( info.hProcess );
+        CloseHandle( info.hThread );
+    }
+}
+
+START_TEST(imm32)
+{
+    char **argv;
+    int argc = winetest_get_mainargs( &argv );
+
+    if (argc >= 3)
+    {
+        test_com_init( argv[2] );
+        return;
+    }
+
     if (init())
     {
         test_ImmNotifyIME();
@@ -2054,6 +2301,7 @@ START_TEST(imm32) {
         if (pSendInput)
             test_ime_processkey();
         else win_skip("SendInput is not available\n");
+        test_com_initialization();
     }
     cleanup();
 }

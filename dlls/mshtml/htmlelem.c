@@ -38,32 +38,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
-static const WCHAR aW[]        = {'A',0};
-static const WCHAR areaW[]     = {'A','R','E','A',0};
-static const WCHAR bodyW[]     = {'B','O','D','Y',0};
-static const WCHAR buttonW[]   = {'B','U','T','T','O','N',0};
-static const WCHAR embedW[]    = {'E','M','B','E','D',0};
-static const WCHAR formW[]     = {'F','O','R','M',0};
-static const WCHAR frameW[]    = {'F','R','A','M','E',0};
-static const WCHAR headW[]     = {'H','E','A','D',0};
-static const WCHAR htmlW[]     = {'H','T','M','L',0};
-static const WCHAR iframeW[]   = {'I','F','R','A','M','E',0};
-static const WCHAR imgW[]      = {'I','M','G',0};
-static const WCHAR inputW[]    = {'I','N','P','U','T',0};
-static const WCHAR labelW[]    = {'L','A','B','E','L',0};
-static const WCHAR linkW[]     = {'L','I','N','K',0};
-static const WCHAR metaW[]     = {'M','E','T','A',0};
-static const WCHAR objectW[]   = {'O','B','J','E','C','T',0};
-static const WCHAR optionW[]   = {'O','P','T','I','O','N',0};
-static const WCHAR scriptW[]   = {'S','C','R','I','P','T',0};
-static const WCHAR selectW[]   = {'S','E','L','E','C','T',0};
-static const WCHAR styleW[]    = {'S','T','Y','L','E',0};
-static const WCHAR tableW[]    = {'T','A','B','L','E',0};
-static const WCHAR tdW[]       = {'T','D',0};
-static const WCHAR textareaW[] = {'T','E','X','T','A','R','E','A',0};
-static const WCHAR title_tagW[]= {'T','I','T','L','E',0};
-static const WCHAR trW[]       = {'T','R',0};
-
 #define ATTRFLAG_CASESENSITIVE  0x0001
 #define ATTRFLAG_ASSTRING       0x0002
 #define ATTRFLAG_EXPANDURL      0x0004
@@ -74,31 +48,31 @@ typedef struct {
 } tag_desc_t;
 
 static const tag_desc_t tag_descs[] = {
-    {aW,         HTMLAnchorElement_Create},
-    {areaW,      HTMLAreaElement_Create},
-    {bodyW,      HTMLBodyElement_Create},
-    {buttonW,    HTMLButtonElement_Create},
-    {embedW,     HTMLEmbedElement_Create},
-    {formW,      HTMLFormElement_Create},
-    {frameW,     HTMLFrameElement_Create},
-    {headW,      HTMLHeadElement_Create},
-    {htmlW,      HTMLHtmlElement_Create},
-    {iframeW,    HTMLIFrame_Create},
-    {imgW,       HTMLImgElement_Create},
-    {inputW,     HTMLInputElement_Create},
-    {labelW,     HTMLLabelElement_Create},
-    {linkW,      HTMLLinkElement_Create},
-    {metaW,      HTMLMetaElement_Create},
-    {objectW,    HTMLObjectElement_Create},
-    {optionW,    HTMLOptionElement_Create},
-    {scriptW,    HTMLScriptElement_Create},
-    {selectW,    HTMLSelectElement_Create},
-    {styleW,     HTMLStyleElement_Create},
-    {tableW,     HTMLTable_Create},
-    {tdW,        HTMLTableCell_Create},
-    {textareaW,  HTMLTextAreaElement_Create},
-    {title_tagW, HTMLTitleElement_Create},
-    {trW,        HTMLTableRow_Create}
+    {L"A",         HTMLAnchorElement_Create},
+    {L"AREA",      HTMLAreaElement_Create},
+    {L"BODY",      HTMLBodyElement_Create},
+    {L"BUTTON",    HTMLButtonElement_Create},
+    {L"EMBED",     HTMLEmbedElement_Create},
+    {L"FORM",      HTMLFormElement_Create},
+    {L"FRAME",     HTMLFrameElement_Create},
+    {L"HEAD",      HTMLHeadElement_Create},
+    {L"HTML",      HTMLHtmlElement_Create},
+    {L"IFRAME",    HTMLIFrame_Create},
+    {L"IMG",       HTMLImgElement_Create},
+    {L"INPUT",     HTMLInputElement_Create},
+    {L"LABEL",     HTMLLabelElement_Create},
+    {L"LINK",      HTMLLinkElement_Create},
+    {L"META",      HTMLMetaElement_Create},
+    {L"OBJECT",    HTMLObjectElement_Create},
+    {L"OPTION",    HTMLOptionElement_Create},
+    {L"SCRIPT",    HTMLScriptElement_Create},
+    {L"SELECT",    HTMLSelectElement_Create},
+    {L"STYLE",     HTMLStyleElement_Create},
+    {L"TABLE",     HTMLTable_Create},
+    {L"TD",        HTMLTableCell_Create},
+    {L"TEXTAREA",  HTMLTextAreaElement_Create},
+    {L"TITLE",     HTMLTitleElement_Create},
+    {L"TR",        HTMLTableRow_Create}
 };
 
 static const tag_desc_t *get_tag_desc(const WCHAR *tag_name)
@@ -230,18 +204,12 @@ HRESULT elem_string_attr_setter(HTMLElement *elem, const WCHAR *name, const WCHA
 
 HRESULT get_readystate_string(READYSTATE readystate, BSTR *p)
 {
-    static const WCHAR uninitializedW[] = {'u','n','i','n','i','t','i','a','l','i','z','e','d',0};
-    static const WCHAR loadingW[] = {'l','o','a','d','i','n','g',0};
-    static const WCHAR loadedW[] = {'l','o','a','d','e','d',0};
-    static const WCHAR interactiveW[] = {'i','n','t','e','r','a','c','t','i','v','e',0};
-    static const WCHAR completeW[] = {'c','o','m','p','l','e','t','e',0};
-
     static const LPCWSTR readystate_strs[] = {
-        uninitializedW,
-        loadingW,
-        loadedW,
-        interactiveW,
-        completeW
+        L"uninitialized",
+        L"loading",
+        L"loaded",
+        L"interactive",
+        L"complete"
     };
 
     assert(readystate <= READYSTATE_COMPLETE);
@@ -892,13 +860,11 @@ HRESULT attr_value_to_string(VARIANT *v)
 {
     HRESULT hres;
 
-    static const WCHAR nullW[] = {'n','u','l','l',0};
-
     switch(V_VT(v)) {
     case VT_BSTR:
         break;
     case VT_NULL:
-        V_BSTR(v) = SysAllocString(nullW);
+        V_BSTR(v) = SysAllocString(L"null");
         if(!V_BSTR(v))
             return E_OUTOFMEMORY;
         V_VT(v) = VT_BSTR;
@@ -1075,10 +1041,8 @@ static HRESULT WINAPI HTMLElement_get_tagName(IHTMLElement *iface, BSTR *p)
     TRACE("(%p)->(%p)\n", This, p);
 
     if(!This->dom_element) {
-        static const WCHAR comment_tagW[] = {'!',0};
-
         TRACE("comment element\n");
-        *p = SysAllocString(comment_tagW);
+        *p = SysAllocString(L"!");
         return *p ? S_OK : E_OUTOFMEMORY;
     }
 
@@ -1346,8 +1310,6 @@ static HRESULT WINAPI HTMLElement_get_document(IHTMLElement *iface, IDispatch **
     return S_OK;
 }
 
-static const WCHAR titleW[] = {'t','i','t','l','e',0};
-
 static HRESULT WINAPI HTMLElement_put_title(IHTMLElement *iface, BSTR v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
@@ -1360,7 +1322,7 @@ static HRESULT WINAPI HTMLElement_put_title(IHTMLElement *iface, BSTR v)
         VARIANT *var;
         HRESULT hres;
 
-        hres = dispex_get_dprop_ref(&This->node.event_target.dispex, titleW, TRUE, &var);
+        hres = dispex_get_dprop_ref(&This->node.event_target.dispex, L"title", TRUE, &var);
         if(FAILED(hres))
             return hres;
 
@@ -1391,7 +1353,7 @@ static HRESULT WINAPI HTMLElement_get_title(IHTMLElement *iface, BSTR *p)
         VARIANT *var;
         HRESULT hres;
 
-        hres = dispex_get_dprop_ref(&This->node.event_target.dispex, titleW, FALSE, &var);
+        hres = dispex_get_dprop_ref(&This->node.event_target.dispex, L"title", FALSE, &var);
         if(hres == DISP_E_UNKNOWNNAME) {
             *p = NULL;
         }else if(V_VT(var) != VT_BSTR) {
@@ -1409,15 +1371,13 @@ static HRESULT WINAPI HTMLElement_get_title(IHTMLElement *iface, BSTR *p)
     return return_nsstr(nsres, &title_str, p);
 }
 
-static const WCHAR languageW[] = {'l','a','n','g','u','a','g','e',0};
-
 static HRESULT WINAPI HTMLElement_put_language(IHTMLElement *iface, BSTR v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    return elem_string_attr_setter(This, languageW, v);
+    return elem_string_attr_setter(This, L"language", v);
 }
 
 static HRESULT WINAPI HTMLElement_get_language(IHTMLElement *iface, BSTR *p)
@@ -1426,7 +1386,7 @@ static HRESULT WINAPI HTMLElement_get_language(IHTMLElement *iface, BSTR *p)
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    return elem_string_attr_getter(This, languageW, TRUE, p);
+    return elem_string_attr_getter(This, L"language", TRUE, p);
 }
 
 static HRESULT WINAPI HTMLElement_put_onselectstart(IHTMLElement *iface, VARIANT v)
@@ -1877,12 +1837,7 @@ static HRESULT insert_adjacent_node(HTMLElement *This, const WCHAR *where, nsIDO
     nsresult nsres;
     HRESULT hres = S_OK;
 
-    static const WCHAR beforebeginW[] = {'b','e','f','o','r','e','b','e','g','i','n',0};
-    static const WCHAR afterbeginW[] = {'a','f','t','e','r','b','e','g','i','n',0};
-    static const WCHAR beforeendW[] = {'b','e','f','o','r','e','e','n','d',0};
-    static const WCHAR afterendW[] = {'a','f','t','e','r','e','n','d',0};
-
-    if (!wcsicmp(where, beforebeginW)) {
+    if (!wcsicmp(where, L"beforebegin")) {
         nsIDOMNode *parent;
 
         nsres = nsIDOMNode_GetParentNode(This->node.nsnode, &parent);
@@ -1894,7 +1849,7 @@ static HRESULT insert_adjacent_node(HTMLElement *This, const WCHAR *where, nsIDO
 
         nsres = nsIDOMNode_InsertBefore(parent, nsnode, This->node.nsnode, &ret_nsnode);
         nsIDOMNode_Release(parent);
-    }else if(!wcsicmp(where, afterbeginW)) {
+    }else if(!wcsicmp(where, L"afterbegin")) {
         nsIDOMNode *first_child;
 
         nsres = nsIDOMNode_GetFirstChild(This->node.nsnode, &first_child);
@@ -1907,9 +1862,9 @@ static HRESULT insert_adjacent_node(HTMLElement *This, const WCHAR *where, nsIDO
 
         if (first_child)
             nsIDOMNode_Release(first_child);
-    }else if (!wcsicmp(where, beforeendW)) {
+    }else if (!wcsicmp(where, L"beforeend")) {
         nsres = nsIDOMNode_AppendChild(This->node.nsnode, nsnode, &ret_nsnode);
-    }else if (!wcsicmp(where, afterendW)) {
+    }else if (!wcsicmp(where, L"afterend")) {
         nsIDOMNode *next_sibling, *parent;
 
         nsres = nsIDOMNode_GetParentNode(This->node.nsnode, &parent);
@@ -2838,7 +2793,7 @@ static HRESULT WINAPI HTMLElement2_put_accessKey(IHTMLElement2 *iface, BSTR v)
     HTMLElement *This = impl_from_IHTMLElement2(iface);
     VARIANT var;
 
-    static WCHAR accessKeyW[] = {'a','c','c','e','s','s','K','e','y',0};
+    static WCHAR accessKeyW[] = L"accessKey";
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
@@ -3048,9 +3003,7 @@ static HRESULT WINAPI HTMLElement2_get_readyState(IHTMLElement2 *iface, VARIANT 
         if(FAILED(hres))
             return hres;
     }else {
-        static const WCHAR completeW[] = {'c','o','m','p','l','e','t','e',0};
-
-        str = SysAllocString(completeW);
+        str = SysAllocString(L"complete");
         if(!str)
             return E_OUTOFMEMORY;
     }
@@ -3782,8 +3735,6 @@ static HRESULT WINAPI HTMLElement3_get_hideFocus(IHTMLElement3 *iface, VARIANT_B
     return E_NOTIMPL;
 }
 
-static const WCHAR disabledW[] = {'d','i','s','a','b','l','e','d',0};
-
 static HRESULT WINAPI HTMLElement3_put_disabled(IHTMLElement3 *iface, VARIANT_BOOL v)
 {
     HTMLElement *This = impl_from_IHTMLElement3(iface);
@@ -3795,7 +3746,7 @@ static HRESULT WINAPI HTMLElement3_put_disabled(IHTMLElement3 *iface, VARIANT_BO
     if(This->node.vtbl->put_disabled)
         return This->node.vtbl->put_disabled(&This->node, v);
 
-    hres = dispex_get_dprop_ref(&This->node.event_target.dispex, disabledW, TRUE, &var);
+    hres = dispex_get_dprop_ref(&This->node.event_target.dispex, L"disabled", TRUE, &var);
     if(FAILED(hres))
         return hres;
 
@@ -3816,7 +3767,7 @@ static HRESULT WINAPI HTMLElement3_get_disabled(IHTMLElement3 *iface, VARIANT_BO
     if(This->node.vtbl->get_disabled)
         return This->node.vtbl->get_disabled(&This->node, p);
 
-    hres = dispex_get_dprop_ref(&This->node.event_target.dispex, disabledW, FALSE, &var);
+    hres = dispex_get_dprop_ref(&This->node.event_target.dispex, L"disabled", FALSE, &var);
     if(hres == DISP_E_UNKNOWNNAME) {
         *p = VARIANT_FALSE;
         return S_OK;
@@ -5127,9 +5078,7 @@ HRESULT elem_unique_id(unsigned id, BSTR *p)
 {
     WCHAR buf[32];
 
-    static const WCHAR formatW[] = {'m','s','_','_','i','d','%','u',0};
-
-    swprintf(buf, ARRAY_SIZE(buf), formatW, id);
+    swprintf(buf, ARRAY_SIZE(buf), L"ms__id%u", id);
     *p = SysAllocString(buf);
     return *p ? S_OK : E_OUTOFMEMORY;
 }

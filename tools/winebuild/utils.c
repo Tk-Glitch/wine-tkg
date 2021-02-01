@@ -34,7 +34,6 @@
 # include <sys/stat.h>
 #endif
 
-#include "wine/list.h"
 #include "build.h"
 
 #if defined(_WIN32) && !defined(__CYGWIN__)
@@ -463,6 +462,7 @@ struct strarray get_ld_command(void)
         case PLATFORM_FREEBSD:
             strarray_add( &args, "-m", (force_pointer_size == 8) ? "elf_x86_64_fbsd" : "elf_i386_fbsd", NULL );
             break;
+        case PLATFORM_MINGW:
         case PLATFORM_WINDOWS:
             strarray_add( &args, "-m", (force_pointer_size == 8) ? "i386pep" : "i386pe", NULL );
             break;
@@ -480,7 +480,7 @@ struct strarray get_ld_command(void)
         }
     }
 
-    if (target_cpu == CPU_ARM && target_platform != PLATFORM_WINDOWS)
+    if (target_cpu == CPU_ARM && !is_pe())
         strarray_add( &args, "--no-wchar-size-warning", NULL );
 
     return args;
@@ -543,86 +543,7 @@ size_t input_buffer_pos;
 size_t input_buffer_size;
 unsigned char *output_buffer;
 size_t output_buffer_pos;
-size_t output_buffer_rva;
 size_t output_buffer_size;
-
-struct label
-{
-    struct list entry;
-    char *name;
-    size_t pos;
-    size_t rva;
-};
-
-static struct list labels = LIST_INIT( labels );
-
-struct label *get_label( const char *name )
-{
-    struct label *label;
-
-    LIST_FOR_EACH_ENTRY( label, &labels, struct label, entry )
-    {
-        if (!strcmp(name, label->name))
-            return label;
-    }
-
-    label = xmalloc( sizeof(*label) );
-    label->name = xstrdup( name );
-    label->pos = 0;
-    label->rva = 0;
-
-    list_add_tail( &labels, &label->entry );
-
-    return label;
-}
-
-size_t label_pos( const char *name )
-{
-    struct label *label = get_label( name );
-    return label->pos;
-}
-
-size_t label_rva( const char *name )
-{
-    struct label *label = get_label( name );
-    return label->rva;
-}
-
-size_t label_rva_align( const char *name )
-{
-    const unsigned int page_size = get_page_size();
-    size_t rva = label_rva( name );
-    size_t size = page_size - (rva % page_size);
-
-    if (size != page_size) rva += size;
-    return rva;
-}
-
-void put_label( const char *name )
-{
-    struct label *label = get_label( name );
-
-    if (label->pos || label->rva)
-    {
-        assert( label->pos == output_buffer_pos );
-        assert( label->rva == output_buffer_rva );
-    }
-
-    label->pos = output_buffer_pos;
-    label->rva = output_buffer_rva;
-}
-
-void free_labels( void )
-{
-    struct label *label, *label2;
-
-    LIST_FOR_EACH_ENTRY_SAFE( label, label2, &labels, struct label, entry )
-    {
-        list_remove( &label->entry );
-        free( label->name );
-        free( label );
-    }
-}
 
 static void check_output_buffer_space( size_t size )
 {
@@ -655,9 +576,7 @@ void init_output_buffer(void)
 {
     output_buffer_size = 1024;
     output_buffer_pos = 0;
-    output_buffer_rva = 0;
     output_buffer = xmalloc( output_buffer_size );
-    free_labels();
 }
 
 void flush_output_buffer(void)
@@ -667,7 +586,6 @@ void flush_output_buffer(void)
         fatal_error( "Error writing to %s\n", output_file_name );
     close_output_file();
     free( output_buffer );
-    free_labels();
 }
 
 unsigned char get_byte(void)
@@ -707,14 +625,12 @@ void put_data( const void *data, size_t size )
     check_output_buffer_space( size );
     memcpy( output_buffer + output_buffer_pos, data, size );
     output_buffer_pos += size;
-    output_buffer_rva += size;
 }
 
 void put_byte( unsigned char val )
 {
     check_output_buffer_space( 1 );
     output_buffer[output_buffer_pos++] = val;
-    output_buffer_rva++;
 }
 
 void put_word( unsigned short val )
@@ -751,11 +667,6 @@ void put_pword( unsigned int val )
     else put_dword( val );
 }
 
-void put_str( const char *str )
-{
-    put_data( str, strlen(str) + 1 );
-}
-
 void align_output( unsigned int align )
 {
     size_t size = align - (output_buffer_pos % align);
@@ -764,14 +675,6 @@ void align_output( unsigned int align )
     check_output_buffer_space( size );
     memset( output_buffer + output_buffer_pos, 0, size );
     output_buffer_pos += size;
-}
-
-void align_output_rva( unsigned int file_align, unsigned int rva_align )
-{
-    size_t size = rva_align - (output_buffer_rva % rva_align);
-
-    if (size != rva_align) output_buffer_rva += size;
-    align_output( file_align );
 }
 
 /* output a standard header for generated files */
@@ -784,9 +687,14 @@ void output_standard_file_header(void)
     output( "/* This file can be copied, modified and distributed without restriction. */\n\n" );
     if (safe_seh)
     {
-        output( "\t.def    @feat.00; .scl 3; .type 0; .endef\n" );
+        output( "\t.def    @feat.00\n\t.scl 3\n\t.type 0\n\t.endef\n" );
         output( "\t.globl  @feat.00\n" );
         output( ".set @feat.00, 1\n" );
+    }
+    if (thumb_mode)
+    {
+        output( "\t.syntax unified\n" );
+        output( "\t.thumb\n" );
     }
 }
 
@@ -958,7 +866,6 @@ void free_dll_spec( DLLSPEC *spec )
         free( odp->name );
         free( odp->export_name );
         free( odp->link_name );
-        free( odp->impl_name );
     }
     free( spec->file_name );
     free( spec->dll_name );
@@ -968,7 +875,6 @@ void free_dll_spec( DLLSPEC *spec )
     free( spec->names );
     free( spec->ordinals );
     free( spec->resources );
-    free( spec->syscalls );
     free( spec );
 }
 
@@ -1026,7 +932,7 @@ const char *get_link_name( const ORDDEF *odp )
     switch (odp->type)
     {
     case TYPE_STDCALL:
-        if (target_platform == PLATFORM_WINDOWS)
+        if (is_pe())
         {
             if (odp->flags & FLAG_THISCALL) return odp->link_name;
             if (odp->flags & FLAG_FASTCALL) ret = strmake( "@%s@%u", odp->link_name, get_args_size( odp ));
@@ -1042,7 +948,7 @@ const char *get_link_name( const ORDDEF *odp )
         break;
 
     case TYPE_PASCAL:
-        if (target_platform == PLATFORM_WINDOWS && !kill_at)
+        if (is_pe() && !kill_at)
         {
             int args = get_args_size( odp );
             if (odp->flags & FLAG_REGISTER) args += get_ptr_size();  /* context argument */
@@ -1059,6 +965,22 @@ const char *get_link_name( const ORDDEF *odp )
     buffer = ret;
     return ret;
 }
+
+/*******************************************************************
+ *         sort_func_list
+ *
+ * Sort a list of functions, removing duplicates.
+ */
+int sort_func_list( ORDDEF **list, int count, int (*compare)(const void *, const void *) )
+{
+    int i, j;
+
+    if (!count) return 0;
+    qsort( list, count, sizeof(*list), compare );
+    for (i = j = 0; i < count; i++) if (compare( &list[j], &list[i] )) list[++j] = list[i];
+    return j + 1;
+}
+
 
 /* parse a cpu name and return the corresponding value */
 int get_cpu_from_name( const char *name )
@@ -1178,6 +1100,7 @@ const char *asm_name( const char *sym )
 
     switch (target_platform)
     {
+    case PLATFORM_MINGW:
     case PLATFORM_WINDOWS:
         if (target_cpu != CPU_x86) return sym;
         if (sym[0] == '@') return sym;  /* fastcall */
@@ -1201,15 +1124,20 @@ const char *func_declaration( const char *func )
     {
     case PLATFORM_APPLE:
         return "";
+    case PLATFORM_MINGW:
     case PLATFORM_WINDOWS:
         free( buffer );
-        buffer = strmake( ".def %s; .scl 2; .type 32; .endef", asm_name(func) );
+        buffer = strmake( ".def %s\n\t.scl 2\n\t.type 32\n\t.endef%s", asm_name(func),
+                          thumb_mode ? "\n\t.thumb_func" : "" );
         break;
     default:
         free( buffer );
         switch(target_cpu)
         {
         case CPU_ARM:
+            buffer = strmake( ".type %s,%%function%s", func,
+                              thumb_mode ? "\n\t.thumb_func" : "" );
+            break;
         case CPU_ARM64:
             buffer = strmake( ".type %s,%%function", func );
             break;
@@ -1228,6 +1156,7 @@ void output_function_size( const char *name )
     switch (target_platform)
     {
     case PLATFORM_APPLE:
+    case PLATFORM_MINGW:
     case PLATFORM_WINDOWS:
         break;
     default:
@@ -1257,6 +1186,7 @@ void output_rva( const char *format, ... )
     va_start( valist, format );
     switch (target_platform)
     {
+    case PLATFORM_MINGW:
     case PLATFORM_WINDOWS:
         output( "\t.rva " );
         vfprintf( output_file, format, valist );
@@ -1276,6 +1206,7 @@ void output_gnu_stack_note(void)
 {
     switch (target_platform)
     {
+    case PLATFORM_MINGW:
     case PLATFORM_WINDOWS:
     case PLATFORM_APPLE:
         break;
@@ -1305,6 +1236,7 @@ const char *asm_globl( const char *func )
     case PLATFORM_APPLE:
         buffer = strmake( "\t.globl _%s\n\t.private_extern _%s\n_%s:", func, func, func );
         break;
+    case PLATFORM_MINGW:
     case PLATFORM_WINDOWS:
         buffer = strmake( "\t.globl %s%s\n%s%s:", target_cpu == CPU_x86 ? "_" : "", func,
                           target_cpu == CPU_x86 ? "_" : "", func );
@@ -1343,6 +1275,7 @@ const char *get_asm_export_section(void)
     switch (target_platform)
     {
     case PLATFORM_APPLE:   return ".data";
+    case PLATFORM_MINGW:
     case PLATFORM_WINDOWS: return ".section .edata";
     default:               return ".section .data";
     }
@@ -1362,6 +1295,7 @@ const char *get_asm_rsrc_section(void)
     switch (target_platform)
     {
     case PLATFORM_APPLE:   return ".data";
+    case PLATFORM_MINGW:
     case PLATFORM_WINDOWS: return ".section .rsrc";
     default:               return ".section .data";
     }
@@ -1376,21 +1310,34 @@ const char *get_asm_string_section(void)
     }
 }
 
-/*******************************************************************
- *         sort_func_list
- *
- * Sort a list of functions, removing duplicates.
- */
-int sort_func_list( ORDDEF **list, int count, int (*compare)(const void *, const void *) )
+const char *arm64_page( const char *sym )
 {
-    int i, j;
+    static char *buffer;
 
-    if (!count) return 0;
-    qsort( list, count, sizeof(*list), compare );
-
-    for (i = j = 0; i < count; i++)
+    switch (target_platform)
     {
-        if (compare( &list[j], &list[i] )) list[++j] = list[i];
+    case PLATFORM_APPLE:
+        free( buffer );
+        buffer = strmake( "%s@PAGE", sym );
+        return buffer;
+    default:
+        return sym;
     }
-    return j + 1;
+}
+
+const char *arm64_pageoff( const char *sym )
+{
+    static char *buffer;
+
+    free( buffer );
+    switch (target_platform)
+    {
+    case PLATFORM_APPLE:
+        buffer = strmake( "%s@PAGEOFF", sym );
+        break;
+    default:
+        buffer = strmake( ":lo12:%s", sym );
+        break;
+    }
+    return buffer;
 }

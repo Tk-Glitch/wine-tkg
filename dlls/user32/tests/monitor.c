@@ -283,29 +283,9 @@ struct device_info
     DEVMODEA original_mode;
 };
 
-static BOOL get_primary_adapter(CHAR *name)
-{
-    DISPLAY_DEVICEA dd;
-    DWORD i;
-
-    dd.cb = sizeof(dd);
-    for (i = 0; EnumDisplayDevicesA(NULL, i, &dd, 0); ++i)
-    {
-        if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
-        {
-            lstrcpyA(name, dd.DeviceName);
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
-
 #define expect_dm(a, b, c) _expect_dm(__LINE__, a, b, c)
-static void _expect_dm(INT line, DEVMODEA expected, const CHAR *device, DWORD test)
+static void _expect_dm(INT line, const DEVMODEA *expected, const CHAR *device, DWORD test)
 {
-    CHAR primary_adapter[CCHDEVICENAME];
-    BOOL is_primary;
     DEVMODEA dm;
     BOOL ret;
 
@@ -315,48 +295,42 @@ static void _expect_dm(INT line, DEVMODEA expected, const CHAR *device, DWORD te
     ret = EnumDisplaySettingsA(device, ENUM_CURRENT_SETTINGS, &dm);
     ok_(__FILE__, line)(ret, "Device %s test %d EnumDisplaySettingsA failed, error %#x\n", device, test, GetLastError());
 
-    ok(get_primary_adapter(primary_adapter), "Failed to get primary adapter name.\n");
-    is_primary = !lstrcmpA(primary_adapter, device);
-
-    todo_wine_if(expected.dmFields & DM_POSITION)
-    ok_(__FILE__, line)((dm.dmFields & expected.dmFields) == expected.dmFields,
-            "Device %s test %d expect dmFields to contain %#x, got %#x\n", device, test, expected.dmFields, dm.dmFields);
+    ok_(__FILE__, line)((dm.dmFields & expected->dmFields) == expected->dmFields,
+            "Device %s test %d expect dmFields to contain %#x, got %#x\n", device, test, expected->dmFields, dm.dmFields);
     /* Wine doesn't support changing color depth yet */
-    todo_wine_if(expected.dmBitsPerPel != 32 && expected.dmBitsPerPel != 24)
-    ok_(__FILE__, line)(dm.dmBitsPerPel == expected.dmBitsPerPel, "Device %s test %d expect dmBitsPerPel %d, got %d\n",
-            device, test, expected.dmBitsPerPel, dm.dmBitsPerPel);
-    /* Wine currently reports primary monitor settings for non-primary monitors */
-    todo_wine_if(!is_primary && dm.dmPelsWidth != expected.dmPelsWidth)
-    ok_(__FILE__, line)(dm.dmPelsWidth == expected.dmPelsWidth, "Device %s test %d expect dmPelsWidth %d, got %d\n",
-            device, test, expected.dmPelsWidth, dm.dmPelsWidth);
-    todo_wine_if(!is_primary && dm.dmPelsHeight != expected.dmPelsHeight)
-    ok_(__FILE__, line)(dm.dmPelsHeight == expected.dmPelsHeight, "Device %s test %d expect dmPelsHeight %d, got %d\n",
-            device, test, expected.dmPelsHeight, dm.dmPelsHeight);
-    todo_wine_if(!is_primary && dm.dmPosition.x != expected.dmPosition.x)
-    ok_(__FILE__, line)(dm.dmPosition.x == expected.dmPosition.x, "Device %s test %d expect dmPosition.x %d, got %d\n",
-            device, test, expected.dmPosition.x, dm.dmPosition.x);
-    todo_wine_if(!is_primary && dm.dmPosition.y != expected.dmPosition.y)
-    ok_(__FILE__, line)(dm.dmPosition.y == expected.dmPosition.y, "Device %s test %d expect dmPosition.y %d, got %d\n",
-            device, test, expected.dmPosition.y, dm.dmPosition.y);
-    todo_wine_if(!is_primary && dm.dmDisplayFrequency != expected.dmDisplayFrequency)
-    ok_(__FILE__, line)(dm.dmDisplayFrequency == expected.dmDisplayFrequency,
-            "Device %s test %d expect dmDisplayFrequency %d, got %d\n", device, test, expected.dmDisplayFrequency,
+    todo_wine_if(expected->dmFields & DM_BITSPERPEL && expected->dmBitsPerPel != 32 && expected->dmBitsPerPel != 24)
+    ok_(__FILE__, line)(!(expected->dmFields & DM_BITSPERPEL) || dm.dmBitsPerPel == expected->dmBitsPerPel,
+            "Device %s test %d expect dmBitsPerPel %u, got %u\n", device, test, expected->dmBitsPerPel, dm.dmBitsPerPel);
+    ok_(__FILE__, line)(!(expected->dmFields & DM_PELSWIDTH) || dm.dmPelsWidth == expected->dmPelsWidth,
+            "Device %s test %d expect dmPelsWidth %u, got %u\n", device, test, expected->dmPelsWidth, dm.dmPelsWidth);
+    ok_(__FILE__, line)(!(expected->dmFields & DM_PELSHEIGHT) || dm.dmPelsHeight == expected->dmPelsHeight,
+            "Device %s test %d expect dmPelsHeight %u, got %u\n", device, test, expected->dmPelsHeight, dm.dmPelsHeight);
+    ok_(__FILE__, line)(!(expected->dmFields & DM_POSITION) || dm.dmPosition.x == expected->dmPosition.x,
+            "Device %s test %d expect dmPosition.x %d, got %d\n", device, test, expected->dmPosition.x, dm.dmPosition.x);
+    ok_(__FILE__, line)(!(expected->dmFields & DM_POSITION) || dm.dmPosition.y == expected->dmPosition.y,
+            "Device %s test %d expect dmPosition.y %d, got %d\n", device, test, expected->dmPosition.y, dm.dmPosition.y);
+    ok_(__FILE__, line)(!(expected->dmFields & DM_DISPLAYFREQUENCY) ||
+            dm.dmDisplayFrequency == expected->dmDisplayFrequency,
+            "Device %s test %d expect dmDisplayFrequency %u, got %u\n", device, test, expected->dmDisplayFrequency,
             dm.dmDisplayFrequency);
-    todo_wine_if(!is_primary && dm.dmDisplayOrientation != expected.dmDisplayOrientation)
-    ok_(__FILE__, line)(dm.dmDisplayOrientation == expected.dmDisplayOrientation,
-            "Device %s test %d expect dmDisplayOrientation %d, got %d\n", device, test, expected.dmDisplayOrientation,
+    ok_(__FILE__, line)(!(expected->dmFields & DM_DISPLAYORIENTATION) ||
+            dm.dmDisplayOrientation == expected->dmDisplayOrientation,
+            "Device %s test %d expect dmDisplayOrientation %d, got %d\n", device, test, expected->dmDisplayOrientation,
             dm.dmDisplayOrientation);
 }
 
 static void test_ChangeDisplaySettingsEx(void)
 {
+    static const DWORD registry_fields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT |
+            DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY | DM_POSITION;
+    static const DWORD depths[] = {8, 16, 32};
     DPI_AWARENESS_CONTEXT context = NULL;
     UINT primary, device, test, mode;
     UINT device_size, device_count;
     struct device_info *devices;
+    DEVMODEA dm, dm2, dm3;
     INT count, old_count;
     DISPLAY_DEVICEA dd;
-    DEVMODEA dm, dm2;
     POINTL position;
     DEVMODEW dmW;
     LONG res;
@@ -627,6 +601,114 @@ static void test_ChangeDisplaySettingsEx(void)
         ok(count == old_count, "Expect monitor count %d, got %d\n", old_count, count);
     }
 
+    /* Test changing to a mode with depth set but with zero width and height */
+    for (device = 0; device < device_count; ++device)
+    {
+        for (test = 0; test < ARRAY_SIZE(depths); ++test)
+        {
+            /* Find the native resolution */
+            memset(&dm, 0, sizeof(dm));
+            memset(&dm2, 0, sizeof(dm2));
+            dm2.dmSize = sizeof(dm2);
+            for (mode = 0; EnumDisplaySettingsExA(devices[device].name, mode, &dm2, 0); ++mode)
+            {
+                if (dm2.dmBitsPerPel == depths[test]
+                    && dm2.dmPelsWidth > dm.dmPelsWidth && dm2.dmPelsHeight > dm.dmPelsHeight)
+                    dm = dm2;
+            }
+            if (dm.dmBitsPerPel != depths[test])
+            {
+                skip("Depth %u is unsupported for %s.\n", depths[test], devices[device].name);
+                continue;
+            }
+
+            /* Find the second resolution */
+            memset(&dm2, 0, sizeof(dm2));
+            dm2.dmSize = sizeof(dm2);
+            for (mode = 0; EnumDisplaySettingsExA(devices[device].name, mode, &dm2, 0); ++mode)
+            {
+                if (dm2.dmBitsPerPel == depths[test]
+                    && dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight)
+                    break;
+            }
+            if (dm2.dmBitsPerPel != depths[test]
+                || dm2.dmPelsWidth == dm.dmPelsWidth || dm2.dmPelsHeight == dm.dmPelsHeight)
+            {
+                skip("Failed to find the second mode for %s.\n", devices[device].name);
+                continue;
+            }
+
+            /* Find the third resolution */
+            memset(&dm3, 0, sizeof(dm3));
+            dm3.dmSize = sizeof(dm3);
+            for (mode = 0; EnumDisplaySettingsExA(devices[device].name, mode, &dm3, 0); ++mode)
+            {
+                if (dm3.dmBitsPerPel == depths[test]
+                    && dm3.dmPelsWidth != dm.dmPelsWidth && dm3.dmPelsHeight != dm.dmPelsHeight
+                    && dm3.dmPelsWidth != dm2.dmPelsWidth && dm3.dmPelsHeight != dm2.dmPelsHeight)
+                    break;
+            }
+            if (dm3.dmBitsPerPel != depths[test]
+                || dm3.dmPelsWidth == dm.dmPelsWidth || dm3.dmPelsHeight == dm.dmPelsHeight
+                || dm3.dmPelsWidth == dm2.dmPelsWidth || dm3.dmPelsHeight == dm2.dmPelsHeight)
+            {
+                skip("Failed to find the third mode for %s.\n", devices[device].name);
+                continue;
+            }
+
+            /* Change the current mode to the third mode first */
+            res = ChangeDisplaySettingsExA(devices[device].name, &dm3, NULL, CDS_RESET, NULL);
+            ok(res == DISP_CHANGE_SUCCESSFUL
+               || broken(res == DISP_CHANGE_FAILED), /* Win8 TestBots */
+               "ChangeDisplaySettingsExA %s returned unexpected %d.\n", devices[device].name, res);
+            if (res != DISP_CHANGE_SUCCESSFUL)
+            {
+                win_skip("Failed to change display mode for %s.\n", devices[device].name);
+                continue;
+            }
+            flush_events();
+            expect_dm(&dm3, devices[device].name, test);
+
+            /* Change the registry mode to the second mode */
+            res = ChangeDisplaySettingsExA(devices[device].name, &dm2, NULL, CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+            ok(res == DISP_CHANGE_SUCCESSFUL
+               || broken(res == DISP_CHANGE_BADFLAGS), /* Win10 32bit */
+               "ChangeDisplaySettingsExA %s returned unexpected %d.\n", devices[device].name, res);
+
+            /* Change to a mode with depth set but with zero width and height */
+            memset(&dm, 0, sizeof(dm));
+            dm.dmSize = sizeof(dm);
+            dm.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
+            dm.dmBitsPerPel = depths[test];
+            res = ChangeDisplaySettingsExA(devices[device].name, &dm, NULL, CDS_RESET, NULL);
+            ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned unexpected %d.\n",
+               devices[device].name, res);
+            flush_events();
+
+            dd.cb = sizeof(dd);
+            res = EnumDisplayDevicesA(NULL, devices[device].index, &dd, 0);
+            ok(res, "EnumDisplayDevicesA %s failed, error %#x.\n", devices[device].name, GetLastError());
+            ok(dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP, "Expect %s attached.\n",
+               devices[device].name);
+
+            memset(&dm, 0, sizeof(dm));
+            dm.dmSize = sizeof(dm);
+            res = EnumDisplaySettingsA(devices[device].name, ENUM_CURRENT_SETTINGS, &dm);
+            ok(res, "Device %s EnumDisplaySettingsA failed, error %#x.\n", devices[device].name, GetLastError());
+            todo_wine_if(depths[test] != 32)
+            ok(dm.dmBitsPerPel == depths[test], "Device %s expect dmBitsPerPel %u, got %u.\n",
+               devices[device].name, depths[test], dm.dmBitsPerPel);
+            /* 2008 resets to the resolution in the registry. Newer versions of Windows doesn't
+             * change the current resolution */
+            ok(dm.dmPelsWidth == dm3.dmPelsWidth || broken(dm.dmPelsWidth == dm2.dmPelsWidth),
+               "Device %s expect dmPelsWidth %u, got %u.\n",
+               devices[device].name, dm3.dmPelsWidth, dm.dmPelsWidth);
+            ok(dm.dmPelsHeight == dm3.dmPelsHeight || broken(dm.dmPelsHeight == dm2.dmPelsHeight),
+               "Device %s expect dmPelsHeight %u, got %u.\n",
+               devices[device].name, dm3.dmPelsHeight, dm.dmPelsHeight);
+        }
+    }
+
     /* Detach all non-primary adapters to avoid position conflicts */
     for (device = 1; device < device_count; ++device)
     {
@@ -644,10 +726,10 @@ static void test_ChangeDisplaySettingsEx(void)
         dd.cb = sizeof(dd);
         res = EnumDisplayDevicesA(NULL, devices[device].index, &dd, 0);
         ok(res, "EnumDisplayDevicesA %s failed, error %#x\n", devices[device].name, GetLastError());
-        todo_wine ok(!(dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP), "Expect device %s detached.\n", devices[device].name);
+        ok(!(dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP), "Expect device %s detached.\n", devices[device].name);
 
         count = GetSystemMetrics(SM_CMONITORS);
-        todo_wine ok(count == old_count - 1, "Expect monitor count %d, got %d\n", old_count - 1, count);
+        ok(count == old_count - 1, "Expect monitor count %d, got %d\n", old_count - 1, count);
     }
 
     /* Test changing each adapter to every available mode */
@@ -683,7 +765,7 @@ static void test_ChangeDisplaySettingsEx(void)
             }
 
             flush_events();
-            expect_dm(dm, devices[device].name, mode);
+            expect_dm(&dm, devices[device].name, mode);
         }
 
         /* Restore settings */
@@ -703,24 +785,44 @@ static void test_ChangeDisplaySettingsEx(void)
     /* Test changing modes by saving settings to the registry first */
     for (device = 0; device < device_count; ++device)
     {
+        /* Place adapter to the right */
+        if (device == 0)
+        {
+            position.x = 0;
+            position.y = 0;
+        }
+        else
+        {
+            memset(&dm, 0, sizeof(dm));
+            dm.dmSize = sizeof(dm);
+            res = EnumDisplaySettingsA(devices[device - 1].name, ENUM_CURRENT_SETTINGS, &dm);
+            ok(res, "EnumDisplaySettingsA %s failed, error %#x.\n", devices[device - 1].name, GetLastError());
+            position.x = dm.dmPosition.x + dm.dmPelsWidth;
+        }
+
         memset(&dm, 0, sizeof(dm));
         dm.dmSize = sizeof(dm);
         res = EnumDisplaySettingsA(devices[device].name, ENUM_CURRENT_SETTINGS, &dm);
         ok(res, "EnumDisplaySettingsA %s failed, error %#x\n", devices[device].name, GetLastError());
+        dm3 = dm;
 
         /* Find a mode that's different from the current mode */
         memset(&dm2, 0, sizeof(dm2));
         dm2.dmSize = sizeof(dm2);
         for (mode = 0; EnumDisplaySettingsA(devices[device].name, mode, &dm2); ++mode)
         {
-            if (dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight)
+            /* Use the same color depth because the win2008 TestBots are unable to change it */
+            if (dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight &&
+                    dm2.dmBitsPerPel == dm.dmBitsPerPel)
                 break;
         }
-        ok(dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight, "Failed to find a different mode.\n");
+        ok(dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight &&
+                dm2.dmBitsPerPel == dm.dmBitsPerPel, "Failed to find a different mode.\n");
 
-        dm.dmPelsWidth = dm2.dmPelsWidth;
-        dm.dmPelsHeight = dm2.dmPelsHeight;
-        dm.dmDisplayFrequency = dm2.dmDisplayFrequency;
+        /* Test normal operation */
+        dm = dm2;
+        dm.dmFields |= DM_POSITION;
+        dm.dmPosition = position;
         res = ChangeDisplaySettingsExA(devices[device].name, &dm, NULL, CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
         ok(res == DISP_CHANGE_SUCCESSFUL ||
                 broken(res == DISP_CHANGE_FAILED), /* win8 TestBot */
@@ -736,7 +838,52 @@ static void test_ChangeDisplaySettingsEx(void)
         }
 
         flush_events();
-        expect_dm(dm, devices[device].name, 0);
+        expect_dm(&dm, devices[device].name, 0);
+
+        /* Test specifying only position, width and height */
+        memset(&dm, 0, sizeof(dm));
+        dm.dmSize = sizeof(dm);
+        dm.dmFields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
+        dm.dmPosition = position;
+        dm.dmPelsWidth = dm3.dmPelsWidth;
+        dm.dmPelsHeight = dm3.dmPelsHeight;
+        res = ChangeDisplaySettingsExA(devices[device].name, &dm, NULL, CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+        ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned %d.\n", devices[device].name, res);
+        res = EnumDisplaySettingsA(devices[device].name, ENUM_REGISTRY_SETTINGS, &dm);
+        /* Win10 either returns failure here or retrieves outdated display settings until they're applied */
+        if (res)
+        {
+            ok((dm.dmFields & registry_fields) == registry_fields, "Got unexpected dmFields %#x.\n", dm.dmFields);
+            ok(dm.dmPosition.x == position.x, "Expected dmPosition.x %d, got %d.\n", position.x, dm.dmPosition.x);
+            ok(dm.dmPosition.y == position.y, "Expected dmPosition.y %d, got %d.\n", position.y, dm.dmPosition.y);
+            ok(dm.dmPelsWidth == dm3.dmPelsWidth || broken(dm.dmPelsWidth == dm2.dmPelsWidth), /* Win10 */
+                    "Expected dmPelsWidth %u, got %u.\n", dm3.dmPelsWidth, dm.dmPelsWidth);
+            ok(dm.dmPelsHeight == dm3.dmPelsHeight || broken(dm.dmPelsHeight == dm2.dmPelsHeight), /* Win10 */
+                    "Expected dmPelsHeight %u, got %u.\n", dm3.dmPelsHeight, dm.dmPelsHeight);
+            ok(dm.dmBitsPerPel, "Expected dmBitsPerPel not zero.\n");
+            ok(dm.dmDisplayFrequency, "Expected dmDisplayFrequency not zero.\n");
+        }
+        else
+        {
+            win_skip("EnumDisplaySettingsA %s failed, error %#x.\n", devices[device].name, GetLastError());
+        }
+
+        res = ChangeDisplaySettingsExA(devices[device].name, NULL, NULL, 0, NULL);
+        ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned %d.\n", devices[device].name, res);
+        flush_events();
+
+        res = EnumDisplaySettingsA(devices[device].name, ENUM_REGISTRY_SETTINGS, &dm);
+        ok(res, "EnumDisplaySettingsA %s failed, error %#x.\n", devices[device].name, GetLastError());
+        ok((dm.dmFields & registry_fields) == registry_fields, "Got unexpected dmFields %#x.\n", dm.dmFields);
+        ok(dm.dmPosition.x == position.x, "Expected dmPosition.x %d, got %d.\n", position.x, dm.dmPosition.x);
+        ok(dm.dmPosition.y == position.y, "Expected dmPosition.y %d, got %d.\n", position.y, dm.dmPosition.y);
+        ok(dm.dmPelsWidth == dm3.dmPelsWidth, "Expected dmPelsWidth %u, got %u.\n", dm3.dmPelsWidth, dm.dmPelsWidth);
+        ok(dm.dmPelsHeight == dm3.dmPelsHeight, "Expected dmPelsHeight %u, got %u.\n", dm3.dmPelsHeight,
+                dm.dmPelsHeight);
+        ok(dm.dmBitsPerPel, "Expected dmBitsPerPel not zero.\n");
+        ok(dm.dmDisplayFrequency, "Expected dmDisplayFrequency not zero.\n");
+
+        expect_dm(&dm, devices[device].name, 0);
     }
 
     /* Test dmPosition */
@@ -780,7 +927,7 @@ static void test_ChangeDisplaySettingsEx(void)
         if (res)
         {
             /* The secondary adapter should be to the right of the primary adapter */
-            todo_wine ok(dm2.dmPosition.x == dm.dmPosition.x + dm.dmPelsWidth,
+            ok(dm2.dmPosition.x == dm.dmPosition.x + dm.dmPelsWidth,
                "Expected dm2.dmPosition.x %d, got %d.\n", dm.dmPosition.x + dm.dmPelsWidth,
                dm2.dmPosition.x);
             ok(dm2.dmPosition.y == dm.dmPosition.y, "Expected dm2.dmPosition.y %d, got %d.\n",
@@ -797,7 +944,7 @@ static void test_ChangeDisplaySettingsEx(void)
             dm2.dmSize = sizeof(dm2);
             res = EnumDisplaySettingsA(devices[1].name, ENUM_CURRENT_SETTINGS, &dm2);
             ok(res, "EnumDisplaySettingsA %s failed, error %#x\n", devices[1].name, GetLastError());
-            todo_wine ok((dm2.dmPosition.x == dm.dmPosition.x - dm2.dmPelsWidth),
+            ok(dm2.dmPosition.x == dm.dmPosition.x - dm2.dmPelsWidth,
                "Expected dmPosition.x %d, got %d.\n", dm.dmPosition.x - dm2.dmPelsWidth,
                dm2.dmPosition.x);
 
@@ -808,7 +955,7 @@ static void test_ChangeDisplaySettingsEx(void)
             ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned unexpected %d\n", devices[1].name, res);
 
             dm2.dmPosition.x = dm.dmPosition.x + dm.dmPelsWidth;
-            expect_dm(dm2, devices[1].name, 0);
+            expect_dm(&dm2, devices[1].name, 0);
 
             /* Test placing the secondary adapter to all sides of the primary adapter */
             for (test = 0; test < 8; ++test)
@@ -867,7 +1014,7 @@ static void test_ChangeDisplaySettingsEx(void)
                 }
 
                 flush_events();
-                expect_dm(dm2, devices[1].name, test);
+                expect_dm(&dm2, devices[1].name, test);
             }
 
             /* Test automatic position update when other adapters change resolution */
@@ -891,7 +1038,7 @@ static void test_ChangeDisplaySettingsEx(void)
             dm2.dmSize = sizeof(dm2);
             res = EnumDisplaySettingsA(devices[1].name, ENUM_CURRENT_SETTINGS, &dm2);
             ok(res, "EnumDisplaySettingsA %s failed, error %#x\n", devices[1].name, GetLastError());
-            todo_wine ok(dm2.dmPosition.x == dm.dmPelsWidth, "Expect dmPosition.x %d, got %d\n",
+            ok(dm2.dmPosition.x == dm.dmPelsWidth, "Expect dmPosition.x %d, got %d\n",
                     dm.dmPelsWidth, dm2.dmPosition.x);
         }
         else
@@ -932,7 +1079,7 @@ static void test_ChangeDisplaySettingsEx(void)
             ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s mode %d returned unexpected %d.\n",
                     devices[device].name, mode, res);
             flush_events();
-            expect_dm(dm2, devices[device].name, mode);
+            expect_dm(&dm2, devices[device].name, mode);
 
             /* EnumDisplaySettingsEx without EDS_ROTATEDMODE reports modes with current orientation */
             memset(&dm3, 0, sizeof(dm3));
@@ -978,7 +1125,7 @@ static void test_ChangeDisplaySettingsEx(void)
             broken(res == DISP_CHANGE_FAILED), /* win8 TestBot */
             "ChangeDisplaySettingsExA returned unexpected %d\n", res);
     for (device = 0; device < device_count; ++device)
-        expect_dm(devices[device].original_mode, devices[device].name, 0);
+        expect_dm(&devices[device].original_mode, devices[device].name, 0);
 
     heap_free(devices);
 }
@@ -1363,10 +1510,21 @@ static BOOL CALLBACK test_EnumDisplayMonitors_invalid_handle_cb(HMONITOR monitor
     return TRUE;
 }
 
+static BOOL CALLBACK test_EnumDisplayMonitors_count(HMONITOR monitor, HDC hdc, LPRECT rect,
+        LPARAM lparam)
+{
+    INT *count = (INT *)lparam;
+    ++(*count);
+    return TRUE;
+}
+
 static void test_EnumDisplayMonitors(void)
 {
+    static const DWORD DESKTOP_ALL_ACCESS = 0x01ff;
+    HWINSTA winstation, old_winstation;
+    HDESK desktop, old_desktop;
+    INT count, old_count;
     DWORD error;
-    INT count;
     BOOL ret;
 
     ret = EnumDisplayMonitors(NULL, NULL, test_EnumDisplayMonitors_normal_cb, 0);
@@ -1387,6 +1545,45 @@ static void test_EnumDisplayMonitors(void)
     else
         ok(ret, "EnumDisplayMonitors failed.\n");
     ok(error == 0xdeadbeef, "Expected error %#x, got %#x.\n", 0xdeadbeef, error);
+
+    /* Test that monitor enumeration is not affected by window stations and desktops */
+    old_winstation = GetProcessWindowStation();
+    old_desktop = GetThreadDesktop(GetCurrentThreadId());
+    old_count = GetSystemMetrics(SM_CMONITORS);
+
+    count = 0;
+    ret = EnumDisplayMonitors(NULL, NULL, test_EnumDisplayMonitors_count, (LPARAM)&count);
+    ok(ret, "EnumDisplayMonitors failed, error %#x.\n", GetLastError());
+    ok(count == old_count, "Expected %d, got %d.\n", old_count, count);
+
+    winstation = CreateWindowStationW(NULL, 0, WINSTA_ALL_ACCESS, NULL);
+    ok(!!winstation && winstation != old_winstation, "CreateWindowStationW failed, error %#x.\n", GetLastError());
+    ret = SetProcessWindowStation(winstation);
+    ok(ret, "SetProcessWindowStation failed, error %#x.\n", GetLastError());
+    ok(winstation == GetProcessWindowStation(), "Expected %p, got %p.\n", GetProcessWindowStation(), winstation);
+
+    desktop = CreateDesktopW(L"test_desktop", NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL);
+    ok(!!desktop && desktop != old_desktop, "CreateDesktopW failed, error %#x.\n", GetLastError());
+    ret = SetThreadDesktop(desktop);
+    ok(ret, "SetThreadDesktop failed, error %#x.\n", GetLastError());
+    ok(desktop == GetThreadDesktop(GetCurrentThreadId()), "Expected %p, got %p.\n",
+            GetThreadDesktop(GetCurrentThreadId()), desktop);
+
+    count = GetSystemMetrics(SM_CMONITORS);
+    ok(count == old_count, "Expected %d, got %d.\n", old_count, count);
+    count = 0;
+    ret = EnumDisplayMonitors(NULL, NULL, test_EnumDisplayMonitors_count, (LPARAM)&count);
+    ok(ret, "EnumDisplayMonitors failed, error %#x.\n", GetLastError());
+    ok(count == old_count, "Expected %d, got %d.\n", old_count, count);
+
+    ret = SetProcessWindowStation(old_winstation);
+    ok(ret, "SetProcessWindowStation failed, error %#x.\n", GetLastError());
+    ret = SetThreadDesktop(old_desktop);
+    ok(ret, "SetThreadDesktop failed, error %#x.\n", GetLastError());
+    ret = CloseDesktop(desktop);
+    ok(ret, "CloseDesktop failed, error %#x.\n", GetLastError());
+    ret = CloseWindowStation(winstation);
+    ok(ret, "CloseWindowStation failed, error %#x.\n", GetLastError());
 }
 
 static void test_QueryDisplayConfig_result(UINT32 flags,
@@ -1715,6 +1912,241 @@ static void test_display_config(void)
     test_DisplayConfigGetDeviceInfo();
 }
 
+static BOOL CALLBACK test_handle_proc(HMONITOR full_monitor, HDC hdc, LPRECT rect, LPARAM lparam)
+{
+    MONITORINFO monitor_info = {sizeof(monitor_info)};
+    HMONITOR monitor;
+    BOOL ret;
+
+#ifdef _WIN64
+    if ((ULONG_PTR)full_monitor >> 32)
+        monitor = full_monitor;
+    else
+        monitor = (HMONITOR)((ULONG_PTR)full_monitor | ((ULONG_PTR)~0u << 32));
+    SetLastError(0xdeadbeef);
+    ret = GetMonitorInfoW(monitor, &monitor_info);
+    ok(ret, "GetMonitorInfoW failed, error %#x.\n", GetLastError());
+
+    monitor = (HMONITOR)((ULONG_PTR)full_monitor & 0xffffffff);
+    SetLastError(0xdeadbeef);
+    ret = GetMonitorInfoW(monitor, &monitor_info);
+    ok(ret, "GetMonitorInfoW failed, error %#x.\n", GetLastError());
+
+    monitor = (HMONITOR)(((ULONG_PTR)full_monitor & 0xffffffff) | ((ULONG_PTR)0x1234 << 32));
+    SetLastError(0xdeadbeef);
+    ret = GetMonitorInfoW(monitor, &monitor_info);
+    ok(ret, "GetMonitorInfoW failed, error %#x.\n", GetLastError());
+
+    monitor = (HMONITOR)((ULONG_PTR)full_monitor & 0xffff);
+    SetLastError(0xdeadbeef);
+    ret = GetMonitorInfoW(monitor, &monitor_info);
+    todo_wine ok(!ret, "GetMonitorInfoW succeeded.\n");
+    todo_wine ok(GetLastError() == ERROR_INVALID_MONITOR_HANDLE, "Expected error code %#x, got %#x.\n",
+            ERROR_INVALID_MONITOR_HANDLE, GetLastError());
+
+    monitor = (HMONITOR)(((ULONG_PTR)full_monitor & 0xffff) | ((ULONG_PTR)0x9876 << 16));
+    SetLastError(0xdeadbeef);
+    ret = GetMonitorInfoW(monitor, &monitor_info);
+    ok(!ret, "GetMonitorInfoW succeeded.\n");
+    ok(GetLastError() == ERROR_INVALID_MONITOR_HANDLE, "Expected error code %#x, got %#x.\n",
+            ERROR_INVALID_MONITOR_HANDLE, GetLastError());
+
+    monitor = (HMONITOR)(((ULONG_PTR)full_monitor & 0xffff) | ((ULONG_PTR)0x12345678 << 16));
+    SetLastError(0xdeadbeef);
+    ret = GetMonitorInfoW(monitor, &monitor_info);
+    ok(!ret, "GetMonitorInfoW succeeded.\n");
+    ok(GetLastError() == ERROR_INVALID_MONITOR_HANDLE, "Expected error code %#x, got %#x.\n",
+            ERROR_INVALID_MONITOR_HANDLE, GetLastError());
+#else
+    if ((ULONG_PTR)full_monitor >> 16)
+        monitor = full_monitor;
+    else
+        monitor = (HMONITOR)((ULONG_PTR)full_monitor | ((ULONG_PTR)~0u << 16));
+    SetLastError(0xdeadbeef);
+    ret = GetMonitorInfoW(monitor, &monitor_info);
+    todo_wine_if(((ULONG_PTR)full_monitor >> 16) == 0)
+    ok(ret, "GetMonitorInfoW failed, error %#x.\n", GetLastError());
+
+    monitor = (HMONITOR)((ULONG_PTR)full_monitor & 0xffff);
+    SetLastError(0xdeadbeef);
+    ret = GetMonitorInfoW(monitor, &monitor_info);
+    ok(ret, "GetMonitorInfoW failed, error %#x.\n", GetLastError());
+
+    monitor = (HMONITOR)(((ULONG_PTR)full_monitor & 0xffff) | ((ULONG_PTR)0x1234 << 16));
+    SetLastError(0xdeadbeef);
+    ret = GetMonitorInfoW(monitor, &monitor_info);
+    ok(!ret, "GetMonitorInfoW succeeded.\n");
+    ok(GetLastError() == ERROR_INVALID_MONITOR_HANDLE, "Expected error code %#x, got %#x.\n",
+            ERROR_INVALID_MONITOR_HANDLE, GetLastError());
+#endif
+
+    return TRUE;
+}
+
+static void test_handles(void)
+{
+    BOOL ret;
+
+    /* Test that monitor handles are user32 handles */
+    ret = EnumDisplayMonitors(NULL, NULL, test_handle_proc, 0);
+    ok(ret, "EnumDisplayMonitors failed, error %#x.\n", GetLastError());
+}
+
+#define check_display_dc(a, b, c) _check_display_dc(__LINE__, a, b, c)
+static void _check_display_dc(INT line, HDC hdc, const DEVMODEA *dm, BOOL allow_todo)
+{
+    INT value;
+
+    value = GetDeviceCaps(hdc, HORZRES);
+    todo_wine_if(allow_todo && dm->dmPelsWidth != GetSystemMetrics(SM_CXSCREEN))
+    ok_(__FILE__, line)(value == dm->dmPelsWidth, "Expected HORZRES %d, got %d.\n",
+            dm->dmPelsWidth, value);
+
+    value = GetDeviceCaps(hdc, VERTRES);
+    todo_wine_if(allow_todo && dm->dmPelsHeight != GetSystemMetrics(SM_CYSCREEN))
+    ok_(__FILE__, line)(value == dm->dmPelsHeight, "Expected VERTRES %d, got %d.\n",
+            dm->dmPelsHeight, value);
+
+    value = GetDeviceCaps(hdc, DESKTOPHORZRES);
+    todo_wine_if(dm->dmPelsWidth != GetSystemMetrics(SM_CXVIRTUALSCREEN)
+            && value == GetSystemMetrics(SM_CXVIRTUALSCREEN))
+    ok_(__FILE__, line)(value == dm->dmPelsWidth, "Expected DESKTOPHORZRES %d, got %d.\n",
+            dm->dmPelsWidth, value);
+
+    value = GetDeviceCaps(hdc, DESKTOPVERTRES);
+    todo_wine_if(dm->dmPelsHeight != GetSystemMetrics(SM_CYVIRTUALSCREEN)
+            && value == GetSystemMetrics(SM_CYVIRTUALSCREEN))
+    ok_(__FILE__, line)(value == dm->dmPelsHeight, "Expected DESKTOPVERTRES %d, got %d.\n",
+            dm->dmPelsHeight, value);
+
+    value = GetDeviceCaps(hdc, VREFRESH);
+    todo_wine_if(allow_todo)
+    ok_(__FILE__, line)(value == dm->dmDisplayFrequency, "Expected VREFRESH %d, got %d.\n",
+            dm->dmDisplayFrequency, value);
+}
+
+static void test_display_dc(void)
+{
+    DWORD device_idx, mode_idx;
+    DEVMODEA dm, dm2, dm3;
+    INT count, old_count;
+    DISPLAY_DEVICEA dd;
+    BOOL ret;
+    LONG res;
+    HDC hdc;
+
+    /* Test DCs covering the entire virtual screen */
+    hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
+    ok(!!hdc, "CreateDCA failed.\n");
+
+    memset(&dm, 0, sizeof(dm));
+    dm.dmSize = sizeof(dm);
+    ret = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm);
+    ok(ret, "EnumDisplaySettingsA failed.\n");
+
+    check_display_dc(hdc, &dm, FALSE);
+
+    /* Tests after mode changes */
+    memset(&dm2, 0, sizeof(dm2));
+    dm2.dmSize = sizeof(dm2);
+    for (mode_idx = 0; EnumDisplaySettingsA(NULL, mode_idx, &dm2); ++mode_idx)
+    {
+        if (dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight)
+            break;
+    }
+    ok(dm2.dmPelsWidth && dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight,
+            "Failed to find a different resolution.\n");
+
+    res = ChangeDisplaySettingsExA(NULL, &dm2, NULL, CDS_RESET, NULL);
+    ok(res == DISP_CHANGE_SUCCESSFUL || broken(res == DISP_CHANGE_FAILED), /* Win8 TestBots */
+            "ChangeDisplaySettingsExA returned unexpected %d.\n", res);
+    if (res == DISP_CHANGE_SUCCESSFUL)
+    {
+        check_display_dc(hdc, &dm2, FALSE);
+
+        res = ChangeDisplaySettingsExA(NULL, NULL, NULL, 0, NULL);
+        ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA returned unexpected %d.\n", res);
+    }
+
+    DeleteDC(hdc);
+
+    /* Test DCs covering a specific monitor */
+    dd.cb = sizeof(dd);
+    for (device_idx = 0; EnumDisplayDevicesA(NULL, device_idx, &dd, 0); ++device_idx)
+    {
+        if (!(dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
+            continue;
+
+        memset(&dm, 0, sizeof(dm));
+        dm.dmSize = sizeof(dm);
+        ret = EnumDisplaySettingsA(dd.DeviceName, ENUM_CURRENT_SETTINGS, &dm);
+        ok(ret, "EnumDisplaySettingsA %s failed.\n", dd.DeviceName);
+
+        hdc = CreateDCA(dd.DeviceName, NULL, NULL, NULL);
+        ok(!!hdc, "CreateDCA %s failed.\n", dd.DeviceName);
+
+        check_display_dc(hdc, &dm, FALSE);
+
+        /* Tests after mode changes */
+        memset(&dm2, 0, sizeof(dm2));
+        dm2.dmSize = sizeof(dm2);
+        for (mode_idx = 0; EnumDisplaySettingsA(dd.DeviceName, mode_idx, &dm2); ++mode_idx)
+        {
+            if (dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight)
+                break;
+        }
+        ok(dm2.dmPelsWidth && dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight,
+                "Failed to find a different resolution for %s.\n", dd.DeviceName);
+
+        res = ChangeDisplaySettingsExA(dd.DeviceName, &dm2, NULL, CDS_RESET, NULL);
+        ok(res == DISP_CHANGE_SUCCESSFUL || broken(res == DISP_CHANGE_FAILED), /* Win8 TestBots */
+                "ChangeDisplaySettingsExA %s returned unexpected %d.\n", dd.DeviceName, res);
+        if (res != DISP_CHANGE_SUCCESSFUL)
+        {
+            win_skip("Failed to change display mode for %s.\n", dd.DeviceName);
+            DeleteDC(hdc);
+            continue;
+        }
+
+        check_display_dc(hdc, &dm2, FALSE);
+
+        /* Tests after monitor detach */
+        if (!(dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE))
+        {
+            old_count = GetSystemMetrics(SM_CMONITORS);
+
+            memset(&dm3, 0, sizeof(dm3));
+            dm3.dmSize = sizeof(dm3);
+            ret = EnumDisplaySettingsA(dd.DeviceName, ENUM_CURRENT_SETTINGS, &dm3);
+            ok(ret, "EnumDisplaySettingsA %s failed.\n", dd.DeviceName);
+
+            dm3.dmFields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
+            dm3.dmPelsWidth = 0;
+            dm3.dmPelsHeight = 0;
+            res = ChangeDisplaySettingsExA(dd.DeviceName, &dm3, NULL, CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+            ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned unexpected %d.\n",
+                    dd.DeviceName, res);
+            res = ChangeDisplaySettingsExA(dd.DeviceName, NULL, NULL, 0, NULL);
+            ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned unexpected %d.\n",
+                    dd.DeviceName, res);
+
+            count = GetSystemMetrics(SM_CMONITORS);
+            ok(count == old_count - 1, "Expected monitor count %d, got %d.\n", old_count - 1, count);
+
+            /* Should report the same values before detach */
+            check_display_dc(hdc, &dm2, TRUE);
+        }
+
+        res = ChangeDisplaySettingsExA(dd.DeviceName, &dm, NULL, CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+        ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned unexpected %d.\n",
+                dd.DeviceName, res);
+        res = ChangeDisplaySettingsExA(NULL, NULL, NULL, 0, NULL);
+        ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned unexpected %d.\n",
+                dd.DeviceName, res);
+        DeleteDC(hdc);
+    }
+}
+
 START_TEST(monitor)
 {
     init_function_pointers();
@@ -1724,4 +2156,6 @@ START_TEST(monitor)
     test_monitors();
     test_work_area();
     test_display_config();
+    test_handles();
+    test_display_dc();
 }

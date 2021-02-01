@@ -1591,17 +1591,19 @@ NTSTATUS WINAPI IoCreateSymbolicLink( UNICODE_STRING *name, UNICODE_STRING *targ
 {
     HANDLE handle;
     OBJECT_ATTRIBUTES attr;
+    NTSTATUS ret;
 
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = 0;
     attr.ObjectName               = name;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | OBJ_OPENIF;
+    attr.Attributes               = OBJ_CASE_INSENSITIVE | OBJ_OPENIF | OBJ_PERMANENT;
     attr.SecurityDescriptor       = NULL;
     attr.SecurityQualityOfService = NULL;
 
     TRACE( "%s -> %s\n", debugstr_us(name), debugstr_us(target) );
-    /* FIXME: store handle somewhere */
-    return NtCreateSymbolicLinkObject( &handle, SYMBOLIC_LINK_ALL_ACCESS, &attr, target );
+    if (!(ret = NtCreateSymbolicLinkObject( &handle, SYMBOLIC_LINK_ALL_ACCESS, &attr, target )))
+        NtClose( handle );
+    return ret;
 }
 
 
@@ -1612,17 +1614,19 @@ NTSTATUS WINAPI IoCreateUnprotectedSymbolicLink( UNICODE_STRING *name, UNICODE_S
 {
     HANDLE handle;
     OBJECT_ATTRIBUTES attr;
+    NTSTATUS ret;
 
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = 0;
     attr.ObjectName               = name;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | OBJ_OPENIF;
+    attr.Attributes               = OBJ_CASE_INSENSITIVE | OBJ_OPENIF | OBJ_PERMANENT;
     attr.SecurityDescriptor       = NULL;
     attr.SecurityQualityOfService = NULL;
 
     TRACE( "%s -> %s\n", debugstr_us(name), debugstr_us(target) );
-    /* FIXME: store handle somewhere */
-    return NtCreateSymbolicLinkObject( &handle, SYMBOLIC_LINK_ALL_ACCESS, &attr, target );
+    if (!(ret = NtCreateSymbolicLinkObject( &handle, SYMBOLIC_LINK_ALL_ACCESS, &attr, target )))
+        NtClose( handle );
+    return ret;
 }
 
 
@@ -1644,12 +1648,7 @@ NTSTATUS WINAPI IoDeleteSymbolicLink( UNICODE_STRING *name )
 
     if (!(status = NtOpenSymbolicLinkObject( &handle, 0, &attr )))
     {
-        SERVER_START_REQ( unlink_object )
-        {
-            req->handle = wine_server_obj_handle( handle );
-            status = wine_server_call( req );
-        }
-        SERVER_END_REQ;
+        NtMakeTemporaryObject( handle );
         NtClose( handle );
     }
     return status;
@@ -3167,6 +3166,15 @@ BOOLEAN WINAPI MmIsThisAnNtAsSystem(void)
 }
 
 /***********************************************************************
+ *           MmProtectMdlSystemAddress   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI MmProtectMdlSystemAddress(PMDL MemoryDescriptorList, ULONG NewProtect)
+{
+    FIXME("(%p, %u) stub\n", MemoryDescriptorList, NewProtect);
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
  *           MmQuerySystemSize   (NTOSKRNL.EXE.@)
  */
 MM_SYSTEMSIZE WINAPI MmQuerySystemSize(void)
@@ -3843,18 +3851,13 @@ PKEVENT WINAPI IoCreateNotificationEvent(UNICODE_STRING *name, HANDLE *handle)
 }
 
 
-#ifdef __x86_64__
 /**************************************************************************
  *		__chkstk (NTOSKRNL.@)
- *
- * Supposed to touch all the stack pages, but we shouldn't need that.
  */
+#ifdef __x86_64__
+/* Supposed to touch all the stack pages, but we shouldn't need that. */
 __ASM_GLOBAL_FUNC( __chkstk, "ret" );
-
 #elif defined(__i386__)
-/**************************************************************************
- *           _chkstk   (NTOSKRNL.@)
- */
 __ASM_GLOBAL_FUNC( _chkstk,
                    "negl %eax\n\t"
                    "addl %esp,%eax\n\t"
@@ -3863,13 +3866,12 @@ __ASM_GLOBAL_FUNC( _chkstk,
                    "movl %eax,0(%esp)\n\t"
                    "ret" )
 #elif defined(__arm__)
-/**************************************************************************
- *		__chkstk (NTDLL.@)
- *
- * Incoming r4 contains words to allocate, converting to bytes then return
- */
+/* Incoming r4 contains words to allocate, converting to bytes then return */
 __ASM_GLOBAL_FUNC( __chkstk, "lsl r4, r4, #2\n\t"
                              "bx lr" )
+#elif defined(__aarch64__)
+/* Supposed to touch all the stack pages, but we shouldn't need that. */
+__ASM_GLOBAL_FUNC( __chkstk, "ret" );
 #endif
 
 /*********************************************************************

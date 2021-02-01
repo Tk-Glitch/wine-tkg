@@ -120,6 +120,7 @@ static const struct object_ops thread_apc_ops =
     no_map_access,              /* map_access */
     default_get_sd,             /* get_sd */
     default_set_sd,             /* set_sd */
+    no_get_full_name,           /* get_full_name */
     no_lookup_name,             /* lookup_name */
     no_link_name,               /* link_name */
     NULL,                       /* unlink_name */
@@ -151,13 +152,14 @@ static const struct object_ops context_ops =
     remove_queue,               /* remove_queue */
     context_signaled,           /* signaled */
     NULL,                       /* get_esync_fd */
-    NULL,                       /* get_fsync_fd */
+    NULL,                       /* get_fsync_idx */
     no_satisfied,               /* satisfied */
     no_signal,                  /* signal */
     no_get_fd,                  /* get_fd */
     no_map_access,              /* map_access */
     default_get_sd,             /* get_sd */
     default_set_sd,             /* set_sd */
+    no_get_full_name,           /* get_full_name */
     no_lookup_name,             /* lookup_name */
     no_link_name,               /* link_name */
     NULL,                       /* unlink_name */
@@ -196,6 +198,7 @@ static const struct object_ops thread_ops =
     thread_map_access,          /* map_access */
     default_get_sd,             /* get_sd */
     default_set_sd,             /* set_sd */
+    no_get_full_name,           /* get_full_name */
     no_lookup_name,             /* lookup_name */
     no_link_name,               /* link_name */
     NULL,                       /* unlink_name */
@@ -231,7 +234,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->esync_fd        = -1;
     thread->esync_apc_fd    = -1;
     thread->fsync_idx       = 0;
-    thread->debug_ctx       = NULL;
+    thread->debug_obj       = NULL;
     thread->system_regs     = 0;
     thread->queue           = NULL;
     thread->wait            = NULL;
@@ -247,13 +250,12 @@ static inline void init_thread_structure( struct thread *thread )
     thread->exit_code       = 0;
     thread->priority        = 0;
     thread->suspend         = 0;
+    thread->dbg_hidden      = 0;
     thread->desktop_users   = 0;
     thread->token           = NULL;
     thread->desc            = NULL;
     thread->desc_len        = 0;
     thread->exit_poll       = NULL;
-    thread->shm_fd          = -1;
-    thread->shm             = NULL;
 
     thread->creation_time = current_time;
     thread->exit_time     = 0;
@@ -436,10 +438,7 @@ static void cleanup_thread( struct thread *thread )
             thread->inflight[i].client = thread->inflight[i].server = -1;
         }
     }
-
     free( thread->desc );
-    release_shared_memory( thread->shm_fd, thread->shm, sizeof(*thread->shm) );
-
     thread->req_data = NULL;
     thread->reply_data = NULL;
     thread->request_fd = NULL;
@@ -448,8 +447,6 @@ static void cleanup_thread( struct thread *thread )
     thread->desktop = 0;
     thread->desc = NULL;
     thread->desc_len = 0;
-    thread->shm_fd = -1;
-    thread->shm = NULL;
 }
 
 /* destroy a thread when its refcount is 0 */
@@ -458,7 +455,7 @@ static void destroy_thread( struct object *obj )
     struct thread *thread = (struct thread *)obj;
     assert( obj->ops == &thread_ops );
 
-    assert( !thread->debug_ctx );  /* cannot still be debugging something */
+    assert( !thread->debug_obj );  /* cannot still be debugging something */
     list_remove( &thread->entry );
     cleanup_thread( thread );
     release_object( thread->process );
@@ -612,8 +609,19 @@ int set_thread_affinity( struct thread *thread, affinity_t affinity )
 
         CPU_ZERO( &set );
         for (i = 0, mask = 1; mask; i++, mask <<= 1)
-            if (affinity & mask) CPU_SET( i, &set );
-
+            if (affinity & mask)
+            {
+                if (thread->process->cpu_override.cpu_count)
+                {
+                    if (i >= thread->process->cpu_override.cpu_count)
+                        break;
+                    CPU_SET( thread->process->cpu_override.host_cpu_id[i], &set );
+                }
+                else
+                {
+                    CPU_SET( i, &set );
+                }
+            }
         ret = sched_setaffinity( thread->unix_tid, sizeof(set), &set );
     }
 #endif
@@ -678,6 +686,8 @@ static void set_thread_info( struct thread *thread,
         security_set_thread_token( thread, req->token );
     if (req->mask & SET_THREAD_INFO_ENTRYPOINT)
         thread->entry_point = req->entry_point;
+    if (req->mask & SET_THREAD_INFO_DBG_HIDDEN)
+        thread->dbg_hidden = 1;
     if (req->mask & SET_THREAD_INFO_DESCRIPTION)
     {
         WCHAR *desc;
@@ -1382,6 +1392,7 @@ static void copy_context( context_t *to, const context_t *from, unsigned int fla
     if (flags & SERVER_CTX_FLOATING_POINT) to->fp = from->fp;
     if (flags & SERVER_CTX_DEBUG_REGISTERS) to->debug = from->debug;
     if (flags & SERVER_CTX_EXTENDED_REGISTERS) to->ext = from->ext;
+    if (flags & SERVER_CTX_YMM_REGISTERS) to->ymm = from->ymm;
 }
 
 /* return the context flags that correspond to system regs */
@@ -1397,30 +1408,6 @@ static unsigned int get_context_system_regs( enum cpu_type cpu )
     case CPU_ARM64:   return SERVER_CTX_DEBUG_REGISTERS;
     }
     return 0;
-}
-
-/* take a snapshot of currently running threads */
-struct thread_snapshot *thread_snap( int *count )
-{
-    struct thread_snapshot *snapshot, *ptr;
-    struct thread *thread;
-    int total = 0;
-
-    LIST_FOR_EACH_ENTRY( thread, &thread_list, struct thread, entry )
-        if (thread->state != TERMINATED) total++;
-    if (!total || !(snapshot = mem_alloc( sizeof(*snapshot) * total ))) return NULL;
-    ptr = snapshot;
-    LIST_FOR_EACH_ENTRY( thread, &thread_list, struct thread, entry )
-    {
-        if (thread->state == TERMINATED) continue;
-        ptr->thread   = thread;
-        ptr->count    = thread->obj.refcount;
-        ptr->priority = thread->priority;
-        grab_object( thread );
-        ptr++;
-    }
-    *count = total;
-    return snapshot;
 }
 
 /* gets the current impersonation token */
@@ -1556,7 +1543,7 @@ DECL_HANDLER(init_thread)
         reply->info_size  = init_process( current );
         if (!process->parent_id)
             process->affinity = current->affinity = get_thread_affinity( current );
-        else
+        else if (!process->cpu_override.cpu_count)
             set_thread_affinity( current, current->affinity );
     }
     else
@@ -1570,7 +1557,8 @@ DECL_HANDLER(init_thread)
             process->unix_pid = -1;  /* can happen with linuxthreads */
         init_thread_context( current );
         generate_debug_event( current, CREATE_THREAD_DEBUG_EVENT, &req->entry );
-        set_thread_affinity( current, current->affinity );
+        if (!process->cpu_override.cpu_count)
+            set_thread_affinity( current, current->affinity );
     }
     debug_level = max( debug_level, req->debug_level );
 
@@ -1618,11 +1606,10 @@ DECL_HANDLER(open_thread)
 DECL_HANDLER(get_thread_info)
 {
     struct thread *thread;
-    obj_handle_t handle = req->handle;
+    unsigned int access = req->access & (THREAD_QUERY_INFORMATION | THREAD_QUERY_LIMITED_INFORMATION);
 
-    if (!handle) thread = get_thread_from_id( req->tid_in );
-    else thread = get_thread_from_handle( req->handle, THREAD_QUERY_LIMITED_INFORMATION );
-
+    if (!access) access = THREAD_QUERY_LIMITED_INFORMATION;
+    thread = get_thread_from_handle( req->handle, access );
     if (thread)
     {
         reply->pid            = get_process_id( thread->process );
@@ -1634,6 +1621,7 @@ DECL_HANDLER(get_thread_info)
         reply->affinity       = thread->affinity;
         reply->last           = thread->process->running_threads == 1;
         reply->suspend_count  = thread->suspend;
+        reply->dbg_hidden     = thread->dbg_hidden;
         reply->desc_len       = thread->desc_len;
 
         if (thread->desc && get_reply_max_size())
@@ -1653,7 +1641,7 @@ DECL_HANDLER(get_thread_times)
 {
     struct thread *thread;
 
-    if ((thread = get_thread_from_handle( req->handle, THREAD_QUERY_INFORMATION )))
+    if ((thread = get_thread_from_handle( req->handle, THREAD_QUERY_LIMITED_INFORMATION )))
     {
         reply->creation_time  = thread->creation_time;
         reply->exit_time      = thread->exit_time;

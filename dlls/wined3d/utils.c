@@ -2989,6 +2989,8 @@ static void query_internal_format(struct wined3d_adapter *adapter,
                 WINED3DFMT_FLAG_VTF, "vertex texture usage");
         query_format_flag(gl_info, format, format->internal, GL_FILTER,
                 WINED3DFMT_FLAG_FILTERING, "filtering");
+        query_format_flag(gl_info, format, format->internal, GL_SHADER_IMAGE_STORE,
+                WINED3DFMT_FLAG_UNORDERED_ACCESS, "unordered access");
 
         if (srgb_format || format->srgb_internal != format->internal)
         {
@@ -4131,6 +4133,7 @@ static void init_vulkan_format_info(struct wined3d_format_vk *format,
     unsigned int flags;
     const char *fixup;
     unsigned int i;
+    uint32_t mask;
     VkResult vr;
 
     for (i = 0; i < ARRAY_SIZE(vulkan_formats); ++i)
@@ -4183,6 +4186,10 @@ static void init_vulkan_format_info(struct wined3d_format_vk *format,
     {
         flags |= WINED3DFMT_FLAG_FILTERING;
     }
+    if (texture_flags & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)
+    {
+        flags |= WINED3DFMT_FLAG_UNORDERED_ACCESS;
+    }
 
     format->f.flags[WINED3D_GL_RES_TYPE_TEX_1D] |= flags;
     format->f.flags[WINED3D_GL_RES_TYPE_TEX_2D] |= flags;
@@ -4202,7 +4209,13 @@ static void init_vulkan_format_info(struct wined3d_format_vk *format,
             ERR("Failed to get image format properties, vr %s.\n", wined3d_debug_vkresult(vr));
             return;
         }
-        format->f.multisample_types = image_properties.sampleCounts;
+
+        mask = image_properties.sampleCounts & 0x3f;
+        while (mask)
+        {
+            i = (1u << wined3d_bit_scan(&mask)) - 1;
+            format->f.multisample_types |= 1u << i;
+        }
     }
 }
 
@@ -4704,30 +4717,17 @@ const char *debug_d3dusage(DWORD usage)
     WINED3DUSAGE_TO_STR(WINED3DUSAGE_OWNDC);
     WINED3DUSAGE_TO_STR(WINED3DUSAGE_STATICDECL);
     WINED3DUSAGE_TO_STR(WINED3DUSAGE_OVERLAY);
+    WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_FILTER);
+    WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_GENMIPMAP);
+    WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_LEGACYBUMPMAP);
+    WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING);
+    WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_SRGBREAD);
+    WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_SRGBWRITE);
+    WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_VERTEXTEXTURE);
+    WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_WRAPANDMIP);
 #undef WINED3DUSAGE_TO_STR
     if (usage)
         FIXME("Unrecognized usage flag(s) %#x.\n", usage);
-
-    return wine_dbg_sprintf("%s", buffer.str);
-}
-
-const char *debug_d3dusagequery(DWORD usage)
-{
-    struct debug_buffer buffer;
-
-    init_debug_buffer(&buffer, "0");
-#define WINED3DUSAGEQUERY_TO_STR(x) if (usage & x) { debug_append(&buffer, #x, " | "); usage &= ~x; }
-    WINED3DUSAGEQUERY_TO_STR(WINED3DUSAGE_QUERY_FILTER);
-    WINED3DUSAGEQUERY_TO_STR(WINED3DUSAGE_QUERY_GENMIPMAP);
-    WINED3DUSAGEQUERY_TO_STR(WINED3DUSAGE_QUERY_LEGACYBUMPMAP);
-    WINED3DUSAGEQUERY_TO_STR(WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING);
-    WINED3DUSAGEQUERY_TO_STR(WINED3DUSAGE_QUERY_SRGBREAD);
-    WINED3DUSAGEQUERY_TO_STR(WINED3DUSAGE_QUERY_SRGBWRITE);
-    WINED3DUSAGEQUERY_TO_STR(WINED3DUSAGE_QUERY_VERTEXTEXTURE);
-    WINED3DUSAGEQUERY_TO_STR(WINED3DUSAGE_QUERY_WRAPANDMIP);
-#undef WINED3DUSAGEQUERY_TO_STR
-    if (usage)
-        FIXME("Unrecognized usage query flag(s) %#x.\n", usage);
 
     return wine_dbg_sprintf("%s", buffer.str);
 }

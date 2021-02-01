@@ -1,6 +1,5 @@
 MODULE  = wineandroid.drv
 IMPORTS = uuid ole32 user32 gdi32 advapi32 ntoskrnl
-EXTRALIBS = -lwine
 
 C_SRCS = \
 	device.c \
@@ -17,9 +16,3 @@ SVG_SRCS = \
 	wine.svg
 
 EXTRA_TARGETS = wine-debug.apk
-
-all: wine-debug.apk
-
-wine-debug.apk: build.gradle $(srcdir)/AndroidManifest.xml $(srcdir)/WineActivity.java $(srcdir)/wine.svg
-	gradle -q assembleDebug
-	mv build/outputs/apk/wine-debug.apk $@

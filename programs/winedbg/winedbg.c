@@ -27,7 +27,6 @@
 
 #include "winternl.h"
 #include "wine/exception.h"
-#include "wine/library.h"
 
 #include "wine/debug.h"
 
@@ -665,7 +664,7 @@ static void restart_if_wow64(void)
     }
 }
 
-int __cdecl main(int argc, char** argv)
+int main(int argc, char** argv)
 {
     int 	        retv = 0;
     HANDLE              hFile = INVALID_HANDLE_VALUE;

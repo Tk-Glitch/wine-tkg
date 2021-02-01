@@ -271,7 +271,6 @@ void context_update_stream_info(struct wined3d_context *context, const struct wi
     wined3d_stream_info_from_declaration(stream_info, state, d3d_info);
 
     stream_info->all_vbo = 1;
-    context->buffer_fence_count = 0;
     for (i = 0, map = stream_info->use_map; map; map >>= 1, ++i)
     {
         struct wined3d_stream_info_element *element;
@@ -312,9 +311,6 @@ void context_update_stream_info(struct wined3d_context *context, const struct wi
         if (!element->data.buffer_object)
             stream_info->all_vbo = 0;
 
-        if (buffer->fence)
-            context->buffer_fences[context->buffer_fence_count++] = buffer->fence;
-
         TRACE("Load array %u %s.\n", i, debug_bo_address(&element->data));
     }
 
@@ -347,8 +343,8 @@ static void context_preload_texture(struct wined3d_context *context,
     if (!(texture = state->textures[idx]))
         return;
 
-    if (texture->resource.rtv_bind_count_device || (state->fb.depth_stencil
-            && state->fb.depth_stencil->resource == &texture->resource))
+    if ((texture->resource.rtv_full_bind_count_device + texture->resource.rtv_partial_bind_count_device)
+            || (state->fb.depth_stencil && state->fb.depth_stencil->resource == &texture->resource))
         context->uses_fbo_attached_resources = 1;
 
     wined3d_texture_load(texture, context, is_srgb_enabled(state->sampler_states[idx]));
@@ -385,92 +381,5 @@ void context_preload_textures(struct wined3d_context *context, const struct wine
             if (ffu_map & 1)
                 context_preload_texture(context, state, i);
         }
-    }
-}
-
-void context_load_shader_resources(struct wined3d_context *context,
-        const struct wined3d_state *state, unsigned int shader_mask)
-{
-    struct wined3d_shader_sampler_map_entry *entry;
-    struct wined3d_shader_resource_view *view;
-    struct wined3d_shader *shader;
-    unsigned int i, j;
-
-    for (i = 0; i < WINED3D_SHADER_TYPE_COUNT; ++i)
-    {
-        if (!(shader_mask & (1u << i)))
-            continue;
-
-        if (!(shader = state->shader[i]))
-            continue;
-
-        for (j = 0; j < WINED3D_MAX_CBS; ++j)
-        {
-            if (state->cb[i][j])
-                wined3d_buffer_load(state->cb[i][j], context, state);
-        }
-
-        for (j = 0; j < shader->reg_maps.sampler_map.count; ++j)
-        {
-            entry = &shader->reg_maps.sampler_map.entries[j];
-
-            if (!(view = state->shader_resource_view[i][entry->resource_idx]))
-                continue;
-
-            if (view->resource->type == WINED3D_RTYPE_BUFFER)
-                wined3d_buffer_load(buffer_from_resource(view->resource), context, state);
-            else
-                wined3d_texture_load(texture_from_resource(view->resource), context, FALSE);
-        }
-    }
-}
-
-void context_load_unordered_access_resources(struct wined3d_context *context,
-        const struct wined3d_shader *shader, struct wined3d_unordered_access_view * const *views)
-{
-    struct wined3d_unordered_access_view *view;
-    struct wined3d_texture *texture;
-    struct wined3d_buffer *buffer;
-    unsigned int i;
-
-    context->uses_uavs = 0;
-
-    if (!shader)
-        return;
-
-    for (i = 0; i < MAX_UNORDERED_ACCESS_VIEWS; ++i)
-    {
-        if (!(view = views[i]))
-            continue;
-
-        if (view->resource->type == WINED3D_RTYPE_BUFFER)
-        {
-            buffer = buffer_from_resource(view->resource);
-            wined3d_buffer_load_location(buffer, context, WINED3D_LOCATION_BUFFER);
-            wined3d_unordered_access_view_invalidate_location(view, ~WINED3D_LOCATION_BUFFER);
-        }
-        else
-        {
-            texture = texture_from_resource(view->resource);
-            wined3d_texture_load(texture, context, FALSE);
-            wined3d_unordered_access_view_invalidate_location(view, ~WINED3D_LOCATION_TEXTURE_RGB);
-        }
-
-        context->uses_uavs = 1;
-    }
-}
-
-void context_load_stream_output_buffers(struct wined3d_context *context, const struct wined3d_state *state)
-{
-    unsigned int i;
-
-    for (i = 0; i < ARRAY_SIZE(state->stream_output); ++i)
-    {
-        struct wined3d_buffer *buffer;
-        if (!(buffer = state->stream_output[i].buffer))
-            continue;
-
-        wined3d_buffer_load(buffer, context, state);
-        wined3d_buffer_invalidate_location(buffer, ~WINED3D_LOCATION_BUFFER);
     }
 }

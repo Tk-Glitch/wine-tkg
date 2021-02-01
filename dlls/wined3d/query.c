@@ -180,7 +180,7 @@ static BOOL wined3d_fence_supported(const struct wined3d_gl_info *gl_info)
     return gl_info->supported[ARB_SYNC] || gl_info->supported[NV_FENCE] || gl_info->supported[APPLE_FENCE];
 }
 
-static enum wined3d_fence_result wined3d_fence_test(const struct wined3d_fence *fence,
+enum wined3d_fence_result wined3d_fence_test(const struct wined3d_fence *fence,
         struct wined3d_device *device, DWORD flags)
 {
     const struct wined3d_gl_info *gl_info;
@@ -1423,6 +1423,15 @@ bool wined3d_query_pool_vk_init(struct wined3d_query_pool_vk *pool_vk,
                     | VK_QUERY_PIPELINE_STATISTIC_COMPUTE_SHADER_INVOCATIONS_BIT;
             break;
 
+        case WINED3D_QUERY_TYPE_SO_STATISTICS:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM0:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM1:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM2:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM3:
+            pool_info.queryType = VK_QUERY_TYPE_TRANSFORM_FEEDBACK_STREAM_EXT;
+            pool_info.pipelineStatistics = 0;
+            break;
+
         default:
             FIXME("Unhandled query type %#x.\n", type);
             return false;
@@ -1452,6 +1461,7 @@ bool wined3d_query_vk_accumulate_data(struct wined3d_query_vk *query_vk,
         uint64_t occlusion;
         uint64_t timestamp;
         struct wined3d_query_data_pipeline_statistics pipeline_statistics;
+        struct wined3d_query_data_so_statistics so_statistics;
     } tmp, *result;
 
     if ((vr = VK_CALL(vkGetQueryPoolResults(device_vk->vk_device, pool_idx->pool_vk->vk_query_pool,
@@ -1491,6 +1501,15 @@ bool wined3d_query_vk_accumulate_data(struct wined3d_query_vk *query_vk,
             ps_result->cs_invocations += ps_tmp->cs_invocations;
             break;
 
+        case WINED3D_QUERY_TYPE_SO_STATISTICS:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM0:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM1:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM2:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM3:
+            result->so_statistics.primitives_written += tmp.so_statistics.primitives_written;
+            result->so_statistics.primitives_generated += tmp.so_statistics.primitives_generated;
+            break;
+
         default:
             FIXME("Unhandled query type %#x.\n", query_vk->q.type);
             return false;
@@ -1516,7 +1535,12 @@ static void wined3d_query_vk_begin(struct wined3d_query_vk *query_vk,
     idx = query_vk->pool_idx.idx;
 
     VK_CALL(vkCmdResetQueryPool(vk_command_buffer, pool_vk->vk_query_pool, idx, 1));
-    VK_CALL(vkCmdBeginQuery(vk_command_buffer, pool_vk->vk_query_pool, idx, query_vk->control_flags));
+    if (query_vk->q.type >= WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM1
+            && query_vk->q.type <= WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM3)
+        VK_CALL(vkCmdBeginQueryIndexedEXT(vk_command_buffer, pool_vk->vk_query_pool, idx,
+                query_vk->control_flags, query_vk->q.type - WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM0));
+    else
+        VK_CALL(vkCmdBeginQuery(vk_command_buffer, pool_vk->vk_query_pool, idx, query_vk->control_flags));
     wined3d_context_vk_reference_query(context_vk, query_vk);
 }
 
@@ -1530,7 +1554,12 @@ static void wined3d_query_vk_end(struct wined3d_query_vk *query_vk,
     pool_vk = query_vk->pool_idx.pool_vk;
     idx = query_vk->pool_idx.idx;
 
-    VK_CALL(vkCmdEndQuery(vk_command_buffer, pool_vk->vk_query_pool, idx));
+    if (query_vk->q.type >= WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM1
+            && query_vk->q.type <= WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM3)
+        VK_CALL(vkCmdEndQueryIndexedEXT(vk_command_buffer, pool_vk->vk_query_pool,
+                idx, query_vk->q.type - WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM0));
+    else
+        VK_CALL(vkCmdEndQuery(vk_command_buffer, pool_vk->vk_query_pool, idx));
 }
 
 void wined3d_query_vk_resume(struct wined3d_query_vk *query_vk, struct wined3d_context_vk *context_vk)
@@ -1691,6 +1720,14 @@ static BOOL wined3d_query_event_vk_issue(struct wined3d_query *query, uint32_t f
     {
         context_vk = wined3d_context_vk(context_acquire(&device_vk->d, NULL, 0));
         wined3d_context_vk_reference_query(context_vk, query_vk);
+        /* Because we don't actually submit any commands to the command buffer
+         * for event queries, the context's current command buffer may still
+         * be empty, and we should wait on the preceding command buffer
+         * instead. That's not merely an optimisation; if the command buffer
+         * referenced by the query is still empty by the time the application
+         * waits for it, that wait will never complete. */
+        if (!context_vk->current_command_buffer.vk_command_buffer)
+            --query_vk->command_buffer_id;
         context_release(&context_vk->c);
 
         return TRUE;
@@ -1801,6 +1838,19 @@ HRESULT wined3d_query_vk_create(struct wined3d_device *device, enum wined3d_quer
 
         case WINED3D_QUERY_TYPE_PIPELINE_STATISTICS:
             data_size = sizeof(struct wined3d_query_data_pipeline_statistics);
+            break;
+
+        case WINED3D_QUERY_TYPE_SO_STATISTICS:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM0:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM1:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM2:
+        case WINED3D_QUERY_TYPE_SO_STATISTICS_STREAM3:
+            if (!wined3d_adapter_vk(device->adapter)->vk_info.supported[WINED3D_VK_EXT_TRANSFORM_FEEDBACK])
+            {
+                WARN("Stream output queries not supported.\n");
+                return WINED3DERR_NOTAVAILABLE;
+            }
+            data_size = sizeof(struct wined3d_query_data_so_statistics);
             break;
 
         default:

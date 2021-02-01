@@ -63,12 +63,11 @@ struct IDirectInputDeviceImpl
     GUID                        guid;
     CRITICAL_SECTION            crit;
     IDirectInputImpl           *dinput;
-    struct list                 entry;       /* entry into IDirectInput devices list */
+    struct list                 entry;       /* entry into acquired device list */
     HANDLE                      hEvent;
     DWORD                       dwCoopLevel;
     HWND                        win;
     int                         acquired;
-    int                         inputlost;
 
     BOOL                        use_raw_input; /* use raw input instead of low-level messages */
     RAWINPUTDEVICE              raw_device;    /* raw device to (un)register */

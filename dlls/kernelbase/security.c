@@ -642,96 +642,50 @@ exit:
     return ret;
 }
 
-static BOOL allocate_groups(TOKEN_GROUPS **groups_ret, SID_AND_ATTRIBUTES *sids, DWORD count)
-{
-    TOKEN_GROUPS *groups;
-    DWORD i;
-
-    if (!count)
-    {
-        *groups_ret = NULL;
-        return TRUE;
-    }
-
-    groups = (TOKEN_GROUPS *)heap_alloc(FIELD_OFFSET(TOKEN_GROUPS, Groups) +
-                                        count * sizeof(SID_AND_ATTRIBUTES));
-    if (!groups)
-    {
-        SetLastError(ERROR_OUTOFMEMORY);
-        return FALSE;
-    }
-
-    groups->GroupCount = count;
-    for (i = 0; i < count; i++)
-        groups->Groups[i] = sids[i];
-
-    *groups_ret = groups;
-    return TRUE;
-}
-
-static BOOL allocate_privileges(TOKEN_PRIVILEGES **privileges_ret, LUID_AND_ATTRIBUTES *privs, DWORD count)
-{
-    TOKEN_PRIVILEGES *privileges;
-    DWORD i;
-
-    if (!count)
-    {
-        *privileges_ret = NULL;
-        return TRUE;
-    }
-
-    privileges = (TOKEN_PRIVILEGES *)heap_alloc(FIELD_OFFSET(TOKEN_PRIVILEGES, Privileges) +
-                                                count * sizeof(LUID_AND_ATTRIBUTES));
-    if (!privileges)
-    {
-        SetLastError(ERROR_OUTOFMEMORY);
-        return FALSE;
-    }
-
-    privileges->PrivilegeCount = count;
-    for (i = 0; i < count; i++)
-        privileges->Privileges[i] = privs[i];
-
-    *privileges_ret = privileges;
-    return TRUE;
-}
-
 /*************************************************************************
  * CreateRestrictedToken    (kernelbase.@)
  */
-BOOL WINAPI CreateRestrictedToken( HANDLE baseToken, DWORD flags,
-                                   DWORD nDisableSids, PSID_AND_ATTRIBUTES disableSids,
-                                   DWORD nDeletePrivs, PLUID_AND_ATTRIBUTES deletePrivs,
-                                   DWORD nRestrictSids, PSID_AND_ATTRIBUTES restrictSids, PHANDLE newToken )
+BOOL WINAPI CreateRestrictedToken( HANDLE token, DWORD flags,
+                                   DWORD disable_sid_count, SID_AND_ATTRIBUTES *disable_sids,
+                                   DWORD delete_priv_count, LUID_AND_ATTRIBUTES *delete_privs,
+                                   DWORD restrict_sid_count, SID_AND_ATTRIBUTES *restrict_sids, HANDLE *ret )
 {
-    TOKEN_PRIVILEGES *delete_privs = NULL;
-    TOKEN_GROUPS *disable_groups = NULL;
-    TOKEN_GROUPS *restrict_sids = NULL;
-    BOOL ret = FALSE;
+    TOKEN_PRIVILEGES *nt_privs = NULL;
+    TOKEN_GROUPS *nt_disable_sids = NULL, *nt_restrict_sids = NULL;
+    NTSTATUS status = STATUS_NO_MEMORY;
 
-    TRACE("(%p, 0x%x, %u, %p, %u, %p, %u, %p, %p)\n",
-          baseToken, flags, nDisableSids, disableSids,
-          nDeletePrivs, deletePrivs,
-          nRestrictSids, restrictSids,
-          newToken);
+    TRACE("token %p, flags %#x, disable_sids %u %p, delete_privs %u %p, restrict_sids %u %p, ret %p\n",
+            token, flags, disable_sid_count, disable_sids, delete_priv_count, delete_privs,
+            restrict_sid_count, restrict_sids, ret);
 
-    if (!allocate_groups(&disable_groups, disableSids, nDisableSids))
-        goto done;
+    if (disable_sid_count)
+    {
+        if (!(nt_disable_sids = heap_alloc( offsetof( TOKEN_GROUPS, Groups[disable_sid_count] ) ))) goto out;
+        nt_disable_sids->GroupCount = disable_sid_count;
+        memcpy( nt_disable_sids->Groups, disable_sids, disable_sid_count * sizeof(SID_AND_ATTRIBUTES) );
+    }
 
-    if (!allocate_privileges(&delete_privs, deletePrivs, nDeletePrivs))
-        goto done;
+    if (delete_priv_count)
+    {
+        if (!(nt_privs = heap_alloc( offsetof( TOKEN_GROUPS, Groups[delete_priv_count] ) ))) goto out;
+        nt_privs->PrivilegeCount = delete_priv_count;
+        memcpy( nt_privs->Privileges, delete_privs, delete_priv_count * sizeof(SID_AND_ATTRIBUTES) );
+    }
 
-    if (!allocate_groups(&restrict_sids, restrictSids, nRestrictSids))
-        goto done;
+    if (restrict_sid_count)
+    {
+        if (!(nt_restrict_sids = heap_alloc( offsetof( TOKEN_GROUPS, Groups[restrict_sid_count] ) ))) goto out;
+        nt_restrict_sids->GroupCount = restrict_sid_count;
+        memcpy( nt_restrict_sids->Groups, restrict_sids, restrict_sid_count * sizeof(SID_AND_ATTRIBUTES) );
+    }
 
-    ret = set_ntstatus(NtFilterToken(baseToken, flags, disable_groups, delete_privs, restrict_sids, newToken));
+    status = NtFilterToken(token, flags, nt_disable_sids, nt_privs, nt_restrict_sids, ret);
 
-done:
-    heap_free(disable_groups);
-    heap_free(delete_privs);
-    heap_free(restrict_sids);
-    return ret;
-
+out:
+    heap_free(nt_disable_sids);
+    heap_free(nt_privs);
+    heap_free(nt_restrict_sids);
+    return set_ntstatus( status );
 }
 
 /******************************************************************************
@@ -965,8 +919,7 @@ BOOL WINAPI ConvertToAutoInheritPrivateObjectSecurity( PSECURITY_DESCRIPTOR pare
                                                        GUID *type, BOOL is_dir,
                                                        PGENERIC_MAPPING mapping )
 {
-    FIXME("%p %p %p %p %d %p - stub\n", parent, current, descr, type, is_dir, mapping );
-    return FALSE;
+    return set_ntstatus( RtlConvertToAutoInheritSecurityObject( parent, current, descr, type, is_dir, mapping ));
 }
 
 /******************************************************************************

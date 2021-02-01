@@ -23,31 +23,24 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
-#include <stdlib.h>
 #include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-#ifdef HAVE_NETINET_IN_H
-#include <netinet/in.h>
-#endif
+
 #include "ntstatus.h"
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
 #define WIN32_NO_STATUS
-#define USE_WS_PREFIX
+#include "winsock2.h"
 #include "windef.h"
 #include "winternl.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
 #include "ntdll_misc.h"
-#include "inaddr.h"
 #include "in6addr.h"
 #include "ddk/ntddk.h"
+#include "ddk/ntifs.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
+WINE_DECLARE_DEBUG_CHANNEL(debugstr);
 
 /* CRC polynomial 0xedb88320 */
 static const DWORD CRC_table[256] =
@@ -306,21 +299,24 @@ void WINAPI RtlDumpResource(LPRTL_RWLOCK rwl)
  *	misc functions
  */
 
+static LONG WINAPI debug_exception_handler( EXCEPTION_POINTERS *eptr )
+{
+    EXCEPTION_RECORD *rec = eptr->ExceptionRecord;
+    return (rec->ExceptionCode == DBG_PRINTEXCEPTION_C) ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH;
+}
+
 /******************************************************************************
  *	DbgPrint	[NTDLL.@]
  */
 NTSTATUS WINAPIV DbgPrint(LPCSTR fmt, ...)
 {
-  char buf[512];
-  __ms_va_list args;
+    NTSTATUS ret;
+    __ms_va_list args;
 
-  __ms_va_start(args, fmt);
-  NTDLL__vsnprintf(buf, sizeof(buf), fmt, args);
-  __ms_va_end(args);
-
-  MESSAGE("DbgPrint says: %s",buf);
-  /* hmm, raise exception? */
-  return STATUS_SUCCESS;
+    __ms_va_start(args, fmt);
+    ret = vDbgPrintEx(0, DPFLTR_ERROR_LEVEL, fmt, args);
+    __ms_va_end(args);
+    return ret;
 }
 
 
@@ -351,18 +347,36 @@ NTSTATUS WINAPI vDbgPrintEx( ULONG id, ULONG level, LPCSTR fmt, __ms_va_list arg
  */
 NTSTATUS WINAPI vDbgPrintExWithPrefix( LPCSTR prefix, ULONG id, ULONG level, LPCSTR fmt, __ms_va_list args )
 {
-    char buf[1024];
+    ULONG level_mask = level <= 31 ? (1 << level) : level;
+    SIZE_T len = strlen( prefix );
+    char buf[1024], *end;
 
-    NTDLL__vsnprintf(buf, sizeof(buf), fmt, args);
+    strcpy( buf, prefix );
+    len += _vsnprintf( buf + len, sizeof(buf) - len, fmt, args );
+    end = buf + len - 1;
 
-    switch (level & DPFLTR_MASK)
+    WARN_(debugstr)(*end == '\n' ? "%08x:%08x: %s" : "%08x:%08x: %s\n", id, level_mask, buf);
+
+    if (level_mask & (1 << DPFLTR_ERROR_LEVEL) && NtCurrentTeb()->Peb->BeingDebugged)
     {
-    case DPFLTR_ERROR_LEVEL:   ERR("%s%x: %s", prefix, id, buf); break;
-    case DPFLTR_WARNING_LEVEL: WARN("%s%x: %s", prefix, id, buf); break;
-    case DPFLTR_TRACE_LEVEL:
-    case DPFLTR_INFO_LEVEL:
-    default:                   TRACE("%s%x: %s", prefix, id, buf); break;
+        __TRY
+        {
+            EXCEPTION_RECORD record;
+            record.ExceptionCode    = DBG_PRINTEXCEPTION_C;
+            record.ExceptionFlags   = 0;
+            record.ExceptionRecord  = NULL;
+            record.ExceptionAddress = RtlRaiseException;
+            record.NumberParameters = 2;
+            record.ExceptionInformation[1] = (ULONG_PTR)buf;
+            record.ExceptionInformation[0] = strlen( buf ) + 1;
+            RtlRaiseException( &record );
+        }
+        __EXCEPT(debug_exception_handler)
+        {
+        }
+        __ENDTRY
     }
+
     return STATUS_SUCCESS;
 }
 
@@ -1301,8 +1315,6 @@ NTSTATUS WINAPI RtlIpv6StringToAddressA(const char *str, const char **terminator
 NTSTATUS WINAPI RtlIpv4AddressToStringExW(const IN_ADDR *pin, USHORT port, LPWSTR buffer, PULONG psize)
 {
     WCHAR tmp_ip[32];
-    static const WCHAR fmt_ip[] = {'%','u','.','%','u','.','%','u','.','%','u',0};
-    static const WCHAR fmt_port[] = {':','%','u',0};
     ULONG needed;
 
     if (!pin || !buffer || !psize)
@@ -1310,11 +1322,11 @@ NTSTATUS WINAPI RtlIpv4AddressToStringExW(const IN_ADDR *pin, USHORT port, LPWST
 
     TRACE("(%p:0x%x, %d, %p, %p:%d)\n", pin, pin->S_un.S_addr, port, buffer, psize, *psize);
 
-    needed = NTDLL_swprintf(tmp_ip, fmt_ip,
+    needed = swprintf(tmp_ip, ARRAY_SIZE(tmp_ip), L"%u.%u.%u.%u",
                       pin->S_un.S_un_b.s_b1, pin->S_un.S_un_b.s_b2,
                       pin->S_un.S_un_b.s_b3, pin->S_un.S_un_b.s_b4);
 
-    if (port) needed += NTDLL_swprintf(tmp_ip + needed, fmt_port, ntohs(port));
+    if (port) needed += swprintf(tmp_ip + needed, ARRAY_SIZE(tmp_ip) - needed, L":%u", ntohs(port));
 
     if (*psize > needed) {
         *psize = needed + 1;
@@ -2153,4 +2165,13 @@ NTSTATUS WINAPI RtlQueryPackageIdentity(HANDLE token, WCHAR *fullname, SIZE_T *f
 {
     FIXME("(%p, %p, %p, %p, %p, %p): stub\n", token, fullname, fullname_size, appid, appid_size, packaged);
     return STATUS_NOT_FOUND;
+}
+
+/*********************************************************************
+ *           RtlQueryProcessPlaceholderCompatibilityMode [NTDLL.@]
+ */
+char WINAPI RtlQueryProcessPlaceholderCompatibilityMode(void)
+{
+    FIXME("stub\n");
+    return PHCM_APPLICATION_DEFAULT;
 }

@@ -577,11 +577,9 @@ static HRESULT WINAPI HTMLDocument_put_designMode(IHTMLDocument2 *iface, BSTR v)
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
     HRESULT hres;
 
-    static const WCHAR onW[] = {'o','n',0};
-
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    if(wcsicmp(v, onW)) {
+    if(wcsicmp(v, L"on")) {
         FIXME("Unsupported arg %s\n", debugstr_w(v));
         return E_NOTIMPL;
     }
@@ -597,13 +595,12 @@ static HRESULT WINAPI HTMLDocument_put_designMode(IHTMLDocument2 *iface, BSTR v)
 static HRESULT WINAPI HTMLDocument_get_designMode(IHTMLDocument2 *iface, BSTR *p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
-    static const WCHAR szOff[] = {'O','f','f',0};
     FIXME("(%p)->(%p) always returning Off\n", This, p);
 
     if(!p)
         return E_INVALIDARG;
 
-    *p = SysAllocString(szOff);
+    *p = SysAllocString(L"Off");
 
     return S_OK;
 }
@@ -824,12 +821,9 @@ static HRESULT WINAPI HTMLDocument_get_URL(IHTMLDocument2 *iface, BSTR *p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
 
-    static const WCHAR about_blank_url[] =
-        {'a','b','o','u','t',':','b','l','a','n','k',0};
-
     TRACE("(%p)->(%p)\n", iface, p);
 
-    *p = SysAllocString(This->window->url ? This->window->url : about_blank_url);
+    *p = SysAllocString(This->window->url ? This->window->url : L"about:blank");
     return *p ? S_OK : E_OUTOFMEMORY;
 }
 
@@ -1119,8 +1113,6 @@ static HRESULT WINAPI HTMLDocument_open(IHTMLDocument2 *iface, BSTR url, VARIANT
     nsISupports *tmp;
     nsresult nsres;
 
-    static const WCHAR text_htmlW[] = {'t','e','x','t','/','h','t','m','l',0};
-
     TRACE("(%p)->(%s %s %s %s %p)\n", This, debugstr_w(url), debugstr_variant(&name),
           debugstr_variant(&features), debugstr_variant(&replace), pomWindowResult);
 
@@ -1129,7 +1121,7 @@ static HRESULT WINAPI HTMLDocument_open(IHTMLDocument2 *iface, BSTR url, VARIANT
         return E_NOTIMPL;
     }
 
-    if(!url || wcscmp(url, text_htmlW) || V_VT(&name) != VT_ERROR
+    if(!url || wcscmp(url, L"text/html") || V_VT(&name) != VT_ERROR
        || V_VT(&features) != VT_ERROR || V_VT(&replace) != VT_ERROR)
         FIXME("unsupported args\n");
 
@@ -1185,41 +1177,20 @@ static HRESULT WINAPI HTMLDocument_clear(IHTMLDocument2 *iface)
     return S_OK;
 }
 
-static const WCHAR copyW[] =
-    {'c','o','p','y',0};
-static const WCHAR cutW[] =
-    {'c','u','t',0};
-static const WCHAR fontnameW[] =
-    {'f','o','n','t','n','a','m','e',0};
-static const WCHAR fontsizeW[] =
-    {'f','o','n','t','s','i','z','e',0};
-static const WCHAR indentW[] =
-    {'i','n','d','e','n','t',0};
-static const WCHAR insertorderedlistW[] =
-    {'i','n','s','e','r','t','o','r','d','e','r','e','d','l','i','s','t',0};
-static const WCHAR insertunorderedlistW[] =
-    {'i','n','s','e','r','t','u','n','o','r','d','e','r','e','d','l','i','s','t',0};
-static const WCHAR outdentW[] =
-    {'o','u','t','d','e','n','t',0};
-static const WCHAR pasteW[] =
-    {'p','a','s','t','e',0};
-static const WCHAR respectvisibilityindesignW[] =
-    {'r','e','s','p','e','c','t','v','i','s','i','b','i','l','i','t','y','i','n','d','e','s','i','g','n',0};
-
 static const struct {
     const WCHAR *name;
     OLECMDID id;
 }command_names[] = {
-    {copyW, IDM_COPY},
-    {cutW, IDM_CUT},
-    {fontnameW, IDM_FONTNAME},
-    {fontsizeW, IDM_FONTSIZE},
-    {indentW, IDM_INDENT},
-    {insertorderedlistW, IDM_ORDERLIST},
-    {insertunorderedlistW, IDM_UNORDERLIST},
-    {outdentW, IDM_OUTDENT},
-    {pasteW, IDM_PASTE},
-    {respectvisibilityindesignW, IDM_RESPECTVISIBILITY_INDESIGN}
+    {L"copy", IDM_COPY},
+    {L"cut", IDM_CUT},
+    {L"fontname", IDM_FONTNAME},
+    {L"fontsize", IDM_FONTSIZE},
+    {L"indent", IDM_INDENT},
+    {L"insertorderedlist", IDM_ORDERLIST},
+    {L"insertunorderedlist", IDM_UNORDERLIST},
+    {L"outdent", IDM_OUTDENT},
+    {L"paste", IDM_PASTE},
+    {L"respectvisibilityindesign", IDM_RESPECTVISIBILITY_INDESIGN}
 };
 
 static BOOL cmdid_from_string(const WCHAR *str, OLECMDID *cmdid)
@@ -1730,14 +1701,12 @@ static HRESULT WINAPI HTMLDocument_toString(IHTMLDocument2 *iface, BSTR *String)
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
 
-    static const WCHAR objectW[] = {'[','o','b','j','e','c','t',']',0};
-
     TRACE("(%p)->(%p)\n", This, String);
 
     if(!String)
         return E_INVALIDARG;
 
-    *String = SysAllocString(objectW);
+    *String = SysAllocString(L"[object]");
     return *String ? S_OK : E_OUTOFMEMORY;
 
 }
@@ -1751,8 +1720,6 @@ static HRESULT WINAPI HTMLDocument_createStyleSheet(IHTMLDocument2 *iface, BSTR 
     HTMLElement *elem;
     nsresult nsres;
     HRESULT hres;
-
-    static const WCHAR styleW[] = {'s','t','y','l','e',0};
 
     TRACE("(%p)->(%s %d %p)\n", This, debugstr_w(bstrHref), lIndex, ppnewStyleSheet);
 
@@ -1770,7 +1737,7 @@ static HRESULT WINAPI HTMLDocument_createStyleSheet(IHTMLDocument2 *iface, BSTR 
         return S_OK;
     }
 
-    hres = create_element(This->doc_node, styleW, &elem);
+    hres = create_element(This->doc_node, L"style", &elem);
     if(FAILED(hres))
         return hres;
 
@@ -2383,8 +2350,7 @@ static HRESULT WINAPI HTMLDocument3_getElementsByName(IHTMLDocument3 *iface, BST
     nsAString selector_str;
     WCHAR *selector;
     nsresult nsres;
-
-    static const WCHAR formatW[] = {'*','[','i','d','=','%','s',']',',','*','[','n','a','m','e','=','%','s',']',0};
+    static const WCHAR formatW[] = L"*[id=%s],*[name=%s]";
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(v), ppelColl);
 
@@ -3027,12 +2993,9 @@ static HRESULT WINAPI HTMLDocument5_get_compatMode(IHTMLDocument5 *iface, BSTR *
 {
     HTMLDocument *This = impl_from_IHTMLDocument5(iface);
 
-    static const WCHAR BackCompatW[] = {'B','a','c','k','C','o','m','p','a','t',0};
-    static const WCHAR CSS1CompatW[] = {'C','S','S','1','C','o','m','p','a','t',0};
-
     TRACE("(%p)->(%p)\n", This, p);
 
-    *p = SysAllocString(This->doc_node->document_mode <= COMPAT_MODE_IE5 ? BackCompatW : CSS1CompatW);
+    *p = SysAllocString(This->doc_node->document_mode <= COMPAT_MODE_IE5 ? L"BackCompat" : L"CSS1Compat");
     return *p ? S_OK : E_OUTOFMEMORY;
 }
 
@@ -5757,9 +5720,7 @@ HRESULT create_document_node(nsIDOMHTMLDocument *nsdoc, GeckoBrowser *browser, H
         nsAString mode_str;
         nsresult nsres;
 
-        static const PRUnichar onW[] = {'o','n',0};
-
-        nsAString_InitDepend(&mode_str, onW);
+        nsAString_InitDepend(&mode_str, L"on");
         nsres = nsIDOMHTMLDocument_SetDesignMode(doc->nsdoc, &mode_str);
         nsAString_Finish(&mode_str);
         if(NS_FAILED(nsres))

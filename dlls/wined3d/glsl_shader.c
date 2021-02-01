@@ -871,7 +871,7 @@ static BOOL shader_glsl_generate_transform_feedback_varyings(struct wined3d_stri
         const char **varyings, unsigned int *varying_count, char *strings, unsigned int *strings_length,
         GLenum buffer_mode, struct wined3d_shader *shader)
 {
-    const struct wined3d_stream_output_desc *so_desc = &shader->u.gs.so_desc;
+    const struct wined3d_stream_output_desc *so_desc = shader->u.gs.so_desc;
     unsigned int buffer_idx, count, length, highest_output_slot, stride;
     unsigned int i, register_idx, component_idx;
     BOOL have_varyings_to_record = FALSE;
@@ -960,7 +960,7 @@ static BOOL shader_glsl_generate_transform_feedback_varyings(struct wined3d_stri
 static void shader_glsl_init_transform_feedback(const struct wined3d_context_gl *context_gl,
         struct shader_glsl_priv *priv, GLuint program_id, struct wined3d_shader *shader)
 {
-    const struct wined3d_stream_output_desc *so_desc = &shader->u.gs.so_desc;
+    const struct wined3d_stream_output_desc *so_desc = shader->u.gs.so_desc;
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_string_buffer *buffer;
     unsigned int i, count, length;
@@ -968,7 +968,7 @@ static void shader_glsl_init_transform_feedback(const struct wined3d_context_gl 
     char *strings;
     GLenum mode;
 
-    if (!so_desc->element_count)
+    if (!so_desc)
         return;
 
     if (gl_info->supported[ARB_TRANSFORM_FEEDBACK3])
@@ -1017,7 +1017,7 @@ static void shader_glsl_init_transform_feedback(const struct wined3d_context_gl 
     if (!shader_glsl_generate_transform_feedback_varyings(buffer, NULL, &count, NULL, &length, mode, shader))
     {
         FIXME("No varyings to record, disabling transform feedback.\n");
-        shader->u.gs.so_desc.element_count = 0;
+        shader->u.gs.so_desc = NULL;
         string_buffer_release(&priv->string_buffers, buffer);
         return;
     }
@@ -2691,6 +2691,10 @@ static void shader_generate_glsl_declarations(const struct wined3d_context_gl *c
     /* Temporary variables for matrix operations */
     shader_addline(buffer, "vec4 tmp0;\n");
     shader_addline(buffer, "vec4 tmp1;\n");
+    if (gl_info->supported[ARB_GPU_SHADER5])
+        shader_addline(buffer, "precise vec4 tmp_precise;\n");
+    else
+        shader_addline(buffer, "/* precise */ vec4 tmp_precise;\n");
 
     if (!shader->load_local_constsF)
     {
@@ -3275,6 +3279,11 @@ static void shader_glsl_get_swizzle(const struct wined3d_shader_src_param *param
 static void shader_glsl_sprintf_cast(struct wined3d_string_buffer *dst_param, const char *src_param,
         enum wined3d_data_type dst_data_type, enum wined3d_data_type src_data_type, unsigned int size)
 {
+    if (dst_data_type == WINED3D_DATA_UNORM || dst_data_type == WINED3D_DATA_SNORM)
+        dst_data_type = WINED3D_DATA_FLOAT;
+    if (src_data_type == WINED3D_DATA_UNORM || src_data_type == WINED3D_DATA_SNORM)
+        src_data_type = WINED3D_DATA_FLOAT;
+
     if (dst_data_type == src_data_type)
     {
         string_buffer_sprintf(dst_param, "%s", src_param);
@@ -3419,9 +3428,14 @@ static DWORD shader_glsl_append_dst_ext(struct wined3d_string_buffer *buffer,
 
     if ((mask = shader_glsl_add_dst_param(ins, dst, &glsl_dst)))
     {
+        if (ins->flags & WINED3DSI_PRECISE_XYZW)
+            sprintf(glsl_dst.reg_name, "tmp_precise");
+
         switch (data_type)
         {
             case WINED3D_DATA_FLOAT:
+            case WINED3D_DATA_UNORM:
+            case WINED3D_DATA_SNORM:
                 shader_addline(buffer, "%s%s = %s(",
                         glsl_dst.reg_name, glsl_dst.mask_str, shift_glsl_tab[dst->shift]);
                 break;
@@ -3459,6 +3473,13 @@ static void shader_glsl_add_instruction_modifiers(const struct wined3d_shader_in
     DWORD modifiers;
 
     if (!ins->dst_count) return;
+
+    if (ins->flags & WINED3DSI_PRECISE_XYZW)
+    {
+        shader_glsl_add_dst_param(ins, &ins->dst[0], &dst_param);
+        shader_addline(ins->ctx->buffer, "%s%s = tmp_precise%s;\n",
+                dst_param.reg_name, dst_param.mask_str, dst_param.mask_str);
+    }
 
     modifiers = ins->dst[0].modifiers;
     if (!modifiers) return;
@@ -5954,6 +5975,12 @@ static void shader_glsl_sync(const struct wined3d_shader_instruction *ins)
         sync_flags &= ~WINED3DSSF_GROUP_SHARED_MEMORY;
     }
 
+    if (sync_flags & WINED3DSSF_GLOBAL_UAV)
+    {
+        shader_addline(buffer, "memoryBarrier();\n");
+        sync_flags &= ~WINED3DSSF_GLOBAL_UAV;
+    }
+
     if (sync_flags)
         FIXME("Unhandled sync flags %#x.\n", sync_flags);
 }
@@ -7463,7 +7490,7 @@ static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl
 static void shader_glsl_generate_stream_output_setup(struct wined3d_string_buffer *buffer,
         const struct wined3d_shader *shader)
 {
-    const struct wined3d_stream_output_desc *so_desc = &shader->u.gs.so_desc;
+    const struct wined3d_stream_output_desc *so_desc = shader->u.gs.so_desc;
     unsigned int i, register_idx, component_idx;
 
     shader_addline(buffer, "out shader_in_out\n{\n");

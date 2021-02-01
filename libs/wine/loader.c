@@ -54,31 +54,17 @@
 extern char **environ;
 #endif
 
-#ifdef __ANDROID__
-#include <jni.h>
-#endif
-
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
 #include "wine/asm.h"
-#include "wine/library.h"
 
 /* argc/argv for the Windows application */
 int __wine_main_argc = 0;
 char **__wine_main_argv = NULL;
 WCHAR **__wine_main_wargv = NULL;
 char **__wine_main_environ = NULL;
-
-struct dll_path_context
-{
-    unsigned int index; /* current index in the dll path list */
-    char *buffer;       /* buffer used for storing path names */
-    char *name;         /* start of file name part in buffer (including leading slash) */
-    int   namelen;      /* length of file name without .so extension */
-    int   win16;        /* 16-bit dll search */
-};
 
 #define MAX_DLLS 100
 
@@ -92,14 +78,30 @@ static int nb_dlls;
 
 static const IMAGE_NT_HEADERS *main_exe;
 
+typedef void (*load_dll_callback_t)( void *, const char * );
 static load_dll_callback_t load_dll_callback;
 
-extern const char *build_dir;
+extern void *wine_anon_mmap( void *start, size_t size, int prot, int flags );
+
+#ifdef __ASM_OBSOLETE
+
+struct dll_path_context
+{
+    unsigned int index; /* current index in the dll path list */
+    char *buffer;       /* buffer used for storing path names */
+    char *name;         /* start of file name part in buffer (including leading slash) */
+    int   namelen;      /* length of file name without .so extension */
+    int   win16;        /* 16-bit dll search */
+};
+
 static const char *default_dlldir;
 static const char **dll_paths;
 static unsigned int nb_dll_paths;
 static int dll_path_maxlen;
 
+extern const char *build_dir;
+
+extern void wine_init_argv0_path_obsolete( const char *argv0 );
 extern void mmap_init(void);
 extern const char *get_dlldir( const char **default_dlldir );
 
@@ -228,6 +230,7 @@ static inline void free_dll_path( struct dll_path_context *context )
     free( context->buffer );
 }
 
+#endif  /* __ASM_OBSOLETE */
 
 /* adjust an array of pointers to make them into RVAs */
 static inline void fixup_rva_ptrs( void *array, BYTE *base, unsigned int count )
@@ -335,12 +338,8 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     assert( size <= page_size );
 
     /* module address must be aligned on 64K boundary */
-    addr = *(BYTE **)&nt_descr->OptionalHeader.DataDirectory[15];
-    if (!addr || ((ULONG_PTR)addr & 0xffff) || mprotect( addr, page_size, PROT_READ | PROT_WRITE ))
-    {
-        addr = (BYTE *)((nt_descr->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
-        if (wine_anon_mmap( addr, page_size, PROT_READ|PROT_WRITE, MAP_FIXED ) != addr) return NULL;
-    }
+    addr = (BYTE *)((nt_descr->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
+    if (wine_anon_mmap( addr, page_size, PROT_READ|PROT_WRITE, MAP_FIXED ) != addr) return NULL;
 
     dos    = (IMAGE_DOS_HEADER *)addr;
     nt     = (IMAGE_NT_HEADERS *)(dos + 1);
@@ -387,22 +386,13 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     nt->OptionalHeader.SizeOfImage                 = data_end;
     nt->OptionalHeader.ImageBase                   = (ULONG_PTR)addr;
 
-    /* Clear DataDirectory[15] */
-
-    nt->OptionalHeader.DataDirectory[15].VirtualAddress = 0;
-    nt->OptionalHeader.DataDirectory[15].Size = 0;
-
     /* Build the code section */
 
     memcpy( sec->Name, ".text", sizeof(".text") );
     sec->SizeOfRawData = code_end - code_start;
     sec->Misc.VirtualSize = sec->SizeOfRawData;
     sec->VirtualAddress   = code_start;
-#ifdef _WIN64
-    sec->PointerToRawData = 0x400; /* file alignment */
-#else
-    sec->PointerToRawData = 0x200; /* file alignment */
-#endif
+    sec->PointerToRawData = code_start;
     sec->Characteristics  = (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
     sec++;
 
@@ -799,16 +789,6 @@ int wine_dll_get_owner_obsolete( const char *name, char *buffer, int size, int *
     return ret;
 }
 
-__ASM_OBSOLETE(wine_dlopen);
-__ASM_OBSOLETE(wine_dlsym);
-__ASM_OBSOLETE(wine_dlclose);
-__ASM_OBSOLETE(wine_dll_enum_load_path);
-__ASM_OBSOLETE(wine_dll_get_owner);
-__ASM_OBSOLETE(wine_dll_load);
-__ASM_OBSOLETE(wine_dll_load_main_exe);
-__ASM_OBSOLETE(wine_dll_unload);
-
-#endif /* __ASM_OBSOLETE */
 
 /***********************************************************************
  *           set_max_limit
@@ -893,9 +873,9 @@ static void apple_create_wine_thread( void *init_func )
          * fails, just let it go wherever.  It'll be a waste of space, but we
          * can go on. */
         if (!pthread_attr_getstacksize( &attr, &info.desired_size ) &&
-            wine_mmap_enum_reserved_areas( apple_alloc_thread_stack, &info, 1 ))
+            wine_mmap_enum_reserved_areas_obsolete( apple_alloc_thread_stack, &info, 1 ))
         {
-            wine_mmap_remove_reserved_area( info.stack, info.desired_size, 0 );
+            wine_mmap_remove_reserved_area_obsolete( info.stack, info.desired_size, 0 );
             pthread_attr_setstackaddr( &attr, (char*)info.stack + info.desired_size );
         }
 #endif
@@ -968,137 +948,12 @@ static void apple_main_thread( void (*init_func)(void) )
 #endif
 
 
-#ifdef __ANDROID__
-
-#ifndef WINE_JAVA_CLASS
-#define WINE_JAVA_CLASS "org/winehq/wine/WineActivity"
-#endif
-
-static JavaVM *java_vm;
-static jobject java_object;
-
-/* return the Java VM that was used for JNI initialisation */
-JavaVM *wine_get_java_vm(void)
-{
-    return java_vm;
-}
-
-/* return the Java object that called the wine_init method */
-jobject wine_get_java_object(void)
-{
-    return java_object;
-}
-
-/* main Wine initialisation */
-static jstring wine_init_jni( JNIEnv *env, jobject obj, jobjectArray cmdline, jobjectArray environment )
-{
-    char **argv;
-    char *str;
-    char error[1024];
-    int i, argc, length;
-
-    /* get the command line array */
-
-    argc = (*env)->GetArrayLength( env, cmdline );
-    for (i = length = 0; i < argc; i++)
-    {
-        jobject str_obj = (*env)->GetObjectArrayElement( env, cmdline, i );
-        length += (*env)->GetStringUTFLength( env, str_obj ) + 1;
-    }
-
-    argv = malloc( (argc + 1) * sizeof(*argv) + length );
-    str = (char *)(argv + argc + 1);
-    for (i = 0; i < argc; i++)
-    {
-        jobject str_obj = (*env)->GetObjectArrayElement( env, cmdline, i );
-        length = (*env)->GetStringUTFLength( env, str_obj );
-        (*env)->GetStringUTFRegion( env, str_obj, 0,
-                                    (*env)->GetStringLength( env, str_obj ), str );
-        argv[i] = str;
-        str[length] = 0;
-        str += length + 1;
-    }
-    argv[argc] = NULL;
-
-    /* set the environment variables */
-
-    if (environment)
-    {
-        int count = (*env)->GetArrayLength( env, environment );
-        for (i = 0; i < count - 1; i += 2)
-        {
-            jobject var_obj = (*env)->GetObjectArrayElement( env, environment, i );
-            jobject val_obj = (*env)->GetObjectArrayElement( env, environment, i + 1 );
-            const char *var = (*env)->GetStringUTFChars( env, var_obj, NULL );
-
-            if (val_obj)
-            {
-                const char *val = (*env)->GetStringUTFChars( env, val_obj, NULL );
-                setenv( var, val, 1 );
-                if (!strcmp( var, "LD_LIBRARY_PATH" ))
-                {
-                    void (*update_func)( const char * ) = dlsym( RTLD_DEFAULT,
-                                                                 "android_update_LD_LIBRARY_PATH" );
-                    if (update_func) update_func( val );
-                }
-                else if (!strcmp( var, "WINEDEBUGLOG" ))
-                {
-                    int fd = open( val, O_WRONLY | O_CREAT | O_APPEND, 0666 );
-                    if (fd != -1)
-                    {
-                        dup2( fd, 2 );
-                        close( fd );
-                    }
-                }
-                (*env)->ReleaseStringUTFChars( env, val_obj, val );
-            }
-            else unsetenv( var );
-
-            (*env)->ReleaseStringUTFChars( env, var_obj, var );
-        }
-    }
-
-    java_object = (*env)->NewGlobalRef( env, obj );
-
-#ifdef __i386__
-    {
-        unsigned short java_fs;
-        __asm__( "mov %%fs,%0" : "=r" (java_fs) );
-        __asm__( "mov %0,%%fs" :: "r" (0) );
-        wine_init( argc, argv, error, sizeof(error) );
-        __asm__( "mov %0,%%fs" :: "r" (java_fs) );
-    }
-#else
-    wine_init( argc, argv, error, sizeof(error) );
-#endif
-    return (*env)->NewStringUTF( env, error );
-}
-
-jint JNI_OnLoad( JavaVM *vm, void *reserved )
-{
-    static const JNINativeMethod method =
-    {
-        "wine_init", "([Ljava/lang/String;[Ljava/lang/String;)Ljava/lang/String;", wine_init_jni
-    };
-
-    JNIEnv *env;
-    jclass class;
-
-    java_vm = vm;
-    if ((*vm)->AttachCurrentThread( vm, &env, NULL ) != JNI_OK) return JNI_ERR;
-    if (!(class = (*env)->FindClass( env, WINE_JAVA_CLASS ))) return JNI_ERR;
-    (*env)->RegisterNatives( env, class, &method, 1 );
-    return JNI_VERSION_1_6;
-}
-
-#endif  /* __ANDROID__ */
-
 /***********************************************************************
  *           wine_init
  *
  * Main Wine initialisation.
  */
-void wine_init( int argc, char *argv[], char *error, int error_size )
+void wine_init_obsolete( int argc, char *argv[], char *error, int error_size )
 {
     struct dll_path_context context;
     char *path;
@@ -1113,7 +968,7 @@ void wine_init( int argc, char *argv[], char *error, int error_size )
     set_max_limit( RLIMIT_AS );
 #endif
 
-    wine_init_argv0_path( argv[0] );
+    wine_init_argv0_path_obsolete( argv[0] );
     build_dll_path();
     __wine_main_argc = argc;
     __wine_main_argv = argv;
@@ -1152,3 +1007,15 @@ void wine_init( int argc, char *argv[], char *error, int error_size )
     init_func();
 #endif
 }
+
+__ASM_OBSOLETE(wine_dlopen);
+__ASM_OBSOLETE(wine_dlsym);
+__ASM_OBSOLETE(wine_dlclose);
+__ASM_OBSOLETE(wine_dll_enum_load_path);
+__ASM_OBSOLETE(wine_dll_get_owner);
+__ASM_OBSOLETE(wine_dll_load);
+__ASM_OBSOLETE(wine_dll_load_main_exe);
+__ASM_OBSOLETE(wine_dll_unload);
+__ASM_OBSOLETE(wine_init);
+
+#endif /* __ASM_OBSOLETE */

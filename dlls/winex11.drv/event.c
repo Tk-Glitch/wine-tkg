@@ -155,6 +155,9 @@ static const char * event_names[MAX_EVENT_HANDLERS] =
     "SelectionNotify", "ColormapNotify", "ClientMessage", "MappingNotify", "GenericEvent"
 };
 
+/* is someone else grabbing the keyboard, for example the WM, when manipulating the window */
+BOOL keyboard_grabbed = FALSE;
+
 int xinput2_opcode = 0;
 
 /* return the name of an X event */
@@ -311,24 +314,6 @@ static enum event_merge_action merge_raw_motion_events( XIRawEvent *prev, XIRawE
 }
 #endif
 
-static int try_grab_pointer( Display *display )
-{
-    if (!grab_pointer)
-        return 1;
-
-    /* if we are already clipping the cursor in the current thread, we should not
-     * call XGrabPointer here or it would change the confine-to window. */
-    if (clipping_cursor && x11drv_thread_data()->clip_hwnd)
-        return 1;
-
-    if (XGrabPointer( display, root_window, False, 0, GrabModeAsync, GrabModeAsync,
-                      None, None, CurrentTime ) != GrabSuccess)
-        return 0;
-
-    XUngrabPointer( display, CurrentTime );
-    return 1;
-}
-
 /***********************************************************************
  *           merge_events
  *
@@ -433,13 +418,18 @@ static BOOL process_events( Display *display, Bool (*filter)(Display*, XEvent*,X
 {
     XEvent event, prev_event;
     int count = 0;
-    BOOL queued = FALSE;
+    BOOL queued = FALSE, overlay_enabled = FALSE;
     enum event_merge_action action = MERGE_DISCARD;
+    ULONG_PTR overlay_filter = QS_KEY | QS_MOUSEBUTTON | QS_MOUSEMOVE;
+
+    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0)
+        overlay_enabled = TRUE;
 
     prev_event.type = 0;
     while (XCheckIfEvent( display, &event, filter, (char *)arg ))
     {
         count++;
+        if (overlay_enabled && filter_event( display, &event, (char *)overlay_filter )) continue;
         if (XFilterEvent( &event, None ))
         {
             /*
@@ -615,22 +605,28 @@ static void set_input_focus( struct x11drv_win_data *data )
 /**********************************************************************
  *              set_focus
  */
-static void set_focus( XEvent *event, HWND hwnd, Time time )
+static void set_focus( Display *display, HWND hwnd, Time time )
 {
-    HWND focus;
+    HWND focus, old_active;
     Window win;
     GUITHREADINFO threadinfo;
 
-    if (!try_grab_pointer( event->xany.display ))
-    {
-        /* ask the foreground window to release its grab before trying to get ours */
-        SendMessageW( GetForegroundWindow(), WM_X11DRV_RELEASE_CURSOR, 0, 0 );
-        XSendEvent( event->xany.display, event->xany.window, False, 0, event );
-        return;
-    }
+    old_active = GetForegroundWindow();
+
+    /* prevent recursion */
+    x11drv_thread_data()->active_window = hwnd;
 
     TRACE( "setting foreground window to %p\n", hwnd );
     SetForegroundWindow( hwnd );
+
+    /* Some applications expect that a being deactivated topmost window
+     * receives the WM_WINDOWPOSCHANGING/WM_WINDOWPOSCHANGED messages,
+     * and perform some specific actions. Chessmaster is one of such apps.
+     * Window Manager keeps a topmost window on top in z-oder, so there is
+     * no need to actually do anything, just send the messages.
+     */
+    if (old_active && (GetWindowLongW( old_active, GWL_EXSTYLE ) & WS_EX_TOPMOST))
+        SetWindowPos( old_active, hwnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER );
 
     threadinfo.cbSize = sizeof(threadinfo);
     GetGUIThreadInfo(0, &threadinfo);
@@ -642,7 +638,7 @@ static void set_focus( XEvent *event, HWND hwnd, Time time )
     if (win)
     {
         TRACE( "setting focus to %p (%lx) time=%ld\n", focus, win, time );
-        XSetInputFocus( event->xany.display, win, RevertToParent, time );
+        XSetInputFocus( display, win, RevertToParent, time );
     }
 }
 
@@ -650,10 +646,8 @@ static void set_focus( XEvent *event, HWND hwnd, Time time )
 /**********************************************************************
  *              handle_manager_message
  */
-static void handle_manager_message( HWND hwnd, XEvent *xev )
+static void handle_manager_message( HWND hwnd, XClientMessageEvent *event )
 {
-    XClientMessageEvent *event = &xev->xclient;
-
     if (hwnd != GetDesktopWindow()) return;
     if (systray_atom && event->data.l[1] == systray_atom)
         change_systray_owner( event->display, event->data.l[2] );
@@ -663,9 +657,8 @@ static void handle_manager_message( HWND hwnd, XEvent *xev )
 /**********************************************************************
  *              handle_wm_protocols
  */
-static void handle_wm_protocols( HWND hwnd, XEvent *xev )
+static void handle_wm_protocols( HWND hwnd, XClientMessageEvent *event )
 {
-    XClientMessageEvent *event = &xev->xclient;
     Atom protocol = (Atom)event->data.l[0];
     Time event_time = (Time)event->data.l[1];
 
@@ -734,14 +727,14 @@ static void handle_wm_protocols( HWND hwnd, XEvent *xev )
 
         if (can_activate_window(hwnd))
         {
-            /* simulate a mouse click on the caption to find out
+            /* simulate a mouse click on the menu to find out
              * whether the window wants to be activated */
             LRESULT ma = SendMessageW( hwnd, WM_MOUSEACTIVATE,
                                        (WPARAM)GetAncestor( hwnd, GA_ROOT ),
                                        MAKELONG( HTMENU, WM_LBUTTONDOWN ) );
             if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE)
             {
-                set_focus( xev, hwnd, event_time );
+                set_focus( event->display, hwnd, event_time );
                 return;
             }
         }
@@ -750,7 +743,7 @@ static void handle_wm_protocols( HWND hwnd, XEvent *xev )
             hwnd = GetForegroundWindow();
             if (!hwnd) hwnd = last_focus;
             if (!hwnd) hwnd = GetDesktopWindow();
-            set_focus( xev, hwnd, event_time );
+            set_focus( event->display, hwnd, event_time );
             return;
         }
         /* try to find some other window to give the focus to */
@@ -758,7 +751,7 @@ static void handle_wm_protocols( HWND hwnd, XEvent *xev )
         if (hwnd) hwnd = GetAncestor( hwnd, GA_ROOT );
         if (!hwnd) hwnd = GetActiveWindow();
         if (!hwnd) hwnd = last_focus;
-        if (hwnd && can_activate_window(hwnd)) set_focus( xev, hwnd, event_time );
+        if (hwnd && can_activate_window(hwnd)) set_focus( event->display, hwnd, event_time );
     }
     else if (protocol == x11drv_atom(_NET_WM_PING))
     {
@@ -807,19 +800,23 @@ static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
     if (event->detail == NotifyPointer) return FALSE;
     if (hwnd == GetDesktopWindow()) return FALSE;
 
-    /* Focus was just restored but it can be right after super was
-     * pressed and gnome-shell needs a bit of time to respond and
-     * toggle the activity view. If we grab the cursor right away
-     * it will cancel it and super key will do nothing.
-     */
-    if (event->mode == NotifyUngrab && wm_is_mutter(event->display))
-        Sleep(100);
-
-    /* ask the foreground window to re-apply the current ClipCursor rect */
-    SendMessageW( GetForegroundWindow(), WM_X11DRV_CLIP_CURSOR, 0, 0 );
-
-    /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
-    if (event->mode == NotifyGrab || event->mode == NotifyUngrab) return FALSE;
+    switch (event->mode)
+    {
+    case NotifyGrab:
+        /* these are received when moving undecorated managed windows on mutter */
+        keyboard_grabbed = TRUE;
+        return FALSE;
+    case NotifyWhileGrabbed:
+        keyboard_grabbed = TRUE;
+        break;
+    case NotifyNormal:
+        keyboard_grabbed = FALSE;
+        break;
+    case NotifyUngrab:
+        keyboard_grabbed = FALSE;
+        retry_grab_clipping_window();
+        return TRUE; /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
+    }
 
     if ((xic = X11DRV_get_ic( hwnd ))) XSetICFocus( xic );
     if (use_take_focus)
@@ -834,17 +831,9 @@ static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
         if (hwnd) hwnd = GetAncestor( hwnd, GA_ROOT );
         if (!hwnd) hwnd = GetActiveWindow();
         if (!hwnd) hwnd = x11drv_thread_data()->last_focus;
-        if (hwnd && can_activate_window(hwnd)) set_focus( xev, hwnd, CurrentTime );
-        return TRUE;
+        if (hwnd && can_activate_window(hwnd)) set_focus( event->display, hwnd, CurrentTime );
     }
-
-    if (!try_grab_pointer( event->display ))
-    {
-        XSendEvent( event->display, event->window, False, 0, xev );
-        return FALSE;
-    }
-
-    SetForegroundWindow( hwnd );
+    else SetForegroundWindow( hwnd );
     return TRUE;
 }
 
@@ -857,26 +846,8 @@ static void focus_out( Display *display , HWND hwnd )
     Window focus_win;
     int revert;
     XIC xic;
-    struct x11drv_win_data *data;
 
     if (ximInComposeMode) return;
-
-    data = get_win_data(hwnd);
-    if(data){
-        ULONGLONG now = GetTickCount64();
-        if(data->take_focus_back > 0 &&
-                now >= data->take_focus_back &&
-                now - data->take_focus_back < 1000){
-            data->take_focus_back = 0;
-            TRACE("workaround mutter bug, taking focus back\n");
-            XSetInputFocus( data->display, data->whole_window, RevertToParent, CurrentTime);
-            release_win_data(data);
-            /* don't inform win32 client */
-            return;
-        }
-        data->take_focus_back = 0;
-        release_win_data(data);
-    }
 
     x11drv_thread_data()->last_focus = hwnd;
     if ((xic = X11DRV_get_ic( hwnd ))) XUnsetICFocus( xic );
@@ -901,6 +872,8 @@ static void focus_out( Display *display , HWND hwnd )
 
     if (!focus_win)
     {
+        x11drv_thread_data()->active_window = 0;
+
         /* Abey : 6-Oct-99. Check again if the focus out window is the
            Foreground window, because in most cases the messages sent
            above must have already changed the foreground window, in which
@@ -931,10 +904,29 @@ static BOOL X11DRV_FocusOut( HWND hwnd, XEvent *xev )
     }
     if (!hwnd) return FALSE;
 
-    if (hwnd == GetForegroundWindow()) ungrab_clipping_window();
+    switch (event->mode)
+    {
+    case NotifyUngrab:
+        /* these are received when moving undecorated managed windows on mutter */
+        keyboard_grabbed = FALSE;
+        return FALSE;
+    case NotifyNormal:
+        keyboard_grabbed = FALSE;
+        break;
+    case NotifyWhileGrabbed:
+        keyboard_grabbed = TRUE;
+        break;
+    case NotifyGrab:
+        keyboard_grabbed = TRUE;
 
-    /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
-    if (event->mode == NotifyGrab || event->mode == NotifyUngrab) return FALSE;
+        /* This will do nothing due to keyboard_grabbed == TRUE, but it
+         * will save the current clipping rect so we can restore it on
+         * FocusIn with NotifyUngrab mode.
+         */
+        retry_grab_clipping_window();
+
+        return TRUE; /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
+    }
 
     focus_out( event->display, hwnd );
     return TRUE;
@@ -1159,12 +1151,6 @@ static BOOL X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
                event->serial, data->configure_serial );
         goto done;
     }
-    if (data->pending_fullscreen)
-    {
-        TRACE( "win %p/%lx event %d,%d,%dx%d pending_fullscreen is pending, so ignoring\n",
-               hwnd, data->whole_window, event->x, event->y, event->width, event->height );
-        goto done;
-    }
 
     /* Get geometry */
 
@@ -1186,35 +1172,14 @@ static BOOL X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
     }
     else pos = root_to_virtual_screen( x, y );
 
-    if(data->fs_hack){
-        POINT p = fs_hack_current_mode();
-        rect.left = 0;
-        rect.top = 0;
-        rect.right = p.x;
-        rect.bottom = p.y;
-    }else{
-        X11DRV_X_to_window_rect( data, &rect, pos.x, pos.y, event->width, event->height );
-        if (root_coords) MapWindowPoints( 0, parent, (POINT *)&rect, 2 );
-    }
+    X11DRV_X_to_window_rect( data, &rect, pos.x, pos.y, event->width, event->height );
+    if (root_coords) MapWindowPoints( 0, parent, (POINT *)&rect, 2 );
 
     TRACE( "win %p/%lx new X rect %d,%d,%dx%d (event %d,%d,%dx%d)\n",
            hwnd, data->whole_window, rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top,
            event->x, event->y, event->width, event->height );
 
     /* Compare what has changed */
-
-    {
-        const char *steamgameid = getenv("SteamGameId");
-        if(steamgameid && !strcmp(steamgameid, "590380")){
-            /* Into The Breach is extremely picky about the size of its window. */
-            if(is_window_rect_fullscreen(&data->whole_rect) &&
-                    is_window_rect_fullscreen(&rect)){
-                TRACE("window is fullscreen and new size is also fullscreen, so preserving window size\n");
-                rect.right = rect.left + (data->whole_rect.right - data->whole_rect.left);
-                rect.bottom = rect.top + (data->whole_rect.bottom - data->whole_rect.top);
-            }
-        }
-    }
 
     x     = rect.left;
     y     = rect.top;
@@ -1417,57 +1382,15 @@ done:
 }
 
 
-static void handle__net_wm_state_notify( HWND hwnd, XPropertyEvent *event )
-{
-    struct x11drv_win_data *data = get_win_data( hwnd );
-
-    if(data->pending_fullscreen)
-    {
-        read_net_wm_states( event->display, data );
-        if(data->net_wm_state & (1 << NET_WM_STATE_FULLSCREEN)){
-            data->pending_fullscreen = FALSE;
-            TRACE("PropertyNotify _NET_WM_STATE, now 0x%x, pending_fullscreen no longer pending.\n",
-                    data->net_wm_state);
-        }else
-            TRACE("PropertyNotify _NET_WM_STATE, now 0x%x, pending_fullscreen still pending.\n",
-                    data->net_wm_state);
-    }
-
-    release_win_data( data );
-}
-
-
 /***********************************************************************
  *           X11DRV_PropertyNotify
  */
 static BOOL X11DRV_PropertyNotify( HWND hwnd, XEvent *xev )
 {
     XPropertyEvent *event = &xev->xproperty;
-    char *name;
 
     if (!hwnd) return FALSE;
-
-    name = XGetAtomName(event->display, event->atom);
-    if(name){
-        TRACE("win %p PropertyNotify atom: %s, state: 0x%x\n", hwnd, name, event->state);
-        XFree(name);
-    }
-
-    if (event->atom == x11drv_atom(_NET_WM_BYPASS_COMPOSITOR))
-    {
-        struct x11drv_win_data *data = get_win_data( hwnd );
-        if (!data) return TRUE;
-
-        /* workaround for mutter gitlab bug #676, changing decorations of a
-         * fullscreen and unredirected window freezes the compositing.
-         */
-        if (wm_is_mutter( data->display )) set_wm_hints( data );
-
-        release_win_data( data );
-    }
-
     if (event->atom == x11drv_atom(WM_STATE)) handle_wm_state_notify( hwnd, event, TRUE );
-    else if (event->atom == x11drv_atom(_NET_WM_STATE)) handle__net_wm_state_notify( hwnd, event );
     return TRUE;
 }
 
@@ -1614,7 +1537,6 @@ static void EVENT_DropFromOffiX( HWND hWnd, XClientMessageEvent *event )
     Window		win, w_aux_root, w_aux_child;
 
     if (!(data = get_win_data( hWnd ))) return;
-    ERR("TODO: fs hack\n");
     cx = data->whole_rect.right - data->whole_rect.left;
     cy = data->whole_rect.bottom - data->whole_rect.top;
     win = data->whole_window;
@@ -1801,10 +1723,8 @@ static void EVENT_DropURLs( HWND hWnd, XClientMessageEvent *event )
 /**********************************************************************
  *              handle_xembed_protocol
  */
-static void handle_xembed_protocol( HWND hwnd, XEvent *xev )
+static void handle_xembed_protocol( HWND hwnd, XClientMessageEvent *event )
 {
-    XClientMessageEvent *event = &xev->xclient;
-
     switch (event->data.l[1])
     {
     case XEMBED_EMBEDDED_NOTIFY:
@@ -1859,9 +1779,8 @@ static void handle_xembed_protocol( HWND hwnd, XEvent *xev )
 /**********************************************************************
  *              handle_dnd_protocol
  */
-static void handle_dnd_protocol( HWND hwnd, XEvent *xev )
+static void handle_dnd_protocol( HWND hwnd, XClientMessageEvent *event )
 {
-    XClientMessageEvent *event = &xev->xclient;
     Window root, child;
     int root_x, root_y, child_x, child_y;
     unsigned int u;
@@ -1880,8 +1799,8 @@ static void handle_dnd_protocol( HWND hwnd, XEvent *xev )
 
 struct client_message_handler
 {
-    int    atom;                     /* protocol atom */
-    void (*handler)(HWND, XEvent *); /* corresponding handler function */
+    int    atom;                                  /* protocol atom */
+    void (*handler)(HWND, XClientMessageEvent *); /* corresponding handler function */
 };
 
 static const struct client_message_handler client_messages[] =
@@ -1917,7 +1836,7 @@ static BOOL X11DRV_ClientMessage( HWND hwnd, XEvent *xev )
     {
         if (event->message_type == X11DRV_Atoms[client_messages[i].atom - FIRST_XATOM])
         {
-            client_messages[i].handler( hwnd, xev );
+            client_messages[i].handler( hwnd, event );
             return TRUE;
         }
     }

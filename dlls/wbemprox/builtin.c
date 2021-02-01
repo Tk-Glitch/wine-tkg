@@ -197,6 +197,7 @@ static const struct column col_networkadapter[] =
     { L"AdapterTypeID",       CIM_UINT16 },
     { L"Description",         CIM_STRING|COL_FLAG_DYNAMIC },
     { L"DeviceId",            CIM_STRING|COL_FLAG_DYNAMIC|COL_FLAG_KEY },
+    { L"GUID",                CIM_STRING|COL_FLAG_DYNAMIC },
     { L"Index",               CIM_UINT32 },
     { L"InterfaceIndex",      CIM_UINT32 },
     { L"MACAddress",          CIM_STRING|COL_FLAG_DYNAMIC },
@@ -205,6 +206,7 @@ static const struct column col_networkadapter[] =
     { L"NetConnectionStatus", CIM_UINT16 },
     { L"PhysicalAdapter",     CIM_BOOLEAN },
     { L"PNPDeviceID",         CIM_STRING },
+    { L"ServiceName",         CIM_STRING|COL_FLAG_DYNAMIC },
     { L"Speed",               CIM_UINT64 },
 };
 static const struct column col_networkadapterconfig[] =
@@ -376,9 +378,12 @@ static const struct column col_sid[] =
 };
 static const struct column col_sounddevice[] =
 {
+    { L"DeviceID",     CIM_STRING|COL_FLAG_DYNAMIC },
     { L"Manufacturer", CIM_STRING },
     { L"Name",         CIM_STRING },
+    { L"PNPDeviceID",  CIM_STRING|COL_FLAG_DYNAMIC },
     { L"ProductName",  CIM_STRING },
+    { L"Status",       CIM_STRING },
     { L"StatusInfo",   CIM_UINT16 },
 };
 static const struct column col_stdregprov[] =
@@ -402,6 +407,20 @@ static const struct column col_systemsecurity[] =
 {
     { L"GetSD", CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { L"SetSD", CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+};
+static const struct column col_sysrestore[] =
+{
+    { L"CreationTime",         CIM_STRING },
+    { L"Description",          CIM_STRING },
+    { L"EventType",            CIM_UINT32 },
+    { L"RestorePointType",     CIM_UINT32 },
+    { L"SequenceNumber",       CIM_UINT32 },
+    /* methods */
+    { L"CreateRestorePoint",   CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+    { L"Disable",              CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+    { L"Enable",               CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+    { L"GetLastRestoreStatus", CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+    { L"Restore",              CIM_FLAG_ARRAY|COL_FLAG_METHOD },
 };
 static const struct column col_videocontroller[] =
 {
@@ -586,6 +605,7 @@ struct record_networkadapter
     UINT16       adaptertypeid;
     const WCHAR *description;
     const WCHAR *device_id;
+    const WCHAR *guid;
     UINT32       index;
     UINT32       interface_index;
     const WCHAR *mac_address;
@@ -594,6 +614,7 @@ struct record_networkadapter
     UINT16       netconnection_status;
     int          physicaladapter;
     const WCHAR *pnpdevice_id;
+    const WCHAR *servicename;
     UINT64       speed;
 };
 struct record_networkadapterconfig
@@ -765,9 +786,12 @@ struct record_sid
 };
 struct record_sounddevice
 {
+    const WCHAR *deviceid;
     const WCHAR *manufacturer;
     const WCHAR *name;
+    const WCHAR *pnpdeviceid;
     const WCHAR *productname;
+    const WCHAR *status;
     UINT16       statusinfo;
 };
 struct record_stdregprov
@@ -776,6 +800,19 @@ struct record_stdregprov
     class_method *enumkey;
     class_method *enumvalues;
     class_method *getstringvalue;
+};
+struct record_sysrestore
+{
+    const WCHAR  *creation_time;
+    const WCHAR  *description;
+    UINT32        event_type;
+    UINT32        restore_point_type;
+    UINT32        sequence_number;
+    class_method *create_restore_point;
+    class_method *disable_restore;
+    class_method *enable_restore;
+    class_method *get_last_restore_status;
+    class_method *restore;
 };
 struct record_systemsecurity
 {
@@ -859,6 +896,10 @@ static const struct record_param data_param[] =
     { L"StdRegProv", L"GetStringValue", 1, L"sValueName", CIM_STRING },
     { L"StdRegProv", L"GetStringValue", -1, L"ReturnValue", CIM_UINT32 },
     { L"StdRegProv", L"GetStringValue", -1, L"sValue", CIM_STRING },
+    { L"SystemRestore", L"Disable", 1, L"Drive", CIM_STRING },
+    { L"SystemRestore", L"Disable", -1, L"ReturnValue", CIM_UINT32 },
+    { L"SystemRestore", L"Enable", 1, L"Drive", CIM_STRING },
+    { L"SystemRestore", L"Enable", -1, L"ReturnValue", CIM_UINT32 },
     { L"Win32_Process", L"GetOwner", -1, L"ReturnValue", CIM_UINT32 },
     { L"Win32_Process", L"GetOwner", -1, L"User", CIM_STRING },
     { L"Win32_Process", L"GetOwner", -1, L"Domain", CIM_STRING },
@@ -884,14 +925,17 @@ static const struct record_quickfixengineering data_quickfixengineering[] =
 {
     { L"http://winehq.org", L"KB1234567" },
 };
-static const struct record_sounddevice data_sounddevice[] =
-{
-    { L"The Wine Project", L"Wine Audio Device", L"Wine Audio Device", 3 /* enabled */ }
-};
+
 static const struct record_stdregprov data_stdregprov[] =
 {
     { reg_create_key, reg_enum_key, reg_enum_values, reg_get_stringvalue }
 };
+
+static const struct record_sysrestore data_sysrestore[] =
+{
+    { NULL, NULL, 0, 0, 0, create_restore_point, disable_restore, enable_restore, get_last_restore_status, restore }
+};
+
 static UINT16 systemenclosure_chassistypes[] =
 {
     1,
@@ -1181,7 +1225,7 @@ static WCHAR *get_bios_string( BYTE id, const char *buf, UINT len )
 static WCHAR *get_bios_manufacturer( const char *buf, UINT len )
 {
     WCHAR *ret = get_bios_string( 1, buf, len );
-    if (!ret) return heap_strdupW( L"The Wine Project" );
+    if (!ret) return heap_strdupW( L"The Proton Project" );
     return ret;
 }
 
@@ -1227,7 +1271,7 @@ static WCHAR *get_bios_releasedate( const char *buf, UINT len )
 static WCHAR *get_bios_smbiosbiosversion( const char *buf, UINT len )
 {
     WCHAR *ret = get_bios_string( 2, buf, len );
-    if (!ret) return heap_strdupW( L"Wine" );
+    if (!ret) return heap_strdupW( L"Proton" );
     return ret;
 }
 
@@ -1307,7 +1351,7 @@ static enum fill_status fill_bios( struct table *table, const struct expr *cond 
     rec->smbiosminorversion     = get_bios_smbiosminorversion( buf, len );
     rec->systembiosmajorversion = get_bios_system_bios_major_release( buf, len );
     rec->systembiosminorversion = get_bios_system_bios_minor_release( buf, len );
-    rec->version                = L"WINE   - 1";
+    rec->version                = L"PROTON - 1";
     if (!match_row( table, row, cond, &status )) free_row_values( table, row );
     else row++;
 
@@ -1320,7 +1364,7 @@ static enum fill_status fill_bios( struct table *table, const struct expr *cond 
 
 static enum fill_status fill_cdromdrive( struct table *table, const struct expr *cond )
 {
-    WCHAR drive[3], root[] = {'A',':','\\',0};
+    WCHAR drive[3], root[] = L"A:\\";
     struct record_cdromdrive *rec;
     UINT i, row = 0, offset = 0;
     DWORD drives = GetLogicalDrives();
@@ -1468,8 +1512,8 @@ static enum fill_status fill_compsys( struct table *table, const struct expr *co
     rec->description            = L"AT/AT COMPATIBLE";
     rec->domain                 = L"WORKGROUP";
     rec->domainrole             = 0; /* standalone workstation */
-    rec->manufacturer           = L"The Wine Project";
-    rec->model                  = L"Wine";
+    rec->manufacturer           = L"The Proton Project";
+    rec->model                  = L"Proton";
     rec->name                   = get_computername();
     rec->num_logical_processors = get_logical_processor_count( NULL, &rec->num_processors );
     rec->total_physical_memory  = get_total_physical_memory();
@@ -1505,7 +1549,7 @@ static WCHAR *get_compsysproduct_identifyingnumber( const char *buf, UINT len )
 static WCHAR *get_compsysproduct_name( const char *buf, UINT len )
 {
     WCHAR *ret = get_compsysproduct_string( 2, buf, len );
-    if (!ret) return heap_strdupW( L"Wine" );
+    if (!ret) return heap_strdupW( L"Proton" );
     return ret;
 }
 
@@ -1533,7 +1577,7 @@ done:
 static WCHAR *get_compsysproduct_vendor( const char *buf, UINT len )
 {
     WCHAR *ret = get_compsysproduct_string( 1, buf, len );
-    if (!ret) return heap_strdupW( L"The Wine Project" );
+    if (!ret) return heap_strdupW( L"The Proton Project" );
     return ret;
 }
 
@@ -1846,7 +1890,7 @@ static enum fill_status fill_datafile( struct table *table, const struct expr *c
 {
     struct record_datafile *rec;
     UINT i, len, row = 0, offset = 0, num_expected_rows;
-    WCHAR *glob = NULL, *path = NULL, *new_path, root[] = {'A',':','\\',0};
+    WCHAR *glob = NULL, *path = NULL, *new_path, root[] = L"A:\\";
     DWORD drives = GetLogicalDrives();
     WIN32_FIND_DATAW data;
     HANDLE handle;
@@ -1974,7 +2018,7 @@ static enum fill_status fill_directory( struct table *table, const struct expr *
 {
     struct record_directory *rec;
     UINT i, len, row = 0, offset = 0, num_expected_rows;
-    WCHAR *glob = NULL, *path = NULL, *new_path, root[] = {'A',':','\\',0};
+    WCHAR *glob = NULL, *path = NULL, *new_path, root[] = L"A:\\";
     DWORD drives = GetLogicalDrives();
     WIN32_FIND_DATAW data;
     HANDLE handle;
@@ -2071,7 +2115,7 @@ done:
 
 static UINT64 get_freespace( const WCHAR *dir, UINT64 *disksize )
 {
-    WCHAR root[] = {'\\','\\','.','\\','A',':',0};
+    WCHAR root[] = L"\\\\.\\A:";
     ULARGE_INTEGER free;
     DISK_GEOMETRY_EX info;
     HANDLE handle;
@@ -2130,7 +2174,7 @@ done:
 static enum fill_status fill_diskdrive( struct table *table, const struct expr *cond )
 {
     static const WCHAR fmtW[] = L"\\\\\\\\.\\\\PHYSICALDRIVE%u";
-    WCHAR device_id[ARRAY_SIZE( fmtW ) + 10], root[] = {'A',':','\\',0};
+    WCHAR device_id[ARRAY_SIZE( fmtW ) + 10], root[] = L"A:\\";
     struct record_diskdrive *rec;
     UINT i, row = 0, offset = 0, index = 0, type;
     UINT64 size = 1024 * 1024 * 1024;
@@ -2283,7 +2327,7 @@ static WCHAR *get_filesystem( const WCHAR *root )
 
 static enum fill_status fill_diskpartition( struct table *table, const struct expr *cond )
 {
-    WCHAR device_id[32], root[] = {'A',':','\\',0};
+    WCHAR device_id[32], root[] = L"A:\\";
     struct record_diskpartition *rec;
     UINT i, row = 0, offset = 0, type, index = 0;
     UINT64 size = 1024 * 1024 * 1024;
@@ -2435,7 +2479,7 @@ static WCHAR *get_volumeserialnumber( const WCHAR *root )
 
 static enum fill_status fill_logicaldisk( struct table *table, const struct expr *cond )
 {
-    WCHAR device_id[3], root[] = {'A',':','\\',0};
+    WCHAR device_id[3], root[] = L"A:\\";
     struct record_logicaldisk *rec;
     UINT i, row = 0, offset = 0, type;
     UINT64 size = 1024 * 1024 * 1024;
@@ -2611,6 +2655,24 @@ static const WCHAR *get_adaptertype( DWORD type, int *id, int *physical )
     }
 }
 
+#define GUID_SIZE 39
+static WCHAR *guid_to_str( const GUID *ptr )
+{
+    WCHAR *ret;
+    if (!(ret = heap_alloc( GUID_SIZE * sizeof(WCHAR) ))) return NULL;
+    swprintf( ret, GUID_SIZE, L"{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+              ptr->Data1, ptr->Data2, ptr->Data3, ptr->Data4[0], ptr->Data4[1], ptr->Data4[2],
+              ptr->Data4[3], ptr->Data4[4], ptr->Data4[5], ptr->Data4[6], ptr->Data4[7] );
+    return ret;
+}
+
+static WCHAR *get_networkadapter_guid( const IF_LUID *luid )
+{
+    GUID guid;
+    if (ConvertInterfaceLuidToGuid( luid, &guid )) return NULL;
+    return guid_to_str( &guid );
+}
+
 static enum fill_status fill_networkadapter( struct table *table, const struct expr *cond )
 {
     WCHAR device_id[11];
@@ -2649,14 +2711,16 @@ static enum fill_status fill_networkadapter( struct table *table, const struct e
         rec->adaptertypeid        = adaptertypeid;
         rec->description          = heap_strdupW( aa->Description );
         rec->device_id            = heap_strdupW( device_id );
+        rec->guid                 = get_networkadapter_guid( &aa->Luid );
         rec->index                = aa->u.s.IfIndex;
         rec->interface_index      = aa->u.s.IfIndex;
         rec->mac_address          = get_mac_address( aa->PhysicalAddress, aa->PhysicalAddressLength );
-        rec->manufacturer         = L"The Wine Project";
+        rec->manufacturer         = L"The Proton Project";
         rec->name                 = heap_strdupW( aa->FriendlyName );
         rec->netconnection_status = get_connection_status( aa->OperStatus );
         rec->physicaladapter      = physical;
         rec->pnpdevice_id         = L"PCI\\VEN_8086&DEV_100E&SUBSYS_001E8086&REV_02\\3&267A616A&1&18";
+        rec->servicename          = heap_strdupW( aa->FriendlyName );
         rec->speed                = 1000000;
         if (!match_row( table, row, cond, &status ))
         {
@@ -2837,13 +2901,9 @@ static struct array *get_ipsubnet( IP_ADAPTER_UNICAST_ADDRESS_LH *list )
 static WCHAR *get_settingid( UINT32 index )
 {
     GUID guid;
-    WCHAR *ret, *str;
     memset( &guid, 0, sizeof(guid) );
     guid.Data1 = index;
-    UuidToStringW( &guid, &str );
-    ret = heap_strdupW( str );
-    RpcStringFreeW( &str );
-    return ret;
+    return guid_to_str( &guid );
 }
 
 static enum fill_status fill_networkadapterconfig( struct table *table, const struct expr *cond )
@@ -3286,7 +3346,7 @@ static WCHAR *get_lastbootuptime(void)
     if (!(ret = heap_alloc( 26 * sizeof(WCHAR) ))) return NULL;
 
     NtQuerySystemInformation( SystemTimeOfDayInformation, &ti, sizeof(ti), NULL );
-    RtlTimeToTimeFields( &ti.liKeBootTime, &tf );
+    RtlTimeToTimeFields( &ti.BootTime, &tf );
     swprintf( ret, 26, L"%04u%02u%02u%02u%02u%02u.%06u+000", tf.Year, tf.Month, tf.Day, tf.Hour, tf.Minute,
               tf.Second, tf.Milliseconds * 1000 );
     return ret;
@@ -3475,7 +3535,7 @@ static enum fill_status fill_operatingsystem( struct table *table, const struct 
     rec->lastbootuptime         = get_lastbootuptime();
     rec->localdatetime          = get_localdatetime();
     rec->locale                 = get_locale();
-    rec->manufacturer           = L"The Wine Project";
+    rec->manufacturer           = L"The Proton Project";
     rec->name                   = get_osname( rec->caption );
     rec->operatingsystemsku     = get_operatingsystemsku();
     rec->osarchitecture         = get_osarchitecture();
@@ -3740,7 +3800,7 @@ static WCHAR *get_systemenclosure_string( BYTE id, const char *buf, UINT len )
 static WCHAR *get_systemenclosure_manufacturer( const char *buf, UINT len )
 {
     WCHAR *ret = get_systemenclosure_string( 1, buf, len );
-    if (!ret) return heap_strdupW( L"Wine" );
+    if (!ret) return heap_strdupW( L"Proton" );
     return ret;
 }
 
@@ -3828,7 +3888,7 @@ static enum fill_status fill_systemenclosure( struct table *table, const struct 
     return status;
 }
 
-static WCHAR *get_pnpdeviceid( DXGI_ADAPTER_DESC *desc )
+static WCHAR *get_videocontroller_pnpdeviceid( DXGI_ADAPTER_DESC *desc )
 {
     static const WCHAR fmtW[] = L"PCI\\VEN_%04X&DEV_%04X&SUBSYS_%08X&REV_%02X\\0&DEADBEEF&0&DEAD";
     UINT len = sizeof(fmtW) + 2;
@@ -3844,7 +3904,7 @@ static WCHAR *get_pnpdeviceid( DXGI_ADAPTER_DESC *desc )
 #define HW_VENDOR_VMWARE 0x15ad
 #define HW_VENDOR_INTEL  0x8086
 
-static const WCHAR *get_installeddriver( UINT vendorid )
+static const WCHAR *get_videocontroller_installeddriver( UINT vendorid )
 {
     /* FIXME: wined3d has a better table, but we cannot access this information through dxgi */
 
@@ -3854,12 +3914,32 @@ static const WCHAR *get_installeddriver( UINT vendorid )
     return L"wine.dll";
 }
 
+static BOOL get_dxgi_adapter_desc( DXGI_ADAPTER_DESC *desc )
+{
+    IDXGIFactory *factory;
+    IDXGIAdapter *adapter;
+    HRESULT hr;
+
+    memset( desc, 0, sizeof(*desc) );
+    hr = CreateDXGIFactory( &IID_IDXGIFactory, (void **)&factory );
+    if (FAILED( hr )) return FALSE;
+
+    hr = IDXGIFactory_EnumAdapters( factory, 0, &adapter );
+    if (FAILED( hr ))
+    {
+        IDXGIFactory_Release( factory );
+        return FALSE;
+    }
+
+    hr = IDXGIAdapter_GetDesc( adapter, desc );
+    IDXGIAdapter_Release( adapter );
+    IDXGIFactory_Release( factory );
+    return SUCCEEDED( hr );
+}
+
 static enum fill_status fill_videocontroller( struct table *table, const struct expr *cond )
 {
     struct record_videocontroller *rec;
-    HRESULT hr;
-    IDXGIFactory *factory = NULL;
-    IDXGIAdapter *adapter = NULL;
     DXGI_ADAPTER_DESC desc;
     UINT row = 0, hres = 1024, vres = 768, vidmem = 512 * 1024 * 1024;
     const WCHAR *name = L"VideoController1";
@@ -3868,21 +3948,13 @@ static enum fill_status fill_videocontroller( struct table *table, const struct 
 
     if (!resize_table( table, 1, sizeof(*rec) )) return FILL_STATUS_FAILED;
 
-    memset (&desc, 0, sizeof(desc));
-    hr = CreateDXGIFactory( &IID_IDXGIFactory, (void **)&factory );
-    if (FAILED(hr)) goto done;
-
-    hr = IDXGIFactory_EnumAdapters( factory, 0, &adapter );
-    if (FAILED(hr)) goto done;
-
-    hr = IDXGIAdapter_GetDesc( adapter, &desc );
-    if (SUCCEEDED(hr))
+    if (get_dxgi_adapter_desc( &desc ))
     {
-        vidmem = desc.DedicatedVideoMemory;
-        name   = desc.Description;
+        if (desc.DedicatedVideoMemory > UINT_MAX) vidmem = 0xfff00000;
+        else vidmem = desc.DedicatedVideoMemory;
+        name = desc.Description;
     }
 
-done:
     rec = (struct record_videocontroller *)table->data;
     rec->adapter_compatibility = L"(Standard display types)";
     rec->adapter_dactype       = L"Integrated RAMDAC";
@@ -3899,9 +3971,9 @@ done:
     rec->device_id             = L"VideoController1";
     rec->driverdate            = L"20170101000000.000000+000";
     rec->driverversion         = L"1.0";
-    rec->installeddriver       = get_installeddriver( desc.VendorId );
+    rec->installeddriver       = get_videocontroller_installeddriver( desc.VendorId );
     rec->name                  = heap_strdupW( name );
-    rec->pnpdevice_id          = get_pnpdeviceid( &desc );
+    rec->pnpdevice_id          = get_videocontroller_pnpdeviceid( &desc );
     rec->status                = L"OK";
     rec->videoarchitecture     = 2; /* Unknown */
     rec->videomemorytype       = 2; /* Unknown */
@@ -3913,9 +3985,44 @@ done:
 
     TRACE("created %u rows\n", row);
     table->num_rows = row;
+    return status;
+}
 
-    if (adapter) IDXGIAdapter_Release( adapter );
-    if (factory) IDXGIFactory_Release( factory );
+static WCHAR *get_sounddevice_pnpdeviceid( DXGI_ADAPTER_DESC *desc )
+{
+    static const WCHAR fmtW[] = L"HDAUDIO\\FUNC_01&VEN_%04X&DEV_%04X&SUBSYS_%08X&REV_%04X\\0&DEADBEEF&0&DEAD";
+    UINT len = sizeof(fmtW) + 2;
+    WCHAR *ret;
+
+    if (!(ret = heap_alloc( len * sizeof(WCHAR) ))) return NULL;
+    swprintf( ret, len, fmtW, desc->VendorId, desc->DeviceId, desc->SubSysId, desc->Revision );
+    return ret;
+}
+
+static enum fill_status fill_sounddevice( struct table *table, const struct expr *cond )
+{
+    struct record_sounddevice *rec;
+    DXGI_ADAPTER_DESC desc;
+    UINT row = 0;
+    enum fill_status status = FILL_STATUS_UNFILTERED;
+
+    if (!resize_table( table, 1, sizeof(*rec) )) return FILL_STATUS_FAILED;
+
+    get_dxgi_adapter_desc( &desc );
+
+    rec = (struct record_sounddevice *)table->data;
+    rec->deviceid = get_sounddevice_pnpdeviceid( &desc );
+    rec->manufacturer = L"The Proton Project";
+    rec->name = L"Wine Audio Device";
+    rec->pnpdeviceid = get_sounddevice_pnpdeviceid( &desc );
+    rec->productname = L"Wine Audio Device";
+    rec->status = L"OK";
+    rec->statusinfo = 3;
+    if (!match_row( table, row, cond, &status )) free_row_values( table, row );
+    else row++;
+
+    TRACE("created %u rows\n", row);
+    table->num_rows = row;
     return status;
 }
 
@@ -3931,6 +4038,7 @@ static struct table builtin_classes[] =
     { L"CIM_LogicalDisk", C(col_logicaldisk), 0, 0, NULL, fill_logicaldisk },
     { L"CIM_Processor", C(col_processor), 0, 0, NULL, fill_processor },
     { L"StdRegProv", C(col_stdregprov), D(data_stdregprov) },
+    { L"SystemRestore", C(col_sysrestore), D(data_sysrestore) },
     { L"Win32_BIOS", C(col_bios), 0, 0, NULL, fill_bios },
     { L"Win32_BaseBoard", C(col_baseboard), 0, 0, NULL, fill_baseboard },
     { L"Win32_CDROMDrive", C(col_cdromdrive), 0, 0, NULL, fill_cdromdrive },
@@ -3957,7 +4065,7 @@ static struct table builtin_classes[] =
     { L"Win32_QuickFixEngineering", C(col_quickfixengineering), D(data_quickfixengineering) },
     { L"Win32_SID", C(col_sid), 0, 0, NULL, fill_sid },
     { L"Win32_Service", C(col_service), 0, 0, NULL, fill_service },
-    { L"Win32_SoundDevice", C(col_sounddevice), D(data_sounddevice) },
+    { L"Win32_SoundDevice", C(col_sounddevice), 0, 0, NULL, fill_sounddevice },
     { L"Win32_SystemEnclosure", C(col_systemenclosure), 0, 0, NULL, fill_systemenclosure },
     { L"Win32_VideoController", C(col_videocontroller), 0, 0, NULL, fill_videocontroller },
     { L"Win32_WinSAT", C(col_winsat), D(data_winsat) },

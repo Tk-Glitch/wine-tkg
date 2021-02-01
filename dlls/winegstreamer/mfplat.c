@@ -406,6 +406,10 @@ failed:
 
 static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618, 0x5e5a, 0x468a, {0x9f, 0x15, 0xd8, 0x27, 0xa9, 0xa0, 0x81, 0x62}};
 
+static const GUID CLSID_WINEAudioConverter = {0x6a170414,0xaad9,0x4693,{0xb8,0x06,0x3a,0x0c,0x47,0xc5,0x70,0xd6}};
+
+static GUID CLSID_WINEColorConverter = {0x2be8b27f,0xcd60,0x4b8a,{0x95,0xae,0xd1,0x74,0xcc,0x5c,0xba,0xa7}};
+
 static HRESULT h264_decoder_create(REFIID riid, void **ret)
 {
     return generic_decoder_construct(riid, ret, DECODER_TYPE_H264);
@@ -431,10 +435,6 @@ static HRESULT m4s2_decoder_create(REFIID riid, void **ret)
     return generic_decoder_construct(riid, ret, DECODER_TYPE_M4S2);
 }
 
-static GUID CLSID_CColorConvertDMO = {0x98230571,0x0087,0x4204,{0xb0,0x20,0x32,0x82,0x53,0x8e,0x57,0xd3}};
-
-static GUID CLSID_WINEAudioConverter = {0x6a170414,0xaad9,0x4693,{0xb8,0x06,0x3a,0x0c,0x47,0xc5,0x70,0xd6}};
-
 static const struct class_object
 {
     const GUID *clsid;
@@ -444,13 +444,13 @@ class_objects[] =
 {
     { &CLSID_VideoProcessorMFT, &video_processor_create },
     { &CLSID_GStreamerByteStreamHandler, &winegstreamer_stream_handler_create },
+    { &CLSID_WINEAudioConverter, &audio_converter_create },
+    { &CLSID_WINEColorConverter, &color_converter_create },
     { &CLSID_CMSH264DecoderMFT, &h264_decoder_create },
     { &CLSID_CMSAACDecMFT, &aac_decoder_create },
     { &CLSID_CWMVDecMediaObject, &wmv_decoder_create },
     { &CLSID_CWMADecMediaObject, &wma_decoder_create },
     { &CLSID_CMpeg4sDecMFT, m4s2_decoder_create },
-    { &CLSID_CColorConvertDMO, &color_converter_create },
-    { &CLSID_WINEAudioConverter, &audio_converter_create },
 };
 
 HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
@@ -479,8 +479,14 @@ HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 
-static WCHAR color_converterW[] = {'C','o','l','o','r',' ','C','o','n','v','e','r','t','e','r',0};
+static WCHAR audio_converterW[] = {'A','u','d','i','o',' ','C','o','n','v','e','r','t','e','r',0};
+static const GUID *audio_converter_supported_types[] =
+{
+    &MFAudioFormat_PCM,
+    &MFAudioFormat_Float,
+};
 
+static WCHAR color_converterW[] = {'C','o','l','o','r',' ','C','o','n','v','e','r','t','e','r',0};
 const GUID *color_converter_supported_types[] =
 {
     &MFVideoFormat_RGB24,
@@ -498,14 +504,6 @@ const GUID *color_converter_supported_types[] =
     &MFVideoFormat_YUY2,
     &MFVideoFormat_YVYU,
     &MFVideoFormat_YVYU,
-};
-
-static WCHAR audio_converterW[] = {'A','u','d','i','o',' ','C','o','n','v','e','r','t','e','r',0};
-
-const GUID *audio_converter_supported_types[] =
-{
-    &MFAudioFormat_PCM,
-    &MFAudioFormat_Float,
 };
 
 static WCHAR h264decoderW[] = {'H','.','2','6','4',' ','D','e','c','o','d','e','r',0};
@@ -603,18 +601,6 @@ static const struct mft
 mfts[] =
 {
     {
-        &CLSID_CColorConvertDMO,
-        &MFT_CATEGORY_VIDEO_EFFECT,
-        color_converterW,
-        MFT_ENUM_FLAG_SYNCMFT,
-        &MFMediaType_Video,
-        ARRAY_SIZE(color_converter_supported_types),
-        color_converter_supported_types,
-        ARRAY_SIZE(color_converter_supported_types),
-        color_converter_supported_types,
-        NULL
-    },
-    {
         &CLSID_WINEAudioConverter,
         &MFT_CATEGORY_AUDIO_EFFECT,
         audio_converterW,
@@ -624,6 +610,18 @@ mfts[] =
         audio_converter_supported_types,
         ARRAY_SIZE(audio_converter_supported_types),
         audio_converter_supported_types,
+        NULL
+    },
+    {
+        &CLSID_WINEColorConverter,
+        &MFT_CATEGORY_VIDEO_EFFECT,
+        color_converterW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Video,
+        ARRAY_SIZE(color_converter_supported_types),
+        color_converter_supported_types,
+        ARRAY_SIZE(color_converter_supported_types),
+        color_converter_supported_types,
         NULL
     },
     {
@@ -685,36 +683,32 @@ mfts[] =
         ARRAY_SIZE(m4s2_decoder_output_types),
         m4s2_decoder_output_types,
         NULL
-    }
+    },
 };
 
 HRESULT mfplat_DllRegisterServer(void)
 {
+    unsigned int i, j;
     HRESULT hr;
+    MFT_REGISTER_TYPE_INFO input_types[15], output_types[15];
 
-    for (unsigned int i = 0; i < ARRAY_SIZE(mfts); i++)
+    for (i = 0; i < ARRAY_SIZE(mfts); i++)
     {
         const struct mft *cur = &mfts[i];
 
-        MFT_REGISTER_TYPE_INFO *input_types, *output_types;
-        input_types = heap_alloc(cur->input_types_count * sizeof(input_types[0]));
-        output_types = heap_alloc(cur->output_types_count * sizeof(output_types[0]));
-        for (unsigned int i = 0; i < cur->input_types_count; i++)
+        for (j = 0; j < cur->input_types_count; j++)
         {
-            input_types[i].guidMajorType = *(cur->major_type);
-            input_types[i].guidSubtype = *(cur->input_types[i]);
+            input_types[j].guidMajorType = *(cur->major_type);
+            input_types[j].guidSubtype = *(cur->input_types[j]);
         }
-        for (unsigned int i = 0; i < cur->output_types_count; i++)
+        for (j = 0; j < cur->output_types_count; j++)
         {
-            output_types[i].guidMajorType = *(cur->major_type);
-            output_types[i].guidSubtype = *(cur->output_types[i]);
+            output_types[j].guidMajorType = *(cur->major_type);
+            output_types[j].guidSubtype = *(cur->output_types[j]);
         }
 
         hr = MFTRegister(*(cur->clsid), *(cur->category), cur->name, cur->flags, cur->input_types_count,
                     input_types, cur->output_types_count, output_types, cur->attributes);
-
-        heap_free(input_types);
-        heap_free(output_types);
 
         if (FAILED(hr))
         {
@@ -806,6 +800,7 @@ IMFMediaType *mf_media_type_from_caps(const GstCaps *caps)
             unsigned int i;
 
             IMFMediaType_SetUINT32(media_type, &MF_MT_COMPRESSED, FALSE);
+            IMFMediaType_SetUINT32(media_type, &MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
 
             /* First try FOURCC */
             if ((fourcc_subtype.Data1 = gst_video_format_to_fourcc(video_info.finfo->format)))
@@ -824,7 +819,7 @@ IMFMediaType *mf_media_type_from_caps(const GstCaps *caps)
                 }
                 if (i == ARRAY_SIZE(uncompressed_video_formats))
                 {
-                    FIXME("Unrecognized uncompressed video format %x\n", video_info.finfo->format);
+                    FIXME("Unrecognized uncompressed video format %s\n", gst_video_format_to_string(video_info.finfo->format));
                     IMFMediaType_Release(media_type);
                     return NULL;
                 }
@@ -973,146 +968,46 @@ IMFMediaType *mf_media_type_from_caps(const GstCaps *caps)
         if (gst_structure_get_int(info, "bitrate", &bitrate))
             IMFMediaType_SetUINT32(media_type, &MF_MT_AVG_BITRATE, bitrate);
 
-        if (!strcmp(mime_type, "audio/x-raw"))
+        if (!strcmp(mime_type, "audio/x-raw") || !(strcmp(mime_type, "audio/mpeg")))
         {
             GstAudioInfo audio_info;
+            DWORD depth;
 
-            if (gst_audio_info_from_caps(&audio_info, caps))
-            {
-                DWORD depth = GST_AUDIO_INFO_DEPTH(&audio_info);
-
-                /* validation */
-                if ((audio_info.finfo->flags & GST_AUDIO_FORMAT_FLAG_INTEGER && depth > 8) ||
-                    (audio_info.finfo->flags & GST_AUDIO_FORMAT_FLAG_SIGNED && depth <= 8) ||
-                    (audio_info.finfo->endianness != G_LITTLE_ENDIAN && depth > 8))
-                {
-                    IMFMediaType_Release(media_type);
-                    return NULL;
-                }
-
-                /* conversion */
-                switch (audio_info.finfo->flags)
-                {
-                    case GST_AUDIO_FORMAT_FLAG_FLOAT:
-                        IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_Float);
-                        break;
-                    case GST_AUDIO_FORMAT_FLAG_INTEGER:
-                    case GST_AUDIO_FORMAT_FLAG_SIGNED:
-                        IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
-                        break;
-                    default:
-                        FIXME("Unrecognized audio format %x\n", audio_info.finfo->format);
-                        IMFMediaType_Release(media_type);
-                        return NULL;
-                }
-
-                IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, depth);
-            }
-            else
+            if (!gst_audio_info_from_caps(&audio_info, caps))
             {
                 ERR("Failed to get caps audio info\n");
                 IMFMediaType_Release(media_type);
                 return NULL;
             }
-        }
-        else if (!(strcmp(mime_type, "audio/mpeg")))
-        {
-            int mpeg_version = -1;
 
-            IMFMediaType_SetUINT32(media_type, &MF_MT_COMPRESSED, TRUE);
+            depth = GST_AUDIO_INFO_DEPTH(&audio_info);
 
-            if (!(gst_structure_get_int(info, "mpegversion", &mpeg_version)))
-                ERR("Failed to get mpegversion\n");
-            switch (mpeg_version)
+            /* validation */
+            if ((audio_info.finfo->flags & GST_AUDIO_FORMAT_FLAG_INTEGER && depth > 8) ||
+                (audio_info.finfo->flags & GST_AUDIO_FORMAT_FLAG_SIGNED && depth <= 8) ||
+                (audio_info.finfo->endianness != G_LITTLE_ENDIAN && depth > 8))
             {
-                case 2:
-                case 4:
-                {
-                    const char *format, *profile, *level;
-                    DWORD profile_level_indication = 0;
-                    const GValue *codec_data;
-                    DWORD asc_size = 0;
-                    struct aac_user_data *user_data = NULL;
-
-                    IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_AAC);
-                    IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-
-                    codec_data = gst_structure_get_value(info, "codec_data");
-                    if (codec_data)
-                    {
-                        GstBuffer *codec_data_buffer = gst_value_get_buffer(codec_data);
-                        if (codec_data_buffer)
-                        {
-                            if ((asc_size = gst_buffer_get_size(codec_data_buffer)) >= 2)
-                            {
-                                user_data = heap_alloc_zero(sizeof(*user_data)+asc_size);
-                                gst_buffer_extract(codec_data_buffer, 0, (gpointer)(user_data + 1), asc_size);
-                            }
-                            else
-                                ERR("Unexpected buffer size\n");
-                        }
-                        else
-                            ERR("codec_data not a buffer\n");
-                    }
-                    else
-                        ERR("codec_data not found\n");
-                    if (!user_data)
-                        user_data = heap_alloc_zero(sizeof(*user_data));
-
-                    if ((format = gst_structure_get_string(info, "stream-format")))
-                    {
-                        DWORD payload_type = -1;
-                        if (!(strcmp(format, "raw")))
-                            payload_type = 0;
-                        else if (!(strcmp(format, "adts")))
-                            payload_type = 1;
-                        else if (!(strcmp(format, "adif")))
-                            payload_type = 2;
-                        else if (!(strcmp(format, "loas")))
-                            payload_type = 3;
-                        else
-                            FIXME("Unrecognized stream-format\n");
-                        if (payload_type != -1)
-                        {
-                            IMFMediaType_SetUINT32(media_type, &MF_MT_AAC_PAYLOAD_TYPE, payload_type);
-                            user_data->payload_type = payload_type;
-                        }
-                    }
-                    else
-                    {
-                        ERR("Stream format not present\n");
-                    }
-
-                    profile = gst_structure_get_string(info, "profile");
-                    level = gst_structure_get_string(info, "level");
-                    /* Data from http://archive.is/whp6P#45% */
-                    if (profile && level)
-                    {
-                        if (!(strcmp(profile, "lc")) && !(strcmp(level, "2")))
-                            profile_level_indication = 0x29;
-                        else if (!(strcmp(profile, "lc")) && !(strcmp(level, "4")))
-                            profile_level_indication = 0x2A;
-                        else if (!(strcmp(profile, "lc")) && !(strcmp(level, "5")))
-                            profile_level_indication = 0x2B;
-                        else
-                            FIXME("Unhandled profile/level combo\n");
-                    }
-                    else
-                        ERR("Profile or level not present\n");
-
-                    if (profile_level_indication)
-                    {
-                        IMFMediaType_SetUINT32(media_type, &MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, profile_level_indication);
-                        user_data->profile_level_indication = profile_level_indication;
-                    }
-
-                    IMFMediaType_SetBlob(media_type, &MF_MT_USER_DATA, (BYTE *)user_data, sizeof(*user_data) + asc_size);
-                    heap_free(user_data);
-                    break;
-                }
-                default:
-                    FIXME("Unhandled mpegversion %d\n", mpeg_version);
+                IMFMediaType_Release(media_type);
+                return NULL;
             }
+
+            /* conversion */
+            switch (audio_info.finfo->flags)
+            {
+                case GST_AUDIO_FORMAT_FLAG_FLOAT:
+                    IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_Float);
+                    break;
+                case GST_AUDIO_FORMAT_FLAG_INTEGER:
+                case GST_AUDIO_FORMAT_FLAG_SIGNED:
+                    IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
+                    break;
+                default:
+                    FIXME("Unrecognized audio format %x\n", audio_info.finfo->format);
+                    IMFMediaType_Release(media_type);
+                    return NULL;
+            }
+
+            IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, depth);
         }
         else if (!(strcmp(mime_type, "audio/x-wma")))
         {
@@ -1164,11 +1059,41 @@ GstCaps *make_mf_compatible_caps(GstCaps *caps)
     if (gst_caps_get_size(caps) != 1)
         return NULL;
 
+    /* Optimization: Don't copy caps if no transformation is needed */
+    if ((media_type = mf_media_type_from_caps(caps)))
+    {
+        IMFMediaType_Release(media_type);
+        return gst_caps_ref(caps);
+    }
+
     ret = gst_caps_copy(caps);
     structure = gst_caps_get_structure(ret, 0);
     mime_type = gst_structure_get_name(structure);
 
-    if (!strcmp(mime_type, "video/x-h264"))
+    if (!strcmp(mime_type, "audio/x-raw"))
+    {
+        const char *format;
+        if ((format = gst_structure_get_string(structure, "format")))
+        {
+            char type;
+            unsigned int bits_per_sample;
+            char endian[2];
+            char new_format[6];
+
+            if (strlen(format) <= 5 && (sscanf(format, "%c%u%2c", &type, &bits_per_sample, endian) >= 2))
+            {
+                if (type == 'U' || type == 'S')
+                    type = bits_per_sample == 8 ? 'U' : 'S';
+
+                if (endian[0] == 'B')
+                    endian[0] = 'L';
+
+                sprintf(new_format, "%c%u%.2s", type, bits_per_sample, bits_per_sample > 8 ? endian : 0);
+                gst_caps_set_simple(caps, "format", G_TYPE_STRING, new_format, NULL);
+            }
+        }
+    }
+    else if (!strcmp(mime_type, "video/x-h264"))
     {
         gst_caps_set_simple(ret, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
         gst_caps_set_simple(ret, "alignment", G_TYPE_STRING, "au", NULL);
@@ -1216,62 +1141,16 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
     if (IsEqualGUID(&major_type, &MFMediaType_Video))
     {
         UINT64 frame_rate = 0, frame_size = 0;
-        DWORD width, height, framerate_num, framerate_den;
-        UINT32 unused;
+        DWORD width, height;
 
         if (FAILED(IMFMediaType_GetUINT64(type, &MF_MT_FRAME_SIZE, &frame_size)))
             return NULL;
         width = frame_size >> 32;
         height = frame_size;
-        if (FAILED(IMFMediaType_GetUINT64(type, &MF_MT_FRAME_RATE, &frame_rate)))
-        {
-            frame_rate = TRUE;
-            framerate_num = 0;
-            framerate_den = 1;
-        }
-        else
-        {
-            framerate_num = frame_rate >> 32;
-            framerate_den = frame_rate;
-        }
 
-        /* Check if type is uncompressed */
-        if (SUCCEEDED(MFCalculateImageSize(&subtype, 100, 100, &unused)))
-        {
-            GstVideoFormat format = GST_VIDEO_FORMAT_UNKNOWN;
-            unsigned int i;
+        output = gst_caps_new_empty_simple("video/x-raw");
 
-            output = gst_caps_new_empty_simple("video/x-raw");
-
-            for (i = 0; i < ARRAY_SIZE(uncompressed_video_formats); i++)
-            {
-                if (IsEqualGUID(uncompressed_video_formats[i].subtype, &subtype))
-                {
-                    format = uncompressed_video_formats[i].format;
-                    break;
-                }
-            }
-
-            if (format == GST_VIDEO_FORMAT_UNKNOWN)
-            {
-                format = gst_video_format_from_fourcc(subtype.Data1);
-            }
-
-            if (format == GST_VIDEO_FORMAT_UNKNOWN)
-            {
-                FIXME("Unrecognized format %s\n", debugstr_guid(&subtype));
-                return NULL;
-            }
-            else
-            {
-                GstVideoInfo info;
-
-                gst_video_info_set_format(&info, format, width, height);
-                output = gst_video_info_to_caps(&info);
-            }
-
-        }
-        else if (IsEqualGUID(&subtype, &MFVideoFormat_H264))
+        if (IsEqualGUID(&subtype, &MFVideoFormat_H264))
         {
             enum eAVEncH264VProfile h264_profile;
             enum eAVEncH264VLevel h264_level;
@@ -1364,48 +1243,91 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
 
             user_data_to_codec_data(type, output);
         }
-        else {
-            FIXME("Unrecognized subtype %s\n", debugstr_guid(&subtype));
-            return NULL;
-        }
+        else
+        {
+            GstVideoFormat format = GST_VIDEO_FORMAT_UNKNOWN;
+            GUID subtype_base;
+            GstVideoInfo info;
+            unsigned int i;
 
+            for (i = 0; i < ARRAY_SIZE(uncompressed_video_formats); i++)
+            {
+                if (IsEqualGUID(uncompressed_video_formats[i].subtype, &subtype))
+                {
+                    format = uncompressed_video_formats[i].format;
+                    break;
+                }
+            }
+
+            subtype_base = subtype;
+            subtype_base.Data1 = 0;
+            if (format == GST_VIDEO_FORMAT_UNKNOWN && IsEqualGUID(&MFVideoFormat_Base, &subtype_base))
+                format = gst_video_format_from_fourcc(subtype.Data1);
+
+            if (format == GST_VIDEO_FORMAT_UNKNOWN)
+            {
+                FIXME("Unrecognized format %s\n", debugstr_guid(&subtype));
+                return NULL;
+            }
+
+            gst_video_info_set_format(&info, format, width, height);
+            output = gst_video_info_to_caps(&info);
+        }
 
         if (frame_size)
         {
             gst_caps_set_simple(output, "width", G_TYPE_INT, width, NULL);
             gst_caps_set_simple(output, "height", G_TYPE_INT, height, NULL);
         }
-        if (frame_rate)
-            gst_caps_set_simple(output, "framerate", GST_TYPE_FRACTION, framerate_num, framerate_den, NULL);
+        if (SUCCEEDED(IMFMediaType_GetUINT64(type, &MF_MT_FRAME_RATE, &frame_rate)))
+        {
+            /* Darksiders: Warmastered Edition uses a MF_MT_FRAME_RATE of 0,
+               and gstreamer won't accept an undefined number as the framerate. */
+            if (!(DWORD32)frame_rate)
+                frame_rate = 1;
+            gst_caps_set_simple(output, "framerate", GST_TYPE_FRACTION, (DWORD32)(frame_rate >> 32), (DWORD32) frame_rate, NULL);
+        }
         return output;
     }
     else if (IsEqualGUID(&major_type, &MFMediaType_Audio))
     {
-        DWORD rate, channels, channel_mask, bitrate;
+        DWORD rate = -1, channels = -1, channel_mask = -1;
+
+        IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate);
+        IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_NUM_CHANNELS, &channels);
+        IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_CHANNEL_MASK, &channel_mask);
 
         if (IsEqualGUID(&subtype, &MFAudioFormat_Float))
         {
-            output = gst_caps_new_empty_simple("audio/x-raw");
+            GstAudioInfo float_info;
 
-            gst_caps_set_simple(output, "format", G_TYPE_STRING, "F32LE", NULL);
-            gst_caps_set_simple(output, "layout", G_TYPE_STRING, "interleaved", NULL);
+            if (rate == -1 || channels == -1)
+            {
+                ERR("Incomplete media type.\n");
+                return NULL;
+            }
+
+            gst_audio_info_set_format(&float_info, GST_AUDIO_FORMAT_F32LE, rate, channels, NULL);
+            output = gst_audio_info_to_caps(&float_info);
         }
         else if (IsEqualGUID(&subtype, &MFAudioFormat_PCM))
         {
+            GstAudioFormat pcm_format;
+            GstAudioInfo pcm_info;
             DWORD bits_per_sample;
+
+            if (rate == -1 || channels == -1)
+            {
+                ERR("Incomplete media type.\n");
+                return NULL;
+            }
 
             if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_BITS_PER_SAMPLE, &bits_per_sample)))
             {
-                char format[6];
-                char type;
+                pcm_format = gst_audio_format_build_integer(bits_per_sample > 8, G_LITTLE_ENDIAN, bits_per_sample, bits_per_sample);
 
-                type = bits_per_sample > 8 ? 'S' : 'U';
-
-                output = gst_caps_new_empty_simple("audio/x-raw");
-
-                sprintf(format, "%c%u%s", type, bits_per_sample, bits_per_sample > 8 ? "LE" : "");
-
-                gst_caps_set_simple(output, "format", G_TYPE_STRING, format, NULL);
+                gst_audio_info_set_format(&pcm_info, pcm_format, rate, channels, NULL);
+                output = gst_audio_info_to_caps(&pcm_info);
             }
             else
             {
@@ -1500,23 +1422,12 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
             return NULL;
         }
 
-        if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate)))
-        {
+        if (rate != -1)
             gst_caps_set_simple(output, "rate", G_TYPE_INT, rate, NULL);
-        }
-        if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_NUM_CHANNELS, &channels)))
-        {
+        if (channels != -1)
             gst_caps_set_simple(output, "channels", G_TYPE_INT, channels, NULL);
-        }
-        if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_CHANNEL_MASK, &channel_mask)))
-        {
+        if (channel_mask != -1)
             gst_caps_set_simple(output, "channel-mask", GST_TYPE_BITMASK, (guint64) channel_mask, NULL);
-        }
-
-        if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AVG_BITRATE, &bitrate)))
-        {
-            gst_caps_set_simple(output, "bitrate", G_TYPE_INT, bitrate, NULL);
-        }
 
         return output;
     }
@@ -1536,91 +1447,71 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
 
 IMFSample* mf_sample_from_gst_buffer(GstBuffer *gst_buffer)
 {
-    IMFSample *out = NULL;
+    IMFMediaBuffer *mf_buffer = NULL;
+    GstMapInfo map_info = {0};
     LONGLONG duration, time;
-    int buffer_count;
+    BYTE *mapped_buf = NULL;
+    IMFSample *out = NULL;
     HRESULT hr;
 
     if (FAILED(hr = MFCreateSample(&out)))
-        goto fail;
+        goto done;
 
     duration = GST_BUFFER_DURATION(gst_buffer);
     time = GST_BUFFER_PTS(gst_buffer);
 
-    if (FAILED(IMFSample_SetSampleDuration(out, duration / 100)))
-        goto fail;
+    if (FAILED(hr = IMFSample_SetSampleDuration(out, duration / 100)))
+        goto done;
 
-    if (FAILED(IMFSample_SetSampleTime(out, time / 100)))
-        goto fail;
+    if (FAILED(hr = IMFSample_SetSampleTime(out, time / 100)))
+        goto done;
 
-    buffer_count = gst_buffer_n_memory(gst_buffer);
-
-    for (unsigned int i = 0; i < buffer_count; i++)
+    if (!gst_buffer_map(gst_buffer, &map_info, GST_MAP_READ))
     {
-        GstMemory *memory = gst_buffer_get_memory(gst_buffer, i);
-        IMFMediaBuffer *mf_buffer = NULL;
-        GstMapInfo map_info;
-        BYTE *buf_data;
+        hr = E_FAIL;
+        goto done;
+    }
 
-        if (!memory)
-        {
-            hr = E_FAIL;
-            goto loop_done;
-        }
+    if (FAILED(hr = MFCreateMemoryBuffer(map_info.maxsize, &mf_buffer)))
+        goto done;
 
-        if (!(gst_memory_map(memory, &map_info, GST_MAP_READ)))
-        {
-            hr = E_FAIL;
-            goto loop_done;
-        }
+    if (FAILED(hr = IMFMediaBuffer_Lock(mf_buffer, &mapped_buf, NULL, NULL)))
+        goto done;
 
-        if (FAILED(hr = MFCreateMemoryBuffer(map_info.maxsize, &mf_buffer)))
-        {
-            gst_memory_unmap(memory, &map_info);
-            goto loop_done;
-        }
+    memcpy(mapped_buf, map_info.data, map_info.size);
 
-        if (FAILED(hr = IMFMediaBuffer_Lock(mf_buffer, &buf_data, NULL, NULL)))
-        {
-            gst_memory_unmap(memory, &map_info);
-            goto loop_done;
-        }
+    if (FAILED(hr = IMFMediaBuffer_Unlock(mf_buffer)))
+        goto done;
 
-        memcpy(buf_data, map_info.data, map_info.size);
+    if (FAILED(hr = IMFMediaBuffer_SetCurrentLength(mf_buffer, map_info.size)))
+        goto done;
 
-        gst_memory_unmap(memory, &map_info);
+    if (FAILED(hr = IMFSample_AddBuffer(out, mf_buffer)))
+        goto done;
 
-        if (FAILED(hr = IMFMediaBuffer_Unlock(mf_buffer)))
-            goto loop_done;
-
-        if (FAILED(hr = IMFMediaBuffer_SetCurrentLength(mf_buffer, map_info.size)))
-            goto loop_done;
-
-        if (FAILED(hr = IMFSample_AddBuffer(out, mf_buffer)))
-            goto loop_done;
-
-        loop_done:
-        if (mf_buffer)
-            IMFMediaBuffer_Release(mf_buffer);
-        if (memory)
-            gst_memory_unref(memory);
-        if (FAILED(hr))
-            goto fail;
+done:
+    if (mf_buffer)
+        IMFMediaBuffer_Release(mf_buffer);
+    if (map_info.data)
+        gst_buffer_unmap(gst_buffer, &map_info);
+    if (FAILED(hr))
+    {
+        ERR("Failed to copy IMFSample to GstBuffer, hr = %#x\n", hr);
+        if (out)
+            IMFSample_Release(out);
+        out = NULL;
     }
 
     return out;
-    fail:
-    ERR("Failed to copy IMFSample to GstBuffer, hr = %#x\n", hr);
-    IMFSample_Release(out);
-    return NULL;
 }
 
-GstBuffer* gst_buffer_from_mf_sample(IMFSample *mf_sample)
+GstBuffer *gst_buffer_from_mf_sample(IMFSample *mf_sample)
 {
     GstBuffer *out = gst_buffer_new();
     IMFMediaBuffer *mf_buffer = NULL;
     LONGLONG duration, time;
     DWORD buffer_count;
+    unsigned int i;
     HRESULT hr;
 
     if (FAILED(hr = IMFSample_GetSampleDuration(mf_sample, &duration)))
@@ -1635,17 +1526,14 @@ GstBuffer* gst_buffer_from_mf_sample(IMFSample *mf_sample)
     if (FAILED(hr = IMFSample_GetBufferCount(mf_sample, &buffer_count)))
         goto fail;
 
-    for (unsigned int i = 0; i < buffer_count; i++)
+    for (i = 0; i < buffer_count; i++)
     {
-        DWORD buffer_max_size, buffer_size;
+        DWORD buffer_size;
         GstMapInfo map_info;
         GstMemory *memory;
         BYTE *buf_data;
 
         if (FAILED(hr = IMFSample_GetBufferByIndex(mf_sample, i, &mf_buffer)))
-            goto fail;
-
-        if (FAILED(hr = IMFMediaBuffer_GetMaxLength(mf_buffer, &buffer_max_size)))
             goto fail;
 
         if (FAILED(hr = IMFMediaBuffer_GetCurrentLength(mf_buffer, &buffer_size)))
@@ -1654,7 +1542,7 @@ GstBuffer* gst_buffer_from_mf_sample(IMFSample *mf_sample)
         memory = gst_allocator_alloc(NULL, buffer_size, NULL);
         gst_memory_resize(memory, 0, buffer_size);
 
-        if (!(gst_memory_map(memory, &map_info, GST_MAP_WRITE)))
+        if (!gst_memory_map(memory, &map_info, GST_MAP_WRITE))
         {
             hr = E_FAIL;
             goto fail;
@@ -1668,9 +1556,6 @@ GstBuffer* gst_buffer_from_mf_sample(IMFSample *mf_sample)
         if (FAILED(hr = IMFMediaBuffer_Unlock(mf_buffer)))
             goto fail;
 
-        if (FAILED(hr = IMFMediaBuffer_SetCurrentLength(mf_buffer, buffer_size)))
-            goto fail;
-
         gst_memory_unmap(memory, &map_info);
 
         gst_buffer_append_memory(out, memory);
@@ -1681,7 +1566,7 @@ GstBuffer* gst_buffer_from_mf_sample(IMFSample *mf_sample)
 
     return out;
 
-    fail:
+fail:
     ERR("Failed to copy IMFSample to GstBuffer, hr = %#x\n", hr);
     if (mf_buffer)
         IMFMediaBuffer_Release(mf_buffer);

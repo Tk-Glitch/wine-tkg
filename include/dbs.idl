@@ -79,6 +79,22 @@ enum DBPROPOPTIONENUM {
 
 typedef DWORD DBPROPSTATUS;
 
+enum DBPROPSTATUSENUM {
+    DBPROPSTATUS_OK             = 0,
+    DBPROPSTATUS_NOTSUPPORTED   = 1,
+    DBPROPSTATUS_BADVALUE       = 2,
+    DBPROPSTATUS_BADOPTION      = 3,
+    DBPROPSTATUS_BADCOLUMN      = 4,
+    DBPROPSTATUS_NOTALLSETTABLE = 5,
+    DBPROPSTATUS_NOTSETTABLE    = 6,
+    DBPROPSTATUS_NOTSET         = 7,
+    DBPROPSTATUS_CONFLICTING    = 8
+};
+
+enum DBPROPSTATUSENUM21 {
+    DBPROPSTATUS_NOTAVAILABLE   = 9
+};
+
 typedef struct tagDBPROP {
     DBPROPID dwPropertyID;
     DBPROPOPTIONS dwOptions;
@@ -500,6 +516,8 @@ cpp_quote("    EXTERN_C const GUID name DECLSPEC_HIDDEN")
 cpp_quote("#endif")
 
 cpp_quote("DEFINE_DBGUID(DB_NULLGUID,       0x00000000, 0x0000, 0x0000, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);")
+cpp_quote("DEFINE_DBGUID(DBGUID_SQL,        0xc8b522d7, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);")
+cpp_quote("DEFINE_DBGUID(DBGUID_DEFAULT,    0xc8b521fb, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);")
 cpp_quote("DEFINE_DBGUID(DBGUID_SESSION,    0xc8b522f5, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);")
 cpp_quote("DEFINE_DBGUID(DBGUID_ROWSET,     0xc8b522f6, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);")
 cpp_quote("DEFINE_DBGUID(DBGUID_ROW,        0xc8b522f7, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);")
@@ -800,3 +818,28 @@ typedef struct tagDBCOLUMNINFO {
     BYTE          bScale;
     DBID          columnid;
 } DBCOLUMNINFO;
+
+typedef DWORD DBPARAMFLAGS;
+
+enum DBPARAMFLAGSENUM {
+    DBPARAMFLAGS_ISINPUT    = 0x001,
+    DBPARAMFLAGS_ISOUTPUT   = 0x002,
+    DBPARAMFLAGS_ISSIGNED   = 0x010,
+    DBPARAMFLAGS_ISNULLABLE = 0x040,
+    DBPARAMFLAGS_ISLONG     = 0x080
+};
+
+enum DBPARAMFLAGSENUM20 {
+    DBPARAMFLAGS_SCALEISNEGATIVE = 0x100
+};
+
+typedef struct tagDBPARAMINFO {
+    DBPARAMFLAGS dwFlags;
+    DBORDINAL    iOrdinal;
+    LPOLESTR     pwszName;
+    ITypeInfo   *pTypeInfo;
+    DBLENGTH     ulParamSize;
+    DBTYPE       wType;
+    BYTE         bPrecision;
+    BYTE         bScale;
+} DBPARAMINFO;

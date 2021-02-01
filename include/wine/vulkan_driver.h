@@ -13,7 +13,7 @@
 #define __WINE_VULKAN_DRIVER_H
 
 /* Wine internal vulkan driver version, needs to be bumped upon vulkan_funcs changes. */
-#define WINE_VULKAN_DRIVER_VERSION 8
+#define WINE_VULKAN_DRIVER_VERSION 10
 
 struct vulkan_funcs
 {
@@ -42,12 +42,8 @@ struct vulkan_funcs
     VkResult (*p_vkGetSwapchainImagesKHR)(VkDevice, VkSwapchainKHR, uint32_t *, VkImage *);
     VkResult (*p_vkQueuePresentKHR)(VkQueue, const VkPresentInfoKHR *);
 
-    /* Optional. Returns TRUE if FS hack is active, otherwise returns FALSE. If
-     * it returns TRUE, then real_sz will contain the actual display
-     * resolution; user_sz will contain the app's requested mode; and dst_blit
-     * will contain the area to blit the user image to in real coordinates.
-     * All parameters are optional. */
-    VkBool32 (*query_fs_hack)(VkExtent2D *real_sz, VkExtent2D *user_sz, VkRect2D *dst_blit, VkFilter *filter);
+    /* winevulkan specific functions */
+    VkSurfaceKHR (*p_wine_get_native_surface)(VkSurfaceKHR);
 };
 
 extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver(HDC hdc, UINT version);

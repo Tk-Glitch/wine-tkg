@@ -87,7 +87,8 @@ typedef struct {
     const char *short_date;
     const char *date;
     const char *time;
-    int  unk[2];
+    int unk;
+    int refcount;
     const wchar_t *short_wdayW[7];
     const wchar_t *wdayW[7];
     const wchar_t *short_monW[12];
@@ -1037,7 +1038,7 @@ static void test_strftime(void)
         { "day1", "day2", "day3", "day4", "day5", "day6", "day7" },
         { "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10", "m11", "m12" },
         { "mon1", "mon2", "mon3", "mon4", "mon5", "mon6", "mon7", "mon8", "mon9", "mon10", "mon11", "mon12" },
-        "tam", "tpm", 0, 0, 0, { 1, 0 },
+        "tam", "tpm", 0, 0, 0, 1, 0,
         { L"D1", L"D2", L"D3", L"D4", L"D5", L"D6", L"D7" },
         { L"Day1", L"Day2", L"Day3", L"Day4", L"Day5", L"Day6", L"Day7" },
         { L"M1", L"M2", L"M3", L"M4", L"M5", L"M6", L"M7", L"M8", L"M9", L"M10", L"M11", L"M12" },
@@ -1110,6 +1111,15 @@ static void test_strftime(void)
     ret = strftime(buf, sizeof(buf), "%r", &epoch);
     ok(ret == 8, "ret = %d\n", ret);
     ok(!strcmp(buf, "00:00:00"), "buf = \"%s\", expected \"%s\"\n", buf, "00:00:00");
+    setlocale(LC_ALL, "C");
+
+    if(!setlocale(LC_TIME, "Japanese_Japan.932")) {
+        win_skip("Japanese_Japan.932 locale not available\n");
+        return;
+    }
+    ret = strftime(buf, sizeof(buf), "%a", &epoch);
+    ok(ret == 2 || broken(ret == 1), "ret = %d\n", ret);
+    ok(!strcmp(buf, "\x96\xd8"), "buf = %s, expected \"\\x96\\xd8\"\n", wine_dbgstr_an(buf, 2));
     setlocale(LC_ALL, "C");
 }
 

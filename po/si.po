@@ -79,17 +79,17 @@ msgstr "තොරතුරු සඳහා සහාය"
 #: dlls/shlwapi/shlwapi.rc:44 dlls/twain_32/twain.rc:32
 #: dlls/user32/user32.rc:83 dlls/user32/user32.rc:98 dlls/wininet/wininet.rc:62
 #: dlls/wininet/wininet.rc:82 dlls/winspool.drv/winspool.rc:42
-#: programs/net/net.rc:47 programs/notepad/notepad.rc:117
-#: programs/oleview/oleview.rc:161 programs/oleview/oleview.rc:174
-#: programs/progman/progman.rc:106 programs/progman/progman.rc:124
-#: programs/progman/progman.rc:142 programs/progman/progman.rc:158
-#: programs/progman/progman.rc:180 programs/progman/progman.rc:199
-#: programs/progman/progman.rc:216 programs/regedit/regedit.rc:296
-#: programs/regedit/regedit.rc:307 programs/regedit/regedit.rc:320
-#: programs/regedit/regedit.rc:336 programs/regedit/regedit.rc:349
-#: programs/regedit/regedit.rc:362 programs/taskmgr/taskmgr.rc:442
-#: programs/taskmgr/taskmgr.rc:517 programs/winecfg/winecfg.rc:213
-#: programs/winecfg/winecfg.rc:223 programs/wineconsole/wineconsole.rc:135
+#: programs/conhost/conhost.rc:126 programs/net/net.rc:47
+#: programs/notepad/notepad.rc:117 programs/oleview/oleview.rc:161
+#: programs/oleview/oleview.rc:174 programs/progman/progman.rc:106
+#: programs/progman/progman.rc:124 programs/progman/progman.rc:142
+#: programs/progman/progman.rc:158 programs/progman/progman.rc:180
+#: programs/progman/progman.rc:199 programs/progman/progman.rc:216
+#: programs/regedit/regedit.rc:296 programs/regedit/regedit.rc:307
+#: programs/regedit/regedit.rc:320 programs/regedit/regedit.rc:336
+#: programs/regedit/regedit.rc:349 programs/regedit/regedit.rc:362
+#: programs/taskmgr/taskmgr.rc:442 programs/taskmgr/taskmgr.rc:517
+#: programs/winecfg/winecfg.rc:213 programs/winecfg/winecfg.rc:223
 #: programs/winefile/winefile.rc:127 programs/winefile/winefile.rc:150
 #: programs/winefile/winefile.rc:180 programs/winemine/winemine.rc:73
 #: programs/winemine/winemine.rc:84 programs/winemine/winemine.rc:98
@@ -183,18 +183,18 @@ msgstr "ස්ථාපනය කරන්න (&I)"
 #: dlls/shell32/shell32.rc:342 dlls/shlwapi/shlwapi.rc:45
 #: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:84 dlls/user32/user32.rc:99
 #: dlls/wininet/wininet.rc:63 dlls/wininet/wininet.rc:83
-#: dlls/winspool.drv/winspool.rc:43 programs/notepad/notepad.rc:118
-#: programs/oleview/oleview.rc:162 programs/oleview/oleview.rc:175
-#: programs/progman/progman.rc:107 programs/progman/progman.rc:125
-#: programs/progman/progman.rc:143 programs/progman/progman.rc:159
-#: programs/progman/progman.rc:181 programs/progman/progman.rc:200
-#: programs/progman/progman.rc:217 programs/regedit/regedit.rc:297
-#: programs/regedit/regedit.rc:308 programs/regedit/regedit.rc:321
-#: programs/regedit/regedit.rc:337 programs/regedit/regedit.rc:350
-#: programs/regedit/regedit.rc:363 programs/taskmgr/taskmgr.rc:443
-#: programs/taskmgr/taskmgr.rc:518 programs/wineboot/wineboot.rc:34
-#: programs/winecfg/winecfg.rc:214 programs/winecfg/winecfg.rc:224
-#: programs/wineconsole/wineconsole.rc:136 programs/winefile/winefile.rc:128
+#: dlls/winspool.drv/winspool.rc:43 programs/conhost/conhost.rc:127
+#: programs/notepad/notepad.rc:118 programs/oleview/oleview.rc:162
+#: programs/oleview/oleview.rc:175 programs/progman/progman.rc:107
+#: programs/progman/progman.rc:125 programs/progman/progman.rc:143
+#: programs/progman/progman.rc:159 programs/progman/progman.rc:181
+#: programs/progman/progman.rc:200 programs/progman/progman.rc:217
+#: programs/regedit/regedit.rc:297 programs/regedit/regedit.rc:308
+#: programs/regedit/regedit.rc:321 programs/regedit/regedit.rc:337
+#: programs/regedit/regedit.rc:350 programs/regedit/regedit.rc:363
+#: programs/taskmgr/taskmgr.rc:443 programs/taskmgr/taskmgr.rc:518
+#: programs/wineboot/wineboot.rc:34 programs/winecfg/winecfg.rc:214
+#: programs/winecfg/winecfg.rc:224 programs/winefile/winefile.rc:128
 #: programs/winefile/winefile.rc:151 programs/winefile/winefile.rc:181
 #: programs/winemine/winemine.rc:99 programs/wordpad/wordpad.rc:216
 #: programs/wordpad/wordpad.rc:227 programs/wordpad/wordpad.rc:245
@@ -649,7 +649,7 @@ msgstr "තරම (&Z)"
 msgid "&Source"
 msgstr "මූලය (&S)"
 
-#: dlls/comdlg32/comdlg32.rc:251 programs/wineconsole/wineconsole.rc:85
+#: dlls/comdlg32/comdlg32.rc:251 programs/conhost/conhost.rc:76
 msgid "Font"
 msgstr "ෆොන්ටය"
 
@@ -799,7 +799,7 @@ msgstr "සියලුම ප්රතිස්ථාපනය කරන්න 
 #: dlls/comdlg32/comdlg32.rc:363 dlls/comdlg32/comdlg32.rc:403
 #: dlls/ieframe/ieframe.rc:42 dlls/shdoclc/shdoclc.rc:61
 #: dlls/shell32/shell32.rc:108 programs/clock/clock.rc:31
-#: programs/wineconsole/wineconsole.rc:30
+#: programs/conhost/conhost.rc:34
 msgid "&Properties"
 msgstr "ගුණාංග"
 
@@ -3263,7 +3263,7 @@ msgstr "කපන්න (&T)"
 #: dlls/shdoclc/shdoclc.rc:94 dlls/shdoclc/shdoclc.rc:118
 #: dlls/shdoclc/shdoclc.rc:133 dlls/shdoclc/shdoclc.rc:160
 #: dlls/shdoclc/shdoclc.rc:184 dlls/shell32/shell32.rc:102
-#: dlls/user32/user32.rc:61 programs/wineconsole/wineconsole.rc:32
+#: dlls/user32/user32.rc:61 programs/conhost/conhost.rc:36
 #: programs/winhlp32/winhlp32.rc:40 programs/wordpad/wordpad.rc:113
 msgid "&Copy"
 msgstr "පිටපත් කරන්න (&C)"
@@ -3332,7 +3332,7 @@ msgstr "මුල"
 msgid "Sync"
 msgstr "සමමුහුර්ත කරන්න"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:50 programs/wineconsole/wineconsole.rc:60
+#: dlls/hhctrl.ocx/hhctrl.rc:50 programs/conhost/conhost.rc:51
 #: programs/wordpad/wordpad.rc:166
 msgid "Options"
 msgstr "විකල්ප"
@@ -6878,6 +6878,12 @@ msgstr ""
 msgid "Not implemented.\n"
 msgstr "හදල නැහැ"
 
+#: dlls/kernel32/winerror.mc:3788
+#, fuzzy
+#| msgid "RPC call failed.\n"
+msgid "Call failed.\n"
+msgstr "RPC කෝල් එක බැරි උනා.\n"
+
 #: dlls/kernel32/winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr "ගොනුවේ අත්සනයක් නැහැ.\n"
@@ -8697,7 +8703,7 @@ msgstr "මූලය:"
 #: dlls/shdoclc/shdoclc.rc:82 dlls/shdoclc/shdoclc.rc:95
 #: dlls/shdoclc/shdoclc.rc:135 dlls/shdoclc/shdoclc.rc:162
 #: dlls/shdoclc/shdoclc.rc:186 dlls/user32/user32.rc:62
-#: programs/wineconsole/wineconsole.rc:33 programs/wordpad/wordpad.rc:114
+#: programs/conhost/conhost.rc:37 programs/wordpad/wordpad.rc:114
 msgid "&Paste"
 msgstr "අලවන්න"
 
@@ -9808,129 +9814,153 @@ msgstr " තත්පර"
 msgid "Select Source"
 msgstr "මූලය තෝරන්න"
 
-#: dlls/tzres/tzres.rc:88
+#: dlls/tzres/tzres.rc:90
 msgid "China Standard Time"
 msgstr "චීනයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:89
+#: dlls/tzres/tzres.rc:91
 msgid "China Daylight Time"
 msgstr "චීනයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:170
+#: dlls/tzres/tzres.rc:180
 msgid "North Asia Standard Time"
 msgstr "උතුරු ආසියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:171
+#: dlls/tzres/tzres.rc:181
 msgid "North Asia Daylight Time"
 msgstr "උතුරු ආසියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:110
+#: dlls/tzres/tzres.rc:116
 msgid "Georgian Standard Time"
 msgstr "ජෝර්ජියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:111
+#: dlls/tzres/tzres.rc:117
 msgid "Georgian Daylight Time"
 msgstr "ජෝර්ජියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:162
+#: dlls/tzres/tzres.rc:172
 msgid "Nepal Standard Time"
 msgstr "නේපාලයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:163
+#: dlls/tzres/tzres.rc:173
 msgid "Nepal Daylight Time"
 msgstr "නේපාලයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:64
+#: dlls/tzres/tzres.rc:66
 msgid "Cape Verde Standard Time"
 msgstr "කේප් වර්ඩෙ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:65
+#: dlls/tzres/tzres.rc:67
 msgid "Cape Verde Daylight Time"
 msgstr "කේප් වර්ඩෙ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:120
+#: dlls/tzres/tzres.rc:126
 #, fuzzy
 #| msgid "Hawaiian Standard Time"
 msgid "Haiti Standard Time"
 msgstr "හවායි සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:121
+#: dlls/tzres/tzres.rc:127
 #, fuzzy
 #| msgid "Hawaiian Daylight Time"
 msgid "Haiti Daylight Time"
 msgstr "හවායි දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:78
+#: dlls/tzres/tzres.rc:80
 msgid "Central European Standard Time"
 msgstr "මධ්‍යම යුරෝපයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:79
+#: dlls/tzres/tzres.rc:81
 msgid "Central European Daylight Time"
 msgstr "මධ්‍යම යුරෝපයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:150
+#: dlls/tzres/tzres.rc:160
 msgid "Morocco Standard Time"
 msgstr "මොරොක්කෝවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:151
+#: dlls/tzres/tzres.rc:161
 msgid "Morocco Daylight Time"
 msgstr "මොරොක්කෝවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:76
+#: dlls/tzres/tzres.rc:78
 msgid "Central Europe Standard Time"
 msgstr "මධ්‍යම යුරෝපයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:77
+#: dlls/tzres/tzres.rc:79
 msgid "Central Europe Daylight Time"
 msgstr "මධ්‍යම යුරෝපයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:126
+#: dlls/tzres/tzres.rc:132
 msgid "Iran Standard Time"
 msgstr "ඉරානයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:127
+#: dlls/tzres/tzres.rc:133
 msgid "Iran Daylight Time"
 msgstr "ඉරානයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:160
+#: dlls/tzres/tzres.rc:204
+#, fuzzy
+#| msgid "Hawaiian Standard Time"
+msgid "Saint Pierre Standard Time"
+msgstr "හවායි සම්මත වෙලාව"
+
+#: dlls/tzres/tzres.rc:205
+#, fuzzy
+#| msgid "Hawaiian Daylight Time"
+msgid "Saint Pierre Daylight Time"
+msgstr "හවායි දිවා ආලෝකය වෙලාව"
+
+#: dlls/tzres/tzres.rc:170
 msgid "Namibia Standard Time"
 msgstr "නැමීබියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:161
+#: dlls/tzres/tzres.rc:171
 msgid "Namibia Daylight Time"
 msgstr "නැමීබියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:210
+#: dlls/tzres/tzres.rc:226
 msgid "Tonga Standard Time"
 msgstr "ටොන්ගාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:211
+#: dlls/tzres/tzres.rc:227
 msgid "Tonga Daylight Time"
 msgstr "ටොන්ගාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:154
+#: dlls/tzres/tzres.rc:164
 msgid "Mountain Standard Time (Mexico)"
 msgstr "කන්දේ සම්මත වෙලාව (මෙක්සිකෝව)"
 
-#: dlls/tzres/tzres.rc:155
+#: dlls/tzres/tzres.rc:165
 msgid "Mountain Daylight Time (Mexico)"
 msgstr "කන්දේ දිවා ආලෝකය වෙලාව (මෙක්සිකෝව)"
 
-#: dlls/tzres/tzres.rc:112
+#: dlls/tzres/tzres.rc:118
 msgid "GMT Standard Time"
 msgstr "GMT සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:113
+#: dlls/tzres/tzres.rc:119
 msgid "GMT Daylight Time"
 msgstr "GMT දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:72
+#: dlls/tzres/tzres.rc:74
 msgid "Central Asia Standard Time"
 msgstr "මධ්‍යම ආසියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:73
+#: dlls/tzres/tzres.rc:75
 msgid "Central Asia Daylight Time"
 msgstr "මධ්‍යම ආසියාවේ දිවා ආලෝකය වෙලාව"
+
+#: dlls/tzres/tzres.rc:146
+#, fuzzy
+#| msgid "Korea Standard Time"
+msgid "Lord Howe Standard Time"
+msgstr "කොරියාවේ සම්මත වෙලාව"
+
+#: dlls/tzres/tzres.rc:147
+#, fuzzy
+#| msgid "Korea Daylight Time"
+msgid "Lord Howe Daylight Time"
+msgstr "කොරියාවේ දිවා ආලෝකය වෙලාව"
 
 #: dlls/tzres/tzres.rc:40
 msgid "Arabic Standard Time"
@@ -9940,123 +9970,147 @@ msgstr "අරාබි සම්මත වෙලාව"
 msgid "Arabic Daylight Time"
 msgstr "අරාබි දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:140
+#: dlls/tzres/tzres.rc:148
 msgid "Magadan Standard Time"
 msgstr "මාගඩාන් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:141
+#: dlls/tzres/tzres.rc:149
 msgid "Magadan Daylight Time"
 msgstr "මාගඩාන් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:166
+#: dlls/tzres/tzres.rc:176
 msgid "Newfoundland Standard Time"
 msgstr "නිව්ෆවුන්ඩ්ලන්තයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:167
+#: dlls/tzres/tzres.rc:177
 msgid "Newfoundland Daylight Time"
 msgstr "නිව්ෆවුන්ඩ්ලන්තයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:234
+#: dlls/tzres/tzres.rc:250
 msgid "West Pacific Standard Time"
 msgstr "බටහිර පැසිෆිකයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:235
+#: dlls/tzres/tzres.rc:251
 msgid "West Pacific Daylight Time"
 msgstr "බටහිර පැසිෆිකයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:174
+#: dlls/tzres/tzres.rc:186
 msgid "Pacific Standard Time"
 msgstr "පැසිෆිකයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:175
+#: dlls/tzres/tzres.rc:187
 msgid "Pacific Daylight Time"
 msgstr "පැසිෆිකයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:50
+#: dlls/tzres/tzres.rc:52
 msgid "Azerbaijan Standard Time"
 msgstr "අසර්බයිජානයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:51
+#: dlls/tzres/tzres.rc:53
 msgid "Azerbaijan Daylight Time"
 msgstr "අසර්බයිජානයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:192
+#: dlls/tzres/tzres.rc:150
+#, fuzzy
+#| msgid "Magadan Standard Time"
+msgid "Magallanes Standard Time"
+msgstr "මාගඩාන් සම්මත වෙලාව"
+
+#: dlls/tzres/tzres.rc:151
+#, fuzzy
+#| msgid "Magadan Daylight Time"
+msgid "Magallanes Daylight Time"
+msgstr "මාගඩාන් දිවා ආලෝකය වෙලාව"
+
+#: dlls/tzres/tzres.rc:206
 msgid "Samoa Standard Time"
 msgstr "සැමෝවා සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:193
+#: dlls/tzres/tzres.rc:207
 msgid "Samoa Daylight Time"
 msgstr "සැමෝවා දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:132
+#: dlls/tzres/tzres.rc:138
 msgid "Kaliningrad Standard Time"
 msgstr "කලිනින්ග්රාඩ් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:133
+#: dlls/tzres/tzres.rc:139
 msgid "Kaliningrad Daylight Time"
 msgstr "කලිනින්ග්රාඩ් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:176
+#: dlls/tzres/tzres.rc:188
 msgid "Pacific Standard Time (Mexico)"
 msgstr "පැසිෆිකයේ සම්මත වෙලාව (මෙක්සිකෝව)"
 
-#: dlls/tzres/tzres.rc:177
+#: dlls/tzres/tzres.rc:189
 msgid "Pacific Daylight Time (Mexico)"
 msgstr "පැසිෆිකයේ දිවා ආලෝකය වෙලාව (මෙක්සිකෝව)"
 
-#: dlls/tzres/tzres.rc:146
+#: dlls/tzres/tzres.rc:156
 msgid "Middle East Standard Time"
 msgstr "මැද පෙරදිගයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:147
+#: dlls/tzres/tzres.rc:157
 msgid "Middle East Daylight Time"
 msgstr "මැද පෙරදිගයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:208
+#: dlls/tzres/tzres.rc:224
 msgid "Tokyo Standard Time"
 msgstr "ටෝකියෝවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:209
+#: dlls/tzres/tzres.rc:225
 msgid "Tokyo Daylight Time"
 msgstr "ටෝකියෝවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:138
+#: dlls/tzres/tzres.rc:144
 msgid "Line Islands Standard Time"
 msgstr "රේඛිය දූපත් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:139
+#: dlls/tzres/tzres.rc:145
 msgid "Line Islands Daylight Time"
 msgstr "රේඛිය දූපත් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:130
+#: dlls/tzres/tzres.rc:92
+#, fuzzy
+#| msgid "China Standard Time"
+msgid "Cuba Standard Time"
+msgstr "චීනයේ සම්මත වෙලාව"
+
+#: dlls/tzres/tzres.rc:93
+#, fuzzy
+#| msgid "China Daylight Time"
+msgid "Cuba Daylight Time"
+msgstr "චීනයේ දිවා ආලෝකය වෙලාව"
+
+#: dlls/tzres/tzres.rc:136
 msgid "Jordan Standard Time"
 msgstr "පෝර්දානයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:131
+#: dlls/tzres/tzres.rc:137
 msgid "Jordan Daylight Time"
 msgstr "පෝර්දානයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:82
+#: dlls/tzres/tzres.rc:84
 msgid "Central Standard Time"
 msgstr "මධ්‍යම සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:83
+#: dlls/tzres/tzres.rc:85
 msgid "Central Daylight Time"
 msgstr "මධ්‍යම දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:52
+#: dlls/tzres/tzres.rc:54
 msgid "Azores Standard Time"
 msgstr "ඇසෝරස් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:53
+#: dlls/tzres/tzres.rc:55
 msgid "Azores Daylight Time"
 msgstr "ඇසෝරස් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:168
+#: dlls/tzres/tzres.rc:178
 msgid "North Asia East Standard Time"
 msgstr "උතුරු ආසියාවේ නැගෙනහිර සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:169
+#: dlls/tzres/tzres.rc:179
 msgid "North Asia East Daylight Time"
 msgstr "උතුරු ආසියාවේ නැගෙනහිර දිවා ආලෝකය වෙලාව"
 
@@ -10068,139 +10122,139 @@ msgstr "ආර්ජන්ටිනාවේ සම්මත වෙලාව"
 msgid "Argentina Daylight Time"
 msgstr "ආර්ජන්ටිනාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:142
+#: dlls/tzres/tzres.rc:152
 #, fuzzy
 #| msgid "Mauritius Standard Time"
 msgid "Marquesas Standard Time"
 msgstr "මෞරිටුයුස් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:143
+#: dlls/tzres/tzres.rc:153
 #, fuzzy
 #| msgid "Mauritius Daylight Time"
 msgid "Marquesas Daylight Time"
 msgstr "මෞරිටුයුස් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:156
+#: dlls/tzres/tzres.rc:166
 msgid "Myanmar Standard Time"
 msgstr "මියන්මාරයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:157
+#: dlls/tzres/tzres.rc:167
 msgid "Myanmar Daylight Time"
 msgstr "මියන්මාරයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:220 dlls/tzres/tzres.rc:221
+#: dlls/tzres/tzres.rc:236 dlls/tzres/tzres.rc:237
 msgid "Coordinated Universal Time"
 msgstr "සම්බන්ධිත විශ්ව වෙලාව"
 
-#: dlls/tzres/tzres.rc:124
+#: dlls/tzres/tzres.rc:130
 msgid "India Standard Time"
 msgstr "ඉන්දියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:125
+#: dlls/tzres/tzres.rc:131
 msgid "India Daylight Time"
 msgstr "ඉන්දියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:118
+#: dlls/tzres/tzres.rc:124
 msgid "GTB Standard Time"
 msgstr "GTB සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:119
+#: dlls/tzres/tzres.rc:125
 msgid "GTB Daylight Time"
 msgstr "GTB දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:212
+#: dlls/tzres/tzres.rc:228
 msgid "Turkey Standard Time"
 msgstr "තුර්කියේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:213
+#: dlls/tzres/tzres.rc:229
 msgid "Turkey Daylight Time"
 msgstr "තුර්කියේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:106
+#: dlls/tzres/tzres.rc:112
 msgid "Fiji Standard Time"
 msgstr "ෆිජියේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:107
+#: dlls/tzres/tzres.rc:113
 msgid "Fiji Daylight Time"
 msgstr "ෆිජියේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:62
+#: dlls/tzres/tzres.rc:64
 msgid "Canada Central Standard Time"
 msgstr "මධ්‍යම කැනඩාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:63
+#: dlls/tzres/tzres.rc:65
 msgid "Canada Central Daylight Time"
 msgstr "මධ්‍යම කැනඩාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:204
+#: dlls/tzres/tzres.rc:218
 msgid "Taipei Standard Time"
 msgstr "තායිපේයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:205
+#: dlls/tzres/tzres.rc:219
 msgid "Taipei Daylight Time"
 msgstr "තායිපේයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:230
+#: dlls/tzres/tzres.rc:246
 msgid "W. Europe Standard Time"
 msgstr "බටහිර යුරෝපයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:231
+#: dlls/tzres/tzres.rc:247
 msgid "W. Europe Daylight Time"
 msgstr "බටහිර යුරෝපයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:148
+#: dlls/tzres/tzres.rc:158
 msgid "Montevideo Standard Time"
 msgstr "මොන්ටෙවිඩෝ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:149
+#: dlls/tzres/tzres.rc:159
 msgid "Montevideo Daylight Time"
 msgstr "මොන්ටෙවිඩෝ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:178
+#: dlls/tzres/tzres.rc:190
 msgid "Pakistan Standard Time"
 msgstr "පකිස්ථානයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:179
+#: dlls/tzres/tzres.rc:191
 msgid "Pakistan Daylight Time"
 msgstr "පකිස්ථානයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:66
+#: dlls/tzres/tzres.rc:68
 msgid "Caucasus Standard Time"
 msgstr "කොකේසස් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:67
+#: dlls/tzres/tzres.rc:69
 msgid "Caucasus Daylight Time"
 msgstr "කොකේසස් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:48
+#: dlls/tzres/tzres.rc:50
 msgid "AUS Eastern Standard Time"
 msgstr "නැගෙනහිර ඕස්ට්රේලියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:49
+#: dlls/tzres/tzres.rc:51
 msgid "AUS Eastern Daylight Time"
 msgstr "නැගෙනහිර ඕස්ට්රේලියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:158
+#: dlls/tzres/tzres.rc:168
 msgid "N. Central Asia Standard Time"
 msgstr "උතුරු මධ්‍යම ආසියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:159
+#: dlls/tzres/tzres.rc:169
 msgid "N. Central Asia Daylight Time"
 msgstr "උතුරු මධ්‍යම ආසියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:100
+#: dlls/tzres/tzres.rc:104
 msgid "Eastern Standard Time"
 msgstr "නැගෙනහිර සම්මත වේලාව"
 
-#: dlls/tzres/tzres.rc:101
+#: dlls/tzres/tzres.rc:105
 msgid "Eastern Daylight Time"
 msgstr "නැගෙනහිර දිවා ආලෝකය වේලාව"
 
-#: dlls/tzres/tzres.rc:84
+#: dlls/tzres/tzres.rc:86
 msgid "Central Standard Time (Mexico)"
 msgstr "මධ්‍යම සම්මත වෙලාව (මෙක්සිකෝව)"
 
-#: dlls/tzres/tzres.rc:85
+#: dlls/tzres/tzres.rc:87
 msgid "Central Daylight Time (Mexico)"
 msgstr "මධ්‍යම දිවා ආලෝකය වෙලාව (මෙක්සිකෝව)"
 
@@ -10212,67 +10266,79 @@ msgstr "අත්ලාන්තිකයේ සම්මත වෙලාව"
 msgid "Atlantic Daylight Time"
 msgstr "අත්ලාන්තිකයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:152
+#: dlls/tzres/tzres.rc:162
 msgid "Mountain Standard Time"
 msgstr "කන්දේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:153
+#: dlls/tzres/tzres.rc:163
 msgid "Mountain Daylight Time"
 msgstr "කන්දේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:216
+#: dlls/tzres/tzres.rc:232
 msgid "US Eastern Standard Time"
 msgstr "එක්සත් ජනපදයේ නැගෙනහිරේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:217
+#: dlls/tzres/tzres.rc:233
 msgid "US Eastern Daylight Time"
 msgstr "එක්සත් ජනපදයේ නැගෙනහිරේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:206
+#: dlls/tzres/tzres.rc:182
+#, fuzzy
+#| msgid "Korea Standard Time"
+msgid "North Korea Standard Time"
+msgstr "කොරියාවේ සම්මත වෙලාව"
+
+#: dlls/tzres/tzres.rc:183
+#, fuzzy
+#| msgid "Korea Daylight Time"
+msgid "North Korea Daylight Time"
+msgstr "කොරියාවේ දිවා ආලෝකය වෙලාව"
+
+#: dlls/tzres/tzres.rc:220
 msgid "Tasmania Standard Time"
 msgstr "ටැස්මේනියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:207
+#: dlls/tzres/tzres.rc:221
 msgid "Tasmania Daylight Time"
 msgstr "ටැස්මේනියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:70
+#: dlls/tzres/tzres.rc:72
 msgid "Central America Standard Time"
 msgstr "මධ්‍යම ඇමරිකාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:71
+#: dlls/tzres/tzres.rc:73
 msgid "Central America Daylight Time"
 msgstr "මධ්‍යම ඇමරිකාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:218
+#: dlls/tzres/tzres.rc:234
 msgid "US Mountain Standard Time"
 msgstr "එක්සත් ජනපදයේ කන්දේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:219
+#: dlls/tzres/tzres.rc:235
 msgid "US Mountain Daylight Time"
 msgstr "එක්සත් ජනපදයේ කන්දේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:198
+#: dlls/tzres/tzres.rc:212
 msgid "South Africa Standard Time"
 msgstr "දකුණු අප්රිකාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:199
+#: dlls/tzres/tzres.rc:213
 msgid "South Africa Daylight Time"
 msgstr "දකුණු අප්රිකාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:68
+#: dlls/tzres/tzres.rc:70
 msgid "Cen. Australia Standard Time"
 msgstr "මධ්යම ඕස්ට්රේලියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:69
+#: dlls/tzres/tzres.rc:71
 msgid "Cen. Australia Daylight Time"
 msgstr "මධ්යම ඕස්ට්රේලියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:200
+#: dlls/tzres/tzres.rc:214
 msgid "Sri Lanka Standard Time"
 msgstr "ශ්‍රී ලංකාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:201
+#: dlls/tzres/tzres.rc:215
 msgid "Sri Lanka Daylight Time"
 msgstr "ශ්‍රී ලංකාවේ දිවා ආලෝකය වෙලාව"
 
@@ -10284,19 +10350,19 @@ msgstr "ඇෆ්ඝනිස්ථානයේ සම්මත වෙලාව"
 msgid "Afghanistan Daylight Time"
 msgstr "ඇෆ්ඝනිස්ථානයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:236
+#: dlls/tzres/tzres.rc:252
 msgid "Yakutsk Standard Time"
 msgstr "යකුට්ස්ක් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:237
+#: dlls/tzres/tzres.rc:253
 msgid "Yakutsk Daylight Time"
 msgstr "යකුට්ස්ක් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:186
+#: dlls/tzres/tzres.rc:198
 msgid "SA Eastern Standard Time"
 msgstr "SA නැගෙනහිර සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:187
+#: dlls/tzres/tzres.rc:199
 msgid "SA Eastern Daylight Time"
 msgstr "SA නැගෙනහිර දිවා ආලෝකය වෙලාව"
 
@@ -10316,35 +10382,59 @@ msgstr "අරාබි ජාතිකයේ සම්මත වෙලාව"
 msgid "Arabian Daylight Time"
 msgstr "අරාබි ජාතිකයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:184
+#: dlls/tzres/tzres.rc:222
+#, fuzzy
+#| msgid "Mountain Standard Time"
+msgid "Tocantins Standard Time"
+msgstr "කන්දේ සම්මත වෙලාව"
+
+#: dlls/tzres/tzres.rc:223
+#, fuzzy
+#| msgid "Mountain Daylight Time"
+msgid "Tocantins Daylight Time"
+msgstr "කන්දේ දිවා ආලෝකය වෙලාව"
+
+#: dlls/tzres/tzres.rc:196
 msgid "Russian Standard Time"
 msgstr "රුසියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:185
+#: dlls/tzres/tzres.rc:197
 msgid "Russian Daylight Time"
 msgstr "රුසියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:182
+#: dlls/tzres/tzres.rc:48
+#, fuzzy
+#| msgid "AUS Central Standard Time"
+msgid "Aus Central W. Standard Time"
+msgstr "මධ්‍යම ඕස්ට්රේලියාවේ සම්මත වෙලාව"
+
+#: dlls/tzres/tzres.rc:49
+#, fuzzy
+#| msgid "AUS Central Daylight Time"
+msgid "Aus Central W. Daylight Time"
+msgstr "මධ්‍යම ඕස්ට්රේලියාවේ දිවා ආලෝකය වෙලාව"
+
+#: dlls/tzres/tzres.rc:194
 msgid "Romance Standard Time"
 msgstr "Romance සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:183
+#: dlls/tzres/tzres.rc:195
 msgid "Romance Daylight Time"
 msgstr "Romance දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:104
+#: dlls/tzres/tzres.rc:110
 msgid "Ekaterinburg Standard Time"
 msgstr "ඊකේටර්බින්බර්ග් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:105
+#: dlls/tzres/tzres.rc:111
 msgid "Ekaterinburg Daylight Time"
 msgstr "ඊකේටර්බින්බර්ග් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:202
+#: dlls/tzres/tzres.rc:216
 msgid "Syria Standard Time"
 msgstr "සිරියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:203
+#: dlls/tzres/tzres.rc:217
 msgid "Syria Daylight Time"
 msgstr "සිරියාවේ දිවා ආලෝකය වෙලාව"
 
@@ -10356,51 +10446,51 @@ msgstr "මධ්‍යම ඕස්ට්රේලියාවේ සම්ම�
 msgid "AUS Central Daylight Time"
 msgstr "මධ්‍යම ඕස්ට්රේලියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:116
+#: dlls/tzres/tzres.rc:122
 msgid "Greenwich Standard Time"
 msgstr "ග්රිනිච් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:117
+#: dlls/tzres/tzres.rc:123
 msgid "Greenwich Daylight Time"
 msgstr "ග්රිනිච් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:214
+#: dlls/tzres/tzres.rc:230
 msgid "Ulaanbaatar Standard Time"
 msgstr "උලාන්බාටර් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:215
+#: dlls/tzres/tzres.rc:231
 msgid "Ulaanbaatar Daylight Time"
 msgstr "උලාන්බාටර් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:128
+#: dlls/tzres/tzres.rc:134
 msgid "Israel Standard Time"
 msgstr "ඊශ්රායෙලයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:129
+#: dlls/tzres/tzres.rc:135
 msgid "Israel Daylight Time"
 msgstr "ඊශ්රායෙලයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:56
+#: dlls/tzres/tzres.rc:58
 msgid "Bangladesh Standard Time"
 msgstr "බංගලාදේශයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:57
+#: dlls/tzres/tzres.rc:59
 msgid "Bangladesh Daylight Time"
 msgstr "බංගලාදේශයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:188
+#: dlls/tzres/tzres.rc:200
 msgid "SA Pacific Standard Time"
 msgstr "SA පැසිෆිකයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:189
+#: dlls/tzres/tzres.rc:201
 msgid "SA Pacific Daylight Time"
 msgstr "SA පැසිෆිකයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:232
+#: dlls/tzres/tzres.rc:248
 msgid "West Asia Standard Time"
 msgstr "බටහිර ආසියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:233
+#: dlls/tzres/tzres.rc:249
 msgid "West Asia Daylight Time"
 msgstr "බටහිර ආසියාවේ දිවා ආලෝකය වෙලාව"
 
@@ -10412,79 +10502,79 @@ msgstr "ඇලස්කාවේ සම්මත වෙලාව"
 msgid "Alaskan Daylight Time"
 msgstr "ඇලස්කාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:180
+#: dlls/tzres/tzres.rc:192
 msgid "Paraguay Standard Time"
 msgstr "පැරගුවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:181
+#: dlls/tzres/tzres.rc:193
 msgid "Paraguay Daylight Time"
 msgstr "පැරගුවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:90
+#: dlls/tzres/tzres.rc:94
 msgid "Dateline Standard Time"
 msgstr "Dateline සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:91
+#: dlls/tzres/tzres.rc:95
 msgid "Dateline Daylight Time"
 msgstr "Dateline දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:136
+#: dlls/tzres/tzres.rc:142
 msgid "Libya Standard Time"
 msgstr "ලිබියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:137
+#: dlls/tzres/tzres.rc:143
 msgid "Libya Daylight Time"
 msgstr "ලිබියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:54
+#: dlls/tzres/tzres.rc:56
 msgid "Bahia Standard Time"
 msgstr "බහියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:55
+#: dlls/tzres/tzres.rc:57
 msgid "Bahia Daylight Time"
 msgstr "බහියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:222
+#: dlls/tzres/tzres.rc:238
 msgid "Venezuela Standard Time"
 msgstr "වෙනිසියුලාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:223
+#: dlls/tzres/tzres.rc:239
 msgid "Venezuela Daylight Time"
 msgstr "වෙනිසියුලාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:60
+#: dlls/tzres/tzres.rc:62
 #, fuzzy
 #| msgid "Mountain Standard Time"
 msgid "Bougainville Standard Time"
 msgstr "කන්දේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:61
+#: dlls/tzres/tzres.rc:63
 #, fuzzy
 #| msgid "Mountain Daylight Time"
 msgid "Bougainville Daylight Time"
 msgstr "කන්දේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:122
+#: dlls/tzres/tzres.rc:128
 msgid "Hawaiian Standard Time"
 msgstr "හවායි සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:123
+#: dlls/tzres/tzres.rc:129
 msgid "Hawaiian Daylight Time"
 msgstr "හවායි දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:194
+#: dlls/tzres/tzres.rc:208
 msgid "SE Asia Standard Time"
 msgstr "SE ආසියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:195
+#: dlls/tzres/tzres.rc:209
 msgid "SE Asia Daylight Time"
 msgstr "SE ආසියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:164
+#: dlls/tzres/tzres.rc:174
 msgid "New Zealand Standard Time"
 msgstr "නවසීලන්තයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:165
+#: dlls/tzres/tzres.rc:175
 msgid "New Zealand Daylight Time"
 msgstr "නවසීලන්තයේ දිවා ආලෝකය වෙලාව"
 
@@ -10500,159 +10590,171 @@ msgstr "ආර්ජන්ටිනාවේ සම්මත වෙලාව"
 msgid "Aleutian Daylight Time"
 msgstr "ආර්ජන්ටිනාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:74
+#: dlls/tzres/tzres.rc:76
 msgid "Central Brazilian Standard Time"
 msgstr "මධ්‍යම බ්‍රසීලයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:75
+#: dlls/tzres/tzres.rc:77
 msgid "Central Brazilian Daylight Time"
 msgstr "මධ්‍යම බ්‍රසීලයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:58
+#: dlls/tzres/tzres.rc:60
 msgid "Belarus Standard Time"
 msgstr "බෙලාරස් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:59
+#: dlls/tzres/tzres.rc:61
 msgid "Belarus Daylight Time"
 msgstr "බෙලාරස් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:190
+#: dlls/tzres/tzres.rc:202
 msgid "SA Western Standard Time"
 msgstr "SA බටහිර සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:191
+#: dlls/tzres/tzres.rc:203
 msgid "SA Western Daylight Time"
 msgstr "SA බටහිර දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:114
+#: dlls/tzres/tzres.rc:120
 msgid "Greenland Standard Time"
 msgstr "ග්රීන්ලන්තයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:115
+#: dlls/tzres/tzres.rc:121
 msgid "Greenland Daylight Time"
 msgstr "ග්රීන්ලන්තයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:98
+#: dlls/tzres/tzres.rc:102
 msgid "Easter Island Standard Time"
 msgstr "ඊස්ටර් දූපතේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:99
+#: dlls/tzres/tzres.rc:103
 msgid "Easter Island Daylight Time"
 msgstr "ඊස්ටර් දූපතේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:102
+#: dlls/tzres/tzres.rc:108
 msgid "Egypt Standard Time"
 msgstr "ඊජිප්තුවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:103
+#: dlls/tzres/tzres.rc:109
 msgid "Egypt Daylight Time"
 msgstr "ඊජිප්තුවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:144
+#: dlls/tzres/tzres.rc:106
+#, fuzzy
+#| msgid "Central Standard Time (Mexico)"
+msgid "Eastern Standard Time (Mexico)"
+msgstr "මධ්‍යම සම්මත වෙලාව (මෙක්සිකෝව)"
+
+#: dlls/tzres/tzres.rc:107
+#, fuzzy
+#| msgid "Central Daylight Time (Mexico)"
+msgid "Eastern Daylight Time (Mexico)"
+msgstr "මධ්‍යම දිවා ආලෝකය වෙලාව (මෙක්සිකෝව)"
+
+#: dlls/tzres/tzres.rc:154
 msgid "Mauritius Standard Time"
 msgstr "මෞරිටුයුස් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:145
+#: dlls/tzres/tzres.rc:155
 msgid "Mauritius Daylight Time"
 msgstr "මෞරිටුයුස් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:224
+#: dlls/tzres/tzres.rc:240
 msgid "Vladivostok Standard Time"
 msgstr "ලාඩිවොස්ටොක් සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:225
+#: dlls/tzres/tzres.rc:241
 msgid "Vladivostok Daylight Time"
 msgstr "ලාඩිවොස්ටොක් දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:196
+#: dlls/tzres/tzres.rc:210
 msgid "Singapore Standard Time"
 msgstr "සිංගප්පූරුවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:197
+#: dlls/tzres/tzres.rc:211
 msgid "Singapore Daylight Time"
 msgstr "සිංගප්පූරුවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:134
+#: dlls/tzres/tzres.rc:140
 msgid "Korea Standard Time"
 msgstr "කොරියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:135
+#: dlls/tzres/tzres.rc:141
 msgid "Korea Daylight Time"
 msgstr "කොරියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:86
+#: dlls/tzres/tzres.rc:88
 #, fuzzy
 #| msgid "Easter Island Standard Time"
 msgid "Chatham Islands Standard Time"
 msgstr "ඊස්ටර් දූපතේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:87
+#: dlls/tzres/tzres.rc:89
 #, fuzzy
 #| msgid "Easter Island Daylight Time"
 msgid "Chatham Islands Daylight Time"
 msgstr "ඊස්ටර් දූපතේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:92
+#: dlls/tzres/tzres.rc:96
 msgid "E. Africa Standard Time"
 msgstr "නැගෙනහිර අප්රිකාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:93
+#: dlls/tzres/tzres.rc:97
 msgid "E. Africa Daylight Time"
 msgstr "නැගෙනහිර අප්රිකාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:108
+#: dlls/tzres/tzres.rc:114
 msgid "FLE Standard Time"
 msgstr "FLE සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:109
+#: dlls/tzres/tzres.rc:115
 msgid "FLE Daylight Time"
 msgstr "FLE දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:96
+#: dlls/tzres/tzres.rc:100
 msgid "E. South America Standard Time"
 msgstr "නැගෙනහිර දකුණු ඇමරිකාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:97
+#: dlls/tzres/tzres.rc:101
 msgid "E. South America Daylight Time"
 msgstr "නැගෙනහිර දකුණු ඇමරිකාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:80
+#: dlls/tzres/tzres.rc:82
 msgid "Central Pacific Standard Time"
 msgstr "මධ්‍යම පැසිෆිකයේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:81
+#: dlls/tzres/tzres.rc:83
 msgid "Central Pacific Daylight Time"
 msgstr "මධ්‍යම පැසිෆිකයේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:228
+#: dlls/tzres/tzres.rc:244
 msgid "W. Central Africa Standard Time"
 msgstr "බටහිර මධ්‍යම අප්රිකාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:229
+#: dlls/tzres/tzres.rc:245
 msgid "W. Central Africa Daylight Time"
 msgstr "බටහිර මධ්‍යම අප්රිකාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:172
+#: dlls/tzres/tzres.rc:184
 msgid "Pacific SA Standard Time"
 msgstr "පැසිෆිකය SA සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:173
+#: dlls/tzres/tzres.rc:185
 msgid "Pacific SA Daylight Time"
 msgstr "පැසිෆිකය SA දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:94
+#: dlls/tzres/tzres.rc:98
 msgid "E. Australia Standard Time"
 msgstr "නැගෙනහිර ඔස්ට්රාලියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:95
+#: dlls/tzres/tzres.rc:99
 msgid "E. Australia Daylight Time"
 msgstr "නැගෙනහිර ඔස්ට්රාලියාවේ දිවා ආලෝකය වෙලාව"
 
-#: dlls/tzres/tzres.rc:226
+#: dlls/tzres/tzres.rc:242
 msgid "W. Australia Standard Time"
 msgstr "බටහිර ඕස්ට්රේලියාවේ සම්මත වෙලාව"
 
-#: dlls/tzres/tzres.rc:227
+#: dlls/tzres/tzres.rc:243
 msgid "W. Australia Daylight Time"
 msgstr "බටහිර ඕස්ට්රේලියාවේ දිවා ආලෝකය වෙලාව"
 
@@ -10697,7 +10799,7 @@ msgid "&Move"
 msgstr "ගෙනයන්න (&M)"
 
 #: dlls/user32/user32.rc:32 dlls/user32/user32.rc:45
-#: programs/wineconsole/wineconsole.rc:93
+#: programs/conhost/conhost.rc:84
 msgid "&Size"
 msgstr "තරම (&S)"
 
@@ -12588,6 +12690,170 @@ msgid ""
 " hexadecimal (0x34) or octal (056).\n"
 msgstr ""
 
+#: programs/conhost/conhost.rc:54
+msgid "Cursor size"
+msgstr "කර්සරය ප්රමාණය"
+
+#: programs/conhost/conhost.rc:55
+msgid "&Small"
+msgstr "පොඩි (&S)"
+
+#: programs/conhost/conhost.rc:56
+msgid "&Medium"
+msgstr "මධ්යම (&M)"
+
+#: programs/conhost/conhost.rc:57
+msgid "&Large"
+msgstr "ලොකු (&L)"
+
+#: programs/conhost/conhost.rc:59
+msgid "Command history"
+msgstr "විධාන ඉතිහාසය"
+
+#: programs/conhost/conhost.rc:60
+msgid "&Buffer size:"
+msgstr "බෆරයේ ප්රමාණය (&B):"
+
+#: programs/conhost/conhost.rc:63
+msgid "&Remove duplicates"
+msgstr ""
+
+#: programs/conhost/conhost.rc:65
+msgid "Popup menu"
+msgstr "උත්පතන මෙනුව"
+
+#: programs/conhost/conhost.rc:66
+msgid "&Control"
+msgstr ""
+
+#: programs/conhost/conhost.rc:67
+msgid "S&hift"
+msgstr ""
+
+#: programs/conhost/conhost.rc:69
+msgid "Console"
+msgstr "කොන්සෝලය"
+
+#: programs/conhost/conhost.rc:70
+msgid "&Quick Edit mode"
+msgstr ""
+
+#: programs/conhost/conhost.rc:71
+msgid "&Insert mode"
+msgstr "ඇතුළු කරන්න ප්රකාරය (&I)"
+
+#: programs/conhost/conhost.rc:79
+msgid "&Font"
+msgstr "ෆොන්ටය (&F)"
+
+#: programs/conhost/conhost.rc:81
+msgid "&Color"
+msgstr "පාට (&C)"
+
+#: programs/conhost/conhost.rc:92
+msgid "Configuration"
+msgstr "වින්‍යාසය"
+
+#: programs/conhost/conhost.rc:95
+msgid "Buffer zone"
+msgstr "බෆරය කලාපය"
+
+#: programs/conhost/conhost.rc:96
+msgid "&Width:"
+msgstr "පළල (&W):"
+
+#: programs/conhost/conhost.rc:99
+msgid "&Height:"
+msgstr "උස (&H):"
+
+#: programs/conhost/conhost.rc:103
+msgid "Window size"
+msgstr "කවුළු ප්‍රමාණය"
+
+#: programs/conhost/conhost.rc:104
+msgid "W&idth:"
+msgstr "පළල (&I):"
+
+#: programs/conhost/conhost.rc:107
+msgid "H&eight:"
+msgstr "උස (&E):"
+
+#: programs/conhost/conhost.rc:111
+msgid "End of program"
+msgstr ""
+
+#: programs/conhost/conhost.rc:112
+msgid "&Close console"
+msgstr "කොන්සෝලය වහන්න (&C)"
+
+#: programs/conhost/conhost.rc:114
+msgid "Edition"
+msgstr "සංස්කරණය"
+
+#: programs/conhost/conhost.rc:120
+msgid "Console parameters"
+msgstr "කොන්සෝලයේ පරාමීති"
+
+#: programs/conhost/conhost.rc:123
+msgid "Retain these settings for later sessions"
+msgstr ""
+
+#: programs/conhost/conhost.rc:124
+msgid "Modify only current session"
+msgstr "වර්තමාන සැසිය විතරක් වෙනස් කරන්න"
+
+#: programs/conhost/conhost.rc:32 programs/notepad/notepad.rc:41
+#: programs/regedit/regedit.rc:43 programs/winhlp32/winhlp32.rc:39
+#: programs/wordpad/wordpad.rc:42
+msgid "&Edit"
+msgstr "සකසන්න (&E)"
+
+#: programs/conhost/conhost.rc:33
+msgid "Set &Defaults"
+msgstr ""
+
+#: programs/conhost/conhost.rc:35
+msgid "&Mark"
+msgstr "සලකුණු කරන්න (&M)"
+
+#: programs/conhost/conhost.rc:38
+msgid "&Select all"
+msgstr "සියල්ල තෝරන්න (&S)"
+
+#: programs/conhost/conhost.rc:39
+msgid "Sc&roll"
+msgstr "අනුචලනය කරන්න (&R)"
+
+#: programs/conhost/conhost.rc:40
+msgid "S&earch"
+msgstr "සොයන්න (&E)"
+
+#: programs/conhost/conhost.rc:43
+msgid "Setup - Default settings"
+msgstr "පිහිටුම - නිශ්චය කළ පසුතල"
+
+#: programs/conhost/conhost.rc:44
+msgid "Setup - Current settings"
+msgstr "පිහිටුම - පවතින සිටුවම්"
+
+#: programs/conhost/conhost.rc:45
+msgid "Configuration error"
+msgstr "වින්‍යාසයේ දෝෂයක්"
+
+#: programs/conhost/conhost.rc:46
+msgid ""
+"The size of the screen buffer must be greater than or equal to the size of "
+"the window."
+msgstr ""
+
+#: programs/conhost/conhost.rc:41
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
+msgstr ""
+
+#: programs/conhost/conhost.rc:42
+msgid "This is a test"
+msgstr "මේ පරික්‍ෂණයක්"
+
 #: programs/dxdiag/dxdiag.rc:30
 msgid "DirectX Diagnostic Tool"
 msgstr "DirectX දෝෂ විමර්ශන මෙවලම"
@@ -12982,12 +13248,6 @@ msgstr "පිටු පිහිටුම... (&T)"
 #: programs/notepad/notepad.rc:37
 msgid "P&rinter Setup..."
 msgstr "මුද්‍රකය පිහිටුම... (&R)"
-
-#: programs/notepad/notepad.rc:41 programs/regedit/regedit.rc:43
-#: programs/wineconsole/wineconsole.rc:28 programs/winhlp32/winhlp32.rc:39
-#: programs/wordpad/wordpad.rc:42
-msgid "&Edit"
-msgstr "සකසන්න (&E)"
 
 #: programs/notepad/notepad.rc:42 programs/wordpad/wordpad.rc:44
 msgid "&Undo\tCtrl+Z"
@@ -16106,229 +16366,13 @@ msgstr "මෙනු උද්දීපනය"
 msgid "Menu Bar"
 msgstr "මෙනු තීරුව"
 
-#: programs/wineconsole/wineconsole.rc:63
-msgid "Cursor size"
-msgstr "කර්සරය ප්රමාණය"
-
-#: programs/wineconsole/wineconsole.rc:64
-msgid "&Small"
-msgstr "පොඩි (&S)"
-
-#: programs/wineconsole/wineconsole.rc:65
-msgid "&Medium"
-msgstr "මධ්යම (&M)"
-
-#: programs/wineconsole/wineconsole.rc:66
-msgid "&Large"
-msgstr "ලොකු (&L)"
-
-#: programs/wineconsole/wineconsole.rc:68
-msgid "Command history"
-msgstr "විධාන ඉතිහාසය"
-
-#: programs/wineconsole/wineconsole.rc:69
-msgid "&Buffer size:"
-msgstr "බෆරයේ ප්රමාණය (&B):"
-
-#: programs/wineconsole/wineconsole.rc:72
-msgid "&Remove duplicates"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:74
-msgid "Popup menu"
-msgstr "උත්පතන මෙනුව"
-
-#: programs/wineconsole/wineconsole.rc:75
-msgid "&Control"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:76
-msgid "S&hift"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:78
-msgid "Console"
-msgstr "කොන්සෝලය"
-
-#: programs/wineconsole/wineconsole.rc:79
-msgid "&Quick Edit mode"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:80
-msgid "&Insert mode"
-msgstr "ඇතුළු කරන්න ප්රකාරය (&I)"
-
-#: programs/wineconsole/wineconsole.rc:88
-msgid "&Font"
-msgstr "ෆොන්ටය (&F)"
-
-#: programs/wineconsole/wineconsole.rc:90
-msgid "&Color"
-msgstr "පාට (&C)"
-
-#: programs/wineconsole/wineconsole.rc:101
-msgid "Configuration"
-msgstr "වින්‍යාසය"
-
-#: programs/wineconsole/wineconsole.rc:104
-msgid "Buffer zone"
-msgstr "බෆරය කලාපය"
-
-#: programs/wineconsole/wineconsole.rc:105
-msgid "&Width:"
-msgstr "පළල (&W):"
-
-#: programs/wineconsole/wineconsole.rc:108
-msgid "&Height:"
-msgstr "උස (&H):"
-
-#: programs/wineconsole/wineconsole.rc:112
-msgid "Window size"
-msgstr "කවුළු ප්‍රමාණය"
-
-#: programs/wineconsole/wineconsole.rc:113
-msgid "W&idth:"
-msgstr "පළල (&I):"
-
-#: programs/wineconsole/wineconsole.rc:116
-msgid "H&eight:"
-msgstr "උස (&E):"
-
-#: programs/wineconsole/wineconsole.rc:120
-msgid "End of program"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:121
-msgid "&Close console"
-msgstr "කොන්සෝලය වහන්න (&C)"
-
-#: programs/wineconsole/wineconsole.rc:123
-msgid "Edition"
-msgstr "සංස්කරණය"
-
-#: programs/wineconsole/wineconsole.rc:129
-msgid "Console parameters"
-msgstr "කොන්සෝලයේ පරාමීති"
-
-#: programs/wineconsole/wineconsole.rc:132
-msgid "Retain these settings for later sessions"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:133
-msgid "Modify only current session"
-msgstr "වර්තමාන සැසිය විතරක් වෙනස් කරන්න"
-
 #: programs/wineconsole/wineconsole.rc:29
-msgid "Set &Defaults"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:31
-msgid "&Mark"
-msgstr "සලකුණු කරන්න (&M)"
-
-#: programs/wineconsole/wineconsole.rc:34
-msgid "&Select all"
-msgstr "සියල්ල තෝරන්න (&S)"
-
-#: programs/wineconsole/wineconsole.rc:35
-msgid "Sc&roll"
-msgstr "අනුචලනය කරන්න (&R)"
-
-#: programs/wineconsole/wineconsole.rc:36
-msgid "S&earch"
-msgstr "සොයන්න (&E)"
-
-#: programs/wineconsole/wineconsole.rc:39
-msgid "Setup - Default settings"
-msgstr "පිහිටුම - නිශ්චය කළ පසුතල"
-
-#: programs/wineconsole/wineconsole.rc:40
-msgid "Setup - Current settings"
-msgstr "පිහිටුම - පවතින සිටුවම්"
-
-#: programs/wineconsole/wineconsole.rc:41
-msgid "Configuration error"
-msgstr "වින්‍යාසයේ දෝෂයක්"
-
-#: programs/wineconsole/wineconsole.rc:42
-msgid ""
-"The size of the screen buffer must be greater than or equal to the size of "
-"the window."
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:37
-msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
-msgstr ""
-
-#: programs/wineconsole/wineconsole.rc:38
-msgid "This is a test"
-msgstr "මේ පරික්‍ෂණයක්"
-
-#: programs/wineconsole/wineconsole.rc:44
-msgid "wineconsole: Couldn't parse event id\n"
-msgstr "wineconsole: සිද්ධිය id එක විශ්ලේෂණය කරන්න බැරි උනා\n"
-
-#: programs/wineconsole/wineconsole.rc:45
-msgid "wineconsole: Invalid backend\n"
-msgstr "wineconsole: අවලංගු බැකන්ඩ් එකක්\n"
-
-#: programs/wineconsole/wineconsole.rc:46
-msgid "wineconsole: Unrecognized command line option\n"
-msgstr "wineconsole: හඳුනගත්තු නැති විධාන රේඛා විකල්පය\n"
-
-#: programs/wineconsole/wineconsole.rc:47
-msgid "Starts a program in a Wine console\n"
-msgstr "ක්‍රමලේඛයක් ධාවන කරනවා Wine කොන්සෝලයක් ඇතුලේ\n"
-
-#: programs/wineconsole/wineconsole.rc:48
 msgid ""
 "wineconsole: Starting program %s failed.\n"
 "The command is invalid.\n"
 msgstr ""
 "wineconsole: %s ක්‍රමලේඛය ධාවන කිරීම බැරි උනා.\n"
 "විධානය වලංගු නැහැ.\n"
-
-#: programs/wineconsole/wineconsole.rc:50
-msgid ""
-"\n"
-"Usage:\n"
-"  wineconsole [options] <command>\n"
-"\n"
-"Options:\n"
-msgstr ""
-"\n"
-"භාවිතය:\n"
-"  wineconsole [විකල්ප] <විධානය>\n"
-"\n"
-"විකල්ප:\n"
-
-#: programs/wineconsole/wineconsole.rc:52
-msgid ""
-"  --backend={user|curses}  Choosing user will spawn a new window, curses "
-"will\n"
-"                           try to setup the current terminal as a Wine "
-"console.\n"
-msgstr ""
-"  --backend={user|curses}  user තෝරන කොට අලුත් කවුළුවක් හදනවා, curses \n"
-"                           වත්මන් terminal එක Wine කොන්සෝලයක් විදිහට හදන්න හදනවා.\n"
-
-#: programs/wineconsole/wineconsole.rc:53
-msgid "  <command>                The Wine program to launch in the console.\n"
-msgstr "  <විධානය>                Wine ක්‍රමලේඛය කොන්සෝලය ඇතුලේ ධාවන කරන්න.\n"
-
-#: programs/wineconsole/wineconsole.rc:54
-msgid ""
-"\n"
-"Example:\n"
-"  wineconsole cmd\n"
-"Starts the Wine command prompt in a Wine console.\n"
-"\n"
-msgstr ""
-"\n"
-"උදාහරණයක්:\n"
-"  wineconsole cmd\n"
-"Wine විධාන ප්‍රේරකය ධාවන කරනවා Wine කොන්සෝලයක් ඇතුලේ.\n"
-"\n"
 
 #: programs/winedbg/winedbg.rc:50 programs/winedbg/winedbg.rc:38
 msgid "Program Error"

@@ -1175,7 +1175,6 @@ static void test_tr2_sys__File_size(void)
     ULONGLONG val;
     HANDLE file;
     LARGE_INTEGER file_size;
-    WCHAR testW[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','1',0};
     CreateDirectoryA("tr2_test_dir", NULL);
 
     file = CreateFileA("tr2_test_dir/f1", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
@@ -1186,7 +1185,7 @@ static void test_tr2_sys__File_size(void)
     CloseHandle(file);
     val = p_tr2_sys__File_size("tr2_test_dir/f1");
     ok(val == 7, "file_size is %s\n", wine_dbgstr_longlong(val));
-    val = p_tr2_sys__File_size_wchar(testW);
+    val = p_tr2_sys__File_size_wchar(L"tr2_test_dir/f1");
     ok(val == 7, "file_size is %s\n", wine_dbgstr_longlong(val));
 
     file = CreateFileA("tr2_test_dir/f2", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
@@ -1218,9 +1217,6 @@ static void test_tr2_sys__Equivalent(void)
     int val, i;
     HANDLE file;
     char temp_path[MAX_PATH], current_path[MAX_PATH];
-    WCHAR testW[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','1',0};
-    WCHAR testW2[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','2',0};
-    WCHAR test_dirW[] = {'t','r','2','_','t','e','s','t','_','d','i','r',0};
     struct {
         char const *path1;
         char const *path2;
@@ -1260,11 +1256,11 @@ static void test_tr2_sys__Equivalent(void)
         ok(errno == 0xdeadbeef, "errno = %d\n", errno);
     }
 
-    val = p_tr2_sys__Equivalent_wchar(testW, testW);
+    val = p_tr2_sys__Equivalent_wchar(L"tr2_test_dir/f1", L"tr2_test_dir/f1");
     ok(val == 1, "tr2_sys__Equivalent(): expect: 1, got %d\n", val);
-    val = p_tr2_sys__Equivalent_wchar(testW, testW2);
+    val = p_tr2_sys__Equivalent_wchar(L"tr2_test_dir/f1", L"tr2_test_dir/f2");
     ok(val == 0, "tr2_sys__Equivalent(): expect: 0, got %d\n", val);
-    val = p_tr2_sys__Equivalent_wchar(test_dirW, test_dirW);
+    val = p_tr2_sys__Equivalent_wchar(L"tr2_test_dir", L"tr2_test_dir");
     ok(val == -1, "tr2_sys__Equivalent(): expect: -1, got %d\n", val);
 
     ok(DeleteFileA("tr2_test_dir/f1"), "expect tr2_test_dir/f1 to exist\n");
@@ -1275,7 +1271,6 @@ static void test_tr2_sys__Equivalent(void)
 
 static void test_tr2_sys__Current_get(void)
 {
-    static const WCHAR backslashW[] = {'\\',0};
     char temp_path[MAX_PATH], current_path[MAX_PATH], origin_path[MAX_PATH];
     char *temp;
     WCHAR temp_path_wchar[MAX_PATH], current_path_wchar[MAX_PATH];
@@ -1294,7 +1289,7 @@ static void test_tr2_sys__Current_get(void)
     ok(SetCurrentDirectoryW(temp_path_wchar), "SetCurrentDirectoryW to temp_path_wchar failed\n");
     temp_wchar = p_tr2_sys__Current_get_wchar(current_path_wchar);
     ok(temp_wchar == current_path_wchar, "p_tr2_sys__Current_get_wchar returned different buffer\n");
-    wcscat(temp_wchar, backslashW);
+    wcscat(temp_wchar, L"\\");
     ok(!wcscmp(temp_path_wchar, current_path_wchar), "test_tr2_sys__Current_get(): expect: %s, got %s\n", wine_dbgstr_w(temp_path_wchar), wine_dbgstr_w(current_path_wchar));
 
     ok(SetCurrentDirectoryA(origin_path), "SetCurrentDirectoryA to origin_path failed\n");
@@ -1307,7 +1302,6 @@ static void test_tr2_sys__Current_set(void)
 {
     char temp_path[MAX_PATH], current_path[MAX_PATH], origin_path[MAX_PATH];
     char *temp;
-    WCHAR testW[] = {'.','/',0};
 
     GetTempPathA(MAX_PATH, temp_path);
     GetCurrentDirectoryA(MAX_PATH, origin_path);
@@ -1320,7 +1314,7 @@ static void test_tr2_sys__Current_set(void)
     strcat(temp, "\\");
     ok(!strcmp(temp_path, current_path), "test_tr2_sys__Current_get(): expect: %s, got %s\n", temp_path, current_path);
 
-    ok(p_tr2_sys__Current_set_wchar(testW), "p_tr2_sys__Current_set_wchar to temp_path failed\n");
+    ok(p_tr2_sys__Current_set_wchar(L"./"), "p_tr2_sys__Current_set_wchar to temp_path failed\n");
     temp = p_tr2_sys__Current_get(current_path);
     ok(temp == current_path, "p_tr2_sys__Current_get returned different buffer\n");
     strcat(temp, "\\");
@@ -1343,7 +1337,6 @@ static void test_tr2_sys__Current_set(void)
 static void test_tr2_sys__Make_dir(void)
 {
     int ret, i;
-    WCHAR testW[] = {'w','d',0};
     struct {
         char const *path;
         int val;
@@ -1360,11 +1353,11 @@ static void test_tr2_sys__Make_dir(void)
         ok(ret == tests[i].val, "tr2_sys__Make_dir(): test %d expect: %d, got %d\n", i+1, tests[i].val, ret);
         ok(errno == 0xdeadbeef, "tr2_sys__Make_dir(): test %d errno expect 0xdeadbeef, got %d\n", i+1, errno);
     }
-    ret = p_tr2_sys__Make_dir_wchar(testW);
+    ret = p_tr2_sys__Make_dir_wchar(L"wd");
     ok(ret == 1, "tr2_sys__Make_dir(): expect: 1, got %d\n", ret);
 
     ok(p_tr2_sys__Remove_dir("tr2_test_dir"), "expect tr2_test_dir to exist\n");
-    ok(p_tr2_sys__Remove_dir_wchar(testW), "expect wd to exist\n");
+    ok(p_tr2_sys__Remove_dir_wchar(L"wd"), "expect wd to exist\n");
 }
 
 static void test_tr2_sys__Remove_dir(void)
@@ -1396,7 +1389,6 @@ static void test_tr2_sys__Copy_file(void)
     HANDLE file;
     int ret, i;
     LARGE_INTEGER file_size;
-    WCHAR testW[] = {'f','1',0}, testW2[] = {'f','w',0};
     struct {
         char const *source;
         char const *dest;
@@ -1436,11 +1428,11 @@ static void test_tr2_sys__Copy_file(void)
             ok(p_tr2_sys__File_size(tests[i].source) == p_tr2_sys__File_size(tests[i].dest),
                     "test_tr2_sys__Copy_file(): test %d failed, mismatched file sizes\n", i+1);
     }
-    ret = p_tr2_sys__Copy_file_wchar(testW, testW2, TRUE);
+    ret = p_tr2_sys__Copy_file_wchar(L"f1", L"fw", TRUE);
     ok(ret == ERROR_SUCCESS, "test_tr2_sys__Copy_file_wchar() expect ERROR_SUCCESS, got %d\n", ret);
 
     ok(DeleteFileA("f1"), "expect f1 to exist\n");
-    ok(DeleteFileW(testW2), "expect fw to exist\n");
+    ok(DeleteFileW(L"fw"), "expect fw to exist\n");
     ok(DeleteFileA("f1_copy"), "expect f1_copy to exist\n");
     ok(DeleteFileA("tr2_test_dir/f1_copy"), "expect tr2_test_dir/f1 to exist\n");
     ret = p_tr2_sys__Remove_dir("tr2_test_dir");
@@ -1454,7 +1446,6 @@ static void test_tr2_sys__Rename(void)
     BY_HANDLE_FILE_INFORMATION info1, info2;
     char temp_path[MAX_PATH], current_path[MAX_PATH];
     LARGE_INTEGER file_size;
-    static const WCHAR testW[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','1',0};
     static const struct {
         char const *old_path;
         char const *new_path;
@@ -1467,28 +1458,18 @@ static void test_tr2_sys__Rename(void)
         { "tr2_test_dir\\f1_rename", "tr2_test_dir\\??invalid_name>>", ERROR_INVALID_NAME },
         { "tr2_test_dir\\not_exist_file", "tr2_test_dir\\not_exist_rename", ERROR_FILE_NOT_FOUND }
     };
-    static const WCHAR f1_renameW[] =
-            {'t','r','2','_','t','e','s','t','_','d','i','r','\\','f','1','_','r','e','n','a','m','e',0};
-    static const WCHAR f1_rename2W[] =
-            {'t','r','2','_','t','e','s','t','_','d','i','r','\\','f','1','_','r','e','n','a','m','e','2',0};
-    static const WCHAR not_existW[] =
-            {'t','r','2','_','t','e','s','t','_','d','i','r','\\','n','o','t','_','e','x','i','s','t',0};
-    static const WCHAR not_exist2W[] =
-            {'t','r','2','_','t','e','s','t','_','d','i','r','\\','n','o','t','_','e','x','i','s','t','2',0};
-    static const WCHAR invalidW[] =
-            {'t','r','2','_','t','e','s','t','_','d','i','r','\\','?','?','i','n','v','a','l','i','d','>',0};
     static const struct {
         const WCHAR *old_path;
         const WCHAR *new_path;
         int val;
     } testsW[] = {
-        { testW, f1_renameW, ERROR_SUCCESS },
-        { testW, NULL, ERROR_FILE_NOT_FOUND }, /* Differs from the A version */
-        { testW, f1_renameW, ERROR_FILE_NOT_FOUND },
-        { NULL, f1_rename2W, ERROR_PATH_NOT_FOUND }, /* Differs from the A version */
-        { f1_renameW, invalidW, ERROR_INVALID_NAME },
-        { not_existW, not_exist2W, ERROR_FILE_NOT_FOUND },
-        { not_existW, invalidW, ERROR_FILE_NOT_FOUND }
+        { L"tr2_test_dir/f1", L"tr2_test_dir\\f1_rename", ERROR_SUCCESS },
+        { L"tr2_test_dir/f1", NULL, ERROR_FILE_NOT_FOUND }, /* Differs from the A version */
+        { L"tr2_test_dir/f1", L"tr2_test_dir\\f1_rename", ERROR_FILE_NOT_FOUND },
+        { NULL, L"tr2_test_dir\\f1_rename2", ERROR_PATH_NOT_FOUND }, /* Differs from the A version */
+        { L"tr2_test_dir\\f1_rename", L"tr2_test_dir\\??invalid>", ERROR_INVALID_NAME },
+        { L"tr2_test_dir\\not_exist", L"tr2_test_dir\\not_exist2", ERROR_FILE_NOT_FOUND },
+        { L"tr2_test_dir\\not_exist", L"tr2_test_dir\\??invalid>", ERROR_FILE_NOT_FOUND }
     };
 
     GetCurrentDirectoryA(MAX_PATH, current_path);
@@ -1615,18 +1596,15 @@ static void test_tr2_sys__Stat(void)
         char const *path;
         enum file_type ret;
         int err_code;
-        int is_todo;
     } tests[] = {
-        { NULL, status_unknown, ERROR_INVALID_PARAMETER, FALSE },
-        { "tr2_test_dir",    directory_file, ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir\\f1",  regular_file, ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir\\not_exist_file  ", file_not_found, ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir\\??invalid_name>>", file_not_found, ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir\\f1_link" ,   regular_file, ERROR_SUCCESS, TRUE },
-        { "tr2_test_dir\\dir_link", directory_file, ERROR_SUCCESS, TRUE },
+        { NULL, status_unknown, ERROR_INVALID_PARAMETER },
+        { "tr2_test_dir",    directory_file, ERROR_SUCCESS },
+        { "tr2_test_dir\\f1",  regular_file, ERROR_SUCCESS },
+        { "tr2_test_dir\\not_exist_file  ", file_not_found, ERROR_SUCCESS },
+        { "tr2_test_dir\\??invalid_name>>", file_not_found, ERROR_SUCCESS },
+        { "tr2_test_dir\\f1_link" ,   regular_file, ERROR_SUCCESS },
+        { "tr2_test_dir\\dir_link", directory_file, ERROR_SUCCESS },
     };
-    WCHAR testW[] = {'t','r','2','_','t','e','s','t','_','d','i','r',0};
-    WCHAR testW2[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','1',0};
 
     CreateDirectoryA("tr2_test_dir", NULL);
     file = CreateFileA("tr2_test_dir/f1", 0, 0, NULL, CREATE_ALWAYS, 0, NULL);
@@ -1668,32 +1646,30 @@ static void test_tr2_sys__Stat(void)
     for(i=0; i<ARRAY_SIZE(tests); i++) {
         err_code = 0xdeadbeef;
         val = p_tr2_sys__Stat(tests[i].path, &err_code);
-        todo_wine_if(tests[i].is_todo)
-            ok(tests[i].ret == val, "tr2_sys__Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+        ok(tests[i].ret == val, "tr2_sys__Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
         ok(tests[i].err_code == err_code, "tr2_sys__Stat(): test %d err_code expect: %d, got %d\n",
                 i+1, tests[i].err_code, err_code);
 
         /* test tr2_sys__Lstat */
         err_code = 0xdeadbeef;
         val = p_tr2_sys__Lstat(tests[i].path, &err_code);
-        todo_wine_if(tests[i].is_todo)
-            ok(tests[i].ret == val, "tr2_sys__Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+        ok(tests[i].ret == val, "tr2_sys__Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
         ok(tests[i].err_code == err_code, "tr2_sys__Lstat(): test %d err_code expect: %d, got %d\n",
                 i+1, tests[i].err_code, err_code);
     }
 
     err_code = 0xdeadbeef;
-    val = p_tr2_sys__Stat_wchar(testW, &err_code);
+    val = p_tr2_sys__Stat_wchar(L"tr2_test_dir", &err_code);
     ok(directory_file == val, "tr2_sys__Stat_wchar() expect directory_file, got %d\n", val);
     ok(ERROR_SUCCESS == err_code, "tr2_sys__Stat_wchar(): err_code expect ERROR_SUCCESS, got %d\n", err_code);
     err_code = 0xdeadbeef;
-    val = p_tr2_sys__Lstat_wchar(testW2, &err_code);
+    val = p_tr2_sys__Lstat_wchar(L"tr2_test_dir/f1", &err_code);
     ok(regular_file == val, "tr2_sys__Lstat_wchar() expect regular_file, got %d\n", val);
     ok(ERROR_SUCCESS == err_code, "tr2_sys__Lstat_wchar(): err_code expect ERROR_SUCCESS, got %d\n", err_code);
 
     if(ret) {
-        todo_wine ok(DeleteFileA("tr2_test_dir/f1_link"), "expect tr2_test_dir/f1_link to exist\n");
-        todo_wine ok(RemoveDirectoryA("tr2_test_dir/dir_link"), "expect tr2_test_dir/dir_link to exist\n");
+        ok(DeleteFileA("tr2_test_dir/f1_link"), "expect tr2_test_dir/f1_link to exist\n");
+        ok(RemoveDirectoryA("tr2_test_dir/dir_link"), "expect tr2_test_dir/dir_link to exist\n");
     }
     ok(DeleteFileA("tr2_test_dir/f1"), "expect tr2_test_dir/f1 to exist\n");
     ok(RemoveDirectoryA("tr2_test_dir"), "expect tr2_test_dir to exist\n");
@@ -1704,7 +1680,6 @@ static void test_tr2_sys__Last_write_time(void)
     HANDLE file;
     int ret;
     __int64 last_write_time, newtime;
-    static const WCHAR fileW[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','1',0};
     ret = p_tr2_sys__Make_dir("tr2_test_dir");
     ok(ret == 1, "tr2_sys__Make_dir() expect 1 got %d\n", ret);
 
@@ -1713,7 +1688,7 @@ static void test_tr2_sys__Last_write_time(void)
     CloseHandle(file);
 
     last_write_time = p_tr2_sys__Last_write_time("tr2_test_dir/f1");
-    newtime = p_tr2_sys__Last_write_time_wchar(fileW);
+    newtime = p_tr2_sys__Last_write_time_wchar(L"tr2_test_dir/f1");
     ok(last_write_time == newtime, "last_write_time = %s, newtime = %s\n",
             wine_dbgstr_longlong(last_write_time), wine_dbgstr_longlong(newtime));
     newtime = last_write_time + 123456789;
@@ -1923,16 +1898,15 @@ static void test_tr2_sys__Symlink(void)
         char const *existing_path;
         char const *new_path;
         int last_error;
-        MSVCP_bool is_todo;
     } tests[] = {
-        { "f1", "f1_link", ERROR_SUCCESS, FALSE },
-        { "f1", "tr2_test_dir\\f1_link", ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir\\f1_link", "tr2_test_dir\\f1_link_link", ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir", "dir_link", ERROR_SUCCESS, FALSE },
-        { NULL, "NULL_link", ERROR_INVALID_PARAMETER, FALSE },
-        { "f1", NULL, ERROR_INVALID_PARAMETER, FALSE },
-        { "not_exist",  "not_exist_link", ERROR_SUCCESS, FALSE },
-        { "f1", "not_exist_dir\\f1_link", ERROR_PATH_NOT_FOUND, TRUE }
+        { "f1", "f1_link", ERROR_SUCCESS },
+        { "f1", "tr2_test_dir\\f1_link", ERROR_SUCCESS },
+        { "tr2_test_dir\\f1_link", "tr2_test_dir\\f1_link_link", ERROR_SUCCESS },
+        { "tr2_test_dir", "dir_link", ERROR_SUCCESS },
+        { NULL, "NULL_link", ERROR_INVALID_PARAMETER },
+        { "f1", NULL, ERROR_INVALID_PARAMETER },
+        { "not_exist",  "not_exist_link", ERROR_SUCCESS },
+        { "f1", "not_exist_dir\\f1_link", ERROR_PATH_NOT_FOUND }
     };
 
     ret = p_tr2_sys__Make_dir("tr2_test_dir");
@@ -1957,18 +1931,17 @@ static void test_tr2_sys__Symlink(void)
         }
 
         ok(errno == 0xdeadbeef, "tr2_sys__Symlink(): test %d errno expect 0xdeadbeef, got %d\n", i+1, errno);
-        todo_wine_if(tests[i].is_todo)
-            ok(ret == tests[i].last_error, "tr2_sys__Symlink(): test %d expect: %d, got %d\n", i+1, tests[i].last_error, ret);
+        ok(ret == tests[i].last_error, "tr2_sys__Symlink(): test %d expect: %d, got %d\n", i+1, tests[i].last_error, ret);
         if(ret == ERROR_SUCCESS)
             ok(p_tr2_sys__File_size(tests[i].new_path) == 0, "tr2_sys__Symlink(): expect 0, got %s\n", wine_dbgstr_longlong(p_tr2_sys__File_size(tests[i].new_path)));
     }
 
     ok(DeleteFileA("f1"), "expect f1 to exist\n");
-    todo_wine ok(DeleteFileA("f1_link"), "expect f1_link to exist\n");
-    todo_wine ok(DeleteFileA("tr2_test_dir/f1_link"), "expect tr2_test_dir/f1_link to exist\n");
-    todo_wine ok(DeleteFileA("tr2_test_dir/f1_link_link"), "expect tr2_test_dir/f1_link_link to exist\n");
-    todo_wine ok(DeleteFileA("not_exist_link"), "expect not_exist_link to exist\n");
-    todo_wine ok(DeleteFileA("dir_link"), "expect dir_link to exist\n");
+    ok(DeleteFileA("f1_link"), "expect f1_link to exist\n");
+    ok(DeleteFileA("tr2_test_dir/f1_link"), "expect tr2_test_dir/f1_link to exist\n");
+    ok(DeleteFileA("tr2_test_dir/f1_link_link"), "expect tr2_test_dir/f1_link_link to exist\n");
+    ok(DeleteFileA("not_exist_link"), "expect not_exist_link to exist\n");
+    ok(DeleteFileA("dir_link"), "expect dir_link to exist\n");
     ret = p_tr2_sys__Remove_dir("tr2_test_dir");
     ok(ret == 1, "tr2_sys__Remove_dir(): expect 1 got %d\n", ret);
 }
@@ -1982,15 +1955,14 @@ static void test_tr2_sys__Unlink(void)
     struct {
         char const *path;
         int last_error;
-        MSVCP_bool is_todo;
     } tests[] = {
-        { "tr2_test_dir\\f1_symlink", ERROR_SUCCESS, TRUE },
-        { "tr2_test_dir\\f1_link", ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir\\f1", ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir", ERROR_ACCESS_DENIED, FALSE },
-        { "not_exist", ERROR_FILE_NOT_FOUND, FALSE },
-        { "not_exist_dir\\not_exist_file", ERROR_PATH_NOT_FOUND, FALSE },
-        { NULL, ERROR_PATH_NOT_FOUND, FALSE }
+        { "tr2_test_dir\\f1_symlink", ERROR_SUCCESS },
+        { "tr2_test_dir\\f1_link", ERROR_SUCCESS },
+        { "tr2_test_dir\\f1", ERROR_SUCCESS },
+        { "tr2_test_dir", ERROR_ACCESS_DENIED },
+        { "not_exist", ERROR_FILE_NOT_FOUND },
+        { "not_exist_dir\\not_exist_file", ERROR_PATH_NOT_FOUND },
+        { NULL, ERROR_PATH_NOT_FOUND }
     };
 
     GetCurrentDirectoryA(MAX_PATH, current_path);
@@ -2019,9 +1991,8 @@ static void test_tr2_sys__Unlink(void)
     for(i=0; i<ARRAY_SIZE(tests); i++) {
         errno = 0xdeadbeef;
         ret = p_tr2_sys__Unlink(tests[i].path);
-        todo_wine_if(tests[i].is_todo)
-            ok(ret == tests[i].last_error, "tr2_sys__Unlink(): test %d expect: %d, got %d\n",
-                    i+1, tests[i].last_error, ret);
+        ok(ret == tests[i].last_error, "tr2_sys__Unlink(): test %d expect: %d, got %d\n",
+           i+1, tests[i].last_error, ret);
         ok(errno == 0xdeadbeef, "tr2_sys__Unlink(): test %d errno expect: 0xdeadbeef, got %d\n", i+1, ret);
     }
 

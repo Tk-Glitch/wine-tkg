@@ -57,7 +57,12 @@
 #endif
 #endif
 
-#if !defined(_MSC_VER) && !defined(__stdcall)
+#ifndef __has_attribute
+#define __has_attribute(x) 0
+#endif
+
+#ifndef _MSC_VER
+# undef __stdcall
 # ifdef __i386__
 #  ifdef __GNUC__
 #   if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 2)) || defined(__APPLE__)
@@ -69,44 +74,35 @@
 #   error You need to define __stdcall for your compiler
 #  endif
 # elif defined(__x86_64__) && defined (__GNUC__)
-#  if (__GNUC__ > 5) || ((__GNUC__ == 5) && (__GNUC_MINOR__ >= 3))
+#  if __has_attribute(__force_align_arg_pointer__)
 #   define __stdcall __attribute__((ms_abi)) __attribute__((__force_align_arg_pointer__))
 #  else
 #   define __stdcall __attribute__((ms_abi))
 #  endif
-# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__)
+# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(_WIN32)
 #   define __stdcall __attribute__((pcs("aapcs-vfp")))
-# elif defined(__aarch64__) && defined (__GNUC__)
+# elif defined(__aarch64__) && defined (__GNUC__) && __has_attribute(ms_abi)
 #  define __stdcall __attribute__((ms_abi))
 # else  /* __i386__ */
 #  define __stdcall
 # endif  /* __i386__ */
 #endif /* __stdcall */
 
-#if !defined(_MSC_VER) && !defined(__cdecl)
+#ifndef _MSC_VER
+# undef __cdecl
 # if defined(__i386__) && defined(__GNUC__)
-#   if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 2)) || defined(__APPLE__)
+#  if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 2)) || defined(__APPLE__)
 #   define __cdecl __attribute__((__cdecl__)) __attribute__((__force_align_arg_pointer__))
 #  else
 #   define __cdecl __attribute__((__cdecl__))
 #  endif
-# elif defined(__x86_64__) && defined (__GNUC__)
-#  if (__GNUC__ > 5) || ((__GNUC__ == 5) && (__GNUC_MINOR__ >= 3))
-#   define __cdecl __attribute__((ms_abi)) __attribute__((__force_align_arg_pointer__))
-#  else
-#   define __cdecl __attribute__((ms_abi))
-#  endif
-# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__)
-#   define __cdecl __attribute__((pcs("aapcs-vfp")))
-# elif defined(__aarch64__) && defined (__GNUC__)
-#  define __cdecl __attribute__((ms_abi))
 # else
-#  define __cdecl
+#  define __cdecl __stdcall
 # endif
-#endif /* __cdecl */
+#endif
 
 #ifndef __ms_va_list
-# if (defined(__x86_64__) || defined(__aarch64__)) && defined (__GNUC__)
+# if (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined (__GNUC__)
 #  define __ms_va_list __builtin_ms_va_list
 #  define __ms_va_start(list,arg) __builtin_ms_va_start(list,arg)
 #  define __ms_va_end(list) __builtin_ms_va_end(list)
@@ -124,7 +120,7 @@
 #endif
 
 #ifndef WINAPIV
-# if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__)
+# if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(_WIN32)
 #  define WINAPIV __attribute__((pcs("aapcs")))
 # else
 #  define WINAPIV __cdecl
@@ -281,8 +277,16 @@ typedef struct tagLC_ID {
 
 #ifndef _THREADLOCALEINFO
 typedef struct threadlocaleinfostruct {
-    int refcount;
+#if _MSVCR_VER >= 140
+    unsigned short *pctype;
+    int mb_cur_max;
     unsigned int lc_codepage;
+#endif
+
+    int refcount;
+#if _MSVCR_VER < 140
+    unsigned int lc_codepage;
+#endif
     unsigned int lc_collate_cp;
     __msvcrt_ulong lc_handle[6];
     LC_ID lc_id[6];
@@ -293,17 +297,24 @@ typedef struct threadlocaleinfostruct {
         int *wrefcount;
     } lc_category[6];
     int lc_clike;
+#if _MSVCR_VER < 140
     int mb_cur_max;
+#endif
     int *lconv_intl_refcount;
     int *lconv_num_refcount;
     int *lconv_mon_refcount;
     struct lconv *lconv;
     int *ctype1_refcount;
     unsigned short *ctype1;
-    const unsigned short *pctype;
+#if _MSVCR_VER < 140
+    unsigned short *pctype;
+#endif
     const unsigned char *pclmap;
     const unsigned char *pcumap;
     struct __lc_time_data *lc_time_curr;
+#if _MSVCR_VER >= 110
+    wchar_t *lc_name[6];
+#endif
 } threadlocinfo;
 #define _THREADLOCALEINFO
 #endif

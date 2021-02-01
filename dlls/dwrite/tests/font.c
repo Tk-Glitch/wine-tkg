@@ -8208,16 +8208,17 @@ static BOOL has_vertical_glyph_variants(IDWriteFontFace1 *fontface)
                 subst2 = (const GSUB_SingleSubstFormat2*)((BYTE*)lookup_table + offset);
                 index = GET_BE_WORD(subst2->SubstFormat);
                 if (index == 1)
-                    ok(0, "validate Single Substitution Format 1\n");
+                    ret = TRUE;
                 else if (index == 2) {
                     /* SimSun-ExtB has 0 glyph count for this substitution */
-                    if (GET_BE_WORD(subst2->GlyphCount) > 0) {
+                    if (GET_BE_WORD(subst2->GlyphCount) > 0)
                         ret = TRUE;
-                        break;
-                    }
                 }
                 else
                     ok(0, "unknown Single Substitution Format, %u\n", index);
+
+                if (ret)
+                    break;
             }
         }
     }
@@ -9370,21 +9371,15 @@ static void test_fontsetbuilder(void)
     HRESULT hr;
 
     factory = create_factory_iid(&IID_IDWriteFactory3);
-    if (!factory) {
-        skip("IDWriteFontSetBuilder is not supported.\n");
+    if (!factory)
+    {
+        win_skip("IDWriteFontSetBuilder is not supported.\n");
         return;
     }
 
     EXPECT_REF(factory, 1);
     hr = IDWriteFactory3_CreateFontSetBuilder(factory, &builder);
-todo_wine
     ok(hr == S_OK, "Failed to create font set builder, hr %#x.\n", hr);
-
-    if (FAILED(hr)) {
-        IDWriteFactory3_Release(factory);
-        return;
-    }
-
     EXPECT_REF(factory, 2);
     IDWriteFontSetBuilder_Release(builder);
 
@@ -9418,12 +9413,16 @@ todo_wine
 
             EXPECT_REF(ref, 1);
             hr = IDWriteFontSetBuilder_AddFontFaceReference(builder, ref);
+       todo_wine
             ok(hr == S_OK, "Failed to add fontface reference, hr %#x.\n", hr);
             EXPECT_REF(ref, 1);
 
             hr = IDWriteFontSetBuilder_CreateFontSet(builder, &fontset);
+       todo_wine
             ok(hr == S_OK, "Failed to create a font set, hr %#x.\n", hr);
 
+        if (SUCCEEDED(hr))
+        {
             setcount = IDWriteFontSet_GetFontCount(fontset);
             ok(setcount == 1, "Unexpected font count %u.\n", setcount);
 
@@ -9489,6 +9488,7 @@ todo_wine
             }
 
             IDWriteFontSet_Release(fontset);
+        }
             IDWriteFontFaceReference_Release(ref);
             IDWriteFontSetBuilder_Release(builder);
 

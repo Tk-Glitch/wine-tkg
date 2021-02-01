@@ -831,7 +831,6 @@ typedef struct WS(WSAData)
 
 /* internal per-socket flags */
 #ifdef __WINESRC__
-#define FD_WINE_REUSE              0x08000000
 #define FD_WINE_LISTENING          0x10000000
 #define FD_WINE_NONBLOCKING        0x20000000
 #define FD_WINE_CONNECTED          0x40000000

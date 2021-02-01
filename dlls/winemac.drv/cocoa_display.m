@@ -183,7 +183,9 @@ done:
 /***********************************************************************
  *              macdrv_get_gpu_info_from_entry
  *
- * Starting from entry, search upwards to find the PCI GPU. And get GPU information from the PCI GPU entry.
+ * Starting from entry (which must be the GPU or a child below the GPU),
+ * search upwards to find the IOPCIDevice and get information from it.
+ * In case the GPU is not a PCI device, get properties from 'entry'.
  *
  * Returns non-zero value on failure.
  */
@@ -193,18 +195,21 @@ static int macdrv_get_gpu_info_from_entry(struct macdrv_gpu* gpu, io_registry_en
     io_registry_entry_t gpu_entry;
     kern_return_t result;
     int ret = -1;
-    char buffer[64];
     NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
 
     gpu_entry = entry;
-    while (![@"IOPCIDevice" isEqualToString:[(NSString*)IOObjectCopyClass(gpu_entry) autorelease]]
-           || get_entry_property_string(gpu_entry, CFSTR("IOName"), buffer, sizeof(buffer))
-           || strcmp(buffer, "display"))
+    while (![@"IOPCIDevice" isEqualToString:[(NSString*)IOObjectCopyClass(gpu_entry) autorelease]])
     {
         result = IORegistryEntryGetParentEntry(gpu_entry, kIOServicePlane, &parent_entry);
         if (gpu_entry != entry)
             IOObjectRelease(gpu_entry);
-        if (result != kIOReturnSuccess)
+        if (result == kIOReturnNoDevice)
+        {
+            /* If no IOPCIDevice node is found, get properties from the given entry. */
+            gpu_entry = entry;
+            break;
+        }
+        else if (result != kIOReturnSuccess)
         {
             [pool release];
             return ret;
@@ -330,9 +335,35 @@ done:
     return ret;
 }
 
+/***********************************************************************
+ *              macdrv_get_gpu_info_from_display_id_using_metal
+ *
+ * Get GPU information for a CG display id using Metal.
+ *
+ * Returns non-zero value on failure.
+ */
+static int macdrv_get_gpu_info_from_display_id_using_metal(struct macdrv_gpu* gpu, CGDirectDisplayID display_id)
+{
+    id<MTLDevice> device;
+    int ret = -1;
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+
+    device = [CGDirectDisplayCopyCurrentMetalDevice(display_id) autorelease];
+    if (device && [device respondsToSelector:@selector(registryID)])
+        ret = macdrv_get_gpu_info_from_registry_id(gpu, device.registryID);
+
+    [pool release];
+    return ret;
+}
+
 #else
 
 static int macdrv_get_gpus_from_metal(struct macdrv_gpu** new_gpus, int* count)
+{
+    return -1;
+}
+
+static int macdrv_get_gpu_info_from_display_id_using_metal(struct macdrv_gpu* gpu, CGDirectDisplayID display_id)
 {
     return -1;
 }
@@ -343,14 +374,21 @@ static int macdrv_get_gpus_from_metal(struct macdrv_gpu** new_gpus, int* count)
  *              macdrv_get_gpu_info_from_display_id
  *
  * Get GPU information from a display id.
- * This is a fallback for 32bit build or older Mac OS version where Metal is unavailable.
  *
  * Returns non-zero value on failure.
  */
 static int macdrv_get_gpu_info_from_display_id(struct macdrv_gpu* gpu, CGDirectDisplayID display_id)
 {
-    io_registry_entry_t entry = CGDisplayIOServicePort(display_id);
-    return macdrv_get_gpu_info_from_entry(gpu, entry);
+    int ret;
+    io_registry_entry_t entry;
+
+    ret = macdrv_get_gpu_info_from_display_id_using_metal(gpu, display_id);
+    if (ret)
+    {
+        entry = CGDisplayIOServicePort(display_id);
+        ret = macdrv_get_gpu_info_from_entry(gpu, entry);
+    }
+    return ret;
 }
 
 /***********************************************************************
@@ -371,6 +409,7 @@ static int macdrv_get_gpus_from_iokit(struct macdrv_gpu** new_gpus, int* count)
     int integrated_index = -1;
     int primary_index = 0;
     int gpu_count = 0;
+    char buffer[64];
     int ret = -1;
     int i;
 
@@ -384,7 +423,9 @@ static int macdrv_get_gpus_from_iokit(struct macdrv_gpu** new_gpus, int* count)
 
     while ((entry = IOIteratorNext(iterator)))
     {
-        if (!macdrv_get_gpu_info_from_entry(&gpus[gpu_count], entry))
+        if (!get_entry_property_string(entry, CFSTR("IOName"), buffer, sizeof(buffer)) &&
+            !strcmp(buffer, "display") &&
+            !macdrv_get_gpu_info_from_entry(&gpus[gpu_count], entry))
         {
             gpu_count++;
             assert(gpu_count < MAX_GPUS);

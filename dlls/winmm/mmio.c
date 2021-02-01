@@ -52,9 +52,7 @@ static WINE_MMIO *MMIOList;
 static HANDLE create_file_OF( LPCSTR path, INT mode )
 {
     DWORD access, sharing, creation;
-    HANDLE ret;
-    char *fullpath = NULL;
-    DWORD len;
+    char full_path[MAX_PATH];
 
     if (mode & OF_CREATE)
     {
@@ -83,19 +81,12 @@ static HANDLE create_file_OF( LPCSTR path, INT mode )
     default:                  sharing = FILE_SHARE_READ | FILE_SHARE_WRITE; break;
     }
 
-    len = SearchPathA( NULL, path, NULL, 0, fullpath, NULL );
-    if (!len)
+    if (mode & OF_CREATE)
         return CreateFileA( path, access, sharing, NULL, creation, FILE_ATTRIBUTE_NORMAL, 0 );
 
-    fullpath = HeapAlloc(GetProcessHeap(), 0, len);
-    if (!fullpath)
+    if (!SearchPathA( NULL, path, NULL, MAX_PATH, full_path, NULL ))
         return INVALID_HANDLE_VALUE;
-
-    SearchPathA( NULL, path, NULL, len, fullpath, NULL );
-    ret = CreateFileA( fullpath, access, sharing, NULL, creation, FILE_ATTRIBUTE_NORMAL, 0 );
-
-    HeapFree(GetProcessHeap(), 0, fullpath);
-    return ret;
+    return CreateFileA( full_path, access, sharing, NULL, creation, FILE_ATTRIBUTE_NORMAL, 0 );
 }
 
 /**************************************************************************
@@ -750,6 +741,7 @@ HMMIO WINAPI mmioOpenW(LPWSTR szFileName, MMIOINFO* lpmmioinfo,
     if (szFileName)
     {
         INT     len = WideCharToMultiByte( CP_ACP, 0, szFileName, -1, NULL, 0, NULL, NULL );
+        if (len < MAX_PATH) len = MAX_PATH;
         szFn = HeapAlloc( GetProcessHeap(), 0, len );
         if (!szFn) return NULL;
         WideCharToMultiByte( CP_ACP, 0, szFileName, -1, szFn, len, NULL, NULL );

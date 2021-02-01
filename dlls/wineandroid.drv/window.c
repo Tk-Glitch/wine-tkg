@@ -364,8 +364,6 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
 }
 
 
-extern void __wine_esync_set_queue_fd( int fd );
-
 /***********************************************************************
  *           init_event_queue
  */
@@ -379,7 +377,6 @@ static void init_event_queue(void)
         ERR( "could not create data\n" );
         ExitProcess(1);
     }
-    __wine_esync_set_queue_fd( event_pipe[0] );
     if (wine_server_fd_to_handle( event_pipe[0], GENERIC_READ | SYNCHRONIZE, 0, &handle ))
     {
         ERR( "Can't allocate handle for event fd\n" );

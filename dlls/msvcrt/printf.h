@@ -19,21 +19,17 @@
 #include "bnum.h"
 
 #ifdef PRINTF_WIDE
-#define APICHAR MSVCRT_wchar_t
+#define APICHAR wchar_t
 #define CONVCHAR char
 #define FUNC_NAME(func) func ## _w
 #else
 #define APICHAR char
-#define CONVCHAR MSVCRT_wchar_t
+#define CONVCHAR wchar_t
 #define FUNC_NAME(func) func ## _a
 #endif
 
-#ifndef signbit
-#define signbit(x) ((x) < 0)
-#endif
-
 struct FUNC_NAME(_str_ctx) {
-    MSVCRT_size_t len;
+    size_t len;
     APICHAR *buf;
 };
 
@@ -61,7 +57,7 @@ static inline const APICHAR* FUNC_NAME(pf_parse_int)(const APICHAR *fmt, int *va
 {
     *val = 0;
 
-    while(isdigit(*fmt)) {
+    while (*fmt >= '0' && *fmt <= '9') {
         *val *= 10;
         *val += *fmt++ - '0';
     }
@@ -112,28 +108,28 @@ static inline int FUNC_NAME(pf_fill)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ct
 
 #ifndef PRINTF_HELPERS
 #define PRINTF_HELPERS
-static inline int wcstombs_len(char *mbstr, const MSVCRT_wchar_t *wcstr,
-        int len, MSVCRT__locale_t locale)
+static inline int wcstombs_len(char *mbstr, const wchar_t *wcstr,
+        int len, _locale_t locale)
 {
-    char buf[MSVCRT_MB_LEN_MAX];
+    char buf[MB_LEN_MAX];
     int i, r, mblen = 0;
 
     for(i=0; i<len; i++) {
-        r = MSVCRT__wctomb_l(mbstr ? mbstr+mblen : buf, wcstr[i], locale);
+        r = _wctomb_l(mbstr ? mbstr+mblen : buf, wcstr[i], locale);
         if(r < 0) return r;
         mblen += r;
     }
     return mblen;
 }
 
-static inline int mbstowcs_len(MSVCRT_wchar_t *wcstr, const char *mbstr,
-        int len, MSVCRT__locale_t locale)
+static inline int mbstowcs_len(wchar_t *wcstr, const char *mbstr,
+        int len, _locale_t locale)
 {
     int i, r, wlen = 0;
     WCHAR buf;
 
     for(i=0; i<len; wlen++) {
-        r = MSVCRT_mbtowc_l(wcstr ? wcstr+wlen : &buf, mbstr+i, len-i, locale);
+        r = _mbtowc_l(wcstr ? wcstr+wlen : &buf, mbstr+i, len-i, locale);
         if(r < 0) return r;
         i += r ? r : 1;
     }
@@ -142,7 +138,7 @@ static inline int mbstowcs_len(MSVCRT_wchar_t *wcstr, const char *mbstr,
 #endif
 
 static inline int FUNC_NAME(pf_output_wstr)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
-        const MSVCRT_wchar_t *str, int len, MSVCRT__locale_t locale)
+        const wchar_t *str, int len, _locale_t locale)
 {
 #ifdef PRINTF_WIDE
     return pf_puts(puts_ctx, len, str);
@@ -164,7 +160,7 @@ static inline int FUNC_NAME(pf_output_wstr)(FUNC_NAME(puts_clbk) pf_puts, void *
 }
 
 static inline int FUNC_NAME(pf_output_str)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
-        const char *str, int len, MSVCRT__locale_t locale)
+        const char *str, int len, _locale_t locale)
 {
 #ifdef PRINTF_WIDE
     LPWSTR out;
@@ -186,16 +182,16 @@ static inline int FUNC_NAME(pf_output_str)(FUNC_NAME(puts_clbk) pf_puts, void *p
 }
 
 static inline int FUNC_NAME(pf_output_format_wstr)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
-        const MSVCRT_wchar_t *str, int len, pf_flags *flags, MSVCRT__locale_t locale)
+        const wchar_t *str, int len, pf_flags *flags, _locale_t locale)
 {
     int r, ret;
 
     if(len < 0) {
         /* Do not search past the length specified by the precision. */
         if(flags->Precision>=0)
-            len = MSVCRT_wcsnlen(str, flags->Precision);
+            len = wcsnlen(str, flags->Precision);
         else
-            len = MSVCRT_wcslen(str);
+            len = wcslen(str);
     }
 
     if(flags->Precision>=0 && flags->Precision<len)
@@ -216,14 +212,14 @@ static inline int FUNC_NAME(pf_output_format_wstr)(FUNC_NAME(puts_clbk) pf_puts,
 }
 
 static inline int FUNC_NAME(pf_output_format_str)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
-        const char *str, int len, pf_flags *flags, MSVCRT__locale_t locale)
+        const char *str, int len, pf_flags *flags, _locale_t locale)
 {
     int r, ret;
 
     if(len < 0) {
         /* Do not search past the length specified by the precision. */
         if(flags->Precision>=0)
-            len = MSVCRT_strnlen(str, flags->Precision);
+            len = strnlen(str, flags->Precision);
         else
             len = strlen(str);
     }
@@ -246,15 +242,14 @@ static inline int FUNC_NAME(pf_output_format_str)(FUNC_NAME(puts_clbk) pf_puts, 
 }
 
 static inline int FUNC_NAME(pf_handle_string)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
-        const void *str, int len, pf_flags *flags, MSVCRT__locale_t locale, BOOL legacy_wide)
+        const void *str, int len, pf_flags *flags, _locale_t locale, BOOL legacy_wide)
 {
-    BOOL api_is_wide = sizeof(APICHAR) == sizeof(MSVCRT_wchar_t);
+    BOOL api_is_wide = sizeof(APICHAR) == sizeof(wchar_t);
     BOOL complement_is_narrow = legacy_wide ? api_is_wide : FALSE;
 #ifdef PRINTF_WIDE
-    static const MSVCRT_wchar_t nullW[] = {'(','n','u','l','l',')',0};
 
     if(!str)
-        return FUNC_NAME(pf_output_format_wstr)(pf_puts, puts_ctx, nullW, 6, flags, locale);
+        return FUNC_NAME(pf_output_format_wstr)(pf_puts, puts_ctx, L"(null)", 6, flags, locale);
 #else
     if(!str)
         return FUNC_NAME(pf_output_format_str)(pf_puts, puts_ctx, "(null)", 6, flags, locale);
@@ -272,7 +267,7 @@ static inline int FUNC_NAME(pf_handle_string)(FUNC_NAME(puts_clbk) pf_puts, void
 }
 
 static inline int FUNC_NAME(pf_output_special_fp)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
-        double v, pf_flags *flags, MSVCRT__locale_t locale,
+        double v, pf_flags *flags, _locale_t locale,
         BOOL legacy_msvcrt_compat, BOOL three_digit_exp)
 {
     APICHAR pfx[16], sfx[8], *p;
@@ -401,7 +396,7 @@ static inline int FUNC_NAME(pf_output_special_fp)(FUNC_NAME(puts_clbk) pf_puts, 
 }
 
 static inline int FUNC_NAME(pf_output_hex_fp)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
-        double v, pf_flags *flags, MSVCRT__locale_t locale, BOOL standard_rounding)
+        double v, pf_flags *flags, _locale_t locale, BOOL standard_rounding)
 {
     const APICHAR digits[2][16] = {
         { '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f' },
@@ -592,7 +587,7 @@ static inline void FUNC_NAME(pf_integer_conv)(APICHAR *buf, pf_flags *flags, LON
 }
 
 static inline int FUNC_NAME(pf_output_fp)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
-        double v, pf_flags *flags, MSVCRT__locale_t locale, BOOL three_digit_exp,
+        double v, pf_flags *flags, _locale_t locale, BOOL three_digit_exp,
         BOOL standard_rounding)
 {
     int e2, e10 = 0, round_pos, round_limb, radix_pos, first_limb_len, i, len, r, ret;
@@ -604,8 +599,6 @@ static inline int FUNC_NAME(pf_output_fp)(FUNC_NAME(puts_clbk) pf_puts, void *pu
     int limb_len, prec;
     ULONGLONG m;
     DWORD l;
-
-    TRACE("floating point argument: %.16le\n", v);
 
     if(flags->Precision == -1)
         flags->Precision = 6;
@@ -957,7 +950,7 @@ static inline int FUNC_NAME(pf_output_fp)(FUNC_NAME(puts_clbk) pf_puts, void *pu
 }
 
 int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const APICHAR *fmt,
-        MSVCRT__locale_t locale, DWORD options,
+        _locale_t locale, DWORD options,
         args_clbk pf_args, void *args_ctx, __ms_va_list *valist)
 {
     const APICHAR *q, *p = fmt;
@@ -967,17 +960,15 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
     BOOL positional_params = options & MSVCRT_PRINTF_POSITIONAL_PARAMS;
     BOOL invoke_invalid_param_handler = options & MSVCRT_PRINTF_INVOKE_INVALID_PARAM_HANDLER;
 #if _MSVCR_VER >= 140
-    BOOL legacy_wide = options & UCRTBASE_PRINTF_LEGACY_WIDE_SPECIFIERS;
-    BOOL legacy_msvcrt_compat = options & UCRTBASE_PRINTF_LEGACY_MSVCRT_COMPATIBILITY;
-    BOOL three_digit_exp = options & UCRTBASE_PRINTF_LEGACY_THREE_DIGIT_EXPONENTS;
-    BOOL standard_rounding = options & UCRTBASE_PRINTF_STANDARD_ROUNDING;
+    BOOL legacy_wide = options & _CRT_INTERNAL_PRINTF_LEGACY_WIDE_SPECIFIERS;
+    BOOL legacy_msvcrt_compat = options & _CRT_INTERNAL_PRINTF_LEGACY_MSVCRT_COMPATIBILITY;
+    BOOL three_digit_exp = options & _CRT_INTERNAL_PRINTF_LEGACY_THREE_DIGIT_EXPONENTS;
+    BOOL standard_rounding = options & _CRT_INTERNAL_PRINTF_STANDARD_ROUNDING;
 #else
     BOOL legacy_wide = TRUE, legacy_msvcrt_compat = TRUE;
-    BOOL three_digit_exp = MSVCRT__get_output_format() != MSVCRT__TWO_DIGIT_EXPONENT;
+    BOOL three_digit_exp = _get_output_format() != _TWO_DIGIT_EXPONENT;
     BOOL standard_rounding = FALSE;
 #endif
-
-    TRACE("Format is: %s\n", FUNC_NAME(debugstr)(fmt));
 
     if (!MSVCRT_CHECK_PMT(fmt != NULL))
         return -1;
@@ -1045,7 +1036,7 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
                 flags.LeftAlign = TRUE;
                 flags.FieldLength = -flags.FieldLength;
             }
-        } else while(isdigit(*p)) {
+        } else while (*p >= '0' && *p <= '9') {
             flags.FieldLength *= 10;
             flags.FieldLength += *p++ - '0';
         }
@@ -1063,7 +1054,7 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
                     i = -1;
 
                 flags.Precision = pf_args(args_ctx, i, VT_INT, valist).get_int;
-            } else while(isdigit(*p)) {
+            } else while (*p >= '0' && *p <= '9') {
                 flags.Precision *= 10;
                 flags.Precision += *p++ - '0';
             }
@@ -1135,7 +1126,7 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
             int *used;
 
             if(!n_format_enabled) {
-                MSVCRT_INVALID_PMT("\'n\' format specifier disabled", MSVCRT_EINVAL);
+                MSVCRT_INVALID_PMT("\'n\' format specifier disabled", EINVAL);
                 return -1;
             }
 
@@ -1197,8 +1188,8 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
                         locale, three_digit_exp, standard_rounding);
         } else {
             if(invoke_invalid_param_handler) {
-                MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
-                *MSVCRT__errno() = MSVCRT_EINVAL;
+                _invalid_parameter(NULL, NULL, NULL, 0, 0);
+                *_errno() = EINVAL;
                 return -1;
             }
 
@@ -1234,7 +1225,7 @@ static printf_arg arg_clbk_type(void *ctx, int pos, int type, __ms_va_list *vali
     } else
         args[0].get_int |= TYPE_CLBK_POSITIONAL;
 
-    if(pos<1 || pos>MSVCRT__ARGMAX)
+    if(pos<1 || pos>_ARGMAX)
         args[0].get_int |= TYPE_CLBK_ERROR_POS;
     else if(args[pos].get_int && args[pos].get_int!=type)
         args[0].get_int |= TYPE_CLBK_ERROR_TYPE;
@@ -1261,7 +1252,7 @@ int FUNC_NAME(create_positional_ctx)(void *args_ctx, const APICHAR *format, __ms
     if(args[0].get_int != TYPE_CLBK_POSITIONAL)
         return -1;
 
-    for(i=MSVCRT__ARGMAX; i>0; i--)
+    for(i=_ARGMAX; i>0; i--)
         if(args[i].get_int)
             break;
 

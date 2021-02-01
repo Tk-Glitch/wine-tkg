@@ -996,7 +996,11 @@ static void testIcmpSendEcho(void)
     address = htonl(INADDR_LOOPBACK);
     ret = IcmpSendEcho(icmp, address, senddata, sizeof(senddata), NULL, replydata, replysz, 1000);
     error = GetLastError();
-    if (ret)
+    if (!ret)
+    {
+        skip ("Failed to ping with error %d, is lo interface down?.\n", error);
+    }
+    else if (winetest_debug > 1)
     {
         PICMP_ECHO_REPLY pong = (PICMP_ECHO_REPLY) replydata;
         trace ("send addr  : %s\n", ntoa(address));
@@ -1007,10 +1011,6 @@ static void testIcmpSendEcho(void)
         trace ("recv size  : %u\n", pong->DataSize);
         trace ("ttl        : %u\n", pong->Options.Ttl);
         trace ("flags      : 0x%x\n", pong->Options.Flags);
-    }
-    else
-    {
-        skip ("Failed to ping with error %d, is lo interface down?.\n", error);
     }
 
     /* check reply data */
@@ -1027,6 +1027,8 @@ static void testIcmpSendEcho(void)
     ok(reply->Status == IP_SUCCESS, "Expect status:0x%08x, got:0x%08x\n", IP_SUCCESS, reply->Status);
     ok(reply->DataSize == sizeof(senddata), "Got size:%d\n", reply->DataSize);
     ok(!memcmp(senddata, reply->Data, min(sizeof(senddata), reply->DataSize)), "Data mismatch\n");
+
+    IcmpCloseHandle(icmp);
 }
 
 /*
@@ -1275,6 +1277,7 @@ static void testWin2KFunctions(void)
 
 static void test_GetAdaptersAddresses(void)
 {
+    BOOL dns_eligible_found = FALSE;
     ULONG ret, size, osize, i;
     IP_ADAPTER_ADDRESSES *aa, *ptr;
     IP_ADAPTER_UNICAST_ADDRESS *ua;
@@ -1347,6 +1350,10 @@ static void test_GetAdaptersAddresses(void)
                   S(U(*ua)).Flags, ua->PrefixOrigin, ua->SuffixOrigin, ua->DadState,
                   ua->ValidLifetime, ua->PreferredLifetime, ua->LeaseLifetime,
                   S(U(*ua)).Length < sizeof(IP_ADAPTER_UNICAST_ADDRESS_LH) ? 0 : ua->OnLinkPrefixLength);
+
+            if (ua->Flags & IP_ADAPTER_ADDRESS_DNS_ELIGIBLE)
+                dns_eligible_found = TRUE;
+
             ua = ua->Next;
         }
         for (i = 0, temp[0] = '\0'; i < ARRAY_SIZE(aa->ZoneIndices); i++)
@@ -1378,6 +1385,7 @@ static void test_GetAdaptersAddresses(void)
             ok(!strcasecmp(aa->AdapterName, buf), "expected '%s' got '%s'\n", aa->AdapterName, buf);
         }
     }
+    ok(dns_eligible_found, "Did not find any dns eligible addresses.\n");
     HeapFree(GetProcessHeap(), 0, ptr);
 }
 

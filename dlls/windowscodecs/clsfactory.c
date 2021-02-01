@@ -16,8 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #define COBJMACROS
@@ -208,7 +206,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
     return ret;
 }
 
-HRESULT create_instance(CLSID *clsid, const IID *iid, void **ppv)
+HRESULT create_instance(const CLSID *clsid, const IID *iid, void **ppv)
 {
     int i;
 

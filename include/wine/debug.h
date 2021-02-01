@@ -157,7 +157,7 @@ extern int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine
    quotes.  The string will be valid for some time, but not indefinitely
    as strings are re-used.  */
 
-#if (defined(__x86_64__) || defined(__aarch64__)) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
+#if (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
 # define __wine_dbg_cdecl __cdecl
 # define __wine_dbg_va_list __builtin_ms_va_list
 # define __wine_dbg_va_start(list,arg) __builtin_ms_va_start(list,arg)
@@ -225,7 +225,9 @@ static inline const char *wine_dbgstr_an( const char *str, int n )
 
     if (!str) return "(null)";
     if (!((ULONG_PTR)str >> 16)) return wine_dbg_sprintf( "#%04x", LOWORD(str) );
+#ifndef WINE_UNIX_LIB
     if (IsBadStringPtrA( str, n )) return "(invalid)";
+#endif
     if (n == -1) for (n = 0; str[n]; n++) ;
     *dst++ = '"';
     while (n-- > 0 && dst <= buffer + sizeof(buffer) - 9)
@@ -267,7 +269,9 @@ static inline const char *wine_dbgstr_wn( const WCHAR *str, int n )
 
     if (!str) return "(null)";
     if (!((ULONG_PTR)str >> 16)) return wine_dbg_sprintf( "#%04x", LOWORD(str) );
+#ifndef WINE_UNIX_LIB
     if (IsBadStringPtrW( str, n )) return "(invalid)";
+#endif
     if (n == -1) for (n = 0; str[n]; n++) ;
     *dst++ = 'L';
     *dst++ = '"';

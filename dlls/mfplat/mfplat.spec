@@ -23,9 +23,9 @@
 @ stub MFAverageTimePerFrameToFrameRate
 @ stdcall MFBeginCreateFile(long long long wstr ptr ptr ptr)
 @ stub MFBeginGetHostByName
-@ stub MFBeginRegisterWorkQueueWithMMCSS
+@ stdcall MFBeginRegisterWorkQueueWithMMCSS(long wstr long ptr ptr)
 @ stdcall MFBeginRegisterWorkQueueWithMMCSSEx(long wstr long long ptr ptr) rtworkq.RtwqBeginRegisterWorkQueueWithMMCSS
-@ stub MFBeginUnregisterWorkQueueWithMMCSS
+@ stdcall MFBeginUnregisterWorkQueueWithMMCSS(long ptr ptr) rtworkq.RtwqBeginUnregisterWorkQueueWithMMCSS
 @ stub MFBlockThread
 @ stub MFCalculateBitmapImageSize
 @ stdcall MFCalculateImageSize(ptr long long ptr)
@@ -46,6 +46,7 @@
 @ stub MFCreateAudioMediaType
 @ stdcall MFCreateCollection(ptr)
 @ stdcall MFCreateDXGIDeviceManager(ptr ptr)
+@ stdcall MFCreateDXSurfaceBuffer(ptr ptr long ptr)
 @ stdcall MFCreateEventQueue(ptr)
 @ stdcall MFCreateFile(long long long wstr ptr)
 @ stub MFCreateLegacyMediaBufferOnMFMediaBuffer
@@ -87,9 +88,9 @@
 @ stub MFDeserializePresentationDescriptor
 @ stdcall MFEndCreateFile(ptr ptr)
 @ stub MFEndGetHostByName
-@ stub MFEndRegisterWorkQueueWithMMCSS
-@ stub MFEndUnregisterWorkQueueWithMMCSS
-@ stub MFFrameRateToAverageTimePerFrame
+@ stdcall MFEndRegisterWorkQueueWithMMCSS(ptr ptr) rtworkq.RtwqEndRegisterWorkQueueWithMMCSS
+@ stdcall MFEndUnregisterWorkQueueWithMMCSS(ptr) rtworkq.RtwqEndUnregisterWorkQueueWithMMCSS
+@ stdcall MFFrameRateToAverageTimePerFrame(long long ptr)
 @ stub MFFreeAdaptersAddresses
 @ stub MFGetAdaptersAddresses
 @ stdcall MFGetAttributesAsBlob(ptr ptr long)
@@ -130,6 +131,7 @@
 @ stdcall MFJoinWorkQueue(long long ptr) rtworkq.RtwqJoinWorkQueue
 @ stdcall MFLockPlatform() rtworkq.RtwqLockPlatform
 @ stdcall MFLockWorkQueue(long) rtworkq.RtwqLockWorkQueue
+@ stdcall MFMapDXGIFormatToDX9Format(long)
 @ stdcall MFPutWaitingWorkItem(long long ptr ptr) rtworkq.RtwqPutWaitingWorkItem
 @ stdcall MFPutWorkItem(long ptr ptr)
 @ stdcall MFPutWorkItem2(long long ptr ptr)

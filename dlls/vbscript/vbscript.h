@@ -265,6 +265,7 @@ typedef enum {
     X(or,             1, 0,           0)          \
     X(pop,            1, ARG_UINT,    0)          \
     X(redim,          1, ARG_BSTR,    ARG_UINT)   \
+    X(redim_preserve, 1, ARG_BSTR,    ARG_UINT)   \
     X(ret,            0, 0,           0)          \
     X(retval,         1, 0,           0)          \
     X(set_ident,      1, ARG_BSTR,    ARG_UINT)   \
@@ -313,7 +314,6 @@ typedef enum {
     FUNC_PROPGET,
     FUNC_PROPLET,
     FUNC_PROPSET,
-    FUNC_DEFGET
 } function_type_t;
 
 typedef struct {

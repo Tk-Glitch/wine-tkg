@@ -219,10 +219,10 @@ static BOOL i386_stack_walk(struct cpu_stack_walk *csw, STACKFRAME64 *frame,
         if (NtQueryInformationThread(csw->hThread, ThreadBasicInformation, &info,
                                      sizeof(info), NULL) == STATUS_SUCCESS)
         {
-            curr_switch = (DWORD_PTR)info.TebBaseAddress + FIELD_OFFSET(TEB, SystemReserved1[0]);
+            curr_switch = (DWORD_PTR)info.TebBaseAddress + FIELD_OFFSET(TEB, SystemReserved1);
             if (!sw_read_mem(csw, curr_switch, &p, sizeof(p)))
             {
-                WARN("Can't read TEB:SystemReserved1[0]\n");
+                WARN("Can't read TEB:SystemReserved1\n");
                 goto done_err;
             }
             next_switch = p;

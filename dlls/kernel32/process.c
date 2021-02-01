@@ -18,9 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -28,40 +25,24 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
-#ifdef HAVE_SYS_TIME_H
-# include <sys/time.h>
-#endif
-#ifdef HAVE_SYS_IOCTL_H
-#include <sys/ioctl.h>
-#endif
-#ifdef HAVE_SYS_SOCKET_H
-#include <sys/socket.h>
-#endif
-#include <sys/types.h>
-#ifdef HAVE_SYS_WAIT_H
-# include <sys/wait.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "winternl.h"
 #include "winbase.h"
+#include "winnls.h"
 #include "wincon.h"
 #include "kernel_private.h"
-#include "winreg.h"
 #include "psapi.h"
+#include "ddk/wdm.h"
 #include "wine/exception.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
-WINE_DECLARE_DEBUG_CHANNEL(relay);
-WINE_DECLARE_DEBUG_CHANNEL(winediag);
+
+static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)0x7ffe0000;
 
 typedef struct
 {
@@ -71,14 +52,7 @@ typedef struct
     DWORD dwReserved;
 } LOADPARMS32;
 
-static BOOL is_wow64;
-
-HMODULE kernel32_handle = 0;
 SYSTEM_BASIC_INFORMATION system_info = { 0 };
-
-const WCHAR DIR_Windows[] = {'C',':','\\','w','i','n','d','o','w','s',0};
-const WCHAR DIR_System[] = {'C',':','\\','w','i','n','d','o','w','s',
-                            '\\','s','y','s','t','e','m','3','2',0};
 
 /* Process flags */
 #define PDB32_DEBUGGED      0x0001  /* Process is being debugged */
@@ -88,106 +62,6 @@ const WCHAR DIR_System[] = {'C',':','\\','w','i','n','d','o','w','s',
 #define PDB32_FILE_APIS_OEM 0x0040  /* File APIs are OEM */
 #define PDB32_WIN32S_PROC   0x8000  /* Win32s process */
 
-static DEP_SYSTEM_POLICY_TYPE system_DEP_policy = OptIn;
-
-#ifdef __i386__
-extern DWORD call_process_entry( PEB *peb, LPTHREAD_START_ROUTINE entry );
-__ASM_GLOBAL_FUNC( call_process_entry,
-                    "pushl %ebp\n\t"
-                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
-                    "movl %esp,%ebp\n\t"
-                    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
-                    "pushl %ebx\n\t"
-                    __ASM_CFI(".cfi_rel_offset %ebx,-4\n\t")
-                    "movl 8(%ebp),%ebx\n\t"
-                    /* deliberately mis-align the stack by 8, Doom 3 needs this */
-                    "pushl 4(%ebp)\n\t"  /* Driller expects readable address at this offset */
-                    "pushl 4(%ebp)\n\t"
-                    "pushl %ebx\n\t"
-                    "call *12(%ebp)\n\t"
-                    "leal -4(%ebp),%esp\n\t"
-                    "popl %ebx\n\t"
-                    __ASM_CFI(".cfi_same_value %ebx\n\t")
-                    "popl %ebp\n\t"
-                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
-                    __ASM_CFI(".cfi_same_value %ebp\n\t")
-                    "ret" )
-
-__ASM_GLOBAL_FUNC( __wine_start_process,
-                   "pushl %ebp\n\t"
-                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                   __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
-                   "movl %esp,%ebp\n\t"
-                   __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
-                   "pushl %ebx\n\t"  /* arg */
-                   "pushl %eax\n\t"  /* entry */
-                   "call " __ASM_NAME("start_process") )
-#else
-static inline DWORD call_process_entry( PEB *peb, LPTHREAD_START_ROUTINE entry )
-{
-    return entry( peb );
-}
-#endif
-
-extern const char * CDECL wine_get_version(void);
-/***********************************************************************
- *           __wine_start_process
- *
- * Startup routine of a new process. Runs on the new process stack.
- */
-#ifdef __i386__
-void CDECL start_process( LPTHREAD_START_ROUTINE entry, PEB *peb )
-#else
-void CDECL __wine_start_process( LPTHREAD_START_ROUTINE entry, PEB *peb )
-#endif
-{
-    BOOL being_debugged;
-
-    if (!entry)
-    {
-        ERR( "%s doesn't have an entry point, it cannot be executed\n",
-             debugstr_w(peb->ProcessParameters->ImagePathName.Buffer) );
-        ExitThread( 1 );
-    }
-
-    TRACE_(relay)( "\1Starting process %s (entryproc=%p)\n",
-                   debugstr_w(peb->ProcessParameters->ImagePathName.Buffer), entry );
-
-    __TRY
-    {
-        if (CreateEventA(0, 0, 0, "__winestaging_warn_event") && GetLastError() != ERROR_ALREADY_EXISTS)
-        {
-            FIXME_(winediag)("Wine TkG %s is a testing version containing experimental patches.\n", wine_get_version());
-            FIXME_(winediag)("Please don't report bugs about it on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead.\n");
-        }
-        else
-            WARN_(winediag)("Wine TkG %s is a testing version containing experimental patches.\n", wine_get_version());
-
-
-        if (!CheckRemoteDebuggerPresent( GetCurrentProcess(), &being_debugged ))
-            being_debugged = FALSE;
-
-        SetLastError( 0 );  /* clear error code */
-        if (being_debugged) DbgBreakPoint();
-    }
-    __EXCEPT_ALL
-    {
-        /* do nothing */
-    }
-    __ENDTRY
-
-    __TRY
-    {
-        ExitThread( call_process_entry( peb, entry ));
-    }
-    __EXCEPT(UnhandledExceptionFilter)
-    {
-        TerminateProcess( GetCurrentProcess(), GetExceptionCode() );
-    }
-    __ENDTRY
-    abort();  /* should not be reached */
-}
 
 /***********************************************************************
  *           wait_input_idle
@@ -682,109 +556,25 @@ DWORD WINAPI WTSGetActiveConsoleSessionId(void)
  */
 DEP_SYSTEM_POLICY_TYPE WINAPI GetSystemDEPPolicy(void)
 {
-    char buffer[MAX_PATH+10];
-    DWORD size = sizeof(buffer);
-    HKEY hkey = 0;
-    HKEY appkey = 0;
-    DWORD len;
-    LSTATUS (WINAPI *pRegOpenKeyA)(HKEY,LPCSTR,PHKEY);
-    LSTATUS (WINAPI *pRegQueryValueExA)(HKEY,LPCSTR,LPDWORD,LPDWORD,LPBYTE,LPDWORD);
-    LSTATUS (WINAPI *pRegCloseKey)(HKEY);
-
-    TRACE("()\n");
-
-    pRegOpenKeyA = (void*)GetProcAddress(GetModuleHandleA("advapi32"), "RegOpenKeyA");
-    pRegQueryValueExA = (void*)GetProcAddress(GetModuleHandleA("advapi32"), "RegQueryValueExA");
-    pRegCloseKey = (void*)GetProcAddress(GetModuleHandleA("advapi32"), "RegCloseKey");
-    if ( !pRegOpenKeyA || !pRegQueryValueExA || !pRegCloseKey ) return OptIn;
-
-    /* @@ Wine registry key: HKCU\Software\Wine\Boot.ini */
-    if ( pRegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\Boot.ini", &hkey ) ) hkey = 0;
-
-    len = GetModuleFileNameA( 0, buffer, MAX_PATH );
-    if (len && len < MAX_PATH)
-    {
-        HKEY tmpkey;
-        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\Boot.ini */
-        if (!pRegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey ))
-        {
-            char *p, *appname = buffer;
-            if ((p = strrchr( appname, '/' ))) appname = p + 1;
-            if ((p = strrchr( appname, '\\' ))) appname = p + 1;
-            strcat( appname, "\\Boot.ini" );
-            TRACE("appname = [%s]\n", appname);
-            if (pRegOpenKeyA( tmpkey, appname, &appkey )) appkey = 0;
-            pRegCloseKey( tmpkey );
-        }
-    }
-
-    if (hkey || appkey)
-    {
-        if ((appkey && !pRegQueryValueExA(appkey, "NoExecute", 0, NULL, (BYTE *)buffer, &size)) ||
-            (hkey && !pRegQueryValueExA(hkey, "NoExecute", 0, NULL, (BYTE *)buffer, &size)))
-        {
-            if (!strcmp(buffer,"OptIn"))
-            {
-                TRACE("System DEP policy set to OptIn\n");
-                system_DEP_policy = OptIn;
-            }
-            else if (!strcmp(buffer,"OptOut"))
-            {
-                TRACE("System DEP policy set to OptOut\n");
-                system_DEP_policy = OptIn;
-            }
-            else if (!strcmp(buffer,"AlwaysOn"))
-            {
-                TRACE("System DEP policy set to AlwaysOn\n");
-                system_DEP_policy = AlwaysOn;
-            }
-            else if (!strcmp(buffer,"AlwaysOff"))
-            {
-                TRACE("System DEP policy set to AlwaysOff\n");
-                system_DEP_policy = AlwaysOff;
-            }
-        }
-    }
-
-    if (appkey) pRegCloseKey( appkey );
-    if (hkey) pRegCloseKey( hkey );
-    return system_DEP_policy;
+    return user_shared_data->NXSupportPolicy;
 }
 
 /**********************************************************************
  *           SetProcessDEPPolicy     (KERNEL32.@)
  */
-BOOL WINAPI SetProcessDEPPolicy(DWORD newDEP)
+BOOL WINAPI SetProcessDEPPolicy( DWORD flags )
 {
     ULONG dep_flags = 0;
-    NTSTATUS status;
 
-    TRACE("(%d)\n", newDEP);
+    TRACE("%#x\n", flags);
 
-    if (is_wow64 || (system_DEP_policy != OptIn && system_DEP_policy != OptOut) )
-    {
-        SetLastError(ERROR_ACCESS_DENIED);
-        return FALSE;
-    }
-
-    if (!newDEP)
-        dep_flags = MEM_EXECUTE_OPTION_ENABLE;
-    else if (newDEP & PROCESS_DEP_ENABLE)
-        dep_flags = MEM_EXECUTE_OPTION_DISABLE|MEM_EXECUTE_OPTION_PERMANENT;
-    else
-    {
-        SetLastError(ERROR_ACCESS_DENIED);
-        return FALSE;
-    }
-
-    if (newDEP & PROCESS_DEP_DISABLE_ATL_THUNK_EMULATION)
+    if (flags & PROCESS_DEP_ENABLE)
+        dep_flags |= MEM_EXECUTE_OPTION_DISABLE | MEM_EXECUTE_OPTION_PERMANENT;
+    if (flags & PROCESS_DEP_DISABLE_ATL_THUNK_EMULATION)
         dep_flags |= MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION;
 
-    status = NtSetInformationProcess( GetCurrentProcess(), ProcessExecuteFlags,
-                                        &dep_flags, sizeof(dep_flags) );
-
-    if (status) SetLastError( RtlNtStatusToDosError(status) );
-    return !status;
+    return set_ntstatus( NtSetInformationProcess( GetCurrentProcess(), ProcessExecuteFlags,
+                                                  &dep_flags, sizeof(dep_flags) ) );
 }
 
 /**********************************************************************
@@ -863,15 +653,6 @@ WORD WINAPI GetMaximumProcessorGroupCount(void)
     return 1;
 }
 
-
-/***********************************************************************
- *           GetEnabledXStateFeatures (KERNEL32.@)
- */
-DWORD64 WINAPI GetEnabledXStateFeatures(void)
-{
-    FIXME("\n");
-    return 0;
-}
 
 /***********************************************************************
  *           GetFirmwareEnvironmentVariableA     (KERNEL32.@)
@@ -985,21 +766,13 @@ BOOL WINAPI GetProcessDEPPolicy(HANDLE process, LPDWORD flags, PBOOL permanent)
     if (flags)
     {
         *flags = 0;
-        if (system_DEP_policy != AlwaysOff)
-        {
-            if (dep_flags & MEM_EXECUTE_OPTION_DISABLE || system_DEP_policy == AlwaysOn)
-                *flags |= PROCESS_DEP_ENABLE;
-            if (dep_flags & MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION)
-                *flags |= PROCESS_DEP_DISABLE_ATL_THUNK_EMULATION;
-        }
+        if (dep_flags & MEM_EXECUTE_OPTION_DISABLE)
+            *flags |= PROCESS_DEP_ENABLE;
+        if (dep_flags & MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION)
+            *flags |= PROCESS_DEP_DISABLE_ATL_THUNK_EMULATION;
     }
 
-    if (permanent)
-    {
-        *permanent = (dep_flags & MEM_EXECUTE_OPTION_PERMANENT) != 0;
-        if (system_DEP_policy == AlwaysOn || system_DEP_policy == AlwaysOff)
-            *permanent = TRUE;
-    }
+    if (permanent) *permanent = (dep_flags & MEM_EXECUTE_OPTION_PERMANENT) != 0;
     return TRUE;
 }
 

@@ -104,7 +104,7 @@ void set_screen_dpi( DWORD dpi )
  */
 static void fetch_display_metrics(void)
 {
-    if (wine_get_java_vm()) return;  /* for Java threads it will be set when the top view is created */
+    if (*p_java_vm) return;  /* for Java threads it will be set when the top view is created */
 
     SERVER_START_REQ( get_window_rectangles )
     {
@@ -620,16 +620,29 @@ static void load_android_libs(void)
 #undef DECL_FUNCPTR
 #undef LOAD_FUNCPTR
 
+JavaVM **p_java_vm = NULL;
+jobject *p_java_object = NULL;
+unsigned short *p_java_gdt_sel = NULL;
+
 static BOOL process_attach(void)
 {
     jclass class;
-    jobject object = wine_get_java_object();
+    jobject object;
     JNIEnv *jni_env;
     JavaVM *java_vm;
+    void *ntdll;
+
+    if (!(ntdll = dlopen( "ntdll.so", RTLD_NOW ))) return FALSE;
+
+    p_java_vm = dlsym( ntdll, "java_vm" );
+    p_java_object = dlsym( ntdll, "java_object" );
+    p_java_gdt_sel = dlsym( ntdll, "java_gdt_sel" );
+
+    object = *p_java_object;
 
     load_hardware_libs();
 
-    if ((java_vm = wine_get_java_vm()))  /* running under Java */
+    if ((java_vm = *p_java_vm))  /* running under Java */
     {
 #ifdef __i386__
         WORD old_fs;

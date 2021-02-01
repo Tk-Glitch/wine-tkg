@@ -79,3 +79,6 @@ static inline const char *debugstr_time(LONGLONG time)
 
     return wine_dbg_sprintf("%s", rev);
 }
+
+extern BOOL mf_is_sample_copier_transform(IMFTransform *transform) DECLSPEC_HIDDEN;
+extern HRESULT topology_node_get_object(IMFTopologyNode *node, REFIID riid, void **obj) DECLSPEC_HIDDEN;

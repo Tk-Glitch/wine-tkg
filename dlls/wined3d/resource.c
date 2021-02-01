@@ -529,6 +529,21 @@ void wined3d_resource_free_sysmem(struct wined3d_resource *resource)
     resource->heap_memory = NULL;
 }
 
+GLbitfield wined3d_resource_gl_storage_flags(const struct wined3d_resource *resource)
+{
+    uint32_t access = resource->access;
+    GLbitfield flags = 0;
+
+    if (resource->usage & WINED3DUSAGE_DYNAMIC)
+        flags |= GL_CLIENT_STORAGE_BIT;
+    if (access & WINED3D_RESOURCE_ACCESS_MAP_W)
+        flags |= GL_MAP_WRITE_BIT;
+    if (access & WINED3D_RESOURCE_ACCESS_MAP_R)
+        flags |= GL_MAP_READ_BIT;
+
+    return flags;
+}
+
 GLbitfield wined3d_resource_gl_map_flags(DWORD d3d_flags)
 {
     GLbitfield ret = 0;
@@ -537,10 +552,7 @@ GLbitfield wined3d_resource_gl_map_flags(DWORD d3d_flags)
         ret |= GL_MAP_WRITE_BIT | GL_MAP_FLUSH_EXPLICIT_BIT;
     if (d3d_flags & WINED3D_MAP_READ)
         ret |= GL_MAP_READ_BIT;
-
-    if (d3d_flags & WINED3D_MAP_DISCARD)
-        ret |= GL_MAP_INVALIDATE_BUFFER_BIT;
-    if (d3d_flags & WINED3D_MAP_NOOVERWRITE)
+    else
         ret |= GL_MAP_UNSYNCHRONIZED_BIT;
 
     return ret;
@@ -666,7 +678,29 @@ VkAccessFlags vk_access_mask_from_bind_flags(uint32_t bind_flags)
     if (bind_flags & WINED3D_BIND_DEPTH_STENCIL)
         flags |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     if (bind_flags & WINED3D_BIND_STREAM_OUTPUT)
-        FIXME("Ignoring some bind flags %#x.\n", bind_flags);
+        flags |= VK_ACCESS_TRANSFORM_FEEDBACK_WRITE_BIT_EXT;
+
+    return flags;
+}
+
+VkPipelineStageFlags vk_pipeline_stage_mask_from_bind_flags(uint32_t bind_flags)
+{
+    VkPipelineStageFlags flags = 0;
+
+    if (bind_flags & (WINED3D_BIND_VERTEX_BUFFER | WINED3D_BIND_INDEX_BUFFER))
+        flags |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+    if (bind_flags & (WINED3D_BIND_CONSTANT_BUFFER | WINED3D_BIND_SHADER_RESOURCE | WINED3D_BIND_UNORDERED_ACCESS))
+        flags |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT
+                | VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT
+                | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    if (bind_flags & WINED3D_BIND_INDIRECT_BUFFER)
+        flags |= VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+    if (bind_flags & WINED3D_BIND_RENDER_TARGET)
+        flags |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    if (bind_flags & WINED3D_BIND_DEPTH_STENCIL)
+        flags |= VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    if (bind_flags & WINED3D_BIND_STREAM_OUTPUT)
+        flags |= VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT;
 
     return flags;
 }

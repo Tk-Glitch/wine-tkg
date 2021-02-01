@@ -1,26 +1,12 @@
 STATICLIB = libwine_port.a
 
 C_SRCS = \
-	casemap.c \
-	ffs.c \
-	fstatvfs.c \
 	getopt.c \
-	isfinite.c \
-	isinf.c \
-	isnan.c \
 	lstat.c \
 	mkstemps.c \
 	poll.c \
 	pread.c \
 	pwrite.c \
 	readlink.c \
-	renameat2.c \
-	rint.c \
 	spawn.c \
-	statvfs.c \
-	string.c \
-	strnlen.c \
-	symlink.c \
-	usleep.c \
-	wctype.c \
-	xattr.c
+	symlink.c

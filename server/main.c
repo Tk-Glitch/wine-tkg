@@ -36,6 +36,7 @@
 #include "file.h"
 #include "thread.h"
 #include "request.h"
+#include "unicode.h"
 #include "esync.h"
 #include "fsync.h"
 
@@ -147,14 +148,16 @@ int main( int argc, char *argv[] )
 
     if (do_esync())
         esync_init();
+ 
+    if (!do_fsync() && !do_esync())
+        fprintf( stderr, "wineserver: using server-side synchronization.\n" );
 
     if (debug_level) fprintf( stderr, "wineserver: starting (pid=%ld)\n", (long) getpid() );
     set_current_time();
     init_scheduler();
     init_signals();
-    init_directories();
+    init_directories( load_intl_file() );
     init_registry();
-    init_shared_memory();
     init_types();
     main_loop();
     return 0;

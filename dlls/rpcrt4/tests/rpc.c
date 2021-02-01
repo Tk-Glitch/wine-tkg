@@ -896,9 +896,9 @@ static void test_RpcIfInqId(void)
         ok(status == RPC_S_OK, "Test %u: Expected %#x, got %#x.\n", test_idx, RPC_S_OK, status);
         ok(!memcmp(&if_id.Uuid, &guid, sizeof(guid)), "Test %u: Expected UUID %s, got %s.\n", test_idx,
                 wine_dbgstr_guid(&guid), wine_dbgstr_guid(&if_id.Uuid));
-        ok(if_id.VersMajor == 1, "Test %u: Expected major version %hu, got %hu.\n", test_idx, 1,
+        ok(if_id.VersMajor == 1, "Test %u: Expected major version 1, got %hu.\n", test_idx,
                 if_id.VersMajor);
-        ok(if_id.VersMinor == 2, "Test %u: Expected minor version %hu, got %hu.\n", test_idx, 2,
+        ok(if_id.VersMinor == 2, "Test %u: Expected minor version 2, got %hu.\n", test_idx,
                 if_id.VersMinor);
     }
 }
@@ -1165,7 +1165,6 @@ enum firewall_op
 
 static HRESULT set_firewall( enum firewall_op op )
 {
-    static const WCHAR testW[] = {'r','p','c','r','t','4','_','t','e','s','t',0};
     HRESULT hr, init;
     INetFwMgr *mgr = NULL;
     INetFwPolicy *policy = NULL;
@@ -1205,7 +1204,7 @@ static HRESULT set_firewall( enum firewall_op op )
     hr = INetFwAuthorizedApplication_put_ProcessImageFileName( app, image );
     if (hr != S_OK) goto done;
 
-    name = SysAllocString( testW );
+    name = SysAllocString( L"rpcrt4_test" );
     hr = INetFwAuthorizedApplication_put_Name( app, name );
     SysFreeString( name );
     ok( hr == S_OK, "got %08x\n", hr );

@@ -228,7 +228,13 @@ static ULONG WINAPI audio_renderer_sink_AddRef(IMFMediaSink *iface)
 
 static void audio_renderer_release_audio_client(struct audio_renderer *renderer)
 {
+    struct queued_object *obj, *obj2;
+
     MFCancelWorkItem(renderer->buffer_ready_key);
+    LIST_FOR_EACH_ENTRY_SAFE(obj, obj2, &renderer->queue, struct queued_object, entry)
+    {
+        release_pending_object(obj);
+    }
     renderer->buffer_ready_key = 0;
     if (renderer->audio_client)
     {
@@ -253,7 +259,6 @@ static ULONG WINAPI audio_renderer_sink_Release(IMFMediaSink *iface)
 {
     struct audio_renderer *renderer = impl_from_IMFMediaSink(iface);
     ULONG refcount = InterlockedDecrement(&renderer->refcount);
-    struct queued_object *obj, *obj2;
 
     TRACE("%p, refcount %u.\n", iface, refcount);
 
@@ -273,10 +278,6 @@ static ULONG WINAPI audio_renderer_sink_Release(IMFMediaSink *iface)
             IMFMediaType_Release(renderer->current_media_type);
         audio_renderer_release_audio_client(renderer);
         CloseHandle(renderer->buffer_ready_event);
-        LIST_FOR_EACH_ENTRY_SAFE(obj, obj2, &renderer->queue, struct queued_object, entry)
-        {
-            release_pending_object(obj);
-        }
         DeleteCriticalSection(&renderer->cs);
         heap_free(renderer);
     }
@@ -1479,12 +1480,10 @@ static HRESULT WINAPI audio_renderer_stream_type_handler_IsMediaTypeSupported(IM
     TRACE("%p, %p, %p.\n", iface, in_type, out_type);
 
     EnterCriticalSection(&renderer->cs);
-    hr = IMFMediaType_IsEqual(renderer->current_media_type ? renderer->current_media_type : renderer->media_type, in_type, &flags) == S_OK ?
-                S_OK : MF_E_INVALIDMEDIATYPE;
-
+    hr = IMFMediaType_IsEqual(renderer->media_type, in_type, &flags);
     LeaveCriticalSection(&renderer->cs);
 
-    return hr;
+    return hr != S_OK ? MF_E_INVALIDMEDIATYPE : hr;
 }
 
 static HRESULT WINAPI audio_renderer_stream_type_handler_GetMediaTypeCount(IMFMediaTypeHandler *iface, DWORD *count)
@@ -1751,17 +1750,14 @@ static HRESULT WINAPI audio_renderer_render_callback_GetParameters(IMFAsyncCallb
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI audio_renderer_render_callback_Invoke(IMFAsyncCallback *iface, IMFAsyncResult *result)
+static void audio_renderer_render(struct audio_renderer *renderer, IMFAsyncResult *result)
 {
-    struct audio_renderer *renderer = impl_from_render_callback_IMFAsyncCallback(iface);
     unsigned int src_frames, dst_frames, max_frames, src_len;
     struct queued_object *obj, *obj2;
     BOOL keep_sample = FALSE;
     IMFMediaBuffer *buffer;
     BYTE *dst, *src;
     HRESULT hr;
-
-    EnterCriticalSection(&renderer->cs);
 
     LIST_FOR_EACH_ENTRY_SAFE(obj, obj2, &renderer->queue, struct queued_object, entry)
     {
@@ -1817,7 +1813,15 @@ static HRESULT WINAPI audio_renderer_render_callback_Invoke(IMFAsyncCallback *if
 
     if (FAILED(hr = MFPutWaitingWorkItem(renderer->buffer_ready_event, 0, result, &renderer->buffer_ready_key)))
         WARN("Failed to submit wait item, hr %#x.\n", hr);
+}
 
+static HRESULT WINAPI audio_renderer_render_callback_Invoke(IMFAsyncCallback *iface, IMFAsyncResult *result)
+{
+    struct audio_renderer *renderer = impl_from_render_callback_IMFAsyncCallback(iface);
+
+    EnterCriticalSection(&renderer->cs);
+    if (!(renderer->flags & SAR_SHUT_DOWN))
+        audio_renderer_render(renderer, result);
     LeaveCriticalSection(&renderer->cs);
 
     return S_OK;

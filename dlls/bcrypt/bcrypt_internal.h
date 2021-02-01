@@ -21,23 +21,13 @@
 #define __BCRYPT_INTERNAL_H
 
 #include <stdarg.h>
-#ifdef HAVE_GNUTLS_CIPHER_INIT
-#include <gnutls/gnutls.h>
-#include <gnutls/crypto.h>
-#include <gnutls/abstract.h>
-#ifdef SONAME_LIBGCRYPT
-#include <gcrypt.h>
-#endif
-#elif HAVE_COMMONCRYPTO_COMMONCRYPTOR_H
-#include <AvailabilityMacros.h>
-#include <CommonCrypto/CommonCryptor.h>
-#endif
 
 #include "windef.h"
 #include "winbase.h"
 #include "wincrypt.h"
 #include "bcrypt.h"
 
+#define MAGIC_DSS1 ('D' | ('S' << 8) | ('S' << 16) | ('1' << 24))
 #define MAGIC_DSS2 ('D' | ('S' << 8) | ('S' << 16) | ('2' << 24))
 
 typedef struct
@@ -123,6 +113,7 @@ struct object
 enum alg_id
 {
     /* cipher */
+    ALG_ID_3DES,
     ALG_ID_AES,
 
     /* hash */
@@ -165,22 +156,22 @@ struct algorithm
     ULONG         flags;
 };
 
-#if defined(HAVE_GNUTLS_CIPHER_INIT)
 struct key_symmetric
 {
-    enum mode_id        mode;
-    ULONG               block_size;
-    gnutls_cipher_hd_t  handle;
-    UCHAR              *vector;
-    ULONG               vector_len;
-    UCHAR              *secret;
-    ULONG               secret_len;
+    enum mode_id mode;
+    ULONG        block_size;
+    UCHAR       *vector;
+    ULONG        vector_len;
+    UCHAR       *secret;
+    ULONG        secret_len;
 };
+
+#define KEY_FLAG_LEGACY_DSA_V2  0x00000001
 
 struct key_asymmetric
 {
-    gnutls_privkey_t  handle;
     ULONG             bitlen;     /* ignored for ECC keys */
+    ULONG             flags;
     UCHAR            *pubkey;
     ULONG             pubkey_len;
     DSSSEED           dss_seed;
@@ -190,58 +181,13 @@ struct key
 {
     struct object hdr;
     enum alg_id   alg_id;
-    union
-    {
-        struct key_symmetric  s;
-        struct key_asymmetric a;
-    } u;
-};
-#elif defined(HAVE_COMMONCRYPTO_COMMONCRYPTOR_H) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1080
-struct key_symmetric
-{
-    enum mode_id   mode;
-    ULONG          block_size;
-    CCCryptorRef   ref_encrypt;
-    CCCryptorRef   ref_decrypt;
-    UCHAR         *vector;
-    ULONG          vector_len;
-    UCHAR         *secret;
-    ULONG          secret_len;
-};
-
-struct key_asymmetric
-{
-    ULONG  bitlen;
-    UCHAR *pubkey;
-    ULONG  pubkey_len;
-};
-
-struct key
-{
-    struct object hdr;
-    enum alg_id   alg_id;
-    union
-    {
-        struct key_symmetric  s;
-        struct key_asymmetric a;
-    } u;
-};
-#else
-struct key_symmetric
-{
-    enum mode_id mode;
-};
-
-struct key
-{
-    struct object hdr;
-    enum alg_id   alg_id;
+    void         *private[2];  /* private data for backend */
     union
     {
         struct key_symmetric s;
+        struct key_asymmetric a;
     } u;
 };
-#endif
 
 struct secret
 {
@@ -250,31 +196,33 @@ struct secret
     ULONG len;
 };
 
-NTSTATUS get_alg_property( const struct algorithm *, const WCHAR *, UCHAR *, ULONG, ULONG * ) DECLSPEC_HIDDEN;
+struct key_funcs
+{
+    NTSTATUS (CDECL *key_set_property)( struct key *, const WCHAR *, UCHAR *, ULONG, ULONG );
+    NTSTATUS (CDECL *key_symmetric_init)( struct key * );
+    void     (CDECL *key_symmetric_vector_reset)( struct key * );
+    NTSTATUS (CDECL *key_symmetric_set_auth_data)( struct key *, UCHAR *, ULONG );
+    NTSTATUS (CDECL *key_symmetric_encrypt)( struct key *, const UCHAR *, ULONG, UCHAR *, ULONG );
+    NTSTATUS (CDECL *key_symmetric_decrypt)( struct key *, const UCHAR *, ULONG, UCHAR *, ULONG );
+    NTSTATUS (CDECL *key_symmetric_get_tag)( struct key *, UCHAR *, ULONG );
+    void     (CDECL *key_symmetric_destroy)( struct key * );
+    NTSTATUS (CDECL *key_asymmetric_init)( struct key * );
+    NTSTATUS (CDECL *key_asymmetric_generate)( struct key * );
+    NTSTATUS (CDECL *key_asymmetric_decrypt)( struct key *, UCHAR *, ULONG, UCHAR *, ULONG * );
+    NTSTATUS (CDECL *key_asymmetric_duplicate)( struct key *, struct key * );
+    NTSTATUS (CDECL *key_asymmetric_sign)( struct key *, void *, UCHAR *, ULONG, UCHAR *, ULONG, ULONG *, ULONG );
+    NTSTATUS (CDECL *key_asymmetric_verify)( struct key *, void *, UCHAR *, ULONG, UCHAR *, ULONG, DWORD );
+    void     (CDECL *key_asymmetric_destroy)( struct key * );
+    NTSTATUS (CDECL *key_export_dsa_capi)( struct key *, UCHAR *, ULONG, ULONG * );
+    NTSTATUS (CDECL *key_export_ecc)( struct key *, UCHAR *, ULONG, ULONG * );
+    NTSTATUS (CDECL *key_import_dsa_capi)( struct key *, UCHAR *, ULONG );
+    NTSTATUS (CDECL *key_import_ecc)( struct key *, UCHAR *, ULONG );
+    NTSTATUS (CDECL *key_import_rsa)( struct key *, UCHAR *, ULONG );
+    NTSTATUS (CDECL *key_compute_secret_ecc)( unsigned char *privkey_in, struct key *pubkey_in, struct secret *secret );
+};
 
-NTSTATUS key_set_property( struct key *, const WCHAR *, UCHAR *, ULONG, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS key_symmetric_init( struct key *, struct algorithm *, const UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS key_symmetric_set_vector( struct key *, UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS key_symmetric_set_auth_data( struct key *, UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS key_symmetric_encrypt( struct key *, const UCHAR *, ULONG, UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS key_symmetric_decrypt( struct key *, const UCHAR *, ULONG, UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS key_symmetric_get_tag( struct key *, UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS key_asymmetric_init( struct key *, struct algorithm *, ULONG, const UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS key_asymmetric_generate( struct key * ) DECLSPEC_HIDDEN;
-NTSTATUS key_asymmetric_sign( struct key *, void *, UCHAR *, ULONG, UCHAR *, ULONG, ULONG *, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS key_asymmetric_verify( struct key *, void *, UCHAR *, ULONG, UCHAR *, ULONG, DWORD ) DECLSPEC_HIDDEN;
-NTSTATUS key_destroy( struct key * ) DECLSPEC_HIDDEN;
-BOOL key_is_symmetric( struct key * ) DECLSPEC_HIDDEN;
-NTSTATUS key_export_dsa_capi( struct key *, UCHAR *, ULONG, ULONG * ) DECLSPEC_HIDDEN;
-NTSTATUS key_export_ecc( struct key *, UCHAR *, ULONG, ULONG * ) DECLSPEC_HIDDEN;
-NTSTATUS key_import_dsa_capi( struct key *, UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS key_import_ecc( struct key *, UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-NTSTATUS compute_secret_ecc (struct key *pubkey_in, struct key *privkey_in, struct secret *secret) DECLSPEC_HIDDEN;
-
-BOOL is_zero_vector( const UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-BOOL is_equal_vector( const UCHAR *, ULONG, const UCHAR *, ULONG ) DECLSPEC_HIDDEN;
-
-BOOL gnutls_initialize(void) DECLSPEC_HIDDEN;
-void gnutls_uninitialize(void) DECLSPEC_HIDDEN;
+struct key_funcs *gnutls_lib_init(DWORD reason);
+struct key_funcs *macos_lib_init(DWORD reason);
+struct key_funcs *gcrypt_lib_init(DWORD reason);
 
 #endif /* __BCRYPT_INTERNAL_H */

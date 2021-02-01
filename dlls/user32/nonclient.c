@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #include "windef.h"
@@ -30,7 +28,6 @@
 #include "user_private.h"
 #include "controls.h"
 #include "wine/debug.h"
-#include "wine/gdi_driver.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nonclient);
 
@@ -62,9 +59,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(nonclient);
 static void adjust_window_rect( RECT *rect, DWORD style, BOOL menu, DWORD exStyle, NONCLIENTMETRICSW *ncm )
 {
     int adjust = 0;
-
-    if (__wine_get_window_manager() == WINE_WM_X11_STEAMCOMPMGR)
-        return;
 
     if ((exStyle & (WS_EX_STATICEDGE|WS_EX_DLGMODALFRAME)) == WS_EX_STATICEDGE)
         adjust = 1; /* for the outer frame always present */
@@ -361,9 +355,6 @@ LRESULT NC_HandleNCCalcSize( HWND hwnd, WPARAM wparam, RECT *winRect )
     LONG exStyle = GetWindowLongW( hwnd, GWL_EXSTYLE );
 
     if (winRect == NULL)
-        return 0;
-
-    if (__wine_get_window_manager() == WINE_WM_X11_STEAMCOMPMGR)
         return 0;
 
     if (cls_style & CS_VREDRAW) result |= WVR_VREDRAW;
@@ -1590,9 +1581,12 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
             if (hmodule)
             {
                 BOOL (WINAPI *aboutproc)(HWND, LPCSTR, LPCSTR, HICON);
+                extern const char * CDECL wine_get_version(void);
+                char app[256];
 
+                sprintf( app, "Wine %s", wine_get_version() );
                 aboutproc = (void *)GetProcAddress( hmodule, "ShellAboutA" );
-                if (aboutproc) aboutproc( hwnd, PACKAGE_STRING, NULL, 0 );
+                if (aboutproc) aboutproc( hwnd, app, NULL, 0 );
                 FreeLibrary( hmodule );
             }
         }

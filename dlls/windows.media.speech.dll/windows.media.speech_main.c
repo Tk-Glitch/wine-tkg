@@ -5,14 +5,19 @@
 #include "winbase.h"
 #include "winstring.h"
 #include "wine/debug.h"
-#include "activation.h"
 #include "objbase.h"
+
 #include "initguid.h"
+#include "activation.h"
+
+#define WIDL_USING_IVECTORVIEW_1_WINDOWS_MEDIA_SPEECHSYNTHESIS_VOICEINFORMATION
+#define WIDL_USING_WINDOWS_MEDIA_SPEECHSYNTHESIS_IINSTALLEDVOICESSTATIC
+#define WIDL_USING_WINDOWS_MEDIA_SPEECHSYNTHESIS_IVOICEINFORMATION
+#define WIDL_USING_WINDOWS_MEDIA_SPEECHSYNTHESIS_VOICEINFORMATION
+#include "windows.foundation.h"
+#include "windows.media.speechsynthesis.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(speech);
-
-DEFINE_GUID(IID_IInstalledVoicesStatic,0x7d526ecc,0x7533,0x4c3f,0x85,0xbe,0x88,0x8c,0x2b,0xae,0xeb,0xdc);
-DEFINE_GUID(IID_IAgileObject,0x94ea2b94,0xe9cc,0x49e0,0xc0,0xff,0xee,0x64,0xca,0x8f,0x5b,0x90);
 
 static const char *debugstr_hstring(HSTRING hstr)
 {
@@ -23,120 +28,12 @@ static const char *debugstr_hstring(HSTRING hstr)
     return wine_dbgstr_wn(str, len);
 }
 
-typedef struct IVectorView IVectorView;
-
-typedef struct IVectorViewVtbl
-{
-    /*** IUnknown methods ***/
-    HRESULT (STDMETHODCALLTYPE *QueryInterface)(
-        IVectorView *This,
-        REFIID riid,
-        void **ppvObject);
-
-    ULONG (STDMETHODCALLTYPE *AddRef)(
-        IVectorView *This);
-
-    ULONG (STDMETHODCALLTYPE *Release)(
-        IVectorView *This);
-
-    /*** IInspectable methods ***/
-    HRESULT (STDMETHODCALLTYPE *GetIids)(
-        IVectorView *This,
-        ULONG *iidCount,
-        IID **iids);
-
-    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(
-        IVectorView *This,
-        HSTRING *className);
-
-    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(
-        IVectorView *This,
-        TrustLevel *trustLevel);
-
-    /*** IVectorView<T> methods ***/
-    HRESULT (STDMETHODCALLTYPE *GetAt)(
-        IVectorView *This,
-        ULONG index,
-        /* T */ void *out_value);
-
-    HRESULT (STDMETHODCALLTYPE *get_Size)(
-        IVectorView *This,
-        ULONG *out_value);
-
-    HRESULT (STDMETHODCALLTYPE *IndexOf)(
-        IVectorView *This,
-        /* T */ void *value,
-        ULONG *index,
-        BOOLEAN *out_value);
-
-    HRESULT (STDMETHODCALLTYPE *GetMany)(
-        IVectorView *This,
-        ULONG start_index,
-        /* T[] */ void **items,
-        UINT *out_value);
-} IVectorViewVtbl;
-
-struct IVectorView
-{
-    CONST_VTBL IVectorViewVtbl* lpVtbl;
-};
-
-typedef struct IInstalledVoicesStatic IInstalledVoicesStatic;
-
-typedef struct IInstalledVoicesStaticVtbl
-{
-    BEGIN_INTERFACE
-
-    /*** IUnknown methods ***/
-    HRESULT (STDMETHODCALLTYPE *QueryInterface)(
-        IInstalledVoicesStatic *This,
-        REFIID riid,
-        void **ppvObject);
-
-    ULONG (STDMETHODCALLTYPE *AddRef)(
-        IInstalledVoicesStatic *This);
-
-    ULONG (STDMETHODCALLTYPE *Release)(
-        IInstalledVoicesStatic *This);
-
-    /*** IInspectable methods ***/
-    HRESULT (STDMETHODCALLTYPE *GetIids)(
-        IInstalledVoicesStatic *This,
-        ULONG *iidCount,
-        IID **iids);
-
-    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(
-        IInstalledVoicesStatic *This,
-        HSTRING *className);
-
-    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(
-        IInstalledVoicesStatic *This,
-        TrustLevel *trustLevel);
-
-    /*** IInstalledVoicesStatic methods ***/
-    HRESULT (STDMETHODCALLTYPE *get_AllVoices)(
-        IInstalledVoicesStatic *This,
-        /* Windows.Foundation.Collections.IVectorView<Windows.Media.SpeechSynthesis.VoiceInformation*>** */
-        void **value);
-    HRESULT (STDMETHODCALLTYPE *get_DefaultVoice)(
-        IInstalledVoicesStatic *This,
-        /* Windows.Media.SpeechSynthesis.VoiceInformation** */
-        void **value);
-
-    END_INTERFACE
-} IInstalledVoicesStaticVtbl;
-
-struct IInstalledVoicesStatic
-{
-    CONST_VTBL IInstalledVoicesStaticVtbl* lpVtbl;
-};
-
 struct windows_media_speech
 {
     IActivationFactory IActivationFactory_iface;
     IInstalledVoicesStatic IInstalledVoicesStatic_iface;
-    IVectorView IVectorView_iface;
-    LONG refcount;
+    IVectorView_VoiceInformation IVectorView_VoiceInformation_iface;
+    LONG ref;
 };
 
 static inline struct windows_media_speech *impl_from_IActivationFactory(IActivationFactory *iface)
@@ -149,120 +46,133 @@ static inline struct windows_media_speech *impl_from_IInstalledVoicesStatic(IIns
     return CONTAINING_RECORD(iface, struct windows_media_speech, IInstalledVoicesStatic_iface);
 }
 
-static inline struct windows_media_speech *impl_from_IVectorView(IVectorView *iface)
+static inline struct windows_media_speech *impl_from_IVectorView_VoiceInformation(IVectorView_VoiceInformation *iface)
 {
-    return CONTAINING_RECORD(iface, struct windows_media_speech, IVectorView_iface);
+    return CONTAINING_RECORD(iface, struct windows_media_speech, IVectorView_VoiceInformation_iface);
 }
 
-static HRESULT STDMETHODCALLTYPE vector_view_QueryInterface(
-        IVectorView *iface, REFIID iid, void **object)
+static HRESULT STDMETHODCALLTYPE vector_view_voice_information_QueryInterface(
+        IVectorView_VoiceInformation *iface, REFIID iid, void **out)
 {
-    TRACE("iface %p, iid %s, object %p stub!\n", iface, debugstr_guid(iid), object);
+    TRACE("iface %p, iid %s, out %p stub!\n", iface, debugstr_guid(iid), out);
+
+    if (IsEqualGUID(iid, &IID_IUnknown) ||
+        IsEqualGUID(iid, &IID_IInspectable) ||
+        IsEqualGUID(iid, &IID_IVectorView_VoiceInformation))
+    {
+        IUnknown_AddRef(iface);
+        *out = iface;
+        return S_OK;
+    }
+
     WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
-    *object = NULL;
+    *out = NULL;
     return E_NOINTERFACE;
 }
 
-static ULONG STDMETHODCALLTYPE vector_view_AddRef(
-        IVectorView *iface)
+static ULONG STDMETHODCALLTYPE vector_view_voice_information_AddRef(
+        IVectorView_VoiceInformation *iface)
 {
-    struct windows_media_speech *impl = impl_from_IVectorView(iface);
-    ULONG rc = InterlockedIncrement(&impl->refcount);
-    TRACE("%p increasing refcount to %u.\n", impl, rc);
-    return rc;
+    struct windows_media_speech *impl = impl_from_IVectorView_VoiceInformation(iface);
+    ULONG ref = InterlockedIncrement(&impl->ref);
+    TRACE("iface %p, ref %u.\n", iface, ref);
+    return ref;
 }
 
-static ULONG STDMETHODCALLTYPE vector_view_Release(
-        IVectorView *iface)
+static ULONG STDMETHODCALLTYPE vector_view_voice_information_Release(
+        IVectorView_VoiceInformation *iface)
 {
-    struct windows_media_speech *impl = impl_from_IVectorView(iface);
-    ULONG rc = InterlockedDecrement(&impl->refcount);
-    TRACE("%p decreasing refcount to %u.\n", impl, rc);
-    return rc;
+    struct windows_media_speech *impl = impl_from_IVectorView_VoiceInformation(iface);
+    ULONG ref = InterlockedDecrement(&impl->ref);
+    TRACE("iface %p, ref %u.\n", iface, ref);
+    return ref;
 }
 
-static HRESULT STDMETHODCALLTYPE vector_view_GetIids(
-        IVectorView *iface, ULONG *iid_count, IID **iids)
+static HRESULT STDMETHODCALLTYPE vector_view_voice_information_GetIids(
+        IVectorView_VoiceInformation *iface, ULONG *iid_count, IID **iids)
 {
     FIXME("iface %p, iid_count %p, iids %p stub!\n", iface, iid_count, iids);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE vector_view_GetRuntimeClassName(
-        IVectorView *iface, HSTRING *class_name)
+static HRESULT STDMETHODCALLTYPE vector_view_voice_information_GetRuntimeClassName(
+        IVectorView_VoiceInformation *iface, HSTRING *class_name)
 {
     FIXME("iface %p, class_name %p stub!\n", iface, class_name);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE vector_view_GetTrustLevel(
-        IVectorView *iface, TrustLevel *trust_level)
+static HRESULT STDMETHODCALLTYPE vector_view_voice_information_GetTrustLevel(
+        IVectorView_VoiceInformation *iface, TrustLevel *trust_level)
 {
     FIXME("iface %p, trust_level %p stub!\n", iface, trust_level);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE vector_view_GetAt(
-    IVectorView *iface, ULONG index, void *out_value)
+static HRESULT STDMETHODCALLTYPE vector_view_voice_information_GetAt(
+    IVectorView_VoiceInformation *iface, ULONG index, IVoiceInformation **value)
 {
-    FIXME("iface %p, index %#x, out_value %p stub!\n", iface, index, out_value);
+    FIXME("iface %p, index %#x, value %p stub!\n", iface, index, value);
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE vector_view_get_Size(
-    IVectorView *iface, ULONG *out_value)
+static HRESULT STDMETHODCALLTYPE vector_view_voice_information_get_Size(
+    IVectorView_VoiceInformation *iface, ULONG *value)
 {
-    FIXME("iface %p, out_value %p stub!\n", iface, out_value);
-    *out_value = 0;
+    FIXME("iface %p, value %p stub!\n", iface, value);
+    *value = 0;
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE vector_view_IndexOf(
-    IVectorView *iface, void *value, ULONG *index, BOOLEAN *out_value)
+static HRESULT STDMETHODCALLTYPE vector_view_voice_information_IndexOf(
+    IVectorView_VoiceInformation *iface, IVoiceInformation *element, ULONG *index, BOOLEAN *value)
 {
-    FIXME("iface %p, value %p, index %p, out_value %p stub!\n", iface, value, index, out_value);
-    *out_value = FALSE;
+    FIXME("iface %p, element %p, index %p, value %p stub!\n", iface, element, index, value);
+    *value = FALSE;
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE vector_view_GetMany(
-    IVectorView *iface, ULONG start_index, void **items, UINT *out_value)
+static HRESULT STDMETHODCALLTYPE vector_view_voice_information_GetMany(
+    IVectorView_VoiceInformation *iface, ULONG start_index, IVoiceInformation **items, UINT *value)
 {
-    FIXME("iface %p, start_index %#x, items %p, out_value %p stub!\n", iface, start_index, items, out_value);
-    *out_value = 0;
+    FIXME("iface %p, start_index %#x, items %p, value %p stub!\n", iface, start_index, items, value);
+    *value = 0;
     return S_OK;
 }
 
-static const struct IVectorViewVtbl vector_view_vtbl =
+static const struct IVectorView_VoiceInformationVtbl vector_view_voice_information_vtbl =
 {
-    vector_view_QueryInterface,
-    vector_view_AddRef,
-    vector_view_Release,
+    vector_view_voice_information_QueryInterface,
+    vector_view_voice_information_AddRef,
+    vector_view_voice_information_Release,
     /* IInspectable methods */
-    vector_view_GetIids,
-    vector_view_GetRuntimeClassName,
-    vector_view_GetTrustLevel,
-    /*** IVectorView<T> methods ***/
-    vector_view_GetAt,
-    vector_view_get_Size,
-    vector_view_IndexOf,
-    vector_view_GetMany,
+    vector_view_voice_information_GetIids,
+    vector_view_voice_information_GetRuntimeClassName,
+    vector_view_voice_information_GetTrustLevel,
+    /* IVectorView<VoiceInformation> methods */
+    vector_view_voice_information_GetAt,
+    vector_view_voice_information_get_Size,
+    vector_view_voice_information_IndexOf,
+    vector_view_voice_information_GetMany,
 };
 
 static HRESULT STDMETHODCALLTYPE installed_voices_static_QueryInterface(
-        IInstalledVoicesStatic *iface, REFIID iid, void **object)
+        IInstalledVoicesStatic *iface, REFIID iid, void **out)
 {
-    TRACE("iface %p, iid %s, object %p stub!\n", iface, debugstr_guid(iid), object);
+    TRACE("iface %p, iid %s, out %p stub!\n", iface, debugstr_guid(iid), out);
 
-    if (IsEqualGUID(iid, &IID_IAgileObject))
+    if (IsEqualGUID(iid, &IID_IUnknown) ||
+        IsEqualGUID(iid, &IID_IAgileObject) ||
+        IsEqualGUID(iid, &IID_IInspectable) ||
+        IsEqualGUID(iid, &IID_IInstalledVoicesStatic))
     {
         IUnknown_AddRef(iface);
-        *object = iface;
+        *out = iface;
         return S_OK;
     }
 
     WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
-    *object = NULL;
+    *out = NULL;
     return E_NOINTERFACE;
 }
 
@@ -270,18 +180,18 @@ static ULONG STDMETHODCALLTYPE installed_voices_static_AddRef(
         IInstalledVoicesStatic *iface)
 {
     struct windows_media_speech *impl = impl_from_IInstalledVoicesStatic(iface);
-    ULONG rc = InterlockedIncrement(&impl->refcount);
-    TRACE("%p increasing refcount to %u.\n", impl, rc);
-    return rc;
+    ULONG ref = InterlockedIncrement(&impl->ref);
+    TRACE("iface %p, ref %u.\n", iface, ref);
+    return ref;
 }
 
 static ULONG STDMETHODCALLTYPE installed_voices_static_Release(
         IInstalledVoicesStatic *iface)
 {
     struct windows_media_speech *impl = impl_from_IInstalledVoicesStatic(iface);
-    ULONG rc = InterlockedDecrement(&impl->refcount);
-    TRACE("%p decreasing refcount to %u.\n", impl, rc);
-    return rc;
+    ULONG ref = InterlockedDecrement(&impl->ref);
+    TRACE("iface %p, ref %u.\n", iface, ref);
+    return ref;
 }
 
 static HRESULT STDMETHODCALLTYPE installed_voices_static_GetIids(
@@ -306,21 +216,19 @@ static HRESULT STDMETHODCALLTYPE installed_voices_static_GetTrustLevel(
 }
 
 static HRESULT STDMETHODCALLTYPE installed_voices_static_get_AllVoices(
-    IInstalledVoicesStatic *iface, void **value)
+    IInstalledVoicesStatic *iface, IVectorView_VoiceInformation **value)
 {
     struct windows_media_speech *impl = impl_from_IInstalledVoicesStatic(iface);
     FIXME("iface %p, value %p stub!\n", iface, value);
-    *value = &impl->IVectorView_iface;
+    *value = &impl->IVectorView_VoiceInformation_iface;
     return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE installed_voices_static_get_DefaultVoice(
-    IInstalledVoicesStatic *iface, void **value)
+    IInstalledVoicesStatic *iface, IVoiceInformation **value)
 {
-    struct windows_media_speech *impl = impl_from_IInstalledVoicesStatic(iface);
     FIXME("iface %p, value %p stub!\n", iface, value);
-    *value = &impl->IVectorView_iface;
-    return S_OK;
+    return E_NOTIMPL;
 }
 
 static const struct IInstalledVoicesStaticVtbl installed_voices_static_vtbl =
@@ -338,20 +246,29 @@ static const struct IInstalledVoicesStaticVtbl installed_voices_static_vtbl =
 };
 
 static HRESULT STDMETHODCALLTYPE windows_media_speech_QueryInterface(
-        IActivationFactory *iface, REFIID iid, void **object)
+        IActivationFactory *iface, REFIID iid, void **out)
 {
     struct windows_media_speech *impl = impl_from_IActivationFactory(iface);
-    TRACE("iface %p, iid %s, object %p stub!\n", iface, debugstr_guid(iid), object);
+    TRACE("iface %p, iid %s, out %p stub!\n", iface, debugstr_guid(iid), out);
+
+    if (IsEqualGUID(iid, &IID_IUnknown) ||
+        IsEqualGUID(iid, &IID_IInspectable) ||
+        IsEqualGUID(iid, &IID_IActivationFactory))
+    {
+        IUnknown_AddRef(iface);
+        *out = &impl->IActivationFactory_iface;
+        return S_OK;
+    }
 
     if (IsEqualGUID(iid, &IID_IInstalledVoicesStatic))
     {
         IUnknown_AddRef(iface);
-        *object = &impl->IInstalledVoicesStatic_iface;
+        *out = &impl->IInstalledVoicesStatic_iface;
         return S_OK;
     }
 
     FIXME("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
-    *object = NULL;
+    *out = NULL;
     return E_NOINTERFACE;
 }
 
@@ -359,18 +276,18 @@ static ULONG STDMETHODCALLTYPE windows_media_speech_AddRef(
         IActivationFactory *iface)
 {
     struct windows_media_speech *impl = impl_from_IActivationFactory(iface);
-    ULONG rc = InterlockedIncrement(&impl->refcount);
-    TRACE("%p increasing refcount to %u.\n", impl, rc);
-    return rc;
+    ULONG ref = InterlockedIncrement(&impl->ref);
+    TRACE("iface %p, ref %u.\n", iface, ref);
+    return ref;
 }
 
 static ULONG STDMETHODCALLTYPE windows_media_speech_Release(
         IActivationFactory *iface)
 {
     struct windows_media_speech *impl = impl_from_IActivationFactory(iface);
-    ULONG rc = InterlockedDecrement(&impl->refcount);
-    TRACE("%p decreasing refcount to %u.\n", impl, rc);
-    return rc;
+    ULONG ref = InterlockedDecrement(&impl->ref);
+    TRACE("iface %p, ref %u.\n", iface, ref);
+    return ref;
 }
 
 static HRESULT STDMETHODCALLTYPE windows_media_speech_GetIids(
@@ -418,7 +335,7 @@ static struct windows_media_speech windows_media_speech =
 {
     {&activation_factory_vtbl},
     {&installed_voices_static_vtbl},
-    {&vector_view_vtbl},
+    {&vector_view_voice_information_vtbl},
     0
 };
 
@@ -427,9 +344,9 @@ HRESULT WINAPI DllCanUnloadNow(void)
     return S_FALSE;
 }
 
-HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID riid, LPVOID *object)
+HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID riid, void **out)
 {
-    FIXME("clsid %s, riid %s, object %p stub!\n", debugstr_guid(clsid), debugstr_guid(riid), object);
+    FIXME("clsid %s, riid %s, out %p stub!\n", debugstr_guid(clsid), debugstr_guid(riid), out);
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 

@@ -558,6 +558,15 @@ static VkResult macdrv_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *
     return res;
 }
 
+static VkSurfaceKHR macdrv_wine_get_native_surface(VkSurfaceKHR surface)
+{
+    struct wine_vk_surface *mac_surface = surface_from_handle(surface);
+
+    TRACE("0x%s\n", wine_dbgstr_longlong(surface));
+
+    return mac_surface->surface;
+}
+
 static const struct vulkan_funcs vulkan_funcs =
 {
     macdrv_vkCreateInstance,
@@ -580,6 +589,8 @@ static const struct vulkan_funcs vulkan_funcs =
     macdrv_vkGetPhysicalDeviceWin32PresentationSupportKHR,
     macdrv_vkGetSwapchainImagesKHR,
     macdrv_vkQueuePresentKHR,
+
+    macdrv_wine_get_native_surface,
 };
 
 static void *macdrv_get_vk_device_proc_addr(const char *name)

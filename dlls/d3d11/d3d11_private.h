@@ -516,6 +516,39 @@ struct d3d_query *unsafe_impl_from_ID3D11Query(ID3D11Query *iface) DECLSPEC_HIDD
 struct d3d_query *unsafe_impl_from_ID3D10Query(ID3D10Query *iface) DECLSPEC_HIDDEN;
 struct d3d_query *unsafe_impl_from_ID3D11Asynchronous(ID3D11Asynchronous *iface) DECLSPEC_HIDDEN;
 
+/* ID3DDeviceContextState */
+struct d3d_device_context_state
+{
+    ID3DDeviceContextState ID3DDeviceContextState_iface;
+    LONG refcount;
+
+    struct wined3d_private_store private_store;
+    struct
+    {
+        ID3D11VertexShader *shader;
+        ID3D11SamplerState *samplers[D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT];
+        ID3D11ShaderResourceView *srvs[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT];
+        ID3D11Buffer *cbs[D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT];
+    } vs;
+    struct
+    {
+        ID3D11GeometryShader *shader;
+        ID3D11SamplerState *samplers[D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT];
+        ID3D11ShaderResourceView *srvs[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT];
+        ID3D11Buffer *cbs[D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT];
+    } gs;
+    struct
+    {
+        ID3D11PixelShader *shader;
+        ID3D11SamplerState *samplers[D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT];
+        ID3D11ShaderResourceView *srvs[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT];
+        ID3D11Buffer *cbs[D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT];
+    } ps;
+
+    GUID emulated_interface;
+    ID3D11Device2 *device;
+};
+
 /* ID3D11DeviceContext - immediate context */
 struct d3d11_immediate_context
 {
@@ -539,6 +572,7 @@ struct d3d_device
 
     D3D_FEATURE_LEVEL feature_level;
     BOOL d3d11_only;
+    GUID emulated_interface;
 
     struct d3d11_immediate_context immediate_context;
 

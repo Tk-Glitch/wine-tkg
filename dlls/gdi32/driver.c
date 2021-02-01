@@ -19,9 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <stdarg.h>
 #include <string.h>
@@ -42,7 +39,6 @@
 #include "ddk/d3dkmthk.h"
 
 #include "gdi_private.h"
-#include "wine/unicode.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
@@ -76,8 +72,6 @@ static struct graphics_driver *display_driver;
 static struct list d3dkmt_adapters = LIST_INIT( d3dkmt_adapters );
 static struct list d3dkmt_devices = LIST_INIT( d3dkmt_devices );
 
-const struct gdi_dc_funcs *font_driver = NULL;
-
 static CRITICAL_SECTION driver_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =
 {
@@ -87,7 +81,10 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION driver_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
+static BOOL (WINAPI *pEnumDisplayMonitors)(HDC, LPRECT, MONITORENUMPROC, LPARAM);
+static BOOL (WINAPI *pEnumDisplaySettingsW)(LPCWSTR, DWORD, LPDEVMODEW);
 static HWND (WINAPI *pGetDesktopWindow)(void);
+static BOOL (WINAPI *pGetMonitorInfoW)(HMONITOR, LPMONITORINFO);
 static INT (WINAPI *pGetSystemMetrics)(INT);
 static DPI_AWARENESS_CONTEXT (WINAPI *pSetThreadDpiAwarenessContext)(DPI_AWARENESS_CONTEXT);
 
@@ -143,22 +140,23 @@ static const struct gdi_dc_funcs *get_display_driver(void)
 /**********************************************************************
  *	     is_display_device
  */
-static BOOL is_display_device( LPCWSTR name )
+BOOL is_display_device( LPCWSTR name )
 {
-    static const WCHAR display_deviceW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
     const WCHAR *p = name;
 
-    if (strncmpiW( name, display_deviceW, sizeof(display_deviceW) / sizeof(WCHAR) ))
+    if (!name)
         return FALSE;
 
-    p += sizeof(display_deviceW) / sizeof(WCHAR);
+    if (wcsnicmp( name, L"\\\\.\\DISPLAY", lstrlenW(L"\\\\.\\DISPLAY") )) return FALSE;
 
-    if (!isdigitW( *p++ ))
+    p += lstrlenW(L"\\\\.\\DISPLAY");
+
+    if (!iswdigit( *p++ ))
         return FALSE;
 
     for (; *p; p++)
     {
-        if (!isdigitW( *p ))
+        if (!iswdigit( *p ))
             return FALSE;
     }
 
@@ -167,8 +165,7 @@ static BOOL is_display_device( LPCWSTR name )
 
 static HANDLE get_display_device_init_mutex( void )
 {
-    static const WCHAR init_mutex[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t',0};
-    HANDLE mutex = CreateMutexW( NULL, FALSE, init_mutex );
+    HANDLE mutex = CreateMutexW( NULL, FALSE, L"display_device_init" );
 
     WaitForSingleObject( mutex, INFINITE );
     return mutex;
@@ -187,10 +184,9 @@ const struct gdi_dc_funcs *DRIVER_load_driver( LPCWSTR name )
 {
     HMODULE module;
     struct graphics_driver *driver, *new_driver;
-    static const WCHAR displayW[] = { 'd','i','s','p','l','a','y',0 };
 
     /* display driver is a special case */
-    if (!strcmpiW( name, displayW ) || is_display_device( name )) return get_display_driver();
+    if (!wcsicmp( name, L"display" ) || is_display_device( name )) return get_display_driver();
 
     if ((module = GetModuleHandleW( name )))
     {
@@ -247,10 +243,34 @@ void CDECL __wine_set_display_driver( HMODULE module )
         HeapFree( GetProcessHeap(), 0, driver );
 
     user32 = LoadLibraryA( "user32.dll" );
+    pGetMonitorInfoW = (void *)GetProcAddress( user32, "GetMonitorInfoW" );
     pGetSystemMetrics = (void *)GetProcAddress( user32, "GetSystemMetrics" );
+    pEnumDisplayMonitors = (void *)GetProcAddress( user32, "EnumDisplayMonitors" );
+    pEnumDisplaySettingsW = (void *)GetProcAddress( user32, "EnumDisplaySettingsW" );
     pSetThreadDpiAwarenessContext = (void *)GetProcAddress( user32, "SetThreadDpiAwarenessContext" );
 }
 
+struct monitor_info
+{
+    const WCHAR *name;
+    RECT rect;
+};
+
+static BOOL CALLBACK monitor_enum_proc( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lparam )
+{
+    struct monitor_info *info = (struct monitor_info *)lparam;
+    MONITORINFOEXW mi;
+
+    mi.cbSize = sizeof(mi);
+    pGetMonitorInfoW( monitor, (MONITORINFO *)&mi );
+    if (!lstrcmpiW( info->name, mi.szDevice ))
+    {
+        info->rect = mi.rcMonitor;
+        return FALSE;
+    }
+
+    return TRUE;
+}
 
 static INT CDECL nulldrv_AbortDoc( PHYSDEV dev )
 {
@@ -388,8 +408,38 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
                                          GetDeviceCaps( dev->hdc, LOGPIXELSX ) * 10 );
     case VERTSIZE:        return MulDiv( GetDeviceCaps( dev->hdc, VERTRES ), 254,
                                          GetDeviceCaps( dev->hdc, LOGPIXELSY ) * 10 );
-    case HORZRES:         return pGetSystemMetrics ? pGetSystemMetrics( SM_CXSCREEN ) : 640;
-    case VERTRES:         return pGetSystemMetrics ? pGetSystemMetrics( SM_CYSCREEN ) : 480;
+    case HORZRES:
+    {
+        DC *dc = get_nulldrv_dc( dev );
+        struct monitor_info info;
+
+        if (dc->display[0] && pEnumDisplayMonitors && pGetMonitorInfoW)
+        {
+            info.name = dc->display;
+            SetRectEmpty( &info.rect );
+            pEnumDisplayMonitors( NULL, NULL, monitor_enum_proc, (LPARAM)&info );
+            if (!IsRectEmpty( &info.rect ))
+                return info.rect.right - info.rect.left;
+        }
+
+        return pGetSystemMetrics ? pGetSystemMetrics( SM_CXSCREEN ) : 640;
+    }
+    case VERTRES:
+    {
+        DC *dc = get_nulldrv_dc( dev );
+        struct monitor_info info;
+
+        if (dc->display[0] && pEnumDisplayMonitors && pGetMonitorInfoW)
+        {
+            info.name = dc->display;
+            SetRectEmpty( &info.rect );
+            pEnumDisplayMonitors( NULL, NULL, monitor_enum_proc, (LPARAM)&info );
+            if (!IsRectEmpty( &info.rect ))
+                return info.rect.bottom - info.rect.top;
+        }
+
+        return pGetSystemMetrics ? pGetSystemMetrics( SM_CYSCREEN ) : 480;
+    }
     case BITSPIXEL:       return 32;
     case PLANES:          return 1;
     case NUMBRUSHES:      return -1;
@@ -423,7 +473,28 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
     case PHYSICALOFFSETY: return 0;
     case SCALINGFACTORX:  return 0;
     case SCALINGFACTORY:  return 0;
-    case VREFRESH:        return GetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY ? 1 : 0;
+    case VREFRESH:
+    {
+        DEVMODEW devmode;
+        WCHAR *display;
+        DC *dc;
+
+        if (GetDeviceCaps( dev->hdc, TECHNOLOGY ) != DT_RASDISPLAY)
+            return 0;
+
+        if (pEnumDisplaySettingsW)
+        {
+            dc = get_nulldrv_dc( dev );
+
+            memset( &devmode, 0, sizeof(devmode) );
+            devmode.dmSize = sizeof(devmode);
+            display = dc->display[0] ? dc->display : NULL;
+            if (pEnumDisplaySettingsW( display, ENUM_CURRENT_SETTINGS, &devmode ))
+                return devmode.dmDisplayFrequency ? devmode.dmDisplayFrequency : 1;
+        }
+
+        return 1;
+    }
     case DESKTOPHORZRES:
         if (GetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY && pGetSystemMetrics)
         {
@@ -544,7 +615,7 @@ static INT CDECL nulldrv_GetTextFace( PHYSDEV dev, INT size, LPWSTR name )
 
     if (GetObjectW( dc->hFont, sizeof(font), &font ))
     {
-        ret = strlenW( font.lfFaceName ) + 1;
+        ret = lstrlenW( font.lfFaceName ) + 1;
         if (name)
         {
             lstrcpynW( name, font.lfFaceName, size );
@@ -651,6 +722,11 @@ static HBITMAP CDECL nulldrv_SelectBitmap( PHYSDEV dev, HBITMAP bitmap )
 static HBRUSH CDECL nulldrv_SelectBrush( PHYSDEV dev, HBRUSH brush, const struct brush_pattern *pattern )
 {
     return brush;
+}
+
+static HFONT CDECL nulldrv_SelectFont( PHYSDEV dev, HFONT font, UINT *aa_flags )
+{
+    return font;
 }
 
 static HPALETTE CDECL nulldrv_SelectPalette( PHYSDEV dev, HPALETTE palette, BOOL bkgnd )
@@ -937,25 +1013,21 @@ const struct gdi_dc_funcs null_driver =
  */
 BOOL DRIVER_GetDriverName( LPCWSTR device, LPWSTR driver, DWORD size )
 {
-    static const WCHAR displayW[] = { 'd','i','s','p','l','a','y',0 };
-    static const WCHAR devicesW[] = { 'd','e','v','i','c','e','s',0 };
-    static const WCHAR empty_strW[] = { 0 };
     WCHAR *p;
 
     /* display is a special case */
-    if (!strcmpiW( device, displayW ) ||
-        is_display_device( device ))
+    if (!wcsicmp( device, L"display" ) || is_display_device( device ))
     {
-        lstrcpynW( driver, displayW, size );
+        lstrcpynW( driver, L"display", size );
         return TRUE;
     }
 
-    size = GetProfileStringW(devicesW, device, empty_strW, driver, size);
+    size = GetProfileStringW(L"devices", device, L"", driver, size);
     if(!size) {
         WARN("Unable to find %s in [devices] section of win.ini\n", debugstr_w(device));
         return FALSE;
     }
-    p = strchrW(driver, ',');
+    p = wcschr(driver, ',');
     if(!p)
     {
         WARN("%s entry in [devices] section of win.ini is malformed.\n", debugstr_w(device));
@@ -1370,14 +1442,6 @@ NTSTATUS WINAPI D3DKMTCloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
  */
 NTSTATUS WINAPI D3DKMTOpenAdapterFromGdiDisplayName( D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME *desc )
 {
-    static const WCHAR displayW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
-    static const WCHAR state_flagsW[] = {'S','t','a','t','e','F','l','a','g','s',0};
-    static const WCHAR video_value_fmtW[] = {'\\','D','e','v','i','c','e','\\',
-                                             'V','i','d','e','o','%','d',0};
-    static const WCHAR video_keyW[] = {'H','A','R','D','W','A','R','E','\\',
-                                       'D','E','V','I','C','E','M','A','P','\\',
-                                       'V','I','D','E','O','\\',0};
-    static const WCHAR gpu_idW[] = {'G','P','U','I','D',0};
     WCHAR *end, key_nameW[MAX_PATH], bufferW[MAX_PATH];
     HDEVINFO devinfo = INVALID_HANDLE_VALUE;
     NTSTATUS status = STATUS_UNSUCCESSFUL;
@@ -1396,10 +1460,10 @@ NTSTATUS WINAPI D3DKMTOpenAdapterFromGdiDisplayName( D3DKMT_OPENADAPTERFROMGDIDI
         return STATUS_UNSUCCESSFUL;
 
     TRACE("DeviceName: %s\n", wine_dbgstr_w( desc->DeviceName ));
-    if (strncmpiW( desc->DeviceName, displayW, ARRAY_SIZE(displayW) ))
+    if (wcsnicmp( desc->DeviceName, L"\\\\.\\DISPLAY", lstrlenW(L"\\\\.\\DISPLAY") ))
         return STATUS_UNSUCCESSFUL;
 
-    index = strtolW( desc->DeviceName + ARRAY_SIZE(displayW), &end, 10 ) - 1;
+    index = wcstol( desc->DeviceName + lstrlenW(L"\\\\.\\DISPLAY"), &end, 10 ) - 1;
     if (*end)
         return STATUS_UNSUCCESSFUL;
 
@@ -1411,14 +1475,14 @@ NTSTATUS WINAPI D3DKMTOpenAdapterFromGdiDisplayName( D3DKMT_OPENADAPTERFROMGDIDI
     mutex = get_display_device_init_mutex();
 
     size = sizeof( bufferW );
-    sprintfW( key_nameW, video_value_fmtW, index );
-    if (RegGetValueW( HKEY_LOCAL_MACHINE, video_keyW, key_nameW, RRF_RT_REG_SZ, NULL, bufferW, &size ))
+    swprintf( key_nameW, MAX_PATH, L"\\Device\\Video%d", index );
+    if (RegGetValueW( HKEY_LOCAL_MACHINE, L"HARDWARE\\DEVICEMAP\\VIDEO", key_nameW, RRF_RT_REG_SZ, NULL, bufferW, &size ))
         goto done;
 
     /* Strip \Registry\Machine\ prefix and retrieve Wine specific data set by the display driver */
     lstrcpyW( key_nameW, bufferW + 18 );
     size = sizeof( state_flags );
-    if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, state_flagsW, RRF_RT_REG_DWORD, NULL,
+    if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, L"StateFlags", RRF_RT_REG_DWORD, NULL,
                       &state_flags, &size ))
         goto done;
 
@@ -1426,7 +1490,7 @@ NTSTATUS WINAPI D3DKMTOpenAdapterFromGdiDisplayName( D3DKMT_OPENADAPTERFROMGDIDI
         goto done;
 
     size = sizeof( bufferW );
-    if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, gpu_idW, RRF_RT_REG_SZ, NULL, bufferW, &size ))
+    if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, L"GPUID", RRF_RT_REG_SZ, NULL, bufferW, &size ))
         goto done;
 
     devinfo = SetupDiCreateDeviceInfoList( &GUID_DEVCLASS_DISPLAY, NULL );

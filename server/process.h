@@ -56,7 +56,7 @@ struct process
     struct list          entry;           /* entry in system-wide process list */
     process_id_t         parent_id;       /* parent process id (at the time of creation) */
     struct list          thread_list;     /* thread list */
-    struct thread       *debugger;        /* thread debugging this process */
+    struct debug_obj    *debug_obj;       /* debug object debugging this process */
     struct debug_event  *debug_event;     /* debug event being sent to debugger */
     struct handle_table *handles;         /* handle entries */
     struct fd           *msg_fd;          /* fd for sendmsg/recvmsg */
@@ -80,11 +80,10 @@ struct process
     struct list          asyncs;          /* list of async object owned by the process */
     struct list          locks;           /* list of file locks owned by the process */
     struct list          classes;         /* window classes owned by the process */
-    struct console_input*console;         /* console input */
+    struct console      *console;         /* console input */
     enum startup_state   startup_state;   /* startup state */
     struct startup_info *startup_info;    /* startup info while init is in progress */
     struct event        *idle_event;      /* event for input idle */
-    struct file         *exe_file;        /* file handle for main exe (during startup only) */
     obj_handle_t         winstation;      /* main handle to process window station */
     obj_handle_t         desktop;         /* handle to desktop to use for new threads */
     struct token        *token;           /* security token associated with this process */
@@ -100,15 +99,7 @@ struct process
     struct list          kernel_object;   /* list of kernel object pointers */
     int                  esync_fd;        /* esync file descriptor (signaled on exit) */
     unsigned int         fsync_idx;
-};
-
-struct process_snapshot
-{
-    struct process *process;  /* process ptr */
-    int             count;    /* process refcount */
-    int             threads;  /* number of threads */
-    int             priority; /* priority class */
-    int             handles;  /* number of handles */
+    struct cpu_topology_override cpu_override; /* Overridden CPUs to host CPUs mapping. */
 };
 
 #define CPU_FLAG(cpu) (1 << (cpu))
@@ -119,14 +110,15 @@ struct process_snapshot
 extern unsigned int alloc_ptid( void *ptr );
 extern void free_ptid( unsigned int id );
 extern void *get_ptid_entry( unsigned int id );
-extern struct process *create_process( int fd, struct process *parent, int inherit_all,
-                                       const struct security_descriptor *sd, struct token *token );
+extern struct process *create_process( int fd, struct process *parent, int inherit_all, const startup_info_t *info,
+                                       const struct security_descriptor *sd, const obj_handle_t *handles,
+                                       unsigned int handle_count, struct token *token );
 extern data_size_t init_process( struct thread *thread );
 extern struct thread *get_process_first_thread( struct process *process );
 extern struct process *get_process_from_id( process_id_t id );
 extern struct process *get_process_from_handle( obj_handle_t handle, unsigned int access );
 extern int process_set_debugger( struct process *process, struct thread *thread );
-extern int debugger_detach( struct process* process, struct thread* debugger );
+extern void debugger_detach( struct process *process, struct debug_obj *debug_obj );
 extern int set_process_debug_flag( struct process *process, int flag );
 
 extern void add_process_thread( struct process *process,
@@ -137,17 +129,11 @@ extern void suspend_process( struct process *process );
 extern void resume_process( struct process *process );
 extern void kill_process( struct process *process, int violent_death );
 extern void kill_console_processes( struct thread *renderer, int exit_code );
-extern void kill_debugged_processes( struct thread *debugger, int exit_code );
-extern void detach_debugged_processes( struct thread *debugger );
-extern struct process_snapshot *process_snap( int *count );
+extern void detach_debugged_processes( struct debug_obj *debug_obj, int exit_code );
 extern void enum_processes( int (*cb)(struct process*, void*), void *user);
-extern void replace_process_token( struct process *process, struct token *token );
 
 /* console functions */
-extern void inherit_console( struct thread *parent_thread, struct process *parent,
-                             struct process *process, obj_handle_t hconin );
-extern int free_console( struct process *process );
-extern struct thread *console_get_renderer( struct console_input *console );
+extern struct thread *console_get_renderer( struct console *console );
 
 /* process tracing mechanism to use */
 #ifdef __APPLE__

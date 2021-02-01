@@ -42,6 +42,7 @@ struct multimedia_stream
     BOOL initialized;
     STREAM_TYPE type;
     OAEVENT event;
+    STREAM_STATE state;
 };
 
 static inline struct multimedia_stream *impl_from_IAMMultiMediaStream(IAMMultiMediaStream *iface)
@@ -136,13 +137,15 @@ static HRESULT WINAPI multimedia_stream_EnumMediaStreams(IAMMultiMediaStream *if
     return IMediaStreamFilter_EnumMediaStreams(mmstream->filter, index, stream);
 }
 
-static HRESULT WINAPI multimedia_stream_GetState(IAMMultiMediaStream *iface, STREAM_STATE *pCurrentState)
+static HRESULT WINAPI multimedia_stream_GetState(IAMMultiMediaStream *iface, STREAM_STATE *state)
 {
-    struct multimedia_stream *This = impl_from_IAMMultiMediaStream(iface);
+    struct multimedia_stream *mmstream = impl_from_IAMMultiMediaStream(iface);
 
-    FIXME("(%p/%p)->(%p) stub!\n", This, iface, pCurrentState);
+    TRACE("mmstream %p, state %p.\n", mmstream, state);
 
-    return E_NOTIMPL;
+    *state = mmstream->state;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI multimedia_stream_SetState(IAMMultiMediaStream *iface, STREAM_STATE new_state)
@@ -156,21 +159,28 @@ static HRESULT WINAPI multimedia_stream_SetState(IAMMultiMediaStream *iface, STR
     {
         hr = IMediaControl_Run(This->media_control);
         if (SUCCEEDED(hr))
+        {
+            FILTER_STATE state;
+            IMediaControl_GetState(This->media_control, INFINITE, (OAFilterState *)&state);
             hr = S_OK;
+        }
     }
     else if (new_state == STREAMSTATE_STOP)
         hr = IMediaControl_Stop(This->media_control);
 
+    if (SUCCEEDED(hr))
+        This->state = new_state;
+
     return hr;
 }
 
-static HRESULT WINAPI multimedia_stream_GetTime(IAMMultiMediaStream *iface, STREAM_TIME *pCurrentTime)
+static HRESULT WINAPI multimedia_stream_GetTime(IAMMultiMediaStream *iface, STREAM_TIME *time)
 {
-    struct multimedia_stream *This = impl_from_IAMMultiMediaStream(iface);
+    struct multimedia_stream *stream = impl_from_IAMMultiMediaStream(iface);
 
-    FIXME("(%p/%p)->(%p) stub!\n", This, iface, pCurrentTime);
+    TRACE("stream %p, time %p.\n", stream, time);
 
-    return E_NOTIMPL;
+    return IMediaStreamFilter_GetCurrentStreamTime(stream->filter, time);
 }
 
 static HRESULT WINAPI multimedia_stream_GetDuration(IAMMultiMediaStream *iface, STREAM_TIME *duration)
@@ -465,6 +475,17 @@ static HRESULT WINAPI multimedia_stream_OpenFile(IAMMultiMediaStream *iface,
         {
             FIXME("Failed to get IFilterGraph2 interface, hr %#x.\n", ret);
             ret = IGraphBuilder_Render(This->graph, This->ipin);
+        }
+    }
+
+    if (SUCCEEDED(ret) && (flags & AMMSF_NOCLOCK))
+    {
+        IMediaFilter *media_filter;
+
+        if (SUCCEEDED(ret = IGraphBuilder_QueryInterface(This->graph, &IID_IMediaFilter, (void **)&media_filter)))
+        {
+            ret = IMediaFilter_SetSyncSource(media_filter, NULL);
+            IMediaFilter_Release(media_filter);
         }
     }
 

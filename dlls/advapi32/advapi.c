@@ -32,7 +32,6 @@
 #include "wincred.h"
 #include "wct.h"
 
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 #include "advapi32_misc.h"
@@ -59,8 +58,7 @@ BOOL WINAPI GetUserNameA( LPSTR name, LPDWORD size )
  */
 BOOL WINAPI GetUserNameW( LPWSTR name, LPDWORD size )
 {
-    static const WCHAR wineusernameW[] = {'W','I','N','E','U','S','E','R','N','A','M','E',0};
-    DWORD len = GetEnvironmentVariableW( wineusernameW, name, *size );
+    DWORD len = GetEnvironmentVariableW( L"WINEUSERNAME", name, *size );
     BOOL ret;
 
     if (!len) return FALSE;
@@ -274,14 +272,13 @@ typedef UINT (WINAPI *fnMsiProvideComponentFromDescriptor)(LPCWSTR,LPWSTR,DWORD*
 DWORD WINAPI CommandLineFromMsiDescriptor( WCHAR *szDescriptor,
                     WCHAR *szCommandLine, DWORD *pcchCommandLine )
 {
-    static const WCHAR szMsi[] = { 'm','s','i',0 };
     fnMsiProvideComponentFromDescriptor mpcfd;
     HMODULE hmsi;
     UINT r = ERROR_CALL_NOT_IMPLEMENTED;
 
     TRACE("%s %p %p\n", debugstr_w(szDescriptor), szCommandLine, pcchCommandLine);
 
-    hmsi = LoadLibraryW( szMsi );
+    hmsi = LoadLibraryW( L"msi" );
     if (!hmsi)
         return r;
     mpcfd = (fnMsiProvideComponentFromDescriptor)GetProcAddress( hmsi,

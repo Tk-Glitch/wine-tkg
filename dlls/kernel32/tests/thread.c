@@ -1177,10 +1177,24 @@ static void test_SetThreadContext(void)
     CloseHandle( thread );
 }
 
+static DWORD WINAPI test_stack( void *arg )
+{
+    DWORD *stack = (DWORD *)(((DWORD)&arg & ~0xfff) + 0x1000);
+
+    ok( stack == NtCurrentTeb()->Tib.StackBase, "wrong stack %p/%p\n",
+        stack, NtCurrentTeb()->Tib.StackBase );
+    ok( !stack[-1], "wrong data %p = %08x\n", stack - 1, stack[-1] );
+    ok( stack[-2] == (DWORD)arg, "wrong data %p = %08x\n", stack - 2, stack[-2] );
+    ok( stack[-3] == (DWORD)test_stack, "wrong data %p = %08x\n", stack - 3, stack[-3] );
+    ok( !stack[-4], "wrong data %p = %08x\n", stack - 4, stack[-4] );
+    return 0;
+}
+
 static void test_GetThreadContext(void)
 {
     CONTEXT ctx;
     BOOL ret;
+    HANDLE thread;
 
     memset(&ctx, 0xcc, sizeof(ctx));
     ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
@@ -1189,6 +1203,10 @@ static void test_GetThreadContext(void)
     ok(ctx.ContextFlags == CONTEXT_DEBUG_REGISTERS, "ContextFlags = %x\n", ctx.ContextFlags);
     ok(!ctx.Dr0, "Dr0 = %x\n", ctx.Dr0);
     ok(!ctx.Dr1, "Dr0 = %x\n", ctx.Dr0);
+
+    thread = CreateThread( NULL, 0, test_stack, (void *)0x1234, 0, NULL );
+    WaitForSingleObject( thread, 1000 );
+    CloseHandle( thread );
 }
 
 static void test_GetThreadSelectorEntry(void)
@@ -1895,7 +1913,7 @@ static inline unsigned long get_fpu_cw(void)
 #endif
     return MAKELONG( cw, sse );
 #elif defined(__aarch64__)
-    unsigned long cw;
+    ULONG_PTR cw;
     __asm__ __volatile__( "mrs %0, fpcr" : "=r" (cw) );
     return cw;
 #else
@@ -2329,12 +2347,9 @@ static void test_thread_info(void)
 #endif
 
         case ThreadTimes:
-todo_wine
             ok(status == STATUS_SUCCESS, "for info %u expected STATUS_SUCCESS, got %08x (ret_len %u)\n", i, status, ret_len);
             break;
 
-        case ThreadAffinityMask:
-        case ThreadQuerySetWin32StartAddress:
         case ThreadIsIoPending:
 todo_wine
             ok(status == STATUS_ACCESS_DENIED, "for info %u expected STATUS_ACCESS_DENIED, got %08x (ret_len %u)\n", i, status, ret_len);
@@ -2560,6 +2575,7 @@ START_TEST(thread)
        }
        return;
    }
+
    test_thread_info();
    test_reserved_tls();
    test_CreateRemoteThread();
@@ -2588,5 +2604,6 @@ START_TEST(thread)
    test_thread_fpu_cw();
    test_thread_actctx();
    test_thread_description();
+
    test_threadpool();
 }

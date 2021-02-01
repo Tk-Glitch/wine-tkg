@@ -176,6 +176,13 @@ ULONG CDECL wined3d_device_incref(struct wined3d_device *device)
     return refcount;
 }
 
+static void device_free_so_desc(struct wine_rb_entry *entry, void *context)
+{
+    struct wined3d_so_desc_entry *s = WINE_RB_ENTRY_VALUE(entry, struct wined3d_so_desc_entry, entry);
+
+    heap_free(s);
+}
+
 static void device_leftover_sampler(struct wine_rb_entry *entry, void *context)
 {
     struct wined3d_sampler *sampler = WINE_RB_ENTRY_VALUE(entry, struct wined3d_sampler, entry);
@@ -242,6 +249,7 @@ void wined3d_device_cleanup(struct wined3d_device *device)
     wine_rb_destroy(&device->rasterizer_states, device_leftover_rasterizer_state, NULL);
     wine_rb_destroy(&device->blend_states, device_leftover_blend_state, NULL);
     wine_rb_destroy(&device->depth_stencil_states, device_leftover_depth_stencil_state, NULL);
+    wine_rb_destroy(&device->so_descs, device_free_so_desc, NULL);
 
     wined3d_decref(device->wined3d);
     device->wined3d = NULL;
@@ -709,11 +717,15 @@ bool wined3d_device_vk_create_null_resources(struct wined3d_device_vk *device_vk
 
     vk_info = context_vk->vk_info;
 
-    usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+    usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT
+            | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     memory_type = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     if (!wined3d_context_vk_create_bo(context_vk, 16, usage, memory_type, &r->bo))
         return false;
     VK_CALL(vkCmdFillBuffer(vk_command_buffer, r->bo.vk_buffer, r->bo.buffer_offset, r->bo.size, 0x00000000u));
+    r->buffer_info.buffer = r->bo.vk_buffer;
+    r->buffer_info.offset = r->bo.buffer_offset;
+    r->buffer_info.range = r->bo.size;
 
     if (!wined3d_null_image_vk_init(&r->image_1d, context_vk, vk_command_buffer, VK_IMAGE_TYPE_1D, 1, 1))
     {
@@ -1213,6 +1225,7 @@ void wined3d_device_uninit_3d(struct wined3d_device *device)
     wine_rb_clear(&device->samplers, device_free_sampler, NULL);
     wine_rb_clear(&device->rasterizer_states, device_free_rasterizer_state, NULL);
     wine_rb_clear(&device->blend_states, device_free_blend_state, NULL);
+    wine_rb_clear(&device->depth_stencil_states, device_free_depth_stencil_state, NULL);
 
     LIST_FOR_EACH_ENTRY_SAFE(resource, cursor, &device->resources, struct wined3d_resource, resource_list_entry)
     {
@@ -3709,7 +3722,21 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
                     set_blend_state = TRUE;
                     break;
 
+                case WINED3D_RS_BACK_STENCILFAIL:
+                case WINED3D_RS_BACK_STENCILFUNC:
+                case WINED3D_RS_BACK_STENCILPASS:
+                case WINED3D_RS_BACK_STENCILZFAIL:
+                case WINED3D_RS_STENCILENABLE:
+                case WINED3D_RS_STENCILFAIL:
+                case WINED3D_RS_STENCILFUNC:
+                case WINED3D_RS_STENCILMASK:
+                case WINED3D_RS_STENCILPASS:
+                case WINED3D_RS_STENCILWRITEMASK:
+                case WINED3D_RS_STENCILZFAIL:
+                case WINED3D_RS_TWOSIDEDSTENCILMODE:
                 case WINED3D_RS_ZENABLE:
+                case WINED3D_RS_ZFUNC:
+                case WINED3D_RS_ZWRITEENABLE:
                     set_depth_stencil_state = TRUE;
                     break;
 
@@ -3862,6 +3889,27 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
 
             default:
                 FIXME("Unrecognized depth buffer type %#x.\n", state->rs[WINED3D_RS_ZENABLE]);
+        }
+        desc.depth_write = state->rs[WINED3D_RS_ZWRITEENABLE];
+        desc.depth_func = state->rs[WINED3D_RS_ZFUNC];
+        desc.stencil = state->rs[WINED3D_RS_STENCILENABLE];
+        desc.stencil_read_mask = state->rs[WINED3D_RS_STENCILMASK];
+        desc.stencil_write_mask = state->rs[WINED3D_RS_STENCILWRITEMASK];
+        desc.front.fail_op = state->rs[WINED3D_RS_STENCILFAIL];
+        desc.front.depth_fail_op = state->rs[WINED3D_RS_STENCILZFAIL];
+        desc.front.pass_op = state->rs[WINED3D_RS_STENCILPASS];
+        desc.front.func = state->rs[WINED3D_RS_STENCILFUNC];
+
+        if (state->rs[WINED3D_RS_TWOSIDEDSTENCILMODE])
+        {
+            desc.back.fail_op = state->rs[WINED3D_RS_BACK_STENCILFAIL];
+            desc.back.depth_fail_op = state->rs[WINED3D_RS_BACK_STENCILZFAIL];
+            desc.back.pass_op = state->rs[WINED3D_RS_BACK_STENCILPASS];
+            desc.back.func = state->rs[WINED3D_RS_BACK_STENCILFUNC];
+        }
+        else
+        {
+            desc.back = desc.front;
         }
 
         if ((entry = wine_rb_get(&device->depth_stencil_states, &desc)))
@@ -4395,7 +4443,8 @@ HRESULT CDECL wined3d_device_validate_device(const struct wined3d_device *device
         }
     }
 
-    if (wined3d_state_uses_depth_buffer(state) || state->render_states[WINED3D_RS_STENCILENABLE])
+    if (wined3d_state_uses_depth_buffer(state)
+            || (state->depth_stencil_state && state->depth_stencil_state->desc.stencil))
     {
         struct wined3d_rendertarget_view *rt = device->state.fb.render_targets[0];
         struct wined3d_rendertarget_view *ds = device->state.fb.depth_stencil;
@@ -5693,6 +5742,49 @@ void device_resource_released(struct wined3d_device *device, struct wined3d_reso
     TRACE("Resource released.\n");
 }
 
+static int wined3d_so_desc_compare(const void *key, const struct wine_rb_entry *entry)
+{
+    const struct wined3d_stream_output_desc *desc = &WINE_RB_ENTRY_VALUE(entry,
+            struct wined3d_so_desc_entry, entry)->desc;
+    const struct wined3d_stream_output_desc *k = key;
+    unsigned int i;
+    int ret;
+
+    if ((ret = (k->element_count - desc->element_count)))
+        return ret;
+    if ((ret = (k->buffer_stride_count - desc->buffer_stride_count)))
+        return ret;
+    if ((ret = (k->rasterizer_stream_idx - desc->rasterizer_stream_idx)))
+        return ret;
+
+    for (i = 0; i < k->element_count; ++i)
+    {
+        const struct wined3d_stream_output_element *b = &desc->elements[i];
+        const struct wined3d_stream_output_element *a = &k->elements[i];
+
+        if ((ret = (a->stream_idx - b->stream_idx)))
+            return ret;
+        if ((ret = strcmp(a->semantic_name, b->semantic_name)))
+            return ret;
+        if ((ret = (a->semantic_idx - b->semantic_idx)))
+            return ret;
+        if ((ret = (a->component_idx - b->component_idx)))
+            return ret;
+        if ((ret = (a->component_count - b->component_count)))
+            return ret;
+        if ((ret = (a->output_slot - b->output_slot)))
+            return ret;
+    }
+
+    for (i = 0; i < k->buffer_stride_count; ++i)
+    {
+        if ((ret = (k->buffer_strides[i] - desc->buffer_strides[i])))
+            return ret;
+    }
+
+    return 0;
+}
+
 static int wined3d_sampler_compare(const void *key, const struct wine_rb_entry *entry)
 {
     const struct wined3d_sampler *sampler = WINE_RB_ENTRY_VALUE(entry, struct wined3d_sampler, entry);
@@ -5780,6 +5872,7 @@ HRESULT wined3d_device_init(struct wined3d_device *device, struct wined3d *wined
 
     fragment_pipeline = adapter->fragment_pipe;
 
+    wine_rb_init(&device->so_descs, wined3d_so_desc_compare);
     wine_rb_init(&device->samplers, wined3d_sampler_compare);
     wine_rb_init(&device->rasterizer_states, wined3d_rasterizer_state_compare);
     wine_rb_init(&device->blend_states, wined3d_blend_state_compare);
@@ -5795,6 +5888,7 @@ HRESULT wined3d_device_init(struct wined3d_device *device, struct wined3d *wined
         wine_rb_destroy(&device->rasterizer_states, NULL, NULL);
         wine_rb_destroy(&device->blend_states, NULL, NULL);
         wine_rb_destroy(&device->depth_stencil_states, NULL, NULL);
+        wine_rb_destroy(&device->so_descs, NULL, NULL);
         wined3d_decref(device->wined3d);
         return hr;
     }
@@ -5822,6 +5916,7 @@ err:
     wine_rb_destroy(&device->rasterizer_states, NULL, NULL);
     wine_rb_destroy(&device->blend_states, NULL, NULL);
     wine_rb_destroy(&device->depth_stencil_states, NULL, NULL);
+    wine_rb_destroy(&device->so_descs, NULL, NULL);
     wined3d_decref(device->wined3d);
     return hr;
 }

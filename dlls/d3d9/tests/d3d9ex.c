@@ -621,7 +621,7 @@ static void test_get_adapter_displaymode_ex(void)
     ok(mode_ex.ScanLineOrdering != 0, "ScanLineOrdering returned 0\n");
     /* Check that orientation is returned correctly by GetAdapterDisplayModeEx
      * and EnumDisplaySettingsEx(). */
-    todo_wine ok(S2(U1(devmode)).dmDisplayOrientation == DMDO_180 && rotation == D3DDISPLAYROTATION_180,
+    ok(S2(U1(devmode)).dmDisplayOrientation == DMDO_180 && rotation == D3DDISPLAYROTATION_180,
             "rotation is %d instead of %d\n", rotation, S2(U1(devmode)).dmDisplayOrientation);
 
     trace("GetAdapterDisplayModeEx returned Width = %d, Height = %d, RefreshRate = %d, Format = %x, ScanLineOrdering = %x, rotation = %d\n",
@@ -4020,8 +4020,7 @@ static void test_device_caps(void)
 
     ok(!(caps.Caps & ~(D3DCAPS_OVERLAY | D3DCAPS_READ_SCANLINE)),
             "Caps field has unexpected flags %#x.\n", caps.Caps);
-    ok(!(caps.Caps2 & ~(D3DCAPS2_NO2DDURING3DSCENE | D3DCAPS2_FULLSCREENGAMMA
-            | D3DCAPS2_CANRENDERWINDOWED | D3DCAPS2_CANCALIBRATEGAMMA | D3DCAPS2_RESERVED
+    ok(!(caps.Caps2 & ~(D3DCAPS2_FULLSCREENGAMMA | D3DCAPS2_CANCALIBRATEGAMMA | D3DCAPS2_RESERVED
             | D3DCAPS2_CANMANAGERESOURCE | D3DCAPS2_DYNAMICTEXTURES | D3DCAPS2_CANAUTOGENMIPMAP
             | D3DCAPS2_CANSHARERESOURCE)),
             "Caps2 field has unexpected flags %#x.\n", caps.Caps2);

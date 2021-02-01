@@ -59,7 +59,6 @@
 #include "shellapi.h"
 
 #include "wine/debug.h"
-#include "wine/library.h"
 #include "wine/list.h"
 #include "wine/unicode.h"
 

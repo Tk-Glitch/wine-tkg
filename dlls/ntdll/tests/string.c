@@ -65,6 +65,7 @@ static int      (__cdecl *p_wcsnicmp)(LPCWSTR,LPCWSTR,int);
 
 static LPWSTR   (__cdecl *pwcschr)(LPCWSTR, WCHAR);
 static LPWSTR   (__cdecl *pwcsrchr)(LPCWSTR, WCHAR);
+static void*    (__cdecl *pmemchr)(const void*, int, size_t);
 
 static void     (__cdecl *pqsort)(void *,size_t,size_t, int(__cdecl *compar)(const void *, const void *) );
 static void*    (__cdecl *pbsearch)(void *,void*,size_t,size_t, int(__cdecl *compar)(const void *, const void *) );
@@ -85,6 +86,18 @@ static int      (__cdecl *piswdigit)(WCHAR);
 static int      (__cdecl *piswlower)(WCHAR);
 static int      (__cdecl *piswspace)(WCHAR);
 static int      (__cdecl *piswxdigit)(WCHAR);
+
+static int      (__cdecl *pisalnum)(int);
+static int      (__cdecl *pisalpha)(int);
+static int      (__cdecl *piscntrl)(int);
+static int      (__cdecl *pisdigit)(int);
+static int      (__cdecl *pisgraph)(int);
+static int      (__cdecl *pislower)(int);
+static int      (__cdecl *pisprint)(int);
+static int      (__cdecl *pispunct)(int);
+static int      (__cdecl *pisspace)(int);
+static int      (__cdecl *pisupper)(int);
+static int      (__cdecl *pisxdigit)(int);
 
 static void InitFunctionPtrs(void)
 {
@@ -122,6 +135,7 @@ static void InitFunctionPtrs(void)
     X(_wcsnicmp);
     X(wcschr);
     X(wcsrchr);
+    X(memchr);
     X(qsort);
     X(bsearch);
     X(_snprintf);
@@ -138,6 +152,17 @@ static void InitFunctionPtrs(void)
     X(iswlower);
     X(iswspace);
     X(iswxdigit);
+    X(isalnum);
+    X(isalpha);
+    X(iscntrl);
+    X(isdigit);
+    X(isgraph);
+    X(islower);
+    X(isprint);
+    X(ispunct);
+    X(isspace);
+    X(isupper);
+    X(isxdigit);
 #undef X
 }
 
@@ -1506,6 +1531,14 @@ static void test__snprintf(void)
     ok(!memcmp(buffer, "tes", 3), "buf = %s\n", buffer);
     ok(buffer[3] == 0x7c, "buffer[3] = %x\n", buffer[3]);
 
+    res = p_snprintf(buffer, sizeof(buffer), "%ls", L"test");
+    ok(res == strlen(buffer), "wrong size %d\n", res);
+    ok(!strcmp(buffer, "test"), "got %s\n", debugstr_a(buffer));
+
+    res = p_snprintf(buffer, sizeof(buffer), "%Ls", "test");
+    ok(res == strlen(buffer), "wrong size %d\n", res);
+    ok(!strcmp(buffer, "test"), "got %s\n", debugstr_a(buffer));
+
     res = p_snprintf(buffer, sizeof(buffer), "%I64x %d", (ULONGLONG)0x1234567890, 1);
     ok(res == strlen(buffer), "wrong size %d\n", res);
     ok(!strcmp(buffer, "1234567890 1"), "got %s\n", debugstr_a(buffer));
@@ -1954,6 +1987,74 @@ static void test_wctype(void)
     }
 }
 
+/* we could reuse wctypes except for TAB, which doesn't have C1_BLANK for some reason... */
+static const unsigned short ctypes[256] =
+{
+    /* 00 */
+    0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020,
+    0x0020, 0x0028, 0x0028, 0x0028, 0x0028, 0x0028, 0x0020, 0x0020,
+    /* 10 */
+    0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020,
+    0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020, 0x0020,
+    /* 20 */
+    0x0048, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010,
+    0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010,
+    /* 30 */
+    0x0084, 0x0084, 0x0084, 0x0084, 0x0084, 0x0084, 0x0084, 0x0084,
+    0x0084, 0x0084, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010,
+    /* 40 */
+    0x0010, 0x0181, 0x0181, 0x0181, 0x0181, 0x0181, 0x0181, 0x0101,
+    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+    /* 50 */
+    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+    0x0101, 0x0101, 0x0101, 0x0010, 0x0010, 0x0010, 0x0010, 0x0010,
+    /* 60 */
+    0x0010, 0x0182, 0x0182, 0x0182, 0x0182, 0x0182, 0x0182, 0x0102,
+    0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102,
+    /* 70 */
+    0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102, 0x0102,
+    0x0102, 0x0102, 0x0102, 0x0010, 0x0010, 0x0010, 0x0010, 0x0020
+};
+
+static void test_ctype(void)
+{
+    int i;
+
+    for (i = -1; i < 256; i++)
+    {
+        unsigned short type = (i >= 0 ? ctypes[i] : 0);
+        ok( pisalnum( i ) == (type & (C1_DIGIT|C1_LOWER|C1_UPPER)), "%u: wrong isalnum %x / %x\n", i, pisalnum(i), type );
+        ok( pisalpha( i ) == (type & (C1_LOWER|C1_UPPER)), "%u: wrong isalpha %x / %x\n", i, pisalpha(i), type );
+        ok( piscntrl( i ) == (type & C1_CNTRL), "%u: wrong iscntrl %x / %x\n", i, piscntrl( i ), type );
+        ok( pisdigit( i ) == (type & C1_DIGIT), "%u: wrong isdigit %x / %x\n", i, pisdigit( i ), type );
+        ok( pisgraph( i ) == (type & (C1_DIGIT|C1_PUNCT|C1_LOWER|C1_UPPER)), "%u: wrong isgraph %x / %x\n", i, pisgraph( i ), type );
+        ok( pislower( i ) == (type & C1_LOWER), "%u: wrong islower %x / %x\n", i, pislower( i ), type );
+        ok( pisprint( i ) == (type & (C1_DIGIT|C1_BLANK|C1_PUNCT|C1_LOWER|C1_UPPER)), "%u: wrong isprint %x / %x\n", i, pisprint( i ), type );
+        ok( pispunct( i ) == (type & C1_PUNCT), "%u: wrong ispunct %x / %x\n", i, pispunct( i ), type );
+        ok( pisspace( i ) == (type & C1_SPACE), "%u: wrong isspace %x / %x\n", i, pisspace( i ), type );
+        ok( pisupper( i ) == (type & C1_UPPER), "%u: wrong isupper %x / %x\n", i, pisupper( i ), type );
+        ok( pisxdigit( i ) == (type & C1_XDIGIT), "%u: wrong isxdigit %x / %x\n", i, pisxdigit( i ), type );
+    }
+}
+
+static void test_memchr(void)
+{
+    const char s[] = "ab";
+    char *r;
+
+    r = pmemchr(s, 'z', 2);
+    ok(!r, "memchr returned %p, expected NULL\n", r);
+
+    r = pmemchr(s, 'a', 2);
+    ok(r == s, "memchr returned %p, expected %p\n", r, s);
+
+    r = pmemchr(s, 0x100 + 'a', 2);
+    ok(r == s, "memchr returned %p, expected %p\n", r, s);
+
+    r = pmemchr(s, -0x100 + 'a', 2);
+    ok(r == s, "memchr returned %p, expected %p\n", r, s);
+}
+
 START_TEST(string)
 {
     InitFunctionPtrs();
@@ -1984,4 +2085,6 @@ START_TEST(string)
     test_wcsicmp();
     test_sscanf();
     test_wctype();
+    test_ctype();
+    test_memchr();
 }

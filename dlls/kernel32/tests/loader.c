@@ -412,12 +412,19 @@ static BOOL query_image_section( int id, const char *dll_name, const IMAGE_NT_HE
         ok( image.SubSystemType == nt_header->OptionalHeader.Subsystem,
             "%u: SubSystemType wrong %08x / %08x\n", id,
             image.SubSystemType, nt_header->OptionalHeader.Subsystem );
-    ok( image.SubsystemVersionLow == nt_header->OptionalHeader.MinorSubsystemVersion,
-        "%u: SubsystemVersionLow wrong %04x / %04x\n", id,
-        image.SubsystemVersionLow, nt_header->OptionalHeader.MinorSubsystemVersion );
-    ok( image.SubsystemVersionHigh == nt_header->OptionalHeader.MajorSubsystemVersion,
-        "%u: SubsystemVersionHigh wrong %04x / %04x\n", id,
-        image.SubsystemVersionHigh, nt_header->OptionalHeader.MajorSubsystemVersion );
+    ok( image.MinorSubsystemVersion == nt_header->OptionalHeader.MinorSubsystemVersion,
+        "%u: MinorSubsystemVersion wrong %04x / %04x\n", id,
+        image.MinorSubsystemVersion, nt_header->OptionalHeader.MinorSubsystemVersion );
+    ok( image.MajorSubsystemVersion == nt_header->OptionalHeader.MajorSubsystemVersion,
+        "%u: MajorSubsystemVersion wrong %04x / %04x\n", id,
+        image.MajorSubsystemVersion, nt_header->OptionalHeader.MajorSubsystemVersion );
+    ok( image.MajorOperatingSystemVersion == nt_header->OptionalHeader.MajorOperatingSystemVersion ||
+        broken( !image.MajorOperatingSystemVersion), /* before win10 */
+        "%u: MajorOperatingSystemVersion wrong %04x / %04x\n", id,
+        image.MajorOperatingSystemVersion, nt_header->OptionalHeader.MajorOperatingSystemVersion );
+    ok( image.MinorOperatingSystemVersion == nt_header->OptionalHeader.MinorOperatingSystemVersion,
+        "%u: MinorOperatingSystemVersion wrong %04x / %04x\n", id,
+        image.MinorOperatingSystemVersion, nt_header->OptionalHeader.MinorOperatingSystemVersion );
     ok( image.ImageCharacteristics == nt_header->FileHeader.Characteristics,
         "%u: ImageCharacteristics wrong %04x / %04x\n", id,
         image.ImageCharacteristics, nt_header->FileHeader.Characteristics );
@@ -458,11 +465,19 @@ static BOOL query_image_section( int id, const char *dll_name, const IMAGE_NT_HE
         else
             ok( !S(U(image)).ComPlusNativeReady,
                 "%u: wrong ComPlusNativeReady flags %02x\n", id, U(image).ImageFlags );
+        if (nt_header->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
+            (cor_header->Flags & COMIMAGE_FLAGS_32BITPREFERRED))
+            ok( S(U(image)).ComPlusPrefer32bit ||
+                broken( !image.MajorOperatingSystemVersion ), /* before win10 */
+                "%u: wrong ComPlusPrefer32bit flags %02x\n", id, U(image).ImageFlags );
+        else
+            ok( !S(U(image)).ComPlusPrefer32bit, "%u: wrong ComPlusPrefer32bit flags %02x\n", id, U(image).ImageFlags );
     }
     else
     {
         ok( !S(U(image)).ComPlusILOnly, "%u: wrong ComPlusILOnly flags %02x\n", id, U(image).ImageFlags );
         ok( !S(U(image)).ComPlusNativeReady, "%u: wrong ComPlusNativeReady flags %02x\n", id, U(image).ImageFlags );
+        ok( !S(U(image)).ComPlusPrefer32bit, "%u: wrong ComPlusPrefer32bit flags %02x\n", id, U(image).ImageFlags );
     }
     if (!(nt_header->OptionalHeader.SectionAlignment % page_size))
         ok( !S(U(image)).ImageMappedFlat, "%u: wrong ImageMappedFlat flags %02x\n", id, U(image).ImageFlags );
@@ -483,9 +498,6 @@ static BOOL query_image_section( int id, const char *dll_name, const IMAGE_NT_HE
         ok( !S(U(image)).ImageDynamicallyRelocated || broken(TRUE), /* <= win8 */
             "%u: wrong ImageDynamicallyRelocated flags %02x\n", id, U(image).ImageFlags );
     ok( !S(U(image)).BaseBelow4gb, "%u: wrong BaseBelow4gb flags %02x\n", id, U(image).ImageFlags );
-
-    /* FIXME: needs more work: */
-    /* image.GpValue */
 
     map_size.QuadPart = (nt_header->OptionalHeader.SizeOfImage + page_size - 1) & ~(page_size - 1);
     status = pNtQuerySection( mapping, SectionBasicInformation, &info, sizeof(info), NULL );
@@ -1570,100 +1582,6 @@ static void test_filenames(void)
     DeleteFileA( long_path );
 }
 
-static void test_FakeDLL(void)
-{
-#if defined(__i386__) || defined(__x86_64__)
-    NTSTATUS (WINAPI *pNtSetEvent)(HANDLE, ULONG *) = NULL;
-    IMAGE_EXPORT_DIRECTORY *dir;
-    HMODULE module = GetModuleHandleA("ntdll.dll");
-    HANDLE file, map, event;
-    WCHAR path[MAX_PATH];
-    DWORD *names, *funcs;
-    WORD *ordinals;
-    ULONG size;
-    void *ptr;
-    int i;
-
-    GetModuleFileNameW(module, path, MAX_PATH);
-
-    file = CreateFileW(path, GENERIC_READ | GENERIC_EXECUTE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
-    ok(file != INVALID_HANDLE_VALUE, "Failed to open %s (error %u)\n", wine_dbgstr_w(path), GetLastError());
-
-    map = CreateFileMappingW(file, NULL, PAGE_EXECUTE_READ | SEC_IMAGE, 0, 0, NULL);
-    ok(map != NULL, "CreateFileMapping failed with error %u\n", GetLastError());
-    ptr = MapViewOfFile(map, FILE_MAP_READ | FILE_MAP_EXECUTE, 0, 0, 0);
-    ok(ptr != NULL, "MapViewOfFile failed with error %u\n", GetLastError());
-
-    dir = RtlImageDirectoryEntryToData(ptr, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &size);
-    ok(dir != NULL, "RtlImageDirectoryEntryToData failed\n");
-
-    names    = RVAToAddr(dir->AddressOfNames, ptr);
-    ordinals = RVAToAddr(dir->AddressOfNameOrdinals, ptr);
-    funcs    = RVAToAddr(dir->AddressOfFunctions, ptr);
-    ok(dir->NumberOfNames > 0, "Could not find any exported functions\n");
-
-    for (i = 0; i < dir->NumberOfNames; i++)
-    {
-        DWORD map_rva, dll_rva, map_offset, dll_offset;
-        char *func_name = RVAToAddr(names[i], ptr);
-        BYTE *dll_func, *map_func;
-
-        /* check only Nt functions for now */
-        if (strncmp(func_name, "Zw", 2) && strncmp(func_name, "Nt", 2))
-            continue;
-
-        dll_func = (BYTE *)GetProcAddress(module, func_name);
-        ok(dll_func != NULL, "%s: GetProcAddress returned NULL\n", func_name);
-#if defined(__i386__)
-        if (dll_func[0] == 0x90 && dll_func[1] == 0x90 &&
-            dll_func[2] == 0x90 && dll_func[3] == 0x90)
-#elif defined(__x86_64__)
-        if (dll_func[0] == 0x48 && dll_func[1] == 0x83 &&
-            dll_func[2] == 0xec && dll_func[3] == 0x08)
-#endif
-        {
-            todo_wine ok(0, "%s: Export is a stub-function, skipping\n", func_name);
-            continue;
-        }
-
-        /* check position in memory */
-        dll_rva = (DWORD_PTR)dll_func - (DWORD_PTR)module;
-        map_rva = funcs[ordinals[i]];
-        ok(map_rva == dll_rva, "%s: Rva of mapped function (0x%x) does not match dll (0x%x)\n",
-           func_name, dll_rva, map_rva);
-
-        /* check position in file */
-        map_offset = (DWORD_PTR)RtlImageRvaToVa(RtlImageNtHeader(ptr),    ptr,    map_rva, NULL) - (DWORD_PTR)ptr;
-        dll_offset = (DWORD_PTR)RtlImageRvaToVa(RtlImageNtHeader(module), module, dll_rva, NULL) - (DWORD_PTR)module;
-        ok(map_offset == dll_offset, "%s: File offset of mapped function (0x%x) does not match dll (0x%x)\n",
-           func_name, map_offset, dll_offset);
-
-        /* check function content */
-        map_func = RVAToAddr(map_rva, ptr);
-        ok(!memcmp(map_func, dll_func, 0x20), "%s: Function content does not match!\n", func_name);
-
-        if (!strcmp(func_name, "NtSetEvent"))
-            pNtSetEvent = (void *)map_func;
-    }
-
-    ok(pNtSetEvent != NULL, "Could not find NtSetEvent export\n");
-    if (pNtSetEvent)
-    {
-        event = CreateEventA(NULL, TRUE, FALSE, NULL);
-        ok(event != NULL, "CreateEvent failed with error %u\n", GetLastError());
-        pNtSetEvent(event, 0);
-        ok(WaitForSingleObject(event, 0) == WAIT_OBJECT_0, "Event was not signaled\n");
-        pNtSetEvent(event, 0);
-        ok(WaitForSingleObject(event, 0) == WAIT_OBJECT_0, "Event was not signaled\n");
-        CloseHandle(event);
-    }
-
-    UnmapViewOfFile(ptr);
-    CloseHandle(map);
-    CloseHandle(file);
-#endif
-}
-
 /* Verify linking style of import descriptors */
 static void test_ImportDescriptors(void)
 {
@@ -2413,12 +2331,34 @@ static VOID WINAPI fls_callback(PVOID lpFlsData)
     InterlockedIncrement(&fls_callback_count);
 }
 
+static LIST_ENTRY *fls_list_head;
+
+static unsigned int check_linked_list(const LIST_ENTRY *le, const LIST_ENTRY *search_entry, unsigned int *index_found)
+{
+    unsigned int count = 0;
+    LIST_ENTRY *entry;
+
+    *index_found = ~0;
+
+    for (entry = le->Flink; entry != le; entry = entry->Flink)
+    {
+        if (entry == search_entry)
+        {
+            ok(*index_found == ~0, "Duplicate list entry.\n");
+            *index_found = count;
+        }
+        ++count;
+    }
+    return count;
+}
+
 static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
 {
     static LONG noop_thread_started;
-    static DWORD fls_index = FLS_OUT_OF_INDEXES;
+    static DWORD fls_index = FLS_OUT_OF_INDEXES, fls_index2 = FLS_OUT_OF_INDEXES;
     static int fls_count = 0;
     static int thread_detach_count = 0;
+    static int thread_count;
     DWORD ret;
 
     ok(!inside_loader_lock, "inside_loader_lock should not be set\n");
@@ -2447,8 +2387,11 @@ static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
             bret = pFlsSetValue(fls_index, (void*) 0x31415);
             ok(bret, "FlsSetValue failed\n");
             fls_count++;
-        }
 
+            fls_index2 = pFlsAlloc(&fls_callback);
+            ok(fls_index2 != FLS_OUT_OF_INDEXES, "FlsAlloc returned %d\n", ret);
+        }
+        ++thread_count;
         break;
     case DLL_PROCESS_DETACH:
     {
@@ -2519,11 +2462,11 @@ todo_wine
             SetLastError(0xdeadbeef);
             value = pFlsGetValue(fls_index);
             ok(broken(value == (void*) 0x31415) || /* Win2k3 */
-               value == NULL, "FlsGetValue returned %p, expected NULL\n", value);
+                value == NULL, "FlsGetValue returned %p, expected NULL\n", value);
             ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %u\n", GetLastError());
             ok(broken(fls_callback_count == thread_detach_count) || /* Win2k3 */
-               fls_callback_count == thread_detach_count + 1,
-               "wrong FLS callback count %d, expected %d\n", fls_callback_count, thread_detach_count + 1);
+                fls_callback_count == thread_detach_count + 1,
+                "wrong FLS callback count %d, expected %d\n", fls_callback_count, thread_detach_count + 1);
         }
         if (pFlsFree)
         {
@@ -2533,7 +2476,7 @@ todo_wine
             ok(ret, "FlsFree failed with error %u\n", GetLastError());
             fls_index = FLS_OUT_OF_INDEXES;
             ok(fls_callback_count == fls_count,
-               "wrong FLS callback count %d, expected %d\n", fls_callback_count, fls_count);
+                "wrong FLS callback count %d, expected %d\n", fls_callback_count, fls_count);
         }
 
         ok(attached_thread_count >= 2, "attached thread count should be >= 2\n");
@@ -2697,6 +2640,8 @@ todo_wine
     case DLL_THREAD_ATTACH:
         trace("dll: %p, DLL_THREAD_ATTACH, %p\n", hinst, param);
 
+        ++thread_count;
+
         ret = pRtlDllShutdownInProgress();
         ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
 
@@ -2724,6 +2669,7 @@ todo_wine
         break;
     case DLL_THREAD_DETACH:
         trace("dll: %p, DLL_THREAD_DETACH, %p\n", hinst, param);
+        --thread_count;
         thread_detach_count++;
 
         ret = pRtlDllShutdownInProgress();
@@ -2742,12 +2688,25 @@ todo_wine
          */
         if (pFlsGetValue && fls_index != FLS_OUT_OF_INDEXES)
         {
+            unsigned int index, count;
             void* value;
+            BOOL bret;
+
             SetLastError(0xdeadbeef);
             value = pFlsGetValue(fls_index);
             ok(broken(value == (void*) 0x31415) || /* Win2k3 */
-               !value, "FlsGetValue returned %p, expected NULL\n", value);
+                !value, "FlsGetValue returned %p, expected NULL\n", value);
             ok(GetLastError() == ERROR_SUCCESS, "FlsGetValue failed with error %u\n", GetLastError());
+
+            bret = pFlsSetValue(fls_index2, (void*) 0x31415);
+            ok(bret, "FlsSetValue failed\n");
+
+            if (fls_list_head)
+            {
+                count = check_linked_list(fls_list_head, &NtCurrentTeb()->FlsSlots->fls_list_entry, &index);
+                ok(count <= thread_count, "Got unexpected count %u, thread_count %u.\n", count, thread_count);
+                ok(index == ~0, "Got unexpected index %u.\n", index);
+            }
         }
 
         break;
@@ -2771,6 +2730,12 @@ static void child_process(const char *dll_name, DWORD target_offset)
     DWORD_PTR affinity;
 
     trace("phase %d: writing %p at %#x\n", test_dll_phase, dll_entry_point, target_offset);
+
+    if (pFlsAlloc)
+    {
+        fls_list_head = NtCurrentTeb()->Peb->FlsListHead.Flink ? &NtCurrentTeb()->Peb->FlsListHead
+                : NtCurrentTeb()->FlsSlots->fls_list_entry.Flink;
+    }
 
     SetLastError(0xdeadbeef);
     mutex = CreateMutexW(NULL, FALSE, NULL);
@@ -4008,27 +3973,17 @@ static void test_dll_file( const char *name )
     nt_file = pRtlImageNtHeader( ptr );
     ok( nt_file != NULL, "%s: invalid header\n", path );
 #define OK_FIELD(x) ok( nt->x == nt_file->x, "%s:%u: wrong " #x " %x / %x\n", name, i, nt->x, nt_file->x )
-    todo_wine
     OK_FIELD( FileHeader.NumberOfSections );
-    todo_wine
     OK_FIELD( OptionalHeader.AddressOfEntryPoint );
     OK_FIELD( OptionalHeader.NumberOfRvaAndSizes );
     for (i = 0; i < nt->OptionalHeader.NumberOfRvaAndSizes; i++)
     {
-        todo_wine_if( i == IMAGE_DIRECTORY_ENTRY_EXPORT ||
-                      (i == IMAGE_DIRECTORY_ENTRY_IMPORT && nt->OptionalHeader.DataDirectory[i].Size) ||
-                      i == IMAGE_DIRECTORY_ENTRY_RESOURCE ||
-                      i == IMAGE_DIRECTORY_ENTRY_BASERELOC )
         OK_FIELD( OptionalHeader.DataDirectory[i].VirtualAddress );
-        todo_wine_if( i == IMAGE_DIRECTORY_ENTRY_EXPORT ||
-                      (i == IMAGE_DIRECTORY_ENTRY_IMPORT && nt->OptionalHeader.DataDirectory[i].Size) ||
-                      i == IMAGE_DIRECTORY_ENTRY_BASERELOC )
         OK_FIELD( OptionalHeader.DataDirectory[i].Size );
     }
     sec = (IMAGE_SECTION_HEADER *)((char *)&nt->OptionalHeader + nt->FileHeader.SizeOfOptionalHeader);
     sec_file = (IMAGE_SECTION_HEADER *)((char *)&nt_file->OptionalHeader + nt_file->FileHeader.SizeOfOptionalHeader);
     for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
-        todo_wine
         ok( !memcmp( sec + i, sec_file + i, sizeof(*sec) ), "%s: wrong section %d\n", name, i );
     UnmapViewOfFile( ptr );
 #undef OK_FIELD
@@ -4186,7 +4141,6 @@ START_TEST(loader)
         return;
     }
 
-    test_FakeDLL();
     test_filenames();
     test_ResolveDelayLoadedAPI();
     test_ImportDescriptors();
@@ -4201,7 +4155,6 @@ START_TEST(loader)
     test_dll_file( "kernel32.dll" );
     test_dll_file( "advapi32.dll" );
     test_dll_file( "user32.dll" );
-
     /* loader test must be last, it can corrupt the internal loader state on Windows */
     test_Loader();
 }

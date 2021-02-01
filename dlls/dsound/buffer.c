@@ -421,6 +421,8 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetStatus(IDirectSoundBuffer8 *ifac
 		if (This->playflags & DSBPLAY_LOOPING)
 			*status |= DSBSTATUS_LOOPING;
 	}
+	if (This->dsbd.dwFlags & DSBCAPS_LOCDEFER)
+		*status |= DSBSTATUS_LOCSOFTWARE;
 	ReleaseSRWLockShared(&This->lock);
 
 	TRACE("status=%x\n", *status);
@@ -1297,7 +1299,8 @@ static HRESULT WINAPI IKsPropertySetImpl_Set(IKsPropertySet *iface, REFGUID guid
 
     TRACE("(%p,%s,%d,%p,%d,%p,%d)\n",This,debugstr_guid(guidPropSet),dwPropID,pInstanceData,cbInstanceData,pPropData,cbPropData);
 
-    if (IsEqualGUID(&DSPROPSETID_EAX_ReverbProperties, guidPropSet) || IsEqualGUID(&DSPROPSETID_EAXBUFFER_ReverbProperties, guidPropSet))
+    if (IsEqualGUID(&DSPROPSETID_EAX_ReverbProperties, guidPropSet) || IsEqualGUID(&DSPROPSETID_EAXBUFFER_ReverbProperties, guidPropSet) ||
+        IsEqualGUID(&DSPROPSETID_EAX20_ListenerProperties, guidPropSet) || IsEqualGUID(&DSPROPSETID_EAX20_BufferProperties, guidPropSet))
         return EAX_Set(This, guidPropSet, dwPropID, pInstanceData, cbInstanceData, pPropData, cbPropData);
 
     return E_PROP_ID_UNSUPPORTED;

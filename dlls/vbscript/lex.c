@@ -315,7 +315,7 @@ static int parse_hex_literal(parser_ctx_t *ctx, LONG *ret)
     while((d = hex_to_int(*++ctx->ptr)) != -1)
         l = l*16 + d;
 
-    if(begin + 9 /* max digits+1 */ < ctx->ptr || (*ctx->ptr != '&' && is_identifier_char(*ctx->ptr))) {
+    if(begin + 9 /* max digits+1 */ < ctx->ptr) {
         FIXME("invalid literal\n");
         return 0;
     }
@@ -337,8 +337,7 @@ static void skip_spaces(parser_ctx_t *ctx)
 
 static int comment_line(parser_ctx_t *ctx)
 {
-    static const WCHAR newlineW[] = {'\n','\r',0};
-    ctx->ptr = wcspbrk(ctx->ptr, newlineW);
+    ctx->ptr = wcspbrk(ctx->ptr, L"\n\r");
     if(ctx->ptr)
         ctx->ptr++;
     else

@@ -213,15 +213,18 @@ static inline void print_subsys(const char *title, WORD value)
 
 static inline void print_dllflags(const char *title, WORD value)
 {
-    printf("  %-34s 0x%X\n", title, value);
+    printf("  %-34s 0x%04X\n", title, value);
 #define X(f,s) if (value & f) printf("    %s\n", s)
+    X(IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA,       "HIGH_ENTROPY_VA");
     X(IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE,          "DYNAMIC_BASE");
     X(IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY,       "FORCE_INTEGRITY");
     X(IMAGE_DLLCHARACTERISTICS_NX_COMPAT,             "NX_COMPAT");
     X(IMAGE_DLLCHARACTERISTICS_NO_ISOLATION,          "NO_ISOLATION");
     X(IMAGE_DLLCHARACTERISTICS_NO_SEH,                "NO_SEH");
     X(IMAGE_DLLCHARACTERISTICS_NO_BIND,               "NO_BIND");
+    X(IMAGE_DLLCHARACTERISTICS_APPCONTAINER,          "APPCONTAINER");
     X(IMAGE_DLLCHARACTERISTICS_WDM_DRIVER,            "WDM_DRIVER");
+    X(IMAGE_DLLCHARACTERISTICS_GUARD_CF,              "GUARD_CF");
     X(IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE, "TERMINAL_SERVER_AWARE");
 #undef X
 }
@@ -1412,7 +1415,7 @@ static void dump_arm64_packed_info( const struct runtime_function_arm64 *func )
     {
         if (func->u.s.RegF % 2 == 0)
             printf( "    %04x:  str d%u,[sp,#%#x]\n", pos++, 8 + func->u.s.RegF, intsz + fpsz - 8 );
-        for (i = func->u.s.RegF / 2 - 1; i >= 0; i--)
+        for (i = (func->u.s.RegF - 1)/ 2; i >= 0; i--)
         {
             if (!i && !intsz)
                 printf( "    %04x:  stp d8,d9,[sp,-#%#x]!\n", pos++, savesz );

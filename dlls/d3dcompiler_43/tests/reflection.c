@@ -1010,22 +1010,21 @@ static void test_reflection_desc_ps_output(void)
     {
         const DWORD *blob;
         D3D11_SIGNATURE_PARAMETER_DESC desc;
-        BOOL d3d10;
     }
     tests[] =
     {
         {test_reflection_desc_ps_output_blob_0,
-        {"SV_Target", 3, 3, D3D_NAME_TARGET, D3D_REGISTER_COMPONENT_FLOAT32, 0xf, 0, 0}, TRUE},
+        {"SV_Target", 3, 3, D3D_NAME_TARGET, D3D_REGISTER_COMPONENT_FLOAT32, 0xf, 0, 0}},
         {test_reflection_desc_ps_output_blob_1,
-        {"SV_DepthLessEqual", 0, 0xffffffff, D3D_NAME_DEPTH_LESS_EQUAL, D3D_REGISTER_COMPONENT_FLOAT32, 0x1, 0xe, 0}, FALSE},
+        {"SV_DepthLessEqual", 0, 0xffffffff, D3D_NAME_DEPTH_LESS_EQUAL, D3D_REGISTER_COMPONENT_FLOAT32, 0x1, 0xe, 0}},
         {test_reflection_desc_ps_output_blob_2,
-        {"SV_DepthGreaterEqual", 0, 0xffffffff, D3D11_NAME_DEPTH_GREATER_EQUAL, D3D_REGISTER_COMPONENT_FLOAT32, 0x1, 0xe, 0}, FALSE},
+        {"SV_DepthGreaterEqual", 0, 0xffffffff, D3D11_NAME_DEPTH_GREATER_EQUAL, D3D_REGISTER_COMPONENT_FLOAT32, 0x1, 0xe, 0}},
         {test_reflection_desc_ps_output_blob_3,
-        {"sV_DePtH", 0, 0xffffffff, D3D_NAME_DEPTH, D3D_REGISTER_COMPONENT_FLOAT32, 0x1, 0xe, 0}, FALSE},
+        {"sV_DePtH", 0, 0xffffffff, D3D_NAME_DEPTH, D3D_REGISTER_COMPONENT_FLOAT32, 0x1, 0xe, 0}},
         {test_reflection_desc_ps_output_blob_4,
-        {"SV_Depth", 0, 0xffffffff, D3D_NAME_DEPTH, D3D_REGISTER_COMPONENT_FLOAT32, 0x1, 0xe, 0}, TRUE},
+        {"SV_Depth", 0, 0xffffffff, D3D_NAME_DEPTH, D3D_REGISTER_COMPONENT_FLOAT32, 0x1, 0xe, 0}},
         {test_reflection_desc_ps_output_blob_5,
-        {"SV_COVERAGE", 0, 0xffffffff, D3D_NAME_COVERAGE, D3D_REGISTER_COMPONENT_UINT32, 0x1, 0xe, 0}, FALSE},
+        {"SV_COVERAGE", 0, 0xffffffff, D3D_NAME_COVERAGE, D3D_REGISTER_COMPONENT_UINT32, 0x1, 0xe, 0}},
     };
     HRESULT hr;
     ULONG count;
@@ -1038,7 +1037,7 @@ static void test_reflection_desc_ps_output(void)
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
         hr = call_reflect(tests[i].blob, tests[i].blob[6], &IID_ID3D11ShaderReflection, (void **)&ref11);
-        if (!D3D_COMPILER_VERSION && !tests[i].d3d10)
+        if (!D3D_COMPILER_VERSION)
         {
             todo_wine ok(hr == E_INVALIDARG, "(%u): got unexpected hr %x.\n", i, hr);
             if (SUCCEEDED(hr))
@@ -1245,7 +1244,7 @@ static void test_reflection_bound_resources(const DWORD *blob, const D3D12_SHADE
 #endif
         ok(desc11.uFlags == expected, "Got unexpected uFlags %#x, i %u.\n", desc11.uFlags, i);
         ok(desc11.ReturnType == pdesc->ReturnType, "Got unexpected ReturnType %#x, i %u.\n", desc11.ReturnType, i);
-        ok(desc11.Dimension == pdesc->Dimension, "Got unexpected Dimenstion %#x, i %u.\n", desc11.Dimension, i);
+        ok(desc11.Dimension == pdesc->Dimension, "Got unexpected Dimension %#x, i %u.\n", desc11.Dimension, i);
         ok(desc11.NumSamples == pdesc->NumSamples, "Got unexpected NumSamples %u, i %u.\n", desc11.NumSamples, i);
 
         if (ref12)
@@ -1309,7 +1308,7 @@ static void test_reflection_bound_resources(const DWORD *blob, const D3D12_SHADE
         ok(desc11.BindCount == pdesc->BindCount, "Got unexpected BindCount failed %u, i %u.\n", desc11.BindCount, i);
         ok(desc11.uFlags == pdesc->uFlags, "Got unexpected uFlags %#x, i %u.\n", desc11.uFlags, i);
         ok(desc11.ReturnType == pdesc->ReturnType, "Got unexpected ReturnType %#x, i %u.\n", desc11.ReturnType, i);
-        ok(desc11.Dimension == pdesc->Dimension, "Got unexpected Dimenstion %#x, i %u.\n", desc11.Dimension, i);
+        ok(desc11.Dimension == pdesc->Dimension, "Got unexpected Dimension %#x, i %u.\n", desc11.Dimension, i);
         ok(desc11.NumSamples == pdesc->NumSamples, "Got unexpected NumSamples %u, i %u.\n", desc11.NumSamples, i);
 
         if (ref12)

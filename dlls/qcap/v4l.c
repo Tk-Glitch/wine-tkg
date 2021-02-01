@@ -19,6 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #define BIONIC_IOCTL_NO_SIGNEDNESS_OVERLOAD  /* work around ioctl breakage on Android */
 
 #include "config.h"
@@ -47,12 +51,15 @@
 #include <unistd.h>
 #endif
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "initguid.h"
 #include "qcap_private.h"
-
-WINE_DEFAULT_DEBUG_CHANNEL(qcap);
+#include "winternl.h"
 
 #ifdef HAVE_LINUX_VIDEODEV2_H
 
+WINE_DEFAULT_DEBUG_CHANNEL(qcap);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 static typeof(open) *video_open = open;
@@ -88,29 +95,17 @@ struct caps
     VIDEO_STREAM_CONFIG_CAPS config;
 };
 
-struct v4l_device
+struct video_capture_device
 {
-    struct video_capture_device d;
-
     const struct caps *current_caps;
     struct caps *caps;
     LONG caps_count;
 
     int image_size, image_pitch;
+    BYTE *image_data;
 
-    struct strmbase_source *pin;
     int fd, mmap;
-
-    HANDLE thread;
-    FILTER_STATE state;
-    CONDITION_VARIABLE state_cv;
-    CRITICAL_SECTION state_cs;
 };
-
-static inline struct v4l_device *v4l_device(struct video_capture_device *iface)
-{
-    return CONTAINING_RECORD(iface, struct v4l_device, d);
-}
 
 static int xioctl(int fd, int request, void * arg)
 {
@@ -123,20 +118,17 @@ static int xioctl(int fd, int request, void * arg)
     return r;
 }
 
-static void v4l_device_destroy(struct video_capture_device *iface)
+static void CDECL v4l_device_destroy(struct video_capture_device *device)
 {
-    struct v4l_device *device = v4l_device(iface);
-
-    device->state_cs.DebugInfo->Spare[0] = 0;
-    DeleteCriticalSection(&device->state_cs);
     if (device->fd != -1)
         video_close(device->fd);
     if (device->caps_count)
-        heap_free(device->caps);
-    heap_free(device);
+        free(device->caps);
+    free(device->image_data);
+    free(device);
 }
 
-static const struct caps *find_caps(struct v4l_device *device, const AM_MEDIA_TYPE *mt)
+static const struct caps *find_caps(struct video_capture_device *device, const AM_MEDIA_TYPE *mt)
 {
     const VIDEOINFOHEADER *video_info = (VIDEOINFOHEADER *)mt->pbFormat;
     LONG index;
@@ -156,10 +148,8 @@ static const struct caps *find_caps(struct v4l_device *device, const AM_MEDIA_TY
     return NULL;
 }
 
-static HRESULT v4l_device_check_format(struct video_capture_device *iface, const AM_MEDIA_TYPE *mt)
+static HRESULT CDECL v4l_device_check_format(struct video_capture_device *device, const AM_MEDIA_TYPE *mt)
 {
-    struct v4l_device *device = v4l_device(iface);
-
     TRACE("device %p, mt %p.\n", device, mt);
 
     if (!mt)
@@ -174,13 +164,21 @@ static HRESULT v4l_device_check_format(struct video_capture_device *iface, const
     return E_FAIL;
 }
 
-static BOOL set_caps(struct v4l_device *device, const struct caps *caps)
+static HRESULT set_caps(struct video_capture_device *device, const struct caps *caps)
 {
     struct v4l2_format format = {0};
-    LONG width, height;
+    LONG width, height, image_size;
+    BYTE *image_data;
 
     width = caps->video_info.bmiHeader.biWidth;
     height = caps->video_info.bmiHeader.biHeight;
+    image_size = width * height * caps->video_info.bmiHeader.biBitCount / 8;
+
+    if (!(image_data = malloc(image_size)))
+    {
+        ERR("Failed to allocate memory.\n");
+        return E_OUTOFMEMORY;
+    }
 
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     format.fmt.pix.pixelformat = caps->pixelformat;
@@ -192,19 +190,20 @@ static BOOL set_caps(struct v4l_device *device, const struct caps *caps)
             || format.fmt.pix.height != height)
     {
         ERR("Failed to set pixel format: %s.\n", strerror(errno));
-        return FALSE;
+        free(image_data);
+        return VFW_E_TYPE_NOT_ACCEPTED;
     }
 
     device->current_caps = caps;
-    device->image_size = width * height * caps->video_info.bmiHeader.biBitCount / 8;
+    device->image_size = image_size;
     device->image_pitch = width * caps->video_info.bmiHeader.biBitCount / 8;
-
-    return TRUE;
+    free(device->image_data);
+    device->image_data = image_data;
+    return S_OK;
 }
 
-static HRESULT v4l_device_set_format(struct video_capture_device *iface, const AM_MEDIA_TYPE *mt)
+static HRESULT CDECL v4l_device_set_format(struct video_capture_device *device, const AM_MEDIA_TYPE *mt)
 {
-    struct v4l_device *device = v4l_device(iface);
     const struct caps *caps;
 
     caps = find_caps(device, mt);
@@ -214,32 +213,34 @@ static HRESULT v4l_device_set_format(struct video_capture_device *iface, const A
     if (device->current_caps == caps)
         return S_OK;
 
-    if (!set_caps(device, caps))
-        return VFW_E_TYPE_NOT_ACCEPTED;
-
-    return S_OK;
+    return set_caps(device, caps);
 }
 
-static HRESULT v4l_device_get_format(struct video_capture_device *iface, AM_MEDIA_TYPE *mt)
+static void CDECL v4l_device_get_format(struct video_capture_device *device, AM_MEDIA_TYPE *mt, VIDEOINFOHEADER *format)
 {
-    struct v4l_device *device = v4l_device(iface);
-
-    return CopyMediaType(mt, &device->current_caps->media_type);
+    *mt = device->current_caps->media_type;
+    *format = device->current_caps->video_info;
 }
 
-static HRESULT v4l_device_get_media_type(struct video_capture_device *iface,
-        unsigned int index, AM_MEDIA_TYPE *mt)
+static HRESULT CDECL v4l_device_get_media_type(struct video_capture_device *device,
+        unsigned int index, AM_MEDIA_TYPE *mt, VIDEOINFOHEADER *format)
 {
-    struct v4l_device *device = v4l_device(iface);
     unsigned int caps_count = (device->current_caps) ? 1 : device->caps_count;
 
     if (index >= caps_count)
         return VFW_S_NO_MORE_ITEMS;
 
     if (device->current_caps)
-        return CopyMediaType(mt, &device->current_caps->media_type);
-
-    return CopyMediaType(mt, &device->caps[index].media_type);
+    {
+        *mt = device->current_caps->media_type;
+        *format = device->current_caps->video_info;
+    }
+    else
+    {
+        *mt = device->caps[index].media_type;
+        *format = device->caps[index].video_info;
+    }
+    return S_OK;
 }
 
 static __u32 v4l2_cid_from_qcap_property(VideoProcAmpProperty property)
@@ -260,10 +261,9 @@ static __u32 v4l2_cid_from_qcap_property(VideoProcAmpProperty property)
     }
 }
 
-static HRESULT v4l_device_get_prop_range(struct video_capture_device *iface, VideoProcAmpProperty property,
+static HRESULT CDECL v4l_device_get_prop_range(struct video_capture_device *device, VideoProcAmpProperty property,
         LONG *min, LONG *max, LONG *step, LONG *default_value, LONG *flags)
 {
-    struct v4l_device *device = v4l_device(iface);
     struct v4l2_queryctrl ctrl;
 
     ctrl.id = v4l2_cid_from_qcap_property(property);
@@ -282,10 +282,9 @@ static HRESULT v4l_device_get_prop_range(struct video_capture_device *iface, Vid
     return S_OK;
 }
 
-static HRESULT v4l_device_get_prop(struct video_capture_device *iface,
+static HRESULT CDECL v4l_device_get_prop(struct video_capture_device *device,
         VideoProcAmpProperty property, LONG *value, LONG *flags)
 {
-    struct v4l_device *device = v4l_device(iface);
     struct v4l2_control ctrl;
 
     ctrl.id = v4l2_cid_from_qcap_property(property);
@@ -302,10 +301,9 @@ static HRESULT v4l_device_get_prop(struct video_capture_device *iface,
     return S_OK;
 }
 
-static HRESULT v4l_device_set_prop(struct video_capture_device *iface,
+static HRESULT CDECL v4l_device_set_prop(struct video_capture_device *device,
         VideoProcAmpProperty property, LONG value, LONG flags)
 {
-    struct v4l_device *device = v4l_device(iface);
     struct v4l2_control ctrl;
 
     ctrl.id = v4l2_cid_from_qcap_property(property);
@@ -320,7 +318,7 @@ static HRESULT v4l_device_set_prop(struct video_capture_device *iface,
     return S_OK;
 }
 
-static void reverse_image(struct v4l_device *device, LPBYTE output, const BYTE *input)
+static void reverse_image(struct video_capture_device *device, LPBYTE output, const BYTE *input)
 {
     int inoffset, outoffset, pitch;
 
@@ -339,130 +337,20 @@ static void reverse_image(struct v4l_device *device, LPBYTE output, const BYTE *
     }
 }
 
-static DWORD WINAPI ReadThread(void *arg)
+static BOOL CDECL v4l_device_read_frame(struct video_capture_device *device, BYTE *data)
 {
-    struct v4l_device *device = arg;
-    HRESULT hr;
-    IMediaSample *pSample = NULL;
-    unsigned char *pTarget, *image_data;
-
-    if (!(image_data = heap_alloc(device->image_size)))
+    while (video_read(device->fd, device->image_data, device->image_size) < 0)
     {
-        ERR("Failed to allocate memory.\n");
-        return 0;
-    }
-
-    for (;;)
-    {
-        EnterCriticalSection(&device->state_cs);
-
-        while (device->state == State_Paused)
-            SleepConditionVariableCS(&device->state_cv, &device->state_cs, INFINITE);
-
-        if (device->state == State_Stopped)
+        if (errno != EAGAIN)
         {
-            LeaveCriticalSection(&device->state_cs);
-            break;
-        }
-
-        LeaveCriticalSection(&device->state_cs);
-
-        hr = BaseOutputPinImpl_GetDeliveryBuffer(device->pin, &pSample, NULL, NULL, 0);
-        if (SUCCEEDED(hr))
-        {
-            int len;
-            
-            IMediaSample_SetActualDataLength(pSample, device->image_size);
-
-            len = IMediaSample_GetActualDataLength(pSample);
-            TRACE("Data length: %d KB\n", len / 1024);
-
-            IMediaSample_GetPointer(pSample, &pTarget);
-
-            while (video_read(device->fd, image_data, device->image_size) == -1)
-            {
-                if (errno != EAGAIN)
-                {
-                    ERR("Failed to read frame: %s\n", strerror(errno));
-                    break;
-                }
-            }
-
-            reverse_image(device, pTarget, image_data);
-            hr = IMemInputPin_Receive(device->pin->pMemInputPin, pSample);
-            IMediaSample_Release(pSample);
-        }
-
-        if (FAILED(hr) && hr != VFW_E_NOT_CONNECTED)
-        {
-            TRACE("Return %x, stop IFilterGraph\n", hr);
-            break;
+            ERR("Failed to read frame: %s\n", strerror(errno));
+            return FALSE;
         }
     }
 
-    heap_free(image_data);
-    return 0;
+    reverse_image(device, data, device->image_data);
+    return TRUE;
 }
-
-static void v4l_device_init_stream(struct video_capture_device *iface)
-{
-    struct v4l_device *device = v4l_device(iface);
-    ALLOCATOR_PROPERTIES req_props, ret_props;
-    HRESULT hr;
-
-    req_props.cBuffers = 3;
-    req_props.cbBuffer = device->image_size;
-    req_props.cbAlign = 1;
-    req_props.cbPrefix = 0;
-
-    hr = IMemAllocator_SetProperties(device->pin->pAllocator, &req_props, &ret_props);
-    if (FAILED(hr))
-        ERR("Failed to set allocator properties (buffer size %u), hr %#x.\n", req_props.cbBuffer, hr);
-
-    if (SUCCEEDED(hr))
-    {
-        if (FAILED(hr = IMemAllocator_Commit(device->pin->pAllocator)))
-            ERR("Failed to commit allocator, hr %#x.\n", hr);
-    }
-
-    device->state = State_Paused;
-    device->thread = CreateThread(NULL, 0, ReadThread, device, 0, NULL);
-}
-
-static void v4l_device_start_stream(struct video_capture_device *iface)
-{
-    struct v4l_device *device = v4l_device(iface);
-    EnterCriticalSection(&device->state_cs);
-    device->state = State_Running;
-    LeaveCriticalSection(&device->state_cs);
-}
-
-static void v4l_device_stop_stream(struct video_capture_device *iface)
-{
-    struct v4l_device *device = v4l_device(iface);
-    EnterCriticalSection(&device->state_cs);
-    device->state = State_Paused;
-    LeaveCriticalSection(&device->state_cs);
-}
-
-static void v4l_device_cleanup_stream(struct video_capture_device *iface)
-{
-    struct v4l_device *device = v4l_device(iface);
-    HRESULT hr;
-
-    EnterCriticalSection(&device->state_cs);
-    device->state = State_Stopped;
-    LeaveCriticalSection(&device->state_cs);
-    WakeConditionVariable(&device->state_cv);
-    WaitForSingleObject(device->thread, INFINITE);
-    CloseHandle(device->thread);
-    device->thread = NULL;
-
-    hr = IMemAllocator_Decommit(device->pin->pAllocator);
-    if (hr != S_OK && hr != VFW_E_NOT_COMMITTED)
-        ERR("Failed to decommit allocator, hr %#x.\n", hr);
-}
-
 
 static void fill_caps(__u32 pixelformat, __u32 width, __u32 height,
         __u32 max_fps, __u32 min_fps, struct caps *caps)
@@ -500,64 +388,36 @@ static void fill_caps(__u32 pixelformat, __u32 width, __u32 height,
     caps->pixelformat = pixelformat;
 }
 
-static HRESULT v4l_device_get_caps(struct video_capture_device *iface, LONG index,
-        AM_MEDIA_TYPE **type, VIDEO_STREAM_CONFIG_CAPS *vscc)
+static void CDECL v4l_device_get_caps(struct video_capture_device *device, LONG index,
+        AM_MEDIA_TYPE *type, VIDEOINFOHEADER *format, VIDEO_STREAM_CONFIG_CAPS *vscc)
 {
-    struct v4l_device *device = v4l_device(iface);
-
-    if (index >= device->caps_count)
-        return S_FALSE;
-
-    *type = CreateMediaType(&device->caps[index].media_type);
-    if (!*type)
-        return E_OUTOFMEMORY;
-
-    if (vscc)
-        memcpy(vscc, &device->caps[index].config, sizeof(VIDEO_STREAM_CONFIG_CAPS));
-    return S_OK;
+    *vscc = device->caps[index].config;
+    *type = device->caps[index].media_type;
+    *format = device->caps[index].video_info;
 }
 
-static LONG v4l_device_get_caps_count(struct video_capture_device *iface)
+static LONG CDECL v4l_device_get_caps_count(struct video_capture_device *device)
 {
-    struct v4l_device *device = v4l_device(iface);
-
     return device->caps_count;
 }
 
-static const struct video_capture_device_ops v4l_device_ops =
-{
-    .destroy = v4l_device_destroy,
-    .check_format = v4l_device_check_format,
-    .set_format = v4l_device_set_format,
-    .get_format = v4l_device_get_format,
-    .get_media_type = v4l_device_get_media_type,
-    .get_caps = v4l_device_get_caps,
-    .get_caps_count = v4l_device_get_caps_count,
-    .get_prop_range = v4l_device_get_prop_range,
-    .get_prop = v4l_device_get_prop,
-    .set_prop = v4l_device_set_prop,
-    .init_stream = v4l_device_init_stream,
-    .start_stream = v4l_device_start_stream,
-    .stop_stream = v4l_device_stop_stream,
-    .cleanup_stream = v4l_device_cleanup_stream,
-};
-
-struct video_capture_device *v4l_device_create(struct strmbase_source *pin, USHORT card)
+struct video_capture_device * CDECL v4l_device_create(USHORT index)
 {
     struct v4l2_frmsizeenum frmsize = {0};
+    struct video_capture_device *device;
     struct v4l2_capability caps = {{0}};
     struct v4l2_format format = {0};
-    struct v4l_device *device;
     BOOL have_libv4l2;
     char path[20];
+    HRESULT hr;
     int fd, i;
 
     have_libv4l2 = video_init();
 
-    if (!(device = heap_alloc_zero(sizeof(*device))))
+    if (!(device = calloc(1, sizeof(*device))))
         return NULL;
 
-    sprintf(path, "/dev/video%i", card);
+    sprintf(path, "/dev/video%i", index);
     TRACE("Opening device %s.\n", path);
 #ifdef O_CLOEXEC
     if ((fd = video_open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC)) == -1 && errno == EINVAL)
@@ -656,7 +516,7 @@ struct video_capture_device *v4l_device_create(struct strmbase_source *pin, USHO
         else
             ERR("Failed to get fps: %s.\n", strerror(errno));
 
-        new_caps = heap_realloc(device->caps, (device->caps_count + 1) * sizeof(*device->caps));
+        new_caps = realloc(device->caps, (device->caps_count + 1) * sizeof(*device->caps));
         if (!new_caps)
             goto error;
         device->caps = new_caps;
@@ -671,38 +531,46 @@ struct video_capture_device *v4l_device_create(struct strmbase_source *pin, USHO
     for (i = 0; i < device->caps_count; ++i)
         device->caps[i].media_type.pbFormat = (BYTE *)&device->caps[i].video_info;
 
-    if (!set_caps(device, &device->caps[0]))
+    if (FAILED(hr = set_caps(device, &device->caps[0])))
     {
-        ERR("Failed to set pixel format: %s\n", strerror(errno));
-        if (!have_libv4l2)
+        if (hr == VFW_E_TYPE_NOT_ACCEPTED && !have_libv4l2)
             ERR_(winediag)("You may need libv4l2 to use this device.\n");
         goto error;
     }
-
-    device->d.ops = &v4l_device_ops;
-    device->pin = pin;
-    device->state = State_Stopped;
-    InitializeConditionVariable(&device->state_cv);
-    InitializeCriticalSection(&device->state_cs);
-    device->state_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": v4l_device.state_cs");
 
     TRACE("Format: %d bpp - %dx%d.\n", device->current_caps->video_info.bmiHeader.biBitCount,
             device->current_caps->video_info.bmiHeader.biWidth,
             device->current_caps->video_info.bmiHeader.biHeight);
 
-    return &device->d;
+    return device;
 
 error:
-    v4l_device_destroy(&device->d);
+    v4l_device_destroy(device);
     return NULL;
 }
 
-#else
-
-struct video_capture_device *v4l_device_create(struct strmbase_source *pin, USHORT card)
+const struct video_capture_funcs v4l_funcs =
 {
-    ERR("v4l2 was not present at compilation time.\n");
-    return NULL;
+    .create = v4l_device_create,
+    .destroy = v4l_device_destroy,
+    .check_format = v4l_device_check_format,
+    .set_format = v4l_device_set_format,
+    .get_format = v4l_device_get_format,
+    .get_media_type = v4l_device_get_media_type,
+    .get_caps = v4l_device_get_caps,
+    .get_caps_count = v4l_device_get_caps_count,
+    .get_prop_range = v4l_device_get_prop_range,
+    .get_prop = v4l_device_get_prop,
+    .set_prop = v4l_device_set_prop,
+    .read_frame = v4l_device_read_frame,
+};
+
+NTSTATUS CDECL __wine_init_unix_lib(HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out)
+{
+    if (reason != DLL_PROCESS_ATTACH) return STATUS_SUCCESS;
+
+    *(const struct video_capture_funcs **)ptr_out = &v4l_funcs;
+    return STATUS_SUCCESS;
 }
 
-#endif /* defined(VIDIOCMCAPTURE) */
+#endif /* HAVE_LINUX_VIDEODEV2_H */

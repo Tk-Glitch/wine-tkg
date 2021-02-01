@@ -34,7 +34,7 @@
 struct JoystickGenericImpl;
 
 /* Number of buttons for which to allow remapping */
-#define MAX_MAP_BUTTONS 32
+#define MAX_MAP_BUTTONS 128
 
 typedef void joy_polldev_handler(LPDIRECTINPUTDEVICE8A iface);
 

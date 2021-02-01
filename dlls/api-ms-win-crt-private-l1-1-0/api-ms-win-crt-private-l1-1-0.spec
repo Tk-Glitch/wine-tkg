@@ -14,7 +14,7 @@
 @ cdecl __AdjustPointer(ptr ptr) ucrtbase.__AdjustPointer
 @ stub __BuildCatchObject
 @ stub __BuildCatchObjectHelper
-@ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr) ucrtbase.__C_specific_handler
+@ stdcall -arch=x86_64,arm64 __C_specific_handler(ptr long ptr ptr) ucrtbase.__C_specific_handler
 @ stub __C_specific_handler_noexcept
 @ cdecl -arch=i386,x86_64,arm,arm64 __CxxDetectRethrow(ptr) ucrtbase.__CxxDetectRethrow
 @ cdecl -arch=i386,x86_64,arm,arm64 __CxxExceptionFilter(ptr ptr long ptr) ucrtbase.__CxxExceptionFilter
@@ -38,7 +38,7 @@
 @ cdecl __current_exception_context() ucrtbase.__current_exception_context
 @ stub __dcrt_get_wide_environment_from_os
 @ stub __dcrt_initial_narrow_environment
-@ stub __intrinsic_abnormal_termination
+@ cdecl __intrinsic_abnormal_termination() ucrtbase.__intrinsic_abnormal_termination
 @ cdecl -arch=i386,x86_64,arm,arm64 -norelay __intrinsic_setjmp(ptr) ucrtbase.__intrinsic_setjmp
 @ cdecl -arch=x86_64,arm64 -norelay __intrinsic_setjmpex(ptr ptr) ucrtbase.__intrinsic_setjmpex
 @ cdecl __processing_throw() ucrtbase.__processing_throw
@@ -62,7 +62,7 @@
 @ cdecl _get_unexpected() ucrtbase._get_unexpected
 @ cdecl -arch=i386 _global_unwind2(ptr) ucrtbase._global_unwind2
 @ stub _is_exception_typeof
-@ cdecl -arch=x86_64 _local_unwind(ptr ptr) ucrtbase._local_unwind
+@ cdecl -arch=x86_64,arm64 _local_unwind(ptr ptr) ucrtbase._local_unwind
 @ cdecl -arch=i386 _local_unwind2(ptr long) ucrtbase._local_unwind2
 @ cdecl -arch=i386 _local_unwind4(ptr ptr long) ucrtbase._local_unwind4
 @ cdecl -arch=i386 _longjmpex(ptr long) ucrtbase._longjmpex
@@ -282,7 +282,7 @@
 @ cdecl _o__findnext64i32(long ptr) ucrtbase._o__findnext64i32
 @ cdecl _o__flushall() ucrtbase._o__flushall
 @ cdecl _o__fpclass(double) ucrtbase._o__fpclass
-@ stub _o__fpclassf
+@ cdecl -arch=!i386 _o__fpclassf(float) ucrtbase._o__fpclassf
 @ cdecl _o__fputc_nolock(long ptr) ucrtbase._o__fputc_nolock
 @ cdecl _o__fputchar(long) ucrtbase._o__fputchar
 @ cdecl _o__fputwc_nolock(long ptr) ucrtbase._o__fputwc_nolock
@@ -719,7 +719,7 @@
 @ cdecl -ret64 _o__strtoi64(str ptr long) ucrtbase._o__strtoi64
 @ cdecl -ret64 _o__strtoi64_l(str ptr long ptr) ucrtbase._o__strtoi64_l
 @ cdecl _o__strtol_l(str ptr long ptr) ucrtbase._o__strtol_l
-@ stub _o__strtold_l
+@ cdecl _o__strtold_l(str ptr ptr) ucrtbase._o__strtold_l
 @ cdecl -ret64 _o__strtoll_l(str ptr long ptr) ucrtbase._o__strtoll_l
 @ cdecl -ret64 _o__strtoui64(str ptr long) ucrtbase._o__strtoui64
 @ cdecl -ret64 _o__strtoui64_l(str ptr long ptr) ucrtbase._o__strtoui64_l
@@ -794,12 +794,12 @@
 @ cdecl _o__wcsnset_s(wstr long long long) ucrtbase._o__wcsnset_s
 @ cdecl _o__wcsset(wstr long) ucrtbase._o__wcsset
 @ cdecl _o__wcsset_s(wstr long long) ucrtbase._o__wcsset_s
-@ cdecl _o__wcstod_l(wstr ptr long) ucrtbase._o__wcstod_l
+@ cdecl _o__wcstod_l(wstr ptr ptr) ucrtbase._o__wcstod_l
 @ cdecl _o__wcstof_l(wstr ptr ptr) ucrtbase._o__wcstof_l
 @ cdecl -ret64 _o__wcstoi64(wstr ptr long) ucrtbase._o__wcstoi64
 @ cdecl -ret64 _o__wcstoi64_l(wstr ptr long ptr) ucrtbase._o__wcstoi64_l
 @ cdecl _o__wcstol_l(wstr ptr long ptr) ucrtbase._o__wcstol_l
-@ stub _o__wcstold_l
+@ cdecl _o__wcstold_l(wstr ptr ptr) ucrtbase._o__wcstold_l
 @ cdecl -ret64 _o__wcstoll_l(wstr ptr long ptr) ucrtbase._o__wcstoll_l
 @ cdecl _o__wcstombs_l(ptr ptr long ptr) ucrtbase._o__wcstombs_l
 @ cdecl _o__wcstombs_s_l(ptr ptr long wstr long ptr) ucrtbase._o__wcstombs_s_l
@@ -1126,7 +1126,7 @@
 @ cdecl _o_strtok(str str) ucrtbase._o_strtok
 @ cdecl _o_strtok_s(ptr str ptr) ucrtbase._o_strtok_s
 @ cdecl _o_strtol(str ptr long) ucrtbase._o_strtol
-@ stub _o_strtold
+@ cdecl _o_strtold(str ptr) ucrtbase._o_strtold
 @ cdecl -ret64 _o_strtoll(str ptr long) ucrtbase._o_strtoll
 @ cdecl _o_strtoul(str ptr long) ucrtbase._o_strtoul
 @ cdecl -ret64 _o_strtoull(str ptr long) ucrtbase._o_strtoull
@@ -1163,7 +1163,7 @@
 @ cdecl _o_wcstok(wstr wstr ptr) ucrtbase._o_wcstok
 @ cdecl _o_wcstok_s(ptr wstr ptr) ucrtbase._o_wcstok_s
 @ cdecl _o_wcstol(wstr ptr long) ucrtbase._o_wcstol
-@ stub _o_wcstold
+@ cdecl _o_wcstold(wstr ptr ptr) ucrtbase._o_wcstold
 @ cdecl -ret64 _o_wcstoll(wstr ptr long) ucrtbase._o_wcstoll
 @ cdecl _o_wcstombs(ptr ptr long) ucrtbase._o_wcstombs
 @ cdecl _o_wcstombs_s(ptr ptr long wstr long) ucrtbase._o_wcstombs_s

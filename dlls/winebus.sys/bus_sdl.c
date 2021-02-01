@@ -27,8 +27,8 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
-#ifdef HAVE_SDL2_SDL_H
-# include <SDL2/SDL.h>
+#ifdef HAVE_SDL_H
+# include <SDL.h>
 #endif
 
 #define NONAMELESSUNION
@@ -69,7 +69,6 @@ static void *sdl_handle = NULL;
 static HANDLE deviceloop_handle;
 static UINT quit_event = -1;
 
-#ifdef SONAME_LIBSDL2
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL
 MAKE_FUNCPTR(SDL_GetError);
 MAKE_FUNCPTR(SDL_Init);
@@ -109,7 +108,6 @@ MAKE_FUNCPTR(SDL_memset);
 MAKE_FUNCPTR(SDL_GameControllerAddMapping);
 MAKE_FUNCPTR(SDL_RegisterEvents);
 MAKE_FUNCPTR(SDL_PushEvent);
-#endif
 static Uint16 (*pSDL_JoystickGetProduct)(SDL_Joystick * joystick);
 static Uint16 (*pSDL_JoystickGetProductVersion)(SDL_Joystick * joystick);
 static Uint16 (*pSDL_JoystickGetVendor)(SDL_Joystick * joystick);
@@ -1024,8 +1022,15 @@ static DWORD CALLBACK deviceloop_thread(void *args)
     {
         HKEY key;
         static const WCHAR szPath[] = {'m','a','p',0};
+        const char *mapping;
 
-        if (!RegOpenKeyExW(driver_key, szPath, 0, KEY_ENUMERATE_SUB_KEYS, &key))
+        if ((mapping = getenv("SDL_GAMECONTROLLERCONFIG")))
+        {
+            TRACE("Setting environment mapping %s\n", debugstr_a(mapping));
+            if (pSDL_GameControllerAddMapping(mapping) < 0)
+                WARN("Failed to add environment mapping %s\n", pSDL_GetError());
+        }
+        else if (!RegOpenKeyExW(driver_key, szPath, 0, KEY_QUERY_VALUE, &key))
         {
             DWORD index = 0;
             CHAR *buffer = NULL;
@@ -1054,8 +1059,9 @@ static DWORD CALLBACK deviceloop_thread(void *args)
 
                 if (rc == STATUS_SUCCESS)
                 {
-                    TRACE("Setting mapping %s...\n",debugstr_an(buffer,29));
-                    pSDL_GameControllerAddMapping(buffer);
+                    TRACE("Setting registry mapping %s\n", debugstr_a(buffer));
+                    if (pSDL_GameControllerAddMapping(buffer) < 0)
+                        WARN("Failed to add registry mapping %s\n", pSDL_GetError());
                     index ++;
                 }
             } while (rc == STATUS_SUCCESS);

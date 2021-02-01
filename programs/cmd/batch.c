@@ -249,7 +249,7 @@ WCHAR *WCMD_fgets(WCHAR *buf, DWORD noChars, HANDLE h)
   /* We can't use the native f* functions because of the filename syntax differences
      between DOS and Unix. Also need to lose the LF (or CRLF) from the line. */
 
-  if (!WCMD_is_console_handle(h)) {
+  if (!ReadConsoleW(h, buf, noChars, &charsRead, NULL)) {
       LARGE_INTEGER filepos;
       char *bufA;
       UINT cp;
@@ -282,8 +282,7 @@ WCHAR *WCMD_fgets(WCHAR *buf, DWORD noChars, HANDLE h)
       heap_free(bufA);
   }
   else {
-      status = WCMD_ReadFile(h, buf, noChars, &charsRead);
-      if (!status || charsRead == 0) return NULL;
+      if (!charsRead) return NULL;
 
       /* Find first EOL */
       for (i = 0; i < charsRead; i++) {
@@ -342,8 +341,8 @@ void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
   };
 
   WIN32_FILE_ATTRIBUTE_DATA fileInfo;
-  WCHAR  outputparam[MAX_PATH];
-  WCHAR  finaloutput[MAX_PATH];
+  WCHAR  outputparam[MAXSTRING];
+  WCHAR  finaloutput[MAXSTRING];
   WCHAR  fullfilename[MAX_PATH];
   WCHAR  thisoutput[MAX_PATH];
   WCHAR  *filepart       = NULL;
@@ -516,13 +515,13 @@ void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
       doneModifier = TRUE;
 
       if (exists) {
-        if (finaloutput[0] != 0x00) lstrcatW(finaloutput, spaceW);
+        if (finaloutput[0] != 0x00) lstrcatW(finaloutput, L" ");
 
         /* Format the time */
         FileTimeToSystemTime(&fileInfo.ftLastWriteTime, &systime);
         GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &systime,
                           NULL, thisoutput, MAX_PATH);
-        lstrcatW(thisoutput, spaceW);
+        lstrcatW(thisoutput, L" ");
         datelen = lstrlenW(thisoutput);
         GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &systime,
                           NULL, (thisoutput+datelen), MAX_PATH-datelen);
@@ -538,7 +537,7 @@ void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
 
       doneModifier = TRUE;
       if (exists) {
-        if (finaloutput[0] != 0x00) lstrcatW(finaloutput, spaceW);
+        if (finaloutput[0] != 0x00) lstrcatW(finaloutput, L" ");
         wsprintfW(thisoutput, L"%u", fullsize);
         lstrcatW(finaloutput, thisoutput);
       }
@@ -546,7 +545,7 @@ void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
 
     /* 4. Handle 's' : Use short paths (File doesn't have to exist) */
     if (wmemchr(firstModifier, 's', modifierLen) != NULL) {
-      if (finaloutput[0] != 0x00) lstrcatW(finaloutput, spaceW);
+      if (finaloutput[0] != 0x00) lstrcatW(finaloutput, L" ");
 
       /* Convert fullfilename's path to a short path - Save filename away as
          only path is valid, name may not exist which causes GetShortPathName
@@ -563,7 +562,7 @@ void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
     /*      Note this overrides d,p,n,x                                 */
     if (wmemchr(firstModifier, 'f', modifierLen) != NULL) {
       doneModifier = TRUE;
-      if (finaloutput[0] != 0x00) lstrcatW(finaloutput, spaceW);
+      if (finaloutput[0] != 0x00) lstrcatW(finaloutput, L" ");
       lstrcatW(finaloutput, fullfilename);
     } else {
 
@@ -580,7 +579,7 @@ void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
       /* 5. Handle 'd' : Drive Letter */
       if (wmemchr(firstModifier, 'd', modifierLen) != NULL) {
         if (addSpace) {
-          lstrcatW(finaloutput, spaceW);
+          lstrcatW(finaloutput, L" ");
           addSpace = FALSE;
         }
 
@@ -592,7 +591,7 @@ void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
       /* 6. Handle 'p' : Path */
       if (wmemchr(firstModifier, 'p', modifierLen) != NULL) {
         if (addSpace) {
-          lstrcatW(finaloutput, spaceW);
+          lstrcatW(finaloutput, L" ");
           addSpace = FALSE;
         }
 
@@ -604,7 +603,7 @@ void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
       /* 7. Handle 'n' : Name */
       if (wmemchr(firstModifier, 'n', modifierLen) != NULL) {
         if (addSpace) {
-          lstrcatW(finaloutput, spaceW);
+          lstrcatW(finaloutput, L" ");
           addSpace = FALSE;
         }
 
@@ -616,7 +615,7 @@ void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
       /* 8. Handle 'x' : Ext */
       if (wmemchr(firstModifier, 'x', modifierLen) != NULL) {
         if (addSpace) {
-          lstrcatW(finaloutput, spaceW);
+          lstrcatW(finaloutput, L" ");
           addSpace = FALSE;
         }
 
@@ -629,7 +628,7 @@ void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute)
       if (!doneFileModifier &&
           wmemchr(firstModifier, 's', modifierLen) != NULL) {
         doneModifier = TRUE;
-        if (finaloutput[0] != 0x00) lstrcatW(finaloutput, spaceW);
+        if (finaloutput[0] != 0x00) lstrcatW(finaloutput, L" ");
         lstrcatW(finaloutput, fullfilename);
       }
     }

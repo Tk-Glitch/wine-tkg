@@ -20,9 +20,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 
 #define NONAMELESSUNION
@@ -34,7 +31,6 @@
 #include "winternl.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
-#include "wine/unicode.h"
 #include "wine/list.h"
 #include "kernel_private.h"
 
@@ -213,7 +209,7 @@ static int resource_strcmp( LPCWSTR a, LPCWSTR b )
     if ( a == b )
         return 0;
     if (!IS_INTRESOURCE( a ) && !IS_INTRESOURCE( b ) )
-        return lstrcmpW( a, b );
+        return wcscmp( a, b );
     /* strings come before ids */
     if (!IS_INTRESOURCE( a ) && IS_INTRESOURCE( b ))
         return -1;
@@ -985,7 +981,6 @@ static DWORD get_init_data_size( void *base, DWORD mapping_size )
 
 static BOOL write_raw_resources( QUEUEDUPDATES *updates )
 {
-    static const WCHAR prefix[] = { 'r','e','s','u',0 };
     WCHAR tempdir[MAX_PATH], tempfile[MAX_PATH];
     DWORD i, section_size;
     BOOL ret = FALSE;
@@ -1002,7 +997,7 @@ static BOOL write_raw_resources( QUEUEDUPDATES *updates )
     if (!GetTempPathW( MAX_PATH, tempdir ))
         return ret;
 
-    if (!GetTempFileNameW( tempdir, prefix, 0, tempfile ))
+    if (!GetTempFileNameW( tempdir, L"resu", 0, tempfile ))
         return ret;
 
     if (!CopyFileW( updates->pFileName, tempfile, FALSE ))

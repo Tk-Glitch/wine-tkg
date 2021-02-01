@@ -166,6 +166,9 @@ DEFINE_EXPECT(BindHandler);
 #define DISPID_GLOBAL_PROPARGPUTOP  0x1020
 #define DISPID_GLOBAL_THROWINT      0x1021
 #define DISPID_GLOBAL_THROWEI       0x1022
+#define DISPID_GLOBAL_VDATE         0x1023
+#define DISPID_GLOBAL_VCY           0x1024
+#define DISPID_GLOBAL_TODOWINE      0x1025
 
 #define DISPID_GLOBAL_TESTPROPDELETE      0x2000
 #define DISPID_GLOBAL_TESTNOPROPDELETE    0x2001
@@ -808,6 +811,11 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         *pid = DISPID_GLOBAL_TRACE;
         return S_OK;
     }
+    if(!lstrcmpW(bstrName, L"todo_wine_ok")) {
+        test_grfdex(grfdex, fdexNameCaseSensitive);
+        *pid = DISPID_GLOBAL_TODOWINE;
+        return S_OK;
+    }
     if(!lstrcmpW(bstrName, L"reportSuccess")) {
         CHECK_EXPECT(global_success_d);
         test_grfdex(grfdex, fdexNameCaseSensitive);
@@ -966,6 +974,16 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         return S_OK;
     }
 
+    if(!lstrcmpW(bstrName, L"v_date")) {
+        *pid = DISPID_GLOBAL_VDATE;
+        return S_OK;
+    }
+
+    if(!lstrcmpW(bstrName, L"v_cy")) {
+        *pid = DISPID_GLOBAL_VCY;
+        return S_OK;
+    }
+
     if(!lstrcmpW(bstrName, L"testArgTypes")) {
         *pid = DISPID_GLOBAL_TESTARGTYPES;
         return S_OK;
@@ -1043,6 +1061,25 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         ok(V_VT(pdp->rgvarg) == VT_BSTR, "V_VT(pdp->rgvarg) = %d\n", V_VT(pdp->rgvarg));
         ok(V_VT(pdp->rgvarg+1) == VT_BOOL, "V_VT(pdp->rgvarg+1) = %d\n", V_VT(pdp->rgvarg+1));
         ok(V_BOOL(pdp->rgvarg+1), "%s: %s\n", test_name, wine_dbgstr_w(V_BSTR(pdp->rgvarg)));
+
+        return S_OK;
+
+    case DISPID_GLOBAL_TODOWINE:
+        ok(wFlags == INVOKE_FUNC || wFlags == (INVOKE_FUNC|INVOKE_PROPERTYGET), "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(pdp->cArgs == 2, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        if(wFlags & INVOKE_PROPERTYGET)
+            ok(pvarRes != NULL, "pvarRes == NULL\n");
+        else
+            ok(!pvarRes, "pvarRes != NULL\n");
+        ok(pei != NULL, "pei == NULL\n");
+
+        ok(V_VT(pdp->rgvarg) == VT_BSTR, "V_VT(pdp->rgvarg) = %d\n", V_VT(pdp->rgvarg));
+        ok(V_VT(pdp->rgvarg+1) == VT_BOOL, "V_VT(pdp->rgvarg+1) = %d\n", V_VT(pdp->rgvarg+1));
+        todo_wine ok(V_BOOL(pdp->rgvarg+1), "%s: %s\n", test_name, wine_dbgstr_w(V_BSTR(pdp->rgvarg)));
 
         return S_OK;
 
@@ -1160,6 +1197,9 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
             break;
         case VT_ARRAY|VT_VARIANT:
             V_BSTR(pvarRes) = SysAllocString(L"VT_ARRAY|VT_VARIANT");
+            break;
+        case VT_DATE:
+            V_BSTR(pvarRes) = SysAllocString(L"VT_DATE");
             break;
         default:
             ok(0, "unknown vt %d\n", V_VT(pdp->rgvarg));
@@ -1505,6 +1545,46 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
     case DISPID_GLOBAL_GETSHORT:
         V_VT(pvarRes) = VT_I2;
         V_I2(pvarRes) = 10;
+        return S_OK;
+
+    case DISPID_GLOBAL_VDATE:
+        ok(wFlags == (DISPATCH_METHOD|DISPATCH_PROPERTYGET), "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+        ok(pvarRes != NULL, "pvarRes != NULL\n");
+        V_VT(pvarRes) = VT_DATE;
+        switch(V_VT(pdp->rgvarg))
+        {
+        case VT_I4:
+            V_DATE(pvarRes) = V_I4(pdp->rgvarg);
+            break;
+        case VT_R8:
+            V_DATE(pvarRes) = V_R8(pdp->rgvarg);
+            break;
+        default:
+            ok(0, "vt = %u\n", V_VT(pdp->rgvarg));
+            return E_INVALIDARG;
+        }
+        return S_OK;
+
+    case DISPID_GLOBAL_VCY:
+        ok(wFlags == (DISPATCH_METHOD|DISPATCH_PROPERTYGET), "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+        ok(pvarRes != NULL, "pvarRes != NULL\n");
+        V_VT(pvarRes) = VT_CY;
+        switch(V_VT(pdp->rgvarg))
+        {
+        case VT_I4:
+            V_CY(pvarRes).int64 = V_I4(pdp->rgvarg);
+            break;
+        case VT_R8:
+            V_CY(pvarRes).int64 = V_R8(pdp->rgvarg);
+            break;
+        default:
+            ok(0, "vt = %u\n", V_VT(pdp->rgvarg));
+            return E_INVALIDARG;
+        }
         return S_OK;
 
     case DISPID_GLOBAL_INTPROP:
@@ -2484,9 +2564,6 @@ static void test_isvisible(BOOL global_members)
     IActiveScript *engine;
     HRESULT hres;
 
-    static const WCHAR script_textW[] =
-        {'v','a','r',' ','v',' ','=',' ','t','e','s','t','V','a','l',';',0};
-
     engine = create_script();
     if(!engine)
         return;
@@ -2519,12 +2596,12 @@ static void test_isvisible(BOOL global_members)
 
     if(!global_members)
         SET_EXPECT(GetItemInfo_testVal);
-    hres = IActiveScriptParse_ParseScriptText(parser, script_textW, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
+    hres = IActiveScriptParse_ParseScriptText(parser, L"var v = testVal;", NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08x\n", hres);
     if(!global_members)
         CHECK_CALLED(GetItemInfo_testVal);
 
-    hres = IActiveScriptParse_ParseScriptText(parser, script_textW, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
+    hres = IActiveScriptParse_ParseScriptText(parser, L"var v = testVal;", NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08x\n", hres);
 
     IActiveScript_Release(engine);
@@ -3035,17 +3112,17 @@ static void run_bom_tests(void)
     int i;
     HRESULT hres;
     struct bom_test bom_tests[] = {
-        {{'v','a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',')',';','\0'}, S_OK},
-        {{0xFEFF,'v','a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',')',';','\0'}, S_OK},
-        {{'v',0xFEFF,'a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',')',';','\0'}, JS_E_OUT_OF_MEMORY},
-        {{'v','a','r',0xFEFF,' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',')',';','\0'}, S_OK},
-        {{'v','a','r',' ','a',' ','=',' ','1',';',' ',0xFEFF,'r','e','p','o','r','t','S','u','c','c','e','s','s','(',')',';','\0'}, S_OK},
-        {{'v','a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t',0xFEFF,'S','u','c','c','e','s','s','(',')',';','\0'}, JS_E_OUT_OF_MEMORY},
-        {{'v','a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s',0xFEFF,'(',')',';','\0'}, S_OK},
-        {{'v','a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',0xFEFF,')',';','\0'}, S_OK},
-        {{'v','a','r',' ','a',' ','=',0xFEFF,' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',0xFEFF,')',';','\0'}, S_OK},
-        {{0xFEFF,'v','a','r',' ','a',' ','=',0xFEFF,0xFEFF,' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',0xFEFF,')',';','\0'}, S_OK},
-        {{0}}
+        {L"var a = 1; reportSuccess();", S_OK},
+        {L"\xfeffvar a = 1; reportSuccess();", S_OK},
+        {L"v\xfeff" "ar a = 1; reportSuccess();", JS_E_OUT_OF_MEMORY},
+        {L"var\xfeff a = 1; reportSuccess();", S_OK},
+        {L"var a = 1; \xfeffreportSuccess();", S_OK},
+        {L"var a = 1; report\xfeffSuccess();", JS_E_OUT_OF_MEMORY},
+        {L"var a = 1; reportSuccess\xfeff();", S_OK},
+        {L"var a = 1; reportSuccess(\xfeff);", S_OK},
+        {L"var a =\xfeff 1; reportSuccess(\xfeff);", S_OK},
+        {L"\xfeffvar a =\xfeff\xfeff 1; reportSuccess(\xfeff);", S_OK},
+        {L""}
     };
 
     engine_clsid = &CLSID_JScript;

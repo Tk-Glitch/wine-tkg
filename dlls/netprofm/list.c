@@ -24,7 +24,6 @@
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
-#define USE_WS_PREFIX
 #include "winsock2.h"
 #include "ws2ipdef.h"
 #include "iphlpapi.h"
@@ -85,6 +84,7 @@ struct list_manager
     struct connection_point list_mgr_cp;
     struct connection_point cost_mgr_cp;
     struct connection_point conn_mgr_cp;
+    struct connection_point events_cp;
 };
 
 struct sink_entry
@@ -582,14 +582,14 @@ static BOOL map_address_6to4( const SOCKADDR_IN6 *addr6, SOCKADDR_IN *addr4 )
 {
     ULONG i;
 
-    if (addr6->sin6_family != WS_AF_INET6) return FALSE;
+    if (addr6->sin6_family != AF_INET6) return FALSE;
 
     for (i = 0; i < 5; i++)
         if (addr6->sin6_addr.u.Word[i]) return FALSE;
 
     if (addr6->sin6_addr.u.Word[5] != 0xffff) return FALSE;
 
-    addr4->sin_family = WS_AF_INET;
+    addr4->sin_family = AF_INET;
     addr4->sin_port   = addr6->sin6_port;
     addr4->sin_addr.S_un.S_addr = addr6->sin6_addr.u.Word[6] << 16 | addr6->sin6_addr.u.Word[7];
     memset( &addr4->sin_zero, 0, sizeof(addr4->sin_zero) );
@@ -610,8 +610,8 @@ static HRESULT WINAPI cost_manager_GetDataPlanStatus(
 
     if (!pDataPlanStatus) return E_POINTER;
 
-    if (dst && ((dst->sa_family == WS_AF_INET && (dst4 = (SOCKADDR_IN *)dst)) ||
-               ((dst->sa_family == WS_AF_INET6 && map_address_6to4( (const SOCKADDR_IN6 *)dst, &addr4 )
+    if (dst && ((dst->sa_family == AF_INET && (dst4 = (SOCKADDR_IN *)dst)) ||
+               ((dst->sa_family == AF_INET6 && map_address_6to4( (const SOCKADDR_IN6 *)dst, &addr4 )
                 && (dst4 = &addr4)))))
     {
         if ((ret = GetBestInterface( dst4->sin_addr.S_un.S_addr, &index )))
@@ -1111,6 +1111,7 @@ static ULONG WINAPI list_manager_Release(
 
         TRACE( "destroying %p\n", mgr );
 
+        connection_point_release( &mgr->events_cp );
         connection_point_release( &mgr->conn_mgr_cp );
         connection_point_release( &mgr->cost_mgr_cp );
         connection_point_release( &mgr->list_mgr_cp );
@@ -1395,6 +1396,8 @@ static HRESULT WINAPI ConnectionPointContainer_FindConnectionPoint(IConnectionPo
         ret = &This->cost_mgr_cp;
     else if (IsEqualGUID( riid, &IID_INetworkConnectionEvents ))
         ret = &This->conn_mgr_cp;
+    else if (IsEqualGUID( riid, &IID_INetworkEvents))
+        ret = &This->events_cp;
     else
     {
         FIXME( "interface %s not implemented\n", debugstr_guid(riid) );
@@ -1718,11 +1721,11 @@ static void init_networks( struct list_manager *mgr )
     list_init( &mgr->networks );
     list_init( &mgr->connections );
 
-    ret = GetAdaptersAddresses( WS_AF_UNSPEC, flags, NULL, NULL, &size );
+    ret = GetAdaptersAddresses( AF_UNSPEC, flags, NULL, NULL, &size );
     if (ret != ERROR_BUFFER_OVERFLOW) return;
 
     if (!(buf = heap_alloc( size ))) return;
-    if (GetAdaptersAddresses( WS_AF_UNSPEC, flags, NULL, buf, &size ))
+    if (GetAdaptersAddresses( AF_UNSPEC, flags, NULL, buf, &size ))
     {
         heap_free( buf );
         return;
@@ -1784,6 +1787,8 @@ HRESULT list_manager_create( void **obj )
     connection_point_init( &mgr->cost_mgr_cp, &IID_INetworkCostManagerEvents,
                            &mgr->IConnectionPointContainer_iface);
     connection_point_init( &mgr->conn_mgr_cp, &IID_INetworkConnectionEvents,
+                           &mgr->IConnectionPointContainer_iface );
+    connection_point_init( &mgr->events_cp, &IID_INetworkEvents,
                            &mgr->IConnectionPointContainer_iface );
 
     *obj = &mgr->INetworkListManager_iface;

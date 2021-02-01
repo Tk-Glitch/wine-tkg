@@ -327,10 +327,11 @@ static HRESULT WINAPI mf_decoder_GetOutputAvailableType(IMFTransform *iface, DWO
 
     copy_attr(output_type, decoder->input_type, &MF_MT_FRAME_SIZE);
     copy_attr(output_type, decoder->input_type, &MF_MT_FRAME_RATE);
+    copy_attr(output_type, decoder->input_type, &MF_MT_AUDIO_NUM_CHANNELS);
     copy_attr(output_type, decoder->input_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND);
 
-    /* TODO: support both stereo folding and matching channels */
-    IMFMediaType_SetUINT32(output_type, &MF_MT_AUDIO_NUM_CHANNELS, 2);
+    IMFMediaType_SetUINT32(output_type, &MF_MT_COMPRESSED, FALSE);
+    IMFMediaType_SetUINT32(output_type, &MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
 
     if (FAILED(hr = IMFMediaType_SetGUID(output_type, &MF_MT_MAJOR_TYPE, decoder_descs[decoder->type].major_type)))
     {
@@ -342,11 +343,6 @@ static HRESULT WINAPI mf_decoder_GetOutputAvailableType(IMFTransform *iface, DWO
     {
         IMFMediaType_Release(output_type);
         return hr;
-    }
-
-    if (IsEqualGUID(decoder_descs[decoder->type].output_types[index], &MFAudioFormat_PCM))
-    {
-        IMFMediaType_SetUINT32(output_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
     }
 
     *type = output_type;
@@ -432,88 +428,83 @@ static GstFlowReturn decoder_new_sample(GstElement *appsink, gpointer user)
 
 static BOOL find_decoder_from_caps(GstCaps *input_caps, GstElement **decoder, GstElement **parser)
 {
+    GList *decoder_list_one, *decoder_list_two;
     GList *parser_list_one, *parser_list_two;
     GList *walk;
     BOOL ret = TRUE;
 
     TRACE("input caps: %s\n", gst_caps_to_string(input_caps));
 
+    decoder_list_one = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODER, 1);
+    decoder_list_two = gst_element_factory_list_filter(decoder_list_one, input_caps, GST_PAD_SINK, 0);
+    gst_plugin_feature_list_free(decoder_list_one);
+    decoder_list_one = decoder_list_two;
+    if (g_list_length(decoder_list_one) &&
+        (*decoder = gst_element_factory_create(g_list_first(decoder_list_one)->data, NULL)))
+    {
+        TRACE("Found decoder %s\n", GST_ELEMENT_NAME(g_list_first(decoder_list_one)->data));
+        gst_plugin_feature_list_free(decoder_list_one);
+        return TRUE;
+    }
+    gst_plugin_feature_list_free(decoder_list_one);
+
     parser_list_one = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_PARSER, 1);
     parser_list_two = gst_element_factory_list_filter(parser_list_one, input_caps, GST_PAD_SINK, 0);
     gst_plugin_feature_list_free(parser_list_one);
     parser_list_one = parser_list_two;
-    if (!(g_list_length(parser_list_one)))
+
+    for (walk = (GList *) parser_list_one; walk; walk = g_list_next(walk))
     {
-        GList *decoder_list_one, *decoder_list_two;
-        decoder_list_one = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODER, 1);
-        decoder_list_two = gst_element_factory_list_filter(decoder_list_one, input_caps, GST_PAD_SINK, 0);
-        gst_plugin_feature_list_free(decoder_list_one);
-        decoder_list_one = decoder_list_two;
-        if (!(g_list_length(decoder_list_one)) ||
-            !(*decoder = gst_element_factory_create(g_list_first(decoder_list_one)->data, NULL)))
+        GstElementFactory *parser_factory = walk->data;
+        const GList *templates, *walk_templ;
+
+        templates = gst_element_factory_get_static_pad_templates(parser_factory);
+
+        for (walk_templ = (GList *)templates; walk_templ; walk_templ = g_list_next(walk_templ))
         {
+            GstStaticPadTemplate *templ = walk_templ->data;
+            GstCaps *templ_caps;
+
+            if (templ->direction != GST_PAD_SRC)
+                continue;
+
+            templ_caps = gst_static_pad_template_get_caps(templ);
+
+            TRACE("Matching parser src caps %s to decoder.\n", gst_caps_to_string(templ_caps));
+
+            decoder_list_one = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODER, 1);
+            decoder_list_two = gst_element_factory_list_filter(decoder_list_one, templ_caps, GST_PAD_SINK, 0);
             gst_plugin_feature_list_free(decoder_list_one);
-            ERR("Failed to create decoder\n");
-            ret = FALSE;
-            goto done;
-        }
-        TRACE("Found decoder %s\n", GST_ELEMENT_NAME(g_list_first(decoder_list_one)->data));
-    }
-    else
-    {
-        for (walk = (GList *) parser_list_one; walk; walk = g_list_next(walk))
-        {
-            GstElementFactory *parser_factory = walk->data;
-            const GList *templates, *walk_templ;
+            decoder_list_one = decoder_list_two;
+            gst_caps_unref(templ_caps);
 
-            templates = gst_element_factory_get_static_pad_templates(parser_factory);
+            if (!(g_list_length(decoder_list_one)))
+                continue;
 
-            for (walk_templ = (GList *)templates; walk_templ; walk_templ = g_list_next(walk_templ))
+            if (!(*parser = gst_element_factory_create(parser_factory, NULL)))
             {
-                GList *decoder_list_one, *decoder_list_two;
-                GstStaticPadTemplate *templ = walk_templ->data;
-                GstCaps *templ_caps;
-
-                if (templ->direction != GST_PAD_SRC)
-                    continue;
-
-                templ_caps = gst_static_pad_template_get_caps(templ);
-
-                TRACE("Matching parser src caps %s to decoder.\n", gst_caps_to_string(templ_caps));
-
-                decoder_list_one = gst_element_factory_list_get_elements(GST_ELEMENT_FACTORY_TYPE_DECODER, 1);
-                decoder_list_two = gst_element_factory_list_filter(decoder_list_one, templ_caps, GST_PAD_SINK, 0);
                 gst_plugin_feature_list_free(decoder_list_one);
-                decoder_list_one = decoder_list_two;
-                gst_caps_unref(templ_caps);
-
-                if (!(g_list_length(decoder_list_one)))
-                    continue;
-
-                if (!(*parser = gst_element_factory_create(parser_factory, NULL)))
-                {
-                    gst_plugin_feature_list_free(decoder_list_one);
-                    ERR("Failed to create parser\n");
-                    ret = FALSE;
-                    goto done;
-                }
-
-                if (!(*decoder = gst_element_factory_create(g_list_first(decoder_list_one)->data, NULL)))
-                {
-                    gst_plugin_feature_list_free(decoder_list_one);
-                    ERR("Failed to create decoder\n");
-                    ret = FALSE;
-                    goto done;
-                }
-
-                TRACE("Found decoder %s parser %s\n",
-                GST_ELEMENT_NAME(g_list_first(decoder_list_one)->data), GST_ELEMENT_NAME(parser_factory));
-                gst_plugin_feature_list_free(decoder_list_one);
-
+                ERR("Failed to create parser\n");
+                ret = FALSE;
                 goto done;
             }
+
+            if (!(*decoder = gst_element_factory_create(g_list_first(decoder_list_one)->data, NULL)))
+            {
+                gst_plugin_feature_list_free(decoder_list_one);
+                ERR("Failed to create decoder\n");
+                ret = FALSE;
+                goto done;
+            }
+
+            TRACE("Found decoder %s parser %s\n",
+            GST_ELEMENT_NAME(g_list_first(decoder_list_one)->data), GST_ELEMENT_NAME(parser_factory));
+            gst_plugin_feature_list_free(decoder_list_one);
+
+            goto done;
         }
     }
+
     done:
     gst_plugin_feature_list_free(parser_list_one);
     return ret;
@@ -987,6 +978,7 @@ static HRESULT WINAPI mf_decoder_ProcessMessage(IMFTransform *iface, MFT_MESSAGE
             gst_element_set_state(decoder->container, GST_STATE_PLAYING);
 
             decoder->flushing = FALSE;
+            decoder->draining = FALSE;
             LeaveCriticalSection(&decoder->state_cs);
 
             hr = S_OK;

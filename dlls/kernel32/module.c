@@ -18,18 +18,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "winerror.h"
@@ -43,7 +38,6 @@
 #include "wine/list.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(module);
 
@@ -171,8 +165,6 @@ BOOL WINAPI SetDllDirectoryW( LPCWSTR dir )
  */
 BOOL WINAPI GetBinaryTypeW( LPCWSTR name, LPDWORD type )
 {
-    static const WCHAR comW[] = { '.','c','o','m',0 };
-    static const WCHAR pifW[] = { '.','p','i','f',0 };
     HANDLE hfile, mapping;
     NTSTATUS status;
     const WCHAR *ptr;
@@ -230,14 +222,14 @@ BOOL WINAPI GetBinaryTypeW( LPCWSTR name, LPDWORD type )
         *type = SCS_DOS_BINARY;
         return TRUE;
     case STATUS_INVALID_IMAGE_NOT_MZ:
-        if ((ptr = strrchrW( name, '.' )))
+        if ((ptr = wcsrchr( name, '.' )))
         {
-            if (!strcmpiW( ptr, comW ))
+            if (!wcsicmp( ptr, L".com" ))
             {
                 *type = SCS_DOS_BINARY;
                 return TRUE;
             }
-            if (!strcmpiW( ptr, pifW ))
+            if (!wcsicmp( ptr, L".pif" ))
             {
                 *type = SCS_PIF_BINARY;
                 return TRUE;
@@ -326,18 +318,18 @@ __ASM_GLOBAL_FUNC( get_proc_address_wrapper,
                    "movq %rsp,%rbp\n\t"
                    __ASM_SEH(".seh_setframe %rbp,0\n\t")
                    __ASM_CFI(".cfi_def_cfa_register %rbp\n\t")
-                   "subq $0x40,%rsp\n\t"
-                   __ASM_SEH(".seh_stackalloc 0x40\n\t")
                    __ASM_SEH(".seh_endprologue\n\t")
-                   "movaps %xmm0,-0x10(%rbp)\n\t"
-                   "movaps %xmm1,-0x20(%rbp)\n\t"
-                   "movaps %xmm2,-0x30(%rbp)\n\t"
-                   "movaps %xmm3,-0x40(%rbp)\n\t"
+                   "subq $0x60,%rsp\n\t"
+                   "andq $~15,%rsp\n\t"
+                   "movaps %xmm0,0x20(%rsp)\n\t"
+                   "movaps %xmm1,0x30(%rsp)\n\t"
+                   "movaps %xmm2,0x40(%rsp)\n\t"
+                   "movaps %xmm3,0x50(%rsp)\n\t"
                    "call " __ASM_NAME("get_proc_address") "\n\t"
-                   "movaps -0x40(%rbp), %xmm3\n\t"
-                   "movaps -0x30(%rbp), %xmm2\n\t"
-                   "movaps -0x20(%rbp), %xmm1\n\t"
-                   "movaps -0x10(%rbp), %xmm0\n\t"
+                   "movaps 0x50(%rsp), %xmm3\n\t"
+                   "movaps 0x40(%rsp), %xmm2\n\t"
+                   "movaps 0x30(%rsp), %xmm1\n\t"
+                   "movaps 0x20(%rsp), %xmm0\n\t"
                    "leaq 0(%rbp),%rsp\n\t"
                    __ASM_CFI(".cfi_def_cfa_register %rsp\n\t")
                    "popq %rbp\n\t"

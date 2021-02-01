@@ -71,7 +71,7 @@ enum target_platform target_platform = PLATFORM_FREEBSD;
 #elif defined(__sun)
 enum target_platform target_platform = PLATFORM_SOLARIS;
 #elif defined(_WIN32)
-enum target_platform target_platform = PLATFORM_WINDOWS;
+enum target_platform target_platform = PLATFORM_MINGW;
 #else
 enum target_platform target_platform = PLATFORM_UNSPECIFIED;
 #endif
@@ -129,13 +129,14 @@ static const struct
     enum target_platform platform;
 } platform_names[] =
 {
-    { "macos",   PLATFORM_APPLE },
-    { "darwin",  PLATFORM_APPLE },
-    { "freebsd", PLATFORM_FREEBSD },
-    { "solaris", PLATFORM_SOLARIS },
-    { "mingw32", PLATFORM_WINDOWS },
-    { "windows", PLATFORM_WINDOWS },
-    { "winnt",   PLATFORM_WINDOWS }
+    { "macos",       PLATFORM_APPLE },
+    { "darwin",      PLATFORM_APPLE },
+    { "freebsd",     PLATFORM_FREEBSD },
+    { "solaris",     PLATFORM_SOLARIS },
+    { "mingw32",     PLATFORM_MINGW },
+    { "windows-gnu", PLATFORM_MINGW },
+    { "windows",     PLATFORM_WINDOWS },
+    { "winnt",       PLATFORM_MINGW }
 };
 
 /* set the dll file name from the input file name */
@@ -244,6 +245,8 @@ static void set_target( const char *target )
     }
 
     free( spec );
+
+    if (target_cpu == CPU_ARM && is_pe()) thumb_mode = 1;
 }
 
 /* cleanup on program exit */
@@ -396,8 +399,27 @@ static const char *get_default_entry_point( const DLLSPEC *spec )
 {
     if (spec->characteristics & IMAGE_FILE_DLL) return "DllMain";
     if (spec->subsystem == IMAGE_SUBSYSTEM_NATIVE) return "DriverEntry";
-    if (spec->type == SPEC_WIN16) return "__wine_spec_exe16_entry";
-    return "__wine_spec_exe_entry";
+    if (spec->type == SPEC_WIN16)
+    {
+        add_spec_extra_ld_symbol("WinMain16");
+        return "__wine_spec_exe16_entry";
+    }
+    else if (spec->unicode_app)
+    {
+        /* __wine_spec_exe_wentry always calls wmain */
+        add_spec_extra_ld_symbol("wmain");
+        if (spec->subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI)
+            add_spec_extra_ld_symbol("wWinMain");
+        return "__wine_spec_exe_wentry";
+    }
+    else
+    {
+        /* __wine_spec_exe_entry always calls main */
+        add_spec_extra_ld_symbol("main");
+        if (spec->subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI)
+            add_spec_extra_ld_symbol("WinMain");
+        return "__wine_spec_exe_entry";
+    }
 }
 
 /* parse options from the argv array and remove all the recognized ones */
@@ -448,6 +470,7 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             else if (!strcmp( optarg, "thumb" )) thumb_mode = 1;
             else if (!strcmp( optarg, "no-cygwin" )) use_msvcrt = 1;
             else if (!strcmp( optarg, "unix" )) unix_lib = 1;
+            else if (!strcmp( optarg, "unicode" )) spec->unicode_app = 1;
             else if (!strncmp( optarg, "cpu=", 4 )) cpu_option = xstrdup( optarg + 4 );
             else if (!strncmp( optarg, "fpu=", 4 )) fpu_option = xstrdup( optarg + 4 );
             else if (!strncmp( optarg, "arch=", 5 )) arch_option = xstrdup( optarg + 5 );
@@ -688,7 +711,7 @@ int main(int argc, char **argv)
             else output_fake_module( spec );
             break;
         }
-        if (target_platform != PLATFORM_WINDOWS)
+        if (!is_pe())
         {
             load_import_libs( argv );
             read_undef_symbols( spec, argv );

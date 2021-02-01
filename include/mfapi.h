@@ -22,6 +22,7 @@
 #include <mfobjects.h>
 #include <mmreg.h>
 #include <avrt.h>
+#include <dxgiformat.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -482,14 +483,21 @@ typedef enum
 #define MFSESSIONCAP_RATE_REVERSE          0x00000020
 #define MFSESSIONCAP_DOES_NOT_USE_NETWORK  0x00000040
 
+#define MF_E_DXGI_DEVICE_NOT_INITIALIZED   ((HRESULT)0x80041000)
+#define MF_E_DXGI_NEW_VIDEO_DEVICE         ((HRESULT)0x80041001)
+#define MF_E_DXGI_VIDEO_DEVICE_LOCKED      ((HRESULT)0x80041002)
+
 HRESULT WINAPI MFAddPeriodicCallback(MFPERIODICCALLBACK callback, IUnknown *context, DWORD *key);
 HRESULT WINAPI MFAllocateSerialWorkQueue(DWORD target_queue, DWORD *queue);
 HRESULT WINAPI MFAllocateWorkQueue(DWORD *queue);
 HRESULT WINAPI MFAllocateWorkQueueEx(MFASYNC_WORKQUEUE_TYPE queue_type, DWORD *queue);
 HRESULT WINAPI MFBeginCreateFile(MF_FILE_ACCESSMODE access_mode, MF_FILE_OPENMODE open_mode, MF_FILE_FLAGS flags,
         const WCHAR *path, IMFAsyncCallback *callback, IUnknown *state, IUnknown **cancel_cookie);
+HRESULT WINAPI MFBeginRegisterWorkQueueWithMMCSS(DWORD queue, const WCHAR *usage_class, DWORD taskid,
+        IMFAsyncCallback *callback, IUnknown *state);
 HRESULT WINAPI MFBeginRegisterWorkQueueWithMMCSSEx(DWORD queue, const WCHAR *usage_class, DWORD taskid, LONG priority,
         IMFAsyncCallback *callback, IUnknown *state);
+HRESULT WINAPI MFBeginUnregisterWorkQueueWithMMCSS(DWORD queue, IMFAsyncCallback *callback, IUnknown *state);
 HRESULT WINAPI MFCalculateImageSize(REFGUID subtype, UINT32 width, UINT32 height, UINT32 *size);
 HRESULT WINAPI MFCancelCreateFile(IUnknown *cancel_cookie);
 HRESULT WINAPI MFCancelWorkItem(MFWORKITEM_KEY key);
@@ -517,6 +525,9 @@ HRESULT WINAPI MFCreateVideoMediaTypeFromSubtype(const GUID *subtype, IMFVideoMe
 HRESULT WINAPI MFCreateMemoryBuffer(DWORD max_length, IMFMediaBuffer **buffer);
 HRESULT WINAPI MFCreateWaveFormatExFromMFMediaType(IMFMediaType *type, WAVEFORMATEX **format, UINT32 *size, UINT32 flags);
 HRESULT WINAPI MFEndCreateFile(IMFAsyncResult *result, IMFByteStream **stream);
+HRESULT WINAPI MFEndRegisterWorkQueueWithMMCSS(IMFAsyncResult *result, DWORD *taskid);
+HRESULT WINAPI MFEndUnregisterWorkQueueWithMMCSS(IMFAsyncResult *result);
+HRESULT WINAPI MFFrameRateToAverageTimePerFrame(UINT32 numerator, UINT32 denominator, UINT64 *avgtime);
 void *  WINAPI MFHeapAlloc(SIZE_T size, ULONG flags, char *file, int line, EAllocationType type);
 void    WINAPI MFHeapFree(void *ptr);
 HRESULT WINAPI MFGetAttributesAsBlob(IMFAttributes *attributes, UINT8 *buffer, UINT size);
@@ -539,6 +550,7 @@ HRESULT WINAPI MFInitAttributesFromBlob(IMFAttributes *attributes, const UINT8 *
 HRESULT WINAPI MFInitMediaTypeFromWaveFormatEx(IMFMediaType *mediatype, const WAVEFORMATEX *format, UINT32 size);
 HRESULT WINAPI MFInvokeCallback(IMFAsyncResult *result);
 HRESULT WINAPI MFLockPlatform(void);
+DWORD WINAPI MFMapDXGIFormatToDX9Format(DXGI_FORMAT dxgi_format);
 HRESULT WINAPI MFPutWaitingWorkItem(HANDLE event, LONG priority, IMFAsyncResult *result, MFWORKITEM_KEY *key);
 HRESULT WINAPI MFPutWorkItem(DWORD queue, IMFAsyncCallback *callback, IUnknown *state);
 HRESULT WINAPI MFPutWorkItem2(DWORD queue, LONG priority, IMFAsyncCallback *callback, IUnknown *state);

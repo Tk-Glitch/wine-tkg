@@ -718,7 +718,7 @@ static HRESULT WINAPI ThreadMgrSource_UnadviseSink(ITfSource *iface, DWORD pdwCo
     if (magic != COOKIE_MAGIC_TMSINK && magic != COOKIE_MAGIC_THREADFOCUSSINK
         && magic != COOKIE_MAGIC_KEYTRACESINK && magic != COOKIE_MAGIC_UIELEMENTSINK
         && magic != COOKIE_MAGIC_INPUTPROCESSORPROFILEACTIVATIONSINK
-        && magic != COOKIE_MAGIC_KEYTRACESINK)
+        && magic != COOKIE_MAGIC_ACTIVELANGSINK)
         return E_INVALIDARG;
 
     return unadvise_sink(pdwCookie);

@@ -265,6 +265,69 @@ static IDirectDrawSurface *get_depth_stencil(IDirect3DDevice *device)
     return ret;
 }
 
+/* Free original_modes after finished using it */
+static BOOL save_display_modes(DEVMODEW **original_modes, unsigned int *display_count)
+{
+    unsigned int number, size = 2, count = 0, index = 0;
+    DISPLAY_DEVICEW display_device;
+    DEVMODEW *modes, *tmp;
+
+    if (!(modes = heap_alloc(size * sizeof(*modes))))
+        return FALSE;
+
+    display_device.cb = sizeof(display_device);
+    while (EnumDisplayDevicesW(NULL, index++, &display_device, 0))
+    {
+        /* Skip software devices */
+        if (swscanf(display_device.DeviceName, L"\\\\.\\DISPLAY%u", &number) != 1)
+            continue;
+
+        if (!(display_device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
+            continue;
+
+        if (count >= size)
+        {
+            size *= 2;
+            if (!(tmp = heap_realloc(modes, size * sizeof(*modes))))
+            {
+                heap_free(modes);
+                return FALSE;
+            }
+            modes = tmp;
+        }
+
+        memset(&modes[count], 0, sizeof(modes[count]));
+        modes[count].dmSize = sizeof(modes[count]);
+        if (!EnumDisplaySettingsW(display_device.DeviceName, ENUM_CURRENT_SETTINGS, &modes[count]))
+        {
+            heap_free(modes);
+            return FALSE;
+        }
+
+        lstrcpyW(modes[count++].dmDeviceName, display_device.DeviceName);
+    }
+
+    *original_modes = modes;
+    *display_count = count;
+    return TRUE;
+}
+
+static BOOL restore_display_modes(DEVMODEW *modes, unsigned int count)
+{
+    unsigned int index;
+    LONG ret;
+
+    for (index = 0; index < count; ++index)
+    {
+        ret = ChangeDisplaySettingsExW(modes[index].dmDeviceName, &modes[index], NULL,
+                CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+        if (ret != DISP_CHANGE_SUCCESSFUL)
+            return FALSE;
+    }
+    ret = ChangeDisplaySettingsExW(NULL, NULL, NULL, 0, NULL);
+    return ret == DISP_CHANGE_SUCCESSFUL;
+}
+
 static HRESULT set_display_mode(IDirectDraw *ddraw, DWORD width, DWORD height)
 {
     if (SUCCEEDED(IDirectDraw_SetDisplayMode(ddraw, width, height, 32)))
@@ -1301,6 +1364,14 @@ static void test_coop_level_threaded(void)
     IDirectDraw_Release(ddraw);
 }
 
+static BOOL compare_mode_rect(const DEVMODEW *mode1, const DEVMODEW *mode2)
+{
+    return mode1->dmPosition.x == mode2->dmPosition.x
+            && mode1->dmPosition.y == mode2->dmPosition.y
+            && mode1->dmPelsWidth == mode2->dmPelsWidth
+            && mode1->dmPelsHeight == mode2->dmPelsHeight;
+}
+
 static ULONG get_refcount(IUnknown *test_iface)
 {
     IUnknown_AddRef(test_iface);
@@ -2012,7 +2083,7 @@ static void test_ck_complex(void)
     {
         skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
-        IDirectDraw2_Release(ddraw);
+        IDirectDraw_Release(ddraw);
         return;
     }
     IDirect3DDevice_Release(device);
@@ -2630,6 +2701,8 @@ static HRESULT CALLBACK test_coop_level_mode_set_enum_cb(DDSURFACEDESC *surface_
 
 static void test_coop_level_mode_set(void)
 {
+    DEVMODEW *original_modes = NULL, devmode, devmode2;
+    unsigned int display_count = 0;
     IDirectDrawSurface *primary;
     RECT registry_rect, ddraw_rect, user32_rect, r;
     IDirectDraw *ddraw;
@@ -2640,7 +2713,6 @@ static void test_coop_level_mode_set(void)
     ULONG ref;
     MSG msg;
     struct test_coop_level_mode_set_enum_param param;
-    DEVMODEW devmode;
     BOOL ret;
     LONG change_ret;
 
@@ -2716,6 +2788,18 @@ static void test_coop_level_mode_set(void)
         {0,                     FALSE,  0},
     };
 
+    memset(&devmode, 0, sizeof(devmode));
+    devmode.dmSize = sizeof(devmode);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode, &registry_mode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode, &registry_mode), "Got a different mode.\n");
+
+    ret = save_display_modes(&original_modes, &display_count);
+    ok(ret, "Failed to save original display modes.\n");
+
     ddraw = create_ddraw();
     ok(!!ddraw, "Failed to create a ddraw object.\n");
 
@@ -2728,6 +2812,7 @@ static void test_coop_level_mode_set(void)
     if (!param.user32_height)
     {
         skip("Fewer than 3 different modes supported, skipping mode restore test.\n");
+        heap_free(original_modes);
         return;
     }
 
@@ -3315,19 +3400,125 @@ static void test_coop_level_mode_set(void)
     ok(EqualRect(&r, &ddraw_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&ddraw_rect),
             wine_dbgstr_rect(&r));
 
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that no mode restorations if no mode changes happened */
+    devmode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+    devmode.dmPelsWidth = param.user32_width;
+    devmode.dmPelsHeight = param.user32_height;
+    change_ret = ChangeDisplaySettingsW(&devmode, CDS_UPDATEREGISTRY | CDS_NORESET);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW failed with %d.\n", change_ret);
+
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    ref = IDirectDraw_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+
+    memset(&devmode2, 0, sizeof(devmode2));
+    devmode2.dmSize = sizeof(devmode2);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &registry_mode), "Got a different mode.\n");
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that no mode restorations if no mode changes happened with fullscreen ddraw objects */
+    change_ret = ChangeDisplaySettingsW(&devmode, CDS_UPDATEREGISTRY | CDS_NORESET);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW failed with %d.\n", change_ret);
+
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+    ref = IDirectDraw_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &registry_mode), "Got a different mode.\n");
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations use display settings in the registry after ddraw object releases
+     * if SetDisplayMode() was called */
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = set_display_mode(ddraw, registry_mode.dmPelsWidth, registry_mode.dmPelsHeight);
+    ok(hr == DD_OK, "Failed to set display mode, hr %#x.\n", hr);
+
+    change_ret = ChangeDisplaySettingsW(&devmode, CDS_UPDATEREGISTRY | CDS_NORESET);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW failed with %d.\n", change_ret);
+
+    ref = IDirectDraw_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &devmode), "Got a different mode.\n");
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations use display settings in the registry after RestoreDisplayMode() */
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = set_display_mode(ddraw, param.ddraw_width, param.ddraw_height);
+    ok(hr == DD_OK, "Failed to set display mode, hr %#x.\n", hr);
+
+    change_ret = ChangeDisplaySettingsW(&devmode, CDS_UPDATEREGISTRY | CDS_NORESET);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW failed with %d.\n", change_ret);
+
+    hr = IDirectDraw_RestoreDisplayMode(ddraw);
+    ok(hr == DD_OK, "RestoreDisplayMode failed, hr %#x.\n", hr);
+
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &devmode), "Got a different mode.\n");
+
+    ref = IDirectDraw_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+
 done:
     expect_messages = NULL;
     DestroyWindow(window);
     UnregisterClassA("ddraw_test_wndproc_wc", GetModuleHandleA(NULL));
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+    heap_free(original_modes);
 }
 
 static void test_coop_level_mode_set_multi(void)
 {
+    DEVMODEW old_devmode, devmode, devmode2, devmode3, *original_modes = NULL;
+    unsigned int mode_idx = 0, display_idx, display_count = 0;
+    WCHAR second_monitor_name[CCHDEVICENAME];
     IDirectDraw *ddraw1, *ddraw2;
+    LONG change_ret;
     UINT w, h;
     HWND window;
     HRESULT hr;
     ULONG ref;
+    BOOL ret;
+
+    memset(&devmode, 0, sizeof(devmode));
+    devmode.dmSize = sizeof(devmode);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode, &registry_mode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode, &registry_mode), "Got a different mode.\n");
+
+    ret = save_display_modes(&original_modes, &display_count);
+    ok(ret, "Failed to save original display modes.\n");
 
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 100, 100, 0, 0, 0, 0);
@@ -3509,7 +3700,210 @@ static void test_coop_level_mode_set_multi(void)
     h = GetSystemMetrics(SM_CYSCREEN);
     ok(h == registry_mode.dmPelsHeight, "Got unexpected screen height %u.\n", h);
 
+    if (display_count < 2)
+    {
+        skip("Following tests require two monitors.\n");
+        goto done;
+    }
+
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    second_monitor_name[0] = '\0';
+    for (display_idx = 0; display_idx < display_count; ++display_idx)
+    {
+        if (original_modes[display_idx].dmPosition.x || original_modes[display_idx].dmPosition.y)
+        {
+            lstrcpyW(second_monitor_name, original_modes[display_idx].dmDeviceName);
+            break;
+        }
+    }
+    ok(lstrlenW(second_monitor_name), "Got an empty second monitor name.\n");
+    memset(&old_devmode, 0, sizeof(old_devmode));
+    old_devmode.dmSize = sizeof(old_devmode);
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &old_devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+
+    devmode = old_devmode;
+    while (EnumDisplaySettingsW(second_monitor_name, mode_idx++, &devmode))
+    {
+        if (devmode.dmPelsWidth != old_devmode.dmPelsWidth
+                || devmode.dmPelsHeight != old_devmode.dmPelsHeight)
+            break;
+    }
+    ok(devmode.dmPelsWidth != old_devmode.dmPelsWidth
+            || devmode.dmPelsHeight != old_devmode.dmPelsHeight,
+            "Failed to find a different mode for the second monitor.\n");
+
+    /* Test that no mode restorations for non-primary monitors if SetDisplayMode() was not called */
+    ddraw1 = create_ddraw();
+    ok(!!ddraw1, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw_SetCooperativeLevel(ddraw1, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL, CDS_RESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+
+    memset(&devmode2, 0, sizeof(devmode2));
+    devmode2.dmSize = sizeof(devmode2);
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    if (compare_mode_rect(&devmode2, &old_devmode))
+    {
+        skip("Failed to change display settings of the second monitor.\n");
+        ref = IDirectDraw_Release(ddraw1);
+        ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+        goto done;
+    }
+
+    hr = IDirectDraw_SetCooperativeLevel(ddraw1, window, DDSCL_NORMAL);
+    ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
+    ref = IDirectDraw_Release(ddraw1);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+
+    memset(&devmode3, 0, sizeof(devmode3));
+    devmode3.dmSize = sizeof(devmode3);
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode3);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode3, &devmode2), "Got a different mode.\n");
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations happen for non-primary monitors on ddraw releases if
+     * SetDisplayMode() was called */
+    ddraw1 = create_ddraw();
+    ok(!!ddraw1, "Failed to create a ddraw object.\n");
+    hr = set_display_mode(ddraw1, 800, 600);
+    ok(hr == DD_OK, "Failed to set display mode, hr %#x.\n", hr);
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL, CDS_RESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+
+    ref = IDirectDraw_Release(ddraw1);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations happen for non-primary monitors as well */
+    ddraw1 = create_ddraw();
+    ok(!!ddraw1, "Failed to create a ddraw object.\n");
+    hr = set_display_mode(ddraw1, 800, 600);
+    ok(hr == DD_OK, "Failed to set display mode, hr %#x.\n", hr);
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL, CDS_RESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+
+    hr = IDirectDraw_RestoreDisplayMode(ddraw1);
+    ok(hr == DD_OK, "RestoreDisplayMode failed, hr %#x.\n", hr);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+
+    ref = IDirectDraw_Release(ddraw1);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations for non-primary monitors use display settings in the registry */
+    ddraw1 = create_ddraw();
+    ok(!!ddraw1, "Failed to create a ddraw object.\n");
+    hr = set_display_mode(ddraw1, 800, 600);
+    ok(hr == DD_OK, "Failed to set display mode, hr %#x.\n", hr);
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL,
+            CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+
+    ref = IDirectDraw_Release(ddraw1);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(devmode2.dmPelsWidth == devmode.dmPelsWidth && devmode2.dmPelsHeight == devmode.dmPelsHeight,
+            "Expected resolution %ux%u, got %ux%u.\n", devmode.dmPelsWidth, devmode.dmPelsHeight,
+            devmode2.dmPelsWidth, devmode2.dmPelsHeight);
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(devmode2.dmPelsWidth == devmode.dmPelsWidth && devmode2.dmPelsHeight == devmode.dmPelsHeight,
+            "Expected resolution %ux%u, got %ux%u.\n", devmode.dmPelsWidth, devmode.dmPelsHeight,
+            devmode2.dmPelsWidth, devmode2.dmPelsHeight);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test mode restorations for non-primary monitors when there are multiple fullscreen ddraw
+     * objects and one of them restores display mode */
+    ddraw1 = create_ddraw();
+    ok(!!ddraw1, "Failed to create a ddraw object.\n");
+    ddraw2 = create_ddraw();
+    ok(!!ddraw2, "Failed to create a ddraw object.\n");
+    hr = set_display_mode(ddraw1, 800, 600);
+    ok(hr == DD_OK, "Failed to set display mode, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw2, 640, 480);
+    ok(hr == DD_OK, "Failed to set display mode, hr %#x.\n", hr);
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL, CDS_RESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+
+    hr = IDirectDraw_RestoreDisplayMode(ddraw2);
+    ok(hr == DD_OK, "RestoreDisplayMode failed, hr %#x.\n", hr);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+
+    ref = IDirectDraw_Release(ddraw2);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    ref = IDirectDraw_Release(ddraw1);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test mode restorations for non-primary monitors when there are multiple fullscreen ddraw
+     * objects and one of them got released */
+    ddraw1 = create_ddraw();
+    ok(!!ddraw1, "Failed to create a ddraw object.\n");
+    ddraw2 = create_ddraw();
+    ok(!!ddraw2, "Failed to create a ddraw object.\n");
+    hr = set_display_mode(ddraw1, 800, 600);
+    ok(hr == DD_OK, "Failed to set display mode, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw2, 640, 480);
+    ok(hr == DD_OK, "Failed to set display mode, hr %#x.\n", hr);
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL, CDS_RESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+
+    ref = IDirectDraw_Release(ddraw2);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(compare_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+
+    ref = IDirectDraw_Release(ddraw1);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+
+done:
     DestroyWindow(window);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+    heap_free(original_modes);
 }
 
 static void test_initialize(void)
@@ -11205,7 +11599,7 @@ static void test_surface_desc_size(void)
         }
     }
 
-    refcount = IDirectDraw7_Release(ddraw);
+    refcount = IDirectDraw_Release(ddraw);
     ok(!refcount, "DirectDraw has %u references left.\n", refcount);
 }
 
@@ -11529,9 +11923,9 @@ static void test_ck_operation(void)
     U3(surface_desc.ddpfPixelFormat).dwGBitMask = 0x0000ff00;
     U4(surface_desc.ddpfPixelFormat).dwBBitMask = 0x000000ff;
     U5(surface_desc.ddpfPixelFormat).dwRGBAlphaBitMask = 0xff000000;
-    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &dst, NULL);
+    hr = IDirectDraw_CreateSurface(ddraw, &surface_desc, &dst, NULL);
     ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
-    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &src, NULL);
+    hr = IDirectDraw_CreateSurface(ddraw, &surface_desc, &src, NULL);
     ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
 
     ckey.dwColorSpaceLowValue = 0x0000ff00;
@@ -13570,6 +13964,7 @@ static void test_cursor_clipping(void)
     IDirectDraw *ddraw;
     HWND window;
     HRESULT hr;
+    BOOL ret;
 
     window = create_window();
     ok(!!window, "Failed to create a window.\n");
@@ -13592,9 +13987,11 @@ static void test_cursor_clipping(void)
         goto done;
     }
 
-    ok(ClipCursor(NULL), "ClipCursor failed, error %#x.\n", GetLastError());
+    ret = ClipCursor(NULL);
+    ok(ret, "ClipCursor failed, error %#x.\n", GetLastError());
     get_virtual_rect(&rect);
-    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ret = GetClipCursor(&clip_rect);
+    ok(ret, "GetClipCursor failed, error %#x.\n", GetLastError());
     ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
             wine_dbgstr_rect(&clip_rect));
 
@@ -13603,7 +14000,8 @@ static void test_cursor_clipping(void)
     ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
     flush_events();
     get_virtual_rect(&rect);
-    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ret = GetClipCursor(&clip_rect);
+    ok(ret, "GetClipCursor failed, error %#x.\n", GetLastError());
     ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
             wine_dbgstr_rect(&clip_rect));
 
@@ -13616,7 +14014,8 @@ static void test_cursor_clipping(void)
     }
     flush_events();
     get_virtual_rect(&rect);
-    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ret = GetClipCursor(&clip_rect);
+    ok(ret, "GetClipCursor failed, error %#x.\n", GetLastError());
     ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
             wine_dbgstr_rect(&clip_rect));
 
@@ -13624,7 +14023,8 @@ static void test_cursor_clipping(void)
     ok(hr == DD_OK, "RestoreDisplayMode failed, hr %#x.\n", hr);
     flush_events();
     get_virtual_rect(&rect);
-    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ret = GetClipCursor(&clip_rect);
+    ok(ret, "GetClipCursor failed, error %#x.\n", GetLastError());
     ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
             wine_dbgstr_rect(&clip_rect));
 
@@ -13633,7 +14033,8 @@ static void test_cursor_clipping(void)
     ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
     flush_events();
     SetRect(&rect, 0, 0, param.old_width, param.old_height);
-    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ret = GetClipCursor(&clip_rect);
+    ok(ret, "GetClipCursor failed, error %#x.\n", GetLastError());
     ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
             wine_dbgstr_rect(&clip_rect));
 
@@ -13646,7 +14047,8 @@ static void test_cursor_clipping(void)
     }
     flush_events();
     SetRect(&rect, 0, 0, param.new_width, param.new_height);
-    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ret = GetClipCursor(&clip_rect);
+    ok(ret, "GetClipCursor failed, error %#x.\n", GetLastError());
     ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
             wine_dbgstr_rect(&clip_rect));
 
@@ -13655,7 +14057,8 @@ static void test_cursor_clipping(void)
     ok(hr == DD_OK, "RestoreDisplayMode failed, hr %#x.\n", hr);
     flush_events();
     SetRect(&rect, 0, 0, param.old_width, param.old_height);
-    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ret = GetClipCursor(&clip_rect);
+    ok(ret, "GetClipCursor failed, error %#x.\n", GetLastError());
     ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
             wine_dbgstr_rect(&clip_rect));
 
@@ -13664,7 +14067,8 @@ static void test_cursor_clipping(void)
     ok(hr == DD_OK, "SetCooperativeLevel failed, hr %#x.\n", hr);
     flush_events();
     get_virtual_rect(&rect);
-    ok(GetClipCursor(&clip_rect), "GetClipCursor failed, error %#x.\n", GetLastError());
+    ret = GetClipCursor(&clip_rect);
+    ok(ret, "GetClipCursor failed, error %#x.\n", GetLastError());
     ok(EqualRect(&clip_rect, &rect), "Expect clip rect %s, got %s.\n", wine_dbgstr_rect(&rect),
             wine_dbgstr_rect(&clip_rect));
 

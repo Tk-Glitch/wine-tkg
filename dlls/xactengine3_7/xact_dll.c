@@ -637,6 +637,8 @@ typedef struct _XACT3EngineImpl {
     XACT_READFILE_CALLBACK pReadFile;
     XACT_GETOVERLAPPEDRESULT_CALLBACK pGetOverlappedResult;
     XACT_NOTIFICATION_CALLBACK notification_callback;
+
+    void *contexts[17];
 } XACT3EngineImpl;
 
 typedef struct wrap_readfile_struct {
@@ -776,7 +778,16 @@ static HRESULT WINAPI IXACT3EngineImpl_Initialize(IXACT3Engine *iface,
 
     TRACE("(%p)->(%p)\n", This, pParams);
 
-    memcpy(&params, pParams, sizeof(FACTRuntimeParameters));
+    memset(&params, 0, sizeof(FACTRuntimeParameters));
+    /* Explicitly copy to the FAudio structure as the packing is wrong under 64 bits */
+    params.lookAheadTime = pParams->lookAheadTime;
+    params.pGlobalSettingsBuffer = pParams->pGlobalSettingsBuffer;
+    params.globalSettingsBufferSize = pParams->globalSettingsBufferSize;
+    params.globalSettingsFlags = pParams->globalSettingsFlags;
+    params.globalSettingsAllocAttributes = pParams->globalSettingsAllocAttributes;
+    params.pRendererID = (int16_t*)pParams->pRendererID;
+    params.pXAudio2 = NULL;
+    params.pMasteringVoice = NULL;
 
     /* FIXME: pXAudio2 and pMasteringVoice are pointers to
      * IXAudio2/IXAudio2MasteringVoice objects. FACT wants pointers to
@@ -789,12 +800,10 @@ static HRESULT WINAPI IXACT3EngineImpl_Initialize(IXACT3Engine *iface,
      * -flibit
      */
     if (pParams->pXAudio2 != NULL){
-        FIXME("pXAudio2 parameter not supported! Falling back to NULL\n");
-        params.pXAudio2 = NULL;
+        FIXME("pXAudio2 parameter not supported!\n");
 
         if (pParams->pMasteringVoice != NULL){
-            FIXME("pXAudio2 parameter not supported! Falling back to NULL\n");
-            params.pMasteringVoice = NULL;
+            FIXME("pMasteringVoice parameter not supported!\n");
         }
     }
 
@@ -913,6 +922,26 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateInMemoryWaveBank(IXACT3Engine *ifac
     return S_OK;
 }
 
+struct thread_data
+{
+    XACT3EngineImpl *engine;
+    XACT_NOTIFICATION note;
+};
+
+static DWORD WINAPI thread_notications(LPVOID data)
+{
+    struct thread_data *tdata = data;
+
+    Sleep(1000);
+
+    FIXME("Callback XACTNOTIFICATIONTYPE_WAVEBANKPREPARED\n");
+
+    tdata->engine->notification_callback(&tdata->note);
+
+    CoTaskMemFree(data);
+    return 0;
+}
+
 static HRESULT WINAPI IXACT3EngineImpl_CreateStreamingWaveBank(IXACT3Engine *iface,
         const XACT_WAVEBANK_STREAMING_PARAMETERS *pParms,
         IXACT3WaveBank **ppWaveBank)
@@ -955,6 +984,20 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateStreamingWaveBank(IXACT3Engine *ifa
     wb->IXACT3WaveBank_iface.lpVtbl = &XACT3WaveBank_Vtbl;
     wb->fact_wavebank = fwb;
     *ppWaveBank = &wb->IXACT3WaveBank_iface;
+
+    if (This->notification_callback)
+    {
+        HANDLE thread;
+        struct thread_data *tdata = CoTaskMemAlloc(sizeof(struct thread_data));
+
+        tdata->engine = This;
+        tdata->note.type = XACTNOTIFICATIONTYPE_WAVEBANKPREPARED;
+        tdata->note.pvContext = This->contexts[tdata->note.type - 1];
+        tdata->note.u.wave.pWaveBank = &wb->IXACT3WaveBank_iface;
+
+        thread = CreateThread(NULL, 0, thread_notications, tdata, 0, NULL);
+        CloseHandle(thread);
+    }
 
     TRACE("Created streaming WaveBank: %p\n", wb);
 
@@ -1199,9 +1242,11 @@ static HRESULT WINAPI IXACT3EngineImpl_RegisterNotification(IXACT3Engine *iface,
     XACT3EngineImpl *This = impl_from_IXACT3Engine(iface);
     FACTNotificationDescription fdesc;
 
-    TRACE("(%p)->(%p)\n", This, pNotificationDesc);
+    TRACE("(%p)->(%p, pvContext %p)\n", This, pNotificationDesc, pNotificationDesc->pvContext);
 
     unwrap_notificationdesc(&fdesc, pNotificationDesc);
+
+    This->contexts[pNotificationDesc->type - 1] = pNotificationDesc->pvContext;
     fdesc.pvContext = This;
     return FACTAudioEngine_RegisterNotification(This->fact_engine, &fdesc);
 }
@@ -1215,6 +1260,8 @@ static HRESULT WINAPI IXACT3EngineImpl_UnRegisterNotification(IXACT3Engine *ifac
     TRACE("(%p)->(%p)\n", This, pNotificationDesc);
 
     unwrap_notificationdesc(&fdesc, pNotificationDesc);
+
+    This->contexts[pNotificationDesc->type - 1] = pNotificationDesc->pvContext;
     fdesc.pvContext = This;
     return FACTAudioEngine_UnRegisterNotification(This->fact_engine, &fdesc);
 }
