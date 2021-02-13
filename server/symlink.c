@@ -38,6 +38,20 @@
 #include "object.h"
 #include "unicode.h"
 
+static const WCHAR symlink_name[] = {'S','y','m','b','o','l','i','c','L','i','n','k'};
+
+struct type_descr symlink_type =
+{
+    { symlink_name, sizeof(symlink_name) },   /* name */
+    SYMBOLIC_LINK_ALL_ACCESS,                 /* valid_access */
+    {                                         /* mapping */
+        STANDARD_RIGHTS_READ | SYMBOLIC_LINK_QUERY,
+        STANDARD_RIGHTS_WRITE,
+        STANDARD_RIGHTS_EXECUTE | SYMBOLIC_LINK_QUERY,
+        SYMBOLIC_LINK_ALL_ACCESS
+    },
+};
+
 struct symlink
 {
     struct object    obj;       /* object header */
@@ -46,8 +60,6 @@ struct symlink
 };
 
 static void symlink_dump( struct object *obj, int verbose );
-static struct object_type *symlink_get_type( struct object *obj );
-static unsigned int symlink_map_access( struct object *obj, unsigned int access );
 static struct object *symlink_lookup_name( struct object *obj, struct unicode_str *name,
                                            unsigned int attr, struct object *root );
 static void symlink_destroy( struct object *obj );
@@ -55,8 +67,8 @@ static void symlink_destroy( struct object *obj );
 static const struct object_ops symlink_ops =
 {
     sizeof(struct symlink),       /* size */
+    &symlink_type,                /* type */
     symlink_dump,                 /* dump */
-    symlink_get_type,             /* get_type */
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
@@ -65,7 +77,7 @@ static const struct object_ops symlink_ops =
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    symlink_map_access,           /* map_access */
+    default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     default_get_full_name,        /* get_full_name */
@@ -86,12 +98,6 @@ static void symlink_dump( struct object *obj, int verbose )
     fputs( "Symlink target=\"", stderr );
     dump_strW( symlink->target, symlink->len, stderr, "\"\"" );
     fputs( "\"\n", stderr );
-}
-
-static struct object_type *symlink_get_type( struct object *obj )
-{
-    static const struct unicode_str str = { type_SymbolicLink, sizeof(type_SymbolicLink) };
-    return get_object_type( &str );
 }
 
 static struct object *symlink_lookup_name( struct object *obj, struct unicode_str *name,
@@ -119,15 +125,6 @@ static struct object *symlink_lookup_name( struct object *obj, struct unicode_st
         }
     }
     return target;
-}
-
-static unsigned int symlink_map_access( struct object *obj, unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | SYMBOLIC_LINK_QUERY;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE;
-    if (access & GENERIC_ALL)     access |= SYMBOLIC_LINK_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 static void symlink_destroy( struct object *obj )

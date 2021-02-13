@@ -46,7 +46,6 @@ struct _import_t
 
 static str_list_t *append_str(str_list_t *list, char *str);
 static type_list_t *append_type(type_list_t *list, type_t *type);
-static type_list_t *append_types(type_list_t *list, type_list_t *types);
 static attr_list_t *append_attr(attr_list_t *list, attr_t *attr);
 static attr_list_t *append_attr_list(attr_list_t *new_list, attr_list_t *old_list);
 static decl_spec_t *make_decl_spec(type_t *type, decl_spec_t *left, decl_spec_t *right,
@@ -71,24 +70,19 @@ static void append_chain_callconv(type_t *chain, char *callconv);
 static warning_list_t *append_warning(warning_list_t *, int);
 
 static type_t *reg_typedefs(decl_spec_t *decl_spec, var_list_t *names, attr_list_t *attrs);
-static type_t *get_qualified_type(enum type_type type, char *name, int t);
-static type_t *find_qualified_type_or_error(const char *name, int t);
-static type_t *find_type_or_error(const char *name, int t);
-static type_t *find_type_or_error2(char *name, int t);
+static type_t *find_type_or_error(struct namespace *parent, const char *name);
+static struct namespace *find_namespace_or_error(struct namespace *namespace, const char *name);
 
 static var_t *reg_const(var_t *var);
 
 static void push_namespace(const char *name);
 static void pop_namespace(const char *name);
-static void push_lookup_namespace(const char *name);
 static void push_parameters_namespace(const char *name);
 static void pop_parameters_namespace(const char *name);
 
-static statement_list_t *append_parameterized_type_stmts(statement_list_t *stmts);
 static void check_arg_attrs(const var_t *arg);
 static void check_statements(const statement_list_t *stmts, int is_inside_library);
 static void check_all_user_types(const statement_list_t *stmts);
-static attr_list_t *check_iface_attrs(const char *name, attr_list_t *attrs);
 static attr_list_t *check_function_attrs(const char *name, attr_list_t *attrs);
 static attr_list_t *check_typedef_attrs(attr_list_t *attrs);
 static attr_list_t *check_enum_attrs(attr_list_t *attrs);
@@ -97,14 +91,8 @@ static attr_list_t *check_struct_attrs(attr_list_t *attrs);
 static attr_list_t *check_union_attrs(attr_list_t *attrs);
 static attr_list_t *check_field_attrs(const char *name, attr_list_t *attrs);
 static attr_list_t *check_library_attrs(const char *name, attr_list_t *attrs);
-static attr_list_t *check_dispiface_attrs(const char *name, attr_list_t *attrs);
-static attr_list_t *check_module_attrs(const char *name, attr_list_t *attrs);
-static attr_list_t *check_coclass_attrs(const char *name, attr_list_t *attrs);
-static attr_list_t *check_runtimeclass_attrs(const char *name, attr_list_t *attrs);
-static attr_list_t *check_apicontract_attrs(const char *name, attr_list_t *attrs);
 const char *get_attr_display_name(enum attr_type type);
 static void add_explicit_handle_if_necessary(const type_t *iface, var_t *func);
-static void check_def(const type_t *t);
 
 static void check_async_uuid(type_t *iface);
 
@@ -119,8 +107,6 @@ static statement_t *make_statement_importlib(const char *str);
 static statement_t *make_statement_module(type_t *type);
 static statement_t *make_statement_typedef(var_list_t *names, int declonly);
 static statement_t *make_statement_import(const char *str);
-static statement_t *make_statement_parameterized_type(type_t *type, type_list_t *params);
-static statement_t *make_statement_delegate(type_t *ret, var_list_t *args);
 static statement_list_t *append_statement(statement_list_t *list, statement_t *stmt);
 static statement_list_t *append_statements(statement_list_t *, statement_list_t *);
 static attr_list_t *append_attribs(attr_list_t *, attr_list_t *);
@@ -130,9 +116,7 @@ static struct namespace global_namespace = {
 };
 
 static struct namespace *current_namespace = &global_namespace;
-static struct namespace *lookup_namespace = &global_namespace;
 static struct namespace *parameters_namespace = NULL;
-static statement_list_t *parameterized_type_stmts = NULL;
 
 static typelib_t *current_typelib;
 
@@ -144,7 +128,7 @@ static typelib_t *current_typelib;
 	expr_t *expr;
 	expr_list_t *expr_list;
 	type_t *type;
-	type_list_t *typelist;
+	type_list_t *type_list;
 	var_t *var;
 	var_list_t *var_list;
 	declarator_t *declarator;
@@ -165,10 +149,11 @@ static typelib_t *current_typelib;
 	enum storage_class stgclass;
 	enum type_qualifier type_qualifier;
 	enum function_specifier function_specifier;
+	struct namespace *namespace;
 }
 
 %token <str> aIDENTIFIER aPRAGMA
-%token <str> aKNOWNTYPE aNAMESPACE
+%token <str> aKNOWNTYPE
 %token <num> aNUM aHEXNUM
 %token <dbl> aDOUBLE
 %token <str> aSTRING aWSTRING aSQSTRING
@@ -194,9 +179,7 @@ static typelib_t *current_typelib;
 %token tCONTRACTVERSION
 %token tCONTROL tCPPQUOTE
 %token tCUSTOM
-%token tDECLARE
 %token tDECODE tDEFAULT tDEFAULTBIND
-%token tDELEGATE
 %token tDEFAULTCOLLELEM
 %token tDEFAULTVALUE
 %token tDEFAULTVTABLE
@@ -289,31 +272,30 @@ static typelib_t *current_typelib;
 %type <attr> attribute acf_attribute
 %type <attr_list> m_attributes attributes attrib_list
 %type <attr_list> acf_attributes acf_attribute_list
+%type <attr_list> dispattributes
 %type <str_list> str_list
 %type <expr> m_expr expr expr_const expr_int_const array m_bitfield
 %type <expr_list> m_exprs /* exprs expr_list */ expr_list_int_const
 %type <expr> contract_req
 %type <expr> static_attr
-%type <type> interfacehdr
-%type <type> delegatedef
 %type <stgclass> storage_cls_spec
 %type <type_qualifier> type_qualifier m_type_qual_list
 %type <function_specifier> function_specifier
-%type <declspec> decl_spec decl_spec_no_type m_decl_spec_no_type
-%type <type> inherit interface interfacedef interfacedec
-%type <type> dispinterface dispinterfacehdr dispinterfacedef
-%type <type> module modulehdr moduledef
+%type <declspec> decl_spec unqualified_decl_spec decl_spec_no_type m_decl_spec_no_type
+%type <type> inherit interface interfacedef
+%type <type> interfaceref
+%type <type> dispinterfaceref
+%type <type> dispinterface dispinterfacedef
+%type <type> module moduledef
 %type <str> namespacedef
 %type <type> base_type int_std
 %type <type> enumdef structdef uniondef typedecl
-%type <type> type qualified_type
+%type <type> type unqualified_type qualified_type
 %type <type> type_parameter
-%type <typelist> type_parameters
-%type <type> parameterized_type
-%type <typelist> parameterized_types
-%type <typelist> requires required_types
+%type <type_list> type_parameters
 %type <ifref> class_interface
 %type <ifref_list> class_interfaces
+%type <ifref_list> requires required_types
 %type <var> arg ne_union_field union_field s_field case enum enum_member declaration
 %type <var> funcdef
 %type <var_list> m_args arg_list args dispint_meths
@@ -323,21 +305,21 @@ static typelib_t *current_typelib;
 %type <declarator> m_any_declarator any_declarator any_declarator_no_direct any_direct_declarator
 %type <declarator> m_abstract_declarator abstract_declarator abstract_declarator_no_direct abstract_direct_declarator
 %type <declarator_list> declarator_list struct_declarator_list
-%type <type> coclass coclasshdr coclassdef
-%type <type> runtimeclass runtimeclass_hdr runtimeclass_def
-%type <type> apicontract
+%type <type> coclass coclassdef
+%type <type> runtimeclass runtimeclass_def
+%type <type> apicontract apicontract_def
 %type <num> contract_ver
 %type <num> pointer_type threading_type marshaling_behavior version
-%type <str> libraryhdr callconv cppquote importlib import t_ident
+%type <str> libraryhdr callconv cppquote importlib import
+%type <str> typename m_typename
 %type <uuid> uuid_string
 %type <import> import_start
 %type <typelib> library_start librarydef
 %type <statement> statement typedef pragma_warning
 %type <stmt_list> gbl_statements imp_statements int_statements
-%type <stmt_list> decl_block decl_statements
-%type <stmt_list> imp_decl_block imp_decl_statements
 %type <warning_list> warnings
 %type <num> allocate_option_list allocate_option
+%type <namespace> namespace_pfx
 
 %left ','
 %right '?' ':'
@@ -358,8 +340,7 @@ static typelib_t *current_typelib;
 
 %%
 
-input: gbl_statements m_acf			{ $1 = append_parameterized_type_stmts($1);
-						  check_statements($1, FALSE);
+input: gbl_statements m_acf			{ check_statements($1, FALSE);
 						  check_all_user_types($1);
 						  write_header($1);
 						  write_id_data($1);
@@ -375,57 +356,42 @@ input: gbl_statements m_acf			{ $1 = append_parameterized_type_stmts($1);
 
 m_acf: /* empty */ | aACF acf_statements
 
-decl_statements:				{ $$ = NULL; }
-	| decl_statements tINTERFACE qualified_type '<' parameterized_types '>' ';'
-						{ parameterized_type_stmts = append_statement(parameterized_type_stmts, make_statement_parameterized_type($3, $5));
-						  $$ = append_statement($1, make_statement_reference(type_parameterized_type_specialize_declare($3, $5)));
-						}
-	;
-
-decl_block: tDECLARE '{' decl_statements '}' { $$ = $3; }
-
-imp_decl_statements:				{ $$ = NULL; }
-	| imp_decl_statements tINTERFACE qualified_type '<' parameterized_types '>' ';'
-						{ $$ = append_statement($1, make_statement_reference(type_parameterized_type_specialize_declare($3, $5))); }
-	;
-
-imp_decl_block: tDECLARE '{' imp_decl_statements '}' { $$ = $3; }
-
 gbl_statements:					{ $$ = NULL; }
 	| gbl_statements namespacedef '{' { push_namespace($2); } gbl_statements '}'
 						{ pop_namespace($2); $$ = append_statements($1, $5); }
-	| gbl_statements interfacedec		{ $$ = append_statement($1, make_statement_reference($2)); }
+	| gbl_statements interface ';'		{ $$ = append_statement($1, make_statement_reference($2)); }
+	| gbl_statements dispinterface ';'	{ $$ = append_statement($1, make_statement_reference($2)); }
 	| gbl_statements interfacedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
-	| gbl_statements delegatedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
 	| gbl_statements coclass ';'		{ $$ = $1;
 						  reg_type($2, $2->name, current_namespace, 0);
 						}
 	| gbl_statements coclassdef		{ $$ = append_statement($1, make_statement_type_decl($2));
 						  reg_type($2, $2->name, current_namespace, 0);
 						}
-	| gbl_statements apicontract ';'        { $$ = append_statement($1, make_statement_type_decl($2));
-	                                          reg_type($2, $2->name, current_namespace, 0); }
+	| gbl_statements apicontract ';'	{ $$ = $1; reg_type($2, $2->name, current_namespace, 0); }
+	| gbl_statements apicontract_def	{ $$ = append_statement($1, make_statement_type_decl($2));
+						  reg_type($2, $2->name, current_namespace, 0); }
 	| gbl_statements runtimeclass ';'       { $$ = $1; reg_type($2, $2->name, current_namespace, 0); }
 	| gbl_statements runtimeclass_def       { $$ = append_statement($1, make_statement_type_decl($2));
 	                                          reg_type($2, $2->name, current_namespace, 0); }
 	| gbl_statements moduledef		{ $$ = append_statement($1, make_statement_module($2)); }
 	| gbl_statements librarydef		{ $$ = append_statement($1, make_statement_library($2)); }
 	| gbl_statements statement		{ $$ = append_statement($1, $2); }
-	| gbl_statements decl_block		{ $$ = append_statements($1, $2); }
 	;
 
 imp_statements:					{ $$ = NULL; }
-	| imp_statements interfacedec		{ $$ = append_statement($1, make_statement_reference($2)); }
+	| imp_statements interface ';'		{ $$ = append_statement($1, make_statement_reference($2)); }
+	| imp_statements dispinterface ';'	{ $$ = append_statement($1, make_statement_reference($2)); }
 	| imp_statements namespacedef '{' { push_namespace($2); } imp_statements '}'
 						{ pop_namespace($2); $$ = append_statements($1, $5); }
 	| imp_statements interfacedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
-	| imp_statements delegatedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
 	| imp_statements coclass ';'		{ $$ = $1; reg_type($2, $2->name, current_namespace, 0); }
 	| imp_statements coclassdef		{ $$ = append_statement($1, make_statement_type_decl($2));
 						  reg_type($2, $2->name, current_namespace, 0);
 						}
-	| imp_statements apicontract ';'        { $$ = append_statement($1, make_statement_type_decl($2));
-	                                          reg_type($2, $2->name, current_namespace, 0); }
+	| imp_statements apicontract ';'	{ $$ = $1; reg_type($2, $2->name, current_namespace, 0); }
+	| imp_statements apicontract_def	{ $$ = append_statement($1, make_statement_type_decl($2));
+						  reg_type($2, $2->name, current_namespace, 0); }
 	| imp_statements runtimeclass ';'       { $$ = $1; reg_type($2, $2->name, current_namespace, 0); }
 	| imp_statements runtimeclass_def       { $$ = append_statement($1, make_statement_type_decl($2));
 	                                          reg_type($2, $2->name, current_namespace, 0); }
@@ -433,7 +399,6 @@ imp_statements:					{ $$ = NULL; }
 	| imp_statements statement		{ $$ = append_statement($1, $2); }
 	| imp_statements importlib		{ $$ = append_statement($1, make_statement_importlib($2)); }
 	| imp_statements librarydef		{ $$ = append_statement($1, make_statement_library($2)); }
-	| imp_statements imp_decl_block		{ $$ = append_statements($1, $2); }
 	;
 
 int_statements:					{ $$ = NULL; }
@@ -501,8 +466,7 @@ importlib: tIMPORTLIB '(' aSTRING ')'
 	   semicolon_opt			{ $$ = $3; if(!parse_only) add_importlib($3, current_typelib); }
 	;
 
-libraryhdr: tLIBRARY aIDENTIFIER		{ $$ = $2; }
-	|   tLIBRARY aKNOWNTYPE			{ $$ = $2; }
+libraryhdr: tLIBRARY typename			{ $$ = $2; }
 	;
 library_start: attributes libraryhdr '{'	{ $$ = make_library($2, check_library_attrs($2, $1));
 						  if (!parse_only && do_typelib) current_typelib = $$;
@@ -764,7 +728,7 @@ enum:	  enum_member '=' expr_int_const	{ $$ = reg_const($1);
 						}
 	;
 
-enumdef: tENUM t_ident '{' enums '}'		{ $$ = type_new_enum($2, current_namespace, TRUE, $4); }
+enumdef: tENUM m_typename '{' enums '}'		{ $$ = type_new_enum($2, current_namespace, TRUE, $4); }
 	;
 
 m_exprs:  m_expr                                { $$ = append_expr( NULL, $1 ); }
@@ -812,9 +776,9 @@ expr:	  aNUM					{ $$ = make_exprl(EXPR_NUM, $1); }
 	| '*' expr %prec PPTR			{ $$ = make_expr1(EXPR_PPTR, $2); }
 	| expr MEMBERPTR aIDENTIFIER		{ $$ = make_expr2(EXPR_MEMBER, make_expr1(EXPR_PPTR, $1), make_exprs(EXPR_IDENTIFIER, $3)); }
 	| expr '.' aIDENTIFIER			{ $$ = make_expr2(EXPR_MEMBER, $1, make_exprs(EXPR_IDENTIFIER, $3)); }
-	| '(' decl_spec m_abstract_declarator ')' expr %prec CAST
+	| '(' unqualified_decl_spec m_abstract_declarator ')' expr %prec CAST
 						{ $$ = make_exprt(EXPR_CAST, declare_var(NULL, $2, $3, 0), $5); free($2); free($3); }
-	| tSIZEOF '(' decl_spec m_abstract_declarator ')'
+	| tSIZEOF '(' unqualified_decl_spec m_abstract_declarator ')'
 						{ $$ = make_exprt(EXPR_SIZEOF, declare_var(NULL, $3, $4, 0), NULL); free($3); free($4); }
 	| expr '[' expr ']'			{ $$ = make_expr2(EXPR_ARRAY, $1, $3); }
 	| '(' expr ')'				{ $$ = $2; }
@@ -896,27 +860,28 @@ m_ident:					{ $$ = NULL; }
 	| ident
 	;
 
-t_ident:					{ $$ = NULL; }
-	| aIDENTIFIER				{ $$ = $1; }
-	| aKNOWNTYPE				{ $$ = $1; }
+m_typename:					{ $$ = NULL; }
+	| typename
 	;
 
-ident:	  aIDENTIFIER				{ $$ = make_var($1); }
-/* some "reserved words" used in attributes are also used as field names in some MS IDL files */
-	| aKNOWNTYPE				{ $$ = make_var($<str>1); }
+typename: aIDENTIFIER
+	| aKNOWNTYPE
 	;
 
-base_type: tBYTE				{ $$ = find_type_or_error($<str>1, 0); }
-	| tWCHAR				{ $$ = find_type_or_error($<str>1, 0); }
+ident:	  typename				{ $$ = make_var($1); }
+	;
+
+base_type: tBYTE				{ $$ = find_type_or_error(NULL, $<str>1); }
+	| tWCHAR				{ $$ = find_type_or_error(NULL, $<str>1); }
 	| int_std
 	| tSIGNED int_std			{ $$ = type_new_int(type_basic_get_type($2), -1); }
 	| tUNSIGNED int_std			{ $$ = type_new_int(type_basic_get_type($2), 1); }
 	| tUNSIGNED				{ $$ = type_new_int(TYPE_BASIC_INT, 1); }
-	| tFLOAT				{ $$ = find_type_or_error($<str>1, 0); }
-	| tDOUBLE				{ $$ = find_type_or_error($<str>1, 0); }
-	| tBOOLEAN				{ $$ = find_type_or_error($<str>1, 0); }
-	| tERRORSTATUST				{ $$ = find_type_or_error($<str>1, 0); }
-	| tHANDLET				{ $$ = find_type_or_error($<str>1, 0); }
+	| tFLOAT				{ $$ = find_type_or_error(NULL, $<str>1); }
+	| tDOUBLE				{ $$ = find_type_or_error(NULL, $<str>1); }
+	| tBOOLEAN				{ $$ = find_type_or_error(NULL, $<str>1); }
+	| tERRORSTATUST				{ $$ = find_type_or_error(NULL, $<str>1); }
+	| tHANDLET				{ $$ = find_type_or_error(NULL, $<str>1); }
 	;
 
 m_int:
@@ -935,76 +900,37 @@ int_std:  tINT					{ $$ = type_new_int(TYPE_BASIC_INT, 0); }
 	;
 
 namespace_pfx:
-	  aNAMESPACE '.'			{ push_lookup_namespace($1); }
-	| namespace_pfx aNAMESPACE '.'		{ push_lookup_namespace($2); }
+	  aIDENTIFIER '.'			{ $$ = find_namespace_or_error(&global_namespace, $1); }
+	| namespace_pfx aIDENTIFIER '.'		{ $$ = find_namespace_or_error($1, $2); }
 	;
 
 qualified_type:
-	  aKNOWNTYPE				{ $$ = find_type_or_error($1, 0); }
-	| namespace_pfx aKNOWNTYPE		{ $$ = find_qualified_type_or_error($2, 0); }
+	  typename				{ $$ = find_type_or_error(current_namespace, $1); }
+	| namespace_pfx typename		{ $$ = find_type_or_error($1, $2); }
 	;
 
-parameterized_type: qualified_type '<' parameterized_types '>'
-						{ $$ = find_parameterized_type($1, $3, 0); }
+coclass:  tCOCLASS typename			{ $$ = type_coclass_declare($2); }
 	;
 
-parameterized_types:
-	  base_type				{ $$ = append_type(NULL, $1); }
-	| qualified_type			{ $$ = append_type(NULL, $1); }
-	| qualified_type '*'			{ $$ = append_type(NULL, type_new_pointer($1)); }
-	| parameterized_type			{ $$ = append_type(NULL, $1); }
-	| parameterized_type '*'		{ $$ = append_type(NULL, type_new_pointer($1)); }
-	| parameterized_types ',' parameterized_types
-						{ $$ = append_types($1, $3); }
+coclassdef: attributes coclass '{' class_interfaces '}' semicolon_opt
+						{ $$ = type_coclass_define($2, $1, $4); }
 	;
 
-coclass:  tCOCLASS aIDENTIFIER			{ $$ = type_new_coclass($2); }
-	| tCOCLASS aKNOWNTYPE			{ $$ = find_type($2, NULL, 0);
-						  if (type_get_type_detect_alias($$) != TYPE_COCLASS)
-						    error_loc("%s was not declared a coclass at %s:%d\n",
-							      $2, $$->loc_info.input_name,
-							      $$->loc_info.line_number);
-						}
+runtimeclass: tRUNTIMECLASS typename		{ $$ = type_runtimeclass_declare($2, current_namespace); }
 	;
 
-coclasshdr: attributes coclass			{ $$ = $2;
-						  check_def($$);
-						  $$->attrs = check_coclass_attrs($2->name, $1);
-						}
+runtimeclass_def: attributes runtimeclass '{' class_interfaces '}' semicolon_opt
+						{ $$ = type_runtimeclass_define($2, $1, $4); }
 	;
 
-coclassdef: coclasshdr '{' class_interfaces '}' semicolon_opt
-						{ $$ = type_coclass_define($1, $3); }
+apicontract: tAPICONTRACT typename		{ $$ = type_apicontract_declare($2, current_namespace); }
 	;
 
-runtimeclass:
-	  tRUNTIMECLASS aIDENTIFIER		{ $$ = type_new_runtimeclass($2, current_namespace); }
-	| tRUNTIMECLASS aKNOWNTYPE		{ $$ = find_type($2, NULL, 0);
-						  if (type_get_type_detect_alias($$) != TYPE_RUNTIMECLASS)
-						    error_loc("%s was not declared a runtimeclass at %s:%d\n", $2,
-						              $$->loc_info.input_name, $$->loc_info.line_number);
-						}
-	;
-
-runtimeclass_hdr: attributes runtimeclass	{ $$ = $2;
-						  check_def($$);
-						  $$->attrs = check_runtimeclass_attrs($2->name, $1);
-						}
-	;
-
-runtimeclass_def: runtimeclass_hdr '{' class_interfaces '}' semicolon_opt
-						{ $$ = type_runtimeclass_define($1, $3); }
-	;
-
-apicontract: attributes tAPICONTRACT aIDENTIFIER '{' '}'
-						{ $$ = get_type(TYPE_APICONTRACT, $3, current_namespace, 0);
-						  check_def($$);
-						  $$->attrs = check_apicontract_attrs($$->name, $1);
-						}
+apicontract_def: attributes apicontract '{' '}' semicolon_opt
+						{ $$ = type_apicontract_define($2, $1); }
 	;
 
 namespacedef: tNAMESPACE aIDENTIFIER		{ $$ = $2; }
-	| tNAMESPACE aNAMESPACE                 { $$ = $2; }
 	;
 
 class_interfaces:				{ $$ = NULL; }
@@ -1012,20 +938,14 @@ class_interfaces:				{ $$ = NULL; }
 	;
 
 class_interface:
-	  m_attributes interfacedec		{ $$ = make_ifref($2); $$->attrs = $1; }
+	  m_attributes interfaceref ';'		{ $$ = make_ifref($2); $$->attrs = $1; }
+	| m_attributes dispinterfaceref ';'	{ $$ = make_ifref($2); $$->attrs = $1; }
 	;
 
-dispinterface: tDISPINTERFACE aIDENTIFIER	{ $$ = get_type(TYPE_INTERFACE, $2, current_namespace, 0); }
-	|      tDISPINTERFACE aKNOWNTYPE	{ $$ = get_type(TYPE_INTERFACE, $2, current_namespace, 0); }
+dispinterface: tDISPINTERFACE typename		{ $$ = type_dispinterface_declare($2); }
 	;
 
-dispinterfacehdr: attributes dispinterface	{ attr_t *attrs;
-						  $$ = $2;
-						  check_def($$);
-						  attrs = make_attr(ATTR_DISPINTERFACE);
-						  $$->attrs = append_attr( check_dispiface_attrs($2->name, $1), attrs );
-						  $$->defined = TRUE;
-						}
+dispattributes: attributes			{ $$ = append_attr($1, make_attr(ATTR_DISPINTERFACE)); }
 	;
 
 dispint_props: tPROPERTIES ':'			{ $$ = NULL; }
@@ -1036,38 +956,18 @@ dispint_meths: tMETHODS ':'			{ $$ = NULL; }
 	| dispint_meths funcdef ';'		{ $$ = append_var( $1, $2 ); }
 	;
 
-dispinterfacedef: dispinterfacehdr '{'
-	  dispint_props
-	  dispint_meths
-	  '}'					{ $$ = $1;
-						  type_dispinterface_define($$, $3, $4);
-						}
-	| dispinterfacehdr
-	 '{' interface ';' '}' 			{ $$ = $1;
-						  type_dispinterface_define_from_iface($$, $3);
-						}
+dispinterfacedef:
+	  dispattributes dispinterface '{' dispint_props dispint_meths '}'
+						{ $$ = type_dispinterface_define($2, $1, $4, $5); }
+	| dispattributes dispinterface '{' interface ';' '}'
+						{ $$ = type_dispinterface_define_from_iface($2, $1, $4); }
 	;
 
 inherit:					{ $$ = NULL; }
 	| ':' qualified_type                    { $$ = $2; }
-	| ':' parameterized_type		{ $$ = $2; }
 	;
 
-interface: tINTERFACE aIDENTIFIER		{ $$ = get_type(TYPE_INTERFACE, $2, current_namespace, 0); }
-	|  tINTERFACE aKNOWNTYPE		{ $$ = get_type(TYPE_INTERFACE, $2, current_namespace, 0); }
-	|  tINTERFACE namespace_pfx aIDENTIFIER	{ $$ = get_qualified_type(TYPE_INTERFACE, $3, 0); }
-	|  tINTERFACE namespace_pfx aKNOWNTYPE	{ $$ = get_qualified_type(TYPE_INTERFACE, $3, 0); }
-	;
-
-interfacehdr: attributes interface		{ $$ = $2;
-						  check_def($2);
-						  $2->attrs = check_iface_attrs($2->name, $1);
-						  $2->defined = TRUE;
-						}
-	;
-
-type_parameter: aIDENTIFIER			{ $$ = get_type(TYPE_PARAMETER, $1, parameters_namespace, 0); }
-	| aKNOWNTYPE				{ $$ = get_type(TYPE_PARAMETER, $1, parameters_namespace, 0); }
+type_parameter: typename			{ $$ = get_type(TYPE_PARAMETER, $1, parameters_namespace, 0); }
 	;
 
 type_parameters:
@@ -1075,84 +975,50 @@ type_parameters:
 	| type_parameters ',' type_parameter	{ $$ = append_type($1, $3); }
 	;
 
-delegatedef:
-	  m_attributes tDELEGATE type ident '(' m_args ')'
-	  semicolon_opt				{ $$ = get_type(TYPE_DELEGATE, $4->name, current_namespace, 0);
-						  check_def($$);
-						  $$->attrs = check_iface_attrs($$->name, $1);
-						  $$->defined = TRUE;
-						  type_delegate_define($$, append_statement(NULL, make_statement_delegate($3, $6)));
-						  check_async_uuid($$);
-						}
-	| m_attributes tDELEGATE type ident
-	  '<' { push_parameters_namespace($4->name); } type_parameters '>'
-	  '(' m_args ')'
-	  semicolon_opt				{ $$ = get_type(TYPE_DELEGATE, $4->name, current_namespace, 0);
-						  check_def($$);
-						  $$->attrs = check_iface_attrs($$->name, $1);
-						  $$->defined = TRUE;
-						  type_parameterized_delegate_define($$, $7, append_statement(NULL, make_statement_delegate($3, $10)));
-						  check_async_uuid($$);
-						  pop_parameters_namespace($4->name);
-						}
+interface:
+	  tINTERFACE typename			{ $$ = type_interface_declare($2, current_namespace); }
+	| tINTERFACE typename '<' { push_parameters_namespace($2); } type_parameters { pop_parameters_namespace($2); } '>'
+						{ $$ = type_parameterized_interface_declare($2, current_namespace, $5); }
 	;
 
 required_types:
-	  qualified_type			{ $$ = append_type(NULL, $1); }
-	| parameterized_type			{ $$ = append_type(NULL, $1); }
-	| required_types ',' required_types	{ $$ = append_types($1, $3); }
+	  qualified_type			{ $$ = append_ifref(NULL, make_ifref($1)); }
+	| required_types ',' qualified_type	{ $$ = append_ifref($1, make_ifref($3)); }
 
 requires:					{ $$ = NULL; }
 	| tREQUIRES required_types		{ $$ = $2; }
 	;
 
-interfacedef: interfacehdr inherit requires
-	  '{' int_statements '}' semicolon_opt	{ $$ = $1;
-						  if($$ == $2)
-						    error_loc("Interface can't inherit from itself\n");
-						  type_interface_define($$, $2, $5, $3);
-						  check_async_uuid($$);
-						}
-	| interfacehdr '<' { push_parameters_namespace($1->name); } type_parameters '>' inherit
-	  '{' int_statements '}' semicolon_opt	{ $$ = $1;
-						  if($$ == $6) error_loc("Interface can't inherit from itself\n");
-						  type_parameterized_interface_define($$, $4, $6, $8);
-						  check_async_uuid($$);
-						  pop_parameters_namespace($1->name);
-						}
-/* MIDL is able to import the definition of a base class from inside the
- * definition of a derived class, I'll try to support it with this rule */
-	| interfacehdr ':' aIDENTIFIER requires
-	  '{' import int_statements '}'
-	   semicolon_opt			{ $$ = $1;
-						  type_interface_define($$, find_type_or_error2($3, 0), $7, $4);
+interfacedef: attributes interface		{ if ($2->type_type == TYPE_PARAMETERIZED_TYPE) push_parameters_namespace($2->name); }
+	  inherit requires '{' int_statements '}' semicolon_opt
+						{ if ($2->type_type == TYPE_PARAMETERIZED_TYPE)
+						  {
+						      $$ = type_parameterized_interface_define($2, $1, $4, $7, $5);
+						      pop_parameters_namespace($2->name);
+						  }
+						  else
+						  {
+						      $$ = type_interface_define($2, $1, $4, $7, $5);
+						      check_async_uuid($$);
+						  }
 						}
 	| dispinterfacedef semicolon_opt	{ $$ = $1; }
 	;
 
-interfacedec:
-	  interface ';'				{ $$ = $1; }
-	| interface '<' { push_parameters_namespace($1->name); } type_parameters '>' ';'
-						{ $$ = $1;
-						  type_parameterized_interface_declare($$, $4);
-						  pop_parameters_namespace($1->name);
-						}
-	| dispinterface ';'			{ $$ = $1; }
+interfaceref:
+	  tINTERFACE typename			{ $$ = get_type(TYPE_INTERFACE, $2, current_namespace, 0); }
+	| tINTERFACE namespace_pfx typename	{ $$ = get_type(TYPE_INTERFACE, $3, $2, 0); }
 	;
 
-module:   tMODULE aIDENTIFIER			{ $$ = type_new_module($2); }
-	| tMODULE aKNOWNTYPE			{ $$ = type_new_module($2); }
+dispinterfaceref:
+	  tDISPINTERFACE typename		{ $$ = get_type(TYPE_INTERFACE, $2, current_namespace, 0); }
 	;
 
-modulehdr: attributes module			{ $$ = $2;
-						  $$->attrs = check_module_attrs($2->name, $1);
-						}
+module:   tMODULE typename			{ $$ = type_module_declare($2); }
 	;
 
-moduledef: modulehdr '{' int_statements '}'
-	   semicolon_opt			{ $$ = $1;
-                                                  type_module_define($$, $3);
-						}
+moduledef: attributes module '{' int_statements '}' semicolon_opt
+						{ $$ = type_module_define($2, $1, $4); }
 	;
 
 storage_cls_spec:
@@ -1175,6 +1041,12 @@ m_type_qual_list:				{ $$ = 0; }
 
 decl_spec: type m_decl_spec_no_type		{ $$ = make_decl_spec($1, $2, NULL, STG_NONE, 0, 0); }
 	| decl_spec_no_type type m_decl_spec_no_type
+						{ $$ = make_decl_spec($2, $1, $3, STG_NONE, 0, 0); }
+	;
+
+unqualified_decl_spec: unqualified_type m_decl_spec_no_type
+						{ $$ = make_decl_spec($1, $2, NULL, STG_NONE, 0, 0); }
+	| decl_spec_no_type unqualified_type m_decl_spec_no_type
 						{ $$ = make_decl_spec($2, $1, $3, STG_NONE, 0, 0); }
 	;
 
@@ -1316,12 +1188,11 @@ pointer_type:
 	| tPTR					{ $$ = FC_FP; }
 	;
 
-structdef: tSTRUCT t_ident '{' fields '}'	{ $$ = type_new_struct($2, current_namespace, TRUE, $4); }
+structdef: tSTRUCT m_typename '{' fields '}'	{ $$ = type_new_struct($2, current_namespace, TRUE, $4); }
 	;
 
-type:	  tVOID					{ $$ = type_new_void(); }
-	| qualified_type                        { $$ = $1; }
-	| parameterized_type			{ $$ = $1; }
+unqualified_type:
+	  tVOID					{ $$ = type_new_void(); }
 	| base_type				{ $$ = $1; }
 	| enumdef				{ $$ = $1; }
 	| tENUM aIDENTIFIER			{ $$ = type_new_enum($2, current_namespace, FALSE, NULL); }
@@ -1330,6 +1201,12 @@ type:	  tVOID					{ $$ = type_new_void(); }
 	| uniondef				{ $$ = $1; }
 	| tUNION aIDENTIFIER			{ $$ = type_new_nonencapsulated_union($2, FALSE, NULL); }
 	| tSAFEARRAY '(' type ')'		{ $$ = make_safearray($3); }
+	| aKNOWNTYPE				{ $$ = find_type_or_error(current_namespace, $1); }
+	;
+
+type:
+	  unqualified_type
+	| namespace_pfx typename		{ $$ = find_type_or_error($1, $2); }
 	;
 
 typedef: m_attributes tTYPEDEF m_attributes decl_spec declarator_list
@@ -1339,9 +1216,9 @@ typedef: m_attributes tTYPEDEF m_attributes decl_spec declarator_list
 						}
 	;
 
-uniondef: tUNION t_ident '{' ne_union_fields '}'
+uniondef: tUNION m_typename '{' ne_union_fields '}'
 						{ $$ = type_new_nonencapsulated_union($2, TRUE, $4); }
-	| tUNION t_ident
+	| tUNION m_typename
 	  tSWITCH '(' s_field ')'
 	  m_ident '{' cases '}'			{ $$ = type_new_encapsulated_union($2, $5, $7, $9); }
 	;
@@ -1364,14 +1241,14 @@ acf_int_statements
 
 acf_int_statement
         : tTYPEDEF acf_attributes aKNOWNTYPE ';'
-                                                { type_t *type = find_type_or_error($3, 0);
+                                                { type_t *type = find_type_or_error(current_namespace, $3);
                                                   type->attrs = append_attr_list(type->attrs, $2);
                                                 }
 	;
 
 acf_interface
         : acf_attributes tINTERFACE aKNOWNTYPE '{' acf_int_statements '}'
-                                                {  type_t *iface = find_type_or_error2($3, 0);
+                                                {  type_t *iface = find_type_or_error(current_namespace, $3);
                                                    if (type_get_type(iface) != TYPE_INTERFACE)
                                                        error_loc("%s is not an interface\n", iface->name);
                                                    iface->attrs = append_attr_list(iface->attrs, $1);
@@ -1447,26 +1324,6 @@ static str_list_t *append_str(str_list_t *list, char *str)
     entry = xmalloc( sizeof(*entry) );
     entry->str = str;
     list_add_tail( list, &entry->entry );
-    return list;
-}
-
-static type_list_t *append_type(type_list_t *list, type_t *type)
-{
-    type_list_t *entry;
-    if (!type) return list;
-    entry = xmalloc( sizeof(*entry) );
-    entry->type = type;
-    entry->next = list;
-    return entry;
-}
-
-static type_list_t *append_types(type_list_t *list, type_list_t *types)
-{
-    type_list_t *entry;
-    if (!list) return types;
-    if (!types) return list;
-    for (entry = list; entry->next; entry = entry->next) {}
-    entry->next = types;
     return list;
 }
 
@@ -1972,6 +1829,16 @@ static ifref_t *make_ifref(type_t *iface)
   return l;
 }
 
+static type_list_t *append_type(type_list_t *list, type_t *type)
+{
+    type_list_t *entry;
+    if (!type) return list;
+    entry = xmalloc( sizeof(*entry) );
+    entry->type = type;
+    entry->next = list;
+    return entry;
+}
+
 var_list_t *append_var(var_list_t *list, var_t *var)
 {
     if (!var) return list;
@@ -2106,14 +1973,6 @@ static void pop_namespace(const char *name)
   current_namespace = current_namespace->parent;
 }
 
-static void push_lookup_namespace(const char *name)
-{
-    struct namespace *namespace;
-    if (!(namespace = find_sub_namespace(lookup_namespace, name)))
-        error_loc("namespace '%s' not found\n", name);
-    lookup_namespace = namespace;
-}
-
 static void push_parameters_namespace(const char *name)
 {
     struct namespace *namespace;
@@ -2158,15 +2017,9 @@ type_t *reg_type(type_t *type, const char *name, struct namespace *namespace, in
   nt = xmalloc(sizeof(struct rtype));
   nt->name = name;
   if (is_global_namespace(namespace))
-  {
     type->c_name = name;
-    type->qualified_name = name;
-  }
   else
-  {
     type->c_name = format_namespace(namespace, "__x_", "_C", name, use_abi_namespace ? "ABI" : NULL);
-    type->qualified_name = format_namespace(namespace, "", "::", name, use_abi_namespace ? "ABI" : NULL);
-  }
   nt->type = type;
   nt->t = t;
   nt->next = namespace->type_hash[hash];
@@ -2252,57 +2105,34 @@ type_t *find_type(const char *name, struct namespace *namespace, int t)
   return NULL;
 }
 
-static type_t *get_qualified_type(enum type_type type_type, char *name, int t)
-{
-    type_t *type = get_type(type_type, name, lookup_namespace, t);
-    lookup_namespace = &global_namespace;
-    return type;
-}
-
-static type_t *find_qualified_type_or_error(const char *name, int t)
+static type_t *find_type_or_error(struct namespace *namespace, const char *name)
 {
     type_t *type;
-    if (!(type = find_type(name, lookup_namespace, t)))
+    if (!(type = find_type(name, namespace, 0)) &&
+        !(type = find_type(name, parameters_namespace, 0)))
     {
-        error_loc("type '%s' not found\n", name);
-        return NULL;
-    }
-    lookup_namespace = &global_namespace;
-    return type;
-}
-
-static type_t *find_type_or_error(const char *name, int t)
-{
-    type_t *type;
-    if (!(type = find_type(name, current_namespace, t)) &&
-        !(type = find_type(name, parameters_namespace, t)))
-    {
-        error_loc("type '%s' not found\n", name);
+        error_loc("type '%s' not found in %s namespace\n", name, namespace && namespace->name ? namespace->name : "global");
         return NULL;
     }
     return type;
 }
 
-static type_t *find_type_or_error2(char *name, int t)
+static struct namespace *find_namespace_or_error(struct namespace *parent, const char *name)
 {
-  type_t *tp = find_type_or_error(name, t);
-  free(name);
-  return tp;
+    struct namespace *namespace = NULL;
+
+    if (!winrt_mode)
+        error_loc("namespaces are only supported in winrt mode.\n");
+    else if (!(namespace = find_sub_namespace(parent, name)))
+        error_loc("namespace '%s' not found in '%s'\n", name, parent->name);
+
+    return namespace;
 }
 
 int is_type(const char *name)
 {
-    if (lookup_namespace != &global_namespace)
-        return find_type(name, lookup_namespace, 0) != NULL;
-    else
-        return find_type(name, current_namespace, 0) != NULL ||
-               find_type(name, parameters_namespace, 0) != NULL;
-}
-
-int is_namespace(const char *name)
-{
-    if (!winrt_mode) return 0;
-    return find_sub_namespace(lookup_namespace, name) != NULL;
+    return find_type(name, current_namespace, 0) != NULL ||
+           find_type(name, parameters_namespace, 0);
 }
 
 type_t *get_type(enum type_type type, char *name, struct namespace *namespace, int t)
@@ -2434,7 +2264,7 @@ struct allowed_attr allowed_attr[] =
     /* ATTR_DEFAULTVALUE */        { 0, 0, 0,  0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "defaultvalue" },
     /* ATTR_DEFAULTVTABLE */       { 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, "defaultvtable" },
  /* ATTR_DISABLECONSISTENCYCHECK */{ 0, 0, 0,  0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "disable_consistency_check" },
-    /* ATTR_DISPINTERFACE */       { 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL },
+    /* ATTR_DISPINTERFACE */       { 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, NULL },
     /* ATTR_DISPLAYBIND */         { 0, 0, 0,  0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "displaybind" },
     /* ATTR_DLLNAME */             { 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, "dllname" },
     /* ATTR_DUAL */                { 0, 0, 0,  1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "dual" },
@@ -2548,7 +2378,7 @@ const char *get_attr_display_name(enum attr_type type)
     return allowed_attr[type].display_name;
 }
 
-static attr_list_t *check_iface_attrs(const char *name, attr_list_t *attrs)
+attr_list_t *check_interface_attrs(const char *name, attr_list_t *attrs)
 {
   const attr_t *attr;
   if (!attrs) return attrs;
@@ -2692,7 +2522,7 @@ static attr_list_t *check_library_attrs(const char *name, attr_list_t *attrs)
   return attrs;
 }
 
-static attr_list_t *check_dispiface_attrs(const char *name, attr_list_t *attrs)
+attr_list_t *check_dispiface_attrs(const char *name, attr_list_t *attrs)
 {
   const attr_t *attr;
   if (!attrs) return attrs;
@@ -2705,7 +2535,7 @@ static attr_list_t *check_dispiface_attrs(const char *name, attr_list_t *attrs)
   return attrs;
 }
 
-static attr_list_t *check_module_attrs(const char *name, attr_list_t *attrs)
+attr_list_t *check_module_attrs(const char *name, attr_list_t *attrs)
 {
   const attr_t *attr;
   if (!attrs) return attrs;
@@ -2718,7 +2548,7 @@ static attr_list_t *check_module_attrs(const char *name, attr_list_t *attrs)
   return attrs;
 }
 
-static attr_list_t *check_coclass_attrs(const char *name, attr_list_t *attrs)
+attr_list_t *check_coclass_attrs(const char *name, attr_list_t *attrs)
 {
   const attr_t *attr;
   if (!attrs) return attrs;
@@ -2731,7 +2561,7 @@ static attr_list_t *check_coclass_attrs(const char *name, attr_list_t *attrs)
   return attrs;
 }
 
-static attr_list_t *check_runtimeclass_attrs(const char *name, attr_list_t *attrs)
+attr_list_t *check_runtimeclass_attrs(const char *name, attr_list_t *attrs)
 {
     const attr_t *attr;
     if (!attrs) return attrs;
@@ -2742,7 +2572,7 @@ static attr_list_t *check_runtimeclass_attrs(const char *name, attr_list_t *attr
     return attrs;
 }
 
-static attr_list_t *check_apicontract_attrs(const char *name, attr_list_t *attrs)
+attr_list_t *check_apicontract_attrs(const char *name, attr_list_t *attrs)
 {
     const attr_t *attr;
     if (!attrs) return attrs;
@@ -2792,7 +2622,6 @@ static int is_allowed_conf_type(const type_t *type)
     case TYPE_INTERFACE:
     case TYPE_BITFIELD:
     case TYPE_RUNTIMECLASS:
-    case TYPE_DELEGATE:
         return FALSE;
     case TYPE_APICONTRACT:
     case TYPE_PARAMETERIZED_TYPE:
@@ -3102,7 +2931,7 @@ static void add_explicit_handle_if_necessary(const type_t *iface, var_t *func)
          * function */
         var_t *idl_handle = make_var(xstrdup("IDL_handle"));
         idl_handle->attrs = append_attr(NULL, make_attr(ATTR_IN));
-        idl_handle->declspec.type = find_type_or_error("handle_t", 0);
+        idl_handle->declspec.type = find_type_or_error(NULL, "handle_t");
         type_function_add_head_arg(func->declspec.type, idl_handle);
     }
 }
@@ -3189,8 +3018,7 @@ static void check_async_uuid(type_t *iface)
     if (!inherit)
         error_loc("async_uuid applied to an interface with incompatible parent\n");
 
-    async_iface = get_type(TYPE_INTERFACE, strmake("Async%s", iface->name), iface->namespace, 0);
-    async_iface->attrs = map_attrs(iface->attrs, async_iface_attrs);
+    async_iface = type_interface_declare(strmake("Async%s", iface->name), iface->namespace);
 
     STATEMENTS_FOR_EACH_FUNC( stmt, type_iface_get_stmts(iface) )
     {
@@ -3221,29 +3049,8 @@ static void check_async_uuid(type_t *iface)
         stmts = append_statement(stmts, make_statement_declaration(finish_func));
     }
 
-    type_interface_define(async_iface, inherit, stmts, NULL);
+    type_interface_define(async_iface, map_attrs(iface->attrs, async_iface_attrs), inherit, stmts, NULL);
     iface->details.iface->async_iface = async_iface->details.iface->async_iface = async_iface;
-}
-
-static statement_list_t *append_parameterized_type_stmts(statement_list_t *stmts)
-{
-    statement_t *stmt, *next;
-    if (stmts && parameterized_type_stmts) LIST_FOR_EACH_ENTRY_SAFE(stmt, next, parameterized_type_stmts, statement_t, entry)
-    {
-        switch(stmt->type) {
-        case STMT_TYPE:
-            stmt->u.type = type_parameterized_type_specialize_define(stmt->u.type_list->type, stmt->u.type_list->next);
-            stmt->declonly = FALSE;
-            list_remove(&stmt->entry);
-            stmts = append_statement(stmts, stmt);
-            break;
-        default:
-            assert(0); /* should not be there */
-            break;
-        }
-    }
-
-    return stmts;
 }
 
 static void check_statements(const statement_list_t *stmts, int is_inside_library)
@@ -3414,7 +3221,7 @@ static statement_t *make_statement_typedef(declarator_list_t *decls, int declonl
     LIST_FOR_EACH_ENTRY_SAFE( decl, next, decls, declarator_t, entry )
     {
         var_t *var = decl->var;
-        type_t *type = find_type_or_error(var->name, 0);
+        type_t *type = find_type_or_error(current_namespace, var->name);
         *type_list = xmalloc(sizeof(type_list_t));
         (*type_list)->type = type;
         (*type_list)->next = NULL;
@@ -3425,23 +3232,6 @@ static statement_t *make_statement_typedef(declarator_list_t *decls, int declonl
     }
 
     return stmt;
-}
-
-static statement_t *make_statement_parameterized_type(type_t *type, type_list_t *params)
-{
-    statement_t *stmt = make_statement(STMT_TYPE);
-    stmt->u.type_list = xmalloc(sizeof(type_list_t));
-    stmt->u.type_list->type = type;
-    stmt->u.type_list->next = params;
-    return stmt;
-}
-
-static statement_t *make_statement_delegate(type_t *ret, var_list_t *args)
-{
-    declarator_t *decl = make_declarator(make_var(xstrdup("Invoke")));
-    decl_spec_t *spec = make_decl_spec(ret, NULL, NULL, STG_NONE, 0, 0);
-    append_chain_type(decl, type_new_function(args), 0);
-    return make_statement_declaration(declare_var(NULL, spec, decl, FALSE));
 }
 
 static statement_list_t *append_statements(statement_list_t *l1, statement_list_t *l2)
@@ -3477,29 +3267,4 @@ void init_loc_info(loc_info_t *i)
     i->input_name = input_name ? input_name : "stdin";
     i->line_number = line_number;
     i->near_text = parser_text;
-}
-
-static void check_def(const type_t *t)
-{
-    if (t->defined)
-        error_loc("%s: redefinition error; original definition was at %s:%d\n",
-                  t->name, t->loc_info.input_name, t->loc_info.line_number);
-}
-
-type_t *find_parameterized_type(type_t *type, type_list_t *params, int t)
-{
-    char *name = format_parameterized_type_name(type, params);
-
-    if (parameters_namespace)
-    {
-        assert(type->type_type == TYPE_PARAMETERIZED_TYPE);
-        type = type_parameterized_type_specialize_partial(type, params);
-    }
-    else if ((type = find_type(name, type->namespace, t)))
-        assert(type->type_type != TYPE_PARAMETERIZED_TYPE);
-    else
-        error_loc("parameterized type '%s' not declared\n", name);
-
-    free(name);
-    return type;
 }

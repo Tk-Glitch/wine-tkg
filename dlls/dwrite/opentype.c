@@ -470,10 +470,17 @@ enum gsub_gpos_lookup_flags
     LOOKUP_FLAG_IGNORE_BASE = 0x2,
     LOOKUP_FLAG_IGNORE_LIGATURES = 0x4,
     LOOKUP_FLAG_IGNORE_MARKS = 0x8,
-    LOOKUP_FLAG_IGNORE_MASK = 0xe,
+    LOOKUP_FLAG_IGNORE_MASK = 0xe, /* Combined LOOKUP_FLAG_IGNORE_* flags. */
 
     LOOKUP_FLAG_USE_MARK_FILTERING_SET = 0x10,
     LOOKUP_FLAG_MARK_ATTACHMENT_TYPE = 0xff00,
+};
+
+enum attach_type
+{
+    GLYPH_ATTACH_NONE = 0,
+    GLYPH_ATTACH_MARK,
+    GLYPH_ATTACH_CURSIVE,
 };
 
 enum glyph_prop_flags
@@ -481,10 +488,14 @@ enum glyph_prop_flags
     GLYPH_PROP_BASE = LOOKUP_FLAG_IGNORE_BASE,
     GLYPH_PROP_LIGATURE = LOOKUP_FLAG_IGNORE_LIGATURES,
     GLYPH_PROP_MARK = LOOKUP_FLAG_IGNORE_MARKS,
+
     GLYPH_PROP_ZWNJ = 0x10,
     GLYPH_PROP_ZWJ = 0x20,
     GLYPH_PROP_IGNORABLE = 0x40,
     GLYPH_PROP_HIDDEN = 0x80,
+
+    GLYPH_PROP_MARK_ATTACH_CLASS_MASK = 0xff00, /* Used with LOOKUP_FLAG_MARK_ATTACHMENT_TYPE. */
+    GLYPH_PROP_ATTACH_TYPE_MASK = 0xff0000,
 };
 
 enum gpos_lookup_type
@@ -2159,7 +2170,7 @@ void opentype_get_font_properties(struct file_stream_desc *stream_desc, struct d
         IDWriteFontFileStream_ReleaseFileFragment(stream_desc->stream, colr.context);
     }
 
-    TRACE("stretch=%d, weight=%d, style %d\n", props->stretch, props->weight, props->style);
+    TRACE("stretch %d, weight %d, style %d\n", props->stretch, props->weight, props->style);
 
     if (os2.data)
         IDWriteFontFileStream_ReleaseFileFragment(stream_desc->stream, os2.context);
@@ -3525,6 +3536,16 @@ struct lookup
     unsigned int auto_zwj : 1;
 };
 
+static unsigned int opentype_layout_is_subst_context(const struct scriptshaping_context *context)
+{
+    return context->table == &context->cache->gsub;
+}
+
+static unsigned int opentype_layout_is_pos_context(const struct scriptshaping_context *context)
+{
+    return context->table == &context->cache->gpos;
+}
+
 static unsigned int opentype_layout_get_gsubgpos_subtable(const struct scriptshaping_context *context,
         const struct lookup *lookup, unsigned int subtable, unsigned int *lookup_type)
 {
@@ -3534,8 +3555,8 @@ static unsigned int opentype_layout_get_gsubgpos_subtable(const struct scriptsha
 
     subtable_offset += lookup->offset;
 
-    if ((context->table == &context->cache->gsub && lookup->type != GSUB_LOOKUP_EXTENSION_SUBST) ||
-            (context->table == &context->cache->gpos && lookup->type != GPOS_LOOKUP_EXTENSION_POSITION))
+    if ((opentype_layout_is_subst_context(context) && lookup->type != GSUB_LOOKUP_EXTENSION_SUBST) ||
+            (opentype_layout_is_pos_context(context) && lookup->type != GPOS_LOOKUP_EXTENSION_POSITION))
     {
         *lookup_type = lookup->type;
         return subtable_offset;
@@ -3616,7 +3637,7 @@ static void glyph_iterator_init(struct scriptshaping_context *context, unsigned 
     iter->match_data = NULL;
     iter->glyph_data = NULL;
     /* Context matching iterators will get these fixed up. */
-    iter->ignore_zwnj = context->table == &context->cache->gpos;
+    iter->ignore_zwnj = !!opentype_layout_is_pos_context(context);
     iter->ignore_zwj = context->auto_zwj;
 }
 
@@ -4026,6 +4047,43 @@ static void opentype_layout_gpos_get_anchor(const struct scriptshaping_context *
         WARN("Unknown anchor format %u.\n", format);
 }
 
+static void opentype_set_glyph_attach_type(struct scriptshaping_context *context, unsigned int idx,
+        enum attach_type attach_type)
+{
+    context->glyph_infos[idx].props &= ~GLYPH_PROP_ATTACH_TYPE_MASK;
+    context->glyph_infos[idx].props |= attach_type << 16;
+}
+
+static enum attach_type opentype_get_glyph_attach_type(const struct scriptshaping_context *context, unsigned int idx)
+{
+    return (context->glyph_infos[idx].props >> 16) & 0xff;
+}
+
+static void opentype_reverse_cursive_offset(struct scriptshaping_context *context, unsigned int i,
+        unsigned int new_parent)
+{
+    enum attach_type type = opentype_get_glyph_attach_type(context, i);
+    int chain = context->glyph_infos[i].attach_chain;
+    unsigned int j;
+
+    if (!chain || type != GLYPH_ATTACH_CURSIVE)
+        return;
+
+    context->glyph_infos[i].attach_chain = 0;
+
+    j = (int)i + chain;
+    if (j == new_parent)
+        return;
+
+    opentype_reverse_cursive_offset(context, j, new_parent);
+
+    /* FIXME: handle vertical flow direction */
+    context->offsets[j].ascenderOffset = -context->offsets[i].ascenderOffset;
+
+    context->glyph_infos[j].attach_chain = -chain;
+    opentype_set_glyph_attach_type(context, j, type);
+}
+
 static BOOL opentype_layout_apply_gpos_cursive_attachment(struct scriptshaping_context *context,
         const struct lookup *lookup, unsigned int subtable_offset)
 {
@@ -4039,9 +4097,10 @@ static BOOL opentype_layout_apply_gpos_cursive_attachment(struct scriptshaping_c
     {
         WORD coverage_offset = table_read_be_word(table, subtable_offset +
                 FIELD_OFFSET(struct ot_gpos_cursive_format1, coverage));
-        unsigned int glyph_index, entry_count, entry_anchor, exit_anchor;
+        unsigned int glyph_index, entry_count, entry_anchor, exit_anchor, child, parent;
         float entry_x, entry_y, exit_x, exit_y, delta;
         struct glyph_iterator prev_iter;
+        float y_offset;
 
         if (!coverage_offset)
             return FALSE;
@@ -4090,9 +4149,28 @@ static BOOL opentype_layout_apply_gpos_cursive_attachment(struct scriptshaping_c
         }
 
         if (lookup->flags & LOOKUP_FLAG_RTL)
-            context->offsets[prev_iter.pos].ascenderOffset = entry_y - exit_y;
+        {
+            y_offset = entry_y - exit_y;
+            child = prev_iter.pos;
+            parent = context->cur;
+        }
         else
-            context->offsets[context->cur].ascenderOffset = exit_y - entry_y;
+        {
+            y_offset = exit_y - entry_y;
+            child = context->cur;
+            parent = prev_iter.pos;
+        }
+
+        opentype_reverse_cursive_offset(context, child, parent);
+
+        context->offsets[child].ascenderOffset = y_offset;
+
+        opentype_set_glyph_attach_type(context, child, GLYPH_ATTACH_CURSIVE);
+        context->glyph_infos[child].attach_chain = (int)parent - (int)child;
+        context->has_gpos_attachment = 1;
+
+        if (context->glyph_infos[parent].attach_chain == -context->glyph_infos[child].attach_chain)
+            context->glyph_infos[parent].attach_chain = 0;
 
         context->cur++;
     }
@@ -4143,8 +4221,11 @@ static BOOL opentype_layout_apply_mark_array(struct scriptshaping_context *conte
         context->offsets[context->cur].advanceOffset = mark_x - base_x;
     else
         context->offsets[context->cur].advanceOffset = -context->advances[glyph_pos] + base_x - mark_x;
-
     context->offsets[context->cur].ascenderOffset = base_y - mark_y;
+    opentype_set_glyph_attach_type(context, context->cur, GLYPH_ATTACH_MARK);
+    context->glyph_infos[context->cur].attach_chain = (int)glyph_pos - (int)context->cur;
+    context->has_gpos_attachment = 1;
+
     context->cur++;
 
     return TRUE;
@@ -4663,7 +4744,7 @@ static void opentype_layout_set_glyph_masks(struct scriptshaping_context *contex
    for (g = 0; g < context->glyph_count; ++g)
        context->glyph_infos[g].mask = context->global_mask;
 
-   if (context->shaper->setup_masks)
+   if (opentype_layout_is_subst_context(context) && context->shaper->setup_masks)
        context->shaper->setup_masks(context, features);
 
    for (r = 0, start_char = 0; r < context->user_features.range_count; ++r)
@@ -4699,6 +4780,51 @@ static void opentype_layout_apply_gpos_context_lookup(struct scriptshaping_conte
     struct lookup lookup = { 0 };
     if (opentype_layout_init_lookup(context->table, lookup_index, NULL, &lookup))
         opentype_layout_apply_gpos_lookup(context, &lookup);
+}
+
+static void opentype_propagate_attachment_offsets(struct scriptshaping_context *context, unsigned int i)
+{
+    enum attach_type type = opentype_get_glyph_attach_type(context, i);
+    int chain = context->glyph_infos[i].attach_chain;
+    unsigned int j, k;
+
+    if (!chain)
+        return;
+
+    context->glyph_infos[i].attach_chain = 0;
+
+    j = (int)i + chain;
+    if (j >= context->glyph_count)
+        return;
+
+    opentype_propagate_attachment_offsets(context, j);
+
+    if (type == GLYPH_ATTACH_CURSIVE)
+    {
+        /* FIXME: handle vertical direction. */
+        context->offsets[i].ascenderOffset += context->offsets[j].ascenderOffset;
+    }
+    else if (type == GLYPH_ATTACH_MARK)
+    {
+        context->offsets[i].advanceOffset += context->offsets[j].advanceOffset;
+        context->offsets[i].ascenderOffset += context->offsets[j].ascenderOffset;
+
+        /* FIXME: handle vertical adjustment. */
+        if (context->is_rtl)
+        {
+            for (k = j + 1; k < i + 1; ++k)
+            {
+                context->offsets[i].advanceOffset += context->advances[k];
+            }
+        }
+        else
+        {
+            for (k = j; k < i; k++)
+            {
+                context->offsets[i].advanceOffset -= context->advances[k];
+            }
+        }
+    }
 }
 
 void opentype_layout_apply_gpos_features(struct scriptshaping_context *context, unsigned int script_index,
@@ -4741,6 +4867,12 @@ void opentype_layout_apply_gpos_features(struct scriptshaping_context *context, 
     }
 
     heap_free(lookups.lookups);
+
+    if (context->has_gpos_attachment)
+    {
+        for (i = 0; i < context->glyph_count; ++i)
+            opentype_propagate_attachment_offsets(context, i);
+    }
 }
 
 static void opentype_layout_replace_glyph(struct scriptshaping_context *context, UINT16 glyph)
@@ -4994,10 +5126,28 @@ static BOOL opentype_layout_context_match_input(const struct match_context *mc, 
     return TRUE;
 }
 
-static void opentype_layout_unsafe_to_break(struct scriptshaping_context *context, unsigned int idx)
+/* Marks text segment as unsafe to break between [start, end) glyphs. */
+void opentype_layout_unsafe_to_break(struct scriptshaping_context *context, unsigned int start,
+        unsigned int end)
 {
-    if (context->u.buffer.glyph_props[idx].isClusterStart)
-        context->u.buffer.text_props[context->glyph_infos[idx].start_text_idx].canBreakShapingAfter = 0;
+    unsigned int i;
+
+    while (start && !context->u.buffer.glyph_props[start].isClusterStart)
+        --start;
+
+    while (--end && !context->u.buffer.glyph_props[end].isClusterStart)
+        ;
+
+    if (start == end)
+    {
+        context->u.buffer.text_props[context->glyph_infos[start].start_text_idx].canBreakShapingAfter = 0;
+        return;
+    }
+
+    for (i = context->glyph_infos[start].start_text_idx; i < context->glyph_infos[end].start_text_idx; ++i)
+    {
+        context->u.buffer.text_props[i].canBreakShapingAfter = 0;
+    }
 }
 
 static void opentype_layout_delete_glyph(struct scriptshaping_context *context, unsigned int idx)
@@ -5062,10 +5212,8 @@ static BOOL opentype_layout_apply_ligature(struct scriptshaping_context *context
         {
             context->u.buffer.glyph_props[j++].lig_component = comp_count - i;
         }
-        opentype_layout_unsafe_to_break(context, i);
-        context->u.buffer.glyph_props[i].isClusterStart = 0;
-        context->glyph_infos[i].start_text_idx = 0;
     }
+    opentype_layout_unsafe_to_break(context, match_positions[0], match_positions[comp_count - 1] + 1);
 
     /* Delete ligated glyphs, backwards to preserve index. */
     for (i = 1; i < comp_count; ++i)
@@ -5797,10 +5945,11 @@ static void opentype_get_nominal_glyphs(struct scriptshaping_context *context, c
                 context->glyph_infos[i].mask |= rtlm_mask;
         }
 
-        /* TODO: should this check for glyph availability? */
+        /* Glyph availability is not tested for a replacement digit. */
         if (*context->u.subst.digits && codepoint >= '0' && codepoint <= '9')
             codepoint = context->u.subst.digits[codepoint - '0'];
 
+        context->glyph_infos[g].codepoint = codepoint;
         context->u.buffer.glyphs[g] = font->get_glyph(context->cache->context, codepoint);
         context->u.buffer.glyph_props[g].justification = SCRIPT_JUSTIFY_CHARACTER;
         opentype_set_subst_glyph_props(context, g);
@@ -6154,7 +6303,7 @@ BOOL opentype_layout_check_feature(struct scriptshaping_context *context, unsign
 
     opentype_layout_collect_lookups(context, script_index, language_index, &features, context->table, &lookups);
 
-    func_is_covered = context->table == &context->cache->gsub ? opentype_layout_gsub_lookup_is_glyph_covered :
+    func_is_covered = opentype_layout_is_subst_context(context) ? opentype_layout_gsub_lookup_is_glyph_covered :
             opentype_layout_gpos_lookup_is_glyph_covered;
 
     for (i = 0; i < lookups.count; ++i)

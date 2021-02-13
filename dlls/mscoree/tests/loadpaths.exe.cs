@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Rémi Bernon for CodeWeavers
+ * Copyright 2021 Rémi Bernon for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,30 +16,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef __WIDL__
-#pragma winrt ns_prefix
-#endif
-
-import "inspectable.idl";
-
-typedef [v1_enum] enum AsyncStatus
+namespace LoadPaths
 {
-    Started = 0,
-    Completed, 
-    Canceled, 
-    Error,
-} AsyncStatus;
-
-[
-    object,
-    uuid(00000036-0000-0000-c000-000000000046),
-    pointer_default(unique)
-]
-interface IAsyncInfo : IInspectable
-{
-    [propget] HRESULT Id([out, retval] unsigned __int32 *id);
-    [propget] HRESULT Status([out, retval] AsyncStatus *status);
-    [propget] HRESULT ErrorCode([out, retval] HRESULT *errorCode);
-    HRESULT Cancel();
-    HRESULT Close();
+    public static class Test
+    {
+        static int Main(string[] args)
+        {
+	     return new Test2().Foo();
+        }
+    }
 }

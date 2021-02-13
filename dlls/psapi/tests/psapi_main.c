@@ -410,10 +410,6 @@ static void test_GetMappedFileName(void)
     char temp_path[MAX_PATH], file_name[MAX_PATH], map_name[MAX_PATH], device_name[MAX_PATH], drive[3];
     WCHAR map_nameW[MAX_PATH], nt_map_name[MAX_PATH];
     HANDLE hfile, hmap;
-    HANDLE current_process;
-
-    DuplicateHandle( GetCurrentProcess(), GetCurrentProcess(),
-                     GetCurrentProcess(), &current_process, 0, 0, DUPLICATE_SAME_ACCESS );
 
     SetLastError(0xdeadbeef);
     ret = GetMappedFileNameA(NULL, hMod, szMapPath, sizeof(szMapPath));
@@ -488,30 +484,18 @@ static void test_GetMappedFileName(void)
     ret = GetMappedFileNameA(GetCurrentProcess(), base, map_name, sizeof(map_name));
     ok(ret, "GetMappedFileName error %d\n", GetLastError());
     ok(ret > strlen(device_name), "map_name should be longer than device_name\n");
+    todo_wine
     ok(memcmp(map_name, device_name, strlen(device_name)) == 0, "map name does not start with a device name: %s\n", map_name);
 
     SetLastError(0xdeadbeef);
     ret = GetMappedFileNameW(GetCurrentProcess(), base, map_nameW, ARRAY_SIZE(map_nameW));
-todo_wine {
     ok(ret, "GetMappedFileNameW error %d\n", GetLastError());
     ok(ret > strlen(device_name), "map_name should be longer than device_name\n");
-}
     if (nt_get_mapped_file_name(GetCurrentProcess(), base, nt_map_name, ARRAY_SIZE(nt_map_name)))
     {
         ok(memcmp(map_nameW, nt_map_name, lstrlenW(map_nameW)) == 0, "map name does not start with a device name: %s\n", map_name);
         WideCharToMultiByte(CP_ACP, 0, map_nameW, -1, map_name, MAX_PATH, NULL, NULL);
-        ok(memcmp(map_name, device_name, strlen(device_name)) == 0, "map name does not start with a device name: %s\n", map_name);
-    }
-
-    SetLastError(0xdeadbeef);
-    ret = GetMappedFileNameW(current_process, base, map_nameW, sizeof(map_nameW)/sizeof(map_nameW[0]));
-    ok(ret, "GetMappedFileNameW error %d\n", GetLastError());
-    ok(ret > strlen(device_name), "map_name should be longer than device_name\n");
-
-    if (nt_get_mapped_file_name(current_process, base, nt_map_name, sizeof(nt_map_name)/sizeof(nt_map_name[0])))
-    {
-        ok(memcmp(map_nameW, nt_map_name, lstrlenW(map_nameW)) == 0, "map name does not start with a device name: %s\n", map_name);
-        WideCharToMultiByte(CP_ACP, 0, map_nameW, -1, map_name, MAX_PATH, NULL, NULL);
+        todo_wine
         ok(memcmp(map_name, device_name, strlen(device_name)) == 0, "map name does not start with a device name: %s\n", map_name);
     }
 
@@ -519,6 +503,7 @@ todo_wine {
     ret = GetMappedFileNameA(GetCurrentProcess(), base + 0x2000, map_name, sizeof(map_name));
     ok(ret, "GetMappedFileName error %d\n", GetLastError());
     ok(ret > strlen(device_name), "map_name should be longer than device_name\n");
+    todo_wine
     ok(memcmp(map_name, device_name, strlen(device_name)) == 0, "map name does not start with a device name: %s\n", map_name);
 
     SetLastError(0xdeadbeef);
@@ -529,7 +514,6 @@ todo_wine {
     SetLastError(0xdeadbeef);
     ret = GetMappedFileNameA(GetCurrentProcess(), NULL, map_name, sizeof(map_name));
     ok(!ret, "GetMappedFileName should fail\n");
-todo_wine
     ok(GetLastError() == ERROR_UNEXP_NET_ERR, "expected ERROR_UNEXP_NET_ERR, got %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
@@ -555,7 +539,6 @@ todo_wine
     ok(!ret, "GetMappedFileName should fail\n");
     ok(GetLastError() == ERROR_FILE_INVALID, "expected ERROR_FILE_INVALID, got %d\n", GetLastError());
 
-    CloseHandle(current_process);
     UnmapViewOfFile(base);
     CloseHandle(hmap);
 }
@@ -575,11 +558,7 @@ static void test_GetProcessImageFileName(void)
 	    win_skip("GetProcessImageFileName not implemented\n");
             return;
         }
-
-        if(GetLastError() == 0xdeadbeef)
-	    todo_wine ok(0, "failed without error code\n");
-	else
-	    todo_wine ok(0, "failed with %d\n", GetLastError());
+        ok(0, "failed with %d\n", GetLastError());
     }
 
     SetLastError(0xdeadbeef);
@@ -600,7 +579,7 @@ static void test_GetProcessImageFileName(void)
     {
         /* Windows returns 2*strlen-1 */
         ok(ret >= strlen(szImgPath), "szImgPath=\"%s\" ret=%d\n", szImgPath, ret);
-        ok(!strcmp(szImgPath, szMapPath), "szImgPath=\"%s\" szMapPath=\"%s\"\n", szImgPath, szMapPath);
+        todo_wine ok(!strcmp(szImgPath, szMapPath), "szImgPath=\"%s\" szMapPath=\"%s\"\n", szImgPath, szMapPath);
     }
 
     SetLastError(0xdeadbeef);

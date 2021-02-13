@@ -74,7 +74,6 @@ typedef union
     {
         int          code;
         obj_handle_t handle;
-        client_ptr_t teb;
         client_ptr_t start;
     } create_thread;
     struct
@@ -86,10 +85,7 @@ typedef union
         mod_handle_t base;
         int          dbg_offset;
         int          dbg_size;
-        client_ptr_t teb;
         client_ptr_t start;
-        client_ptr_t name;
-        int          unicode;
     } create_process;
     struct
     {
@@ -104,7 +100,6 @@ typedef union
         int          dbg_offset;
         int          dbg_size;
         client_ptr_t name;
-        int          unicode;
     } load_dll;
     struct
     {
@@ -390,6 +385,14 @@ typedef struct
     int          high_part;
 } luid_t;
 
+typedef struct
+{
+    unsigned int read;
+    unsigned int write;
+    unsigned int exec;
+    unsigned int all;
+} generic_map_t;
+
 #define MAX_ACL_LEN 65535
 
 struct security_descriptor
@@ -412,6 +415,19 @@ struct object_attributes
     data_size_t  sd_len;
     data_size_t  name_len;
 
+
+};
+
+struct object_type_info
+{
+    data_size_t   name_len;
+    unsigned int  index;
+    unsigned int  obj_count;
+    unsigned int  handle_count;
+    unsigned int  obj_max;
+    unsigned int  handle_max;
+    unsigned int  valid_access;
+    generic_map_t mapping;
 
 };
 
@@ -772,6 +788,8 @@ typedef struct
     unsigned int   header_size;
     unsigned int   file_size;
     unsigned int   checksum;
+    unsigned int   dbg_offset;
+    unsigned int   dbg_size;
     client_cpu_t   cpu;
     int            __pad;
 } pe_image_info_t;
@@ -815,6 +833,7 @@ struct new_process_request
 {
     struct request_header __header;
     obj_handle_t token;
+    obj_handle_t debug;
     obj_handle_t parent_process;
     int          inherit_all;
     unsigned int create_flags;
@@ -827,6 +846,7 @@ struct new_process_request
     /* VARARG(handles,uints,handles_size); */
     /* VARARG(info,startup_info,info_size); */
     /* VARARG(env,unicode_str); */
+    char __pad_52[4];
 };
 struct new_process_reply
 {
@@ -905,17 +925,41 @@ struct get_startup_info_reply
 struct init_process_done_request
 {
     struct request_header __header;
-    int          gui;
-    mod_handle_t module;
-    client_ptr_t ldt_copy;
-    client_ptr_t entry;
     /* VARARG(cpu_override,cpu_topology_override); */
+    char __pad_12[4];
 };
 struct init_process_done_reply
 {
     struct reply_header __header;
+    client_ptr_t entry;
     int          suspend;
-    char __pad_12[4];
+    char __pad_20[4];
+};
+
+
+
+struct init_first_thread_request
+{
+    struct request_header __header;
+    int          unix_pid;
+    int          unix_tid;
+    int          debug_level;
+    client_ptr_t teb;
+    client_ptr_t peb;
+    client_ptr_t ldt_copy;
+    int          reply_fd;
+    int          wait_fd;
+    client_cpu_t cpu;
+    char __pad_60[4];
+};
+struct init_first_thread_reply
+{
+    struct reply_header __header;
+    process_id_t pid;
+    thread_id_t  tid;
+    timeout_t    server_start;
+    data_size_t  info_size;
+    unsigned int all_cpus;
 };
 
 
@@ -923,26 +967,19 @@ struct init_process_done_reply
 struct init_thread_request
 {
     struct request_header __header;
-    int          unix_pid;
     int          unix_tid;
-    int          debug_level;
-    client_ptr_t teb;
-    client_ptr_t entry;
     int          reply_fd;
     int          wait_fd;
-    client_cpu_t cpu;
-    char __pad_52[4];
+    client_ptr_t teb;
+    client_ptr_t entry;
 };
 struct init_thread_reply
 {
     struct reply_header __header;
     process_id_t pid;
     thread_id_t  tid;
-    timeout_t    server_start;
-    data_size_t  info_size;
-    int          version;
-    unsigned int all_cpus;
     int          suspend;
+    char __pad_20[4];
 };
 
 
@@ -996,9 +1033,40 @@ struct get_process_info_reply
     int          exit_code;
     int          priority;
     client_cpu_t cpu;
-    short int    debugger_present;
-    short int    debug_children;
     /* VARARG(image,pe_image_info); */
+    char __pad_60[4];
+};
+
+
+
+struct get_process_debug_info_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_process_debug_info_reply
+{
+    struct reply_header __header;
+    obj_handle_t debug;
+    int          debug_children;
+    /* VARARG(image,pe_image_info); */
+};
+
+
+
+struct get_process_image_name_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    int          win32;
+    char __pad_20[4];
+};
+struct get_process_image_name_reply
+{
+    struct reply_header __header;
+    data_size_t  len;
+    /* VARARG(name,unicode_str); */
+    char __pad_12[4];
 };
 
 
@@ -1105,23 +1173,6 @@ struct set_thread_info_reply
 
 
 
-struct get_dll_info_request
-{
-    struct request_header __header;
-    obj_handle_t handle;
-    mod_handle_t base_address;
-};
-struct get_dll_info_reply
-{
-    struct reply_header __header;
-    client_ptr_t entry_point;
-    data_size_t  filename_len;
-    /* VARARG(filename,unicode_str); */
-    char __pad_20[4];
-};
-
-
-
 struct suspend_thread_request
 {
     struct request_header __header;
@@ -1146,36 +1197,6 @@ struct resume_thread_reply
     struct reply_header __header;
     int          count;
     char __pad_12[4];
-};
-
-
-
-struct load_dll_request
-{
-    struct request_header __header;
-    data_size_t  dbg_offset;
-    mod_handle_t base;
-    client_ptr_t name;
-    data_size_t  dbg_size;
-    /* VARARG(filename,unicode_str); */
-    char __pad_36[4];
-};
-struct load_dll_reply
-{
-    struct reply_header __header;
-};
-
-
-
-struct unload_dll_request
-{
-    struct request_header __header;
-    char __pad_12[4];
-    mod_handle_t base;
-};
-struct unload_dll_reply
-{
-    struct reply_header __header;
 };
 
 
@@ -1953,21 +1974,6 @@ struct unmap_view_reply
 
 
 
-struct get_mapping_file_request
-{
-    struct request_header __header;
-    obj_handle_t process;
-    client_ptr_t addr;
-};
-struct get_mapping_file_reply
-{
-    struct reply_header __header;
-    obj_handle_t handle;
-    char __pad_12[4];
-};
-
-
-
 struct get_mapping_committed_range_request
 {
     struct request_header __header;
@@ -2010,6 +2016,22 @@ struct is_same_mapping_request
 struct is_same_mapping_reply
 {
     struct reply_header __header;
+};
+
+
+
+struct get_mapping_filename_request
+{
+    struct request_header __header;
+    obj_handle_t process;
+    client_ptr_t addr;
+};
+struct get_mapping_filename_reply
+{
+    struct reply_header __header;
+    data_size_t  len;
+    /* VARARG(filename,unicode_str); */
+    char __pad_12[4];
 };
 
 
@@ -2073,16 +2095,14 @@ struct create_debug_obj_reply
 struct wait_debug_event_request
 {
     struct request_header __header;
-    int           get_handle;
+    obj_handle_t debug;
 };
 struct wait_debug_event_reply
 {
     struct reply_header __header;
     process_id_t  pid;
     thread_id_t   tid;
-    obj_handle_t  wait;
     /* VARARG(event,debug_event); */
-    char __pad_20[4];
 };
 
 
@@ -2123,9 +2143,11 @@ struct get_exception_status_reply
 struct continue_debug_event_request
 {
     struct request_header __header;
+    obj_handle_t debug;
     process_id_t pid;
     thread_id_t  tid;
-    int          status;
+    unsigned int status;
+    char __pad_28[4];
 };
 struct continue_debug_event_reply
 {
@@ -2137,9 +2159,9 @@ struct continue_debug_event_reply
 struct debug_process_request
 {
     struct request_header __header;
-    process_id_t pid;
+    obj_handle_t handle;
+    obj_handle_t debug;
     int          attach;
-    char __pad_20[4];
 };
 struct debug_process_reply
 {
@@ -2148,12 +2170,14 @@ struct debug_process_reply
 
 
 
-struct set_debugger_kill_on_exit_request
+struct set_debug_obj_info_request
 {
     struct request_header __header;
-    int          kill_on_exit;
+    obj_handle_t debug;
+    unsigned int flags;
+    char __pad_20[4];
 };
-struct set_debugger_kill_on_exit_reply
+struct set_debug_obj_info_reply
 {
     struct reply_header __header;
 };
@@ -4498,10 +4522,7 @@ struct access_check_request
     struct request_header __header;
     obj_handle_t    handle;
     unsigned int    desired_access;
-    unsigned int    mapping_read;
-    unsigned int    mapping_write;
-    unsigned int    mapping_execute;
-    unsigned int    mapping_all;
+    generic_map_t   mapping;
     /* VARARG(sd,security_descriptor); */
     char __pad_36[4];
 };
@@ -4601,7 +4622,6 @@ struct handle_info
     process_id_t owner;
     obj_handle_t handle;
     unsigned int access;
-    unsigned int type;
 };
 
 
@@ -4780,23 +4800,21 @@ struct get_object_type_request
 struct get_object_type_reply
 {
     struct reply_header __header;
-    unsigned int   index;
-    data_size_t    total;
-    /* VARARG(type,unicode_str); */
+    /* VARARG(info,object_type_info); */
 };
 
 
 
-struct get_object_type_by_index_request
+struct get_object_types_request
 {
     struct request_header __header;
-    unsigned int   index;
+    char __pad_12[4];
 };
-struct get_object_type_by_index_reply
+struct get_object_types_reply
 {
     struct reply_header __header;
-    data_size_t    total;
-    /* VARARG(type,unicode_str); */
+    int            count;
+    /* VARARG(info,object_types_info); */
     char __pad_12[4];
 };
 
@@ -5146,10 +5164,11 @@ struct set_fd_name_info_request
     struct request_header __header;
     obj_handle_t handle;
     obj_handle_t rootdir;
+    data_size_t  namelen;
     int          link;
     int          replace;
+    /* VARARG(name,unicode_str,namelen); */
     /* VARARG(filename,string); */
-    char __pad_28[4];
 };
 struct set_fd_name_info_reply
 {
@@ -5635,20 +5654,20 @@ enum request
     REQ_new_thread,
     REQ_get_startup_info,
     REQ_init_process_done,
+    REQ_init_first_thread,
     REQ_init_thread,
     REQ_terminate_process,
     REQ_terminate_thread,
     REQ_get_process_info,
+    REQ_get_process_debug_info,
+    REQ_get_process_image_name,
     REQ_get_process_vm_counters,
     REQ_set_process_info,
     REQ_get_thread_info,
     REQ_get_thread_times,
     REQ_set_thread_info,
-    REQ_get_dll_info,
     REQ_suspend_thread,
     REQ_resume_thread,
-    REQ_load_dll,
-    REQ_unload_dll,
     REQ_queue_apc,
     REQ_get_apc_result,
     REQ_close_handle,
@@ -5696,10 +5715,10 @@ enum request
     REQ_get_mapping_info,
     REQ_map_view,
     REQ_unmap_view,
-    REQ_get_mapping_file,
     REQ_get_mapping_committed_range,
     REQ_add_mapping_committed_range,
     REQ_is_same_mapping,
+    REQ_get_mapping_filename,
     REQ_list_processes,
     REQ_create_debug_obj,
     REQ_wait_debug_event,
@@ -5707,7 +5726,7 @@ enum request
     REQ_get_exception_status,
     REQ_continue_debug_event,
     REQ_debug_process,
-    REQ_set_debugger_kill_on_exit,
+    REQ_set_debug_obj_info,
     REQ_read_process_memory,
     REQ_write_process_memory,
     REQ_create_key,
@@ -5864,7 +5883,7 @@ enum request
     REQ_query_symlink,
     REQ_get_object_info,
     REQ_get_object_type,
-    REQ_get_object_type_by_index,
+    REQ_get_object_types,
     REQ_get_token_impersonation_level,
     REQ_allocate_locally_unique_id,
     REQ_create_device_manager,
@@ -5931,20 +5950,20 @@ union generic_request
     struct new_thread_request new_thread_request;
     struct get_startup_info_request get_startup_info_request;
     struct init_process_done_request init_process_done_request;
+    struct init_first_thread_request init_first_thread_request;
     struct init_thread_request init_thread_request;
     struct terminate_process_request terminate_process_request;
     struct terminate_thread_request terminate_thread_request;
     struct get_process_info_request get_process_info_request;
+    struct get_process_debug_info_request get_process_debug_info_request;
+    struct get_process_image_name_request get_process_image_name_request;
     struct get_process_vm_counters_request get_process_vm_counters_request;
     struct set_process_info_request set_process_info_request;
     struct get_thread_info_request get_thread_info_request;
     struct get_thread_times_request get_thread_times_request;
     struct set_thread_info_request set_thread_info_request;
-    struct get_dll_info_request get_dll_info_request;
     struct suspend_thread_request suspend_thread_request;
     struct resume_thread_request resume_thread_request;
-    struct load_dll_request load_dll_request;
-    struct unload_dll_request unload_dll_request;
     struct queue_apc_request queue_apc_request;
     struct get_apc_result_request get_apc_result_request;
     struct close_handle_request close_handle_request;
@@ -5992,10 +6011,10 @@ union generic_request
     struct get_mapping_info_request get_mapping_info_request;
     struct map_view_request map_view_request;
     struct unmap_view_request unmap_view_request;
-    struct get_mapping_file_request get_mapping_file_request;
     struct get_mapping_committed_range_request get_mapping_committed_range_request;
     struct add_mapping_committed_range_request add_mapping_committed_range_request;
     struct is_same_mapping_request is_same_mapping_request;
+    struct get_mapping_filename_request get_mapping_filename_request;
     struct list_processes_request list_processes_request;
     struct create_debug_obj_request create_debug_obj_request;
     struct wait_debug_event_request wait_debug_event_request;
@@ -6003,7 +6022,7 @@ union generic_request
     struct get_exception_status_request get_exception_status_request;
     struct continue_debug_event_request continue_debug_event_request;
     struct debug_process_request debug_process_request;
-    struct set_debugger_kill_on_exit_request set_debugger_kill_on_exit_request;
+    struct set_debug_obj_info_request set_debug_obj_info_request;
     struct read_process_memory_request read_process_memory_request;
     struct write_process_memory_request write_process_memory_request;
     struct create_key_request create_key_request;
@@ -6160,7 +6179,7 @@ union generic_request
     struct query_symlink_request query_symlink_request;
     struct get_object_info_request get_object_info_request;
     struct get_object_type_request get_object_type_request;
-    struct get_object_type_by_index_request get_object_type_by_index_request;
+    struct get_object_types_request get_object_types_request;
     struct get_token_impersonation_level_request get_token_impersonation_level_request;
     struct allocate_locally_unique_id_request allocate_locally_unique_id_request;
     struct create_device_manager_request create_device_manager_request;
@@ -6225,20 +6244,20 @@ union generic_reply
     struct new_thread_reply new_thread_reply;
     struct get_startup_info_reply get_startup_info_reply;
     struct init_process_done_reply init_process_done_reply;
+    struct init_first_thread_reply init_first_thread_reply;
     struct init_thread_reply init_thread_reply;
     struct terminate_process_reply terminate_process_reply;
     struct terminate_thread_reply terminate_thread_reply;
     struct get_process_info_reply get_process_info_reply;
+    struct get_process_debug_info_reply get_process_debug_info_reply;
+    struct get_process_image_name_reply get_process_image_name_reply;
     struct get_process_vm_counters_reply get_process_vm_counters_reply;
     struct set_process_info_reply set_process_info_reply;
     struct get_thread_info_reply get_thread_info_reply;
     struct get_thread_times_reply get_thread_times_reply;
     struct set_thread_info_reply set_thread_info_reply;
-    struct get_dll_info_reply get_dll_info_reply;
     struct suspend_thread_reply suspend_thread_reply;
     struct resume_thread_reply resume_thread_reply;
-    struct load_dll_reply load_dll_reply;
-    struct unload_dll_reply unload_dll_reply;
     struct queue_apc_reply queue_apc_reply;
     struct get_apc_result_reply get_apc_result_reply;
     struct close_handle_reply close_handle_reply;
@@ -6286,10 +6305,10 @@ union generic_reply
     struct get_mapping_info_reply get_mapping_info_reply;
     struct map_view_reply map_view_reply;
     struct unmap_view_reply unmap_view_reply;
-    struct get_mapping_file_reply get_mapping_file_reply;
     struct get_mapping_committed_range_reply get_mapping_committed_range_reply;
     struct add_mapping_committed_range_reply add_mapping_committed_range_reply;
     struct is_same_mapping_reply is_same_mapping_reply;
+    struct get_mapping_filename_reply get_mapping_filename_reply;
     struct list_processes_reply list_processes_reply;
     struct create_debug_obj_reply create_debug_obj_reply;
     struct wait_debug_event_reply wait_debug_event_reply;
@@ -6297,7 +6316,7 @@ union generic_reply
     struct get_exception_status_reply get_exception_status_reply;
     struct continue_debug_event_reply continue_debug_event_reply;
     struct debug_process_reply debug_process_reply;
-    struct set_debugger_kill_on_exit_reply set_debugger_kill_on_exit_reply;
+    struct set_debug_obj_info_reply set_debug_obj_info_reply;
     struct read_process_memory_reply read_process_memory_reply;
     struct write_process_memory_reply write_process_memory_reply;
     struct create_key_reply create_key_reply;
@@ -6454,7 +6473,7 @@ union generic_reply
     struct query_symlink_reply query_symlink_reply;
     struct get_object_info_reply get_object_info_reply;
     struct get_object_type_reply get_object_type_reply;
-    struct get_object_type_by_index_reply get_object_type_by_index_reply;
+    struct get_object_types_reply get_object_types_reply;
     struct get_token_impersonation_level_reply get_token_impersonation_level_reply;
     struct allocate_locally_unique_id_reply allocate_locally_unique_id_reply;
     struct create_device_manager_reply create_device_manager_reply;
@@ -6512,7 +6531,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 659
+#define SERVER_PROTOCOL_VERSION 676
 
 /* ### protocol_version end ### */
 

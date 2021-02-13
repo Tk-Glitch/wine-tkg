@@ -2594,85 +2594,11 @@ static char get_windows_drive(void)
     return windowsdir[0];
 }
 
-struct
-{
-    const char *path;
-    BOOL expected;
-}
-static const invalid_char_tests[] =
-{
-    { "./test-dir",                     TRUE },
-    { "./test-dir/",                    FALSE },
-    { ".\\test-dir",                    TRUE },
-    { ".\\test-dir\\",                  FALSE },
-    { "/>test-dir",                     FALSE },
-    { "<\"test->dir",                   FALSE },
-    { "<test->dir",                     FALSE },
-    { "><test->dir",                    FALSE },
-    { ">>test-dir",                     FALSE },
-    { ">test->dir",                     FALSE },
-    { ">test-dir",                      FALSE },
-    { "\"test-dir\"",                   FALSE },
-    { "\"test-file\"",                  FALSE },
-    { "test-/>dir",                     FALSE },
-    { "test-dir/",                      FALSE },
-    { "test-dir//",                     FALSE },
-    { "test-dir/:",                     FALSE },
-    { "test-dir/<",                     TRUE },
-    { "test-dir/>",                     TRUE },
-    { "test-dir/\"",                    TRUE },
-    { "test-dir/\\",                    FALSE },
-    { "test-dir/|",                     FALSE },
-    { "test-dir<",                      TRUE },
-    { "test-dir</",                     FALSE },
-    { "test-dir<<",                     TRUE },
-    { "test-dir<<<><><>\"\"\"\"<<<>",   TRUE },
-    { "test-dir<>",                     TRUE },
-    { "test-dir<\"",                    TRUE },
-    { "test-dir>",                      TRUE },
-    { "test-dir>/",                     FALSE },
-    { "test-dir><",                     TRUE },
-    { "test-dir>>",                     TRUE },
-    { "test-dir>\"",                    TRUE },
-    { "test-dir\"",                     TRUE },
-    { "test-dir\"/",                    FALSE },
-    { "test-dir\"<",                    TRUE },
-    { "test-dir\">",                    TRUE },
-    { "test-dir\"\"",                   TRUE },
-    { "test-dir\"\"\"\"\"",             TRUE },
-    { "test-dir\\",                     FALSE },
-    { "test-dir\\/",                    FALSE },
-    { "test-dir\\<",                    TRUE },
-    { "test-dir\\>",                    TRUE },
-    { "test-dir\\\"",                   TRUE },
-    { "test-dir\\\\",                   FALSE },
-    { "test-file/",                     FALSE },
-    { "test-file/<",                    FALSE },
-    { "test-file/>",                    FALSE },
-    { "test-file/\"",                   FALSE },
-    { "test-file<",                     TRUE },
-    { "test-file<<",                    TRUE },
-    { "test-file<>",                    TRUE },
-    { "test-file<\"",                   TRUE },
-    { "test-file>",                     TRUE },
-    { "test-file><",                    TRUE },
-    { "test-file>>",                    TRUE },
-    { "test-file>\"",                   TRUE },
-    { "test-file\"",                    TRUE },
-    { "test-file\"<",                   TRUE },
-    { "test-file\">",                   TRUE },
-    { "test-file\"\"",                  TRUE },
-    { "test-file\\",                    FALSE },
-    { "test-file\\<",                   FALSE },
-    { "test-file\\>",                   FALSE },
-    { "test-file\\\"",                  FALSE },
-};
-
 static void test_FindFirstFileA(void)
 {
     HANDLE handle;
     WIN32_FIND_DATAA data;
-    int err, i;
+    int err;
     char buffer[5] = "C:\\";
     char buffer2[100];
     char nonexistent[MAX_PATH];
@@ -2840,30 +2766,6 @@ static void test_FindFirstFileA(void)
     err = GetLastError();
     ok ( handle == INVALID_HANDLE_VALUE, "FindFirstFile on %s should fail\n", buffer2 );
     ok ( err == ERROR_PATH_NOT_FOUND, "Bad Error number %d\n", err );
-
-    /* try FindFirstFileA with invalid characters */
-    CreateDirectoryA("test-dir", NULL);
-    _lclose(_lcreat("test-file", 0));
-
-    for (i = 0; i < sizeof(invalid_char_tests) / sizeof(invalid_char_tests[0]); i++)
-    {
-        handle = FindFirstFileA(invalid_char_tests[i].path, &data);
-        if (invalid_char_tests[i].expected)
-        {
-            ok(handle != INVALID_HANDLE_VALUE, "FindFirstFileA on %s should succeed\n",
-               invalid_char_tests[i].path);
-        }
-        else
-        {
-            ok(handle == INVALID_HANDLE_VALUE, "FindFirstFileA on %s should fail\n",
-               invalid_char_tests[i].path);
-        }
-        if (handle != INVALID_HANDLE_VALUE)
-            FindClose(handle);
-    }
-
-    DeleteFileA("test-file");
-    RemoveDirectoryA("test-dir");
 }
 
 static void test_FindNextFileA(void)
@@ -3020,15 +2922,46 @@ static void test_FindFirstFile_wildcards(void)
         {0, "*.. ", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
         {1, "*. .", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
         {1, "* ..", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
-        {1, " *..", ", '.aaa'"},
+        {0, " *..", ""},
         {0, "..* ", ", '.', '..', '..a', '..a.a'"},
+
+        {1, "<.<.<", ", '..a', '..a.a', '.a..a', '.a.a', 'a..a', 'a.a.a'"},
+        {1, "<.<.", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a..a', 'a.a', 'a.a.a'"},
+        {1, ".<.<", ", '..a', '..a.a', '.a..a', '.a.a'"},
+        {1, "<.<", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a..a', 'a.a', 'a.a.a'"},
+        {1, ".<", ", '.', '..', '.a', '.aaa'"},
+        {1, "<.", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
+        {1, "<", ", '.', '..', '..a', '.a', '.aaa', 'a', 'aa', 'aaa', 'aaaa'"},
+        {1, "<..<", ", '..a', '.a..a', 'a..a'"},
+        {1, "<..", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
+        {1, ".<.", ", '.', '..', '.a', '.aaa'"},
+        {1, "..<", ", '..a'"},
+        {1, "<<", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
+        {1, "<<.", ", '.', '..', '..a', '..a.a', '.a', '.a..a', '.a.a', '.aaa', 'a', 'a..a', 'a.a', 'a.a.a', 'aa', 'aaa', 'aaaa'"},
+        {1, "<. ", ", '.', '..', '..a', '.a', '.aaa', 'a', 'aa', 'aaa', 'aaaa'"},
+        {1, "< .", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
+        {1, "< . ", ", '.', '..', '..a', '.a', '.aaa', 'a', 'aa', 'aaa', 'aaaa'"},
+        {1, "<.. ", ", '.', '..', '..a', '.a', '.aaa', 'a', 'aa', 'aaa', 'aaaa'"},
+        {1, "<. .", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
+        {1, "< ..", ", '.', '..', 'a', '.a', '..a', 'aa', 'aaa', 'aaaa', '.aaa'"},
+        {0, " <..", ""},
+        {1, "..< ", ", '..a'"},
+
         {1, "?", ", '.', '..', 'a'"},
         {1, "?.", ", '.', '..', 'a'"},
         {1, "?. ", ", '.', '..', 'a'"},
         {1, "??.", ", '.', '..', 'a', 'aa'"},
         {1, "??. ", ", '.', '..', 'a', 'aa'"},
         {1, "???.", ", '.', '..', 'a', 'aa', 'aaa'"},
-        {1, "?.??.", ", '.', '..', '.a', 'a', 'a.a'"}
+        {1, "?.??.", ", '.', '..', '.a', 'a', 'a.a'"},
+
+        {1, ">", ", '.', '..', 'a'"},
+        {1, ">.", ", '.', '..', 'a'"},
+        {1, ">. ", ", '.', '..', 'a'"},
+        {1, ">>.", ", '.', '..', 'a', 'aa'"},
+        {1, ">>. ", ", '.', '..', 'a', 'aa'"},
+        {1, ">>>.", ", '.', '..', 'a', 'aa', 'aaa'"},
+        {1, ">.>>.", ", '.', '..', '.a', 'a.a'"},
     };
 
     CreateDirectoryA("test-dir", NULL);
@@ -3046,23 +2979,26 @@ static void test_FindFirstFile_wildcards(void)
         correct[0] = incorrect[0] = 0;
 
         handle = FindFirstFileA(tests[i].pattern, &find_data);
-        if (handle) do {
-            char* ptr;
-            char quoted[16];
+        if (handle != INVALID_HANDLE_VALUE)
+        {
+            do {
+                char *ptr;
+                char quoted[16];
 
-            sprintf( quoted, ", '%.10s'", find_data.cFileName );
+                sprintf(quoted, ", '%.10s'", find_data.cFileName);
 
-            if ((ptr = strstr(missing, quoted)))
-            {
-                int len = strlen(quoted);
-                while ((ptr[0] = ptr[len]) != 0)
-                    ++ptr;
-                strcat(correct, quoted);
-            }
-            else
-                strcat(incorrect, quoted);
-        } while (FindNextFileA(handle, &find_data));
-        FindClose(handle);
+                if ((ptr = strstr(missing, quoted)))
+                {
+                    int len = strlen(quoted);
+                    while ((ptr[0] = ptr[len]) != 0)
+                        ++ptr;
+                    strcat(correct, quoted);
+                }
+                else
+                    strcat(incorrect, quoted);
+            } while (FindNextFileA(handle, &find_data));
+            FindClose(handle);
+        }
 
         todo_wine_if (tests[i].todo)
         ok(missing[0] == 0 && incorrect[0] == 0,

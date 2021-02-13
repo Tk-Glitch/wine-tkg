@@ -5614,8 +5614,8 @@ static void test_reparse_points(void)
     ok(!bret, "Succeeded in deleting file symlink as a directory!\n");
     err = GetLastError();
     ok(err == ERROR_DIRECTORY,
-       "Expected last error 0x%x for RemoveDirectory on file symlink (actually 0x%x)!\n",
-       ERROR_DIRECTORY, err);
+        "Expected last error 0x%x for RemoveDirectory on file symlink (actually 0x%x)!\n",
+        ERROR_DIRECTORY, err);
     dwret = GetFileAttributesW(reparse_path);
     ok(dwret != (DWORD)~0, "Symlink doesn't exist (attributes: 0x%x)!\n", dwret);
     ok(dwret & FILE_ATTRIBUTE_REPARSE_POINT, "File is not a symlink! (attributes: 0x%x)\n", dwret);
@@ -5705,6 +5705,8 @@ static void test_reparse_points(void)
     bret = DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, NULL, 0, (LPVOID)buffer, buffer_len, &dwret, 0);
     ok(bret, "Failed to read relative symlink!\n");
     string_len = buffer->SymbolicLinkReparseBuffer.SubstituteNameLength;
+    ok(string_len != lstrlenW(targetW), "Symlink destination length does not match ('%d' != '%d')!\n",
+                                        string_len, lstrlenW(targetW));
     dest = &buffer->SymbolicLinkReparseBuffer.PathBuffer[buffer->SymbolicLinkReparseBuffer.SubstituteNameOffset/sizeof(WCHAR)];
     ok((memcmp(dest, targetW, string_len) == 0), "Symlink destination does not match ('%s' != '%s')!\n",
                                                  wine_dbgstr_w(dest), wine_dbgstr_w(targetW));

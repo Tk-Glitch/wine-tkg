@@ -1850,34 +1850,6 @@ static void test_topology_loader(void)
                 }
             },
 
-            MF_CONNECT_ALLOW_DECODER &~ MF_CONNECT_ALLOW_CONVERTER,
-            MF_E_INVALIDMEDIATYPE,
-            LOADER_TODO,
-        },
-
-        {
-            /* MP3 -> PCM */
-            &MFMediaType_Audio,
-            {
-                {
-                  { &MF_MT_SUBTYPE, WAVE_FORMAT_MPEGLAYER3 },
-                  { &MF_MT_AUDIO_NUM_CHANNELS, 2 },
-                  { &MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100 },
-                  { &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 16000 },
-                  { &MF_MT_AUDIO_BLOCK_ALIGNMENT, 1 },
-                }
-            },
-            {
-                {
-                  { &MF_MT_SUBTYPE, WAVE_FORMAT_PCM },
-                  { &MF_MT_AUDIO_NUM_CHANNELS, 1 },
-                  { &MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100 },
-                  { &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 44100 },
-                  { &MF_MT_AUDIO_BLOCK_ALIGNMENT, 1 },
-                  { &MF_MT_AUDIO_BITS_PER_SAMPLE, 8 },
-                }
-            },
-
             MF_CONNECT_ALLOW_DECODER,
             S_OK,
             LOADER_EXPECTED_DECODER | LOADER_TODO,
@@ -3375,7 +3347,7 @@ static void test_video_processor(void)
     IMFTransform *transform;
     IMFMediaBuffer *buffer;
     IMFMediaEvent *event;
-    IUnknown *unk;
+    unsigned int value;
     HRESULT hr;
     GUID guid;
 
@@ -3390,15 +3362,28 @@ static void test_video_processor(void)
         goto failed;
     }
 
-    hr = IMFTransform_QueryInterface(transform, &IID_IMFMediaEventGenerator, (void **)&unk);
-    ok(hr == E_NOINTERFACE, "Unexpected hr %#x.\n", hr);
-
-    hr = IMFTransform_QueryInterface(transform, &IID_IMFShutdown, (void **)&unk);
-    ok(hr == E_NOINTERFACE, "Unexpected hr %#x.\n", hr);
+todo_wine
+    check_interface(transform, &IID_IMFVideoProcessorControl, TRUE);
+todo_wine
+    check_interface(transform, &IID_IMFRealTimeClientEx, TRUE);
+    check_interface(transform, &IID_IMFMediaEventGenerator, FALSE);
+    check_interface(transform, &IID_IMFShutdown, FALSE);
 
     /* Transform global attributes. */
     hr = IMFTransform_GetAttributes(transform, &attributes);
     ok(hr == S_OK, "Failed to get attributes, hr %#x.\n", hr);
+
+    hr = IMFAttributes_GetCount(attributes, &count);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+todo_wine
+    ok(!!count, "Unexpected attribute count %u.\n", count);
+
+    value = 0;
+    hr = IMFAttributes_GetUINT32(attributes, &MF_SA_D3D11_AWARE, &value);
+todo_wine {
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(value == 1, "Unexpected attribute value %u.\n", value);
+}
     hr = IMFTransform_GetAttributes(transform, &attributes2);
     ok(hr == S_OK, "Failed to get attributes, hr %#x.\n", hr);
     ok(attributes == attributes2, "Unexpected instance.\n");
@@ -3675,16 +3660,113 @@ failed:
 
 static void test_quality_manager(void)
 {
+    IMFPresentationClock *clock;
     IMFQualityManager *manager;
+    IMFTopology *topology;
     HRESULT hr;
+
+    hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
+    ok(hr == S_OK, "Startup failure, hr %#x.\n", hr);
+
+    hr = MFCreatePresentationClock(&clock);
+    ok(hr == S_OK, "Failed to create presentation clock, hr %#x.\n", hr);
 
     hr = MFCreateStandardQualityManager(&manager);
     ok(hr == S_OK, "Failed to create quality manager, hr %#x.\n", hr);
 
+    check_interface(manager, &IID_IMFQualityManager, TRUE);
+    check_interface(manager, &IID_IMFClockStateSink, TRUE);
+
     hr = IMFQualityManager_NotifyPresentationClock(manager, NULL);
     ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
 
+    hr = IMFQualityManager_NotifyTopology(manager, NULL);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    /* Set clock, then shutdown. */
+    EXPECT_REF(clock, 1);
+    EXPECT_REF(manager, 1);
+    hr = IMFQualityManager_NotifyPresentationClock(manager, clock);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    EXPECT_REF(clock, 2);
+    EXPECT_REF(manager, 2);
+
+    hr = IMFQualityManager_Shutdown(manager);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    EXPECT_REF(clock, 1);
+
+    hr = IMFQualityManager_NotifyPresentationClock(manager, clock);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFQualityManager_NotifyTopology(manager, NULL);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFQualityManager_NotifyPresentationClock(manager, NULL);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFQualityManager_Shutdown(manager);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
     IMFQualityManager_Release(manager);
+
+    /* Set clock, then release without shutting down. */
+    hr = MFCreateStandardQualityManager(&manager);
+    ok(hr == S_OK, "Failed to create quality manager, hr %#x.\n", hr);
+
+    EXPECT_REF(clock, 1);
+    hr = IMFQualityManager_NotifyPresentationClock(manager, clock);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    EXPECT_REF(clock, 2);
+
+    IMFQualityManager_Release(manager);
+    EXPECT_REF(clock, 2);
+
+    IMFPresentationClock_Release(clock);
+
+    /* Set topology. */
+    hr = MFCreateStandardQualityManager(&manager);
+    ok(hr == S_OK, "Failed to create quality manager, hr %#x.\n", hr);
+
+    hr = MFCreateTopology(&topology);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    EXPECT_REF(topology, 1);
+    hr = IMFQualityManager_NotifyTopology(manager, topology);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    EXPECT_REF(topology, 2);
+
+    hr = IMFQualityManager_NotifyTopology(manager, NULL);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    EXPECT_REF(topology, 1);
+
+    hr = IMFQualityManager_NotifyTopology(manager, topology);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    EXPECT_REF(topology, 2);
+    hr = IMFQualityManager_Shutdown(manager);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    EXPECT_REF(topology, 1);
+
+    hr = IMFQualityManager_NotifyTopology(manager, topology);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+    IMFQualityManager_Release(manager);
+
+    hr = MFCreateStandardQualityManager(&manager);
+    ok(hr == S_OK, "Failed to create quality manager, hr %#x.\n", hr);
+
+    EXPECT_REF(topology, 1);
+    hr = IMFQualityManager_NotifyTopology(manager, topology);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    EXPECT_REF(topology, 2);
+
+    IMFQualityManager_Release(manager);
+    EXPECT_REF(topology, 1);
+
+    IMFTopology_Release(topology);
+
+    hr = MFShutdown();
+    ok(hr == S_OK, "Shutdown failure, hr %#x.\n", hr);
 }
 
 static void test_sar(void)

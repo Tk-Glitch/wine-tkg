@@ -73,12 +73,6 @@ void RingBuffer_Destroy(struct ReportRingBuffer *buffer) DECLSPEC_HIDDEN;
 struct ReportRingBuffer* RingBuffer_Create(UINT buffer_size) DECLSPEC_HIDDEN;
 NTSTATUS RingBuffer_SetSize(struct ReportRingBuffer *buffer, UINT size) DECLSPEC_HIDDEN;
 
-typedef struct _hiddevice
-{
-    struct list entry;
-    DEVICE_OBJECT *device;
-} hid_device;
-
 typedef struct _minidriver
 {
     struct list entry;
@@ -89,7 +83,6 @@ typedef struct _minidriver
 
     PDRIVER_ADD_DEVICE AddDevice;
     PDRIVER_DISPATCH PNPDispatch;
-    struct list device_list;
 } minidriver;
 
 NTSTATUS call_minidriver(ULONG code, DEVICE_OBJECT *device, void *in_buff, ULONG in_size, void *out_buff, ULONG out_size) DECLSPEC_HIDDEN;
@@ -110,7 +103,6 @@ NTSTATUS WINAPI HID_PNP_Dispatch(DEVICE_OBJECT *device, IRP *irp) DECLSPEC_HIDDE
 
 /* Pseudo-Plug and Play support*/
 NTSTATUS WINAPI PNP_AddDevice(DRIVER_OBJECT *driver, DEVICE_OBJECT* PDO) DECLSPEC_HIDDEN;
-NTSTATUS PNP_RemoveDevice(minidriver *minidriver, DEVICE_OBJECT* device, IRP* irp) DECLSPEC_HIDDEN;
 
 /* Parsing HID Report Descriptors into preparsed data */
 WINE_HIDP_PREPARSED_DATA* ParseDescriptor(BYTE *descriptor, unsigned int length) DECLSPEC_HIDDEN;

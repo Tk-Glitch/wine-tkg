@@ -35,7 +35,6 @@
 #include "wine/exception.h"
 #include "wine/debug.h"
 #include "wine/list.h"
-#include "wine/server.h"
 #include "ntdll_misc.h"
 #include "ddk/wdm.h"
 
@@ -2071,19 +2070,6 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
 
     TRACE( "loaded %s %p %p\n", debugstr_us(nt_name), wm, *module );
 
-    /* send DLL load event */
-
-    SERVER_START_REQ( load_dll )
-    {
-        req->base       = wine_server_client_ptr( *module );
-        req->dbg_offset = nt->FileHeader.PointerToSymbolTable;
-        req->dbg_size   = nt->FileHeader.NumberOfSymbols;
-        req->name       = wine_server_client_ptr( &wm->ldr.FullDllName.Buffer );
-        wine_server_add_data( req, wm->ldr.FullDllName.Buffer, wm->ldr.FullDllName.Length );
-        wine_server_call( req );
-    }
-    SERVER_END_REQ;
-
     if (image_info->u.ImageFlags & IMAGE_FLAGS_WineBuiltin)
     {
 #ifdef __aarch64__
@@ -2146,6 +2132,7 @@ static BOOL convert_to_pe64( HMODULE module, const SECTION_IMAGE_INFORMATION *in
     ULONG i, old_prot;
 
     if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC) return TRUE;  /* already 64-bit */
+    if (!info->ImageContainsCode) return TRUE;  /* no need to convert */
 
     TRACE( "%p\n", module );
 
@@ -2202,7 +2189,7 @@ static BOOL get_cor_header( HANDLE file, const SECTION_IMAGE_INFORMATION *info, 
     va = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress;
     size = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].Size;
     if (!va || size < sizeof(*cor)) return FALSE;
-    offset.QuadPart = offsetof( IMAGE_NT_HEADERS32, OptionalHeader ) + nt.FileHeader.SizeOfOptionalHeader;
+    offset.QuadPart += offsetof( IMAGE_NT_HEADERS32, OptionalHeader ) + nt.FileHeader.SizeOfOptionalHeader;
     count = min( 96, nt.FileHeader.NumberOfSections );
     if (NtReadFile( file, 0, NULL, NULL, &io, &sec, count * sizeof(*sec), &offset, NULL )) return FALSE;
     if (io.Information != count * sizeof(*sec)) return FALSE;
@@ -2532,34 +2519,28 @@ static NTSTATUS load_so_dll( LPCWSTR load_path, const UNICODE_STRING *nt_name,
 /***********************************************************************
  *           load_builtin_dll
  */
-static NTSTATUS load_builtin_dll( LPCWSTR load_path, const UNICODE_STRING *nt_name,
+static NTSTATUS load_builtin_dll( LPCWSTR load_path, UNICODE_STRING *nt_name,
                                   DWORD flags, WINE_MODREF** pwm )
 {
-    const WCHAR *name, *p;
     NTSTATUS status;
     void *module, *unix_entry = NULL;
     SECTION_IMAGE_INFORMATION image_info;
 
-    /* Fix the name in case we have a full path and extension */
-    name = nt_name->Buffer;
-    if ((p = wcsrchr( name, '\\' ))) name = p + 1;
-    if ((p = wcsrchr( name, '/' ))) name = p + 1;
+    TRACE("Trying built-in %s\n", debugstr_us(nt_name));
 
-    TRACE("Trying built-in %s\n", debugstr_w(name));
-
-    status = unix_funcs->load_builtin_dll( name, &module, &unix_entry, &image_info );
+    status = unix_funcs->load_builtin_dll( nt_name, &module, &unix_entry, &image_info );
     if (status) return status;
 
     if ((*pwm = get_modref( module )))  /* already loaded */
     {
         if ((*pwm)->ldr.LoadCount != -1) (*pwm)->ldr.LoadCount++;
         TRACE( "Found %s for %s at %p, count=%d\n",
-               debugstr_w((*pwm)->ldr.FullDllName.Buffer), debugstr_w(name),
+               debugstr_us(&(*pwm)->ldr.FullDllName), debugstr_us(nt_name),
                (*pwm)->ldr.DllBase, (*pwm)->ldr.LoadCount);
         return STATUS_SUCCESS;
     }
 
-    TRACE( "loading %s from %s\n", debugstr_w(name), debugstr_us(nt_name) );
+    TRACE( "loading %s\n", debugstr_us(nt_name) );
     status = build_module( load_path, nt_name, &module, &image_info, NULL, flags, pwm );
     if (!status) (*pwm)->unix_entry = unix_entry;
     else if (module) unix_funcs->unload_builtin_dll( module );
@@ -2809,6 +2790,7 @@ static NTSTATUS load_dll( const WCHAR *load_path, const WCHAR *libname, const WC
     HANDLE mapping = 0;
     SECTION_IMAGE_INFORMATION image_info;
     NTSTATUS nts;
+    void *prev;
 
     TRACE( "looking for %s in %s\n", debugstr_w(libname), debugstr_w(load_path) );
 
@@ -2829,6 +2811,9 @@ static NTSTATUS load_dll( const WCHAR *load_path, const WCHAR *libname, const WC
 
     main_exe = get_modref( NtCurrentTeb()->Peb->ImageBaseAddress );
     loadorder = get_load_order( main_exe ? main_exe->ldr.BaseDllName.Buffer : NULL, &nt_name );
+
+    prev = NtCurrentTeb()->Tib.ArbitraryUserPointer;
+    NtCurrentTeb()->Tib.ArbitraryUserPointer = nt_name.Buffer + 4;
 
     switch (nts)
     {
@@ -2916,6 +2901,7 @@ static NTSTATUS load_dll( const WCHAR *load_path, const WCHAR *libname, const WC
         }
         break;
     }
+    NtCurrentTeb()->Tib.ArbitraryUserPointer = prev;
 
 done:
     if (nts == STATUS_SUCCESS)
@@ -3441,6 +3427,8 @@ void WINAPI LdrShutdownThread(void)
     RtlReleasePebLock();
 
     RtlLeaveCriticalSection( &loader_section );
+    if (DbgUiGetThreadDebugObject()) NtClose( DbgUiGetThreadDebugObject() );
+    RtlFreeThreadActivationContextStack();
 }
 
 
@@ -3461,13 +3449,6 @@ static void free_modref( WINE_MODREF *wm )
         TRACE_(loaddll)("Unloaded module %s : %s\n",
                         debugstr_w(wm->ldr.FullDllName.Buffer),
                         (wm->ldr.Flags & LDR_WINE_INTERNAL) ? "builtin" : "native" );
-
-    SERVER_START_REQ( unload_dll )
-    {
-        req->base = wine_server_client_ptr( wm->ldr.DllBase );
-        wine_server_call( req );
-    }
-    SERVER_END_REQ;
 
     free_tls_slot( &wm->ldr );
     RtlReleaseActivationContext( wm->ldr.ActivationContext );
@@ -4214,36 +4195,6 @@ static NTSTATUS process_init(void)
     for (i = 0; i < HASH_MAP_SIZE; i++)
         InitializeListHead(&hash_table[i]);
 
-    /* setup the load callback and create ntdll modref */
-    RtlInitUnicodeString( &nt_name, L"\\??\\C:\\windows\\system32\\ntdll.dll" );
-    NtQueryVirtualMemory( GetCurrentProcess(), process_init, MemoryBasicInformation,
-                          &meminfo, sizeof(meminfo), NULL );
-    status = build_builtin_module( params->DllPath.Buffer, &nt_name, meminfo.AllocationBase, 0, &wm );
-    assert( !status );
-
-    if ((status = load_dll( params->DllPath.Buffer, L"C:\\windows\\system32\\kernel32.dll",
-                            NULL, 0, &wm )) != STATUS_SUCCESS)
-    {
-        MESSAGE( "wine: could not load kernel32.dll, status %x\n", status );
-        NtTerminateProcess( GetCurrentProcess(), status );
-    }
-
-    RtlInitUnicodeString( &nt_name, L"\\??\\C:\\windows\\system32\\wow64cpu.dll" );
-    if ((status = load_builtin_dll( NULL, &nt_name, 0, &wow64cpu_wm )) == STATUS_SUCCESS)
-        Wow64Transition = wow64cpu_wm->ldr.DllBase;
-    else
-        WARN( "could not load wow64cpu.dll, status %#x\n", status );
-
-    RtlInitAnsiString( &func_name, "BaseThreadInitThunk" );
-    if ((status = LdrGetProcedureAddress( wm->ldr.DllBase, &func_name,
-                                          0, (void **)&pBaseThreadInitThunk )) != STATUS_SUCCESS)
-    {
-        MESSAGE( "wine: could not find BaseThreadInitThunk in kernel32.dll, status %x\n", status );
-        NtTerminateProcess( GetCurrentProcess(), status );
-    }
-
-    init_locale( wm->ldr.DllBase );
-
     if (!(status = load_dll( params->DllPath.Buffer, params->ImagePathName.Buffer, NULL,
                              DONT_RESOLVE_DLL_REFERENCES, &wm )))
     {
@@ -4307,11 +4258,34 @@ static NTSTATUS process_init(void)
     }
 #endif
 
-    /* the main exe needs to be the first in the load order list */
-    RemoveEntryList( &wm->ldr.InLoadOrderLinks );
-    InsertHeadList( &peb->LdrData->InLoadOrderModuleList, &wm->ldr.InLoadOrderLinks );
-    RemoveEntryList( &wm->ldr.InMemoryOrderLinks );
-    InsertHeadList( &peb->LdrData->InMemoryOrderModuleList, &wm->ldr.InMemoryOrderLinks );
+    RtlInitUnicodeString( &nt_name, L"\\??\\C:\\windows\\system32\\ntdll.dll" );
+    NtQueryVirtualMemory( GetCurrentProcess(), process_init, MemoryBasicInformation,
+                          &meminfo, sizeof(meminfo), NULL );
+    status = build_builtin_module( params->DllPath.Buffer, &nt_name, meminfo.AllocationBase, 0, &wm );
+    assert( !status );
+
+    if ((status = load_dll( params->DllPath.Buffer, L"C:\\windows\\system32\\kernel32.dll",
+                            NULL, 0, &wm )) != STATUS_SUCCESS)
+    {
+        MESSAGE( "wine: could not load kernel32.dll, status %x\n", status );
+        NtTerminateProcess( GetCurrentProcess(), status );
+    }
+
+    RtlInitUnicodeString( &nt_name, L"\\??\\C:\\windows\\system32\\wow64cpu.dll" );
+    if ((status = load_builtin_dll( NULL, &nt_name, 0, &wow64cpu_wm )) == STATUS_SUCCESS)
+        Wow64Transition = wow64cpu_wm->ldr.DllBase;
+    else
+        WARN( "could not load wow64cpu.dll, status %#x\n", status );
+
+    RtlInitAnsiString( &func_name, "BaseThreadInitThunk" );
+    if ((status = LdrGetProcedureAddress( wm->ldr.DllBase, &func_name,
+                                          0, (void **)&pBaseThreadInitThunk )) != STATUS_SUCCESS)
+    {
+        MESSAGE( "wine: could not find BaseThreadInitThunk in kernel32.dll, status %x\n", status );
+        NtTerminateProcess( GetCurrentProcess(), status );
+    }
+
+    init_locale( wm->ldr.DllBase );
 
     RtlCreateUserStack( 0, 0, 0, 0x10000, 0x10000, &stack );
     teb->Tib.StackBase = stack.StackBase;

@@ -1832,7 +1832,10 @@ enum wined3d_pipeline
 #define STATE_DEPTH_STENCIL (STATE_SAMPLE_MASK + 1)
 #define STATE_IS_DEPTH_STENCIL(a) ((a) == STATE_DEPTH_STENCIL)
 
-#define STATE_COMPUTE_OFFSET (STATE_DEPTH_STENCIL + 1)
+#define STATE_STENCIL_REF (STATE_DEPTH_STENCIL + 1)
+#define STATE_IS_STENCIL_REF(a) ((a) == STATE_STENCIL_REF)
+
+#define STATE_COMPUTE_OFFSET (STATE_STENCIL_REF + 1)
 
 #define STATE_COMPUTE_SHADER (STATE_COMPUTE_OFFSET)
 #define STATE_IS_COMPUTE_SHADER(a) ((a) == STATE_COMPUTE_SHADER)
@@ -2896,6 +2899,7 @@ enum wined3d_pci_device
     CARD_AMD_RADEON_RAVEN           = 0x15dd,
     CARD_AMD_RADEON_RX_VEGA_20      = 0x66af,
     CARD_AMD_RADEON_RX_NAVI_10      = 0x731f,
+    CARD_AMD_RADEON_RX_NAVI_14      = 0x7340,
 
     CARD_NVIDIA_RIVA_128            = 0x0018,
     CARD_NVIDIA_RIVA_TNT            = 0x0020,
@@ -3708,6 +3712,7 @@ struct wined3d_state
     struct wined3d_color blend_factor;
     unsigned int sample_mask;
     struct wined3d_depth_stencil_state *depth_stencil_state;
+    unsigned int stencil_ref;
     struct wined3d_rasterizer_state *rasterizer_state;
 };
 
@@ -4766,7 +4771,7 @@ void wined3d_cs_emit_set_color_key(struct wined3d_cs *cs, struct wined3d_texture
 void wined3d_cs_emit_set_constant_buffer(struct wined3d_cs *cs, enum wined3d_shader_type type,
         UINT cb_idx, struct wined3d_buffer *buffer) DECLSPEC_HIDDEN;
 void wined3d_cs_emit_set_depth_stencil_state(struct wined3d_cs *cs,
-        struct wined3d_depth_stencil_state *state) DECLSPEC_HIDDEN;
+        struct wined3d_depth_stencil_state *state, unsigned int stencil_ref) DECLSPEC_HIDDEN;
 void wined3d_cs_emit_set_depth_stencil_view(struct wined3d_cs *cs,
         struct wined3d_rendertarget_view *view) DECLSPEC_HIDDEN;
 void wined3d_cs_emit_set_index_buffer(struct wined3d_cs *cs, struct wined3d_buffer *buffer,
@@ -5734,6 +5739,7 @@ extern enum wined3d_format_id pixelformat_for_depth(DWORD depth) DECLSPEC_HIDDEN
 #define WINED3DFMT_FLAG_VERTEX_ATTRIBUTE            0x01000000
 #define WINED3DFMT_FLAG_BLIT                        0x02000000
 #define WINED3DFMT_FLAG_MAPPABLE                    0x04000000
+#define WINED3DFMT_FLAG_CAST_TO_BLOCK               0x08000000
 
 struct wined3d_rational
 {

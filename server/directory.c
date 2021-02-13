@@ -41,20 +41,32 @@
 
 #define HASH_SIZE 7  /* default hash size */
 
+static const WCHAR objtype_name[] = {'T','y','p','e'};
+
+struct type_descr objtype_type =
+{
+    { objtype_name, sizeof(objtype_name) },        /* name */
+    STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0x1,  /* valid_access */
+    {                                              /* mapping */
+        STANDARD_RIGHTS_READ,
+        STANDARD_RIGHTS_WRITE,
+        STANDARD_RIGHTS_EXECUTE,
+        STANDARD_RIGHTS_REQUIRED | 0x1
+    },
+};
+
 struct object_type
 {
     struct object     obj;        /* object header */
-    unsigned int      index;      /* type index */
 };
 
 static void object_type_dump( struct object *obj, int verbose );
-static struct object_type *object_type_get_type( struct object *obj );
 
 static const struct object_ops object_type_ops =
 {
     sizeof(struct object_type),   /* size */
+    &objtype_type,                /* type */
     object_type_dump,             /* dump */
-    object_type_get_type,         /* get_type */
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
@@ -63,7 +75,7 @@ static const struct object_ops object_type_ops =
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    no_map_access,                /* map_access */
+    default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     default_get_full_name,        /* get_full_name */
@@ -76,8 +88,20 @@ static const struct object_ops object_type_ops =
     no_destroy                    /* destroy */
 };
 
-static struct object_type *object_type_list[64];
-static unsigned int object_type_count;
+
+static const WCHAR directory_name[] = {'D','i','r','e','c','t','o','r','y'};
+
+struct type_descr directory_type =
+{
+    { directory_name, sizeof(directory_name) },   /* name */
+    DIRECTORY_ALL_ACCESS,                         /* valid_access */
+    {                                             /* mapping */
+        STANDARD_RIGHTS_READ | DIRECTORY_TRAVERSE | DIRECTORY_QUERY,
+        STANDARD_RIGHTS_WRITE | DIRECTORY_CREATE_SUBDIRECTORY | DIRECTORY_CREATE_OBJECT,
+        STANDARD_RIGHTS_EXECUTE | DIRECTORY_TRAVERSE | DIRECTORY_QUERY,
+        DIRECTORY_ALL_ACCESS
+    },
+};
 
 struct directory
 {
@@ -86,7 +110,6 @@ struct directory
 };
 
 static void directory_dump( struct object *obj, int verbose );
-static struct object_type *directory_get_type( struct object *obj );
 static struct object *directory_lookup_name( struct object *obj, struct unicode_str *name,
                                              unsigned int attr, struct object *root );
 static void directory_destroy( struct object *obj );
@@ -94,8 +117,8 @@ static void directory_destroy( struct object *obj );
 static const struct object_ops directory_ops =
 {
     sizeof(struct directory),     /* size */
+    &directory_type,              /* type */
     directory_dump,               /* dump */
-    directory_get_type,           /* get_type */
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
@@ -104,7 +127,7 @@ static const struct object_ops directory_ops =
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    default_fd_map_access,        /* map_access */
+    default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     default_get_full_name,        /* get_full_name */
@@ -121,26 +144,51 @@ static struct directory *root_directory;
 static struct directory *dir_objtype;
 
 
+static struct type_descr *types[] =
+{
+    &objtype_type,
+    &directory_type,
+    &symlink_type,
+    &token_type,
+    &job_type,
+    &process_type,
+    &thread_type,
+    &debug_obj_type,
+    &event_type,
+    &mutex_type,
+    &semaphore_type,
+    &timer_type,
+    &keyed_event_type,
+    &winstation_type,
+    &desktop_type,
+    &device_type,
+    &completion_type,
+    &file_type,
+    &mapping_type,
+    &key_type,
+};
+
 static void object_type_dump( struct object *obj, int verbose )
 {
     fputs( "Object type\n", stderr );
 }
 
-static struct object_type *object_type_get_type( struct object *obj )
+static struct object_type *create_object_type( struct object *root, unsigned int index,
+                                               unsigned int attr, const struct security_descriptor *sd )
 {
-    static const struct unicode_str str = { type_Type, sizeof(type_Type) };
-    return get_object_type( &str );
+    struct type_descr *descr = types[index];
+    struct object_type *type;
+
+    if ((type = create_named_object( root, &object_type_ops, &descr->name, attr, sd )))
+    {
+        descr->index = index;
+    }
+    return type;
 }
 
 static void directory_dump( struct object *obj, int verbose )
 {
     fputs( "Directory\n", stderr );
-}
-
-static struct object_type *directory_get_type( struct object *obj )
-{
-    static const struct unicode_str str = { type_Directory, sizeof(type_Directory) };
-    return get_object_type( &str );
 }
 
 static struct object *directory_lookup_name( struct object *obj, struct unicode_str *name,
@@ -232,31 +280,6 @@ struct object *get_root_directory(void)
 struct object *get_directory_obj( struct process *process, obj_handle_t handle )
 {
     return get_handle_obj( process, handle, 0, &directory_ops );
-}
-
-/* retrieve an object type, creating it if needed */
-struct object_type *get_object_type( const struct unicode_str *name )
-{
-    struct object_type *type;
-
-    if ((type = create_named_object( &dir_objtype->obj, &object_type_ops, name,
-                                     OBJ_OPENIF | OBJ_PERMANENT, NULL )))
-    {
-        if (get_error() != STATUS_OBJECT_NAME_EXISTS)
-        {
-            assert( object_type_count < ARRAY_SIZE(object_type_list) );
-            type->index = object_type_count++;
-            object_type_list[ type->index ] = (struct object_type *)type;
-        }
-        clear_error();
-    }
-    return type;
-}
-
-/* retrieve the object type index */
-unsigned int type_get_index( struct object_type *type )
-{
-    return type->index;
 }
 
 /* Global initialization */
@@ -445,6 +468,11 @@ void init_directories( struct fd *intl_fd )
     create_session( 0 );
     create_session( 1 );
 
+    /* object types */
+
+    for (i = 0; i < ARRAY_SIZE(types); i++)
+        release_object( create_object_type( &dir_objtype->obj, i, OBJ_PERMANENT, NULL ));
+
     /* symlinks */
     release_object( create_obj_symlink( &root_directory->obj, &link_dosdev_str, OBJ_PERMANENT, &dir_global->obj, NULL ));
     release_object( create_obj_symlink( &dir_global->obj, &link_global_str, OBJ_PERMANENT, &dir_global->obj, NULL ));
@@ -516,26 +544,22 @@ DECL_HANDLER(get_directory_entry)
         struct object *obj = find_object_index( dir->entries, req->index );
         if (obj)
         {
-            data_size_t name_len, type_len = 0;
-            const WCHAR *type_name = NULL;
+            data_size_t name_len;
+            const struct unicode_str *type_name = &obj->ops->type->name;
             const WCHAR *name = get_object_name( obj, &name_len );
-            struct object_type *type = obj->ops->get_type( obj );
 
-            if (type) type_name = get_object_name( &type->obj, &type_len );
-
-            if (name_len + type_len <= get_reply_max_size())
+            if (name_len + type_name->len <= get_reply_max_size())
             {
-                void *ptr = set_reply_data_size( name_len + type_len );
+                void *ptr = set_reply_data_size( name_len + type_name->len );
                 if (ptr)
                 {
                     reply->name_len = name_len;
                     memcpy( ptr, name, name_len );
-                    memcpy( (char *)ptr + name_len, type_name, type_len );
+                    memcpy( (char *)ptr + name_len, type_name->str, type_name->len );
                 }
             }
             else set_error( STATUS_BUFFER_OVERFLOW );
 
-            if (type) release_object( type );
             release_object( obj );
         }
         release_object( dir );
@@ -546,31 +570,67 @@ DECL_HANDLER(get_directory_entry)
 DECL_HANDLER(get_object_type)
 {
     struct object *obj;
-    struct object_type *type;
-    const WCHAR *name;
+    struct type_descr *type;
+    struct object_type_info *info;
 
     if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL ))) return;
 
-    if ((type = obj->ops->get_type( obj )))
+    type = obj->ops->type;
+    if (sizeof(*info) + type->name.len <= get_reply_max_size())
     {
-        if ((name = get_object_name( &type->obj, &reply->total )))
-            set_reply_data( name, min( reply->total, get_reply_max_size() ) );
-        reply->index = type->index;
-        release_object( type );
+        if ((info = set_reply_data_size( sizeof(*info) + type->name.len )))
+        {
+            info->name_len     = type->name.len;
+            info->index        = type->index;
+            info->obj_count    = type->obj_count;
+            info->handle_count = type->handle_count;
+            info->obj_max      = type->obj_max;
+            info->handle_max   = type->handle_max;
+            info->valid_access = type->valid_access;
+            info->mapping      = type->mapping;
+            memcpy( info + 1, type->name.str, type->name.len );
+        }
     }
+    else set_error( STATUS_BUFFER_OVERFLOW );
+
     release_object( obj );
 }
 
-/* query object type name information by index */
-DECL_HANDLER(get_object_type_by_index)
+/* query type information for all types */
+DECL_HANDLER(get_object_types)
 {
-    struct object_type *type;
-    const WCHAR *name;
+    struct object_type_info *info;
+    data_size_t size = ARRAY_SIZE(types) * sizeof(*info);
+    unsigned int i;
+    char *next;
 
-    if (req->index < object_type_count && (type = object_type_list[ req->index ]))
+    for (i = 0; i < ARRAY_SIZE(types); i++) size += (types[i]->name.len + 3) & ~3;
+
+    if (size <= get_reply_max_size())
     {
-        if ((name = get_object_name( &type->obj, &reply->total )))
-            set_reply_data( name, min( reply->total, get_reply_max_size() ) );
+        if ((info = set_reply_data_size( size )))
+        {
+            for (i = 0; i < ARRAY_SIZE(types); i++)
+            {
+                info->name_len     = types[i]->name.len;
+                info->index        = types[i]->index;
+                info->obj_count    = types[i]->obj_count;
+                info->handle_count = types[i]->handle_count;
+                info->obj_max      = types[i]->obj_max;
+                info->handle_max   = types[i]->handle_max;
+                info->valid_access = types[i]->valid_access;
+                info->mapping      = types[i]->mapping;
+                memcpy( info + 1, types[i]->name.str, types[i]->name.len );
+                next = (char *)(info + 1) + types[i]->name.len;
+                if (types[i]->name.len & 3)
+                {
+                    memset( next, 0, 4 - (types[i]->name.len & 3) );
+                    next += 4 - (types[i]->name.len & 3);
+                }
+                info = (struct object_type_info *)next;
+            }
+            reply->count = i;
+        }
     }
-    else set_error( STATUS_NO_MORE_ENTRIES );
+    else set_error( STATUS_BUFFER_OVERFLOW );
 }

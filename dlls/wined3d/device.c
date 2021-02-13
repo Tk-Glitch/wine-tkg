@@ -1005,6 +1005,8 @@ void wined3d_device_delete_opengl_contexts_cs(void *object)
     struct wined3d_context *context;
     struct wined3d_shader *shader;
 
+    TRACE("device %p.\n", device);
+
     device_gl = wined3d_device_gl(device);
 
     LIST_FOR_EACH_ENTRY(shader, &device->shaders, struct wined3d_shader, shader_list_entry)
@@ -1037,6 +1039,8 @@ void wined3d_device_create_primary_opengl_context_cs(void *object)
     struct wined3d_context *context;
     struct wined3d_texture *target;
     HRESULT hr;
+
+    TRACE("device %p.\n", device);
 
     swapchain = device->swapchains[0];
     target = swapchain->back_buffers ? swapchain->back_buffers[0] : swapchain->front_buffer;
@@ -1088,26 +1092,6 @@ HRESULT wined3d_device_set_implicit_swapchain(struct wined3d_device *device, str
     if (device->d3d_initialized)
         return WINED3DERR_INVALIDCALL;
 
-    swapchain_desc = &swapchain->state.desc;
-    if (swapchain_desc->backbuffer_count && swapchain_desc->backbuffer_bind_flags & WINED3D_BIND_RENDER_TARGET)
-    {
-        struct wined3d_resource *back_buffer = &swapchain->back_buffers[0]->resource;
-        struct wined3d_view_desc view_desc;
-
-        view_desc.format_id = back_buffer->format->id;
-        view_desc.flags = 0;
-        view_desc.u.texture.level_idx = 0;
-        view_desc.u.texture.level_count = 1;
-        view_desc.u.texture.layer_idx = 0;
-        view_desc.u.texture.layer_count = 1;
-        if (FAILED(hr = wined3d_rendertarget_view_create(&view_desc, back_buffer,
-                NULL, &wined3d_null_parent_ops, &device->back_buffer_view)))
-        {
-            ERR("Failed to create rendertarget view, hr %#x.\n", hr);
-            return hr;
-        }
-    }
-
     device->swapchain_count = 1;
     if (!(device->swapchains = heap_calloc(device->swapchain_count, sizeof(*device->swapchains))))
     {
@@ -1125,6 +1109,28 @@ HRESULT wined3d_device_set_implicit_swapchain(struct wined3d_device *device, str
     if (FAILED(hr = device->adapter->adapter_ops->adapter_init_3d(device)))
         goto err_out;
     device->d3d_initialized = TRUE;
+
+    swapchain_desc = &swapchain->state.desc;
+    if (swapchain_desc->backbuffer_count && swapchain_desc->backbuffer_bind_flags & WINED3D_BIND_RENDER_TARGET)
+    {
+        struct wined3d_resource *back_buffer = &swapchain->back_buffers[0]->resource;
+        struct wined3d_view_desc view_desc;
+
+        view_desc.format_id = back_buffer->format->id;
+        view_desc.flags = 0;
+        view_desc.u.texture.level_idx = 0;
+        view_desc.u.texture.level_count = 1;
+        view_desc.u.texture.layer_idx = 0;
+        view_desc.u.texture.layer_count = 1;
+        if (FAILED(hr = wined3d_rendertarget_view_create(&view_desc, back_buffer,
+                NULL, &wined3d_null_parent_ops, &device->back_buffer_view)))
+        {
+            ERR("Failed to create rendertarget view, hr %#x.\n", hr);
+            device->adapter->adapter_ops->adapter_uninit_3d(device);
+            device->d3d_initialized = FALSE;
+            goto err_out;
+        }
+    }
 
     device_init_swapchain_state(device, swapchain);
 
@@ -1147,11 +1153,6 @@ err_out:
     heap_free(device->swapchains);
     device->swapchains = NULL;
     device->swapchain_count = 0;
-    if (device->back_buffer_view)
-    {
-        wined3d_rendertarget_view_decref(device->back_buffer_view);
-        device->back_buffer_view = NULL;
-    }
 
     return hr;
 }
@@ -1797,28 +1798,30 @@ struct wined3d_blend_state * CDECL wined3d_device_get_blend_state(const struct w
 }
 
 void CDECL wined3d_device_set_depth_stencil_state(struct wined3d_device *device,
-        struct wined3d_depth_stencil_state *state)
+        struct wined3d_depth_stencil_state *state, unsigned int stencil_ref)
 {
     struct wined3d_depth_stencil_state *prev;
 
-    TRACE("device %p, state %p.\n", device, state);
+    TRACE("device %p, state %p, stencil_ref %u.\n", device, state, stencil_ref);
 
     prev = device->state.depth_stencil_state;
-    if (prev == state)
+    if (prev == state && device->state.stencil_ref == stencil_ref)
         return;
 
     if (state)
         wined3d_depth_stencil_state_incref(state);
     device->state.depth_stencil_state = state;
-    wined3d_cs_emit_set_depth_stencil_state(device->cs, state);
+    device->state.stencil_ref = stencil_ref;
+    wined3d_cs_emit_set_depth_stencil_state(device->cs, state, stencil_ref);
     if (prev)
         wined3d_depth_stencil_state_decref(prev);
 }
 
-struct wined3d_depth_stencil_state * CDECL wined3d_device_get_depth_stencil_state(const struct wined3d_device *device)
+struct wined3d_depth_stencil_state * CDECL wined3d_device_get_depth_stencil_state(const struct wined3d_device *device, unsigned int *stencil_ref)
 {
-    TRACE("device %p.\n", device);
+    TRACE("device %p, stencil_ref %p.\n", device, stencil_ref);
 
+    *stencil_ref = device->state.stencil_ref;
     return device->state.depth_stencil_state;
 }
 
@@ -3729,6 +3732,7 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
                 case WINED3D_RS_STENCILENABLE:
                 case WINED3D_RS_STENCILFAIL:
                 case WINED3D_RS_STENCILFUNC:
+                case WINED3D_RS_STENCILREF:
                 case WINED3D_RS_STENCILMASK:
                 case WINED3D_RS_STENCILPASS:
                 case WINED3D_RS_STENCILWRITEMASK:
@@ -3873,6 +3877,7 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
         struct wined3d_depth_stencil_state *depth_stencil_state;
         struct wined3d_depth_stencil_state_desc desc;
         struct wine_rb_entry *entry;
+        unsigned int stencil_ref;
 
         memset(&desc, 0, sizeof(desc));
         switch (state->rs[WINED3D_RS_ZENABLE])
@@ -3912,15 +3917,20 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
             desc.back = desc.front;
         }
 
+        if (wined3d_bitmap_is_set(changed->renderState, WINED3D_RS_STENCILREF))
+            stencil_ref = state->rs[WINED3D_RS_STENCILREF];
+        else
+            wined3d_device_get_depth_stencil_state(device, &stencil_ref);
+
         if ((entry = wine_rb_get(&device->depth_stencil_states, &desc)))
         {
             depth_stencil_state = WINE_RB_ENTRY_VALUE(entry, struct wined3d_depth_stencil_state, entry);
-            wined3d_device_set_depth_stencil_state(device, depth_stencil_state);
+            wined3d_device_set_depth_stencil_state(device, depth_stencil_state, stencil_ref);
         }
         else if (SUCCEEDED(wined3d_depth_stencil_state_create(device, &desc, NULL,
                 &wined3d_null_parent_ops, &depth_stencil_state)))
         {
-            wined3d_device_set_depth_stencil_state(device, depth_stencil_state);
+            wined3d_device_set_depth_stencil_state(device, depth_stencil_state, stencil_ref);
             if (wine_rb_put(&device->depth_stencil_states, &desc, &depth_stencil_state->entry) == -1)
             {
                 ERR("Failed to insert depth/stencil state.\n");
@@ -4557,11 +4567,31 @@ void CDECL wined3d_device_copy_uav_counter(struct wined3d_device *device,
     wined3d_cs_emit_copy_uav_counter(device->cs, dst_buffer, offset, uav);
 }
 
+static bool resources_format_compatible(const struct wined3d_resource *src_resource,
+        const struct wined3d_resource *dst_resource)
+{
+    if (src_resource->format->id == dst_resource->format->id)
+        return true;
+    if (src_resource->format->typeless_id && src_resource->format->typeless_id == dst_resource->format->typeless_id)
+        return true;
+    if (src_resource->device->feature_level < WINED3D_FEATURE_LEVEL_10_1)
+        return false;
+    if ((src_resource->format_flags & WINED3DFMT_FLAG_BLOCKS)
+            && (dst_resource->format_flags & WINED3DFMT_FLAG_CAST_TO_BLOCK))
+        return src_resource->format->block_byte_count == dst_resource->format->byte_count;
+    if ((src_resource->format_flags & WINED3DFMT_FLAG_CAST_TO_BLOCK)
+            && (dst_resource->format_flags & WINED3DFMT_FLAG_BLOCKS))
+        return src_resource->format->byte_count == dst_resource->format->block_byte_count;
+    return false;
+}
+
 void CDECL wined3d_device_copy_resource(struct wined3d_device *device,
         struct wined3d_resource *dst_resource, struct wined3d_resource *src_resource)
 {
+    unsigned int src_row_block_count, dst_row_block_count;
     struct wined3d_texture *dst_texture, *src_texture;
-    struct wined3d_box box;
+    unsigned int src_row_count, dst_row_count;
+    struct wined3d_box src_box, dst_box;
     unsigned int i, j;
 
     TRACE("device %p, dst_resource %p, src_resource %p.\n", device, dst_resource, src_resource);
@@ -4580,18 +4610,7 @@ void CDECL wined3d_device_copy_resource(struct wined3d_device *device,
         return;
     }
 
-    if (src_resource->width != dst_resource->width
-            || src_resource->height != dst_resource->height
-            || src_resource->depth != dst_resource->depth)
-    {
-        WARN("Resource dimensions (%ux%ux%u / %ux%ux%u) don't match.\n",
-                dst_resource->width, dst_resource->height, dst_resource->depth,
-                src_resource->width, src_resource->height, src_resource->depth);
-        return;
-    }
-
-    if (src_resource->format->typeless_id != dst_resource->format->typeless_id
-            || (!src_resource->format->typeless_id && src_resource->format->id != dst_resource->format->id))
+    if (!resources_format_compatible(src_resource, dst_resource))
     {
         WARN("Resource formats %s and %s are incompatible.\n",
                 debug_d3dformat(dst_resource->format->id),
@@ -4599,11 +4618,29 @@ void CDECL wined3d_device_copy_resource(struct wined3d_device *device,
         return;
     }
 
+    src_row_block_count = (src_resource->width + (src_resource->format->block_width - 1))
+            / src_resource->format->block_width;
+    dst_row_block_count = (dst_resource->width + (dst_resource->format->block_width - 1))
+            / dst_resource->format->block_width;
+    src_row_count = (src_resource->height + (src_resource->format->block_height - 1))
+            / src_resource->format->block_height;
+    dst_row_count = (dst_resource->height + (dst_resource->format->block_height - 1))
+            / dst_resource->format->block_height;
+
+    if (src_row_block_count != dst_row_block_count || src_row_count != dst_row_count
+            || src_resource->depth != dst_resource->depth)
+    {
+        WARN("Resource block dimensions (%ux%ux%u / %ux%ux%u) don't match.\n",
+                dst_row_block_count, dst_row_count, dst_resource->depth,
+                src_row_block_count, src_row_count, src_resource->depth);
+        return;
+    }
+
     if (dst_resource->type == WINED3D_RTYPE_BUFFER)
     {
-        wined3d_box_set(&box, 0, 0, src_resource->size, 1, 0, 1);
-        wined3d_cs_emit_blt_sub_resource(device->cs, dst_resource, 0, &box,
-                src_resource, 0, &box, WINED3D_BLT_RAW, NULL, WINED3D_TEXF_POINT);
+        wined3d_box_set(&src_box, 0, 0, src_resource->size, 1, 0, 1);
+        wined3d_cs_emit_blt_sub_resource(device->cs, dst_resource, 0, &src_box,
+                src_resource, 0, &src_box, WINED3D_BLT_RAW, NULL, WINED3D_TEXF_POINT);
         return;
     }
 
@@ -4621,13 +4658,14 @@ void CDECL wined3d_device_copy_resource(struct wined3d_device *device,
 
     for (i = 0; i < dst_texture->level_count; ++i)
     {
-        wined3d_texture_get_level_box(dst_texture, i, &box);
+        wined3d_texture_get_level_box(src_texture, i, &src_box);
+        wined3d_texture_get_level_box(dst_texture, i, &dst_box);
         for (j = 0; j < dst_texture->layer_count; ++j)
         {
             unsigned int idx = j * dst_texture->level_count + i;
 
-            wined3d_cs_emit_blt_sub_resource(device->cs, dst_resource, idx, &box,
-                    src_resource, idx, &box, WINED3D_BLT_RAW, NULL, WINED3D_TEXF_POINT);
+            wined3d_cs_emit_blt_sub_resource(device->cs, dst_resource, idx, &dst_box,
+                    src_resource, idx, &src_box, WINED3D_BLT_RAW, NULL, WINED3D_TEXF_POINT);
         }
     }
 }
@@ -4653,8 +4691,7 @@ HRESULT CDECL wined3d_device_copy_sub_resource_region(struct wined3d_device *dev
         return WINED3DERR_INVALIDCALL;
     }
 
-    if (src_resource->format->typeless_id != dst_resource->format->typeless_id
-            || (!src_resource->format->typeless_id && src_resource->format->id != dst_resource->format->id))
+    if (!resources_format_compatible(src_resource, dst_resource))
     {
         WARN("Resource formats %s and %s are incompatible.\n",
                 debug_d3dformat(dst_resource->format->id),
@@ -4715,6 +4752,7 @@ HRESULT CDECL wined3d_device_copy_sub_resource_region(struct wined3d_device *dev
         struct wined3d_texture *dst_texture = texture_from_resource(dst_resource);
         struct wined3d_texture *src_texture = texture_from_resource(src_resource);
         unsigned int src_level = src_sub_resource_idx % src_texture->level_count;
+        unsigned int src_row_block_count, src_row_count;
 
         if (dst_sub_resource_idx >= dst_texture->level_count * dst_texture->layer_count)
         {
@@ -4762,8 +4800,23 @@ HRESULT CDECL wined3d_device_copy_sub_resource_region(struct wined3d_device *dev
             return WINED3DERR_INVALIDCALL;
         }
 
-        wined3d_box_set(&dst_box, dst_x, dst_y, dst_x + (src_box->right - src_box->left),
-                dst_y + (src_box->bottom - src_box->top), dst_z, dst_z + (src_box->back - src_box->front));
+        if (src_resource->format->block_width == dst_resource->format->block_width
+                && src_resource->format->block_height == dst_resource->format->block_height)
+        {
+            wined3d_box_set(&dst_box, dst_x, dst_y, dst_x + (src_box->right - src_box->left),
+                    dst_y + (src_box->bottom - src_box->top), dst_z, dst_z + (src_box->back - src_box->front));
+        }
+        else
+        {
+            src_row_block_count = (src_box->right - src_box->left + src_resource->format->block_width - 1)
+                    / src_resource->format->block_width;
+            src_row_count = (src_box->bottom - src_box->top + src_resource->format->block_height - 1)
+                    / src_resource->format->block_height;
+            wined3d_box_set(&dst_box, dst_x, dst_y,
+                    dst_x + (src_row_block_count * dst_resource->format->block_width),
+                    dst_y + (src_row_count * dst_resource->format->block_height),
+                    dst_z, dst_z + (src_box->back - src_box->front));
+        }
         if (FAILED(wined3d_texture_check_box_dimensions(dst_texture,
                 dst_sub_resource_idx % dst_texture->level_count, &dst_box)))
         {

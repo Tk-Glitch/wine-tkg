@@ -276,9 +276,7 @@ static const struct keyword keywords[] = {
 	{"coclass",         tCOCLASS,        0},
 	{"const",           tCONST,          0},
 	{"cpp_quote",       tCPPQUOTE,       0},
-	{"declare",         tDECLARE,        1},
 	{"default",         tDEFAULT,        0},
-	{"delegate",        tDELEGATE,       1},
 	{"dispinterface",   tDISPINTERFACE,  0},
 	{"double",          tDOUBLE,         0},
 	{"enum",            tENUM,           0},
@@ -473,7 +471,7 @@ static int kw_token(const char *kw)
 		return kwp->token;
 	}
 	parser_lval.str = xstrdup(kw);
-	return is_type(kw) ? aKNOWNTYPE : is_namespace(kw) ? aNAMESPACE : aIDENTIFIER;
+	return is_type(kw) ? aKNOWNTYPE : aIDENTIFIER;
 }
 
 static int attr_token(const char *kw)

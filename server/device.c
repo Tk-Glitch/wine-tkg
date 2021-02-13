@@ -65,8 +65,8 @@ static void irp_call_destroy( struct object *obj );
 static const struct object_ops irp_call_ops =
 {
     sizeof(struct irp_call),          /* size */
+    &no_type,                         /* type */
     irp_call_dump,                    /* dump */
-    no_get_type,                      /* get_type */
     add_queue,                        /* add_queue */
     remove_queue,                     /* remove_queue */
     irp_call_signaled,                /* signaled */
@@ -75,7 +75,7 @@ static const struct object_ops irp_call_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
-    no_map_access,                    /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     no_get_full_name,                 /* get_full_name */
@@ -111,8 +111,8 @@ static void device_manager_destroy( struct object *obj );
 static const struct object_ops device_manager_ops =
 {
     sizeof(struct device_manager),    /* size */
+    &no_type,                         /* type */
     device_manager_dump,              /* dump */
-    no_get_type,                      /* get_type */
     add_queue,                        /* add_queue */
     remove_queue,                     /* remove_queue */
     device_manager_signaled,          /* signaled */
@@ -121,7 +121,7 @@ static const struct object_ops device_manager_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
-    no_map_access,                    /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     no_get_full_name,                 /* get_full_name */
@@ -137,6 +137,20 @@ static const struct object_ops device_manager_ops =
 
 /* device (a single device object) */
 
+static const WCHAR device_name[] = {'D','e','v','i','c','e'};
+
+struct type_descr device_type =
+{
+    { device_name, sizeof(device_name) },   /* name */
+    FILE_ALL_ACCESS,                        /* valid_access */
+    {                                       /* mapping */
+        FILE_GENERIC_READ,
+        FILE_GENERIC_WRITE,
+        FILE_GENERIC_EXECUTE,
+        FILE_ALL_ACCESS
+    },
+};
+
 struct device
 {
     struct object          obj;           /* object header */
@@ -148,7 +162,6 @@ struct device
 };
 
 static void device_dump( struct object *obj, int verbose );
-static struct object_type *device_get_type( struct object *obj );
 static void device_destroy( struct object *obj );
 static struct object *device_open_file( struct object *obj, unsigned int access,
                                         unsigned int sharing, unsigned int options );
@@ -157,8 +170,8 @@ static struct list *device_get_kernel_obj_list( struct object *obj );
 static const struct object_ops device_ops =
 {
     sizeof(struct device),            /* size */
+    &device_type,                     /* type */
     device_dump,                      /* dump */
-    device_get_type,                  /* get_type */
     no_add_queue,                     /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
@@ -167,7 +180,7 @@ static const struct object_ops device_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
-    default_fd_map_access,            /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     default_get_full_name,            /* get_full_name */
@@ -210,8 +223,8 @@ static void device_file_reselect_async( struct fd *fd, struct async_queue *queue
 static const struct object_ops device_file_ops =
 {
     sizeof(struct device_file),       /* size */
+    &file_type,                       /* type */
     device_file_dump,                 /* dump */
-    file_get_type,                    /* get_type */
     add_queue,                        /* add_queue */
     remove_queue,                     /* remove_queue */
     default_fd_signaled,              /* signaled */
@@ -220,7 +233,7 @@ static const struct object_ops device_file_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     device_file_get_fd,               /* get_fd */
-    default_fd_map_access,            /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     device_file_get_full_name,        /* get_full_name */
@@ -423,13 +436,6 @@ static void device_dump( struct object *obj, int verbose )
     fputs( "Device\n", stderr );
 }
 
-static struct object_type *device_get_type( struct object *obj )
-{
-    static const WCHAR name[] = {'D','e','v','i','c','e'};
-    static const struct unicode_str str = { name, sizeof(name) };
-    return get_object_type( &str );
-}
-
 static void device_destroy( struct object *obj )
 {
     struct device *device = (struct device *)obj;
@@ -454,6 +460,7 @@ static struct object *device_open_file( struct object *obj, unsigned int access,
 {
     struct device *device = (struct device *)obj;
     struct device_file *file;
+    struct unicode_str nt_name;
 
     if (!(file = alloc_object( &device_file_ops ))) return NULL;
 
@@ -466,7 +473,8 @@ static struct object *device_open_file( struct object *obj, unsigned int access,
     {
         mode_t mode = 0666;
         access = file->obj.ops->map_access( &file->obj, access );
-        file->fd = open_fd( NULL, device->unix_path, O_NONBLOCK | O_LARGEFILE,
+        nt_name.str = device->obj.ops->get_full_name( &device->obj, &nt_name.len );
+        file->fd = open_fd( NULL, device->unix_path, nt_name, O_NONBLOCK | O_LARGEFILE,
                             &mode, access, sharing, options );
         if (file->fd) set_fd_user( file->fd, &device_file_fd_ops, &file->obj );
     }

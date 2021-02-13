@@ -92,8 +92,8 @@ static void master_socket_poll_event( struct fd *fd, int event );
 static const struct object_ops master_socket_ops =
 {
     sizeof(struct master_socket),  /* size */
+    &no_type,                      /* type */
     master_socket_dump,            /* dump */
-    no_get_type,                   /* get_type */
     no_add_queue,                  /* add_queue */
     NULL,                          /* remove_queue */
     NULL,                          /* signaled */
@@ -102,7 +102,7 @@ static const struct object_ops master_socket_ops =
     NULL,                          /* satisfied */
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
-    no_map_access,                 /* map_access */
+    default_map_access,            /* map_access */
     default_get_sd,                /* get_sd */
     default_set_sd,                /* set_sd */
     no_get_full_name,              /* get_full_name */

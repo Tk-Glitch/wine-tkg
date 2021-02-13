@@ -1940,6 +1940,9 @@ void WINAPI wine_vkDestroyDebugUtilsMessengerEXT(
 
     object = wine_debug_utils_messenger_from_handle(messenger);
 
+    if (!object)
+        return;
+
     instance->funcs.p_vkDestroyDebugUtilsMessengerEXT(instance->instance, object->debug_messenger, NULL);
     WINE_VK_REMOVE_HANDLE_MAPPING(instance, object);
 
@@ -2041,6 +2044,9 @@ void WINAPI wine_vkDestroyDebugReportCallbackEXT(
     TRACE("%p, 0x%s, %p\n", instance, wine_dbgstr_longlong(callback), allocator);
 
     object = wine_debug_report_callback_from_handle(callback);
+
+    if (!object)
+        return;
 
     instance->funcs.p_vkDestroyDebugReportCallbackEXT(instance->instance, object->debug_callback, NULL);
 

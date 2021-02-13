@@ -2775,7 +2775,6 @@ struct neutralsublang_name_t {
     WCHAR name[3];
     WCHAR sname[16];
     LCID lcid;
-    int todo;
 };
 
 static const struct neutralsublang_name_t neutralsublang_names[] = {
@@ -2789,7 +2788,7 @@ static const struct neutralsublang_name_t neutralsublang_names[] = {
     { {'m','s',0}, {'m','s','-','M','Y',0}, MAKELCID(MAKELANGID(LANG_MALAY, SUBLANG_MALAY_MALAYSIA), SORT_DEFAULT) },
     { {'n','l',0}, {'n','l','-','N','L',0}, MAKELCID(MAKELANGID(LANG_DUTCH, SUBLANG_DUTCH), SORT_DEFAULT) },
     { {'p','t',0}, {'p','t','-','B','R',0}, MAKELCID(MAKELANGID(LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN), SORT_DEFAULT) },
-    { {'s','r',0}, {'s','r','-','L','a','t','n','-','R','S',0}, MAKELCID(MAKELANGID(LANG_SERBIAN, SUBLANG_SERBIAN_SERBIA_LATIN), SORT_DEFAULT), 1 },
+    { {'s','r',0}, {'s','r','-','L','a','t','n','-','R','S',0}, MAKELCID(MAKELANGID(LANG_SERBIAN, SUBLANG_SERBIAN_SERBIA_LATIN), SORT_DEFAULT) },
     { {'s','v',0}, {'s','v','-','S','E',0}, MAKELCID(MAKELANGID(LANG_SWEDISH, SUBLANG_SWEDISH), SORT_DEFAULT) },
     { {'u','z',0}, {'u','z','-','L','a','t','n','-','U','Z',0}, MAKELCID(MAKELANGID(LANG_UZBEK, SUBLANG_UZBEK_LATIN), SORT_DEFAULT) },
     { {'z','h',0}, {'z','h','-','C','N',0}, MAKELCID(MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED), SORT_DEFAULT) },
@@ -2868,14 +2867,12 @@ static void test_LocaleNameToLCID(void)
         for (ptr = neutralsublang_names; *ptr->name; ptr++)
         {
             lcid = pLocaleNameToLCID(ptr->name, 0);
-            todo_wine_if (ptr->todo)
-                ok(lcid == ptr->lcid, "%s: got wrong lcid 0x%04x, expected 0x%04x\n",
-                    wine_dbgstr_w(ptr->name), lcid, ptr->lcid);
+            ok(lcid == ptr->lcid, "%s: got wrong lcid 0x%04x, expected 0x%04x\n",
+                wine_dbgstr_w(ptr->name), lcid, ptr->lcid);
 
             *buffer = 0;
             ret = pLCIDToLocaleName(lcid, buffer, ARRAY_SIZE(buffer), 0);
             ok(ret > 0, "%s: got %d\n", wine_dbgstr_w(ptr->name), ret);
-            todo_wine_if (ptr->todo)
             ok(!lstrcmpW(ptr->sname, buffer), "%s: got wrong locale name %s\n",
                 wine_dbgstr_w(ptr->name), wine_dbgstr_w(buffer));
 
@@ -2981,13 +2978,11 @@ static void test_LocaleNameToLCID(void)
             status = pRtlLocaleNameToLcid( ptr->name, &lcid, 2 );
             ok( !status || broken(ptr->lcid == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)), /* vista */
                 "%s failed error %x\n", wine_dbgstr_w(ptr->name), status );
-            todo_wine_if(ptr->todo)
             if (!status) ok( lcid == expect, "%s: got wrong lcid 0x%04x, expected 0x%04x\n",
                              wine_dbgstr_w(ptr->name), lcid, expect );
             status = pRtlLocaleNameToLcid( ptr->sname, &lcid, 0 );
             ok( !status || broken(ptr->lcid == MAKELANGID(LANG_SERBIAN, SUBLANG_SERBIAN_SERBIA_LATIN)), /* vista */
                 "%s failed error %x\n", wine_dbgstr_w(ptr->name), status );
-            todo_wine_if(ptr->todo)
             if (!status) ok( lcid == ptr->lcid, "%s: got wrong lcid 0x%04x, expected 0x%04x\n",
                              wine_dbgstr_w(ptr->name), lcid, ptr->lcid );
         }
@@ -3966,6 +3961,10 @@ static void test_ConvertDefaultLocale(void)
       broken( lcid == 0x7c04 ) ||  /* winxp */
       broken( lcid == 0x0404 ),  /* vista */
       "Expected lcid = %08x got %08x\n", MAKELANGID( LANG_CHINESE, SUBLANG_CHINESE_HONGKONG ), lcid );
+  lcid = ConvertDefaultLocale( LANG_SERBIAN_NEUTRAL );
+  ok( lcid == MAKELANGID( LANG_SERBIAN, SUBLANG_SERBIAN_SERBIA_LATIN ) ||
+      broken( lcid == MAKELANGID( LANG_SERBIAN, SUBLANG_SERBIAN_LATIN ) ),  /* <= vista */
+      "Expected lcid = %08x got %08x\n", MAKELANGID( LANG_SERBIAN, SUBLANG_SERBIAN_SERBIA_LATIN ), lcid );
 
   /* Invariant language is not treated specially */
   TEST_LCID(LANG_INVARIANT, SUBLANG_DEFAULT, SORT_DEFAULT);
@@ -5134,8 +5133,7 @@ static void test_GetLocaleInfoEx(void)
         {
             val = 0;
             pGetLocaleInfoEx(ptr->name, LOCALE_ILANGUAGE|LOCALE_RETURN_NUMBER, (WCHAR*)&val, sizeof(val)/sizeof(WCHAR));
-            todo_wine_if (ptr->todo)
-                ok(val == ptr->lcid, "%s: got wrong lcid 0x%04x, expected 0x%04x\n", wine_dbgstr_w(ptr->name), val, ptr->lcid);
+            ok(val == ptr->lcid, "%s: got wrong lcid 0x%04x, expected 0x%04x\n", wine_dbgstr_w(ptr->name), val, ptr->lcid);
             bufferW[0] = 0;
             ret = pGetLocaleInfoEx(ptr->name, LOCALE_SNAME, bufferW, ARRAY_SIZE(bufferW));
             ok(ret == lstrlenW(bufferW)+1, "%s: got ret value %d\n", wine_dbgstr_w(ptr->name), ret);

@@ -63,6 +63,20 @@
 #include "process.h"
 #include "security.h"
 
+static const WCHAR file_name[] = {'F','i','l','e'};
+
+struct type_descr file_type =
+{
+    { file_name, sizeof(file_name) },   /* name */
+    FILE_ALL_ACCESS,                    /* valid_access */
+    {                                   /* mapping */
+        FILE_GENERIC_READ,
+        FILE_GENERIC_WRITE,
+        FILE_GENERIC_EXECUTE,
+        FILE_ALL_ACCESS
+    },
+};
+
 #ifndef XATTR_USER_PREFIX
 #define XATTR_USER_PREFIX "user."
 #endif
@@ -91,9 +105,6 @@ struct file
     struct list         kernel_object;  /* list of kernel object pointers */
 };
 
-static unsigned int generic_file_map_access( unsigned int access );
-static struct security_descriptor *get_xattr_sd( int fd );
-
 static void file_dump( struct object *obj, int verbose );
 static struct fd *file_get_fd( struct object *obj );
 static struct security_descriptor *file_get_sd( struct object *obj );
@@ -110,8 +121,8 @@ static enum server_fd_type file_get_fd_type( struct fd *fd );
 static const struct object_ops file_ops =
 {
     sizeof(struct file),          /* size */
+    &file_type,                   /* type */
     file_dump,                    /* dump */
-    file_get_type,                /* get_type */
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
@@ -120,7 +131,7 @@ static const struct object_ops file_ops =
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     file_get_fd,                  /* get_fd */
-    default_fd_map_access,        /* map_access */
+    default_map_access,           /* map_access */
     file_get_sd,                  /* get_sd */
     file_set_sd,                  /* set_sd */
     no_get_full_name,             /* get_full_name */
@@ -169,7 +180,7 @@ struct file *create_file_for_fd( int fd, unsigned int access, unsigned int shari
     }
 
     file->mode = st.st_mode;
-    file->access = default_fd_map_access( &file->obj, access );
+    file->access = default_map_access( &file->obj, access );
     list_init( &file->kernel_object );
     if (!(file->fd = create_anonymous_fd( &file_fd_ops, fd, &file->obj,
                                           FILE_SYNCHRONOUS_IO_NONALERT )))
@@ -177,7 +188,6 @@ struct file *create_file_for_fd( int fd, unsigned int access, unsigned int shari
         release_object( file );
         return NULL;
     }
-    set_unix_name_of_fd( file->fd, &st );
     allow_fd_caching( file->fd );
     return file;
 }
@@ -197,7 +207,7 @@ struct file *create_file_for_fd_obj( struct fd *fd, unsigned int access, unsigne
     if ((file = alloc_object( &file_ops )))
     {
         file->mode = st.st_mode;
-        file->access = default_fd_map_access( &file->obj, access );
+        file->access = default_map_access( &file->obj, access );
         list_init( &file->kernel_object );
         if (!(file->fd = dup_fd_object( fd, access, sharing, FILE_SYNCHRONOUS_IO_NONALERT )))
         {
@@ -303,149 +313,19 @@ static void set_xattr_sd( int fd, const struct security_descriptor *sd )
     xattr_fset( fd, WINE_XATTR_SD, buffer, len );
 }
 
-static struct security_descriptor *inherit_sd( const struct security_descriptor *parent_sd, int is_dir )
-{
-    const DWORD inheritance_mask = INHERIT_ONLY_ACE | OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
-    struct security_descriptor *sd = NULL;
-    const ACL *parent_dacl;
-    int present;
-    ACL *dacl;
-
-    parent_dacl = sd_get_dacl( parent_sd, &present );
-    if (present && parent_dacl)
-    {
-        size_t dacl_size = sizeof(ACL), ace_count = 0;
-        const ACE_HEADER *parent_ace;
-        const SID *user, *group;
-        ACE_HEADER *ace;
-        char *ptr;
-        ULONG i;
-
-        /* Calculate the size of the DACL */
-        parent_ace = (const ACE_HEADER *)(parent_dacl + 1);
-        for (i = 0; i < parent_dacl->AceCount; i++, parent_ace = ace_next( parent_ace ))
-        {
-            if (!(parent_ace->AceFlags & inheritance_mask)) continue;
-
-            ace_count++;
-            dacl_size += parent_ace->AceSize;
-        }
-        if (!ace_count) return sd; /* No inheritance */
-
-        /* Fill in the security descriptor so that it is compatible with our DACL */
-        user = (const SID *)(parent_sd + 1);
-        group = (const SID *)((char *)(parent_sd + 1) + parent_sd->owner_len);
-        sd = mem_alloc( sizeof(struct security_descriptor) + parent_sd->owner_len
-                        + parent_sd->group_len + dacl_size );
-        if (!sd) return sd;
-        sd->control = SE_DACL_PRESENT;
-        sd->owner_len = parent_sd->owner_len;
-        sd->group_len = parent_sd->group_len;
-        sd->sacl_len = 0;
-        sd->dacl_len = dacl_size;
-        ptr = (char *)(sd + 1);
-        memcpy( ptr, user, sd->owner_len );
-        ptr += sd->owner_len;
-        memcpy( ptr, group, sd->group_len );
-        ptr += sd->group_len;
-        dacl = (ACL *)ptr;
-        dacl->AclRevision = ACL_REVISION;
-        dacl->Sbz1 = 0;
-        dacl->AclSize = dacl_size;
-        dacl->AceCount = ace_count;
-        dacl->Sbz2 = 0;
-        ace = (ACE_HEADER *)(dacl + 1);
-
-        /* Build the new DACL, inheriting from the parent's information */
-        parent_ace = (const ACE_HEADER *)(parent_dacl + 1);
-        for (i = 0; i < parent_dacl->AceCount; i++, parent_ace = ace_next( parent_ace ))
-        {
-            DWORD flags = parent_ace->AceFlags;
-
-            if (!(flags & inheritance_mask)) continue;
-
-            ace->AceType = parent_ace->AceType;
-            if (is_dir && (flags & CONTAINER_INHERIT_ACE))
-                flags &= ~INHERIT_ONLY_ACE;
-            else if (!is_dir && (flags & OBJECT_INHERIT_ACE))
-                flags &= ~INHERIT_ONLY_ACE;
-            else if (is_dir && (flags & OBJECT_INHERIT_ACE))
-                flags |= INHERIT_ONLY_ACE;
-            if (is_dir)
-                ace->AceFlags = flags | INHERITED_ACE;
-            else
-                ace->AceFlags = (parent_ace->AceFlags & ~inheritance_mask) | INHERITED_ACE;
-            ace->AceSize = parent_ace->AceSize;
-            memcpy( ace + 1, parent_ace + 1, parent_ace->AceSize - sizeof(ACE_HEADER));
-            ace = (ACE_HEADER *)ace_next( ace );
-        }
-    }
-    return sd;
-}
-
-static struct security_descriptor *file_get_parent_sd( struct fd *root, const char *child_name,
-                                                       int child_len, int is_dir )
-{
-    struct security_descriptor *parent_sd, *sd = NULL;
-    mode_t parent_mode = 0555;
-    char *p, *parent_name;
-    struct fd *parent_fd;
-    int unix_fd;
-
-    if (!(parent_name = mem_alloc( child_len + 1 ))) return NULL;
-    memcpy( parent_name, child_name, child_len );
-    parent_name[child_len] = 0;
-
-    /* skip trailing slashes */
-    p = parent_name + strlen( parent_name ) - 1;
-    while (p > parent_name && *p == '/') p--;
-
-    /* remove last path component */
-    if (p == parent_name && *p == '/')
-    {
-        free(parent_name);
-        return NULL;
-    }
-    while (p > parent_name && *p != '/') p--;
-    while (p > parent_name && *p == '/') p--;
-    p[1] = 0;
-
-    parent_fd = open_fd( root, parent_name, O_NONBLOCK | O_LARGEFILE, &parent_mode,
-                         READ_CONTROL|ACCESS_SYSTEM_SECURITY,
-                         FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
-                         FILE_OPEN_FOR_BACKUP_INTENT );
-    free( parent_name );
-
-    if (parent_fd)
-    {
-        unix_fd = get_unix_fd( parent_fd );
-        if (unix_fd != -1)
-        {
-            parent_sd = get_xattr_sd( unix_fd );
-            if (parent_sd)
-            {
-                sd = inherit_sd( parent_sd, is_dir );
-                free( parent_sd );
-            }
-        }
-        release_object( parent_fd );
-    }
-    return sd;
-}
-
 static struct object *create_file( struct fd *root, const char *nameptr, data_size_t len,
+                                   struct unicode_str nt_name,
                                    unsigned int access, unsigned int sharing, int create,
                                    unsigned int options, unsigned int attrs,
                                    const struct security_descriptor *sd )
 {
-    struct security_descriptor *temp_sd = NULL;
     struct object *obj = NULL;
     struct fd *fd;
     int flags;
     char *name;
     mode_t mode;
 
-    if (!len || ((nameptr[0] == '/') ^ !root))
+    if (!len || ((nameptr[0] == '/') ^ !root) || (nt_name.len && ((nt_name.str[0] == '\\') ^ !root)))
     {
         set_error( STATUS_OBJECT_PATH_SYNTAX_BAD );
         return NULL;
@@ -466,10 +346,6 @@ static struct object *create_file( struct fd *root, const char *nameptr, data_si
                             access |= FILE_WRITE_ATTRIBUTES; break;
     default:                set_error( STATUS_INVALID_PARAMETER ); goto done;
     }
-
-    /* Note: inheritance of security descriptors only occurs on creation when sd is NULL */
-    if (!sd && (create == FILE_CREATE || create == FILE_OVERWRITE_IF))
-        sd = temp_sd = file_get_parent_sd( root, nameptr, len, options & FILE_DIRECTORY_FILE );
 
     if (sd)
     {
@@ -493,10 +369,10 @@ static struct object *create_file( struct fd *root, const char *nameptr, data_si
             mode |= S_IXOTH;
     }
 
-    access = generic_file_map_access( access );
+    access = map_access( access, &file_type.mapping );
 
     /* FIXME: should set error to STATUS_OBJECT_NAME_COLLISION if file existed before */
-    fd = open_fd( root, name, flags | O_NONBLOCK | O_LARGEFILE, &mode, access, sharing, options );
+    fd = open_fd( root, name, nt_name, flags | O_NONBLOCK | O_LARGEFILE, &mode, access, sharing, options );
     if (!fd) goto done;
 
     if (S_ISDIR(mode))
@@ -509,7 +385,6 @@ static struct object *create_file( struct fd *root, const char *nameptr, data_si
     release_object( fd );
 
 done:
-    free( temp_sd );
     free( name );
     return obj;
 }
@@ -519,12 +394,6 @@ static void file_dump( struct object *obj, int verbose )
     struct file *file = (struct file *)obj;
     assert( obj->ops == &file_ops );
     fprintf( stderr, "File fd=%p\n", file->fd );
-}
-
-struct object_type *file_get_type( struct object *obj )
-{
-    static const struct unicode_str str = { type_File, sizeof(type_File) };
-    return get_object_type( &str );
 }
 
 static enum server_fd_type file_get_fd_type( struct fd *fd )
@@ -542,15 +411,6 @@ static struct fd *file_get_fd( struct object *obj )
     struct file *file = (struct file *)obj;
     assert( obj->ops == &file_ops );
     return (struct fd *)grab_object( file->fd );
-}
-
-static unsigned int generic_file_map_access( unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= FILE_GENERIC_READ;
-    if (access & GENERIC_WRITE)   access |= FILE_GENERIC_WRITE;
-    if (access & GENERIC_EXECUTE) access |= FILE_GENERIC_EXECUTE;
-    if (access & GENERIC_ALL)     access |= FILE_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 struct security_descriptor *mode_to_sd( mode_t mode, const SID *user, const SID *group )
@@ -684,7 +544,7 @@ static void convert_generic_sd( struct security_descriptor *sd )
         for (i = 0; i < dacl->AceCount; i++, ace = ace_next( ace ))
         {
             DWORD *mask = (DWORD *)(ace + 1);
-            *mask = generic_file_map_access( *mask );
+            *mask = map_access( *mask, &file_type.mapping );
         }
     }
 }
@@ -758,7 +618,7 @@ static mode_t file_access_to_mode( unsigned int access )
 {
     mode_t mode = 0;
 
-    access = generic_file_map_access( access );
+    access = map_access( access, &file_type.mapping );
     if (access & FILE_READ_DATA)  mode |= 4;
     if (access & (FILE_WRITE_DATA|FILE_APPEND_DATA)) mode |= 2;
     if (access & FILE_EXECUTE)    mode |= 1;
@@ -923,13 +783,15 @@ static struct object *file_open_file( struct object *obj, unsigned int access,
 {
     struct file *file = (struct file *)obj;
     struct object *new_file = NULL;
+    struct unicode_str nt_name;
     char *unix_name;
 
     assert( obj->ops == &file_ops );
 
     if ((unix_name = dup_fd_name( file->fd, "" )))
     {
-        new_file = create_file( NULL, unix_name, strlen(unix_name), access,
+        get_nt_name( file->fd, &nt_name );
+        new_file = create_file( NULL, unix_name, strlen(unix_name), nt_name, access,
                                 sharing, FILE_OPEN, options, 0, NULL );
         free( unix_name );
     }
@@ -1020,20 +882,13 @@ DECL_HANDLER(create_file)
 {
     struct object *file;
     struct fd *root_fd = NULL;
-    struct unicode_str unicode_name;
+    struct unicode_str nt_name;
     const struct security_descriptor *sd;
-    const struct object_attributes *objattr = get_req_object_attributes( &sd, &unicode_name, NULL );
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &nt_name, NULL );
     const char *name;
     data_size_t name_len;
 
     if (!objattr) return;
-
-    /* name is transferred in the unix codepage outside of the objattr structure */
-    if (unicode_name.len)
-    {
-        set_error( STATUS_INVALID_PARAMETER );
-        return;
-    }
 
     if (objattr->rootdir)
     {
@@ -1048,7 +903,7 @@ DECL_HANDLER(create_file)
     name = get_req_data_after_objattr( objattr, &name_len );
 
     reply->handle = 0;
-    if ((file = create_file( root_fd, name, name_len, req->access, req->sharing,
+    if ((file = create_file( root_fd, name, name_len, nt_name, req->access, req->sharing,
                              req->create, req->options, req->attrs, sd )))
     {
         if (get_error() == STATUS_OBJECT_NAME_EXISTS)

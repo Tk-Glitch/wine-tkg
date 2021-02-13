@@ -145,8 +145,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(file);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
-#define ROUND_UP(value, alignment) (((value) + ((alignment) - 1)) & ~((alignment)-1))
-
 #define MAX_DOS_DRIVES 26
 
 #define FILE_WRITE_TO_END_OF_FILE      ((LONGLONG)-1)
@@ -1483,6 +1481,7 @@ static BOOLEAN match_filename( const WCHAR *name, int length, const UNICODE_STRI
             next_to_retry = name;
             break;
         case '?':
+        case '>':
             mask++;
             name++;
             break;
@@ -2014,7 +2013,7 @@ static NTSTATUS fill_file_info( const struct stat *st, ULONG attr, void *ptr,
 }
 
 
-NTSTATUS server_get_unix_name( HANDLE handle, char **unix_name, BOOL nofollow )
+static NTSTATUS server_get_unix_name( HANDLE handle, char **unix_name, BOOL nofollow )
 {
     data_size_t size = 1024;
     NTSTATUS ret;
@@ -3168,6 +3167,29 @@ static NTSTATUS find_drive_rootA( LPCSTR *ppath, unsigned int len, int *drive_re
 
 
 /******************************************************************************
+ *           rebuild_nt_name
+ */
+static void rebuild_nt_name( const UNICODE_STRING *nameW, DWORD prefix_len,
+                             const char *unix_name, UNICODE_STRING *nt_name )
+{
+    WCHAR *buf;
+    DWORD len;
+
+    while (*unix_name == '/') unix_name++;
+    nt_name->MaximumLength = (prefix_len + strlen(unix_name) + 2) * sizeof(WCHAR);
+    if (!(buf = malloc( nt_name->MaximumLength ))) return;
+    nt_name->Buffer = buf;
+    memcpy( buf, nameW->Buffer, prefix_len * sizeof(WCHAR) );
+    if (prefix_len && buf[prefix_len - 1] != '\\') buf[prefix_len++] = '\\';
+    buf += prefix_len;
+    len = ntdll_umbstowcs( unix_name, strlen(unix_name), buf, strlen(unix_name) );
+    for (; len; len--, buf++) if (*buf == '/') *buf = '\\';
+    *buf = 0;
+    nt_name->Length = (buf - nt_name->Buffer) * sizeof(WCHAR);
+}
+
+
+/******************************************************************************
  *           find_file_id
  *
  * Recursively search directories from the dir queue for a given inode.
@@ -3226,7 +3248,8 @@ static NTSTATUS find_file_id( char **unix_name, ULONG *len, ULONGLONG file_id, d
  *
  * Lookup a file from its file id instead of its name.
  */
-static NTSTATUS file_id_to_unix_file_name( const OBJECT_ATTRIBUTES *attr, char **unix_name_ret )
+static NTSTATUS file_id_to_unix_file_name( const OBJECT_ATTRIBUTES *attr, char **unix_name_ret,
+                                           UNICODE_STRING *nt_name )
 {
     enum server_fd_type type;
     int old_cwd, root_fd, needs_close;
@@ -3289,6 +3312,7 @@ done:
     {
         TRACE( "%s -> %s\n", wine_dbgstr_longlong(file_id), debugstr_a(unix_name) );
         *unix_name_ret = unix_name;
+        if (nt_name) rebuild_nt_name( attr->ObjectName, 0, unix_name, nt_name );
     }
     else
     {
@@ -3434,7 +3458,7 @@ static NTSTATUS lookup_unix_name( const WCHAR *name, int name_len, char **buffer
  *           nt_to_unix_file_name_attr
  */
 static NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, char **name_ret,
-                                           UINT disposition )
+                                           UNICODE_STRING *nt_name, UINT disposition )
 {
     static const WCHAR invalid_charsW[] = { INVALID_NT_CHARS, 0 };
     enum server_fd_type type;
@@ -3452,7 +3476,7 @@ static NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, char *
         if (!attr->ObjectName->Buffer)
             return STATUS_OBJECT_PATH_SYNTAX_BAD;
 
-        return nt_to_unix_file_name( attr->ObjectName, name_ret, disposition );
+        return nt_to_unix_file_name( attr->ObjectName, name_ret, nt_name, disposition );
     }
 
     name     = attr->ObjectName->Buffer;
@@ -3496,6 +3520,7 @@ static NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, char *
     {
         TRACE( "%s -> %s\n", debugstr_us(attr->ObjectName), debugstr_a(unix_name) );
         *name_ret = unix_name;
+        if (nt_name) rebuild_nt_name( attr->ObjectName, 0, unix_name, nt_name );
     }
     else
     {
@@ -3515,7 +3540,8 @@ static NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, char *
  * element doesn't have to exist; in that case STATUS_NO_SUCH_FILE is
  * returned, but the unix name is still filled in properly.
  */
-static NTSTATUS nt_to_unix_file_name_internal( const UNICODE_STRING *nameW, char **unix_name_ret, UINT disposition )
+static NTSTATUS nt_to_unix_file_name_internal( const UNICODE_STRING *nameW, char **unix_name_ret,
+                                               UNICODE_STRING *nt_name, UINT disposition )
 {
     static const WCHAR unixW[] = {'u','n','i','x'};
     static const WCHAR pipeW[] = {'p','i','p','e'};
@@ -3617,6 +3643,7 @@ static NTSTATUS nt_to_unix_file_name_internal( const UNICODE_STRING *nameW, char
     {
         TRACE( "%s -> %s\n", debugstr_us(nameW), debugstr_a(unix_name) );
         *unix_name_ret = unix_name;
+        if (nt_name) rebuild_nt_name( nameW, name - nameW->Buffer, unix_name + pos, nt_name );
     }
     else
     {
@@ -3640,7 +3667,7 @@ NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, char *nam
                                           UINT disposition )
 {
     char *buffer = NULL;
-    NTSTATUS status = nt_to_unix_file_name( nameW, &buffer, disposition );
+    NTSTATUS status = nt_to_unix_file_name( nameW, &buffer, NULL, disposition );
 
     if (buffer)
     {
@@ -3653,7 +3680,7 @@ NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, char *nam
 }
 
 /* read the contents of an NT symlink object */
-NTSTATUS read_nt_symlink( HANDLE root, UNICODE_STRING *name, WCHAR *target, size_t length )
+static NTSTATUS read_nt_symlink( HANDLE root, UNICODE_STRING *name, WCHAR *target, size_t length )
 {
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING targetW;
@@ -3727,7 +3754,7 @@ static NTSTATUS nt_to_dos_device( WCHAR *name, size_t length, WCHAR *device_ret 
  * returned, but the unix name is still filled in properly.
  */
 NTSTATUS nt_to_unix_file_name( const UNICODE_STRING *nameW, char **unix_name_ret,
-                                     UINT disposition )
+                               UNICODE_STRING *nt_name, UINT disposition )
 {
     static const WCHAR systemrootW[] = {'\\','S','y','s','t','e','m','R','o','o','t','\\',0};
     static const WCHAR dosprefixW[] = {'\\','?','?','\\'};
@@ -3750,7 +3777,7 @@ NTSTATUS nt_to_unix_file_name( const UNICODE_STRING *nameW, char **unix_name_ret
         prefix = user_shared_data->NtSystemRoot;
     }
     else
-        return nt_to_unix_file_name_internal( nameW, unix_name_ret, disposition );
+        return nt_to_unix_file_name_internal( nameW, unix_name_ret, nt_name, disposition );
 
     name_len = sizeof(dosprefixW) + wcslen(prefix) * sizeof(WCHAR) +
                nameW->Length - offset * sizeof(WCHAR) + sizeof(WCHAR);
@@ -3767,7 +3794,7 @@ NTSTATUS nt_to_unix_file_name( const UNICODE_STRING *nameW, char **unix_name_ret
 
     dospathW.Buffer = name;
     dospathW.Length = wcslen( name ) * sizeof(WCHAR);
-    status = nt_to_unix_file_name_internal( &dospathW, unix_name_ret, disposition );
+    status = nt_to_unix_file_name_internal( &dospathW, unix_name_ret, nt_name, disposition );
 
     free( name );
     return status;
@@ -3911,14 +3938,11 @@ NTSTATUS open_unix_file( HANDLE *handle, const char *unix_name, ACCESS_MASK acce
                          OBJECT_ATTRIBUTES *attr, ULONG attributes, ULONG sharing, ULONG disposition,
                          ULONG options, void *ea_buffer, ULONG ea_length )
 {
-    static UNICODE_STRING empty_string;
     struct object_attributes *objattr;
-    OBJECT_ATTRIBUTES unix_attr = *attr;
     NTSTATUS status;
     data_size_t len;
 
-    unix_attr.ObjectName = &empty_string;  /* we send the unix name instead */
-    if ((status = alloc_object_attributes( &unix_attr, &objattr, &len ))) return status;
+    if ((status = alloc_object_attributes( attr, &objattr, &len ))) return status;
 
     SERVER_START_REQ( create_file )
     {
@@ -3946,6 +3970,8 @@ NTSTATUS WINAPI NtCreateFile( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBU
                               ULONG attributes, ULONG sharing, ULONG disposition,
                               ULONG options, void *ea_buffer, ULONG ea_length )
 {
+    OBJECT_ATTRIBUTES nt_attr;
+    UNICODE_STRING nt_name = { 0 };
     char *unix_name;
     BOOL created = FALSE;
 
@@ -3960,9 +3986,9 @@ NTSTATUS WINAPI NtCreateFile( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBU
     if (alloc_size) FIXME( "alloc_size not supported\n" );
 
     if (options & FILE_OPEN_BY_FILE_ID)
-        io->u.Status = file_id_to_unix_file_name( attr, &unix_name );
+        io->u.Status = file_id_to_unix_file_name( attr, &unix_name, &nt_name );
     else
-        io->u.Status = nt_to_unix_file_name_attr( attr, &unix_name, disposition );
+        io->u.Status = nt_to_unix_file_name_attr( attr, &unix_name, &nt_name, disposition );
 
     if (io->u.Status == STATUS_BAD_DEVICE_TYPE)
     {
@@ -3994,8 +4020,11 @@ NTSTATUS WINAPI NtCreateFile( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBU
         return io->u.Status;
     }
 
-    io->u.Status = open_unix_file( handle, unix_name, access, attr, attributes,
+    nt_attr = *attr;
+    if (nt_name.Buffer) nt_attr.ObjectName = &nt_name;
+    io->u.Status = open_unix_file( handle, unix_name, access, &nt_attr, attributes,
                                    sharing, disposition, options, ea_buffer, ea_length );
+    free( nt_name.Buffer );
 
     if (io->u.Status == STATUS_SUCCESS)
     {
@@ -4152,7 +4181,7 @@ NTSTATUS WINAPI NtQueryFullAttributesFile( const OBJECT_ATTRIBUTES *attr,
     char *unix_name;
     NTSTATUS status;
 
-    if (!(status = nt_to_unix_file_name_attr( attr, &unix_name, FILE_OPEN )))
+    if (!(status = nt_to_unix_file_name_attr( attr, &unix_name, NULL, FILE_OPEN )))
     {
         ULONG attributes;
         struct stat st;
@@ -4192,7 +4221,7 @@ NTSTATUS WINAPI NtQueryAttributesFile( const OBJECT_ATTRIBUTES *attr, FILE_BASIC
     char *unix_name;
     NTSTATUS status;
 
-    if (!(status = nt_to_unix_file_name_attr( attr, &unix_name, FILE_OPEN )))
+    if (!(status = nt_to_unix_file_name_attr( attr, &unix_name, NULL, FILE_OPEN )))
     {
         ULONG attributes;
         struct stat st;
@@ -4715,7 +4744,7 @@ NTSTATUS WINAPI NtSetInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
         if (len >= sizeof(FILE_RENAME_INFORMATION))
         {
             FILE_RENAME_INFORMATION *info = ptr;
-            UNICODE_STRING name_str;
+            UNICODE_STRING name_str, nt_name = { 0 };
             OBJECT_ATTRIBUTES attr;
             char *unix_name;
 
@@ -4728,7 +4757,7 @@ NTSTATUS WINAPI NtSetInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
             attr.RootDirectory = info->RootDirectory;
             attr.Attributes = OBJ_CASE_INSENSITIVE;
 
-            io->u.Status = nt_to_unix_file_name_attr( &attr, &unix_name, FILE_OPEN_IF );
+            io->u.Status = nt_to_unix_file_name_attr( &attr, &unix_name, &nt_name, FILE_OPEN_IF );
             if (io->u.Status != STATUS_SUCCESS && io->u.Status != STATUS_NO_SUCH_FILE)
                 break;
 
@@ -4736,14 +4765,17 @@ NTSTATUS WINAPI NtSetInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
             {
                 req->handle   = wine_server_obj_handle( handle );
                 req->rootdir  = wine_server_obj_handle( attr.RootDirectory );
+                req->namelen  = nt_name.Length;
                 req->link     = FALSE;
                 req->replace  = info->ReplaceIfExists;
+                wine_server_add_data( req, nt_name.Buffer, nt_name.Length );
                 wine_server_add_data( req, unix_name, strlen(unix_name) );
                 io->u.Status = wine_server_call( req );
             }
             SERVER_END_REQ;
 
             free( unix_name );
+            free( nt_name.Buffer );
         }
         else io->u.Status = STATUS_INVALID_PARAMETER_3;
         break;
@@ -4752,7 +4784,7 @@ NTSTATUS WINAPI NtSetInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
         if (len >= sizeof(FILE_LINK_INFORMATION))
         {
             FILE_LINK_INFORMATION *info = ptr;
-            UNICODE_STRING name_str;
+            UNICODE_STRING name_str, nt_name = { 0 };
             OBJECT_ATTRIBUTES attr;
             char *unix_name;
 
@@ -4765,7 +4797,7 @@ NTSTATUS WINAPI NtSetInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
             attr.RootDirectory = info->RootDirectory;
             attr.Attributes = OBJ_CASE_INSENSITIVE;
 
-            io->u.Status = nt_to_unix_file_name_attr( &attr, &unix_name, FILE_OPEN_IF );
+            io->u.Status = nt_to_unix_file_name_attr( &attr, &unix_name, &nt_name, FILE_OPEN_IF );
             if (io->u.Status != STATUS_SUCCESS && io->u.Status != STATUS_NO_SUCH_FILE)
                 break;
 
@@ -4773,14 +4805,17 @@ NTSTATUS WINAPI NtSetInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
             {
                 req->handle   = wine_server_obj_handle( handle );
                 req->rootdir  = wine_server_obj_handle( attr.RootDirectory );
+                req->namelen  = nt_name.Length;
                 req->link     = TRUE;
                 req->replace  = info->ReplaceIfExists;
+                wine_server_add_data( req, nt_name.Buffer, nt_name.Length );
                 wine_server_add_data( req, unix_name, strlen(unix_name) );
                 io->u.Status  = wine_server_call( req );
             }
             SERVER_END_REQ;
 
             free( unix_name );
+            free( nt_name.Buffer );
         }
         else io->u.Status = STATUS_INVALID_PARAMETER_3;
         break;
@@ -6309,7 +6344,6 @@ NTSTATUS FILE_GetSymlink(HANDLE handle, REPARSE_DATA_BUFFER *buffer, ULONG out_s
     int unix_dest_len = PATH_MAX;
     BOOL dest_allocated = FALSE;
     int dest_fd, needs_close;
-    int path_len = 0;
     DWORD max_length;
     NTSTATUS status;
     ULONG flags = 0;
@@ -6329,71 +6363,42 @@ NTSTATUS FILE_GetSymlink(HANDLE handle, REPARSE_DATA_BUFFER *buffer, ULONG out_s
     /* convert the relative path into an absolute path */
     if (flags == SYMLINK_FLAG_RELATIVE)
     {
-        int unix_src_len = strlen(unix_src);
-        int offset = unix_src_len + 2;
-        char *d;
+        int i;
 
-        memcpy( &unix_dest[offset], unix_dest, unix_dest_len + 1 );
-        memcpy( unix_dest, unix_src, unix_src_len );
-        unix_dest[unix_src_len] = 0;
-        d = dirname( unix_dest );
-        if (d != unix_dest) strcpy( unix_dest, d );
-        strcat( unix_dest, "/" );
-        path_len = strlen( unix_dest );
-        memmove( &unix_dest[path_len], &unix_dest[offset], unix_dest_len + 1 );
-        unix_dest_len = strlen( unix_dest );
-    }
-    /* resolve the NT path */
-    for (;;)
-    {
+        nt_dest_len = unix_dest_len;
         nt_dest = malloc( nt_dest_len * sizeof(WCHAR) );
         if (!nt_dest)
         {
             status = STATUS_NO_MEMORY;
             goto cleanup;
         }
-        status = wine_unix_to_nt_file_name( unix_dest, nt_dest, &nt_dest_len );
-        if (status != STATUS_BUFFER_TOO_SMALL) break;
-        free( nt_dest );
+        /* wine_unix_to_nt_file_name does not work on relative paths, so convert manually */
+        for (i = 0; i < unix_dest_len; i++)
+        {
+            if (unix_dest[i] == '/') unix_dest[i] = '\\';
+        }
+        ascii_to_unicode( nt_dest, unix_dest, unix_dest_len );
+    }
+    else
+    {
+        /* resolve the NT path */
+        for (;;)
+        {
+            nt_dest = malloc( nt_dest_len * sizeof(WCHAR) );
+            if (!nt_dest)
+            {
+                status = STATUS_NO_MEMORY;
+                goto cleanup;
+            }
+            status = wine_unix_to_nt_file_name( unix_dest, nt_dest, &nt_dest_len );
+            if (status != STATUS_BUFFER_TOO_SMALL) break;
+            free( nt_dest );
+        }
     }
     dest_allocated = TRUE;
     if (status != STATUS_SUCCESS)
         goto cleanup;
     nt_dest_len *= sizeof(WCHAR);
-
-    /* remove the relative path from the NT path */
-    if (flags == SYMLINK_FLAG_RELATIVE)
-    {
-        SIZE_T nt_path_len = PATH_MAX;
-        int relative_offset;
-        WCHAR *nt_path;
-
-        unix_dest_len = path_len;
-        for (;;)
-        {
-            nt_path = malloc( nt_path_len * sizeof(WCHAR) );
-            if (!nt_path)
-            {
-                status = STATUS_NO_MEMORY;
-                goto cleanup;
-            }
-            status = wine_unix_to_nt_file_name( unix_dest, nt_path, &nt_path_len );
-            if (status != STATUS_BUFFER_TOO_SMALL) break;
-            free( nt_path );
-        }
-        if (status != STATUS_SUCCESS)
-            goto cleanup;
-        relative_offset = lstrlenW( nt_path );
-        if (wcsnicmp( nt_path, nt_dest, relative_offset ) != 0)
-        {
-            free( nt_path );
-            status = STATUS_IO_REPARSE_DATA_INVALID;
-            goto cleanup;
-        }
-        free( nt_path );
-        nt_dest_len = lstrlenW( &nt_dest[relative_offset] ) * sizeof(WCHAR);
-        memmove( nt_dest, &nt_dest[relative_offset], nt_dest_len + sizeof(WCHAR) );
-    }
 
     prefix_len = (flags == SYMLINK_FLAG_RELATIVE) ? 0 : strlen("\\??\\");
     switch(buffer->ReparseTag)
@@ -7528,6 +7533,30 @@ NTSTATUS WINAPI NtSetEaFile( HANDLE handle, IO_STATUS_BLOCK *io, void *buffer, U
 }
 
 
+/* convert type information from server format; helper for NtQueryObject */
+static void *put_object_type_info( OBJECT_TYPE_INFORMATION *p, struct object_type_info *info )
+{
+    const ULONG align = sizeof(DWORD_PTR) - 1;
+
+    memset( p, 0, sizeof(*p) );
+    p->TypeName.Buffer               = (WCHAR *)(p + 1);
+    p->TypeName.Length               = info->name_len;
+    p->TypeName.MaximumLength        = info->name_len + sizeof(WCHAR);
+    p->TotalNumberOfObjects          = info->obj_count;
+    p->TotalNumberOfHandles          = info->handle_count;
+    p->HighWaterNumberOfObjects      = info->obj_max;
+    p->HighWaterNumberOfHandles      = info->handle_max;
+    p->TypeIndex                     = info->index + 2;
+    p->GenericMapping.GenericRead    = info->mapping.read;
+    p->GenericMapping.GenericWrite   = info->mapping.write;
+    p->GenericMapping.GenericExecute = info->mapping.exec;
+    p->GenericMapping.GenericAll     = info->mapping.all;
+    p->ValidAccessMask               = info->valid_access;
+    memcpy( p->TypeName.Buffer, info + 1, info->name_len );
+    p->TypeName.Buffer[info->name_len / sizeof(WCHAR)] = 0;
+    return (char *)(p + 1) + ((p->TypeName.MaximumLength + align) & ~align);
+}
+
 /**************************************************************************
  *           NtQueryObject   (NTDLL.@)
  */
@@ -7633,95 +7662,65 @@ NTSTATUS WINAPI NtQueryObject( HANDLE handle, OBJECT_INFORMATION_CLASS info_clas
     case ObjectTypeInformation:
     {
         OBJECT_TYPE_INFORMATION *p = ptr;
+        char buffer[sizeof(struct object_type_info) + 64];
+        struct object_type_info *info = (struct object_type_info *)buffer;
 
         SERVER_START_REQ( get_object_type )
         {
             req->handle = wine_server_obj_handle( handle );
-            if (len > sizeof(*p)) wine_server_set_reply( req, p + 1, len - sizeof(*p) );
+            wine_server_set_reply( req, buffer, sizeof(buffer) );
             status = wine_server_call( req );
-            if (status == STATUS_SUCCESS)
-            {
-                if (!reply->total)  /* no name */
-                {
-                    if (sizeof(*p) > len) status = STATUS_INFO_LENGTH_MISMATCH;
-                    else memset( p, 0, sizeof(*p) );
-                    if (used_len) *used_len = sizeof(*p);
-                }
-                else if (sizeof(*p) + reply->total + sizeof(WCHAR) > len)
-                {
-                    if (used_len) *used_len = sizeof(*p) + reply->total + sizeof(WCHAR);
-                    status = STATUS_INFO_LENGTH_MISMATCH;
-                }
-                else
-                {
-                    ULONG res = wine_server_reply_size( reply );
-                    p->TypeName.Buffer = (WCHAR *)(p + 1);
-                    p->TypeName.Length = res;
-                    p->TypeName.MaximumLength = res + sizeof(WCHAR);
-                    p->TypeName.Buffer[res / sizeof(WCHAR)] = 0;
-                    if (used_len) *used_len = sizeof(*p) + p->TypeName.MaximumLength;
-                }
-                if (status == STATUS_SUCCESS)
-                {
-                    WORD version = MAKEWORD(NtCurrentTeb()->Peb->OSMinorVersion,
-                                            NtCurrentTeb()->Peb->OSMajorVersion);
-                    if (version >= 0x0602)
-                        p->TypeIndex = reply->index;
-                }
-            }
         }
         SERVER_END_REQ;
+        if (status) break;
+        if (sizeof(*p) + info->name_len + sizeof(WCHAR) <= len)
+        {
+            put_object_type_info( p, info );
+            if (used_len) *used_len = sizeof(*p) + p->TypeName.MaximumLength;
+        }
+        else
+        {
+            if (used_len) *used_len = sizeof(*p) + info->name_len + sizeof(WCHAR);
+            status = STATUS_INFO_LENGTH_MISMATCH;
+        }
         break;
     }
 
     case ObjectTypesInformation:
     {
-        OBJECT_TYPES_INFORMATION *p = ptr;
-        OBJECT_TYPE_INFORMATION *type = (OBJECT_TYPE_INFORMATION *)(p + 1);
-        ULONG count, type_len, req_len = sizeof(OBJECT_TYPES_INFORMATION);
+        OBJECT_TYPES_INFORMATION *types = ptr;
+        OBJECT_TYPE_INFORMATION *p;
+        struct object_type_info *buffer;
+        /* assume at most 32 types, with an average 16-char name */
+        ULONG size = 32 * (sizeof(struct object_type_info) + 16 * sizeof(WCHAR));
+        ULONG i, count, pos, total, align = sizeof(DWORD_PTR) - 1;
 
-        for (count = 0, status = STATUS_SUCCESS; !status; count++)
+        buffer = malloc( size );
+        SERVER_START_REQ( get_object_types )
         {
-            SERVER_START_REQ( get_object_type_by_index )
-            {
-                req->index = count;
-                if (len > sizeof(*type))
-                    wine_server_set_reply( req, type + 1, len - sizeof(*type) );
-                status = wine_server_call( req );
-                if (status == STATUS_SUCCESS)
-                {
-                    type_len = sizeof(*type);
-                    if (reply->total)
-                        type_len += ROUND_UP( reply->total + sizeof(WCHAR), sizeof(DWORD_PTR) );
-                    req_len += type_len;
-                }
-                if (status == STATUS_SUCCESS && len >= req_len)
-                {
-                    ULONG res = wine_server_reply_size( reply );
-                    memset( type, 0, sizeof(*type) );
-                    if (reply->total)
-                    {
-                        type->TypeName.Buffer = (WCHAR *)(type + 1);
-                        type->TypeName.Length = res;
-                        type->TypeName.MaximumLength = res + sizeof(WCHAR);
-                        type->TypeName.Buffer[res / sizeof(WCHAR)] = 0;
-                    }
-                    type->TypeIndex = count;
-                    type = (OBJECT_TYPE_INFORMATION *)((char *)type + type_len);
-                }
-            }
-            SERVER_END_REQ;
+            wine_server_set_reply( req, buffer, size );
+            status = wine_server_call( req );
+            count = reply->count;
         }
+        SERVER_END_REQ;
+        if (!status)
+        {
+            if (len >= sizeof(*types)) types->NumberOfTypes = count;
+            total = (sizeof(*types) + align) & ~align;
+            p = (OBJECT_TYPE_INFORMATION *)((char *)ptr + total);
+            for (i = pos = 0; i < count; i++)
+            {
+                struct object_type_info *info = (struct object_type_info *)((char *)buffer + pos);
+                pos += sizeof(*info) + ((info->name_len + 3) & ~3);
+                total += sizeof(*p) + ((info->name_len + sizeof(WCHAR) + align) & ~align);
+                if (total <= len) p = put_object_type_info( p, info );
+            }
+            if (used_len) *used_len = total;
+            if (total > len) status = STATUS_INFO_LENGTH_MISMATCH;
+        }
+        else if (status == STATUS_BUFFER_OVERFLOW) FIXME( "size %u too small\n", size );
 
-        if (status != STATUS_NO_MORE_ENTRIES)
-            return status;
-
-        if (used_len) *used_len = req_len;
-        if (len < req_len)
-            return STATUS_INFO_LENGTH_MISMATCH;
-
-        p->NumberOfTypes = count - 1;
-        status = STATUS_SUCCESS;
+        free( buffer );
         break;
     }
 

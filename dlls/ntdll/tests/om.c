@@ -21,6 +21,8 @@
 
 #include "ntdll_test.h"
 #include "winternl.h"
+#include "winuser.h"
+#include "ddk/wdm.h"
 #include "stdio.h"
 #include "winnt.h"
 #include "stdlib.h"
@@ -76,26 +78,11 @@ static void     (WINAPI *pRtlWakeAddressAll)( const void * );
 static void     (WINAPI *pRtlWakeAddressSingle)( const void * );
 static NTSTATUS (WINAPI *pNtOpenProcess)( HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES *, const CLIENT_ID * );
 static NTSTATUS (WINAPI *pNtCreateDebugObject)( HANDLE *, ACCESS_MASK, OBJECT_ATTRIBUTES *, ULONG );
-static NTSTATUS (WINAPI *pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 
 #define KEYEDEVENT_WAIT       0x0001
 #define KEYEDEVENT_WAKE       0x0002
 #define KEYEDEVENT_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | 0x0003)
-
-#define ROUND_UP(value, alignment) (((value) + ((alignment) - 1)) & ~((alignment)-1))
-
-static LPCSTR wine_dbgstr_us( const UNICODE_STRING *us )
-{
-    if (!us) return "(null)";
-    return wine_dbgstr_wn(us->Buffer, us->Length / sizeof(WCHAR));
-}
-
-static inline int strncmpW( const WCHAR *str1, const WCHAR *str2, int n )
-{
-    if (n <= 0) return 0;
-    while ((--n > 0) && *str1 && (*str1 == *str2)) { str1++; str2++; }
-    return *str1 - *str2;
-}
+#define DESKTOP_ALL_ACCESS    0x01ff
 
 static void test_case_sensitive (void)
 {
@@ -204,9 +191,6 @@ static void test_namespace_pipe(void)
 
     pNtClose(pipe);
 }
-
-#define DIRECTORY_QUERY (0x0001)
-#define SYMBOLIC_LINK_QUERY 0x0001
 
 #define check_create_open_dir(parent, name, status) check_create_open_dir_(__LINE__, parent, name, status)
 static void check_create_open_dir_( int line, HANDLE parent, const WCHAR *name, NTSTATUS expect )
@@ -1305,6 +1289,44 @@ static void _test_no_file_info(unsigned line, HANDLE handle)
                        "FileIoCompletionNotificationInformation returned %x\n", status);
 }
 
+static OBJECT_TYPE_INFORMATION all_types[256];
+
+static void add_object_type( OBJECT_TYPE_INFORMATION *info )
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(all_types); i++)
+    {
+        if (!all_types[i].TypeName.Buffer) break;
+        if (!RtlCompareUnicodeString( &all_types[i].TypeName, &info->TypeName, FALSE )) break;
+    }
+    ok( i < ARRAY_SIZE(all_types), "too many types\n" );
+
+    if (all_types[i].TypeName.Buffer)  /* existing type */
+    {
+        ok( !memcmp( &all_types[i].GenericMapping, &info->GenericMapping, sizeof(GENERIC_MAPPING) ),
+            "%u: mismatched mappings %08x,%08x,%08x,%08x / %08x,%08x,%08x,%08x\n", i,
+            all_types[i].GenericMapping.GenericRead, all_types[i].GenericMapping.GenericWrite,
+            all_types[i].GenericMapping.GenericExecute, all_types[i].GenericMapping.GenericAll,
+            info->GenericMapping.GenericRead, info->GenericMapping.GenericWrite,
+            info->GenericMapping.GenericExecute, info->GenericMapping.GenericAll );
+        ok( all_types[i].ValidAccessMask == info->ValidAccessMask,
+            "%u: mismatched access mask %08x / %08x\n", i,
+            all_types[i].ValidAccessMask, info->ValidAccessMask );
+    }
+    else  /* add it */
+    {
+        all_types[i] = *info;
+        RtlDuplicateUnicodeString( 1, &info->TypeName, &all_types[i].TypeName );
+    }
+    ok( info->TotalNumberOfObjects <= info->HighWaterNumberOfObjects, "%s: wrong object counts %u/%u\n",
+        debugstr_w( all_types[i].TypeName.Buffer ),
+        info->TotalNumberOfObjects, info->HighWaterNumberOfObjects );
+    ok( info->TotalNumberOfHandles <= info->HighWaterNumberOfHandles, "%s: wrong handle counts %u/%u\n",
+        debugstr_w( all_types[i].TypeName.Buffer ),
+        info->TotalNumberOfHandles, info->HighWaterNumberOfHandles );
+}
+
 static BOOL compare_unicode_string( const UNICODE_STRING *string, const WCHAR *expect )
 {
     return string->Length == wcslen( expect ) * sizeof(WCHAR)
@@ -1315,7 +1337,8 @@ static BOOL compare_unicode_string( const UNICODE_STRING *string, const WCHAR *e
 static void _test_object_type( unsigned line, HANDLE handle, const WCHAR *expected_name )
 {
     char buffer[1024];
-    UNICODE_STRING *str = (UNICODE_STRING *)buffer, expect;
+    OBJECT_TYPE_INFORMATION *type = (OBJECT_TYPE_INFORMATION *)buffer;
+    UNICODE_STRING expect;
     ULONG len = 0;
     NTSTATUS status;
 
@@ -1325,8 +1348,10 @@ static void _test_object_type( unsigned line, HANDLE handle, const WCHAR *expect
     status = pNtQueryObject( handle, ObjectTypeInformation, buffer, sizeof(buffer), &len );
     ok_(__FILE__,line)( status == STATUS_SUCCESS, "NtQueryObject failed %x\n", status );
     ok_(__FILE__,line)( len > sizeof(UNICODE_STRING), "unexpected len %u\n", len );
-    ok_(__FILE__,line)( len >= sizeof(OBJECT_TYPE_INFORMATION) + str->Length, "unexpected len %u\n", len );
-    ok_(__FILE__,line)(compare_unicode_string( str, expected_name ), "wrong name %s\n", debugstr_w( str->Buffer ));
+    ok_(__FILE__,line)( len >= sizeof(*type) + type->TypeName.Length, "unexpected len %u\n", len );
+    ok_(__FILE__,line)(compare_unicode_string( &type->TypeName, expected_name ), "wrong name %s\n",
+                       debugstr_w( type->TypeName.Buffer ));
+    add_object_type( type );
 }
 
 #define test_object_name(a,b,c) _test_object_name(__LINE__,a,b,c)
@@ -1355,7 +1380,7 @@ static void test_query_object(void)
     NTSTATUS status;
     ULONG len, expected_len;
     OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING path, *str;
+    UNICODE_STRING path, target, *str;
     char dir[MAX_PATH], tmp_path[MAX_PATH], file1[MAX_PATH + 16];
     WCHAR expect[100];
     LARGE_INTEGER size;
@@ -1473,11 +1498,76 @@ static void test_query_object(void)
     RtlInitUnicodeString( &path, L"\\BaseNamedObjects\\test_debug" );
     status = pNtCreateDebugObject( &handle, DEBUG_ALL_ACCESS, &attr, 0 );
     ok(!status, "NtCreateDebugObject failed: %x\n", status);
-
     test_object_name( handle, L"\\BaseNamedObjects\\test_debug", FALSE );
     test_object_type( handle, L"DebugObject" );
     test_no_file_info( handle );
     pNtClose(handle);
+
+    RtlInitUnicodeString( &path, L"\\BaseNamedObjects\\test_mutant" );
+    status = pNtCreateMutant( &handle, MUTANT_ALL_ACCESS, &attr, 0 );
+    ok(!status, "NtCreateMutant failed: %x\n", status);
+    test_object_name( handle, L"\\BaseNamedObjects\\test_mutant", FALSE );
+    test_object_type( handle, L"Mutant" );
+    test_no_file_info( handle );
+    pNtClose(handle);
+
+    RtlInitUnicodeString( &path, L"\\BaseNamedObjects\\test_sem" );
+    status = pNtCreateSemaphore( &handle, SEMAPHORE_ALL_ACCESS, &attr, 1, 2 );
+    ok(!status, "NtCreateSemaphore failed: %x\n", status);
+    test_object_name( handle, L"\\BaseNamedObjects\\test_sem", FALSE );
+    test_object_type( handle, L"Semaphore" );
+    test_no_file_info( handle );
+    pNtClose(handle);
+
+    RtlInitUnicodeString( &path, L"\\BaseNamedObjects\\test_keyed" );
+    status = pNtCreateKeyedEvent( &handle, KEYEDEVENT_ALL_ACCESS, &attr, 0 );
+    ok(!status, "NtCreateKeyedEvent failed: %x\n", status);
+    test_object_name( handle, L"\\BaseNamedObjects\\test_keyed", FALSE );
+    test_object_type( handle, L"KeyedEvent" );
+    test_no_file_info( handle );
+    pNtClose(handle);
+
+    RtlInitUnicodeString( &path, L"\\BaseNamedObjects\\test_compl" );
+    status = pNtCreateIoCompletion( &handle, IO_COMPLETION_ALL_ACCESS, &attr, 0 );
+    ok(!status, "NtCreateIoCompletion failed: %x\n", status);
+    test_object_name( handle, L"\\BaseNamedObjects\\test_compl", FALSE );
+    test_object_type( handle, L"IoCompletion" );
+    test_no_file_info( handle );
+    pNtClose(handle);
+
+    RtlInitUnicodeString( &path, L"\\BaseNamedObjects\\test_job" );
+    status = pNtCreateJobObject( &handle, JOB_OBJECT_ALL_ACCESS, &attr );
+    ok(!status, "NtCreateJobObject failed: %x\n", status);
+    test_object_name( handle, L"\\BaseNamedObjects\\test_job", FALSE );
+    test_object_type( handle, L"Job" );
+    test_no_file_info( handle );
+    pNtClose(handle);
+
+    RtlInitUnicodeString( &path, L"\\BaseNamedObjects\\test_timer" );
+    status = pNtCreateTimer( &handle, TIMER_ALL_ACCESS, &attr, NotificationTimer );
+    ok(!status, "NtCreateTimer failed: %x\n", status);
+    test_object_type( handle, L"Timer" );
+    test_no_file_info( handle );
+    pNtClose(handle);
+
+    RtlInitUnicodeString( &path, L"\\DosDevices\\test_link" );
+    RtlInitUnicodeString( &target, L"\\DosDevices" );
+    status = pNtCreateSymbolicLinkObject( &handle, SYMBOLIC_LINK_ALL_ACCESS, &attr, &target );
+    ok(!status, "NtCreateSymbolicLinkObject failed: %x\n", status);
+    test_object_type( handle, L"SymbolicLink" );
+    test_no_file_info( handle );
+    pNtClose(handle);
+
+    handle = GetProcessWindowStation();
+    swprintf( expect, ARRAY_SIZE(expect), L"\\Sessions\\%u\\Windows\\WindowStations\\WinSta0", NtCurrentTeb()->Peb->SessionId );
+    test_object_name( handle, expect, FALSE );
+    test_object_type( handle, L"WindowStation" );
+    test_no_file_info( handle );
+
+    handle = GetThreadDesktop( GetCurrentThreadId() );
+    test_object_name( handle, L"\\Default", FALSE );
+    test_object_type( handle, L"Desktop" );
+    test_no_file_info( handle );
 
     status = pNtCreateDirectoryObject( &handle, DIRECTORY_QUERY, NULL );
     ok(status == STATUS_SUCCESS, "Failed to create Directory %08x\n", status);
@@ -1584,108 +1674,13 @@ static void test_query_object(void)
     test_no_file_info( handle );
 
     pNtClose(handle);
-}
 
-static BOOL winver_equal_or_newer(WORD major, WORD minor)
-{
-    OSVERSIONINFOEXW info = {sizeof(info)};
-    ULONGLONG mask = 0;
-
-    info.dwMajorVersion = major;
-    info.dwMinorVersion = minor;
-
-    VER_SET_CONDITION(mask, VER_MAJORVERSION, VER_GREATER_EQUAL);
-    VER_SET_CONDITION(mask, VER_MINORVERSION, VER_GREATER_EQUAL);
-
-    return VerifyVersionInfoW(&info, VER_MAJORVERSION | VER_MINORVERSION, mask);
-}
-
-static void test_query_object_types(void)
-{
-    static const WCHAR typeW[] = {'T','y','p','e'};
-    static const WCHAR eventW[] = {'E','v','e','n','t'};
-    SYSTEM_HANDLE_INFORMATION_EX *shi;
-    OBJECT_TYPES_INFORMATION *buffer;
-    OBJECT_TYPE_INFORMATION *type;
-    NTSTATUS status;
-    HANDLE handle;
-    BOOL found;
-    ULONG len, i, event_type_index = 0;
-
-    buffer = HeapAlloc( GetProcessHeap(), 0, sizeof(OBJECT_TYPES_INFORMATION) );
-    ok( buffer != NULL, "Failed to allocate memory\n" );
-
-    status = pNtQueryObject( NULL, ObjectTypesInformation, buffer, sizeof(OBJECT_TYPES_INFORMATION), &len );
-    ok( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %x\n", status );
-    ok( len, "len is zero\n");
-
-    buffer = HeapReAlloc( GetProcessHeap(), 0, buffer, len );
-    ok( buffer != NULL, "Failed to allocate memory\n" );
-
-    memset( buffer, 0, len );
-    status = pNtQueryObject( NULL, ObjectTypesInformation, buffer, len, &len );
-    ok( status == STATUS_SUCCESS, "NtQueryObject failed %x\n", status );
-    ok( buffer->NumberOfTypes, "NumberOfTypes is zero\n" );
-
-    type = (OBJECT_TYPE_INFORMATION *)(buffer + 1);
-    for (i = 0; i < buffer->NumberOfTypes; i++)
-    {
-        USHORT length = type->TypeName.MaximumLength;
-        trace( "Type %u: %s\n", i, wine_dbgstr_us(&type->TypeName) );
-
-        if (i == 0)
-        {
-            ok( type->TypeName.Length == sizeof(typeW) && !strncmpW(typeW, type->TypeName.Buffer, 4),
-                "Expected 'Type' as first type, got %s\n", wine_dbgstr_us(&type->TypeName) );
-        }
-        if (type->TypeName.Length == sizeof(eventW) && !strncmpW(eventW, type->TypeName.Buffer, 5))
-        {
-            if (winver_equal_or_newer( 6, 2 ))
-                event_type_index = type->TypeIndex;
-            else
-                event_type_index = winver_equal_or_newer( 6, 1 ) ? i + 2 : i + 1;
-        }
-
-        type = (OBJECT_TYPE_INFORMATION *)ROUND_UP( (DWORD_PTR)(type + 1) + length, sizeof(DWORD_PTR) );
-    }
-
-    HeapFree( GetProcessHeap(), 0, buffer );
-
-    ok( event_type_index, "Could not find object type for events\n" );
-
-    handle = CreateEventA( NULL, FALSE, FALSE, NULL );
-    ok( handle != NULL, "Failed to create event\n" );
-
-    shi = HeapAlloc( GetProcessHeap(), 0, sizeof(*shi) );
-    ok( shi != NULL, "Failed to allocate memory\n" );
-
-    status = pNtQuerySystemInformation( SystemExtendedHandleInformation, shi, sizeof(*shi), &len );
-    ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status );
-
-    shi = HeapReAlloc( GetProcessHeap(), 0, shi, len );
-    ok( shi != NULL, "Failed to allocate memory\n" );
-
-    status = pNtQuerySystemInformation( SystemExtendedHandleInformation, shi, len, &len );
-    ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status );
-
-    found = FALSE;
-    for (i = 0; i < shi->Count; i++)
-    {
-        if (shi->Handle[i].UniqueProcessId != GetCurrentProcessId())
-            continue;
-        if ((HANDLE)(ULONG_PTR)shi->Handle[i].HandleValue != handle)
-            continue;
-
-        ok( shi->Handle[i].ObjectTypeIndex == event_type_index, "Event type does not match: %u vs %u\n",
-            shi->Handle[i].ObjectTypeIndex, event_type_index );
-
-        found = TRUE;
-        break;
-    }
-    ok( found, "Expected to find event handle %p (pid %x) in handle list\n", handle, GetCurrentProcessId() );
-
-    HeapFree( GetProcessHeap(), 0, shi );
-    CloseHandle( handle );
+    handle = CreateFileA( "nul", GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0 );
+    ok( handle != INVALID_HANDLE_VALUE, "CreateFile failed (%d)\n", GetLastError() );
+    test_object_name( handle, L"\\Device\\Null", TRUE );
+    test_object_type( handle, L"File" );
+    test_file_info( handle );
+    pNtClose( handle );
 }
 
 static void test_type_mismatch(void)
@@ -2375,6 +2370,185 @@ static void test_process(void)
     pNtClose( process );
 }
 
+#define DEBUG_GENERIC_EXECUTE         (STANDARD_RIGHTS_EXECUTE|SYNCHRONIZE)
+#define DEBUG_GENERIC_READ            (STANDARD_RIGHTS_READ|DEBUG_READ_EVENT)
+#define DEBUG_GENERIC_WRITE           (STANDARD_RIGHTS_WRITE|DEBUG_PROCESS_ASSIGN)
+#define DESKTOP_GENERIC_EXECUTE       (STANDARD_RIGHTS_EXECUTE|DESKTOP_SWITCHDESKTOP)
+#define DESKTOP_GENERIC_READ          (STANDARD_RIGHTS_READ|DESKTOP_ENUMERATE|DESKTOP_READOBJECTS)
+#define DESKTOP_GENERIC_WRITE         (STANDARD_RIGHTS_WRITE|DESKTOP_WRITEOBJECTS|DESKTOP_JOURNALPLAYBACK|\
+                                       DESKTOP_JOURNALRECORD|DESKTOP_HOOKCONTROL|DESKTOP_CREATEMENU| \
+                                       DESKTOP_CREATEWINDOW)
+#define DIRECTORY_GENERIC_EXECUTE     (STANDARD_RIGHTS_EXECUTE|DIRECTORY_TRAVERSE|DIRECTORY_QUERY)
+#define DIRECTORY_GENERIC_READ        (STANDARD_RIGHTS_READ|DIRECTORY_TRAVERSE|DIRECTORY_QUERY)
+#define DIRECTORY_GENERIC_WRITE       (STANDARD_RIGHTS_WRITE|DIRECTORY_CREATE_SUBDIRECTORY|\
+                                       DIRECTORY_CREATE_OBJECT)
+#define EVENT_GENERIC_EXECUTE         (STANDARD_RIGHTS_EXECUTE|SYNCHRONIZE)
+#define EVENT_GENERIC_READ            (STANDARD_RIGHTS_READ|EVENT_QUERY_STATE)
+#define EVENT_GENERIC_WRITE           (STANDARD_RIGHTS_WRITE|EVENT_MODIFY_STATE)
+#define IO_COMPLETION_GENERIC_EXECUTE (STANDARD_RIGHTS_EXECUTE|SYNCHRONIZE)
+#define IO_COMPLETION_GENERIC_READ    (STANDARD_RIGHTS_READ|IO_COMPLETION_QUERY_STATE)
+#define IO_COMPLETION_GENERIC_WRITE   (STANDARD_RIGHTS_WRITE|IO_COMPLETION_MODIFY_STATE)
+#define JOB_OBJECT_GENERIC_EXECUTE    (STANDARD_RIGHTS_EXECUTE|SYNCHRONIZE)
+#define JOB_OBJECT_GENERIC_READ       (STANDARD_RIGHTS_READ|JOB_OBJECT_QUERY)
+#define JOB_OBJECT_GENERIC_WRITE      (STANDARD_RIGHTS_WRITE|JOB_OBJECT_TERMINATE|\
+                                       JOB_OBJECT_SET_ATTRIBUTES|JOB_OBJECT_ASSIGN_PROCESS)
+#define KEY_GENERIC_EXECUTE           (STANDARD_RIGHTS_EXECUTE|KEY_CREATE_LINK|KEY_NOTIFY|\
+                                       KEY_ENUMERATE_SUB_KEYS|KEY_QUERY_VALUE)
+#define KEY_GENERIC_READ              (STANDARD_RIGHTS_READ|KEY_NOTIFY|KEY_ENUMERATE_SUB_KEYS|\
+                                       KEY_QUERY_VALUE)
+#define KEY_GENERIC_WRITE             (STANDARD_RIGHTS_WRITE|KEY_CREATE_SUB_KEY|KEY_SET_VALUE)
+#define KEYEDEVENT_GENERIC_EXECUTE    (STANDARD_RIGHTS_EXECUTE)
+#define KEYEDEVENT_GENERIC_READ       (STANDARD_RIGHTS_READ|KEYEDEVENT_WAIT)
+#define KEYEDEVENT_GENERIC_WRITE      (STANDARD_RIGHTS_WRITE|KEYEDEVENT_WAKE)
+#define MUTANT_GENERIC_EXECUTE        (STANDARD_RIGHTS_EXECUTE|SYNCHRONIZE)
+#define MUTANT_GENERIC_READ           (STANDARD_RIGHTS_READ|MUTANT_QUERY_STATE)
+#define MUTANT_GENERIC_WRITE          (STANDARD_RIGHTS_WRITE)
+#define PROCESS_GENERIC_EXECUTE       (STANDARD_RIGHTS_EXECUTE|SYNCHRONIZE|\
+                                       PROCESS_QUERY_LIMITED_INFORMATION|PROCESS_TERMINATE)
+#define PROCESS_GENERIC_READ          (STANDARD_RIGHTS_READ|PROCESS_VM_READ|PROCESS_QUERY_INFORMATION)
+#define PROCESS_GENERIC_WRITE         (STANDARD_RIGHTS_WRITE|PROCESS_SUSPEND_RESUME|\
+                                       PROCESS_SET_INFORMATION|PROCESS_SET_QUOTA|PROCESS_CREATE_PROCESS|\
+                                       PROCESS_DUP_HANDLE|PROCESS_VM_WRITE|PROCESS_VM_OPERATION|\
+                                       PROCESS_CREATE_THREAD)
+#define SECTION_GENERIC_EXECUTE       (STANDARD_RIGHTS_EXECUTE|SECTION_MAP_EXECUTE)
+#define SECTION_GENERIC_READ          (STANDARD_RIGHTS_READ|SECTION_QUERY|SECTION_MAP_READ)
+#define SECTION_GENERIC_WRITE         (STANDARD_RIGHTS_WRITE|SECTION_MAP_WRITE)
+#define SEMAPHORE_GENERIC_EXECUTE     (STANDARD_RIGHTS_EXECUTE|SYNCHRONIZE)
+#define SEMAPHORE_GENERIC_READ        (STANDARD_RIGHTS_READ|SEMAPHORE_QUERY_STATE)
+#define SEMAPHORE_GENERIC_WRITE       (STANDARD_RIGHTS_WRITE|SEMAPHORE_MODIFY_STATE)
+#define SYMBOLIC_LINK_GENERIC_EXECUTE (STANDARD_RIGHTS_EXECUTE|SYMBOLIC_LINK_QUERY)
+#define SYMBOLIC_LINK_GENERIC_READ    (STANDARD_RIGHTS_READ|SYMBOLIC_LINK_QUERY)
+#define SYMBOLIC_LINK_GENERIC_WRITE   (STANDARD_RIGHTS_WRITE)
+#define THREAD_GENERIC_EXECUTE        (STANDARD_RIGHTS_EXECUTE|SYNCHRONIZE|THREAD_RESUME|\
+                                       THREAD_QUERY_LIMITED_INFORMATION)
+#define THREAD_GENERIC_READ           (STANDARD_RIGHTS_READ|THREAD_QUERY_INFORMATION|THREAD_GET_CONTEXT)
+#define THREAD_GENERIC_WRITE          (STANDARD_RIGHTS_WRITE|THREAD_SET_LIMITED_INFORMATION|\
+                                       THREAD_SET_INFORMATION|THREAD_SET_CONTEXT|THREAD_SUSPEND_RESUME|\
+                                       THREAD_TERMINATE|0x04)
+#define TIMER_GENERIC_EXECUTE         (STANDARD_RIGHTS_EXECUTE|SYNCHRONIZE)
+#define TIMER_GENERIC_READ            (STANDARD_RIGHTS_READ|TIMER_QUERY_STATE)
+#define TIMER_GENERIC_WRITE           (STANDARD_RIGHTS_WRITE|TIMER_MODIFY_STATE)
+#define TOKEN_GENERIC_EXECUTE         (STANDARD_RIGHTS_EXECUTE|TOKEN_IMPERSONATE|TOKEN_ASSIGN_PRIMARY)
+#define TOKEN_GENERIC_READ            (STANDARD_RIGHTS_READ|TOKEN_QUERY_SOURCE|TOKEN_QUERY|TOKEN_DUPLICATE)
+#define TOKEN_GENERIC_WRITE           (STANDARD_RIGHTS_WRITE|TOKEN_ADJUST_SESSIONID|TOKEN_ADJUST_DEFAULT|\
+                                       TOKEN_ADJUST_GROUPS|TOKEN_ADJUST_PRIVILEGES)
+#define TYPE_GENERIC_EXECUTE          (STANDARD_RIGHTS_EXECUTE)
+#define TYPE_GENERIC_READ             (STANDARD_RIGHTS_READ)
+#define TYPE_GENERIC_WRITE            (STANDARD_RIGHTS_WRITE)
+#define WINSTA_GENERIC_EXECUTE        (STANDARD_RIGHTS_EXECUTE|WINSTA_EXITWINDOWS|WINSTA_ACCESSGLOBALATOMS)
+#define WINSTA_GENERIC_READ           (STANDARD_RIGHTS_READ|WINSTA_READSCREEN|WINSTA_ENUMERATE|\
+                                       WINSTA_READATTRIBUTES|WINSTA_ENUMDESKTOPS)
+#define WINSTA_GENERIC_WRITE          (STANDARD_RIGHTS_WRITE|WINSTA_WRITEATTRIBUTES|WINSTA_CREATEDESKTOP|\
+                                       WINSTA_ACCESSCLIPBOARD)
+
+#undef WINSTA_ALL_ACCESS
+#undef DESKTOP_ALL_ACCESS
+#define WINSTA_ALL_ACCESS  (STANDARD_RIGHTS_REQUIRED|0x37f)
+#define DESKTOP_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED|0x1ff)
+#define DEVICE_ALL_ACCESS  (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0x1ff)
+#define TYPE_ALL_ACCESS    (STANDARD_RIGHTS_REQUIRED|0x1)
+
+static void *align_ptr( void *ptr )
+{
+    ULONG align = sizeof(DWORD_PTR) - 1;
+    return (void *)(((DWORD_PTR)ptr + align) & ~align);
+}
+
+static void test_object_types(void)
+{
+    static const struct { const WCHAR *name; GENERIC_MAPPING mapping; ULONG mask, broken; } tests[] =
+    {
+#define TYPE(name,gen,extra,broken) { name, { gen ## _GENERIC_READ, gen ## _GENERIC_WRITE, \
+                gen ## _GENERIC_EXECUTE, gen ## _ALL_ACCESS }, gen ## _ALL_ACCESS | extra, broken }
+        TYPE( L"DebugObject",   DEBUG, 0, 0 ),
+        TYPE( L"Desktop",       DESKTOP, 0, 0 ),
+        TYPE( L"Device",        FILE, 0, 0 ),
+        TYPE( L"Directory",     DIRECTORY, 0, 0 ),
+        TYPE( L"Event",         EVENT, 0, 0 ),
+        TYPE( L"File",          FILE, 0, 0 ),
+        TYPE( L"IoCompletion",  IO_COMPLETION, 0, 0 ),
+        TYPE( L"Job",           JOB_OBJECT, 0, JOB_OBJECT_IMPERSONATE ),
+        TYPE( L"Key",           KEY, SYNCHRONIZE, 0 ),
+        TYPE( L"KeyedEvent",    KEYEDEVENT, SYNCHRONIZE, 0 ),
+        TYPE( L"Mutant",        MUTANT, 0, 0 ),
+        TYPE( L"Process",       PROCESS, 0, 0 ),
+        TYPE( L"Section",       SECTION, SYNCHRONIZE, 0 ),
+        TYPE( L"Semaphore",     SEMAPHORE, 0, 0 ),
+        TYPE( L"SymbolicLink",  SYMBOLIC_LINK, 0, 0xfffe ),
+        TYPE( L"Thread",        THREAD, 0, THREAD_RESUME ),
+        TYPE( L"Timer",         TIMER, 0, 0 ),
+        TYPE( L"Token",         TOKEN, SYNCHRONIZE, 0 ),
+        TYPE( L"Type",          TYPE, SYNCHRONIZE, 0 ),
+        TYPE( L"WindowStation", WINSTA, 0, 0 ),
+#undef TYPE
+    };
+    unsigned int i, j;
+    BOOLEAN tested[ARRAY_SIZE(all_types)] = { 0 };
+    char buffer[256];
+    OBJECT_TYPES_INFORMATION *info = (OBJECT_TYPES_INFORMATION *)buffer;
+    GENERIC_MAPPING map;
+    NTSTATUS status;
+    ULONG len, retlen;
+
+    memset( buffer, 0xcc, sizeof(buffer) );
+    status = pNtQueryObject( NULL, ObjectTypesInformation, info, sizeof(buffer), &len );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %x\n", status );
+    ok( info->NumberOfTypes < 100 || info->NumberOfTypes == 0xcccccccc, /* wow64 */
+        "wrong number of types %u\n", info->NumberOfTypes );
+
+    info = malloc( len + 16 );  /* Windows gets the length wrong on WoW64 and overflows the buffer */
+    memset( info, 0xcc, sizeof(*info) );
+    status = pNtQueryObject( NULL, ObjectTypesInformation, info, len, &retlen );
+    ok( retlen <= len + 16, "wrong len %x/%x\n", len, retlen );
+    ok( len == retlen || broken( retlen >= len - 32 && retlen <= len + 32 ),  /* wow64 */
+        "wrong len %x/%x\n", len, retlen );
+    ok( !status, "NtQueryObject failed %x\n", status );
+    if (!status)
+    {
+        OBJECT_TYPE_INFORMATION *type = align_ptr( info + 1 );
+        for (i = 0; i < info->NumberOfTypes; i++)
+        {
+            add_object_type( type );
+            type = align_ptr( (char *)type->TypeName.Buffer + type->TypeName.MaximumLength );
+        }
+    }
+    free( info );
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
+        for (j = 0; j < ARRAY_SIZE(all_types); j++)
+        {
+            if (!all_types[j].TypeName.Buffer) continue;
+            if (wcscmp( tests[i].name, all_types[j].TypeName.Buffer )) continue;
+            map = all_types[j].GenericMapping;
+            ok( !memcmp( &map, &tests[i].mapping, sizeof(GENERIC_MAPPING) ) ||
+                broken( !((map.GenericRead ^ tests[i].mapping.GenericRead) & ~tests[i].broken) &&
+                        !((map.GenericWrite ^ tests[i].mapping.GenericWrite) & ~tests[i].broken) &&
+                        !((map.GenericExecute ^ tests[i].mapping.GenericExecute) & ~tests[i].broken) &&
+                        !((map.GenericAll ^ tests[i].mapping.GenericAll) & ~tests[i].broken) ),
+                "%s: mismatched mappings %08x,%08x,%08x,%08x / %08x,%08x,%08x,%08x\n",
+                debugstr_w( tests[i].name ),
+                all_types[j].GenericMapping.GenericRead, all_types[j].GenericMapping.GenericWrite,
+                all_types[j].GenericMapping.GenericExecute, all_types[j].GenericMapping.GenericAll,
+                tests[i].mapping.GenericRead, tests[i].mapping.GenericWrite,
+                tests[i].mapping.GenericExecute, tests[i].mapping.GenericAll );
+            ok( all_types[j].ValidAccessMask == tests[i].mask ||
+                broken( !((all_types[j].ValidAccessMask ^ tests[i].mask) & ~tests[i].broken) ),
+                "%s: mismatched access mask %08x / %08x\n", debugstr_w( tests[i].name ),
+                all_types[j].ValidAccessMask, tests[i].mask );
+            tested[j] = TRUE;
+            break;
+        }
+        ok( j < ARRAY_SIZE(all_types), "type %s not found\n", debugstr_w(tests[i].name) );
+    }
+    for (j = 0; j < ARRAY_SIZE(all_types); j++)
+    {
+        if (!all_types[j].TypeName.Buffer) continue;
+        if (tested[j]) continue;
+        trace( "not tested: %s\n", debugstr_w(all_types[j].TypeName.Buffer ));
+    }
+}
+
 START_TEST(om)
 {
     HMODULE hntdll = GetModuleHandleA("ntdll.dll");
@@ -2426,7 +2600,6 @@ START_TEST(om)
     pRtlWakeAddressSingle   =  (void *)GetProcAddress(hntdll, "RtlWakeAddressSingle");
     pNtOpenProcess          =  (void *)GetProcAddress(hntdll, "NtOpenProcess");
     pNtCreateDebugObject    =  (void *)GetProcAddress(hntdll, "NtCreateDebugObject");
-    pNtQuerySystemInformation = (void *)GetProcAddress(hntdll, "NtQuerySystemInformation");
 
     test_case_sensitive();
     test_namespace_pipe();
@@ -2435,7 +2608,6 @@ START_TEST(om)
     test_directory();
     test_symboliclink();
     test_query_object();
-    test_query_object_types();
     test_type_mismatch();
     test_event();
     test_mutant();
@@ -2444,4 +2616,5 @@ START_TEST(om)
     test_null_device();
     test_wait_on_address();
     test_process();
+    test_object_types();
 }

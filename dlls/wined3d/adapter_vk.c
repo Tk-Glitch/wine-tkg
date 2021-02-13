@@ -43,6 +43,7 @@ static const struct wined3d_state_entry_template misc_state_template_vk[] =
     {STATE_STREAMSRC,                                     {STATE_STREAMSRC,                                     state_nop}},
     {STATE_VDECL,                                         {STATE_VDECL,                                         state_nop}},
     {STATE_DEPTH_STENCIL,                                 {STATE_DEPTH_STENCIL,                                 state_nop}},
+    {STATE_STENCIL_REF,                                   {STATE_STENCIL_REF,                                   state_nop}},
     {STATE_RASTERIZER,                                    {STATE_RASTERIZER,                                    state_nop}},
     {STATE_SCISSORRECT,                                   {STATE_SCISSORRECT,                                   state_nop}},
     {STATE_POINTSPRITECOORDORIGIN,                        {STATE_POINTSPRITECOORDORIGIN,                        state_nop}},
@@ -116,7 +117,6 @@ static const struct wined3d_state_entry_template misc_state_template_vk[] =
     {STATE_RENDER(WINED3D_RS_ANISOTROPY),                 {STATE_RENDER(WINED3D_RS_ANISOTROPY),                 state_nop}},
     {STATE_RENDER(WINED3D_RS_FLUSHBATCH),                 {STATE_RENDER(WINED3D_RS_FLUSHBATCH),                 state_nop}},
     {STATE_RENDER(WINED3D_RS_TRANSLUCENTSORTINDEPENDENT), {STATE_RENDER(WINED3D_RS_TRANSLUCENTSORTINDEPENDENT), state_nop}},
-    {STATE_RENDER(WINED3D_RS_STENCILREF),                 {STATE_RENDER(WINED3D_RS_STENCILREF),                 state_nop}},
     {STATE_RENDER(WINED3D_RS_WRAP0),                      {STATE_RENDER(WINED3D_RS_WRAP0),                      state_nop}},
     {STATE_RENDER(WINED3D_RS_WRAP1),                      {STATE_RENDER(WINED3D_RS_WRAP0)}},
     {STATE_RENDER(WINED3D_RS_WRAP2),                      {STATE_RENDER(WINED3D_RS_WRAP0)}},
@@ -1321,6 +1321,8 @@ static void wined3d_view_vk_destroy_object(void *object)
     struct wined3d_device_vk *device_vk;
     struct wined3d_context *context;
 
+    TRACE("ctx %p.\n", ctx);
+
     device_vk = ctx->device_vk;
     vk_info = &wined3d_adapter_vk(device_vk->d.adapter)->vk_info;
     context = context_acquire(&device_vk->d, NULL, 0);
@@ -1551,6 +1553,8 @@ static void wined3d_sampler_vk_destroy_object(void *object)
     struct wined3d_sampler_vk *sampler_vk = object;
     struct wined3d_context_vk *context_vk;
 
+    TRACE("sampler_vk %p.\n", sampler_vk);
+
     context_vk = wined3d_context_vk(context_acquire(sampler_vk->s.device, NULL, 0));
 
     wined3d_context_vk_destroy_sampler(context_vk, sampler_vk->vk_image_info.sampler, sampler_vk->command_buffer_id);
@@ -1580,6 +1584,8 @@ static HRESULT adapter_vk_create_query(struct wined3d_device *device, enum wined
 static void wined3d_query_vk_destroy_object(void *object)
 {
     struct wined3d_query_vk *query_vk = object;
+
+    TRACE("query_vk %p.\n", query_vk);
 
     query_vk->q.query_ops->query_destroy(&query_vk->q);
 }

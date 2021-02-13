@@ -1841,21 +1841,33 @@ static void assemble_files( const char *prefix )
 /* build a library from the current asm files and any additional object files in argv */
 static void build_library( const char *output_name, char **argv, int create )
 {
-    struct strarray args = find_tool( "ar", NULL );
-    struct strarray ranlib = find_tool( "ranlib", NULL );
+    struct strarray args;
 
-    strarray_add( &args, create ? "rc" : "r", output_name, NULL );
+    if (!create || target_platform != PLATFORM_WINDOWS)
+    {
+        args = find_tool( "ar", NULL );
+        strarray_add( &args, create ? "rc" : "r", output_name, NULL );
+    }
+    else
+    {
+        args = find_link_tool();
+        strarray_add( &args, "/lib", strmake( "-out:%s", output_name ), NULL );
+    }
     strarray_addall( &args, as_files );
     strarray_addv( &args, argv );
     if (create) unlink( output_name );
     spawn( args );
 
-    strarray_add( &ranlib, output_name, NULL );
-    spawn( ranlib );
+    if (target_platform != PLATFORM_WINDOWS)
+    {
+        struct strarray ranlib = find_tool( "ranlib", NULL );
+        strarray_add( &ranlib, output_name, NULL );
+        spawn( ranlib );
+    }
 }
 
 /* create a Windows-style import library */
-static void build_windows_import_lib( DLLSPEC *spec )
+static void build_windows_import_lib( const char *lib_name, DLLSPEC *spec )
 {
     struct strarray args;
     char *def_file;
@@ -1888,8 +1900,9 @@ static void build_windows_import_lib( DLLSPEC *spec )
             m_flag = NULL;
             break;
     }
-    strarray_add( &args, "-k", strendswith( output_file_name, ".delay.a" ) ? "-y" : "-l",
-                  output_file_name, "-d", def_file, NULL );
+
+    strarray_add( &args, "-k", strendswith( lib_name, ".delay.a" ) ? "-y" : "-l",
+                  lib_name, "-d", def_file, NULL );
     if (m_flag)
         strarray_add( &args, "-m", m_flag, as_flags, NULL );
     spawn( args );
@@ -1961,7 +1974,7 @@ void output_static_lib( DLLSPEC *spec, char **argv )
 {
     if (is_pe())
     {
-        if (spec) build_windows_import_lib( spec );
+        if (spec) build_windows_import_lib( output_file_name, spec );
         if (argv[0] || !spec) build_library( output_file_name, argv, !spec );
     }
     else

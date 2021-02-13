@@ -39,28 +39,39 @@
 #include "file.h"
 #include "security.h"
 
+#define DESKTOP_ALL_ACCESS 0x01ff
 
 static struct list winstation_list = LIST_INIT(winstation_list);
 
 static void winstation_dump( struct object *obj, int verbose );
-static struct object_type *winstation_get_type( struct object *obj );
 static int winstation_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static struct object *winstation_lookup_name( struct object *obj, struct unicode_str *name,
                                               unsigned int attr, struct object *root );
 static void winstation_destroy( struct object *obj );
-static unsigned int winstation_map_access( struct object *obj, unsigned int access );
 static void desktop_dump( struct object *obj, int verbose );
-static struct object_type *desktop_get_type( struct object *obj );
 static int desktop_link_name( struct object *obj, struct object_name *name, struct object *parent );
 static int desktop_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static void desktop_destroy( struct object *obj );
-static unsigned int desktop_map_access( struct object *obj, unsigned int access );
+
+static const WCHAR winstation_name[] = {'W','i','n','d','o','w','S','t','a','t','i','o','n'};
+
+struct type_descr winstation_type =
+{
+    { winstation_name, sizeof(winstation_name) },   /* name */
+    STANDARD_RIGHTS_REQUIRED | WINSTA_ALL_ACCESS,   /* valid_access */
+    {                                               /* mapping */
+        STANDARD_RIGHTS_READ | WINSTA_READSCREEN | WINSTA_ENUMERATE | WINSTA_READATTRIBUTES | WINSTA_ENUMDESKTOPS,
+        STANDARD_RIGHTS_WRITE | WINSTA_WRITEATTRIBUTES | WINSTA_CREATEDESKTOP | WINSTA_ACCESSCLIPBOARD,
+        STANDARD_RIGHTS_EXECUTE | WINSTA_EXITWINDOWS | WINSTA_ACCESSGLOBALATOMS,
+        STANDARD_RIGHTS_REQUIRED | WINSTA_ALL_ACCESS
+    },
+};
 
 static const struct object_ops winstation_ops =
 {
     sizeof(struct winstation),    /* size */
+    &winstation_type,             /* type */
     winstation_dump,              /* dump */
-    winstation_get_type,          /* get_type */
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
@@ -69,7 +80,7 @@ static const struct object_ops winstation_ops =
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    winstation_map_access,        /* map_access */
+    default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     default_get_full_name,        /* get_full_name */
@@ -83,11 +94,26 @@ static const struct object_ops winstation_ops =
 };
 
 
+static const WCHAR desktop_name[] = {'D','e','s','k','t','o','p'};
+
+struct type_descr desktop_type =
+{
+    { desktop_name, sizeof(desktop_name) },   /* name */
+    STANDARD_RIGHTS_REQUIRED | DESKTOP_ALL_ACCESS,  /* valid_access */
+    {                                         /* mapping */
+        STANDARD_RIGHTS_READ | DESKTOP_ENUMERATE | DESKTOP_READOBJECTS,
+        STANDARD_RIGHTS_WRITE | DESKTOP_WRITEOBJECTS | DESKTOP_JOURNALPLAYBACK | DESKTOP_JOURNALRECORD
+        | DESKTOP_HOOKCONTROL | DESKTOP_CREATEMENU | DESKTOP_CREATEWINDOW,
+        STANDARD_RIGHTS_EXECUTE | DESKTOP_SWITCHDESKTOP,
+        STANDARD_RIGHTS_REQUIRED | DESKTOP_ALL_ACCESS
+    },
+};
+
 static const struct object_ops desktop_ops =
 {
     sizeof(struct desktop),       /* size */
+    &desktop_type,                /* type */
     desktop_dump,                 /* dump */
-    desktop_get_type,             /* get_type */
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
@@ -96,7 +122,7 @@ static const struct object_ops desktop_ops =
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
-    desktop_map_access,           /* map_access */
+    default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     default_get_full_name,        /* get_full_name */
@@ -108,8 +134,6 @@ static const struct object_ops desktop_ops =
     desktop_close_handle,         /* close_handle */
     desktop_destroy               /* destroy */
 };
-
-#define DESKTOP_ALL_ACCESS 0x01ff
 
 /* create a winstation object */
 static struct winstation *create_winstation( struct object *root, const struct unicode_str *name,
@@ -144,12 +168,6 @@ static void winstation_dump( struct object *obj, int verbose )
 
     fprintf( stderr, "Winstation flags=%x clipboard=%p atoms=%p\n",
              winstation->flags, winstation->clipboard, winstation->atom_table );
-}
-
-static struct object_type *winstation_get_type( struct object *obj )
-{
-    static const struct unicode_str str = { type_WindowStation, sizeof(type_WindowStation) };
-    return get_object_type( &str );
 }
 
 static int winstation_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
@@ -187,17 +205,6 @@ static void winstation_destroy( struct object *obj )
     if (winstation->clipboard) release_object( winstation->clipboard );
     if (winstation->atom_table) release_object( winstation->atom_table );
     free( winstation->desktop_names );
-}
-
-static unsigned int winstation_map_access( struct object *obj, unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | WINSTA_ENUMDESKTOPS | WINSTA_READATTRIBUTES |
-                                            WINSTA_ENUMERATE | WINSTA_READSCREEN;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE | WINSTA_ACCESSCLIPBOARD | WINSTA_CREATEDESKTOP |
-                                            WINSTA_WRITEATTRIBUTES;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE | WINSTA_ACCESSGLOBALATOMS | WINSTA_EXITWINDOWS;
-    if (access & GENERIC_ALL)     access |= STANDARD_RIGHTS_REQUIRED | WINSTA_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 /* retrieve the process window station, checking the handle access rights */
@@ -250,12 +257,6 @@ static void desktop_dump( struct object *obj, int verbose )
              desktop->flags, desktop->winstation, desktop->top_window, desktop->global_hooks );
 }
 
-static struct object_type *desktop_get_type( struct object *obj )
-{
-    static const struct unicode_str str = { type_Desktop, sizeof(type_Desktop) };
-    return get_object_type( &str );
-}
-
 static int desktop_link_name( struct object *obj, struct object_name *name, struct object *parent )
 {
     struct winstation *winstation = (struct winstation *)parent;
@@ -296,17 +297,6 @@ static void desktop_destroy( struct object *obj )
     if (desktop->close_timeout) remove_timeout_user( desktop->close_timeout );
     list_remove( &desktop->entry );
     release_object( desktop->winstation );
-}
-
-static unsigned int desktop_map_access( struct object *obj, unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | DESKTOP_READOBJECTS | DESKTOP_ENUMERATE;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE | DESKTOP_CREATEMENU | DESKTOP_CREATEWINDOW |
-                                            DESKTOP_HOOKCONTROL | DESKTOP_JOURNALRECORD | DESKTOP_JOURNALPLAYBACK |
-                                            DESKTOP_WRITEOBJECTS;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE | DESKTOP_SWITCHDESKTOP;
-    if (access & GENERIC_ALL)     access |= STANDARD_RIGHTS_REQUIRED | DESKTOP_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 /* retrieve the thread desktop, checking the handle access rights */

@@ -63,8 +63,8 @@ static void ranges_destroy( struct object *obj );
 static const struct object_ops ranges_ops =
 {
     sizeof(struct ranges),     /* size */
+    &no_type,                  /* type */
     ranges_dump,               /* dump */
-    no_get_type,               /* get_type */
     no_add_queue,              /* add_queue */
     NULL,                      /* remove_queue */
     NULL,                      /* signaled */
@@ -73,7 +73,7 @@ static const struct object_ops ranges_ops =
     NULL,                      /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
-    no_map_access,             /* map_access */
+    default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
     no_get_full_name,          /* get_full_name */
@@ -101,8 +101,8 @@ static void shared_map_destroy( struct object *obj );
 static const struct object_ops shared_map_ops =
 {
     sizeof(struct shared_map), /* size */
+    &no_type,                  /* type */
     shared_map_dump,           /* dump */
-    no_get_type,               /* get_type */
     no_add_queue,              /* add_queue */
     NULL,                      /* remove_queue */
     NULL,                      /* signaled */
@@ -111,7 +111,7 @@ static const struct object_ops shared_map_ops =
     NULL,                      /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
-    no_map_access,             /* map_access */
+    default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
     no_get_full_name,          /* get_full_name */
@@ -140,6 +140,21 @@ struct memory_view
     file_pos_t      start;           /* start offset in mapping */
 };
 
+
+static const WCHAR mapping_name[] = {'S','e','c','t','i','o','n'};
+
+struct type_descr mapping_type =
+{
+    { mapping_name, sizeof(mapping_name) },   /* name */
+    SECTION_ALL_ACCESS | SYNCHRONIZE,         /* valid_access */
+    {                                         /* mapping */
+        STANDARD_RIGHTS_READ | SECTION_QUERY | SECTION_MAP_READ,
+        STANDARD_RIGHTS_WRITE | SECTION_MAP_WRITE,
+        STANDARD_RIGHTS_EXECUTE | SECTION_MAP_EXECUTE,
+        SECTION_ALL_ACCESS
+    },
+};
+
 struct mapping
 {
     struct object   obj;             /* object header */
@@ -152,17 +167,15 @@ struct mapping
 };
 
 static void mapping_dump( struct object *obj, int verbose );
-static struct object_type *mapping_get_type( struct object *obj );
 static struct fd *mapping_get_fd( struct object *obj );
-static unsigned int mapping_map_access( struct object *obj, unsigned int access );
 static void mapping_destroy( struct object *obj );
 static enum server_fd_type mapping_get_fd_type( struct fd *fd );
 
 static const struct object_ops mapping_ops =
 {
     sizeof(struct mapping),      /* size */
+    &mapping_type,               /* type */
     mapping_dump,                /* dump */
-    mapping_get_type,            /* get_type */
     no_add_queue,                /* add_queue */
     NULL,                        /* remove_queue */
     NULL,                        /* signaled */
@@ -171,7 +184,7 @@ static const struct object_ops mapping_ops =
     NULL,                        /* satisfied */
     no_signal,                   /* signal */
     mapping_get_fd,              /* get_fd */
-    mapping_map_access,          /* map_access */
+    default_map_access,          /* map_access */
     default_get_sd,              /* get_sd */
     default_set_sd,              /* set_sd */
     default_get_full_name,       /* get_full_name */
@@ -311,7 +324,7 @@ static int create_temp_file( file_pos_t size )
 }
 
 /* find a memory view from its base address */
-static struct memory_view *find_mapped_view( struct process *process, client_ptr_t base )
+struct memory_view *find_mapped_view( struct process *process, client_ptr_t base )
 {
     struct memory_view *view;
 
@@ -322,12 +335,34 @@ static struct memory_view *find_mapped_view( struct process *process, client_ptr
     return NULL;
 }
 
-/* add a view to the process list */
-static void add_process_view( struct process *process, struct memory_view *view )
+/* find a memory view from any address inside it */
+static struct memory_view *find_mapped_addr( struct process *process, client_ptr_t addr )
 {
+    struct memory_view *view;
+
+    LIST_FOR_EACH_ENTRY( view, &process->views, struct memory_view, entry )
+        if (addr >= view->base && addr < view->base + view->size) return view;
+
+    set_error( STATUS_NOT_MAPPED_VIEW );
+    return NULL;
+}
+
+/* get the main exe memory view */
+struct memory_view *get_exe_view( struct process *process )
+{
+    return LIST_ENTRY( list_head( &process->views ), struct memory_view, entry );
+}
+
+/* add a view to the process list */
+static void add_process_view( struct thread *thread, struct memory_view *view )
+{
+    struct process *process = thread->process;
+
     if (view->flags & SEC_IMAGE)
     {
-        if (!is_process_init_done( process ) && !(view->image.image_charact & IMAGE_FILE_DLL))
+        if (is_process_init_done( process ))
+            generate_debug_event( thread, DbgLoadDllStateChange, view );
+        else if (!(view->image.image_charact & IMAGE_FILE_DLL))
         {
             /* main exe */
             list_add_head( &process->views, &view->entry );
@@ -730,6 +765,8 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
 
     mapping->image.image_charact = nt.FileHeader.Characteristics;
     mapping->image.machine       = nt.FileHeader.Machine;
+    mapping->image.dbg_offset    = nt.FileHeader.PointerToSymbolTable;
+    mapping->image.dbg_size      = nt.FileHeader.NumberOfSymbols;
     mapping->image.zerobits      = 0; /* FIXME */
     mapping->image.file_size     = file_size;
     mapping->image.loader_flags  = clr_va && clr_size;
@@ -951,23 +988,63 @@ static struct mapping *get_mapping_obj( struct process *process, obj_handle_t ha
     return (struct mapping *)get_handle_obj( process, handle, access, &mapping_ops );
 }
 
-/* open a new file for the file descriptor backing the mapping */
-struct file *get_mapping_file( struct process *process, client_ptr_t base,
-                               unsigned int access, unsigned int sharing )
+/* open a new file for the file descriptor backing the view */
+struct file *get_view_file( const struct memory_view *view, unsigned int access, unsigned int sharing )
 {
-    struct memory_view *view = find_mapped_view( process, base );
-
-    if (!view || !view->fd) return NULL;
+    if (!view->fd) return NULL;
     return create_file_for_fd_obj( view->fd, access, sharing );
 }
 
-/* get the image info for a SEC_IMAGE mapping */
-const pe_image_info_t *get_mapping_image_info( struct process *process, client_ptr_t base )
+/* get the image info for a SEC_IMAGE mapped view */
+const pe_image_info_t *get_view_image_info( const struct memory_view *view, client_ptr_t *base )
 {
-    struct memory_view *view = find_mapped_view( process, base );
-
-    if (!view || !(view->flags & SEC_IMAGE)) return NULL;
+    if (!(view->flags & SEC_IMAGE)) return NULL;
+    *base = view->base;
     return &view->image;
+}
+
+/* get the file name for a mapped view */
+int get_view_nt_name( const struct memory_view *view, struct unicode_str *name )
+{
+    if (!view->fd) return 0;
+    get_nt_name( view->fd, name );
+    return 1;
+}
+
+/* generate all startup events of a given process */
+void generate_startup_debug_events( struct process *process )
+{
+    struct memory_view *view;
+    struct list *ptr = list_head( &process->views );
+    struct thread *thread, *first_thread = get_process_first_thread( process );
+
+    if (!ptr) return;
+    view = LIST_ENTRY( ptr, struct memory_view, entry );
+    generate_debug_event( first_thread, DbgCreateProcessStateChange, view );
+
+    /* generate ntdll.dll load event */
+    while (ptr && (ptr = list_next( &process->views, ptr )))
+    {
+        view = LIST_ENTRY( ptr, struct memory_view, entry );
+        if (!(view->flags & SEC_IMAGE)) continue;
+        generate_debug_event( first_thread, DbgLoadDllStateChange, view );
+        break;
+    }
+
+    /* generate creation events */
+    LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
+    {
+        if (thread != first_thread)
+            generate_debug_event( thread, DbgCreateThreadStateChange, NULL );
+    }
+
+    /* generate dll events (in loading order) */
+    while (ptr && (ptr = list_next( &process->views, ptr )))
+    {
+        view = LIST_ENTRY( ptr, struct memory_view, entry );
+        if (!(view->flags & SEC_IMAGE)) continue;
+        generate_debug_event( first_thread, DbgLoadDllStateChange, view );
+    }
 }
 
 static void mapping_dump( struct object *obj, int verbose )
@@ -979,25 +1056,10 @@ static void mapping_dump( struct object *obj, int verbose )
              mapping->flags, mapping->fd, mapping->shared );
 }
 
-static struct object_type *mapping_get_type( struct object *obj )
-{
-    static const struct unicode_str str = { type_Section, sizeof(type_Section) };
-    return get_object_type( &str );
-}
-
 static struct fd *mapping_get_fd( struct object *obj )
 {
     struct mapping *mapping = (struct mapping *)obj;
     return (struct fd *)grab_object( mapping->fd );
-}
-
-static unsigned int mapping_map_access( struct object *obj, unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | SECTION_QUERY | SECTION_MAP_READ;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE | SECTION_MAP_WRITE;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE | SECTION_MAP_EXECUTE;
-    if (access & GENERIC_ALL)     access |= SECTION_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 static void mapping_destroy( struct object *obj )
@@ -1126,7 +1188,7 @@ DECL_HANDLER(map_view)
         view->start = req->start;
         view->flags = SEC_IMAGE;
         memcpy( &view->image, get_req_data(), min( sizeof(view->image), get_req_data_size() ));
-        add_process_view( current->process, view );
+        add_process_view( current, view );
         return;
     }
 
@@ -1157,12 +1219,10 @@ DECL_HANDLER(map_view)
         view->fd        = !is_fd_removable( mapping->fd ) ? (struct fd *)grab_object( mapping->fd ) : NULL;
         view->committed = mapping->committed ? (struct ranges *)grab_object( mapping->committed ) : NULL;
         view->shared    = mapping->shared ? (struct shared_map *)grab_object( mapping->shared ) : NULL;
-        if (mapping->flags & SEC_IMAGE)
-        {
-            view->image = mapping->image;
-            if (view->base != mapping->image.base) set_error( STATUS_IMAGE_NOT_AT_BASE );
-        }
-        add_process_view( current->process, view );
+        if (view->flags & SEC_IMAGE) view->image = mapping->image;
+        add_process_view( current, view );
+        if (view->flags & SEC_IMAGE && view->base != mapping->image.base)
+            set_error( STATUS_IMAGE_NOT_AT_BASE );
     }
 
 done:
@@ -1174,36 +1234,9 @@ DECL_HANDLER(unmap_view)
 {
     struct memory_view *view = find_mapped_view( current->process, req->base );
 
-    if (view) free_memory_view( view );
-}
-
-/* get file handle from mapping by address */
-DECL_HANDLER(get_mapping_file)
-{
-    struct memory_view *view;
-    struct process *process;
-    struct file *file;
-
-    if (!(process = get_process_from_handle( req->process, PROCESS_QUERY_INFORMATION ))) return;
-
-    LIST_FOR_EACH_ENTRY( view, &process->views, struct memory_view, entry )
-        if (req->addr >= view->base && req->addr < view->base + view->size) break;
-
-    if (&view->entry == &process->views)
-    {
-        set_error( STATUS_NOT_MAPPED_VIEW );
-        release_object( process );
-        return;
-    }
-
-    if (view->fd && (file = create_file_for_fd_obj( view->fd, GENERIC_READ,
-                                                    FILE_SHARE_READ | FILE_SHARE_WRITE )))
-    {
-        reply->handle = alloc_handle( process, file, GENERIC_READ, 0 );
-        release_object( file );
-    }
-
-    release_object( process );
+    if (!view) return;
+    if (view->flags & SEC_IMAGE) generate_debug_event( current, DbgUnloadDllStateChange, view );
+    free_memory_view( view );
 }
 
 /* get a range of committed pages in a file mapping */
@@ -1233,4 +1266,25 @@ DECL_HANDLER(is_same_mapping)
         !(view1->flags & SEC_IMAGE) || !(view2->flags & SEC_IMAGE) ||
         !is_same_file_fd( view1->fd, view2->fd ))
         set_error( STATUS_NOT_SAME_DEVICE );
+}
+
+/* get the filename of a mapping */
+DECL_HANDLER(get_mapping_filename)
+{
+    struct process *process;
+    struct memory_view *view;
+    struct unicode_str name;
+
+    if (!(process = get_process_from_handle( req->process, PROCESS_QUERY_INFORMATION ))) return;
+
+    if ((view = find_mapped_addr( process, req->addr )) && get_view_nt_name( view, &name ))
+    {
+        reply->len = name.len;
+        if (name.len > get_reply_max_size()) set_error( STATUS_BUFFER_OVERFLOW );
+        else if (!name.len) set_error( STATUS_FILE_INVALID );
+        else set_reply_data( name.str, name.len );
+    }
+    else set_error( STATUS_INVALID_ADDRESS );
+
+    release_object( process );
 }

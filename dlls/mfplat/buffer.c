@@ -21,6 +21,7 @@
 #include "mfplat_private.h"
 #include "rtworkq.h"
 
+#include "d3d11.h"
 #include "initguid.h"
 #include "d3d9.h"
 #include "evr.h"
@@ -35,6 +36,7 @@ struct memory_buffer
 {
     IMFMediaBuffer IMFMediaBuffer_iface;
     IMF2DBuffer2 IMF2DBuffer2_iface;
+    IMFDXGIBuffer IMFDXGIBuffer_iface;
     IMFGetService IMFGetService_iface;
     LONG refcount;
 
@@ -59,33 +61,14 @@ struct memory_buffer
         IDirect3DSurface9 *surface;
         D3DLOCKED_RECT rect;
     } d3d9_surface;
+    struct
+    {
+        IUnknown *surface;
+        unsigned int subresource;
+        struct attributes attributes;
+    } dxgi_surface;
 
     CRITICAL_SECTION cs;
-};
-
-enum sample_prop_flags
-{
-    SAMPLE_PROP_HAS_DURATION  = 1 << 0,
-    SAMPLE_PROP_HAS_TIMESTAMP = 1 << 1,
-};
-
-struct sample
-{
-    struct attributes attributes;
-    IMFSample IMFSample_iface;
-    IMFTrackedSample IMFTrackedSample_iface;
-
-    IMFMediaBuffer **buffers;
-    size_t buffer_count;
-    size_t capacity;
-    DWORD flags;
-    DWORD prop_flags;
-    LONGLONG duration;
-    LONGLONG timestamp;
-
-    /* Tracked sample functionality. */
-    IRtwqAsyncResult *tracked_result;
-    LONG tracked_refcount;
 };
 
 static inline struct memory_buffer *impl_from_IMFMediaBuffer(IMFMediaBuffer *iface)
@@ -103,14 +86,9 @@ static struct memory_buffer *impl_from_IMFGetService(IMFGetService *iface)
     return CONTAINING_RECORD(iface, struct memory_buffer, IMFGetService_iface);
 }
 
-static inline struct sample *impl_from_IMFSample(IMFSample *iface)
+static struct memory_buffer *impl_from_IMFDXGIBuffer(IMFDXGIBuffer *iface)
 {
-    return CONTAINING_RECORD(iface, struct sample, IMFSample_iface);
-}
-
-static struct sample *impl_from_IMFTrackedSample(IMFTrackedSample *iface)
-{
-    return CONTAINING_RECORD(iface, struct sample, IMFTrackedSample_iface);
+    return CONTAINING_RECORD(iface, struct memory_buffer, IMFDXGIBuffer_iface);
 }
 
 static HRESULT WINAPI memory_buffer_QueryInterface(IMFMediaBuffer *iface, REFIID riid, void **out)
@@ -153,6 +131,11 @@ static ULONG WINAPI memory_buffer_Release(IMFMediaBuffer *iface)
     {
         if (buffer->d3d9_surface.surface)
             IDirect3DSurface9_Release(buffer->d3d9_surface.surface);
+        if (buffer->dxgi_surface.surface)
+        {
+            IUnknown_Release(buffer->dxgi_surface.surface);
+            clear_attributes_object(&buffer->dxgi_surface.attributes);
+        }
         DeleteCriticalSection(&buffer->cs);
         heap_free(buffer->_2d.linear_buffer);
         heap_free(buffer->data);
@@ -816,6 +799,204 @@ static const IMFGetServiceVtbl d3d9_surface_buffer_gs_vtbl =
     d3d9_surface_buffer_gs_GetService,
 };
 
+static HRESULT WINAPI dxgi_1d_2d_buffer_QueryInterface(IMFMediaBuffer *iface, REFIID riid, void **out)
+{
+    struct memory_buffer *buffer = impl_from_IMFMediaBuffer(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), out);
+
+    if (IsEqualIID(riid, &IID_IMFMediaBuffer) ||
+            IsEqualIID(riid, &IID_IUnknown))
+    {
+        *out = &buffer->IMFMediaBuffer_iface;
+    }
+    else if (IsEqualIID(riid, &IID_IMF2DBuffer2) ||
+            IsEqualIID(riid, &IID_IMF2DBuffer))
+    {
+        *out = &buffer->IMF2DBuffer2_iface;
+    }
+    else if (IsEqualIID(riid, &IID_IMFDXGIBuffer))
+    {
+        *out = &buffer->IMFDXGIBuffer_iface;
+    }
+    else
+    {
+        WARN("Unsupported interface %s.\n", debugstr_guid(riid));
+        *out = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*out);
+    return S_OK;
+}
+
+static HRESULT WINAPI dxgi_surface_buffer_Lock(IMFMediaBuffer *iface, BYTE **data, DWORD *max_length,
+        DWORD *current_length)
+{
+    FIXME("%p, %p, %p, %p.\n", iface, data, max_length, current_length);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dxgi_surface_buffer_Unlock(IMFMediaBuffer *iface)
+{
+    FIXME("%p.\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dxgi_surface_buffer_Lock2D(IMF2DBuffer2 *iface, BYTE **scanline0, LONG *pitch)
+{
+    FIXME("%p, %p, %p.\n", iface, scanline0, pitch);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dxgi_surface_buffer_Unlock2D(IMF2DBuffer2 *iface)
+{
+    FIXME("%p.\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dxgi_surface_buffer_GetScanline0AndPitch(IMF2DBuffer2 *iface, BYTE **scanline0, LONG *pitch)
+{
+    FIXME("%p, %p, %p.\n", iface, scanline0, pitch);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dxgi_surface_buffer_GetContiguousLength(IMF2DBuffer2 *iface, DWORD *length)
+{
+    FIXME("%p, %p.\n", iface, length);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dxgi_surface_buffer_Lock2DSize(IMF2DBuffer2 *iface, MF2DBuffer_LockFlags flags,
+        BYTE **scanline0, LONG *pitch, BYTE **buffer_start, DWORD *buffer_length)
+{
+    FIXME("%p, %#x, %p, %p, %p, %p.\n", iface, flags, scanline0, pitch, buffer_start, buffer_length);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dxgi_buffer_QueryInterface(IMFDXGIBuffer *iface, REFIID riid, void **obj)
+{
+    struct memory_buffer *buffer = impl_from_IMFDXGIBuffer(iface);
+    return IMFMediaBuffer_QueryInterface(&buffer->IMFMediaBuffer_iface, riid, obj);
+}
+
+static ULONG WINAPI dxgi_buffer_AddRef(IMFDXGIBuffer *iface)
+{
+    struct memory_buffer *buffer = impl_from_IMFDXGIBuffer(iface);
+    return IMFMediaBuffer_AddRef(&buffer->IMFMediaBuffer_iface);
+}
+
+static ULONG WINAPI dxgi_buffer_Release(IMFDXGIBuffer *iface)
+{
+    struct memory_buffer *buffer = impl_from_IMFDXGIBuffer(iface);
+    return IMFMediaBuffer_Release(&buffer->IMFMediaBuffer_iface);
+}
+
+static HRESULT WINAPI dxgi_buffer_GetResource(IMFDXGIBuffer *iface, REFIID riid, void **obj)
+{
+    struct memory_buffer *buffer = impl_from_IMFDXGIBuffer(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+
+    return IUnknown_QueryInterface(buffer->dxgi_surface.surface, riid, obj);
+}
+
+static HRESULT WINAPI dxgi_buffer_GetSubresourceIndex(IMFDXGIBuffer *iface, UINT *index)
+{
+    struct memory_buffer *buffer = impl_from_IMFDXGIBuffer(iface);
+
+    TRACE("%p, %p.\n", iface, index);
+
+    if (!index)
+        return E_POINTER;
+
+    *index = buffer->dxgi_surface.subresource;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI dxgi_buffer_GetUnknown(IMFDXGIBuffer *iface, REFIID guid, REFIID riid, void **object)
+{
+    struct memory_buffer *buffer = impl_from_IMFDXGIBuffer(iface);
+
+    TRACE("%p, %s, %s, %p.\n", iface, debugstr_guid(guid), debugstr_guid(riid), object);
+
+    if (attributes_GetUnknown(&buffer->dxgi_surface.attributes, guid, riid, object) == MF_E_ATTRIBUTENOTFOUND)
+        return MF_E_NOT_FOUND;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI dxgi_buffer_SetUnknown(IMFDXGIBuffer *iface, REFIID guid, IUnknown *data)
+{
+    struct memory_buffer *buffer = impl_from_IMFDXGIBuffer(iface);
+    HRESULT hr = S_OK;
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(guid), data);
+
+    EnterCriticalSection(&buffer->dxgi_surface.attributes.cs);
+    if (data)
+    {
+        if (SUCCEEDED(attributes_GetItem(&buffer->dxgi_surface.attributes, guid, NULL)))
+            hr = HRESULT_FROM_WIN32(ERROR_OBJECT_ALREADY_EXISTS);
+        else
+            hr = attributes_SetUnknown(&buffer->dxgi_surface.attributes, guid, data);
+    }
+    else
+    {
+        attributes_DeleteItem(&buffer->dxgi_surface.attributes, guid);
+    }
+    LeaveCriticalSection(&buffer->dxgi_surface.attributes.cs);
+
+    return hr;
+}
+
+static const IMFMediaBufferVtbl dxgi_surface_1d_buffer_vtbl =
+{
+    dxgi_1d_2d_buffer_QueryInterface,
+    memory_buffer_AddRef,
+    memory_buffer_Release,
+    dxgi_surface_buffer_Lock,
+    dxgi_surface_buffer_Unlock,
+    memory_buffer_GetCurrentLength,
+    memory_buffer_SetCurrentLength,
+    memory_buffer_GetMaxLength,
+};
+
+static const IMF2DBuffer2Vtbl dxgi_surface_buffer_vtbl =
+{
+    memory_2d_buffer_QueryInterface,
+    memory_2d_buffer_AddRef,
+    memory_2d_buffer_Release,
+    dxgi_surface_buffer_Lock2D,
+    dxgi_surface_buffer_Unlock2D,
+    dxgi_surface_buffer_GetScanline0AndPitch,
+    memory_2d_buffer_IsContiguousFormat,
+    dxgi_surface_buffer_GetContiguousLength,
+    memory_2d_buffer_ContiguousCopyTo,
+    memory_2d_buffer_ContiguousCopyFrom,
+    dxgi_surface_buffer_Lock2DSize,
+    memory_2d_buffer_Copy2DTo,
+};
+
+static const IMFDXGIBufferVtbl dxgi_buffer_vtbl =
+{
+    dxgi_buffer_QueryInterface,
+    dxgi_buffer_AddRef,
+    dxgi_buffer_Release,
+    dxgi_buffer_GetResource,
+    dxgi_buffer_GetSubresourceIndex,
+    dxgi_buffer_GetUnknown,
+    dxgi_buffer_SetUnknown,
+};
+
 static HRESULT memory_buffer_init(struct memory_buffer *buffer, DWORD max_length, DWORD alignment,
         const IMFMediaBufferVtbl *vtbl)
 {
@@ -976,6 +1157,55 @@ static HRESULT create_d3d9_surface_buffer(IUnknown *surface, BOOL bottom_up, IMF
     return S_OK;
 }
 
+static HRESULT create_dxgi_surface_buffer(IUnknown *surface, UINT subresource, BOOL bottom_up,
+        IMFMediaBuffer **buffer)
+{
+    struct memory_buffer *object;
+    D3D11_TEXTURE2D_DESC desc;
+    unsigned int stride;
+    D3DFORMAT format;
+    GUID subtype;
+    BOOL is_yuv;
+    HRESULT hr;
+
+    ID3D11Texture2D_GetDesc((ID3D11Texture2D *)surface, &desc);
+    TRACE("format %#x, %u x %u.\n", desc.Format, desc.Width, desc.Height);
+
+    memcpy(&subtype, &MFVideoFormat_Base, sizeof(subtype));
+    subtype.Data1 = format = MFMapDXGIFormatToDX9Format(desc.Format);
+
+    if (!(stride = mf_format_get_stride(&subtype, desc.Width, &is_yuv)))
+        return MF_E_INVALIDMEDIATYPE;
+
+    object = heap_alloc_zero(sizeof(*object));
+    if (!object)
+        return E_OUTOFMEMORY;
+
+    object->IMFMediaBuffer_iface.lpVtbl = &dxgi_surface_1d_buffer_vtbl;
+    object->IMF2DBuffer2_iface.lpVtbl = &dxgi_surface_buffer_vtbl;
+    object->IMFDXGIBuffer_iface.lpVtbl = &dxgi_buffer_vtbl;
+    object->refcount = 1;
+    InitializeCriticalSection(&object->cs);
+    object->dxgi_surface.surface = surface;
+    IUnknown_AddRef(surface);
+    object->dxgi_surface.subresource = subresource;
+
+    MFGetPlaneSize(format, desc.Width, desc.Height, &object->_2d.plane_size);
+    object->_2d.width = stride;
+    object->_2d.height = desc.Height;
+    object->max_length = object->_2d.plane_size;
+
+    if (FAILED(hr = init_attributes_object(&object->dxgi_surface.attributes, 0)))
+    {
+        IMFMediaBuffer_Release(&object->IMFMediaBuffer_iface);
+        return hr;
+    }
+
+    *buffer = &object->IMFMediaBuffer_iface;
+
+    return S_OK;
+}
+
 /***********************************************************************
  *      MFCreateMemoryBuffer (mfplat.@)
  */
@@ -1017,6 +1247,20 @@ HRESULT WINAPI MFCreateDXSurfaceBuffer(REFIID riid, IUnknown *surface, BOOL bott
         return E_INVALIDARG;
 
     return create_d3d9_surface_buffer(surface, bottom_up, buffer);
+}
+
+/***********************************************************************
+ *      MFCreateDXGISurfaceBuffer (mfplat.@)
+ */
+HRESULT WINAPI MFCreateDXGISurfaceBuffer(REFIID riid, IUnknown *surface, UINT subresource, BOOL bottom_up,
+        IMFMediaBuffer **buffer)
+{
+    TRACE("%s, %p, %u, %d, %p.\n", debugstr_guid(riid), surface, subresource, bottom_up, buffer);
+
+    if (!IsEqualIID(riid, &IID_ID3D11Texture2D))
+        return E_INVALIDARG;
+
+    return create_dxgi_surface_buffer(surface, subresource, bottom_up, buffer);
 }
 
 static unsigned int buffer_get_aligned_length(unsigned int length, unsigned int alignment)
@@ -1079,951 +1323,4 @@ HRESULT WINAPI MFCreateMediaBufferFromMediaType(IMFMediaType *media_type, LONGLO
         FIXME("Major type %s is not supported.\n", debugstr_guid(&major));
 
     return E_NOTIMPL;
-}
-
-static HRESULT WINAPI sample_QueryInterface(IMFSample *iface, REFIID riid, void **out)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), out);
-
-    if (IsEqualIID(riid, &IID_IMFSample) ||
-            IsEqualIID(riid, &IID_IMFAttributes) ||
-            IsEqualIID(riid, &IID_IUnknown))
-    {
-        *out = &sample->IMFSample_iface;
-    }
-    else if (sample->IMFTrackedSample_iface.lpVtbl && IsEqualIID(riid, &IID_IMFTrackedSample))
-    {
-        *out = &sample->IMFTrackedSample_iface;
-    }
-    else
-    {
-        WARN("Unsupported %s.\n", debugstr_guid(riid));
-        *out = NULL;
-        return E_NOINTERFACE;
-    }
-
-    IUnknown_AddRef((IUnknown *)*out);
-    return S_OK;
-}
-
-static ULONG WINAPI sample_AddRef(IMFSample *iface)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    ULONG refcount = InterlockedIncrement(&sample->attributes.ref);
-
-    TRACE("%p, refcount %u.\n", iface, refcount);
-
-    return refcount;
-}
-
-static void release_sample_object(struct sample *sample)
-{
-    size_t i;
-
-    for (i = 0; i < sample->buffer_count; ++i)
-        IMFMediaBuffer_Release(sample->buffers[i]);
-    clear_attributes_object(&sample->attributes);
-    heap_free(sample->buffers);
-    heap_free(sample);
-}
-
-static ULONG WINAPI sample_Release(IMFSample *iface)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    ULONG refcount = InterlockedDecrement(&sample->attributes.ref);
-
-    TRACE("%p, refcount %u.\n", iface, refcount);
-
-    if (!refcount)
-        release_sample_object(sample);
-
-    return refcount;
-}
-
-static ULONG WINAPI sample_tracked_Release(IMFSample *iface)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    ULONG refcount;
-    HRESULT hr;
-
-    EnterCriticalSection(&sample->attributes.cs);
-    refcount = InterlockedDecrement(&sample->attributes.ref);
-    if (sample->tracked_result && sample->tracked_refcount == refcount)
-    {
-        /* Call could fail if queue system is not initialized, it's not critical. */
-        if (FAILED(hr = RtwqInvokeCallback(sample->tracked_result)))
-            WARN("Failed to invoke tracking callback, hr %#x.\n", hr);
-        IRtwqAsyncResult_Release(sample->tracked_result);
-        sample->tracked_result = NULL;
-        sample->tracked_refcount = 0;
-    }
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    TRACE("%p, refcount %u.\n", iface, refcount);
-
-    if (!refcount)
-        release_sample_object(sample);
-
-    return refcount;
-}
-
-static HRESULT WINAPI sample_GetItem(IMFSample *iface, REFGUID key, PROPVARIANT *value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
-
-    return attributes_GetItem(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_GetItemType(IMFSample *iface, REFGUID key, MF_ATTRIBUTE_TYPE *type)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), type);
-
-    return attributes_GetItemType(&sample->attributes, key, type);
-}
-
-static HRESULT WINAPI sample_CompareItem(IMFSample *iface, REFGUID key, REFPROPVARIANT value, BOOL *result)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %s, %p.\n", iface, debugstr_attr(key), debugstr_propvar(value), result);
-
-    return attributes_CompareItem(&sample->attributes, key, value, result);
-}
-
-static HRESULT WINAPI sample_Compare(IMFSample *iface, IMFAttributes *theirs, MF_ATTRIBUTES_MATCH_TYPE type,
-        BOOL *result)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %p, %d, %p.\n", iface, theirs, type, result);
-
-    return attributes_Compare(&sample->attributes, theirs, type, result);
-}
-
-static HRESULT WINAPI sample_GetUINT32(IMFSample *iface, REFGUID key, UINT32 *value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
-
-    return attributes_GetUINT32(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_GetUINT64(IMFSample *iface, REFGUID key, UINT64 *value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
-
-    return attributes_GetUINT64(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_GetDouble(IMFSample *iface, REFGUID key, double *value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
-
-    return attributes_GetDouble(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_GetGUID(IMFSample *iface, REFGUID key, GUID *value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
-
-    return attributes_GetGUID(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_GetStringLength(IMFSample *iface, REFGUID key, UINT32 *length)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), length);
-
-    return attributes_GetStringLength(&sample->attributes, key, length);
-}
-
-static HRESULT WINAPI sample_GetString(IMFSample *iface, REFGUID key, WCHAR *value, UINT32 size, UINT32 *length)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p, %u, %p.\n", iface, debugstr_attr(key), value, size, length);
-
-    return attributes_GetString(&sample->attributes, key, value, size, length);
-}
-
-static HRESULT WINAPI sample_GetAllocatedString(IMFSample *iface, REFGUID key, WCHAR **value, UINT32 *length)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p, %p.\n", iface, debugstr_attr(key), value, length);
-
-    return attributes_GetAllocatedString(&sample->attributes, key, value, length);
-}
-
-static HRESULT WINAPI sample_GetBlobSize(IMFSample *iface, REFGUID key, UINT32 *size)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), size);
-
-    return attributes_GetBlobSize(&sample->attributes, key, size);
-}
-
-static HRESULT WINAPI sample_GetBlob(IMFSample *iface, REFGUID key, UINT8 *buf, UINT32 bufsize, UINT32 *blobsize)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p, %u, %p.\n", iface, debugstr_attr(key), buf, bufsize, blobsize);
-
-    return attributes_GetBlob(&sample->attributes, key, buf, bufsize, blobsize);
-}
-
-static HRESULT WINAPI sample_GetAllocatedBlob(IMFSample *iface, REFGUID key, UINT8 **buf, UINT32 *size)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p, %p.\n", iface, debugstr_attr(key), buf, size);
-
-    return attributes_GetAllocatedBlob(&sample->attributes, key, buf, size);
-}
-
-static HRESULT WINAPI sample_GetUnknown(IMFSample *iface, REFGUID key, REFIID riid, void **out)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %s, %p.\n", iface, debugstr_attr(key), debugstr_guid(riid), out);
-
-    return attributes_GetUnknown(&sample->attributes, key, riid, out);
-}
-
-static HRESULT WINAPI sample_SetItem(IMFSample *iface, REFGUID key, REFPROPVARIANT value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %s.\n", iface, debugstr_attr(key), debugstr_propvar(value));
-
-    return attributes_SetItem(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_DeleteItem(IMFSample *iface, REFGUID key)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s.\n", iface, debugstr_attr(key));
-
-    return attributes_DeleteItem(&sample->attributes, key);
-}
-
-static HRESULT WINAPI sample_DeleteAllItems(IMFSample *iface)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p.\n", iface);
-
-    return attributes_DeleteAllItems(&sample->attributes);
-}
-
-static HRESULT WINAPI sample_SetUINT32(IMFSample *iface, REFGUID key, UINT32 value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %u.\n", iface, debugstr_attr(key), value);
-
-    return attributes_SetUINT32(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_SetUINT64(IMFSample *iface, REFGUID key, UINT64 value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %s.\n", iface, debugstr_attr(key), wine_dbgstr_longlong(value));
-
-    return attributes_SetUINT64(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_SetDouble(IMFSample *iface, REFGUID key, double value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %f.\n", iface, debugstr_attr(key), value);
-
-    return attributes_SetDouble(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_SetGUID(IMFSample *iface, REFGUID key, REFGUID value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %s.\n", iface, debugstr_attr(key), debugstr_mf_guid(value));
-
-    return attributes_SetGUID(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_SetString(IMFSample *iface, REFGUID key, const WCHAR *value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %s.\n", iface, debugstr_attr(key), debugstr_w(value));
-
-    return attributes_SetString(&sample->attributes, key, value);
-}
-
-static HRESULT WINAPI sample_SetBlob(IMFSample *iface, REFGUID key, const UINT8 *buf, UINT32 size)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p, %u.\n", iface, debugstr_attr(key), buf, size);
-
-    return attributes_SetBlob(&sample->attributes, key, buf, size);
-}
-
-static HRESULT WINAPI sample_SetUnknown(IMFSample *iface, REFGUID key, IUnknown *unknown)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), unknown);
-
-    return attributes_SetUnknown(&sample->attributes, key, unknown);
-}
-
-static HRESULT WINAPI sample_LockStore(IMFSample *iface)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p.\n", iface);
-
-    return attributes_LockStore(&sample->attributes);
-}
-
-static HRESULT WINAPI sample_UnlockStore(IMFSample *iface)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p.\n", iface);
-
-    return attributes_UnlockStore(&sample->attributes);
-}
-
-static HRESULT WINAPI sample_GetCount(IMFSample *iface, UINT32 *count)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %p.\n", iface, count);
-
-    return attributes_GetCount(&sample->attributes, count);
-}
-
-static HRESULT WINAPI sample_GetItemByIndex(IMFSample *iface, UINT32 index, GUID *key, PROPVARIANT *value)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %u, %p, %p.\n", iface, index, key, value);
-
-    return attributes_GetItemByIndex(&sample->attributes, index, key, value);
-}
-
-static HRESULT WINAPI sample_CopyAllItems(IMFSample *iface, IMFAttributes *dest)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %p.\n", iface, dest);
-
-    return attributes_CopyAllItems(&sample->attributes, dest);
-}
-
-static HRESULT WINAPI sample_GetSampleFlags(IMFSample *iface, DWORD *flags)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %p.\n", iface, flags);
-
-    EnterCriticalSection(&sample->attributes.cs);
-    *flags = sample->flags;
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI sample_SetSampleFlags(IMFSample *iface, DWORD flags)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %#x.\n", iface, flags);
-
-    EnterCriticalSection(&sample->attributes.cs);
-    sample->flags = flags;
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI sample_GetSampleTime(IMFSample *iface, LONGLONG *timestamp)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    HRESULT hr = S_OK;
-
-    TRACE("%p, %p.\n", iface, timestamp);
-
-    EnterCriticalSection(&sample->attributes.cs);
-    if (sample->prop_flags & SAMPLE_PROP_HAS_TIMESTAMP)
-        *timestamp = sample->timestamp;
-    else
-        hr = MF_E_NO_SAMPLE_TIMESTAMP;
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return hr;
-}
-
-static HRESULT WINAPI sample_SetSampleTime(IMFSample *iface, LONGLONG timestamp)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s.\n", iface, debugstr_time(timestamp));
-
-    EnterCriticalSection(&sample->attributes.cs);
-    sample->timestamp = timestamp;
-    sample->prop_flags |= SAMPLE_PROP_HAS_TIMESTAMP;
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI sample_GetSampleDuration(IMFSample *iface, LONGLONG *duration)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    HRESULT hr = S_OK;
-
-    TRACE("%p, %p.\n", iface, duration);
-
-    EnterCriticalSection(&sample->attributes.cs);
-    if (sample->prop_flags & SAMPLE_PROP_HAS_DURATION)
-        *duration = sample->duration;
-    else
-        hr = MF_E_NO_SAMPLE_DURATION;
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return hr;
-}
-
-static HRESULT WINAPI sample_SetSampleDuration(IMFSample *iface, LONGLONG duration)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %s.\n", iface, debugstr_time(duration));
-
-    EnterCriticalSection(&sample->attributes.cs);
-    sample->duration = duration;
-    sample->prop_flags |= SAMPLE_PROP_HAS_DURATION;
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI sample_GetBufferCount(IMFSample *iface, DWORD *count)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %p.\n", iface, count);
-
-    if (!count)
-        return E_INVALIDARG;
-
-    EnterCriticalSection(&sample->attributes.cs);
-    *count = sample->buffer_count;
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI sample_GetBufferByIndex(IMFSample *iface, DWORD index, IMFMediaBuffer **buffer)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    HRESULT hr = S_OK;
-
-    TRACE("%p, %u, %p.\n", iface, index, buffer);
-
-    EnterCriticalSection(&sample->attributes.cs);
-    if (index < sample->buffer_count)
-    {
-        *buffer = sample->buffers[index];
-        IMFMediaBuffer_AddRef(*buffer);
-    }
-    else
-        hr = E_INVALIDARG;
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return hr;
-}
-
-static unsigned int sample_get_total_length(struct sample *sample)
-{
-    DWORD total_length = 0, length;
-    size_t i;
-
-    for (i = 0; i < sample->buffer_count; ++i)
-    {
-        length = 0;
-        if (SUCCEEDED(IMFMediaBuffer_GetCurrentLength(sample->buffers[i], &length)))
-            total_length += length;
-    }
-
-    return total_length;
-}
-
-static HRESULT sample_copy_to_buffer(struct sample *sample, IMFMediaBuffer *buffer)
-{
-    DWORD total_length, dst_length, dst_current_length, src_max_length, current_length;
-    BYTE *src_ptr, *dst_ptr;
-    BOOL locked;
-    HRESULT hr;
-    size_t i;
-
-    total_length = sample_get_total_length(sample);
-    dst_current_length = 0;
-
-    dst_ptr = NULL;
-    dst_length = current_length = 0;
-    locked = SUCCEEDED(hr = IMFMediaBuffer_Lock(buffer, &dst_ptr, &dst_length, &current_length));
-    if (locked)
-    {
-        if (dst_length < total_length)
-            hr = MF_E_BUFFERTOOSMALL;
-        else if (dst_ptr)
-        {
-            for (i = 0; i < sample->buffer_count && SUCCEEDED(hr); ++i)
-            {
-                src_ptr = NULL;
-                src_max_length = current_length = 0;
-                if (SUCCEEDED(hr = IMFMediaBuffer_Lock(sample->buffers[i], &src_ptr, &src_max_length, &current_length)))
-                {
-                    if (src_ptr)
-                    {
-                        if (current_length > dst_length)
-                            hr = MF_E_BUFFERTOOSMALL;
-                        else if (current_length)
-                        {
-                            memcpy(dst_ptr, src_ptr, current_length);
-                            dst_length -= current_length;
-                            dst_current_length += current_length;
-                            dst_ptr += current_length;
-                        }
-                    }
-                    IMFMediaBuffer_Unlock(sample->buffers[i]);
-                }
-            }
-        }
-    }
-
-    if (FAILED(IMFMediaBuffer_SetCurrentLength(buffer, dst_current_length)))
-        WARN("Failed to set buffer length.\n");
-
-    if (locked)
-        IMFMediaBuffer_Unlock(buffer);
-
-    return hr;
-}
-
-static HRESULT WINAPI sample_ConvertToContiguousBuffer(IMFSample *iface, IMFMediaBuffer **buffer)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    unsigned int total_length, i;
-    IMFMediaBuffer *dest_buffer;
-    HRESULT hr = S_OK;
-
-    TRACE("%p, %p.\n", iface, buffer);
-
-    EnterCriticalSection(&sample->attributes.cs);
-
-    if (sample->buffer_count == 0)
-        hr = E_UNEXPECTED;
-    else if (sample->buffer_count > 1)
-    {
-        total_length = sample_get_total_length(sample);
-        if (SUCCEEDED(hr = MFCreateMemoryBuffer(total_length, &dest_buffer)))
-        {
-            if (SUCCEEDED(hr = sample_copy_to_buffer(sample, dest_buffer)))
-            {
-                for (i = 0; i < sample->buffer_count; ++i)
-                    IMFMediaBuffer_Release(sample->buffers[i]);
-
-                sample->buffers[0] = dest_buffer;
-                IMFMediaBuffer_AddRef(sample->buffers[0]);
-
-                sample->buffer_count = 1;
-            }
-            IMFMediaBuffer_Release(dest_buffer);
-        }
-    }
-
-    if (SUCCEEDED(hr) && buffer)
-    {
-        *buffer = sample->buffers[0];
-        IMFMediaBuffer_AddRef(*buffer);
-    }
-
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return hr;
-}
-
-static HRESULT WINAPI sample_AddBuffer(IMFSample *iface, IMFMediaBuffer *buffer)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    HRESULT hr = S_OK;
-
-    TRACE("%p, %p.\n", iface, buffer);
-
-    EnterCriticalSection(&sample->attributes.cs);
-    if (!mf_array_reserve((void **)&sample->buffers, &sample->capacity, sample->buffer_count + 1,
-            sizeof(*sample->buffers)))
-        hr = E_OUTOFMEMORY;
-    else
-    {
-        sample->buffers[sample->buffer_count++] = buffer;
-        IMFMediaBuffer_AddRef(buffer);
-    }
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return hr;
-}
-
-static HRESULT WINAPI sample_RemoveBufferByIndex(IMFSample *iface, DWORD index)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    HRESULT hr = S_OK;
-
-    TRACE("%p, %u.\n", iface, index);
-
-    EnterCriticalSection(&sample->attributes.cs);
-    if (index < sample->buffer_count)
-    {
-        IMFMediaBuffer_Release(sample->buffers[index]);
-        if (index < sample->buffer_count - 1)
-        {
-            memmove(&sample->buffers[index], &sample->buffers[index+1],
-                    (sample->buffer_count - index - 1) * sizeof(*sample->buffers));
-        }
-        sample->buffer_count--;
-    }
-    else
-        hr = E_INVALIDARG;
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return hr;
-}
-
-static HRESULT WINAPI sample_RemoveAllBuffers(IMFSample *iface)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    size_t i;
-
-    TRACE("%p.\n", iface);
-
-    EnterCriticalSection(&sample->attributes.cs);
-    for (i = 0; i < sample->buffer_count; ++i)
-         IMFMediaBuffer_Release(sample->buffers[i]);
-    sample->buffer_count = 0;
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI sample_GetTotalLength(IMFSample *iface, DWORD *total_length)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-
-    TRACE("%p, %p.\n", iface, total_length);
-
-    EnterCriticalSection(&sample->attributes.cs);
-    *total_length = sample_get_total_length(sample);
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI sample_CopyToBuffer(IMFSample *iface, IMFMediaBuffer *buffer)
-{
-    struct sample *sample = impl_from_IMFSample(iface);
-    DWORD total_length, dst_length, dst_current_length, src_max_length, current_length;
-    BYTE *src_ptr, *dst_ptr;
-    BOOL locked;
-    HRESULT hr;
-    size_t i;
-
-    TRACE("%p, %p.\n", iface, buffer);
-
-    EnterCriticalSection(&sample->attributes.cs);
-
-    total_length = sample_get_total_length(sample);
-    dst_current_length = 0;
-
-    dst_ptr = NULL;
-    dst_length = current_length = 0;
-    locked = SUCCEEDED(hr = IMFMediaBuffer_Lock(buffer, &dst_ptr, &dst_length, &current_length));
-    if (locked)
-    {
-        if (dst_length < total_length)
-            hr = MF_E_BUFFERTOOSMALL;
-        else if (dst_ptr)
-        {
-            for (i = 0; i < sample->buffer_count && SUCCEEDED(hr); ++i)
-            {
-                src_ptr = NULL;
-                src_max_length = current_length = 0;
-                if (SUCCEEDED(hr = IMFMediaBuffer_Lock(sample->buffers[i], &src_ptr, &src_max_length, &current_length)))
-                {
-                    if (src_ptr)
-                    {
-                        if (current_length > dst_length)
-                            hr = MF_E_BUFFERTOOSMALL;
-                        else if (current_length)
-                        {
-                            memcpy(dst_ptr, src_ptr, current_length);
-                            dst_length -= current_length;
-                            dst_current_length += current_length;
-                            dst_ptr += current_length;
-                        }
-                    }
-                    IMFMediaBuffer_Unlock(sample->buffers[i]);
-                }
-            }
-        }
-    }
-
-    IMFMediaBuffer_SetCurrentLength(buffer, dst_current_length);
-
-    if (locked)
-        IMFMediaBuffer_Unlock(buffer);
-
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return hr;
-}
-
-static const IMFSampleVtbl samplevtbl =
-{
-    sample_QueryInterface,
-    sample_AddRef,
-    sample_Release,
-    sample_GetItem,
-    sample_GetItemType,
-    sample_CompareItem,
-    sample_Compare,
-    sample_GetUINT32,
-    sample_GetUINT64,
-    sample_GetDouble,
-    sample_GetGUID,
-    sample_GetStringLength,
-    sample_GetString,
-    sample_GetAllocatedString,
-    sample_GetBlobSize,
-    sample_GetBlob,
-    sample_GetAllocatedBlob,
-    sample_GetUnknown,
-    sample_SetItem,
-    sample_DeleteItem,
-    sample_DeleteAllItems,
-    sample_SetUINT32,
-    sample_SetUINT64,
-    sample_SetDouble,
-    sample_SetGUID,
-    sample_SetString,
-    sample_SetBlob,
-    sample_SetUnknown,
-    sample_LockStore,
-    sample_UnlockStore,
-    sample_GetCount,
-    sample_GetItemByIndex,
-    sample_CopyAllItems,
-    sample_GetSampleFlags,
-    sample_SetSampleFlags,
-    sample_GetSampleTime,
-    sample_SetSampleTime,
-    sample_GetSampleDuration,
-    sample_SetSampleDuration,
-    sample_GetBufferCount,
-    sample_GetBufferByIndex,
-    sample_ConvertToContiguousBuffer,
-    sample_AddBuffer,
-    sample_RemoveBufferByIndex,
-    sample_RemoveAllBuffers,
-    sample_GetTotalLength,
-    sample_CopyToBuffer,
-};
-
-static HRESULT WINAPI tracked_sample_QueryInterface(IMFTrackedSample *iface, REFIID riid, void **obj)
-{
-    struct sample *sample = impl_from_IMFTrackedSample(iface);
-    return IMFSample_QueryInterface(&sample->IMFSample_iface, riid, obj);
-}
-
-static ULONG WINAPI tracked_sample_AddRef(IMFTrackedSample *iface)
-{
-    struct sample *sample = impl_from_IMFTrackedSample(iface);
-    return IMFSample_AddRef(&sample->IMFSample_iface);
-}
-
-static ULONG WINAPI tracked_sample_Release(IMFTrackedSample *iface)
-{
-    struct sample *sample = impl_from_IMFTrackedSample(iface);
-    return IMFSample_Release(&sample->IMFSample_iface);
-}
-
-static HRESULT WINAPI tracked_sample_SetAllocator(IMFTrackedSample *iface,
-        IMFAsyncCallback *sample_allocator, IUnknown *state)
-{
-    struct sample *sample = impl_from_IMFTrackedSample(iface);
-    HRESULT hr = S_OK;
-
-    TRACE("%p, %p, %p.\n", iface, sample_allocator, state);
-
-    EnterCriticalSection(&sample->attributes.cs);
-
-    if (sample->tracked_result)
-        hr = MF_E_NOTACCEPTING;
-    else
-    {
-        if (SUCCEEDED(hr = RtwqCreateAsyncResult((IUnknown *)iface, (IRtwqAsyncCallback *)sample_allocator,
-                state, &sample->tracked_result)))
-        {
-            /* Account for additional refcount brought by 'state' object. This threshold is used
-               on Release() to invoke tracker callback.  */
-            sample->tracked_refcount = 1;
-            if (state == (IUnknown *)&sample->IMFTrackedSample_iface ||
-                    state == (IUnknown *)&sample->IMFSample_iface)
-            {
-                ++sample->tracked_refcount;
-            }
-        }
-    }
-
-    LeaveCriticalSection(&sample->attributes.cs);
-
-    return hr;
-}
-
-static const IMFTrackedSampleVtbl tracked_sample_vtbl =
-{
-    tracked_sample_QueryInterface,
-    tracked_sample_AddRef,
-    tracked_sample_Release,
-    tracked_sample_SetAllocator,
-};
-
-static const IMFSampleVtbl sample_tracked_vtbl =
-{
-    sample_QueryInterface,
-    sample_AddRef,
-    sample_tracked_Release,
-    sample_GetItem,
-    sample_GetItemType,
-    sample_CompareItem,
-    sample_Compare,
-    sample_GetUINT32,
-    sample_GetUINT64,
-    sample_GetDouble,
-    sample_GetGUID,
-    sample_GetStringLength,
-    sample_GetString,
-    sample_GetAllocatedString,
-    sample_GetBlobSize,
-    sample_GetBlob,
-    sample_GetAllocatedBlob,
-    sample_GetUnknown,
-    sample_SetItem,
-    sample_DeleteItem,
-    sample_DeleteAllItems,
-    sample_SetUINT32,
-    sample_SetUINT64,
-    sample_SetDouble,
-    sample_SetGUID,
-    sample_SetString,
-    sample_SetBlob,
-    sample_SetUnknown,
-    sample_LockStore,
-    sample_UnlockStore,
-    sample_GetCount,
-    sample_GetItemByIndex,
-    sample_CopyAllItems,
-    sample_GetSampleFlags,
-    sample_SetSampleFlags,
-    sample_GetSampleTime,
-    sample_SetSampleTime,
-    sample_GetSampleDuration,
-    sample_SetSampleDuration,
-    sample_GetBufferCount,
-    sample_GetBufferByIndex,
-    sample_ConvertToContiguousBuffer,
-    sample_AddBuffer,
-    sample_RemoveBufferByIndex,
-    sample_RemoveAllBuffers,
-    sample_GetTotalLength,
-    sample_CopyToBuffer,
-};
-
-
-/***********************************************************************
- *      MFCreateSample (mfplat.@)
- */
-HRESULT WINAPI MFCreateSample(IMFSample **sample)
-{
-    struct sample *object;
-    HRESULT hr;
-
-    TRACE("%p.\n", sample);
-
-    object = heap_alloc_zero(sizeof(*object));
-    if (!object)
-        return E_OUTOFMEMORY;
-
-    if (FAILED(hr = init_attributes_object(&object->attributes, 0)))
-    {
-        heap_free(object);
-        return hr;
-    }
-
-    object->IMFSample_iface.lpVtbl = &samplevtbl;
-
-    *sample = &object->IMFSample_iface;
-
-    TRACE("Created sample %p.\n", *sample);
-
-    return S_OK;
-}
-
-/***********************************************************************
- *      MFCreateTrackedSample (mfplat.@)
- */
-HRESULT WINAPI MFCreateTrackedSample(IMFTrackedSample **sample)
-{
-    struct sample *object;
-    HRESULT hr;
-
-    TRACE("%p.\n", sample);
-
-    object = heap_alloc_zero(sizeof(*object));
-    if (!object)
-        return E_OUTOFMEMORY;
-
-    if (FAILED(hr = init_attributes_object(&object->attributes, 0)))
-    {
-        heap_free(object);
-        return hr;
-    }
-
-    object->IMFSample_iface.lpVtbl = &sample_tracked_vtbl;
-    object->IMFTrackedSample_iface.lpVtbl = &tracked_sample_vtbl;
-
-    *sample = &object->IMFTrackedSample_iface;
-
-    return S_OK;
 }

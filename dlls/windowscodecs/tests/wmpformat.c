@@ -89,7 +89,7 @@ static void test_decode(void)
                           &IID_IWICBitmapDecoder, (void **)&decoder);
     if (FAILED(hr))
     {
-        todo_wine win_skip("WmpDecoder isn't available, skipping test\n");
+        win_skip("WmpDecoder isn't available, skipping test\n");
         return;
     }
 

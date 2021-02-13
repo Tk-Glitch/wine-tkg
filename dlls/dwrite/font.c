@@ -4568,7 +4568,7 @@ err:
     return hr;
 }
 
-static const struct IDWriteFontFileEnumeratorVtbl systemfontfileenumeratorvtbl =
+static const IDWriteFontFileEnumeratorVtbl systemfontfileenumeratorvtbl =
 {
     systemfontfileenumerator_QueryInterface,
     systemfontfileenumerator_AddRef,
@@ -5451,7 +5451,7 @@ static HRESULT WINAPI localfontfileloader_GetLastWriteTimeFromKey(IDWriteLocalFo
     return S_OK;
 }
 
-static const struct IDWriteLocalFontFileLoaderVtbl localfontfileloadervtbl =
+static const IDWriteLocalFontFileLoaderVtbl localfontfileloadervtbl =
 {
     localfontfileloader_QueryInterface,
     localfontfileloader_AddRef,
@@ -5874,7 +5874,7 @@ static HRESULT WINAPI glyphrunanalysis_GetAlphaBlendParams(IDWriteGlyphRunAnalys
     return S_OK;
 }
 
-static const struct IDWriteGlyphRunAnalysisVtbl glyphrunanalysisvtbl =
+static const IDWriteGlyphRunAnalysisVtbl glyphrunanalysisvtbl =
 {
     glyphrunanalysis_QueryInterface,
     glyphrunanalysis_AddRef,
@@ -6663,9 +6663,7 @@ HRESULT create_fontfacereference(IDWriteFactory7 *factory, IDWriteFontFile *file
 
 static HRESULT WINAPI inmemoryfilestream_QueryInterface(IDWriteFontFileStream *iface, REFIID riid, void **obj)
 {
-    struct dwrite_inmemory_filestream *stream = inmemory_impl_from_IDWriteFontFileStream(iface);
-
-    TRACE_(dwrite_file)("(%p)->(%s, %p)\n", stream, debugstr_guid(riid), obj);
+    TRACE_(dwrite_file)("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
 
     if (IsEqualIID(riid, &IID_IDWriteFontFileStream) || IsEqualIID(riid, &IID_IUnknown)) {
         *obj = iface;
@@ -6682,24 +6680,27 @@ static HRESULT WINAPI inmemoryfilestream_QueryInterface(IDWriteFontFileStream *i
 static ULONG WINAPI inmemoryfilestream_AddRef(IDWriteFontFileStream *iface)
 {
     struct dwrite_inmemory_filestream *stream = inmemory_impl_from_IDWriteFontFileStream(iface);
-    ULONG ref = InterlockedIncrement(&stream->ref);
-    TRACE_(dwrite_file)("(%p)->(%u)\n", stream, ref);
-    return ref;
+    ULONG refcount = InterlockedIncrement(&stream->ref);
+
+    TRACE_(dwrite_file)("%p, refcount %u.\n", iface, refcount);
+
+    return refcount;
 }
 
 static ULONG WINAPI inmemoryfilestream_Release(IDWriteFontFileStream *iface)
 {
     struct dwrite_inmemory_filestream *stream = inmemory_impl_from_IDWriteFontFileStream(iface);
-    ULONG ref = InterlockedDecrement(&stream->ref);
+    ULONG refcount = InterlockedDecrement(&stream->ref);
 
-    TRACE_(dwrite_file)("(%p)->(%u)\n", stream, ref);
+    TRACE_(dwrite_file)("%p, refcount %u.\n", iface, refcount);
 
-    if (!ref) {
+    if (!refcount)
+    {
         release_inmemory_stream(stream->data);
         heap_free(stream);
     }
 
-    return ref;
+    return refcount;
 }
 
 static HRESULT WINAPI inmemoryfilestream_ReadFileFragment(IDWriteFontFileStream *iface, void const **fragment_start,
@@ -6707,7 +6708,7 @@ static HRESULT WINAPI inmemoryfilestream_ReadFileFragment(IDWriteFontFileStream 
 {
     struct dwrite_inmemory_filestream *stream = inmemory_impl_from_IDWriteFontFileStream(iface);
 
-    TRACE_(dwrite_file)("(%p)->(%p, 0x%s, 0x%s, %p)\n", stream, fragment_start,
+    TRACE_(dwrite_file)("%p, %p, 0x%s, 0x%s, %p.\n", iface, fragment_start,
           wine_dbgstr_longlong(offset), wine_dbgstr_longlong(fragment_size), fragment_context);
 
     *fragment_context = NULL;
@@ -6723,16 +6724,14 @@ static HRESULT WINAPI inmemoryfilestream_ReadFileFragment(IDWriteFontFileStream 
 
 static void WINAPI inmemoryfilestream_ReleaseFileFragment(IDWriteFontFileStream *iface, void *fragment_context)
 {
-    struct dwrite_inmemory_filestream *stream = inmemory_impl_from_IDWriteFontFileStream(iface);
-
-    TRACE_(dwrite_file)("(%p)->(%p)\n", stream, fragment_context);
+    TRACE_(dwrite_file)("%p, %p.\n", iface, fragment_context);
 }
 
 static HRESULT WINAPI inmemoryfilestream_GetFileSize(IDWriteFontFileStream *iface, UINT64 *size)
 {
     struct dwrite_inmemory_filestream *stream = inmemory_impl_from_IDWriteFontFileStream(iface);
 
-    TRACE_(dwrite_file)("(%p)->(%p)\n", stream, size);
+    TRACE_(dwrite_file)("%p, %p.\n", iface, size);
 
     *size = stream->data->size;
 
@@ -6741,9 +6740,7 @@ static HRESULT WINAPI inmemoryfilestream_GetFileSize(IDWriteFontFileStream *ifac
 
 static HRESULT WINAPI inmemoryfilestream_GetLastWriteTime(IDWriteFontFileStream *iface, UINT64 *last_writetime)
 {
-    struct dwrite_inmemory_filestream *stream = inmemory_impl_from_IDWriteFontFileStream(iface);
-
-    TRACE_(dwrite_file)("(%p)->(%p)\n", stream, last_writetime);
+    TRACE_(dwrite_file)("%p, %p.\n", iface, last_writetime);
 
     *last_writetime = 0;
 
@@ -6763,9 +6760,7 @@ static const IDWriteFontFileStreamVtbl inmemoryfilestreamvtbl = {
 static HRESULT WINAPI inmemoryfontfileloader_QueryInterface(IDWriteInMemoryFontFileLoader *iface,
         REFIID riid, void **obj)
 {
-    struct dwrite_inmemory_fileloader *loader = impl_from_IDWriteInMemoryFontFileLoader(iface);
-
-    TRACE("(%p)->(%s, %p)\n", loader, debugstr_guid(riid), obj);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
 
     if (IsEqualIID(riid, &IID_IDWriteInMemoryFontFileLoader) ||
         IsEqualIID(riid, &IID_IDWriteFontFileLoader) ||
@@ -6786,27 +6781,30 @@ static HRESULT WINAPI inmemoryfontfileloader_QueryInterface(IDWriteInMemoryFontF
 static ULONG WINAPI inmemoryfontfileloader_AddRef(IDWriteInMemoryFontFileLoader *iface)
 {
     struct dwrite_inmemory_fileloader *loader = impl_from_IDWriteInMemoryFontFileLoader(iface);
-    ULONG ref = InterlockedIncrement(&loader->ref);
-    TRACE("(%p)->(%u)\n", loader, ref);
-    return ref;
+    ULONG refcount = InterlockedIncrement(&loader->ref);
+
+    TRACE("%p, refcount %u.\n", iface, refcount);
+
+    return refcount;
 }
 
 static ULONG WINAPI inmemoryfontfileloader_Release(IDWriteInMemoryFontFileLoader *iface)
 {
     struct dwrite_inmemory_fileloader *loader = impl_from_IDWriteInMemoryFontFileLoader(iface);
-    ULONG ref = InterlockedDecrement(&loader->ref);
+    ULONG refcount = InterlockedDecrement(&loader->ref);
     size_t i;
 
-    TRACE("(%p)->(%u)\n", loader, ref);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
-    if (!ref) {
+    if (!refcount)
+    {
         for (i = 0; i < loader->count; ++i)
             release_inmemory_stream(loader->streams[i]);
         heap_free(loader->streams);
         heap_free(loader);
     }
 
-    return ref;
+    return refcount;
 }
 
 static HRESULT WINAPI inmemoryfontfileloader_CreateStreamFromKey(IDWriteInMemoryFontFileLoader *iface,
@@ -6816,7 +6814,7 @@ static HRESULT WINAPI inmemoryfontfileloader_CreateStreamFromKey(IDWriteInMemory
     struct dwrite_inmemory_filestream *stream;
     DWORD index;
 
-    TRACE("(%p)->(%p, %u, %p)\n", loader, key, key_size, ret);
+    TRACE("%p, %p, %u, %p.\n", iface, key, key_size, ret);
 
     *ret = NULL;
 
@@ -6848,7 +6846,7 @@ static HRESULT WINAPI inmemoryfontfileloader_CreateInMemoryFontFileReference(IDW
     struct dwrite_inmemory_stream_data *stream;
     DWORD key;
 
-    TRACE("(%p)->(%p, %p, %u, %p, %p)\n", loader, factory, data, data_size, owner, fontfile);
+    TRACE("%p, %p, %p, %u, %p, %p.\n", iface, factory, data, data_size, owner, fontfile);
 
     *fontfile = NULL;
 

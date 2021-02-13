@@ -119,7 +119,6 @@ static BOOL init_threadpool(void)
 static DWORD CALLBACK rtl_work_cb(void *userdata)
 {
     HANDLE semaphore = userdata;
-    trace("Running rtl_work callback\n");
     ReleaseSemaphore(semaphore, 1, NULL);
     return 0;
 }
@@ -175,8 +174,6 @@ static void CALLBACK rtl_wait_cb(void *userdata, BOOLEAN timeout)
     struct rtl_wait_info *info = userdata;
     DWORD result;
 
-    trace("Running rtl_wait callback\n");
-
     if (!timeout)
         InterlockedIncrement(&info->userdata);
     else
@@ -196,7 +193,6 @@ static HANDLE rtl_wait_apc_semaphore;
 
 static void CALLBACK rtl_wait_apc_cb(ULONG_PTR userdata)
 {
-    trace("Running rtl_wait_apc callback\n");
     if (rtl_wait_apc_semaphore)
         ReleaseSemaphore(rtl_wait_apc_semaphore, 1, NULL);
 }
@@ -207,7 +203,7 @@ static void test_RtlRegisterWait(void)
     struct rtl_wait_info info;
     HANDLE semaphores[2];
     NTSTATUS status;
-    DWORD result;
+    DWORD result, threadid;
 
     semaphores[0] = CreateSemaphoreW(NULL, 0, 2, NULL);
     ok(semaphores[0] != NULL, "failed to create semaphore\n");
@@ -298,6 +294,69 @@ static void test_RtlRegisterWait(void)
     status = RtlDeregisterWait(wait1);
     ok(!status, "RtlDeregisterWait failed with status %x\n", status);
 
+    /* test RtlRegisterWait WT_EXECUTEINWAITTHREAD flag */
+    info.userdata = 0;
+    info.threadid = 0;
+    status = RtlRegisterWait(&wait1, semaphores[1], rtl_wait_cb, &info, 200, WT_EXECUTEINWAITTHREAD|WT_EXECUTEONLYONCE);
+    ok(!status, "RtlRegisterWait failed with status %x\n", status);
+    ReleaseSemaphore(semaphores[1], 1, NULL);
+    result = WaitForSingleObject(semaphores[0], 200);
+    ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
+    ok(info.userdata == 1, "expected info.userdata = 1, got %u\n", info.userdata);
+    ok(info.threadid && info.threadid != GetCurrentThreadId(), "unexpected wait thread id %x\n", info.threadid);
+    threadid = info.threadid;
+    result = WaitForSingleObject(semaphores[1], 0);
+    ok(result == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", result);
+    Sleep(50);
+    status = RtlDeregisterWait(wait1);
+    ok(!status, "RtlDeregisterWait failed with status %x\n", status);
+
+    info.userdata = 0;
+    info.threadid = 0;
+    status = RtlRegisterWait(&wait1, semaphores[1], rtl_wait_cb, &info, 200, WT_EXECUTEINWAITTHREAD|WT_EXECUTEONLYONCE);
+    ok(!status, "RtlRegisterWait failed with status %x\n", status);
+    ReleaseSemaphore(semaphores[1], 1, NULL);
+    result = WaitForSingleObject(semaphores[0], 200);
+    ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
+    ok(info.userdata == 1, "expected info.userdata = 1, got %u\n", info.userdata);
+    ok(info.threadid == threadid, "unexpected different wait thread id %x\n", info.threadid);
+    result = WaitForSingleObject(semaphores[1], 0);
+    ok(result == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", result);
+    Sleep(50);
+    status = RtlDeregisterWait(wait1);
+    ok(!status, "RtlDeregisterWait failed with status %x\n", status);
+
+    /* test RtlRegisterWait WT_EXECUTEINWAITTHREAD flag with 0 timeout */
+    info.userdata = 0;
+    info.threadid = 0;
+    status = RtlRegisterWait(&wait1, semaphores[1], rtl_wait_cb, &info, 0, WT_EXECUTEINWAITTHREAD|WT_EXECUTEONLYONCE);
+    ok(!status, "RtlRegisterWait failed with status %x\n", status);
+    result = WaitForSingleObject(semaphores[0], 100);
+    ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
+    ok(info.userdata == 0x10000, "expected info.userdata = 0x10000, got %u\n", info.userdata);
+    ok(info.threadid == threadid, "unexpected different wait thread id %x\n", info.threadid);
+    result = WaitForSingleObject(semaphores[1], 0);
+    ok(result == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", result);
+    Sleep(50);
+    status = RtlDeregisterWait(wait1);
+    ok(!status, "RtlDeregisterWait failed with status %x\n", status);
+
+    /* test RtlRegisterWait WT_EXECUTEINWAITTHREAD flag with already signaled event */
+    info.userdata = 0;
+    info.threadid = 0;
+    ReleaseSemaphore(semaphores[1], 1, NULL);
+    status = RtlRegisterWait(&wait1, semaphores[1], rtl_wait_cb, &info, 200, WT_EXECUTEINWAITTHREAD|WT_EXECUTEONLYONCE);
+    ok(!status, "RtlRegisterWait failed with status %x\n", status);
+    result = WaitForSingleObject(semaphores[0], 200);
+    ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
+    ok(info.userdata == 1, "expected info.userdata = 1, got %u\n", info.userdata);
+    ok(info.threadid == threadid, "unexpected different wait thread id %x\n", info.threadid);
+    result = WaitForSingleObject(semaphores[1], 0);
+    ok(result == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", result);
+    Sleep(50);
+    status = RtlDeregisterWait(wait1);
+    ok(!status, "RtlDeregisterWait failed with status %x\n", status);
+
     /* test for IO threads */
     info.userdata = 0;
     info.threadid = 0;
@@ -374,7 +433,6 @@ static void test_RtlRegisterWait(void)
     ok(!status, "RtlDeregisterWaitEx failed with status %x\n", status);
     ok(info.userdata == 0, "expected info.userdata = 0, got %u\n", info.userdata);
     result = WaitForSingleObject(event, 200);
-    todo_wine
     ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
 
     /* test RtlDeregisterWaitEx after wait expired */
@@ -411,7 +469,6 @@ static void test_RtlRegisterWait(void)
     ok(!status, "RtlDeregisterWaitEx failed with status %x\n", status);
     ok(info.userdata == 0x10000, "expected info.userdata = 0x10000, got %u\n", info.userdata);
     result = WaitForSingleObject(event, 200);
-    todo_wine
     ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
 
     /* test RtlDeregisterWaitEx while callback is running */
@@ -420,6 +477,19 @@ static void test_RtlRegisterWait(void)
 
     info.userdata = 0;
     status = RtlRegisterWait(&wait1, semaphores[1], rtl_wait_cb, &info, INFINITE, WT_EXECUTEONLYONCE);
+    ok(!status, "RtlRegisterWait failed with status %x\n", status);
+    ReleaseSemaphore(semaphores[1], 1, NULL);
+    result = WaitForSingleObject(semaphores[0], 1000);
+    ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
+    ok(info.userdata == 1, "expected info.userdata = 1, got %u\n", info.userdata);
+    status = RtlDeregisterWait(wait1);
+    ok(status == STATUS_PENDING, "expected STATUS_PENDING, got %x\n", status);
+    ReleaseSemaphore(semaphores[1], 1, NULL);
+    result = WaitForSingleObject(semaphores[0], 1000);
+    ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
+
+    info.userdata = 0;
+    status = RtlRegisterWait(&wait1, semaphores[1], rtl_wait_cb, &info, INFINITE, WT_EXECUTEINWAITTHREAD|WT_EXECUTEONLYONCE);
     ok(!status, "RtlRegisterWait failed with status %x\n", status);
     ReleaseSemaphore(semaphores[1], 1, NULL);
     result = WaitForSingleObject(semaphores[0], 1000);
@@ -457,6 +527,19 @@ static void test_RtlRegisterWait(void)
     result = WaitForSingleObject(semaphores[0], 0);
     ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
 
+    info.wait_result = WAIT_TIMEOUT;
+    info.userdata = 0;
+    status = RtlRegisterWait(&wait1, semaphores[1], rtl_wait_cb, &info, INFINITE, WT_EXECUTEINWAITTHREAD|WT_EXECUTEONLYONCE);
+    ok(!status, "RtlRegisterWait failed with status %x\n", status);
+    ReleaseSemaphore(semaphores[1], 1, NULL);
+    result = WaitForSingleObject(semaphores[0], 1000);
+    ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
+    ok(info.userdata == 1, "expected info.userdata = 1, got %u\n", info.userdata);
+    status = RtlDeregisterWaitEx(wait1, INVALID_HANDLE_VALUE);
+    ok(!status, "RtlDeregisterWaitEx failed with status %x\n", status);
+    result = WaitForSingleObject(semaphores[0], 0);
+    ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
+
     info.wait_result = WAIT_OBJECT_0;
     info.userdata = 0;
     status = RtlRegisterWait(&wait1, semaphores[1], rtl_wait_cb, &info, INFINITE, WT_EXECUTEONLYONCE);
@@ -481,13 +564,11 @@ static void test_RtlRegisterWait(void)
 static void CALLBACK simple_cb(TP_CALLBACK_INSTANCE *instance, void *userdata)
 {
     HANDLE semaphore = userdata;
-    trace("Running simple callback\n");
     ReleaseSemaphore(semaphore, 1, NULL);
 }
 
 static void CALLBACK simple2_cb(TP_CALLBACK_INSTANCE *instance, void *userdata)
 {
-    trace("Running simple2 callback\n");
     Sleep(50);
     InterlockedIncrement((LONG *)userdata);
 }
@@ -605,14 +686,12 @@ static void test_tp_simple(void)
 
 static void CALLBACK work_cb(TP_CALLBACK_INSTANCE *instance, void *userdata, TP_WORK *work)
 {
-    trace("Running work callback\n");
     Sleep(100);
     InterlockedIncrement((LONG *)userdata);
 }
 
 static void CALLBACK work2_cb(TP_CALLBACK_INSTANCE *instance, void *userdata, TP_WORK *work)
 {
-    trace("Running work2 callback\n");
     Sleep(100);
     InterlockedExchangeAdd((LONG *)userdata, 0x10000);
 }
@@ -735,7 +814,6 @@ static void test_tp_work_scheduler(void)
 static void CALLBACK simple_release_cb(TP_CALLBACK_INSTANCE *instance, void *userdata)
 {
     HANDLE *semaphores = userdata;
-    trace("Running simple release callback\n");
     ReleaseSemaphore(semaphores, 1, NULL);
     Sleep(200); /* wait until main thread is in TpReleaseCleanupGroupMembers */
 }
@@ -743,7 +821,6 @@ static void CALLBACK simple_release_cb(TP_CALLBACK_INSTANCE *instance, void *use
 static void CALLBACK work_release_cb(TP_CALLBACK_INSTANCE *instance, void *userdata, TP_WORK *work)
 {
     HANDLE semaphore = userdata;
-    trace("Running work release callback\n");
     ReleaseSemaphore(semaphore, 1, NULL);
     Sleep(200); /* wait until main thread is in TpReleaseCleanupGroupMembers */
     pTpReleaseWork(work);
@@ -752,7 +829,6 @@ static void CALLBACK work_release_cb(TP_CALLBACK_INSTANCE *instance, void *userd
 static void CALLBACK timer_release_cb(TP_CALLBACK_INSTANCE *instance, void *userdata, TP_TIMER *timer)
 {
     HANDLE semaphore = userdata;
-    trace("Running timer release callback\n");
     ReleaseSemaphore(semaphore, 1, NULL);
     Sleep(200); /* wait until main thread is in TpReleaseCleanupGroupMembers */
     pTpReleaseTimer(timer);
@@ -762,7 +838,6 @@ static void CALLBACK wait_release_cb(TP_CALLBACK_INSTANCE *instance, void *userd
                                      TP_WAIT *wait, TP_WAIT_RESULT result)
 {
     HANDLE semaphore = userdata;
-    trace("Running wait release callback\n");
     ReleaseSemaphore(semaphore, 1, NULL);
     Sleep(200); /* wait until main thread is in TpReleaseCleanupGroupMembers */
     pTpReleaseWait(wait);
@@ -855,8 +930,6 @@ static void CALLBACK simple_group_cancel_cb(TP_CALLBACK_INSTANCE *instance, void
     DWORD result;
     int i;
 
-    trace("Running simple group cancel callback\n");
-
     status = pTpCallbackMayRunLong(instance);
     ok(status == STATUS_TOO_MANY_THREADS || broken(status == 1) /* Win Vista / 2008 */,
        "expected STATUS_TOO_MANY_THREADS, got %08x\n", status);
@@ -875,8 +948,6 @@ static void CALLBACK work_group_cancel_cb(TP_CALLBACK_INSTANCE *instance, void *
     HANDLE *semaphores = userdata;
     DWORD result;
 
-    trace("Running work group cancel callback\n");
-
     ReleaseSemaphore(semaphores[1], 1, NULL);
     result = WaitForSingleObject(semaphores[0], 200);
     ok(result == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", result);
@@ -885,7 +956,6 @@ static void CALLBACK work_group_cancel_cb(TP_CALLBACK_INSTANCE *instance, void *
 static void CALLBACK group_cancel_cleanup_release_cb(void *object, void *userdata)
 {
     HANDLE *semaphores = userdata;
-    trace("Running group cancel cleanup release callback\n");
     group_cancel_tid = GetCurrentThreadId();
     ok(object == (void *)0xdeadbeef, "expected 0xdeadbeef, got %p\n", object);
     ReleaseSemaphore(semaphores[0], 1, NULL);
@@ -894,7 +964,6 @@ static void CALLBACK group_cancel_cleanup_release_cb(void *object, void *userdat
 static void CALLBACK group_cancel_cleanup_release2_cb(void *object, void *userdata)
 {
     HANDLE *semaphores = userdata;
-    trace("Running group cancel cleanup release2 callback\n");
     group_cancel_tid = GetCurrentThreadId();
     ok(object == userdata, "expected %p, got %p\n", userdata, object);
     ReleaseSemaphore(semaphores[0], 1, NULL);
@@ -902,7 +971,6 @@ static void CALLBACK group_cancel_cleanup_release2_cb(void *object, void *userda
 
 static void CALLBACK group_cancel_cleanup_increment_cb(void *object, void *userdata)
 {
-    trace("Running group cancel cleanup increment callback\n");
     group_cancel_tid = GetCurrentThreadId();
     InterlockedIncrement((LONG *)userdata);
 }
@@ -1089,7 +1157,6 @@ static void test_tp_group_cancel(void)
 static void CALLBACK instance_semaphore_completion_cb(TP_CALLBACK_INSTANCE *instance, void *userdata)
 {
     HANDLE *semaphores = userdata;
-    trace("Running instance completion callback\n");
     pTpCallbackReleaseSemaphoreOnCompletion(instance, semaphores[0], 1);
 }
 
@@ -1098,8 +1165,7 @@ static void CALLBACK instance_finalization_cb(TP_CALLBACK_INSTANCE *instance, vo
     HANDLE *semaphores = userdata;
     DWORD result;
 
-    trace("Running instance finalization callback\n");
-
+    Sleep(50);
     result = WaitForSingleObject(semaphores[0], 100);
     ok(result == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", result);
     ReleaseSemaphore(semaphores[1], 1, NULL);
@@ -1156,8 +1222,6 @@ static void CALLBACK disassociate_cb(TP_CALLBACK_INSTANCE *instance, void *userd
     HANDLE *semaphores = userdata;
     DWORD result;
 
-    trace("Running disassociate callback\n");
-
     pTpDisassociateCallback(instance);
     result = WaitForSingleObject(semaphores[0], 1000);
     ok(result == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", result);
@@ -1169,8 +1233,6 @@ static void CALLBACK disassociate2_cb(TP_CALLBACK_INSTANCE *instance, void *user
     HANDLE *semaphores = userdata;
     DWORD result;
 
-    trace("Running disassociate2 callback\n");
-
     pTpDisassociateCallback(instance);
     result = WaitForSingleObject(semaphores[0], 100);
     ok(result == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", result);
@@ -1181,8 +1243,6 @@ static void CALLBACK disassociate3_cb(TP_CALLBACK_INSTANCE *instance, void *user
 {
     HANDLE *semaphores = userdata;
     DWORD result;
-
-    trace("Running disassociate3 callback\n");
 
     pTpDisassociateCallback(instance);
     result = WaitForSingleObject(semaphores[0], 100);
@@ -1300,7 +1360,6 @@ static void test_tp_disassociate(void)
 static void CALLBACK timer_cb(TP_CALLBACK_INSTANCE *instance, void *userdata, TP_TIMER *timer)
 {
     HANDLE semaphore = userdata;
-    trace("Running timer callback\n");
     ReleaseSemaphore(semaphore, 1, NULL);
 }
 
@@ -1440,7 +1499,6 @@ struct window_length_info
 static void CALLBACK window_length_cb(TP_CALLBACK_INSTANCE *instance, void *userdata, TP_TIMER *timer)
 {
     struct window_length_info *info = userdata;
-    trace("Running window length callback\n");
     info->ticks = GetTickCount();
     ReleaseSemaphore(info->semaphore, 1, NULL);
 }
@@ -1558,8 +1616,6 @@ static void CALLBACK wait_cb(TP_CALLBACK_INSTANCE *instance, void *userdata,
                              TP_WAIT *wait, TP_WAIT_RESULT result)
 {
     struct wait_info *info = userdata;
-    trace("Running wait callback\n");
-
     if (result == WAIT_OBJECT_0)
         InterlockedIncrement(&info->userdata);
     else if (result == WAIT_TIMEOUT)

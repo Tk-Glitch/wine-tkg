@@ -43,6 +43,20 @@
 #include "request.h"
 
 
+static const WCHAR completion_name[] = {'I','o','C','o','m','p','l','e','t','i','o','n'};
+
+struct type_descr completion_type =
+{
+    { completion_name, sizeof(completion_name) },   /* name */
+    IO_COMPLETION_ALL_ACCESS,                       /* valid_access */
+    {                                               /* mapping */
+        STANDARD_RIGHTS_READ | IO_COMPLETION_QUERY_STATE,
+        STANDARD_RIGHTS_WRITE | IO_COMPLETION_MODIFY_STATE,
+        STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE,
+        IO_COMPLETION_ALL_ACCESS
+    },
+};
+
 struct completion
 {
     struct object  obj;
@@ -52,17 +66,15 @@ struct completion
 };
 
 static void completion_dump( struct object*, int );
-static struct object_type *completion_get_type( struct object *obj );
 static int completion_signaled( struct object *obj, struct wait_queue_entry *entry );
-static unsigned int completion_map_access( struct object *obj, unsigned int access );
 static int completion_close( struct object *obj, struct process *process, obj_handle_t handle );
 static void completion_destroy( struct object * );
 
 static const struct object_ops completion_ops =
 {
     sizeof(struct completion), /* size */
+    &completion_type,          /* type */
     completion_dump,           /* dump */
-    completion_get_type,       /* get_type */
     add_queue,                 /* add_queue */
     remove_queue,              /* remove_queue */
     completion_signaled,       /* signaled */
@@ -71,7 +83,7 @@ static const struct object_ops completion_ops =
     no_satisfied,              /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
-    completion_map_access,     /* map_access */
+    default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
     default_get_full_name,     /* get_full_name */
@@ -128,26 +140,11 @@ static void completion_dump( struct object *obj, int verbose )
     fprintf( stderr, "Completion depth=%u\n", completion->depth );
 }
 
-static struct object_type *completion_get_type( struct object *obj )
-{
-    static const struct unicode_str str = { type_IoCompletion, sizeof(type_IoCompletion) };
-    return get_object_type( &str );
-}
-
 static int completion_signaled( struct object *obj, struct wait_queue_entry *entry )
 {
     struct completion *completion = (struct completion *)obj;
 
     return !list_empty( &completion->queue ) || completion->abandoned;
-}
-
-static unsigned int completion_map_access( struct object *obj, unsigned int access )
-{
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | SYNCHRONIZE | IO_COMPLETION_QUERY_STATE;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE;
-    if (access & GENERIC_ALL)     access |= STANDARD_RIGHTS_ALL | IO_COMPLETION_ALL_ACCESS;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 static struct completion *create_completion( struct object *root, const struct unicode_str *name,

@@ -55,6 +55,8 @@ struct async
     struct completion   *completion;      /* completion associated with fd */
     apc_param_t          comp_key;        /* completion key associated with fd */
     unsigned int         comp_flags;      /* completion flags */
+    async_completion_callback completion_callback; /* callback to be called on completion */
+    void                *completion_callback_private; /* argument to completion_callback */
 };
 
 static void async_dump( struct object *obj, int verbose );
@@ -65,8 +67,8 @@ static void async_destroy( struct object *obj );
 static const struct object_ops async_ops =
 {
     sizeof(struct async),      /* size */
+    &no_type,                  /* type */
     async_dump,                /* dump */
-    no_get_type,               /* get_type */
     add_queue,                 /* add_queue */
     remove_queue,              /* remove_queue */
     async_signaled,            /* signaled */
@@ -75,7 +77,7 @@ static const struct object_ops async_ops =
     async_satisfied,           /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
-    no_map_access,             /* map_access */
+    default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
     no_get_full_name,          /* get_full_name */
@@ -249,6 +251,8 @@ struct async *create_async( struct fd *fd, struct thread *thread, const async_da
     async->direct_result = 0;
     async->completion    = fd_get_completion( fd, &async->comp_key );
     async->comp_flags    = 0;
+    async->completion_callback = NULL;
+    async->completion_callback_private = NULL;
 
     if (iosb) async->iosb = (struct iosb *)grab_object( iosb );
     else async->iosb = NULL;
@@ -364,6 +368,13 @@ void async_set_timeout( struct async *async, timeout_t timeout, unsigned int sta
     async->timeout_status = status;
 }
 
+/* set a callback to be notified when the async is completed */
+void async_set_completion_callback( struct async *async, async_completion_callback func, void *private )
+{
+    async->completion_callback = func;
+    async->completion_callback_private = private;
+}
+
 static void add_async_completion( struct async *async, apc_param_t cvalue, unsigned int status,
                                   apc_param_t information )
 {
@@ -422,6 +433,10 @@ void async_set_result( struct object *obj, unsigned int status, apc_param_t tota
             async->signaled = 1;
             wake_up( &async->obj, 0 );
         }
+
+        if (async->completion_callback)
+            async->completion_callback( async->completion_callback_private );
+        async->completion_callback = NULL;
     }
 }
 
@@ -481,8 +496,8 @@ static void iosb_destroy( struct object *obj );
 static const struct object_ops iosb_ops =
 {
     sizeof(struct iosb),      /* size */
+    &no_type,                 /* type */
     iosb_dump,                /* dump */
-    no_get_type,              /* get_type */
     no_add_queue,             /* add_queue */
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
@@ -491,7 +506,7 @@ static const struct object_ops iosb_ops =
     NULL,                     /* satisfied */
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
-    no_map_access,            /* map_access */
+    default_map_access,       /* map_access */
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
     no_get_full_name,         /* get_full_name */

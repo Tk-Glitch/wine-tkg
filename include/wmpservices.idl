@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Rémi Bernon for CodeWeavers
+ * Copyright 2021 Rémi Bernon for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,30 +16,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef __WIDL__
-#pragma winrt ns_prefix
-#endif
+import "oaidl.idl";
+import "ocidl.idl";
 
-import "windows.foundation.idl";
+cpp_quote("#define WMPGC_FLAGS_SUPPRESS_DIALOGS 0x00000002")
 
-namespace Windows {
-    namespace Globalization {
-        typedef enum DayOfWeek DayOfWeek;
-    }
-}
-
-namespace Windows {
-    namespace Globalization {
-        [contract(Windows.Foundation.UniversalApiContract, 1.0)]
-        enum DayOfWeek
-        {
-            Sunday    = 0,
-            Monday    = 1,
-            Tuesday   = 2,
-            Wednesday = 3,
-            Thursday  = 4,
-            Friday    = 5,
-            Saturday  = 6
-        };
-    }
+[
+    odl,
+    uuid(bfb377e5-c594-4369-a970-de896d5ece74),
+    oleautomation
+]
+interface IWMPGraphCreation : IUnknown
+{
+    HRESULT GraphCreationPreRender([in] IUnknown *filter_graph, [in] IUnknown *reserved);
+    HRESULT GraphCreationPostRender([in] IUnknown *filter_graph);
+    HRESULT GetGraphCreationFlags([out, retval] DWORD *flags);
 }

@@ -21,15 +21,10 @@
 #endif
 
 import "inspectable.idl";
-import "asyncinfo.idl";
+/* import "asyncinfo.idl"; */
 import "windowscontracts.idl";
 /* import "eventtoken.idl"; */
 /* import "ivectorchangedeventargs.idl"; */
-
-typedef struct EventRegistrationToken
-{
-    __int64 value;
-} EventRegistrationToken;
 
 namespace Windows {
     namespace Foundation {
@@ -118,37 +113,6 @@ namespace Windows {
         }
 
 #ifdef __WIDL__
-        [
-            contract(Windows.Foundation.FoundationContract, 1.0),
-            uuid(9de1c535-6ae1-11e0-84e1-18a905bcc53f)
-        ]
-        delegate void EventHandler<T>([in] IInspectable *sender, [in] T args);
-
-        [
-            contract(Windows.Foundation.FoundationContract, 1.0),
-            uuid(9de1c534-6ae1-11e0-84e1-18a905bcc53f)
-        ]
-        delegate void TypedEventHandler<TSender, TResult>([in] TSender sender, [in] TResult args);
-
-        interface IAsyncOperation<TResult>;
-
-        [
-            contract(Windows.Foundation.FoundationContract, 1.0),
-            uuid(fcdcf02c-e5d8-4478-915a-4d90b74b83a5)
-        ]
-        delegate void AsyncOperationCompletedHandler<TResult>([in] IAsyncOperation<TResult> *info, [in] AsyncStatus status);
-
-        [
-            contract(Windows.Foundation.FoundationContract, 1.0),
-            uuid(9fc2b0bb-e446-44e2-aa61-9cab8f636af2)
-        ]
-        interface IAsyncOperation<TResult> : IInspectable
-        {
-            [propput] HRESULT Completed([in] AsyncOperationCompletedHandler<TResult> *handler);
-            [propget] HRESULT Completed([out, retval] AsyncOperationCompletedHandler<TResult> **handler);
-            HRESULT GetResults([out, retval] TResult **results);
-        }
-
         namespace Collections
         {
             [
@@ -165,15 +129,6 @@ namespace Windows {
 
             [
                 contract(Windows.Foundation.FoundationContract, 1.0),
-                uuid(faa585ea-6214-4217-afda-7f46de5869b3)
-            ]
-            interface IIterable<T> : IInspectable
-            {
-                HRESULT First([out, retval] Windows.Foundation.Collections.IIterator<T> **value);
-            }
-
-            [
-                contract(Windows.Foundation.FoundationContract, 1.0),
                 uuid(bbe1fa4c-b0e3-4583-baef-1f1b2e483e56)
             ]
             interface IVectorView<T> : IInspectable
@@ -185,15 +140,5 @@ namespace Windows {
             }
         }
 #endif
-    }
-}
-
-namespace Windows {
-    namespace Foundation {
-        declare {
-            interface Windows.Foundation.Collections.IVectorView<HSTRING>;
-            interface Windows.Foundation.AsyncOperationCompletedHandler<boolean>;
-            interface Windows.Foundation.IAsyncOperation<boolean>;
-        }
     }
 }

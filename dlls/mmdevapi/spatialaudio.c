@@ -356,14 +356,15 @@ static HRESULT WINAPI SAORS_Reset(ISpatialAudioObjectRenderStream *iface)
 }
 
 static HRESULT WINAPI SAORS_BeginUpdatingAudioObjects(ISpatialAudioObjectRenderStream *iface,
-        UINT32 *count, UINT32 *frames)
+        UINT32 *dyn_count, UINT32 *frames)
 {
+    static BOOL fixme_once = FALSE;
     SpatialAudioStreamImpl *This = impl_from_ISpatialAudioObjectRenderStream(iface);
     SpatialAudioObjectImpl *object;
     UINT32 pad;
     HRESULT hr;
 
-    TRACE("(%p)->(%p, %p)\n", This, count, frames);
+    TRACE("(%p)->(%p, %p)\n", This, dyn_count, frames);
 
     EnterCriticalSection(&This->lock);
 
@@ -394,15 +395,15 @@ static HRESULT WINAPI SAORS_BeginUpdatingAudioObjects(ISpatialAudioObjectRenderS
             return hr;
         }
 
-        *count = 0;
         LIST_FOR_EACH_ENTRY(object, &This->objects, SpatialAudioObjectImpl, entry){
             memset(object->buf, 0, This->update_frames * This->sa_client->object_fmtex.Format.nBlockAlign);
-            *count += 1;
         }
-    }else{
-        *count = list_count(&This->objects);
+    }else if (!fixme_once){
+        fixme_once = TRUE;
+        FIXME("Zero frame update.\n");
     }
 
+    *dyn_count = 0;
     *frames = This->update_frames;
 
     LeaveCriticalSection(&This->lock);
@@ -470,14 +471,22 @@ static HRESULT WINAPI SAORS_ActivateSpatialAudioObject(ISpatialAudioObjectRender
 
     TRACE("(%p)->(0x%x, %p)\n", This, type, object);
 
+    if(type == AudioObjectType_Dynamic)
+        return SPTLAUDCLNT_E_NO_MORE_OBJECTS;
+
+    if(type & ~This->params.StaticObjectTypeMask)
+        return SPTLAUDCLNT_E_STATIC_OBJECT_NOT_AVAILABLE;
+
+    LIST_FOR_EACH_ENTRY(obj, &This->objects, SpatialAudioObjectImpl, entry){
+        if(obj->static_idx == AudioObjectType_to_index(type))
+            return SPTLAUDCLNT_E_OBJECT_ALREADY_ACTIVE;
+    }
+
     obj = heap_alloc_zero(sizeof(*obj));
     obj->ISpatialAudioObject_iface.lpVtbl = &ISpatialAudioObject_vtbl;
     obj->ref = 1;
     obj->type = type;
-    if(type == AudioObjectType_Dynamic){
-        FIXME("AudioObjectType_Dynamic not implemented yet!\n");
-        obj->static_idx = ~0;
-    }else if(type == AudioObjectType_None){
+    if(type == AudioObjectType_None){
         FIXME("AudioObjectType_None not implemented yet!\n");
         obj->static_idx = ~0;
     }else{
@@ -578,7 +587,10 @@ static HRESULT WINAPI SAC_GetMaxDynamicObjectCount(ISpatialAudioClient *iface,
 {
     SpatialAudioImpl *This = impl_from_ISpatialAudioClient(iface);
     FIXME("(%p)->(%p)\n", This, value);
-    return E_NOTIMPL;
+
+    *value = 0;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI SAC_GetSupportedAudioObjectFormatEnumerator(
@@ -726,7 +738,6 @@ static HRESULT activate_stream(SpatialAudioStreamImpl *stream)
         return hr;
     }
 
-    /* XXX: OK that this is the user's handle? */
     hr = IAudioClient_SetEventHandle(stream->client, stream->params.EventHandle);
     if(FAILED(hr)){
         WARN("SetEventHandle failed: %08x\n", hr);
@@ -747,9 +758,10 @@ static HRESULT activate_stream(SpatialAudioStreamImpl *stream)
 }
 
 static HRESULT WINAPI SAC_ActivateSpatialAudioStream(ISpatialAudioClient *iface,
-        const PROPVARIANT *params, REFIID riid, void **stream)
+        const PROPVARIANT *prop, REFIID riid, void **stream)
 {
     SpatialAudioImpl *This = impl_from_ISpatialAudioClient(iface);
+    SpatialAudioObjectRenderStreamActivationParams *params;
     HRESULT hr;
 
     TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), stream);
@@ -757,18 +769,38 @@ static HRESULT WINAPI SAC_ActivateSpatialAudioStream(ISpatialAudioClient *iface,
     if(IsEqualIID(riid, &IID_ISpatialAudioObjectRenderStream)){
         SpatialAudioStreamImpl *obj;
 
-        if(params &&
-                (params->vt != VT_BLOB ||
-                 params->u.blob.cbSize != sizeof(SpatialAudioObjectRenderStreamActivationParams))){
+        if(prop &&
+                (prop->vt != VT_BLOB ||
+                 prop->u.blob.cbSize != sizeof(SpatialAudioObjectRenderStreamActivationParams))){
             WARN("Got invalid params\n");
+            *stream = NULL;
             return E_INVALIDARG;
+        }
+
+        params = (SpatialAudioObjectRenderStreamActivationParams*) prop->u.blob.pBlobData;
+
+        if(params->StaticObjectTypeMask & AudioObjectType_Dynamic){
+            *stream = NULL;
+            return E_INVALIDARG;
+        }
+
+        if(params->EventHandle == INVALID_HANDLE_VALUE ||
+                params->EventHandle == 0){
+            *stream = NULL;
+            return E_INVALIDARG;
+        }
+
+        if(!params->ObjectFormat ||
+                memcmp(params->ObjectFormat, &This->object_fmtex.Format, sizeof(*params->ObjectFormat) + params->ObjectFormat->cbSize)){
+            *stream = NULL;
+            return AUDCLNT_E_UNSUPPORTED_FORMAT;
         }
 
         obj = heap_alloc_zero(sizeof(SpatialAudioStreamImpl));
 
         obj->ISpatialAudioObjectRenderStream_iface.lpVtbl = &ISpatialAudioObjectRenderStream_vtbl;
         obj->ref = 1;
-        memcpy(&obj->params, params->u.blob.pBlobData, sizeof(obj->params));
+        memcpy(&obj->params, params, sizeof(obj->params));
 
         obj->update_frames = ~0;
 
@@ -780,11 +812,9 @@ static HRESULT WINAPI SAC_ActivateSpatialAudioStream(ISpatialAudioClient *iface,
 
         obj->params.ObjectFormat = clone_fmtex(obj->params.ObjectFormat);
 
-        if(obj->params.EventHandle != INVALID_HANDLE_VALUE &&
-                obj->params.EventHandle != 0)
-            DuplicateHandle(GetCurrentProcess(), obj->params.EventHandle,
-                    GetCurrentProcess(), &obj->params.EventHandle, 0, FALSE,
-                    DUPLICATE_SAME_ACCESS);
+        DuplicateHandle(GetCurrentProcess(), obj->params.EventHandle,
+                GetCurrentProcess(), &obj->params.EventHandle, 0, FALSE,
+                DUPLICATE_SAME_ACCESS);
 
         if(obj->params.NotifyObject)
             ISpatialAudioObjectRenderStreamNotify_AddRef(obj->params.NotifyObject);
@@ -808,6 +838,7 @@ static HRESULT WINAPI SAC_ActivateSpatialAudioStream(ISpatialAudioClient *iface,
             CloseHandle(obj->params.EventHandle);
             ISpatialAudioClient_Release(&obj->sa_client->ISpatialAudioClient_iface);
             heap_free(obj);
+            *stream = NULL;
             return hr;
         }
 
@@ -891,31 +922,9 @@ static IAudioFormatEnumeratorVtbl IAudioFormatEnumerator_vtbl = {
 HRESULT SpatialAudioClient_Create(IMMDevice *mmdev, ISpatialAudioClient **out)
 {
     SpatialAudioImpl *obj;
-    IPropertyStore *ps;
-    PROPVARIANT pv;
+    IAudioClient *aclient;
+    WAVEFORMATEX *closest;
     HRESULT hr;
-    WAVEFORMATEXTENSIBLE *fmtex;
-
-    hr = IMMDevice_OpenPropertyStore(mmdev, STGM_READ, &ps);
-    if(FAILED(hr)){
-        WARN("OpenPropertyStore failed: %08x\n", hr);
-        return hr;
-    }
-
-    pv.vt = VT_EMPTY;
-    hr = IPropertyStore_GetValue(ps, (const PROPERTYKEY *)&PKEY_AudioEngine_DeviceFormat, &pv);
-    if(FAILED(hr)){
-        WARN("Failed to get DeviceFormat: %08x\n", hr);
-        IPropertyStore_Release(ps);
-        return hr;
-    }
-
-    if(pv.vt != VT_BLOB || pv.u.blob.cbSize == 0){
-        WARN("Got invalid DeviceFormat\n");
-        PropVariantClear(&pv);
-        IPropertyStore_Release(ps);
-        return E_FAIL;
-    }
 
     obj = heap_alloc_zero(sizeof(*obj));
 
@@ -923,24 +932,55 @@ HRESULT SpatialAudioClient_Create(IMMDevice *mmdev, ISpatialAudioClient **out)
     obj->ISpatialAudioClient_iface.lpVtbl = &ISpatialAudioClient_vtbl;
     obj->IAudioFormatEnumerator_iface.lpVtbl = &IAudioFormatEnumerator_vtbl;
 
-    obj->mmdev = mmdev;
-    IMMDevice_AddRef(mmdev);
-
-    fmtex = (WAVEFORMATEXTENSIBLE *)pv.u.blob.pBlobData;
-
-    obj->object_fmtex.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+    obj->object_fmtex.Format.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
     obj->object_fmtex.Format.nChannels = 1;
-    obj->object_fmtex.Format.nSamplesPerSec = fmtex->Format.nSamplesPerSec;
+    obj->object_fmtex.Format.nSamplesPerSec = 48000;
     obj->object_fmtex.Format.wBitsPerSample = sizeof(float) * 8;
     obj->object_fmtex.Format.nBlockAlign = (obj->object_fmtex.Format.nChannels * obj->object_fmtex.Format.wBitsPerSample) / 8;
     obj->object_fmtex.Format.nAvgBytesPerSec = obj->object_fmtex.Format.nSamplesPerSec * obj->object_fmtex.Format.nBlockAlign;
-    obj->object_fmtex.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMAT);
-    obj->object_fmtex.Samples.wValidBitsPerSample = obj->object_fmtex.Format.wBitsPerSample;
-    obj->object_fmtex.dwChannelMask = 0;
-    obj->object_fmtex.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+    obj->object_fmtex.Format.cbSize = 0;
 
-    PropVariantClear(&pv);
-    IPropertyStore_Release(ps);
+    hr = IMMDevice_Activate(mmdev, &IID_IAudioClient,
+            CLSCTX_INPROC_SERVER, NULL, (void**)&aclient);
+    if(FAILED(hr)){
+        WARN("Activate failed: %08x\n", hr);
+        heap_free(obj);
+        return hr;
+    }
+
+    hr = IAudioClient_IsFormatSupported(aclient, AUDCLNT_SHAREMODE_SHARED, &obj->object_fmtex.Format, &closest);
+
+    IAudioClient_Release(aclient);
+
+    if(hr == S_FALSE){
+        if(sizeof(WAVEFORMATEX) + closest->cbSize > sizeof(obj->object_fmtex)){
+            ERR("Returned format too large: %s\n", debugstr_fmtex(closest));
+            CoTaskMemFree(closest);
+            heap_free(obj);
+            return AUDCLNT_E_UNSUPPORTED_FORMAT;
+        }else if(!((closest->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
+                    (closest->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+                     IsEqualGUID(&((WAVEFORMATEXTENSIBLE *)closest)->SubFormat,
+                         &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT))) &&
+                    closest->wBitsPerSample == 32)){
+            ERR("Returned format not 32-bit float: %s\n", debugstr_fmtex(closest));
+            CoTaskMemFree(closest);
+            heap_free(obj);
+            return AUDCLNT_E_UNSUPPORTED_FORMAT;
+        }
+        WARN("The audio stack doesn't support 48kHz 32bit float. Using the closest match. Audio may be glitchy. %s\n", debugstr_fmtex(closest));
+        memcpy(&obj->object_fmtex,
+               closest,
+               sizeof(WAVEFORMATEX) + closest->cbSize);
+        CoTaskMemFree(closest);
+    } else if(hr != S_OK){
+        WARN("Checking supported formats failed: %08x\n", hr);
+        heap_free(obj);
+        return hr;
+    }
+
+    obj->mmdev = mmdev;
+    IMMDevice_AddRef(mmdev);
 
     *out = &obj->ISpatialAudioClient_iface;
 

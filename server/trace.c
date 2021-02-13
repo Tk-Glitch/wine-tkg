@@ -431,6 +431,12 @@ static void dump_luid( const char *prefix, const luid_t *luid )
     fprintf( stderr, "%s%d.%u", prefix, luid->high_part, luid->low_part );
 }
 
+static void dump_generic_map( const char *prefix, const generic_map_t *map )
+{
+    fprintf( stderr, "%s{r=%08x,w=%08x,x=%08x,a=%08x}",
+             prefix, map->read, map->write, map->exec, map->all );
+}
+
 static void dump_varargs_ints( const char *prefix, data_size_t size )
 {
     const int *data = cur_data;
@@ -784,8 +790,39 @@ static void dump_varargs_debug_event( const char *prefix, data_size_t size )
 
     switch(event.code)
     {
-    case EXCEPTION_DEBUG_EVENT:
-        fprintf( stderr, "%s{exception,first=%d,exc_code=%08x,flags=%08x", prefix,
+    case DbgIdle:
+        fprintf( stderr, "%s{idle}", prefix );
+        break;
+    case DbgReplyPending:
+        fprintf( stderr, "%s{pending}", prefix );
+        break;
+    case DbgCreateThreadStateChange:
+        fprintf( stderr, "%s{create_thread,thread=%04x", prefix, event.create_thread.handle );
+        dump_uint64( ",start=", &event.create_thread.start );
+        fputc( '}', stderr );
+        break;
+    case DbgCreateProcessStateChange:
+        fprintf( stderr, "%s{create_process,file=%04x,process=%04x,thread=%04x", prefix,
+                 event.create_process.file, event.create_process.process,
+                 event.create_process.thread );
+        dump_uint64( ",base=", &event.create_process.base );
+        fprintf( stderr, ",offset=%d,size=%d",
+                 event.create_process.dbg_offset, event.create_process.dbg_size );
+        dump_uint64( ",start=", &event.create_process.start );
+        fputc( '}', stderr );
+        break;
+    case DbgExitThreadStateChange:
+        fprintf( stderr, "%s{exit_thread,code=%d}", prefix, event.exit.exit_code );
+        break;
+    case DbgExitProcessStateChange:
+        fprintf( stderr, "%s{exit_process,code=%d}", prefix, event.exit.exit_code );
+        break;
+    case DbgExceptionStateChange:
+    case DbgBreakpointStateChange:
+    case DbgSingleStepStateChange:
+        fprintf( stderr, "%s{%s,first=%d,exc_code=%08x,flags=%08x", prefix,
+                 event.code == DbgBreakpointStateChange ? "breakpoint" :
+                 event.code == DbgSingleStepStateChange ? "singlestep" : "exception",
                  event.exception.first, event.exception.exc_code, event.exception.flags );
         dump_uint64( ",record=", &event.exception.record );
         dump_uint64( ",address=", &event.exception.address );
@@ -798,45 +835,18 @@ static void dump_varargs_debug_event( const char *prefix, data_size_t size )
         }
         fprintf( stderr, "}}" );
         break;
-    case CREATE_THREAD_DEBUG_EVENT:
-        fprintf( stderr, "%s{create_thread,thread=%04x", prefix, event.create_thread.handle );
-        dump_uint64( ",teb=", &event.create_thread.teb );
-        dump_uint64( ",start=", &event.create_thread.start );
-        fputc( '}', stderr );
-        break;
-    case CREATE_PROCESS_DEBUG_EVENT:
-        fprintf( stderr, "%s{create_process,file=%04x,process=%04x,thread=%04x", prefix,
-                 event.create_process.file, event.create_process.process,
-                 event.create_process.thread );
-        dump_uint64( ",base=", &event.create_process.base );
-        fprintf( stderr, ",offset=%d,size=%d",
-                 event.create_process.dbg_offset, event.create_process.dbg_size );
-        dump_uint64( ",teb=", &event.create_process.teb );
-        dump_uint64( ",start=", &event.create_process.start );
-        dump_uint64( ",name=", &event.create_process.name );
-        fprintf( stderr, ",unicode=%d}", event.create_process.unicode );
-        break;
-    case EXIT_THREAD_DEBUG_EVENT:
-        fprintf( stderr, "%s{exit_thread,code=%d}", prefix, event.exit.exit_code );
-        break;
-    case EXIT_PROCESS_DEBUG_EVENT:
-        fprintf( stderr, "%s{exit_process,code=%d}", prefix, event.exit.exit_code );
-        break;
-    case LOAD_DLL_DEBUG_EVENT:
+    case DbgLoadDllStateChange:
         fprintf( stderr, "%s{load_dll,file=%04x", prefix, event.load_dll.handle );
         dump_uint64( ",base=", &event.load_dll.base );
         fprintf( stderr, ",offset=%d,size=%d",
                  event.load_dll.dbg_offset, event.load_dll.dbg_size );
         dump_uint64( ",name=", &event.load_dll.name );
-        fprintf( stderr, ",unicode=%d}", event.load_dll.unicode );
+        fputc( '}', stderr );
         break;
-    case UNLOAD_DLL_DEBUG_EVENT:
+    case DbgUnloadDllStateChange:
         fprintf( stderr, "%s{unload_dll", prefix );
         dump_uint64( ",base=", &event.unload_dll.base );
         fputc( '}', stderr );
-        break;
-    case 0:  /* zero is the code returned on timeouts */
-        fprintf( stderr, "%s{}", prefix );
         break;
     default:
         fprintf( stderr, "%s{code=??? (%d)}", prefix, event.code );
@@ -1208,6 +1218,39 @@ static void dump_varargs_object_attributes( const char *prefix, data_size_t size
     fputc( '}', stderr );
 }
 
+static void dump_varargs_object_type_info( const char *prefix, data_size_t size )
+{
+    const struct object_type_info *info = cur_data;
+
+    fprintf( stderr,"%s{", prefix );
+    if (size)
+    {
+        if (size < sizeof(*info) || (size - sizeof(*info) < info->name_len))
+        {
+            fprintf( stderr, "***invalid***}" );
+            remove_data( size );
+            return;
+        }
+
+        fprintf( stderr, "index=%u,obj_count=%u,handle_count=%u,obj_max=%u,handle_max=%u,valid=%08x",
+                 info->index,info->obj_count, info->handle_count, info->obj_max, info->handle_max,
+                 info->valid_access );
+        dump_generic_map( ",access=", &info->mapping );
+        fprintf( stderr, ",name=L\"" );
+        dump_strW( (const WCHAR *)(info + 1), info->name_len, stderr, "\"\"" );
+        fputc( '\"', stderr );
+        remove_data( min( size, sizeof(*info) + ((info->name_len + 2) & ~3 )));
+    }
+    fputc( '}', stderr );
+}
+
+static void dump_varargs_object_types_info( const char *prefix, data_size_t size )
+{
+    fprintf( stderr,"%s{", prefix );
+    while (cur_size) dump_varargs_object_type_info( ",", cur_size );
+    fputc( '}', stderr );
+}
+
 static void dump_varargs_filesystem_event( const char *prefix, data_size_t size )
 {
     static const char * const actions[] = {
@@ -1332,6 +1375,7 @@ typedef void (*dump_func)( const void *req );
 static void dump_new_process_request( const struct new_process_request *req )
 {
     fprintf( stderr, " token=%04x", req->token );
+    fprintf( stderr, ", debug=%04x", req->debug );
     fprintf( stderr, ", parent_process=%04x", req->parent_process );
     fprintf( stderr, ", inherit_all=%d", req->inherit_all );
     fprintf( stderr, ", create_flags=%08x", req->create_flags );
@@ -1398,38 +1442,50 @@ static void dump_get_startup_info_reply( const struct get_startup_info_reply *re
 
 static void dump_init_process_done_request( const struct init_process_done_request *req )
 {
-    fprintf( stderr, " gui=%d", req->gui );
-    dump_uint64( ", module=", &req->module );
-    dump_uint64( ", ldt_copy=", &req->ldt_copy );
-    dump_uint64( ", entry=", &req->entry );
-    dump_varargs_cpu_topology_override( ", cpu_override=", cur_size );
+    dump_varargs_cpu_topology_override( " cpu_override=", cur_size );
 }
 
 static void dump_init_process_done_reply( const struct init_process_done_reply *req )
 {
-    fprintf( stderr, " suspend=%d", req->suspend );
+    dump_uint64( " entry=", &req->entry );
+    fprintf( stderr, ", suspend=%d", req->suspend );
 }
 
-static void dump_init_thread_request( const struct init_thread_request *req )
+static void dump_init_first_thread_request( const struct init_first_thread_request *req )
 {
     fprintf( stderr, " unix_pid=%d", req->unix_pid );
     fprintf( stderr, ", unix_tid=%d", req->unix_tid );
     fprintf( stderr, ", debug_level=%d", req->debug_level );
     dump_uint64( ", teb=", &req->teb );
-    dump_uint64( ", entry=", &req->entry );
+    dump_uint64( ", peb=", &req->peb );
+    dump_uint64( ", ldt_copy=", &req->ldt_copy );
     fprintf( stderr, ", reply_fd=%d", req->reply_fd );
     fprintf( stderr, ", wait_fd=%d", req->wait_fd );
     dump_client_cpu( ", cpu=", &req->cpu );
+}
+
+static void dump_init_first_thread_reply( const struct init_first_thread_reply *req )
+{
+    fprintf( stderr, " pid=%04x", req->pid );
+    fprintf( stderr, ", tid=%04x", req->tid );
+    dump_timeout( ", server_start=", &req->server_start );
+    fprintf( stderr, ", info_size=%u", req->info_size );
+    fprintf( stderr, ", all_cpus=%08x", req->all_cpus );
+}
+
+static void dump_init_thread_request( const struct init_thread_request *req )
+{
+    fprintf( stderr, " unix_tid=%d", req->unix_tid );
+    fprintf( stderr, ", reply_fd=%d", req->reply_fd );
+    fprintf( stderr, ", wait_fd=%d", req->wait_fd );
+    dump_uint64( ", teb=", &req->teb );
+    dump_uint64( ", entry=", &req->entry );
 }
 
 static void dump_init_thread_reply( const struct init_thread_reply *req )
 {
     fprintf( stderr, " pid=%04x", req->pid );
     fprintf( stderr, ", tid=%04x", req->tid );
-    dump_timeout( ", server_start=", &req->server_start );
-    fprintf( stderr, ", info_size=%u", req->info_size );
-    fprintf( stderr, ", version=%d", req->version );
-    fprintf( stderr, ", all_cpus=%08x", req->all_cpus );
     fprintf( stderr, ", suspend=%d", req->suspend );
 }
 
@@ -1471,9 +1527,31 @@ static void dump_get_process_info_reply( const struct get_process_info_reply *re
     fprintf( stderr, ", exit_code=%d", req->exit_code );
     fprintf( stderr, ", priority=%d", req->priority );
     dump_client_cpu( ", cpu=", &req->cpu );
-    fprintf( stderr, ", debugger_present=%d", req->debugger_present );
+    dump_varargs_pe_image_info( ", image=", cur_size );
+}
+
+static void dump_get_process_debug_info_request( const struct get_process_debug_info_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_process_debug_info_reply( const struct get_process_debug_info_reply *req )
+{
+    fprintf( stderr, " debug=%04x", req->debug );
     fprintf( stderr, ", debug_children=%d", req->debug_children );
     dump_varargs_pe_image_info( ", image=", cur_size );
+}
+
+static void dump_get_process_image_name_request( const struct get_process_image_name_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", win32=%d", req->win32 );
+}
+
+static void dump_get_process_image_name_reply( const struct get_process_image_name_reply *req )
+{
+    fprintf( stderr, " len=%u", req->len );
+    dump_varargs_unicode_str( ", name=", cur_size );
 }
 
 static void dump_get_process_vm_counters_request( const struct get_process_vm_counters_request *req )
@@ -1545,19 +1623,6 @@ static void dump_set_thread_info_request( const struct set_thread_info_request *
     dump_varargs_unicode_str( ", desc=", cur_size );
 }
 
-static void dump_get_dll_info_request( const struct get_dll_info_request *req )
-{
-    fprintf( stderr, " handle=%04x", req->handle );
-    dump_uint64( ", base_address=", &req->base_address );
-}
-
-static void dump_get_dll_info_reply( const struct get_dll_info_reply *req )
-{
-    dump_uint64( " entry_point=", &req->entry_point );
-    fprintf( stderr, ", filename_len=%u", req->filename_len );
-    dump_varargs_unicode_str( ", filename=", cur_size );
-}
-
 static void dump_suspend_thread_request( const struct suspend_thread_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -1576,20 +1641,6 @@ static void dump_resume_thread_request( const struct resume_thread_request *req 
 static void dump_resume_thread_reply( const struct resume_thread_reply *req )
 {
     fprintf( stderr, " count=%d", req->count );
-}
-
-static void dump_load_dll_request( const struct load_dll_request *req )
-{
-    fprintf( stderr, " dbg_offset=%u", req->dbg_offset );
-    dump_uint64( ", base=", &req->base );
-    dump_uint64( ", name=", &req->name );
-    fprintf( stderr, ", dbg_size=%u", req->dbg_size );
-    dump_varargs_unicode_str( ", filename=", cur_size );
-}
-
-static void dump_unload_dll_request( const struct unload_dll_request *req )
-{
-    dump_uint64( " base=", &req->base );
 }
 
 static void dump_queue_apc_request( const struct queue_apc_request *req )
@@ -2139,17 +2190,6 @@ static void dump_unmap_view_request( const struct unmap_view_request *req )
     dump_uint64( " base=", &req->base );
 }
 
-static void dump_get_mapping_file_request( const struct get_mapping_file_request *req )
-{
-    fprintf( stderr, " process=%04x", req->process );
-    dump_uint64( ", addr=", &req->addr );
-}
-
-static void dump_get_mapping_file_reply( const struct get_mapping_file_reply *req )
-{
-    fprintf( stderr, " handle=%04x", req->handle );
-}
-
 static void dump_get_mapping_committed_range_request( const struct get_mapping_committed_range_request *req )
 {
     dump_uint64( " base=", &req->base );
@@ -2173,6 +2213,18 @@ static void dump_is_same_mapping_request( const struct is_same_mapping_request *
 {
     dump_uint64( " base1=", &req->base1 );
     dump_uint64( ", base2=", &req->base2 );
+}
+
+static void dump_get_mapping_filename_request( const struct get_mapping_filename_request *req )
+{
+    fprintf( stderr, " process=%04x", req->process );
+    dump_uint64( ", addr=", &req->addr );
+}
+
+static void dump_get_mapping_filename_reply( const struct get_mapping_filename_reply *req )
+{
+    fprintf( stderr, " len=%u", req->len );
+    dump_varargs_unicode_str( ", filename=", cur_size );
 }
 
 static void dump_list_processes_request( const struct list_processes_request *req )
@@ -2200,14 +2252,13 @@ static void dump_create_debug_obj_reply( const struct create_debug_obj_reply *re
 
 static void dump_wait_debug_event_request( const struct wait_debug_event_request *req )
 {
-    fprintf( stderr, " get_handle=%d", req->get_handle );
+    fprintf( stderr, " debug=%04x", req->debug );
 }
 
 static void dump_wait_debug_event_reply( const struct wait_debug_event_reply *req )
 {
     fprintf( stderr, " pid=%04x", req->pid );
     fprintf( stderr, ", tid=%04x", req->tid );
-    fprintf( stderr, ", wait=%04x", req->wait );
     dump_varargs_debug_event( ", event=", cur_size );
 }
 
@@ -2234,20 +2285,23 @@ static void dump_get_exception_status_request( const struct get_exception_status
 
 static void dump_continue_debug_event_request( const struct continue_debug_event_request *req )
 {
-    fprintf( stderr, " pid=%04x", req->pid );
+    fprintf( stderr, " debug=%04x", req->debug );
+    fprintf( stderr, ", pid=%04x", req->pid );
     fprintf( stderr, ", tid=%04x", req->tid );
-    fprintf( stderr, ", status=%d", req->status );
+    fprintf( stderr, ", status=%08x", req->status );
 }
 
 static void dump_debug_process_request( const struct debug_process_request *req )
 {
-    fprintf( stderr, " pid=%04x", req->pid );
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", debug=%04x", req->debug );
     fprintf( stderr, ", attach=%d", req->attach );
 }
 
-static void dump_set_debugger_kill_on_exit_request( const struct set_debugger_kill_on_exit_request *req )
+static void dump_set_debug_obj_info_request( const struct set_debug_obj_info_request *req )
 {
-    fprintf( stderr, " kill_on_exit=%d", req->kill_on_exit );
+    fprintf( stderr, " debug=%04x", req->debug );
+    fprintf( stderr, ", flags=%08x", req->flags );
 }
 
 static void dump_read_process_memory_request( const struct read_process_memory_request *req )
@@ -3838,10 +3892,7 @@ static void dump_access_check_request( const struct access_check_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", desired_access=%08x", req->desired_access );
-    fprintf( stderr, ", mapping_read=%08x", req->mapping_read );
-    fprintf( stderr, ", mapping_write=%08x", req->mapping_write );
-    fprintf( stderr, ", mapping_execute=%08x", req->mapping_execute );
-    fprintf( stderr, ", mapping_all=%08x", req->mapping_all );
+    dump_generic_map( ", mapping=", &req->mapping );
     dump_varargs_security_descriptor( ", sd=", cur_size );
 }
 
@@ -4042,20 +4093,17 @@ static void dump_get_object_type_request( const struct get_object_type_request *
 
 static void dump_get_object_type_reply( const struct get_object_type_reply *req )
 {
-    fprintf( stderr, " index=%08x", req->index );
-    fprintf( stderr, ", total=%u", req->total );
-    dump_varargs_unicode_str( ", type=", cur_size );
+    dump_varargs_object_type_info( " info=", cur_size );
 }
 
-static void dump_get_object_type_by_index_request( const struct get_object_type_by_index_request *req )
+static void dump_get_object_types_request( const struct get_object_types_request *req )
 {
-    fprintf( stderr, " index=%08x", req->index );
 }
 
-static void dump_get_object_type_by_index_reply( const struct get_object_type_by_index_reply *req )
+static void dump_get_object_types_reply( const struct get_object_types_reply *req )
 {
-    fprintf( stderr, " total=%u", req->total );
-    dump_varargs_unicode_str( ", type=", cur_size );
+    fprintf( stderr, " count=%d", req->count );
+    dump_varargs_object_types_info( ", info=", cur_size );
 }
 
 static void dump_get_token_impersonation_level_request( const struct get_token_impersonation_level_request *req )
@@ -4275,8 +4323,10 @@ static void dump_set_fd_name_info_request( const struct set_fd_name_info_request
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", rootdir=%04x", req->rootdir );
+    fprintf( stderr, ", namelen=%u", req->namelen );
     fprintf( stderr, ", link=%d", req->link );
     fprintf( stderr, ", replace=%d", req->replace );
+    dump_varargs_unicode_str( ", name=", min(cur_size,req->namelen) );
     dump_varargs_string( ", filename=", cur_size );
 }
 
@@ -4572,20 +4622,20 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_thread_request,
     (dump_func)dump_get_startup_info_request,
     (dump_func)dump_init_process_done_request,
+    (dump_func)dump_init_first_thread_request,
     (dump_func)dump_init_thread_request,
     (dump_func)dump_terminate_process_request,
     (dump_func)dump_terminate_thread_request,
     (dump_func)dump_get_process_info_request,
+    (dump_func)dump_get_process_debug_info_request,
+    (dump_func)dump_get_process_image_name_request,
     (dump_func)dump_get_process_vm_counters_request,
     (dump_func)dump_set_process_info_request,
     (dump_func)dump_get_thread_info_request,
     (dump_func)dump_get_thread_times_request,
     (dump_func)dump_set_thread_info_request,
-    (dump_func)dump_get_dll_info_request,
     (dump_func)dump_suspend_thread_request,
     (dump_func)dump_resume_thread_request,
-    (dump_func)dump_load_dll_request,
-    (dump_func)dump_unload_dll_request,
     (dump_func)dump_queue_apc_request,
     (dump_func)dump_get_apc_result_request,
     (dump_func)dump_close_handle_request,
@@ -4633,10 +4683,10 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_mapping_info_request,
     (dump_func)dump_map_view_request,
     (dump_func)dump_unmap_view_request,
-    (dump_func)dump_get_mapping_file_request,
     (dump_func)dump_get_mapping_committed_range_request,
     (dump_func)dump_add_mapping_committed_range_request,
     (dump_func)dump_is_same_mapping_request,
+    (dump_func)dump_get_mapping_filename_request,
     (dump_func)dump_list_processes_request,
     (dump_func)dump_create_debug_obj_request,
     (dump_func)dump_wait_debug_event_request,
@@ -4644,7 +4694,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_exception_status_request,
     (dump_func)dump_continue_debug_event_request,
     (dump_func)dump_debug_process_request,
-    (dump_func)dump_set_debugger_kill_on_exit_request,
+    (dump_func)dump_set_debug_obj_info_request,
     (dump_func)dump_read_process_memory_request,
     (dump_func)dump_write_process_memory_request,
     (dump_func)dump_create_key_request,
@@ -4801,7 +4851,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_query_symlink_request,
     (dump_func)dump_get_object_info_request,
     (dump_func)dump_get_object_type_request,
-    (dump_func)dump_get_object_type_by_index_request,
+    (dump_func)dump_get_object_types_request,
     (dump_func)dump_get_token_impersonation_level_request,
     (dump_func)dump_allocate_locally_unique_id_request,
     (dump_func)dump_create_device_manager_request,
@@ -4864,20 +4914,20 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_thread_reply,
     (dump_func)dump_get_startup_info_reply,
     (dump_func)dump_init_process_done_reply,
+    (dump_func)dump_init_first_thread_reply,
     (dump_func)dump_init_thread_reply,
     (dump_func)dump_terminate_process_reply,
     (dump_func)dump_terminate_thread_reply,
     (dump_func)dump_get_process_info_reply,
+    (dump_func)dump_get_process_debug_info_reply,
+    (dump_func)dump_get_process_image_name_reply,
     (dump_func)dump_get_process_vm_counters_reply,
     NULL,
     (dump_func)dump_get_thread_info_reply,
     (dump_func)dump_get_thread_times_reply,
     NULL,
-    (dump_func)dump_get_dll_info_reply,
     (dump_func)dump_suspend_thread_reply,
     (dump_func)dump_resume_thread_reply,
-    NULL,
-    NULL,
     (dump_func)dump_queue_apc_reply,
     (dump_func)dump_get_apc_result_reply,
     NULL,
@@ -4925,10 +4975,10 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_mapping_info_reply,
     NULL,
     NULL,
-    (dump_func)dump_get_mapping_file_reply,
     (dump_func)dump_get_mapping_committed_range_reply,
     NULL,
     NULL,
+    (dump_func)dump_get_mapping_filename_reply,
     (dump_func)dump_list_processes_reply,
     (dump_func)dump_create_debug_obj_reply,
     (dump_func)dump_wait_debug_event_reply,
@@ -5093,7 +5143,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_query_symlink_reply,
     (dump_func)dump_get_object_info_reply,
     (dump_func)dump_get_object_type_reply,
-    (dump_func)dump_get_object_type_by_index_reply,
+    (dump_func)dump_get_object_types_reply,
     (dump_func)dump_get_token_impersonation_level_reply,
     (dump_func)dump_allocate_locally_unique_id_reply,
     (dump_func)dump_create_device_manager_reply,
@@ -5156,20 +5206,20 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "new_thread",
     "get_startup_info",
     "init_process_done",
+    "init_first_thread",
     "init_thread",
     "terminate_process",
     "terminate_thread",
     "get_process_info",
+    "get_process_debug_info",
+    "get_process_image_name",
     "get_process_vm_counters",
     "set_process_info",
     "get_thread_info",
     "get_thread_times",
     "set_thread_info",
-    "get_dll_info",
     "suspend_thread",
     "resume_thread",
-    "load_dll",
-    "unload_dll",
     "queue_apc",
     "get_apc_result",
     "close_handle",
@@ -5217,10 +5267,10 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_mapping_info",
     "map_view",
     "unmap_view",
-    "get_mapping_file",
     "get_mapping_committed_range",
     "add_mapping_committed_range",
     "is_same_mapping",
+    "get_mapping_filename",
     "list_processes",
     "create_debug_obj",
     "wait_debug_event",
@@ -5228,7 +5278,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_exception_status",
     "continue_debug_event",
     "debug_process",
-    "set_debugger_kill_on_exit",
+    "set_debug_obj_info",
     "read_process_memory",
     "write_process_memory",
     "create_key",
@@ -5385,7 +5435,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "query_symlink",
     "get_object_info",
     "get_object_type",
-    "get_object_type_by_index",
+    "get_object_types",
     "get_token_impersonation_level",
     "allocate_locally_unique_id",
     "create_device_manager",
@@ -5482,6 +5532,7 @@ static const struct
     { "ERROR_NO_MORE_USER_HANDLES",  0xc0010000 | ERROR_NO_MORE_USER_HANDLES },
     { "ERROR_WINDOW_OF_OTHER_THREAD", 0xc0010000 | ERROR_WINDOW_OF_OTHER_THREAD },
     { "FILE_DELETED",                STATUS_FILE_DELETED },
+    { "FILE_INVALID",                STATUS_FILE_INVALID },
     { "FILE_IS_A_DIRECTORY",         STATUS_FILE_IS_A_DIRECTORY },
     { "FILE_LOCK_CONFLICT",          STATUS_FILE_LOCK_CONFLICT },
     { "GENERIC_NOT_MAPPED",          STATUS_GENERIC_NOT_MAPPED },
@@ -5493,6 +5544,7 @@ static const struct
     { "INFO_LENGTH_MISMATCH",        STATUS_INFO_LENGTH_MISMATCH },
     { "INSTANCE_NOT_AVAILABLE",      STATUS_INSTANCE_NOT_AVAILABLE },
     { "INSUFFICIENT_RESOURCES",      STATUS_INSUFFICIENT_RESOURCES },
+    { "INVALID_ADDRESS",             STATUS_INVALID_ADDRESS },
     { "INVALID_CID",                 STATUS_INVALID_CID },
     { "INVALID_DEVICE_REQUEST",      STATUS_INVALID_DEVICE_REQUEST },
     { "INVALID_FILE_FOR_SECTION",    STATUS_INVALID_FILE_FOR_SECTION },
@@ -5550,6 +5602,7 @@ static const struct
     { "PIPE_EMPTY",                  STATUS_PIPE_EMPTY },
     { "PIPE_LISTENING",              STATUS_PIPE_LISTENING },
     { "PIPE_NOT_AVAILABLE",          STATUS_PIPE_NOT_AVAILABLE },
+    { "PORT_NOT_SET",                STATUS_PORT_NOT_SET },
     { "PRIVILEGE_NOT_HELD",          STATUS_PRIVILEGE_NOT_HELD },
     { "PROCESS_IN_JOB",              STATUS_PROCESS_IN_JOB },
     { "PROCESS_IS_TERMINATING",      STATUS_PROCESS_IS_TERMINATING },

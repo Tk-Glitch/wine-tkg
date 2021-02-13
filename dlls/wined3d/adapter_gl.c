@@ -1667,8 +1667,9 @@ cards_intel[] =
  * drivers: R700, RV790, R680, RV535, RV516, R410, RS485, RV360, RV351. */
 cards_amd_mesa[] =
 {
-    /* Navi 10 */
+    /* Navi 10/14 */
     {"NAVI10",                      CARD_AMD_RADEON_RX_NAVI_10},
+    {"NAVI14",                      CARD_AMD_RADEON_RX_NAVI_14},
     /* Polaris 10/11 */
     {"POLARIS10",                   CARD_AMD_RADEON_RX_480},
     {"POLARIS11",                   CARD_AMD_RADEON_RX_460},
@@ -4792,6 +4793,8 @@ static void wined3d_view_gl_destroy_object(void *object)
     struct wined3d_device *device;
     GLuint counter_id;
 
+    TRACE("ctx %p.\n", ctx);
+
     device = ctx->device;
 
     counter_id = ctx->counter_bo ? ctx->counter_bo->id : 0;
@@ -4971,6 +4974,8 @@ static void wined3d_sampler_gl_destroy_object(void *object)
     const struct wined3d_gl_info *gl_info;
     struct wined3d_context *context;
 
+    TRACE("sampler_gl %p.\n", sampler_gl);
+
     if (sampler_gl->name)
     {
         context = context_acquire(sampler_gl->s.device, NULL, 0);
@@ -5003,6 +5008,8 @@ static HRESULT adapter_gl_create_query(struct wined3d_device *device, enum wined
 static void wined3d_query_gl_destroy_object(void *object)
 {
     struct wined3d_query *query = object;
+
+    TRACE("query %p.\n", query);
 
     if (query->buffer_object)
     {

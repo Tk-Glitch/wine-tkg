@@ -126,7 +126,8 @@ struct accept_req
 {
     struct list entry;
     struct async *async;
-    struct sock *acceptsock;
+    struct iosb *iosb;
+    struct sock *sock, *acceptsock;
     int accepted;
     unsigned int recv_len, local_len;
 };
@@ -164,6 +165,7 @@ struct sock
 static void sock_dump( struct object *obj, int verbose );
 static int sock_signaled( struct object *obj, struct wait_queue_entry *entry );
 static struct fd *sock_get_fd( struct object *obj );
+static int sock_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static void sock_destroy( struct object *obj );
 static struct object *sock_get_ifchange( struct sock *sock );
 static void sock_release_ifchange( struct sock *sock );
@@ -183,8 +185,8 @@ static unsigned int sock_get_error( int err );
 static const struct object_ops sock_ops =
 {
     sizeof(struct sock),          /* size */
+    &file_type,                   /* type */
     sock_dump,                    /* dump */
-    no_get_type,                  /* get_type */
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     sock_signaled,                /* signaled */
@@ -193,7 +195,7 @@ static const struct object_ops sock_ops =
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     sock_get_fd,                  /* get_fd */
-    default_fd_map_access,        /* map_access */
+    default_map_access,           /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     no_get_full_name,             /* get_full_name */
@@ -202,7 +204,7 @@ static const struct object_ops sock_ops =
     NULL,                         /* unlink_name */
     no_open_file,                 /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
-    fd_close_handle,              /* close_handle */
+    sock_close_handle,            /* close_handle */
     sock_destroy                  /* destroy */
 };
 
@@ -449,16 +451,24 @@ static inline int sock_error( struct fd *fd )
     return optval;
 }
 
-static void free_accept_req( struct accept_req *req )
+static void free_accept_req( void *private )
 {
+    struct accept_req *req = private;
     list_remove( &req->entry );
-    if (req->acceptsock) req->acceptsock->accept_recv_req = NULL;
+    if (req->acceptsock)
+    {
+        req->acceptsock->accept_recv_req = NULL;
+        release_object( req->acceptsock );
+    }
     release_object( req->async );
+    release_object( req->iosb );
+    release_object( req->sock );
     free( req );
 }
 
-static void fill_accept_output( struct accept_req *req, struct iosb *iosb )
+static void fill_accept_output( struct accept_req *req )
 {
+    struct iosb *iosb = req->iosb;
     union unix_sockaddr unix_addr;
     struct WS_sockaddr *win_addr;
     unsigned int remote_len;
@@ -529,20 +539,17 @@ static void complete_async_accept( struct sock *sock, struct accept_req *req )
 {
     struct sock *acceptsock = req->acceptsock;
     struct async *async = req->async;
-    struct iosb *iosb;
 
     if (debug_level) fprintf( stderr, "completing accept request for socket %p\n", sock );
 
     if (acceptsock)
     {
         if (!accept_into_socket( sock, acceptsock )) return;
-
-        iosb = async_get_iosb( async );
-        fill_accept_output( req, iosb );
-        release_object( iosb );
+        fill_accept_output( req );
     }
     else
     {
+        struct iosb *iosb = req->iosb;
         obj_handle_t handle;
 
         if (!(acceptsock = accept_socket( sock ))) return;
@@ -552,32 +559,22 @@ static void complete_async_accept( struct sock *sock, struct accept_req *req )
         release_object( acceptsock );
         if (!handle) return;
 
-        iosb = async_get_iosb( async );
-        if (!(iosb->out_data = malloc( sizeof(handle) )))
-        {
-            release_object( iosb );
-            return;
-        }
+        if (!(iosb->out_data = malloc( sizeof(handle) ))) return;
+
         iosb->status = STATUS_SUCCESS;
         iosb->out_size = sizeof(handle);
         memcpy( iosb->out_data, &handle, sizeof(handle) );
-        release_object( iosb );
         set_error( STATUS_ALERTED );
     }
 }
 
 static void complete_async_accept_recv( struct accept_req *req )
 {
-    struct async *async = req->async;
-    struct iosb *iosb;
-
     if (debug_level) fprintf( stderr, "completing accept recv request for socket %p\n", req->acceptsock );
 
     assert( req->recv_len );
 
-    iosb = async_get_iosb( async );
-    fill_accept_output( req, iosb );
-    release_object( iosb );
+    fill_accept_output( req );
 }
 
 static int sock_dispatch_asyncs( struct sock *sock, int event, int error )
@@ -588,7 +585,7 @@ static int sock_dispatch_asyncs( struct sock *sock, int event, int error )
 
         LIST_FOR_EACH_ENTRY( req, &sock->accept_list, struct accept_req, entry )
         {
-            if (!req->accepted)
+            if (req->iosb->status == STATUS_PENDING && !req->accepted)
             {
                 complete_async_accept( sock, req );
                 if (get_error() != STATUS_PENDING)
@@ -597,7 +594,7 @@ static int sock_dispatch_asyncs( struct sock *sock, int event, int error )
             }
         }
 
-        if (sock->accept_recv_req)
+        if (sock->accept_recv_req && sock->accept_recv_req->iosb->status == STATUS_PENDING)
         {
             complete_async_accept_recv( sock->accept_recv_req );
             if (get_error() != STATUS_PENDING)
@@ -632,9 +629,12 @@ static int sock_dispatch_asyncs( struct sock *sock, int event, int error )
             async_wake_up( &sock->write_q, status );
 
         LIST_FOR_EACH_ENTRY_SAFE( req, next, &sock->accept_list, struct accept_req, entry )
-            async_terminate( req->async, status );
+        {
+            if (req->iosb->status == STATUS_PENDING)
+                async_terminate( req->async, status );
+        }
 
-        if (sock->accept_recv_req)
+        if (sock->accept_recv_req && sock->accept_recv_req->iosb->status == STATUS_PENDING)
             async_terminate( sock->accept_recv_req->async, status );
     }
 
@@ -878,15 +878,6 @@ static void sock_queue_async( struct fd *fd, struct async *async, int type, int 
 static void sock_reselect_async( struct fd *fd, struct async_queue *queue )
 {
     struct sock *sock = get_fd_user( fd );
-    struct accept_req *req, *next;
-
-    LIST_FOR_EACH_ENTRY_SAFE( req, next, &sock->accept_list, struct accept_req, entry )
-    {
-        struct iosb *iosb = async_get_iosb( req->async );
-        if (iosb->status != STATUS_PENDING)
-            free_accept_req( req );
-        release_object( iosb );
-    }
 
     /* ignore reselect on ifchange queue */
     if (&sock->ifchange_q != queue)
@@ -899,10 +890,26 @@ static struct fd *sock_get_fd( struct object *obj )
     return (struct fd *)grab_object( sock->fd );
 }
 
-static void sock_destroy( struct object *obj )
+static int sock_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
 {
     struct sock *sock = (struct sock *)obj;
     struct accept_req *req, *next;
+
+    if (sock->obj.handle_count == 1) /* last handle */
+    {
+        if (sock->accept_recv_req)
+            async_terminate( sock->accept_recv_req->async, STATUS_CANCELLED );
+
+        LIST_FOR_EACH_ENTRY_SAFE( req, next, &sock->accept_list, struct accept_req, entry )
+            async_terminate( req->async, STATUS_CANCELLED );
+    }
+
+    return fd_close_handle( obj, process, handle );
+}
+
+static void sock_destroy( struct object *obj )
+{
+    struct sock *sock = (struct sock *)obj;
 
     assert( obj->ops == &sock_ops );
 
@@ -910,12 +917,6 @@ static void sock_destroy( struct object *obj )
 
     if ( sock->deferred )
         release_object( sock->deferred );
-
-    if (sock->accept_recv_req)
-        async_terminate( sock->accept_recv_req->async, STATUS_CANCELLED );
-
-    LIST_FOR_EACH_ENTRY_SAFE( req, next, &sock->accept_list, struct accept_req, entry )
-        async_terminate( req->async, STATUS_CANCELLED );
 
     async_wake_up( &sock->ifchange_q, STATUS_CANCELLED );
     sock_release_ifchange( sock );
@@ -1364,7 +1365,7 @@ static int sock_get_ntstatus( int err )
     }
 }
 
-static struct accept_req *alloc_accept_req( struct sock *acceptsock, struct async *async,
+static struct accept_req *alloc_accept_req( struct sock *sock, struct sock *acceptsock, struct async *async,
                                             const struct afd_accept_into_params *params )
 {
     struct accept_req *req = mem_alloc( sizeof(*req) );
@@ -1372,7 +1373,10 @@ static struct accept_req *alloc_accept_req( struct sock *acceptsock, struct asyn
     if (req)
     {
         req->async = (struct async *)grab_object( async );
+        req->iosb = async_get_iosb( async );
+        req->sock = (struct sock *)grab_object( sock );
         req->acceptsock = acceptsock;
+        if (acceptsock) grab_object( acceptsock );
         req->accepted = 0;
         req->recv_len = 0;
         req->local_len = 0;
@@ -1426,9 +1430,10 @@ static int sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
             if (sock->state & FD_WINE_NONBLOCKING) return 0;
             if (get_error() != (0xc0010000 | WSAEWOULDBLOCK)) return 0;
 
-            if (!(req = alloc_accept_req( NULL, async, NULL ))) return 0;
+            if (!(req = alloc_accept_req( sock, NULL, async, NULL ))) return 0;
             list_add_tail( &sock->accept_list, &req->entry );
 
+            async_set_completion_callback( async, free_accept_req, req );
             queue_async( &sock->accept_q, async );
             sock_reselect( sock );
             set_error( STATUS_PENDING );
@@ -1475,7 +1480,7 @@ static int sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
             return 0;
         }
 
-        if (!(req = alloc_accept_req( acceptsock, async, params )))
+        if (!(req = alloc_accept_req( sock, acceptsock, async, params )))
         {
             release_object( acceptsock );
             return 0;
@@ -1485,6 +1490,7 @@ static int sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         release_object( acceptsock );
 
         acceptsock->wparam = params->accept_handle;
+        async_set_completion_callback( async, free_accept_req, req );
         queue_async( &sock->accept_q, async );
         sock_reselect( sock );
         set_error( STATUS_PENDING );
@@ -1530,8 +1536,8 @@ struct ifchange
 static const struct object_ops ifchange_ops =
 {
     sizeof(struct ifchange), /* size */
+    &no_type,                /* type */
     ifchange_dump,           /* dump */
-    no_get_type,             /* get_type */
     add_queue,               /* add_queue */
     NULL,                    /* remove_queue */
     NULL,                    /* signaled */
@@ -1540,7 +1546,7 @@ static const struct object_ops ifchange_ops =
     no_satisfied,            /* satisfied */
     no_signal,               /* signal */
     ifchange_get_fd,         /* get_fd */
-    default_fd_map_access,   /* map_access */
+    default_map_access,      /* map_access */
     default_get_sd,          /* get_sd */
     default_set_sd,          /* set_sd */
     no_get_full_name,        /* get_full_name */
@@ -1743,7 +1749,6 @@ static void sock_release_ifchange( struct sock *sock )
     }
 }
 
-static struct object_type *socket_device_get_type( struct object *obj );
 static void socket_device_dump( struct object *obj, int verbose );
 static struct object *socket_device_lookup_name( struct object *obj, struct unicode_str *name,
                                                  unsigned int attr, struct object *root );
@@ -1753,8 +1758,8 @@ static struct object *socket_device_open_file( struct object *obj, unsigned int 
 static const struct object_ops socket_device_ops =
 {
     sizeof(struct object),      /* size */
+    &device_type,               /* type */
     socket_device_dump,         /* dump */
-    socket_device_get_type,     /* get_type */
     no_add_queue,               /* add_queue */
     NULL,                       /* remove_queue */
     NULL,                       /* signaled */
@@ -1763,7 +1768,7 @@ static const struct object_ops socket_device_ops =
     no_satisfied,               /* satisfied */
     no_signal,                  /* signal */
     no_get_fd,                  /* get_fd */
-    default_fd_map_access,      /* map_access */
+    default_map_access,         /* map_access */
     default_get_sd,             /* get_sd */
     default_set_sd,             /* set_sd */
     default_get_full_name,      /* get_full_name */
@@ -1775,13 +1780,6 @@ static const struct object_ops socket_device_ops =
     no_close_handle,            /* close_handle */
     no_destroy                  /* destroy */
 };
-
-static struct object_type *socket_device_get_type( struct object *obj )
-{
-    static const WCHAR name[] = {'D','e','v','i','c','e'};
-    static const struct unicode_str str = { name, sizeof(name) };
-    return get_object_type( &str );
-}
 
 static void socket_device_dump( struct object *obj, int verbose )
 {

@@ -50,6 +50,18 @@ struct namespace
 };
 
 
+struct type_descr no_type =
+{
+    { NULL, 0 },                /* name */
+    STANDARD_RIGHTS_REQUIRED,   /* valid_access */
+    {                           /* mapping */
+        STANDARD_RIGHTS_READ,
+        STANDARD_RIGHTS_WRITE,
+        STANDARD_RIGHTS_EXECUTE,
+        STANDARD_RIGHTS_REQUIRED
+    },
+};
+
 #ifdef DEBUG_OBJECTS
 static struct list object_list = LIST_INIT(object_list);
 
@@ -197,6 +209,8 @@ void *alloc_object( const struct object_ops *ops )
 #ifdef DEBUG_OBJECTS
         list_add_head( &object_list, &obj->obj_list );
 #endif
+        obj->ops->type->obj_count++;
+        obj->ops->type->obj_max = max( obj->ops->type->obj_max, obj->ops->type->obj_count );
         return obj;
     }
     return NULL;
@@ -206,6 +220,7 @@ void *alloc_object( const struct object_ops *ops )
 static void free_object( struct object *obj )
 {
     free( obj->sd );
+    obj->ops->type->obj_count--;
 #ifdef DEBUG_OBJECTS
     list_remove( &obj->obj_list );
     memset( obj, 0xaa, obj->ops->size );
@@ -491,11 +506,6 @@ struct namespace *create_namespace( unsigned int hash_size )
 
 /* functions for unimplemented/default object operations */
 
-struct object_type *no_get_type( struct object *obj )
-{
-    return NULL;
-}
-
 int no_add_queue( struct object *obj, struct wait_queue_entry *entry )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
@@ -518,13 +528,9 @@ struct fd *no_get_fd( struct object *obj )
     return NULL;
 }
 
-unsigned int no_map_access( struct object *obj, unsigned int access )
+unsigned int default_map_access( struct object *obj, unsigned int access )
 {
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE;
-    if (access & GENERIC_ALL)     access |= STANDARD_RIGHTS_ALL;
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
+    return map_access( access, &obj->ops->type->mapping );
 }
 
 struct security_descriptor *default_get_sd( struct object *obj )
@@ -716,40 +722,4 @@ int no_close_handle( struct object *obj, struct process *process, obj_handle_t h
 
 void no_destroy( struct object *obj )
 {
-}
-
-static const struct unicode_str type_array[] =
-{
-    {type_Type,          sizeof(type_Type)},
-    {type_Directory,     sizeof(type_Directory)},
-    {type_SymbolicLink,  sizeof(type_SymbolicLink)},
-    {type_Token,         sizeof(type_Token)},
-    {type_Job,           sizeof(type_Job)},
-    {type_Process,       sizeof(type_Process)},
-    {type_Thread,        sizeof(type_Thread)},
-    {type_Event,         sizeof(type_Event)},
-    {type_Mutant,        sizeof(type_Mutant)},
-    {type_Semaphore,     sizeof(type_Semaphore)},
-    {type_Timer,         sizeof(type_Timer)},
-    {type_KeyedEvent,    sizeof(type_KeyedEvent)},
-    {type_WindowStation, sizeof(type_WindowStation)},
-    {type_Desktop,       sizeof(type_Desktop)},
-    {type_Device,        sizeof(type_Device)},
-    /* Driver */
-    {type_IoCompletion,  sizeof(type_IoCompletion)},
-    {type_File,          sizeof(type_File)},
-    {type_Section,       sizeof(type_Section)},
-    {type_Key,           sizeof(type_Key)},
-};
-
-void init_types(void)
-{
-    struct object_type *type;
-    unsigned int i;
-
-    for (i = 0; i < sizeof(type_array) / sizeof(type_array[0]); i++)
-    {
-        type = get_object_type(&type_array[i]);
-        if (type) release_object(type);
-    }
 }

@@ -40,12 +40,15 @@ static const WCHAR avi_splitterW[] =
 static const WCHAR mpeg_splitterW[] =
 {'M','P','E','G','-','I',' ','S','t','r','e','a','m',' ','S','p','l','i','t','t','e','r',0};
 
+const struct unix_funcs *unix_funcs = NULL;
+
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
         winegstreamer_instance = instance;
         DisableThreadLibraryCalls(instance);
+        __wine_init_unix_lib(instance, reason, NULL, &unix_funcs);
     }
     return TRUE;
 }
@@ -171,59 +174,16 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
 
 static BOOL CALLBACK init_gstreamer_proc(INIT_ONCE *once, void *param, void **ctx)
 {
-    BOOL *status = param;
-    char argv0[] = "wine";
-    char argv1[] = "--gst-disable-registry-fork";
-    char *args[3];
-    char **argv = args;
-    int argc = 2;
-    GError *err = NULL;
-    const char *e;
+    HINSTANCE handle;
 
-    TRACE("Initializing...\n");
+    /* Unloading glib is a bad idea.. it installs atexit handlers,
+     * so never unload the dll after loading */
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+            (LPCWSTR)winegstreamer_instance, &handle);
+    if (!handle)
+        ERR("Failed to pin module %p.\n", winegstreamer_instance);
 
-    if ((e = getenv("WINE_GST_REGISTRY_DIR")))
-    {
-        char gst_reg[PATH_MAX];
-#if defined(__x86_64__)
-        const char *arch = "/registry.x86_64.bin";
-#elif defined(__i386__)
-        const char *arch = "/registry.i386.bin";
-#else
-#error Bad arch
-#endif
-        strcpy(gst_reg, e);
-        strcat(gst_reg, arch);
-        setenv("GST_REGISTRY_1_0", gst_reg, 1);
-    }
-
-    argv[0] = argv0;
-    argv[1] = argv1;
-    argv[2] = NULL;
-    *status = gst_init_check(&argc, &argv, &err);
-    if (*status)
-    {
-        HINSTANCE handle;
-
-        TRACE("Initialized, version %s. Built with %d.%d.%d.\n", gst_version_string(),
-                GST_VERSION_MAJOR, GST_VERSION_MINOR, GST_VERSION_MICRO);
-
-        /* Unloading glib is a bad idea.. it installs atexit handlers,
-         * so never unload the dll after loading */
-        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
-                (LPCWSTR)winegstreamer_instance, &handle);
-        if (!handle)
-            ERR("Failed to pin module %p.\n", winegstreamer_instance);
-
-        start_dispatch_thread();
-    }
-    else if (err)
-    {
-        ERR("Failed to initialize gstreamer: %s\n", debugstr_a(err->message));
-        g_error_free(err);
-    }
-
-    gst_wine_yuvfixup_plugin_init();
+    start_dispatch_thread();
 
     return TRUE;
 }
@@ -231,11 +191,12 @@ static BOOL CALLBACK init_gstreamer_proc(INIT_ONCE *once, void *param, void **ct
 BOOL init_gstreamer(void)
 {
     static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
-    static BOOL status;
 
-    InitOnceExecuteOnce(&once, init_gstreamer_proc, &status, NULL);
+    InitOnceExecuteOnce(&once, init_gstreamer_proc, NULL, NULL);
 
-    return status;
+    gst_wine_yuvfixup_plugin_init();
+
+    return TRUE;
 }
 
 static const REGPINTYPES reg_audio_mt = {&MEDIATYPE_Audio, &GUID_NULL};

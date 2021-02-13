@@ -60,6 +60,20 @@ struct notify
     struct process   *process;  /* process in which the hkey is valid */
 };
 
+static const WCHAR key_name[] = {'K','e','y'};
+
+struct type_descr key_type =
+{
+    { key_name, sizeof(key_name) },   /* name */
+    KEY_ALL_ACCESS | SYNCHRONIZE,     /* valid_access */
+    {                                 /* mapping */
+        STANDARD_RIGHTS_READ | KEY_NOTIFY | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE,
+        STANDARD_RIGHTS_WRITE | KEY_CREATE_SUB_KEY | KEY_SET_VALUE,
+        STANDARD_RIGHTS_EXECUTE | KEY_CREATE_LINK | KEY_NOTIFY | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE,
+        KEY_ALL_ACCESS
+    },
+};
+
 /* a registry key */
 struct key
 {
@@ -146,7 +160,6 @@ struct file_load_info
 
 
 static void key_dump( struct object *obj, int verbose );
-static struct object_type *key_get_type( struct object *obj );
 static unsigned int key_map_access( struct object *obj, unsigned int access );
 static struct security_descriptor *key_get_sd( struct object *obj );
 static WCHAR *key_get_full_name( struct object *obj, data_size_t *len );
@@ -156,8 +169,8 @@ static void key_destroy( struct object *obj );
 static const struct object_ops key_ops =
 {
     sizeof(struct key),      /* size */
+    &key_type,               /* type */
     key_dump,                /* dump */
-    key_get_type,            /* get_type */
     no_add_queue,            /* add_queue */
     NULL,                    /* remove_queue */
     NULL,                    /* signaled */
@@ -307,12 +320,6 @@ static void key_dump( struct object *obj, int verbose )
     fprintf( stderr, "\n" );
 }
 
-static struct object_type *key_get_type( struct object *obj )
-{
-    static const struct unicode_str str = { type_Key, sizeof(type_Key) };
-    return get_object_type( &str );
-}
-
 /* notify waiter and maybe delete the notification */
 static void do_notification( struct key *key, struct notify *notify, int del )
 {
@@ -347,13 +354,9 @@ static inline struct notify *find_notify( struct key *key, struct process *proce
 
 static unsigned int key_map_access( struct object *obj, unsigned int access )
 {
-    if (access & GENERIC_READ)    access |= KEY_READ;
-    if (access & GENERIC_WRITE)   access |= KEY_WRITE;
-    if (access & GENERIC_EXECUTE) access |= KEY_EXECUTE;
-    if (access & GENERIC_ALL)     access |= KEY_ALL_ACCESS;
+    access = default_map_access( obj, access );
     /* filter the WOW64 masks, as they aren't real access bits */
-    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL |
-                      KEY_WOW64_64KEY | KEY_WOW64_32KEY);
+    return access & ~(KEY_WOW64_64KEY | KEY_WOW64_32KEY);
 }
 
 static struct security_descriptor *key_get_sd( struct object *obj )

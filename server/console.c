@@ -78,8 +78,8 @@ static struct object *console_open_file( struct object *obj, unsigned int access
 static const struct object_ops console_ops =
 {
     sizeof(struct console),           /* size */
+    &file_type,                       /* type */
     console_dump,                     /* dump */
-    no_get_type,                      /* get_type */
     add_queue,                        /* add_queue */
     remove_queue,                     /* remove_queue */
     console_signaled,                 /* signaled */
@@ -88,7 +88,7 @@ static const struct object_ops console_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     console_get_fd,                   /* get_fd */
-    default_fd_map_access,            /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     no_get_full_name,                 /* get_full_name */
@@ -159,8 +159,8 @@ static struct object *console_server_open_file( struct object *obj, unsigned int
 static const struct object_ops console_server_ops =
 {
     sizeof(struct console_server),    /* size */
+    &file_type,                       /* type */
     console_server_dump,              /* dump */
-    no_get_type,                      /* get_type */
     add_queue,                        /* add_queue */
     remove_queue,                     /* remove_queue */
     console_server_signaled,          /* signaled */
@@ -169,7 +169,7 @@ static const struct object_ops console_server_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     console_server_get_fd,            /* get_fd */
-    default_fd_map_access,            /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     no_get_full_name,                 /* get_full_name */
@@ -229,8 +229,8 @@ static struct object *screen_buffer_open_file( struct object *obj, unsigned int 
 static const struct object_ops screen_buffer_ops =
 {
     sizeof(struct screen_buffer),     /* size */
+    &file_type,                       /* type */
     screen_buffer_dump,               /* dump */
-    no_get_type,                      /* get_type */
     screen_buffer_add_queue,          /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
@@ -239,7 +239,7 @@ static const struct object_ops screen_buffer_ops =
     NULL,                             /* satisfied */
     no_signal,                        /* signal */
     screen_buffer_get_fd,             /* get_fd */
-    default_fd_map_access,            /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     no_get_full_name,                 /* get_full_name */
@@ -270,7 +270,6 @@ static const struct fd_ops screen_buffer_fd_ops =
     default_fd_reselect_async     /* reselect_async */
 };
 
-static struct object_type *console_device_get_type( struct object *obj );
 static void console_device_dump( struct object *obj, int verbose );
 static struct object *console_device_lookup_name( struct object *obj, struct unicode_str *name,
                                                 unsigned int attr, struct object *root );
@@ -280,8 +279,8 @@ static struct object *console_device_open_file( struct object *obj, unsigned int
 static const struct object_ops console_device_ops =
 {
     sizeof(struct object),            /* size */
+    &device_type,                     /* type */
     console_device_dump,              /* dump */
-    console_device_get_type,          /* get_type */
     no_add_queue,                     /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
@@ -290,7 +289,7 @@ static const struct object_ops console_device_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
-    default_fd_map_access,            /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     default_get_full_name,            /* get_full_name */
@@ -319,8 +318,8 @@ static void console_input_destroy( struct object *obj );
 static const struct object_ops console_input_ops =
 {
     sizeof(struct console_input),     /* size */
+    &device_type,                     /* type */
     console_input_dump,               /* dump */
-    console_device_get_type,          /* get_type */
     console_input_add_queue,          /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
@@ -329,7 +328,7 @@ static const struct object_ops console_input_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     console_input_get_fd,             /* get_fd */
-    no_map_access,                    /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     no_get_full_name,                 /* get_full_name */
@@ -377,8 +376,8 @@ static void console_output_destroy( struct object *obj );
 static const struct object_ops console_output_ops =
 {
     sizeof(struct console_output),    /* size */
+    &device_type,                     /* type */
     console_output_dump,              /* dump */
-    console_device_get_type,          /* get_type */
     console_output_add_queue,         /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
@@ -387,7 +386,7 @@ static const struct object_ops console_output_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     console_output_get_fd,            /* get_fd */
-    no_map_access,                    /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     no_get_full_name,                 /* get_full_name */
@@ -436,8 +435,8 @@ static void console_connection_destroy( struct object *obj );
 static const struct object_ops console_connection_ops =
 {
     sizeof(struct console_connection),/* size */
+    &device_type,                     /* type */
     console_connection_dump,          /* dump */
-    console_device_get_type,          /* get_type */
     no_add_queue,                     /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
@@ -446,7 +445,7 @@ static const struct object_ops console_connection_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     console_connection_get_fd,        /* get_fd */
-    no_map_access,                    /* map_access */
+    default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
     no_get_full_name,                 /* get_full_name */
@@ -939,7 +938,6 @@ static struct object *create_console_server( void )
         return NULL;
     }
     allow_fd_caching(server->fd);
-    server->fsync_idx = -1;
     server->esync_fd = -1;
 
     if (do_fsync())
@@ -1241,13 +1239,6 @@ static void console_connection_destroy( struct object *obj )
     if (connection->fd) release_object( connection->fd );
 }
 
-static struct object_type *console_device_get_type( struct object *obj )
-{
-    static const WCHAR name[] = {'D','e','v','i','c','e'};
-    static const struct unicode_str str = { name, sizeof(name) };
-    return get_object_type( &str );
-}
-
 static void console_device_dump( struct object *obj, int verbose )
 {
     fputs( "Console device\n", stderr );
@@ -1353,7 +1344,7 @@ static struct object *console_device_open_file( struct object *obj, unsigned int
                                                 unsigned int sharing, unsigned int options )
 {
     int is_output;
-    access = default_fd_map_access( obj, access );
+    access = default_map_access( obj, access );
     is_output = access & FILE_WRITE_DATA;
     if (!current->process->console || (is_output && !current->process->console))
     {

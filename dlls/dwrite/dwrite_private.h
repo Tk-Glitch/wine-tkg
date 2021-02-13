@@ -517,8 +517,11 @@ struct shaping_glyph_info
     unsigned int mask;
     /* Derived from glyph class, supplied by GDEF. */
     unsigned int props;
+    /* Used for GPOS mark and cursive attachments. */
+    int attach_chain;
     /* Only relevant for isClusterStart glyphs. Indicates text position for this cluster. */
     unsigned int start_text_idx;
+    unsigned int codepoint;
 };
 
 struct shaping_glyph_properties
@@ -649,6 +652,7 @@ struct scriptshaping_context
     unsigned int auto_zwj;
     unsigned int auto_zwnj;
     struct shaping_glyph_info *glyph_infos;
+    unsigned int has_gpos_attachment : 1;
 
     unsigned int cur;
     unsigned int glyph_count;
@@ -686,6 +690,8 @@ extern void opentype_layout_apply_gpos_features(struct scriptshaping_context *co
 extern BOOL opentype_layout_check_feature(struct scriptshaping_context *context, unsigned int script_index,
         unsigned int language_index, struct shaping_feature *feature, unsigned int glyph_count,
         const UINT16 *glyphs, UINT8 *feature_applies) DECLSPEC_HIDDEN;
+extern void opentype_layout_unsafe_to_break(struct scriptshaping_context *context, unsigned int start,
+        unsigned int end) DECLSPEC_HIDDEN;
 extern BOOL opentype_has_vertical_variants(struct dwrite_fontface *fontface) DECLSPEC_HIDDEN;
 extern HRESULT opentype_get_vertical_glyph_variants(struct dwrite_fontface *fontface, unsigned int glyph_count,
         const UINT16 *nominal_glyphs, UINT16 *glyphs) DECLSPEC_HIDDEN;

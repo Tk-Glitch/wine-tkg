@@ -75,6 +75,7 @@ static const struct {
 	{&CLSID_MyComputer,	ISF_MyComputer_Constructor},
 	{&CLSID_MyDocuments,    MyDocuments_Constructor},
 	{&CLSID_NetworkPlaces,  ISF_NetworkPlaces_Constructor},
+	{&CLSID_NewMenu,        NewMenu_Constructor},
 	{&CLSID_Printers,       Printers_Constructor},
 	{&CLSID_QueryAssociations, QueryAssociations_Constructor},
 	{&CLSID_RecycleBin,     RecycleBin_Constructor},
@@ -89,7 +90,7 @@ static const struct {
 	{&CLSID_Shell,          IShellDispatch_Constructor},
 	{&CLSID_DestinationList, CustomDestinationList_Constructor},
 	{&CLSID_ShellImageDataFactory, ShellImageDataFactory_Constructor},
-	{&CLSID_NewMenu,        NewMenu_Constructor},
+	{&CLSID_FileOperation, IFileOperation_Constructor},
 	{NULL, NULL}
 };
 

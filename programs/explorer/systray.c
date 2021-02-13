@@ -723,7 +723,7 @@ static BOOL notify_owner( struct icon *icon, UINT msg, POINT pt )
     WPARAM wp = icon->id;
     LPARAM lp = msg;
 
-    if (icon->version >= NOTIFY_VERSION_4)
+    if (icon->version >= NOTIFYICON_VERSION_4)
     {
         ClientToScreen( tray_window, &pt );
         wp = MAKEWPARAM( pt.x, pt.y );
@@ -731,7 +731,7 @@ static BOOL notify_owner( struct icon *icon, UINT msg, POINT pt )
     }
 
     TRACE( "relaying 0x%x\n", msg );
-    if (!PostMessageW( icon->owner, icon->callback_message, wp, lp ) &&
+    if (!SendNotifyMessageW( icon->owner, icon->callback_message, wp, lp ) &&
         (GetLastError() == ERROR_INVALID_WINDOW_HANDLE))
     {
         WARN( "application window was destroyed, removing icon %u\n", icon->id );
