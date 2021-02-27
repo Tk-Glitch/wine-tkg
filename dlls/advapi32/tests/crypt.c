@@ -152,6 +152,11 @@ static void test_CryptReleaseContext(void)
     ret = CryptContextAddRef(prov, NULL, 0);
     ok(ret, "got %u\n", GetLastError());
 
+    ret = CryptContextAddRef(0, NULL, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %u\n", GetLastError());
+    ret = CryptContextAddRef(0xdeadbeef, NULL, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %u\n", GetLastError());
+
     ret = CryptReleaseContext(prov, 0);
     ok(ret, "got %u\n", GetLastError());
 
@@ -269,10 +274,40 @@ static void test_incorrect_api_usage(void)
     ok (result, "%08x\n", GetLastError());
     if (!result) return;
 
+    /* Looks like native handles are just pointers. */
+    ok(!!*(void **)hProv, "Got zero *(void **)hProv.\n");
+
     result = CryptCreateHash(hProv, CALG_SHA, 0, 0, &hHash);
     ok (result, "%d\n", GetLastError());
     if (!result) return;
-    CryptDestroyHash(hHash);
+
+    result = CryptDeriveKey(0, CALG_RC4, hHash, 0, &hKey2);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    result = CryptDeriveKey(hProv, CALG_RC4, 0, 0, &hKey2);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    result = CryptHashData(0, &temp, 1, 0);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    result = CryptGenKey(hProv, CALG_RC4, 0, &hKey);
+    ok (result, "%d\n", GetLastError());
+    if (!result) return;
+
+    result = pCryptHashSessionKey(hHash, 0, 0);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    result = pCryptHashSessionKey(0, hKey, 0);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    result = CryptDestroyHash(hHash);
+    ok (result, "%08x\n", GetLastError());
+
+    result = CryptDestroyHash(0);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    result = CryptCreateHash(0xdeadbeef, CALG_SHA, 0, 0, &hHash);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
 
     result = CryptCreateHash(0, CALG_SHA, 0, 0, &hHash);
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
@@ -280,9 +315,28 @@ static void test_incorrect_api_usage(void)
     result = CryptGenKey(0, CALG_RC4, 0, &hKey);
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
 
-    result = CryptGenKey(hProv, CALG_RC4, 0, &hKey);
+    dwLen = 1;
+    result = CryptDecrypt(hKey, 0, TRUE, 0, &temp, &dwLen);
     ok (result, "%d\n", GetLastError());
-    if (!result) return;
+    result = CryptDecrypt(hKey, 0xdeadbeef, TRUE, 0, &temp, &dwLen);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+    result = CryptDecrypt(0, 0, TRUE, 0, &temp, &dwLen);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+    result = CryptDecrypt(0xdeadbeef, 0, TRUE, 0, &temp, &dwLen);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    result = CryptEncrypt(hKey, 0, TRUE, 0, &temp, &dwLen, sizeof(temp));
+    ok (result, "%d\n", GetLastError());
+    result = CryptEncrypt(hKey, 0xdeadbeef, TRUE, 0, &temp, &dwLen, sizeof(temp));
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+    result = CryptEncrypt(0, 0, TRUE, 0, &temp, &dwLen, sizeof(temp));
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+    result = CryptEncrypt(0xdeadbeef, 0, TRUE, 0, &temp, &dwLen, sizeof(temp));
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    dwLen = 1;
+    result = CryptExportKey(hKey, 0xdeadbeef, 0, 0, &temp, &dwLen);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
 
     result = CryptDestroyKey(hKey);
     ok (result, "%d\n", GetLastError());
@@ -293,6 +347,9 @@ static void test_incorrect_api_usage(void)
 
     result = CryptDestroyKey(hKey2);
     ok (result, "%d\n", GetLastError());
+
+    result = CryptDestroyKey(0);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
 
     dwTemp = CRYPT_MODE_ECB;    
     result = CryptSetKeyParam(hKey2, KP_MODE, (BYTE*)&dwTemp, sizeof(DWORD));
@@ -308,6 +365,9 @@ static void test_incorrect_api_usage(void)
     result = CryptReleaseContext(hProv, 0);
     ok(result, "got %u\n", GetLastError());
     if (!result) return;
+
+    result = pCryptGenRandom(0, 1, &temp);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
 
     result = pCryptGenRandom(hProv, 1, &temp);
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
@@ -353,6 +413,9 @@ static void test_incorrect_api_usage(void)
     dwLen = 1;
     result = CryptGetProvParam(hProv, 0, &temp, &dwLen, 0);
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    result = CryptGetUserKey(0, 0, &hKey2);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
     
     result = CryptGetUserKey(hProv, 0, &hKey2);
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
@@ -372,6 +435,9 @@ static void test_incorrect_api_usage(void)
         result = pCryptSignHashW(hHash, 0, NULL, 0, &temp, &dwLen);
         ok (!result && (GetLastError() == ERROR_INVALID_PARAMETER ||
             GetLastError() == ERROR_CALL_NOT_IMPLEMENTED), "%d\n", GetLastError());
+        result = pCryptSignHashW(hHash, 0, NULL, 0, &temp, &dwLen);
+        ok (!result && (GetLastError() == ERROR_INVALID_PARAMETER ||
+            GetLastError() == ERROR_CALL_NOT_IMPLEMENTED), "%d\n", GetLastError());
     }
     else
         win_skip("CryptSignHashW is not available\n");
@@ -380,6 +446,9 @@ static void test_incorrect_api_usage(void)
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
 
     result = CryptSetHashParam(hHash, 0, &temp, 1);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    result = CryptSetProvParam(0, 0, &temp, 1);
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
 
     result = CryptSetProvParam(hProv, 0, &temp, 1);

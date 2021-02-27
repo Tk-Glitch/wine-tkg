@@ -27,24 +27,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dpmodemx);
 
-BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
-{
-    TRACE("(%p, %u, %p)\n", instance, reason, reserved);
-
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(instance);
-            break;
-    }
-
-    return TRUE;
-}
-
 HRESULT WINAPI SPInit( LPSPINITDATA lpspData )
 {
     FIXME("Currently not implemented.\n");
     return DPERR_UNAVAILABLE;
 }
+

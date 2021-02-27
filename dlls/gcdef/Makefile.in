@@ -1,8 +1,6 @@
 MODULE    = gcdef.dll
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
-	gcdef_main.c
 
 RC_SRCS = version.rc

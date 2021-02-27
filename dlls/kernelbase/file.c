@@ -1250,7 +1250,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH DeleteFileW( LPCWSTR path )
 
     status = NtCreateFile(&hFile, SYNCHRONIZE | DELETE, &attr, &io, NULL, 0,
 			  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-			  FILE_OPEN, FILE_DELETE_ON_CLOSE | FILE_NON_DIRECTORY_FILE, NULL, 0);
+			  FILE_OPEN, FILE_DELETE_ON_CLOSE | FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+			  NULL, 0);
     if (status == STATUS_SUCCESS) status = NtClose(hFile);
 
     RtlFreeUnicodeString( &nameW );
@@ -2762,7 +2763,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH MoveFileWithProgressW( const WCHAR *source, const 
 
     status = NtOpenFile( &source_handle, DELETE | SYNCHRONIZE, &attr, &io,
                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                         FILE_SYNCHRONOUS_IO_NONALERT );
+                         FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT );
     RtlFreeUnicodeString( &nt_name );
     if (!set_ntstatus( status )) goto error;
 

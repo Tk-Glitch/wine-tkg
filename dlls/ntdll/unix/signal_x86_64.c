@@ -35,6 +35,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <sys/types.h>
+#include <sys/mman.h>
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
@@ -274,24 +275,44 @@ struct apc_stack_layout
 C_ASSERT( offsetof(struct apc_stack_layout, context) == 0x30 );
 C_ASSERT( sizeof(struct apc_stack_layout) == 0x510 );
 
-struct syscall_frame
+struct syscall_xsave
 {
-    ULONG64               xmm[10 * 2];  /* xmm6-xmm15 */
-    ULONG64               mxcsr;
-    ULONG64               r12;
-    ULONG64               r13;
-    ULONG64               r14;
-    ULONG64               r15;
-    ULONG64               rdi;
-    ULONG64               rsi;
-    ULONG64               rbx;
-    ULONG64               rbp;
-    ULONG64               thunk_addr;
-    ULONG64               ret_addr;
+    XMM_SAVE_AREA32       xsave;
+    XSTATE                xstate;
 };
 
-/* Should match the offset in call_user_apc_dispatcher(). */
-C_ASSERT( offsetof( struct syscall_frame, ret_addr ) == 0xf0);
+C_ASSERT( sizeof(struct syscall_xsave) == 0x340 );
+
+struct syscall_frame
+{
+    ULONG64               rax;     /* 0000 */
+    ULONG64               rbx;     /* 0008 */
+    ULONG64               rcx;     /* 0010 */
+    ULONG64               rdx;     /* 0018 */
+    ULONG64               rsi;     /* 0020 */
+    ULONG64               rdi;     /* 0028 */
+    ULONG64               r8;      /* 0030 */
+    ULONG64               r9;      /* 0038 */
+    ULONG64               r10;     /* 0040 */
+    ULONG64               r11;     /* 0048 */
+    ULONG64               r12;     /* 0050 */
+    ULONG64               r13;     /* 0058 */
+    ULONG64               r14;     /* 0060 */
+    ULONG64               r15;     /* 0068 */
+    ULONG64               rip;     /* 0070 */
+    WORD                  cs;      /* 0078 */
+    WORD                  ds;      /* 007a */
+    WORD                  es;      /* 007c */
+    WORD                  fs;      /* 007e */
+    ULONG64               eflags;  /* 0080 */
+    ULONG64               rsp;     /* 0088 */
+    WORD                  ss;      /* 0090 */
+    WORD                  gs;      /* 0092 */
+    WORD                  pad[2];  /* 0094 */
+    ULONG64               rbp;     /* 0098 */
+};
+
+C_ASSERT( sizeof( struct syscall_frame ) == 0xa0);
 
 struct amd64_thread_data
 {
@@ -322,6 +343,11 @@ void *get_syscall_frame(void)
 void set_syscall_frame(void *frame)
 {
     amd64_thread_data()->syscall_frame = frame;
+}
+
+static struct syscall_xsave *get_syscall_xsave( struct syscall_frame *frame )
+{
+    return (struct syscall_xsave *)((ULONG_PTR)((struct syscall_xsave *)frame - 1) & ~63);
 }
 
 /***********************************************************************
@@ -1511,7 +1537,7 @@ static void save_context( struct xcontext *xcontext, const ucontext_t *sigcontex
         context->ContextFlags |= CONTEXT_FLOATING_POINT;
         context->u.FltSave = *FPU_sig(sigcontext);
         context->MxCsr = context->u.FltSave.MxCsr;
-        if (user_shared_data->XState.EnabledFeatures && (xs = XState_sig(FPU_sig(sigcontext))))
+        if ((cpu_info.FeatureSet & CPU_FEATURE_AVX) && (xs = XState_sig(FPU_sig(sigcontext))))
         {
             /* xcontext and sigcontext are both on the signal stack, so we can
              * just reference sigcontext without overflowing 32 bit XState.Offset */
@@ -1520,56 +1546,6 @@ static void save_context( struct xcontext *xcontext, const ucontext_t *sigcontex
             xcontext->host_compaction_mask = xs->CompactionMask;
         }
     }
-}
-
-
-/***********************************************************************
- *           save_xstate
- *
- * Save the XState context
- */
-static inline NTSTATUS save_xstate( CONTEXT *context )
-{
-    CONTEXT_EX *context_ex = (CONTEXT_EX *)(context + 1);
-    DECLSPEC_ALIGN(64) struct
-    {
-        XSAVE_FORMAT xsave;
-        XSTATE xstate;
-    }
-    xsave_area;
-    XSTATE *xs;
-
-    if (!(user_shared_data->XState.EnabledFeatures && (xs = xstate_from_context( context ))))
-        return STATUS_SUCCESS;
-
-    if (context_ex->XState.Length < offsetof(XSTATE, YmmContext)
-            || context_ex->XState.Length > sizeof(XSTATE))
-        return STATUS_INVALID_PARAMETER;
-
-    if (user_shared_data->XState.CompactionEnabled)
-    {
-        /* xsavec doesn't use anything from the save area. */
-        __asm__ volatile( "xsavec %0" : "=m"(xsave_area)
-                : "a" ((unsigned int)(xs->CompactionMask & (1 << XSTATE_AVX))), "d" (0) );
-    }
-    else
-    {
-        /* xsave preserves those bits in the mask which are not in EDX:EAX, so zero it. */
-        xsave_area.xstate.Mask = xsave_area.xstate.CompactionMask = 0;
-        __asm__ volatile( "xsave %0" : "=m"(xsave_area)
-                : "a" ((unsigned int)(xs->Mask & (1 << XSTATE_AVX))), "d" (0) );
-    }
-
-    memcpy(xs, &xsave_area.xstate, offsetof(XSTATE, YmmContext));
-    if (xs->Mask & (1 << XSTATE_AVX))
-    {
-        if (context_ex->XState.Length < sizeof(XSTATE))
-            return STATUS_BUFFER_OVERFLOW;
-
-        memcpy(&xs->YmmContext, &xsave_area.xstate.YmmContext, sizeof(xs->YmmContext));
-    }
-
-    return STATUS_SUCCESS;
 }
 
 
@@ -1591,7 +1567,7 @@ static void restore_context( const struct xcontext *xcontext, ucontext_t *sigcon
     amd64_thread_data()->dr7 = context->Dr7;
     set_sigcontext( context, sigcontext );
     if (FPU_sig(sigcontext)) *FPU_sig(sigcontext) = context->u.FltSave;
-    if (user_shared_data->XState.EnabledFeatures && (xs = XState_sig(FPU_sig(sigcontext))))
+    if ((cpu_info.FeatureSet & CPU_FEATURE_AVX) && (xs = XState_sig(FPU_sig(sigcontext))))
         xs->CompactionMask = xcontext->host_compaction_mask;
 }
 
@@ -1601,70 +1577,49 @@ static void restore_context( const struct xcontext *xcontext, ucontext_t *sigcon
  *
  * Set the new CPU context.
  */
-extern void set_full_cpu_context( const CONTEXT *context );
+extern void set_full_cpu_context(void);
 __ASM_GLOBAL_FUNC( set_full_cpu_context,
-                   "subq $40,%rsp\n\t"
-                   __ASM_SEH(".seh_stackalloc 0x40\n\t")
-                   __ASM_SEH(".seh_endprologue\n\t")
-                   __ASM_CFI(".cfi_adjust_cfa_offset 40\n\t")
                    "movq %gs:0x30,%rdx\n\t"
-                   "movw 0x38(%rdi),%ax\n\t"        /* context->SegCs */
-                   "movq %rax,8(%rsp)\n\t"
-                   "movw 0x42(%rdi),%ax\n\t"        /* context->SegSs */
-                   "movq %rax,32(%rsp)\n\t"
-                   "movq 0x44(%rdi),%rax\n\t"       /* context->Eflags */
-                   "movq %rax,16(%rsp)\n\t"
-                   "movq $0,0x328(%rdx)\n\t"        /* amd64_thread_data()->syscall_frame */
-                   "movq 0x80(%rdi),%rcx\n\t"       /* context->Rcx */
-                   "movq 0x88(%rdi),%rdx\n\t"       /* context->Rdx */
-                   "movq 0x90(%rdi),%rbx\n\t"       /* context->Rbx */
-                   "movq 0x98(%rdi),%rax\n\t"       /* context->Rsp */
-                   "movq %rax,24(%rsp)\n\t"
-                   "movq 0xa0(%rdi),%rbp\n\t"       /* context->Rbp */
-                   "movq 0xa8(%rdi),%rsi\n\t"       /* context->Rsi */
-                   "movq 0xb8(%rdi),%r8\n\t"        /* context->R8 */
-                   "movq 0xc0(%rdi),%r9\n\t"        /* context->R9 */
-                   "movq 0xc8(%rdi),%r10\n\t"       /* context->R10 */
-                   "movq 0xd0(%rdi),%r11\n\t"       /* context->R11 */
-                   "movq 0xd8(%rdi),%r12\n\t"       /* context->R12 */
-                   "movq 0xe0(%rdi),%r13\n\t"       /* context->R13 */
-                   "movq 0xe8(%rdi),%r14\n\t"       /* context->R14 */
-                   "movq 0xf0(%rdi),%r15\n\t"       /* context->R15 */
-                   "movq 0xf8(%rdi),%rax\n\t"       /* context->Rip */
-                   "movq %rax,(%rsp)\n\t"
-                   "fxrstor 0x100(%rdi)\n\t"        /* context->FltSave */
-                   "movq 0x78(%rdi),%rax\n\t"       /* context->Rax */
-                   "movq 0xb0(%rdi),%rdi\n\t"       /* context->Rdi */
-                   "iretq" );
-
+                   "movq 0x328(%rdx),%rsp\n\t"      /* amd64_thread_data()->syscall_frame */
+                   "movq $0,0x328(%rdx)\n\t"
+                   "movq 0x00(%rsp),%rax\n\t"
+                   "movq 0x08(%rsp),%rbx\n\t"
+                   "movq 0x10(%rsp),%rcx\n\t"
+                   "movq 0x18(%rsp),%rdx\n\t"
+                   "movq 0x20(%rsp),%rsi\n\t"
+                   "movq 0x28(%rsp),%rdi\n\t"
+                   "movq 0x30(%rsp),%r8\n\t"
+                   "movq 0x38(%rsp),%r9\n\t"
+                   "movq 0x40(%rsp),%r10\n\t"
+                   "movq 0x48(%rsp),%r11\n\t"
+                   "movq 0x50(%rsp),%r12\n\t"
+                   "movq 0x58(%rsp),%r13\n\t"
+                   "movq 0x60(%rsp),%r14\n\t"
+                   "movq 0x68(%rsp),%r15\n\t"
+                   "movq 0x98(%rsp),%rbp\n\t"
+                   "leaq 0x70(%rsp),%rsp\n\t"
+                   "iretq" )
 
 /***********************************************************************
- *           restore_xstate
+ *           signal_restore_full_cpu_context
  *
- * Restore the XState context.
+ * Restore full context from syscall frame
  */
-static void restore_xstate( const CONTEXT *context )
+void signal_restore_full_cpu_context(void)
 {
-    XSAVE_FORMAT *xrstor_base;
-    XSTATE *xs;
+    struct syscall_xsave *xsave = get_syscall_xsave( get_syscall_frame() );
 
-    if (!(user_shared_data->XState.EnabledFeatures && (xs = xstate_from_context( context ))))
-        return;
-
-    xrstor_base = (XSAVE_FORMAT *)xs - 1;
-
-    if (!(xs->CompactionMask & ((ULONG64)1 << 63)))
+    if (cpu_info.FeatureSet & CPU_FEATURE_XSAVE)
     {
-        /* Non-compacted xrstor will load Mxcsr regardless of the specified mask. Loading garbage there
-         * may lead to fault. We have only padding, no more used EXCEPTION_RECORD or unused context fields
-         * at the MxCsr restore location, so just put it there. */
-        assert( (void *)&xrstor_base->MxCsr > (void *)context->VectorRegister );
-        xrstor_base->MxCsr = context->u.FltSave.MxCsr;
-        xrstor_base->MxCsr_Mask = context->u.FltSave.MxCsr_Mask;
+        __asm__ volatile( "xrstor64 %0" : : "m"(xsave->xsave), "a" (7), "d" (0) );
     }
-
-    __asm__ volatile( "xrstor64 %0" : : "m"(*xrstor_base), "a" (4), "d" (0) );
+    else
+    {
+        __asm__ volatile( "fxrstor64 %0" : : "m"(xsave->xsave) );
+    }
+    set_full_cpu_context();
 }
+
 
 /***********************************************************************
  *           get_server_context_flags
@@ -1831,6 +1786,9 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
     NTSTATUS ret = STATUS_SUCCESS;
     DWORD flags = context->ContextFlags & ~CONTEXT_AMD64;
     BOOL self = (handle == GetCurrentThread());
+    struct syscall_frame *frame;
+    struct syscall_xsave *xsave;
+    XSTATE *xs;
 
     /* debug registers require a server call */
     if (self && (flags & CONTEXT_DEBUG_REGISTERS))
@@ -1859,16 +1817,66 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
         }
     }
 
-    restore_xstate( context );
-
-    if (flags & CONTEXT_FULL)
+    frame = amd64_thread_data()->syscall_frame;
+    xsave = get_syscall_xsave( frame );
+    if (flags & CONTEXT_INTEGER)
     {
-        if (!(flags & CONTEXT_CONTROL))
-            FIXME( "setting partial context (%x) not supported\n", flags );
-        else
-            set_full_cpu_context( context );
+        frame->rax = context->Rax;
+        frame->rbx = context->Rbx;
+        frame->rcx = context->Rcx;
+        frame->rdx = context->Rdx;
+        frame->rsi = context->Rsi;
+        frame->rdi = context->Rdi;
+        frame->r8  = context->R8;
+        frame->r9  = context->R9;
+        frame->r10 = context->R10;
+        frame->r11 = context->R11;
+        frame->r12 = context->R12;
+        frame->r13 = context->R13;
+        frame->r14 = context->R14;
+        frame->r15 = context->R15;
     }
-    return ret;
+    if (flags & CONTEXT_CONTROL)
+    {
+        frame->rsp    = context->Rsp;
+        frame->rbp    = context->Rbp;
+        frame->rip    = context->Rip;
+        frame->eflags = context->EFlags;
+        frame->cs     = context->SegCs;
+        frame->ss     = context->SegSs;
+    }
+    if (flags & CONTEXT_SEGMENTS)
+    {
+        frame->ds = context->SegDs;
+        frame->es = context->SegEs;
+        frame->fs = context->SegFs;
+        frame->gs = context->SegGs;
+    }
+    if (flags & CONTEXT_FLOATING_POINT)
+    {
+        xsave->xsave = context->u.FltSave;
+        xsave->xstate.Mask |= XSTATE_MASK_LEGACY;
+    }
+    if ((cpu_info.FeatureSet & CPU_FEATURE_AVX) && (xs = xstate_from_context( context )))
+    {
+        CONTEXT_EX *context_ex = (CONTEXT_EX *)(context + 1);
+
+        if (context_ex->XState.Length < offsetof(XSTATE, YmmContext)
+            || context_ex->XState.Length > sizeof(XSTATE))
+            return STATUS_INVALID_PARAMETER;
+
+        if (xs->Mask & XSTATE_MASK_GSSE)
+        {
+            if (context_ex->XState.Length < sizeof(XSTATE))
+                return STATUS_BUFFER_OVERFLOW;
+
+            xsave->xstate.Mask |= XSTATE_MASK_GSSE;
+            memcpy( &xsave->xstate.YmmContext, &xs->YmmContext, sizeof(xs->YmmContext) );
+        }
+        else if (xs->CompactionMask & XSTATE_MASK_GSSE)
+            xsave->xstate.Mask &= ~XSTATE_MASK_GSSE;
+    }
+    return STATUS_SUCCESS;
 }
 
 
@@ -1878,16 +1886,13 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
  */
 NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
 {
-    NTSTATUS ret, xsave_status;
+    NTSTATUS ret;
     DWORD needed_flags;
     struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
     BOOL self = (handle == GetCurrentThread());
+    XSTATE *xstate;
 
     if (!context) return STATUS_INVALID_PARAMETER;
-
-    /* Save xstate before any calls which can potentially change volatile ymm registers.
-     * E. g., debug output will clobber ymm registers. */
-    xsave_status = self ? save_xstate( context ) : STATUS_SUCCESS;
 
     needed_flags = context->ContextFlags & ~CONTEXT_AMD64;
 
@@ -1908,16 +1913,16 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
     {
         if (needed_flags & CONTEXT_INTEGER)
         {
-            context->Rax = 0;
+            context->Rax = frame->rax;
             context->Rbx = frame->rbx;
-            context->Rcx = 0;
-            context->Rdx = 0;
+            context->Rcx = frame->rcx;
+            context->Rdx = frame->rdx;
             context->Rsi = frame->rsi;
             context->Rdi = frame->rdi;
-            context->R8  = 0;
-            context->R9  = 0;
-            context->R10 = 0;
-            context->R11 = 0;
+            context->R8  = frame->r8;
+            context->R9  = frame->r9;
+            context->R10 = frame->r10;
+            context->R11 = frame->r11;
             context->R12 = frame->r12;
             context->R13 = frame->r13;
             context->R14 = frame->r14;
@@ -1926,28 +1931,57 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
         }
         if (needed_flags & CONTEXT_CONTROL)
         {
-            context->Rsp    = (ULONG64)&frame->ret_addr;
+            context->Rsp    = frame->rsp;
             context->Rbp    = frame->rbp;
-            context->Rip    = frame->thunk_addr;
-            context->EFlags = 0x202;
-            __asm__( "movw %%cs,%0" : "=g" (context->SegCs) );
-            __asm__( "movw %%ss,%0" : "=g" (context->SegSs) );
+            context->Rip    = frame->rip;
+            context->EFlags = frame->eflags;
+            context->SegCs  = frame->cs;
+            context->SegSs  = frame->ss;
             context->ContextFlags |= CONTEXT_CONTROL;
         }
         if (needed_flags & CONTEXT_SEGMENTS)
         {
-            __asm__( "movw %%ds,%0" : "=g" (context->SegDs) );
-            __asm__( "movw %%es,%0" : "=g" (context->SegEs) );
-            __asm__( "movw %%fs,%0" : "=g" (context->SegFs) );
-            __asm__( "movw %%gs,%0" : "=g" (context->SegGs) );
+            context->SegDs  = frame->ds;
+            context->SegEs  = frame->es;
+            context->SegFs  = frame->fs;
+            context->SegGs  = frame->gs;
             context->ContextFlags |= CONTEXT_SEGMENTS;
         }
         if (needed_flags & CONTEXT_FLOATING_POINT)
         {
-            __asm__( "fxsave %0" : "=m" (context->u.FltSave) );
-            context->MxCsr = frame->mxcsr;
-            memset( &context->u.s.Xmm0, 0, 6 * sizeof(context->u.s.Xmm0) );
-            memcpy( &context->u.s.Xmm6, frame->xmm, 10 * sizeof(context->u.s.Xmm0) );
+            struct syscall_xsave *xsave = get_syscall_xsave( frame );
+
+            if (!xstate_compaction_enabled ||
+                (xsave->xstate.Mask & XSTATE_MASK_LEGACY_FLOATING_POINT))
+            {
+                memcpy( &context->u.FltSave, &xsave->xsave, FIELD_OFFSET( XSAVE_FORMAT, MxCsr ));
+                memcpy( context->u.FltSave.FloatRegisters, xsave->xsave.FloatRegisters,
+                        sizeof( context->u.FltSave.FloatRegisters ));
+            }
+            else
+            {
+                memset( &context->u.FltSave, 0, FIELD_OFFSET( XSAVE_FORMAT, MxCsr ));
+                memset( context->u.FltSave.FloatRegisters, 0,
+                        sizeof( context->u.FltSave.FloatRegisters ));
+                context->u.FltSave.ControlWord = 0x37f;
+            }
+
+            if (!xstate_compaction_enabled || (xsave->xstate.Mask & XSTATE_MASK_LEGACY_SSE))
+            {
+                memcpy( context->u.FltSave.XmmRegisters, xsave->xsave.XmmRegisters,
+                        sizeof( context->u.FltSave.XmmRegisters ));
+                context->u.FltSave.MxCsr      = xsave->xsave.MxCsr;
+                context->u.FltSave.MxCsr_Mask = xsave->xsave.MxCsr_Mask;
+            }
+            else
+            {
+                memset( context->u.FltSave.XmmRegisters, 0,
+                        sizeof( context->u.FltSave.XmmRegisters ));
+                context->u.FltSave.MxCsr      = 0x1f80;
+                context->u.FltSave.MxCsr_Mask = 0x2ffff;
+            }
+
+            context->MxCsr = context->u.FltSave.MxCsr;
             context->ContextFlags |= CONTEXT_FLOATING_POINT;
         }
         /* update the cached version of the debug registers */
@@ -1960,9 +1994,31 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
             amd64_thread_data()->dr6 = context->Dr6;
             amd64_thread_data()->dr7 = context->Dr7;
         }
+        if ((cpu_info.FeatureSet & CPU_FEATURE_AVX) && (xstate = xstate_from_context( context )))
+        {
+            struct syscall_xsave *xsave = get_syscall_xsave( frame );
+            CONTEXT_EX *context_ex = (CONTEXT_EX *)(context + 1);
+            unsigned int mask;
+
+            if (context_ex->XState.Length < offsetof(XSTATE, YmmContext)
+                || context_ex->XState.Length > sizeof(XSTATE))
+                return STATUS_INVALID_PARAMETER;
+
+            mask = (xstate_compaction_enabled ? xstate->CompactionMask : xstate->Mask) & XSTATE_MASK_GSSE;
+            xstate->Mask = xsave->xstate.Mask & mask;
+            xstate->CompactionMask = xstate_compaction_enabled ? (0x8000000000000000 | mask) : 0;
+            memset( xstate->Reserved, 0, sizeof(xstate->Reserved) );
+            if (xstate->Mask)
+            {
+                if (context_ex->XState.Length < sizeof(XSTATE))
+                    return STATUS_BUFFER_OVERFLOW;
+
+                memcpy( &xstate->YmmContext, &xsave->xstate.YmmContext, sizeof(xstate->YmmContext) );
+            }
+        }
     }
 
-    return xsave_status;
+    return STATUS_SUCCESS;
 }
 
 extern void CDECL raise_func_trampoline( void *dispatcher );
@@ -2026,7 +2082,7 @@ static void setup_raise_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec
         assert( !((ULONG_PTR)dst_xs & 63) );
         context_init_xstate( &stack->context, stack->xstate );
         memset( dst_xs, 0, offsetof(XSTATE, YmmContext) );
-        dst_xs->CompactionMask = user_shared_data->XState.CompactionEnabled ? 0x8000000000000004 : 0;
+        dst_xs->CompactionMask = xstate_compaction_enabled ? 0x8000000000000004 : 0;
         if (src_xs->Mask & 4)
         {
             dst_xs->Mask = 4;
@@ -2088,7 +2144,7 @@ __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
                    "movq 0x98(%rcx),%rdx\n\t"        /* context->Rsp */
                    "jmp 2f\n\t"
                    "1:\tmovq 0x328(%rbx),%rax\n\t"   /* amd64_thread_data()->syscall_frame */
-                   "leaq 0xf0(%rax),%rdx\n\t"        /* &amd64_thread_data()->syscall_frame->ret_addr */
+                   "movq 0x88(%rax),%rdx\n\t"        /* frame->rsp */
                    "2:\tsubq $0x510,%rdx\n\t"        /* sizeof(struct apc_stack_layout) */
                    "andq $~0xf,%rdx\n\t"
                    "addq $8,%rsp\n\t"                /* pop return address */
@@ -2130,31 +2186,10 @@ __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
 /***********************************************************************
  *           call_raise_user_exception_dispatcher
  */
-__ASM_GLOBAL_FUNC( call_raise_user_exception_dispatcher,
-                   "movq %gs:0x30,%rdx\n\t"
-                   "movq 0x328(%rdx),%rax\n\t"    /* amd64_thread_data()->syscall_frame */
-                   "movdqu 0x0(%rax),%xmm6\n\t"   /* frame->xmm[0..19] */
-                   "movdqu 0x10(%rax),%xmm7\n\t"
-                   "movdqu 0x20(%rax),%xmm8\n\t"
-                   "movdqu 0x30(%rax),%xmm9\n\t"
-                   "movdqu 0x40(%rax),%xmm10\n\t"
-                   "movdqu 0x50(%rax),%xmm11\n\t"
-                   "movdqu 0x60(%rax),%xmm12\n\t"
-                   "movdqu 0x70(%rax),%xmm13\n\t"
-                   "movdqu 0x80(%rax),%xmm14\n\t"
-                   "movdqu 0x90(%rax),%xmm15\n\t"
-                   "ldmxcsr 0xa0(%rax)\n\t"       /* frame->mxcsr */
-                   "movq 0xa8(%rax),%r12\n\t"     /* frame->r12 */
-                   "movq 0xb0(%rax),%r13\n\t"     /* frame->r13 */
-                   "movq 0xb8(%rax),%r14\n\t"     /* frame->r14 */
-                   "movq 0xc0(%rax),%r15\n\t"     /* frame->r15 */
-                   "movq 0xc8(%rax),%rdi\n\t"     /* frame->rdi */
-                   "movq 0xd0(%rax),%rsi\n\t"     /* frame->rsi */
-                   "movq 0xd8(%rax),%rbx\n\t"     /* frame->rbx */
-                   "movq 0xe0(%rax),%rbp\n\t"     /* frame->rbp */
-                   "movq $0,0x328(%rdx)\n\t"
-                   "leaq 0xf0(%rax),%rsp\n\t"
-                   "jmpq *%rcx" )
+void WINAPI call_raise_user_exception_dispatcher( NTSTATUS (WINAPI *dispatcher)(void) )
+{
+    amd64_thread_data()->syscall_frame->rip = (UINT64)dispatcher;
+}
 
 
 /***********************************************************************
@@ -2503,7 +2538,7 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, EXCEPTION_RECORD *rec,
     {
         XMM_SAVE_AREA32 *fpu = FPU_sig(sigcontext);
 
-        TRACE( "returning to user mode ip=%016lx ret=%08x\n", frame->ret_addr, rec->ExceptionCode );
+        TRACE( "returning to user mode ip=%016lx ret=%08x\n", frame->rip, rec->ExceptionCode );
         RAX_sig(sigcontext) = rec->ExceptionCode;
         RBX_sig(sigcontext) = frame->rbx;
         RSI_sig(sigcontext) = frame->rsi;
@@ -2513,13 +2548,9 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, EXCEPTION_RECORD *rec,
         R13_sig(sigcontext) = frame->r13;
         R14_sig(sigcontext) = frame->r14;
         R15_sig(sigcontext) = frame->r15;
-        RSP_sig(sigcontext) = (ULONG_PTR)&frame->ret_addr;
-        RIP_sig(sigcontext) = frame->thunk_addr;
-        if (fpu)
-        {
-            fpu->MxCsr =frame->mxcsr;
-            memcpy( fpu->XmmRegisters + 6, frame->xmm, sizeof(frame->xmm) );
-        }
+        RSP_sig(sigcontext) = frame->rsp;
+        RIP_sig(sigcontext) = frame->rip;
+        if (fpu) *fpu = get_syscall_xsave( frame )->xsave;
         amd64_thread_data()->syscall_frame = NULL;
     }
     return TRUE;
@@ -2745,11 +2776,24 @@ static void quit_handler( int signal, siginfo_t *siginfo, void *ucontext )
  */
 static void usr1_handler( int signal, siginfo_t *siginfo, void *ucontext )
 {
+    struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
     struct xcontext context;
+    if (frame)
+    {
+        DECLSPEC_ALIGN(64) XSTATE xs;
+        context.c.ContextFlags = CONTEXT_FULL;
+        context_init_xstate( &context.c, &xs );
 
-    save_context( &context, ucontext );
-    wait_suspend( &context.c );
-    restore_context( &context, ucontext );
+        NtGetContextThread( GetCurrentThread(), &context.c );
+        wait_suspend( &context.c );
+        NtSetContextThread( GetCurrentThread(), &context.c );
+    }
+    else
+    {
+        save_context( &context, ucontext );
+        wait_suspend( &context.c );
+        restore_context( &context, ucontext );
+    }
 }
 
 
@@ -2919,6 +2963,32 @@ void signal_init_process(void)
  error:
     perror("sigaction");
     exit(1);
+}
+
+
+/**********************************************************************
+ *		signal_init_syscalls
+ */
+void *signal_init_syscalls(void)
+{
+    void *ptr, *syscall_dispatcher;
+
+    extern void __wine_syscall_dispatcher_xsave(void) DECLSPEC_HIDDEN;
+    extern void __wine_syscall_dispatcher_xsavec(void) DECLSPEC_HIDDEN;
+
+    if (xstate_compaction_enabled)
+        syscall_dispatcher = __wine_syscall_dispatcher_xsavec;
+    else if (cpu_info.FeatureSet & CPU_FEATURE_XSAVE)
+        syscall_dispatcher = __wine_syscall_dispatcher_xsave;
+    else
+        syscall_dispatcher = __wine_syscall_dispatcher;
+
+    /* sneak in a syscall dispatcher pointer at a fixed address (7ffe1000) */
+    ptr = (char *)user_shared_data + page_size;
+    anon_mmap_fixed( ptr, page_size, PROT_READ | PROT_WRITE, 0 );
+    *(void **)ptr = syscall_dispatcher;
+
+    return syscall_dispatcher;
 }
 
 /**********************************************************************

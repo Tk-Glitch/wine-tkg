@@ -1934,7 +1934,7 @@ void get_nt_name( struct fd *fd, struct unicode_str *name )
     name->len = fd->nt_namelen;
 }
 
-static void decode_symlink(char *name, int *is_dir)
+static char *decode_symlink(const char *name, ULONG *tag, int *is_dir)
 {
     char link[MAX_PATH], *p;
     ULONG reparse_tag;
@@ -1942,7 +1942,7 @@ static void decode_symlink(char *name, int *is_dir)
 
     len = readlink( name, link, sizeof(link) );
     if (len == -1)
-        return;
+        return NULL;
     link[len] = 0;
     p = link;
     /* skip past relative/absolute indication */
@@ -1950,7 +1950,7 @@ static void decode_symlink(char *name, int *is_dir)
         p++;
     if (*p++ != '/')
     {
-        return;
+        return NULL;
     }
     /* decode the reparse tag */
     reparse_tag = 0;
@@ -1964,7 +1964,7 @@ static void decode_symlink(char *name, int *is_dir)
         else if (c == '.' && *p++ == '/')
             val = 1;
         else
-            return;
+            return NULL;
         reparse_tag |= (val << i);
     }
     /* decode the directory/file flag */
@@ -1977,10 +1977,69 @@ static void decode_symlink(char *name, int *is_dir)
         else if (c == '.' && *p++ == '/')
             *is_dir = TRUE;
         else
-            return;
+            return NULL;
     }
     else
         *is_dir = TRUE;
+    if (tag) *tag = reparse_tag;
+    return p;
+}
+
+static void rewrite_symlink( const char *path )
+{
+    static char marker[] = "////.//.//"; /* "P" (0x50) encoded as a path (0=/ 1=./) */
+    char *link, *prefix_end, *local_link;
+    static char config_dir[MAX_PATH];
+    static int config_dir_len = 0;
+    char new_target[PATH_MAX];
+    int len, is_dir, i;
+    ULONG tag;
+
+    /* obtain the wine prefix path */
+    if (!config_dir_len)
+    {
+        char tmp_dir[MAX_PATH];
+
+        if (getcwd( tmp_dir, sizeof(tmp_dir) ) == NULL) return;
+        if (fchdir( config_dir_fd ) == -1) return;
+        if (getcwd( config_dir, sizeof(config_dir) ) == NULL) return;
+        if (chdir( tmp_dir ) == -1) return;
+        config_dir_len = strlen( config_dir );
+    }
+
+    /* grab the current link contents */
+    link = decode_symlink( path, &tag, &is_dir );
+    if (link == NULL) return;
+
+    /* find out if the prefix matches, if it does then do not modify the link */
+    prefix_end = strstr( link, marker );
+    if (prefix_end == NULL) return;
+    local_link = prefix_end + strlen( marker );
+    len = prefix_end - link;
+    if (len == config_dir_len && strncmp( config_dir, link, len ) == 0) return;
+    /* if the prefix does not match then re-encode the link with the new prefix */
+
+    /* Encode the reparse tag into the symlink */
+    strcpy( new_target, "/" );
+    for (i = 0; i < sizeof(ULONG)*8; i++)
+    {
+        if ((tag >> i) & 1)
+            strcat( new_target, "." );
+        strcat( new_target, "/" );
+    }
+    /* Encode the type (file or directory) if NT symlink */
+    if (tag == IO_REPARSE_TAG_SYMLINK)
+    {
+        if (is_dir)
+            strcat( new_target, "." );
+        strcat( new_target, "/" );
+    }
+    strcat( new_target, config_dir );
+    strcat( new_target, marker );
+    strcat( new_target, local_link );
+    /* replace the symlink */
+    unlink( path );
+    symlink( new_target, path );
 }
 
 /* open() wrapper that returns a struct fd with no fd user set */
@@ -2056,6 +2115,15 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
         flags |= O_SYMLINK;
 #endif
 
+    fd->unix_name = NULL;
+    if ((path = dup_fd_name( root, name )))
+    {
+        rewrite_symlink( path );
+        fd->unlink_name = path;
+        fd->unix_name = realpath( path, NULL );
+        if (!fd->unix_name) fd->unix_name = dup_fd_name( root, name ); /* dangling symlink */
+    }
+
     if ((fd->unix_fd = open( name, rw_mode | (flags & ~O_TRUNC), *mode )) == -1)
     {
         /* if we tried to open a directory for write access, retry read-only */
@@ -2091,13 +2159,6 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
     }
 
     fd->nt_name = dup_nt_name( root, nt_name, &fd->nt_namelen );
-    fd->unix_name = NULL;
-    if ((path = dup_fd_name( root, name )))
-    {
-        fd->unlink_name = path;
-        fd->unix_name = realpath( path, NULL );
-        if (!fd->unix_name) fd->unix_name = dup_fd_name( root, name ); /* dangling symlink */
-    }
 
     closed_fd->unix_fd = fd->unix_fd;
     closed_fd->unlink = 0;
@@ -2132,7 +2193,7 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
         *mode = st.st_mode;
         is_dir = S_ISDIR(st.st_mode);
         if (is_link)
-            decode_symlink(fd->unlink_name, &is_dir);
+            decode_symlink(fd->unlink_name, NULL, &is_dir);
 
         /* check directory options */
         if ((options & FILE_DIRECTORY_FILE) && !is_dir)
@@ -2534,9 +2595,10 @@ void default_fd_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int 
 }
 
 /* default get_volume_info() routine */
-void no_fd_get_volume_info( struct fd *fd, unsigned int info_class )
+int no_fd_get_volume_info( struct fd *fd, struct async *async, unsigned int info_class )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
+    return 0;
 }
 
 /* default ioctl() routine */
@@ -2722,7 +2784,7 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, da
         goto failed;
     }
 
-    if (!stat( name, &st ))
+    if (!lstat( name, &st ))
     {
         if (!fstat( fd->unix_fd, &st2 ) && st.st_ino == st2.st_ino && st.st_dev == st2.st_dev)
         {
@@ -2738,7 +2800,7 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, da
         }
 
         /* can't replace directories or special files */
-        if (!S_ISREG( st.st_mode ))
+        if (!S_ISREG( st.st_mode ) && !S_ISLNK( st.st_mode ))
         {
             set_error( STATUS_ACCESS_DENIED );
             goto failed;
@@ -2796,8 +2858,9 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, da
     fd->nt_name = dup_nt_name( root, nt_name, &fd->nt_namelen );
     free( fd->unlink_name );
     free( fd->unix_name );
-    fd->closed->unlink_name = fd->unlink_name = name;
     fd->closed->unix_name = fd->unix_name = realpath( name, NULL );
+    if (!fd->unix_name)
+        fd->closed->unix_name = fd->unix_name = dup_fd_name( NULL, name ); /* dangling symlink */
     if (!fd->unlink_name || !fd->unix_name)
         set_error( STATUS_NO_MEMORY );
     return;
@@ -2904,12 +2967,16 @@ DECL_HANDLER(get_file_info)
 DECL_HANDLER(get_volume_info)
 {
     struct fd *fd = get_handle_fd_obj( current->process, req->handle, 0 );
+    struct async *async;
 
-    if (fd)
+    if (!fd) return;
+
+    if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        fd->fd_ops->get_volume_info( fd, req->info_class );
-        release_object( fd );
+        reply->wait = async_handoff( async, fd->fd_ops->get_volume_info( fd, async, req->info_class ), NULL, 1 );
+        release_object( async );
     }
+    release_object( fd );
 }
 
 /* open a file object */

@@ -118,11 +118,6 @@ static inline unsigned short get_table_entry(const unsigned short *table, WCHAR 
     return table[table[table[ch >> 8] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
 }
 
-static inline FLOAT get_scaled_advance_width(INT32 advance, FLOAT emSize, const DWRITE_FONT_METRICS *metrics)
-{
-    return (FLOAT)advance * emSize / (FLOAT)metrics->designUnitsPerEm;
-}
-
 static inline BOOL is_simulation_valid(DWRITE_FONT_SIMULATIONS simulations)
 {
     return (simulations & ~(DWRITE_FONT_SIMULATIONS_NONE | DWRITE_FONT_SIMULATIONS_BOLD |
@@ -304,7 +299,7 @@ extern void    set_en_localizedstring(IDWriteLocalizedStrings*,const WCHAR*) DEC
 extern void    sort_localizedstrings(IDWriteLocalizedStrings*) DECLSPEC_HIDDEN;
 extern HRESULT get_system_fontcollection(IDWriteFactory7 *factory, IDWriteFontCollection1 **collection) DECLSPEC_HIDDEN;
 extern HRESULT get_eudc_fontcollection(IDWriteFactory7 *factory, IDWriteFontCollection3 **collection) DECLSPEC_HIDDEN;
-extern IDWriteTextAnalyzer *get_text_analyzer(void) DECLSPEC_HIDDEN;
+extern IDWriteTextAnalyzer2 *get_text_analyzer(void) DECLSPEC_HIDDEN;
 extern HRESULT create_font_file(IDWriteFontFileLoader *loader, const void *reference_key, UINT32 key_size, IDWriteFontFile **font_file) DECLSPEC_HIDDEN;
 extern void    init_local_fontfile_loader(void) DECLSPEC_HIDDEN;
 extern IDWriteFontFileLoader *get_local_fontfile_loader(void) DECLSPEC_HIDDEN;
@@ -347,6 +342,8 @@ extern HRESULT create_inmemory_fileloader(IDWriteInMemoryFontFileLoader **loader
 extern HRESULT create_font_resource(IDWriteFactory7 *factory, IDWriteFontFile *file, UINT32 face_index,
         IDWriteFontResource **resource) DECLSPEC_HIDDEN;
 extern HRESULT create_fontset_builder(IDWriteFactory7 *factory, IDWriteFontSetBuilder2 **ret) DECLSPEC_HIDDEN;
+extern HRESULT compute_glyph_origins(DWRITE_GLYPH_RUN const *run, DWRITE_MEASURING_MODE measuring_mode,
+        D2D1_POINT_2F baseline_origin, DWRITE_MATRIX const *transform, D2D1_POINT_2F *origins) DECLSPEC_HIDDEN;
 
 struct dwrite_fontface;
 
@@ -564,7 +561,10 @@ struct shaping_feature
 
 #define MAX_SHAPING_STAGE 16
 
-typedef void (*stage_func)(struct scriptshaping_context *context);
+struct shaping_features;
+
+typedef void (*stage_func)(struct scriptshaping_context *context,
+        const struct shaping_features *features);
 
 struct shaping_stage
 {

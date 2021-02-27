@@ -1,7 +1,9 @@
 MODULE    = dhtmled.ocx
-IMPORTS   = uuid
+IMPORTS   = uuid ole32
 
 EXTRADLLFLAGS = -mno-cygwin
+
+RC_SRCS   = dhtmled.rc
 
 C_SRCS = \
 	edit.c \

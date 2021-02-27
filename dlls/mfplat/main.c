@@ -702,20 +702,6 @@ static BOOL GUIDFromString(LPCWSTR s, GUID *id)
     return FALSE;
 }
 
-BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
-{
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(instance);
-            break;
-    }
-
-    return TRUE;
-}
-
 static HRESULT register_transform(const CLSID *clsid, const WCHAR *name, UINT32 flags,
         UINT32 cinput, const MFT_REGISTER_TYPE_INFO *input_types, UINT32 coutput,
         const MFT_REGISTER_TYPE_INFO *output_types, IMFAttributes *attributes)
@@ -8599,7 +8585,7 @@ static HRESULT dxgi_device_manager_get_handle_index(struct dxgi_device_manager *
 
 static HRESULT WINAPI dxgi_device_manager_QueryInterface(IMFDXGIDeviceManager *iface, REFIID riid, void **obj)
 {
-    TRACE("(%p, %s, %p).\n", iface, debugstr_guid(riid), obj);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
 
     if (IsEqualIID(riid, &IID_IMFDXGIDeviceManager) ||
         IsEqualGUID(riid, &IID_IUnknown))
@@ -8619,7 +8605,7 @@ static ULONG WINAPI dxgi_device_manager_AddRef(IMFDXGIDeviceManager *iface)
     struct dxgi_device_manager *manager = impl_from_IMFDXGIDeviceManager(iface);
     ULONG refcount = InterlockedIncrement(&manager->refcount);
 
-    TRACE("(%p) ref=%u.\n", iface, refcount);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
     return refcount;
 }
@@ -8629,7 +8615,7 @@ static ULONG WINAPI dxgi_device_manager_Release(IMFDXGIDeviceManager *iface)
     struct dxgi_device_manager *manager = impl_from_IMFDXGIDeviceManager(iface);
     ULONG refcount = InterlockedDecrement(&manager->refcount);
 
-    TRACE("(%p) ref=%u.\n", iface, refcount);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
     if (!refcount)
     {

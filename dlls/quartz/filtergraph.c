@@ -42,105 +42,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
-typedef struct {
-    HWND     hWnd;      /* Target window */
-    UINT     msg;       /* User window message */
-    LONG_PTR instance;  /* User data */
-    int      disabled;  /* Disabled messages posting */
-} WndNotify;
-
-typedef struct {
-    LONG lEventCode;   /* Event code */
-    LONG_PTR lParam1;  /* Param1 */
-    LONG_PTR lParam2;  /* Param2 */
-} Event;
-
-/* messages ring implementation for queuing events (taken from winmm) */
-#define EVENTS_RING_BUFFER_INCREMENT      64
-typedef struct {
-    Event* messages;
-    int ring_buffer_size;
-    int msg_tosave;
-    int msg_toget;
-    CRITICAL_SECTION msg_crst;
-    HANDLE msg_event; /* Signaled for no empty queue */
-} EventsQueue;
-
-static int EventsQueue_Init(EventsQueue* omr)
+struct media_event
 {
-    omr->msg_toget = 0;
-    omr->msg_tosave = 0;
-    omr->msg_event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    omr->ring_buffer_size = EVENTS_RING_BUFFER_INCREMENT;
-    omr->messages = CoTaskMemAlloc(omr->ring_buffer_size * sizeof(Event));
-    ZeroMemory(omr->messages, omr->ring_buffer_size * sizeof(Event));
-
-    InitializeCriticalSection(&omr->msg_crst);
-    omr->msg_crst.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": EventsQueue.msg_crst");
-    return TRUE;
-}
-
-static int EventsQueue_Destroy(EventsQueue* omr)
-{
-    CloseHandle(omr->msg_event);
-    CoTaskMemFree(omr->messages);
-    omr->msg_crst.DebugInfo->Spare[0] = 0;
-    DeleteCriticalSection(&omr->msg_crst);
-    return TRUE;
-}
-
-static BOOL EventsQueue_PutEvent(EventsQueue* omr, const Event* evt)
-{
-    EnterCriticalSection(&omr->msg_crst);
-    if (omr->msg_toget == ((omr->msg_tosave + 1) % omr->ring_buffer_size))
-    {
-	int old_ring_buffer_size = omr->ring_buffer_size;
-	omr->ring_buffer_size += EVENTS_RING_BUFFER_INCREMENT;
-	TRACE("omr->ring_buffer_size=%d\n",omr->ring_buffer_size);
-	omr->messages = CoTaskMemRealloc(omr->messages, omr->ring_buffer_size * sizeof(Event));
-	/* Now we need to rearrange the ring buffer so that the new
-	   buffers just allocated are in between omr->msg_tosave and
-	   omr->msg_toget.
-	*/
-	if (omr->msg_tosave < omr->msg_toget)
-	{
-	    memmove(&(omr->messages[omr->msg_toget + EVENTS_RING_BUFFER_INCREMENT]),
-		    &(omr->messages[omr->msg_toget]),
-		    sizeof(Event)*(old_ring_buffer_size - omr->msg_toget)
-		    );
-	    omr->msg_toget += EVENTS_RING_BUFFER_INCREMENT;
-	}
-    }
-    omr->messages[omr->msg_tosave] = *evt;
-    SetEvent(omr->msg_event);
-    omr->msg_tosave = (omr->msg_tosave + 1) % omr->ring_buffer_size;
-    LeaveCriticalSection(&omr->msg_crst);
-    return TRUE;
-}
-
-static BOOL EventsQueue_GetEvent(EventsQueue* omr, Event* evt, LONG msTimeOut)
-{
-    if (WaitForSingleObject(omr->msg_event, msTimeOut) != WAIT_OBJECT_0)
-	return FALSE;
-	
-    EnterCriticalSection(&omr->msg_crst);
-
-    if (omr->msg_toget == omr->msg_tosave) /* buffer empty ? */
-    {
-        LeaveCriticalSection(&omr->msg_crst);
-	return FALSE;
-    }
-
-    *evt = omr->messages[omr->msg_toget];
-    omr->msg_toget = (omr->msg_toget + 1) % omr->ring_buffer_size;
-
-    /* Mark the buffer as empty if needed */
-    if (omr->msg_toget == omr->msg_tosave) /* buffer empty ? */
-	ResetEvent(omr->msg_event);
-
-    LeaveCriticalSection(&omr->msg_crst);
-    return TRUE;
-}
+    struct list entry;
+    LONG code;
+    LONG_PTR param1, param2;
+};
 
 #define MAX_ITF_CACHE_ENTRIES 3
 typedef struct _ITF_CACHE_ENTRY {
@@ -196,15 +103,20 @@ struct filter_graph
 
     IReferenceClock *refClock;
     IBaseFilter *refClockProvider;
-    EventsQueue evqueue;
+
+    struct list media_events;
+    HANDLE media_event_handle;
+    HWND media_event_window;
+    UINT media_event_message;
+    LPARAM media_event_lparam;
     HANDLE hEventCompletion;
     int CompletionStatus;
-    WndNotify notif;
     int nRenderers;
     int EcCompleteCount;
     int HandleEcComplete;
     int HandleEcRepaint;
     int HandleEcClockChanged;
+
     CRITICAL_SECTION cs;
     ITF_CACHE_ENTRY ItfCacheEntries[MAX_ITF_CACHE_ENTRIES];
     int nItfCacheEntries;
@@ -224,6 +136,7 @@ struct filter_graph
 
     unsigned int needs_async_run : 1;
     unsigned int got_ec_complete : 1;
+    unsigned int media_events_disabled : 1;
 };
 
 struct enum_filters
@@ -386,6 +299,39 @@ static HRESULT create_enum_filters(struct filter_graph *graph, struct list *curs
     return S_OK;
 }
 
+static BOOL queue_media_event(struct filter_graph *graph, LONG code,
+        LONG_PTR param1, LONG_PTR param2)
+{
+    struct media_event *event;
+
+    if (!(event = malloc(sizeof(*event))))
+        return FALSE;
+
+    event->code = code;
+    event->param1 = param1;
+    event->param2 = param2;
+    list_add_tail(&graph->media_events, &event->entry);
+
+    SetEvent(graph->media_event_handle);
+    if (graph->media_event_window)
+        PostMessageW(graph->media_event_window, graph->media_event_message, 0, graph->media_event_lparam);
+
+    return TRUE;
+}
+
+static void flush_media_events(struct filter_graph *graph)
+{
+    struct list *cursor;
+
+    while ((cursor = list_head(&graph->media_events)))
+    {
+        struct media_event *event = LIST_ENTRY(cursor, struct media_event, entry);
+
+        list_remove(&event->entry);
+        free(event);
+    }
+}
+
 static struct filter_graph *impl_from_IUnknown(IUnknown *iface)
 {
     return CONTAINING_RECORD(iface, struct filter_graph, IUnknown_inner);
@@ -479,7 +425,7 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
 {
     struct filter_graph *This = impl_from_IUnknown(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
-    struct filter *filter, *next;
+    struct list *cursor;
 
     TRACE("(%p)->(): new ref = %d\n", This, ref);
 
@@ -490,8 +436,10 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
 
         IMediaControl_Stop(&This->IMediaControl_iface);
 
-        LIST_FOR_EACH_ENTRY_SAFE(filter, next, &This->filters, struct filter, entry)
+        while ((cursor = list_head(&This->filters)))
         {
+            struct filter *filter = LIST_ENTRY(cursor, struct filter, entry);
+
             IFilterGraph2_RemoveFilter(&This->IFilterGraph2_iface, filter->filter);
         }
 
@@ -508,8 +456,9 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
 
         if (This->pSite) IUnknown_Release(This->pSite);
 
-	CloseHandle(This->hEventCompletion);
-	EventsQueue_Destroy(&This->evqueue);
+        flush_media_events(This);
+        CloseHandle(This->media_event_handle);
+
         This->cs.DebugInfo->Spare[0] = 0;
         if (This->message_thread)
         {
@@ -1741,12 +1690,24 @@ static void update_render_count(struct filter_graph *graph)
 /* Perform the paused -> running transition. The caller must hold graph->cs. */
 static HRESULT graph_start(struct filter_graph *graph, REFERENCE_TIME stream_start)
 {
+    struct media_event *event, *next;
     REFERENCE_TIME stream_stop;
     struct filter *filter;
     HRESULT hr = S_OK;
 
     graph->EcCompleteCount = 0;
     update_render_count(graph);
+
+    LIST_FOR_EACH_ENTRY_SAFE(event, next, &graph->media_events, struct media_event, entry)
+    {
+        if (event->code == EC_COMPLETE)
+        {
+            list_remove(&event->entry);
+            free(event);
+        }
+    }
+    if (list_empty(&graph->media_events))
+        ResetEvent(graph->media_event_handle);
 
     if (graph->defaultclock && !graph->refClock)
         IFilterGraph2_SetDefaultSyncSource(&graph->IFilterGraph2_iface);
@@ -4767,35 +4728,47 @@ static HRESULT WINAPI MediaEvent_Invoke(IMediaEventEx *iface, DISPID dispIdMembe
 }
 
 /*** IMediaEvent methods ***/
-static HRESULT WINAPI MediaEvent_GetEventHandle(IMediaEventEx *iface, OAEVENT *hEvent)
+static HRESULT WINAPI MediaEvent_GetEventHandle(IMediaEventEx *iface, OAEVENT *event)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, hEvent);
+    TRACE("graph %p, event %p.\n", graph, event);
 
-    *hEvent = (OAEVENT)This->evqueue.msg_event;
-
+    *event = (OAEVENT)graph->media_event_handle;
     return S_OK;
 }
 
-static HRESULT WINAPI MediaEvent_GetEvent(IMediaEventEx *iface, LONG *lEventCode, LONG_PTR *lParam1,
-        LONG_PTR *lParam2, LONG msTimeout)
+static HRESULT WINAPI MediaEvent_GetEvent(IMediaEventEx *iface, LONG *code,
+        LONG_PTR *param1, LONG_PTR *param2, LONG timeout)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
-    Event evt;
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
+    struct media_event *event;
+    struct list *entry;
 
-    TRACE("(%p/%p)->(%p, %p, %p, %d)\n", This, iface, lEventCode, lParam1, lParam2, msTimeout);
+    TRACE("graph %p, code %p, param1 %p, param2 %p, timeout %d.\n", graph, code, param1, param2, timeout);
 
-    if (EventsQueue_GetEvent(&This->evqueue, &evt, msTimeout))
+    *code = 0;
+
+    if (WaitForSingleObject(graph->media_event_handle, timeout))
+        return E_ABORT;
+
+    EnterCriticalSection(&graph->cs);
+
+    if (!(entry = list_head(&graph->media_events)))
     {
-	*lEventCode = evt.lEventCode;
-	*lParam1 = evt.lParam1;
-	*lParam2 = evt.lParam2;
-	return S_OK;
+        ResetEvent(graph->media_event_handle);
+        LeaveCriticalSection(&graph->cs);
+        return E_ABORT;
     }
+    event = LIST_ENTRY(entry, struct media_event, entry);
+    list_remove(&event->entry);
+    *code = event->code;
+    *param1 = event->param1;
+    *param2 = event->param2;
+    free(event);
 
-    *lEventCode = 0;
-    return E_ABORT;
+    LeaveCriticalSection(&graph->cs);
+    return S_OK;
 }
 
 static HRESULT WINAPI MediaEvent_WaitForCompletion(IMediaEventEx *iface, LONG msTimeout,
@@ -4865,44 +4838,53 @@ static HRESULT WINAPI MediaEvent_FreeEventParams(IMediaEventEx *iface, LONG lEvC
 }
 
 /*** IMediaEventEx methods ***/
-static HRESULT WINAPI MediaEvent_SetNotifyWindow(IMediaEventEx *iface, OAHWND hwnd, LONG lMsg,
-        LONG_PTR lInstanceData)
+static HRESULT WINAPI MediaEvent_SetNotifyWindow(IMediaEventEx *iface,
+        OAHWND window, LONG message, LONG_PTR lparam)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%08lx, %d, %08lx)\n", This, iface, hwnd, lMsg, lInstanceData);
+    TRACE("graph %p, window %#Ix, message %#x, lparam %#Ix.\n", graph, window, message, lparam);
 
-    This->notif.hWnd = (HWND)hwnd;
-    This->notif.msg = lMsg;
-    This->notif.instance = lInstanceData;
+    graph->media_event_window = (HWND)window;
+    graph->media_event_message = message;
+    graph->media_event_lparam = lparam;
 
     return S_OK;
 }
 
-static HRESULT WINAPI MediaEvent_SetNotifyFlags(IMediaEventEx *iface, LONG lNoNotifyFlags)
+static HRESULT WINAPI MediaEvent_SetNotifyFlags(IMediaEventEx *iface, LONG flags)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%d)\n", This, iface, lNoNotifyFlags);
+    TRACE("graph %p, flags %#x.\n", graph, flags);
 
-    if ((lNoNotifyFlags != 0) && (lNoNotifyFlags != 1))
-	return E_INVALIDARG;
+    if (flags & ~AM_MEDIAEVENT_NONOTIFY)
+    {
+        WARN("Invalid flags %#x, returning E_INVALIDARG.\n", flags);
+        return E_INVALIDARG;
+    }
 
-    This->notif.disabled = lNoNotifyFlags;
+    graph->media_events_disabled = flags;
+
+    if (flags)
+    {
+        flush_media_events(graph);
+        ResetEvent(graph->media_event_handle);
+    }
 
     return S_OK;
 }
 
-static HRESULT WINAPI MediaEvent_GetNotifyFlags(IMediaEventEx *iface, LONG *lplNoNotifyFlags)
+static HRESULT WINAPI MediaEvent_GetNotifyFlags(IMediaEventEx *iface, LONG *flags)
 {
-    struct filter_graph *This = impl_from_IMediaEventEx(iface);
+    struct filter_graph *graph = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, lplNoNotifyFlags);
+    TRACE("graph %p, flags %p.\n", graph, flags);
 
-    if (!lplNoNotifyFlags)
-	return E_POINTER;
+    if (!flags)
+        return E_POINTER;
 
-    *lplNoNotifyFlags = This->notif.disabled;
+    *flags = graph->media_events_disabled;
 
     return S_OK;
 }
@@ -5272,52 +5254,38 @@ static ULONG WINAPI MediaEventSink_Release(IMediaEventSink *iface)
     return IUnknown_Release(graph->outer_unk);
 }
 
-static HRESULT WINAPI MediaEventSink_Notify(IMediaEventSink *iface, LONG EventCode,
-        LONG_PTR EventParam1, LONG_PTR EventParam2)
+static HRESULT WINAPI MediaEventSink_Notify(IMediaEventSink *iface, LONG code,
+        LONG_PTR param1, LONG_PTR param2)
 {
-    struct filter_graph *This = impl_from_IMediaEventSink(iface);
-    Event evt;
+    struct filter_graph *graph = impl_from_IMediaEventSink(iface);
 
-    TRACE("(%p/%p)->(%d, %ld, %ld)\n", This, iface, EventCode, EventParam1, EventParam2);
+    TRACE("graph %p, code %#x, param1 %#Ix, param2 %#Ix.\n", graph, code, param1, param2);
 
-    /* We need thread safety here, let's use the events queue's one */
-    EnterCriticalSection(&This->evqueue.msg_crst);
+    EnterCriticalSection(&graph->cs);
 
-    if ((EventCode == EC_COMPLETE) && This->HandleEcComplete)
+    if (code == EC_COMPLETE && graph->HandleEcComplete)
     {
-        TRACE("Process EC_COMPLETE notification\n");
-        if (++This->EcCompleteCount == This->nRenderers)
+        if (++graph->EcCompleteCount == graph->nRenderers)
         {
-            evt.lEventCode = EC_COMPLETE;
-            evt.lParam1 = S_OK;
-            evt.lParam2 = 0;
-            TRACE("Send EC_COMPLETE to app\n");
-            EventsQueue_PutEvent(&This->evqueue, &evt);
-            if (!This->notif.disabled && This->notif.hWnd)
-	    {
-                TRACE("Send Window message\n");
-                PostMessageW(This->notif.hWnd, This->notif.msg, 0, This->notif.instance);
-            }
-            This->CompletionStatus = EC_COMPLETE;
-            This->got_ec_complete = 1;
-            SetEvent(This->hEventCompletion);
+            if (graph->media_events_disabled)
+                SetEvent(graph->media_event_handle);
+            else
+                queue_media_event(graph, EC_COMPLETE, S_OK, 0);
+            graph->CompletionStatus = EC_COMPLETE;
+            graph->got_ec_complete = 1;
+            SetEvent(graph->hEventCompletion);
         }
     }
-    else if ((EventCode == EC_REPAINT) && This->HandleEcRepaint)
+    else if ((code == EC_REPAINT) && graph->HandleEcRepaint)
     {
-        /* FIXME: Not handled yet */
+        FIXME("EC_REPAINT is not handled.\n");
     }
-    else
+    else if (!graph->media_events_disabled)
     {
-        evt.lEventCode = EventCode;
-        evt.lParam1 = EventParam1;
-        evt.lParam2 = EventParam2;
-        EventsQueue_PutEvent(&This->evqueue, &evt);
-        if (!This->notif.disabled && This->notif.hWnd)
-            PostMessageW(This->notif.hWnd, This->notif.msg, 0, This->notif.instance);
+        queue_media_event(graph, code, param1, param2);
     }
 
-    LeaveCriticalSection(&This->evqueue.msg_crst);
+    LeaveCriticalSection(&graph->cs);
     return S_OK;
 }
 
@@ -5642,12 +5610,15 @@ static HRESULT filter_graph_common_create(IUnknown *outer, IUnknown **out, BOOL 
     object->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": filter_graph.cs");
 
     object->defaultclock = TRUE;
-    EventsQueue_Init(&object->evqueue);
+
+    object->media_event_handle = CreateEventW(NULL, TRUE, FALSE, NULL);
+    list_init(&object->media_events);
     list_init(&object->filters);
     object->HandleEcClockChanged = TRUE;
     object->HandleEcComplete = TRUE;
     object->HandleEcRepaint = TRUE;
     object->hEventCompletion = CreateEventW(0, TRUE, FALSE, 0);
+
     object->name_index = 1;
     object->timeformatseek = TIME_FORMAT_MEDIA_TIME;
 

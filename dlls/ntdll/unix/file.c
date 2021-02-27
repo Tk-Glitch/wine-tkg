@@ -1614,8 +1614,8 @@ static inline int get_file_xattr( char *hexattr, int attrlen )
 
 NTSTATUS FILE_DecodeSymlink(const char *unix_src, char *unix_dest, int *unix_dest_len,
                             DWORD *tag, ULONG *flags, BOOL *is_dir);
-NTSTATUS get_symlink_properties(const char *target, int len, char *unix_dest, int *unix_dest_len,
-                                DWORD *tag, ULONG *flags, BOOL *is_dir);
+void get_symlink_properties(const char *target, int len, char *unix_dest, int *unix_dest_len,
+                            DWORD *tag, ULONG *flags, BOOL *is_dir);
 
 /* fetch the attributes of a file */
 static inline ULONG get_file_attributes( const struct stat *st )
@@ -1663,8 +1663,8 @@ static int fd_get_file_info( int fd, unsigned int options, struct stat *st, ULON
         *attr |= FILE_ATTRIBUTE_REPARSE_POINT;
         /* symbolic links always report size 0 */
         st->st_size = 0;
-        if (get_symlink_properties(path, len, NULL, NULL, NULL, NULL, &is_dir) == STATUS_SUCCESS)
-            st->st_mode = (st->st_mode & ~S_IFMT) | (is_dir ? S_IFDIR : S_IFREG);
+        get_symlink_properties(path, len, NULL, NULL, NULL, NULL, &is_dir);
+        st->st_mode = (st->st_mode & ~S_IFMT) | (is_dir ? S_IFDIR : S_IFREG);
     }
 
 done:
@@ -2210,7 +2210,7 @@ static NTSTATUS get_mountmgr_fs_info( HANDLE handle, int fd, struct mountmgr_uni
         struct stat st;
 
         fstat( fd, &st );
-        drive->unix_dev = st.st_dev;
+        drive->unix_dev = st.st_rdev ? st.st_rdev : st.st_dev;
         drive->letter = 0;
     }
     else
@@ -2963,11 +2963,46 @@ static int get_redirect_path( char *unix_name, int pos, const WCHAR *name, int l
 
 #endif
 
+#define IS_OPTION_TRUE(ch) ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
+
+static NTSTATUS open_hkcu_key( const char *path, HANDLE *key )
+{
+    NTSTATUS status;
+    char buffer[256];
+    WCHAR bufferW[256];
+    DWORD_PTR sid_data[(sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE) / sizeof(DWORD_PTR)];
+    DWORD i, len = sizeof(sid_data);
+    SID *sid;
+    UNICODE_STRING name;
+    OBJECT_ATTRIBUTES attr;
+
+    status = NtQueryInformationToken( GetCurrentThreadEffectiveToken(), TokenUser, sid_data, len, &len );
+    if (status) return status;
+
+    sid = ((TOKEN_USER *)sid_data)->User.Sid;
+    len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
+                 MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
+                           MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
+    for (i = 0; i < sid->SubAuthorityCount; i++)
+        len += sprintf( buffer + len, "-%u", sid->SubAuthority[i] );
+    len += sprintf( buffer + len, "\\%s", path );
+
+    name.Buffer = bufferW;
+    name.Length = len * sizeof(WCHAR);
+    name.MaximumLength = name.Length + sizeof(WCHAR);
+    ascii_to_unicode( bufferW, buffer, len + 1 );
+    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, 0, NULL );
+    return NtCreateKey( key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL );
+}
+
+
 /***********************************************************************
  *           init_files
  */
 void init_files(void)
 {
+    HANDLE key;
+
 #ifndef _WIN64
     if (is_wow64) init_redirects();
 #endif
@@ -2981,6 +3016,24 @@ void init_files(void)
     /* retrieve initial umask */
     start_umask = umask( 0777 );
     umask( start_umask );
+
+    if (!open_hkcu_key( "Software\\Wine", &key ))
+    {
+        static WCHAR showdotfilesW[] = {'S','h','o','w','D','o','t','F','i','l','e','s',0};
+        char tmp[80];
+        DWORD dummy;
+        UNICODE_STRING nameW;
+
+        nameW.MaximumLength = sizeof(showdotfilesW);
+        nameW.Length = nameW.MaximumLength - sizeof(WCHAR);
+        nameW.Buffer = showdotfilesW;
+        if (!NtQueryValueKey( key, &nameW, KeyValuePartialInformation, tmp, sizeof(tmp), &dummy ))
+        {
+            WCHAR *str = (WCHAR *)((KEY_VALUE_PARTIAL_INFORMATION *)tmp)->Data;
+            show_dot_files = IS_OPTION_TRUE( str[0] );
+        }
+        NtClose( key );
+    }
 }
 
 
@@ -3903,15 +3956,6 @@ static NTSTATUS unmount_device( HANDLE handle )
         if (needs_close) close( unix_fd );
     }
     return status;
-}
-
-
-/***********************************************************************
- *           set_show_dot_files
- */
-void CDECL set_show_dot_files( BOOL enable )
-{
-    show_dot_files = enable;
 }
 
 NTSTATUS set_file_info( const char *path, ULONG attr )
@@ -6031,6 +6075,51 @@ static void ignore_server_ioctl_struct_holes( ULONG code, const void *in_buffer,
 }
 
 
+void strip_external_path( char *path, SIZE_T *len )
+{
+    static char *unix_root = NULL;
+    static int unix_root_len = 0;
+
+    if (unix_root == NULL)
+    {
+        UNICODE_STRING nameW;
+        WCHAR *nt_name;
+
+        if (unix_to_nt_file_name( "/", &nt_name ) != STATUS_SUCCESS) return;
+        nameW.Buffer = nt_name;
+        nameW.Length = wcslen(nt_name) * sizeof(WCHAR);
+        nt_to_unix_file_name( &nameW, &unix_root, NULL, FILE_OPEN );
+        free( nt_name );
+        if (unix_root == NULL) return;
+        unix_root_len = strlen(unix_root);
+    }
+
+    if (strncmp( unix_root, path, unix_root_len ) != 0) return;
+    *len -= unix_root_len;
+    memmove( path, &path[unix_root_len - 1], *len + 1 );
+}
+
+
+char *mark_prefix_end( char *path, SIZE_T *len )
+{
+    static char marker[] = "////.//.//"; /* "P" (0x50) encoded as a path (0=/ 1=./) */
+    int new_path_len = *len + sizeof(marker) - 1;
+    static int config_dir_len = 0;
+    char *new_path;
+
+    if (!config_dir_len) config_dir_len = strlen(config_dir);
+    if (path[config_dir_len] != '/') return path;
+    if (strncmp( config_dir, path, config_dir_len ) != 0) return path;
+    if (!(new_path = malloc( new_path_len ))) return path;
+    *len = new_path_len;
+    strcpy( new_path, config_dir );
+    strcat( new_path, marker );
+    strcat( new_path, &path[config_dir_len] );
+    free( path );
+    return new_path;
+}
+
+
 /*
  * Retrieve the unix name corresponding to a file handle, remove that directory, and then symlink
  * the requested directory to the location of the old directory.
@@ -6163,6 +6252,11 @@ NTSTATUS FILE_CreateSymlink(HANDLE handle, REPARSE_DATA_BUFFER *buffer)
             goto cleanup;
         }
     }
+    else
+    {
+        strip_external_path( unix_dest, &unix_dest_len );
+        unix_dest = mark_prefix_end( unix_dest, &unix_dest_len );
+    }
 
     TRACE( "Linking %s to %s\n", unix_src, &unix_dest[relative_offset] );
 
@@ -6252,10 +6346,11 @@ cleanup:
 }
 
 
-NTSTATUS get_symlink_properties(const char *target, int len, char *unix_dest, int *unix_dest_len,
-                                DWORD *tag, ULONG *flags, BOOL *is_dir)
+void get_symlink_properties(const char *target, int len, char *unix_dest, int *unix_dest_len,
+                            DWORD *tag, ULONG *flags, BOOL *is_dir)
 {
     const char *p = target;
+    int decoded = FALSE;
     DWORD reparse_tag;
     BOOL dir_flag;
     int i;
@@ -6267,7 +6362,7 @@ NTSTATUS get_symlink_properties(const char *target, int len, char *unix_dest, in
         p++;
     }
     if (*p++ != '/')
-        return STATUS_NOT_IMPLEMENTED;
+        goto done;
     reparse_tag = 0;
     for (i = 0; i < sizeof(ULONG)*8; i++)
     {
@@ -6279,7 +6374,7 @@ NTSTATUS get_symlink_properties(const char *target, int len, char *unix_dest, in
         else if (c == '.' && *p++ == '/')
             val = 1;
         else
-            return STATUS_NOT_IMPLEMENTED;
+            goto done;
         reparse_tag |= (val << i);
     }
     /* skip past the directory/file flag */
@@ -6292,16 +6387,31 @@ NTSTATUS get_symlink_properties(const char *target, int len, char *unix_dest, in
         else if (c == '.' && *p++ == '/')
             dir_flag = TRUE;
         else
-            return STATUS_NOT_IMPLEMENTED;
+            goto done;
     }
     else
         dir_flag = TRUE;
+    decoded = TRUE;
+
+done:
+    if (!decoded)
+    {
+        /* treat undecoded unix symlinks as NT symlinks */
+        struct stat st;
+
+        p = target;
+        if (flags && *p != '/') *flags = SYMLINK_FLAG_RELATIVE;
+        reparse_tag = IO_REPARSE_TAG_SYMLINK;
+        if (!stat( target, &st ))
+            dir_flag = S_ISDIR(st.st_mode);
+        else
+            dir_flag = FALSE; /* treat dangling symlinks as files */
+    }
     len -= (p - target);
     if (tag) *tag = reparse_tag;
     if (is_dir) *is_dir = dir_flag;
     if (unix_dest) memmove(unix_dest, p, len + 1);
     if (unix_dest_len) *unix_dest_len = len;
-    return STATUS_SUCCESS;
 }
 
 
@@ -6324,7 +6434,8 @@ NTSTATUS FILE_DecodeSymlink(const char *unix_src, char *unix_dest, int *unix_des
         goto cleanup;
     }
     len = ret;
-    status = get_symlink_properties(tmp, len, unix_dest, unix_dest_len, tag, flags, is_dir);
+    get_symlink_properties(tmp, len, unix_dest, unix_dest_len, tag, flags, is_dir);
+    status = STATUS_SUCCESS;
 
 cleanup:
     if (!unix_dest) free( tmp );
@@ -7200,16 +7311,33 @@ NTSTATUS WINAPI NtQueryVolumeInformationFile( HANDLE handle, IO_STATUS_BLOCK *io
     io->u.Status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL, NULL );
     if (io->u.Status == STATUS_BAD_DEVICE_TYPE)
     {
+        struct async_irp *async;
+        HANDLE wait_handle;
+        NTSTATUS status;
+
+        if (!(async = (struct async_irp *)alloc_fileio( sizeof(*async), irp_completion, handle )))
+            return STATUS_NO_MEMORY;
+        async->buffer  = buffer;
+        async->size    = length;
+
         SERVER_START_REQ( get_volume_info )
         {
+            req->async = server_async( handle, &async->io, NULL, NULL, NULL, io );
             req->handle = wine_server_obj_handle( handle );
             req->info_class = info_class;
             wine_server_set_reply( req, buffer, length );
-            io->u.Status = wine_server_call( req );
-            if (!io->u.Status) io->Information = wine_server_reply_size( reply );
+            status = wine_server_call( req );
+            if (status != STATUS_PENDING)
+            {
+                io->u.Status = status;
+                io->Information = wine_server_reply_size( reply );
+            }
+            wait_handle = wine_server_ptr_handle( reply->wait );
         }
         SERVER_END_REQ;
-        return io->u.Status;
+        if (status != STATUS_PENDING) free( async );
+        if (wait_handle) status = wait_async( wait_handle, FALSE, io );
+        return status;
     }
     else if (io->u.Status) return io->u.Status;
 

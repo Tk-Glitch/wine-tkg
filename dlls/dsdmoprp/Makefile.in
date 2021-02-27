@@ -1,8 +1,6 @@
 MODULE    = dsdmoprp.dll
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
-	dsdmoprp_main.c
 
 RC_SRCS = version.rc

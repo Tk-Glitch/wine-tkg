@@ -169,7 +169,7 @@ struct smbios_boot_info
 #define FIRM 0x4649524D
 #define RSMB 0x52534D42
 
-static SYSTEM_CPU_INFORMATION cpu_info;
+SYSTEM_CPU_INFORMATION cpu_info = { 0 };
 static struct
 {
     struct cpu_topology_override mapping;
@@ -185,6 +185,8 @@ cpu_override;
  */
 #if defined(__i386__) || defined(__x86_64__)
 
+BOOL xstate_compaction_enabled = FALSE;
+
 #define AUTH	0x68747541	/* "Auth" */
 #define ENTI	0x69746e65	/* "enti" */
 #define CAMD	0x444d4163	/* "cAMD" */
@@ -193,36 +195,10 @@ cpu_override;
 #define INEI	0x49656e69	/* "ineI" */
 #define NTEL	0x6c65746e	/* "ntel" */
 
-extern void do_cpuid(unsigned int ax, unsigned int *p);
-
-#ifdef __i386__
-__ASM_GLOBAL_FUNC( do_cpuid,
-                   "pushl %esi\n\t"
-                   "pushl %ebx\n\t"
-                   "movl 12(%esp),%eax\n\t"
-                   "movl 16(%esp),%esi\n\t"
-                   "xorl %ecx,%ecx\n\t"
-                   "cpuid\n\t"
-                   "movl %eax,(%esi)\n\t"
-                   "movl %ebx,4(%esi)\n\t"
-                   "movl %ecx,8(%esi)\n\t"
-                   "movl %edx,12(%esi)\n\t"
-                   "popl %ebx\n\t"
-                   "popl %esi\n\t"
-                   "ret" )
-#else
-__ASM_GLOBAL_FUNC( do_cpuid,
-                   "pushq %rbx\n\t"
-                   "movl %edi,%eax\n\t"
-                   "xorl %ecx,%ecx\n\t"
-                   "cpuid\n\t"
-                   "movl %eax,(%rsi)\n\t"
-                   "movl %ebx,4(%rsi)\n\t"
-                   "movl %ecx,8(%rsi)\n\t"
-                   "movl %edx,12(%rsi)\n\t"
-                   "popq %rbx\n\t"
-                   "ret" )
-#endif
+static inline void do_cpuid(unsigned int ax, unsigned int cx, unsigned int *p)
+{
+    __asm__ ("cpuid" : "=a"(p[0]), "=b" (p[1]), "=c"(p[2]), "=d"(p[3]) : "a"(ax), "c"(cx));
+}
 
 #ifdef __i386__
 extern int have_cpuid(void);
@@ -280,10 +256,10 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
 
     if (!have_cpuid()) return;
 
-    do_cpuid( 0x00000000, regs );  /* get standard cpuid level and vendor name */
+    do_cpuid( 0x00000000, 0, regs );  /* get standard cpuid level and vendor name */
     if (regs[0]>=0x00000001)   /* Check for supported cpuid version */
     {
-        do_cpuid( 0x00000001, regs2 ); /* get cpu features */
+        do_cpuid( 0x00000001, 0, regs2 ); /* get cpu features */
         if (regs2[3] & (1 << 3 )) info->FeatureSet |= CPU_FEATURE_PSE;
         if (regs2[3] & (1 << 4 )) info->FeatureSet |= CPU_FEATURE_TSC;
         if (regs2[3] & (1 << 6 )) info->FeatureSet |= CPU_FEATURE_PAE;
@@ -308,8 +284,14 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
 
         if (regs[0] >= 0x00000007)
         {
-            do_cpuid( 0x00000007, regs3 ); /* get extended features */
+            do_cpuid( 0x00000007, 0, regs3 ); /* get extended features */
             if (regs3[1] & (1 << 5)) info->FeatureSet |= CPU_FEATURE_AVX2;
+        }
+
+        if (info->FeatureSet & CPU_FEATURE_XSAVE)
+        {
+            do_cpuid( 0x0000000d, 1, regs3 ); /* get XSAVE details */
+            if (regs3[0] & 2) xstate_compaction_enabled = TRUE;
         }
 
         if (regs[1] == AUTH && regs[3] == ENTI && regs[2] == CAMD)
@@ -323,10 +305,10 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
             info->Revision |= ((regs2[0] >> 4 ) & 0xf) << 8;  /* model          */
             info->Revision |= regs2[0] & 0xf;                 /* stepping       */
 
-            do_cpuid( 0x80000000, regs );  /* get vendor cpuid level */
+            do_cpuid( 0x80000000, 0, regs );  /* get vendor cpuid level */
             if (regs[0] >= 0x80000001)
             {
-                do_cpuid( 0x80000001, regs2 );  /* get vendor features */
+                do_cpuid( 0x80000001, 0, regs2 );  /* get vendor features */
                 if (regs2[2] & (1 << 2))   info->FeatureSet |= CPU_FEATURE_VIRT;
                 if (regs2[3] & (1 << 20))  info->FeatureSet |= CPU_FEATURE_NX;
                 if (regs2[3] & (1 << 27))  info->FeatureSet |= CPU_FEATURE_TSC;
@@ -346,10 +328,10 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
             if(regs2[2] & (1 << 5))  info->FeatureSet |= CPU_FEATURE_VIRT;
             if(regs2[3] & (1 << 21)) info->FeatureSet |= CPU_FEATURE_DS;
 
-            do_cpuid( 0x80000000, regs );  /* get vendor cpuid level */
+            do_cpuid( 0x80000000, 0, regs );  /* get vendor cpuid level */
             if (regs[0] >= 0x80000001)
             {
-                do_cpuid( 0x80000001, regs2 );  /* get vendor features */
+                do_cpuid( 0x80000001, 0, regs2 );  /* get vendor features */
                 if (regs2[3] & (1 << 20)) info->FeatureSet |= CPU_FEATURE_NX;
                 if (regs2[3] & (1 << 27)) info->FeatureSet |= CPU_FEATURE_TSC;
             }
@@ -2584,12 +2566,66 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
                     shi->Handle[i].OwnerPid     = handle_info[i].owner;
                     shi->Handle[i].HandleValue  = handle_info[i].handle;
                     shi->Handle[i].AccessMask   = handle_info[i].access;
-                    /* FIXME: Fill out ObjectType, HandleFlags, ObjectPointer */
+                    shi->Handle[i].HandleFlags  = handle_info[i].attributes;
+                    shi->Handle[i].ObjectType   = handle_info[i].type;
+                    /* FIXME: Fill out ObjectPointer */
                 }
             }
             else if (ret == STATUS_BUFFER_TOO_SMALL)
             {
                 len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION, Handle[reply->count] );
+                ret = STATUS_INFO_LENGTH_MISMATCH;
+            }
+        }
+        SERVER_END_REQ;
+
+        free( handle_info );
+        break;
+    }
+
+    case SystemExtendedHandleInformation:
+    {
+        struct handle_info *handle_info;
+        DWORD i, num_handles;
+
+        if (size < sizeof(SYSTEM_HANDLE_INFORMATION_EX))
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+
+        if (!info)
+        {
+            ret = STATUS_ACCESS_VIOLATION;
+            break;
+        }
+
+        num_handles = (size - FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handles ))
+                      / sizeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX);
+        if (!(handle_info = malloc( sizeof(*handle_info) * num_handles ))) return STATUS_NO_MEMORY;
+
+        SERVER_START_REQ( get_system_handles )
+        {
+            wine_server_set_reply( req, handle_info, sizeof(*handle_info) * num_handles );
+            if (!(ret = wine_server_call( req )))
+            {
+                SYSTEM_HANDLE_INFORMATION_EX *shi = info;
+                shi->NumberOfHandles = wine_server_reply_size( req ) / sizeof(*handle_info);
+                len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handles[shi->NumberOfHandles] );
+                for (i = 0; i < shi->NumberOfHandles; i++)
+                {
+                    memset( &shi->Handles[i], 0, sizeof(shi->Handles[i]) );
+                    shi->Handles[i].UniqueProcessId  = handle_info[i].owner;
+                    shi->Handles[i].HandleValue      = handle_info[i].handle;
+                    shi->Handles[i].GrantedAccess    = handle_info[i].access;
+                    shi->Handles[i].HandleAttributes = handle_info[i].attributes;
+                    shi->Handles[i].ObjectTypeIndex  = handle_info[i].type;
+                    /* FIXME: Fill out Object */
+                }
+            }
+            else if (ret == STATUS_BUFFER_TOO_SMALL)
+            {
+                len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handles[reply->count] );
                 ret = STATUS_INFO_LENGTH_MISMATCH;
             }
         }

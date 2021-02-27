@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Sat Feb 13 09:15:54 PM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sat Feb 27 06:11:29 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.2.r0.g4f7e621dc58
-Using wine-staging patchset (version 6.2.r0.g3b5ea332)
+Wine (plain) version: 6.3.r0.g0f972e22479
+Using wine-staging patchset (version 6.3.r0.ge83fdffe)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -22,6 +22,7 @@ Staging overrides, if any: -W ntdll-NtAlertThreadByThreadId
 mk11.patch -- ( Applied Mortal Kombat 11 fix )
 fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
+fsync_futex2.patch -- ( Add futex2 support to fsync )
 
 LAA-unix-staging.patch -- ( Applied large address aware override support )
 
@@ -35,7 +36,6 @@ proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (s
 Applied hotfix mfplat-derek-hotfix.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch amdags.mypatch
-Applied your own patch fsync_futex2.mypatch
 Applied your own patch ntdll_Map_top-down_if_dll_characteristics_include_DYNAMIC_BASE.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
 

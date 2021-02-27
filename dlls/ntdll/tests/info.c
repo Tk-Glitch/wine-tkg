@@ -542,11 +542,14 @@ static void test_query_handle(void)
     ULONG SystemInformationLength = sizeof(SYSTEM_HANDLE_INFORMATION);
     SYSTEM_HANDLE_INFORMATION* shi = HeapAlloc(GetProcessHeap(), 0, SystemInformationLength);
     HANDLE EventHandle;
-    BOOL found;
+    BOOL found, ret;
     INT i;
 
     EventHandle = CreateEventA(NULL, FALSE, FALSE, NULL);
     ok( EventHandle != NULL, "CreateEventA failed %u\n", GetLastError() );
+    ret = SetHandleInformation(EventHandle, HANDLE_FLAG_INHERIT | HANDLE_FLAG_PROTECT_FROM_CLOSE,
+            HANDLE_FLAG_INHERIT | HANDLE_FLAG_PROTECT_FROM_CLOSE);
+    ok(ret, "got error %u\n", GetLastError());
 
     /* Request the needed length : a SystemInformationLength greater than one struct sets ReturnLength */
     ReturnLength = 0xdeadbeef;
@@ -581,11 +584,22 @@ static void test_query_handle(void)
         goto done;
     }
 
-    for (i = 0, found = FALSE; i < shi->Count && !found; i++)
-        found = (shi->Handle[i].OwnerPid == GetCurrentProcessId()) &&
-                ((HANDLE)(ULONG_PTR)shi->Handle[i].HandleValue == EventHandle);
+    found = FALSE;
+    for (i = 0; i < shi->Count; i++)
+    {
+        if (shi->Handle[i].OwnerPid == GetCurrentProcessId() &&
+                (HANDLE)(ULONG_PTR)shi->Handle[i].HandleValue == EventHandle)
+        {
+            ok(shi->Handle[i].HandleFlags == (OBJ_INHERIT | OBJ_PROTECT_CLOSE),
+                    "got attributes %#x\n", shi->Handle[i].HandleFlags);
+            found = TRUE;
+            break;
+        }
+    }
     ok( found, "Expected to find event handle %p (pid %x) in handle list\n", EventHandle, GetCurrentProcessId() );
 
+    ret = SetHandleInformation(EventHandle, HANDLE_FLAG_PROTECT_FROM_CLOSE, 0);
+    ok(ret, "got error %u\n", GetLastError());
     CloseHandle(EventHandle);
 
     ReturnLength = 0xdeadbeef;
@@ -607,6 +621,84 @@ static void test_query_handle(void)
 
 done:
     HeapFree( GetProcessHeap(), 0, shi);
+}
+
+static void test_query_handle_ex(void)
+{
+    SYSTEM_HANDLE_INFORMATION_EX *info = malloc(sizeof(SYSTEM_HANDLE_INFORMATION_EX));
+    ULONG size, expect_size;
+    NTSTATUS status;
+    unsigned int i;
+    HANDLE event;
+    BOOL found, ret;
+
+    event = CreateEventA(NULL, FALSE, FALSE, NULL);
+    ok(event != NULL, "failed to create event, error %u\n", GetLastError());
+    ret = SetHandleInformation(event, HANDLE_FLAG_INHERIT | HANDLE_FLAG_PROTECT_FROM_CLOSE,
+            HANDLE_FLAG_INHERIT | HANDLE_FLAG_PROTECT_FROM_CLOSE);
+    ok(ret, "got error %u\n", GetLastError());
+
+    size = 0;
+    status = pNtQuerySystemInformation(SystemExtendedHandleInformation, info, sizeof(SYSTEM_HANDLE_INFORMATION_EX), &size);
+    ok(status == STATUS_INFO_LENGTH_MISMATCH, "got %#x\n", status);
+    ok(size > sizeof(SYSTEM_HANDLE_INFORMATION_EX), "got size %u\n", size);
+
+    while (status == STATUS_INFO_LENGTH_MISMATCH)
+    {
+        info = realloc(info, size);
+        status = pNtQuerySystemInformation(SystemExtendedHandleInformation, info, size, &size);
+    }
+    ok(!status, "got %#x\n", status);
+    expect_size = FIELD_OFFSET(SYSTEM_HANDLE_INFORMATION_EX, Handles[info->NumberOfHandles]);
+    ok(size == expect_size, "expected size %u, got %u\n", expect_size, size);
+    ok(info->NumberOfHandles > 1, "got %Iu handles\n", info->NumberOfHandles);
+
+    found = FALSE;
+    for (i = 0; i < info->NumberOfHandles; ++i)
+    {
+        if (info->Handles[i].UniqueProcessId == GetCurrentProcessId()
+                && (HANDLE)info->Handles[i].HandleValue == event)
+        {
+            ok(info->Handles[i].HandleAttributes == (OBJ_INHERIT | OBJ_PROTECT_CLOSE),
+                    "got flags %#x\n", info->Handles[i].HandleAttributes);
+            ok(info->Handles[i].GrantedAccess == EVENT_ALL_ACCESS, "got access %#x\n", info->Handles[i].GrantedAccess);
+            found = TRUE;
+        }
+        ok(!info->Handles[i].CreatorBackTraceIndex, "got backtrace index %u\n", info->Handles[i].CreatorBackTraceIndex);
+    }
+    ok(found, "event handle not found\n");
+
+    ret = SetHandleInformation(event, HANDLE_FLAG_PROTECT_FROM_CLOSE, 0);
+    ok(ret, "got error %u\n", GetLastError());
+    CloseHandle(event);
+
+    status = pNtQuerySystemInformation(SystemExtendedHandleInformation, info, size, &size);
+    while (status == STATUS_INFO_LENGTH_MISMATCH)
+    {
+        info = realloc(info, size);
+        status = pNtQuerySystemInformation(SystemExtendedHandleInformation, info, size, &size);
+    }
+    ok(!status, "got %#x\n", status);
+    expect_size = FIELD_OFFSET(SYSTEM_HANDLE_INFORMATION_EX, Handles[info->NumberOfHandles]);
+    ok(size == expect_size, "expected size %u, got %u\n", expect_size, size);
+    ok(info->NumberOfHandles > 1, "got %Iu handles\n", info->NumberOfHandles);
+
+    found = FALSE;
+    for (i = 0; i < info->NumberOfHandles; ++i)
+    {
+        if (info->Handles[i].UniqueProcessId == GetCurrentProcessId()
+                && (HANDLE)info->Handles[i].HandleValue == event)
+        {
+            found = TRUE;
+            break;
+        }
+    }
+    ok(!found, "event handle found\n");
+
+    status = pNtQuerySystemInformation(SystemExtendedHandleInformation, NULL, sizeof(SYSTEM_HANDLE_INFORMATION_EX), &size);
+    ok( status == STATUS_ACCESS_VIOLATION, "Expected STATUS_ACCESS_VIOLATION, got %08x\n", status );
+
+    free(info);
 }
 
 static void test_query_cache(void)
@@ -2959,6 +3051,7 @@ START_TEST(info)
     test_query_procperf();
     test_query_module();
     test_query_handle();
+    test_query_handle_ex();
     test_query_cache();
     test_query_interrupt();
     test_time_adjustment();

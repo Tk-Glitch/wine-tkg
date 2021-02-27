@@ -1,8 +1,6 @@
 MODULE    = qdv.dll
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
-	qdv_main.c
 
 RC_SRCS = version.rc

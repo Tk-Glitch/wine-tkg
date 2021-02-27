@@ -1691,10 +1691,9 @@ BOOL WINAPI SQLValidDSN(LPCSTR lpszDSN)
 
 BOOL WINAPI SQLWriteDSNToIniW(LPCWSTR lpszDSN, LPCWSTR lpszDriver)
 {
-    BOOL ret = FALSE;
+    DWORD ret;
     HKEY hkey, hkeydriver;
-    WCHAR *filename = NULL;
-    DWORD size = 0, type;
+    WCHAR filename[MAX_PATH];
 
     TRACE("%s %s\n", debugstr_w(lpszDSN), debugstr_w(lpszDriver));
 
@@ -1707,66 +1706,43 @@ BOOL WINAPI SQLWriteDSNToIniW(LPCWSTR lpszDSN, LPCWSTR lpszDriver)
     }
 
     /* It doesn't matter if we cannot find the driver, windows just writes a blank value. */
-    if ((ret = RegOpenKeyW(HKEY_LOCAL_MACHINE, odbcini, &hkey)) == ERROR_SUCCESS)
+    filename[0] = 0;
+    if (RegOpenKeyW(HKEY_LOCAL_MACHINE, odbcini, &hkey) == ERROR_SUCCESS)
     {
         HKEY hkeydriver;
 
-        if ((ret = RegOpenKeyW(hkey, lpszDriver, &hkeydriver)) == ERROR_SUCCESS)
+        if (RegOpenKeyW(hkey, lpszDriver, &hkeydriver) == ERROR_SUCCESS)
         {
-            ret = RegGetValueW(hkeydriver, NULL, L"driver", RRF_RT_REG_SZ, &type, NULL, &size);
-            /* Windows ignores the fact the driver key is missing */
-            if(ret == ERROR_SUCCESS && type == REG_SZ && size)
-            {
-                filename = HeapAlloc(GetProcessHeap(), 0, size);
-                if(!filename)
-                {
-                    RegCloseKey(hkeydriver);
-                    RegCloseKey(hkey);
-                    push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
-
-                    return FALSE;
-                }
-                ret = RegGetValueW(hkeydriver, NULL, L"driver", RRF_RT_REG_SZ, &type, filename, &size);
-            }
-
+            DWORD size = MAX_PATH * sizeof(WCHAR);
+            RegGetValueW(hkeydriver, NULL, L"driver", RRF_RT_REG_SZ, NULL, filename, &size);
             RegCloseKey(hkeydriver);
         }
-
         RegCloseKey(hkey);
     }
 
-    if (RegCreateKeyW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ODBC\\ODBC.INI", &hkey) == ERROR_SUCCESS)
+    if ((ret = RegCreateKeyW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ODBC\\ODBC.INI", &hkey)) == ERROR_SUCCESS)
     {
         HKEY sources;
 
-        if (RegCreateKeyW(hkey, L"ODBC Data Sources", &sources) == ERROR_SUCCESS)
+        if ((ret = RegCreateKeyW(hkey, L"ODBC Data Sources", &sources)) == ERROR_SUCCESS)
         {
             RegSetValueExW(sources, lpszDSN, 0, REG_SZ, (BYTE*)lpszDriver, (lstrlenW(lpszDriver)+1)*sizeof(WCHAR));
             RegCloseKey(sources);
-        }
 
-        RegDeleteTreeW(hkey, lpszDSN);
-
-        if (RegCreateKeyW(hkey, lpszDSN, &hkeydriver) == ERROR_SUCCESS)
-        {
-            if (filename)
+            RegDeleteTreeW(hkey, lpszDSN);
+            if ((ret = RegCreateKeyW(hkey, lpszDSN, &hkeydriver)) == ERROR_SUCCESS)
+            {
                 RegSetValueExW(sources, L"driver", 0, REG_SZ, (BYTE*)filename, (lstrlenW(filename)+1)*sizeof(WCHAR));
-            else
-                RegSetValueExW(sources, L"driver", 0, REG_SZ, (BYTE*)L"", sizeof(L""));
-
-            RegCloseKey(hkeydriver);
-            ret = TRUE;
+                RegCloseKey(hkeydriver);
+            }
         }
-
         RegCloseKey(hkey);
     }
 
-    if (!ret)
+    if (ret != ERROR_SUCCESS)
         push_error(ODBC_ERROR_REQUEST_FAILED, odbc_error_request_failed);
 
-    heap_free(filename);
-
-    return ret;
+    return ret == ERROR_SUCCESS;
 }
 
 BOOL WINAPI SQLWriteDSNToIni(LPCSTR lpszDSN, LPCSTR lpszDriver)

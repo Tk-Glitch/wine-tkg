@@ -24,21 +24,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(uiautomation);
 
-BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, void *lpv)
-{
-    TRACE("(%p %d %p)\n", hInstDLL, fdwReason, lpv);
-
-    switch(fdwReason) {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls(hInstDLL);
-        break;
-    }
-
-    return TRUE;
-}
-
 static HRESULT WINAPI dummy_QueryInterface(IUnknown *iface, REFIID iid, void **ppv)
 {
     TRACE("(%p, %s, %p)\n", iface, debugstr_guid(iid), ppv);

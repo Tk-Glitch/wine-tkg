@@ -236,7 +236,7 @@ static void output_relay_debug( DLLSPEC *spec )
         ORDDEF *odp = spec->ordinals[i];
 
         if (needs_relay( odp ))
-            output( "\t.long .L__wine_spec_relay_entry_point_%d-__wine_spec_relay_entry_points\n", i );
+            output( "\t.long __wine_spec_relay_entry_point_%d-__wine_spec_relay_entry_points\n", i );
         else
             output( "\t.long 0\n" );
     }
@@ -249,7 +249,6 @@ static void output_relay_debug( DLLSPEC *spec )
     /* then the relay thunks */
 
     output( "\t.text\n" );
-    if (thumb_mode) output( "\t.thumb_func\n" );
     output( "__wine_spec_relay_entry_points:\n" );
     output( "\tnop\n" );  /* to avoid 0 offset */
 
@@ -264,7 +263,7 @@ static void output_relay_debug( DLLSPEC *spec )
         case CPU_x86:
             output( "\t.align %d\n", get_alignment(4) );
             output( "\t.long 0x90909090,0x90909090\n" );
-            output( ".L__wine_spec_relay_entry_point_%d:\n", i );
+            output( "__wine_spec_relay_entry_point_%d:\n", i );
             output_cfi( ".cfi_startproc" );
             output( "\t.byte 0x8b,0xff,0x55,0x8b,0xec,0x5d\n" );  /* hotpatch prolog */
             if (odp->flags & (FLAG_THISCALL | FLAG_FASTCALL))  /* add the register arguments */
@@ -298,42 +297,46 @@ static void output_relay_debug( DLLSPEC *spec )
 
         case CPU_ARM:
         {
-            unsigned int mask, val, count = 0;
             int j, has_float = 0;
 
             if (strcmp( float_abi_option, "soft" ))
                 for (j = 0; j < odp->u.func.nb_args && !has_float; j++)
                     has_float = is_float_arg( odp, j );
 
-            val = (odp->u.func.args_str_offset << 16) | (i - spec->base);
             output( "\t.align %d\n", get_alignment(4) );
             if (thumb_mode) output( "\t.thumb_func\n" );
-            output( ".L__wine_spec_relay_entry_point_%d:\n", i );
+            output( "__wine_spec_relay_entry_point_%d:\n", i );
             output_cfi( ".cfi_startproc" );
             output( "\tpush {r0-r3}\n" );
             output( "\tmov r2, SP\n");
             if (has_float) output( "\tvpush {s0-s15}\n" );
             output( "\tpush {LR}\n" );
             output( "\tsub SP, #4\n");
-            for (mask = 0xff; mask; mask <<= 8)
-                if (val & mask) output( "\t%s r1,#%u\n", count++ ? "add" : "mov", val & mask );
-            if (!count) output( "\tmov r1,#0\n" );
-            output( "\tldr r0, 2f\n");
-            if (UsePIC) output( "1:\tadd r0, PC\n");
+            output( "\tmov r1,#%u\n", i - spec->base );
+            output( "\tmovt r1,#%u\n", odp->u.func.args_str_offset );
+            if (UsePIC)
+            {
+                output( "\tldr r0, 2f\n");
+                output( "1:\tadd r0, PC\n");
+            }
+            else
+            {
+                output( "\tmovw r0, :lower16:.L__wine_spec_relay_descr\n" );
+                output( "\tmovt r0, :upper16:.L__wine_spec_relay_descr\n" );
+            }
             output( "\tldr IP, [r0, #4]\n");
             output( "\tblx IP\n");
             output( "\tldr IP, [SP, #4]\n" );
             output( "\tadd SP, #%u\n", 24 + (has_float ? 64 : 0) );
             output( "\tbx IP\n");
             if (UsePIC) output( "2:\t.long .L__wine_spec_relay_descr-1b-%u\n", thumb_mode ? 4 : 8 );
-            else output( "2:\t.long .L__wine_spec_relay_descr\n" );
             output_cfi( ".cfi_endproc" );
             break;
         }
 
         case CPU_ARM64:
             output( "\t.align %d\n", get_alignment(4) );
-            output( ".L__wine_spec_relay_entry_point_%d:\n", i );
+            output( "__wine_spec_relay_entry_point_%d:\n", i );
             output_cfi( ".cfi_startproc" );
             switch (odp->u.func.nb_args)
             {
@@ -372,7 +375,7 @@ static void output_relay_debug( DLLSPEC *spec )
         case CPU_x86_64:
             output( "\t.align %d\n", get_alignment(4) );
             output( "\t.long 0x90909090,0x90909090\n" );
-            output( ".L__wine_spec_relay_entry_point_%d:\n", i );
+            output( "__wine_spec_relay_entry_point_%d:\n", i );
             output_cfi( ".cfi_startproc" );
             switch (odp->u.func.nb_args)
             {
@@ -1076,6 +1079,19 @@ void make_builtin_files( char *argv[] )
             if (header.e_lfanew < sizeof(header) + sizeof(builtin_signature))
                 fatal_error( "%s: Not enough space (%x) for Wine signature\n", argv[i], header.e_lfanew );
             write( fd, builtin_signature, sizeof(builtin_signature) );
+
+            if (prefer_native)
+            {
+                unsigned int pos = header.e_lfanew + 0x5e;  /* OptionalHeader.DllCharacteristics */
+                unsigned short dll_charact;
+                lseek( fd, pos, SEEK_SET );
+                if (read( fd, &dll_charact, sizeof(dll_charact) ) == sizeof(dll_charact))
+                {
+                    dll_charact |= IMAGE_DLLCHARACTERISTICS_PREFER_NATIVE;
+                    lseek( fd, pos, SEEK_SET );
+                    write( fd, &dll_charact, sizeof(dll_charact) );
+                }
+            }
         }
         else fatal_error( "%s: Unrecognized file format\n", argv[i] );
         close( fd );

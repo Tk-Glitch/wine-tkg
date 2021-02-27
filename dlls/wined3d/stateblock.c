@@ -374,6 +374,7 @@ void state_unbind_resources(struct wined3d_state *state)
     struct wined3d_shader_resource_view *srv;
     struct wined3d_vertex_declaration *decl;
     struct wined3d_blend_state *blend_state;
+    struct wined3d_rendertarget_view *rtv;
     struct wined3d_sampler *sampler;
     struct wined3d_texture *texture;
     struct wined3d_buffer *buffer;
@@ -472,6 +473,21 @@ void state_unbind_resources(struct wined3d_state *state)
     {
         state->blend_state = NULL;
         wined3d_blend_state_decref(blend_state);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(state->fb.render_targets); ++i)
+    {
+        if ((rtv = state->fb.render_targets[i]))
+        {
+            state->fb.render_targets[i] = NULL;
+            wined3d_rendertarget_view_decref(rtv);
+        }
+    }
+
+    if ((rtv = state->fb.depth_stencil))
+    {
+        state->fb.depth_stencil = NULL;
+        wined3d_rendertarget_view_decref(rtv);
     }
 }
 
@@ -1872,6 +1888,28 @@ void state_init(struct wined3d_state *state, const struct wined3d_d3d_info *d3d_
 
     if (flags & WINED3D_STATE_INIT_DEFAULT)
         state_init_default(state, d3d_info);
+}
+
+HRESULT CDECL wined3d_state_create(struct wined3d_device *device, struct wined3d_state **state)
+{
+    struct wined3d_state *object;
+
+    TRACE("device %p, state %p.\n", device, state);
+
+    if (!(object = heap_alloc_zero(sizeof(*object))))
+        return E_OUTOFMEMORY;
+    state_init(object, &device->adapter->d3d_info, WINED3D_STATE_INIT_DEFAULT);
+
+    *state = object;
+    return S_OK;
+}
+
+void CDECL wined3d_state_destroy(struct wined3d_state *state)
+{
+    TRACE("state %p.\n", state);
+
+    state_cleanup(state);
+    heap_free(state);
 }
 
 static void stateblock_state_init_default(struct wined3d_stateblock_state *state,

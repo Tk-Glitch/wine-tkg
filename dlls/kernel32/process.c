@@ -36,7 +36,6 @@
 #include "psapi.h"
 #include "ddk/wdm.h"
 #include "wine/exception.h"
-#include "wine/server.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
 
@@ -273,7 +272,7 @@ HANDLE WINAPI ConvertToGlobalHandle(HANDLE hSrc)
 {
     HANDLE ret = INVALID_HANDLE_VALUE;
     DuplicateHandle( GetCurrentProcess(), hSrc, GetCurrentProcess(), &ret, 0, FALSE,
-                     DUP_HANDLE_MAKE_GLOBAL | DUP_HANDLE_SAME_ACCESS | DUP_HANDLE_CLOSE_SOURCE );
+                     DUPLICATE_MAKE_GLOBAL | DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE );
     return ret;
 }
 

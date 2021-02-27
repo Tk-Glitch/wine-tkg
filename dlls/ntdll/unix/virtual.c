@@ -2602,7 +2602,7 @@ void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info )
 /***********************************************************************
  *           virtual_create_builtin_view
  */
-NTSTATUS virtual_create_builtin_view( void *module, pe_image_info_t *info )
+NTSTATUS virtual_create_builtin_view( void *module, const UNICODE_STRING *nt_name, pe_image_info_t *info )
 {
     NTSTATUS status;
     sigset_t sigset;
@@ -2619,7 +2619,7 @@ NTSTATUS virtual_create_builtin_view( void *module, pe_image_info_t *info )
                           VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC );
     if (!status)
     {
-        TRACE( "created %p-%p\n", base, (char *)base + size );
+        TRACE( "created %p-%p for %s\n", base, (char *)base + size, debugstr_us(nt_name) );
 
         /* The PE header is always read-only, no write, no execute. */
         set_page_vprot( base, page_size, VPROT_COMMITTED | VPROT_READ );
@@ -2640,6 +2640,7 @@ NTSTATUS virtual_create_builtin_view( void *module, pe_image_info_t *info )
             req->base = wine_server_client_ptr( view->base );
             req->size = size;
             wine_server_add_data( req, info, sizeof(*info) );
+            wine_server_add_data( req, nt_name->Buffer, nt_name->Length );
             status = wine_server_call( req );
         }
         SERVER_END_REQ;
@@ -2716,12 +2717,6 @@ TEB *virtual_alloc_first_teb(void)
         ERR( "wine: failed to map the shared user data: %08x\n", status );
         exit(1);
     }
-
-#ifdef __x86_64__  /* sneak in a syscall dispatcher pointer at a fixed address (7ffe1000) */
-    ptr = (char *)user_shared_data + page_size;
-    anon_mmap_fixed( ptr, page_size, PROT_READ | PROT_WRITE, 0 );
-    *(void **)ptr = __wine_syscall_dispatcher;
-#endif
 
     NtAllocateVirtualMemory( NtCurrentProcess(), &teb_block, 0, &total,
                              MEM_RESERVE | MEM_TOP_DOWN, PAGE_READWRITE );

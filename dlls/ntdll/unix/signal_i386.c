@@ -463,13 +463,25 @@ enum i386_trap_code
 
 struct syscall_frame
 {
-    DWORD                 edi;
-    DWORD                 esi;
-    DWORD                 ebx;
-    DWORD                 ebp;
-    DWORD                 thunk_addr;
-    DWORD                 ret_addr;
+    DWORD              eflags;  /* 00 */
+    DWORD              eip;     /* 04 */
+    DWORD              esp;     /* 08 */
+    WORD               cs;      /* 0c */
+    WORD               ss;      /* 0e */
+    WORD               ds;      /* 10 */
+    WORD               es;      /* 12 */
+    WORD               fs;      /* 14 */
+    WORD               gs;      /* 16 */
+    DWORD              eax;     /* 18 */
+    DWORD              ebx;     /* 1c */
+    DWORD              ecx;     /* 20 */
+    DWORD              edx;     /* 24 */
+    DWORD              edi;     /* 28 */
+    DWORD              esi;     /* 2c */
+    DWORD              ebp;     /* 30 */
 };
+
+C_ASSERT( sizeof(struct syscall_frame) == 0x34 );
 
 struct x86_thread_data
 {
@@ -709,14 +721,14 @@ static inline NTSTATUS save_xstate( CONTEXT *context )
     xsave_area;
     XSTATE *xs;
 
-    if (!(user_shared_data->XState.EnabledFeatures && (xs = xstate_from_context( context ))))
+    if (!(cpu_info.FeatureSet & CPU_FEATURE_AVX) || !(xs = xstate_from_context( context )))
         return STATUS_SUCCESS;
 
     if (context_ex->XState.Length < offsetof(XSTATE, YmmContext)
             || context_ex->XState.Length > sizeof(XSTATE))
         return STATUS_INVALID_PARAMETER;
 
-    if (user_shared_data->XState.CompactionEnabled)
+    if (xstate_compaction_enabled)
     {
         /* xsavec doesn't use anything from the save area. */
         __asm__ volatile( "xsavec %0" : "=m"(xsave_area)
@@ -784,7 +796,7 @@ static inline void restore_xstate( const CONTEXT *context )
     XSAVE_FORMAT *xrstor_base;
     XSTATE *xs;
 
-    if (!(user_shared_data->XState.EnabledFeatures && (xs = xstate_from_context( context ))))
+    if (!(cpu_info.FeatureSet & CPU_FEATURE_AVX) || !(xs = xstate_from_context( context )))
         return;
 
     xrstor_base = (XSAVE_FORMAT *)xs - 1;
@@ -806,6 +818,7 @@ static inline void restore_xstate( const CONTEXT *context )
     }
     __asm__ volatile( "xrstor %0" : : "m"(*xrstor_base), "a" (4), "d" (0) );
 }
+
 
 /***********************************************************************
  *           fpux_to_fpu
@@ -901,7 +914,7 @@ static inline void save_context( struct xcontext *xcontext, const ucontext_t *si
         context->ContextFlags |= CONTEXT_FLOATING_POINT | CONTEXT_EXTENDED_REGISTERS;
         memcpy( context->ExtendedRegisters, fpux, sizeof(*fpux) );
         if (!fpu) fpux_to_fpu( &context->FloatSave, fpux );
-        if (user_shared_data->XState.EnabledFeatures && (xs = XState_sig(fpux)))
+        if ((cpu_info.FeatureSet & CPU_FEATURE_AVX) && (xs = XState_sig(fpux)))
         {
             context_init_xstate( context, xs );
             xcontext->host_compaction_mask = xs->CompactionMask;
@@ -968,40 +981,40 @@ static inline void restore_context( const struct xcontext *xcontext, ucontext_t 
  *
  * Set the new CPU context.
  */
-extern void set_full_cpu_context( const CONTEXT *context );
+extern void set_full_cpu_context(void);
 __ASM_GLOBAL_FUNC( set_full_cpu_context,
-                   "movl $0,%fs:0x1f8\n\t"     /* x86_thread_data()->syscall_frame = NULL */
-                   "movl 4(%esp),%ecx\n\t"
-                   "movw 0x8c(%ecx),%gs\n\t"  /* SegGs */
-                   "movw 0x90(%ecx),%fs\n\t"  /* SegFs */
-                   "movw 0x94(%ecx),%es\n\t"  /* SegEs */
-                   "movl 0x9c(%ecx),%edi\n\t" /* Edi */
-                   "movl 0xa0(%ecx),%esi\n\t" /* Esi */
-                   "movl 0xa4(%ecx),%ebx\n\t" /* Ebx */
-                   "movl 0xb4(%ecx),%ebp\n\t" /* Ebp */
+                   "movl %fs:0x1f8,%ecx\n\t"
+                   "movl $0,%fs:0x1f8\n\t"    /* x86_thread_data()->syscall_frame = NULL */
+                   "movw 0x16(%ecx),%gs\n\t"  /* SegGs */
+                   "movw 0x14(%ecx),%fs\n\t"  /* SegFs */
+                   "movw 0x12(%ecx),%es\n\t"  /* SegEs */
+                   "movl 0x1c(%ecx),%ebx\n\t" /* Ebx */
+                   "movl 0x28(%ecx),%edi\n\t" /* Edi */
+                   "movl 0x2c(%ecx),%esi\n\t" /* Esi */
+                   "movl 0x30(%ecx),%ebp\n\t" /* Ebp */
                    "movw %ss,%ax\n\t"
-                   "cmpw 0xc8(%ecx),%ax\n\t"  /* SegSs */
+                   "cmpw 0x0e(%ecx),%ax\n\t"  /* SegSs */
                    "jne 1f\n\t"
                    /* As soon as we have switched stacks the context structure could
                     * be invalid (when signal handlers are executed for example). Copy
                     * values on the target stack before changing ESP. */
-                   "movl 0xc4(%ecx),%eax\n\t" /* Esp */
+                   "movl 0x08(%ecx),%eax\n\t" /* Esp */
                    "leal -4*4(%eax),%eax\n\t"
-                   "movl 0xc0(%ecx),%edx\n\t" /* EFlags */
+                   "movl (%ecx),%edx\n\t"     /* EFlags */
                    ".byte 0x36\n\t"
                    "movl %edx,3*4(%eax)\n\t"
-                   "movl 0xbc(%ecx),%edx\n\t" /* SegCs */
+                   "movl 0x0c(%ecx),%edx\n\t" /* SegCs */
                    ".byte 0x36\n\t"
                    "movl %edx,2*4(%eax)\n\t"
-                   "movl 0xb8(%ecx),%edx\n\t" /* Eip */
+                   "movl 0x04(%ecx),%edx\n\t" /* Eip */
                    ".byte 0x36\n\t"
                    "movl %edx,1*4(%eax)\n\t"
-                   "movl 0xb0(%ecx),%edx\n\t" /* Eax */
+                   "movl 0x18(%ecx),%edx\n\t" /* Eax */
                    ".byte 0x36\n\t"
                    "movl %edx,0*4(%eax)\n\t"
-                   "pushl 0x98(%ecx)\n\t"     /* SegDs */
-                   "movl 0xa8(%ecx),%edx\n\t" /* Edx */
-                   "movl 0xac(%ecx),%ecx\n\t" /* Ecx */
+                   "pushl 0x10(%ecx)\n\t"     /* SegDs */
+                   "movl 0x24(%ecx),%edx\n\t" /* Edx */
+                   "movl 0x20(%ecx),%ecx\n\t" /* Ecx */
                    "popl %ds\n\t"
                    "movl %eax,%esp\n\t"
                    "popl %eax\n\t"
@@ -1011,17 +1024,28 @@ __ASM_GLOBAL_FUNC( set_full_cpu_context,
                     * is 16 or 32 bit, and 'movl' will throw an exception when we try to
                     * access memory above the limit. */
                    "1:\n\t"
-                   "movl 0xa8(%ecx),%edx\n\t" /* Edx */
-                   "movl 0xb0(%ecx),%eax\n\t" /* Eax */
-                   "movw 0xc8(%ecx),%ss\n\t"  /* SegSs */
-                   "movl 0xc4(%ecx),%esp\n\t" /* Esp */
-                   "pushl 0xc0(%ecx)\n\t"     /* EFlags */
-                   "pushl 0xbc(%ecx)\n\t"     /* SegCs */
-                   "pushl 0xb8(%ecx)\n\t"     /* Eip */
-                   "pushl 0x98(%ecx)\n\t"     /* SegDs */
-                   "movl 0xac(%ecx),%ecx\n\t" /* Ecx */
+                   "movl 0x24(%ecx),%edx\n\t" /* Edx */
+                   "movl 0x18(%ecx),%eax\n\t" /* Eax */
+                   "movw 0x0e(%ecx),%ss\n\t"  /* SegSs */
+                   "movl 0x08(%ecx),%esp\n\t" /* Esp */
+                   "pushl 0x00(%ecx)\n\t"     /* EFlags */
+                   "pushl 0x0c(%ecx)\n\t"     /* SegCs */
+                   "pushl 0x04(%ecx)\n\t"     /* Eip */
+                   "pushl 0x10(%ecx)\n\t"     /* SegDs */
+                   "movl 0x20(%ecx),%ecx\n\t" /* Ecx */
                    "popl %ds\n\t"
                    "iret" )
+
+
+/***********************************************************************
+ *           signal_restore_full_cpu_context
+ *
+ * Restore full context from syscall frame
+ */
+void signal_restore_full_cpu_context(void)
+{
+    set_full_cpu_context();
+}
 
 
 /***********************************************************************
@@ -1196,6 +1220,7 @@ NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
 NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
 {
     NTSTATUS ret = STATUS_SUCCESS;
+    struct syscall_frame *frame = x86_thread_data()->syscall_frame;
     DWORD flags = context->ContextFlags & ~CONTEXT_i386;
     BOOL self = (handle == GetCurrentThread());
 
@@ -1225,28 +1250,39 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
         }
     }
 
+    if (flags & CONTEXT_INTEGER)
+    {
+        frame->eax = context->Eax;
+        frame->ebx = context->Ebx;
+        frame->ecx = context->Ecx;
+        frame->edx = context->Edx;
+        frame->esi = context->Esi;
+        frame->edi = context->Edi;
+    }
+    if (flags & CONTEXT_CONTROL)
+    {
+        frame->esp    = context->Esp;
+        frame->ebp    = context->Ebp;
+        frame->eip    = context->Eip;
+        frame->eflags = context->EFlags;
+        frame->cs     = context->SegCs;
+        frame->ss     = context->SegSs;
+    }
+    if (flags & CONTEXT_SEGMENTS)
+    {
+        frame->ds = context->SegDs;
+        frame->es = context->SegEs;
+        frame->fs = context->SegFs;
+        frame->gs = context->SegGs;
+    }
     if (flags & CONTEXT_EXTENDED_REGISTERS) restore_fpux( context );
     else if (flags & CONTEXT_FLOATING_POINT) restore_fpu( context );
 
     restore_xstate( context );
 
-    if (flags & CONTEXT_FULL)
-    {
-        if (!(flags & CONTEXT_CONTROL))
-            FIXME( "setting partial context (%x) not supported\n", flags );
-        else if (flags & CONTEXT_SEGMENTS)
-            set_full_cpu_context( context );
-        else
-        {
-            CONTEXT newcontext = *context;
-            newcontext.SegDs = get_ds();
-            newcontext.SegEs = get_ds();
-            newcontext.SegFs = get_fs();
-            newcontext.SegGs = get_gs();
-            set_full_cpu_context( &newcontext );
-        }
-    }
-    return ret;
+    if (!(flags & CONTEXT_INTEGER)) frame->eax = STATUS_SUCCESS;
+    signal_restore_full_cpu_context();
+    return STATUS_SUCCESS;
 }
 
 
@@ -1285,30 +1321,30 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
     {
         if (needed_flags & CONTEXT_INTEGER)
         {
-            context->Eax = 0;
+            context->Eax = frame->eax;
             context->Ebx = frame->ebx;
-            context->Ecx = 0;
-            context->Edx = 0;
+            context->Ecx = frame->ecx;
+            context->Edx = frame->edx;
             context->Esi = frame->esi;
             context->Edi = frame->edi;
             context->ContextFlags |= CONTEXT_INTEGER;
         }
         if (needed_flags & CONTEXT_CONTROL)
         {
-            context->Esp    = (DWORD)&frame->ret_addr;
+            context->Esp    = frame->esp;
             context->Ebp    = frame->ebp;
-            context->Eip    = frame->thunk_addr;
-            context->EFlags = 0x202;
-            context->SegCs  = get_cs();
-            context->SegSs  = get_ds();
+            context->Eip    = frame->eip;
+            context->EFlags = frame->eflags;
+            context->SegCs  = frame->cs;
+            context->SegSs  = frame->ds;
             context->ContextFlags |= CONTEXT_CONTROL;
         }
         if (needed_flags & CONTEXT_SEGMENTS)
         {
-            context->SegDs = get_ds();
-            context->SegEs = get_ds();
-            context->SegFs = get_fs();
-            context->SegGs = get_gs();
+            context->SegDs = frame->ds;
+            context->SegEs = frame->es;
+            context->SegFs = frame->fs;
+            context->SegGs = frame->gs;
             context->ContextFlags |= CONTEXT_SEGMENTS;
         }
         if (needed_flags & CONTEXT_FLOATING_POINT) save_fpu( context );
@@ -1643,7 +1679,7 @@ C_ASSERT( (offsetof(struct stack_layout, xstate) == sizeof(struct stack_layout))
         assert(!((ULONG_PTR)dst_xs & 63));
         context_init_xstate( &stack->context, stack->xstate );
         memset( dst_xs, 0, offsetof(XSTATE, YmmContext) );
-        dst_xs->CompactionMask = user_shared_data->XState.CompactionEnabled ? 0x8000000000000004 : 0;
+        dst_xs->CompactionMask = xstate_compaction_enabled ? 0x8000000000000004 : 0;
         if (src_xs->Mask & 4)
         {
             dst_xs->Mask = 4;
@@ -1713,7 +1749,6 @@ struct apc_stack_layout * WINAPI setup_user_apc_dispatcher_stack( CONTEXT *conte
 }
 
 C_ASSERT( sizeof(struct apc_stack_layout) == 0x2e0 );
-C_ASSERT( offsetof(struct syscall_frame, ret_addr) == 0x14 );
 C_ASSERT( offsetof(struct apc_stack_layout, context) == 20 );
 
 /***********************************************************************
@@ -1728,7 +1763,7 @@ __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
                    "movl 0xc4(%esi),%eax\n\t"    /* context_ptr->Esp */
                    "jmp 2f\n\t"
                    "1:\tmovl %fs:0x1f8,%eax\n\t" /* x86_thread_data()->syscall_frame */
-                   "leal 0x14(%eax),%eax\n\t"    /* &x86_thread_data()->syscall_frame->ret_addr */
+                   "leal 0x38(%eax),%eax\n\t"    /* &x86_thread_data()->syscall_frame->ret_addr */
                    "2:\tsubl $0x2e0,%eax\n\t"    /* sizeof(struct apc_stack_layout) */
                    "movl %ebp,%esp\n\t"          /* pop return address */
                    "cmpl %esp,%eax\n\t"
@@ -1752,14 +1787,14 @@ __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
  *           call_raise_user_exception_dispatcher
  */
 __ASM_GLOBAL_FUNC( call_raise_user_exception_dispatcher,
-                   "movl %fs:0x1f8,%eax\n\t"  /* x86_thread_data()->syscall_frame */
-                   "movl 0(%eax),%edi\n\t"    /* frame->edi */
-                   "movl 4(%eax),%esi\n\t"    /* frame->esi */
-                   "movl 8(%eax),%ebx\n\t"    /* frame->ebx */
-                   "movl 12(%eax),%ebp\n\t"   /* frame->ebp */
-                   "movl 4(%esp),%edx\n\t"    /* dispatcher */
+                   "movl %fs:0x1f8,%eax\n\t"   /* x86_thread_data()->syscall_frame */
+                   "movl 0x1c(%eax),%ebx\n\t"  /* frame->ebx */
+                   "movl 0x28(%eax),%edi\n\t"  /* frame->edi */
+                   "movl 0x2c(%eax),%esi\n\t"  /* frame->esi */
+                   "movl 0x30(%eax),%ebp\n\t"  /* frame->ebp */
+                   "movl 4(%esp),%edx\n\t"     /* dispatcher */
                    "movl $0,%fs:0x1f8\n\t"
-                   "leal 20(%eax),%esp\n\t"
+                   "leal 0x38(%eax),%esp\n\t"
                    "jmp *%edx" )
 
 
@@ -1773,15 +1808,15 @@ __ASM_GLOBAL_FUNC( call_user_exception_dispatcher,
                    "jne 1f\n\t"
                    "decl 0xb8(%ecx)\n"            /* context->Eip */
                    "1:\tmovl %fs:0x1f8,%eax\n\t"  /* x86_thread_data()->syscall_frame */
-                   "movl 0(%eax),%edi\n\t"        /* frame->edi */
-                   "movl 4(%eax),%esi\n\t"        /* frame->esi */
-                   "movl 8(%eax),%ebx\n\t"        /* frame->ebx */
-                   "movl 12(%eax),%ebp\n\t"       /* frame->ebp */
-                   "movl %edx,12(%eax)\n\t"
-                   "movl %ecx,16(%eax)\n\t"
+                   "movl 0x1c(%eax),%ebx\n\t"     /* frame->ebx */
+                   "movl 0x28(%eax),%edi\n\t"     /* frame->edi */
+                   "movl 0x2c(%eax),%esi\n\t"     /* frame->esi */
+                   "movl 0x30(%eax),%ebp\n\t"     /* frame->ebp */
+                   "movl %edx,0x30(%eax)\n\t"
+                   "movl %ecx,0x34(%eax)\n\t"
                    "movl 12(%esp),%edx\n\t"       /* dispatcher */
                    "movl $0,%fs:0x1f8\n\t"
-                   "leal 12(%eax),%esp\n\t"
+                   "leal 0x30(%eax),%esp\n\t"
                    "jmp *%edx" )
 
 /**********************************************************************
@@ -1897,14 +1932,14 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, void *stack_ptr,
     }
     else
     {
-        TRACE( "returning to user mode ip=%08x ret=%08x\n", frame->ret_addr, rec->ExceptionCode );
+        TRACE( "returning to user mode ip=%08x ret=%08x\n", frame->eip, rec->ExceptionCode );
         EAX_sig(sigcontext) = rec->ExceptionCode;
         EBX_sig(sigcontext) = frame->ebx;
         ESI_sig(sigcontext) = frame->esi;
         EDI_sig(sigcontext) = frame->edi;
         EBP_sig(sigcontext) = frame->ebp;
-        ESP_sig(sigcontext) = (DWORD)&frame->ret_addr;
-        EIP_sig(sigcontext) = frame->thunk_addr;
+        ESP_sig(sigcontext) = frame->esp;
+        EIP_sig(sigcontext) = frame->eip;
         x86_thread_data()->syscall_frame = NULL;
     }
     return TRUE;
@@ -2490,6 +2525,15 @@ void signal_init_process(void)
  error:
     perror("sigaction");
     exit(1);
+}
+
+
+/**********************************************************************
+ *		signal_init_syscalls
+ */
+void *signal_init_syscalls(void)
+{
+    return __wine_syscall_dispatcher;
 }
 
 /**********************************************************************

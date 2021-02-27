@@ -1613,11 +1613,15 @@ static void add_statement(struct sltg_typelib *typelib, const statement_t *stmt)
 
     case STMT_TYPEDEF:
     {
-        const type_list_t *type_entry = stmt->u.type_list;
-        for (; type_entry; type_entry = type_entry->next)
+        typeref_t *ref;
+
+        if (!stmt->u.type_list)
+            break;
+
+        LIST_FOR_EACH_ENTRY(ref, stmt->u.type_list, typeref_t, entry)
         {
             /* in old style typelibs all types are public */
-            add_type_typeinfo(typelib, type_entry->type);
+            add_type_typeinfo(typelib, ref->type);
         }
         break;
     }

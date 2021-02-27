@@ -35,14 +35,6 @@
 #include <sys/socket.h>
 #endif
 
-#ifdef HAVE_NETINET_IN_H
-#include <netinet/in.h>
-#endif
-
-#ifdef HAVE_ARPA_INET_H
-#include <arpa/inet.h>
-#endif
-
 #ifdef HAVE_NET_IF_H
 #include <net/if.h>
 #endif
@@ -73,6 +65,10 @@
 
 #ifdef HAVE_NET_IF_TYPES_H
 #include <net/if_types.h>
+#endif
+
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
 #endif
 
 #ifdef HAVE_IFADDRS_H
@@ -1106,15 +1102,3 @@ ULONG v6addressesFromIndex(IF_INDEX index, SOCKET_ADDRESS **addrs, ULONG *num_ad
 }
 
 #endif
-
-char *toIPAddressString(unsigned int addr, char string[16])
-{
-  if (string) {
-    struct in_addr iAddr;
-
-    iAddr.s_addr = addr;
-    /* extra-anal, just to make auditors happy */
-    lstrcpynA(string, inet_ntoa(iAddr), 16);
-  }
-  return string;
-}

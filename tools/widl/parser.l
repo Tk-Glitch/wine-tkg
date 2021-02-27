@@ -276,7 +276,9 @@ static const struct keyword keywords[] = {
 	{"coclass",         tCOCLASS,        0},
 	{"const",           tCONST,          0},
 	{"cpp_quote",       tCPPQUOTE,       0},
+	{"declare",         tDECLARE,        1},
 	{"default",         tDEFAULT,        0},
+	{"delegate",        tDELEGATE,       1},
 	{"dispinterface",   tDISPINTERFACE,  0},
 	{"double",          tDOUBLE,         0},
 	{"enum",            tENUM,           0},
@@ -645,7 +647,7 @@ static void warning_enable(int warning)
         }
 }
 
-int do_warning(char *toggle, warning_list_t *wnum)
+int do_warning(const char *toggle, warning_list_t *wnum)
 {
     warning_t *warning, *next;
     int ret = 1;
@@ -658,7 +660,7 @@ int do_warning(char *toggle, warning_list_t *wnum)
     if(!strcmp(toggle, "disable"))
         LIST_FOR_EACH_ENTRY(warning, wnum, warning_t, entry)
             warning_disable(warning->num);
-    else if(!strcmp(toggle, "enable"))
+    else if(!strcmp(toggle, "enable") || !strcmp(toggle, "default"))
         LIST_FOR_EACH_ENTRY(warning, wnum, warning_t, entry)
             warning_enable(warning->num);
     else

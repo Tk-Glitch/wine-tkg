@@ -21,26 +21,18 @@
 #ifndef __GST_PRIVATE_INCLUDED__
 #define __GST_PRIVATE_INCLUDED__
 
+#include <assert.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <gst/gst.h>
-#include <gst/video/video.h>
-#include <gst/audio/audio.h>
 
 #define COBJMACROS
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
-#include "windef.h"
-#include "winbase.h"
-#include "wtypes.h"
-#include "winuser.h"
 #include "dshow.h"
-#include "strmif.h"
-#include "mfobjects.h"
+#include "mfidl.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/strmbase.h"
 
 typedef enum
@@ -128,42 +120,10 @@ struct wg_format
             } format;
 
             uint32_t channels;
+            uint32_t channel_mask; /* In WinMM format. */
             uint32_t rate;
         } audio;
     } u;
-};
-
-struct wg_parser
-{
-    BOOL (*init_gst)(struct wg_parser *parser);
-
-    struct wg_parser_stream **streams;
-    unsigned int stream_count;
-
-    GstElement *container;
-    GstBus *bus;
-    GstPad *my_src, *their_sink;
-
-    guint64 file_size, start_offset, next_offset, stop_offset;
-
-    pthread_t push_thread;
-
-    pthread_mutex_t mutex;
-
-    pthread_cond_t init_cond;
-    bool no_more_pads, has_duration, error;
-
-    pthread_cond_t read_cond, read_done_cond;
-    struct
-    {
-        GstBuffer *buffer;
-        uint64_t offset;
-        uint32_t size;
-        bool done;
-        GstFlowReturn ret;
-    } read_request;
-
-    bool flushing, sink_connected;
 };
 
 enum wg_parser_event_type
@@ -179,30 +139,21 @@ struct wg_parser_event
     enum wg_parser_event_type type;
     union
     {
-        GstBuffer *buffer;
         struct
         {
-            uint64_t position, stop;
-            double rate;
+            /* pts and duration are in 100-nanosecond units. */
+            ULONGLONG pts, duration;
+            uint32_t size;
+            bool discontinuity, preroll, delta, has_pts, has_duration;
+        } buffer;
+        struct
+        {
+            ULONGLONG position, stop;
+            DOUBLE rate;
         } segment;
     } u;
 };
-
-struct wg_parser_stream
-{
-    struct wg_parser *parser;
-
-    GstPad *their_src, *post_sink, *post_src, *my_sink;
-    GstElement *flip;
-    struct wg_format preferred_format, current_format;
-
-    pthread_cond_t event_cond, event_empty_cond;
-    struct wg_parser_event event;
-
-    bool flushing, eos, enabled, has_caps;
-
-    uint64_t duration;
-};
+C_ASSERT(sizeof(struct wg_parser_event) == 40);
 
 struct unix_funcs
 {
@@ -211,6 +162,38 @@ struct unix_funcs
     struct wg_parser *(CDECL *wg_mpeg_audio_parser_create)(void);
     struct wg_parser *(CDECL *wg_wave_parser_create)(void);
     void (CDECL *wg_parser_destroy)(struct wg_parser *parser);
+
+    HRESULT (CDECL *wg_parser_connect)(struct wg_parser *parser, uint64_t file_size);
+    void (CDECL *wg_parser_disconnect)(struct wg_parser *parser);
+
+    void (CDECL *wg_parser_begin_flush)(struct wg_parser *parser);
+    void (CDECL *wg_parser_end_flush)(struct wg_parser *parser);
+
+    bool (CDECL *wg_parser_get_read_request)(struct wg_parser *parser,
+            void **data, uint64_t *offset, uint32_t *size);
+    void (CDECL *wg_parser_complete_read_request)(struct wg_parser *parser, bool ret);
+
+    void (CDECL *wg_parser_set_unlimited_buffering)(struct wg_parser *parser);
+
+    uint32_t (CDECL *wg_parser_get_stream_count)(struct wg_parser *parser);
+    struct wg_parser_stream *(CDECL *wg_parser_get_stream)(struct wg_parser *parser, uint32_t index);
+
+    void (CDECL *wg_parser_stream_get_preferred_format)(struct wg_parser_stream *stream, struct wg_format *format);
+    void (CDECL *wg_parser_stream_enable)(struct wg_parser_stream *stream, const struct wg_format *format);
+    void (CDECL *wg_parser_stream_disable)(struct wg_parser_stream *stream);
+
+    bool (CDECL *wg_parser_stream_get_event)(struct wg_parser_stream *stream, struct wg_parser_event *event);
+    bool (CDECL *wg_parser_stream_copy_buffer)(struct wg_parser_stream *stream,
+            void *data, uint32_t offset, uint32_t size);
+    void (CDECL *wg_parser_stream_release_buffer)(struct wg_parser_stream *stream);
+    void (CDECL *wg_parser_stream_notify_qos)(struct wg_parser_stream *stream,
+            bool underflow, double proportion, int64_t diff, uint64_t timestamp);
+
+    /* Returns the duration in 100-nanosecond units. */
+    uint64_t (CDECL *wg_parser_stream_get_duration)(struct wg_parser_stream *stream);
+    /* start_pos and stop_pos are in 100-nanosecond units. */
+    bool (CDECL *wg_parser_stream_seek)(struct wg_parser_stream *stream, double rate,
+            uint64_t start_pos, uint64_t stop_pos, DWORD start_flags, DWORD stop_flags);
 };
 
 extern const struct unix_funcs *unix_funcs;
@@ -229,14 +212,11 @@ void start_dispatch_thread(void) DECLSPEC_HIDDEN;
 extern HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj) DECLSPEC_HIDDEN;
 extern HRESULT mfplat_DllRegisterServer(void) DECLSPEC_HIDDEN;
 
-HRESULT winegstreamer_stream_handler_create(REFIID riid, void **obj) DECLSPEC_HIDDEN;
-IMFMediaType *mf_media_type_from_caps(const GstCaps *caps) DECLSPEC_HIDDEN;
-GstCaps *caps_from_mf_media_type(IMFMediaType *type) DECLSPEC_HIDDEN;
-IMFSample *mf_sample_from_gst_buffer(GstBuffer *in) DECLSPEC_HIDDEN;
+IMFMediaType *mf_media_type_from_wg_format(const struct wg_format *format) DECLSPEC_HIDDEN;
+void mf_media_type_to_wg_format(IMFMediaType *type, struct wg_format *format) DECLSPEC_HIDDEN;
 
 HRESULT winegstreamer_stream_handler_create(REFIID riid, void **obj) DECLSPEC_HIDDEN;
 
 HRESULT audio_converter_create(REFIID riid, void **ret) DECLSPEC_HIDDEN;
 
-gboolean gst_wine_yuvfixup_plugin_init(void) DECLSPEC_HIDDEN;
 #endif /* __GST_PRIVATE_INCLUDED__ */

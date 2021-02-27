@@ -287,28 +287,29 @@ int CDECL _isnanf( float num )
     return (u.i & 0x7fffffff) > 0x7f800000;
 }
 
+static float asinf_R(float z)
+{
+    /* coefficients for R(x^2) */
+    static const float p1 = 1.66666672e-01,
+                 p2 = -5.11644611e-02,
+                 p3 = -1.21124933e-02,
+                 p4 = -3.58742251e-03,
+                 q1 = -7.56982703e-01;
+
+    float p, q;
+    p = z * (p1 + z * (p2 + z * (p3 + z * p4)));
+    q = 1.0f + z * q1;
+    return p / q;
+}
+
 /*********************************************************************
  *      acosf (MSVCRT.@)
  *
  * Copied from musl: src/math/acosf.c
  */
-static float acosf_R(float z)
-{
-    static const float pS0 = 1.6666586697e-01,
-                 pS1 = -4.2743422091e-02,
-                 pS2 = -8.6563630030e-03,
-                 qS1 = -7.0662963390e-01;
-
-    float p, q;
-    p = z * (pS0 + z * (pS1 + z * pS2));
-    q = 1.0f + z * qS1;
-    return p / q;
-}
-
 float CDECL acosf( float x )
 {
-    static const float pio2_hi = 1.5707962513e+00,
-                 pio2_lo = 7.5497894159e-08;
+    static const double pio2_lo = 6.12323399573676603587e-17;
 
     float z, w, s, c, df;
     unsigned int hx, ix;
@@ -319,7 +320,7 @@ float CDECL acosf( float x )
     if (ix >= 0x3f800000) {
         if (ix == 0x3f800000) {
             if (hx >> 31)
-                return 2 * pio2_lo + 2 * pio2_hi + 7.5231638453e-37;
+                return M_PI;
             return 0;
         }
         if (isnan(x)) return x;
@@ -328,23 +329,22 @@ float CDECL acosf( float x )
     /* |x| < 0.5 */
     if (ix < 0x3f000000) {
         if (ix <= 0x32800000) /* |x| < 2**-26 */
-            return pio2_lo + pio2_hi + 7.5231638453e-37;
-        return pio2_hi - (x - (pio2_lo - x * acosf_R(x * x)));
+            return M_PI_2;
+        return M_PI_2 - (x - (pio2_lo - x * asinf_R(x * x)));
     }
     /* x < -0.5 */
     if (hx >> 31) {
         z = (1 + x) * 0.5f;
         s = sqrtf(z);
-        w = acosf_R(z) * s - pio2_lo;
-        return 2 * (pio2_hi - (s + w));
+        return M_PI - 2 * (s + ((double)s * asinf_R(z)));
     }
     /* x > 0.5 */
     z = (1 - x) * 0.5f;
     s = sqrtf(z);
-    hx = *(unsigned int*)&s & 0xfffff000;
+    hx = *(unsigned int*)&s & 0xffff0000;
     df = *(float*)&hx;
     c = (z - df * df) / (s + df);
-    w = acosf_R(z) * s + c;
+    w = asinf_R(z) * s + c;
     return 2 * (df + w);
 }
 
@@ -353,26 +353,13 @@ float CDECL acosf( float x )
  *
  * Copied from musl: src/math/asinf.c
  */
-static float asinf_R(float z)
-{
-    /* coefficients for R(x^2) */
-    static const float pS0 =  1.6666586697e-01,
-                 pS1 = -4.2743422091e-02,
-                 pS2 = -8.6563630030e-03,
-                 qS1 = -7.0662963390e-01;
-
-    float p, q;
-    p = z * (pS0 + z * (pS1 + z * pS2));
-    q = 1.0f + z * qS1;
-    return p / q;
-}
-
 float CDECL asinf( float x )
 {
     static const double pio2 = 1.570796326794896558e+00;
+    static const float pio4_hi = 0.785398125648;
+    static const float pio2_lo = 7.54978941586e-08;
 
-    double s;
-    float z;
+    float s, z, f, c;
     unsigned int hx, ix;
 
     hx = *(unsigned int*)&x;
@@ -391,8 +378,11 @@ float CDECL asinf( float x )
     }
     /* 1 > |x| >= 0.5 */
     z = (1 - fabsf(x)) * 0.5f;
-    s = sqrt(z);
-    x = pio2 - 2 * (s + s * asinf_R(z));
+    s = sqrtf(z);
+    /* f+c = sqrt(z) */
+    *(unsigned int*)&f = *(unsigned int*)&s & 0xffff0000;
+    c = (z - f * f) / (s + f);
+    x = pio4_hi - (2 * s * asinf_R(z) - (pio2_lo - 2 * c) - (pio4_hi - 2 * f));
     if (hx >> 31)
         return -x;
     return x;

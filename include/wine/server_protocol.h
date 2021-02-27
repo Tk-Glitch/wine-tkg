@@ -699,6 +699,7 @@ enum irp_type
     IRP_CALL_WRITE,
     IRP_CALL_FLUSH,
     IRP_CALL_IOCTL,
+    IRP_CALL_VOLUME,
     IRP_CALL_FREE,
     IRP_CALL_CANCEL
 };
@@ -751,6 +752,14 @@ typedef union
         int              __pad;
         client_ptr_t     file;
     } ioctl;
+    struct
+    {
+        enum irp_type    type;
+        unsigned int     info_class;
+        data_size_t      out_size;
+        int              __pad;
+        client_ptr_t     file;
+    } volume;
     struct
     {
         enum irp_type    type;
@@ -1276,9 +1285,6 @@ struct dup_handle_reply
     int          closed;
     char __pad_20[4];
 };
-#define DUP_HANDLE_CLOSE_SOURCE  DUPLICATE_CLOSE_SOURCE
-#define DUP_HANDLE_SAME_ACCESS   DUPLICATE_SAME_ACCESS
-#define DUP_HANDLE_MAKE_GLOBAL   0x80000000
 
 
 
@@ -1717,13 +1723,16 @@ struct get_volume_info_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    async_data_t async;
     unsigned int info_class;
-    char __pad_20[4];
+    char __pad_60[4];
 };
 struct get_volume_info_reply
 {
     struct reply_header __header;
+    obj_handle_t wait;
     /* VARARG(data,bytes); */
+    char __pad_12[4];
 };
 
 
@@ -1953,6 +1962,7 @@ struct map_view_request
     mem_size_t   size;
     file_pos_t   start;
     /* VARARG(image,pe_image_info); */
+    /* VARARG(name,unicode_str); */
 };
 struct map_view_reply
 {
@@ -2376,7 +2386,10 @@ struct load_registry_reply
 struct unload_registry_request
 {
     struct request_header __header;
-    obj_handle_t hkey;
+    obj_handle_t parent;
+    unsigned int attributes;
+    /* VARARG(name,unicode_str); */
+    char __pad_20[4];
 };
 struct unload_registry_reply
 {
@@ -2547,8 +2560,8 @@ struct get_selector_entry_reply
 struct add_atom_request
 {
     struct request_header __header;
-    obj_handle_t  table;
     /* VARARG(name,unicode_str); */
+    char __pad_12[4];
 };
 struct add_atom_reply
 {
@@ -2562,9 +2575,7 @@ struct add_atom_reply
 struct delete_atom_request
 {
     struct request_header __header;
-    obj_handle_t  table;
     atom_t        atom;
-    char __pad_20[4];
 };
 struct delete_atom_reply
 {
@@ -2576,8 +2587,8 @@ struct delete_atom_reply
 struct find_atom_request
 {
     struct request_header __header;
-    obj_handle_t table;
     /* VARARG(name,unicode_str); */
+    char __pad_12[4];
 };
 struct find_atom_reply
 {
@@ -2591,9 +2602,7 @@ struct find_atom_reply
 struct get_atom_information_request
 {
     struct request_header __header;
-    obj_handle_t table;
     atom_t       atom;
-    char __pad_20[4];
 };
 struct get_atom_information_reply
 {
@@ -2603,48 +2612,6 @@ struct get_atom_information_reply
     data_size_t  total;
     /* VARARG(name,unicode_str); */
     char __pad_20[4];
-};
-
-
-
-struct set_atom_information_request
-{
-    struct request_header __header;
-    obj_handle_t table;
-    atom_t       atom;
-    int          pinned;
-};
-struct set_atom_information_reply
-{
-    struct reply_header __header;
-};
-
-
-
-struct empty_atom_table_request
-{
-    struct request_header __header;
-    obj_handle_t table;
-    int          if_pinned;
-    char __pad_20[4];
-};
-struct empty_atom_table_reply
-{
-    struct reply_header __header;
-};
-
-
-
-struct init_atom_table_request
-{
-    struct request_header __header;
-    int          entries;
-};
-struct init_atom_table_reply
-{
-    struct reply_header __header;
-    obj_handle_t table;
-    char __pad_12[4];
 };
 
 
@@ -4622,6 +4589,8 @@ struct handle_info
     process_id_t owner;
     obj_handle_t handle;
     unsigned int access;
+    unsigned int attributes;
+    unsigned int type;
 };
 
 
@@ -4820,19 +4789,6 @@ struct get_object_types_reply
 
 
 
-struct get_token_impersonation_level_request
-{
-    struct request_header __header;
-    obj_handle_t   handle;
-};
-struct get_token_impersonation_level_reply
-{
-    struct reply_header __header;
-    int            impersonation_level;
-    char __pad_12[4];
-};
-
-
 struct allocate_locally_unique_id_request
 {
     struct request_header __header;
@@ -5000,20 +4956,36 @@ struct make_process_system_reply
 
 
 
-struct get_token_statistics_request
+struct get_token_info_request
 {
     struct request_header __header;
     obj_handle_t   handle;
 };
-struct get_token_statistics_reply
+struct get_token_info_reply
 {
     struct reply_header __header;
     luid_t         token_id;
     luid_t         modified_id;
     int            primary;
     int            impersonation_level;
+    int            elevation;
     int            group_count;
     int            privilege_count;
+    char __pad_44[4];
+};
+
+
+
+struct create_linked_token_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+};
+struct create_linked_token_reply
+{
+    struct reply_header __header;
+    obj_handle_t   linked;
+    char __pad_12[4];
 };
 
 
@@ -5754,9 +5726,6 @@ enum request
     REQ_delete_atom,
     REQ_find_atom,
     REQ_get_atom_information,
-    REQ_set_atom_information,
-    REQ_empty_atom_table,
-    REQ_init_atom_table,
     REQ_get_msg_queue,
     REQ_set_queue_fd,
     REQ_set_queue_mask,
@@ -5884,7 +5853,6 @@ enum request
     REQ_get_object_info,
     REQ_get_object_type,
     REQ_get_object_types,
-    REQ_get_token_impersonation_level,
     REQ_allocate_locally_unique_id,
     REQ_create_device_manager,
     REQ_create_device,
@@ -5896,7 +5864,8 @@ enum request
     REQ_release_kernel_object,
     REQ_get_kernel_object_handle,
     REQ_make_process_system,
-    REQ_get_token_statistics,
+    REQ_get_token_info,
+    REQ_create_linked_token,
     REQ_create_completion,
     REQ_open_completion,
     REQ_add_completion,
@@ -6050,9 +6019,6 @@ union generic_request
     struct delete_atom_request delete_atom_request;
     struct find_atom_request find_atom_request;
     struct get_atom_information_request get_atom_information_request;
-    struct set_atom_information_request set_atom_information_request;
-    struct empty_atom_table_request empty_atom_table_request;
-    struct init_atom_table_request init_atom_table_request;
     struct get_msg_queue_request get_msg_queue_request;
     struct set_queue_fd_request set_queue_fd_request;
     struct set_queue_mask_request set_queue_mask_request;
@@ -6180,7 +6146,6 @@ union generic_request
     struct get_object_info_request get_object_info_request;
     struct get_object_type_request get_object_type_request;
     struct get_object_types_request get_object_types_request;
-    struct get_token_impersonation_level_request get_token_impersonation_level_request;
     struct allocate_locally_unique_id_request allocate_locally_unique_id_request;
     struct create_device_manager_request create_device_manager_request;
     struct create_device_request create_device_request;
@@ -6192,7 +6157,8 @@ union generic_request
     struct release_kernel_object_request release_kernel_object_request;
     struct get_kernel_object_handle_request get_kernel_object_handle_request;
     struct make_process_system_request make_process_system_request;
-    struct get_token_statistics_request get_token_statistics_request;
+    struct get_token_info_request get_token_info_request;
+    struct create_linked_token_request create_linked_token_request;
     struct create_completion_request create_completion_request;
     struct open_completion_request open_completion_request;
     struct add_completion_request add_completion_request;
@@ -6344,9 +6310,6 @@ union generic_reply
     struct delete_atom_reply delete_atom_reply;
     struct find_atom_reply find_atom_reply;
     struct get_atom_information_reply get_atom_information_reply;
-    struct set_atom_information_reply set_atom_information_reply;
-    struct empty_atom_table_reply empty_atom_table_reply;
-    struct init_atom_table_reply init_atom_table_reply;
     struct get_msg_queue_reply get_msg_queue_reply;
     struct set_queue_fd_reply set_queue_fd_reply;
     struct set_queue_mask_reply set_queue_mask_reply;
@@ -6474,7 +6437,6 @@ union generic_reply
     struct get_object_info_reply get_object_info_reply;
     struct get_object_type_reply get_object_type_reply;
     struct get_object_types_reply get_object_types_reply;
-    struct get_token_impersonation_level_reply get_token_impersonation_level_reply;
     struct allocate_locally_unique_id_reply allocate_locally_unique_id_reply;
     struct create_device_manager_reply create_device_manager_reply;
     struct create_device_reply create_device_reply;
@@ -6486,7 +6448,8 @@ union generic_reply
     struct release_kernel_object_reply release_kernel_object_reply;
     struct get_kernel_object_handle_reply get_kernel_object_handle_reply;
     struct make_process_system_reply make_process_system_reply;
-    struct get_token_statistics_reply get_token_statistics_reply;
+    struct get_token_info_reply get_token_info_reply;
+    struct create_linked_token_reply create_linked_token_reply;
     struct create_completion_reply create_completion_reply;
     struct open_completion_reply open_completion_reply;
     struct add_completion_reply add_completion_reply;
@@ -6531,7 +6494,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 676
+#define SERVER_PROTOCOL_VERSION 686
 
 /* ### protocol_version end ### */
 

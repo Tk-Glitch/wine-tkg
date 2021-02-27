@@ -36,6 +36,8 @@ attr_list_t *check_interface_attrs(const char *name, attr_list_t *attrs);
 attr_list_t *check_module_attrs(const char *name, attr_list_t *attrs);
 attr_list_t *check_runtimeclass_attrs(const char *name, attr_list_t *attrs);
 
+type_t *find_parameterized_type(type_t *type, typeref_list_t *params);
+
 type_t *type_new_function(var_list_t *args);
 type_t *type_new_pointer(type_t *ref);
 type_t *type_new_alias(const decl_spec_t *t, const char *name);
@@ -53,21 +55,34 @@ type_t *type_new_encapsulated_union(char *name, var_t *switch_field, var_t *unio
 type_t *type_new_bitfield(type_t *field_type, const expr_t *bits);
 type_t *type_runtimeclass_declare(char *name, struct namespace *namespace);
 type_t *type_interface_declare(char *name, struct namespace *namespace);
-type_t *type_interface_define(type_t *iface, attr_list_t *attrs, type_t *inherit, statement_list_t *stmts, ifref_list_t *requires);
+type_t *type_interface_define(type_t *iface, attr_list_t *attrs, type_t *inherit, statement_list_t *stmts, typeref_list_t *requires);
 type_t *type_dispinterface_declare(char *name);
 type_t *type_dispinterface_define(type_t *iface, attr_list_t *attrs, var_list_t *props, var_list_t *methods);
 type_t *type_dispinterface_define_from_iface(type_t *dispiface, attr_list_t *attrs, type_t *iface);
 type_t *type_module_define(type_t* module, attr_list_t *attrs, statement_list_t *stmts);
-type_t *type_coclass_define(type_t *coclass, attr_list_t *attrs, ifref_list_t *ifaces);
-type_t *type_runtimeclass_define(type_t *runtimeclass, attr_list_t *attrs, ifref_list_t *ifaces);
+type_t *type_coclass_define(type_t *coclass, attr_list_t *attrs, typeref_list_t *ifaces);
+type_t *type_runtimeclass_define(type_t *runtimeclass, attr_list_t *attrs, typeref_list_t *ifaces);
 type_t *type_apicontract_declare(char *name, struct namespace *namespace);
 type_t *type_apicontract_define(type_t *apicontract, attr_list_t *attrs);
-type_t *type_parameterized_interface_declare(char *name, struct namespace *namespace, type_list_t *params);
-type_t *type_parameterized_interface_define(type_t *type, attr_list_t *attrs, type_t *inherit, statement_list_t *stmts, ifref_list_t *requires);
+type_t *type_delegate_declare(char *name, struct namespace *namespace);
+type_t *type_delegate_define(type_t *delegate, attr_list_t *attrs, statement_list_t *stmts);
+type_t *type_parameterized_interface_declare(char *name, struct namespace *namespace, typeref_list_t *params);
+type_t *type_parameterized_interface_define(type_t *type, attr_list_t *attrs, type_t *inherit, statement_list_t *stmts, typeref_list_t *requires);
+type_t *type_parameterized_delegate_declare(char *name, struct namespace *namespace, typeref_list_t *params);
+type_t *type_parameterized_delegate_define(type_t *type, attr_list_t *attrs, statement_list_t *stmts);
+type_t *type_parameterized_type_specialize_partial(type_t *type, typeref_list_t *params);
+type_t *type_parameterized_type_specialize_declare(type_t *type, typeref_list_t *params);
+type_t *type_parameterized_type_specialize_define(type_t *type);
 int type_is_equal(const type_t *type1, const type_t *type2);
 const char *type_get_name(const type_t *type, enum name_type name_type);
+const char *type_get_qualified_name(const type_t *type, enum name_type name_type);
 char *gen_name(void);
 extern int is_attr(const attr_list_t *list, enum attr_type t);
+
+typeref_t *make_typeref(type_t *type);
+typeref_list_t *append_typeref(typeref_list_t *list, typeref_t *ref);
+attr_t *make_attrp(enum attr_type type, void *val);
+attr_list_t *append_attr(attr_list_t *list, attr_t *attr);
 
 /* FIXME: shouldn't need to export this */
 type_t *duptype(type_t *t, int dupname);
@@ -77,6 +92,14 @@ static inline type_t *type_get_real_type(const type_t *type)
 {
     if (type->type_type == TYPE_ALIAS)
         return type_get_real_type(type->details.alias.aliasee.type);
+    else
+        return (type_t *)type;
+}
+
+static inline type_t *type_parameterized_type_get_real_type(const type_t *type)
+{
+    if (type->type_type == TYPE_PARAMETERIZED_TYPE)
+        return type_parameterized_type_get_real_type(type->details.parameterized.type);
     else
         return (type_t *)type;
 }
@@ -183,7 +206,7 @@ static inline type_t *type_iface_get_inherit(const type_t *type)
     return type->details.iface->inherit;
 }
 
-static inline ifref_list_t *type_iface_get_requires(const type_t *type)
+static inline typeref_list_t *type_iface_get_requires(const type_t *type)
 {
     type = type_get_real_type(type);
     assert(type_get_type(type) == TYPE_INTERFACE);
@@ -246,6 +269,7 @@ static inline int type_is_complete(const type_t *type)
     case TYPE_ARRAY:
     case TYPE_BITFIELD:
     case TYPE_RUNTIMECLASS:
+    case TYPE_DELEGATE:
         return TRUE;
     case TYPE_APICONTRACT:
     case TYPE_PARAMETERIZED_TYPE:
@@ -341,14 +365,14 @@ static inline type_t *type_alias_get_aliasee_type(const type_t *type)
     return type->details.alias.aliasee.type;
 }
 
-static inline ifref_list_t *type_coclass_get_ifaces(const type_t *type)
+static inline typeref_list_t *type_coclass_get_ifaces(const type_t *type)
 {
     type = type_get_real_type(type);
     assert(type_get_type(type) == TYPE_COCLASS);
     return type->details.coclass.ifaces;
 }
 
-static inline ifref_list_t *type_runtimeclass_get_ifaces(const type_t *type)
+static inline typeref_list_t *type_runtimeclass_get_ifaces(const type_t *type)
 {
     type = type_get_real_type(type);
     assert(type_get_type(type) == TYPE_RUNTIMECLASS);
@@ -357,15 +381,22 @@ static inline ifref_list_t *type_runtimeclass_get_ifaces(const type_t *type)
 
 static inline type_t *type_runtimeclass_get_default_iface(const type_t *type)
 {
-    ifref_list_t *ifaces = type_runtimeclass_get_ifaces(type);
-    ifref_t *entry;
+    typeref_list_t *ifaces = type_runtimeclass_get_ifaces(type);
+    typeref_t *ref;
 
     if (!ifaces) return NULL;
-    LIST_FOR_EACH_ENTRY(entry, ifaces, ifref_t, entry)
-        if (is_attr(entry->attrs, ATTR_DEFAULT))
-            return entry->iface;
+    LIST_FOR_EACH_ENTRY(ref, ifaces, typeref_t, entry)
+        if (is_attr(ref->attrs, ATTR_DEFAULT))
+            return ref->type;
 
     return NULL;
+}
+
+static inline type_t *type_delegate_get_iface(const type_t *type)
+{
+    type = type_get_real_type(type);
+    assert(type_get_type(type) == TYPE_DELEGATE);
+    return type->details.delegate.iface;
 }
 
 static inline const decl_spec_t *type_pointer_get_ref(const type_t *type)
@@ -378,6 +409,12 @@ static inline const decl_spec_t *type_pointer_get_ref(const type_t *type)
 static inline type_t *type_pointer_get_ref_type(const type_t *type)
 {
     return type_pointer_get_ref(type)->type;
+}
+
+static inline type_t *type_pointer_get_root_type(type_t *type)
+{
+    for (; type && type->type_type == TYPE_POINTER; type = type_pointer_get_ref_type(type)) {}
+    return type;
 }
 
 static inline type_t *type_bitfield_get_field(const type_t *type)

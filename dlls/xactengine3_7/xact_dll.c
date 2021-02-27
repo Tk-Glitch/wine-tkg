@@ -1144,7 +1144,6 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareWave(IXACT3Engine *iface,
     if (!wave)
     {
         FACTWave_Destroy(fwave);
-        ERR("Failed to allocate XACT3WaveImpl!");
         return E_OUTOFMEMORY;
     }
 

@@ -1,24 +1,18 @@
 MODULE    = winegstreamer.dll
-IMPORTS   = strmiids uuid ole32 mfuuid
+IMPORTS   = strmbase strmiids uuid ole32 mfuuid
 DELAYIMPORTS = mfplat
 EXTRAINCL = $(GSTREAMER_CFLAGS)
 EXTRALIBS = $(GSTREAMER_LIBS) $(PTHREAD_LIBS)
-PARENTSRC = ../strmbase
+
+EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	audioconvert.c \
-	filter.c \
-	gst_cbs.c \
-	gstdemux.c \
 	main.c \
 	media_source.c \
-	mediatype.c \
 	mfplat.c \
-	pin.c \
-	qualitycontrol.c \
-	seeking.c \
-	wg_parser.c \
-	yuvfixup.c
+	quartz_parser.c \
+	wg_parser.c
 
 IDL_SRCS = \
 	winegstreamer_classes.idl

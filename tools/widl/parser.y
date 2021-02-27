@@ -45,20 +45,15 @@ struct _import_t
 };
 
 static str_list_t *append_str(str_list_t *list, char *str);
-static type_list_t *append_type(type_list_t *list, type_t *type);
-static attr_list_t *append_attr(attr_list_t *list, attr_t *attr);
 static attr_list_t *append_attr_list(attr_list_t *new_list, attr_list_t *old_list);
 static decl_spec_t *make_decl_spec(type_t *type, decl_spec_t *left, decl_spec_t *right,
         enum storage_class stgclass, enum type_qualifier qual, enum function_specifier func_specifier);
 static attr_t *make_attr(enum attr_type type);
 static attr_t *make_attrv(enum attr_type type, unsigned int val);
-static attr_t *make_attrp(enum attr_type type, void *val);
 static attr_t *make_custom_attr(UUID *id, expr_t *pval);
 static expr_list_t *append_expr(expr_list_t *list, expr_t *expr);
 static var_t *declare_var(attr_list_t *attrs, decl_spec_t *decl_spec, declarator_t *decl, int top);
 static var_list_t *set_var_types(attr_list_t *attrs, decl_spec_t *decl_spec, declarator_list_t *decls);
-static ifref_list_t *append_ifref(ifref_list_t *list, ifref_t *iface);
-static ifref_t *make_ifref(type_t *iface);
 static var_list_t *append_var_list(var_list_t *list, var_list_t *vars);
 static declarator_list_t *append_declarator(declarator_list_t *list, declarator_t *p);
 static declarator_t *make_declarator(var_t *var);
@@ -80,6 +75,7 @@ static void pop_namespace(const char *name);
 static void push_parameters_namespace(const char *name);
 static void pop_parameters_namespace(const char *name);
 
+static statement_list_t *append_parameterized_type_stmts(statement_list_t *stmts);
 static void check_arg_attrs(const var_t *arg);
 static void check_statements(const statement_list_t *stmts, int is_inside_library);
 static void check_all_user_types(const statement_list_t *stmts);
@@ -107,6 +103,8 @@ static statement_t *make_statement_importlib(const char *str);
 static statement_t *make_statement_module(type_t *type);
 static statement_t *make_statement_typedef(var_list_t *names, int declonly);
 static statement_t *make_statement_import(const char *str);
+static statement_t *make_statement_parameterized_type(type_t *type, typeref_list_t *params);
+static statement_t *make_statement_delegate(type_t *ret, var_list_t *args);
 static statement_list_t *append_statement(statement_list_t *list, statement_t *stmt);
 static statement_list_t *append_statements(statement_list_t *, statement_list_t *);
 static attr_list_t *append_attribs(attr_list_t *, attr_list_t *);
@@ -117,6 +115,7 @@ static struct namespace global_namespace = {
 
 static struct namespace *current_namespace = &global_namespace;
 static struct namespace *parameters_namespace = NULL;
+static statement_list_t *parameterized_type_stmts = NULL;
 
 static typelib_t *current_typelib;
 
@@ -128,7 +127,6 @@ static typelib_t *current_typelib;
 	expr_t *expr;
 	expr_list_t *expr_list;
 	type_t *type;
-	type_list_t *type_list;
 	var_t *var;
 	var_list_t *var_list;
 	declarator_t *declarator;
@@ -137,8 +135,8 @@ static typelib_t *current_typelib;
 	statement_list_t *stmt_list;
 	warning_t *warning;
 	warning_list_t *warning_list;
-	ifref_t *ifref;
-	ifref_list_t *ifref_list;
+	typeref_t *typeref;
+	typeref_list_t *typeref_list;
 	char *str;
 	UUID *uuid;
 	unsigned int num;
@@ -179,7 +177,9 @@ static typelib_t *current_typelib;
 %token tCONTRACTVERSION
 %token tCONTROL tCPPQUOTE
 %token tCUSTOM
+%token tDECLARE
 %token tDECODE tDEFAULT tDEFAULTBIND
+%token tDELEGATE
 %token tDEFAULTCOLLELEM
 %token tDEFAULTVALUE
 %token tDEFAULTVTABLE
@@ -278,6 +278,7 @@ static typelib_t *current_typelib;
 %type <expr_list> m_exprs /* exprs expr_list */ expr_list_int_const
 %type <expr> contract_req
 %type <expr> static_attr
+%type <type> delegatedef
 %type <stgclass> storage_cls_spec
 %type <type_qualifier> type_qualifier m_type_qual_list
 %type <function_specifier> function_specifier
@@ -292,10 +293,13 @@ static typelib_t *current_typelib;
 %type <type> enumdef structdef uniondef typedecl
 %type <type> type unqualified_type qualified_type
 %type <type> type_parameter
-%type <type_list> type_parameters
-%type <ifref> class_interface
-%type <ifref_list> class_interfaces
-%type <ifref_list> requires required_types
+%type <typeref_list> type_parameters
+%type <type> parameterized_type
+%type <type> parameterized_type_arg
+%type <typeref_list> parameterized_type_args
+%type <typeref> class_interface
+%type <typeref_list> class_interfaces
+%type <typeref_list> requires required_types
 %type <var> arg ne_union_field union_field s_field case enum enum_member declaration
 %type <var> funcdef
 %type <var_list> m_args arg_list args dispint_meths
@@ -317,6 +321,8 @@ static typelib_t *current_typelib;
 %type <typelib> library_start librarydef
 %type <statement> statement typedef pragma_warning
 %type <stmt_list> gbl_statements imp_statements int_statements
+%type <stmt_list> decl_block decl_statements
+%type <stmt_list> imp_decl_block imp_decl_statements
 %type <warning_list> warnings
 %type <num> allocate_option_list allocate_option
 %type <namespace> namespace_pfx
@@ -340,7 +346,8 @@ static typelib_t *current_typelib;
 
 %%
 
-input: gbl_statements m_acf			{ check_statements($1, FALSE);
+input: gbl_statements m_acf			{ $1 = append_parameterized_type_stmts($1);
+						  check_statements($1, FALSE);
 						  check_all_user_types($1);
 						  write_header($1);
 						  write_id_data($1);
@@ -356,12 +363,29 @@ input: gbl_statements m_acf			{ check_statements($1, FALSE);
 
 m_acf: /* empty */ | aACF acf_statements
 
+decl_statements:				{ $$ = NULL; }
+	| decl_statements tINTERFACE qualified_type '<' parameterized_type_args '>' ';'
+						{ parameterized_type_stmts = append_statement(parameterized_type_stmts, make_statement_parameterized_type($3, $5));
+						  $$ = append_statement($1, make_statement_reference(type_parameterized_type_specialize_declare($3, $5)));
+						}
+	;
+
+decl_block: tDECLARE '{' decl_statements '}' { $$ = $3; }
+
+imp_decl_statements:				{ $$ = NULL; }
+	| imp_decl_statements tINTERFACE qualified_type '<' parameterized_type_args '>' ';'
+						{ $$ = append_statement($1, make_statement_reference(type_parameterized_type_specialize_declare($3, $5))); }
+	;
+
+imp_decl_block: tDECLARE '{' imp_decl_statements '}' { $$ = $3; }
+
 gbl_statements:					{ $$ = NULL; }
 	| gbl_statements namespacedef '{' { push_namespace($2); } gbl_statements '}'
 						{ pop_namespace($2); $$ = append_statements($1, $5); }
 	| gbl_statements interface ';'		{ $$ = append_statement($1, make_statement_reference($2)); }
 	| gbl_statements dispinterface ';'	{ $$ = append_statement($1, make_statement_reference($2)); }
 	| gbl_statements interfacedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
+	| gbl_statements delegatedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
 	| gbl_statements coclass ';'		{ $$ = $1;
 						  reg_type($2, $2->name, current_namespace, 0);
 						}
@@ -377,6 +401,7 @@ gbl_statements:					{ $$ = NULL; }
 	| gbl_statements moduledef		{ $$ = append_statement($1, make_statement_module($2)); }
 	| gbl_statements librarydef		{ $$ = append_statement($1, make_statement_library($2)); }
 	| gbl_statements statement		{ $$ = append_statement($1, $2); }
+	| gbl_statements decl_block		{ $$ = append_statements($1, $2); }
 	;
 
 imp_statements:					{ $$ = NULL; }
@@ -385,6 +410,7 @@ imp_statements:					{ $$ = NULL; }
 	| imp_statements namespacedef '{' { push_namespace($2); } imp_statements '}'
 						{ pop_namespace($2); $$ = append_statements($1, $5); }
 	| imp_statements interfacedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
+	| imp_statements delegatedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
 	| imp_statements coclass ';'		{ $$ = $1; reg_type($2, $2->name, current_namespace, 0); }
 	| imp_statements coclassdef		{ $$ = append_statement($1, make_statement_type_decl($2));
 						  reg_type($2, $2->name, current_namespace, 0);
@@ -399,6 +425,7 @@ imp_statements:					{ $$ = NULL; }
 	| imp_statements statement		{ $$ = append_statement($1, $2); }
 	| imp_statements importlib		{ $$ = append_statement($1, make_statement_importlib($2)); }
 	| imp_statements librarydef		{ $$ = append_statement($1, make_statement_library($2)); }
+	| imp_statements imp_decl_block		{ $$ = append_statements($1, $2); }
 	;
 
 int_statements:					{ $$ = NULL; }
@@ -425,7 +452,12 @@ pragma_warning: tPRAGMA_WARNING '(' aIDENTIFIER ':' warnings ')'
                       $$ = NULL;
                       result = do_warning($3, $5);
                       if(!result)
-                          error_loc("expected \"disable\" or \"enable\"\n");
+                          error_loc("expected \"disable\", \"enable\" or \"default\"\n");
+                  }
+              | tPRAGMA_WARNING '(' tDEFAULT ':' warnings ')'
+                  {
+                      $$ = NULL;
+                      do_warning("default", $5);
                   }
 	;
 
@@ -909,6 +941,24 @@ qualified_type:
 	| namespace_pfx typename		{ $$ = find_type_or_error($1, $2); }
 	;
 
+parameterized_type: qualified_type '<' parameterized_type_args '>'
+						{ $$ = find_parameterized_type($1, $3); }
+	;
+
+parameterized_type_arg:
+	  base_type				{ $$ = $1; }
+	| qualified_type			{ $$ = $1; }
+	| qualified_type '*'			{ $$ = type_new_pointer($1); }
+	| parameterized_type			{ $$ = $1; }
+	| parameterized_type '*'		{ $$ = type_new_pointer($1); }
+	;
+
+parameterized_type_args:
+	  parameterized_type_arg		{ $$ = append_typeref(NULL, make_typeref($1)); }
+	| parameterized_type_args ',' parameterized_type_arg
+						{ $$ = append_typeref($1, make_typeref($3)); }
+	;
+
 coclass:  tCOCLASS typename			{ $$ = type_coclass_declare($2); }
 	;
 
@@ -934,12 +984,12 @@ namespacedef: tNAMESPACE aIDENTIFIER		{ $$ = $2; }
 	;
 
 class_interfaces:				{ $$ = NULL; }
-	| class_interfaces class_interface	{ $$ = append_ifref( $1, $2 ); }
+	| class_interfaces class_interface	{ $$ = append_typeref( $1, $2 ); }
 	;
 
 class_interface:
-	  m_attributes interfaceref ';'		{ $$ = make_ifref($2); $$->attrs = $1; }
-	| m_attributes dispinterfaceref ';'	{ $$ = make_ifref($2); $$->attrs = $1; }
+	  m_attributes interfaceref ';'		{ $$ = make_typeref($2); $$->attrs = $1; }
+	| m_attributes dispinterfaceref ';'	{ $$ = make_typeref($2); $$->attrs = $1; }
 	;
 
 dispinterface: tDISPINTERFACE typename		{ $$ = type_dispinterface_declare($2); }
@@ -965,14 +1015,15 @@ dispinterfacedef:
 
 inherit:					{ $$ = NULL; }
 	| ':' qualified_type                    { $$ = $2; }
+	| ':' parameterized_type		{ $$ = $2; }
 	;
 
 type_parameter: typename			{ $$ = get_type(TYPE_PARAMETER, $1, parameters_namespace, 0); }
 	;
 
 type_parameters:
-	  type_parameter			{ $$ = append_type(NULL, $1); }
-	| type_parameters ',' type_parameter	{ $$ = append_type($1, $3); }
+	  type_parameter			{ $$ = append_typeref(NULL, make_typeref($1)); }
+	| type_parameters ',' type_parameter	{ $$ = append_typeref($1, make_typeref($3)); }
 	;
 
 interface:
@@ -981,9 +1032,23 @@ interface:
 						{ $$ = type_parameterized_interface_declare($2, current_namespace, $5); }
 	;
 
+delegatedef: m_attributes tDELEGATE type ident '(' m_args ')' semicolon_opt
+						{ $$ = type_delegate_declare($4->name, current_namespace);
+						  $$ = type_delegate_define($$, $1, append_statement(NULL, make_statement_delegate($3, $6)));
+						}
+	| m_attributes tDELEGATE type ident
+	  '<' { push_parameters_namespace($4->name); } type_parameters '>'
+	  '(' m_args ')' { pop_parameters_namespace($4->name); } semicolon_opt
+						{ $$ = type_parameterized_delegate_declare($4->name, current_namespace, $7);
+						  $$ = type_parameterized_delegate_define($$, $1, append_statement(NULL, make_statement_delegate($3, $10)));
+						}
+	;
+
 required_types:
-	  qualified_type			{ $$ = append_ifref(NULL, make_ifref($1)); }
-	| required_types ',' qualified_type	{ $$ = append_ifref($1, make_ifref($3)); }
+	  qualified_type			{ $$ = append_typeref(NULL, make_typeref($1)); }
+	| parameterized_type			{ $$ = append_typeref(NULL, make_typeref($1)); }
+	| required_types ',' qualified_type	{ $$ = append_typeref($1, make_typeref($3)); }
+	| required_types ',' parameterized_type	{ $$ = append_typeref($1, make_typeref($3)); }
 
 requires:					{ $$ = NULL; }
 	| tREQUIRES required_types		{ $$ = $2; }
@@ -1207,6 +1272,7 @@ unqualified_type:
 type:
 	  unqualified_type
 	| namespace_pfx typename		{ $$ = find_type_or_error($1, $2); }
+	| parameterized_type			{ $$ = $1; }
 	;
 
 typedef: m_attributes tTYPEDEF m_attributes decl_spec declarator_list
@@ -1439,7 +1505,7 @@ static attr_t *make_attrv(enum attr_type type, unsigned int val)
   return a;
 }
 
-static attr_t *make_attrp(enum attr_type type, void *val)
+attr_t *make_attrp(enum attr_type type, void *val)
 {
   attr_t *a = xmalloc(sizeof(attr_t));
   a->type = type;
@@ -1809,34 +1875,24 @@ static var_list_t *set_var_types(attr_list_t *attrs, decl_spec_t *decl_spec, dec
   return var_list;
 }
 
-static ifref_list_t *append_ifref(ifref_list_t *list, ifref_t *iface)
+typeref_list_t *append_typeref(typeref_list_t *list, typeref_t *ref)
 {
-    if (!iface) return list;
+    if (!ref) return list;
     if (!list)
     {
         list = xmalloc( sizeof(*list) );
         list_init( list );
     }
-    list_add_tail( list, &iface->entry );
+    list_add_tail( list, &ref->entry );
     return list;
 }
 
-static ifref_t *make_ifref(type_t *iface)
+typeref_t *make_typeref(type_t *type)
 {
-  ifref_t *l = xmalloc(sizeof(ifref_t));
-  l->iface = iface;
-  l->attrs = NULL;
-  return l;
-}
-
-static type_list_t *append_type(type_list_t *list, type_t *type)
-{
-    type_list_t *entry;
-    if (!type) return list;
-    entry = xmalloc( sizeof(*entry) );
-    entry->type = type;
-    entry->next = list;
-    return entry;
+    typeref_t *ref = xmalloc(sizeof(typeref_t));
+    ref->type = type;
+    ref->attrs = NULL;
+    return ref;
 }
 
 var_list_t *append_var(var_list_t *list, var_t *var)
@@ -2017,9 +2073,15 @@ type_t *reg_type(type_t *type, const char *name, struct namespace *namespace, in
   nt = xmalloc(sizeof(struct rtype));
   nt->name = name;
   if (is_global_namespace(namespace))
+  {
     type->c_name = name;
+    type->qualified_name = name;
+  }
   else
+  {
     type->c_name = format_namespace(namespace, "__x_", "_C", name, use_abi_namespace ? "ABI" : NULL);
+    type->qualified_name = format_namespace(namespace, "", "::", name, use_abi_namespace ? "ABI" : NULL);
+  }
   nt->type = type;
   nt->t = t;
   nt->next = namespace->type_hash[hash];
@@ -2349,7 +2411,7 @@ struct allowed_attr allowed_attr[] =
     /* ATTR_WIREMARSHAL */         { 1, 0, 0,  0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "wire_marshal" },
 };
 
-static attr_list_t *append_attr(attr_list_t *list, attr_t *attr)
+attr_list_t *append_attr(attr_list_t *list, attr_t *attr)
 {
     attr_t *attr_existing;
     if (!attr) return list;
@@ -2622,6 +2684,7 @@ static int is_allowed_conf_type(const type_t *type)
     case TYPE_INTERFACE:
     case TYPE_BITFIELD:
     case TYPE_RUNTIMECLASS:
+    case TYPE_DELEGATE:
         return FALSE;
     case TYPE_APICONTRACT:
     case TYPE_PARAMETERIZED_TYPE:
@@ -3053,6 +3116,29 @@ static void check_async_uuid(type_t *iface)
     iface->details.iface->async_iface = async_iface->details.iface->async_iface = async_iface;
 }
 
+static statement_list_t *append_parameterized_type_stmts(statement_list_t *stmts)
+{
+    statement_t *stmt, *next;
+
+    if (stmts && parameterized_type_stmts) LIST_FOR_EACH_ENTRY_SAFE(stmt, next, parameterized_type_stmts, statement_t, entry)
+    {
+        switch(stmt->type)
+        {
+        case STMT_TYPE:
+            stmt->u.type = type_parameterized_type_specialize_define(stmt->u.type);
+            stmt->declonly = FALSE;
+            list_remove(&stmt->entry);
+            stmts = append_statement(stmts, stmt);
+            break;
+        default:
+            assert(0); /* should not be there */
+            break;
+        }
+    }
+
+    return stmts;
+}
+
 static void check_statements(const statement_list_t *stmts, int is_inside_library)
 {
     const statement_t *stmt;
@@ -3209,29 +3295,38 @@ static statement_t *make_statement_typedef(declarator_list_t *decls, int declonl
 {
     declarator_t *decl, *next;
     statement_t *stmt;
-    type_list_t **type_list;
 
     if (!decls) return NULL;
 
     stmt = make_statement(STMT_TYPEDEF);
     stmt->u.type_list = NULL;
-    type_list = &stmt->u.type_list;
     stmt->declonly = declonly;
 
     LIST_FOR_EACH_ENTRY_SAFE( decl, next, decls, declarator_t, entry )
     {
         var_t *var = decl->var;
         type_t *type = find_type_or_error(current_namespace, var->name);
-        *type_list = xmalloc(sizeof(type_list_t));
-        (*type_list)->type = type;
-        (*type_list)->next = NULL;
-
-        type_list = &(*type_list)->next;
+        stmt->u.type_list = append_typeref(stmt->u.type_list, make_typeref(type));
         free(decl);
         free(var);
     }
 
     return stmt;
+}
+
+static statement_t *make_statement_parameterized_type(type_t *type, typeref_list_t *params)
+{
+    statement_t *stmt = make_statement(STMT_TYPE);
+    stmt->u.type = type_parameterized_type_specialize_partial(type, params);
+    return stmt;
+}
+
+static statement_t *make_statement_delegate(type_t *ret, var_list_t *args)
+{
+    declarator_t *decl = make_declarator(make_var(xstrdup("Invoke")));
+    decl_spec_t *spec = make_decl_spec(ret, NULL, NULL, STG_NONE, 0, 0);
+    append_chain_type(decl, type_new_function(args), 0);
+    return make_statement_declaration(declare_var(NULL, spec, decl, FALSE));
 }
 
 static statement_list_t *append_statements(statement_list_t *l1, statement_list_t *l2)
@@ -3267,4 +3362,22 @@ void init_loc_info(loc_info_t *i)
     i->input_name = input_name ? input_name : "stdin";
     i->line_number = line_number;
     i->near_text = parser_text;
+}
+
+type_t *find_parameterized_type(type_t *type, typeref_list_t *params)
+{
+    char *name = format_parameterized_type_name(type, params);
+
+    if (parameters_namespace)
+    {
+        assert(type->type_type == TYPE_PARAMETERIZED_TYPE);
+        type = type_parameterized_type_specialize_partial(type, params);
+    }
+    else if ((type = find_type(name, type->namespace, 0)))
+        assert(type->type_type != TYPE_PARAMETERIZED_TYPE);
+    else
+        error_loc("parameterized type '%s' not declared\n", name);
+
+    free(name);
+    return type;
 }

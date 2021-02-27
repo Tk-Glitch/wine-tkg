@@ -354,6 +354,7 @@ enum typegen_type typegen_detect_type(const type_t *type, const attr_list_t *att
     case TYPE_POINTER:
         if (type_get_type(type_pointer_get_ref_type(type)) == TYPE_INTERFACE ||
             type_get_type(type_pointer_get_ref_type(type)) == TYPE_RUNTIMECLASS ||
+            type_get_type(type_pointer_get_ref_type(type)) == TYPE_DELEGATE ||
             (type_get_type(type_pointer_get_ref_type(type)) == TYPE_VOID && is_attr(attrs, ATTR_IIDIS)))
             return TGT_IFACE_POINTER;
         else if (is_aliaschain_attr(type_pointer_get_ref_type(type), ATTR_CONTEXTHANDLE))
@@ -375,6 +376,7 @@ enum typegen_type typegen_detect_type(const type_t *type, const attr_list_t *att
     case TYPE_ALIAS:
     case TYPE_BITFIELD:
     case TYPE_RUNTIMECLASS:
+    case TYPE_DELEGATE:
         break;
     case TYPE_APICONTRACT:
     case TYPE_PARAMETERIZED_TYPE:
@@ -1978,6 +1980,7 @@ unsigned int type_memsize_and_alignment(const type_t *t, unsigned int *align)
     case TYPE_RUNTIMECLASS:
     case TYPE_PARAMETERIZED_TYPE:
     case TYPE_PARAMETER:
+    case TYPE_DELEGATE:
         /* these types should not be encountered here due to language
          * restrictions (interface, void, coclass, module), logical
          * restrictions (alias - due to type_get_type call above) or
@@ -2083,6 +2086,7 @@ static unsigned int type_buffer_alignment(const type_t *t)
     case TYPE_RUNTIMECLASS:
     case TYPE_PARAMETERIZED_TYPE:
     case TYPE_PARAMETER:
+    case TYPE_DELEGATE:
         /* these types should not be encountered here due to language
          * restrictions (interface, void, coclass, module), logical
          * restrictions (alias - due to type_get_type call above) or
@@ -3747,13 +3751,13 @@ static void process_tfs_iface(type_t *iface, FILE *file, int indent, unsigned in
         }
         case STMT_TYPEDEF:
         {
-            const type_list_t *type_entry;
-            for (type_entry = stmt->u.type_list; type_entry; type_entry = type_entry->next)
+            typeref_t *ref;
+            if (stmt->u.type_list) LIST_FOR_EACH_ENTRY(ref, stmt->u.type_list, typeref_t, entry)
             {
-                if (is_attr(type_entry->type->attrs, ATTR_ENCODE)
-                    || is_attr(type_entry->type->attrs, ATTR_DECODE))
-                    type_entry->type->typestring_offset = write_type_tfs( file,
-                            type_entry->type->attrs, type_entry->type, type_entry->type->name,
+                if (is_attr(ref->type->attrs, ATTR_ENCODE)
+                    || is_attr(ref->type->attrs, ATTR_DECODE))
+                    ref->type->typestring_offset = write_type_tfs( file,
+                            ref->type->attrs, ref->type, ref->type->name,
                             TYPE_CONTEXT_CONTAINER, offset);
             }
             break;

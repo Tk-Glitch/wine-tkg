@@ -27,7 +27,6 @@
 #include "winternl.h"
 #include "unixlib.h"
 #include "wine/debug.h"
-#include "wine/server.h"
 #include "wine/asm.h"
 
 #define DECLARE_CRITICAL_SECTION(cs) \
@@ -85,8 +84,6 @@ extern const WCHAR syswow64_dir[] DECLSPEC_HIDDEN;
 
 extern void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *) DECLSPEC_HIDDEN;
 extern const struct unix_funcs *unix_funcs DECLSPEC_HIDDEN;
-
-extern void init_directories(void) DECLSPEC_HIDDEN;
 
 extern struct _KUSER_SHARED_DATA *user_shared_data DECLSPEC_HIDDEN;
 

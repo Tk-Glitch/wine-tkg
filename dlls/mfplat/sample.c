@@ -72,6 +72,8 @@ struct sample_allocator
         unsigned int height;
         D3DFORMAT d3d9_format;
         DXGI_FORMAT dxgi_format;
+        unsigned int usage;
+        unsigned int bindflags;
         unsigned int buffer_count;
     } frame_desc;
 
@@ -184,17 +186,20 @@ static ULONG WINAPI sample_tracked_Release(IMFSample *iface)
     HRESULT hr;
 
     EnterCriticalSection(&sample->attributes.cs);
-    refcount = InterlockedDecrement(&sample->attributes.ref);
-    if (sample->tracked_result && sample->tracked_refcount == refcount)
+    if (sample->tracked_result && sample->tracked_refcount == (sample->attributes.ref - 1))
     {
-        /* Call could fail if queue system is not initialized, it's not critical. */
-        if (FAILED(hr = RtwqInvokeCallback(sample->tracked_result)))
-            WARN("Failed to invoke tracking callback, hr %#x.\n", hr);
-        IRtwqAsyncResult_Release(sample->tracked_result);
+        IRtwqAsyncResult *tracked_result = sample->tracked_result;
         sample->tracked_result = NULL;
         sample->tracked_refcount = 0;
+
+        /* Call could fail if queue system is not initialized, it's not critical. */
+        if (FAILED(hr = RtwqInvokeCallback(tracked_result)))
+            WARN("Failed to invoke tracking callback, hr %#x.\n", hr);
+        IRtwqAsyncResult_Release(tracked_result);
     }
     LeaveCriticalSection(&sample->attributes.cs);
+
+    refcount = InterlockedDecrement(&sample->attributes.ref);
 
     TRACE("%p, refcount %u.\n", iface, refcount);
 
@@ -1174,8 +1179,6 @@ static ULONG WINAPI sample_allocator_Release(IMFVideoSampleAllocatorEx *iface)
             IDirect3DDeviceManager9_Release(allocator->d3d9_device_manager);
         if (allocator->dxgi_device_manager)
             IMFDXGIDeviceManager_Release(allocator->dxgi_device_manager);
-        if (allocator->attributes)
-            IMFAttributes_Release(allocator->attributes);
         sample_allocator_set_media_type(allocator, NULL);
         sample_allocator_set_attributes(allocator, NULL);
         sample_allocator_release_samples(allocator);
@@ -1345,8 +1348,12 @@ static HRESULT sample_allocator_allocate_sample(struct sample_allocator *allocat
             desc.Format = allocator->frame_desc.dxgi_format;
             desc.SampleDesc.Count = 1;
             desc.SampleDesc.Quality = 0;
-            desc.Usage = 0;
-            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+            desc.Usage = allocator->frame_desc.usage;
+            desc.BindFlags = allocator->frame_desc.bindflags;
+            if (desc.Usage == D3D11_USAGE_DYNAMIC)
+                desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+            else if (desc.Usage == D3D11_USAGE_STAGING)
+                desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE | D3D11_CPU_ACCESS_READ;
 
             if (SUCCEEDED(hr = ID3D11Device_CreateTexture2D(service->d3d11_device, &desc, NULL, &texture)))
             {
@@ -1395,14 +1402,31 @@ static HRESULT sample_allocator_initialize(struct sample_allocator *allocator, u
     if (sample_count > max_sample_count)
         return E_INVALIDARG;
 
+    allocator->frame_desc.usage = D3D11_USAGE_DEFAULT;
+    if (attributes)
+    {
+        IMFAttributes_GetUINT32(attributes, &MF_SA_BUFFERS_PER_SAMPLE, &allocator->frame_desc.buffer_count);
+        IMFAttributes_GetUINT32(attributes, &MF_SA_D3D11_USAGE, &allocator->frame_desc.usage);
+    }
+
+    if (allocator->frame_desc.usage == D3D11_USAGE_IMMUTABLE || allocator->frame_desc.usage > D3D11_USAGE_STAGING)
+        return E_INVALIDARG;
+
+    if (allocator->frame_desc.usage == D3D11_USAGE_DEFAULT)
+        allocator->frame_desc.bindflags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    else if (allocator->frame_desc.usage == D3D11_USAGE_DYNAMIC)
+        allocator->frame_desc.bindflags = D3D11_BIND_SHADER_RESOURCE;
+    else
+        allocator->frame_desc.bindflags = 0;
+
+    if (attributes)
+        IMFAttributes_GetUINT32(attributes, &MF_SA_D3D11_BINDFLAGS, &allocator->frame_desc.bindflags);
+
     sample_allocator_set_media_type(allocator, media_type);
     sample_allocator_set_attributes(allocator, attributes);
 
     sample_count = max(1, sample_count);
     max_sample_count = max(1, max_sample_count);
-
-    if (attributes)
-        IMFAttributes_GetUINT32(attributes, &MF_SA_BUFFERS_PER_SAMPLE, &allocator->frame_desc.buffer_count);
 
     allocator->frame_desc.d3d9_format = subtype.Data1;
     allocator->frame_desc.dxgi_format = MFMapDX9FormatToDXGIFormat(allocator->frame_desc.d3d9_format);

@@ -26,6 +26,8 @@ HRESULT Connection_create( void ** ) DECLSPEC_HIDDEN;
 HRESULT Recordset_create( void ** ) DECLSPEC_HIDDEN;
 HRESULT Stream_create( void ** ) DECLSPEC_HIDDEN;
 
+HRESULT create_command_text(IUnknown *session, BSTR command, ICommandText **cmd_text) DECLSPEC_HIDDEN;
+
 static inline void *heap_realloc_zero( void *mem, SIZE_T len )
 {
     if (!mem) return HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, len );
@@ -39,5 +41,18 @@ static inline WCHAR *strdupW( const WCHAR *src )
     if ((dst = heap_alloc( (lstrlenW( src ) + 1) * sizeof(*dst) ))) lstrcpyW( dst, src );
     return dst;
 }
+
+typedef enum tid_t {
+    ADORecordsetConstruction_tid,
+    Command_tid,
+    Connection_tid,
+    Field_tid,
+    Fields_tid,
+    Recordset_tid,
+    Stream_tid,
+    LAST_tid
+} tid_t;
+
+HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo) DECLSPEC_HIDDEN;
 
 #endif /* _WINE_MSADO15_PRIVATE_H_ */

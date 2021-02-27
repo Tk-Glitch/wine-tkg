@@ -1,8 +1,6 @@
 MODULE    = dpnhupnp.dll
 
-EXTRADLLFLAGS = -mno-cygwin
+EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
-	dpnhupnp_main.c
 
 RC_SRCS = version.rc

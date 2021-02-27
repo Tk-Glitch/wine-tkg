@@ -53,6 +53,9 @@
 #include "unix_private.h"
 #include "fsync.h"
 
+
+#define TICKS_1601_TO_1970 (SECS_1601_TO_1970 * TICKSPERSEC)
+
 WINE_DEFAULT_DEBUG_CHANNEL(fsync);
 
 #include "pshpack4.h"
@@ -93,13 +96,11 @@ static long nr_futex2_wait, nr_futex2_waitv, nr_futex2_wake;
 
 #define FUTEX_32 2
 #define FUTEX_SHARED_FLAG 8
+#define FUTEX_CLOCK_REALTIME 256
 
 struct futex_waitv
 {
     void *uaddr;
-#if __SIZEOF_POINTER__ == 4
-    int pad;
-#endif
     unsigned int val;
     unsigned int flags;
 };
@@ -126,9 +127,12 @@ static inline int futex_wait( int *addr, int val, const ULONGLONG *end )
         if (end)
         {
             struct timespec64 timespec;
-            timespec.tv_sec = *end / (ULONGLONG)TICKSPERSEC;
-            timespec.tv_nsec = (*end % TICKSPERSEC) * 100;
-            return syscall( nr_futex2_wait, addr, val, FUTEX_32 | FUTEX_SHARED_FLAG, &timespec );
+            ULONGLONG tmp = *end - TICKS_1601_TO_1970;
+            timespec.tv_sec = tmp / (ULONGLONG)TICKSPERSEC;
+            timespec.tv_nsec = (tmp % TICKSPERSEC) * 100;
+
+            return syscall( nr_futex2_wait, addr, val, FUTEX_32 |
+			    FUTEX_SHARED_FLAG | FUTEX_CLOCK_REALTIME, &timespec );
         }
         else
         {
@@ -164,9 +168,6 @@ static inline void futex_vector_set( union futex_vector *vector, unsigned int in
     {
         vector->futex2[index].uaddr = addr;
         vector->futex2[index].val = val;
-#if __SIZEOF_POINTER__ == 4
-        vector->futex2[index].pad = 0;
-#endif
         vector->futex2[index].flags = FUTEX_32 | FUTEX_SHARED_FLAG;
     }
     else
@@ -187,9 +188,11 @@ static inline int futex_wait_multiple( union futex_vector *vector, unsigned int 
         if (end)
         {
             struct timespec64 timespec;
-            timespec.tv_sec = *end / (ULONGLONG)TICKSPERSEC;
-            timespec.tv_nsec = (*end % TICKSPERSEC) * 100;
-            return syscall( nr_futex2_waitv, &vector->futex2, count, 0, &timespec );
+            ULONGLONG tmp = *end - TICKS_1601_TO_1970;
+            timespec.tv_sec = tmp / (ULONGLONG)TICKSPERSEC;
+            timespec.tv_nsec = (tmp % TICKSPERSEC) * 100;
+
+            return syscall( nr_futex2_waitv, &vector->futex2, count, FUTEX_CLOCK_REALTIME, &timespec );
         }
         else
         {

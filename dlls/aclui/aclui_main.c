@@ -36,6 +36,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(aclui);
 
+
+HPROPSHEETPAGE WINAPI CreateSecurityPage(LPSECURITYINFO psi);
+
 /* the aclui.h files does not contain the necessary COBJMACROS */
 #define ISecurityInformation_AddRef(This) (This)->lpVtbl->AddRef(This)
 #define ISecurityInformation_Release(This) (This)->lpVtbl->Release(This)

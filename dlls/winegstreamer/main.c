@@ -19,9 +19,8 @@
  */
 
 #include "gst_private.h"
+#include "winternl.h"
 #include "rpcproxy.h"
-#include "wine/debug.h"
-#include "wine/unicode.h"
 
 #include "initguid.h"
 #include "gst_guids.h"
@@ -30,15 +29,6 @@ static HINSTANCE winegstreamer_instance;
 LONG object_locks;
 
 WINE_DEFAULT_DEBUG_CHANNEL(gstreamer);
-
-static const WCHAR wGstreamer_Splitter[] =
-{'G','S','t','r','e','a','m','e','r',' ','s','p','l','i','t','t','e','r',' ','f','i','l','t','e','r',0};
-static const WCHAR wave_parserW[] =
-{'W','a','v','e',' ','P','a','r','s','e','r',0};
-static const WCHAR avi_splitterW[] =
-{'A','V','I',' ','S','p','l','i','t','t','e','r',0};
-static const WCHAR mpeg_splitterW[] =
-{'M','P','E','G','-','I',' ','S','t','r','e','a','m',' ','S','p','l','i','t','t','e','r',0};
 
 const struct unix_funcs *unix_funcs = NULL;
 
@@ -183,8 +173,6 @@ static BOOL CALLBACK init_gstreamer_proc(INIT_ONCE *once, void *param, void **ct
     if (!handle)
         ERR("Failed to pin module %p.\n", winegstreamer_instance);
 
-    start_dispatch_thread();
-
     return TRUE;
 }
 
@@ -193,8 +181,6 @@ BOOL init_gstreamer(void)
     static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
 
     InitOnceExecuteOnce(&once, init_gstreamer_proc, NULL, NULL);
-
-    gst_wine_yuvfixup_plugin_init();
 
     return TRUE;
 }
@@ -340,11 +326,12 @@ HRESULT WINAPI DllRegisterServer(void)
             &IID_IFilterMapper2, (void **)&mapper)))
         return hr;
 
-    IFilterMapper2_RegisterFilter(mapper, &CLSID_AviSplitter, avi_splitterW, NULL, NULL, NULL, &reg_avi_splitter);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_AviSplitter, L"AVI Splitter", NULL, NULL, NULL, &reg_avi_splitter);
     IFilterMapper2_RegisterFilter(mapper, &CLSID_decodebin_parser,
-            wGstreamer_Splitter, NULL, NULL, NULL, &reg_decodebin_parser);
-    IFilterMapper2_RegisterFilter(mapper, &CLSID_MPEG1Splitter, mpeg_splitterW, NULL, NULL, NULL, &reg_mpeg_splitter);
-    IFilterMapper2_RegisterFilter(mapper, &CLSID_WAVEParser, wave_parserW, NULL, NULL, NULL, &reg_wave_parser);
+            L"GStreamer splitter filter", NULL, NULL, NULL, &reg_decodebin_parser);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_MPEG1Splitter,
+            L"MPEG-I Stream Splitter", NULL, NULL, NULL, &reg_mpeg_splitter);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_WAVEParser, L"Wave Parser", NULL, NULL, NULL, &reg_wave_parser);
 
     IFilterMapper2_Release(mapper);
 

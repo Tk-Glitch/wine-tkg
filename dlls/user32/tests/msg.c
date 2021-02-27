@@ -5445,7 +5445,7 @@ static void test_messages(void)
     {
         ShowWindow(hwnd, SW_RESTORE);
         flush_events();
-        ok_sequence(WmShowRestoreMinOverlappedSeq, "ShowWindow(SW_RESTORE):overlapped", TRUE);
+        ok_sequence(WmShowRestoreMinOverlappedSeq, "ShowWindow(SW_RESTORE):overlapped", FALSE);
         flush_sequence();
     }
 
@@ -14010,6 +14010,7 @@ static const struct message WmCreateDialogParamSeq_1[] = {
     { WM_QUERYNEWPALETTE, sent|optional },
     { WM_PALETTEISCHANGING, sent|optional },
     { WM_WINDOWPOSCHANGING, sent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam|optional, SWP_NOMOVE|SWP_NOSIZE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE|SWP_NOREDRAW },
     { WM_ACTIVATEAPP, sent|wparam, 1 },
     { WM_NCACTIVATE, sent },
     { WM_ACTIVATE, sent|wparam, 1 },

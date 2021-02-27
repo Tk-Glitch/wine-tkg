@@ -381,6 +381,12 @@ static void dump_irp_params( const char *prefix, const irp_params_t *data )
         dump_uint64( ",file=", &data->ioctl.file );
         fputc( '}', stderr );
         break;
+    case IRP_CALL_VOLUME:
+        fprintf( stderr, "%s{VOLUME,class=%u,out_size=%u", prefix,
+                 data->volume.info_class, data->volume.out_size );
+        dump_uint64( ",file=", &data->volume.file );
+        fputc( '}', stderr );
+        break;
     case IRP_CALL_FREE:
         fprintf( stderr, "%s{FREE", prefix );
         dump_uint64( ",obj=", &data->free.obj );
@@ -1312,7 +1318,7 @@ static void dump_varargs_pe_image_info( const char *prefix, data_size_t size )
              info.header_size, info.file_size, info.checksum );
     dump_client_cpu( ",cpu=", &info.cpu );
     fputc( '}', stderr );
-    remove_data( size );
+    remove_data( min( size, sizeof(info) ));
 }
 
 static void dump_varargs_rawinput_devices(const char *prefix, data_size_t size )
@@ -1340,8 +1346,8 @@ static void dump_varargs_handle_infos( const char *prefix, data_size_t size )
     while (size >= sizeof(*handle))
     {
         handle = cur_data;
-        fprintf( stderr, "{owner=%04x,handle=%04x,access=%08x}",
-                 handle->owner, handle->handle, handle->access );
+        fprintf( stderr, "{owner=%04x,handle=%04x,access=%08x,attributes=%08x,type=%u}",
+                 handle->owner, handle->handle, handle->access, handle->attributes, handle->type );
         size -= sizeof(*handle);
         remove_data( sizeof(*handle) );
         if (size) fputc( ',', stderr );
@@ -2017,12 +2023,14 @@ static void dump_get_file_info_reply( const struct get_file_info_reply *req )
 static void dump_get_volume_info_request( const struct get_volume_info_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    dump_async_data( ", async=", &req->async );
     fprintf( stderr, ", info_class=%08x", req->info_class );
 }
 
 static void dump_get_volume_info_reply( const struct get_volume_info_reply *req )
 {
-    dump_varargs_bytes( " data=", cur_size );
+    fprintf( stderr, " wait=%04x", req->wait );
+    dump_varargs_bytes( ", data=", cur_size );
 }
 
 static void dump_lock_file_request( const struct lock_file_request *req )
@@ -2183,6 +2191,7 @@ static void dump_map_view_request( const struct map_view_request *req )
     dump_uint64( ", size=", &req->size );
     dump_uint64( ", start=", &req->start );
     dump_varargs_pe_image_info( ", image=", cur_size );
+    dump_varargs_unicode_str( ", name=", cur_size );
 }
 
 static void dump_unmap_view_request( const struct unmap_view_request *req )
@@ -2433,7 +2442,9 @@ static void dump_load_registry_request( const struct load_registry_request *req 
 
 static void dump_unload_registry_request( const struct unload_registry_request *req )
 {
-    fprintf( stderr, " hkey=%04x", req->hkey );
+    fprintf( stderr, " parent=%04x", req->parent );
+    fprintf( stderr, ", attributes=%08x", req->attributes );
+    dump_varargs_unicode_str( ", name=", cur_size );
 }
 
 static void dump_save_registry_request( const struct save_registry_request *req )
@@ -2549,8 +2560,7 @@ static void dump_get_selector_entry_reply( const struct get_selector_entry_reply
 
 static void dump_add_atom_request( const struct add_atom_request *req )
 {
-    fprintf( stderr, " table=%04x", req->table );
-    dump_varargs_unicode_str( ", name=", cur_size );
+    dump_varargs_unicode_str( " name=", cur_size );
 }
 
 static void dump_add_atom_reply( const struct add_atom_reply *req )
@@ -2560,14 +2570,12 @@ static void dump_add_atom_reply( const struct add_atom_reply *req )
 
 static void dump_delete_atom_request( const struct delete_atom_request *req )
 {
-    fprintf( stderr, " table=%04x", req->table );
-    fprintf( stderr, ", atom=%04x", req->atom );
+    fprintf( stderr, " atom=%04x", req->atom );
 }
 
 static void dump_find_atom_request( const struct find_atom_request *req )
 {
-    fprintf( stderr, " table=%04x", req->table );
-    dump_varargs_unicode_str( ", name=", cur_size );
+    dump_varargs_unicode_str( " name=", cur_size );
 }
 
 static void dump_find_atom_reply( const struct find_atom_reply *req )
@@ -2577,8 +2585,7 @@ static void dump_find_atom_reply( const struct find_atom_reply *req )
 
 static void dump_get_atom_information_request( const struct get_atom_information_request *req )
 {
-    fprintf( stderr, " table=%04x", req->table );
-    fprintf( stderr, ", atom=%04x", req->atom );
+    fprintf( stderr, " atom=%04x", req->atom );
 }
 
 static void dump_get_atom_information_reply( const struct get_atom_information_reply *req )
@@ -2587,29 +2594,6 @@ static void dump_get_atom_information_reply( const struct get_atom_information_r
     fprintf( stderr, ", pinned=%d", req->pinned );
     fprintf( stderr, ", total=%u", req->total );
     dump_varargs_unicode_str( ", name=", cur_size );
-}
-
-static void dump_set_atom_information_request( const struct set_atom_information_request *req )
-{
-    fprintf( stderr, " table=%04x", req->table );
-    fprintf( stderr, ", atom=%04x", req->atom );
-    fprintf( stderr, ", pinned=%d", req->pinned );
-}
-
-static void dump_empty_atom_table_request( const struct empty_atom_table_request *req )
-{
-    fprintf( stderr, " table=%04x", req->table );
-    fprintf( stderr, ", if_pinned=%d", req->if_pinned );
-}
-
-static void dump_init_atom_table_request( const struct init_atom_table_request *req )
-{
-    fprintf( stderr, " entries=%d", req->entries );
-}
-
-static void dump_init_atom_table_reply( const struct init_atom_table_reply *req )
-{
-    fprintf( stderr, " table=%04x", req->table );
 }
 
 static void dump_get_msg_queue_request( const struct get_msg_queue_request *req )
@@ -4106,16 +4090,6 @@ static void dump_get_object_types_reply( const struct get_object_types_reply *re
     dump_varargs_object_types_info( ", info=", cur_size );
 }
 
-static void dump_get_token_impersonation_level_request( const struct get_token_impersonation_level_request *req )
-{
-    fprintf( stderr, " handle=%04x", req->handle );
-}
-
-static void dump_get_token_impersonation_level_reply( const struct get_token_impersonation_level_reply *req )
-{
-    fprintf( stderr, " impersonation_level=%d", req->impersonation_level );
-}
-
 static void dump_allocate_locally_unique_id_request( const struct allocate_locally_unique_id_request *req )
 {
 }
@@ -4219,19 +4193,30 @@ static void dump_make_process_system_reply( const struct make_process_system_rep
     fprintf( stderr, " event=%04x", req->event );
 }
 
-static void dump_get_token_statistics_request( const struct get_token_statistics_request *req )
+static void dump_get_token_info_request( const struct get_token_info_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
-static void dump_get_token_statistics_reply( const struct get_token_statistics_reply *req )
+static void dump_get_token_info_reply( const struct get_token_info_reply *req )
 {
     dump_luid( " token_id=", &req->token_id );
     dump_luid( ", modified_id=", &req->modified_id );
     fprintf( stderr, ", primary=%d", req->primary );
     fprintf( stderr, ", impersonation_level=%d", req->impersonation_level );
+    fprintf( stderr, ", elevation=%d", req->elevation );
     fprintf( stderr, ", group_count=%d", req->group_count );
     fprintf( stderr, ", privilege_count=%d", req->privilege_count );
+}
+
+static void dump_create_linked_token_request( const struct create_linked_token_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_create_linked_token_reply( const struct create_linked_token_reply *req )
+{
+    fprintf( stderr, " linked=%04x", req->linked );
 }
 
 static void dump_create_completion_request( const struct create_completion_request *req )
@@ -4722,9 +4707,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_delete_atom_request,
     (dump_func)dump_find_atom_request,
     (dump_func)dump_get_atom_information_request,
-    (dump_func)dump_set_atom_information_request,
-    (dump_func)dump_empty_atom_table_request,
-    (dump_func)dump_init_atom_table_request,
     (dump_func)dump_get_msg_queue_request,
     (dump_func)dump_set_queue_fd_request,
     (dump_func)dump_set_queue_mask_request,
@@ -4852,7 +4834,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_object_info_request,
     (dump_func)dump_get_object_type_request,
     (dump_func)dump_get_object_types_request,
-    (dump_func)dump_get_token_impersonation_level_request,
     (dump_func)dump_allocate_locally_unique_id_request,
     (dump_func)dump_create_device_manager_request,
     (dump_func)dump_create_device_request,
@@ -4864,7 +4845,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_release_kernel_object_request,
     (dump_func)dump_get_kernel_object_handle_request,
     (dump_func)dump_make_process_system_request,
-    (dump_func)dump_get_token_statistics_request,
+    (dump_func)dump_get_token_info_request,
+    (dump_func)dump_create_linked_token_request,
     (dump_func)dump_create_completion_request,
     (dump_func)dump_open_completion_request,
     (dump_func)dump_add_completion_request,
@@ -5014,9 +4996,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     (dump_func)dump_find_atom_reply,
     (dump_func)dump_get_atom_information_reply,
-    NULL,
-    NULL,
-    (dump_func)dump_init_atom_table_reply,
     (dump_func)dump_get_msg_queue_reply,
     NULL,
     (dump_func)dump_set_queue_mask_reply,
@@ -5144,7 +5123,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_object_info_reply,
     (dump_func)dump_get_object_type_reply,
     (dump_func)dump_get_object_types_reply,
-    (dump_func)dump_get_token_impersonation_level_reply,
     (dump_func)dump_allocate_locally_unique_id_reply,
     (dump_func)dump_create_device_manager_reply,
     NULL,
@@ -5156,7 +5134,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     (dump_func)dump_get_kernel_object_handle_reply,
     (dump_func)dump_make_process_system_reply,
-    (dump_func)dump_get_token_statistics_reply,
+    (dump_func)dump_get_token_info_reply,
+    (dump_func)dump_create_linked_token_reply,
     (dump_func)dump_create_completion_reply,
     (dump_func)dump_open_completion_reply,
     NULL,
@@ -5306,9 +5285,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "delete_atom",
     "find_atom",
     "get_atom_information",
-    "set_atom_information",
-    "empty_atom_table",
-    "init_atom_table",
     "get_msg_queue",
     "set_queue_fd",
     "set_queue_mask",
@@ -5436,7 +5412,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_object_info",
     "get_object_type",
     "get_object_types",
-    "get_token_impersonation_level",
     "allocate_locally_unique_id",
     "create_device_manager",
     "create_device",
@@ -5448,7 +5423,8 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "release_kernel_object",
     "get_kernel_object_handle",
     "make_process_system",
-    "get_token_statistics",
+    "get_token_info",
+    "create_linked_token",
     "create_completion",
     "open_completion",
     "add_completion",

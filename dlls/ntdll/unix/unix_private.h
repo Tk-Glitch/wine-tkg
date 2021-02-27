@@ -24,6 +24,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include "unixlib.h"
+#include "wine/server.h"
 #include "wine/list.h"
 
 #ifdef __i386__
@@ -102,11 +103,6 @@ extern LONGLONG CDECL fast_RtlGetSystemTimePrecise(void) DECLSPEC_HIDDEN;
 extern NTSTATUS CDECL fast_wait_cv( RTL_CONDITION_VARIABLE *variable, const void *value,
                                     const LARGE_INTEGER *timeout ) DECLSPEC_HIDDEN;
 
-extern NTSTATUS CDECL get_initial_environment( WCHAR **wargv[], WCHAR *env, SIZE_T *size ) DECLSPEC_HIDDEN;
-extern NTSTATUS CDECL get_startup_info( startup_info_t *info, SIZE_T *total_size, SIZE_T *info_size ) DECLSPEC_HIDDEN;
-extern NTSTATUS CDECL get_dynamic_environment( WCHAR *env, SIZE_T *size ) DECLSPEC_HIDDEN;
-extern void CDECL get_initial_directory( UNICODE_STRING *dir ) DECLSPEC_HIDDEN;
-extern void CDECL get_initial_console( RTL_USER_PROCESS_PARAMETERS *params ) DECLSPEC_HIDDEN;
 extern USHORT * CDECL get_unix_codepage_data(void) DECLSPEC_HIDDEN;
 extern void CDECL get_locales( WCHAR *sys, WCHAR *user ) DECLSPEC_HIDDEN;
 extern void CDECL virtual_release_address_space(void) DECLSPEC_HIDDEN;
@@ -136,11 +132,13 @@ extern HANDLE keyed_event DECLSPEC_HIDDEN;
 extern timeout_t server_start_time DECLSPEC_HIDDEN;
 extern sigset_t server_block_set DECLSPEC_HIDDEN;
 extern struct _KUSER_SHARED_DATA *user_shared_data DECLSPEC_HIDDEN;
+extern SYSTEM_CPU_INFORMATION cpu_info DECLSPEC_HIDDEN;
 #ifdef __i386__
 extern struct ldt_copy __wine_ldt_copy DECLSPEC_HIDDEN;
 #endif
 
 extern void init_environment( int argc, char *argv[], char *envp[] ) DECLSPEC_HIDDEN;
+extern void init_startup_info(void) DECLSPEC_HIDDEN;
 extern DWORD ntdll_umbstowcs( const char *src, DWORD srclen, WCHAR *dst, DWORD dstlen ) DECLSPEC_HIDDEN;
 extern int ntdll_wcstoumbs( const WCHAR *src, DWORD srclen, char *dst, DWORD dstlen, BOOL strict ) DECLSPEC_HIDDEN;
 extern char **build_envp( const WCHAR *envW ) DECLSPEC_HIDDEN;
@@ -182,7 +180,8 @@ extern void *anon_mmap_alloc( size_t size, int prot ) DECLSPEC_HIDDEN;
 extern void virtual_init(void) DECLSPEC_HIDDEN;
 extern ULONG_PTR get_system_affinity_mask(void) DECLSPEC_HIDDEN;
 extern void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info ) DECLSPEC_HIDDEN;
-extern NTSTATUS virtual_create_builtin_view( void *module, pe_image_info_t *info ) DECLSPEC_HIDDEN;
+extern NTSTATUS virtual_create_builtin_view( void *module, const UNICODE_STRING *nt_name,
+                                             pe_image_info_t *info ) DECLSPEC_HIDDEN;
 extern TEB *virtual_alloc_first_teb(void) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_alloc_teb( TEB **ret_teb ) DECLSPEC_HIDDEN;
 extern void virtual_free_teb( TEB *teb ) DECLSPEC_HIDDEN;
@@ -214,11 +213,13 @@ extern void signal_free_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_init_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_init_process(void) DECLSPEC_HIDDEN;
 extern void signal_init_early(void) DECLSPEC_HIDDEN;
+extern void *signal_init_syscalls(void) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE entry, void *arg,
                                                    BOOL suspend, void *thunk, TEB *teb ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN signal_exit_thread( int status, void (*func)(int) ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN exec_process( NTSTATUS status ) DECLSPEC_HIDDEN;
 extern void __wine_syscall_dispatcher(void) DECLSPEC_HIDDEN;
+extern void signal_restore_full_cpu_context(void) DECLSPEC_HIDDEN;
 extern void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid ) DECLSPEC_HIDDEN;
 
 extern NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
@@ -251,7 +252,7 @@ extern void WINAPI DECLSPEC_NORETURN call_user_apc_dispatcher( CONTEXT *context_
                                                                void (WINAPI *dispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PNTAPCFUNC) ) DECLSPEC_HIDDEN;
 extern void WINAPI DECLSPEC_NORETURN call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context,
                                                                      NTSTATUS (WINAPI *dispatcher)(EXCEPTION_RECORD*,CONTEXT*) ) DECLSPEC_HIDDEN;
-extern void WINAPI DECLSPEC_NORETURN call_raise_user_exception_dispatcher( NTSTATUS (WINAPI *dispatcher)(void) ) DECLSPEC_HIDDEN;
+extern void WINAPI call_raise_user_exception_dispatcher( NTSTATUS (WINAPI *dispatcher)(void) ) DECLSPEC_HIDDEN;
 
 extern void *get_syscall_frame(void) DECLSPEC_HIDDEN;
 extern void set_syscall_frame(void *frame) DECLSPEC_HIDDEN;
@@ -312,6 +313,8 @@ struct xcontext
 };
 
 #if defined(__i386__) || defined(__x86_64__)
+extern BOOL xstate_compaction_enabled DECLSPEC_HIDDEN;
+
 static inline XSTATE *xstate_from_context( const CONTEXT *context )
 {
     CONTEXT_EX *xctx = (CONTEXT_EX *)(context + 1);
