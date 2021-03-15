@@ -25,8 +25,8 @@ import "inspectable.idl";
 typedef [v1_enum] enum AsyncStatus
 {
     Started = 0,
-    Completed, 
-    Canceled, 
+    Completed,
+    Canceled,
     Error,
 } AsyncStatus;
 

@@ -1070,6 +1070,8 @@ static void fill_builtin_image_info( void *module, pe_image_info_t *info )
     info->header_size     = nt->OptionalHeader.SizeOfHeaders;
     info->file_size       = nt->OptionalHeader.SizeOfImage;
     info->checksum        = nt->OptionalHeader.CheckSum;
+    info->dbg_offset      = 0;
+    info->dbg_size        = 0;
     info->cpu             = client_cpu;
     info->__pad           = 0;
 }
@@ -1620,9 +1622,7 @@ static void load_ntdll(void)
     void *module;
     char *name = build_path( dll_dir, "ntdll.dll.so" );
 
-    str.Buffer = path;
-    str.Length = sizeof(path) - sizeof(WCHAR);
-    str.MaximumLength = sizeof(path);
+    init_unicode_string( &str, path );
     InitializeObjectAttributes( &attr, &str, 0, 0, NULL );
     name[strlen(name) - 3] = 0;  /* remove .so */
     status = open_builtin_file( name, &attr, &mapping, &module, &info, &st, FALSE );
@@ -1717,8 +1717,6 @@ static struct unix_funcs unix_funcs =
     ntdll_sin,
     ntdll_sqrt,
     ntdll_tan,
-    get_unix_codepage_data,
-    get_locales,
     virtual_release_address_space,
     load_so_dll,
     load_builtin_dll,

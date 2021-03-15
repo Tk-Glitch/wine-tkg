@@ -1659,6 +1659,7 @@ static int fd_get_file_info( int fd, unsigned int options, struct stat *st, ULON
         BOOL is_dir;
 
         if ((len = readlinkat( fd, "", path, sizeof(path))) == -1) goto done;
+        path[len] = 0;
         /* symbolic links (either junction points or NT symlinks) are "reparse points" */
         *attr |= FILE_ATTRIBUTE_REPARSE_POINT;
         /* symbolic links always report size 0 */
@@ -2205,19 +2206,18 @@ static NTSTATUS get_mountmgr_fs_info( HANDLE handle, int fd, struct mountmgr_uni
     letter = find_dos_device( unix_name );
     free( unix_name );
 
+    memset( drive, 0, sizeof(*drive) );
     if (letter == -1)
     {
         struct stat st;
 
         fstat( fd, &st );
         drive->unix_dev = st.st_rdev ? st.st_rdev : st.st_dev;
-        drive->letter = 0;
     }
     else
         drive->letter = 'a' + letter;
 
-    string.Buffer = (WCHAR *)MOUNTMGR_DEVICE_NAME;
-    string.Length = sizeof(MOUNTMGR_DEVICE_NAME) - sizeof(WCHAR);
+    init_unicode_string( &string, MOUNTMGR_DEVICE_NAME );
     InitializeObjectAttributes( &attr, &string, 0, NULL, NULL );
     status = NtOpenFile( &mountmgr, GENERIC_READ | SYNCHRONIZE, &attr, &io,
                          FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_SYNCHRONOUS_IO_NONALERT );
@@ -2965,37 +2965,6 @@ static int get_redirect_path( char *unix_name, int pos, const WCHAR *name, int l
 
 #define IS_OPTION_TRUE(ch) ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
 
-static NTSTATUS open_hkcu_key( const char *path, HANDLE *key )
-{
-    NTSTATUS status;
-    char buffer[256];
-    WCHAR bufferW[256];
-    DWORD_PTR sid_data[(sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE) / sizeof(DWORD_PTR)];
-    DWORD i, len = sizeof(sid_data);
-    SID *sid;
-    UNICODE_STRING name;
-    OBJECT_ATTRIBUTES attr;
-
-    status = NtQueryInformationToken( GetCurrentThreadEffectiveToken(), TokenUser, sid_data, len, &len );
-    if (status) return status;
-
-    sid = ((TOKEN_USER *)sid_data)->User.Sid;
-    len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
-                 MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
-                           MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
-    for (i = 0; i < sid->SubAuthorityCount; i++)
-        len += sprintf( buffer + len, "-%u", sid->SubAuthority[i] );
-    len += sprintf( buffer + len, "\\%s", path );
-
-    name.Buffer = bufferW;
-    name.Length = len * sizeof(WCHAR);
-    name.MaximumLength = name.Length + sizeof(WCHAR);
-    ascii_to_unicode( bufferW, buffer, len + 1 );
-    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, 0, NULL );
-    return NtCreateKey( key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL );
-}
-
-
 /***********************************************************************
  *           init_files
  */
@@ -3024,9 +2993,7 @@ void init_files(void)
         DWORD dummy;
         UNICODE_STRING nameW;
 
-        nameW.MaximumLength = sizeof(showdotfilesW);
-        nameW.Length = nameW.MaximumLength - sizeof(WCHAR);
-        nameW.Buffer = showdotfilesW;
+        init_unicode_string( &nameW, showdotfilesW );
         if (!NtQueryValueKey( key, &nameW, KeyValuePartialInformation, tmp, sizeof(tmp), &dummy ))
         {
             WCHAR *str = (WCHAR *)((KEY_VALUE_PARTIAL_INFORMATION *)tmp)->Data;
@@ -3455,7 +3422,8 @@ static NTSTATUS lookup_unix_name( const WCHAR *name, int name_len, char **buffer
         /* if this is the last element, not finding it is not necessarily fatal */
         if (!name_len)
         {
-            if (status == STATUS_OBJECT_PATH_NOT_FOUND)
+            if (status == STATUS_OBJECT_PATH_NOT_FOUND
+                || (disposition == FILE_WINE_PATH && status == STATUS_OBJECT_NAME_NOT_FOUND))
             {
                 status = STATUS_OBJECT_NAME_NOT_FOUND;
                 if (disposition != FILE_OPEN && disposition != FILE_OVERWRITE)
@@ -4543,7 +4511,7 @@ NTSTATUS WINAPI NtQueryInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
             FILE_ID_INFORMATION *info = ptr;
 
             info->VolumeSerialNumber = 0;
-            if (!(io->u.Status = get_mountmgr_fs_info( handle, fd, &drive, sizeof(drive) )))
+            if (!get_mountmgr_fs_info( handle, fd, &drive, sizeof(drive) ))
                 info->VolumeSerialNumber = drive.serial;
             memset( &info->FileId, 0, sizeof(info->FileId) );
             *(ULONGLONG *)&info->FileId = st.st_ino;
@@ -4563,7 +4531,10 @@ NTSTATUS WINAPI NtQueryInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
                 BOOL is_dir;
 
                 if ((len = readlinkat( fd, "", path, sizeof(path))) != -1)
+                {
+                    path[len] = 0;
                     get_symlink_properties(path, len, NULL, NULL, &info->ReparseTag, NULL, &is_dir);
+                }
             }
             if ((options & FILE_OPEN_REPARSE_POINT) && fd_is_mount_point( fd, &st ))
                 info->ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
@@ -6434,6 +6405,7 @@ NTSTATUS FILE_DecodeSymlink(const char *unix_src, char *unix_dest, int *unix_des
         goto cleanup;
     }
     len = ret;
+    tmp[len] = 0;
     get_symlink_properties(tmp, len, unix_dest, unix_dest_len, tag, flags, is_dir);
     status = STATUS_SUCCESS;
 
@@ -6469,7 +6441,6 @@ NTSTATUS FILE_GetSymlink(HANDLE handle, REPARSE_DATA_BUFFER *buffer, ULONG out_s
 
     if ((status = FILE_DecodeSymlink( unix_src, unix_dest, &unix_dest_len, &buffer->ReparseTag, &flags, NULL )))
         goto cleanup;
-    unix_dest[unix_dest_len] = 0;
 
     /* convert the relative path into an absolute path */
     if (flags == SYMLINK_FLAG_RELATIVE)

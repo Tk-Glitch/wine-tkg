@@ -16077,7 +16077,10 @@ static void test_clear_buffer_unordered_access_view(void)
             const struct uvec4 broken_result = {uvec4.x, uvec4.x, uvec4.x, uvec4.x}; /* Intel */
             data = get_readback_uvec4(&rb, x, 0);
             if (!(compare_uvec4(data, &uvec4) || broken(compare_uvec4(data, &broken_result))))
+            {
                 all_match = FALSE;
+                break;
+            }
         }
         ok(all_match, "Got {%#x, %#x, %#x, %#x}, expected {%#x, %#x, %#x, %#x} at %u.\n",
                 data->x, data->y, data->z, data->w, uvec4.x, uvec4.y, uvec4.z, uvec4.w, x);
@@ -16092,7 +16095,10 @@ static void test_clear_buffer_unordered_access_view(void)
             uvec4 = U(uav_desc).Buffer.FirstElement <= x ? fe_uvec4 : uvec4_data[i];
             broken_result.x = broken_result.y = broken_result.z = broken_result.w = uvec4.x;
             if (!(compare_uvec4(data, &uvec4) || broken(compare_uvec4(data, &broken_result))))
+            {
                 all_match = FALSE;
+                break;
+            }
         }
         ok(all_match, "Got {%#x, %#x, %#x, %#x}, expected {%#x, %#x, %#x, %#x} at %u.\n",
                 data->x, data->y, data->z, data->w, uvec4.x, uvec4.y, uvec4.z, uvec4.w, x);
@@ -32033,6 +32039,64 @@ static void test_deferred_context_state(void)
     release_test_context(&test_context);
 }
 
+static void test_deferred_context_swap_state(void)
+{
+    ID3D11DeviceContext1 *immediate, *deferred;
+    ID3DDeviceContextState *state, *prev_state;
+    ID3D11Buffer *green_buffer, *ret_buffer;
+    struct d3d11_test_context test_context;
+    D3D_FEATURE_LEVEL feature_level;
+    ID3D11Device1 *device;
+    HRESULT hr;
+
+    static const float green[] = {0.0f, 1.0f, 0.0f, 1.0f};
+
+    if (!init_test_context(&test_context, NULL))
+        return;
+
+    if (FAILED(ID3D11Device_QueryInterface(test_context.device, &IID_ID3D11Device1, (void **)&device)))
+    {
+        skip("ID3D11Device1 is not available.\n");
+        release_test_context(&test_context);
+        return;
+    }
+
+    ID3D11Device1_GetImmediateContext1(device, &immediate);
+
+    green_buffer = create_buffer(test_context.device, D3D11_BIND_CONSTANT_BUFFER, sizeof(green), &green);
+    ID3D11DeviceContext1_PSSetConstantBuffers(immediate, 0, 1, &green_buffer);
+
+    hr = ID3D11Device1_CreateDeferredContext1(device, 0, &deferred);
+    todo_wine ok(hr == S_OK, "Failed to create deferred context, hr %#x.\n", hr);
+    if (hr != S_OK)
+        goto out;
+
+    feature_level = ID3D11Device1_GetFeatureLevel(device);
+    hr = ID3D11Device1_CreateDeviceContextState(device, 0, &feature_level, 1, D3D11_SDK_VERSION,
+            &IID_ID3D11Device1, NULL, &state);
+    ok(hr == S_OK, "Failed to create device context state, hr %#x.\n", hr);
+
+    prev_state = (void *)0xdeadbeef;
+    ID3D11DeviceContext1_SwapDeviceContextState(deferred, NULL, &prev_state);
+    ok(!prev_state, "Got state %p.\n", prev_state);
+
+    prev_state = (void *)0xdeadbeef;
+    ID3D11DeviceContext1_SwapDeviceContextState(deferred, state, &prev_state);
+    ok(!prev_state, "Got state %p.\n", prev_state);
+
+    ID3D11DeviceContext1_PSGetConstantBuffers(deferred, 0, 1, &ret_buffer);
+    ok(!ret_buffer, "Got unexpected buffer %p.\n", ret_buffer);
+
+    ID3DDeviceContextState_Release(state);
+    ID3D11DeviceContext1_Release(deferred);
+
+out:
+    ID3D11Buffer_Release(green_buffer);
+    ID3D11DeviceContext1_Release(immediate);
+    ID3D11Device1_Release(device);
+    release_test_context(&test_context);
+}
+
 static void test_deferred_context_rendering(void)
 {
     ID3D11DeviceContext *immediate, *deferred;
@@ -32302,6 +32366,7 @@ START_TEST(d3d11)
     queue_test(test_independent_blend);
     queue_test(test_dual_source_blend);
     queue_test(test_deferred_context_state);
+    queue_test(test_deferred_context_swap_state);
     queue_test(test_deferred_context_rendering);
 
     run_queued_tests();

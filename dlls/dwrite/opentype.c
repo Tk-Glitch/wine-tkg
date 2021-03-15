@@ -46,6 +46,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
 #define MS_CBLC_TAG DWRITE_MAKE_OPENTYPE_TAG('C','B','L','C')
 #define MS_CMAP_TAG DWRITE_MAKE_OPENTYPE_TAG('c','m','a','p')
 #define MS_META_TAG DWRITE_MAKE_OPENTYPE_TAG('m','e','t','a')
+#define MS_KERN_TAG DWRITE_MAKE_OPENTYPE_TAG('k','e','r','n')
 
 /* 'sbix' formats */
 #define MS_PNG__TAG DWRITE_MAKE_OPENTYPE_TAG('p','n','g',' ')
@@ -399,7 +400,7 @@ struct ot_script
     WORD default_langsys;
     WORD langsys_count;
     struct ot_langsys_record langsys[1];
-} OT_Script;
+};
 
 struct ot_script_record
 {
@@ -801,24 +802,18 @@ struct ot_gpos_mark_to_mark_format1
     WORD mark2_array;
 };
 
-typedef struct {
-    WORD SubstFormat;
-    WORD Coverage;
-    WORD DeltaGlyphID;
-} GSUB_SingleSubstFormat1;
+struct kern_header
+{
+    WORD version;
+    WORD table_count;
+};
 
-typedef struct {
-    WORD SubstFormat;
-    WORD Coverage;
-    WORD GlyphCount;
-    WORD Substitute[1];
-} GSUB_SingleSubstFormat2;
-
-typedef struct {
-    WORD SubstFormat;
-    WORD ExtensionLookupType;
-    DWORD ExtensionOffset;
-} GSUB_ExtensionPosFormat1;
+struct kern_subtable_header
+{
+    WORD version;
+    WORD length;
+    WORD coverage;
+};
 
 #include "poppack.h"
 
@@ -2293,9 +2288,21 @@ static void get_name_record_locale(enum OPENTYPE_PLATFORM_ID platform, USHORT la
     }
 }
 
+static BOOL opentype_is_english_namerecord(const struct dwrite_fonttable *table, unsigned int idx)
+{
+    const struct name_header *header = (const struct name_header *)table->data;
+    const struct name_record *record;
+
+    record = &header->records[idx];
+
+    return GET_BE_WORD(record->platformID) == OPENTYPE_PLATFORM_MAC &&
+            GET_BE_WORD(record->languageID) == TT_NAME_MAC_LANGID_ENGLISH;
+}
+
 static BOOL opentype_decode_namerecord(const struct dwrite_fonttable *table, unsigned int idx,
         IDWriteLocalizedStrings *strings)
 {
+    static const WCHAR enusW[] = {'e','n','-','U','S',0};
     USHORT lang_id, length, offset, encoding, platform;
     const struct name_header *header = (const struct name_header *)table->data;
     const struct name_record *record;
@@ -2343,7 +2350,8 @@ static BOOL opentype_decode_namerecord(const struct dwrite_fonttable *table, uns
         TRACE("string %s for locale %s found\n", debugstr_w(name_string), debugstr_w(locale));
         add_localizedstring(strings, locale, name_string);
         heap_free(name_string);
-        ret = TRUE;
+
+        ret = !lstrcmpW(locale, enusW);
     }
     else
         FIXME("handle NAME format 1\n");
@@ -2354,10 +2362,10 @@ static BOOL opentype_decode_namerecord(const struct dwrite_fonttable *table, uns
 static HRESULT opentype_get_font_strings_from_id(const struct dwrite_fonttable *table, enum OPENTYPE_STRING_ID id,
         IDWriteLocalizedStrings **strings)
 {
-    int i, count, candidate_mac, candidate_unicode;
+    int i, count, candidate_mac, candidate_mac_en, candidate_unicode;
     const struct name_record *records;
+    BOOL has_english;
     WORD format;
-    BOOL exists;
     HRESULT hr;
 
     if (!table->data)
@@ -2379,8 +2387,8 @@ static HRESULT opentype_get_font_strings_from_id(const struct dwrite_fonttable *
         count = 0;
     }
 
-    exists = FALSE;
-    candidate_unicode = candidate_mac = -1;
+    has_english = FALSE;
+    candidate_unicode = candidate_mac = candidate_mac_en = -1;
 
     for (i = 0; i < count; i++)
     {
@@ -2403,10 +2411,11 @@ static HRESULT opentype_get_font_strings_from_id(const struct dwrite_fonttable *
             case OPENTYPE_PLATFORM_MAC:
                 if (candidate_mac == -1)
                     candidate_mac = i;
+                if (candidate_mac_en == -1 && opentype_is_english_namerecord(table, i))
+                    candidate_mac_en = i;
                 break;
             case OPENTYPE_PLATFORM_WIN:
-                if (opentype_decode_namerecord(table, i, *strings))
-                    exists = TRUE;
+                has_english |= opentype_decode_namerecord(table, i, *strings);
                 break;
             default:
                 FIXME("platform %i not supported\n", platform);
@@ -2414,24 +2423,23 @@ static HRESULT opentype_get_font_strings_from_id(const struct dwrite_fonttable *
         }
     }
 
-    if (!exists)
-    {
-        if (candidate_mac != -1)
-            exists = opentype_decode_namerecord(table, candidate_mac, *strings);
-        if (!exists && candidate_unicode != -1)
-            exists = opentype_decode_namerecord(table, candidate_unicode, *strings);
+    if (!get_localizedstrings_count(*strings) && candidate_mac != -1)
+        has_english |= opentype_decode_namerecord(table, candidate_mac, *strings);
+    if (!get_localizedstrings_count(*strings) && candidate_unicode != -1)
+        has_english |= opentype_decode_namerecord(table, candidate_unicode, *strings);
+    if (!has_english && candidate_mac_en != -1)
+        opentype_decode_namerecord(table, candidate_mac_en, *strings);
 
-        if (!exists)
-        {
-            IDWriteLocalizedStrings_Release(*strings);
-            *strings = NULL;
-        }
+    if (!get_localizedstrings_count(*strings))
+    {
+        IDWriteLocalizedStrings_Release(*strings);
+        *strings = NULL;
     }
 
     if (*strings)
         sort_localizedstrings(*strings);
 
-    return exists ? S_OK : E_FAIL;
+    return *strings ? S_OK : E_FAIL;
 }
 
 static WCHAR *meta_get_lng_name(WCHAR *str, WCHAR **ctx)
@@ -6342,6 +6350,9 @@ BOOL opentype_has_vertical_variants(struct dwrite_fontface *fontface)
     struct lookups lookups = { 0 };
     UINT16 format;
 
+    if (fontface->flags & (FONTFACE_VERTICAL_VARIANTS | FONTFACE_NO_VERTICAL_VARIANTS))
+        return !!(fontface->flags & FONTFACE_VERTICAL_VARIANTS);
+
     context.cache = fontface_get_shaping_cache(fontface);
     context.table = &context.cache->gsub;
 
@@ -6384,7 +6395,12 @@ BOOL opentype_has_vertical_variants(struct dwrite_fontface *fontface)
 
     heap_free(lookups.lookups);
 
-    return !!count;
+    if (count)
+        fontface->flags |= FONTFACE_VERTICAL_VARIANTS;
+    else
+        fontface->flags |= FONTFACE_NO_VERTICAL_VARIANTS;
+
+    return !!(fontface->flags & FONTFACE_VERTICAL_VARIANTS);
 }
 
 HRESULT opentype_get_vertical_glyph_variants(struct dwrite_fontface *fontface, unsigned int glyph_count,
@@ -6398,7 +6414,7 @@ HRESULT opentype_get_vertical_glyph_variants(struct dwrite_fontface *fontface, u
 
     memcpy(glyphs, nominal_glyphs, glyph_count * sizeof(*glyphs));
 
-    if (!(fontface->flags & FONTFACE_HAS_VERTICAL_VARIANTS))
+    if (!opentype_has_vertical_variants(fontface))
         return S_OK;
 
     context.cache = fontface_get_shaping_cache(fontface);
@@ -6440,6 +6456,135 @@ HRESULT opentype_get_vertical_glyph_variants(struct dwrite_fontface *fontface, u
     heap_free(context.u.subst.glyph_props);
     heap_free(context.glyph_infos);
     heap_free(lookups.lookups);
+
+    return S_OK;
+}
+
+BOOL opentype_has_kerning_pairs(struct dwrite_fontface *fontface)
+{
+    const struct kern_subtable_header *subtable;
+    struct file_stream_desc stream_desc;
+    const struct kern_header *header;
+    unsigned int offset, count, i;
+
+    if (fontface->flags & (FONTFACE_KERNING_PAIRS | FONTFACE_NO_KERNING_PAIRS))
+        return !!(fontface->flags & FONTFACE_KERNING_PAIRS);
+
+    fontface->flags |= FONTFACE_NO_KERNING_PAIRS;
+
+    stream_desc.stream = fontface->stream;
+    stream_desc.face_type = fontface->type;
+    stream_desc.face_index = fontface->index;
+
+    opentype_get_font_table(&stream_desc, MS_KERN_TAG, &fontface->kern);
+    if (fontface->kern.exists)
+    {
+        if ((header = table_read_ensure(&fontface->kern, 0, sizeof(*header))))
+        {
+            count = GET_BE_WORD(header->table_count);
+            offset = sizeof(*header);
+
+            /* Freetype limits table count this way. */
+            count = min(count, 32);
+
+            /* Check for presence of format 0 subtable with horizontal coverage. */
+            for (i = 0; i < count; ++i)
+            {
+                if (!(subtable = table_read_ensure(&fontface->kern, offset, sizeof(*subtable))))
+                    break;
+
+                if (subtable->version == 0 && GET_BE_WORD(subtable->coverage) & 1)
+                {
+                    fontface->flags &= ~FONTFACE_NO_KERNING_PAIRS;
+                    fontface->flags |= FONTFACE_KERNING_PAIRS;
+                    break;
+                }
+
+                offset += GET_BE_WORD(subtable->length);
+            }
+        }
+    }
+
+    if (fontface->flags & FONTFACE_NO_KERNING_PAIRS && fontface->kern.data)
+        IDWriteFontFileStream_ReleaseFileFragment(stream_desc.stream, fontface->kern.context);
+
+    return !!(fontface->flags & FONTFACE_KERNING_PAIRS);
+}
+
+struct kern_format0_compare_key
+{
+    UINT16 left;
+    UINT16 right;
+};
+
+static int kern_format0_compare(const void *a, const void *b)
+{
+    const struct kern_format0_compare_key *key = a;
+    const WORD *data = b;
+    UINT16 left = GET_BE_WORD(data[0]), right = GET_BE_WORD(data[1]);
+    int ret;
+
+    if ((ret = (int)key->left - (int)left)) return ret;
+    if ((ret = (int)key->right - (int)right)) return ret;
+    return 0;
+}
+
+HRESULT opentype_get_kerning_pairs(struct dwrite_fontface *fontface, unsigned int count,
+        const UINT16 *glyphs, INT32 *values)
+{
+    const struct kern_subtable_header *subtable;
+    unsigned int i, s, offset, pair_count, subtable_count;
+    struct kern_format0_compare_key key;
+    const struct kern_header *header;
+    const WORD *data;
+
+    if (!opentype_has_kerning_pairs(fontface))
+    {
+        memset(values, 0, count * sizeof(*values));
+        return S_OK;
+    }
+
+    subtable_count = table_read_be_word(&fontface->kern, 2);
+    subtable_count = min(subtable_count, 32);
+
+    for (i = 0; i < count - 1; ++i)
+    {
+        offset = sizeof(*header);
+
+        key.left = glyphs[i];
+        key.right = glyphs[i + 1];
+        values[i] = 0;
+
+        for (s = 0; s < subtable_count; ++s)
+        {
+            if (!(subtable = table_read_ensure(&fontface->kern, offset, sizeof(*subtable))))
+                break;
+
+            if (subtable->version == 0 && GET_BE_WORD(subtable->coverage) & 1)
+            {
+                if ((data = table_read_ensure(&fontface->kern, offset, GET_BE_WORD(subtable->length))))
+                {
+                    /* Skip subtable header */
+                    data += 3;
+                    pair_count = GET_BE_WORD(*data);
+                    data += 4;
+                    /* Move to pair data */
+                    if ((data = table_read_ensure(&fontface->kern, offset + 7 * sizeof(*data),
+                            pair_count * 3 * sizeof(*data))))
+                    {
+                        if ((data = bsearch(&key, data, pair_count, 3 * sizeof(*data), kern_format0_compare)))
+                        {
+                            values[i] = (short)GET_BE_WORD(data[2]);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            offset += GET_BE_WORD(subtable->length);
+        }
+    }
+    values[count - 1] = 0;
 
     return S_OK;
 }

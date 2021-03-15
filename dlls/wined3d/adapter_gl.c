@@ -4832,7 +4832,7 @@ static void wined3d_view_gl_destroy(struct wined3d_device *device,
 
     wined3d_cs_destroy_object(device->cs, wined3d_view_gl_destroy_object, ctx);
     if (ctx == &c)
-        device->cs->ops->finish(device->cs, WINED3D_CS_QUEUE_DEFAULT);
+        wined3d_cs_finish(device->cs, WINED3D_CS_QUEUE_DEFAULT);
 }
 
 static void adapter_gl_destroy_rendertarget_view(struct wined3d_rendertarget_view *view)
@@ -5053,6 +5053,14 @@ static void adapter_gl_clear_uav(struct wined3d_context *context,
             clear_value, wined3d_context_gl(context));
 }
 
+static void adapter_gl_generate_mipmap(struct wined3d_context *context, struct wined3d_shader_resource_view *view)
+{
+    TRACE("context %p, view %p.\n", context, view);
+
+    wined3d_shader_resource_view_gl_generate_mipmap(wined3d_shader_resource_view_gl(view),
+            wined3d_context_gl(context));
+}
+
 static const struct wined3d_adapter_ops wined3d_adapter_gl_ops =
 {
     .adapter_destroy = adapter_gl_destroy,
@@ -5087,6 +5095,7 @@ static const struct wined3d_adapter_ops wined3d_adapter_gl_ops =
     .adapter_draw_primitive = draw_primitive,
     .adapter_dispatch_compute = dispatch_compute,
     .adapter_clear_uav = adapter_gl_clear_uav,
+    .adapter_generate_mipmap = adapter_gl_generate_mipmap,
 };
 
 static void wined3d_adapter_gl_init_d3d_info(struct wined3d_adapter_gl *adapter_gl, uint32_t wined3d_creation_flags)

@@ -188,6 +188,7 @@ typedef struct EventTarget EventTarget;
     XIID(IHTMLElement3) \
     XIID(IHTMLElement4) \
     XIID(IHTMLElement6) \
+    XIID(IHTMLElement7) \
     XIID(IHTMLElementCollection) \
     XIID(IHTMLEmbedElement) \
     XIID(IHTMLEventObj) \
@@ -811,6 +812,7 @@ typedef struct {
     IHTMLElement3 IHTMLElement3_iface;
     IHTMLElement4 IHTMLElement4_iface;
     IHTMLElement6 IHTMLElement6_iface;
+    IHTMLElement7 IHTMLElement7_iface;
     IHTMLUniqueName IHTMLUniqueName_iface;
     IElementSelector IElementSelector_iface;
     IElementTraversal IElementTraversal_iface;
@@ -909,7 +911,7 @@ HRESULT HTMLImageElementFactory_Create(HTMLInnerWindow*,HTMLImageElementFactory*
 HRESULT HTMLXMLHttpRequestFactory_Create(HTMLInnerWindow*,HTMLXMLHttpRequestFactory**) DECLSPEC_HIDDEN;
 HRESULT HTMLLocation_Create(HTMLInnerWindow*,HTMLLocation**) DECLSPEC_HIDDEN;
 IOmNavigator *OmNavigator_Create(void) DECLSPEC_HIDDEN;
-HRESULT HTMLScreen_Create(IHTMLScreen**) DECLSPEC_HIDDEN;
+HRESULT create_html_screen(compat_mode_t,IHTMLScreen**) DECLSPEC_HIDDEN;
 HRESULT create_performance(IHTMLPerformance**) DECLSPEC_HIDDEN;
 HRESULT create_history(HTMLInnerWindow*,OmHistory**) DECLSPEC_HIDDEN;
 HRESULT create_namespace_collection(IHTMLNamespaceCollection**) DECLSPEC_HIDDEN;

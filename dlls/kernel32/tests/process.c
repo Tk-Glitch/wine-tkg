@@ -2187,9 +2187,9 @@ static void test_IsWow64Process2(void)
 #elif defined __x86_64__
     USHORT expect_native = IMAGE_FILE_MACHINE_AMD64;
 #elif defined __arm__
-    USHORT expect_native = IMAGE_FILE_MACHINE_ARM;
+    USHORT expect_native = IMAGE_FILE_MACHINE_ARMNT;
 #elif defined __aarch64__
-    USHORT expect_native = IMAGE_FILE_MACHINE_ARM;
+    USHORT expect_native = IMAGE_FILE_MACHINE_ARM64;
 #else
     USHORT expect_native = 0;
 #endif
@@ -4266,6 +4266,67 @@ static void test_handle_list_attribute(BOOL child, HANDLE handle1, HANDLE handle
     CloseHandle(pipe[1]);
 }
 
+static void test_dead_process(void)
+{
+    DWORD_PTR data[256];
+    PROCESS_BASIC_INFORMATION basic;
+    SYSTEM_PROCESS_INFORMATION *spi;
+    SECTION_IMAGE_INFORMATION image;
+    PROCESS_INFORMATION pi;
+    PROCESS_PRIORITY_CLASS *prio = (PROCESS_PRIORITY_CLASS *)data;
+    BYTE *buffer = NULL;
+    BOOL found;
+    ULONG size = 0;
+    DWORD offset = 0;
+    NTSTATUS status;
+
+    create_process("exit", &pi);
+    wait_child_process(pi.hProcess);
+    Sleep(100);
+
+    memset( data, 0, sizeof(data) );
+    status = NtQueryInformationProcess( pi.hProcess, ProcessImageFileName, data, sizeof(data), NULL);
+    ok( !status, "ProcessImageFileName failed %x\n", status );
+    ok( ((UNICODE_STRING *)data)->Length, "ProcessImageFileName not set\n" );
+    ok( ((UNICODE_STRING *)data)->Buffer[0] == '\\', "ProcessImageFileName not set\n" );
+
+    memset( prio, 0xcc, sizeof(*prio) );
+    status = NtQueryInformationProcess( pi.hProcess, ProcessPriorityClass, prio, sizeof(*prio), NULL);
+    ok( !status, "ProcessPriorityClass failed %x\n", status );
+    ok( prio->PriorityClass != 0xcc, "ProcessPriorityClass not set\n" );
+
+    memset( &basic, 0xcc, sizeof(basic) );
+    status = NtQueryInformationProcess( pi.hProcess, ProcessBasicInformation, &basic, sizeof(basic), NULL);
+    ok( !status, "ProcessBasicInformation failed %x\n", status );
+    ok( basic.ExitStatus == 0, "ProcessBasicInformation info modified\n" );
+
+    memset( &image, 0xcc, sizeof(image) );
+    status = NtQueryInformationProcess( pi.hProcess, ProcessImageInformation, &image, sizeof(image), NULL);
+    ok( status == STATUS_PROCESS_IS_TERMINATING, "ProcessImageInformation wrong error %x\n", status );
+    ok( image.Machine == 0xcccc, "ProcessImageInformation info modified\n" );
+
+    while ((status = NtQuerySystemInformation(SystemProcessInformation, buffer, size, &size)) == STATUS_INFO_LENGTH_MISMATCH)
+    {
+        free(buffer);
+        buffer = malloc(size);
+    }
+    ok(status == STATUS_SUCCESS, "got %#x\n", status);
+    found = FALSE;
+    do
+    {
+        spi = (SYSTEM_PROCESS_INFORMATION *)(buffer + offset);
+        if (spi->UniqueProcessId == ULongToHandle(pi.dwProcessId))
+        {
+            found = TRUE;
+            break;
+        }
+        offset += spi->NextEntryOffset;
+    } while (spi->NextEntryOffset);
+    ok( !found, "process still enumerated\n" );
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+}
+
 static void test_GetActiveProcessorCount(void)
 {
     DWORD count;
@@ -4407,6 +4468,9 @@ START_TEST(process)
     test_ProcThreadAttributeList();
     test_SuspendProcessState();
     test_SuspendProcessNewThread();
+    test_parent_process_attribute(0, NULL);
+    test_handle_list_attribute(FALSE, NULL, NULL);
+    test_dead_process();
 
     /* things that can be tested:
      *  lookup:         check the way program to be executed is searched
@@ -4430,6 +4494,4 @@ START_TEST(process)
     test_jobInheritance(job);
     test_BreakawayOk(job);
     CloseHandle(job);
-    test_parent_process_attribute(0, NULL);
-    test_handle_list_attribute(FALSE, NULL, NULL);
 }

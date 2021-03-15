@@ -53,7 +53,7 @@ static HWND new_richedit(HWND parent) {
 static BOOL is_rtl(void) {
   LOCALESIGNATURE sig;
 
-  return (GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_FONTSIGNATURE,
+  return (GetLocaleInfoA(LOCALE_SYSTEM_DEFAULT, LOCALE_FONTSIGNATURE,
                          (LPSTR) &sig, sizeof(LOCALESIGNATURE)) &&
           (sig.lsUsb[3] & 0x08000000) != 0);
 }
@@ -155,7 +155,7 @@ static void test_WM_GETTEXTLENGTH(void)
     {
         SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)text3);
         result = SendMessageA(hwndRichEdit, WM_GETTEXTLENGTH, 0, 0);
-        ok(result == 8, "WM_GETTEXTLENGTH returned %d, expected 8\n", result);
+        todo_wine ok(result == 8, "WM_GETTEXTLENGTH returned %d, expected 8\n", result);
     }
 
     DestroyWindow(hwndRichEdit);
@@ -584,7 +584,7 @@ static void test_EM_GETTEXTRANGE(void)
         textRange.chrg.cpMax = 8;
         result = SendMessageA(hwndRichEdit, EM_GETTEXTRANGE, 0, (LPARAM)&textRange);
         ok(result == 4, "EM_GETTEXTRANGE returned %ld\n", result);
-        todo_wine ok(!strcmp("ef\x8e\xf0", buffer), "EM_GETTEXTRANGE filled %s\n", buffer);
+        ok(!strcmp("ef\x8e\xf0", buffer), "EM_GETTEXTRANGE filled %s\n", buffer);
     }
 
     DestroyWindow(hwndRichEdit);
@@ -1440,7 +1440,7 @@ START_TEST( editor )
    * RICHED32.DLL, so the linker doesn't actually link to it. */
   hmoduleRichEdit = LoadLibraryA("riched32.dll");
   ok(hmoduleRichEdit != NULL, "error: %d\n", (int) GetLastError());
-  is_lang_japanese = (PRIMARYLANGID(GetUserDefaultLangID()) == LANG_JAPANESE);
+  is_lang_japanese = (PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_JAPANESE);
 
   test_WM_SETTEXT();
   test_EM_GETTEXTRANGE();

@@ -1,19 +1,40 @@
 # Lithuanian translations for Wine
-# Aurimas Fišeras <aurimas@members.fsf.org>, 2011-2020.
+# Aurimas Fišeras <aurimas@members.fsf.org>, 2011-2021.
 msgid ""
 msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2020-11-09 23:18+0200\n"
+"PO-Revision-Date: 2021-03-05 09:05+0200\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: Lithuanian <komp_lt@konf.lt>\n"
 "Language: lt\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"X-Generator: Poedit 2.4.1\n"
+"X-Generator: Poedit 2.4.2\n"
 "X-Project-Style: default\n"
+
+#: dlls/aclui/aclui.rc:29 dlls/inetcpl.cpl/inetcpl.rc:90
+#: programs/winefile/winefile.rc:114
+msgid "Security"
+msgstr "Saugumas"
+
+#: dlls/aclui/aclui.rc:32
+msgid "&Group or user names:"
+msgstr "&Grupių ar naudotojų vardai:"
+
+#: dlls/aclui/aclui.rc:38
+msgid "Allow"
+msgstr "Leisti"
+
+#: dlls/aclui/aclui.rc:39
+msgid "Deny"
+msgstr "Drausti"
+
+#: dlls/aclui/aclui.rc:47
+msgid "Permissions for %1"
+msgstr "%1 teisės"
 
 #: dlls/appwiz.cpl/appwiz.rc:58
 msgid "Install/Uninstall"
@@ -3596,10 +3617,6 @@ msgstr ""
 #: dlls/inetcpl.cpl/inetcpl.rc:82 programs/progman/progman.rc:67
 msgid "Delete"
 msgstr "Šalinti"
-
-#: dlls/inetcpl.cpl/inetcpl.rc:90 programs/winefile/winefile.rc:114
-msgid "Security"
-msgstr "Saugumas"
 
 #: dlls/inetcpl.cpl/inetcpl.rc:112
 msgid ""

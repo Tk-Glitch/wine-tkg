@@ -109,6 +109,10 @@ typedef struct {
 static const event_info_t event_info[] = {
     {L"abort",             EVENT_TYPE_EVENT,     DISPID_EVMETH_ONABORT,
         EVENT_BIND_TO_TARGET},
+    {L"animationend",      EVENT_TYPE_EVENT,     DISPID_EVPROP_ONANIMATIONEND,
+        EVENT_DEFAULTLISTENER | EVENT_BUBBLES},
+    {L"animationstart",    EVENT_TYPE_EVENT,     DISPID_EVPROP_ONANIMATIONSTART,
+        EVENT_DEFAULTLISTENER | EVENT_BUBBLES},
     {L"beforeactivate",    EVENT_TYPE_EVENT,     DISPID_EVMETH_ONBEFOREACTIVATE,
         EVENT_FIXME | EVENT_BUBBLES | EVENT_CANCELABLE},
     {L"beforeunload",      EVENT_TYPE_EVENT,     DISPID_EVMETH_ONBEFOREUNLOAD,
@@ -184,6 +188,8 @@ static const event_info_t event_info[] = {
     {L"unload",            EVENT_TYPE_UIEVENT,   DISPID_EVMETH_ONUNLOAD,
         EVENT_FIXME}
 };
+
+C_ASSERT(ARRAY_SIZE(event_info) == EVENTID_LAST);
 
 static eventid_t str_to_eid(const WCHAR *str)
 {
@@ -750,7 +756,7 @@ static dispex_static_data_t HTMLEventObj_dispex = {
     HTMLEventObj_iface_tids
 };
 
-static HTMLEventObj *alloc_event_obj(DOMEvent *event)
+static HTMLEventObj *alloc_event_obj(DOMEvent *event, compat_mode_t compat_mode)
 {
     HTMLEventObj *event_obj;
 
@@ -764,15 +770,15 @@ static HTMLEventObj *alloc_event_obj(DOMEvent *event)
     if(event)
         IDOMEvent_AddRef(&event->IDOMEvent_iface);
 
-    init_dispex(&event_obj->dispex, (IUnknown*)&event_obj->IHTMLEventObj_iface, &HTMLEventObj_dispex);
+    init_dispex_with_compat_mode(&event_obj->dispex, (IUnknown*)&event_obj->IHTMLEventObj_iface, &HTMLEventObj_dispex, compat_mode);
     return event_obj;
 }
 
-HRESULT create_event_obj(IHTMLEventObj **ret)
+HRESULT create_event_obj(compat_mode_t compat_mode, IHTMLEventObj **ret)
 {
     HTMLEventObj *event_obj;
 
-    event_obj = alloc_event_obj(NULL);
+    event_obj = alloc_event_obj(NULL, compat_mode);
     if(!event_obj)
         return E_OUTOFMEMORY;
 
@@ -2195,7 +2201,7 @@ static BOOL check_event_iface(nsIDOMEvent *event, REFIID riid)
     return TRUE;
 }
 
-static DOMEvent *alloc_event(nsIDOMEvent *nsevent, eventid_t event_id)
+static DOMEvent *alloc_event(nsIDOMEvent *nsevent, compat_mode_t compat_mode, eventid_t event_id)
 {
     dispex_static_data_t *dispex_data = &DOMEvent_dispex;
     DOMEvent *event = NULL;
@@ -2260,11 +2266,11 @@ static DOMEvent *alloc_event(nsIDOMEvent *nsevent, eventid_t event_id)
     else
         event->keyboard_event = NULL;
 
-    init_dispex(&event->dispex, (IUnknown*)&event->IDOMEvent_iface, dispex_data);
+    init_dispex_with_compat_mode(&event->dispex, (IUnknown*)&event->IDOMEvent_iface, dispex_data, compat_mode);
     return event;
 }
 
-HRESULT create_event_from_nsevent(nsIDOMEvent *nsevent, DOMEvent **ret_event)
+HRESULT create_event_from_nsevent(nsIDOMEvent *nsevent, compat_mode_t compat_mode, DOMEvent **ret_event)
 {
     eventid_t event_id = EVENTID_LAST;
     DOMEvent *event;
@@ -2284,7 +2290,7 @@ HRESULT create_event_from_nsevent(nsIDOMEvent *nsevent, DOMEvent **ret_event)
     }
     nsAString_Finish(&nsstr);
 
-    event = alloc_event(nsevent, event_id);
+    event = alloc_event(nsevent, compat_mode, event_id);
     if(!event)
         return E_OUTOFMEMORY;
 
@@ -2307,7 +2313,7 @@ HRESULT create_document_event_str(HTMLDocumentNode *doc, const WCHAR *type, IDOM
         return E_FAIL;
     }
 
-    event = alloc_event(nsevent, EVENTID_LAST);
+    event = alloc_event(nsevent, dispex_compat_mode(&doc->node.event_target.dispex), EVENTID_LAST);
     nsIDOMEvent_Release(nsevent);
     if(!event)
         return E_OUTOFMEMORY;
@@ -2331,7 +2337,7 @@ HRESULT create_document_event(HTMLDocumentNode *doc, eventid_t event_id, DOMEven
         return E_FAIL;
     }
 
-    event = alloc_event(nsevent, event_id);
+    event = alloc_event(nsevent, dispex_compat_mode(&doc->node.event_target.dispex), event_id);
     if(!event)
         return E_OUTOFMEMORY;
 
@@ -2444,10 +2450,10 @@ static void call_event_handlers(EventTarget *event_target, DOMEvent *event, disp
             V_DISPATCH(&arg) = (IDispatch*)&event_target->dispex.IDispatchEx_iface;
             V_VT(&v) = VT_EMPTY;
 
-            TRACE("%s >>>\n", debugstr_w(event->type));
+            TRACE("%p %s >>>\n", event_target, debugstr_w(event->type));
             hres = call_disp_func(listener->function, &dp, &v);
             if(hres == S_OK) {
-                TRACE("%s <<< %s\n", debugstr_w(event->type), debugstr_variant(&v));
+                TRACE("%p %s <<< %s\n", event_target, debugstr_w(event->type), debugstr_variant(&v));
 
                 if(event->cancelable) {
                     if(V_VT(&v) == VT_BOOL) {
@@ -2459,7 +2465,7 @@ static void call_event_handlers(EventTarget *event_target, DOMEvent *event, disp
                 }
                 VariantClear(&v);
             }else {
-                WARN("%s <<< %08x\n", debugstr_w(event->type), hres);
+                WARN("%p %s <<< %08x\n", event_target, debugstr_w(event->type), hres);
             }
         }
     }
@@ -2524,10 +2530,10 @@ static void call_event_handlers(EventTarget *event_target, DOMEvent *event, disp
                 ? (IDispatch*)event->event_obj : (IDispatch*)&event->IDOMEvent_iface;
             V_VT(&v) = VT_EMPTY;
 
-            TRACE("%s >>>\n", debugstr_w(event->type));
+            TRACE("%p %s >>>\n", event_target, debugstr_w(event->type));
             hres = call_disp_func(listener->function, &dp, &v);
             if(hres == S_OK) {
-                TRACE("%s <<< %s\n", debugstr_w(event->type),
+                TRACE("%p %s <<< %s\n", event_target, debugstr_w(event->type),
                       debugstr_variant(&v));
 
                 if(event->cancelable) {
@@ -2540,7 +2546,7 @@ static void call_event_handlers(EventTarget *event_target, DOMEvent *event, disp
                 }
                 VariantClear(&v);
             }else {
-                WARN("%s <<< %08x\n", debugstr_w(event->type), hres);
+                WARN("%p %s <<< %08x\n", event_target, debugstr_w(event->type), hres);
             }
         }else {
             VARIANTARG arg;
@@ -2550,10 +2556,10 @@ static void call_event_handlers(EventTarget *event_target, DOMEvent *event, disp
             V_DISPATCH(&arg) = (IDispatch*)event->event_obj;
             V_VT(&v) = VT_EMPTY;
 
-            TRACE("%s attached >>>\n", debugstr_w(event->type));
+            TRACE("%p %s attached >>>\n", event_target, debugstr_w(event->type));
             hres = call_disp_func(listener->function, &dp, &v);
             if(hres == S_OK) {
-                TRACE("%s attached <<<\n", debugstr_w(event->type));
+                TRACE("%p %s attached <<<\n", event_target, debugstr_w(event->type));
 
                 if(event->cancelable) {
                     if(V_VT(&v) == VT_BOOL) {
@@ -2565,7 +2571,7 @@ static void call_event_handlers(EventTarget *event_target, DOMEvent *event, disp
                 }
                 VariantClear(&v);
             }else {
-                WARN("%s attached <<< %08x\n", debugstr_w(event->type), hres);
+                WARN("%p %s attached <<< %08x\n", event_target, debugstr_w(event->type), hres);
             }
         }
     }
@@ -2595,11 +2601,11 @@ static void call_event_handlers(EventTarget *event_target, DOMEvent *event, disp
 
                     V_VT(&v) = VT_EMPTY;
 
-                    TRACE("cp %s [%u] >>>\n", debugstr_w(event->type), i);
+                    TRACE("%p cp %s [%u] >>>\n", event_target, debugstr_w(event->type), i);
                     hres = call_cp_func(cp->sinks[i].disp, event_info[event->event_id].dispid,
                             cp->data->pass_event_arg ? event->event_obj : NULL, &v);
                     if(hres == S_OK) {
-                        TRACE("cp %s [%u] <<<\n", debugstr_w(event->type), i);
+                        TRACE("%p cp %s [%u] <<<\n", event_target, debugstr_w(event->type), i);
 
                         if(event->cancelable) {
                             if(V_VT(&v) == VT_BOOL) {
@@ -2611,7 +2617,7 @@ static void call_event_handlers(EventTarget *event_target, DOMEvent *event, disp
                         }
                         VariantClear(&v);
                     }else {
-                        WARN("cp %s [%u] <<< %08x\n", debugstr_w(event->type), i, hres);
+                        WARN("%p cp %s [%u] <<< %08x\n", event_target, debugstr_w(event->type), i, hres);
                     }
                 }
             }
@@ -2676,7 +2682,7 @@ static HRESULT dispatch_event_object(EventTarget *event_target, DOMEvent *event,
     } while(iter);
 
     if(!event->event_obj && !event->no_event_obj) {
-        event_obj_ref = alloc_event_obj(event);
+        event_obj_ref = alloc_event_obj(event, dispex_compat_mode(&event->dispex));
         if(event_obj_ref)
             event->event_obj = &event_obj_ref->IHTMLEventObj_iface;
     }
@@ -2794,7 +2800,7 @@ HRESULT fire_event(HTMLDOMNode *node, const WCHAR *event_name, VARIANT *event_va
     }
 
     if(!event_obj) {
-        event_obj = alloc_event_obj(NULL);
+        event_obj = alloc_event_obj(NULL, dispex_compat_mode(&node->event_target.dispex));
         if(!event_obj)
             return E_OUTOFMEMORY;
     }

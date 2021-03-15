@@ -210,6 +210,7 @@ struct wbem_services
     CRITICAL_SECTION cs;
     WCHAR *namespace;
     struct async_header *async;
+    IWbemContext *context;
 };
 
 static inline struct wbem_services *impl_from_IWbemServices( IWbemServices *iface )
@@ -243,6 +244,8 @@ static ULONG WINAPI wbem_services_Release(
         }
         ws->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection( &ws->cs );
+        if (ws->context)
+            IWbemContext_Release( ws->context );
         heap_free( ws->namespace );
         heap_free( ws );
     }
@@ -293,7 +296,7 @@ static HRESULT WINAPI wbem_services_OpenNamespace(
     if ((wcsicmp( strNamespace, L"cimv2" ) && wcsicmp( strNamespace, L"default" )) || ws->namespace)
         return WBEM_E_INVALID_NAMESPACE;
 
-    return WbemServices_create( L"cimv2", (void **)ppWorkingNamespace );
+    return WbemServices_create( L"cimv2", NULL, (void **)ppWorkingNamespace );
 }
 
 static HRESULT WINAPI wbem_services_CancelAsyncCall(
@@ -833,11 +836,12 @@ static HRESULT WINAPI wbem_services_ExecMethod(
     const BSTR strObjectPath,
     const BSTR strMethodName,
     LONG lFlags,
-    IWbemContext *pCtx,
+    IWbemContext *context,
     IWbemClassObject *pInParams,
     IWbemClassObject **ppOutParams,
     IWbemCallResult **ppCallResult )
 {
+    struct wbem_services *services = impl_from_IWbemServices( iface );
     IEnumWbemClassObject *result = NULL;
     IWbemClassObject *obj = NULL;
     struct query *query = NULL;
@@ -848,7 +852,7 @@ static HRESULT WINAPI wbem_services_ExecMethod(
     HRESULT hr;
 
     TRACE("%p, %s, %s, %08x, %p, %p, %p, %p\n", iface, debugstr_w(strObjectPath),
-          debugstr_w(strMethodName), lFlags, pCtx, pInParams, ppOutParams, ppCallResult);
+          debugstr_w(strMethodName), lFlags, context, pInParams, ppOutParams, ppCallResult);
 
     if (lFlags) FIXME("flags %08x not supported\n", lFlags);
 
@@ -879,7 +883,7 @@ static HRESULT WINAPI wbem_services_ExecMethod(
     hr = get_method( table, strMethodName, &func );
     if (hr != S_OK) goto done;
 
-    hr = func( obj, pInParams, ppOutParams );
+    hr = func( obj, context ? context : services->context, pInParams, ppOutParams );
 
 done:
     if (result) IEnumWbemClassObject_Release( result );
@@ -933,21 +937,22 @@ static const IWbemServicesVtbl wbem_services_vtbl =
     wbem_services_ExecMethodAsync
 };
 
-HRESULT WbemServices_create( const WCHAR *namespace, LPVOID *ppObj )
+HRESULT WbemServices_create( const WCHAR *namespace, IWbemContext *context, LPVOID *ppObj )
 {
     struct wbem_services *ws;
 
     TRACE("(%p)\n", ppObj);
 
-    ws = heap_alloc( sizeof(*ws) );
+    ws = heap_alloc_zero( sizeof(*ws) );
     if (!ws) return E_OUTOFMEMORY;
 
     ws->IWbemServices_iface.lpVtbl = &wbem_services_vtbl;
     ws->refs      = 1;
     ws->namespace = heap_strdupW( namespace );
-    ws->async     = NULL;
     InitializeCriticalSection( &ws->cs );
     ws->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": wbemprox_services.cs");
+    if (context)
+        IWbemContext_Clone( context, &ws->context );
 
     *ppObj = &ws->IWbemServices_iface;
 
@@ -1035,9 +1040,32 @@ static HRESULT WINAPI wbem_context_Clone(
     IWbemContext *iface,
     IWbemContext **newcopy )
 {
-    FIXME("%p, %p\n", iface, newcopy);
+    struct wbem_context *context = impl_from_IWbemContext( iface );
+    struct wbem_context_value *value;
+    IWbemContext *cloned_context;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p\n", iface, newcopy);
+
+    if (SUCCEEDED(hr = WbemContext_create( (void **)&cloned_context )))
+    {
+        LIST_FOR_EACH_ENTRY( value, &context->values, struct wbem_context_value, entry )
+        {
+            if (FAILED(hr = IWbemContext_SetValue( cloned_context, value->name, 0, &value->value ))) break;
+        }
+    }
+
+    if (SUCCEEDED(hr))
+    {
+        *newcopy = cloned_context;
+    }
+    else
+    {
+        *newcopy = NULL;
+        IWbemContext_Release( cloned_context );
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI wbem_context_GetNames(

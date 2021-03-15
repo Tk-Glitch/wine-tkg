@@ -465,6 +465,7 @@
 @ stdcall IoReuseIrp(ptr long)
 @ stub IoSetCompletionRoutineEx
 @ stdcall IoSetDeviceInterfaceState(ptr long)
+@ stdcall IoSetDevicePropertyData(ptr ptr long long long long ptr)
 @ stub IoSetDeviceToVerify
 @ stub IoSetFileOrigin
 @ stub IoSetHardErrorOrVerifyDevice
@@ -1214,6 +1215,7 @@
 @ stdcall RtlQueryPackageIdentity(long ptr ptr ptr ptr ptr)
 @ stdcall RtlQueryProcessPlaceholderCompatibilityMode() ntdll.RtlQueryProcessPlaceholderCompatibilityMode
 @ stdcall RtlQueryRegistryValues(long ptr ptr ptr ptr)
+@ stdcall RtlQueryRegistryValuesEx(long ptr ptr ptr ptr) RtlQueryRegistryValues
 @ stdcall RtlQueryTimeZoneInformation(ptr)
 @ stdcall -norelay RtlRaiseException(ptr)
 @ stdcall RtlRaiseStatus(long)

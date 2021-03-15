@@ -2214,6 +2214,52 @@ int CDECL fegetenv(fenv_t *env)
     env->_Fe_stat = _statusfp();
     return 0;
 }
+
+/*********************************************************************
+ *      fetestexcept (MSVCR120.@)
+ */
+int CDECL fetestexcept(int flags)
+{
+    return _statusfp() & flags;
+}
+
+/*********************************************************************
+ *      fesetexceptflag (MSVCR120.@)
+ */
+int CDECL fesetexceptflag(const fexcept_t *status, int excepts)
+{
+    fenv_t env;
+
+    if(!excepts)
+        return 0;
+
+    fegetenv(&env);
+    excepts &= FE_ALL_EXCEPT;
+    env._Fe_stat &= ~excepts;
+    env._Fe_stat |= (*status & excepts);
+    return fesetenv(&env);
+}
+
+/*********************************************************************
+ *      feclearexcept (MSVCR120.@)
+ */
+int CDECL feclearexcept(int flags)
+{
+    fenv_t env;
+
+    fegetenv(&env);
+    env._Fe_stat &= ~(flags & FE_ALL_EXCEPT);
+    return fesetenv(&env);
+}
+
+/*********************************************************************
+ *      fegetexceptflag (MSVCR120.@)
+ */
+int CDECL fegetexceptflag(fexcept_t *status, int excepts)
+{
+    *status = _statusfp() & excepts;
+    return 0;
+}
 #endif
 
 #if _MSVCR_VER>=140

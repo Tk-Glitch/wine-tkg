@@ -32,4 +32,3 @@ HRESULT WINAPI SPInit( LPSPINITDATA lpspData )
     FIXME("Currently not implemented.\n");
     return DPERR_UNAVAILABLE;
 }
-

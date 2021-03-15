@@ -108,8 +108,6 @@ struct quartz_vmr
     LONG VideoWidth;
     LONG VideoHeight;
     VMR9AspectRatioMode aspect_mode;
-
-    HANDLE run_event;
 };
 
 static inline BOOL is_vmr9(const struct quartz_vmr *filter)
@@ -208,10 +206,9 @@ static inline struct quartz_vmr *impl_from_IBaseFilter(IBaseFilter *iface)
     return CONTAINING_RECORD(iface, struct quartz_vmr, renderer.filter.IBaseFilter_iface);
 }
 
-static HRESULT WINAPI VMR9_DoRenderSample(struct strmbase_renderer *iface, IMediaSample *sample)
+static HRESULT vmr_render(struct strmbase_renderer *iface, IMediaSample *sample)
 {
     struct quartz_vmr *filter = impl_from_IBaseFilter(&iface->filter.IBaseFilter_iface);
-    const HANDLE events[2] = {filter->run_event, filter->renderer.flush_event};
     unsigned int data_size, width, depth, src_pitch;
     const BITMAPINFOHEADER *bitmap_header;
     REFERENCE_TIME start_time, end_time;
@@ -312,20 +309,10 @@ static HRESULT WINAPI VMR9_DoRenderSample(struct strmbase_renderer *iface, IMedi
 
     IDirect3DSurface9_UnlockRect(info.lpSurf);
 
-    hr = IVMRImagePresenter9_PresentImage(filter->presenter, filter->cookie, &info);
-
-    if (filter->renderer.filter.state == State_Paused)
-    {
-        SetEvent(filter->renderer.state_event);
-        LeaveCriticalSection(&filter->renderer.filter.stream_cs);
-        WaitForMultipleObjects(2, events, FALSE, INFINITE);
-        EnterCriticalSection(&filter->renderer.filter.stream_cs);
-    }
-
-    return hr;
+    return IVMRImagePresenter9_PresentImage(filter->presenter, filter->cookie, &info);
 }
 
-static HRESULT WINAPI VMR9_CheckMediaType(struct strmbase_renderer *iface, const AM_MEDIA_TYPE *mt)
+static HRESULT vmr_query_accept(struct strmbase_renderer *iface, const AM_MEDIA_TYPE *mt)
 {
     if (!IsEqualIID(&mt->majortype, &MEDIATYPE_Video) || !mt->pbFormat)
         return S_FALSE;
@@ -486,7 +473,6 @@ static void vmr_start_stream(struct strmbase_renderer *iface)
     struct quartz_vmr *filter = impl_from_IBaseFilter(&iface->filter.IBaseFilter_iface);
 
     IVMRImagePresenter9_StartPresenting(filter->presenter, filter->cookie);
-    SetEvent(filter->run_event);
 }
 
 static void vmr_stop_stream(struct strmbase_renderer *iface)
@@ -497,7 +483,6 @@ static void vmr_stop_stream(struct strmbase_renderer *iface)
 
     if (This->renderer.filter.state == State_Running)
         IVMRImagePresenter9_StopPresenting(This->presenter, This->cookie);
-    ResetEvent(This->run_event);
 }
 
 static HRESULT vmr_connect(struct strmbase_renderer *iface, const AM_MEDIA_TYPE *mt)
@@ -527,30 +512,20 @@ static HRESULT vmr_connect(struct strmbase_renderer *iface, const AM_MEDIA_TYPE 
     return hr;
 }
 
-static HRESULT WINAPI VMR9_BreakConnect(struct strmbase_renderer *This)
+static void vmr_disconnect(struct strmbase_renderer *This)
 {
-    struct quartz_vmr *pVMR9 = impl_from_IBaseFilter(&This->filter.IBaseFilter_iface);
-    HRESULT hr = S_OK;
+    struct quartz_vmr *filter = impl_from_IBaseFilter(&This->filter.IBaseFilter_iface);
     DWORD i;
 
-    if (!pVMR9->mode)
-        return S_FALSE;
-     if (This->sink.pin.peer && pVMR9->allocator && pVMR9->presenter)
+    if (filter->mode && filter->allocator && filter->presenter)
     {
-        if (pVMR9->renderer.filter.state != State_Stopped)
-        {
-            ERR("Disconnecting while not stopped! UNTESTED!!\n");
-        }
-        if (pVMR9->renderer.filter.state == State_Running)
-            hr = IVMRImagePresenter9_StopPresenting(pVMR9->presenter, pVMR9->cookie);
+        for (i = 0; i < filter->num_surfaces; ++i)
+            IDirect3DSurface9_Release(filter->surfaces[i]);
+        free(filter->surfaces);
 
-        for (i = 0; i < pVMR9->num_surfaces; ++i)
-            IDirect3DSurface9_Release(pVMR9->surfaces[i]);
-        free(pVMR9->surfaces);
-        IVMRSurfaceAllocator9_TerminateDevice(pVMR9->allocator, pVMR9->cookie);
-        pVMR9->num_surfaces = 0;
+        IVMRSurfaceAllocator9_TerminateDevice(filter->allocator, filter->cookie);
+        filter->num_surfaces = 0;
     }
-    return hr;
 }
 
 static void vmr_free(struct quartz_vmr *filter)
@@ -585,7 +560,6 @@ static void vmr_destroy(struct strmbase_renderer *iface)
         filter->allocator_d3d9_dev = NULL;
     }
 
-    CloseHandle(filter->run_event);
     FreeLibrary(filter->hD3d9);
     strmbase_renderer_cleanup(&filter->renderer);
     if (!filter->IVMRSurfaceAllocatorNotify9_refcount)
@@ -653,13 +627,13 @@ static HRESULT vmr_pin_query_interface(struct strmbase_renderer *iface, REFIID i
 
 static const struct strmbase_renderer_ops renderer_ops =
 {
-    .pfnCheckMediaType = VMR9_CheckMediaType,
-    .pfnDoRenderSample = VMR9_DoRenderSample,
+    .renderer_query_accept = vmr_query_accept,
+    .renderer_render = vmr_render,
     .renderer_init_stream = vmr_init_stream,
     .renderer_start_stream = vmr_start_stream,
     .renderer_stop_stream = vmr_stop_stream,
     .renderer_connect = vmr_connect,
-    .pfnBreakConnect = VMR9_BreakConnect,
+    .renderer_disconnect = vmr_disconnect,
     .renderer_destroy = vmr_destroy,
     .renderer_query_interface = vmr_query_interface,
     .renderer_pin_query_interface = vmr_pin_query_interface,
@@ -2609,8 +2583,6 @@ static HRESULT vmr_create(IUnknown *outer, IUnknown **out, const CLSID *clsid)
         free(object);
         return hr;
     }
-
-    object->run_event = CreateEventW(NULL, TRUE, FALSE, NULL);
 
     object->mixing_prefs = MixerPref9_NoDecimation | MixerPref9_ARAdjustXorY
             | MixerPref9_BiLinearFiltering | MixerPref9_RenderTargetRGB;

@@ -48,9 +48,6 @@ struct video_renderer
     LONG FullScreenMode;
 
     DWORD saved_style;
-
-    HANDLE run_event;
-    IMediaSample *current_sample;
 };
 
 static inline struct video_renderer *impl_from_video_window(struct video_window *iface)
@@ -82,7 +79,7 @@ static void VideoRenderer_AutoShowWindow(struct video_renderer *This)
         ShowWindow(This->window.hwnd, SW_SHOW);
 }
 
-static HRESULT WINAPI VideoRenderer_DoRenderSample(struct strmbase_renderer *iface, IMediaSample *pSample)
+static HRESULT video_renderer_render(struct strmbase_renderer *iface, IMediaSample *pSample)
 {
     struct video_renderer *filter = impl_from_strmbase_renderer(iface);
     RECT src = filter->window.src, dst = filter->window.dst;
@@ -105,24 +102,10 @@ static HRESULT WINAPI VideoRenderer_DoRenderSample(struct strmbase_renderer *ifa
             (BITMAPINFO *)get_bitmap_header(&filter->renderer.sink.pin.mt), DIB_RGB_COLORS, SRCCOPY);
     ReleaseDC(filter->window.hwnd, dc);
 
-    if (filter->renderer.filter.state == State_Paused)
-    {
-        const HANDLE events[2] = {filter->run_event, filter->renderer.flush_event};
-
-        filter->current_sample = pSample;
-
-        SetEvent(filter->renderer.state_event);
-        LeaveCriticalSection(&filter->renderer.filter.stream_cs);
-        WaitForMultipleObjects(2, events, FALSE, INFINITE);
-        EnterCriticalSection(&filter->renderer.filter.stream_cs);
-
-        filter->current_sample = NULL;
-    }
-
     return S_OK;
 }
 
-static HRESULT WINAPI VideoRenderer_CheckMediaType(struct strmbase_renderer *iface, const AM_MEDIA_TYPE *mt)
+static HRESULT video_renderer_query_accept(struct strmbase_renderer *iface, const AM_MEDIA_TYPE *mt)
 {
     if (!IsEqualGUID(&mt->majortype, &MEDIATYPE_Video))
         return S_FALSE;
@@ -145,7 +128,6 @@ static void video_renderer_destroy(struct strmbase_renderer *iface)
     struct video_renderer *filter = impl_from_strmbase_renderer(iface);
 
     video_window_cleanup(&filter->window);
-    CloseHandle(filter->run_event);
     strmbase_renderer_cleanup(&filter->renderer);
     free(filter);
 
@@ -180,13 +162,6 @@ static HRESULT video_renderer_pin_query_interface(struct strmbase_renderer *ifac
     return S_OK;
 }
 
-static void video_renderer_start_stream(struct strmbase_renderer *iface)
-{
-    struct video_renderer *filter = impl_from_strmbase_renderer(iface);
-
-    SetEvent(filter->run_event);
-}
-
 static void video_renderer_stop_stream(struct strmbase_renderer *iface)
 {
     struct video_renderer *This = impl_from_strmbase_renderer(iface);
@@ -196,8 +171,6 @@ static void video_renderer_stop_stream(struct strmbase_renderer *iface)
     if (This->window.AutoShow)
         /* Black it out */
         RedrawWindow(This->window.hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE);
-
-    ResetEvent(This->run_event);
 }
 
 static void video_renderer_init_stream(struct strmbase_renderer *iface)
@@ -240,10 +213,9 @@ static RECT video_renderer_get_default_rect(struct video_window *iface)
 
 static const struct strmbase_renderer_ops renderer_ops =
 {
-    .pfnCheckMediaType = VideoRenderer_CheckMediaType,
-    .pfnDoRenderSample = VideoRenderer_DoRenderSample,
+    .renderer_query_accept = video_renderer_query_accept,
+    .renderer_render = video_renderer_render,
     .renderer_init_stream = video_renderer_init_stream,
-    .renderer_start_stream = video_renderer_start_stream,
     .renderer_stop_stream = video_renderer_stop_stream,
     .renderer_destroy = video_renderer_destroy,
     .renderer_query_interface = video_renderer_query_interface,
@@ -276,7 +248,7 @@ static HRESULT video_renderer_get_current_image(struct video_window *iface, LONG
         return VFW_E_NOT_PAUSED;
     }
 
-    if (!filter->current_sample)
+    if (!filter->renderer.current_sample)
     {
         LeaveCriticalSection(&filter->renderer.filter.stream_cs);
         return E_UNEXPECTED;
@@ -289,7 +261,7 @@ static HRESULT video_renderer_get_current_image(struct video_window *iface, LONG
     }
 
     memcpy(image, bih, sizeof(BITMAPINFOHEADER));
-    IMediaSample_GetPointer(filter->current_sample, &sample_data);
+    IMediaSample_GetPointer(filter->renderer.current_sample, &sample_data);
     memcpy((char *)image + sizeof(BITMAPINFOHEADER), sample_data, image_size);
 
     LeaveCriticalSection(&filter->renderer.filter.stream_cs);
@@ -523,8 +495,6 @@ HRESULT video_renderer_create(IUnknown *outer, IUnknown **out)
         free(object);
         return hr;
     }
-
-    object->run_event = CreateEventW(NULL, TRUE, FALSE, NULL);
 
     TRACE("Created video renderer %p.\n", object);
     *out = &object->renderer.filter.IUnknown_inner;

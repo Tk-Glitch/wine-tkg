@@ -130,7 +130,7 @@ static HRESULT get_sd( SECURITY_DESCRIPTOR **sd, DWORD *size )
     return hr;
 }
 
-HRESULT security_get_sd( IWbemClassObject *obj, IWbemClassObject *in, IWbemClassObject **out )
+HRESULT security_get_sd( IWbemClassObject *obj, IWbemContext *context, IWbemClassObject *in, IWbemClassObject **out )
 {
     VARIANT var_sd, retval;
     IWbemClassObject *sig, *out_params = NULL;
@@ -138,7 +138,7 @@ HRESULT security_get_sd( IWbemClassObject *obj, IWbemClassObject *in, IWbemClass
     SECURITY_DESCRIPTOR *sd;
     DWORD sd_size;
 
-    TRACE("%p, %p\n", in, out);
+    TRACE("%p, %p, %p, %p\n", obj, context, in, out);
 
     hr = create_signature( L"__SystemSecurity", L"GetSD", PARAM_OUT, &sig );
 
@@ -185,7 +185,7 @@ HRESULT security_get_sd( IWbemClassObject *obj, IWbemClassObject *in, IWbemClass
 }
 
 
-HRESULT security_set_sd( IWbemClassObject *obj, IWbemClassObject *in, IWbemClassObject **out )
+HRESULT security_set_sd( IWbemClassObject *obj, IWbemContext *context, IWbemClassObject *in, IWbemClassObject **out )
 {
     VARIANT retval;
     IWbemClassObject *sig, *out_params = NULL;

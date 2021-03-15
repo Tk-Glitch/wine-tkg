@@ -2486,7 +2486,7 @@ static NTSTATUS load_so_dll( LPCWSTR load_path, const UNICODE_STRING *nt_name,
         SECTION_IMAGE_INFORMATION image_info = { 0 };
 
         image_info.u.s.WineBuiltin = 1;
-        if ((status = build_module( load_path, &win_name, &module, &image_info, NULL, flags, pwm )))
+        if ((status = build_module( load_path, &win_name, &module, &image_info, NULL, flags, &wm )))
         {
             if (module) unix_funcs->unload_builtin_dll( module );
             return status;
@@ -4081,7 +4081,6 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
     return TRUE;
 }
 
-void *Wow64Transition;
 
 /***********************************************************************
  *           restart_winevdm
@@ -4105,6 +4104,38 @@ static void restart_winevdm( RTL_USER_PROCESS_PARAMETERS *params )
     RtlInitUnicodeString( &params->CommandLine, cmdline );
 }
 
+#ifndef _WIN64
+void *Wow64Transition = NULL;
+
+static void map_wow64cpu(void)
+{
+    SIZE_T size = 0;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING string;
+    HANDLE file, section;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+
+    RtlInitUnicodeString( &string, L"\\??\\C:\\windows\\sysnative\\wow64cpu.dll" );
+    InitializeObjectAttributes( &attr, &string, 0, NULL, NULL );
+    if ((status = NtOpenFile( &file, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ,
+                              FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE )))
+    {
+        WARN("failed to open wow64cpu, status %#x\n", status);
+        return;
+    }
+    if (!NtCreateSection( &section, STANDARD_RIGHTS_REQUIRED | SECTION_QUERY |
+                          SECTION_MAP_READ | SECTION_MAP_EXECUTE,
+                          NULL, NULL, PAGE_EXECUTE_READ, SEC_COMMIT, file ))
+    {
+        NtMapViewOfSection( section, NtCurrentProcess(), &Wow64Transition, 0,
+                            0, NULL, &size, ViewShare, 0, PAGE_EXECUTE_READ );
+        NtClose( section );
+    }
+    NtClose( file );
+}
+#endif
+
 
 /***********************************************************************
  *           process_init
@@ -4112,10 +4143,9 @@ static void restart_winevdm( RTL_USER_PROCESS_PARAMETERS *params )
 static NTSTATUS process_init(void)
 {
     RTL_USER_PROCESS_PARAMETERS *params;
-    WINE_MODREF *wm, *wow64cpu_wm;
+    WINE_MODREF *wm;
     NTSTATUS status;
     ANSI_STRING func_name;
-    UNICODE_STRING nt_name;
     INITIAL_TEB stack;
     TEB *teb = NtCurrentTeb();
     PEB *peb = teb->Peb;
@@ -4148,7 +4178,6 @@ static NTSTATUS process_init(void)
     is_wow64 = !!NtCurrentTeb64();
 #endif
 
-    init_unix_codepage();
     init_user_process_params();
     params = peb->ProcessParameters;
 
@@ -4224,19 +4253,17 @@ static NTSTATUS process_init(void)
 
     build_ntdll_module();
 
+#ifndef _WIN64
+    if (is_wow64)
+        map_wow64cpu();
+#endif
+
     if ((status = load_dll( params->DllPath.Buffer, L"C:\\windows\\system32\\kernel32.dll",
                             NULL, 0, &wm )) != STATUS_SUCCESS)
     {
         MESSAGE( "wine: could not load kernel32.dll, status %x\n", status );
         NtTerminateProcess( GetCurrentProcess(), status );
     }
-
-    RtlInitUnicodeString( &nt_name, L"\\??\\C:\\windows\\system32\\wow64cpu.dll" );
-    if ((status = load_builtin_dll( NULL, &nt_name, 0, &wow64cpu_wm, FALSE )) == STATUS_SUCCESS)
-        Wow64Transition = wow64cpu_wm->ldr.DllBase;
-    else
-        WARN( "could not load wow64cpu.dll, status %#x\n", status );
-
     RtlInitAnsiString( &func_name, "BaseThreadInitThunk" );
     if ((status = LdrGetProcedureAddress( wm->ldr.DllBase, &func_name,
                                           0, (void **)&pBaseThreadInitThunk )) != STATUS_SUCCESS)

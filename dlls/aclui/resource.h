@@ -24,8 +24,6 @@
 #define IDD_SECURITY_PROPERTIES  100
 
 #define IDC_USERS          101
-#define IDC_USER_ADD       102
-#define IDC_USER_REMOVE    103
 
 #define IDC_ACE_USER       110
 #define IDC_ACE            111

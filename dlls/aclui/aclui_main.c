@@ -19,10 +19,7 @@
  */
 
 #include <stdarg.h>
-
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "initguid.h"
 #include "windef.h"
 #include "winbase.h"
@@ -31,13 +28,9 @@
 #include "aclui.h"
 #include "resource.h"
 
-#include "wine/list.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(aclui);
-
-
-HPROPSHEETPAGE WINAPI CreateSecurityPage(LPSECURITYINFO psi);
 
 /* the aclui.h files does not contain the necessary COBJMACROS */
 #define ISecurityInformation_AddRef(This) (This)->lpVtbl->AddRef(This)
@@ -48,11 +41,8 @@ HPROPSHEETPAGE WINAPI CreateSecurityPage(LPSECURITYINFO psi);
 
 struct user
 {
-    struct list entry;
     WCHAR *name;
-
-    /* must be the last entry */
-    SID sid;
+    PSID sid;
 };
 
 struct security_page
@@ -60,76 +50,30 @@ struct security_page
     ISecurityInformation *security;
     SI_OBJECT_INFO info;
     PSECURITY_DESCRIPTOR sd;
+
     SI_ACCESS *access;
     ULONG access_count;
-    struct list users;
+
+    struct user *users;
+    unsigned int user_count;
 
     HWND dialog;
-    HIMAGELIST image_list_user;
+    HIMAGELIST image_list;
 };
 
 static HINSTANCE aclui_instance;
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
-{
-    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
-
-    switch (fdwReason)
-    {
-    case DLL_WINE_PREATTACH:
-        return FALSE;    /* prefer native version */
-    case DLL_PROCESS_ATTACH:
-        aclui_instance = hinstDLL;
-        DisableThreadLibraryCalls(hinstDLL);
-        break;
-    }
-    return TRUE;
-}
-
-static WCHAR* WINAPIV load_formatstr(UINT resource, ...)
+static WCHAR *WINAPIV load_formatstr(UINT resource, ...)
 {
     __ms_va_list valist;
-    WCHAR *str, fmtstr[256];
+    WCHAR *str;
     DWORD ret;
 
-    if (!LoadStringW(aclui_instance, resource, fmtstr, 256))
-        return NULL;
-
-    __ms_va_start( valist, resource );
-    ret = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_STRING,
-                         fmtstr, 0, 0, (WCHAR*)&str, 0, &valist);
-    __ms_va_end( valist );
+    __ms_va_start(valist, resource);
+    ret = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_HMODULE,
+                         aclui_instance, resource, 0, (WCHAR*)&str, 0, &valist);
+    __ms_va_end(valist);
     return ret ? str : NULL;
-}
-
-static void security_page_free(struct security_page *page)
-{
-    struct user *user, *user2;
-
-    LIST_FOR_EACH_ENTRY_SAFE(user, user2, &page->users, struct user, entry)
-    {
-        list_remove(&user->entry);
-        HeapFree(GetProcessHeap(), 0, user->name);
-        HeapFree(GetProcessHeap(), 0, user);
-    }
-
-    if (page->image_list_user) ImageList_Destroy(page->image_list_user);
-    if (page->security) ISecurityInformation_Release(page->security);
-    HeapFree(GetProcessHeap(), 0, page);
-}
-
-static void users_clear(struct security_page *page)
-{
-    struct user *user, *user2;
-
-    LIST_FOR_EACH_ENTRY_SAFE(user, user2, &page->users, struct user, entry)
-    {
-        /* TODO: Remove from GUI */
-
-        list_remove(&user->entry);
-        HeapFree(GetProcessHeap(), 0, user->name);
-        HeapFree(GetProcessHeap(), 0, user);
-    }
 }
 
 static WCHAR *get_sid_name(PSID sid, SID_NAME_USE *sid_type)
@@ -142,65 +86,55 @@ static WCHAR *get_sid_name(PSID sid, SID_NAME_USE *sid_type)
     LookupAccountSidW(NULL, sid, NULL, &name_len, NULL, &domain_len, sid_type);
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
         return NULL;
-    if (!(name = HeapAlloc(GetProcessHeap(), 0, name_len * sizeof(WCHAR))))
+    if (!(name = malloc(name_len * sizeof(WCHAR))))
         return NULL;
-    if (!(domain = HeapAlloc(GetProcessHeap(), 0, domain_len * sizeof(WCHAR))))
-        goto error;
+    if (!(domain = malloc(domain_len * sizeof(WCHAR))))
+    {
+        free(name);
+        return NULL;
+    }
 
     ret = LookupAccountSidW(NULL, sid, name, &name_len, domain, &domain_len, sid_type);
-    HeapFree(GetProcessHeap(), 0, domain);
+    free(domain);
     if (ret) return name;
-
-error:
-    HeapFree(GetProcessHeap(), 0, name);
+    free(name);
     return NULL;
 }
 
-static BOOL users_add(struct security_page *page, PSID sid)
+static void add_user(struct security_page *page, PSID sid)
 {
+    struct user *new_array, *user;
     SID_NAME_USE sid_type;
-    struct user *user;
-    DWORD sid_len;
+    unsigned int i;
     LVITEMW item;
     WCHAR *name;
 
     /* check if we already processed this user or group */
-    LIST_FOR_EACH_ENTRY( user, &page->users, struct user, entry )
+    for (i = 0; i < page->user_count; ++i)
     {
-        if (EqualSid(sid, &user->sid))
-            return TRUE;
+        if (EqualSid(sid, page->users[i].sid))
+            return;
     }
 
     if (!(name = get_sid_name(sid, &sid_type)))
-        return FALSE;
+        return;
 
-    sid_len = GetLengthSid(sid);
-    user = HeapAlloc(GetProcessHeap(), 0, offsetof(struct user, sid) + sid_len);
-    if (!user)
-    {
-        HeapFree(GetProcessHeap(), 0, name);
-        return FALSE;
-    }
+    if (!(new_array = realloc(page->users, (page->user_count + 1) * sizeof(*page->users))))
+        return;
+    page->users = new_array;
+    user = &page->users[page->user_count++];
 
     user->name = name;
-    CopySid(sid_len, &user->sid, sid);
-    list_add_tail(&page->users, &user->entry);
+    user->sid = sid;
 
-    /* Add in GUI */
-    item.mask     = LVIF_PARAM | LVIF_TEXT;
+    item.mask     = LVIF_PARAM | LVIF_TEXT | LVIF_IMAGE;
     item.iItem    = -1;
     item.iSubItem = 0;
     item.pszText  = name;
     item.lParam   = (LPARAM)user;
+    item.iImage = (sid_type == SidTypeGroup || sid_type == SidTypeWellKnownGroup) ? 0 : 1;
 
-    if (page->image_list_user)
-    {
-        item.mask |= LVIF_IMAGE;
-        item.iImage = (sid_type == SidTypeGroup || sid_type == SidTypeWellKnownGroup) ? 0 : 1;
-    }
-
-    ListView_InsertItemW(GetDlgItem(page->dialog, IDC_USERS), &item);
-    return TRUE;
+    SendMessageW(GetDlgItem(page->dialog, IDC_USERS), LVM_INSERTITEMW, 0, (LPARAM)&item);
 }
 
 static PSID get_sid_from_ace(ACE_HEADER *ace)
@@ -208,61 +142,13 @@ static PSID get_sid_from_ace(ACE_HEADER *ace)
     switch (ace->AceType)
     {
         case ACCESS_ALLOWED_ACE_TYPE:
-            return (SID *)&((ACCESS_ALLOWED_ACE *)ace)->SidStart;
+            return &((ACCESS_ALLOWED_ACE *)ace)->SidStart;
         case ACCESS_DENIED_ACE_TYPE:
-            return (SID *)&((ACCESS_DENIED_ACE *)ace)->SidStart;
+            return &((ACCESS_DENIED_ACE *)ace)->SidStart;
         default:
-            FIXME("Don't know how to extract SID from ace type %d\n", ace->AceType);
+            FIXME("Unhandled ACE type %#x.\n", ace->AceType);
             return NULL;
     }
-}
-
-static void users_refresh(struct security_page *page)
-{
-    BOOL defaulted, present;
-    ACE_HEADER *ace;
-    DWORD index;
-    ACL *dacl;
-    PSID sid;
-
-    users_clear(page);
-
-    /* Add Owner to list */
-    if (GetSecurityDescriptorOwner(page->sd, &sid, &defaulted))
-        users_add(page, sid);
-
-    /* Everyone else who appears in the DACL */
-    if (GetSecurityDescriptorDacl(page->sd, &present, &dacl, &defaulted) && present)
-    {
-        for (index = 0; index < dacl->AceCount; index++)
-        {
-            if (!GetAce(dacl, index, (void**)&ace))
-                break;
-            if (!(sid = get_sid_from_ace(ace)))
-                continue;
-            users_add(page, sid);
-        }
-    }
-}
-
-static HIMAGELIST create_image_list(UINT resource, UINT width, UINT height, UINT count, COLORREF mask_color)
-{
-    HIMAGELIST image_list;
-    HBITMAP image;
-    INT ret;
-
-    if (!(image_list = ImageList_Create(width, height, ILC_COLOR32 | ILC_MASK, 0, count)))
-        return NULL;
-    if (!(image = LoadBitmapW(aclui_instance, MAKEINTRESOURCEW(resource))))
-        goto error;
-
-    ret = ImageList_AddMasked(image_list, image, mask_color);
-    DeleteObject(image);
-    if (ret != -1) return image_list;
-
-error:
-    ImageList_Destroy(image_list);
-    return NULL;
 }
 
 static void compute_access_masks(PSECURITY_DESCRIPTOR sd, PSID sid, ACCESS_MASK *allowed, ACCESS_MASK *denied)
@@ -295,18 +181,15 @@ static void compute_access_masks(PSECURITY_DESCRIPTOR sd, PSID sid, ACCESS_MASK 
     }
 }
 
-static void show_ace_entries(struct security_page *page, struct user *user)
+static void update_access_list(struct security_page *page, struct user *user)
 {
-    static const WCHAR yesW[] = {'X',0};
-    static const WCHAR noW[] = {'-',0};
-
     ACCESS_MASK allowed, denied;
     WCHAR *infotext;
     ULONG i, index;
     LVITEMW item;
     HWND control;
 
-    compute_access_masks(page->sd, &user->sid, &allowed, &denied);
+    compute_access_masks(page->sd, user->sid, &allowed, &denied);
 
     if ((infotext = load_formatstr(IDS_PERMISSION_FOR, user->name)))
     {
@@ -326,28 +209,55 @@ static void show_ace_entries(struct security_page *page, struct user *user)
 
         item.iSubItem = 1;
         if ((page->access[i].mask & allowed) == page->access[i].mask)
-            item.pszText = (WCHAR *)yesW;
+            item.pszText = (WCHAR *)L"X";
         else
-            item.pszText = (WCHAR *)noW;
-        ListView_SetItemW(control, &item);
+            item.pszText = (WCHAR *)L"-";
+        SendMessageW(control, LVM_SETITEMW, 0, (LPARAM)&item);
 
         item.iSubItem = 2;
         if ((page->access[i].mask & denied) == page->access[i].mask)
-            item.pszText = (WCHAR *)yesW;
+            item.pszText = (WCHAR *)L"X";
         else
-            item.pszText = (WCHAR *)noW;
-        ListView_SetItemW(control, &item);
+            item.pszText = (WCHAR *)L"-";
+        SendMessageW(control, LVM_SETITEMW, 0, (LPARAM)&item);
 
         index++;
     }
 }
 
-static void create_ace_entries(struct security_page *page)
+static void init_users(struct security_page *page)
 {
-    WCHAR str[256];
-    HWND control;
-    LVITEMW item;
+    BOOL defaulted, present;
+    ACE_HEADER *ace;
+    DWORD index;
+    ACL *dacl;
+    PSID sid;
+
+    if (!GetSecurityDescriptorDacl(page->sd, &present, &dacl, &defaulted))
+    {
+        ERR("Failed to query descriptor information, error %u.\n", GetLastError());
+        return;
+    }
+
+    if (!present)
+        return;
+
+    for (index = 0; index < dacl->AceCount; index++)
+    {
+        if (!GetAce(dacl, index, (void **)&ace))
+            break;
+        if (!(sid = get_sid_from_ace(ace)))
+            continue;
+        add_user(page, sid);
+    }
+}
+
+static void init_access_list(struct security_page *page)
+{
     ULONG i, index;
+    WCHAR str[256];
+    LVITEMW item;
+    HWND control;
 
     control = GetDlgItem(page->dialog, IDC_ACE);
     index = 0;
@@ -362,36 +272,83 @@ static void create_ace_entries(struct security_page *page)
         if (IS_INTRESOURCE(page->access[i].pszName))
         {
             str[0] = 0;
-            LoadStringW(page->info.hInstance, (UINT)(DWORD_PTR)page->access[i].pszName, str, 256);
+            LoadStringW(page->info.hInstance, (DWORD_PTR)page->access[i].pszName, str, ARRAY_SIZE(str));
             item.pszText = str;
         }
         else
             item.pszText = (WCHAR *)page->access[i].pszName;
-        ListView_InsertItemW(control, &item);
+        SendMessageW(control, LVM_INSERTITEMW, 0, (LPARAM)&item);
 
         index++;
     }
+}
+
+static HIMAGELIST create_image_list(UINT resource, UINT width, UINT height, UINT count, COLORREF mask_color)
+{
+    HIMAGELIST image_list;
+    HBITMAP image;
+    INT ret;
+
+    if (!(image_list = ImageList_Create(width, height, ILC_COLOR32 | ILC_MASK, 0, count)))
+        return NULL;
+    if (!(image = LoadBitmapW(aclui_instance, MAKEINTRESOURCEW(resource))))
+    {
+        ImageList_Destroy(image_list);
+        return NULL;
+    }
+
+    ret = ImageList_AddMasked(image_list, image, mask_color);
+    DeleteObject(image);
+    if (ret == -1)
+    {
+        ImageList_Destroy(image_list);
+        return NULL;
+    }
+    return image_list;
+}
+
+static void security_page_free(struct security_page *page)
+{
+    unsigned int i;
+
+    for (i = 0; i < page->user_count; ++i)
+        free(page->users[i].name);
+    free(page->users);
+
+    LocalFree(page->sd);
+    if (page->image_list)
+        ImageList_Destroy(page->image_list);
+    if (page->security)
+        ISecurityInformation_Release(page->security);
+    free(page);
 }
 
 static void security_page_init_dlg(HWND hwnd, struct security_page *page)
 {
     LVCOLUMNW column;
     HWND control;
+    HRESULT hr;
+    ULONG def;
     RECT rect;
-    ULONG def = 0;
 
     page->dialog = hwnd;
 
-    if (FAILED(ISecurityInformation_GetSecurity(page->security, DACL_SECURITY_INFORMATION |
-                                                OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION,
-                                                &page->sd, FALSE)))
+    if (FAILED(hr = ISecurityInformation_GetSecurity(page->security,
+            DACL_SECURITY_INFORMATION, &page->sd, FALSE)))
+    {
+        ERR("Failed to get security descriptor, hr %#x.\n", hr);
         return;
+    }
 
-    if (FAILED(ISecurityInformation_GetAccessRights(page->security, NULL, 0, &page->access,
-                                                    &page->access_count, &def)))
+    if (FAILED(hr = ISecurityInformation_GetAccessRights(page->security,
+            NULL, 0, &page->access, &page->access_count, &def)))
+    {
+        ERR("Failed to get access mapping, hr %#x.\n", hr);
         return;
+    }
 
-    /* Prepare user list */
+    /* user list */
+
     control = GetDlgItem(hwnd, IDC_USERS);
     SendMessageW(control, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_FULLROWSELECT, LVS_EX_FULLROWSELECT);
 
@@ -399,34 +356,32 @@ static void security_page_init_dlg(HWND hwnd, struct security_page *page)
     column.mask = LVCF_FMT | LVCF_WIDTH;
     column.fmt = LVCFMT_LEFT;
     column.cx = rect.right - rect.left;
-    ListView_InsertColumnW(control, 0, &column);
+    SendMessageW(control, LVM_INSERTCOLUMNW, 0, (LPARAM)&column);
 
-    if ((page->image_list_user = create_image_list(IDB_USER_ICONS, 18, 18, 2, RGB(255, 0, 255))))
-        SendMessageW(control, LVM_SETIMAGELIST, LVSIL_SMALL, (LPARAM)page->image_list_user);
+    if (!(page->image_list = create_image_list(IDB_USER_ICONS, 18, 18, 2, RGB(255, 0, 255))))
+        return;
+    SendMessageW(control, LVM_SETIMAGELIST, LVSIL_SMALL, (LPARAM)page->image_list);
 
-    /* Prepare ACE list */
+    init_users(page);
+
+    /* ACE list */
+
     control = GetDlgItem(hwnd, IDC_ACE);
     SendMessageW(control, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_FULLROWSELECT, LVS_EX_FULLROWSELECT);
 
     column.mask = LVCF_FMT | LVCF_WIDTH;
     column.fmt = LVCFMT_LEFT;
     column.cx = 170;
-    ListView_InsertColumnW(control, 0, &column);
+    SendMessageW(control, LVM_INSERTCOLUMNW, 0, (LPARAM)&column);
 
-    column.mask = LVCF_FMT | LVCF_WIDTH;
     column.fmt = LVCFMT_CENTER;
     column.cx = 85;
-    ListView_InsertColumnW(control, 1, &column);
+    SendMessageW(control, LVM_INSERTCOLUMNW, 1, (LPARAM)&column);
+    SendMessageW(control, LVM_INSERTCOLUMNW, 2, (LPARAM)&column);
 
-    column.mask = LVCF_FMT | LVCF_WIDTH;
-    column.fmt = LVCFMT_CENTER;
-    column.cx = 85;
-    ListView_InsertColumnW(control, 2, &column);
+    init_access_list(page);
 
-    users_refresh(page);
-    create_ace_entries(page);
-
-    if (!list_empty(&page->users))
+    if (page->user_count)
     {
         LVITEMW item;
         item.mask = LVIF_STATE;
@@ -434,53 +389,41 @@ static void security_page_init_dlg(HWND hwnd, struct security_page *page)
         item.iSubItem = 0;
         item.state = LVIS_FOCUSED | LVIS_SELECTED;
         item.stateMask = item.state;
-        ListView_SetItemW(GetDlgItem(hwnd, IDC_USERS), &item);
+        SendMessageW(control, LVM_SETITEMW, 0, (LPARAM)&item);
     }
 }
 
-static INT_PTR CALLBACK security_page_proc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+static INT_PTR CALLBACK security_page_proc(HWND dialog, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     switch (msg)
     {
         case WM_INITDIALOG:
         {
-            LPPROPSHEETPAGEW ppsp = (LPPROPSHEETPAGEW)lParam;
-            SetWindowLongPtrW(hwndDlg, DWLP_USER, (LONG_PTR)ppsp->lParam);
-            security_page_init_dlg(hwndDlg, (struct security_page *)ppsp->lParam);
+            PROPSHEETPAGEW *propsheet = (PROPSHEETPAGEW *)lparam;
+            SetWindowLongPtrW(dialog, DWLP_USER, propsheet->lParam);
+            security_page_init_dlg(dialog, (struct security_page *)propsheet->lParam);
             break;
         }
 
-        case WM_COMMAND:
-            if (LOWORD(wParam) == IDC_USER_ADD ||
-                LOWORD(wParam) == IDC_USER_REMOVE)
-            {
-                /* TODO: Adding & removing users */
-                MessageBoxA(hwndDlg, "Not implemented yet.", "Error", MB_OK | MB_ICONEXCLAMATION);
-            }
-            break;
-
         case WM_NOTIFY:
         {
-            struct security_page *page = (struct security_page *)GetWindowLongPtrW(hwndDlg, DWLP_USER);
-            NMHDR *hdr = (NMHDR *)lParam;
+            struct security_page *page = (struct security_page *)GetWindowLongPtrW(dialog, DWLP_USER);
+            NMHDR *hdr = (NMHDR *)lparam;
 
-            if (hdr->hwndFrom == GetDlgItem(hwndDlg, IDC_USERS) && hdr->code == LVN_ITEMCHANGED)
+            if (hdr->hwndFrom == GetDlgItem(dialog, IDC_USERS) && hdr->code == LVN_ITEMCHANGED)
             {
-                NMLISTVIEW *nmv = (NMLISTVIEW *)lParam;
-                if (!(nmv->uOldState & LVIS_SELECTED) && (nmv->uNewState & LVIS_SELECTED))
-                    show_ace_entries(page, (struct user *)nmv->lParam);
+                NMLISTVIEW *listview = (NMLISTVIEW *)lparam;
+                if (!(listview->uOldState & LVIS_SELECTED) && (listview->uNewState & LVIS_SELECTED))
+                    update_access_list(page, (struct user *)listview->lParam);
                 return TRUE;
             }
             break;
         }
-
-        default:
-            break;
     }
     return FALSE;
 }
 
-static UINT CALLBACK security_page_callback(HWND hwnd, UINT msg, LPPROPSHEETPAGEW ppsp)
+static UINT CALLBACK security_page_callback(HWND hwnd, UINT msg, PROPSHEETPAGEW *ppsp)
 {
     struct security_page *page = (struct security_page *)ppsp->lParam;
 
@@ -490,27 +433,33 @@ static UINT CALLBACK security_page_callback(HWND hwnd, UINT msg, LPPROPSHEETPAGE
     return 1;
 }
 
-static HPROPSHEETPAGE create_security_property_page(ISecurityInformation *security)
+HPROPSHEETPAGE WINAPI CreateSecurityPage(ISecurityInformation *security)
 {
     struct security_page *page;
     PROPSHEETPAGEW propsheet;
     HPROPSHEETPAGE ret;
 
-    if (!(page = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*page))))
+    TRACE("%p\n", security);
+
+    InitCommonControls();
+
+    if (!(page = calloc(1, sizeof(*page))))
         return NULL;
 
-    list_init(&page->users);
+    if (FAILED(ISecurityInformation_GetObjectInformation(security, &page->info)))
+    {
+        free(page);
+        return NULL;
+    }
+
     page->security = security;
     ISecurityInformation_AddRef(security);
-
-    if (FAILED(ISecurityInformation_GetObjectInformation(security, &page->info)))
-        goto error;
 
     memset(&propsheet, 0, sizeof(propsheet));
     propsheet.dwSize        = sizeof(propsheet);
     propsheet.dwFlags       = PSP_DEFAULT | PSP_USECALLBACK;
     propsheet.hInstance     = aclui_instance;
-    propsheet.u.pszTemplate = (LPWSTR)MAKEINTRESOURCE(IDD_SECURITY_PROPERTIES);
+    propsheet.pszTemplate   = (WCHAR *)MAKEINTRESOURCE(IDD_SECURITY_PROPERTIES);
     propsheet.pfnDlgProc    = security_page_proc;
     propsheet.pfnCallback   = security_page_callback;
     propsheet.lParam        = (LPARAM)page;
@@ -521,47 +470,50 @@ static HPROPSHEETPAGE create_security_property_page(ISecurityInformation *securi
         propsheet.dwFlags |= PSP_USETITLE;
     }
 
-    if ((ret = CreatePropertySheetPageW(&propsheet)))
-        return ret;
-
-error:
-    security_page_free(page);
-    return NULL;
+    if (!(ret = CreatePropertySheetPageW(&propsheet)))
+    {
+        ERR("Failed to create property sheet page.\n");
+        ISecurityInformation_Release(security);
+        free(page);
+        return NULL;
+    }
+    return ret;
 }
 
-HPROPSHEETPAGE WINAPI CreateSecurityPage(LPSECURITYINFO psi)
+BOOL WINAPI EditSecurity(HWND owner, ISecurityInformation *security)
 {
-    FIXME("(%p): semi-stub\n", psi);
-
-    InitCommonControls();
-    return create_security_property_page(psi);
-}
-
-BOOL WINAPI EditSecurity(HWND owner, LPSECURITYINFO psi)
-{
-    PROPSHEETHEADERW prop;
+    PROPSHEETHEADERW sheet = {0};
     HPROPSHEETPAGE pages[1];
     SI_OBJECT_INFO info;
     BOOL ret;
 
-    TRACE("(%p, %p)\n", owner, psi);
+    TRACE("(%p, %p)\n", owner, security);
 
-    if (FAILED(ISecurityInformation_GetObjectInformation(psi, &info)))
+    if (FAILED(ISecurityInformation_GetObjectInformation(security, &info)))
         return FALSE;
-    if (!(pages[0] = CreateSecurityPage(psi)))
+    if (!(pages[0] = CreateSecurityPage(security)))
         return FALSE;
 
-    memset(&prop, 0, sizeof(prop));
-    prop.dwSize = sizeof(prop);
-    prop.dwFlags = PSH_DEFAULT;
-    prop.hwndParent = owner;
-    prop.hInstance = aclui_instance;
-    prop.pszCaption = load_formatstr(IDS_PERMISSION_FOR, info.pszObjectName);
-    prop.nPages = 1;
-    prop.u2.nStartPage = 0;
-    prop.u3.phpage = pages;
+    sheet.dwSize = sizeof(sheet);
+    sheet.dwFlags = PSH_DEFAULT;
+    sheet.hwndParent = owner;
+    sheet.hInstance = aclui_instance;
+    sheet.pszCaption = load_formatstr(IDS_PERMISSION_FOR, info.pszObjectName);
+    sheet.nPages = 1;
+    sheet.nStartPage = 0;
+    sheet.phpage = pages;
 
-    ret = PropertySheetW(&prop) != -1;
-    LocalFree((void *)prop.pszCaption);
+    ret = PropertySheetW(&sheet) != -1;
+    LocalFree((void *)sheet.pszCaption);
     return ret;
+}
+
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
+{
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        aclui_instance = instance;
+        DisableThreadLibraryCalls(instance);
+    }
+    return TRUE;
 }

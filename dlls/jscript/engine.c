@@ -1304,7 +1304,7 @@ static HRESULT interp_local_ref(script_ctx_t *ctx)
     call_frame_t *frame = ctx->call_ctx;
     exprval_t ref;
 
-    TRACE("%d\n", arg);
+    TRACE("%s\n", debugstr_w(local_name(frame, arg)));
 
     if(!frame->base_scope || !frame->base_scope->frame)
         return interp_identifier_ref(ctx, local_name(frame, arg), flags);
@@ -1321,15 +1321,16 @@ static HRESULT interp_local(script_ctx_t *ctx)
     jsval_t copy;
     HRESULT hres;
 
-    TRACE("%d: %s\n", arg, debugstr_w(local_name(frame, arg)));
-
-    if(!frame->base_scope || !frame->base_scope->frame)
+    if(!frame->base_scope || !frame->base_scope->frame) {
+        TRACE("%s\n", debugstr_w(local_name(frame, arg)));
         return identifier_value(ctx, local_name(frame, arg));
+    }
 
     hres = jsval_copy(ctx->stack[local_off(frame, arg)], &copy);
     if(FAILED(hres))
         return hres;
 
+    TRACE("%s: %s\n", debugstr_w(local_name(frame, arg)), debugstr_jsval(copy));
     return stack_push(ctx, copy);
 }
 
@@ -2703,7 +2704,7 @@ static void pop_call_frame(script_ctx_t *ctx)
 
 static void print_backtrace(script_ctx_t *ctx)
 {
-    unsigned depth = 0, i;
+    unsigned depth = 0, i, line, char_pos;
     call_frame_t *frame;
 
     for(frame = ctx->call_ctx; frame; frame = frame->prev_frame) {
@@ -2724,7 +2725,8 @@ static void print_backtrace(script_ctx_t *ctx)
         }else {
             WARN("[detached frame]");
         }
-        WARN(")\n");
+        line = get_location_line(frame->bytecode, frame->bytecode->instrs[frame->ip].loc, &char_pos);
+        WARN(") context %s line %u char %u\n", wine_dbgstr_longlong(frame->bytecode->source_context), line, char_pos);
 
         if(!(frame->flags & EXEC_RETURN_TO_INTERP)) {
             WARN("%u\t[native code]\n", depth);

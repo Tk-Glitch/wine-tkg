@@ -561,7 +561,7 @@ static dispex_static_data_t HTMLScreen_dispex = {
     HTMLScreen_iface_tids
 };
 
-HRESULT HTMLScreen_Create(IHTMLScreen **ret)
+HRESULT create_html_screen(compat_mode_t compat_mode, IHTMLScreen **ret)
 {
     HTMLScreen *screen;
 
@@ -572,7 +572,7 @@ HRESULT HTMLScreen_Create(IHTMLScreen **ret)
     screen->IHTMLScreen_iface.lpVtbl = &HTMLSreenVtbl;
     screen->ref = 1;
 
-    init_dispex(&screen->dispex, (IUnknown*)&screen->IHTMLScreen_iface, &HTMLScreen_dispex);
+    init_dispex_with_compat_mode(&screen->dispex, (IUnknown*)&screen->IHTMLScreen_iface, &HTMLScreen_dispex, compat_mode);
 
     *ret = &screen->IHTMLScreen_iface;
     return S_OK;
@@ -733,7 +733,8 @@ HRESULT create_history(HTMLInnerWindow *window, OmHistory **ret)
     if(!history)
         return E_OUTOFMEMORY;
 
-    init_dispex(&history->dispex, (IUnknown*)&history->IOmHistory_iface, &OmHistory_dispex);
+    init_dispex_with_compat_mode(&history->dispex, (IUnknown*)&history->IOmHistory_iface, &OmHistory_dispex,
+                                 dispex_compat_mode(&window->event_target.dispex));
     history->IOmHistory_iface.lpVtbl = &OmHistoryVtbl;
     history->ref = 1;
 
@@ -891,8 +892,8 @@ static HRESULT create_plugins_collection(OmNavigator *navigator, HTMLPluginsColl
     col->ref = 1;
     col->navigator = navigator;
 
-    init_dispex(&col->dispex, (IUnknown*)&col->IHTMLPluginsCollection_iface,
-                &HTMLPluginsCollection_dispex);
+    init_dispex_with_compat_mode(&col->dispex, (IUnknown*)&col->IHTMLPluginsCollection_iface,
+                                 &HTMLPluginsCollection_dispex, dispex_compat_mode(&navigator->dispex));
 
     *ret = col;
     return S_OK;
@@ -1035,8 +1036,8 @@ static HRESULT create_mime_types_collection(OmNavigator *navigator, HTMLMimeType
     col->ref = 1;
     col->navigator = navigator;
 
-    init_dispex(&col->dispex, (IUnknown*)&col->IHTMLMimeTypesCollection_iface,
-                &HTMLMimeTypesCollection_dispex);
+    init_dispex_with_compat_mode(&col->dispex, (IUnknown*)&col->IHTMLMimeTypesCollection_iface,
+                                 &HTMLMimeTypesCollection_dispex, dispex_compat_mode(&navigator->dispex));
 
     *ret = col;
     return S_OK;

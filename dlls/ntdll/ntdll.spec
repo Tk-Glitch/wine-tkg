@@ -902,7 +902,7 @@
 @ stub RtlQueryPropertyNames
 @ stub RtlQueryPropertySet
 @ stdcall RtlQueryRegistryValues(long ptr ptr ptr ptr)
-@ stdcall RtlQueryRegistryValuesEx(long ptr ptr ptr ptr)
+@ stdcall RtlQueryRegistryValuesEx(long ptr ptr ptr ptr) RtlQueryRegistryValues
 @ stub RtlQuerySecurityObject
 @ stub RtlQueryTagHeap
 @ stdcall RtlQueryTimeZoneInformation(ptr)
@@ -1131,7 +1131,7 @@
 @ stdcall WinSqmIsOptedIn()
 @ stdcall WinSqmSetDWORD(ptr long long)
 @ stdcall WinSqmStartSession(ptr long long)
-@ extern Wow64Transition
+@ extern -arch=win32 Wow64Transition
 @ stdcall -private -syscall ZwAcceptConnectPort(ptr long ptr long ptr ptr) NtAcceptConnectPort
 @ stdcall -private -syscall ZwAccessCheck(ptr long long ptr ptr ptr ptr ptr) NtAccessCheck
 @ stdcall -private -syscall ZwAccessCheckAndAuditAlarm(ptr long ptr ptr ptr long ptr long ptr ptr ptr) NtAccessCheckAndAuditAlarm
@@ -1628,9 +1628,6 @@
 @ cdecl -syscall wine_get_version()
 @ cdecl -syscall wine_get_build_id()
 @ cdecl -syscall wine_get_host_version(ptr ptr)
-
-# Codepages
-@ cdecl __wine_get_unix_codepage()
 
 # Filesystem
 @ cdecl -syscall wine_nt_to_unix_file_name(ptr ptr ptr long)

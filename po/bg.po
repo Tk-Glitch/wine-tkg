@@ -13,6 +13,32 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
+#: dlls/aclui/aclui.rc:29 dlls/inetcpl.cpl/inetcpl.rc:90
+#: programs/winefile/winefile.rc:114
+msgid "Security"
+msgstr ""
+
+#: dlls/aclui/aclui.rc:32
+#, fuzzy
+msgid "&Group or user names:"
+msgstr "По &име"
+
+#: dlls/aclui/aclui.rc:38
+#, fuzzy
+#| msgid "Yellow"
+msgid "Allow"
+msgstr "Жълт"
+
+#: dlls/aclui/aclui.rc:39
+msgid "Deny"
+msgstr ""
+
+#: dlls/aclui/aclui.rc:47
+#, fuzzy
+#| msgid "Properties for %s"
+msgid "Permissions for %1"
+msgstr "Свойства на %s"
+
 #: dlls/appwiz.cpl/appwiz.rc:58
 #, fuzzy
 msgid "Install/Uninstall"
@@ -3616,10 +3642,6 @@ msgstr ""
 #, fuzzy
 msgid "Delete"
 msgstr "Из&трий"
-
-#: dlls/inetcpl.cpl/inetcpl.rc:90 programs/winefile/winefile.rc:114
-msgid "Security"
-msgstr ""
 
 #: dlls/inetcpl.cpl/inetcpl.rc:112
 msgid ""

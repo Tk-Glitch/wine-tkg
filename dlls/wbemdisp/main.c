@@ -211,7 +211,7 @@ static HRESULT WINAPI factory_QueryInterface( IClassFactory *iface, REFIID riid,
         *obj = iface;
         return S_OK;
     }
-    FIXME( "interface %s not implemented\n", debugstr_guid(riid) );
+    WARN( "interface %s not implemented\n", debugstr_guid(riid) );
     return E_NOINTERFACE;
 }
 
@@ -270,8 +270,6 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 
     switch (reason)
     {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
         case DLL_PROCESS_ATTACH:
             instance = hinst;
             DisableThreadLibraryCalls( hinst );
