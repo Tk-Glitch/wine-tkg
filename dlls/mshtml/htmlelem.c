@@ -202,6 +202,38 @@ HRESULT elem_string_attr_setter(HTMLElement *elem, const WCHAR *name, const WCHA
     return S_OK;
 }
 
+static VARIANT_BOOL element_has_attribute(HTMLElement *element, const WCHAR *name)
+{
+    nsAString name_str;
+    cpp_bool r;
+    nsresult nsres;
+
+    if(!element->dom_element) {
+        WARN("no DOM element\n");
+        return VARIANT_FALSE;
+    }
+
+    nsAString_InitDepend(&name_str, name);
+    nsres = nsIDOMElement_HasAttribute(element->dom_element, &name_str, &r);
+    return variant_bool(NS_SUCCEEDED(nsres) && r);
+}
+
+static HRESULT element_remove_attribute(HTMLElement *element, const WCHAR *name)
+{
+    nsAString name_str;
+    nsresult nsres;
+
+    if(!element->dom_element) {
+        WARN("no DOM element\n");
+        return S_OK;
+    }
+
+    nsAString_InitDepend(&name_str, name);
+    nsres = nsIDOMElement_RemoveAttribute(element->dom_element, &name_str);
+    nsAString_Finish(&name_str);
+    return map_nsresult(nsres);
+}
+
 HRESULT get_readystate_string(READYSTATE readystate, BSTR *p)
 {
     static const LPCWSTR readystate_strs[] = {
@@ -230,7 +262,7 @@ static inline HTMLFiltersCollection *impl_from_IHTMLFiltersCollection(IHTMLFilte
     return CONTAINING_RECORD(iface, HTMLFiltersCollection, IHTMLFiltersCollection_iface);
 }
 
-static IHTMLFiltersCollection *HTMLFiltersCollection_Create(void);
+static HRESULT create_filters_collection(compat_mode_t compat_mode, IHTMLFiltersCollection **ret);
 
 static inline HTMLElement *impl_from_IHTMLElement(IHTMLElement *iface)
 {
@@ -512,7 +544,7 @@ static HRESULT create_html_rect(nsIDOMClientRect *nsrect, compat_mode_t compat_m
     rect->IHTMLRect_iface.lpVtbl = &HTMLRectVtbl;
     rect->ref = 1;
 
-    init_dispex_with_compat_mode(&rect->dispex, (IUnknown*)&rect->IHTMLRect_iface, &HTMLRect_dispex, compat_mode);
+    init_dispatch(&rect->dispex, (IUnknown*)&rect->IHTMLRect_iface, &HTMLRect_dispex, compat_mode);
 
     nsIDOMClientRect_AddRef(nsrect);
     rect->nsrect = nsrect;
@@ -839,6 +871,23 @@ static HRESULT WINAPI HTMLElement_setAttribute(IHTMLElement *iface, BSTR strAttr
 
     TRACE("(%p)->(%s %s %08x)\n", This, debugstr_w(strAttributeName), debugstr_variant(&AttributeValue), lFlags);
 
+    if(This->dom_element && dispex_compat_mode(&This->node.event_target.dispex) >= COMPAT_MODE_IE8) {
+        nsAString name_str, value_str;
+        nsresult nsres;
+
+        hres = variant_to_nsstr(&AttributeValue, FALSE, &value_str);
+        if(FAILED(hres))
+            return hres;
+
+        nsAString_InitDepend(&name_str, strAttributeName);
+        nsres = nsIDOMElement_SetAttribute(This->dom_element, &name_str, &value_str);
+        nsAString_Finish(&name_str);
+        nsAString_Finish(&value_str);
+        if(NS_FAILED(nsres))
+            WARN("SetAttribute failed: %08x\n", nsres);
+        return map_nsresult(nsres);
+    }
+
     hres = IDispatchEx_GetDispID(&This->node.event_target.dispex.IDispatchEx_iface, strAttributeName,
             (lFlags&ATTRFLAG_CASESENSITIVE ? fdexNameCaseSensitive : fdexNameCaseInsensitive) | fdexNameEnsure, &dispid);
     if(FAILED(hres))
@@ -895,6 +944,17 @@ static HRESULT WINAPI HTMLElement_getAttribute(IHTMLElement *iface, BSTR strAttr
     if(lFlags & ~(ATTRFLAG_CASESENSITIVE|ATTRFLAG_ASSTRING))
         FIXME("Unsupported flags %x\n", lFlags);
 
+    if(This->dom_element && dispex_compat_mode(&This->node.event_target.dispex) >= COMPAT_MODE_IE8) {
+        nsAString name_str, value_str;
+        nsresult nsres;
+
+        nsAString_InitDepend(&name_str, strAttributeName);
+        nsAString_InitDepend(&value_str, NULL);
+        nsres = nsIDOMElement_GetAttribute(This->dom_element, &name_str, &value_str);
+        nsAString_Finish(&name_str);
+        return return_nsstr_variant(nsres, &value_str, 0, AttributeValue);
+    }
+
     hres = IDispatchEx_GetDispID(&This->node.event_target.dispex.IDispatchEx_iface, strAttributeName,
             lFlags&ATTRFLAG_CASESENSITIVE ? fdexNameCaseSensitive : fdexNameCaseInsensitive, &dispid);
     if(hres == DISP_E_UNKNOWNNAME) {
@@ -921,6 +981,9 @@ static HRESULT WINAPI HTMLElement_removeAttribute(IHTMLElement *iface, BSTR strA
     HRESULT hres;
 
     TRACE("(%p)->(%s %x %p)\n", This, debugstr_w(strAttributeName), lFlags, pfSuccess);
+
+    if(dispex_compat_mode(&This->node.event_target.dispex) >= COMPAT_MODE_IE8)
+        return element_remove_attribute(This, strAttributeName);
 
     hres = IDispatchEx_GetDispID(&This->node.event_target.dispex.IDispatchEx_iface, strAttributeName,
             lFlags&ATTRFLAG_CASESENSITIVE ? fdexNameCaseSensitive : fdexNameCaseInsensitive, &id);
@@ -1318,7 +1381,7 @@ static HRESULT WINAPI HTMLElement_put_title(IHTMLElement *iface, BSTR v)
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    if(!This->html_element) {
+    if(!This->dom_element) {
         VARIANT *var;
         HRESULT hres;
 
@@ -1331,6 +1394,9 @@ static HRESULT WINAPI HTMLElement_put_title(IHTMLElement *iface, BSTR v)
         V_BSTR(var) = v ? SysAllocString(v) : NULL;
         return S_OK;
     }
+
+    if(!This->html_element)
+        return elem_string_attr_setter(This, L"title", v);
 
     nsAString_InitDepend(&title_str, v);
     nsres = nsIDOMHTMLElement_SetTitle(This->html_element, &title_str);
@@ -1349,7 +1415,7 @@ static HRESULT WINAPI HTMLElement_get_title(IHTMLElement *iface, BSTR *p)
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(!This->html_element) {
+    if(!This->dom_element) {
         VARIANT *var;
         HRESULT hres;
 
@@ -1365,6 +1431,9 @@ static HRESULT WINAPI HTMLElement_get_title(IHTMLElement *iface, BSTR *p)
 
         return S_OK;
     }
+
+    if(!This->html_element)
+        return elem_string_attr_getter(This, L"title", FALSE, p);
 
     nsAString_Init(&title_str, NULL);
     nsres = nsIDOMHTMLElement_GetTitle(This->html_element, &title_str);
@@ -1628,7 +1697,7 @@ static HRESULT WINAPI HTMLElement_get_offsetParent(IHTMLElement *iface, IHTMLEle
 
     if(!nsparent) {
         *p = NULL;
-        hres = S_OK;
+        return S_OK;
     }
 
     hres = get_element(nsparent, &parent);
@@ -2011,18 +2080,16 @@ static HRESULT WINAPI HTMLElement_click(IHTMLElement *iface)
     return S_OK;
 }
 
-static HRESULT WINAPI HTMLElement_get_filters(IHTMLElement *iface,
-                                              IHTMLFiltersCollection **p)
+static HRESULT WINAPI HTMLElement_get_filters(IHTMLElement *iface, IHTMLFiltersCollection **p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
+
     TRACE("(%p)->(%p)\n", This, p);
 
     if(!p)
         return E_POINTER;
 
-    *p = HTMLFiltersCollection_Create();
-
-    return S_OK;
+    return create_filters_collection(dispex_compat_mode(&This->node.event_target.dispex), p);
 }
 
 static HRESULT WINAPI HTMLElement_put_ondragstart(IHTMLElement *iface, VARIANT v)
@@ -2670,8 +2737,8 @@ static HRESULT WINAPI HTMLElement2_getClientRects(IHTMLElement2 *iface, IHTMLRec
     rects->IHTMLRectCollection_iface.lpVtbl = &HTMLRectCollectionVtbl;
     rects->ref = 1;
     rects->rect_list = rect_list;
-    init_dispex_with_compat_mode(&rects->dispex, (IUnknown*)&rects->IHTMLRectCollection_iface,
-                                 &HTMLRectCollection_dispex, dispex_compat_mode(&This->node.event_target.dispex));
+    init_dispatch(&rects->dispex, (IUnknown*)&rects->IHTMLRectCollection_iface,
+                  &HTMLRectCollection_dispex, dispex_compat_mode(&This->node.event_target.dispex));
 
     *pRectCol = &rects->IHTMLRectCollection_iface;
     return S_OK;
@@ -2792,22 +2859,38 @@ static HRESULT WINAPI HTMLElement2_focus(IHTMLElement2 *iface)
 static HRESULT WINAPI HTMLElement2_put_accessKey(IHTMLElement2 *iface, BSTR v)
 {
     HTMLElement *This = impl_from_IHTMLElement2(iface);
-    VARIANT var;
-
-    static WCHAR accessKeyW[] = L"accessKey";
+    nsAString nsstr;
+    nsresult nsres;
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    V_VT(&var) = VT_BSTR;
-    V_BSTR(&var) = v;
-    return IHTMLElement_setAttribute(&This->IHTMLElement_iface, accessKeyW, var, 0);
+    if(!This->html_element) {
+        FIXME("non-HTML element\n");
+        return E_NOTIMPL;
+    }
+
+    nsAString_InitDepend(&nsstr, v);
+    nsres = nsIDOMHTMLElement_SetAccessKey(This->html_element, &nsstr);
+    nsAString_Finish(&nsstr);
+    return map_nsresult(nsres);
 }
 
 static HRESULT WINAPI HTMLElement2_get_accessKey(IHTMLElement2 *iface, BSTR *p)
 {
     HTMLElement *This = impl_from_IHTMLElement2(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString nsstr;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!This->html_element) {
+        FIXME("non-HTML element\n");
+        return E_NOTIMPL;
+    }
+
+    nsAString_InitDepend(&nsstr, NULL);
+    nsres = nsIDOMHTMLElement_GetAccessKey(This->html_element, &nsstr);
+    return return_nsstr(nsres, &nsstr, p);
 }
 
 static HRESULT WINAPI HTMLElement2_put_onblur(IHTMLElement2 *iface, VARIANT v)
@@ -3739,49 +3822,26 @@ static HRESULT WINAPI HTMLElement3_get_hideFocus(IHTMLElement3 *iface, VARIANT_B
 static HRESULT WINAPI HTMLElement3_put_disabled(IHTMLElement3 *iface, VARIANT_BOOL v)
 {
     HTMLElement *This = impl_from_IHTMLElement3(iface);
-    VARIANT *var;
-    HRESULT hres;
 
     TRACE("(%p)->(%x)\n", This, v);
 
     if(This->node.vtbl->put_disabled)
         return This->node.vtbl->put_disabled(&This->node, v);
 
-    hres = dispex_get_dprop_ref(&This->node.event_target.dispex, L"disabled", TRUE, &var);
-    if(FAILED(hres))
-        return hres;
-
-    VariantClear(var);
-    V_VT(var) = VT_BOOL;
-    V_BOOL(var) = v;
-    return S_OK;
+    if(!v) return element_remove_attribute(This, L"disabled");
+    return elem_string_attr_setter(This, L"disabled", L"");
 }
 
 static HRESULT WINAPI HTMLElement3_get_disabled(IHTMLElement3 *iface, VARIANT_BOOL *p)
 {
     HTMLElement *This = impl_from_IHTMLElement3(iface);
-    VARIANT *var;
-    HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
     if(This->node.vtbl->get_disabled)
         return This->node.vtbl->get_disabled(&This->node, p);
 
-    hres = dispex_get_dprop_ref(&This->node.event_target.dispex, L"disabled", FALSE, &var);
-    if(hres == DISP_E_UNKNOWNNAME) {
-        *p = VARIANT_FALSE;
-        return S_OK;
-    }
-    if(FAILED(hres))
-        return hres;
-
-    if(V_VT(var) != VT_BOOL) {
-        FIXME("value is %s\n", debugstr_variant(var));
-        return E_NOTIMPL;
-    }
-
-    *p = V_BOOL(var);
+    *p = variant_bool(element_has_attribute(This, L"disabled"));
     return S_OK;
 }
 
@@ -4433,11 +4493,14 @@ static HRESULT WINAPI HTMLElement6_removeAttributeNode(IHTMLElement6 *iface, IHT
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI HTMLElement6_hasAttribute(IHTMLElement6 *iface, BSTR name, VARIANT_BOOL *pfHasAttribute)
+static HRESULT WINAPI HTMLElement6_hasAttribute(IHTMLElement6 *iface, BSTR name, VARIANT_BOOL *p)
 {
     HTMLElement *This = impl_from_IHTMLElement6(iface);
-    FIXME("(%p)->(%s %p)\n", This, debugstr_w(name), pfHasAttribute);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_w(name), p);
+
+    *p = element_has_attribute(This, name);
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLElement6_getElementsByTagNameNS(IHTMLElement6 *iface, VARIANT *varNS, BSTR bstrLocalName, IHTMLElementCollection **pelColl)
@@ -5740,7 +5803,7 @@ static HRESULT WINAPI ElementSelector_querySelectorAll(IElementSelector *iface, 
     HTMLElement *This = impl_from_IElementSelector(iface);
     nsIDOMNodeList *node_list;
     nsAString nsstr;
-    nsresult nsres;
+    HRESULT hres;
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(v), pel);
 
@@ -5750,16 +5813,16 @@ static HRESULT WINAPI ElementSelector_querySelectorAll(IElementSelector *iface, 
     }
 
     nsAString_InitDepend(&nsstr, v);
-    nsres = nsIDOMElement_QuerySelectorAll(This->dom_element, &nsstr, &node_list);
+    hres = map_nsresult(nsIDOMElement_QuerySelectorAll(This->dom_element, &nsstr, &node_list));
     nsAString_Finish(&nsstr);
-    if(NS_FAILED(nsres)) {
-        ERR("QuerySelectorAll failed: %08x\n", nsres);
-        return E_FAIL;
+    if(FAILED(hres)) {
+        ERR("QuerySelectorAll failed: %08x\n", hres);
+        return hres;
     }
 
-    *pel = create_child_collection(node_list);
+    hres = create_child_collection(node_list, dispex_compat_mode(&This->node.event_target.dispex), pel);
     nsIDOMNodeList_Release(node_list);
-    return *pel ? S_OK : E_OUTOFMEMORY;
+    return hres;
 }
 
 static const IElementSelectorVtbl ElementSelectorVtbl = {
@@ -6287,6 +6350,7 @@ void HTMLElement_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
 {
     static const dispex_hook_t elem2_ie11_hooks[] = {
         {DISPID_IHTMLELEMENT2_DOSCROLL, NULL},
+        {DISPID_IHTMLELEMENT2_READYSTATE, NULL},
         {DISPID_UNKNOWN}
     };
 
@@ -6606,17 +6670,21 @@ static dispex_static_data_t HTMLFiltersCollection_dispex = {
     HTMLFiltersCollection_iface_tids
 };
 
-static IHTMLFiltersCollection *HTMLFiltersCollection_Create(void)
+static HRESULT create_filters_collection(compat_mode_t compat_mode, IHTMLFiltersCollection **ret)
 {
-    HTMLFiltersCollection *ret = heap_alloc(sizeof(HTMLFiltersCollection));
+    HTMLFiltersCollection *collection;
 
-    ret->IHTMLFiltersCollection_iface.lpVtbl = &HTMLFiltersCollectionVtbl;
-    ret->ref = 1;
+    if(!(collection = heap_alloc(sizeof(HTMLFiltersCollection))))
+        return E_OUTOFMEMORY;
 
-    init_dispex(&ret->dispex, (IUnknown*)&ret->IHTMLFiltersCollection_iface,
-            &HTMLFiltersCollection_dispex);
+    collection->IHTMLFiltersCollection_iface.lpVtbl = &HTMLFiltersCollectionVtbl;
+    collection->ref = 1;
 
-    return &ret->IHTMLFiltersCollection_iface;
+    init_dispatch(&collection->dispex, (IUnknown*)&collection->IHTMLFiltersCollection_iface,
+                  &HTMLFiltersCollection_dispex, compat_mode);
+
+    *ret = &collection->IHTMLFiltersCollection_iface;
+    return S_OK;
 }
 
 /* interface IHTMLAttributeCollection */
@@ -7196,8 +7264,8 @@ HRESULT HTMLElement_get_attr_col(HTMLDOMNode *iface, HTMLAttributeCollection **a
 
     This->attrs->elem = This;
     list_init(&This->attrs->attrs);
-    init_dispex_with_compat_mode(&This->attrs->dispex, (IUnknown*)&This->attrs->IHTMLAttributeCollection_iface,
-                                 &HTMLAttributeCollection_dispex, dispex_compat_mode(&iface->event_target.dispex));
+    init_dispatch(&This->attrs->dispex, (IUnknown*)&This->attrs->IHTMLAttributeCollection_iface,
+                  &HTMLAttributeCollection_dispex, dispex_compat_mode(&iface->event_target.dispex));
 
     *ac = This->attrs;
     return S_OK;

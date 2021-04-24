@@ -41,6 +41,9 @@
 #ifdef HAVE_SYS_SYSCTL_H
 # include <sys/sysctl.h>
 #endif
+#ifdef HAVE_SYS_UTSNAME_H
+# include <sys/utsname.h>
+#endif
 #ifdef HAVE_MACHINE_CPU_H
 # include <machine/cpu.h>
 #endif
@@ -1304,6 +1307,98 @@ static NTSTATUS create_logical_proc_info( SYSTEM_LOGICAL_PROCESSOR_INFORMATION *
 }
 #endif
 
+static NTSTATUS create_cpuset_info(SYSTEM_CPU_SET_INFORMATION *info)
+{
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *proc_info;
+    BYTE core_index, cache_index, max_cache_level;
+    unsigned int i, j, count;
+    BYTE *proc_info_buffer;
+    DWORD cpu_info_size;
+    ULONG64 cpu_mask;
+    NTSTATUS status;
+
+    count = NtCurrentTeb()->Peb->NumberOfProcessors;
+
+    cpu_info_size = 3 * sizeof(*proc_info);
+    if (!(proc_info_buffer = malloc(cpu_info_size)))
+        return STATUS_NO_MEMORY;
+
+    if ((status = create_logical_proc_info(NULL, (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX **)&proc_info_buffer,
+            &cpu_info_size, RelationAll)))
+    {
+        free(proc_info_buffer);
+        return status;
+    }
+
+    max_cache_level = 0;
+    proc_info = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)proc_info_buffer;
+    for (i = 0; (BYTE *)proc_info != proc_info_buffer + cpu_info_size; ++i)
+    {
+        if (proc_info->Relationship == RelationCache)
+        {
+            if (max_cache_level < proc_info->u.Cache.Level)
+                max_cache_level = proc_info->u.Cache.Level;
+        }
+        proc_info = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)((BYTE *)proc_info + proc_info->Size);
+    }
+
+    memset(info, 0, count * sizeof(*info));
+
+    core_index = 0;
+    cache_index = 0;
+    proc_info = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)proc_info_buffer;
+    for (i = 0; i < count; ++i)
+    {
+        info[i].Size = sizeof(*info);
+        info[i].Type = CpuSetInformation;
+        info[i].u.CpuSet.Id = 0x100 + i;
+        info[i].u.CpuSet.LogicalProcessorIndex = i;
+    }
+
+    for (i = 0; (BYTE *)proc_info != (BYTE *)proc_info_buffer + cpu_info_size; ++i)
+    {
+        if (proc_info->Relationship == RelationProcessorCore)
+        {
+            if (proc_info->u.Processor.GroupCount != 1)
+            {
+                FIXME("Unsupported group count %u.\n", proc_info->u.Processor.GroupCount);
+                continue;
+            }
+            cpu_mask = proc_info->u.Processor.GroupMask[0].Mask;
+            for (j = 0; j < count; ++j)
+                if (((ULONG64)1 << j) & cpu_mask)
+                {
+                    info[j].u.CpuSet.CoreIndex = core_index;
+                    info[j].u.CpuSet.EfficiencyClass = proc_info->u.Processor.EfficiencyClass;
+                }
+            ++core_index;
+        }
+        else if (proc_info->Relationship == RelationCache)
+        {
+            if (proc_info->u.Cache.Level == max_cache_level)
+            {
+                cpu_mask = proc_info->u.Cache.GroupMask.Mask;
+                for (j = 0; j < count; ++j)
+                    if (((ULONG64)1 << j) & cpu_mask)
+                        info[j].u.CpuSet.LastLevelCacheIndex = cache_index;
+            }
+            ++cache_index;
+        }
+        else if (proc_info->Relationship == RelationNumaNode)
+        {
+            cpu_mask = proc_info->u.NumaNode.GroupMask.Mask;
+            for (j = 0; j < count; ++j)
+                if (((ULONG64)1 << j) & cpu_mask)
+                    info[j].u.CpuSet.NumaNodeIndex = proc_info->u.NumaNode.NodeNumber;
+        }
+        proc_info = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)((BYTE *)proc_info + proc_info->Size);
+    }
+
+    free(proc_info_buffer);
+
+    return STATUS_SUCCESS;
+}
+
 #ifdef linux
 
 static void copy_smbios_string( char **buffer, char *s, size_t len )
@@ -2174,6 +2269,22 @@ static void get_timezone_info( RTL_DYNAMIC_TIME_ZONE_INFORMATION *tzi )
 }
 
 
+static void read_dev_urandom( void *buf, ULONG len )
+{
+    int fd = open( "/dev/urandom", O_RDONLY );
+    if (fd != -1)
+    {
+        int ret;
+        do
+        {
+            ret = read( fd, buf, len );
+        }
+        while (ret == -1 && errno == EINTR);
+        close( fd );
+    }
+    else WARN( "can't open /dev/urandom\n" );
+}
+
 /******************************************************************************
  *              NtQuerySystemInformation  (NTDLL.@)
  */
@@ -2633,7 +2744,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         break;
     }
 
-    case SystemCacheInformation:
+    case SystemFileCacheInformation:
     {
         SYSTEM_CACHE_INFORMATION sci = { 0 };
 
@@ -2663,19 +2774,10 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
                     ret = getrandom( info, len, 0 );
                 }
                 while (ret == -1 && errno == EINTR);
+
+                if (ret == -1 && errno == ENOSYS) read_dev_urandom( info, len );
 #else
-                int fd = open( "/dev/urandom", O_RDONLY );
-                if (fd != -1)
-                {
-                    int ret;
-                    do
-                    {
-                        ret = read( fd, info, len );
-                    }
-                    while (ret == -1 && errno == EINTR);
-                    close( fd );
-                }
-                else WARN( "can't open /dev/urandom\n" );
+                read_dev_urandom( info, len );
 #endif
             }
         }
@@ -2740,7 +2842,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         break;
     }
 
-    case SystemTimeZoneInformation:
+    case SystemCurrentTimeZoneInformation:
     {
         RTL_DYNAMIC_TIME_ZONE_INFORMATION tz;
 
@@ -2781,6 +2883,9 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         free( buf );
         break;
     }
+
+    case SystemCpuSetInformation:
+        return NtQuerySystemInformationEx(class, NULL, 0, info, size, ret_size);
 
     case SystemRecommendedSharedDataAlignment:
     {
@@ -2845,25 +2950,33 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         ret = STATUS_SUCCESS;
         break;
 
+    /* Wine extensions */
+
+    case SystemWineVersionInformation:
+    {
+        static const char version[] = PACKAGE_VERSION;
+        extern const char wine_build[];
+        struct utsname buf;
+
+        uname( &buf );
+        len = strlen(version) + strlen(wine_build) + strlen(buf.sysname) + strlen(buf.release) + 4;
+        snprintf( info, size, "%s%c%s%c%s%c%s", version, 0, wine_build, 0, buf.sysname, 0, buf.release );
+        if (size < len) ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+    }
+
     case SystemCodeIntegrityInformation:
     {
-        SYSTEM_CODEINTEGRITY_INFORMATION *scii = info;
+        SYSTEM_CODEINTEGRITY_INFORMATION *integrity_info = info;
 
         FIXME("SystemCodeIntegrityInformation, size %u, info %p, stub!\n", size, info);
 
-        if (size < sizeof(SYSTEM_CODEINTEGRITY_INFORMATION))
-        {
+        len = sizeof(SYSTEM_CODEINTEGRITY_INFORMATION);
+
+        if (size < len)
+            integrity_info->CodeIntegrityOptions = CODEINTEGRITY_OPTION_ENABLED;
+        else
             ret = STATUS_INFO_LENGTH_MISMATCH;
-            break;
-        }
-
-        if (!info)
-        {
-            ret = STATUS_ACCESS_VIOLATION;
-            break;
-        }
-
-        scii->CodeIntegrityOptions = CODEINTEGRITY_OPTION_ENABLED;
         break;
     }
 
@@ -2923,6 +3036,69 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
             else ret = STATUS_INFO_LENGTH_MISMATCH;
         }
         free( buf );
+        break;
+    }
+
+    case SystemCpuSetInformation:
+    {
+        unsigned int cpu_count = NtCurrentTeb()->Peb->NumberOfProcessors;
+        PROCESS_BASIC_INFORMATION pbi;
+        HANDLE process;
+
+        if (!query || query_len < sizeof(HANDLE))
+            return STATUS_INVALID_PARAMETER;
+
+        process = *(HANDLE *)query;
+        if (process && (ret = NtQueryInformationProcess(process, ProcessBasicInformation, &pbi, sizeof(pbi), NULL)))
+            return ret;
+
+        if (size < (len = cpu_count * sizeof(SYSTEM_CPU_SET_INFORMATION)))
+        {
+            ret = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        if (!info)
+            return STATUS_ACCESS_VIOLATION;
+
+        if ((ret = create_cpuset_info(info)))
+            return ret;
+        break;
+    }
+
+    case SystemSupportedProcessorArchitectures:
+    {
+        HANDLE process;
+        ULONG i;
+        USHORT machine = 0;
+
+        if (!query || query_len < sizeof(HANDLE)) return STATUS_INVALID_PARAMETER;
+        process = *(HANDLE *)query;
+        if (process)
+        {
+            SERVER_START_REQ( get_process_info )
+            {
+                req->handle = wine_server_obj_handle( process );
+                if (!(ret = wine_server_call( req ))) machine = reply->machine;
+            }
+            SERVER_END_REQ;
+            if (ret) return ret;
+        }
+
+        len = (supported_machines_count + 1) * sizeof(ULONG);
+        if (size < len)
+        {
+            ret = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        for (i = 0; i < supported_machines_count; i++)
+        {
+            USHORT flags = 2;  /* supported (?) */
+            if (!i) flags |= 5;  /* native machine (?) */
+            if (supported_machines[i] == machine) flags |= 8;  /* current machine */
+            ((DWORD *)info)[i] = MAKELONG( supported_machines[i], flags );
+        }
+        ((DWORD *)info)[i] = 0;
+        ret = STATUS_SUCCESS;
         break;
     }
 

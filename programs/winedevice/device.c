@@ -35,6 +35,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(winedevice);
 static const WCHAR servicesW[] = L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\";
 
 extern NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event );
+extern void CDECL wine_enumerate_root_devices( const WCHAR *driver_name );
 
 static WCHAR winedeviceW[] = L"winedevice";
 static SERVICE_STATUS_HANDLE service_handle;
@@ -54,6 +55,8 @@ static void set_service_status( SERVICE_STATUS_HANDLE handle, DWORD state, DWORD
     status.dwWaitHint                = (state == SERVICE_START_PENDING) ? 10000 : 0;
     SetServiceStatus( handle, &status );
 }
+
+#define SERVICE_CONTROL_REENUMERATE_ROOT_DEVICES 128
 
 static DWORD device_handler( DWORD ctrl, const WCHAR *driver_name )
 {
@@ -76,6 +79,10 @@ static DWORD device_handler( DWORD ctrl, const WCHAR *driver_name )
 
     case SERVICE_CONTROL_STOP:
         result = RtlNtStatusToDosError(ZwUnloadDriver( &service_name ));
+        break;
+
+    case SERVICE_CONTROL_REENUMERATE_ROOT_DEVICES:
+        wine_enumerate_root_devices( driver_name );
         break;
 
     default:
@@ -115,15 +122,27 @@ static DWORD WINAPI service_handler( DWORD ctrl, DWORD event_type, LPVOID event_
 
 static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
 {
-    static const WCHAR ntoskrnlW[] = {'n','t','o','s','k','r','n','l','.','e','x','e',0};
-    static const WCHAR win32kW[]   = {'w','i','n','3','2','k','.','s','y','s',0};
-    static const WCHAR dxgkrnlW[]  = {'d','x','g','k','r','n','l','.','s','y','s',0};
-    static const WCHAR dxgmms1W[]  = {'d','x','g','m','m','s','1','.','s','y','s',0};
+    static const WCHAR ntoskrnlW[] = L"C:\\windows\\system32\\ntoskrnl.exe";
+    static const WCHAR win32kW[]   = L"C:\\windows\\system32\\win32k.sys";
+    static const WCHAR dxgkrnlW[]  = L"C:\\windows\\system32\\drivers\\dxgkrnl.sys";
+    static const WCHAR dxgmms1W[]  = L"C:\\windows\\system32\\drivers\\dxgmms1.sys";
     static const WCHAR *stubs[] = { win32kW, dxgkrnlW, dxgmms1W };
+    WCHAR driver_dir[MAX_PATH];
     const WCHAR *service_group = (argc >= 2) ? argv[1] : argv[0];
     LDR_DATA_TABLE_ENTRY *ldr;
     ULONG_PTR magic;
     int i;
+
+    if (!(stop_event = CreateEventW( NULL, TRUE, FALSE, NULL )))
+        return;
+    if (!(manager_handle = OpenSCManagerW( NULL, NULL, SC_MANAGER_CONNECT )))
+        return;
+    if (!(service_handle = RegisterServiceCtrlHandlerExW( winedeviceW, service_handler, (void *)service_group )))
+        return;
+
+    GetSystemDirectoryW( driver_dir, MAX_PATH );
+    wcscat( driver_dir, L"\\drivers" );
+    AddDllDirectory( driver_dir );
 
     /* Load some default drivers (required by anticheat drivers) */
     for (i = 0; i < sizeof(stubs)/sizeof(stubs[0]); i++)
@@ -142,13 +161,6 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
         InsertHeadList( &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList, &ldr->InMemoryOrderLinks );
     }
     LdrUnlockLoaderLock( 0, magic );
-
-    if (!(stop_event = CreateEventW( NULL, TRUE, FALSE, NULL )))
-        return;
-    if (!(manager_handle = OpenSCManagerW( NULL, NULL, SC_MANAGER_CONNECT )))
-        return;
-    if (!(service_handle = RegisterServiceCtrlHandlerExW( winedeviceW, service_handler, (void *)service_group )))
-        return;
 
     TRACE( "starting service group %s\n", wine_dbgstr_w(service_group) );
     set_service_status( service_handle, SERVICE_RUNNING,

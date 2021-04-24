@@ -15,6 +15,7 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
 #ifndef __XACT2WB_H__
 #define __XACT2WB_H__
 
@@ -23,7 +24,6 @@
 typedef DWORD WAVEBANKOFFSET;
 
 #define WAVEBANK_HEADER_SIGNATURE 0x444e4257 /* DNBW */
-#define WAVEBANK_HEADER_VERSION   42
 #define WAVEBANK_BANKNAME_LENGTH  64
 #define WAVEBANK_ENTRYNAME_LENGTH 64
 
@@ -35,7 +35,6 @@ typedef DWORD WAVEBANKOFFSET;
 #define WAVEBANK_FLAGS_COMPACT       0x00020000
 #define WAVEBANK_FLAGS_SYNC_DISABLED 0x00040000
 #define WAVEBANK_FLAGS_SEEKTABLES    0x00080000
-#define WAVEBANK_FLAGS_MASK          0x000f0000
 
 #define WAVEBANK_DVD_SECTOR_SIZE 2048
 #define WAVEBANK_DVD_BLOCK_SIZE  (WAVEBANK_DVD_SECTOR_SIZE * 16)
@@ -64,12 +63,12 @@ typedef union WAVEBANKMINIWAVEFORMAT
 {
     struct
     {
-        DWORD wFormatTag     :  2;
-        DWORD nChannels      :  3;
+        DWORD wFormatTag : 2;
+        DWORD nChannels : 3;
         DWORD nSamplesPerSec : 18;
-        DWORD wBlockAlign    :  8;
-        DWORD wBitsPerSample :  1;
-    } DUMMYSTRUCTNAME;
+        DWORD wBlockAlign : 8;
+        DWORD wBitsPerSample : 1;
+    };
     DWORD dwValue;
 } WAVEBANKMINIWAVEFORMAT, *LPWAVEBANKMINIWAVEFORMAT;
 typedef const WAVEBANKMINIWAVEFORMAT *LPCWAVEBANKMINIWAVEFORMAT;
@@ -92,7 +91,9 @@ typedef struct WAVEBANKHEADER
 {
     DWORD dwSignature;
     DWORD dwVersion;
+#if XACT3_VER >= 0x0205
     DWORD dwHeaderVersion;
+#endif
     WAVEBANKREGION Segments[WAVEBANK_SEGIDX_COUNT];
 } WAVEBANKHEADER, *LPWAVEBANKHEADER;
 typedef const WAVEBANKHEADER *LPCWAVEBANKHEADER;
@@ -112,21 +113,36 @@ typedef struct WAVEBANKENTRY
     {
         struct
         {
-            DWORD dwFlags  :  4;
+            DWORD dwFlags : 4;
             DWORD Duration : 28;
-        } DUMMYSTRUCTNAME;
+        };
         DWORD dwFlagsAndDuration;
-    } DUMMYUNIONNAME;
+    };
 
     WAVEBANKMINIWAVEFORMAT Format;
     WAVEBANKREGION PlayRegion;
+#if XACT3_VER >= 0x0202
     WAVEBANKSAMPLEREGION LoopRegion;
+#else
+    union
+    {
+        WAVEBANKREGION LoopRegion;
+        struct
+        {
+            DWORD dwStartOffset;
+            DWORD nSubframeSkip : 2;
+            DWORD nSubframeEnd : 2;
+            DWORD dwEndOffset : 28;
+        } XMALoopRegion[WAVEBANKENTRY_XMASTREAMS_MAX];
+        WAVEBANKREGION LoopRegionAlias[WAVEBANKENTRY_XMASTREAMS_MAX];
+    };
+#endif
 } WAVEBANKENTRY, *LPWAVEBANKENTRY;
 typedef const WAVEBANKENTRY *LPCWAVEBANKENTRY;
 
 typedef struct WAVEBANKENTRYCOMPACT
 {
-    DWORD dwOffset          : 21;
+    DWORD dwOffset : 21;
     DWORD dwLengthDeviation : 11;
 } WAVEBANKENTRYCOMPACT, *LPWAVEBANKENTRYCOMPACT;
 typedef const WAVEBANKENTRYCOMPACT *LPCWAVEBANKENTRYCOMPACT;
@@ -135,7 +151,7 @@ typedef struct WAVEBANKDATA
 {
     DWORD dwFlags;
     DWORD dwEntryCount;
-    CHAR  szBankName[WAVEBANK_BANKNAME_LENGTH];
+    CHAR szBankName[WAVEBANK_BANKNAME_LENGTH];
     DWORD dwEntryMetaDataElementSize;
     DWORD dwEntryNameElementSize;
     DWORD dwAlignment;

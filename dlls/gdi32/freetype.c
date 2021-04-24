@@ -1701,8 +1701,6 @@ static void fontconfig_add_fonts_from_dir_list( FcConfig *config, FcStrList *dir
     }
 
 done:
-    if (font_set) pFcFontSetDestroy( font_set );
-    if (subdir_list) pFcStrListDone( subdir_list );
     if (subdir_set) pFcStrSetDestroy( subdir_set );
     if (cache) pFcDirCacheUnload( cache );
 }
@@ -2496,6 +2494,7 @@ static BOOL CDECL freetype_load_font( struct gdi_font *font )
         TRACE( "height %d => ppem %d\n", font->lf.lfHeight, font->ppem );
         height = font->ppem;
         font->ttc_item_offset = get_ttc_offset( ft_face, font->face_index );
+        font->otm.otmEMSquare = ft_face->units_per_EM;
     }
     else
     {
@@ -3774,7 +3773,6 @@ static BOOL CDECL freetype_set_outline_text_metrics( struct gdi_font *font )
         descent = windescent;
     }
 
-    font->ntmCellHeight = ascent + descent;
     font->ntmAvgWidth = pOS2->xAvgCharWidth;
 
 #define SCALE_X(x) (pFT_MulFix(x, em_scale))
@@ -3946,7 +3944,6 @@ static BOOL CDECL freetype_set_outline_text_metrics( struct gdi_font *font )
     font->otm.otmsCharSlopeRise = pHori->caret_Slope_Rise;
     font->otm.otmsCharSlopeRun = pHori->caret_Slope_Run;
     font->otm.otmItalicAngle = 0; /* POST table */
-    font->otm.otmEMSquare = ft_face->units_per_EM;
     font->otm.otmAscent = SCALE_Y(pOS2->sTypoAscender);
     font->otm.otmDescent = SCALE_Y(pOS2->sTypoDescender);
     font->otm.otmLineGap = SCALE_Y(pOS2->sTypoLineGap);

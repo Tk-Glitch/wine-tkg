@@ -719,7 +719,7 @@ HRESULT WINAPI SHPropStgCreate(IPropertySetStorage *psstg, REFFMTID fmtid,
             if(FAILED(hres) || ret.vt!=VT_I2)
                 *puCodePage = 0;
             else
-                *puCodePage = ret.u.iVal;
+                *puCodePage = ret.iVal;
         }
     }
 
@@ -752,7 +752,7 @@ HRESULT WINAPI SHPropStgReadMultiple(IPropertyStorage *pps, UINT uCodePage,
         if(FAILED(hres) || ret.vt!=VT_I2)
             return S_OK;
 
-        uCodePage = ret.u.iVal;
+        uCodePage = ret.iVal;
     }
 
     hres = IPropertyStorage_Stat(pps, &stat);
@@ -790,10 +790,10 @@ HRESULT WINAPI SHPropStgWriteMultiple(IPropertyStorage *pps, UINT *uCodePage,
         hres = IPropertyStorage_ReadMultiple(pps, 1, &prop, &ret);
         if(FAILED(hres))
             return hres;
-        if(ret.vt!=VT_I2 || !ret.u.iVal)
+        if(ret.vt!=VT_I2 || !ret.iVal)
             return E_FAIL;
 
-        codepage = ret.u.iVal;
+        codepage = ret.iVal;
         if(uCodePage)
             *uCodePage = codepage;
     }

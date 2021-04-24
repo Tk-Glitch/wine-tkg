@@ -207,9 +207,7 @@ const char *debugstr_sa_script(UINT16 script)
 }
 
 /* system font falback configuration */
-static const WCHAR meiryoW[] = {'M','e','i','r','y','o',0};
-
-static const WCHAR *cjk_families[] = { meiryoW };
+static const WCHAR *cjk_families[] = { L"Meiryo" };
 
 static const DWRITE_UNICODE_RANGE cjk_ranges[] =
 {
@@ -467,7 +465,7 @@ static HRESULT analyze_linebreaks(const WCHAR *text, UINT32 count, DWRITE_LINE_B
 
         breakpoints[i].breakConditionBefore = DWRITE_BREAK_CONDITION_NEUTRAL;
         breakpoints[i].breakConditionAfter  = DWRITE_BREAK_CONDITION_NEUTRAL;
-        breakpoints[i].isWhitespace = !!isspaceW(text[i]);
+        breakpoints[i].isWhitespace = !!iswspace(text[i]);
         breakpoints[i].isSoftHyphen = text[i] == 0x00ad /* Unicode Soft Hyphen */;
         breakpoints[i].padding = 0;
 
@@ -1102,13 +1100,14 @@ static void get_number_substitutes(IDWriteNumberSubstitution *substitution, BOOL
         break;
     case DWRITE_NUMBER_SUBSTITUTION_METHOD_CONTEXTUAL:
     case DWRITE_NUMBER_SUBSTITUTION_METHOD_TRADITIONAL:
-        if (GetLocaleInfoEx(numbersubst->locale, LOCALE_SISO639LANGNAME, isolang, ARRAY_SIZE(isolang))) {
-             static const WCHAR arW[] = {'a','r',0};
+        if (GetLocaleInfoEx(numbersubst->locale, LOCALE_SISO639LANGNAME, isolang, ARRAY_SIZE(isolang)))
+        {
              static const WCHAR arabicW[] = {0x640,0x641,0x642,0x643,0x644,0x645,0x646,0x647,0x648,0x649,0};
 
              /* For some Arabic locales Latin digits are returned for SNATIVEDIGITS */
-             if (!strcmpW(arW, isolang)) {
-                 strcpyW(digits, arabicW);
+             if (!wcscmp(L"ar", isolang))
+             {
+                 wcscpy(digits, arabicW);
                  break;
              }
         }
@@ -1978,7 +1977,7 @@ static ULONG WINAPI fontfallback_Release(IDWriteFontFallback1 *iface)
     return IDWriteFactory7_Release(fallback->factory);
 }
 
-static int compare_mapping_range(const void *a, const void *b)
+static int __cdecl compare_mapping_range(const void *a, const void *b)
 {
     UINT32 ch = *(UINT32 *)a;
     DWRITE_UNICODE_RANGE *range = (DWRITE_UNICODE_RANGE *)b;

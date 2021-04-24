@@ -115,9 +115,9 @@ struct thread_input
     user_handle_t          cursor;        /* current cursor */
     int                    cursor_count;  /* cursor show count */
     struct list            msg_list;      /* list of hardware messages */
-    int                    lock_count;    /* lock counter for keystate */
     unsigned char          keystate[256]; /* state of each key */
-    unsigned char          shadow_keystate[256]; /* shadow copy of keystate */
+    unsigned char          desktop_keystate[256]; /* desktop keystate when keystate was synced */
+    int                    keystate_lock; /* keystate is locked */
 };
 
 struct msg_queue
@@ -128,7 +128,6 @@ struct msg_queue
     unsigned int           wake_mask;       /* wakeup mask */
     unsigned int           changed_bits;    /* changed wakeup bits */
     unsigned int           changed_mask;    /* changed wakeup mask */
-    int                    keystate_locked; /* keystate is locked */
     int                    paint_count;     /* pending paint messages count */
     int                    hotkey_count;    /* pending hotkey messages count */
     int                    quit_message;    /* is there a pending quit message? */
@@ -145,6 +144,7 @@ struct msg_queue
     struct thread_input   *input;           /* thread input descriptor */
     struct hook_table     *hooks;           /* hook table */
     timeout_t              last_get_msg;    /* time of last get message call */
+    int                    keystate_lock;   /* owns an input keystate lock */
     unsigned int           ignore_post_msg; /* ignore post messages newer than this unique id */
     int                    esync_fd;        /* esync file descriptor (signalled on message) */
     int                    esync_in_msgwait; /* our thread is currently waiting on us */
@@ -278,17 +278,17 @@ static struct thread_input *create_thread_input( struct thread *thread )
         input->move_size    = 0;
         input->cursor       = 0;
         input->cursor_count = 0;
-        input->lock_count   = 0;
         list_init( &input->msg_list );
         set_caret_window( input, 0 );
         memset( input->keystate, 0, sizeof(input->keystate) );
-        memset( input->shadow_keystate, 0, sizeof(input->shadow_keystate) );
+        input->keystate_lock = 0;
 
         if (!(input->desktop = get_thread_desktop( thread, 0 /* FIXME: access rights */ )))
         {
             release_object( input );
             return NULL;
         }
+        memcpy( input->desktop_keystate, input->desktop->keystate, sizeof(input->desktop_keystate) );
     }
     return input;
 }
@@ -313,7 +313,6 @@ static struct msg_queue *create_msg_queue( struct thread *thread, struct thread_
         queue->wake_mask       = 0;
         queue->changed_bits    = 0;
         queue->changed_mask    = 0;
-        queue->keystate_locked = 0;
         queue->paint_count     = 0;
         queue->hotkey_count    = 0;
         queue->quit_message    = 0;
@@ -324,6 +323,7 @@ static struct msg_queue *create_msg_queue( struct thread *thread, struct thread_
         queue->input           = (struct thread_input *)grab_object( input );
         queue->hooks           = NULL;
         queue->last_get_msg    = current_time;
+        queue->keystate_lock   = 0;
         queue->ignore_post_msg = 0;
         queue->esync_fd        = -1;
         queue->esync_in_msgwait = 0;
@@ -356,6 +356,31 @@ void free_msg_queue( struct thread *thread )
     thread->queue = NULL;
 }
 
+/* synchronize thread input keystate with the desktop */
+static void sync_input_keystate( struct thread_input *input )
+{
+    int i;
+    if (!input->desktop || input->keystate_lock) return;
+    for (i = 0; i < sizeof(input->keystate); ++i)
+    {
+        if (input->desktop_keystate[i] == input->desktop->keystate[i]) continue;
+        input->keystate[i] = input->desktop_keystate[i] = input->desktop->keystate[i];
+    }
+}
+
+/* locks thread input keystate to prevent synchronization */
+static void lock_input_keystate( struct thread_input *input )
+{
+    input->keystate_lock++;
+}
+
+/* unlock the thread input keystate and synchronize it again */
+static void unlock_input_keystate( struct thread_input *input )
+{
+    input->keystate_lock--;
+    if (!input->keystate_lock) sync_input_keystate( input );
+}
+
 /* change the thread input data of a given thread */
 static int assign_thread_input( struct thread *thread, struct thread_input *new_input )
 {
@@ -368,12 +393,12 @@ static int assign_thread_input( struct thread *thread, struct thread_input *new_
     }
     if (queue->input)
     {
-        if (queue->keystate_locked) queue->input->lock_count--;
         queue->input->cursor_count -= queue->cursor_count;
+        if (queue->keystate_lock) unlock_input_keystate( queue->input );
         release_object( queue->input );
-        queue->keystate_locked = 0;
     }
     queue->input = (struct thread_input *)grab_object( new_input );
+    if (queue->keystate_lock) lock_input_keystate( queue->input );
     new_input->cursor_count += queue->cursor_count;
     return 1;
 }
@@ -509,6 +534,11 @@ static inline int is_signaled( struct msg_queue *queue )
 /* set some queue bits */
 static inline void set_queue_bits( struct msg_queue *queue, unsigned int bits )
 {
+    if (bits & (QS_KEY | QS_MOUSEBUTTON))
+    {
+        if (!queue->keystate_lock) lock_input_keystate( queue->input );
+        queue->keystate_lock = 1;
+    }
     queue->wake_bits |= bits;
     queue->changed_bits |= bits;
     if (is_signaled( queue )) wake_up( &queue->obj, 0 );
@@ -519,6 +549,11 @@ static inline void clear_queue_bits( struct msg_queue *queue, unsigned int bits 
 {
     queue->wake_bits &= ~bits;
     queue->changed_bits &= ~bits;
+    if (!(queue->wake_bits & (QS_KEY | QS_MOUSEBUTTON)))
+    {
+        if (queue->keystate_lock) unlock_input_keystate( queue->input );
+        queue->keystate_lock = 0;
+    }
 
     if (do_fsync() && !is_signaled( queue ))
         fsync_clear( &queue->obj );
@@ -1098,8 +1133,8 @@ static void msg_queue_destroy( struct object *obj )
         free( timer );
     }
     if (queue->timeout) remove_timeout_user( queue->timeout );
-    if (queue->keystate_locked) queue->input->lock_count--;
     queue->input->cursor_count -= queue->cursor_count;
+    if (queue->keystate_lock) unlock_input_keystate( queue->input );
     release_object( queue->input );
     if (queue->hooks) release_object( queue->hooks );
     if (queue->fd) release_object( queue->fd );
@@ -1199,11 +1234,7 @@ int attach_thread_input( struct thread *thread_from, struct thread *thread_to )
     }
 
     ret = assign_thread_input( thread_from, input );
-    if (ret)
-    {
-        memset( input->keystate, 0, sizeof(input->keystate) );
-        memset( input->shadow_keystate, 0, sizeof(input->shadow_keystate) );
-    }
+    if (ret) memset( input->keystate, 0, sizeof(input->keystate) );
     release_object( input );
     return ret;
 }
@@ -1373,9 +1404,9 @@ static void set_input_key_state( unsigned char *keystate, unsigned char key, int
     else keystate[key] &= ~0x80;
 }
 
-/* update the key state for a keyboard message */
-static void update_key_state( struct desktop *desktop, unsigned char *keystate,
-                              unsigned int msg, lparam_t wparam )
+/* update the input key state for a keyboard message */
+static void update_input_key_state( struct desktop *desktop, unsigned char *keystate,
+                                    unsigned int msg, lparam_t wparam )
 {
     unsigned char key;
     int down = 0;
@@ -1444,48 +1475,21 @@ static void update_desktop_mouse_state( struct desktop *desktop, unsigned int fl
     if (flags & MOUSEEVENTF_MOVE)
         update_desktop_cursor_pos( desktop, x, y );
     if (flags & MOUSEEVENTF_LEFTDOWN)
-        update_key_state( desktop, desktop->keystate, WM_LBUTTONDOWN, wparam );
+        update_input_key_state( desktop, desktop->keystate, WM_LBUTTONDOWN, wparam );
     if (flags & MOUSEEVENTF_LEFTUP)
-        update_key_state( desktop, desktop->keystate, WM_LBUTTONUP, wparam );
+        update_input_key_state( desktop, desktop->keystate, WM_LBUTTONUP, wparam );
     if (flags & MOUSEEVENTF_RIGHTDOWN)
-        update_key_state( desktop, desktop->keystate, WM_RBUTTONDOWN, wparam );
+        update_input_key_state( desktop, desktop->keystate, WM_RBUTTONDOWN, wparam );
     if (flags & MOUSEEVENTF_RIGHTUP)
-        update_key_state( desktop, desktop->keystate, WM_RBUTTONUP, wparam );
+        update_input_key_state( desktop, desktop->keystate, WM_RBUTTONUP, wparam );
     if (flags & MOUSEEVENTF_MIDDLEDOWN)
-        update_key_state( desktop, desktop->keystate, WM_MBUTTONDOWN, wparam );
+        update_input_key_state( desktop, desktop->keystate, WM_MBUTTONDOWN, wparam );
     if (flags & MOUSEEVENTF_MIDDLEUP)
-        update_key_state( desktop, desktop->keystate, WM_MBUTTONUP, wparam );
+        update_input_key_state( desktop, desktop->keystate, WM_MBUTTONUP, wparam );
     if (flags & MOUSEEVENTF_XDOWN)
-        update_key_state( desktop, desktop->keystate, WM_XBUTTONDOWN, wparam );
+        update_input_key_state( desktop, desktop->keystate, WM_XBUTTONDOWN, wparam );
     if (flags & MOUSEEVENTF_XUP)
-        update_key_state( desktop, desktop->keystate, WM_XBUTTONUP, wparam );
-}
-
-/* synchronizes the thread input key state with the desktop */
-static void synchronize_input_key_state( struct thread_input *input )
-{
-    if (!input->lock_count)
-    {
-        unsigned char *shadow_keystate = input->shadow_keystate;
-        unsigned char *keystate = input->keystate;
-        unsigned int i;
-
-        for (i = 0; i < 256; i++)
-        {
-            if (input->desktop->keystate[i] != shadow_keystate[i])
-            {
-                keystate[i] = input->desktop->keystate[i] & ~0x40;
-                shadow_keystate[i] = input->desktop->keystate[i];
-            }
-        }
-    }
-}
-
-/* update the thread input key state for a keyboard message */
-static void update_input_key_state( struct thread_input *input, unsigned int msg, lparam_t wparam )
-{
-    synchronize_input_key_state( input );
-    update_key_state( input->desktop, input->keystate, msg, wparam );
+        update_input_key_state( desktop, desktop->keystate, WM_XBUTTONUP, wparam );
 }
 
 /* release the hardware message currently being processed by the given thread */
@@ -1513,7 +1517,7 @@ static void release_hardware_message( struct msg_queue *queue, unsigned int hw_i
     }
     if (clr_bit) clear_queue_bits( queue, clr_bit );
 
-    update_input_key_state( input, msg->msg, msg->wparam );
+    update_input_key_state( input->desktop, input->keystate, msg->msg, msg->wparam );
     list_remove( &msg->entry );
     free_message( msg );
 }
@@ -1565,7 +1569,7 @@ static user_handle_t find_hardware_message_window( struct desktop *desktop, stru
 
     *thread = NULL;
     *msg_code = msg->msg;
-    if (msg->msg == WM_INPUT)
+    if (msg->msg == WM_INPUT || msg->msg == WM_INPUT_DEVICE_CHANGE)
     {
         if (!(win = msg->win) && input) win = input->focus;
     }
@@ -1643,7 +1647,7 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
     struct hardware_msg_data *msg_data = msg->data;
     unsigned int msg_code;
 
-    update_key_state( desktop, desktop->keystate, msg->msg, msg->wparam );
+    update_input_key_state( desktop, desktop->keystate, msg->msg, msg->wparam );
     last_input_time = get_tick_count();
     if (msg->msg != WM_MOUSEMOVE) always_queue = 1;
 
@@ -1654,7 +1658,7 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
         if (msg->wparam == VK_SHIFT || msg->wparam == VK_LSHIFT || msg->wparam == VK_RSHIFT)
             msg->lparam &= ~(KF_EXTENDED << 16);
     }
-    else if (msg->msg != WM_INPUT)
+    else if (msg->msg != WM_INPUT && msg->msg != WM_INPUT_DEVICE_CHANGE)
     {
         if (msg->msg == WM_MOUSEMOVE)
         {
@@ -1682,7 +1686,7 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
     win = find_hardware_message_window( desktop, input, msg, &msg_code, &thread );
     if (!win || !thread)
     {
-        if (input) update_input_key_state( input, msg->msg, msg->wparam );
+        if (input) update_input_key_state( input->desktop, input->keystate, msg->msg, msg->wparam );
         free_message( msg );
         return;
     }
@@ -1695,15 +1699,6 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
     else
     {
         msg->unique_id = 0;  /* will be set once we return it to the app */
-
-        /* lock the keystate on the first hardware message */
-        if (!thread->queue->keystate_locked)
-        {
-            synchronize_input_key_state( input );
-            input->lock_count++;
-            thread->queue->keystate_locked = 1;
-        }
-
         list_add_tail( &input->msg_list, &msg->entry );
         set_queue_bits( thread->queue, get_hardware_msg_bit(msg) );
     }
@@ -1718,7 +1713,7 @@ static int send_hook_ll_message( struct desktop *desktop, struct message *hardwa
     struct msg_queue *queue;
     struct message *msg;
     timeout_t timeout = 2000 * -10000;  /* FIXME: load from registry */
-    int id = (input->type == HW_INPUT_MOUSE) ? WH_MOUSE_LL : WH_KEYBOARD_LL;
+    int id = (input->type == INPUT_MOUSE) ? WH_MOUSE_LL : WH_KEYBOARD_LL;
 
     if (!(hook_thread = get_first_global_hook( id ))) return 0;
     if (!(queue = hook_thread->queue)) return 0;
@@ -1735,7 +1730,7 @@ static int send_hook_ll_message( struct desktop *desktop, struct message *hardwa
     msg->data_size = hardware_msg->data_size;
     msg->result    = NULL;
 
-    if (input->type == HW_INPUT_KEYBOARD)
+    if (input->type == INPUT_KEYBOARD)
     {
         unsigned short vkey = input->kbd.vkey;
         if (input->kbd.flags & KEYEVENTF_UNICODE) vkey = VK_PACKET;
@@ -1760,9 +1755,55 @@ static int send_hook_ll_message( struct desktop *desktop, struct message *hardwa
 static struct thread *get_foreground_thread( struct desktop *desktop, user_handle_t window )
 {
     /* if desktop has no foreground process, assume the receiving window is */
-    if (desktop->foreground_input) return get_window_thread( desktop->foreground_input->focus );
+    if (desktop && desktop->foreground_input) return get_window_thread( desktop->foreground_input->focus );
     if (window) return get_window_thread( window );
     return NULL;
+}
+
+static struct rawinput_device *hid_rawinput_devices;
+static unsigned int hid_rawinput_device_count;
+
+static void insert_hid_rawinput_device( unsigned int index, const char *data, unsigned int data_len )
+{
+    unsigned int new_count;
+
+    if (data_len < 2) return;
+
+    if (!hid_rawinput_device_count)
+    {
+        hid_rawinput_device_count = 64;
+        while (hid_rawinput_device_count < index) hid_rawinput_device_count *= 2;
+        hid_rawinput_devices = mem_alloc( hid_rawinput_device_count * sizeof(*hid_rawinput_devices) );
+        memset( hid_rawinput_devices, 0, hid_rawinput_device_count * sizeof(*hid_rawinput_devices) );
+    }
+    else if (hid_rawinput_device_count < index)
+    {
+        new_count = hid_rawinput_device_count;
+        while (new_count < index) new_count *= 2;
+        hid_rawinput_devices = realloc( hid_rawinput_devices, new_count * sizeof(*hid_rawinput_devices) );
+        memset( hid_rawinput_devices + hid_rawinput_device_count, 0, (new_count - hid_rawinput_device_count) * sizeof(*hid_rawinput_devices) );
+        hid_rawinput_device_count = new_count;
+    }
+
+    hid_rawinput_devices[index].usage_page = data[0];
+    hid_rawinput_devices[index].usage = data[1];
+}
+
+static void remove_hid_rawinput_device( unsigned int index )
+{
+    if (hid_rawinput_device_count < index) return;
+    hid_rawinput_devices[index].usage_page = 0;
+    hid_rawinput_devices[index].usage = 0;
+}
+
+static struct rawinput_device_entry *find_hid_rawinput_device( struct process *process, const union rawinput *rawinput )
+{
+    unsigned int index;
+    if (rawinput->type != RIM_TYPEHID) return NULL;
+    if (!(index = rawinput->hid.device)) return NULL;
+    if (hid_rawinput_device_count < index) return NULL;
+    if (!hid_rawinput_devices[index].usage_page) return NULL;
+    return find_rawinput_device( process, hid_rawinput_devices[index].usage_page, hid_rawinput_devices[index].usage );
 }
 
 struct rawinput_message
@@ -1771,8 +1812,7 @@ struct rawinput_message
     struct desktop          *desktop;
     struct hw_msg_source     source;
     unsigned int             time;
-    unsigned char            usage_page;
-    unsigned char            usage;
+    unsigned int             message;
     struct hardware_msg_data data;
     const void              *extra;
     data_size_t              extra_len;
@@ -1794,9 +1834,11 @@ static int queue_rawinput_message( struct process* process, void *arg )
         device = process->rawinput_mouse;
     else if (raw_msg->data.rawinput.type == RIM_TYPEKEYBOARD)
         device = process->rawinput_kbd;
-    else if ((entry = find_rawinput_device( process, raw_msg->usage_page, raw_msg->usage )))
+    else if ((entry = find_hid_rawinput_device( process, &raw_msg->data.rawinput )))
         device = &entry->device;
     if (!device) return 0;
+
+    if (raw_msg->message == WM_INPUT_DEVICE_CHANGE && !(device->flags & RIDEV_DEVNOTIFY)) return 0;
 
     if (raw_msg->desktop) desktop = (struct desktop *)grab_object( raw_msg->desktop );
     else if (!(desktop = get_desktop_obj( process, process->desktop, 0 ))) goto done;
@@ -1806,7 +1848,7 @@ static int queue_rawinput_message( struct process* process, void *arg )
 
     if (process != foreground->process)
     {
-        if (!(device->flags & RIDEV_INPUTSINK)) goto done;
+        if (raw_msg->message == WM_INPUT && !(device->flags & RIDEV_INPUTSINK)) goto done;
         if (!(target_thread = get_window_thread( device->target ))) goto done;
         if (!(target_desktop = get_thread_desktop( target_thread, 0 ))) goto done;
         if (target_desktop != desktop) goto done;
@@ -1818,13 +1860,19 @@ static int queue_rawinput_message( struct process* process, void *arg )
     msg_data = msg->data;
 
     msg->win    = device->target;
-    msg->msg    = WM_INPUT;
+    msg->msg    = raw_msg->message;
     msg->wparam = wparam;
     msg->lparam = 0;
 
     memcpy( msg_data, &raw_msg->data, sizeof(*msg_data) );
     if (raw_msg->extra_len && raw_msg->extra)
         memcpy( msg_data + 1, raw_msg->extra, raw_msg->extra_len );
+
+    if (raw_msg->message == WM_INPUT_DEVICE_CHANGE && raw_msg->data.rawinput.type == RIM_TYPEHID)
+    {
+        msg->wparam = raw_msg->data.rawinput.hid.param;
+        msg->lparam = raw_msg->data.rawinput.hid.device;
+    }
 
     queue_hardware_message( desktop, msg, 1 );
 
@@ -1893,12 +1941,13 @@ static int queue_mouse_message( struct desktop *desktop, user_handle_t win, cons
         y = desktop->cursor.y;
     }
 
-    if ((foreground = get_foreground_thread( desktop, win )))
+    if ((req_flags & SEND_HWMSG_RAWINPUT) && (foreground = get_foreground_thread( desktop, win )))
     {
         raw_msg.foreground = foreground;
         raw_msg.desktop    = desktop;
         raw_msg.source     = source;
         raw_msg.time       = time;
+        raw_msg.message    = WM_INPUT;
         raw_msg.extra      = NULL;
         raw_msg.extra_len  = 0;
 
@@ -1910,8 +1959,7 @@ static int queue_mouse_message( struct desktop *desktop, user_handle_t win, cons
         msg_data->rawinput.mouse.y    = input->mouse.y;
         msg_data->rawinput.mouse.data = input->mouse.data;
 
-        if ((req_flags & SEND_HWMSG_RAWINPUT))
-            enum_processes( queue_rawinput_message, &raw_msg );
+        enum_processes( queue_rawinput_message, &raw_msg );
         release_object( foreground );
     }
 
@@ -1920,9 +1968,6 @@ static int queue_mouse_message( struct desktop *desktop, user_handle_t win, cons
         update_desktop_mouse_state( desktop, flags, x, y, input->mouse.data << 16 );
         return 0;
     }
-
-    if (!(req_flags & SEND_HWMSG_WINDOW))
-        return 0;
 
     for (i = 0; i < ARRAY_SIZE( messages ); i++)
     {
@@ -2033,12 +2078,13 @@ static int queue_keyboard_message( struct desktop *desktop, user_handle_t win, c
         break;
     }
 
-    if ((foreground = get_foreground_thread( desktop, win )))
+    if ((req_flags & SEND_HWMSG_RAWINPUT) && (foreground = get_foreground_thread( desktop, win )))
     {
         raw_msg.foreground = foreground;
         raw_msg.desktop    = desktop;
         raw_msg.source     = source;
         raw_msg.time       = time;
+        raw_msg.message    = WM_INPUT;
         raw_msg.extra      = NULL;
         raw_msg.extra_len  = 0;
 
@@ -2050,19 +2096,15 @@ static int queue_keyboard_message( struct desktop *desktop, user_handle_t win, c
         msg_data->rawinput.kbd.vkey    = vkey;
         msg_data->rawinput.kbd.scan    = input->kbd.scan;
 
-        if ((req_flags & SEND_HWMSG_RAWINPUT))
-            enum_processes( queue_rawinput_message, &raw_msg );
+        enum_processes( queue_rawinput_message, &raw_msg );
         release_object( foreground );
     }
 
     if ((device = current->process->rawinput_kbd) && (device->flags & RIDEV_NOLEGACY))
     {
-        update_key_state( desktop, desktop->keystate, message_code, vkey );
+        update_input_key_state( desktop, desktop->keystate, message_code, vkey );
         return 0;
     }
-
-    if (!(req_flags & SEND_HWMSG_WINDOW))
-        return 0;
 
     if (!(msg = alloc_hardware_message( input->kbd.info, source, time, 0 ))) return 0;
     msg_data = msg->data;
@@ -2100,8 +2142,53 @@ static void queue_custom_hardware_message( struct desktop *desktop, user_handle_
                                            unsigned int origin, const hw_input_t *input )
 {
     struct hw_msg_source source = { IMDT_UNAVAILABLE, origin };
+    struct hardware_msg_data *msg_data;
+    struct rawinput_message raw_msg;
     struct message *msg;
 
+    switch (input->hw.msg)
+    {
+    case WM_INPUT:
+    case WM_INPUT_DEVICE_CHANGE:
+        raw_msg.foreground = get_foreground_thread( desktop, win );
+        raw_msg.desktop    = desktop;
+        raw_msg.source     = source;
+        raw_msg.time       = get_tick_count();
+        raw_msg.message    = input->hw.msg;
+        raw_msg.extra      = NULL;
+        raw_msg.extra_len  = 0;
+
+        if (input->hw.msg == WM_INPUT && input->hw.data.rawinput.type == RIM_TYPEHID)
+        {
+            raw_msg.extra     = get_req_data();
+            raw_msg.extra_len = get_req_data_size();
+        }
+
+        msg_data = &raw_msg.data;
+        msg_data->info     = 0;
+        msg_data->flags    = 0;
+        msg_data->rawinput = input->hw.data.rawinput;
+
+        if (input->hw.msg == WM_INPUT && input->hw.data.rawinput.type == RIM_TYPEMOUSE)
+            msg_data->flags = input->hw.lparam;
+
+        if (input->hw.msg == WM_INPUT_DEVICE_CHANGE &&
+            input->hw.data.rawinput.type == RIM_TYPEHID &&
+            input->hw.data.rawinput.hid.param == GIDC_ARRIVAL)
+            insert_hid_rawinput_device( input->hw.data.rawinput.hid.device, get_req_data(), get_req_data_size() );
+
+        enum_processes( queue_rawinput_message, &raw_msg );
+
+        if (input->hw.msg == WM_INPUT_DEVICE_CHANGE &&
+            input->hw.data.rawinput.type == RIM_TYPEHID &&
+            input->hw.data.rawinput.hid.param == GIDC_REMOVAL)
+            remove_hid_rawinput_device( input->hw.data.rawinput.hid.device );
+
+        if (raw_msg.foreground) release_object( raw_msg.foreground );
+        return;
+    }
+
+    if (!desktop) return;
     if (!(msg = alloc_hardware_message( 0, source, get_tick_count(), 0 ))) return;
 
     msg->win       = get_user_full_handle( win );
@@ -2112,37 +2199,6 @@ static void queue_custom_hardware_message( struct desktop *desktop, user_handle_
     msg->y         = desktop->cursor.y;
 
     queue_hardware_message( desktop, msg, 1 );
-}
-
-/* queue a hardware message for an hid event */
-static void queue_hid_message( struct desktop *desktop, user_handle_t win, const hw_input_t *input,
-                               unsigned int origin, struct msg_queue *sender, unsigned int req_flags,
-                               const void *report, data_size_t report_len )
-{
-    struct hw_msg_source source = { IMDT_UNAVAILABLE, origin };
-    struct hardware_msg_data *msg_data;
-    struct rawinput_message raw_msg;
-
-    if (!(req_flags & SEND_HWMSG_RAWINPUT))
-        return;
-
-    /* send to all desktops */
-    raw_msg.foreground = NULL;
-    raw_msg.desktop    = NULL;
-    raw_msg.source     = source;
-    raw_msg.time       = get_tick_count();
-    raw_msg.usage_page = input->hid.usage_page;
-    raw_msg.usage      = input->hid.usage;
-    raw_msg.extra      = report;
-    raw_msg.extra_len  = report_len;
-
-    msg_data = &raw_msg.data;
-    msg_data->flags               = 0;
-    msg_data->rawinput.type       = RIM_TYPEHID;
-    msg_data->rawinput.hid.device = input->hid.device;
-    msg_data->rawinput.hid.length = report_len;
-
-    enum_processes( queue_rawinput_message, &raw_msg );
 }
 
 /* check message filter for a hardware message */
@@ -2220,7 +2276,7 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
         if (!win || !win_thread)
         {
             /* no window at all, remove it */
-            update_input_key_state( input, msg->msg, msg->wparam );
+            update_input_key_state( input->desktop, input->keystate, msg->msg, msg->wparam );
             list_remove( &msg->entry );
             free_message( msg );
             continue;
@@ -2236,7 +2292,7 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
             else
             {
                 /* for another thread input, drop it */
-                update_input_key_state( input, msg->msg, msg->wparam );
+                update_input_key_state( input->desktop, input->keystate, msg->msg, msg->wparam );
                 list_remove( &msg->entry );
                 free_message( msg );
             }
@@ -2265,7 +2321,7 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
 
         data->hw_id = msg->unique_id;
         set_reply_data( msg->data, msg->data_size );
-        if (msg->msg == WM_INPUT && (flags & PM_REMOVE))
+        if ((msg->msg == WM_INPUT || msg->msg == WM_INPUT_DEVICE_CHANGE) && (flags & PM_REMOVE))
             release_hardware_message( current->queue, data->hw_id );
         return 1;
     }
@@ -2635,15 +2691,14 @@ DECL_HANDLER(send_message)
 DECL_HANDLER(send_hardware_message)
 {
     struct thread *thread = NULL;
-    struct desktop *desktop;
+    struct desktop *desktop = get_thread_desktop( current, 0 );
     unsigned int origin = (req->flags & SEND_HWMSG_INJECTED ? IMO_INJECTED : IMO_HARDWARE);
     struct msg_queue *sender = get_current_queue();
     data_size_t size = min( 256, get_reply_max_size() );
 
-    if (!(desktop = get_thread_desktop( current, 0 ))) return;
-
     if (req->win)
     {
+        if (!desktop) return;
         if (!(thread = get_window_thread( req->win ))) return;
         if (desktop != thread->queue->input->desktop)
         {
@@ -2653,32 +2708,38 @@ DECL_HANDLER(send_hardware_message)
         }
     }
 
-    reply->prev_x = desktop->cursor.x;
-    reply->prev_y = desktop->cursor.y;
+    if (desktop)
+    {
+        reply->prev_x = desktop->cursor.x;
+        reply->prev_y = desktop->cursor.y;
+    }
 
     switch (req->input.type)
     {
-    case HW_INPUT_MOUSE:
+    case INPUT_MOUSE:
+        if (!desktop) return;
         reply->wait = queue_mouse_message( desktop, req->win, &req->input, origin, sender, req->flags );
         break;
-    case HW_INPUT_KEYBOARD:
+    case INPUT_KEYBOARD:
+        if (!desktop) return;
         reply->wait = queue_keyboard_message( desktop, req->win, &req->input, origin, sender, req->flags );
         break;
-    case HW_INPUT_HARDWARE:
+    case INPUT_HARDWARE:
+        if (!desktop) set_error( STATUS_SUCCESS );
         queue_custom_hardware_message( desktop, req->win, origin, &req->input );
-        break;
-    case HW_INPUT_HID:
-        queue_hid_message( desktop, req->win, &req->input, origin, sender, req->flags, get_req_data(), get_req_data_size() );
         break;
     default:
         set_error( STATUS_INVALID_PARAMETER );
     }
     if (thread) release_object( thread );
 
-    reply->new_x = desktop->cursor.x;
-    reply->new_y = desktop->cursor.y;
-    set_reply_data( desktop->keystate, size );
-    release_object( desktop );
+    if (desktop)
+    {
+        reply->new_x = desktop->cursor.x;
+        reply->new_y = desktop->cursor.y;
+        set_reply_data( desktop->keystate, size );
+        release_object( desktop );
+    }
 }
 
 /* post a quit message to the current queue */
@@ -2714,13 +2775,6 @@ DECL_HANDLER(get_message)
     if (!queue) return;
     queue->last_get_msg = current_time;
     if (!filter) filter = QS_ALLINPUT;
-
-    /* no longer lock the keystate if we have processed all input */
-    if (queue->keystate_locked && !(queue->wake_bits & QS_ALLINPUT))
-    {
-        queue->input->lock_count--;
-        queue->keystate_locked = 0;
-    }
 
     /* first check for sent messages */
     if ((ptr = list_head( &queue->msg_list[SEND_MESSAGE] )))
@@ -3174,14 +3228,13 @@ DECL_HANDLER(get_thread_input)
 }
 
 
-/* retrieve queue keyboard state for a given thread */
+/* retrieve queue keyboard state for current thread or global async state */
 DECL_HANDLER(get_key_state)
 {
-    struct thread *thread;
     struct desktop *desktop;
     data_size_t size = min( 256, get_reply_max_size() );
 
-    if (!req->tid)  /* get global async key state */
+    if (req->async)  /* get global async key state */
     {
         if (!(desktop = get_thread_desktop( current, 0 ))) return;
         if (req->key >= 0)
@@ -3194,58 +3247,31 @@ DECL_HANDLER(get_key_state)
     }
     else
     {
-        unsigned char *keystate;
-        if (!(thread = get_thread_from_id( req->tid ))) return;
-        if (thread->queue)
+        struct msg_queue *queue = get_current_queue();
+        unsigned char *keystate = queue->input->keystate;
+        if (req->key >= 0)
         {
-            if (req->key >= 0)
-            {
-                /* synchronize with desktop keystate, but _only_ if req->key is given */
-                synchronize_input_key_state( thread->queue->input );
-                reply->state = thread->queue->input->keystate[req->key & 0xff];
-            }
-            set_reply_data( thread->queue->input->keystate, size );
-            release_object( thread );
-            return;
+            sync_input_keystate( queue->input );
+            reply->state = keystate[req->key & 0xff];
         }
-        release_object( thread );
-
-        /* fallback to desktop keystate */
-        if (!(desktop = get_thread_desktop( current, 0 ))) return;
-        if (req->key >= 0) reply->state = desktop->keystate[req->key & 0xff] & ~0x40;
-        if ((keystate = set_reply_data_size( size )))
-        {
-            unsigned int i;
-            for (i = 0; i < size; i++) keystate[i] = desktop->keystate[i] & ~0x40;
-        }
-        release_object( desktop );
+        set_reply_data( keystate, size );
     }
 }
 
 
-/* set queue keyboard state for a given thread */
+/* set queue keyboard state for current thread */
 DECL_HANDLER(set_key_state)
 {
-    struct thread *thread;
     struct desktop *desktop;
+    struct msg_queue *queue = get_current_queue();
     data_size_t size = min( 256, get_req_data_size() );
 
-    if (!req->tid)  /* set global async key state */
+    memcpy( queue->input->keystate, get_req_data(), size );
+    memcpy( queue->input->desktop_keystate, queue->input->desktop->keystate, 256 );
+    if (req->async && (desktop = get_thread_desktop( current, 0 )))
     {
-        if (!(desktop = get_thread_desktop( current, 0 ))) return;
         memcpy( desktop->keystate, get_req_data(), size );
         release_object( desktop );
-    }
-    else
-    {
-        if (!(thread = get_thread_from_id( req->tid ))) return;
-        if (thread->queue) memcpy( thread->queue->input->keystate, get_req_data(), size );
-        if (req->async && (desktop = get_thread_desktop( thread, 0 )))
-        {
-            memcpy( desktop->keystate, get_req_data(), size );
-            release_object( desktop );
-        }
-        release_object( thread );
     }
 }
 
@@ -3483,19 +3509,18 @@ DECL_HANDLER(get_rawinput_buffer)
     {
         struct message *msg = LIST_ENTRY( ptr, struct message, entry );
         struct hardware_msg_data *data = msg->data;
-        data_size_t msg_size = sizeof(*data);
-        if (data->rawinput.type == RIM_TYPEHID)
-            msg_size += data->rawinput.hid.length;
+        data_size_t hid_size = data->rawinput.type != RIM_TYPEHID ? 0 : data->rawinput.hid.length;
+        data_size_t data_size = sizeof(*data) + hid_size;
 
         ptr = list_next( &input->msg_list, ptr );
         if (msg->msg != WM_INPUT) continue;
 
-        next_size = req->rawinput_size;
+        next_size = req->rawinput_size + hid_size;
         if (size + next_size > req->buffer_size) break;
-        if (cur + msg_size > buf + get_reply_max_size()) break;
-        if (cur + msg_size > buf + buf_size)
+        if (cur + data_size > buf + get_reply_max_size()) break;
+        if (cur + data_size > buf + buf_size)
         {
-            buf_size += buf_size / 2;
+            buf_size += buf_size / 2 + hid_size;
             if (!(tmp = realloc( buf, buf_size )))
             {
                 set_error( STATUS_NO_MEMORY );
@@ -3505,12 +3530,12 @@ DECL_HANDLER(get_rawinput_buffer)
             buf = tmp;
         }
 
-        memcpy(cur, data, msg_size);
+        memcpy( cur, data, data_size );
         list_remove( &msg->entry );
         free_message( msg );
 
         size += next_size;
-        cur += msg_size;
+        cur += sizeof(*data);
         count++;
     }
 

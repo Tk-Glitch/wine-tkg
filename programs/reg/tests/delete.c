@@ -21,7 +21,7 @@
 
 static void test_delete(void)
 {
-    HKEY hkey, hsubkey;
+    HKEY hkey;
     DWORD r;
     const DWORD deadbeef = 0xdeadbeef;
 
@@ -47,7 +47,16 @@ static void test_delete(void)
     run_reg_exe("reg delete HKCU\\" KEY_BASE " /v Wine /va", &r);
     ok(r == REG_EXIT_FAILURE, "got exit code %d, expected 1\n", r);
 
+    run_reg_exe("reg delete HKCU\\" KEY_BASE " /ve /ve", &r);
+    ok(r == REG_EXIT_FAILURE, "got exit code %d, expected 1\n", r);
+
     run_reg_exe("reg delete HKCU\\" KEY_BASE " /ve /va", &r);
+    ok(r == REG_EXIT_FAILURE, "got exit code %d, expected 1\n", r);
+
+    run_reg_exe("reg delete HKCU\\" KEY_BASE " /va /va", &r);
+    ok(r == REG_EXIT_FAILURE, "got exit code %d, expected 1\n", r);
+
+    run_reg_exe("reg delete HKCU\\" KEY_BASE " /v Test /ve /va", &r);
     ok(r == REG_EXIT_FAILURE, "got exit code %d, expected 1\n", r);
 
     run_reg_exe("reg delete HKCU\\" KEY_BASE " /v Wine /v Test /f", &r);
@@ -66,8 +75,7 @@ static void test_delete(void)
     add_value(hkey, "bar", REG_DWORD, &deadbeef, sizeof(deadbeef));
     add_value(hkey, NULL, REG_DWORD, &deadbeef, sizeof(deadbeef));
 
-    add_key(hkey, "subkey", &hsubkey);
-    close_key(hsubkey);
+    add_key(hkey, "subkey", NULL);
 
     run_reg_exe("reg delete HKCU\\" KEY_BASE " /v bar /f", &r);
     ok(r == REG_EXIT_SUCCESS, "got exit code %d, expected 0\n", r);
@@ -83,8 +91,7 @@ static void test_delete(void)
     verify_key(hkey, "subkey");
 
     /* Test forward and back slashes */
-    add_key(hkey, "https://winehq.org", &hsubkey);
-    close_key(hsubkey);
+    add_key(hkey, "https://winehq.org", NULL);
     add_value(hkey, "count/up", REG_SZ, "one/two/three", 14);
     add_value(hkey, "\\foo\\bar", REG_SZ, "", 1);
 

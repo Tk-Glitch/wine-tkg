@@ -48,10 +48,45 @@ typedef enum AppPolicyWindowingModel
     AppPolicyWindowingModel_ClassicPhone   = 3
 } AppPolicyWindowingModel;
 
+typedef struct PACKAGE_VERSION
+{
+    union
+    {
+        UINT64 Version;
+        struct
+        {
+            USHORT Revision;
+            USHORT Build;
+            USHORT Minor;
+            USHORT Major;
+        }
+        DUMMYSTRUCTNAME;
+    }
+    DUMMYUNIONNAME;
+}
+PACKAGE_VERSION;
+
+typedef struct PACKAGE_ID
+{
+    UINT32 reserved;
+    UINT32 processorArchitecture;
+    PACKAGE_VERSION version;
+    WCHAR *name;
+    WCHAR *publisher;
+    WCHAR *resourceId;
+    WCHAR *publisherId;
+}
+PACKAGE_ID;
+
 LONG WINAPI AppPolicyGetProcessTerminationMethod(HANDLE token, AppPolicyProcessTerminationMethod *policy);
 LONG WINAPI AppPolicyGetShowDeveloperDiagnostic(HANDLE token, AppPolicyShowDeveloperDiagnostic *policy);
 LONG WINAPI AppPolicyGetThreadInitializationType(HANDLE token, AppPolicyThreadInitializationType *policy);
 LONG WINAPI AppPolicyGetWindowingModel(HANDLE processToken, AppPolicyWindowingModel *policy);
+LONG WINAPI GetPackagePath(const PACKAGE_ID *package_id, const UINT32 reserved, UINT32 *length, WCHAR *path);
+LONG WINAPI GetPackagesByPackageFamily(const WCHAR *family_name, UINT32 *count, WCHAR **full_names,
+        UINT32 *buffer_length, WCHAR *buffer);
+LONG WINAPI PackageFullNameFromId(const PACKAGE_ID *package_id, UINT32 *length, WCHAR *full_name);
+LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *buffer_length, BYTE *buffer);
 
 #if defined(__cplusplus)
 }

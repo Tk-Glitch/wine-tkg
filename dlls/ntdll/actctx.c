@@ -200,13 +200,6 @@ struct wndclass_redirect_data
     ULONG module_offset;/* container name offset */
 };
 
-struct dllredirect_data
-{
-    ULONG size;
-    ULONG unk;
-    DWORD res[3];
-};
-
 struct tlibredirect_data
 {
     ULONG  size;
@@ -498,6 +491,7 @@ struct entity_array
 struct dll_redirect
 {
     WCHAR                *name;
+    WCHAR                *load_from;
     WCHAR                *hash;
     struct entity_array   entities;
 };
@@ -1076,6 +1070,7 @@ static void actctx_release( ACTIVATION_CONTEXT *actctx )
                 struct dll_redirect *dll = &assembly->dlls[j];
                 free_entity_array( &dll->entities );
                 RtlFreeHeap( GetProcessHeap(), 0, dll->name );
+                RtlFreeHeap( GetProcessHeap(), 0, dll->load_from );
                 RtlFreeHeap( GetProcessHeap(), 0, dll->hash );
             }
             RtlFreeHeap( GetProcessHeap(), 0, assembly->dlls );
@@ -2237,6 +2232,10 @@ static void parse_file_elem( xmlbuf_t* xmlbuf, struct assembly* assembly,
             if (!(dll->name = xmlstrdupW(&attr.value))) set_error( xmlbuf );
             TRACE("name=%s\n", debugstr_xmlstr(&attr.value));
         }
+        else if (xml_attr_cmp(&attr, L"loadFrom"))
+        {
+            if (!(dll->load_from = xmlstrdupW(&attr.value))) set_error( xmlbuf );
+        }
         else if (xml_attr_cmp(&attr, L"hash"))
         {
             if (!(dll->hash = xmlstrdupW(&attr.value))) set_error( xmlbuf );
@@ -2329,6 +2328,38 @@ static void parse_supportedos_elem( xmlbuf_t *xmlbuf, struct assembly *assembly,
     if (!end) parse_expect_end_elem(xmlbuf, parent);
 }
 
+static void parse_maxversiontested_elem( xmlbuf_t *xmlbuf, struct assembly *assembly,
+                                         struct actctx_loader *acl, const struct xml_elem *parent )
+{
+    struct xml_attr attr;
+    BOOL end = FALSE;
+
+    while (next_xml_attr(xmlbuf, &attr, &end))
+    {
+        if (xml_attr_cmp(&attr, L"Id"))
+        {
+            COMPATIBILITY_CONTEXT_ELEMENT *compat;
+            struct assembly_version version;
+
+            if (!(compat = add_compat_context(assembly)))
+            {
+                set_error( xmlbuf );
+                return;
+            }
+            parse_version( &attr.value, &version );
+            compat->Type = ACTCTX_COMPATIBILITY_ELEMENT_TYPE_MAXVERSIONTESTED;
+            compat->MaxVersionTested = (ULONGLONG)version.major << 48 |
+                (ULONGLONG)version.minor << 32 | version.build << 16 | version.revision;
+        }
+        else if (!is_xmlns_attr( &attr ))
+        {
+            WARN("unknown attr %s\n", debugstr_xml_attr(&attr));
+        }
+    }
+
+    if (!end) parse_expect_end_elem(xmlbuf, parent);
+}
+
 static void parse_compatibility_application_elem(xmlbuf_t *xmlbuf, struct assembly *assembly,
                                                  struct actctx_loader* acl, const struct xml_elem *parent)
 {
@@ -2339,6 +2370,10 @@ static void parse_compatibility_application_elem(xmlbuf_t *xmlbuf, struct assemb
         if (xml_elem_cmp(&elem, L"supportedOS", compatibilityNSW))
         {
             parse_supportedos_elem(xmlbuf, assembly, acl, &elem);
+        }
+        else if (xml_elem_cmp(&elem, L"maxversiontested", compatibilityNSW))
+        {
+            parse_maxversiontested_elem(xmlbuf, assembly, acl, &elem);
         }
         else
         {
@@ -3314,8 +3349,13 @@ static NTSTATUS build_dllredirect_section(ACTIVATION_CONTEXT* actctx, struct str
 
             /* each entry needs index, data and string data */
             total_len += sizeof(*index);
-            total_len += sizeof(*data);
             total_len += aligned_string_len((wcslen(dll->name)+1)*sizeof(WCHAR));
+            if (dll->load_from)
+            {
+                total_len += offsetof( struct dllredirect_data, paths[1] );
+                total_len += aligned_string_len( wcslen(dll->load_from) * sizeof(WCHAR) );
+            }
+            else total_len += offsetof( struct dllredirect_data, paths[0] );
         }
 
         dll_count += assembly->num_dlls;
@@ -3353,21 +3393,40 @@ static NTSTATUS build_dllredirect_section(ACTIVATION_CONTEXT* actctx, struct str
             index->name_offset = name_offset;
             index->name_len = str.Length;
             index->data_offset = index->name_offset + aligned_string_len(str.MaximumLength);
-            index->data_len = sizeof(*data);
+            index->data_len = offsetof( struct dllredirect_data, paths[0] );
             index->rosterindex = i + 1;
-
-            /* setup data */
-            data = (struct dllredirect_data*)((BYTE*)header + index->data_offset);
-            data->size = sizeof(*data);
-            data->unk = 2; /* FIXME: seems to be constant */
-            memset(data->res, 0, sizeof(data->res));
 
             /* dll name */
             ptrW = (WCHAR*)((BYTE*)header + index->name_offset);
             memcpy(ptrW, dll->name, index->name_len);
             ptrW[index->name_len/sizeof(WCHAR)] = 0;
+            name_offset += aligned_string_len(str.MaximumLength);
 
-            name_offset += sizeof(*data) + aligned_string_len(str.MaximumLength);
+            /* setup data */
+            data = (struct dllredirect_data*)((BYTE*)header + index->data_offset);
+            if (dll->load_from)
+            {
+                ULONG len = wcslen(dll->load_from) * sizeof(WCHAR);
+                data->size = offsetof( struct dllredirect_data, paths[1] );
+                data->flags = 0;
+                data->total_len = aligned_string_len( len );
+                data->paths_count = 1;
+                data->paths_offset = index->data_offset + offsetof( struct dllredirect_data, paths[0] );
+                data->paths[0].offset = index->data_offset + data->size;
+                data->paths[0].len = len;
+                ptrW = (WCHAR *)((BYTE *)header + data->paths[0].offset);
+                memcpy( ptrW, dll->load_from, len );
+                if (wcschr( dll->load_from, '%' )) data->flags |= DLL_REDIRECT_PATH_EXPAND;
+            }
+            else
+            {
+                data->size = offsetof( struct dllredirect_data, paths[0] );
+                data->flags = DLL_REDIRECT_PATH_OMITS_ASSEMBLY_ROOT;
+                data->total_len = 0;
+                data->paths_count = 0;
+                data->paths_offset = 0;
+            }
+            name_offset += data->size + data->total_len;
 
             index++;
         }
@@ -4750,9 +4809,6 @@ static NTSTATUS find_string(ACTIVATION_CONTEXT* actctx, ULONG section_kind,
 
     switch (section_kind)
     {
-    case ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION:
-        FIXME("Unsupported yet section_kind %x\n", section_kind);
-        return STATUS_SXS_KEY_NOT_FOUND;
     case ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION:
         status = find_dll_redirection(actctx, section_name, data);
         break;
@@ -5339,8 +5395,11 @@ NTSTATUS WINAPI RtlQueryInformationActivationContext( ULONG flags, HANDLE handle
 
     case CompatibilityInformationInActivationContext:
         {
-            /*ACTIVATION_CONTEXT_COMPATIBILITY_INFORMATION*/DWORD *acci = buffer;
-            COMPATIBILITY_CONTEXT_ELEMENT *elements;
+            struct acci
+            {
+                DWORD ElementCount;
+                COMPATIBILITY_CONTEXT_ELEMENT Elements[1];
+            } *acci = buffer;
             struct assembly *assembly = NULL;
             ULONG num_compat_contexts = 0, n;
             SIZE_T len;
@@ -5351,16 +5410,15 @@ NTSTATUS WINAPI RtlQueryInformationActivationContext( ULONG flags, HANDLE handle
 
             if (assembly)
                 num_compat_contexts = assembly->num_compat_contexts;
-            len = sizeof(*acci) + num_compat_contexts * sizeof(COMPATIBILITY_CONTEXT_ELEMENT);
+            len = offsetof( struct acci, Elements[num_compat_contexts] );
 
             if (retlen) *retlen = len;
             if (!buffer || bufsize < len) return STATUS_BUFFER_TOO_SMALL;
 
-            *acci = num_compat_contexts;
-            elements = (COMPATIBILITY_CONTEXT_ELEMENT*)(acci + 1);
+            acci->ElementCount = num_compat_contexts;
             for (n = 0; n < num_compat_contexts; ++n)
             {
-                elements[n] = assembly->compat_contexts[n];
+                acci->Elements[n] = assembly->compat_contexts[n];
             }
         }
         break;

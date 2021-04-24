@@ -49,10 +49,14 @@ static HWND create_window(void)
             0, 0, r.right - r.left, r.bottom - r.top, NULL, NULL, NULL, NULL);
 }
 
-static IDirect3DDevice9 *create_device(IDirect3D9 *d3d9, HWND focus_window)
+static IDirect3DDevice9 *create_device(HWND focus_window)
 {
     D3DPRESENT_PARAMETERS present_parameters = {0};
     IDirect3DDevice9 *device = NULL;
+    IDirect3D9 *d3d9;
+
+    d3d9 = Direct3DCreate9(D3D_SDK_VERSION);
+    ok(!!d3d9, "Failed to create a D3D object.\n");
 
     present_parameters.BackBufferWidth = 640;
     present_parameters.BackBufferHeight = 480;
@@ -65,6 +69,8 @@ static IDirect3DDevice9 *create_device(IDirect3D9 *d3d9, HWND focus_window)
 
     IDirect3D9_CreateDevice(d3d9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, focus_window,
             D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device);
+
+    IDirect3D9_Release(d3d9);
 
     return device;
 }
@@ -253,6 +259,7 @@ static void test_interfaces(void)
 
     todo_wine check_interface(filter, &IID_IAMFilterMiscFlags, TRUE);
     check_interface(filter, &IID_IBaseFilter, TRUE);
+    check_interface(filter, &IID_IEVRFilterConfig, TRUE);
     check_interface(filter, &IID_IMediaFilter, TRUE);
     check_interface(filter, &IID_IMediaPosition, TRUE);
     check_interface(filter, &IID_IMediaSeeking, TRUE);
@@ -718,16 +725,13 @@ static void test_surface_sample(void)
     DWORD flags, count, length;
     IDirect3DDevice9 *device;
     IMFSample *sample;
-    IDirect3D9 *d3d;
     IUnknown *unk;
     HWND window;
     HRESULT hr;
     BYTE *data;
 
     window = create_window();
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    ok(!!d3d, "Failed to create a D3D object.\n");
-    if (!(device = create_device(d3d, window)))
+    if (!(device = create_device(window)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
@@ -929,7 +933,6 @@ static void test_surface_sample(void)
 done:
     if (backbuffer)
         IDirect3DSurface9_Release(backbuffer);
-    IDirect3D9_Release(d3d);
     DestroyWindow(window);
 }
 
@@ -944,7 +947,6 @@ static void test_default_mixer_type_negotiation(void)
     IMFTransform *transform;
     DWORD index, count;
     GUID guid, *guids;
-    IDirect3D9 *d3d;
     IUnknown *unk;
     HWND window;
     HRESULT hr;
@@ -980,9 +982,7 @@ static void test_default_mixer_type_negotiation(void)
     /* Now try with device manager. */
 
     window = create_window();
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    ok(!!d3d, "Failed to create a D3D object.\n");
-    if (!(device = create_device(d3d, window)))
+    if (!(device = create_device(window)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
@@ -1117,7 +1117,6 @@ todo_wine
 
 done:
     IMFTransform_Release(transform);
-    IDirect3D9_Release(d3d);
     DestroyWindow(window);
 }
 
@@ -1154,7 +1153,7 @@ static void test_default_presenter(void)
     check_interface(presenter, &IID_IMFVideoDeviceID, TRUE);
     check_interface(presenter, &IID_IMFQualityAdvise, TRUE);
     check_interface(presenter, &IID_IDirect3DDeviceManager9, TRUE);
-    todo_wine check_interface(presenter, &IID_IMFQualityAdviseLimits, TRUE);
+    check_interface(presenter, &IID_IMFQualityAdviseLimits, TRUE);
     check_service_interface(presenter, &MR_VIDEO_RENDER_SERVICE, &IID_IMFVideoPositionMapper, TRUE);
     check_service_interface(presenter, &MR_VIDEO_RENDER_SERVICE, &IID_IMFVideoDisplayControl, TRUE);
     check_service_interface(presenter, &MR_VIDEO_RENDER_SERVICE, &IID_IMFVideoPresenter, TRUE);
@@ -1165,7 +1164,7 @@ static void test_default_presenter(void)
     check_service_interface(presenter, &MR_VIDEO_RENDER_SERVICE, &IID_IMFGetService, TRUE);
     check_service_interface(presenter, &MR_VIDEO_RENDER_SERVICE, &IID_IMFVideoDeviceID, TRUE);
     check_service_interface(presenter, &MR_VIDEO_RENDER_SERVICE, &IID_IMFQualityAdvise, TRUE);
-    todo_wine check_service_interface(presenter, &MR_VIDEO_RENDER_SERVICE, &IID_IMFQualityAdviseLimits, TRUE);
+    check_service_interface(presenter, &MR_VIDEO_RENDER_SERVICE, &IID_IMFQualityAdviseLimits, TRUE);
     check_service_interface(presenter, &MR_VIDEO_RENDER_SERVICE, &IID_IMFTransform, FALSE);
     check_service_interface(presenter, &MR_VIDEO_RENDER_SERVICE, &IID_IDirect3DDeviceManager9, TRUE);
     check_service_interface(presenter, &MR_VIDEO_ACCELERATION_SERVICE, &IID_IDirect3DDeviceManager9, TRUE);
@@ -1340,7 +1339,6 @@ static void test_MFCreateVideoSampleAllocator(void)
     LONG refcount, count;
     unsigned int token;
     IMFGetService *gs;
-    IDirect3D9 *d3d;
     IUnknown *unk;
     HWND window;
     HRESULT hr;
@@ -1455,9 +1453,7 @@ static void test_MFCreateVideoSampleAllocator(void)
 
     /* Using device manager */
     window = create_window();
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    ok(!!d3d, "Failed to create a D3D object.\n");
-    if (!(device = create_device(d3d, window)))
+    if (!(device = create_device(window)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
@@ -1506,7 +1502,6 @@ static void test_MFCreateVideoSampleAllocator(void)
     IDirect3DDeviceManager9_Release(manager);
     IDirect3DDevice9_Release(device);
 done:
-    IDirect3D9_Release(d3d);
     DestroyWindow(window);
 }
 
@@ -2018,30 +2013,32 @@ static void test_presenter_quality_control(void)
     ok(hr == S_OK, "Failed to create default presenter, hr %#x.\n", hr);
 
     hr = IMFVideoPresenter_QueryInterface(presenter, &IID_IMFQualityAdviseLimits, (void **)&qa_limits);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     hr = IMFVideoPresenter_QueryInterface(presenter, &IID_IMFQualityAdvise, (void **)&advise);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
-if (qa_limits)
-{
     hr = IMFQualityAdviseLimits_GetMaximumDropMode(qa_limits, NULL);
+todo_wine
     ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
 
     hr = IMFQualityAdviseLimits_GetMaximumDropMode(qa_limits, &mode);
+todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-    ok(mode == MF_DROP_MODE_NONE, "Unexpected mode %d.\n", mode);
+    if (SUCCEEDED(hr))
+        ok(mode == MF_DROP_MODE_NONE, "Unexpected mode %d.\n", mode);
 
     hr = IMFQualityAdviseLimits_GetMinimumQualityLevel(qa_limits, NULL);
+todo_wine
     ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
 
     hr = IMFQualityAdviseLimits_GetMinimumQualityLevel(qa_limits, &level);
+todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-    ok(level == MF_QUALITY_NORMAL, "Unexpected level %d.\n", level);
+    if (SUCCEEDED(hr))
+        ok(level == MF_QUALITY_NORMAL, "Unexpected level %d.\n", level);
 
     IMFQualityAdviseLimits_Release(qa_limits);
-}
 
 todo_wine {
     mode = 1;
@@ -2099,7 +2096,6 @@ static void test_presenter_media_type(void)
     IDirect3DDeviceManager9 *manager;
     HRESULT hr;
     IMFTransform *mixer;
-    IDirect3D9 *d3d;
     IDirect3DDevice9 *device;
     unsigned int token;
     SIZE frame_size;
@@ -2109,9 +2105,7 @@ static void test_presenter_media_type(void)
     RECT dst;
 
     window = create_window();
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    ok(!!d3d, "Failed to create a D3D object.\n");
-    if (!(device = create_device(d3d, window)))
+    if (!(device = create_device(window)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
@@ -2193,7 +2187,6 @@ todo_wine {
     IMFTransform_Release(mixer);
 
 done:
-    IDirect3D9_Release(d3d);
     DestroyWindow(window);
 }
 
@@ -2436,16 +2429,13 @@ static void test_mixer_samples(void)
     DWORD count, flags, color, status;
     IMFTransform *mixer;
     IMFSample *sample, *sample2;
-    IDirect3D9 *d3d;
     HWND window;
     UINT token;
     HRESULT hr;
     LONGLONG pts, duration;
 
     window = create_window();
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    ok(!!d3d, "Failed to create a D3D object.\n");
-    if (!(device = create_device(d3d, window)))
+    if (!(device = create_device(window)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
@@ -2675,7 +2665,6 @@ static void test_mixer_samples(void)
     IDirect3DDeviceManager9_Release(manager);
 
 done:
-    IDirect3D9_Release(d3d);
     DestroyWindow(window);
 }
 

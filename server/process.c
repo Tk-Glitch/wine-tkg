@@ -514,7 +514,7 @@ static void process_sigkill( void *private )
 static void start_sigkill_timer( struct process *process )
 {
     grab_object( process );
-    if (process->unix_pid != -1 && process->msg_fd)
+    if (process->unix_pid != -1)
         process->sigkill_timeout = add_timeout_user( -TICKS_PER_SEC, process_sigkill, process );
     else
         process_died( process );
@@ -522,7 +522,7 @@ static void start_sigkill_timer( struct process *process )
 
 /* create a new process */
 /* if the function fails the fd is closed */
-struct process *create_process( int fd, struct process *parent, int inherit_all, const startup_info_t *info,
+struct process *create_process( int fd, struct process *parent, unsigned int flags, const startup_info_t *info,
                                 const struct security_descriptor *sd, const obj_handle_t *handles,
                                 unsigned int handle_count, struct token *token )
 {
@@ -605,8 +605,10 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
         std_handles[2] = info->hstderr;
 
         process->parent_id = parent->id;
-        process->handles = inherit_all ? copy_handle_table( process, parent, handles, handle_count, std_handles )
-                                       : alloc_handle_table( process, 0 );
+        if (flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES)
+            process->handles = copy_handle_table( process, parent, handles, handle_count, std_handles );
+        else
+            process->handles = alloc_handle_table( process, 0 );
         /* Note: for security reasons, starting a new process does not attempt
          * to use the current impersonation token for the new process */
         process->token = token_duplicate( token ? token : parent->token, TRUE, 0, NULL, NULL, 0, NULL, 0 );
@@ -874,11 +876,11 @@ static void process_killed( struct process *process )
 
     assert( list_empty( &process->thread_list ));
     process->end_time = current_time;
-    if (!process->is_system) close_process_desktop( process );
+    close_process_desktop( process );
     process->winstation = 0;
     process->desktop = 0;
-    close_process_handles( process );
     cancel_process_asyncs( process );
+    close_process_handles( process );
     if (process->idle_event) release_object( process->idle_event );
     process->idle_event = NULL;
     assert( !process->console );
@@ -980,13 +982,7 @@ void kill_process( struct process *process, int violent_death )
         process->msg_fd = NULL;
     }
 
-    if (process->sigkill_timeout)  /* already waiting for it to die */
-    {
-        remove_timeout_user( process->sigkill_timeout );
-        process->sigkill_timeout = NULL;
-        process_died( process );
-        return;
-    }
+    if (process->sigkill_timeout) return;  /* already waiting for it to die */
 
     if (violent_death) terminate_process( process, NULL, 1 );
     else
@@ -1101,7 +1097,7 @@ DECL_HANDLER(new_process)
     }
     else parent = (struct process *)grab_object( current->process );
 
-    if (parent->job && (req->create_flags & CREATE_BREAKAWAY_FROM_JOB) &&
+    if (parent->job && (req->flags & PROCESS_CREATE_FLAGS_BREAKAWAY) &&
         !(parent->job->limit_flags & (JOB_OBJECT_LIMIT_BREAKAWAY_OK | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK)))
     {
         set_error( STATUS_ACCESS_DENIED );
@@ -1185,14 +1181,14 @@ DECL_HANDLER(new_process)
         goto done;
     }
 
-    if (!(process = create_process( socket_fd, parent, req->inherit_all, info->data, sd,
+    if (!(process = create_process( socket_fd, parent, req->flags, info->data, sd,
                                     handles, req->handles_size / sizeof(*handles), token )))
         goto done;
 
     process->startup_info = (struct startup_info *)grab_object( info );
 
     if (parent->job
-       && !(req->create_flags & CREATE_BREAKAWAY_FROM_JOB)
+       && !(req->flags & PROCESS_CREATE_FLAGS_BREAKAWAY)
        && !(parent->job->limit_flags & JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK))
     {
         add_job_process( parent->job, process );
@@ -1206,7 +1202,7 @@ DECL_HANDLER(new_process)
         info->data->console = duplicate_handle( parent, info->data->console, process,
                                                 0, 0, DUPLICATE_SAME_ACCESS );
 
-    if (!req->inherit_all && !(req->create_flags & CREATE_NEW_CONSOLE))
+    if (!(req->flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES) && info->data->console != 1)
     {
         info->data->hstdin  = duplicate_handle( parent, info->data->hstdin, process,
                                                 0, OBJ_INHERIT, DUPLICATE_SAME_ACCESS );
@@ -1223,7 +1219,7 @@ DECL_HANDLER(new_process)
     if (debug_obj)
     {
         process->debug_obj = debug_obj;
-        process->debug_children = !(req->create_flags & DEBUG_ONLY_THIS_PROCESS);
+        process->debug_children = !(req->flags & PROCESS_CREATE_FLAGS_NO_DEBUG_INHERIT);
     }
     else if (parent->debug_children)
     {
@@ -1231,8 +1227,7 @@ DECL_HANDLER(new_process)
         /* debug_children is set to 1 by default */
     }
 
-    if (!(req->create_flags & CREATE_NEW_PROCESS_GROUP))
-        process->group_id = parent->group_id;
+    if (!info->data->console_flags) process->group_id = parent->group_id;
 
     info->process = (struct process *)grab_object( process );
     reply->info = alloc_handle( current->process, info, SYNCHRONIZE, 0 );
@@ -1245,39 +1240,6 @@ DECL_HANDLER(new_process)
     if (token) release_object( token );
     release_object( parent );
     release_object( info );
-}
-
-/* execute a new process, replacing the existing one */
-DECL_HANDLER(exec_process)
-{
-    struct process *process;
-    int socket_fd = thread_get_inflight_fd( current, req->socket_fd );
-
-    if (socket_fd == -1)
-    {
-        set_error( STATUS_INVALID_PARAMETER );
-        return;
-    }
-    if (fcntl( socket_fd, F_SETFL, O_NONBLOCK ) == -1)
-    {
-        set_error( STATUS_INVALID_HANDLE );
-        close( socket_fd );
-        return;
-    }
-    if (shutdown_stage)
-    {
-        set_error( STATUS_SHUTDOWN_IN_PROGRESS );
-        close( socket_fd );
-        return;
-    }
-    if (!is_cpu_supported( req->cpu ))
-    {
-        close( socket_fd );
-        return;
-    }
-    if (!(process = create_process( socket_fd, NULL, 0, NULL, NULL, NULL, 0, NULL ))) return;
-    create_thread( -1, process, NULL );
-    release_object( process );
 }
 
 /* Retrieve information about a newly started process */
@@ -1395,7 +1357,7 @@ DECL_HANDLER(get_process_info)
         reply->peb              = process->peb;
         reply->start_time       = process->start_time;
         reply->end_time         = process->end_time;
-        reply->cpu              = process->cpu;
+        reply->machine          = process->machine;
         if (get_reply_max_size())
         {
             client_ptr_t base;
@@ -1581,6 +1543,7 @@ DECL_HANDLER(get_process_idle_event)
 DECL_HANDLER(make_process_system)
 {
     struct process *process = current->process;
+    struct thread *thread;
 
     if (!shutdown_event)
     {
@@ -1593,8 +1556,9 @@ DECL_HANDLER(make_process_system)
 
     if (!process->is_system)
     {
+        LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
+            release_thread_desktop( thread, 0 );
         process->is_system = 1;
-        close_process_desktop( process );
         if (!--user_processes && !shutdown_stage && master_socket_timeout != TIMEOUT_INFINITE)
             shutdown_timeout = add_timeout_user( master_socket_timeout, server_shutdown_timeout, NULL );
     }
@@ -1763,6 +1727,47 @@ DECL_HANDLER(resume_process)
 
         release_object( process );
     }
+}
+
+/* Iterate process list */
+DECL_HANDLER(get_next_process)
+{
+    struct process *process = NULL, *next;
+    struct list *ptr;
+
+    reply->handle = 0;
+
+    if ( req->flags > 1 )
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+
+    if (!req->last)
+    {
+        ptr = req->flags ? list_tail( &process_list ) : list_head( &process_list );
+    }
+    else if ((process = get_process_from_handle( req->last, 0 )))
+    {
+        ptr = req->flags ? list_prev( &process_list, &process->entry ) :
+                list_next( &process_list, &process->entry );
+    }
+    else
+        return;
+
+    while (ptr)
+    {
+        next = LIST_ENTRY( ptr, struct process, entry );
+        if ((reply->handle = alloc_handle( current->process, next, req->access, req->attributes )))
+            break;
+        ptr = req->flags ? list_prev( &process_list, &next->entry ) : list_next( &process_list, &next->entry );
+    }
+
+    if (!reply->handle)
+        set_error( STATUS_NO_MORE_ENTRIES );
+
+    if (process)
+        release_object( process );
 }
 
 /* Get a list of processes and threads currently running */

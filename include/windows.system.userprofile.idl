@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Rémi Bernon for CodeWeavers
+ * Copyright 2021 Rémi Bernon for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,6 +20,10 @@
 #pragma winrt ns_prefix
 #endif
 
+import "inspectable.idl";
+import "asyncinfo.idl";
+import "eventtoken.idl";
+import "windowscontracts.idl";
 import "windows.foundation.idl";
 import "windows.globalization.idl";
 
@@ -27,6 +31,8 @@ namespace Windows {
     namespace System {
         namespace UserProfile {
             interface IGlobalizationPreferencesStatics;
+            interface IGlobalizationPreferencesStatics2;
+            interface IGlobalizationPreferencesStatics3;
             runtimeclass GlobalizationPreferences;
         }
     }
@@ -51,6 +57,14 @@ namespace Windows {
                 [propget] HRESULT WeekStartsOn([out, retval] Windows.Globalization.DayOfWeek* value);
             }
 
+            [contract(Windows.Foundation.UniversalApiContract, 1.0)]
+            [marshaling_behavior(agile)]
+            [static(Windows.System.UserProfile.IGlobalizationPreferencesStatics, Windows.Foundation.UniversalApiContract, 1.0)]
+            [static(Windows.System.UserProfile.IGlobalizationPreferencesStatics2, Windows.Foundation.UniversalApiContract, 5.0)]
+            [static(Windows.System.UserProfile.IGlobalizationPreferencesStatics3, Windows.Foundation.UniversalApiContract, 6.0)]
+            runtimeclass GlobalizationPreferences
+            {
+            }
         }
     }
 }

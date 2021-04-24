@@ -112,7 +112,7 @@ typedef union
 
 enum cpu_type
 {
-    CPU_x86, CPU_x86_64, CPU_POWERPC, CPU_ARM, CPU_ARM64
+    CPU_x86, CPU_x86_64, CPU_ARM, CPU_ARM64
 };
 typedef int client_cpu_t;
 
@@ -126,7 +126,6 @@ typedef struct
         struct { unsigned int eip, ebp, esp, eflags, cs, ss; } i386_regs;
         struct { unsigned __int64 rip, rbp, rsp;
                  unsigned int cs, ss, flags, __pad; } x86_64_regs;
-        struct { unsigned int iar, msr, ctr, lr, dar, dsisr, trap, __pad; } powerpc_regs;
         struct { unsigned int sp, lr, pc, cpsr; } arm_regs;
         struct { unsigned __int64 sp, pc, pstate; } arm64_regs;
     } ctl;
@@ -135,7 +134,6 @@ typedef struct
         struct { unsigned int eax, ebx, ecx, edx, esi, edi; } i386_regs;
         struct { unsigned __int64 rax,rbx, rcx, rdx, rsi, rdi,
                                   r8, r9, r10, r11, r12, r13, r14, r15; } x86_64_regs;
-        struct { unsigned int gpr[32], cr, xer; } powerpc_regs;
         struct { unsigned int r[13]; } arm_regs;
         struct { unsigned __int64 x[31]; } arm64_regs;
     } integer;
@@ -149,7 +147,6 @@ typedef struct
         struct { unsigned int ctrl, status, tag, err_off, err_sel, data_off, data_sel, cr0npx;
                  unsigned char regs[80]; } i386_regs;
         struct { struct { unsigned __int64 low, high; } fpregs[32]; } x86_64_regs;
-        struct { double fpr[32], fpscr; } powerpc_regs;
         struct { unsigned __int64 d[32]; unsigned int fpscr; } arm_regs;
         struct { struct { unsigned __int64 low, high; } q[32]; unsigned int fpcr, fpsr; } arm64_regs;
     } fp;
@@ -157,7 +154,6 @@ typedef struct
     {
         struct { unsigned int dr0, dr1, dr2, dr3, dr6, dr7; } i386_regs;
         struct { unsigned __int64 dr0, dr1, dr2, dr3, dr6, dr7; } x86_64_regs;
-        struct { unsigned int dr[8]; } powerpc_regs;
         struct { unsigned int bvr[8], bcr[8], wvr[1], wcr[1]; } arm_regs;
         struct { unsigned __int64 bvr[8], wvr[2]; unsigned int bcr[8], wcr[2]; } arm64_regs;
     } debug;
@@ -273,37 +269,40 @@ struct hw_msg_source
     unsigned int    origin;
 };
 
+union rawinput
+{
+    int type;
+    struct
+    {
+        int            type;
+        unsigned int   message;
+        unsigned short vkey;
+        unsigned short scan;
+    } kbd;
+    struct
+    {
+        int            type;
+        int            x;
+        int            y;
+        unsigned int   data;
+    } mouse;
+    struct
+    {
+        int            type;
+        unsigned int   device;
+        unsigned int   param;
+        unsigned int   length;
+
+    } hid;
+};
+
 struct hardware_msg_data
 {
     lparam_t             info;
     unsigned int         hw_id;
     unsigned int         flags;
     struct hw_msg_source source;
-    union
-    {
-        int type;
-        struct
-        {
-            int            type;
-            unsigned int   message;
-            unsigned short vkey;
-            unsigned short scan;
-        } kbd;
-        struct
-        {
-            int            type;
-            int            x;
-            int            y;
-            unsigned int   data;
-        } mouse;
-        struct
-        {
-            int            type;
-            obj_handle_t   device;
-            unsigned int   length;
-
-        } hid;
-    } rawinput;
+    union rawinput       rawinput;
 };
 
 struct callback_msg_data
@@ -348,20 +347,12 @@ typedef union
         int            type;
         unsigned int   msg;
         lparam_t       lparam;
+        union
+        {
+            union rawinput rawinput;
+        } data;
     } hw;
-    struct
-    {
-        int            type;
-        obj_handle_t   device;
-        unsigned char  usage_page;
-        unsigned char  usage;
-        unsigned int   length;
-    } hid;
 } hw_input_t;
-#define HW_INPUT_MOUSE    0
-#define HW_INPUT_KEYBOARD 1
-#define HW_INPUT_HARDWARE 2
-#define HW_INPUT_HID      3
 
 typedef union
 {
@@ -486,6 +477,7 @@ enum apc_type
     APC_MAP_VIEW,
     APC_UNMAP_VIEW,
     APC_CREATE_THREAD,
+    APC_DUP_HANDLE,
     APC_BREAK_PROCESS
 };
 
@@ -596,6 +588,15 @@ typedef union
         mem_size_t       reserve;
         mem_size_t       commit;
     } create_thread;
+    struct
+    {
+        enum apc_type    type;
+        obj_handle_t     src_handle;
+        obj_handle_t     dst_process;
+        unsigned int     access;
+        unsigned int     attributes;
+        unsigned int     options;
+    } dup_handle;
 } apc_call_t;
 
 typedef union
@@ -683,6 +684,12 @@ typedef union
         client_ptr_t     teb;
         obj_handle_t     handle;
     } create_thread;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        obj_handle_t     handle;
+    } dup_handle;
     struct
     {
         enum apc_type    type;
@@ -799,8 +806,6 @@ typedef struct
     unsigned int   checksum;
     unsigned int   dbg_offset;
     unsigned int   dbg_size;
-    client_cpu_t   cpu;
-    int            __pad;
 } pe_image_info_t;
 #define IMAGE_FLAGS_ComPlusNativeReady        0x01
 #define IMAGE_FLAGS_ComPlusILOnly             0x02
@@ -844,8 +849,7 @@ struct new_process_request
     obj_handle_t token;
     obj_handle_t debug;
     obj_handle_t parent_process;
-    int          inherit_all;
-    unsigned int create_flags;
+    unsigned int flags;
     int          socket_fd;
     unsigned int access;
     client_cpu_t cpu;
@@ -855,7 +859,6 @@ struct new_process_request
     /* VARARG(handles,uints,handles_size); */
     /* VARARG(info,startup_info,info_size); */
     /* VARARG(env,unicode_str); */
-    char __pad_52[4];
 };
 struct new_process_reply
 {
@@ -864,20 +867,6 @@ struct new_process_reply
     process_id_t pid;
     obj_handle_t handle;
     char __pad_20[4];
-};
-
-
-
-struct exec_process_request
-{
-    struct request_header __header;
-    int          socket_fd;
-    client_cpu_t cpu;
-    char __pad_20[4];
-};
-struct exec_process_reply
-{
-    struct reply_header __header;
 };
 
 
@@ -968,7 +957,8 @@ struct init_first_thread_reply
     thread_id_t  tid;
     timeout_t    server_start;
     data_size_t  info_size;
-    unsigned int all_cpus;
+    /* VARARG(machines,ushorts); */
+    char __pad_28[4];
 };
 
 
@@ -1041,9 +1031,9 @@ struct get_process_info_reply
     timeout_t    end_time;
     int          exit_code;
     int          priority;
-    client_cpu_t cpu;
+    unsigned short machine;
     /* VARARG(image,pe_image_info); */
-    char __pad_60[4];
+    char __pad_58[6];
 };
 
 
@@ -1281,9 +1271,7 @@ struct dup_handle_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
-    int          self;
-    int          closed;
-    char __pad_20[4];
+    char __pad_12[4];
 };
 
 
@@ -1947,7 +1935,10 @@ struct get_mapping_info_reply
     mem_size_t   size;
     unsigned int flags;
     obj_handle_t shared_file;
+    data_size_t  total;
     /* VARARG(image,pe_image_info); */
+    /* VARARG(name,unicode_str); */
+    char __pad_28[4];
 };
 
 
@@ -2737,7 +2728,6 @@ struct send_hardware_message_request
     user_handle_t   win;
     hw_input_t      input;
     unsigned int    flags;
-    /* VARARG(data,bytes); */
     char __pad_52[4];
 };
 struct send_hardware_message_reply
@@ -2753,7 +2743,6 @@ struct send_hardware_message_reply
 };
 #define SEND_HWMSG_INJECTED    0x01
 #define SEND_HWMSG_RAWINPUT    0x02
-#define SEND_HWMSG_WINDOW      0x04
 
 
 
@@ -3875,7 +3864,7 @@ struct get_last_input_time_reply
 struct get_key_state_request
 {
     struct request_header __header;
-    thread_id_t    tid;
+    int            async;
     int            key;
     char __pad_20[4];
 };
@@ -3891,10 +3880,8 @@ struct get_key_state_reply
 struct set_key_state_request
 {
     struct request_header __header;
-    thread_id_t    tid;
     int            async;
     /* VARARG(keystate,bytes); */
-    char __pad_20[4];
 };
 struct set_key_state_reply
 {
@@ -5618,10 +5605,45 @@ struct get_fsync_apc_idx_reply
 };
 
 
+
+struct get_next_process_request
+{
+    struct request_header __header;
+    obj_handle_t last;
+    unsigned int access;
+    unsigned int attributes;
+    unsigned int flags;
+    char __pad_28[4];
+};
+struct get_next_process_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+
+struct get_next_thread_request
+{
+    struct request_header __header;
+    obj_handle_t process;
+    obj_handle_t last;
+    unsigned int access;
+    unsigned int attributes;
+    unsigned int flags;
+};
+struct get_next_thread_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
 enum request
 {
     REQ_new_process,
-    REQ_exec_process,
     REQ_get_new_process_info,
     REQ_new_thread,
     REQ_get_startup_info,
@@ -5906,6 +5928,8 @@ enum request
     REQ_get_fsync_idx,
     REQ_fsync_msgwait,
     REQ_get_fsync_apc_idx,
+    REQ_get_next_process,
+    REQ_get_next_thread,
     REQ_NB_REQUESTS
 };
 
@@ -5914,7 +5938,6 @@ union generic_request
     struct request_max_size max_size;
     struct request_header request_header;
     struct new_process_request new_process_request;
-    struct exec_process_request exec_process_request;
     struct get_new_process_info_request get_new_process_info_request;
     struct new_thread_request new_thread_request;
     struct get_startup_info_request get_startup_info_request;
@@ -6199,13 +6222,14 @@ union generic_request
     struct get_fsync_idx_request get_fsync_idx_request;
     struct fsync_msgwait_request fsync_msgwait_request;
     struct get_fsync_apc_idx_request get_fsync_apc_idx_request;
+    struct get_next_process_request get_next_process_request;
+    struct get_next_thread_request get_next_thread_request;
 };
 union generic_reply
 {
     struct request_max_size max_size;
     struct reply_header reply_header;
     struct new_process_reply new_process_reply;
-    struct exec_process_reply exec_process_reply;
     struct get_new_process_info_reply get_new_process_info_reply;
     struct new_thread_reply new_thread_reply;
     struct get_startup_info_reply get_startup_info_reply;
@@ -6490,11 +6514,13 @@ union generic_reply
     struct get_fsync_idx_reply get_fsync_idx_reply;
     struct fsync_msgwait_reply fsync_msgwait_reply;
     struct get_fsync_apc_idx_reply get_fsync_apc_idx_reply;
+    struct get_next_process_reply get_next_process_reply;
+    struct get_next_thread_reply get_next_thread_reply;
 };
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 686
+#define SERVER_PROTOCOL_VERSION 696
 
 /* ### protocol_version end ### */
 

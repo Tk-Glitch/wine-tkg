@@ -429,6 +429,8 @@ static const char compat_manifest_vista_7_8_10_81[] =
 "           <supportedOS Id=\"{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}\" ></supportedOS>"  /* Windows 8 */
 "           <supportedOS Id=\"{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}\" />"  /* Windows 10 */
 "           <supportedOS Id=\"{1f676c76-80e1-4239-95bb-83d0f6d0da78}\" />"  /* Windows 8.1 */
+"           <maxversiontested Id=\"10.0.18358\" />"
+"           <maxversiontested Id=\"2.3.4.5\" />"
 "       </application>"
 "   </compatibility>"
 "</assembly>";
@@ -1150,12 +1152,26 @@ struct wndclass_redirect_data
     ULONG module_offset;/* container name offset */
 };
 
+struct dllredirect_data_path
+{
+    ULONG len;
+    ULONG offset;
+};
+
 struct dllredirect_data
 {
     ULONG size;
-    ULONG unk;
-    DWORD res[3];
+    ULONG flags;
+    ULONG total_len;
+    ULONG paths_count;
+    ULONG paths_offset;
+    struct dllredirect_data_path paths[1];
 };
+
+#define DLL_REDIRECT_PATH_INCLUDES_BASE_NAME                      1
+#define DLL_REDIRECT_PATH_OMITS_ASSEMBLY_ROOT                     2
+#define DLL_REDIRECT_PATH_EXPAND                                  4
+#define DLL_REDIRECT_PATH_SYSTEM_DEFAULT_REDIRECTED_SYSTEM32_DLL  8
 
 struct tlibredirect_data
 {
@@ -1193,16 +1209,18 @@ static void test_find_dll_redirection(HANDLE handle, LPCWSTR libname, ULONG exid
     ok_(__FILE__, line)(data.cbSize == sizeof(data), "data.cbSize=%u\n", data.cbSize);
     ok_(__FILE__, line)(data.ulDataFormatVersion == 1, "data.ulDataFormatVersion=%u\n", data.ulDataFormatVersion);
     ok_(__FILE__, line)(data.lpData != NULL, "data.lpData == NULL\n");
-    ok_(__FILE__, line)(data.ulLength == 20, "data.ulLength=%u\n", data.ulLength);
+    ok_(__FILE__, line)(data.ulLength == offsetof( struct dllredirect_data, paths[0]), "data.ulLength=%u\n", data.ulLength);
 
     if (data.lpData)
     {
         struct dllredirect_data *dlldata = (struct dllredirect_data*)data.lpData;
-        ok_(__FILE__, line)(dlldata->size == data.ulLength, "got wrong size %d\n", dlldata->size);
-        ok_(__FILE__, line)(dlldata->unk == 2, "got wrong field value %d\n", dlldata->unk);
-        ok_(__FILE__, line)(dlldata->res[0] == 0, "got wrong res[0] value %d\n", dlldata->res[0]);
-        ok_(__FILE__, line)(dlldata->res[1] == 0, "got wrong res[1] value %d\n", dlldata->res[1]);
-        ok_(__FILE__, line)(dlldata->res[2] == 0, "got wrong res[2] value %d\n", dlldata->res[2]);
+        ok_(__FILE__, line)(dlldata->size == offsetof( struct dllredirect_data, paths[dlldata->paths_count]),
+                            "got wrong size %d\n", dlldata->size);
+        ok_(__FILE__, line)(dlldata->flags == DLL_REDIRECT_PATH_OMITS_ASSEMBLY_ROOT,
+                            "got wrong flags value %x\n", dlldata->flags);
+        ok_(__FILE__, line)(dlldata->total_len == 0, "got wrong total len value %d\n", dlldata->total_len);
+        ok_(__FILE__, line)(dlldata->paths_count == 0, "got wrong paths count value %d\n", dlldata->paths_count);
+        ok_(__FILE__, line)(dlldata->paths_offset == 0, "got wrong paths offset value %d\n", dlldata->paths_offset);
     }
 
     ok_(__FILE__, line)(data.lpSectionGlobalData == NULL, "data.lpSectionGlobalData != NULL\n");
@@ -2371,7 +2389,7 @@ static HANDLE create_manifest(const char *filename, const char *data, int line)
     return handle;
 }
 
-static void kernel32_find(ULONG section, const char *string_to_find, BOOL should_find, int line)
+static void kernel32_find(ULONG section, const char *string_to_find, BOOL should_find, BOOL todo, int line)
 {
     UNICODE_STRING string_to_findW;
     ACTCTX_SECTION_KEYED_DATA data;
@@ -2388,6 +2406,7 @@ static void kernel32_find(ULONG section, const char *string_to_find, BOOL should
     err = GetLastError();
     ok_(__FILE__, line)(ret == should_find,
         "FindActCtxSectionStringA: expected ret = %u, got %u\n", should_find, ret);
+    todo_wine_if(todo)
     ok_(__FILE__, line)(err == (should_find ? ERROR_SUCCESS : ERROR_SXS_KEY_NOT_FOUND),
         "FindActCtxSectionStringA: unexpected error %u\n", err);
 
@@ -2399,6 +2418,7 @@ static void kernel32_find(ULONG section, const char *string_to_find, BOOL should
     err = GetLastError();
     ok_(__FILE__, line)(ret == should_find,
         "FindActCtxSectionStringW: expected ret = %u, got %u\n", should_find, ret);
+    todo_wine_if(todo)
     ok_(__FILE__, line)(err == (should_find ? ERROR_SUCCESS : ERROR_SXS_KEY_NOT_FOUND),
         "FindActCtxSectionStringW: unexpected error %u\n", err);
 
@@ -2421,7 +2441,7 @@ static void kernel32_find(ULONG section, const char *string_to_find, BOOL should
     pRtlFreeUnicodeString(&string_to_findW);
 }
 
-static void ntdll_find(ULONG section, const char *string_to_find, BOOL should_find, int line)
+static void ntdll_find(ULONG section, const char *string_to_find, BOOL should_find, BOOL todo, int line)
 {
     UNICODE_STRING string_to_findW;
     ACTCTX_SECTION_KEYED_DATA data;
@@ -2433,10 +2453,12 @@ static void ntdll_find(ULONG section, const char *string_to_find, BOOL should_fi
     data.cbSize = sizeof(data);
 
     ret = pRtlFindActivationContextSectionString(0, NULL, section, &string_to_findW, &data);
+    todo_wine_if(todo)
     ok_(__FILE__, line)(ret == (should_find ? STATUS_SUCCESS : STATUS_SXS_KEY_NOT_FOUND),
         "RtlFindActivationContextSectionString: unexpected status 0x%x\n", ret);
 
     ret = pRtlFindActivationContextSectionString(0, NULL, section, &string_to_findW, NULL);
+    todo_wine_if(todo)
     ok_(__FILE__, line)(ret == (should_find ? STATUS_SUCCESS : STATUS_SXS_KEY_NOT_FOUND),
         "RtlFindActivationContextSectionString: unexpected status 0x%x\n", ret);
 
@@ -2454,22 +2476,22 @@ static void test_findsectionstring(void)
     ok(ret, "ActivateActCtx failed: %u\n", GetLastError());
 
     /* first we show the parameter validation from kernel32 */
-    kernel32_find(ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION, "testdep", FALSE, __LINE__);
-    kernel32_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib.dll", TRUE, __LINE__);
-    kernel32_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib2.dll", TRUE, __LINE__);
-    kernel32_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib3.dll", FALSE, __LINE__);
-    kernel32_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass", TRUE, __LINE__);
-    kernel32_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass2", TRUE, __LINE__);
-    kernel32_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass3", FALSE, __LINE__);
+    kernel32_find(ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION, "testdep", FALSE, TRUE, __LINE__);
+    kernel32_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib.dll", TRUE, FALSE, __LINE__);
+    kernel32_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib2.dll", TRUE, FALSE, __LINE__);
+    kernel32_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib3.dll", FALSE, FALSE, __LINE__);
+    kernel32_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass", TRUE, FALSE, __LINE__);
+    kernel32_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass2", TRUE, FALSE, __LINE__);
+    kernel32_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass3", FALSE, FALSE, __LINE__);
 
     /* then we show that ntdll plays by different rules */
-    ntdll_find(ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION, "testdep", FALSE, __LINE__);
-    ntdll_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib.dll", TRUE, __LINE__);
-    ntdll_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib2.dll", TRUE, __LINE__);
-    ntdll_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib3.dll", FALSE, __LINE__);
-    ntdll_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass", TRUE, __LINE__);
-    ntdll_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass2", TRUE, __LINE__);
-    ntdll_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass3", FALSE, __LINE__);
+    ntdll_find(ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION, "testdep", FALSE, TRUE, __LINE__);
+    ntdll_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib.dll", TRUE, FALSE, __LINE__);
+    ntdll_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib2.dll", TRUE, FALSE, __LINE__);
+    ntdll_find(ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "testlib3.dll", FALSE, FALSE, __LINE__);
+    ntdll_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass", TRUE, FALSE, __LINE__);
+    ntdll_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass2", TRUE, FALSE, __LINE__);
+    ntdll_find(ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, "wndClass3", FALSE, FALSE, __LINE__);
 
     ret = DeactivateActCtx(0, cookie);
     ok(ret, "DeactivateActCtx failed: %u\n", GetLastError());
@@ -2814,6 +2836,20 @@ typedef struct _test_act_ctx_compat_info {
     COMPATIBILITY_CONTEXT_ELEMENT Elements[10];
 } test_act_ctx_compat_info;
 
+/* Win10 versions before 1909 don't have the MaxVersionTested field */
+typedef struct
+{
+    GUID Id;
+    ACTCTX_COMPATIBILITY_ELEMENT_TYPE Type;
+} old_win10_COMPATIBILITY_CONTEXT_ELEMENT;
+
+typedef struct
+{
+    DWORD ElementCount;
+    old_win10_COMPATIBILITY_CONTEXT_ELEMENT Elements[10];
+} old_win10_test_act_ctx_compat_info;
+
+
 static void test_no_compat(HANDLE handle, int line)
 {
     test_act_ctx_compat_info compat_info;
@@ -2825,15 +2861,17 @@ static void test_no_compat(HANDLE handle, int line)
             &compat_info, sizeof(compat_info), &size);
 
     ok_(__FILE__, line)(b, "CompatibilityInformationInActivationContext failed\n");
-    ok_(__FILE__, line)(size == sizeof(DWORD), "size mismatch (got %lu, expected 4)\n", size);
+    ok_(__FILE__, line)(size == offsetof(test_act_ctx_compat_info,Elements[0]) ||
+                        broken(size == offsetof(old_win10_test_act_ctx_compat_info,Elements[0])),
+                        "size mismatch got %lu\n", size);
     ok_(__FILE__, line)(compat_info.ElementCount == 0, "unexpected ElementCount %u\n", compat_info.ElementCount);
 }
 
-static void test_with_compat(HANDLE handle, DWORD num_compat, const GUID* expected_compat[], int line)
+static void test_with_compat(HANDLE handle, DWORD num_compat, DWORD num_version,
+                             const GUID *expected_compat[], const ULONGLONG expected_version[], int line)
 {
     test_act_ctx_compat_info compat_info;
     SIZE_T size;
-    SIZE_T expected = sizeof(COMPATIBILITY_CONTEXT_ELEMENT) * num_compat + sizeof(DWORD);
     DWORD n;
     BOOL b;
 
@@ -2842,18 +2880,46 @@ static void test_with_compat(HANDLE handle, DWORD num_compat, const GUID* expect
             &compat_info, sizeof(compat_info), &size);
 
     ok_(__FILE__, line)(b, "CompatibilityInformationInActivationContext failed\n");
-    ok_(__FILE__, line)(size == expected, "size mismatch (got %lu, expected %lu)\n", size, expected);
-    ok_(__FILE__, line)(compat_info.ElementCount == num_compat, "unexpected ElementCount %u\n", compat_info.ElementCount);
+    ok_(__FILE__, line)(size == offsetof(test_act_ctx_compat_info,Elements[num_compat + num_version]) ||
+                        broken(size == offsetof(old_win10_test_act_ctx_compat_info,Elements[num_compat])),
+                        "size mismatch got %lu\n", size);
+    ok_(__FILE__, line)(compat_info.ElementCount == num_compat + num_version ||
+                        broken(compat_info.ElementCount == num_compat),
+                        "unexpected ElementCount %u\n", compat_info.ElementCount);
 
-    for (n = 0; n < num_compat; ++n)
+    if (size == offsetof(old_win10_test_act_ctx_compat_info,Elements[num_compat]))
     {
-        ok_(__FILE__, line)(IsEqualGUID(&compat_info.Elements[n].Id, expected_compat[n]),
-                            "got wrong clsid %s, expected %s for %u\n",
-                            wine_dbgstr_guid(&compat_info.Elements[n].Id),
-                            wine_dbgstr_guid(expected_compat[n]),
-                            n);
-        ok_(__FILE__, line)(compat_info.Elements[n].Type == ACTCTX_COMPATIBILITY_ELEMENT_TYPE_OS,
-                            "Wrong type, got %u for %u\n", (DWORD)compat_info.Elements[n].Type, n);
+        for (n = 0; n < num_compat; ++n)
+        {
+            old_win10_test_act_ctx_compat_info *info = (old_win10_test_act_ctx_compat_info *)&compat_info;
+            ok_(__FILE__, line)(IsEqualGUID(&info->Elements[n].Id, expected_compat[n]),
+                                "got wrong clsid %s, expected %s for %u\n",
+                                wine_dbgstr_guid(&info->Elements[n].Id),
+                                wine_dbgstr_guid(expected_compat[n]),
+                                n);
+            ok_(__FILE__, line)(info->Elements[n].Type == ACTCTX_COMPATIBILITY_ELEMENT_TYPE_OS,
+                                "Wrong type, got %u for %u\n", (DWORD)info->Elements[n].Type, n);
+        }
+    }
+    else
+    {
+        for (n = 0; n < num_compat; ++n)
+        {
+            ok_(__FILE__, line)(IsEqualGUID(&compat_info.Elements[n].Id, expected_compat[n]),
+                                "got wrong clsid %s, expected %s for %u\n",
+                                wine_dbgstr_guid(&compat_info.Elements[n].Id),
+                                wine_dbgstr_guid(expected_compat[n]),
+                                n);
+            ok_(__FILE__, line)(compat_info.Elements[n].Type == ACTCTX_COMPATIBILITY_ELEMENT_TYPE_OS,
+                                "Wrong type, got %u for %u\n", (DWORD)compat_info.Elements[n].Type, n);
+        }
+        for (; n < num_compat + num_version; ++n)
+        {
+            ok_(__FILE__, line)(compat_info.Elements[n].Type == ACTCTX_COMPATIBILITY_ELEMENT_TYPE_MAXVERSIONTESTED,
+                                "Wrong type, got %u for %u\n", (DWORD)compat_info.Elements[n].Type, n);
+            ok_(__FILE__, line)(compat_info.Elements[n].MaxVersionTested == expected_version[n - num_compat],
+                                "Wrong version, got %s for %u\n", wine_dbgstr_longlong(compat_info.Elements[n].MaxVersionTested), n);
+        }
     }
 }
 
@@ -2927,7 +2993,7 @@ static void test_compatibility(void)
             &VISTA_COMPAT_GUID
         };
         test_basic_info(handle, __LINE__);
-        test_with_compat(handle, 1, expect_manifest, __LINE__);
+        test_with_compat(handle, 1, 0, expect_manifest, NULL, __LINE__);
         ReleaseActCtx(handle);
     }
 
@@ -2951,8 +3017,13 @@ static void test_compatibility(void)
             &WIN10_COMPAT_GUID,
             &WIN81_COMPAT_GUID,
         };
+        static const ULONGLONG expect_version[] =
+        {
+            0x000a000047b60000ull,  /* 10.0.18358.0 */
+            0x0002000300040005ull,  /* 2.3.4.5 */
+        };
         test_basic_info(handle, __LINE__);
-        test_with_compat(handle, 5, expect_manifest, __LINE__);
+        test_with_compat(handle, 5, 2, expect_manifest, expect_version, __LINE__);
         ReleaseActCtx(handle);
     }
 
@@ -2973,7 +3044,7 @@ static void test_compatibility(void)
             &OTHER_COMPAT_GUID,
         };
         test_basic_info(handle, __LINE__);
-        test_with_compat(handle, 1, expect_manifest, __LINE__);
+        test_with_compat(handle, 1, 0, expect_manifest, NULL, __LINE__);
         ReleaseActCtx(handle);
     }
 }

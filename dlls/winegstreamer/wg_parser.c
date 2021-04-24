@@ -79,6 +79,7 @@ struct wg_parser_stream
 
     GstPad *their_src, *post_sink, *post_src, *my_sink;
     GstElement *flip;
+    GstSegment segment;
     struct wg_format preferred_format, current_format;
 
     pthread_cond_t event_cond, event_empty_cond;
@@ -191,6 +192,8 @@ static enum wg_video_format wg_video_format_from_gst(GstVideoFormat format)
             return WG_VIDEO_FORMAT_BGR;
         case GST_VIDEO_FORMAT_RGB15:
             return WG_VIDEO_FORMAT_RGB15;
+        case GST_VIDEO_FORMAT_RGB16:
+            return WG_VIDEO_FORMAT_RGB16;
         case GST_VIDEO_FORMAT_AYUV:
             return WG_VIDEO_FORMAT_AYUV;
         case GST_VIDEO_FORMAT_I420:
@@ -545,9 +548,9 @@ static void CDECL wg_parser_complete_read_request(struct wg_parser *parser, bool
 
 static void CDECL wg_parser_set_unlimited_buffering(struct wg_parser *parser)
 {
-    g_object_set(parser->decodebin, "max-size-buffers", 0, NULL);
-    g_object_set(parser->decodebin, "max-size-time", G_GUINT64_CONSTANT(0), NULL);
-    g_object_set(parser->decodebin, "max-size-bytes", 0, NULL);
+    g_object_set(parser->decodebin, "max-size-buffers", G_MAXUINT, NULL);
+    g_object_set(parser->decodebin, "max-size-time", G_MAXUINT64, NULL);
+    g_object_set(parser->decodebin, "max-size-bytes", G_MAXUINT, NULL);
 }
 
 static void CDECL wg_parser_stream_get_preferred_format(struct wg_parser_stream *stream, struct wg_format *format)
@@ -691,10 +694,24 @@ static bool CDECL wg_parser_stream_seek(struct wg_parser_stream *stream, double 
 static void CDECL wg_parser_stream_notify_qos(struct wg_parser_stream *stream,
         bool underflow, double proportion, int64_t diff, uint64_t timestamp)
 {
+    GstClockTime stream_time;
     GstEvent *event;
 
+    /* We return timestamps in stream time, i.e. relative to the start of the
+     * file (or other medium), but gst_event_new_qos() expects the timestamp in
+     * running time. */
+    stream_time = gst_segment_to_running_time(&stream->segment, GST_FORMAT_TIME, timestamp * 100);
+    if (stream_time == -1)
+    {
+        /* This can happen legitimately if the sample falls outside of the
+         * segment bounds. GStreamer elements shouldn't present the sample in
+         * that case, but DirectShow doesn't care. */
+        TRACE("Ignoring QoS event.\n");
+        return;
+    }
+
     if (!(event = gst_event_new_qos(underflow ? GST_QOS_TYPE_UNDERFLOW : GST_QOS_TYPE_OVERFLOW,
-            1000.0 / proportion, diff * 100, timestamp * 100)))
+            proportion, diff * 100, stream_time)))
         ERR("Failed to create QOS event.\n");
     gst_pad_push_event(stream->my_sink, event);
 }
@@ -792,6 +809,8 @@ static gboolean sink_event_cb(GstPad *pad, GstObject *parent, GstEvent *event)
                     break;
                 }
 
+                gst_segment_copy_into(segment, &stream->segment);
+
                 stream_event.type = WG_PARSER_EVENT_SEGMENT;
                 stream_event.u.segment.position = segment->position / 100;
                 stream_event.u.segment.stop = segment->stop / 100;
@@ -838,6 +857,14 @@ static gboolean sink_event_cb(GstPad *pad, GstObject *parent, GstEvent *event)
             break;
 
         case GST_EVENT_FLUSH_STOP:
+        {
+            gboolean reset_time;
+
+            gst_event_parse_flush_stop(event, &reset_time);
+
+            if (reset_time)
+                gst_segment_init(&stream->segment, GST_FORMAT_UNDEFINED);
+
             if (stream->enabled)
             {
                 pthread_mutex_lock(&parser->mutex);
@@ -845,6 +872,7 @@ static gboolean sink_event_cb(GstPad *pad, GstObject *parent, GstEvent *event)
                 pthread_mutex_unlock(&parser->mutex);
             }
             break;
+        }
 
         case GST_EVENT_CAPS:
         {
@@ -881,6 +909,10 @@ static GstFlowReturn sink_chain_cb(GstPad *pad, GstObject *parent, GstBuffer *bu
     }
 
     stream_event.type = WG_PARSER_EVENT_BUFFER;
+
+    /* FIXME: Should we use gst_segment_to_stream_time_full()? Under what
+     * circumstances is the stream time not equal to the buffer PTS? Note that
+     * this will need modification to wg_parser_stream_notify_qos() as well. */
 
     if ((stream_event.u.buffer.has_pts = GST_BUFFER_PTS_IS_VALID(buffer)))
         stream_event.u.buffer.pts = GST_BUFFER_PTS(buffer) / 100;
@@ -971,6 +1003,8 @@ static struct wg_parser_stream *create_stream(struct wg_parser *parser)
 
     if (!(stream = calloc(1, sizeof(*stream))))
         return NULL;
+
+    gst_segment_init(&stream->segment, GST_FORMAT_UNDEFINED);
 
     stream->parser = parser;
     pthread_cond_init(&stream->event_cond, NULL);

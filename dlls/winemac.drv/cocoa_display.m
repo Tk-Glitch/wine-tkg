@@ -575,15 +575,13 @@ int macdrv_get_adapters(uint64_t gpu_id, struct macdrv_adapter** new_adapters, i
         if (gpu.id == gpu_id || (gpu_id == dedicated_gpu_id && gpu.id == integrated_gpu_id))
         {
             adapters[adapter_count].id = display_ids[i];
+            adapters[adapter_count].state_flags = DISPLAY_DEVICE_ATTACHED_TO_DESKTOP;
 
             if (CGDisplayIsMain(display_ids[i]))
             {
                 adapters[adapter_count].state_flags |= DISPLAY_DEVICE_PRIMARY_DEVICE;
                 primary_index = adapter_count;
             }
-
-            if (CGDisplayIsActive(display_ids[i]))
-                adapters[adapter_count].state_flags |= DISPLAY_DEVICE_ATTACHED_TO_DESKTOP;
 
             adapter_count++;
         }
@@ -646,65 +644,54 @@ int macdrv_get_monitors(uint32_t adapter_id, struct macdrv_monitor** new_monitor
     if (!monitors)
         return -1;
 
-    /* Report an inactive monitor */
-    if (!CGDisplayIsActive(adapter_id) && !CGDisplayIsInMirrorSet(adapter_id))
-    {
-        strcpy(monitors[monitor_count].name, "Generic Non-PnP Monitor");
-        monitors[monitor_count].state_flags = DISPLAY_DEVICE_ATTACHED;
-        monitor_count++;
-    }
-    /* Report active and mirrored monitors in the same mirroring set */
-    else
-    {
-        if (CGGetOnlineDisplayList(sizeof(display_ids) / sizeof(display_ids[0]), display_ids, &display_id_count)
-            != kCGErrorSuccess)
-            goto done;
+    if (CGGetOnlineDisplayList(sizeof(display_ids) / sizeof(display_ids[0]), display_ids, &display_id_count)
+        != kCGErrorSuccess)
+        goto done;
 
-        if (macdrv_get_displays(&displays, &display_count))
-            goto done;
+    if (macdrv_get_displays(&displays, &display_count))
+        goto done;
 
-        for (i = 0; i < display_id_count; i++)
+    for (i = 0; i < display_id_count; i++)
+    {
+        if (display_ids[i] != adapter_id && CGDisplayMirrorsDisplay(display_ids[i]) != adapter_id)
+            continue;
+
+        /* Find and fill in monitor info */
+        for (j = 0; j < display_count; j++)
         {
-            if (display_ids[i] != adapter_id && CGDisplayMirrorsDisplay(display_ids[i]) != adapter_id)
-                continue;
-
-            /* Find and fill in monitor info */
-            for (j = 0; j < display_count; j++)
+            if (displays[j].displayID == display_ids[i]
+                || CGDisplayMirrorsDisplay(display_ids[i]) == displays[j].displayID)
             {
-                if (displays[j].displayID == display_ids[i]
-                    || CGDisplayMirrorsDisplay(display_ids[i]) == displays[j].displayID)
+                /* Allocate more space if needed */
+                if (monitor_count >= capacity)
                 {
-                    /* Allocate more space if needed */
-                    if (monitor_count >= capacity)
-                    {
-                        capacity *= 2;
-                        realloc_monitors = realloc(monitors, sizeof(*monitors) * capacity);
-                        if (!realloc_monitors)
-                            goto done;
-                        monitors = realloc_monitors;
-                    }
-
-                    if (j == 0)
-                        primary_index = monitor_count;
-
-                    strcpy(monitors[monitor_count].name, "Generic Non-PnP Monitor");
-                    monitors[monitor_count].state_flags = DISPLAY_DEVICE_ATTACHED | DISPLAY_DEVICE_ACTIVE;
-                    monitors[monitor_count].rc_monitor = displays[j].frame;
-                    monitors[monitor_count].rc_work = displays[j].work_frame;
-                    monitor_count++;
-                    break;
+                    capacity *= 2;
+                    realloc_monitors = realloc(monitors, sizeof(*monitors) * capacity);
+                    if (!realloc_monitors)
+                        goto done;
+                    monitors = realloc_monitors;
                 }
+
+                if (j == 0)
+                    primary_index = monitor_count;
+
+                strcpy(monitors[monitor_count].name, "Generic Non-PnP Monitor");
+                monitors[monitor_count].state_flags = DISPLAY_DEVICE_ATTACHED | DISPLAY_DEVICE_ACTIVE;
+                monitors[monitor_count].rc_monitor = displays[j].frame;
+                monitors[monitor_count].rc_work = displays[j].work_frame;
+                monitor_count++;
+                break;
             }
         }
+    }
 
-        /* Make sure the first monitor on primary adapter is primary */
-        if (primary_index)
-        {
-            struct macdrv_monitor tmp;
-            tmp = monitors[0];
-            monitors[0] = monitors[primary_index];
-            monitors[primary_index] = tmp;
-        }
+    /* Make sure the first monitor on primary adapter is primary */
+    if (primary_index)
+    {
+        struct macdrv_monitor tmp;
+        tmp = monitors[0];
+        monitors[0] = monitors[primary_index];
+        monitors[primary_index] = tmp;
     }
 
     *new_monitors = monitors;

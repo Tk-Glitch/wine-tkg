@@ -77,7 +77,6 @@
 #include <shlwapi.h>
 #include <shellapi.h>
 #include <setupapi.h>
-#include <ntsecapi.h>
 #include <wininet.h>
 #include <newdev.h>
 #include "resource.h"
@@ -648,36 +647,6 @@ done:
     RegCloseKey( bios_key );
 }
 
-/* set a serial number for the disk containing windows */
-static void create_disk_serial_number(void)
-{
-    static const  WCHAR filename[] = {'\\','.','w','i','n','d','o','w','s','-','s','e','r','i','a','l',0};
-    DWORD serial, written;
-    WCHAR path[MAX_PATH];
-    char buffer[16];
-    HANDLE file;
-
-    if (GetSystemDirectoryW( path, sizeof(path)/sizeof(path[0]) ) && path[1] == ':')
-    {
-        path[2] = 0;
-        lstrcatW( path, filename );
-        if (!PathFileExistsW( path ) && RtlGenRandom( &serial, sizeof(serial) ))
-        {
-            WINE_TRACE( "Putting serial number of %08X into file %s\n", serial, wine_dbgstr_w(path) );
-            file = CreateFileW( path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
-                                CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL );
-            if (file == INVALID_HANDLE_VALUE)
-                WINE_ERR( "wine: failed to create %s.\n", wine_dbgstr_w(path) );
-            else
-            {
-                sprintf( buffer, "%X\n", serial );
-                WriteFile( file, buffer, strlen(buffer), &written, NULL );
-                CloseHandle( file );
-            }
-        }
-    }
-}
-
 /* create the volatile hardware registry keys */
 static void create_hardware_registry_keys(void)
 {
@@ -1039,41 +1008,6 @@ static void create_proxy_settings(void)
     HINTERNET inet;
     inet = InternetOpenA( "Wine", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0 );
     if (inet) InternetCloseHandle( inet );
-}
-
-static void create_etc_stub_files(void)
-{
-    static const WCHAR drivers_etcW[] = {'\\','d','r','i','v','e','r','s','\\','e','t','c',0};
-    static const WCHAR hostsW[]    = {'h','o','s','t','s',0};
-    static const WCHAR networksW[] = {'n','e','t','w','o','r','k','s',0};
-    static const WCHAR protocolW[] = {'p','r','o','t','o','c','o','l',0};
-    static const WCHAR servicesW[] = {'s','e','r','v','i','c','e','s',0};
-    static const WCHAR *files[] = { hostsW, networksW, protocolW, servicesW };
-    WCHAR path[MAX_PATH + sizeof(drivers_etcW)/sizeof(WCHAR) + 32];
-    DWORD i, path_len;
-    HANDLE file;
-
-    GetSystemDirectoryW( path, MAX_PATH );
-    lstrcatW( path, drivers_etcW );
-    path_len = lstrlenW( path );
-
-    if (!CreateDirectoryW( path, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
-        return;
-
-    path[ path_len++ ] = '\\';
-    for (i = 0; i < sizeof(files) / sizeof(files[0]); i++)
-    {
-        path[ path_len ] = 0;
-        lstrcatW( path, files[i] );
-        if (PathFileExistsW( path )) continue;
-
-        file = CreateFileW( path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                            NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL );
-        if (file == INVALID_HANDLE_VALUE)
-            WINE_ERR( "wine: failed to create %s.\n", wine_dbgstr_w(path) );
-        else
-            CloseHandle( file );
-    }
 }
 
 /* Performs the rename operations dictated in %SystemRoot%\Wininit.ini.
@@ -1709,7 +1643,6 @@ static void update_wineprefix( BOOL force )
         }
         install_root_pnp_devices();
         update_user_profile();
-        create_etc_stub_files();
         update_win_version();
 
         WINE_MESSAGE( "wine: configuration in %s has been updated.\n", debugstr_w(prettyprint_configdir()) );
@@ -1837,7 +1770,8 @@ int __cdecl main( int argc, char *argv[] )
 
         memset( &si, 0, sizeof(si) );
         si.cb = sizeof(si);
-        GetModuleFileNameW( 0, filename, MAX_PATH );
+        GetSystemDirectoryW( filename, MAX_PATH );
+        wcscat( filename, L"\\wineboot.exe" );
 
         Wow64DisableWow64FsRedirection( &redir );
         if (CreateProcessW( filename, GetCommandLineW(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
@@ -1905,7 +1839,6 @@ int __cdecl main( int argc, char *argv[] )
     ResetEvent( event );  /* in case this is a restart */
 
     create_user_shared_data();
-    create_disk_serial_number();
     create_hardware_registry_keys();
     create_dynamic_registry_keys();
     create_environment_registry_keys();

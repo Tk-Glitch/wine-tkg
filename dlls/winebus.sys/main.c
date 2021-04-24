@@ -97,6 +97,7 @@ static const struct product_desc XBOX_CONTROLLERS[] = {
 static DRIVER_OBJECT *driver_obj;
 
 static DEVICE_OBJECT *mouse_obj;
+static DEVICE_OBJECT *keyboard_obj;
 
 /* The root-enumerated device stack. */
 DEVICE_OBJECT *bus_pdo;
@@ -112,6 +113,10 @@ struct pnp_device
 
 struct device_extension
 {
+    CRITICAL_SECTION cs;
+
+    BOOL removed;
+
     struct pnp_device *pnp_device;
 
     WORD vid, pid, input;
@@ -127,7 +132,6 @@ struct device_extension
     BOOL last_report_read;
     DWORD buffer_size;
     LIST_ENTRY irp_queue;
-    CRITICAL_SECTION report_cs;
 
     BYTE platform_private[1];
 };
@@ -285,8 +289,8 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
     memset(ext->platform_private, 0, platform_data_size);
 
     InitializeListHead(&ext->irp_queue);
-    InitializeCriticalSection(&ext->report_cs);
-    ext->report_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": report_cs");
+    InitializeCriticalSection(&ext->cs);
+    ext->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": cs");
 
     /* add to list of pnp devices */
     pnp_dev->device = device;
@@ -354,30 +358,21 @@ void bus_unlink_hid_device(DEVICE_OBJECT *device)
     EnterCriticalSection(&device_list_cs);
     list_remove(&pnp_device->entry);
     LeaveCriticalSection(&device_list_cs);
+
+    EnterCriticalSection(&ext->cs);
+    ext->removed = TRUE;
+    LeaveCriticalSection(&ext->cs);
 }
 
 void bus_remove_hid_device(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
     struct pnp_device *pnp_device = ext->pnp_device;
-    LIST_ENTRY *entry;
-    IRP *irp;
 
     TRACE("(%p)\n", device);
 
-    /* Cancel pending IRPs */
-    EnterCriticalSection(&ext->report_cs);
-    while ((entry = RemoveHeadList(&ext->irp_queue)) != &ext->irp_queue)
-    {
-        irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.s.ListEntry);
-        irp->IoStatus.u.Status = STATUS_DELETE_PENDING;
-        irp->IoStatus.Information = 0;
-        IoCompleteRequest(irp, IO_NO_INCREMENT);
-    }
-    LeaveCriticalSection(&ext->report_cs);
-
-    ext->report_cs.DebugInfo->Spare[0] = 0;
-    DeleteCriticalSection(&ext->report_cs);
+    ext->cs.DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection(&ext->cs);
 
     HeapFree(GetProcessHeap(), 0, ext->serial);
     HeapFree(GetProcessHeap(), 0, ext->last_report);
@@ -473,6 +468,10 @@ static NTSTATUS handle_IRP_MN_QUERY_ID(DEVICE_OBJECT *device, IRP *irp)
     return status;
 }
 
+static void mouse_free_device(DEVICE_OBJECT *device)
+{
+}
+
 static NTSTATUS mouse_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *ret_length)
 {
     TRACE("buffer %p, length %u.\n", buffer, length);
@@ -525,6 +524,7 @@ static NTSTATUS mouse_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *
 
 static const platform_vtbl mouse_vtbl =
 {
+    .free_device = mouse_free_device,
     .get_reportdescriptor = mouse_get_reportdescriptor,
     .get_string = mouse_get_string,
     .begin_report_processing = mouse_begin_report_processing,
@@ -538,6 +538,74 @@ static void mouse_device_create(void)
     static const WCHAR busidW[] = {'W','I','N','E','M','O','U','S','E',0};
 
     mouse_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &mouse_vtbl, 0);
+    IoInvalidateDeviceRelations(bus_pdo, BusRelations);
+}
+
+static NTSTATUS keyboard_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *ret_length)
+{
+    TRACE("buffer %p, length %u.\n", buffer, length);
+
+    *ret_length = sizeof(REPORT_HEADER) + sizeof(REPORT_TAIL);
+    if (length < sizeof(REPORT_HEADER) + sizeof(REPORT_TAIL))
+        return STATUS_BUFFER_TOO_SMALL;
+
+    memcpy(buffer, REPORT_HEADER, sizeof(REPORT_HEADER));
+    memcpy(buffer + sizeof(REPORT_HEADER), REPORT_TAIL, sizeof(REPORT_TAIL));
+    buffer[IDX_HEADER_PAGE] = HID_USAGE_PAGE_GENERIC;
+    buffer[IDX_HEADER_USAGE] = HID_USAGE_GENERIC_KEYBOARD;
+
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS keyboard_get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
+{
+    static const WCHAR nameW[] = {'W','i','n','e',' ','H','I','D',' ','k','e','y','b','o','a','r','d',0};
+    if (index != HID_STRING_ID_IPRODUCT)
+        return STATUS_NOT_IMPLEMENTED;
+    if (length < ARRAY_SIZE(nameW))
+        return STATUS_BUFFER_TOO_SMALL;
+    strcpyW(buffer, nameW);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS keyboard_begin_report_processing(DEVICE_OBJECT *device)
+{
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS keyboard_set_output_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *ret_length)
+{
+    FIXME("id %u, stub!\n", id);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+static NTSTATUS keyboard_get_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *ret_length)
+{
+    FIXME("id %u, stub!\n", id);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+static NTSTATUS keyboard_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *ret_length)
+{
+    FIXME("id %u, stub!\n", id);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+static const platform_vtbl keyboard_vtbl =
+{
+    .get_reportdescriptor = keyboard_get_reportdescriptor,
+    .get_string = keyboard_get_string,
+    .begin_report_processing = keyboard_begin_report_processing,
+    .set_output_report = keyboard_set_output_report,
+    .get_feature_report = keyboard_get_feature_report,
+    .set_feature_report = keyboard_set_feature_report,
+};
+
+static void keyboard_device_create(void)
+{
+    static const WCHAR busidW[] = {'W','I','N','E','K','E','Y','B','O','A','R','D',0};
+
+    keyboard_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &keyboard_vtbl, 0);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
@@ -555,6 +623,7 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         break;
     case IRP_MN_START_DEVICE:
         mouse_device_create();
+        keyboard_device_create();
 
         if (check_bus_option(&SDL_enabled, 1))
         {
@@ -592,21 +661,65 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
 
 static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
+    struct device_extension *ext = device->DeviceExtension;
     NTSTATUS status = irp->IoStatus.u.Status;
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
+
+    TRACE("device %p, irp %p, minor function %#x.\n", device, irp, irpsp->MinorFunction);
 
     switch (irpsp->MinorFunction)
     {
         case IRP_MN_QUERY_ID:
-            TRACE("IRP_MN_QUERY_ID\n");
             status = handle_IRP_MN_QUERY_ID(device, irp);
             break;
+
         case IRP_MN_QUERY_CAPABILITIES:
-            TRACE("IRP_MN_QUERY_CAPABILITIES\n");
             status = STATUS_SUCCESS;
             break;
+
+        case IRP_MN_START_DEVICE:
+            status = STATUS_SUCCESS;
+            break;
+
+        case IRP_MN_REMOVE_DEVICE:
+        {
+            struct pnp_device *pnp_device = ext->pnp_device;
+            LIST_ENTRY *entry;
+
+            EnterCriticalSection(&ext->cs);
+            while ((entry = RemoveHeadList(&ext->irp_queue)) != &ext->irp_queue)
+            {
+                IRP *queued_irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.s.ListEntry);
+                queued_irp->IoStatus.u.Status = STATUS_DELETE_PENDING;
+                queued_irp->IoStatus.Information = 0;
+                IoCompleteRequest(queued_irp, IO_NO_INCREMENT);
+            }
+            LeaveCriticalSection(&ext->cs);
+
+            ext->vtbl->free_device(device);
+
+            ext->cs.DebugInfo->Spare[0] = 0;
+            DeleteCriticalSection(&ext->cs);
+
+            HeapFree(GetProcessHeap(), 0, ext->serial);
+            HeapFree(GetProcessHeap(), 0, ext->last_report);
+
+            irp->IoStatus.u.Status = STATUS_SUCCESS;
+            IoCompleteRequest(irp, IO_NO_INCREMENT);
+
+            IoDeleteDevice(device);
+
+            /* pnp_device must be released after the device is gone */
+            HeapFree(GetProcessHeap(), 0, pnp_device);
+
+            return STATUS_SUCCESS;
+        }
+
         default:
             FIXME("Unhandled function %08x\n", irpsp->MinorFunction);
+            /* fall through */
+
+        case IRP_MN_QUERY_DEVICE_RELATIONS:
             break;
     }
 
@@ -701,6 +814,16 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
         return IoCallDriver(bus_pdo, irp);
     }
 
+    EnterCriticalSection(&ext->cs);
+
+    if (ext->removed)
+    {
+        LeaveCriticalSection(&ext->cs);
+        irp->IoStatus.u.Status = STATUS_DELETE_PENDING;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return STATUS_DELETE_PENDING;
+    }
+
     switch (irpsp->Parameters.DeviceIoControl.IoControlCode)
     {
         case IOCTL_HID_GET_DEVICE_ATTRIBUTES:
@@ -783,12 +906,11 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
         {
             HID_XFER_PACKET *packet = (HID_XFER_PACKET*)(irp->UserBuffer);
             TRACE_(hid_report)("IOCTL_HID_GET_INPUT_REPORT\n");
-            EnterCriticalSection(&ext->report_cs);
             status = ext->vtbl->begin_report_processing(device);
             if (status != STATUS_SUCCESS)
             {
                 irp->IoStatus.u.Status = status;
-                LeaveCriticalSection(&ext->report_cs);
+                LeaveCriticalSection(&ext->cs);
                 break;
             }
 
@@ -798,18 +920,16 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
 
             if (status == STATUS_SUCCESS)
                 packet->reportBufferLen = irp->IoStatus.Information;
-            LeaveCriticalSection(&ext->report_cs);
             break;
         }
         case IOCTL_HID_READ_REPORT:
         {
             TRACE_(hid_report)("IOCTL_HID_READ_REPORT\n");
-            EnterCriticalSection(&ext->report_cs);
             status = ext->vtbl->begin_report_processing(device);
             if (status != STATUS_SUCCESS)
             {
                 irp->IoStatus.u.Status = status;
-                LeaveCriticalSection(&ext->report_cs);
+                LeaveCriticalSection(&ext->cs);
                 break;
             }
             if (!ext->last_report_read)
@@ -824,7 +944,6 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
                 InsertTailList(&ext->irp_queue, &irp->Tail.Overlay.s.ListEntry);
                 status = STATUS_PENDING;
             }
-            LeaveCriticalSection(&ext->report_cs);
             break;
         }
         case IOCTL_HID_SET_OUTPUT_REPORT:
@@ -865,6 +984,8 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
         }
     }
 
+    LeaveCriticalSection(&ext->cs);
+
     if (status != STATUS_PENDING)
         IoCompleteRequest(irp, IO_NO_INCREMENT);
 
@@ -880,7 +1001,7 @@ void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
     if (!length || !report)
         return;
 
-    EnterCriticalSection(&ext->report_cs);
+    EnterCriticalSection(&ext->cs);
     if (length > ext->buffer_size)
     {
         HeapFree(GetProcessHeap(), 0, ext->last_report);
@@ -891,7 +1012,7 @@ void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
             ext->buffer_size = 0;
             ext->last_report_size = 0;
             ext->last_report_read = TRUE;
-            LeaveCriticalSection(&ext->report_cs);
+            LeaveCriticalSection(&ext->cs);
             return;
         }
         else
@@ -914,7 +1035,7 @@ void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
         ext->last_report_read = TRUE;
         IoCompleteRequest(irp, IO_NO_INCREMENT);
     }
-    LeaveCriticalSection(&ext->report_cs);
+    LeaveCriticalSection(&ext->cs);
 }
 
 DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value)

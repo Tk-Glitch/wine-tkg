@@ -430,7 +430,7 @@ static void update_window_cursor( struct console *console )
 {
     if (console->win != GetFocus() || !console->active->cursor_visible) return;
 
-    SetCaretPos( (console->active->cursor_x - console->active->win.left) * console->active->font.width,
+    SetCaretPos( (get_bounded_cursor_x( console->active ) - console->active->win.left) * console->active->font.width,
                  (console->active->cursor_y - console->active->win.top)  * console->active->font.height );
     ShowCaret( console->win );
 }
@@ -607,10 +607,10 @@ static void update_window( struct console *console )
         }
     }
 
-    if (update_all || console->active->cursor_x != console->window->cursor_pos.X ||
+    if (update_all || get_bounded_cursor_x( console->active ) != console->window->cursor_pos.X ||
         console->active->cursor_y != console->window->cursor_pos.Y)
     {
-        console->window->cursor_pos.X = console->active->cursor_x;
+        console->window->cursor_pos.X = get_bounded_cursor_x( console->active );
         console->window->cursor_pos.Y = console->active->cursor_y;
         update_window_cursor( console );
     }
@@ -2170,8 +2170,10 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         PostQuitMessage( 0 );
         break;
 
+    case WM_TIMER:
     case WM_UPDATE_CONFIG:
-        update_window( console );
+        if (console->window->update_state == UPDATE_PENDING)
+            update_window( console );
         break;
 
     case WM_PAINT:
@@ -2457,11 +2459,16 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
     return 0;
 }
 
-void update_window_config( struct console *console )
+void update_window_config( struct console *console, BOOL delay )
 {
+    const int delay_timeout = 50;
+
     if (!console->win || console->window->update_state != UPDATE_NONE) return;
     console->window->update_state = UPDATE_PENDING;
-    PostMessageW( console->win, WM_UPDATE_CONFIG, 0, 0 );
+    if (delay)
+        SetTimer( console->win, 1, delay_timeout, NULL );
+    else
+        PostMessageW( console->win, WM_UPDATE_CONFIG, 0, 0 );
 }
 
 void update_window_region( struct console *console, const RECT *update )
@@ -2471,7 +2478,7 @@ void update_window_region( struct console *console, const RECT *update )
     window_rect->top    = min( window_rect->top,    update->top );
     window_rect->right  = max( window_rect->right,  update->right );
     window_rect->bottom = max( window_rect->bottom, update->bottom );
-    update_window_config( console );
+    update_window_config( console, TRUE );
 }
 
 BOOL init_window( struct console *console )

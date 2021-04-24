@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Rémi Bernon for CodeWeavers
+ * Copyright 2021 Rémi Bernon for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,6 +21,9 @@
 #endif
 
 import "inspectable.idl";
+import "asyncinfo.idl";
+import "eventtoken.idl";
+import "windowscontracts.idl";
 import "windows.foundation.idl";
 
 namespace Windows {
@@ -86,14 +89,16 @@ namespace Windows {
                     [propput] HRESULT MasterGain([in] DOUBLE value);
                     [propget] HRESULT IsEnabled([out, retval] boolean* value);
                     [propget] HRESULT SupportedAxes([out, retval] Windows.Gaming.Input.ForceFeedback.ForceFeedbackEffectAxes* value);
-                    HRESULT LoadEffectAsync([in] Windows.Gaming.Input.ForceFeedback.IForceFeedbackEffect* effect, [out, retval] Windows.Foundation.IAsyncOperation<Windows.Gaming.Input.ForceFeedback.ForceFeedbackLoadEffectResult>** asyncOperation);
+                    HRESULT LoadEffectAsync([in] Windows.Gaming.Input.ForceFeedback.IForceFeedbackEffect* effect,
+                                            [out, retval] Windows.Foundation.IAsyncOperation<Windows.Gaming.Input.ForceFeedback.ForceFeedbackLoadEffectResult>** async_op);
                     HRESULT PauseAllEffects();
                     HRESULT ResumeAllEffects();
                     HRESULT StopAllEffects();
-                    HRESULT TryDisableAsync([out, retval] Windows.Foundation.IAsyncOperation<boolean>** asyncOperation);
-                    HRESULT TryEnableAsync([out, retval] Windows.Foundation.IAsyncOperation<boolean>** asyncOperation);
-                    HRESULT TryResetAsync([out, retval] Windows.Foundation.IAsyncOperation<boolean>** asyncOperation);
-                    HRESULT TryUnloadEffectAsync([in] Windows.Gaming.Input.ForceFeedback.IForceFeedbackEffect* effect, [out, retval] Windows.Foundation.IAsyncOperation<boolean>** asyncOperation);
+                    HRESULT TryDisableAsync([out, retval] Windows.Foundation.IAsyncOperation<boolean>** async_op);
+                    HRESULT TryEnableAsync([out, retval] Windows.Foundation.IAsyncOperation<boolean>** async_op);
+                    HRESULT TryResetAsync([out, retval] Windows.Foundation.IAsyncOperation<boolean>** async_op);
+                    HRESULT TryUnloadEffectAsync([in] Windows.Gaming.Input.ForceFeedback.IForceFeedbackEffect* effect,
+                                                 [out, retval] Windows.Foundation.IAsyncOperation<boolean>** async_op);
                 }
 
                 [

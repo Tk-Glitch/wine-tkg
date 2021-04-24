@@ -1312,7 +1312,7 @@ static inline int get_sock_fd( SOCKET s, DWORD access, unsigned int *options )
 
 static inline void release_sock_fd( SOCKET s, int fd )
 {
-    wine_server_release_fd( SOCKET2HANDLE(s), fd );
+    close( fd );
 }
 
 static void _enable_event( HANDLE s, unsigned int event,
@@ -2479,7 +2479,7 @@ static NTSTATUS WS2_async_recv( void *user, IO_STATUS_BLOCK *iosb, NTSTATUS stat
             break;
 
         result = WS2_recv( fd, wsa, convert_flags(wsa->flags) );
-        wine_server_release_fd( wsa->hSocket, fd );
+        close( fd );
         if (result >= 0)
         {
             status = STATUS_SUCCESS;
@@ -2610,7 +2610,7 @@ static NTSTATUS WS2_async_send( void *user, IO_STATUS_BLOCK *iosb, NTSTATUS stat
 
         /* check to see if the data is ready (non-blocking) */
         result = WS2_send( fd, wsa, convert_flags(wsa->flags) );
-        wine_server_release_fd( wsa->hSocket, fd );
+        close( fd );
 
         if (result >= 0)
         {
@@ -2662,7 +2662,7 @@ static NTSTATUS WS2_async_shutdown( void *user, IO_STATUS_BLOCK *iosb, NTSTATUS 
         case ASYNC_TYPE_WRITE:  err = shutdown( fd, 1 );  break;
         }
         status = err ? wsaErrStatus() : STATUS_SUCCESS;
-        wine_server_release_fd( wsa->hSocket, fd );
+        close( fd );
         break;
     }
     iosb->u.Status = status;
@@ -2833,7 +2833,7 @@ static NTSTATUS WS2_ReadFile(HANDLE hFile, PIO_STATUS_BLOCK io_status, char* buf
     else
         status = STATUS_PENDING;
 
-    wine_server_release_fd( hFile, unix_handle );
+    close( unix_handle );
     TRACE("= 0x%08x (%d)\n", status, result);
     if (status == STATUS_SUCCESS || status == STATUS_END_OF_FILE)
     {
@@ -2958,7 +2958,7 @@ static NTSTATUS WS2_async_transmitfile( void *user, IO_STATUS_BLOCK *iosb, NTSTA
         if (!(status = wine_server_handle_to_fd( wsa->write.hSocket, FILE_WRITE_DATA, &fd, NULL )))
         {
             status = WS2_transmitfile_base( fd, wsa );
-            wine_server_release_fd( wsa->write.hSocket, fd );
+            close( fd );
         }
         if (status == STATUS_PENDING)
             return status;
@@ -3483,14 +3483,18 @@ static BOOL WINAPI WS2_ConnectEx(SOCKET s, const struct WS_sockaddr* name, int n
     else if (ret == WSAEINPROGRESS)
     {
         struct ws2_async *wsa;
+        DWORD size;
+
         ULONG_PTR cvalue = (((ULONG_PTR)ov->hEvent & 1) == 0) ? (ULONG_PTR)ov : 0;
 
         _enable_event(SOCKET2HANDLE(s), FD_CONNECT|FD_READ|FD_WRITE,
                       FD_CONNECT,
                       FD_WINE_CONNECTED|FD_WINE_LISTENING);
 
+        size = offsetof( struct ws2_async, iovec[1] ) + sendBufLen;
+
         /* Indirectly call WSASend */
-        if (!(wsa = (struct ws2_async *)alloc_async_io( offsetof( struct ws2_async, iovec[1] ), WS2_async_send )))
+        if (!(wsa = (struct ws2_async *)alloc_async_io( size, WS2_async_send )))
         {
             SetLastError(WSAEFAULT);
         }
@@ -3509,8 +3513,11 @@ static BOOL WINAPI WS2_ConnectEx(SOCKET s, const struct WS_sockaddr* name, int n
             wsa->n_iovecs    = sendBuf ? 1 : 0;
             wsa->first_iovec = 0;
             wsa->completion_func = NULL;
-            wsa->iovec[0].iov_base = sendBuf;
+            wsa->iovec[0].iov_base = &wsa->iovec[1];
             wsa->iovec[0].iov_len  = sendBufLen;
+
+            if (sendBufLen)
+                memcpy( wsa->iovec[0].iov_base, sendBuf, sendBufLen );
 
             status = register_async( ASYNC_TYPE_WRITE, wsa->hSocket, &wsa->io, ov->hEvent,
                                       NULL, (void *)cvalue, iosb );
@@ -7271,6 +7278,36 @@ int WINAPI WS_gethostname(char *name, int namelen)
     return 0;
 }
 
+/***********************************************************************
+ *              GetHostNameW           (WS2_32.@)
+ */
+int WINAPI GetHostNameW(WCHAR *name, int namelen)
+{
+    char buf[256];
+    int len;
+
+    TRACE("name %p, len %d\n", name, namelen);
+
+    if (!name)
+    {
+        SetLastError(WSAEFAULT);
+        return SOCKET_ERROR;
+    }
+
+    if (gethostname(buf, sizeof(buf)))
+    {
+        SetLastError(wsaErrno());
+        return SOCKET_ERROR;
+    }
+
+    if ((len = MultiByteToWideChar(CP_ACP, 0, buf, -1, NULL, 0)) > namelen)
+    {
+        SetLastError(WSAEFAULT);
+        return SOCKET_ERROR;
+    }
+    MultiByteToWideChar(CP_ACP, 0, buf, -1, name, namelen);
+    return 0;
+}
 
 /* ------------------------------------- Windows sockets extensions -- *
  *								       *
@@ -7538,6 +7575,7 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
             if (!af) af = supported_protocols[i].iAddressFamily;
             if (!type) type = supported_protocols[i].iSocketType;
             if (!protocol) protocol = supported_protocols[i].iProtocol;
+            break;
         }
     }
 

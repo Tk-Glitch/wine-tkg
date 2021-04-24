@@ -1,39 +1,40 @@
-# Last wine-tkg-staging-fsync-git configuration - Mon Mar 15 03:29:06 PM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sat Apr 24 09:22:46 PM CEST 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.4.r0.g4336ed0b84b
-Using wine-staging patchset (version 6.4.r0.g7ec998e1)
+Wine (plain) version: 6.7.r0.gc0af8b73725
+Using wine-staging patchset (version 6.7.r0.gdeed76f3)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
 
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
+Applied hotfix protonify_stg_syscall_emu.mystagingpatch
+Applied reverting hotfix winevulkan_Use_standard_CRT_memory_allocators4.myearlyrevert
 use_clock_monotonic.patch -- ( Applied clock_monotonic patch )
 plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
-FS_bypass_compositor.patch -- ( Applied Fullscreen compositor bypass patch )
-childwindow.patch -- ( Applied child window for vk patch )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W ntdll-NtAlertThreadByThreadId
+Staging overrides, if any: -W ntdll-NtAlertThreadByThreadId -W bcrypt-ECDHSecretAgreement
 
 mk11.patch -- ( Applied Mortal Kombat 11 fix )
 fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
 fsync_futex2.patch -- ( Add futex2 support to fsync )
 
+valve_proton_fullscreen_hack-staging.patch -- ( Applied Proton fullscreen hack patch (staging) )
 LAA-unix-staging.patch -- ( Applied large address aware override support )
 
 proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 2/3 )
 proton-pa-staging.patch -- ( Enable Proton's PA additions )
 proton-cpu-topology-overrides.patch -- ( Enable Proton's CPU topology override support )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
+proton-bcrypt.patch -- ( Using Proton Bcrypt patches )
 josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
 
-Applied hotfix mfplat-derek-hotfix.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch amdags.mypatch
 Applied your own patch ntdll_Map_top-down_if_dll_characteristics_include_DYNAMIC_BASE.mypatch

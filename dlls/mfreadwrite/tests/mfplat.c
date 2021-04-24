@@ -37,9 +37,49 @@ DEFINE_GUID(GUID_NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 #include "mfidl.h"
 #include "mferror.h"
 #include "mfreadwrite.h"
+#include "d3d9.h"
+#include "dxva2api.h"
 
 #include "wine/heap.h"
 #include "wine/test.h"
+
+static ULONG get_refcount(void *iface)
+{
+    IUnknown *unknown = iface;
+    IUnknown_AddRef(unknown);
+    return IUnknown_Release(unknown);
+}
+
+static HWND create_window(void)
+{
+    RECT r = {0, 0, 640, 480};
+
+    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW | WS_VISIBLE, FALSE);
+
+    return CreateWindowA("static", "mfreadwrite_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, r.right - r.left, r.bottom - r.top, NULL, NULL, NULL, NULL);
+}
+
+static IDirect3DDevice9 *create_d3d9_device(IDirect3D9 *d3d9, HWND focus_window)
+{
+    D3DPRESENT_PARAMETERS present_parameters = {0};
+    IDirect3DDevice9 *device = NULL;
+
+    present_parameters.BackBufferWidth = 640;
+    present_parameters.BackBufferHeight = 480;
+    present_parameters.BackBufferFormat = D3DFMT_X8R8G8B8;
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    present_parameters.hDeviceWindow = focus_window;
+    present_parameters.Windowed = TRUE;
+    present_parameters.EnableAutoDepthStencil = TRUE;
+    present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
+    present_parameters.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
+
+    IDirect3D9_CreateDevice(d3d9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, focus_window,
+            D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device);
+
+    return device;
+}
 
 static HRESULT (WINAPI *pMFCreateMFByteStreamOnStream)(IStream *stream, IMFByteStream **bytestream);
 
@@ -215,6 +255,7 @@ struct test_source
     IMFMediaEventQueue *event_queue;
     IMFPresentationDescriptor *pd;
     struct test_media_stream *streams[TEST_SOURCE_NUM_STREAMS];
+    unsigned stream_count;
     enum source_state state;
     CRITICAL_SECTION cs;
 };
@@ -312,7 +353,7 @@ static HRESULT WINAPI test_source_CreatePresentationDescriptor(IMFMediaSource *i
     }
     else
     {
-        for (i = 0; i < ARRAY_SIZE(source->streams); ++i)
+        for (i = 0; i < source->stream_count; ++i)
         {
             hr = MFCreateMediaType(&media_type);
             ok(hr == S_OK, "Failed to create media type, hr %#x.\n", hr);
@@ -328,9 +369,9 @@ static HRESULT WINAPI test_source_CreatePresentationDescriptor(IMFMediaSource *i
             IMFMediaType_Release(media_type);
         }
 
-        hr = MFCreatePresentationDescriptor(ARRAY_SIZE(sds), sds, &source->pd);
+        hr = MFCreatePresentationDescriptor(source->stream_count, sds, &source->pd);
         ok(hr == S_OK, "Failed to create presentation descriptor, hr %#x.\n", hr);
-        for (i = 0; i < ARRAY_SIZE(sds); ++i)
+        for (i = 0; i < source->stream_count; ++i)
             IMFStreamDescriptor_Release(sds[i]);
 
         *pd = source->pd;
@@ -373,7 +414,7 @@ static HRESULT WINAPI test_source_Start(IMFMediaSource *iface, IMFPresentationDe
     hr = IMFMediaEventQueue_QueueEventParamVar(source->event_queue, event_type, &GUID_NULL, S_OK, NULL);
     ok(hr == S_OK, "Failed to queue event, hr %#x.\n", hr);
 
-    for (i = 0; i < ARRAY_SIZE(source->streams); ++i)
+    for (i = 0; i < source->stream_count; ++i)
     {
         if (!is_stream_selected(pd, i))
             continue;
@@ -461,7 +502,7 @@ static struct test_media_stream *create_test_stream(DWORD stream_index, IMFMedia
     return stream;
 }
 
-static IMFMediaSource *create_test_source(void)
+static IMFMediaSource *create_test_source(int stream_count)
 {
     struct test_source *source;
     int i;
@@ -469,9 +510,10 @@ static IMFMediaSource *create_test_source(void)
     source = heap_alloc_zero(sizeof(*source));
     source->IMFMediaSource_iface.lpVtbl = &test_source_vtbl;
     source->refcount = 1;
+    source->stream_count = stream_count;
     MFCreateEventQueue(&source->event_queue);
     InitializeCriticalSection(&source->cs);
-    for (i = 0; i < ARRAY_SIZE(source->streams); ++i)
+    for (i = 0; i < source->stream_count; ++i)
         source->streams[i] = create_test_stream(i, &source->IMFMediaSource_iface);
 
     return &source->IMFMediaSource_iface;
@@ -620,6 +662,7 @@ static void test_source_reader(void)
     IMFByteStream *stream;
     LONGLONG timestamp;
     IMFSample *sample;
+    ULONG refcount;
     BOOL selected;
     HRESULT hr;
 
@@ -836,9 +879,12 @@ skip_read_sample:
     ok(hr == S_OK, "Failed to set attribute value, hr %#x.\n", hr);
     IMFSourceReaderCallback_Release(&callback->IMFSourceReaderCallback_iface);
 
+    refcount = get_refcount(attributes);
     hr = MFCreateSourceReaderFromByteStream(stream, attributes, &reader);
-todo_wine
+todo_wine {
     ok(hr == S_OK, "Failed to create source reader, hr %#x.\n", hr);
+    ok(get_refcount(attributes) > refcount, "Unexpected refcount.\n");
+}
     IMFAttributes_Release(attributes);
     if (hr == S_OK)
         IMFSourceReader_Release(reader);
@@ -856,9 +902,11 @@ static void test_source_reader_from_media_source(void)
     IMFSample *sample;
     LONGLONG timestamp;
     IMFAttributes *attributes;
+    ULONG refcount;
     int i;
+    PROPVARIANT pos;
 
-    source = create_test_source();
+    source = create_test_source(3);
     ok(!!source, "Failed to create test source.\n");
 
     hr = MFCreateSourceReaderFromMediaSource(source, NULL, &reader);
@@ -870,6 +918,11 @@ static void test_source_reader_from_media_source(void)
 
     hr = IMFSourceReader_SetStreamSelection(reader, 1, TRUE);
     ok(hr == S_OK, "Failed to select a stream, hr %#x.\n", hr);
+
+    pos.vt = VT_I8;
+    pos.hVal.QuadPart = 0;
+    hr = IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &pos);
+    ok(hr == S_OK, "Failed to seek to beginning of stream, hr %#x.\n", hr);
 
     hr = IMFSourceReader_ReadSample(reader, MF_SOURCE_READER_ANY_STREAM, 0, &actual_index, &stream_flags,
             &timestamp, &sample);
@@ -886,13 +939,12 @@ static void test_source_reader_from_media_source(void)
     hr = IMFSourceReader_SetStreamSelection(reader, 2, TRUE);
     ok(hr == S_OK, "Failed to select a stream, hr %#x.\n", hr);
 
-    for (i = 0; i < 2 * TEST_SOURCE_NUM_STREAMS; ++i)
+    for (i = 0; i < TEST_SOURCE_NUM_STREAMS + 1; ++i)
     {
         hr = IMFSourceReader_ReadSample(reader, MF_SOURCE_READER_ANY_STREAM, 0, &actual_index, &stream_flags,
                 &timestamp, &sample);
         ok(hr == S_OK, "Failed to get a sample, hr %#x.\n", hr);
-        ok(actual_index == (i < TEST_SOURCE_NUM_STREAMS ? i : 0), "%d: Unexpected stream index %u\n",
-                i, actual_index);
+        ok(actual_index == i % TEST_SOURCE_NUM_STREAMS, "%d: Unexpected stream index %u\n", i, actual_index);
         ok(!stream_flags, "Unexpected stream flags %#x.\n", stream_flags);
         ok(timestamp == 123, "Unexpected timestamp.\n");
         ok(!!sample, "Expected sample object.\n");
@@ -905,13 +957,12 @@ static void test_source_reader_from_media_source(void)
     hr = IMFSourceReader_SetStreamSelection(reader, 0, TRUE);
     ok(hr == S_OK, "Failed to select a stream, hr %#x.\n", hr);
 
-    for (i = 0; i < 2 * TEST_SOURCE_NUM_STREAMS; ++i)
+    for (i = 0; i < TEST_SOURCE_NUM_STREAMS + 1; ++i)
     {
         hr = IMFSourceReader_ReadSample(reader, MF_SOURCE_READER_ANY_STREAM, 0, &actual_index, &stream_flags,
                 &timestamp, &sample);
         ok(hr == S_OK, "Failed to get a sample, hr %#x.\n", hr);
-        ok(actual_index == (i < TEST_SOURCE_NUM_STREAMS ? i : 0), "%d: Unexpected stream index %u\n",
-                i, actual_index);
+        ok(actual_index == i % TEST_SOURCE_NUM_STREAMS, "%d: Unexpected stream index %u\n", i, actual_index);
         ok(!stream_flags, "Unexpected stream flags %#x.\n", stream_flags);
         ok(timestamp == 123, "Unexpected timestamp.\n");
         ok(!!sample, "Expected sample object.\n");
@@ -921,8 +972,44 @@ static void test_source_reader_from_media_source(void)
     IMFSourceReader_Release(reader);
     IMFMediaSource_Release(source);
 
+    source = create_test_source(1);
+    ok(!!source, "Failed to create test source.\n");
+
+    hr = MFCreateSourceReaderFromMediaSource(source, NULL, &reader);
+    ok(hr == S_OK, "Failed to create source reader, hr %#x.\n", hr);
+
+    /* MF_SOURCE_READER_ANY_STREAM with a single stream */
+    hr = IMFSourceReader_SetStreamSelection(reader, 0, TRUE);
+    ok(hr == S_OK, "Failed to select a stream, hr %#x.\n", hr);
+
+    pos.vt = VT_I8;
+    pos.hVal.QuadPart = 0;
+    hr = IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &pos);
+    ok(hr == S_OK, "Failed to seek to beginning of stream, hr %#x.\n", hr);
+
+    hr = IMFSourceReader_ReadSample(reader, MF_SOURCE_READER_ANY_STREAM, 0, &actual_index, &stream_flags,
+            &timestamp, &sample);
+    ok(hr == S_OK, "Failed to get a sample, hr %#x.\n", hr);
+    ok(actual_index == 0, "Unexpected stream index %u\n", actual_index);
+    ok(!stream_flags, "Unexpected stream flags %#x.\n", stream_flags);
+    ok(timestamp == 123, "Unexpected timestamp.\n");
+    ok(!!sample, "Expected sample object.\n");
+    IMFSample_Release(sample);
+
+    hr = IMFSourceReader_ReadSample(reader, MF_SOURCE_READER_ANY_STREAM, 0, &actual_index, &stream_flags,
+            &timestamp, &sample);
+    ok(hr == S_OK, "Failed to get a sample, hr %#x.\n", hr);
+    ok(actual_index == 0, "Unexpected stream index %u\n", actual_index);
+    ok(!stream_flags, "Unexpected stream flags %#x.\n", stream_flags);
+    ok(timestamp == 123, "Unexpected timestamp.\n");
+    ok(!!sample, "Expected sample object.\n");
+    IMFSample_Release(sample);
+
+    IMFSourceReader_Release(reader);
+    IMFMediaSource_Release(source);
+
     /* Request from stream 0. */
-    source = create_test_source();
+    source = create_test_source(3);
     ok(!!source, "Failed to create test source.\n");
 
     hr = MFCreateSourceReaderFromMediaSource(source, NULL, &reader);
@@ -956,7 +1043,7 @@ static void test_source_reader_from_media_source(void)
     IMFMediaSource_Release(source);
 
     /* Async mode. */
-    source = create_test_source();
+    source = create_test_source(3);
     ok(!!source, "Failed to create test source.\n");
 
     callback = create_async_callback();
@@ -969,8 +1056,10 @@ static void test_source_reader_from_media_source(void)
     ok(hr == S_OK, "Failed to set attribute value, hr %#x.\n", hr);
     IMFSourceReaderCallback_Release(&callback->IMFSourceReaderCallback_iface);
 
+    refcount = get_refcount(attributes);
     hr = MFCreateSourceReaderFromMediaSource(source, attributes, &reader);
     ok(hr == S_OK, "Failed to create source reader, hr %#x.\n", hr);
+    ok(get_refcount(attributes) > refcount, "Unexpected refcount.\n");
 
     hr = IMFSourceReader_SetStreamSelection(reader, 0, TRUE);
     ok(hr == S_OK, "Failed to select a stream, hr %#x.\n", hr);
@@ -999,7 +1088,7 @@ static void test_source_reader_from_media_source(void)
     IMFMediaSource_Release(source);
 
     /* RequestSample failure. */
-    source = create_test_source();
+    source = create_test_source(3);
     ok(!!source, "Failed to create test source.\n");
 
     fail_request_sample = TRUE;
@@ -1042,6 +1131,57 @@ static void test_source_reader_from_media_source(void)
     fail_request_sample = FALSE;
 }
 
+static void test_reader_d3d9(void)
+{
+    IDirect3DDeviceManager9 *d3d9_manager;
+    IDirect3DDevice9 *d3d9_device;
+    IMFAttributes *attributes;
+    IMFSourceReader *reader;
+    IMFMediaSource *source;
+    IDirect3D9 *d3d9;
+    HWND window;
+    HRESULT hr;
+    UINT token;
+
+    window = create_window();
+    d3d9 = Direct3DCreate9(D3D_SDK_VERSION);
+    ok(!!d3d9, "Failed to create a D3D9 object.\n");
+    if (!(d3d9_device = create_d3d9_device(d3d9, window)))
+    {
+        skip("Failed to create a D3D9 device, skipping tests.\n");
+        goto done;
+    }
+
+    hr = DXVA2CreateDirect3DDeviceManager9(&token, &d3d9_manager);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDeviceManager9_ResetDevice(d3d9_manager, d3d9_device, token);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    source = create_test_source(3);
+    ok(!!source, "Failed to create test source.\n");
+
+    hr = MFCreateAttributes(&attributes, 1);
+    ok(hr == S_OK, "Failed to create attributes object, hr %#x.\n", hr);
+
+    hr = IMFAttributes_SetUnknown(attributes, &MF_SOURCE_READER_D3D_MANAGER, (IUnknown *)d3d9_manager);
+    ok(hr == S_OK, "Failed to set attribute, hr %#x.\n", hr);
+
+    hr = MFCreateSourceReaderFromMediaSource(source, attributes, &reader);
+    ok(hr == S_OK, "Failed to create source reader, hr %#x.\n", hr);
+
+    IMFAttributes_Release(attributes);
+
+    IMFSourceReader_Release(reader);
+
+    IDirect3DDeviceManager9_Release(d3d9_manager);
+    IDirect3DDevice9_Release(d3d9_device);
+
+done:
+    IDirect3D9_Release(d3d9);
+    DestroyWindow(window);
+}
+
 START_TEST(mfplat)
 {
     HRESULT hr;
@@ -1054,6 +1194,7 @@ START_TEST(mfplat)
     test_factory();
     test_source_reader();
     test_source_reader_from_media_source();
+    test_reader_d3d9();
 
     hr = MFShutdown();
     ok(hr == S_OK, "Failed to shut down, hr %#x.\n", hr);

@@ -770,7 +770,7 @@ static HTMLEventObj *alloc_event_obj(DOMEvent *event, compat_mode_t compat_mode)
     if(event)
         IDOMEvent_AddRef(&event->IDOMEvent_iface);
 
-    init_dispex_with_compat_mode(&event_obj->dispex, (IUnknown*)&event_obj->IHTMLEventObj_iface, &HTMLEventObj_dispex, compat_mode);
+    init_dispatch(&event_obj->dispex, (IUnknown*)&event_obj->IHTMLEventObj_iface, &HTMLEventObj_dispex, compat_mode);
     return event_obj;
 }
 
@@ -1058,8 +1058,11 @@ static HRESULT WINAPI DOMEvent_stopImmediatePropagation(IDOMEvent *iface)
 static HRESULT WINAPI DOMEvent_get_isTrusted(IDOMEvent *iface, VARIANT_BOOL *p)
 {
     DOMEvent *This = impl_from_IDOMEvent(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    *p = variant_bool(This->trusted);
+    return S_OK;
 }
 
 static HRESULT WINAPI DOMEvent_put_cancelBubble(IDOMEvent *iface, VARIANT_BOOL v)
@@ -2205,11 +2208,7 @@ static DOMEvent *alloc_event(nsIDOMEvent *nsevent, compat_mode_t compat_mode, ev
 {
     dispex_static_data_t *dispex_data = &DOMEvent_dispex;
     DOMEvent *event = NULL;
-    FILETIME time;
     nsresult nsres;
-
-    /* 1601 to 1970 is 369 years plus 89 leap days */
-    const ULONGLONG time_epoch = (ULONGLONG)(369 * 365 + 89) * 86400 * 1000;
 
     if(check_event_iface(nsevent, &IID_nsIDOMCustomEvent)) {
         DOMCustomEvent *custom_event = heap_alloc_zero(sizeof(*custom_event));
@@ -2244,9 +2243,7 @@ static DOMEvent *alloc_event(nsIDOMEvent *nsevent, compat_mode_t compat_mode, ev
     }
     nsIDOMEvent_AddRef(event->nsevent = nsevent);
 
-    GetSystemTimeAsFileTime(&time);
-    event->time_stamp = (((ULONGLONG)time.dwHighDateTime<<32) + time.dwLowDateTime) / 10000
-        - time_epoch;
+    event->time_stamp = get_time_stamp();
 
     nsres = nsIDOMEvent_QueryInterface(nsevent, &IID_nsIDOMUIEvent, (void**)&event->ui_event);
     if(NS_SUCCEEDED(nsres))
@@ -2266,7 +2263,7 @@ static DOMEvent *alloc_event(nsIDOMEvent *nsevent, compat_mode_t compat_mode, ev
     else
         event->keyboard_event = NULL;
 
-    init_dispex_with_compat_mode(&event->dispex, (IUnknown*)&event->IDOMEvent_iface, dispex_data, compat_mode);
+    init_dispatch(&event->dispex, (IUnknown*)&event->IDOMEvent_iface, dispex_data, compat_mode);
     return event;
 }
 
@@ -2294,6 +2291,7 @@ HRESULT create_event_from_nsevent(nsIDOMEvent *nsevent, compat_mode_t compat_mod
     if(!event)
         return E_OUTOFMEMORY;
 
+    event->trusted = TRUE;
     *ret_event = event;
     return S_OK;
 }
@@ -2342,6 +2340,7 @@ HRESULT create_document_event(HTMLDocumentNode *doc, eventid_t event_id, DOMEven
         return E_OUTOFMEMORY;
 
     event->event_id = event_id;
+    event->trusted = TRUE;
     *ret_event = event;
     return S_OK;
 }
@@ -3429,7 +3428,7 @@ static int event_id_cmp(const void *key, const struct wine_rb_entry *entry)
 void EventTarget_Init(EventTarget *event_target, IUnknown *outer, dispex_static_data_t *dispex_data,
                       compat_mode_t compat_mode)
 {
-    init_dispex_with_compat_mode(&event_target->dispex, outer, dispex_data, compat_mode);
+    init_dispatch(&event_target->dispex, outer, dispex_data, compat_mode);
     event_target->IEventTarget_iface.lpVtbl = &EventTargetVtbl;
     wine_rb_init(&event_target->handler_map, event_id_cmp);
 }

@@ -137,48 +137,24 @@ static void WINAPI apc( void *arg, IO_STATUS_BLOCK *iosb, ULONG reserved )
 
 static void create_file_test(void)
 {
-    static const WCHAR notepadW[] = {'n','o','t','e','p','a','d','.','e','x','e',0};
     static const WCHAR systemrootW[] = {'\\','S','y','s','t','e','m','R','o','o','t',
                                         '\\','f','a','i','l','i','n','g',0};
-    static const WCHAR systemrootExplorerW[] = {'\\','S','y','s','t','e','m','R','o','o','t',
-                                               '\\','e','x','p','l','o','r','e','r','.','e','x','e',0};
     static const WCHAR questionmarkInvalidNameW[] = {'a','f','i','l','e','?',0};
     static const WCHAR pipeInvalidNameW[]  = {'a','|','b',0};
     static const WCHAR pathInvalidNtW[] = {'\\','\\','?','\\',0};
     static const WCHAR pathInvalidNt2W[] = {'\\','?','?','\\',0};
     static const WCHAR pathInvalidDosW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\',0};
     static const char testdata[] = "Hello World";
-    static const WCHAR sepW[] = {'\\',0};
     FILE_NETWORK_OPEN_INFORMATION info;
-    UNICODE_STRING nameW, null_string;
     NTSTATUS status;
     HANDLE dir, file;
-    WCHAR path[MAX_PATH], temp[MAX_PATH];
+    WCHAR path[MAX_PATH];
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
+    UNICODE_STRING nameW;
     LARGE_INTEGER offset;
     char buf[32];
     DWORD ret;
-
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = NULL;
-    attr.ObjectName = &null_string;
-    attr.Attributes = 0;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
-
-    null_string.Buffer = NULL;
-    null_string.Length = 256;
-
-    /* try various open modes and options on directories */
-    status = pNtCreateFile( &dir, GENERIC_READ|GENERIC_WRITE, &attr, &io, NULL, 0,
-                            FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_OPEN, FILE_DIRECTORY_FILE, NULL, 0 );
-    ok( status == STATUS_ACCESS_VIOLATION, "Got unexpected status %#x.\n",  status );
-
-    null_string.Length = 0;
-    status = pNtCreateFile( &dir, GENERIC_READ|GENERIC_WRITE, &attr, &io, NULL, 0,
-                            FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_OPEN, FILE_DIRECTORY_FILE, NULL, 0 );
-    ok( status == STATUS_OBJECT_PATH_SYNTAX_BAD, "Got unexpected status %#x.\n",  status );
 
     GetCurrentDirectoryW( MAX_PATH, path );
     pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
@@ -351,25 +327,6 @@ static void create_file_test(void)
 
     status = pNtQueryFullAttributesFile( &attr, &info );
     ok( status == STATUS_OBJECT_NAME_INVALID,
-        "query %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
-
-    GetWindowsDirectoryW( path, MAX_PATH );
-    path[2] = 0;
-    ok( QueryDosDeviceW( path, temp, MAX_PATH ),
-        "QueryDosDeviceW failed with error %u\n", GetLastError() );
-    lstrcatW( temp, sepW );
-    lstrcatW( temp, path+3 );
-    lstrcatW( temp, sepW );
-    lstrcatW( temp, notepadW );
-
-    pRtlInitUnicodeString( &nameW, temp );
-    status = pNtQueryFullAttributesFile( &attr, &info );
-    ok( status == STATUS_SUCCESS,
-        "query %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
-
-    pRtlInitUnicodeString( &nameW, systemrootExplorerW );
-    status = pNtQueryFullAttributesFile( &attr, &info );
-    ok( status == STATUS_SUCCESS,
         "query %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
 }
 
@@ -2215,6 +2172,7 @@ static void test_file_link_information(void)
     WCHAR tmp_path[MAX_PATH], oldpath[MAX_PATH + 16], newpath[MAX_PATH + 16], *filename, *p;
     FILE_LINK_INFORMATION *fli;
     FILE_NAME_INFORMATION *fni;
+    WIN32_FIND_DATAW find_data;
     BOOL success, fileDeleted;
     UNICODE_STRING name_str;
     HANDLE handle, handle2;
@@ -2316,6 +2274,46 @@ static void test_file_link_information(void)
     ok( !fileDeleted, "file should exist\n" );
     fileDeleted = GetFileAttributesW( newpath ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
     ok( !fileDeleted, "file should exist\n" );
+
+    CloseHandle( handle );
+    HeapFree( GetProcessHeap(), 0, fli );
+    delete_object( oldpath );
+    delete_object( newpath );
+
+    /* oldpath is a file, newpath is a file, ReplaceIfExists = TRUE, different casing on link */
+    res = GetTempFileNameW( tmp_path, fooW, 0, oldpath );
+    ok( res != 0, "failed to create temp file\n" );
+    handle = CreateFileW( oldpath, GENERIC_WRITE | DELETE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    ok( handle != INVALID_HANDLE_VALUE, "CreateFileW failed\n" );
+
+    res = GetTempFileNameW( tmp_path, fooW, 0, newpath );
+    ok( res != 0, "failed to create temp file\n" );
+    wcsrchr( newpath, '\\' )[1] = 'F';
+    pRtlDosPathNameToNtPathName_U( newpath, &name_str, NULL, NULL );
+    fli = HeapAlloc( GetProcessHeap(), 0, sizeof(FILE_LINK_INFORMATION) + name_str.Length );
+    fli->ReplaceIfExists = TRUE;
+    fli->RootDirectory = NULL;
+    fli->FileNameLength = name_str.Length;
+    memcpy( fli->FileName, name_str.Buffer, name_str.Length );
+    pRtlFreeUnicodeString( &name_str );
+
+    U(io).Status = 0xdeadbeef;
+    res = pNtSetInformationFile( handle, &io, fli, sizeof(FILE_LINK_INFORMATION) + fli->FileNameLength, FileLinkInformation );
+    ok( U(io).Status == STATUS_SUCCESS, "io.Status expected STATUS_SUCCESS, got %x\n", U(io).Status );
+    ok( res == STATUS_SUCCESS, "res expected STATUS_SUCCESS, got %x\n", res );
+    fileDeleted = GetFileAttributesW( oldpath ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
+    ok( !fileDeleted, "file should exist\n" );
+    fileDeleted = GetFileAttributesW( newpath ) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND;
+    ok( !fileDeleted, "file should exist\n" );
+
+    CloseHandle( handle );
+    handle = FindFirstFileW( newpath, &find_data );
+    ok(handle != INVALID_HANDLE_VALUE, "FindFirstFileW: failed, error %d\n", GetLastError());
+    if (handle != INVALID_HANDLE_VALUE)
+    {
+        todo_wine ok(!lstrcmpW(wcsrchr(newpath, '\\') + 1, find_data.cFileName),
+           "Link did not change casing on existing target file: got %s\n", wine_dbgstr_w(find_data.cFileName));
+    }
 
     CloseHandle( handle );
     HeapFree( GetProcessHeap(), 0, fli );
@@ -2861,6 +2859,46 @@ static void test_file_link_information(void)
     ok( U(io).Status == STATUS_SUCCESS, "got io status %#x\n", U(io).Status );
     ok( res == STATUS_SUCCESS, "got status %x\n", res );
     ok( GetFileAttributesW( oldpath ) != INVALID_FILE_ATTRIBUTES, "file should exist\n" );
+
+    CloseHandle( handle );
+    HeapFree( GetProcessHeap(), 0, fli );
+    delete_object( oldpath );
+
+    /* oldpath == newpath, different casing on link */
+    res = GetTempFileNameW( tmp_path, fooW, 0, oldpath );
+    ok( res != 0, "failed to create temp file\n" );
+    handle = CreateFileW( oldpath, GENERIC_WRITE | DELETE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    ok( handle != INVALID_HANDLE_VALUE, "CreateFileW failed\n" );
+
+    wcsrchr( oldpath, '\\' )[1] = 'F';
+    pRtlDosPathNameToNtPathName_U( oldpath, &name_str, NULL, NULL );
+    fli = HeapAlloc( GetProcessHeap(), 0, sizeof(FILE_RENAME_INFORMATION) + name_str.Length );
+    fli->ReplaceIfExists = FALSE;
+    fli->RootDirectory = NULL;
+    fli->FileNameLength = name_str.Length;
+    memcpy( fli->FileName, name_str.Buffer, name_str.Length );
+    pRtlFreeUnicodeString( &name_str );
+
+    U(io).Status = 0xdeadbeef;
+    res = pNtSetInformationFile( handle, &io, fli, sizeof(FILE_LINK_INFORMATION) + fli->FileNameLength, FileLinkInformation );
+    todo_wine ok( U(io).Status == 0xdeadbeef, "got io status %#x\n", U(io).Status );
+    ok( res == STATUS_OBJECT_NAME_COLLISION, "got status %x\n", res );
+
+    fli->ReplaceIfExists = TRUE;
+    U(io).Status = 0xdeadbeef;
+    res = pNtSetInformationFile( handle, &io, fli, sizeof(FILE_LINK_INFORMATION) + fli->FileNameLength, FileLinkInformation );
+    ok( U(io).Status == STATUS_SUCCESS, "got io status %#x\n", U(io).Status );
+    ok( res == STATUS_SUCCESS, "got status %x\n", res );
+    ok( GetFileAttributesW( oldpath ) != INVALID_FILE_ATTRIBUTES, "file should exist\n" );
+
+    CloseHandle( handle );
+    handle = FindFirstFileW( oldpath, &find_data );
+    ok(handle != INVALID_HANDLE_VALUE, "FindFirstFileW: failed, error %d\n", GetLastError());
+    if (handle != INVALID_HANDLE_VALUE)
+    {
+        todo_wine ok(!lstrcmpW(wcsrchr(oldpath, '\\') + 1, find_data.cFileName),
+           "Link did not change casing on same file: got %s\n", wine_dbgstr_w(find_data.cFileName));
+    }
 
     CloseHandle( handle );
     HeapFree( GetProcessHeap(), 0, fli );

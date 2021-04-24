@@ -59,8 +59,6 @@
 static const unsigned int supported_cpus = CPU_FLAG(CPU_x86);
 #elif defined(__x86_64__)
 static const unsigned int supported_cpus = CPU_FLAG(CPU_x86_64) | CPU_FLAG(CPU_x86);
-#elif defined(__powerpc__)
-static const unsigned int supported_cpus = CPU_FLAG(CPU_POWERPC);
 #elif defined(__arm__)
 static const unsigned int supported_cpus = CPU_FLAG(CPU_ARM);
 #elif defined(__aarch64__)
@@ -320,6 +318,7 @@ static struct context *create_thread_context( struct thread *thread )
 /* create a new thread */
 struct thread *create_thread( int fd, struct process *process, const struct security_descriptor *sd )
 {
+    struct desktop *desktop;
     struct thread *thread;
     int request_pipe[2];
 
@@ -356,7 +355,7 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
     init_thread_structure( thread );
 
     thread->process = (struct process *)grab_object( process );
-    thread->desktop = process->desktop;
+    thread->desktop = 0;
     thread->affinity = process->affinity;
     if (!current) current = thread;
 
@@ -381,6 +380,16 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
     {
         release_object( thread );
         return NULL;
+    }
+
+    if (process->desktop)
+    {
+        if (!(desktop = get_desktop_obj( process, process->desktop, 0 ))) clear_error();  /* ignore errors */
+        else
+        {
+            set_thread_default_desktop( thread, desktop, process->desktop );
+            release_object( desktop );
+        }
     }
 
     if (do_fsync())
@@ -442,7 +451,7 @@ static void cleanup_thread( struct thread *thread )
     cleanup_clipboard_thread(thread);
     destroy_thread_windows( thread );
     free_msg_queue( thread );
-    close_thread_desktop( thread );
+    release_thread_desktop( thread, 1 );
     for (i = 0; i < MAX_INFLIGHT_FDS; i++)
     {
         if (thread->inflight[i].client != -1)
@@ -1410,7 +1419,6 @@ static unsigned int get_context_system_regs( enum cpu_type cpu )
     {
     case CPU_x86:     return SERVER_CTX_DEBUG_REGISTERS;
     case CPU_x86_64:  return SERVER_CTX_DEBUG_REGISTERS;
-    case CPU_POWERPC: return 0;
     case CPU_ARM:     return SERVER_CTX_DEBUG_REGISTERS;
     case CPU_ARM64:   return SERVER_CTX_DEBUG_REGISTERS;
     }
@@ -1545,8 +1553,6 @@ DECL_HANDLER(init_first_thread)
         return;
     }
 
-    if (!is_cpu_supported( req->cpu )) return;
-
     current->unix_pid = process->unix_pid = req->unix_pid;
     current->unix_tid = req->unix_tid;
     current->teb      = req->teb;
@@ -1565,7 +1571,8 @@ DECL_HANDLER(init_first_thread)
     reply->tid          = get_thread_id( current );
     reply->info_size    = get_process_startup_info_size( process );
     reply->server_start = server_start_time;
-    reply->all_cpus     = supported_cpus & get_prefix_cpu_mask();
+    set_reply_data( supported_machines,
+                    min( supported_machines_count * sizeof(unsigned short), get_reply_max_size() ));
 }
 
 /* initialize a new thread */
@@ -1866,6 +1873,21 @@ DECL_HANDLER(queue_apc)
     case APC_BREAK_PROCESS:
         process = get_process_from_handle( req->handle, PROCESS_CREATE_THREAD );
         break;
+    case APC_DUP_HANDLE:
+        process = get_process_from_handle( req->handle, PROCESS_DUP_HANDLE );
+        if (process && process != current->process)
+        {
+            /* duplicate the destination process handle into the target process */
+            obj_handle_t handle = duplicate_handle( current->process, apc->call.dup_handle.dst_process,
+                                                    process, 0, 0, DUPLICATE_SAME_ACCESS );
+            if (handle) apc->call.dup_handle.dst_process = handle;
+            else
+            {
+                release_object( process );
+                process = NULL;
+            }
+        }
+        break;
     default:
         set_error( STATUS_INVALID_PARAMETER );
         break;
@@ -2044,4 +2066,56 @@ DECL_HANDLER(get_selector_entry)
         get_selector_entry( thread, req->entry, &reply->base, &reply->limit, &reply->flags );
         release_object( thread );
     }
+}
+
+/* Iterate process list */
+DECL_HANDLER(get_next_thread)
+{
+    struct thread *thread = NULL, *next;
+    struct process *process;
+    struct list *ptr;
+
+    reply->handle = 0;
+
+    if ( req->flags > 1 )
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+
+    if (!(process = get_process_from_handle( req->process, PROCESS_QUERY_INFORMATION )))
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+
+    if (!req->last)
+    {
+        ptr = req->flags ? list_tail( &process->thread_list ) : list_head( &process->thread_list );
+    }
+    else if ((thread = get_thread_from_handle( req->last, 0 )))
+    {
+        ptr = req->flags ? list_prev( &process->thread_list, &thread->proc_entry ) :
+                list_next( &process->thread_list, &thread->proc_entry );
+    }
+    else
+    {
+        release_object( process );
+        return;
+    }
+
+    while (ptr)
+    {
+        next = LIST_ENTRY( ptr, struct thread, proc_entry );
+        if ((reply->handle = alloc_handle( current->process, next, req->access, req->attributes )))
+            break;
+        ptr = req->flags ? list_prev( &process->thread_list, &next->proc_entry ) : list_next( &process->thread_list, &next->proc_entry );
+    }
+
+    if (!reply->handle)
+        set_error( STATUS_NO_MORE_ENTRIES );
+
+    if (thread)
+        release_object( thread );
+    release_object( process );
 }

@@ -62,12 +62,8 @@ extern void version_init(void) DECLSPEC_HIDDEN;
 extern void debug_init(void) DECLSPEC_HIDDEN;
 extern void actctx_init(void) DECLSPEC_HIDDEN;
 extern void heap_set_debug_flags( HANDLE handle ) DECLSPEC_HIDDEN;
-extern void init_locale( HMODULE module ) DECLSPEC_HIDDEN;
 extern void init_user_process_params(void) DECLSPEC_HIDDEN;
 extern void CDECL DECLSPEC_NORETURN signal_start_thread( CONTEXT *ctx ) DECLSPEC_HIDDEN;
-
-/* server support */
-extern BOOL is_wow64 DECLSPEC_HIDDEN;
 
 /* module handling */
 extern LIST_ENTRY tls_links DECLSPEC_HIDDEN;
@@ -80,6 +76,7 @@ extern void SNOOP_SetupDLL( HMODULE hmod ) DECLSPEC_HIDDEN;
 extern const WCHAR windows_dir[] DECLSPEC_HIDDEN;
 extern const WCHAR system_dir[] DECLSPEC_HIDDEN;
 extern const WCHAR syswow64_dir[] DECLSPEC_HIDDEN;
+extern HMODULE kernel32_handle DECLSPEC_HIDDEN;
 
 extern void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *) DECLSPEC_HIDDEN;
 extern const struct unix_funcs *unix_funcs DECLSPEC_HIDDEN;
@@ -122,22 +119,24 @@ static inline void leave_critical_section( RTL_CRITICAL_SECTION *crit )
     }
 }
 
-/* load order */
-
-enum loadorder
+struct dllredirect_data
 {
-    LO_INVALID,
-    LO_DISABLED,
-    LO_NATIVE,
-    LO_BUILTIN,
-    LO_NATIVE_BUILTIN,  /* native then builtin */
-    LO_BUILTIN_NATIVE,  /* builtin then native */
-    LO_DEFAULT          /* nothing specified, use default strategy */
+    ULONG size;
+    ULONG flags;
+    ULONG total_len;
+    ULONG paths_count;
+    ULONG paths_offset;
+    struct { ULONG len; ULONG offset; } paths[1];
 };
 
-extern enum loadorder get_load_order( const WCHAR *app_name, const UNICODE_STRING *nt_name ) DECLSPEC_HIDDEN;
+#define DLL_REDIRECT_PATH_INCLUDES_BASE_NAME                      1
+#define DLL_REDIRECT_PATH_OMITS_ASSEMBLY_ROOT                     2
+#define DLL_REDIRECT_PATH_EXPAND                                  4
+#define DLL_REDIRECT_PATH_SYSTEM_DEFAULT_REDIRECTED_SYSTEM32_DLL  8
 
-#ifndef _WIN64
+#ifdef _WIN64
+static inline TEB64 *NtCurrentTeb64(void) { return NULL; }
+#else
 static inline TEB64 *NtCurrentTeb64(void) { return (TEB64 *)NtCurrentTeb()->GdiBatchCount; }
 #endif
 
@@ -159,7 +158,6 @@ static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
 }
 
 /* FLS data */
-extern void init_global_fls_data(void) DECLSPEC_HIDDEN;
 extern TEB_FLS_DATA *fls_alloc_data(void) DECLSPEC_HIDDEN;
 
 #endif

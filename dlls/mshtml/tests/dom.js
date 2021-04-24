@@ -381,6 +381,7 @@ sync_test("style_properties", function() {
 
 sync_test("stylesheets", function() {
     document.body.innerHTML = '<style>.div { margin-right: 1px; }</style>';
+    var elem = document.body.firstChild;
 
     ok(document.styleSheets.length === 1, "document.styleSheets.length = " + document.styleSheets.length);
 
@@ -393,13 +394,27 @@ sync_test("stylesheets", function() {
         stylesheet.rules.item(1);
         ok(false, "expected exception");
     }catch(e) {}
+
+    ok(stylesheet.href === null, "stylesheet.href = " + stylesheet.href);
+
+    var id = stylesheet.insertRule(".input { margin-left: 1px; }", 0);
+    ok(id === 0, "id = " + id);
+    ok(document.styleSheets.length === 1, "document.styleSheets.length = " + document.styleSheets.length);
+
+    try {
+        stylesheet.insertRule(".input { margin-left: 1px; }", 3);
+        ok(false, "expected exception");
+    }catch(e) {}
 });
 
 sync_test("storage", function() {
     ok(typeof(window.sessionStorage) === "object",
        "typeof(window.sessionStorage) = " + typeof(window.sessionStorage));
-    ok(typeof(window.localStorage) === "object",
+    ok(typeof(window.localStorage) === "object" || typeof(window.localStorage) === "unknown",
        "typeof(window.localStorage) = " + typeof(window.localStorage));
+
+    var item = sessionStorage.getItem("nonexisting");
+    ok(item === null, "item = " + item);
 });
 
 async_test("animation", function() {
@@ -414,4 +429,82 @@ async_test("animation", function() {
     });
     document.body.appendChild(div);
     div.className = "testAnimation";
+});
+
+sync_test("navigator", function() {
+    ok(typeof(window.navigator) === "object",
+       "typeof(window.navigator) = " + typeof(window.navigator));
+
+    var v = window.navigator;
+    ok(v === window.navigator, "v != window.navigator");
+    v.testProp = true;
+    ok(window.navigator.testProp, "window.navigator.testProp = " + window.navigator.testProp);
+});
+
+sync_test("elem_props", function() {
+    var elem = document.body;
+
+    ok(elem.accessKey === "", "accessKey = " + elem.accessKey);
+    elem.accessKey = "q";
+    ok(elem.accessKey === "q", "accessKey = " + elem.accessKey + " expected q");
+});
+
+async_test("animation_frame", function() {
+    var id = requestAnimationFrame(function(x) {
+        ok(this === window, "this != window");
+        ok(typeof(x) === "number", "x = " + x);
+        ok(arguments.length === 1, "arguments.lenght = " + arguments.length);
+        next_test();
+    });
+    ok(typeof(id) === "number", "id = " + id);
+});
+
+sync_test("title", function() {
+    var elem = document.createElement("div");
+    ok(elem.title === "", "div.title = " + elem.title);
+    ok(elem.getAttribute("title") === null, "title attribute = " + elem.getAttribute("title"));
+    elem.title = "test";
+    ok(elem.title === "test", "div.title = " + elem.title);
+    ok(elem.getAttribute("title") === "test", "title attribute = " + elem.getAttribute("title"));
+});
+
+sync_test("disabled", function() {
+    var elem = document.createElement("div");
+    document.body.appendChild(elem);
+    ok(elem.disabled === false, "div.disabled = " + elem.disabled);
+    ok(elem.getAttribute("disabled") === null, "disabled attribute = " + elem.getAttribute("disabled") + " expected null");
+
+    elem.disabled = true;
+    ok(elem.disabled === true, "div.disabled = " + elem.disabled);
+    ok(elem.getAttribute("disabled") === "", "disabled attribute = " + elem.getAttribute("disabled") + " expected \"\"");
+
+    elem.disabled = false;
+    ok(elem.disabled === false, "div.disabled = " + elem.disabled);
+    ok(elem.getAttribute("disabled") === null, "disabled attribute = " + elem.getAttribute("disabled") + " expected null");
+
+    elem.setAttribute("disabled", "false");
+    ok(elem.disabled === true, "div.disabled = " + elem.disabled);
+    ok(elem.getAttribute("disabled") === "false", "disabled attribute = " + elem.getAttribute("disabled"));
+
+    elem.removeAttribute("disabled");
+    ok(elem.disabled === false, "div.disabled = " + elem.disabled);
+    ok(elem.getAttribute("disabled") === null, "disabled attribute = " + elem.getAttribute("disabled") + " expected null");
+});
+
+sync_test("hasAttribute", function() {
+    document.body.innerHTML = '<div attr="test"></div>';
+    var elem = document.body.firstChild, r;
+
+    r = elem.hasAttribute("attr");
+    ok(r === true, "hasAttribute(attr) returned " + r);
+    r = elem.hasAttribute("attr2");
+    ok(r === false, "hasAttribute(attr2) returned " + r);
+
+    elem.setAttribute("attr2", "abc");
+    r = elem.hasAttribute("attr2");
+    ok(r === true, "hasAttribute(attr2) returned " + r);
+
+    elem.removeAttribute("attr");
+    r = elem.hasAttribute("attr");
+    ok(r === false, "hasAttribute(attr) returned " + r);
 });

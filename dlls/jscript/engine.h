@@ -90,8 +90,10 @@
     X(typeofident,1, 0,0)                  \
     X(refval,     1, 0,0)                  \
     X(ret,        0, ARG_UINT,   0)        \
+    X(set_member, 1, 0,0)                  \
     X(setret,     1, 0,0)                  \
     X(sub,        1, 0,0)                  \
+    X(to_string,  1, 0,0)                  \
     X(undefined,  1, 0,0)                  \
     X(void,       1, 0,0)                  \
     X(xor,        1, 0,0)
@@ -142,6 +144,8 @@ typedef struct {
     BSTR name;
     int ref;
 } local_ref_t;
+
+#define INVALID_LOCAL_REF 0x7fffffff
 
 typedef struct _function_code_t {
     BSTR name;

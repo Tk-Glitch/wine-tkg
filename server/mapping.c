@@ -195,7 +195,7 @@ static const struct object_ops mapping_ops =
     default_unlink_name,         /* unlink_name */
     no_open_file,                /* open_file */
     no_kernel_obj_list,          /* get_kernel_obj_list */
-    fd_close_handle,             /* close_handle */
+    no_close_handle,             /* close_handle */
     mapping_destroy              /* destroy */
 };
 
@@ -368,6 +368,7 @@ static void add_process_view( struct thread *thread, struct memory_view *view )
         else if (!(view->image.image_charact & IMAGE_FILE_DLL))
         {
             /* main exe */
+            process->machine = view->image.machine;
             list_add_head( &process->views, &view->entry );
             if (get_view_nt_name( view, &name ) && (process->image = memdup( name.str, name.len )))
                 process->imagelen = name.len;
@@ -679,18 +680,10 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
         switch (nt.FileHeader.Machine)
         {
         case IMAGE_FILE_MACHINE_I386:
-            mapping->image.cpu = CPU_x86;
             if (cpu_mask & (CPU_FLAG(CPU_x86) | CPU_FLAG(CPU_x86_64))) break;
             return STATUS_INVALID_IMAGE_FORMAT;
-        case IMAGE_FILE_MACHINE_ARM:
-        case IMAGE_FILE_MACHINE_THUMB:
         case IMAGE_FILE_MACHINE_ARMNT:
-            mapping->image.cpu = CPU_ARM;
             if (cpu_mask & (CPU_FLAG(CPU_ARM) | CPU_FLAG(CPU_ARM64))) break;
-            return STATUS_INVALID_IMAGE_FORMAT;
-        case IMAGE_FILE_MACHINE_POWERPC:
-            mapping->image.cpu = CPU_POWERPC;
-            if (cpu_mask & CPU_FLAG(CPU_POWERPC)) break;
             return STATUS_INVALID_IMAGE_FORMAT;
         default:
             return STATUS_INVALID_IMAGE_FORMAT;
@@ -727,11 +720,9 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
         switch (nt.FileHeader.Machine)
         {
         case IMAGE_FILE_MACHINE_AMD64:
-            mapping->image.cpu = CPU_x86_64;
             if (cpu_mask & (CPU_FLAG(CPU_x86) | CPU_FLAG(CPU_x86_64))) break;
             return STATUS_INVALID_IMAGE_FORMAT;
         case IMAGE_FILE_MACHINE_ARM64:
-            mapping->image.cpu = CPU_ARM64;
             if (cpu_mask & (CPU_FLAG(CPU_ARM) | CPU_FLAG(CPU_ARM64))) break;
             return STATUS_INVALID_IMAGE_FORMAT;
         default:
@@ -775,7 +766,6 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
     mapping->image.zerobits      = 0; /* FIXME */
     mapping->image.file_size     = file_size;
     mapping->image.loader_flags  = clr_va && clr_size;
-    mapping->image.__pad         = 0;
     if (mz_size == sizeof(mz) && !memcmp( mz.buffer, builtin_signature, sizeof(builtin_signature) ))
         mapping->image.image_flags |= IMAGE_FLAGS_WineBuiltin;
     else if (mz_size == sizeof(mz) && !memcmp( mz.buffer, fakedll_signature, sizeof(fakedll_signature) ))
@@ -802,11 +792,7 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
         if (nt.opt.hdr32.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
         {
             if (!(clr.Flags & COMIMAGE_FLAGS_32BITREQUIRED))
-            {
                 mapping->image.image_flags |= IMAGE_FLAGS_ComPlusNativeReady;
-                if (cpu_mask & CPU_FLAG(CPU_x86_64)) mapping->image.cpu = CPU_x86_64;
-                else if (cpu_mask & CPU_FLAG(CPU_ARM64)) mapping->image.cpu = CPU_ARM64;
-            }
             if (clr.Flags & COMIMAGE_FLAGS_32BITPREFERRED)
                 mapping->image.image_flags |= IMAGE_FLAGS_ComPlusPrefer32bit;
         }
@@ -1155,7 +1141,21 @@ DECL_HANDLER(get_mapping_info)
     reply->flags   = mapping->flags;
 
     if (mapping->flags & SEC_IMAGE)
-        set_reply_data( &mapping->image, min( sizeof(mapping->image), get_reply_max_size() ));
+    {
+        struct unicode_str name = { NULL, 0 };
+        data_size_t size;
+        void *data;
+
+        if (mapping->fd) get_nt_name( mapping->fd, &name );
+        size = min( sizeof(pe_image_info_t) + name.len, get_reply_max_size() );
+        if ((data = set_reply_data_size( size )))
+        {
+            memcpy( data, &mapping->image, min( sizeof(pe_image_info_t), size ));
+            if (size > sizeof(pe_image_info_t))
+                memcpy( (pe_image_info_t *)data + 1, name.str, size - sizeof(pe_image_info_t) );
+        }
+        reply->total = sizeof(pe_image_info_t) + name.len;
+    }
 
     if (!(req->access & (SECTION_MAP_READ | SECTION_MAP_WRITE)))  /* query only */
     {

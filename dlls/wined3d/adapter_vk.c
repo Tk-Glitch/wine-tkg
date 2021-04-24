@@ -319,10 +319,7 @@ struct wined3d_physical_device_info
 
 static void wined3d_disable_vulkan_features(struct wined3d_physical_device_info *info)
 {
-    VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT *vertex_divisor_features = &info->vertex_divisor_features;
     VkPhysicalDeviceFeatures *features = &info->features2.features;
-
-    vertex_divisor_features->vertexAttributeInstanceRateZeroDivisor = VK_FALSE;
 
     features->depthBounds = VK_FALSE;
     features->alphaToOne = VK_FALSE;
@@ -447,7 +444,8 @@ static HRESULT adapter_vk_create_device(struct wined3d *wined3d, const struct wi
     else
         VK_CALL(vkGetPhysicalDeviceFeatures(physical_device, &features2->features));
 
-    if (!vertex_divisor_features->vertexAttributeInstanceRateDivisor)
+    if (!vertex_divisor_features->vertexAttributeInstanceRateDivisor
+            || !vertex_divisor_features->vertexAttributeInstanceRateZeroDivisor)
     {
         WARN("Vertex attribute divisors not supported.\n");
         hr = E_FAIL;
@@ -538,7 +536,7 @@ static void adapter_vk_destroy_device(struct wined3d_device *device)
     heap_free(device_vk);
 }
 
-struct wined3d_context *adapter_vk_acquire_context(struct wined3d_device *device,
+static struct wined3d_context *adapter_vk_acquire_context(struct wined3d_device *device,
         struct wined3d_texture *texture, unsigned int sub_resource_idx)
 {
     TRACE("device %p, texture %p, sub_resource_idx %u.\n", device, texture, sub_resource_idx);
@@ -551,7 +549,7 @@ struct wined3d_context *adapter_vk_acquire_context(struct wined3d_device *device
     return &wined3d_device_vk(device)->context_vk.c;
 }
 
-void adapter_vk_release_context(struct wined3d_context *context)
+static void adapter_vk_release_context(struct wined3d_context *context)
 {
     TRACE("context %p.\n", context);
 }
@@ -1331,7 +1329,7 @@ static void wined3d_view_vk_destroy_object(void *object)
     {
         if (context)
         {
-            wined3d_context_vk_destroy_buffer_view(wined3d_context_vk(context),
+            wined3d_context_vk_destroy_vk_buffer_view(wined3d_context_vk(context),
                     *ctx->vk_buffer_view, *ctx->command_buffer_id);
         }
         else
@@ -1344,7 +1342,7 @@ static void wined3d_view_vk_destroy_object(void *object)
     {
         if (context)
         {
-            wined3d_context_vk_destroy_image_view(wined3d_context_vk(context),
+            wined3d_context_vk_destroy_vk_image_view(wined3d_context_vk(context),
                     *ctx->vk_image_view, *ctx->command_buffer_id);
         }
         else
@@ -1359,7 +1357,7 @@ static void wined3d_view_vk_destroy_object(void *object)
     {
         if (context)
         {
-            wined3d_context_vk_destroy_buffer_view(wined3d_context_vk(context),
+            wined3d_context_vk_destroy_vk_buffer_view(wined3d_context_vk(context),
                     *ctx->vk_counter_view, *ctx->command_buffer_id);
         }
         else
@@ -1557,7 +1555,7 @@ static void wined3d_sampler_vk_destroy_object(void *object)
 
     context_vk = wined3d_context_vk(context_acquire(sampler_vk->s.device, NULL, 0));
 
-    wined3d_context_vk_destroy_sampler(context_vk, sampler_vk->vk_image_info.sampler, sampler_vk->command_buffer_id);
+    wined3d_context_vk_destroy_vk_sampler(context_vk, sampler_vk->vk_image_info.sampler, sampler_vk->command_buffer_id);
     heap_free(sampler_vk);
 
     context_release(&context_vk->c);
@@ -2001,9 +1999,10 @@ fail:
     return FALSE;
 }
 
-static VkPhysicalDevice get_vulkan_physical_device(struct wined3d_vk_info *vk_info)
+static VkPhysicalDevice get_vulkan_physical_device(unsigned int ordinal,
+        struct wined3d_vk_info *vk_info)
 {
-    VkPhysicalDevice physical_devices[1];
+    VkPhysicalDevice *physical_devices, ret;
     uint32_t count;
     VkResult vr;
 
@@ -2012,25 +2011,29 @@ static VkPhysicalDevice get_vulkan_physical_device(struct wined3d_vk_info *vk_in
         WARN("Failed to enumerate physical devices, vr %s.\n", wined3d_debug_vkresult(vr));
         return VK_NULL_HANDLE;
     }
-    if (!count)
+
+    if (ordinal >= count)
     {
-        WARN("No physical device.\n");
+        WARN("Device %u not found.\n", ordinal);
         return VK_NULL_HANDLE;
     }
-    if (count > 1)
+
+    if (!(physical_devices = heap_calloc(count, sizeof(*physical_devices))))
     {
-        /* TODO: Create wined3d_adapter for each device. */
-        FIXME("Multiple physical devices available.\n");
-        count = 1;
+        WARN("Out of memory.\n");
+        return VK_NULL_HANDLE;
     }
 
     if ((vr = VK_CALL(vkEnumeratePhysicalDevices(vk_info->instance, &count, physical_devices))) < 0)
     {
         WARN("Failed to get physical devices, vr %s.\n", wined3d_debug_vkresult(vr));
+        heap_free(physical_devices);
         return VK_NULL_HANDLE;
     }
 
-    return physical_devices[0];
+    ret = physical_devices[ordinal];
+    heap_free(physical_devices);
+    return ret;
 }
 
 static enum wined3d_display_driver guess_display_driver(enum wined3d_pci_vendor vendor)
@@ -2313,7 +2316,7 @@ static BOOL wined3d_adapter_vk_init(struct wined3d_adapter_vk *adapter_vk,
         return FALSE;
     }
 
-    if (!(adapter_vk->physical_device = get_vulkan_physical_device(vk_info)))
+    if (!(adapter_vk->physical_device = get_vulkan_physical_device(ordinal, vk_info)))
         goto fail_vulkan;
 
     if (!wined3d_adapter_vk_init_device_extensions(adapter_vk))

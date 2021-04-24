@@ -113,7 +113,7 @@ static int get_display_bpp(void)
 
 static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
 
-const struct png_funcs *png_funcs;
+static const struct png_funcs *png_funcs;
 
 static BOOL WINAPI load_libpng( INIT_ONCE *once, void *param, void **context )
 {
@@ -121,7 +121,7 @@ static BOOL WINAPI load_libpng( INIT_ONCE *once, void *param, void **context )
     return TRUE;
 }
 
-BOOL have_libpng(void)
+static BOOL have_libpng(void)
 {
     return InitOnceExecuteOnce( &init_once, load_libpng, NULL, NULL ) && png_funcs;
 }

@@ -18366,11 +18366,11 @@ static void test_texture_wrong_caps(const GUID *device_guid)
         return;
     }
     hr = IDirect3DDevice3_GetDirect3D(device, &d3d);
-    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3D3_QueryInterface(d3d, &IID_IDirectDraw4, (void **)&ddraw);
-    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice3_GetRenderTarget(device, &rt);
-    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
 
     viewport = create_viewport(device, 0, 0, 640, 480);
     hr = IDirect3DDevice3_SetCurrentViewport(device, viewport);
@@ -18384,9 +18384,9 @@ static void test_texture_wrong_caps(const GUID *device_guid)
     ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
     U4(ddsd).ddpfPixelFormat = fmt;
     hr = IDirectDraw4_CreateSurface(ddraw, &ddsd, &surface, NULL);
-    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirectDrawSurface4_QueryInterface(surface, &IID_IDirect3DTexture2, (void **)&texture);
-    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
 
     fill_surface(surface, 0xff00ff00);
 
@@ -18420,6 +18420,8 @@ static void test_texture_wrong_caps(const GUID *device_guid)
 
     IDirect3DTexture2_Release(texture);
     IDirectDrawSurface4_Release(surface);
+    IDirectDrawSurface4_Release(rt);
+    destroy_viewport(device, viewport);
     IDirectDraw4_Release(ddraw);
     IDirect3D3_Release(d3d);
     refcount = IDirect3DDevice3_Release(device);
@@ -18559,11 +18561,11 @@ START_TEST(ddraw4)
     test_gdi_surface();
     test_alphatest();
     test_clipper_refcount();
-    run_for_each_device_type(test_texture_wrong_caps);
     test_caps();
     test_d32_support();
     test_surface_format_conversion_alpha();
     test_cursor_clipping();
     test_window_position();
     test_get_display_mode();
+    run_for_each_device_type(test_texture_wrong_caps);
 }

@@ -2288,11 +2288,14 @@ static void accept_hardware_message( UINT hw_id )
 static BOOL process_rawinput_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data )
 {
     struct rawinput_thread_data *thread_data = rawinput_thread_data();
-    if (!rawinput_from_hardware_message( thread_data->buffer, msg_data ))
-        return FALSE;
 
-    thread_data->hw_id = hw_id;
-    msg->lParam = (LPARAM)hw_id;
+    if (msg->message == WM_INPUT)
+    {
+        if (!rawinput_from_hardware_message( thread_data->buffer, msg_data )) return FALSE;
+        thread_data->hw_id = hw_id;
+        msg->lParam = (LPARAM)hw_id;
+    }
+
     msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
     return TRUE;
 }
@@ -2612,7 +2615,7 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
     /* hardware messages are always in physical coords */
     context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
 
-    if (msg->message == WM_INPUT)
+    if (msg->message == WM_INPUT || msg->message == WM_INPUT_DEVICE_CHANGE)
         ret = process_rawinput_message( msg, hw_id, msg_data );
     else if (is_keyboard_message( msg->message ))
         ret = process_keyboard_message( msg, hw_id, hwnd_filter, first, last, remove );
@@ -3227,7 +3230,7 @@ static BOOL send_message( struct send_message_info *info, DWORD_PTR *res_ptr, BO
 /***********************************************************************
  *		send_hardware_message
  */
-NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
+NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput, UINT flags )
 {
     struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
     struct send_message_info info;
@@ -3246,29 +3249,55 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
     {
         req->win        = wine_server_user_handle( hwnd );
         req->flags      = flags;
+        req->input.type = input->type;
         switch (input->type)
         {
         case INPUT_MOUSE:
-            req->input.type        = HW_INPUT_MOUSE;
             req->input.mouse.x     = input->u.mi.dx;
             req->input.mouse.y     = input->u.mi.dy;
             req->input.mouse.data  = input->u.mi.mouseData;
             req->input.mouse.flags = input->u.mi.dwFlags;
             req->input.mouse.time  = input->u.mi.time;
             req->input.mouse.info  = input->u.mi.dwExtraInfo;
+            if (rawinput) req->flags |= SEND_HWMSG_RAWINPUT;
             break;
         case INPUT_KEYBOARD:
-            req->input.type      = HW_INPUT_KEYBOARD;
             req->input.kbd.vkey  = input->u.ki.wVk;
             req->input.kbd.scan  = input->u.ki.wScan;
             req->input.kbd.flags = input->u.ki.dwFlags;
             req->input.kbd.time  = input->u.ki.time;
             req->input.kbd.info  = input->u.ki.dwExtraInfo;
+            if (rawinput) req->flags |= SEND_HWMSG_RAWINPUT;
             break;
         case INPUT_HARDWARE:
-            req->input.type      = HW_INPUT_HARDWARE;
             req->input.hw.msg    = input->u.hi.uMsg;
             req->input.hw.lparam = MAKELONG( input->u.hi.wParamL, input->u.hi.wParamH );
+            switch (input->u.hi.uMsg)
+            {
+            case WM_INPUT:
+            case WM_INPUT_DEVICE_CHANGE:
+                req->input.hw.data.rawinput.type = rawinput->header.dwType;
+                switch (rawinput->header.dwType)
+                {
+                case RIM_TYPEMOUSE:
+                    req->input.hw.data.rawinput.mouse.x = rawinput->data.mouse.lLastX;
+                    req->input.hw.data.rawinput.mouse.y = rawinput->data.mouse.lLastY;
+                    req->input.hw.data.rawinput.mouse.data = rawinput->data.mouse.u.ulButtons;
+                    req->input.hw.lparam = rawinput->data.mouse.ulRawButtons;
+                    break;
+                case RIM_TYPEHID:
+                    assert( rawinput->data.hid.dwCount <= 1 );
+                    req->input.hw.data.rawinput.hid.device = HandleToUlong( rawinput->header.hDevice );
+                    req->input.hw.data.rawinput.hid.param = rawinput->header.wParam;
+                    req->input.hw.data.rawinput.hid.length = rawinput->data.hid.dwSizeHid;
+                    if (rawinput->data.hid.dwSizeHid)
+                        wine_server_add_data( req, rawinput->data.hid.bRawData, rawinput->data.hid.dwSizeHid );
+                    break;
+                default:
+                    assert( 0 );
+                    break;
+                }
+            }
             break;
         }
         if (key_state_info) wine_server_set_reply( req, key_state_info->state,

@@ -169,6 +169,40 @@ static struct video_stream *impl_from_stream_IMFAttributes(IMFAttributes *iface)
     return CONTAINING_RECORD(iface, struct video_stream, IMFAttributes_iface);
 }
 
+static HRESULT video_renderer_init_presenter_services(struct video_renderer *renderer)
+{
+    IMFTopologyServiceLookupClient *lookup_client;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = IMFVideoPresenter_QueryInterface(renderer->presenter, &IID_IMFTopologyServiceLookupClient,
+            (void **)&lookup_client)))
+    {
+        renderer->flags |= EVR_INIT_SERVICES;
+        if (SUCCEEDED(hr = IMFTopologyServiceLookupClient_InitServicePointers(lookup_client,
+                &renderer->IMFTopologyServiceLookup_iface)))
+        {
+            renderer->flags |= EVR_PRESENTER_INITED_SERVICES;
+        }
+        renderer->flags &= ~EVR_INIT_SERVICES;
+        IMFTopologyServiceLookupClient_Release(lookup_client);
+    }
+
+    return hr;
+}
+
+static void video_renderer_release_presenter_services(struct video_renderer *renderer)
+{
+    IMFTopologyServiceLookupClient *lookup_client;
+
+    if (renderer->flags & EVR_PRESENTER_INITED_SERVICES && SUCCEEDED(IMFVideoPresenter_QueryInterface(renderer->presenter,
+            &IID_IMFTopologyServiceLookupClient, (void **)&lookup_client)))
+    {
+        IMFTopologyServiceLookupClient_ReleaseServicePointers(lookup_client);
+        IMFTopologyServiceLookupClient_Release(lookup_client);
+        renderer->flags &= ~EVR_PRESENTER_INITED_SERVICES;
+    }
+}
+
 static void video_renderer_release_services(struct video_renderer *renderer)
 {
     IMFTopologyServiceLookupClient *lookup_client;
@@ -181,13 +215,7 @@ static void video_renderer_release_services(struct video_renderer *renderer)
         renderer->flags &= ~EVR_MIXER_INITED_SERVICES;
     }
 
-    if (renderer->flags & EVR_PRESENTER_INITED_SERVICES && SUCCEEDED(IMFVideoPresenter_QueryInterface(renderer->presenter,
-            &IID_IMFTopologyServiceLookupClient, (void **)&lookup_client)))
-    {
-        IMFTopologyServiceLookupClient_ReleaseServicePointers(lookup_client);
-        IMFTopologyServiceLookupClient_Release(lookup_client);
-        renderer->flags &= ~EVR_PRESENTER_INITED_SERVICES;
-    }
+    video_renderer_release_presenter_services(renderer);
 }
 
 static HRESULT WINAPI video_stream_sink_QueryInterface(IMFStreamSink *iface, REFIID riid, void **obj)
@@ -1280,12 +1308,15 @@ static void video_renderer_set_presentation_clock(struct video_renderer *rendere
         IMFPresentationClock_RemoveClockStateSink(renderer->clock, &renderer->IMFClockStateSink_iface);
         IMFPresentationClock_Release(renderer->clock);
     }
+    video_renderer_release_presenter_services(renderer);
+
     renderer->clock = clock;
     if (renderer->clock)
     {
         IMFPresentationClock_AddRef(renderer->clock);
         IMFPresentationClock_AddClockStateSink(renderer->clock, &renderer->IMFClockStateSink_iface);
     }
+    video_renderer_init_presenter_services(renderer);
 }
 
 static HRESULT WINAPI video_renderer_sink_SetPresentationClock(IMFMediaSink *iface, IMFPresentationClock *clock)
@@ -1579,28 +1610,20 @@ static HRESULT video_renderer_configure_mixer(struct video_renderer *renderer)
 
 static HRESULT video_renderer_configure_presenter(struct video_renderer *renderer)
 {
-    IMFTopologyServiceLookupClient *lookup_client;
     IMFVideoDisplayControl *control;
+    RECT rect = { 0 };
     HRESULT hr;
 
     if (SUCCEEDED(IMFVideoPresenter_QueryInterface(renderer->presenter, &IID_IMFVideoDisplayControl, (void **)&control)))
     {
-        IMFVideoDisplayControl_SetVideoWindow(control, renderer->window);
+        GetClientRect(renderer->window, &rect);
+
+        if (SUCCEEDED(hr = IMFVideoDisplayControl_SetVideoWindow(control, renderer->window)))
+            hr = IMFVideoDisplayControl_SetVideoPosition(control, NULL, &rect);
         IMFVideoDisplayControl_Release(control);
     }
 
-    if (SUCCEEDED(hr = IMFVideoPresenter_QueryInterface(renderer->presenter, &IID_IMFTopologyServiceLookupClient,
-            (void **)&lookup_client)))
-    {
-        renderer->flags |= EVR_INIT_SERVICES;
-        if (SUCCEEDED(hr = IMFTopologyServiceLookupClient_InitServicePointers(lookup_client,
-                &renderer->IMFTopologyServiceLookup_iface)))
-        {
-            renderer->flags |= EVR_PRESENTER_INITED_SERVICES;
-        }
-        renderer->flags &= ~EVR_INIT_SERVICES;
-        IMFTopologyServiceLookupClient_Release(lookup_client);
-    }
+    hr = video_renderer_init_presenter_services(renderer);
 
     if (FAILED(MFGetService((IUnknown *)renderer->presenter, &MR_VIDEO_ACCELERATION_SERVICE,
             &IID_IUnknown, (void **)&renderer->device_manager)))
@@ -2048,6 +2071,13 @@ static HRESULT WINAPI video_renderer_service_lookup_LookupService(IMFTopologySer
         {
             *objects = &renderer->IMediaEventSink_iface;
             IUnknown_AddRef((IUnknown *)*objects);
+        }
+        else if (IsEqualIID(riid, &IID_IMFClock))
+        {
+            *objects = renderer->clock;
+            if (*objects)
+                IUnknown_AddRef((IUnknown *)*objects);
+            hr = *objects ? S_OK : E_NOINTERFACE;
         }
         else
         {

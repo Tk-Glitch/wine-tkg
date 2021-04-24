@@ -222,7 +222,6 @@ extern struct keyed_event *create_keyed_event( struct object *root, const struct
                                                unsigned int attr, const struct security_descriptor *sd );
 extern struct event *get_event_obj( struct process *process, obj_handle_t handle, unsigned int access );
 extern struct keyed_event *get_keyed_event_obj( struct process *process, obj_handle_t handle, unsigned int access );
-extern void pulse_event( struct event *event );
 extern void set_event( struct event *event );
 extern void reset_event( struct event *event );
 
@@ -247,6 +246,8 @@ extern void generate_startup_debug_events( struct process *process );
 /* registry functions */
 
 extern unsigned int get_prefix_cpu_mask(void);
+extern unsigned int supported_machines_count;
+extern unsigned short supported_machines[8];
 extern void init_registry(void);
 extern void flush_registry(void);
 

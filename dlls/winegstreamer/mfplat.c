@@ -521,6 +521,7 @@ video_formats[] =
     {&MFVideoFormat_RGB565, WG_VIDEO_FORMAT_RGB16},
     {&MFVideoFormat_AYUV,   WG_VIDEO_FORMAT_AYUV},
     {&MFVideoFormat_I420,   WG_VIDEO_FORMAT_I420},
+    {&MFVideoFormat_IYUV,   WG_VIDEO_FORMAT_I420},
     {&MFVideoFormat_NV12,   WG_VIDEO_FORMAT_NV12},
     {&MFVideoFormat_UYVY,   WG_VIDEO_FORMAT_UYVY},
     {&MFVideoFormat_YUY2,   WG_VIDEO_FORMAT_YUY2},
@@ -594,6 +595,7 @@ static IMFMediaType *mf_media_type_from_wg_format_video(const struct wg_format *
             IMFMediaType_SetUINT64(type, &MF_MT_FRAME_RATE,
                     make_uint64(format->u.video.fps_n, format->u.video.fps_d));
             IMFMediaType_SetUINT32(type, &MF_MT_COMPRESSED, FALSE);
+            IMFMediaType_SetUINT32(type, &MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
 
             return type;
         }

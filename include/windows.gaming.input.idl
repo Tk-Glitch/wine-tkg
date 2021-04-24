@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Rémi Bernon for CodeWeavers
+ * Copyright 2021 Rémi Bernon for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,9 +21,12 @@
 #endif
 
 import "inspectable.idl";
+import "asyncinfo.idl";
+import "eventtoken.idl";
+import "windowscontracts.idl";
 import "windows.foundation.idl";
-import "windows.system.idl";
 import "windows.gaming.input.forcefeedback.idl";
+import "windows.system.idl";
 
 namespace Windows {
     namespace Gaming {
@@ -222,11 +225,14 @@ namespace Windows {
             ]
             interface IGameController : IInspectable
             {
-                [eventadd] HRESULT HeadsetConnected([in] Windows.Foundation.TypedEventHandler<Windows.Gaming.Input.IGameController*, Windows.Gaming.Input.Headset*>* value, [out, retval] EventRegistrationToken* token);
+                [eventadd] HRESULT HeadsetConnected([in] Windows.Foundation.TypedEventHandler<Windows.Gaming.Input.IGameController*, Windows.Gaming.Input.Headset*>* handler,
+                                                    [out, retval] EventRegistrationToken* token);
                 [eventremove] HRESULT HeadsetConnected([in] EventRegistrationToken token);
-                [eventadd] HRESULT HeadsetDisconnected([in] Windows.Foundation.TypedEventHandler<Windows.Gaming.Input.IGameController*, Windows.Gaming.Input.Headset*>* value, [out, retval] EventRegistrationToken* token);
+                [eventadd] HRESULT HeadsetDisconnected([in] Windows.Foundation.TypedEventHandler<Windows.Gaming.Input.IGameController*, Windows.Gaming.Input.Headset*>* handler,
+                                                       [out, retval] EventRegistrationToken* token);
                 [eventremove] HRESULT HeadsetDisconnected([in] EventRegistrationToken token);
-                [eventadd] HRESULT UserChanged([in] Windows.Foundation.TypedEventHandler<Windows.Gaming.Input.IGameController*, Windows.System.UserChangedEventArgs*>* value, [out, retval] EventRegistrationToken* token);
+                [eventadd] HRESULT UserChanged([in] Windows.Foundation.TypedEventHandler<Windows.Gaming.Input.IGameController*, Windows.System.UserChangedEventArgs*>* handler,
+                                               [out, retval] EventRegistrationToken* token);
                 [eventremove] HRESULT UserChanged([in] EventRegistrationToken token);
                 [propget] HRESULT Headset([out, retval] Windows.Gaming.Input.Headset** value);
                 [propget] HRESULT IsWireless([out, retval] boolean* value);
@@ -254,15 +260,18 @@ namespace Windows {
             interface IRawGameController : IInspectable
                 requires Windows.Gaming.Input.IGameController
             {
-                [propget] HRESULT AxisCount([out] [retval] INT32* value);
-                [propget] HRESULT ButtonCount([out] [retval] INT32* value);
-                [propget] HRESULT ForceFeedbackMotors([out] [retval] Windows.Foundation.Collections.IVectorView<Windows.Gaming.Input.ForceFeedback.ForceFeedbackMotor*>** value);
-                [propget] HRESULT HardwareProductId([out] [retval] UINT16* value);
-                [propget] HRESULT HardwareVendorId([out] [retval] UINT16* value);
-                [propget] HRESULT SwitchCount([out] [retval] INT32* value);
-                HRESULT GetButtonLabel([in] INT32 buttonIndex, [out] [retval] Windows.Gaming.Input.GameControllerButtonLabel* value);
-                HRESULT GetCurrentReading([in] UINT32 __buttonArraySize, [out] [size_is(__buttonArraySize)] boolean* buttonArray, [in] UINT32 __switchArraySize, [out] [size_is(__switchArraySize)] Windows.Gaming.Input.GameControllerSwitchPosition* switchArray, [in] UINT32 __axisArraySize, [out] [size_is(__axisArraySize)] DOUBLE* axisArray, [out] [retval] UINT64* timestamp);
-                HRESULT GetSwitchKind([in] INT32 switchIndex, [out] [retval] Windows.Gaming.Input.GameControllerSwitchKind* value);
+                [propget] HRESULT AxisCount([out, retval] INT32* value);
+                [propget] HRESULT ButtonCount([out, retval] INT32* value);
+                [propget] HRESULT ForceFeedbackMotors([out, retval] Windows.Foundation.Collections.IVectorView<Windows.Gaming.Input.ForceFeedback.ForceFeedbackMotor*>** value);
+                [propget] HRESULT HardwareProductId([out, retval] UINT16* value);
+                [propget] HRESULT HardwareVendorId([out, retval] UINT16* value);
+                [propget] HRESULT SwitchCount([out, retval] INT32* value);
+                HRESULT GetButtonLabel([in] INT32 index, [out, retval] Windows.Gaming.Input.GameControllerButtonLabel* value);
+                HRESULT GetCurrentReading([in] UINT32 buttons_size, [out, size_is(buttons_size)] boolean* buttons,
+                                          [in] UINT32 switches_size, [out, size_is(switches_size)] Windows.Gaming.Input.GameControllerSwitchPosition* switches,
+                                          [in] UINT32 axes_size, [out, size_is(axes_size)] DOUBLE* axes,
+                                          [out, retval] UINT64* timestamp);
+                HRESULT GetSwitchKind([in] INT32 index, [out, retval] Windows.Gaming.Input.GameControllerSwitchKind* value);
             }
 
             [
@@ -295,9 +304,11 @@ namespace Windows {
             ]
             interface IRawGameControllerStatics : IInspectable
             {
-                [eventadd] HRESULT RawGameControllerAdded([in] Windows.Foundation.EventHandler<Windows.Gaming.Input.RawGameController*> *value, [out, retval] EventRegistrationToken* token);
+                [eventadd] HRESULT RawGameControllerAdded([in] Windows.Foundation.EventHandler<Windows.Gaming.Input.RawGameController*> *handler,
+                                                          [out, retval] EventRegistrationToken* token);
                 [eventremove] HRESULT RawGameControllerAdded([in] EventRegistrationToken token);
-                [eventadd] HRESULT RawGameControllerRemoved([in] Windows.Foundation.EventHandler<Windows.Gaming.Input.RawGameController*> *value, [out, retval] EventRegistrationToken* token);
+                [eventadd] HRESULT RawGameControllerRemoved([in] Windows.Foundation.EventHandler<Windows.Gaming.Input.RawGameController*> *handler,
+                                                            [out, retval] EventRegistrationToken* token);
                 [eventremove] HRESULT RawGameControllerRemoved([in] EventRegistrationToken token);
                 [propget] HRESULT RawGameControllers([out, retval] Windows.Foundation.Collections.IVectorView<Windows.Gaming.Input.RawGameController*> **value);
                 HRESULT FromGameController([in] Windows.Gaming.Input.IGameController *game_controller, [out, retval] Windows.Gaming.Input.RawGameController **value);

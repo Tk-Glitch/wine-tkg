@@ -315,6 +315,7 @@ void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height )
     settings_handler.free_modes = X11DRV_desktop_free_modes;
     settings_handler.get_current_mode = X11DRV_desktop_get_current_mode;
     settings_handler.set_current_mode = X11DRV_desktop_set_current_mode;
+    settings_handler.convert_coordinates = NULL;
     X11DRV_Settings_SetHandler( &settings_handler );
 }
 
@@ -356,6 +357,7 @@ BOOL CDECL X11DRV_create_desktop( UINT width, UINT height )
                          0, 0, width, height, 0, default_visual.depth, InputOutput, default_visual.visual,
                          CWEventMask | CWCursor | CWColormap, &win_attr );
     if (!win) return FALSE;
+    x11drv_xinput_enable( display, win, win_attr.event_mask );
     if (!create_desktop_win_data( win )) return FALSE;
 
     X11DRV_init_desktop( win, width, height );

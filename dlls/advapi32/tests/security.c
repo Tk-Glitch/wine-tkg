@@ -7570,6 +7570,32 @@ static void test_GetExplicitEntriesFromAclW(void)
     ok(access2 == NULL, "access2 was not NULL\n");
     LocalFree(new_acl);
 
+    /* Make the ACL both Allow and Deny Everyone. */
+    res = AddAccessAllowedAce(old_acl, ACL_REVISION, KEY_READ, everyone_sid);
+    ok(res, "AddAccessAllowedAce failed with error %d\n", GetLastError());
+    res = AddAccessDeniedAce(old_acl, ACL_REVISION, KEY_WRITE, everyone_sid);
+    ok(res, "AddAccessDeniedAce failed with error %d\n", GetLastError());
+    /* Revoke Everyone. */
+    access.Trustee.ptstrName = everyone_sid;
+    access.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
+    access.grfAccessPermissions = 0;
+    new_acl = NULL;
+    res = pSetEntriesInAclW(1, &access, old_acl, &new_acl);
+    ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
+    ok(new_acl != NULL, "returned acl was NULL\n");
+    /* Deny Everyone should remain (along with Grant Users from earlier). */
+    access2 = NULL;
+    res = pGetExplicitEntriesFromAclW(new_acl, &count, &access2);
+    ok(res == ERROR_SUCCESS, "GetExplicitEntriesFromAclW failed with error %d\n", GetLastError());
+    ok(count == 2, "Expected count == 2, got %d\n", count);
+    ok(access2[0].grfAccessMode == GRANT_ACCESS, "Expected GRANT_ACCESS, got %d\n", access2[0].grfAccessMode);
+    ok(access2[0].grfAccessPermissions == KEY_READ , "Expected KEY_READ, got %d\n", access2[0].grfAccessPermissions);
+    ok(EqualSid(access2[0].Trustee.ptstrName, users_sid), "Expected equal SIDs\n");
+    ok(access2[1].grfAccessMode == DENY_ACCESS, "Expected DENY_ACCESS, got %d\n", access2[1].grfAccessMode);
+    ok(access2[1].grfAccessPermissions == KEY_WRITE, "Expected KEY_WRITE, got %d\n", access2[1].grfAccessPermissions);
+    ok(EqualSid(access2[1].Trustee.ptstrName, everyone_sid), "Expected equal SIDs\n");
+    LocalFree(access2);
+
     FreeSid(users_sid);
     FreeSid(everyone_sid);
     HeapFree(GetProcessHeap(), 0, old_acl);
@@ -8413,6 +8439,74 @@ static void test_elevation(void)
     CloseHandle(token);
 }
 
+static void test_group_as_file_owner(void)
+{
+    char sd_buffer[200], sid_buffer[100];
+    SECURITY_DESCRIPTOR *sd = (SECURITY_DESCRIPTOR *)sd_buffer;
+    char temp_path[MAX_PATH], path[MAX_PATH];
+    SID *admin_sid = (SID *)sid_buffer;
+    BOOL ret, present, defaulted;
+    SECURITY_DESCRIPTOR new_sd;
+    HANDLE file;
+    DWORD size;
+    ACL *dacl;
+
+    /* The EA Origin client sets the SD owner of a directory to Administrators,
+     * while using the default DACL, and subsequently tries to create
+     * subdirectories. */
+
+    size = sizeof(sid_buffer);
+    CreateWellKnownSid(WinBuiltinAdministratorsSid, NULL, admin_sid, &size);
+
+    ret = CheckTokenMembership(NULL, admin_sid, &present);
+    ok(ret, "got error %u\n", GetLastError());
+    if (!present)
+    {
+        skip("user is not an administrator\n");
+        return;
+    }
+
+    GetTempPathA(ARRAY_SIZE(temp_path), temp_path);
+    sprintf(path, "%s\\testdir", temp_path);
+
+    ret = CreateDirectoryA(path, NULL);
+    ok(ret, "got error %u\n", GetLastError());
+
+    file = CreateFileA(path, FILE_ALL_ACCESS, 0, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+    ok(file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
+
+    ret = GetKernelObjectSecurity(file, DACL_SECURITY_INFORMATION, sd_buffer, sizeof(sd_buffer), &size);
+    ok(ret, "got error %u\n", GetLastError());
+    ret = GetSecurityDescriptorDacl(sd, &present, &dacl, &defaulted);
+    ok(ret, "got error %u\n", GetLastError());
+
+    InitializeSecurityDescriptor(&new_sd, SECURITY_DESCRIPTOR_REVISION);
+
+    ret = SetSecurityDescriptorOwner(&new_sd, admin_sid, FALSE);
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = GetSecurityDescriptorDacl(sd, &present, &dacl, &defaulted);
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = SetSecurityDescriptorDacl(&new_sd, present, dacl, defaulted);
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = SetKernelObjectSecurity(file, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, &new_sd);
+    ok(ret, "got error %u\n", GetLastError());
+
+    CloseHandle(file);
+
+    sprintf(path, "%s\\testdir\\subdir", temp_path);
+    ret = CreateDirectoryA(path, NULL);
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = RemoveDirectoryA(path);
+    ok(ret, "got error %u\n", GetLastError());
+    sprintf(path, "%s\\testdir", temp_path);
+    ret = RemoveDirectoryA(path);
+    ok(ret, "got error %u\n", GetLastError());
+}
+
 START_TEST(security)
 {
     init();
@@ -8481,6 +8575,7 @@ START_TEST(security)
     test_duplicate_token();
     test_GetKernelObjectSecurity();
     test_elevation();
+    test_group_as_file_owner();
 
     /* Must be the last test, modifies process token */
     test_token_security_descriptor();

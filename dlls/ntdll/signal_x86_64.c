@@ -576,6 +576,10 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
               context->R12, context->R13, context->R14, context->R15 );
     }
 
+    /* Legends of Runeterra depends on having SegDs == SegSs in an exception
+     * handler. */
+    context->SegDs = context->SegSs;
+
     if (call_vectored_handlers( rec, context ) == EXCEPTION_CONTINUE_EXECUTION)
         NtContinue( context, FALSE );
 
@@ -1549,9 +1553,7 @@ __ASM_GLOBAL_FUNC( signal_start_thread,
                    "movq %rcx,%rbx\n\t"        /* context */
                    /* clear the thread stack */
                    "andq $~0xfff,%rcx\n\t"     /* round down to page size */
-                   "movq %gs:0x30,%rax\n\t"
-                   "movq 0x10(%rax),%rdi\n\t"  /* NtCurrentTeb()->Tib.StackLimit */
-                   "addq $0x2000,%rdi\n\t"
+                   "leaq -0xf0000(%rcx),%rdi\n\t"
                    "movq %rdi,%rsp\n\t"
                    "subq %rdi,%rcx\n\t"
                    "xorl %eax,%eax\n\t"

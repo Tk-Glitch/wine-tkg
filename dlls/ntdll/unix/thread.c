@@ -147,6 +147,16 @@ static void update_attr_list( PS_ATTRIBUTE_LIST *attr, const CLIENT_ID *id, TEB 
     }
 }
 
+/***********************************************************************
+ *              NtCreateThread   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtCreateThread( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
+                                HANDLE process, CLIENT_ID *id, CONTEXT *ctx, INITIAL_TEB *teb,
+                                BOOLEAN suspended )
+{
+    FIXME( "%p %d %p %p %p %p %p %d, stub!\n", handle, access, attr, process, id, ctx, teb, suspended );
+    return STATUS_NOT_IMPLEMENTED;
+}
 
 /***********************************************************************
  *              NtCreateThreadEx   (NTDLL.@)
@@ -332,7 +342,7 @@ static void exit_thread( int status )
 void exit_process( int status )
 {
     pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
-    signal_exit_thread( get_unix_exit_code( status ), exit );
+    signal_exit_thread( get_unix_exit_code( status ), process_exit_wrapper );
 }
 
 
@@ -645,13 +655,8 @@ NTSTATUS get_thread_context( HANDLE handle, context_t *context, unsigned int fla
 
     if (ret == STATUS_PENDING)
     {
-        LARGE_INTEGER timeout;
-        timeout.QuadPart = -1000000;
-        if (NtWaitForSingleObject( handle, FALSE, &timeout ))
-        {
-            NtClose( handle );
-            return STATUS_ACCESS_DENIED;
-        }
+        NtWaitForSingleObject( handle, FALSE, NULL );
+
         SERVER_START_REQ( get_thread_context )
         {
             req->handle  = wine_server_obj_handle( handle );
@@ -1417,4 +1422,30 @@ ULONG WINAPI NtGetCurrentProcessorNumber(void)
     }
     /* fallback to the first processor */
     return 0;
+}
+
+
+/******************************************************************************
+ *                          NtGetNextThread  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtGetNextThread(HANDLE hprocess, HANDLE hthread, ACCESS_MASK access, ULONG attributes,
+        ULONG flags, HANDLE *handle)
+{
+    NTSTATUS ret;
+
+    FIXME( "hprocess %p, hthread %p, access %#x, attributes %#x, flags %#x, handle %p stub.\n",
+            hprocess, hthread, access, attributes, flags, handle);
+
+    SERVER_START_REQ( get_next_thread )
+    {
+        req->process = wine_server_obj_handle( hprocess );
+        req->last = wine_server_obj_handle( hthread );
+        req->access = access;
+        req->attributes = attributes;
+        req->flags = flags;
+        ret = wine_server_call( req );
+        if (!ret) *handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    return ret;
 }

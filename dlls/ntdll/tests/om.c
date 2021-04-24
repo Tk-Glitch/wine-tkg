@@ -78,6 +78,8 @@ static void     (WINAPI *pRtlWakeAddressAll)( const void * );
 static void     (WINAPI *pRtlWakeAddressSingle)( const void * );
 static NTSTATUS (WINAPI *pNtOpenProcess)( HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES *, const CLIENT_ID * );
 static NTSTATUS (WINAPI *pNtCreateDebugObject)( HANDLE *, ACCESS_MASK, OBJECT_ATTRIBUTES *, ULONG );
+static NTSTATUS (WINAPI *pNtGetNextProcess)(HANDLE process, ACCESS_MASK access, ULONG attributes, ULONG flags, HANDLE *handle);
+static NTSTATUS (WINAPI *pNtGetNextThread)(HANDLE process, HANDLE thread, ACCESS_MASK access, ULONG attributes, ULONG flags, HANDLE *handle);
 
 #define KEYEDEVENT_WAIT       0x0001
 #define KEYEDEVENT_WAKE       0x0002
@@ -1379,6 +1381,7 @@ static void test_query_object(void)
     char buffer[1024];
     NTSTATUS status;
     ULONG len, expected_len;
+    OBJECT_BASIC_INFORMATION info;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING path, target, *str;
     char dir[MAX_PATH], tmp_path[MAX_PATH], file1[MAX_PATH + 16];
@@ -1389,6 +1392,20 @@ static void test_query_object(void)
     InitializeObjectAttributes( &attr, &path, 0, 0, 0 );
 
     handle = CreateEventA( NULL, FALSE, FALSE, "test_event" );
+
+    status = pNtQueryObject( handle, ObjectBasicInformation, NULL, 0, NULL );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %x\n", status );
+
+    status = pNtQueryObject( handle, ObjectBasicInformation, &info, 0, NULL );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %x\n", status );
+
+    status = pNtQueryObject( handle, ObjectBasicInformation, NULL, 0, &len );
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %x\n", status );
+
+    len = 0;
+    status = pNtQueryObject( handle, ObjectBasicInformation, &info, sizeof(OBJECT_BASIC_INFORMATION), &len );
+    ok( status == STATUS_SUCCESS, "NtQueryObject failed %x\n", status );
+    ok( len >= sizeof(OBJECT_BASIC_INFORMATION), "unexpected len %u\n", len );
 
     len = 0;
     status = pNtQueryObject( handle, ObjectNameInformation, buffer, 0, &len );
@@ -2549,6 +2566,59 @@ static void test_object_types(void)
     }
 }
 
+static void test_get_next_process(void)
+{
+    NTSTATUS status;
+    HANDLE handle;
+
+    if (!pNtGetNextProcess)
+    {
+        win_skip("NtGetNextProcess is not available.\n");
+        return;
+    }
+
+    status = pNtGetNextProcess(0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, &handle);
+    ok(!status, "Unexpected status %#x.\n", status);
+    pNtClose(handle);
+
+    /* Reversed search only supported in recent enough Win10 */
+    status = pNtGetNextProcess(0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 1, &handle);
+    ok(!status || broken(status == STATUS_INVALID_PARAMETER), "Unexpected status %#x.\n", status);
+    if (status)
+        pNtClose(handle);
+
+    status = pNtGetNextProcess(0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 2, &handle);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %#x.\n", status);
+}
+
+static void test_get_next_thread(void)
+{
+    HANDLE hprocess = GetCurrentProcess();
+    NTSTATUS status;
+    HANDLE handle;
+
+    if (!pNtGetNextThread)
+    {
+        win_skip("NtGetNextThread is not available.\n");
+        return;
+    }
+    status = pNtGetNextThread(hprocess, 0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, &handle);
+    ok(!status, "Unexpected status %#x.\n", status);
+    pNtClose(handle);
+
+    status = pNtGetNextThread((void *)0xdeadbeef, 0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, &handle);
+    ok(status == STATUS_INVALID_HANDLE, "Unexpected status %#x.\n", status);
+
+    /* Reversed search only supported in recent enough Win10 */
+    status = pNtGetNextThread(hprocess, 0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 1, &handle);
+    ok(!status || broken(status == STATUS_INVALID_PARAMETER), "Unexpected status %#x.\n", status);
+    if (status)
+        pNtClose(handle);
+
+    status = pNtGetNextThread(hprocess, 0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 2, &handle);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %#x.\n", status);
+}
+
 START_TEST(om)
 {
     HMODULE hntdll = GetModuleHandleA("ntdll.dll");
@@ -2600,6 +2670,8 @@ START_TEST(om)
     pRtlWakeAddressSingle   =  (void *)GetProcAddress(hntdll, "RtlWakeAddressSingle");
     pNtOpenProcess          =  (void *)GetProcAddress(hntdll, "NtOpenProcess");
     pNtCreateDebugObject    =  (void *)GetProcAddress(hntdll, "NtCreateDebugObject");
+    pNtGetNextProcess       =  (void *)GetProcAddress(hntdll, "NtGetNextProcess");
+    pNtGetNextThread        =  (void *)GetProcAddress(hntdll, "NtGetNextThread");
 
     test_case_sensitive();
     test_namespace_pipe();
@@ -2617,4 +2689,6 @@ START_TEST(om)
     test_wait_on_address();
     test_process();
     test_object_types();
+    test_get_next_process();
+    test_get_next_thread();
 }

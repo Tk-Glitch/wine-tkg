@@ -351,8 +351,6 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 
     switch (reason)
     {
-        case DLL_WINE_PREATTACH:
-            return FALSE; /* Prefer native. */
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(instance);
             break;

@@ -291,7 +291,7 @@ extern "C" {
 #undef __C89_NAMELESSUNIONNAME7
 #undef __C89_NAMELESSUNIONNAME8
 
-#if !defined(__WINESRC__) && !defined(WINE_NO_NAMELESS_EXTENSION)
+#if !defined(WINE_NO_NAMELESS_EXTENSION)
 # ifdef __GNUC__
    /* Anonymous structs support starts with gcc 2.96/g++ 2.95 */
 #  if (__GNUC__ > 2) || ((__GNUC__ == 2) && ((__GNUC_MINOR__ > 95) || ((__GNUC_MINOR__ == 95) && defined(__cplusplus))))
@@ -676,9 +676,6 @@ typedef DWORD FLONG;
 #define	DLL_PROCESS_ATTACH	1	/* attach process (load library) */
 #define	DLL_THREAD_ATTACH	2	/* attach new thread */
 #define	DLL_THREAD_DETACH	3	/* detach thread */
-#ifdef __WINESRC__
-#define DLL_WINE_PREATTACH      8       /* called before process attach for Wine builtins */
-#endif
 
 /* u.x.wProcessorArchitecture (NT) */
 #define PROCESSOR_ARCHITECTURE_INTEL	0
@@ -6451,6 +6448,7 @@ typedef enum {
 typedef struct _COMPATIBILITY_CONTEXT_ELEMENT {
     GUID Id;
     ACTCTX_COMPATIBILITY_ELEMENT_TYPE Type;
+    ULONGLONG MaxVersionTested;
 } COMPATIBILITY_CONTEXT_ELEMENT, *PCOMPATIBILITY_CONTEXT_ELEMENT;
 
 #if !defined(__WINESRC__) && (defined(_MSC_EXTENSIONS) || ((defined(__GNUC__) && __GNUC__ >= 3)))
@@ -6734,6 +6732,47 @@ typedef struct _SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX
         GROUP_RELATIONSHIP Group;
     } DUMMYUNIONNAME;
 } SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX, *PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
+
+typedef enum _CPU_SET_INFORMATION_TYPE
+{
+    CpuSetInformation,
+} CPU_SET_INFORMATION_TYPE, *PCPU_SET_INFORMATION_TYPE;
+
+typedef struct _SYSTEM_CPU_SET_INFORMATION
+{
+    DWORD Size;
+    CPU_SET_INFORMATION_TYPE Type;
+    union
+    {
+        struct
+        {
+            DWORD Id;
+            WORD Group;
+            BYTE LogicalProcessorIndex;
+            BYTE CoreIndex;
+            BYTE LastLevelCacheIndex;
+            BYTE NumaNodeIndex;
+            BYTE EfficiencyClass;
+            union
+            {
+                BYTE AllFlags;
+                struct
+                {
+                    BYTE Parked : 1;
+                    BYTE Allocated : 1;
+                    BYTE AllocatedToTargetProcess : 1;
+                    BYTE RealTime : 1;
+                    BYTE ReservedFlags : 4;
+                } DUMMYSTRUCTNAME;
+            } DUMMYUNIONNAME2;
+            union {
+            DWORD Reserved;
+            BYTE  SchedulingClass;
+            };
+            DWORD64 AllocationTag;
+        } CpuSet;
+    } DUMMYUNIONNAME;
+} SYSTEM_CPU_SET_INFORMATION, *PSYSTEM_CPU_SET_INFORMATION;
 
 /* Threadpool things */
 typedef DWORD TP_VERSION,*PTP_VERSION;

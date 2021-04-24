@@ -25,6 +25,8 @@
 #define USE_STRUCT_CONVERSION
 #endif
 
+#include <pthread.h>
+
 #include "wine/debug.h"
 #include "wine/heap.h"
 #include "wine/list.h"
@@ -87,10 +89,48 @@ struct VkDevice_T
     struct VkPhysicalDevice_T *phys_dev; /* parent */
     VkDevice device; /* native device */
 
-    struct VkQueue_T **queues;
-    uint32_t max_queue_families;
+    struct VkQueue_T* queues;
+    uint32_t queue_count;
 
     unsigned int quirks;
+
+    VkQueueFamilyProperties *queue_props;
+
+    struct wine_vk_mapping mapping;
+};
+
+struct fs_hack_image
+{
+    uint32_t cmd_queue_idx;
+    VkCommandBuffer cmd;
+    VkImage swapchain_image;
+    VkImage blit_image;
+    VkImage user_image;
+    VkSemaphore blit_finished;
+    VkImageView user_view, blit_view;
+    VkDescriptorSet descriptor_set;
+};
+
+struct VkSwapchainKHR_T
+{
+    VkSwapchainKHR swapchain; /* native swapchain */
+
+    /* fs hack data below */
+    BOOL fs_hack_enabled;
+    VkExtent2D user_extent;
+    VkExtent2D real_extent;
+    VkImageUsageFlags surface_usage;
+    VkRect2D blit_dst;
+    VkCommandPool *cmd_pools; /* VkCommandPool[device->queue_count] */
+    VkDeviceMemory user_image_memory, blit_image_memory;
+    uint32_t n_images;
+    struct fs_hack_image *fs_hack_images; /* struct fs_hack_image[n_images] */
+    VkFilter fs_hack_filter;
+    VkSampler sampler;
+    VkDescriptorPool descriptor_pool;
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkPipelineLayout pipeline_layout;
+    VkPipeline pipeline;
 
     struct wine_vk_mapping mapping;
 };
@@ -123,7 +163,7 @@ struct VkInstance_T
 
     VkBool32 enable_wrapper_list;
     struct list wrappers;
-    SRWLOCK wrapper_lock;
+    pthread_rwlock_t wrapper_lock;
 
     struct wine_debug_utils_messenger *utils_messengers;
     uint32_t utils_messenger_count;
@@ -153,6 +193,8 @@ struct VkQueue_T
     struct VkDevice_T *device; /* parent */
     VkQueue queue; /* native queue */
 
+    uint32_t family_index;
+    uint32_t queue_index;
     VkDeviceQueueCreateFlags flags;
 
     struct wine_vk_mapping mapping;
@@ -232,6 +274,7 @@ static inline VkSurfaceKHR wine_surface_to_handle(struct wine_surface *surface)
 }
 
 void *wine_vk_get_device_proc_addr(const char *name) DECLSPEC_HIDDEN;
+void *wine_vk_get_phys_dev_proc_addr(const char *name) DECLSPEC_HIDDEN;
 void *wine_vk_get_instance_proc_addr(const char *name) DECLSPEC_HIDDEN;
 
 BOOL wine_vk_device_extension_supported(const char *name) DECLSPEC_HIDDEN;
@@ -239,5 +282,13 @@ BOOL wine_vk_instance_extension_supported(const char *name) DECLSPEC_HIDDEN;
 
 BOOL wine_vk_is_type_wrapped(VkObjectType type) DECLSPEC_HIDDEN;
 uint64_t wine_vk_unwrap_handle(VkObjectType type, uint64_t handle) DECLSPEC_HIDDEN;
+
+void unix_vk_init(const struct vulkan_funcs *driver) DECLSPEC_HIDDEN;
+
+VkResult WINAPI unix_vkCreateInstance(const VkInstanceCreateInfo *create_info,
+        const VkAllocationCallbacks *allocator, VkInstance *instance) DECLSPEC_HIDDEN;
+VkResult WINAPI unix_vkEnumerateInstanceExtensionProperties(const char *layer_name,
+        uint32_t *count, VkExtensionProperties *properties) DECLSPEC_HIDDEN;
+VkResult WINAPI unix_vkEnumerateInstanceVersion(uint32_t *version) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_VULKAN_PRIVATE_H */

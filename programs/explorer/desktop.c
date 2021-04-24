@@ -862,11 +862,7 @@ static HMODULE load_graphics_driver( const WCHAR *driver, const GUID *guid )
         name = next;
     }
 
-    if (module)
-    {
-        GetModuleFileNameW( module, buffer, MAX_PATH );
-        TRACE( "display %s driver %s\n", debugstr_guid(guid), debugstr_w(buffer) );
-    }
+    TRACE( "display %s driver %s\n", debugstr_guid(guid), debugstr_w(libname) );
 
     /* create video key first without REG_OPTION_VOLATILE attribute */
     if (!RegCreateKeyExW( HKEY_LOCAL_MACHINE, video_keyW, 0, NULL, 0, KEY_SET_VALUE, NULL, &hkey, NULL ))
@@ -881,7 +877,7 @@ static HMODULE load_graphics_driver( const WCHAR *driver, const GUID *guid )
     {
         if (module || null_driver)
             RegSetValueExW( hkey, graphics_driverW, 0, REG_SZ,
-                            (BYTE *)buffer, (lstrlenW(buffer) + 1) * sizeof(WCHAR) );
+                            (BYTE *)libname, (lstrlenW(libname) + 1) * sizeof(WCHAR) );
         else
             RegSetValueExA( hkey, "DriverError", 0, REG_SZ, (BYTE *)error, strlen(error) + 1 );
         RegCloseKey( hkey );

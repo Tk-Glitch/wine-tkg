@@ -957,6 +957,8 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
 
                     if (event->signaled)
                     {
+                        if (ac_odyssey && alertable)
+                            usleep( 0 );
                         if ((size = read( obj->fd, &value, sizeof(value) )) == sizeof(value))
                         {
                             TRACE("Woken up by handle %p [%d].\n", handles[i], i);
@@ -972,6 +974,12 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
 
                     if (event->signaled)
                     {
+                        if (ac_odyssey && alertable)
+                        {
+                            usleep( 0 );
+                            if (!event->signaled)
+                                break;
+                        }
                         TRACE("Woken up by handle %p [%d].\n", handles[i], i);
                         return i;
                     }
@@ -1000,6 +1008,9 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
 
         while (1)
         {
+            if (ac_odyssey && alertable)
+                usleep( 0 );
+
             ret = do_poll( fds, pollcount, timeout ? &end : NULL );
             if (ret > 0)
             {
@@ -1157,10 +1168,22 @@ tryagain:
                         {
                             /* We were too slow. Put everything back. */
                             value = 1;
-                            for (j = i; j >= 0; j--)
+                            for (j = i - 1; j >= 0; j--)
                             {
-                                if (write( obj->fd, &value, sizeof(value) ) == -1)
+                                struct esync *obj = objs[j];
+
+                                if (obj->type == ESYNC_MUTEX)
+                                {
+                                    struct mutex *mutex = obj->shm;
+
+                                    if (mutex->tid == GetCurrentThreadId())
+                                        continue;
+                                }
+                                if (write( fds[j].fd, &value, sizeof(value) ) == -1)
+                                {
+                                    ERR("write failed.\n");
                                     return errno_to_status( errno );
+                                }
                             }
 
                             goto tryagain;  /* break out of two loops and a switch */

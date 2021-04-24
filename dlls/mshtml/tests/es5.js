@@ -513,6 +513,19 @@ sync_test("defineProperty", function() {
     test_accessor_prop_desc(obj, "no_setter", desc);
     obj.no_setter = false;
     ok(obj.no_setter === true, "no_setter = " + obj.no_setter);
+
+    /* call prop with getter */
+    desc = {
+        get: function() {
+            return function(x) {
+                ok(x === 100, "x = " + x);
+                return 10;
+            };
+        }
+    };
+    Object.defineProperty(obj, "funcprop", desc);
+    test_accessor_prop_desc(obj, "funcprop", desc);
+    ok(obj.funcprop(100) === 10, "obj.funcprop() = " + obj.funcprop(100));
 });
 
 sync_test("defineProperties", function() {
@@ -879,7 +892,38 @@ sync_test("keys", function() {
     keys = Object.keys(o).sort().join();
     ok(keys === "test", "keys = " + keys);
 
+    Object.defineProperty(o, "defined", { value: 3, enumerable: false });
+    keys = Object.keys(o).sort().join();
+    ok(keys === "test", "keys = " + keys);
+
+    keys = Object.keys([]).sort().join();
+    ok(keys === "", "keys([]) = " + keys);
+
     ok(Object.keys.length === 1, "Object.keys.length = " + Object.keys.length);
+});
+
+sync_test("getOwnPropertyNames", function() {
+    var o = { a: 1, b: 2, c: 3 };
+    var names = Object.getOwnPropertyNames(o).sort().join();
+    ok(names === "a,b,c", "names = " + names);
+
+    o = Object.create(o);
+    names = Object.getOwnPropertyNames(o).sort().join();
+    ok(names === "", "names = " + names);
+
+    o.test = 1;
+    names = Object.getOwnPropertyNames(o).sort().join();
+    ok(names === "test", "names = " + names);
+
+    Object.defineProperty(o, "defined", { value: 3, enumerable: false });
+    names = Object.getOwnPropertyNames(o).sort().join();
+    ok(names === "defined,test", "names = " + names);
+
+    names = Object.getOwnPropertyNames([]).sort().join();
+    todo_wine.
+    ok(names === "length", "names = " + names);
+
+    ok(Object.getOwnPropertyNames.length === 1, "Object.getOwnPropertyNames.length = " + Object.getOwnPropertyNames.length);
 });
 
 sync_test("reduce", function() {
@@ -934,11 +978,9 @@ sync_test("preventExtensions", function() {
     var r = Object.preventExtensions(o);
     ok(r === o, "r != o");
     o.x = 1;
-    todo_wine.
     ok(!("x" in o), "x property added to o");
     try {
         Object.defineProperty(o, "y", { value: true });
-        todo_wine.
         ok(false, "expected exception");
     }catch(e) {
         ok(e.name === "TypeError", "got " + e.name + " exception");
@@ -946,8 +988,219 @@ sync_test("preventExtensions", function() {
 
     r = Object.preventExtensions(o);
     ok(r === o, "r != o");
+    r = Object.isExtensible(o);
+    ok(r === false, "isExtensible(o) returned " + r);
+
+    function Constr() {}
+    o = Object.preventExtensions(new Constr());
+    Constr.prototype.prop = 1;
+    ok(o.prop === 1, "o.prop = " + o.prop);
+    o.prop = 2;
+    ok(o.prop === 1, "o.prop = " + o.prop);
+    r = Object.isExtensible(o);
+    ok(r === false, "isExtensible(o) returned " + r);
+
+    r = Object.isExtensible({});
+    ok(r === true, "isExtensible(o) returned " + r);
+
+    try {
+        Object.isExtensible(1);
+        ok(false, "exception expected");
+    }catch(e) {
+        ok(e.name === "TypeError", "got " + e.name + " exception");
+    }
+
+    o = [];
+    Object.preventExtensions(o);
+    try {
+        o.push(1);
+        ok(false, "exception expected on o.push");
+    }catch(e) {
+        ok(e.name === "TypeError", "got " + e.name + " exception");
+    }
+    ok(!("0" in o), "0 is in o");
+    ok(o.length === 0, "o.length = " + o.length);
+
+    o = [1];
+    Object.preventExtensions(o);
+    o.pop();
+    ok(!("0" in o), "0 is in o");
+    ok(o.length === 0, "o.length = " + o.length);
 
     ok(Object.preventExtensions.length === 1, "Object.preventExtensions.length = " + Object.preventExtensions.length);
+    ok(Object.isExtensible.length === 1, "Object.isExtensible.length = " + Object.isExtensible.length);
+});
+
+sync_test("freeze", function() {
+    ok(Object.freeze.length === 1, "Object.freeze.length = " + Object.freeze.length);
+    try {
+        Object.freeze(1);
+        ok(false, "exception expected");
+    }catch(e) {
+        ok(e.name === "TypeError", "got " + e.name + " exception");
+    }
+
+    function f() {}
+
+    var o = {}, r;
+    o.prop = 1;
+    o.func = f;
+    Object.defineProperty(o, "accprop", {
+        get: function() {
+            return r;
+        },
+        set: function(v) {
+            r = v;
+        }
+    });
+
+    test_own_data_prop_desc(o, "prop", true, true, true);
+    r = Object.freeze(o);
+    ok(r === o, "r != o");
+    test_own_data_prop_desc(o, "prop", false, true, false);
+    test_own_data_prop_desc(o, "func", false, true, false);
+    ok(!Object.isExtensible(o), "o is still extensible");
+    o.prop = false;
+    o.func = false;
+    ok(o.prop === 1, "o.prop = " + o.prop);
+    ok(o.func === f, "o.func = " + o.func);
+
+    r = 1;
+    o.accprop = 2;
+    ok(r === 2, "r = " + r);
+    r = 3;
+    ok(o.accprop === 3, "o.accprop = " + o.accprop);
+
+    o = [1];
+    Object.freeze(o);
+    try {
+        o.pop();
+        ok(false, "exception expected on o.pop");
+    }catch(e) {
+        ok(e.name === "TypeError", "got " + e.name + " exception");
+    }
+    ok(o[0] === 1, "o[0] = " + o[0]);
+    ok(o.length === 1, "o.length = " + o.length);
+});
+
+sync_test("seal", function() {
+    ok(Object.seal.length === 1, "Object.seal.length = " + Object.seal.length);
+    try {
+        Object.seal(1);
+        ok(false, "exception expected");
+    }catch(e) {
+        ok(e.name === "TypeError", "got " + e.name + " exception");
+    }
+
+    function f() {}
+
+    var o = {}, r;
+    o.prop = 1;
+    o.func = f;
+    Object.defineProperty(o, "accprop", {
+        get: function() {
+            return r;
+        },
+        set: function(v) {
+            r = v;
+        }
+    });
+
+    test_own_data_prop_desc(o, "prop", true, true, true);
+    r = Object.seal(o);
+    ok(r === o, "r != o");
+    test_own_data_prop_desc(o, "prop", true, true, false);
+    test_own_data_prop_desc(o, "func", true, true, false);
+    ok(!Object.isExtensible(o), "o is still extensible");
+    o.prop = false;
+    o.func = false;
+    ok(o.prop === false, "o.prop = " + o.prop);
+    ok(o.func === false, "o.func = " + o.func);
+
+    r = 1;
+    o.accprop = 2;
+    ok(r === 2, "r = " + r);
+    r = 3;
+    ok(o.accprop === 3, "o.accprop = " + o.accprop);
+
+    o = [1];
+    Object.seal(o);
+    try {
+        o.pop();
+       ok(false, "exception expected on o.pop");
+    }catch(e) {
+        ok(e.name === "TypeError", "got " + e.name + " exception");
+    }
+    ok(o[0] === 1, "o[0] = " + o[0]);
+    ok(o.length === 1, "o.length = " + o.length);
+});
+
+sync_test("isFrozen", function() {
+    ok(Object.isFrozen.length === 1, "Object.isFrozen.length = " + Object.isFrozen.length);
+    ok(Object.isSealed.length === 1, "Object.isSealed.length = " + Object.isSealed.length);
+
+    var o = Object.freeze({});
+    ok(Object.isFrozen(o) === true, "o is not frozen");
+    ok(Object.isSealed(o) === true, "o is not sealed");
+    ok(Object.isExtensible(o) === false, "o is extensible");
+
+    ok(Object.isFrozen({}) === false, "{} is frozen");
+    ok(Object.isSealed({}) === false, "{} is sealed");
+
+    o = Object.preventExtensions({});
+    ok(Object.isFrozen(o) === true, "o is not frozen");
+    ok(Object.isSealed(o) === true, "o is not sealed");
+    ok(Object.isExtensible(o) === false, "o is extensible");
+
+    o = Object.preventExtensions({ prop: 1 });
+    ok(Object.isFrozen(o) === false, "o is frozen");
+    ok(Object.isSealed(o) === false, "o is sealed");
+    ok(Object.isExtensible(o) === false, "o is extensible");
+
+    o = Object.freeze({ prop: 1 });
+    ok(Object.isFrozen(o) === true, "o is not frozen");
+    ok(Object.isSealed(o) === true, "o is not sealed");
+    ok(Object.isExtensible(o) === false, "o is extensible");
+
+    o = Object.seal({ prop: 1 });
+    ok(Object.isFrozen(o) === false, "o is frozen");
+    ok(Object.isSealed(o) === true, "o is not sealed");
+    ok(Object.isExtensible(o) === false, "o is extensible");
+
+    o = {};
+    Object.defineProperty(o, "prop", { value: 1 });
+    Object.preventExtensions(o);
+    ok(Object.isFrozen(o) === true, "o is not frozen");
+    ok(Object.isSealed(o) === true, "o is not sealed");
+    ok(Object.isExtensible(o) === false, "o is extensible");
+
+    o = {};
+    Object.defineProperty(o, "prop", { value: 1, writable: true });
+    Object.preventExtensions(o);
+    ok(Object.isFrozen(o) === false, "o is frozen");
+    ok(Object.isSealed(o) === true, "o is not sealed");
+    ok(Object.isExtensible(o) === false, "o is extensible");
+
+    o = {};
+    Object.defineProperty(o, "prop", { value: 1, writable: true, configurable: true });
+    Object.preventExtensions(o);
+    ok(Object.isFrozen(o) === false, "o is frozen");
+    ok(Object.isSealed(o) === false, "o is sealed");
+    ok(Object.isExtensible(o) === false, "o is extensible");
+
+    o = {};
+    Object.defineProperty(o, "prop", { value: 1, configurable: true });
+    Object.preventExtensions(o);
+    ok(Object.isFrozen(o) === false, "o is frozen");
+    ok(Object.isSealed(o) === false, "o is sealed");
+    ok(Object.isExtensible(o) === false, "o is extensible");
+
+    o = {};
+    Object.defineProperty(o, "prop", { get: function() {}, set: function() {} });
+    Object.preventExtensions(o);
+    ok(Object.isFrozen(o) === true, "o is not frozen");
+    ok(Object.isSealed(o) === true, "o is not sealed");
+    ok(Object.isExtensible(o) === false, "o is extensible");
 });
 
 sync_test("head_setter", function() {

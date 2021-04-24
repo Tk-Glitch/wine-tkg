@@ -20,6 +20,7 @@
 
 #define COBJMACROS
 #define NONAMELESSUNION
+#define WINE_NO_NAMELESS_EXTENSION
 
 #include "wine/test.h"
 #include "dshow.h"
@@ -1166,7 +1167,6 @@ static ULONG WINAPI testsource_seeking_Release(IMediaSeeking *iface)
 
 static HRESULT WINAPI testsource_seeking_GetCapabilities(IMediaSeeking *iface, DWORD *capabilities)
 {
-    ok(0, "Unexpected call.\n");
     return E_NOTIMPL;
 }
 
@@ -1200,7 +1200,6 @@ static HRESULT WINAPI testsource_seeking_GetTimeFormat(IMediaSeeking *iface, GUI
 
 static HRESULT WINAPI testsource_seeking_IsUsingTimeFormat(IMediaSeeking *iface, const GUID *format)
 {
-    ok(0, "Unexpected call.\n");
     return E_NOTIMPL;
 }
 
@@ -1232,8 +1231,8 @@ static HRESULT WINAPI testsource_seeking_GetStopPosition(IMediaSeeking *iface, L
 
 static HRESULT WINAPI testsource_seeking_GetCurrentPosition(IMediaSeeking *iface, LONGLONG *current)
 {
-    ok(0, "Unexpected call.\n");
-    return E_NOTIMPL;
+    *current = 0;
+    return S_OK;
 }
 
 static HRESULT WINAPI testsource_seeking_ConvertTimeFormat(IMediaSeeking *iface, LONGLONG *target,
@@ -2030,15 +2029,36 @@ static void test_pin_info(void)
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
-static IUnknown *graph_inner_unk;
-static IFilterGraph2 *graph_inner;
-static LONG graph_refcount = 1;
-static unsigned int got_add_filter;
-static IBaseFilter *graph_filter;
-static WCHAR graph_filter_name[128];
+struct graph
+{
+    IFilterGraph2 IFilterGraph2_iface;
+    IMediaEventSink IMediaEventSink_iface;
+    IUnknown *inner_unk;
+    IFilterGraph2 *inner;
+    IMediaEventSink *inner_event_sink;
+    LONG refcount;
+    unsigned int got_add_filter;
+    IBaseFilter *filter;
+    WCHAR filter_name[128];
+    unsigned int got_notify;
+    LONG event_code;
+    LONG_PTR event_param1;
+    LONG_PTR event_param2;
+};
+
+static struct graph *impl_from_IFilterGraph2(IFilterGraph2 *iface)
+{
+    return CONTAINING_RECORD(iface, struct graph, IFilterGraph2_iface);
+}
+
+static struct graph *impl_from_IMediaEventSink(IMediaEventSink *iface)
+{
+    return CONTAINING_RECORD(iface, struct graph, IMediaEventSink_iface);
+}
 
 static HRESULT WINAPI graph_QueryInterface(IFilterGraph2 *iface, REFIID iid, void **out)
 {
+    struct graph *graph = impl_from_IFilterGraph2(iface);
     if (winetest_debug > 1) trace("QueryInterface(%s)\n", wine_dbgstr_guid(iid));
     if (IsEqualGUID(iid, &IID_IFilterGraph2)
             || IsEqualGUID(iid, &IID_IGraphBuilder)
@@ -2049,35 +2069,42 @@ static HRESULT WINAPI graph_QueryInterface(IFilterGraph2 *iface, REFIID iid, voi
         IFilterGraph2_AddRef(iface);
         return S_OK;
     }
-    else if (IsEqualGUID(iid, &IID_IMediaSeeking)
-            || IsEqualGUID(iid, &IID_IMediaControl)
-            || IsEqualGUID(iid, &IID_IMediaEventEx))
+    else if (IsEqualGUID(iid, &IID_IMediaEventSink))
     {
-        return IUnknown_QueryInterface(graph_inner_unk, iid, out);
+        *out = &graph->IMediaEventSink_iface;
+        IFilterGraph2_AddRef(iface);
+        return S_OK;
+    }
+    else
+    {
+        return IUnknown_QueryInterface(graph->inner_unk, iid, out);
     }
     return E_NOINTERFACE;
 }
 
 static ULONG WINAPI graph_AddRef(IFilterGraph2 *iface)
 {
-    return InterlockedIncrement(&graph_refcount);
+    struct graph *graph = impl_from_IFilterGraph2(iface);
+    return InterlockedIncrement(&graph->refcount);
 }
 
 static ULONG WINAPI graph_Release(IFilterGraph2 *iface)
 {
-    return InterlockedDecrement(&graph_refcount);
+    struct graph *graph = impl_from_IFilterGraph2(iface);
+    return InterlockedDecrement(&graph->refcount);
 }
 
 static HRESULT WINAPI graph_AddFilter(IFilterGraph2 *iface, IBaseFilter *filter, const WCHAR *name)
 {
+    struct graph *graph = impl_from_IFilterGraph2(iface);
     if (winetest_debug > 1) trace("AddFilter(%p, %s)\n", filter, wine_dbgstr_w(name));
-    ++got_add_filter;
-    graph_filter = filter;
+    ++graph->got_add_filter;
+    graph->filter = filter;
     if (name)
-        wcscpy(graph_filter_name, name);
+        wcscpy(graph->filter_name, name);
     else
-        graph_filter_name[0] = 0;
-    return IFilterGraph2_AddFilter(graph_inner, filter, name);
+        graph->filter_name[0] = 0;
+    return IFilterGraph2_AddFilter(graph->inner, filter, name);
 }
 
 static HRESULT WINAPI graph_RemoveFilter(IFilterGraph2 *iface, IBaseFilter *filter)
@@ -2088,8 +2115,9 @@ static HRESULT WINAPI graph_RemoveFilter(IFilterGraph2 *iface, IBaseFilter *filt
 
 static HRESULT WINAPI graph_EnumFilters(IFilterGraph2 *iface, IEnumFilters **enumfilters)
 {
+    struct graph *graph = impl_from_IFilterGraph2(iface);
     if (winetest_debug > 1) trace("EnumFilters()\n");
-    return IFilterGraph2_EnumFilters(graph_inner, enumfilters);
+    return IFilterGraph2_EnumFilters(graph->inner, enumfilters);
 }
 
 static HRESULT WINAPI graph_FindFilterByName(IFilterGraph2 *iface, const WCHAR *name, IBaseFilter **filter)
@@ -2100,8 +2128,8 @@ static HRESULT WINAPI graph_FindFilterByName(IFilterGraph2 *iface, const WCHAR *
 
 static HRESULT WINAPI graph_ConnectDirect(IFilterGraph2 *iface, IPin *source, IPin *sink, const AM_MEDIA_TYPE *mt)
 {
-    ok(0, "Unexpected call.\n");
-    return E_NOTIMPL;
+    struct graph *graph = impl_from_IFilterGraph2(iface);
+    return IFilterGraph2_ConnectDirect(graph->inner, source, sink, mt);
 }
 
 static HRESULT WINAPI graph_Reconnect(IFilterGraph2 *iface, IPin *pin)
@@ -2112,8 +2140,8 @@ static HRESULT WINAPI graph_Reconnect(IFilterGraph2 *iface, IPin *pin)
 
 static HRESULT WINAPI graph_Disconnect(IFilterGraph2 *iface, IPin *pin)
 {
-    ok(0, "Unexpected call.\n");
-    return E_NOTIMPL;
+    struct graph *graph = impl_from_IFilterGraph2(iface);
+    return IFilterGraph2_Disconnect(graph->inner, pin);
 }
 
 static HRESULT WINAPI graph_SetDefaultSyncSource(IFilterGraph2 *iface)
@@ -2209,13 +2237,77 @@ static const IFilterGraph2Vtbl graph_vtbl =
     graph_RenderEx,
 };
 
+static HRESULT WINAPI event_sink_QueryInterface(IMediaEventSink *iface, REFIID iid, void **out)
+{
+    struct graph *graph = impl_from_IMediaEventSink(iface);
+    return IFilterGraph2_QueryInterface(&graph->IFilterGraph2_iface, iid, out);
+}
+
+static ULONG WINAPI event_sink_AddRef(IMediaEventSink *iface)
+{
+    struct graph *graph = impl_from_IMediaEventSink(iface);
+    return IFilterGraph2_AddRef(&graph->IFilterGraph2_iface);
+}
+
+static ULONG WINAPI event_sink_Release(IMediaEventSink *iface)
+{
+    struct graph *graph = impl_from_IMediaEventSink(iface);
+    return IFilterGraph2_Release(&graph->IFilterGraph2_iface);
+}
+
+static HRESULT WINAPI event_sink_Notify(IMediaEventSink *iface,
+        LONG code, LONG_PTR param1, LONG_PTR param2)
+{
+    struct graph *graph = impl_from_IMediaEventSink(iface);
+    ++graph->got_notify;
+    graph->event_code = code;
+    graph->event_param1 = param1;
+    graph->event_param2 = param2;
+    return IMediaEventSink_Notify(graph->inner_event_sink, code, param1, param2);
+}
+
+static const IMediaEventSinkVtbl event_sink_vtbl =
+{
+    event_sink_QueryInterface,
+    event_sink_AddRef,
+    event_sink_Release,
+    event_sink_Notify,
+};
+
+static void graph_init(struct graph *graph)
+{
+    HRESULT hr;
+
+    memset(graph, 0, sizeof(*graph));
+    graph->IFilterGraph2_iface.lpVtbl = &graph_vtbl;
+    graph->IMediaEventSink_iface.lpVtbl = &event_sink_vtbl;
+    graph->refcount = 1;
+    hr = CoCreateInstance(&CLSID_FilterGraph, (IUnknown *)&graph->IFilterGraph2_iface, CLSCTX_INPROC_SERVER,
+            &IID_IUnknown, (void **)&graph->inner_unk);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IUnknown_QueryInterface(graph->inner_unk, &IID_IFilterGraph2, (void **)&graph->inner);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IUnknown_QueryInterface(graph->inner_unk, &IID_IMediaEventSink, (void **)&graph->inner_event_sink);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+}
+
+static void graph_destroy(struct graph *graph)
+{
+    ULONG ref;
+
+    IMediaEventSink_Release(graph->inner_event_sink);
+    IFilterGraph2_Release(graph->inner);
+    ref = IUnknown_Release(graph->inner_unk);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
 static void test_initialize(void)
 {
     IAMMultiMediaStream *mmstream = create_ammultimediastream();
-    IFilterGraph2 graph = {&graph_vtbl};
     IMediaStreamFilter *filter;
     IGraphBuilder *ret_graph;
     IMediaStream *stream;
+    struct graph graph;
     STREAM_TYPE type;
     HRESULT hr;
     ULONG ref;
@@ -2350,9 +2442,7 @@ static void test_initialize(void)
 
     mmstream = create_ammultimediastream();
 
-    CoCreateInstance(&CLSID_FilterGraph, (IUnknown *)&graph, CLSCTX_INPROC_SERVER,
-            &IID_IUnknown, (void **)&graph_inner_unk);
-    IUnknown_QueryInterface(graph_inner_unk, &IID_IFilterGraph2, (void **)&graph_inner);
+    graph_init(&graph);
 
     ret_graph = (IGraphBuilder *)0xdeadbeef;
     hr = IAMMultiMediaStream_GetFilterGraph(mmstream, &ret_graph);
@@ -2363,27 +2453,27 @@ static void test_initialize(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(!!filter, "Expected a non-NULL filter.");
 
-    got_add_filter = 0;
-    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, (IGraphBuilder *)&graph);
+    graph.got_add_filter = 0;
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, (IGraphBuilder *)&graph.IFilterGraph2_iface);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(got_add_filter == 1, "Got %d calls to IGraphBuilder::AddFilter().\n", got_add_filter);
-    ok(graph_filter == (IBaseFilter *)filter, "Got filter %p.\n", filter);
-    ok(!wcscmp(graph_filter_name, L"MediaStreamFilter"), "Got unexpected name %s.\n", wine_dbgstr_w(graph_filter_name));
+    ok(graph.got_add_filter == 1, "Got %d calls to IGraphBuilder::AddFilter().\n", graph.got_add_filter);
+    ok(graph.filter == (IBaseFilter *)filter, "Got filter %p.\n", filter);
+    ok(!wcscmp(graph.filter_name, L"MediaStreamFilter"), "Got unexpected name %s.\n", wine_dbgstr_w(graph.filter_name));
 
     hr = IAMMultiMediaStream_GetFilterGraph(mmstream, &ret_graph);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(ret_graph == (IGraphBuilder *)&graph, "Got unexpected graph %p.\n", ret_graph);
     IGraphBuilder_Release(ret_graph);
 
-    got_add_filter = 0;
+    graph.got_add_filter = 0;
     hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryAudio, 0, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(!got_add_filter, "Got %d calls to IGraphBuilder::AddFilter().\n", got_add_filter);
+    ok(!graph.got_add_filter, "Got %d calls to IGraphBuilder::AddFilter().\n", graph.got_add_filter);
 
-    got_add_filter = 0;
+    graph.got_add_filter = 0;
     hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryVideo, 0, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(!got_add_filter, "Got %d calls to IGraphBuilder::AddFilter().\n", got_add_filter);
+    ok(!graph.got_add_filter, "Got %d calls to IGraphBuilder::AddFilter().\n", graph.got_add_filter);
 
     hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, (IGraphBuilder *)&graph);
     ok(hr == E_INVALIDARG, "Got hr %#x.\n", hr);
@@ -2397,9 +2487,8 @@ static void test_initialize(void)
     IMediaStreamFilter_Release(filter);
     ref = IAMMultiMediaStream_Release(mmstream);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
-    IFilterGraph2_Release(graph_inner);
-    ok(graph_refcount == 1, "Got outstanding refcount %d.\n", graph_refcount);
-    IUnknown_Release(graph_inner_unk);
+
+    graph_destroy(&graph);
 }
 
 static IAMMultiMediaStream *mmstream_mmstream;
@@ -2869,6 +2958,87 @@ static void test_media_types(void)
     IMediaStream_Release(stream);
 
     ref = IAMMultiMediaStream_Release(mmstream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
+static void test_get_end_of_stream_event_handle(void)
+{
+    IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    IMediaStreamFilter *filter;
+    struct testfilter source;
+    IGraphBuilder *graph;
+    IMediaStream *stream;
+    HANDLE event;
+    HRESULT hr;
+    ULONG ref;
+    IPin *pin;
+
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilter(mmstream, &filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!!filter, "Expected non-null filter.\n");
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryVideo, 0, &stream);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStream_QueryInterface(stream, &IID_IPin, (void **)&pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilterGraph(mmstream, &graph);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!!graph, "Expected non-NULL graph.\n");
+    testfilter_init(&source);
+    source.IMediaSeeking_iface.lpVtbl = &testsource_seeking_vtbl;
+    hr = IGraphBuilder_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMultiMediaStream_GetEndOfStreamEventHandle(mmstream, NULL);
+    ok(hr == E_POINTER, "Got hr %#x.\n", hr);
+
+    event = INVALID_HANDLE_VALUE;
+    hr = IAMMultiMediaStream_GetEndOfStreamEventHandle(mmstream, &event);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &rgb32_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(WaitForSingleObject(event, 0) == WAIT_TIMEOUT, "Event should not be signaled.\n");
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(WaitForSingleObject(event, 0) == WAIT_TIMEOUT, "Event should not be signaled.\n");
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(WaitForSingleObject(event, 0) == 0, "Event should be signaled.\n");
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(WaitForSingleObject(event, 0) == 0, "Event should be signaled.\n");
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(WaitForSingleObject(event, 0) == WAIT_TIMEOUT, "Event should not be signaled.\n");
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    IGraphBuilder_Disconnect(graph, pin);
+    IGraphBuilder_Disconnect(graph, &source.source.pin.IPin_iface);
+
+    ref = IAMMultiMediaStream_Release(mmstream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IGraphBuilder_Release(graph);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IMediaStreamFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin);
+    ref = IMediaStream_Release(stream);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
@@ -3982,30 +4152,47 @@ static void test_audiostream_initialize(void)
 static void test_audiostream_begin_flush_end_flush(void)
 {
     IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    static const MSPID mspid = {0x88888888, 1};
     IAudioStreamSample *stream_sample;
     IAudioMediaStream *audio_stream;
+    IMediaStreamFilter *filter;
     IMediaSample *media_sample;
+    struct testfilter source2;
     struct testfilter source;
+    IAMMediaStream *stream2;
     IAudioData *audio_data;
-    IGraphBuilder *graph;
     IMediaStream *stream;
+    struct graph graph;
     HRESULT hr;
+    IPin *pin2;
     ULONG ref;
     IPin *pin;
 
-    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, NULL);
+    graph_init(&graph);
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, (IGraphBuilder *)&graph.IFilterGraph2_iface);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryAudio, 0, &stream);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = CoCreateInstance(&CLSID_AMAudioStream, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_Initialize(stream2, NULL, 0, &mspid, STREAMTYPE_READ);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)stream2, &mspid, 0, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMediaStream_QueryInterface(stream, &IID_IAudioMediaStream, (void **)&audio_stream);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMediaStream_QueryInterface(stream, &IID_IPin, (void **)&pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    hr = IAMMultiMediaStream_GetFilterGraph(mmstream, &graph);
+    hr = IAMMediaStream_QueryInterface(stream2, &IID_IPin, (void **)&pin2);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(graph != NULL, "Expected non-NULL graph.\n");
+    hr = IAMMultiMediaStream_GetFilter(mmstream, &filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
     testfilter_init(&source);
-    hr = IGraphBuilder_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
+    testfilter_init(&source2);
+    source.IMediaSeeking_iface.lpVtbl = &testsource_seeking_vtbl;
+    hr = IFilterGraph2_AddFilter(&graph.IFilterGraph2_iface, &source.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_AddFilter(&graph.IFilterGraph2_iface, &source2.filter.IBaseFilter_iface, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = CoCreateInstance(&CLSID_AMAudioData, NULL, CLSCTX_INPROC_SERVER, &IID_IAudioData, (void **)&audio_data);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -4014,7 +4201,12 @@ static void test_audiostream_begin_flush_end_flush(void)
     hr = IAudioMediaStream_CreateSample(audio_stream, audio_data, 0, &stream_sample);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &audio_mt);
+    hr = IFilterGraph2_ConnectDirect(&graph.IFilterGraph2_iface, &source.source.pin.IPin_iface, pin, &audio_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_ConnectDirect(&graph.IFilterGraph2_iface, &source2.source.pin.IPin_iface, pin2, &audio_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
@@ -4065,9 +4257,88 @@ static void test_audiostream_begin_flush_end_flush(void)
 
     hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    IGraphBuilder_Disconnect(graph, pin);
-    IGraphBuilder_Disconnect(graph, &source.source.pin.IPin_iface);
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IPin_EndOfStream(pin2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+    ok(graph.event_code == EC_COMPLETE, "Got event code %d.\n", graph.event_code);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+    graph.event_code = 0xcc;
+
+    hr = IPin_EndOfStream(pin2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+    ok(graph.event_code == EC_COMPLETE, "Got event code %d.\n", graph.event_code);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+    graph.event_code = 0xcc;
+
+    hr = IPin_EndOfStream(pin2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+    ok(graph.event_code == EC_COMPLETE, "Got event code %d.\n", graph.event_code);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    IFilterGraph2_Disconnect(&graph.IFilterGraph2_iface, pin);
+    IFilterGraph2_Disconnect(&graph.IFilterGraph2_iface, &source.source.pin.IPin_iface);
+    IFilterGraph2_Disconnect(&graph.IFilterGraph2_iface, pin2);
+    IFilterGraph2_Disconnect(&graph.IFilterGraph2_iface, &source2.source.pin.IPin_iface);
 
     ref = IAudioStreamSample_Release(stream_sample);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
@@ -4075,11 +4346,15 @@ static void test_audiostream_begin_flush_end_flush(void)
     ok(!ref, "Got outstanding refcount %d.\n", ref);
     ref = IAMMultiMediaStream_Release(mmstream);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
-    ref = IGraphBuilder_Release(graph);
+    graph_destroy(&graph);
+    ref = IMediaStreamFilter_Release(filter);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
     IPin_Release(pin);
     IAudioMediaStream_Release(audio_stream);
     ref = IMediaStream_Release(stream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin2);
+    ref = IAMMediaStream_Release(stream2);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
@@ -5459,35 +5734,52 @@ static void test_ddrawstream_receive(void)
 static void test_ddrawstream_begin_flush_end_flush(void)
 {
     IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    static const MSPID mspid = {0x88888888, 1};
     IDirectDrawStreamSample *stream_sample;
     IDirectDrawMediaStream *ddraw_stream;
+    IMediaStreamFilter *filter;
     IMediaSample *media_sample;
     IMediaFilter *media_filter;
+    struct testfilter source2;
     struct testfilter source;
-    IGraphBuilder *graph;
+    IAMMediaStream *stream2;
     IMediaStream *stream;
     VIDEOINFO video_info;
+    struct graph graph;
     AM_MEDIA_TYPE mt;
     HANDLE thread;
     HRESULT hr;
+    IPin *pin2;
     ULONG ref;
     IPin *pin;
 
-    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, NULL);
+    graph_init(&graph);
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, (IGraphBuilder *)&graph.IFilterGraph2_iface);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryVideo, 0, &stream);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = CoCreateInstance(&CLSID_AMDirectDrawStream, NULL, CLSCTX_INPROC_SERVER, &IID_IAMMediaStream, (void **)&stream2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMediaStream_Initialize(stream2, NULL, 0, &mspid, STREAMTYPE_READ);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, (IUnknown *)stream2, &mspid, 0, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMediaStream_QueryInterface(stream, &IID_IDirectDrawMediaStream, (void **)&ddraw_stream);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMediaStream_QueryInterface(stream, &IID_IPin, (void **)&pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    hr = IAMMultiMediaStream_GetFilterGraph(mmstream, &graph);
+    hr = IAMMediaStream_QueryInterface(stream2, &IID_IPin, (void **)&pin2);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(graph != NULL, "Expected non-NULL graph.\n");
-    hr = IGraphBuilder_QueryInterface(graph, &IID_IMediaFilter, (void **)&media_filter);
+    hr = IFilterGraph2_QueryInterface(&graph.IFilterGraph2_iface, &IID_IMediaFilter, (void **)&media_filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilter(mmstream, &filter);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     testfilter_init(&source);
-    hr = IGraphBuilder_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
+    testfilter_init(&source2);
+    source.IMediaSeeking_iface.lpVtbl = &testsource_seeking_vtbl;
+    hr = IFilterGraph2_AddFilter(&graph.IFilterGraph2_iface, &source.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_AddFilter(&graph.IFilterGraph2_iface, &source2.filter.IBaseFilter_iface, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IMediaFilter_SetSyncSource(media_filter, NULL);
@@ -5498,7 +5790,12 @@ static void test_ddrawstream_begin_flush_end_flush(void)
     video_info.bmiHeader.biHeight = 1;
     mt = rgb32_mt;
     mt.pbFormat = (BYTE *)&video_info;
-    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &mt);
+    hr = IFilterGraph2_ConnectDirect(&graph.IFilterGraph2_iface, &source.source.pin.IPin_iface, pin, &mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_ConnectDirect(&graph.IFilterGraph2_iface, &source2.source.pin.IPin_iface, pin2, &mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IDirectDrawMediaStream_CreateSample(ddraw_stream, NULL, NULL, 0, &stream_sample);
@@ -5554,16 +5851,96 @@ static void test_ddrawstream_begin_flush_end_flush(void)
 
     hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    IGraphBuilder_Disconnect(graph, pin);
-    IGraphBuilder_Disconnect(graph, &source.source.pin.IPin_iface);
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IPin_EndOfStream(pin2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+    ok(graph.event_code == EC_COMPLETE, "Got event code %d.\n", graph.event_code);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+    graph.event_code = 0xcc;
+
+    hr = IPin_EndOfStream(pin2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+    ok(graph.event_code == EC_COMPLETE, "Got event code %d.\n", graph.event_code);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+    graph.event_code = 0xcc;
+
+    hr = IPin_EndOfStream(pin2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+    ok(graph.event_code == EC_COMPLETE, "Got event code %d.\n", graph.event_code);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    IFilterGraph2_Disconnect(&graph.IFilterGraph2_iface, pin);
+    IFilterGraph2_Disconnect(&graph.IFilterGraph2_iface, &source.source.pin.IPin_iface);
+    IFilterGraph2_Disconnect(&graph.IFilterGraph2_iface, pin2);
+    IFilterGraph2_Disconnect(&graph.IFilterGraph2_iface, &source2.source.pin.IPin_iface);
 
     ref = IDirectDrawStreamSample_Release(stream_sample);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
     ref = IAMMultiMediaStream_Release(mmstream);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
     IMediaFilter_Release(media_filter);
-    ref = IGraphBuilder_Release(graph);
+    graph_destroy(&graph);
+    ref = IMediaStreamFilter_Release(filter);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
     IPin_Release(pin);
     IDirectDrawMediaStream_Release(ddraw_stream);
@@ -5976,30 +6353,36 @@ static void test_ammediastream_set_state(void)
     check_ammediastream_set_state(&MSPID_PrimaryVideo);
 }
 
-static void check_ammediastream_end_of_stream(const MSPID *id, const AM_MEDIA_TYPE *mt)
+static void check_ammediastream_end_of_stream(const CLSID *clsid, const MSPID *id, const AM_MEDIA_TYPE *mt)
 {
     IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    IMediaStreamFilter *filter;
     struct testfilter source;
-    IGraphBuilder *graph;
     IMediaStream *stream;
+    struct graph graph;
     HRESULT hr;
     ULONG ref;
     IPin *pin;
 
-    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, NULL);
+    graph_init(&graph);
+
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, (IGraphBuilder *)&graph.IFilterGraph2_iface);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, id, 0, &stream);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = IMediaStream_QueryInterface(stream, &IID_IPin, (void **)&pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    hr = IAMMultiMediaStream_GetFilterGraph(mmstream, &graph);
+    hr = IAMMultiMediaStream_GetFilter(mmstream, &filter);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(!!graph, "Expected non-NULL graph.\n");
     testfilter_init(&source);
-    hr = IGraphBuilder_AddFilter(graph, &source.filter.IBaseFilter_iface, NULL);
+    source.IMediaSeeking_iface.lpVtbl = &testsource_seeking_vtbl;
+    hr = IFilterGraph2_AddFilter(&graph.IFilterGraph2_iface, &source.filter.IBaseFilter_iface, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IGraphBuilder_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, mt);
+    hr = IFilterGraph2_ConnectDirect(&graph.IFilterGraph2_iface, &source.source.pin.IPin_iface, pin, mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IPin_EndOfStream(pin);
@@ -6023,12 +6406,28 @@ static void check_ammediastream_end_of_stream(const MSPID *id, const AM_MEDIA_TY
     hr = IPin_EndOfStream(pin);
     ok(hr == E_FAIL, "Got hr %#x.\n", hr);
 
-    IGraphBuilder_Disconnect(graph, pin);
-    IGraphBuilder_Disconnect(graph, &source.source.pin.IPin_iface);
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+    graph.event_code = 0xcc;
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+    ok(graph.event_code == EC_COMPLETE, "Got event code %d.\n", graph.event_code);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    IFilterGraph2_Disconnect(&graph.IFilterGraph2_iface, pin);
+    IFilterGraph2_Disconnect(&graph.IFilterGraph2_iface, &source.source.pin.IPin_iface);
 
     ref = IAMMultiMediaStream_Release(mmstream);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
-    ref = IGraphBuilder_Release(graph);
+    graph_destroy(&graph);
+    ref = IMediaStreamFilter_Release(filter);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
     IPin_Release(pin);
     ref = IMediaStream_Release(stream);
@@ -6037,8 +6436,8 @@ static void check_ammediastream_end_of_stream(const MSPID *id, const AM_MEDIA_TY
 
 static void test_ammediastream_end_of_stream(void)
 {
-    check_ammediastream_end_of_stream(&MSPID_PrimaryAudio, &audio_mt);
-    check_ammediastream_end_of_stream(&MSPID_PrimaryVideo, &rgb32_mt);
+    check_ammediastream_end_of_stream(&CLSID_AMAudioStream, &MSPID_PrimaryAudio, &audio_mt);
+    check_ammediastream_end_of_stream(&CLSID_AMDirectDrawStream, &MSPID_PrimaryVideo, &rgb32_mt);
 }
 
 void test_mediastreamfilter_get_state(void)
@@ -6814,6 +7213,323 @@ static void test_mediastreamfilter_wait_until(void)
     CloseHandle(cookie2.advise_time_called_event);
 
     ref = IMediaStreamFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
+static void test_mediastreamfilter_end_of_stream(void)
+{
+    IAMMultiMediaStream *mmstream = create_ammultimediastream();
+    struct testfilter source1, source2;
+    IMediaStream *stream1, *stream2;
+    IMediaControl *media_control;
+    IMediaStreamFilter *filter;
+    struct graph graph;
+    IPin *pin1, *pin2;
+    HRESULT hr;
+    ULONG ref;
+
+    graph_init(&graph);
+    hr = IFilterGraph2_QueryInterface(&graph.IFilterGraph2_iface, &IID_IMediaControl, (void **)&media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMultiMediaStream_Initialize(mmstream, STREAMTYPE_READ, 0, (IGraphBuilder *)&graph.IFilterGraph2_iface);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryAudio, 0, &stream1);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_AddMediaStream(mmstream, NULL, &MSPID_PrimaryVideo, 0, &stream2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStream_QueryInterface(stream1, &IID_IPin, (void **)&pin1);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStream_QueryInterface(stream2, &IID_IPin, (void **)&pin2);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_GetFilter(mmstream, &filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(filter != NULL, "Expected non-null filter\n");
+    testfilter_init(&source1);
+    testfilter_init(&source2);
+    hr = IFilterGraph2_AddFilter(&graph.IFilterGraph2_iface, &source1.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_AddFilter(&graph.IFilterGraph2_iface, &source2.filter.IBaseFilter_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_Connect(&source1.source.pin.IPin_iface, pin1, &audio_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_Connect(&source2.source.pin.IPin_iface, pin2, &rgb32_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* Initially, EC_COMPLETE notifications are disabled. */
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* Unsuccsessful call to SupportSeeking does not enable EC_COMPLETE notifications. */
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
+    ok(hr == E_NOINTERFACE, "Got hr %#x.\n", hr);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* Successful call to SupportSeeking enables EC_COMPLETE notifications. */
+    source1.IMediaSeeking_iface.lpVtbl = &testsource_seeking_vtbl;
+
+    hr = IMediaStreamFilter_SupportSeeking(filter, TRUE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* EC_COMPLETE is sent on paused->running state transition
+     * if EndOfStream has been called for all streams. */
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaControl_Pause(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaControl_Run(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaControl_Run(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaControl_Stop(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* EC_COMPLETE is sent on paused->running state transition
+     * if EndOfStream has been called for all streams. */
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaControl_Pause(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaControl_Run(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaControl_Stop(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* EndOfStream count is reset on paused->stopped state transition. */
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* EOS count is not reset on running->paused state transition. */
+    hr = IMediaControl_Run(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Pause(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaControl_Run(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaControl_Stop(media_control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* EndOfStream count is not reset when Stop() is called on an already stopped filter. */
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_Stop(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* Flush with cancel_eos=TRUE decrements EOS count. */
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_Flush(filter, TRUE);
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* Flush followed by EndOfStream causes another EC_COMPLETE to be sent. */
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaStreamFilter_Flush(filter, TRUE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 2, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* Flush decrements EOS count event when it is 0. */
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_Flush(filter, TRUE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 0, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* Flush with cancel_eos=FALSE does not decrement EOS count. */
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    graph.got_notify = 0;
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaStreamFilter_Flush(filter, FALSE);
+
+    hr = IMediaStreamFilter_EndOfStream(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ok(graph.got_notify == 1, "Got %d calls to IMediaEventSink::Notify().\n", graph.got_notify);
+
+    hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_STOP);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ref = IAMMultiMediaStream_Release(mmstream);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IMediaControl_Release(media_control);
+    graph_destroy(&graph);
+    ref = IMediaStreamFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin1);
+    ref = IMediaStream_Release(stream1);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IPin_Release(pin2);
+    ref = IMediaStream_Release(stream2);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
@@ -7795,6 +8511,19 @@ static void test_ddrawstreamsample_update(void)
     hr = IAMMultiMediaStream_SetState(mmstream, STREAMSTATE_RUN);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
+    hr = IDirectDrawStreamSample_Update(stream_sample, 0, event, NULL, 0);
+    ok(hr == MS_S_PENDING, "Got hr %#x.\n", hr);
+
+    ok(WaitForSingleObject(event, 0) == WAIT_TIMEOUT, "Event should not be signaled.\n");
+
+    media_sample = ammediastream_allocate_sample(&source, test_data, sizeof(test_data));
+    hr = IMemInputPin_Receive(source.source.pMemInputPin, media_sample);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ref = IMediaSample_Release(media_sample);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+
+    ok(WaitForSingleObject(event, 0) == 0, "Event should be signaled.\n");
+
     hr = IDirectDrawStreamSample_Update(stream_sample, SSUPDATE_ASYNC, NULL, NULL, 0);
     ok(hr == MS_S_PENDING, "Got hr %#x.\n", hr);
     EXPECT_REF(stream_sample, 1);
@@ -8666,6 +9395,7 @@ START_TEST(amstream)
     test_set_state();
     test_enum_media_types();
     test_media_types();
+    test_get_end_of_stream_event_handle();
 
     test_avi_path = load_resource(L"test.avi");
 
@@ -8724,6 +9454,7 @@ START_TEST(amstream)
     test_mediastreamfilter_get_current_stream_time();
     test_mediastreamfilter_reference_time_to_stream_time();
     test_mediastreamfilter_wait_until();
+    test_mediastreamfilter_end_of_stream();
 
     CoUninitialize();
 }

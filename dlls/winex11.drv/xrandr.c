@@ -29,9 +29,6 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xrandr);
-#ifdef HAVE_XRRGETPROVIDERRESOURCES
-WINE_DECLARE_DEBUG_CHANNEL(winediag);
-#endif
 
 #ifdef SONAME_LIBXRANDR
 
@@ -350,7 +347,6 @@ static BOOL is_broken_driver(void)
     XRRScreenResources *screen_resources;
     XRROutputInfo *output_info;
     XRRModeInfo *first_mode;
-    INT major, event, error;
     INT output_idx, i, j;
     BOOL only_one_mode;
 
@@ -401,15 +397,6 @@ static BOOL is_broken_driver(void)
 
         if (!only_one_mode)
             continue;
-
-        /* Check if it is NVIDIA proprietary driver */
-        if (XQueryExtension( gdi_display, "NV-CONTROL", &major, &event, &error ))
-        {
-            ERR_(winediag)("Broken NVIDIA RandR detected, falling back to RandR 1.0. "
-                           "Please consider using the Nouveau driver instead.\n");
-            pXRRFreeScreenResources( screen_resources );
-            return TRUE;
-        }
     }
     pXRRFreeScreenResources( screen_resources );
     return FALSE;
@@ -1522,6 +1509,24 @@ done:
 
 #endif
 
+static void xrandr14_convert_coordinates( struct x11drv_display_setting *displays, UINT display_count )
+{
+    INT left_most = INT_MAX, top_most = INT_MAX;
+    UINT display_idx;
+
+    for (display_idx = 0; display_idx < display_count; ++display_idx)
+    {
+        left_most = min( left_most, displays[display_idx].desired_mode.u1.s2.dmPosition.x );
+        top_most = min( top_most, displays[display_idx].desired_mode.u1.s2.dmPosition.y );
+    }
+
+    for (display_idx = 0; display_idx < display_count; ++display_idx)
+    {
+        displays[display_idx].desired_mode.u1.s2.dmPosition.x -= left_most;
+        displays[display_idx].desired_mode.u1.s2.dmPosition.y -= top_most;
+    }
+}
+
 void X11DRV_XRandR_Init(void)
 {
     struct x11drv_display_device_handler display_handler;
@@ -1550,6 +1555,7 @@ void X11DRV_XRandR_Init(void)
     settings_handler.free_modes = xrandr10_free_modes;
     settings_handler.get_current_mode = xrandr10_get_current_mode;
     settings_handler.set_current_mode = xrandr10_set_current_mode;
+    settings_handler.convert_coordinates = NULL;
     X11DRV_Settings_SetHandler( &settings_handler );
 
 #ifdef HAVE_XRRGETPROVIDERRESOURCES
@@ -1608,6 +1614,7 @@ void X11DRV_XRandR_Init(void)
         settings_handler.free_modes = xrandr14_free_modes;
         settings_handler.get_current_mode = xrandr14_get_current_mode;
         settings_handler.set_current_mode = xrandr14_set_current_mode;
+        settings_handler.convert_coordinates = xrandr14_convert_coordinates;
         X11DRV_Settings_SetHandler( &settings_handler );
     }
 #endif

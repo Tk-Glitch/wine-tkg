@@ -476,7 +476,7 @@ HRESULT CDECL wined3d_query_get_data(struct wined3d_query *query,
                 || (query->buffer_object && !wined3d_query_buffer_is_valid(query)))
         {
             if (flags & WINED3DGETDATA_FLUSH && !query->device->cs->queries_flushed)
-                wined3d_cs_emit_flush(query->device->cs);
+                query->device->cs->c.ops->flush(&query->device->cs->c);
             return S_FALSE;
         }
         if (query->buffer_object)
@@ -504,15 +504,7 @@ HRESULT CDECL wined3d_query_issue(struct wined3d_query *query, DWORD flags)
 {
     TRACE("query %p, flags %#x.\n", query, flags);
 
-    if (flags & WINED3DISSUE_END)
-        ++query->counter_main;
-
-    wined3d_cs_emit_query_issue(query->device->cs, query, flags);
-
-    if (flags & WINED3DISSUE_BEGIN)
-        query->state = QUERY_BUILDING;
-    else
-        query->state = QUERY_SIGNALLED;
+    wined3d_device_context_issue_query(&query->device->cs->c, query, flags);
 
     return WINED3D_OK;
 }

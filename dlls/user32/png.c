@@ -293,16 +293,10 @@ static BITMAPINFO * CDECL load_png(const char *png_data, DWORD *size)
     return info;
 }
 
-int CDECL hack_unix_setenv(const char *name, const char *value, int overwrite)
-{
-    return setenv(name, value, overwrite);
-}
-
-static const struct png_funcs png_funcs_unix =
+static const struct png_funcs png_funcs =
 {
     get_png_info,
-    load_png,
-    hack_unix_setenv,
+    load_png
 };
 
 NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out )
@@ -341,7 +335,7 @@ NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *p
     LOAD_FUNCPTR(png_set_read_fn);
 #undef LOAD_FUNCPTR
 
-    *(const struct png_funcs **)ptr_out = &png_funcs_unix;
+    *(const struct png_funcs **)ptr_out = &png_funcs;
     return STATUS_SUCCESS;
 }
 

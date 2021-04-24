@@ -147,6 +147,7 @@ struct transform_stream
 {
     struct list samples;
     unsigned int requests;
+    unsigned int min_buffer_size;
 };
 
 enum topo_node_flags
@@ -1231,6 +1232,7 @@ static DWORD session_get_object_rate_caps(IUnknown *object)
 static HRESULT session_add_media_sink(struct media_session *session, IMFTopologyNode *node, IMFMediaSink *sink)
 {
     struct media_sink *media_sink;
+    unsigned int disable_preroll = 0;
     DWORD flags;
 
     LIST_FOR_EACH_ENTRY(media_sink, &session->presentation.sinks, struct media_sink, entry)
@@ -1247,7 +1249,8 @@ static HRESULT session_add_media_sink(struct media_session *session, IMFTopology
 
     IMFMediaSink_QueryInterface(media_sink->sink, &IID_IMFMediaEventGenerator, (void **)&media_sink->event_generator);
 
-    if (SUCCEEDED(IMFMediaSink_GetCharacteristics(sink, &flags)) && flags & MEDIASINK_CAN_PREROLL)
+    IMFTopologyNode_GetUINT32(node, &MF_TOPONODE_DISABLE_PREROLL, &disable_preroll);
+    if (SUCCEEDED(IMFMediaSink_GetCharacteristics(sink, &flags)) && flags & MEDIASINK_CAN_PREROLL && !disable_preroll)
     {
         if (SUCCEEDED(IMFMediaSink_QueryInterface(media_sink->sink, &IID_IMFMediaSinkPreroll, (void **)&media_sink->preroll)))
             session->presentation.flags |= SESSION_FLAG_NEEDS_PREROLL;
@@ -1258,11 +1261,19 @@ static HRESULT session_add_media_sink(struct media_session *session, IMFTopology
     return S_OK;
 }
 
+static unsigned int transform_node_get_stream_id(struct topo_node *node, BOOL output, unsigned int index)
+{
+    unsigned int *map = output ? node->u.transform.output_map : node->u.transform.input_map;
+    return map ? map[index] : index;
+}
+
 static HRESULT session_set_transform_stream_info(struct topo_node *node)
 {
     unsigned int *input_map = NULL, *output_map = NULL;
-    unsigned int i, input_count, output_count;
+    unsigned int i, input_count, output_count, block_alignment;
     struct transform_stream *streams;
+    IMFMediaType *media_type;
+    GUID major = { 0 };
     HRESULT hr;
 
     hr = IMFTransform_GetStreamCount(node->object.transform, &input_count, &output_count);
@@ -1282,20 +1293,33 @@ static HRESULT session_set_transform_stream_info(struct topo_node *node)
 
     if (SUCCEEDED(hr))
     {
+        node->u.transform.input_map = input_map;
+        node->u.transform.output_map = output_map;
+
         streams = heap_calloc(input_count, sizeof(*streams));
         for (i = 0; i < input_count; ++i)
             list_init(&streams[i].samples);
         node->u.transform.inputs = streams;
+        node->u.transform.input_count = input_count;
 
         streams = heap_calloc(output_count, sizeof(*streams));
         for (i = 0; i < output_count; ++i)
+        {
             list_init(&streams[i].samples);
-        node->u.transform.outputs = streams;
 
-        node->u.transform.input_count = input_count;
+            if (SUCCEEDED(IMFTransform_GetOutputCurrentType(node->object.transform,
+                    transform_node_get_stream_id(node, TRUE, i), &media_type)))
+            {
+                if (SUCCEEDED(IMFMediaType_GetMajorType(media_type, &major)) && IsEqualGUID(&major, &MFMediaType_Audio)
+                        && SUCCEEDED(IMFMediaType_GetUINT32(media_type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, &block_alignment)))
+                {
+                    streams[i].min_buffer_size = block_alignment;
+                }
+                IMFMediaType_Release(media_type);
+            }
+        }
+        node->u.transform.outputs = streams;
         node->u.transform.output_count = output_count;
-        node->u.transform.input_map = input_map;
-        node->u.transform.output_map = output_map;
     }
 
     return hr;
@@ -1996,15 +2020,66 @@ static ULONG WINAPI session_get_service_Release(IMFGetService *iface)
     return IMFMediaSession_Release(&session->IMFMediaSession_iface);
 }
 
+static HRESULT session_get_video_render_service(struct media_session *session, REFGUID service,
+        REFIID riid, void **obj)
+{
+    IMFStreamSink *stream_sink;
+    IMFTopologyNode *node;
+    IMFCollection *nodes;
+    IMFMediaSink *sink;
+    unsigned int i = 0;
+    IUnknown *vr;
+    HRESULT hr = E_FAIL;
+
+    /* Use first sink to support IMFVideoRenderer. */
+    if (session->presentation.current_topology)
+    {
+        if (SUCCEEDED(IMFTopology_GetOutputNodeCollection(session->presentation.current_topology,
+                &nodes)))
+        {
+            while (IMFCollection_GetElement(nodes, i++, (IUnknown **)&node) == S_OK)
+            {
+                if (SUCCEEDED(topology_node_get_object(node, &IID_IMFStreamSink, (void **)&stream_sink)))
+                {
+                    if (SUCCEEDED(IMFStreamSink_GetMediaSink(stream_sink, &sink)))
+                    {
+                        if (SUCCEEDED(IMFMediaSink_QueryInterface(sink, &IID_IMFVideoRenderer, (void **)&vr)))
+                        {
+                            if (FAILED(hr = MFGetService(vr, service, riid, obj)))
+                                WARN("Failed to get service from video renderer %#x.\n", hr);
+                            IUnknown_Release(vr);
+                        }
+                    }
+                    IMFStreamSink_Release(stream_sink);
+                }
+
+                IMFTopologyNode_Release(node);
+
+                if (*obj)
+                    break;
+            }
+
+            IMFCollection_Release(nodes);
+        }
+    }
+
+    return hr;
+}
+
 static HRESULT WINAPI session_get_service_GetService(IMFGetService *iface, REFGUID service, REFIID riid, void **obj)
 {
     struct media_session *session = impl_from_IMFGetService(iface);
+    HRESULT hr = S_OK;
 
     TRACE("%p, %s, %s, %p.\n", iface, debugstr_guid(service), debugstr_guid(riid), obj);
 
     *obj = NULL;
 
-    if (IsEqualGUID(service, &MF_RATE_CONTROL_SERVICE))
+    EnterCriticalSection(&session->cs);
+    if (FAILED(hr = session_is_shut_down(session)))
+    {
+    }
+    else if (IsEqualGUID(service, &MF_RATE_CONTROL_SERVICE))
     {
         if (IsEqualIID(riid, &IID_IMFRateSupport))
         {
@@ -2014,68 +2089,31 @@ static HRESULT WINAPI session_get_service_GetService(IMFGetService *iface, REFGU
         {
             *obj = &session->IMFRateControl_iface;
         }
+        else
+            hr = E_NOINTERFACE;
+
+        if (*obj)
+            IUnknown_AddRef((IUnknown *)*obj);
     }
     else if (IsEqualGUID(service, &MF_LOCAL_MFT_REGISTRATION_SERVICE))
     {
-        return IMFLocalMFTRegistration_QueryInterface(&local_mft_registration, riid, obj);
+        hr = IMFLocalMFTRegistration_QueryInterface(&local_mft_registration, riid, obj);
     }
     else if (IsEqualGUID(service, &MF_TOPONODE_ATTRIBUTE_EDITOR_SERVICE))
     {
         *obj = &session->IMFTopologyNodeAttributeEditor_iface;
+        IUnknown_AddRef((IUnknown *)*obj);
     }
     else if (IsEqualGUID(service, &MR_VIDEO_RENDER_SERVICE))
     {
-        IMFStreamSink *stream_sink;
-        IMFTopologyNode *node;
-        IMFCollection *nodes;
-        IMFMediaSink *sink;
-        unsigned int i = 0;
-        IUnknown *vr;
-        HRESULT hr;
-
-        EnterCriticalSection(&session->cs);
-
-        /* Use first sink to support IMFVideoRenderer. */
-        if (session->presentation.current_topology)
-        {
-            if (SUCCEEDED(IMFTopology_GetOutputNodeCollection(session->presentation.current_topology,
-                    &nodes)))
-            {
-                while (IMFCollection_GetElement(nodes, i++, (IUnknown **)&node) == S_OK)
-                {
-                    if (SUCCEEDED(topology_node_get_object(node, &IID_IMFStreamSink, (void **)&stream_sink)))
-                    {
-                        if (SUCCEEDED(IMFStreamSink_GetMediaSink(stream_sink, &sink)))
-                        {
-                            if (SUCCEEDED(IMFMediaSink_QueryInterface(sink, &IID_IMFVideoRenderer, (void **)&vr)))
-                            {
-                                if (FAILED(hr = MFGetService(vr, service, riid, obj)))
-                                    WARN("Failed to get service from video renderer %#x.\n", hr);
-                                IUnknown_Release(vr);
-                            }
-                        }
-                        IMFStreamSink_Release(stream_sink);
-                    }
-
-                    IMFTopologyNode_Release(node);
-
-                    if (*obj)
-                        break;
-                }
-
-                IMFCollection_Release(nodes);
-            }
-        }
-
-        LeaveCriticalSection(&session->cs);
+        hr = session_get_video_render_service(session, service, riid, obj);
     }
     else
         FIXME("Unsupported service %s.\n", debugstr_guid(service));
 
-    if (*obj)
-        IUnknown_AddRef((IUnknown *)*obj);
+    LeaveCriticalSection(&session->cs);
 
-    return *obj ? S_OK : E_NOINTERFACE;
+    return hr;
 }
 
 static const IMFGetServiceVtbl session_get_service_vtbl =
@@ -2646,12 +2684,6 @@ static void session_set_sink_stream_state(struct media_session *session, IMFStre
     }
 }
 
-static DWORD transform_node_get_stream_id(struct topo_node *node, BOOL output, DWORD index)
-{
-    unsigned int *map = output ? node->u.transform.output_map : node->u.transform.input_map;
-    return map ? map[index] : index;
-}
-
 static struct sample *transform_create_sample(IMFSample *sample)
 {
     struct sample *sample_entry = heap_alloc_zero(sizeof(*sample_entry));
@@ -2669,8 +2701,8 @@ static struct sample *transform_create_sample(IMFSample *sample)
 static HRESULT transform_get_external_output_sample(const struct media_session *session, struct topo_node *transform,
         unsigned int output_index, const MFT_OUTPUT_STREAM_INFO *stream_info, IMFSample **sample)
 {
+    unsigned int buffer_size, downstream_input;
     IMFTopologyNode *downstream_node;
-    unsigned int downstream_input;
     IMFMediaBuffer *buffer = NULL;
     struct topo_node *topo_node;
     TOPOID node_id;
@@ -2693,7 +2725,9 @@ static HRESULT transform_get_external_output_sample(const struct media_session *
     }
     else
     {
-        hr = MFCreateAlignedMemoryBuffer(stream_info->cbSize, stream_info->cbAlignment, &buffer);
+        buffer_size = max(stream_info->cbSize, transform->u.transform.outputs[output_index].min_buffer_size);
+
+        hr = MFCreateAlignedMemoryBuffer(buffer_size, stream_info->cbAlignment, &buffer);
         if (SUCCEEDED(hr))
             hr = MFCreateSample(sample);
 
@@ -2730,7 +2764,7 @@ static HRESULT transform_node_pull_samples(const struct media_session *session, 
         if (FAILED(hr = IMFTransform_GetOutputStreamInfo(node->object.transform, buffers[i].dwStreamID, &stream_info)))
             break;
 
-        if (!(stream_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES))
+        if (!(stream_info.dwFlags & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES | MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES)))
         {
             if (FAILED(hr = transform_get_external_output_sample(session, node, i, &stream_info, &buffers[i].pSample)))
                 break;
@@ -3197,6 +3231,22 @@ static HRESULT WINAPI session_events_callback_Invoke(IMFAsyncCallback *iface, IM
                 IMFMediaEventQueue_QueueEvent(session->event_queue, event);
             }
             LeaveCriticalSection(&session->cs);
+            break;
+
+        case MEReconnectStart:
+        case MEReconnectEnd:
+
+            EnterCriticalSection(&session->cs);
+            if (session_get_media_source(session, (IMFMediaSource *)event_source))
+                IMFMediaEventQueue_QueueEvent(session->event_queue, event);
+            LeaveCriticalSection(&session->cs);
+            break;
+
+        case MEExtendedType:
+        case MERendererEvent:
+        case MEStreamSinkFormatChanged:
+
+            IMFMediaEventQueue_QueueEvent(session->event_queue, event);
             break;
 
         case MENewStream:

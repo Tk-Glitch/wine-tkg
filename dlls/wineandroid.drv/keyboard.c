@@ -660,7 +660,7 @@ static BOOL get_async_key_state( BYTE state[256] )
 
     SERVER_START_REQ( get_key_state )
     {
-        req->tid = 0;
+        req->async = 1;
         req->key = -1;
         wine_server_set_reply( req, state, 256 );
         ret = !wine_server_call( req );
@@ -671,6 +671,7 @@ static BOOL get_async_key_state( BYTE state[256] )
 
 static void send_keyboard_input( HWND hwnd, WORD vkey, WORD scan, DWORD flags )
 {
+    RAWINPUT rawinput;
     INPUT input;
 
     input.type             = INPUT_KEYBOARD;
@@ -680,7 +681,7 @@ static void send_keyboard_input( HWND hwnd, WORD vkey, WORD scan, DWORD flags )
     input.u.ki.time        = 0;
     input.u.ki.dwExtraInfo = 0;
 
-    __wine_send_input( hwnd, &input, SEND_HWMSG_RAWINPUT|SEND_HWMSG_WINDOW );
+    __wine_send_input( hwnd, &input, &rawinput );
 }
 
 /***********************************************************************
