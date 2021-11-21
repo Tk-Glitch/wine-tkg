@@ -30,7 +30,7 @@
 #include "winternl.h"
 #include "winerror.h"
 #include "ntgdi_private.h"
-#include "gdi_private.h"
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dc);
@@ -47,7 +47,7 @@ static const struct gdi_obj_funcs dc_funcs =
 
 static inline DC *get_dc_obj( HDC hdc )
 {
-    WORD type;
+    DWORD type;
     DC *dc = get_any_obj_ptr( hdc, &type );
     if (!dc) return NULL;
 
@@ -118,7 +118,7 @@ static void set_initial_dc_state( DC *dc )
 /***********************************************************************
  *           alloc_dc_ptr
  */
-DC *alloc_dc_ptr( WORD magic )
+DC *alloc_dc_ptr( DWORD magic )
 {
     DC *dc;
 
@@ -133,10 +133,10 @@ DC *alloc_dc_ptr( WORD magic )
     dc->physDev             = &dc->nulldrv;
     dc->thread              = GetCurrentThreadId();
     dc->refcount            = 1;
-    dc->hPen                = GDI_inc_ref_count( GetStockObject( BLACK_PEN ));
-    dc->hBrush              = GDI_inc_ref_count( GetStockObject( WHITE_BRUSH ));
-    dc->hFont               = GDI_inc_ref_count( GetStockObject( SYSTEM_FONT ));
-    dc->hPalette            = GetStockObject( DEFAULT_PALETTE );
+    dc->hPen                = GDI_inc_ref_count( get_stock_object( BLACK_PEN ));
+    dc->hBrush              = GDI_inc_ref_count( get_stock_object( WHITE_BRUSH ));
+    dc->hFont               = GDI_inc_ref_count( get_stock_object( SYSTEM_FONT ));
+    dc->hPalette            = get_stock_object( DEFAULT_PALETTE );
 
     set_initial_dc_state( dc );
 
@@ -164,10 +164,10 @@ DC *alloc_dc_ptr( WORD magic )
  */
 static void free_dc_state( DC *dc )
 {
-    if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
-    if (dc->hMetaRgn) DeleteObject( dc->hMetaRgn );
-    if (dc->hVisRgn) DeleteObject( dc->hVisRgn );
-    if (dc->region) DeleteObject( dc->region );
+    if (dc->hClipRgn) NtGdiDeleteObjectApp( dc->hClipRgn );
+    if (dc->hMetaRgn) NtGdiDeleteObjectApp( dc->hMetaRgn );
+    if (dc->hVisRgn) NtGdiDeleteObjectApp( dc->hVisRgn );
+    if (dc->region) NtGdiDeleteObjectApp( dc->region );
     if (dc->path) free_gdi_path( dc->path );
     HeapFree( GetProcessHeap(), 0, dc->attr );
     HeapFree( GetProcessHeap(), 0, dc );
@@ -366,8 +366,7 @@ void DC_UpdateXforms( DC *dc )
 
     oldworld2vport = dc->xformWorld2Vport;
     /* Combine with the world transformation */
-    CombineTransform( &dc->xformWorld2Vport, &dc->xformWorld2Wnd,
-        &xformWnd2Vport );
+    combine_transform( &dc->xformWorld2Vport, &dc->xformWorld2Wnd, &xformWnd2Vport );
 
     /* Create inverse of world-to-viewport transformation */
     dc->vport2WorldValid = DC_InvertXform( &dc->xformWorld2Vport,
@@ -396,16 +395,16 @@ static BOOL reset_dc_state( HDC hdc )
     set_initial_dc_state( dc );
     set_bk_color( dc, RGB( 255, 255, 255 ));
     set_text_color( dc, RGB( 0, 0, 0 ));
-    NtGdiSelectBrush( hdc, GetStockObject( WHITE_BRUSH ));
-    NtGdiSelectFont( hdc, GetStockObject( SYSTEM_FONT ));
-    NtGdiSelectPen( hdc, GetStockObject( BLACK_PEN ));
+    NtGdiSelectBrush( hdc, get_stock_object( WHITE_BRUSH ));
+    NtGdiSelectFont( hdc, get_stock_object( SYSTEM_FONT ));
+    NtGdiSelectPen( hdc, get_stock_object( BLACK_PEN ));
     NtGdiSetVirtualResolution( hdc, 0, 0, 0, 0 );
-    GDISelectPalette( hdc, GetStockObject( DEFAULT_PALETTE ), FALSE );
+    GDISelectPalette( hdc, get_stock_object( DEFAULT_PALETTE ), FALSE );
     NtGdiSetBoundsRect( hdc, NULL, DCB_DISABLE );
     NtGdiAbortPath( hdc );
 
-    if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
-    if (dc->hMetaRgn) DeleteObject( dc->hMetaRgn );
+    if (dc->hClipRgn) NtGdiDeleteObjectApp( dc->hClipRgn );
+    if (dc->hMetaRgn) NtGdiDeleteObjectApp( dc->hMetaRgn );
     dc->hClipRgn = 0;
     dc->hMetaRgn = 0;
     update_dc_clipping( dc );
@@ -660,7 +659,7 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
     if (!(dc = alloc_dc_ptr( NTGDI_OBJ_DC ))) return 0;
     hdc = dc->hSelf;
 
-    dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
+    dc->hBitmap = GDI_inc_ref_count( get_stock_object( DEFAULT_BITMAP ));
 
     TRACE("(driver=%s, device=%s, output=%s): returning %p\n",
           debugstr_w(driver), debugstr_w(device), debugstr_w(output), dc->hSelf );
@@ -728,7 +727,7 @@ HDC WINAPI NtGdiCreateCompatibleDC( HDC hdc )
 
     TRACE("(%p): returning %p\n", hdc, dc->hSelf );
 
-    dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
+    dc->hBitmap = GDI_inc_ref_count( get_stock_object( DEFAULT_BITMAP ));
     dc->attr->vis_rect.left   = 0;
     dc->attr->vis_rect.top    = 0;
     dc->attr->vis_rect.right  = 1;
@@ -806,6 +805,24 @@ INT WINAPI NtGdiGetDeviceCaps( HDC hdc, INT cap )
 }
 
 
+static BOOL set_graphics_mode( DC *dc, int mode )
+{
+    if (mode == dc->attr->graphics_mode) return TRUE;
+    if (mode <= 0 || mode > GM_LAST) return FALSE;
+
+    /* One would think that setting the graphics mode to GM_COMPATIBLE
+     * would also reset the world transformation matrix to the unity
+     * matrix. However, in Windows, this is not the case. This doesn't
+     * make a lot of sense to me, but that's the way it is.
+     */
+    dc->attr->graphics_mode = mode;
+
+    /* font metrics depend on the graphics mode */
+    NtGdiSelectFont(dc->hSelf, dc->hFont);
+    return TRUE;
+}
+
+
 /***********************************************************************
  *           NtGdiGetAndSetDCDword    (win32u.@)
  */
@@ -813,6 +830,7 @@ BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *pre
 {
     PHYSDEV physdev;
     BOOL ret = TRUE;
+    DWORD prev;
     DC *dc;
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
@@ -820,32 +838,37 @@ BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *pre
     switch (method)
     {
     case NtGdiSetMapMode:
-        *prev_value = dc->attr->map_mode;
+        prev = dc->attr->map_mode;
         ret = set_map_mode( dc, value );
         break;
 
     case NtGdiSetBkColor:
-        *prev_value = dc->attr->background_color;
+        prev = dc->attr->background_color;
         set_bk_color( dc, value );
         break;
 
     case NtGdiSetTextColor:
-        *prev_value = dc->attr->text_color;
+        prev = dc->attr->text_color;
         set_text_color( dc, value );
         break;
 
     case NtGdiSetDCBrushColor:
         physdev = GET_DC_PHYSDEV( dc, pSetDCBrushColor );
-        *prev_value = dc->attr->brush_color;
+        prev = dc->attr->brush_color;
         value = physdev->funcs->pSetDCBrushColor( physdev, value );
         if (value != CLR_INVALID) dc->attr->brush_color = value;
         break;
 
     case NtGdiSetDCPenColor:
         physdev = GET_DC_PHYSDEV( dc, pSetDCPenColor );
-        *prev_value = dc->attr->pen_color;
+        prev = dc->attr->pen_color;
         value = physdev->funcs->pSetDCPenColor( physdev, value );
         if (value != CLR_INVALID) dc->attr->pen_color = value;
+        break;
+
+    case NtGdiSetGraphicsMode:
+        prev = dc->attr->graphics_mode;
+        ret = set_graphics_mode( dc, value );
         break;
 
     default:
@@ -855,33 +878,9 @@ BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *pre
     }
 
     release_dc_ptr( dc );
-    return ret;
-}
-
-
-/***********************************************************************
- *           SetGraphicsMode    (GDI32.@)
- */
-INT WINAPI SetGraphicsMode( HDC hdc, INT mode )
-{
-    INT ret = 0;
-    DC *dc = get_dc_ptr( hdc );
-
-    /* One would think that setting the graphics mode to GM_COMPATIBLE
-     * would also reset the world transformation matrix to the unity
-     * matrix. However, in Windows, this is not the case. This doesn't
-     * make a lot of sense to me, but that's the way it is.
-     */
-    if (!dc) return 0;
-    if ((mode > 0) && (mode <= GM_LAST))
-    {
-        ret = dc->attr->graphics_mode;
-        dc->attr->graphics_mode = mode;
-    }
-    /* font metrics depend on the graphics mode */
-    if (ret != mode) NtGdiSelectFont(dc->hSelf, dc->hFont);
-    release_dc_ptr( dc );
-    return ret;
+    if (!ret || !prev_value) return FALSE;
+    *prev_value = prev;
+    return TRUE;
 }
 
 
@@ -933,55 +932,6 @@ BOOL WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform )
 
     release_dc_ptr( dc );
     return ret;
-}
-
-
-/****************************************************************************
- * CombineTransform [GDI32.@]
- * Combines two transformation matrices.
- *
- * PARAMS
- *    xformResult [O] Stores the result of combining the two matrices
- *    xform1      [I] Specifies the first matrix to apply
- *    xform2      [I] Specifies the second matrix to apply
- *
- * REMARKS
- *    The same matrix can be passed in for more than one of the parameters.
- *
- * RETURNS
- *  Success: TRUE.
- *  Failure: FALSE. Use GetLastError() to determine the cause.
- */
-BOOL WINAPI CombineTransform( LPXFORM xformResult, const XFORM *xform1,
-    const XFORM *xform2 )
-{
-    XFORM xformTemp;
-
-    /* Check for illegal parameters */
-    if (!xformResult || !xform1 || !xform2)
-        return FALSE;
-
-    /* Create the result in a temporary XFORM, since xformResult may be
-     * equal to xform1 or xform2 */
-    xformTemp.eM11 = xform1->eM11 * xform2->eM11 +
-                     xform1->eM12 * xform2->eM21;
-    xformTemp.eM12 = xform1->eM11 * xform2->eM12 +
-                     xform1->eM12 * xform2->eM22;
-    xformTemp.eM21 = xform1->eM21 * xform2->eM11 +
-                     xform1->eM22 * xform2->eM21;
-    xformTemp.eM22 = xform1->eM21 * xform2->eM12 +
-                     xform1->eM22 * xform2->eM22;
-    xformTemp.eDx  = xform1->eDx  * xform2->eM11 +
-                     xform1->eDy  * xform2->eM21 +
-                     xform2->eDx;
-    xformTemp.eDy  = xform1->eDx  * xform2->eM12 +
-                     xform1->eDy  * xform2->eM22 +
-                     xform2->eDy;
-
-    /* Copy the result to xformResult */
-    *xformResult = xformTemp;
-
-    return TRUE;
 }
 
 
@@ -1290,4 +1240,21 @@ DWORD WINAPI NtGdiSetLayout( HDC hdc, LONG wox, DWORD layout )
     TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, old_layout, layout);
 
     return old_layout;
+}
+
+/**********************************************************************
+ *           get_icm_profile     (win32u.@)
+ */
+BOOL get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size, WCHAR *filename )
+{
+    PHYSDEV physdev;
+    DC *dc;
+    BOOL ret;
+
+    if (!(dc = get_dc_ptr(hdc))) return FALSE;
+
+    physdev = GET_DC_PHYSDEV( dc, pGetICMProfile );
+    ret = physdev->funcs->pGetICMProfile( physdev, allow_default, size, filename );
+    release_dc_ptr(dc);
+    return ret;
 }

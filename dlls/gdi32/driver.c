@@ -29,14 +29,8 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winreg.h"
-#include "ddrawgdi.h"
 #include "wine/winbase16.h"
 #include "winuser.h"
-#include "winternl.h"
-#include "initguid.h"
-#include "devguid.h"
-#include "setupapi.h"
-#include "ddk/d3dkmthk.h"
 
 #include "ntgdi_private.h"
 #include "wine/list.h"
@@ -44,8 +38,6 @@
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(driver);
-
-DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
 
 struct graphics_driver
 {
@@ -163,20 +155,6 @@ BOOL is_display_device( LPCWSTR name )
     return TRUE;
 }
 
-static HANDLE get_display_device_init_mutex( void )
-{
-    HANDLE mutex = CreateMutexW( NULL, FALSE, L"display_device_init" );
-
-    WaitForSingleObject( mutex, INFINITE );
-    return mutex;
-}
-
-static void release_display_device_init_mutex( HANDLE mutex )
-{
-    ReleaseMutex( mutex );
-    CloseHandle( mutex );
-}
-
 #ifdef __i386__
 static const WCHAR printer_env[] = L"w32x86";
 #elif defined __x86_64__
@@ -247,7 +225,7 @@ done:
 
 
 /***********************************************************************
- *           __wine_set_display_driver    (GDI32.@)
+ *           __wine_set_display_driver    (win32u.@)
  */
 void CDECL __wine_set_display_driver( HMODULE module )
 {
@@ -357,11 +335,6 @@ static INT CDECL nulldrv_EndPage( PHYSDEV dev )
 static BOOL CDECL nulldrv_EnumFonts( PHYSDEV dev, LOGFONTW *logfont, FONTENUMPROCW proc, LPARAM lParam )
 {
     return TRUE;
-}
-
-static INT CDECL nulldrv_EnumICMProfiles( PHYSDEV dev, ICMENUMPROCW func, LPARAM lparam )
-{
-    return -1;
 }
 
 static INT CDECL nulldrv_ExtDeviceMode( LPSTR buffer, HWND hwnd, DEVMODEA *output, LPSTR device,
@@ -605,7 +578,7 @@ static DWORD CDECL nulldrv_GetGlyphOutline( PHYSDEV dev, UINT ch, UINT format, L
     return GDI_ERROR;
 }
 
-static BOOL CDECL nulldrv_GetICMProfile( PHYSDEV dev, LPDWORD size, LPWSTR filename )
+static BOOL CDECL nulldrv_GetICMProfile( PHYSDEV dev, BOOL allow_default, LPDWORD size, LPWSTR filename )
 {
     return FALSE;
 }
@@ -850,7 +823,6 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_EndPage,                    /* pEndPage */
     nulldrv_EndPath,                    /* pEndPath */
     nulldrv_EnumFonts,                  /* pEnumFonts */
-    nulldrv_EnumICMProfiles,            /* pEnumICMProfiles */
     nulldrv_ExtDeviceMode,              /* pExtDeviceMode */
     nulldrv_ExtEscape,                  /* pExtEscape */
     nulldrv_ExtFloodFill,               /* pExtFloodFill */
@@ -960,56 +932,6 @@ BOOL DRIVER_GetDriverName( LPCWSTR device, LPWSTR driver, DWORD size )
     *p = 0;
     TRACE("Found %s for %s\n", debugstr_w(driver), debugstr_w(device));
     return TRUE;
-}
-
-
-/***********************************************************************
- *           GdiConvertToDevmodeW    (GDI32.@)
- */
-DEVMODEW * WINAPI GdiConvertToDevmodeW(const DEVMODEA *dmA)
-{
-    DEVMODEW *dmW;
-    WORD dmW_size, dmA_size;
-
-    dmA_size = dmA->dmSize;
-
-    /* this is the minimal dmSize that XP accepts */
-    if (dmA_size < FIELD_OFFSET(DEVMODEA, dmFields))
-        return NULL;
-
-    if (dmA_size > sizeof(DEVMODEA))
-        dmA_size = sizeof(DEVMODEA);
-
-    dmW_size = dmA_size + CCHDEVICENAME;
-    if (dmA_size >= FIELD_OFFSET(DEVMODEA, dmFormName) + CCHFORMNAME)
-        dmW_size += CCHFORMNAME;
-
-    dmW = HeapAlloc(GetProcessHeap(), 0, dmW_size + dmA->dmDriverExtra);
-    if (!dmW) return NULL;
-
-    MultiByteToWideChar(CP_ACP, 0, (const char*) dmA->dmDeviceName, -1,
-                                   dmW->dmDeviceName, CCHDEVICENAME);
-    /* copy slightly more, to avoid long computations */
-    memcpy(&dmW->dmSpecVersion, &dmA->dmSpecVersion, dmA_size - CCHDEVICENAME);
-
-    if (dmA_size >= FIELD_OFFSET(DEVMODEA, dmFormName) + CCHFORMNAME)
-    {
-        if (dmA->dmFields & DM_FORMNAME)
-            MultiByteToWideChar(CP_ACP, 0, (const char*) dmA->dmFormName, -1,
-                                       dmW->dmFormName, CCHFORMNAME);
-        else
-            dmW->dmFormName[0] = 0;
-
-        if (dmA_size > FIELD_OFFSET(DEVMODEA, dmLogPixels))
-            memcpy(&dmW->dmLogPixels, &dmA->dmLogPixels, dmA_size - FIELD_OFFSET(DEVMODEA, dmLogPixels));
-    }
-
-    if (dmA->dmDriverExtra)
-        memcpy((char *)dmW + dmW_size, (const char *)dmA + dmA_size, dmA->dmDriverExtra);
-
-    dmW->dmSize = dmW_size;
-
-    return dmW;
 }
 
 
@@ -1168,42 +1090,6 @@ INT WINAPI NtGdiExtEscape( HDC hdc, WCHAR *driver, int driver_id, INT escape, IN
 }
 
 
-/*******************************************************************
- *      DrawEscape [GDI32.@]
- *
- *
- */
-INT WINAPI DrawEscape(HDC hdc, INT nEscape, INT cbInput, LPCSTR lpszInData)
-{
-    FIXME("DrawEscape, stub\n");
-    return 0;
-}
-
-/*******************************************************************
- *      NamedEscape [GDI32.@]
- */
-INT WINAPI NamedEscape( HDC hdc, LPCWSTR pDriver, INT nEscape, INT cbInput, LPCSTR lpszInData,
-                        INT cbOutput, LPSTR lpszOutData )
-{
-    FIXME("(%p, %s, %d, %d, %p, %d, %p)\n",
-          hdc, wine_dbgstr_w(pDriver), nEscape, cbInput, lpszInData, cbOutput,
-          lpszOutData);
-    return 0;
-}
-
-/*******************************************************************
- *      DdQueryDisplaySettingsUniqueness [GDI32.@]
- *      GdiEntry13                       [GDI32.@]
- */
-ULONG WINAPI DdQueryDisplaySettingsUniqueness(VOID)
-{
-    static int warn_once;
-
-    if (!warn_once++)
-        FIXME("stub\n");
-    return 0;
-}
-
 /******************************************************************************
  *           NtGdiDdDDIOpenAdapterFromHdc    (win32u.@)
  */
@@ -1251,93 +1137,21 @@ NTSTATUS WINAPI NtGdiDdDDICloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
     return status;
 }
 
-
-static void d3dkmt_adapter_alloc_handle( struct d3dkmt_adapter *adapter )
+/******************************************************************************
+ *           NtGdiDdDDIOpenAdapterFromLuid    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *desc )
 {
     static D3DKMT_HANDLE handle_start = 0;
+    struct d3dkmt_adapter *adapter;
+
+    if (!(adapter = heap_alloc( sizeof( *adapter ) ))) return STATUS_NO_MEMORY;
 
     EnterCriticalSection( &driver_section );
-    /* D3DKMT_HANDLE is UINT, so we can't use pointer as handle */
-    adapter->handle = ++handle_start;
+    desc->hAdapter = adapter->handle = ++handle_start;
     list_add_tail( &d3dkmt_adapters, &adapter->entry );
     LeaveCriticalSection( &driver_section );
-}
-
-/******************************************************************************
- *		D3DKMTOpenAdapterFromGdiDisplayName [GDI32.@]
- */
-NTSTATUS WINAPI D3DKMTOpenAdapterFromGdiDisplayName( D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME *desc )
-{
-    WCHAR *end, key_nameW[MAX_PATH], bufferW[MAX_PATH];
-    HDEVINFO devinfo = INVALID_HANDLE_VALUE;
-    NTSTATUS status = STATUS_UNSUCCESSFUL;
-    struct d3dkmt_adapter *adapter;
-    SP_DEVINFO_DATA device_data;
-    DWORD size, state_flags;
-    DEVPROPTYPE type;
-    HANDLE mutex;
-    LUID luid;
-    int index;
-
-    TRACE("(%p)\n", desc);
-
-    if (!desc)
-        return STATUS_UNSUCCESSFUL;
-
-    TRACE("DeviceName: %s\n", wine_dbgstr_w( desc->DeviceName ));
-    if (wcsnicmp( desc->DeviceName, L"\\\\.\\DISPLAY", lstrlenW(L"\\\\.\\DISPLAY") ))
-        return STATUS_UNSUCCESSFUL;
-
-    index = wcstol( desc->DeviceName + lstrlenW(L"\\\\.\\DISPLAY"), &end, 10 ) - 1;
-    if (*end)
-        return STATUS_UNSUCCESSFUL;
-
-    adapter = heap_alloc( sizeof( *adapter ) );
-    if (!adapter)
-        return STATUS_NO_MEMORY;
-
-    /* Get adapter LUID from SetupAPI */
-    mutex = get_display_device_init_mutex();
-
-    size = sizeof( bufferW );
-    swprintf( key_nameW, MAX_PATH, L"\\Device\\Video%d", index );
-    if (RegGetValueW( HKEY_LOCAL_MACHINE, L"HARDWARE\\DEVICEMAP\\VIDEO", key_nameW, RRF_RT_REG_SZ, NULL, bufferW, &size ))
-        goto done;
-
-    /* Strip \Registry\Machine\ prefix and retrieve Wine specific data set by the display driver */
-    lstrcpyW( key_nameW, bufferW + 18 );
-    size = sizeof( state_flags );
-    if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, L"StateFlags", RRF_RT_REG_DWORD, NULL,
-                      &state_flags, &size ))
-        goto done;
-
-    if (!(state_flags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
-        goto done;
-
-    size = sizeof( bufferW );
-    if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, L"GPUID", RRF_RT_REG_SZ, NULL, bufferW, &size ))
-        goto done;
-
-    devinfo = SetupDiCreateDeviceInfoList( &GUID_DEVCLASS_DISPLAY, NULL );
-    device_data.cbSize = sizeof( device_data );
-    SetupDiOpenDeviceInfoW( devinfo, bufferW, NULL, 0, &device_data );
-    if (!SetupDiGetDevicePropertyW( devinfo, &device_data, &DEVPROPKEY_GPU_LUID, &type,
-                                    (BYTE *)&luid, sizeof( luid ), NULL, 0))
-        goto done;
-
-    d3dkmt_adapter_alloc_handle( adapter );
-
-    desc->hAdapter = adapter->handle;
-    desc->AdapterLuid = luid;
-    desc->VidPnSourceId = index;
-    status = STATUS_SUCCESS;
-
-done:
-    SetupDiDestroyDeviceInfoList( devinfo );
-    release_display_device_init_mutex( mutex );
-    if (status != STATUS_SUCCESS)
-        heap_free( adapter );
-    return status;
+    return STATUS_SUCCESS;
 }
 
 /******************************************************************************
@@ -1470,94 +1284,4 @@ NTSTATUS WINAPI NtGdiDdDDICheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNE
         return STATUS_INVALID_PARAMETER;
 
     return get_display_driver()->pD3DKMTCheckVidPnExclusiveOwnership( desc );
-}
-
-/******************************************************************************
- *		D3DKMTOpenAdapterFromDeviceName [GDI32.@]
- */
-NTSTATUS WINAPI D3DKMTOpenAdapterFromDeviceName(D3DKMT_OPENADAPTERFROMDEVICENAME *device_name)
-{
-    SP_DEVICE_INTERFACE_DATA iface_data = {sizeof(iface_data)};
-    SP_DEVICE_INTERFACE_DETAIL_DATA_W *iface_detail_data;
-    SP_DEVINFO_DATA device_data = {sizeof(device_data)};
-    WCHAR iface_detail_buffer[256];
-    struct d3dkmt_adapter *adapter;
-    UNICODE_STRING guid_str;
-    unsigned int i, j;
-    DEVPROPTYPE type;
-    LUID luid = {0};
-    GUID iface_uid;
-    const WCHAR *p;
-    HDEVINFO set;
-    BOOL found;
-
-    TRACE( "device_name %p.\n", device_name );
-
-    p = device_name->pDeviceName + lstrlenW( device_name->pDeviceName );
-    while(p != device_name->pDeviceName && *p != L'#')
-        --p;
-    if (*p == L'#') ++p;
-    RtlInitUnicodeString( &guid_str, p );
-    if (RtlGUIDFromString( &guid_str, &iface_uid ))
-    {
-        WARN( "Could not parse guid from %s.\n", debugstr_w( device_name->pDeviceName ));
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    set = SetupDiGetClassDevsW( &iface_uid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT );
-    iface_detail_data = (SP_DEVICE_INTERFACE_DETAIL_DATA_W *)iface_detail_buffer;
-    iface_detail_data->cbSize = sizeof(*iface_detail_data);
-
-    found = FALSE;
-    j = 0;
-    while (SetupDiEnumDeviceInfo( set, j, &device_data ))
-    {
-        i = 0;
-        while (SetupDiEnumDeviceInterfaces(set, &device_data, &iface_uid, i, &iface_data))
-        {
-            if (SetupDiGetDeviceInterfaceDetailW( set, &iface_data, iface_detail_data,
-                                                  sizeof(iface_detail_buffer), NULL, &device_data ))
-            {
-                if (!lstrcmpiW( device_name->pDeviceName, iface_detail_data->DevicePath ))
-                {
-                    found = TRUE;
-
-                    if (SetupDiGetDevicePropertyW( set, &device_data, &DEVPROPKEY_GPU_LUID, &type,
-                                                    (BYTE *)&luid, sizeof( luid ), NULL, 0))
-                        TRACE( "luid %#x:%#x.\n", luid.HighPart, luid.LowPart );
-                    else
-                        ERR( "Could not get luid.\n" );
-
-                    goto done;
-                }
-            }
-            else
-            {
-                ERR( "Could not get interface detail, iface %u.\n", i );
-            }
-            ++i;
-        }
-        ++j;
-    }
-
-done:
-    SetupDiDestroyDeviceInfoList( set );
-    if (!found)
-    {
-        WARN( "Device %s not found.\n", debugstr_w(device_name->pDeviceName ));
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    adapter = heap_alloc( sizeof( *adapter ));
-    if (!adapter)
-    {
-        ERR( "No memory.\n" );
-        return STATUS_NO_MEMORY;
-    }
-    d3dkmt_adapter_alloc_handle( adapter );
-
-    device_name->hAdapter = adapter->handle;
-    device_name->AdapterLuid = luid;
-
-    return STATUS_SUCCESS;
 }

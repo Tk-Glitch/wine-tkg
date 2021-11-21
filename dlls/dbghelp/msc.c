@@ -671,8 +671,16 @@ static struct symt* codeview_add_type_array(struct codeview_type_parse* ctp,
 {
     struct symt*        elem = codeview_fetch_type(ctp, elemtype, FALSE);
     struct symt*        index = codeview_fetch_type(ctp, indextype, FALSE);
+    DWORD64             elem_size;
+    DWORD               count = 0;
 
-    return &symt_new_array(ctp->module, 0, -arr_len, elem, index)->symt;
+    if (symt_get_info(ctp->module, elem, TI_GET_LENGTH, &elem_size) && elem_size)
+    {
+        if (arr_len % (DWORD)elem_size)
+            FIXME("array size should be a multiple of element size %u %u\n", arr_len, (DWORD)elem_size);
+        count = arr_len / (unsigned)elem_size;
+    }
+    return &symt_new_array(ctp->module, 0, count, elem, index)->symt;
 }
 
 static BOOL codeview_add_type_enum_field_list(struct module* module,
@@ -736,13 +744,13 @@ static void codeview_add_udt_element(struct codeview_type_parse* ctp,
         case LF_BITFIELD_V1:
             symt_add_udt_element(ctp->module, symt, name,
                                  codeview_fetch_type(ctp, cv_type->bitfield_v1.type, FALSE),
-                                 (value << 3) + cv_type->bitfield_v1.bitoff,
+                                 value, cv_type->bitfield_v1.bitoff,
                                  cv_type->bitfield_v1.nbits);
             return;
         case LF_BITFIELD_V2:
             symt_add_udt_element(ctp->module, symt, name,
                                  codeview_fetch_type(ctp, cv_type->bitfield_v2.type, FALSE),
-                                 (value << 3) + cv_type->bitfield_v2.bitoff,
+                                 value, cv_type->bitfield_v2.bitoff,
                                  cv_type->bitfield_v2.nbits);
             return;
         }
@@ -753,8 +761,7 @@ static void codeview_add_udt_element(struct codeview_type_parse* ctp,
     {
         DWORD64 elem_size = 0;
         symt_get_info(ctp->module, subtype, TI_GET_LENGTH, &elem_size);
-        symt_add_udt_element(ctp->module, symt, name, subtype,
-                             value << 3, (DWORD)elem_size << 3);
+        symt_add_udt_element(ctp->module, symt, name, subtype, value, 0, 0);
     }
 }
 
@@ -1820,7 +1827,6 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* roo
             }
             else if (curr_func)
             {
-                symt_normalize_function(msc_dbg->module, curr_func);
                 curr_func = NULL;
             }
             break;
@@ -1851,6 +1857,7 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* roo
             compiland = symt_new_compiland(msc_dbg->module, 0 /* FIXME */,
                                            source_new(msc_dbg->module, NULL,
                                                       sym->objname_v3.name));
+            break;
 
         case S_OBJNAME_ST:
             TRACE("S-ObjName-V1 %s\n", terminate_string(&sym->objname_v1.p_name));
@@ -2026,8 +2033,6 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* roo
             break;
         }
     }
-
-    if (curr_func) symt_normalize_function(msc_dbg->module, curr_func);
 
     return TRUE;
 }
@@ -3361,7 +3366,7 @@ static BOOL codeview_process_info(const struct process* pcs,
     }
     default:
         ERR("Unknown CODEVIEW signature %08x in module %s\n",
-            *signature, debugstr_w(msc_dbg->module->module.ModuleName));
+            *signature, debugstr_w(msc_dbg->module->modulename));
         break;
     }
     if (ret)

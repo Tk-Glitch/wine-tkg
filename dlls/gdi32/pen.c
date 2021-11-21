@@ -50,17 +50,12 @@ static const struct gdi_obj_funcs pen_funcs =
     PEN_DeleteObject   /* pDeleteObject */
 };
 
-
-/***********************************************************************
- *           NtGdiCreatePen    (win32u.@)
- */
-HPEN WINAPI NtGdiCreatePen( INT style, INT width, COLORREF color, HBRUSH brush )
+HPEN create_pen( INT style, INT width, COLORREF color )
 {
     PENOBJ *penPtr;
     HPEN hpen;
 
     TRACE( "%d %d %06x\n", style, width, color );
-    if (brush) FIXME( "brush not supported\n" );
 
     switch (style)
     {
@@ -72,7 +67,6 @@ HPEN WINAPI NtGdiCreatePen( INT style, INT width, COLORREF color, HBRUSH brush )
     case PS_INSIDEFRAME:
         break;
     case PS_NULL:
-        if ((hpen = GetStockObject( NULL_PEN ))) return hpen;
         width = 1;
         color = 0;
         break;
@@ -93,12 +87,22 @@ HPEN WINAPI NtGdiCreatePen( INT style, INT width, COLORREF color, HBRUSH brush )
 }
 
 /***********************************************************************
- *           ExtCreatePen    (GDI32.@)
+ *           NtGdiCreatePen    (win32u.@)
  */
+HPEN WINAPI NtGdiCreatePen( INT style, INT width, COLORREF color, HBRUSH brush )
+{
+    if (brush) FIXME( "brush not supported\n" );
+    if (style == PS_NULL) return get_stock_object( NULL_PEN );
+    return create_pen( style, width, color );
+}
 
-HPEN WINAPI ExtCreatePen( DWORD style, DWORD width,
-                              const LOGBRUSH * brush, DWORD style_count,
-                              const DWORD *style_bits )
+/***********************************************************************
+ *           NtGdiExtCreatePen    (win32u.@)
+ */
+HPEN WINAPI NtGdiExtCreatePen( DWORD style, DWORD width, ULONG brush_style, ULONG color,
+                               ULONG_PTR client_hatch, ULONG_PTR hatch, DWORD style_count,
+                               const DWORD *style_bits, ULONG dib_size, BOOL old_style,
+                               HBRUSH brush )
 {
     PENOBJ *penPtr = NULL;
     HPEN hpen;
@@ -110,7 +114,7 @@ HPEN WINAPI ExtCreatePen( DWORD style, DWORD width,
     switch (style & PS_STYLE_MASK)
     {
     case PS_NULL:
-        return CreatePen( PS_NULL, 0, brush->lbColor );
+        return NtGdiCreatePen( PS_NULL, 0, color, NULL );
 
     case PS_SOLID:
     case PS_DASH:
@@ -154,18 +158,20 @@ HPEN WINAPI ExtCreatePen( DWORD style, DWORD width,
 
     if ((style & PS_TYPE_MASK) == PS_GEOMETRIC)
     {
-        if (brush->lbStyle == BS_NULL) return CreatePen( PS_NULL, 0, 0 );
+        if (brush_style == BS_NULL) return NtGdiCreatePen( PS_NULL, 0, 0, NULL );
     }
     else
     {
         if (width != 1) goto invalid;
-        if (brush->lbStyle != BS_SOLID) goto invalid;
+        if (brush_style != BS_SOLID) goto invalid;
     }
 
     if (!(penPtr = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(PENOBJ,logpen.elpStyleEntry[style_count]))))
         return 0;
 
-    logbrush = *brush;
+    logbrush.lbStyle = brush_style;
+    logbrush.lbColor = color;
+    logbrush.lbHatch = hatch;
     if (!store_brush_pattern( &logbrush, &penPtr->pattern )) goto invalid;
     if (logbrush.lbStyle == BS_DIBPATTERN) logbrush.lbStyle = BS_DIBPATTERNPT;
 
@@ -173,7 +179,7 @@ HPEN WINAPI ExtCreatePen( DWORD style, DWORD width,
     penPtr->logpen.elpWidth = abs((int)width);
     penPtr->logpen.elpBrushStyle = logbrush.lbStyle;
     penPtr->logpen.elpColor = logbrush.lbColor;
-    penPtr->logpen.elpHatch = brush->lbHatch;
+    penPtr->logpen.elpHatch = client_hatch;
     penPtr->logpen.elpNumEntries = style_count;
     memcpy(penPtr->logpen.elpStyleEntry, style_bits, style_count * sizeof(DWORD));
 
@@ -197,7 +203,7 @@ HGDIOBJ WINAPI NtGdiSelectPen( HDC hdc, HGDIOBJ handle )
 {
     PENOBJ *pen;
     HGDIOBJ ret = 0;
-    WORD type;
+    DWORD type;
     DC *dc;
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
@@ -260,7 +266,7 @@ static BOOL PEN_DeleteObject( HGDIOBJ handle )
  */
 static INT PEN_GetObject( HGDIOBJ handle, INT count, LPVOID buffer )
 {
-    WORD type;
+    DWORD type;
     PENOBJ *pen = get_any_obj_ptr( handle, &type );
     INT ret = 0;
 

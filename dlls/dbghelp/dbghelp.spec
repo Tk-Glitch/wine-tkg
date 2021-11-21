@@ -92,10 +92,10 @@
 @ stdcall SymGetLineFromNameW64(long wstr wstr long ptr ptr)
 @ stdcall SymGetLineNext(long ptr)
 @ stdcall SymGetLineNext64(long ptr)
-@ stub SymGetLineNextW64
+@ stdcall SymGetLineNextW64(long ptr)
 @ stdcall SymGetLinePrev(long ptr)
 @ stdcall SymGetLinePrev64(long ptr)
-@ stub SymGetLinePrevW64
+@ stdcall SymGetLinePrevW64(long ptr)
 @ stdcall SymGetModuleBase(long long)
 @ stdcall SymGetModuleBase64(long int64)
 @ stdcall SymGetModuleInfo(long long ptr)

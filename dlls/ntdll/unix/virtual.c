@@ -638,7 +638,7 @@ static void add_builtin_module( void *module, void *handle )
 /***********************************************************************
  *           release_builtin_module
  */
-static void release_builtin_module( void *module )
+void release_builtin_module( void *module )
 {
     struct builtin_module *builtin;
 
@@ -965,6 +965,91 @@ static BYTE get_page_vprot( const void *addr )
 #endif
 }
 
+
+/***********************************************************************
+ *           get_vprot_range_size
+ *
+ * Return the size of the region with equal masked protection byte.
+ * base and size should be page aligned.
+ */
+static SIZE_T get_vprot_range_size( BYTE *base, SIZE_T size, BYTE mask, BYTE *vprot )
+{
+#define BYTES_IN_WORD sizeof(UINT64)
+    SIZE_T i, start_idx, end_idx, aligned_start_idx, aligned_end_idx, count;
+    static const UINT_PTR index_align_mask = BYTES_IN_WORD - 1;
+    UINT64 vprot_word, mask_word, changed_word;
+    const BYTE *vprot_ptr;
+    unsigned int j;
+#ifdef _WIN64
+    size_t idx_page;
+#endif
+    size_t idx;
+
+
+    TRACE("base %p, size %p, mask %#x.\n", base, (void *)size, mask);
+
+    start_idx = (size_t)base >> page_shift;
+    end_idx = start_idx + (size >> page_shift);
+    idx = start_idx;
+#ifdef _WIN64
+    end_idx = min( end_idx, pages_vprot_size << pages_vprot_shift );
+    if (end_idx <= start_idx) return size;
+    idx_page = idx >> pages_vprot_shift;
+    idx &= pages_vprot_mask;
+    vprot_ptr = pages_vprot[idx_page++];
+#else
+    vprot_ptr = pages_vprot;
+#endif
+
+    aligned_start_idx = (start_idx + index_align_mask) & ~index_align_mask;
+    if (aligned_start_idx > end_idx) aligned_start_idx = end_idx;
+
+    aligned_end_idx = end_idx & ~index_align_mask;
+    if (aligned_end_idx < aligned_start_idx) aligned_end_idx = aligned_start_idx;
+
+    /* Page count in zero level page table on x64 is at least the multiples of BYTES_IN_WORD
+     * so we don't have to worry about crossing the boundary on unaligned idx values. */
+    *vprot = vprot_ptr[idx];
+    count = aligned_start_idx - start_idx;
+
+    for (i = 0; i < count; ++i)
+        if ((*vprot ^ vprot_ptr[idx++]) & mask) return i << page_shift;
+
+    count += aligned_end_idx - aligned_start_idx;
+    vprot_word = 0x101010101010101ull * *vprot;
+    mask_word = 0x101010101010101ull * mask;
+    for (; i < count; i += 8)
+    {
+#ifdef _WIN64
+        if (idx >> pages_vprot_shift)
+        {
+            idx = 0;
+            vprot_ptr = pages_vprot[idx_page++];
+        }
+#endif
+        changed_word = (vprot_word ^ *(UINT64 *)(vprot_ptr + idx)) & mask_word;
+        if (changed_word)
+        {
+            for (j = 0; !((BYTE *)&changed_word)[j]; ++j) ++i;
+            return i << page_shift;
+        }
+        idx += 8;
+    }
+
+#ifdef _WIN64
+    if (aligned_end_idx != end_idx && (idx >> pages_vprot_shift))
+    {
+        idx = 0;
+        vprot_ptr = pages_vprot[idx_page];
+    }
+#endif
+    count += end_idx - aligned_end_idx;
+    for (; i < count; ++i)
+        if ((*vprot ^ vprot_ptr[idx++]) & mask) return i << page_shift;
+
+    return *vprot & mask ? count << page_shift : size;
+#undef BYTES_IN_WORD
+}
 
 /***********************************************************************
  *           set_page_vprot
@@ -2167,18 +2252,21 @@ done:
  */
 static SIZE_T get_committed_size( struct file_view *view, void *base, BYTE *vprot )
 {
-    SIZE_T i, start;
+    SIZE_T offset;
 
-    start = ((char *)base - (char *)view->base) >> page_shift;
-    *vprot = get_page_vprot( base );
+    base = ROUND_ADDR( base, page_mask );
+    offset = (BYTE *)base - (BYTE *)view->base;
 
     if (view->protect & SEC_RESERVE)
     {
         SIZE_T ret = 0;
+
+        *vprot = get_page_vprot( base );
+
         SERVER_START_REQ( get_mapping_committed_range )
         {
             req->base   = wine_server_client_ptr( view->base );
-            req->offset = start << page_shift;
+            req->offset = offset;
             if (!wine_server_call( req ))
             {
                 ret = reply->size;
@@ -2192,9 +2280,8 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, BYTE *vpro
         SERVER_END_REQ;
         return ret;
     }
-    for (i = start + 1; i < view->size >> page_shift; i++)
-        if ((*vprot ^ get_page_vprot( (char *)view->base + (i << page_shift) )) & VPROT_COMMITTED) break;
-    return (i - start) << page_shift;
+
+    return get_vprot_range_size( base, view->size - offset, VPROT_COMMITTED, vprot );
 }
 
 
@@ -4292,7 +4379,7 @@ static NTSTATUS get_basic_memory_info( HANDLE process, LPCVOID addr,
                                        SIZE_T len, SIZE_T *res_len )
 {
     struct file_view *view;
-    char *base, *alloc_base = 0, *alloc_end = working_set_limit;
+    BYTE *base, *alloc_base = 0, *alloc_end = working_set_limit;
     struct wine_rb_entry *ptr;
     sigset_t sigset;
 
@@ -4339,20 +4426,20 @@ static NTSTATUS get_basic_memory_info( HANDLE process, LPCVOID addr,
     while (ptr)
     {
         view = WINE_RB_ENTRY_VALUE( ptr, struct file_view, entry );
-        if ((char *)view->base > base)
+        if ((BYTE *)view->base > base)
         {
             alloc_end = view->base;
             ptr = ptr->left;
         }
-        else if ((char *)view->base + view->size <= base)
+        else if ((BYTE *)view->base + view->size <= base)
         {
-            alloc_base = (char *)view->base + view->size;
+            alloc_base = (BYTE *)view->base + view->size;
             ptr = ptr->right;
         }
         else
         {
             alloc_base = view->base;
-            alloc_end = (char *)view->base + view->size;
+            alloc_end = (BYTE *)view->base + view->size;
             break;
         }
     }
@@ -4369,7 +4456,7 @@ static NTSTATUS get_basic_memory_info( HANDLE process, LPCVOID addr,
         {
             /* not in a reserved area at all, pretend it's allocated */
 #ifdef __i386__
-            if (base >= (char *)address_space_start)
+            if (base >= (BYTE *)address_space_start)
             {
                 info->State             = MEM_RESERVE;
                 info->Protect           = PAGE_NOACCESS;
@@ -4390,8 +4477,13 @@ static NTSTATUS get_basic_memory_info( HANDLE process, LPCVOID addr,
     else
     {
         BYTE vprot;
-        char *ptr;
-        SIZE_T range_size = get_committed_size( view, base, &vprot );
+        SIZE_T range_size;
+
+        if (view->protect & SEC_RESERVE)
+            range_size = get_committed_size( view, base, &vprot );
+        else
+            range_size = view->size - (base - (BYTE *)view->base);
+        info->RegionSize = get_vprot_range_size( base, range_size, ~(VPROT_WRITEWATCH|VPROT_WRITTEN), &vprot );
 
         info->State = (vprot & VPROT_COMMITTED) ? MEM_COMMIT : MEM_RESERVE;
         info->Protect = (vprot & VPROT_COMMITTED) ? get_win32_prot( vprot, view->protect ) : 0;
@@ -4399,9 +4491,6 @@ static NTSTATUS get_basic_memory_info( HANDLE process, LPCVOID addr,
         if (view->protect & SEC_IMAGE) info->Type = MEM_IMAGE;
         else if (view->protect & (SEC_FILE | SEC_RESERVE | SEC_COMMIT)) info->Type = MEM_MAPPED;
         else info->Type = MEM_PRIVATE;
-        for (ptr = base; ptr < base + range_size; ptr += page_size)
-            if ((get_page_vprot( ptr ) ^ vprot) & ~(VPROT_WRITEWATCH|VPROT_WRITTEN)) break;
-        info->RegionSize = ptr - base;
     }
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
 
@@ -4601,21 +4690,6 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
 
         case MemoryMappedFilenameInformation:
             return get_memory_section_name( process, addr, buffer, len, res_len );
-
-        case MemoryWineImageInitFuncs:
-            if (process == GetCurrentProcess())
-            {
-                void *module = (void *)addr;
-                void *handle = get_builtin_so_handle( module );
-
-                if (handle)
-                {
-                    status = get_builtin_init_funcs( handle, buffer, len, res_len );
-                    release_builtin_module( module );
-                    return status;
-                }
-            }
-            return STATUS_INVALID_HANDLE;
 
         case MemoryWineUnixFuncs:
         case MemoryWineUnixWow64Funcs:

@@ -89,7 +89,7 @@ HPALETTE PALETTE_Init(void)
         palPtr->palPalEntry[i].peBlue  = entries[i < 10 ? i : 236 + i].rgbBlue;
         palPtr->palPalEntry[i].peFlags = 0;
     }
-    return CreatePalette( palPtr );
+    return NtGdiCreatePaletteInternal( palPtr, palPtr->palNumEntries );
 }
 
 
@@ -201,8 +201,7 @@ static UINT set_palette_entries( HPALETTE hpalette, UINT start, UINT count,
 
     TRACE("hpal=%p,start=%i,count=%i\n",hpalette,start,count );
 
-    hpalette = get_full_gdi_handle( hpalette );
-    if (hpalette == GetStockObject(DEFAULT_PALETTE)) return 0;
+    if (hpalette == get_stock_object(DEFAULT_PALETTE)) return 0;
     palPtr = GDI_GetObjPtr( hpalette, NTGDI_OBJ_PAL );
     if (!palPtr) return 0;
 
@@ -215,7 +214,7 @@ static UINT set_palette_entries( HPALETTE hpalette, UINT start, UINT count,
     if (start+count > numEntries) count = numEntries - start;
     memcpy( &palPtr->entries[start], entries, count * sizeof(PALETTEENTRY) );
     GDI_ReleaseObj( hpalette );
-    UnrealizeObject( hpalette );
+    NtGdiUnrealizeObject( hpalette );
     return count;
 }
 
@@ -254,8 +253,7 @@ static BOOL animate_palette( HPALETTE hPal, UINT StartIndex, UINT NumEntries,
 {
     TRACE("%p (%i - %i)\n", hPal, StartIndex,StartIndex+NumEntries);
 
-    hPal = get_full_gdi_handle( hPal );
-    if( hPal != GetStockObject(DEFAULT_PALETTE) )
+    if( hPal != get_stock_object(DEFAULT_PALETTE) )
     {
         PALETTEOBJ * palPtr;
         UINT pal_entries;
@@ -412,7 +410,7 @@ COLORREF CDECL nulldrv_GetNearestColor( PHYSDEV dev, COLORREF color )
         PALETTEENTRY entry;
         HPALETTE hpal = dc->hPalette;
 
-        if (!hpal) hpal = GetStockObject( DEFAULT_PALETTE );
+        if (!hpal) hpal = get_stock_object( DEFAULT_PALETTE );
         if (spec_type == 2) /* PALETTERGB */
             index = NtGdiGetNearestPaletteIndex( hpal, color );
         else  /* PALETTEINDEX */
@@ -520,7 +518,6 @@ HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg)
 
     TRACE("%p %p\n", hdc, hpal );
 
-    hpal = get_full_gdi_handle( hpal );
     if (GetObjectType(hpal) != OBJ_PAL)
     {
       WARN("invalid selected palette %p\n",hpal);
@@ -549,7 +546,7 @@ UINT WINAPI GDIRealizePalette( HDC hdc )
 
     TRACE("%p...\n", hdc );
 
-    if( dc->hPalette == GetStockObject( DEFAULT_PALETTE ))
+    if( dc->hPalette == get_stock_object( DEFAULT_PALETTE ))
     {
         PHYSDEV physdev = GET_DC_PHYSDEV( dc, pRealizeDefaultPalette );
         realized = physdev->funcs->pRealizeDefaultPalette( physdev );

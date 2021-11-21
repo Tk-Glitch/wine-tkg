@@ -92,7 +92,7 @@ BOOL CDECL nulldrv_FrameRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush, INT width, INT
     {
         if (REGION_FrameRgn( tmp, rgn, width, height ))
             ret = NtGdiFillRgn( dev->hdc, tmp, brush );
-        DeleteObject( tmp );
+        NtGdiDeleteObjectApp( tmp );
     }
     return ret;
 }
@@ -100,7 +100,7 @@ BOOL CDECL nulldrv_FrameRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush, INT width, INT
 BOOL CDECL nulldrv_InvertRgn( PHYSDEV dev, HRGN rgn )
 {
     INT prev_rop = SetROP2( dev->hdc, R2_NOT );
-    BOOL ret = NtGdiFillRgn( dev->hdc, rgn, GetStockObject(BLACK_BRUSH) );
+    BOOL ret = NtGdiFillRgn( dev->hdc, rgn, get_stock_object(BLACK_BRUSH) );
     SetROP2( dev->hdc, prev_rop );
     return ret;
 }
@@ -661,64 +661,6 @@ BOOL WINAPI NtGdiPolyDraw( HDC hdc, const POINT *points, const BYTE *types, DWOR
 
     release_dc_ptr( dc );
     return result;
-}
-
-
-/**********************************************************************
- *           LineDDA   (GDI32.@)
- */
-BOOL WINAPI LineDDA(INT nXStart, INT nYStart, INT nXEnd, INT nYEnd,
-                    LINEDDAPROC callback, LPARAM lParam )
-{
-    INT xadd = 1, yadd = 1;
-    INT err,erradd;
-    INT cnt;
-    INT dx = nXEnd - nXStart;
-    INT dy = nYEnd - nYStart;
-
-    TRACE( "(%d, %d), (%d, %d), %p, %lx\n", nXStart, nYStart, nXEnd, nYEnd, callback, lParam );
-
-    if (dx < 0)
-    {
-        dx = -dx;
-        xadd = -1;
-    }
-    if (dy < 0)
-    {
-        dy = -dy;
-        yadd = -1;
-    }
-    if (dx > dy)  /* line is "more horizontal" */
-    {
-        err = 2*dy - dx; erradd = 2*dy - 2*dx;
-        for(cnt = 0;cnt < dx; cnt++)
-        {
-            callback(nXStart,nYStart,lParam);
-            if (err > 0)
-            {
-                nYStart += yadd;
-                err += erradd;
-            }
-            else err += 2*dy;
-            nXStart += xadd;
-        }
-    }
-    else   /* line is "more vertical" */
-    {
-        err = 2*dx - dy; erradd = 2*dx - 2*dy;
-        for(cnt = 0;cnt < dy; cnt++)
-        {
-            callback(nXStart,nYStart,lParam);
-            if (err > 0)
-            {
-                nXStart += xadd;
-                err += erradd;
-            }
-            else err += 2*dx;
-            nYStart += yadd;
-        }
-    }
-    return TRUE;
 }
 
 

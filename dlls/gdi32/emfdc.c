@@ -21,9 +21,9 @@
  */
 
 #include <assert.h>
+#include <stdlib.h>
 
 #include "gdi_private.h"
-#include "ntgdi_private.h"
 #include "winnls.h"
 
 #include "wine/debug.h"
@@ -107,6 +107,84 @@ static void emfdc_update_bounds( struct emf *emf, RECTL *rect )
     }
 }
 
+static UINT get_bitmap_info( HDC *hdc, HBITMAP *bitmap, BITMAPINFO *info )
+{
+    HBITMAP blit_bitmap;
+    HDC blit_dc;
+    UINT info_size, bpp;
+    DIBSECTION dib;
+
+    if (!(info_size = GetObjectW( *bitmap, sizeof(dib), &dib ))) return 0;
+
+    if (info_size == sizeof(dib))
+    {
+        blit_dc = *hdc;
+        blit_bitmap = *bitmap;
+    }
+    else
+    {
+        unsigned char dib_info_buffer[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
+        BITMAPINFO *dib_info = (BITMAPINFO *)dib_info_buffer;
+        BITMAP bmp = dib.dsBm;
+        HPALETTE palette;
+        void *bits;
+
+        assert( info_size == sizeof(BITMAP) );
+
+        dib_info->bmiHeader.biSize = sizeof(dib_info->bmiHeader);
+        dib_info->bmiHeader.biWidth = bmp.bmWidth;
+        dib_info->bmiHeader.biHeight = bmp.bmHeight;
+        dib_info->bmiHeader.biPlanes = 1;
+        dib_info->bmiHeader.biBitCount = bmp.bmBitsPixel;
+        dib_info->bmiHeader.biCompression = BI_RGB;
+        dib_info->bmiHeader.biSizeImage = 0;
+        dib_info->bmiHeader.biXPelsPerMeter = 0;
+        dib_info->bmiHeader.biYPelsPerMeter = 0;
+        dib_info->bmiHeader.biClrUsed = 0;
+        dib_info->bmiHeader.biClrImportant = 0;
+        switch (dib_info->bmiHeader.biBitCount)
+        {
+        case 16:
+            ((DWORD *)dib_info->bmiColors)[0] = 0xf800;
+            ((DWORD *)dib_info->bmiColors)[1] = 0x07e0;
+            ((DWORD *)dib_info->bmiColors)[2] = 0x001f;
+            break;
+        case 32:
+            ((DWORD *)dib_info->bmiColors)[0] = 0xff0000;
+            ((DWORD *)dib_info->bmiColors)[1] = 0x00ff00;
+            ((DWORD *)dib_info->bmiColors)[2] = 0x0000ff;
+            break;
+        default:
+            if (dib_info->bmiHeader.biBitCount > 8) break;
+            if (!(palette = GetCurrentObject( *hdc, OBJ_PAL ))) return FALSE;
+            if (!GetPaletteEntries( palette, 0, 256, (PALETTEENTRY *)dib_info->bmiColors ))
+                return FALSE;
+        }
+
+        if (!(blit_dc = NtGdiCreateCompatibleDC( *hdc ))) return FALSE;
+        if (!(blit_bitmap = CreateDIBSection( blit_dc, dib_info, DIB_RGB_COLORS, &bits, NULL, 0 )))
+            goto err;
+        if (!SelectObject( blit_dc, blit_bitmap )) goto err;
+        if (!BitBlt( blit_dc, 0, 0, bmp.bmWidth, bmp.bmHeight, *hdc, 0, 0, SRCCOPY ))
+            goto err;
+    }
+    if (!GetDIBits( blit_dc, blit_bitmap, 0, INT_MAX, NULL, info, DIB_RGB_COLORS ))
+        goto err;
+
+    bpp = info->bmiHeader.biBitCount;
+    if (bpp <= 8)
+        return sizeof(BITMAPINFOHEADER) + (1 << bpp) * sizeof(RGBQUAD);
+    else if (bpp == 16 || bpp == 32)
+        return sizeof(BITMAPINFOHEADER) + 3 * sizeof(RGBQUAD);
+
+    return sizeof(BITMAPINFOHEADER);
+
+err:
+    if (blit_dc && blit_dc != *hdc) DeleteDC( blit_dc );
+    if (blit_bitmap && blit_bitmap != *bitmap) DeleteObject( blit_bitmap );
+    return 0;
+}
+
 static UINT emfdc_add_handle( struct emf *emf, HGDIOBJ obj )
 {
     UINT index;
@@ -121,7 +199,7 @@ static UINT emfdc_add_handle( struct emf *emf, HGDIOBJ obj )
                                     emf->handles,
                                     emf->handles_size * sizeof(emf->handles[0]) );
     }
-    emf->handles[index] = get_full_gdi_handle( obj );
+    emf->handles[index] = obj;
 
     emf->cur_handles++;
     if (emf->cur_handles > emf->emh->nHandles)
@@ -190,15 +268,21 @@ static DWORD emfdc_create_brush( struct emf *emf, HBRUSH brush )
             char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
             BITMAPINFO *info = (BITMAPINFO *)buffer;
             DWORD info_size;
-            void *bits;
             UINT usage;
 
-            if (!get_brush_bitmap_info( brush, info, &bits, &usage )) break;
+            if (!get_brush_bitmap_info( brush, info, NULL, &usage )) break;
             info_size = get_dib_info_size( info, usage );
 
             emr = HeapAlloc( GetProcessHeap(), 0,
-                             sizeof(EMRCREATEDIBPATTERNBRUSHPT)+info_size+info->bmiHeader.biSizeImage );
+                             sizeof(EMRCREATEDIBPATTERNBRUSHPT) + sizeof(DWORD) +
+                             info_size+info->bmiHeader.biSizeImage );
             if(!emr) break;
+
+            /* FIXME: There is an extra DWORD written by native before the BMI.
+             *        Not sure what it's meant to contain.
+             */
+            emr->offBmi = sizeof( EMRCREATEDIBPATTERNBRUSHPT ) + sizeof(DWORD);
+            *(DWORD *)(emr + 1) = 0x20000000;
 
             if (logbrush.lbStyle == BS_PATTERN && info->bmiHeader.biBitCount == 1)
             {
@@ -211,16 +295,11 @@ static DWORD emfdc_create_brush( struct emf *emf, HBRUSH brush )
                  */
                 emr->emr.iType = EMR_CREATEMONOBRUSH;
                 usage = DIB_PAL_MONO;
-                /* FIXME: There is an extra DWORD written by native before the BMI.
-                 *        Not sure what it's meant to contain.
-                 */
-                emr->offBmi = sizeof( EMRCREATEDIBPATTERNBRUSHPT ) + sizeof(DWORD);
                 emr->cbBmi = sizeof( BITMAPINFOHEADER );
             }
             else
             {
                 emr->emr.iType = EMR_CREATEDIBPATTERNBRUSHPT;
-                emr->offBmi = sizeof( EMRCREATEDIBPATTERNBRUSHPT );
                 emr->cbBmi = info_size;
             }
             emr->ihBrush = index = emfdc_add_handle( emf, brush );
@@ -229,8 +308,10 @@ static DWORD emfdc_create_brush( struct emf *emf, HBRUSH brush )
             emr->cbBits = info->bmiHeader.biSizeImage;
             emr->emr.nSize = emr->offBits + emr->cbBits;
 
+            if (info->bmiHeader.biClrUsed == 1 << info->bmiHeader.biBitCount)
+                info->bmiHeader.biClrUsed = 0;
             memcpy( (BYTE *)emr + emr->offBmi, info, emr->cbBmi );
-            memcpy( (BYTE *)emr + emr->offBits, bits, emr->cbBits );
+            get_brush_bitmap_info( brush, NULL, (char *)emr + emr->offBits, NULL );
 
             if (!emfdc_record( emf, &emr->emr )) index = 0;
             HeapFree( GetProcessHeap(), 0, emr );
@@ -1175,80 +1256,18 @@ static BOOL emfdrv_stretchblt( struct emf *emf, INT x_dst, INT y_dst, INT width_
                                DWORD rop, DWORD type )
 {
     BITMAPINFO src_info = {{ sizeof( src_info.bmiHeader ) }};
-    UINT bmi_size, emr_size, size, bpp;
+    UINT bmi_size, emr_size, size;
     HBITMAP bitmap, blit_bitmap = NULL;
     EMRBITBLT *emr = NULL;
     BITMAPINFO *bmi;
-    DIBSECTION dib;
     HDC blit_dc;
-    int info_size;
     BOOL ret = FALSE;
 
     if (!(bitmap = GetCurrentObject( hdc_src, OBJ_BITMAP ))) return FALSE;
-    if (!(info_size = GetObjectW( bitmap, sizeof(dib), &dib ))) return FALSE;
 
-    if (info_size == sizeof(DIBSECTION))
-    {
-        blit_dc = hdc_src;
-        blit_bitmap = bitmap;
-    }
-    else
-    {
-        unsigned char dib_info_buffer[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
-        BITMAPINFO *dib_info = (BITMAPINFO *)dib_info_buffer;
-        BITMAP bmp = dib.dsBm;
-        HPALETTE palette;
-        void *bits;
-
-        assert( info_size == sizeof(BITMAP) );
-
-        dib_info->bmiHeader.biSize = sizeof(dib_info->bmiHeader);
-        dib_info->bmiHeader.biWidth = bmp.bmWidth;
-        dib_info->bmiHeader.biHeight = bmp.bmHeight;
-        dib_info->bmiHeader.biPlanes = 1;
-        dib_info->bmiHeader.biBitCount = bmp.bmBitsPixel;
-        dib_info->bmiHeader.biCompression = BI_RGB;
-        dib_info->bmiHeader.biSizeImage = 0;
-        dib_info->bmiHeader.biXPelsPerMeter = 0;
-        dib_info->bmiHeader.biYPelsPerMeter = 0;
-        dib_info->bmiHeader.biClrUsed = 0;
-        dib_info->bmiHeader.biClrImportant = 0;
-        switch (dib_info->bmiHeader.biBitCount)
-        {
-        case 16:
-            ((DWORD *)dib_info->bmiColors)[0] = 0xf800;
-            ((DWORD *)dib_info->bmiColors)[1] = 0x07e0;
-            ((DWORD *)dib_info->bmiColors)[2] = 0x001f;
-            break;
-        case 32:
-            ((DWORD *)dib_info->bmiColors)[0] = 0xff0000;
-            ((DWORD *)dib_info->bmiColors)[1] = 0x00ff00;
-            ((DWORD *)dib_info->bmiColors)[2] = 0x0000ff;
-            break;
-        default:
-            if (dib_info->bmiHeader.biBitCount > 8) break;
-            if (!(palette = GetCurrentObject( hdc_src, OBJ_PAL ))) return FALSE;
-            if (!GetPaletteEntries( palette, 0, 256, (PALETTEENTRY *)dib_info->bmiColors ))
-                return FALSE;
-        }
-
-        if (!(blit_dc = NtGdiCreateCompatibleDC( hdc_src ))) return FALSE;
-        if (!(blit_bitmap = CreateDIBSection( blit_dc, dib_info, DIB_RGB_COLORS, &bits, NULL, 0 )))
-            goto err;
-        if (!SelectObject( blit_dc, blit_bitmap )) goto err;
-        if (!BitBlt( blit_dc, 0, 0, bmp.bmWidth, bmp.bmHeight, hdc_src, 0, 0, SRCCOPY ))
-            goto err;
-    }
-    if (!GetDIBits( blit_dc, blit_bitmap, 0, INT_MAX, NULL, &src_info, DIB_RGB_COLORS ))
-        goto err;
-
-    bpp = src_info.bmiHeader.biBitCount;
-    if (bpp <= 8)
-        bmi_size = sizeof(BITMAPINFOHEADER) + (1 << bpp) * sizeof(RGBQUAD);
-    else if (bpp == 16 || bpp == 32)
-        bmi_size = sizeof(BITMAPINFOHEADER) + 3 * sizeof(RGBQUAD);
-    else
-        bmi_size = sizeof(BITMAPINFOHEADER);
+    blit_dc = hdc_src;
+    blit_bitmap = bitmap;
+    if (!(bmi_size = get_bitmap_info( &blit_dc, &blit_bitmap, &src_info ))) return FALSE;
 
     /* EMRSTRETCHBLT and EMRALPHABLEND have the same structure */
     emr_size = type == EMR_BITBLT ? sizeof(EMRBITBLT) : sizeof(EMRSTRETCHBLT);
@@ -1268,7 +1287,7 @@ static BOOL emfdrv_stretchblt( struct emf *emf, INT x_dst, INT y_dst, INT width_
     emr->cyDest = height_dst;
     emr->xSrc = x_src;
     emr->ySrc = y_src;
-    if (type == EMR_STRETCHBLT || type == EMR_ALPHABLEND)
+    if (type != EMR_BITBLT)
     {
         EMRSTRETCHBLT *emr_stretchblt = (EMRSTRETCHBLT *)emr;
         emr_stretchblt->cxSrc = width_src;
@@ -1295,8 +1314,8 @@ static BOOL emfdrv_stretchblt( struct emf *emf, INT x_dst, INT y_dst, INT width_
 
 err:
     HeapFree( GetProcessHeap(), 0, emr );
-    if (blit_bitmap && blit_bitmap != bitmap) DeleteObject( blit_bitmap );
-    if (blit_dc && blit_dc != hdc_src) DeleteDC( blit_dc );
+    if (blit_bitmap != bitmap) DeleteObject( blit_bitmap );
+    if (blit_dc != hdc_src) DeleteDC( blit_dc );
     return ret;
 }
 
@@ -1367,6 +1386,214 @@ BOOL EMFDC_StretchBlt( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT width_dst, IN
     return emfdrv_stretchblt( dc_attr->emf, x_dst, y_dst, width_dst, height_dst,
                               hdc_src, x_src, y_src, width_src,
                               height_src, rop, EMR_STRETCHBLT );
+}
+
+BOOL EMFDC_TransparentBlt( DC_ATTR *dc_attr, int x_dst, int y_dst, int width_dst, int height_dst,
+                           HDC hdc_src, int x_src, int y_src, int width_src, int height_src,
+                           UINT color )
+{
+    return emfdrv_stretchblt( dc_attr->emf, x_dst, y_dst, width_dst, height_dst,
+                              hdc_src, x_src, y_src, width_src,
+                              height_src, color, EMR_TRANSPARENTBLT );
+}
+
+BOOL EMFDC_MaskBlt( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT width_dst, INT height_dst,
+                    HDC hdc_src, INT x_src, INT y_src, HBITMAP mask,
+                    INT x_mask, INT y_mask, DWORD rop )
+{
+    unsigned char mask_info_buffer[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
+    BITMAPINFO *mask_bits_info = (BITMAPINFO *)mask_info_buffer;
+    struct emf *emf = dc_attr->emf;
+    BITMAPINFO mask_info = {{ sizeof( mask_info.bmiHeader ) }};
+    BITMAPINFO src_info = {{ sizeof( src_info.bmiHeader ) }};
+    HBITMAP bitmap, blit_bitmap = NULL, mask_bitmap = NULL;
+    UINT bmi_size, size, mask_info_size = 0;
+    EMRMASKBLT *emr = NULL;
+    BITMAPINFO *bmi;
+    HDC blit_dc, mask_dc = NULL;
+    BOOL ret = FALSE;
+
+    if (!rop_uses_src( rop ))
+        return EMFDC_PatBlt( dc_attr, x_dst, y_dst, width_dst, height_dst, rop );
+
+    if (!(bitmap = GetCurrentObject( hdc_src, OBJ_BITMAP ))) return FALSE;
+    blit_dc = hdc_src;
+    blit_bitmap = bitmap;
+    if (!(bmi_size = get_bitmap_info( &blit_dc, &blit_bitmap, &src_info ))) return FALSE;
+
+    if (mask)
+    {
+        mask_dc = hdc_src;
+        mask_bitmap = mask;
+        if (!(mask_info_size = get_bitmap_info( &mask_dc, &mask_bitmap, &mask_info ))) goto err;
+        if (mask_info.bmiHeader.biBitCount == 1)
+            mask_info_size = sizeof(BITMAPINFOHEADER); /* don't include colors */
+    }
+    else mask_info.bmiHeader.biSizeImage = 0;
+
+    size = sizeof(*emr) + bmi_size + src_info.bmiHeader.biSizeImage +
+        mask_info_size + mask_info.bmiHeader.biSizeImage;
+
+    if (!(emr = HeapAlloc(GetProcessHeap(), 0, size))) goto err;
+
+    emr->emr.iType = EMR_MASKBLT;
+    emr->emr.nSize = size;
+    emr->rclBounds.left = x_dst;
+    emr->rclBounds.top = y_dst;
+    emr->rclBounds.right = x_dst + width_dst - 1;
+    emr->rclBounds.bottom = y_dst + height_dst - 1;
+    emr->xDest = x_dst;
+    emr->yDest = y_dst;
+    emr->cxDest = width_dst;
+    emr->cyDest = height_dst;
+    emr->dwRop = rop;
+    emr->xSrc = x_src;
+    emr->ySrc = y_src;
+    NtGdiGetTransform( hdc_src, 0x204, &emr->xformSrc );
+    emr->crBkColorSrc = GetBkColor( hdc_src );
+    emr->iUsageSrc = DIB_RGB_COLORS;
+    emr->offBmiSrc = sizeof(*emr);
+    emr->cbBmiSrc = bmi_size;
+    emr->offBitsSrc = emr->offBmiSrc + bmi_size;
+    emr->cbBitsSrc = src_info.bmiHeader.biSizeImage;
+    emr->xMask = x_mask;
+    emr->yMask = y_mask;
+    emr->iUsageMask = DIB_PAL_MONO;
+    emr->offBmiMask = mask_info_size ? emr->offBitsSrc + emr->cbBitsSrc : 0;
+    emr->cbBmiMask = mask_info_size;
+    emr->offBitsMask = emr->offBmiMask + emr->cbBmiMask;
+    emr->cbBitsMask = mask_info.bmiHeader.biSizeImage;
+
+    bmi = (BITMAPINFO *)((char *)emr + emr->offBmiSrc);
+    bmi->bmiHeader = src_info.bmiHeader;
+    ret = GetDIBits( blit_dc, blit_bitmap, 0, src_info.bmiHeader.biHeight,
+                     (char *)emr + emr->offBitsSrc, bmi, DIB_RGB_COLORS );
+    if (!ret) goto err;
+
+    if (mask_info_size)
+    {
+        mask_bits_info->bmiHeader = mask_info.bmiHeader;
+        ret = GetDIBits( blit_dc, mask_bitmap, 0, mask_info.bmiHeader.biHeight,
+                         (char *)emr + emr->offBitsMask, mask_bits_info, DIB_RGB_COLORS );
+        if (ret) memcpy( (char *)emr + emr->offBmiMask, mask_bits_info, mask_info_size );
+    }
+
+    if (ret)
+    {
+        ret = emfdc_record( emf, (EMR *)emr );
+        if (ret) emfdc_update_bounds( emf, &emr->rclBounds );
+    }
+
+err:
+    HeapFree( GetProcessHeap(), 0, emr );
+    if (mask_bitmap != mask) DeleteObject( mask_bitmap );
+    if (mask_dc != hdc_src) DeleteObject( mask_dc );
+    if (blit_bitmap != bitmap) DeleteObject( blit_bitmap );
+    if (blit_dc != hdc_src) DeleteDC( blit_dc );
+    return ret;
+}
+
+BOOL EMFDC_PlgBlt( DC_ATTR *dc_attr, const POINT *points, HDC hdc_src, INT x_src, INT y_src,
+                   INT width, INT height, HBITMAP mask, INT x_mask, INT y_mask )
+{
+    unsigned char mask_info_buffer[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
+    BITMAPINFO *mask_bits_info = (BITMAPINFO *)mask_info_buffer;
+    struct emf *emf = dc_attr->emf;
+    BITMAPINFO mask_info = {{ sizeof( mask_info.bmiHeader ) }};
+    BITMAPINFO src_info = {{ sizeof( src_info.bmiHeader ) }};
+    HBITMAP bitmap, blit_bitmap = NULL, mask_bitmap = NULL;
+    UINT bmi_size, size, mask_info_size = 0;
+    EMRPLGBLT *emr = NULL;
+    BITMAPINFO *bmi;
+    HDC blit_dc, mask_dc = NULL;
+    int x_min, y_min, x_max, y_max, i;
+    BOOL ret = FALSE;
+
+    if (!(bitmap = GetCurrentObject( hdc_src, OBJ_BITMAP ))) return FALSE;
+
+    blit_dc = hdc_src;
+    blit_bitmap = bitmap;
+    if (!(bmi_size = get_bitmap_info( &blit_dc, &blit_bitmap, &src_info ))) return FALSE;
+
+    if (mask)
+    {
+        mask_dc = hdc_src;
+        mask_bitmap = mask;
+        if (!(mask_info_size = get_bitmap_info( &mask_dc, &mask_bitmap, &mask_info ))) goto err;
+        if (mask_info.bmiHeader.biBitCount == 1)
+            mask_info_size = sizeof(BITMAPINFOHEADER); /* don't include colors */
+    }
+    else mask_info.bmiHeader.biSizeImage = 0;
+
+    size = sizeof(*emr) + bmi_size + src_info.bmiHeader.biSizeImage +
+        mask_info_size + mask_info.bmiHeader.biSizeImage;
+
+    if (!(emr = HeapAlloc(GetProcessHeap(), 0, size))) goto err;
+
+    emr->emr.iType = EMR_PLGBLT;
+    emr->emr.nSize = size;
+
+    /* FIXME: not exactly what native does */
+    x_min = x_max = points[1].x + points[2].x - points[0].x;
+    y_min = y_max = points[1].y + points[2].y - points[0].y;
+    for (i = 0; i < ARRAYSIZE(emr->aptlDest); i++)
+    {
+        x_min = min( x_min, points[i].x );
+        y_min = min( y_min, points[i].y );
+        x_max = max( x_max, points[i].x );
+        y_max = max( y_min, points[i].y );
+    }
+    emr->rclBounds.left = x_min;
+    emr->rclBounds.top = y_min;
+    emr->rclBounds.right = x_max;
+    emr->rclBounds.bottom = y_max;
+    memcpy( emr->aptlDest, points, sizeof(emr->aptlDest) );
+    emr->xSrc = x_src;
+    emr->ySrc = y_src;
+    emr->cxSrc = width;
+    emr->cySrc = height;
+    NtGdiGetTransform( hdc_src, 0x204, &emr->xformSrc );
+    emr->crBkColorSrc = GetBkColor( hdc_src );
+    emr->iUsageSrc = DIB_RGB_COLORS;
+    emr->offBmiSrc = sizeof(*emr);
+    emr->cbBmiSrc = bmi_size;
+    emr->offBitsSrc = emr->offBmiSrc + bmi_size;
+    emr->cbBitsSrc = src_info.bmiHeader.biSizeImage;
+    emr->xMask = x_mask;
+    emr->yMask = y_mask;
+    emr->iUsageMask = DIB_PAL_MONO;
+    emr->offBmiMask = mask_info_size ? emr->offBitsSrc + emr->cbBitsSrc : 0;
+    emr->cbBmiMask = mask_info_size;
+    emr->offBitsMask = emr->offBmiMask + emr->cbBmiMask;
+    emr->cbBitsMask = mask_info.bmiHeader.biSizeImage;
+
+    bmi = (BITMAPINFO *)((char *)emr + emr->offBmiSrc);
+    bmi->bmiHeader = src_info.bmiHeader;
+    ret = GetDIBits( blit_dc, blit_bitmap, 0, src_info.bmiHeader.biHeight,
+                     (char *)emr + emr->offBitsSrc, bmi, DIB_RGB_COLORS );
+    if (!ret) goto err;
+
+    if (mask_info_size)
+    {
+        mask_bits_info->bmiHeader = mask_info.bmiHeader;
+        ret = GetDIBits( blit_dc, mask_bitmap, 0, mask_info.bmiHeader.biHeight,
+                         (char *)emr + emr->offBitsMask, mask_bits_info, DIB_RGB_COLORS );
+        if (ret) memcpy( (char *)emr + emr->offBmiMask, mask_bits_info, mask_info_size );
+    }
+
+    if (ret)
+    {
+        ret = emfdc_record( emf, (EMR *)emr );
+        if (ret) emfdc_update_bounds( emf, &emr->rclBounds );
+    }
+
+err:
+    HeapFree( GetProcessHeap(), 0, emr );
+    if (mask_bitmap != mask) DeleteObject( mask_bitmap );
+    if (mask_dc != hdc_src) DeleteObject( mask_dc );
+    if (blit_bitmap != bitmap) DeleteObject( blit_bitmap );
+    if (blit_dc != hdc_src) DeleteDC( blit_dc );
+    return ret;
 }
 
 BOOL EMFDC_StretchDIBits( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT width_dst, INT height_dst,

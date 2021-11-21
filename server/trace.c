@@ -5610,7 +5610,6 @@ static const struct
     { "KERNEL_APC",                  STATUS_KERNEL_APC },
     { "KEY_DELETED",                 STATUS_KEY_DELETED },
     { "MAPPED_FILE_SIZE_ZERO",       STATUS_MAPPED_FILE_SIZE_ZERO },
-    { "MORE_PROCESSING_REQUIRED",    STATUS_MORE_PROCESSING_REQUIRED },
     { "MUTANT_NOT_OWNED",            STATUS_MUTANT_NOT_OWNED },
     { "NAME_TOO_LONG",               STATUS_NAME_TOO_LONG },
     { "NETWORK_BUSY",                STATUS_NETWORK_BUSY },

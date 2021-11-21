@@ -403,41 +403,64 @@ timeout_t monotonic_time;
 struct _KUSER_SHARED_DATA *user_shared_data = NULL;
 static const int user_shared_data_timeout = 16;
 
+static void atomic_store_ulong(volatile ULONG *ptr, ULONG value)
+{
+    /* on x86 there should be total store order guarantees, so volatile is
+     * enough to ensure the stores aren't reordered by the compiler, and then
+     * they will always be seen in-order from other CPUs. On other archs, we
+     * need atomic intrinsics to guarantee that. */
+#if defined(__i386__) || defined(__x86_64__)
+    *ptr = value;
+#else
+    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
+#endif
+}
+
+static void atomic_store_long(volatile LONG *ptr, LONG value)
+{
+#if defined(__i386__) || defined(__x86_64__)
+    *ptr = value;
+#else
+    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
+#endif
+}
+
 static void set_user_shared_data_time(void)
 {
     timeout_t tick_count = monotonic_time / 10000;
+    static timeout_t last_timezone_update;
+    timeout_t timezone_bias;
+    struct tm *tm;
+    time_t now;
 
-    /* on X86 there should be total store order guarantees, so volatile is enough
-     * to ensure the stores aren't reordered by the compiler, and then they will
-     * always be seen in-order from other CPUs. On other archs, we need atomic
-     * intrinsics to guarantee that. */
-#if defined(__i386__) || defined(__x86_64__)
-    user_shared_data->SystemTime.High2Time = current_time >> 32;
-    user_shared_data->SystemTime.LowPart   = current_time;
-    user_shared_data->SystemTime.High1Time = current_time >> 32;
+    if (monotonic_time - last_timezone_update > TICKS_PER_SEC)
+    {
+        now = time( NULL );
+        tm = gmtime( &now );
+        timezone_bias = mktime( tm ) - now;
+        tm = localtime( &now );
+        if (tm->tm_isdst) timezone_bias -= 3600;
+        timezone_bias *= TICKS_PER_SEC;
 
-    user_shared_data->InterruptTime.High2Time = monotonic_time >> 32;
-    user_shared_data->InterruptTime.LowPart   = monotonic_time;
-    user_shared_data->InterruptTime.High1Time = monotonic_time >> 32;
+        atomic_store_long(&user_shared_data->TimeZoneBias.High2Time, timezone_bias >> 32);
+        atomic_store_ulong(&user_shared_data->TimeZoneBias.LowPart, timezone_bias);
+        atomic_store_long(&user_shared_data->TimeZoneBias.High1Time, timezone_bias >> 32);
 
-    user_shared_data->TickCount.High2Time = tick_count >> 32;
-    user_shared_data->TickCount.LowPart   = tick_count;
-    user_shared_data->TickCount.High1Time = tick_count >> 32;
-    *(volatile ULONG *)&user_shared_data->TickCountLowDeprecated = tick_count;
-#else
-    __atomic_store_n(&user_shared_data->SystemTime.High2Time, current_time >> 32, __ATOMIC_SEQ_CST);
-    __atomic_store_n(&user_shared_data->SystemTime.LowPart, current_time, __ATOMIC_SEQ_CST);
-    __atomic_store_n(&user_shared_data->SystemTime.High1Time, current_time >> 32, __ATOMIC_SEQ_CST);
+        last_timezone_update = monotonic_time;
+    }
 
-    __atomic_store_n(&user_shared_data->InterruptTime.High2Time, monotonic_time >> 32, __ATOMIC_SEQ_CST);
-    __atomic_store_n(&user_shared_data->InterruptTime.LowPart, monotonic_time, __ATOMIC_SEQ_CST);
-    __atomic_store_n(&user_shared_data->InterruptTime.High1Time, monotonic_time >> 32, __ATOMIC_SEQ_CST);
+    atomic_store_long(&user_shared_data->SystemTime.High2Time, current_time >> 32);
+    atomic_store_ulong(&user_shared_data->SystemTime.LowPart, current_time);
+    atomic_store_long(&user_shared_data->SystemTime.High1Time, current_time >> 32);
 
-    __atomic_store_n(&user_shared_data->TickCount.High2Time, tick_count >> 32, __ATOMIC_SEQ_CST);
-    __atomic_store_n(&user_shared_data->TickCount.LowPart, tick_count, __ATOMIC_SEQ_CST);
-    __atomic_store_n(&user_shared_data->TickCount.High1Time, tick_count >> 32, __ATOMIC_SEQ_CST);
-    __atomic_store_n(&user_shared_data->TickCountLowDeprecated, tick_count, __ATOMIC_SEQ_CST);
-#endif
+    atomic_store_long(&user_shared_data->InterruptTime.High2Time, monotonic_time >> 32);
+    atomic_store_ulong(&user_shared_data->InterruptTime.LowPart, monotonic_time);
+    atomic_store_long(&user_shared_data->InterruptTime.High1Time, monotonic_time >> 32);
+
+    atomic_store_long(&user_shared_data->TickCount.High2Time, tick_count >> 32);
+    atomic_store_ulong(&user_shared_data->TickCount.LowPart, tick_count);
+    atomic_store_long(&user_shared_data->TickCount.High1Time, tick_count >> 32);
+    atomic_store_ulong(&user_shared_data->TickCountLowDeprecated, tick_count);
 }
 
 void set_current_time(void)
@@ -2443,6 +2466,11 @@ void fd_async_wake_up( struct fd *fd, int type, unsigned int status )
     }
 }
 
+void fd_cancel_async( struct fd *fd, struct async *async )
+{
+    fd->fd_ops->cancel_async( fd, async );
+}
+
 void fd_reselect_async( struct fd *fd, struct async_queue *queue )
 {
     fd->fd_ops->reselect_async( fd, queue );
@@ -2451,6 +2479,11 @@ void fd_reselect_async( struct fd *fd, struct async_queue *queue )
 void no_fd_queue_async( struct fd *fd, struct async *async, int type, int count )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
+}
+
+void default_fd_cancel_async( struct fd *fd, struct async *async )
+{
+    async_terminate( async, STATUS_CANCELLED );
 }
 
 void default_fd_queue_async( struct fd *fd, struct async *async, int type, int count )
@@ -2519,24 +2552,21 @@ static void unmount_device( struct fd *device_fd )
 }
 
 /* default read() routine */
-int no_fd_read( struct fd *fd, struct async *async, file_pos_t pos )
+void no_fd_read( struct fd *fd, struct async *async, file_pos_t pos )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
-    return 0;
 }
 
 /* default write() routine */
-int no_fd_write( struct fd *fd, struct async *async, file_pos_t pos )
+void no_fd_write( struct fd *fd, struct async *async, file_pos_t pos )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
-    return 0;
 }
 
 /* default flush() routine */
-int no_fd_flush( struct fd *fd, struct async *async )
+void no_fd_flush( struct fd *fd, struct async *async )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
-    return 0;
 }
 
 /* default get_file_info() routine */
@@ -2596,30 +2626,28 @@ void default_fd_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int 
 }
 
 /* default get_volume_info() routine */
-int no_fd_get_volume_info( struct fd *fd, struct async *async, unsigned int info_class )
+void no_fd_get_volume_info( struct fd *fd, struct async *async, unsigned int info_class )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
-    return 0;
 }
 
 /* default ioctl() routine */
-int no_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+void no_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
-    return 0;
 }
 
 /* default ioctl() routine */
-int default_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+void default_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 {
     switch(code)
     {
     case FSCTL_DISMOUNT_VOLUME:
         unmount_device( fd );
-        return 1;
+        break;
+
     default:
         set_error( STATUS_NOT_SUPPORTED );
-        return 0;
     }
 }
 
@@ -2929,7 +2957,8 @@ DECL_HANDLER(flush)
 
     if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        reply->event = async_handoff( async, fd->fd_ops->flush( fd, async ), NULL, 1 );
+        fd->fd_ops->flush( fd, async );
+        reply->event = async_handoff( async, NULL, 1 );
         release_object( async );
     }
     release_object( fd );
@@ -2957,7 +2986,8 @@ DECL_HANDLER(get_volume_info)
 
     if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        reply->wait = async_handoff( async, fd->fd_ops->get_volume_info( fd, async, req->info_class ), NULL, 1 );
+        fd->fd_ops->get_volume_info( fd, async, req->info_class );
+        reply->wait = async_handoff( async, NULL, 1 );
         release_object( async );
     }
     release_object( fd );
@@ -3033,7 +3063,8 @@ DECL_HANDLER(read)
 
     if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        reply->wait    = async_handoff( async, fd->fd_ops->read( fd, async, req->pos ), NULL, 0 );
+        fd->fd_ops->read( fd, async, req->pos );
+        reply->wait = async_handoff( async, NULL, 0 );
         reply->options = fd->options;
         release_object( async );
     }
@@ -3050,7 +3081,8 @@ DECL_HANDLER(write)
 
     if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        reply->wait    = async_handoff( async, fd->fd_ops->write( fd, async, req->pos ), &reply->size, 0 );
+        fd->fd_ops->write( fd, async, req->pos );
+        reply->wait = async_handoff( async, &reply->size, 0 );
         reply->options = fd->options;
         release_object( async );
     }
@@ -3068,7 +3100,8 @@ DECL_HANDLER(ioctl)
 
     if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        reply->wait    = async_handoff( async, fd->fd_ops->ioctl( fd, req->code, async ), NULL, 0 );
+        fd->fd_ops->ioctl( fd, req->code, async );
+        reply->wait = async_handoff( async, NULL, 0 );
         reply->options = fd->options;
         release_object( async );
     }

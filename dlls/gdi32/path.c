@@ -721,7 +721,7 @@ BOOL WINAPI NtGdiSelectClipPath( HDC hdc, INT mode )
     if ((rgn = NtGdiPathToRegion( hdc )))
     {
         ret = NtGdiExtSelectClipRgn( hdc, rgn, mode ) != ERROR;
-        DeleteObject( rgn );
+        NtGdiDeleteObjectApp( rgn );
     }
     return ret;
 }
@@ -2046,7 +2046,6 @@ const struct gdi_dc_funcs path_driver =
     NULL,                               /* pEndPage */
     pathdrv_EndPath,                    /* pEndPath */
     NULL,                               /* pEnumFonts */
-    NULL,                               /* pEnumICMProfiles */
     NULL,                               /* pExtDeviceMode */
     NULL,                               /* pExtEscape */
     NULL,                               /* pExtFloodFill */

@@ -1,7 +1,7 @@
 /*
- * pread function
+ * WoW64 USER32 syscall definitions
  *
- * Copyright 1996 Alexandre Julliard
+ * Copyright 2021 Alexandre Julliard
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,33 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
+#ifndef __WOW64WIN_SYSCALL_H
+#define __WOW64WIN_SYSCALL_H
 
-#include <errno.h>
-#include <stdio.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#define ALL_WIN32_SYSCALLS \
+    SYSCALL_ENTRY( NtGdiFlush )
 
-/* FIXME: this is not thread-safe */
-
-#ifndef HAVE_PREAD
-ssize_t pread( int fd, void *buf, size_t count, off_t offset )
-{
-    ssize_t ret;
-    off_t old_pos;
-
-    if ((old_pos = lseek( fd, 0, SEEK_CUR )) == -1) return -1;
-    if (lseek( fd, offset, SEEK_SET ) == -1) return -1;
-    if ((ret = read( fd, buf, count )) == -1)
-    {
-        int err = errno;  /* save errno */
-        lseek( fd, old_pos, SEEK_SET );
-        errno = err;
-        return -1;
-    }
-    if (lseek( fd, old_pos, SEEK_SET ) == -1) return -1;
-    return ret;
-}
-#endif /* HAVE_PREAD */
+#endif /* __WOW64WIN_SYSCALL_H */

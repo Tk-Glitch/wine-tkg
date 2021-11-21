@@ -278,8 +278,11 @@ static void save_sys_colors (HKEY baseKey)
  * is deactivated */
 static void UXTHEME_BackupSystemMetrics(void)
 {
+    DPI_AWARENESS_CONTEXT old_context;
     HKEY hKey;
     const struct BackupSysParam* bsp = backupSysParams;
+
+    old_context = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE);
 
     if (RegCreateKeyExW( HKEY_CURRENT_USER, szThemeManager,
                          0, 0, 0, KEY_ALL_ACCESS,
@@ -317,13 +320,18 @@ static void UXTHEME_BackupSystemMetrics(void)
     
         RegCloseKey (hKey);
     }
+
+    SetThreadDpiAwarenessContext(old_context);
 }
 
 /* Read back old settings after a theme was deactivated */
 static void UXTHEME_RestoreSystemMetrics(void)
 {
+    DPI_AWARENESS_CONTEXT old_context;
     HKEY hKey;
     const struct BackupSysParam* bsp = backupSysParams;
+
+    old_context = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE);
 
     if (RegOpenKeyExW (HKEY_CURRENT_USER, szThemeManager,
                        0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) 
@@ -404,6 +412,8 @@ static void UXTHEME_RestoreSystemMetrics(void)
       
         RegCloseKey (hKey);
     }
+
+    SetThreadDpiAwarenessContext(old_context);
 }
 
 /* Make system settings persistent, so they're in effect even w/o uxtheme 
@@ -617,10 +627,7 @@ static LPWSTR UXTHEME_GetWindowProperty(HWND hwnd, ATOM aProp, LPWSTR pszBuffer,
     return NULL;
 }
 
-/***********************************************************************
- *      OpenThemeDataEx                                     (UXTHEME.61)
- */
-HTHEME WINAPI OpenThemeDataEx(HWND hwnd, LPCWSTR pszClassList, DWORD flags)
+static HTHEME open_theme_data(HWND hwnd, LPCWSTR pszClassList, DWORD flags, UINT dpi)
 {
     WCHAR szAppBuff[256];
     WCHAR szClassBuff[256];
@@ -647,11 +654,11 @@ HTHEME WINAPI OpenThemeDataEx(HWND hwnd, LPCWSTR pszClassList, DWORD flags)
             pszUseClassList = pszClassList;
 
         if (pszUseClassList)
-            hTheme = MSSTYLES_OpenThemeClass(pszAppName, pszUseClassList);
+            hTheme = MSSTYLES_OpenThemeClass(pszAppName, pszUseClassList, dpi);
 
         /* Fall back to default class if the specified subclass is not found */
         if (!hTheme)
-            hTheme = MSSTYLES_OpenThemeClass(NULL, pszUseClassList);
+            hTheme = MSSTYLES_OpenThemeClass(NULL, pszUseClassList, dpi);
     }
     if(IsWindow(hwnd))
         SetPropW(hwnd, (LPCWSTR)MAKEINTATOM(atWindowTheme), hTheme);
@@ -659,6 +666,28 @@ HTHEME WINAPI OpenThemeDataEx(HWND hwnd, LPCWSTR pszClassList, DWORD flags)
 
     SetLastError(hTheme ? ERROR_SUCCESS : E_PROP_ID_UNSUPPORTED);
     return hTheme;
+}
+
+/***********************************************************************
+ *      OpenThemeDataEx                                     (UXTHEME.61)
+ */
+HTHEME WINAPI OpenThemeDataEx(HWND hwnd, LPCWSTR pszClassList, DWORD flags)
+{
+    UINT dpi;
+
+    dpi = GetDpiForWindow(hwnd);
+    if (!dpi)
+        dpi = 96;
+
+    return open_theme_data(hwnd, pszClassList, flags, dpi);
+}
+
+/***********************************************************************
+ *      OpenThemeDataForDpi                                 (UXTHEME.@)
+ */
+HTHEME WINAPI OpenThemeDataForDpi(HWND hwnd, LPCWSTR class_list, UINT dpi)
+{
+    return open_theme_data(hwnd, class_list, 0, dpi);
 }
 
 /***********************************************************************

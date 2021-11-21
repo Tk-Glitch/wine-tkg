@@ -107,6 +107,7 @@ struct d3d10_effect_shader_variable
 {
     ID3D10ShaderReflection *reflection;
     ID3D10Blob *input_signature;
+    ID3D10Blob *bytecode;
     union
     {
         ID3D10VertexShader *vs;
@@ -117,6 +118,7 @@ struct d3d10_effect_shader_variable
     unsigned int resource_count;
     struct d3d10_effect_shader_resource *resources;
     char *stream_output_declaration;
+    unsigned int isinline : 1;
 };
 
 struct d3d10_effect_state_object_variable

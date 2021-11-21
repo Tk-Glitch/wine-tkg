@@ -213,12 +213,12 @@ static struct list *device_file_get_kernel_obj_list( struct object *obj );
 static int device_file_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static void device_file_destroy( struct object *obj );
 static enum server_fd_type device_file_get_fd_type( struct fd *fd );
-static int device_file_read( struct fd *fd, struct async *async, file_pos_t pos );
-static int device_file_write( struct fd *fd, struct async *async, file_pos_t pos );
-static int device_file_flush( struct fd *fd, struct async *async );
-static int device_file_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
-static void device_file_reselect_async( struct fd *fd, struct async_queue *queue );
-static int device_file_get_volume_info( struct fd *fd, struct async *async, unsigned int info_class );
+static void device_file_read( struct fd *fd, struct async *async, file_pos_t pos );
+static void device_file_write( struct fd *fd, struct async *async, file_pos_t pos );
+static void device_file_flush( struct fd *fd, struct async *async );
+static void device_file_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+static void device_file_cancel_async( struct fd *fd, struct async *async );
+static void device_file_get_volume_info( struct fd *fd, struct async *async, unsigned int info_class );
 
 static const struct object_ops device_file_ops =
 {
@@ -257,8 +257,9 @@ static const struct fd_ops device_file_fd_ops =
     default_fd_get_file_info,         /* get_file_info */
     device_file_get_volume_info,      /* get_volume_info */
     device_file_ioctl,                /* ioctl */
+    device_file_cancel_async,         /* cancel_async */
     default_fd_queue_async,           /* queue_async */
-    device_file_reselect_async        /* reselect_async */
+    default_fd_reselect_async,        /* reselect_async */
 };
 
 
@@ -383,11 +384,6 @@ static struct irp_call *create_irp( struct device_file *file, const irp_params_t
         irp->user_ptr = 0;
 
         if (async) irp->iosb = async_get_iosb( async );
-        if (!irp->iosb && !(irp->iosb = create_iosb( NULL, 0, 0 )))
-        {
-            release_object( irp );
-            irp = NULL;
-        }
     }
     return irp;
 }
@@ -396,24 +392,16 @@ static void set_irp_result( struct irp_call *irp, unsigned int status,
                             const void *out_data, data_size_t out_size, data_size_t result )
 {
     struct device_file *file = irp->file;
-    struct iosb *iosb = irp->iosb;
 
     if (!file) return;  /* already finished */
-
-    /* FIXME: handle the STATUS_PENDING case */
-    iosb->status = status;
-    iosb->result = result;
-    iosb->out_size = min( iosb->out_size, out_size );
-    if (iosb->out_size && !(iosb->out_data = memdup( out_data, iosb->out_size )))
-        iosb->out_size = 0;
 
     /* remove it from the device queue */
     list_remove( &irp->dev_entry );
     irp->file = NULL;
     if (irp->async)
     {
-        if (result) status = STATUS_ALERTED;
-        async_terminate( irp->async, status );
+        out_size = min( irp->iosb->out_size, out_size );
+        async_request_complete_alloc( irp->async, status, result, out_size, out_data );
         release_object( irp->async );
         irp->async = NULL;
     }
@@ -623,17 +611,16 @@ static void free_irp_params( struct irp_call *irp )
 }
 
 /* queue an irp to the device */
-static int queue_irp( struct device_file *file, const irp_params_t *params, struct async *async )
+static void queue_irp( struct device_file *file, const irp_params_t *params, struct async *async )
 {
     struct irp_call *irp = create_irp( file, params, async );
-    if (!irp) return 0;
+    if (!irp) return;
 
     fd_queue_async( file->fd, async, ASYNC_TYPE_WAIT );
     irp->async = (struct async *)grab_object( async );
     add_irp_to_queue( file->device->manager, irp, current );
     release_object( irp );
-    set_error( STATUS_PENDING );
-    return 0;
+    async_set_unknown_status( async );
 }
 
 static enum server_fd_type device_file_get_fd_type( struct fd *fd )
@@ -641,7 +628,7 @@ static enum server_fd_type device_file_get_fd_type( struct fd *fd )
     return FD_TYPE_DEVICE;
 }
 
-static int device_file_get_volume_info( struct fd *fd, struct async *async, unsigned int info_class )
+static void device_file_get_volume_info( struct fd *fd, struct async *async, unsigned int info_class )
 {
     struct device_file *file = get_fd_user( fd );
     irp_params_t params;
@@ -649,10 +636,10 @@ static int device_file_get_volume_info( struct fd *fd, struct async *async, unsi
     memset( &params, 0, sizeof(params) );
     params.volume.type = IRP_CALL_VOLUME;
     params.volume.info_class = info_class;
-    return queue_irp( file, &params, async );
+    queue_irp( file, &params, async );
 }
 
-static int device_file_read( struct fd *fd, struct async *async, file_pos_t pos )
+static void device_file_read( struct fd *fd, struct async *async, file_pos_t pos )
 {
     struct device_file *file = get_fd_user( fd );
     irp_params_t params;
@@ -661,10 +648,10 @@ static int device_file_read( struct fd *fd, struct async *async, file_pos_t pos 
     params.read.type = IRP_CALL_READ;
     params.read.key  = 0;
     params.read.pos  = pos;
-    return queue_irp( file, &params, async );
+    queue_irp( file, &params, async );
 }
 
-static int device_file_write( struct fd *fd, struct async *async, file_pos_t pos )
+static void device_file_write( struct fd *fd, struct async *async, file_pos_t pos )
 {
     struct device_file *file = get_fd_user( fd );
     irp_params_t params;
@@ -673,20 +660,20 @@ static int device_file_write( struct fd *fd, struct async *async, file_pos_t pos
     params.write.type = IRP_CALL_WRITE;
     params.write.key  = 0;
     params.write.pos  = pos;
-    return queue_irp( file, &params, async );
+    queue_irp( file, &params, async );
 }
 
-static int device_file_flush( struct fd *fd, struct async *async )
+static void device_file_flush( struct fd *fd, struct async *async )
 {
     struct device_file *file = get_fd_user( fd );
     irp_params_t params;
 
     memset( &params, 0, sizeof(params) );
     params.flush.type = IRP_CALL_FLUSH;
-    return queue_irp( file, &params, async );
+    queue_irp( file, &params, async );
 }
 
-static int device_file_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+static void device_file_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 {
     struct device_file *file = get_fd_user( fd );
     irp_params_t params;
@@ -694,7 +681,7 @@ static int device_file_ioctl( struct fd *fd, ioctl_code_t code, struct async *as
     memset( &params, 0, sizeof(params) );
     params.ioctl.type = IRP_CALL_IOCTL;
     params.ioctl.code = code;
-    return queue_irp( file, &params, async );
+    queue_irp( file, &params, async );
 }
 
 static void cancel_irp_call( struct irp_call *irp )
@@ -714,21 +701,21 @@ static void cancel_irp_call( struct irp_call *irp )
         add_irp_to_queue( irp->file->device->manager, cancel_irp, NULL );
         release_object( cancel_irp );
     }
-
-    set_irp_result( irp, STATUS_CANCELLED, NULL, 0, 0 );
 }
 
-static void device_file_reselect_async( struct fd *fd, struct async_queue *queue )
+static void device_file_cancel_async( struct fd *fd, struct async *async )
 {
     struct device_file *file = get_fd_user( fd );
     struct irp_call *irp;
 
     LIST_FOR_EACH_ENTRY( irp, &file->requests, struct irp_call, dev_entry )
-        if (irp->iosb->status != STATUS_PENDING)
+    {
+        if (irp->async == async)
         {
             cancel_irp_call( irp );
             return;
         }
+    }
 }
 
 static struct device *create_device( struct object *root, const struct unicode_str *name,
@@ -1017,7 +1004,7 @@ DECL_HANDLER(get_next_device_request)
              * so we need to do it now */
             cancel_irp_call( irp );
         else if (irp->async)
-            set_async_pending( irp->async, irp->file && is_fd_overlapped( irp->file->fd ) );
+            set_async_pending( irp->async );
 
         free_irp_params( irp );
         release_object( irp );
@@ -1037,15 +1024,21 @@ DECL_HANDLER(get_next_device_request)
         reply->client_tid    = get_thread_id( thread );
 
         iosb = irp->iosb;
-        reply->in_size = iosb->in_size;
-        if (iosb->in_size > get_reply_max_size()) set_error( STATUS_BUFFER_OVERFLOW );
+        if (iosb)
+            reply->in_size = iosb->in_size;
+
+        if (iosb && iosb->in_size > get_reply_max_size())
+            set_error( STATUS_BUFFER_OVERFLOW );
         else if (!irp->file || (reply->next = alloc_handle( current->process, irp, 0, 0 )))
         {
             if (fill_irp_params( manager, irp, &reply->params ))
             {
-                set_reply_data_ptr( iosb->in_data, iosb->in_size );
-                iosb->in_data = NULL;
-                iosb->in_size = 0;
+                if (iosb)
+                {
+                    set_reply_data_ptr( iosb->in_data, iosb->in_size );
+                    iosb->in_data = NULL;
+                    iosb->in_size = 0;
+                }
                 list_remove( &irp->mgr_entry );
                 list_init( &irp->mgr_entry );
                 /* we already own the object if it's only on manager queue */
@@ -1074,12 +1067,9 @@ DECL_HANDLER(set_irp_result)
 
     if ((irp = (struct irp_call *)get_handle_obj( current->process, req->handle, 0, &irp_call_ops )))
     {
-        if (!irp->canceled)
-            set_irp_result( irp, req->status, get_req_data(), get_req_data_size(), req->size );
-        else if(irp->user_ptr) /* cancel already queued */
-            set_error( STATUS_MORE_PROCESSING_REQUIRED );
-        else /* we may be still dispatching the IRP. don't bother queuing cancel if it's already complete */
-            irp->canceled = 0;
+        set_irp_result( irp, req->status, get_req_data(), get_req_data_size(), req->size );
+        /* we may be still dispatching the IRP. don't bother queuing cancel if it's already complete */
+        irp->canceled = 0;
         close_handle( current->process, req->handle );  /* avoid an extra round-trip for close */
         release_object( irp );
     }

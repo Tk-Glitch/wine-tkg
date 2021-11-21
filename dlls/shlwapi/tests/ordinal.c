@@ -1674,12 +1674,6 @@ static void test_SHFormatDateTimeA(void)
     DWORD flags;
     INT ret;
 
-if (0)
-{
-    /* crashes on native */
-    pSHFormatDateTimeA(NULL, NULL, NULL, 0);
-}
-
     GetLocalTime(&st);
     SystemTimeToFileTime(&st, &filetime);
     /* SHFormatDateTime expects input as utc */
@@ -1717,6 +1711,21 @@ if (0)
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ok(GetLastError() == 0xdeadbeef,
         "expected 0xdeadbeef, got %d\n", GetLastError());
+
+    flags = FDTF_DEFAULT;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+
+    buff2[0] = '\0';
+    flags = FDTF_SHORTDATE | FDTF_SHORTTIME;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff, buff2);
+
+    buff2[0] = '\0';
+    ret = pSHFormatDateTimeA(&filetime, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff, buff2);
 
     /* now check returned strings */
     flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTTIME;

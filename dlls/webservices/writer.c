@@ -220,15 +220,7 @@ HRESULT WINAPI WsCreateWriter( const WS_XML_WRITER_PROPERTY *properties, ULONG c
         }
     }
 
-    hr = prop_get( writer->prop, writer->prop_count, WS_XML_WRITER_PROPERTY_BUFFER_MAX_SIZE,
-                   &max_size, sizeof(max_size) );
-    if (hr != S_OK)
-    {
-        free_writer( writer );
-        return hr;
-    }
-
-    hr = WsCreateHeap( max_size, 0, NULL, 0, &writer->output_heap, NULL );
+    hr = WsCreateHeap( 1 << 20, 0, NULL, 0, &writer->output_heap, NULL );
     if (hr != S_OK)
     {
         free_writer( writer );
@@ -2762,6 +2754,26 @@ static HRESULT write_text_bin( struct writer *writer, const WS_XML_TEXT *text, U
         {
             if ((hr = write_grow_buffer( writer, 1 + sizeof(len) + len )) != S_OK) return hr;
             write_char( writer, rem ? RECORD_BYTES16_TEXT : RECORD_BYTES16_TEXT_WITH_ENDELEMENT );
+            write_bytes( writer, (const BYTE *)&len, sizeof(len) );
+            write_bytes( writer, text_base64->bytes, len );
+        }
+        if (rem)
+        {
+            if ((hr = write_grow_buffer( writer, 3 )) != S_OK) return hr;
+            write_char( writer, RECORD_BYTES8_TEXT_WITH_ENDELEMENT );
+            write_char( writer, rem );
+            write_bytes( writer, (const BYTE *)text_base64->bytes + len, rem );
+        }
+        return S_OK;
+    }
+    case RECORD_BYTES32_TEXT:
+    {
+        const WS_XML_BASE64_TEXT *text_base64 = (const WS_XML_BASE64_TEXT *)text;
+        UINT32 rem = text_base64->length % 3, len = text_base64->length - rem;
+        if (len)
+        {
+            if ((hr = write_grow_buffer( writer, 1 + sizeof(len) + len )) != S_OK) return hr;
+            write_char( writer, rem ? RECORD_BYTES32_TEXT : RECORD_BYTES32_TEXT_WITH_ENDELEMENT );
             write_bytes( writer, (const BYTE *)&len, sizeof(len) );
             write_bytes( writer, text_base64->bytes, len );
         }

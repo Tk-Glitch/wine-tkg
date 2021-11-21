@@ -62,6 +62,7 @@ typedef struct {
     LONG ref;
     IShellFolder2 IShellFolder2_iface;
     IPersistFolder3 IPersistFolder3_iface;
+    IPersistPropertyBag IPersistPropertyBag_iface;
     IDropTarget IDropTarget_iface;
     ISFHelper ISFHelper_iface;
     IUnknown *outer_unk;
@@ -72,10 +73,10 @@ typedef struct {
     LPWSTR sPathTarget;     /* complete path to target used for enumeration and ChangeNotify */
 
     LPITEMIDLIST pidlRoot; /* absolute pidl */
-
-    UINT cfShellIDList;    /* clipboardformat for IDropTarget */
-    BOOL fAcceptFmt;       /* flag for pending Drop */
+    DWORD drop_effects_mask;
 } IGenericSFImpl;
+
+static UINT cfShellIDList;
 
 static inline IGenericSFImpl *impl_from_IUnknown(IUnknown *iface)
 {
@@ -92,6 +93,11 @@ static inline IGenericSFImpl *impl_from_IPersistFolder3(IPersistFolder3 *iface)
     return CONTAINING_RECORD(iface, IGenericSFImpl, IPersistFolder3_iface);
 }
 
+static inline IGenericSFImpl *impl_from_IPersistPropertyBag(IPersistPropertyBag *iface)
+{
+    return CONTAINING_RECORD(iface, IGenericSFImpl, IPersistPropertyBag_iface);
+}
+
 static inline IGenericSFImpl *impl_from_IDropTarget(IDropTarget *iface)
 {
     return CONTAINING_RECORD(iface, IGenericSFImpl, IDropTarget_iface);
@@ -100,18 +106,6 @@ static inline IGenericSFImpl *impl_from_IDropTarget(IDropTarget *iface)
 static inline IGenericSFImpl *impl_from_ISFHelper(ISFHelper *iface)
 {
     return CONTAINING_RECORD(iface, IGenericSFImpl, ISFHelper_iface);
-}
-
-/**************************************************************************
-* registers clipboardformat once
-*/
-static void SF_RegisterClipFmt (IGenericSFImpl * This)
-{
-    TRACE ("(%p)\n", This);
-
-    if (!This->cfShellIDList) {
-        This->cfShellIDList = RegisterClipboardFormatW (CFSTR_SHELLIDLISTW);
-    }
 }
 
 /**************************************************************************
@@ -132,11 +126,13 @@ static HRESULT WINAPI IUnknown_fnQueryInterface(IUnknown *iface, REFIID riid, vo
     else if (IsEqualIID(riid, &IID_IPersist) || IsEqualIID(riid, &IID_IPersistFolder) ||
             IsEqualIID(riid, &IID_IPersistFolder2) || IsEqualIID(riid, &IID_IPersistFolder3))
         *ppvObj = &This->IPersistFolder3_iface;
+    else if (IsEqualIID(&IID_IPersistPropertyBag, riid))
+        *ppvObj = &This->IPersistPropertyBag_iface;
     else if (IsEqualIID (riid, &IID_ISFHelper))
         *ppvObj = &This->ISFHelper_iface;
     else if (IsEqualIID (riid, &IID_IDropTarget)) {
         *ppvObj = &This->IDropTarget_iface;
-        SF_RegisterClipFmt(This);
+        if (!cfShellIDList) cfShellIDList = RegisterClipboardFormatW(CFSTR_SHELLIDLISTW);
     }
 
     if (*ppvObj) {
@@ -965,46 +961,15 @@ IShellFolder_fnGetDetailsOf (IShellFolder2 * iface, LPCITEMIDLIST pidl,
                              UINT iColumn, SHELLDETAILS * psd)
 {
     IGenericSFImpl *This = impl_from_IShellFolder2(iface);
-    HRESULT hr = E_FAIL;
 
     TRACE ("(%p)->(%p %i %p)\n", This, pidl, iColumn, psd);
 
     if (!psd || iColumn >= GENERICSHELLVIEWCOLUMNS)
         return E_INVALIDARG;
 
-    if (!pidl) {
-        /* the header titles */
-        psd->fmt = GenericSFHeader[iColumn].fmt;
-        psd->cxChar = GenericSFHeader[iColumn].cxChar;
-        psd->str.uType = STRRET_CSTR;
-        LoadStringA (shell32_hInstance, GenericSFHeader[iColumn].colnameid,
-         psd->str.u.cStr, MAX_PATH);
-        return S_OK;
-    } else {
-        hr = S_OK;
-        psd->str.uType = STRRET_CSTR;
-        /* the data from the pidl */
-        switch (iColumn) {
-        case 0:                /* name */
-            hr = IShellFolder2_GetDisplayNameOf (iface, pidl,
-             SHGDN_NORMAL | SHGDN_INFOLDER, &psd->str);
-            break;
-        case 1:                /* size */
-            _ILGetFileSize (pidl, psd->str.u.cStr, MAX_PATH);
-            break;
-        case 2:                /* type */
-            _ILGetFileType (pidl, psd->str.u.cStr, MAX_PATH);
-            break;
-        case 3:                /* date */
-            _ILGetFileDate (pidl, psd->str.u.cStr, MAX_PATH);
-            break;
-        case 4:                /* attributes */
-            _ILGetFileAttributes (pidl, psd->str.u.cStr, MAX_PATH);
-            break;
-        }
-    }
+    if (!pidl) return SHELL32_GetColumnDetails(GenericSFHeader, iColumn, psd);
 
-    return hr;
+    return shellfolder_get_file_details( iface, pidl, GenericSFHeader, iColumn, psd );
 }
 
 static HRESULT WINAPI
@@ -1552,6 +1517,90 @@ static const IPersistFolder3Vtbl pfvt =
 };
 
 /****************************************************************************
+ * IPersistPropertyBag implementation
+ */
+static HRESULT WINAPI PersistPropertyBag_QueryInterface(IPersistPropertyBag* iface,
+    REFIID riid, void** ppv)
+{
+    IGenericSFImpl *This = impl_from_IPersistPropertyBag(iface);
+    return IUnknown_QueryInterface(This->outer_unk, riid, ppv);
+}
+
+static ULONG WINAPI PersistPropertyBag_AddRef(IPersistPropertyBag* iface)
+{
+    IGenericSFImpl *This = impl_from_IPersistPropertyBag(iface);
+    return IUnknown_AddRef(This->outer_unk);
+}
+
+static ULONG WINAPI PersistPropertyBag_Release(IPersistPropertyBag* iface)
+{
+    IGenericSFImpl *This = impl_from_IPersistPropertyBag(iface);
+    return IUnknown_Release(This->outer_unk);
+}
+
+static HRESULT WINAPI PersistPropertyBag_GetClassID(IPersistPropertyBag* iface, CLSID* pClassID)
+{
+    IGenericSFImpl *This = impl_from_IPersistPropertyBag(iface);
+    return IPersistFolder3_GetClassID(&This->IPersistFolder3_iface, pClassID);
+}
+
+static HRESULT WINAPI PersistPropertyBag_InitNew(IPersistPropertyBag* iface)
+{
+    IGenericSFImpl *This = impl_from_IPersistPropertyBag(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI PersistPropertyBag_Load(IPersistPropertyBag *iface,
+    IPropertyBag *pPropertyBag, IErrorLog *pErrorLog)
+{
+    IGenericSFImpl *This = impl_from_IPersistPropertyBag(iface);
+
+    static const WCHAR wszTarget[] = { 'T','a','r','g','e','t', 0 };
+    PERSIST_FOLDER_TARGET_INFO pftiTarget;
+    VARIANT var;
+    HRESULT hr;
+
+    TRACE("(%p)->(%p %p)\n", This, pPropertyBag, pErrorLog);
+
+    if (!pPropertyBag)
+        return E_POINTER;
+
+    /* Get 'Target' property from the property bag. */
+    V_VT(&var) = VT_BSTR;
+    hr = IPropertyBag_Read(pPropertyBag, wszTarget, &var, NULL);
+    if (FAILED(hr))
+        return E_FAIL;
+    lstrcpyW(pftiTarget.szTargetParsingName, V_BSTR(&var));
+    SysFreeString(V_BSTR(&var));
+
+    pftiTarget.pidlTargetFolder = NULL;
+    pftiTarget.szNetworkProvider[0] = 0;
+    pftiTarget.dwAttributes = -1;
+    pftiTarget.csidl = -1;
+
+    return IPersistFolder3_InitializeEx(&This->IPersistFolder3_iface, NULL, NULL, &pftiTarget);
+}
+
+static HRESULT WINAPI PersistPropertyBag_Save(IPersistPropertyBag *iface,
+    IPropertyBag *pPropertyBag, BOOL fClearDirty, BOOL fSaveAllProperties)
+{
+    IGenericSFImpl *This = impl_from_IPersistPropertyBag(iface);
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static const IPersistPropertyBagVtbl ppbvt = {
+    PersistPropertyBag_QueryInterface,
+    PersistPropertyBag_AddRef,
+    PersistPropertyBag_Release,
+    PersistPropertyBag_GetClassID,
+    PersistPropertyBag_InitNew,
+    PersistPropertyBag_Load,
+    PersistPropertyBag_Save
+};
+
+/****************************************************************************
  * ISFDropTarget implementation
  */
 static HRESULT WINAPI ISFDropTarget_QueryInterface(IDropTarget *iface, REFIID riid, void **ppv)
@@ -1575,22 +1624,42 @@ static ULONG WINAPI ISFDropTarget_Release(IDropTarget *iface)
     return IUnknown_Release(This->outer_unk);
 }
 
+#define HIDA_GetPIDLFolder(pida) (LPCITEMIDLIST)(((LPBYTE)pida)+(pida)->aoffset[0])
+#define HIDA_GetPIDLItem(pida, i) (LPCITEMIDLIST)(((LPBYTE)pida)+(pida)->aoffset[i+1])
+
 static HRESULT WINAPI
 ISFDropTarget_DragEnter (IDropTarget * iface, IDataObject * pDataObject,
                          DWORD dwKeyState, POINTL pt, DWORD * pdwEffect)
 {
-    FORMATETC fmt;
-
     IGenericSFImpl *This = impl_from_IDropTarget(iface);
+    FORMATETC format;
+    STGMEDIUM medium;
 
-    TRACE ("(%p)->(DataObject=%p)\n", This, pDataObject);
+    TRACE("(%p)->(%p 0x%08x {.x=%d, .y=%d} %p)\n", This, pDataObject, dwKeyState, pt.x, pt.y, pdwEffect);
 
-    InitFormatEtc (fmt, This->cfShellIDList, TYMED_HGLOBAL);
-    This->fAcceptFmt = IDataObject_QueryGetData (pDataObject, &fmt) == S_OK;
-    if (This->fAcceptFmt)
-        *pdwEffect = KeyStateToDropEffect(dwKeyState);
-    else
-        *pdwEffect = DROPEFFECT_NONE;
+    if (!pdwEffect || !pDataObject)
+        return E_INVALIDARG;
+
+    /* Compute a mask of supported drop-effects for this shellfolder object and the given data
+     * object. Dropping is only supported on folders, which represent filesystem locations. One
+     * can't drop on file objects. And the 'move' drop effect is only supported, if the source
+     * folder is not identical to the target folder. */
+    This->drop_effects_mask = DROPEFFECT_NONE;
+    InitFormatEtc(format, cfShellIDList, TYMED_HGLOBAL);
+    if (_ILIsFolder(ILFindLastID(This->pidlRoot)) && /* Only drop to folders, not to files */
+        SUCCEEDED(IDataObject_GetData(pDataObject, &format, &medium))) /* Only ShellIDList format */
+    {
+        LPIDA pidaShellIDList = GlobalLock(medium.u.hGlobal);
+        This->drop_effects_mask |= DROPEFFECT_COPY|DROPEFFECT_LINK;
+
+        if (pidaShellIDList) { /* Files can only be moved between two different folders */
+            if (!ILIsEqual(HIDA_GetPIDLFolder(pidaShellIDList), This->pidlRoot))
+                This->drop_effects_mask |= DROPEFFECT_MOVE;
+            GlobalUnlock(medium.u.hGlobal);
+        }
+    }
+
+    *pdwEffect = KeyStateToDropEffect(dwKeyState) & This->drop_effects_mask;
 
     return S_OK;
 }
@@ -1601,15 +1670,12 @@ ISFDropTarget_DragOver (IDropTarget * iface, DWORD dwKeyState, POINTL pt,
 {
     IGenericSFImpl *This = impl_from_IDropTarget(iface);
 
-    TRACE ("(%p)\n", This);
+    TRACE("(%p)->(0x%08x {.x=%d, .y=%d} %p)\n", This, dwKeyState, pt.x, pt.y, pdwEffect);
 
     if (!pdwEffect)
         return E_INVALIDARG;
 
-    if (This->fAcceptFmt)
-        *pdwEffect = KeyStateToDropEffect(dwKeyState);
-    else
-        *pdwEffect = DROPEFFECT_NONE;
+    *pdwEffect = KeyStateToDropEffect(dwKeyState) & This->drop_effects_mask;
 
     return S_OK;
 }
@@ -1618,10 +1684,9 @@ static HRESULT WINAPI ISFDropTarget_DragLeave (IDropTarget * iface)
 {
     IGenericSFImpl *This = impl_from_IDropTarget(iface);
 
-    TRACE ("(%p)\n", This);
+    TRACE("(%p)\n", This);
 
-    This->fAcceptFmt = FALSE;
-
+    This->drop_effects_mask = DROPEFFECT_NONE;
     return S_OK;
 }
 
@@ -1630,8 +1695,70 @@ ISFDropTarget_Drop (IDropTarget * iface, IDataObject * pDataObject,
                     DWORD dwKeyState, POINTL pt, DWORD * pdwEffect)
 {
     IGenericSFImpl *This = impl_from_IDropTarget(iface);
+    FORMATETC format;
+    STGMEDIUM medium;
+    HRESULT hr;
 
-    FIXME ("(%p) object dropped\n", This);
+    TRACE("(%p)->(%p %d {.x=%d, .y=%d} %p) semi-stub\n",
+        This, pDataObject, dwKeyState, pt.x, pt.y, pdwEffect);
+
+    InitFormatEtc(format, cfShellIDList, TYMED_HGLOBAL);
+    hr = IDataObject_GetData(pDataObject, &format, &medium);
+    if (FAILED(hr))
+        return hr;
+
+    if (medium.tymed == TYMED_HGLOBAL) {
+        IShellFolder *psfSourceFolder, *psfDesktopFolder;
+        LPIDA pidaShellIDList = GlobalLock(medium.u.hGlobal);
+        STRRET strret;
+        UINT i;
+
+        if (!pidaShellIDList)
+            return HRESULT_FROM_WIN32(GetLastError());
+
+        hr = SHGetDesktopFolder(&psfDesktopFolder);
+        if (FAILED(hr)) {
+            GlobalUnlock(medium.u.hGlobal);
+            return hr;
+        }
+
+        hr = IShellFolder_BindToObject(psfDesktopFolder, HIDA_GetPIDLFolder(pidaShellIDList), NULL,
+                                       &IID_IShellFolder, (LPVOID*)&psfSourceFolder);
+        IShellFolder_Release(psfDesktopFolder);
+        if (FAILED(hr)) {
+            GlobalUnlock(medium.u.hGlobal);
+            return hr;
+        }
+
+        for (i = 0; i < pidaShellIDList->cidl; i++) {
+            WCHAR wszSourcePath[MAX_PATH];
+
+            hr = IShellFolder_GetDisplayNameOf(psfSourceFolder, HIDA_GetPIDLItem(pidaShellIDList, i),
+                                               SHGDN_FORPARSING, &strret);
+            if (FAILED(hr))
+                break;
+
+            hr = StrRetToBufW(&strret, NULL, wszSourcePath, MAX_PATH);
+            if (FAILED(hr))
+                break;
+
+            switch (*pdwEffect) {
+                case DROPEFFECT_MOVE:
+                    FIXME("Move %s to %s!\n", debugstr_w(wszSourcePath), debugstr_w(This->sPathTarget));
+                    break;
+                case DROPEFFECT_COPY:
+                    FIXME("Copy %s to %s!\n", debugstr_w(wszSourcePath), debugstr_w(This->sPathTarget));
+                    break;
+                case DROPEFFECT_LINK:
+                    FIXME("Link %s from %s!\n", debugstr_w(wszSourcePath), debugstr_w(This->sPathTarget));
+                    break;
+            }
+        }
+
+        IShellFolder_Release(psfSourceFolder);
+        GlobalUnlock(medium.u.hGlobal);
+        return hr;
+    }
 
     return E_NOTIMPL;
 }
@@ -1664,6 +1791,7 @@ HRESULT WINAPI IFSFolder_Constructor(IUnknown *outer_unk, REFIID riid, void **pp
     sf->IUnknown_inner.lpVtbl = &unkvt;
     sf->IShellFolder2_iface.lpVtbl = &sfvt;
     sf->IPersistFolder3_iface.lpVtbl = &pfvt;
+    sf->IPersistPropertyBag_iface.lpVtbl = &ppbvt;
     sf->IDropTarget_iface.lpVtbl = &dtvt;
     sf->ISFHelper_iface.lpVtbl = &shvt;
     sf->pclsid = (CLSID *) & CLSID_ShellFSFolder;

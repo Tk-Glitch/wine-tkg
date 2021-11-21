@@ -93,7 +93,7 @@ static const struct gdi_obj_funcs dib_funcs =
  *
  * Return the size of the bitmap info structure including color table.
  */
-int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
+static int bitmap_info_size( const BITMAPINFO *info, WORD coloruse )
 {
     unsigned int colors, size, masks = 0;
 
@@ -253,7 +253,7 @@ static BOOL bitmapinfo_from_user_bitmapinfo( BITMAPINFO *dst, const BITMAPINFO *
 static int fill_color_table_from_palette( BITMAPINFO *info, HDC hdc )
 {
     PALETTEENTRY palEntry[256];
-    HPALETTE palette = GetCurrentObject( hdc, OBJ_PAL );
+    HPALETTE palette = NtGdiGetDCObject( hdc, NTGDI_OBJ_PAL );
     int i, colors = 1 << info->bmiHeader.biBitCount;
 
     info->bmiHeader.biClrUsed = colors;
@@ -284,7 +284,8 @@ BOOL fill_color_table_from_pal_colors( BITMAPINFO *info, HDC hdc )
     int i, count, colors = info->bmiHeader.biClrUsed;
 
     if (!colors) return TRUE;
-    if (!(palette = GetCurrentObject( hdc, OBJ_PAL ))) return FALSE;
+    if (!(palette = NtGdiGetDCObject( hdc, NTGDI_OBJ_PAL )))
+        return FALSE;
     if (!(count = get_palette_entries( palette, 0, colors, entries ))) return FALSE;
 
     for (i = 0; i < colors; i++, index++)
@@ -438,7 +439,7 @@ static BOOL build_rle_bitmap( BITMAPINFO *info, struct gdi_image_bits *bits, HRG
     }
 
 done:
-    if (run) DeleteObject( run );
+    if (run) NtGdiDeleteObjectApp( run );
     if (bits->free) bits->free( bits );
 
     bits->ptr     = out_bits;
@@ -449,8 +450,8 @@ done:
     return TRUE;
 
 fail:
-    if (run) DeleteObject( run );
-    if (clip && *clip) DeleteObject( *clip );
+    if (run) NtGdiDeleteObjectApp( run );
+    if (clip && *clip) NtGdiDeleteObjectApp( *clip );
     HeapFree( GetProcessHeap(), 0, out_bits );
     return FALSE;
 }
@@ -599,7 +600,7 @@ INT CDECL nulldrv_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst, 
 
 done:
     if (src_bits.free) src_bits.free( &src_bits );
-    if (clip) DeleteObject( clip );
+    if (clip) NtGdiDeleteObjectApp( clip );
     return ret;
 }
 
@@ -755,7 +756,7 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
 
 done:
     if (src_bits.free) src_bits.free( &src_bits );
-    if (clip) DeleteObject( clip );
+    if (clip) NtGdiDeleteObjectApp( clip );
     GDI_ReleaseObj( hbitmap );
     return result;
 }
@@ -873,7 +874,7 @@ INT CDECL nulldrv_SetDIBitsToDevice( PHYSDEV dev, INT x_dst, INT y_dst, DWORD cx
 
 done:
     if (src_bits.free) src_bits.free( &src_bits );
-    if (clip) DeleteObject( clip );
+    if (clip) NtGdiDeleteObjectApp( clip );
     return lines;
 }
 
@@ -1190,22 +1191,13 @@ BITMAPINFO *copy_packed_dib( const BITMAPINFO *src_info, UINT usage )
 }
 
 /******************************************************************************
- * GetDIBits [GDI32.@]
+ *           NtGdiGetDIBitsInternal    (win32u.@)
  *
  * Retrieves bits of bitmap and copies to buffer.
- *
- * RETURNS
- *    Success: Number of scan lines copied from bitmap
- *    Failure: 0
  */
-INT WINAPI DECLSPEC_HOTPATCH GetDIBits(
-    HDC hdc,         /* [in]  Handle to device context */
-    HBITMAP hbitmap, /* [in]  Handle to bitmap */
-    UINT startscan,  /* [in]  First scan line to set in dest bitmap */
-    UINT lines,      /* [in]  Number of scan lines to copy */
-    LPVOID bits,       /* [out] Address of array for bitmap bits */
-    BITMAPINFO * info, /* [out] Address of structure with bitmap data */
-    UINT coloruse)   /* [in]  RGB or palette index */
+INT WINAPI NtGdiGetDIBitsInternal( HDC hdc, HBITMAP hbitmap, UINT startscan, UINT lines,
+                                   void *bits, BITMAPINFO *info, UINT coloruse,
+                                   UINT max_bits, UINT max_info )
 {
     DC * dc;
     BITMAPOBJ * bmp;
@@ -1427,35 +1419,30 @@ done:
 
 
 /***********************************************************************
- *           CreateDIBitmap    (GDI32.@)
+ *           NtGdiCreateDIBitmapInternal    (win32u.@)
  *
  * Creates a DDB (device dependent bitmap) from a DIB.
  * The DDB will have the same color depth as the reference DC.
  */
-HBITMAP WINAPI CreateDIBitmap( HDC hdc, const BITMAPINFOHEADER *header,
-                            DWORD init, LPCVOID bits, const BITMAPINFO *data,
-                            UINT coloruse )
+HBITMAP WINAPI NtGdiCreateDIBitmapInternal( HDC hdc, INT width, INT height, DWORD init,
+                                            const void *bits, const BITMAPINFO *data,
+                                            UINT coloruse, UINT max_info, UINT max_bits,
+                                            ULONG flags, HANDLE xform )
 {
-    BITMAPINFOHEADER info;
     HBITMAP handle;
-    LONG height;
 
-    if (!bitmapinfoheader_from_user_bitmapinfo( &info, header )) return 0;
-    if (info.biCompression == BI_JPEG || info.biCompression == BI_PNG) return 0;
-    if (coloruse > DIB_PAL_COLORS + 1) return 0;
-    if (info.biWidth < 0) return 0;
+    if (coloruse > DIB_PAL_COLORS + 1 || width < 0) return 0;
 
     /* Top-down DIBs have a negative height */
-    height = abs( info.biHeight );
+    height = abs( height );
 
-    TRACE("hdc=%p, header=%p, init=%u, bits=%p, data=%p, coloruse=%u (bitmap: width=%d, height=%d, bpp=%u, compr=%u)\n",
-          hdc, header, init, bits, data, coloruse, info.biWidth, info.biHeight,
-          info.biBitCount, info.biCompression);
+    TRACE( "hdc=%p, init=%u, bits=%p, data=%p, coloruse=%u (bitmap: width=%d, height=%d)\n",
+           hdc, init, bits, data, coloruse, width, height );
 
     if (hdc == NULL)
-        handle = CreateBitmap( info.biWidth, height, 1, 1, NULL );
+        handle = NtGdiCreateBitmap( width, height, 1, 1, NULL );
     else
-        handle = CreateCompatibleBitmap( hdc, info.biWidth, height );
+        handle = NtGdiCreateCompatibleBitmap( hdc, width, height );
 
     if (handle)
     {
@@ -1463,7 +1450,7 @@ HBITMAP WINAPI CreateDIBitmap( HDC hdc, const BITMAPINFOHEADER *header,
         {
             if (SetDIBits( hdc, handle, 0, height, bits, data, coloruse ) == 0)
             {
-                DeleteObject( handle );
+                NtGdiDeleteObjectApp( handle );
                 handle = 0;
             }
         }
@@ -1474,10 +1461,11 @@ HBITMAP WINAPI CreateDIBitmap( HDC hdc, const BITMAPINFOHEADER *header,
 
 
 /***********************************************************************
- *           CreateDIBSection    (GDI32.@)
+ *           NtGdiCreateDIBSection    (win32u.@)
  */
-HBITMAP WINAPI DECLSPEC_HOTPATCH CreateDIBSection(HDC hdc, const BITMAPINFO *bmi, UINT usage,
-                                                  void **bits, HANDLE section, DWORD offset)
+HBITMAP WINAPI NtGdiCreateDIBSection( HDC hdc, HANDLE section, DWORD offset, const BITMAPINFO *bmi,
+                                      UINT usage, UINT header_size, ULONG flags,
+                                      ULONG_PTR color_space, void **bits )
 {
     char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
     BITMAPINFO *info = (BITMAPINFO *)buffer;
@@ -1703,7 +1691,7 @@ NTSTATUS WINAPI NtGdiDdDDIDestroyDCFromMemory( const D3DKMT_DESTROYDCFROMMEMORY 
 
     if (GetObjectType( desc->hDc ) != OBJ_MEMDC ||
         GetObjectType( desc->hBitmap ) != OBJ_BITMAP) return STATUS_INVALID_PARAMETER;
-    DeleteObject( desc->hBitmap );
+    NtGdiDeleteObjectApp( desc->hBitmap );
     NtGdiDeleteObjectApp( desc->hDc );
 
     return STATUS_SUCCESS;

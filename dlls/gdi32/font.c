@@ -196,21 +196,8 @@ typedef struct
     LOGFONTW              logfont;
 } FONTOBJ;
 
-struct font_enum
-{
-  LPLOGFONTW          lpLogFontParam;
-  FONTENUMPROCW       lpEnumFunc;
-  LPARAM              lpData;
-  BOOL                unicode;
-  HDC                 hdc;
-  INT                 retval;
-};
-
-/*
- *  For TranslateCharsetInfo
- */
-#define MAXTCIINDEX 32
-static const CHARSETINFO FONT_tci[MAXTCIINDEX] = {
+/* for translate_charset_info */
+static const CHARSETINFO charset_info[] = {
   /* ANSI */
   { ANSI_CHARSET, 1252, {{0,0,0,0},{FS_LATIN1,0}} },
   { EASTEUROPE_CHARSET, 1250, {{0,0,0,0},{FS_LATIN2,0}} },
@@ -1442,6 +1429,34 @@ static void load_system_links(void)
     }
 }
 
+/* see TranslateCharsetInfo */
+BOOL translate_charset_info( DWORD *src, CHARSETINFO *cs, DWORD flags )
+{
+    int index = 0;
+
+    switch (flags)
+    {
+    case TCI_SRCFONTSIG:
+        while (index < ARRAY_SIZE(charset_info) && !(*src>>index & 0x0001)) index++;
+        break;
+    case TCI_SRCCODEPAGE:
+        while (index < ARRAY_SIZE(charset_info) && PtrToUlong(src) != charset_info[index].ciACP)
+            index++;
+        break;
+    case TCI_SRCCHARSET:
+        while (index < ARRAY_SIZE(charset_info) &&
+               PtrToUlong(src) != charset_info[index].ciCharset)
+            index++;
+        break;
+    default:
+        return FALSE;
+    }
+
+    if (index >= ARRAY_SIZE(charset_info) || charset_info[index].ciCharset == DEFAULT_CHARSET) return FALSE;
+    *cs = charset_info[index];
+    return TRUE;
+}
+
 /* font matching */
 
 static BOOL can_select_face( const struct gdi_font_face *face, FONTSIGNATURE fs, BOOL can_use_bitmap )
@@ -1572,7 +1587,7 @@ static struct gdi_font_face *find_matching_face( const LOGFONTW *lf, CHARSETINFO
     BOOL want_vertical = (lf->lfFaceName[0] == '@');
     struct gdi_font_face *face;
 
-    if (!TranslateCharsetInfo( (DWORD *)(INT_PTR)lf->lfCharSet, csi, TCI_SRCCHARSET ))
+    if (!translate_charset_info( (DWORD *)(INT_PTR)lf->lfCharSet, csi, TCI_SRCCHARSET ))
     {
         if (lf->lfCharSet != DEFAULT_CHARSET) FIXME( "Untranslated charset %d\n", lf->lfCharSet );
         csi->fs.fsCsb[0] = 0;
@@ -1588,7 +1603,7 @@ static struct gdi_font_face *find_matching_face( const LOGFONTW *lf, CHARSETINFO
 	    TRACE( "substituting %s,%d -> %s,%d\n", debugstr_w(lf->lfFaceName), lf->lfCharSet,
                    debugstr_w(subst), (subst_charset != -1) ? subst_charset : lf->lfCharSet );
 	    if (subst_charset != -1)
-                TranslateCharsetInfo( (DWORD *)(INT_PTR)subst_charset, csi, TCI_SRCCHARSET );
+                translate_charset_info( (DWORD *)(INT_PTR)subst_charset, csi, TCI_SRCCHARSET );
             *orig_name = lf->lfFaceName;
 	}
 
@@ -1602,7 +1617,7 @@ static struct gdi_font_face *find_matching_face( const LOGFONTW *lf, CHARSETINFO
     if (!csi->fs.fsCsb[0])
     {
         INT acp = GetACP();
-        if (!TranslateCharsetInfo( (DWORD *)(INT_PTR)acp, csi, TCI_SRCCODEPAGE ))
+        if (!translate_charset_info( (DWORD *)(INT_PTR)acp, csi, TCI_SRCCODEPAGE ))
         {
             FIXME( "TCI failed on codepage %d\n", acp );
             csi->fs.fsCsb[0] = 0;
@@ -2619,7 +2634,7 @@ static DWORD create_enum_charset_list(DWORD charset, struct enum_charset *list)
     CHARSETINFO csi;
     int i;
 
-    if (TranslateCharsetInfo( ULongToPtr(charset), &csi, TCI_SRCCHARSET ) && csi.fs.fsCsb[0] != 0)
+    if (translate_charset_info( ULongToPtr(charset), &csi, TCI_SRCCHARSET ) && csi.fs.fsCsb[0] != 0)
     {
         list->mask    = csi.fs.fsCsb[0];
         list->charset = csi.ciCharset;
@@ -2633,7 +2648,7 @@ static DWORD create_enum_charset_list(DWORD charset, struct enum_charset *list)
 
         /* Set the current codepage's charset as the first element. */
         if (!is_complex_script_ansi_cp(acp) &&
-            TranslateCharsetInfo( (DWORD *)(INT_PTR)acp, &csi, TCI_SRCCODEPAGE ) &&
+            translate_charset_info( (DWORD *)(INT_PTR)acp, &csi, TCI_SRCCODEPAGE ) &&
             csi.fs.fsCsb[0] != 0)
         {
             list->mask    = csi.fs.fsCsb[0];
@@ -2650,7 +2665,7 @@ static DWORD create_enum_charset_list(DWORD charset, struct enum_charset *list)
             fs.fsCsb[0] = 1u << i;
             fs.fsCsb[1] = 0;
             if (fs.fsCsb[0] & mask) continue; /* skip, already added. */
-            if (!TranslateCharsetInfo( fs.fsCsb, &csi, TCI_SRCFONTSIG ))
+            if (!translate_charset_info( fs.fsCsb, &csi, TCI_SRCFONTSIG ))
                 continue; /* skip, this is an invalid fsCsb bit. */
             list->mask    = fs.fsCsb[0];
             list->charset = csi.ciCharset;
@@ -3615,7 +3630,7 @@ static void get_nearest_charset( const WCHAR *family_name, struct gdi_font_face 
 
     int i;
 
-    if (TranslateCharsetInfo( (DWORD*)(INT_PTR)GetACP(), csi, TCI_SRCCODEPAGE ))
+    if (translate_charset_info( (DWORD*)(INT_PTR)GetACP(), csi, TCI_SRCCODEPAGE ))
     {
         const struct gdi_font_link *font_link;
 
@@ -3628,7 +3643,7 @@ static void get_nearest_charset( const WCHAR *family_name, struct gdi_font_face 
         DWORD fs0 = 1u << i;
         if (face->fs.fsCsb[0] & fs0)
         {
-	    if (TranslateCharsetInfo(&fs0, csi, TCI_SRCFONTSIG)) return;
+	    if (translate_charset_info(&fs0, csi, TCI_SRCFONTSIG)) return;
             FIXME("TCI failing on %x\n", fs0);
 	}
     }
@@ -3745,9 +3760,9 @@ static HFONT CDECL font_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
     {
         LOGFONTW lf;
         FMAT2 dcmat;
-        BOOL can_use_bitmap = !!(GetDeviceCaps( dc->hSelf, TEXTCAPS ) & TC_RA_ABLE);
+        BOOL can_use_bitmap = !!(NtGdiGetDeviceCaps( dc->hSelf, TEXTCAPS ) & TC_RA_ABLE);
 
-        GetObjectW( hfont, sizeof(lf), &lf );
+        NtGdiExtGetObjectW( hfont, sizeof(lf), &lf );
         switch (lf.lfQuality)
         {
         case NONANTIALIASED_QUALITY:
@@ -3839,7 +3854,6 @@ const struct gdi_dc_funcs font_driver =
     NULL,                           /* pEndPage */
     NULL,                           /* pEndPath */
     font_EnumFonts,                 /* pEnumFonts */
-    NULL,                           /* pEnumICMProfiles */
     NULL,                           /* pExtDeviceMode */
     NULL,                           /* pExtEscape */
     NULL,                           /* pExtFloodFill */
@@ -3991,89 +4005,6 @@ static void init_font_options(void)
 }
 
 
-static void FONT_LogFontAToW( const LOGFONTA *fontA, LPLOGFONTW fontW )
-{
-    memcpy(fontW, fontA, sizeof(LOGFONTA) - LF_FACESIZE);
-    MultiByteToWideChar(CP_ACP, 0, fontA->lfFaceName, -1, fontW->lfFaceName,
-			LF_FACESIZE);
-    fontW->lfFaceName[LF_FACESIZE-1] = 0;
-}
-
-static void FONT_LogFontWToA( const LOGFONTW *fontW, LPLOGFONTA fontA )
-{
-    memcpy(fontA, fontW, sizeof(LOGFONTA) - LF_FACESIZE);
-    WideCharToMultiByte(CP_ACP, 0, fontW->lfFaceName, -1, fontA->lfFaceName,
-			LF_FACESIZE, NULL, NULL);
-    fontA->lfFaceName[LF_FACESIZE-1] = 0;
-}
-
-static void FONT_EnumLogFontExWToA( const ENUMLOGFONTEXW *fontW, LPENUMLOGFONTEXA fontA )
-{
-    FONT_LogFontWToA( &fontW->elfLogFont, &fontA->elfLogFont );
-
-    WideCharToMultiByte( CP_ACP, 0, fontW->elfFullName, -1,
-			 (LPSTR) fontA->elfFullName, LF_FULLFACESIZE, NULL, NULL );
-    fontA->elfFullName[LF_FULLFACESIZE-1] = '\0';
-    WideCharToMultiByte( CP_ACP, 0, fontW->elfStyle, -1,
-			 (LPSTR) fontA->elfStyle, LF_FACESIZE, NULL, NULL );
-    fontA->elfStyle[LF_FACESIZE-1] = '\0';
-    WideCharToMultiByte( CP_ACP, 0, fontW->elfScript, -1,
-			 (LPSTR) fontA->elfScript, LF_FACESIZE, NULL, NULL );
-    fontA->elfScript[LF_FACESIZE-1] = '\0';
-}
-
-/***********************************************************************
- *              TEXTMETRIC conversion functions.
- */
-static void FONT_TextMetricWToA(const TEXTMETRICW *ptmW, LPTEXTMETRICA ptmA )
-{
-    ptmA->tmHeight = ptmW->tmHeight;
-    ptmA->tmAscent = ptmW->tmAscent;
-    ptmA->tmDescent = ptmW->tmDescent;
-    ptmA->tmInternalLeading = ptmW->tmInternalLeading;
-    ptmA->tmExternalLeading = ptmW->tmExternalLeading;
-    ptmA->tmAveCharWidth = ptmW->tmAveCharWidth;
-    ptmA->tmMaxCharWidth = ptmW->tmMaxCharWidth;
-    ptmA->tmWeight = ptmW->tmWeight;
-    ptmA->tmOverhang = ptmW->tmOverhang;
-    ptmA->tmDigitizedAspectX = ptmW->tmDigitizedAspectX;
-    ptmA->tmDigitizedAspectY = ptmW->tmDigitizedAspectY;
-    ptmA->tmFirstChar = min(ptmW->tmFirstChar, 255);
-    if (ptmW->tmCharSet == SYMBOL_CHARSET)
-    {
-        ptmA->tmFirstChar = 0x1e;
-        ptmA->tmLastChar = 0xff;  /* win9x behaviour - we need the OS2 table data to calculate correctly */
-    }
-    else if (ptmW->tmPitchAndFamily & TMPF_TRUETYPE)
-    {
-        ptmA->tmFirstChar = ptmW->tmDefaultChar - 1;
-        ptmA->tmLastChar = min(ptmW->tmLastChar, 0xff);
-    }
-    else
-    {
-        ptmA->tmFirstChar = min(ptmW->tmFirstChar, 0xff);
-        ptmA->tmLastChar  = min(ptmW->tmLastChar,  0xff);
-    }
-    ptmA->tmDefaultChar = ptmW->tmDefaultChar;
-    ptmA->tmBreakChar = ptmW->tmBreakChar;
-    ptmA->tmItalic = ptmW->tmItalic;
-    ptmA->tmUnderlined = ptmW->tmUnderlined;
-    ptmA->tmStruckOut = ptmW->tmStruckOut;
-    ptmA->tmPitchAndFamily = ptmW->tmPitchAndFamily;
-    ptmA->tmCharSet = ptmW->tmCharSet;
-}
-
-
-static void FONT_NewTextMetricExWToA(const NEWTEXTMETRICEXW *ptmW, NEWTEXTMETRICEXA *ptmA )
-{
-    FONT_TextMetricWToA((const TEXTMETRICW *)ptmW, (LPTEXTMETRICA)ptmA);
-    ptmA->ntmTm.ntmFlags = ptmW->ntmTm.ntmFlags;
-    ptmA->ntmTm.ntmSizeEM = ptmW->ntmTm.ntmSizeEM;
-    ptmA->ntmTm.ntmCellHeight = ptmW->ntmTm.ntmCellHeight;
-    ptmA->ntmTm.ntmAvgWidth = ptmW->ntmTm.ntmAvgWidth;
-    memcpy(&ptmA->ntmFontSig, &ptmW->ntmFontSig, sizeof(FONTSIGNATURE));
-}
-
 /* compute positions for text rendering, in device coords */
 static BOOL get_char_positions( DC *dc, const WCHAR *str, INT count, INT *dx, SIZE *size )
 {
@@ -4189,36 +4120,6 @@ UINT WINAPI NtGdiGetTextCharsetInfo( HDC hdc, FONTSIGNATURE *fs, DWORD flags )
 }
 
 /***********************************************************************
- *           FONT_mbtowc
- *
- * Returns a Unicode translation of str using the charset of the
- * currently selected font in hdc.  If count is -1 then str is assumed
- * to be '\0' terminated, otherwise it contains the number of bytes to
- * convert.  If plenW is non-NULL, on return it will point to the
- * number of WCHARs that have been written.  If pCP is non-NULL, on
- * return it will point to the codepage used in the conversion.  The
- * caller should free the returned LPWSTR from the process heap
- * itself.
- */
-static LPWSTR FONT_mbtowc(HDC hdc, LPCSTR str, INT count, INT *plenW, UINT *pCP)
-{
-    UINT cp;
-    INT lenW;
-    LPWSTR strW;
-
-    cp = GdiGetCodePage( hdc );
-
-    if(count == -1) count = strlen(str);
-    lenW = MultiByteToWideChar(cp, 0, str, count, NULL, 0);
-    strW = HeapAlloc(GetProcessHeap(), 0, lenW*sizeof(WCHAR));
-    MultiByteToWideChar(cp, 0, str, count, strW, lenW);
-    TRACE("mapped %s -> %s\n", debugstr_an(str, count), debugstr_wn(strW, lenW));
-    if(plenW) *plenW = lenW;
-    if(pCP) *pCP = cp;
-    return strW;
-}
-
-/***********************************************************************
  *           NtGdiHfontCreate   (win32u.@)
  */
 HFONT WINAPI NtGdiHfontCreate( const ENUMLOGFONTEXDVW *penumex, ULONG size, ULONG type,
@@ -4317,13 +4218,13 @@ static void update_font_code_page( DC *dc, HANDLE font )
     {
         LOGFONTW lf;
 
-        GetObjectW( font, sizeof(lf), &lf );
+        NtGdiExtGetObjectW( font, sizeof(lf), &lf );
         if (!(lf.lfClipPrecision & CLIP_DFA_DISABLE))
             charset = DEFAULT_CHARSET;
     }
 
     /* Hmm, nicely designed api this one! */
-    if (TranslateCharsetInfo( ULongToPtr(charset), &csi, TCI_SRCCHARSET) )
+    if (translate_charset_info( ULongToPtr(charset), &csi, TCI_SRCCHARSET) )
         dc->attr->font_code_page = csi.ciACP;
     else {
         switch(charset) {
@@ -4429,155 +4330,65 @@ static BOOL FONT_DeleteObject( HGDIOBJ handle )
 }
 
 
-/***********************************************************************
- *              FONT_EnumInstance
- *
- * Note: plf is really an ENUMLOGFONTEXW, and ptm is a NEWTEXTMETRICEXW.
- *       We have to use other types because of the FONTENUMPROCW definition.
- */
-static INT CALLBACK FONT_EnumInstance( const LOGFONTW *plf, const TEXTMETRICW *ptm,
-                                       DWORD fType, LPARAM lp )
+struct font_enum
 {
-    struct font_enum *pfe = (struct font_enum *)lp;
-    INT ret = 1;
+    HDC hdc;
+    struct font_enum_entry *buf;
+    ULONG size;
+    ULONG count;
+    ULONG charset;
+};
 
-    /* lfCharSet is at the same offset in both LOGFONTA and LOGFONTW */
-    if ((!pfe->lpLogFontParam ||
-        pfe->lpLogFontParam->lfCharSet == DEFAULT_CHARSET ||
-        pfe->lpLogFontParam->lfCharSet == plf->lfCharSet) &&
-       (!(fType & RASTER_FONTTYPE) || GetDeviceCaps(pfe->hdc, TEXTCAPS) & TC_RA_ABLE) )
+static INT WINAPI font_enum_proc( const LOGFONTW *lf, const TEXTMETRICW *tm,
+                                  DWORD type, LPARAM lp )
+{
+    struct font_enum *fe = (struct font_enum *)lp;
+
+    if (fe->charset != DEFAULT_CHARSET && lf->lfCharSet != fe->charset) return 1;
+    if ((type & RASTER_FONTTYPE) && !(NtGdiGetDeviceCaps( fe->hdc, TEXTCAPS ) & TC_RA_ABLE))
+        return 1;
+
+    if (fe->buf && fe->count < fe->size)
     {
-	/* convert font metrics */
-        ENUMLOGFONTEXA logfont;
-        NEWTEXTMETRICEXA tmA;
-
-        if (!pfe->unicode)
-        {
-            FONT_EnumLogFontExWToA( (const ENUMLOGFONTEXW *)plf, &logfont);
-            FONT_NewTextMetricExWToA( (const NEWTEXTMETRICEXW *)ptm, &tmA );
-            plf = (LOGFONTW *)&logfont.elfLogFont;
-            ptm = (TEXTMETRICW *)&tmA;
-        }
-        ret = pfe->lpEnumFunc( plf, ptm, fType, pfe->lpData );
-        pfe->retval = ret;
+        fe->buf[fe->count].type = type;
+        fe->buf[fe->count].lf = *(const ENUMLOGFONTEXW *)lf;
+        fe->buf[fe->count].tm = *(const NEWTEXTMETRICEXW *)tm;
     }
-    return ret;
+    fe->count++;
+    return 1;
 }
 
 /***********************************************************************
- *		FONT_EnumFontFamiliesEx
+ *           NtGdiEnumFonts    (win32u.@)
  */
-static INT FONT_EnumFontFamiliesEx( HDC hDC, LPLOGFONTW plf, FONTENUMPROCW efproc,
-                                    LPARAM lParam, BOOL unicode )
+BOOL WINAPI NtGdiEnumFonts( HDC hdc, ULONG type, ULONG win32_compat, ULONG face_name_len,
+                            const WCHAR *face_name, ULONG charset, ULONG *count, void *buf )
 {
-    INT ret = 0;
-    DC *dc = get_dc_ptr( hDC );
     struct font_enum fe;
+    PHYSDEV physdev;
+    LOGFONTW lf;
+    BOOL ret;
+    DC *dc;
 
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pEnumFonts );
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
-        if (plf) TRACE("lfFaceName = %s lfCharset = %d\n", debugstr_w(plf->lfFaceName), plf->lfCharSet);
-        fe.lpLogFontParam = plf;
-        fe.lpEnumFunc = efproc;
-        fe.lpData = lParam;
-        fe.unicode = unicode;
-        fe.hdc = hDC;
-        fe.retval = 1;
-        ret = physdev->funcs->pEnumFonts( physdev, plf, FONT_EnumInstance, (LPARAM)&fe );
-        release_dc_ptr( dc );
-    }
-    return ret ? fe.retval : 0;
-}
+    memset( &lf, 0, sizeof(lf) );
+    lf.lfCharSet = charset;
+    if (face_name_len) memcpy( lf.lfFaceName, face_name, face_name_len * sizeof(WCHAR) );
 
-/***********************************************************************
- *              EnumFontFamiliesExW	(GDI32.@)
- */
-INT WINAPI EnumFontFamiliesExW( HDC hDC, LPLOGFONTW plf,
-                                    FONTENUMPROCW efproc,
-                                    LPARAM lParam, DWORD dwFlags )
-{
-    return FONT_EnumFontFamiliesEx( hDC, plf, efproc, lParam, TRUE );
-}
+    fe.hdc     = hdc;
+    fe.buf     = buf;
+    fe.size    = *count / sizeof(*fe.buf);
+    fe.count   = 0;
+    fe.charset = charset;
 
-/***********************************************************************
- *              EnumFontFamiliesExA	(GDI32.@)
- */
-INT WINAPI EnumFontFamiliesExA( HDC hDC, LPLOGFONTA plf,
-                                    FONTENUMPROCA efproc,
-                                    LPARAM lParam, DWORD dwFlags)
-{
-    LOGFONTW lfW, *plfW;
+    physdev = GET_DC_PHYSDEV( dc, pEnumFonts );
+    ret = physdev->funcs->pEnumFonts( physdev, &lf, font_enum_proc, (LPARAM)&fe );
+    if (ret && buf) ret = fe.count <= fe.size;
+    *count = fe.count * sizeof(*fe.buf);
 
-    if (plf)
-    {
-        FONT_LogFontAToW( plf, &lfW );
-        plfW = &lfW;
-    }
-    else plfW = NULL;
-
-    return FONT_EnumFontFamiliesEx( hDC, plfW, (FONTENUMPROCW)efproc, lParam, FALSE );
-}
-
-/***********************************************************************
- *              EnumFontFamiliesA	(GDI32.@)
- */
-INT WINAPI EnumFontFamiliesA( HDC hDC, LPCSTR lpFamily,
-                                  FONTENUMPROCA efproc, LPARAM lpData )
-{
-    LOGFONTA lf, *plf;
-
-    if (lpFamily)
-    {
-        if (!*lpFamily) return 1;
-        lstrcpynA( lf.lfFaceName, lpFamily, LF_FACESIZE );
-        lf.lfCharSet = DEFAULT_CHARSET;
-        lf.lfPitchAndFamily = 0;
-        plf = &lf;
-    }
-    else plf = NULL;
-
-    return EnumFontFamiliesExA( hDC, plf, efproc, lpData, 0 );
-}
-
-/***********************************************************************
- *              EnumFontFamiliesW	(GDI32.@)
- */
-INT WINAPI EnumFontFamiliesW( HDC hDC, LPCWSTR lpFamily,
-                                  FONTENUMPROCW efproc, LPARAM lpData )
-{
-    LOGFONTW lf, *plf;
-
-    if (lpFamily)
-    {
-        if (!*lpFamily) return 1;
-        lstrcpynW( lf.lfFaceName, lpFamily, LF_FACESIZE );
-        lf.lfCharSet = DEFAULT_CHARSET;
-        lf.lfPitchAndFamily = 0;
-        plf = &lf;
-    }
-    else plf = NULL;
-
-    return EnumFontFamiliesExW( hDC, plf, efproc, lpData, 0 );
-}
-
-/***********************************************************************
- *              EnumFontsA		(GDI32.@)
- */
-INT WINAPI EnumFontsA( HDC hDC, LPCSTR lpName, FONTENUMPROCA efproc,
-                           LPARAM lpData )
-{
-    return EnumFontFamiliesA( hDC, lpName, efproc, lpData );
-}
-
-/***********************************************************************
- *              EnumFontsW		(GDI32.@)
- */
-INT WINAPI EnumFontsW( HDC hDC, LPCWSTR lpName, FONTENUMPROCW efproc,
-                           LPARAM lpData )
-{
-    return EnumFontFamiliesW( hDC, lpName, efproc, lpData );
+    release_dc_ptr( dc );
+    return ret;
 }
 
 
@@ -4704,8 +4515,8 @@ BOOL WINAPI NtGdiGetTextMetricsW( HDC hdc, TEXTMETRICW *metrics, ULONG flags )
     /* device layer returns values in device units
      * therefore we have to convert them to logical */
 
-        metrics->tmDigitizedAspectX = GetDeviceCaps(hdc, LOGPIXELSX);
-        metrics->tmDigitizedAspectY = GetDeviceCaps(hdc, LOGPIXELSY);
+        metrics->tmDigitizedAspectX = NtGdiGetDeviceCaps(hdc, LOGPIXELSX);
+        metrics->tmDigitizedAspectY = NtGdiGetDeviceCaps(hdc, LOGPIXELSY);
         metrics->tmHeight           = height_to_LP( dc, metrics->tmHeight );
         metrics->tmAscent           = height_to_LP( dc, metrics->tmAscent );
         metrics->tmDescent          = height_to_LP( dc, metrics->tmDescent );
@@ -4767,8 +4578,8 @@ UINT WINAPI NtGdiGetOutlineTextMetricsInternalW( HDC hdc, UINT cbData,
 
     if (lpOTM && ret)
     {
-        output->otmTextMetrics.tmDigitizedAspectX = GetDeviceCaps(hdc, LOGPIXELSX);
-        output->otmTextMetrics.tmDigitizedAspectY = GetDeviceCaps(hdc, LOGPIXELSY);
+        output->otmTextMetrics.tmDigitizedAspectX = NtGdiGetDeviceCaps(hdc, LOGPIXELSX);
+        output->otmTextMetrics.tmDigitizedAspectY = NtGdiGetDeviceCaps(hdc, LOGPIXELSY);
         output->otmTextMetrics.tmHeight           = height_to_LP( dc, output->otmTextMetrics.tmHeight );
         output->otmTextMetrics.tmAscent           = height_to_LP( dc, output->otmTextMetrics.tmAscent );
         output->otmTextMetrics.tmDescent          = height_to_LP( dc, output->otmTextMetrics.tmDescent );
@@ -4889,7 +4700,7 @@ static DWORD get_glyph_bitmap( HDC hdc, UINT index, UINT flags, UINT aa_flags,
     for (i = 0; i < ARRAY_SIZE( indices ); i++)
     {
         index = indices[i];
-        ret = GetGlyphOutlineW( hdc, index, aa_flags, metrics, 0, NULL, &identity );
+        ret = NtGdiGetGlyphOutline( hdc, index, aa_flags, metrics, 0, NULL, &identity, FALSE );
         if (ret != GDI_ERROR) break;
     }
 
@@ -4911,7 +4722,8 @@ static DWORD get_glyph_bitmap( HDC hdc, UINT index, UINT flags, UINT aa_flags,
     image->is_copy = TRUE;
     image->free = free_heap_bits;
 
-    ret = GetGlyphOutlineW( hdc, index, aa_flags, metrics, size, image->ptr, &identity );
+    ret = NtGdiGetGlyphOutline( hdc, index, aa_flags, metrics, size, image->ptr,
+                                &identity, FALSE );
     if (ret == GDI_ERROR)
     {
         HeapFree( GetProcessHeap(), 0, image->ptr );
@@ -5000,7 +4812,11 @@ static void draw_glyph( DC *dc, INT origin_x, INT origin_y, const GLYPHMETRICS *
     }
     assert( count <= max_count );
     dp_to_lp( dc, pts, count );
-    for (i = 0; i < count; i += 2) Polyline( dc->hSelf, pts + i, 2 );
+    for (i = 0; i < count; i += 2)
+    {
+        const UINT pts_count = 2;
+        NtGdiPolyPolyDraw( dc->hSelf, pts + i, &pts_count, 1, NtGdiPolyPolyline );
+    }
     HeapFree( GetProcessHeap(), 0, pts );
 }
 
@@ -5019,7 +4835,8 @@ BOOL CDECL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT
     if (flags & ETO_OPAQUE)
     {
         RECT rc = *rect;
-        HBRUSH brush = CreateSolidBrush( NtGdiGetNearestColor( dev->hdc, dc->attr->background_color ));
+        COLORREF brush_color = NtGdiGetNearestColor( dev->hdc, dc->attr->background_color );
+        HBRUSH brush = NtGdiCreateSolidBrush( brush_color, NULL);
 
         if (brush)
         {
@@ -5027,7 +4844,7 @@ BOOL CDECL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT
             dp_to_lp( dc, (POINT *)&rc, 2 );
             NtGdiPatBlt( dev->hdc, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, PATCOPY );
             NtGdiSelectBrush( dev->hdc, orig );
-            DeleteObject( brush );
+            NtGdiDeleteObjectApp( brush );
         }
     }
 
@@ -5111,7 +4928,7 @@ BOOL CDECL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT
         }
     }
 
-    pen = CreatePen( PS_SOLID, 1, dc->attr->text_color );
+    pen = NtGdiCreatePen( PS_SOLID, 1, dc->attr->text_color, NULL );
     orig = NtGdiSelectPen( dev->hdc, pen );
 
     for (i = 0; i < count; i++)
@@ -5142,7 +4959,7 @@ BOOL CDECL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT
     }
 
     NtGdiSelectPen( dev->hdc, orig );
-    DeleteObject( pen );
+    NtGdiDeleteObjectApp( pen );
     return TRUE;
 }
 
@@ -5203,7 +5020,6 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
     SIZE sz;
     RECT rc;
     POINT *deltas = NULL, width = {0, 0};
-    DWORD type;
     DC * dc = get_dc_ptr( hdc );
     PHYSDEV physdev;
     INT breakRem;
@@ -5224,13 +5040,6 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
 
     update_dc( dc );
     physdev = GET_DC_PHYSDEV( dc, pExtTextOut );
-    type = GetObjectType(hdc);
-    if(type == OBJ_METADC || type == OBJ_ENHMETADC)
-    {
-        ret = physdev->funcs->pExtTextOut( physdev, x, y, flags, lprect, str, count, lpDx );
-        release_dc_ptr( dc );
-        return ret;
-    }
 
     if (flags & ETO_RTLREADING) align |= TA_RTLREADING;
     if (layout & LAYOUT_RTL)
@@ -5251,8 +5060,8 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
         y = pt.y;
     }
 
-    GetTextMetricsW(hdc, &tm);
-    GetObjectW(dc->hFont, sizeof(lf), &lf);
+    NtGdiGetTextMetricsW( hdc, &tm, 0 );
+    NtGdiExtGetObjectW( dc->hFont, sizeof(lf), &lf );
 
     if(!(tm.tmPitchAndFamily & TMPF_VECTOR)) /* Non-scalable fonts shouldn't be rotated */
         lf.lfEscapement = 0;
@@ -5296,8 +5105,8 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
     x = pt.x;
     y = pt.y;
 
-    char_extra = GetTextCharacterExtra(hdc);
-    if (char_extra && lpDx && GetDeviceCaps( hdc, TECHNOLOGY ) == DT_RASPRINTER)
+    char_extra = dc->attr->char_extra;
+    if (char_extra && lpDx && NtGdiGetDeviceCaps( hdc, TECHNOLOGY ) == DT_RASPRINTER)
         char_extra = 0; /* Printer drivers don't add char_extra if lpDx is supplied */
 
     if(char_extra || dc->breakExtra || breakRem || lpDx || lf.lfEscapement != 0)
@@ -5374,10 +5183,7 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
     {
         POINT desired[2];
 
-        if(flags & ETO_GLYPH_INDEX)
-            GetTextExtentPointI(hdc, str, count, &sz);
-        else
-            GetTextExtentPointW(hdc, str, count, &sz);
+        NtGdiGetTextExtentExW( hdc, str, count, 0, NULL, NULL, &sz, !!(flags & ETO_GLYPH_INDEX) );
         desired[0].x = desired[0].y = 0;
         desired[1].x = sz.cx;
         desired[1].y = 0;
@@ -5405,7 +5211,7 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
             pt.x = x + width.x;
             pt.y = y + width.y;
             dp_to_lp(dc, &pt, 1);
-            MoveToEx(hdc, pt.x, pt.y, NULL);
+            NtGdiMoveTo( hdc, pt.x, pt.y, NULL );
         }
         break;
 
@@ -5422,7 +5228,7 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
             pt.x = x;
             pt.y = y;
             dp_to_lp(dc, &pt, 1);
-            MoveToEx(hdc, pt.x, pt.y, NULL);
+            NtGdiMoveTo( hdc, pt.x, pt.y, NULL );
         }
         break;
     }
@@ -5477,8 +5283,8 @@ done:
         UINT size = NtGdiGetOutlineTextMetricsInternalW( hdc, 0, NULL, 0 );
         OUTLINETEXTMETRICW* otm = NULL;
         POINT pts[5];
-        HPEN hpen = NtGdiSelectPen(hdc, GetStockObject(NULL_PEN));
-        HBRUSH hbrush = CreateSolidBrush( dc->attr->text_color );
+        HPEN hpen = NtGdiSelectPen( hdc, get_stock_object(NULL_PEN) );
+        HBRUSH hbrush = NtGdiCreateSolidBrush( dc->attr->text_color, NULL );
 
         hbrush = NtGdiSelectBrush(hdc, hbrush);
 
@@ -5539,22 +5345,12 @@ done:
 
         NtGdiSelectPen(hdc, hpen);
         hbrush = NtGdiSelectBrush(hdc, hbrush);
-        DeleteObject(hbrush);
+        NtGdiDeleteObjectApp( hbrush );
     }
 
     release_dc_ptr( dc );
 
     return ret;
-}
-
-
-/***********************************************************************
- *          GetAspectRatioFilterEx  (GDI32.@)
- */
-BOOL WINAPI GetAspectRatioFilterEx( HDC hdc, LPSIZE pAspectRatio )
-{
-  FIXME("(%p, %p): -- Empty Stub !\n", hdc, pAspectRatio);
-  return FALSE;
 }
 
 
@@ -5646,11 +5442,11 @@ BOOL WINAPI NtGdiGetCharABCWidthsW( HDC hdc, UINT first, UINT last, WCHAR *chars
 
 
 /***********************************************************************
- *           NtGdiGetGlyphOutlineW    (win32u.@)
+ *           NtGdiGetGlyphOutline    (win32u.@)
  */
-DWORD WINAPI NtGdiGetGlyphOutlineW( HDC hdc, UINT ch, UINT format, GLYPHMETRICS *metrics,
-                                    DWORD size, void *buffer, const MAT2 *mat2,
-                                    BOOL ignore_rotation )
+DWORD WINAPI NtGdiGetGlyphOutline( HDC hdc, UINT ch, UINT format, GLYPHMETRICS *metrics,
+                                   DWORD size, void *buffer, const MAT2 *mat2,
+                                   BOOL ignore_rotation )
 {
     DC *dc;
     DWORD ret;
@@ -5669,51 +5465,6 @@ DWORD WINAPI NtGdiGetGlyphOutlineW( HDC hdc, UINT ch, UINT format, GLYPHMETRICS 
     return ret;
 }
 
-
-/***********************************************************************
- *           CreateScalableFontResourceA   (GDI32.@)
- */
-BOOL WINAPI CreateScalableFontResourceA( DWORD fHidden,
-                                             LPCSTR lpszResourceFile,
-                                             LPCSTR lpszFontFile,
-                                             LPCSTR lpszCurrentPath )
-{
-    LPWSTR lpszResourceFileW = NULL;
-    LPWSTR lpszFontFileW = NULL;
-    LPWSTR lpszCurrentPathW = NULL;
-    int len;
-    BOOL ret;
-
-    if (lpszResourceFile)
-    {
-        len = MultiByteToWideChar(CP_ACP, 0, lpszResourceFile, -1, NULL, 0);
-        lpszResourceFileW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-        MultiByteToWideChar(CP_ACP, 0, lpszResourceFile, -1, lpszResourceFileW, len);
-    }
-
-    if (lpszFontFile)
-    {
-        len = MultiByteToWideChar(CP_ACP, 0, lpszFontFile, -1, NULL, 0);
-        lpszFontFileW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-        MultiByteToWideChar(CP_ACP, 0, lpszFontFile, -1, lpszFontFileW, len);
-    }
-
-    if (lpszCurrentPath)
-    {
-        len = MultiByteToWideChar(CP_ACP, 0, lpszCurrentPath, -1, NULL, 0);
-        lpszCurrentPathW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-        MultiByteToWideChar(CP_ACP, 0, lpszCurrentPath, -1, lpszCurrentPathW, len);
-    }
-
-    ret = CreateScalableFontResourceW(fHidden, lpszResourceFileW,
-            lpszFontFileW, lpszCurrentPathW);
-
-    HeapFree(GetProcessHeap(), 0, lpszResourceFileW);
-    HeapFree(GetProcessHeap(), 0, lpszFontFileW);
-    HeapFree(GetProcessHeap(), 0, lpszCurrentPathW);
-
-    return ret;
-}
 
 #define NE_FFLAGS_LIBMODULE     0x8000
 #define NE_OSFLAGS_WINDOWS      0x02
@@ -5976,9 +5727,9 @@ done:
 }
 
 /*************************************************************************
- *             NtGdiGetKerningPairsW   (win32u.@)
+ *             NtGdiGetKerningPairs   (win32u.@)
  */
-DWORD WINAPI NtGdiGetKerningPairsW( HDC hdc, DWORD count, KERNINGPAIR *kern_pair )
+DWORD WINAPI NtGdiGetKerningPairs( HDC hdc, DWORD count, KERNINGPAIR *kern_pair )
 {
     DC *dc;
     DWORD ret;
@@ -5999,49 +5750,6 @@ DWORD WINAPI NtGdiGetKerningPairsW( HDC hdc, DWORD count, KERNINGPAIR *kern_pair
     ret = dev->funcs->pGetKerningPairs( dev, count, kern_pair );
     release_dc_ptr( dc );
     return ret;
-}
-
-/*************************************************************************
- * TranslateCharsetInfo [GDI32.@]
- *
- * Fills a CHARSETINFO structure for a character set, code page, or
- * font. This allows making the correspondence between different labels
- * (character set, Windows, ANSI, and OEM codepages, and Unicode ranges)
- * of the same encoding.
- *
- * Only one codepage will be set in lpCs->fs. If TCI_SRCFONTSIG is used,
- * only one codepage should be set in *lpSrc.
- *
- * RETURNS
- *   TRUE on success, FALSE on failure.
- *
- */
-BOOL WINAPI TranslateCharsetInfo(
-  LPDWORD lpSrc, /* [in]
-       if flags == TCI_SRCFONTSIG: pointer to fsCsb of a FONTSIGNATURE
-       if flags == TCI_SRCCHARSET: a character set value
-       if flags == TCI_SRCCODEPAGE: a code page value
-		 */
-  LPCHARSETINFO lpCs, /* [out] structure to receive charset information */
-  DWORD flags /* [in] determines interpretation of lpSrc */)
-{
-    int index = 0;
-    switch (flags) {
-    case TCI_SRCFONTSIG:
-      while (index < MAXTCIINDEX && !(*lpSrc>>index & 0x0001)) index++;
-      break;
-    case TCI_SRCCODEPAGE:
-      while (index < MAXTCIINDEX && PtrToUlong(lpSrc) != FONT_tci[index].ciACP) index++;
-      break;
-    case TCI_SRCCHARSET:
-      while (index < MAXTCIINDEX && PtrToUlong(lpSrc) != FONT_tci[index].ciCharset) index++;
-      break;
-    default:
-      return FALSE;
-    }
-    if (index >= MAXTCIINDEX || FONT_tci[index].ciCharset == DEFAULT_CHARSET) return FALSE;
-    *lpCs = FONT_tci[index];
-    return TRUE;
 }
 
 /*************************************************************************
@@ -6074,42 +5782,21 @@ DWORD WINAPI NtGdiGetFontData( HDC hdc, DWORD table, DWORD offset, void *buffer,
 }
 
 /*************************************************************************
- * GetGlyphIndicesA [GDI32.@]
+ *           NtGdiGetGlyphIndicesW    (win32u.@)
  */
-DWORD WINAPI GetGlyphIndicesA(HDC hdc, LPCSTR lpstr, INT count,
-			      LPWORD pgi, DWORD flags)
-{
-    DWORD ret;
-    WCHAR *lpstrW;
-    INT countW;
-
-    TRACE("(%p, %s, %d, %p, 0x%x)\n",
-          hdc, debugstr_an(lpstr, count), count, pgi, flags);
-
-    lpstrW = FONT_mbtowc(hdc, lpstr, count, &countW, NULL);
-    ret = GetGlyphIndicesW(hdc, lpstrW, countW, pgi, flags);
-    HeapFree(GetProcessHeap(), 0, lpstrW);
-
-    return ret;
-}
-
-/*************************************************************************
- * GetGlyphIndicesW [GDI32.@]
- */
-DWORD WINAPI GetGlyphIndicesW(HDC hdc, LPCWSTR lpstr, INT count,
-			      LPWORD pgi, DWORD flags)
+DWORD WINAPI NtGdiGetGlyphIndicesW( HDC hdc, const WCHAR *str, INT count,
+                                    WORD *indices, DWORD flags )
 {
     DC *dc = get_dc_ptr(hdc);
     PHYSDEV dev;
     DWORD ret;
 
-    TRACE("(%p, %s, %d, %p, 0x%x)\n",
-          hdc, debugstr_wn(lpstr, count), count, pgi, flags);
+    TRACE( "(%p, %s, %d, %p, 0x%x)\n", hdc, debugstr_wn(str, count), count, indices, flags );
 
     if(!dc) return GDI_ERROR;
 
     dev = GET_DC_PHYSDEV( dc, pGetGlyphIndices );
-    ret = dev->funcs->pGetGlyphIndices( dev, lpstr, count, pgi, flags );
+    ret = dev->funcs->pGetGlyphIndices( dev, str, count, indices, flags );
     release_dc_ptr( dc );
     return ret;
 }
@@ -6120,38 +5807,6 @@ DWORD WINAPI GetGlyphIndicesW(HDC hdc, LPCWSTR lpstr, INT count,
  *								       *
  ***********************************************************************/
 
-/***********************************************************************
- *           AddFontResourceA    (GDI32.@)
- */
-INT WINAPI AddFontResourceA( LPCSTR str )
-{
-    return AddFontResourceExA( str, 0, NULL);
-}
-
-/***********************************************************************
- *           AddFontResourceW    (GDI32.@)
- */
-INT WINAPI AddFontResourceW( LPCWSTR str )
-{
-    return AddFontResourceExW(str, 0, NULL);
-}
-
-
-/***********************************************************************
- *           AddFontResourceExA    (GDI32.@)
- */
-INT WINAPI AddFontResourceExA( LPCSTR str, DWORD fl, PVOID pdv )
-{
-    DWORD len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-    LPWSTR strW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-    INT ret;
-
-    MultiByteToWideChar(CP_ACP, 0, str, -1, strW, len);
-    ret = AddFontResourceExW(strW, fl, pdv);
-    HeapFree(GetProcessHeap(), 0, strW);
-    return ret;
-}
-
 static BOOL CALLBACK load_enumed_resource(HMODULE hModule, LPCWSTR type, LPWSTR name, LONG_PTR lParam)
 {
     HRSRC rsrc = FindResourceW(hModule, name, type);
@@ -6161,7 +5816,7 @@ static BOOL CALLBACK load_enumed_resource(HMODULE hModule, LPCWSTR type, LPWSTR 
     DWORD num_in_res;
 
     TRACE("Found resource %s - trying to load\n", wine_dbgstr_w(type));
-    if (!AddFontMemResourceEx(pMem, SizeofResource(hModule, rsrc), NULL, &num_in_res))
+    if (!NtGdiAddFontMemResourceEx( pMem, SizeofResource(hModule, rsrc), NULL, 0, &num_in_res ))
     {
         ERR("Failed to load PE font resource mod=%p ptr=%p\n", hModule, hMem);
         return FALSE;
@@ -6572,9 +6227,10 @@ void font_init(void)
 }
 
 /***********************************************************************
- *           AddFontResourceExW    (GDI32.@)
+ *           NtGdiAddFontResourceW    (win32u.@)
  */
-INT WINAPI AddFontResourceExW( LPCWSTR str, DWORD flags, PVOID pdv )
+INT WINAPI NtGdiAddFontResourceW( const WCHAR *str, ULONG size, ULONG files, DWORD flags,
+                                  DWORD tid, void *dv )
 {
     int ret;
     WCHAR *filename;
@@ -6607,31 +6263,16 @@ INT WINAPI AddFontResourceExW( LPCWSTR str, DWORD flags, PVOID pdv )
 }
 
 /***********************************************************************
- *           RemoveFontResourceA    (GDI32.@)
+ *           NtGdiAddFontMemResourceEx    (win32u.@)
  */
-BOOL WINAPI RemoveFontResourceA( LPCSTR str )
-{
-    return RemoveFontResourceExA(str, 0, 0);
-}
-
-/***********************************************************************
- *           RemoveFontResourceW    (GDI32.@)
- */
-BOOL WINAPI RemoveFontResourceW( LPCWSTR str )
-{
-    return RemoveFontResourceExW(str, 0, 0);
-}
-
-/***********************************************************************
- *           AddFontMemResourceEx    (GDI32.@)
- */
-HANDLE WINAPI AddFontMemResourceEx( PVOID ptr, DWORD size, PVOID pdv, DWORD *pcFonts )
+HANDLE WINAPI NtGdiAddFontMemResourceEx( void *ptr, DWORD size, void *dv, ULONG dv_size,
+                                         DWORD *count )
 {
     HANDLE ret;
     DWORD num_fonts;
     void *copy;
 
-    if (!ptr || !size || !pcFonts)
+    if (!ptr || !size || !count)
     {
         SetLastError(ERROR_INVALID_PARAMETER);
         return NULL;
@@ -6657,12 +6298,12 @@ HANDLE WINAPI AddFontMemResourceEx( PVOID ptr, DWORD size, PVOID pdv, DWORD *pcF
 
     __TRY
     {
-        *pcFonts = num_fonts;
+        *count = num_fonts;
     }
     __EXCEPT_PAGE_FAULT
     {
-        WARN("page fault while writing to *pcFonts (%p)\n", pcFonts);
-        RemoveFontMemResourceEx( ret );
+        WARN( "page fault while writing to *count (%p)\n", count );
+        NtGdiRemoveFontMemResourceEx( ret );
         ret = 0;
     }
     __ENDTRY
@@ -6671,33 +6312,19 @@ HANDLE WINAPI AddFontMemResourceEx( PVOID ptr, DWORD size, PVOID pdv, DWORD *pcF
 }
 
 /***********************************************************************
- *           RemoveFontMemResourceEx    (GDI32.@)
+ *           NtGdiRemoveFontMemResourceEx    (win32u.@)
  */
-BOOL WINAPI RemoveFontMemResourceEx( HANDLE fh )
+BOOL WINAPI NtGdiRemoveFontMemResourceEx( HANDLE handle )
 {
-    FIXME("(%p) stub\n", fh);
+    FIXME( "(%p) stub\n", handle );
     return TRUE;
 }
 
 /***********************************************************************
- *           RemoveFontResourceExA    (GDI32.@)
+ *           NtGdiRemoveFontResourceW    (win32u.@)
  */
-BOOL WINAPI RemoveFontResourceExA( LPCSTR str, DWORD fl, PVOID pdv )
-{
-    DWORD len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-    LPWSTR strW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-    INT ret;
-
-    MultiByteToWideChar(CP_ACP, 0, str, -1, strW, len);
-    ret = RemoveFontResourceExW(strW, fl, pdv);
-    HeapFree(GetProcessHeap(), 0, strW);
-    return ret;
-}
-
-/***********************************************************************
- *           RemoveFontResourceExW    (GDI32.@)
- */
-BOOL WINAPI RemoveFontResourceExW( LPCWSTR str, DWORD flags, PVOID pdv )
+BOOL WINAPI NtGdiRemoveFontResourceW( const WCHAR *str, ULONG size, ULONG files, DWORD flags,
+                                      DWORD tid, void *dv )
 {
     int ret;
     WCHAR *filename;
@@ -6725,68 +6352,7 @@ BOOL WINAPI RemoveFontResourceExW( LPCWSTR str, DWORD flags, PVOID pdv )
 }
 
 /***********************************************************************
- *           GetFontResourceInfoW    (GDI32.@)
- */
-BOOL WINAPI GetFontResourceInfoW( LPCWSTR str, LPDWORD size, PVOID buffer, DWORD type )
-{
-    FIXME("%s %p(%d) %p %d\n", debugstr_w(str), size, size ? *size : 0, buffer, type);
-    return FALSE;
-}
-
-/***********************************************************************
- *           GetTextCharset    (GDI32.@)
- */
-UINT WINAPI GetTextCharset(HDC hdc)
-{
-    /* MSDN docs say this is equivalent */
-    return NtGdiGetTextCharsetInfo( hdc, NULL, 0 );
-}
-
-/***********************************************************************
- *           GdiGetCharDimensions    (GDI32.@)
- *
- * Gets the average width of the characters in the English alphabet.
- *
- * PARAMS
- *  hdc    [I] Handle to the device context to measure on.
- *  lptm   [O] Pointer to memory to store the text metrics into.
- *  height [O] On exit, the maximum height of characters in the English alphabet.
- *
- * RETURNS
- *  The average width of characters in the English alphabet.
- *
- * NOTES
- *  This function is used by the dialog manager to get the size of a dialog
- *  unit. It should also be used by other pieces of code that need to know
- *  the size of a dialog unit in logical units without having access to the
- *  window handle of the dialog.
- *  Windows caches the font metrics from this function, but we don't and
- *  there doesn't appear to be an immediate advantage to do so.
- *
- * SEE ALSO
- *  GetTextExtentPointW, GetTextMetricsW, MapDialogRect.
- */
-LONG WINAPI GdiGetCharDimensions(HDC hdc, LPTEXTMETRICW lptm, LONG *height)
-{
-    SIZE sz;
-
-    if(lptm && !GetTextMetricsW(hdc, lptm)) return 0;
-
-    if(!GetTextExtentPointW(hdc, L"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 52, &sz))
-        return 0;
-
-    if (height) *height = sz.cy;
-    return (sz.cx / 26 + 1) / 2;
-}
-
-BOOL WINAPI EnableEUDC(BOOL fEnableEUDC)
-{
-    FIXME("(%d): stub\n", fEnableEUDC);
-    return FALSE;
-}
-
-/***********************************************************************
- *           GetFontUnicodeRanges    (GDI32.@)
+ *           NtGdiGetFontUnicodeRanges    (win32u.@)
  *
  *  Retrieve a list of supported Unicode characters in a font.
  *
@@ -6799,7 +6365,7 @@ BOOL WINAPI EnableEUDC(BOOL fEnableEUDC)
  *   Failure: 0
  *
  */
-DWORD WINAPI GetFontUnicodeRanges(HDC hdc, LPGLYPHSET lpgs)
+DWORD WINAPI NtGdiGetFontUnicodeRanges( HDC hdc, GLYPHSET *lpgs )
 {
     DWORD ret;
     PHYSDEV dev;
@@ -6817,9 +6383,9 @@ DWORD WINAPI GetFontUnicodeRanges(HDC hdc, LPGLYPHSET lpgs)
 
 
 /*************************************************************
- *           FontIsLinked    (GDI32.@)
+ *           NtGdiFontIsLinked    (win32u.@)
  */
-BOOL WINAPI FontIsLinked(HDC hdc)
+BOOL WINAPI NtGdiFontIsLinked( HDC hdc )
 {
     DC *dc = get_dc_ptr(hdc);
     PHYSDEV dev;
@@ -6834,9 +6400,9 @@ BOOL WINAPI FontIsLinked(HDC hdc)
 }
 
 /*************************************************************
- *           GetFontRealizationInfo    (GDI32.@)
+ *           NtGdiGetRealizationInfo    (win32u.@)
  */
-BOOL WINAPI GetFontRealizationInfo(HDC hdc, struct font_realization_info *info)
+BOOL WINAPI NtGdiGetRealizationInfo( HDC hdc, struct font_realization_info *info )
 {
     BOOL is_v0 = info->size == FIELD_OFFSET(struct font_realization_info, file_count);
     PHYSDEV dev;
@@ -6855,20 +6421,21 @@ BOOL WINAPI GetFontRealizationInfo(HDC hdc, struct font_realization_info *info)
 }
 
 /*************************************************************************
- *             GetRasterizerCaps   (GDI32.@)
+ *           NtGdiGetRasterizerCaps   (win32u.@)
  */
-BOOL WINAPI GetRasterizerCaps( LPRASTERIZER_STATUS lprs, UINT cbNumBytes)
+BOOL WINAPI NtGdiGetRasterizerCaps( RASTERIZER_STATUS *status, UINT size )
 {
-    lprs->nSize = sizeof(RASTERIZER_STATUS);
-    lprs->wFlags = font_funcs ? (TT_AVAILABLE | TT_ENABLED) : 0;
-    lprs->nLanguageID = 0;
+    status->nSize = sizeof(RASTERIZER_STATUS);
+    status->wFlags = font_funcs ? (TT_AVAILABLE | TT_ENABLED) : 0;
+    status->nLanguageID = 0;
     return TRUE;
 }
 
 /*************************************************************************
- *             GetFontFileData   (GDI32.@)
+ *             NtGdiGetFontFileData   (win32u.@)
  */
-BOOL WINAPI GetFontFileData( DWORD instance_id, DWORD file_index, UINT64 offset, void *buff, DWORD buff_size )
+BOOL WINAPI NtGdiGetFontFileData( DWORD instance_id, DWORD file_index, UINT64 *offset,
+                                  void *buff, DWORD buff_size )
 {
     struct gdi_font *font;
     DWORD tag = 0, size;
@@ -6880,8 +6447,8 @@ BOOL WINAPI GetFontFileData( DWORD instance_id, DWORD file_index, UINT64 offset,
     {
         if (font->ttc_item_offset) tag = MS_TTCF_TAG;
         size = font_funcs->get_font_data( font, tag, 0, NULL, 0 );
-        if (size != GDI_ERROR && size >= buff_size && offset <= size - buff_size)
-            ret = font_funcs->get_font_data( font, tag, offset, buff, buff_size ) != GDI_ERROR;
+        if (size != GDI_ERROR && size >= buff_size && *offset <= size - buff_size)
+            ret = font_funcs->get_font_data( font, tag, *offset, buff, buff_size ) != GDI_ERROR;
         else
             SetLastError( ERROR_INVALID_PARAMETER );
     }
@@ -6889,19 +6456,11 @@ BOOL WINAPI GetFontFileData( DWORD instance_id, DWORD file_index, UINT64 offset,
     return ret;
 }
 
-/* Undocumented structure filled in by GetFontFileInfo */
-struct font_fileinfo
-{
-    FILETIME writetime;
-    LARGE_INTEGER size;
-    WCHAR path[1];
-};
-
 /*************************************************************************
- *             GetFontFileInfo   (GDI32.@)
+ *             NtGdiGetFontFileInfo   (win32u.@)
  */
-BOOL WINAPI GetFontFileInfo( DWORD instance_id, DWORD file_index, struct font_fileinfo *info,
-                             SIZE_T size, SIZE_T *needed )
+BOOL WINAPI NtGdiGetFontFileInfo( DWORD instance_id, DWORD file_index, struct font_fileinfo *info,
+                                  SIZE_T size, SIZE_T *needed )
 {
     SIZE_T required_size = 0;
     struct gdi_font *font;
@@ -6927,40 +6486,10 @@ BOOL WINAPI GetFontFileInfo( DWORD instance_id, DWORD file_index, struct font_fi
     return ret;
 }
 
-struct realization_info
-{
-    DWORD flags;       /* 1 for bitmap fonts, 3 for scalable fonts */
-    DWORD cache_num;   /* keeps incrementing - num of fonts that have been created allowing for caching?? */
-    DWORD instance_id; /* identifies a realized font instance */
-};
-
 /*************************************************************
- *           GdiRealizationInfo    (GDI32.@)
- *
- * Returns a structure that contains some font information.
+ *           NtGdiGetCharWidthInfo    (win32u.@)
  */
-BOOL WINAPI GdiRealizationInfo(HDC hdc, struct realization_info *info)
-{
-    struct font_realization_info ri;
-    BOOL ret;
-
-    ri.size = sizeof(ri);
-    ret = GetFontRealizationInfo( hdc, &ri );
-    if (ret)
-    {
-        info->flags = ri.flags;
-        info->cache_num = ri.cache_num;
-        info->instance_id = ri.instance_id;
-    }
-
-    return ret;
-}
-
-/*************************************************************
- *           GetCharWidthInfo    (GDI32.@)
- *
- */
-BOOL WINAPI GetCharWidthInfo(HDC hdc, struct char_width_info *info)
+BOOL WINAPI NtGdiGetCharWidthInfo( HDC hdc, struct char_width_info *info )
 {
     PHYSDEV dev;
     BOOL ret;

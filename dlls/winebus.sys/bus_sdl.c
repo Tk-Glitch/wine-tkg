@@ -64,6 +64,7 @@ static struct sdl_bus_options options;
 
 static void *sdl_handle = NULL;
 static UINT quit_event = -1;
+static struct list event_queue = LIST_INIT(event_queue);
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL
 MAKE_FUNCPTR(SDL_GetError);
@@ -477,9 +478,9 @@ failed:
     return STATUS_NO_MEMORY;
 }
 
-static void free_device(DEVICE_OBJECT *device)
+static void sdl_device_destroy(struct unix_device *iface)
 {
-    struct platform_private *ext = impl_from_DEVICE_OBJECT(device);
+    struct platform_private *ext = impl_from_unix_device(iface);
 
     pSDL_JoystickClose(ext->sdl_joystick);
     if (ext->sdl_controller)
@@ -490,21 +491,22 @@ static void free_device(DEVICE_OBJECT *device)
     HeapFree(GetProcessHeap(), 0, ext);
 }
 
-static int compare_platform_device(DEVICE_OBJECT *device, void *context)
+static int sdl_device_compare(struct unix_device *iface, void *context)
 {
-    return impl_from_DEVICE_OBJECT(device)->id - PtrToUlong(context);
+    return impl_from_unix_device(iface)->id - PtrToUlong(context);
 }
 
-static NTSTATUS start_device(DEVICE_OBJECT *device)
+static NTSTATUS sdl_device_start(struct unix_device *iface, DEVICE_OBJECT *device)
 {
-    struct platform_private *ext = impl_from_DEVICE_OBJECT(device);
+    struct platform_private *ext = impl_from_unix_device(iface);
     if (ext->sdl_controller) return build_mapped_report_descriptor(ext);
     return build_report_descriptor(ext);
 }
 
-static NTSTATUS get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *out_length)
+static NTSTATUS sdl_device_get_reportdescriptor(struct unix_device *iface, BYTE *buffer,
+                                                DWORD length, DWORD *out_length)
 {
-    struct platform_private *ext = impl_from_DEVICE_OBJECT(device);
+    struct platform_private *ext = impl_from_unix_device(iface);
 
     *out_length = ext->desc.size;
     if (length < ext->desc.size) return STATUS_BUFFER_TOO_SMALL;
@@ -513,9 +515,9 @@ static NTSTATUS get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD 
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
+static NTSTATUS sdl_device_get_string(struct unix_device *iface, DWORD index, WCHAR *buffer, DWORD length)
 {
-    struct platform_private *ext = impl_from_DEVICE_OBJECT(device);
+    struct platform_private *ext = impl_from_unix_device(iface);
     const char* str = NULL;
 
     switch (index)
@@ -544,9 +546,9 @@ static NTSTATUS get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DW
     return STATUS_SUCCESS;
 }
 
-static void set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
+static void sdl_device_set_output_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    struct platform_private *ext = impl_from_DEVICE_OBJECT(device);
+    struct platform_private *ext = impl_from_unix_device(iface);
 
     if (ext->sdl_haptic && packet->reportId == 0)
     {
@@ -591,28 +593,28 @@ static void set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO
     }
 }
 
-static void get_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
+static void sdl_device_get_feature_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
     io->Information = 0;
     io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
-static void set_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
+static void sdl_device_set_feature_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
     io->Information = 0;
     io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
-static const platform_vtbl sdl_vtbl =
+static const struct unix_device_vtbl sdl_device_vtbl =
 {
-    free_device,
-    compare_platform_device,
-    start_device,
-    get_reportdescriptor,
-    get_string,
-    set_output_report,
-    get_feature_report,
-    set_feature_report,
+    sdl_device_destroy,
+    sdl_device_compare,
+    sdl_device_start,
+    sdl_device_get_reportdescriptor,
+    sdl_device_get_string,
+    sdl_device_set_output_report,
+    sdl_device_get_feature_report,
+    sdl_device_set_feature_report,
 };
 
 static BOOL set_report_from_event(DEVICE_OBJECT *device, SDL_Event *event)
@@ -730,21 +732,16 @@ static BOOL set_mapped_report_from_event(DEVICE_OBJECT *device, SDL_Event *event
     return FALSE;
 }
 
-static void try_remove_device(DEVICE_OBJECT *device)
+static void sdl_add_device(unsigned int index)
 {
-    bus_unlink_hid_device(device);
-    IoInvalidateDeviceRelations(bus_pdo, BusRelations);
-}
-
-static void try_add_device(unsigned int index)
-{
-    DWORD vid = 0, pid = 0, version = 0;
+    struct device_desc desc =
+    {
+        .busid = sdl_busidW,
+        .input = -1,
+        .serial = {'0','0','0','0',0},
+    };
     struct platform_private *private;
-    DEVICE_OBJECT *device = NULL;
-    WCHAR serial[34] = {0};
     char guid_str[34];
-    BOOL is_xbox_gamepad;
-    WORD input = -1;
 
     SDL_Joystick* joystick;
     SDL_JoystickID id;
@@ -763,53 +760,41 @@ static void try_add_device(unsigned int index)
     id = pSDL_JoystickInstanceID(joystick);
 
     if (pSDL_JoystickGetProductVersion != NULL) {
-        vid = pSDL_JoystickGetVendor(joystick);
-        pid = pSDL_JoystickGetProduct(joystick);
-        version = pSDL_JoystickGetProductVersion(joystick);
+        desc.vid = pSDL_JoystickGetVendor(joystick);
+        desc.pid = pSDL_JoystickGetProduct(joystick);
+        desc.version = pSDL_JoystickGetProductVersion(joystick);
     }
     else
     {
-        vid = 0x01;
-        pid = pSDL_JoystickInstanceID(joystick) + 1;
-        version = 0;
+        desc.vid = 0x01;
+        desc.pid = pSDL_JoystickInstanceID(joystick) + 1;
+        desc.version = 0;
     }
 
     guid = pSDL_JoystickGetGUID(joystick);
     pSDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
-    MultiByteToWideChar(CP_ACP, 0, guid_str, -1, serial, sizeof(guid_str));
+    MultiByteToWideChar(CP_ACP, 0, guid_str, -1, desc.serial, sizeof(guid_str));
 
-    if (controller)
-    {
-        TRACE("Found sdl game controller %i (vid %04x, pid %04x, version %u, serial %s)\n",
-              id, vid, pid, version, debugstr_w(serial));
-        is_xbox_gamepad = TRUE;
-    }
+    if (controller) desc.is_gamepad = TRUE;
     else
     {
         int button_count, axis_count;
 
-        TRACE("Found sdl device %i (vid %04x, pid %04x, version %u, serial %s)\n",
-              id, vid, pid, version, debugstr_w(serial));
-
         axis_count = pSDL_JoystickNumAxes(joystick);
         button_count = pSDL_JoystickNumButtons(joystick);
-        is_xbox_gamepad = (axis_count == 6  && button_count >= 14);
+        desc.is_gamepad = (axis_count == 6  && button_count >= 14);
     }
-    if (is_xbox_gamepad)
-        input = 0;
 
-    if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*private)))) return;
+    TRACE("%s id %d, desc %s.\n", controller ? "controller" : "joystick", id, debugstr_device_desc(&desc));
 
-    device = bus_create_hid_device(sdl_busidW, vid, pid, input, version, index, serial, is_xbox_gamepad,
-                                   &sdl_vtbl, &private->unix_device);
-    if (!device) HeapFree(GetProcessHeap(), 0, private);
-    else
-    {
-        private->sdl_joystick = joystick;
-        private->sdl_controller = controller;
-        private->id = id;
-        IoInvalidateDeviceRelations(bus_pdo, BusRelations);
-    }
+    if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*private))))
+        return;
+    private->unix_device.vtbl = &sdl_device_vtbl;
+    private->sdl_joystick = joystick;
+    private->sdl_controller = controller;
+    private->id = id;
+
+    bus_event_queue_device_created(&event_queue, &private->unix_device, &desc);
 }
 
 static void process_device_event(SDL_Event *event)
@@ -820,13 +805,11 @@ static void process_device_event(SDL_Event *event)
     TRACE_(hid_report)("Received action %x\n", event->type);
 
     if (event->type == SDL_JOYDEVICEADDED)
-        try_add_device(((SDL_JoyDeviceEvent*)event)->which);
+        sdl_add_device(((SDL_JoyDeviceEvent *)event)->which);
     else if (event->type == SDL_JOYDEVICEREMOVED)
     {
         id = ((SDL_JoyDeviceEvent *)event)->which;
-        device = bus_find_hid_device(sdl_busidW, ULongToPtr(id));
-        if (device) try_remove_device(device);
-        else WARN("failed to find device with id %d\n", id);
+        bus_event_queue_device_removed(&event_queue, sdl_busidW, ULongToPtr(id));
     }
     else if (event->type >= SDL_JOYAXISMOTION && event->type <= SDL_JOYBUTTONUP)
     {
@@ -983,15 +966,18 @@ failed:
 
 NTSTATUS sdl_bus_wait(void *args)
 {
+    struct bus_event *result = args;
     SDL_Event event;
 
     do
     {
+        if (bus_event_queue_pop(&event_queue, result)) return STATUS_PENDING;
         if (pSDL_WaitEvent(&event) != 0) process_device_event(&event);
         else WARN("SDL_WaitEvent failed: %s\n", pSDL_GetError());
     } while (event.type != quit_event);
 
     TRACE("SDL main loop exiting\n");
+    bus_event_queue_destroy(&event_queue);
     dlclose(sdl_handle);
     sdl_handle = NULL;
     return STATUS_SUCCESS;

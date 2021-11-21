@@ -138,12 +138,34 @@ void module_set_module(struct module* module, const WCHAR* name)
 }
 
 /* Returned string must be freed by caller */
-const WCHAR *get_wine_loader_name(struct process *pcs)
+WCHAR *get_wine_loader_name(struct process *pcs)
 {
-    const WCHAR *name = process_getenv(pcs, L"WINELOADER");
+    const WCHAR *name;
+    WCHAR* altname;
+    unsigned len;
+
+    name = process_getenv(pcs, L"WINELOADER");
     if (!name) name = pcs->is_64bit ? L"wine64" : L"wine";
-    TRACE("returning %s\n", debugstr_w(name));
-    return name;
+    len = lstrlenW(name);
+
+    /* WINELOADER isn't properly updated in Wow64 process calling inside Windows env block
+     * (it's updated in ELF env block though)
+     * So do the adaptation ourselves.
+     */
+    altname = HeapAlloc(GetProcessHeap(), 0, (len + 2 + 1) * sizeof(WCHAR));
+    if (altname)
+    {
+        memcpy(altname, name, len * sizeof(WCHAR));
+        if (pcs->is_64bit && len >= 2 && memcmp(name + len - 2, L"64", 2 * sizeof(WCHAR)) != 0)
+            lstrcpyW(altname + len, L"64");
+        else if (!pcs->is_64bit && len >= 2 && !memcmp(name + len - 2, L"64", 2 * sizeof(WCHAR)))
+            altname[len - 2] = '\0';
+        else
+            altname[len] = '\0';
+    }
+
+    TRACE("returning %s\n", debugstr_w(altname));
+    return altname;
 }
 
 static const char*      get_module_type(enum module_type type, BOOL virtual)
@@ -163,7 +185,7 @@ static const char*      get_module_type(enum module_type type, BOOL virtual)
 struct module* module_new(struct process* pcs, const WCHAR* name,
                           enum module_type type, BOOL virtual,
                           DWORD64 mod_addr, DWORD64 size,
-                          ULONG_PTR stamp, ULONG_PTR checksum)
+                          ULONG_PTR stamp, ULONG_PTR checksum, WORD machine)
 {
     struct module*      module;
     unsigned            i;
@@ -207,7 +229,7 @@ struct module* module_new(struct process* pcs, const WCHAR* name,
     module->module.TypeInfo = FALSE;
     module->module.SourceIndexed = FALSE;
     module->module.Publics = FALSE;
-    module->module.MachineType = 0;
+    module->module.MachineType = machine;
     module->module.Reserved = 0;
 
     module->reloc_delta       = 0;
@@ -233,6 +255,9 @@ struct module* module_new(struct process* pcs, const WCHAR* name,
     module->sources           = 0;
     wine_rb_init(&module->sources_offsets_tree, source_rb_compare);
 
+    /* add top level symbol */
+    module->top = symt_new_module(module);
+
     return module;
 }
 
@@ -246,7 +271,7 @@ struct module* module_find_by_nameW(const struct process* pcs, const WCHAR* name
 
     for (module = pcs->lmodules; module; module = module->next)
     {
-        if (!wcsicmp(name, module->module.ModuleName)) return module;
+        if (!wcsicmp(name, module->modulename)) return module;
     }
     SetLastError(ERROR_INVALID_NAME);
     return NULL;
@@ -677,7 +702,7 @@ BOOL image_check_alternate(struct image_file_map* fmap, const struct module* mod
         const char* dbg_link;
 
         found = TRUE;
-        dbg_link = (const char*)image_map_section(&debuglink_sect);
+        dbg_link = image_map_section(&debuglink_sect);
         if (dbg_link != IMAGE_NO_MAP)
         {
             /* The content of a debug link section is:
@@ -690,7 +715,7 @@ BOOL image_check_alternate(struct image_file_map* fmap, const struct module* mod
             ret = image_locate_debug_link(module, fmap, dbg_link, crc);
             if (!ret)
                 WARN("Couldn't load linked debug file for %s\n",
-                     debugstr_w(module->module.ModuleName));
+                     debugstr_w(module->modulename));
         }
         image_unmap_section(&debuglink_sect);
     }
@@ -761,22 +786,23 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
     if (Data)
         FIXME("Unsupported load data parameter %p for %s\n",
               Data, debugstr_w(wImageName));
-    if (!validate_addr64(BaseOfDll)) return FALSE;
 
-    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+    if (!(pcs = process_find_by_handle(hProcess))) return 0;
 
     if (Flags & SLMFLAG_VIRTUAL)
     {
-        if (!wImageName) return FALSE;
-        module = module_new(pcs, wImageName, DMT_PE, TRUE, BaseOfDll, SizeOfDll, 0, 0);
-        if (!module) return FALSE;
+        if (!wImageName) return 0;
+        module = module_new(pcs, wImageName, DMT_PE, TRUE, BaseOfDll, SizeOfDll, 0, 0, IMAGE_FILE_MACHINE_UNKNOWN);
+        if (!module) return 0;
         if (wModuleName) module_set_module(module, wModuleName);
         module->module.SymType = SymVirtual;
 
-        return TRUE;
+        return module->module.BaseOfImage;
     }
     if (Flags & ~(SLMFLAG_VIRTUAL))
         FIXME("Unsupported Flags %08x for %s\n", Flags, debugstr_w(wImageName));
+
+    if (!validate_addr64(BaseOfDll)) return 0;
 
     pcs->loader->synchronize_module_list(pcs);
 
@@ -789,6 +815,20 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
     if (wImageName)
     {
         module = module_is_already_loaded(pcs, wImageName);
+        if (module)
+        {
+            if (module->module.BaseOfImage == BaseOfDll)
+                SetLastError(ERROR_SUCCESS);
+            else
+            {
+                /* native allows to load the same module at different addresses
+                 * we don't support this for now
+                 */
+                SetLastError(ERROR_INVALID_PARAMETER);
+                FIXME("Reloading %s at different base address isn't supported\n", debugstr_w(module->modulename));
+            }
+            return 0;
+        }
         if (!module && module_is_container_loaded(pcs, wImageName, BaseOfDll))
         {
             /* force the loading of DLL as builtin */
@@ -842,7 +882,7 @@ BOOL module_remove(struct process* pcs, struct module* module)
     struct module**     p;
     unsigned            i;
 
-    TRACE("%s (%p)\n", debugstr_w(module->module.ModuleName), module);
+    TRACE("%s (%p)\n", debugstr_w(module->modulename), module);
 
     for (i = 0; i < DFI_LAST; i++)
     {
@@ -898,7 +938,6 @@ BOOL WINAPI SymUnloadModule64(HANDLE hProcess, DWORD64 BaseOfDll)
 
     pcs = process_find_by_handle(hProcess);
     if (!pcs) return FALSE;
-    if (!validate_addr64(BaseOfDll)) return FALSE;
     module = module_find_by_addr(pcs, BaseOfDll, DMT_UNKNOWN);
     if (!module) return FALSE;
     return module_remove(pcs, module);

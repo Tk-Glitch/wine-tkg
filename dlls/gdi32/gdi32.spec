@@ -87,9 +87,9 @@
 @ stdcall D3DKMTDestroyDCFromMemory(ptr) NtGdiDdDDIDestroyDCFromMemory
 @ stdcall D3DKMTDestroyDevice(ptr) NtGdiDdDDIDestroyDevice
 @ stdcall D3DKMTEscape(ptr) NtGdiDdDDIEscape
-@ stdcall D3DKMTOpenAdapterFromDeviceName(ptr)
 @ stdcall D3DKMTOpenAdapterFromGdiDisplayName(ptr)
 @ stdcall D3DKMTOpenAdapterFromHdc(ptr) NtGdiDdDDIOpenAdapterFromHdc
+@ stdcall D3DKMTOpenAdapterFromLuid(ptr) NtGdiDdDDIOpenAdapterFromLuid
 @ stdcall D3DKMTQueryStatistics(ptr) NtGdiDdDDIQueryStatistics
 @ stdcall D3DKMTSetQueuedLimit(ptr) NtGdiDdDDISetQueuedLimit
 @ stdcall D3DKMTSetVidPnSourceOwner(ptr) NtGdiDdDDISetVidPnSourceOwner
@@ -138,7 +138,7 @@
 @ stdcall FixBrushOrgEx(long long long ptr)
 @ stdcall FlattenPath(long)
 @ stdcall FloodFill(long long long long)
-@ stdcall FontIsLinked(long)
+@ stdcall FontIsLinked(long) NtGdiFontIsLinked
 @ stdcall FrameRgn(long long long long long)
 @ stub FreeImageColorMatcher
 # @ stub GdiAddFontResourceW
@@ -189,7 +189,7 @@
 # @ stub GdiEndPageEMF
 @ stdcall GdiEntry13()
 # @ stub GdiFixUpHandle
-@ stdcall GdiFlush()
+@ stdcall GdiFlush() NtGdiFlush
 # @ stub GdiFullscreenControl
 @ stdcall GdiGetBatchLimit()
 @ stdcall GdiGetCharDimensions(long ptr ptr)
@@ -203,9 +203,9 @@
 # @ stub GdiGetPageCount
 # @ stub GdiGetPageHandle
 # @ stub GdiGetSpoolFileHandle
-@ stdcall GdiGetSpoolMessage(ptr long ptr long)
+@ stdcall GdiGetSpoolMessage(ptr long ptr long) NtGdiGetSpoolMessage
 @ stdcall GdiGradientFill(long ptr long ptr long long) 
-@ stdcall GdiInitSpool()
+@ stdcall GdiInitSpool() NtGdiInitSpool
 @ stdcall GdiInitializeLanguagePack(long)
 @ stdcall GdiIsMetaFileDC(long)
 @ stdcall GdiIsMetaPrintDC(long)
@@ -259,14 +259,14 @@
 @ stdcall GetCharWidthFloatA(long long long ptr)
 @ stdcall GetCharWidthFloatW(long long long ptr)
 @ stdcall GetCharWidthI(ptr long long ptr ptr)
-@ stdcall GetCharWidthInfo(ptr ptr)
+@ stdcall GetCharWidthInfo(ptr ptr) NtGdiGetCharWidthInfo
 @ stdcall GetCharWidthW(long long long ptr) GetCharWidth32W
 @ stub GetCharWidthWOW
 @ stdcall GetCharacterPlacementA(long str long long ptr long)
 @ stdcall GetCharacterPlacementW(long wstr long long ptr long)
-@ stdcall GetClipBox(long ptr)
+@ stdcall GetClipBox(long ptr) NtGdiGetAppClipBox
 @ stdcall GetClipRgn(long long)
-@ stdcall GetColorAdjustment(long ptr)
+@ stdcall GetColorAdjustment(long ptr) NtGdiGetColorAdjustment
 @ stdcall GetColorSpace(long)
 @ stdcall GetCurrentObject(long long)
 @ stdcall GetCurrentPositionEx(long ptr)
@@ -291,14 +291,14 @@
 # @ stub GetFontAssocStatus
 @ stdcall GetFontData(long long long ptr long) NtGdiGetFontData
 @ stdcall GetFontFileData(long long int64 ptr long)
-@ stdcall GetFontFileInfo(long long ptr long ptr)
+@ stdcall GetFontFileInfo(long long ptr long ptr) NtGdiGetFontFileInfo
 @ stdcall GetFontLanguageInfo(long)
-@ stdcall GetFontRealizationInfo(long ptr)
+@ stdcall GetFontRealizationInfo(long ptr) NtGdiGetRealizationInfo
 @ stub GetFontResourceInfo
 @ stdcall GetFontResourceInfoW(wstr ptr ptr long)
-@ stdcall GetFontUnicodeRanges(ptr ptr)
+@ stdcall GetFontUnicodeRanges(ptr ptr) NtGdiGetFontUnicodeRanges
 @ stdcall GetGlyphIndicesA(long ptr long ptr long)
-@ stdcall GetGlyphIndicesW(long ptr long ptr long)
+@ stdcall GetGlyphIndicesW(long ptr long ptr long) NtGdiGetGlyphIndicesW
 @ stdcall GetGlyphOutline(long long long ptr long ptr ptr) GetGlyphOutlineA
 @ stdcall GetGlyphOutlineA(long long long ptr long ptr ptr)
 @ stdcall GetGlyphOutlineW(long long long ptr long ptr ptr)
@@ -309,7 +309,7 @@
 @ stdcall GetICMProfileW(long ptr ptr)
 @ stdcall GetKerningPairs(long long ptr) GetKerningPairsA
 @ stdcall GetKerningPairsA(long long ptr)
-@ stdcall GetKerningPairsW(long long ptr) NtGdiGetKerningPairsW
+@ stdcall GetKerningPairsW(long long ptr) NtGdiGetKerningPairs
 @ stdcall GetLayout(long)
 @ stdcall GetLogColorSpaceA(long ptr long)
 @ stdcall GetLogColorSpaceW(long ptr long)
@@ -332,8 +332,8 @@
 @ stdcall GetPixelFormat(long)
 @ stdcall GetPolyFillMode(long)
 @ stdcall GetROP2(long)
-@ stdcall GetRandomRgn(long long long)
-@ stdcall GetRasterizerCaps(ptr long)
+@ stdcall GetRandomRgn(long long long) NtGdiGetRandomRgn
+@ stdcall GetRasterizerCaps(ptr long) NtGdiGetRasterizerCaps
 @ stdcall GetRegionData(long long ptr) NtGdiGetRegionData
 @ stdcall GetRelAbs(long long)
 @ stdcall GetRgnBox(long ptr) NtGdiGetRgnBox
@@ -414,7 +414,7 @@
 @ stdcall RectInRegion(long ptr) NtGdiRectInRegion
 @ stdcall RectVisible(long ptr) NtGdiRectVisible
 @ stdcall Rectangle(long long long long long)
-@ stdcall RemoveFontMemResourceEx(ptr)
+@ stdcall RemoveFontMemResourceEx(ptr) NtGdiRemoveFontMemResourceEx
 @ stdcall RemoveFontResourceA(str)
 @ stdcall RemoveFontResourceExA(str long ptr)
 @ stdcall RemoveFontResourceExW(wstr long ptr)
@@ -482,7 +482,7 @@
 @ stdcall SetBoundsRect(long ptr long) NtGdiSetBoundsRect
 # @ stub SetBrushAttributes
 @ stdcall SetBrushOrgEx(long long long ptr)
-@ stdcall SetColorAdjustment(long ptr)
+@ stdcall SetColorAdjustment(long ptr) NtGdiSetColorAdjustment
 @ stdcall SetColorSpace(long long)
 @ stdcall SetDCBrushColor(long long)
 @ stdcall SetDCPenColor(long long)
@@ -539,7 +539,7 @@
 @ stdcall TextOutW(long long long wstr long)
 @ stdcall TranslateCharsetInfo(ptr ptr long)
 @ stub UnloadNetworkFonts
-@ stdcall UnrealizeObject(long)
+@ stdcall UnrealizeObject(long) NtGdiUnrealizeObject
 @ stdcall UpdateColors(long) NtGdiUpdateColors
 @ stdcall UpdateICMRegKey(long str str long) UpdateICMRegKeyA
 @ stdcall UpdateICMRegKeyA(long str str long)

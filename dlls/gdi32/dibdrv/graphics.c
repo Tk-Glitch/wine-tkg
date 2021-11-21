@@ -455,7 +455,7 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
         !(interior = create_polypolygon_region( points, &count, 1, WINDING, &rc )))
     {
         HeapFree( GetProcessHeap(), 0, points );
-        if (outline) DeleteObject( outline );
+        if (outline) NtGdiDeleteObjectApp( outline );
         return FALSE;
     }
 
@@ -463,7 +463,7 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
     if (interior && !outline)
     {
         ret = brush_region( pdev, interior );
-        DeleteObject( interior );
+        NtGdiDeleteObjectApp( interior );
         interior = 0;
     }
 
@@ -475,12 +475,12 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
     {
         NtGdiCombineRgn( interior, interior, outline, RGN_DIFF );
         ret = brush_region( pdev, interior );
-        DeleteObject( interior );
+        NtGdiDeleteObjectApp( interior );
     }
     if (outline)
     {
         if (ret) ret = pen_region( pdev, outline );
-        DeleteObject( outline );
+        NtGdiDeleteObjectApp( outline );
     }
     HeapFree( GetProcessHeap(), 0, points );
     return ret;
@@ -508,7 +508,7 @@ static BOOL stroke_and_fill_path( dibdrv_physdev *dev, BOOL stroke, BOOL fill )
     if (interior && !outline)
     {
         ret = brush_region( dev, interior );
-        DeleteObject( interior );
+        NtGdiDeleteObjectApp( interior );
         interior = 0;
     }
 
@@ -540,12 +540,12 @@ static BOOL stroke_and_fill_path( dibdrv_physdev *dev, BOOL stroke, BOOL fill )
     {
         NtGdiCombineRgn( interior, interior, outline, RGN_DIFF );
         ret = brush_region( dev, interior );
-        DeleteObject( interior );
+        NtGdiDeleteObjectApp( interior );
     }
     if (outline)
     {
         if (ret) ret = pen_region( dev, outline );
-        DeleteObject( outline );
+        NtGdiDeleteObjectApp( outline );
     }
 
 done:
@@ -1154,7 +1154,7 @@ BOOL CDECL dibdrv_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT 
     add_clipped_bounds( pdev, NULL, rgn );
     brush_region( pdev, rgn );
 
-    DeleteObject( rgn );
+    NtGdiDeleteObjectApp( rgn );
     return TRUE;
 }
 
@@ -1236,7 +1236,7 @@ BOOL CDECL dibdrv_LineTo( PHYSDEV dev, INT x, INT y )
     if (region)
     {
         ret = pen_region( pdev, region );
-        DeleteObject( region );
+        NtGdiDeleteObjectApp( region );
     }
     return ret;
 }
@@ -1364,7 +1364,7 @@ BOOL CDECL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, 
     if (interior && !outline)
     {
         ret = brush_region( pdev, interior );
-        DeleteObject( interior );
+        NtGdiDeleteObjectApp( interior );
         interior = 0;
     }
 
@@ -1380,12 +1380,12 @@ BOOL CDECL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, 
     {
         NtGdiCombineRgn( interior, interior, outline, RGN_DIFF );
         ret = brush_region( pdev, interior );
-        DeleteObject( interior );
+        NtGdiDeleteObjectApp( interior );
     }
     if (outline)
     {
         if (ret) ret = pen_region( pdev, outline );
-        DeleteObject( outline );
+        NtGdiDeleteObjectApp( outline );
     }
 
 done:
@@ -1437,7 +1437,7 @@ BOOL CDECL dibdrv_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* count
     if (outline)
     {
         ret = pen_region( pdev, outline );
-        DeleteObject( outline );
+        NtGdiDeleteObjectApp( outline );
     }
 
 done:
@@ -1505,10 +1505,10 @@ BOOL CDECL dibdrv_Rectangle( PHYSDEV dev, INT left, INT top, INT right, INT bott
 
             NtGdiCombineRgn( interior, interior, outline, RGN_DIFF );
             brush_region( pdev, interior );
-            DeleteObject( interior );
+            NtGdiDeleteObjectApp( interior );
         }
         ret = pen_region( pdev, outline );
-        DeleteObject( outline );
+        NtGdiDeleteObjectApp( outline );
     }
     else
     {
@@ -1628,7 +1628,7 @@ BOOL CDECL dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
         !(interior = CreatePolygonRgn(points, count, ALTERNATE)))
     {
         HeapFree( GetProcessHeap(), 0, points );
-        if (outline) DeleteObject( outline );
+        if (outline) NtGdiDeleteObjectApp( outline );
             return FALSE;
     }
 
@@ -1636,7 +1636,7 @@ BOOL CDECL dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
     if (interior && !outline)
     {
         ret = brush_region( pdev, interior );
-        DeleteObject( interior );
+        NtGdiDeleteObjectApp( interior );
         interior = 0;
     }
 
@@ -1647,12 +1647,12 @@ BOOL CDECL dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
     if (interior)
     {
         ret = brush_region( pdev, interior );
-        DeleteObject( interior );
+        NtGdiDeleteObjectApp( interior );
     }
     if (outline)
     {
         if (ret) ret = pen_region( pdev, outline );
-        DeleteObject( outline );
+        NtGdiDeleteObjectApp( outline );
     }
     HeapFree( GetProcessHeap(), 0, points );
     return ret;

@@ -47,7 +47,7 @@ HMODULE gdi32_module = 0;
 static inline HGDIOBJ entry_to_handle( GDI_HANDLE_ENTRY *entry )
 {
     unsigned int idx = entry - gdi_shared.Handles;
-    return LongToHandle( idx | (entry->Unique << 16) );
+    return LongToHandle( idx | (entry->Unique << NTGDI_HANDLE_TYPE_SHIFT) );
 }
 
 static inline GDI_HANDLE_ENTRY *handle_entry( HGDIOBJ handle )
@@ -80,19 +80,7 @@ static const LOGBRUSH LtGrayBrush = { BS_SOLID, RGB(192,192,192), 0 };
 static const LOGBRUSH GrayBrush   = { BS_SOLID, RGB(128,128,128), 0 };
 static const LOGBRUSH DkGrayBrush = { BS_SOLID, RGB(64,64,64), 0 };
 
-static const LOGPEN WhitePen = { PS_SOLID, { 0, 0 }, RGB(255,255,255) };
-static const LOGPEN BlackPen = { PS_SOLID, { 0, 0 }, RGB(0,0,0) };
-static const LOGPEN NullPen  = { PS_NULL,  { 0, 0 }, 0 };
-
 static const LOGBRUSH DCBrush = { BS_SOLID, RGB(255,255,255), 0 };
-static const LOGPEN DCPen     = { PS_SOLID, { 0, 0 }, RGB(0,0,0) };
-
-/* reserve one extra entry for the stock default bitmap */
-/* this is what Windows does too */
-#define NB_STOCK_OBJECTS (STOCK_LAST+2)
-
-static HGDIOBJ stock_objects[NB_STOCK_OBJECTS];
-static HGDIOBJ scaled_stock_objects[NB_STOCK_OBJECTS];
 
 static CRITICAL_SECTION gdi_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -407,7 +395,7 @@ static const struct DefaultFontInfo default_fonts[] =
 
 
 /*************************************************************************
- * __wine_make_gdi_object_system    (GDI32.@)
+ * __wine_make_gdi_object_system    (win32u.@)
  *
  * USER has to tell GDI that its system brushes and pens are non-deletable.
  * For a description of the GDI object magics and their flags,
@@ -452,7 +440,7 @@ static UINT get_default_charset( void )
 
     uACP = GetACP();
     csi.ciCharset = ANSI_CHARSET;
-    if ( !TranslateCharsetInfo( ULongToPtr(uACP), &csi, TCI_SRCCODEPAGE ) )
+    if ( !translate_charset_info( ULongToPtr(uACP), &csi, TCI_SRCCODEPAGE ) )
     {
         FIXME( "unhandled codepage %u - use ANSI_CHARSET for default stock objects\n", uACP );
         return ANSI_CHARSET;
@@ -516,7 +504,7 @@ BOOL GDI_dec_ref_count( HGDIOBJ handle )
             entry_obj( entry )->deleted = 0;
             LeaveCriticalSection( &gdi_section );
             TRACE( "executing delayed DeleteObject for %p\n", handle );
-            DeleteObject( handle );
+            NtGdiDeleteObjectApp( handle );
             return TRUE;
         }
     }
@@ -582,6 +570,15 @@ DWORD get_system_dpi(void)
     return pGetDpiForSystem ? pGetDpiForSystem() : 96;
 }
 
+static HFONT create_font( const LOGFONTW *deffont )
+{
+    ENUMLOGFONTEXDVW lf;
+
+    memset( &lf, 0, sizeof(lf) );
+    lf.elfEnumLogfontEx.elfLogFont = *deffont;
+    return NtGdiHfontCreate( &lf, sizeof(lf), 0, 0, NULL );
+}
+
 static HFONT create_scaled_font( const LOGFONTW *deffont )
 {
     LOGFONTW lf;
@@ -595,7 +592,7 @@ static HFONT create_scaled_font( const LOGFONTW *deffont )
 
     lf = *deffont;
     lf.lfHeight = MulDiv( lf.lfHeight, dpi, 96 );
-    return CreateFontIndirectW( &lf );
+    return create_font( &lf );
 }
 
 static void set_gdi_shared(void)
@@ -613,14 +610,85 @@ static void set_gdi_shared(void)
     NtCurrentTeb()->Peb->GdiSharedHandleTable = &gdi_shared;
 }
 
-static HGDIOBJ make_stock_object( HGDIOBJ obj )
+HGDIOBJ get_stock_object( INT obj )
 {
-    GDI_HANDLE_ENTRY *entry;
+    assert( obj >= 0 && obj <= STOCK_LAST + 1 && obj != 9 );
 
-    if (!(entry = handle_entry( obj ))) return 0;
-    entry_obj( entry )->system = TRUE;
-    entry->StockFlag = 1;
-    return entry_to_handle( entry );
+    switch (obj)
+    {
+    case OEM_FIXED_FONT:
+        if (get_system_dpi() != 96) obj = 9;
+        break;
+    case SYSTEM_FONT:
+        if (get_system_dpi() != 96) obj = STOCK_LAST + 2;
+        break;
+    case SYSTEM_FIXED_FONT:
+        if (get_system_dpi() != 96) obj = STOCK_LAST + 3;
+        break;
+    case DEFAULT_GUI_FONT:
+        if (get_system_dpi() != 96) obj = STOCK_LAST + 4;
+        break;
+    }
+
+    return entry_to_handle( handle_entry( ULongToHandle( obj + FIRST_GDI_HANDLE )));
+}
+
+static void init_stock_objects(void)
+{
+    const struct DefaultFontInfo *deffonts;
+    unsigned int i;
+    HGDIOBJ obj;
+
+    /* Create stock objects in order matching stock object macros,
+     * so that they use predictable handle slots. Our GetStockObject
+     * depends on it. */
+    create_brush( &WhiteBrush );
+    create_brush( &LtGrayBrush );
+    create_brush( &GrayBrush );
+    create_brush( &DkGrayBrush );
+    create_brush( &BlackBrush );
+    create_brush( &NullBrush );
+
+    create_pen( PS_SOLID, 0, RGB(255,255,255) );
+    create_pen( PS_SOLID, 0, RGB(0,0,0) );
+    create_pen( PS_NULL,  0, RGB(0,0,0) );
+
+    /* slot 9 is not used for non-scaled stock objects */
+    create_scaled_font( &OEMFixedFont );
+
+    /* language-independent stock fonts */
+    create_font( &OEMFixedFont );
+    create_font( &AnsiFixedFont );
+    create_font( &AnsiVarFont );
+
+    /* language-dependent stock fonts */
+    deffonts = get_default_fonts(get_default_charset());
+    create_font( &deffonts->SystemFont );
+    create_font( &deffonts->DeviceDefaultFont );
+
+    PALETTE_Init();
+
+    create_font( &deffonts->SystemFixedFont );
+    create_font( &deffonts->DefaultGuiFont );
+
+    create_brush( &DCBrush );
+    NtGdiCreatePen( PS_SOLID, 0, RGB(0,0,0), NULL );
+
+    obj = NtGdiCreateBitmap( 1, 1, 1, 1, NULL );
+
+    assert( (HandleToULong( obj ) & 0xffff) == FIRST_GDI_HANDLE + DEFAULT_BITMAP );
+
+    create_scaled_font( &deffonts->SystemFont );
+    create_scaled_font( &deffonts->SystemFixedFont );
+    create_scaled_font( &deffonts->DefaultGuiFont );
+
+    /* clear the NOSYSTEM bit on all stock objects*/
+    for (i = 0; i < STOCK_LAST + 5; i++)
+    {
+        GDI_HANDLE_ENTRY *entry = &gdi_shared.Handles[FIRST_GDI_HANDLE + i];
+        entry_obj( entry )->system = TRUE;
+        entry->StockFlag = 1;
+    }
 }
 
 /***********************************************************************
@@ -630,69 +698,13 @@ static HGDIOBJ make_stock_object( HGDIOBJ obj )
  */
 BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
 {
-    const struct DefaultFontInfo* deffonts;
-    int i;
-
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
 
     gdi32_module = inst;
     DisableThreadLibraryCalls( inst );
     set_gdi_shared();
     font_init();
-
-    /* create stock objects */
-    stock_objects[WHITE_BRUSH]  = create_brush( &WhiteBrush );
-    stock_objects[LTGRAY_BRUSH] = create_brush( &LtGrayBrush );
-    stock_objects[GRAY_BRUSH]   = create_brush( &GrayBrush );
-    stock_objects[DKGRAY_BRUSH] = create_brush( &DkGrayBrush );
-    stock_objects[BLACK_BRUSH]  = create_brush( &BlackBrush );
-    stock_objects[NULL_BRUSH]   = create_brush( &NullBrush );
-
-    stock_objects[WHITE_PEN]    = CreatePenIndirect( &WhitePen );
-    stock_objects[BLACK_PEN]    = CreatePenIndirect( &BlackPen );
-    stock_objects[NULL_PEN]     = CreatePenIndirect( &NullPen );
-
-    stock_objects[DEFAULT_PALETTE] = PALETTE_Init();
-    stock_objects[DEFAULT_BITMAP]  = CreateBitmap( 1, 1, 1, 1, NULL );
-
-    /* language-independent stock fonts */
-    stock_objects[OEM_FIXED_FONT]      = CreateFontIndirectW( &OEMFixedFont );
-    stock_objects[ANSI_FIXED_FONT]     = CreateFontIndirectW( &AnsiFixedFont );
-    stock_objects[ANSI_VAR_FONT]       = CreateFontIndirectW( &AnsiVarFont );
-
-    /* language-dependent stock fonts */
-    deffonts = get_default_fonts(get_default_charset());
-    stock_objects[SYSTEM_FONT]         = CreateFontIndirectW( &deffonts->SystemFont );
-    stock_objects[DEVICE_DEFAULT_FONT] = CreateFontIndirectW( &deffonts->DeviceDefaultFont );
-    stock_objects[SYSTEM_FIXED_FONT]   = CreateFontIndirectW( &deffonts->SystemFixedFont );
-    stock_objects[DEFAULT_GUI_FONT]    = CreateFontIndirectW( &deffonts->DefaultGuiFont );
-
-    scaled_stock_objects[OEM_FIXED_FONT]    = create_scaled_font( &OEMFixedFont );
-    scaled_stock_objects[SYSTEM_FONT]       = create_scaled_font( &deffonts->SystemFont );
-    scaled_stock_objects[SYSTEM_FIXED_FONT] = create_scaled_font( &deffonts->SystemFixedFont );
-    scaled_stock_objects[DEFAULT_GUI_FONT]  = create_scaled_font( &deffonts->DefaultGuiFont );
-
-    stock_objects[DC_BRUSH]     = create_brush( &DCBrush );
-    stock_objects[DC_PEN]       = CreatePenIndirect( &DCPen );
-
-    /* clear the NOSYSTEM bit on all stock objects*/
-    for (i = 0; i < NB_STOCK_OBJECTS; i++)
-    {
-        stock_objects[i] = make_stock_object( stock_objects[i] );
-        scaled_stock_objects[i] = make_stock_object( scaled_stock_objects[i] );
-    }
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           GdiDllInitialize
- *
- * Stub entry point, some games (CoD: Black Ops 3) call it directly.
- */
-BOOL WINAPI GdiDllInitialize( HINSTANCE inst, DWORD reason, LPVOID reserved )
-{
-    FIXME("stub\n");
+    init_stock_objects();
     return TRUE;
 }
 
@@ -732,8 +744,8 @@ static void dump_gdi_objects( void )
         else
             TRACE( "handle %p obj %s type %s selcount %u deleted %u\n",
                    entry_to_handle( entry ), wine_dbgstr_longlong( entry->Object ),
-                   gdi_obj_type( entry->ExtType ), entry_obj( entry )->selcount,
-                   entry_obj( entry )->deleted );
+                   gdi_obj_type( entry->ExtType << NTGDI_HANDLE_TYPE_SHIFT ),
+                   entry_obj( entry )->selcount, entry_obj( entry )->deleted );
     }
     LeaveCriticalSection( &gdi_section );
 }
@@ -743,7 +755,7 @@ static void dump_gdi_objects( void )
  *
  * Allocate a GDI handle for an object, which must have been allocated on the process heap.
  */
-HGDIOBJ alloc_gdi_handle( struct gdi_obj_header *obj, WORD type, const struct gdi_obj_funcs *funcs )
+HGDIOBJ alloc_gdi_handle( struct gdi_obj_header *obj, DWORD type, const struct gdi_obj_funcs *funcs )
 {
     GDI_HANDLE_ENTRY *entry;
     HGDIOBJ ret;
@@ -769,8 +781,8 @@ HGDIOBJ alloc_gdi_handle( struct gdi_obj_header *obj, WORD type, const struct gd
     obj->system   = 0;
     obj->deleted  = 0;
     entry->Object  = (UINT_PTR)obj;
-    entry->Type    = type & 0x1f;
-    entry->ExtType = type;
+    entry->ExtType = type >> NTGDI_HANDLE_TYPE_SHIFT;
+    entry->Type    = entry->ExtType & 0x1f;
     if (++entry->Generation == 0xff) entry->Generation = 1;
     ret = entry_to_handle( entry );
     LeaveCriticalSection( &gdi_section );
@@ -793,8 +805,8 @@ void *free_gdi_handle( HGDIOBJ handle )
     EnterCriticalSection( &gdi_section );
     if ((entry = handle_entry( handle )))
     {
-        TRACE( "freed %s %p %u/%u\n", gdi_obj_type( entry->ExtType ), handle,
-               InterlockedDecrement( &debug_count ) + 1, GDI_MAX_HANDLE_COUNT );
+        TRACE( "freed %s %p %u/%u\n", gdi_obj_type( entry->ExtType << NTGDI_HANDLE_TYPE_SHIFT ),
+               handle, InterlockedDecrement( &debug_count ) + 1, GDI_MAX_HANDLE_COUNT );
         object = entry_obj( entry );
         entry->Type = 0;
         entry->Object = (UINT_PTR)next_free;
@@ -806,31 +818,13 @@ void *free_gdi_handle( HGDIOBJ handle )
 
 
 /***********************************************************************
- *           get_full_gdi_handle
- *
- * Return the full GDI handle from a possibly truncated value.
- */
-HGDIOBJ get_full_gdi_handle( HGDIOBJ handle )
-{
-    GDI_HANDLE_ENTRY *entry;
-
-    if (!HIWORD( handle ))
-    {
-        EnterCriticalSection( &gdi_section );
-        if ((entry = handle_entry( handle ))) handle = entry_to_handle( entry );
-        LeaveCriticalSection( &gdi_section );
-    }
-    return handle;
-}
-
-/***********************************************************************
  *           get_any_obj_ptr
  *
  * Return a pointer to, and the type of, the GDI object
  * associated with the handle.
  * The object must be released with GDI_ReleaseObj.
  */
-void *get_any_obj_ptr( HGDIOBJ handle, WORD *type )
+void *get_any_obj_ptr( HGDIOBJ handle, DWORD *type )
 {
     void *ptr = NULL;
     GDI_HANDLE_ENTRY *entry;
@@ -840,7 +834,7 @@ void *get_any_obj_ptr( HGDIOBJ handle, WORD *type )
     if ((entry = handle_entry( handle )))
     {
         ptr = entry_obj( entry );
-        *type = entry->ExtType;
+        *type = entry->ExtType << NTGDI_HANDLE_TYPE_SHIFT;
     }
 
     if (!ptr) LeaveCriticalSection( &gdi_section );
@@ -854,9 +848,9 @@ void *get_any_obj_ptr( HGDIOBJ handle, WORD *type )
  * Return NULL if the object has the wrong type.
  * The object must be released with GDI_ReleaseObj.
  */
-void *GDI_GetObjPtr( HGDIOBJ handle, WORD type )
+void *GDI_GetObjPtr( HGDIOBJ handle, DWORD type )
 {
-    WORD ret_type;
+    DWORD ret_type;
     void *ptr = get_any_obj_ptr( handle, &ret_type );
     if (ptr && ret_type != type)
     {
@@ -968,24 +962,6 @@ BOOL WINAPI NtGdiDeleteClientObj( HGDIOBJ handle )
     return TRUE;
 }
 
-/***********************************************************************
- *           GetStockObject    (GDI32.@)
- */
-HGDIOBJ WINAPI GetStockObject( INT obj )
-{
-    if ((obj < 0) || (obj >= NB_STOCK_OBJECTS)) return 0;
-    switch (obj)
-    {
-    case OEM_FIXED_FONT:
-    case SYSTEM_FONT:
-    case SYSTEM_FIXED_FONT:
-    case DEFAULT_GUI_FONT:
-        if (get_system_dpi() != 96) return scaled_stock_objects[obj];
-        break;
-    }
-    return stock_objects[obj];
-}
-
 
 /***********************************************************************
  *           NtGdiExtGetObjectW    (win32u.@)
@@ -1017,47 +993,28 @@ INT WINAPI NtGdiExtGetObjectW( HGDIOBJ handle, INT count, void *buffer )
 }
 
 /***********************************************************************
- *           GetCurrentObject    	(GDI32.@)
+ *           NtGdiGetDCObject    (win32u.@)
  *
  * Get the currently selected object of a given type in a device context.
- *
- * PARAMS
- *  hdc  [I] Device context to get the current object from
- *  type [I] Type of current object to get (OBJ_* defines from "wingdi.h")
- *
- * RETURNS
- *  Success: The current object of the given type selected in hdc.
- *  Failure: A NULL handle.
- *
- * NOTES
- * - only the following object types are supported:
- *| OBJ_PEN
- *| OBJ_BRUSH
- *| OBJ_PAL
- *| OBJ_FONT
- *| OBJ_BITMAP
  */
-HGDIOBJ WINAPI GetCurrentObject(HDC hdc,UINT type)
+HANDLE WINAPI NtGdiGetDCObject( HDC hdc, UINT type )
 {
     HGDIOBJ ret = 0;
-    DC * dc = get_dc_ptr( hdc );
+    DC *dc;
 
-    if (!dc) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
-    switch (type) {
-	case OBJ_EXTPEN: /* fall through */
-	case OBJ_PEN:	 ret = dc->hPen; break;
-	case OBJ_BRUSH:	 ret = dc->hBrush; break;
-	case OBJ_PAL:	 ret = dc->hPalette; break;
-	case OBJ_FONT:	 ret = dc->hFont; break;
-	case OBJ_BITMAP: ret = dc->hBitmap; break;
-
-	/* tests show that OBJ_REGION is explicitly ignored */
-	case OBJ_REGION: break;
-        default:
-            /* the SDK only mentions those above */
-            FIXME("(%p,%d): unknown type.\n",hdc,type);
-	    break;
+    switch (type)
+    {
+    case NTGDI_OBJ_EXTPEN: /* fall through */
+    case NTGDI_OBJ_PEN:    ret = dc->hPen; break;
+    case NTGDI_OBJ_BRUSH:  ret = dc->hBrush; break;
+    case NTGDI_OBJ_PAL:    ret = dc->hPalette; break;
+    case NTGDI_OBJ_FONT:   ret = dc->hFont; break;
+    case NTGDI_OBJ_SURF:   ret = dc->hBitmap; break;
+    default:
+        FIXME( "(%p, %d): unknown type.\n", hdc, type );
+        break;
     }
     release_dc_ptr( dc );
     return ret;
@@ -1065,9 +1022,9 @@ HGDIOBJ WINAPI GetCurrentObject(HDC hdc,UINT type)
 
 
 /***********************************************************************
- *           UnrealizeObject    (GDI32.@)
+ *           NtGdiUnrealizeObject    (win32u.@)
  */
-BOOL WINAPI UnrealizeObject( HGDIOBJ obj )
+BOOL WINAPI NtGdiUnrealizeObject( HGDIOBJ obj )
 {
     const struct gdi_obj_funcs *funcs = NULL;
     GDI_HANDLE_ENTRY *entry;
@@ -1085,145 +1042,29 @@ BOOL WINAPI UnrealizeObject( HGDIOBJ obj )
 }
 
 
-/* Solid colors to enumerate */
-static const COLORREF solid_colors[] =
-{ RGB(0x00,0x00,0x00), RGB(0xff,0xff,0xff),
-RGB(0xff,0x00,0x00), RGB(0x00,0xff,0x00),
-RGB(0x00,0x00,0xff), RGB(0xff,0xff,0x00),
-RGB(0xff,0x00,0xff), RGB(0x00,0xff,0xff),
-RGB(0x80,0x00,0x00), RGB(0x00,0x80,0x00),
-RGB(0x80,0x80,0x00), RGB(0x00,0x00,0x80),
-RGB(0x80,0x00,0x80), RGB(0x00,0x80,0x80),
-RGB(0x80,0x80,0x80), RGB(0xc0,0xc0,0xc0)
-};
-
-
 /***********************************************************************
- *           EnumObjects    (GDI32.@)
+ *           NtGdiFlush    (win32u.@)
  */
-INT WINAPI EnumObjects( HDC hdc, INT nObjType,
-                            GOBJENUMPROC lpEnumFunc, LPARAM lParam )
-{
-    UINT i;
-    INT retval = 0;
-    LOGPEN pen;
-    LOGBRUSH brush;
-
-    TRACE("%p %d %p %08lx\n", hdc, nObjType, lpEnumFunc, lParam );
-    switch(nObjType)
-    {
-    case OBJ_PEN:
-        /* Enumerate solid pens */
-        for (i = 0; i < ARRAY_SIZE( solid_colors ); i++)
-        {
-            pen.lopnStyle   = PS_SOLID;
-            pen.lopnWidth.x = 1;
-            pen.lopnWidth.y = 0;
-            pen.lopnColor   = solid_colors[i];
-            retval = lpEnumFunc( &pen, lParam );
-            TRACE("solid pen %08x, ret=%d\n",
-                         solid_colors[i], retval);
-            if (!retval) break;
-        }
-        break;
-
-    case OBJ_BRUSH:
-        /* Enumerate solid brushes */
-        for (i = 0; i < ARRAY_SIZE( solid_colors ); i++)
-        {
-            brush.lbStyle = BS_SOLID;
-            brush.lbColor = solid_colors[i];
-            brush.lbHatch = 0;
-            retval = lpEnumFunc( &brush, lParam );
-            TRACE("solid brush %08x, ret=%d\n",
-                         solid_colors[i], retval);
-            if (!retval) break;
-        }
-
-        /* Now enumerate hatched brushes */
-        if (retval) for (i = HS_HORIZONTAL; i <= HS_DIAGCROSS; i++)
-        {
-            brush.lbStyle = BS_HATCHED;
-            brush.lbColor = RGB(0,0,0);
-            brush.lbHatch = i;
-            retval = lpEnumFunc( &brush, lParam );
-            TRACE("hatched brush %d, ret=%d\n",
-                         i, retval);
-            if (!retval) break;
-        }
-        break;
-
-    default:
-        /* FIXME: implement Win32 types */
-        WARN("(%d): Invalid type\n", nObjType );
-        break;
-    }
-    return retval;
-}
-
-
-/***********************************************************************
- *           SetObjectOwner    (GDI32.@)
- */
-void WINAPI SetObjectOwner( HGDIOBJ handle, HANDLE owner )
-{
-    /* Nothing to do */
-}
-
-/***********************************************************************
- *           GdiInitializeLanguagePack    (GDI32.@)
- */
-DWORD WINAPI GdiInitializeLanguagePack( DWORD arg )
-{
-    FIXME("stub\n");
-    return 0;
-}
-
-/***********************************************************************
- *           GdiFlush    (GDI32.@)
- */
-BOOL WINAPI GdiFlush(void)
+BOOL WINAPI NtGdiFlush(void)
 {
     return TRUE;  /* FIXME */
 }
 
 
-/***********************************************************************
- *           GdiGetBatchLimit    (GDI32.@)
- */
-DWORD WINAPI GdiGetBatchLimit(void)
-{
-    return 1;  /* FIXME */
-}
-
-
-/***********************************************************************
- *           GdiSetBatchLimit    (GDI32.@)
- */
-DWORD WINAPI GdiSetBatchLimit( DWORD limit )
-{
-    return 1; /* FIXME */
-}
-
-
 /*******************************************************************
- *      GetColorAdjustment [GDI32.@]
- *
- *
+ *           NtGdiGetColorAdjustment    (win32u.@)
  */
-BOOL WINAPI GetColorAdjustment(HDC hdc, LPCOLORADJUSTMENT lpca)
+BOOL WINAPI NtGdiGetColorAdjustment( HDC hdc, COLORADJUSTMENT *ca )
 {
-    FIXME("stub\n");
+    FIXME( "stub\n" );
     return FALSE;
 }
 
 /*******************************************************************
- *      SetColorAdjustment [GDI32.@]
- *
- *
+ *           NtGdiSetColorAdjustment    (win32u.@)
  */
-BOOL WINAPI SetColorAdjustment(HDC hdc, const COLORADJUSTMENT* lpca)
+BOOL WINAPI NtGdiSetColorAdjustment( HDC hdc, const COLORADJUSTMENT *ca )
 {
-    FIXME("stub\n");
+    FIXME( "stub\n" );
     return FALSE;
 }

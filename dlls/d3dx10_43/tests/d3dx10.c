@@ -2176,15 +2176,11 @@ static void test_font(void)
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     hr = ID3DX10Font_GetDescA(font, NULL);
-todo_wine
     ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
 
     hr = ID3DX10Font_GetDescA(font, &desc);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
-if (SUCCEEDED(hr))
-{
     ok(desc.Height == 12, "Unexpected height %d.\n", desc.Height);
     ok(desc.Width == 8, "Unexpected width %u.\n", desc.Width);
     ok(desc.Weight == FW_BOLD, "Unexpected weight %u.\n", desc.Weight);
@@ -2195,7 +2191,7 @@ if (SUCCEEDED(hr))
     ok(desc.Quality == ANTIALIASED_QUALITY, "Unexpected quality %u.\n", desc.Quality);
     ok(desc.PitchAndFamily == VARIABLE_PITCH, "Unexpected pitch and family %#x.\n", desc.PitchAndFamily);
     ok(!strcmp(desc.FaceName, "Tahoma"), "Unexpected facename %s.\n", debugstr_a(desc.FaceName));
-}
+
     ID3DX10Font_Release(font);
 
     /* GetDC + GetTextMetrics */
@@ -2204,18 +2200,14 @@ if (SUCCEEDED(hr))
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     hdc = ID3DX10Font_GetDC(font);
-todo_wine
     ok(!!hdc, "Unexpected hdc %p.\n", hdc);
 
-    ret = ID3DX10Font_GetTextMetricsA(font, &metrics);
-todo_wine
-    ok(ret, "Unexpected ret %#x.\n", ret);
     ret = GetTextMetricsA(hdc, &expmetrics);
-todo_wine
     ok(ret, "Unexpected ret %#x.\n", ret);
 
-if (ret)
-{
+    ret = ID3DX10Font_GetTextMetricsA(font, &metrics);
+    ok(ret, "Unexpected ret %#x.\n", ret);
+
     ok(metrics.tmHeight == expmetrics.tmHeight, "Unexpected height %d, expected %d.\n",
             metrics.tmHeight, expmetrics.tmHeight);
     ok(metrics.tmAscent == expmetrics.tmAscent, "Unexpected ascent %d, expected %d.\n",
@@ -2256,7 +2248,7 @@ if (ret)
             metrics.tmPitchAndFamily, expmetrics.tmPitchAndFamily);
     ok(metrics.tmCharSet == expmetrics.tmCharSet, "Unexpected charset %u, expected %u.\n",
             metrics.tmCharSet, expmetrics.tmCharSet);
-}
+
     ID3DX10Font_Release(font);
 
     /* PreloadText */
@@ -2271,32 +2263,23 @@ if (ret)
     hr = ID3DX10Font_PreloadTextA(font, NULL, 1);
     ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
     hr = ID3DX10Font_PreloadTextA(font, "test", -1);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     hr = ID3DX10Font_PreloadTextA(font, "", 0);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     hr = ID3DX10Font_PreloadTextA(font, "", -1);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     hr = ID3DX10Font_PreloadTextW(font, NULL, -1);
-todo_wine
     ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
     hr = ID3DX10Font_PreloadTextW(font, NULL, 0);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     hr = ID3DX10Font_PreloadTextW(font, NULL, 1);
-todo_wine
     ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
     hr = ID3DX10Font_PreloadTextW(font, testW, -1);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     hr = ID3DX10Font_PreloadTextW(font, L"", 0);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     hr = ID3DX10Font_PreloadTextW(font, L"", -1);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     ID3DX10Font_Release(font);
@@ -2307,7 +2290,6 @@ todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     hdc = ID3DX10Font_GetDC(font);
-todo_wine
     ok(!!hdc, "Unexpected hdc %p.\n", hdc);
 
     hr = ID3DX10Font_GetGlyphData(font, 0, NULL, &blackbox, &cellinc);
@@ -2325,26 +2307,29 @@ todo_wine
         ID3D10ShaderResourceView_Release(srv);
 
     hr = ID3DX10Font_PreloadCharacters(font, 'b', 'a');
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     hr = ID3DX10Font_PreloadGlyphs(font, 1, 0);
 todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     hr = ID3DX10Font_PreloadCharacters(font, 'a', 'a');
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     for (c = 'b'; c <= 'z'; ++c)
     {
-        if (!hdc) break;
-
         winetest_push_context("Character %c", c);
         count = GetGlyphIndicesA(hdc, &c, 1, &glyph, 0);
         ok(count != GDI_ERROR, "Unexpected count %u.\n", count);
 
         hr = ID3DX10Font_GetGlyphData(font, glyph, &srv, &blackbox, &cellinc);
+    todo_wine
         ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+        if (FAILED(hr))
+        {
+            winetest_pop_context();
+            break;
+        }
 
         ID3D10ShaderResourceView_GetResource(srv, &resource);
         hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture2D, (void **)&texture);
@@ -2389,7 +2374,6 @@ todo_wine
     }
 
     hr = ID3DX10Font_PreloadCharacters(font, 'a', 'z');
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     /* Test multiple textures */
@@ -2419,21 +2403,21 @@ todo_wine
         ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
         hdc = ID3DX10Font_GetDC(font);
-    todo_wine
         ok(!!hdc, "Unexpected hdc %p.\n", hdc);
-
-        if (!hdc)
-        {
-            ID3DX10Font_Release(font);
-            winetest_pop_context();
-            break;
-        }
 
         count = GetGlyphIndicesA(hdc, &c, 1, &glyph, 0);
         ok(count != GDI_ERROR, "Unexpected count %u.\n", count);
 
         hr = ID3DX10Font_GetGlyphData(font, glyph, &srv, NULL, NULL);
+    todo_wine
         ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+        if (FAILED(hr))
+        {
+            ID3DX10Font_Release(font);
+            winetest_pop_context();
+            break;
+        }
 
         ID3D10ShaderResourceView_GetResource(srv, &resource);
         hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture2D, (void **)&texture);
@@ -2984,6 +2968,13 @@ static void test_sprite(void)
     D3DXMATRIX mat, mat2;
     ULONG refcount;
     HRESULT hr;
+    static const D3DXMATRIX identity =
+    {
+        ._11 = 1.0f,
+        ._22 = 1.0f,
+        ._33 = 1.0f,
+        ._44 = 1.0f,
+    };
 
     if (!(device = create_device()))
     {
@@ -3036,11 +3027,10 @@ static void test_sprite(void)
 
     /* Projection transform */
     hr = ID3DX10Sprite_GetProjectionTransform(sprite, NULL);
-todo_wine
     ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
     hr = ID3DX10Sprite_GetProjectionTransform(sprite, &mat);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!memcmp(&mat, &identity, sizeof(mat)), "Unexpected projection transform.\n");
 
     /* Set a transform and test if it gets returned correctly */
     mat.m[0][0] = 2.1f; mat.m[0][1] = 6.5f; mat.m[0][2] =-9.6f; mat.m[0][3] = 1.7f;
@@ -3049,18 +3039,14 @@ todo_wine
     mat.m[3][0] = 6.7f; mat.m[3][1] =-5.1f; mat.m[3][2] = 6.1f; mat.m[3][3] = 2.2f;
 
     hr = ID3DX10Sprite_SetProjectionTransform(sprite, NULL);
-todo_wine
     ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
 
     hr = ID3DX10Sprite_SetProjectionTransform(sprite, &mat);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     hr = ID3DX10Sprite_GetProjectionTransform(sprite, &mat2);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     ok(!memcmp(&mat, &mat2, sizeof(mat)), "Unexpected matrix.\n");
-}
 
     /* View transform */
     hr = ID3DX10Sprite_SetViewTransform(sprite, NULL);
@@ -3167,6 +3153,27 @@ todo_wine
     ok(!refcount, "Unexpected refcount.\n");
 }
 
+static void test_create_effect_from_resource(void)
+{
+    ID3D10Device *device;
+    ID3D10Effect *effect;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    hr = D3DX10CreateEffectFromResourceA(GetModuleHandleA(NULL), "resource", NULL, NULL, NULL,
+            "fx_4_0", 0, 0, device, NULL, NULL, &effect, NULL, NULL);
+    ok(hr == D3DX10_ERR_INVALID_DATA, "Unexpected hr %#x.\n", hr);
+
+    refcount = ID3D10Device_Release(device);
+    ok(!refcount, "Unexpected refcount.\n");
+}
+
 START_TEST(d3dx10)
 {
     test_D3DX10UnsetAllDeviceObjects();
@@ -3177,4 +3184,5 @@ START_TEST(d3dx10)
     test_create_texture();
     test_font();
     test_sprite();
+    test_create_effect_from_resource();
 }

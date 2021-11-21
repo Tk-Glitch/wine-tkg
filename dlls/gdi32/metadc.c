@@ -22,7 +22,6 @@
 
 #include <stdarg.h>
 
-#include "ntgdi_private.h"
 #include "gdi_private.h"
 #include "winnls.h"
 #include "wine/wingdi16.h"
@@ -491,7 +490,7 @@ static UINT metadc_add_handle( struct metadc *metadc, HGDIOBJ obj )
                                        metadc->handles,
                                        metadc->handles_size * sizeof(metadc->handles[0]) );
     }
-    metadc->handles[index] = get_full_gdi_handle( obj );
+    metadc->handles[index] = obj;
 
     metadc->cur_handles++;
     if (metadc->cur_handles > metadc->mh->mtNoObjects)
@@ -546,11 +545,9 @@ static INT16 metadc_create_brush( struct metadc *metadc, HBRUSH brush )
             char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
             BITMAPINFO *dst_info, *src_info = (BITMAPINFO *)buffer;
             DWORD info_size;
-            char *dst_ptr;
-            void *bits;
             UINT usage;
 
-            if (!get_brush_bitmap_info( brush, src_info, &bits, &usage )) goto done;
+            if (!get_brush_bitmap_info( brush, src_info, NULL, &usage )) goto done;
 
             info_size = get_dib_info_size( src_info, usage );
             size = FIELD_OFFSET( METARECORD, rdParm[2] ) +
@@ -562,22 +559,9 @@ static INT16 metadc_create_brush( struct metadc *metadc, HBRUSH brush )
             mr->rdParm[0] = logbrush.lbStyle;
             mr->rdParm[1] = usage;
             dst_info = (BITMAPINFO *)(mr->rdParm + 2);
-            memcpy( dst_info, src_info, info_size );
+            get_brush_bitmap_info( brush, dst_info, (char *)dst_info + info_size, NULL );
             if (dst_info->bmiHeader.biClrUsed == 1 << dst_info->bmiHeader.biBitCount)
                 dst_info->bmiHeader.biClrUsed = 0;
-            dst_ptr = (char *)dst_info + info_size;
-
-            /* always return a bottom-up DIB */
-            if (dst_info->bmiHeader.biHeight < 0)
-            {
-                int i, width_bytes = get_dib_stride( dst_info->bmiHeader.biWidth,
-                                                     dst_info->bmiHeader.biBitCount );
-                dst_info->bmiHeader.biHeight = -dst_info->bmiHeader.biHeight;
-                dst_ptr += (dst_info->bmiHeader.biHeight - 1) * width_bytes;
-                for (i = 0; i < dst_info->bmiHeader.biHeight; i++, dst_ptr -= width_bytes)
-                    memcpy( dst_ptr, (char *)bits + i * width_bytes, width_bytes );
-            }
-            else memcpy( dst_ptr, bits, src_info->bmiHeader.biSizeImage );
             break;
         }
 

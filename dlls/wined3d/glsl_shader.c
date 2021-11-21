@@ -4208,7 +4208,7 @@ static void shader_glsl_pow(const struct wined3d_shader_instruction *ins)
             shader_addline(buffer, "vec%u(%s == 0.0 ? 1.0 : min(pow(abs(%s), %s), ",
                     dst_size, src1_param.param_str, src0_param.param_str, src1_param.param_str);
             shader_glsl_append_imm_vec(buffer, &max_float, 1, priv->gl_info);
-            shader_addline(buffer, "));\n");
+            shader_addline(buffer, ")));\n");
         }
         else
         {
@@ -13258,8 +13258,10 @@ static void gen_yv12_read(struct wined3d_string_buffer *buffer,
      * Don't forget to clamp the y values in into the range, otherwise we'll
      * get filtering bleeding. */
 
-    /* Read odd lines from the right side (add 0.5 to the x coordinate). */
-    shader_addline(buffer, "    if (fract(floor(texcoord.y * size.y) * 0.5 + 1.0 / 6.0) >= 0.5)\n");
+    /* Read odd lines from the right side (add 0.5 to the x coordinate). Keep
+     * in mind that each line of the chroma plane corresponds to 2 lines of the
+     * resulting image. */
+    shader_addline(buffer, "    if (fract(texcoord.y * size.y * 0.25) >= 0.5)\n");
     shader_addline(buffer, "        texcoord.x += 0.5;\n");
 
     /* Clamp, keep the half pixel origin in mind. */

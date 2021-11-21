@@ -22,9 +22,6 @@
 #define WIN32_LEAN_AND_MEAN
 #define NONAMELESSUNION
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -61,13 +58,7 @@ struct DeviceInfo {
     int speaker_config;
 };
 
-static WCHAR g_drv_keyW[256] = {'S','o','f','t','w','a','r','e','\\',
-    'W','i','n','e','\\','D','r','i','v','e','r','s','\\',0};
-
-static const WCHAR reg_out_nameW[] = {'D','e','f','a','u','l','t','O','u','t','p','u','t',0};
-static const WCHAR reg_in_nameW[] = {'D','e','f','a','u','l','t','I','n','p','u','t',0};
-static const WCHAR reg_vout_nameW[] = {'D','e','f','a','u','l','t','V','o','i','c','e','O','u','t','p','u','t',0};
-static const WCHAR reg_vin_nameW[] = {'D','e','f','a','u','l','t','V','o','i','c','e','I','n','p','u','t',0};
+static WCHAR g_drv_keyW[256] = L"Software\\Wine\\Drivers\\";
 
 static UINT num_render_devs, num_capture_devs;
 static struct DeviceInfo *render_devs, *capture_devs;
@@ -195,10 +186,7 @@ static BOOL get_driver_name(IMMDeviceEnumerator *devenum, PROPVARIANT *pv)
     IPropertyStore *ps;
     HRESULT hr;
 
-    static const WCHAR wine_info_deviceW[] = {'W','i','n','e',' ',
-        'i','n','f','o',' ','d','e','v','i','c','e',0};
-
-    hr = IMMDeviceEnumerator_GetDevice(devenum, wine_info_deviceW, &device);
+    hr = IMMDeviceEnumerator_GetDevice(devenum, L"Wine info device", &device);
     if(FAILED(hr))
         return FALSE;
 
@@ -249,7 +237,7 @@ static void initAudioDlg (HWND hDlg)
         PropVariantInit(&pv);
         if(get_driver_name(devenum, &pv) && pv.pwszVal[0] != '\0'){
             have_driver = TRUE;
-            wnsprintfW(display_str, ARRAY_SIZE(display_str), format_str, pv.pwszVal);
+            swprintf(display_str, ARRAY_SIZE(display_str), format_str, pv.pwszVal);
             lstrcatW(g_drv_keyW, pv.pwszVal);
         }
         PropVariantClear(&pv);
@@ -303,10 +291,10 @@ static void initAudioDlg (HWND hDlg)
     if(have_driver){
         WCHAR *reg_out_dev, *reg_vout_dev, *reg_in_dev, *reg_vin_dev;
 
-        reg_out_dev = get_reg_keyW(HKEY_CURRENT_USER, g_drv_keyW, reg_out_nameW, NULL);
-        reg_vout_dev = get_reg_keyW(HKEY_CURRENT_USER, g_drv_keyW, reg_vout_nameW, NULL);
-        reg_in_dev = get_reg_keyW(HKEY_CURRENT_USER, g_drv_keyW, reg_in_nameW, NULL);
-        reg_vin_dev = get_reg_keyW(HKEY_CURRENT_USER, g_drv_keyW, reg_vin_nameW, NULL);
+        reg_out_dev = get_reg_key(HKEY_CURRENT_USER, g_drv_keyW, L"DefaultOutput", NULL);
+        reg_vout_dev = get_reg_key(HKEY_CURRENT_USER, g_drv_keyW, L"DefaultVoiceOutput", NULL);
+        reg_in_dev = get_reg_key(HKEY_CURRENT_USER, g_drv_keyW, L"DefaultInput", NULL);
+        reg_vin_dev = get_reg_key(HKEY_CURRENT_USER, g_drv_keyW, L"DefaultVoiceInput", NULL);
 
         for(i = 0; i < num_render_devs; ++i){
             LVITEMW lvitem;
@@ -319,7 +307,7 @@ static void initAudioDlg (HWND hDlg)
             SendDlgItemMessageW(hDlg, IDC_AUDIOOUT_DEVICE, CB_SETITEMDATA,
                     i + 1, (LPARAM)&render_devs[i]);
 
-            if(reg_out_dev && !lstrcmpW(render_devs[i].id, reg_out_dev)){
+            if(reg_out_dev && !wcscmp(render_devs[i].id, reg_out_dev)){
                 SendDlgItemMessageW(hDlg, IDC_AUDIOOUT_DEVICE, CB_SETCURSEL, i + 1, 0);
                 SendDlgItemMessageW(hDlg, IDC_SPEAKERCONFIG_SPEAKERS, CB_SETCURSEL, render_devs[i].speaker_config, 0);
             }
@@ -328,7 +316,7 @@ static void initAudioDlg (HWND hDlg)
                     0, (LPARAM)render_devs[i].name.pwszVal);
             SendDlgItemMessageW(hDlg, IDC_VOICEOUT_DEVICE, CB_SETITEMDATA,
                     i + 1, (LPARAM)&render_devs[i]);
-            if(reg_vout_dev && !lstrcmpW(render_devs[i].id, reg_vout_dev))
+            if(reg_vout_dev && !wcscmp(render_devs[i].id, reg_vout_dev))
                 SendDlgItemMessageW(hDlg, IDC_VOICEOUT_DEVICE, CB_SETCURSEL, i + 1, 0);
 
             lvitem.mask = LVIF_TEXT | LVIF_PARAM;
@@ -360,14 +348,14 @@ static void initAudioDlg (HWND hDlg)
                     0, (LPARAM)capture_devs[i].name.pwszVal);
             SendDlgItemMessageW(hDlg, IDC_AUDIOIN_DEVICE, CB_SETITEMDATA,
                     i + 1, (LPARAM)&capture_devs[i]);
-            if(reg_in_dev && !lstrcmpW(capture_devs[i].id, reg_in_dev))
+            if(reg_in_dev && !wcscmp(capture_devs[i].id, reg_in_dev))
                 SendDlgItemMessageW(hDlg, IDC_AUDIOIN_DEVICE, CB_SETCURSEL, i + 1, 0);
 
             SendDlgItemMessageW(hDlg, IDC_VOICEIN_DEVICE, CB_ADDSTRING,
                     0, (LPARAM)capture_devs[i].name.pwszVal);
             SendDlgItemMessageW(hDlg, IDC_VOICEIN_DEVICE, CB_SETITEMDATA,
                     i + 1, (LPARAM)&capture_devs[i]);
-            if(reg_vin_dev && !lstrcmpW(capture_devs[i].id, reg_vin_dev))
+            if(reg_vin_dev && !wcscmp(capture_devs[i].id, reg_vin_dev))
                 SendDlgItemMessageW(hDlg, IDC_VOICEIN_DEVICE, CB_SETCURSEL, i + 1, 0);
         }
 
@@ -376,7 +364,7 @@ static void initAudioDlg (HWND hDlg)
         HeapFree(GetProcessHeap(), 0, reg_in_dev);
         HeapFree(GetProcessHeap(), 0, reg_vin_dev);
     }else
-        wnsprintfW(display_str, ARRAY_SIZE(display_str), format_str, disabled_str);
+        swprintf(display_str, ARRAY_SIZE(display_str), format_str, disabled_str);
 
     SetDlgItemTextW(hDlg, IDC_AUDIO_DRIVER, display_str);
 }
@@ -392,9 +380,9 @@ static void set_reg_device(HWND hDlg, int dlgitem, const WCHAR *key_name)
             CB_GETITEMDATA, idx, 0);
 
     if(!info || info == (void*)CB_ERR)
-        set_reg_keyW(HKEY_CURRENT_USER, g_drv_keyW, key_name, NULL);
+        set_reg_key(HKEY_CURRENT_USER, g_drv_keyW, key_name, NULL);
     else
-        set_reg_keyW(HKEY_CURRENT_USER, g_drv_keyW, key_name, info->id);
+        set_reg_key(HKEY_CURRENT_USER, g_drv_keyW, key_name, info->id);
 }
 
 static void test_sound(void)
@@ -488,25 +476,25 @@ AudioDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
               break;
           case IDC_AUDIOOUT_DEVICE:
               if(HIWORD(wParam) == CBN_SELCHANGE){
-                  set_reg_device(hDlg, IDC_AUDIOOUT_DEVICE, reg_out_nameW);
+                  set_reg_device(hDlg, IDC_AUDIOOUT_DEVICE, L"DefaultOutput");
                   SendMessageW(GetParent(hDlg), PSM_CHANGED, 0, 0);
               }
               break;
           case IDC_VOICEOUT_DEVICE:
               if(HIWORD(wParam) == CBN_SELCHANGE){
-                  set_reg_device(hDlg, IDC_VOICEOUT_DEVICE, reg_vout_nameW);
+                  set_reg_device(hDlg, IDC_VOICEOUT_DEVICE, L"DefaultVoiceOutput");
                   SendMessageW(GetParent(hDlg), PSM_CHANGED, 0, 0);
               }
               break;
           case IDC_AUDIOIN_DEVICE:
               if(HIWORD(wParam) == CBN_SELCHANGE){
-                  set_reg_device(hDlg, IDC_AUDIOIN_DEVICE, reg_in_nameW);
+                  set_reg_device(hDlg, IDC_AUDIOIN_DEVICE, L"DefaultInput");
                   SendMessageW(GetParent(hDlg), PSM_CHANGED, 0, 0);
               }
               break;
           case IDC_VOICEIN_DEVICE:
               if(HIWORD(wParam) == CBN_SELCHANGE){
-                  set_reg_device(hDlg, IDC_VOICEIN_DEVICE, reg_vin_nameW);
+                  set_reg_device(hDlg, IDC_VOICEIN_DEVICE, L"DefaultVoiceInput");
                   SendMessageW(GetParent(hDlg), PSM_CHANGED, 0, 0);
               }
               break;

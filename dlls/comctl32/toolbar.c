@@ -156,7 +156,7 @@ typedef struct
     BOOL     bAnchor;         /* anchor highlight enabled */
     BOOL     bDoRedraw;       /* Redraw status */
     BOOL     bDragOutSent;    /* has TBN_DRAGOUT notification been sent for this drag? */
-    BOOL     bUnicode;        /* Notifications are ASCII (FALSE) or Unicode (TRUE)? */
+    BOOL     bUnicode;        /* Notifications are ANSI (FALSE) or Unicode (TRUE)? */
     BOOL     bCaptured;       /* mouse captured? */
     DWORD      dwStyle;       /* regular toolbar style */
     DWORD      dwExStyle;     /* extended toolbar style */
@@ -5313,7 +5313,7 @@ TOOLBAR_Create (HWND hwnd, const CREATESTRUCTW *lpcs)
 
     SystemParametersInfoW (SPI_GETICONTITLELOGFONT, 0, &logFont, 0);
     infoPtr->hFont = infoPtr->hDefaultFont = CreateFontIndirectW (&logFont);
-    infoPtr->hTheme = OpenThemeData (NULL, themeClass);
+    infoPtr->hTheme = OpenThemeDataForDpi (NULL, themeClass, GetDpiForWindow (hwnd));
 
     TOOLBAR_CheckStyle (infoPtr);
 
@@ -6550,7 +6550,7 @@ TOOLBAR_SysColorChange (void)
 static LRESULT theme_changed (TOOLBAR_INFO *infoPtr)
 {
     CloseThemeData (infoPtr->hTheme);
-    infoPtr->hTheme = OpenThemeData (NULL, themeClass);
+    infoPtr->hTheme = OpenThemeDataForDpi (NULL, themeClass, GetDpiForWindow (infoPtr->hwndSelf));
     InvalidateRect (infoPtr->hwndSelf, NULL, TRUE);
     return 0;
 }

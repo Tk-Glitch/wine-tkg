@@ -23,23 +23,54 @@
 #define __WINE_GDI_PRIVATE_H
 
 #include <stdarg.h>
+#include <limits.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "ntgdi.h"
 
 void set_gdi_client_ptr( HGDIOBJ handle, void *ptr ) DECLSPEC_HIDDEN;
-void *get_gdi_client_ptr( HGDIOBJ handle, WORD type ) DECLSPEC_HIDDEN;
+void *get_gdi_client_ptr( HGDIOBJ handle, DWORD type ) DECLSPEC_HIDDEN;
 DC_ATTR *get_dc_attr( HDC hdc ) DECLSPEC_HIDDEN;
+HGDIOBJ get_full_gdi_handle( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 void GDI_hdc_using_object( HGDIOBJ obj, HDC hdc,
                            void (*delete)( HDC hdc, HGDIOBJ handle )) DECLSPEC_HIDDEN;
 void GDI_hdc_not_using_object( HGDIOBJ obj, HDC hdc ) DECLSPEC_HIDDEN;
 
-static inline WORD gdi_handle_type( HGDIOBJ obj )
+static inline DWORD gdi_handle_type( HGDIOBJ obj )
 {
     unsigned int handle = HandleToULong( obj );
-    return (handle & NTGDI_HANDLE_TYPE_MASK) >> NTGDI_HANDLE_TYPE_SHIFT;
+    return handle & NTGDI_HANDLE_TYPE_MASK;
 }
+
+/* metafile defines */
+
+#define META_EOF 0x0000
+
+#define METAFILE_MEMORY 1
+#define METAFILE_DISK   2
+
+#define MFVERSION 0x300
+
+/* Undocumented value for DIB's iUsage: Indicates a mono DIB w/o pal entries */
+#define DIB_PAL_MONO 2
+
+/* Format of comment record added by GetWinMetaFileBits */
+#include <pshpack2.h>
+typedef struct
+{
+    DWORD comment_id;   /* WMFC */
+    DWORD comment_type; /* Always 0x00000001 */
+    DWORD version;      /* Always 0x00010000 */
+    WORD checksum;
+    DWORD flags;        /* Always 0 */
+    DWORD num_chunks;
+    DWORD chunk_size;
+    DWORD remaining_size;
+    DWORD emf_size;
+    BYTE emf_data[1];
+} emf_in_wmf_comment;
+#include <poppack.h>
 
 static inline BOOL is_meta_dc( HDC hdc )
 {
@@ -123,7 +154,20 @@ extern INT  METADC_StretchDIBits( HDC hdc, INT x_dst, INT y_dst, INT width_dst, 
                                   INT x_src, INT y_src, INT width_src, INT height_src,
                                   const void *bits, const BITMAPINFO *info, UINT coloruse,
                                   DWORD rop ) DECLSPEC_HIDDEN;
+
+extern HMETAFILE MF_Create_HMETAFILE(METAHEADER *mh) DECLSPEC_HIDDEN;
+
 /* enhanced metafiles */
+
+#define WMFC_MAGIC 0x43464d57
+
+typedef struct
+{
+    EMR   emr;
+    INT   nBreakExtra;
+    INT   nBreakCount;
+} EMRSETTEXTJUSTIFICATION, *PEMRSETTEXTJUSTIFICATION;
+
 extern BOOL EMFDC_AbortPath( DC_ATTR *dc_attr ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_AlphaBlend( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT width_dst, INT height_dst,
                               HDC hdc_src, INT x_src, INT y_src, INT width_src, INT height_src,
@@ -159,12 +203,17 @@ extern BOOL EMFDC_IntersectClipRect( DC_ATTR *dc_attr, INT left, INT top, INT ri
                                      INT bottom ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_InvertRgn( DC_ATTR *dc_attr, HRGN hrgn ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_LineTo( DC_ATTR *dc_attr, INT x, INT y ) DECLSPEC_HIDDEN;
+extern BOOL EMFDC_MaskBlt( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT width_dst, INT height_dst,
+                           HDC hdc_src, INT x_src, INT y_src, HBITMAP mask,
+                           INT x_mask, INT y_mask, DWORD rop ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_ModifyWorldTransform( DC_ATTR *dc_attr, const XFORM *xform,
                                         DWORD mode ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_MoveTo( DC_ATTR *dc_attr, INT x, INT y ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_OffsetClipRgn( DC_ATTR *dc_attr, INT x, INT y ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_PaintRgn( DC_ATTR *dc_attr, HRGN hrgn ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_PatBlt( DC_ATTR *dc_attr, INT left, INT top, INT width, INT height, DWORD rop );
+extern BOOL EMFDC_PlgBlt( DC_ATTR *dc_attr, const POINT *point, HDC hdc_src, INT x_src, INT y_src,
+                          INT width, INT height, HBITMAP mask, INT x_mask, INT y_mask ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_PolyBezier( DC_ATTR *dc_attr, const POINT *points, DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_PolyBezierTo( DC_ATTR *dc_attr, const POINT *points, DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_PolyDraw( DC_ATTR *dc_attr, const POINT *points, const BYTE *types,
@@ -222,7 +271,33 @@ extern BOOL EMFDC_StretchDIBits( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT wid
                                  UINT coloruse, DWORD rop ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_StrokeAndFillPath( DC_ATTR *dc_attr ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_StrokePath( DC_ATTR *dc_attr ) DECLSPEC_HIDDEN;
+extern BOOL EMFDC_TransparentBlt( DC_ATTR *dc_attr, int x_dst, int y_dst, int width_dst,
+                                  int height_dst, HDC hdc_src, int x_src, int y_src, int width_src,
+                                  int height_src, UINT color ) DECLSPEC_HIDDEN;
 extern BOOL EMFDC_WidenPath( DC_ATTR *dc_attr ) DECLSPEC_HIDDEN;
+
+extern HENHMETAFILE EMF_Create_HENHMETAFILE( ENHMETAHEADER *emh, DWORD filesize,
+                                             BOOL on_disk ) DECLSPEC_HIDDEN;
+
+extern BOOL get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void *bits,
+                                   UINT *usage ) DECLSPEC_HIDDEN;
+extern BOOL get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size,
+                             WCHAR *filename ) DECLSPEC_HIDDEN;
+
+static inline int get_dib_stride( int width, int bpp )
+{
+    return ((width * bpp + 31) >> 3) & ~3;
+}
+
+/* only for use on sanitized BITMAPINFO structures */
+static inline int get_dib_info_size( const BITMAPINFO *info, UINT coloruse )
+{
+    if (info->bmiHeader.biCompression == BI_BITFIELDS)
+        return sizeof(BITMAPINFOHEADER) + 3 * sizeof(DWORD);
+    if (coloruse == DIB_PAL_COLORS)
+        return sizeof(BITMAPINFOHEADER) + info->bmiHeader.biClrUsed * sizeof(WORD);
+    return FIELD_OFFSET( BITMAPINFO, bmiColors[info->bmiHeader.biClrUsed] );
+}
 
 BOOL xform_has_rotate_and_uniform_scale_and_shear( const XFORM *xform ) DECLSPEC_HIDDEN;
 BOOL xform_decompose_rotation_and_translation( XFORM *xform, XFORM *rotation_and_translation ) DECLSPEC_HIDDEN;

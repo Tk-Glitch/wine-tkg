@@ -72,7 +72,7 @@ BOOL WINAPI SHAddDataBlock(LPDBLIST* lppList, const DATABLOCK_HEADER *lpNewItem)
 
   TRACE("(%p,%p)\n", lppList, lpNewItem);
 
-  if(!lppList || !lpNewItem)
+  if(!lppList || !lpNewItem )
     return FALSE;
 
   if (lpNewItem->cbSize < sizeof(DATABLOCK_HEADER) ||
@@ -354,7 +354,7 @@ VOID WINAPI SHFreeDataBlockList(LPDBLIST lpList)
  */
 BOOL WINAPI SHRemoveDataBlock(LPDBLIST* lppList, DWORD dwSignature)
 {
-  LPDATABLOCK_HEADER lpList = NULL;
+  LPDATABLOCK_HEADER lpList = 0;
   LPDATABLOCK_HEADER lpItem = NULL;
   LPDATABLOCK_HEADER lpNext;
   ULONG ulNewSize;

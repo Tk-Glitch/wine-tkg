@@ -615,19 +615,11 @@ static inline int stabs_pts_read_aggregate(struct ParseTypedefData* ptd,
             if (doadd && adt)
             {
                 char    tmp[256];
-                DWORD64 size;
 
                 strcpy(tmp, "__inherited_class_");
                 strcat(tmp, symt_get_name(adt));
 
-                /* FIXME: TI_GET_LENGTH will not always work, especially when adt
-                 * has just been seen as a forward definition and not the real stuff
-                 * yet.
-                 * As we don't use much the size of members in structs, this may not
-                 * be much of a problem
-                 */
-                symt_get_info(ptd->module, adt, TI_GET_LENGTH, &size);
-                symt_add_udt_element(ptd->module, sdt, tmp, adt, ofs, (DWORD)size * 8);
+                symt_add_udt_element(ptd->module, sdt, tmp, adt, ofs, 0, 0);
             }
             PTS_ABORTIF(ptd, *ptd->ptr++ != ';');
         }
@@ -701,7 +693,7 @@ static inline int stabs_pts_read_aggregate(struct ParseTypedefData* ptd,
             PTS_ABORTIF(ptd, stabs_pts_read_number(ptd, &sz) == -1);
             PTS_ABORTIF(ptd, *ptd->ptr++ != ';');
 
-            if (doadd) symt_add_udt_element(ptd->module, sdt, ptd->buf + idx, adt, ofs, sz);
+            if (doadd) symt_add_udt_element(ptd->module, sdt, ptd->buf + idx, adt, ofs, 0, 0);
             break;
         case ':':
             {
@@ -766,7 +758,7 @@ static inline int stabs_pts_read_array(struct ParseTypedefData* ptd,
 
     PTS_ABORTIF(ptd, stabs_pts_read_type_def(ptd, NULL, &base_dt) == -1);
 
-    *adt = &symt_new_array(ptd->module, lo, hi, base_dt, range_dt)->symt;
+    *adt = &symt_new_array(ptd->module, lo, hi - lo + 1, base_dt, range_dt)->symt;
     return 0;
 }
 
@@ -1201,14 +1193,15 @@ static void stabs_finalize_function(struct module* module, struct symt_function*
 {
     IMAGEHLP_LINE64     il;
     struct location     loc;
+    DWORD               disp;
 
     if (!func) return;
-    symt_normalize_function(module, func);
     /* To define the debug-start of the function, we use the second line number.
      * Not 100% bullet proof, but better than nothing
      */
-    if (symt_fill_func_line_info(module, func, func->address, &il) &&
-        symt_get_func_line_next(module, &il))
+    il.SizeOfStruct = sizeof(il);
+    if (SymGetLineFromAddr64(module->process->handle, func->address, &disp, &il) &&
+        SymGetLineNext64(module->process->handle, &il))
     {
         loc.kind = loc_absolute;
         loc.offset = il.Address - func->address;

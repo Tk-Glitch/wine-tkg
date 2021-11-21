@@ -475,7 +475,6 @@ AC_CHECK_HEADERS(\
 	gsm.h \
 	gsm/gsm.h \
 	ieeefp.h \
-	inet/mib2.h \
 	libproc.h \
 	link.h \
 	linux/cdrom.h \
@@ -513,7 +512,6 @@ AC_CHECK_HEADERS(\
 	scsi/scsi_ioctl.h \
 	scsi/sg.h \
 	stdint.h \
-	stropts.h \
 	sys/attr.h \
 	sys/auxv.h \
 	sys/cdio.h \
@@ -526,7 +524,6 @@ AC_CHECK_HEADERS(\
 	sys/link.h \
 	sys/mman.h \
 	sys/modem.h \
-	sys/msg.h \
 	sys/mtio.h \
 	sys/param.h \
 	sys/poll.h \
@@ -546,7 +543,6 @@ AC_CHECK_HEADERS(\
 	sys/strtio.h \
 	sys/syscall.h \
 	sys/sysinfo.h \
-	sys/tihdr.h \
 	sys/time.h \
 	sys/timeout.h \
 	sys/times.h \
@@ -765,7 +761,6 @@ case $host_os in
     dnl Disable modules that can't be used on Windows
     enable_iphlpapi=${enable_iphlpapi:-no}
     enable_nsiproxy_sys=${enable_nsiproxy_sys:-no}
-    enable_ws2_32=${enable_ws2_32:-no}
     enable_loader=${enable_loader:-no}
     enable_server=${enable_server:-no}
     dnl Disable dependencies that are not useful on Windows
@@ -2234,9 +2229,7 @@ AC_CHECK_FUNCS(\
 	posix_fadvise \
 	ppoll \
 	prctl \
-	pread \
 	proc_pidinfo \
-	pwrite \
 	readlink \
 	renameat \
 	renameat2 \
@@ -2272,11 +2265,7 @@ dnl Check for -lresolv for Solaris
 AC_SEARCH_LIBS(inet_aton, resolv)
 
 dnl **** Check for functions which may rely on -lsocket on Solaris.
-AC_CHECK_FUNCS(\
-	getaddrinfo \
-	getnameinfo \
-	getservbyport \
-)
+AC_CHECK_FUNCS(getaddrinfo)
 
 dnl Check for clock_gettime which may be in -lrt
 case $host_os in
@@ -2893,6 +2882,7 @@ WINE_CONFIG_MAKEFILE(dlls/api-ms-win-core-processthreads-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/api-ms-win-core-processthreads-l1-1-1)
 WINE_CONFIG_MAKEFILE(dlls/api-ms-win-core-processthreads-l1-1-2)
 WINE_CONFIG_MAKEFILE(dlls/api-ms-win-core-processthreads-l1-1-3)
+WINE_CONFIG_MAKEFILE(dlls/api-ms-win-core-processtopology-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/api-ms-win-core-processtopology-obsolete-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/api-ms-win-core-profile-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/api-ms-win-core-psapi-ansi-l1-1-0)
@@ -3133,6 +3123,7 @@ WINE_CONFIG_MAKEFILE(dlls/d3dcompiler_42)
 WINE_CONFIG_MAKEFILE(dlls/d3dcompiler_43)
 WINE_CONFIG_MAKEFILE(dlls/d3dcompiler_43/tests)
 WINE_CONFIG_MAKEFILE(dlls/d3dcompiler_46)
+WINE_CONFIG_MAKEFILE(dlls/d3dcompiler_46/tests)
 WINE_CONFIG_MAKEFILE(dlls/d3dcompiler_47)
 WINE_CONFIG_MAKEFILE(dlls/d3dcompiler_47/tests)
 WINE_CONFIG_MAKEFILE(dlls/d3dim)
@@ -3145,7 +3136,9 @@ WINE_CONFIG_MAKEFILE(dlls/d3dx10_35)
 WINE_CONFIG_MAKEFILE(dlls/d3dx10_36)
 WINE_CONFIG_MAKEFILE(dlls/d3dx10_37)
 WINE_CONFIG_MAKEFILE(dlls/d3dx10_38)
+WINE_CONFIG_MAKEFILE(dlls/d3dx10_38/tests)
 WINE_CONFIG_MAKEFILE(dlls/d3dx10_39)
+WINE_CONFIG_MAKEFILE(dlls/d3dx10_39/tests)
 WINE_CONFIG_MAKEFILE(dlls/d3dx10_40)
 WINE_CONFIG_MAKEFILE(dlls/d3dx10_40/tests)
 WINE_CONFIG_MAKEFILE(dlls/d3dx10_41)
@@ -3874,6 +3867,7 @@ WINE_CONFIG_MAKEFILE(dlls/wineqtdecoder)
 WINE_CONFIG_MAKEFILE(dlls/wineusb.sys)
 WINE_CONFIG_MAKEFILE(dlls/winevulkan)
 WINE_CONFIG_MAKEFILE(dlls/winex11.drv)
+WINE_CONFIG_MAKEFILE(dlls/winexinput.sys)
 WINE_CONFIG_MAKEFILE(dlls/wing.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/wing32)
 WINE_CONFIG_MAKEFILE(dlls/winhttp)

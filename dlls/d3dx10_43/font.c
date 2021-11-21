@@ -32,6 +32,9 @@ struct d3dx_font
     ID3DX10Font ID3DX10Font_iface;
     LONG refcount;
 
+    HDC hdc;
+    HFONT hfont;
+    D3DX10_FONT_DESCW desc;
     ID3D10Device *device;
 };
 
@@ -76,6 +79,8 @@ static ULONG WINAPI d3dx_font_Release(ID3DX10Font *iface)
 
     if (!refcount)
     {
+        DeleteObject(font->hfont);
+        DeleteDC(font->hdc);
         ID3D10Device_Release(font->device);
         heap_free(font);
     }
@@ -97,37 +102,59 @@ static HRESULT WINAPI d3dx_font_GetDevice(ID3DX10Font *iface, ID3D10Device **dev
 
 static HRESULT WINAPI d3dx_font_GetDescA(ID3DX10Font *iface, D3DX10_FONT_DESCA *desc)
 {
-    FIXME("iface %p, desc %p stub!\n", iface, desc);
+    struct d3dx_font *font = impl_from_ID3DX10Font(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, desc %p.\n", iface, desc);
+
+    if (!desc)
+        return D3DERR_INVALIDCALL;
+
+    memcpy(desc, &font->desc, FIELD_OFFSET(D3DX10_FONT_DESCA, FaceName));
+    WideCharToMultiByte(CP_ACP, 0, font->desc.FaceName, -1, desc->FaceName,
+            ARRAY_SIZE(desc->FaceName), NULL, NULL);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI d3dx_font_GetDescW(ID3DX10Font *iface, D3DX10_FONT_DESCW *desc)
 {
-    FIXME("iface %p, desc %p stub!\n", iface, desc);
+    struct d3dx_font *font = impl_from_ID3DX10Font(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, desc %p.\n", iface, desc);
+
+    if (!desc)
+        return D3DERR_INVALIDCALL;
+
+    *desc = font->desc;
+
+    return S_OK;
 }
 
 static BOOL WINAPI d3dx_font_GetTextMetricsA(ID3DX10Font *iface, TEXTMETRICA *metrics)
 {
-    FIXME("iface %p, metrics %p stub!\n", iface, metrics);
+    struct d3dx_font *font = impl_from_ID3DX10Font(iface);
 
-    return FALSE;
+    TRACE("iface %p, metrics %p.\n", iface, metrics);
+
+    return GetTextMetricsA(font->hdc, metrics);
 }
 
 static BOOL WINAPI d3dx_font_GetTextMetricsW(ID3DX10Font *iface, TEXTMETRICW *metrics)
 {
-    FIXME("iface %p, metrics %p stub!\n", iface, metrics);
+    struct d3dx_font *font = impl_from_ID3DX10Font(iface);
 
-    return FALSE;
+    TRACE("iface %p, metrics %p.\n", iface, metrics);
+
+    return GetTextMetricsW(font->hdc, metrics);
 }
 
 static HDC WINAPI d3dx_font_GetDC(ID3DX10Font *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3dx_font *font = impl_from_ID3DX10Font(iface);
 
-    return NULL;
+    TRACE("iface %p.\n", iface);
+
+    return font->hdc;
 }
 
 static HRESULT WINAPI d3dx_font_GetGlyphData(ID3DX10Font *iface, UINT glyph,
@@ -141,9 +168,50 @@ static HRESULT WINAPI d3dx_font_GetGlyphData(ID3DX10Font *iface, UINT glyph,
 
 static HRESULT WINAPI d3dx_font_PreloadCharacters(ID3DX10Font *iface, UINT first, UINT last)
 {
-    FIXME("iface %p, first %u, last %u stub!\n", iface, first, last);
+    struct d3dx_font *font = impl_from_ID3DX10Font(iface);
+    unsigned int i, count, start, end;
+    WORD *indices;
+    WCHAR *chars;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, first %u, last %u.\n", iface, first, last);
+
+    if (last < first)
+        return S_OK;
+
+    count = last - first + 1;
+    indices = heap_alloc(count * sizeof(*indices));
+    if (!indices)
+        return E_OUTOFMEMORY;
+
+    chars = heap_alloc(count * sizeof(*chars));
+    if (!chars)
+    {
+        heap_free(indices);
+        return E_OUTOFMEMORY;
+    }
+
+    for (i = 0; i < count; ++i)
+        chars[i] = first + i;
+
+    GetGlyphIndicesW(font->hdc, chars, count, indices, 0);
+
+    start = end = indices[0];
+    for (i = 1; i < count; ++i)
+    {
+        if (indices[i] == end + 1)
+        {
+            end = indices[i];
+            continue;
+        }
+        ID3DX10Font_PreloadGlyphs(iface, start, end);
+        start = end = indices[i];
+    }
+    ID3DX10Font_PreloadGlyphs(iface, start, end);
+
+    heap_free(chars);
+    heap_free(indices);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI d3dx_font_PreloadGlyphs(ID3DX10Font *iface, UINT first, UINT last)
@@ -183,9 +251,33 @@ static HRESULT WINAPI d3dx_font_PreloadTextA(ID3DX10Font *iface, const char *str
 
 static HRESULT WINAPI d3dx_font_PreloadTextW(ID3DX10Font *iface, const WCHAR *string, INT count)
 {
-    FIXME("iface %p, string %s, count %d stub!\n", iface, debugstr_wn(string, count), count);
+    struct d3dx_font *font = impl_from_ID3DX10Font(iface);
+    WORD *indices;
+    int i;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, string %s, count %d.\n", iface, debugstr_wn(string, count), count);
+
+    if (!string && !count)
+        return S_OK;
+
+    if (!string)
+        return D3DERR_INVALIDCALL;
+
+    if (count < 0)
+        count = lstrlenW(string);
+
+    indices = heap_alloc(count * sizeof(*indices));
+    if (!indices)
+        return E_OUTOFMEMORY;
+
+    GetGlyphIndicesW(font->hdc, string, count, indices, 0);
+
+    for (i = 0; i < count; ++i)
+        ID3DX10Font_PreloadGlyphs(iface, indices[i], indices[i]);
+
+    heap_free(indices);
+
+    return S_OK;
 }
 
 static INT WINAPI d3dx_font_DrawTextA(ID3DX10Font *iface, ID3DX10Sprite *sprite,
@@ -336,15 +428,32 @@ HRESULT WINAPI D3DX10CreateFontIndirectW(ID3D10Device *device, const D3DX10_FONT
     if (!device || !desc || !font)
         return D3DERR_INVALIDCALL;
 
+    *font = NULL;
+
     if (!(object = heap_alloc_zero(sizeof(*object))))
-    {
-        *font = NULL;
         return E_OUTOFMEMORY;
+
+    object->hdc = CreateCompatibleDC(NULL);
+    if (!object->hdc)
+    {
+        heap_free(object);
+        return E_FAIL;
     }
+
+    object->hfont = CreateFontW(desc->Height, desc->Width, 0, 0, desc->Weight, desc->Italic, FALSE, FALSE, desc->CharSet,
+            desc->OutputPrecision, CLIP_DEFAULT_PRECIS, desc->Quality, desc->PitchAndFamily, desc->FaceName);
+    if (!object->hfont)
+    {
+        DeleteDC(object->hdc);
+        heap_free(object);
+        return E_FAIL;
+    }
+    SelectObject(object->hdc, object->hfont);
 
     object->ID3DX10Font_iface.lpVtbl = &d3dx_font_vtbl;
     object->refcount = 1;
     object->device = device;
+    object->desc = *desc;
     ID3D10Device_AddRef(device);
 
     *font = &object->ID3DX10Font_iface;

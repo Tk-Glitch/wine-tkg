@@ -11711,14 +11711,19 @@ static void test_IsWindowEnabled(void)
 
 static void test_window_placement(void)
 {
-    RECT orig = {100, 200, 300, 400}, orig2 = {200, 300, 400, 500}, rect;
+    RECT orig = {100, 200, 300, 400}, orig2 = {200, 300, 400, 500}, rect, work_rect;
     WINDOWPLACEMENT wp = {sizeof(wp)};
+    MONITORINFO mon_info;
     HWND hwnd;
     BOOL ret;
 
     hwnd = CreateWindowA("MainWindowClass", "wp", WS_OVERLAPPEDWINDOW,
         orig.left, orig.top, orig.right - orig.left, orig.bottom - orig.top, 0, 0, 0, 0);
     ok(!!hwnd, "failed to create window, error %u\n", GetLastError());
+
+    mon_info.cbSize = sizeof(mon_info);
+    GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mon_info);
+    work_rect = mon_info.rcWork;
 
     ret = GetWindowPlacement(hwnd, &wp);
     ok(ret, "failed to get window placement, error %u\n", GetLastError());
@@ -11762,7 +11767,6 @@ static void test_window_placement(void)
     ok(wp.showCmd == SW_SHOWMAXIMIZED, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
@@ -11780,6 +11784,42 @@ todo_wine
     ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
         wine_dbgstr_rect(&wp.rcNormalPosition));
 
+    SetWindowPos(hwnd, 0, work_rect.left, work_rect.top, work_rect.right - work_rect.left,
+                 work_rect.bottom - work_rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWMAXIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    SetWindowPos(hwnd, 0, work_rect.left, work_rect.top, work_rect.right - work_rect.left - 1,
+                 work_rect.bottom - work_rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWMAXIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+    ok(wp.ptMaxPosition.x == work_rect.left && wp.ptMaxPosition.y == work_rect.top,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    SetWindowPos(hwnd, 0, work_rect.left, work_rect.top, work_rect.right - work_rect.left,
+                 work_rect.bottom - work_rect.top - 1, SWP_NOZORDER | SWP_NOACTIVATE);
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWMAXIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+    ok(wp.ptMaxPosition.x == work_rect.left && wp.ptMaxPosition.y == work_rect.top,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
     ShowWindow(hwnd, SW_MINIMIZE);
 
     ret = GetWindowPlacement(hwnd, &wp);
@@ -11788,7 +11828,6 @@ todo_wine
     ok(wp.showCmd == SW_SHOWMINIMIZED, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
@@ -11801,7 +11840,6 @@ todo_wine
     ok(wp.showCmd == SW_SHOWMAXIMIZED, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
@@ -11814,7 +11852,6 @@ todo_wine
     ok(wp.showCmd == SW_SHOWNORMAL, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
@@ -11832,7 +11869,6 @@ todo_wine
     ok(wp.showCmd == SW_SHOWNORMAL, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == 100 && wp.ptMinPosition.y == 100,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig2), "got normal pos %s\n",
@@ -11848,7 +11884,6 @@ todo_wine
     ok(wp.showCmd == SW_SHOWMINIMIZED, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig2), "got normal pos %s\n",
@@ -11870,7 +11905,6 @@ todo_wine
     ok(wp.showCmd == SW_SHOWMINIMIZED, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
@@ -11891,7 +11925,6 @@ todo_wine
     ok(wp.showCmd == SW_SHOWMAXIMIZED, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == 100 && wp.ptMinPosition.y == 100,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
@@ -11912,7 +11945,6 @@ todo_wine
     ok(wp.showCmd == SW_SHOWMINIMIZED, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
@@ -11926,7 +11958,6 @@ todo_wine
     ok(wp.showCmd == SW_SHOWMINIMIZED, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
@@ -11941,7 +11972,6 @@ todo_wine
     ok(wp.showCmd == SW_NORMAL, "got show cmd %u\n", wp.showCmd);
     ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
         "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
-todo_wine
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
         "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
     ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",

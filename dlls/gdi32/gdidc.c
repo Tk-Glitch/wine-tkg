@@ -22,6 +22,8 @@
 
 #include "gdi_private.h"
 #include "winternl.h"
+#include "ddrawgdi.h"
+#include "winnls.h"
 
 #include "wine/debug.h"
 
@@ -29,9 +31,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdi);
 
 DC_ATTR *get_dc_attr( HDC hdc )
 {
-    WORD type = gdi_handle_type( hdc );
+    DWORD type = gdi_handle_type( hdc );
     DC_ATTR *dc_attr;
-    if ((type & 0x1f) != NTGDI_OBJ_DC || !(dc_attr = get_gdi_client_ptr( hdc, 0 )))
+    if ((type & 0x1f0000) != NTGDI_OBJ_DC || !(dc_attr = get_gdi_client_ptr( hdc, 0 )))
     {
         SetLastError( ERROR_INVALID_HANDLE );
         return NULL;
@@ -93,6 +95,55 @@ HDC WINAPI CreateICW( const WCHAR *driver, const WCHAR *device, const WCHAR *out
 {
     /* Nothing special yet for ICs */
     return CreateDCW( driver, device, output, init_data );
+}
+
+/***********************************************************************
+ *           GdiConvertToDevmodeW    (GDI32.@)
+ */
+DEVMODEW *WINAPI GdiConvertToDevmodeW( const DEVMODEA *dmA )
+{
+    DEVMODEW *dmW;
+    WORD dmW_size, dmA_size;
+
+    dmA_size = dmA->dmSize;
+
+    /* this is the minimal dmSize that XP accepts */
+    if (dmA_size < FIELD_OFFSET(DEVMODEA, dmFields))
+        return NULL;
+
+    if (dmA_size > sizeof(DEVMODEA))
+        dmA_size = sizeof(DEVMODEA);
+
+    dmW_size = dmA_size + CCHDEVICENAME;
+    if (dmA_size >= FIELD_OFFSET(DEVMODEA, dmFormName) + CCHFORMNAME)
+        dmW_size += CCHFORMNAME;
+
+    dmW = HeapAlloc( GetProcessHeap(), 0, dmW_size + dmA->dmDriverExtra );
+    if (!dmW) return NULL;
+
+    MultiByteToWideChar( CP_ACP, 0, (const char*) dmA->dmDeviceName, -1,
+                         dmW->dmDeviceName, CCHDEVICENAME );
+    /* copy slightly more, to avoid long computations */
+    memcpy( &dmW->dmSpecVersion, &dmA->dmSpecVersion, dmA_size - CCHDEVICENAME );
+
+    if (dmA_size >= FIELD_OFFSET(DEVMODEA, dmFormName) + CCHFORMNAME)
+    {
+        if (dmA->dmFields & DM_FORMNAME)
+            MultiByteToWideChar( CP_ACP, 0, (const char*) dmA->dmFormName, -1,
+                                 dmW->dmFormName, CCHFORMNAME );
+        else
+            dmW->dmFormName[0] = 0;
+
+        if (dmA_size > FIELD_OFFSET(DEVMODEA, dmLogPixels))
+            memcpy( &dmW->dmLogPixels, &dmA->dmLogPixels, dmA_size - FIELD_OFFSET(DEVMODEA, dmLogPixels) );
+    }
+
+    if (dmA->dmDriverExtra)
+        memcpy( (char *)dmW + dmW_size, (const char *)dmA + dmA_size, dmA->dmDriverExtra );
+
+    dmW->dmSize = dmW_size;
+
+    return dmW;
 }
 
 /***********************************************************************
@@ -433,6 +484,15 @@ INT WINAPI GetGraphicsMode( HDC hdc )
 {
     DC_ATTR *dc_attr = get_dc_attr( hdc );
     return dc_attr ? dc_attr->graphics_mode : 0;
+}
+
+/***********************************************************************
+ *           SetGraphicsMode    (GDI32.@)
+ */
+INT WINAPI SetGraphicsMode( HDC hdc, INT mode )
+{
+    DWORD ret;
+    return NtGdiGetAndSetDCDword( hdc, NtGdiSetGraphicsMode, mode, &ret ) ? ret : 0;
 }
 
 /***********************************************************************
@@ -1439,6 +1499,56 @@ BOOL WINAPI StretchBlt( HDC hdc, INT x_dst, INT y_dst, INT width_dst, INT height
                             height_src, rop, 0 /* FIXME */ );
 }
 
+/***********************************************************************
+ *           MaskBlt [GDI32.@]
+ */
+BOOL WINAPI MaskBlt( HDC hdc, INT x_dst, INT y_dst, INT width_dst, INT height_dst,
+                     HDC hdc_src, INT x_src, INT y_src, HBITMAP mask,
+                     INT x_mask, INT y_mask, DWORD rop )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_MaskBlt( dc_attr, x_dst, y_dst, width_dst, height_dst,
+                                        hdc_src, x_src, y_src, mask, x_mask, y_mask, rop ))
+        return FALSE;
+    return NtGdiMaskBlt( hdc, x_dst, y_dst, width_dst, height_dst, hdc_src, x_src, y_src,
+                         mask, x_mask, y_mask, rop, 0 /* FIXME */ );
+}
+
+/***********************************************************************
+ *      PlgBlt    (GDI32.@)
+ */
+BOOL WINAPI PlgBlt( HDC hdc, const POINT *points, HDC hdc_src, INT x_src, INT y_src,
+                    INT width, INT height, HBITMAP mask, INT x_mask, INT y_mask )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_PlgBlt( dc_attr, points, hdc_src, x_src, y_src,
+                                       width, height, mask, x_mask, y_mask ))
+        return FALSE;
+    return NtGdiPlgBlt( hdc, points, hdc_src, x_src, y_src, width, height,
+                        mask, x_mask, y_mask, 0 /* FIXME */ );
+}
+
+/******************************************************************************
+ *           GdiTransparentBlt    (GDI32.@)
+ */
+BOOL WINAPI GdiTransparentBlt( HDC hdc, int x_dst, int y_dst, int width_dst, int height_dst,
+                               HDC hdc_src, int x_src, int y_src, int width_src, int height_src,
+                               UINT color )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_TransparentBlt( dc_attr, x_dst, y_dst, width_dst, height_dst, hdc_src,
+                                               x_src, y_src, width_src, height_src, color ))
+        return FALSE;
+    return NtGdiTransparentBlt( hdc, x_dst, y_dst, width_dst, height_dst, hdc_src, x_src, y_src,
+                                width_src, height_src, color );
+}
+
 /******************************************************************************
  *           GdiAlphaBlend   (GDI32.@)
  */
@@ -1624,6 +1734,22 @@ BOOL WINAPI SelectClipPath( HDC hdc, INT mode )
 }
 
 /***********************************************************************
+ *           GetClipRgn  (GDI32.@)
+ */
+INT WINAPI GetClipRgn( HDC hdc, HRGN rgn )
+{
+    return NtGdiGetRandomRgn( hdc, rgn, NTGDI_RGN_MIRROR_RTL | 1 );
+}
+
+/***********************************************************************
+ *           GetMetaRgn    (GDI32.@)
+ */
+INT WINAPI GetMetaRgn( HDC hdc, HRGN rgn )
+{
+    return NtGdiGetRandomRgn( hdc, rgn, NTGDI_RGN_MIRROR_RTL | 2 );
+}
+
+/***********************************************************************
  *           IntersectClipRect    (GDI32.@)
  */
 INT WINAPI IntersectClipRect( HDC hdc, INT left, INT top, INT right, INT bottom )
@@ -1762,6 +1888,7 @@ HPALETTE WINAPI SelectPalette( HDC hdc, HPALETTE palette, BOOL force_background 
 {
     DC_ATTR *dc_attr;
 
+    palette = get_full_gdi_handle( palette );
     if (is_meta_dc( hdc )) return ULongToHandle( METADC_SelectPalette( hdc, palette ) );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_SelectPalette( dc_attr, palette )) return 0;
@@ -1792,6 +1919,116 @@ BOOL WINAPI GdiSetPixelFormat( HDC hdc, INT format, const PIXELFORMATDESCRIPTOR 
 BOOL WINAPI CancelDC(HDC hdc)
 {
     FIXME( "stub\n" );
+    return TRUE;
+}
+
+/***********************************************************************
+ *           StartDocW  [GDI32.@]
+ *
+ * StartDoc calls the STARTDOC Escape with the input data pointing to DocName
+ * and the output data (which is used as a second input parameter).pointing at
+ * the whole docinfo structure.  This seems to be an undocumented feature of
+ * the STARTDOC Escape.
+ *
+ * Note: we now do it the other way, with the STARTDOC Escape calling StartDoc.
+ */
+INT WINAPI StartDocW( HDC hdc, const DOCINFOW *doc )
+{
+    DC_ATTR *dc_attr;
+
+    TRACE("DocName %s, Output %s, Datatype %s, fwType %#x\n",
+          debugstr_w(doc->lpszDocName), debugstr_w(doc->lpszOutput),
+          debugstr_w(doc->lpszDatatype), doc->fwType);
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return SP_ERROR;
+
+    if (dc_attr->abort_proc && !dc_attr->abort_proc( hdc, 0 )) return 0;
+    return NtGdiStartDoc( hdc, doc, NULL, 0 );
+}
+
+/***********************************************************************
+ *           StartDocA [GDI32.@]
+ */
+INT WINAPI StartDocA( HDC hdc, const DOCINFOA *doc )
+{
+    WCHAR *doc_name = NULL, *output = NULL, *data_type = NULL;
+    DOCINFOW docW;
+    INT ret, len;
+
+    docW.cbSize = doc->cbSize;
+    if (doc->lpszDocName)
+    {
+        len = MultiByteToWideChar( CP_ACP, 0, doc->lpszDocName, -1, NULL, 0 );
+        doc_name = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+        MultiByteToWideChar( CP_ACP, 0, doc->lpszDocName, -1, doc_name, len );
+    }
+    if (doc->lpszOutput)
+    {
+        len = MultiByteToWideChar( CP_ACP, 0, doc->lpszOutput, -1, NULL, 0 );
+        output = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+        MultiByteToWideChar( CP_ACP, 0, doc->lpszOutput, -1, output, len );
+    }
+    if (doc->lpszDatatype)
+    {
+        len = MultiByteToWideChar( CP_ACP, 0, doc->lpszDatatype, -1, NULL, 0);
+        data_type = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+        MultiByteToWideChar( CP_ACP, 0, doc->lpszDatatype, -1, data_type, len );
+    }
+
+    docW.lpszDocName = doc_name;
+    docW.lpszOutput = output;
+    docW.lpszDatatype = data_type;
+    docW.fwType = doc->fwType;
+
+    ret = StartDocW(hdc, &docW);
+
+    HeapFree( GetProcessHeap(), 0, doc_name );
+    HeapFree( GetProcessHeap(), 0, output );
+    HeapFree( GetProcessHeap(), 0, data_type );
+    return ret;
+}
+
+/***********************************************************************
+ *           StartPage    (GDI32.@)
+ */
+INT WINAPI StartPage( HDC hdc )
+{
+    return NtGdiStartPage( hdc );
+}
+
+/***********************************************************************
+ *           EndPage    (GDI32.@)
+ */
+INT WINAPI EndPage( HDC hdc )
+{
+    return NtGdiEndPage( hdc );
+}
+
+/***********************************************************************
+ *           EndDoc    (GDI32.@)
+ */
+INT WINAPI EndDoc( HDC hdc )
+{
+    return NtGdiEndDoc( hdc );
+}
+
+/***********************************************************************
+ *           AbortDoc    (GDI32.@)
+ */
+INT WINAPI AbortDoc( HDC hdc )
+{
+    return NtGdiAbortDoc( hdc );
+}
+
+/**********************************************************************
+ *           SetAbortProc   (GDI32.@)
+ */
+INT WINAPI SetAbortProc( HDC hdc, ABORTPROC abrtprc )
+{
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    dc_attr->abort_proc = abrtprc;
     return TRUE;
 }
 
@@ -1842,4 +2079,35 @@ BOOL WINAPI GdiIsPlayMetafileDC( HDC hdc )
 {
     FIXME( "%p\n", hdc );
     return FALSE;
+}
+
+/*******************************************************************
+ *           DrawEscape    (GDI32.@)
+ */
+INT WINAPI DrawEscape( HDC hdc, INT escape, INT input_size, const char *input )
+{
+    FIXME( "stub\n" );
+    return 0;
+}
+
+/*******************************************************************
+ *           NamedEscape    (GDI32.@)
+ */
+INT WINAPI NamedEscape( HDC hdc, const WCHAR *driver, INT escape, INT input_size,
+                        const char *input, INT output_size, char *output )
+{
+    FIXME( "(%p %s %d, %d %p %d %p)\n", hdc, wine_dbgstr_w(driver), escape, input_size,
+           input, output_size, output );
+    return 0;
+}
+
+/*******************************************************************
+ *           DdQueryDisplaySettingsUniqueness    (GDI32.@)
+ *           GdiEntry13
+ */
+ULONG WINAPI DdQueryDisplaySettingsUniqueness(void)
+{
+    static int warn_once;
+    if (!warn_once++) FIXME( "stub\n" );
+    return 0;
 }

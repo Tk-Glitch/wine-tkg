@@ -90,8 +90,6 @@ done:
 
 BOOL store_brush_pattern( LOGBRUSH *brush, struct brush_pattern *pattern )
 {
-    HGLOBAL hmem = 0;
-
     pattern->info = NULL;
     pattern->bits.free = NULL;
 
@@ -117,20 +115,16 @@ BOOL store_brush_pattern( LOGBRUSH *brush, struct brush_pattern *pattern )
         brush->lbColor = 0;
         return copy_bitmap( pattern, (HBITMAP)brush->lbHatch );
 
-    case BS_DIBPATTERN:
-        hmem = (HGLOBAL)brush->lbHatch;
-        if (!(brush->lbHatch = (ULONG_PTR)GlobalLock( hmem ))) return FALSE;
-        /* fall through */
     case BS_DIBPATTERNPT:
         pattern->usage = brush->lbColor;
         pattern->info = copy_packed_dib( (BITMAPINFO *)brush->lbHatch, pattern->usage );
-        if (hmem) GlobalUnlock( hmem );
         if (!pattern->info) return FALSE;
         pattern->bits.ptr = (char *)pattern->info + get_dib_info_size( pattern->info, pattern->usage );
         brush->lbStyle = BS_DIBPATTERN;
         brush->lbColor = 0;
         return TRUE;
 
+    case BS_DIBPATTERN:
     case BS_DIBPATTERN8X8:
     case BS_MONOPATTERN:
     case BS_INDEXED:
@@ -146,7 +140,7 @@ void free_brush_pattern( struct brush_pattern *pattern )
     HeapFree( GetProcessHeap(), 0, pattern->info );
 }
 
-BOOL get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void **bits, UINT *usage )
+BOOL get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void *bits, UINT *usage )
 {
     BRUSHOBJ *brush;
     BOOL ret = FALSE;
@@ -155,11 +149,34 @@ BOOL get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void **bits, UINT *
 
     if (brush->pattern.info)
     {
-        memcpy( info, brush->pattern.info, get_dib_info_size( brush->pattern.info, brush->pattern.usage ));
-        if (info->bmiHeader.biBitCount <= 8 && !info->bmiHeader.biClrUsed)
-            fill_default_color_table( info );
-        *bits = brush->pattern.bits.ptr;
-        *usage = brush->pattern.usage;
+        if (info)
+        {
+            memcpy( info, brush->pattern.info,
+                    get_dib_info_size( brush->pattern.info, brush->pattern.usage ));
+            if (info->bmiHeader.biBitCount <= 8 && !info->bmiHeader.biClrUsed)
+                fill_default_color_table( info );
+            if (info->bmiHeader.biHeight < 0)
+                info->bmiHeader.biHeight = -info->bmiHeader.biHeight;
+        }
+        if (bits)
+        {
+            /* always return a bottom-up DIB */
+            if (brush->pattern.info->bmiHeader.biHeight < 0)
+            {
+                unsigned int i, width_bytes, height = -brush->pattern.info->bmiHeader.biHeight;
+                char *dst_ptr;
+
+                width_bytes = get_dib_stride( brush->pattern.info->bmiHeader.biWidth,
+                                              brush->pattern.info->bmiHeader.biBitCount );
+                dst_ptr = (char *)bits + (height - 1) * width_bytes;
+                for (i = 0; i < height; i++, dst_ptr -= width_bytes)
+                    memcpy( dst_ptr, (char *)brush->pattern.bits.ptr + i * width_bytes,
+                            width_bytes );
+            }
+            else memcpy( bits, brush->pattern.bits.ptr,
+                         brush->pattern.info->bmiHeader.biSizeImage );
+        }
+        if (usage) *usage = brush->pattern.usage;
         ret = TRUE;
     }
     GDI_ReleaseObj( handle );
@@ -190,11 +207,11 @@ HBRUSH create_brush( const LOGBRUSH *brush )
 
 
 /***********************************************************************
- *           NtGdiCreateHatchBrush    (win32u.@)
+ *           NtGdiCreateHatchBrushInternal    (win32u.@)
  *
  * Create a logical brush with a hatched pattern.
  */
-HBRUSH WINAPI NtGdiCreateHatchBrush( INT style, COLORREF color, BOOL pen )
+HBRUSH WINAPI NtGdiCreateHatchBrushInternal( INT style, COLORREF color, BOOL pen )
 {
     LOGBRUSH logbrush;
 

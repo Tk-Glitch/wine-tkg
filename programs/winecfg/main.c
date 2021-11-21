@@ -191,7 +191,7 @@ doPropertySheet (HINSTANCE hInstance, HWND hOwner)
  *              program execution.
  */
 static int
-ProcessCmdLine(LPSTR lpCmdLine)
+ProcessCmdLine(LPWSTR lpCmdLine)
 {
     if (!(lpCmdLine[0] == '/' || lpCmdLine[0] == '-'))
     {
@@ -199,7 +199,7 @@ ProcessCmdLine(LPSTR lpCmdLine)
     }
     if (lpCmdLine[1] == 'V' || lpCmdLine[1] == 'v')
     {
-        if (lstrlenA(lpCmdLine) > 4)
+        if (wcslen(lpCmdLine) > 4)
             return set_winver_from_string(&lpCmdLine[3]) ? 0 : 1;
 
         print_current_winver();
@@ -233,24 +233,21 @@ ProcessCmdLine(LPSTR lpCmdLine)
  * Returns    : Program exit code
  */
 int WINAPI
-WinMain (HINSTANCE hInstance, HINSTANCE hPrev, LPSTR szCmdLine, int nShow)
+wWinMain (HINSTANCE hInstance, HINSTANCE hPrev, LPWSTR cmdline, int nShow)
 {
     BOOL is_wow64;
     int cmd_ret;
 
     if (IsWow64Process( GetCurrentProcess(), &is_wow64 ) && is_wow64)
     {
-        static const WCHAR winecfgW[] = {'\\','w','i','n','e','c','f','g','.','e','x','e',0};
         STARTUPINFOW si;
         PROCESS_INFORMATION pi;
-        WCHAR filename[MAX_PATH];
+        WCHAR filename[] = L"C:\\windows\\system32\\winecfg.exe";
         void *redir;
         DWORD exit_code;
 
         memset( &si, 0, sizeof(si) );
         si.cb = sizeof(si);
-        GetSystemDirectoryW( filename, MAX_PATH );
-        lstrcatW( filename, winecfgW );
 
         Wow64DisableWow64FsRedirection( &redir );
         if (CreateProcessW( filename, GetCommandLineW(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
@@ -269,7 +266,7 @@ WinMain (HINSTANCE hInstance, HINSTANCE hPrev, LPSTR szCmdLine, int nShow)
 	ExitProcess(1);
     }
 
-    cmd_ret = ProcessCmdLine(szCmdLine);
+    cmd_ret = ProcessCmdLine(cmdline);
     if (cmd_ret >= 0) return cmd_ret;
 
     /*
