@@ -3090,16 +3090,31 @@ static inline int get_dos_prefix_len( const UNICODE_STRING *name )
 {
     static const WCHAR nt_prefixW[] = {'\\','?','?','\\'};
     static const WCHAR dosdev_prefixW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\'};
+    static const WCHAR globalrootW[] = {'\\','?','?','\\','G','l','o','b','a','l','R','o','o','t'};
+    int prefix_len = 0;
+    WCHAR *prefix;
+    USHORT length;
 
-    if (name->Length >= sizeof(nt_prefixW) &&
-        !memcmp( name->Buffer, nt_prefixW, sizeof(nt_prefixW) ))
-        return ARRAY_SIZE( nt_prefixW );
+    prefix = name->Buffer;
+    length = name->Length;
 
-    if (name->Length >= sizeof(dosdev_prefixW) &&
-        !wcsnicmp( name->Buffer, dosdev_prefixW, ARRAY_SIZE( dosdev_prefixW )))
-        return ARRAY_SIZE( dosdev_prefixW );
+    if (length >= ARRAY_SIZE( globalrootW ) &&
+        !wcsnicmp( prefix, globalrootW, ARRAY_SIZE( globalrootW )))
+    {
+        WARN("Stripping off GlobalRoot prefix.\n");
+        prefix += ARRAY_SIZE( globalrootW );
+        prefix_len += ARRAY_SIZE( globalrootW );
+        length -= ARRAY_SIZE( globalrootW );
+    }
 
-    return 0;
+    if (length >= sizeof(nt_prefixW) &&
+        !memcmp( prefix, nt_prefixW, sizeof(nt_prefixW) ))
+        prefix_len += ARRAY_SIZE( nt_prefixW );
+    else if (length >= sizeof(dosdev_prefixW) &&
+        !wcsnicmp( prefix, dosdev_prefixW, ARRAY_SIZE( dosdev_prefixW )))
+        prefix_len += ARRAY_SIZE( dosdev_prefixW );
+
+    return prefix_len;
 }
 
 
@@ -4626,6 +4641,15 @@ NTSTATUS WINAPI NtSetInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
         }
         else io->u.Status = STATUS_INVALID_PARAMETER_3;
         break;
+
+    case FileAllocationInformation:
+    {
+        const FILE_ALLOCATION_INFORMATION *info = ptr;
+
+        FIXME("FileAllocationInformation AllocationSize %p stub.\n", (void *)(ULONG_PTR)info->AllocationSize.QuadPart);
+        io->u.Status = STATUS_SUCCESS;
+        break;
+    }
 
     case FilePipeInformation:
         if (len >= sizeof(FILE_PIPE_INFORMATION))

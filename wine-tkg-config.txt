@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:24:24 PM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:25:42 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.10.r0.g649385e7d47
-Using wine-staging patchset (version 6.10.r0.g8a3554ad)
+Wine (plain) version: 6.11.r0.g1de583a4dac
+Using wine-staging patchset (version 6.11.r0.g432c0b5a)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -12,7 +12,7 @@ Done applying reverting hotfixes (if any) - list available in prepare.log
 
 Applied reverting hotfix staging-pulseaudio-reverts.mystagingrevert
 Applied hotfix staging-reenable-pulse.mystagingpatch
-Applied hotfix protonify_stg_syscall_emu-001.mystagingpatch
+Applied hotfix protonify_stg_syscall_emu-003.mystagingpatch
 plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle-ef11bb6.patch -- ( Applied CSMT toggle logic patch )
@@ -27,13 +27,13 @@ fsync_futex2.patch -- ( Add futex2 support to fsync )
 valve_proton_fullscreen_hack-staging-f46c4a3.patch -- ( Applied Proton fullscreen hack patch (f46c4a3) )
 LAA-unix-staging-ea6308e.patch -- ( Applied large address aware override support )
 
-proton-tkg-staging-5c009c1.patch -- ( Using Steam-specific Proton-tkg patches (staging-5c009c1) 2/2 )
+proton-tkg-staging-20fff53.patch -- ( Using Steam-specific Proton-tkg patches (staging-20fff53) 2/2 )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 proton-bcrypt-staging-b3cd21c.patch -- ( Using Proton Bcrypt patches )
 josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging-d02d502.patch -- ( Enforce win10 as default wine version (staging) )
 
-Applied hotfix msvcrt_Fix_logf_implementation.mypatch
+Applied hotfix wineserver-socket-spin-workaround.mypatch
 Applied hotfix imm32-com-initialization_no_net_active_window.mypatch
 Applied hotfix virtual_alloc_remi2.mypatch
 Applied hotfix a608ef1.mypatch

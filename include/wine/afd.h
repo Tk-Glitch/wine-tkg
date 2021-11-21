@@ -32,9 +32,32 @@
 # define WS(x)    x
 #endif
 
+#define IOCTL_AFD_BIND                      CTL_CODE(FILE_DEVICE_BEEP, 0x800, METHOD_NEITHER,  FILE_ANY_ACCESS)
 #define IOCTL_AFD_LISTEN                    CTL_CODE(FILE_DEVICE_BEEP, 0x802, METHOD_NEITHER,  FILE_ANY_ACCESS)
 #define IOCTL_AFD_RECV                      CTL_CODE(FILE_DEVICE_BEEP, 0x805, METHOD_NEITHER,  FILE_ANY_ACCESS)
 #define IOCTL_AFD_POLL                      CTL_CODE(FILE_DEVICE_BEEP, 0x809, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_AFD_GETSOCKNAME               CTL_CODE(FILE_DEVICE_BEEP, 0x80b, METHOD_NEITHER,  FILE_ANY_ACCESS)
+#define IOCTL_AFD_EVENT_SELECT              CTL_CODE(FILE_DEVICE_BEEP, 0x821, METHOD_NEITHER,  FILE_ANY_ACCESS)
+#define IOCTL_AFD_GET_EVENTS                CTL_CODE(FILE_DEVICE_BEEP, 0x822, METHOD_NEITHER,  FILE_ANY_ACCESS)
+
+enum afd_poll_bit
+{
+    AFD_POLL_BIT_READ           = 0,
+    AFD_POLL_BIT_OOB            = 1,
+    AFD_POLL_BIT_WRITE          = 2,
+    AFD_POLL_BIT_HUP            = 3,
+    AFD_POLL_BIT_RESET          = 4,
+    AFD_POLL_BIT_CLOSE          = 5,
+    AFD_POLL_BIT_CONNECT        = 6,
+    AFD_POLL_BIT_ACCEPT         = 7,
+    AFD_POLL_BIT_CONNECT_ERR    = 8,
+    /* IOCTL_AFD_GET_EVENTS has space for 13 events. */
+    AFD_POLL_BIT_UNK1           = 9,
+    AFD_POLL_BIT_UNK2           = 10,
+    AFD_POLL_BIT_UNK3           = 11,
+    AFD_POLL_BIT_UNK4           = 12,
+    AFD_POLL_BIT_COUNT          = 13,
+};
 
 #define AFD_POLL_READ           0x0001
 #define AFD_POLL_OOB            0x0002
@@ -48,6 +71,12 @@
 /* I have never seen these reported, but StarCraft Remastered polls for them. */
 #define AFD_POLL_UNK1           0x0200
 #define AFD_POLL_UNK2           0x0400
+
+struct afd_bind_params
+{
+    int unknown;
+    struct WS(sockaddr) addr; /* variable size */
+};
 
 struct afd_listen_params
 {
@@ -87,6 +116,30 @@ struct afd_poll_params
 };
 #include <poppack.h>
 
+struct afd_event_select_params
+{
+    HANDLE event;
+    int mask;
+};
+
+struct afd_event_select_params_64
+{
+    ULONGLONG event;
+    int mask;
+};
+
+struct afd_event_select_params_32
+{
+    ULONG event;
+    int mask;
+};
+
+struct afd_get_events_params
+{
+    int flags;
+    NTSTATUS status[13];
+};
+
 #define IOCTL_AFD_WINE_CREATE               CTL_CODE(FILE_DEVICE_NETWORK, 200, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_AFD_WINE_ACCEPT               CTL_CODE(FILE_DEVICE_NETWORK, 201, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_AFD_WINE_ACCEPT_INTO          CTL_CODE(FILE_DEVICE_NETWORK, 202, METHOD_BUFFERED, FILE_ANY_ACCESS)
@@ -100,6 +153,11 @@ struct afd_poll_params
 #define IOCTL_AFD_WINE_COMPLETE_ASYNC       CTL_CODE(FILE_DEVICE_NETWORK, 210, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_AFD_WINE_FIONREAD             CTL_CODE(FILE_DEVICE_NETWORK, 211, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_AFD_WINE_SIOCATMARK           CTL_CODE(FILE_DEVICE_NETWORK, 212, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_AFD_WINE_GET_INTERFACE_LIST   CTL_CODE(FILE_DEVICE_NETWORK, 213, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_AFD_WINE_KEEPALIVE_VALS       CTL_CODE(FILE_DEVICE_NETWORK, 214, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_AFD_WINE_MESSAGE_SELECT       CTL_CODE(FILE_DEVICE_NETWORK, 215, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_AFD_WINE_GETPEERNAME          CTL_CODE(FILE_DEVICE_NETWORK, 216, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_AFD_WINE_DEFER                CTL_CODE(FILE_DEVICE_NETWORK, 217, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 struct afd_create_params
 {
@@ -117,7 +175,7 @@ struct afd_connect_params
 {
     int addr_len;
     int synchronous;
-    /* VARARG(addr, struct sockaddr, addr_len); */
+    /* VARARG(addr, struct WS(sockaddr), addr_len); */
     /* VARARG(data, bytes); */
 };
 
@@ -150,6 +208,14 @@ struct afd_transmit_params
     LARGE_INTEGER offset;
     TRANSMIT_FILE_BUFFERS buffers;
     DWORD flags;
+};
+
+struct afd_message_select_params
+{
+    obj_handle_t handle;
+    user_handle_t window;
+    unsigned int message;
+    int mask;
 };
 
 #endif

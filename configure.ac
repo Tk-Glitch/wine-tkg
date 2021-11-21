@@ -443,9 +443,6 @@ AC_SYS_LARGEFILE()
 AC_CHECK_HEADERS(\
 	AL/al.h \
 	ApplicationServices/ApplicationServices.h \
-	AudioToolbox/AudioConverter.h \
-	AudioUnit/AudioUnit.h \
-	AudioUnit/AudioComponent.h \
 	CL/cl.h \
 	Carbon/Carbon.h \
 	CommonCrypto/CommonCryptor.h \
@@ -790,10 +787,10 @@ case $host_os in
     AC_SUBST(APPKIT_LIBS,"-framework AppKit")
     AC_SUBST(SYSTEMCONFIGURATION_LIBS,"-framework SystemConfiguration")
 
-    WINELOADER_LDFLAGS="-Wl,-pie,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist"
+    WINELOADER_LDFLAGS="-Wl,-pie,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist"
 
     wine_can_build_preloader=yes
-    WINEPRELOADER_LDFLAGS="-nostartfiles -nodefaultlibs -e _start -ldylib1.o -Wl,-image_base,0x7d400000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist,-segaddr,WINE_4GB_RESERVE,0x100000000"
+    WINEPRELOADER_LDFLAGS="-nostartfiles -nodefaultlibs -e _start -ldylib1.o -Wl,-image_base,0x7d400000,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist,-segaddr,WINE_4GB_RESERVE,0x100000000"
     WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main],
                     [WINEPRELOADER_LDFLAGS="-Wl,-no_new_main $WINEPRELOADER_LDFLAGS"
                      WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main -nostartfiles -nodefaultlibs],,
@@ -828,21 +825,10 @@ case $host_os in
         AC_CHECK_FUNCS(SSLCopyPeerCertificates)
         LIBS="$ac_save_LIBS"
     fi
-    if test "$ac_cv_header_CoreAudio_CoreAudio_h" = "yes" -a "$ac_cv_header_AudioUnit_AudioUnit_h" = "yes"
+    if test "$ac_cv_header_CoreAudio_CoreAudio_h" = "yes"
     then
-        if test "$ac_cv_header_AudioUnit_AudioComponent_h" = "yes"
-        then
-            AC_SUBST(COREAUDIO_LIBS,"-framework CoreFoundation -framework CoreAudio -framework AudioUnit -framework AudioToolbox -framework CoreMIDI")
-        else
-            dnl CoreServices needed by AudioUnit
-            AC_SUBST(COREAUDIO_LIBS,"-framework CoreAudio -framework AudioUnit -framework CoreServices -framework AudioToolbox -framework CoreMIDI")
-        fi
+        AC_SUBST(COREAUDIO_LIBS,"-framework CoreFoundation -framework CoreAudio -framework AudioUnit -framework AudioToolbox -framework CoreMIDI")
         enable_winecoreaudio_drv=${enable_winecoreaudio_drv:-yes}
-        dnl Check for the AUGraphAddNode function
-        ac_save_LIBS="$LIBS"
-        LIBS="$LIBS $COREAUDIO_LIBS"
-        AC_CHECK_FUNCS(AUGraphAddNode)
-        LIBS="$ac_save_LIBS"
     fi
     if test "$ac_cv_header_OpenAL_al_h" = "yes"
     then
@@ -1658,8 +1644,11 @@ then
                  ac_glib2_broken=yes
                  WINE_NOTICE([glib-2.0 pkgconfig configuration is for the wrong architecture, winegstreamer won't be built.])])])])
 fi
-WINE_NOTICE_WITH(gstreamer,[test "x$ac_glib2_broken" != xyes -a "x$ac_cv_lib_gstreamer_1_0_gst_pad_new" != xyes -a "x$ac_cv_header_QuickTime_ImageCompression_h" != xyes ],
-                 [gstreamer-1.0 base plugins ${notice_platform}development files not found, GStreamer won't be supported.])
+if test "x$with_gstreamer" = xyes -o "x$with_quicktime" = xno -o "x$ac_cv_header_QuickTime_ImageCompression_h" != xyes
+then
+    WINE_NOTICE_WITH(gstreamer,[test "x$ac_glib2_broken" != xyes -a "x$ac_cv_lib_gstreamer_1_0_gst_pad_new" != xyes],
+                     [gstreamer-1.0 base plugins ${notice_platform}development files not found, GStreamer won't be supported.])
+fi
 test "x$ac_cv_lib_gstreamer_1_0_gst_pad_new" = xyes || enable_winegstreamer=${enable_winegstreamer:-no}
 
 dnl **** Check for ALSA 1.x ****
@@ -1929,7 +1918,7 @@ then
             MPG123_LIBS=""
         fi])
 fi
-WINE_NOTICE_WITH(mpg123,[test "x$ac_cv_lib_mpg123_mpg123_feed" != xyes -a x"$ac_cv_header_CoreAudio_CoreAudio_h" != xyes],
+WINE_NOTICE_WITH(mpg123,[test "x$ac_cv_lib_mpg123_mpg123_feed" != xyes],
                  [libmpg123 ${notice_platform}development files not found (or too old), mp3 codec won't be supported.],
                  [enable_l3codeca_acm])
 test "x$ac_cv_lib_mpg123_mpg123_feed" = xyes || enable_mp3dmod=${enable_mp3dmod:-no}
@@ -2718,13 +2707,6 @@ then
     AC_DEFINE(HAVE_ISNAN, 1, [Define to 1 if you have the `isnan' function.])
 fi
 
-AC_CHECK_FUNCS(\
-	exp2 \
-	exp2f \
-	fmaf \
-	tgamma \
-	tgammaf
-)
 LIBS="$ac_save_LIBS"
 
 dnl Check for __builtin_popcount
@@ -3243,6 +3225,7 @@ WINE_CONFIG_MAKEFILE(dlls/dpnaddr)
 WINE_CONFIG_MAKEFILE(dlls/dpnet)
 WINE_CONFIG_MAKEFILE(dlls/dpnet/tests)
 WINE_CONFIG_MAKEFILE(dlls/dpnhpast)
+WINE_CONFIG_MAKEFILE(dlls/dpnhupnp)
 WINE_CONFIG_MAKEFILE(dlls/dpnlobby)
 WINE_CONFIG_MAKEFILE(dlls/dpvoice)
 WINE_CONFIG_MAKEFILE(dlls/dpvoice/tests)
@@ -3837,6 +3820,7 @@ WINE_CONFIG_MAKEFILE(dlls/wiaservc/tests)
 WINE_CONFIG_MAKEFILE(dlls/wimgapi)
 WINE_CONFIG_MAKEFILE(dlls/win32k.sys)
 WINE_CONFIG_MAKEFILE(dlls/win32s16.dll16,enable_win16)
+WINE_CONFIG_MAKEFILE(dlls/win32u)
 WINE_CONFIG_MAKEFILE(dlls/win87em.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/winaspi.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/windebug.dll16,enable_win16)

@@ -172,10 +172,8 @@ DECL_HANDLER(get_file_info);
 DECL_HANDLER(get_volume_info);
 DECL_HANDLER(lock_file);
 DECL_HANDLER(unlock_file);
-DECL_HANDLER(set_socket_event);
 DECL_HANDLER(get_socket_event);
 DECL_HANDLER(get_socket_info);
-DECL_HANDLER(set_socket_deferred);
 DECL_HANDLER(recv_socket);
 DECL_HANDLER(poll_socket);
 DECL_HANDLER(send_socket);
@@ -466,10 +464,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_volume_info,
     (req_handler)req_lock_file,
     (req_handler)req_unlock_file,
-    (req_handler)req_set_socket_event,
     (req_handler)req_get_socket_event,
     (req_handler)req_get_socket_info,
-    (req_handler)req_set_socket_deferred,
     (req_handler)req_recv_socket,
     (req_handler)req_poll_socket,
     (req_handler)req_send_socket,
@@ -1065,20 +1061,13 @@ C_ASSERT( FIELD_OFFSET(struct unlock_file_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct unlock_file_request, offset) == 16 );
 C_ASSERT( FIELD_OFFSET(struct unlock_file_request, count) == 24 );
 C_ASSERT( sizeof(struct unlock_file_request) == 32 );
-C_ASSERT( FIELD_OFFSET(struct set_socket_event_request, handle) == 12 );
-C_ASSERT( FIELD_OFFSET(struct set_socket_event_request, mask) == 16 );
-C_ASSERT( FIELD_OFFSET(struct set_socket_event_request, event) == 20 );
-C_ASSERT( FIELD_OFFSET(struct set_socket_event_request, window) == 24 );
-C_ASSERT( FIELD_OFFSET(struct set_socket_event_request, msg) == 28 );
-C_ASSERT( sizeof(struct set_socket_event_request) == 32 );
 C_ASSERT( FIELD_OFFSET(struct get_socket_event_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct get_socket_event_request, service) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_socket_event_request, c_event) == 20 );
 C_ASSERT( sizeof(struct get_socket_event_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_socket_event_reply, mask) == 8 );
 C_ASSERT( FIELD_OFFSET(struct get_socket_event_reply, pmask) == 12 );
-C_ASSERT( FIELD_OFFSET(struct get_socket_event_reply, state) == 16 );
-C_ASSERT( sizeof(struct get_socket_event_reply) == 24 );
+C_ASSERT( sizeof(struct get_socket_event_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_socket_info_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_socket_info_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_socket_info_reply, family) == 8 );
@@ -1086,9 +1075,6 @@ C_ASSERT( FIELD_OFFSET(struct get_socket_info_reply, type) == 12 );
 C_ASSERT( FIELD_OFFSET(struct get_socket_info_reply, protocol) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_socket_info_reply, connect_time) == 24 );
 C_ASSERT( sizeof(struct get_socket_info_reply) == 32 );
-C_ASSERT( FIELD_OFFSET(struct set_socket_deferred_request, handle) == 12 );
-C_ASSERT( FIELD_OFFSET(struct set_socket_deferred_request, deferred) == 16 );
-C_ASSERT( sizeof(struct set_socket_deferred_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct recv_socket_request, oob) == 12 );
 C_ASSERT( FIELD_OFFSET(struct recv_socket_request, async) == 16 );
 C_ASSERT( FIELD_OFFSET(struct recv_socket_request, status) == 56 );

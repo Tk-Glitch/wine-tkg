@@ -1751,7 +1751,7 @@ static struct object *unsafe_object_impl_from_IDispatch(IDispatch *iface)
         FIXME( "External implementations are not supported.\n" );
         return NULL;
     }
-    return CONTAINING_RECORD(iface, struct object, ISWbemObject_iface);
+    return CONTAINING_RECORD((ISWbemObject *)iface, struct object, ISWbemObject_iface);
 }
 
 static HRESULT SWbemObject_create( struct services *services, IWbemClassObject *wbem_object,
@@ -3587,7 +3587,7 @@ static struct namedvalueset *unsafe_valueset_impl_from_IDispatch(IDispatch *ifac
         FIXME( "External implementations are not supported.\n" );
         return NULL;
     }
-    return CONTAINING_RECORD(iface, struct namedvalueset, ISWbemNamedValueSet_iface);
+    return CONTAINING_RECORD((ISWbemNamedValueSet*)iface, struct namedvalueset, ISWbemNamedValueSet_iface);
 }
 
 HRESULT SWbemNamedValueSet_create( void **obj )

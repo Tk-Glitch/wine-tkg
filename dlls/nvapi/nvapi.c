@@ -29,9 +29,9 @@
 #include "d3d9.h"
 #include "d3d11.h"
 #include "initguid.h"
-#include "wine/winedxgi.h"
 
 #include "wine/wined3d.h"
+#include "wine/winedxgi.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nvapi);
 

@@ -894,10 +894,11 @@ void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid )
 {
 #if defined(MACH_TASK_BASIC_INFO)
     struct mach_task_basic_info info;
+    mach_msg_type_number_t infoCount;
 
     if (unix_pid != -1) return; /* FIXME: Retrieve information for other processes. */
 
-    mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
+    infoCount = MACH_TASK_BASIC_INFO_COUNT;
     if(task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &infoCount) == KERN_SUCCESS)
     {
         pvmi->VirtualSize = info.resident_size + info.virtual_size;
@@ -1525,6 +1526,22 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
         }
         SERVER_END_REQ;
         return ret;
+
+    case ProcessInstrumentationCallback:
+    {
+        PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION *instr = info;
+
+        FIXME("ProcessInstrumentationCallback version %#x, reserved %#x, callback %p, size %u stub.\n",
+                instr->version, instr->reserved, instr->callback, size);
+
+        if (size != sizeof(*instr))
+        {
+            WARN("Incorrect size %u.\n", size);
+            return STATUS_INVALID_PARAMETER;
+        }
+        ret = STATUS_SUCCESS;
+        break;
+    }
 
     default:
         FIXME( "(%p,0x%08x,%p,0x%08x) stub\n", handle, class, info, size );

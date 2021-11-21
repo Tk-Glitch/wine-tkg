@@ -19,14 +19,12 @@
 
 #include "reg_test.h"
 
-static void test_delete(void)
+static void test_command_syntax(void)
 {
-    HKEY hkey;
     DWORD r;
-    const DWORD deadbeef = 0xdeadbeef;
 
     delete_tree(HKEY_CURRENT_USER, KEY_BASE);
-    verify_key_nonexist(HKEY_CURRENT_USER, KEY_BASE);
+    verify_key_nonexist(HKEY_CURRENT_USER, KEY_BASE, 0);
 
     run_reg_exe("reg delete", &r);
     ok(r == REG_EXIT_FAILURE, "got exit code %d, expected 1\n", r);
@@ -68,14 +66,24 @@ static void test_delete(void)
 
     run_reg_exe("reg delete HKCU\\" KEY_BASE " /f /v", &r);
     ok(r == REG_EXIT_FAILURE, "got exit code %d, expected 1\n", r);
+}
+
+static void test_delete(void)
+{
+    HKEY hkey;
+    DWORD r;
+    const DWORD deadbeef = 0xdeadbeef;
+
+    delete_tree(HKEY_CURRENT_USER, KEY_BASE);
+    verify_key_nonexist(HKEY_CURRENT_USER, KEY_BASE, 0);
 
     /* Create a test key */
-    add_key(HKEY_CURRENT_USER, KEY_BASE, &hkey);
+    add_key(HKEY_CURRENT_USER, KEY_BASE, 0, &hkey);
     add_value(hkey, "foo", REG_DWORD, &deadbeef, sizeof(deadbeef));
     add_value(hkey, "bar", REG_DWORD, &deadbeef, sizeof(deadbeef));
     add_value(hkey, NULL, REG_DWORD, &deadbeef, sizeof(deadbeef));
 
-    add_key(hkey, "subkey", NULL);
+    add_key(hkey, "subkey", 0, NULL);
 
     run_reg_exe("reg delete HKCU\\" KEY_BASE " /v bar /f", &r);
     ok(r == REG_EXIT_SUCCESS, "got exit code %d, expected 0\n", r);
@@ -88,16 +96,16 @@ static void test_delete(void)
     run_reg_exe("reg delete HKCU\\" KEY_BASE " /va /f", &r);
     ok(r == REG_EXIT_SUCCESS, "got exit code %d, expected 0\n", r);
     verify_reg_nonexist(hkey, "foo");
-    verify_key(hkey, "subkey");
+    verify_key(hkey, "subkey", 0);
 
     /* Test forward and back slashes */
-    add_key(hkey, "https://winehq.org", NULL);
+    add_key(hkey, "https://winehq.org", 0, NULL);
     add_value(hkey, "count/up", REG_SZ, "one/two/three", 14);
     add_value(hkey, "\\foo\\bar", REG_SZ, "", 1);
 
     run_reg_exe("reg delete HKCU\\" KEY_BASE "\\https://winehq.org /f", &r);
     ok(r == REG_EXIT_SUCCESS, "got exit code %d, expected 0\n", r);
-    verify_key_nonexist(hkey, "https://winehq.org");
+    verify_key_nonexist(hkey, "https://winehq.org", 0);
 
     run_reg_exe("reg delete HKCU\\" KEY_BASE " /v count/up /f", &r);
     ok(r == REG_EXIT_SUCCESS, "got exit code %d, expected 0\n", r);
@@ -127,7 +135,7 @@ static void test_delete(void)
 
     run_reg_exe("reg delete HKCU\\" KEY_BASE " /f", &r);
     ok(r == REG_EXIT_SUCCESS, "got exit code %d, expected 0\n", r);
-    verify_key_nonexist(HKEY_CURRENT_USER, KEY_BASE);
+    verify_key_nonexist(HKEY_CURRENT_USER, KEY_BASE, 0);
 
     run_reg_exe("reg delete HKCU\\" KEY_BASE " /f", &r);
     ok(r == REG_EXIT_FAILURE, "got exit code %d, expected 1\n", r);
@@ -142,5 +150,6 @@ START_TEST(delete)
         return;
     }
 
+    test_command_syntax();
     test_delete();
 }

@@ -1,7 +1,5 @@
 /*
- * MSVCRT Unix interface
- *
- * Copyright 2020 Alexandre Julliard
+ * Copyright 2020 Austin English
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,20 +16,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __UNIXLIB_H
-#define __UNIXLIB_H
+#define WINE_FILEDESCRIPTION_STR "Wine dpnhupnp"
+#define WINE_FILENAME_STR "dpnhupnp.dll"
+#define WINE_FILEVERSION 5,3,2600,5512
+#define WINE_FILEVERSION_STR "5.3.2600.5512"
+#define WINE_PRODUCTVERSION 5,3,2600,5512
+#define WINE_PRODUCTVERSION_STR "5.3.2600.5512"
 
-struct unix_funcs
-{
-    double          (CDECL *exp)(double x);
-    float           (CDECL *expf)(float x);
-    double          (CDECL *exp2)(double x);
-    float           (CDECL *exp2f)(float x);
-    float           (CDECL *fmaf)(float x, float y, float z);
-    double          (CDECL *pow)(double x, double y);
-    float           (CDECL *powf)(float x, float y);
-    double          (CDECL *tgamma)(double x);
-    float           (CDECL *tgammaf)(float x);
-};
-
-#endif /* __UNIXLIB_H */
+#include "wine/wine_common_ver.rc"

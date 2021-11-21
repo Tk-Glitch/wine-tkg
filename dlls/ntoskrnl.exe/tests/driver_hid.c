@@ -40,6 +40,7 @@
 static UNICODE_STRING control_symlink;
 
 static unsigned int got_start_device;
+static DWORD report_id;
 
 static NTSTATUS WINAPI driver_pnp(DEVICE_OBJECT *device, IRP *irp)
 {
@@ -85,24 +86,216 @@ static NTSTATUS WINAPI driver_power(DEVICE_OBJECT *device, IRP *irp)
     return PoCallDriver(ext->NextDeviceObject, irp);
 }
 
-static const unsigned char report_descriptor[] =
-{
-    0x05, HID_USAGE_PAGE_GENERIC,
-    0x09, HID_USAGE_GENERIC_JOYSTICK,
-    0xa1, 0x01, /* application collection */
-    0x05, HID_USAGE_PAGE_GENERIC,
-    0x09, HID_USAGE_GENERIC_X,
-    0x09, HID_USAGE_GENERIC_Y,
-    0x15, 0x80, /* logical minimum -128 */
-    0x25, 0x7f, /* logical maximum 127 */
-    0x75, 0x08, /* report size */
-    0x95, 0x02, /* report count */
-    0x81, 0x02, /* input, variable */
-    0xc0, /* end collection */
-};
-
 static NTSTATUS WINAPI driver_internal_ioctl(DEVICE_OBJECT *device, IRP *irp)
 {
+#include "psh_hid_macros.h"
+/* Replace REPORT_ID with USAGE_PAGE when id is 0 */
+#define REPORT_ID_OR_USAGE_PAGE(size, id, off) SHORT_ITEM_1((id ? 8 : 0), 1, (id + off))
+    const unsigned char report_descriptor[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Logical),
+                REPORT_ID_OR_USAGE_PAGE(1, report_id, 0),
+                USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                LOGICAL_MINIMUM(1, -128),
+                LOGICAL_MAXIMUM(1, 127),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 2),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 8),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                REPORT_COUNT(1, 8),
+                REPORT_SIZE(1, 1),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE_MINIMUM(1, 0x18),
+                USAGE_MAXIMUM(1, 0x1f),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                REPORT_COUNT(1, 8),
+                REPORT_SIZE(1, 1),
+                INPUT(1, Cnst|Var|Abs),
+                REPORT_COUNT(1, 8),
+                REPORT_SIZE(1, 1),
+                INPUT(1, Cnst|Var|Abs),
+                /* needs to be 8 bit aligned as next has Buff */
+
+                USAGE_MINIMUM(4, (HID_USAGE_PAGE_KEYBOARD<<16)|0x8),
+                USAGE_MAXIMUM(4, (HID_USAGE_PAGE_KEYBOARD<<16)|0xf),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 8),
+                REPORT_COUNT(1, 2),
+                REPORT_SIZE(1, 8),
+                INPUT(2, Data|Ary|Rel|Wrap|Lin|Pref|Null|Vol|Buff),
+
+                /* needs to be 8 bit aligned as previous has Buff */
+                USAGE(1, 0x20),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                REPORT_COUNT(1, 8),
+                REPORT_SIZE(1, 1),
+                INPUT(1, Data|Var|Abs),
+                USAGE_MINIMUM(1, 0x21),
+                USAGE_MAXIMUM(1, 0x22),
+                REPORT_COUNT(1, 2),
+                REPORT_SIZE(1, 0),
+                INPUT(1, Data|Var|Abs),
+                USAGE(1, 0x23),
+                REPORT_COUNT(1, 0),
+                REPORT_SIZE(1, 1),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+                USAGE(1, HID_USAGE_GENERIC_HATSWITCH),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 8),
+                REPORT_SIZE(1, 4),
+                REPORT_COUNT(1, 2),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+                USAGE(1, HID_USAGE_GENERIC_Z),
+                LOGICAL_MINIMUM(4, 0x00000000),
+                LOGICAL_MAXIMUM(4, 0x3fffffff),
+                PHYSICAL_MINIMUM(4, 0x80000000),
+                PHYSICAL_MAXIMUM(4, 0x7fffffff),
+                REPORT_SIZE(1, 32),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs),
+
+                /* reset physical range to its default interpretation */
+                USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+                USAGE(1, HID_USAGE_GENERIC_RX),
+                PHYSICAL_MINIMUM(4, 0),
+                PHYSICAL_MAXIMUM(4, 0),
+                REPORT_SIZE(1, 32),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+                USAGE(1, HID_USAGE_GENERIC_RY),
+                LOGICAL_MINIMUM(4, 0x7fff),
+                LOGICAL_MAXIMUM(4, 0x0000),
+                PHYSICAL_MINIMUM(4, 0x0000),
+                PHYSICAL_MAXIMUM(4, 0x7fff),
+                REPORT_SIZE(1, 32),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Report),
+                REPORT_ID_OR_USAGE_PAGE(1, report_id, 1),
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 9),
+                USAGE_MAXIMUM(1, 10),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                REPORT_COUNT(1, 8),
+                REPORT_SIZE(1, 1),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE_PAGE(1, HID_USAGE_PAGE_LED),
+            USAGE(1, HID_USAGE_LED_GREEN),
+            COLLECTION(1, Report),
+                REPORT_ID_OR_USAGE_PAGE(1, report_id, 0),
+                USAGE_PAGE(1, HID_USAGE_PAGE_LED),
+                USAGE(1, 1),
+                USAGE(1, 2),
+                USAGE(1, 3),
+                USAGE(1, 4),
+                USAGE(1, 5),
+                USAGE(1, 6),
+                USAGE(1, 7),
+                USAGE(1, 8),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_COUNT(1, 8),
+                REPORT_SIZE(1, 1),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+
+            USAGE_PAGE(2, HID_USAGE_PAGE_HAPTICS),
+            USAGE(1, HID_USAGE_HAPTICS_SIMPLE_CONTROLLER),
+            COLLECTION(1, Logical),
+                REPORT_ID_OR_USAGE_PAGE(1, report_id, 0),
+                USAGE_PAGE(2, HID_USAGE_PAGE_HAPTICS),
+
+                USAGE(1, HID_USAGE_HAPTICS_WAVEFORM_LIST),
+                COLLECTION(1, NamedArray),
+                    USAGE_PAGE(1, HID_USAGE_PAGE_ORDINAL),
+                    USAGE(1, 3), /* HID_USAGE_HAPTICS_WAVEFORM_RUMBLE */
+                    USAGE(1, 4), /* HID_USAGE_HAPTICS_WAVEFORM_BUZZ */
+                    LOGICAL_MINIMUM(2, 0x0000),
+                    LOGICAL_MAXIMUM(2, 0xffff),
+                    REPORT_COUNT(1, 2),
+                    REPORT_SIZE(1, 16),
+                    FEATURE(1, Data|Var|Abs|Null),
+                END_COLLECTION,
+
+                USAGE_PAGE(2, HID_USAGE_PAGE_HAPTICS),
+                USAGE(1, HID_USAGE_HAPTICS_DURATION_LIST),
+                COLLECTION(1, NamedArray),
+                    USAGE_PAGE(1, HID_USAGE_PAGE_ORDINAL),
+                    USAGE(1, 3), /* 0 (HID_USAGE_HAPTICS_WAVEFORM_RUMBLE) */
+                    USAGE(1, 4), /* 0 (HID_USAGE_HAPTICS_WAVEFORM_BUZZ) */
+                    LOGICAL_MINIMUM(2, 0x0000),
+                    LOGICAL_MAXIMUM(2, 0xffff),
+                    REPORT_COUNT(1, 2),
+                    REPORT_SIZE(1, 16),
+                    FEATURE(1, Data|Var|Abs|Null),
+                END_COLLECTION,
+
+                USAGE_PAGE(2, HID_USAGE_PAGE_HAPTICS),
+                USAGE(1, HID_USAGE_HAPTICS_WAVEFORM_CUTOFF_TIME),
+                UNIT(2, 0x1001), /* seconds */
+                UNIT_EXPONENT(1, -3), /* 10^-3 */
+                LOGICAL_MINIMUM(2, 0x8000),
+                LOGICAL_MAXIMUM(2, 0x7fff),
+                PHYSICAL_MINIMUM(4, 0x00000000),
+                PHYSICAL_MAXIMUM(4, 0xffffffff),
+                REPORT_SIZE(1, 32),
+                REPORT_COUNT(1, 2),
+                FEATURE(1, Data|Var|Abs),
+                /* reset global items */
+                UNIT(1, 0), /* None */
+                UNIT_EXPONENT(1, 0),
+            END_COLLECTION,
+
+            USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Report),
+                REPORT_ID_OR_USAGE_PAGE(1, report_id, 1),
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 9),
+                USAGE_MAXIMUM(1, 10),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_COUNT(1, 8),
+                REPORT_SIZE(1, 1),
+                FEATURE(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+#undef REPORT_ID_OR_USAGE_PAGE
+#include "pop_hid_macros.h"
+
+    static BOOL test_failed;
     IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation(irp);
     const ULONG in_size = stack->Parameters.DeviceIoControl.InputBufferLength;
     const ULONG out_size = stack->Parameters.DeviceIoControl.OutputBufferLength;
@@ -175,11 +368,19 @@ static NTSTATUS WINAPI driver_internal_ioctl(DEVICE_OBJECT *device, IRP *irp)
         }
 
         case IOCTL_HID_READ_REPORT:
+        {
+            ULONG expected_size = 23;
             ok(!in_size, "got input size %u\n", in_size);
-            todo_wine ok(out_size == 2, "got output size %u\n", out_size);
+            if (!test_failed)
+            {
+                todo_wine_if(!report_id)
+                ok(out_size == expected_size, "got output size %u\n", out_size);
+            }
+            if (out_size != expected_size) test_failed = TRUE;
 
             ret = STATUS_NOT_IMPLEMENTED;
             break;
+        }
 
         case IOCTL_HID_GET_STRING:
             ok(!in_size, "got input size %u\n", in_size);
@@ -248,16 +449,32 @@ static void WINAPI driver_unload(DRIVER_OBJECT *driver)
 
 NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, UNICODE_STRING *registry)
 {
+    static const int info_size = offsetof( KEY_VALUE_PARTIAL_INFORMATION, Data );
+    char buffer[offsetof( KEY_VALUE_PARTIAL_INFORMATION, Data ) + sizeof(DWORD)];
     HID_MINIDRIVER_REGISTRATION params =
     {
         .Revision = HID_REVISION,
         .DriverObject = driver,
         .RegistryPath = registry,
     };
+    UNICODE_STRING name_str;
+    OBJECT_ATTRIBUTES attr;
     NTSTATUS ret;
+    HANDLE hkey;
+    DWORD size;
 
     if ((ret = winetest_init()))
         return ret;
+
+    InitializeObjectAttributes(&attr, registry, 0, NULL, NULL);
+    ret = ZwOpenKey(&hkey, KEY_ALL_ACCESS, &attr);
+    ok(!ret, "ZwOpenKey returned %#x\n", ret);
+
+    RtlInitUnicodeString(&name_str, L"ReportID");
+    size = info_size + sizeof(report_id);
+    ret = ZwQueryValueKey(hkey, &name_str, KeyValuePartialInformation, buffer, size, &size);
+    ok(!ret, "ZwQueryValueKey returned %#x\n", ret);
+    memcpy(&report_id, buffer + info_size, size - info_size);
 
     driver->DriverExtension->AddDevice = driver_add_device;
     driver->DriverUnload = driver_unload;

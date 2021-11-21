@@ -1675,12 +1675,16 @@ HICON WINAPI CreateIcon( HINSTANCE instance, int width, int height, BYTE planes,
 HICON WINAPI CopyIcon( HICON icon )
 {
     ICONINFOEXW info;
+    HICON res;
 
     info.cbSize = sizeof(info);
     if (!GetIconInfoExW( icon, &info ))
         return NULL;
 
-    return CopyImage( icon, info.fIcon ? IMAGE_ICON : IMAGE_CURSOR, 0, 0, 0 );
+    res = CopyImage( icon, info.fIcon ? IMAGE_ICON : IMAGE_CURSOR, 0, 0, 0 );
+    DeleteObject( info.hbmColor );
+    DeleteObject( info.hbmMask );
+    return res;
 }
 
 
@@ -3005,6 +3009,7 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
                 {
                     if (!(info.hbmColor = create_color_bitmap( desiredx, desiredy )))
                     {
+                        release_icon_frame( icon, frame );
                         release_user_handle_ptr( icon );
                         return 0;
                     }
@@ -3014,6 +3019,7 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
                     if (!(info.hbmMask = CreateBitmap( desiredx, desiredy, 1, 1, NULL )))
                     {
                         DeleteObject( info.hbmColor );
+                        release_icon_frame( icon, frame );
                         release_user_handle_ptr( icon );
                         return 0;
                     }
@@ -3039,6 +3045,7 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
                 DeleteObject( info.hbmMask );
             }
 
+            release_icon_frame( icon, frame );
             release_user_handle_ptr( icon );
 
             if (res && (flags & LR_COPYDELETEORG)) DeleteObject( hnd );

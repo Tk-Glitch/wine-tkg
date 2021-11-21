@@ -83,10 +83,14 @@
 # include <resolv.h>
 #endif
 #ifdef HAVE_NET_IF_H
+# define if_indextoname unix_if_indextoname
+# define if_nametoindex unix_if_nametoindex
 # include <net/if.h>
+# undef if_indextoname
+# undef if_nametoindex
 #endif
-#ifdef HAVE_LINUX_FILTER_H
-# include <linux/filter.h>
+#ifdef HAVE_IFADDRS_H
+# include <ifaddrs.h>
 #endif
 
 #ifdef HAVE_NETIPX_IPX_H

@@ -2090,7 +2090,7 @@ static HRESULT layout_set_dummy_line_metrics(struct dwrite_textlayout *layout, U
         if (layout->format.fallback) {
             fallback = layout->format.fallback;
             IDWriteFontFallback_AddRef(fallback);
-        } else if (FAILED(hr = IDWriteFactory5_GetSystemFontFallback(layout->factory, &fallback))) {
+        } else if (FAILED(hr = IDWriteFactory7_GetSystemFontFallback(layout->factory, &fallback))) {
             WARN("Failed to get system fallback, hr %#x.\n", hr);
             return hr;
         }

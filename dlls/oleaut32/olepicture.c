@@ -2497,11 +2497,6 @@ HRESULT WINAPI OleLoadPicturePath( LPOLESTR szURLorPath, LPUNKNOWN punkCaller,
 		DWORD dwReserved, OLE_COLOR clrReserved, REFIID riid,
 		LPVOID *ppvRet )
 {
-  IPicture *ipicture;
-  HANDLE hFile;
-  DWORD dwFileSize;
-  HGLOBAL hGlobal = NULL;
-  DWORD dwBytesRead;
   IStream *stream;
   HRESULT hRes;
   WCHAR *file_candidate;

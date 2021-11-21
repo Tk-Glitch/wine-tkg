@@ -31,15 +31,8 @@
 
 #define HID_MAGIC 0x8491759
 
-typedef enum __WINE_ELEMENT_TYPE {
-    UnknownElement = 0,
-    ButtonElement,
-    ValueElement,
-} WINE_ELEMENT_TYPE;
-
 typedef struct __WINE_ELEMENT
 {
-    WINE_ELEMENT_TYPE ElementType;
     UINT  valueStartBit;
     UINT  bitCount;
     HIDP_VALUE_CAPS caps;
@@ -74,6 +67,36 @@ C_ASSERT( offsetof(HIDP_BUTTON_CAPS, NotRange.Usage) == offsetof(HIDP_VALUE_CAPS
 C_ASSERT( offsetof(HIDP_BUTTON_CAPS, NotRange.StringIndex) == offsetof(HIDP_VALUE_CAPS, NotRange.StringIndex) );
 C_ASSERT( offsetof(HIDP_BUTTON_CAPS, NotRange.DesignatorIndex) == offsetof(HIDP_VALUE_CAPS, NotRange.DesignatorIndex) );
 C_ASSERT( offsetof(HIDP_BUTTON_CAPS, NotRange.DataIndex) == offsetof(HIDP_VALUE_CAPS, NotRange.DataIndex) );
+
+struct hid_value_caps
+{
+    USAGE   usage_page;
+    USAGE   usage_min;
+    USAGE   usage_max;
+    USHORT  string_min;
+    USHORT  string_max;
+    USHORT  designator_min;
+    USHORT  designator_max;
+    BOOLEAN is_range;
+    BOOLEAN is_string_range;
+    BOOLEAN is_designator_range;
+    UCHAR   report_id;
+    USHORT  link_collection;
+    USAGE   link_usage_page;
+    USAGE   link_usage;
+    USHORT  bit_field;
+    USHORT  bit_size;
+    USHORT  report_count;
+    LONG    logical_min;
+    LONG    logical_max;
+    LONG    physical_min;
+    LONG    physical_max;
+    ULONG   units;
+    ULONG   units_exp;
+};
+
+#define HID_VALUE_CAPS_IS_ABSOLUTE(x) (((x)->bit_field & 0x04) == 0)
+#define HID_VALUE_CAPS_HAS_NULL(x) (((x)->bit_field & 0x40) != 0)
 
 typedef struct __WINE_HID_REPORT
 {

@@ -773,8 +773,19 @@ static VkImageView wined3d_view_vk_create_vk_image_view(struct wined3d_context_v
     }
     create_info.subresourceRange.baseMipLevel = desc->u.texture.level_idx;
     create_info.subresourceRange.levelCount = desc->u.texture.level_count;
-    create_info.subresourceRange.baseArrayLayer = desc->u.texture.layer_idx;
-    create_info.subresourceRange.layerCount = desc->u.texture.layer_count;
+    if (create_info.viewType == VK_IMAGE_VIEW_TYPE_3D)
+    {
+        if (desc->u.texture.layer_idx || (desc->u.texture.layer_count != texture_vk->t.resource.depth
+                && desc->u.texture.layer_count != ~0u))
+            WARN("Partial 3D texture views are not supported.\n");
+        create_info.subresourceRange.baseArrayLayer = 0;
+        create_info.subresourceRange.layerCount = 1;
+    }
+    else
+    {
+        create_info.subresourceRange.baseArrayLayer = desc->u.texture.layer_idx;
+        create_info.subresourceRange.layerCount = desc->u.texture.layer_count;
+    }
     if ((vr = VK_CALL(vkCreateImageView(device_vk->vk_device, &create_info, NULL, &vk_image_view))) < 0)
     {
         ERR("Failed to create Vulkan image view, vr %s.\n", wined3d_debug_vkresult(vr));
@@ -1197,7 +1208,7 @@ static void shader_resource_view_gl_bind_and_dirtify(struct wined3d_shader_resou
 void wined3d_shader_resource_view_gl_generate_mipmap(struct wined3d_shader_resource_view_gl *view_gl,
         struct wined3d_context_gl *context_gl)
 {
-    unsigned int i, j, layer_count, level_count, base_level, base_layer;
+    unsigned int i, j, layer_count, level_count, base_level, base_layer, sub_resource_idx;
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_texture_gl *texture_gl;
     struct gl_texture *gl_tex;
@@ -1216,8 +1227,8 @@ void wined3d_shader_resource_view_gl_generate_mipmap(struct wined3d_shader_resou
     location = srgb ? WINED3D_LOCATION_TEXTURE_SRGB : WINED3D_LOCATION_TEXTURE_RGB;
     for (i = 0; i < layer_count; ++i)
     {
-        if (!wined3d_texture_load_location(&texture_gl->t,
-                (base_layer + i) * level_count + base_level, &context_gl->c, location))
+        sub_resource_idx = (base_layer + i) * texture_gl->t.level_count + base_level;
+        if (!wined3d_texture_load_location(&texture_gl->t, sub_resource_idx, &context_gl->c, location))
             ERR("Failed to load source layer %u.\n", base_layer + i);
     }
 
@@ -1249,10 +1260,9 @@ void wined3d_shader_resource_view_gl_generate_mipmap(struct wined3d_shader_resou
     {
         for (j = 1; j < level_count; ++j)
         {
-            wined3d_texture_validate_location(&texture_gl->t,
-                    (base_layer + i) * level_count + base_level + j, location);
-            wined3d_texture_invalidate_location(&texture_gl->t,
-                    (base_layer + i) * level_count + base_level + j, ~location);
+            sub_resource_idx = (base_layer + i) * texture_gl->t.level_count + base_level + j;
+            wined3d_texture_validate_location(&texture_gl->t, sub_resource_idx, location);
+            wined3d_texture_invalidate_location(&texture_gl->t, sub_resource_idx, ~location);
         }
     }
 
@@ -1267,7 +1277,7 @@ void wined3d_shader_resource_view_gl_generate_mipmap(struct wined3d_shader_resou
 void wined3d_shader_resource_view_vk_generate_mipmap(struct wined3d_shader_resource_view_vk *srv_vk,
         struct wined3d_context_vk *context_vk)
 {
-    unsigned int i, j, layer_count, level_count, base_level, base_layer;
+    unsigned int i, j, layer_count, level_count, base_level, base_layer, sub_resource_idx;
     const struct wined3d_vk_info *vk_info = context_vk->vk_info;
     VkImageSubresourceRange vk_src_range, vk_dst_range;
     struct wined3d_texture_vk *texture_vk;
@@ -1284,8 +1294,9 @@ void wined3d_shader_resource_view_vk_generate_mipmap(struct wined3d_shader_resou
     texture_vk = wined3d_texture_vk(texture_from_resource(srv_vk->v.resource));
     for (i = 0; i < layer_count; ++i)
     {
-        if (!wined3d_texture_load_location(&texture_vk->t,
-                (base_layer + i) * level_count + base_level, &context_vk->c, WINED3D_LOCATION_TEXTURE_RGB))
+        sub_resource_idx = (base_layer + i) * texture_vk->t.level_count + base_level;
+        if (!wined3d_texture_load_location(&texture_vk->t, sub_resource_idx,
+                &context_vk->c, WINED3D_LOCATION_TEXTURE_RGB))
             ERR("Failed to load source layer %u.\n", base_layer + i);
     }
 
@@ -1394,10 +1405,9 @@ void wined3d_shader_resource_view_vk_generate_mipmap(struct wined3d_shader_resou
     {
         for (j = 1; j < level_count; ++j)
         {
-            wined3d_texture_validate_location(&texture_vk->t,
-                    (base_layer + i) * level_count + base_level + j, WINED3D_LOCATION_TEXTURE_RGB);
-            wined3d_texture_invalidate_location(&texture_vk->t,
-                    (base_layer + i) * level_count + base_level + j, ~WINED3D_LOCATION_TEXTURE_RGB);
+            sub_resource_idx = (base_layer + i) * texture_vk->t.level_count + base_level + j;
+            wined3d_texture_validate_location(&texture_vk->t, sub_resource_idx, WINED3D_LOCATION_TEXTURE_RGB);
+            wined3d_texture_invalidate_location(&texture_vk->t, sub_resource_idx, ~WINED3D_LOCATION_TEXTURE_RGB);
         }
     }
 
@@ -1446,11 +1456,11 @@ void wined3d_unordered_access_view_invalidate_location(struct wined3d_unordered_
     wined3d_view_invalidate_location(view->resource, &view->desc, location);
 }
 
-void wined3d_unordered_access_view_gl_clear_uint(struct wined3d_unordered_access_view_gl *view_gl,
-        const struct wined3d_uvec4 *clear_value, struct wined3d_context_gl *context_gl)
+void wined3d_unordered_access_view_gl_clear(struct wined3d_unordered_access_view_gl *view_gl,
+        const struct wined3d_uvec4 *clear_value, struct wined3d_context_gl *context_gl, bool fp)
 {
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
-    const struct wined3d_format_gl *format;
+    const struct wined3d_format_gl *format_gl;
     struct wined3d_buffer_gl *buffer_gl;
     struct wined3d_resource *resource;
     unsigned int offset, size;
@@ -1458,7 +1468,82 @@ void wined3d_unordered_access_view_gl_clear_uint(struct wined3d_unordered_access
     resource = view_gl->v.resource;
     if (resource->type != WINED3D_RTYPE_BUFFER)
     {
-        FIXME("Not implemented for %s resources.\n", debug_d3dresourcetype(resource->type));
+        unsigned int layer_count, level_count, base_level, base_layer;
+        unsigned int sub_resource_idx, width, height, depth, i, j;
+        struct wined3d_texture_gl *texture_gl;
+        const void *data = clear_value;
+        GLenum gl_format, gl_type;
+        uint32_t packed;
+
+        if (!gl_info->supported[ARB_CLEAR_TEXTURE])
+        {
+            FIXME("OpenGL implementation does not support ARB_clear_texture.\n");
+            return;
+        }
+
+        format_gl = wined3d_format_gl(resource->format);
+        texture_gl = wined3d_texture_gl(texture_from_resource(resource));
+        layer_count = view_gl->v.desc.u.texture.layer_count;
+        level_count = view_gl->v.desc.u.texture.level_count;
+        base_layer = view_gl->v.desc.u.texture.layer_idx;
+        base_level = view_gl->v.desc.u.texture.level_idx;
+
+        if (format_gl->f.byte_count <= 4 && !fp)
+        {
+            gl_format = format_gl->format;
+            gl_type = format_gl->type;
+            packed = wined3d_format_pack(&format_gl->f, clear_value);
+            data = &packed;
+        }
+        else if (resource->format_flags & WINED3DFMT_FLAG_INTEGER)
+        {
+            gl_format = GL_RGBA_INTEGER;
+            gl_type = GL_UNSIGNED_INT;
+        }
+        else
+        {
+            gl_format = GL_RGBA;
+            gl_type = GL_FLOAT;
+        }
+
+        for (i = 0; i < layer_count; ++i)
+        {
+            for (j = 0; j < level_count; ++j)
+            {
+                sub_resource_idx = (base_layer + i) * texture_gl->t.level_count + base_level + j;
+                wined3d_texture_prepare_location(&texture_gl->t, sub_resource_idx,
+                        &context_gl->c, WINED3D_LOCATION_TEXTURE_RGB);
+
+                width = wined3d_texture_get_level_width(&texture_gl->t, base_level + j);
+                height = wined3d_texture_get_level_height(&texture_gl->t, base_level + j);
+                depth = wined3d_texture_get_level_depth(&texture_gl->t, base_level + j);
+
+                switch (texture_gl->target)
+                {
+                    case GL_TEXTURE_1D_ARRAY:
+                        GL_EXTCALL(glClearTexSubImage(texture_gl->texture_rgb.name, base_level + j,
+                                0, base_layer + i, 0, width, 1, 1, gl_format, gl_type, data));
+                        break;
+
+                    case GL_TEXTURE_2D_ARRAY:
+                    case GL_TEXTURE_2D_MULTISAMPLE_ARRAY:
+                    case GL_TEXTURE_CUBE_MAP:
+                    case GL_TEXTURE_CUBE_MAP_ARRAY:
+                        GL_EXTCALL(glClearTexSubImage(texture_gl->texture_rgb.name, base_level + j,
+                                0, 0, base_layer + i, width, height, 1, gl_format, gl_type, data));
+                        break;
+
+                    default:
+                        GL_EXTCALL(glClearTexSubImage(texture_gl->texture_rgb.name, base_level + j,
+                                0, 0, 0, width, height, depth, gl_format, gl_type, data));
+                        break;
+                }
+
+                wined3d_texture_validate_location(&texture_gl->t, sub_resource_idx, WINED3D_LOCATION_TEXTURE_RGB);
+                wined3d_texture_invalidate_location(&texture_gl->t, sub_resource_idx, ~WINED3D_LOCATION_TEXTURE_RGB);
+            }
+        }
+
         return;
     }
 
@@ -1468,12 +1553,18 @@ void wined3d_unordered_access_view_gl_clear_uint(struct wined3d_unordered_access
         return;
     }
 
-    format = wined3d_format_gl(view_gl->v.format);
-    if (format->f.id != WINED3DFMT_R32_UINT && format->f.id != WINED3DFMT_R32_SINT
-            && format->f.id != WINED3DFMT_R32G32B32A32_UINT
-            && format->f.id != WINED3DFMT_R32G32B32A32_SINT)
+    format_gl = wined3d_format_gl(view_gl->v.format);
+    if (format_gl->f.id != WINED3DFMT_R32_UINT && format_gl->f.id != WINED3DFMT_R32_SINT
+            && format_gl->f.id != WINED3DFMT_R32G32B32A32_UINT
+            && format_gl->f.id != WINED3DFMT_R32G32B32A32_SINT)
     {
-        FIXME("Not implemented for format %s.\n", debug_d3dformat(format->f.id));
+        FIXME("Not implemented for format %s.\n", debug_d3dformat(format_gl->f.id));
+        return;
+    }
+
+    if (fp)
+    {
+        FIXME("Floating-point buffer clears not implemented.\n");
         return;
     }
 
@@ -1481,10 +1572,10 @@ void wined3d_unordered_access_view_gl_clear_uint(struct wined3d_unordered_access
     wined3d_buffer_load_location(&buffer_gl->b, &context_gl->c, WINED3D_LOCATION_BUFFER);
     wined3d_unordered_access_view_invalidate_location(&view_gl->v, ~WINED3D_LOCATION_BUFFER);
 
-    get_buffer_view_range(&buffer_gl->b, &view_gl->v.desc, &format->f, &offset, &size);
+    get_buffer_view_range(&buffer_gl->b, &view_gl->v.desc, &format_gl->f, &offset, &size);
     wined3d_context_gl_bind_bo(context_gl, buffer_gl->bo.binding, buffer_gl->bo.id);
-    GL_EXTCALL(glClearBufferSubData(buffer_gl->bo.binding, format->internal,
-            offset, size, format->format, format->type, clear_value));
+    GL_EXTCALL(glClearBufferSubData(buffer_gl->bo.binding, format_gl->internal,
+            offset, size, format_gl->format, format_gl->type, clear_value));
     wined3d_context_gl_reference_bo(context_gl, &buffer_gl->bo);
     checkGLcall("clear unordered access view");
 }
@@ -1625,8 +1716,8 @@ HRESULT wined3d_unordered_access_view_gl_init(struct wined3d_unordered_access_vi
     return hr;
 }
 
-void wined3d_unordered_access_view_vk_clear_uint(struct wined3d_unordered_access_view_vk *view_vk,
-        const struct wined3d_uvec4 *clear_value, struct wined3d_context_vk *context_vk)
+void wined3d_unordered_access_view_vk_clear(struct wined3d_unordered_access_view_vk *view_vk,
+        const struct wined3d_uvec4 *clear_value, struct wined3d_context_vk *context_vk, bool fp)
 {
     const struct wined3d_vk_info *vk_info;
     const struct wined3d_format *format;
@@ -1637,7 +1728,7 @@ void wined3d_unordered_access_view_vk_clear_uint(struct wined3d_unordered_access
     VkAccessFlags access_mask;
     unsigned int offset, size;
 
-    TRACE("view_vk %p, clear_value %s, context_vk %p.\n", view_vk, debug_uvec4(clear_value), context_vk);
+    TRACE("view_vk %p, clear_value %s, context_vk %p, fp %#x.\n", view_vk, debug_uvec4(clear_value), context_vk, fp);
 
     resource = view_vk->v.resource;
     if (resource->type != WINED3D_RTYPE_BUFFER)

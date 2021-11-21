@@ -111,6 +111,7 @@ void     (WINAPI *pKiUserApcDispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,P
 NTSTATUS (WINAPI *pKiUserExceptionDispatcher)(EXCEPTION_RECORD*,CONTEXT*) = NULL;
 void     (WINAPI *pLdrInitializeThunk)(CONTEXT*,void**,ULONG_PTR,ULONG_PTR) = NULL;
 void     (WINAPI *pRtlUserThreadStart)( PRTL_THREAD_START_ROUTINE entry, void *arg ) = NULL;
+void     (WINAPI *p__wine_ctrl_routine)(void*);
 
 static NTSTATUS (CDECL *p__wine_set_unix_funcs)( int version, const struct unix_funcs *funcs );
 
@@ -838,6 +839,7 @@ static void load_ntdll_functions( HMODULE module )
     GET_FUNC( KiUserApcDispatcher );
     GET_FUNC( LdrInitializeThunk );
     GET_FUNC( RtlUserThreadStart );
+    GET_FUNC( __wine_ctrl_routine );
     GET_FUNC( __wine_set_unix_funcs );
 #undef GET_FUNC
 #define SET_PTR(name,val) \
@@ -1772,7 +1774,7 @@ static void load_ntdll(void)
 /***********************************************************************
  *           get_image_address
  */
-ULONG_PTR get_image_address(void)
+static ULONG_PTR get_image_address(void)
 {
 #ifdef HAVE_GETAUXVAL
     ULONG_PTR size, num, phdr_addr = getauxval( AT_PHDR );
@@ -1850,9 +1852,6 @@ static struct unix_funcs unix_funcs =
     init_builtin_dll,
     init_unix_lib,
     unwind_builtin_dll,
-    __wine_dbg_strdup,
-    __wine_dbg_output,
-    __wine_dbg_header,
 };
 
 BOOL ac_odyssey;
@@ -1900,8 +1899,9 @@ static void start_main_thread(void)
     if (p___wine_main_argc) *p___wine_main_argc = main_argc;
     if (p___wine_main_argv) *p___wine_main_argv = main_argv;
     if (p___wine_main_wargv) *p___wine_main_wargv = main_wargv;
+    *(ULONG_PTR *)&peb->CloudFileFlags = get_image_address();
     set_load_order_app_name( main_wargv[0] );
-    init_thread_stack( teb, is_win64 ? 0x7fffffff : 0, 0, 0, NULL );
+    init_thread_stack( teb, is_win64 ? 0x7fffffff : 0, 0, 0 );
     NtCreateKeyedEvent( &keyed_event, GENERIC_READ | GENERIC_WRITE, NULL, 0 );
     load_ntdll();
     status = p__wine_set_unix_funcs( NTDLL_UNIXLIB_VERSION, &unix_funcs );

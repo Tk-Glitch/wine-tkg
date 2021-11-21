@@ -527,7 +527,7 @@ static BOOL start_debugger( EXCEPTION_POINTERS *epointers, HANDLE event )
     TRACE( "Starting debugger %s\n", debugstr_w(cmdline) );
     memset( &startup, 0, sizeof(startup) );
     startup.cb = sizeof(startup);
-    startup.lpDesktop = L"WinSta0";
+    startup.lpDesktop = (WCHAR*)L"WinSta0";
     startup.dwFlags = STARTF_USESHOWWINDOW;
     startup.wShowWindow = SW_SHOWNORMAL;
     ret = CreateProcessW( NULL, cmdline, NULL, NULL, TRUE, 0, env, NULL, &startup, &info );

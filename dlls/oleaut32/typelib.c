@@ -4256,8 +4256,8 @@ static void SLTG_DoFuncs(char *pBlk, char *pFirstItem, ITypeInfoImpl *pTI,
         else
 	    pFuncDesc->funcdesc.oVft = (pFunc->vtblpos & ~1) * sizeof(void *) / pTI->pTypeLib->ptr_size;
 
-    if (pFunc->helpstring != 0xffff)
-        pFuncDesc->HelpString = decode_string(hlp_strings, pBlk + pFunc->helpstring, pNameTable - pBlk, pTI->pTypeLib);
+	if (pFunc->helpstring != 0xffff)
+		pFuncDesc->HelpString = decode_string(hlp_strings, pBlk + pFunc->helpstring, pNameTable - pBlk, pTI->pTypeLib);
 
 	if(pFunc->magic & SLTG_FUNCTION_FLAGS_PRESENT)
 	    pFuncDesc->funcdesc.wFuncFlags = pFunc->funcflags;

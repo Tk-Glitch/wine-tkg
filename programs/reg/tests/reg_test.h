@@ -46,24 +46,23 @@ void verify_reg_(const char *file, unsigned line, HKEY hkey, const char *value,
 #define verify_reg_nonexist(k,v) verify_reg_nonexist_(__FILE__,__LINE__,k,v)
 void verify_reg_nonexist_(const char *file, unsigned line, HKEY hkey, const char *value);
 
-#define open_key(b,p,s,k) open_key_(__FILE__,__LINE__,b,p,s,k)
-void open_key_(const char *file, unsigned line, const HKEY base, const char *path,
-               const DWORD sam, HKEY *hkey);
+#define open_key(r,p,s,k) open_key_(__FILE__,__LINE__,r,p,s,k)
+void open_key_(const char *file, unsigned line, HKEY root, const char *path, REGSAM sam, HKEY *hkey);
 
 #define close_key(k) close_key_(__FILE__,__LINE__,k)
 void close_key_(const char *file, unsigned line, HKEY hkey);
 
-#define verify_key(k,s) verify_key_(__FILE__,__LINE__,k,s)
-void verify_key_(const char *file, unsigned line, HKEY key_base, const char *subkey);
+#define verify_key(r,p,s) verify_key_(__FILE__,__LINE__,r,p,s)
+void verify_key_(const char *file, unsigned line, HKEY root, const char *path, REGSAM sam);
 
-#define verify_key_nonexist(k,s) verify_key_nonexist_(__FILE__,__LINE__,k,s)
-void verify_key_nonexist_(const char *file, unsigned line, HKEY key_base, const char *subkey);
+#define verify_key_nonexist(r,p,s) verify_key_nonexist_(__FILE__,__LINE__,r,p,s)
+void verify_key_nonexist_(const char *file, unsigned line, HKEY root, const char *path, REGSAM sam);
 
-#define add_key(k,p,s) add_key_(__FILE__,__LINE__,k,p,s)
-void add_key_(const char *file, unsigned line, const HKEY hkey, const char *path, HKEY *subkey);
+#define add_key(r,p,s,k) add_key_(__FILE__,__LINE__,r,p,s,k)
+void add_key_(const char *file, unsigned line, const HKEY root, const char *path, REGSAM sam, HKEY *hkey);
 
-#define delete_key(k,p) delete_key_(__FILE__,__LINE__,k,p)
-void delete_key_(const char *file, unsigned line, const HKEY hkey, const char *path);
+#define delete_key(r,p,s) delete_key_(__FILE__,__LINE__,r,p,s)
+void delete_key_(const char *file, unsigned line, HKEY root, const char *path, REGSAM sam);
 
 LONG delete_tree(const HKEY key, const char *subkey);
 
@@ -72,7 +71,7 @@ void add_value_(const char *file, unsigned line, HKEY hkey, const char *name,
                 DWORD type, const void *data, size_t size);
 
 #define delete_value(k,n) delete_value_(__FILE__,__LINE__,k,n)
-void delete_value_(const char *file, unsigned line, const HKEY hkey, const char *name);
+void delete_value_(const char *file, unsigned line, HKEY hkey, const char *name);
 
 /* export.c */
 #define compare_export(f,e,todo) compare_export_(__FILE__,__LINE__,f,e,todo)
@@ -91,6 +90,8 @@ extern const char *embedded_null_test;
 extern const char *escaped_null_test;
 
 /* import.c */
+BOOL is_elevated_process(void);
+
 #define test_import_str(c,r) import_reg(__FILE__,__LINE__,c,FALSE,r)
 #define test_import_wstr(c,r) import_reg(__FILE__,__LINE__,c,TRUE,r)
 BOOL import_reg(const char *file, unsigned line, const char *contents, BOOL unicode, DWORD *rc);

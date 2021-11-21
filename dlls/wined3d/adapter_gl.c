@@ -1348,6 +1348,7 @@ cards_nvidia_binary[] =
     {"GTX 1060",                    CARD_NVIDIA_GEFORCE_GTX1060},   /* GeForce 1000 - midend high */
     {"GTX 1050 Ti",                 CARD_NVIDIA_GEFORCE_GTX1050TI}, /* GeForce 1000 - midend */
     {"GTX 1050",                    CARD_NVIDIA_GEFORCE_GTX1050},   /* GeForce 1000 - midend */
+    {"GT 1030",                     CARD_NVIDIA_GEFORCE_GT1030},    /* GeForce 1000 - lowend */
     {"GTX 980 Ti",                  CARD_NVIDIA_GEFORCE_GTX980TI},  /* GeForce 900 - highend */
     {"GTX 980",                     CARD_NVIDIA_GEFORCE_GTX980},    /* GeForce 900 - highend */
     {"GTX 970M",                    CARD_NVIDIA_GEFORCE_GTX970M},   /* GeForce 900 - highend mobile*/
@@ -5040,12 +5041,12 @@ static void adapter_gl_flush_context(struct wined3d_context *context)
 }
 
 static void adapter_gl_clear_uav(struct wined3d_context *context,
-        struct wined3d_unordered_access_view *view, const struct wined3d_uvec4 *clear_value)
+        struct wined3d_unordered_access_view *view, const struct wined3d_uvec4 *clear_value, bool fp)
 {
     TRACE("context %p, view %p, clear_value %s.\n", context, view, debug_uvec4(clear_value));
 
-    wined3d_unordered_access_view_gl_clear_uint(wined3d_unordered_access_view_gl(view),
-            clear_value, wined3d_context_gl(context));
+    wined3d_unordered_access_view_gl_clear(wined3d_unordered_access_view_gl(view),
+            clear_value, wined3d_context_gl(context), fp);
 }
 
 static void adapter_gl_generate_mipmap(struct wined3d_context *context, struct wined3d_shader_resource_view *view)

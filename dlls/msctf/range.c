@@ -54,7 +54,7 @@ static inline Range *impl_from_ITfRangeACP(ITfRangeACP *iface)
 
 static Range *unsafe_impl_from_ITfRange(ITfRange *iface)
 {
-    return CONTAINING_RECORD(iface, Range, ITfRangeACP_iface);
+    return CONTAINING_RECORD((ITfRangeACP*)iface, Range, ITfRangeACP_iface);
 }
 
 static void Range_Destructor(Range *This)

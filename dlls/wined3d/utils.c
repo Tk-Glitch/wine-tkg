@@ -5803,6 +5803,18 @@ BOOL wined3d_get_primary_adapter_luid(LUID *luid)
     return TRUE;
 }
 
+uint32_t wined3d_format_pack(const struct wined3d_format *format, const struct wined3d_uvec4 *value)
+{
+    uint32_t p = 0;
+
+    p |= (value->x & wined3d_mask_from_size(format->red_size)) << format->red_offset;
+    p |= (value->y & wined3d_mask_from_size(format->green_size)) << format->green_offset;
+    p |= (value->z & wined3d_mask_from_size(format->blue_size)) << format->blue_offset;
+    p |= (value->w & wined3d_mask_from_size(format->alpha_size)) << format->alpha_offset;
+
+    return p;
+}
+
 /* Note: It's the caller's responsibility to ensure values can be expressed
  * in the requested format. UNORM formats for example can only express values
  * in the range 0.0f -> 1.0f. */
@@ -5902,7 +5914,7 @@ DWORD wined3d_format_convert_from_float(const struct wined3d_format *format, con
 
 static float color_to_float(DWORD color, DWORD size, DWORD offset)
 {
-    DWORD mask = size < 32 ? (1u << size) - 1 : ~0u;
+    uint32_t mask = wined3d_mask_from_size(size);
 
     if (!size)
         return 1.0f;
@@ -5938,10 +5950,10 @@ void wined3d_format_get_float_color_key(const struct wined3d_format *format,
         case WINED3DFMT_R8G8B8X8_UNORM:
         case WINED3DFMT_R16G16_UNORM:
         case WINED3DFMT_B10G10R10A2_UNORM:
-            slop.r = 0.5f / ((1u << format->red_size) - 1);
-            slop.g = 0.5f / ((1u << format->green_size) - 1);
-            slop.b = 0.5f / ((1u << format->blue_size) - 1);
-            slop.a = 0.5f / ((1u << format->alpha_size) - 1);
+            slop.r = 0.5f / wined3d_mask_from_size(format->red_size);
+            slop.g = 0.5f / wined3d_mask_from_size(format->green_size);
+            slop.b = 0.5f / wined3d_mask_from_size(format->blue_size);
+            slop.a = 0.5f / wined3d_mask_from_size(format->alpha_size);
 
             float_colors[0].r = color_to_float(key->color_space_low_value, format->red_size, format->red_offset)
                     - slop.r;

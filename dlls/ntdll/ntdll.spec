@@ -1224,7 +1224,7 @@
 # @ stub ZwEnumerateSystemEnvironmentValuesEx
 @ stdcall -private -syscall ZwEnumerateValueKey(long long long ptr long ptr) NtEnumerateValueKey
 @ stub ZwExtendSection
-# @ stub ZwFilterToken
+@ stdcall -private -syscall ZwFilterToken(long long ptr ptr ptr ptr) NtFilterToken
 @ stdcall -private -syscall ZwFindAtom(ptr long ptr) NtFindAtom
 @ stdcall -private -syscall ZwFlushBuffersFile(long ptr) NtFlushBuffersFile
 @ stdcall -private -syscall ZwFlushInstructionCache(long ptr long) NtFlushInstructionCache
@@ -1616,10 +1616,12 @@
 @ cdecl -syscall __wine_unix_call(int64 long ptr)
 @ cdecl __wine_set_unix_funcs(long ptr)
 @ cdecl __wine_init_unix_lib(long long ptr ptr)
+@ stdcall __wine_ctrl_routine(ptr)
 @ extern __wine_syscall_dispatcher
 @ extern -arch=i386 __wine_ldt_copy
 
 # Debugging
+@ stdcall -syscall -norelay __wine_dbg_write(ptr long)
 @ cdecl -norelay __wine_dbg_get_channel_flags(ptr)
 @ cdecl -norelay __wine_dbg_header(long long str)
 @ cdecl -norelay __wine_dbg_output(str)

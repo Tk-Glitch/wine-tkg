@@ -1425,16 +1425,6 @@ enum server_fd_type
 @END
 
 
-/* Set socket event parameters */
-@REQ(set_socket_event)
-    obj_handle_t  handle;        /* handle to the socket */
-    unsigned int  mask;          /* event mask */
-    obj_handle_t  event;         /* event object */
-    user_handle_t window;        /* window to send the message to */
-    unsigned int  msg;           /* message to send */
-@END
-
-
 /* Get socket event parameters */
 @REQ(get_socket_event)
     obj_handle_t handle;        /* handle to the socket */
@@ -1443,7 +1433,6 @@ enum server_fd_type
 @REPLY
     unsigned int mask;          /* event mask */
     unsigned int pmask;         /* pending events */
-    unsigned int state;         /* status bits */
     VARARG(errors,ints);        /* event errors */
 @END
 
@@ -1456,12 +1445,6 @@ enum server_fd_type
     int type;                   /* type, see socket manpage */
     int protocol;               /* protocol, see socket manpage */
     timeout_t connect_time;     /* time the socket was connected (relative) */
-@END
-
-
-@REQ(set_socket_deferred)
-    obj_handle_t handle;        /* handle to the socket */
-    obj_handle_t deferred;      /* handle to the socket for which accept() is deferred */
 @END
 
 

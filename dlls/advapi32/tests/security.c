@@ -265,6 +265,7 @@ static void test_ConvertStringSidToSid(void)
     str_to_sid_tests[] =
     {
         { "WD", "S-1-1-0" },
+        { "wD", "S-1-1-0" },
         { "CO", "S-1-3-0" },
         { "CG", "S-1-3-1" },
         { "OW", "S-1-3-4", 1 }, /* Vista+ */
@@ -304,6 +305,8 @@ static void test_ConvertStringSidToSid(void)
         { "PA", "", 1 },
         { "RS", "", 1 },
         { "SA", "", 1 },
+        { "s-1-12-1", "S-1-12-1" },
+        { "S-0x1-0XC-0x1a", "S-1-12-26" },
     };
 
     const char noSubAuthStr[] = "S-1-5";
@@ -334,6 +337,20 @@ static void test_ConvertStringSidToSid(void)
     r = ConvertStringSidToSidA( noSubAuthStr, &psid );
     ok( !r,
      "expected failure with no sub authorities\n" );
+    ok( GetLastError() == ERROR_INVALID_SID,
+     "expected GetLastError() is ERROR_INVALID_SID, got %d\n",
+     GetLastError() );
+
+    r = ConvertStringSidToSidA( "WDandmorecharacters", &psid );
+    ok( !r,
+     "expected failure with too many characters\n" );
+    ok( GetLastError() == ERROR_INVALID_SID,
+     "expected GetLastError() is ERROR_INVALID_SID, got %d\n",
+     GetLastError() );
+
+    r = ConvertStringSidToSidA( "WD)", &psid );
+    ok( !r,
+     "expected failure with too many characters\n" );
     ok( GetLastError() == ERROR_INVALID_SID,
      "expected GetLastError() is ERROR_INVALID_SID, got %d\n",
      GetLastError() );
@@ -1076,10 +1093,25 @@ todo_wine {
     SetLastError(0xdeadbeef);
     rc = AccessCheck(sd, token, DELETE, &mapping, &priv_set, &priv_set_len, &granted, &status);
     ok(rc, "AccessCheck error %d\n", GetLastError());
-todo_wine {
     ok(status == 1, "expected 1, got %d\n", status);
     ok(granted == DELETE, "expected DELETE, got %#x\n", granted);
-}
+
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, WRITE_OWNER, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == WRITE_OWNER, "expected WRITE_OWNER, got %#x\n", granted);
+
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, SYNCHRONIZE, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == SYNCHRONIZE, "expected SYNCHRONIZE, got %#x\n", granted);
+
     granted = 0xdeadbeef;
     status = 0xdeadbeef;
     SetLastError(0xdeadbeef);
@@ -3754,7 +3786,6 @@ static void test_CreateDirectoryA(void)
     ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
     bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
     ok(bret, "GetAclInformation failed\n");
-    todo_wine
     ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
                                acl_size.AceCount);
     LocalFree(pSD);
@@ -3802,6 +3833,7 @@ static void test_CreateDirectoryA(void)
     ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
     bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
     ok(bret, "GetAclInformation failed\n");
+    todo_wine
     ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
                                acl_size.AceCount);
     LocalFree(pSD);
@@ -4356,7 +4388,8 @@ static void test_ConvertStringSecurityDescriptor(void)
         { "",                                SDDL_REVISION_1, TRUE },
         /* test ACE string SID */
         { "D:(D;;GA;;;S-1-0-0)",             SDDL_REVISION_1, TRUE },
-        { "D:(D;;GA;;;Nonexistent account)", SDDL_REVISION_1, FALSE, ERROR_INVALID_ACL, ERROR_INVALID_SID } /* W2K */
+        { "D:(D;;GA;;;WDANDSUCH)",           SDDL_REVISION_1, FALSE, ERROR_INVALID_ACL },
+        { "D:(D;;GA;;;Nonexistent account)", SDDL_REVISION_1, FALSE, ERROR_INVALID_ACL, ERROR_INVALID_SID }, /* W2K */
     };
 
     for (i = 0; i < ARRAY_SIZE(cssd); i++)

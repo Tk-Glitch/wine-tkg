@@ -95,6 +95,7 @@ literal_t *new_boolean_literal(parser_ctx_t*,BOOL) DECLSPEC_HIDDEN;
 
 typedef struct _variable_declaration_t {
     const WCHAR *identifier;
+    BOOL block_scope, constant;
     expression_t *expr;
 
     struct _variable_declaration_t *next;
@@ -128,6 +129,7 @@ struct _statement_t {
 
 typedef struct {
     statement_t stat;
+    unsigned int scope_index;
     statement_t *stat_list;
 } block_statement_t;
 
@@ -303,6 +305,7 @@ typedef struct _function_expression_t {
     DWORD src_len;
     unsigned func_id;
     BOOL is_statement;
+    unsigned int scope_index;
 
     struct _function_expression_t *next; /* for compiler */
 } function_expression_t;

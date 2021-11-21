@@ -1021,6 +1021,18 @@ static HRESULT join_thread_(int line, HANDLE thread)
 }
 #define join_thread(a) join_thread_(__LINE__, a)
 
+static void commit_allocator(IMemInputPin *input)
+{
+    IMemAllocator *allocator;
+    HRESULT hr;
+
+    hr = IMemInputPin_GetAllocator(input, &allocator);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMemAllocator_Commit(allocator);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    IMemAllocator_Release(allocator);
+}
+
 static void test_filter_state(IMemInputPin *input, IMediaControl *control)
 {
     IMemAllocator *allocator;
@@ -1130,9 +1142,7 @@ static void test_filter_state(IMemInputPin *input, IMediaControl *control)
     hr = IMediaControl_GetState(control, 0, &state);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IMemAllocator_Commit(allocator);
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
-
+    commit_allocator(input);
     hr = IMediaControl_Pause(control);
     ok(hr == S_FALSE, "Got hr %#x.\n", hr);
 
@@ -1163,17 +1173,11 @@ static void test_filter_state(IMemInputPin *input, IMediaControl *control)
 
 static void test_flushing(IPin *pin, IMemInputPin *input, IMediaControl *control)
 {
-    IMemAllocator *allocator;
     OAFilterState state;
     HANDLE thread;
     HRESULT hr;
 
-    hr = IMemInputPin_GetAllocator(input, &allocator);
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
-    hr = IMemAllocator_Commit(allocator);
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
-    IMemAllocator_Release(allocator);
-
+    commit_allocator(input);
     hr = IMediaControl_Pause(control);
     ok(hr == S_FALSE, "Got hr %#x.\n", hr);
 
@@ -1239,7 +1243,6 @@ static void test_current_image(IBaseFilter *filter, IMemInputPin *input,
     const BITMAPINFOHEADER *bih = (BITMAPINFOHEADER *)buffer;
     const DWORD *data = (DWORD *)((char *)buffer + sizeof(BITMAPINFOHEADER));
     BITMAPINFOHEADER expect_bih = *req_bih;
-    IMemAllocator *allocator;
     OAFilterState state;
     IBasicVideo *video;
     unsigned int i;
@@ -1272,12 +1275,7 @@ static void test_current_image(IBaseFilter *filter, IMemInputPin *input,
     ok(!memcmp(bih, &expect_bih, sizeof(BITMAPINFOHEADER)), "Bitmap headers didn't match.\n");
     /* The contents seem to reflect the last frame rendered. */
 
-    hr = IMemInputPin_GetAllocator(input, &allocator);
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
-    hr = IMemAllocator_Commit(allocator);
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
-    IMemAllocator_Release(allocator);
-
+    commit_allocator(input);
     hr = IMediaControl_Pause(control);
     ok(hr == S_FALSE, "Got hr %#x.\n", hr);
 
@@ -1324,6 +1322,110 @@ static void test_current_image(IBaseFilter *filter, IMemInputPin *input,
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     IBasicVideo_Release(video);
+}
+
+static unsigned int check_ec_userabort(IMediaEvent *eventsrc, DWORD timeout)
+{
+    LONG_PTR param1, param2;
+    unsigned int ret = 0;
+    HRESULT hr;
+    LONG code;
+
+    while ((hr = IMediaEvent_GetEvent(eventsrc, &code, &param1, &param2, timeout)) == S_OK)
+    {
+        if (code == EC_USERABORT)
+        {
+            ok(!param1, "Got param1 %#lx.\n", param1);
+            ok(!param2, "Got param2 %#lx.\n", param2);
+            ret++;
+        }
+        IMediaEvent_FreeEventParams(eventsrc, code, param1, param2);
+        timeout = 0;
+    }
+    ok(hr == E_ABORT, "Got hr %#x.\n", hr);
+
+    return ret;
+}
+
+static void test_window_close(IPin *pin, IMemInputPin *input, IMediaControl *control)
+{
+    IMediaEvent *eventsrc;
+    OAFilterState state;
+    IOverlay *overlay;
+    HANDLE thread;
+    HRESULT hr;
+    HWND hwnd;
+    BOOL ret;
+
+    IMediaControl_QueryInterface(control, &IID_IMediaEvent, (void **)&eventsrc);
+    IPin_QueryInterface(pin, &IID_IOverlay, (void **)&overlay);
+
+    hr = IOverlay_GetWindowHandle(overlay, &hwnd);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    IOverlay_Release(overlay);
+
+    commit_allocator(input);
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ret = check_ec_userabort(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_USERABORT.\n");
+
+    SendMessageW(hwnd, WM_CLOSE, 0, 0);
+
+    hr = IMediaControl_GetState(control, 1000, &state);
+    ok(hr == VFW_S_STATE_INTERMEDIATE, "Got hr %#x.\n", hr);
+    ret = check_ec_userabort(eventsrc, 0);
+    ok(ret == 1, "Expected EC_USERABORT.\n");
+
+    ok(IsWindow(hwnd), "Window should exist.\n");
+    ok(!IsWindowVisible(hwnd), "Window should be visible.\n");
+
+    thread = send_frame(input);
+    ret = WaitForSingleObject(thread, 1000);
+    todo_wine ok(ret == WAIT_OBJECT_0, "Wait failed\n");
+    if (ret == WAIT_OBJECT_0)
+    {
+        GetExitCodeThread(thread, (DWORD *)&hr);
+        ok(hr == E_UNEXPECTED, "Got hr %#x.\n", hr);
+    }
+    CloseHandle(thread);
+
+    hr = IMediaControl_Run(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_userabort(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_USERABORT.\n");
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_userabort(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_USERABORT.\n");
+
+    /* We receive an EC_USERABORT notification immediately. */
+
+    commit_allocator(input);
+    hr = IMediaControl_Run(control);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    hr = join_thread(send_frame(input));
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaControl_GetState(control, 1000, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_userabort(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_USERABORT.\n");
+
+    SendMessageW(hwnd, WM_CLOSE, 0, 0);
+
+    ret = check_ec_userabort(eventsrc, 0);
+    ok(ret == 1, "Expected EC_USERABORT.\n");
+
+    ok(IsWindow(hwnd), "Window should exist.\n");
+    ok(!IsWindowVisible(hwnd), "Window should be visible.\n");
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_userabort(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_USERABORT.\n");
+
+    IMediaEvent_Release(eventsrc);
 }
 
 static void test_connect_pin(void)
@@ -1470,6 +1572,7 @@ static void test_connect_pin(void)
     test_filter_state(input, control);
     test_flushing(pin, input, control);
     test_current_image(filter, input, control, &vih.bmiHeader);
+    test_window_close(pin, input, control);
 
     hr = IFilterGraph2_Disconnect(graph, pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);

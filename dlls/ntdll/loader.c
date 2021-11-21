@@ -73,6 +73,8 @@ typedef void  (CALLBACK *LDRENUMPROC)(LDR_DATA_TABLE_ENTRY *, void *, BOOLEAN *)
 
 void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *) = NULL;
 
+static DWORD (WINAPI *pCtrlRoutine)(void *);
+
 const struct unix_funcs *unix_funcs = NULL;
 
 /* windows directory */
@@ -504,25 +506,6 @@ static ULONG hash_basename(const WCHAR *basename)
         hash = towupper(basename[0]) - 'A';
 
     return hash & (HASH_MAP_SIZE-1);
-}
-
-/*************************************************************************
- *      recompute_hash_maps
- *
- * Recomputes the LDR hash map (necessary when windows version changes).
- */
-static void recompute_hash_map(void)
-{
-    LIST_ENTRY *mark, *entry;
-    LDR_DATA_TABLE_ENTRY *mod;
-
-    mark = &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList;
-    for (entry = mark->Flink; entry != mark; entry = entry->Flink)
-    {
-        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-        RemoveEntryList( &mod->HashLinks );
-        InsertTailList( &hash_table[hash_basename(mod->BaseDllName.Buffer)], &mod->HashLinks );
-    }
 }
 
 /*************************************************************************
@@ -2991,12 +2974,6 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname, con
                 status = STATUS_SUCCESS;
                 goto done;
             }
-            /* 16-bit files can't be loaded from the prefix */
-            if (libname[0] && libname[1] && !wcscmp( libname + wcslen(libname) - 2, L"16" ))
-            {
-                status = find_builtin_without_file( libname, nt_name, pwm, mapping, image_info, id );
-                goto done;
-            }
         }
     }
 
@@ -3004,6 +2981,10 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname, con
         status = search_dll_file( load_path, libname, nt_name, pwm, mapping, image_info, id );
     else if (!(status = RtlDosPathNameToNtPathName_U_WithStatus( libname, nt_name, NULL, NULL )))
         status = open_dll_file( nt_name, pwm, mapping, image_info, id );
+
+    /* 16-bit files can't be loaded from the prefix */
+    if (status && libname[0] && libname[1] && !wcscmp( libname + wcslen(libname) - 2, L"16" ) && !contains_path( libname ))
+        status = find_builtin_without_file( libname, nt_name, pwm, mapping, image_info, id );
 
     if (status == STATUS_IMAGE_MACHINE_TYPE_MISMATCH) status = STATUS_INVALID_IMAGE_FORMAT;
 
@@ -3103,6 +3084,17 @@ NTSTATUS __cdecl __wine_init_unix_lib( HMODULE module, DWORD reason, const void 
     return ret;
 }
 
+
+/***********************************************************************
+ *              __wine_ctrl_routine
+ */
+NTSTATUS WINAPI __wine_ctrl_routine( void *arg )
+{
+    DWORD ret = 0;
+
+    if (pCtrlRoutine && NtCurrentTeb()->Peb->ProcessParameters->ConsoleHandle) ret = pCtrlRoutine( arg );
+    RtlExitUserThread( ret );
+}
 
 /******************************************************************
  *		LdrLoadDll (NTDLL.@)
@@ -3948,6 +3940,8 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
             MESSAGE( "wine: could not find BaseThreadInitThunk in kernel32.dll, status %x\n", status );
             NtTerminateProcess( GetCurrentProcess(), status );
         }
+        RtlInitAnsiString( &func_name, "CtrlRoutine" );
+        LdrGetProcedureAddress( kernel32_handle, &func_name, 0, (void **)&pCtrlRoutine );
 
         actctx_init();
         if (wm->ldr.Flags & LDR_COR_ILONLY)

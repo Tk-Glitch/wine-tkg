@@ -25,9 +25,10 @@
 #include "config.h"
 #include "wine/port.h"
 
+#include <stdarg.h>
+
 #ifdef HAVE_GNUTLS_CIPHER_INIT
 
-#include <stdarg.h>
 #include <assert.h>
 #include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>

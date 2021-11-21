@@ -1207,3 +1207,220 @@ sync_test("head_setter", function() {
     document.head = "";
     ok(typeof(document.head) === "object", "typeof(document.head) = " + typeof(document.head));
 });
+
+
+sync_test("declaration_let", function() {
+    ok(typeof(func) === "undefined", "typeof(func)  = " + typeof(func));
+    with(new Object()) {
+        var x = false && function func() {};
+    }
+    ok(typeof(func) === "undefined", "typeof(func)  = " + typeof(func));
+
+    function expect_exception(func, todo) {
+        try {
+            func();
+        }catch(e) {
+            return;
+        }
+        if (typeof todo === 'undefined' || !todo)
+            ok(false, "expected exception");
+        else
+            todo_wine.ok(false, "expected exception");
+    }
+
+    function call_func(f, expected_a)
+    {
+        f(2, expected_a);
+    }
+
+    ok(a === undefined, "a is not undefined");
+    var a = 3;
+
+    {
+        let a = 2;
+        let b
+
+        ok(typeof b === 'undefined', "b is defined");
+        ok(b === undefined, "b !== undefined");
+
+        ok(a == 2, "a != 2");
+
+        a = 4;
+        ok(a == 4, "a != 4");
+
+        eval('ok(a == 4, "eval: a != 4"); b = a; a = 5;')
+        ok(b == 4, "b != 4");
+        ok(a == 5, "a != 5");
+
+        function func1()
+        {
+            ok(typeof b === 'undefined', "func1: b is defined");
+            ok(b === undefined, "func1: should produce exception");
+            let b = 1;
+        }
+        expect_exception(func1, true);
+
+        function func2()
+        {
+            let b = 1;
+            ok(b == 1, "func2: b != 1");
+        }
+        func2();
+
+        var w = 8;
+        with({w: 9})
+        {
+            {
+                let c = 5
+
+                function func3(b, expected)
+                {
+                    var b = 2
+
+                    ok(typeof d === 'undefined', "d is defined");
+
+                    ok(c == expected, "func3: c != expected");
+                    ok(w == 9, "w != 9")
+                    ok(b == 2, "func3: b != 2");
+                    b = 3;
+                    ok(b == 3, "func3: b != 3");
+                    ok(a == expected, "func3: a != expected");
+                    a = 6;
+                    c = 6;
+                }
+
+                let f3 = func3
+                let f4 = function()
+                    {
+                        ok(a == 6, "f4: a != 6");
+                    }
+
+                ok(a == 5, "tmp 2 a != 5");
+                ok(c == 5, "c != 5");
+                func3(1, 5)
+                ok(c == 6, "c != 6");
+                call_func(func3, 6);
+                f3(1, 6)
+                ok(a == 6, "a != 6");
+                ok(b == 4, "b != 4");
+                ok(c == 6, "c != 6");
+
+                call_func(f4);
+                f4();
+            }
+        }
+        {
+            let c = 4;
+            let d = 1;
+
+            func3(1, 6);
+        }
+    }
+
+    ok(a == 3, "a != 3");
+});
+
+sync_test("let scope instances", function() {
+    var a = [], i;
+    for(i = 0; i < 3; i++) {
+        a[i] = function() { return v; };
+        let v = i;
+    }
+    for(i = 0; i < 3; i++)
+        ok(a[i]() == i, "a[" + i + "]() = " + a[i]());
+
+    ok(typeof f == 'undefined', "f is defined");
+
+    for(i = 0; i < 3; i++) {
+        function f() { return v; }
+        a[i] = f;
+        let v = i;
+    }
+    for(i = 0; i < 3; i++)
+        ok(a[i]() == i, "a[" + i + "]() = " + a[i]());
+
+    ok(f() == 2, "f() = " + f());
+});
+
+sync_test("functions scope", function() {
+    function f(){ return 1; }
+    function f(){ return 2; }
+
+    var f0 = f, f1, f2, f3, i, o, a = [];
+    ok(f0() === 2, "f0() = " + f0());
+
+    {
+        f1 = f;
+        function f() { return 3; }
+        ok(f1 === f, "f1 != f");
+        ok(f0 != f1, "f0 == f1");
+    }
+    ok(f === f1, "f != f1");
+
+    for(i = 0; i < 3; i++) {
+        a[i] = f;
+        function f() {}
+        ok(f === a[i], "f != a[i]");
+    }
+    ok(a[0] != a[1], "a[0] == a[1]");
+    ok(a[1] != a[2], "a[1] == a[2]");
+    ok(f === a[2], "f != a[2]");
+
+    {
+        f2 = f;
+        ok(f() === 4, "f() = " + f());
+        function f() { return 4; }
+
+        {
+            f3 = f;
+            ok(f() === 5, "f() = " + f());
+            function f() { return 5;}
+        }
+        ok(f() === 4, "f() = " + f());
+        ok(f === f2, "f != f2");
+    }
+    ok(f === f3, "f != f3");
+
+    with(o = {f: 1}) {
+        ok(f === 1, "f != 1");
+        {
+            ok(f() === 6, "f() = " + f());
+            function f() { return 6; }
+        }
+        ok(f === 1, "f != 1");
+        delete o.f;
+        ok(f() === 6, "f() = " + f());
+    }
+
+    if(false) {
+        function f() { throw "unexpected call"; }
+    }
+    ok(f() === 6, "f() = " + f());
+
+    /* 'with' has no effect for function defined in a single statement context. */
+    let w = 8;
+    with({w:10, value:11})
+        function with_function()
+        {
+            var except
+
+            ok(w == 8, "w != 8");
+            except = false;
+            try
+            {
+                ok(value === undefined, "value is defined");
+            }
+            catch(e)
+            {
+                except = true;
+            }
+            ok(except, "with_function: expected exception");
+
+            let ret = w;
+            w = 9;
+            return ret;
+        }
+    val = with_function();
+    ok(val == 8, "val != 8");
+    ok(w == 9, "w != 9");
+});

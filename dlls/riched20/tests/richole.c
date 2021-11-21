@@ -3252,7 +3252,7 @@ static void test_InsertObject(void)
   REOBJECT reo1, reo2, reo3, received_reo;
   HRESULT hr;
   HWND hwnd;
-  const WCHAR *expected_string;
+  const WCHAR *expected_string, *string;
   const CHAR *expected_stringA;
   ITextSelection *selection;
   IDataObject *dataobject;
@@ -3377,15 +3377,15 @@ static void test_InsertObject(void)
 
   SendMessageW(hwnd, EM_SETSEL, 3, 4);
   result = SendMessageW(hwnd, EM_SELECTIONTYPE, 0, 0);
-  todo_wine ok(result == SEL_OBJECT, "Got selection type: %x.\n", result);
-  todo_wine CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 1, NULL, NULL, reo1.polesite, 1);
+  ok(result == SEL_OBJECT, "Got selection type: %x.\n", result);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 1, NULL, NULL, reo1.polesite, 1);
 
   SendMessageW(hwnd, EM_SETSEL, 2, 4);
   result = SendMessageW(hwnd, EM_SELECTIONTYPE, 0, 0);
-  todo_wine ok(result == (SEL_TEXT | SEL_OBJECT), "Got selection type: %x.\n", result);
+  ok(result == (SEL_TEXT | SEL_OBJECT), "Got selection type: %x.\n", result);
 
   SendMessageW(hwnd, EM_SETSEL, 5, 6);
-  todo_wine CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 1, NULL, NULL, reo2.polesite, 2);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 1, NULL, NULL, reo2.polesite, 2);
 
   expected_string = L"abc\xfffc""d\xfffc""efg";
   gettextex.cb = sizeof(buffer);
@@ -3403,12 +3403,32 @@ static void test_InsertObject(void)
   ok(result == lstrlenW(expected_string), "Got wrong length: %d.\n", result);
   todo_wine ok(!lstrcmpW(buffer, expected_string), "Got wrong content: %s.\n", debugstr_w(buffer));
 
+  gettextex.flags = GT_NOHIDDENTEXT;
+  memset(buffer, 0, sizeof(buffer));
+  result = SendMessageW(hwnd, EM_GETTEXTEX, (WPARAM)&gettextex, (LPARAM)buffer);
+  ok(result == lstrlenW(expected_string), "Got wrong length: %d.\n", result);
+  todo_wine ok(!lstrcmpW(buffer, expected_string), "Got wrong content: %s.\n", debugstr_w(buffer));
+
+  gettextex.flags = GT_SELECTION;
+  memset(buffer, 0, sizeof(buffer));
+  SendMessageW(hwnd, EM_SETSEL, 0, -1);
+  result = SendMessageW(hwnd, EM_GETTEXTEX, (WPARAM)&gettextex, (LPARAM)buffer);
+  ok(result == lstrlenW(expected_string), "Got wrong length: %d.\n", result);
+  todo_wine ok(!lstrcmpW(buffer, expected_string), "Got wrong content: %s.\n", debugstr_w(buffer));
+
+  expected_string = L"abc d efg";
+  gettextex.flags = GT_USECRLF;
+  memset(buffer, 0, sizeof(buffer));
+  result = SendMessageW(hwnd, EM_GETTEXTEX, (WPARAM)&gettextex, (LPARAM)buffer);
+  ok(result == lstrlenW(expected_string), "Got wrong length: %d.\n", result);
+  ok(!lstrcmpW(buffer, expected_string), "Got wrong content: %s.\n", debugstr_w(buffer));
+
   expected_stringA = "abc d efg";
   memset(bufferA, 0, sizeof(bufferA));
   SendMessageA(hwnd, EM_SETSEL, 0, -1);
   result = SendMessageA(hwnd, EM_GETSELTEXT, (WPARAM)sizeof(bufferA), (LPARAM)bufferA);
   ok(result == strlen(expected_stringA), "Got wrong length: %d.\n", result);
-  todo_wine ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+  ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
 
   memset(bufferA, 0, sizeof(bufferA));
   textrange.lpstrText = bufferA;
@@ -3416,7 +3436,7 @@ static void test_InsertObject(void)
   textrange.chrg.cpMax = 11;
   result = SendMessageA(hwnd, EM_GETTEXTRANGE, 0, (LPARAM)&textrange);
   ok(result == strlen(expected_stringA), "Got wrong length: %d.\n", result);
-  todo_wine ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+  ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
 
   expected_string = L"abc\xfffc""d\xfffc""efg\r";
   hr = ITextDocument_Range(doc, 0, 11, &range);
@@ -3465,8 +3485,10 @@ static void test_InsertObject(void)
   formatetc.lindex = -1;
   hr = IDataObject_GetData(dataobject, &formatetc, &stgmedium);
   ok(hr == S_OK, "Got hr %#x.\n", hr);
-  todo_wine ok(lstrlenW(stgmedium.hGlobal) == lstrlenW(expected_string), "Got wrong length: %d.\n", result);
-  todo_wine ok(!lstrcmpW(stgmedium.hGlobal, expected_string), "Got wrong content: %s.\n", debugstr_w(stgmedium.hGlobal));
+  string = GlobalLock(stgmedium.hGlobal);
+  ok(lstrlenW(string) == lstrlenW(expected_string), "Got wrong length: %d.\n", lstrlenW(string));
+  ok(!lstrcmpW(string, expected_string), "Got wrong content: %s.\n", debugstr_w(string));
+  GlobalUnlock(stgmedium.hGlobal);
 
   expected_string = L"abc\xfffc""d\xfffc""efg";
   gettextex.cb = sizeof(buffer);
@@ -3489,7 +3511,7 @@ static void test_InsertObject(void)
   SendMessageA(hwnd, EM_SETSEL, 0, -1);
   result = SendMessageA(hwnd, EM_GETSELTEXT, (WPARAM)sizeof(bufferA), (LPARAM)bufferA);
   ok(result == strlen(expected_stringA), "Got wrong length: %d.\n", result);
-  todo_wine ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+  ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
 
   memset(bufferA, 0, sizeof(bufferA));
   textrange.lpstrText = bufferA;
@@ -3497,7 +3519,7 @@ static void test_InsertObject(void)
   textrange.chrg.cpMax = 11;
   result = SendMessageA(hwnd, EM_GETTEXTRANGE, 0, (LPARAM)&textrange);
   ok(result == strlen(expected_stringA), "Got wrong length: %d.\n", result);
-  todo_wine ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+  ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
 
   expected_string = L"abc\xfffc""d\xfffc""efg";
   hr = ITextDocument_Range(doc, 0, 11, &range);

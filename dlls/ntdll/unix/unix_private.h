@@ -47,27 +47,17 @@ static inline BOOL is_machine_64bit( WORD machine )
     return (machine == IMAGE_FILE_MACHINE_AMD64 || machine == IMAGE_FILE_MACHINE_ARM64);
 }
 
-struct debug_info
-{
-    unsigned int str_pos;       /* current position in strings buffer */
-    unsigned int out_pos;       /* current position in output buffer */
-    char         strings[1024]; /* buffer for temporary strings */
-    char         output[1024];  /* current output line */
-};
-
 /* thread private data, stored in NtCurrentTeb()->GdiTebBatch */
 struct ntdll_thread_data
 {
     void              *cpu_data[16];  /* reserved for CPU-specific data */
-    struct debug_info *debug_info;    /* info for debugstr functions */
-    void              *start_stack;   /* stack for thread startup */
+    void              *kernel_stack;  /* stack for thread startup and kernel syscalls */
     int                esync_apc_fd;  /* fd to wait on for user APCs */
     int               *fsync_apc_futex;
     int                request_fd;    /* fd for sending server requests */
     int                reply_fd;      /* fd for receiving server replies */
     int                wait_fd[2];    /* fd for sleeping server requests */
     pthread_t          pthread_id;    /* pthread thread id */
-    void              *pthread_stack; /* pthread stack */
     struct list        entry;         /* entry in TEB list */
     PRTL_THREAD_START_ROUTINE start;  /* thread entry point */
     void              *param;         /* thread entry point parameter */
@@ -92,9 +82,10 @@ struct async_fileio
 };
 
 static const SIZE_T page_size = 0x1000;
-static const SIZE_T teb_size = 0x3000;  /* TEB64 + TEB32 */
+static const SIZE_T teb_size = 0x3800;  /* TEB64 + TEB32 + debug info */
 static const SIZE_T signal_stack_mask = 0xffff;
-static const SIZE_T signal_stack_size = 0x10000 - 0x3000;
+static const SIZE_T signal_stack_size = 0x10000 - 0x3800;
+static const SIZE_T kernel_stack_size = 0x20000;
 static const LONG teb_offset = 0x2000;
 
 /* callbacks to PE ntdll from the Unix side */
@@ -104,6 +95,7 @@ extern void     (WINAPI *pKiUserApcDispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULON
 extern NTSTATUS (WINAPI *pKiUserExceptionDispatcher)(EXCEPTION_RECORD*,CONTEXT*) DECLSPEC_HIDDEN;
 extern void     (WINAPI *pLdrInitializeThunk)(CONTEXT*,void**,ULONG_PTR,ULONG_PTR) DECLSPEC_HIDDEN;
 extern void     (WINAPI *pRtlUserThreadStart)( PRTL_THREAD_START_ROUTINE entry, void *arg ) DECLSPEC_HIDDEN;
+extern void     (WINAPI *p__wine_ctrl_routine)(void *) DECLSPEC_HIDDEN;
 extern NTSTATUS CDECL fast_RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit, int timeout ) DECLSPEC_HIDDEN;
 extern NTSTATUS CDECL fast_RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit ) DECLSPEC_HIDDEN;
 extern NTSTATUS CDECL fast_RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit ) DECLSPEC_HIDDEN;
@@ -129,6 +121,7 @@ extern const char *build_dir DECLSPEC_HIDDEN;
 extern const char *config_dir DECLSPEC_HIDDEN;
 extern const char *user_name DECLSPEC_HIDDEN;
 extern const char **dll_paths DECLSPEC_HIDDEN;
+extern PEB *peb DECLSPEC_HIDDEN;
 extern USHORT *uctable DECLSPEC_HIDDEN;
 extern USHORT *lctable DECLSPEC_HIDDEN;
 extern SIZE_T startup_info_size DECLSPEC_HIDDEN;
@@ -171,7 +164,6 @@ extern NTSTATUS load_main_exe( const WCHAR *name, const char *unix_name, const W
                                void **module ) DECLSPEC_HIDDEN;
 extern NTSTATUS load_start_exe( WCHAR **image, void **module ) DECLSPEC_HIDDEN;
 extern void start_server( BOOL debug ) DECLSPEC_HIDDEN;
-extern ULONG_PTR get_image_address(void) DECLSPEC_HIDDEN;
 
 extern unsigned int server_call_unlocked( void *req_ptr ) DECLSPEC_HIDDEN;
 extern void server_enter_uninterrupted_section( pthread_mutex_t *mutex, sigset_t *sigset ) DECLSPEC_HIDDEN;
@@ -193,8 +185,7 @@ extern void server_init_thread( void *entry_point, BOOL *suspend ) DECLSPEC_HIDD
 extern int server_pipe( int fd[2] ) DECLSPEC_HIDDEN;
 
 extern void set_thread_id( TEB *teb, DWORD pid, DWORD tid ) DECLSPEC_HIDDEN;
-extern NTSTATUS init_thread_stack( TEB *teb, ULONG_PTR zero_bits, SIZE_T reserve_size,
-                                   SIZE_T commit_size, SIZE_T *pthread_size ) DECLSPEC_HIDDEN;
+extern NTSTATUS init_thread_stack( TEB *teb, ULONG_PTR zero_bits, SIZE_T reserve_size, SIZE_T commit_size ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN abort_thread( int status ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN abort_process( int status ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN exit_process( int status ) DECLSPEC_HIDDEN;
@@ -219,7 +210,7 @@ extern NTSTATUS virtual_alloc_teb( TEB **ret_teb, ULONG_PTR zero_bits ) DECLSPEC
 extern void virtual_free_teb( TEB *teb ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_clear_tls_index( ULONG index ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR zero_bits, SIZE_T reserve_size,
-                                            SIZE_T commit_size, SIZE_T *pthread_size ) DECLSPEC_HIDDEN;
+                                            SIZE_T commit_size, SIZE_T extra_size ) DECLSPEC_HIDDEN;
 extern void virtual_map_user_shared_data(void) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_handle_fault( void *addr, DWORD err, void *stack ) DECLSPEC_HIDDEN;
 extern unsigned int virtual_locked_server_call( void *req_ptr ) DECLSPEC_HIDDEN;
@@ -252,10 +243,10 @@ extern void signal_init_process(void) DECLSPEC_HIDDEN;
 extern void signal_init_early(void) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE entry, void *arg,
                                                    BOOL suspend, void *thunk, TEB *teb ) DECLSPEC_HIDDEN;
-extern void DECLSPEC_NORETURN signal_exit_thread( int status, void (*func)(int) ) DECLSPEC_HIDDEN;
+extern void DECLSPEC_NORETURN signal_exit_thread( int status, void (*func)(int), TEB *teb ) DECLSPEC_HIDDEN;
 extern void __wine_syscall_dispatcher(void) DECLSPEC_HIDDEN;
 extern unsigned int __wine_syscall_flags DECLSPEC_HIDDEN;
-extern void signal_restore_full_cpu_context(void) DECLSPEC_HIDDEN;
+extern NTSTATUS signal_set_full_context( CONTEXT *context ) DECLSPEC_HIDDEN;
 extern NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size ) DECLSPEC_HIDDEN;
 extern NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size ) DECLSPEC_HIDDEN;
 extern void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid ) DECLSPEC_HIDDEN;
@@ -290,14 +281,10 @@ extern void add_completion( HANDLE handle, ULONG_PTR value, NTSTATUS status, ULO
 
 extern void dbg_init(void) DECLSPEC_HIDDEN;
 
-extern void WINAPI DECLSPEC_NORETURN call_user_apc_dispatcher( CONTEXT *context_ptr, ULONG_PTR arg1,
-                                                               ULONG_PTR arg2, ULONG_PTR arg3,
-                                                               PNTAPCFUNC func,
-                                                               void (WINAPI *dispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PNTAPCFUNC),
-                                                               NTSTATUS status ) DECLSPEC_HIDDEN;
-extern void WINAPI DECLSPEC_NORETURN call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context,
-                                                                     NTSTATUS (WINAPI *dispatcher)(EXCEPTION_RECORD*,CONTEXT*) ) DECLSPEC_HIDDEN;
-extern void WINAPI call_raise_user_exception_dispatcher( NTSTATUS (WINAPI *dispatcher)(void) ) DECLSPEC_HIDDEN;
+extern NTSTATUS call_user_apc_dispatcher( CONTEXT *context_ptr, ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3,
+                                          PNTAPCFUNC func, NTSTATUS status ) DECLSPEC_HIDDEN;
+extern NTSTATUS call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context ) DECLSPEC_HIDDEN;
+extern void call_raise_user_exception_dispatcher(void) DECLSPEC_HIDDEN;
 
 #define IMAGE_DLLCHARACTERISTICS_PREFER_NATIVE 0x0010 /* Wine extension */
 
@@ -340,56 +327,17 @@ static inline void mutex_unlock( pthread_mutex_t *mutex )
 }
 
 #ifdef _WIN64
+typedef TEB32 WOW_TEB;
 static inline TEB64 *NtCurrentTeb64(void) { return NULL; }
 #else
+typedef TEB64 WOW_TEB;
 static inline TEB64 *NtCurrentTeb64(void) { return (TEB64 *)NtCurrentTeb()->GdiBatchCount; }
 #endif
 
-struct xcontext
+static inline WOW_TEB *get_wow_teb( TEB *teb )
 {
-    CONTEXT c;
-    CONTEXT_EX c_ex;
-    ULONG64 host_compaction_mask;
-};
-
-#if defined(__i386__) || defined(__x86_64__)
-extern BOOL xstate_compaction_enabled DECLSPEC_HIDDEN;
-
-static inline XSTATE *xstate_from_context( const CONTEXT *context )
-{
-    CONTEXT_EX *xctx = (CONTEXT_EX *)(context + 1);
-
-    if ((context->ContextFlags & CONTEXT_XSTATE) != CONTEXT_XSTATE)
-        return NULL;
-
-    return (XSTATE *)((char *)(context + 1) + xctx->XState.Offset);
+    return teb->WowTebOffset ? (WOW_TEB *)((char *)teb + teb->WowTebOffset) : NULL;
 }
-
-static inline void context_init_xstate( CONTEXT *context, void *xstate_buffer )
-{
-    CONTEXT_EX *xctx;
-
-    xctx = (CONTEXT_EX *)(context + 1);
-    xctx->Legacy.Length = sizeof(CONTEXT);
-    xctx->Legacy.Offset = -(LONG)sizeof(CONTEXT);
-
-    xctx->XState.Length = sizeof(XSTATE);
-    xctx->XState.Offset = (BYTE *)xstate_buffer - (BYTE *)xctx;
-
-    xctx->All.Length = sizeof(CONTEXT) + xctx->XState.Offset + xctx->XState.Length;
-    xctx->All.Offset = -(LONG)sizeof(CONTEXT);
-    context->ContextFlags |= 0x40;
-}
-
-#else
-static inline XSTATE *xstate_from_context( const CONTEXT *context )
-{
-    return NULL;
-}
-static inline void context_init_xstate( CONTEXT *context, void *xstate_buffer )
-{
-}
-#endif
 
 enum loadorder
 {

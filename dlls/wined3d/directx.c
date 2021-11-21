@@ -438,6 +438,7 @@ static const struct wined3d_gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX970M,    "NVIDIA GeForce GTX 970M",          DRIVER_NVIDIA_KEPLER,  3072},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX980,     "NVIDIA GeForce GTX 980",           DRIVER_NVIDIA_KEPLER,  4096},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX980TI,   "NVIDIA GeForce GTX 980 Ti",        DRIVER_NVIDIA_KEPLER,  6144},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT1030,     "NVIDIA GeForce GT 1030",           DRIVER_NVIDIA_KEPLER,  2048},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1050,    "NVIDIA GeForce GTX 1050",          DRIVER_NVIDIA_KEPLER,  2048},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1050TI,  "NVIDIA GeForce GTX 1050 Ti",       DRIVER_NVIDIA_KEPLER,  4096},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX1060_3GB,"NVIDIA GeForce GTX 1060 3GB",      DRIVER_NVIDIA_KEPLER,  3072},
@@ -3049,9 +3050,9 @@ static void adapter_no3d_dispatch_compute(struct wined3d_device *device,
 }
 
 static void adapter_no3d_clear_uav(struct wined3d_context *context,
-        struct wined3d_unordered_access_view *view, const struct wined3d_uvec4 *clear_value)
+        struct wined3d_unordered_access_view *view, const struct wined3d_uvec4 *clear_value, bool fp)
 {
-    ERR("context %p, view %p, clear_value %s.\n", context, view, debug_uvec4(clear_value));
+    ERR("context %p, view %p, clear_value %s, fp %#x.\n", context, view, debug_uvec4(clear_value), fp);
 }
 
 static const struct wined3d_adapter_ops wined3d_adapter_no3d_ops =

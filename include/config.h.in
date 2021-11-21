@@ -34,18 +34,6 @@
 /* Define to 1 if you have the <attr/xattr.h> header file. */
 #undef HAVE_ATTR_XATTR_H
 
-/* Define to 1 if you have the <AudioToolbox/AudioConverter.h> header file. */
-#undef HAVE_AUDIOTOOLBOX_AUDIOCONVERTER_H
-
-/* Define to 1 if you have the <AudioUnit/AudioComponent.h> header file. */
-#undef HAVE_AUDIOUNIT_AUDIOCOMPONENT_H
-
-/* Define to 1 if you have the <AudioUnit/AudioUnit.h> header file. */
-#undef HAVE_AUDIOUNIT_AUDIOUNIT_H
-
-/* Define to 1 if you have the `AUGraphAddNode' function. */
-#undef HAVE_AUGRAPHADDNODE
-
 /* Define to 1 if you have the <capi20.h> header file. */
 #undef HAVE_CAPI20_H
 
@@ -95,12 +83,6 @@
 /* Define to 1 if you have the `epoll_create' function. */
 #undef HAVE_EPOLL_CREATE
 
-/* Define to 1 if you have the `exp2' function. */
-#undef HAVE_EXP2
-
-/* Define to 1 if you have the `exp2f' function. */
-#undef HAVE_EXP2F
-
 /* Define to 1 if you have the `F3DAudioInitialize8' function. */
 #undef HAVE_F3DAUDIOINITIALIZE8
 
@@ -122,9 +104,6 @@
 
 /* Define to 1 if you have the <float.h> header file. */
 #undef HAVE_FLOAT_H
-
-/* Define to 1 if you have the `fmaf' function. */
-#undef HAVE_FMAF
 
 /* Define to 1 if you have the `fnmatch' function. */
 #undef HAVE_FNMATCH
@@ -961,12 +940,6 @@
 
 /* Define to 1 if you have the <termios.h> header file. */
 #undef HAVE_TERMIOS_H
-
-/* Define to 1 if you have the `tgamma' function. */
-#undef HAVE_TGAMMA
-
-/* Define to 1 if you have the `tgammaf' function. */
-#undef HAVE_TGAMMAF
 
 /* Define to 1 if you have the `thr_kill2' function. */
 #undef HAVE_THR_KILL2

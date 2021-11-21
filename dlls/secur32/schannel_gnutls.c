@@ -28,6 +28,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <errno.h>
 #ifdef SONAME_LIBGNUTLS
 #include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>
@@ -46,7 +47,7 @@
 #include "wine/debug.h"
 #include "wine/unicode.h"
 
-#if defined(SONAME_LIBGNUTLS) && !defined(HAVE_SECURITY_SECURITY_H)
+#if defined(SONAME_LIBGNUTLS)
 
 WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
@@ -204,9 +205,14 @@ static ssize_t pull_adapter(gnutls_transport_ptr_t transport, void *buff, size_t
     gnutls_session_t s = (gnutls_session_t)callbacks->get_session_for_transport(t);
 
     int ret = callbacks->pull(transport, buff, &buff_len);
-    if (ret)
+    if (ret == -1)
     {
-        pgnutls_transport_set_errno(s, ret);
+        pgnutls_transport_set_errno(s, EAGAIN);
+        return -1;
+    }
+    if (ret < 0)
+    {
+        FIXME("unhandled error from pull callback %d\n", ret);
         return -1;
     }
 
@@ -219,9 +225,14 @@ static ssize_t push_adapter(gnutls_transport_ptr_t transport, const void *buff, 
     gnutls_session_t s = (gnutls_session_t)callbacks->get_session_for_transport(t);
 
     int ret = callbacks->push(transport, buff, &buff_len);
-    if (ret)
+    if (ret == -1)
     {
-        pgnutls_transport_set_errno(s, ret);
+        pgnutls_transport_set_errno(s, EAGAIN);
+        return -1;
+    }
+    if (ret < 0)
+    {
+        FIXME("unhandled error from push callback %d\n", ret);
         return -1;
     }
 
@@ -1111,4 +1122,4 @@ NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *p
     return STATUS_SUCCESS;
 }
 
-#endif /* SONAME_LIBGNUTLS && !HAVE_SECURITY_SECURITY_H */
+#endif /* SONAME_LIBGNUTLS */

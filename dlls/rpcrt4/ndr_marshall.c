@@ -6999,7 +6999,7 @@ static unsigned char *WINAPI NdrContextHandleMarshall(
     }
     else
     {
-        NDR_SCONTEXT ctxt = CONTAINING_RECORD(pMemory, struct _NDR_SCONTEXT, userContext);
+        NDR_SCONTEXT ctxt = CONTAINING_RECORD((void * const*)pMemory, struct _NDR_SCONTEXT, userContext);
         NDR_RUNDOWN rundown = pStubMsg->StubDesc->apfnNdrRundownRoutines[pFormat[2]];
         NdrServerContextNewMarshall(pStubMsg, ctxt, rundown, pFormat);
     }

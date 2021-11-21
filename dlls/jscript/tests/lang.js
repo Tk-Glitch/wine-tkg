@@ -1586,6 +1586,22 @@ tmp.testWith = true;
 with(tmp)
     ok(testWith === true, "testWith !== true");
 
+function withScopeTest()
+{
+    var a = 3;
+    with({a : 2})
+    {
+        ok(a == 2, "withScopeTest: a != 2");
+        function func()
+        {
+            ok(a == 3, "withScopeTest: func: a != 3");
+        }
+        func();
+        eval('ok(a == 2, "withScopeTest: eval: a != 2");');
+    }
+}
+withScopeTest();
+
 if(false) {
     var varTest1 = true;
 }
@@ -2030,3 +2046,37 @@ Math = 6;
 ok(Math === 6, "NaN !== 6");
 
 reportSuccess();
+
+function test_es5_keywords() {
+    var let = 1
+    var tmp
+    ok(let == 1, "let != 1");
+
+    tmp = false
+    try {
+        eval('var var = 1;');
+    }
+    catch(e) {
+        tmp = true
+    }
+    ok(tmp === true, "Expected exception for 'var var = 1;'");
+
+    tmp = false
+    try {
+        eval('var const = 1;');
+    }
+    catch(e) {
+        tmp = true
+    }
+    ok(tmp === true, "Expected exception for 'var const = 1;'");
+
+    tmp = false
+    try {
+        eval('const c1 = 1;');
+    }
+    catch(e) {
+        tmp = true
+    }
+    ok(tmp === true, "Expected exception for 'const c1 = 1;'");
+}
+test_es5_keywords();
