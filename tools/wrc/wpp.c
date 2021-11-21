@@ -20,7 +20,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -30,10 +29,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include <time.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 
+#include "../tools.h"
 #include "utils.h"
 #include "wpp_private.h"
 
@@ -88,13 +85,7 @@ static char *wpp_lookup(const char *name, int type, const char *parent_name,
     if(type && parent_name)
     {
         /* Search directory of parent include and then -I path */
-        const char *p;
-
-        if ((p = strrchr( parent_name, '/' ))) p++;
-        else p = parent_name;
-        path = xmalloc( (p - parent_name) + strlen(cpy) + 1 );
-        memcpy( path, parent_name, p - parent_name );
-        strcpy( path + (p - parent_name), cpy );
+        path = strmake( "%s/%s", get_dirname(parent_name), cpy );
         fd = open( path, O_RDONLY );
         if (fd != -1)
         {

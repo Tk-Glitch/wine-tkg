@@ -1,16 +1,14 @@
 MODULE    = bcrypt.dll
 IMPORTS   = advapi32
 IMPORTLIB = bcrypt
+UNIXLIB   = bcrypt.so
 EXTRAINCL = $(GNUTLS_CFLAGS) $(GMP_CFLAGS)
 
 C_SRCS = \
 	bcrypt_main.c \
-	gcrypt.c \
 	gnutls.c \
-	macos.c \
 	md2.c \
 	sha256.c \
-	sha512.c \
-	unixlib.c
+	sha512.c
 
 RC_SRCS = version.rc

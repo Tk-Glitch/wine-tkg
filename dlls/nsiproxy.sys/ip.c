@@ -18,6 +18,10 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 #include <stdarg.h>
 
@@ -94,11 +98,10 @@
 #include "ifdef.h"
 #include "ipmib.h"
 #include "netiodef.h"
-#include "wine/heap.h"
 #include "wine/nsi.h"
 #include "wine/debug.h"
 
-#include "nsiproxy_private.h"
+#include "unix_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nsi);
 
@@ -261,10 +264,10 @@ static NTSTATUS ipv4_icmpstats_get_all_parameters( const void *key, DWORD key_si
 
         while ((ptr = fgets( buf, sizeof(buf), fp )))
         {
-            if (_strnicmp( buf, hdr, sizeof(hdr) - 1 )) continue;
+            if (ascii_strncasecmp( buf, hdr, sizeof(hdr) - 1 )) continue;
             /* last line was a header, get another */
             if (!(ptr = fgets( buf, sizeof(buf), fp ))) break;
-            if (!_strnicmp( buf, hdr, sizeof(hdr) - 1 ))
+            if (!ascii_strncasecmp( buf, hdr, sizeof(hdr) - 1 ))
             {
                 ptr += sizeof(hdr);
                 sscanf( ptr, "%u %u %*u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
@@ -427,13 +430,13 @@ static NTSTATUS ipv6_icmpstats_get_all_parameters( const void *key, DWORD key_si
             while (*value == ' ') value++;
             if ((ptr = strchr( value, '\n' ))) *ptr='\0';
 
-            if (!_strnicmp( buf, "Icmp6InMsgs", -1 ))
+            if (!ascii_strcasecmp( buf, "Icmp6InMsgs" ))
             {
                 if (sscanf( value, "%d", &res )) dyn.in_msgs = res;
                 continue;
             }
 
-            if (!_strnicmp( buf, "Icmp6InErrors", -1 ))
+            if (!ascii_strcasecmp( buf, "Icmp6InErrors" ))
             {
                 if (sscanf( value, "%d", &res )) dyn.in_errors = res;
                 continue;
@@ -441,7 +444,7 @@ static NTSTATUS ipv6_icmpstats_get_all_parameters( const void *key, DWORD key_si
 
             for (i = 0; i < ARRAY_SIZE(in_list); i++)
             {
-                if (!_strnicmp( buf, in_list[i].name, -1 ))
+                if (!ascii_strcasecmp( buf, in_list[i].name ))
                 {
                     if (sscanf( value, "%d", &res ))
                         dyn.in_type_counts[in_list[i].pos] = res;
@@ -449,13 +452,13 @@ static NTSTATUS ipv6_icmpstats_get_all_parameters( const void *key, DWORD key_si
                 }
             }
 
-            if (!_strnicmp( buf, "Icmp6OutMsgs", -1 ))
+            if (!ascii_strcasecmp( buf, "Icmp6OutMsgs" ))
             {
                 if (sscanf( value, "%d", &res )) dyn.out_msgs = res;
                 continue;
             }
 
-            if (!_strnicmp( buf, "Icmp6OutErrors", -1 ))
+            if (!ascii_strcasecmp( buf, "Icmp6OutErrors" ))
             {
                 if (sscanf( value, "%d", &res )) dyn.out_errors = res;
                 continue;
@@ -463,7 +466,7 @@ static NTSTATUS ipv6_icmpstats_get_all_parameters( const void *key, DWORD key_si
 
             for (i = 0; i < ARRAY_SIZE(out_list); i++)
             {
-                if (!_strnicmp( buf, out_list[i].name, -1 ))
+                if (!ascii_strcasecmp( buf, out_list[i].name ))
                 {
                     if (sscanf( value, "%d", &res ))
                         dyn.out_type_counts[out_list[i].pos] = res;
@@ -504,10 +507,10 @@ static NTSTATUS ipv4_ipstats_get_all_parameters( const void *key, DWORD key_size
 
         while ((ptr = fgets( buf, sizeof(buf), fp )))
         {
-            if (_strnicmp( buf, hdr, sizeof(hdr) - 1 )) continue;
+            if (ascii_strncasecmp( buf, hdr, sizeof(hdr) - 1 )) continue;
             /* last line was a header, get another */
             if (!(ptr = fgets( buf, sizeof(buf), fp ))) break;
-            if (!_strnicmp( buf, hdr, sizeof(hdr) - 1 ))
+            if (!ascii_strncasecmp( buf, hdr, sizeof(hdr) - 1 ))
             {
                 DWORD in_recv, in_hdr_errs, fwd_dgrams, in_delivers, out_reqs;
                 ptr += sizeof(hdr);
@@ -643,7 +646,7 @@ static NTSTATUS ipv6_ipstats_get_all_parameters( const void *key, DWORD key_size
             if ((ptr = strchr( value, '\n' ))) *ptr = '\0';
 
             for (i = 0; i < ARRAY_SIZE(ipstatlist); i++)
-                if (!_strnicmp( buf, ipstatlist[i].name, -1 ))
+                if (!ascii_strcasecmp( buf, ipstatlist[i].name ))
                 {
                     if (ipstatlist[i].size == sizeof(long))
                         *(long *)ipstatlist[i].elem = strtoul( value, NULL, 10 );
@@ -933,12 +936,12 @@ static NTSTATUS ipv4_neighbour_enumerate_all( void *key_data, DWORD key_size, vo
 
         if (sysctl( mib, ARRAY_SIZE(mib), NULL, &needed, NULL, 0 ) == -1) return STATUS_NOT_SUPPORTED;
 
-        buf = heap_alloc( needed );
+        buf = malloc( needed );
         if (!buf) return STATUS_NO_MEMORY;
 
         if (sysctl( mib, ARRAY_SIZE(mib), buf, &needed, NULL, 0 ) == -1)
         {
-            heap_free( buf );
+            free( buf );
             return STATUS_NOT_SUPPORTED;
         }
 
@@ -982,7 +985,7 @@ static NTSTATUS ipv4_neighbour_enumerate_all( void *key_data, DWORD key_size, vo
             }
             next += rtm->rtm_msglen;
         }
-        heap_free( buf );
+        free( buf );
     }
 #else
     FIXME( "not implemented\n" );
@@ -1122,12 +1125,12 @@ static NTSTATUS ipv4_forward_enumerate_all( void *key_data, DWORD key_size, void
 
         if (sysctl( mib, ARRAY_SIZE(mib), NULL, &needed, NULL, 0 ) < 0) return STATUS_NOT_SUPPORTED;
 
-        buf = heap_alloc( needed );
+        buf = malloc( needed );
         if (!buf) return STATUS_NO_MEMORY;
 
         if (sysctl( mib, 6, buf, &needed, NULL, 0 ) < 0)
         {
-            heap_free( buf );
+            free( buf );
             return STATUS_NOT_SUPPORTED;
         }
 
@@ -1225,7 +1228,7 @@ static NTSTATUS ipv4_forward_enumerate_all( void *key_data, DWORD key_size, void
             }
             num++;
         }
-        HeapFree( GetProcessHeap (), 0, buf );
+        free( buf );
     }
 #else
     FIXME( "not implemented\n" );

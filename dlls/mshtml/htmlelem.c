@@ -46,32 +46,119 @@ typedef struct {
     HRESULT (*constructor)(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
 } tag_desc_t;
 
+static HRESULT HTMLElement_Ctor(HTMLDocumentNode*,nsIDOMElement*,HTMLElement**);
+
 static const tag_desc_t tag_descs[] = {
-    {L"A",         HTMLAnchorElement_Create},
-    {L"AREA",      HTMLAreaElement_Create},
-    {L"BODY",      HTMLBodyElement_Create},
-    {L"BUTTON",    HTMLButtonElement_Create},
-    {L"EMBED",     HTMLEmbedElement_Create},
-    {L"FORM",      HTMLFormElement_Create},
-    {L"FRAME",     HTMLFrameElement_Create},
-    {L"HEAD",      HTMLHeadElement_Create},
-    {L"HTML",      HTMLHtmlElement_Create},
-    {L"IFRAME",    HTMLIFrame_Create},
-    {L"IMG",       HTMLImgElement_Create},
-    {L"INPUT",     HTMLInputElement_Create},
-    {L"LABEL",     HTMLLabelElement_Create},
-    {L"LINK",      HTMLLinkElement_Create},
-    {L"META",      HTMLMetaElement_Create},
-    {L"OBJECT",    HTMLObjectElement_Create},
-    {L"OPTION",    HTMLOptionElement_Create},
-    {L"SCRIPT",    HTMLScriptElement_Create},
-    {L"SELECT",    HTMLSelectElement_Create},
-    {L"STYLE",     HTMLStyleElement_Create},
-    {L"TABLE",     HTMLTable_Create},
-    {L"TD",        HTMLTableCell_Create},
-    {L"TEXTAREA",  HTMLTextAreaElement_Create},
-    {L"TITLE",     HTMLTitleElement_Create},
-    {L"TR",        HTMLTableRow_Create}
+    {L"A",              HTMLAnchorElement_Create},
+    {L"ABBR",           HTMLElement_Ctor},
+    {L"ACRONYM",        HTMLElement_Ctor},
+    {L"ADDRESS",        HTMLElement_Ctor},
+    {L"APPLET",         HTMLElement_Ctor},
+    {L"AREA",           HTMLAreaElement_Create},
+    {L"ARTICLE",        HTMLElement_Ctor},
+    {L"ASIDE",          HTMLElement_Ctor},
+    {L"AUDIO",          HTMLElement_Ctor},
+    {L"B",              HTMLElement_Ctor},
+    {L"BASE",           HTMLElement_Ctor},
+    {L"BASEFONT",       HTMLElement_Ctor},
+    {L"BDO",            HTMLElement_Ctor},
+    {L"BIG",            HTMLElement_Ctor},
+    {L"BLOCKQUOTE",     HTMLElement_Ctor},
+    {L"BODY",           HTMLBodyElement_Create},
+    {L"BR",             HTMLElement_Ctor},
+    {L"BUTTON",         HTMLButtonElement_Create},
+    {L"CANVAS",         HTMLElement_Ctor},
+    {L"CAPTION",        HTMLElement_Ctor},
+    {L"CENTER",         HTMLElement_Ctor},
+    {L"CITE",           HTMLElement_Ctor},
+    {L"CODE",           HTMLElement_Ctor},
+    {L"COL",            HTMLElement_Ctor},
+    {L"COLGROUP",       HTMLElement_Ctor},
+    {L"DATALIST",       HTMLElement_Ctor},
+    {L"DD",             HTMLElement_Ctor},
+    {L"DEL",            HTMLElement_Ctor},
+    {L"DFN",            HTMLElement_Ctor},
+    {L"DIR",            HTMLElement_Ctor},
+    {L"DIV",            HTMLElement_Ctor},
+    {L"DL",             HTMLElement_Ctor},
+    {L"DT",             HTMLElement_Ctor},
+    {L"EM",             HTMLElement_Ctor},
+    {L"EMBED",          HTMLEmbedElement_Create},
+    {L"FIELDSET",       HTMLElement_Ctor},
+    {L"FIGCAPTION",     HTMLElement_Ctor},
+    {L"FIGURE",         HTMLElement_Ctor},
+    {L"FONT",           HTMLElement_Ctor},
+    {L"FOOTER",         HTMLElement_Ctor},
+    {L"FORM",           HTMLFormElement_Create},
+    {L"FRAME",          HTMLFrameElement_Create},
+    {L"FRAMESET",       HTMLElement_Ctor},
+    {L"H1",             HTMLElement_Ctor},
+    {L"H2",             HTMLElement_Ctor},
+    {L"H3",             HTMLElement_Ctor},
+    {L"H4",             HTMLElement_Ctor},
+    {L"H5",             HTMLElement_Ctor},
+    {L"H6",             HTMLElement_Ctor},
+    {L"HEAD",           HTMLHeadElement_Create},
+    {L"HEADER",         HTMLElement_Ctor},
+    {L"HR",             HTMLElement_Ctor},
+    {L"HTML",           HTMLHtmlElement_Create},
+    {L"I",              HTMLElement_Ctor},
+    {L"IFRAME",         HTMLIFrame_Create},
+    {L"IMG",            HTMLImgElement_Create},
+    {L"INPUT",          HTMLInputElement_Create},
+    {L"INS",            HTMLElement_Ctor},
+    {L"KBD",            HTMLElement_Ctor},
+    {L"LABEL",          HTMLLabelElement_Create},
+    {L"LEGEND",         HTMLElement_Ctor},
+    {L"LI",             HTMLElement_Ctor},
+    {L"LINK",           HTMLLinkElement_Create},
+    {L"MAP",            HTMLElement_Ctor},
+    {L"MARK",           HTMLElement_Ctor},
+    {L"META",           HTMLMetaElement_Create},
+    {L"NAV",            HTMLElement_Ctor},
+    {L"NOFRAMES",       HTMLElement_Ctor},
+    {L"NOSCRIPT",       HTMLElement_Ctor},
+    {L"OBJECT",         HTMLObjectElement_Create},
+    {L"OL",             HTMLElement_Ctor},
+    {L"OPTGROUP",       HTMLElement_Ctor},
+    {L"OPTION",         HTMLOptionElement_Create},
+    {L"P",              HTMLElement_Ctor},
+    {L"PARAM",          HTMLElement_Ctor},
+    {L"PRE",            HTMLElement_Ctor},
+    {L"PROGRESS",       HTMLElement_Ctor},
+    {L"Q",              HTMLElement_Ctor},
+    {L"RP",             HTMLElement_Ctor},
+    {L"RT",             HTMLElement_Ctor},
+    {L"RUBY",           HTMLElement_Ctor},
+    {L"S",              HTMLElement_Ctor},
+    {L"SAMP",           HTMLElement_Ctor},
+    {L"SCRIPT",         HTMLScriptElement_Create},
+    {L"SECTION",        HTMLElement_Ctor},
+    {L"SELECT",         HTMLSelectElement_Create},
+    {L"SMALL",          HTMLElement_Ctor},
+    {L"SOURCE",         HTMLElement_Ctor},
+    {L"SPAN",           HTMLElement_Ctor},
+    {L"STRIKE",         HTMLElement_Ctor},
+    {L"STRONG",         HTMLElement_Ctor},
+    {L"STYLE",          HTMLStyleElement_Create},
+    {L"SUB",            HTMLElement_Ctor},
+    {L"SUP",            HTMLElement_Ctor},
+    {L"TABLE",          HTMLTable_Create},
+    {L"TBODY",          HTMLElement_Ctor},
+    {L"TD",             HTMLTableCell_Create},
+    {L"TEXTAREA",       HTMLTextAreaElement_Create},
+    {L"TFOOT",          HTMLElement_Ctor},
+    {L"TH",             HTMLElement_Ctor},
+    {L"THEAD",          HTMLElement_Ctor},
+    {L"TITLE",          HTMLTitleElement_Create},
+    {L"TR",             HTMLTableRow_Create},
+    {L"TRACK",          HTMLElement_Ctor},
+    {L"TT",             HTMLElement_Ctor},
+    {L"U",              HTMLElement_Ctor},
+    {L"UL",             HTMLElement_Ctor},
+    {L"VAR",            HTMLElement_Ctor},
+    {L"VIDEO",          HTMLElement_Ctor},
+    {L"WBR",            HTMLElement_Ctor}
 };
 
 static const tag_desc_t *get_tag_desc(const WCHAR *tag_name)
@@ -527,6 +614,7 @@ static const tid_t HTMLRect_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLRect_dispex = {
+    L"ClientRect",
     NULL,
     IHTMLRect_tid,
     HTMLRect_iface_tids
@@ -788,6 +876,7 @@ static const tid_t HTMLRectCollection_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLRectCollection_dispex = {
+    L"ClientRectList",
     &HTMLRectCollection_dispex_vtbl,
     IHTMLRectCollection_tid,
     HTMLRectCollection_iface_tids
@@ -2112,8 +2201,21 @@ static HRESULT WINAPI HTMLElement_get_ondragstart(IHTMLElement *iface, VARIANT *
 static HRESULT WINAPI HTMLElement_toString(IHTMLElement *iface, BSTR *String)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->(%p)\n", This, String);
-    return E_NOTIMPL;
+    HRESULT hres;
+    VARIANT var;
+
+    TRACE("(%p)->(%p)\n", This, String);
+
+    if(!String)
+        return E_INVALIDARG;
+
+    hres = IDispatchEx_InvokeEx(&This->node.event_target.dispex.IDispatchEx_iface, DISPID_VALUE,
+                                LOCALE_SYSTEM_DEFAULT, DISPATCH_PROPERTYGET, NULL, &var, NULL, NULL);
+    if(SUCCEEDED(hres)) {
+        assert(V_VT(&var) == VT_BSTR);
+        *String = V_BSTR(&var);
+    }
+    return hres;
 }
 
 static HRESULT WINAPI HTMLElement_put_onbeforeupdate(IHTMLElement *iface, VARIANT v)
@@ -6612,6 +6714,15 @@ static HRESULT WINAPI token_list_remove(IWineDOMTokenList *iface, BSTR token)
     return token_list_add_remove(iface, token, TRUE);
 }
 
+static HRESULT WINAPI token_list_toString(IWineDOMTokenList *iface, BSTR *String)
+{
+    struct token_list *token_list = impl_from_IWineDOMTokenList(iface);
+
+    TRACE("(%p)->(%p)\n", token_list, String);
+
+    return IHTMLElement_get_className(token_list->element, String);
+}
+
 static const IWineDOMTokenListVtbl WineDOMTokenListVtbl = {
     token_list_QueryInterface,
     token_list_AddRef,
@@ -6622,6 +6733,37 @@ static const IWineDOMTokenListVtbl WineDOMTokenListVtbl = {
     token_list_Invoke,
     token_list_add,
     token_list_remove,
+    token_list_toString
+};
+
+static inline struct token_list *token_list_from_DispatchEx(DispatchEx *iface)
+{
+    return CONTAINING_RECORD(iface, struct token_list, dispex);
+}
+
+static HRESULT token_list_value(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *params,
+        VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
+{
+    struct token_list *token_list = token_list_from_DispatchEx(dispex);
+    HRESULT hres;
+
+    switch(flags) {
+    case DISPATCH_PROPERTYGET:
+        hres = IHTMLElement_get_className(token_list->element, &V_BSTR(res));
+        if(FAILED(hres))
+            return hres;
+        V_VT(res) = VT_BSTR;
+        break;
+    default:
+        FIXME("Unimplemented flags %x\n", flags);
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
+}
+
+static const dispex_static_data_vtbl_t token_list_dispex_vtbl = {
+    token_list_value
 };
 
 static const tid_t token_list_iface_tids[] = {
@@ -6629,7 +6771,8 @@ static const tid_t token_list_iface_tids[] = {
     0
 };
 static dispex_static_data_t token_list_dispex = {
-    NULL,
+    L"DOMTokenList",
+    &token_list_dispex_vtbl,
     IWineDOMTokenList_tid,
     token_list_iface_tids
 };
@@ -6739,6 +6882,15 @@ static const IWineHTMLElementPrivateVtbl WineHTMLElementPrivateVtbl = {
 };
 
 static dispex_static_data_t HTMLElement_dispex = {
+    L"HTMLElement",
+    &HTMLElement_event_target_vtbl.dispex_vtbl,
+    DispHTMLUnknownElement_tid,
+    HTMLElement_iface_tids,
+    HTMLElement_init_dispex_info
+};
+
+static dispex_static_data_t HTMLUnknownElement_dispex = {
+    L"HTMLUnknownElement",
     &HTMLElement_event_target_vtbl.dispex_vtbl,
     DispHTMLUnknownElement_tid,
     HTMLElement_iface_tids,
@@ -6766,7 +6918,7 @@ void HTMLElement_Init(HTMLElement *This, HTMLDocumentNode *doc, nsIDOMElement *n
         nsIDOMHTMLElement *html_element;
         nsresult nsres;
 
-        HTMLDOMNode_Init(doc, &This->node, (nsIDOMNode*)nselem, dispex_data ? dispex_data : &HTMLElement_dispex);
+        HTMLDOMNode_Init(doc, &This->node, (nsIDOMNode*)nselem, dispex_data ? dispex_data : &HTMLUnknownElement_dispex);
 
         /* No AddRef, share reference with HTMLDOMNode */
         assert((nsIDOMNode*)nselem == This->node.nsnode);
@@ -6821,7 +6973,7 @@ HRESULT HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL use_g
             elem = heap_alloc_zero(sizeof(HTMLElement));
             if(elem) {
                 elem->node.vtbl = &HTMLElementImplVtbl;
-                HTMLElement_Init(elem, doc, nselem, &HTMLElement_dispex);
+                HTMLElement_Init(elem, doc, nselem, &HTMLUnknownElement_dispex);
                 hres = S_OK;
             }else {
                 hres = E_OUTOFMEMORY;
@@ -6837,6 +6989,21 @@ HRESULT HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL use_g
         return hres;
 
     *ret = elem;
+    return S_OK;
+}
+
+static HRESULT HTMLElement_Ctor(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)
+{
+    HTMLElement *ret;
+
+    ret = heap_alloc_zero(sizeof(*ret));
+    if(!ret)
+        return E_OUTOFMEMORY;
+
+    ret->node.vtbl = &HTMLElementImplVtbl;
+    HTMLElement_Init(ret, doc, nselem, &HTMLElement_dispex);
+
+    *elem = ret;
     return S_OK;
 }
 
@@ -7013,6 +7180,7 @@ static const tid_t HTMLFiltersCollection_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLFiltersCollection_dispex = {
+    L"FiltersCollection",
     &HTMLFiltersCollection_dispex_vtbl,
     IHTMLFiltersCollection_tid,
     HTMLFiltersCollection_iface_tids
@@ -7029,7 +7197,7 @@ static HRESULT create_filters_collection(compat_mode_t compat_mode, IHTMLFilters
     collection->ref = 1;
 
     init_dispatch(&collection->dispex, (IUnknown*)&collection->IHTMLFiltersCollection_iface,
-                  &HTMLFiltersCollection_dispex, compat_mode);
+                  &HTMLFiltersCollection_dispex, min(compat_mode, COMPAT_MODE_IE8));
 
     *ret = &collection->IHTMLFiltersCollection_iface;
     return S_OK;
@@ -7206,7 +7374,7 @@ static inline HRESULT get_domattr(HTMLAttributeCollection *This, DISPID id, LONG
             return E_UNEXPECTED;
         }
 
-        hres = HTMLDOMAttribute_Create(NULL, This->elem, id, attr);
+        hres = HTMLDOMAttribute_Create(NULL, This->elem, id, dispex_compat_mode(&This->elem->node.event_target.dispex), attr);
         if(FAILED(hres))
             return hres;
     }
@@ -7586,6 +7754,7 @@ static const tid_t HTMLAttributeCollection_iface_tids[] = {
 };
 
 static dispex_static_data_t HTMLAttributeCollection_dispex = {
+    L"NamedNodeMap",
     &HTMLAttributeCollection_dispex_vtbl,
     DispHTMLAttributeCollection_tid,
     HTMLAttributeCollection_iface_tids

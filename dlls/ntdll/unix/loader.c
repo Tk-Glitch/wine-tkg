@@ -347,6 +347,7 @@ static void * const syscalls[] =
     __wine_dbg_write,
     __wine_needs_override_large_address_aware,
     __wine_unix_call,
+    __wine_unix_spawnvp,
     wine_nt_to_unix_file_name,
     wine_server_call,
     wine_server_fd_to_handle,

@@ -2558,7 +2558,7 @@ static VkResult wined3d_context_vk_create_vk_descriptor_pool(struct wined3d_devi
     return vr;
 }
 
-static VkResult wined3d_context_vk_create_vk_descriptor_set(struct wined3d_context_vk *context_vk,
+VkResult wined3d_context_vk_create_vk_descriptor_set(struct wined3d_context_vk *context_vk,
         VkDescriptorSetLayout vk_set_layout, VkDescriptorSet *vk_descriptor_set)
 {
     struct wined3d_device_vk *device_vk = wined3d_device_vk(context_vk->c.device);
@@ -2677,6 +2677,10 @@ static bool wined3d_shader_resource_bindings_add_null_srv_binding(struct wined3d
         case WINED3D_SHADER_RESOURCE_TEXTURE_2DMSARRAY:
             return wined3d_shader_descriptor_writes_vk_add_write(writes, vk_descriptor_set,
                     binding_idx, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, NULL, &v->vk_info_2dms_array, NULL);
+
+        case WINED3D_SHADER_RESOURCE_TEXTURE_CUBEARRAY:
+            return wined3d_shader_descriptor_writes_vk_add_write(writes, vk_descriptor_set,
+                    binding_idx, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, NULL, &v->vk_info_cube_array, NULL);
 
         default:
             FIXME("Unhandled resource type %#x.\n", type);

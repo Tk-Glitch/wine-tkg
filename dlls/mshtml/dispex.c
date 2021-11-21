@@ -715,15 +715,17 @@ HRESULT dispex_get_dynid(DispatchEx *This, const WCHAR *name, DISPID *id)
 static HRESULT dispex_value(DispatchEx *This, LCID lcid, WORD flags, DISPPARAMS *params,
         VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
+    HRESULT hres;
+
     if(This->info->desc->vtbl && This->info->desc->vtbl->value)
         return This->info->desc->vtbl->value(This, lcid, flags, params, res, ei, caller);
 
     switch(flags) {
     case DISPATCH_PROPERTYGET:
         V_VT(res) = VT_BSTR;
-        V_BSTR(res) = SysAllocString(L"[object]");
-        if(!V_BSTR(res))
-            return E_OUTOFMEMORY;
+        hres = dispex_to_string(This, &V_BSTR(res));
+        if(FAILED(hres))
+            return hres;
         break;
     default:
         FIXME("Unimplemented flags %x\n", flags);
@@ -886,6 +888,7 @@ static const dispex_static_data_vtbl_t function_dispex_vtbl = {
 static const tid_t function_iface_tids[] = {0};
 
 static dispex_static_data_t function_dispex = {
+    L"Function",
     &function_dispex_vtbl,
     NULL_tid,
     function_iface_tids
@@ -1304,9 +1307,9 @@ static HRESULT function_invoke(DispatchEx *This, func_info_t *func, WORD flags, 
         if(func->id == DISPID_VALUE) {
             BSTR ret;
 
-            ret = SysAllocString(L"[object]");
-            if(!ret)
-                return E_OUTOFMEMORY;
+            hres = dispex_to_string(This, &ret);
+            if(FAILED(hres))
+                return hres;
 
             V_VT(res) = VT_BSTR;
             V_BSTR(res) = ret;
@@ -1480,6 +1483,34 @@ compat_mode_t dispex_compat_mode(DispatchEx *dispex)
     return dispex->info != dispex->info->desc->delayed_init_info
         ? dispex->info->compat_mode
         : dispex->info->desc->vtbl->get_compat_mode(dispex);
+}
+
+HRESULT dispex_to_string(DispatchEx *dispex, BSTR *ret)
+{
+    static const WCHAR prefix[8] = L"[object ";
+    static const WCHAR suffix[] = L"]";
+    WCHAR buf[ARRAY_SIZE(prefix) + 28 + ARRAY_SIZE(suffix)], *p = buf;
+    compat_mode_t compat_mode = dispex_compat_mode(dispex);
+    const WCHAR *name = dispex->info->desc->name;
+    unsigned len;
+
+    if(!ret)
+        return E_INVALIDARG;
+
+    memcpy(p, prefix, sizeof(prefix));
+    p += ARRAY_SIZE(prefix);
+    if(compat_mode < COMPAT_MODE_IE9)
+        p--;
+    else {
+        len = wcslen(name);
+        assert(len <= 28);
+        memcpy(p, name, len * sizeof(WCHAR));
+        p += len;
+    }
+    memcpy(p, suffix, sizeof(suffix));
+
+    *ret = SysAllocString(buf);
+    return *ret ? S_OK : E_OUTOFMEMORY;
 }
 
 static dispex_data_t *ensure_dispex_info(dispex_static_data_t *desc, compat_mode_t compat_mode)

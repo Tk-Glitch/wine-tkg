@@ -840,11 +840,17 @@ static CRITICAL_SECTION_DEBUG cache_cs_debug =
 {
     0, 0, &cache_cs,
     { &cache_cs_debug.ProcessLocksList, &cache_cs_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": cs") }
+      0, 0, { (DWORD_PTR)(__FILE__ ": cache_cs") }
 };
 static CRITICAL_SECTION cache_cs = { &cache_cs_debug, -1, 0, 0, 0, 0 };
-static GUID cached_guid;
-static CRYPT_PROVIDER_FUNCTIONS cached_provider_functions;
+
+static struct provider_cache_entry
+{
+    GUID guid;
+    CRYPT_PROVIDER_FUNCTIONS provider_functions;
+}
+*provider_cache;
+static unsigned int provider_cache_size;
 
 /***********************************************************************
  *              WintrustLoadFunctionPointers (WINTRUST.@)
@@ -853,7 +859,8 @@ BOOL WINAPI WintrustLoadFunctionPointers( GUID* pgActionID,
                                           CRYPT_PROVIDER_FUNCTIONS* pPfns )
 {
     WCHAR GuidString[39];
-    BOOL cached;
+    BOOL cached = FALSE;
+    unsigned int i;
 
     TRACE("(%s %p)\n", debugstr_guid(pgActionID), pPfns);
 
@@ -866,12 +873,16 @@ BOOL WINAPI WintrustLoadFunctionPointers( GUID* pgActionID,
     if (pPfns->cbStruct != sizeof(CRYPT_PROVIDER_FUNCTIONS)) return FALSE;
 
     EnterCriticalSection( &cache_cs );
-    if (IsEqualGUID( &cached_guid, pgActionID ))
+    for (i = 0; i < provider_cache_size; ++i)
     {
-        TRACE( "Using cached data.\n" );
-        *pPfns = cached_provider_functions;
-        cached = TRUE;
-    } else cached = FALSE;
+        if (IsEqualGUID( &provider_cache[i].guid, pgActionID ))
+        {
+            TRACE( "Using cached data.\n" );
+            *pPfns = provider_cache[i].provider_functions;
+            cached = TRUE;
+            break;
+        }
+    }
     LeaveCriticalSection( &cache_cs );
     if (cached) return TRUE;
 
@@ -896,8 +907,22 @@ BOOL WINAPI WintrustLoadFunctionPointers( GUID* pgActionID,
     pPfns->pfnCleanupPolicy = (PFN_PROVIDER_CLEANUP_CALL)WINTRUST_ReadProviderFromReg(GuidString, Cleanup);
 
     EnterCriticalSection( &cache_cs );
-    cached_guid = *pgActionID;
-    cached_provider_functions = *pPfns;
+    for (i = 0; i < provider_cache_size; ++i)
+        if (IsEqualGUID( &provider_cache[i].guid, pgActionID )) break;
+
+    if (i == provider_cache_size)
+    {
+        struct provider_cache_entry *new;
+
+        new = realloc( provider_cache, (provider_cache_size + 1) * sizeof(*new) );
+        if (new)
+        {
+            provider_cache = new;
+            provider_cache[provider_cache_size].guid = *pgActionID;
+            provider_cache[provider_cache_size].provider_functions = *pPfns;
+            ++provider_cache_size;
+        }
+    }
     LeaveCriticalSection( &cache_cs );
 
     return TRUE;

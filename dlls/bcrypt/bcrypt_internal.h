@@ -24,8 +24,10 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "wincrypt.h"
 #include "bcrypt.h"
+#include "wine/unixlib.h"
 
 #define MAGIC_DSS1 ('D' | ('S' << 8) | ('S' << 16) | ('1' << 24))
 #define MAGIC_DSS2 ('D' | ('S' << 8) | ('S' << 16) | ('2' << 24))
@@ -131,6 +133,7 @@ enum alg_id
     /* secret agreement */
     ALG_ID_DH,
     ALG_ID_ECDH_P256,
+    ALG_ID_ECDH_P384,
 
     /* signature */
     ALG_ID_RSA_SIGN,
@@ -201,34 +204,134 @@ struct secret
     ULONG  data_len;
 };
 
-struct key_funcs
+struct key_symmetric_set_auth_data_params
 {
-    NTSTATUS (CDECL *key_set_property)( struct key *, const WCHAR *, UCHAR *, ULONG, ULONG );
-    NTSTATUS (CDECL *key_symmetric_init)( struct key * );
-    void     (CDECL *key_symmetric_vector_reset)( struct key * );
-    NTSTATUS (CDECL *key_symmetric_set_auth_data)( struct key *, UCHAR *, ULONG );
-    NTSTATUS (CDECL *key_symmetric_encrypt)( struct key *, const UCHAR *, ULONG, UCHAR *, ULONG );
-    NTSTATUS (CDECL *key_symmetric_decrypt)( struct key *, const UCHAR *, ULONG, UCHAR *, ULONG );
-    NTSTATUS (CDECL *key_symmetric_get_tag)( struct key *, UCHAR *, ULONG );
-    void     (CDECL *key_symmetric_destroy)( struct key * );
-    NTSTATUS (CDECL *key_asymmetric_init)( struct key * );
-    NTSTATUS (CDECL *key_asymmetric_generate)( struct key * );
-    NTSTATUS (CDECL *key_asymmetric_decrypt)( struct key *, UCHAR *, ULONG, UCHAR *, ULONG, ULONG * );
-    NTSTATUS (CDECL *key_asymmetric_duplicate)( struct key *, struct key * );
-    NTSTATUS (CDECL *key_asymmetric_sign)( struct key *, void *, UCHAR *, ULONG, UCHAR *, ULONG, ULONG *, ULONG );
-    NTSTATUS (CDECL *key_asymmetric_verify)( struct key *, void *, UCHAR *, ULONG, UCHAR *, ULONG, DWORD );
-    void     (CDECL *key_asymmetric_destroy)( struct key * );
-    NTSTATUS (CDECL *key_export_dsa_capi)( struct key *, UCHAR *, ULONG, ULONG * );
-    NTSTATUS (CDECL *key_export_ecc)( struct key *, UCHAR *, ULONG, ULONG * );
-    NTSTATUS (CDECL *key_import_dsa_capi)( struct key *, UCHAR *, ULONG );
-    NTSTATUS (CDECL *key_import_ecc)( struct key *, UCHAR *, ULONG );
-    NTSTATUS (CDECL *key_import_rsa)( struct key *, UCHAR *, ULONG );
-    NTSTATUS (CDECL *key_secret_agreement)( struct key *, struct key *, struct secret * );
-    NTSTATUS (CDECL *key_compute_secret_ecc)( unsigned char *privkey_in, struct key *pubkey_in, struct secret *secret );
+    struct key  *key;
+    UCHAR       *auth_data;
+    ULONG        len;
 };
 
-const struct key_funcs *gnutls_lib_init(DWORD reason);
-const struct key_funcs *macos_lib_init(DWORD reason);
-const struct key_funcs *gcrypt_lib_init(DWORD reason);
+struct key_symmetric_encrypt_params
+{
+    struct key  *key;
+    const UCHAR *input;
+    ULONG        input_len;
+    UCHAR       *output;
+    ULONG        output_len;
+};
+
+struct key_symmetric_decrypt_params
+{
+    struct key  *key;
+    const UCHAR *input;
+    ULONG        input_len;
+    UCHAR       *output;
+    ULONG        output_len;
+};
+
+struct key_symmetric_get_tag_params
+{
+    struct key  *key;
+    UCHAR       *tag;
+    ULONG        len;
+};
+
+struct key_asymmetric_encrypt_params
+{
+    struct key  *key;
+    void        *padding;
+    UCHAR       *input;
+    ULONG        input_len;
+    UCHAR       *output;
+    ULONG        output_len;
+    ULONG       *ret_len;
+    ULONG        flags;
+};
+
+struct key_asymmetric_decrypt_params
+{
+    struct key  *key;
+    UCHAR       *input;
+    ULONG        input_len;
+    UCHAR       *output;
+    ULONG        output_len;
+    ULONG       *ret_len;
+};
+
+struct key_asymmetric_duplicate_params
+{
+    struct key  *key_orig;
+    struct key  *key_copy;
+};
+
+struct key_asymmetric_sign_params
+{
+    struct key  *key;
+    void        *padding;
+    UCHAR       *input;
+    ULONG        input_len;
+    UCHAR       *output;
+    ULONG        output_len;
+    ULONG       *ret_len;
+    ULONG        flags;
+};
+
+struct key_asymmetric_verify_params
+{
+    struct key *key;
+    void       *padding;
+    UCHAR      *hash;
+    ULONG       hash_len;
+    UCHAR      *signature;
+    ULONG       signature_len;
+    ULONG       flags;
+};
+
+struct key_export_params
+{
+    struct key  *key;
+    UCHAR       *buf;
+    ULONG        len;
+    ULONG       *ret_len;
+};
+
+struct key_import_params
+{
+    struct key  *key;
+    UCHAR       *buf;
+    ULONG        len;
+};
+
+struct key_secret_agreement_params
+{
+    struct key *privkey;
+    struct key *pubkey;
+    struct secret *secret;
+};
+
+enum key_funcs
+{
+    unix_process_attach,
+    unix_process_detach,
+    unix_key_symmetric_vector_reset,
+    unix_key_symmetric_set_auth_data,
+    unix_key_symmetric_encrypt,
+    unix_key_symmetric_decrypt,
+    unix_key_symmetric_get_tag,
+    unix_key_symmetric_destroy,
+    unix_key_asymmetric_generate,
+    unix_key_asymmetric_encrypt,
+    unix_key_asymmetric_decrypt,
+    unix_key_asymmetric_duplicate,
+    unix_key_asymmetric_sign,
+    unix_key_asymmetric_verify,
+    unix_key_asymmetric_destroy,
+    unix_key_export_dsa_capi,
+    unix_key_export_ecc,
+    unix_key_import_dsa_capi,
+    unix_key_import_ecc,
+    unix_key_import_rsa,
+    unix_key_secret_agreement,
+};
 
 #endif /* __BCRYPT_INTERNAL_H */

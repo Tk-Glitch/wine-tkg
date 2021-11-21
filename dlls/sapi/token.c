@@ -705,6 +705,7 @@ static HRESULT WINAPI token_enum_Next( ISpObjectTokenEnumBuilder *iface,
                                        ULONG *fetched )
 {
     struct token_enum *This = impl_from_ISpObjectTokenEnumBuilder( iface );
+    HRESULT hr;
 
     TRACE( "(%p)->(%u %p %p)\n", This, num, tokens, fetched );
 
@@ -712,8 +713,12 @@ static HRESULT WINAPI token_enum_Next( ISpObjectTokenEnumBuilder *iface,
 
     FIXME( "semi-stub: Returning an empty enumerator\n" );
 
-    if (fetched) *fetched = 0;
-    return S_FALSE;
+    hr = token_create( NULL, &IID_ISpObjectToken, (void**)tokens );
+    if (FAILED(hr))
+        return hr;
+
+    if (fetched) *fetched = 1;
+    return hr;
 }
 
 static HRESULT WINAPI token_enum_Skip( ISpObjectTokenEnumBuilder *iface,
@@ -1083,6 +1088,14 @@ static HRESULT WINAPI token_GetId( ISpObjectToken *iface,
     if (!This->token_key)
         return SPERR_UNINITIALIZED;
 
+    if (!token_id)
+        return E_POINTER;
+
+    if (!This->token_id)
+    {
+        FIXME("Loading default category not supported.\n");
+        return E_POINTER;
+    }
     *token_id = CoTaskMemAlloc( (wcslen(This->token_id) + 1) * sizeof(WCHAR));
     if (!*token_id)
         return E_OUTOFMEMORY;

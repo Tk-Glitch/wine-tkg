@@ -185,7 +185,7 @@ typedef struct
     BOOL desktop;
 } ContextMenu;
 
-static BOOL DoPaste(ContextMenu *This);
+static HRESULT DoPaste(ContextMenu *This);
 
 static inline ContextMenu *impl_from_IContextMenu3(IContextMenu3 *iface)
 {

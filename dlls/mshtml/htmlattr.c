@@ -484,6 +484,7 @@ static const tid_t HTMLDOMAttribute_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLDOMAttribute_dispex = {
+    L"Attr",
     NULL,
     DispHTMLDOMAttribute_tid,
     HTMLDOMAttribute_iface_tids
@@ -494,9 +495,8 @@ HTMLDOMAttribute *unsafe_impl_from_IHTMLDOMAttribute(IHTMLDOMAttribute *iface)
     return iface->lpVtbl == &HTMLDOMAttributeVtbl ? impl_from_IHTMLDOMAttribute(iface) : NULL;
 }
 
-HRESULT HTMLDOMAttribute_Create(const WCHAR *name, HTMLElement *elem, DISPID dispid, HTMLDOMAttribute **attr)
+HRESULT HTMLDOMAttribute_Create(const WCHAR *name, HTMLElement *elem, DISPID dispid, compat_mode_t compat_mode, HTMLDOMAttribute **attr)
 {
-    compat_mode_t compat_mode = elem ? dispex_compat_mode(&elem->node.event_target.dispex) : COMPAT_MODE_QUIRKS;
     HTMLAttributeCollection *col;
     HTMLDOMAttribute *ret;
     HRESULT hres;

@@ -29,6 +29,67 @@
 
 #include "wine/list.h"
 
+struct effect_periodic
+{
+    BYTE magnitude;
+    BYTE offset;
+    BYTE phase;
+    UINT16 period;
+};
+
+struct effect_envelope
+{
+    BYTE attack_level;
+    BYTE fade_level;
+    UINT16 attack_time;
+    UINT16 fade_time;
+};
+
+struct effect_condition
+{
+    BYTE center_point_offset;
+    BYTE positive_coefficient;
+    BYTE negative_coefficient;
+    BYTE positive_saturation;
+    BYTE negative_saturation;
+    BYTE dead_band;
+};
+
+struct effect_constant_force
+{
+    UINT16 magnitude;
+};
+
+struct effect_ramp_force
+{
+    BYTE ramp_start;
+    BYTE ramp_end;
+};
+
+struct effect_params
+{
+    USAGE effect_type;
+    UINT16 duration;
+    UINT16 trigger_repeat_interval;
+    UINT16 sample_period;
+    UINT16 start_delay;
+    BYTE gain;
+    BYTE trigger_button;
+    BOOL axis_enabled[2];
+    BOOL direction_enabled;
+    BYTE direction[2];
+    BYTE condition_count;
+    /* only for periodic, constant or ramp forces */
+    struct effect_envelope envelope;
+    union
+    {
+        struct effect_periodic periodic;
+        struct effect_condition condition[2];
+        struct effect_constant_force constant_force;
+        struct effect_ramp_force ramp_force;
+    };
+};
+
 struct raw_device_vtbl
 {
     void (*destroy)(struct unix_device *iface);
@@ -47,6 +108,9 @@ struct hid_device_vtbl
     void (*stop)(struct unix_device *iface);
     NTSTATUS (*haptics_start)(struct unix_device *iface, DWORD duration_ms,
                               USHORT rumble_intensity, USHORT buzz_intensity);
+    NTSTATUS (*physical_device_control)(struct unix_device *iface, USAGE control);
+    NTSTATUS (*physical_effect_control)(struct unix_device *iface, BYTE index, USAGE control, BYTE iterations);
+    NTSTATUS (*physical_effect_update)(struct unix_device *iface, BYTE index, struct effect_params *params);
 };
 
 struct hid_report_descriptor
@@ -87,6 +151,21 @@ struct hid_haptics
     BYTE waveform_report;
 };
 
+struct hid_physical
+{
+    USAGE effect_types[32];
+    struct effect_params effect_params[256];
+
+    BYTE device_control_report;
+    BYTE effect_control_report;
+    BYTE effect_update_report;
+    BYTE set_periodic_report;
+    BYTE set_envelope_report;
+    BYTE set_condition_report;
+    BYTE set_constant_force_report;
+    BYTE set_ramp_force_report;
+};
+
 struct hid_device_state
 {
     ULONG bit_size;
@@ -115,6 +194,7 @@ struct unix_device
     struct hid_report_descriptor hid_report_descriptor;
     struct hid_device_state hid_device_state;
     struct hid_haptics hid_haptics;
+    struct hid_physical hid_physical;
 };
 
 extern void *raw_device_create(const struct raw_device_vtbl *vtbl, SIZE_T size) DECLSPEC_HIDDEN;
@@ -152,6 +232,7 @@ extern BOOL hid_device_add_axes(struct unix_device *iface, BYTE count, USAGE usa
                                 const USAGE *usages, BOOL rel, LONG min, LONG max) DECLSPEC_HIDDEN;
 
 extern BOOL hid_device_add_haptics(struct unix_device *iface) DECLSPEC_HIDDEN;
+extern BOOL hid_device_add_physical(struct unix_device *iface, USAGE *usages, USHORT count) DECLSPEC_HIDDEN;
 
 extern BOOL hid_device_set_abs_axis(struct unix_device *iface, ULONG index, LONG value) DECLSPEC_HIDDEN;
 extern BOOL hid_device_set_rel_axis(struct unix_device *iface, ULONG index, LONG value) DECLSPEC_HIDDEN;

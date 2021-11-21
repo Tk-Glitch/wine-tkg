@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include "winedump.h"
 
@@ -28,15 +27,10 @@ _globals globals; /* All global variables */
 
 static void do_include (const char *arg)
 {
-  char *newIncludes;
-
   if (!globals.directory)
-    globals.directory = strdup(arg);
-  else {
-    newIncludes = str_create (3,globals.directory," ",arg);
-    free(globals.directory);
-    globals.directory = newIncludes;
-  }
+    globals.directory = xstrdup(arg);
+  else
+    globals.directory = strmake( "%s %s", globals.directory, arg );
   globals.do_code = TRUE;
 }
 
@@ -47,7 +41,7 @@ static inline const char* strip_ext (const char *str)
   if (len>4 && strcmp(str+len-4,".dll") == 0)
     return str_substring (str, str+len-4);
   else
-    return strdup (str);
+    return xstrdup (str);
 }
 
 
@@ -145,8 +139,7 @@ static void do_symfile (const char *arg)
   while (1 == fscanf(f, "%255s", symstring))    /* keep count with [<width>] above */
   {
     symstring[sizeof(symstring)-1] = '\0';
-    if (!(symbolp = malloc(sizeof(*symbolp) + strlen(symstring))))
-      fatal ("Out of memory");
+    symbolp = xmalloc(sizeof(*symbolp) + strlen(symstring));
     strcpy(symbolp->symbolname, symstring);
     symbolp->found = FALSE;
     symbolp->next = NULL;
@@ -262,11 +255,11 @@ void do_usage (const char *arg)
 
 
 /*******************************************************************
- *          parse_options
+ *          parse_cmdline
  *
  * Parse options from the argv array
  */
-static void parse_options (char *argv[])
+static void parse_cmdline (char *argv[])
 {
   const struct my_option *opt;
   char *const *ptr;
@@ -322,26 +315,11 @@ static void parse_options (char *argv[])
 
 static void set_module_name(BOOL setUC)
 {
-    const char*	ptr;
-    char*	buf;
-    int		len;
-
     /* FIXME: we shouldn't assume all module extensions are .dll in winedump
      * in some cases, we could have some .drv for example
      */
-    /* get module name from name */
-    if ((ptr = strrchr (globals.input_name, '/')))
-	ptr++;
-    else
-	ptr = globals.input_name;
-    len = strlen(ptr);
-    if (len > 4 && strcmp(ptr + len - 4, ".dll") == 0)
-	len -= 4;
-    buf = malloc(len + 1);
-    memcpy(buf, (const void*)ptr, len);
-    buf[len] = 0;
-    globals.input_module = buf;
-    OUTPUT_UC_DLL_NAME = (setUC) ? str_toupper( strdup (OUTPUT_DLL_NAME)) : "";
+    globals.input_module = replace_extension( get_basename( globals.input_name ), ".dll", "" );
+    OUTPUT_UC_DLL_NAME = (setUC) ? str_toupper( xstrdup (OUTPUT_DLL_NAME)) : "";
 }
 
 /* Marks the symbol as 'found'! */
@@ -408,7 +386,7 @@ int   main (int argc, char *argv[])
     globals.input_name = NULL;
     globals.dumpsect = NULL;
 
-    parse_options (argv);
+    parse_cmdline (argv);
 
     memset (&symbol, 0, sizeof (parsed_symbol));
 

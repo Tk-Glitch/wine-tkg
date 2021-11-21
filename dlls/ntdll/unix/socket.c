@@ -369,7 +369,6 @@ static int sockaddr_from_unix( const union unix_sockaddr *uaddr, struct WS_socka
 }
 
 #ifndef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
-#if defined(IP_PKTINFO) || defined(IP_RECVDSTADDR)
 static WSACMSGHDR *fill_control_message( int level, int type, WSACMSGHDR *current, ULONG *maxsize, void *data, int len )
 {
     ULONG msgsize = sizeof(WSACMSGHDR) + WSA_CMSG_ALIGN(len);
@@ -384,11 +383,9 @@ static WSACMSGHDR *fill_control_message( int level, int type, WSACMSGHDR *curren
     memcpy(ptr, data, len);
     return (WSACMSGHDR *)(ptr + WSA_CMSG_ALIGN(len));
 }
-#endif /* defined(IP_PKTINFO) || defined(IP_RECVDSTADDR) */
 
 static int convert_control_headers(struct msghdr *hdr, WSABUF *control)
 {
-#if defined(IP_PKTINFO) || defined(IP_RECVDSTADDR)
     WSACMSGHDR *cmsg_win = (WSACMSGHDR *)control->buf, *ptr;
     ULONG ctlsize = control->len;
     struct cmsghdr *cmsg_unix;
@@ -428,6 +425,27 @@ static int convert_control_headers(struct msghdr *hdr, WSABUF *control)
                         break;
                     }
 #endif /* IP_PKTINFO */
+
+#if defined(IP_TOS)
+                    case IP_TOS:
+                    {
+                        ptr = fill_control_message( WS_IPPROTO_IP, WS_IP_TOS, ptr, &ctlsize,
+                                                    CMSG_DATA(cmsg_unix), sizeof(INT) );
+                        if (!ptr) goto error;
+                        break;
+                    }
+#endif /* IP_TOS */
+
+#if defined(IP_TTL)
+                    case IP_TTL:
+                    {
+                        ptr = fill_control_message( WS_IPPROTO_IP, WS_IP_TTL, ptr, &ctlsize,
+                                                    CMSG_DATA(cmsg_unix), sizeof(INT) );
+                        if (!ptr) goto error;
+                        break;
+                    }
+#endif /* IP_TTL */
+
                     default:
                         FIXME("Unhandled IPPROTO_IP message header type %d\n", cmsg_unix->cmsg_type);
                         break;
@@ -490,10 +508,6 @@ static int convert_control_headers(struct msghdr *hdr, WSABUF *control)
 error:
     control->len = 0;
     return 0;
-#else /* defined(IP_PKTINFO) || defined(IP_RECVDSTADDR) */
-    control->len = 0;
-    return 1;
-#endif /* defined(IP_PKTINFO) || defined(IP_RECVDSTADDR) */
 }
 #endif /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
 
@@ -1838,6 +1852,38 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             int sock_type = get_sock_type( handle );
             if (sock_type != SOCK_DGRAM && sock_type != SOCK_RAW) return STATUS_INVALID_PARAMETER;
             return do_setsockopt( handle, io, IPPROTO_IP, IP_RECVDSTADDR, in_buffer, in_size );
+        }
+#endif
+
+#ifdef IP_RECVTOS
+        case IOCTL_AFD_WINE_GET_IP_RECVTOS:
+        {
+            int sock_type = get_sock_type( handle );
+            if (sock_type != SOCK_DGRAM && sock_type != SOCK_RAW) return STATUS_INVALID_PARAMETER;
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_RECVTOS, out_buffer, out_size );
+        }
+
+        case IOCTL_AFD_WINE_SET_IP_RECVTOS:
+        {
+            int sock_type = get_sock_type( handle );
+            if (sock_type != SOCK_DGRAM && sock_type != SOCK_RAW) return STATUS_INVALID_PARAMETER;
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_RECVTOS, in_buffer, in_size );
+        }
+#endif
+
+#ifdef IP_RECVTTL
+        case IOCTL_AFD_WINE_GET_IP_RECVTTL:
+        {
+            int sock_type = get_sock_type( handle );
+            if (sock_type != SOCK_DGRAM && sock_type != SOCK_RAW) return STATUS_INVALID_PARAMETER;
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_RECVTTL, out_buffer, out_size );
+        }
+
+        case IOCTL_AFD_WINE_SET_IP_RECVTTL:
+        {
+            int sock_type = get_sock_type( handle );
+            if (sock_type != SOCK_DGRAM && sock_type != SOCK_RAW) return STATUS_INVALID_PARAMETER;
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_RECVTTL, in_buffer, in_size );
         }
 #endif
 

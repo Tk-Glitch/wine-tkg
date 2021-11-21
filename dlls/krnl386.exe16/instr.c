@@ -30,7 +30,6 @@
 #include "wine/debug.h"
 #include "kernel16_private.h"
 #include "dosexe.h"
-#include "wine/exception.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(int);
 WINE_DECLARE_DEBUG_CHANNEL(io);
@@ -941,7 +940,7 @@ LONG CALLBACK INSTR_vectored_handler( EXCEPTION_POINTERS *ptrs )
  */
 void WINAPI DOS3Call( CONTEXT *context )
 {
-    __wine_call_int_handler( context, 0x21 );
+    __wine_call_int_handler16( 0x21, context );
 }
 
 
@@ -950,7 +949,7 @@ void WINAPI DOS3Call( CONTEXT *context )
  */
 void WINAPI NetBIOSCall16( CONTEXT *context )
 {
-    __wine_call_int_handler( context, 0x5c );
+    __wine_call_int_handler16( 0x5c, context );
 }
 
 

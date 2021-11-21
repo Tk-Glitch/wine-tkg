@@ -19,24 +19,11 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 #include <time.h>
-#ifdef HAVE_SYS_TYPES_H
-# include <sys/types.h>
-#endif
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
-#ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
-#endif
 #include <fcntl.h>
 
 #define NONAMELESSUNION
@@ -2419,8 +2406,7 @@ static	void	do_grab_sym( void )
 
     /* dll_close(); */
 
-    if (!(dll_symbols = malloc((exportDir->NumberOfFunctions + 1) * sizeof(dll_symbol))))
-	fatal ("Out of memory");
+    dll_symbols = xmalloc((exportDir->NumberOfFunctions + 1) * sizeof(dll_symbol));
 
     /* bit map of used funcs */
     map = calloc(((exportDir->NumberOfFunctions + 31) & ~31) / 32, sizeof(DWORD));
@@ -2431,7 +2417,7 @@ static	void	do_grab_sym( void )
 	map[*pOrdl / 32] |= 1 << (*pOrdl % 32);
 	ptr = RVA(*pName++, sizeof(DWORD));
 	if (!ptr) ptr = "cant_get_function";
-	dll_symbols[j].symbol = strdup(ptr);
+	dll_symbols[j].symbol = xstrdup(ptr);
 	dll_symbols[j].ordinal = exportDir->Base + *pOrdl;
 	assert(dll_symbols[j].symbol);
     }
@@ -2442,11 +2428,11 @@ static	void	do_grab_sym( void )
 	{
 	    char ordinal_text[256];
 	    /* Ordinal only entry */
-            snprintf (ordinal_text, sizeof(ordinal_text), "%s_%u",
+            sprintf (ordinal_text, "%s_%u",
 		      globals.forward_dll ? globals.forward_dll : OUTPUT_UC_DLL_NAME,
 		      exportDir->Base + i);
 	    str_toupper(ordinal_text);
-	    dll_symbols[j].symbol = strdup(ordinal_text);
+	    dll_symbols[j].symbol = xstrdup(ordinal_text);
 	    assert(dll_symbols[j].symbol);
 	    dll_symbols[j].ordinal = exportDir->Base + i;
 	    j++;
@@ -2486,7 +2472,7 @@ BOOL dll_next_symbol (parsed_symbol * sym)
     if (!dll_current_symbol || !dll_current_symbol->symbol)
        return FALSE;
      assert (dll_symbols);
-    sym->symbol = strdup (dll_current_symbol->symbol);
+    sym->symbol = xstrdup (dll_current_symbol->symbol);
     sym->ordinal = dll_current_symbol->ordinal;
     dll_current_symbol++;
     return TRUE;

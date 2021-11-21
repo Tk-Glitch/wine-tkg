@@ -18,6 +18,10 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 #include <stdarg.h>
 #include <stddef.h>
@@ -77,12 +81,11 @@
 #include "netiodef.h"
 #include "ws2ipdef.h"
 #include "udpmib.h"
-#include "wine/heap.h"
 #include "wine/nsi.h"
 #include "wine/debug.h"
 #include "wine/server.h"
 
-#include "nsiproxy_private.h"
+#include "unix_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nsi);
 
@@ -123,10 +126,10 @@ static NTSTATUS udp_stats_get_all_parameters( const void *key, DWORD key_size, v
 
         while ((ptr = fgets( buf, sizeof(buf), fp )))
         {
-            if (_strnicmp( buf, hdr, sizeof(hdr) - 1) ) continue;
+            if (ascii_strncasecmp( buf, hdr, sizeof(hdr) - 1 )) continue;
             /* last line was a header, get another */
             if (!(ptr = fgets( buf, sizeof(buf), fp ))) break;
-            if (!_strnicmp(buf, hdr, sizeof(hdr) - 1))
+            if (!ascii_strncasecmp( buf, hdr, sizeof(hdr) - 1 ))
             {
                 unsigned int in_dgrams, out_dgrams;
                 ptr += sizeof(hdr);
@@ -176,7 +179,7 @@ static NTSTATUS udp_stats_get_all_parameters( const void *key, DWORD key_size, v
             if ((ptr = strchr( value, '\n' ))) *ptr='\0';
 
             for (i = 0; i < ARRAY_SIZE(udp_stat_list); i++)
-                if (!_strnicmp( buf, udp_stat_list[i].name, -1 ) && sscanf( value, "%d", &res ))
+                if (!ascii_strcasecmp( buf, udp_stat_list[i].name ) && sscanf( value, "%d", &res ))
                     *udp_stat_list[i].elem = res;
         }
         dyn.in_dgrams = in_dgrams;
@@ -309,7 +312,7 @@ static NTSTATUS udp_endpoint_enumerate_all( void *key_data, DWORD key_size, void
             goto err;
         }
 
-        buf = heap_alloc( len );
+        buf = malloc( len );
         if (!buf)
         {
             status = STATUS_NO_MEMORY;
@@ -386,7 +389,7 @@ static NTSTATUS udp_endpoint_enumerate_all( void *key_data, DWORD key_size, void
             num++;
         }
     err:
-        heap_free( buf );
+        free( buf );
     }
 #else
     FIXME( "not implemented\n" );
@@ -396,8 +399,8 @@ static NTSTATUS udp_endpoint_enumerate_all( void *key_data, DWORD key_size, void
     if (!want_data || num <= *count) *count = num;
     else status = STATUS_BUFFER_OVERFLOW;
 
-    heap_free( pid_map );
-    heap_free( addr_scopes );
+    free( pid_map );
+    free( addr_scopes );
     return status;
 }
 

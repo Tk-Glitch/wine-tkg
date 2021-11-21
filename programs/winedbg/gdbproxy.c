@@ -24,46 +24,21 @@
  * http://sources.redhat.com/gdb/onlinedocs/gdb/Maintenance-Commands.html
  */
 
-#include "config.h"
-#include "wine/port.h"
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 
 #include <assert.h>
-#include <errno.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_SYS_POLL_H
-# include <sys/poll.h>
-#endif
-#ifdef HAVE_SYS_WAIT_H
-# include <sys/wait.h>
-#endif
-#ifdef HAVE_SYS_SOCKET_H
-# include <sys/socket.h>
-#endif
-#ifdef HAVE_NETINET_IN_H
-# include <netinet/in.h>
-#endif
-#ifdef HAVE_NETINET_TCP_H
-# include <netinet/tcp.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-
-/* if we don't have poll support on this system
- * we won't provide gdb proxy support here...
- */
-#ifdef HAVE_POLL
 
 #include "debugger.h"
 
 #include "windef.h"
 #include "winbase.h"
+#include "winsock2.h"
 #include "tlhelp32.h"
-#include "wine/exception.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
@@ -76,13 +51,13 @@ struct gdb_xpoint
     enum be_xpoint_type type;
     void *addr;
     int size;
-    unsigned long value;
+    unsigned int value;
 };
 
 struct gdb_context
 {
     /* gdb information */
-    int                         sock;
+    SOCKET                      sock;
     /* incoming buffer */
     char*                       in_buf;
     int                         in_buf_alloc;
@@ -105,8 +80,29 @@ struct gdb_context
     /* Win32 information */
     struct dbg_process*         process;
     /* Unix environment */
-    unsigned long               wine_segs[3];   /* load addresses of the ELF wine exec segments (text, bss and data) */
+    ULONG_PTR                   wine_segs[3];   /* load addresses of the ELF wine exec segments (text, bss and data) */
     BOOL                        no_ack_mode;
+};
+
+/* assume standard signal and errno values */
+enum host_error
+{
+    HOST_ESRCH  = 3,
+    HOST_EFAULT = 14,
+    HOST_EINVAL = 22,
+};
+
+enum host_signal
+{
+    HOST_SIGINT  = 2,
+    HOST_SIGILL  = 4,
+    HOST_SIGTRAP = 5,
+    HOST_SIGABRT = 6,
+    HOST_SIGFPE  = 8,
+    HOST_SIGBUS  = 10,
+    HOST_SIGSEGV = 11,
+    HOST_SIGALRM = 14,
+    HOST_SIGTERM = 15,
 };
 
 static void gdbctx_delete_xpoint(struct gdb_context *gdbctx, struct dbg_thread *thread,
@@ -128,7 +124,7 @@ static void gdbctx_insert_xpoint(struct gdb_context *gdbctx, struct dbg_thread *
     struct dbg_process *process = thread->process;
     struct backend_cpu *cpu = process->be_cpu;
     struct gdb_xpoint *x;
-    unsigned long value;
+    unsigned int value;
 
     if (!cpu->insert_Xpoint(process->handle, process->process_io, ctx, type, addr, &value, size))
     {
@@ -314,9 +310,9 @@ static unsigned char signal_from_debug_event(DEBUG_EVENT* de)
     DWORD ec;
 
     if (de->dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT)
-        return SIGTERM;
+        return HOST_SIGTERM;
     if (de->dwDebugEventCode != EXCEPTION_DEBUG_EVENT)
-        return SIGTRAP;
+        return HOST_SIGTRAP;
 
     ec = de->u.Exception.ExceptionRecord.ExceptionCode;
     switch (ec)
@@ -325,12 +321,12 @@ static unsigned char signal_from_debug_event(DEBUG_EVENT* de)
     case EXCEPTION_PRIV_INSTRUCTION:
     case EXCEPTION_STACK_OVERFLOW:
     case EXCEPTION_GUARD_PAGE:
-        return SIGSEGV;
+        return HOST_SIGSEGV;
     case EXCEPTION_DATATYPE_MISALIGNMENT:
-        return SIGBUS;
+        return HOST_SIGBUS;
     case EXCEPTION_SINGLE_STEP:
     case EXCEPTION_BREAKPOINT:
-        return SIGTRAP;
+        return HOST_SIGTRAP;
     case EXCEPTION_FLT_DENORMAL_OPERAND:
     case EXCEPTION_FLT_DIVIDE_BY_ZERO:
     case EXCEPTION_FLT_INEXACT_RESULT:
@@ -338,23 +334,23 @@ static unsigned char signal_from_debug_event(DEBUG_EVENT* de)
     case EXCEPTION_FLT_OVERFLOW:
     case EXCEPTION_FLT_STACK_CHECK:
     case EXCEPTION_FLT_UNDERFLOW:
-        return SIGFPE;
+        return HOST_SIGFPE;
     case EXCEPTION_INT_DIVIDE_BY_ZERO:
     case EXCEPTION_INT_OVERFLOW:
-        return SIGFPE;
+        return HOST_SIGFPE;
     case EXCEPTION_ILLEGAL_INSTRUCTION:
-        return SIGILL;
+        return HOST_SIGILL;
     case CONTROL_C_EXIT:
-        return SIGINT;
+        return HOST_SIGINT;
     case STATUS_POSSIBLE_DEADLOCK:
-        return SIGALRM;
+        return HOST_SIGALRM;
     /* should not be here */
     case EXCEPTION_INVALID_HANDLE:
     case EXCEPTION_WINE_NAME_THREAD:
-        return SIGTRAP;
+        return HOST_SIGTRAP;
     default:
         ERR("Unknown exception code 0x%08x\n", ec);
-        return SIGABRT;
+        return HOST_SIGABRT;
     }
 }
 
@@ -551,29 +547,26 @@ static void handle_step_or_continue(struct gdb_context* gdbctx, int tid, BOOL st
 
 static BOOL	check_for_interrupt(struct gdb_context* gdbctx)
 {
-	struct pollfd       pollfd;
-	int ret;
 	char pkt;
-				
-	pollfd.fd = gdbctx->sock;
-	pollfd.events = POLLIN;
-	pollfd.revents = 0;
-				
-	if ((ret = poll(&pollfd, 1, 0)) == 1) {
-		ret = read(gdbctx->sock, &pkt, 1);
-		if (ret != 1) {
-			ERR("read failed\n");
-			return FALSE;
-		}
-		if (pkt != '\003') {
-			ERR("Unexpected break packet %#02x\n", pkt);
-			return FALSE;
-		}
-		return TRUE;
-	} else if (ret == -1) {
-		ERR("poll failed\n");
-	}
-	return FALSE;
+        fd_set read_fds;
+        struct timeval tv = { 0, 0 };
+
+        FD_ZERO( &read_fds );
+        FD_SET( gdbctx->sock, &read_fds );
+
+        if (select( 0, &read_fds, NULL, NULL, &tv ) > 0)
+        {
+            if (recv(gdbctx->sock, &pkt, 1, 0) != 1) {
+                ERR("read failed\n");
+                return FALSE;
+            }
+            if (pkt != '\003') {
+                ERR("Unexpected break packet %#02x\n", pkt);
+                return FALSE;
+            }
+            return TRUE;
+        }
+        return FALSE;
 }
 
 static void    wait_for_debuggee(struct gdb_context* gdbctx)
@@ -638,12 +631,8 @@ static void get_process_info(struct gdb_context* gdbctx, char* buffer, size_t le
     switch (GetPriorityClass(gdbctx->process->handle))
     {
     case 0: break;
-#ifdef ABOVE_NORMAL_PRIORITY_CLASS
     case ABOVE_NORMAL_PRIORITY_CLASS:   strcat(buffer, ", above normal priority");      break;
-#endif
-#ifdef BELOW_NORMAL_PRIORITY_CLASS
     case BELOW_NORMAL_PRIORITY_CLASS:   strcat(buffer, ", below normal priority");      break;
-#endif
     case HIGH_PRIORITY_CLASS:           strcat(buffer, ", high priority");              break;
     case IDLE_PRIORITY_CLASS:           strcat(buffer, ", idle priority");              break;
     case NORMAL_PRIORITY_CLASS:         strcat(buffer, ", normal priority");            break;
@@ -745,7 +734,7 @@ static inline void packet_reply_hex_to_str(struct gdb_context* gdbctx, const cha
     packet_reply_hex_to(gdbctx, src, strlen(src));
 }
 
-static void packet_reply_val(struct gdb_context* gdbctx, unsigned long val, int len)
+static void packet_reply_val(struct gdb_context* gdbctx, ULONG_PTR val, int len)
 {
     int i, shift;
 
@@ -866,13 +855,13 @@ static void packet_reply_status_xpoints(struct gdb_context* gdbctx, struct dbg_t
         if (x->type == be_xpoint_watch_write)
         {
             packet_reply_add(gdbctx, "watch:");
-            packet_reply_val(gdbctx, (unsigned long)x->addr, sizeof(x->addr));
+            packet_reply_val(gdbctx, (ULONG_PTR)x->addr, sizeof(x->addr));
             packet_reply_add(gdbctx, ";");
         }
         if (x->type == be_xpoint_watch_read)
         {
             packet_reply_add(gdbctx, "rwatch:");
-            packet_reply_val(gdbctx, (unsigned long)x->addr, sizeof(x->addr));
+            packet_reply_val(gdbctx, (ULONG_PTR)x->addr, sizeof(x->addr));
             packet_reply_add(gdbctx, ";");
         }
     }
@@ -925,7 +914,7 @@ static enum packet_return packet_reply_status(struct gdb_context* gdbctx)
     case UNLOAD_DLL_DEBUG_EVENT:
         packet_reply_open(gdbctx);
         packet_reply_add(gdbctx, "T");
-        packet_reply_val(gdbctx, SIGTRAP, 1);
+        packet_reply_val(gdbctx, HOST_SIGTRAP, 1);
         packet_reply_add(gdbctx, "library:;");
         packet_reply_close(gdbctx);
         return packet_done;
@@ -1219,7 +1208,7 @@ static enum packet_return packet_read_memory(struct gdb_context* gdbctx)
             buffer, blk_len, &r) || r == 0)
         {
             /* fail at first address, return error */
-            if (nread == 0) return packet_reply_error(gdbctx, EFAULT);
+            if (nread == 0) return packet_reply_error(gdbctx, HOST_EFAULT );
             /* something has already been read, return partial information */
             break;
         }
@@ -1286,15 +1275,15 @@ static enum packet_return packet_read_register(struct gdb_context* gdbctx)
     if (!backend->get_context(thread->handle, &ctx))
         return packet_error;
 
-    if (sscanf(gdbctx->in_packet, "%zx", &reg) != 1)
+    if (sscanf(gdbctx->in_packet, "%Ix", &reg) != 1)
         return packet_error;
     if (reg >= backend->gdb_num_regs)
     {
-        WARN("Unhandled register %zu\n", reg);
+        WARN("Unhandled register %Iu\n", reg);
         return packet_error;
     }
 
-    TRACE("%zu => %s\n", reg, wine_dbgstr_longlong(cpu_register(gdbctx, &ctx, reg)));
+    TRACE("%Iu => %s\n", reg, wine_dbgstr_longlong(cpu_register(gdbctx, &ctx, reg)));
 
     packet_reply_open(gdbctx);
     packet_reply_register_hex_to(gdbctx, &ctx, reg);
@@ -1321,18 +1310,18 @@ static enum packet_return packet_write_register(struct gdb_context* gdbctx)
         return packet_error;
     *ptr++ = '\0';
 
-    if (sscanf(gdbctx->in_packet, "%zx", &reg) != 1)
+    if (sscanf(gdbctx->in_packet, "%Ix", &reg) != 1)
         return packet_error;
     if (reg >= backend->gdb_num_regs)
     {
         /* FIXME: if just the reg is above cpu_num_regs, don't tell gdb
          *        it wouldn't matter too much, and it fakes our support for all regs
          */
-        WARN("Unhandled register %zu\n", reg);
+        WARN("Unhandled register %Iu\n", reg);
         return packet_ok;
     }
 
-    TRACE("%zu <= %s\n", reg, debugstr_an(ptr, (int)(gdbctx->in_packet_len - (ptr - gdbctx->in_packet))));
+    TRACE("%Iu <= %s\n", reg, debugstr_an(ptr, (int)(gdbctx->in_packet_len - (ptr - gdbctx->in_packet))));
 
     cpu_register_hex_from(gdbctx, &ctx, reg, (const char**)&ptr);
     if (!backend->set_context(thread->handle, &ctx))
@@ -1535,7 +1524,7 @@ static enum packet_return packet_query_remote_command(struct gdb_context* gdbctx
         (qd->handler)(gdbctx, len - qd->len, buffer + qd->len);
         return packet_done;
     }
-    return packet_reply_error(gdbctx, EINVAL);
+    return packet_reply_error(gdbctx, HOST_EINVAL );
 }
 
 static BOOL CALLBACK packet_query_libraries_cb(PCSTR mod_name, DWORD64 base, PVOID ctx)
@@ -1612,7 +1601,7 @@ static BOOL CALLBACK packet_query_libraries_cb(PCSTR mod_name, DWORD64 base, PVO
     {
         if ((char *)(sec + i) >= buffer + size) break;
         packet_reply_add(gdbctx, "<segment address=\"0x");
-        packet_reply_val(gdbctx, mod.BaseOfImage + sec[i].VirtualAddress, sizeof(unsigned long));
+        packet_reply_val(gdbctx, mod.BaseOfImage + sec[i].VirtualAddress, sizeof(ULONG_PTR));
         packet_reply_add(gdbctx, "\"/>");
     }
 
@@ -1750,7 +1739,7 @@ static void packet_query_target_xml(struct gdb_context* gdbctx, struct backend_c
                                          "</flags>");
         }
 
-        snprintf(buffer, ARRAY_SIZE(buffer), "<reg name=\"%s\" bitsize=\"%zu\"",
+        snprintf(buffer, ARRAY_SIZE(buffer), "<reg name=\"%s\" bitsize=\"%Iu\"",
                  cpu->gdb_register_map[i].name, 8 * cpu->gdb_register_map[i].length);
         packet_reply_add(gdbctx, buffer);
 
@@ -1960,10 +1949,10 @@ static enum packet_return packet_thread_alive(struct gdb_context* gdbctx)
 
     tid = strtol(gdbctx->in_packet, &end, 16);
     if (tid == -1 || tid == 0)
-        return packet_reply_error(gdbctx, EINVAL);
+        return packet_reply_error(gdbctx, HOST_EINVAL );
     if (dbg_get_thread(gdbctx->process, tid) != NULL)
         return packet_ok;
-    return packet_reply_error(gdbctx, ESRCH);
+    return packet_reply_error(gdbctx, HOST_ESRCH );
 }
 
 /* =============================================== *
@@ -2024,13 +2013,13 @@ static BOOL extract_packets(struct gdb_context* gdbctx)
         if (cksum == checksum(ptr + 1, len))
         {
             TRACE("Acking: %s\n", debugstr_an(ptr, sum - ptr));
-            write(gdbctx->sock, "+", 1);
+            send(gdbctx->sock, "+", 1, 0);
         }
         else
         {
             ERR("Nacking: %s (checksum: %d != %d)\n", debugstr_an(ptr, sum - ptr),
                 cksum, checksum(ptr + 1, len));
-            write(gdbctx->sock, "-", 1);
+            send(gdbctx->sock, "-", 1, 0);
         }
     }
 
@@ -2071,7 +2060,7 @@ static BOOL extract_packets(struct gdb_context* gdbctx)
             }
 
             TRACE("Reply: %s\n", debugstr_an(gdbctx->out_buf, gdbctx->out_len));
-            i = write(gdbctx->sock, gdbctx->out_buf, gdbctx->out_len);
+            i = send(gdbctx->sock, gdbctx->out_buf, gdbctx->out_len, 0);
             assert(i == gdbctx->out_len);
             gdbctx->out_len = 0;
         }
@@ -2098,7 +2087,7 @@ static int fetch_data(struct gdb_context* gdbctx)
         if (gdbctx->in_len + STEP > gdbctx->in_buf_alloc)
             gdbctx->in_buf = packet_realloc(gdbctx->in_buf, gdbctx->in_buf_alloc += STEP);
 #undef STEP
-        len = read(gdbctx->sock, gdbctx->in_buf + gdbctx->in_len, gdbctx->in_buf_alloc - gdbctx->in_len - 1);
+        len = recv(gdbctx->sock, gdbctx->in_buf + gdbctx->in_len, gdbctx->in_buf_alloc - gdbctx->in_len - 1, 0);
         if (len <= 0) break;
         gdbctx->in_len += len;
         assert(gdbctx->in_len <= gdbctx->in_buf_alloc);
@@ -2114,18 +2103,17 @@ static int fetch_data(struct gdb_context* gdbctx)
 
 static BOOL gdb_exec(unsigned port, unsigned flags)
 {
-    char            buf[MAX_PATH];
-    int             fd;
-    const char      *gdb_path, *tmp_path;
+    WCHAR tmp[MAX_PATH], buf[MAX_PATH];
+    const char *argv[6];
+    char *unix_tmp;
+    const char      *gdb_path;
     FILE*           f;
 
     if (!(gdb_path = getenv("WINE_GDB"))) gdb_path = "gdb";
-    if (!(tmp_path = getenv("TMPDIR"))) tmp_path = "/tmp";
-    strcpy(buf, tmp_path);
-    strcat(buf, "/winegdb.XXXXXX");
-    fd = mkstemps(buf, 0);
-    if (fd == -1) return FALSE;
-    if ((f = fdopen(fd, "w+")) == NULL) return FALSE;
+    GetTempPathW( MAX_PATH, buf );
+    GetTempFileNameW( buf, L"gdb", 0, tmp );
+    if ((f = _wfopen( tmp, L"w+" )) == NULL) return FALSE;
+    unix_tmp = wine_get_unix_file_name( tmp );
     fprintf(f, "target remote localhost:%d\n", ntohs(port));
     fprintf(f, "set prompt Wine-gdb>\\ \n");
     /* gdb 5.1 seems to require it, won't hurt anyway */
@@ -2139,38 +2127,47 @@ static BOOL gdb_exec(unsigned port, unsigned flags)
      */
     fprintf(f, "set step-mode on\n");
     /* tell gdb to delete this file when done handling it... */
-    fprintf(f, "shell rm -f \"%s\"\n", buf);
+    fprintf(f, "shell rm -f \"%s\"\n", unix_tmp);
     fclose(f);
+    argv[0] = "xterm";
+    argv[1] = "-e";
+    argv[2] = gdb_path;
+    argv[3] = "-x";
+    argv[4] = unix_tmp;
+    argv[5] = NULL;
     if (flags & FLAG_WITH_XTERM)
-        execlp("xterm", "xterm", "-e", gdb_path, "-x", buf, NULL);
+        __wine_unix_spawnvp( (char **)argv, FALSE );
     else
-        execlp(gdb_path, gdb_path, "-x", buf, NULL);
-    assert(0); /* never reached */
+        __wine_unix_spawnvp( (char **)argv + 2, FALSE );
+    HeapFree( GetProcessHeap(), 0, unix_tmp );
     return TRUE;
 }
 
 static BOOL gdb_startup(struct gdb_context* gdbctx, unsigned flags, unsigned port)
 {
-    int                 sock;
-    struct sockaddr_in  s_addrs = {0};
-    socklen_t           s_len = sizeof(s_addrs);
-    struct pollfd       pollfd;
+    SOCKET sock;
+    struct sockaddr_in s_addrs = {0};
+    int s_len = sizeof(s_addrs);
+    fd_set read_fds;
+    WSADATA data;
     BOOL                ret = FALSE;
 
+    WSAStartup( MAKEWORD(2, 2), &data );
+
     /* step 1: create socket for gdb connection request */
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
     {
-        ERR("Failed to create socket: %s\n", strerror(errno));
+        ERR("Failed to create socket: %u\n", WSAGetLastError());
         return FALSE;
     }
 
     s_addrs.sin_family = AF_INET;
-    s_addrs.sin_addr.s_addr = INADDR_ANY;
+    s_addrs.sin_addr.S_un.S_addr = INADDR_ANY;
     s_addrs.sin_port = htons(port);
     if (bind(sock, (struct sockaddr *)&s_addrs, sizeof(s_addrs)) == -1)
         goto cleanup;
 
-    if (listen(sock, 1) == -1 || getsockname(sock, (struct sockaddr*)&s_addrs, &s_len) == -1)
+    if (listen(sock, 1) == -1 || getsockname(sock, (struct sockaddr *)&s_addrs, &s_len) == -1)
         goto cleanup;
 
     /* step 2: do the process internal creation */
@@ -2180,54 +2177,31 @@ static BOOL gdb_startup(struct gdb_context* gdbctx, unsigned flags, unsigned por
     if (flags & FLAG_NO_START)
         fprintf(stderr, "target remote localhost:%d\n", ntohs(s_addrs.sin_port));
     else
-        switch (fork())
-        {
-        case -1: /* error in parent... */
-            ERR("Failed to start gdb: fork: %s\n", strerror(errno));
-            goto cleanup;
-        default: /* in parent... success */
-            signal(SIGINT, SIG_IGN);
-            break;
-        case 0: /* in child... and alive */
-            gdb_exec(s_addrs.sin_port, flags);
-            /* if we're here, exec failed, so report failure */
-            goto cleanup;
-        }
+        gdb_exec(s_addrs.sin_port, flags);
 
     /* step 4: wait for gdb to connect actually */
-    pollfd.fd = sock;
-    pollfd.events = POLLIN;
-    pollfd.revents = 0;
+    FD_ZERO( &read_fds );
+    FD_SET( sock, &read_fds );
 
-    switch (poll(&pollfd, 1, -1))
+    if (select( 0, &read_fds, NULL, NULL, NULL ) > 0)
     {
-    case 1:
-        if (pollfd.revents & POLLIN)
+        int dummy = 1;
+
+        gdbctx->sock = accept(sock, (struct sockaddr *)&s_addrs, &s_len);
+        if (gdbctx->sock != INVALID_SOCKET)
         {
-            int dummy = 1;
-            gdbctx->sock = accept(sock, (struct sockaddr*)&s_addrs, &s_len);
-            if (gdbctx->sock == -1)
-                break;
             ret = TRUE;
-            TRACE("connected on %d\n", gdbctx->sock);
+            TRACE("connected on %lu\n", gdbctx->sock);
             /* don't keep our small packets too long: send them ASAP back to GDB
              * without this, GDB really crawls
              */
             setsockopt(gdbctx->sock, IPPROTO_TCP, TCP_NODELAY, (char*)&dummy, sizeof(dummy));
         }
-        break;
-    case 0:
-        ERR("Timed out connecting to gdb\n");
-        break;
-    case -1:
-        ERR("Failed to connect to gdb: poll: %s\n", strerror(errno));
-        break;
-    default:
-        assert(0);
     }
+    else ERR("Failed to connect to gdb: %u\n", WSAGetLastError());
 
 cleanup:
-    close(sock);
+    closesocket(sock);
     return ret;
 }
 
@@ -2235,7 +2209,7 @@ static BOOL gdb_init_context(struct gdb_context* gdbctx, unsigned flags, unsigne
 {
     int                 i;
 
-    gdbctx->sock = -1;
+    gdbctx->sock = INVALID_SOCKET;
     gdbctx->in_buf = NULL;
     gdbctx->in_buf_alloc = 0;
     gdbctx->in_len = 0;
@@ -2272,50 +2246,40 @@ static BOOL gdb_init_context(struct gdb_context* gdbctx, unsigned flags, unsigne
 
 static int gdb_remote(unsigned flags, unsigned port)
 {
-    struct pollfd       pollfd;
     struct gdb_context  gdbctx;
-    BOOL                doLoop;
 
-    for (doLoop = gdb_init_context(&gdbctx, flags, port); doLoop;)
+    if (!gdb_init_context(&gdbctx, flags, port)) return 0;
+    for (;;)
     {
-        pollfd.fd = gdbctx.sock;
-        pollfd.events = POLLIN;
-        pollfd.revents = 0;
+        fd_set read_fds, err_fds;
 
-        switch (poll(&pollfd, 1, -1))
+        FD_ZERO( &read_fds );
+        FD_ZERO( &err_fds );
+        FD_SET( gdbctx.sock, &read_fds );
+        FD_SET( gdbctx.sock, &err_fds );
+
+        if (select( 0, &read_fds, NULL, &err_fds, NULL ) == -1) break;
+
+        if (FD_ISSET( gdbctx.sock, &err_fds ))
         {
-        case 1:
-            /* got something */
-            if (pollfd.revents & (POLLHUP | POLLERR))
-            {
-                ERR("gdb hung up\n");
-                /* kill also debuggee process - questionnable - */
-                detach_debuggee(&gdbctx, TRUE);
-                doLoop = FALSE;
-                break;
-            }
-            if ((pollfd.revents & POLLIN) && fetch_data(&gdbctx) > 0)
-            {
-                if (extract_packets(&gdbctx)) doLoop = FALSE;
-            }
-            break;
-        case 0:
-            /* timeout, should never happen (infinite timeout) */
-            break;
-        case -1:
-            ERR("poll failed: %s\n", strerror(errno));
-            doLoop = FALSE;
+            ERR("gdb hung up\n");
+            /* kill also debuggee process - questionnable - */
+            detach_debuggee(&gdbctx, TRUE);
             break;
         }
+        if (FD_ISSET( gdbctx.sock, &read_fds ))
+        {
+            if (fetch_data(&gdbctx) > 0)
+            {
+                if (extract_packets(&gdbctx)) break;
+            }
+        }
     }
-    wait(NULL);
     return 0;
 }
-#endif
 
 int gdb_main(int argc, char* argv[])
 {
-#ifdef HAVE_POLL
     unsigned gdb_flags = 0, port = 0;
     char *port_end;
 
@@ -2350,8 +2314,6 @@ int gdb_main(int argc, char* argv[])
     if (dbg_active_attach(argc, argv) == start_ok ||
         dbg_active_launch(argc, argv) == start_ok)
         return gdb_remote(gdb_flags, port);
-#else
-    fprintf(stderr, "GdbProxy mode not supported on this platform\n");
-#endif
+
     return -1;
 }

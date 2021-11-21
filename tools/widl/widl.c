@@ -20,22 +20,15 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
 #include <signal.h>
-#ifdef HAVE_GETOPT_H
-# include <getopt.h>
-#endif
 
 #include "widl.h"
 #include "utils.h"
@@ -155,6 +148,8 @@ char *temp_name;
 const char *prefix_client = "";
 const char *prefix_server = "";
 static const char *includedir;
+static char *output_name;
+static const char *sysroot = "";
 
 int line_number = 1;
 
@@ -189,30 +184,30 @@ enum {
 
 static const char short_options[] =
     "b:cC:d:D:EhH:I:m:No:O:pP:rsS:tT:uU:VW";
-static const struct option long_options[] = {
-    { "acf", 1, NULL, ACF_OPTION },
-    { "app_config", 0, NULL, APP_CONFIG_OPTION },
-    { "dlldata", 1, NULL, DLLDATA_OPTION },
-    { "dlldata-only", 0, NULL, DLLDATA_ONLY_OPTION },
-    { "help", 0, NULL, PRINT_HELP },
-    { "local-stubs", 1, NULL, LOCAL_STUBS_OPTION },
-    { "nostdinc", 0, NULL, NOSTDINC_OPTION },
-    { "ns_prefix", 0, NULL, RT_NS_PREFIX },
-    { "oldnames", 0, NULL, OLDNAMES_OPTION },
+static const struct long_option long_options[] = {
+    { "acf", 1, ACF_OPTION },
+    { "app_config", 0, APP_CONFIG_OPTION },
+    { "dlldata", 1, DLLDATA_OPTION },
+    { "dlldata-only", 0, DLLDATA_ONLY_OPTION },
+    { "help", 0, PRINT_HELP },
+    { "local-stubs", 1, LOCAL_STUBS_OPTION },
+    { "nostdinc", 0, NOSTDINC_OPTION },
+    { "ns_prefix", 0, RT_NS_PREFIX },
+    { "oldnames", 0, OLDNAMES_OPTION },
     { "oldtlb", 0, NULL, OLD_TYPELIB_OPTION },
-    { "output", 0, NULL, 'o' },
-    { "prefix-all", 1, NULL, PREFIX_ALL_OPTION },
-    { "prefix-client", 1, NULL, PREFIX_CLIENT_OPTION },
-    { "prefix-server", 1, NULL, PREFIX_SERVER_OPTION },
-    { "robust", 0, NULL, ROBUST_OPTION },
-    { "sysroot", 1, NULL, SYSROOT_OPTION },
-    { "target", 0, NULL, 'b' },
-    { "winrt", 0, NULL, RT_OPTION },
-    { "win32", 0, NULL, WIN32_OPTION },
-    { "win64", 0, NULL, WIN64_OPTION },
-    { "win32-align", 1, NULL, WIN32_ALIGN_OPTION },
-    { "win64-align", 1, NULL, WIN64_ALIGN_OPTION },
-    { NULL, 0, NULL, 0 }
+    { "output", 0, 'o' },
+    { "prefix-all", 1, PREFIX_ALL_OPTION },
+    { "prefix-client", 1, PREFIX_CLIENT_OPTION },
+    { "prefix-server", 1, PREFIX_SERVER_OPTION },
+    { "robust", 0, ROBUST_OPTION },
+    { "sysroot", 1, SYSROOT_OPTION },
+    { "target", 0, 'b' },
+    { "winrt", 0, RT_OPTION },
+    { "win32", 0, WIN32_OPTION },
+    { "win64", 0, WIN64_OPTION },
+    { "win32-align", 1, WIN32_ALIGN_OPTION },
+    { "win64-align", 1, WIN64_ALIGN_OPTION },
+    { NULL }
 };
 
 static const struct
@@ -252,16 +247,9 @@ enum stub_mode get_stub_mode(void)
 static char *make_token(const char *name)
 {
   char *token;
-  char *slash;
   int i;
 
-  slash = strrchr(name, '/');
-  if(!slash)
-    slash = strrchr(name, '\\');
-
-  if (slash) name = slash + 1;
-
-  token = xstrdup(name);
+  token = get_basename( name );
   for (i=0; token[i]; i++) {
     if (!isalnum(token[i])) token[i] = '_';
     else token[i] = tolower(token[i]);
@@ -272,7 +260,7 @@ static char *make_token(const char *name)
 /* duplicate a basename into a valid C token */
 static char *dup_basename_token(const char *name, const char *ext)
 {
-    char *p, *ret = dup_basename( name, ext );
+    char *p, *ret = replace_extension( get_basename(name), ext, "" );
     /* map invalid characters to '_' */
     for (p = ret; *p; p++) if (!isalnum(*p)) *p = '_';
     return ret;
@@ -299,7 +287,7 @@ static void add_widl_version_define(void)
     if (p)
         version += atoi(p + 1);
 
-    snprintf(version_str, sizeof(version_str), "__WIDL__=0x%x", version);
+    sprintf(version_str, "__WIDL__=0x%x", version);
     wpp_add_cmdline_define(version_str);
 }
 
@@ -322,14 +310,8 @@ static void set_cpu( const char *cpu, int error_out )
  * If not found, or not matching a known CPU name, just proceed silently. */
 static void init_argv0_target( const char *argv0 )
 {
-    char *p, *name;
+    char *p, *name = get_basename( argv0 );
 
-    if ((p = strrchr(argv0, '/')) != NULL)
-        argv0 = p + 1;
-    if ((p = strrchr(argv0, '\\')) != NULL)
-        argv0 = p + 1;
-
-    name = xstrdup( argv0 );
     if (!(p = strchr(name, '-')))
     {
         free( name );
@@ -386,33 +368,10 @@ void end_cplusplus_guard(FILE *fp)
   fprintf(fp, "#endif\n\n");
 }
 
-typedef struct
-{
-  char *filename;
-  struct list link;
-} filename_node_t;
-
-static void add_filename_node(struct list *list, const char *name)
-{
-  filename_node_t *node = xmalloc(sizeof *node);
-  node->filename = dup_basename( name, ".idl" );
-  list_add_tail(list, &node->link);
-}
-
-static void free_filename_nodes(struct list *list)
-{
-  filename_node_t *node, *next;
-  LIST_FOR_EACH_ENTRY_SAFE(node, next, list, filename_node_t, link) {
-    list_remove(&node->link);
-    free(node->filename);
-    free(node);
-  }
-}
-
-static void write_dlldata_list(struct list *filenames, int define_proxy_delegation)
+static void write_dlldata_list( struct strarray filenames, int define_proxy_delegation)
 {
   FILE *dlldata;
-  filename_node_t *node;
+  unsigned int i;
 
   dlldata = fopen(dlldata_name, "w");
   if (!dlldata)
@@ -426,13 +385,13 @@ static void write_dlldata_list(struct list *filenames, int define_proxy_delegati
   fprintf(dlldata, "#include <rpcproxy.h>\n\n");
   start_cplusplus_guard(dlldata);
 
-  LIST_FOR_EACH_ENTRY(node, filenames, filename_node_t, link)
-    fprintf(dlldata, "EXTERN_PROXY_FILE(%s)\n", node->filename);
+  for (i = 0; i < filenames.count; i++)
+    fprintf(dlldata, "EXTERN_PROXY_FILE(%s)\n", filenames.str[i]);
 
   fprintf(dlldata, "\nPROXYFILE_LIST_START\n");
   fprintf(dlldata, "/* Start of list */\n");
-  LIST_FOR_EACH_ENTRY(node, filenames, filename_node_t, link)
-    fprintf(dlldata, "  REFERENCE_PROXY_FILE(%s),\n", node->filename);
+  for (i = 0; i < filenames.count; i++)
+    fprintf(dlldata, "  REFERENCE_PROXY_FILE(%s),\n", filenames.str[i]);
   fprintf(dlldata, "/* End of list */\n");
   fprintf(dlldata, "PROXYFILE_LIST_END\n\n");
 
@@ -450,9 +409,8 @@ static char *eat_space(char *s)
 
 void write_dlldata(const statement_list_t *stmts)
 {
-  struct list filenames = LIST_INIT(filenames);
+  struct strarray filenames = empty_strarray;
   int define_proxy_delegation = 0;
-  filename_node_t *node;
   FILE *dlldata;
 
   if (!do_dlldata || !need_proxy_file(stmts))
@@ -483,7 +441,7 @@ void write_dlldata(const statement_list_t *stmts)
           --end;
         *end = '\0';
         if (start < end)
-          add_filename_node(&filenames, start);
+          strarray_add(&filenames, replace_extension( get_basename( start ), ".idl", "" ));
       }else if (!define_proxy_delegation && strncmp(start, delegation_define, sizeof(delegation_define)-1)) {
           define_proxy_delegation = 1;
       }
@@ -496,16 +454,12 @@ void write_dlldata(const statement_list_t *stmts)
     fclose(dlldata);
   }
 
-  LIST_FOR_EACH_ENTRY(node, &filenames, filename_node_t, link)
-    if (strcmp(proxy_token, node->filename) == 0) {
+  if (strarray_exists( &filenames, proxy_token ))
       /* We're already in the list, no need to regenerate this file.  */
-      free_filename_nodes(&filenames);
       return;
-    }
 
-  add_filename_node(&filenames, proxy_token);
-  write_dlldata_list(&filenames, define_proxy_delegation);
-  free_filename_nodes(&filenames);
+  strarray_add(&filenames, proxy_token);
+  write_dlldata_list(filenames, define_proxy_delegation);
 }
 
 static void write_id_guid(FILE *f, const char *type, const char *guid_prefix, const char *name, const UUID *uuid)
@@ -608,7 +562,7 @@ void write_id_data(const statement_list_t *stmts)
 static void init_argv0_dir( const char *argv0 )
 {
 #ifndef _WIN32
-    char *p, *dir;
+    char *dir;
 
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
     dir = realpath( "/proc/self/exe", NULL );
@@ -618,34 +572,14 @@ static void init_argv0_dir( const char *argv0 )
     dir = realpath( argv0, NULL );
 #endif
     if (!dir) return;
-    if (!(p = strrchr( dir, '/' ))) return;
-    if (p == dir) p++;
-    *p = 0;
-    includedir = strmake( "%s/%s", dir, BIN_TO_INCLUDEDIR );
-    free( dir );
+    includedir = strmake( "%s/%s", get_dirname( dir ), BIN_TO_INCLUDEDIR );
 #endif
 }
 
-int main(int argc,char *argv[])
+static void option_callback( int optc, char *optarg )
 {
-  int i, optc;
-  int ret = 0;
-  int opti = 0;
-  char *output_name = NULL;
-  const char *sysroot = "";
-
-  signal( SIGTERM, exit_on_signal );
-  signal( SIGINT, exit_on_signal );
-#ifdef SIGHUP
-  signal( SIGHUP, exit_on_signal );
-#endif
-  init_argv0_dir( argv[0] );
-  init_argv0_target( argv[0] );
-
-  now = time(NULL);
-
-  while((optc = getopt_long_only(argc, argv, short_options, long_options, &opti)) != EOF) {
-    switch(optc) {
+    switch (optc)
+    {
     case DLLDATA_OPTION:
       dlldata_name = xstrdup(optarg);
       break;
@@ -675,7 +609,7 @@ int main(int argc,char *argv[])
       break;
     case PRINT_HELP:
       fprintf(stderr, "%s", usage);
-      return 0;
+      exit(0);
     case RT_OPTION:
       winrt_mode = 1;
       break;
@@ -796,15 +730,33 @@ int main(int argc,char *argv[])
       break;
     case 'V':
       printf("%s", version_string);
-      return 0;
+      exit(0);
     case 'W':
       pedantic = 1;
       break;
-    default:
-      fprintf(stderr, "%s", usage);
-      return 1;
+    case '?':
+      fprintf(stderr, "widl: %s\n\n%s", optarg, usage);
+      exit(1);
     }
-  }
+}
+
+int main(int argc,char *argv[])
+{
+  int i;
+  int ret = 0;
+  struct strarray files;
+
+  signal( SIGTERM, exit_on_signal );
+  signal( SIGINT, exit_on_signal );
+#ifdef SIGHUP
+  signal( SIGHUP, exit_on_signal );
+#endif
+  init_argv0_dir( argv[0] );
+  init_argv0_target( argv[0] );
+
+  now = time(NULL);
+
+  files = parse_options( argc, argv, short_options, long_options, 1, option_callback );
 
   if (stdinc)
   {
@@ -888,22 +840,21 @@ int main(int argc,char *argv[])
   if (!dlldata_name && do_dlldata)
     dlldata_name = xstrdup("dlldata.c");
 
-  if(optind < argc) {
+  if (files.count) {
     if (do_dlldata && !do_everything) {
-      struct list filenames = LIST_INIT(filenames);
-      for ( ; optind < argc; ++optind)
-        add_filename_node(&filenames, argv[optind]);
+      struct strarray filenames = empty_strarray;
+      for (i = 0; i < files.count; i++)
+          strarray_add(&filenames, replace_extension( get_basename( files.str[i] ), ".idl", "" ));
 
-      write_dlldata_list(&filenames, 0 /* FIXME */ );
-      free_filename_nodes(&filenames);
+      write_dlldata_list(filenames, 0 /* FIXME */ );
       return 0;
     }
-    else if (optind != argc - 1) {
+    else if (files.count > 1) {
       fprintf(stderr, "%s", usage);
       return 1;
     }
     else
-      input_idl_name = input_name = xstrdup(argv[optind]);
+      input_idl_name = input_name = xstrdup(files.str[0]);
   }
   else {
     fprintf(stderr, "%s", usage);
@@ -923,40 +874,26 @@ int main(int argc,char *argv[])
                  (debuglevel & DEBUGLEVEL_PPTRACE) != 0,
                  (debuglevel & DEBUGLEVEL_PPMSG) != 0 );
 
-  if (!header_name) {
-    header_name = dup_basename(input_name, ".idl");
-    strcat(header_name, ".h");
-  }
+  if (!header_name)
+      header_name = replace_extension( get_basename(input_name), ".idl", ".h" );
 
-  if (!typelib_name && do_typelib) {
-    typelib_name = dup_basename(input_name, ".idl");
-    strcat(typelib_name, ".tlb");
-  }
+  if (!typelib_name && do_typelib)
+      typelib_name = replace_extension( get_basename(input_name), ".idl", ".tlb" );
 
-  if (!proxy_name && do_proxies) {
-    proxy_name = dup_basename(input_name, ".idl");
-    strcat(proxy_name, "_p.c");
-  }
+  if (!proxy_name && do_proxies)
+      proxy_name = replace_extension( get_basename(input_name), ".idl", "_p.c" );
 
-  if (!client_name && do_client) {
-    client_name = dup_basename(input_name, ".idl");
-    strcat(client_name, "_c.c");
-  }
+  if (!client_name && do_client)
+      client_name = replace_extension( get_basename(input_name), ".idl", "_c.c" );
 
-  if (!server_name && do_server) {
-    server_name = dup_basename(input_name, ".idl");
-    strcat(server_name, "_s.c");
-  }
+  if (!server_name && do_server)
+      server_name = replace_extension( get_basename(input_name), ".idl", "_s.c" );
 
-  if (!regscript_name && do_regscript) {
-    regscript_name = dup_basename(input_name, ".idl");
-    strcat(regscript_name, "_r.rgs");
-  }
+  if (!regscript_name && do_regscript)
+      regscript_name = replace_extension( get_basename(input_name), ".idl", "_r.rgs" );
 
-  if (!idfile_name && do_idfile) {
-    idfile_name = dup_basename(input_name, ".idl");
-    strcat(idfile_name, "_i.c");
-  }
+  if (!idfile_name && do_idfile)
+      idfile_name = replace_extension( get_basename(input_name), ".idl", "_i.c" );
 
   if (do_proxies) proxy_token = dup_basename_token(proxy_name,"_p.c");
   if (do_client) client_token = dup_basename_token(client_name,"_c.c");
@@ -975,14 +912,9 @@ int main(int argc,char *argv[])
     {
         FILE *output;
         int fd;
-        char *name = xmalloc( strlen(header_name) + 8 );
+        char *name;
 
-        strcpy( name, header_name );
-        strcat( name, ".XXXXXX" );
-
-        if ((fd = mkstemps( name, 0 )) == -1)
-            error("Could not generate a temp name from %s\n", name);
-
+        fd = make_temp_file( header_name, NULL, &name );
         temp_name = name;
         if (!(output = fdopen(fd, "wt")))
             error("Could not open fd %s for writing\n", name);

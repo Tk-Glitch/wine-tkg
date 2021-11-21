@@ -55,6 +55,18 @@ enum SymTagEnum
    SymTagCustomType,
    SymTagManagedType,
    SymTagDimension,
+   SymTagCallSite,
+   SymTagInlineSite,
+   SymTagBaseInterface,
+   SymTagVectorType,
+   SymTagMatrixType,
+   SymTagHLSLType,
+   SymTagCaller,
+   SymTagCallee,
+   SymTagExport,
+   SymTagHeapAllocationSite,
+   SymTagCoffGroup,
+   SymTagInlinee,
    SymTagMax
 };
 
@@ -103,7 +115,8 @@ enum LocationType
     LocIsSlot,
     LocIsIlRel,
     LocInMetaData,
-    LocIsConstant
+    LocIsConstant,
+    LocTypeMax
 };
 
 /* kind of SymTagData */

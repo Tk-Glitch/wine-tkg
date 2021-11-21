@@ -1,9 +1,0 @@
-STATICLIB = libwine_port.a
-
-C_SRCS = \
-	getopt.c \
-	lstat.c \
-	mkstemps.c \
-	readlink.c \
-	spawn.c \
-	symlink.c

@@ -301,8 +301,10 @@ static HRESULT WINAPI HTMLElementCollection_toString(IHTMLElementCollection *ifa
                                                      BSTR *String)
 {
     HTMLElementCollection *This = impl_from_IHTMLElementCollection(iface);
-    FIXME("(%p)->(%p)\n", This, String);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, String);
+
+    return dispex_to_string(&This->dispex, String);
 }
 
 static HRESULT WINAPI HTMLElementCollection_put_length(IHTMLElementCollection *iface,
@@ -618,6 +620,7 @@ static const tid_t HTMLElementCollection_iface_tids[] = {
 };
 
 static dispex_static_data_t HTMLElementCollection_dispex = {
+    L"HTMLCollection",
     &HTMLElementColection_dispex_vtbl,
     DispHTMLElementCollection_tid,
     HTMLElementCollection_iface_tids

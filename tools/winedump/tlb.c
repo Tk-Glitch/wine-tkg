@@ -20,13 +20,10 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-
-#include "windef.h"
 
 #include "winedump.h"
 
@@ -1190,7 +1187,7 @@ static const char *decode_string(const BYTE *table, const char *stream, DWORD st
     table_size = *(const DWORD *)table;
     table += sizeof(DWORD);
 
-    buf = malloc(buf_size);
+    buf = xmalloc(buf_size);
     buf[0] = 0;
 
     while ((p = lookup_code(table, table_size, &bits)))

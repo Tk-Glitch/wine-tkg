@@ -62,9 +62,9 @@ static const char* symt_get_tag_str(DWORD tag)
     case SymTagBaseClass:               return "SymTagBaseClass";
     case SymTagFriend:                  return "SymTagFriend";
     case SymTagFunctionArgType:         return "SymTagFunctionArgType,";
-    case SymTagFuncDebugStart:          return "SymTagFuncDebugStart,";
+    case SymTagFuncDebugStart:          return "SymTagFuncDebugStart";
     case SymTagFuncDebugEnd:            return "SymTagFuncDebugEnd";
-    case SymTagUsingNamespace:          return "SymTagUsingNamespace,";
+    case SymTagUsingNamespace:          return "SymTagUsingNamespace";
     case SymTagVTableShape:             return "SymTagVTableShape";
     case SymTagVTable:                  return "SymTagVTable";
     case SymTagCustom:                  return "SymTagCustom";
@@ -72,6 +72,18 @@ static const char* symt_get_tag_str(DWORD tag)
     case SymTagCustomType:              return "SymTagCustomType";
     case SymTagManagedType:             return "SymTagManagedType";
     case SymTagDimension:               return "SymTagDimension";
+    case SymTagCallSite:                return "SymTagCallSite";
+    case SymTagInlineSite:              return "SymTagInlineSite";
+    case SymTagBaseInterface:           return "SymTagBaseInterface";
+    case SymTagVectorType:              return "SymTagVectorType";
+    case SymTagMatrixType:              return "SymTagMatrixType";
+    case SymTagHLSLType:                return "SymTagHLSLType";
+    case SymTagCaller:                  return "SymTagCaller";
+    case SymTagCallee:                  return "SymTagCallee";
+    case SymTagExport:                  return "SymTagExport";
+    case SymTagHeapAllocationSite:      return "SymTagHeapAllocationSite";
+    case SymTagCoffGroup:               return "SymTagCoffGroup";
+    case SymTagInlinee:                 return "SymTagInlinee";
     default:                            return "---";
     }
 }
@@ -87,6 +99,7 @@ const char* symt_get_name(const struct symt* sym)
     case SymTagBaseType:        return ((const struct symt_basic*)sym)->hash_elt.name;
     case SymTagLabel:           return ((const struct symt_hierarchy_point*)sym)->hash_elt.name;
     case SymTagThunk:           return ((const struct symt_thunk*)sym)->hash_elt.name;
+    case SymTagCustom:          return ((const struct symt_custom*)sym)->hash_elt.name;
     /* hierarchy tree */
     case SymTagEnum:            return ((const struct symt_enum*)sym)->hash_elt.name;
     case SymTagTypedef:         return ((const struct symt_typedef*)sym)->hash_elt.name;
@@ -99,6 +112,10 @@ const char* symt_get_name(const struct symt* sym)
     case SymTagArrayType:
     case SymTagPointerType:
     case SymTagFunctionType:
+    case SymTagFunctionArgType:
+    case SymTagBlock:
+    case SymTagFuncDebugStart:
+    case SymTagFuncDebugEnd:
         return NULL;
     }
 }
@@ -130,6 +147,9 @@ BOOL symt_get_address(const struct symt* type, ULONG64* addr)
         default: return FALSE;
         }
         break;
+    case SymTagBlock:
+        *addr = ((const struct symt_block*)type)->address;
+        break;
     case SymTagFunction:
         *addr = ((const struct symt_function*)type)->address;
         break;
@@ -141,17 +161,28 @@ BOOL symt_get_address(const struct symt* type, ULONG64* addr)
     case SymTagLabel:
         if (!((const struct symt_hierarchy_point*)type)->parent ||
             !symt_get_address(((const struct symt_hierarchy_point*)type)->parent, addr))
-            return FALSE;
+            *addr = 0;
         *addr += ((const struct symt_hierarchy_point*)type)->loc.offset;
         break;
     case SymTagThunk:
         *addr = ((const struct symt_thunk*)type)->address;
         break;
-    case SymTagCompiland:
-        *addr = ((const struct symt_compiland*)type)->address;
+    case SymTagCustom:
+        *addr = ((const struct symt_custom*)type)->address;
         break;
     default:
         FIXME("Unsupported sym-tag %s for get-address\n", symt_get_tag_str(type->tag));
+        /* fall through */
+    case SymTagExe:
+    case SymTagCompiland:
+    case SymTagFunctionType:
+    case SymTagFunctionArgType:
+    case SymTagBaseType:
+    case SymTagUDT:
+    case SymTagEnum:
+    case SymTagTypedef:
+    case SymTagPointerType:
+    case SymTagArrayType:
         return FALSE;
     }
     return TRUE;
@@ -396,7 +427,6 @@ BOOL symt_add_function_signature_parameter(struct module* module,
     if (!arg) return FALSE;
     arg->symt.tag = SymTagFunctionArgType;
     arg->arg_type = param;
-    arg->container = &sig_type->symt;
     p = vector_add(&sig_type->vchildren, &module->pool);
     if (!p) return FALSE; /* FIXME we leak arg */
     *p = &arg->symt;
@@ -538,10 +568,25 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
 
             switch (type->tag)
             {
+            case SymTagExe:          v = &((const struct symt_module*)type)->vchildren; break;
+            case SymTagCompiland:    v = &((const struct symt_compiland*)type)->vchildren; break;
             case SymTagUDT:          v = &((const struct symt_udt*)type)->vchildren; break;
             case SymTagEnum:         v = &((const struct symt_enum*)type)->vchildren; break;
             case SymTagFunctionType: v = &((const struct symt_function_signature*)type)->vchildren; break;
             case SymTagFunction:     v = &((const struct symt_function*)type)->vchildren; break;
+            case SymTagBlock:        v = &((const struct symt_block*)type)->vchildren; break;
+            case SymTagPointerType:
+            case SymTagArrayType:
+            case SymTagFunctionArgType:
+            case SymTagThunk:
+            case SymTagLabel:
+            case SymTagFuncDebugStart:
+            case SymTagFuncDebugEnd:
+            case SymTagTypedef:
+            case SymTagBaseType:
+            case SymTagCustom:
+                /* for those, CHILDRENCOUNT returns 0 */
+                return tifp->Count == 0;
             default:
                 FIXME("Unsupported sym-tag %s for find-children\n", 
                       symt_get_tag_str(type->tag));
@@ -583,6 +628,12 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
     case TI_GET_CHILDRENCOUNT:
         switch (type->tag)
         {
+        case SymTagExe:
+            X(DWORD) = vector_length(&((const struct symt_module*)type)->vchildren);
+            break;
+        case SymTagCompiland:
+            X(DWORD) = vector_length(&((const struct symt_compiland*)type)->vchildren);
+            break;
         case SymTagUDT:
             X(DWORD) = vector_length(&((const struct symt_udt*)type)->vchildren);
             break;
@@ -595,18 +646,29 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         case SymTagFunction:
             X(DWORD) = vector_length(&((const struct symt_function*)type)->vchildren);
             break;
-        case SymTagPointerType: /* MS does it that way */
-        case SymTagArrayType: /* MS does it that way */
-        case SymTagThunk: /* MS does it that way */
+        case SymTagBlock:
+            X(DWORD) = vector_length(&((const struct symt_block*)type)->vchildren);
+            break;
+        /* some SymTag:s return 0 */
+        case SymTagPointerType:
+        case SymTagArrayType:
+        case SymTagFunctionArgType:
+        case SymTagThunk:
+        case SymTagFuncDebugStart:
+        case SymTagFuncDebugEnd:
+        case SymTagLabel:
+        case SymTagTypedef:
+        case SymTagBaseType:
+        case SymTagCustom:
             X(DWORD) = 0;
             break;
         default:
             FIXME("Unsupported sym-tag %s for get-children-count\n", 
                   symt_get_tag_str(type->tag));
             /* fall through */
+            /* some others return error */
         case SymTagData:
         case SymTagPublicSymbol:
-        case SymTagBaseType:
             return FALSE;
         }
         break;
@@ -641,6 +703,9 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         case SymTagFunction:
             X(DWORD64) = ((const struct symt_function*)type)->size;
             break;
+        case SymTagBlock:
+            X(DWORD64) = ((const struct symt_block*)type)->size;
+            break;
         case SymTagPointerType:
             X(DWORD64) = ((const struct symt_pointer*)type)->size;
             break;
@@ -671,14 +736,18 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         case SymTagThunk:
             X(DWORD64) = ((const struct symt_thunk*)type)->size;
             break;
-        case SymTagLabel:
-            X(DWORD64) = 0;
+        case SymTagCustom:
+            X(DWORD64) = ((const struct symt_custom*)type)->size;
             break;
         default:
             FIXME("Unsupported sym-tag %s for get-length\n", 
                   symt_get_tag_str(type->tag));
             /* fall through */
+        case SymTagExe:
+        case SymTagCompiland:
         case SymTagFunctionType:
+        case SymTagFunctionArgType:
+        case SymTagLabel:
             return FALSE;
         }
         break;
@@ -686,6 +755,9 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
     case TI_GET_LEXICALPARENT:
         switch (type->tag)
         {
+        case SymTagCompiland:
+            X(DWORD) = symt_ptr2index(module, &((const struct symt_compiland*)type)->container->symt);
+            break;
         case SymTagBlock:
             X(DWORD) = symt_ptr2index(module, ((const struct symt_block*)type)->container);
             break;
@@ -698,16 +770,29 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         case SymTagThunk:
             X(DWORD) = symt_ptr2index(module, ((const struct symt_thunk*)type)->container);
             break;
-        case SymTagFunctionArgType:
-            X(DWORD) = symt_ptr2index(module, ((const struct symt_function_arg_type*)type)->container);
+        case SymTagFuncDebugStart:
+        case SymTagFuncDebugEnd:
+        case SymTagLabel:
+            X(DWORD) = symt_ptr2index(module, ((const struct symt_hierarchy_point*)type)->parent);
             break;
         case SymTagUDT:
         case SymTagEnum:
+        case SymTagFunctionType:
+        case SymTagFunctionArgType:
+        case SymTagPointerType:
+        case SymTagArrayType:
+        case SymTagBaseType:
+        case SymTagTypedef:
+        case SymTagBaseClass:
+        case SymTagPublicSymbol:
+        case SymTagCustom:
             X(DWORD) = symt_ptr2index(module, &module->top->symt);
             break;
         default:
             FIXME("Unsupported sym-tag %s for get-lexical-parent\n", 
                   symt_get_tag_str(type->tag));
+            /* fall through */
+        case SymTagExe:
             return FALSE;
         }
         break;
@@ -746,6 +831,21 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         default:
             FIXME("Unsupported sym-tag %s for get-offset\n", 
                   symt_get_tag_str(type->tag));
+            /* fall through */
+        case SymTagExe:
+        case SymTagCompiland:
+        case SymTagUDT:
+        case SymTagFunctionType:
+        case SymTagFunctionArgType:
+        case SymTagPointerType:
+        case SymTagArrayType:
+        case SymTagBaseType:
+        case SymTagTypedef:
+        case SymTagBlock:
+        case SymTagFuncDebugStart:
+        case SymTagFuncDebugEnd:
+        case SymTagLabel:
+        case SymTagCustom:
             return FALSE;
         }
         break;
@@ -810,7 +910,15 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         /* fall through */
         case SymTagPublicSymbol:
         case SymTagThunk:
+        case SymTagBlock:
+        case SymTagFuncDebugStart:
+        case SymTagFuncDebugEnd:
         case SymTagLabel:
+        case SymTagExe:
+        case SymTagCompiland:
+        case SymTagUDT:
+        case SymTagBaseType:
+        case SymTagCustom:
             return FALSE;
         }
         break;
@@ -874,17 +982,15 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
 
 #undef X
 
-    case TI_GET_ADDRESSOFFSET:
-    case TI_GET_SYMINDEX:
-    case TI_GET_THISADJUST:
-    case TI_GET_VIRTUALBASECLASS:
-    case TI_GET_VIRTUALBASEPOINTEROFFSET:
-    case TI_GET_VIRTUALTABLESHAPEID:
-    case TI_IS_EQUIV_TO:
-        FIXME("Unsupported GetInfo request (%u)\n", req);
-        return FALSE;
     default:
-        FIXME("Unknown GetInfo request (%u)\n", req);
+        {
+            static DWORD64 once;
+            if (!(once & ((DWORD64)1 << req)))
+            {
+                FIXME("Unsupported GetInfo request (%u)\n", req);
+                once |= (DWORD64)1 << req;
+            }
+        }
         return FALSE;
     }
 

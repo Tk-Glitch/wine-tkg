@@ -21,6 +21,7 @@
 #ifndef __WMC_WMC_H
 #define __WMC_WMC_H
 
+#include "../tools.h"
 #include "wmctypes.h"
 
 /*
@@ -45,7 +46,7 @@ extern int unicodein;
 extern int rcinline;
 
 extern char *output_name;
-extern char *input_name;
+extern const char *input_name;
 extern char *header_name;
 extern char *cmdline;
 

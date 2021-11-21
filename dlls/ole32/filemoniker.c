@@ -608,21 +608,16 @@ FileMonikerImpl_BindToStorage(IMoniker* iface, IBindCtx* pbc, IMoniker* pmkToLef
     return E_NOTIMPL;
 }
 
-/******************************************************************************
- *        FileMoniker_Reduce
- ******************************************************************************/
-static HRESULT WINAPI
-FileMonikerImpl_Reduce(IMoniker* iface, IBindCtx* pbc, DWORD dwReduceHowFar,
-                       IMoniker** ppmkToLeft, IMoniker** ppmkReduced)
+static HRESULT WINAPI FileMonikerImpl_Reduce(IMoniker *iface, IBindCtx *pbc, DWORD howfar,
+        IMoniker **toleft, IMoniker **reduced)
 {
-    TRACE("(%p,%p,%d,%p,%p)\n",iface,pbc,dwReduceHowFar,ppmkToLeft,ppmkReduced);
+    TRACE("%p, %p, %d, %p, %p.\n", iface, pbc, howfar, toleft, reduced);
 
-    if (ppmkReduced==NULL)
-        return E_POINTER;
+    if (!pbc || !reduced)
+        return E_INVALIDARG;
 
     IMoniker_AddRef(iface);
-
-    *ppmkReduced=iface;
+    *reduced = iface;
 
     return MK_S_REDUCED_TO_SELF;
 }
@@ -634,6 +629,85 @@ static void free_stringtable(LPOLESTR *stringTable)
     for (i=0; stringTable[i]!=NULL; i++)
         CoTaskMemFree(stringTable[i]);
     CoTaskMemFree(stringTable);
+}
+
+static int FileMonikerImpl_DecomposePath(LPCOLESTR str, LPOLESTR** stringTable)
+{
+    LPOLESTR word;
+    int i=0,j,tabIndex=0, ret=0;
+    LPOLESTR *strgtable ;
+
+    int len=lstrlenW(str);
+
+    TRACE("%s, %p\n", debugstr_w(str), *stringTable);
+
+    strgtable = CoTaskMemAlloc((len + 1)*sizeof(*strgtable));
+
+    if (strgtable==NULL)
+        return E_OUTOFMEMORY;
+
+    word = CoTaskMemAlloc((len + 1)*sizeof(WCHAR));
+
+    if (word==NULL)
+    {
+        ret = E_OUTOFMEMORY;
+        goto lend;
+    }
+
+    while(str[i]!=0){
+
+        if (str[i] == L'\\')
+        {
+
+            strgtable[tabIndex]=CoTaskMemAlloc(2*sizeof(WCHAR));
+
+            if (strgtable[tabIndex]==NULL)
+            {
+                ret = E_OUTOFMEMORY;
+                goto lend;
+            }
+
+            lstrcpyW(strgtable[tabIndex++], L"\\");
+
+            i++;
+
+        }
+        else {
+
+            for (j = 0; str[i] && str[i] != L'\\'; i++, j++)
+                word[j]=str[i];
+
+            word[j]=0;
+
+            strgtable[tabIndex]=CoTaskMemAlloc(sizeof(WCHAR)*(j+1));
+
+            if (strgtable[tabIndex]==NULL)
+            {
+                ret = E_OUTOFMEMORY;
+                goto lend;
+            }
+
+            lstrcpyW(strgtable[tabIndex++],word);
+        }
+    }
+    strgtable[tabIndex]=NULL;
+
+    *stringTable=strgtable;
+
+    ret = tabIndex;
+
+lend:
+    if (ret < 0)
+    {
+        for (i = 0; i < tabIndex; i++)
+            CoTaskMemFree(strgtable[i]);
+
+        CoTaskMemFree(strgtable);
+    }
+
+    CoTaskMemFree(word);
+
+    return ret;
 }
 
 /******************************************************************************
@@ -971,88 +1045,6 @@ failed:
     CoTaskMemFree(commonPath);
     if (stringTable1) free_stringtable(stringTable1);
     if (stringTable2) free_stringtable(stringTable2);
-
-    return ret;
-}
-
-/******************************************************************************
- *        DecomposePath (local function)
- */
-int FileMonikerImpl_DecomposePath(LPCOLESTR str, LPOLESTR** stringTable)
-{
-    LPOLESTR word;
-    int i=0,j,tabIndex=0, ret=0;
-    LPOLESTR *strgtable ;
-
-    int len=lstrlenW(str);
-
-    TRACE("%s, %p\n", debugstr_w(str), *stringTable);
-
-    strgtable = CoTaskMemAlloc((len + 1)*sizeof(*strgtable));
-
-    if (strgtable==NULL)
-	return E_OUTOFMEMORY;
-
-    word = CoTaskMemAlloc((len + 1)*sizeof(WCHAR));
-
-    if (word==NULL)
-    {
-        ret = E_OUTOFMEMORY;
-        goto lend;
-    }
-
-    while(str[i]!=0){
-
-        if (str[i] == L'\\')
-        {
-
-            strgtable[tabIndex]=CoTaskMemAlloc(2*sizeof(WCHAR));
-
-            if (strgtable[tabIndex]==NULL)
-            {
-                ret = E_OUTOFMEMORY;
-                goto lend;
-            }
-
-            lstrcpyW(strgtable[tabIndex++], L"\\");
-
-            i++;
-
-        }
-        else {
-
-            for (j = 0; str[i] && str[i] != L'\\'; i++, j++)
-                word[j]=str[i];
-
-            word[j]=0;
-
-            strgtable[tabIndex]=CoTaskMemAlloc(sizeof(WCHAR)*(j+1));
-
-            if (strgtable[tabIndex]==NULL)
-            {
-                ret = E_OUTOFMEMORY;
-                goto lend;
-            }
-
-            lstrcpyW(strgtable[tabIndex++],word);
-        }
-    }
-    strgtable[tabIndex]=NULL;
-
-    *stringTable=strgtable;
-
-    ret = tabIndex;
-
-lend:
-    if (ret < 0)
-    {
-        for (i = 0; i < tabIndex; i++)
-            CoTaskMemFree(strgtable[i]);
-
-        CoTaskMemFree(strgtable);
-    }
-
-    CoTaskMemFree(word);
 
     return ret;
 }

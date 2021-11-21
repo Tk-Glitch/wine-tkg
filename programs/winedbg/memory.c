@@ -20,16 +20,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
 #include "debugger.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
@@ -40,7 +36,7 @@ void* be_cpu_linearize(HANDLE hThread, const ADDRESS64* addr)
 }
 
 BOOL be_cpu_build_addr(HANDLE hThread, const dbg_ctx_t *ctx, ADDRESS64* addr,
-                       unsigned seg, unsigned long offset)
+                       unsigned seg, DWORD64 offset)
 {
     addr->Mode    = AddrModeFlat;
     addr->Segment = 0; /* don't need segment */
@@ -350,7 +346,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
 {
     LONGLONG            val_int;
     void*               val_ptr;
-    long double         val_real;
+    double              val_real;
     DWORD64             size64;
     DWORD               tag, size, count, bt;
     struct dbg_type     type = lvalue->type;
@@ -385,7 +381,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
             break;
         case btFloat:
             if (!dbg_curr_process->be_cpu->fetch_float(lvalue, size, &val_real)) return;
-            dbg_printf("%Lf", val_real);
+            dbg_printf("%f", val_real);
             break;
         case btChar:
         case btWChar:

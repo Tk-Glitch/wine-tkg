@@ -64,35 +64,68 @@ int __cdecl symt_cmp_addr(const void* p1, const void* p2)
     return cmp_addr(a1, a2);
 }
 
+#define BASE_CUSTOM_SYMT 0x80000000
+
+/* dbghelp exposes the internal symbols/types with DWORD indexes.
+ * - custom symbols are always stored with index starting at BASE_CUSTOM_SYMT
+ * - for all the others (non custom) symbols:
+ *   + on 32bit machine, index is set to the actual adress of symt
+ *   + on 64bit machine, we have a dedicated array to store symt exposed to caller
+ *     index is the index in this array of the symbol
+ */
 DWORD             symt_ptr2index(struct module* module, const struct symt* sym)
 {
-#ifdef _WIN64
+    struct vector* vector;
+    DWORD offset;
     const struct symt** c;
-    int                 len = vector_length(&module->vsymt), i;
+    int len, i;
 
+    if (!sym) return 0;
+    if (sym->tag == SymTagCustom)
+    {
+        vector = &module->vcustom_symt;
+        offset = BASE_CUSTOM_SYMT;
+    }
+    else
+    {
+#ifdef _WIN64
+        vector = &module->vsymt;
+        offset = 1;
+#else
+        return (DWORD)sym;
+#endif
+    }
+    len = vector_length(vector);
     /* FIXME: this is inefficient */
     for (i = 0; i < len; i++)
     {
-        if (*(struct symt**)vector_at(&module->vsymt, i) == sym)
-            return i + 1;
+        if (*(struct symt**)vector_at(vector, i) == sym)
+            return i + offset;
     }
     /* not found */
-    c = vector_add(&module->vsymt, &module->pool);
+    c = vector_add(vector, &module->pool);
     if (c) *c = sym;
-    return len + 1;
-#else
-    return (DWORD)sym;
-#endif
+    return len + offset;
 }
 
 struct symt*      symt_index2ptr(struct module* module, DWORD id)
 {
+    struct vector* vector;
+    if (id >= BASE_CUSTOM_SYMT)
+    {
+        id -= BASE_CUSTOM_SYMT;
+        vector = &module->vcustom_symt;
+    }
+    else
+    {
 #ifdef _WIN64
-    if (!id-- || id >= vector_length(&module->vsymt)) return NULL;
-    return *(struct symt**)vector_at(&module->vsymt, id);
+        if (!id--) return NULL;
+        vector = &module->vsymt;
 #else
-    return (struct symt*)id;
+        return (struct symt*)id;
 #endif
+    }
+    return (id >= vector_length(vector)) ? NULL : *(struct symt**)vector_at(vector, id);
 }
 
 static BOOL symt_grow_sorttab(struct module* module, unsigned sz)
@@ -191,6 +224,7 @@ struct symt_module* symt_new_module(struct module* module)
     {
         sym->symt.tag = SymTagExe;
         sym->module   = module;
+        vector_init(&sym->vchildren, sizeof(struct symt*), 8);
     }
     return sym;
 }
@@ -199,6 +233,7 @@ struct symt_compiland* symt_new_compiland(struct module* module,
                                           ULONG_PTR address, unsigned src_idx)
 {
     struct symt_compiland*    sym;
+    struct symt_compiland**   p;
 
     TRACE_(dbghelp_symt)("Adding compiland symbol %s:%s\n",
                          debugstr_w(module->modulename), source_get(module, src_idx));
@@ -210,6 +245,8 @@ struct symt_compiland* symt_new_compiland(struct module* module,
         sym->source    = src_idx;
         vector_init(&sym->vchildren, sizeof(struct symt*), 32);
         sym->user      = NULL;
+        p = vector_add(&module->top->vchildren, &module->pool);
+        *p = sym;
     }
     return sym;
 }
@@ -409,6 +446,42 @@ struct symt_data* symt_add_func_local(struct module* module,
     return locsym;
 }
 
+/******************************************************************
+ *             symt_add_func_local
+ *
+ * Adds a new (local) constant to a given function
+ */
+struct symt_data* symt_add_func_constant(struct module* module,
+                                         struct symt_function* func,
+                                         struct symt_block* block,
+                                         struct symt* type, const char* name,
+                                         VARIANT* v)
+{
+    struct symt_data*   locsym;
+    struct symt**       p;
+
+    TRACE_(dbghelp_symt)("Adding local constant (%s:%s): %s %p\n",
+                         debugstr_w(module->modulename), func->hash_elt.name,
+                         name, type);
+
+    assert(func);
+    assert(func->symt.tag == SymTagFunction);
+
+    locsym = pool_alloc(&module->pool, sizeof(*locsym));
+    locsym->symt.tag      = SymTagData;
+    locsym->hash_elt.name = pool_strdup(&module->pool, name);
+    locsym->hash_elt.next = NULL;
+    locsym->kind          = DataIsConstant;
+    locsym->container     = block ? &block->symt : &func->symt;
+    locsym->type          = type;
+    locsym->u.value       = *v;
+    if (block)
+        p = vector_add(&block->vchildren, &module->pool);
+    else
+        p = vector_add(&func->vchildren, &module->pool);
+    *p = &locsym->symt;
+    return locsym;
+}
 
 struct symt_block* symt_open_func_block(struct module* module, 
                                         struct symt_function* func,
@@ -555,6 +628,25 @@ struct symt_hierarchy_point* symt_new_label(struct module* module,
     return sym;
 }
 
+struct symt_custom* symt_new_custom(struct module* module, const char* name,
+                                    DWORD64 addr, DWORD size)
+{
+    struct symt_custom*        sym;
+
+    TRACE_(dbghelp_symt)("Adding custom symbol %s:%s\n",
+                         debugstr_w(module->modulename), name);
+
+    if ((sym = pool_alloc(&module->pool, sizeof(*sym))))
+    {
+        sym->symt.tag      = SymTagCustom;
+        sym->hash_elt.name = pool_strdup(&module->pool, name);
+        sym->address       = addr;
+        sym->size          = size;
+        symt_add_module_ht(module, (struct symt_ht*)sym);
+    }
+    return sym;
+}
+
 /* expect sym_info->MaxNameLen to be set before being called */
 static void symt_fill_sym_info(struct module_pair* pair,
                                const struct symt_function* func,
@@ -653,6 +745,9 @@ static void symt_fill_sym_info(struct module_pair* pair,
                 break;
             case DataIsConstant:
                 sym_info->Flags |= SYMFLAG_VALUEPRESENT;
+                if (data->container &&
+                    (data->container->tag == SymTagFunction || data->container->tag == SymTagBlock))
+                    sym_info->Flags |= SYMFLAG_LOCAL;
                 switch (data->u.value.n1.n2.vt)
                 {
                 case VT_I4:  sym_info->Value = (ULONG)data->u.value.n1.n2.n3.lVal; break;
@@ -690,6 +785,10 @@ static void symt_fill_sym_info(struct module_pair* pair,
     case SymTagThunk:
         sym_info->Flags |= SYMFLAG_THUNK;
         symt_get_address(sym, &sym_info->Address);
+        break;
+    case SymTagCustom:
+        symt_get_address(sym, &sym_info->Address);
+        sym_info->Flags |= SYMFLAG_VIRTUAL;
         break;
     default:
         symt_get_address(sym, &sym_info->Address);
@@ -2238,30 +2337,32 @@ BOOL WINAPI SymSearchW(HANDLE hProcess, ULONG64 BaseOfDll, DWORD Index,
 BOOL WINAPI SymAddSymbol(HANDLE hProcess, ULONG64 BaseOfDll, PCSTR name,
                          DWORD64 addr, DWORD size, DWORD flags)
 {
-    WCHAR       nameW[MAX_SYM_NAME];
-
-    MultiByteToWideChar(CP_ACP, 0, name, -1, nameW, ARRAY_SIZE(nameW));
-    return SymAddSymbolW(hProcess, BaseOfDll, nameW, addr, size, flags);
-}
-
-/******************************************************************
- *		SymAddSymbolW (DBGHELP.@)
- *
- */
-BOOL WINAPI SymAddSymbolW(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR name,
-                          DWORD64 addr, DWORD size, DWORD flags)
-{
     struct module_pair  pair;
 
-    TRACE("(%p %s %s %u)\n", hProcess, wine_dbgstr_w(name), wine_dbgstr_longlong(addr), size);
+    TRACE("(%p %s %s %u)\n", hProcess, wine_dbgstr_a(name), wine_dbgstr_longlong(addr), size);
 
     pair.pcs = process_find_by_handle(hProcess);
     if (!pair.pcs) return FALSE;
     pair.requested = module_find_by_addr(pair.pcs, BaseOfDll, DMT_UNKNOWN);
     if (!module_get_debug(&pair)) return FALSE;
 
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    return symt_new_custom(pair.effective, name, addr, size) != NULL;
+}
+
+/******************************************************************
+ *		SymAddSymbolW (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymAddSymbolW(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR nameW,
+                          DWORD64 addr, DWORD size, DWORD flags)
+{
+    char       name[MAX_SYM_NAME];
+
+    TRACE("(%p %s %s %u)\n", hProcess, wine_dbgstr_w(nameW), wine_dbgstr_longlong(addr), size);
+
+    WideCharToMultiByte(CP_ACP, 0, nameW, -1, name, ARRAY_SIZE(name), NULL, NULL);
+
+    return SymAddSymbol(hProcess, BaseOfDll, name, addr, size, flags);
 }
 
 /******************************************************************

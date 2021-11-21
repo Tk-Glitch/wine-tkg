@@ -304,6 +304,7 @@ static const tid_t HTMLDOMImplementation_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLDOMImplementation_dispex = {
+    L"DOMImplementation",
     NULL,
     DispHTMLDOMImplementation_tid,
     HTMLDOMImplementation_iface_tids
@@ -555,6 +556,7 @@ static const tid_t HTMLScreen_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLScreen_dispex = {
+    L"Screen",
     NULL,
     DispHTMLScreen_tid,
     HTMLScreen_iface_tids
@@ -718,6 +720,7 @@ static const tid_t OmHistory_iface_tids[] = {
     0
 };
 static dispex_static_data_t OmHistory_dispex = {
+    L"History",
     NULL,
     DispHTMLHistory_tid,
     OmHistory_iface_tids
@@ -874,6 +877,7 @@ static const tid_t HTMLPluginsCollection_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLPluginsCollection_dispex = {
+    L"PluginArray",
     NULL,
     DispCPlugins_tid,
     HTMLPluginsCollection_iface_tids
@@ -1018,6 +1022,7 @@ static const tid_t HTMLMimeTypesCollection_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLMimeTypesCollection_dispex = {
+    L"MimeTypeArray",
     NULL,
     IHTMLMimeTypesCollection_tid,
     HTMLMimeTypesCollection_iface_tids
@@ -1310,12 +1315,7 @@ static HRESULT WINAPI OmNavigator_toString(IOmNavigator *iface, BSTR *String)
 
     TRACE("(%p)->(%p)\n", This, String);
 
-    if(!String)
-        return E_INVALIDARG;
-
-    *String = SysAllocString(dispex_compat_mode(&This->dispex) < COMPAT_MODE_IE9
-                             ? L"[object]" : L"[object Navigator]");
-    return *String ? S_OK : E_OUTOFMEMORY;
+    return dispex_to_string(&This->dispex, String);
 }
 
 static HRESULT WINAPI OmNavigator_get_cpuClass(IOmNavigator *iface, BSTR *p)
@@ -1469,6 +1469,7 @@ static const tid_t OmNavigator_iface_tids[] = {
     0
 };
 static dispex_static_data_t OmNavigator_dispex = {
+    L"Navigator",
     NULL,
     DispHTMLNavigator_tid,
     OmNavigator_iface_tids
@@ -1800,8 +1801,10 @@ static HRESULT WINAPI HTMLPerformanceTiming_get_msFirstPaint(IHTMLPerformanceTim
 static HRESULT WINAPI HTMLPerformanceTiming_toString(IHTMLPerformanceTiming *iface, BSTR *string)
 {
     HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
-    FIXME("(%p)->(%p)\n", This, string);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, string);
+
+    return dispex_to_string(&This->dispex, string);
 }
 
 static HRESULT WINAPI HTMLPerformanceTiming_toJSON(IHTMLPerformanceTiming *iface, VARIANT *p)
@@ -1849,6 +1852,7 @@ static const tid_t HTMLPerformanceTiming_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLPerformanceTiming_dispex = {
+    L"PerformanceTiming",
     NULL,
     IHTMLPerformanceTiming_tid,
     HTMLPerformanceTiming_iface_tids
@@ -1968,8 +1972,10 @@ static HRESULT WINAPI HTMLPerformanceNavigation_get_redirectCount(IHTMLPerforman
 static HRESULT WINAPI HTMLPerformanceNavigation_toString(IHTMLPerformanceNavigation *iface, BSTR *string)
 {
     HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
-    FIXME("(%p)->(%p)\n", This, string);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, string);
+
+    return dispex_to_string(&This->dispex, string);
 }
 
 static HRESULT WINAPI HTMLPerformanceNavigation_toJSON(IHTMLPerformanceNavigation *iface, VARIANT *p)
@@ -1998,6 +2004,7 @@ static const tid_t HTMLPerformanceNavigation_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLPerformanceNavigation_dispex = {
+    L"PerformanceNavigation",
     NULL,
     IHTMLPerformanceNavigation_tid,
     HTMLPerformanceNavigation_iface_tids
@@ -2158,8 +2165,10 @@ static HRESULT WINAPI HTMLPerformance_get_timing(IHTMLPerformance *iface, IHTMLP
 static HRESULT WINAPI HTMLPerformance_toString(IHTMLPerformance *iface, BSTR *string)
 {
     HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
-    FIXME("(%p)->(%p)\n", This, string);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, string);
+
+    return dispex_to_string(&This->dispex, string);
 }
 
 static HRESULT WINAPI HTMLPerformance_toJSON(IHTMLPerformance *iface, VARIANT *var)
@@ -2188,6 +2197,7 @@ static const tid_t HTMLPerformance_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLPerformance_dispex = {
+    L"Performance",
     NULL,
     IHTMLPerformance_tid,
     HTMLPerformance_iface_tids
@@ -2346,6 +2356,7 @@ static const tid_t HTMLNamespaceCollection_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLNamespaceCollection_dispex = {
+    L"MSNamespaceInfoCollection",
     NULL,
     DispHTMLNamespaceCollection_tid,
     HTMLNamespaceCollection_iface_tids
@@ -2601,6 +2612,7 @@ static const tid_t console_iface_tids[] = {
     0
 };
 static dispex_static_data_t console_dispex = {
+    L"Console",
     NULL,
     IWineMSHTMLConsole_tid,
     console_iface_tids

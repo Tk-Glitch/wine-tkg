@@ -20,7 +20,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -140,35 +139,6 @@ void chat(const char *s, ...)
 	}
 }
 
-char *dup_basename(const char *name, const char *ext)
-{
-	int namelen;
-	int extlen = strlen(ext);
-	char *base;
-	char *slash;
-
-	if(!name)
-		name = "widl.tab";
-
-	slash = strrchr(name, '/');
-	if (!slash)
-		slash = strrchr(name, '\\');
-
-	if (slash)
-		name = slash + 1;
-
-	namelen = strlen(name);
-
-	/* +6 for later extension (strlen("_r.rgs")) and +1 for '\0' */
-	base = xmalloc(namelen +6 +1);
-	strcpy(base, name);
-	if(!strcasecmp(name + namelen-extlen, ext))
-	{
-		base[namelen - extlen] = '\0';
-	}
-	return base;
-}
-
 size_t widl_getline(char **linep, size_t *lenp, FILE *fp)
 {
     char *line = *linep;
@@ -196,53 +166,6 @@ size_t widl_getline(char **linep, size_t *lenp, FILE *fp)
     *linep = line;
     *lenp = len;
     return n;
-}
-
-void *xmalloc(size_t size)
-{
-    void *res;
-
-    assert(size > 0);
-    res = malloc(size);
-    if(res == NULL)
-    {
-	error("Virtual memory exhausted.\n");
-    }
-    memset(res, 0x55, size);
-    return res;
-}
-
-
-void *xrealloc(void *p, size_t size)
-{
-    void *res;
-
-    assert(size > 0);
-    res = realloc(p, size);
-    if(res == NULL)
-    {
-	error("Virtual memory exhausted.\n");
-    }
-    return res;
-}
-
-char *strmake( const char* fmt, ... )
-{
-    int n;
-    size_t size = 100;
-    va_list ap;
-
-    for (;;)
-    {
-        char *p = xmalloc( size );
-        va_start( ap, fmt );
-        n = vsnprintf( p, size, fmt, ap );
-        va_end( ap );
-        if (n == -1) size *= 2;
-        else if ((size_t)n >= size) size = n + 1;
-        else return p;
-        free( p );
-    }
 }
 
 size_t strappend(char **buf, size_t *len, size_t pos, const char* fmt, ...)
@@ -280,22 +203,6 @@ size_t strappend(char **buf, size_t *len, size_t pos, const char* fmt, ...)
     *len = size;
     *buf = ptr;
     return n;
-}
-
-char *xstrdup(const char *str)
-{
-	char *s;
-
-	assert(str != NULL);
-	s = xmalloc(strlen(str)+1);
-	return strcpy(s, str);
-}
-
-int strendswith(const char* str, const char* end)
-{
-    int l = strlen(str);
-    int m = strlen(end);
-    return l >= m && strcmp(str + l - m, end) == 0;
 }
 
 /*******************************************************************

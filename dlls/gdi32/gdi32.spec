@@ -73,20 +73,20 @@
 @ stdcall CreateScalableFontResourceA(long str str str)
 @ stdcall CreateScalableFontResourceW(long wstr wstr wstr)
 @ stdcall CreateSolidBrush(long)
-@ stdcall D3DKMTCheckVidPnExclusiveOwnership(ptr) NtGdiDdDDICheckVidPnExclusiveOwnership
-@ stdcall D3DKMTCloseAdapter(ptr) NtGdiDdDDICloseAdapter
-@ stdcall D3DKMTCreateDCFromMemory(ptr) NtGdiDdDDICreateDCFromMemory
-@ stdcall D3DKMTCreateDevice(ptr) NtGdiDdDDICreateDevice
-@ stdcall D3DKMTDestroyDCFromMemory(ptr) NtGdiDdDDIDestroyDCFromMemory
-@ stdcall D3DKMTDestroyDevice(ptr) NtGdiDdDDIDestroyDevice
-@ stdcall D3DKMTEscape(ptr) NtGdiDdDDIEscape
-@ stdcall D3DKMTOpenAdapterFromDeviceName(ptr) NtGdiDdDDIOpenAdapterFromDeviceName
+@ stdcall D3DKMTCheckVidPnExclusiveOwnership(ptr) win32u.NtGdiDdDDICheckVidPnExclusiveOwnership
+@ stdcall D3DKMTCloseAdapter(ptr) win32u.NtGdiDdDDICloseAdapter
+@ stdcall D3DKMTCreateDCFromMemory(ptr) win32u.NtGdiDdDDICreateDCFromMemory
+@ stdcall D3DKMTCreateDevice(ptr) win32u.NtGdiDdDDICreateDevice
+@ stdcall D3DKMTDestroyDCFromMemory(ptr) win32u.NtGdiDdDDIDestroyDCFromMemory
+@ stdcall D3DKMTDestroyDevice(ptr) win32u.NtGdiDdDDIDestroyDevice
+@ stdcall D3DKMTEscape(ptr) win32u.NtGdiDdDDIEscape
+@ stdcall D3DKMTOpenAdapterFromDeviceName(ptr) win32u.NtGdiDdDDIOpenAdapterFromDeviceName
 @ stdcall D3DKMTOpenAdapterFromGdiDisplayName(ptr)
-@ stdcall D3DKMTOpenAdapterFromHdc(ptr) NtGdiDdDDIOpenAdapterFromHdc
-@ stdcall D3DKMTOpenAdapterFromLuid(ptr) NtGdiDdDDIOpenAdapterFromLuid
-@ stdcall D3DKMTQueryStatistics(ptr) NtGdiDdDDIQueryStatistics
-@ stdcall D3DKMTSetQueuedLimit(ptr) NtGdiDdDDISetQueuedLimit
-@ stdcall D3DKMTSetVidPnSourceOwner(ptr) NtGdiDdDDISetVidPnSourceOwner
+@ stdcall D3DKMTOpenAdapterFromHdc(ptr) win32u.NtGdiDdDDIOpenAdapterFromHdc
+@ stdcall D3DKMTOpenAdapterFromLuid(ptr) win32u.NtGdiDdDDIOpenAdapterFromLuid
+@ stdcall D3DKMTQueryStatistics(ptr) win32u.NtGdiDdDDIQueryStatistics
+@ stdcall D3DKMTSetQueuedLimit(ptr) win32u.NtGdiDdDDISetQueuedLimit
+@ stdcall D3DKMTSetVidPnSourceOwner(ptr) win32u.NtGdiDdDDISetVidPnSourceOwner
 @ stdcall DPtoLP(long ptr long)
 @ stdcall DeleteColorSpace(long)
 @ stdcall DeleteDC(long)
@@ -543,29 +543,3 @@
 @ extern pfnRealizePalette
 @ extern pfnSelectPalette
 @ stub pstackConnect
-
-################################################################
-# Wine extensions: Win16 functions that are needed by other dlls
-#
-@ stdcall GetDCHook(long ptr)
-@ stdcall SetDCHook(long ptr long)
-@ stdcall SetHookFlags(long long)
-
-################################################################
-# Wine internal extensions
-#
-# All functions must be prefixed with '__wine_' (for internal functions)
-# or 'wine_' (for user-visible functions) to avoid namespace conflicts.
-
-# GDI objects
-@ cdecl __wine_make_gdi_object_system(long long)
-@ cdecl __wine_set_visible_region(long long ptr ptr ptr)
-
-# Graphics drivers
-@ cdecl __wine_set_display_driver(long)
-
-# OpenGL
-@ cdecl __wine_get_wgl_driver(long long)
-
-# Vulkan
-@ cdecl __wine_get_vulkan_driver(long long)

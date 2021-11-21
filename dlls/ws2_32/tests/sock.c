@@ -1984,6 +1984,113 @@ static void test_ip_pktinfo(void)
     CloseHandle(ov.hEvent);
 }
 
+static void test_ipv4_cmsg(void)
+{
+    static const DWORD off = 0;
+    static const DWORD on = 1;
+    SOCKADDR_IN localhost = {0};
+    SOCKET client, server;
+    char payload[] = "HELLO";
+    char control[100];
+    WSABUF payload_buf = {sizeof(payload), payload};
+    WSAMSG msg = {NULL, 0, &payload_buf, 1, {sizeof(control), control}, 0};
+    WSACMSGHDR *header = (WSACMSGHDR *)control;
+    LPFN_WSARECVMSG pWSARecvMsg;
+    INT *int_data = (INT *)WSA_CMSG_DATA(header);
+    IN_PKTINFO *pkt_info = (IN_PKTINFO *)WSA_CMSG_DATA(header);
+    DWORD count, state;
+    int rc;
+
+    localhost.sin_family = AF_INET;
+    localhost.sin_port = htons(SERVERPORT);
+    inet_pton(AF_INET, "127.0.0.1", &localhost.sin_addr);
+
+    client = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ok(client != INVALID_SOCKET, "failed to create socket, error %u\n", WSAGetLastError());
+    server = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ok(server != INVALID_SOCKET, "failed to create socket, error %u\n", WSAGetLastError());
+
+    rc = bind(server, (SOCKADDR *)&localhost, sizeof(localhost));
+    ok(rc != SOCKET_ERROR, "bind failed, error %u\n", WSAGetLastError());
+    rc = connect(client, (SOCKADDR *)&localhost, sizeof(localhost));
+    ok(rc != SOCKET_ERROR, "connect failed, error %u\n", WSAGetLastError());
+
+    rc = WSAIoctl(server, SIO_GET_EXTENSION_FUNCTION_POINTER, &WSARecvMsg_GUID, sizeof(WSARecvMsg_GUID),
+                  &pWSARecvMsg, sizeof(pWSARecvMsg), &count, NULL, NULL);
+    ok(!rc, "failed to get WSARecvMsg, error %u\n", WSAGetLastError());
+
+    memset(control, 0, sizeof(control));
+    msg.Control.len = sizeof(control);
+    rc = setsockopt(server, IPPROTO_IP, IP_RECVTTL, (const char *)&on, sizeof(on));
+    ok(!rc, "failed to set IP_RECVTTL, error %u\n", WSAGetLastError());
+    state = 0;
+    count = sizeof(state);
+    rc = getsockopt(server, IPPROTO_IP, IP_RECVTTL, (char *)&state, (INT *)&count);
+    ok(!rc, "failed to get IP_RECVTTL, error %u\n", WSAGetLastError());
+    ok(state == 1, "expected 1, got %u\n", state);
+    rc = send(client, payload, sizeof(payload), 0);
+    ok(rc == sizeof(payload), "send failed, error %u\n", WSAGetLastError());
+    rc = pWSARecvMsg(server, &msg, &count, NULL, NULL);
+    ok(!rc, "WSARecvMsg failed, error %u\n", WSAGetLastError());
+    ok(count == sizeof(payload), "expected length %Iu, got %u\n", sizeof(payload), count);
+    ok(header->cmsg_level == IPPROTO_IP, "expected IPPROTO_IP, got %i\n", header->cmsg_level);
+    ok(header->cmsg_type == IP_TTL || broken(header->cmsg_type == IP_HOPLIMIT) /* <= win10 v1607 */,
+       "expected IP_TTL, got %i\n", header->cmsg_type);
+    ok(header->cmsg_len == sizeof(*header) + sizeof(INT),
+       "expected length %Iu, got %Iu\n", sizeof(*header) + sizeof(INT), header->cmsg_len);
+    ok(*int_data >= 32, "expected at least 32, got %i\n", *int_data);
+    setsockopt(server, IPPROTO_IP, IP_RECVTTL, (const char *)&off, sizeof(off));
+    ok(!rc, "failed to clear IP_RECVTTL, error %u\n", WSAGetLastError());
+
+    memset(control, 0, sizeof(control));
+    msg.Control.len = sizeof(control);
+    rc = setsockopt(server, IPPROTO_IP, IP_PKTINFO, (const char *)&on, sizeof(on));
+    ok(!rc, "failed to set IP_PKTINFO, error %u\n", WSAGetLastError());
+    state = 0;
+    count = sizeof(state);
+    rc = getsockopt(server, IPPROTO_IP, IP_PKTINFO, (char *)&state, (INT *)&count);
+    ok(!rc, "failed to get IP_PKTINFO, error %u\n", WSAGetLastError());
+    ok(state == 1, "expected 1, got %u\n", state);
+    rc = send(client, payload, sizeof(payload), 0);
+    ok(rc == sizeof(payload), "send failed, error %u\n", WSAGetLastError());
+    rc = pWSARecvMsg(server, &msg, &count, NULL, NULL);
+    ok(!rc, "WSARecvMsg failed, error %u\n", WSAGetLastError());
+    ok(count == sizeof(payload), "expected length %Iu, got %u\n", sizeof(payload), count);
+    ok(header->cmsg_level == IPPROTO_IP, "expected IPPROTO_IP, got %i\n", header->cmsg_level);
+    ok(header->cmsg_type == IP_PKTINFO, "expected IP_PKTINFO, got %i\n", header->cmsg_type);
+    ok(header->cmsg_len == sizeof(*header) + sizeof(IN_PKTINFO),
+       "expected length %Iu, got %Iu\n", sizeof(*header) + sizeof(IN_PKTINFO), header->cmsg_len);
+    ok(!memcmp(&pkt_info->ipi_addr, &localhost.sin_addr, sizeof(IN_ADDR)), "expected 127.0.0.1\n");
+    rc = setsockopt(server, IPPROTO_IP, IP_PKTINFO, (const char *)&off, sizeof(off));
+    ok(!rc, "failed to clear IP_PKTINFO, error %u\n", WSAGetLastError());
+
+    memset(control, 0, sizeof(control));
+    msg.Control.len = sizeof(control);
+    rc = setsockopt(server, IPPROTO_IP, IP_RECVTOS, (const char *)&on, sizeof(on));
+    ok(!rc, "failed to set IP_RECVTOS, error %u\n", WSAGetLastError());
+    state = 0;
+    count = sizeof(state);
+    rc = getsockopt(server, IPPROTO_IP, IP_RECVTOS, (char *)&state, (INT *)&count);
+    ok(!rc, "failed to get IP_RECVTOS, error %u\n", WSAGetLastError());
+    ok(state == 1, "expected 1, got %u\n", state);
+    rc = send(client, payload, sizeof(payload), 0);
+    ok(rc == sizeof(payload), "send failed, error %u\n", WSAGetLastError());
+    rc = pWSARecvMsg(server, &msg, &count, NULL, NULL);
+    ok(!rc, "WSARecvMsg failed, error %u\n", WSAGetLastError());
+    ok(count == sizeof(payload), "expected length %Iu, got %u\n", sizeof(payload), count);
+    ok(header->cmsg_level == IPPROTO_IP, "expected IPPROTO_IP, got %i\n", header->cmsg_level);
+    ok(header->cmsg_type == IP_TOS || broken(header->cmsg_type == IP_TCLASS) /* <= win10 v1607 */,
+       "expected IP_TOS, got %i\n", header->cmsg_type);
+    ok(header->cmsg_len == sizeof(*header) + sizeof(INT),
+       "expected length %Iu, got %Iu\n", sizeof(*header) + sizeof(INT), header->cmsg_len);
+    ok(*int_data == 0, "expected 0, got %i\n", *int_data);
+    rc = setsockopt(server, IPPROTO_IP, IP_RECVTOS, (const char *)&off, sizeof(off));
+    ok(!rc, "failed to clear IP_RECVTOS, error %u\n", WSAGetLastError());
+
+    closesocket(server);
+    closesocket(client);
+}
+
 static void test_ipv6_cmsg(void)
 {
     static const DWORD off = 0;
@@ -2032,11 +2139,11 @@ static void test_ipv6_cmsg(void)
     ok(rc == sizeof(payload), "send failed, error %u\n", WSAGetLastError());
     rc = pWSARecvMsg(server, &msg, &count, NULL, NULL);
     ok(!rc, "WSARecvMsg failed, error %u\n", WSAGetLastError());
-    ok(count == sizeof(payload), "expected length %i, got %i\n", (INT)sizeof(payload), count);
+    ok(count == sizeof(payload), "expected length %Iu, got %u\n", sizeof(payload), count);
     ok(header->cmsg_level == IPPROTO_IPV6, "expected IPPROTO_IPV6, got %i\n", header->cmsg_level);
     ok(header->cmsg_type == IPV6_HOPLIMIT, "expected IPV6_HOPLIMIT, got %i\n", header->cmsg_type);
     ok(header->cmsg_len == sizeof(*header) + sizeof(INT),
-       "expected length %i, got %i\n", (INT)(sizeof(*header) + sizeof(INT)), (INT)header->cmsg_len);
+       "expected length %Iu, got %Iu\n", sizeof(*header) + sizeof(INT), header->cmsg_len);
     ok(*int_data >= 32, "expected at least 32, got %i\n", *int_data);
     setsockopt(server, IPPROTO_IPV6, IPV6_HOPLIMIT, (const char *)&off, sizeof(off));
     ok(!rc, "failed to clear IPV6_HOPLIMIT, error %u\n", WSAGetLastError());
@@ -2054,11 +2161,11 @@ static void test_ipv6_cmsg(void)
     ok(rc == sizeof(payload), "send failed, error %u\n", WSAGetLastError());
     rc = pWSARecvMsg(server, &msg, &count, NULL, NULL);
     ok(!rc, "WSARecvMsg failed, error %u\n", WSAGetLastError());
-    ok(count == sizeof(payload), "expected length %i, got %i\n", (INT)sizeof(payload), count);
+    ok(count == sizeof(payload), "expected length %Iu, got %u\n", sizeof(payload), count);
     ok(header->cmsg_level == IPPROTO_IPV6, "expected IPPROTO_IPV6, got %i\n", header->cmsg_level);
     ok(header->cmsg_type == IPV6_PKTINFO, "expected IPV6_PKTINFO, got %i\n", header->cmsg_type);
     ok(header->cmsg_len == sizeof(*header) + sizeof(IN6_PKTINFO),
-       "expected length %i, got %i\n", (INT)(sizeof(*header) + sizeof(IN6_PKTINFO)), (INT)header->cmsg_len);
+       "expected length %Iu, got %Iu\n", sizeof(*header) + sizeof(IN6_PKTINFO), header->cmsg_len);
     ok(!memcmp(&pkt_info->ipi6_addr, &localhost.sin6_addr, sizeof(IN6_ADDR)), "expected ::1\n");
     rc = setsockopt(server, IPPROTO_IPV6, IPV6_PKTINFO, (const char *)&off, sizeof(off));
     ok(!rc, "failed to clear IPV6_PKTINFO, error %u\n", WSAGetLastError());
@@ -2076,11 +2183,11 @@ static void test_ipv6_cmsg(void)
     ok(rc == sizeof(payload), "send failed, error %u\n", WSAGetLastError());
     rc = pWSARecvMsg(server, &msg, &count, NULL, NULL);
     ok(!rc, "WSARecvMsg failed, error %u\n", WSAGetLastError());
-    ok(count == sizeof(payload), "expected length %i, got %i\n", (INT)sizeof(payload), count);
+    ok(count == sizeof(payload), "expected length %Iu, got %u\n", sizeof(payload), count);
     ok(header->cmsg_level == IPPROTO_IPV6, "expected IPPROTO_IPV6, got %i\n", header->cmsg_level);
     ok(header->cmsg_type == IPV6_TCLASS, "expected IPV6_TCLASS, got %i\n", header->cmsg_type);
     ok(header->cmsg_len == sizeof(*header) + sizeof(INT),
-       "expected length %i, got %i\n", (INT)(sizeof(*header) + sizeof(INT)), (INT)header->cmsg_len);
+       "expected length %Iu, got %Iu\n", sizeof(*header) + sizeof(INT), header->cmsg_len);
     ok(*int_data == 0, "expected 0, got %i\n", *int_data);
     rc = setsockopt(server, IPPROTO_IPV6, IPV6_RECVTCLASS, (const char *)&off, sizeof(off));
     ok(!rc, "failed to clear IPV6_RECVTCLASS, error %u\n", WSAGetLastError());
@@ -11495,7 +11602,7 @@ static void test_sockopt_validity(void)
         { IP_DROP_MEMBERSHIP,         WSAENOPROTOOPT                    },
         { IP_DONTFRAGMENT                                               },
         { IP_PKTINFO,                 WSAEINVAL                         },
-        { IP_RECVTTL,                 WSAEINVAL,       0,          TRUE },
+        { IP_RECVTTL,                 WSAEINVAL                         },
         { IP_RECEIVE_BROADCAST,       WSAEINVAL,       0,          TRUE },
         { IP_RECVIF,                  WSAEINVAL,       0,          TRUE },
         { IP_RECVDSTADDR,             WSAEINVAL,       0,          TRUE },
@@ -11504,7 +11611,7 @@ static void test_sockopt_validity(void)
         { IP_RTHDR,                   0,               0,          TRUE },
         { IP_GET_IFLIST,              WSAEINVAL,       0,          TRUE },
         { IP_RECVRTHDR,               WSAEINVAL,       0,          TRUE },
-        { IP_RECVTCLASS,              WSAEINVAL,       0,          TRUE },
+        { IP_RECVTOS,                 WSAEINVAL                         },
         { IP_ORIGINAL_ARRIVAL_IF,     WSAEINVAL,       0,          TRUE },
         { IP_ECN,                     WSAEINVAL,       0,          TRUE },
         { IP_PKTINFO_EX,              WSAEINVAL,       0,          TRUE },
@@ -11530,7 +11637,7 @@ static void test_sockopt_validity(void)
         { IP_DROP_MEMBERSHIP,         WSAENOPROTOOPT                    },
         { IP_DONTFRAGMENT                                               },
         { IP_PKTINFO                                                    },
-        { IP_RECVTTL,                 0,               0,          TRUE },
+        { IP_RECVTTL                                                    },
         { IP_RECEIVE_BROADCAST,       0,               0,          TRUE },
         { IP_RECVIF,                  0,               0,          TRUE },
         { IP_RECVDSTADDR,             0,               0,          TRUE },
@@ -11539,7 +11646,7 @@ static void test_sockopt_validity(void)
         { IP_RTHDR,                   0,               0,          TRUE },
         { IP_GET_IFLIST,              WSAEINVAL,       0,          TRUE },
         { IP_RECVRTHDR,               0,               0,          TRUE },
-        { IP_RECVTCLASS,              0,               0,          TRUE },
+        { IP_RECVTOS                                                    },
         { IP_ORIGINAL_ARRIVAL_IF,     0,               0,          TRUE },
         { IP_ECN,                     0,               0,          TRUE },
         { IP_PKTINFO_EX,              0,               0,          TRUE },
@@ -11565,7 +11672,7 @@ static void test_sockopt_validity(void)
         { IP_DROP_MEMBERSHIP,         WSAENOPROTOOPT                    },
         { IP_DONTFRAGMENT                                               },
         { IP_PKTINFO                                                    },
-        { IP_RECVTTL,                 0,               0,          TRUE },
+        { IP_RECVTTL                                                    },
         { IP_RECEIVE_BROADCAST,       0,               0,          TRUE },
         { IP_RECVIF,                  0,               0,          TRUE },
         { IP_RECVDSTADDR,             0,               0,          TRUE },
@@ -11574,7 +11681,7 @@ static void test_sockopt_validity(void)
         { IP_RTHDR,                   0,               0,          TRUE },
         { IP_GET_IFLIST,              WSAEINVAL,       0,          TRUE },
         { IP_RECVRTHDR,               0,               0,          TRUE },
-        { IP_RECVTCLASS,              0,               0,          TRUE },
+        { IP_RECVTOS                                                    },
         { IP_ORIGINAL_ARRIVAL_IF,     0,               0,          TRUE },
         { IP_ECN,                     0,               0,          TRUE },
         { IP_PKTINFO_EX,              0,               0,          TRUE },
@@ -11767,6 +11874,7 @@ START_TEST( sock )
     test_set_getsockopt();
     test_so_reuseaddr();
     test_ip_pktinfo();
+    test_ipv4_cmsg();
     test_ipv6_cmsg();
     test_extendedSocketOptions();
     test_so_debug();

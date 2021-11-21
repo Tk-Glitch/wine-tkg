@@ -19,21 +19,15 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_GETOPT_H
-# include <getopt.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 
 #include "windef.h"
 #include "guiddef.h"
+#include "tools.h"
 
 #define TOKEN_NAME         1
 #define TOKEN_STRING       2
@@ -90,8 +84,6 @@ static const struct keyword reserved_words[] = {
     {"WORD", TOKEN_WORD}
 };
 
-extern int getopt(int argc, char *const *argv, const char *optstring);
-
 static BOOL option_header;
 static char *option_inc_var_name = NULL;
 static char *option_inc_size_name = NULL;
@@ -103,10 +95,6 @@ static const char *infile_name;
 static FILE *outfile;
 static BYTE *output_data;
 static UINT output_pos, output_size;
-
-#ifndef __GNUC__
-#define __attribute__(x)
-#endif
 
 static void fatal_error( const char *msg, ... ) __attribute__ ((__format__ (__printf__, 1, 2)));
 
@@ -362,12 +350,12 @@ static BOOL parse_token(void)
             if (!strcmp( tok, "name" ))
             {
                 tok = strtok( NULL, " \t" );
-                if (tok && !option_inc_var_name) option_inc_var_name = strdup( tok );
+                if (tok && !option_inc_var_name) option_inc_var_name = xstrdup( tok );
             }
             else if (!strcmp( tok, "size" ))
             {
                 tok = strtok( NULL, " \t" );
-                if (tok && !option_inc_size_name) option_inc_size_name = strdup( tok );
+                if (tok && !option_inc_size_name) option_inc_size_name = xstrdup( tok );
             }
             return TRUE;
 
@@ -422,50 +410,47 @@ static void usage(void)
                     program_name);
 }
 
-static char **parse_options(int argc, char **argv)
+static void option_callback( int optc, char *optarg )
 {
-    int optc;
-
-    while ((optc = getopt(argc, argv, "hHi:o:s:")) != -1)
+    switch (optc)
     {
-        switch (optc)
-        {
-            case 'h':
-                usage();
-                exit(0);
-            case 'H':
-                option_header = TRUE;
-                break;
-            case 'i':
-                option_header = TRUE;
-                option_inc_var_name = strdup(optarg);
-                break;
-            case 'o':
-                option_outfile_name = strdup(optarg);
-                break;
-            case 's':
-                option_inc_size_name = strdup(optarg);
-                break;
-        }
+    case 'h':
+        usage();
+        exit(0);
+    case 'H':
+        option_header = TRUE;
+        break;
+    case 'i':
+        option_header = TRUE;
+        option_inc_var_name = xstrdup(optarg);
+        break;
+    case 'o':
+        option_outfile_name = xstrdup(optarg);
+        break;
+    case 's':
+        option_inc_size_name = xstrdup(optarg);
+        break;
+    case '?':
+        fprintf( stderr, "%s: %s\n", program_name, optarg );
+        exit(1);
     }
-    return &argv[optind];
 }
 
 int main(int argc, char **argv)
 {
     char header[16];
-    char **args;
+    struct strarray args;
     char *header_name = NULL;
 
     program_name = argv[0];
 
-    args = parse_options(argc, argv);
-    infile_name = *args++;
-    if (!infile_name || *args)
+    args = parse_options(argc, argv, "hHi:o:s:", NULL, 0, option_callback );
+    if (!args.count)
     {
         usage();
         return 1;
     }
+    infile_name = args.str[0];
 
     infile = stdin;
     outfile = NULL;
@@ -537,16 +522,7 @@ int main(int argc, char **argv)
         if (!option_inc_var_name)
             fatal_error( "variable name must be specified with -i or #pragma name\n" );
 
-        header_name = strrchr(option_outfile_name, '/');
-        if (header_name)
-            header_name = strdup(header_name + 1);
-        else
-            header_name = strdup(option_outfile_name);
-        if (!header_name) {
-            fprintf(stderr, "Out of memory\n");
-            goto error;
-        }
-
+        header_name = get_basename( option_outfile_name );
         str_ptr = header_name;
         while (*str_ptr) {
             if (*str_ptr == '.')

@@ -19,24 +19,11 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 #include <time.h>
-#ifdef HAVE_SYS_TYPES_H
-# include <sys/types.h>
-#endif
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
-#ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
-#endif
 #include <fcntl.h>
 
 #define NONAMELESSUNION
@@ -75,7 +62,7 @@ static void* pdb_jg_read(const struct PDB_JG_HEADER* pdb, const WORD* block_list
     if (!size) return NULL;
 
     nBlocks = (size + pdb->block_size - 1) / pdb->block_size;
-    buffer = malloc(nBlocks * pdb->block_size);
+    buffer = xmalloc(nBlocks * pdb->block_size);
 
     for (i = 0; i < nBlocks; i++)
         memcpy(buffer + i * pdb->block_size,
@@ -278,9 +265,9 @@ static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx
         printf("-Unknown symbol info version %d\n", symbols->version);
     }
     if (symbols->flags & 0x8000) /* new */
-        snprintf(tcver, sizeof(tcver), "%u.%u", (symbols->flags >> 8) & 0x7f, symbols->flags & 0xff);
+        sprintf(tcver, "%u.%u", (symbols->flags >> 8) & 0x7f, symbols->flags & 0xff);
     else
-        snprintf(tcver, sizeof(tcver), "old-%x", symbols->flags);
+        sprintf(tcver, "old-%x", symbols->flags);
     printf("Symbols:\n"
            "\tsignature:       %08x\n"
            "\tversion:         %u\n"
@@ -861,7 +848,7 @@ static void* pdb_ds_read(const struct PDB_DS_HEADER* header, const DWORD* block_
     if (!size) return NULL;
 
     nBlocks = (size + header->block_size - 1) / header->block_size;
-    buffer = malloc(nBlocks * header->block_size);
+    buffer = xmalloc(nBlocks * header->block_size);
 
     for (i = 0; i < nBlocks; i++)
         memcpy(buffer + i * header->block_size,

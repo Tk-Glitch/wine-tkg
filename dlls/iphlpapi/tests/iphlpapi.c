@@ -894,15 +894,6 @@ static void testIcmpSendEcho(void)
         "expected 87, got %d\n", error);
 
     icmp = IcmpCreateFile();
-    if (icmp == INVALID_HANDLE_VALUE)
-    {
-        error = GetLastError();
-        if (error == ERROR_ACCESS_DENIED)
-        {
-            skip ("ICMP is not available.\n");
-            return;
-        }
-    }
     ok (icmp != INVALID_HANDLE_VALUE, "IcmpCreateFile failed unexpectedly with error %d\n", GetLastError());
 
     address = 0;
@@ -924,6 +915,11 @@ static void testIcmpSendEcho(void)
     SetLastError(0xdeadbeef);
     ret = IcmpSendEcho(icmp, address, senddata, 0, NULL, replydata, replysz, 1000);
     error = GetLastError();
+    if (!ret && error == ERROR_ACCESS_DENIED)
+    {
+        skip( "ICMP is not available.\n" );
+        return;
+    }
     ok (ret, "IcmpSendEcho failed unexpectedly with error %d\n", error);
 
     SetLastError(0xdeadbeef);
@@ -1043,20 +1039,40 @@ static void testIcmpSendEcho(void)
     IcmpCloseHandle(icmp);
 }
 
-/*
-still-to-be-tested NT4-onward functions:
-CreateIpForwardEntry
-DeleteIpForwardEntry
-CreateIpNetEntry
-DeleteIpNetEntry
-GetFriendlyIfIndex
-GetRTTAndHopCount
-SetIfEntry
-SetIpForwardEntry
-SetIpNetEntry
-SetIpStatistics
-SetIpTTL
-*/
+static void testIcmpParseReplies( void )
+{
+    ICMP_ECHO_REPLY reply = { 0 };
+    DWORD ret;
+
+    SetLastError( 0xdeadbeef );
+    ret = IcmpParseReplies( &reply, sizeof(reply) );
+    ok( ret == 0, "ret %d\n", ret );
+    ok( GetLastError() == 0, "gle %d\n", GetLastError() );
+
+    reply.Status = 12345;
+    SetLastError( 0xdeadbeef );
+    ret = IcmpParseReplies( &reply, sizeof(reply) );
+    ok( ret == 0, "ret %d\n", ret );
+    ok( GetLastError() == 12345, "gle %d\n", GetLastError() );
+    ok( reply.Status == 12345, "status %d\n", reply.Status );
+
+    reply.Reserved = 1;
+    SetLastError( 0xdeadbeef );
+    ret = IcmpParseReplies( &reply, sizeof(reply) );
+    ok( ret == 1, "ret %d\n", ret );
+    ok( GetLastError() == 0xdeadbeef, "gle %d\n", GetLastError() );
+    ok( reply.Status == 12345, "status %d\n", reply.Status );
+    ok( !reply.Reserved, "reserved %d\n", reply.Reserved );
+
+    reply.Reserved = 3;
+    SetLastError( 0xdeadbeef );
+    ret = IcmpParseReplies( &reply, sizeof(reply) );
+    ok( ret == 3, "ret %d\n", ret );
+    ok( GetLastError() == 0xdeadbeef, "gle %d\n", GetLastError() );
+    ok( reply.Status == 12345, "status %d\n", reply.Status );
+    ok( !reply.Reserved, "reserved %d\n", reply.Reserved );
+}
+
 static void testWinNT4Functions(void)
 {
   testGetNumberOfInterfaces();
@@ -1076,6 +1092,7 @@ static void testWinNT4Functions(void)
   testGetUdpTable();
   testSetTcpEntry();
   testIcmpSendEcho();
+  testIcmpParseReplies();
 }
 
 static void testGetInterfaceInfo(void)

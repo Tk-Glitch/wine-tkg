@@ -18,13 +18,16 @@
 
 #define COBJMACROS
 
+#include <assert.h>
 #include "oleacc_private.h"
+#include "commctrl.h"
 
 #include "wine/debug.h"
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(oleacc);
 
+typedef struct win_class_vtbl win_class_vtbl;
 typedef struct {
     IAccessible IAccessible_iface;
     IOleWindow IOleWindow_iface;
@@ -34,7 +37,63 @@ typedef struct {
 
     HWND hwnd;
     HWND enum_pos;
+    INT role;
+
+    const win_class_vtbl *vtbl;
 } Client;
+
+struct win_class_vtbl {
+    void (*init)(Client*);
+    HRESULT (*get_state)(Client*, VARIANT, VARIANT*);
+    HRESULT (*get_name)(Client*, VARIANT, BSTR*);
+    HRESULT (*get_kbd_shortcut)(Client*, VARIANT, BSTR*);
+    HRESULT (*get_value)(Client*, VARIANT, BSTR*);
+    HRESULT (*put_value)(Client*, VARIANT, BSTR);
+};
+
+static HRESULT win_get_name(HWND hwnd, BSTR *name)
+{
+    WCHAR buf[1024];
+    UINT i, len;
+
+    len = SendMessageW(hwnd, WM_GETTEXT, ARRAY_SIZE(buf), (LPARAM)buf);
+    if(!len)
+        return S_FALSE;
+
+    for(i=0; i<len; i++) {
+        if(buf[i] == '&') {
+            len--;
+            memmove(buf+i, buf+i+1, (len-i)*sizeof(WCHAR));
+            break;
+        }
+    }
+
+    *name = SysAllocStringLen(buf, len);
+    return *name ? S_OK : E_OUTOFMEMORY;
+}
+
+static HRESULT win_get_kbd_shortcut(HWND hwnd, BSTR *shortcut)
+{
+    WCHAR buf[1024];
+    UINT i, len;
+
+    len = SendMessageW(hwnd, WM_GETTEXT, ARRAY_SIZE(buf), (LPARAM)buf);
+    if(!len)
+        return S_FALSE;
+
+    for(i=0; i<len; i++) {
+        if(buf[i] == '&')
+            break;
+    }
+    if(i+1 >= len)
+        return S_FALSE;
+
+    *shortcut = SysAllocString(L"Alt+!");
+    if(!*shortcut)
+        return E_OUTOFMEMORY;
+    (*shortcut)[4] = buf[i+1];
+    return S_OK;
+}
 
 static inline Client* impl_from_Client(IAccessible *iface)
 {
@@ -155,42 +214,33 @@ static HRESULT WINAPI Client_get_accChild(IAccessible *iface,
     return E_INVALIDARG;
 }
 
-static HRESULT WINAPI Client_get_accName(IAccessible *iface, VARIANT varID, BSTR *pszName)
+static HRESULT WINAPI Client_get_accName(IAccessible *iface, VARIANT id, BSTR *name)
 {
     Client *This = impl_from_Client(iface);
-    WCHAR name[1024];
-    UINT i, len;
 
-    TRACE("(%p)->(%s %p)\n", This, debugstr_variant(&varID), pszName);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_variant(&id), name);
 
-    *pszName = NULL;
-    if(convert_child_id(&varID) != CHILDID_SELF || !IsWindow(This->hwnd))
+    *name = NULL;
+    if(This->vtbl && This->vtbl->get_name)
+        return This->vtbl->get_name(This, id, name);
+
+    if(convert_child_id(&id) != CHILDID_SELF || !IsWindow(This->hwnd))
         return E_INVALIDARG;
 
-    len = SendMessageW(This->hwnd, WM_GETTEXT, ARRAY_SIZE(name), (LPARAM)name);
-    if(!len)
-        return S_FALSE;
-
-    for(i=0; i<len; i++) {
-        if(name[i] == '&') {
-            len--;
-            memmove(name+i, name+i+1, (len-i)*sizeof(WCHAR));
-            break;
-        }
-    }
-
-    *pszName = SysAllocStringLen(name, len);
-    return *pszName ? S_OK : E_OUTOFMEMORY;
+    return win_get_name(This->hwnd, name);
 }
 
-static HRESULT WINAPI Client_get_accValue(IAccessible *iface, VARIANT varID, BSTR *pszValue)
+static HRESULT WINAPI Client_get_accValue(IAccessible *iface, VARIANT id, BSTR *value)
 {
     Client *This = impl_from_Client(iface);
 
-    TRACE("(%p)->(%s %p)\n", This, debugstr_variant(&varID), pszValue);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_variant(&id), value);
 
-    *pszValue = NULL;
-    if(convert_child_id(&varID) != CHILDID_SELF)
+    *value = NULL;
+    if(This->vtbl && This->vtbl->get_value)
+        return This->vtbl->get_value(This, id, value);
+
+    if(convert_child_id(&id) != CHILDID_SELF)
         return E_INVALIDARG;
     return S_FALSE;
 }
@@ -220,38 +270,46 @@ static HRESULT WINAPI Client_get_accRole(IAccessible *iface, VARIANT varID, VARI
     }
 
     V_VT(pvarRole) = VT_I4;
-    V_I4(pvarRole) = ROLE_SYSTEM_CLIENT;
+    V_I4(pvarRole) = This->role;
     return S_OK;
 }
 
-static HRESULT WINAPI Client_get_accState(IAccessible *iface, VARIANT varID, VARIANT *pvarState)
+static HRESULT client_get_state(Client *client, VARIANT id, VARIANT *state)
 {
-    Client *This = impl_from_Client(iface);
     GUITHREADINFO info;
     LONG style;
 
-    TRACE("(%p)->(%s %p)\n", This, debugstr_variant(&varID), pvarState);
-
-    if(convert_child_id(&varID) != CHILDID_SELF) {
-        V_VT(pvarState) = VT_EMPTY;
+    if(convert_child_id(&id) != CHILDID_SELF) {
+        V_VT(state) = VT_EMPTY;
         return E_INVALIDARG;
     }
 
-    V_VT(pvarState) = VT_I4;
-    V_I4(pvarState) = 0;
+    V_VT(state) = VT_I4;
+    V_I4(state) = 0;
 
-    style = GetWindowLongW(This->hwnd, GWL_STYLE);
+    style = GetWindowLongW(client->hwnd, GWL_STYLE);
     if(style & WS_DISABLED)
-        V_I4(pvarState) |= STATE_SYSTEM_UNAVAILABLE;
-    else if(IsWindow(This->hwnd))
-        V_I4(pvarState) |= STATE_SYSTEM_FOCUSABLE;
+        V_I4(state) |= STATE_SYSTEM_UNAVAILABLE;
+    else if(IsWindow(client->hwnd))
+        V_I4(state) |= STATE_SYSTEM_FOCUSABLE;
 
     info.cbSize = sizeof(info);
-    if(GetGUIThreadInfo(0, &info) && info.hwndFocus == This->hwnd)
-        V_I4(pvarState) |= STATE_SYSTEM_FOCUSED;
+    if(GetGUIThreadInfo(0, &info) && info.hwndFocus == client->hwnd)
+        V_I4(state) |= STATE_SYSTEM_FOCUSED;
     if(!(style & WS_VISIBLE))
-        V_I4(pvarState) |= STATE_SYSTEM_INVISIBLE;
+        V_I4(state) |= STATE_SYSTEM_INVISIBLE;
     return S_OK;
+}
+
+static HRESULT WINAPI Client_get_accState(IAccessible *iface, VARIANT id, VARIANT *state)
+{
+    Client *This = impl_from_Client(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_variant(&id), state);
+
+    if(This->vtbl && This->vtbl->get_state)
+        return This->vtbl->get_state(This, id, state);
+    return client_get_state(This, id, state);
 }
 
 static HRESULT WINAPI Client_get_accHelp(IAccessible *iface, VARIANT varID, BSTR *pszHelp)
@@ -275,32 +333,20 @@ static HRESULT WINAPI Client_get_accHelpTopic(IAccessible *iface,
 }
 
 static HRESULT WINAPI Client_get_accKeyboardShortcut(IAccessible *iface,
-        VARIANT varID, BSTR *pszKeyboardShortcut)
+        VARIANT id, BSTR *shortcut)
 {
     Client *This = impl_from_Client(iface);
-    WCHAR name[1024];
-    UINT i, len;
 
-    TRACE("(%p)->(%s %p)\n", This, debugstr_variant(&varID), pszKeyboardShortcut);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_variant(&id), shortcut);
 
-    *pszKeyboardShortcut = NULL;
-    if(convert_child_id(&varID) != CHILDID_SELF)
+    *shortcut = NULL;
+    if(This->vtbl && This->vtbl->get_kbd_shortcut)
+        return This->vtbl->get_kbd_shortcut(This, id, shortcut);
+
+    if(convert_child_id(&id) != CHILDID_SELF)
         return E_INVALIDARG;
 
-    len = SendMessageW(This->hwnd, WM_GETTEXT, ARRAY_SIZE(name), (LPARAM)name);
-    for(i=0; i<len; i++) {
-        if(name[i] == '&')
-            break;
-    }
-    if(i+1 >= len)
-        return S_FALSE;
-
-    *pszKeyboardShortcut = SysAllocString(L"Alt+!");
-    if(!*pszKeyboardShortcut)
-        return E_OUTOFMEMORY;
-
-    (*pszKeyboardShortcut)[4] = name[i+1];
-    return S_OK;
+    return win_get_kbd_shortcut(This->hwnd, shortcut);
 }
 
 static HRESULT WINAPI Client_get_accFocus(IAccessible *iface, VARIANT *focus)
@@ -442,11 +488,18 @@ static HRESULT WINAPI Client_put_accName(IAccessible *iface, VARIANT varID, BSTR
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI Client_put_accValue(IAccessible *iface, VARIANT varID, BSTR pszValue)
+static HRESULT WINAPI Client_put_accValue(IAccessible *iface, VARIANT id, BSTR value)
 {
     Client *This = impl_from_Client(iface);
-    FIXME("(%p)->(%s %s)\n", This, debugstr_variant(&varID), debugstr_w(pszValue));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_variant(&id), value);
+
+    if(This->vtbl && This->vtbl->put_value)
+        return This->vtbl->put_value(This, id, value);
+
+    if(convert_child_id(&id) != CHILDID_SELF)
+        return E_INVALIDARG;
+    return S_FALSE;
 }
 
 static const IAccessibleVtbl ClientVtbl = {
@@ -650,10 +703,162 @@ static const IEnumVARIANTVtbl ClientEnumVARIANTVtbl = {
     Client_EnumVARIANT_Clone
 };
 
+static void edit_init(Client *client)
+{
+    client->role = ROLE_SYSTEM_TEXT;
+}
+
+static HRESULT edit_get_state(Client *client, VARIANT id, VARIANT *state)
+{
+    HRESULT hres;
+    LONG style;
+
+    hres = client_get_state(client, id, state);
+    if(FAILED(hres))
+        return hres;
+
+    assert(V_VT(state) == VT_I4);
+
+    style = GetWindowLongW(client->hwnd, GWL_STYLE);
+    if(style & ES_READONLY)
+        V_I4(state) |= STATE_SYSTEM_READONLY;
+    if(style & ES_PASSWORD)
+        V_I4(state) |= STATE_SYSTEM_PROTECTED;
+    return S_OK;
+}
+
+/*
+ * Edit control objects have their name property defined by the first static
+ * text control preceding them in the order of window creation. If one is not
+ * found, the edit has no name property. In the case of the keyboard shortcut
+ * property, the first preceding visible static text control is used.
+ */
+static HWND edit_find_label(HWND hwnd, BOOL visible)
+{
+    HWND cur;
+
+    for(cur = hwnd; cur; cur = GetWindow(cur, GW_HWNDPREV)) {
+        WCHAR class_name[64];
+
+        if(!RealGetWindowClassW(cur, class_name, ARRAY_SIZE(class_name)))
+            continue;
+
+        if(!wcsicmp(class_name, WC_STATICW)) {
+            if(visible && !(GetWindowLongW(cur, GWL_STYLE) & WS_VISIBLE))
+                continue;
+            else
+                break;
+        }
+    }
+
+    return cur;
+}
+
+static HRESULT edit_get_name(Client *client, VARIANT id, BSTR *name)
+{
+    HWND label;
+
+    if(convert_child_id(&id) != CHILDID_SELF || !IsWindow(client->hwnd))
+        return E_INVALIDARG;
+
+    label = edit_find_label(client->hwnd, FALSE);
+    if(!label)
+        return S_FALSE;
+
+    return win_get_name(label, name);
+}
+
+static HRESULT edit_get_kbd_shortcut(Client *client, VARIANT id, BSTR *shortcut)
+{
+    HWND label;
+
+    if(convert_child_id(&id) != CHILDID_SELF)
+        return E_INVALIDARG;
+
+    label = edit_find_label(client->hwnd, TRUE);
+    if(!label)
+        return S_FALSE;
+
+    return win_get_kbd_shortcut(label, shortcut);
+}
+
+static HRESULT edit_get_value(Client *client, VARIANT id, BSTR *value_out)
+{
+    WCHAR *buf;
+    UINT len;
+
+    if(convert_child_id(&id) != CHILDID_SELF)
+        return E_INVALIDARG;
+
+    if(GetWindowLongW(client->hwnd, GWL_STYLE) & ES_PASSWORD)
+        return E_ACCESSDENIED;
+
+    len = SendMessageW(client->hwnd, WM_GETTEXTLENGTH, 0, 0);
+    buf = heap_alloc_zero((len + 1) * sizeof(*buf));
+    if(!buf)
+        return E_OUTOFMEMORY;
+
+    SendMessageW(client->hwnd, WM_GETTEXT, len + 1, (LPARAM)buf);
+    *value_out = SysAllocString(buf);
+    heap_free(buf);
+    return S_OK;
+}
+
+static HRESULT edit_put_value(Client *client, VARIANT id, BSTR value)
+{
+    if(convert_child_id(&id) != CHILDID_SELF || !IsWindow(client->hwnd))
+        return E_INVALIDARG;
+
+    SendMessageW(client->hwnd, WM_SETTEXT, 0, (LPARAM)value);
+    return S_OK;
+}
+
+static const win_class_vtbl edit_vtbl = {
+    edit_init,
+    edit_get_state,
+    edit_get_name,
+    edit_get_kbd_shortcut,
+    edit_get_value,
+    edit_put_value,
+};
+
+static const struct win_class_data classes[] = {
+    {WC_LISTBOXW,           0x10000, TRUE},
+    {L"#32768",             0x10001, TRUE}, /* menu */
+    {WC_BUTTONW,            0x10002, TRUE},
+    {WC_STATICW,            0x10003, TRUE},
+    {WC_EDITW,              0x10004, FALSE, &edit_vtbl},
+    {WC_COMBOBOXW,          0x10005, TRUE},
+    {L"#32770",             0x10006, TRUE}, /* dialog */
+    {L"#32771",             0x10007, TRUE}, /* winswitcher */
+    {L"MDIClient",          0x10008, TRUE},
+    {L"#32769",             0x10009, TRUE}, /* desktop */
+    {WC_SCROLLBARW,         0x1000a, TRUE},
+    {STATUSCLASSNAMEW,      0x1000b, TRUE},
+    {TOOLBARCLASSNAMEW,     0x1000c, TRUE},
+    {PROGRESS_CLASSW,       0x1000d, TRUE},
+    {ANIMATE_CLASSW,        0x1000e, TRUE},
+    {WC_TABCONTROLW,        0x1000f, TRUE},
+    {HOTKEY_CLASSW,         0x10010, TRUE},
+    {WC_HEADERW,            0x10011, TRUE},
+    {TRACKBAR_CLASSW,       0x10012, TRUE},
+    {WC_LISTVIEWW,          0x10013, TRUE},
+    {UPDOWN_CLASSW,         0x10016, TRUE},
+    {TOOLTIPS_CLASSW,       0x10018, TRUE},
+    {WC_TREEVIEWW,          0x10019, TRUE},
+    {DATETIMEPICK_CLASSW,   0, TRUE},
+    {WC_IPADDRESSW,         0, TRUE},
+    {L"RICHEDIT",           0x1001c, TRUE},
+    {L"RichEdit20A",        0, TRUE},
+    {L"RichEdit20W",        0, TRUE},
+    {NULL}
+};
+
 HRESULT create_client_object(HWND hwnd, const IID *iid, void **obj)
 {
+    const struct win_class_data *data;
     Client *client;
-    HRESULT hres;
+    HRESULT hres = S_OK;
 
     if(!IsWindow(hwnd))
         return E_FAIL;
@@ -662,12 +867,20 @@ HRESULT create_client_object(HWND hwnd, const IID *iid, void **obj)
     if(!client)
         return E_OUTOFMEMORY;
 
+    data = find_class_data(hwnd, classes);
+
     client->IAccessible_iface.lpVtbl = &ClientVtbl;
     client->IOleWindow_iface.lpVtbl = &ClientOleWindowVtbl;
     client->IEnumVARIANT_iface.lpVtbl = &ClientEnumVARIANTVtbl;
     client->ref = 1;
     client->hwnd = hwnd;
     client->enum_pos = 0;
+    client->role = ROLE_SYSTEM_CLIENT;
+
+    if(data)
+        client->vtbl = data->vtbl;
+    if(client->vtbl && client->vtbl->init)
+        client->vtbl->init(client);
 
     hres = IAccessible_QueryInterface(&client->IAccessible_iface, iid, obj);
     IAccessible_Release(&client->IAccessible_iface);

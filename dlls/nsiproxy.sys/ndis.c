@@ -18,6 +18,10 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <stdarg.h>
@@ -66,6 +70,8 @@
 #include <net/if_types.h>
 #endif
 
+#include <pthread.h>
+
 #define NONAMELESSUNION
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -82,10 +88,10 @@
 #include "ddk/wdm.h"
 #include "wine/nsi.h"
 #include "wine/list.h"
-#include "wine/heap.h"
 #include "wine/debug.h"
+#include "wine/unixlib.h"
 
-#include "nsiproxy_private.h"
+#include "unix_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nsi);
 
@@ -102,15 +108,7 @@ struct if_entry
 };
 
 static struct list if_list = LIST_INIT( if_list );
-
-static CRITICAL_SECTION if_list_cs;
-static CRITICAL_SECTION_DEBUG if_list_cs_debug =
-{
-    0, 0, &if_list_cs,
-    { &if_list_cs_debug.ProcessLocksList, &if_list_cs_debug.ProcessLocksList },
-    0, 0, { (DWORD_PTR)(__FILE__ ": if_list_cs") }
-};
-static CRITICAL_SECTION if_list_cs = { &if_list_cs_debug, -1, 0, 0, 0, 0 };
+static pthread_mutex_t if_list_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static struct if_entry *find_entry_from_index( DWORD index )
 {
@@ -258,9 +256,9 @@ static WCHAR *strdupAtoW( const char *str )
     DWORD len;
 
     if (!str) return ret;
-    len = MultiByteToWideChar( CP_UNIXCP, 0, str, -1, NULL, 0 );
-    ret = heap_alloc( len * sizeof(WCHAR) );
-    if (ret) MultiByteToWideChar( CP_UNIXCP, 0, str, -1, ret, len );
+    len = strlen( str ) + 1;
+    ret = malloc( len * sizeof(WCHAR) );
+    if (ret) ntdll_umbstowcs( str, len, ret, len );
     return ret;
 }
 
@@ -270,7 +268,7 @@ static struct if_entry *add_entry( DWORD index, char *name )
     int name_len = strlen( name );
 
     if (name_len >= IFNAMSIZ - 1) return NULL;
-    entry = heap_alloc( sizeof(*entry) );
+    entry = malloc( sizeof(*entry) );
     if (!entry) return NULL;
 
     entry->if_index = index;
@@ -278,7 +276,7 @@ static struct if_entry *add_entry( DWORD index, char *name )
     entry->if_name = strdupAtoW( name );
     if (!entry->if_name)
     {
-        heap_free( entry );
+        free( entry );
         return NULL;
     }
 
@@ -360,7 +358,7 @@ static void ifinfo_fill_dynamic( struct if_entry *entry, struct nsi_ndis_ifinfo_
             while ((ptr = fgets( buf, sizeof(buf), fp )))
             {
                 while (*ptr && isspace( *ptr )) ptr++;
-                if (!_strnicmp( ptr, entry->if_unix_name, name_len ) && ptr[name_len] == ':')
+                if (!ascii_strncasecmp( ptr, entry->if_unix_name, name_len ) && ptr[name_len] == ':')
                 {
                     unsigned long long values[9];
                     ptr += name_len + 1;
@@ -391,7 +389,7 @@ static void ifinfo_fill_dynamic( struct if_entry *entry, struct nsi_ndis_ifinfo_
         struct if_data ifdata;
 
         if (sysctl( mib, ARRAY_SIZE(mib), NULL, &needed, NULL, 0 ) == -1) goto done;
-        buf = heap_alloc( needed );
+        buf = malloc( needed );
         if (!buf) goto done;
         if (sysctl( mib, ARRAY_SIZE(mib), buf, &needed, NULL, 0 ) == -1) goto done;
         for (end = buf + needed; buf < end; buf += ifm->ifm_msglen)
@@ -414,7 +412,7 @@ static void ifinfo_fill_dynamic( struct if_entry *entry, struct nsi_ndis_ifinfo_
             }
         }
     done:
-        heap_free( buf );
+        free( buf );
     }
 #endif
 }
@@ -468,7 +466,7 @@ static NTSTATUS ifinfo_enumerate_all( void *key_data, DWORD key_size, void *rw_d
     TRACE( "%p %d %p %d %p %d %p %d %p\n", key_data, key_size, rw_data, rw_size,
            dynamic_data, dynamic_size, static_data, static_size, count );
 
-    EnterCriticalSection( &if_list_cs );
+    pthread_mutex_lock( &if_list_lock );
 
     update_if_table();
 
@@ -485,7 +483,7 @@ static NTSTATUS ifinfo_enumerate_all( void *key_data, DWORD key_size, void *rw_d
         num++;
     }
 
-    LeaveCriticalSection( &if_list_cs );
+    pthread_mutex_unlock( &if_list_lock );
 
     if (!want_data || num <= *count) *count = num;
     else status = STATUS_BUFFER_OVERFLOW;
@@ -503,7 +501,7 @@ static NTSTATUS ifinfo_get_all_parameters( const void *key, DWORD key_size, void
     TRACE( "%p %d %p %d %p %d %p %d\n", key, key_size, rw_data, rw_size,
            dynamic_data, dynamic_size, static_data, static_size );
 
-    EnterCriticalSection( &if_list_cs );
+    pthread_mutex_lock( &if_list_lock );
 
     update_if_table();
 
@@ -514,7 +512,7 @@ static NTSTATUS ifinfo_get_all_parameters( const void *key, DWORD key_size, void
         status = STATUS_SUCCESS;
     }
 
-    LeaveCriticalSection( &if_list_cs );
+    pthread_mutex_unlock( &if_list_lock );
 
     return status;
 }
@@ -565,7 +563,7 @@ static NTSTATUS ifinfo_get_parameter( const void *key, DWORD key_size, DWORD par
 
     TRACE( "%p %d %d %p %d %d\n", key, key_size, param_type, data, data_size, data_offset );
 
-    EnterCriticalSection( &if_list_cs );
+    pthread_mutex_lock( &if_list_lock );
 
     update_if_table();
 
@@ -583,7 +581,7 @@ static NTSTATUS ifinfo_get_parameter( const void *key, DWORD key_size, DWORD par
         }
     }
 
-    LeaveCriticalSection( &if_list_cs );
+    pthread_mutex_unlock( &if_list_lock );
 
     return status;
 }
@@ -599,7 +597,7 @@ static NTSTATUS index_luid_get_parameter( const void *key, DWORD key_size, DWORD
     if (param_type != NSI_PARAM_TYPE_STATIC || data_size != sizeof(NET_LUID) || data_offset != 0)
         return STATUS_INVALID_PARAMETER;
 
-    EnterCriticalSection( &if_list_cs );
+    pthread_mutex_lock( &if_list_lock );
 
     update_if_table();
 
@@ -609,7 +607,7 @@ static NTSTATUS index_luid_get_parameter( const void *key, DWORD key_size, DWORD
         *(NET_LUID *)data = entry->if_luid;
         status = STATUS_SUCCESS;
     }
-    LeaveCriticalSection( &if_list_cs );
+    pthread_mutex_unlock( &if_list_lock );
     return status;
 }
 
@@ -618,7 +616,7 @@ BOOL convert_unix_name_to_luid( const char *unix_name, NET_LUID *luid )
     struct if_entry *entry;
     BOOL ret = FALSE;
 
-    EnterCriticalSection( &if_list_cs );
+    pthread_mutex_lock( &if_list_lock );
 
     update_if_table();
 
@@ -629,7 +627,7 @@ BOOL convert_unix_name_to_luid( const char *unix_name, NET_LUID *luid )
             ret = TRUE;
             break;
         }
-    LeaveCriticalSection( &if_list_cs );
+    pthread_mutex_unlock( &if_list_lock );
 
     return ret;
 }
@@ -639,7 +637,7 @@ BOOL convert_luid_to_unix_name( const NET_LUID *luid, const char **unix_name )
     struct if_entry *entry;
     BOOL ret = FALSE;
 
-    EnterCriticalSection( &if_list_cs );
+    pthread_mutex_lock( &if_list_lock );
 
     update_if_table();
 
@@ -650,7 +648,7 @@ BOOL convert_luid_to_unix_name( const NET_LUID *luid, const char **unix_name )
             ret = TRUE;
 
         }
-    LeaveCriticalSection( &if_list_cs );
+    pthread_mutex_unlock( &if_list_lock );
 
     return ret;
 }

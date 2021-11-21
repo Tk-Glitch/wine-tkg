@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -27,9 +26,6 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_GETOPT_H
-# include <getopt.h>
-#endif
 
 #ifdef HAVE_FREETYPE
 
@@ -45,6 +41,7 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "basetsd.h"
+#include "../tools.h"
 
 #include "pshpack1.h"
 
@@ -437,9 +434,11 @@ static const char *output_name;
 
 static FT_Library ft_library;
 
-static void usage(char **argv)
+static const char *argv0;
+
+static void usage(void)
 {
-    fprintf(stderr, "%s [options] input.ttf ppem,enc,avg_width ...\n", argv[0]);
+    fprintf(stderr, "%s [options] input.ttf ppem,enc,avg_width ...\n", argv0);
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -h       Display help\n" );
     fprintf(stderr, "  -d char  Set the font default char\n" );
@@ -448,10 +447,6 @@ static void usage(char **argv)
     fprintf(stderr, "  -r dpi   Set resolution in DPI (default: 96)\n" );
     fprintf(stderr, "  -s       Single .fnt file mode\n" );
 }
-
-#ifndef __GNUC__
-#define __attribute__(X)
-#endif
 
 /* atexit handler to cleanup files */
 static void cleanup(void)
@@ -580,7 +575,7 @@ static struct fontinfo *fill_fontinfo( const char *face_name, int ppem, int enc,
         fprintf(stderr,"Can't find EBLC table\n");
     else
     {
-        eblc = malloc(needed);
+        eblc = xmalloc(needed);
         FT_Load_Sfnt_Table(face, TTAG_EBLC, 0, (FT_Byte *)eblc, &needed);
 
         num_sizes = GET_BE_DWORD(&eblc->numSizes);
@@ -828,40 +823,35 @@ static void write_fontinfo( const struct fontinfo *info, FILE *fp )
     fwrite( info->data, info->hdr.dfSize - info->hdr.fi.dfBitsOffset, 1, fp );
 }
 
-/* parse options from the argv array and remove all the recognized ones */
-static char **parse_options( int argc, char **argv )
+static void option_callback( int optc, char *optarg )
 {
-    int optc;
-
-    while ((optc = getopt_long( argc, argv, "d:ho:qr:s", NULL, NULL )) != -1)
+    switch(optc)
     {
-        switch(optc)
-        {
-        case 'd':
-            option_defchar = atoi( optarg );
-            break;
-        case 'o':
-            option_output = strdup( optarg );
-            break;
-        case 'q':
-            option_quiet = 1;
-            break;
-        case 'r':
-            option_dpi = atoi( optarg );
-            break;
-        case 's':
-            option_fnt_mode = 1;
-            break;
-        case 'h':
-            usage(argv);
-            exit(0);
-        case '?':
-            usage(argv);
-            exit(1);
-        }
+    case 'd':
+        option_defchar = atoi( optarg );
+        break;
+    case 'o':
+        option_output = xstrdup( optarg );
+        break;
+    case 'q':
+        option_quiet = 1;
+        break;
+    case 'r':
+        option_dpi = atoi( optarg );
+        break;
+    case 's':
+        option_fnt_mode = 1;
+        break;
+    case 'h':
+        usage();
+        exit(0);
+    case '?':
+        fprintf( stderr, "%s: %s\n\n", argv0, optarg );
+        usage();
+        exit(1);
     }
-    return &argv[optind];
 }
+
 
 int main(int argc, char **argv)
 {
@@ -878,18 +868,19 @@ int main(int argc, char **argv)
     NE_TYPEINFO rc_type;
     NE_NAMEINFO rc_name;
     struct fontinfo **info;
-    char *input_file;
-    char **args;
+    const char *input_file;
+    struct strarray args;
     short tmp16;
 
-    args = parse_options( argc, argv );
+    argv0 = argv[0];
+    args = parse_options( argc, argv, "d:ho:qr:s", NULL, 0, option_callback );
 
-    input_file = *args++;
-    if (!input_file || !*args)
+    if (!args.count)
     {
-        usage(argv);
+        usage();
         exit(1);
     }
+    input_file = args.str[0];
 
     if(FT_Init_FreeType(&ft_library))
         error("ft init failure\n");
@@ -897,21 +888,19 @@ int main(int argc, char **argv)
     FT_Version.major=FT_Version.minor=FT_Version.patch=-1;
     FT_Library_Version(ft_library,&FT_Version.major,&FT_Version.minor,&FT_Version.patch);
 
-    num_files = 0;
-    while (args[num_files]) num_files++;
-
+    num_files = args.count - 1;
     if (option_fnt_mode && num_files > 1)
         error( "can only specify one font in .fnt mode\n" );
 
-    info = malloc( num_files * sizeof(*info) );
+    info = xmalloc( num_files * sizeof(*info) );
     for (i = 0; i < num_files; i++)
     {
         int ppem, enc, avg_width;
         const char *name;
 
-        if (sscanf( args[i], "%d,%d,%d", &ppem, &enc, &avg_width ) != 3)
+        if (sscanf( args.str[i + 1], "%d,%d,%d", &ppem, &enc, &avg_width ) != 3)
         {
-            usage(argv);
+            usage();
             exit(1);
         }
         if (!(info[i] = fill_fontinfo( input_file, ppem, enc, option_dpi, option_defchar, avg_width )))
@@ -974,16 +963,8 @@ int main(int argc, char **argv)
 #endif
 
     if (!option_output)  /* build a default output name */
-    {
-        char *p = strrchr( input_file, '/' );
-        if (p) p++;
-        else p = input_file;
-        option_output = malloc( strlen(p) + sizeof(".fon") );
-        strcpy( option_output, p );
-        p = strrchr( option_output, '.' );
-        if (!p) p = option_output + strlen(option_output);
-        strcpy( p, option_fnt_mode ? ".fnt" : ".fon" );
-    }
+        option_output = strmake( "%s%s", get_basename_noext( input_file ),
+                                 option_fnt_mode ? ".fnt" : ".fon" );
 
     if (!(ofp = fopen(option_output, "wb")))
     {

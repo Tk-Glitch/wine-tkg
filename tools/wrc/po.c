@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +30,7 @@
 #include <gettext-po.h>
 #endif
 
+#include "../tools.h"
 #include "wrc.h"
 #include "genres.h"
 #include "newstruc.h"
@@ -691,10 +691,7 @@ static unsigned int flush_po_files( const char *output_name )
         char *name = get_po_file_name( &po_file->lang );
         if (output_name)
         {
-            const char *p = strrchr( output_name, '/' );
-            if (p) p++;
-            else p = output_name;
-            if (!strcmp( p, name ))
+            if (!strcmp( get_basename(output_name), name ))
             {
                 po_file_write( po_file->po, name, &po_xerror_handler );
                 count++;

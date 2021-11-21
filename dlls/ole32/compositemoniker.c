@@ -72,13 +72,13 @@ static inline CompositeMonikerImpl *impl_from_IMarshal(IMarshal *iface)
     return CONTAINING_RECORD(iface, CompositeMonikerImpl, IMarshal_iface);
 }
 
-/* EnumMoniker data structure */
-typedef struct EnumMonikerImpl{
+typedef struct EnumMonikerImpl
+{
     IEnumMoniker IEnumMoniker_iface;
     LONG ref;
-    IMoniker** tabMoniker; /* dynamic table containing the enumerated monikers */
-    ULONG      tabSize; /* size of tabMoniker */
-    ULONG      currentPos;  /* index pointer on the current moniker */
+    IMoniker **monikers;
+    unsigned int count;
+    unsigned int pos;
 } EnumMonikerImpl;
 
 static inline EnumMonikerImpl *impl_from_IEnumMoniker(IEnumMoniker *iface)
@@ -86,8 +86,9 @@ static inline EnumMonikerImpl *impl_from_IEnumMoniker(IEnumMoniker *iface)
     return CONTAINING_RECORD(iface, EnumMonikerImpl, IEnumMoniker_iface);
 }
 
-static HRESULT EnumMonikerImpl_CreateEnumMoniker(IMoniker** tabMoniker,ULONG tabSize,ULONG currentPos,BOOL leftToRight,IEnumMoniker ** ppmk);
+static HRESULT create_enumerator(IMoniker **components, unsigned int count, BOOL forward, IEnumMoniker **ret);
 static HRESULT composite_get_rightmost(CompositeMonikerImpl *composite, IMoniker **left, IMoniker **rightmost);
+static HRESULT composite_get_leftmost(CompositeMonikerImpl *composite, IMoniker **leftmost);
 
 /*******************************************************************************
  *        CompositeMoniker_QueryInterface
@@ -314,23 +315,30 @@ CompositeMonikerImpl_GetSizeMax(IMoniker* iface,ULARGE_INTEGER* pcbSize)
     return S_OK;
 }
 
-static HRESULT WINAPI CompositeMonikerImpl_BindToObject(IMoniker *iface, IBindCtx *pbc,
-        IMoniker *pmkToLeft, REFIID riid, void **result)
+static HRESULT compose_with(IMoniker *left, IMoniker *right, IMoniker **c)
 {
+    HRESULT hr = IMoniker_ComposeWith(left, right, TRUE, c);
+    if (FAILED(hr) && hr != MK_E_NEEDGENERIC) return hr;
+    return CreateGenericComposite(left, right, c);
+}
+
+static HRESULT WINAPI CompositeMonikerImpl_BindToObject(IMoniker *iface, IBindCtx *pbc,
+        IMoniker *toleft, REFIID riid, void **result)
+{
+    CompositeMonikerImpl *moniker = impl_from_IMoniker(iface);
+    IMoniker *left, *rightmost, *c;
     IRunningObjectTable *rot;
     IUnknown *object;
     HRESULT hr;
-    IMoniker *tempMk,*antiMk,*rightMostMk;
-    IEnumMoniker *enumMoniker;
 
-    TRACE("(%p,%p,%p,%s,%p)\n", iface, pbc, pmkToLeft, debugstr_guid(riid), result);
+    TRACE("%p, %p, %p, %s, %p.\n", iface, pbc, toleft, debugstr_guid(riid), result);
 
     if (!result)
         return E_POINTER;
 
     *result = NULL;
 
-    if (!pmkToLeft)
+    if (!toleft)
     {
         hr = IBindCtx_GetRunningObjectTable(pbc, &rot);
         if (SUCCEEDED(hr))
@@ -342,170 +350,111 @@ static HRESULT WINAPI CompositeMonikerImpl_BindToObject(IMoniker *iface, IBindCt
             hr = IUnknown_QueryInterface(object, riid, result);
             IUnknown_Release(object);
         }
+
+        return hr;
     }
-    else{
-        /* If pmkToLeft is not NULL, the method recursively calls IMoniker::BindToObject on the rightmost */
-        /* component of the composite, passing the rest of the composite as the pmkToLeft parameter for that call */
 
-        IMoniker_Enum(iface,FALSE,&enumMoniker);
-        IEnumMoniker_Next(enumMoniker,1,&rightMostMk,NULL);
-        IEnumMoniker_Release(enumMoniker);
+    /* Try to bind rightmost component with (toleft, composite->left) composite at its left side */
+    if (FAILED(hr = composite_get_rightmost(moniker, &left, &rightmost)))
+        return hr;
 
-        hr = CreateAntiMoniker(&antiMk);
-        hr = IMoniker_ComposeWith(iface,antiMk,0,&tempMk);
-        IMoniker_Release(antiMk);
+    hr = compose_with(toleft, left, &c);
+    IMoniker_Release(left);
 
-        hr = IMoniker_BindToObject(rightMostMk,pbc,tempMk,riid,result);
-
-        IMoniker_Release(tempMk);
-        IMoniker_Release(rightMostMk);
+    if (SUCCEEDED(hr))
+    {
+        hr = IMoniker_BindToObject(rightmost, pbc, c, riid, result);
+        IMoniker_Release(c);
     }
+
+    IMoniker_Release(rightmost);
 
     return hr;
 }
 
-/******************************************************************************
- *        CompositeMoniker_BindToStorage
- ******************************************************************************/
-static HRESULT WINAPI
-CompositeMonikerImpl_BindToStorage(IMoniker* iface, IBindCtx* pbc,
-               IMoniker* pmkToLeft, REFIID riid, VOID** ppvResult)
+static HRESULT WINAPI CompositeMonikerImpl_BindToStorage(IMoniker *iface, IBindCtx *pbc,
+        IMoniker *toleft, REFIID riid, void **result)
 {
-    HRESULT   res;
-    IMoniker *tempMk,*antiMk,*rightMostMk,*leftMk;
-    IEnumMoniker *enumMoniker;
+    CompositeMonikerImpl *moniker = impl_from_IMoniker(iface);
+    IMoniker *left, *rightmost, *composed_left;
+    HRESULT hr;
 
-    TRACE("(%p,%p,%p,%s,%p)\n",iface,pbc,pmkToLeft,debugstr_guid(riid),ppvResult);
+    TRACE("%p, %p, %p, %s, %p.\n", iface, pbc, toleft, debugstr_guid(riid), result);
 
-    *ppvResult=0;
+    *result = NULL;
 
-    /* This method recursively calls BindToStorage on the rightmost component of the composite, */
-    /* passing the rest of the composite as the pmkToLeft parameter for that call. */
+    if (FAILED(hr = composite_get_rightmost(moniker, &left, &rightmost)))
+        return hr;
 
-    if (pmkToLeft)
+    if (toleft)
     {
-        res = IMoniker_ComposeWith(pmkToLeft, iface, FALSE, &leftMk);
-        if (FAILED(res)) return res;
+        hr = compose_with(toleft, left, &composed_left);
     }
     else
-        leftMk = iface;
+    {
+        composed_left = left;
+        IMoniker_AddRef(composed_left);
+    }
 
-    IMoniker_Enum(iface, FALSE, &enumMoniker);
-    IEnumMoniker_Next(enumMoniker, 1, &rightMostMk, NULL);
-    IEnumMoniker_Release(enumMoniker);
+    if (SUCCEEDED(hr))
+    {
+        hr = IMoniker_BindToStorage(rightmost, pbc, composed_left, riid, result);
+        IMoniker_Release(composed_left);
+    }
 
-    res = CreateAntiMoniker(&antiMk);
-    if (FAILED(res)) return res;
-    res = IMoniker_ComposeWith(leftMk, antiMk, 0, &tempMk);
-    if (FAILED(res)) return res;
-    IMoniker_Release(antiMk);
+    IMoniker_Release(rightmost);
+    IMoniker_Release(left);
 
-    res = IMoniker_BindToStorage(rightMostMk, pbc, tempMk, riid, ppvResult);
-
-    IMoniker_Release(tempMk);
-
-    IMoniker_Release(rightMostMk);
-
-    if (pmkToLeft)
-        IMoniker_Release(leftMk);
-
-    return res;
+    return hr;
 }
 
-/******************************************************************************
- *        CompositeMoniker_Reduce
- ******************************************************************************/
-static HRESULT WINAPI
-CompositeMonikerImpl_Reduce(IMoniker* iface, IBindCtx* pbc, DWORD dwReduceHowFar,
-               IMoniker** ppmkToLeft, IMoniker** ppmkReduced)
+static HRESULT WINAPI CompositeMonikerImpl_Reduce(IMoniker *iface, IBindCtx *pbc, DWORD howfar,
+        IMoniker **toleft, IMoniker **reduced)
 {
-    HRESULT   res;
-    IMoniker *tempMk,*antiMk,*rightMostMk,*leftReducedComposedMk,*rightMostReducedMk;
-    IEnumMoniker *enumMoniker;
+    CompositeMonikerImpl *moniker = impl_from_IMoniker(iface);
+    IMoniker *m, *reduced_left, *reduced_right;
+    BOOL was_reduced;
+    HRESULT hr;
 
-    TRACE("(%p,%p,%d,%p,%p)\n",iface,pbc,dwReduceHowFar,ppmkToLeft,ppmkReduced);
+    TRACE("%p, %p, %d, %p, %p.\n", iface, pbc, howfar, toleft, reduced);
 
-    if (ppmkReduced==NULL)
-        return E_POINTER;
+    if (!pbc || !reduced)
+        return E_INVALIDARG;
 
-    /* This method recursively calls Reduce for each of its component monikers. */
+    if (FAILED(hr = IMoniker_Reduce(moniker->left, pbc, howfar, NULL, &reduced_left)))
+        return hr;
 
-    if (ppmkToLeft==NULL){
-
-        IMoniker_Enum(iface,FALSE,&enumMoniker);
-        IEnumMoniker_Next(enumMoniker,1,&rightMostMk,NULL);
-        IEnumMoniker_Release(enumMoniker);
-
-        CreateAntiMoniker(&antiMk);
-        IMoniker_ComposeWith(iface,antiMk,0,&tempMk);
-        IMoniker_Release(antiMk);
-
-        res = IMoniker_Reduce(rightMostMk,pbc,dwReduceHowFar,&tempMk, ppmkReduced);
-        IMoniker_Release(tempMk);
-        IMoniker_Release(rightMostMk);
-
-        return res;
+    m = moniker->left;
+    if (FAILED(hr = IMoniker_Reduce(moniker->right, pbc, howfar, &m, &reduced_right)))
+    {
+        IMoniker_Release(reduced_left);
+        return hr;
     }
-    else if (*ppmkToLeft==NULL)
 
-        return IMoniker_Reduce(iface,pbc,dwReduceHowFar,NULL,ppmkReduced);
-
-    else{
-
-        /* separate the composite moniker in to left and right moniker */
-        IMoniker_Enum(iface,FALSE,&enumMoniker);
-        IEnumMoniker_Next(enumMoniker,1,&rightMostMk,NULL);
-        IEnumMoniker_Release(enumMoniker);
-
-        CreateAntiMoniker(&antiMk);
-        IMoniker_ComposeWith(iface,antiMk,0,&tempMk);
-        IMoniker_Release(antiMk);
-
-        /* If any of the components  reduces itself, the method returns S_OK and passes back a composite */
-        /* of the reduced components */
-        if (IMoniker_Reduce(rightMostMk,pbc,dwReduceHowFar,NULL,&rightMostReducedMk) &&
-            IMoniker_Reduce(rightMostMk,pbc,dwReduceHowFar,&tempMk,&leftReducedComposedMk) ){
-            IMoniker_Release(tempMk);
-            IMoniker_Release(rightMostMk);
-
-            return CreateGenericComposite(leftReducedComposedMk,rightMostReducedMk,ppmkReduced);
-        }
-        else{
-            /* If no reduction occurred, the method passes back the same moniker and returns MK_S_REDUCED_TO_SELF.*/
-            IMoniker_Release(tempMk);
-            IMoniker_Release(rightMostMk);
-
-            IMoniker_AddRef(iface);
-
-            *ppmkReduced=iface;
-
-            return MK_S_REDUCED_TO_SELF;
-        }
+    if ((was_reduced = (reduced_left != moniker->left || reduced_right != moniker->right)))
+    {
+        hr = CreateGenericComposite(reduced_left, reduced_right, reduced);
     }
+    else
+    {
+        *reduced = iface;
+        IMoniker_AddRef(*reduced);
+    }
+
+    IMoniker_Release(reduced_left);
+    IMoniker_Release(reduced_right);
+
+    return was_reduced ? hr : MK_S_REDUCED_TO_SELF;
 }
 
-/******************************************************************************
- *        CompositeMoniker_ComposeWith
- ******************************************************************************/
-static HRESULT WINAPI
-CompositeMonikerImpl_ComposeWith(IMoniker* iface, IMoniker* pmkRight,
-               BOOL fOnlyIfNotGeneric, IMoniker** ppmkComposite)
+static HRESULT WINAPI CompositeMonikerImpl_ComposeWith(IMoniker *iface, IMoniker *right,
+        BOOL only_if_not_generic, IMoniker **composite)
 {
-    TRACE("(%p,%p,%d,%p)\n",iface,pmkRight,fOnlyIfNotGeneric,ppmkComposite);
+    TRACE("%p, %p, %d, %p.\n", iface, right, only_if_not_generic, composite);
 
-    if ((ppmkComposite==NULL)||(pmkRight==NULL))
-	return E_POINTER;
+    *composite = NULL;
 
-    *ppmkComposite=0;
-
-    /* If fOnlyIfNotGeneric is TRUE, this method sets *pmkComposite to NULL and returns MK_E_NEEDGENERIC; */
-    /* otherwise, the method returns the result of combining the two monikers by calling the */
-    /* CreateGenericComposite function */
-
-    if (fOnlyIfNotGeneric)
-        return MK_E_NEEDGENERIC;
-
-    return CreateGenericComposite(iface,pmkRight,ppmkComposite);
+    return only_if_not_generic ? MK_E_NEEDGENERIC : CreateGenericComposite(iface, right, composite);
 }
 
 static void composite_get_components(IMoniker *moniker, IMoniker **components, unsigned int *index)
@@ -524,80 +473,80 @@ static void composite_get_components(IMoniker *moniker, IMoniker **components, u
     }
 }
 
-static HRESULT WINAPI CompositeMonikerImpl_Enum(IMoniker *iface, BOOL forward, IEnumMoniker **ppenumMoniker)
+static HRESULT composite_get_components_alloc(IMoniker *iface, unsigned int *count, IMoniker ***components)
 {
-    CompositeMonikerImpl *moniker = impl_from_IMoniker(iface);
-    IMoniker **monikers;
+    CompositeMonikerImpl *moniker;
     unsigned int index;
-    HRESULT hr;
 
-    TRACE("%p, %d, %p\n", iface, forward, ppenumMoniker);
+    if ((moniker = unsafe_impl_from_IMoniker(iface)))
+        *count = moniker->comp_count;
+    else
+        *count = 1;
 
-    if (!ppenumMoniker)
-        return E_POINTER;
-
-    if (!(monikers = heap_alloc(moniker->comp_count * sizeof(*monikers))))
+    if (!(*components = heap_alloc(*count * sizeof(**components))))
         return E_OUTOFMEMORY;
 
     index = 0;
-    composite_get_components(iface, monikers, &index);
+    composite_get_components(iface, *components, &index);
 
-    hr = EnumMonikerImpl_CreateEnumMoniker(monikers, moniker->comp_count, 0, forward, ppenumMoniker);
+    return S_OK;
+}
+
+static HRESULT WINAPI CompositeMonikerImpl_Enum(IMoniker *iface, BOOL forward, IEnumMoniker **ret_enum)
+{
+    IMoniker **monikers;
+    unsigned int count;
+    HRESULT hr;
+
+    TRACE("%p, %d, %p\n", iface, forward, ret_enum);
+
+    if (!ret_enum)
+        return E_INVALIDARG;
+
+    if (FAILED(hr = composite_get_components_alloc(iface, &count, &monikers)))
+        return hr;
+
+    hr = create_enumerator(monikers, count, forward, ret_enum);
     heap_free(monikers);
 
     return hr;
 }
 
-/******************************************************************************
- *        CompositeMoniker_IsEqual
- ******************************************************************************/
-static HRESULT WINAPI
-CompositeMonikerImpl_IsEqual(IMoniker* iface,IMoniker* pmkOtherMoniker)
+static HRESULT WINAPI CompositeMonikerImpl_IsEqual(IMoniker *iface, IMoniker *other)
 {
-    IEnumMoniker *enumMoniker1,*enumMoniker2;
-    IMoniker *tempMk1,*tempMk2;
-    HRESULT res1,res2,res;
-    BOOL done;
+    CompositeMonikerImpl *moniker = impl_from_IMoniker(iface), *other_moniker;
+    IMoniker **components, **other_components;
+    unsigned int i, count;
+    HRESULT hr;
 
-    TRACE("(%p,%p)\n",iface,pmkOtherMoniker);
+    TRACE("%p, %p.\n", iface, other);
 
-    if (pmkOtherMoniker==NULL)
+    if (!other)
+        return E_INVALIDARG;
+
+    if (!(other_moniker = unsafe_impl_from_IMoniker(other)))
         return S_FALSE;
 
-    /* This method returns S_OK if the components of both monikers are equal when compared in the */
-    /* left-to-right order.*/
-    IMoniker_Enum(pmkOtherMoniker,TRUE,&enumMoniker1);
-
-    if (enumMoniker1==NULL)
+    if (moniker->comp_count != other_moniker->comp_count)
         return S_FALSE;
 
-    IMoniker_Enum(iface,TRUE,&enumMoniker2);
+    if (FAILED(hr = composite_get_components_alloc(iface, &count, &components))) return hr;
+    if (FAILED(hr = composite_get_components_alloc(other, &count, &other_components)))
+    {
+        heap_free(components);
+        return hr;
+    }
 
-    do {
+    for (i = 0; i < moniker->comp_count; ++i)
+    {
+        if ((hr = IMoniker_IsEqual(components[i], other_components[i]) != S_OK))
+            break;
+    }
 
-        res1=IEnumMoniker_Next(enumMoniker1,1,&tempMk1,NULL);
-        res2=IEnumMoniker_Next(enumMoniker2,1,&tempMk2,NULL);
+    heap_free(other_components);
+    heap_free(components);
 
-        if((res1==S_OK)&&(res2==S_OK)){
-            done = (res = IMoniker_IsEqual(tempMk1,tempMk2)) == S_FALSE;
-        }
-        else
-        {
-            res = (res1==S_FALSE) && (res2==S_FALSE);
-            done = TRUE;
-        }
-
-        if (res1==S_OK)
-            IMoniker_Release(tempMk1);
-
-        if (res2==S_OK)
-            IMoniker_Release(tempMk2);
-    } while (!done);
-
-    IEnumMoniker_Release(enumMoniker1);
-    IEnumMoniker_Release(enumMoniker2);
-
-    return res;
+    return hr;
 }
 
 static HRESULT WINAPI CompositeMonikerImpl_Hash(IMoniker *iface, DWORD *hash)
@@ -624,89 +573,49 @@ static HRESULT WINAPI CompositeMonikerImpl_Hash(IMoniker *iface, DWORD *hash)
     return hr;
 }
 
-/******************************************************************************
- *        CompositeMoniker_IsRunning
- ******************************************************************************/
-static HRESULT WINAPI
-CompositeMonikerImpl_IsRunning(IMoniker* iface, IBindCtx* pbc,
-               IMoniker* pmkToLeft, IMoniker* pmkNewlyRunning)
+static HRESULT WINAPI CompositeMonikerImpl_IsRunning(IMoniker *iface, IBindCtx *pbc,
+        IMoniker *toleft, IMoniker *newly_running)
 {
-    IRunningObjectTable* rot;
-    HRESULT res;
-    IMoniker *tempMk,*antiMk,*rightMostMk;
-    IEnumMoniker *enumMoniker;
+    CompositeMonikerImpl *moniker = impl_from_IMoniker(iface);
+    IMoniker *c, *left, *rightmost;
+    IRunningObjectTable *rot;
+    HRESULT hr;
 
-    TRACE("(%p,%p,%p,%p)\n",iface,pbc,pmkToLeft,pmkNewlyRunning);
+    TRACE("%p, %p, %p, %p.\n", iface, pbc, toleft, newly_running);
 
-    /* If pmkToLeft is non-NULL, this method composes pmkToLeft with this moniker and calls IsRunning on the result.*/
-    if (pmkToLeft!=NULL){
+    if (!pbc)
+        return E_INVALIDARG;
 
-        CreateGenericComposite(pmkToLeft,iface,&tempMk);
-
-        res = IMoniker_IsRunning(tempMk,pbc,NULL,pmkNewlyRunning);
-
-        IMoniker_Release(tempMk);
-
-        return res;
-    }
-    else
-        /* If pmkToLeft is NULL, this method returns S_OK if pmkNewlyRunning is non-NULL and is equal */
-        /* to this moniker */
-
-        if (pmkNewlyRunning!=NULL)
-
-            if (IMoniker_IsEqual(iface,pmkNewlyRunning)==S_OK)
-                return S_OK;
-
-            else
-                return S_FALSE;
-
-        else{
-
-            if (pbc==NULL)
-                return E_INVALIDARG;
-
-            /* If pmkToLeft and pmkNewlyRunning are both NULL, this method checks the ROT to see whether */
-            /* the moniker is running. If so, the method returns S_OK; otherwise, it recursively calls   */
-            /* IMoniker::IsRunning on the rightmost component of the composite, passing the remainder of */
-            /* the composite as the pmkToLeft parameter for that call.                                   */
-
-             res=IBindCtx_GetRunningObjectTable(pbc,&rot);
-
-            if (FAILED(res))
-                return res;
-
-            res = IRunningObjectTable_IsRunning(rot,iface);
-            IRunningObjectTable_Release(rot);
-
-            if(res==S_OK)
-                return S_OK;
-
-            else{
-
-                IMoniker_Enum(iface,FALSE,&enumMoniker);
-                IEnumMoniker_Next(enumMoniker,1,&rightMostMk,NULL);
-                IEnumMoniker_Release(enumMoniker);
-
-                res=CreateAntiMoniker(&antiMk);
-                res=IMoniker_ComposeWith(iface,antiMk,0,&tempMk);
-                IMoniker_Release(antiMk);
-
-                res=IMoniker_IsRunning(rightMostMk,pbc,tempMk,pmkNewlyRunning);
-
-                IMoniker_Release(tempMk);
-                IMoniker_Release(rightMostMk);
-
-                return res;
-            }
+    if (toleft)
+    {
+        if (SUCCEEDED(hr = CreateGenericComposite(toleft, iface, &c)))
+        {
+            hr = IMoniker_IsRunning(c, pbc, NULL, newly_running);
+            IMoniker_Release(c);
         }
-}
 
-static HRESULT compose_with(IMoniker *left, IMoniker *right, IMoniker **c)
-{
-    HRESULT hr = IMoniker_ComposeWith(left, right, TRUE, c);
-    if (FAILED(hr) && hr != MK_E_NEEDGENERIC) return hr;
-    return CreateGenericComposite(left, right, c);
+        return hr;
+    }
+
+    if (newly_running)
+        return IMoniker_IsEqual(iface, newly_running);
+
+    if (FAILED(hr = IBindCtx_GetRunningObjectTable(pbc, &rot)))
+        return hr;
+
+    hr = IRunningObjectTable_IsRunning(rot, iface);
+    IRunningObjectTable_Release(rot);
+    if (hr == S_OK) return S_OK;
+
+    if (FAILED(hr = composite_get_rightmost(moniker, &left, &rightmost)))
+        return hr;
+
+    hr = IMoniker_IsRunning(rightmost, pbc, left, NULL);
+
+    IMoniker_Release(left);
+    IMoniker_Release(rightmost);
+
+    return hr;
 }
 
 static HRESULT WINAPI CompositeMonikerImpl_GetTimeOfLastChange(IMoniker *iface, IBindCtx *pbc,
@@ -759,339 +668,235 @@ static HRESULT WINAPI CompositeMonikerImpl_GetTimeOfLastChange(IMoniker *iface, 
     return hr;
 }
 
-/******************************************************************************
- *        CompositeMoniker_Inverse
- ******************************************************************************/
-static HRESULT WINAPI
-CompositeMonikerImpl_Inverse(IMoniker* iface,IMoniker** ppmk)
+static HRESULT WINAPI CompositeMonikerImpl_Inverse(IMoniker *iface, IMoniker **inverse)
 {
-    HRESULT res;
-    IMoniker *tempMk,*antiMk,*rightMostMk,*tempInvMk,*rightMostInvMk;
-    IEnumMoniker *enumMoniker;
+    CompositeMonikerImpl *moniker = impl_from_IMoniker(iface);
+    IMoniker *right_inverted, *left_inverted;
+    HRESULT hr;
 
-    TRACE("(%p,%p)\n",iface,ppmk);
+    TRACE("%p, %p.\n", iface, inverse);
 
-    if (ppmk==NULL)
-        return E_POINTER;
+    if (!inverse)
+        return E_INVALIDARG;
 
-    /* This method returns a composite moniker that consists of the inverses of each of the components */
-    /* of the original composite, stored in reverse order */
+    *inverse = NULL;
 
-    *ppmk = NULL;
-
-    res=CreateAntiMoniker(&antiMk);
-    if (FAILED(res))
-        return res;
-
-    res=IMoniker_ComposeWith(iface,antiMk,FALSE,&tempMk);
-    IMoniker_Release(antiMk);
-    if (FAILED(res))
-        return res;
-
-    if (tempMk==NULL)
-
-        return IMoniker_Inverse(iface,ppmk);
-
-    else{
-
-        IMoniker_Enum(iface,FALSE,&enumMoniker);
-        IEnumMoniker_Next(enumMoniker,1,&rightMostMk,NULL);
-        IEnumMoniker_Release(enumMoniker);
-
-        IMoniker_Inverse(rightMostMk,&rightMostInvMk);
-        CompositeMonikerImpl_Inverse(tempMk,&tempInvMk);
-
-        res=CreateGenericComposite(rightMostInvMk,tempInvMk,ppmk);
-
-        IMoniker_Release(tempMk);
-        IMoniker_Release(rightMostMk);
-        IMoniker_Release(tempInvMk);
-        IMoniker_Release(rightMostInvMk);
-
-        return res;
+    if (FAILED(hr = IMoniker_Inverse(moniker->right, &right_inverted))) return hr;
+    if (FAILED(hr = IMoniker_Inverse(moniker->left, &left_inverted)))
+    {
+        IMoniker_Release(right_inverted);
+        return hr;
     }
+
+    hr = CreateGenericComposite(right_inverted, left_inverted, inverse);
+
+    IMoniker_Release(left_inverted);
+    IMoniker_Release(right_inverted);
+
+    return hr;
 }
 
-/******************************************************************************
- *        CompositeMoniker_CommonPrefixWith
- ******************************************************************************/
-static HRESULT WINAPI
-CompositeMonikerImpl_CommonPrefixWith(IMoniker* iface, IMoniker* pmkOther,
-               IMoniker** ppmkPrefix)
+static HRESULT WINAPI CompositeMonikerImpl_CommonPrefixWith(IMoniker *iface, IMoniker *other,
+        IMoniker **prefix)
 {
-    DWORD mkSys;
-    HRESULT res1,res2;
-    IMoniker *tempMk1,*tempMk2,*mostLeftMk1,*mostLeftMk2;
-    IEnumMoniker *enumMoniker1,*enumMoniker2;
-    ULONG i,nbCommonMk=0;
+    CompositeMonikerImpl *moniker = impl_from_IMoniker(iface), *other_moniker;
+    unsigned int i, count, prefix_len = 0;
+    IMoniker *leftmost;
+    HRESULT hr;
+
+    TRACE("%p, %p, %p.\n", iface, other, prefix);
 
     /* If the other moniker is a composite, this method compares the components of each composite from left  */
     /* to right. The returned common prefix moniker might also be a composite moniker, depending on how many */
     /* of the leftmost components were common to both monikers.                                              */
 
-    if (ppmkPrefix==NULL)
-        return E_POINTER;
+    if (prefix)
+        *prefix = NULL;
 
-    *ppmkPrefix=0;
+    if (!other || !prefix)
+        return E_INVALIDARG;
 
-    if (pmkOther==NULL)
-        return MK_E_NOPREFIX;
+    if ((other_moniker = unsafe_impl_from_IMoniker(other)))
+    {
+        IMoniker **components, **other_components, **prefix_components;
+        IMoniker *last, *c;
 
-    IMoniker_IsSystemMoniker(pmkOther,&mkSys);
-
-    if(mkSys==MKSYS_GENERICCOMPOSITE){
-
-        IMoniker_Enum(iface,TRUE,&enumMoniker1);
-        IMoniker_Enum(pmkOther,TRUE,&enumMoniker2);
-
-        while(1){
-
-            res1=IEnumMoniker_Next(enumMoniker1,1,&mostLeftMk1,NULL);
-            res2=IEnumMoniker_Next(enumMoniker2,1,&mostLeftMk2,NULL);
-
-            if ((res1==S_FALSE) && (res2==S_FALSE)){
-
-                /* If the monikers are equal, the method returns MK_S_US and sets ppmkPrefix to this moniker.*/
-                *ppmkPrefix=iface;
-                IMoniker_AddRef(iface);
-                return  MK_S_US;
-            }
-            else if ((res1==S_OK) && (res2==S_OK)){
-
-                if (IMoniker_IsEqual(mostLeftMk1,mostLeftMk2)==S_OK)
-
-                    nbCommonMk++;
-
-                else
-                    break;
-
-            }
-            else if (res1==S_OK){
-
-                /* If the other moniker is a prefix of this moniker, the method returns MK_S_HIM and sets */
-                /* ppmkPrefix to the other moniker.                                                       */
-                *ppmkPrefix=pmkOther;
-                return MK_S_HIM;
-            }
-            else{
-                /* If this moniker is a prefix of the other, this method returns MK_S_ME and sets ppmkPrefix */
-                /* to this moniker.                                                                          */
-                *ppmkPrefix=iface;
-                return MK_S_ME;
-            }
+        if (FAILED(hr = composite_get_components_alloc(iface, &count, &components))) return hr;
+        if (FAILED(hr = composite_get_components_alloc(other, &count, &other_components)))
+        {
+            heap_free(components);
+            return hr;
         }
 
-        IEnumMoniker_Release(enumMoniker1);
-        IEnumMoniker_Release(enumMoniker2);
-
-        /* If there is no common prefix, this method returns MK_E_NOPREFIX and sets ppmkPrefix to NULL. */
-        if (nbCommonMk==0)
-            return MK_E_NOPREFIX;
-
-        IEnumMoniker_Reset(enumMoniker1);
-
-        IEnumMoniker_Next(enumMoniker1,1,&tempMk1,NULL);
-
-        /* if we have more than one common moniker the result will be a composite moniker */
-        if (nbCommonMk>1){
-
-            /* initialize the common prefix moniker with the composite of two first moniker (from the left)*/
-            IEnumMoniker_Next(enumMoniker1,1,&tempMk2,NULL);
-            CreateGenericComposite(tempMk1,tempMk2,ppmkPrefix);
-            IMoniker_Release(tempMk1);
-            IMoniker_Release(tempMk2);
-
-            /* compose all common monikers in a composite moniker */
-            for(i=0;i<nbCommonMk;i++){
-
-                IEnumMoniker_Next(enumMoniker1,1,&tempMk1,NULL);
-
-                CreateGenericComposite(*ppmkPrefix,tempMk1,&tempMk2);
-
-                IMoniker_Release(*ppmkPrefix);
-
-                IMoniker_Release(tempMk1);
-
-                *ppmkPrefix=tempMk2;
-            }
-            return S_OK;
+        count = min(moniker->comp_count, other_moniker->comp_count);
+        if (!(prefix_components = heap_calloc(count, sizeof(*prefix_components))))
+        {
+            heap_free(components);
+            heap_free(other_components);
+            return E_OUTOFMEMORY;
         }
-        else{
-            /* if we have only one common moniker the result will be a simple moniker which is the most-left one*/
-            *ppmkPrefix=tempMk1;
 
-            return S_OK;
-        }
-    }
-    else{
-        /* If the other moniker is not a composite, the method simply compares it to the leftmost component
-         of this moniker.*/
+        /* Collect prefix components */
+        for (i = 0; i < count; ++i)
+        {
+            IMoniker *p;
 
-        IMoniker_Enum(iface,TRUE,&enumMoniker1);
-
-        IEnumMoniker_Next(enumMoniker1,1,&mostLeftMk1,NULL);
-
-        if (IMoniker_IsEqual(pmkOther,mostLeftMk1)==S_OK){
-
-            *ppmkPrefix=pmkOther;
-
-            return MK_S_HIM;
-        }
-        else
-            return MK_E_NOPREFIX;
-    }
-}
-
-/***************************************************************************************************
- *        GetAfterCommonPrefix (local function)
- *  This function returns a moniker that consist of the remainder when the common prefix is removed
- ***************************************************************************************************/
-static VOID GetAfterCommonPrefix(IMoniker* pGenMk,IMoniker* commonMk,IMoniker** restMk)
-{
-    IMoniker *tempMk,*tempMk1,*tempMk2;
-    IEnumMoniker *enumMoniker1,*enumMoniker2,*enumMoniker3;
-    ULONG nbRestMk=0;
-    DWORD mkSys;
-    HRESULT res1,res2;
-
-    *restMk=0;
-
-    /* to create an enumerator for pGenMk with current position pointed on the first element after common  */
-    /* prefix: enum the two monikers (left-right) then compare these enumerations (left-right) and stop  */
-    /* on the first difference. */
-    IMoniker_Enum(pGenMk,TRUE,&enumMoniker1);
-
-    IMoniker_IsSystemMoniker(commonMk,&mkSys);
-
-    if (mkSys==MKSYS_GENERICCOMPOSITE){
-
-        IMoniker_Enum(commonMk,TRUE,&enumMoniker2);
-        while(1){
-
-            res1=IEnumMoniker_Next(enumMoniker1,1,&tempMk1,NULL);
-            res2=IEnumMoniker_Next(enumMoniker2,1,&tempMk2,NULL);
-
-            if ((res1==S_FALSE)||(res2==S_FALSE)){
-
-                if (res1==S_OK)
-
-                    nbRestMk++;
-
-                IMoniker_Release(tempMk1);
-                IMoniker_Release(tempMk2);
-
+            if (FAILED(hr = IMoniker_CommonPrefixWith(components[i], other_components[i], &p)))
                 break;
-            }
-            IMoniker_Release(tempMk1);
-            IMoniker_Release(tempMk2);
+            prefix_components[prefix_len++] = p;
+            /* S_OK means that prefix was found and is neither of tested monikers */
+            if (hr == S_OK) break;
         }
-    }
-    else{
-        IEnumMoniker_Next(enumMoniker1,1,&tempMk1,NULL);
-        IMoniker_Release(tempMk1);
-    }
 
-    /* count the number of elements in the enumerator after the common prefix */
-    IEnumMoniker_Clone(enumMoniker1,&enumMoniker3);
+        heap_free(components);
+        heap_free(other_components);
 
-    for(;IEnumMoniker_Next(enumMoniker3,1,&tempMk,NULL)==S_OK;nbRestMk++)
+        if (!prefix_len) return MK_E_NOPREFIX;
 
-        IMoniker_Release(tempMk);
-
-    if (nbRestMk==0)
-        return;
-
-    /* create a generic composite moniker with monikers located after the common prefix */
-    IEnumMoniker_Next(enumMoniker1,1,&tempMk1,NULL);
-
-    if (nbRestMk==1){
-
-        *restMk= tempMk1;
-        return;
-    }
-    else {
-
-        IEnumMoniker_Next(enumMoniker1,1,&tempMk2,NULL);
-
-        CreateGenericComposite(tempMk1,tempMk2,restMk);
-
-        IMoniker_Release(tempMk1);
-
-        IMoniker_Release(tempMk2);
-
-        while(IEnumMoniker_Next(enumMoniker1,1,&tempMk1,NULL)==S_OK){
-
-            CreateGenericComposite(*restMk,tempMk1,&tempMk2);
-
-            IMoniker_Release(tempMk1);
-
-            IMoniker_Release(*restMk);
-
-            *restMk=tempMk2;
+        last = prefix_components[0];
+        for (i = 1; i < prefix_len; ++i)
+        {
+            hr = CreateGenericComposite(last, prefix_components[i], &c);
+            IMoniker_Release(last);
+            IMoniker_Release(prefix_components[i]);
+            if (FAILED(hr)) break;
+            last = c;
         }
+        heap_free(prefix_components);
+
+        if (SUCCEEDED(hr))
+        {
+            *prefix = last;
+            if (IMoniker_IsEqual(iface, *prefix) == S_OK)
+                hr = MK_S_US;
+            else if (prefix_len < count)
+                hr = S_OK;
+            else
+                hr = prefix_len == moniker->comp_count ? MK_S_ME : MK_S_HIM;
+        }
+
+        return hr;
     }
+
+    /* For non-composite, compare to leftmost component */
+    if (SUCCEEDED(hr = composite_get_leftmost(moniker, &leftmost)))
+    {
+        if ((hr = IMoniker_IsEqual(leftmost, other)) == S_OK)
+        {
+            *prefix = leftmost;
+            IMoniker_AddRef(*prefix);
+        }
+
+        hr = hr == S_OK ? MK_S_HIM : MK_E_NOPREFIX;
+        IMoniker_Release(leftmost);
+    }
+
+    return hr;
 }
 
-/******************************************************************************
- *        CompositeMoniker_RelativePathTo
- ******************************************************************************/
-static HRESULT WINAPI
-CompositeMonikerImpl_RelativePathTo(IMoniker* iface,IMoniker* pmkOther,
-               IMoniker** ppmkRelPath)
+static HRESULT composite_compose_components(IMoniker **comp, unsigned int count, IMoniker **ret)
 {
-    HRESULT res;
-    IMoniker *restOtherMk=0,*restThisMk=0,*invRestThisMk=0,*commonMk=0;
+    IMoniker *last, *c;
+    HRESULT hr = S_OK;
+    unsigned int i;
 
-    TRACE("(%p,%p,%p)\n",iface,pmkOther,ppmkRelPath);
+    last = comp[0];
+    IMoniker_AddRef(last);
 
-    if (ppmkRelPath==NULL)
-        return E_POINTER;
-
-    *ppmkRelPath=0;
-
-    /* This method finds the common prefix of the two monikers and creates two monikers that consist     */
-    /* of the remainder when the common prefix is removed. Then it creates the inverse for the remainder */
-    /* of this moniker and composes the remainder of the other moniker on the right of it.               */
-
-    /* finds the common prefix of the two monikers */
-    res=IMoniker_CommonPrefixWith(iface,pmkOther,&commonMk);
-
-    /* if there's no common prefix or the two moniker are equal the relative is the other moniker */
-    if ((res== MK_E_NOPREFIX)||(res==MK_S_US)){
-
-        *ppmkRelPath=pmkOther;
-        IMoniker_AddRef(pmkOther);
-        return MK_S_HIM;
+    for (i = 1; i < count; ++i)
+    {
+        hr = CreateGenericComposite(last, comp[i], &c);
+        IMoniker_Release(last);
+        if (FAILED(hr)) break;
+        last = c;
     }
 
-    GetAfterCommonPrefix(iface,commonMk,&restThisMk);
-    GetAfterCommonPrefix(pmkOther,commonMk,&restOtherMk);
+    *ret = SUCCEEDED(hr) ? last : NULL;
 
-    /* if other is a prefix of this moniker the relative path is the inverse of the remainder path of this */
-    /* moniker when the common prefix is removed                                                           */
-    if (res==MK_S_HIM){
+    return hr;
+}
 
-        IMoniker_Inverse(restThisMk,ppmkRelPath);
-        IMoniker_Release(restThisMk);
+static HRESULT WINAPI CompositeMonikerImpl_RelativePathTo(IMoniker *iface, IMoniker *other,
+        IMoniker **relpath)
+{
+    unsigned int count, this_count, other_count, prefix_len = 0;
+    IMoniker *inv, *tail = NULL, *other_tail = NULL, *rel = NULL;
+    IMoniker **components, **other_components;
+    unsigned int start = 0, other_start = 0;
+    HRESULT hr;
+
+    TRACE("%p, %p, %p.\n", iface, other, relpath);
+
+    if (!relpath)
+        return E_INVALIDARG;
+
+    *relpath = NULL;
+
+    if (FAILED(hr = composite_get_components_alloc(iface, &this_count, &components))) return hr;
+    if (FAILED(hr = composite_get_components_alloc(other, &other_count, &other_components)))
+    {
+        heap_free(components);
+        return hr;
     }
-    /* if this moniker is a prefix of other moniker the relative path is the remainder path of other moniker */
-    /* when the common prefix is removed                                                                     */
-    else if (res==MK_S_ME){
 
-        *ppmkRelPath=restOtherMk;
-        IMoniker_AddRef(restOtherMk);
+    /* Skip common prefix of equal components */
+    count = min(other_count, this_count);
+    while (IMoniker_IsEqual(components[prefix_len], other_components[prefix_len]) == S_OK)
+    {
+        if (++prefix_len == count) break;
     }
-    /* the relative path is the inverse for the remainder of this moniker and the remainder of the other  */
-    /* moniker on the right of it.                                                                        */
-    else if (res==S_OK){
 
-        IMoniker_Inverse(restThisMk,&invRestThisMk);
-        IMoniker_Release(restThisMk);
-        CreateGenericComposite(invRestThisMk,restOtherMk,ppmkRelPath);
-        IMoniker_Release(invRestThisMk);
-        IMoniker_Release(restOtherMk);
+    if (prefix_len)
+    {
+        this_count -= prefix_len;
+        other_count -= prefix_len;
+        other_start += prefix_len;
+        start += prefix_len;
     }
-    return S_OK;
+    else
+    {
+        /* Replace first component of the other tail with relative path */
+        if (SUCCEEDED(hr = IMoniker_RelativePathTo(*components, *other_components, &rel)))
+            *other_components = rel;
+
+        this_count--;
+        start++;
+    }
+
+    /* Invert left side tail */
+    if (this_count && SUCCEEDED(hr))
+    {
+        if (SUCCEEDED(hr = composite_compose_components(&components[start], this_count, &tail)))
+        {
+            hr = IMoniker_Inverse(tail, &inv);
+            IMoniker_Release(tail);
+            tail = inv;
+        }
+    }
+
+    if (other_count && SUCCEEDED(hr))
+        hr = composite_compose_components(&other_components[other_start], other_count, &other_tail);
+
+    if (tail || other_tail)
+        hr = CreateGenericComposite(tail, other_tail, relpath);
+    else if (SUCCEEDED(hr))
+    {
+        *relpath = other;
+        IMoniker_AddRef(*relpath);
+        hr = MK_S_HIM;
+    }
+
+    if (rel)
+        IMoniker_Release(rel);
+    if (tail)
+        IMoniker_Release(tail);
+    if (other_tail)
+        IMoniker_Release(other_tail);
+
+    heap_free(other_components);
+    heap_free(components);
+
+    return hr;
 }
 
 static HRESULT WINAPI CompositeMonikerImpl_GetDisplayName(IMoniker *iface, IBindCtx *pbc,
@@ -1099,17 +904,19 @@ static HRESULT WINAPI CompositeMonikerImpl_GetDisplayName(IMoniker *iface, IBind
 {
     CompositeMonikerImpl *moniker = impl_from_IMoniker(iface);
     WCHAR *left_name = NULL, *right_name = NULL;
+    HRESULT hr;
 
     TRACE("%p, %p, %p, %p\n", iface, pbc, pmkToLeft, displayname);
 
-    if (!displayname)
-        return E_POINTER;
-
-    if (!moniker->comp_count)
+    if (!pbc || !displayname || !moniker->comp_count)
         return E_INVALIDARG;
 
-    IMoniker_GetDisplayName(moniker->left, pbc, NULL, &left_name);
-    IMoniker_GetDisplayName(moniker->right, pbc, NULL, &right_name);
+    if (FAILED(hr = IMoniker_GetDisplayName(moniker->left, pbc, NULL, &left_name))) return hr;
+    if (FAILED(hr = IMoniker_GetDisplayName(moniker->right, pbc, NULL, &right_name)))
+    {
+        CoTaskMemFree(left_name);
+        return hr;
+    }
 
     if (!(*displayname = CoTaskMemAlloc((lstrlenW(left_name) + lstrlenW(right_name) + 1) * sizeof(WCHAR))))
     {
@@ -1473,95 +1280,89 @@ EnumMonikerImpl_AddRef(IEnumMoniker* iface)
 
 }
 
-/******************************************************************************
- *        EnumMonikerImpl_Release
- ******************************************************************************/
-static ULONG WINAPI
-EnumMonikerImpl_Release(IEnumMoniker* iface)
+static ULONG WINAPI EnumMonikerImpl_Release(IEnumMoniker *iface)
 {
-    EnumMonikerImpl *This = impl_from_IEnumMoniker(iface);
-    ULONG i;
-    ULONG ref;
-    TRACE("(%p)\n",This);
+    EnumMonikerImpl *e = impl_from_IEnumMoniker(iface);
+    ULONG refcount = InterlockedDecrement(&e->ref);
+    unsigned int i;
 
-    ref = InterlockedDecrement(&This->ref);
+    TRACE("%p, refcount %d.\n", iface, refcount);
 
-    /* destroy the object if there are no more references to it */
-    if (ref == 0) {
-
-        for(i=0;i<This->tabSize;i++)
-            IMoniker_Release(This->tabMoniker[i]);
-
-        HeapFree(GetProcessHeap(),0,This->tabMoniker);
-        HeapFree(GetProcessHeap(),0,This);
+    if (!refcount)
+    {
+        for (i = 0; i < e->count; ++i)
+            IMoniker_Release(e->monikers[i]);
+        heap_free(e->monikers);
+        heap_free(e);
     }
-    return ref;
+
+    return refcount;
 }
 
-/******************************************************************************
- *        EnumMonikerImpl_Next
- ******************************************************************************/
-static HRESULT WINAPI
-EnumMonikerImpl_Next(IEnumMoniker* iface,ULONG celt, IMoniker** rgelt,
-               ULONG* pceltFethed)
+static HRESULT WINAPI EnumMonikerImpl_Next(IEnumMoniker *iface, ULONG count,
+        IMoniker **m, ULONG *fetched)
 {
-    EnumMonikerImpl *This = impl_from_IEnumMoniker(iface);
-    ULONG i;
+    EnumMonikerImpl *e = impl_from_IEnumMoniker(iface);
+    unsigned int i;
+
+    TRACE("%p, %u, %p, %p.\n", iface, count, m, fetched);
+
+    if (!m)
+        return E_INVALIDARG;
+
+    *m = NULL;
 
     /* retrieve the requested number of moniker from the current position */
-    for(i=0;((This->currentPos < This->tabSize) && (i < celt));i++)
+    for (i = 0; (e->pos < e->count) && (i < count); ++i)
     {
-        rgelt[i]=This->tabMoniker[This->currentPos++];
-        IMoniker_AddRef(rgelt[i]);
+        m[i] = e->monikers[e->pos++];
+        IMoniker_AddRef(m[i]);
     }
 
-    if (pceltFethed!=NULL)
-        *pceltFethed= i;
+    if (fetched)
+        *fetched = i;
 
-    if (i==celt)
+    return i == count ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI EnumMonikerImpl_Skip(IEnumMoniker *iface, ULONG count)
+{
+    EnumMonikerImpl *e = impl_from_IEnumMoniker(iface);
+
+    TRACE("%p, %u.\n", iface, count);
+
+    if (!count)
         return S_OK;
-    else
-        return S_FALSE;
-}
 
-/******************************************************************************
- *        EnumMonikerImpl_Skip
- ******************************************************************************/
-static HRESULT WINAPI
-EnumMonikerImpl_Skip(IEnumMoniker* iface,ULONG celt)
-{
-    EnumMonikerImpl *This = impl_from_IEnumMoniker(iface);
-
-    if ((This->currentPos+celt) >= This->tabSize)
+    if ((e->pos + count) >= e->count)
         return S_FALSE;
 
-    This->currentPos+=celt;
+    e->pos += count;
 
     return S_OK;
 }
 
-/******************************************************************************
- *        EnumMonikerImpl_Reset
- ******************************************************************************/
-static HRESULT WINAPI
-EnumMonikerImpl_Reset(IEnumMoniker* iface)
+static HRESULT WINAPI EnumMonikerImpl_Reset(IEnumMoniker* iface)
 {
-    EnumMonikerImpl *This = impl_from_IEnumMoniker(iface);
+    EnumMonikerImpl *e = impl_from_IEnumMoniker(iface);
 
-    This->currentPos=0;
+    TRACE("%p.\n", iface);
+
+    e->pos = 0;
 
     return S_OK;
 }
 
-/******************************************************************************
- *        EnumMonikerImpl_Clone
- ******************************************************************************/
-static HRESULT WINAPI
-EnumMonikerImpl_Clone(IEnumMoniker* iface,IEnumMoniker** ppenum)
+static HRESULT WINAPI EnumMonikerImpl_Clone(IEnumMoniker *iface, IEnumMoniker **ret)
 {
-    EnumMonikerImpl *This = impl_from_IEnumMoniker(iface);
+    TRACE("%p, %p.\n", iface, ret);
 
-    return EnumMonikerImpl_CreateEnumMoniker(This->tabMoniker,This->tabSize,This->currentPos,TRUE,ppenum);
+    if (!ret)
+        return E_INVALIDARG;
+
+    *ret = NULL;
+
+    return E_NOTIMPL;
 }
 
 static const IEnumMonikerVtbl VT_EnumMonikerImpl =
@@ -1575,59 +1376,34 @@ static const IEnumMonikerVtbl VT_EnumMonikerImpl =
     EnumMonikerImpl_Clone
 };
 
-/******************************************************************************
- *        EnumMonikerImpl_CreateEnumMoniker
- ******************************************************************************/
-static HRESULT
-EnumMonikerImpl_CreateEnumMoniker(IMoniker** tabMoniker, ULONG tabSize,
-               ULONG currentPos, BOOL leftToRight, IEnumMoniker ** ppmk)
+static HRESULT create_enumerator(IMoniker **components, unsigned int count, BOOL forward, IEnumMoniker **ret)
 {
-    EnumMonikerImpl* newEnumMoniker;
-    ULONG i;
+    EnumMonikerImpl *object;
+    unsigned int i;
 
-    if (currentPos > tabSize)
-        return E_INVALIDARG;
+    if (!(object = heap_alloc_zero(sizeof(*object))))
+        return E_OUTOFMEMORY;
 
-    newEnumMoniker = HeapAlloc(GetProcessHeap(), 0, sizeof(EnumMonikerImpl));
+    object->IEnumMoniker_iface.lpVtbl = &VT_EnumMonikerImpl;
+    object->ref = 1;
+    object->count = count;
 
-    if (newEnumMoniker == 0)
-        return STG_E_INSUFFICIENTMEMORY;
-
-    /* Initialize the virtual function table. */
-    newEnumMoniker->IEnumMoniker_iface.lpVtbl = &VT_EnumMonikerImpl;
-    newEnumMoniker->ref          = 1;
-
-    newEnumMoniker->tabSize=tabSize;
-    newEnumMoniker->currentPos=currentPos;
-
-    newEnumMoniker->tabMoniker=HeapAlloc(GetProcessHeap(),0,tabSize*sizeof(newEnumMoniker->tabMoniker[0]));
-
-    if (newEnumMoniker->tabMoniker==NULL) {
-        HeapFree(GetProcessHeap(), 0, newEnumMoniker);
+    if (!(object->monikers = heap_calloc(count, sizeof(*object->monikers))))
+    {
+        heap_free(object);
         return E_OUTOFMEMORY;
     }
 
-    if (leftToRight)
-        for (i=0;i<tabSize;i++){
+    for (i = 0; i < count; ++i)
+    {
+        object->monikers[i] = forward ? components[i] : components[count - i - 1];
+        IMoniker_AddRef(object->monikers[i]);
+    }
 
-            newEnumMoniker->tabMoniker[i]=tabMoniker[i];
-            IMoniker_AddRef(tabMoniker[i]);
-        }
-    else
-        for (i = tabSize; i > 0; i--){
-
-            newEnumMoniker->tabMoniker[tabSize-i]=tabMoniker[i - 1];
-            IMoniker_AddRef(tabMoniker[i - 1]);
-        }
-
-    *ppmk=&newEnumMoniker->IEnumMoniker_iface;
+    *ret = &object->IEnumMoniker_iface;
 
     return S_OK;
 }
-
-/********************************************************************************/
-/* Virtual function table for the CompositeMonikerImpl class which includes     */
-/* IPersist, IPersistStream and IMoniker functions.                             */
 
 static const IMonikerVtbl VT_CompositeMonikerImpl =
 {
@@ -1863,6 +1639,35 @@ static HRESULT composite_get_rightmost(CompositeMonikerImpl *composite, IMoniker
     }
 
     return hr;
+}
+
+static HRESULT composite_get_leftmost(CompositeMonikerImpl *composite, IMoniker **leftmost)
+{
+    struct comp_node *root, *node;
+    HRESULT hr;
+
+    if (!unsafe_impl_from_IMoniker(composite->left))
+    {
+        *leftmost = composite->left;
+        IMoniker_AddRef(*leftmost);
+        return S_OK;
+    }
+
+    if (FAILED(hr = moniker_get_tree_representation(&composite->IMoniker_iface, NULL, &root)))
+        return hr;
+
+    if (!(node = moniker_tree_get_leftmost(root)))
+    {
+        WARN("Couldn't get right most component.\n");
+        return E_FAIL;
+    }
+
+    *leftmost = node->moniker;
+    IMoniker_AddRef(*leftmost);
+
+    moniker_tree_release(root);
+
+    return S_OK;
 }
 
 static HRESULT moniker_simplify_composition(IMoniker *left, IMoniker *right,

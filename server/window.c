@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <stdarg.h>
@@ -1979,6 +1978,8 @@ DECL_HANDLER(create_window)
         win->dpi_awareness = req->awareness;
         win->dpi = req->dpi;
     }
+    win->style = req->style;
+    win->ex_style = req->ex_style;
 
     reply->handle    = win->handle;
     reply->parent    = win->parent ? win->parent->handle : 0;

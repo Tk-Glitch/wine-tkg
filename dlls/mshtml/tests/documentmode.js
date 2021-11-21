@@ -19,6 +19,243 @@
 var compat_version;
 var tests = [];
 
+sync_test("builtin_toString", function() {
+    var tags = [
+        [ "abbr",            "Phrase" ],
+        [ "acronym",         "Phrase" ],
+        [ "address",         "Block" ],
+     // [ "applet",          "Applet" ],  // makes Windows pop up a dialog box
+        [ "article",         "" ],
+        [ "aside",           "" ],
+        [ "audio",           "Audio" ],
+        [ "b",               "Phrase" ],
+        [ "base",            "Base" ],
+        [ "basefont",        "BaseFont" ],
+        [ "bdi",             "Unknown" ],
+        [ "bdo",             "Phrase" ],
+        [ "big",             "Phrase" ],
+        [ "blockquote",      "Block" ],
+        [ "body",            "Body" ],
+        [ "br",              "BR" ],
+        [ "button",          "Button" ],
+        [ "canvas",          "Canvas" ],
+        [ "caption",         "TableCaption" ],
+        [ "center",          "Block" ],
+        [ "cite",            "Phrase" ],
+        [ "code",            "Phrase" ],
+        [ "col",             "TableCol" ],
+        [ "colgroup",        "TableCol" ],
+        [ "data",            "Unknown" ],
+        [ "datalist",        "DataList", 10 ],
+        [ "dd",              "DD" ],
+        [ "del",             "Mod" ],
+        [ "details",         "Unknown" ],
+        [ "dfn",             "Phrase" ],
+        [ "dialog",          "Unknown" ],
+        [ "dir",             "Directory" ],
+        [ "div",             "Div" ],
+        [ "dl",              "DList" ],
+        [ "dt",              "DT" ],
+        [ "em",              "Phrase" ],
+        [ "embed",           "Embed" ],
+        [ "fieldset",        "FieldSet" ],
+        [ "figcaption",      "" ],
+        [ "figure",          "" ],
+        [ "font",            "Font" ],
+        [ "footer",          "" ],
+        [ "form",            "Form" ],
+        [ "frame",           "Frame" ],
+        [ "frameset",        "FrameSet" ],
+        [ "h1",              "Heading" ],
+        [ "h2",              "Heading" ],
+        [ "h3",              "Heading" ],
+        [ "h4",              "Heading" ],
+        [ "h5",              "Heading" ],
+        [ "h6",              "Heading" ],
+        [ "h7",              "Unknown" ],
+        [ "head",            "Head" ],
+        [ "header",          "" ],
+        [ "hr",              "HR" ],
+        [ "html",            "Html" ],
+        [ "i",               "Phrase" ],
+        [ "iframe",          "IFrame" ],
+        [ "img",             "Image" ],
+        [ "input",           "Input" ],
+        [ "ins",             "Mod" ],
+        [ "kbd",             "Phrase" ],
+        [ "label",           "Label" ],
+        [ "legend",          "Legend" ],
+        [ "li",              "LI" ],
+        [ "link",            "Link" ],
+        [ "main",            "Unknown" ],
+        [ "map",             "Map" ],
+        [ "mark",            "" ],
+        [ "meta",            "Meta" ],
+        [ "meter",           "Unknown" ],
+        [ "nav",             "" ],
+        [ "noframes",        "" ],
+        [ "noscript",        "" ],
+        [ "object",          "Object" ],
+        [ "ol",              "OList" ],
+        [ "optgroup",        "OptGroup" ],
+        [ "option",          "Option" ],
+        [ "output",          "Unknown" ],
+        [ "p",               "Paragraph" ],
+        [ "param",           "Param" ],
+        [ "picture",         "Unknown" ],
+        [ "pre",             "Pre" ],
+        [ "progress",        "Progress", 10 ],
+        [ "q",               "Quote" ],
+        [ "rp",              "Phrase" ],
+        [ "rt",              "Phrase" ],
+        [ "ruby",            "Phrase" ],
+        [ "s",               "Phrase" ],
+        [ "samp",            "Phrase" ],
+        [ "script",          "Script" ],
+        [ "section",         "" ],
+        [ "select",          "Select" ],
+        [ "small",           "Phrase" ],
+        [ "source",          "Source" ],
+        [ "span",            "Span" ],
+        [ "strike",          "Phrase" ],
+        [ "strong",          "Phrase" ],
+        [ "style",           "Style" ],
+        [ "sub",             "Phrase" ],
+        [ "summary",         "Unknown" ],
+        [ "sup",             "Phrase" ],
+        [ "svg",             "Unknown" ],
+        [ "table",           "Table" ],
+        [ "tbody",           "TableSection" ],
+        [ "td",              "TableDataCell" ],
+        [ "template",        "Unknown" ],
+        [ "textarea",        "TextArea" ],
+        [ "tfoot",           "TableSection" ],
+        [ "th",              "TableHeaderCell" ],
+        [ "thead",           "TableSection" ],
+        [ "time",            "Unknown" ],
+        [ "title",           "Title" ],
+        [ "tr",              "TableRow" ],
+        [ "track",           "Track", 10 ],
+        [ "tt",              "Phrase" ],
+        [ "u",               "Phrase" ],
+        [ "ul",              "UList" ],
+        [ "var",             "Phrase" ],
+        [ "video",           "Video" ],
+        [ "wbr",             "" ],
+        [ "winetest",        "Unknown" ]
+    ];
+    var v = document.documentMode, e;
+
+    function test(msg, obj, name, tostr) {
+        var s;
+        if(obj.toString) {
+            s = obj.toString();
+            todo_wine_if(name !== "HTMLElement" && s === "[object HTMLElement]").
+            ok(s === (tostr ? tostr : (v < 9 ? "[object]" : "[object " + name + "]")), msg + " toString returned " + s);
+        }
+        s = Object.prototype.toString.call(obj);
+        todo_wine_if(v >= 9 && name != "Object").
+        ok(s === (v < 9 ? "[object Object]" : "[object " + name + "]"), msg + " Object.toString returned " + s);
+    }
+
+    for(var i = 0; i < tags.length; i++)
+        if(tags[i].length < 3 || v >= tags[i][2])
+            test("tag '" + tags[i][0] + "'", document.createElement(tags[i][0]), "HTML" + tags[i][1] + "Element");
+
+    e = document.createElement("a");
+    ok(e.toString() === "", "tag 'a' (without href) toString returned " + e.toString());
+    e.href = "https://www.winehq.org/";
+    test("tag 'a'", e, "HTMLAnchorElement", "https://www.winehq.org/");
+
+    e = document.createElement("area");
+    ok(e.toString() === "", "tag 'area' (without href) toString returned " + e.toString());
+    e.href = "https://www.winehq.org/";
+    test("tag 'area'", e, "HTMLAreaElement", "https://www.winehq.org/");
+
+    e = document.createElement("style");
+    document.body.appendChild(e);
+    var sheet = v >= 9 ? e.sheet : e.styleSheet;
+    if(v >= 9)
+        sheet.insertRule("div { border: none }", 0);
+    else
+        sheet.addRule("div", "border: none", 0);
+
+    e = document.createElement("p");
+    e.className = "testclass    another ";
+    e.textContent = "Test content";
+    e.style.border = "1px solid black";
+    document.body.appendChild(e);
+
+    var txtRange = document.body.createTextRange();
+    txtRange.moveToElementText(e);
+
+    var clientRects = e.getClientRects();
+    if(!clientRects) win_skip("getClientRects() is buggy and not available, skipping");
+
+    var currentStyle = e.currentStyle;
+    if(!currentStyle) win_skip("currentStyle is buggy and not available, skipping");
+
+    // w10pro64 testbot VM throws WININET_E_INTERNAL_ERROR for some reason
+    var localStorage;
+    try {
+        localStorage = window.localStorage;
+    }catch(e) {
+        ok(e.number === 0x72ee4 - 0x80000000, "localStorage threw " + e.number + ": " + e);
+    }
+    if(!localStorage) win_skip("localStorage is buggy and not available, skipping");
+
+    test("attribute", document.createAttribute("class"), "Attr");
+    if(false /* todo_wine */) test("attributes", e.attributes, "NamedNodeMap");
+    test("childNodes", document.body.childNodes, "NodeList");
+    if(clientRects) test("clientRect", clientRects[0], "ClientRect");
+    if(clientRects) test("clientRects", clientRects, "ClientRectList");
+    if(currentStyle) test("currentStyle", currentStyle, "MSCurrentStyleCSSProperties");
+    test("elements", document.getElementsByTagName("body"), "HTMLCollection");
+    test("history", window.history, "History");
+    test("implementation", document.implementation, "DOMImplementation");
+    if(localStorage) test("localStorage", localStorage, "Storage");
+    test("location", window.location, "Object", window.location.href);
+    test("navigator", window.navigator, "Navigator");
+    test("performance", window.performance, "Performance");
+    test("performanceNavigation", window.performance.navigation, "PerformanceNavigation");
+    test("performanceTiming", window.performance.timing, "PerformanceTiming");
+    test("screen", window.screen, "Screen");
+    test("sessionStorage", window.sessionStorage, "Storage");
+    test("style", document.body.style, "MSStyleCSSProperties");
+    test("styleSheet", sheet, "CSSStyleSheet");
+    test("styleSheetRule", sheet.rules.item(0), "CSSStyleRule");
+    test("styleSheetRules", sheet.rules, "MSCSSRuleList");
+    test("styleSheets", document.styleSheets, "StyleSheetList");
+    test("textNode", document.createTextNode("testNode"), "Text", v < 9 ? "testNode" : null);
+    test("textRange", txtRange, "TextRange");
+    test("window", window, "Window", "[object Window]");
+    test("xmlHttpRequest", new XMLHttpRequest(), "XMLHttpRequest");
+    if(v < 10) {
+        test("namespaces", document.namespaces, "MSNamespaceInfoCollection");
+    }
+    if(v < 11) {
+        test("eventObject", document.createEventObject(), "MSEventObj");
+        test("selection", document.selection, "MSSelection");
+    }
+    if(v >= 9) {
+        test("computedStyle", window.getComputedStyle(e), "CSSStyleDeclaration");
+
+        test("Event", document.createEvent("Event"), "Event");
+        test("CustomEvent", document.createEvent("CustomEvent"), "CustomEvent");
+        test("KeyboardEvent", document.createEvent("KeyboardEvent"), "KeyboardEvent");
+        test("MouseEvent", document.createEvent("MouseEvent"), "MouseEvent");
+        test("UIEvent", document.createEvent("UIEvent"), "UIEvent");
+    }
+    if(v >= 10) {
+        test("classList", e.classList, "DOMTokenList", "testclass    another ");
+        test("console", window.console, "Console");
+    }
+    if(v >= 9) {
+        document.body.innerHTML = "<!--...-->";
+        test("comment", document.body.firstChild, "Comment");
+    }
+});
+
 sync_test("elem_props", function() {
     var elem = document.documentElement;
 
@@ -120,8 +357,7 @@ sync_test("window_props", function() {
     test_exposed("requestAnimationFrame", v >= 10);
     test_exposed("Map", v >= 11);
     test_exposed("Set", v >= 11);
-    if(v >= 9) /* FIXME: native exposes it in all compat modes */
-        test_exposed("performance", true);
+    test_exposed("performance", true);
     test_exposed("console", v >= 10);
 });
 

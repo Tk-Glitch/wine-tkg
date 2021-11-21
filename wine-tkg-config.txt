@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:38:04 PM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:39:30 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.18.r0.g2660cd9fcbb
-Using wine-staging patchset (version 6.18.r0.gf8851f16)
+Wine (plain) version: 6.19.r0.g7554bd4b41a
+Using wine-staging patchset (version 6.19.r0.gd1ea5ced)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -13,15 +13,14 @@ Done applying reverting hotfixes (if any) - list available in prepare.log
 Applied reverting hotfix staging-pulseaudio-reverts.mystagingrevert
 Applied hotfix staging-reenable-pulse.mystagingpatch
 Applied hotfix protonify_stg_syscall_emu-006.mystagingpatch
-Applied hotfix pulse_reverts-5.myearlypatch
+Applied hotfix pulse_reverts-6.myearlypatch
 plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W ntdll-NtAlertThreadByThreadId -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W imm32-com-initialization -W bcrypt-ECDHSecretAgreement
+Staging overrides, if any: -W ntdll-NtAlertThreadByThreadId -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W imm32-com-initialization
 
 use_clock_monotonic-staging.patch -- ( Applied clock_monotonic patch )
-leagueoflolfix.patch -- ( Applied LoL 9.20+ fix - Requires vdso32 disabled (echo 0 > /proc/sys/abi/vsyscall32) )
 fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
 fsync_futex2.patch -- ( Add futex2 support to fsync )
@@ -29,17 +28,17 @@ fsync_futex2.patch -- ( Add futex2 support to fsync )
 valve_proton_fullscreen_hack-staging-c9c7130.patch -- ( Applied Proton fullscreen hack patch (c9c7130) )
 LAA-unix-staging.patch -- ( Applied large address aware override support )
 
-proton-tkg-staging-72449b7.patch -- ( Using Steam-specific Proton-tkg patches (staging-72449b7) 2/2 )
+proton-tkg-staging-d8be858.patch -- ( Using Steam-specific Proton-tkg patches (staging-d8be858) 2/2 )
 rdr2.patch -- ( Enable Proton's RDR2 fixes from Paul Gofman )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
-proton-bcrypt-staging-b3cd21c.patch -- ( Using Proton Bcrypt patches )
 josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
 
 Applied hotfix Return_nt_filename_and_resolve_DOS_drive_path.mypatch
 Applied hotfix memset.mypatch
-Applied hotfix 215195.mypatch
-Applied hotfix 215197.mypatch
+Applied hotfix 0001-proton-bcrypt_rdr2_fixes.mypatch
+Applied hotfix 0002-bcrypt-Add-support-for-calculating-secret-ecc-keys.mypatch
+Applied hotfix 0003-bcrypt-Add-support-for-OAEP-padded-asymmetric-key-de.mypatch
 Applied hotfix imm32-com-initialization_no_net_active_window.mypatch
 Applied hotfix virtual_alloc_remi2.mypatch
 Applied hotfix a608ef1.mypatch

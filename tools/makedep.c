@@ -31,22 +31,9 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-#if defined(_WIN32) && !defined(__CYGWIN__)
-#include <direct.h>
-#include <io.h>
-#define mkdir(path,mode) mkdir(path)
-#endif
-#include "wine/list.h"
 
-struct strarray
-{
-    unsigned int count;  /* strings in use */
-    unsigned int size;   /* total allocated size */
-    const char **str;
-};
+#include "tools.h"
+#include "wine/list.h"
 
 enum incl_type
 {
@@ -129,8 +116,6 @@ static const struct
 #define HASH_SIZE 997
 
 static struct list files[HASH_SIZE];
-
-static const struct strarray empty_strarray;
 
 enum install_rules { INSTALL_LIB, INSTALL_DEV, NB_INSTALL_RULES };
 
@@ -256,10 +241,6 @@ static const char Usage[] =
     "   -fxxx       Store output in file 'xxx' (default: Makefile)\n";
 
 
-#ifndef __GNUC__
-#define __attribute__(x)
-#endif
-
 static void fatal_error( const char *msg, ... ) __attribute__ ((__format__ (__printf__, 1, 2)));
 static void fatal_perror( const char *msg, ... ) __attribute__ ((__format__ (__printf__, 1, 2)));
 static void output( const char *format, ... ) __attribute__ ((__format__ (__printf__, 1, 2)));
@@ -326,76 +307,6 @@ static void exit_on_signal( int sig )
 
 
 /*******************************************************************
- *         xmalloc
- */
-static void *xmalloc( size_t size )
-{
-    void *res;
-    if (!(res = malloc (size ? size : 1)))
-        fatal_error( "Virtual memory exhausted.\n" );
-    return res;
-}
-
-
-/*******************************************************************
- *         xrealloc
- */
-static void *xrealloc (void *ptr, size_t size)
-{
-    void *res;
-    assert( size );
-    if (!(res = realloc( ptr, size )))
-        fatal_error( "Virtual memory exhausted.\n" );
-    return res;
-}
-
-/*******************************************************************
- *         xstrdup
- */
-static char *xstrdup( const char *str )
-{
-    char *res = strdup( str );
-    if (!res) fatal_error( "Virtual memory exhausted.\n" );
-    return res;
-}
-
-
-/*******************************************************************
- *         strmake
- */
-static char *strmake( const char* fmt, ... )
-{
-    int n;
-    size_t size = 100;
-    va_list ap;
-
-    for (;;)
-    {
-        char *p = xmalloc (size);
-        va_start(ap, fmt);
-        n = vsnprintf (p, size, fmt, ap);
-        va_end(ap);
-        if (n == -1) size *= 2;
-        else if ((size_t)n >= size) size = n + 1;
-        else return xrealloc( p, n + 1 );
-        free(p);
-    }
-}
-
-
-/*******************************************************************
- *         strendswith
- */
-static int strendswith( const char* str, const char* end )
-{
-    size_t l = strlen( str );
-    size_t m = strlen( end );
-
-    return l >= m && strcmp(str + l - m, end) == 0;
-}
-
-
-/*******************************************************************
  *         output
  */
 static void output( const char *format, ... )
@@ -409,64 +320,6 @@ static void output( const char *format, ... )
     if (ret < 0) fatal_perror( "output" );
     if (format[0] && format[strlen(format) - 1] == '\n') output_column = 0;
     else output_column += ret;
-}
-
-
-/*******************************************************************
- *         strarray_add
- */
-static void strarray_add( struct strarray *array, const char *str )
-{
-    if (array->count == array->size)
-    {
-	if (array->size) array->size *= 2;
-        else array->size = 16;
-	array->str = xrealloc( array->str, sizeof(array->str[0]) * array->size );
-    }
-    array->str[array->count++] = str;
-}
-
-
-/*******************************************************************
- *         strarray_addall
- */
-static void strarray_addall( struct strarray *array, struct strarray added )
-{
-    unsigned int i;
-
-    for (i = 0; i < added.count; i++) strarray_add( array, added.str[i] );
-}
-
-
-/*******************************************************************
- *         strarray_exists
- */
-static int strarray_exists( const struct strarray *array, const char *str )
-{
-    unsigned int i;
-
-    for (i = 0; i < array->count; i++) if (!strcmp( array->str[i], str )) return 1;
-    return 0;
-}
-
-
-/*******************************************************************
- *         strarray_add_uniq
- */
-static void strarray_add_uniq( struct strarray *array, const char *str )
-{
-    if (!strarray_exists( array, str )) strarray_add( array, str );
-}
-
-
-/*******************************************************************
- *         strarray_addall_uniq
- */
-static void strarray_addall_uniq( struct strarray *array, struct strarray added )
-{
-    unsigned int i;
-
-    for (i = 0; i < added.count; i++) strarray_add_uniq( array, added.str[i] );
 }
 
 
@@ -516,15 +369,6 @@ static void strarray_set_value( struct strarray *array, const char *name, const 
     for (i = array->count - 1; i > min * 2 + 1; i--) array->str[i] = array->str[i - 2];
     array->str[min * 2] = name;
     array->str[min * 2 + 1] = value;
-}
-
-
-/*******************************************************************
- *         strarray_set_qsort
- */
-static void strarray_qsort( struct strarray *array, int (*func)(const char **, const char **) )
-{
-    if (array->count) qsort( array->str, array->count, sizeof(*array->str), (void *)func );
 }
 
 
@@ -624,23 +468,6 @@ static const char *get_base_name( const char *name )
     base = xstrdup( name );
     *strrchr( base, '.' ) = 0;
     return base;
-}
-
-
-/*******************************************************************
- *         replace_extension
- */
-static char *replace_extension( const char *name, const char *old_ext, const char *new_ext )
-{
-    char *ret;
-    size_t name_len = strlen( name );
-    size_t ext_len = strlen( old_ext );
-
-    if (name_len >= ext_len && !strcmp( name + name_len - ext_len, old_ext )) name_len -= ext_len;
-    ret = xmalloc( name_len + strlen( new_ext ) + 1 );
-    memcpy( ret, name, name_len );
-    strcpy( ret + name_len, new_ext );
-    return ret;
 }
 
 
@@ -2197,7 +2024,6 @@ static struct strarray add_unix_libraries( const struct makefile *make, struct s
     struct strarray all_libs = empty_strarray;
     unsigned int i, j;
 
-    strarray_add( &all_libs, "-lwine_port" );
     if (make->native_unix_lib && strcmp( make->unixlib, "ntdll.so" )) strarray_add( &all_libs, "-lntdll" );
     strarray_addall( &all_libs, get_expanded_make_var_array( make, "EXTRALIBS" ));
     strarray_addall( &all_libs, libs );
@@ -3139,12 +2965,12 @@ static void output_source_default( struct makefile *make, struct incl_file *sour
                       find_src_file( make, replace_extension( source->name, ".c", ".spec" )));
     int need_cross = (crosstarget &&
                       !(source->file->flags & FLAG_C_UNIX) &&
-                      (make->is_cross || (make->module && make->staticlib) ||
+                      (make->is_cross || make->staticlib ||
                        (source->file->flags & FLAG_C_IMPLIB)));
     int need_obj = ((*dll_ext || !(source->file->flags & FLAG_C_UNIX)) &&
                     (!need_cross ||
                      (source->file->flags & FLAG_C_IMPLIB) ||
-                     (make->module && make->staticlib)));
+                     make->staticlib));
 
     if ((source->file->flags & FLAG_GENERATED) &&
         (!make->testdll || !strendswith( source->filename, "testlist.c" )))
@@ -3162,14 +2988,16 @@ static void output_source_default( struct makefile *make, struct incl_file *sour
         output( "%s.o: %s\n", obj_dir_path( make, obj ), source->filename );
         output( "\t%s$(CC) -c -o $@ %s", cmd_prefix( "CC" ), source->filename );
         output_filenames( defines );
-        if (make->sharedlib || (make->staticlib && !make->module) || (source->file->flags & FLAG_C_UNIX))
+        if (make->sharedlib || (source->file->flags & FLAG_C_UNIX))
         {
             output_filenames( unix_dllflags );
         }
-        else if (make->module || make->staticlib || make->testdll)
+        else if (make->module || make->testdll)
         {
             output_filenames( dll_flags );
             if (source->use_msvcrt) output_filenames( msvcrt_flags );
+            if (!*dll_ext && make->module && is_crt_module( make->module ))
+                output_filename( "-fno-builtin" );
         }
         output_filenames( extra_cflags );
         output_filenames( cpp_flags );
@@ -3186,7 +3014,7 @@ static void output_source_default( struct makefile *make, struct incl_file *sour
         output( "\t%s$(CROSSCC) -c -o $@ %s", cmd_prefix( "CC" ), source->filename );
         output_filenames( defines );
         output_filenames( extra_cross_cflags );
-        if (source->file->flags & FLAG_C_IMPLIB || (make->module && is_crt_module( make->module )))
+        if (make->module && is_crt_module( make->module ))
             output_filename( "-fno-builtin" );
         output_filenames( cpp_flags );
         output_filename( "$(CROSSCFLAGS)" );
@@ -3517,7 +3345,7 @@ static void output_module( struct makefile *make )
  */
 static void output_static_lib( struct makefile *make )
 {
-    strarray_add( &make->all_targets, make->staticlib );
+    strarray_add( &make->clean_files, make->staticlib );
     output( "%s:", obj_dir_path( make, make->staticlib ));
     output_filenames_obj_dir( make, make->object_files );
     output_filenames_obj_dir( make, make->unixobj_files );
@@ -3530,7 +3358,7 @@ static void output_static_lib( struct makefile *make )
     {
         char *name = replace_extension( make->staticlib, ".a", ".cross.a" );
 
-        strarray_add( &make->all_targets, name );
+        strarray_add( &make->clean_files, name );
         output( "%s: %s", obj_dir_path( make, name ), tools_path( make, "winebuild" ));
         output_filenames_obj_dir( make, make->crossobj_files );
         output( "\n" );
@@ -4257,7 +4085,7 @@ static void load_sources( struct makefile *make )
     make->install_dev   = get_expanded_make_var_array( make, "INSTALL_DEV" );
     make->extra_targets = get_expanded_make_var_array( make, "EXTRA_TARGETS" );
 
-    if (make->module && strendswith( make->module, ".a" )) make->staticlib = make->module;
+    if (make->staticlib) make->module = make->staticlib;
 
     make->disabled   = make->obj_dir && strarray_exists( &disabled_dirs, make->obj_dir );
     make->is_win16   = strarray_exists( &make->extradllflags, "-m16" );

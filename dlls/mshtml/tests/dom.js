@@ -405,6 +405,32 @@ sync_test("stylesheets", function() {
         stylesheet.insertRule(".input { margin-left: 1px; }", 3);
         ok(false, "expected exception");
     }catch(e) {}
+
+    id = stylesheet.addRule(".p", "margin-top: 2px");
+    ok(id === 2, "id = " + id);
+    ok(document.styleSheets.length === 1, "document.styleSheets.length = " + document.styleSheets.length);
+    ok(stylesheet.rules.length === 3, "stylesheet.rules.length = " + stylesheet.rules.length);
+
+    id = stylesheet.addRule(".pre", "border: none", -1);
+    ok(id === 3, "id = " + id);
+    ok(stylesheet.rules.length === 4, "stylesheet.rules.length = " + stylesheet.rules.length);
+
+    id = stylesheet.addRule(".h1", " ", 0);
+    ok(id === 0, "id = " + id);
+    ok(stylesheet.rules.length === 5, "stylesheet.rules.length = " + stylesheet.rules.length);
+
+    id = stylesheet.addRule(".h2", "color: black", 8);
+    ok(id === 5, "id = " + id);
+    ok(stylesheet.rules.length === 6, "stylesheet.rules.length = " + stylesheet.rules.length);
+
+    try {
+        stylesheet.addRule("", "border: none", 0);
+        ok(false, "expected exception");
+    }catch(e) {}
+    try {
+        stylesheet.addRule(".img", "", 0);
+        ok(false, "expected exception");
+    }catch(e) {}
 });
 
 sync_test("storage", function() {
@@ -527,6 +553,8 @@ sync_test("classList", function() {
 
     classList.add("c");
     ok(elem.className === "a b c 4", "(2) Expected className 'a b c 4', got " + elem.className);
+    ok(("" + classList) === "a b c 4", "Expected classList value 'a b c 4', got " + classList);
+    ok(classList.toString() === "a b c 4", "Expected classList toString 'a b c 4', got " + classList.toString());
 
     var exception = false
 
@@ -605,4 +633,8 @@ sync_test("classList", function() {
 
     classList.remove("b");
     ok(elem.className === "", "remove: expected className '', got " + elem.className);
+
+    elem.className = "  testclass    foobar  ";
+    ok(("" + classList) === "  testclass    foobar  ", "Expected classList value '  testclass    foobar  ', got " + classList);
+    ok(classList.toString() === "  testclass    foobar  ", "Expected classList toString '  testclass    foobar  ', got " + classList.toString());
 });

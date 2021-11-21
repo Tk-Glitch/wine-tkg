@@ -50,20 +50,17 @@
 #if defined(_WIN32) && !defined(__CYGWIN__)
 
 #include <direct.h>
+#include <errno.h>
 #include <io.h>
 #include <process.h>
-
-#define mkdir(path,mode) mkdir(path)
 
 static inline void *dlopen(const char *name, int flags) { return NULL; }
 static inline void *dlsym(void *handle, const char *name) { return NULL; }
 static inline int dlclose(void *handle) { return 0; }
 static inline const char *dlerror(void) { return "No dlopen support on Windows"; }
+static inline int symlink(const char *from, const char *to) { errno = ENOSYS; return -1; }
 
 #ifdef _MSC_VER
-
-#define popen _popen
-#define pclose _pclose
 /* The UCRT headers in the Windows SDK #error out if we #define snprintf.
  * The C headers that came with previous Visual Studio versions do not have
  * snprintf. Check for VS 2015, which appears to be the first version to
@@ -71,37 +68,6 @@ static inline const char *dlerror(void) { return "No dlopen support on Windows";
 #if _MSC_VER < 1900
 # define snprintf _snprintf
 #endif
-#define strtoll _strtoi64
-#define strtoull _strtoui64
-#define strncasecmp _strnicmp
-#define strcasecmp _stricmp
-
-typedef long off_t;
-typedef int pid_t;
-typedef int ssize_t;
-
-#endif /* _MSC_VER */
-
-#else  /* _WIN32 */
-
-#ifndef __int64
-#  if defined(__x86_64__) || defined(__aarch64__) || defined(__powerpc64__) || defined(_WIN64)
-#    define __int64 long
-#  else
-#    define __int64 long long
-#  endif
-#endif
-
-/* Process creation flags */
-#ifndef _P_WAIT
-# define _P_WAIT    0
-# define _P_NOWAIT  1
-# define _P_OVERLAY 2
-# define _P_NOWAITO 3
-# define _P_DETACH  4
-#endif
-#ifndef HAVE__SPAWNVP
-extern int _spawnvp(int mode, const char *cmdname, const char * const argv[]);
 #endif
 
 #endif  /* _WIN32 */
@@ -118,36 +84,6 @@ extern int _spawnvp(int mode, const char *cmdname, const char * const argv[]);
 #define RTLD_GLOBAL  0x100
 #endif
 
-#ifndef S_ISLNK
-# define S_ISLNK(mod) (0)
-#endif
-
-#ifndef S_ISDIR
-# define S_ISDIR(mod) (((mod) & _S_IFMT) == _S_IFDIR)
-#endif
-
-#ifndef S_ISCHR
-# define S_ISCHR(mod) (((mod) & _S_IFMT) == _S_IFCHR)
-#endif
-
-#ifndef S_ISREG
-# define S_ISREG(mod) (((mod) & _S_IFMT) == _S_IFREG)
-#endif
-
-/* So we open files in 64 bit access mode on Linux */
-#ifndef O_LARGEFILE
-# define O_LARGEFILE 0
-#endif
-
-#ifndef O_NONBLOCK
-# define O_NONBLOCK 0
-#endif
-
-#ifndef O_BINARY
-# define O_BINARY 0
-#endif
-
-
 /****************************************************************
  * Constants
  */
@@ -159,49 +95,5 @@ extern int _spawnvp(int mode, const char *cmdname, const char * const argv[]);
 #ifndef M_PI_2
 #define M_PI_2 1.570796326794896619
 #endif
-
-
-/****************************************************************
- * Function definitions (only when using libwine_port)
- */
-
-#ifndef HAVE_GETOPT_LONG_ONLY
-extern char *optarg;
-extern int optind;
-extern int opterr;
-extern int optopt;
-struct option;
-
-#ifndef HAVE_STRUCT_OPTION_NAME
-struct option
-{
-    const char *name;
-    int has_arg;
-    int *flag;
-    int val;
-};
-#endif
-
-extern int getopt_long (int ___argc, char *const *___argv,
-                        const char *__shortopts,
-                        const struct option *__longopts, int *__longind);
-extern int getopt_long_only (int ___argc, char *const *___argv,
-                             const char *__shortopts,
-                             const struct option *__longopts, int *__longind);
-#endif  /* HAVE_GETOPT_LONG_ONLY */
-
-#ifndef HAVE_LSTAT
-int lstat(const char *file_name, struct stat *buf);
-#endif /* HAVE_LSTAT */
-
-#ifndef HAVE_READLINK
-int readlink( const char *path, char *buf, size_t size );
-#endif /* HAVE_READLINK */
-
-#ifndef HAVE_SYMLINK
-int symlink(const char *from, const char *to);
-#endif
-
-extern int mkstemps(char *template, int suffix_len);
 
 #endif /* !defined(__WINE_WINE_PORT_H) */

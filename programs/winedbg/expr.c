@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -37,12 +35,12 @@ struct expr
     {
         struct
         {
-            long int            value;
+            INT_PTR             value;
         } s_const;
 
         struct
         {
-            long unsigned int   value;
+            UINT_PTR            value;
         } u_const;
 
         struct
@@ -64,7 +62,7 @@ struct expr
         {
             int                 unop_type;
             struct expr*        exp1;
-            long int            result;
+            INT_PTR             result;
         } unop;
 
         struct
@@ -72,7 +70,7 @@ struct expr
             int                 binop_type;
             struct expr*        exp1;
             struct expr*        exp2;
-            long int            result;
+            INT_PTR             result;
         } binop;
 
         struct
@@ -85,7 +83,7 @@ struct expr
         {
             struct expr*        exp1;
             const char*         element_name;
-            long int            result;
+            ULONG               result;
         } structure;
 
         struct
@@ -93,7 +91,7 @@ struct expr
             const char*         funcname;
             int	                nargs;
             struct expr*        arg[5];
-            long int            result;
+            ULONG               result;
         } call;
 
     } un;
@@ -165,7 +163,7 @@ struct expr* expr_alloc_symbol(const char* name)
     return ex;
 }
 
-struct expr* expr_alloc_sconstant(long int value)
+struct expr* expr_alloc_sconstant(INT_PTR value)
 {
     struct expr*        ex;
 
@@ -176,7 +174,7 @@ struct expr* expr_alloc_sconstant(long int value)
     return ex;
 }
 
-struct expr* expr_alloc_uconstant(long unsigned int value)
+struct expr* expr_alloc_uconstant(UINT_PTR value)
 {
     struct expr*        ex;
 
@@ -583,10 +581,10 @@ struct dbg_lvalue expr_eval(struct expr* exp)
             exp->un.binop.result = (types_extract_as_integer(&exp1) != types_extract_as_integer(&exp2));
             break;
 	case EXP_OP_SHL:
-            exp->un.binop.result = ((unsigned long)types_extract_as_integer(&exp1) << types_extract_as_integer(&exp2));
+            exp->un.binop.result = ((UINT_PTR)types_extract_as_integer(&exp1) << types_extract_as_integer(&exp2));
             break;
 	case EXP_OP_SHR:
-            exp->un.binop.result = ((unsigned long)types_extract_as_integer(&exp1) >> types_extract_as_integer(&exp2));
+            exp->un.binop.result = ((UINT_PTR)types_extract_as_integer(&exp1) >> types_extract_as_integer(&exp2));
             break;
 	case EXP_OP_MUL:
             exp->un.binop.result = (types_extract_as_integer(&exp1) * types_extract_as_integer(&exp2));

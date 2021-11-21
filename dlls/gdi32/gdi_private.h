@@ -279,13 +279,6 @@ extern BOOL EMFDC_WidenPath( DC_ATTR *dc_attr ) DECLSPEC_HIDDEN;
 extern HENHMETAFILE EMF_Create_HENHMETAFILE( ENHMETAHEADER *emh, DWORD filesize,
                                              BOOL on_disk ) DECLSPEC_HIDDEN;
 
-extern BOOL get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void *bits,
-                                   UINT *usage ) DECLSPEC_HIDDEN;
-extern BOOL get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size,
-                             WCHAR *filename ) DECLSPEC_HIDDEN;
-extern BOOL get_file_outline_text_metric( const WCHAR *path, OUTLINETEXTMETRICW *otm ) DECLSPEC_HIDDEN;
-
-
 static inline int get_dib_stride( int width, int bpp )
 {
     return ((width * bpp + 31) >> 3) & ~3;
@@ -302,8 +295,5 @@ static inline int get_dib_info_size( const BITMAPINFO *info, UINT coloruse )
 }
 
 extern HMODULE gdi32_module DECLSPEC_HIDDEN;
-
-BOOL xform_has_rotate_and_uniform_scale_and_shear( const XFORM *xform ) DECLSPEC_HIDDEN;
-BOOL xform_decompose_rotation_and_translation( XFORM *xform, XFORM *rotation_and_translation ) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_GDI_PRIVATE_H */

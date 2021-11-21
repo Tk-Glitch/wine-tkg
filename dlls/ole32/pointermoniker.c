@@ -368,35 +368,29 @@ static HRESULT WINAPI PointerMonikerImpl_CommonPrefixWith(IMoniker *iface, IMoni
         return MK_E_NOPREFIX;
 }
 
-/******************************************************************************
- *        PointerMoniker_RelativePathTo
- ******************************************************************************/
-static HRESULT WINAPI
-PointerMonikerImpl_RelativePathTo(IMoniker* iface,IMoniker* pmOther, IMoniker** ppmkRelPath)
+static HRESULT WINAPI PointerMonikerImpl_RelativePathTo(IMoniker *iface, IMoniker *other, IMoniker **result)
 {
-    TRACE("(%p,%p,%p)\n",iface,pmOther,ppmkRelPath);
+    TRACE("%p, %p, %p.\n", iface, other, result);
 
-    if (ppmkRelPath==NULL)
-        return E_POINTER;
+    if (!result)
+        return E_INVALIDARG;
 
-    *ppmkRelPath = NULL;
+    *result = NULL;
 
-    return E_NOTIMPL;
+    return other ? E_NOTIMPL : E_INVALIDARG;
 }
 
-/******************************************************************************
- *        PointerMoniker_GetDisplayName
- ******************************************************************************/
-static HRESULT WINAPI
-PointerMonikerImpl_GetDisplayName(IMoniker* iface, IBindCtx* pbc,
-                               IMoniker* pmkToLeft, LPOLESTR *ppszDisplayName)
+static HRESULT WINAPI PointerMonikerImpl_GetDisplayName(IMoniker *iface, IBindCtx *pbc,
+        IMoniker *toleft, LPOLESTR *name)
 {
-    TRACE("(%p,%p,%p,%p)\n",iface,pbc,pmkToLeft,ppszDisplayName);
+    TRACE("%p, %p, %p, %p.\n", iface, pbc, toleft, name);
 
-    if (ppszDisplayName==NULL)
-        return E_POINTER;
+    if (!name || !pbc)
+    {
+        if (name) *name = NULL;
+        return E_INVALIDARG;
+    }
 
-    *ppszDisplayName = NULL;
     return E_NOTIMPL;
 }
 

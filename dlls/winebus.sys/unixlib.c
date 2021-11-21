@@ -53,6 +53,10 @@ BOOL is_xbox_gamepad(WORD vid, WORD pid)
     if (pid == 0x02e6) return TRUE; /* Wireless XBox Controller Dongle */
     if (pid == 0x02ea) return TRUE; /* Xbox One S Controller */
     if (pid == 0x02fd) return TRUE; /* Xbox One S Controller (Firmware 2017) */
+    if (pid == 0x0b00) return TRUE; /* Xbox Elite 2 */
+    if (pid == 0x0b05) return TRUE; /* Xbox Elite 2 Wireless */
+    if (pid == 0x0b12) return TRUE; /* Xbox Series */
+    if (pid == 0x0b13) return TRUE; /* Xbox Series Wireless */
     if (pid == 0x0719) return TRUE; /* Xbox 360 Wireless Adapter */
     return FALSE;
 }
@@ -88,12 +92,32 @@ static NTSTATUS mouse_haptics_start(struct unix_device *iface, DWORD duration,
     return STATUS_NOT_SUPPORTED;
 }
 
+static NTSTATUS mouse_physical_device_control(struct unix_device *iface, USAGE control)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS mouse_physical_effect_control(struct unix_device *iface, BYTE index,
+                                              USAGE control, BYTE iterations)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS mouse_physical_effect_update(struct unix_device *iface, BYTE index,
+                                             struct effect_params *params)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
 static const struct hid_device_vtbl mouse_vtbl =
 {
     mouse_destroy,
     mouse_start,
     mouse_stop,
     mouse_haptics_start,
+    mouse_physical_device_control,
+    mouse_physical_effect_control,
+    mouse_physical_effect_update,
 };
 
 static const struct device_desc mouse_device_desc =
@@ -101,9 +125,9 @@ static const struct device_desc mouse_device_desc =
     .vid = 0x845e,
     .pid = 0x0001,
     .input = -1,
-    .manufacturer = {"The Wine Project"},
-    .product = {"Wine HID mouse"},
-    .serialnumber = {"0000"},
+    .manufacturer = {'T','h','e',' ','W','i','n','e',' ','P','r','o','j','e','c','t',0},
+    .product = {'W','i','n','e',' ','H','I','D',' ','m','o','u','s','e',0},
+    .serialnumber = {'0','0','0','0',0},
 };
 
 static NTSTATUS mouse_device_create(void *args)
@@ -145,12 +169,32 @@ static NTSTATUS keyboard_haptics_start(struct unix_device *iface, DWORD duration
     return STATUS_NOT_SUPPORTED;
 }
 
+static NTSTATUS keyboard_physical_device_control(struct unix_device *iface, USAGE control)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS keyboard_physical_effect_control(struct unix_device *iface, BYTE index,
+                                                 USAGE control, BYTE iterations)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS keyboard_physical_effect_update(struct unix_device *iface, BYTE index,
+                                                struct effect_params *params)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
 static const struct hid_device_vtbl keyboard_vtbl =
 {
     keyboard_destroy,
     keyboard_start,
     keyboard_stop,
     keyboard_haptics_start,
+    keyboard_physical_device_control,
+    keyboard_physical_effect_control,
+    keyboard_physical_effect_update,
 };
 
 static const struct device_desc keyboard_device_desc =
@@ -158,9 +202,9 @@ static const struct device_desc keyboard_device_desc =
     .vid = 0x845e,
     .pid = 0x0002,
     .input = -1,
-    .manufacturer = {"The Wine Project"},
-    .product = {"Wine HID keyboard"},
-    .serialnumber = {"0000"},
+    .manufacturer = {'T','h','e',' ','W','i','n','e',' ','P','r','o','j','e','c','t',0},
+    .product = {'W','i','n','e',' ','H','I','D',' ','k','e','y','b','o','a','r','d',0},
+    .serialnumber = {'0','0','0','0',0},
 };
 
 static NTSTATUS keyboard_device_create(void *args)
@@ -285,7 +329,11 @@ BOOL bus_event_queue_device_removed(struct list *queue, struct unix_device *devi
     struct bus_event *event = malloc(size);
     if (!event) return FALSE;
 
-    if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */
+    if (unix_device_incref(device) == 1) /* being destroyed */
+    {
+        free(event);
+        return FALSE;
+    }
 
     event->type = BUS_EVENT_TYPE_DEVICE_REMOVED;
     event->device = device;
@@ -300,7 +348,11 @@ BOOL bus_event_queue_device_created(struct list *queue, struct unix_device *devi
     struct bus_event *event = malloc(size);
     if (!event) return FALSE;
 
-    if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */
+    if (unix_device_incref(device) == 1) /* being destroyed */
+    {
+        free(event);
+        return FALSE;
+    }
 
     event->type = BUS_EVENT_TYPE_DEVICE_CREATED;
     event->device = device;
@@ -316,7 +368,11 @@ BOOL bus_event_queue_input_report(struct list *queue, struct unix_device *device
     struct bus_event *event = malloc(size);
     if (!event) return FALSE;
 
-    if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */
+    if (unix_device_incref(device) == 1) /* being destroyed */
+    {
+        free(event);
+        return FALSE;
+    }
 
     event->type = BUS_EVENT_TYPE_INPUT_REPORT;
     event->device = device;
@@ -338,8 +394,8 @@ BOOL bus_event_queue_pop(struct list *queue, struct bus_event *event)
     tmp = LIST_ENTRY(entry, struct bus_event, entry);
     list_remove(entry);
 
-    if (event->type != BUS_EVENT_TYPE_INPUT_REPORT) size = sizeof(*event);
-    else size = offsetof(struct bus_event, input_report.buffer[event->input_report.length]);
+    if (tmp->type != BUS_EVENT_TYPE_INPUT_REPORT) size = sizeof(*tmp);
+    else size = offsetof(struct bus_event, input_report.buffer[tmp->input_report.length]);
 
     memcpy(event, tmp, size);
     free(tmp);

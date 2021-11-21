@@ -19,12 +19,13 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #ifdef HAVE_SYS_MMAN_H
 # include <sys/mman.h>
@@ -269,14 +270,29 @@ int grow_file( int unix_fd, file_pos_t new_size )
     return 0;
 }
 
+/* simplified version of mkstemps() */
+static int make_temp_file( char name[16] )
+{
+    static unsigned int value;
+    int i, fd = -1;
+
+    value += (current_time >> 16) + current_time;
+    for (i = 0; i < 0x8000 && fd < 0; i++, value += 7777)
+    {
+        sprintf( name, "tmpmap-%08x", value );
+        fd = open( name, O_RDWR | O_CREAT | O_EXCL, 0600 );
+    }
+    return fd;
+}
+
 /* check if the current directory allows exec mappings */
 static int check_current_dir_for_exec(void)
 {
     int fd;
-    char tmpfn[] = "anonmap.XXXXXX";
+    char tmpfn[16];
     void *ret = MAP_FAILED;
 
-    fd = mkstemps( tmpfn, 0 );
+    fd = make_temp_file( tmpfn );
     if (fd == -1) return 0;
     if (grow_file( fd, 1 ))
     {
@@ -292,7 +308,7 @@ static int check_current_dir_for_exec(void)
 static int create_temp_file( file_pos_t size )
 {
     static int temp_dir_fd = -1;
-    char tmpfn[] = "anonmap.XXXXXX";
+    char tmpfn[16];
     int fd;
 
     if (temp_dir_fd == -1)
@@ -310,7 +326,7 @@ static int create_temp_file( file_pos_t size )
     }
     else if (temp_dir_fd != server_dir_fd) fchdir( temp_dir_fd );
 
-    fd = mkstemps( tmpfn, 0 );
+    fd = make_temp_file( tmpfn );
     if (fd != -1)
     {
         if (!grow_file( fd, size ))

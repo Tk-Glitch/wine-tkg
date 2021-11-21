@@ -19,24 +19,11 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 #include <time.h>
-#ifdef HAVE_SYS_TYPES_H
-# include <sys/types.h>
-#endif
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
-#ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
-#endif
 #include <fcntl.h>
 
 #include "windef.h"
@@ -1364,7 +1351,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                    p_string(&sym->thunk_v1.p_name),
                    sym->thunk_v1.segment, sym->thunk_v1.offset,
                    sym->thunk_v1.thunk_len, sym->thunk_v1.thtype);
-            curr_func = strdup(p_string(&sym->thunk_v1.p_name));
+            curr_func = xstrdup(p_string(&sym->thunk_v1.p_name));
 	    break;
 
 	case S_THUNK32:
@@ -1372,7 +1359,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                    sym->thunk_v3.name,
                    sym->thunk_v3.segment, sym->thunk_v3.offset,
                    sym->thunk_v3.thunk_len, sym->thunk_v3.thtype);
-            curr_func = strdup(sym->thunk_v3.name);
+            curr_func = xstrdup(sym->thunk_v3.name);
 	    break;
 
         /* Global and static functions */
@@ -1391,7 +1378,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                 printf(">>> prev func '%s' still has nest_block %u count\n", curr_func, nest_block);
                 nest_block = 0;
             }
-            curr_func = strdup(p_string(&sym->proc_v1.p_name));
+            curr_func = xstrdup(p_string(&sym->proc_v1.p_name));
 /* EPP 	unsigned int	pparent; */
 /* EPP 	unsigned int	pend; */
 /* EPP 	unsigned int	next; */
@@ -1412,7 +1399,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                 printf(">>> prev func '%s' still has nest_block %u count\n", curr_func, nest_block);
                 nest_block = 0;
             }
-            curr_func = strdup(p_string(&sym->proc_v2.p_name));
+            curr_func = xstrdup(p_string(&sym->proc_v2.p_name));
 /* EPP 	unsigned int	pparent; */
 /* EPP 	unsigned int	pend; */
 /* EPP 	unsigned int	next; */
@@ -1433,7 +1420,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                 printf(">>> prev func '%s' still has nest_block %u count\n", curr_func, nest_block);
                 nest_block = 0;
             }
-            curr_func = strdup(sym->proc_v3.name);
+            curr_func = xstrdup(sym->proc_v3.name);
 /* EPP 	unsigned int	pparent; */
 /* EPP 	unsigned int	pend; */
 /* EPP 	unsigned int	next; */

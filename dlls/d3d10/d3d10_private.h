@@ -60,9 +60,11 @@ enum d3d10_effect_object_type_flags
 
 enum d3d10_effect_object_operation
 {
-    D3D10_EOO_VALUE = 1,
-    D3D10_EOO_PARSED_OBJECT = 2,
-    D3D10_EOO_PARSED_OBJECT_INDEX = 3,
+    D3D10_EOO_CONST = 1,
+    D3D10_EOO_VAR = 2,
+    D3D10_EOO_CONST_INDEX = 3,
+    D3D10_EOO_VAR_INDEX = 4,
+    D3D10_EOO_INDEX_EXPRESSION = 5,
     D3D10_EOO_ANONYMOUS_SHADER = 7,
 };
 
@@ -77,12 +79,10 @@ struct d3d10_effect_object
     enum d3d10_effect_object_type type;
     union
     {
-        ID3D10RasterizerState *rs;
-        ID3D10DepthStencilState *ds;
-        ID3D10BlendState *bs;
         ID3D10VertexShader *vs;
         ID3D10PixelShader *ps;
         ID3D10GeometryShader *gs;
+        IUnknown *object;
     } object;
 };
 
@@ -121,6 +121,12 @@ struct d3d10_effect_shader_variable
     unsigned int isinline : 1;
 };
 
+struct d3d10_effect_sampler_desc
+{
+    D3D10_SAMPLER_DESC desc;
+    struct d3d10_effect_variable *texture;
+};
+
 struct d3d10_effect_state_object_variable
 {
     union
@@ -128,7 +134,7 @@ struct d3d10_effect_state_object_variable
         D3D10_RASTERIZER_DESC rasterizer;
         D3D10_DEPTH_STENCIL_DESC depth_stencil;
         D3D10_BLEND_DESC blend;
-        D3D10_SAMPLER_DESC sampler;
+        struct d3d10_effect_sampler_desc sampler;
     } desc;
     union
     {
@@ -136,6 +142,7 @@ struct d3d10_effect_state_object_variable
         ID3D10DepthStencilState *depth_stencil;
         ID3D10BlendState *blend;
         ID3D10SamplerState *sampler;
+        IUnknown *object;
     } object;
 };
 
@@ -216,6 +223,12 @@ struct d3d10_effect_variable
     } u;
 };
 
+struct d3d10_effect_pass_shader_desc
+{
+    struct d3d10_effect_variable *shader;
+    unsigned int index;
+};
+
 /* ID3D10EffectPass */
 struct d3d10_effect_pass
 {
@@ -223,15 +236,17 @@ struct d3d10_effect_pass
 
     struct d3d10_effect_technique *technique;
     char *name;
-    DWORD start;
     DWORD object_count;
     DWORD annotation_count;
     struct d3d10_effect_object *objects;
     struct d3d10_effect_variable *annotations;
 
-    D3D10_PASS_SHADER_DESC vs;
-    D3D10_PASS_SHADER_DESC ps;
-    D3D10_PASS_SHADER_DESC gs;
+    struct d3d10_effect_pass_shader_desc vs;
+    struct d3d10_effect_pass_shader_desc ps;
+    struct d3d10_effect_pass_shader_desc gs;
+    struct d3d10_effect_variable *rasterizer;
+    struct d3d10_effect_variable *depth_stencil;
+    struct d3d10_effect_variable *blend;
     UINT stencil_ref;
     UINT sample_mask;
     float blend_factor[4];
@@ -256,6 +271,12 @@ struct d3d10_effect_anonymous_shader
     struct d3d10_effect_type type;
 };
 
+enum d3d10_effect_flags
+{
+    D3D10_EFFECT_OPTIMIZED = 0x1,
+    D3D10_EFFECT_IS_POOL   = 0x2,
+};
+
 /* ID3D10Effect */
 struct d3d10_effect
 {
@@ -264,13 +285,13 @@ struct d3d10_effect
     LONG refcount;
 
     ID3D10Device *device;
-    ID3D10Effect *pool;
+    struct d3d10_effect *pool;
     DWORD version;
     DWORD local_buffer_count;
     DWORD variable_count;
     DWORD local_variable_count;
-    DWORD sharedbuffers_count;
-    DWORD sharedobjects_count;
+    DWORD shared_buffer_count;
+    DWORD shared_object_count;
     DWORD technique_count;
     DWORD index_offset;
     DWORD texture_count;
@@ -282,6 +303,7 @@ struct d3d10_effect
     DWORD depthstencilview_count;
     DWORD used_shader_count;
     DWORD anonymous_shader_count;
+    DWORD flags;
 
     DWORD used_shader_current;
     DWORD anonymous_shader_current;

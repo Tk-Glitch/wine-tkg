@@ -19,7 +19,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -27,17 +26,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
 
 #include "build.h"
 
 static struct strarray tmp_files;
-static struct strarray empty_strarray;
 static const char *output_file_source_name;
 
 static const struct
@@ -71,126 +63,11 @@ void cleanup_tmp_files(void)
 }
 
 
-void *xmalloc (size_t size)
-{
-    void *res;
-
-    res = malloc (size ? size : 1);
-    if (res == NULL)
-    {
-        fprintf (stderr, "Virtual memory exhausted.\n");
-        exit (1);
-    }
-    return res;
-}
-
-void *xrealloc (void *ptr, size_t size)
-{
-    void *res = realloc (ptr, size);
-    if (size && res == NULL)
-    {
-        fprintf (stderr, "Virtual memory exhausted.\n");
-        exit (1);
-    }
-    return res;
-}
-
-char *xstrdup( const char *str )
-{
-    char *res = strdup( str );
-    if (!res)
-    {
-        fprintf (stderr, "Virtual memory exhausted.\n");
-        exit (1);
-    }
-    return res;
-}
-
 char *strupper(char *s)
 {
     char *p;
     for (p = s; *p; p++) *p = toupper(*p);
     return s;
-}
-
-int strendswith(const char* str, const char* end)
-{
-    int l = strlen(str);
-    int m = strlen(end);
-    return l >= m && strcmp(str + l - m, end) == 0;
-}
-
-char *strmake( const char* fmt, ... )
-{
-    int n;
-    size_t size = 100;
-    va_list ap;
-
-    for (;;)
-    {
-        char *p = xmalloc( size );
-        va_start( ap, fmt );
-	n = vsnprintf( p, size, fmt, ap );
-	va_end( ap );
-        if (n == -1) size *= 2;
-        else if ((size_t)n >= size) size = n + 1;
-        else return p;
-        free( p );
-    }
-}
-
-void strarray_add( struct strarray *array, const char *str )
-{
-    if (array->count == array->size)
-    {
-	if (array->size) array->size *= 2;
-        else array->size = 16;
-	array->str = xrealloc( array->str, sizeof(array->str[0]) * array->size );
-    }
-    array->str[array->count++] = str;
-}
-
-void strarray_addall( struct strarray *array, struct strarray args )
-{
-    unsigned int i;
-
-    for (i = 0; i < args.count; i++) strarray_add( array, args.str[i] );
-}
-
-struct strarray strarray_fromstring( const char *str, const char *delim )
-{
-    const char *tok;
-    struct strarray array = empty_strarray;
-    char *buf = xstrdup( str );
-
-    for (tok = strtok( buf, delim ); tok; tok = strtok( NULL, delim ))
-        strarray_add( &array, xstrdup( tok ));
-    free( buf );
-    return array;
-}
-
-static struct strarray strarray_frompath( const char *path )
-{
-    if (!path) return empty_strarray;
-#if defined(_WIN32) && !defined(__CYGWIN__)
-    return strarray_fromstring( path, ";" );
-#else
-    return strarray_fromstring( path, ":" );
-#endif
-}
-
-void strarray_qsort( struct strarray *array, int (*func)(const char **, const char **) )
-{
-    if (array->count) qsort( array->str, array->count, sizeof(*array->str), (void *)func );
-}
-
-const char *strarray_bsearch( const struct strarray *array, const char *str,
-                              int (*func)(const char **, const char **) )
-{
-    char **res = NULL;
-
-    if (array->count) res = bsearch( &str, array->str, array->count, sizeof(*array->str), (void *)func );
-    return res ? *res : NULL;
 }
 
 void fatal_error( const char *msg, ... )
@@ -322,17 +199,13 @@ static const char *find_binary( const char *prefix, const char *name )
 
 void spawn( struct strarray args )
 {
-    unsigned int i;
     int status;
     const char *argv0 = find_binary( NULL, args.str[0] );
 
     if (argv0) args.str[0] = argv0;
-    strarray_add( &args, NULL );
-    if (verbose)
-        for (i = 0; args.str[i]; i++)
-            fprintf( stderr, "%s%c", args.str[i], args.str[i+1] ? ' ' : '\n' );
+    if (verbose) strarray_trace( args );
 
-    if ((status = _spawnvp( _P_WAIT, args.str[0], args.str )))
+    if ((status = strarray_spawn( args )))
     {
 	if (status > 0) fatal_error( "%s failed with status %u\n", args.str[0], status );
 	else fatal_perror( "winebuild" );
@@ -558,29 +431,10 @@ const char *get_nm_command(void)
 char *get_temp_file_name( const char *prefix, const char *suffix )
 {
     char *name;
-    const char *ext, *basename;
     int fd;
 
-    if (!prefix || !prefix[0]) prefix = "winebuild";
-    if (!suffix) suffix = "";
-    if ((basename = strrchr( prefix, '/' ))) basename++;
-    else basename = prefix;
-    if (!(ext = strchr( basename, '.' ))) ext = prefix + strlen(prefix);
-    name = xmalloc( sizeof("/tmp/") + (ext - prefix) + sizeof(".XXXXXX") + strlen(suffix) );
-    memcpy( name, prefix, ext - prefix );
-    strcpy( name + (ext - prefix), ".XXXXXX" );
-    strcat( name, suffix );
-
-    if ((fd = mkstemps( name, strlen(suffix) )) == -1)
-    {
-        strcpy( name, "/tmp/" );
-        memcpy( name + 5, basename, ext - basename );
-        strcpy( name + 5 + (ext - basename), ".XXXXXX" );
-        strcat( name, suffix );
-        if ((fd = mkstemps( name, strlen(suffix) )) == -1)
-            fatal_error( "could not generate a temp file\n" );
-    }
-
+    if (prefix) prefix = get_basename_noext( prefix );
+    fd = make_temp_file( prefix, suffix, &name );
     close( fd );
     strarray_add( &tmp_files, name );
     return name;

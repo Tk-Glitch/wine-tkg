@@ -2856,7 +2856,7 @@ static HRESULT WINAPI HTMLDocument5_createAttribute(IHTMLDocument5 *iface, BSTR 
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(bstrattrName), ppattribute);
 
-    hres = HTMLDOMAttribute_Create(bstrattrName, NULL, 0, &attr);
+    hres = HTMLDOMAttribute_Create(bstrattrName, NULL, 0, dispex_compat_mode(&This->doc_node->node.event_target.dispex), &attr);
     if(FAILED(hres))
         return hres;
 
@@ -5654,6 +5654,7 @@ static void HTMLDocumentNode_init_dispex_info(dispex_data_t *info, compat_mode_t
 }
 
 static dispex_static_data_t HTMLDocumentNode_dispex = {
+    L"HTMLDocument",
     &HTMLDocumentNode_event_target_vtbl.dispex_vtbl,
     DispHTMLDocument_tid,
     HTMLDocumentNode_iface_tids,
@@ -5949,6 +5950,7 @@ static const tid_t HTMLDocumentObj_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLDocumentObj_dispex = {
+    L"HTMLDocumentObj",
     NULL,
     DispHTMLDocument_tid,
     HTMLDocumentObj_iface_tids

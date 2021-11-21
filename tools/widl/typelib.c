@@ -20,21 +20,16 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 #include <string.h>
 #include <ctype.h>
 
+#include "widl.h"
 #include "windef.h"
 #include "winbase.h"
-
-#include "widl.h"
 #include "utils.h"
 #include "wpp_private.h"
 #include "parser.h"
@@ -250,7 +245,7 @@ static void tlb_read(int fd, void *buf, int count)
         error("error while reading importlib.\n");
 }
 
-static void tlb_lseek(int fd, off_t offset)
+static void tlb_lseek(int fd, int offset)
 {
     if(lseek(fd, offset, SEEK_SET) == -1)
         error("lseek failed\n");
@@ -340,17 +335,8 @@ static void read_importlib(importlib_t *importlib)
     fd = open_typelib(importlib->name);
 
     /* widl extension: if importlib name has no .tlb extension, try using .tlb */
-    if(fd < 0) {
-        const char *p = strrchr(importlib->name, '.');
-        size_t len = p ? p - importlib->name : strlen(importlib->name);
-        if(strcmp(importlib->name + len, ".tlb")) {
-            char *tlb_name = xmalloc(len + 5);
-            memcpy(tlb_name, importlib->name, len);
-            strcpy(tlb_name + len, ".tlb");
-            fd = open_typelib(tlb_name);
-            free(tlb_name);
-        }
-    }
+    if (fd < 0 && !strendswith( importlib->name, ".tlb" ))
+        fd = open_typelib( strmake( "%s.tlb", importlib->name ));
 
     if(fd < 0)
         error("Could not find importlib %s.\n", importlib->name);

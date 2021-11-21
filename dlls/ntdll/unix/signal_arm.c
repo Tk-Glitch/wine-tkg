@@ -61,7 +61,6 @@
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
-#include "wine/exception.h"
 #include "wine/asm.h"
 #include "unix_private.h"
 #include "wine/debug.h"
@@ -646,7 +645,7 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
     struct syscall_frame *frame = arm_thread_data()->syscall_frame;
     DWORD i;
 
-    if (!is_inside_syscall( context )) return FALSE;
+    if (!is_inside_syscall( context ) && !ntdll_get_thread_data()->jmp_buf) return FALSE;
 
     TRACE( "code=%x flags=%x addr=%p pc=%08x tid=%04x\n",
            rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,

@@ -19,23 +19,13 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 #include <time.h>
-#ifdef HAVE_SYS_TYPES_H
-# include <sys/types.h>
-#endif
-#ifdef HAVE_SYS_STAT_H
-# include <sys/stat.h>
-#endif
-#include <fcntl.h>
 
+#include "../tools.h"
 #include "windef.h"
 #include "winbase.h"
 #include "winedump.h"
@@ -287,7 +277,7 @@ BOOL dump_analysis(const char *name, file_dumper fn, enum FileSig wanted_sig)
     if (fstat(fd, &s) < 0) fatal("Can't get size");
     dump_total_len = s.st_size;
 
-    if (!(dump_base = malloc( dump_total_len ))) fatal( "Out of memory" );
+    dump_base = xmalloc( dump_total_len );
     if ((unsigned long)read( fd, dump_base, dump_total_len ) != dump_total_len) fatal( "Cannot read file" );
 
     printf("Contents of %s: %ld bytes\n\n", name, dump_total_len);
