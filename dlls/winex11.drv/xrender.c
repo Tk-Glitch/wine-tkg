@@ -2339,8 +2339,6 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pPolyDraw */
     NULL,                               /* pPolyPolygon */
     NULL,                               /* pPolyPolyline */
-    NULL,                               /* pPolygon */
-    NULL,                               /* pPolyline */
     NULL,                               /* pPolylineTo */
     xrenderdrv_PutImage,                /* pPutImage */
     NULL,                               /* pRealizeDefaultPalette */
@@ -2349,7 +2347,6 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pResetDC */
     NULL,                               /* pRestoreDC */
     NULL,                               /* pRoundRect */
-    NULL,                               /* pSaveDC */
     NULL,                               /* pScaleViewportExt */
     NULL,                               /* pScaleWindowExt */
     NULL,                               /* pSelectBitmap */
@@ -2358,9 +2355,7 @@ static const struct gdi_dc_funcs xrender_funcs =
     xrenderdrv_SelectFont,              /* pSelectFont */
     NULL,                               /* pSelectPalette */
     NULL,                               /* pSelectPen */
-    NULL,                               /* pSetArcDirection */
     NULL,                               /* pSetBkColor */
-    NULL,                               /* pSetBkMode */
     NULL,                               /* pSetBoundsRect */
     NULL,                               /* pSetDCBrushColor */
     NULL,                               /* pSetDCPenColor */
@@ -2371,11 +2366,6 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pSetMapMode */
     NULL,                               /* pSetMapperFlags */
     NULL,                               /* pSetPixel */
-    NULL,                               /* pSetPolyFillMode */
-    NULL,                               /* pSetROP2 */
-    NULL,                               /* pSetRelAbs */
-    NULL,                               /* pSetStretchBltMode */
-    NULL,                               /* pSetTextAlign */
     NULL,                               /* pSetTextCharacterExtra */
     NULL,                               /* pSetTextColor */
     NULL,                               /* pSetTextJustification */

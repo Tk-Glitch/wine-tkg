@@ -1723,6 +1723,8 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE 
     NTSTATUS ret;
     int fd = -1;
 
+    if (dest) *dest = 0;
+
     if ((options & DUPLICATE_CLOSE_SOURCE) && source_process != NtCurrentProcess())
     {
         apc_call_t call;

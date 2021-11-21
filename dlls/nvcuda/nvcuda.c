@@ -37,6 +37,7 @@
 #include "nvcuda.h"
 #include "d3d9.h"
 #include "dxgi.h"
+#include "d3d11.h"
 
 #if defined(__x86_64) || defined(AMD64) || defined(_M_AMD64)
 #define DEV_PTR "%llu"
@@ -2939,6 +2940,24 @@ CUresult WINAPI wine_cuD3D10GetDevice(CUdevice *pCudaDevice, IDXGIAdapter *pAdap
     FIXME("(%p, %p) - semi-stub\n", pCudaDevice, pAdapter);
     /* DXGI adapters don't have an OpenGL context assigned yet, otherwise we could use cuGLGetDevices */
     return pcuDeviceGet(pCudaDevice, 0);
+}
+
+CUresult WINAPI wine_cuD3D11GetDevice(CUdevice *pCudaDevice, IDXGIAdapter *pAdapter)
+{
+    FIXME("(%p, %p) - semi-stub\n", pCudaDevice, pAdapter);
+    /* DXGI adapters don't have an OpenGL context assigned yet, otherwise we could use cuGLGetDevices */
+    return pcuDeviceGet(pCudaDevice, 0);
+}
+
+CUresult WINAPI wine_cuGraphicsD3D11RegisterResource(CUgraphicsResource *pCudaResource, ID3D11Resource *pD3DResource, unsigned int Flags)
+{
+    TRACE("(%p, %p, %u) - semi-stub\n", pCudaResource, pD3DResource, Flags);
+    /* Not able to handle spesific flags at this time */
+    if(Flags > 0)
+      return CUDA_ERROR_INVALID_VALUE;
+
+    /* pD3D11Resource is unknown at this time and cannot be "registered" */
+    return CUDA_ERROR_UNKNOWN;
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)

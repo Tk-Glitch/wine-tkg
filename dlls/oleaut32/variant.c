@@ -1615,6 +1615,7 @@ HRESULT WINAPI VarParseNumFromStr(const OLECHAR *lpszStr, LCID lcid, ULONG dwFla
   DWORD dwState = B_EXPONENT_START|B_INEXACT_ZEROS;
   int iMaxDigits = ARRAY_SIZE(rgbTmp);
   int cchUsed = 0;
+  OLECHAR cDigitSeparator2;
 
   TRACE("(%s,%d,0x%08x,%p,%p)\n", debugstr_w(lpszStr), lcid, dwFlags, pNumprs, rgbDig);
 
@@ -1634,6 +1635,10 @@ HRESULT WINAPI VarParseNumFromStr(const OLECHAR *lpszStr, LCID lcid, ULONG dwFla
     return DISP_E_TYPEMISMATCH;
 
   VARIANT_GetLocalisedNumberChars(&chars, lcid, dwFlags);
+  /* Setting the thousands separator to a non-breaking space implies regular
+   * spaces are allowed too. But the converse is not true.
+   */
+  cDigitSeparator2 = chars.cDigitSeparator == 0xa0 ? ' ' : 0;
 
   /* First consume all the leading symbols and space from the string */
   while (1)
@@ -1646,6 +1651,12 @@ HRESULT WINAPI VarParseNumFromStr(const OLECHAR *lpszStr, LCID lcid, ULONG dwFla
         cchUsed++;
         lpszStr++;
       } while (iswspace(*lpszStr));
+    }
+    else if (pNumprs->dwInFlags & NUMPRS_THOUSANDS &&
+             ((chars.cDigitSeparator && *lpszStr == chars.cDigitSeparator) ||
+              (cDigitSeparator2 && *lpszStr == cDigitSeparator2)))
+    {
+      return DISP_E_TYPEMISMATCH; /* Not allowed before the first digit */
     }
     else if (pNumprs->dwInFlags & NUMPRS_LEADING_PLUS &&
              *lpszStr == chars.cPositiveSymbol &&
@@ -1674,6 +1685,7 @@ HRESULT WINAPI VarParseNumFromStr(const OLECHAR *lpszStr, LCID lcid, ULONG dwFla
       /* Only accept currency characters */
       chars.cDecimalPoint = chars.cCurrencyDecimalPoint;
       chars.cDigitSeparator = chars.cCurrencyDigitSeparator;
+      cDigitSeparator2 = chars.cDigitSeparator == 0xa0 ? ' ' : 0;
     }
     else if (pNumprs->dwInFlags & NUMPRS_PARENS && *lpszStr == '(' &&
              !(pNumprs->dwOutFlags & NUMPRS_PARENS))
@@ -1781,7 +1793,9 @@ HRESULT WINAPI VarParseNumFromStr(const OLECHAR *lpszStr, LCID lcid, ULONG dwFla
         cchUsed++;
       }
     }
-    else if (*lpszStr == chars.cDigitSeparator && pNumprs->dwInFlags & NUMPRS_THOUSANDS)
+    else if (pNumprs->dwInFlags & NUMPRS_THOUSANDS &&
+             ((chars.cDigitSeparator && *lpszStr == chars.cDigitSeparator) ||
+              (cDigitSeparator2 && *lpszStr == cDigitSeparator2)))
     {
       pNumprs->dwOutFlags |= NUMPRS_THOUSANDS;
       cchUsed++;
@@ -1909,7 +1923,22 @@ HRESULT WINAPI VarParseNumFromStr(const OLECHAR *lpszStr, LCID lcid, ULONG dwFla
   /* Consume any trailing symbols and space */
   while (1)
   {
-    if ((pNumprs->dwInFlags & NUMPRS_TRAILING_WHITE) && iswspace(*lpszStr))
+    if ((chars.cDigitSeparator && *lpszStr == chars.cDigitSeparator) ||
+        (cDigitSeparator2 && *lpszStr == cDigitSeparator2))
+    {
+      if (pNumprs->dwInFlags & NUMPRS_THOUSANDS)
+      {
+        pNumprs->dwOutFlags |= NUMPRS_THOUSANDS;
+        cchUsed++;
+        lpszStr++;
+      }
+      else
+      {
+        /* Not allowed, even with NUMPRS_TRAILING_WHITE */
+        break;
+      }
+    }
+    else if ((pNumprs->dwInFlags & NUMPRS_TRAILING_WHITE) && iswspace(*lpszStr))
     {
       pNumprs->dwOutFlags |= NUMPRS_TRAILING_WHITE;
       do

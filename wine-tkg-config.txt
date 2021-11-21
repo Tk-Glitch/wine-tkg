@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:29:59 PM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:32:19 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.13.r0.gfeb088b2247
-Using wine-staging patchset (version 6.13.r0.g52dd3381)
+Wine (plain) version: 6.14.r0.g7bedd313c88
+Using wine-staging patchset (version 6.14.r0.g069adfd1)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -33,7 +33,6 @@ proton-bcrypt-staging-b3cd21c.patch -- ( Using Proton Bcrypt patches )
 josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging-d02d502.patch -- ( Enforce win10 as default wine version (staging) )
 
-Applied hotfix wineserver-socket-spin-workaround.mypatch
 Applied hotfix imm32-com-initialization_no_net_active_window.mypatch
 Applied hotfix virtual_alloc_remi2.mypatch
 Applied hotfix a608ef1.mypatch

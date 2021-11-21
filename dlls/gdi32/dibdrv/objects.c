@@ -193,8 +193,8 @@ DWORD get_pixel_color( DC *dc, const dib_info *dib, COLORREF color, BOOL mono_fi
     if(rgbquad_equal(&fg_quad, color_table + 1))
         return 1;
 
-    pixel = get_pixel_color( dc, dib, dc->backgroundColor, FALSE );
-    if (color == dc->backgroundColor) return pixel;
+    pixel = get_pixel_color( dc, dib, dc->attr->background_color, FALSE );
+    if (color == dc->attr->background_color) return pixel;
     else return !pixel;
 }
 
@@ -219,8 +219,8 @@ static inline void get_color_masks( DC *dc, const dib_info *dib, UINT rop, COLOR
         return;
     }
 
-    if (dib->bit_count != 1) color = get_pixel_color( dc, dib, dc->backgroundColor, FALSE );
-    else if (colorref != dc->backgroundColor) color = !color;
+    if (dib->bit_count != 1) color = get_pixel_color( dc, dib, dc->attr->background_color, FALSE );
+    else if (colorref != dc->attr->background_color) color = !color;
 
     calc_rop_masks( rop, color, bg_mask );
 }
@@ -819,7 +819,7 @@ static BOOL solid_pen_lines(dibdrv_physdev *pdev, int num, POINT *pts, BOOL clos
         DWORD color, and, xor;
 
         color = get_pixel_color( dc, &pdev->dib, pdev->pen_brush.colorref, TRUE );
-        calc_and_xor_masks( dc->ROPmode, color, &and, &xor );
+        calc_and_xor_masks( dc->attr->rop_mode, color, &and, &xor );
 
         for (i = 0; i < num - 1; i++)
             if (!solid_pen_line( pdev, pts + i, pts + i + 1, and, xor ))
@@ -1229,8 +1229,8 @@ static BOOL dashed_pen_lines(dibdrv_physdev *pdev, int num, POINT *pts, BOOL clo
     }
     else
     {
-        get_color_masks( dc, &pdev->dib, dc->ROPmode, pdev->pen_brush.colorref,
-                         pdev->pen_is_ext ? TRANSPARENT : dc->backgroundMode,
+        get_color_masks( dc, &pdev->dib, dc->attr->rop_mode, pdev->pen_brush.colorref,
+                         pdev->pen_is_ext ? TRANSPARENT : dc->attr->background_mode,
                          &pdev->dash_masks[1], &pdev->dash_masks[0] );
 
         for (i = 0; i < num - 1; i++)
@@ -1316,7 +1316,7 @@ static HRGN create_miter_region( dibdrv_physdev *pdev, const POINT *pt,
     y = a * face_1->dy - b * face_2->dy;
 
     if (((x - pt->x) * (x - pt->x) + (y - pt->y) * (y - pt->y)) * 4 >
-        dc->miterLimit * dc->miterLimit * pdev->pen_width * pdev->pen_width)
+        dc->attr->miter_limit * dc->attr->miter_limit * pdev->pen_width * pdev->pen_width)
         return 0;
 
     pts[0] = face_2->start;
@@ -1891,12 +1891,12 @@ static BOOL create_hatch_brush_bits(dibdrv_physdev *pdev, dib_brush *brush, BOOL
 
     if (!init_hatch_brush( pdev, brush )) return FALSE;
 
-    get_color_masks( dc, &pdev->dib, brush->rop, brush->colorref, dc->backgroundMode,
+    get_color_masks( dc, &pdev->dib, brush->rop, brush->colorref, dc->attr->background_mode,
                      &fg_mask, &bg_mask );
 
     if (brush->colorref & (1 << 24))  /* PALETTEINDEX */
         *needs_reselect = TRUE;
-    if (dc->backgroundMode != TRANSPARENT && (dc->backgroundColor & (1 << 24)))
+    if (dc->attr->background_mode != TRANSPARENT && (dc->attr->background_color & (1 << 24)))
         *needs_reselect = TRUE;
 
     brush->dib.funcs->create_rop_masks( &brush->dib, hatches[brush->hatch],
@@ -1981,13 +1981,13 @@ static BOOL select_pattern_brush( dibdrv_physdev *pdev, dib_brush *brush, BOOL *
         BOOL got_pixel;
         COLORREF color;
 
-        color = make_rgb_colorref( dc, &pdev->dib, dc->textColor, &got_pixel, &pixel );
+        color = make_rgb_colorref( dc, &pdev->dib, dc->attr->text_color, &got_pixel, &pixel );
         color_table[0].rgbRed      = GetRValue( color );
         color_table[0].rgbGreen    = GetGValue( color );
         color_table[0].rgbBlue     = GetBValue( color );
         color_table[0].rgbReserved = 0;
 
-        color = make_rgb_colorref( dc, &pdev->dib, dc->backgroundColor, &got_pixel, &pixel );
+        color = make_rgb_colorref( dc, &pdev->dib, dc->attr->background_color, &got_pixel, &pixel );
         color_table[1].rgbRed      = GetRValue( color );
         color_table[1].rgbGreen    = GetGValue( color );
         color_table[1].rgbBlue     = GetBValue( color );
@@ -2137,7 +2137,7 @@ HBRUSH CDECL dibdrv_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_
     GetObjectW( hbrush, sizeof(logbrush), &logbrush );
 
     if (hbrush == GetStockObject( DC_BRUSH ))
-        logbrush.lbColor = dc->dcBrushColor;
+        logbrush.lbColor = dc->attr->brush_color;
 
     select_brush( pdev, &pdev->brush, &logbrush, pattern, TRUE );
     return hbrush;
@@ -2189,7 +2189,7 @@ HPEN CDECL dibdrv_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern 
     pdev->pen_width  = get_pen_device_width( dc, logpen.lopnWidth.x );
 
     if (hpen == GetStockObject( DC_PEN ))
-        logbrush.lbColor = dc->dcPenColor;
+        logbrush.lbColor = dc->attr->pen_color;
 
     set_dash_pattern( &pdev->pen_pattern, 0, NULL );
     select_brush( pdev, &pdev->pen_brush, &logbrush, pattern, dither );

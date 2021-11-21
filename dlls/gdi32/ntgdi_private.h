@@ -79,7 +79,6 @@ typedef struct tagDC
     DWORD        thread;           /* thread owning the DC */
     LONG         refcount;         /* thread refcount */
     LONG         dirty;            /* dirty flag */
-    LONG         disabled;         /* get_dc_ptr() will return NULL.  Controlled by DCHF_(DISABLE|ENABLE)DC */
     INT          saveLevel;
     DC_ATTR     *attr;             /* DC attributes accessible by client */
     struct tagDC *saved_dc;
@@ -98,11 +97,9 @@ typedef struct tagDC
     RECT         device_rect;      /* rectangle for the whole device */
     int          pixel_format;     /* pixel format (for memory DCs) */
     UINT         aa_flags;         /* anti-aliasing flags to pass to GetGlyphOutline for current font */
-    FLOAT        miterLimit;
     WCHAR        display[CCHDEVICENAME]; /* Display name when created for a specific display device */
 
     int           flags;
-    DWORD         layout;
     HRGN          hClipRgn;      /* Clip region */
     HRGN          hMetaRgn;      /* Meta region */
     HRGN          hVisRgn;       /* Visible region */
@@ -118,26 +115,13 @@ typedef struct tagDC
     const struct font_gamma_ramp *font_gamma_ramp;
 
     UINT          font_code_page;
-    WORD          ROPmode;
-    WORD          polyFillMode;
-    WORD          stretchBltMode;
-    WORD          relAbsMode;
-    WORD          backgroundMode;
-    COLORREF      backgroundColor;
-    COLORREF      textColor;
-    COLORREF      dcBrushColor;
-    COLORREF      dcPenColor;
     POINT         brush_org;
 
     DWORD         mapperFlags;       /* Font mapper flags */
-    WORD          textAlign;         /* Text alignment from SetTextAlign() */
     INT           charExtra;         /* Spacing from SetTextCharacterExtra() */
     INT           breakExtra;        /* breakTotalExtra / breakCount */
     INT           breakRem;          /* breakTotalExtra % breakCount */
-    INT           MapMode;
-    INT           GraphicsMode;      /* Graphics mode */
     ABORTPROC     pAbortProc;        /* AbortProc for Printing */
-    INT           ArcDirection;
     XFORM         xformWorld2Wnd;    /* World-to-window transformation */
     XFORM         xformWorld2Vport;  /* World-to-viewport transformation */
     XFORM         xformVport2World;  /* Inverse of the above transformation */
@@ -618,7 +602,6 @@ extern BOOL CDECL nulldrv_PolyBezierTo( PHYSDEV dev, const POINT *points, DWORD 
 extern BOOL CDECL nulldrv_PolyDraw( PHYSDEV dev, const POINT *points, const BYTE *types, DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_PolylineTo( PHYSDEV dev, const POINT *points, INT count ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_RestoreDC( PHYSDEV dev, INT level ) DECLSPEC_HIDDEN;
-extern INT  CDECL nulldrv_SaveDC( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_ScaleViewportExtEx( PHYSDEV dev, INT x_num, INT x_denom, INT y_num, INT y_denom, SIZE *size ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_ScaleWindowExtEx( PHYSDEV dev, INT x_num, INT x_denom, INT y_num, INT y_denom, SIZE *size ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_SelectClipPath( PHYSDEV dev, INT mode ) DECLSPEC_HIDDEN;

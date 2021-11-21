@@ -1174,6 +1174,107 @@ static void test_iosb(void)
     CloseHandle( server );
 }
 
+static NTSTATUS invoke_syscall( const char *name, ULONG args32[] )
+{
+    ULONG64 args64[] = { -1, PtrToUlong( args32 ) };
+    ULONG64 func = get_proc_address64( wow64_module, "Wow64SystemServiceEx" );
+    BYTE *syscall = (BYTE *)GetProcAddress( GetModuleHandleA("ntdll.dll"), name );
+
+    ok( syscall != NULL, "syscall %s not found\n", name );
+    if (syscall[0] == 0xb8)
+        args64[0] = *(DWORD *)(syscall + 1);
+    else
+        win_skip( "syscall thunk %s not recognized\n", name );
+
+    return call_func64( func, ARRAY_SIZE(args64), args64 );
+}
+
+static void test_syscalls(void)
+{
+    ULONG64 func;
+    ULONG args32[8];
+    HANDLE event, event2;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING name;
+    NTSTATUS status;
+
+    if (!is_wow64) return;
+    if (!ntdll_module) return;
+
+    func = get_proc_address64( wow64_module, "Wow64SystemServiceEx" );
+    ok( func, "Wow64SystemServiceEx not found\n" );
+
+    event = CreateEventA( NULL, FALSE, FALSE, NULL );
+
+    status = NtSetEvent( event, NULL );
+    ok( !status, "NtSetEvent failed %x\n", status );
+    args32[0] = HandleToLong( event );
+    status = invoke_syscall( "NtClose", args32 );
+    ok( !status, "syscall failed %x\n", status );
+    status = NtSetEvent( event, NULL );
+    ok( status == STATUS_INVALID_HANDLE, "NtSetEvent failed %x\n", status );
+    status = invoke_syscall( "NtClose", args32 );
+    ok( status == STATUS_INVALID_HANDLE, "syscall failed %x\n", status );
+    args32[0] = 0xdeadbeef;
+    status = invoke_syscall( "NtClose", args32 );
+    ok( status == STATUS_INVALID_HANDLE, "syscall failed %x\n", status );
+
+    RtlInitUnicodeString( &name, L"\\BaseNamedObjects\\wow64-test");
+    InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, 0, NULL );
+    event = (HANDLE)0xdeadbeef;
+    args32[0] = PtrToUlong(&event );
+    args32[1] = EVENT_ALL_ACCESS;
+    args32[2] = PtrToUlong( &attr );
+    args32[3] = NotificationEvent;
+    args32[4] = 0;
+    status = invoke_syscall( "NtCreateEvent", args32 );
+    ok( !status, "syscall failed %x\n", status );
+    status = NtSetEvent( event, NULL );
+    ok( !status, "NtSetEvent failed %x\n", status );
+
+    event2 = (HANDLE)0xdeadbeef;
+    args32[0] = PtrToUlong( &event2 );
+    status = invoke_syscall( "NtOpenEvent", args32 );
+    ok( !status, "syscall failed %x\n", status );
+    status = NtSetEvent( event2, NULL );
+    ok( !status, "NtSetEvent failed %x\n", status );
+    args32[0] = HandleToLong( event2 );
+    status = invoke_syscall( "NtClose", args32 );
+    ok( !status, "syscall failed %x\n", status );
+
+    event2 = (HANDLE)0xdeadbeef;
+    args32[0] = PtrToUlong( &event2 );
+    status = invoke_syscall( "NtCreateEvent", args32 );
+    ok( status == STATUS_OBJECT_NAME_EXISTS, "syscall failed %x\n", status );
+    status = NtSetEvent( event2, NULL );
+    ok( !status, "NtSetEvent failed %x\n", status );
+    args32[0] = HandleToLong( event2 );
+    status = invoke_syscall( "NtClose", args32 );
+    ok( !status, "syscall failed %x\n", status );
+
+    status = NtClose( event );
+    ok( !status, "NtClose failed %x\n", status );
+
+    if (pNtWow64ReadVirtualMemory64)
+    {
+        TEB64 *teb64 = (TEB64 *)NtCurrentTeb()->GdiBatchCount;
+        PEB64 peb64, peb64_2;
+        ULONG64 res, res2;
+        HANDLE process = OpenProcess( PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId() );
+        ULONG args32[] = { HandleToLong( process ), (ULONG)teb64->Peb, teb64->Peb >> 32,
+                           PtrToUlong(&peb64_2), sizeof(peb64_2), 0, PtrToUlong(&res2) };
+
+        ok( process != 0, "failed to open current process %u\n", GetLastError() );
+        status = pNtWow64ReadVirtualMemory64( process, teb64->Peb, &peb64, sizeof(peb64), &res );
+        ok( !status, "NtWow64ReadVirtualMemory64 failed %x\n", status );
+        status = invoke_syscall( "NtWow64ReadVirtualMemory64", args32 );
+        ok( !status, "NtWow64ReadVirtualMemory64 failed %x\n", status );
+        ok( res2 == res, "wrong len %s / %s\n", wine_dbgstr_longlong(res), wine_dbgstr_longlong(res2) );
+        ok( !memcmp( &peb64, &peb64_2, res ), "data is different\n" );
+        NtClose( process );
+    }
+}
+
 static void test_cpu_area(void)
 {
     TEB64 *teb64 = (TEB64 *)NtCurrentTeb()->GdiBatchCount;
@@ -1217,6 +1318,7 @@ START_TEST(wow64)
     test_modules();
     test_init_block();
     test_iosb();
+    test_syscalls();
 #endif
     test_cpu_area();
 }

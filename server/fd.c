@@ -2855,6 +2855,7 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, da
     fd->nt_name = dup_nt_name( root, nt_name, &fd->nt_namelen );
     free( fd->unlink_name );
     free( fd->unix_name );
+    fd->closed->unlink_name = fd->unlink_name = name;
     fd->closed->unix_name = fd->unix_name = realpath( name, NULL );
     if (!fd->unix_name)
         fd->closed->unix_name = fd->unix_name = dup_fd_name( NULL, name ); /* dangling symlink */

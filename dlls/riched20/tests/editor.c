@@ -9027,8 +9027,8 @@ todo_wine
 START_TEST( editor )
 {
   BOOL ret;
-  /* Must explicitly LoadLibrary(). The test has no references to functions in
-   * RICHED20.DLL, so the linker doesn't actually link to it. */
+  /* Must explicitly LoadLibrary(). The test has no reference to functions in
+   * RICHED20.DLL, so the linker does not actually link to it. */
   hmoduleRichEdit = LoadLibraryA("riched20.dll");
   ok(hmoduleRichEdit != NULL, "error: %d\n", (int) GetLastError());
   is_lang_japanese = (PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_JAPANESE);

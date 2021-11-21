@@ -3379,7 +3379,7 @@ static NTSTATUS lookup_unix_name( const WCHAR *name, int name_len, char **buffer
     for (ptr = name, end = name + name_len; ptr < end; ptr++)
     {
         if (*ptr == '\\') return STATUS_OBJECT_NAME_INVALID;  /* duplicate backslash */
-        if (*ptr == '.')
+        if (*ptr == '.' && disposition != FILE_WINE_PATH)
         {
             if (ptr + 1 == end) return STATUS_OBJECT_NAME_INVALID;  /* "." element */
             if (ptr[1] == '\\') return STATUS_OBJECT_NAME_INVALID;  /* "." element */
@@ -4018,6 +4018,7 @@ NTSTATUS WINAPI NtCreateFile( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBU
            attr->RootDirectory, attr->SecurityDescriptor, io, alloc_size,
            attributes, sharing, disposition, options, ea_buffer, ea_length );
 
+    *handle = 0;
     if (!attr || !attr->ObjectName) return STATUS_INVALID_PARAMETER;
 
     if (alloc_size) FIXME( "alloc_size not supported\n" );
@@ -4119,9 +4120,8 @@ NTSTATUS WINAPI NtCreateMailslotFile( HANDLE *handle, ULONG access, OBJECT_ATTRI
     TRACE( "%p %08x %p %p %08x %08x %08x %p\n",
            handle, access, attr, io, options, quota, msg_size, timeout );
 
-    if (!handle) return STATUS_ACCESS_VIOLATION;
+    *handle = 0;
     if (!attr) return STATUS_INVALID_PARAMETER;
-
     if ((status = alloc_object_attributes( attr, &objattr, &len ))) return status;
 
     SERVER_START_REQ( create_mailslot )
@@ -4152,6 +4152,7 @@ NTSTATUS WINAPI NtCreateNamedPipeFile( HANDLE *handle, ULONG access, OBJECT_ATTR
     data_size_t len;
     struct object_attributes *objattr;
 
+    *handle = 0;
     if (!attr) return STATUS_INVALID_PARAMETER;
 
     TRACE( "(%p %x %s %p %x %d %x %d %d %d %d %d %d %p)\n",

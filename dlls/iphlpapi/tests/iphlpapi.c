@@ -203,6 +203,8 @@ static void testGetIpAddrTable(void)
             for (i = 0; i < buf->dwNumEntries; i++)
             {
                 ok (buf->table[i].wType != 0, "Test[%d]: expected wType > 0\n", i);
+                ok (buf->table[i].dwBCastAddr == 1, "Test[%d]: got %08x\n", i, buf->table[i].dwBCastAddr);
+                ok (buf->table[i].dwReasmSize == 0xffff, "Test[%d]: got %08x\n", i, buf->table[i].dwReasmSize);
                 trace("Entry[%d]: addr %s, dwIndex %u, wType 0x%x\n", i,
                       ntoa(buf->table[i].dwAddr), buf->table[i].dwIndex, buf->table[i].wType);
             }
@@ -1962,7 +1964,7 @@ static void test_GetUnicastIpAddressEntry(void)
 
     memset( &row, 0, sizeof(row) );
     ret = pGetUnicastIpAddressEntry( &row );
-    todo_wine ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
 
     memset( &row, 0, sizeof(row) );
     row.Address.Ipv4.sin_family = AF_INET;
@@ -1974,7 +1976,7 @@ static void test_GetUnicastIpAddressEntry(void)
     memset( &row, 0, sizeof(row) );
     row.InterfaceIndex = 123;
     ret = pGetUnicastIpAddressEntry( &row );
-    todo_wine ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
+    ok( ret == ERROR_INVALID_PARAMETER, "got %u\n", ret );
 
     memset( &row, 0, sizeof(row) );
     row.InterfaceIndex = get_interface_index();

@@ -70,7 +70,7 @@ void set_gdi_client_ptr( HGDIOBJ obj, void *ptr )
 void *get_gdi_client_ptr( HGDIOBJ obj, WORD type )
 {
     GDI_HANDLE_ENTRY *entry = handle_entry( obj );
-    if (!entry || entry->ExtType != type || !entry->UserPointer)
+    if (!entry || (type && entry->ExtType != type) || !entry->UserPointer)
         return NULL;
     return (void *)(UINT_PTR)entry->UserPointer;
 }
@@ -282,6 +282,16 @@ HRGN WINAPI ExtCreateRegion( const XFORM *xform, DWORD count, const RGNDATA *dat
 }
 
 /***********************************************************************
+ *           CreatePolyPolygonRgn    (GDI32.@)
+ */
+HRGN WINAPI CreatePolyPolygonRgn( const POINT *points, const INT *counts, INT count, INT mode )
+{
+    ULONG ret = NtGdiPolyPolyDraw( ULongToHandle(mode), points, (const UINT *)counts,
+                                   count, NtGdiPolyPolygonRgn );
+    return ULongToHandle( ret );
+}
+
+/***********************************************************************
  *           CreateRectRgnIndirect    (GDI32.@)
  *
  * Creates a simple rectangular region.
@@ -307,4 +317,49 @@ HRGN WINAPI CreateEllipticRgnIndirect( const RECT *rect )
 HRGN WINAPI CreatePolygonRgn( const POINT *points, INT count, INT mode )
 {
     return CreatePolyPolygonRgn( points, &count, 1, mode );
+}
+
+/***********************************************************************
+ *           CreateColorSpaceA    (GDI32.@)
+ */
+HCOLORSPACE WINAPI CreateColorSpaceA( LOGCOLORSPACEA *cs )
+{
+    FIXME( "stub\n" );
+    return 0;
+}
+
+/***********************************************************************
+ *           CreateColorSpaceW    (GDI32.@)
+ */
+HCOLORSPACE WINAPI CreateColorSpaceW( LOGCOLORSPACEW *cs )
+{
+    FIXME( "stub\n" );
+    return 0;
+}
+
+/***********************************************************************
+ *           DeleteColorSpace     (GDI32.@)
+ */
+BOOL WINAPI DeleteColorSpace( HCOLORSPACE cs )
+{
+    FIXME( "stub\n" );
+    return TRUE;
+}
+
+/***********************************************************************
+ *           GetColorSpace    (GDI32.@)
+ */
+HCOLORSPACE WINAPI GetColorSpace( HDC hdc )
+{
+    FIXME( "stub\n" );
+    return 0;
+}
+
+/***********************************************************************
+ *           SetColorSpace     (GDI32.@)
+ */
+HCOLORSPACE WINAPI SetColorSpace( HDC hdc, HCOLORSPACE cs )
+{
+    FIXME( "stub\n" );
+    return cs;
 }

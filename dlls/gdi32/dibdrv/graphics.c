@@ -73,7 +73,7 @@ static BOOL brush_rect( dibdrv_physdev *pdev, dib_brush *brush, const RECT *rect
 
     if (!get_clipped_rects( &pdev->dib, rect, clip, &clipped_rects )) return TRUE;
     ret = brush->rects( pdev, brush, &pdev->dib, clipped_rects.count, clipped_rects.rects,
-                        &dc->brush_org, dc->ROPmode );
+                        &dc->brush_org, dc->attr->rop_mode );
     free_clipped_rects( &clipped_rects );
     return ret;
 }
@@ -100,7 +100,7 @@ static RECT get_device_rect( DC *dc, int left, int top, int right, int bottom, B
     rect.top    = top;
     rect.right  = right;
     rect.bottom = bottom;
-    if (rtl_correction && dc->layout & LAYOUT_RTL)
+    if (rtl_correction && dc->attr->layout & LAYOUT_RTL)
     {
         /* shift the rectangle so that the right border is included after mirroring */
         /* it would be more correct to do this after LPtoDP but that's not what Windows does */
@@ -417,9 +417,9 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
     {
         points[0] = dc->attr->cur_pos;
         lp_to_dp( dc, points, 1 );
-        count = 1 + get_arc_points( dc->ArcDirection, &rect, pt[0], pt[1], points + 1 );
+        count = 1 + get_arc_points( dc->attr->arc_direction, &rect, pt[0], pt[1], points + 1 );
     }
-    else count = get_arc_points( dc->ArcDirection, &rect, pt[0], pt[1], points );
+    else count = get_arc_points( dc->attr->arc_direction, &rect, pt[0], pt[1], points );
 
     if (extra_lines == 2)
     {
@@ -641,7 +641,7 @@ static struct cached_font *add_cached_font( DC *dc, HFONT hfont, UINT aa_flags )
     GetObjectW( hfont, sizeof(font.lf), &font.lf );
     font.xform = dc->xformWorld2Vport;
     font.xform.eDx = font.xform.eDy = 0;  /* unused, would break hashing */
-    if (dc->GraphicsMode == GM_COMPATIBLE)
+    if (dc->attr->graphics_mode == GM_COMPATIBLE)
     {
         font.lf.lfOrientation = font.lf.lfEscapement;
         if (font.xform.eM11 * font.xform.eM22 < 0)
@@ -746,7 +746,7 @@ static struct cached_glyph *get_cached_glyph( struct cached_font *font, UINT ind
  */
 static inline void get_text_bkgnd_masks( DC *dc, const dib_info *dib, rop_mask *mask )
 {
-    COLORREF bg = dc->backgroundColor;
+    COLORREF bg = dc->attr->background_color;
 
     mask->and = 0;
 
@@ -754,7 +754,7 @@ static inline void get_text_bkgnd_masks( DC *dc, const dib_info *dib, rop_mask *
         mask->xor = get_pixel_color( dc, dib, bg, FALSE );
     else
     {
-        COLORREF fg = dc->textColor;
+        COLORREF fg = dc->attr->text_color;
         mask->xor = get_pixel_color( dc, dib, fg, TRUE );
         if (fg != bg) mask->xor = ~mask->xor;
     }
@@ -903,7 +903,7 @@ static void render_string( DC *dc, dib_info *dib, struct cached_font *font, INT 
     glyph_dib.bits.is_copy = FALSE;
     glyph_dib.bits.free    = NULL;
 
-    text_color = get_pixel_color( dc, dib, dc->textColor, TRUE );
+    text_color = get_pixel_color( dc, dib, dc->attr->text_color, TRUE );
 
     if (glyph_dib.bit_count == 32)
         intensity.gamma_ramp = dc->font_gamma_ramp;
@@ -1351,7 +1351,8 @@ BOOL CDECL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, 
 
     if (pdev->brush.style != BS_NULL &&
         get_dib_rect( &pdev->dib, &rc ) &&
-        !(interior = create_polypolygon_region( points, counts, polygons, dc->polyFillMode, &rc )))
+        !(interior = create_polypolygon_region( points, counts, polygons,
+                                                dc->attr->poly_fill_mode, &rc )))
     {
         ret = FALSE;
         goto done;
@@ -1445,27 +1446,6 @@ done:
 }
 
 /***********************************************************************
- *           dibdrv_Polygon
- */
-BOOL CDECL dibdrv_Polygon( PHYSDEV dev, const POINT *pt, INT count )
-{
-    INT counts[1] = { count };
-
-    return dibdrv_PolyPolygon( dev, pt, counts, 1 );
-}
-
-/***********************************************************************
- *           dibdrv_Polyline
- */
-BOOL CDECL dibdrv_Polyline( PHYSDEV dev, const POINT* pt, INT count )
-{
-    DWORD counts[1] = { count };
-
-    if (count < 0) return FALSE;
-    return dibdrv_PolyPolyline( dev, pt, counts, 1 );
-}
-
-/***********************************************************************
  *           dibdrv_Rectangle
  */
 BOOL CDECL dibdrv_Rectangle( PHYSDEV dev, INT left, INT top, INT right, INT bottom )
@@ -1479,13 +1459,14 @@ BOOL CDECL dibdrv_Rectangle( PHYSDEV dev, INT left, INT top, INT right, INT bott
 
     TRACE("(%p, %d, %d, %d, %d)\n", dev, left, top, right, bottom);
 
-    if (dc->GraphicsMode == GM_ADVANCED)
+    if (dc->attr->graphics_mode == GM_ADVANCED)
     {
+        const INT count = 4;
         pts[0].x = pts[3].x = left;
         pts[0].y = pts[1].y = top;
         pts[1].x = pts[2].x = right;
         pts[2].y = pts[3].y = bottom;
-        return dibdrv_Polygon( dev, pts, 4 );
+        return dibdrv_PolyPolygon( dev, pts, &count, 1 );
     }
 
     if (!get_pen_device_rect( dc, pdev, &rect, left, top, right, bottom )) return TRUE;
@@ -1496,7 +1477,7 @@ BOOL CDECL dibdrv_Rectangle( PHYSDEV dev, INT left, INT top, INT right, INT bott
     rect.bottom--;
     reset_dash_origin(pdev);
 
-    if (dc->ArcDirection == AD_CLOCKWISE)
+    if (dc->attr->arc_direction == AD_CLOCKWISE)
     {
         /* 4 pts going clockwise starting from bottom-right */
         pts[0].x = pts[3].x = rect.right;
@@ -1593,7 +1574,7 @@ BOOL CDECL dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
 
     count = ellipse_first_quadrant( ellipse_width, ellipse_height, points );
 
-    if (dc->ArcDirection == AD_CLOCKWISE)
+    if (dc->attr->arc_direction == AD_CLOCKWISE)
     {
         for (i = 0; i < count; i++)
         {
@@ -1714,7 +1695,7 @@ COLORREF CDECL dibdrv_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color )
     color = pdev->dib.funcs->pixel_to_colorref( &pdev->dib, pixel );
 
     if (!get_clipped_rects( &pdev->dib, &rect, pdev->clip, &clipped_rects )) return color;
-    fill_with_pixel( dc, &pdev->dib, pixel, clipped_rects.count, clipped_rects.rects, dc->ROPmode );
+    fill_with_pixel( dc, &pdev->dib, pixel, clipped_rects.count, clipped_rects.rects, dc->attr->rop_mode );
     free_clipped_rects( &clipped_rects );
     return color;
 }

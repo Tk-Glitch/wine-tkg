@@ -1576,6 +1576,8 @@ NTSTATUS WINAPI NtOpenProcess( HANDLE *handle, ACCESS_MASK access,
 {
     NTSTATUS status;
 
+    *handle = 0;
+
     SERVER_START_REQ( open_process )
     {
         req->pid        = HandleToULong( id->UniqueProcess );

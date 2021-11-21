@@ -492,7 +492,7 @@ INT CDECL nulldrv_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst, 
     dst.width  = rect.right - rect.left;
     dst.height = rect.bottom - rect.top;
 
-    if (dc->layout & LAYOUT_RTL && rop & NOMIRRORBITMAP)
+    if (dc->attr->layout & LAYOUT_RTL && rop & NOMIRRORBITMAP)
     {
         dst.x += dst.width;
         dst.width = -dst.width;
@@ -592,7 +592,7 @@ INT CDECL nulldrv_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst, 
     if (err == ERROR_TRANSFORM_NOT_SUPPORTED)
     {
         copy_bitmapinfo( src_info, dst_info );
-        err = stretch_bits( src_info, &src, dst_info, &dst, &src_bits, dc->stretchBltMode );
+        err = stretch_bits( src_info, &src, dst_info, &dst, &src_bits, dc->attr->stretch_blt_mode );
         if (!err) err = dev->funcs->pPutImage( dev, NULL, dst_info, &src_bits, &src, &dst, rop );
     }
     if (err) ret = 0;
@@ -846,7 +846,7 @@ INT CDECL nulldrv_SetDIBitsToDevice( PHYSDEV dev, INT x_dst, INT y_dst, DWORD cx
     dst.y = pt.y;
     dst.width = cx;
     dst.height = cy;
-    if (dc->layout & LAYOUT_RTL) dst.x -= cx - 1;
+    if (dc->attr->layout & LAYOUT_RTL) dst.x -= cx - 1;
 
     rect.left = dst.x;
     rect.top = dst.y;
@@ -937,8 +937,8 @@ UINT WINAPI SetDIBColorTable( HDC hdc, UINT startpos, UINT entries, const RGBQUA
 
         if (result)  /* update colors of selected objects */
         {
-            SetTextColor( hdc, dc->textColor );
-            SetBkColor( hdc, dc->backgroundColor );
+            SetTextColor( hdc, dc->attr->text_color );
+            SetBkColor( hdc, dc->attr->background_color );
             NtGdiSelectPen( hdc, dc->hPen );
             NtGdiSelectBrush( hdc, dc->hBrush );
         }
@@ -1636,7 +1636,8 @@ NTSTATUS WINAPI D3DKMTCreateDCFromMemory( D3DKMT_CREATEDCFROMMEMORY *desc )
         !desc->Pitch || desc->Pitch < get_dib_stride( desc->Width, format->bit_count ) ||
         !desc->Height || desc->Height > UINT_MAX / desc->Pitch) return STATUS_INVALID_PARAMETER;
 
-    if (!desc->hDeviceDc || !(dc = CreateCompatibleDC( desc->hDeviceDc ))) return STATUS_INVALID_PARAMETER;
+    if (!desc->hDeviceDc || !(dc = NtGdiCreateCompatibleDC( desc->hDeviceDc )))
+        return STATUS_INVALID_PARAMETER;
 
     if (!(bmp = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*bmp) ))) goto error;
 
