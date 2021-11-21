@@ -26,8 +26,6 @@ HRESULT Connection_create( void ** ) DECLSPEC_HIDDEN;
 HRESULT Recordset_create( void ** ) DECLSPEC_HIDDEN;
 HRESULT Stream_create( void ** ) DECLSPEC_HIDDEN;
 
-HRESULT create_command_text(IUnknown *session, BSTR command, ICommandText **cmd_text) DECLSPEC_HIDDEN;
-
 static inline void *heap_realloc_zero( void *mem, SIZE_T len )
 {
     if (!mem) return HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, len );
@@ -48,6 +46,7 @@ typedef enum tid_t {
     Connection_tid,
     Field_tid,
     Fields_tid,
+    Properties_tid,
     Recordset_tid,
     Stream_tid,
     LAST_tid

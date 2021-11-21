@@ -31,12 +31,16 @@ static unsigned int page_size;
 
 static DWORD64 (WINAPI *pGetEnabledXStateFeatures)(void);
 static NTSTATUS (WINAPI *pRtlCreateUserStack)(SIZE_T, SIZE_T, ULONG, SIZE_T, SIZE_T, INITIAL_TEB *);
+static NTSTATUS (WINAPI *pRtlCreateUserThread)(HANDLE, SECURITY_DESCRIPTOR*, BOOLEAN, ULONG, SIZE_T,
+                                               SIZE_T, PRTL_THREAD_START_ROUTINE, void*, HANDLE*, CLIENT_ID* );
 static ULONG64 (WINAPI *pRtlGetEnabledExtendedFeatures)(ULONG64);
 static NTSTATUS (WINAPI *pRtlFreeUserStack)(void *);
+static void * (WINAPI *pRtlFindExportedRoutineByName)(HMODULE,const char*);
 static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
 static NTSTATUS (WINAPI *pNtAllocateVirtualMemoryEx)(HANDLE, PVOID *, SIZE_T *, ULONG, ULONG,
                                                      MEM_EXTENDED_PARAMETER *, ULONG);
 static const BOOL is_win64 = sizeof(void*) != sizeof(int);
+static BOOL is_wow64;
 
 static SYSTEM_BASIC_INFORMATION sbi;
 
@@ -90,9 +94,6 @@ static void test_NtAllocateVirtualMemory(void)
     NTSTATUS status;
     SIZE_T size;
     ULONG_PTR zero_bits;
-    BOOL is_wow64;
-
-    if (!pIsWow64Process || !pIsWow64Process(NtCurrentProcess(), &is_wow64)) is_wow64 = FALSE;
 
     /* simple allocation should success */
     size = 0x1000;
@@ -484,6 +485,11 @@ static DWORD WINAPI test_stack_size_thread(void *ptr)
     todo_wine ok( committed == 0x6000, "unexpected stack committed size %x, expected 6000\n", committed );
 #endif
 
+    ExitThread(0);
+}
+
+static DWORD WINAPI test_stack_size_dummy_thread(void *ptr)
+{
     return 0;
 }
 
@@ -497,6 +503,7 @@ static void test_RtlCreateUserStack(void)
     unsigned int i;
     NTSTATUS ret;
     HANDLE thread;
+    CLIENT_ID id;
 
     struct
     {
@@ -562,6 +569,62 @@ static void test_RtlCreateUserStack(void)
     thread = CreateThread(NULL, 0x3ff000, test_stack_size_thread, &args, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
     WaitForSingleObject(thread, INFINITE);
     CloseHandle(thread);
+
+    if (is_win64)
+    {
+        thread = CreateThread(NULL, 0x80000000, test_stack_size_dummy_thread, NULL, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
+        ok(thread != NULL, "CreateThread with huge stack failed\n");
+        WaitForSingleObject(thread, INFINITE);
+        CloseHandle(thread);
+    }
+
+    args.expect_committed = default_commit < 0x2000 ? 0x2000 : default_commit;
+    args.expect_reserved = 0x100000;
+    for (i = 0; i < 32; i++)
+    {
+        ULONG mask = ~0u >> i;
+        NTSTATUS expect_ret = STATUS_SUCCESS;
+
+        if (i == 12) expect_ret = STATUS_CONFLICTING_ADDRESSES;
+        else if (i >= 13) expect_ret = STATUS_INVALID_PARAMETER;
+        ret = pRtlCreateUserStack( args.expect_committed, args.expect_reserved, i, 0x1000, 0x1000, &stack );
+        ok( ret == expect_ret || ret == STATUS_NO_MEMORY ||
+            (ret == STATUS_INVALID_PARAMETER_3 && expect_ret == STATUS_INVALID_PARAMETER) ||
+            broken( i == 1 && ret == STATUS_INVALID_PARAMETER_3 ), /* win7 */
+            "%u: got %x / %x\n", i, ret, expect_ret );
+        if (!ret) pRtlFreeUserStack( stack.DeallocationStack );
+        ret = pRtlCreateUserThread( GetCurrentProcess(), NULL, FALSE, i,
+                                    args.expect_reserved, args.expect_committed,
+                                    (void *)test_stack_size_thread, &args, &thread, &id );
+        ok( ret == expect_ret || ret == STATUS_NO_MEMORY ||
+            (ret == STATUS_INVALID_PARAMETER_3 && expect_ret == STATUS_INVALID_PARAMETER) ||
+            broken( i == 1 && ret == STATUS_INVALID_PARAMETER_3 ), /* win7 */
+            "%u: got %x / %x\n", i, ret, expect_ret );
+        if (!ret)
+        {
+            WaitForSingleObject( thread, INFINITE );
+            CloseHandle( thread );
+        }
+
+        if (mask <= 31) continue;
+        if (!is_win64 && !is_wow64) expect_ret = STATUS_INVALID_PARAMETER_3;
+        ret = pRtlCreateUserStack( args.expect_committed, args.expect_reserved, mask, 0x1000, 0x1000, &stack );
+        ok( ret == expect_ret || ret == STATUS_NO_MEMORY ||
+            (ret == STATUS_INVALID_PARAMETER_3 && expect_ret == STATUS_INVALID_PARAMETER),
+            "%08x: got %x / %x\n", mask, ret, expect_ret );
+        if (!ret) pRtlFreeUserStack( stack.DeallocationStack );
+        ret = pRtlCreateUserThread( GetCurrentProcess(), NULL, FALSE, mask,
+                                    args.expect_reserved, args.expect_committed,
+                                    (void *)test_stack_size_thread, &args, &thread, &id );
+        ok( ret == expect_ret || ret == STATUS_NO_MEMORY ||
+            (ret == STATUS_INVALID_PARAMETER_3 && expect_ret == STATUS_INVALID_PARAMETER),
+            "%08x: got %x / %x\n", mask, ret, expect_ret );
+        if (!ret)
+        {
+            WaitForSingleObject( thread, INFINITE );
+            CloseHandle( thread );
+        }
+    }
 }
 
 static void test_NtMapViewOfSection(void)
@@ -571,7 +634,7 @@ static void test_NtMapViewOfSection(void)
     char buffer[sizeof(data)];
     HANDLE file, mapping, process;
     void *ptr, *ptr2;
-    BOOL is_wow64, ret;
+    BOOL ret;
     DWORD status, written;
     SIZE_T size, result;
     LARGE_INTEGER offset;
@@ -996,6 +1059,16 @@ static void test_syscalls(void)
     }
     perform_relocations( ptr, delta );
     pNtClose = (void *)GetProcAddress( module, "NtClose" );
+
+    if (pRtlFindExportedRoutineByName)
+    {
+        void *func = pRtlFindExportedRoutineByName( module, "NtClose" );
+        ok( func == (void *)pNtClose, "wrong ptr %p / %p\n", func, pNtClose );
+        func = pRtlFindExportedRoutineByName( ptr, "NtClose" );
+        ok( (char *)func - (char *)pNtClose == delta, "wrong ptr %p / %p\n", func, pNtClose );
+    }
+    else win_skip( "RtlFindExportedRoutineByName not supported\n" );
+
     if (!memcmp( pNtClose, (char *)pNtClose + delta, 32 ))
     {
         pNtClose = (void *)((char *)pNtClose + delta);
@@ -1040,13 +1113,16 @@ START_TEST(virtual)
     pGetEnabledXStateFeatures = (void *)GetProcAddress(mod, "GetEnabledXStateFeatures");
     mod = GetModuleHandleA("ntdll.dll");
     pRtlCreateUserStack = (void *)GetProcAddress(mod, "RtlCreateUserStack");
+    pRtlCreateUserThread = (void *)GetProcAddress(mod, "RtlCreateUserThread");
     pRtlFreeUserStack = (void *)GetProcAddress(mod, "RtlFreeUserStack");
+    pRtlFindExportedRoutineByName = (void *)GetProcAddress(mod, "RtlFindExportedRoutineByName");
     pRtlGetEnabledExtendedFeatures = (void *)GetProcAddress(mod, "RtlGetEnabledExtendedFeatures");
     pNtAllocateVirtualMemoryEx = (void *)GetProcAddress(mod, "NtAllocateVirtualMemoryEx");
 
     NtQuerySystemInformation(SystemBasicInformation, &sbi, sizeof(sbi), NULL);
     trace("system page size %#x\n", sbi.PageSize);
     page_size = sbi.PageSize;
+    if (!pIsWow64Process || !pIsWow64Process(NtCurrentProcess(), &is_wow64)) is_wow64 = FALSE;
 
     test_NtAllocateVirtualMemory();
     test_RtlCreateUserStack();

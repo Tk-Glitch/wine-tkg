@@ -457,45 +457,6 @@ static float CDECL unix_hypotf(float x, float y)
 }
 
 /*********************************************************************
- *      j0
- */
-static double CDECL unix_j0(double num)
-{
-#ifdef HAVE_J0
-    return j0(num);
-#else
-    FIXME("not implemented\n");
-    return 0;
-#endif
-}
-
-/*********************************************************************
- *      j1
- */
-static double CDECL unix_j1(double num)
-{
-#ifdef HAVE_J1
-    return j1(num);
-#else
-    FIXME("not implemented\n");
-    return 0;
-#endif
-}
-
-/*********************************************************************
- *      jn
- */
-static double CDECL unix_jn(int n, double num)
-{
-#ifdef HAVE_JN
-    return jn(n, num);
-#else
-    FIXME("not implemented\n");
-    return 0;
-#endif
-}
-
-/*********************************************************************
  *      ldexp
  */
 static double CDECL unix_ldexp(double num, int exp)
@@ -848,78 +809,6 @@ static float CDECL unix_rintf(float x)
 }
 
 /*********************************************************************
- *      round
- */
-static double CDECL unix_round(double x)
-{
-#ifdef HAVE_ROUND
-    return round(x);
-#else
-    return unix_rint(x);
-#endif
-}
-
-/*********************************************************************
- *      roundf
- */
-static float CDECL unix_roundf(float x)
-{
-#ifdef HAVE_ROUNDF
-    return roundf(x);
-#else
-    return unix_round(x);
-#endif
-}
-
-/*********************************************************************
- *      lround
- */
-static int CDECL unix_lround(double x)
-{
-#ifdef HAVE_LROUND
-    return lround(x);
-#else
-    return unix_round(x);
-#endif
-}
-
-/*********************************************************************
- *      lroundf
- */
-static int CDECL unix_lroundf(float x)
-{
-#ifdef HAVE_LROUNDF
-    return lroundf(x);
-#else
-    return unix_lround(x);
-#endif
-}
-
-/*********************************************************************
- *      llround
- */
-static __int64 CDECL unix_llround(double x)
-{
-#ifdef HAVE_LLROUND
-    return llround(x);
-#else
-    return unix_round(x);
-#endif
-}
-
-/*********************************************************************
- *      llroundf
- */
-static __int64 CDECL unix_llroundf(float x)
-{
-#ifdef HAVE_LLROUNDF
-    return llroundf(x);
-#else
-    return unix_llround(x);
-#endif
-}
-
-/*********************************************************************
  *      sin
  */
 static double CDECL unix_sin( double x )
@@ -1033,45 +922,6 @@ static float CDECL unix_tgammaf(float x)
 #endif
 }
 
-/*********************************************************************
- *      y0
- */
-static double CDECL unix_y0(double num)
-{
-#ifdef HAVE_Y0
-    return y0(num);
-#else
-    FIXME("not implemented\n");
-    return 0;
-#endif
-}
-
-/*********************************************************************
- *      y1
- */
-static double CDECL unix_y1(double num)
-{
-#ifdef HAVE_Y1
-    return y1(num);
-#else
-    FIXME("not implemented\n");
-    return 0;
-#endif
-}
-
-/*********************************************************************
- *      yn
- */
-static double CDECL unix_yn(int order, double num)
-{
-#ifdef HAVE_YN
-    return yn(order,num);
-#else
-    FIXME("not implemented\n");
-    return 0;
-#endif
-}
-
 static const struct unix_funcs funcs =
 {
     unix_acosh,
@@ -1108,16 +958,11 @@ static const struct unix_funcs funcs =
     unix_frexpf,
     unix_hypot,
     unix_hypotf,
-    unix_j0,
-    unix_j1,
-    unix_jn,
     unix_ldexp,
     unix_lgamma,
     unix_lgammaf,
     unix_llrint,
     unix_llrintf,
-    unix_llround,
-    unix_llroundf,
     unix_log,
     unix_logf,
     unix_log10,
@@ -1130,8 +975,6 @@ static const struct unix_funcs funcs =
     unix_logbf,
     unix_lrint,
     unix_lrintf,
-    unix_lround,
-    unix_lroundf,
     unix_modf,
     unix_modff,
     unix_nearbyint,
@@ -1148,8 +991,6 @@ static const struct unix_funcs funcs =
     unix_remquof,
     unix_rint,
     unix_rintf,
-    unix_round,
-    unix_roundf,
     unix_sin,
     unix_sinf,
     unix_sinh,
@@ -1161,10 +1002,7 @@ static const struct unix_funcs funcs =
     unix_tgamma,
     unix_tgammaf,
     unix_trunc,
-    unix_truncf,
-    unix_y0,
-    unix_y1,
-    unix_yn
+    unix_truncf
 };
 
 NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out )

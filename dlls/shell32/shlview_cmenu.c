@@ -50,6 +50,8 @@ const GUID IID_ISecurityInformation = {0x965fc360, 0x16ff, 0x11d0, {0x91, 0xcb, 
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
+#define FCIDM_BASE 0x7000
+
 /* According to https://blogs.msdn.microsoft.com/oldnewthing/20070726-00/?p=25833 */
 static const SI_ACCESS access_rights_files[] =
 {
@@ -263,6 +265,37 @@ static ULONG WINAPI ContextMenu_Release(IContextMenu3 *iface)
     return ref;
 }
 
+static UINT max_menu_id(HMENU hmenu, UINT offset, UINT last)
+{
+    int i;
+    UINT max_id = 0;
+
+    for (i = GetMenuItemCount(hmenu) - 1; i >= 0; i--)
+    {
+        MENUITEMINFOW item;
+        memset(&item, 0, sizeof(MENUITEMINFOW));
+        item.cbSize = sizeof(MENUITEMINFOW);
+        item.fMask =  MIIM_ID | MIIM_SUBMENU | MIIM_TYPE;
+        if (!GetMenuItemInfoW(hmenu, i, TRUE, &item))
+            continue;
+        if (!(item.fType & MFT_SEPARATOR))
+        {
+            if (item.hSubMenu)
+            {
+                UINT submenu_max_id = max_menu_id(item.hSubMenu, offset, last);
+                if (max_id < submenu_max_id)
+                    max_id = submenu_max_id;
+            }
+            if (item.wID + offset <= last)
+            {
+                if (max_id <= item.wID + offset)
+                    max_id = item.wID + offset + 1;
+            }
+        }
+    }
+    return max_id;
+}
+
 static BOOL CheckClipboard(void)
 {
     IDataObject *pda;
@@ -308,7 +341,8 @@ static HRESULT WINAPI ItemMenu_QueryContextMenu(
         if(uFlags & CMF_EXPLORE)
             RemoveMenu(hmenures, FCIDM_SHVIEW_OPEN, MF_BYCOMMAND);
 
-        uIDMax = Shell_MergeMenus(hmenu, GetSubMenu(hmenures, 0), indexMenu, idCmdFirst, idCmdLast, MM_SUBMENUSHAVEIDS);
+        Shell_MergeMenus(hmenu, GetSubMenu(hmenures, 0), indexMenu, idCmdFirst - FCIDM_BASE, idCmdLast, MM_SUBMENUSHAVEIDS);
+        uIDMax = max_menu_id(GetSubMenu(hmenures, 0), idCmdFirst - FCIDM_BASE, idCmdLast);
 
         DestroyMenu(hmenures);
 
@@ -320,14 +354,14 @@ static HRESULT WINAPI ItemMenu_QueryContextMenu(
             mi.fMask = MIIM_ID | MIIM_STRING | MIIM_FTYPE;
             mi.dwTypeData = str;
             mi.cch = 255;
-            GetMenuItemInfoW(hmenu, FCIDM_SHVIEW_EXPLORE, MF_BYCOMMAND, &mi);
-            RemoveMenu(hmenu, FCIDM_SHVIEW_EXPLORE + idCmdFirst, MF_BYCOMMAND);
+            GetMenuItemInfoW(hmenu, FCIDM_SHVIEW_EXPLORE - FCIDM_BASE + idCmdFirst, MF_BYCOMMAND, &mi);
+            RemoveMenu(hmenu, FCIDM_SHVIEW_EXPLORE - FCIDM_BASE + idCmdFirst, MF_BYCOMMAND);
 
             mi.cbSize = sizeof(mi);
             mi.fMask = MIIM_ID | MIIM_TYPE | MIIM_STATE | MIIM_STRING;
             mi.dwTypeData = str;
             mi.fState = MFS_ENABLED;
-            mi.wID = FCIDM_SHVIEW_EXPLORE;
+            mi.wID = FCIDM_SHVIEW_EXPLORE - FCIDM_BASE + idCmdFirst;
             mi.fType = MFT_STRING;
             InsertMenuItemW(hmenu, (uFlags & CMF_EXPLORE) ? 1 : 2, MF_BYPOSITION, &mi);
         }
@@ -338,7 +372,7 @@ static HRESULT WINAPI ItemMenu_QueryContextMenu(
             IShellFolder_GetAttributesOf(This->parent, 1, (LPCITEMIDLIST*)This->apidl, &attr);
 
         if(uFlags & ~CMF_CANRENAME)
-            RemoveMenu(hmenu, FCIDM_SHVIEW_RENAME, MF_BYCOMMAND);
+            RemoveMenu(hmenu, FCIDM_SHVIEW_RENAME - FCIDM_BASE + idCmdFirst, MF_BYCOMMAND);
         else
         {
             UINT enable = MF_BYCOMMAND;
@@ -349,11 +383,11 @@ static HRESULT WINAPI ItemMenu_QueryContextMenu(
             else
                 enable |= (attr & SFGAO_CANRENAME) ? MFS_ENABLED : MFS_DISABLED;
 
-            EnableMenuItem(hmenu, FCIDM_SHVIEW_RENAME, enable);
+            EnableMenuItem(hmenu, FCIDM_SHVIEW_RENAME - FCIDM_BASE + idCmdFirst, enable);
         }
 
         if ((attr & (SFGAO_FILESYSTEM|SFGAO_FOLDER)) != (SFGAO_FILESYSTEM|SFGAO_FOLDER) || !CheckClipboard())
-            RemoveMenu(hmenu, FCIDM_SHVIEW_INSERT + idCmdFirst, MF_BYCOMMAND);
+            RemoveMenu(hmenu, FCIDM_SHVIEW_INSERT - FCIDM_BASE + idCmdFirst, MF_BYCOMMAND);
 
         return MAKE_HRESULT(SEVERITY_SUCCESS, 0, uIDMax-idCmdFirst);
     }
@@ -1208,7 +1242,7 @@ static HRESULT WINAPI ItemMenu_InvokeCommand(
 
     if (IS_INTRESOURCE(lpcmi->lpVerb))
     {
-        switch(LOWORD(lpcmi->lpVerb))
+        switch(LOWORD(lpcmi->lpVerb) + FCIDM_BASE)
         {
         case FCIDM_SHVIEW_EXPLORE:
             TRACE("Verb FCIDM_SHVIEW_EXPLORE\n");
@@ -1268,6 +1302,10 @@ static HRESULT WINAPI ItemMenu_InvokeCommand(
         TRACE("Verb is %s\n",debugstr_a(lpcmi->lpVerb));
         if (strcmp(lpcmi->lpVerb,"delete")==0)
             DoDelete(This);
+        else if (strcmp(lpcmi->lpVerb,"copy")==0)
+            DoCopyOrCut(This, lpcmi->hwnd, FALSE);
+        else if (strcmp(lpcmi->lpVerb,"cut")==0)
+            DoCopyOrCut(This, lpcmi->hwnd, TRUE);
         else if (strcmp(lpcmi->lpVerb,"properties")==0)
             DoOpenProperties(This, lpcmi->hwnd);
         else if (strcmp(lpcmi->lpVerb,"cut")==0)
@@ -1311,7 +1349,7 @@ static HRESULT WINAPI ItemMenu_GetCommandString(IContextMenu3 *iface, UINT_PTR c
 
     case GCS_VERBA:
     case GCS_VERBW:
-        switch (cmdid)
+        switch (cmdid + FCIDM_BASE)
         {
         case FCIDM_SHVIEW_OPEN:
             cmdW = openW;
@@ -1543,8 +1581,9 @@ static HRESULT WINAPI BackgroundMenu_QueryContextMenu(
     }
     else
     {
-        idMax = Shell_MergeMenus (hMenu, GetSubMenu(hMyMenu,0), indexMenu,
-                                  idCmdFirst, idCmdLast, MM_SUBMENUSHAVEIDS);
+        Shell_MergeMenus (hMenu, GetSubMenu(hMyMenu,0), indexMenu,
+                          idCmdFirst - FCIDM_BASE, idCmdLast, MM_SUBMENUSHAVEIDS);
+        idMax = max_menu_id(GetSubMenu(hMyMenu, 0), idCmdFirst - FCIDM_BASE, idCmdLast);
         hr =  MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, idMax-idCmdFirst);
     }
     DestroyMenu(hMyMenu);
@@ -1581,7 +1620,7 @@ static void DoNewFolder(ContextMenu *This, IShellView *view)
 
 static BOOL DoPaste(ContextMenu *This)
 {
-	BOOL bSuccess = FALSE;
+	BOOL bSuccess = TRUE;
 	IDataObject * pda;
 
 	TRACE("\n");
@@ -1602,6 +1641,7 @@ static BOOL DoPaste(ContextMenu *This)
 	    LPITEMIDLIST * apidl;
 	    LPITEMIDLIST pidl;
 	    IShellFolder *psfFrom = NULL, *psfDesktop;
+	    int i;
 
 	    LPIDA lpcida = GlobalLock(medium.u.hGlobal);
 	    TRACE("cida=%p\n", lpcida);
@@ -1615,55 +1655,54 @@ static BOOL DoPaste(ContextMenu *This)
             if (_ILIsValue(pidl))
                 ILRemoveLastID(pidl);
 
-	    /* bind to the source shellfolder */
-	    SHGetDesktopFolder(&psfDesktop);
-	    if(psfDesktop)
-	    {
-	      IShellFolder_BindToObject(psfDesktop, pidl, NULL, &IID_IShellFolder, (LPVOID*)&psfFrom);
-	      IShellFolder_Release(psfDesktop);
-	    }
+	    for (i = 0; bSuccess && i < lpcida->cidl; i++) {
+	      ITEMIDLIST *apidl_dir = NULL;
+	      ITEMIDLIST *apidl_item;
 
-	    if (psfFrom)
-	    {
-	      /* get source and destination shellfolder */
-            ISFHelper *psfhlpdst = NULL, *psfhlpsrc = NULL;
-
-            /* when using an item context menu we first need to bind to the selected folder */
-            if (This->apidl)
-            {
-                IShellFolder *folder;
-
-                if (SUCCEEDED(IShellFolder_BindToObject(This->parent, This->apidl[0], NULL, &IID_IShellFolder, (LPVOID*)&folder)))
-                {
-                    IShellFolder_QueryInterface(folder, &IID_ISFHelper, (void**)&psfhlpdst);
-                    IShellFolder_Release(folder);
-                }
-            }
-            else
-                IShellFolder_QueryInterface(This->parent, &IID_ISFHelper, (void**)&psfhlpdst);
-
-	      IShellFolder_QueryInterface(psfFrom, &IID_ISFHelper, (void**)&psfhlpsrc);
-
-	      /* do the copy/move */
-	      if (psfhlpdst && psfhlpsrc)
+	      psfFrom = NULL;
+	      /* bind to the source shellfolder */
+	      SHGetDesktopFolder(&psfDesktop);
+	      if(psfDesktop)
 	      {
-                DWORD dropEffect;
-                GetDropEffect(pda, &dropEffect);
-
-                if (SUCCEEDED(ISFHelper_CopyItems(psfhlpdst, psfFrom, lpcida->cidl, (LPCITEMIDLIST*)apidl)))
-                {
-                    if (dropEffect == DROPEFFECT_MOVE)
-                    {
-                        if (SUCCEEDED(ISFHelper_DeleteItems(psfhlpsrc, lpcida->cidl, (LPCITEMIDLIST*)apidl, FALSE)))
-                            bSuccess = TRUE;
-                    }
-                    else
-                        bSuccess = TRUE;
-                }
+	        apidl_dir = ILClone(apidl[i]);
+	        ILRemoveLastID(apidl_dir);
+	        apidl_item = ILFindLastID(apidl[i]);
+	        IShellFolder_BindToObject(psfDesktop, apidl_dir, NULL, &IID_IShellFolder, (LPVOID*)&psfFrom);
+	        IShellFolder_Release(psfDesktop);
 	      }
-	      if(psfhlpdst) ISFHelper_Release(psfhlpdst);
-	      if(psfhlpsrc) ISFHelper_Release(psfhlpsrc);
-	      IShellFolder_Release(psfFrom);
+
+	      if (psfFrom)
+	      {
+	        /* get source and destination shellfolder */
+	        ISFHelper *psfhlpdst, *psfhlpsrc;
+	        IShellFolder_QueryInterface(This->parent, &IID_ISFHelper, (void**)&psfhlpdst);
+	        IShellFolder_QueryInterface(psfFrom, &IID_ISFHelper, (void**)&psfhlpsrc);
+
+	        /* do the copy/move */
+	        if (psfhlpdst && psfhlpsrc)
+	        {
+                    DWORD dropEffect;
+                    GetDropEffect(pda, &dropEffect);
+
+	          HRESULT hr = ISFHelper_CopyItems(psfhlpdst, psfFrom, 1, (LPCITEMIDLIST*)&apidl_item);
+	          if (SUCCEEDED(hr))
+                  {
+                      if (dropEffect == DROPEFFECT_MOVE)
+                      {
+                          if (FAILED(ISFHelper_DeleteItems(psfhlpsrc, lpcida->cidl, (LPCITEMIDLIST*)apidl, FALSE)))
+                              bSuccess = FALSE;
+                      }
+                  }
+                  else
+	            bSuccess = FALSE;
+	        }
+	        if(psfhlpdst) ISFHelper_Release(psfhlpdst);
+	        if(psfhlpsrc) ISFHelper_Release(psfhlpsrc);
+	        IShellFolder_Release(psfFrom);
+	      }
+	      else
+	        bSuccess = FALSE;
+	      SHFree(apidl_dir);
 	    }
 
 	    _ILFreeaPidl(apidl, lpcida->cidl);
@@ -1672,8 +1711,12 @@ static BOOL DoPaste(ContextMenu *This)
 	    /* release the medium*/
 	    ReleaseStgMedium(&medium);
 	  }
+	  else
+	    bSuccess = FALSE;
 	  IDataObject_Release(pda);
 	}
+	else
+	  bSuccess = FALSE;
 #if 0
 	HGLOBAL  hMem;
 
@@ -1735,6 +1778,10 @@ static HRESULT WINAPI BackgroundMenu_InvokeCommand(
         {
 	    if (hWnd) SendMessageA(hWnd, WM_COMMAND, MAKEWPARAM(FCIDM_SHVIEW_REPORTVIEW, 0), 0);
         }
+        else if (!strcmp(lpcmi->lpVerb, "paste"))
+        {
+            DoPaste(This);
+        }
         else
         {
             FIXME("please report: unknown verb %s\n", debugstr_a(lpcmi->lpVerb));
@@ -1742,7 +1789,7 @@ static HRESULT WINAPI BackgroundMenu_InvokeCommand(
     }
     else
     {
-        switch (LOWORD(lpcmi->lpVerb))
+        switch (LOWORD(lpcmi->lpVerb) + FCIDM_BASE)
         {
 	    case FCIDM_SHVIEW_REFRESH:
 	        if (view) IShellView_Refresh(view);
@@ -1785,27 +1832,66 @@ static HRESULT WINAPI BackgroundMenu_GetCommandString(
 	LPSTR lpszName,
 	UINT uMaxNameLen)
 {
-        ContextMenu *This = impl_from_IContextMenu3(iface);
+    static const WCHAR pasteW[] = {'p','a','s','t','e',0};
+    static const WCHAR propertiesW[] = {'p','r','o','p','e','r','t','i','e','s',0};
+    ContextMenu *This = impl_from_IContextMenu3(iface);
+    const WCHAR *cmdW = NULL;
+    HRESULT hr = E_FAIL;
 
-	TRACE("(%p)->(idcom=%lx flags=%x %p name=%p len=%x)\n",This, idCommand, uFlags, lpReserved, lpszName, uMaxNameLen);
+    TRACE("(%p)->(idcom=%lx flags=%x %p name=%p len=%x)\n",This, idCommand, uFlags, lpReserved, lpszName, uMaxNameLen);
 
-	/* test the existence of the menu items, the file dialog enables
-	   the buttons according to this */
-	if (uFlags == GCS_VALIDATEA)
-	{
-	  if(HIWORD(idCommand))
-	  {
-	    if (!strcmp((LPSTR)idCommand, CMDSTR_VIEWLISTA) ||
-	        !strcmp((LPSTR)idCommand, CMDSTR_VIEWDETAILSA) ||
-	        !strcmp((LPSTR)idCommand, CMDSTR_NEWFOLDERA))
-	    {
-	      return S_OK;
-	    }
-	  }
-	}
+    switch (uFlags)
+    {
+    case GCS_HELPTEXTA:
+    case GCS_HELPTEXTW:
+        hr = E_NOTIMPL;
+        break;
 
-	FIXME("unknown command string\n");
-	return E_FAIL;
+    case GCS_VERBA:
+    case GCS_VERBW:
+        switch (idCommand + FCIDM_BASE)
+        {
+        case FCIDM_SHVIEW_INSERT:
+            cmdW = pasteW;
+            break;
+        case FCIDM_SHVIEW_PROPERTIES:
+            cmdW = propertiesW;
+            break;
+        }
+
+        if (!cmdW)
+        {
+            hr = E_INVALIDARG;
+            break;
+        }
+
+        if (uFlags == GCS_VERBA)
+            WideCharToMultiByte(CP_ACP, 0, cmdW, -1, lpszName, uMaxNameLen, NULL, NULL);
+        else
+            lstrcpynW((WCHAR *)lpszName, cmdW, uMaxNameLen);
+        TRACE("name %s\n", uFlags == GCS_VERBA ? debugstr_a(lpszName) : debugstr_w((WCHAR *)lpszName));
+        hr = S_OK;
+        break;
+
+    case GCS_VALIDATEA:
+    case GCS_VALIDATEW:
+        /* test the existence of the menu items, the file dialog enables
+           the buttons according to this */
+        if (HIWORD(idCommand))
+        {
+            if (!strcmp((LPSTR)idCommand, CMDSTR_VIEWLISTA) ||
+                !strcmp((LPSTR)idCommand, CMDSTR_VIEWDETAILSA) ||
+                !strcmp((LPSTR)idCommand, CMDSTR_NEWFOLDERA))
+                hr = S_OK;
+            else
+            {
+                FIXME("unknown command string %s\n", uFlags == GCS_VALIDATEA ? debugstr_a((LPSTR)idCommand) : debugstr_w((WCHAR*)idCommand));
+                hr = E_FAIL;
+            }
+        }
+        break;
+    }
+    return hr;
 }
 
 static const IContextMenu3Vtbl BackgroundContextMenuVtbl =

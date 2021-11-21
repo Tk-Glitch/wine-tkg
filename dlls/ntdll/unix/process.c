@@ -58,7 +58,9 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
+#include "winioctl.h"
 #include "unix_private.h"
+#include "wine/condrv.h"
 #include "wine/exception.h"
 #include "wine/server.h"
 #include "wine/debug.h"
@@ -70,24 +72,7 @@ static ULONG execute_flags = MEM_EXECUTE_OPTION_DISABLE | (sizeof(void *) > size
                                                            MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION |
                                                            MEM_EXECUTE_OPTION_PERMANENT : 0);
 
-static const char * const cpu_names[] = { "x86", "x86_64", "ARM", "ARM64" };
-
 static UINT process_error_mode;
-
-static client_cpu_t get_machine_cpu( pe_image_info_t *pe_info )
-{
-    switch (pe_info->machine)
-    {
-    case IMAGE_FILE_MACHINE_I386:
-        if ((is_win64 || is_wow64) && (pe_info->image_flags & IMAGE_FLAGS_ComPlusNativeReady))
-            return CPU_x86_64;
-        return CPU_x86;
-    case IMAGE_FILE_MACHINE_AMD64: return CPU_x86_64;
-    case IMAGE_FILE_MACHINE_ARMNT: return CPU_ARM;
-    case IMAGE_FILE_MACHINE_ARM64: return CPU_ARM64;
-    default: return 0;
-    }
-}
 
 static char **build_argv( const UNICODE_STRING *cmdline, int reserved )
 {
@@ -404,9 +389,20 @@ static void set_stdio_fd( int stdin_fd, int stdout_fd )
         if (stdout_fd == -1) stdout_fd = fd;
     }
 
-    dup2( stdin_fd, 0 );
-    dup2( stdout_fd, 1 );
+    if (stdin_fd != 0) dup2( stdin_fd, 0 );
+    if (stdout_fd != 1) dup2( stdout_fd, 1 );
     if (fd != -1) close( fd );
+}
+
+
+/***********************************************************************
+ *           is_unix_console_handle
+ */
+static BOOL is_unix_console_handle( HANDLE handle )
+{
+    IO_STATUS_BLOCK io;
+    return !NtDeviceIoControlFile( handle, NULL, NULL, NULL, &io, IOCTL_CONDRV_IS_UNIX,
+                                   NULL, 0, NULL, 0 );
 }
 
 
@@ -421,8 +417,13 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
     pid_t pid;
     char **argv;
 
-    wine_server_handle_to_fd( params->hStdInput, FILE_READ_DATA, &stdin_fd, NULL );
-    wine_server_handle_to_fd( params->hStdOutput, FILE_WRITE_DATA, &stdout_fd, NULL );
+    if (wine_server_handle_to_fd( params->hStdInput, FILE_READ_DATA, &stdin_fd, NULL ) &&
+        isatty(0) && is_unix_console_handle( params->hStdInput ))
+        stdin_fd = 0;
+
+    if (wine_server_handle_to_fd( params->hStdOutput, FILE_WRITE_DATA, &stdout_fd, NULL ) &&
+        isatty(1) && is_unix_console_handle( params->hStdOutput ))
+        stdout_fd = 1;
 
     if (!(pid = fork()))  /* child */
     {
@@ -437,8 +438,8 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
             }
             else set_stdio_fd( stdin_fd, stdout_fd );
 
-            if (stdin_fd != -1) close( stdin_fd );
-            if (stdout_fd != -1) close( stdout_fd );
+            if (stdin_fd != -1 && stdin_fd != 0) close( stdin_fd );
+            if (stdout_fd != -1 && stdout_fd != 1) close( stdout_fd );
 
             if (winedebug) putenv( winedebug );
             if (unixdir != -1)
@@ -465,8 +466,8 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
     }
     else status = STATUS_NO_MEMORY;
 
-    if (stdin_fd != -1) close( stdin_fd );
-    if (stdout_fd != -1) close( stdout_fd );
+    if (stdin_fd != -1 && stdin_fd != 0) close( stdin_fd );
+    if (stdout_fd != -1 && stdout_fd != 1) close( stdout_fd );
     return status;
 }
 
@@ -501,8 +502,13 @@ static NTSTATUS fork_and_exec( OBJECT_ATTRIBUTES *attr, int unixdir,
         fcntl( fd[1], F_SETFD, FD_CLOEXEC );
     }
 
-    wine_server_handle_to_fd( params->hStdInput, FILE_READ_DATA, &stdin_fd, NULL );
-    wine_server_handle_to_fd( params->hStdOutput, FILE_WRITE_DATA, &stdout_fd, NULL );
+    if (wine_server_handle_to_fd( params->hStdInput, FILE_READ_DATA, &stdin_fd, NULL ) &&
+        isatty(0) && is_unix_console_handle( params->hStdInput ))
+        stdin_fd = 0;
+
+    if (wine_server_handle_to_fd( params->hStdOutput, FILE_WRITE_DATA, &stdout_fd, NULL ) &&
+        isatty(1) && is_unix_console_handle( params->hStdOutput ))
+        stdout_fd = 1;
 
     if (!(pid = fork()))  /* child */
     {
@@ -511,7 +517,7 @@ static NTSTATUS fork_and_exec( OBJECT_ATTRIBUTES *attr, int unixdir,
             close( fd[0] );
 
             if (params->ConsoleFlags ||
-                params->ConsoleHandle == (HANDLE)1 /* KERNEL32_CONSOLE_ALLOC */ ||
+                params->ConsoleHandle == CONSOLE_HANDLE_ALLOC ||
                 (params->hStdInput == INVALID_HANDLE_VALUE && params->hStdOutput == INVALID_HANDLE_VALUE))
             {
                 setsid();
@@ -519,8 +525,8 @@ static NTSTATUS fork_and_exec( OBJECT_ATTRIBUTES *attr, int unixdir,
             }
             else set_stdio_fd( stdin_fd, stdout_fd );
 
-            if (stdin_fd != -1) close( stdin_fd );
-            if (stdout_fd != -1) close( stdout_fd );
+            if (stdin_fd != -1 && stdin_fd != 0) close( stdin_fd );
+            if (stdout_fd != -1 && stdout_fd != 1) close( stdout_fd );
 
             /* Reset signals that we previously set to SIG_IGN */
             signal( SIGPIPE, SIG_DFL );
@@ -567,8 +573,8 @@ static NTSTATUS fork_and_exec( OBJECT_ATTRIBUTES *attr, int unixdir,
     else status = STATUS_NO_MEMORY;
 
     close( fd[0] );
-    if (stdin_fd != -1) close( stdin_fd );
-    if (stdout_fd != -1) close( stdout_fd );
+    if (stdin_fd != -1 && stdin_fd != 0) close( stdin_fd );
+    if (stdout_fd != -1 && stdout_fd != 1) close( stdout_fd );
 done:
     free( unix_name );
     return status;
@@ -714,7 +720,6 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         req->flags          = process_flags;
         req->socket_fd      = socketfd[1];
         req->access         = process_access;
-        req->cpu            = get_machine_cpu( &pe_info );
         req->info_size      = startup_info_size;
         req->handles_size   = handles_size;
         wine_server_add_data( req, objattr, attr_len );
@@ -740,8 +745,8 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
             ERR( "64-bit application %s not supported in 32-bit prefix\n", debugstr_us(&path) );
             break;
         case STATUS_INVALID_IMAGE_FORMAT:
-            ERR( "%s not supported on this installation (%s binary)\n",
-                 debugstr_us(&path), cpu_names[get_machine_cpu(&pe_info)] );
+            ERR( "%s not supported on this installation (machine %04x)\n",
+                 debugstr_us(&path), pe_info.machine );
             break;
         }
         goto done;
@@ -1288,9 +1293,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
                 SERVER_START_REQ( get_process_info )
                 {
                     req->handle = wine_server_obj_handle( handle );
-                    if (!(ret = wine_server_call( req )))
-                        val = (reply->machine != IMAGE_FILE_MACHINE_AMD64 &&
-                               reply->machine != IMAGE_FILE_MACHINE_ARM64);
+                    if (!(ret = wine_server_call( req ))) val = (reply->machine != native_machine);
                 }
                 SERVER_END_REQ;
             }
@@ -1555,26 +1558,6 @@ NTSTATUS WINAPI NtResumeProcess( HANDLE handle )
     return ret;
 }
 
-/**********************************************************************
- *           NtGetNextProcess  (NTDLL.@)
- */
-NTSTATUS WINAPI NtGetNextProcess( HANDLE process, ACCESS_MASK access, ULONG attributes,
-                                  ULONG flags, HANDLE *handle )
-{
-    NTSTATUS ret;
-
-    SERVER_START_REQ( get_next_process )
-    {
-        req->last = wine_server_obj_handle( process );
-        req->access = access;
-        req->attributes = attributes;
-        req->flags = flags;
-        ret = wine_server_call( req );
-        if (!ret) *handle = wine_server_ptr_handle( reply->handle );
-    }
-    SERVER_END_REQ;
-    return ret;
-}
 
 /**********************************************************************
  *           NtDebugActiveProcess  (NTDLL.@)

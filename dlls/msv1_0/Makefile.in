@@ -1,0 +1,8 @@
+MODULE    = msv1_0.dll
+IMPORTS   = netapi32 advapi32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	main.c \
+	unixlib.c

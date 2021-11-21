@@ -25,6 +25,9 @@
 static NTSTATUS (WINAPI * pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 static NTSTATUS (WINAPI * pNtSetSystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG);
 static NTSTATUS (WINAPI * pRtlGetNativeSystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
+static USHORT   (WINAPI * pRtlWow64GetCurrentMachine)(void);
+static NTSTATUS (WINAPI * pRtlWow64GetProcessMachines)(HANDLE,WORD*,WORD*);
+static NTSTATUS (WINAPI * pRtlWow64IsWowGuestMachineSupported)(USHORT,BOOLEAN*);
 static NTSTATUS (WINAPI * pNtQuerySystemInformationEx)(SYSTEM_INFORMATION_CLASS, void*, ULONG, void*, ULONG, ULONG*);
 static NTSTATUS (WINAPI * pNtPowerInformation)(POWER_INFORMATION_LEVEL, PVOID, ULONG, PVOID, ULONG);
 static NTSTATUS (WINAPI * pNtQueryInformationProcess)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
@@ -82,6 +85,9 @@ static BOOL InitFunctionPtrs(void)
     NTDLL_GET_PROC(NtQuerySystemInformation);
     NTDLL_GET_PROC(NtSetSystemInformation);
     NTDLL_GET_PROC(RtlGetNativeSystemInformation);
+    NTDLL_GET_PROC(RtlWow64GetCurrentMachine);
+    NTDLL_GET_PROC(RtlWow64GetProcessMachines);
+    NTDLL_GET_PROC(RtlWow64IsWowGuestMachineSupported);
     NTDLL_GET_PROC(NtPowerInformation);
     NTDLL_GET_PROC(NtQueryInformationProcess);
     NTDLL_GET_PROC(NtQueryInformationThread);
@@ -202,8 +208,9 @@ static void test_query_cpu(void)
     ok( sizeof(sci) == ReturnLength, "Inconsistent length %d\n", ReturnLength);
 
     /* Check if we have some return values */
-    if (winetest_debug > 1) trace("Processor FeatureSet : %08x\n", sci.FeatureSet);
-    ok( sci.FeatureSet != 0, "Expected some features for this processor, got %08x\n", sci.FeatureSet);
+    if (winetest_debug > 1) trace("Processor FeatureSet : %08x\n", sci.ProcessorFeatureBits);
+    ok( sci.ProcessorFeatureBits != 0, "Expected some features for this processor, got %08x\n",
+        sci.ProcessorFeatureBits);
 }
 
 static void test_query_performance(void)
@@ -2920,6 +2927,18 @@ static void test_process_architecture( HANDLE process, USHORT expect_machine, US
                                           &buffer, len, &len );
     ok( status == STATUS_BUFFER_TOO_SMALL, "failed %x\n", status );
     ok( len == (i + 1) * sizeof(DWORD), "wrong len %u\n", len );
+
+    if (pRtlWow64GetProcessMachines)
+    {
+        USHORT current = 0xdead, native = 0xbeef;
+        status = pRtlWow64GetProcessMachines( process, &current, &native );
+        ok( !status, "failed %x\n", status );
+        if (expect_machine == expect_native)
+            ok( current == 0, "wrong current machine %x / %x\n", current, expect_machine );
+        else
+            ok( current == expect_machine, "wrong current machine %x / %x\n", current, expect_machine );
+        ok( native == expect_native, "wrong native machine %x / %x\n", native, expect_native );
+    }
 }
 
 static void test_query_architectures(void)
@@ -2994,6 +3013,36 @@ static void test_query_architectures(void)
         TerminateProcess( pi.hProcess, 0 );
         CloseHandle( pi.hProcess );
         CloseHandle( pi.hThread );
+    }
+
+    if (pRtlWow64GetCurrentMachine)
+    {
+        USHORT machine = pRtlWow64GetCurrentMachine();
+        ok( machine == current_machine, "wrong machine %x / %x\n", machine, current_machine );
+    }
+    if (pRtlWow64IsWowGuestMachineSupported)
+    {
+        BOOLEAN ret = 0xcc;
+        status = pRtlWow64IsWowGuestMachineSupported( IMAGE_FILE_MACHINE_I386, &ret );
+        ok( !status, "failed %x\n", status );
+        ok( ret == (native_machine == IMAGE_FILE_MACHINE_AMD64 ||
+                    native_machine == IMAGE_FILE_MACHINE_ARM64), "wrong result %u\n", ret );
+        ret = 0xcc;
+        status = pRtlWow64IsWowGuestMachineSupported( IMAGE_FILE_MACHINE_ARMNT, &ret );
+        ok( !status, "failed %x\n", status );
+        ok( ret == (native_machine == IMAGE_FILE_MACHINE_ARM64), "wrong result %u\n", ret );
+        ret = 0xcc;
+        status = pRtlWow64IsWowGuestMachineSupported( IMAGE_FILE_MACHINE_AMD64, &ret );
+        ok( !status, "failed %x\n", status );
+        ok( !ret, "wrong result %u\n", ret );
+        ret = 0xcc;
+        status = pRtlWow64IsWowGuestMachineSupported( IMAGE_FILE_MACHINE_ARM64, &ret );
+        ok( !status, "failed %x\n", status );
+        ok( !ret, "wrong result %u\n", ret );
+        ret = 0xcc;
+        status = pRtlWow64IsWowGuestMachineSupported( 0xdead, &ret );
+        ok( !status, "failed %x\n", status );
+        ok( !ret, "wrong result %u\n", ret );
     }
 }
 
@@ -3096,6 +3145,10 @@ static void test_wow64(void)
             "wrong WowTebOffset %x (%p/%p)\n", NtCurrentTeb()->WowTebOffset, teb64, NtCurrentTeb() );
         ok( (char *)teb64 + 0x2000 == (char *)NtCurrentTeb(), "unexpected diff %p / %p\n",
             teb64, NtCurrentTeb() );
+        ok( (char *)teb64 + teb64->WowTebOffset == (char *)NtCurrentTeb() ||
+            broken( !teb64->WowTebOffset || teb64->WowTebOffset == 1 ),  /* pre-win10 */
+            "wrong WowTebOffset %x (%p/%p)\n", teb64->WowTebOffset, teb64, NtCurrentTeb() );
+        ok( !teb64->GdiBatchCount, "GdiBatchCount set %x\n", teb64->GdiBatchCount );
         ok( teb64->Tib.ExceptionList == PtrToUlong( NtCurrentTeb() ), "wrong Tib.ExceptionList %s / %p\n",
             wine_dbgstr_longlong(teb64->Tib.ExceptionList), NtCurrentTeb() );
         ok( teb64->Tib.Self == PtrToUlong( teb64 ), "wrong Tib.Self %s / %p\n",

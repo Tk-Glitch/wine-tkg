@@ -40,6 +40,23 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(setupapi);
 
+#ifdef __i386__
+static const WCHAR pe_dir[] = L"\\i386-windows";
+static const char current_arch[] = "x86";
+#elif defined __x86_64__
+static const WCHAR pe_dir[] = L"\\x86_64-windows";
+static const char current_arch[] = "amd64";
+#elif defined __arm__
+static const WCHAR pe_dir[] = L"\\arm-windows";
+static const char current_arch[] = "arm";
+#elif defined __aarch64__
+static const WCHAR pe_dir[] = L"\\aarch64-windows";
+static const char current_arch[] = "arm64";
+#else
+static const WCHAR pe_dir[] = L"";
+static const char current_arch[] = "none";
+#endif
+
 static const char builtin_signature[] = "Wine builtin DLL";
 static const char fakedll_signature[] = "Wine placeholder DLL";
 
@@ -190,14 +207,13 @@ static void extract_16bit_image( IMAGE_NT_HEADERS *nt, void **data, SIZE_T *size
 
 /* read in the contents of a file into the global file buffer */
 /* return 1 on success, 0 on nonexistent file, -1 on other error */
-static int read_file( const WCHAR *name, void **data, SIZE_T *size, BOOL expect_builtin )
+static int read_file( const WCHAR *name, void **data, SIZE_T *size )
 {
     struct stat st;
     int fd, ret = -1;
     size_t header_size;
     IMAGE_DOS_HEADER *dos;
     IMAGE_NT_HEADERS *nt;
-    const char *signature = expect_builtin ? builtin_signature : fakedll_signature;
     const size_t min_size = sizeof(*dos) + 32 +
         FIELD_OFFSET( IMAGE_NT_HEADERS, OptionalHeader.MajorLinkerVersion );
 
@@ -220,8 +236,9 @@ static int read_file( const WCHAR *name, void **data, SIZE_T *size, BOOL expect_
     if (read( fd, file_buffer, header_size ) != header_size) goto done;
     dos = file_buffer;
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) goto done;
-    if (dos->e_lfanew < strlen(signature) + 1) goto done;
-    if (memcmp( dos + 1, signature, strlen(signature) + 1 )) goto done;
+    if (dos->e_lfanew < sizeof(*dos) + 32) goto done;
+    if (memcmp( dos + 1, builtin_signature, strlen(builtin_signature) + 1 ) &&
+        memcmp( dos + 1, fakedll_signature, strlen(fakedll_signature) + 1 )) goto done;
     if (dos->e_lfanew + FIELD_OFFSET(IMAGE_NT_HEADERS,OptionalHeader.MajorLinkerVersion) > header_size)
         goto done;
     nt = (IMAGE_NT_HEADERS *)((char *)file_buffer + dos->e_lfanew);
@@ -414,7 +431,7 @@ static void *load_fake_dll( const WCHAR *name, SIZE_T *size )
     len = lstrlenW( name );
     if (build_dir) maxlen = lstrlenW(build_dir) + ARRAY_SIZE(L"\\programs") + len + 1;
     while ((path = enum_load_path( i++ ))) maxlen = max( maxlen, lstrlenW(path) );
-    maxlen += ARRAY_SIZE(L"\\fakedlls") + len + ARRAY_SIZE(L".fake");
+    maxlen += ARRAY_SIZE(pe_dir) + len + ARRAY_SIZE(L".fake");
 
     if (!(file = HeapAlloc( GetProcessHeap(), 0, maxlen * sizeof(WCHAR) ))) return NULL;
 
@@ -432,9 +449,9 @@ static void *load_fake_dll( const WCHAR *name, SIZE_T *size )
         ptr = prepend( ptr, ptr, namelen );
         ptr = prepend( ptr, L"\\dlls", 5 );
         ptr = prepend( ptr, build_dir, lstrlenW(build_dir) );
-        if ((res = read_file( ptr, &data, size, TRUE ))) goto done;
+        if ((res = read_file( ptr, &data, size ))) goto done;
         lstrcpyW( file + pos + len + 1, L".fake" );
-        if ((res = read_file( ptr, &data, size, FALSE ))) goto done;
+        if ((res = read_file( ptr, &data, size ))) goto done;
 
         /* now as a program */
         ptr = file + pos;
@@ -444,19 +461,19 @@ static void *load_fake_dll( const WCHAR *name, SIZE_T *size )
         ptr = prepend( ptr, ptr, namelen );
         ptr = prepend( ptr, L"\\programs", 9 );
         ptr = prepend( ptr, build_dir, lstrlenW(build_dir) );
-        if ((res = read_file( ptr, &data, size, TRUE ))) goto done;
+        if ((res = read_file( ptr, &data, size ))) goto done;
         lstrcpyW( file + pos + len + 1, L".fake" );
-        if ((res = read_file( ptr, &data, size, FALSE ))) goto done;
+        if ((res = read_file( ptr, &data, size ))) goto done;
     }
 
     file[pos + len + 1] = 0;
     for (i = 0; (path = enum_load_path( i )); i++)
     {
-        ptr = prepend( file + pos, path, lstrlenW(path) );
-        if ((res = read_file( ptr, &data, size, TRUE ))) break;
-        ptr = prepend( file + pos, L"\\fakedlls", 9 );
+        ptr = prepend( file + pos, pe_dir, lstrlenW(pe_dir) );
         ptr = prepend( ptr, path, lstrlenW(path) );
-        if ((res = read_file( ptr, &data, size, FALSE ))) break;
+        if ((res = read_file( ptr, &data, size ))) break;
+        ptr = prepend( file + pos, path, lstrlenW(path) );
+        if ((res = read_file( ptr, &data, size ))) break;
     }
 
 done:
@@ -709,17 +726,6 @@ struct dll_data
 
 static BOOL CALLBACK register_manifest( HMODULE module, const WCHAR *type, WCHAR *res_name, LONG_PTR arg )
 {
-#ifdef __i386__
-    static const char current_arch[] = "x86";
-#elif defined __x86_64__
-    static const char current_arch[] = "amd64";
-#elif defined __arm__
-    static const char current_arch[] = "arm";
-#elif defined __aarch64__
-    static const char current_arch[] = "arm64";
-#else
-    static const char current_arch[] = "none";
-#endif
     const struct dll_data *dll_data = (const struct dll_data*)arg;
     WCHAR *dest = NULL;
     DWORD dest_len = 0;
@@ -881,7 +887,7 @@ static void register_fake_dll( const WCHAR *name, const void *data, size_t size,
 }
 
 /* copy a fake dll file to the dest directory */
-static int install_fake_dll( WCHAR *dest, WCHAR *file, const WCHAR *ext, BOOL delete, BOOL expect_builtin, struct list *delay_copy )
+static int install_fake_dll( WCHAR *dest, WCHAR *file, const WCHAR *ext, BOOL delete, struct list *delay_copy )
 {
     int ret;
     SIZE_T size;
@@ -893,7 +899,7 @@ static int install_fake_dll( WCHAR *dest, WCHAR *file, const WCHAR *ext, BOOL de
     SIZE_T len = end - name;
 
     if (ext) lstrcpyW( end, ext );
-    if (!(ret = read_file( file, &data, &size, expect_builtin )))
+    if (!(ret = read_file( file, &data, &size )))
     {
         *end = 0;
         return 0;
@@ -936,8 +942,7 @@ static void delay_copy_files( struct list *delay_copy )
     LIST_FOR_EACH_ENTRY_SAFE( copy, next, delay_copy, struct delay_copy, entry )
     {
         list_remove( &copy->entry );
-        ret = read_file( copy->src, &data, &size, TRUE );
-        if (ret == -1) ret = read_file( copy->src, &data, &size, FALSE );
+        ret = read_file( copy->src, &data, &size );
         if (ret != 1)
         {
             HeapFree( GetProcessHeap(), 0, copy );
@@ -958,7 +963,7 @@ static void delay_copy_files( struct list *delay_copy )
 
 /* find and install all fake dlls in a given lib directory */
 static void install_lib_dir( WCHAR *dest, WCHAR *file, const WCHAR *wildcard,
-                             const WCHAR *default_ext, BOOL delete, BOOL expect_builtin )
+                             const WCHAR *default_ext, BOOL delete )
 {
     WCHAR *name;
     intptr_t handle;
@@ -983,14 +988,14 @@ static void install_lib_dir( WCHAR *dest, WCHAR *file, const WCHAR *wildcard,
             lstrcatW( name, data.name );
             if (wcschr( data.name, '.' )) /* module possibly already has an extension */
             {
-                if (install_fake_dll( dest, file, NULL, delete, expect_builtin, &delay_copy )) continue;
-                if (install_fake_dll( dest, file, L".fake", delete, FALSE, &delay_copy )) continue;
+                if (install_fake_dll( dest, file, NULL, delete, &delay_copy )) continue;
+                if (install_fake_dll( dest, file, L".fake", delete, &delay_copy )) continue;
             }
             lstrcatW( name, default_ext );
-            if (install_fake_dll( dest, file, NULL, delete, expect_builtin, &delay_copy )) continue;
-            if (install_fake_dll( dest, file, L".fake", delete, FALSE, &delay_copy )) continue;
+            if (install_fake_dll( dest, file, NULL, delete, &delay_copy )) continue;
+            if (install_fake_dll( dest, file, L".fake", delete, &delay_copy )) continue;
         }
-        else install_fake_dll( dest, file, NULL, delete, expect_builtin, &delay_copy );
+        else install_fake_dll( dest, file, NULL, delete, &delay_copy );
     }
     while (!_wfindnext( handle, &data ));
     _findclose( handle );
@@ -1008,7 +1013,7 @@ static BOOL create_wildcard_dlls( const WCHAR *dirname, const WCHAR *wildcard, B
 
     if (build_dir) maxlen = lstrlenW(build_dir) + ARRAY_SIZE(L"\\programs") + 1;
     for (i = 0; (path = enum_load_path(i)); i++) maxlen = max( maxlen, lstrlenW(path) );
-    maxlen += 2 * max_dll_name_len + 2 + 10; /* ".dll.fake" */
+    maxlen += 2 * max_dll_name_len + 2 + ARRAY_SIZE(pe_dir) + 10; /* ".dll.fake" */
     if (!(file = HeapAlloc( GetProcessHeap(), 0, maxlen * sizeof(WCHAR) ))) return FALSE;
 
     if (!(dest = HeapAlloc( GetProcessHeap(), 0, (lstrlenW(dirname) + max_dll_name_len) * sizeof(WCHAR) )))
@@ -1023,18 +1028,17 @@ static BOOL create_wildcard_dlls( const WCHAR *dirname, const WCHAR *wildcard, B
     {
         lstrcpyW( file, build_dir );
         lstrcatW( file, L"\\dlls" );
-        install_lib_dir( dest, file, wildcard, L".dll", delete, TRUE );
+        install_lib_dir( dest, file, wildcard, L".dll", delete );
         lstrcpyW( file, build_dir );
         lstrcatW( file, L"\\programs" );
-        install_lib_dir( dest, file, wildcard, L".exe", delete, TRUE );
+        install_lib_dir( dest, file, wildcard, L".exe", delete );
     }
     for (i = 0; (path = enum_load_path( i )); i++)
     {
+        swprintf( file, maxlen, L"%s%s", path, pe_dir );
+        install_lib_dir( dest, file, wildcard, NULL, delete );
         lstrcpyW( file, path );
-        install_lib_dir( dest, file, wildcard, NULL, delete, TRUE );
-        lstrcpyW( file, path );
-        lstrcatW( file, L"\\fakedlls" );
-        install_lib_dir( dest, file, wildcard, NULL, delete, FALSE );
+        install_lib_dir( dest, file, wildcard, NULL, delete );
     }
     HeapFree( GetProcessHeap(), 0, file );
     HeapFree( GetProcessHeap(), 0, dest );

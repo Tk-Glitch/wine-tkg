@@ -19,16 +19,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(inkobj);
 
-static LONG INKOBJ_refCount;
-
-/*****************************************************
- *    DllCanUnloadNow (INKOBJ.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return (INKOBJ_refCount != 0)? S_FALSE : S_OK;
-}
-
 /*****************************************************
  *    DllGetClassObject [INKOBJ.@]
  */
@@ -36,22 +26,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv)
 {
     FIXME("Not implemented. Requested class was:%s\n", debugstr_guid(rclsid));
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/*****************************************************
- *    DllRegisterServer (INKOBJ.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    FIXME("Not implemented.\n");
-    return E_UNEXPECTED; /* unable to register */
-}
-
-/*****************************************************
- *    DllUnregisterServer (INKOBJ.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    FIXME("Not implemented.\n");
-    return E_UNEXPECTED; /* unable to register */
 }

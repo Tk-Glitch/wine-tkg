@@ -2818,7 +2818,7 @@ static BOOL enum_face_charsets( const struct gdi_font_family *family, struct gdi
 
     for (i = 0; i < count; i++)
     {
-        if (!face->scalable && face->fs.fsCsb[0] == 0)  /* OEM bitmap */
+        if (face->fs.fsCsb[0] == 0)  /* OEM */
         {
             elf.elfLogFont.lfCharSet = ntm.ntmTm.tmCharSet = OEM_CHARSET;
             load_script_name( IDS_OEM_DOS - IDS_FIRST_SCRIPT, elf.elfScript );
@@ -4009,10 +4009,13 @@ static void init_font_options(void)
        This looks roughly similar to Windows Native with the same registry value.
        MS GDI seems to be rasterizing the outline at a different rate than FreeType. */
     gamma = 1000 * gamma / 1400;
-    for (i = 0; i < 256; i++)
+    if (gamma != 1000)
     {
-        font_gamma_ramp.encode[i] = pow( i / 255., 1000. / gamma ) * 255. + .5;
-        font_gamma_ramp.decode[i] = pow( i / 255., gamma / 1000. ) * 255. + .5;
+        for (i = 0; i < 256; i++)
+        {
+            font_gamma_ramp.encode[i] = pow( i / 255., 1000. / gamma ) * 255. + .5;
+            font_gamma_ramp.decode[i] = pow( i / 255., gamma / 1000. ) * 255. + .5;
+        }
     }
     font_gamma_ramp.gamma = gamma;
     TRACE("gamma %d\n", font_gamma_ramp.gamma);

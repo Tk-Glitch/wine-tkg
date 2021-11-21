@@ -20,6 +20,7 @@
 
 #include <stdarg.h>
 #include <string.h>
+#include <limits.h>
 
 #define COBJMACROS
 
@@ -261,6 +262,8 @@ static HRESULT (WINAPI *pMFCreateDXGISurfaceBuffer)(REFIID riid, IUnknown *surfa
         IMFMediaBuffer **buffer);
 static HRESULT (WINAPI *pMFCreateVideoMediaTypeFromSubtype)(const GUID *subtype, IMFVideoMediaType **media_type);
 static HRESULT (WINAPI *pMFLockSharedWorkQueue)(const WCHAR *name, LONG base_priority, DWORD *taskid, DWORD *queue);
+static HRESULT (WINAPI *pMFLockDXGIDeviceManager)(UINT *token, IMFDXGIDeviceManager **manager);
+static HRESULT (WINAPI *pMFUnlockDXGIDeviceManager)(void);
 
 static HWND create_window(void)
 {
@@ -934,6 +937,7 @@ static void init_functions(void)
     X(MFCreateVideoSampleAllocatorEx);
     X(MFGetPlaneSize);
     X(MFGetStrideForBitmapInfoHeader);
+    X(MFLockDXGIDeviceManager);
     X(MFLockSharedWorkQueue);
     X(MFMapDX9FormatToDXGIFormat);
     X(MFMapDXGIFormatToDX9Format);
@@ -946,6 +950,7 @@ static void init_functions(void)
     X(MFTRegisterLocalByCLSID);
     X(MFTUnregisterLocal);
     X(MFTUnregisterLocalByCLSID);
+    X(MFUnlockDXGIDeviceManager);
 
     if ((mod = LoadLibraryA("d3d11.dll")))
     {
@@ -7130,6 +7135,77 @@ static void test_MFLockSharedWorkQueue(void)
     ok(hr == S_OK, "Failed to shut down, hr %#x.\n", hr);
 }
 
+static void test_MFllMulDiv(void)
+{
+    /* (a * b + d) / c */
+    static const struct muldivtest
+    {
+        LONGLONG a;
+        LONGLONG b;
+        LONGLONG c;
+        LONGLONG d;
+        LONGLONG result;
+    }
+    muldivtests[] =
+    {
+        { 0, 0, 0, 0, _I64_MAX },
+        { 1000000, 1000000, 2, 0, 500000000000 },
+        { _I64_MAX, 3, _I64_MAX, 0, 3 },
+        { _I64_MAX, 3, _I64_MAX, 1, 3 },
+        { -10000, 3, 100, 0, -300 },
+        { 2, 0, 3, 5, 1 },
+        { 2, 1, 1, -3, -1 },
+        /* a * b product does not fit in uint64_t */
+        { _I64_MAX, 4, 8, 0, _I64_MAX / 2 },
+        /* Large a * b product, large denominator */
+        { _I64_MAX, 4, 0x100000000, 0, 0x1ffffffff },
+    };
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(muldivtests); ++i)
+    {
+        LONGLONG result;
+
+        result = MFllMulDiv(muldivtests[i].a, muldivtests[i].b, muldivtests[i].c, muldivtests[i].d);
+        ok(result == muldivtests[i].result, "%u: unexpected result %s, expected %s.\n", i,
+                wine_dbgstr_longlong(result), wine_dbgstr_longlong(muldivtests[i].result));
+    }
+}
+
+static void test_shared_dxgi_device_manager(void)
+{
+    IMFDXGIDeviceManager *manager;
+    HRESULT hr;
+    UINT token;
+
+    if (!pMFLockDXGIDeviceManager)
+    {
+        win_skip("Shared DXGI device manager is not supported.\n");
+        return;
+    }
+
+    hr = pMFUnlockDXGIDeviceManager();
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    manager = NULL;
+    hr = pMFLockDXGIDeviceManager(NULL, &manager);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!!manager, "Unexpected instance.\n");
+
+    hr = pMFLockDXGIDeviceManager(&token, &manager);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    EXPECT_REF(manager, 3);
+
+    hr = pMFUnlockDXGIDeviceManager();
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    EXPECT_REF(manager, 2);
+
+    hr = pMFUnlockDXGIDeviceManager();
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+}
+
 START_TEST(mfplat)
 {
     char **argv;
@@ -7194,6 +7270,8 @@ START_TEST(mfplat)
     test_dxgi_surface_buffer();
     test_sample_allocator();
     test_MFMapDX9FormatToDXGIFormat();
+    test_MFllMulDiv();
+    test_shared_dxgi_device_manager();
 
     CoUninitialize();
 }

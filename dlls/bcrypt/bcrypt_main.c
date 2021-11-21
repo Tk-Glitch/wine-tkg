@@ -2078,6 +2078,37 @@ NTSTATUS WINAPI BCryptSecretAgreement(BCRYPT_KEY_HANDLE privatekey, BCRYPT_KEY_H
 
     if (!(secret = heap_alloc_zero( sizeof(*secret) ))) return STATUS_NO_MEMORY;
 
+    if (pubkey->alg_id == ALG_ID_ECDH_P256)
+    {
+        UCHAR *privkey_blob = NULL;
+        ULONG privkey_len;
+
+        secret->hdr.magic = MAGIC_SECRET;
+
+        if ((status = key_funcs->key_export_ecc( privkey, NULL, 0, &privkey_len)))
+            goto done;
+
+        privkey_blob = heap_alloc(privkey_len);
+        if ((status = key_funcs->key_export_ecc( privkey, privkey_blob, privkey_len, &privkey_len)))
+            goto done;
+
+        if ((status = key_funcs->key_compute_secret_ecc( privkey_blob, pubkey, secret )))
+            goto done;
+
+done:
+        if (privkey_blob)
+            heap_free(privkey_blob);
+
+        if (status)
+        {
+            heap_free(secret);
+            secret = NULL;
+        }
+
+        *handle = secret;
+        return status;
+    }
+
     if ((status = key_funcs->key_secret_agreement( privkey, pubkey, secret )))
     {
         heap_free( secret );

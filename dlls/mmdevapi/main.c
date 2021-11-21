@@ -44,8 +44,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mmdevapi);
 
-static HINSTANCE instance;
-
 DriverFuncs drvs;
 
 const WCHAR drv_keyW[] = L"Software\\Wine\\Drivers";
@@ -160,7 +158,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     switch (fdwReason)
     {
         case DLL_PROCESS_ATTACH:
-            instance = hinstDLL;
             DisableThreadLibraryCalls(hinstDLL);
             break;
         case DLL_PROCESS_DETACH:
@@ -171,11 +168,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     }
 
     return TRUE;
-}
-
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
 }
 
 typedef HRESULT (*FnCreateInstance)(REFIID riid, LPVOID *ppobj);
@@ -297,22 +289,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 
-/***********************************************************************
- *		DllRegisterServer (MMDEVAPI.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (MMDEVAPI.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( instance );
-}
-
 struct activate_async_op {
     IActivateAudioInterfaceAsyncOperation IActivateAudioInterfaceAsyncOperation_iface;
     LONG ref;
@@ -428,8 +404,7 @@ static HRESULT get_mmdevice_by_activatepath(const WCHAR *path, IMMDevice **mmdev
     } else if (!memcmp(path, MMDEV_PATH_PREFIX, sizeof(MMDEV_PATH_PREFIX) - sizeof(WCHAR))) {
         WCHAR device_id[56]; /* == strlen("{0.0.1.00000000}.{fd47d9cc-4218-4135-9ce2-0c195c87405b}") + 1 */
 
-        wcsncpy(device_id, path + (ARRAY_SIZE(MMDEV_PATH_PREFIX) - 1), ARRAY_SIZE(device_id));
-        device_id[ARRAY_SIZE(device_id) - 1] = 0;
+        lstrcpynW(device_id, path + (ARRAY_SIZE(MMDEV_PATH_PREFIX) - 1), ARRAY_SIZE(device_id));
 
         hr = IMMDeviceEnumerator_GetDevice(devenum, device_id, mmdev);
     } else {

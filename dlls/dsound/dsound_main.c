@@ -94,7 +94,6 @@ const WCHAR wine_vxd_drv[] = L"winemm.vxd";
 int ds_hel_buflen = 32768 * 2;
 int ds_hq_buffers_max = 4;
 BOOL ds_eax_enabled = TRUE;
-static HINSTANCE instance;
 
 #define IS_OPTION_TRUE(ch) \
     ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
@@ -110,6 +109,7 @@ static inline DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
     if (defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE)buffer, &size )) return 0;
     return ERROR_FILE_NOT_FOUND;
 }
+
 
 /*
  * Setup the dsound options.
@@ -772,19 +772,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 }
 
 
-/*******************************************************************************
- * DllCanUnloadNow [DSOUND.4]
- * Determines whether the DLL is in use.
- *
- * RETURNS
- *    Can unload now: S_OK
- *    Cannot unload now (the DLL is still active): S_FALSE
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
 #define INIT_GUID(guid, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8)      \
         guid.Data1 = l; guid.Data2 = w1; guid.Data3 = w2;               \
         guid.Data4[0] = b1; guid.Data4[1] = b2; guid.Data4[2] = b3;     \
@@ -800,7 +787,6 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpvReserved)
 
     switch (fdwReason) {
     case DLL_PROCESS_ATTACH:
-        instance = hInstDLL;
         DisableThreadLibraryCalls(hInstDLL);
         /* Increase refcount on dsound by 1 */
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)hInstDLL, &hInstDLL);
@@ -812,20 +798,4 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpvReserved)
         break;
     }
     return TRUE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (DSOUND.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (DSOUND.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( instance );
 }

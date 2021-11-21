@@ -21,12 +21,14 @@
 
 #include "ntddk.h"
 
-#define PHCM_ERROR_INVALID_PARAMETER (char)-1
-#define PHCM_ERROR_NO_TEB            (char)-2
-#define PHCM_APPLICATION_DEFAULT     (char)0
-#define PHCM_DISGUISE_PLACEHOLDERS   (char)1
-#define PHCM_EXPOSE_PLACEHOLDERS     (char)2
-#define PHCM_MAX                     (char)2
+#define PHCM_ERROR_INVALID_PARAMETER    ((char)-1)
+#define PHCM_ERROR_NO_TEB               ((char)-2)
+#define PHCM_ERROR_NO_PEB               ((char)-3)
+#define PHCM_APPLICATION_DEFAULT        ((char)0)
+#define PHCM_DISGUISE_PLACEHOLDERS      ((char)1)
+#define PHCM_EXPOSE_PLACEHOLDERS        ((char)2)
+#define PHCM_DISGUISE_FULL_PLACEHOLDERS ((char)3)
+#define PHCM_MAX                        ((char)3)
 
 typedef struct _EX_PUSH_LOCK EX_PUSH_LOCK, *PEX_PUSH_LOCK;
 

@@ -1739,6 +1739,24 @@ void destroy_client_window( HWND hwnd, Window old_window, Window new_window )
 
 
 /**********************************************************************
+ *		create_dummy_client_window
+ */
+Window create_dummy_client_window(void)
+{
+    XSetWindowAttributes attr;
+
+    attr.colormap = default_colormap;
+    attr.bit_gravity = NorthWestGravity;
+    attr.win_gravity = NorthWestGravity;
+    attr.backing_store = NotUseful;
+    attr.border_pixel = 0;
+
+    return XCreateWindow( gdi_display, get_dummy_parent(), 0, 0, 1, 1, 0,
+                          default_visual.depth, InputOutput, default_visual.visual,
+                          CWBitGravity | CWWinGravity | CWBackingStore | CWColormap | CWBorderPixel, &attr );
+}
+
+/**********************************************************************
  *		create_client_window
  */
 Window create_client_window( HWND hwnd, const XVisualInfo *visual )
@@ -2532,54 +2550,6 @@ BOOL CDECL X11DRV_ScrollDC( HDC hdc, INT dx, INT dy, HRGN update )
     return ret;
 }
 
-
-/***********************************************************************
- *		SetActiveWindow  (X11DRV.@)
- */
-void CDECL X11DRV_SetActiveWindow( HWND hwnd )
-{
-    struct x11drv_thread_data *thread_data = x11drv_init_thread_data();
-    struct x11drv_win_data *data;
-
-    TRACE("%p\n", hwnd);
-
-    if (thread_data->active_window == hwnd)
-    {
-        TRACE("ignoring activation for already active window %p\n", hwnd);
-        return;
-    }
-
-    if (!(data = get_win_data( hwnd ))) return;
-
-    if (data->mapped && data->managed)
-    {
-        XEvent xev;
-        struct x11drv_win_data *active = get_win_data( thread_data->active_window );
-        DWORD timestamp = GetMessageTime() - EVENT_x11_time_to_win32_time( 0 );
-
-        TRACE("setting _NET_ACTIVE_WINDOW to %p/%lx, current active %p/%lx\n",
-            data->hwnd, data->whole_window, active ? active->hwnd : NULL, active ? active->whole_window : 0 );
-
-        xev.xclient.type = ClientMessage;
-        xev.xclient.window = data->whole_window;
-        xev.xclient.message_type = x11drv_atom(_NET_ACTIVE_WINDOW);
-        xev.xclient.serial = 0;
-        xev.xclient.display = data->display;
-        xev.xclient.send_event = True;
-        xev.xclient.format = 32;
-
-        xev.xclient.data.l[0] = 1; /* source: application */
-        xev.xclient.data.l[1] = timestamp;
-        xev.xclient.data.l[2] = active ? active->whole_window : 0;
-        xev.xclient.data.l[3] = 0;
-        xev.xclient.data.l[4] = 0;
-        XSendEvent( data->display, root_window, False, SubstructureRedirectMask | SubstructureNotifyMask, &xev );
-
-        if (active) release_win_data( active );
-    }
-
-    release_win_data( data );
-}
 
 /***********************************************************************
  *		SetCapture  (X11DRV.@)

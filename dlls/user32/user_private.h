@@ -62,17 +62,13 @@ enum wine_internal_message
 
 typedef struct tagUSER_DRIVER {
     /* keyboard functions */
-    HKL    (CDECL *pActivateKeyboardLayout)(HKL, UINT);
+    BOOL   (CDECL *pActivateKeyboardLayout)(HKL, UINT);
     void   (CDECL *pBeep)(void);
     INT    (CDECL *pGetKeyNameText)(LONG, LPWSTR, INT);
-    HKL    (CDECL *pGetKeyboardLayout)(DWORD);
     UINT   (CDECL *pGetKeyboardLayoutList)(INT, HKL *);
-    BOOL   (CDECL *pGetKeyboardLayoutName)(LPWSTR);
-    HKL    (CDECL *pLoadKeyboardLayout)(LPCWSTR, UINT);
     UINT   (CDECL *pMapVirtualKeyEx)(UINT, UINT, HKL);
     BOOL   (CDECL *pRegisterHotKey)(HWND, UINT, UINT);
     INT    (CDECL *pToUnicodeEx)(UINT, UINT, const BYTE *, LPWSTR, int, UINT, HKL);
-    BOOL   (CDECL *pUnloadKeyboardLayout)(HKL);
     void   (CDECL *pUnregisterHotKey)(HWND, UINT, UINT);
     SHORT  (CDECL *pVkKeyScanEx)(WCHAR, HKL);
     /* cursor/icon functions */
@@ -97,7 +93,6 @@ typedef struct tagUSER_DRIVER {
     DWORD  (CDECL *pMsgWaitForMultipleObjectsEx)(DWORD,const HANDLE*,DWORD,DWORD,DWORD);
     void   (CDECL *pReleaseDC)(HWND,HDC);
     BOOL   (CDECL *pScrollDC)(HDC,INT,INT,HRGN);
-    void   (CDECL *pSetActiveWindow)(HWND);
     void   (CDECL *pSetCapture)(HWND,UINT);
     void   (CDECL *pSetFocus)(HWND);
     void   (CDECL *pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
@@ -202,6 +197,8 @@ struct user_thread_info
     DWORD                         GetMessagePosVal;       /* Value for GetMessagePos */
     ULONG_PTR                     GetMessageExtraInfoVal; /* Value for GetMessageExtraInfo */
     struct user_key_state_info   *key_state;              /* Cache of global key state */
+    HKL                           kbd_layout;             /* Current keyboard layout */
+    DWORD                         kbd_layout_id;          /* Current keyboard layout ID */
     HWND                          top_window;             /* Desktop window */
     HWND                          msg_window;             /* HWND_MESSAGE parent window */
     struct rawinput_thread_data  *rawinput;               /* RawInput thread local data / buffer */
@@ -246,6 +243,8 @@ struct tagWND;
 struct hardware_msg_data;
 extern BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hardware_msg_data *msg_data);
 extern struct rawinput_thread_data *rawinput_thread_data(void);
+
+extern void keyboard_init(void) DECLSPEC_HIDDEN;
 
 extern void CLIPBOARD_ReleaseOwner( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL FOCUS_MouseActivate( HWND hwnd ) DECLSPEC_HIDDEN;

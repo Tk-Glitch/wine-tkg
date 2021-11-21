@@ -111,7 +111,7 @@ BOOL dxgi_validate_swapchain_desc(const DXGI_SWAP_CHAIN_DESC1 *desc)
     return TRUE;
 }
 
-HRESULT dxgi_get_output_from_window(IDXGIFactory *factory, HWND window, IDXGIOutput **dxgi_output)
+HRESULT dxgi_get_output_from_window(IWineDXGIFactory *factory, HWND window, IDXGIOutput **dxgi_output)
 {
     unsigned int adapter_idx, output_idx;
     DXGI_OUTPUT_DESC desc;
@@ -126,7 +126,7 @@ HRESULT dxgi_get_output_from_window(IDXGIFactory *factory, HWND window, IDXGIOut
         return DXGI_ERROR_INVALID_CALL;
     }
 
-    for (adapter_idx = 0; SUCCEEDED(hr = IDXGIFactory_EnumAdapters(factory, adapter_idx, &adapter));
+    for (adapter_idx = 0; SUCCEEDED(hr = IWineDXGIFactory_EnumAdapters(factory, adapter_idx, &adapter));
             ++adapter_idx)
     {
         for (output_idx = 0; SUCCEEDED(hr = IDXGIAdapter_EnumOutputs(adapter, output_idx,
@@ -248,7 +248,7 @@ static ULONG STDMETHODCALLTYPE DECLSPEC_HOTPATCH d3d11_swapchain_Release(IDXGISw
             IDXGIOutput_Release(swapchain->target);
         }
         if (swapchain->factory)
-            IDXGIFactory_Release(swapchain->factory);
+            IWineDXGIFactory_Release(swapchain->factory);
         wined3d_swapchain_decref(swapchain->wined3d_swapchain);
         if (device)
             IWineDXGIDevice_Release(device);
@@ -302,7 +302,7 @@ static HRESULT STDMETHODCALLTYPE d3d11_swapchain_GetParent(IDXGISwapChain1 *ifac
         return E_NOINTERFACE;
     }
 
-    return IDXGIFactory_QueryInterface(swapchain->factory, riid, parent);
+    return IWineDXGIFactory_QueryInterface(swapchain->factory, riid, parent);
 }
 
 /* IDXGIDeviceSubObject methods */
@@ -849,8 +849,8 @@ HRESULT d3d11_swapchain_init(struct d3d11_swapchain *swapchain, struct dxgi_devi
         if (desc->backbuffer_format == WINED3DFMT_UNKNOWN)
             return E_INVALIDARG;
 
-        if (FAILED(hr = IWineDXGIAdapter_GetParent(device->adapter, &IID_IDXGIFactory,
-                (void **)&swapchain->factory)))
+        if (FAILED(hr = IWineDXGIAdapter_GetParent(device->adapter,
+                &IID_IWineDXGIFactory, (void **)&swapchain->factory)))
         {
             WARN("Failed to get adapter parent, hr %#x.\n", hr);
             return hr;
@@ -914,7 +914,7 @@ cleanup:
     wined3d_private_store_cleanup(&swapchain->private_store);
     wined3d_mutex_unlock();
     if (swapchain->factory)
-        IDXGIFactory_Release(swapchain->factory);
+        IWineDXGIFactory_Release(swapchain->factory);
     if (swapchain->device)
         IWineDXGIDevice_Release(swapchain->device);
     return hr;
@@ -2453,7 +2453,7 @@ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_GetContainingOutput(IDXGISwapCh
 {
     struct d3d12_swapchain *swapchain = d3d12_swapchain_from_IDXGISwapChain4(iface);
     IUnknown *device_parent;
-    IDXGIFactory *factory;
+    IWineDXGIFactory *factory;
     IDXGIAdapter *adapter;
     HRESULT hr;
 
@@ -2473,7 +2473,7 @@ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_GetContainingOutput(IDXGISwapCh
         return hr;
     }
 
-    if (FAILED(hr = IDXGIAdapter_GetParent(adapter, &IID_IDXGIFactory, (void **)&factory)))
+    if (FAILED(hr = IDXGIAdapter_GetParent(adapter, &IID_IWineDXGIFactory, (void **)&factory)))
     {
         WARN("Failed to get factory, hr %#x.\n", hr);
         IDXGIAdapter_Release(adapter);
@@ -2481,7 +2481,7 @@ static HRESULT STDMETHODCALLTYPE d3d12_swapchain_GetContainingOutput(IDXGISwapCh
     }
 
     hr = dxgi_get_output_from_window(factory, swapchain->window, output);
-    IDXGIFactory_Release(factory);
+    IWineDXGIFactory_Release(factory);
     IDXGIAdapter_Release(adapter);
     return hr;
 }
@@ -3041,7 +3041,7 @@ static HRESULT d3d12_swapchain_init(struct d3d12_swapchain *swapchain, IWineDXGI
         return DXGI_ERROR_UNSUPPORTED;
     }
 
-    if (FAILED(hr = dxgi_get_output_from_window((IDXGIFactory *)factory, window, &output)))
+    if (FAILED(hr = dxgi_get_output_from_window(factory, window, &output)))
     {
         WARN("Failed to get output from window %p, hr %#x.\n", window, hr);
         return hr;

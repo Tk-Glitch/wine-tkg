@@ -269,6 +269,7 @@ static bool fbo_blitter_supported(enum wined3d_blit_op blit_op, const struct win
 {
     const struct wined3d_format *src_format = src_resource->format;
     const struct wined3d_format *dst_format = dst_resource->format;
+    bool src_ds, dst_ds;
 
     if ((wined3d_settings.offscreen_rendering_mode != ORM_FBO) || !gl_info->fbo_ops.glBlitFramebuffer)
         return false;
@@ -278,6 +279,16 @@ static bool fbo_blitter_supported(enum wined3d_blit_op blit_op, const struct win
         return false;
 
     if (src_resource->type != WINED3D_RTYPE_TEXTURE_2D)
+        return false;
+
+    /* We can't copy between depth/stencil and colour attachments. One notable
+     * way we can end up here is when copying between typeless resources with
+     * formats like R16_TYPELESS, which can end up using either a
+     * depth/stencil or a colour format on the OpenGL side, depending on the
+     * resource's bind flags. */
+    src_ds = src_format->depth_size || src_format->stencil_size;
+    dst_ds = dst_format->depth_size || dst_format->stencil_size;
+    if (src_ds != dst_ds)
         return false;
 
     switch (blit_op)
@@ -405,7 +416,7 @@ static void texture2d_blt_fbo(struct wined3d_device *device, struct wined3d_cont
             }
 
             if (src_location == WINED3D_LOCATION_DRAWABLE)
-                FIXME("WINED3D_LOCATION_DRAWABLE not supported for the source of a typeless resolve.");
+                FIXME("WINED3D_LOCATION_DRAWABLE not supported for the source of a typeless resolve.\n");
 
             device->blitter->ops->blitter_blit(device->blitter, WINED3D_BLIT_OP_RAW_BLIT, context,
                     src_texture, src_sub_resource_idx, src_location, src_rect,
@@ -543,7 +554,7 @@ static void texture2d_blt_fbo(struct wined3d_device *device, struct wined3d_cont
     if (dst_texture != dst_save_texture)
     {
         if (dst_location == WINED3D_LOCATION_DRAWABLE)
-            FIXME("WINED3D_LOCATION_DRAWABLE not supported for the destination of a typeless resolve.");
+            FIXME("WINED3D_LOCATION_DRAWABLE not supported for the destination of a typeless resolve.\n");
 
         device->blitter->ops->blitter_blit(device->blitter, WINED3D_BLIT_OP_RAW_BLIT, context,
                 dst_texture, 0, dst_location, dst_rect,
@@ -4430,7 +4441,7 @@ HRESULT CDECL wined3d_texture_create(struct wined3d_device *device, const struct
         for (i = 0; i < sub_count; ++i)
         {
             wined3d_texture_get_level_box(*texture, i % (*texture)->level_count, &box);
-            wined3d_device_context_emit_update_sub_resource(&device->cs->c, &(*texture)->resource,
+            device->cs->c.ops->update_sub_resource(&device->cs->c, &(*texture)->resource,
                     i, &box, data[i].data, data[i].row_pitch, data[i].slice_pitch);
         }
     }
@@ -6132,12 +6143,19 @@ static DWORD raw_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_blit
     unsigned int src_level, src_layer, dst_level, dst_layer;
     struct wined3d_blitter *next;
     GLuint src_name, dst_name;
+    bool src_ds, dst_ds;
     DWORD location;
+
+    src_ds = src_texture->resource.format->depth_size || src_texture->resource.format->stencil_size;
+    dst_ds = dst_texture->resource.format->depth_size || dst_texture->resource.format->stencil_size;
 
     /* If we would need to copy from a renderbuffer or drawable, we'd probably
      * be better off using the FBO blitter directly, since we'd need to use it
-     * to copy the resource contents to the texture anyway. */
-    if (op != WINED3D_BLIT_OP_RAW_BLIT
+     * to copy the resource contents to the texture anyway.
+     *
+     * We also can't copy between depth/stencil and colour resources, since
+     * the formats are considered incompatible in OpenGL. */
+    if (op != WINED3D_BLIT_OP_RAW_BLIT || (src_ds != dst_ds)
             || (src_texture->resource.format->id == dst_texture->resource.format->id
             && (!(src_location & (WINED3D_LOCATION_TEXTURE_RGB | WINED3D_LOCATION_TEXTURE_SRGB))
             || !(dst_location & (WINED3D_LOCATION_TEXTURE_RGB | WINED3D_LOCATION_TEXTURE_SRGB)))))

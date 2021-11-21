@@ -632,14 +632,9 @@ static void set_input_focus( struct x11drv_win_data *data )
  */
 static void set_focus( XEvent *xev, HWND hwnd, Time time )
 {
-    HWND focus, old_active;
+    HWND focus;
     Window win;
     GUITHREADINFO threadinfo;
-
-    old_active = GetForegroundWindow();
-
-    /* prevent recursion */
-    x11drv_thread_data()->active_window = hwnd;
 
     if (!try_grab_pointer( xev->xany.display ))
     {
@@ -653,15 +648,6 @@ static void set_focus( XEvent *xev, HWND hwnd, Time time )
         TRACE( "setting foreground window to %p\n", hwnd );
         SetForegroundWindow( hwnd );
     }
-
-    /* Some applications expect that a being deactivated topmost window
-     * receives the WM_WINDOWPOSCHANGING/WM_WINDOWPOSCHANGED messages,
-     * and perform some specific actions. Chessmaster is one of such apps.
-     * Window Manager keeps a topmost window on top in z-oder, so there is
-     * no need to actually do anything, just send the messages.
-     */
-    if (old_active && (GetWindowLongW( old_active, GWL_EXSTYLE ) & WS_EX_TOPMOST))
-        SetWindowPos( old_active, hwnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER );
 
     threadinfo.cbSize = sizeof(threadinfo);
     GetGUIThreadInfo(0, &threadinfo);
@@ -931,8 +917,6 @@ static void focus_out( Display *display , HWND hwnd )
 
     if (!focus_win)
     {
-        x11drv_thread_data()->active_window = 0;
-
         /* Abey : 6-Oct-99. Check again if the focus out window is the
            Foreground window, because in most cases the messages sent
            above must have already changed the foreground window, in which
@@ -1274,7 +1258,7 @@ static BOOL X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
                data->window_rect.bottom - data->window_rect.top, cx, cy );
 
     style = GetWindowLongW( data->hwnd, GWL_STYLE );
-    if ((style & WS_CAPTION) == WS_CAPTION)
+    if ((style & WS_CAPTION) == WS_CAPTION || !is_window_rect_full_screen( &data->whole_rect ))
     {
         read_net_wm_states( event->display, data );
         if ((data->net_wm_state & (1 << NET_WM_STATE_MAXIMIZED)))

@@ -38,9 +38,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(avifile);
 
 HMODULE AVIFILE_hModule   = NULL;
 
-static BOOL    AVIFILE_bLocked;
-static UINT    AVIFILE_uUseCount;
-
 typedef struct
 {
   IClassFactory IClassFactory_iface;
@@ -125,8 +122,6 @@ static HRESULT WINAPI IClassFactory_fnLockServer(IClassFactory *iface, BOOL dolo
 {
   TRACE("(%p,%d)\n",iface,dolock);
 
-  AVIFILE_bLocked = dolock;
-
   return S_OK;
 }
 
@@ -197,14 +192,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID pclsid, REFIID piid, LPVOID *ppv)
 }
 
 /*****************************************************************************
- *		DllCanUnloadNow		(AVIFIL32.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-  return ((AVIFILE_bLocked || AVIFILE_uUseCount) ? S_FALSE : S_OK);
-}
-
-/*****************************************************************************
  *		DllMain		[AVIFIL32.init]
  */
 BOOL WINAPI DllMain(HINSTANCE hInstDll, DWORD fdwReason, LPVOID lpvReserved)
@@ -219,20 +206,4 @@ BOOL WINAPI DllMain(HINSTANCE hInstDll, DWORD fdwReason, LPVOID lpvReserved)
   };
 
   return TRUE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (AVIFIL32.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( AVIFILE_hModule );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (AVIFIL32.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( AVIFILE_hModule );
 }

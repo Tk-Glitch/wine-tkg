@@ -139,6 +139,9 @@ static double math_error(int type, const char *name, double arg1, double arg2, d
 
     switch (type)
     {
+    case 0:
+        /* don't set errno */
+        break;
     case _DOMAIN:
         *_errno() = EDOM;
         break;
@@ -942,7 +945,7 @@ double CDECL asin( double x )
         if (isnan(x))
         {
 #ifdef __i386__
-            return math_error(_DOMAIN, "sqrt", x, 0, x);
+            return math_error(_DOMAIN, "asin", x, 0, x);
 #else
             return x;
 #endif
@@ -2434,82 +2437,769 @@ int CDECL _isnan(double num)
     return (u.i & ~0ull >> 1) > 0x7ffull << 52;
 }
 
+static double pzero(double x)
+{
+    static const double pR8[6] = { /* for x in [inf, 8]=1/[0,0.125] */
+        0.00000000000000000000e+00,
+        -7.03124999999900357484e-02,
+        -8.08167041275349795626e+00,
+        -2.57063105679704847262e+02,
+        -2.48521641009428822144e+03,
+        -5.25304380490729545272e+03,
+    }, pS8[5] = {
+        1.16534364619668181717e+02,
+        3.83374475364121826715e+03,
+        4.05978572648472545552e+04,
+        1.16752972564375915681e+05,
+        4.76277284146730962675e+04,
+    }, pR5[6] = { /* for x in [8,4.5454]=1/[0.125,0.22001] */
+        -1.14125464691894502584e-11,
+        -7.03124940873599280078e-02,
+        -4.15961064470587782438e+00,
+        -6.76747652265167261021e+01,
+        -3.31231299649172967747e+02,
+        -3.46433388365604912451e+02,
+    }, pS5[5] = {
+        6.07539382692300335975e+01,
+        1.05125230595704579173e+03,
+        5.97897094333855784498e+03,
+        9.62544514357774460223e+03,
+        2.40605815922939109441e+03,
+    }, pR3[6] = {/* for x in [4.547,2.8571]=1/[0.2199,0.35001] */
+        -2.54704601771951915620e-09,
+        -7.03119616381481654654e-02,
+        -2.40903221549529611423e+00,
+        -2.19659774734883086467e+01,
+        -5.80791704701737572236e+01,
+        -3.14479470594888503854e+01,
+    }, pS3[5] = {
+        3.58560338055209726349e+01,
+        3.61513983050303863820e+02,
+        1.19360783792111533330e+03,
+        1.12799679856907414432e+03,
+        1.73580930813335754692e+02,
+    }, pR2[6] = {/* for x in [2.8570,2]=1/[0.3499,0.5] */
+        -8.87534333032526411254e-08,
+        -7.03030995483624743247e-02,
+        -1.45073846780952986357e+00,
+        -7.63569613823527770791e+00,
+        -1.11931668860356747786e+01,
+        -3.23364579351335335033e+00,
+    }, pS2[5] = {
+        2.22202997532088808441e+01,
+        1.36206794218215208048e+02,
+        2.70470278658083486789e+02,
+        1.53875394208320329881e+02,
+        1.46576176948256193810e+01,
+    };
+
+    const double *p, *q;
+    double z, r, s;
+    uint32_t ix;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    ix &= 0x7fffffff;
+    if (ix >= 0x40200000) {
+        p = pR8;
+        q = pS8;
+    } else if (ix >= 0x40122E8B) {
+        p = pR5;
+        q = pS5;
+    } else if (ix >= 0x4006DB6D) {
+        p = pR3;
+        q = pS3;
+    } else /*ix >= 0x40000000*/ {
+        p = pR2;
+        q = pS2;
+    }
+
+    z = 1.0 / (x * x);
+    r = p[0] + z * (p[1] + z * (p[2] + z * (p[3] + z * (p[4] + z * p[5]))));
+    s = 1.0 + z * (q[0] + z * (q[1] + z * (q[2] + z * (q[3] + z * q[4]))));
+    return 1.0 + r / s;
+}
+
+static double qzero(double x)
+{
+    static const double qR8[6] = { /* for x in [inf, 8]=1/[0,0.125] */
+        0.00000000000000000000e+00,
+        7.32421874999935051953e-02,
+        1.17682064682252693899e+01,
+        5.57673380256401856059e+02,
+        8.85919720756468632317e+03,
+        3.70146267776887834771e+04,
+    }, qS8[6] = {
+        1.63776026895689824414e+02,
+        8.09834494656449805916e+03,
+        1.42538291419120476348e+05,
+        8.03309257119514397345e+05,
+        8.40501579819060512818e+05,
+        -3.43899293537866615225e+05,
+    }, qR5[6] = { /* for x in [8,4.5454]=1/[0.125,0.22001] */
+        1.84085963594515531381e-11,
+        7.32421766612684765896e-02,
+        5.83563508962056953777e+00,
+        1.35111577286449829671e+02,
+        1.02724376596164097464e+03,
+        1.98997785864605384631e+03,
+    }, qS5[6] = {
+        8.27766102236537761883e+01,
+        2.07781416421392987104e+03,
+        1.88472887785718085070e+04,
+        5.67511122894947329769e+04,
+        3.59767538425114471465e+04,
+        -5.35434275601944773371e+03,
+    }, qR3[6] = {/* for x in [4.547,2.8571]=1/[0.2199,0.35001] */
+        4.37741014089738620906e-09,
+        7.32411180042911447163e-02,
+        3.34423137516170720929e+00,
+        4.26218440745412650017e+01,
+        1.70808091340565596283e+02,
+        1.66733948696651168575e+02,
+    }, qS3[6] = {
+        4.87588729724587182091e+01,
+        7.09689221056606015736e+02,
+        3.70414822620111362994e+03,
+        6.46042516752568917582e+03,
+        2.51633368920368957333e+03,
+        -1.49247451836156386662e+02,
+    }, qR2[6] = {/* for x in [2.8570,2]=1/[0.3499,0.5] */
+        1.50444444886983272379e-07,
+        7.32234265963079278272e-02,
+        1.99819174093815998816e+00,
+        1.44956029347885735348e+01,
+        3.16662317504781540833e+01,
+        1.62527075710929267416e+01,
+    }, qS2[6] = {
+        3.03655848355219184498e+01,
+        2.69348118608049844624e+02,
+        8.44783757595320139444e+02,
+        8.82935845112488550512e+02,
+        2.12666388511798828631e+02,
+        -5.31095493882666946917e+00,
+    };
+
+    const double *p, *q;
+    double s, r, z;
+    unsigned int ix;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    ix &= 0x7fffffff;
+    if (ix >= 0x40200000) {
+        p = qR8;
+        q = qS8;
+    } else if (ix >= 0x40122E8B) {
+        p = qR5;
+        q = qS5;
+    } else if (ix >= 0x4006DB6D) {
+        p = qR3;
+        q = qS3;
+    } else /*ix >= 0x40000000*/ {
+        p = qR2;
+        q = qS2;
+    }
+
+    z = 1.0 / (x * x);
+    r = p[0] + z * (p[1] + z * (p[2] + z * (p[3] + z * (p[4] + z * p[5]))));
+    s = 1.0 + z * (q[0] + z * (q[1] + z * (q[2] + z * (q[3] + z * (q[4] + z * q[5])))));
+    return (-0.125 + r / s) / x;
+}
+
+/* j0 and y0 approximation for |x|>=2 */
+static double j0_y0_approx(unsigned int ix, double x, BOOL y0)
+{
+    static const double invsqrtpi = 5.64189583547756279280e-01;
+
+    double s, c, ss, cc, z;
+
+    s = sin(x);
+    c = cos(x);
+    if (y0) c = -c;
+    cc = s + c;
+    /* avoid overflow in 2*x, big ulp error when x>=0x1p1023 */
+    if (ix < 0x7fe00000) {
+        ss = s - c;
+        z = -cos(2 * x);
+        if (s * c < 0) cc = z / ss;
+        else ss = z / cc;
+        if (ix < 0x48000000) {
+            if (y0) ss = -ss;
+            cc = pzero(x) * cc - qzero(x) * ss;
+        }
+    }
+    return invsqrtpi * cc / sqrt(x);
+}
+
 /*********************************************************************
  *		_j0 (MSVCRT.@)
+ *
+ * Copied from musl: src/math/j0.c
  */
-double CDECL _j0(double num)
+double CDECL _j0(double x)
 {
-  /* FIXME: errno handling */
-  return unix_funcs->j0( num );
+    static const double R02 =  1.56249999999999947958e-02,
+            R03 = -1.89979294238854721751e-04,
+            R04 =  1.82954049532700665670e-06,
+            R05 = -4.61832688532103189199e-09,
+            S01 =  1.56191029464890010492e-02,
+            S02 =  1.16926784663337450260e-04,
+            S03 =  5.13546550207318111446e-07,
+            S04 =  1.16614003333790000205e-09;
+
+    double z, r, s;
+    unsigned int ix;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    ix &= 0x7fffffff;
+
+    /* j0(+-inf)=0, j0(nan)=nan */
+    if (ix >= 0x7ff00000)
+        return math_error(_DOMAIN, "_j0", x, 0, 1 / (x * x));
+    x = fabs(x);
+
+    if (ix >= 0x40000000) {  /* |x| >= 2 */
+        /* large ulp error near zeros: 2.4, 5.52, 8.6537,.. */
+        return j0_y0_approx(ix, x, FALSE);
+    }
+
+    if (ix >= 0x3f200000) {  /* |x| >= 2**-13 */
+        /* up to 4ulp error close to 2 */
+        z = x * x;
+        r = z * (R02 + z * (R03 + z * (R04 + z * R05)));
+        s = 1 + z * (S01 + z * (S02 + z * (S03 + z * S04)));
+        return (1 + x / 2) * (1 - x / 2) + z * (r / s);
+    }
+
+    /* 1 - x*x/4 */
+    /* prevent underflow */
+    /* inexact should be raised when x!=0, this is not done correctly */
+    if (ix >= 0x38000000)  /* |x| >= 2**-127 */
+        x = 0.25 * x * x;
+    return 1 - x;
+}
+
+static double pone(double x)
+{
+    static const double pr8[6] = { /* for x in [inf, 8]=1/[0,0.125] */
+        0.00000000000000000000e+00,
+        1.17187499999988647970e-01,
+        1.32394806593073575129e+01,
+        4.12051854307378562225e+02,
+        3.87474538913960532227e+03,
+        7.91447954031891731574e+03,
+    }, ps8[5] = {
+        1.14207370375678408436e+02,
+        3.65093083420853463394e+03,
+        3.69562060269033463555e+04,
+        9.76027935934950801311e+04,
+        3.08042720627888811578e+04,
+    }, pr5[6] = { /* for x in [8,4.5454]=1/[0.125,0.22001] */
+        1.31990519556243522749e-11,
+        1.17187493190614097638e-01,
+        6.80275127868432871736e+00,
+        1.08308182990189109773e+02,
+        5.17636139533199752805e+02,
+        5.28715201363337541807e+02,
+    }, ps5[5] = {
+        5.92805987221131331921e+01,
+        9.91401418733614377743e+02,
+        5.35326695291487976647e+03,
+        7.84469031749551231769e+03,
+        1.50404688810361062679e+03,
+    }, pr3[6] = {
+        3.02503916137373618024e-09,
+        1.17186865567253592491e-01,
+        3.93297750033315640650e+00,
+        3.51194035591636932736e+01,
+        9.10550110750781271918e+01,
+        4.85590685197364919645e+01,
+    }, ps3[5] = {
+        3.47913095001251519989e+01,
+        3.36762458747825746741e+02,
+        1.04687139975775130551e+03,
+        8.90811346398256432622e+02,
+        1.03787932439639277504e+02,
+    }, pr2[6] = { /* for x in [2.8570,2]=1/[0.3499,0.5] */
+        1.07710830106873743082e-07,
+        1.17176219462683348094e-01,
+        2.36851496667608785174e+00,
+        1.22426109148261232917e+01,
+        1.76939711271687727390e+01,
+        5.07352312588818499250e+00,
+    }, ps2[5] = {
+        2.14364859363821409488e+01,
+        1.25290227168402751090e+02,
+        2.32276469057162813669e+02,
+        1.17679373287147100768e+02,
+        8.36463893371618283368e+00,
+    };
+
+    const double *p, *q;
+    double z, r, s;
+    unsigned int ix;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    ix &= 0x7fffffff;
+    if (ix >= 0x40200000) {
+        p = pr8;
+        q = ps8;
+    } else if (ix >= 0x40122E8B) {
+        p = pr5;
+        q = ps5;
+    } else if (ix >= 0x4006DB6D) {
+        p = pr3;
+        q = ps3;
+    } else /*ix >= 0x40000000*/ {
+        p = pr2;
+        q = ps2;
+    }
+    z = 1.0 / (x * x);
+    r = p[0] + z * (p[1] + z * (p[2] + z * (p[3] + z * (p[4] + z * p[5]))));
+    s = 1.0 + z * (q[0] + z * (q[1] + z * (q[2] + z * (q[3] + z * q[4]))));
+    return 1.0 + r / s;
+}
+
+static double qone(double x)
+{
+    static const double qr8[6] = { /* for x in [inf, 8]=1/[0,0.125] */
+        0.00000000000000000000e+00,
+        -1.02539062499992714161e-01,
+        -1.62717534544589987888e+01,
+        -7.59601722513950107896e+02,
+        -1.18498066702429587167e+04,
+        -4.84385124285750353010e+04,
+    }, qs8[6] = {
+        1.61395369700722909556e+02,
+        7.82538599923348465381e+03,
+        1.33875336287249578163e+05,
+        7.19657723683240939863e+05,
+        6.66601232617776375264e+05,
+        -2.94490264303834643215e+05,
+    }, qr5[6] = { /* for x in [8,4.5454]=1/[0.125,0.22001] */
+        -2.08979931141764104297e-11,
+        -1.02539050241375426231e-01,
+        -8.05644828123936029840e+00,
+        -1.83669607474888380239e+02,
+        -1.37319376065508163265e+03,
+        -2.61244440453215656817e+03,
+    }, qs5[6] = {
+        8.12765501384335777857e+01,
+        1.99179873460485964642e+03,
+        1.74684851924908907677e+04,
+        4.98514270910352279316e+04,
+        2.79480751638918118260e+04,
+        -4.71918354795128470869e+03,
+    }, qr3[6] = {
+        -5.07831226461766561369e-09,
+        -1.02537829820837089745e-01,
+        -4.61011581139473403113e+00,
+        -5.78472216562783643212e+01,
+        -2.28244540737631695038e+02,
+        -2.19210128478909325622e+02,
+    }, qs3[6] = {
+        4.76651550323729509273e+01,
+        6.73865112676699709482e+02,
+        3.38015286679526343505e+03,
+        5.54772909720722782367e+03,
+        1.90311919338810798763e+03,
+        -1.35201191444307340817e+02,
+    }, qr2[6] = { /* for x in [2.8570,2]=1/[0.3499,0.5] */
+        -1.78381727510958865572e-07,
+        -1.02517042607985553460e-01,
+        -2.75220568278187460720e+00,
+        -1.96636162643703720221e+01,
+        -4.23253133372830490089e+01,
+        -2.13719211703704061733e+01,
+    }, qs2[6] = {
+        2.95333629060523854548e+01,
+        2.52981549982190529136e+02,
+        7.57502834868645436472e+02,
+        7.39393205320467245656e+02,
+        1.55949003336666123687e+02,
+        -4.95949898822628210127e+00,
+    };
+
+    const double *p, *q;
+    double s, r, z;
+    unsigned int ix;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    ix &= 0x7fffffff;
+    if (ix >= 0x40200000) {
+        p = qr8;
+        q = qs8;
+    } else if (ix >= 0x40122E8B) {
+        p = qr5;
+        q = qs5;
+    } else if (ix >= 0x4006DB6D) {
+        p = qr3;
+        q = qs3;
+    } else /*ix >= 0x40000000*/ {
+        p = qr2;
+        q = qs2;
+    }
+    z = 1.0 / (x * x);
+    r = p[0] + z * (p[1] + z * (p[2] + z * (p[3] + z * (p[4] + z * p[5]))));
+    s = 1.0 + z * (q[0] + z * (q[1] + z * (q[2] + z * (q[3] + z * (q[4] + z * q[5])))));
+    return (0.375 + r / s) / x;
+}
+
+static double j1_y1_approx(unsigned int ix, double x, BOOL y1, int sign)
+{
+    static const double invsqrtpi = 5.64189583547756279280e-01;
+
+    double z, s, c, ss, cc;
+
+    s = sin(x);
+    if (y1) s = -s;
+    c = cos(x);
+    cc = s - c;
+    if (ix < 0x7fe00000) {
+        ss = -s - c;
+        z = cos(2 * x);
+        if (s * c > 0) cc = z / ss;
+        else ss = z / cc;
+        if (ix < 0x48000000) {
+            if (y1)
+                ss = -ss;
+            cc = pone(x) * cc - qone(x) * ss;
+        }
+    }
+    if (sign)
+        cc = -cc;
+    return invsqrtpi * cc / sqrt(x);
 }
 
 /*********************************************************************
  *		_j1 (MSVCRT.@)
+ *
+ * Copied from musl: src/math/j1.c
  */
-double CDECL _j1(double num)
+double CDECL _j1(double x)
 {
-  /* FIXME: errno handling */
-  return unix_funcs->j1( num );
+    static const double r00 = -6.25000000000000000000e-02,
+        r01 =  1.40705666955189706048e-03,
+        r02 = -1.59955631084035597520e-05,
+        r03 =  4.96727999609584448412e-08,
+        s01 =  1.91537599538363460805e-02,
+        s02 =  1.85946785588630915560e-04,
+        s03 =  1.17718464042623683263e-06,
+        s04 =  5.04636257076217042715e-09,
+        s05 =  1.23542274426137913908e-11;
+
+    double z, r, s;
+    unsigned int ix;
+    int sign;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    sign = ix >> 31;
+    ix &= 0x7fffffff;
+    if (ix >= 0x7ff00000)
+        return math_error(isnan(x) ? 0 : _DOMAIN, "_j1", x, 0, 1 / (x * x));
+    if (ix >= 0x40000000)  /* |x| >= 2 */
+        return j1_y1_approx(ix, fabs(x), FALSE, sign);
+    if (ix >= 0x38000000) {  /* |x| >= 2**-127 */
+        z = x * x;
+        r = z * (r00 + z * (r01 + z * (r02 + z * r03)));
+        s = 1 + z * (s01 + z * (s02 + z * (s03 + z * (s04 + z * s05))));
+        z = r / s;
+    } else {
+        /* avoid underflow, raise inexact if x!=0 */
+        z = x;
+    }
+    return (0.5 + z) * x;
 }
 
 /*********************************************************************
  *		_jn (MSVCRT.@)
+ *
+ * Copied from musl: src/math/jn.c
  */
-double CDECL _jn(int n, double num)
+double CDECL _jn(int n, double x)
 {
-  /* FIXME: errno handling */
-  return unix_funcs->jn( n, num );
+    static const double invsqrtpi = 5.64189583547756279280e-01;
+
+    unsigned int ix, lx;
+    int nm1, i, sign;
+    double a, b, temp;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    lx = *(ULONGLONG*)&x;
+    sign = ix >> 31;
+    ix &= 0x7fffffff;
+
+    if ((ix | (lx | -lx) >> 31) > 0x7ff00000) /* nan */
+        return x;
+
+    if (n == 0)
+        return _j0(x);
+    if (n < 0) {
+        nm1 = -(n + 1);
+        x = -x;
+        sign ^= 1;
+    } else {
+        nm1 = n-1;
+    }
+    if (nm1 == 0)
+        return j1(x);
+
+    sign &= n;  /* even n: 0, odd n: signbit(x) */
+    x = fabs(x);
+    if ((ix | lx) == 0 || ix == 0x7ff00000)  /* if x is 0 or inf */
+        b = 0.0;
+    else if (nm1 < x) {
+        if (ix >= 0x52d00000) { /* x > 2**302 */
+            switch(nm1 & 3) {
+            case 0:
+                temp = -cos(x) + sin(x);
+                break;
+            case 1:
+                temp = -cos(x) - sin(x);
+                break;
+            case 2:
+                temp =  cos(x) - sin(x);
+                break;
+            default:
+                temp =  cos(x) + sin(x);
+                break;
+            }
+            b = invsqrtpi * temp / sqrt(x);
+        } else {
+            a = _j0(x);
+            b = _j1(x);
+            for (i = 0; i < nm1; ) {
+                i++;
+                temp = b;
+                b = b * (2.0 * i / x) - a; /* avoid underflow */
+                a = temp;
+            }
+        }
+    } else {
+        if (ix < 0x3e100000) { /* x < 2**-29 */
+            if (nm1 > 32)  /* underflow */
+                b = 0.0;
+            else {
+                temp = x * 0.5;
+                b = temp;
+                a = 1.0;
+                for (i = 2; i <= nm1 + 1; i++) {
+                    a *= (double)i; /* a = n! */
+                    b *= temp;      /* b = (x/2)^n */
+                }
+                b = b / a;
+            }
+        } else {
+            double t, q0, q1, w, h, z, tmp, nf;
+            int k;
+
+            nf = nm1 + 1.0;
+            w = 2 * nf / x;
+            h = 2 / x;
+            z = w + h;
+            q0 = w;
+            q1 = w * z - 1.0;
+            k = 1;
+            while (q1 < 1.0e9) {
+                k += 1;
+                z += h;
+                tmp = z * q1 - q0;
+                q0 = q1;
+                q1 = tmp;
+            }
+            for (t = 0.0, i = k; i >= 0; i--)
+                t = 1 / (2 * (i + nf) / x - t);
+            a = t;
+            b = 1.0;
+            tmp = nf * log(fabs(w));
+            if (tmp < 7.09782712893383973096e+02) {
+                for (i = nm1; i > 0; i--) {
+                    temp = b;
+                    b = b * (2.0 * i) / x - a;
+                    a = temp;
+                }
+            } else {
+                for (i = nm1; i > 0; i--) {
+                    temp = b;
+                    b = b * (2.0 * i) / x - a;
+                    a = temp;
+                    /* scale b to avoid spurious overflow */
+                    if (b > 0x1p500) {
+                        a /= b;
+                        t /= b;
+                        b  = 1.0;
+                    }
+                }
+            }
+            z = j0(x);
+            w = j1(x);
+            if (fabs(z) >= fabs(w))
+                b = t * z / b;
+            else
+                b = t * w / a;
+        }
+    }
+    return sign ? -b : b;
 }
 
 /*********************************************************************
  *		_y0 (MSVCRT.@)
  */
-double CDECL _y0(double num)
+double CDECL _y0(double x)
 {
-  double retval;
+    static const double tpi = 6.36619772367581382433e-01,
+        u00  = -7.38042951086872317523e-02,
+        u01  =  1.76666452509181115538e-01,
+        u02  = -1.38185671945596898896e-02,
+        u03  =  3.47453432093683650238e-04,
+        u04  = -3.81407053724364161125e-06,
+        u05  =  1.95590137035022920206e-08,
+        u06  = -3.98205194132103398453e-11,
+        v01  =  1.27304834834123699328e-02,
+        v02  =  7.60068627350353253702e-05,
+        v03  =  2.59150851840457805467e-07,
+        v04  =  4.41110311332675467403e-10;
 
-  if (!isfinite(num)) *_errno() = EDOM;
-  retval = unix_funcs->y0( num );
-  if (_fpclass(retval) == _FPCLASS_NINF)
-  {
-    *_errno() = EDOM;
-    retval = NAN;
-  }
-  return retval;
+    double z, u, v;
+    unsigned int ix, lx;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    lx = *(ULONGLONG*)&x;
+
+    /* y0(nan)=nan, y0(<0)=nan, y0(0)=-inf, y0(inf)=0 */
+    if ((ix << 1 | lx) == 0)
+        return math_error(_OVERFLOW, "_y0", x, 0, -INFINITY);
+    if (isnan(x))
+        return x;
+    if (ix >> 31)
+        return math_error(_DOMAIN, "_y0", x, 0, 0 / (x - x));
+    if (ix >= 0x7ff00000)
+        return 1 / x;
+
+    if (ix >= 0x40000000) {  /* x >= 2 */
+        /* large ulp errors near zeros: 3.958, 7.086,.. */
+        return j0_y0_approx(ix, x, TRUE);
+    }
+
+    if (ix >= 0x3e400000) {  /* x >= 2**-27 */
+        /* large ulp error near the first zero, x ~= 0.89 */
+        z = x * x;
+        u = u00 + z * (u01 + z * (u02 + z * (u03 + z * (u04 + z * (u05 + z * u06)))));
+        v = 1.0 + z * (v01 + z * (v02 + z * (v03 + z * v04)));
+        return u / v + tpi * (j0(x) * log(x));
+    }
+    return u00 + tpi * log(x);
 }
 
 /*********************************************************************
  *		_y1 (MSVCRT.@)
  */
-double CDECL _y1(double num)
+double CDECL _y1(double x)
 {
-  double retval;
+    static const double tpi = 6.36619772367581382433e-01,
+        u00 =  -1.96057090646238940668e-01,
+        u01 = 5.04438716639811282616e-02,
+        u02 = -1.91256895875763547298e-03,
+        u03 = 2.35252600561610495928e-05,
+        u04 = -9.19099158039878874504e-08,
+        v00 = 1.99167318236649903973e-02,
+        v01 = 2.02552581025135171496e-04,
+        v02 = 1.35608801097516229404e-06,
+        v03 = 6.22741452364621501295e-09,
+        v04 = 1.66559246207992079114e-11;
 
-  if (!isfinite(num)) *_errno() = EDOM;
-  retval = unix_funcs->y1( num );
-  if (_fpclass(retval) == _FPCLASS_NINF)
-  {
-    *_errno() = EDOM;
-    retval = NAN;
-  }
-  return retval;
+    double z, u, v;
+    unsigned int ix, lx;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    lx = *(ULONGLONG*)&x;
+
+    /* y1(nan)=nan, y1(<0)=nan, y1(0)=-inf, y1(inf)=0 */
+    if ((ix << 1 | lx) == 0)
+        return math_error(_OVERFLOW, "_y1", x, 0, -INFINITY);
+    if (isnan(x))
+        return x;
+    if (ix >> 31)
+        return math_error(_DOMAIN, "_y1", x, 0, 0 / (x - x));
+    if (ix >= 0x7ff00000)
+        return 1 / x;
+
+    if (ix >= 0x40000000)  /* x >= 2 */
+        return j1_y1_approx(ix, x, TRUE, 0);
+    if (ix < 0x3c900000)  /* x < 2**-54 */
+        return -tpi / x;
+    z = x * x;
+    u = u00 + z * (u01 + z * (u02 + z * (u03 + z * u04)));
+    v = 1 + z * (v00 + z * (v01 + z * (v02 + z * (v03 + z * v04))));
+    return x * (u / v) + tpi * (j1(x) * log(x) - 1 / x);
 }
 
 /*********************************************************************
  *		_yn (MSVCRT.@)
+ *
+ * Copied from musl: src/math/jn.c
  */
-double CDECL _yn(int order, double num)
+double CDECL _yn(int n, double x)
 {
-  double retval;
+    static const double invsqrtpi = 5.64189583547756279280e-01;
 
-  if (!isfinite(num)) *_errno() = EDOM;
-  retval = unix_funcs->yn( order, num );
-  if (_fpclass(retval) == _FPCLASS_NINF)
-  {
-    *_errno() = EDOM;
-    retval = NAN;
-  }
-  return retval;
+    unsigned int ix, lx, ib;
+    int nm1, sign, i;
+    double a, b, temp;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    lx = *(ULONGLONG*)&x;
+    sign = ix >> 31;
+    ix &= 0x7fffffff;
+
+    if ((ix | (lx | -lx) >> 31) > 0x7ff00000) /* nan */
+        return x;
+    if (sign && (ix | lx) != 0) /* x < 0 */
+        return math_error(_DOMAIN, "_y1", x, 0, 0 / (x - x));
+    if (ix == 0x7ff00000)
+        return 0.0;
+
+    if (n == 0)
+        return y0(x);
+    if (n < 0) {
+        nm1 = -(n + 1);
+        sign = n & 1;
+    } else {
+        nm1 = n - 1;
+        sign = 0;
+    }
+    if (nm1 == 0)
+        return sign ? -y1(x) : y1(x);
+
+    if (ix >= 0x52d00000) { /* x > 2**302 */
+        switch(nm1 & 3) {
+        case 0:
+            temp = -sin(x) - cos(x);
+            break;
+        case 1:
+            temp = -sin(x) + cos(x);
+            break;
+        case 2:
+            temp = sin(x) + cos(x);
+            break;
+        default:
+            temp = sin(x) - cos(x);
+            break;
+        }
+        b = invsqrtpi * temp / sqrt(x);
+    } else {
+        a = y0(x);
+        b = y1(x);
+        /* quit if b is -inf */
+        ib = *(ULONGLONG*)&b >> 32;
+        for (i = 0; i < nm1 && ib != 0xfff00000;) {
+            i++;
+            temp = b;
+            b = (2.0 * i / x) * b - a;
+            ib = *(ULONGLONG*)&b >> 32;
+            a = temp;
+        }
+    }
+    return sign ? -b : b;
 }
 
 #if _MSVCR_VER>=120
@@ -3631,50 +4321,118 @@ short CDECL _dclass(double x)
 
 /*********************************************************************
  *      round (MSVCR120.@)
+ *
+ * Based on musl implementation: src/math/round.c
  */
 double CDECL round(double x)
 {
-    return unix_funcs->round(x);
+    ULONGLONG llx = *(ULONGLONG*)&x, tmp;
+    int e = (llx >> 52 & 0x7ff) - 0x3ff;
+
+    if (e >= 52)
+        return x;
+    if (e < -1)
+        return 0 * x;
+    else if (e == -1)
+        return signbit(x) ? -1 : 1;
+
+    tmp = 0x000fffffffffffffULL >> e;
+    if (!(llx & tmp))
+        return x;
+    llx += 0x0008000000000000ULL >> e;
+    llx &= ~tmp;
+    return *(double*)&llx;
 }
 
 /*********************************************************************
  *      roundf (MSVCR120.@)
+ *
+ * Copied from musl: src/math/roundf.c
  */
 float CDECL roundf(float x)
 {
-    return unix_funcs->roundf(x);
+    static const float toint = 1 / FLT_EPSILON;
+
+    unsigned int ix = *(unsigned int*)&x;
+    int e = ix >> 23 & 0xff;
+    float y;
+
+    if (e >= 0x7f + 23)
+        return x;
+    if (ix >> 31)
+        x = -x;
+    if (e < 0x7f - 1)
+        return 0 * *(float*)&ix;
+    y = fp_barrierf(x + toint) - toint - x;
+    if (y > 0.5f)
+        y = y + x - 1;
+    else if (y <= -0.5f)
+        y = y + x + 1;
+    else
+        y = y + x;
+    if (ix >> 31)
+        y = -y;
+    return y;
 }
 
 /*********************************************************************
  *      lround (MSVCR120.@)
+ *
+ * Copied from musl: src/math/lround.c
  */
 __msvcrt_long CDECL lround(double x)
 {
-    return unix_funcs->lround( x );
+    double d = round(x);
+    if (d != (double)(__msvcrt_long)d) {
+        *_errno() = EDOM;
+        return 0;
+    }
+    return d;
 }
 
 /*********************************************************************
  *      lroundf (MSVCR120.@)
+ *
+ * Copied from musl: src/math/lroundf.c
  */
 __msvcrt_long CDECL lroundf(float x)
 {
-    return unix_funcs->lroundf( x );
+    float f = roundf(x);
+    if (f != (float)(__msvcrt_long)f) {
+        *_errno() = EDOM;
+        return 0;
+    }
+    return f;
 }
 
 /*********************************************************************
  *      llround (MSVCR120.@)
+ *
+ * Copied from musl: src/math/llround.c
  */
 __int64 CDECL llround(double x)
 {
-    return unix_funcs->llround( x );
+    double d = round(x);
+    if (d != (double)(__int64)d) {
+        *_errno() = EDOM;
+        return 0;
+    }
+    return d;
 }
 
 /*********************************************************************
  *      llroundf (MSVCR120.@)
+ *
+ * Copied from musl: src/math/llroundf.c
  */
 __int64 CDECL llroundf(float x)
 {
-    return unix_funcs->llroundf( x );
+    float f = roundf(x);
+    if (f != (float)(__int64)f) {
+        *_errno() = EDOM;
+        return 0;
+    }
+    return f;
 }
 
 /*********************************************************************

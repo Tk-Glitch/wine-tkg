@@ -597,8 +597,8 @@ static uint64_t scale_uint64(uint64_t value, uint32_t numerator, uint32_t denomi
         return 0;
 
     i.QuadPart = value;
-    low.QuadPart = i.u.LowPart * numerator;
-    high.QuadPart = i.u.HighPart * numerator + low.u.HighPart;
+    low.QuadPart = (ULONGLONG)i.u.LowPart * numerator;
+    high.QuadPart = (ULONGLONG)i.u.HighPart * numerator + low.u.HighPart;
     low.u.HighPart = 0;
 
     if (high.u.HighPart >= denominator)
@@ -875,7 +875,7 @@ static HRESULT parser_init_stream(struct strmbase_filter *iface)
      * it transitions from stopped -> paused. */
 
     seeking = &filter->sources[0]->seek;
-    if (seeking->llStop && seeking->llStop != seeking->llDuration)
+    if (seeking->llStop)
         stop_flags = AM_SEEKING_AbsolutePositioning;
     unix_funcs->wg_parser_stream_seek(filter->sources[0]->wg_stream, seeking->dRate,
             seeking->llCurrent, seeking->llStop, AM_SEEKING_AbsolutePositioning, stop_flags);

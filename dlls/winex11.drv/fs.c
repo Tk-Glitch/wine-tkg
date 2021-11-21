@@ -249,7 +249,7 @@ static BOOL fs_add_monitor(const WCHAR *device_name)
     if (!real_settings_handler.get_current_mode(real_id, &real_mode))
         return FALSE;
 
-    if (!(fs_monitor = heap_alloc(sizeof(*fs_monitor))))
+    if (!(fs_monitor = malloc(sizeof(*fs_monitor))))
         return FALSE;
 
     fs_monitor->user_mode = real_mode;
@@ -261,7 +261,7 @@ static BOOL fs_add_monitor(const WCHAR *device_name)
     if (!fs_monitor_add_modes(fs_monitor))
     {
         ERR("Failed to initialize display modes.\n");
-        heap_free(fs_monitor);
+        free(fs_monitor);
         return FALSE;
     }
     list_add_tail(&fs_monitors, &fs_monitor->entry);

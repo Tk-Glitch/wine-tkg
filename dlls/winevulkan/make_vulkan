@@ -64,7 +64,7 @@ from enum import Enum
 LOGGER = logging.Logger("vulkan")
 LOGGER.addHandler(logging.StreamHandler())
 
-VK_XML_VERSION = "1.2.170"
+VK_XML_VERSION = "1.2.176"
 WINE_VK_VERSION = (1, 2)
 
 # Filenames to create.
@@ -75,6 +75,8 @@ WINE_VULKAN_JSON = "winevulkan.json"
 WINE_VULKAN_SPEC = "winevulkan.spec"
 WINE_VULKAN_THUNKS_C = "vulkan_thunks.c"
 WINE_VULKAN_THUNKS_H = "vulkan_thunks.h"
+WINE_VULKAN_LOADER_THUNKS_C = "loader_thunks.c"
+WINE_VULKAN_LOADER_THUNKS_H = "loader_thunks.h"
 
 # Extension enum values start at a certain offset (EXT_BASE).
 # Relative to the offset each extension has a block (EXT_BLOCK_SIZE)
@@ -151,12 +153,14 @@ class ThunkType(Enum):
 #   - PUBLIC means the implementation is fully auto generated.
 #   - PRIVATE thunks can be used in custom implementations for
 #     struct conversion.
+# - loader_thunk sets whether to create a thunk for unix_funcs.
 FUNCTION_OVERRIDES = {
     # Global functions
-    "vkCreateInstance" : {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE},
-    "vkEnumerateInstanceExtensionProperties" : {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE},
-    "vkEnumerateInstanceVersion": {"dispatch" : False, "driver" : False, "thunk" : ThunkType.NONE},
-    "vkGetInstanceProcAddr": {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE},
+    "vkCreateInstance" : {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
+    "vkEnumerateInstanceExtensionProperties" : {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
+    "vkEnumerateInstanceLayerProperties" : {"dispatch" : False, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.NONE},
+    "vkEnumerateInstanceVersion": {"dispatch" : False, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
+    "vkGetInstanceProcAddr": {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.NONE},
 
     # Instance functions
     "vkCreateDevice" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
@@ -169,8 +173,9 @@ FUNCTION_OVERRIDES = {
     "vkGetPhysicalDeviceExternalFenceProperties" : {"dispatch" : False, "driver" : False, "thunk" : ThunkType.NONE},
     "vkGetPhysicalDeviceExternalSemaphoreProperties" : {"dispatch" : False, "driver" : False, "thunk" : ThunkType.NONE},
     "vkGetPhysicalDeviceImageFormatProperties2" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.PRIVATE},
-    "vkGetPhysicalDeviceProperties2" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.PRIVATE},
-    "vkGetPhysicalDeviceProperties2KHR" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.PRIVATE},
+    "vkGetPhysicalDeviceProperties" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.PUBLIC, "loader_thunk" : ThunkType.PRIVATE},
+    "vkGetPhysicalDeviceProperties2" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.PUBLIC, "loader_thunk" : ThunkType.PRIVATE},
+    "vkGetPhysicalDeviceProperties2KHR" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.PUBLIC, "loader_thunk" : ThunkType.PRIVATE},
 
     # Device functions
     "vkAllocateCommandBuffers" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
@@ -179,7 +184,7 @@ FUNCTION_OVERRIDES = {
     "vkDestroyCommandPool" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE},
     "vkDestroyDevice" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
     "vkFreeCommandBuffers" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
-    "vkGetDeviceProcAddr" : {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE},
+    "vkGetDeviceProcAddr" : {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.NONE},
     "vkGetDeviceQueue" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE},
     "vkGetDeviceQueue2" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE},
     "vkQueueSubmit" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE},
@@ -319,15 +324,11 @@ class VkDefine(object):
             # <type category="define" name="some_name">some_value</type>
             name = define.attrib.get("name")
 
-            # We override behavior of VK_DEFINE_NON_DISPATCHABLE handle as the default
+            # We override behavior of VK_USE_64_BIT_PTR_DEFINES as the default non-dispatchable handle
             # definition various between 64-bit (uses pointers) and 32-bit (uses uint64_t).
             # This complicates TRACEs in the thunks, so just use uint64_t.
-            if name == "VK_DEFINE_NON_DISPATCHABLE_HANDLE":
-                value = "#define VK_DEFINE_NON_DISPATCHABLE_HANDLE(object) typedef uint64_t object;"
-            # As VK_DEFINE_NON_DISPATCHABLE handle is overriden above, we must also override
-            # VK_NULL_HANDLE so that its type will match.
-            elif name == "VK_NULL_HANDLE":
-                value = "#define VK_NULL_HANDLE 0ULL"
+            if name == "VK_USE_64_BIT_PTR_DEFINES":
+                value = "#define VK_USE_64_BIT_PTR_DEFINES 0"
             else:
                 value = define.text
             return VkDefine(name, value)
@@ -531,6 +532,7 @@ class VkFunction(object):
         self.dispatch = func_info["dispatch"] if func_info else True
         self.driver = func_info["driver"] if func_info else False
         self.thunk_type = func_info["thunk"] if func_info else ThunkType.PUBLIC
+        self.loader_thunk_type = func_info["loader_thunk"] if func_info and "loader_thunk" in func_info else ThunkType.PUBLIC
 
         # Required is set while parsing which APIs and types are required
         # and is used by the code generation.
@@ -722,6 +724,19 @@ class VkFunction(object):
 
         return body
 
+    def loader_body(self):
+        body = ""
+
+        params = ", ".join([p.name for p in self.params])
+
+        # Call the function from unix_funcs.
+        if self.type == "void":
+            body += "    unix_funcs->p_{0}({1});\n".format(self.name, params)
+        else:
+            body += "    return unix_funcs->p_{0}({1});\n".format(self.name, params)
+
+        return body
+
     def body_conversion(self):
         body = ""
 
@@ -830,6 +845,13 @@ class VkFunction(object):
         else:
             thunk += self.body()
 
+        thunk += "}\n\n"
+        return thunk
+
+    def loader_thunk(self, prefix=None):
+        thunk = self.prototype(call_conv="WINAPI", prefix=prefix)
+        thunk += "\n{\n"
+        thunk += self.loader_body()
         thunk += "}\n\n"
         return thunk
 
@@ -1928,7 +1950,7 @@ class ConversionFunction(object):
         body += "    unsigned int i;\n\n"
         body += "    if (!in) return NULL;\n\n"
 
-        body += "    out = heap_alloc(count * sizeof(*out));\n"
+        body += "    out = malloc(count * sizeof(*out));\n"
 
         body += "    for (i = 0; i < count; i++)\n"
         body += "    {\n"
@@ -2115,7 +2137,7 @@ class FreeFunction(object):
         else:
             body += "    if (!in) return;\n\n"
 
-        body += "    heap_free(in);\n"
+        body += "    free(in);\n"
 
         body += "}\n\n"
         return body
@@ -2203,7 +2225,7 @@ class StructChainConversionFunction(object):
             body += "            const {0} *in = (const {0} *)in_header;\n".format(e.name)
             body += "            {0} *out;\n\n".format(e.name)
 
-            body += "            if (!(out = heap_alloc(sizeof(*out)))) goto out_of_memory;\n\n"
+            body += "            if (!(out = malloc(sizeof(*out)))) goto out_of_memory;\n\n"
 
             for m in e:
                 if m.name == "pNext":
@@ -2255,7 +2277,7 @@ class FreeStructChainFunction(object):
         body += "    {\n"
         body += "        void *prev = header;\n"
         body += "        header = header->pNext;\n"
-        body += "        heap_free(prev);\n"
+        body += "        free(prev);\n"
         body += "    }\n\n"
 
         body += "    s->pNext = NULL;\n"
@@ -2309,6 +2331,11 @@ class VkGenerator(object):
 
     def generate_thunks_c(self, f, prefix):
         self._generate_copyright(f)
+
+        f.write("#if 0\n")
+        f.write("#pragma makedep unix\n")
+        f.write("#endif\n\n")
+
         f.write("#include \"config.h\"\n")
         f.write("#include \"wine/port.h\"\n\n")
 
@@ -2350,72 +2377,6 @@ class VkGenerator(object):
                 f.write(vk_func.thunk(prefix="thunk_"))
             else:
                 f.write(vk_func.thunk(prefix=prefix, call_conv="WINAPI"))
-
-        f.write("static const struct vulkan_func vk_device_dispatch_table[] =\n{\n")
-        for vk_func in self.registry.device_funcs:
-            if not vk_func.is_required():
-                continue
-
-            f.write("    {{\"{0}\", &{1}{0}}},\n".format(vk_func.name, prefix))
-        f.write("};\n\n")
-
-        f.write("static const struct vulkan_func vk_phys_dev_dispatch_table[] =\n{\n")
-        for vk_func in self.registry.phys_dev_funcs:
-            if not vk_func.is_required():
-                continue
-
-            f.write("    {{\"{0}\", &{1}{0}}},\n".format(vk_func.name, prefix))
-        f.write("};\n\n")
-
-        f.write("static const struct vulkan_func vk_instance_dispatch_table[] =\n{\n")
-        for vk_func in self.registry.instance_funcs:
-            if not vk_func.is_required():
-                continue
-
-            f.write("    {{\"{0}\", &{1}{0}}},\n".format(vk_func.name, prefix))
-        f.write("};\n\n")
-
-        f.write("void *wine_vk_get_device_proc_addr(const char *name)\n")
-        f.write("{\n")
-        f.write("    unsigned int i;\n")
-        f.write("    for (i = 0; i < ARRAY_SIZE(vk_device_dispatch_table); i++)\n")
-        f.write("    {\n")
-        f.write("        if (strcmp(vk_device_dispatch_table[i].name, name) == 0)\n")
-        f.write("        {\n")
-        f.write("            TRACE(\"Found name=%s in device table\\n\", debugstr_a(name));\n")
-        f.write("            return vk_device_dispatch_table[i].func;\n")
-        f.write("        }\n")
-        f.write("    }\n")
-        f.write("    return NULL;\n")
-        f.write("}\n\n")
-
-        f.write("void *wine_vk_get_phys_dev_proc_addr(const char *name)\n")
-        f.write("{\n")
-        f.write("    unsigned int i;\n")
-        f.write("    for (i = 0; i < ARRAY_SIZE(vk_phys_dev_dispatch_table); i++)\n")
-        f.write("    {\n")
-        f.write("        if (strcmp(vk_phys_dev_dispatch_table[i].name, name) == 0)\n")
-        f.write("        {\n")
-        f.write("            TRACE(\"Found name=%s in physical device table\\n\", debugstr_a(name));\n")
-        f.write("            return vk_phys_dev_dispatch_table[i].func;\n")
-        f.write("        }\n")
-        f.write("    }\n")
-        f.write("    return NULL;\n")
-        f.write("}\n\n")
-
-        f.write("void *wine_vk_get_instance_proc_addr(const char *name)\n")
-        f.write("{\n")
-        f.write("    unsigned int i;\n")
-        f.write("    for (i = 0; i < ARRAY_SIZE(vk_instance_dispatch_table); i++)\n")
-        f.write("    {\n")
-        f.write("        if (strcmp(vk_instance_dispatch_table[i].name, name) == 0)\n")
-        f.write("        {\n")
-        f.write("            TRACE(\"Found name=%s in instance table\\n\", debugstr_a(name));\n")
-        f.write("            return vk_instance_dispatch_table[i].func;\n")
-        f.write("        }\n")
-        f.write("    }\n")
-        f.write("    return NULL;\n")
-        f.write("}\n\n")
 
         # Create array of device extensions.
         f.write("static const char * const vk_device_extensions[] =\n{\n")
@@ -2485,7 +2446,18 @@ class VkGenerator(object):
         f.write("    default:\n")
         f.write("       return handle;\n")
         f.write("    }\n")
-        f.write("}\n")
+        f.write("}\n\n")
+
+        f.write("const struct unix_funcs loader_funcs =\n")
+        f.write("{\n")
+        for vk_func in self.registry.funcs.values():
+            if not vk_func.is_required():
+                continue
+            if vk_func.loader_thunk_type == ThunkType.NONE:
+                continue
+
+            f.write("    &{1}{0},\n".format(vk_func.name, prefix))
+        f.write("};\n")
 
     def generate_thunks_h(self, f, prefix):
         self._generate_copyright(f)
@@ -2504,9 +2476,9 @@ class VkGenerator(object):
                 continue
 
             if vk_func.is_core_func():
-                f.write("{0};\n".format(vk_func.prototype("WINAPI", prefix="wine_")))
+                f.write("{0};\n".format(vk_func.prototype("WINAPI", prefix=prefix)))
             else:
-                f.write("{0};\n".format(vk_func.prototype("WINAPI", prefix="wine_", postfix="DECLSPEC_HIDDEN")))
+                f.write("{0};\n".format(vk_func.prototype("WINAPI", prefix=prefix, postfix="DECLSPEC_HIDDEN")))
         f.write("\n")
 
         f.write("/* Private thunks */\n")
@@ -2602,6 +2574,106 @@ class VkGenerator(object):
         f.write("\n\n")
 
         f.write("#endif /* __WINE_VULKAN_THUNKS_H */\n")
+
+    def generate_loader_thunks_c(self, f):
+        self._generate_copyright(f)
+
+        f.write("#include \"vulkan_loader.h\"\n\n")
+
+        f.write("WINE_DEFAULT_DEBUG_CHANNEL(vulkan);\n\n")
+
+        for vk_func in self.registry.funcs.values():
+            if not vk_func.is_required():
+                continue
+            if vk_func.loader_thunk_type != ThunkType.PUBLIC:
+                continue
+
+            f.write(vk_func.loader_thunk())
+
+        f.write("static const struct vulkan_func vk_device_dispatch_table[] =\n{\n")
+        for vk_func in self.registry.device_funcs:
+            if not vk_func.is_required():
+                continue
+
+            f.write("    {{\"{0}\", &{0}}},\n".format(vk_func.name))
+        f.write("};\n\n")
+
+        f.write("static const struct vulkan_func vk_phys_dev_dispatch_table[] =\n{\n")
+        for vk_func in self.registry.phys_dev_funcs:
+            if not vk_func.is_required():
+                continue
+
+            f.write("    {{\"{0}\", &{0}}},\n".format(vk_func.name))
+        f.write("};\n\n")
+
+        f.write("static const struct vulkan_func vk_instance_dispatch_table[] =\n{\n")
+        for vk_func in self.registry.instance_funcs:
+            if not vk_func.is_required():
+                continue
+
+            f.write("    {{\"{0}\", &{0}}},\n".format(vk_func.name))
+        f.write("};\n\n")
+
+        f.write("void *wine_vk_get_device_proc_addr(const char *name)\n")
+        f.write("{\n")
+        f.write("    unsigned int i;\n")
+        f.write("    for (i = 0; i < ARRAY_SIZE(vk_device_dispatch_table); i++)\n")
+        f.write("    {\n")
+        f.write("        if (strcmp(vk_device_dispatch_table[i].name, name) == 0)\n")
+        f.write("        {\n")
+        f.write("            TRACE(\"Found name=%s in device table\\n\", debugstr_a(name));\n")
+        f.write("            return vk_device_dispatch_table[i].func;\n")
+        f.write("        }\n")
+        f.write("    }\n")
+        f.write("    return NULL;\n")
+        f.write("}\n\n")
+
+        f.write("void *wine_vk_get_phys_dev_proc_addr(const char *name)\n")
+        f.write("{\n")
+        f.write("    unsigned int i;\n")
+        f.write("    for (i = 0; i < ARRAY_SIZE(vk_phys_dev_dispatch_table); i++)\n")
+        f.write("    {\n")
+        f.write("        if (strcmp(vk_phys_dev_dispatch_table[i].name, name) == 0)\n")
+        f.write("        {\n")
+        f.write("            TRACE(\"Found name=%s in physical device table\\n\", debugstr_a(name));\n")
+        f.write("            return vk_phys_dev_dispatch_table[i].func;\n")
+        f.write("        }\n")
+        f.write("    }\n")
+        f.write("    return NULL;\n")
+        f.write("}\n\n")
+
+        f.write("void *wine_vk_get_instance_proc_addr(const char *name)\n")
+        f.write("{\n")
+        f.write("    unsigned int i;\n")
+        f.write("    for (i = 0; i < ARRAY_SIZE(vk_instance_dispatch_table); i++)\n")
+        f.write("    {\n")
+        f.write("        if (strcmp(vk_instance_dispatch_table[i].name, name) == 0)\n")
+        f.write("        {\n")
+        f.write("            TRACE(\"Found name=%s in instance table\\n\", debugstr_a(name));\n")
+        f.write("            return vk_instance_dispatch_table[i].func;\n")
+        f.write("        }\n")
+        f.write("    }\n")
+        f.write("    return NULL;\n")
+        f.write("}\n")
+
+    def generate_loader_thunks_h(self, f):
+        self._generate_copyright(f)
+
+        f.write("#ifndef __WINE_VULKAN_LOADER_THUNKS_H\n")
+        f.write("#define __WINE_VULKAN_LOADER_THUNKS_H\n\n")
+
+        f.write("struct unix_funcs\n")
+        f.write("{\n")
+        for vk_func in self.registry.funcs.values():
+            if not vk_func.is_required():
+                continue
+            if vk_func.loader_thunk_type == ThunkType.NONE:
+                continue
+
+            f.write("    {0};\n".format(vk_func.pfn(conv=False, call_conv="WINAPI")))
+        f.write("};\n\n")
+
+        f.write("#endif /* __WINE_VULKAN_LOADER_THUNKS_H */\n")
 
     def generate_vulkan_h(self, f):
         self._generate_copyright(f)
@@ -2767,9 +2839,9 @@ class VkGenerator(object):
 
     def generate_vulkan_spec(self, f):
         self._generate_copyright(f, spec_file=True)
-        f.write("@ stdcall -private vk_icdGetInstanceProcAddr(ptr str) wine_vk_icdGetInstanceProcAddr\n")
-        f.write("@ stdcall -private vk_icdGetPhysicalDeviceProcAddr(ptr str) wine_vk_icdGetPhysicalDeviceProcAddr\n")
-        f.write("@ stdcall -private vk_icdNegotiateLoaderICDInterfaceVersion(ptr) wine_vk_icdNegotiateLoaderICDInterfaceVersion\n")
+        f.write("@ stdcall -private vk_icdGetInstanceProcAddr(ptr str)\n")
+        f.write("@ stdcall -private vk_icdGetPhysicalDeviceProcAddr(ptr str)\n")
+        f.write("@ stdcall -private vk_icdNegotiateLoaderICDInterfaceVersion(ptr)\n")
 
         # Export symbols for all Vulkan Core functions.
         for func in self.registry.funcs.values():
@@ -2779,7 +2851,7 @@ class VkGenerator(object):
             # We support all Core functions except for VK_KHR_display* APIs.
             # Create stubs for unsupported Core functions.
             if func.is_required():
-                f.write(func.spec(prefix="wine_"))
+                f.write(func.spec())
             else:
                 f.write("@ stub {0}\n".format(func.name))
 
@@ -2797,7 +2869,7 @@ class VkGenerator(object):
             # We support all Core functions except for VK_KHR_display* APIs.
             # Create stubs for unsupported Core functions.
             if func.is_required():
-                f.write(func.spec(symbol="winevulkan.wine_" + func.name))
+                f.write(func.spec(symbol="winevulkan." + func.name))
             else:
                 f.write("@ stub {0}\n".format(func.name))
 
@@ -3426,6 +3498,12 @@ def main():
 
     with open(WINE_VULKAN_THUNKS_C, "w") as f:
         generator.generate_thunks_c(f, "wine_")
+
+    with open(WINE_VULKAN_LOADER_THUNKS_H, "w") as f:
+        generator.generate_loader_thunks_h(f)
+
+    with open(WINE_VULKAN_LOADER_THUNKS_C, "w") as f:
+        generator.generate_loader_thunks_c(f)
 
     with open(WINE_VULKAN_JSON, "w") as f:
         generate_vulkan_json(f)

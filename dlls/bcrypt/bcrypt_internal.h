@@ -224,6 +224,11 @@ struct key_funcs
     NTSTATUS (CDECL *key_import_ecc)( struct key *, UCHAR *, ULONG );
     NTSTATUS (CDECL *key_import_rsa)( struct key *, UCHAR *, ULONG );
     NTSTATUS (CDECL *key_secret_agreement)( struct key *, struct key *, struct secret * );
+    NTSTATUS (CDECL *key_compute_secret_ecc)( unsigned char *privkey_in, struct key *pubkey_in, struct secret *secret );
 };
+
+const struct key_funcs *gnutls_lib_init(DWORD reason);
+const struct key_funcs *macos_lib_init(DWORD reason);
+const struct key_funcs *gcrypt_lib_init(DWORD reason);
 
 #endif /* __BCRYPT_INTERNAL_H */

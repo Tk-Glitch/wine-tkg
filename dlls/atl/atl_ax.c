@@ -28,7 +28,6 @@
 #include "winerror.h"
 #include "winuser.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "objbase.h"
 #include "objidl.h"
 #include "ole2.h"
@@ -1402,64 +1401,55 @@ HRESULT WINAPI AtlAxGetControl(HWND hWnd, IUnknown **pUnk)
 }
 
 /***********************************************************************
- *           AtlAxDialogBoxA              [atl100.@]
+ *           AtlAxDialogBoxW              [atl100.35]
  *
  */
-INT_PTR WINAPI AtlAxDialogBoxA(HINSTANCE hInst, LPCSTR name, HWND owner, DLGPROC dlgProc, LPARAM param)
+INT_PTR WINAPI AtlAxDialogBoxW(HINSTANCE instance, const WCHAR *name,
+        HWND owner, DLGPROC proc, LPARAM param)
 {
-    INT_PTR res = 0;
-    int length;
-    WCHAR *nameW;
+    HRSRC resource;
+    HGLOBAL global;
+    DLGTEMPLATE *template;
+    INT_PTR ret;
 
-    if (IS_INTRESOURCE(name))
-        return AtlAxDialogBoxW( hInst, (LPCWSTR) name, owner, dlgProc, param );
+    TRACE("instance %p, name %s, owner %p, proc %p, param %#Ix\n",
+            instance, debugstr_w(name), owner, proc, param);
 
-    length = MultiByteToWideChar( CP_ACP, 0, name, -1, NULL, 0 );
-    nameW = heap_alloc( length * sizeof(WCHAR) );
-    if (nameW)
-    {
-        MultiByteToWideChar( CP_ACP, 0, name, -1, nameW, length );
-        res = AtlAxDialogBoxW( hInst, nameW, owner, dlgProc, param );
-        heap_free( nameW );
-    }
-    return res;
+    if (!(resource = FindResourceW(instance, name, (const WCHAR *)RT_DIALOG)))
+        return 0;
+
+    if (!(global = LoadResource(instance, resource)))
+        return 0;
+
+    if (!(template = AX_ConvertDialogTemplate(LockResource(global))))
+        return 0;
+
+    ret = DialogBoxIndirectParamW(instance, template, owner, proc, param);
+    HeapFree(GetProcessHeap(), 0, template);
+    return ret;
 }
 
 /***********************************************************************
- *           AtlAxDialogBoxW              [atl100.@]
+ *           AtlAxDialogBoxA              [atl100.36]
  *
  */
-INT_PTR WINAPI AtlAxDialogBoxW(HINSTANCE hInst, LPCWSTR name, HWND owner, DLGPROC dlgProc, LPARAM param)
+INT_PTR WINAPI AtlAxDialogBoxA(HINSTANCE instance, const char *name,
+        HWND owner, DLGPROC proc, LPARAM param)
 {
-    HRSRC hrsrc;
-    HGLOBAL hgl;
-    LPCDLGTEMPLATEW ptr;
-    LPDLGTEMPLATEW newptr;
-    INT_PTR res;
+    WCHAR *nameW;
+    int len;
+    INT_PTR ret;
 
-    TRACE("(%p %s %p %p %lx)\n", hInst, debugstr_w(name), owner, dlgProc, param);
+    if (IS_INTRESOURCE(name))
+        return AtlAxDialogBoxW(instance, (const WCHAR *)name, owner, proc, param);
 
-    hrsrc = FindResourceW( hInst, name, (LPWSTR)RT_DIALOG );
-    if ( !hrsrc )
+    len = MultiByteToWideChar(CP_ACP, 0, name, -1, NULL, 0);
+    if (!(nameW = malloc(len * sizeof(WCHAR))))
         return 0;
-    hgl = LoadResource (hInst, hrsrc);
-    if ( !hgl )
-        return 0;
-    ptr = LockResource ( hgl );
-    if (!ptr)
-    {
-        FreeResource( hgl );
-        return 0;
-    }
-    newptr = AX_ConvertDialogTemplate( ptr );
-    if ( newptr )
-    {
-        res = DialogBoxIndirectParamW( hInst, newptr, owner, dlgProc, param );
-        heap_free( newptr );
-    } else
-        res = 0;
-    FreeResource ( hrsrc );
-    return res;
+    MultiByteToWideChar(CP_ACP, 0, name, -1, nameW, len);
+    ret = AtlAxDialogBoxW(instance, nameW, owner, proc, param);
+    free(nameW);
+    return ret;
 }
 
 /***********************************************************************

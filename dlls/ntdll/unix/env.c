@@ -912,7 +912,7 @@ static void rebuild_argv(void)
  */
 static void prepend_argv( const char **args, int count )
 {
-    char **new_argv = malloc( (main_argc + count) * sizeof(*new_argv) );
+    char **new_argv;
     char *p, *end;
     BOOL write_strings = FALSE;
     int i, total = 0, new_argc = main_argc + count - 1;
@@ -1954,6 +1954,8 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params(void)
     if (!status)
     {
         if (main_image_info.ImageCharacteristics & IMAGE_FILE_DLL) status = STATUS_INVALID_IMAGE_FORMAT;
+        if (main_image_info.ImageFlags & IMAGE_FLAGS_ComPlusNativeReady)
+            main_image_info.Machine = native_machine;
         if (main_image_info.Machine != current_machine) status = STATUS_INVALID_IMAGE_FORMAT;
     }
 

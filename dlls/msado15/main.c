@@ -32,20 +32,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msado15);
 
-static HINSTANCE hinstance;
-
-BOOL WINAPI DllMain( HINSTANCE dll, DWORD reason, LPVOID reserved )
-{
-    switch (reason)
-    {
-    case DLL_PROCESS_ATTACH:
-        hinstance = dll;
-        DisableThreadLibraryCalls( dll );
-        break;
-    }
-    return TRUE;
-}
-
 typedef HRESULT (*fnCreateInstance)( void **obj );
 
 struct msadocf
@@ -151,30 +137,6 @@ HRESULT WINAPI DllGetClassObject( REFCLSID clsid, REFIID iid, void **obj )
     return IClassFactory_QueryInterface( cf, iid, obj );
 }
 
-/******************************************************************
- *          DllCanUnloadNow
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-/***********************************************************************
- *          DllRegisterServer
- */
-HRESULT WINAPI DllRegisterServer( void )
-{
-    return __wine_register_resources( hinstance );
-}
-
-/***********************************************************************
- *          DllUnregisterServer
- */
-HRESULT WINAPI DllUnregisterServer( void )
-{
-    return __wine_unregister_resources( hinstance );
-}
-
 static ITypeLib *typelib;
 static ITypeInfo *typeinfos[LAST_tid];
 
@@ -184,6 +146,7 @@ static REFIID tid_ids[] = {
     &IID__Connection,
     &IID_Field,
     &IID_Fields,
+    &IID_Properties,
     &IID__Recordset,
     &IID__Stream,
 };

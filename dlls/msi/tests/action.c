@@ -249,7 +249,9 @@ static const char env_environment_dat[] =
     "Var27\t+-MSITESTVAR21\t[~];1\tOne\n"
     "Var28\t-MSITESTVAR22\t1\tOne\n"
     "Var29\t-MSITESTVAR23\t2\tOne\n"
-    "Var30\t*MSITESTVAR100\t1\tOne\n";
+    "Var30\t*MSITESTVAR100\t1\tOne\n"
+    "Var31\t-=MSITESTVAR24\t[SERVNAME]\tOne\n"
+    "Var32\t-=MSITESTVAR25\t[bogus_prop]\tOne\n";
 
 static const char service_install_dat[] =
     "ServiceInstall\tName\tDisplayName\tServiceType\tStartType\tErrorControl\t"
@@ -2502,35 +2504,7 @@ static void delete_pfmsitest_files(void)
     RemoveDirectoryA(path);
 }
 
-static void check_reg_str(HKEY prodkey, LPCSTR name, LPCSTR expected, BOOL bcase, DWORD line)
-{
-    char val[MAX_PATH];
-    DWORD size, type;
-    LONG res;
-
-    size = MAX_PATH;
-    val[0] = '\0';
-    res = RegQueryValueExA(prodkey, name, NULL, &type, (LPBYTE)val, &size);
-
-    if (res != ERROR_SUCCESS ||
-        (type != REG_SZ && type != REG_EXPAND_SZ && type != REG_MULTI_SZ))
-    {
-        ok_(__FILE__, line)(FALSE, "Key doesn't exist or wrong type\n");
-        return;
-    }
-
-    if (!expected)
-        ok_(__FILE__, line)(!val[0], "Expected empty string, got %s\n", val);
-    else
-    {
-        if (bcase)
-            ok_(__FILE__, line)(!lstrcmpA(val, expected), "Expected \"%s\", got \"%s\"\n", expected, val);
-        else
-            ok_(__FILE__, line)(!lstrcmpiA(val, expected), "Expected \"%s\", got \"%s\"\n", expected, val);
-    }
-}
-
-static void check_reg_multi(HKEY prodkey, const char *name, const char *expect, DWORD line)
+static void check_reg_str(HKEY prodkey, LPCSTR name, LPCSTR expected, BOOL bcase, BOOL todo, DWORD line)
 {
     char val[MAX_PATH];
     DWORD size, type;
@@ -2539,60 +2513,98 @@ static void check_reg_multi(HKEY prodkey, const char *name, const char *expect, 
     size = MAX_PATH;
     val[0] = '\0';
     res = RegQueryValueExA(prodkey, name, NULL, &type, (BYTE *)val, &size);
-
-    if (res != ERROR_SUCCESS || type != REG_MULTI_SZ)
+    ok_(__FILE__, line)(!res, "Failed to query value, error %u\n", res);
+    ok_(__FILE__, line)(type == REG_SZ || type == REG_EXPAND_SZ, "Got wrong type %u\n", type);
+    todo_wine_if (todo)
     {
-        ok_(__FILE__, line)(FALSE, "Key doesn't exist or wrong type\n");
-        return;
+        if (bcase)
+            ok_(__FILE__, line)(!strcmp(val, expected), "got %s\n", debugstr_a(val));
+        else
+            ok_(__FILE__, line)(!strcasecmp(val, expected), "got %s\n", debugstr_a(val));
     }
-
-    ok_(__FILE__, line)(!memcmp(val, expect, size), "wrong data\n");
 }
 
-static void check_reg_dword(HKEY prodkey, LPCSTR name, DWORD expected, DWORD line)
+static void check_reg_multi(HKEY prodkey, const char *name, const char *expect, DWORD line)
+{
+    char val[MAX_PATH];
+    DWORD expect_size = 0, size, type;
+    const char *p;
+    LONG res;
+
+    for (p = expect; *p; p += strlen(p) + 1)
+        ;
+    expect_size = (p + 1) - expect;
+
+    size = MAX_PATH;
+    val[0] = '\0';
+    res = RegQueryValueExA(prodkey, name, NULL, &type, (BYTE *)val, &size);
+    ok_(__FILE__, line)(!res, "Failed to query value, error %u\n", res);
+    ok_(__FILE__, line)(type == REG_MULTI_SZ, "Got wrong type %u\n", type);
+    ok_(__FILE__, line)(size == expect_size, "expected size %u, got %u\n", expect_size, size);
+    ok_(__FILE__, line)(!memcmp(val, expect, size), "got %s\n", debugstr_an(val, size));
+}
+
+static void check_reg_dword(HKEY prodkey, LPCSTR name, DWORD expected, BOOL todo, DWORD line)
 {
     DWORD val, size, type;
     LONG res;
 
     size = sizeof(DWORD);
-    res = RegQueryValueExA(prodkey, name, NULL, &type, (LPBYTE)&val, &size);
-
-    if (res != ERROR_SUCCESS || type != REG_DWORD)
-    {
-        ok_(__FILE__, line)(FALSE, "Key doesn't exist or wrong type\n");
-        return;
-    }
-
-    ok_(__FILE__, line)(val == expected, "Expected %d, got %d\n", expected, val);
+    res = RegQueryValueExA(prodkey, name, NULL, &type, (BYTE *)&val, &size);
+    ok_(__FILE__, line)(!res, "Failed to query value, error %u\n", res);
+    ok_(__FILE__, line)(type == REG_DWORD, "Got wrong type %u\n", type);
+    todo_wine_if (todo)
+        ok_(__FILE__, line)(val == expected, "Expected %d, got %d\n", expected, val);
 }
 
 #define CHECK_REG_STR(prodkey, name, expected) \
-    check_reg_str(prodkey, name, expected, TRUE, __LINE__);
+    check_reg_str(prodkey, name, expected, TRUE, FALSE, __LINE__);
 
 #define CHECK_DEL_REG_STR(prodkey, name, expected) \
     do { \
-        check_reg_str(prodkey, name, expected, TRUE, __LINE__); \
+        check_reg_str(prodkey, name, expected, TRUE, FALSE, __LINE__); \
+        RegDeleteValueA(prodkey, name); \
+    } while(0)
+
+#define CHECK_DEL_REG_STR_TODO(prodkey, name, expected) \
+    do { \
+        check_reg_str(prodkey, name, expected, TRUE, TRUE, __LINE__); \
         RegDeleteValueA(prodkey, name); \
     } while(0)
 
 #define CHECK_REG_ISTR(prodkey, name, expected) \
-    check_reg_str(prodkey, name, expected, FALSE, __LINE__);
+    check_reg_str(prodkey, name, expected, FALSE, FALSE, __LINE__);
 
 #define CHECK_DEL_REG_ISTR(prodkey, name, expected) \
     do { \
-        check_reg_str(prodkey, name, expected, FALSE, __LINE__); \
+        check_reg_str(prodkey, name, expected, FALSE, FALSE, __LINE__); \
         RegDeleteValueA(prodkey, name); \
     } while(0)
 
 #define CHECK_REG_MULTI(key, name, expect) \
     check_reg_multi(key, name, expect, __LINE__);
 
+#define CHECK_DEL_REG_MULTI(key, name, expect) \
+    do { \
+        check_reg_multi(key, name, expect, __LINE__); \
+        RegDeleteValueA(key, name); \
+    } while(0)
+
 #define CHECK_REG_DWORD(prodkey, name, expected) \
-    check_reg_dword(prodkey, name, expected, __LINE__);
+    check_reg_dword(prodkey, name, expected, FALSE, __LINE__);
+
+#define CHECK_REG_DWORD_TODO(prodkey, name, expected) \
+    check_reg_dword(prodkey, name, expected, TRUE, __LINE__);
 
 #define CHECK_DEL_REG_DWORD(prodkey, name, expected) \
     do { \
-        check_reg_dword(prodkey, name, expected, __LINE__); \
+        check_reg_dword(prodkey, name, expected, FALSE, __LINE__); \
+        RegDeleteValueA(prodkey, name); \
+    } while(0)
+
+#define CHECK_DEL_REG_DWORD_TODO(prodkey, name, expected) \
+    do { \
+        check_reg_dword(prodkey, name, expected, TRUE, __LINE__); \
         RegDeleteValueA(prodkey, name); \
     } while(0)
 
@@ -2700,24 +2712,23 @@ static void test_register_product(void)
     CHECK_DEL_REG_ISTR(hkey, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
     CHECK_DEL_REG_STR(hkey, "Publisher", "Wine");
     CHECK_DEL_REG_STR(hkey, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    CHECK_DEL_REG_STR(hkey, "AuthorizedCDFPrefix", NULL);
-    CHECK_DEL_REG_STR(hkey, "Comments", NULL);
-    CHECK_DEL_REG_STR(hkey, "Contact", NULL);
-    CHECK_DEL_REG_STR(hkey, "HelpLink", NULL);
-    CHECK_DEL_REG_STR(hkey, "HelpTelephone", NULL);
-    CHECK_DEL_REG_STR(hkey, "InstallLocation", NULL);
+    CHECK_DEL_REG_STR(hkey, "AuthorizedCDFPrefix", "");
+    CHECK_DEL_REG_STR(hkey, "Comments", "");
+    CHECK_DEL_REG_STR(hkey, "Contact", "");
+    CHECK_DEL_REG_STR(hkey, "HelpLink", "");
+    CHECK_DEL_REG_STR(hkey, "HelpTelephone", "");
+    CHECK_DEL_REG_STR(hkey, "InstallLocation", "");
     CHECK_DEL_REG_DWORD(hkey, "NoModify", 1);
-    CHECK_DEL_REG_STR(hkey, "Readme", NULL);
-    CHECK_DEL_REG_STR(hkey, "Size", NULL);
-    CHECK_DEL_REG_STR(hkey, "URLInfoAbout", NULL);
-    CHECK_DEL_REG_STR(hkey, "URLUpdateInfo", NULL);
+    CHECK_DEL_REG_STR(hkey, "Readme", "");
+    CHECK_DEL_REG_STR(hkey, "Size", "");
+    CHECK_DEL_REG_STR(hkey, "URLInfoAbout", "");
+    CHECK_DEL_REG_STR(hkey, "URLUpdateInfo", "");
     CHECK_DEL_REG_DWORD(hkey, "Language", 1033);
     CHECK_DEL_REG_DWORD(hkey, "Version", 0x1010001);
     CHECK_DEL_REG_DWORD(hkey, "VersionMajor", 1);
     CHECK_DEL_REG_DWORD(hkey, "VersionMinor", 1);
     CHECK_DEL_REG_DWORD(hkey, "WindowsInstaller", 1);
-    todo_wine
-    CHECK_DEL_REG_DWORD(hkey, "EstimatedSize", get_estimated_size());
+    CHECK_DEL_REG_DWORD_TODO(hkey, "EstimatedSize", get_estimated_size());
 
     res = RegDeleteKeyA(hkey, "");
     ok(!res, "got %d\n", res);
@@ -2742,24 +2753,23 @@ static void test_register_product(void)
     CHECK_DEL_REG_ISTR(props, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
     CHECK_DEL_REG_STR(props, "Publisher", "Wine");
     CHECK_DEL_REG_STR(props, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    CHECK_DEL_REG_STR(props, "AuthorizedCDFPrefix", NULL);
-    CHECK_DEL_REG_STR(props, "Comments", NULL);
-    CHECK_DEL_REG_STR(props, "Contact", NULL);
-    CHECK_DEL_REG_STR(props, "HelpLink", NULL);
-    CHECK_DEL_REG_STR(props, "HelpTelephone", NULL);
-    CHECK_DEL_REG_STR(props, "InstallLocation", NULL);
+    CHECK_DEL_REG_STR(props, "AuthorizedCDFPrefix", "");
+    CHECK_DEL_REG_STR(props, "Comments", "");
+    CHECK_DEL_REG_STR(props, "Contact", "");
+    CHECK_DEL_REG_STR(props, "HelpLink", "");
+    CHECK_DEL_REG_STR(props, "HelpTelephone", "");
+    CHECK_DEL_REG_STR(props, "InstallLocation", "");
     CHECK_DEL_REG_DWORD(props, "NoModify", 1);
-    CHECK_DEL_REG_STR(props, "Readme", NULL);
-    CHECK_DEL_REG_STR(props, "Size", NULL);
-    CHECK_DEL_REG_STR(props, "URLInfoAbout", NULL);
-    CHECK_DEL_REG_STR(props, "URLUpdateInfo", NULL);
+    CHECK_DEL_REG_STR(props, "Readme", "");
+    CHECK_DEL_REG_STR(props, "Size", "");
+    CHECK_DEL_REG_STR(props, "URLInfoAbout", "");
+    CHECK_DEL_REG_STR(props, "URLUpdateInfo", "");
     CHECK_DEL_REG_DWORD(props, "Language", 1033);
     CHECK_DEL_REG_DWORD(props, "Version", 0x1010001);
     CHECK_DEL_REG_DWORD(props, "VersionMajor", 1);
     CHECK_DEL_REG_DWORD(props, "VersionMinor", 1);
     CHECK_DEL_REG_DWORD(props, "WindowsInstaller", 1);
-    todo_wine
-    CHECK_DEL_REG_DWORD(props, "EstimatedSize", get_estimated_size());
+    CHECK_DEL_REG_DWORD_TODO(props, "EstimatedSize", get_estimated_size());
 
     res = RegDeleteKeyA(props, "");
     ok(!res, "got %d\n", res);
@@ -2782,7 +2792,7 @@ todo_wine
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, ugkey, 0, KEY_READ | KEY_WOW64_64KEY, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
-    CHECK_DEL_REG_STR(hkey, "84A88FD7F6998CE40A22FB59F6B9C2BB", NULL);
+    CHECK_DEL_REG_STR(hkey, "84A88FD7F6998CE40A22FB59F6B9C2BB", "");
 
     res = RegDeleteKeyA(hkey, "");
     ok(!res, "got %d\n", res);
@@ -2807,24 +2817,23 @@ todo_wine
     CHECK_DEL_REG_ISTR(hkey, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
     CHECK_DEL_REG_STR(hkey, "Publisher", "Wine");
     CHECK_DEL_REG_STR(hkey, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    CHECK_DEL_REG_STR(hkey, "AuthorizedCDFPrefix", NULL);
-    CHECK_DEL_REG_STR(hkey, "Comments", NULL);
-    CHECK_DEL_REG_STR(hkey, "Contact", NULL);
-    CHECK_DEL_REG_STR(hkey, "HelpLink", NULL);
-    CHECK_DEL_REG_STR(hkey, "HelpTelephone", NULL);
-    CHECK_DEL_REG_STR(hkey, "InstallLocation", NULL);
+    CHECK_DEL_REG_STR(hkey, "AuthorizedCDFPrefix", "");
+    CHECK_DEL_REG_STR(hkey, "Comments", "");
+    CHECK_DEL_REG_STR(hkey, "Contact", "");
+    CHECK_DEL_REG_STR(hkey, "HelpLink", "");
+    CHECK_DEL_REG_STR(hkey, "HelpTelephone", "");
+    CHECK_DEL_REG_STR(hkey, "InstallLocation", "");
     CHECK_DEL_REG_DWORD(hkey, "NoModify", 1);
-    CHECK_DEL_REG_STR(hkey, "Readme", NULL);
-    CHECK_DEL_REG_STR(hkey, "Size", NULL);
-    CHECK_DEL_REG_STR(hkey, "URLInfoAbout", NULL);
-    CHECK_DEL_REG_STR(hkey, "URLUpdateInfo", NULL);
+    CHECK_DEL_REG_STR(hkey, "Readme", "");
+    CHECK_DEL_REG_STR(hkey, "Size", "");
+    CHECK_DEL_REG_STR(hkey, "URLInfoAbout", "");
+    CHECK_DEL_REG_STR(hkey, "URLUpdateInfo", "");
     CHECK_DEL_REG_DWORD(hkey, "Language", 1033);
     CHECK_DEL_REG_DWORD(hkey, "Version", 0x1010001);
     CHECK_DEL_REG_DWORD(hkey, "VersionMajor", 1);
     CHECK_DEL_REG_DWORD(hkey, "VersionMinor", 1);
     CHECK_DEL_REG_DWORD(hkey, "WindowsInstaller", 1);
-    todo_wine
-    CHECK_DEL_REG_DWORD(hkey, "EstimatedSize", get_estimated_size());
+    CHECK_DEL_REG_DWORD_TODO(hkey, "EstimatedSize", get_estimated_size());
 
     res = RegDeleteKeyA(hkey, "");
     ok(!res, "got %d\n", res);
@@ -2849,24 +2858,23 @@ todo_wine
     CHECK_DEL_REG_ISTR(props, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
     CHECK_DEL_REG_STR(props, "Publisher", "Wine");
     CHECK_DEL_REG_STR(props, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    CHECK_DEL_REG_STR(props, "AuthorizedCDFPrefix", NULL);
-    CHECK_DEL_REG_STR(props, "Comments", NULL);
-    CHECK_DEL_REG_STR(props, "Contact", NULL);
-    CHECK_DEL_REG_STR(props, "HelpLink", NULL);
-    CHECK_DEL_REG_STR(props, "HelpTelephone", NULL);
-    CHECK_DEL_REG_STR(props, "InstallLocation", NULL);
+    CHECK_DEL_REG_STR(props, "AuthorizedCDFPrefix", "");
+    CHECK_DEL_REG_STR(props, "Comments", "");
+    CHECK_DEL_REG_STR(props, "Contact", "");
+    CHECK_DEL_REG_STR(props, "HelpLink", "");
+    CHECK_DEL_REG_STR(props, "HelpTelephone", "");
+    CHECK_DEL_REG_STR(props, "InstallLocation", "");
     CHECK_DEL_REG_DWORD(props, "NoModify", 1);
-    CHECK_DEL_REG_STR(props, "Readme", NULL);
-    CHECK_DEL_REG_STR(props, "Size", NULL);
-    CHECK_DEL_REG_STR(props, "URLInfoAbout", NULL);
-    CHECK_DEL_REG_STR(props, "URLUpdateInfo", NULL);
+    CHECK_DEL_REG_STR(props, "Readme", "");
+    CHECK_DEL_REG_STR(props, "Size", "");
+    CHECK_DEL_REG_STR(props, "URLInfoAbout", "");
+    CHECK_DEL_REG_STR(props, "URLUpdateInfo", "");
     CHECK_DEL_REG_DWORD(props, "Language", 1033);
     CHECK_DEL_REG_DWORD(props, "Version", 0x1010001);
     CHECK_DEL_REG_DWORD(props, "VersionMajor", 1);
     CHECK_DEL_REG_DWORD(props, "VersionMinor", 1);
     CHECK_DEL_REG_DWORD(props, "WindowsInstaller", 1);
-    todo_wine
-    CHECK_DEL_REG_DWORD(props, "EstimatedSize", get_estimated_size());
+    CHECK_DEL_REG_DWORD_TODO(props, "EstimatedSize", get_estimated_size());
 
     res = RegDeleteKeyA(props, "");
     ok(!res, "got %d\n", res);
@@ -2889,7 +2897,7 @@ todo_wine
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, ugkey, 0, KEY_READ | KEY_WOW64_64KEY, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
-    CHECK_DEL_REG_STR(hkey, "84A88FD7F6998CE40A22FB59F6B9C2BB", NULL);
+    CHECK_DEL_REG_STR(hkey, "84A88FD7F6998CE40A22FB59F6B9C2BB", "");
 
     res = RegDeleteKeyA(hkey, "");
     ok(!res, "got %d\n", res);
@@ -2921,24 +2929,23 @@ todo_wine
         CHECK_DEL_REG_ISTR(hkey, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
         CHECK_DEL_REG_STR(hkey, "Publisher", "Wine");
         CHECK_DEL_REG_STR(hkey, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-        CHECK_DEL_REG_STR(hkey, "AuthorizedCDFPrefix", NULL);
-        CHECK_DEL_REG_STR(hkey, "Comments", NULL);
-        CHECK_DEL_REG_STR(hkey, "Contact", NULL);
-        CHECK_DEL_REG_STR(hkey, "HelpLink", NULL);
-        CHECK_DEL_REG_STR(hkey, "HelpTelephone", NULL);
-        CHECK_DEL_REG_STR(hkey, "InstallLocation", NULL);
+        CHECK_DEL_REG_STR(hkey, "AuthorizedCDFPrefix", "");
+        CHECK_DEL_REG_STR(hkey, "Comments", "");
+        CHECK_DEL_REG_STR(hkey, "Contact", "");
+        CHECK_DEL_REG_STR(hkey, "HelpLink", "");
+        CHECK_DEL_REG_STR(hkey, "HelpTelephone", "");
+        CHECK_DEL_REG_STR(hkey, "InstallLocation", "");
         CHECK_DEL_REG_DWORD(hkey, "NoModify", 1);
-        CHECK_DEL_REG_STR(hkey, "Readme", NULL);
-        CHECK_DEL_REG_STR(hkey, "Size", NULL);
-        CHECK_DEL_REG_STR(hkey, "URLInfoAbout", NULL);
-        CHECK_DEL_REG_STR(hkey, "URLUpdateInfo", NULL);
+        CHECK_DEL_REG_STR(hkey, "Readme", "");
+        CHECK_DEL_REG_STR(hkey, "Size", "");
+        CHECK_DEL_REG_STR(hkey, "URLInfoAbout", "");
+        CHECK_DEL_REG_STR(hkey, "URLUpdateInfo", "");
         CHECK_DEL_REG_DWORD(hkey, "Language", 1033);
         CHECK_DEL_REG_DWORD(hkey, "Version", 0x1010001);
         CHECK_DEL_REG_DWORD(hkey, "VersionMajor", 1);
         CHECK_DEL_REG_DWORD(hkey, "VersionMinor", 1);
         CHECK_DEL_REG_DWORD(hkey, "WindowsInstaller", 1);
-        todo_wine
-        CHECK_DEL_REG_DWORD(hkey, "EstimatedSize", get_estimated_size());
+        CHECK_DEL_REG_DWORD_TODO(hkey, "EstimatedSize", get_estimated_size());
 
         res = RegDeleteKeyA(hkey, "");
         ok(!res, "got %d\n", res);
@@ -2963,24 +2970,23 @@ todo_wine
         CHECK_DEL_REG_ISTR(props, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
         CHECK_DEL_REG_STR(props, "Publisher", "Wine");
         CHECK_DEL_REG_STR(props, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-        CHECK_DEL_REG_STR(props, "AuthorizedCDFPrefix", NULL);
-        CHECK_DEL_REG_STR(props, "Comments", NULL);
-        CHECK_DEL_REG_STR(props, "Contact", NULL);
-        CHECK_DEL_REG_STR(props, "HelpLink", NULL);
-        CHECK_DEL_REG_STR(props, "HelpTelephone", NULL);
-        CHECK_DEL_REG_STR(props, "InstallLocation", NULL);
+        CHECK_DEL_REG_STR(props, "AuthorizedCDFPrefix", "");
+        CHECK_DEL_REG_STR(props, "Comments", "");
+        CHECK_DEL_REG_STR(props, "Contact", "");
+        CHECK_DEL_REG_STR(props, "HelpLink", "");
+        CHECK_DEL_REG_STR(props, "HelpTelephone", "");
+        CHECK_DEL_REG_STR(props, "InstallLocation", "");
         CHECK_DEL_REG_DWORD(props, "NoModify", 1);
-        CHECK_DEL_REG_STR(props, "Readme", NULL);
-        CHECK_DEL_REG_STR(props, "Size", NULL);
-        CHECK_DEL_REG_STR(props, "URLInfoAbout", NULL);
-        CHECK_DEL_REG_STR(props, "URLUpdateInfo", NULL);
+        CHECK_DEL_REG_STR(props, "Readme", "");
+        CHECK_DEL_REG_STR(props, "Size", "");
+        CHECK_DEL_REG_STR(props, "URLInfoAbout", "");
+        CHECK_DEL_REG_STR(props, "URLUpdateInfo", "");
         CHECK_DEL_REG_DWORD(props, "Language", 1033);
         CHECK_DEL_REG_DWORD(props, "Version", 0x1010001);
         CHECK_DEL_REG_DWORD(props, "VersionMajor", 1);
         CHECK_DEL_REG_DWORD(props, "VersionMinor", 1);
         CHECK_DEL_REG_DWORD(props, "WindowsInstaller", 1);
-        todo_wine
-        CHECK_DEL_REG_DWORD(props, "EstimatedSize", get_estimated_size());
+        CHECK_DEL_REG_DWORD_TODO(props, "EstimatedSize", get_estimated_size());
 
         res = RegDeleteKeyA(props, "");
         ok(!res, "got %d\n", res);
@@ -3003,7 +3009,7 @@ todo_wine
         res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, ugkey, 0, KEY_READ | KEY_WOW64_64KEY, &hkey);
         ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
-        CHECK_DEL_REG_STR(hkey, "84A88FD7F6998CE40A22FB59F6B9C2BB", NULL);
+        CHECK_DEL_REG_STR(hkey, "84A88FD7F6998CE40A22FB59F6B9C2BB", "");
 
         res = RegDeleteKeyA(hkey, "");
         ok(!res, "got %d\n", res);
@@ -3105,11 +3111,9 @@ static void test_publish_product(void)
     ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
 
     res = RegOpenKeyExA(hkey, "Patches", 0, access, &patches);
-    todo_wine
-    {
-        ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
-        CHECK_DEL_REG_STR(patches, "AllPatches", NULL);
-    }
+    todo_wine ok(!res, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (!res)
+        CHECK_DEL_REG_STR(patches, "AllPatches", "");
 
     delete_key(patches, "", access);
     RegCloseKey(patches);
@@ -3129,7 +3133,7 @@ currentuser:
     CHECK_DEL_REG_DWORD(hkey, "Assignment", 0);
     CHECK_DEL_REG_DWORD(hkey, "AdvertiseFlags", 0x184);
     CHECK_DEL_REG_DWORD(hkey, "InstanceType", 0);
-    CHECK_DEL_REG_STR(hkey, "Clients", ":");
+    CHECK_DEL_REG_MULTI(hkey, "Clients", ":\0");
 
     res = RegOpenKeyA(hkey, "SourceList", &sourcelist);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
@@ -3162,7 +3166,7 @@ currentuser:
     res = RegOpenKeyA(HKEY_CURRENT_USER, cuupgrades, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
-    CHECK_DEL_REG_STR(hkey, "84A88FD7F6998CE40A22FB59F6B9C2BB", NULL);
+    CHECK_DEL_REG_STR(hkey, "84A88FD7F6998CE40A22FB59F6B9C2BB", "");
 
     RegDeleteKeyA(hkey, "");
     RegCloseKey(hkey);
@@ -3186,11 +3190,9 @@ currentuser:
     ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
 
     res = RegOpenKeyExA(hkey, "Patches", 0, access, &patches);
-    todo_wine
-    {
-        ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
-        CHECK_DEL_REG_STR(patches, "AllPatches", NULL);
-    }
+    todo_wine ok(!res, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (!res)
+        CHECK_DEL_REG_STR(patches, "AllPatches", "");
 
     delete_key(patches, "", access);
     RegCloseKey(patches);
@@ -3207,10 +3209,10 @@ machprod:
     CHECK_DEL_REG_DWORD(hkey, "Version", 0x1010001);
     if (!old_installer)
         CHECK_DEL_REG_DWORD(hkey, "AuthorizedLUAApp", 0);
-    todo_wine CHECK_DEL_REG_DWORD(hkey, "Assignment", 1);
+    CHECK_DEL_REG_DWORD_TODO(hkey, "Assignment", 1);
     CHECK_DEL_REG_DWORD(hkey, "AdvertiseFlags", 0x184);
     CHECK_DEL_REG_DWORD(hkey, "InstanceType", 0);
-    CHECK_DEL_REG_STR(hkey, "Clients", ":");
+    CHECK_DEL_REG_MULTI(hkey, "Clients", ":\0");
 
     res = RegOpenKeyExA(hkey, "SourceList", 0, access, &sourcelist);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
@@ -3247,7 +3249,7 @@ machprod:
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, machup, 0, access, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
-    CHECK_DEL_REG_STR(hkey, "84A88FD7F6998CE40A22FB59F6B9C2BB", NULL);
+    CHECK_DEL_REG_STR(hkey, "84A88FD7F6998CE40A22FB59F6B9C2BB", "");
 
     res = delete_key(hkey, "", access);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
@@ -3837,24 +3839,23 @@ static void test_publish(void)
     CHECK_REG_ISTR(prodkey, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
     CHECK_REG_STR(prodkey, "Publisher", "Wine");
     CHECK_REG_STR(prodkey, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", NULL);
-    CHECK_REG_STR(prodkey, "Comments", NULL);
-    CHECK_REG_STR(prodkey, "Contact", NULL);
-    CHECK_REG_STR(prodkey, "HelpLink", NULL);
-    CHECK_REG_STR(prodkey, "HelpTelephone", NULL);
-    CHECK_REG_STR(prodkey, "InstallLocation", NULL);
+    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", "");
+    CHECK_REG_STR(prodkey, "Comments", "");
+    CHECK_REG_STR(prodkey, "Contact", "");
+    CHECK_REG_STR(prodkey, "HelpLink", "");
+    CHECK_REG_STR(prodkey, "HelpTelephone", "");
+    CHECK_REG_STR(prodkey, "InstallLocation", "");
     CHECK_REG_DWORD(prodkey, "NoModify", 1);
-    CHECK_REG_STR(prodkey, "Readme", NULL);
-    CHECK_REG_STR(prodkey, "Size", NULL);
-    CHECK_REG_STR(prodkey, "URLInfoAbout", NULL);
-    CHECK_REG_STR(prodkey, "URLUpdateInfo", NULL);
+    CHECK_REG_STR(prodkey, "Readme", "");
+    CHECK_REG_STR(prodkey, "Size", "");
+    CHECK_REG_STR(prodkey, "URLInfoAbout", "");
+    CHECK_REG_STR(prodkey, "URLUpdateInfo", "");
     CHECK_REG_DWORD(prodkey, "Language", 1033);
     CHECK_REG_DWORD(prodkey, "Version", 0x1010001);
     CHECK_REG_DWORD(prodkey, "VersionMajor", 1);
     CHECK_REG_DWORD(prodkey, "VersionMinor", 1);
     CHECK_REG_DWORD(prodkey, "WindowsInstaller", 1);
-    todo_wine
-    CHECK_REG_DWORD(prodkey, "EstimatedSize", get_estimated_size());
+    CHECK_REG_DWORD_TODO(prodkey, "EstimatedSize", get_estimated_size());
 
     RegCloseKey(prodkey);
 
@@ -3942,24 +3943,23 @@ static void test_publish(void)
     CHECK_REG_ISTR(prodkey, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
     CHECK_REG_STR(prodkey, "Publisher", "Wine");
     CHECK_REG_STR(prodkey, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", NULL);
-    CHECK_REG_STR(prodkey, "Comments", NULL);
-    CHECK_REG_STR(prodkey, "Contact", NULL);
-    CHECK_REG_STR(prodkey, "HelpLink", NULL);
-    CHECK_REG_STR(prodkey, "HelpTelephone", NULL);
-    CHECK_REG_STR(prodkey, "InstallLocation", NULL);
+    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", "");
+    CHECK_REG_STR(prodkey, "Comments", "");
+    CHECK_REG_STR(prodkey, "Contact", "");
+    CHECK_REG_STR(prodkey, "HelpLink", "");
+    CHECK_REG_STR(prodkey, "HelpTelephone", "");
+    CHECK_REG_STR(prodkey, "InstallLocation", "");
     CHECK_REG_DWORD(prodkey, "NoModify", 1);
-    CHECK_REG_STR(prodkey, "Readme", NULL);
-    CHECK_REG_STR(prodkey, "Size", NULL);
-    CHECK_REG_STR(prodkey, "URLInfoAbout", NULL);
-    CHECK_REG_STR(prodkey, "URLUpdateInfo", NULL);
+    CHECK_REG_STR(prodkey, "Readme", "");
+    CHECK_REG_STR(prodkey, "Size", "");
+    CHECK_REG_STR(prodkey, "URLInfoAbout", "");
+    CHECK_REG_STR(prodkey, "URLUpdateInfo", "");
     CHECK_REG_DWORD(prodkey, "Language", 1033);
     CHECK_REG_DWORD(prodkey, "Version", 0x1010001);
     CHECK_REG_DWORD(prodkey, "VersionMajor", 1);
     CHECK_REG_DWORD(prodkey, "VersionMinor", 1);
     CHECK_REG_DWORD(prodkey, "WindowsInstaller", 1);
-    todo_wine
-    CHECK_REG_DWORD(prodkey, "EstimatedSize", get_estimated_size());
+    CHECK_REG_DWORD_TODO(prodkey, "EstimatedSize", get_estimated_size());
 
     RegCloseKey(prodkey);
 
@@ -4024,24 +4024,23 @@ static void test_publish(void)
     CHECK_REG_ISTR(prodkey, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
     CHECK_REG_STR(prodkey, "Publisher", "Wine");
     CHECK_REG_STR(prodkey, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", NULL);
-    CHECK_REG_STR(prodkey, "Comments", NULL);
-    CHECK_REG_STR(prodkey, "Contact", NULL);
-    CHECK_REG_STR(prodkey, "HelpLink", NULL);
-    CHECK_REG_STR(prodkey, "HelpTelephone", NULL);
-    CHECK_REG_STR(prodkey, "InstallLocation", NULL);
+    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", "");
+    CHECK_REG_STR(prodkey, "Comments", "");
+    CHECK_REG_STR(prodkey, "Contact", "");
+    CHECK_REG_STR(prodkey, "HelpLink", "");
+    CHECK_REG_STR(prodkey, "HelpTelephone", "");
+    CHECK_REG_STR(prodkey, "InstallLocation", "");
     CHECK_REG_DWORD(prodkey, "NoModify", 1);
-    CHECK_REG_STR(prodkey, "Readme", NULL);
-    CHECK_REG_STR(prodkey, "Size", NULL);
-    CHECK_REG_STR(prodkey, "URLInfoAbout", NULL);
-    CHECK_REG_STR(prodkey, "URLUpdateInfo", NULL);
+    CHECK_REG_STR(prodkey, "Readme", "");
+    CHECK_REG_STR(prodkey, "Size", "");
+    CHECK_REG_STR(prodkey, "URLInfoAbout", "");
+    CHECK_REG_STR(prodkey, "URLUpdateInfo", "");
     CHECK_REG_DWORD(prodkey, "Language", 1033);
     CHECK_REG_DWORD(prodkey, "Version", 0x1010001);
     CHECK_REG_DWORD(prodkey, "VersionMajor", 1);
     CHECK_REG_DWORD(prodkey, "VersionMinor", 1);
     CHECK_REG_DWORD(prodkey, "WindowsInstaller", 1);
-    todo_wine
-    CHECK_REG_DWORD(prodkey, "EstimatedSize", get_estimated_size());
+    CHECK_REG_DWORD_TODO(prodkey, "EstimatedSize", get_estimated_size());
 
     RegCloseKey(prodkey);
 
@@ -4083,24 +4082,23 @@ static void test_publish(void)
     CHECK_REG_ISTR(prodkey, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
     CHECK_REG_STR(prodkey, "Publisher", "Wine");
     CHECK_REG_STR(prodkey, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", NULL);
-    CHECK_REG_STR(prodkey, "Comments", NULL);
-    CHECK_REG_STR(prodkey, "Contact", NULL);
-    CHECK_REG_STR(prodkey, "HelpLink", NULL);
-    CHECK_REG_STR(prodkey, "HelpTelephone", NULL);
-    CHECK_REG_STR(prodkey, "InstallLocation", NULL);
+    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", "");
+    CHECK_REG_STR(prodkey, "Comments", "");
+    CHECK_REG_STR(prodkey, "Contact", "");
+    CHECK_REG_STR(prodkey, "HelpLink", "");
+    CHECK_REG_STR(prodkey, "HelpTelephone", "");
+    CHECK_REG_STR(prodkey, "InstallLocation", "");
     CHECK_REG_DWORD(prodkey, "NoModify", 1);
-    CHECK_REG_STR(prodkey, "Readme", NULL);
-    CHECK_REG_STR(prodkey, "Size", NULL);
-    CHECK_REG_STR(prodkey, "URLInfoAbout", NULL);
-    CHECK_REG_STR(prodkey, "URLUpdateInfo", NULL);
+    CHECK_REG_STR(prodkey, "Readme", "");
+    CHECK_REG_STR(prodkey, "Size", "");
+    CHECK_REG_STR(prodkey, "URLInfoAbout", "");
+    CHECK_REG_STR(prodkey, "URLUpdateInfo", "");
     CHECK_REG_DWORD(prodkey, "Language", 1033);
     CHECK_REG_DWORD(prodkey, "Version", 0x1010001);
     CHECK_REG_DWORD(prodkey, "VersionMajor", 1);
     CHECK_REG_DWORD(prodkey, "VersionMinor", 1);
     CHECK_REG_DWORD(prodkey, "WindowsInstaller", 1);
-    todo_wine
-    CHECK_REG_DWORD(prodkey, "EstimatedSize", get_estimated_size());
+    CHECK_REG_DWORD_TODO(prodkey, "EstimatedSize", get_estimated_size());
 
     RegCloseKey(prodkey);
 
@@ -4142,24 +4140,23 @@ static void test_publish(void)
     CHECK_REG_ISTR(prodkey, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
     CHECK_REG_STR(prodkey, "Publisher", "Wine");
     CHECK_REG_STR(prodkey, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", NULL);
-    CHECK_REG_STR(prodkey, "Comments", NULL);
-    CHECK_REG_STR(prodkey, "Contact", NULL);
-    CHECK_REG_STR(prodkey, "HelpLink", NULL);
-    CHECK_REG_STR(prodkey, "HelpTelephone", NULL);
-    CHECK_REG_STR(prodkey, "InstallLocation", NULL);
+    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", "");
+    CHECK_REG_STR(prodkey, "Comments", "");
+    CHECK_REG_STR(prodkey, "Contact", "");
+    CHECK_REG_STR(prodkey, "HelpLink", "");
+    CHECK_REG_STR(prodkey, "HelpTelephone", "");
+    CHECK_REG_STR(prodkey, "InstallLocation", "");
     CHECK_REG_DWORD(prodkey, "NoModify", 1);
-    CHECK_REG_STR(prodkey, "Readme", NULL);
-    CHECK_REG_STR(prodkey, "Size", NULL);
-    CHECK_REG_STR(prodkey, "URLInfoAbout", NULL);
-    CHECK_REG_STR(prodkey, "URLUpdateInfo", NULL);
+    CHECK_REG_STR(prodkey, "Readme", "");
+    CHECK_REG_STR(prodkey, "Size", "");
+    CHECK_REG_STR(prodkey, "URLInfoAbout", "");
+    CHECK_REG_STR(prodkey, "URLUpdateInfo", "");
     CHECK_REG_DWORD(prodkey, "Language", 1033);
     CHECK_REG_DWORD(prodkey, "Version", 0x1010001);
     CHECK_REG_DWORD(prodkey, "VersionMajor", 1);
     CHECK_REG_DWORD(prodkey, "VersionMinor", 1);
     CHECK_REG_DWORD(prodkey, "WindowsInstaller", 1);
-    todo_wine
-    CHECK_REG_DWORD(prodkey, "EstimatedSize", get_estimated_size());
+    CHECK_REG_DWORD_TODO(prodkey, "EstimatedSize", get_estimated_size());
 
     RegCloseKey(prodkey);
 
@@ -4224,24 +4221,23 @@ static void test_publish(void)
     CHECK_REG_ISTR(prodkey, "ModifyPath", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
     CHECK_REG_STR(prodkey, "Publisher", "Wine");
     CHECK_REG_STR(prodkey, "UninstallString", "MsiExec.exe /X{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", NULL);
-    CHECK_REG_STR(prodkey, "Comments", NULL);
-    CHECK_REG_STR(prodkey, "Contact", NULL);
-    CHECK_REG_STR(prodkey, "HelpLink", NULL);
-    CHECK_REG_STR(prodkey, "HelpTelephone", NULL);
-    CHECK_REG_STR(prodkey, "InstallLocation", NULL);
+    CHECK_REG_STR(prodkey, "AuthorizedCDFPrefix", "");
+    CHECK_REG_STR(prodkey, "Comments", "");
+    CHECK_REG_STR(prodkey, "Contact", "");
+    CHECK_REG_STR(prodkey, "HelpLink", "");
+    CHECK_REG_STR(prodkey, "HelpTelephone", "");
+    CHECK_REG_STR(prodkey, "InstallLocation", "");
     CHECK_REG_DWORD(prodkey, "NoModify", 1);
-    CHECK_REG_STR(prodkey, "Readme", NULL);
-    CHECK_REG_STR(prodkey, "Size", NULL);
-    CHECK_REG_STR(prodkey, "URLInfoAbout", NULL);
-    CHECK_REG_STR(prodkey, "URLUpdateInfo", NULL);
+    CHECK_REG_STR(prodkey, "Readme", "");
+    CHECK_REG_STR(prodkey, "Size", "");
+    CHECK_REG_STR(prodkey, "URLInfoAbout", "");
+    CHECK_REG_STR(prodkey, "URLUpdateInfo", "");
     CHECK_REG_DWORD(prodkey, "Language", 1033);
     CHECK_REG_DWORD(prodkey, "Version", 0x1010001);
     CHECK_REG_DWORD(prodkey, "VersionMajor", 1);
     CHECK_REG_DWORD(prodkey, "VersionMinor", 1);
     CHECK_REG_DWORD(prodkey, "WindowsInstaller", 1);
-    todo_wine
-    CHECK_REG_DWORD(prodkey, "EstimatedSize", get_estimated_size());
+    CHECK_REG_DWORD_TODO(prodkey, "EstimatedSize", get_estimated_size());
 
     RegCloseKey(prodkey);
 
@@ -5050,6 +5046,7 @@ static void test_envvar(void)
     CHECK_REG_STR(env, "MSITESTVAR19", "1");
     CHECK_REG_STR(env, "MSITESTVAR20", "1");
     CHECK_REG_STR(env, "MSITESTVAR21", "1");
+    CHECK_REG_STR(env, "MSITESTVAR24", "TestService");
     CHECK_REG_STR(env2, "MSITESTVAR100", "1");
 
     res = RegSetValueExA(env, "MSITESTVAR22", 0, REG_SZ, (const BYTE *)"1", 2);
@@ -5058,6 +5055,9 @@ static void test_envvar(void)
     res = RegSetValueExA(env, "MSITESTVAR23", 0, REG_SZ, (const BYTE *)"1", 2);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
+    res = RegDeleteValueA(env, "MSITESTVAR25");
+    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
+
     r = MsiInstallProductA(msifile, "REMOVE=ALL");
     ok(!r, "got %u\n", r);
 
@@ -5065,10 +5065,8 @@ static void test_envvar(void)
     CHECK_DEL_REG_STR(env, "MSITESTVAR14", ";1;");
     CHECK_DEL_REG_STR(env, "MSITESTVAR15", ";;1;;");
     CHECK_DEL_REG_STR(env, "MSITESTVAR16", " 1 ");
-todo_wine {
-    CHECK_DEL_REG_STR(env, "MSITESTVAR17", "1");
-    CHECK_DEL_REG_STR(env, "MSITESTVAR18", "1");
-}
+    CHECK_DEL_REG_STR_TODO(env, "MSITESTVAR17", "1");
+    CHECK_DEL_REG_STR_TODO(env, "MSITESTVAR18", "1");
     CHECK_DEL_REG_STR(env, "MSITESTVAR23", "1");
 
     for (i = 1; i <= 23; i++)
@@ -6363,24 +6361,24 @@ static void test_publish_assemblies(void)
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, path_dotnet, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
-    CHECK_REG_STR(hkey, name_dotnet, "rcHQPHq?CA@Uv-XqMI1e>Z'q,T*76M@=YEg6My?~]");
+    CHECK_REG_MULTI(hkey, name_dotnet, "rcHQPHq?CA@Uv-XqMI1e>Z'q,T*76M@=YEg6My?~]\0");
     RegCloseKey(hkey);
 
     path = (is_wow64 || is_64bit) ? path_dotnet_local_wow64 : path_dotnet_local;
     res = RegOpenKeyA(HKEY_CURRENT_USER, path, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
-    CHECK_REG_STR(hkey, name_dotnet_local, "rcHQPHq?CA@Uv-XqMI1e>LF,8A?0d.AW@vcZ$Cgox");
+    CHECK_REG_MULTI(hkey, name_dotnet_local, "rcHQPHq?CA@Uv-XqMI1e>LF,8A?0d.AW@vcZ$Cgox\0");
     RegCloseKey(hkey);
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, path_win32, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
-    CHECK_REG_STR(hkey, name_win32, "rcHQPHq?CA@Uv-XqMI1e>}NJjwR'%D9v1p!v{WV(%");
+    CHECK_REG_MULTI(hkey, name_win32, "rcHQPHq?CA@Uv-XqMI1e>}NJjwR'%D9v1p!v{WV(%\0");
     RegCloseKey(hkey);
 
     path = (is_wow64 || is_64bit) ? path_win32_local_wow64 : path_win32_local;
     res = RegOpenKeyA(HKEY_CURRENT_USER, path, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
-    CHECK_REG_STR(hkey, name_win32_local, "rcHQPHq?CA@Uv-XqMI1e>C)Uvlj*53A)u(QQ9=)X!");
+    CHECK_REG_MULTI(hkey, name_win32_local, "rcHQPHq?CA@Uv-XqMI1e>C)Uvlj*53A)u(QQ9=)X!\0");
     RegCloseKey(hkey);
 
     /* No registration is done for a local assembly with no matching file */
@@ -6427,24 +6425,24 @@ static void test_publish_assemblies(void)
         res = RegOpenKeyExA(HKEY_CLASSES_ROOT, classes_path_dotnet, 0, access, &hkey);
     }
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
-    CHECK_REG_STR(hkey, name_dotnet, "rcHQPHq?CA@Uv-XqMI1e>Z'q,T*76M@=YEg6My?~]");
+    CHECK_REG_MULTI(hkey, name_dotnet, "rcHQPHq?CA@Uv-XqMI1e>Z'q,T*76M@=YEg6My?~]\0");
     RegCloseKey(hkey);
 
     path = (is_wow64 || is_64bit) ? classes_path_dotnet_local_wow64 : classes_path_dotnet_local;
     res = RegOpenKeyExA(HKEY_CLASSES_ROOT, path, 0, access, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
-    CHECK_REG_STR(hkey, name_dotnet_local, "rcHQPHq?CA@Uv-XqMI1e>LF,8A?0d.AW@vcZ$Cgox");
+    CHECK_REG_MULTI(hkey, name_dotnet_local, "rcHQPHq?CA@Uv-XqMI1e>LF,8A?0d.AW@vcZ$Cgox\0");
     RegCloseKey(hkey);
 
     res = RegOpenKeyExA(HKEY_CLASSES_ROOT, classes_path_win32, 0, access, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
-    CHECK_REG_STR(hkey, name_win32, "rcHQPHq?CA@Uv-XqMI1e>}NJjwR'%D9v1p!v{WV(%");
+    CHECK_REG_MULTI(hkey, name_win32, "rcHQPHq?CA@Uv-XqMI1e>}NJjwR'%D9v1p!v{WV(%\0");
     RegCloseKey(hkey);
 
     path = (is_wow64 || is_64bit) ? classes_path_win32_local_wow64 : classes_path_win32_local;
     res = RegOpenKeyExA(HKEY_CLASSES_ROOT, path, 0, access, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
-    CHECK_REG_STR(hkey, name_win32_local, "rcHQPHq?CA@Uv-XqMI1e>C)Uvlj*53A)u(QQ9=)X!");
+    CHECK_REG_MULTI(hkey, name_win32_local, "rcHQPHq?CA@Uv-XqMI1e>C)Uvlj*53A)u(QQ9=)X!\0");
     RegCloseKey(hkey);
 
     /* No registration is done for a local assembly with no matching file */

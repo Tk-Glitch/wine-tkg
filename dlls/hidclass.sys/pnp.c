@@ -21,13 +21,14 @@
 #define NONAMELESSUNION
 #include <unistd.h>
 #include <stdarg.h>
+#include "initguid.h"
 #include "hid.h"
+#include "devguid.h"
+#include "devpkey.h"
 #include "ntddmou.h"
 #include "ntddkbd.h"
 #include "ddk/hidtypes.h"
 #include "ddk/wdm.h"
-#include "initguid.h"
-#include "devpkey.h"
 #include "regstr.h"
 #include "winuser.h"
 #include "wine/debug.h"
@@ -35,6 +36,8 @@
 #include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(hid);
+
+DEFINE_DEVPROPKEY(DEVPROPKEY_HID_HANDLE, 0xbc62e415, 0xf4fe, 0x405c, 0x8e, 0xda, 0x63, 0x6f, 0xb5, 0x9f, 0x08, 0x98, 2);
 
 #if defined(__i386__) && !defined(_WIN32)
 
@@ -89,8 +92,6 @@ static NTSTATUS get_device_id(DEVICE_OBJECT *device, BUS_QUERY_ID_TYPE type, WCH
     ExFreePool((WCHAR *)irp_status.Information);
     return irp_status.u.Status;
 }
-
-DEFINE_DEVPROPKEY(DEVPROPKEY_HID_HANDLE, 0xbc62e415, 0xf4fe, 0x405c, 0x8e, 0xda, 0x63, 0x6f, 0xb5, 0x9f, 0x08, 0x98, 2);
 
 /* user32 reserves 1 & 2 for winemouse and winekeyboard,
  * keep this in sync with user_private.h */
@@ -241,8 +242,6 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
 
     pdo_ext->u.pdo.information.DescriptorSize = pdo_ext->u.pdo.preparsed_data->dwSize;
 
-    IoInvalidateDeviceRelations(fdo_ext->u.fdo.hid_ext.PhysicalDeviceObject, BusRelations);
-
     page = pdo_ext->u.pdo.preparsed_data->caps.UsagePage;
     usage = pdo_ext->u.pdo.preparsed_data->caps.Usage;
     if (page == HID_USAGE_PAGE_GENERIC && usage == HID_USAGE_GENERIC_MOUSE)
@@ -252,13 +251,15 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
     else
         pdo_ext->u.pdo.rawinput_handle = alloc_rawinput_handle();
 
-    status = IoSetDevicePropertyData(child_pdo, &DEVPROPKEY_HID_HANDLE, LOCALE_NEUTRAL,
-                                     PLUGPLAY_PROPERTY_PERSISTENT, DEVPROP_TYPE_UINT32,
-                                     sizeof(pdo_ext->u.pdo.rawinput_handle), &pdo_ext->u.pdo.rawinput_handle);
-    if (status != STATUS_SUCCESS)
+    IoInvalidateDeviceRelations(fdo_ext->u.fdo.hid_ext.PhysicalDeviceObject, BusRelations);
+
+    if ((status = IoSetDevicePropertyData(child_pdo, &DEVPROPKEY_HID_HANDLE, LOCALE_NEUTRAL,
+                                          PLUGPLAY_PROPERTY_PERSISTENT, DEVPROP_TYPE_UINT32,
+                                          sizeof(pdo_ext->u.pdo.rawinput_handle), &pdo_ext->u.pdo.rawinput_handle)))
     {
-        FIXME("failed to set device property %x\n", status);
-        return status;
+        ERR("Failed to set device handle property, status %x\n", status);
+        IoDeleteDevice(child_pdo);
+        return;
     }
 
     pdo_ext->u.pdo.poll_interval = DEFAULT_POLL_INTERVAL;

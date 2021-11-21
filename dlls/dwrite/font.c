@@ -4485,7 +4485,10 @@ HRESULT create_font_collection(IDWriteFactory7 *factory, IDWriteFontFileEnumerat
             }
 
             if (FAILED(hr))
+            {
+                release_font_data(font_data);
                 break;
+            }
         }
 
         IDWriteFontFileStream_Release(stream);

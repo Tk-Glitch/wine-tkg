@@ -3801,15 +3801,15 @@ msgstr ""
 msgid "Expected '@'"
 msgstr "අපේක්ෂා කරේ '='"
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:80
 msgid "Microsoft JScript compilation error"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:81
 msgid "Microsoft JScript runtime error"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:81 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:82 dlls/vbscript/vbscript.rc:64
 #, fuzzy
 #| msgid "Unknown error"
 msgid "Unknown runtime error"
@@ -3918,6 +3918,12 @@ msgid "Cannot modify non-writable property '|'"
 msgstr ""
 
 #: dlls/jscript/jscript.rc:77
+#, fuzzy
+#| msgid "'%s' is not a valid port name"
+msgid "'this' is not a Map object"
+msgstr "'%s' වලංගු තොට නමක් නෙමෙයි."
+
+#: dlls/jscript/jscript.rc:78
 msgid "Property cannot have both accessors and a value"
 msgstr ""
 
@@ -14382,6 +14388,12 @@ msgid ""
 "     Access the registry using the 64-bit view.\n"
 "\n"
 msgstr ""
+
+#: programs/reg/reg.rc:180
+#, fuzzy
+#| msgid "reg: Unable to open the registry key '%1'.\n"
+msgid "reg: Unable to access or create the specified registry key\n"
+msgstr "reg: රෙජිස්තරයේ යතුර '%1' අරින්න බැහැ.\n"
 
 #: programs/regedit/regedit.rc:34
 msgid "&Registry"

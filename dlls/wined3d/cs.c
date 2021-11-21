@@ -481,6 +481,12 @@ static inline void wined3d_device_context_finish(struct wined3d_device_context *
     context->ops->finish(context, queue_id);
 }
 
+static inline void wined3d_device_context_acquire_resource(struct wined3d_device_context *context,
+        struct wined3d_resource *resource)
+{
+    context->ops->acquire_resource(context, resource);
+}
+
 static struct wined3d_cs *wined3d_cs_from_context(struct wined3d_device_context *context)
 {
     return CONTAINING_RECORD(context, struct wined3d_cs, c);
@@ -766,15 +772,16 @@ void wined3d_device_context_emit_clear_rendertarget_view(struct wined3d_device_c
     op->rect_count = 1;
     op->rects[0] = *rect;
 
-    wined3d_resource_acquire(view->resource);
+    wined3d_device_context_acquire_resource(context, view->resource);
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
     if (flags & WINED3DCLEAR_SYNCHRONOUS)
         wined3d_device_context_finish(context, WINED3D_CS_QUEUE_DEFAULT);
 }
 
-static void acquire_shader_resources(const struct wined3d_state *state, unsigned int shader_mask)
+static void acquire_shader_resources(struct wined3d_device_context *context, unsigned int shader_mask)
 {
+    const struct wined3d_state *state = context->state;
     struct wined3d_shader_sampler_map_entry *entry;
     struct wined3d_shader_resource_view *view;
     struct wined3d_shader *shader;
@@ -791,7 +798,7 @@ static void acquire_shader_resources(const struct wined3d_state *state, unsigned
         for (j = 0; j < WINED3D_MAX_CBS; ++j)
         {
             if (state->cb[i][j])
-                wined3d_resource_acquire(&state->cb[i][j]->resource);
+                wined3d_device_context_acquire_resource(context, &state->cb[i][j]->resource);
         }
 
         for (j = 0; j < shader->reg_maps.sampler_map.count; ++j)
@@ -801,7 +808,7 @@ static void acquire_shader_resources(const struct wined3d_state *state, unsigned
             if (!(view = state->shader_resource_view[i][entry->resource_idx]))
                 continue;
 
-            wined3d_resource_acquire(view->resource);
+            wined3d_device_context_acquire_resource(context, view->resource);
         }
     }
 }
@@ -839,8 +846,8 @@ static void release_shader_resources(const struct wined3d_state *state, unsigned
     }
 }
 
-static void acquire_unordered_access_resources(const struct wined3d_shader *shader,
-        struct wined3d_unordered_access_view * const *views)
+static void acquire_unordered_access_resources(struct wined3d_device_context *context,
+        const struct wined3d_shader *shader, struct wined3d_unordered_access_view * const *views)
 {
     unsigned int i;
 
@@ -855,7 +862,7 @@ static void acquire_unordered_access_resources(const struct wined3d_shader *shad
         if (!views[i])
             continue;
 
-        wined3d_resource_acquire(views[i]->resource);
+        wined3d_device_context_acquire_resource(context, views[i]->resource);
     }
 }
 
@@ -897,10 +904,12 @@ static void wined3d_cs_exec_dispatch(struct wined3d_cs *cs, const void *data)
             state->unordered_access_view[WINED3D_PIPELINE_COMPUTE]);
 }
 
-static void acquire_compute_pipeline_resources(const struct wined3d_state *state)
+static void acquire_compute_pipeline_resources(struct wined3d_device_context *context)
 {
-    acquire_shader_resources(state, 1u << WINED3D_SHADER_TYPE_COMPUTE);
-    acquire_unordered_access_resources(state->shader[WINED3D_SHADER_TYPE_COMPUTE],
+    const struct wined3d_state *state = context->state;
+
+    acquire_shader_resources(context, 1u << WINED3D_SHADER_TYPE_COMPUTE);
+    acquire_unordered_access_resources(context, state->shader[WINED3D_SHADER_TYPE_COMPUTE],
             state->unordered_access_view[WINED3D_PIPELINE_COMPUTE]);
 }
 
@@ -916,7 +925,7 @@ void CDECL wined3d_device_context_dispatch(struct wined3d_device_context *contex
     op->parameters.u.direct.group_count_y = group_count_y;
     op->parameters.u.direct.group_count_z = group_count_z;
 
-    acquire_compute_pipeline_resources(context->state);
+    acquire_compute_pipeline_resources(context);
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
 }
@@ -932,8 +941,8 @@ void CDECL wined3d_device_context_dispatch_indirect(struct wined3d_device_contex
     op->parameters.u.indirect.buffer = buffer;
     op->parameters.u.indirect.offset = offset;
 
-    acquire_compute_pipeline_resources(context->state);
-    wined3d_resource_acquire(&buffer->resource);
+    acquire_compute_pipeline_resources(context);
+    wined3d_device_context_acquire_resource(context, &buffer->resource);
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
 }
@@ -1025,37 +1034,38 @@ static void wined3d_cs_exec_draw(struct wined3d_cs *cs, const void *data)
             state->unordered_access_view[WINED3D_PIPELINE_GRAPHICS]);
 }
 
-static void acquire_graphics_pipeline_resources(const struct wined3d_state *state,
+static void acquire_graphics_pipeline_resources(struct wined3d_device_context *context,
         BOOL indexed, const struct wined3d_d3d_info *d3d_info)
 {
+    const struct wined3d_state *state = context->state;
     unsigned int i;
 
     if (indexed)
-        wined3d_resource_acquire(&state->index_buffer->resource);
+        wined3d_device_context_acquire_resource(context, &state->index_buffer->resource);
     for (i = 0; i < ARRAY_SIZE(state->streams); ++i)
     {
         if (state->streams[i].buffer)
-            wined3d_resource_acquire(&state->streams[i].buffer->resource);
+            wined3d_device_context_acquire_resource(context, &state->streams[i].buffer->resource);
     }
     for (i = 0; i < ARRAY_SIZE(state->stream_output); ++i)
     {
         if (state->stream_output[i].buffer)
-            wined3d_resource_acquire(&state->stream_output[i].buffer->resource);
+            wined3d_device_context_acquire_resource(context, &state->stream_output[i].buffer->resource);
     }
     for (i = 0; i < ARRAY_SIZE(state->textures); ++i)
     {
         if (state->textures[i])
-            wined3d_resource_acquire(&state->textures[i]->resource);
+            wined3d_device_context_acquire_resource(context, &state->textures[i]->resource);
     }
     for (i = 0; i < d3d_info->limits.max_rt_count; ++i)
     {
         if (state->fb.render_targets[i])
-            wined3d_resource_acquire(state->fb.render_targets[i]->resource);
+            wined3d_device_context_acquire_resource(context, state->fb.render_targets[i]->resource);
     }
     if (state->fb.depth_stencil)
-        wined3d_resource_acquire(state->fb.depth_stencil->resource);
-    acquire_shader_resources(state, ~(1u << WINED3D_SHADER_TYPE_COMPUTE));
-    acquire_unordered_access_resources(state->shader[WINED3D_SHADER_TYPE_PIXEL],
+        wined3d_device_context_acquire_resource(context, state->fb.depth_stencil->resource);
+    acquire_shader_resources(context, ~(1u << WINED3D_SHADER_TYPE_COMPUTE));
+    acquire_unordered_access_resources(context, state->shader[WINED3D_SHADER_TYPE_PIXEL],
             state->unordered_access_view[WINED3D_PIPELINE_GRAPHICS]);
 }
 
@@ -1065,7 +1075,6 @@ void wined3d_device_context_emit_draw(struct wined3d_device_context *context,
         bool indexed)
 {
     const struct wined3d_d3d_info *d3d_info = &context->device->adapter->d3d_info;
-    const struct wined3d_state *state = context->state;
     struct wined3d_cs_draw *op;
 
     op = wined3d_device_context_require_space(context, sizeof(*op), WINED3D_CS_QUEUE_DEFAULT);
@@ -1080,7 +1089,7 @@ void wined3d_device_context_emit_draw(struct wined3d_device_context *context,
     op->parameters.u.direct.instance_count = instance_count;
     op->parameters.indexed = indexed;
 
-    acquire_graphics_pipeline_resources(state, indexed, d3d_info);
+    acquire_graphics_pipeline_resources(context, indexed, d3d_info);
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
 }
@@ -1101,8 +1110,8 @@ void CDECL wined3d_device_context_draw_indirect(struct wined3d_device_context *c
     op->parameters.u.indirect.offset = offset;
     op->parameters.indexed = indexed;
 
-    acquire_graphics_pipeline_resources(state, indexed, d3d_info);
-    wined3d_resource_acquire(&buffer->resource);
+    acquire_graphics_pipeline_resources(context, indexed, d3d_info);
+    wined3d_device_context_acquire_resource(context, &buffer->resource);
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
 }
@@ -2222,6 +2231,9 @@ static void wined3d_cs_issue_query(struct wined3d_device_context *context,
     struct wined3d_cs *cs = wined3d_cs_from_context(context);
     struct wined3d_cs_query_issue *op;
 
+    if (flags & WINED3DISSUE_END)
+        ++query->counter_main;
+
     op = wined3d_device_context_require_space(context, sizeof(*op), WINED3D_CS_QUEUE_DEFAULT);
     op->opcode = WINED3D_CS_OP_QUERY_ISSUE;
     op->query = query;
@@ -2229,6 +2241,11 @@ static void wined3d_cs_issue_query(struct wined3d_device_context *context,
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
     cs->queries_flushed = FALSE;
+
+    if (flags & WINED3DISSUE_BEGIN)
+        query->state = QUERY_BUILDING;
+    else
+        query->state = QUERY_SIGNALLED;
 }
 
 static void wined3d_cs_exec_preload_resource(struct wined3d_cs *cs, const void *data)
@@ -2295,6 +2312,8 @@ static HRESULT wined3d_cs_map(struct wined3d_device_context *context, struct win
     /* Mapping resources from the worker thread isn't an issue by itself, but
      * increasing the map count would be visible to applications. */
     wined3d_not_from_cs(cs);
+
+    wined3d_resource_wait_idle(resource);
 
     op = wined3d_device_context_require_space(context, sizeof(*op), WINED3D_CS_QUEUE_MAP);
     op->opcode = WINED3D_CS_OP_MAP;
@@ -2463,9 +2482,9 @@ void wined3d_device_context_emit_blt_sub_resource(struct wined3d_device_context 
         memset(&op->fx, 0, sizeof(op->fx));
     op->filter = filter;
 
-    wined3d_resource_acquire(dst_resource);
+    wined3d_device_context_acquire_resource(context, dst_resource);
     if (src_resource)
-        wined3d_resource_acquire(src_resource);
+        wined3d_device_context_acquire_resource(context, src_resource);
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
     if (flags & WINED3D_BLT_SYNCHRONOUS)
@@ -2531,7 +2550,7 @@ done:
     wined3d_resource_release(resource);
 }
 
-void wined3d_device_context_emit_update_sub_resource(struct wined3d_device_context *context,
+static void wined3d_cs_update_sub_resource(struct wined3d_device_context *context,
         struct wined3d_resource *resource, unsigned int sub_resource_idx, const struct wined3d_box *box,
         const void *data, unsigned int row_pitch, unsigned int slice_pitch)
 {
@@ -2591,7 +2610,7 @@ no_async:
     op->data.slice_pitch = slice_pitch;
     op->data.data = data;
 
-    wined3d_resource_acquire(resource);
+    wined3d_device_context_acquire_resource(context, resource);
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_MAP);
     /* The data pointer may go away, so we need to wait until it is read.
@@ -2658,7 +2677,7 @@ void wined3d_device_context_emit_clear_uav_uint(struct wined3d_device_context *c
     op->view = view;
     op->clear_value = *clear_value;
 
-    wined3d_resource_acquire(view->resource);
+    wined3d_device_context_acquire_resource(context, view->resource);
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
 }
@@ -2687,7 +2706,7 @@ void wined3d_device_context_emit_copy_uav_counter(struct wined3d_device_context 
     op->offset = offset;
     op->view = uav;
 
-    wined3d_resource_acquire(&dst_buffer->resource);
+    wined3d_device_context_acquire_resource(context, &dst_buffer->resource);
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
 }
@@ -2714,7 +2733,7 @@ void wined3d_device_context_emit_generate_mipmaps(struct wined3d_device_context 
     op->opcode = WINED3D_CS_OP_GENERATE_MIPMAPS;
     op->view = view;
 
-    wined3d_resource_acquire(view->resource);
+    wined3d_device_context_acquire_resource(context, view->resource);
 
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
 }
@@ -2728,6 +2747,11 @@ static void wined3d_cs_emit_stop(struct wined3d_cs *cs)
 
     wined3d_device_context_submit(&cs->c, WINED3D_CS_QUEUE_DEFAULT);
     wined3d_cs_finish(cs, WINED3D_CS_QUEUE_DEFAULT);
+}
+
+static void wined3d_cs_acquire_resource(struct wined3d_device_context *context, struct wined3d_resource *resource)
+{
+    wined3d_resource_acquire(resource);
 }
 
 static void (* const wined3d_cs_op_handlers[])(struct wined3d_cs *cs, const void *data) =
@@ -2853,8 +2877,10 @@ static const struct wined3d_device_context_ops wined3d_cs_st_ops =
     wined3d_cs_st_push_constants,
     wined3d_cs_map,
     wined3d_cs_unmap,
+    wined3d_cs_update_sub_resource,
     wined3d_cs_issue_query,
     wined3d_cs_flush,
+    wined3d_cs_acquire_resource,
 };
 
 static BOOL wined3d_cs_queue_is_empty(const struct wined3d_cs *cs, const struct wined3d_cs_queue *queue)
@@ -3003,8 +3029,10 @@ static const struct wined3d_device_context_ops wined3d_cs_mt_ops =
     wined3d_cs_mt_push_constants,
     wined3d_cs_map,
     wined3d_cs_unmap,
+    wined3d_cs_update_sub_resource,
     wined3d_cs_issue_query,
     wined3d_cs_flush,
+    wined3d_cs_acquire_resource,
 };
 
 static void poll_queries(struct wined3d_cs *cs)

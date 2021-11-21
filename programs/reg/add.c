@@ -48,11 +48,12 @@ static inline BYTE hexchar_to_byte(WCHAR ch)
         return -1;
 }
 
-static LPBYTE get_regdata(const WCHAR *data, DWORD reg_type, WCHAR separator, DWORD *reg_count)
+static BOOL get_regdata(const WCHAR *data, DWORD reg_type, WCHAR separator,
+                        BYTE **data_bytes, DWORD *size_bytes)
 {
     static const WCHAR empty;
-    LPBYTE out_data = NULL;
-    *reg_count = 0;
+
+    *size_bytes = 0;
 
     if (!data) data = &empty;
 
@@ -62,9 +63,9 @@ static LPBYTE get_regdata(const WCHAR *data, DWORD reg_type, WCHAR separator, DW
         case REG_SZ:
         case REG_EXPAND_SZ:
         {
-            *reg_count = (lstrlenW(data) + 1) * sizeof(WCHAR);
-            out_data = malloc(*reg_count);
-            lstrcpyW((LPWSTR)out_data,data);
+            *size_bytes = (lstrlenW(data) + 1) * sizeof(WCHAR);
+            *data_bytes = malloc(*size_bytes);
+            lstrcpyW((WCHAR *)*data_bytes, data);
             break;
         }
         case REG_DWORD:
@@ -76,41 +77,48 @@ static LPBYTE get_regdata(const WCHAR *data, DWORD reg_type, WCHAR separator, DW
             val = wcstoul(data, &rest, (towlower(data[1]) == 'x') ? 16 : 10);
             if (*rest || data[0] == '-' || (val == ~0u && errno == ERANGE)) {
                 output_message(STRING_MISSING_INTEGER);
-                break;
+                return FALSE;
             }
-            *reg_count = sizeof(DWORD);
-            out_data = malloc(*reg_count);
-            ((LPDWORD)out_data)[0] = val;
+            *size_bytes = sizeof(DWORD);
+            *data_bytes = malloc(*size_bytes);
+            *(DWORD *)*data_bytes = val;
             break;
         }
         case REG_BINARY:
         {
-            BYTE hex0, hex1;
+            BYTE hex0, hex1, *ptr;
             int i = 0, destByteIndex = 0, datalen = lstrlenW(data);
-            *reg_count = ((datalen + datalen % 2) / 2) * sizeof(BYTE);
-            out_data = malloc(*reg_count);
-            if(datalen % 2)
+
+            if (!datalen) return TRUE;
+
+            *size_bytes = ((datalen + datalen % 2) / 2) * sizeof(BYTE);
+            *data_bytes = malloc(*size_bytes);
+
+            if (datalen % 2)
             {
                 hex1 = hexchar_to_byte(data[i++]);
-                if(hex1 == 0xFF)
+                if (hex1 == 0xFF)
                     goto no_hex_data;
-                out_data[destByteIndex++] = hex1;
+                *data_bytes[destByteIndex++] = hex1;
             }
-            for(;i + 1 < datalen;i += 2)
+
+            ptr = *data_bytes;
+
+            for (; i + 1 < datalen; i += 2)
             {
                 hex0 = hexchar_to_byte(data[i]);
                 hex1 = hexchar_to_byte(data[i + 1]);
-                if(hex0 == 0xFF || hex1 == 0xFF)
+                if (hex0 == 0xFF || hex1 == 0xFF)
                     goto no_hex_data;
-                out_data[destByteIndex++] = (hex0 << 4) | hex1;
+                ptr[destByteIndex++] = (hex0 << 4) | hex1;
             }
             break;
+
             no_hex_data:
-            /* cleanup, print error */
-            free(out_data);
+            free(*data_bytes);
+            *data_bytes = NULL;
             output_message(STRING_MISSING_HEXDATA);
-            out_data = NULL;
-            break;
+            return FALSE;
         }
         case REG_MULTI_SZ:
         {
@@ -133,78 +141,84 @@ static LPBYTE get_regdata(const WCHAR *data, DWORD reg_type, WCHAR separator, DW
                 {
                     free(buffer);
                     output_message(STRING_INVALID_STRING);
-                    return NULL;
+                    return FALSE;
                 }
             }
             buffer[destindex] = 0;
             if (destindex && buffer[destindex - 1])
                 buffer[++destindex] = 0;
-            *reg_count = (destindex + 1) * sizeof(WCHAR);
-            return (BYTE *)buffer;
+            *size_bytes = (destindex + 1) * sizeof(WCHAR);
+            *data_bytes = (BYTE *)buffer;
+            break;
         }
         default:
             output_message(STRING_UNHANDLED_TYPE, reg_type, data);
     }
 
-    return out_data;
+    return TRUE;
 }
 
 static int run_add(HKEY root, WCHAR *path, WCHAR *value_name, BOOL value_empty,
                    WCHAR *type, WCHAR separator, WCHAR *data, BOOL force)
 {
-    HKEY key;
+    HKEY hkey;
+    DWORD dispos, data_type, data_size;
+    BYTE *reg_data = NULL;
+    LONG rc;
 
     if (RegCreateKeyExW(root, path, 0, NULL, REG_OPTION_NON_VOLATILE,
-                        KEY_READ|KEY_WRITE, NULL, &key, NULL))
+                        KEY_READ|KEY_WRITE, NULL, &hkey, &dispos))
     {
-        output_message(STRING_INVALID_KEY);
+        output_message(STRING_ACCESS_DENIED);
         return 1;
     }
 
-    if (value_name || value_empty || data)
+    if (!force && dispos == REG_OPENED_EXISTING_KEY)
     {
-        DWORD reg_type;
-        DWORD reg_count = 0;
-        BYTE* reg_data = NULL;
-
-        if (!force)
+        if (RegQueryValueExW(hkey, value_name, NULL, NULL, NULL, NULL) == ERROR_SUCCESS)
         {
-            if (RegQueryValueExW(key, value_name, NULL, NULL, NULL, NULL) == ERROR_SUCCESS)
+            if (!ask_confirm(STRING_OVERWRITE_VALUE, value_name))
             {
-                if (!ask_confirm(STRING_OVERWRITE_VALUE, value_name))
-                {
-                    RegCloseKey(key);
-                    output_message(STRING_CANCELLED);
-                    return 0;
-                }
+                RegCloseKey(hkey);
+                output_message(STRING_CANCELLED);
+                return 0;
             }
         }
-
-        reg_type = wchar_get_type(type);
-        if (reg_type == ~0u)
-        {
-            RegCloseKey(key);
-            output_message(STRING_UNSUPPORTED_TYPE, type);
-            return 1;
-        }
-        if ((reg_type == REG_DWORD || reg_type == REG_DWORD_BIG_ENDIAN) && !data)
-        {
-             RegCloseKey(key);
-             output_message(STRING_INVALID_CMDLINE);
-             return 1;
-        }
-
-        if (!(reg_data = get_regdata(data, reg_type, separator, &reg_count)))
-        {
-            RegCloseKey(key);
-            return 1;
-        }
-
-        RegSetValueExW(key, value_name, 0, reg_type, reg_data, reg_count);
-        free(reg_data);
     }
 
-    RegCloseKey(key);
+    data_type = wchar_get_type(type);
+
+    if (data_type == ~0u)
+    {
+        RegCloseKey(hkey);
+        output_message(STRING_UNSUPPORTED_TYPE, type);
+        return 1;
+    }
+
+    if ((data_type == REG_DWORD || data_type == REG_DWORD_BIG_ENDIAN) && !data)
+    {
+         RegCloseKey(hkey);
+         output_message(STRING_INVALID_CMDLINE);
+         return 1;
+    }
+
+    if (!get_regdata(data, data_type, separator, &reg_data, &data_size))
+    {
+        RegCloseKey(hkey);
+        return 1;
+    }
+
+    rc = RegSetValueExW(hkey, value_name, 0, data_type, reg_data, data_size);
+
+    free(reg_data);
+    RegCloseKey(hkey);
+
+    if (rc)
+    {
+        output_message(STRING_ACCESS_DENIED);
+        return 1;
+    }
+
     output_message(STRING_SUCCESS);
 
     return 0;

@@ -50,6 +50,65 @@ PEB * WINAPI RtlGetCurrentPeb(void)
 
 
 /**********************************************************************
+ *           RtlWow64GetCurrentMachine  (NTDLL.@)
+ */
+USHORT WINAPI RtlWow64GetCurrentMachine(void)
+{
+    USHORT current, native;
+
+    RtlWow64GetProcessMachines( GetCurrentProcess(), &current, &native );
+    return current ? current : native;
+}
+
+
+/**********************************************************************
+ *           RtlWow64GetProcessMachines  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlWow64GetProcessMachines( HANDLE process, USHORT *current_ret, USHORT *native_ret )
+{
+    ULONG i, machines[8];
+    USHORT current = 0, native = 0;
+    NTSTATUS status;
+
+    status = NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
+                                         machines, sizeof(machines), NULL );
+    if (status) return status;
+    for (i = 0; machines[i]; i++)
+    {
+        USHORT flags = HIWORD(machines[i]);
+        USHORT machine = LOWORD(machines[i]);
+        if (flags & 4 /* native machine */) native = machine;
+        else if (flags & 8 /* current machine */) current = machine;
+    }
+    if (current_ret) *current_ret = current;
+    if (native_ret) *native_ret = native;
+    return status;
+}
+
+
+/**********************************************************************
+ *           RtlWow64IsWowGuestMachineSupported  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlWow64IsWowGuestMachineSupported( USHORT machine, BOOLEAN *supported )
+{
+    ULONG i, machines[8];
+    HANDLE process = 0;
+    NTSTATUS status;
+
+    status = NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
+                                         machines, sizeof(machines), NULL );
+    if (status) return status;
+    *supported = FALSE;
+    for (i = 0; machines[i]; i++)
+    {
+        if (HIWORD(machines[i]) & 4 /* native machine */) continue;
+        if (machine == LOWORD(machines[i])) *supported = TRUE;
+    }
+    return status;
+}
+
+
+/**********************************************************************
  *           RtlCreateUserProcess  (NTDLL.@)
  */
 NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,

@@ -1603,43 +1603,6 @@ static HKL get_locale_kbd_layout(void)
     return (HKL)layout;
 }
 
-/***********************************************************************
- *     GetKeyboardLayoutName (X11DRV.@)
- */
-BOOL CDECL X11DRV_GetKeyboardLayoutName(LPWSTR name)
-{
-    static const WCHAR formatW[] = {'%','0','8','x',0};
-    DWORD layout;
-
-    layout = HandleToUlong( get_locale_kbd_layout() );
-    if (HIWORD(layout) == LOWORD(layout)) layout = LOWORD(layout);
-    sprintfW(name, formatW, layout);
-    TRACE("returning %s\n", debugstr_w(name));
-    return TRUE;
-}
-
-static void set_kbd_layout_preload_key(void)
-{
-    static const WCHAR preload[] =
-        {'K','e','y','b','o','a','r','d',' ','L','a','y','o','u','t','\\','P','r','e','l','o','a','d',0};
-    static const WCHAR one[] = {'1',0};
-
-    HKEY hkey;
-    WCHAR layout[KL_NAMELENGTH];
-
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, preload, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &hkey, NULL))
-        return;
-
-    if (!RegQueryValueExW(hkey, one, NULL, NULL, NULL, NULL))
-    {
-        RegCloseKey(hkey);
-        return;
-    }
-    if (X11DRV_GetKeyboardLayoutName(layout))
-        RegSetValueExW(hkey, one, 0, REG_SZ, (const BYTE *)layout, sizeof(layout));
-
-    RegCloseKey(hkey);
-}
 
 /**********************************************************************
  *		X11DRV_InitKeyboard
@@ -1675,8 +1638,6 @@ void X11DRV_InitKeyboard( Display *display )
         { 0, 0 }
     };
     int vkey_range;
-
-    set_kbd_layout_preload_key();
 
     EnterCriticalSection( &kbd_section );
     XDisplayKeycodes(display, &min_keycode, &max_keycode);
@@ -1924,82 +1885,27 @@ static BOOL match_x11_keyboard_layout(HKL hkl)
 
 
 /***********************************************************************
- *		GetKeyboardLayout (X11DRV.@)
- */
-HKL CDECL X11DRV_GetKeyboardLayout(DWORD dwThreadid)
-{
-    if (!dwThreadid || dwThreadid == GetCurrentThreadId())
-    {
-        struct x11drv_thread_data *thread_data = x11drv_thread_data();
-        if (thread_data && thread_data->kbd_layout) return thread_data->kbd_layout;
-    }
-    else
-        FIXME("couldn't return keyboard layout for thread %04x\n", dwThreadid);
-
-    return get_locale_kbd_layout();
-}
-
-
-/***********************************************************************
- *		LoadKeyboardLayout (X11DRV.@)
- */
-HKL CDECL X11DRV_LoadKeyboardLayout(LPCWSTR name, UINT flags)
-{
-    FIXME("%s, %04x: semi-stub! Returning default layout.\n", debugstr_w(name), flags);
-    return get_locale_kbd_layout();
-}
-
-
-/***********************************************************************
- *		UnloadKeyboardLayout (X11DRV.@)
- */
-BOOL CDECL X11DRV_UnloadKeyboardLayout(HKL hkl)
-{
-    FIXME("%p: stub!\n", hkl);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-
-/***********************************************************************
  *		ActivateKeyboardLayout (X11DRV.@)
  */
-HKL CDECL X11DRV_ActivateKeyboardLayout(HKL hkl, UINT flags)
+BOOL CDECL X11DRV_ActivateKeyboardLayout(HKL hkl, UINT flags)
 {
-    HKL oldHkl = 0;
-    struct x11drv_thread_data *thread_data = x11drv_init_thread_data();
-
     FIXME("%p, %04x: semi-stub!\n", hkl, flags);
+
     if (flags & KLF_SETFORPROCESS)
     {
         SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
         FIXME("KLF_SETFORPROCESS not supported\n");
-        return 0;
-    }
-
-    if (flags)
-        FIXME("flags %x not supported\n",flags);
-
-    if (hkl == (HKL)HKL_NEXT || hkl == (HKL)HKL_PREV)
-    {
-        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-        FIXME("HKL_NEXT and HKL_PREV not supported\n");
-        return 0;
+        return FALSE;
     }
 
     if (!match_x11_keyboard_layout(hkl))
     {
         SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
         FIXME("setting keyboard of different locales not supported\n");
-        return 0;
+        return FALSE;
     }
 
-    oldHkl = thread_data->kbd_layout;
-    if (!oldHkl) oldHkl = get_locale_kbd_layout();
-
-    thread_data->kbd_layout = hkl;
-
-    return oldHkl;
+    return TRUE;
 }
 
 
@@ -2020,7 +1926,7 @@ BOOL X11DRV_MappingNotify( HWND dummy, XEvent *event )
         hwnd = GetFocus();
         if (!hwnd) hwnd = GetActiveWindow();
         PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST,
-                     0 /*FIXME*/, (LPARAM)X11DRV_GetKeyboardLayout(0));
+                     0 /*FIXME*/, (LPARAM)GetKeyboardLayout(0));
         break;
 
     case MappingPointer:
@@ -2275,7 +2181,7 @@ INT CDECL X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
   scanCode = lParam >> 16;
   scanCode &= 0x1ff;  /* keep "extended-key" flag with code */
 
-  vkey = X11DRV_MapVirtualKeyEx(scanCode, MAPVK_VSC_TO_VK_EX, X11DRV_GetKeyboardLayout(0));
+  vkey = X11DRV_MapVirtualKeyEx(scanCode, MAPVK_VSC_TO_VK_EX, GetKeyboardLayout(0));
 
   /*  handle "don't care" bit (0x02000000) */
   if (!(lParam & 0x02000000)) {
@@ -2298,7 +2204,7 @@ INT CDECL X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
     }
   }
 
-  ansi = X11DRV_MapVirtualKeyEx(vkey, MAPVK_VK_TO_CHAR, X11DRV_GetKeyboardLayout(0));
+  ansi = X11DRV_MapVirtualKeyEx(vkey, MAPVK_VK_TO_CHAR, GetKeyboardLayout(0));
   TRACE("scan 0x%04x, vkey 0x%04X, ANSI 0x%04x\n", scanCode, vkey, ansi);
 
   /* first get the name of the "regular" keys which is the Upper case

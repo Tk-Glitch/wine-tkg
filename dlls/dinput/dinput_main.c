@@ -1707,14 +1707,6 @@ static const IClassFactoryVtbl DICF_Vtbl = {
 static IClassFactoryImpl DINPUT_CF = {{&DICF_Vtbl}, 1 };
 
 /***********************************************************************
- *		DllCanUnloadNow (DINPUT.@)
- */
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-/***********************************************************************
  *		DllGetClassObject (DINPUT.@)
  */
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
@@ -1728,22 +1720,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 
     FIXME("(%s,%s,%p): no interface found.\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (DINPUT.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( DINPUT_instance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (DINPUT.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( DINPUT_instance );
 }
 
 /******************************************************************************

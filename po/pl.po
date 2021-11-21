@@ -8,7 +8,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2021-04-16 09:37+0200\n"
+"PO-Revision-Date: 2021-05-04 16:13+0200\n"
 "Last-Translator: Łukasz Wojniłowicz <lukasz.wojnilowicz@gmail.com>\n"
 "Language-Team: Polish <kde-i18n-doc@kde.org>\n"
 "Language: pl\n"
@@ -3875,15 +3875,15 @@ msgstr "Warunkowa kompilacja jest wyłączona"
 msgid "Expected '@'"
 msgstr "Oczekiwano '@'"
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:80
 msgid "Microsoft JScript compilation error"
 msgstr "Błąd kompilacji Microsoft JScript"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:81
 msgid "Microsoft JScript runtime error"
 msgstr "Błąd biblioteki uruchomieniowej Microsoft JScript"
 
-#: dlls/jscript/jscript.rc:81 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:82 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "Nieznany błąd biblioteki uruchomieniowej"
 
@@ -3988,6 +3988,10 @@ msgid "Cannot modify non-writable property '|'"
 msgstr "Nie można zmienić niezapisywalnej własności '|'"
 
 #: dlls/jscript/jscript.rc:77
+msgid "'this' is not a Map object"
+msgstr "'this' nie jest obiektem Map"
+
+#: dlls/jscript/jscript.rc:78
 msgid "Property cannot have both accessors and a value"
 msgstr "Własność nie może mieć zarówno akcesorów i wartości"
 
@@ -14726,10 +14730,8 @@ msgstr ""
 "\n"
 
 #: programs/reg/reg.rc:172
-#, fuzzy
-#| msgid "reg: Invalid system key [%1]\n"
 msgid "reg: Invalid system key\n"
-msgstr "reg: Nieprawidłowy klucz systemowy [%1]\n"
+msgstr "reg: Nieprawidłowy klucz systemowy\n"
 
 #: programs/reg/reg.rc:173
 msgid "The file '%1' already exists. Do you want to overwrite it?"
@@ -14758,6 +14760,10 @@ msgstr ""
 "  /reg:64\n"
 "     Uzyskaj dostęp do rejestru używając widoku 64-bitowego.\n"
 "\n"
+
+#: programs/reg/reg.rc:180
+msgid "reg: Unable to access or create the specified registry key\n"
+msgstr "reg: Nie można otworzyć, ani stworzyć danego klucza rejestru\n"
 
 #: programs/regedit/regedit.rc:34
 msgid "&Registry"
@@ -16578,9 +16584,9 @@ msgid ""
 "(provided by Wine) or native (taken from Windows or provided by the "
 "application)."
 msgstr ""
-"Tutaj, dla każdej biblioteki DLL osobno, można ustawićczy będzie używana jej "
-"wersja wbudowana (dostarczona z Wine), czy zewnętrzna(wzięta z Windowsa lub "
-"dostarczona wraz z aplikacją)"
+"Tutaj, dla każdej biblioteki DLL osobno, można ustawić czy będzie używana "
+"jej wersja wbudowana (dostarczona z Wine), czy zewnętrzna(wzięta z Windowsa "
+"lub dostarczona wraz z aplikacją)"
 
 #: programs/winecfg/winecfg.rc:193
 msgid "&New override for library:"
@@ -16600,7 +16606,7 @@ msgstr "Zmi&eń..."
 
 #: programs/winecfg/winecfg.rc:204
 msgid "Edit Override"
-msgstr "Zmień zasadę"
+msgstr "Zmiana zasady"
 
 #: programs/winecfg/winecfg.rc:207
 msgid "Load order"
@@ -17723,7 +17729,7 @@ msgstr "Zawijanie wierszy"
 
 #: programs/wordpad/wordpad.rc:268
 msgid "&No line wrapping"
-msgstr "Bez zawijania wierszy"
+msgstr "Bez zawija&nia wierszy"
 
 #: programs/wordpad/wordpad.rc:269
 msgid "Wrap text by the &window border"

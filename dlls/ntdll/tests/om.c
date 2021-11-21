@@ -78,8 +78,8 @@ static void     (WINAPI *pRtlWakeAddressAll)( const void * );
 static void     (WINAPI *pRtlWakeAddressSingle)( const void * );
 static NTSTATUS (WINAPI *pNtOpenProcess)( HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES *, const CLIENT_ID * );
 static NTSTATUS (WINAPI *pNtCreateDebugObject)( HANDLE *, ACCESS_MASK, OBJECT_ATTRIBUTES *, ULONG );
-static NTSTATUS (WINAPI *pNtGetNextProcess)(HANDLE process, ACCESS_MASK access, ULONG attributes, ULONG flags, HANDLE *handle);
-static NTSTATUS (WINAPI *pNtGetNextThread)(HANDLE process, HANDLE thread, ACCESS_MASK access, ULONG attributes, ULONG flags, HANDLE *handle);
+static NTSTATUS (WINAPI *pNtGetNextThread)(HANDLE process, HANDLE thread, ACCESS_MASK access, ULONG attributes,
+                                            ULONG flags, HANDLE *handle);
 
 #define KEYEDEVENT_WAIT       0x0001
 #define KEYEDEVENT_WAKE       0x0002
@@ -2566,57 +2566,93 @@ static void test_object_types(void)
     }
 }
 
-static void test_get_next_process(void)
+static DWORD WINAPI test_get_next_thread_proc( void *arg )
 {
-    NTSTATUS status;
-    HANDLE handle;
+    HANDLE event = (HANDLE)arg;
 
-    if (!pNtGetNextProcess)
-    {
-        win_skip("NtGetNextProcess is not available.\n");
-        return;
-    }
-
-    status = pNtGetNextProcess(0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, &handle);
-    ok(!status, "Unexpected status %#x.\n", status);
-    pNtClose(handle);
-
-    /* Reversed search only supported in recent enough Win10 */
-    status = pNtGetNextProcess(0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 1, &handle);
-    ok(!status || broken(status == STATUS_INVALID_PARAMETER), "Unexpected status %#x.\n", status);
-    if (status)
-        pNtClose(handle);
-
-    status = pNtGetNextProcess(0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 2, &handle);
-    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %#x.\n", status);
+    WaitForSingleObject(event, INFINITE);
+    return 0;
 }
 
 static void test_get_next_thread(void)
 {
     HANDLE hprocess = GetCurrentProcess();
+    HANDLE handle, thread, event, prev;
     NTSTATUS status;
-    HANDLE handle;
+    DWORD thread_id;
+    BOOL found;
 
     if (!pNtGetNextThread)
     {
         win_skip("NtGetNextThread is not available.\n");
         return;
     }
-    status = pNtGetNextThread(hprocess, 0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, &handle);
-    ok(!status, "Unexpected status %#x.\n", status);
-    pNtClose(handle);
 
+    event = CreateEventA(NULL, FALSE, FALSE, NULL);
+
+    thread = CreateThread( NULL, 0, test_get_next_thread_proc, event, 0, &thread_id );
+
+    status = pNtGetNextThread(hprocess, NULL, THREAD_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, NULL);
+    ok(status == STATUS_ACCESS_VIOLATION, "Got unexpected status %#x.\n", status);
+
+    found = FALSE;
+    prev = NULL;
+    while (!(status = pNtGetNextThread(hprocess, prev, THREAD_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, &handle)))
+    {
+        if (prev)
+        {
+            if (GetThreadId(handle) == thread_id)
+                found = TRUE;
+            pNtClose(prev);
+        }
+        else
+        {
+            ok(GetThreadId(handle) == GetCurrentThreadId(), "Got unexpected thread id %04x, current %04x.\n",
+                    GetThreadId(handle), GetCurrentThreadId());
+        }
+        prev = handle;
+        handle = (HANDLE)0xdeadbeef;
+    }
+    pNtClose(prev);
+    ok(!handle, "Got unexpected handle %p.\n", handle);
+    ok(status == STATUS_NO_MORE_ENTRIES, "Unexpected status %#x.\n", status);
+    ok(found, "Thread not found.\n");
+
+    handle = (HANDLE)0xdeadbeef;
     status = pNtGetNextThread((void *)0xdeadbeef, 0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, &handle);
     ok(status == STATUS_INVALID_HANDLE, "Unexpected status %#x.\n", status);
+    ok(!handle, "Got unexpected handle %p.\n", handle);
+    handle = (HANDLE)0xdeadbeef;
+    status = pNtGetNextThread(hprocess, (void *)0xdeadbeef, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, &handle);
+    ok(status == STATUS_INVALID_HANDLE, "Unexpected status %#x.\n", status);
+    ok(!handle, "Got unexpected handle %p.\n", handle);
 
-    /* Reversed search only supported in recent enough Win10 */
+    /* Reversed search is only supported on recent enough Win10. */
     status = pNtGetNextThread(hprocess, 0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 1, &handle);
     ok(!status || broken(status == STATUS_INVALID_PARAMETER), "Unexpected status %#x.\n", status);
-    if (status)
+    if (!status)
         pNtClose(handle);
 
     status = pNtGetNextThread(hprocess, 0, PROCESS_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 2, &handle);
     ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %#x.\n", status);
+
+    SetEvent(event);
+    WaitForSingleObject(thread, INFINITE);
+
+    found = FALSE;
+    prev = NULL;
+    while (!(status = pNtGetNextThread(hprocess, prev, THREAD_QUERY_LIMITED_INFORMATION, OBJ_INHERIT, 0, &handle)))
+    {
+        if (prev)
+            pNtClose(prev);
+        if (GetThreadId(handle) == thread_id)
+            found = TRUE;
+        prev = handle;
+    }
+    pNtClose(prev);
+    ok(found, "Thread not found.\n");
+
+    CloseHandle(thread);
 }
 
 START_TEST(om)
@@ -2670,7 +2706,6 @@ START_TEST(om)
     pRtlWakeAddressSingle   =  (void *)GetProcAddress(hntdll, "RtlWakeAddressSingle");
     pNtOpenProcess          =  (void *)GetProcAddress(hntdll, "NtOpenProcess");
     pNtCreateDebugObject    =  (void *)GetProcAddress(hntdll, "NtCreateDebugObject");
-    pNtGetNextProcess       =  (void *)GetProcAddress(hntdll, "NtGetNextProcess");
     pNtGetNextThread        =  (void *)GetProcAddress(hntdll, "NtGetNextThread");
 
     test_case_sensitive();
@@ -2689,6 +2724,5 @@ START_TEST(om)
     test_wait_on_address();
     test_process();
     test_object_types();
-    test_get_next_process();
     test_get_next_thread();
 }

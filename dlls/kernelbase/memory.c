@@ -74,16 +74,23 @@ SIZE_T WINAPI GetLargePageMinimum(void)
  */
 void WINAPI DECLSPEC_HOTPATCH GetNativeSystemInfo( SYSTEM_INFO *si )
 {
+    USHORT current_machine, native_machine;
+
     GetSystemInfo( si );
-    if (!is_wow64) return;
-    switch (si->u.s.wProcessorArchitecture)
+    RtlWow64GetProcessMachines( GetCurrentProcess(), &current_machine, &native_machine );
+    if (!current_machine) return;
+    switch (native_machine)
     {
-    case PROCESSOR_ARCHITECTURE_INTEL:
+    case IMAGE_FILE_MACHINE_AMD64:
         si->u.s.wProcessorArchitecture = PROCESSOR_ARCHITECTURE_AMD64;
         si->dwProcessorType = PROCESSOR_AMD_X8664;
         break;
+    case IMAGE_FILE_MACHINE_ARM64:
+        si->u.s.wProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM64;
+        si->dwProcessorType = 0;
+        break;
     default:
-        FIXME( "Add the proper information for %d in wow64 mode\n", si->u.s.wProcessorArchitecture );
+        FIXME( "Add the proper information for %x in wow64 mode\n", native_machine );
     }
 }
 
@@ -102,7 +109,7 @@ void WINAPI DECLSPEC_HOTPATCH GetSystemInfo( SYSTEM_INFO *si )
                                                  &cpu_info, sizeof(cpu_info), NULL )))
         return;
 
-    si->u.s.wProcessorArchitecture  = cpu_info.Architecture;
+    si->u.s.wProcessorArchitecture  = cpu_info.ProcessorArchitecture;
     si->u.s.wReserved               = 0;
     si->dwPageSize                  = basic_info.PageSize;
     si->lpMinimumApplicationAddress = basic_info.LowestUserAddress;
@@ -110,13 +117,13 @@ void WINAPI DECLSPEC_HOTPATCH GetSystemInfo( SYSTEM_INFO *si )
     si->dwActiveProcessorMask       = basic_info.ActiveProcessorsAffinityMask;
     si->dwNumberOfProcessors        = basic_info.NumberOfProcessors;
     si->dwAllocationGranularity     = basic_info.AllocationGranularity;
-    si->wProcessorLevel             = cpu_info.Level;
-    si->wProcessorRevision          = cpu_info.Revision;
+    si->wProcessorLevel             = cpu_info.ProcessorLevel;
+    si->wProcessorRevision          = cpu_info.ProcessorRevision;
 
-    switch (cpu_info.Architecture)
+    switch (cpu_info.ProcessorArchitecture)
     {
     case PROCESSOR_ARCHITECTURE_INTEL:
-        switch (cpu_info.Level)
+        switch (cpu_info.ProcessorLevel)
         {
         case 3:  si->dwProcessorType = PROCESSOR_INTEL_386;     break;
         case 4:  si->dwProcessorType = PROCESSOR_INTEL_486;     break;
@@ -126,7 +133,7 @@ void WINAPI DECLSPEC_HOTPATCH GetSystemInfo( SYSTEM_INFO *si )
         }
         break;
     case PROCESSOR_ARCHITECTURE_PPC:
-        switch (cpu_info.Level)
+        switch (cpu_info.ProcessorLevel)
         {
         case 1:  si->dwProcessorType = PROCESSOR_PPC_601;       break;
         case 3:
@@ -141,7 +148,7 @@ void WINAPI DECLSPEC_HOTPATCH GetSystemInfo( SYSTEM_INFO *si )
         si->dwProcessorType = PROCESSOR_AMD_X8664;
         break;
     case PROCESSOR_ARCHITECTURE_ARM:
-        switch (cpu_info.Level)
+        switch (cpu_info.ProcessorLevel)
         {
         case 4:  si->dwProcessorType = PROCESSOR_ARM_7TDMI;     break;
         default: si->dwProcessorType = PROCESSOR_ARM920;
@@ -151,7 +158,7 @@ void WINAPI DECLSPEC_HOTPATCH GetSystemInfo( SYSTEM_INFO *si )
         si->dwProcessorType = 0;
         break;
     default:
-        FIXME( "Unknown processor architecture %x\n", cpu_info.Architecture );
+        FIXME( "Unknown processor architecture %x\n", cpu_info.ProcessorArchitecture );
         si->dwProcessorType = 0;
         break;
     }
@@ -1173,7 +1180,7 @@ BOOL WINAPI GetSystemCpuSetInformation(SYSTEM_CPU_SET_INFORMATION *info, ULONG b
  */
 BOOL WINAPI SetThreadSelectedCpuSets(HANDLE thread, const ULONG *cpu_set_ids, ULONG count)
 {
-    FIXME("thread %p, cpu_set_ids %p, count %u stub.\n", thread, cpu_set_ids, count);
+    FIXME( "thread %p, cpu_set_ids %p, count %u stub.\n", thread, cpu_set_ids, count );
 
     return TRUE;
 }

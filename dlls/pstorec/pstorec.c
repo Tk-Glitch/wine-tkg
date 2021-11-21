@@ -355,18 +355,6 @@ HRESULT WINAPI PStoreCreateInstance( IPStore** ppProvider,
     return S_OK;
 }
 
-HRESULT WINAPI DllRegisterServer(void)
-{
-    FIXME("\n");
-    return S_OK;
-}
-
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    FIXME("\n");
-    return S_OK;
-}
-
 /***********************************************************************
  *             DllGetClassObject (PSTOREC.@)
  */
@@ -374,9 +362,4 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
 {
     FIXME("%s %s %p\n", debugstr_guid(rclsid), debugstr_guid(iid), ppv);
     return CLASS_E_CLASSNOTAVAILABLE;
-}
-
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
 }

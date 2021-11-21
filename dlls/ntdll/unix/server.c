@@ -127,6 +127,7 @@ static const char *server_dir;
 
 unsigned int supported_machines_count = 0;
 USHORT supported_machines[8] = { 0 };
+USHORT native_machine = 0;
 BOOL is_wow64 = FALSE;
 BOOL process_exiting = FALSE;
 
@@ -581,6 +582,7 @@ static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOO
         CLIENT_ID id;
         HANDLE handle;
         TEB *teb;
+        ULONG_PTR zero_bits = call->create_thread.zero_bits;
         SIZE_T reserve = call->create_thread.reserve;
         SIZE_T commit = call->create_thread.commit;
         void *func = wine_server_get_ptr( call->create_thread.func );
@@ -601,7 +603,7 @@ static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOO
             attr->Attributes[1].ReturnLength = NULL;
             result->create_thread.status = NtCreateThreadEx( &handle, THREAD_ALL_ACCESS, NULL,
                                                              NtCurrentProcess(), func, arg,
-                                                             call->create_thread.flags, 0,
+                                                             call->create_thread.flags, zero_bits,
                                                              commit, reserve, attr );
             result->create_thread.handle = wine_server_obj_handle( handle );
             result->create_thread.pid = HandleToULong(id.UniqueProcess);
@@ -1514,6 +1516,7 @@ static void init_teb64( TEB *teb )
     teb->WowTebOffset  = -teb_offset;
     teb64->ClientId.UniqueProcess = PtrToUlong( teb->ClientId.UniqueProcess );
     teb64->ClientId.UniqueThread  = PtrToUlong( teb->ClientId.UniqueThread );
+    teb64->WowTebOffset           = teb_offset;
 #endif
 }
 
@@ -1616,7 +1619,6 @@ size_t server_init_process(void)
         req->reply_fd    = reply_pipe;
         req->wait_fd     = ntdll_get_thread_data()->wait_fd[1];
         req->debug_level = (TRACE_ON(server) != 0);
-        req->cpu         = client_cpu;
         wine_server_set_reply( req, supported_machines, sizeof(supported_machines) );
         ret = wine_server_call( req );
         NtCurrentTeb()->ClientId.UniqueProcess = ULongToHandle(reply->pid);
@@ -1634,10 +1636,9 @@ size_t server_init_process(void)
         fatal_error( "'%s' is a 64-bit installation, it cannot be used with a 32-bit wineserver.\n",
                      config_dir );
 
-    switch (supported_machines[0])
+    native_machine = supported_machines[0];
+    if (is_machine_64bit( native_machine ))
     {
-    case IMAGE_FILE_MACHINE_AMD64:
-    case IMAGE_FILE_MACHINE_ARM64:
         if (arch && !strcmp( arch, "win32" ))
             fatal_error( "WINEARCH set to win32 but '%s' is a 64-bit installation.\n", config_dir );
         if (!is_win64)
@@ -1645,13 +1646,13 @@ size_t server_init_process(void)
             is_wow64 = TRUE;
             init_teb64( NtCurrentTeb() );
         }
-        break;
-    default:
+    }
+    else
+    {
         if (is_win64)
             fatal_error( "'%s' is a 32-bit installation, it cannot support 64-bit applications.\n", config_dir );
         if (arch && !strcmp( arch, "win64" ))
             fatal_error( "WINEARCH set to win64 but '%s' is a 32-bit installation.\n", config_dir );
-        break;
     }
 
     for (i = 0; i < supported_machines_count; i++)
@@ -1668,7 +1669,6 @@ void server_init_process_done(void)
 {
     PEB *peb = NtCurrentTeb()->Peb;
     void *entry;
-    struct cpu_topology_override *cpu_override = get_cpu_topology_override();
     NTSTATUS status;
     int suspend, needs_close, unixdir;
 
@@ -1695,8 +1695,6 @@ void server_init_process_done(void)
     /* Signal the parent process to continue */
     SERVER_START_REQ( init_process_done )
     {
-        if (cpu_override)
-            wine_server_add_data( req, cpu_override, sizeof(*cpu_override) );
         status = wine_server_call( req );
         suspend = reply->suspend;
         entry = wine_server_get_ptr( reply->entry );

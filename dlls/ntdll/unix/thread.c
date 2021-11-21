@@ -72,7 +72,8 @@
 #include "wine/exception.h"
 #include "unix_private.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(seh);
+WINE_DEFAULT_DEBUG_CHANNEL(thread);
+WINE_DECLARE_DEBUG_CHANNEL(seh);
 
 #ifndef PTHREAD_STACK_MIN
 #define PTHREAD_STACK_MIN 16384
@@ -163,7 +164,7 @@ NTSTATUS WINAPI NtCreateThread( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRI
  */
 NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
                                   HANDLE process, PRTL_THREAD_START_ROUTINE start, void *param,
-                                  ULONG flags, SIZE_T zero_bits, SIZE_T stack_commit,
+                                  ULONG flags, ULONG_PTR zero_bits, SIZE_T stack_commit,
                                   SIZE_T stack_reserve, PS_ATTRIBUTE_LIST *attr_list )
 {
     sigset_t sigset;
@@ -180,6 +181,9 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
     INITIAL_TEB stack;
     NTSTATUS status;
 
+    if (zero_bits > 21 && zero_bits < 32) return STATUS_INVALID_PARAMETER_3;
+    if (!is_win64 && !is_wow64 && zero_bits >= 32) return STATUS_INVALID_PARAMETER_3;
+
     if (process != NtCurrentProcess())
     {
         apc_call_t call;
@@ -187,12 +191,13 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
 
         memset( &call, 0, sizeof(call) );
 
-        call.create_thread.type    = APC_CREATE_THREAD;
-        call.create_thread.flags   = flags;
-        call.create_thread.func    = wine_server_client_ptr( start );
-        call.create_thread.arg     = wine_server_client_ptr( param );
-        call.create_thread.reserve = stack_reserve;
-        call.create_thread.commit  = stack_commit;
+        call.create_thread.type      = APC_CREATE_THREAD;
+        call.create_thread.flags     = flags;
+        call.create_thread.func      = wine_server_client_ptr( start );
+        call.create_thread.arg       = wine_server_client_ptr( param );
+        call.create_thread.zero_bits = zero_bits;
+        call.create_thread.reserve   = stack_reserve;
+        call.create_thread.commit    = stack_commit;
         status = server_queue_process_apc( process, &call, &result );
         if (status != STATUS_SUCCESS) return status;
 
@@ -243,9 +248,9 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
 
     pthread_sigmask( SIG_BLOCK, &server_block_set, &sigset );
 
-    if ((status = virtual_alloc_teb( &teb ))) goto done;
+    if ((status = virtual_alloc_teb( &teb, zero_bits ))) goto done;
 
-    if ((status = virtual_alloc_thread_stack( &stack, stack_reserve, stack_commit, &extra_stack )))
+    if ((status = virtual_alloc_thread_stack( &stack, zero_bits, stack_reserve, stack_commit, &extra_stack )))
     {
         virtual_free_teb( teb );
         goto done;
@@ -471,12 +476,12 @@ NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL 
     if (first_chance) call_user_exception_dispatcher( rec, context, pKiUserExceptionDispatcher );
 
     if (rec->ExceptionFlags & EH_STACK_INVALID)
-        ERR("Exception frame is not in stack limits => unable to dispatch exception.\n");
+        ERR_(seh)("Exception frame is not in stack limits => unable to dispatch exception.\n");
     else if (rec->ExceptionCode == STATUS_NONCONTINUABLE_EXCEPTION)
-        ERR("Process attempted to continue execution after noncontinuable exception.\n");
+        ERR_(seh)("Process attempted to continue execution after noncontinuable exception.\n");
     else
-        ERR("Unhandled exception code %x flags %x addr %p\n",
-            rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress );
+        ERR_(seh)("Unhandled exception code %x flags %x addr %p\n",
+                  rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress );
 
     NtTerminateProcess( NtCurrentProcess(), rec->ExceptionCode );
     return STATUS_SUCCESS;
@@ -694,7 +699,7 @@ static unsigned int wow64_get_server_context_flags( DWORD flags )
  */
 static NTSTATUS wow64_context_from_server( WOW64_CONTEXT *to, const context_t *from )
 {
-    if (from->cpu != CPU_x86) return STATUS_INVALID_PARAMETER;
+    if (from->machine != IMAGE_FILE_MACHINE_I386) return STATUS_INVALID_PARAMETER;
 
     to->ContextFlags = WOW64_CONTEXT_i386 | (to->ContextFlags & 0x40);
     if (from->flags & SERVER_CTX_CONTROL)
@@ -770,7 +775,7 @@ static void wow64_context_to_server( context_t *to, const WOW64_CONTEXT *from )
     DWORD flags = from->ContextFlags & ~WOW64_CONTEXT_i386;  /* get rid of CPU id */
 
     memset( to, 0, sizeof(*to) );
-    to->cpu = CPU_x86;
+    to->machine = IMAGE_FILE_MACHINE_I386;
 
     if (flags & WOW64_CONTEXT_CONTROL)
     {
@@ -1384,20 +1389,7 @@ ULONG WINAPI NtGetCurrentProcessorNumber(void)
 
 #if defined(__linux__) && defined(__NR_getcpu)
     int res = syscall(__NR_getcpu, &processor, NULL, NULL);
-    if (res != -1)
-    {
-        struct cpu_topology_override *override = get_cpu_topology_override();
-        unsigned int i;
-
-        if (!override)
-            return processor;
-
-        for (i = 0; i < override->cpu_count; ++i)
-            if (override->host_cpu_id[i] == processor)
-                return i;
-
-        WARN("Thread is running on processor which is not in the defined override.\n");
-    }
+    if (res != -1) return processor;
 #endif
 
     if (NtCurrentTeb()->Peb->NumberOfProcessors > 1)
@@ -1426,26 +1418,28 @@ ULONG WINAPI NtGetCurrentProcessorNumber(void)
 
 
 /******************************************************************************
- *                          NtGetNextThread  (NTDLL.@)
+ *              NtGetNextThread  (NTDLL.@)
  */
-NTSTATUS WINAPI NtGetNextThread(HANDLE hprocess, HANDLE hthread, ACCESS_MASK access, ULONG attributes,
-        ULONG flags, HANDLE *handle)
+NTSTATUS WINAPI NtGetNextThread( HANDLE process, HANDLE thread, ACCESS_MASK access, ULONG attributes,
+                                 ULONG flags, HANDLE *handle )
 {
+    HANDLE ret_handle = 0;
     NTSTATUS ret;
 
-    FIXME( "hprocess %p, hthread %p, access %#x, attributes %#x, flags %#x, handle %p stub.\n",
-            hprocess, hthread, access, attributes, flags, handle);
+    TRACE( "process %p, thread %p, access %#x, attributes %#x, flags %#x, handle %p.\n",
+            process, thread, access, attributes, flags, handle );
 
     SERVER_START_REQ( get_next_thread )
     {
-        req->process = wine_server_obj_handle( hprocess );
-        req->last = wine_server_obj_handle( hthread );
+        req->process = wine_server_obj_handle( process );
+        req->last = wine_server_obj_handle( thread );
         req->access = access;
         req->attributes = attributes;
         req->flags = flags;
-        ret = wine_server_call( req );
-        if (!ret) *handle = wine_server_ptr_handle( reply->handle );
+        if (!(ret = wine_server_call( req ))) ret_handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
+
+    *handle = ret_handle;
     return ret;
 }

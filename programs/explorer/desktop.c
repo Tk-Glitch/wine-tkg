@@ -1228,6 +1228,7 @@ static HRESULT WINAPI shellwindows_Register(IShellWindows *iface,
     window->hwnd = hwnd;
     window->class = class;
     *cookie = window->cookie = ++cookie_counter;
+    window->pidl = NULL;
 
     LeaveCriticalSection(&sw->cs);
     return S_OK;

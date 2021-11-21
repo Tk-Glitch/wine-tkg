@@ -1,6 +1,3 @@
-@ stub DllCanUnloadNow
-@ stub DllGetActivationFactory
-@ stub DllGetClassObject
 @ stub CheckGamingPrivilegeSilently
 @ stub CheckGamingPrivilegeSilentlyForUser
 @ stub CheckGamingPrivilegeWithUI

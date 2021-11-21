@@ -1536,7 +1536,7 @@ static void save_context( struct xcontext *xcontext, const ucontext_t *sigcontex
         context->ContextFlags |= CONTEXT_FLOATING_POINT;
         context->u.FltSave = *FPU_sig(sigcontext);
         context->MxCsr = context->u.FltSave.MxCsr;
-        if ((cpu_info.FeatureSet & CPU_FEATURE_AVX) && (xs = XState_sig(FPU_sig(sigcontext))))
+        if ((cpu_info.ProcessorFeatureBits & CPU_FEATURE_AVX) && (xs = XState_sig(FPU_sig(sigcontext))))
         {
             /* xcontext and sigcontext are both on the signal stack, so we can
              * just reference sigcontext without overflowing 32 bit XState.Offset */
@@ -1566,7 +1566,7 @@ static void restore_context( const struct xcontext *xcontext, ucontext_t *sigcon
     amd64_thread_data()->dr7 = context->Dr7;
     set_sigcontext( context, sigcontext );
     if (FPU_sig(sigcontext)) *FPU_sig(sigcontext) = context->u.FltSave;
-    if ((cpu_info.FeatureSet & CPU_FEATURE_AVX) && (xs = XState_sig(FPU_sig(sigcontext))))
+    if ((cpu_info.ProcessorFeatureBits & CPU_FEATURE_AVX) && (xs = XState_sig(FPU_sig(sigcontext))))
         xs->CompactionMask = xcontext->host_compaction_mask;
 }
 
@@ -1608,7 +1608,7 @@ void signal_restore_full_cpu_context(void)
 {
     struct syscall_xsave *xsave = get_syscall_xsave( get_syscall_frame() );
 
-    if (cpu_info.FeatureSet & CPU_FEATURE_XSAVE)
+    if (cpu_info.ProcessorFeatureBits & CPU_FEATURE_XSAVE)
     {
         __asm__ volatile( "xrstor64 %0" : : "m"(xsave->xsave), "a" (7), "d" (0) );
     }
@@ -1650,7 +1650,7 @@ NTSTATUS context_to_server( context_t *to, const CONTEXT *from )
     DWORD flags = from->ContextFlags & ~CONTEXT_AMD64;  /* get rid of CPU id */
 
     memset( to, 0, sizeof(*to) );
-    to->cpu = CPU_x86_64;
+    to->machine = IMAGE_FILE_MACHINE_AMD64;
 
     if (flags & CONTEXT_CONTROL)
     {
@@ -1715,7 +1715,7 @@ NTSTATUS context_to_server( context_t *to, const CONTEXT *from )
  */
 NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
 {
-    if (from->cpu == CPU_x86)
+    if (from->machine == IMAGE_FILE_MACHINE_I386)
     {
         /* convert the WoW64 context */
         to->ContextFlags = CONTEXT_AMD64;
@@ -1774,7 +1774,7 @@ NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
         return STATUS_SUCCESS;
     }
 
-    if (from->cpu != CPU_x86_64) return STATUS_INVALID_PARAMETER;
+    if (from->machine != IMAGE_FILE_MACHINE_AMD64) return STATUS_INVALID_PARAMETER;
 
     to->ContextFlags = CONTEXT_AMD64 | (to->ContextFlags & 0x40);
     if (from->flags & SERVER_CTX_CONTROL)
@@ -1915,7 +1915,7 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
         xsave->xsave = context->u.FltSave;
         xsave->xstate.Mask |= XSTATE_MASK_LEGACY;
     }
-    if ((cpu_info.FeatureSet & CPU_FEATURE_AVX) && (xs = xstate_from_context( context )))
+    if ((cpu_info.ProcessorFeatureBits & CPU_FEATURE_AVX) && (xs = xstate_from_context( context )))
     {
         CONTEXT_EX *context_ex = (CONTEXT_EX *)(context + 1);
 
@@ -2052,7 +2052,7 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
             amd64_thread_data()->dr6 = context->Dr6;
             amd64_thread_data()->dr7 = context->Dr7;
         }
-        if ((cpu_info.FeatureSet & CPU_FEATURE_AVX) && (xstate = xstate_from_context( context )))
+        if ((cpu_info.ProcessorFeatureBits & CPU_FEATURE_AVX) && (xstate = xstate_from_context( context )))
         {
             struct syscall_xsave *xsave = get_syscall_xsave( frame );
             CONTEXT_EX *context_ex = (CONTEXT_EX *)(context + 1);
@@ -3142,7 +3142,7 @@ void *signal_init_syscalls(void)
 
     if (xstate_compaction_enabled)
         syscall_dispatcher = __wine_syscall_dispatcher_xsavec;
-    else if (cpu_info.FeatureSet & CPU_FEATURE_XSAVE)
+    else if (cpu_info.ProcessorFeatureBits & CPU_FEATURE_XSAVE)
         syscall_dispatcher = __wine_syscall_dispatcher_xsave;
     else
         syscall_dispatcher = __wine_syscall_dispatcher;

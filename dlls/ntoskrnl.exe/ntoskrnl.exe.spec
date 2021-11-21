@@ -1213,7 +1213,7 @@
 @ stdcall RtlQueryDynamicTimeZoneInformation(ptr)
 @ stdcall RtlQueryInformationAcl(ptr ptr long long)
 @ stdcall RtlQueryPackageIdentity(long ptr ptr ptr ptr ptr)
-@ stdcall RtlQueryProcessPlaceholderCompatibilityMode() ntdll.RtlQueryProcessPlaceholderCompatibilityMode
+@ stdcall RtlQueryProcessPlaceholderCompatibilityMode()
 @ stdcall RtlQueryRegistryValues(long ptr ptr ptr ptr)
 @ stdcall RtlQueryRegistryValuesEx(long ptr ptr ptr ptr) RtlQueryRegistryValues
 @ stdcall RtlQueryTimeZoneInformation(ptr)

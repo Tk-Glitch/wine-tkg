@@ -204,6 +204,9 @@
 /* Define to 1 if you have the `futimesat' function. */
 #undef HAVE_FUTIMESAT
 
+/* Define to 1 if you have the <gcrypt.h> header file. */
+#undef HAVE_GCRYPT_H
+
 /* Define to 1 if you have the `getaddrinfo' function. */
 #undef HAVE_GETADDRINFO
 
@@ -293,15 +296,6 @@
 
 /* Define to 1 if you have the `isnan' function. */
 #undef HAVE_ISNAN
-
-/* Define to 1 if you have the `j0' function. */
-#undef HAVE_J0
-
-/* Define to 1 if you have the `j1' function. */
-#undef HAVE_J1
-
-/* Define to 1 if you have the `jn' function. */
-#undef HAVE_JN
 
 /* Define to 1 if you have the <jpeglib.h> header file. */
 #undef HAVE_JPEGLIB_H
@@ -477,12 +471,6 @@
 /* Define to 1 if you have the `llrintf' function. */
 #undef HAVE_LLRINTF
 
-/* Define to 1 if you have the `llround' function. */
-#undef HAVE_LLROUND
-
-/* Define to 1 if you have the `llroundf' function. */
-#undef HAVE_LLROUNDF
-
 /* Define to 1 if you have the `log1p' function. */
 #undef HAVE_LOG1P
 
@@ -500,12 +488,6 @@
 
 /* Define to 1 if you have the `lrintf' function. */
 #undef HAVE_LRINTF
-
-/* Define to 1 if you have the `lround' function. */
-#undef HAVE_LROUND
-
-/* Define to 1 if you have the `lroundf' function. */
-#undef HAVE_LROUNDF
 
 /* Define to 1 if you have the `lstat' function. */
 #undef HAVE_LSTAT
@@ -725,12 +707,6 @@
 
 /* Define to 1 if you have the `rintf' function. */
 #undef HAVE_RINTF
-
-/* Define to 1 if you have the `round' function. */
-#undef HAVE_ROUND
-
-/* Define to 1 if you have the `roundf' function. */
-#undef HAVE_ROUNDF
 
 /* Define to 1 if you have the <sasl/sasl.h> header file. */
 #undef HAVE_SASL_SASL_H
@@ -1208,15 +1184,6 @@
 /* Define if Xrandr has the XRRGetProviderResources function */
 #undef HAVE_XRRGETPROVIDERRESOURCES
 
-/* Define to 1 if you have the `y0' function. */
-#undef HAVE_Y0
-
-/* Define to 1 if you have the `y1' function. */
-#undef HAVE_Y1
-
-/* Define to 1 if you have the `yn' function. */
-#undef HAVE_YN
-
 /* Define to 1 if you have the `_spawnvp' function. */
 #undef HAVE__SPAWNVP
 
@@ -1279,6 +1246,9 @@
 
 /* Define to the soname of the libfreetype library. */
 #undef SONAME_LIBFREETYPE
+
+/* Define to the soname of the libgcrypt library. */
+#undef SONAME_LIBGCRYPT
 
 /* Define to the soname of the libGL library. */
 #undef SONAME_LIBGL

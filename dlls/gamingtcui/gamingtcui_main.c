@@ -1,59 +1,61 @@
-#include "config.h"
+/*
+ * Copyright 2021 Paul Gofman for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ *
+ */
 
 #include <stdarg.h>
 
 #include "windef.h"
 #include "winbase.h"
-#include "hstring.h"
+#include "gamingtcui.h"
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(gamingtcui);
 
-BOOL WINAPI DllMain(HINSTANCE hInstDll, DWORD fdwReason, LPVOID lpvReserved)
+HRESULT WINAPI ProcessPendingGameUI(BOOL wait_for_completion)
 {
-    TRACE("(%p, %d, %p)\n", hInstDll, fdwReason, lpvReserved);
-
-    switch (fdwReason)
-    {
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hInstDll);
-            break;
-    }
-
-    return TRUE;
-}
-
-typedef void (WINAPI *GameUICompletionRoutine)(HRESULT returnCode, void *context);
-
-HRESULT WINAPI ShowProfileCardUI(HSTRING targetUserXuid, GameUICompletionRoutine completionRoutine, void *context)
-{
-    FIXME("%p %p %p: stub\n", targetUserXuid, completionRoutine, context);
-
-    if (completionRoutine)
-        completionRoutine(S_OK, context);
+    FIXME("wait_for_completion %#x stub.\n", wait_for_completion);
 
     return S_OK;
 }
 
-typedef void (WINAPI *PlayerPickerUICompletionRoutine)(HRESULT returnCode, void *context,
-        const HSTRING *selectedXuids, size_t selectedXuidsCount);
-
-HRESULT WINAPI ShowPlayerPickerUI(HSTRING promptDisplayText, const HSTRING *xuids, size_t xuidsCount,
-        const HSTRING *preSelectedXuids, size_t preSelectedXuidsCount, size_t minSelectionCount,
-        size_t maxSelectionCount, PlayerPickerUICompletionRoutine completionRoutine, void *context)
+HRESULT WINAPI ShowPlayerPickerUI(HSTRING prompt_display_text, const HSTRING *xuids, size_t xuid_count,
+        const HSTRING *preselected_xuids, size_t preselected_xuid_count, size_t min_selection_count,
+        size_t max_selection_count, PlayerPickerUICompletionRoutine completion_routine, void *context)
 {
-    FIXME("%p %p %lu %p %lu %lu %lu %p %p stub.\n", promptDisplayText, xuids, xuidsCount, preSelectedXuids,
-            preSelectedXuidsCount, minSelectionCount, maxSelectionCount, completionRoutine, context);
+    FIXME("prompt_display_text %p, xuids %p, xuid_count %lu, preselected_xuids %p, preselected_xuid_count %lu,"
+            " min_selection_count %lu, max_selection_count %lu, completion_routine %p, context %p semi-stub.\n",
+            prompt_display_text, xuids, (SIZE_T)xuid_count, preselected_xuids, (SIZE_T)preselected_xuid_count,
+            (SIZE_T)min_selection_count, (SIZE_T)max_selection_count, completion_routine, context);
 
-    if (completionRoutine)
-        completionRoutine(S_OK, context, preSelectedXuids, preSelectedXuidsCount);
+    if (completion_routine)
+        completion_routine(S_OK, context, preselected_xuids, preselected_xuid_count);
 
     return S_OK;
 }
 
-HRESULT WINAPI ProcessPendingGameUI(BOOL waitForCompletion)
+HRESULT WINAPI ShowProfileCardUI(HSTRING target_user_xuid, GameUICompletionRoutine completion_routine, void *context)
 {
-    FIXME("%d: stub\n", waitForCompletion);
+    FIXME("target_user_xuid %p, completion_routine %p, context %p stub.\n",
+            target_user_xuid, completion_routine, context);
+
+    if (completion_routine)
+        completion_routine(S_OK, context);
 
     return S_OK;
 }

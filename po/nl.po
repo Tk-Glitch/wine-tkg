@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2021-04-21 09:20+0200\n"
+"PO-Revision-Date: 2021-05-04 16:50+0200\n"
 "Last-Translator: Floris Renaud <jkfloris@dds.nl>\n"
 "Language-Team: Dutch\n"
 "Language: nl\n"
@@ -571,7 +571,7 @@ msgstr "Opslaan als..."
 
 #: dlls/comdlg32/comdlg32.rc:193 dlls/comdlg32/comdlg32.rc:146
 msgid "Save As"
-msgstr "&Opslaan als"
+msgstr "Opslaan als"
 
 #: dlls/comdlg32/comdlg32.rc:202 dlls/comdlg32/comdlg32.rc:211
 #: dlls/comdlg32/comdlg32.rc:358 dlls/comdlg32/comdlg32.rc:55
@@ -3872,15 +3872,15 @@ msgstr "Conditionele compilatie is uitgeschakeld"
 msgid "Expected '@'"
 msgstr "Verwacht '@'"
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:80
 msgid "Microsoft JScript compilation error"
 msgstr "Microsoft JScript compilatie fout"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:81
 msgid "Microsoft JScript runtime error"
 msgstr "Microsoft JScript runtime-fout"
 
-#: dlls/jscript/jscript.rc:81 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:82 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "Onbekende runtime-fout"
 
@@ -3985,6 +3985,10 @@ msgid "Cannot modify non-writable property '|'"
 msgstr "Kan onschrijfbare eigenschap '|' niet veranderen"
 
 #: dlls/jscript/jscript.rc:77
+msgid "'this' is not a Map object"
+msgstr "'this' is geen Map object"
+
+#: dlls/jscript/jscript.rc:78
 msgid "Property cannot have both accessors and a value"
 msgstr "Eigenschap kan niet zowel accessors als een waarde hebben"
 
@@ -14791,6 +14795,10 @@ msgstr ""
 "  /reg:64\n"
 "     Open de 64-bits weergave van het register.\n"
 "\n"
+
+#: programs/reg/reg.rc:180
+msgid "reg: Unable to access or create the specified registry key\n"
+msgstr "reg: Kan de gegeven registersleutel niet openen of aanmaken\n"
 
 #: programs/regedit/regedit.rc:34
 msgid "&Registry"

@@ -418,12 +418,6 @@ const CLSID* SchemaCache_version(MSXML_VERSION v)
     }
 }
 
-HRESULT WINAPI DllCanUnloadNow(void)
-{
-    return S_FALSE;
-}
-
-
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID reserved)
 {
     MSXML_hInstance = hInstDLL;
@@ -472,20 +466,4 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID reserved)
         break;
     }
     return TRUE;
-}
-
-/***********************************************************************
- *		DllRegisterServer (MSXML3.@)
- */
-HRESULT WINAPI DllRegisterServer(void)
-{
-    return __wine_register_resources( MSXML_hInstance );
-}
-
-/***********************************************************************
- *		DllUnregisterServer (MSXML3.@)
- */
-HRESULT WINAPI DllUnregisterServer(void)
-{
-    return __wine_unregister_resources( MSXML_hInstance );
 }

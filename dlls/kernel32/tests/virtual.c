@@ -1374,6 +1374,9 @@ static void test_NtAreMappedFilesTheSame(void)
     ok( ptr != NULL, "MapViewOfFile FILE_MAP_READ error %u\n", GetLastError() );
     status = pNtAreMappedFilesTheSame( ptr, GetModuleHandleA("kernel32.dll") );
     ok( status == STATUS_NOT_SAME_DEVICE, "NtAreMappedFilesTheSame returned %x\n", status );
+    status = pNtAreMappedFilesTheSame( GetModuleHandleA("kernel32.dll"), ptr );
+    todo_wine
+    ok( status == STATUS_SUCCESS, "NtAreMappedFilesTheSame returned %x\n", status );
     UnmapViewOfFile( ptr );
     CloseHandle( mapping );
 
@@ -1383,6 +1386,8 @@ static void test_NtAreMappedFilesTheSame(void)
     ok( ptr != NULL, "MapViewOfFile FILE_MAP_READ error %u\n", GetLastError() );
     status = pNtAreMappedFilesTheSame( ptr, GetModuleHandleA("kernel32.dll") );
     ok( status == STATUS_SUCCESS, "NtAreMappedFilesTheSame returned %x\n", status );
+    status = pNtAreMappedFilesTheSame( GetModuleHandleA("kernel32.dll"), ptr );
+    ok( status == STATUS_SUCCESS, "NtAreMappedFilesTheSame returned %x\n", status );
 
     file2 = CreateFileA( path, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0 );
     ok( file2 != INVALID_HANDLE_VALUE, "CreateFile error %u\n", GetLastError() );
@@ -1391,6 +1396,8 @@ static void test_NtAreMappedFilesTheSame(void)
     ptr2 = MapViewOfFile( map2, FILE_MAP_READ, 0, 0, 0 );
     ok( ptr2 != NULL, "MapViewOfFile FILE_MAP_READ error %u\n", GetLastError() );
     status = pNtAreMappedFilesTheSame( ptr, ptr2 );
+    ok( status == STATUS_SUCCESS, "NtAreMappedFilesTheSame returned %x\n", status );
+    status = pNtAreMappedFilesTheSame( ptr2, ptr );
     ok( status == STATUS_SUCCESS, "NtAreMappedFilesTheSame returned %x\n", status );
     UnmapViewOfFile( ptr2 );
     CloseHandle( map2 );

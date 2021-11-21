@@ -28,6 +28,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <signal.h>
 #include <sys/types.h>
@@ -1108,35 +1109,28 @@ static struct file_view *find_view( const void *addr, size_t size )
 
 
 /***********************************************************************
- *           zero_bits_win_to_64
- *
- * Convert from Windows hybrid 32bit-based / bitmask to 64bit-based format
+ *           get_zero_bits_mask
  */
-static inline unsigned short zero_bits_win_to_64( ULONG_PTR zero_bits )
+static inline UINT_PTR get_zero_bits_mask( ULONG_PTR zero_bits )
 {
-    unsigned short zero_bits_64;
+    unsigned int shift;
 
-    if (zero_bits == 0) return 0;
-    if (zero_bits < 32) return 32 + zero_bits;
-    zero_bits_64 = 63;
+    if (zero_bits == 0) return ~(UINT_PTR)0;
+
+    if (zero_bits < 32) shift = 32 + zero_bits;
+    else
+    {
+        shift = 63;
 #ifdef _WIN64
-    if (zero_bits >> 32) { zero_bits_64 -= 32; zero_bits >>= 32; }
+        if (zero_bits >> 32) { shift -= 32; zero_bits >>= 32; }
 #endif
-    if (zero_bits >> 16) { zero_bits_64 -= 16; zero_bits >>= 16; }
-    if (zero_bits >> 8) { zero_bits_64 -= 8; zero_bits >>= 8; }
-    if (zero_bits >> 4) { zero_bits_64 -= 4; zero_bits >>= 4; }
-    if (zero_bits >> 2) { zero_bits_64 -= 2; zero_bits >>= 2; }
-    if (zero_bits >> 1) { zero_bits_64 -= 1; }
-    return zero_bits_64;
-}
-
-
-/***********************************************************************
- *           get_zero_bits_64_mask
- */
-static inline UINT_PTR get_zero_bits_64_mask( USHORT zero_bits_64 )
-{
-    return (UINT_PTR)((~(UINT64)0) >> zero_bits_64);
+        if (zero_bits >> 16) { shift -= 16; zero_bits >>= 16; }
+        if (zero_bits >> 8) { shift -= 8; zero_bits >>= 8; }
+        if (zero_bits >> 4) { shift -= 4; zero_bits >>= 4; }
+        if (zero_bits >> 2) { shift -= 2; zero_bits >>= 2; }
+        if (zero_bits >> 1) { shift -= 1; }
+    }
+    return (UINT_PTR)((~(UINT64)0) >> shift);
 }
 
 
@@ -1997,7 +1991,7 @@ static void clear_native_views(void)
  * virtual_mutex must be held by caller.
  */
 static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
-                          int top_down, unsigned int vprot, unsigned short zero_bits_64 )
+                          int top_down, unsigned int vprot, ULONG_PTR zero_bits )
 {
     void *ptr;
     NTSTATUS status;
@@ -2010,13 +2004,13 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
         if (status != STATUS_SUCCESS) return status;
         ptr = base;
     }
-    else if (!(ptr = alloc_free_area( (void*)(get_zero_bits_64_mask( zero_bits_64 )
+    else if (!(ptr = alloc_free_area( (void*)(get_zero_bits_mask( zero_bits )
             & (UINT_PTR)user_space_limit), size, top_down, get_unix_prot( vprot ) )))
     {
         WARN("Allocation failed, clearing native views.\n");
 
         clear_native_views();
-        if (!(ptr = alloc_free_area( (void*)(get_zero_bits_64_mask( zero_bits_64 )
+        if (!(ptr = alloc_free_area( (void*)(get_zero_bits_mask( zero_bits )
                 & (UINT_PTR)user_space_limit), size, top_down, get_unix_prot( vprot ) )))
             return STATUS_NO_MEMORY;
     }
@@ -2494,7 +2488,7 @@ static NTSTATUS get_mapping_info( HANDLE handle, ACCESS_MASK access, unsigned in
  * Map a PE image section into memory.
  */
 static NTSTATUS virtual_map_image( HANDLE mapping, ACCESS_MASK access, void **addr_ptr, SIZE_T *size_ptr,
-                                   unsigned short zero_bits_64, HANDLE shared_file, ULONG alloc_type,
+                                   ULONG_PTR zero_bits, HANDLE shared_file, ULONG alloc_type,
                                    pe_image_info_t *image_info, WCHAR *filename, BOOL is_builtin )
 {
     unsigned int vprot = SEC_IMAGE | SEC_FILE | VPROT_COMMITTED | VPROT_READ | VPROT_EXEC | VPROT_WRITECOPY;
@@ -2523,9 +2517,9 @@ static NTSTATUS virtual_map_image( HANDLE mapping, ACCESS_MASK access, void **ad
     if ((ULONG_PTR)base != image_info->base) base = NULL;
 
     if ((char *)base >= (char *)address_space_start)  /* make sure the DOS area remains free */
-        status = map_view( &view, base, size, alloc_type & MEM_TOP_DOWN, vprot, zero_bits_64 );
+        status = map_view( &view, base, size, alloc_type & MEM_TOP_DOWN, vprot, zero_bits );
 
-    if (status) status = map_view( &view, NULL, size, alloc_type & MEM_TOP_DOWN, vprot, zero_bits_64 );
+    if (status) status = map_view( &view, NULL, size, alloc_type & MEM_TOP_DOWN, vprot, zero_bits );
     if (status) goto done;
 
     status = map_image_into_view( view, filename, unix_fd, base, image_info->header_size,
@@ -2564,7 +2558,7 @@ done:
  *
  * Map a file section into memory.
  */
-static NTSTATUS virtual_map_section( HANDLE handle, PVOID *addr_ptr, unsigned short zero_bits_64,
+static NTSTATUS virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_PTR zero_bits,
                                      SIZE_T commit_size, const LARGE_INTEGER *offset_ptr, SIZE_T *size_ptr,
                                      ULONG alloc_type, ULONG protect )
 {
@@ -2613,7 +2607,7 @@ static NTSTATUS virtual_map_section( HANDLE handle, PVOID *addr_ptr, unsigned sh
         /* check if we can replace that mapping with the builtin */
         res = load_builtin( image_info, filename, addr_ptr, size_ptr );
         if (res == STATUS_IMAGE_ALREADY_LOADED)
-            res = virtual_map_image( handle, access, addr_ptr, size_ptr, zero_bits_64, shared_file,
+            res = virtual_map_image( handle, access, addr_ptr, size_ptr, zero_bits, shared_file,
                                      alloc_type, image_info, filename, FALSE );
         if (shared_file) NtClose( shared_file );
         free( image_info );
@@ -2648,7 +2642,7 @@ static NTSTATUS virtual_map_section( HANDLE handle, PVOID *addr_ptr, unsigned sh
 
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
 
-    res = map_view( &view, base, size, alloc_type & MEM_TOP_DOWN, vprot, zero_bits_64 );
+    res = map_view( &view, base, size, alloc_type & MEM_TOP_DOWN, vprot, zero_bits );
     if (res) goto done;
 
     TRACE( "handle=%p size=%lx offset=%x%08x\n", handle, size, offset.u.HighPart, offset.u.LowPart );
@@ -2937,27 +2931,48 @@ NTSTATUS virtual_create_builtin_view( void *module, const UNICODE_STRING *nt_nam
 
 
 /* set some initial values in the new PEB */
-static void init_peb( PEB *peb )
+static PEB *init_peb( void *ptr )
 {
-    peb->OSMajorVersion = 6;
-    peb->OSMinorVersion = 1;
-    peb->OSBuildNumber  = 0x1db1;
-    peb->OSPlatformId   = VER_PLATFORM_WIN32_NT;
-    peb->SessionId      = 1;
+    PEB32 *peb32 = ptr;
+    PEB64 *peb64 = (PEB64 *)((char *)ptr + page_size);
+
+    peb32->OSMajorVersion = peb64->OSMajorVersion = 6;
+    peb32->OSMinorVersion = peb64->OSMinorVersion = 1;
+    peb32->OSBuildNumber  = peb64->OSBuildNumber  = 0x1db1;
+    peb32->OSPlatformId   = peb64->OSPlatformId   = VER_PLATFORM_WIN32_NT;
+    peb32->SessionId      = peb64->SessionId      = 1;
+#ifdef _WIN64
+    return (PEB *)peb64;
+#else
+    return (PEB *)peb32;
+#endif
 }
 
 
 /* set some initial values in a new TEB */
-static void init_teb( TEB *teb, PEB *peb )
+static TEB *init_teb( void *ptr, PEB *peb )
 {
-    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
+    struct ntdll_thread_data *thread_data;
+    TEB *teb;
+    TEB64 *teb64 = ptr;
+    TEB32 *teb32 = (TEB32 *)((char *)ptr + teb_offset);
 
-#ifndef _WIN64
-    TEB64 *teb64 = (TEB64 *)((char *)teb - teb_offset);
-
+#ifdef _WIN64
+    teb = (TEB *)teb64;
+    teb32->Peb = PtrToUlong( (char *)peb - page_size );
+    teb32->Tib.Self = PtrToUlong( teb32 );
+    teb32->Tib.ExceptionList = ~0u;
+    teb32->ActivationContextStackPointer = PtrToUlong( &teb32->ActivationContextStack );
+    teb32->ActivationContextStack.FrameListCache.Flink =
+        teb32->ActivationContextStack.FrameListCache.Blink =
+            PtrToUlong( &teb32->ActivationContextStack.FrameListCache );
+    teb32->StaticUnicodeString.Buffer = PtrToUlong( teb32->StaticUnicodeBuffer );
+    teb32->StaticUnicodeString.MaximumLength = sizeof( teb32->StaticUnicodeBuffer );
+#else
+    teb = (TEB *)teb32;
     teb64->Peb = PtrToUlong( (char *)peb + page_size );
     teb64->Tib.Self = PtrToUlong( teb64 );
-    teb64->Tib.ExceptionList = PtrToUlong( teb );
+    teb64->Tib.ExceptionList = PtrToUlong( teb32 );
     teb64->ActivationContextStackPointer = PtrToUlong( &teb64->ActivationContextStack );
     teb64->ActivationContextStack.FrameListCache.Flink =
         teb64->ActivationContextStack.FrameListCache.Blink =
@@ -2973,6 +2988,7 @@ static void init_teb( TEB *teb, PEB *peb )
     InitializeListHead( &teb->ActivationContextStack.FrameListCache );
     teb->StaticUnicodeString.Buffer = teb->StaticUnicodeBuffer;
     teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
+    thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
     thread_data->esync_apc_fd = -1;
     thread_data->fsync_apc_futex = NULL;
     thread_data->request_fd = -1;
@@ -2980,6 +2996,7 @@ static void init_teb( TEB *teb, PEB *peb )
     thread_data->wait_fd[0] = -1;
     thread_data->wait_fd[1] = -1;
     list_add_head( &teb_list, &thread_data->entry );
+    return teb;
 }
 
 
@@ -2988,12 +3005,12 @@ static void init_teb( TEB *teb, PEB *peb )
  */
 TEB *virtual_alloc_first_teb(void)
 {
+    struct ntdll_thread_data *thread_data;
     TEB *teb;
     PEB *peb;
     void *ptr;
     NTSTATUS status;
     SIZE_T data_size = page_size;
-    SIZE_T peb_size = page_size * (is_win64 ? 1 : 2);
     SIZE_T block_size = signal_stack_mask + 1;
     SIZE_T total = 32 * block_size;
 
@@ -3006,17 +3023,17 @@ TEB *virtual_alloc_first_teb(void)
         exit(1);
     }
 
-    NtAllocateVirtualMemory( NtCurrentProcess(), &teb_block, 0, &total,
+    NtAllocateVirtualMemory( NtCurrentProcess(), &teb_block, is_win64 ? 0x7fffffff : 0, &total,
                              MEM_RESERVE | MEM_TOP_DOWN, PAGE_READWRITE );
     teb_block_pos = 30;
-    ptr = ((char *)teb_block + 30 * block_size);
-    teb = (TEB *)((char *)ptr + teb_offset);
-    peb = (PEB *)((char *)teb_block + 32 * block_size - peb_size);
-    NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&ptr, 0, &block_size, MEM_COMMIT, PAGE_READWRITE );
-    NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&peb, 0, &peb_size, MEM_COMMIT, PAGE_READWRITE );
-    init_peb( peb );
-    init_teb( teb, peb );
+    ptr = (char *)teb_block + 30 * block_size;
+    data_size = 2 * block_size;
+    NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&ptr, 0, &data_size, MEM_COMMIT, PAGE_READWRITE );
+    peb = init_peb( (char *)teb_block + 31 * block_size );
+    teb = init_teb( ptr, peb );
     *(ULONG_PTR *)&peb->CloudFileFlags = get_image_address();
+    thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
+    thread_data->debug_info = (struct debug_info *)((char *)teb_block + 31 * block_size + 2 * page_size);
     return teb;
 }
 
@@ -3024,7 +3041,7 @@ TEB *virtual_alloc_first_teb(void)
 /***********************************************************************
  *           virtual_alloc_teb
  */
-NTSTATUS virtual_alloc_teb( TEB **ret_teb )
+NTSTATUS virtual_alloc_teb( TEB **ret_teb, ULONG_PTR zero_bits )
 {
     sigset_t sigset;
     TEB *teb;
@@ -3035,9 +3052,16 @@ NTSTATUS virtual_alloc_teb( TEB **ret_teb )
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
     if (next_free_teb)
     {
-        ptr = next_free_teb;
-        next_free_teb = *(void **)ptr;
-        memset( ptr, 0, teb_size );
+        /*Nioh 2 doesn't like the zero_bits check, so let's not check it*/
+        {
+            const char *sgi = getenv("SteamGameId");
+            if ((sgi && !strcmp(sgi, "1325200")) | !((UINT_PTR)next_free_teb & ~get_zero_bits_mask( zero_bits )))
+            {
+                ptr = next_free_teb;
+                next_free_teb = *(void **)ptr;
+                memset( ptr, 0, teb_size );
+            }
+        }
     }
     else
     {
@@ -3045,8 +3069,8 @@ NTSTATUS virtual_alloc_teb( TEB **ret_teb )
         {
             SIZE_T total = 32 * block_size;
 
-            if ((status = NtAllocateVirtualMemory( NtCurrentProcess(), &ptr, 0, &total,
-                                                   MEM_RESERVE, PAGE_READWRITE )))
+            if ((status = NtAllocateVirtualMemory( NtCurrentProcess(), &ptr, zero_bits,
+                                                   &total, MEM_RESERVE, PAGE_READWRITE )))
             {
                 server_leave_uninterrupted_section( &virtual_mutex, &sigset );
                 return status;
@@ -3058,8 +3082,7 @@ NTSTATUS virtual_alloc_teb( TEB **ret_teb )
         NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&ptr, 0, &block_size,
                                  MEM_COMMIT, PAGE_READWRITE );
     }
-    *ret_teb = teb = (TEB *)((char *)ptr + teb_offset);
-    init_teb( teb, NtCurrentTeb()->Peb );
+    *ret_teb = teb = init_teb( ptr, NtCurrentTeb()->Peb );
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
 
     if ((status = signal_alloc_thread( teb )))
@@ -3079,7 +3102,7 @@ NTSTATUS virtual_alloc_teb( TEB **ret_teb )
 void virtual_free_teb( TEB *teb )
 {
     struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
-    void *ptr;
+    void *ptr = teb;
     SIZE_T size;
     sigset_t sigset;
 
@@ -3097,7 +3120,7 @@ void virtual_free_teb( TEB *teb )
 
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
     list_remove( &thread_data->entry );
-    ptr = (char *)teb - teb_offset;
+    if (!is_win64) ptr = (char *)ptr - teb_offset;
     *(void **)ptr = next_free_teb;
     next_free_teb = ptr;
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
@@ -3143,13 +3166,14 @@ NTSTATUS virtual_clear_tls_index( ULONG index )
 /***********************************************************************
  *           virtual_alloc_thread_stack
  */
-NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, SIZE_T reserve_size, SIZE_T commit_size,
-                                     SIZE_T *pthread_size )
+NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR zero_bits, SIZE_T reserve_size,
+                                     SIZE_T commit_size, SIZE_T *pthread_size )
 {
     struct file_view *view;
     NTSTATUS status;
     sigset_t sigset;
     SIZE_T size, extra_size = 0;
+    unsigned int vprot = VPROT_READ | VPROT_WRITE | VPROT_COMMITTED;
 
     if (!reserve_size) reserve_size = main_image_info.MaximumStackSize;
     if (!commit_size) commit_size = main_image_info.CommittedStackSize;
@@ -3161,9 +3185,20 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, SIZE_T reserve_size, SI
 
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
 
-    if ((status = map_view( &view, NULL, size + extra_size, FALSE,
-                            VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, 0 )) != STATUS_SUCCESS)
-        goto done;
+    /*More Nioh 2 being angry fixes*/
+    {
+        const char *sgi = getenv("SteamGameId");
+        if (sgi && !strcmp(sgi, "1325200"))
+        {
+            if ((status = map_view( &view, NULL, size + extra_size, FALSE,
+                                    VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, zero_bits )) != STATUS_SUCCESS)
+                goto done;
+        }
+    }
+
+    status = map_view( &view, NULL, size + extra_size, FALSE, vprot, zero_bits );
+    if (status == STATUS_NO_MEMORY) status = map_view( &view, NULL, size + extra_size, FALSE, vprot, 0 );
+    if (status != STATUS_SUCCESS) goto done;
 
 #ifdef VALGRIND_STACK_REGISTER
     VALGRIND_STACK_REGISTER( view->base, (char *)view->base + view->size );
@@ -3806,7 +3841,6 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
     sigset_t sigset;
     SIZE_T size = *size_ptr;
     NTSTATUS status = STATUS_SUCCESS;
-    unsigned short zero_bits_64 = zero_bits_win_to_64( zero_bits );
 
     TRACE("%p %p %08lx %x %08x\n", process, *ret, size, type, protect );
 
@@ -3905,7 +3939,7 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
 
             if (vprot & VPROT_WRITECOPY) status = STATUS_INVALID_PAGE_PROTECTION;
             else if (is_dos_memory) status = allocate_dos_memory( &view, vprot );
-            else status = map_view( &view, base, size, type & MEM_TOP_DOWN, vprot, zero_bits_64 );
+            else status = map_view( &view, base, size, type & MEM_TOP_DOWN, vprot, zero_bits );
 
             if (status == STATUS_SUCCESS) base = view->base;
         }
@@ -4499,7 +4533,6 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
     NTSTATUS res;
     SIZE_T mask = granularity_mask;
     LARGE_INTEGER offset;
-    unsigned short zero_bits_64 = zero_bits_win_to_64( zero_bits );
 
     offset.QuadPart = offset_ptr ? offset_ptr->QuadPart : 0;
 
@@ -4557,7 +4590,7 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
         return result.map_view.status;
     }
 
-    return virtual_map_section( handle, addr_ptr, zero_bits_64, commit_size,
+    return virtual_map_section( handle, addr_ptr, zero_bits, commit_size,
                                 offset_ptr, size_ptr, alloc_type, protect );
 }
 
@@ -4649,7 +4682,7 @@ void virtual_fill_image_information( const pe_image_info_t *pe_info, SECTION_IMA
     info->ImageFileSize               = pe_info->file_size;
     info->CheckSum                    = pe_info->checksum;
 #ifndef _WIN64 /* don't return 64-bit values to 32-bit processes */
-    if (pe_info->machine == IMAGE_FILE_MACHINE_AMD64 || pe_info->machine == IMAGE_FILE_MACHINE_ARM64)
+    if (is_machine_64bit( pe_info->machine ))
     {
         info->TransferAddress = (void *)0x81231234;  /* sic */
         info->MaximumStackSize = 0x100000;
