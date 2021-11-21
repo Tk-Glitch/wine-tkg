@@ -1985,6 +1985,12 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
     input.u.mi.dx          = 0;
     input.u.mi.dy          = 0;
 
+    GetCursorPos(&pt);
+    monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONULL);
+    user_to_real_scale = fs_hack_get_user_to_real_scale(monitor);
+    input.u.mi.dx = lround((double)input.u.mi.dx / user_to_real_scale);
+    input.u.mi.dy = lround((double)input.u.mi.dy / user_to_real_scale);
+
     virtual_rect = get_virtual_screen_rect();
     if (x_pos->min < x_pos->max)
         x_scale = (x_pos->mode == XIModeAbsolute ? 65535 : (virtual_rect.right - virtual_rect.left)) /
@@ -2038,12 +2044,6 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
     x_pos->value = x_accum - input.u.mi.dx;
     y_pos->value = y_accum - input.u.mi.dy;
 
-    GetCursorPos(&pt);
-    monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONULL);
-    user_to_real_scale = fs_hack_get_user_to_real_scale(monitor);
-    input.u.mi.dx = lround((double)input.u.mi.dx / user_to_real_scale);
-    input.u.mi.dy = lround((double)input.u.mi.dy / user_to_real_scale);
-
     if (!thread_data->xi2_rawinput_only)
     {
         if ((dy || dy) && !(input.u.mi.dx || input.u.mi.dy))
@@ -2070,16 +2070,18 @@ static BOOL X11DRV_RawMotion( XGenericEventCookie *xev )
         rawinput.header.dwSize = offsetof(RAWINPUT, data) + sizeof(RAWMOUSE);
         rawinput.header.hDevice = ULongToHandle(1); /* WINE_MOUSE_HANDLE */
         rawinput.header.wParam = RIM_INPUT;
-        rawinput.data.mouse.ulRawButtons = input.u.mi.dwFlags;
-        rawinput.data.mouse.u.ulButtons = input.u.mi.mouseData;
+        rawinput.data.mouse.usFlags = input.u.mi.dwFlags;
+        rawinput.data.mouse.ulRawButtons = 0;
+        rawinput.data.mouse.u.usButtonData = 0;
+        rawinput.data.mouse.u.usButtonFlags = 0;
         rawinput.data.mouse.lLastX = input.u.mi.dx;
         rawinput.data.mouse.lLastY = input.u.mi.dy;
         rawinput.data.mouse.ulExtraInformation = 0;
 
         input.type = INPUT_HARDWARE;
         input.u.hi.uMsg = WM_INPUT;
-        input.u.hi.wParamH = (WORD)(rawinput.header.dwSize >> 16);
-        input.u.hi.wParamL = (WORD)(rawinput.header.dwSize >> 0);
+        input.u.hi.wParamH = 0;
+        input.u.hi.wParamL = 0;
         if (rawinput.data.mouse.lLastX || rawinput.data.mouse.lLastY)
             __wine_send_input( 0, &input, &rawinput );
     }
@@ -2118,23 +2120,25 @@ static BOOL X11DRV_RawButtonEvent( XGenericEventCookie *cookie )
     rawinput.header.wParam = RIM_INPUT;
     if (event->evtype == XI_RawButtonRelease)
     {
-        rawinput.data.mouse.ulRawButtons = button_up_flags[button];
-        rawinput.data.mouse.u.ulButtons = button_up_data[button];
+        rawinput.data.mouse.usFlags = button_up_flags[button];
+        rawinput.data.mouse.ulRawButtons = button_up_data[button];
     }
     else
     {
-        rawinput.data.mouse.ulRawButtons = button_down_flags[button];
-        rawinput.data.mouse.u.ulButtons = button_down_data[button];
+        rawinput.data.mouse.usFlags = button_down_flags[button];
+        rawinput.data.mouse.ulRawButtons = button_down_data[button];
     }
+    rawinput.data.mouse.u.usButtonData = 0;
+    rawinput.data.mouse.u.usButtonFlags = 0;
     rawinput.data.mouse.lLastX = 0;
     rawinput.data.mouse.lLastY = 0;
     rawinput.data.mouse.ulExtraInformation = 0;
 
     input.type = INPUT_HARDWARE;
     input.u.hi.uMsg = WM_INPUT;
-    input.u.hi.wParamH = (WORD)(rawinput.header.dwSize >> 16);
-    input.u.hi.wParamL = (WORD)(rawinput.header.dwSize >> 0);
-    if (rawinput.data.mouse.ulRawButtons || rawinput.data.mouse.u.ulButtons)
+    input.u.hi.wParamH = 0;
+    input.u.hi.wParamL = 0;
+    if (rawinput.data.mouse.usFlags || rawinput.data.mouse.ulRawButtons)
         __wine_send_input( 0, &input, &rawinput );
     return TRUE;
 }

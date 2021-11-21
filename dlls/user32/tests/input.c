@@ -2239,9 +2239,14 @@ static void test_GetRawInputBuffer(void)
     UINT size, count, rawinput_size;
     HWND hwnd;
     BOOL ret;
+    POINT pt;
 
     if (is_wow64) rawinput_size = sizeof(RAWINPUT64);
     else rawinput_size = sizeof(RAWINPUT);
+
+    SetCursorPos(300, 300);
+    GetCursorPos(&pt);
+    ok(pt.x == 300 && pt.y == 300, "Unexpected cursor position pos %dx%d\n", pt.x, pt.y);
 
     hwnd = CreateWindowA("static", "static", WS_VISIBLE | WS_POPUP,
                          100, 100, 100, 100, 0, NULL, NULL, NULL);
@@ -2761,6 +2766,10 @@ static void test_rawinput(const char* argv0)
         {
         case 14:
         case 15:
+            DestroyWindow(hwnd);
+            hwnd = CreateWindowA("static", "static", WS_VISIBLE | WS_POPUP,
+                                 pt.x - 50, pt.y - 50, 100, 100, 0, NULL, NULL, NULL);
+            ok(hwnd != 0, "CreateWindow failed\n");
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
             SetForegroundWindow(hwnd);
             empty_message_queue();
@@ -4431,6 +4440,13 @@ static void test_OemKeyScan(void)
     DWORD ret, expect, vkey, scan;
     WCHAR oem, wchr;
     char oem_char;
+
+    BOOL us_kbd = (GetKeyboardLayout(0) == (HKL)(ULONG_PTR)0x04090409);
+    if (!us_kbd)
+    {
+        skip("skipping test with inconsistent results on non-us keyboard\n");
+        return;
+    }
 
     for (oem = 0; oem < 0x200; oem++)
     {

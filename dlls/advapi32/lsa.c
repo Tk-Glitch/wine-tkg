@@ -190,7 +190,7 @@ NTSTATUS WINAPI LsaAddAccountRights(
  */
 NTSTATUS WINAPI LsaClose(IN LSA_HANDLE ObjectHandle)
 {
-    TRACE("(%p) semi-stub\n", ObjectHandle);
+    WARN("(%p) stub\n", ObjectHandle);
     return STATUS_SUCCESS;
 }
 
@@ -234,6 +234,22 @@ NTSTATUS WINAPI LsaEnumerateAccountRights(
     *rights = 0;
     *count = 0;
     return STATUS_OBJECT_NAME_NOT_FOUND;
+}
+
+/******************************************************************************
+ * LsaEnumerateAccounts [ADVAPI32.@]
+ *
+ */
+NTSTATUS WINAPI LsaEnumerateAccounts(
+    LSA_HANDLE policy,
+    PLSA_ENUMERATION_HANDLE context,
+    PVOID *buffer,
+    ULONG maxlen,
+    PULONG count)
+{
+    FIXME("(%p,%p,%p,%d,%p) stub\n", policy, context, buffer, maxlen, count);
+    if (count) *count = 0;
+    return STATUS_NO_MORE_ENTRIES;
 }
 
 /******************************************************************************
@@ -718,7 +734,7 @@ NTSTATUS WINAPI LsaOpenPolicy(
     IN ACCESS_MASK DesiredAccess,
     IN OUT PLSA_HANDLE PolicyHandle)
 {
-    TRACE("(%s,%p,0x%08x,%p) semi-stub\n",
+    WARN("(%s,%p,0x%08x,%p) stub\n",
           SystemName?debugstr_w(SystemName->Buffer):"(null)",
           ObjectAttributes, DesiredAccess, PolicyHandle);
 

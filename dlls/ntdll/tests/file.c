@@ -5429,6 +5429,7 @@ static void test_reparse_points(void)
     WCHAR path[MAX_PATH], reparse_path[MAX_PATH], target_path[MAX_PATH], volnameW[MAX_PATH];
     static const WCHAR reparseW[] = {'\\','r','e','p','a','r','s','e',0};
     static const WCHAR targetW[] = {'\\','t','a','r','g','e','t',0};
+    INT buffer_len, string_len, path_len, total_len;
     FILE_BASIC_INFORMATION old_attrib, new_attrib;
     static const WCHAR fooW[] = {'f','o','o',0};
     static WCHAR volW[] = {'c',':','\\',0};
@@ -5438,8 +5439,9 @@ static void test_reparse_points(void)
     REPARSE_DATA_BUFFER *buffer = NULL;
     DWORD dwret, dwLen, dwFlags, err;
     WIN32_FILE_ATTRIBUTE_DATA fad;
-    INT buffer_len, string_len;
+    UCHAR *unix_dest;
     WCHAR buf[] = {0,0,0,0};
+    char name[] = "target";
     HANDLE handle, token;
     IO_STATUS_BLOCK iosb;
     UNICODE_STRING nameW;
@@ -5517,6 +5519,12 @@ static void test_reparse_points(void)
     dest = &buffer->MountPointReparseBuffer.PathBuffer[buffer->MountPointReparseBuffer.SubstituteNameOffset/sizeof(WCHAR)];
     ok((memcmp(dest, nameW.Buffer, string_len) == 0), "Junction point destination does not match ('%s' != '%s')!\n",
                                                       wine_dbgstr_w(dest), wine_dbgstr_w(nameW.Buffer));
+    path_len = buffer->MountPointReparseBuffer.PrintNameOffset/sizeof(WCHAR);
+    path_len += buffer->MountPointReparseBuffer.PrintNameLength/sizeof(WCHAR);
+    total_len = FIELD_OFFSET(typeof(*buffer), MountPointReparseBuffer.PathBuffer[path_len+1])
+                - FIELD_OFFSET(typeof(*buffer), GenericReparseBuffer);
+    ok(buffer->ReparseDataLength == total_len, "ReparseDataLength has unexpected value (%d != %d)\n",
+                                               buffer->ReparseDataLength, total_len);
 
     /* Delete the junction point */
     memset(&old_attrib, 0x00, sizeof(old_attrib));
@@ -5652,6 +5660,24 @@ static void test_reparse_points(void)
        wine_dbgstr_wn(buf, dwLen), wine_dbgstr_w(fooW));
     CloseHandle(handle);
 
+    /* Check the size/data of the symlink target when opened with FILE_FLAG_OPEN_REPARSE_POINT */
+    handle = CreateFileW(target_path, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING,
+                         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
+    if (handle == INVALID_HANDLE_VALUE)
+    {
+        win_skip("Failed to open symlink file handle (0x%x).\n", GetLastError());
+        goto cleanup;
+    }
+    ok(GetFileSize(handle, NULL) == sizeof(fooW), "symlink target size does not match (%d != %d)\n",
+       GetFileSize(handle, NULL), sizeof(fooW));
+    bret = ReadFile(handle, &buf, sizeof(buf), &dwLen, NULL);
+    ok(bret, "Failed to read data from the symlink target.\n");
+    ok(dwLen == sizeof(fooW), "Length of symlink target data does not match (%d != %d).\n",
+       dwLen, sizeof(fooW));
+    ok(!memcmp(fooW, &buf, sizeof(fooW)), "Symlink target data does not match (%s != %s).\n",
+       wine_dbgstr_wn(buf, dwLen), wine_dbgstr_w(fooW));
+    CloseHandle(handle);
+
     /* Check deleting a file symlink as if it were a directory */
     bret = RemoveDirectoryW(reparse_path);
     ok(!bret, "Succeeded in deleting file symlink as a directory!\n");
@@ -5708,6 +5734,12 @@ static void test_reparse_points(void)
     ok(bret, "Failed to read symlink!\n");
     ok((memcmp(dest, nameW.Buffer, string_len) == 0), "Symlink destination does not match ('%s' != '%s')!\n",
                                                       wine_dbgstr_w(dest), wine_dbgstr_w(nameW.Buffer));
+    path_len = buffer->SymbolicLinkReparseBuffer.PrintNameOffset/sizeof(WCHAR);
+    path_len += buffer->SymbolicLinkReparseBuffer.PrintNameLength/sizeof(WCHAR);
+    total_len = FIELD_OFFSET(typeof(*buffer), MountPointReparseBuffer.PathBuffer[path_len+1])
+                - FIELD_OFFSET(typeof(*buffer), GenericReparseBuffer);
+    ok(buffer->ReparseDataLength == total_len, "ReparseDataLength has unexpected value (%d != %d)\n",
+                                               buffer->ReparseDataLength, total_len);
 
     /* Delete the symlink */
     memset(&old_attrib, 0x00, sizeof(old_attrib));
@@ -5737,7 +5769,7 @@ static void test_reparse_points(void)
     }
     dwret = NtQueryInformationFile(handle, &iosb, &old_attrib, sizeof(old_attrib), FileBasicInformation);
     ok(dwret == STATUS_SUCCESS, "Failed to get symlink folder's attributes (0x%x).\n", dwret);
-    buffer_len = build_reparse_buffer(targetW, IO_REPARSE_TAG_SYMLINK, SYMLINK_FLAG_RELATIVE, &buffer);
+    buffer_len = build_reparse_buffer(&targetW[1], IO_REPARSE_TAG_SYMLINK, SYMLINK_FLAG_RELATIVE, &buffer);
     bret = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, (LPVOID)buffer, buffer_len, NULL, 0, &dwret, 0);
     ok(bret, "Failed to create symlink! (0x%x)\n", GetLastError());
 
@@ -5748,11 +5780,52 @@ static void test_reparse_points(void)
     bret = DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, NULL, 0, (LPVOID)buffer, buffer_len, &dwret, 0);
     ok(bret, "Failed to read relative symlink!\n");
     string_len = buffer->SymbolicLinkReparseBuffer.SubstituteNameLength;
-    ok(string_len != lstrlenW(targetW), "Symlink destination length does not match ('%d' != '%d')!\n",
-                                        string_len, lstrlenW(targetW));
+    ok(string_len != lstrlenW(&targetW[1]), "Symlink destination length does not match ('%d' != '%d')!\n",
+                                            string_len, lstrlenW(&targetW[1]));
     dest = &buffer->SymbolicLinkReparseBuffer.PathBuffer[buffer->SymbolicLinkReparseBuffer.SubstituteNameOffset/sizeof(WCHAR)];
-    ok((memcmp(dest, targetW, string_len) == 0), "Symlink destination does not match ('%s' != '%s')!\n",
-                                                 wine_dbgstr_w(dest), wine_dbgstr_w(targetW));
+    ok((memcmp(dest, &targetW[1], string_len) == 0), "Symlink destination does not match ('%s' != '%s')!\n",
+                                                     wine_dbgstr_w(dest), wine_dbgstr_w(&targetW[1]));
+    CloseHandle(handle);
+
+    /* Create a Unix/Linux symlink */
+    HeapFree(GetProcessHeap(), 0, buffer);
+    RemoveDirectoryW(reparse_path);
+    bret = CreateDirectoryW(reparse_path, NULL);
+    handle = CreateFileW(reparse_path, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING,
+                         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
+    if (handle == INVALID_HANDLE_VALUE)
+    {
+        win_skip("Failed to open symlink directory handle (0x%x).\n", GetLastError());
+        goto cleanup;
+    }
+    dwret = NtQueryInformationFile(handle, &iosb, &old_attrib, sizeof(old_attrib), FileBasicInformation);
+    ok(dwret == STATUS_SUCCESS, "Failed to get symlink folder's attributes (0x%x).\n", dwret);
+    path_len = strlen(name);
+    buffer_len = offsetof(REPARSE_DATA_BUFFER, LinuxSymbolicLinkReparseBuffer.PathBuffer[path_len]);
+    buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buffer_len);
+    buffer->ReparseTag = IO_REPARSE_TAG_LX_SYMLINK;
+    buffer->ReparseDataLength = sizeof(ULONG) + path_len;
+    memcpy(buffer->LinuxSymbolicLinkReparseBuffer.PathBuffer, name, path_len);
+    bret = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, (LPVOID)buffer, buffer_len, NULL, 0, &dwret, 0);
+    ok(bret, "Failed to create symlink! (0x%x)\n", GetLastError());
+
+    /* Read back the Unix/Linux symlink */
+    HeapFree(GetProcessHeap(), 0, buffer);
+    handle = CreateFileW(reparse_path, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING,
+                         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
+    if (handle == INVALID_HANDLE_VALUE)
+    buffer_len = sizeof(*buffer) + MAX_PATH*sizeof(WCHAR);
+    buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buffer_len);
+    bret = DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, NULL, 0, (LPVOID)buffer, buffer_len, &dwret, 0);
+    ok(bret, "Failed to read symlink!\n");
+    string_len = buffer->ReparseDataLength - sizeof(ULONG);
+    unix_dest = &buffer->LinuxSymbolicLinkReparseBuffer.PathBuffer[0];
+    ok((memcmp(unix_dest, name, string_len) == 0), "Symlink destination does not match ('%s' != '%s')!\n",
+                                                   unix_dest, name);
+    total_len = FIELD_OFFSET(typeof(*buffer), LinuxSymbolicLinkReparseBuffer.PathBuffer[path_len])
+                - FIELD_OFFSET(typeof(*buffer), GenericReparseBuffer);
+    ok(buffer->ReparseDataLength == total_len, "ReparseDataLength has unexpected value (%d != %d)\n",
+                                               buffer->ReparseDataLength, total_len);
     CloseHandle(handle);
 
 cleanup:

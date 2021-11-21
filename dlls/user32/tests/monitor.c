@@ -68,6 +68,11 @@ static void flush_events(void)
     }
 }
 
+static int get_bitmap_stride(int width, int bpp)
+{
+    return ((width * bpp + 15) >> 3) & ~1;
+}
+
 static BOOL CALLBACK monitor_enum_proc(HMONITOR hmon, HDC hdc, LPRECT lprc,
                                        LPARAM lparam)
 {
@@ -297,8 +302,6 @@ static void _expect_dm(INT line, const DEVMODEA *expected, const CHAR *device, D
 
     ok_(__FILE__, line)((dm.dmFields & expected->dmFields) == expected->dmFields,
             "Device %s test %d expect dmFields to contain %#x, got %#x\n", device, test, expected->dmFields, dm.dmFields);
-    /* Wine doesn't support changing color depth yet */
-    todo_wine_if(expected->dmFields & DM_BITSPERPEL && expected->dmBitsPerPel != 32 && expected->dmBitsPerPel != 24)
     ok_(__FILE__, line)(!(expected->dmFields & DM_BITSPERPEL) || dm.dmBitsPerPel == expected->dmBitsPerPel,
             "Device %s test %d expect dmBitsPerPel %u, got %u\n", device, test, expected->dmBitsPerPel, dm.dmBitsPerPel);
     ok_(__FILE__, line)(!(expected->dmFields & DM_PELSWIDTH) || dm.dmPelsWidth == expected->dmPelsWidth,
@@ -333,6 +336,7 @@ static void test_ChangeDisplaySettingsEx(void)
     DISPLAY_DEVICEA dd;
     POINTL position;
     DEVMODEW dmW;
+    BOOL found;
     LONG res;
     int i;
 
@@ -695,7 +699,6 @@ static void test_ChangeDisplaySettingsEx(void)
             dm.dmSize = sizeof(dm);
             res = EnumDisplaySettingsA(devices[device].name, ENUM_CURRENT_SETTINGS, &dm);
             ok(res, "Device %s EnumDisplaySettingsA failed, error %#x.\n", devices[device].name, GetLastError());
-            todo_wine_if(depths[test] != 32)
             ok(dm.dmBitsPerPel == depths[test], "Device %s expect dmBitsPerPel %u, got %u.\n",
                devices[device].name, depths[test], dm.dmBitsPerPel);
             /* 2008 resets to the resolution in the registry. Newer versions of Windows doesn't
@@ -732,7 +735,7 @@ static void test_ChangeDisplaySettingsEx(void)
         ok(count == old_count - 1, "Expect monitor count %d, got %d\n", old_count - 1, count);
     }
 
-    /* Test changing each adapter to every available mode */
+    /* Test changing each adapter to different width, height, frequency and depth */
     position.x = 0;
     position.y = 0;
     for (device = 0; device < device_count; ++device)
@@ -741,6 +744,42 @@ static void test_ChangeDisplaySettingsEx(void)
         dm.dmSize = sizeof(dm);
         for (mode = 0; EnumDisplaySettingsExA(devices[device].name, mode, &dm, 0); ++mode)
         {
+            if (mode == 0)
+            {
+                dm2 = dm;
+            }
+            else
+            {
+                found = FALSE;
+                if (dm2.dmPelsWidth && dm.dmPelsWidth != dm2.dmPelsWidth)
+                {
+                    dm2.dmPelsWidth = 0;
+                    found = TRUE;
+                }
+                if (dm2.dmPelsHeight && dm.dmPelsHeight != dm2.dmPelsHeight)
+                {
+                    dm2.dmPelsHeight = 0;
+                    found = TRUE;
+                }
+                if (dm2.dmDisplayFrequency && dm.dmDisplayFrequency != dm2.dmDisplayFrequency)
+                {
+                    dm2.dmDisplayFrequency = 0;
+                    found = TRUE;
+                }
+                if (dm2.dmBitsPerPel && dm.dmBitsPerPel != dm2.dmBitsPerPel)
+                {
+                    dm2.dmBitsPerPel = 0;
+                    found = TRUE;
+                }
+
+                if (!dm2.dmPelsWidth && !dm2.dmPelsHeight && !dm2.dmDisplayFrequency
+                        && !dm2.dmBitsPerPel)
+                    break;
+
+                if (!found)
+                    continue;
+            }
+
             dm.dmPosition = position;
             dm.dmFields |= DM_POSITION;
             /* Reattach detached non-primary adapters, otherwise ChangeDisplaySettingsExA with only CDS_RESET fails */
@@ -1996,7 +2035,10 @@ static void test_handles(void)
 #define check_display_dc(a, b, c) _check_display_dc(__LINE__, a, b, c)
 static void _check_display_dc(INT line, HDC hdc, const DEVMODEA *dm, BOOL allow_todo)
 {
+    BITMAP bitmap;
+    HBITMAP hbmp;
     INT value;
+    BOOL ret;
 
     value = GetDeviceCaps(hdc, HORZRES);
     todo_wine_if(allow_todo && dm->dmPelsWidth != GetSystemMetrics(SM_CXSCREEN))
@@ -2024,6 +2066,35 @@ static void _check_display_dc(INT line, HDC hdc, const DEVMODEA *dm, BOOL allow_
     todo_wine_if(allow_todo)
     ok_(__FILE__, line)(value == dm->dmDisplayFrequency, "Expected VREFRESH %d, got %d.\n",
             dm->dmDisplayFrequency, value);
+
+    value = GetDeviceCaps(hdc, BITSPIXEL);
+    todo_wine_if(dm->dmBitsPerPel != 32)
+    ok_(__FILE__, line)(value == dm->dmBitsPerPel, "Expected BITSPIXEL %d, got %d.\n",
+            dm->dmBitsPerPel, value);
+
+    hbmp = GetCurrentObject(hdc, OBJ_BITMAP);
+    ok_(__FILE__, line)(!!hbmp, "GetCurrentObject failed, error %#x.\n", GetLastError());
+    ret = GetObjectA(hbmp, sizeof(bitmap), &bitmap);
+    /* GetObjectA fails on Win7 and older */
+    ok_(__FILE__, line)(ret || broken(!ret), "GetObjectA failed, error %d.\n", GetLastError());
+    if (ret)
+    {
+        ok_(__FILE__, line)(bitmap.bmType == 0, "Expected bmType %d, got %d.\n", 0, bitmap.bmType);
+        todo_wine
+        ok_(__FILE__, line)(bitmap.bmWidth == GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                "Expected bmWidth %d, got %d.\n", GetSystemMetrics(SM_CXVIRTUALSCREEN), bitmap.bmWidth);
+        todo_wine
+        ok_(__FILE__, line)(bitmap.bmHeight == GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                "Expected bmHeight %d, got %d.\n", GetSystemMetrics(SM_CYVIRTUALSCREEN), bitmap.bmHeight);
+        todo_wine
+        ok_(__FILE__, line)(bitmap.bmBitsPixel == 32, "Expected bmBitsPixel %d, got %d.\n", 32,
+                bitmap.bmBitsPixel);
+        ok_(__FILE__, line)(bitmap.bmWidthBytes == get_bitmap_stride(bitmap.bmWidth, bitmap.bmBitsPixel),
+                "Expected bmWidthBytes %d, got %d.\n", get_bitmap_stride(bitmap.bmWidth, bitmap.bmBitsPixel),
+                bitmap.bmWidthBytes);
+        ok_(__FILE__, line)(bitmap.bmPlanes == 1, "Expected bmPlanes %d, got %d.\n", 1, bitmap.bmPlanes);
+        ok_(__FILE__, line)(bitmap.bmBits == NULL, "Expected bmBits %p, got %p.\n", NULL, bitmap.bmBits);
+    }
 }
 
 static void test_display_dc(void)
@@ -2047,7 +2118,7 @@ static void test_display_dc(void)
 
     check_display_dc(hdc, &dm, FALSE);
 
-    /* Tests after mode changes */
+    /* Tests after mode changes to a different resolution */
     memset(&dm2, 0, sizeof(dm2));
     dm2.dmSize = sizeof(dm2);
     for (mode_idx = 0; EnumDisplaySettingsA(NULL, mode_idx, &dm2); ++mode_idx)
@@ -2069,6 +2140,33 @@ static void test_display_dc(void)
         ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA returned unexpected %d.\n", res);
     }
 
+    /* Tests after mode changes to a different color depth */
+    memset(&dm2, 0, sizeof(dm2));
+    dm2.dmSize = sizeof(dm2);
+    for (mode_idx = 0; EnumDisplaySettingsA(NULL, mode_idx, &dm2); ++mode_idx)
+    {
+        if (dm2.dmBitsPerPel != dm.dmBitsPerPel)
+            break;
+    }
+    if (dm2.dmBitsPerPel && dm2.dmBitsPerPel != dm.dmBitsPerPel)
+    {
+        res = ChangeDisplaySettingsExA(NULL, &dm2, NULL, CDS_RESET, NULL);
+        /* Win8 TestBots */
+        ok(res == DISP_CHANGE_SUCCESSFUL || broken(res == DISP_CHANGE_FAILED),
+                "ChangeDisplaySettingsExA returned unexpected %d.\n", res);
+        if (res == DISP_CHANGE_SUCCESSFUL)
+        {
+            check_display_dc(hdc, &dm2, FALSE);
+
+            res = ChangeDisplaySettingsExA(NULL, NULL, NULL, 0, NULL);
+            ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA returned unexpected %d.\n", res);
+        }
+    }
+    else
+    {
+        win_skip("Failed to find a different color depth other than %u.\n", dm.dmBitsPerPel);
+    }
+
     DeleteDC(hdc);
 
     /* Test DCs covering a specific monitor */
@@ -2088,7 +2186,7 @@ static void test_display_dc(void)
 
         check_display_dc(hdc, &dm, FALSE);
 
-        /* Tests after mode changes */
+        /* Tests after mode changes to a different resolution */
         memset(&dm2, 0, sizeof(dm2));
         dm2.dmSize = sizeof(dm2);
         for (mode_idx = 0; EnumDisplaySettingsA(dd.DeviceName, mode_idx, &dm2); ++mode_idx)
@@ -2111,7 +2209,33 @@ static void test_display_dc(void)
 
         check_display_dc(hdc, &dm2, FALSE);
 
+        /* Tests after mode changes to a different color depth */
+        memset(&dm2, 0, sizeof(dm2));
+        dm2.dmSize = sizeof(dm2);
+        for (mode_idx = 0; EnumDisplaySettingsA(dd.DeviceName, mode_idx, &dm2); ++mode_idx)
+        {
+            if (dm2.dmBitsPerPel != dm.dmBitsPerPel)
+                break;
+        }
+        if (dm2.dmBitsPerPel && dm2.dmBitsPerPel != dm.dmBitsPerPel)
+        {
+            res = ChangeDisplaySettingsExA(dd.DeviceName, &dm2, NULL, CDS_RESET, NULL);
+            ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA returned unexpected %d.\n", res);
+
+            check_display_dc(hdc, &dm2, FALSE);
+
+            res = ChangeDisplaySettingsExA(NULL, NULL, NULL, 0, NULL);
+            ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA returned unexpected %d.\n", res);
+        }
+        else
+        {
+            win_skip("Failed to find a different color depth other than %u.\n", dm.dmBitsPerPel);
+        }
+
         /* Tests after monitor detach */
+        ret = EnumDisplaySettingsA(dd.DeviceName, ENUM_CURRENT_SETTINGS, &dm2);
+        ok(ret, "EnumDisplaySettingsA %s failed.\n", dd.DeviceName);
+
         if (!(dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE))
         {
             old_count = GetSystemMetrics(SM_CMONITORS);

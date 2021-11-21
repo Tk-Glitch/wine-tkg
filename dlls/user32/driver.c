@@ -55,7 +55,7 @@ static BOOL load_desktop_driver( HWND hwnd, HMODULE *module )
     USER_CheckNotLock();
 
     strcpy( driver_load_error, "The explorer process failed to start." );  /* default error */
-    SendMessageW( hwnd, WM_NULL, 0, 0 );  /* wait for the desktop process to be ready */
+    wait_graphics_driver_ready();
 
     guid_atom = HandleToULong( GetPropW( hwnd, L"__wine_display_device_guid" ));
     lstrcpyW( key, L"System\\CurrentControlSet\\Control\\Video\\{" );
@@ -306,6 +306,7 @@ static void CDECL nulldrv_GetDC( HDC hdc, HWND hwnd, HWND top_win, const RECT *w
 static DWORD CDECL nulldrv_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
                                                         DWORD mask, DWORD flags )
 {
+    if (!count && !timeout) return WAIT_TIMEOUT;
     return WaitForMultipleObjectsEx( count, handles, flags & MWMO_WAITALL,
                                      timeout, flags & MWMO_ALERTABLE );
 }
@@ -357,7 +358,7 @@ static void CDECL nulldrv_SetWindowText( HWND hwnd, LPCWSTR text )
 
 static UINT CDECL nulldrv_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp )
 {
-    return swp;
+    return ~0; /* use default implementation */
 }
 
 static LRESULT CDECL nulldrv_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
@@ -376,10 +377,11 @@ static LRESULT CDECL nulldrv_WindowMessage( HWND hwnd, UINT msg, WPARAM wparam, 
     return 0;
 }
 
-static void CDECL nulldrv_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_flags,
+static BOOL CDECL nulldrv_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_flags,
                                              const RECT *window_rect, const RECT *client_rect,
                                              RECT *visible_rect, struct window_surface **surface )
 {
+    return FALSE;
 }
 
 static void CDECL nulldrv_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags,

@@ -4274,9 +4274,9 @@
 @ stub _FSinh
 @ extern _FSnan _FSnan
 # extern _FXbig
-@ cdecl -ret64 _Getcoll()
-@ cdecl _Getctype(ptr)
-@ cdecl -ret64 _Getcvt()
+@ cdecl -norelay _Getcoll()
+@ cdecl -norelay _Getctype()
+@ cdecl -norelay _Getcvt()
 @ extern _Hugeval _Hugeval
 @ extern _Inf _Inf
 @ stub _LCosh

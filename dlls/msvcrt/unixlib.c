@@ -177,46 +177,6 @@ static float CDECL unix_atanhf(float x)
 }
 
 /*********************************************************************
- *      cbrt
- */
-static double CDECL unix_cbrt(double x)
-{
-#ifdef HAVE_CBRT
-    return cbrt(x);
-#else
-    return x < 0 ? -pow(-x, 1.0 / 3.0) : pow(x, 1.0 / 3.0);
-#endif
-}
-
-/*********************************************************************
- *      cbrtf
- */
-static float CDECL unix_cbrtf(float x)
-{
-#ifdef HAVE_CBRTF
-    return cbrtf(x);
-#else
-    return unix_cbrt(x);
-#endif
-}
-
-/*********************************************************************
- *      ceil
- */
-static double CDECL unix_ceil( double x )
-{
-    return ceil( x );
-}
-
-/*********************************************************************
- *      ceilf
- */
-static float CDECL unix_ceilf( float x )
-{
-    return ceilf( x );
-}
-
-/*********************************************************************
  *      cos
  */
 static double CDECL unix_cos( double x )
@@ -246,62 +206,6 @@ static double CDECL unix_cosh( double x )
 static float CDECL unix_coshf( float x )
 {
     return coshf( x );
-}
-
-/*********************************************************************
- *      erf
- */
-static double CDECL unix_erf(double x)
-{
-#ifdef HAVE_ERF
-    return erf(x);
-#else
-    /* Abramowitz and Stegun approximation, maximum error: 1.5*10^-7 */
-    double t, y;
-    int sign = signbit(x);
-
-    if (sign) x = -x;
-    t = 1 / (1 + 0.3275911 * x);
-    y = ((((1.061405429*t - 1.453152027)*t + 1.421413741)*t - 0.284496736)*t + 0.254829592)*t;
-    y = 1.0 - y*exp(-x*x);
-    return sign ? -y : y;
-#endif
-}
-
-/*********************************************************************
- *      erff
- */
-static float CDECL unix_erff(float x)
-{
-#ifdef HAVE_ERFF
-    return erff(x);
-#else
-    return unix_erf(x);
-#endif
-}
-
-/*********************************************************************
- *      erfc
- */
-static double CDECL unix_erfc(double x)
-{
-#ifdef HAVE_ERFC
-    return erfc(x);
-#else
-    return 1 - unix_erf(x);
-#endif
-}
-
-/*********************************************************************
- *      erfcf
- */
-static float CDECL unix_erfcf(float x)
-{
-#ifdef HAVE_ERFCF
-    return erfcf(x);
-#else
-    return unix_erfc(x);
-#endif
 }
 
 /*********************************************************************
@@ -369,22 +273,6 @@ static float CDECL unix_expm1f(float x)
 }
 
 /*********************************************************************
- *      floor
- */
-static double CDECL unix_floor( double x )
-{
-    return floor( x );
-}
-
-/*********************************************************************
- *      floorf
- */
-static float CDECL unix_floorf( float x )
-{
-    return floorf( x );
-}
-
-/*********************************************************************
  *      fma
  */
 static double CDECL unix_fma( double x, double y, double z )
@@ -406,22 +294,6 @@ static float CDECL unix_fmaf( float x, float y, float z )
 #else
     return x * y + z;
 #endif
-}
-
-/*********************************************************************
- *      fmod
- */
-static double CDECL unix_fmod( double x, double y )
-{
-    return fmod( x, y );
-}
-
-/*********************************************************************
- *      fmodf
- */
-static float CDECL unix_fmodf( float x, float y )
-{
-    return fmodf( x, y );
 }
 
 /*********************************************************************
@@ -487,30 +359,6 @@ static float CDECL unix_lgammaf(float x)
 #else
     FIXME( "not implemented\n" );
     return 0;
-#endif
-}
-
-/*********************************************************************
- *      llrint
- */
-static __int64 CDECL unix_llrint(double x)
-{
-#ifdef HAVE_LLRINT
-    return llrint(x);
-#else
-    return x >= 0 ? floor(x + 0.5) : ceil(x - 0.5);
-#endif
-}
-
-/*********************************************************************
- *      llrintf
- */
-static __int64 CDECL unix_llrintf(float x)
-{
-#ifdef HAVE_LLRINTF
-    return llrintf(x);
-#else
-    return x >= 0 ? floorf(x + 0.5) : ceilf(x - 0.5);
 #endif
 }
 
@@ -595,128 +443,6 @@ static float CDECL unix_log2f(float x)
 }
 
 /*********************************************************************
- *      logb
- */
-static double CDECL unix_logb( double x )
-{
-    return logb( x );
-}
-
-/*********************************************************************
- *      logbf
- */
-static float CDECL unix_logbf( float x )
-{
-    return logbf( x );
-}
-
-/*********************************************************************
- *      lrint
- */
-static int CDECL unix_lrint(double x)
-{
-#ifdef HAVE_LRINT
-    return lrint(x);
-#else
-    return x >= 0 ? floor(x + 0.5) : ceil(x - 0.5);
-#endif
-}
-
-/*********************************************************************
- *      lrintf
- */
-static int CDECL unix_lrintf(float x)
-{
-#ifdef HAVE_LRINTF
-    return lrintf(x);
-#else
-    return x >= 0 ? floorf(x + 0.5) : ceilf(x - 0.5);
-#endif
-}
-
-/*********************************************************************
- *      modf
- */
-static double CDECL unix_modf( double x, double *iptr )
-{
-    return modf( x, iptr );
-}
-
-/*********************************************************************
- *      modff
- */
-static float CDECL unix_modff( float x, float *iptr )
-{
-    return modff( x, iptr );
-}
-
-/*********************************************************************
- *      nearbyint
- */
-static double CDECL unix_nearbyint(double num)
-{
-#ifdef HAVE_NEARBYINT
-    return nearbyint(num);
-#else
-    return num >= 0 ? floor(num + 0.5) : ceil(num - 0.5);
-#endif
-}
-
-/*********************************************************************
- *      nearbyintf
- */
-static float CDECL unix_nearbyintf(float num)
-{
-#ifdef HAVE_NEARBYINTF
-    return nearbyintf(num);
-#else
-    return unix_nearbyint(num);
-#endif
-}
-
-/*********************************************************************
- *      nextafter
- */
-static double CDECL unix_nextafter(double num, double next)
-{
-  return nextafter(num,next);
-}
-
-/*********************************************************************
- *      nextafterf
- */
-static float CDECL unix_nextafterf(float num, float next)
-{
-  return nextafterf(num,next);
-}
-
-/*********************************************************************
- *      nexttoward
- */
-static double CDECL unix_nexttoward(double num, double next)
-{
-#ifdef HAVE_NEXTTOWARD
-    return nexttoward(num, next);
-#else
-    FIXME("not implemented\n");
-    return 0;
-#endif
-}
-
-/*********************************************************************
- *      nexttowardf
- */
-static float CDECL unix_nexttowardf(float num, double next)
-{
-#ifdef HAVE_NEXTTOWARDF
-    return nexttowardf(num, next);
-#else
-    FIXME("not implemented\n");
-    return 0;
-#endif
-}
-
-/*********************************************************************
  *      pow
  */
 static double CDECL unix_pow( double x, double y )
@@ -730,90 +456,6 @@ static double CDECL unix_pow( double x, double y )
 static float CDECL unix_powf( float x, float y )
 {
     return powf( x, y );
-}
-
-/*********************************************************************
- *      remainder
- */
-static double CDECL unix_remainder(double x, double y)
-{
-#ifdef HAVE_REMAINDER
-    return remainder(x, y);
-#else
-    FIXME( "not implemented\n" );
-    return 0;
-#endif
-}
-
-/*********************************************************************
- *      remainderf
- */
-static float CDECL unix_remainderf(float x, float y)
-{
-#ifdef HAVE_REMAINDERF
-    return remainderf(x, y);
-#else
-    FIXME( "not implemented\n" );
-    return 0;
-#endif
-}
-
-/*********************************************************************
- *      remquo
- */
-static double CDECL unix_remquo(double x, double y, int *quo)
-{
-#ifdef HAVE_REMQUO
-    return remquo(x, y, quo);
-#else
-    FIXME( "not implemented\n" );
-    return 0;
-#endif
-}
-
-/*********************************************************************
- *      remquof
- */
-static float CDECL unix_remquof(float x, float y, int *quo)
-{
-#ifdef HAVE_REMQUOF
-    return remquof(x, y, quo);
-#else
-    FIXME( "not implemented\n" );
-    return 0;
-#endif
-}
-
-/*********************************************************************
- *      rint
- */
-static double CDECL unix_rint(double x)
-{
-#ifdef HAVE_RINT
-    return rint(x);
-#else
-    return x >= 0 ? floor(x + 0.5) : ceil(x - 0.5);
-#endif
-}
-
-/*********************************************************************
- *      rintf
- */
-static float CDECL unix_rintf(float x)
-{
-#ifdef HAVE_RINTF
-    return rintf(x);
-#else
-    return x >= 0 ? floorf(x + 0.5) : ceilf(x - 0.5);
-#endif
-}
-
-/*********************************************************************
- *      sin
- */
-static double CDECL unix_sin( double x )
-{
-    return sin( x );
 }
 
 /*********************************************************************
@@ -886,30 +528,6 @@ static double CDECL unix_tgamma(double x)
 }
 
 /*********************************************************************
- *      trunc
- */
-static double CDECL unix_trunc(double x)
-{
-#ifdef HAVE_TRUNC
-    return trunc(x);
-#else
-    return (x > 0) ? floor(x) : ceil(x);
-#endif
-}
-
-/*********************************************************************
- *      truncf
- */
-static float CDECL unix_truncf(float x)
-{
-#ifdef HAVE_TRUNCF
-    return truncf(x);
-#else
-    return unix_trunc(x);
-#endif
-}
-
-/*********************************************************************
  *      tgammaf
  */
 static float CDECL unix_tgammaf(float x)
@@ -930,30 +548,18 @@ static const struct unix_funcs funcs =
     unix_asinhf,
     unix_atanh,
     unix_atanhf,
-    unix_cbrt,
-    unix_cbrtf,
-    unix_ceil,
-    unix_ceilf,
     unix_cos,
     unix_cosf,
     unix_cosh,
     unix_coshf,
-    unix_erf,
-    unix_erfc,
-    unix_erfcf,
-    unix_erff,
     unix_exp,
     unix_expf,
     unix_exp2,
     unix_exp2f,
     unix_expm1,
     unix_expm1f,
-    unix_floor,
-    unix_floorf,
     unix_fma,
     unix_fmaf,
-    unix_fmod,
-    unix_fmodf,
     unix_frexp,
     unix_frexpf,
     unix_hypot,
@@ -961,8 +567,6 @@ static const struct unix_funcs funcs =
     unix_ldexp,
     unix_lgamma,
     unix_lgammaf,
-    unix_llrint,
-    unix_llrintf,
     unix_log,
     unix_logf,
     unix_log10,
@@ -971,27 +575,8 @@ static const struct unix_funcs funcs =
     unix_log1pf,
     unix_log2,
     unix_log2f,
-    unix_logb,
-    unix_logbf,
-    unix_lrint,
-    unix_lrintf,
-    unix_modf,
-    unix_modff,
-    unix_nearbyint,
-    unix_nearbyintf,
-    unix_nextafter,
-    unix_nextafterf,
-    unix_nexttoward,
-    unix_nexttowardf,
     unix_pow,
     unix_powf,
-    unix_remainder,
-    unix_remainderf,
-    unix_remquo,
-    unix_remquof,
-    unix_rint,
-    unix_rintf,
-    unix_sin,
     unix_sinf,
     unix_sinh,
     unix_sinhf,
@@ -1001,8 +586,6 @@ static const struct unix_funcs funcs =
     unix_tanhf,
     unix_tgamma,
     unix_tgammaf,
-    unix_trunc,
-    unix_truncf
 };
 
 NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out )

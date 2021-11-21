@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2021-05-04 16:50+0200\n"
+"PO-Revision-Date: 2021-05-20 14:10+0200\n"
 "Last-Translator: Floris Renaud <jkfloris@dds.nl>\n"
 "Language-Team: Dutch\n"
 "Language: nl\n"
@@ -6981,6 +6981,470 @@ msgstr "Ongeldige oproep.\n"
 #: dlls/kernel32/winerror.mc:3781
 msgid "Resource is not currently available.\n"
 msgstr "Bron is tijdelijk niet beschikbaar.\n"
+
+#: dlls/localspl/localspl.rc:37
+msgid "Letter"
+msgstr "Letter (VS)"
+
+#: dlls/localspl/localspl.rc:38
+msgid "Letter Small"
+msgstr "Letter klein (VS)"
+
+#: dlls/localspl/localspl.rc:39
+msgid "Tabloid"
+msgstr "Tabloid (VS)"
+
+#: dlls/localspl/localspl.rc:40
+msgid "Ledger"
+msgstr "Ledger (VS)"
+
+#: dlls/localspl/localspl.rc:41
+msgid "Legal"
+msgstr "Legal (VS)"
+
+#: dlls/localspl/localspl.rc:42
+msgid "Statement"
+msgstr "Statement (VS)"
+
+#: dlls/localspl/localspl.rc:43
+msgid "Executive"
+msgstr "Executive (VS)"
+
+#: dlls/localspl/localspl.rc:44
+msgid "A3"
+msgstr "A3"
+
+#: dlls/localspl/localspl.rc:45
+msgid "A4"
+msgstr "A4"
+
+#: dlls/localspl/localspl.rc:46
+msgid "A4 Small"
+msgstr "A4 (klein)"
+
+#: dlls/localspl/localspl.rc:47
+msgid "A5"
+msgstr "A5"
+
+#: dlls/localspl/localspl.rc:48
+msgid "B4 (JIS)"
+msgstr "B4 (JIS)"
+
+#: dlls/localspl/localspl.rc:49
+msgid "B5 (JIS)"
+msgstr "B5 (JIS)"
+
+#: dlls/localspl/localspl.rc:50
+msgid "Folio"
+msgstr "Folio"
+
+#: dlls/localspl/localspl.rc:51
+msgid "Quarto"
+msgstr "Quarto"
+
+#: dlls/localspl/localspl.rc:52
+msgid "10x14"
+msgstr "10x14"
+
+#: dlls/localspl/localspl.rc:53
+msgid "11x17"
+msgstr "11x17"
+
+#: dlls/localspl/localspl.rc:54
+msgid "Note"
+msgstr "Note (VS)"
+
+#: dlls/localspl/localspl.rc:55
+msgid "Envelope #9"
+msgstr "Envelop nr. 9"
+
+#: dlls/localspl/localspl.rc:56
+msgid "Envelope #10"
+msgstr "Envelop nr. 10"
+
+#: dlls/localspl/localspl.rc:57
+msgid "Envelope #11"
+msgstr "Envelop nr. 11"
+
+#: dlls/localspl/localspl.rc:58
+msgid "Envelope #12"
+msgstr "Envelop nr. 12"
+
+#: dlls/localspl/localspl.rc:59
+msgid "Envelope #14"
+msgstr "Envelop nr. 14"
+
+#: dlls/localspl/localspl.rc:60
+msgid "C size sheet"
+msgstr "C-papierformaat"
+
+#: dlls/localspl/localspl.rc:61
+msgid "D size sheet"
+msgstr "D-papierformaat"
+
+#: dlls/localspl/localspl.rc:62
+msgid "E size sheet"
+msgstr "E-papierformaat"
+
+#: dlls/localspl/localspl.rc:63
+msgid "Envelope DL"
+msgstr "Envelop DL"
+
+#: dlls/localspl/localspl.rc:64
+msgid "Envelope C5"
+msgstr "Envelop C5"
+
+#: dlls/localspl/localspl.rc:65
+msgid "Envelope C3"
+msgstr "Envelop C3"
+
+#: dlls/localspl/localspl.rc:66
+msgid "Envelope C4"
+msgstr "Envelop C4"
+
+#: dlls/localspl/localspl.rc:67
+msgid "Envelope C6"
+msgstr "Envelop C6"
+
+#: dlls/localspl/localspl.rc:68
+msgid "Envelope C65"
+msgstr "Envelop C6/C5"
+
+#: dlls/localspl/localspl.rc:69
+msgid "Envelope B4"
+msgstr "Envelop B4"
+
+#: dlls/localspl/localspl.rc:70
+msgid "Envelope B5"
+msgstr "Envelop B5"
+
+#: dlls/localspl/localspl.rc:71
+msgid "Envelope B6"
+msgstr "Envelop B6"
+
+#: dlls/localspl/localspl.rc:72
+msgid "Envelope"
+msgstr "Envelop"
+
+#: dlls/localspl/localspl.rc:73
+msgid "Envelope Monarch"
+msgstr "Envelop Monarch"
+
+#: dlls/localspl/localspl.rc:74
+msgid "6 3/4 Envelope"
+msgstr "6 3/4 envelope"
+
+#: dlls/localspl/localspl.rc:75
+msgid "US Std Fanfold"
+msgstr "Standaardkettingpapier (VS)"
+
+#: dlls/localspl/localspl.rc:76
+msgid "German Std Fanfold"
+msgstr "Duits standaardkettingpapier"
+
+#: dlls/localspl/localspl.rc:77
+msgid "German Legal Fanfold"
+msgstr "Duits Legal-kettingpapier"
+
+#: dlls/localspl/localspl.rc:78
+msgid "B4 (ISO)"
+msgstr "B4 (ISO)"
+
+#: dlls/localspl/localspl.rc:79
+msgid "Japanese Postcard"
+msgstr "Japanse briefkaart"
+
+#: dlls/localspl/localspl.rc:80
+msgid "9x11"
+msgstr "9x11"
+
+#: dlls/localspl/localspl.rc:81
+msgid "10x11"
+msgstr "10x11"
+
+#: dlls/localspl/localspl.rc:82
+msgid "15x11"
+msgstr "15x11"
+
+#: dlls/localspl/localspl.rc:83
+msgid "Envelope Invite"
+msgstr "Uitnodigingsenvelop"
+
+#: dlls/localspl/localspl.rc:84
+msgid "Letter Extra"
+msgstr "Letter Extra (VS)"
+
+#: dlls/localspl/localspl.rc:85
+msgid "Legal Extra"
+msgstr "Legal Extra (VS)"
+
+#: dlls/localspl/localspl.rc:86
+msgid "Tabloid Extra"
+msgstr "Tabloid Extra (VS)"
+
+#: dlls/localspl/localspl.rc:87
+msgid "A4 Extra"
+msgstr "A4 Extra"
+
+#: dlls/localspl/localspl.rc:88
+msgid "Letter Transverse"
+msgstr "Letter overdwars (VS)"
+
+#: dlls/localspl/localspl.rc:89
+msgid "A4 Transverse"
+msgstr "A4 overdwars"
+
+#: dlls/localspl/localspl.rc:90
+msgid "Letter Extra Transverse"
+msgstr "Letter Extra overdwars (VS)"
+
+#: dlls/localspl/localspl.rc:91
+msgid "Super A"
+msgstr "Super A4"
+
+#: dlls/localspl/localspl.rc:92
+msgid "Super B"
+msgstr "Super A3"
+
+#: dlls/localspl/localspl.rc:93
+msgid "Letter Plus"
+msgstr "Letter Plus (VS)"
+
+#: dlls/localspl/localspl.rc:94
+msgid "A4 Plus"
+msgstr "A4 Plus"
+
+#: dlls/localspl/localspl.rc:95
+msgid "A5 Transverse"
+msgstr "A5 overdwars"
+
+#: dlls/localspl/localspl.rc:96
+msgid "B5 (JIS) Transverse"
+msgstr "B5 (JIS) overdwars"
+
+#: dlls/localspl/localspl.rc:97
+msgid "A3 Extra"
+msgstr "A3 Extra"
+
+#: dlls/localspl/localspl.rc:98
+msgid "A5 Extra"
+msgstr "A5 Extra"
+
+#: dlls/localspl/localspl.rc:99
+msgid "B5 (ISO) Extra"
+msgstr "B5 (ISO) Extra"
+
+#: dlls/localspl/localspl.rc:100
+msgid "A2"
+msgstr "A2"
+
+#: dlls/localspl/localspl.rc:101
+msgid "A3 Transverse"
+msgstr "A3 overdwars"
+
+#: dlls/localspl/localspl.rc:102
+msgid "A3 Extra Transverse"
+msgstr "A3 Extra overdwars"
+
+#: dlls/localspl/localspl.rc:103
+msgid "Japanese Double Postcard"
+msgstr "Japanse dubbele briefkaart"
+
+#: dlls/localspl/localspl.rc:104
+msgid "A6"
+msgstr "A6"
+
+#: dlls/localspl/localspl.rc:105
+msgid "Japanese Envelope Kaku #2"
+msgstr "Japanse envelop Kaku nr. 2"
+
+#: dlls/localspl/localspl.rc:106
+msgid "Japanese Envelope Kaku #3"
+msgstr "Japanse envelop Kaku nr. 3"
+
+#: dlls/localspl/localspl.rc:107
+msgid "Japanese Envelope Chou #3"
+msgstr "Japanse envelop Chou nr. 3"
+
+#: dlls/localspl/localspl.rc:108
+msgid "Japanese Envelope Chou #4"
+msgstr "Japanse envelop Chou nr. 4"
+
+#: dlls/localspl/localspl.rc:109
+msgid "Letter Rotated"
+msgstr "Letter gedraaid (VS)"
+
+#: dlls/localspl/localspl.rc:110
+msgid "A3 Rotated"
+msgstr "A3 gedraaid"
+
+#: dlls/localspl/localspl.rc:111
+msgid "A4 Rotated"
+msgstr "A4 gedraaid"
+
+#: dlls/localspl/localspl.rc:112
+msgid "A5 Rotated"
+msgstr "A5 gedraaid"
+
+#: dlls/localspl/localspl.rc:113
+msgid "B4 (JIS) Rotated"
+msgstr "B4 (JIS) gedraaid"
+
+#: dlls/localspl/localspl.rc:114
+msgid "B5 (JIS) Rotated"
+msgstr "B5 (JIS) gedraaid"
+
+#: dlls/localspl/localspl.rc:115
+msgid "Japanese Postcard Rotated"
+msgstr "Japanse briefkaart gedraaid"
+
+#: dlls/localspl/localspl.rc:116
+msgid "Double Japan Postcard Rotated"
+msgstr "Japanse dubbele briefkaart gedraaid"
+
+#: dlls/localspl/localspl.rc:117
+msgid "A6 Rotated"
+msgstr "A6 Gedraaid"
+
+#: dlls/localspl/localspl.rc:118
+msgid "Japan Envelope Kaku #2 Rotated"
+msgstr "Japanse envelop Kaku nr. 2 gedraaid"
+
+#: dlls/localspl/localspl.rc:119
+msgid "Japan Envelope Kaku #3 Rotated"
+msgstr "Japanse envelop Kaku nr. 3 gedraaid"
+
+#: dlls/localspl/localspl.rc:120
+msgid "Japan Envelope Chou #3 Rotated"
+msgstr "Japanse envelop Chou nr. 3 gedraaid"
+
+#: dlls/localspl/localspl.rc:121
+msgid "Japan Envelope Chou #4 Rotated"
+msgstr "Japanse envelop Chou nr. 4 gedraaid"
+
+#: dlls/localspl/localspl.rc:122
+msgid "B6 (JIS)"
+msgstr "B6 (JIS)"
+
+#: dlls/localspl/localspl.rc:123
+msgid "B6 (JIS) Rotated"
+msgstr "B6 (JIS) gedraaid"
+
+#: dlls/localspl/localspl.rc:124
+msgid "12x11"
+msgstr "12x11"
+
+#: dlls/localspl/localspl.rc:125
+msgid "Japan Envelope You #4"
+msgstr "Japanse envelop You nr. 4"
+
+#: dlls/localspl/localspl.rc:126
+msgid "Japan Envelope You #4 Rotated"
+msgstr "Japanse envelop You nr. 4 gedraaid"
+
+#: dlls/localspl/localspl.rc:127
+msgid "PRC 16K"
+msgstr "Chinese 16K"
+
+#: dlls/localspl/localspl.rc:128
+msgid "PRC 32K"
+msgstr "Chinese 32K"
+
+#: dlls/localspl/localspl.rc:129
+msgid "PRC 32K(Big)"
+msgstr "Chinese 32K (groot)"
+
+#: dlls/localspl/localspl.rc:130
+msgid "PRC Envelope #1"
+msgstr "Chinese envelop nr. 1"
+
+#: dlls/localspl/localspl.rc:131
+msgid "PRC Envelope #2"
+msgstr "Chinese envelop nr. 2"
+
+#: dlls/localspl/localspl.rc:132
+msgid "PRC Envelope #3"
+msgstr "Chinese envelop nr. 3"
+
+#: dlls/localspl/localspl.rc:133
+msgid "PRC Envelope #4"
+msgstr "Chinese envelop nr. 4"
+
+#: dlls/localspl/localspl.rc:134
+msgid "PRC Envelope #5"
+msgstr "Chinese envelop nr. 5"
+
+#: dlls/localspl/localspl.rc:135
+msgid "PRC Envelope #6"
+msgstr "Chinese envelop nr. 6"
+
+#: dlls/localspl/localspl.rc:136
+msgid "PRC Envelope #7"
+msgstr "Chinese envelop nr. 7"
+
+#: dlls/localspl/localspl.rc:137
+msgid "PRC Envelope #8"
+msgstr "Chinese envelop nr. 8"
+
+#: dlls/localspl/localspl.rc:138
+msgid "PRC Envelope #9"
+msgstr "Chinese envelop nr. 9"
+
+#: dlls/localspl/localspl.rc:139
+msgid "PRC Envelope #10"
+msgstr "Chinese envelop nr. 10"
+
+#: dlls/localspl/localspl.rc:140
+msgid "PRC 16K Rotated"
+msgstr "Chinese 16K gedraaid"
+
+#: dlls/localspl/localspl.rc:141
+msgid "PRC 32K Rotated"
+msgstr "Chinese 32K gedraaid"
+
+#: dlls/localspl/localspl.rc:142
+msgid "PRC 32K(Big) Rotated"
+msgstr "Chinese 32K (groot) gedraaid"
+
+#: dlls/localspl/localspl.rc:143
+msgid "PRC Envelope #1 Rotated"
+msgstr "Chinese envelop nr. 1 gedraaid"
+
+#: dlls/localspl/localspl.rc:144
+msgid "PRC Envelope #2 Rotated"
+msgstr "Chinese envelop nr. 2 gedraaid"
+
+#: dlls/localspl/localspl.rc:145
+msgid "PRC Envelope #3 Rotated"
+msgstr "Chinese envelop nr. 3 gedraaid"
+
+#: dlls/localspl/localspl.rc:146
+msgid "PRC Envelope #4 Rotated"
+msgstr "Chinese envelop nr. 4 gedraaid"
+
+#: dlls/localspl/localspl.rc:147
+msgid "PRC Envelope #5 Rotated"
+msgstr "Chinese envelop nr. 5 gedraaid"
+
+#: dlls/localspl/localspl.rc:148
+msgid "PRC Envelope #6 Rotated"
+msgstr "Chinese envelop nr. 6 gedraaid"
+
+#: dlls/localspl/localspl.rc:149
+msgid "PRC Envelope #7 Rotated"
+msgstr "Chinese envelop nr. 7 gedraaid"
+
+#: dlls/localspl/localspl.rc:150
+msgid "PRC Envelope #8 Rotated"
+msgstr "Chinese envelop nr. 8 gedraaid"
+
+#: dlls/localspl/localspl.rc:151
+msgid "PRC Envelope #9 Rotated"
+msgstr "Chinese envelop nr. 9 gedraaid"
+
+#: dlls/localspl/localspl.rc:152
+msgid "PRC Envelope #10 Rotated"
+msgstr "Chinese envelop nr. 10 gedraaid"
 
 #: dlls/localspl/localspl.rc:31 dlls/localui/localui.rc:31
 #: dlls/winspool.drv/winspool.rc:30
@@ -14305,7 +14769,7 @@ msgid ""
 "  REG [operation] [parameters]\n"
 "\n"
 "Supported operations:\n"
-"  ADD | DELETE | EXPORT | IMPORT | QUERY\n"
+"  ADD | COPY | DELETE | EXPORT | IMPORT | QUERY\n"
 "\n"
 "For help on a specific operation, type:\n"
 "  REG [operation] /?\n"
@@ -14315,7 +14779,7 @@ msgstr ""
 "  REG [opdracht] [parameters]\n"
 "\n"
 "Ondersteunde opdrachten:\n"
-"  ADD | DELETE | EXPORT | IMPORT | QUERY\n"
+"  ADD | COPY | DELETE | EXPORT | IMPORT | QUERY\n"
 "\n"
 "Voor hulp bij een opdracht, type:\n"
 "  REG [opdracht] /?\n"
@@ -14594,8 +15058,8 @@ msgid "reg: Unsupported registry data type [%1]\n"
 msgstr "reg: Register data type wordt niet ondersteund [%1]\n"
 
 #: programs/reg/reg.rc:122
-msgid "reg: The option [/d] must be followed by a valid integer\n"
-msgstr "reg: De optie [/d] moet gevolgd worden door een geheel getal\n"
+msgid "reg: The option [/d] must be followed by a valid numeric value\n"
+msgstr "reg: De optie [/d] moet gevolgd worden door een numerieke waarde\n"
 
 #: programs/reg/reg.rc:123
 msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
@@ -14634,12 +15098,8 @@ msgid "reg: The option [/d] must be followed by a valid string\n"
 msgstr "reg: De optie [/d] moet gevolgd worden door tekenreeks\n"
 
 #: programs/reg/reg.rc:135
-msgid ""
-"reg: Unable to delete all registry values in '%1'. An unexpected error "
-"occurred.\n"
-msgstr ""
-"reg: Onmogelijk om alle registerwaardes in '%1' te verwijderen. Er is een "
-"onverwachte fout opgetreden.\n"
+msgid "reg: Unable to delete all registry values in '%1'\n"
+msgstr "reg: Kan niet alle registerwaardes in '%1' verwijderen.\n"
 
 #: programs/reg/reg.rc:136
 msgid ""
@@ -14780,7 +15240,7 @@ msgstr "reg: Kan de gegeven registersleutel niet vinden\n"
 msgid "reg: Unable to import the registry key '%1'\n"
 msgstr "reg: Importeren van de registersleutel '%1' is niet mogelijk.\n"
 
-#: programs/reg/reg.rc:179
+#: programs/reg/reg.rc:180
 msgid ""
 "  /reg:32\n"
 "     Access the registry using the 32-bit view.\n"
@@ -14796,9 +15256,78 @@ msgstr ""
 "     Open de 64-bits weergave van het register.\n"
 "\n"
 
-#: programs/reg/reg.rc:180
+#: programs/reg/reg.rc:181
 msgid "reg: Unable to access or create the specified registry key\n"
 msgstr "reg: Kan de gegeven registersleutel niet openen of aanmaken\n"
+
+#: programs/reg/reg.rc:202
+msgid ""
+"REG COPY <key1> <key2> [/s] [/f]\n"
+"\n"
+"  Copies the contents of a specified registry key to another location.\n"
+"  By default, this operation only copies registry values. Use [/s] to\n"
+"  recursively copy all subkeys and values.\n"
+"\n"
+"  <key1>, <key2>\n"
+"     Registry keys specifying the source (<key1>) and destination (<key2>)\n"
+"     of the data. If <key2> does not exist, it is created.\n"
+"\n"
+"     Format: ROOT\\Subkey\n"
+"\n"
+"     ROOT: A predefined registry key. This must be one of the following:\n"
+"\n"
+"         HKEY_LOCAL_MACHINE  | HKLM\n"
+"         HKEY_CURRENT_USER   | HKCU\n"
+"         HKEY_CLASSES_ROOT   | HKCR\n"
+"         HKEY_USERS          | HKU\n"
+"         HKEY_CURRENT_CONFIG | HKCC\n"
+"\n"
+"     Subkey: The full path to a registry key under a given ROOT key.\n"
+"\n"
+"  /s\n"
+"     Copy all subkeys and values from <key1> to <key2>.\n"
+"\n"
+"  /f\n"
+"     Overwrite all registry data in <key2> without prompting for "
+"confirmation.\n"
+"     This option does not modify subkeys and values that only exist in "
+"<key2>.\n"
+"\n"
+msgstr ""
+"REG COPY <sleutel1> <sleutel2> [/s] [/f]\n"
+"\n"
+"  Kopieert de inhoud van een registersleutel naar een andere plek.\n"
+"  Standaard worden alleen de registerwaarden gekopieerd. Gebruik [/s] om\n"
+"  ook de onderliggende sleutels en waarden te kopiëren.\n"
+"\n"
+"  <sleutel1>, <sleutel2>\n"
+"     De registersleutel (<sleutel1>) die gekopieerd wordt naar <sleutel2>.\n"
+"     <sleutel2> wordt aangemaakt als deze niet bestaat.\n"
+"\n"
+"     Formaat: HOOFDSLEUTEL\\Subsleutel\n"
+"\n"
+"     HOOFDSLEUTEL: Een voorgedefinieerde registersleutel. Dit is één van:\n"
+"\n"
+"         HKEY_LOCAL_MACHINE  | HKLM\n"
+"         HKEY_CURRENT_USER   | HKCU\n"
+"         HKEY_CLASSES_ROOT   | HKCR\n"
+"         HKEY_USERS          | HKU\n"
+"         HKEY_CURRENT_CONFIG | HKCC\n"
+"\n"
+"     Subsleutel: Het volledige pad naar een registersleutel onder de "
+"gegeven\n"
+"     HOOFDSLEUTEL.\n"
+"\n"
+"  /s\n"
+"     Kopieer alle onderliggende sleutels en waarden van <sleutel1> naar "
+"<sleutel2>.\n"
+"\n"
+"  /f\n"
+"     Overschrijf alle register gegevens in <sleutel2> zonder om bevestiging "
+"te vragen.\n"
+"     Deze optie wijzigt geen onderliggende sleutels en waarden die alleen in "
+"<sleutel2> bestaan.\n"
+"\n"
 
 #: programs/regedit/regedit.rc:34
 msgid "&Registry"

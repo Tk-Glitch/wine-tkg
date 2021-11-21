@@ -1675,35 +1675,24 @@ BOOL WINAPI DECLSPEC_HOTPATCH FindNextFileW( HANDLE handle, WIN32_FIND_DATAW *da
         /* get reparse tag */
         if (dir_info->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
         {
-            REPARSE_DATA_BUFFER *buffer = NULL;
-            INT buffer_len;
-            HANDLE hlink;
-            DWORD dwret;
-            BOOL bret;
-            INT path_len = info->path.Length + dir_info->FileNameLength +
-                           sizeof(WCHAR);
+            INT path_len = info->path.Length + dir_info->FileNameLength + sizeof(WCHAR);
             WCHAR *path = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, path_len );
+            FILE_ATTRIBUTE_TAG_INFORMATION taginfo;
+            IO_STATUS_BLOCK iosb;
+            NTSTATUS status;
+            HANDLE hlink;
 
             if (!path) break;
 
             lstrcpynW( path, info->path.Buffer, info->path.Length/sizeof(WCHAR) + 1 );
             lstrcatW( path, data->cFileName );
 
-            hlink = CreateFileW( path, GENERIC_READ | GENERIC_WRITE, 0, 0,
-                                 OPEN_EXISTING,
+            hlink = CreateFileW( path, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING,
                                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0 );
             HeapFree( GetProcessHeap(), 0, path );
-            buffer_len = sizeof(*buffer) + 2*MAX_PATH*sizeof(WCHAR);
-            buffer = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, buffer_len );
-            if (!buffer)
-            {
-                CloseHandle( hlink );
-                break;
-            }
-            bret = DeviceIoControl( hlink, FSCTL_GET_REPARSE_POINT, NULL, 0, (LPVOID)buffer,
-                                    buffer_len, &dwret, 0 );
-            if (bret) data->dwReserved0 = buffer->ReparseTag;
-            HeapFree( GetProcessHeap(), 0, buffer );
+            status = NtQueryInformationFile( hlink, &iosb, &taginfo, sizeof(taginfo),
+                                             FileAttributeTagInformation );
+            if (status == STATUS_SUCCESS) data->dwReserved0 = taginfo.ReparseTag;
             CloseHandle( hlink );
         }
 

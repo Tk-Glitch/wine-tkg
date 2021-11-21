@@ -49,6 +49,9 @@ static NTSTATUS (WINAPI * pNtQueryObject)(HANDLE, OBJECT_INFORMATION_CLASS, void
 static NTSTATUS (WINAPI * pNtCreateDebugObject)( HANDLE *, ACCESS_MASK, OBJECT_ATTRIBUTES *, ULONG );
 static NTSTATUS (WINAPI * pNtSetInformationDebugObject)(HANDLE,DEBUGOBJECTINFOCLASS,PVOID,ULONG,ULONG*);
 static NTSTATUS (WINAPI * pDbgUiConvertStateChangeStructure)(DBGUI_WAIT_STATE_CHANGE*,DEBUG_EVENT*);
+#ifdef _WIN64
+static NTSTATUS (WINAPI * pRtlWow64GetCpuAreaInfo)( WOW64_CPURESERVED *cpu, ULONG reserved, WOW64_CPU_AREA_INFO *info );
+#endif
 
 static BOOL is_wow64;
 
@@ -67,7 +70,6 @@ static inline DWORD_PTR get_affinity_mask(DWORD num_cpus)
     p ## func = (void*)GetProcAddress(hntdll, #func); \
     if(!p ## func) { \
       trace("GetProcAddress(%s) failed\n", #func); \
-      return FALSE; \
     } \
   } while(0)
 
@@ -76,13 +78,14 @@ static inline DWORD_PTR get_affinity_mask(DWORD num_cpus)
 #define FIRM 0x4649524D
 #define RSMB 0x52534D42
 
-static BOOL InitFunctionPtrs(void)
+static void InitFunctionPtrs(void)
 {
     /* All needed functions are NT based, so using GetModuleHandle is a good check */
     HMODULE hntdll = GetModuleHandleA("ntdll");
     HMODULE hkernel32 = GetModuleHandleA("kernel32");
 
     NTDLL_GET_PROC(NtQuerySystemInformation);
+    NTDLL_GET_PROC(NtQuerySystemInformationEx);
     NTDLL_GET_PROC(NtSetSystemInformation);
     NTDLL_GET_PROC(RtlGetNativeSystemInformation);
     NTDLL_GET_PROC(RtlWow64GetCurrentMachine);
@@ -103,24 +106,17 @@ static BOOL InitFunctionPtrs(void)
     NTDLL_GET_PROC(NtQueryObject);
     NTDLL_GET_PROC(NtCreateDebugObject);
     NTDLL_GET_PROC(NtSetInformationDebugObject);
+    NTDLL_GET_PROC(NtGetCurrentProcessorNumber);
     NTDLL_GET_PROC(DbgUiConvertStateChangeStructure);
-
-    /* not present before XP */
-    pNtGetCurrentProcessorNumber = (void *) GetProcAddress(hntdll, "NtGetCurrentProcessorNumber");
+#ifdef _WIN64
+    NTDLL_GET_PROC(RtlWow64GetCpuAreaInfo);
+#endif
 
     pIsWow64Process = (void *)GetProcAddress(hkernel32, "IsWow64Process");
     if (!pIsWow64Process || !pIsWow64Process( GetCurrentProcess(), &is_wow64 )) is_wow64 = FALSE;
 
     pGetSystemDEPPolicy = (void *)GetProcAddress(hkernel32, "GetSystemDEPPolicy");
-
-    /* starting with Win7 */
-    pNtQuerySystemInformationEx = (void *) GetProcAddress(hntdll, "NtQuerySystemInformationEx");
-    if (!pNtQuerySystemInformationEx)
-        win_skip("NtQuerySystemInformationEx() is not supported, some tests will be skipped.\n");
-
     pGetLogicalProcessorInformationEx = (void *) GetProcAddress(hkernel32, "GetLogicalProcessorInformationEx");
-
-    return TRUE;
 }
 
 static void test_query_basic(void)
@@ -3133,7 +3129,169 @@ static void test_thread_info(void)
 
 static void test_wow64(void)
 {
-#ifndef _WIN64
+    PROCESS_BASIC_INFORMATION proc_info;
+    THREAD_BASIC_INFORMATION info;
+    PROCESS_INFORMATION pi;
+    STARTUPINFOA si = {0};
+    NTSTATUS status;
+    void *redir;
+    SIZE_T res;
+    TEB teb;
+    PEB peb;
+    TEB32 teb32;
+    PEB32 peb32;
+
+    Wow64DisableWow64FsRedirection( &redir );
+
+    if (CreateProcessA( "C:\\windows\\syswow64\\notepad.exe", NULL, NULL, NULL,
+                        FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi ))
+    {
+        memset( &info, 0xcc, sizeof(info) );
+        status = pNtQueryInformationThread( pi.hThread, ThreadBasicInformation, &info, sizeof(info), NULL );
+        ok( !status, "ThreadBasicInformation failed %x\n", status );
+        if (!ReadProcessMemory( pi.hProcess, info.TebBaseAddress, &teb, sizeof(teb), &res )) res = 0;
+        ok( res == sizeof(teb), "wrong len %lx\n", res );
+        ok( teb.Tib.Self == info.TebBaseAddress, "wrong teb %p / %p\n", teb.Tib.Self, info.TebBaseAddress );
+        if (is_wow64)
+        {
+            ok( !!teb.GdiBatchCount, "GdiBatchCount not set\n" );
+            ok( (char *)info.TebBaseAddress + teb.WowTebOffset == ULongToPtr(teb.GdiBatchCount) ||
+                broken(!NtCurrentTeb()->WowTebOffset),  /* pre-win10 */
+                "wrong teb offset %d\n", teb.WowTebOffset );
+        }
+        else
+        {
+            ok( !teb.GdiBatchCount, "GdiBatchCount set\n" );
+            ok( teb.WowTebOffset == 0x2000 ||
+                broken( !teb.WowTebOffset || teb.WowTebOffset == 1 ),  /* pre-win10 */
+                "wrong teb offset %d\n", teb.WowTebOffset );
+            ok( (char *)teb.Tib.ExceptionList == (char *)info.TebBaseAddress + 0x2000,
+                "wrong Tib.ExceptionList %p / %p\n",
+                (char *)teb.Tib.ExceptionList, (char *)info.TebBaseAddress + 0x2000 );
+            if (!ReadProcessMemory( pi.hProcess, teb.Tib.ExceptionList, &teb32, sizeof(teb32), &res )) res = 0;
+            ok( res == sizeof(teb32), "wrong len %lx\n", res );
+            ok( (char *)ULongToPtr(teb32.Peb) == (char *)teb.Peb + 0x1000 ||
+                broken( ULongToPtr(teb32.Peb) != teb.Peb ), /* vista */
+                "wrong peb %p / %p\n", ULongToPtr(teb32.Peb), teb.Peb );
+        }
+
+        status = pNtQueryInformationProcess( pi.hProcess, ProcessBasicInformation,
+                                             &proc_info, sizeof(proc_info), NULL );
+        ok( !status, "ProcessBasicInformation failed %x\n", status );
+        ok( proc_info.PebBaseAddress == teb.Peb, "wrong peb %p / %p\n", proc_info.PebBaseAddress, teb.Peb );
+
+        if (!ReadProcessMemory( pi.hProcess, proc_info.PebBaseAddress, &peb, sizeof(peb), &res )) res = 0;
+        ok( res == sizeof(peb), "wrong len %lx\n", res );
+        ok( !peb.BeingDebugged, "BeingDebugged is %u\n", peb.BeingDebugged );
+        if (!is_wow64)
+        {
+            if (!ReadProcessMemory( pi.hProcess, ULongToPtr(teb32.Peb), &peb32, sizeof(peb32), &res )) res = 0;
+            ok( res == sizeof(peb32), "wrong len %lx\n", res );
+            ok( !peb32.BeingDebugged, "BeingDebugged is %u\n", peb32.BeingDebugged );
+        }
+
+        ok( DebugActiveProcess( pi.dwProcessId ), "debugging failed\n" );
+        if (!ReadProcessMemory( pi.hProcess, proc_info.PebBaseAddress, &peb, sizeof(peb), &res )) res = 0;
+        ok( res == sizeof(peb), "wrong len %lx\n", res );
+        ok( peb.BeingDebugged == 1, "BeingDebugged is %u\n", peb.BeingDebugged );
+        if (!is_wow64)
+        {
+            if (!ReadProcessMemory( pi.hProcess, ULongToPtr(teb32.Peb), &peb32, sizeof(peb32), &res )) res = 0;
+            ok( res == sizeof(peb32), "wrong len %lx\n", res );
+            ok( peb32.BeingDebugged == 1, "BeingDebugged is %u\n", peb32.BeingDebugged );
+        }
+
+        TerminateProcess( pi.hProcess, 0 );
+        CloseHandle( pi.hProcess );
+        CloseHandle( pi.hThread );
+    }
+
+    if (CreateProcessA( "C:\\windows\\system32\\notepad.exe", NULL, NULL, NULL,
+                        FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi ))
+    {
+        memset( &info, 0xcc, sizeof(info) );
+        status = pNtQueryInformationThread( pi.hThread, ThreadBasicInformation, &info, sizeof(info), NULL );
+        ok( !status, "ThreadBasicInformation failed %x\n", status );
+        if (!is_wow64)
+        {
+            if (!ReadProcessMemory( pi.hProcess, info.TebBaseAddress, &teb, sizeof(teb), &res )) res = 0;
+            ok( res == sizeof(teb), "wrong len %lx\n", res );
+            ok( teb.Tib.Self == info.TebBaseAddress, "wrong teb %p / %p\n",
+                teb.Tib.Self, info.TebBaseAddress );
+            ok( !teb.GdiBatchCount, "GdiBatchCount set\n" );
+            ok( !teb.WowTebOffset || broken( teb.WowTebOffset == 1 ),  /* vista */
+                "wrong teb offset %d\n", teb.WowTebOffset );
+        }
+        else ok( !info.TebBaseAddress, "got teb %p\n", info.TebBaseAddress );
+
+        status = pNtQueryInformationProcess( pi.hProcess, ProcessBasicInformation,
+                                             &proc_info, sizeof(proc_info), NULL );
+        ok( !status, "ProcessBasicInformation failed %x\n", status );
+        if (is_wow64)
+            ok( !proc_info.PebBaseAddress ||
+                broken( (char *)proc_info.PebBaseAddress >= (char *)0x7f000000 ), /* vista */
+                "wrong peb %p\n", proc_info.PebBaseAddress );
+        else
+            ok( proc_info.PebBaseAddress == teb.Peb, "wrong peb %p / %p\n",
+                proc_info.PebBaseAddress, teb.Peb );
+
+        TerminateProcess( pi.hProcess, 0 );
+        CloseHandle( pi.hProcess );
+        CloseHandle( pi.hThread );
+    }
+
+    Wow64RevertWow64FsRedirection( redir );
+
+#ifdef _WIN64
+    if (pRtlWow64GetCpuAreaInfo)
+    {
+        static const struct
+        {
+            USHORT machine;
+            NTSTATUS expect;
+            ULONG align, size, offset, flag;
+        } tests[] =
+        {
+            { IMAGE_FILE_MACHINE_I386,  0,  4, 0x2cc, 0x00, 0x00010000 },
+            { IMAGE_FILE_MACHINE_AMD64, 0, 16, 0x4d0, 0x30, 0x00100000 },
+            { IMAGE_FILE_MACHINE_ARMNT, 0,  8, 0x1a0, 0x00, 0x00200000 },
+            { IMAGE_FILE_MACHINE_ARM64, 0, 16, 0x390, 0x00, 0x00400000 },
+            { IMAGE_FILE_MACHINE_ARM,   STATUS_INVALID_PARAMETER },
+            { IMAGE_FILE_MACHINE_THUMB, STATUS_INVALID_PARAMETER },
+        };
+        USHORT buffer[2048];
+        WOW64_CPURESERVED *cpu;
+        WOW64_CPU_AREA_INFO info;
+        ULONG i, j;
+        NTSTATUS status;
+#define ALIGN(ptr,align) ((void *)(((ULONG_PTR)(ptr) + (align) - 1) & ~((align) - 1)))
+
+        for (i = 0; i < ARRAY_SIZE(tests); i++)
+        {
+            for (j = 0; j < 8; j++)
+            {
+                cpu = (WOW64_CPURESERVED *)(buffer + j);
+                cpu->Flags = 0;
+                cpu->Machine = tests[i].machine;
+                status = pRtlWow64GetCpuAreaInfo( cpu, 0, &info );
+                ok( status == tests[i].expect, "%u:%u: failed %x\n", i, j, status );
+                if (status) continue;
+                ok( info.Context == ALIGN( cpu + 1, tests[i].align ), "%u:%u: wrong offset %u\n",
+                    i, j, (ULONG)((char *)info.Context - (char *)cpu) );
+                ok( info.ContextEx == ALIGN( (char *)info.Context + tests[i].size, sizeof(void*) ),
+                    "%u:%u: wrong ex offset %u\n", i, j, (ULONG)((char *)info.ContextEx - (char *)cpu) );
+                ok( info.ContextFlagsLocation == (char *)info.Context + tests[i].offset,
+                    "%u:%u: wrong flags offset %u\n",
+                    i, j, (ULONG)((char *)info.ContextFlagsLocation - (char *)info.Context) );
+                ok( info.CpuReserved == cpu, "%u:%u: wrong cpu %p / %p\n", info.CpuReserved, cpu );
+                ok( info.ContextFlag == tests[i].flag, "%u:%u: wrong flag %08x\n", i, j, info.ContextFlag );
+                ok( info.Machine == tests[i].machine, "%u:%u: wrong machine %x\n", i, j, info.Machine );
+            }
+        }
+#undef ALIGN
+    }
+    else win_skip( "RtlWow64GetCpuAreaInfo not supported\n" );
+#else
     if (is_wow64)
     {
         PEB64 *peb64;
@@ -3285,8 +3443,7 @@ START_TEST(info)
     char **argv;
     int argc;
 
-    if(!InitFunctionPtrs())
-        return;
+    InitFunctionPtrs();
 
     argc = winetest_get_mainargs(&argv);
     if (argc >= 3) return; /* Child */

@@ -30,6 +30,7 @@
 #include "winnls.h"
 #include "wincontypes.h"
 #include "winternl.h"
+#include "winuser.h"
 
 #include "kernelbase.h"
 #include "wine/debug.h"
@@ -249,11 +250,12 @@ static NTSTATUS create_nt_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBUT
                                    SECURITY_ATTRIBUTES *tsa, DWORD process_flags,
                                    RTL_USER_PROCESS_PARAMETERS *params,
                                    RTL_USER_PROCESS_INFORMATION *info, HANDLE parent,
-                                   const struct proc_thread_attr *handle_list )
+                                   const struct proc_thread_attr *handle_list,
+                                   const struct proc_thread_attr *job_list)
 {
     OBJECT_ATTRIBUTES process_attr, thread_attr;
     PS_CREATE_INFO create_info;
-    ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[7] ) / sizeof(ULONG_PTR)];
+    ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[8] ) / sizeof(ULONG_PTR)];
     PS_ATTRIBUTE_LIST *attr = (PS_ATTRIBUTE_LIST *)buffer;
     UNICODE_STRING nameW;
     NTSTATUS status;
@@ -312,6 +314,14 @@ static NTSTATUS create_nt_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBUT
             attr->Attributes[pos].ReturnLength = NULL;
             pos++;
         }
+        if (job_list)
+        {
+            attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_JOB_LIST;
+            attr->Attributes[pos].Size         = job_list->size;
+            attr->Attributes[pos].ValuePtr     = job_list->value;
+            attr->Attributes[pos].ReturnLength = NULL;
+            pos++;
+        }
         attr->TotalLength = offsetof( PS_ATTRIBUTE_LIST, Attributes[pos] );
 
         InitializeObjectAttributes( &process_attr, NULL, 0, NULL, psa ? psa->lpSecurityDescriptor : NULL );
@@ -353,7 +363,7 @@ static NTSTATUS create_vdm_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBU
               winevdm, params->ImagePathName.Buffer, params->CommandLine.Buffer );
     RtlInitUnicodeString( &params->ImagePathName, winevdm );
     RtlInitUnicodeString( &params->CommandLine, newcmdline );
-    status = create_nt_process( token, debug, psa, tsa, flags, params, info, NULL, NULL );
+    status = create_nt_process( token, debug, psa, tsa, flags, params, info, NULL, NULL, NULL );
     HeapFree( GetProcessHeap(), 0, newcmdline );
     return status;
 }
@@ -382,7 +392,7 @@ static NTSTATUS create_cmd_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBU
     swprintf( newcmdline, len, L"%s /s/c \"%s\"", comspec, params->CommandLine.Buffer );
     RtlInitUnicodeString( &params->ImagePathName, comspec );
     RtlInitUnicodeString( &params->CommandLine, newcmdline );
-    status = create_nt_process( token, debug, psa, tsa, flags, params, info, NULL, NULL );
+    status = create_nt_process( token, debug, psa, tsa, flags, params, info, NULL, NULL, NULL );
     RtlFreeHeap( GetProcessHeap(), 0, newcmdline );
     return status;
 }
@@ -401,6 +411,54 @@ BOOL WINAPI DECLSPEC_HOTPATCH CloseHandle( HANDLE handle )
         handle = InterlockedExchangePointer( &NtCurrentTeb()->Peb->ProcessParameters->hStdError, 0 );
 
     return set_ntstatus( NtClose( handle ));
+}
+
+
+static BOOL image_needs_elevation( const WCHAR *path )
+{
+    ACTIVATION_CONTEXT_RUN_LEVEL_INFORMATION run_level;
+    BOOL ret = FALSE;
+    HANDLE handle;
+    ACTCTXW ctx;
+
+    ctx.cbSize = sizeof(ctx);
+    ctx.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID;
+    ctx.lpSource = path;
+    ctx.lpResourceName = (const WCHAR *)CREATEPROCESS_MANIFEST_RESOURCE_ID;
+
+    if (RtlCreateActivationContext( &handle, &ctx )) return FALSE;
+
+    if (!RtlQueryInformationActivationContext( 0, handle, NULL, RunlevelInformationInActivationContext,
+                                               &run_level, sizeof(run_level), NULL ))
+    {
+        TRACE( "image requested run level %#x\n", run_level.RunLevel );
+        if (run_level.RunLevel == ACTCTX_RUN_LEVEL_HIGHEST_AVAILABLE
+                || run_level.RunLevel == ACTCTX_RUN_LEVEL_REQUIRE_ADMIN)
+            ret = TRUE;
+    }
+    RtlReleaseActivationContext( handle );
+
+    return ret;
+}
+
+
+static HANDLE get_elevated_token(void)
+{
+    TOKEN_ELEVATION_TYPE type;
+    TOKEN_LINKED_TOKEN linked;
+    NTSTATUS status;
+
+    if ((status = NtQueryInformationToken( GetCurrentThreadEffectiveToken(),
+                                           TokenElevationType, &type, sizeof(type), NULL )))
+        return NULL;
+
+    if (type == TokenElevationTypeFull) return NULL;
+
+    if ((status = NtQueryInformationToken( GetCurrentThreadEffectiveToken(),
+                                           TokenLinkedToken, &linked, sizeof(linked), NULL )))
+        return NULL;
+
+    return linked.LinkedToken;
 }
 
 
@@ -485,12 +543,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
                                                       const WCHAR *cur_dir, STARTUPINFOW *startup_info,
                                                       PROCESS_INFORMATION *info, HANDLE *new_token )
 {
-    const struct proc_thread_attr *handle_list = NULL;
+    const struct proc_thread_attr *handle_list = NULL, *job_list = NULL;
     WCHAR name[MAX_PATH];
     WCHAR *p, *tidy_cmdline = cmd_line;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     RTL_USER_PROCESS_INFORMATION rtl_info;
-    HANDLE parent = 0, debug = 0;
+    HANDLE parent = 0, debug = 0, elevated_token = NULL;
     ULONG nt_flags = 0;
     NTSTATUS status;
 
@@ -607,6 +665,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
                             params->ConsoleHandle = console->reference;
                             break;
                         }
+                    case PROC_THREAD_ATTRIBUTE_JOB_LIST:
+                        job_list = &attrs->attrs[i];
+                        TRACE( "PROC_THREAD_ATTRIBUTE_JOB_LIST handle count %Iu.\n",
+                               attrs->attrs[i].size / sizeof(HANDLE) );
+                        break;
                     default:
                         FIXME("Unsupported attribute %#Ix.\n", attrs->attrs[i].attr);
                         break;
@@ -620,8 +683,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     if (flags & CREATE_BREAKAWAY_FROM_JOB) nt_flags |= PROCESS_CREATE_FLAGS_BREAKAWAY;
     if (flags & CREATE_SUSPENDED) nt_flags |= PROCESS_CREATE_FLAGS_SUSPENDED;
 
+    if (!token && image_needs_elevation( params->ImagePathName.Buffer ))
+        token = elevated_token = get_elevated_token();
+
     status = create_nt_process( token, debug, process_attr, thread_attr,
-                                nt_flags, params, &rtl_info, parent, handle_list );
+                                nt_flags, params, &rtl_info, parent, handle_list, job_list );
     switch (status)
     {
     case STATUS_SUCCESS:
@@ -661,7 +727,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         TRACE( "started process pid %04x tid %04x\n", info->dwProcessId, info->dwThreadId );
     }
 
- done:
+done:
+    if (elevated_token) NtClose( elevated_token );
     RtlDestroyProcessParameters( params );
     if (tidy_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, tidy_cmdline );
     return set_ntstatus( status );
@@ -1715,7 +1782,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH UpdateProcThreadAttribute( struct _PROC_THREAD_ATT
        break;
 
     case PROC_THREAD_ATTRIBUTE_JOB_LIST:
-        FIXME( "Unhandled attribute PROC_THREAD_ATTRIBUTE_JOB_LIST\n" );
+        if ((size / sizeof(HANDLE)) * sizeof(HANDLE) != size)
+        {
+            SetLastError( ERROR_BAD_LENGTH );
+            return FALSE;
+        }
         break;
 
     default:

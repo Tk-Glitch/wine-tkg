@@ -567,7 +567,6 @@ static inline void set_fd_epoll_events( struct fd *fd, int user, int events )
     }
     else if (pollfd[user].fd == -1)
     {
-        if (pollfd[user].events) return;  /* stopped waiting on it, don't restart */
         ctl = EPOLL_CTL_ADD;
     }
     else
@@ -676,7 +675,6 @@ static inline void set_fd_epoll_events( struct fd *fd, int user, int events )
     }
     else if (pollfd[user].fd == -1)
     {
-        if (pollfd[user].events) return;  /* stopped waiting on it, don't restart */
         ev[0].flags |= EV_ADD | ((events & POLLIN) ? EV_ENABLE : EV_DISABLE);
         ev[1].flags |= EV_ADD | ((events & POLLOUT) ? EV_ENABLE : EV_DISABLE);
     }
@@ -785,7 +783,6 @@ static inline void set_fd_epoll_events( struct fd *fd, int user, int events )
     }
     else if (pollfd[user].fd == -1)
     {
-        if (pollfd[user].events) return;  /* stopped waiting on it, don't restart */
         ret = port_associate( port_fd, PORT_SOURCE_FD, fd->unix_fd, events, (void *)user );
     }
     else
@@ -1671,7 +1668,7 @@ void set_fd_events( struct fd *fd, int events )
         pollfd[user].events = POLLERR;
         pollfd[user].revents = 0;
     }
-    else if (pollfd[user].fd != -1 || !pollfd[user].events)
+    else
     {
         pollfd[user].fd = fd->unix_fd;
         pollfd[user].events = events;
@@ -1936,9 +1933,10 @@ void get_nt_name( struct fd *fd, struct unicode_str *name )
 
 static char *decode_symlink(const char *name, ULONG *tag, int *is_dir)
 {
-    char link[MAX_PATH], *p;
+    static char link[MAX_PATH];
     ULONG reparse_tag;
     int len, i;
+    char *p;
 
     len = readlink( name, link, sizeof(link) );
     if (len == -1)
@@ -1985,7 +1983,7 @@ static char *decode_symlink(const char *name, ULONG *tag, int *is_dir)
     return p;
 }
 
-static void rewrite_symlink( const char *path )
+static int rewrite_symlink( const char *path )
 {
     static char marker[] = "////.//.//"; /* "P" (0x50) encoded as a path (0=/ 1=./) */
     char *link, *prefix_end, *local_link;
@@ -2000,23 +1998,23 @@ static void rewrite_symlink( const char *path )
     {
         char tmp_dir[MAX_PATH];
 
-        if (getcwd( tmp_dir, sizeof(tmp_dir) ) == NULL) return;
-        if (fchdir( config_dir_fd ) == -1) return;
-        if (getcwd( config_dir, sizeof(config_dir) ) == NULL) return;
-        if (chdir( tmp_dir ) == -1) return;
+        if (getcwd( tmp_dir, sizeof(tmp_dir) ) == NULL) return FALSE;
+        if (fchdir( config_dir_fd ) == -1) return FALSE;
+        if (getcwd( config_dir, sizeof(config_dir) ) == NULL) return FALSE;
+        if (chdir( tmp_dir ) == -1) return FALSE;
         config_dir_len = strlen( config_dir );
     }
 
     /* grab the current link contents */
     link = decode_symlink( path, &tag, &is_dir );
-    if (link == NULL) return;
+    if (link == NULL) return FALSE;
 
     /* find out if the prefix matches, if it does then do not modify the link */
     prefix_end = strstr( link, marker );
-    if (prefix_end == NULL) return;
+    if (prefix_end == NULL) return TRUE;
     local_link = prefix_end + strlen( marker );
     len = prefix_end - link;
-    if (len == config_dir_len && strncmp( config_dir, link, len ) == 0) return;
+    if (len == config_dir_len && strncmp( config_dir, link, len ) == 0) return TRUE;
     /* if the prefix does not match then re-encode the link with the new prefix */
 
     /* Encode the reparse tag into the symlink */
@@ -2040,6 +2038,7 @@ static void rewrite_symlink( const char *path )
     /* replace the symlink */
     unlink( path );
     symlink( new_target, path );
+    return TRUE;
 }
 
 /* open() wrapper that returns a struct fd with no fd user set */
@@ -2110,15 +2109,14 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
     }
     else rw_mode = O_RDONLY;
 
-#if defined(O_SYMLINK)
-    if ((options & FILE_OPEN_REPARSE_POINT) && !(flags & O_CREAT))
-        flags |= O_SYMLINK;
-#endif
-
     fd->unix_name = NULL;
     if ((path = dup_fd_name( root, name )))
     {
-        rewrite_symlink( path );
+        int is_symlink = rewrite_symlink( path );
+#if defined(O_SYMLINK)
+        if (is_symlink && (options & FILE_OPEN_REPARSE_POINT) && !(flags & O_CREAT))
+            flags |= O_SYMLINK;
+#endif
         fd->unlink_name = path;
         fd->unix_name = realpath( path, NULL );
         if (!fd->unix_name) fd->unix_name = dup_fd_name( root, name ); /* dangling symlink */

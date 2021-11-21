@@ -20,7 +20,6 @@
 #include <stdarg.h>
 
 #define COBJMACROS
-#include "initguid.h"
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -29,6 +28,8 @@
 #include "nvapi.h"
 #include "d3d9.h"
 #include "d3d11.h"
+#include "initguid.h"
+#include "wine/winedxgi.h"
 
 #include "wine/wined3d.h"
 
@@ -682,30 +683,29 @@ static NvAPI_Status CDECL NvAPI_GPU_GetGpuCoreCount(NvPhysicalGpuHandle hPhysica
     return NVAPI_OK;
 }
 
-static NvAPI_Status CDECL NvAPI_D3D11_SetDepthBoundsTest(IUnknown *pDeviceOrContext, NvU32 bEnable, float fMinDepth, float fMaxDepth)
+static NvAPI_Status CDECL NvAPI_D3D11_SetDepthBoundsTest(IUnknown *unk, NvU32 enable, float min, float max)
 {
-    struct wined3d_device *device;
-    union { DWORD d; float f; } z;
+    struct wined3d_device_context *wined3d_context;
+    IWineD3DDeviceContext *context;
+    HRESULT hr;
 
-    TRACE("(%p, %u, %f, %f)\n", pDeviceOrContext, bEnable, fMinDepth, fMaxDepth);
+    TRACE("unk %p, enable %u, min %.8e, max %.8e.\n", unk, enable, min, max);
 
-    if (!pDeviceOrContext)
+    if (!unk)
         return NVAPI_INVALID_ARGUMENT;
 
-    if (FAILED(IUnknown_QueryInterface(pDeviceOrContext, &IID_IWineD3DDevice, (void **)&device)))
+    if (FAILED(hr = IUnknown_QueryInterface(unk, &IID_IWineD3DDeviceContext, (void **)&context)))
     {
-        ERR("Failed to get wined3d device handle!\n");
+        ERR("Failed to retrieve IWineD3DDeviceContext interface, hr %#x.\n", hr);
         return NVAPI_ERROR;
     }
+    wined3d_context = IWineD3DDeviceContext_get_wined3d_device_context(context);
 
     wined3d_mutex_lock();
-    wined3d_device_set_render_state(device, WINED3D_RS_ADAPTIVETESS_X, bEnable ? WINED3DFMT_NVDB : 0);
-    z.f = fMinDepth;
-    wined3d_device_set_render_state(device, WINED3D_RS_ADAPTIVETESS_Z, z.d);
-    z.f = fMaxDepth;
-    wined3d_device_set_render_state(device, WINED3D_RS_ADAPTIVETESS_W, z.d);
+    wined3d_device_context_set_depth_bounds(wined3d_context, enable, min, max);
     wined3d_mutex_unlock();
 
+    IWineD3DDeviceContext_Release(context);
     return NVAPI_OK;
 }
 

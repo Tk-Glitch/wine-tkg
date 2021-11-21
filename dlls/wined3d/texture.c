@@ -920,7 +920,7 @@ static void wined3d_texture_update_map_binding(struct wined3d_texture *texture)
     texture->update_map_binding = 0;
 }
 
-void wined3d_texture_set_map_binding(struct wined3d_texture *texture, DWORD map_binding)
+static void wined3d_texture_set_map_binding(struct wined3d_texture *texture, DWORD map_binding)
 {
     texture->update_map_binding = map_binding;
     if (!texture->resource.map_count)
@@ -1741,7 +1741,7 @@ DWORD CDECL wined3d_texture_set_lod(struct wined3d_texture *texture, DWORD lod)
         wined3d_texture_gl(texture)->texture_rgb.base_level = ~0u;
         wined3d_texture_gl(texture)->texture_srgb.base_level = ~0u;
         if (resource->bind_count)
-            wined3d_cs_emit_set_sampler_state(device->cs, texture->sampler, WINED3D_SAMP_MAX_MIP_LEVEL,
+            wined3d_device_context_emit_set_sampler_state(&device->cs->c, texture->sampler, WINED3D_SAMP_MAX_MIP_LEVEL,
                     device->cs->c.state->sampler_states[texture->sampler][WINED3D_SAMP_MAX_MIP_LEVEL]);
     }
 
@@ -3525,6 +3525,30 @@ static void texture_resource_unload(struct wined3d_resource *resource)
     resource_unload(&texture->resource);
 }
 
+static HRESULT texture_resource_sub_resource_get_size(struct wined3d_resource *resource,
+        unsigned int sub_resource_idx, unsigned int *size, unsigned int *row_pitch, unsigned int *slice_pitch)
+{
+    struct wined3d_texture *texture = texture_from_resource(resource);
+    unsigned int texture_level = sub_resource_idx % texture->level_count;
+    struct wined3d_texture_sub_resource *sub_resource;
+
+    if (!(sub_resource = wined3d_texture_get_sub_resource(texture, sub_resource_idx)))
+        return E_INVALIDARG;
+
+    if (resource->format_flags & WINED3DFMT_FLAG_BROKEN_PITCH)
+    {
+        *row_pitch = wined3d_texture_get_level_width(texture, texture_level) * resource->format->byte_count;
+        *slice_pitch = wined3d_texture_get_level_height(texture, texture_level) * (*row_pitch);
+    }
+    else
+    {
+        wined3d_texture_get_pitch(texture, texture_level, row_pitch, slice_pitch);
+    }
+
+    *size = sub_resource->size;
+    return S_OK;
+}
+
 static HRESULT texture_resource_sub_resource_map(struct wined3d_resource *resource, unsigned int sub_resource_idx,
         struct wined3d_map_desc *map_desc, const struct wined3d_box *box, DWORD flags)
 {
@@ -3660,36 +3684,6 @@ static HRESULT texture_resource_sub_resource_map(struct wined3d_resource *resour
     return WINED3D_OK;
 }
 
-static HRESULT texture_resource_sub_resource_map_info(struct wined3d_resource *resource, unsigned int sub_resource_idx,
-        struct wined3d_map_info *info, DWORD flags)
-{
-    const struct wined3d_format *format = resource->format;
-    struct wined3d_texture_sub_resource *sub_resource;
-    unsigned int fmt_flags = resource->format_flags;
-    struct wined3d_texture *texture;
-    unsigned int texture_level;
-
-    texture = texture_from_resource(resource);
-    if (!(sub_resource = wined3d_texture_get_sub_resource(texture, sub_resource_idx)))
-        return E_INVALIDARG;
-
-    texture_level = sub_resource_idx % texture->level_count;
-
-    if (fmt_flags & WINED3DFMT_FLAG_BROKEN_PITCH)
-    {
-        info->row_pitch = wined3d_texture_get_level_width(texture, texture_level) * format->byte_count;
-        info->slice_pitch = wined3d_texture_get_level_height(texture, texture_level) * info->row_pitch;
-    }
-    else
-    {
-        wined3d_texture_get_pitch(texture, texture_level, &info->row_pitch, &info->slice_pitch);
-    }
-
-    info->size = info->slice_pitch * wined3d_texture_get_level_depth(texture, texture_level);
-
-    return WINED3D_OK;
-}
-
 static HRESULT texture_resource_sub_resource_unmap(struct wined3d_resource *resource, unsigned int sub_resource_idx)
 {
     struct wined3d_texture_sub_resource *sub_resource;
@@ -3741,8 +3735,8 @@ static const struct wined3d_resource_ops texture_resource_ops =
     texture_resource_decref,
     texture_resource_preload,
     texture_resource_unload,
+    texture_resource_sub_resource_get_size,
     texture_resource_sub_resource_map,
-    texture_resource_sub_resource_map_info,
     texture_resource_sub_resource_unmap,
 };
 

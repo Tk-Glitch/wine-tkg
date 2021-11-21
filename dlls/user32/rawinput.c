@@ -98,7 +98,7 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
 {
     SP_DEVINFO_DATA device_data = {sizeof(device_data)};
     SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail;
-    struct device *device;
+    struct device *device = NULL;
     UINT32 handle;
     HANDLE file;
     DWORD i, size, type;
@@ -117,15 +117,6 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
         return NULL;
     }
 
-    for (i = 0; i < rawinput_devices_count; ++i)
-    {
-        if (rawinput_devices[i].handle == UlongToHandle(handle))
-        {
-            TRACE("Updating device %x / %s\n", handle, debugstr_w(rawinput_devices[i].detail->DevicePath));
-            return rawinput_devices + i;
-        }
-    }
-
     if (!(detail = malloc(size)))
     {
         ERR("Failed to allocate memory.\n");
@@ -133,8 +124,6 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
     }
     detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
     SetupDiGetDeviceInterfaceDetailW(set, iface, detail, size, NULL, NULL);
-
-    TRACE("Found device %x / %s.\n", handle, debugstr_w(detail->DevicePath));
 
     file = CreateFileW(detail->DevicePath, GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0);
@@ -145,8 +134,24 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
         return NULL;
     }
 
-    if (!array_reserve((void **)&rawinput_devices, &rawinput_devices_max,
-            rawinput_devices_count + 1, sizeof(*rawinput_devices)))
+    for (i = 0; i < rawinput_devices_count && !device; ++i)
+        if (rawinput_devices[i].handle == UlongToHandle(handle))
+            device = rawinput_devices + i;
+
+    if (device)
+    {
+        TRACE("Updating device %x / %s.\n", handle, debugstr_w(detail->DevicePath));
+        HidD_FreePreparsedData(device->data);
+        CloseHandle(device->file);
+        free(device->detail);
+    }
+    else if (array_reserve((void **)&rawinput_devices, &rawinput_devices_max,
+                           rawinput_devices_count + 1, sizeof(*rawinput_devices)))
+    {
+        device = &rawinput_devices[rawinput_devices_count++];
+        TRACE("Adding device %x / %s.\n", handle, debugstr_w(detail->DevicePath));
+    }
+    else
     {
         ERR("Failed to allocate memory.\n");
         CloseHandle(file);
@@ -154,7 +159,6 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
         return NULL;
     }
 
-    device = &rawinput_devices[rawinput_devices_count++];
     device->detail = detail;
     device->file = file;
     device->handle = ULongToHandle(handle);
@@ -193,42 +197,6 @@ static void find_devices(void)
     }
     rawinput_devices_count = 0;
 
-    /* add mice and keyboards first so we won't add the duplicated HID devices */
-
-    set = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_MOUSE, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
-
-    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_MOUSE, idx, &iface); ++idx)
-    {
-        static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
-
-        if (!(device = add_device(set, &iface)))
-            continue;
-
-        device->info.dwType = RIM_TYPEMOUSE;
-        device->info.u.mouse = mouse_info;
-        HidD_FreePreparsedData(device->data);
-        device->data = NULL;
-    }
-
-    SetupDiDestroyDeviceInfoList(set);
-
-    set = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_KEYBOARD, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
-
-    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_KEYBOARD, idx, &iface); ++idx)
-    {
-        static const RID_DEVICE_INFO_KEYBOARD keyboard_info = {0, 0, 1, 12, 3, 101};
-
-        if (!(device = add_device(set, &iface)))
-            continue;
-
-        device->info.dwType = RIM_TYPEKEYBOARD;
-        device->info.u.keyboard = keyboard_info;
-        HidD_FreePreparsedData(device->data);
-        device->data = NULL;
-    }
-
-    SetupDiDestroyDeviceInfoList(set);
-
     set = SetupDiGetClassDevsW(&hid_guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
 
     for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &hid_guid, idx, &iface); ++idx)
@@ -257,6 +225,36 @@ static void find_devices(void)
 
     SetupDiDestroyDeviceInfoList(set);
 
+    set = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_MOUSE, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
+
+    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_MOUSE, idx, &iface); ++idx)
+    {
+        static const RID_DEVICE_INFO_MOUSE mouse_info = {1, 5, 0, FALSE};
+
+        if (!(device = add_device(set, &iface)))
+            continue;
+
+        device->info.dwType = RIM_TYPEMOUSE;
+        device->info.u.mouse = mouse_info;
+    }
+
+    SetupDiDestroyDeviceInfoList(set);
+
+    set = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_KEYBOARD, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
+
+    for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_KEYBOARD, idx, &iface); ++idx)
+    {
+        static const RID_DEVICE_INFO_KEYBOARD keyboard_info = {0, 0, 1, 12, 3, 101};
+
+        if (!(device = add_device(set, &iface)))
+            continue;
+
+        device->info.dwType = RIM_TYPEKEYBOARD;
+        device->info.u.keyboard = keyboard_info;
+    }
+
+    SetupDiDestroyDeviceInfoList(set);
+
     LeaveCriticalSection(&rawinput_devices_cs);
 }
 
@@ -275,6 +273,21 @@ static struct device *find_device_from_handle(HANDLE handle)
 }
 
 
+BOOL rawinput_device_get_usages(HANDLE handle, USAGE *usage_page, USAGE *usage)
+{
+    struct device *device;
+
+    *usage_page = *usage = 0;
+
+    if (!(device = find_device_from_handle(handle))) return FALSE;
+    if (device->info.dwType != RIM_TYPEHID) return FALSE;
+
+    *usage_page = device->info.u.hid.usUsagePage;
+    *usage = device->info.u.hid.usUsage;
+    return TRUE;
+}
+
+
 struct rawinput_thread_data *rawinput_thread_data(void)
 {
     struct user_thread_info *thread_info = get_user_thread_info();
@@ -288,6 +301,8 @@ struct rawinput_thread_data *rawinput_thread_data(void)
 
 BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hardware_msg_data *msg_data)
 {
+    SIZE_T size;
+
     rawinput->header.dwType = msg_data->rawinput.type;
     if (msg_data->rawinput.type == RIM_TYPEMOUSE)
     {
@@ -386,19 +401,20 @@ BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hardware_ms
     }
     else if (msg_data->rawinput.type == RIM_TYPEHID)
     {
-        if (sizeof(*rawinput) + msg_data->rawinput.hid.length > RAWINPUT_BUFFER_SIZE)
+        size = msg_data->rawinput.hid.count * msg_data->rawinput.hid.length;
+        if (size > RAWINPUT_BUFFER_SIZE - sizeof(*rawinput))
         {
-            ERR( "unexpectedly large hardware message dropped\n" );
+            ERR( "Dropping unexpectedly large HID hardware message.\n" );
             return FALSE;
         }
 
-        rawinput->header.dwSize  = FIELD_OFFSET( RAWINPUT, data.hid.bRawData ) + msg_data->rawinput.hid.length;
+        rawinput->header.dwSize  = FIELD_OFFSET( RAWINPUT, data.hid.bRawData ) + size;
         rawinput->header.hDevice = ULongToHandle( msg_data->rawinput.hid.device );
         rawinput->header.wParam  = 0;
 
+        rawinput->data.hid.dwCount = msg_data->rawinput.hid.count;
         rawinput->data.hid.dwSizeHid = msg_data->rawinput.hid.length;
-        rawinput->data.hid.dwCount = 1;
-        memcpy( rawinput->data.hid.bRawData, msg_data + 1, msg_data->rawinput.hid.length );
+        memcpy( rawinput->data.hid.bRawData, msg_data + 1, size );
     }
     else
     {
@@ -648,13 +664,14 @@ UINT WINAPI DECLSPEC_HOTPATCH GetRawInputBuffer(RAWINPUT *data, UINT *data_size,
 
     for (i = 0; i < count; ++i)
     {
-        rawinput_from_hardware_message(data, msg_data);
+        if (!rawinput_from_hardware_message(data, msg_data)) break;
         if (overhead) memmove((char *)&data->data + overhead, &data->data,
                               data->header.dwSize - sizeof(RAWINPUTHEADER));
         data->header.dwSize += overhead;
         data = NEXTRAWINPUTBLOCK(data);
         msg_size = sizeof(*msg_data);
-        if (msg_data->rawinput.type == RIM_TYPEHID) msg_size += msg_data->rawinput.hid.length;
+        if (msg_data->rawinput.type == RIM_TYPEHID)
+            msg_size += msg_data->rawinput.hid.count * msg_data->rawinput.hid.length;
         msg_data = (struct hardware_msg_data *)((char *)msg_data + msg_size);
     }
 

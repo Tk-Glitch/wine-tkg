@@ -128,8 +128,10 @@ static const char *server_dir;
 unsigned int supported_machines_count = 0;
 USHORT supported_machines[8] = { 0 };
 USHORT native_machine = 0;
-BOOL is_wow64 = FALSE;
 BOOL process_exiting = FALSE;
+#ifndef _WIN64
+BOOL is_wow64 = FALSE;
+#endif
 
 timeout_t server_start_time = 0;  /* time of server startup */
 
@@ -650,24 +652,18 @@ static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOO
  *              server_select
  */
 unsigned int server_select( const select_op_t *select_op, data_size_t size, UINT flags,
-                            timeout_t abs_timeout, CONTEXT *context, pthread_mutex_t *mutex,
+                            timeout_t abs_timeout, context_t *context, pthread_mutex_t *mutex,
                             user_apc_t *user_apc )
 {
     unsigned int ret;
     int cookie;
     obj_handle_t apc_handle = 0;
-    context_t server_context;
-    BOOL suspend_context = FALSE;
+    BOOL suspend_context = !!context;
     apc_call_t call;
     apc_result_t result;
     sigset_t old_set;
 
     memset( &result, 0, sizeof(result) );
-    if (context)
-    {
-        suspend_context = TRUE;
-        context_to_server( &server_context, context );
-    }
 
     do
     {
@@ -685,26 +681,13 @@ unsigned int server_select( const select_op_t *select_op, data_size_t size, UINT
                 wine_server_add_data( req, select_op, size );
                 if (suspend_context)
                 {
-                    wine_server_add_data( req, &server_context, sizeof(server_context) );
+                    wine_server_add_data( req, context, sizeof(*context) );
                     suspend_context = FALSE; /* server owns the context now */
                 }
-                if (context) wine_server_set_reply( req, &server_context, sizeof(server_context) );
+                if (context) wine_server_set_reply( req, context, sizeof(*context) );
                 ret = server_call_unlocked( req );
                 apc_handle  = reply->apc_handle;
                 call        = reply->call;
-                if (wine_server_reply_size( reply ))
-                {
-                    DWORD context_flags = context->ContextFlags; /* unchanged registers are still available */
-                    XSTATE *xs = xstate_from_context( context );
-                    ULONG64 mask;
-
-                    if (xs)
-                        mask = xs->Mask;
-                    context_from_server( context, &server_context );
-                    context->ContextFlags |= context_flags;
-                    if (xs)
-                        xs->Mask |= mask;
-                }
             }
             SERVER_END_REQ;
 
@@ -1502,25 +1485,6 @@ static int init_thread_pipe(void)
 
 
 /***********************************************************************
- *           init_teb64
- *
- * Initialize the 64-bit part of the TEB for WoW64 threads.
- */
-static void init_teb64( TEB *teb )
-{
-#ifndef _WIN64
-    TEB64 *teb64 = (TEB64 *)((char *)teb - teb_offset);
-
-    if (!is_wow64) return;
-    teb->GdiBatchCount = PtrToUlong( teb64 );
-    teb->WowTebOffset  = -teb_offset;
-    teb64->ClientId.UniqueProcess = PtrToUlong( teb->ClientId.UniqueProcess );
-    teb64->ClientId.UniqueThread  = PtrToUlong( teb->ClientId.UniqueThread );
-    teb64->WowTebOffset           = teb_offset;
-#endif
-}
-
-/***********************************************************************
  *           process_exit_wrapper
  *
  * Close server socket and exit process normally.
@@ -1546,6 +1510,7 @@ size_t server_init_process(void)
     int ret, reply_pipe;
     struct sigaction sig_act;
     size_t info_size;
+    DWORD pid, tid;
 
     server_pid = -1;
     if (env_socket)
@@ -1611,18 +1576,13 @@ size_t server_init_process(void)
     {
         req->unix_pid    = getpid();
         req->unix_tid    = get_unix_tid();
-        req->teb         = wine_server_client_ptr( NtCurrentTeb() );
-        req->peb         = wine_server_client_ptr( NtCurrentTeb()->Peb );
-#ifdef __i386__
-        req->ldt_copy    = wine_server_client_ptr( &__wine_ldt_copy );
-#endif
         req->reply_fd    = reply_pipe;
         req->wait_fd     = ntdll_get_thread_data()->wait_fd[1];
         req->debug_level = (TRACE_ON(server) != 0);
         wine_server_set_reply( req, supported_machines, sizeof(supported_machines) );
         ret = wine_server_call( req );
-        NtCurrentTeb()->ClientId.UniqueProcess = ULongToHandle(reply->pid);
-        NtCurrentTeb()->ClientId.UniqueThread  = ULongToHandle(reply->tid);
+        pid               = reply->pid;
+        tid               = reply->tid;
         info_size         = reply->info_size;
         server_start_time = reply->server_start;
         supported_machines_count = wine_server_reply_size( reply ) / sizeof(*supported_machines);
@@ -1641,11 +1601,11 @@ size_t server_init_process(void)
     {
         if (arch && !strcmp( arch, "win32" ))
             fatal_error( "WINEARCH set to win32 but '%s' is a 64-bit installation.\n", config_dir );
-        if (!is_win64)
-        {
-            is_wow64 = TRUE;
-            init_teb64( NtCurrentTeb() );
-        }
+#ifndef _WIN64
+        is_wow64 = TRUE;
+        NtCurrentTeb()->GdiBatchCount = PtrToUlong( (char *)NtCurrentTeb() - teb_offset );
+        NtCurrentTeb()->WowTebOffset  = -teb_offset;
+#endif
     }
     else
     {
@@ -1654,6 +1614,8 @@ size_t server_init_process(void)
         if (arch && !strcmp( arch, "win64" ))
             fatal_error( "WINEARCH set to win64 but '%s' is a 32-bit installation.\n", config_dir );
     }
+
+    set_thread_id( NtCurrentTeb(), pid, tid );
 
     for (i = 0; i < supported_machines_count; i++)
         if (supported_machines[i] == current_machine) return info_size;
@@ -1668,7 +1630,7 @@ size_t server_init_process(void)
 void server_init_process_done(void)
 {
     PEB *peb = NtCurrentTeb()->Peb;
-    void *entry;
+    void *entry, *teb;
     NTSTATUS status;
     int suspend, needs_close, unixdir;
 
@@ -1692,9 +1654,17 @@ void server_init_process_done(void)
      * is sent by init_process_done */
     signal_init_process();
 
+    /* always send the native TEB */
+    if (!(teb = NtCurrentTeb64())) teb = NtCurrentTeb();
+
     /* Signal the parent process to continue */
     SERVER_START_REQ( init_process_done )
     {
+        req->teb      = wine_server_client_ptr( teb );
+        req->peb      = NtCurrentTeb64() ? NtCurrentTeb64()->Peb : wine_server_client_ptr( peb );
+#ifdef __i386__
+        req->ldt_copy = wine_server_client_ptr( &__wine_ldt_copy );
+#endif
         status = wine_server_call( req );
         suspend = reply->suspend;
         entry = wine_server_get_ptr( reply->entry );
@@ -1713,23 +1683,24 @@ void server_init_process_done(void)
  */
 void server_init_thread( void *entry_point, BOOL *suspend )
 {
+    void *teb;
     int reply_pipe = init_thread_pipe();
+
+    /* always send the native TEB */
+    if (!(teb = NtCurrentTeb64())) teb = NtCurrentTeb();
 
     SERVER_START_REQ( init_thread )
     {
         req->unix_tid  = get_unix_tid();
-        req->teb       = wine_server_client_ptr( NtCurrentTeb() );
+        req->teb       = wine_server_client_ptr( teb );
         req->entry     = wine_server_client_ptr( entry_point );
         req->reply_fd  = reply_pipe;
         req->wait_fd   = ntdll_get_thread_data()->wait_fd[1];
         wine_server_call( req );
         *suspend = reply->suspend;
-        NtCurrentTeb()->ClientId.UniqueProcess = ULongToHandle(reply->pid);
-        NtCurrentTeb()->ClientId.UniqueThread  = ULongToHandle(reply->tid);
     }
     SERVER_END_REQ;
     close( reply_pipe );
-    init_teb64( NtCurrentTeb() );
 }
 
 

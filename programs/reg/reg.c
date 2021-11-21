@@ -1,5 +1,6 @@
 /*
  * Copyright 2008 Andrew Riedi
+ * Copyright 2016-2017, 2021 Hugh McMaster
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -285,6 +286,7 @@ static BOOL is_help_switch(const WCHAR *s)
 
 enum operations {
     REG_ADD,
+    REG_COPY,
     REG_DELETE,
     REG_EXPORT,
     REG_IMPORT,
@@ -299,6 +301,7 @@ static enum operations get_operation(const WCHAR *str, int *op_help)
     static const struct op_info op_array[] =
     {
         { L"add",     REG_ADD,     STRING_ADD_USAGE },
+        { L"copy",    REG_COPY,    STRING_COPY_USAGE },
         { L"delete",  REG_DELETE,  STRING_DELETE_USAGE },
         { L"export",  REG_EXPORT,  STRING_EXPORT_USAGE },
         { L"import",  REG_IMPORT,  STRING_IMPORT_USAGE },
@@ -346,14 +349,12 @@ int __cdecl wmain(int argc, WCHAR *argvW[])
         return 1;
     }
     else if (argc == 2) /* Valid operation, no arguments supplied */
-    {
-        output_message(STRING_INVALID_SYNTAX);
-        output_message(STRING_FUNC_HELP, wcsupr(argvW[1]));
-        return 1;
-    }
+        goto invalid;
 
     if (is_help_switch(argvW[2]))
     {
+        if (argc > 3) goto invalid;
+
         output_message(op_help);
         output_message(STRING_REG_VIEW_USAGE);
         return 0;
@@ -361,6 +362,9 @@ int __cdecl wmain(int argc, WCHAR *argvW[])
 
     if (op == REG_ADD)
         return reg_add(argc, argvW);
+
+    if (op == REG_COPY)
+        return reg_copy(argc, argvW);
 
     if (op == REG_DELETE)
         return reg_delete(argc, argvW);
@@ -372,4 +376,9 @@ int __cdecl wmain(int argc, WCHAR *argvW[])
         return reg_import(argc, argvW);
 
     return reg_query(argc, argvW);
+
+invalid:
+    output_message(STRING_INVALID_SYNTAX);
+    output_message(STRING_FUNC_HELP, wcsupr(argvW[1]));
+    return 1;
 }

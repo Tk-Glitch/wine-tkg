@@ -161,12 +161,14 @@ typedef struct DdsFrameDecode {
 
 typedef struct DdsEncoder {
     IWICBitmapEncoder IWICBitmapEncoder_iface;
+    IWICDdsEncoder IWICDdsEncoder_iface;
     LONG ref;
     CRITICAL_SECTION lock;
     IStream *stream;
     UINT frame_count;
     BOOL uncommitted_frame;
     BOOL committed;
+    dds_info info;
 } DdsEncoder;
 
 typedef struct DdsFrameEncode {
@@ -485,6 +487,30 @@ static UINT get_bytes_per_block_from_format(DXGI_FORMAT format)
     }
 }
 
+static UINT get_frame_count(UINT depth, UINT mip_levels, UINT array_size, WICDdsDimension dimension)
+{
+    UINT frame_count, i;
+
+    if (depth == 1)
+    {
+        frame_count = mip_levels;
+    }
+    else
+    {
+        frame_count = 0;
+        for (i = 0; i < mip_levels; i++)
+        {
+            frame_count += depth;
+            if (depth > 1) depth /= 2;
+        }
+    }
+
+    frame_count *= array_size;
+    if (dimension == WICDdsTextureCube) frame_count *= 6;
+
+    return frame_count;
+}
+
 static const GUID *dxgi_format_to_wic_format(DXGI_FORMAT dxgi_format)
 {
     UINT i;
@@ -510,8 +536,6 @@ static BOOL is_compressed(DXGI_FORMAT format)
 
 static void get_dds_info(dds_info* info, DDS_HEADER *header, DDS_HEADER_DXT10 *header_dxt10)
 {
-    int i;
-    UINT depth;
     struct dds_format *format_info;
 
     info->width = header->width;
@@ -552,21 +576,7 @@ static void get_dds_info(dds_info* info, DDS_HEADER *header, DDS_HEADER_DXT10 *h
         info->bytes_per_block = get_bytes_per_block_from_format(info->format);
     }
 
-    /* get frame count */
-
-    if (info->depth == 1) {
-        info->frame_count = info->array_size * info->mip_levels;
-    } else {
-        info->frame_count = 0;
-        depth = info->depth;
-        for (i = 0; i < info->mip_levels; i++)
-        {
-            info->frame_count += depth;
-            if (depth > 1) depth /= 2;
-        }
-        info->frame_count *= info->array_size;
-    }
-    if (info->dimension == WICDdsTextureCube) info->frame_count *= 6;
+    info->frame_count = get_frame_count(info->depth, info->mip_levels, info->array_size, info->dimension);
 }
 
 static void decode_block(const BYTE *block_data, UINT block_count, DXGI_FORMAT format,
@@ -708,6 +718,11 @@ static inline DdsFrameDecode *impl_from_IWICDdsFrameDecode(IWICDdsFrameDecode *i
 static inline DdsEncoder *impl_from_IWICBitmapEncoder(IWICBitmapEncoder *iface)
 {
     return CONTAINING_RECORD(iface, DdsEncoder, IWICBitmapEncoder_iface);
+}
+
+static inline DdsEncoder *impl_from_IWICDdsEncoder(IWICDdsEncoder *iface)
+{
+    return CONTAINING_RECORD(iface, DdsEncoder, IWICDdsEncoder_iface);
 }
 
 static inline DdsFrameEncode *impl_from_IWICBitmapFrameEncode(IWICBitmapFrameEncode *iface)
@@ -1705,6 +1720,119 @@ HRESULT DdsDecoder_CreateInstance(REFIID iid, void** ppv)
     return ret;
 }
 
+static HRESULT WINAPI DdsEncoder_Dds_QueryInterface(IWICDdsEncoder *iface, REFIID iid,
+                                                    void **ppv)
+{
+    DdsEncoder *This = impl_from_IWICDdsEncoder(iface);
+    return IWICBitmapEncoder_QueryInterface(&This->IWICBitmapEncoder_iface, iid, ppv);
+}
+
+static ULONG WINAPI DdsEncoder_Dds_AddRef(IWICDdsEncoder *iface)
+{
+    DdsEncoder *This = impl_from_IWICDdsEncoder(iface);
+    return IWICBitmapEncoder_AddRef(&This->IWICBitmapEncoder_iface);
+}
+
+static ULONG WINAPI DdsEncoder_Dds_Release(IWICDdsEncoder *iface)
+{
+    DdsEncoder *This = impl_from_IWICDdsEncoder(iface);
+    return IWICBitmapEncoder_Release(&This->IWICBitmapEncoder_iface);
+}
+
+static HRESULT WINAPI DdsEncoder_Dds_SetParameters(IWICDdsEncoder *iface,
+                                                   WICDdsParameters *parameters)
+{
+    DdsEncoder *This = impl_from_IWICDdsEncoder(iface);
+    HRESULT hr;
+
+    TRACE("(%p,%p)\n", iface, parameters);
+
+    if (!parameters) return E_INVALIDARG;
+
+    EnterCriticalSection(&This->lock);
+
+    if (!This->stream)
+    {
+        hr = WINCODEC_ERR_WRONGSTATE;
+        goto end;
+    }
+
+    This->info.width      = parameters->Width;
+    This->info.height     = parameters->Height;
+    This->info.depth      = parameters->Depth;
+    This->info.mip_levels = parameters->MipLevels;
+    This->info.array_size = parameters->ArraySize;
+    This->info.format     = parameters->DxgiFormat;
+    This->info.dimension  = parameters->Dimension;
+    This->info.alpha_mode = parameters->AlphaMode;
+
+    This->info.bytes_per_block = get_bytes_per_block_from_format(This->info.format);
+    This->info.frame_count = get_frame_count(This->info.depth, This->info.mip_levels,
+                                             This->info.array_size, This->info.dimension);
+
+    hr = S_OK;
+
+end:
+    LeaveCriticalSection(&This->lock);
+    return hr;
+}
+
+static HRESULT WINAPI DdsEncoder_Dds_GetParameters(IWICDdsEncoder *iface,
+                                                   WICDdsParameters *parameters)
+{
+    DdsEncoder *This = impl_from_IWICDdsEncoder(iface);
+    HRESULT hr;
+
+    TRACE("(%p,%p)\n", iface, parameters);
+
+    if (!parameters) return E_INVALIDARG;
+
+    EnterCriticalSection(&This->lock);
+
+    if (!This->stream)
+    {
+        hr = WINCODEC_ERR_WRONGSTATE;
+        goto end;
+    }
+
+    parameters->Width      = This->info.width;
+    parameters->Height     = This->info.height;
+    parameters->Depth      = This->info.depth;
+    parameters->MipLevels  = This->info.mip_levels;
+    parameters->ArraySize  = This->info.array_size;
+    parameters->DxgiFormat = This->info.format;
+    parameters->Dimension  = This->info.dimension;
+    parameters->AlphaMode  = This->info.alpha_mode;
+
+    TRACE("(%p,%p) -> (%dx%d depth=%u mipLevels=%u arraySize=%u dxgiFormat=%#x dimension=%#x alphaMode=%#x)\n",
+          iface, parameters, parameters->Width, parameters->Height, parameters->Depth, parameters->MipLevels,
+          parameters->ArraySize, parameters->DxgiFormat, parameters->Dimension, parameters->AlphaMode);
+
+    hr = S_OK;
+
+end:
+    LeaveCriticalSection(&This->lock);
+    return hr;
+}
+
+static HRESULT WINAPI DdsEncoder_Dds_CreateNewFrame(IWICDdsEncoder *iface,
+                                                    IWICBitmapFrameEncode **frameEncode,
+                                                    UINT *arrayIndex, UINT *mipLevel, UINT *sliceIndex)
+{
+    FIXME("(%p,%p,%p,%p,%p): stub.\n", iface, frameEncode, arrayIndex, mipLevel, sliceIndex);
+    return E_NOTIMPL;
+}
+
+static const IWICDdsEncoderVtbl DdsEncoder_Dds_Vtbl =
+{
+    DdsEncoder_Dds_QueryInterface,
+    DdsEncoder_Dds_AddRef,
+    DdsEncoder_Dds_Release,
+    DdsEncoder_Dds_SetParameters,
+    DdsEncoder_Dds_GetParameters,
+    DdsEncoder_Dds_CreateNewFrame
+};
+
 static HRESULT WINAPI DdsEncoder_QueryInterface(IWICBitmapEncoder *iface, REFIID iid,
                                                    void **ppv)
 {
@@ -1716,8 +1844,9 @@ static HRESULT WINAPI DdsEncoder_QueryInterface(IWICBitmapEncoder *iface, REFIID
     if (IsEqualIID(&IID_IUnknown, iid) ||
         IsEqualIID(&IID_IWICBitmapEncoder, iid)) {
         *ppv = &This->IWICBitmapEncoder_iface;
-    }
-    else {
+    } else if (IsEqualIID(&IID_IWICDdsEncoder, iid)) {
+        *ppv = &This->IWICDdsEncoder_iface;
+    } else {
         *ppv = NULL;
         return E_NOINTERFACE;
     }
@@ -1776,6 +1905,20 @@ static HRESULT WINAPI DdsEncoder_Initialize(IWICBitmapEncoder *iface,
 
     This->stream = stream;
     IStream_AddRef(stream);
+
+    This->info.width = 1;
+    This->info.height = 1;
+    This->info.depth = 1;
+    This->info.mip_levels = 1;
+    This->info.array_size = 1;
+    This->info.frame_count = 1;
+    This->info.data_offset = 0;
+    This->info.bytes_per_block = get_bytes_per_block_from_format(DXGI_FORMAT_BC3_UNORM);
+    This->info.format = DXGI_FORMAT_BC3_UNORM;
+    This->info.dimension = WICDdsTexture2D;
+    This->info.alpha_mode = WICDdsAlphaModeUnknown;
+    This->info.pixel_format = &GUID_WICPixelFormatUndefined;
+    This->info.pixel_format_bpp = 0;
 
     hr = S_OK;
 
@@ -1929,6 +2072,7 @@ HRESULT DdsEncoder_CreateInstance( REFIID iid, void **ppv)
     if (!This) return E_OUTOFMEMORY;
 
     This->IWICBitmapEncoder_iface.lpVtbl = &DdsEncoder_Vtbl;
+    This->IWICDdsEncoder_iface.lpVtbl = &DdsEncoder_Dds_Vtbl;
     This->ref = 1;
     This->stream = NULL;
     This->frame_count = 0;

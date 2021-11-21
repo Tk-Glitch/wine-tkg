@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2021-04-30 09:04+0300\n"
+"PO-Revision-Date: 2021-05-19 23:30+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: Lithuanian <komp_lt@konf.lt>\n"
 "Language: lt\n"
@@ -6971,6 +6971,470 @@ msgstr "Neteisingas kreipinys.\n"
 #: dlls/kernel32/winerror.mc:3781
 msgid "Resource is not currently available.\n"
 msgstr "Išteklius šiuo metu neprieinamas.\n"
+
+#: dlls/localspl/localspl.rc:37
+msgid "Letter"
+msgstr "Laiškas"
+
+#: dlls/localspl/localspl.rc:38
+msgid "Letter Small"
+msgstr "Laiškas mažas"
+
+#: dlls/localspl/localspl.rc:39
+msgid "Tabloid"
+msgstr "Bulvarinis"
+
+#: dlls/localspl/localspl.rc:40
+msgid "Ledger"
+msgstr "Sąskaitų knyga"
+
+#: dlls/localspl/localspl.rc:41
+msgid "Legal"
+msgstr "Teisinis"
+
+#: dlls/localspl/localspl.rc:42
+msgid "Statement"
+msgstr "Pareiškimas"
+
+#: dlls/localspl/localspl.rc:43
+msgid "Executive"
+msgstr "Administracinis"
+
+#: dlls/localspl/localspl.rc:44
+msgid "A3"
+msgstr "A3"
+
+#: dlls/localspl/localspl.rc:45
+msgid "A4"
+msgstr "A4"
+
+#: dlls/localspl/localspl.rc:46
+msgid "A4 Small"
+msgstr "A4 mažas"
+
+#: dlls/localspl/localspl.rc:47
+msgid "A5"
+msgstr "A5"
+
+#: dlls/localspl/localspl.rc:48
+msgid "B4 (JIS)"
+msgstr "B4 (JIS)"
+
+#: dlls/localspl/localspl.rc:49
+msgid "B5 (JIS)"
+msgstr "B5 (JIS)"
+
+#: dlls/localspl/localspl.rc:50
+msgid "Folio"
+msgstr "Folio"
+
+#: dlls/localspl/localspl.rc:51
+msgid "Quarto"
+msgstr "Ketvirtinis"
+
+#: dlls/localspl/localspl.rc:52
+msgid "10x14"
+msgstr "10x14"
+
+#: dlls/localspl/localspl.rc:53
+msgid "11x17"
+msgstr "11x17"
+
+#: dlls/localspl/localspl.rc:54
+msgid "Note"
+msgstr "Pastaba"
+
+#: dlls/localspl/localspl.rc:55
+msgid "Envelope #9"
+msgstr "Vokas #9"
+
+#: dlls/localspl/localspl.rc:56
+msgid "Envelope #10"
+msgstr "Vokas #10"
+
+#: dlls/localspl/localspl.rc:57
+msgid "Envelope #11"
+msgstr "Vokas #11"
+
+#: dlls/localspl/localspl.rc:58
+msgid "Envelope #12"
+msgstr "Vokas #12"
+
+#: dlls/localspl/localspl.rc:59
+msgid "Envelope #14"
+msgstr "Vokas #14"
+
+#: dlls/localspl/localspl.rc:60
+msgid "C size sheet"
+msgstr "C dydžio lapas"
+
+#: dlls/localspl/localspl.rc:61
+msgid "D size sheet"
+msgstr "D dydžio lapas"
+
+#: dlls/localspl/localspl.rc:62
+msgid "E size sheet"
+msgstr "E dydžio lapas"
+
+#: dlls/localspl/localspl.rc:63
+msgid "Envelope DL"
+msgstr "Vokas DL"
+
+#: dlls/localspl/localspl.rc:64
+msgid "Envelope C5"
+msgstr "Vokas C5"
+
+#: dlls/localspl/localspl.rc:65
+msgid "Envelope C3"
+msgstr "Vokas C3"
+
+#: dlls/localspl/localspl.rc:66
+msgid "Envelope C4"
+msgstr "Vokas C4"
+
+#: dlls/localspl/localspl.rc:67
+msgid "Envelope C6"
+msgstr "Vokas C6"
+
+#: dlls/localspl/localspl.rc:68
+msgid "Envelope C65"
+msgstr "Vokas C65"
+
+#: dlls/localspl/localspl.rc:69
+msgid "Envelope B4"
+msgstr "Vokas B4"
+
+#: dlls/localspl/localspl.rc:70
+msgid "Envelope B5"
+msgstr "Vokas B5"
+
+#: dlls/localspl/localspl.rc:71
+msgid "Envelope B6"
+msgstr "Vokas B6"
+
+#: dlls/localspl/localspl.rc:72
+msgid "Envelope"
+msgstr "Vokas"
+
+#: dlls/localspl/localspl.rc:73
+msgid "Envelope Monarch"
+msgstr "Monarch vokas"
+
+#: dlls/localspl/localspl.rc:74
+msgid "6 3/4 Envelope"
+msgstr "6 3/4 vokas"
+
+#: dlls/localspl/localspl.rc:75
+msgid "US Std Fanfold"
+msgstr "JAV standartinis Fanfold"
+
+#: dlls/localspl/localspl.rc:76
+msgid "German Std Fanfold"
+msgstr "Vokiškas standartinis Fanfold"
+
+#: dlls/localspl/localspl.rc:77
+msgid "German Legal Fanfold"
+msgstr "Vokiškas teisinis Fanfold"
+
+#: dlls/localspl/localspl.rc:78
+msgid "B4 (ISO)"
+msgstr "B4 (ISO)"
+
+#: dlls/localspl/localspl.rc:79
+msgid "Japanese Postcard"
+msgstr "Japoniškas atvirukas"
+
+#: dlls/localspl/localspl.rc:80
+msgid "9x11"
+msgstr "9x11"
+
+#: dlls/localspl/localspl.rc:81
+msgid "10x11"
+msgstr "10x11"
+
+#: dlls/localspl/localspl.rc:82
+msgid "15x11"
+msgstr "15x11"
+
+#: dlls/localspl/localspl.rc:83
+msgid "Envelope Invite"
+msgstr "Pakvietimo vokas"
+
+#: dlls/localspl/localspl.rc:84
+msgid "Letter Extra"
+msgstr "Laiškas ekstra"
+
+#: dlls/localspl/localspl.rc:85
+msgid "Legal Extra"
+msgstr "Teisinis ekstra"
+
+#: dlls/localspl/localspl.rc:86
+msgid "Tabloid Extra"
+msgstr "Bulvarinis ekstra"
+
+#: dlls/localspl/localspl.rc:87
+msgid "A4 Extra"
+msgstr "A4 ekstra"
+
+#: dlls/localspl/localspl.rc:88
+msgid "Letter Transverse"
+msgstr "Laiškas skersinis"
+
+#: dlls/localspl/localspl.rc:89
+msgid "A4 Transverse"
+msgstr "A4 skersinis"
+
+#: dlls/localspl/localspl.rc:90
+msgid "Letter Extra Transverse"
+msgstr "Laiškas ekstra skersinis"
+
+#: dlls/localspl/localspl.rc:91
+msgid "Super A"
+msgstr "Super A"
+
+#: dlls/localspl/localspl.rc:92
+msgid "Super B"
+msgstr "Super B"
+
+#: dlls/localspl/localspl.rc:93
+msgid "Letter Plus"
+msgstr "Laiškas plius"
+
+#: dlls/localspl/localspl.rc:94
+msgid "A4 Plus"
+msgstr "A4 plius"
+
+#: dlls/localspl/localspl.rc:95
+msgid "A5 Transverse"
+msgstr "A5 skersinis"
+
+#: dlls/localspl/localspl.rc:96
+msgid "B5 (JIS) Transverse"
+msgstr "B5 (JIS) skersinis"
+
+#: dlls/localspl/localspl.rc:97
+msgid "A3 Extra"
+msgstr "A3 ekstra"
+
+#: dlls/localspl/localspl.rc:98
+msgid "A5 Extra"
+msgstr "A5 ekstra"
+
+#: dlls/localspl/localspl.rc:99
+msgid "B5 (ISO) Extra"
+msgstr "B5 (ISO) ekstra"
+
+#: dlls/localspl/localspl.rc:100
+msgid "A2"
+msgstr "A2"
+
+#: dlls/localspl/localspl.rc:101
+msgid "A3 Transverse"
+msgstr "A3 skersinis"
+
+#: dlls/localspl/localspl.rc:102
+msgid "A3 Extra Transverse"
+msgstr "A3 ekstra skersinis"
+
+#: dlls/localspl/localspl.rc:103
+msgid "Japanese Double Postcard"
+msgstr "Japoniškas dvigubas atvirukas"
+
+#: dlls/localspl/localspl.rc:104
+msgid "A6"
+msgstr "A6"
+
+#: dlls/localspl/localspl.rc:105
+msgid "Japanese Envelope Kaku #2"
+msgstr "Japoniškas vokas Kaku #2"
+
+#: dlls/localspl/localspl.rc:106
+msgid "Japanese Envelope Kaku #3"
+msgstr "Japoniškas vokas Kaku #3"
+
+#: dlls/localspl/localspl.rc:107
+msgid "Japanese Envelope Chou #3"
+msgstr "Japoniškas vokas Chou #3"
+
+#: dlls/localspl/localspl.rc:108
+msgid "Japanese Envelope Chou #4"
+msgstr "Japoniškas vokas Chou #4"
+
+#: dlls/localspl/localspl.rc:109
+msgid "Letter Rotated"
+msgstr "Laiškas pasuktas"
+
+#: dlls/localspl/localspl.rc:110
+msgid "A3 Rotated"
+msgstr "A3 pasuktas"
+
+#: dlls/localspl/localspl.rc:111
+msgid "A4 Rotated"
+msgstr "A4 pasuktas"
+
+#: dlls/localspl/localspl.rc:112
+msgid "A5 Rotated"
+msgstr "A5 pasuktas"
+
+#: dlls/localspl/localspl.rc:113
+msgid "B4 (JIS) Rotated"
+msgstr "B4 (JIS) pasuktas"
+
+#: dlls/localspl/localspl.rc:114
+msgid "B5 (JIS) Rotated"
+msgstr "B5 (JIS) pasuktas"
+
+#: dlls/localspl/localspl.rc:115
+msgid "Japanese Postcard Rotated"
+msgstr "Japoniškas atvirukas pasuktas"
+
+#: dlls/localspl/localspl.rc:116
+msgid "Double Japan Postcard Rotated"
+msgstr "Dvigubas japoniškas atvirukas pasuktas"
+
+#: dlls/localspl/localspl.rc:117
+msgid "A6 Rotated"
+msgstr "A6 pasuktas"
+
+#: dlls/localspl/localspl.rc:118
+msgid "Japan Envelope Kaku #2 Rotated"
+msgstr "Japoniškas vokas Kaku #2 pasuktas"
+
+#: dlls/localspl/localspl.rc:119
+msgid "Japan Envelope Kaku #3 Rotated"
+msgstr "Japoniškas vokas Kaku #3 pasuktas"
+
+#: dlls/localspl/localspl.rc:120
+msgid "Japan Envelope Chou #3 Rotated"
+msgstr "Japoniškas vokas Chou #3 pasuktas"
+
+#: dlls/localspl/localspl.rc:121
+msgid "Japan Envelope Chou #4 Rotated"
+msgstr "Japoniškas vokas Chou #4 pasuktas"
+
+#: dlls/localspl/localspl.rc:122
+msgid "B6 (JIS)"
+msgstr "B6 (JIS)"
+
+#: dlls/localspl/localspl.rc:123
+msgid "B6 (JIS) Rotated"
+msgstr "B6 (JIS) pasuktas"
+
+#: dlls/localspl/localspl.rc:124
+msgid "12x11"
+msgstr "12x11"
+
+#: dlls/localspl/localspl.rc:125
+msgid "Japan Envelope You #4"
+msgstr "Japoniškas vokas You #4"
+
+#: dlls/localspl/localspl.rc:126
+msgid "Japan Envelope You #4 Rotated"
+msgstr "Japoniškas vokas You #4 pasuktas"
+
+#: dlls/localspl/localspl.rc:127
+msgid "PRC 16K"
+msgstr "Kiniškas 16K"
+
+#: dlls/localspl/localspl.rc:128
+msgid "PRC 32K"
+msgstr "Kiniškas 32K"
+
+#: dlls/localspl/localspl.rc:129
+msgid "PRC 32K(Big)"
+msgstr "Kiniškas 32K (didelis)"
+
+#: dlls/localspl/localspl.rc:130
+msgid "PRC Envelope #1"
+msgstr "Kiniškas vokas #1"
+
+#: dlls/localspl/localspl.rc:131
+msgid "PRC Envelope #2"
+msgstr "Kiniškas vokas #2"
+
+#: dlls/localspl/localspl.rc:132
+msgid "PRC Envelope #3"
+msgstr "Kiniškas vokas #3"
+
+#: dlls/localspl/localspl.rc:133
+msgid "PRC Envelope #4"
+msgstr "Kiniškas vokas #4"
+
+#: dlls/localspl/localspl.rc:134
+msgid "PRC Envelope #5"
+msgstr "Kiniškas vokas #5"
+
+#: dlls/localspl/localspl.rc:135
+msgid "PRC Envelope #6"
+msgstr "Kiniškas vokas #6"
+
+#: dlls/localspl/localspl.rc:136
+msgid "PRC Envelope #7"
+msgstr "Kiniškas vokas #7"
+
+#: dlls/localspl/localspl.rc:137
+msgid "PRC Envelope #8"
+msgstr "Kiniškas vokas #8"
+
+#: dlls/localspl/localspl.rc:138
+msgid "PRC Envelope #9"
+msgstr "Kiniškas vokas #9"
+
+#: dlls/localspl/localspl.rc:139
+msgid "PRC Envelope #10"
+msgstr "Kiniškas vokas #10"
+
+#: dlls/localspl/localspl.rc:140
+msgid "PRC 16K Rotated"
+msgstr "Kiniškas 16K pasuktas"
+
+#: dlls/localspl/localspl.rc:141
+msgid "PRC 32K Rotated"
+msgstr "Kiniškas 32K pasuktas"
+
+#: dlls/localspl/localspl.rc:142
+msgid "PRC 32K(Big) Rotated"
+msgstr "Kiniškas 32K (didelis) pasuktas"
+
+#: dlls/localspl/localspl.rc:143
+msgid "PRC Envelope #1 Rotated"
+msgstr "Kiniškas vokas #1 pasuktas"
+
+#: dlls/localspl/localspl.rc:144
+msgid "PRC Envelope #2 Rotated"
+msgstr "Kiniškas vokas #2 pasuktas"
+
+#: dlls/localspl/localspl.rc:145
+msgid "PRC Envelope #3 Rotated"
+msgstr "Kiniškas vokas #3 pasuktas"
+
+#: dlls/localspl/localspl.rc:146
+msgid "PRC Envelope #4 Rotated"
+msgstr "Kiniškas vokas #4 pasuktas"
+
+#: dlls/localspl/localspl.rc:147
+msgid "PRC Envelope #5 Rotated"
+msgstr "Kiniškas vokas #5 pasuktas"
+
+#: dlls/localspl/localspl.rc:148
+msgid "PRC Envelope #6 Rotated"
+msgstr "Kiniškas vokas #6 pasuktas"
+
+#: dlls/localspl/localspl.rc:149
+msgid "PRC Envelope #7 Rotated"
+msgstr "Kiniškas vokas #7 pasuktas"
+
+#: dlls/localspl/localspl.rc:150
+msgid "PRC Envelope #8 Rotated"
+msgstr "Kiniškas vokas #8 pasuktas"
+
+#: dlls/localspl/localspl.rc:151
+msgid "PRC Envelope #9 Rotated"
+msgstr "Kiniškas vokas #9 pasuktas"
+
+#: dlls/localspl/localspl.rc:152
+msgid "PRC Envelope #10 Rotated"
+msgstr "Kiniškas vokas #10 pasuktas"
 
 #: dlls/localspl/localspl.rc:31 dlls/localui/localui.rc:31
 #: dlls/winspool.drv/winspool.rc:30
@@ -14237,7 +14701,7 @@ msgid ""
 "  REG [operation] [parameters]\n"
 "\n"
 "Supported operations:\n"
-"  ADD | DELETE | EXPORT | IMPORT | QUERY\n"
+"  ADD | COPY | DELETE | EXPORT | IMPORT | QUERY\n"
 "\n"
 "For help on a specific operation, type:\n"
 "  REG [operation] /?\n"
@@ -14247,7 +14711,7 @@ msgstr ""
 "  REG [operacija] [parametrai]\n"
 "\n"
 "Palaikomos operacijos:\n"
-"  ADD | DELETE | EXPORT | IMPORT | QUERY\n"
+"  ADD | COPY | DELETE | EXPORT | IMPORT | QUERY\n"
 "\n"
 "Pagalbai apie specifinę operaciją, įrašykite:\n"
 "  REG [operacija] /?\n"
@@ -14523,8 +14987,8 @@ msgid "reg: Unsupported registry data type [%1]\n"
 msgstr "reg: Nepalaikomas registro duomenų tipas [%1]\n"
 
 #: programs/reg/reg.rc:122
-msgid "reg: The option [/d] must be followed by a valid integer\n"
-msgstr "reg: Už parametro [/d] privalo būti tinkamas sveikasis skaičius\n"
+msgid "reg: The option [/d] must be followed by a valid numeric value\n"
+msgstr "reg: Už parametro [/d] privalo būti tinkama skaitinė reikšmė\n"
 
 #: programs/reg/reg.rc:123
 msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
@@ -14563,11 +15027,8 @@ msgid "reg: The option [/d] must be followed by a valid string\n"
 msgstr "reg: Už parametro [/d] privalo būti tinkama eilutė\n"
 
 #: programs/reg/reg.rc:135
-msgid ""
-"reg: Unable to delete all registry values in '%1'. An unexpected error "
-"occurred.\n"
-msgstr ""
-"reg: Nepavyko pašalinti visų „%1“ registro reikšmių. Įvyko netikėta klaida.\n"
+msgid "reg: Unable to delete all registry values in '%1'\n"
+msgstr "reg: Nepavyko pašalinti visų „%1“ registro reikšmių\n"
 
 #: programs/reg/reg.rc:136
 msgid ""
@@ -14704,7 +15165,7 @@ msgstr "reg: Nepavyko rasti nurodyto registro rakto\n"
 msgid "reg: Unable to import the registry key '%1'\n"
 msgstr "reg: Nepavyko importuoti registro rakto „%1“.\n"
 
-#: programs/reg/reg.rc:179
+#: programs/reg/reg.rc:180
 msgid ""
 "  /reg:32\n"
 "     Access the registry using the 32-bit view.\n"
@@ -14720,9 +15181,75 @@ msgstr ""
 "     Prieiga prie registro naudojant 64-bitų rodinį.\n"
 "\n"
 
-#: programs/reg/reg.rc:180
+#: programs/reg/reg.rc:181
 msgid "reg: Unable to access or create the specified registry key\n"
 msgstr "reg: Nepavyko prieiti prie ar sukurti nurodyto registro rakto\n"
+
+#: programs/reg/reg.rc:202
+msgid ""
+"REG COPY <key1> <key2> [/s] [/f]\n"
+"\n"
+"  Copies the contents of a specified registry key to another location.\n"
+"  By default, this operation only copies registry values. Use [/s] to\n"
+"  recursively copy all subkeys and values.\n"
+"\n"
+"  <key1>, <key2>\n"
+"     Registry keys specifying the source (<key1>) and destination (<key2>)\n"
+"     of the data. If <key2> does not exist, it is created.\n"
+"\n"
+"     Format: ROOT\\Subkey\n"
+"\n"
+"     ROOT: A predefined registry key. This must be one of the following:\n"
+"\n"
+"         HKEY_LOCAL_MACHINE  | HKLM\n"
+"         HKEY_CURRENT_USER   | HKCU\n"
+"         HKEY_CLASSES_ROOT   | HKCR\n"
+"         HKEY_USERS          | HKU\n"
+"         HKEY_CURRENT_CONFIG | HKCC\n"
+"\n"
+"     Subkey: The full path to a registry key under a given ROOT key.\n"
+"\n"
+"  /s\n"
+"     Copy all subkeys and values from <key1> to <key2>.\n"
+"\n"
+"  /f\n"
+"     Overwrite all registry data in <key2> without prompting for "
+"confirmation.\n"
+"     This option does not modify subkeys and values that only exist in "
+"<key2>.\n"
+"\n"
+msgstr ""
+"REG COPY <raktas1> <raktas2> [/s] [/f]\n"
+"\n"
+"  Kopijuoja nurodyto registro rakto turinį į kitą vietą\n"
+"  Standartiškai ši operacija kopijuoja tik registro reikšmes. Naudokite\n"
+"  [/s] rekursyviai nukopijuoti visus porakčius ir reikšmes.\n"
+"\n"
+"  <raktas1>,<raktas2>\n"
+"     Registro raktai nurodantys duomenų šaltinį (<raktas1>) ir\n"
+"     paskirtį (<raktas2>). Jei <raktas2> neegzistuoja, jis bus sukurtas.\n"
+"\n"
+"     Formatas: ŠAKNIS\\Poraktis\n"
+"\n"
+"     ŠAKNIS: Numatytasis registro raktas. Privalo būti vienas iš:\n"
+"\n"
+"         HKEY_LOCAL_MACHINE  | HKLM\n"
+"         HKEY_CURRENT_USER   | HKCU\n"
+"         HKEY_CLASSES_ROOT   | HKCR\n"
+"         HKEY_USERS          | HKU\n"
+"         HKEY_CURRENT_CONFIG | HKCC\n"
+"\n"
+"     Poraktis: Pilnas kelias iki registro rakto po nurodytu ŠAKNIES raktu.\n"
+"\n"
+"  /s\n"
+"     Kopijuoti visus porakčius ir reikšmes iš <raktas1> į <raktas2>.\n"
+"\n"
+"  /f\n"
+"     Perrašyti visus registro duomenis rakte <raktas2> be patvirtinimo "
+"klausimo.\n"
+"     Šis parametras nemodifikuoja porakčių ir reikšmių, kurie yra tik "
+"<raktas2>.\n"
+"\n"
 
 #: programs/regedit/regedit.rc:34
 msgid "&Registry"

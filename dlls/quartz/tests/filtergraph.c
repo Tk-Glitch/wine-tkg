@@ -23,23 +23,9 @@
 #define CONST_VTABLE
 
 #include "dshow.h"
-#include "wine/heap.h"
 #include "wine/test.h"
 
 static const GUID testguid = {0xabbccdde};
-
-typedef struct TestFilterImpl
-{
-    IBaseFilter IBaseFilter_iface;
-
-    LONG refCount;
-    CRITICAL_SECTION csFilter;
-    FILTER_STATE state;
-    FILTER_INFO filterInfo;
-    CLSID clsid;
-    IPin **ppPins;
-    UINT nPins;
-} TestFilterImpl;
 
 static BOOL compare_time(ULONGLONG x, ULONGLONG y, unsigned int max_diff)
 {
@@ -1499,14 +1485,8 @@ static HRESULT WINAPI testfilter_JoinFilterGraph(IBaseFilter *iface, IFilterGrap
     if (winetest_debug > 1) trace("%p->JoinFilterGraph(%p, %s)\n", filter, graph, wine_dbgstr_w(name));
 
     filter->graph = graph;
-    heap_free(filter->name);
-    if (name)
-    {
-        filter->name = heap_alloc((wcslen(name) + 1) * sizeof(WCHAR));
-        wcscpy(filter->name, name);
-    }
-    else
-        filter->name = NULL;
+    free(filter->name);
+    filter->name = name ? wcsdup(name) : NULL;
     return S_OK;
 }
 

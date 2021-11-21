@@ -1361,9 +1361,9 @@ WINE_NOTICE_WITH(opencl,[test "x$ac_cv_lib_OpenCL_clGetPlatformInfo" != xyes],
 dnl **** Check for libpcap ****
 if test "$ac_cv_header_pcap_pcap_h" = "yes"
 then
-    WINE_CHECK_SONAME(pcap,pcap_create,,,)
+    AC_CHECK_LIB(pcap,pcap_create,[AC_SUBST(PCAP_LIBS,["-lpcap"])])
 fi
-WINE_NOTICE_WITH(pcap,[test "x$ac_cv_lib_soname_pcap" = "x"],
+WINE_NOTICE_WITH(pcap,[test "x$ac_cv_lib_pcap_pcap_create" != xyes],
                  [pcap ${notice_platform}development files not found, wpcap won't be supported.],
                  [enable_wpcap])
 
@@ -2725,12 +2725,6 @@ AC_CHECK_FUNCS(\
 	asinhf \
 	atanh \
 	atanhf \
-	cbrt \
-	cbrtf \
-	erf \
-	erfc \
-	erfcf \
-	erff \
 	exp2 \
 	exp2f \
 	expm1 \
@@ -2739,28 +2733,12 @@ AC_CHECK_FUNCS(\
 	fmaf \
 	lgamma \
 	lgammaf \
-	llrint \
-	llrintf \
 	log1p \
 	log1pf \
 	log2 \
 	log2f \
-	lrint \
-	lrintf \
-	nearbyint \
-	nearbyintf \
-	nexttoward \
-	nexttowardf \
-	remainder \
-	remainderf \
-	remquo \
-	remquof \
-	rint \
-	rintf \
 	tgamma \
-	tgammaf \
-	trunc \
-	truncf
+	tgammaf
 )
 LIBS="$ac_save_LIBS"
 

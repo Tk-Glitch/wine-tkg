@@ -43,6 +43,10 @@ typedef struct _REPARSE_DATA_BUFFER {
             WCHAR  PathBuffer[1];
         } MountPointReparseBuffer;
         struct {
+            ULONG  Version;
+            UCHAR  PathBuffer[1];
+        } LinuxSymbolicLinkReparseBuffer;
+        struct {
             UCHAR DataBuffer[1];
         } GenericReparseBuffer;
     };

@@ -45,7 +45,10 @@ BOOL is_char(const WCHAR s, const WCHAR c);
 BOOL is_switch(const WCHAR *s, const WCHAR c);
 
 /* add.c */
-int reg_add(int arc, WCHAR *argvW[]);
+int reg_add(int argc, WCHAR *argvW[]);
+
+/* copy.c */
+int reg_copy(int argc, WCHAR *argvW[]);
 
 /* delete.c */
 int reg_delete(int argc, WCHAR *argvW[]);

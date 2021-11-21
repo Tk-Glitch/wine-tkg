@@ -1815,13 +1815,13 @@
 @ cdecl fegetround() msvcr120.fegetround
 @ stub feholdexcept
 @ cdecl feof(ptr) msvcr120.feof
-@ stub feraiseexcept
+@ cdecl feraiseexcept(long) msvcr120.feraiseexcept
 @ cdecl ferror(ptr) msvcr120.ferror
 @ cdecl fesetenv(ptr) msvcr120.fesetenv
 @ cdecl fesetexceptflag(ptr long) msvcr120.fesetexceptflag
 @ cdecl fesetround(long) msvcr120.fesetround
 @ cdecl fetestexcept(long) msvcr120.fetestexcept
-@ stub feupdateenv
+@ cdecl feupdateenv(ptr) msvcr120.feupdateenv
 @ cdecl fflush(ptr) msvcr120.fflush
 @ cdecl fgetc(ptr) msvcr120.fgetc
 @ cdecl fgetpos(ptr ptr) msvcr120.fgetpos

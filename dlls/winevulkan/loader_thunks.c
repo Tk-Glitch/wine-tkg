@@ -278,6 +278,11 @@ void WINAPI vkCmdCopyQueryPoolResults(VkCommandBuffer commandBuffer, VkQueryPool
     unix_funcs->p_vkCmdCopyQueryPoolResults(commandBuffer, queryPool, firstQuery, queryCount, dstBuffer, dstOffset, stride, flags);
 }
 
+void WINAPI vkCmdCuLaunchKernelNVX(VkCommandBuffer commandBuffer, const VkCuLaunchInfoNVX *pLaunchInfo)
+{
+    unix_funcs->p_vkCmdCuLaunchKernelNVX(commandBuffer, pLaunchInfo);
+}
+
 void WINAPI vkCmdDebugMarkerBeginEXT(VkCommandBuffer commandBuffer, const VkDebugMarkerMarkerInfoEXT *pMarkerInfo)
 {
     unix_funcs->p_vkCmdDebugMarkerBeginEXT(commandBuffer, pMarkerInfo);
@@ -848,6 +853,16 @@ VkResult WINAPI vkCreateComputePipelines(VkDevice device, VkPipelineCache pipeli
     return unix_funcs->p_vkCreateComputePipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 }
 
+VkResult WINAPI vkCreateCuFunctionNVX(VkDevice device, const VkCuFunctionCreateInfoNVX *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkCuFunctionNVX *pFunction)
+{
+    return unix_funcs->p_vkCreateCuFunctionNVX(device, pCreateInfo, pAllocator, pFunction);
+}
+
+VkResult WINAPI vkCreateCuModuleNVX(VkDevice device, const VkCuModuleCreateInfoNVX *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkCuModuleNVX *pModule)
+{
+    return unix_funcs->p_vkCreateCuModuleNVX(device, pCreateInfo, pAllocator, pModule);
+}
+
 VkResult WINAPI vkCreateDebugReportCallbackEXT(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkDebugReportCallbackEXT *pCallback)
 {
     return unix_funcs->p_vkCreateDebugReportCallbackEXT(instance, pCreateInfo, pAllocator, pCallback);
@@ -1051,6 +1066,16 @@ void WINAPI vkDestroyBufferView(VkDevice device, VkBufferView bufferView, const 
 void WINAPI vkDestroyCommandPool(VkDevice device, VkCommandPool commandPool, const VkAllocationCallbacks *pAllocator)
 {
     unix_funcs->p_vkDestroyCommandPool(device, commandPool, pAllocator);
+}
+
+void WINAPI vkDestroyCuFunctionNVX(VkDevice device, VkCuFunctionNVX function, const VkAllocationCallbacks *pAllocator)
+{
+    unix_funcs->p_vkDestroyCuFunctionNVX(device, function, pAllocator);
+}
+
+void WINAPI vkDestroyCuModuleNVX(VkDevice device, VkCuModuleNVX module, const VkAllocationCallbacks *pAllocator)
+{
+    unix_funcs->p_vkDestroyCuModuleNVX(device, module, pAllocator);
 }
 
 void WINAPI vkDestroyDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT callback, const VkAllocationCallbacks *pAllocator)
@@ -1441,6 +1466,16 @@ void WINAPI vkGetImageSparseMemoryRequirements2KHR(VkDevice device, const VkImag
 void WINAPI vkGetImageSubresourceLayout(VkDevice device, VkImage image, const VkImageSubresource *pSubresource, VkSubresourceLayout *pLayout)
 {
     unix_funcs->p_vkGetImageSubresourceLayout(device, image, pSubresource, pLayout);
+}
+
+VkResult WINAPI vkGetImageViewAddressNVX(VkDevice device, VkImageView imageView, VkImageViewAddressPropertiesNVX *pProperties)
+{
+    return unix_funcs->p_vkGetImageViewAddressNVX(device, imageView, pProperties);
+}
+
+uint32_t WINAPI vkGetImageViewHandleNVX(VkDevice device, const VkImageViewHandleInfoNVX *pInfo)
+{
+    return unix_funcs->p_vkGetImageViewHandleNVX(device, pInfo);
 }
 
 VkResult WINAPI vkGetMemoryHostPointerPropertiesEXT(VkDevice device, VkExternalMemoryHandleTypeFlagBits handleType, const void *pHostPointer, VkMemoryHostPointerPropertiesEXT *pMemoryHostPointerProperties)
@@ -1998,6 +2033,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdCopyImageToBuffer2KHR", &vkCmdCopyImageToBuffer2KHR},
     {"vkCmdCopyMemoryToAccelerationStructureKHR", &vkCmdCopyMemoryToAccelerationStructureKHR},
     {"vkCmdCopyQueryPoolResults", &vkCmdCopyQueryPoolResults},
+    {"vkCmdCuLaunchKernelNVX", &vkCmdCuLaunchKernelNVX},
     {"vkCmdDebugMarkerBeginEXT", &vkCmdDebugMarkerBeginEXT},
     {"vkCmdDebugMarkerEndEXT", &vkCmdDebugMarkerEndEXT},
     {"vkCmdDebugMarkerInsertEXT", &vkCmdDebugMarkerInsertEXT},
@@ -2112,6 +2148,8 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCreateBufferView", &vkCreateBufferView},
     {"vkCreateCommandPool", &vkCreateCommandPool},
     {"vkCreateComputePipelines", &vkCreateComputePipelines},
+    {"vkCreateCuFunctionNVX", &vkCreateCuFunctionNVX},
+    {"vkCreateCuModuleNVX", &vkCreateCuModuleNVX},
     {"vkCreateDeferredOperationKHR", &vkCreateDeferredOperationKHR},
     {"vkCreateDescriptorPool", &vkCreateDescriptorPool},
     {"vkCreateDescriptorSetLayout", &vkCreateDescriptorSetLayout},
@@ -2148,6 +2186,8 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkDestroyBuffer", &vkDestroyBuffer},
     {"vkDestroyBufferView", &vkDestroyBufferView},
     {"vkDestroyCommandPool", &vkDestroyCommandPool},
+    {"vkDestroyCuFunctionNVX", &vkDestroyCuFunctionNVX},
+    {"vkDestroyCuModuleNVX", &vkDestroyCuModuleNVX},
     {"vkDestroyDeferredOperationKHR", &vkDestroyDeferredOperationKHR},
     {"vkDestroyDescriptorPool", &vkDestroyDescriptorPool},
     {"vkDestroyDescriptorSetLayout", &vkDestroyDescriptorSetLayout},
@@ -2217,6 +2257,8 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetImageSparseMemoryRequirements2", &vkGetImageSparseMemoryRequirements2},
     {"vkGetImageSparseMemoryRequirements2KHR", &vkGetImageSparseMemoryRequirements2KHR},
     {"vkGetImageSubresourceLayout", &vkGetImageSubresourceLayout},
+    {"vkGetImageViewAddressNVX", &vkGetImageViewAddressNVX},
+    {"vkGetImageViewHandleNVX", &vkGetImageViewHandleNVX},
     {"vkGetMemoryHostPointerPropertiesEXT", &vkGetMemoryHostPointerPropertiesEXT},
     {"vkGetPerformanceParameterINTEL", &vkGetPerformanceParameterINTEL},
     {"vkGetPipelineCacheData", &vkGetPipelineCacheData},

@@ -395,22 +395,6 @@ static void dump_irp_params( const char *prefix, const irp_params_t *data )
     }
 }
 
-static void dump_varargs_bytes( const char *prefix, data_size_t size )
-{
-    const unsigned char *data = cur_data;
-    data_size_t len = min( 1024, size );
-
-    fprintf( stderr, "%s{", prefix );
-    while (len > 0)
-    {
-        fprintf( stderr, "%02x", *data++ );
-        if (--len) fputc( ',', stderr );
-    }
-    if (size > 1024) fprintf( stderr, "...(total %u)", size );
-    fputc( '}', stderr );
-    remove_data( size );
-}
-
 static void dump_rawinput( const char *prefix, const union rawinput *rawinput )
 {
     switch (rawinput->type)
@@ -424,10 +408,9 @@ static void dump_rawinput( const char *prefix, const union rawinput *rawinput )
                  rawinput->kbd.message, rawinput->kbd.vkey, rawinput->kbd.scan );
         break;
     case RIM_TYPEHID:
-        fprintf( stderr, "%s{type=HID,device=%04x,param=%04x,length=%u", prefix,
-                 rawinput->hid.device, rawinput->hid.param, rawinput->hid.length );
-        dump_varargs_bytes( ",report=", rawinput->hid.length );
-        fputc( '}', stderr );
+        fprintf( stderr, "%s{type=HID,device=%04x,param=%04x,page=%04hx,usage=%04hx,count=%u,length=%u}",
+                 prefix, rawinput->hid.device, rawinput->hid.param, rawinput->hid.usage_page,
+                 rawinput->hid.usage, rawinput->hid.count, rawinput->hid.length );
         break;
     default:
         fprintf( stderr, "%s{type=%04x}", prefix, rawinput->type );
@@ -459,7 +442,7 @@ static void dump_hw_input( const char *prefix, const hw_input_t *input )
         {
         case WM_INPUT:
         case WM_INPUT_DEVICE_CHANGE:
-            dump_rawinput( ",rawinput=", &input->hw.data.rawinput );
+            dump_rawinput( ",rawinput=", &input->hw.rawinput );
         }
         fputc( '}', stderr );
         break;
@@ -600,6 +583,22 @@ static void dump_varargs_user_handles( const char *prefix, data_size_t size )
         fprintf( stderr, "%08x", *data++ );
         if (--len) fputc( ',', stderr );
     }
+    fputc( '}', stderr );
+    remove_data( size );
+}
+
+static void dump_varargs_bytes( const char *prefix, data_size_t size )
+{
+    const unsigned char *data = cur_data;
+    data_size_t len = min( 1024, size );
+
+    fprintf( stderr,"%s{", prefix );
+    while (len > 0)
+    {
+        fprintf( stderr, "%02x", *data++ );
+        if (--len) fputc( ',', stderr );
+    }
+    if (size > 1024) fprintf( stderr, "...(total %u)", size );
     fputc( '}', stderr );
     remove_data( size );
 }
@@ -1390,8 +1389,10 @@ static void dump_new_process_request( const struct new_process_request *req )
     fprintf( stderr, ", machine=%04x", req->machine );
     fprintf( stderr, ", info_size=%u", req->info_size );
     fprintf( stderr, ", handles_size=%u", req->handles_size );
+    fprintf( stderr, ", jobs_size=%u", req->jobs_size );
     dump_varargs_object_attributes( ", objattr=", cur_size );
     dump_varargs_uints( ", handles=", min(cur_size,req->handles_size) );
+    dump_varargs_uints( ", jobs=", min(cur_size,req->jobs_size) );
     dump_varargs_startup_info( ", info=", min(cur_size,req->info_size) );
     dump_varargs_unicode_str( ", env=", cur_size );
 }
@@ -1442,6 +1443,9 @@ static void dump_get_startup_info_reply( const struct get_startup_info_reply *re
 
 static void dump_init_process_done_request( const struct init_process_done_request *req )
 {
+    dump_uint64( " teb=", &req->teb );
+    dump_uint64( ", peb=", &req->peb );
+    dump_uint64( ", ldt_copy=", &req->ldt_copy );
 }
 
 static void dump_init_process_done_reply( const struct init_process_done_reply *req )
@@ -1455,9 +1459,6 @@ static void dump_init_first_thread_request( const struct init_first_thread_reque
     fprintf( stderr, " unix_pid=%d", req->unix_pid );
     fprintf( stderr, ", unix_tid=%d", req->unix_tid );
     fprintf( stderr, ", debug_level=%d", req->debug_level );
-    dump_uint64( ", teb=", &req->teb );
-    dump_uint64( ", peb=", &req->peb );
-    dump_uint64( ", ldt_copy=", &req->ldt_copy );
     fprintf( stderr, ", reply_fd=%d", req->reply_fd );
     fprintf( stderr, ", wait_fd=%d", req->wait_fd );
 }
@@ -2659,6 +2660,7 @@ static void dump_send_hardware_message_request( const struct send_hardware_messa
     fprintf( stderr, " win=%08x", req->win );
     dump_hw_input( ", input=", &req->input );
     fprintf( stderr, ", flags=%08x", req->flags );
+    dump_varargs_bytes( ", report=", cur_size );
 }
 
 static void dump_send_hardware_message_reply( const struct send_hardware_message_reply *req )
@@ -5490,6 +5492,7 @@ static const struct
     { "CANT_OPEN_ANONYMOUS",         STATUS_CANT_OPEN_ANONYMOUS },
     { "CHILD_MUST_BE_VOLATILE",      STATUS_CHILD_MUST_BE_VOLATILE },
     { "CONNECTION_ABORTED",          STATUS_CONNECTION_ABORTED },
+    { "CONNECTION_ACTIVE",           STATUS_CONNECTION_ACTIVE },
     { "CONNECTION_REFUSED",          STATUS_CONNECTION_REFUSED },
     { "CONNECTION_RESET",            STATUS_CONNECTION_RESET },
     { "DEBUGGER_INACTIVE",           STATUS_DEBUGGER_INACTIVE },

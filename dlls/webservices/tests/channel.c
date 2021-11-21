@@ -117,6 +117,7 @@ static void test_WsOpenChannel(void)
 {
     HRESULT hr;
     WS_CHANNEL *channel;
+    WS_CHANNEL_STATE state;
     WS_ENDPOINT_ADDRESS addr;
 
     hr = WsCreateChannel( WS_CHANNEL_TYPE_REQUEST, WS_HTTP_CHANNEL_BINDING, NULL, 0, NULL, &channel, NULL );
@@ -141,11 +142,21 @@ static void test_WsOpenChannel(void)
     hr = WsOpenChannel( channel, &addr, NULL, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
 
+    state = 0xdeadbeef;
+    hr = WsGetChannelProperty( channel, WS_CHANNEL_PROPERTY_STATE, &state, sizeof(state), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( state == WS_CHANNEL_STATE_OPEN, "got %u\n", state );
+
     hr = WsOpenChannel( channel, &addr, NULL, NULL );
     ok( hr == WS_E_INVALID_OPERATION, "got %08x\n", hr );
 
     hr = WsCloseChannel( channel, NULL, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
+
+    state = 0xdeadbeef;
+    hr = WsGetChannelProperty( channel, WS_CHANNEL_PROPERTY_STATE, &state, sizeof(state), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( state == WS_CHANNEL_STATE_CLOSED, "got %u\n", state );
 
     hr = WsCloseChannel( channel, NULL, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
@@ -425,7 +436,8 @@ static void test_WsResetListener(void)
 struct listener_info
 {
     int                 port;
-    HANDLE              wait;
+    HANDLE              ready;
+    HANDLE              done;
     WS_CHANNEL_BINDING  binding;
     WS_CHANNEL_TYPE     type;
     void                (*server_func)( WS_CHANNEL * );
@@ -474,6 +486,9 @@ static void client_message_read_write( const struct listener_info *info )
     HRESULT hr;
     DWORD err;
 
+    err = WaitForSingleObject( info->ready, 3000 );
+    ok( err == WAIT_OBJECT_0, "wait failed %u\n", err );
+
     hr = WsCreateChannel( info->type, info->binding, NULL, 0, NULL, &channel, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
 
@@ -516,7 +531,7 @@ static void client_message_read_write( const struct listener_info *info )
     hr = WsWriteMessageEnd( channel, msg, NULL, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
 
-    err = WaitForSingleObject( info->wait, 3000 );
+    err = WaitForSingleObject( info->done, 3000 );
     ok( err == WAIT_OBJECT_0, "wait failed %u\n", err );
 
     hr = WsCloseChannel( channel, NULL, NULL );
@@ -612,6 +627,9 @@ static void client_duplex_session( const struct listener_info *info )
     HRESULT hr;
     DWORD err;
 
+    err = WaitForSingleObject( info->ready, 3000 );
+    ok( err == WAIT_OBJECT_0, "wait failed %u\n", err );
+
     hr = WsCreateChannel( info->type, info->binding, NULL, 0, NULL, &channel, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
 
@@ -643,7 +661,7 @@ static void client_duplex_session( const struct listener_info *info )
     hr = WsSendMessage( channel, msg2, &desc, WS_WRITE_REQUIRED_VALUE, &val, sizeof(val), NULL, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
 
-    err = WaitForSingleObject( info->wait, 3000 );
+    err = WaitForSingleObject( info->done, 3000 );
     ok( err == WAIT_OBJECT_0, "wait failed %u\n", err );
 
     hr = WsShutdownSessionChannel( channel, NULL, NULL );
@@ -655,6 +673,107 @@ static void client_duplex_session( const struct listener_info *info )
     hr = WsCloseChannel( channel, NULL, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
 
+    WsFreeMessage( msg );
+    WsFreeMessage( msg2 );
+    WsFreeChannel( channel );
+}
+
+static void client_duplex_session_async( const struct listener_info *info )
+{
+    WS_XML_STRING action = {6, (BYTE *)"action"}, localname = {9, (BYTE *)"localname"}, ns = {2, (BYTE *)"ns"};
+    WS_ELEMENT_DESCRIPTION desc_body;
+    WS_MESSAGE_DESCRIPTION desc;
+    WS_ENDPOINT_ADDRESS addr;
+    WS_ASYNC_CONTEXT ctx;
+    struct async_test test;
+    WCHAR buf[64];
+    WS_CHANNEL *channel;
+    WS_MESSAGE *msg, *msg2;
+    INT32 val = -1;
+    HRESULT hr;
+    DWORD err;
+
+    err = WaitForSingleObject( info->ready, 3000 );
+    ok( err == WAIT_OBJECT_0, "wait failed %u\n", err );
+
+    hr = WsCreateChannel( info->type, info->binding, NULL, 0, NULL, &channel, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsShutdownSessionChannel( channel, NULL, NULL );
+    ok( hr == WS_E_INVALID_OPERATION, "got %08x\n", hr );
+
+    test.call_count = 0;
+    test.wait       = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ctx.callback      = async_callback;
+    ctx.callbackState = &test;
+
+    memset( &addr, 0, sizeof(addr) );
+    addr.url.length = wsprintfW( buf, L"net.tcp://localhost:%u", info->port );
+    addr.url.chars  = buf;
+    hr = WsOpenChannel( channel, &addr, &ctx, NULL );
+    ok( hr == WS_S_ASYNC || hr == S_OK, "got %08x\n", hr );
+    if (hr == WS_S_ASYNC)
+    {
+        WaitForSingleObject( test.wait, INFINITE );
+        ok( test.call_count == 1, "got %u\n", test.call_count );
+    }
+    else ok( !test.call_count, "got %u\n", test.call_count );
+
+    hr = WsCreateMessageForChannel( channel, NULL, 0, &msg, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    desc_body.elementLocalName = &localname;
+    desc_body.elementNs        = &ns;
+    desc_body.type             = WS_INT32_TYPE;
+    desc_body.typeDescription  = NULL;
+    desc.action                 = &action;
+    desc.bodyElementDescription = &desc_body;
+
+    /* asynchronous call */
+    test.call_count = 0;
+    hr = WsSendMessage( channel, msg, &desc, WS_WRITE_REQUIRED_VALUE, &val, sizeof(val), &ctx, NULL );
+    ok( hr == WS_S_ASYNC || hr == S_OK, "got %08x\n", hr );
+    if (hr == WS_S_ASYNC)
+    {
+        WaitForSingleObject( test.wait, INFINITE );
+        ok( test.call_count == 1, "got %u\n", test.call_count );
+    }
+    else ok( !test.call_count, "got %u\n", test.call_count );
+
+    hr = WsCreateMessageForChannel( channel, NULL, 0, &msg2, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* synchronous call */
+    hr = WsSendMessage( channel, msg2, &desc, WS_WRITE_REQUIRED_VALUE, &val, sizeof(val), NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    test.call_count = 0;
+    hr = WsShutdownSessionChannel( channel, &ctx, NULL );
+    ok( hr == WS_S_ASYNC || hr == S_OK, "got %08x\n", hr );
+    if (hr == WS_S_ASYNC)
+    {
+        WaitForSingleObject( test.wait, INFINITE );
+        ok( test.call_count == 1, "got %u\n", test.call_count );
+    }
+    else ok( !test.call_count, "got %u\n", test.call_count );
+
+    hr = WsShutdownSessionChannel( channel, NULL, NULL );
+    ok( hr == WS_E_INVALID_OPERATION, "got %08x\n", hr );
+
+    test.call_count = 0;
+    hr = WsCloseChannel( channel, &ctx, NULL );
+    ok( hr == WS_S_ASYNC || hr == S_OK, "got %08x\n", hr );
+    if (hr == WS_S_ASYNC)
+    {
+        WaitForSingleObject( test.wait, INFINITE );
+        ok( test.call_count == 1, "got %u\n", test.call_count );
+    }
+    else ok( !test.call_count, "got %u\n", test.call_count );
+
+    err = WaitForSingleObject( info->done, 3000 );
+    ok( err == WAIT_OBJECT_0, "wait failed %u\n", err );
+
+    CloseHandle( test.wait );
     WsFreeMessage( msg );
     WsFreeMessage( msg2 );
     WsFreeChannel( channel );
@@ -704,6 +823,9 @@ static void client_accept_channel( const struct listener_info *info )
     HRESULT hr;
     DWORD err;
 
+    err = WaitForSingleObject( info->ready, 3000 );
+    ok( err == WAIT_OBJECT_0, "wait failed %u\n", err );
+
     hr = WsAcceptChannel( NULL, NULL, NULL, NULL );
     ok( hr == E_INVALIDARG, "got %08x\n", hr );
 
@@ -744,7 +866,7 @@ static void client_accept_channel( const struct listener_info *info )
     hr = WsSendMessage( channel, msg, &desc, WS_WRITE_REQUIRED_VALUE, &val, sizeof(val), NULL, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
 
-    err = WaitForSingleObject( info->wait, 3000 );
+    err = WaitForSingleObject( info->done, 3000 );
     ok( err == WAIT_OBJECT_0, "wait failed %u\n", err );
 
     hr = WsCloseChannel( channel, NULL, NULL );
@@ -806,6 +928,10 @@ static void client_request_reply( const struct listener_info *info )
     WS_MESSAGE_DESCRIPTION req_desc, reply_desc;
     INT32 val_in = -1, val_out = 0;
     HRESULT hr;
+    DWORD err;
+
+    err = WaitForSingleObject( info->ready, 3000 );
+    ok( err == WAIT_OBJECT_0, "wait failed %u\n", err );
 
     hr = WsCreateChannel( info->type, info->binding, NULL, 0, NULL, &channel, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
@@ -840,6 +966,9 @@ static void client_request_reply( const struct listener_info *info )
                          &reply_desc, WS_READ_REQUIRED_VALUE, NULL, &val_out, sizeof(val_out), NULL, NULL );
     ok( val_out == -1, "got %d\n", val_out );
 
+    err = WaitForSingleObject( info->done, 3000 );
+    ok( err == WAIT_OBJECT_0, "wait failed %u\n", err );
+
     hr = WsCloseChannel( channel, NULL, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
 
@@ -854,6 +983,7 @@ static DWORD CALLBACK listener_proc( void *arg )
     const WCHAR *fmt = (info->binding == WS_TCP_CHANNEL_BINDING) ? L"net.tcp://localhost:%u" : L"soap.udp://localhost:%u";
     WS_LISTENER *listener;
     WS_CHANNEL *channel;
+    WS_CHANNEL_STATE state;
     WCHAR buf[64];
     WS_STRING url;
     HRESULT hr;
@@ -869,14 +999,19 @@ static DWORD CALLBACK listener_proc( void *arg )
     hr = WsCreateChannelForListener( listener, NULL, 0, &channel, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
 
-    SetEvent( info->wait );
+    SetEvent( info->ready );
 
     hr = WsAcceptChannel( listener, channel, NULL, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
 
+    state = 0xdeadbeef;
+    hr = WsGetChannelProperty( channel, WS_CHANNEL_PROPERTY_STATE, &state, sizeof(state), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( state == WS_CHANNEL_STATE_OPEN, "got %u\n", state );
+
     info->server_func( channel );
 
-    SetEvent( info->wait );
+    SetEvent( info->done );
 
     hr = WsCloseChannel( channel, NULL, NULL );
     ok( hr == S_OK, "got %08x\n", hr );
@@ -891,12 +1026,8 @@ static DWORD CALLBACK listener_proc( void *arg )
 
 static HANDLE start_listener( struct listener_info *info )
 {
-    DWORD err;
     HANDLE thread = CreateThread( NULL, 0, listener_proc, info, 0, NULL );
     ok( thread != NULL, "failed to create listener thread %u\n", GetLastError() );
-
-    err = WaitForSingleObject( info->wait, 3000 );
-    ok( err == WAIT_OBJECT_0, "failed to start listener %u\n", err );
     return thread;
 }
 
@@ -1041,6 +1172,7 @@ START_TEST(channel)
         { WS_UDP_CHANNEL_BINDING, WS_CHANNEL_TYPE_DUPLEX, server_accept_channel, client_accept_channel },
         { WS_TCP_CHANNEL_BINDING, WS_CHANNEL_TYPE_DUPLEX_SESSION, server_accept_channel, client_accept_channel },
         { WS_TCP_CHANNEL_BINDING, WS_CHANNEL_TYPE_DUPLEX_SESSION, server_request_reply, client_request_reply },
+        { WS_TCP_CHANNEL_BINDING, WS_CHANNEL_TYPE_DUPLEX_SESSION, server_duplex_session, client_duplex_session_async },
     };
 
     if (firewall_enabled)
@@ -1066,7 +1198,8 @@ START_TEST(channel)
     test_WsResetListener();
 
     info.port = 7533;
-    info.wait = CreateEventW( NULL, 0, 0, NULL );
+    info.ready = CreateEventW( NULL, 0, 0, NULL );
+    info.done = CreateEventW( NULL, 0, 0, NULL );
 
     for (i = 0; i < ARRAY_SIZE(tests); i++)
     {

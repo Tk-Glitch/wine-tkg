@@ -5724,9 +5724,9 @@
 @ stub _FSinh
 @ extern _FSnan
 # extern _FXbig
-@ cdecl -ret64 _Getcoll()
-@ cdecl _Getctype(ptr)
-@ cdecl -ret64 _Getcvt()
+@ cdecl -norelay _Getcoll()
+@ cdecl -norelay _Getctype()
+@ cdecl -norelay _Getcvt()
 @ cdecl _Getdateorder()
 @ cdecl _Getwctype(long ptr)
 @ cdecl _Getwctypes(ptr ptr ptr ptr)

@@ -20,7 +20,6 @@
 
 #define COBJMACROS
 #include "dshow.h"
-#include "wine/heap.h"
 #include "wine/strmbase.h"
 #include "wine/test.h"
 
@@ -765,13 +764,13 @@ static DWORD WINAPI frame_thread(void *arg)
     hr = IMemInputPin_Receive(params->sink, params->sample);
     if (winetest_debug > 1) trace("%04x: Returned %#x.\n", GetCurrentThreadId(), hr);
     IMediaSample_Release(params->sample);
-    heap_free(params);
+    free(params);
     return hr;
 }
 
 static HANDLE send_frame_time(IMemInputPin *sink, REFERENCE_TIME start_time, unsigned char color)
 {
-    struct frame_thread_params *params = heap_alloc(sizeof(*params));
+    struct frame_thread_params *params = malloc(sizeof(*params));
     IMemAllocator *allocator;
     REFERENCE_TIME end_time;
     IMediaSample *sample;
@@ -972,7 +971,7 @@ static void test_flushing(IPin *pin, IMemInputPin *input, IMediaControl *control
     thread = send_frame(input);
     ok(WaitForSingleObject(thread, 100) == WAIT_TIMEOUT, "Thread should block in Receive().\n");
 
-    hr = IMediaControl_GetState(control, 0, &state);
+    hr = IMediaControl_GetState(control, 1000, &state);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IPin_BeginFlush(pin);
@@ -1084,7 +1083,8 @@ static void test_sample_time(IBaseFilter *filter, IPin *pin, IMemInputPin *input
     hr = IPin_BeginFlush(pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = join_thread(thread);
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    /* If the frame makes it to Receive() in time to be rendered, we get S_OK. */
+    ok(hr == S_OK || hr == E_FAIL, "Got hr %#x.\n", hr);
     hr = IPin_EndFlush(pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
@@ -1094,7 +1094,8 @@ static void test_sample_time(IBaseFilter *filter, IPin *pin, IMemInputPin *input
     hr = IMediaControl_Stop(control);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     hr = join_thread(thread);
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    /* If the frame makes it to Receive() in time to be rendered, we get S_OK. */
+    ok(hr == S_OK || hr == E_FAIL, "Got hr %#x.\n", hr);
 
     IMediaSeeking_Release(seeking);
 }
@@ -2110,37 +2111,55 @@ static void test_video_window_messages(IVideoWindow *window, HWND hwnd, HWND our
 
     flush_events();
 
+    /* Demonstrate that messages should be sent, not posted, and that only some
+     * messages should be forwarded. A previous implementation unconditionally
+     * posted all messages. */
+
     hr = IVideoWindow_NotifyOwnerMessage(window, (OAHWND)our_hwnd, WM_SYSCOLORCHANGE, 0, 0);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    ret = GetQueueStatus(QS_SENDMESSAGE | QS_POSTMESSAGE);
-    ok(!ret, "Got unexpected status %#x.\n", ret);
+    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+    {
+        ok(msg.message != WM_SYSCOLORCHANGE, "WM_SYSCOLORCHANGE should not be posted.\n");
+        DispatchMessageA(&msg);
+    }
 
-    hr = IVideoWindow_NotifyOwnerMessage(window, (OAHWND)our_hwnd, WM_SETCURSOR,
-            (WPARAM)hwnd, MAKELONG(HTCLIENT, WM_MOUSEMOVE));
+    hr = IVideoWindow_NotifyOwnerMessage(window, (OAHWND)our_hwnd, WM_FONTCHANGE, 0, 0);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    ret = GetQueueStatus(QS_SENDMESSAGE | QS_POSTMESSAGE);
-    ok(!ret, "Got unexpected status %#x.\n", ret);
+    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+    {
+        ok(msg.message != WM_FONTCHANGE, "WM_FONTCHANGE should not be posted.\n");
+        DispatchMessageA(&msg);
+    }
 
     params.window = window;
     params.hwnd = our_hwnd;
     params.message = WM_SYSCOLORCHANGE;
     thread = CreateThread(NULL, 0, notify_message_proc, &params, 0, NULL);
     ok(WaitForSingleObject(thread, 100) == WAIT_TIMEOUT, "Thread should block.\n");
-    ret = GetQueueStatus(QS_SENDMESSAGE | QS_POSTMESSAGE);
-    ok(ret == ((QS_SENDMESSAGE << 16) | QS_SENDMESSAGE), "Got unexpected status %#x.\n", ret);
 
-    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
-    ok(!WaitForSingleObject(thread, 1000), "Wait timed out.\n");
+    while ((ret = MsgWaitForMultipleObjects(1, &thread, FALSE, 1000, QS_ALLINPUT)) == 1)
+    {
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+        {
+            ok(msg.message != WM_SYSCOLORCHANGE, "WM_SYSCOLORCHANGE should not be posted.\n");
+            DispatchMessageA(&msg);
+        }
+    }
+    ok(!ret, "Wait timed out.\n");
     CloseHandle(thread);
 
-    params.message = WM_SETCURSOR;
+    params.message = WM_FONTCHANGE;
     thread = CreateThread(NULL, 0, notify_message_proc, &params, 0, NULL);
     ok(!WaitForSingleObject(thread, 1000), "Thread should not block.\n");
     CloseHandle(thread);
-    ret = GetQueueStatus(QS_SENDMESSAGE | QS_POSTMESSAGE);
-    ok(!ret, "Got unexpected status %#x.\n", ret);
+
+    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+    {
+        ok(msg.message != WM_FONTCHANGE, "WM_FONTCHANGE should not be posted.\n");
+        DispatchMessageA(&msg);
+    }
 
     hr = IVideoWindow_put_Owner(window, 0);
     ok(hr == S_OK, "Got hr %#x.\n", hr);

@@ -128,13 +128,15 @@ extern WCHAR **main_wargv DECLSPEC_HIDDEN;
 extern const WCHAR system_dir[] DECLSPEC_HIDDEN;
 extern unsigned int supported_machines_count DECLSPEC_HIDDEN;
 extern USHORT supported_machines[8] DECLSPEC_HIDDEN;
-extern BOOL is_wow64 DECLSPEC_HIDDEN;
 extern BOOL process_exiting DECLSPEC_HIDDEN;
 extern HANDLE keyed_event DECLSPEC_HIDDEN;
 extern timeout_t server_start_time DECLSPEC_HIDDEN;
 extern sigset_t server_block_set DECLSPEC_HIDDEN;
 extern struct _KUSER_SHARED_DATA *user_shared_data DECLSPEC_HIDDEN;
 extern SYSTEM_CPU_INFORMATION cpu_info DECLSPEC_HIDDEN;
+#ifndef _WIN64
+extern BOOL is_wow64 DECLSPEC_HIDDEN;
+#endif
 #ifdef __i386__
 extern struct ldt_copy __wine_ldt_copy DECLSPEC_HIDDEN;
 #endif
@@ -162,7 +164,7 @@ extern unsigned int server_call_unlocked( void *req_ptr ) DECLSPEC_HIDDEN;
 extern void server_enter_uninterrupted_section( pthread_mutex_t *mutex, sigset_t *sigset ) DECLSPEC_HIDDEN;
 extern void server_leave_uninterrupted_section( pthread_mutex_t *mutex, sigset_t *sigset ) DECLSPEC_HIDDEN;
 extern unsigned int server_select( const select_op_t *select_op, data_size_t size, UINT flags,
-                                   timeout_t abs_timeout, CONTEXT *context, pthread_mutex_t *mutex,
+                                   timeout_t abs_timeout, context_t *context, pthread_mutex_t *mutex,
                                    user_apc_t *user_apc ) DECLSPEC_HIDDEN;
 extern unsigned int server_wait( const select_op_t *select_op, data_size_t size, UINT flags,
                                  const LARGE_INTEGER *timeout ) DECLSPEC_HIDDEN;
@@ -177,15 +179,16 @@ extern void server_init_process_done(void) DECLSPEC_HIDDEN;
 extern void server_init_thread( void *entry_point, BOOL *suspend ) DECLSPEC_HIDDEN;
 extern int server_pipe( int fd[2] ) DECLSPEC_HIDDEN;
 
-extern NTSTATUS context_to_server( context_t *to, const CONTEXT *from ) DECLSPEC_HIDDEN;
-extern NTSTATUS context_from_server( CONTEXT *to, const context_t *from ) DECLSPEC_HIDDEN;
+extern void set_thread_id( TEB *teb, DWORD pid, DWORD tid ) DECLSPEC_HIDDEN;
+extern NTSTATUS init_thread_stack( TEB *teb, ULONG_PTR zero_bits, SIZE_T reserve_size,
+                                   SIZE_T commit_size, SIZE_T *pthread_size ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN abort_thread( int status ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN abort_process( int status ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN exit_process( int status ) DECLSPEC_HIDDEN;
 extern void wait_suspend( CONTEXT *context ) DECLSPEC_HIDDEN;
 extern NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance ) DECLSPEC_HIDDEN;
-extern NTSTATUS set_thread_context( HANDLE handle, const context_t *context, BOOL *self ) DECLSPEC_HIDDEN;
-extern NTSTATUS get_thread_context( HANDLE handle, context_t *context, unsigned int flags, BOOL *self ) DECLSPEC_HIDDEN;
+extern NTSTATUS set_thread_context( HANDLE handle, const void *context, BOOL *self, USHORT machine ) DECLSPEC_HIDDEN;
+extern NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT machine ) DECLSPEC_HIDDEN;
 extern NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_attributes **ret,
                                          data_size_t *ret_len ) DECLSPEC_HIDDEN;
 
@@ -239,6 +242,8 @@ extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE ent
 extern void DECLSPEC_NORETURN signal_exit_thread( int status, void (*func)(int) ) DECLSPEC_HIDDEN;
 extern void __wine_syscall_dispatcher(void) DECLSPEC_HIDDEN;
 extern void signal_restore_full_cpu_context(void) DECLSPEC_HIDDEN;
+extern NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size ) DECLSPEC_HIDDEN;
+extern NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size ) DECLSPEC_HIDDEN;
 extern void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid ) DECLSPEC_HIDDEN;
 extern NTSTATUS open_hkcu_key( const char *path, HANDLE *key ) DECLSPEC_HIDDEN;
 
@@ -358,42 +363,6 @@ static inline void context_init_xstate( CONTEXT *context, void *xstate_buffer )
     xctx->All.Offset = -(LONG)sizeof(CONTEXT);
     context->ContextFlags |= 0x40;
 }
-
-static inline void xstate_to_server( context_t *to, const XSTATE *xs )
-{
-    if (!xs)
-        return;
-
-    to->flags |= SERVER_CTX_YMM_REGISTERS;
-    if (xs->Mask & 4)
-        memcpy(&to->ymm.ymm_high_regs.ymm_high, &xs->YmmContext, sizeof(xs->YmmContext));
-    else
-        memset(&to->ymm.ymm_high_regs.ymm_high, 0, sizeof(xs->YmmContext));
-}
-
-static inline void xstate_from_server_( XSTATE *xs, const context_t *from, BOOL compaction_enabled)
-{
-    if (!xs)
-        return;
-
-    xs->Mask = 0;
-    xs->CompactionMask = compaction_enabled ? 0x8000000000000004 : 0;
-
-    if (from->flags & SERVER_CTX_YMM_REGISTERS)
-    {
-        unsigned long *src = (unsigned long *)&from->ymm.ymm_high_regs.ymm_high;
-        unsigned int i;
-
-        for (i = 0; i < sizeof(xs->YmmContext) / sizeof(unsigned long); ++i)
-            if (src[i])
-            {
-                memcpy( &xs->YmmContext, &from->ymm.ymm_high_regs.ymm_high, sizeof(xs->YmmContext) );
-                xs->Mask = 4;
-                break;
-            }
-    }
-}
-#define xstate_from_server( xs, from ) xstate_from_server_( xs, from, user_shared_data->XState.CompactionEnabled )
 
 #else
 static inline XSTATE *xstate_from_context( const CONTEXT *context )

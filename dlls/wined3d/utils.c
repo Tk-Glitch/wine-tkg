@@ -5242,6 +5242,8 @@ const char *debug_d3dstate(DWORD state)
         return "STATE_DEPTH_STENCIL";
     if (STATE_IS_STENCIL_REF(state))
         return "STATE_STENCIL_REF";
+    if (STATE_IS_DEPTH_BOUNDS(state))
+        return "STATE_DEPTH_BOUNDS";
 
     return wine_dbg_sprintf("UNKNOWN_STATE(%#x)", state);
 }

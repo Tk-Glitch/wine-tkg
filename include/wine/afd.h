@@ -24,11 +24,22 @@
 #include <winioctl.h>
 #include "wine/server_protocol.h"
 
-#define IOCTL_AFD_CREATE                    CTL_CODE(FILE_DEVICE_NETWORK, 200, METHOD_BUFFERED, FILE_WRITE_ACCESS)
-#define IOCTL_AFD_ACCEPT                    CTL_CODE(FILE_DEVICE_NETWORK, 201, METHOD_BUFFERED, FILE_WRITE_ACCESS)
-#define IOCTL_AFD_ACCEPT_INTO               CTL_CODE(FILE_DEVICE_NETWORK, 202, METHOD_BUFFERED, FILE_WRITE_ACCESS)
+#define IOCTL_AFD_LISTEN                    CTL_CODE(FILE_DEVICE_BEEP, 0x802, METHOD_NEITHER,  FILE_ANY_ACCESS)
 
-#define IOCTL_AFD_ADDRESS_LIST_CHANGE       CTL_CODE(FILE_DEVICE_NETWORK, 323, METHOD_BUFFERED, 0)
+struct afd_listen_params
+{
+    int unknown1;
+    int backlog;
+    int unknown2;
+};
+
+#define IOCTL_AFD_WINE_CREATE               CTL_CODE(FILE_DEVICE_NETWORK, 200, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_AFD_WINE_ACCEPT               CTL_CODE(FILE_DEVICE_NETWORK, 201, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_AFD_WINE_ACCEPT_INTO          CTL_CODE(FILE_DEVICE_NETWORK, 202, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_AFD_WINE_CONNECT              CTL_CODE(FILE_DEVICE_NETWORK, 203, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_AFD_WINE_SHUTDOWN             CTL_CODE(FILE_DEVICE_NETWORK, 204, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+#define IOCTL_AFD_WINE_ADDRESS_LIST_CHANGE  CTL_CODE(FILE_DEVICE_NETWORK, 323, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 struct afd_create_params
 {
@@ -40,6 +51,14 @@ struct afd_accept_into_params
 {
     obj_handle_t accept_handle;
     unsigned int recv_len, local_len;
+};
+
+struct afd_connect_params
+{
+    int addr_len;
+    int synchronous;
+    /* VARARG(addr, struct sockaddr, addr_len); */
+    /* VARARG(data, bytes); */
 };
 
 #endif

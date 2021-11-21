@@ -284,8 +284,10 @@ union rawinput
         int            type;
         unsigned int   device;
         unsigned int   param;
+        unsigned short usage_page;
+        unsigned short usage;
+        unsigned int   count;
         unsigned int   length;
-
     } hid;
 };
 
@@ -340,10 +342,7 @@ typedef union
         int            type;
         unsigned int   msg;
         lparam_t       lparam;
-        union
-        {
-            union rawinput rawinput;
-        } data;
+        union rawinput rawinput;
     } hw;
 } hw_input_t;
 
@@ -844,10 +843,13 @@ struct new_process_request
     char __pad_38[2];
     data_size_t  info_size;
     data_size_t  handles_size;
+    data_size_t  jobs_size;
     /* VARARG(objattr,object_attributes); */
     /* VARARG(handles,uints,handles_size); */
+    /* VARARG(jobs,uints,jobs_size); */
     /* VARARG(info,startup_info,info_size); */
     /* VARARG(env,unicode_str); */
+    char __pad_52[4];
 };
 struct new_process_reply
 {
@@ -913,6 +915,9 @@ struct init_process_done_request
 {
     struct request_header __header;
     char __pad_12[4];
+    client_ptr_t teb;
+    client_ptr_t peb;
+    client_ptr_t ldt_copy;
 };
 struct init_process_done_reply
 {
@@ -930,9 +935,6 @@ struct init_first_thread_request
     int          unix_pid;
     int          unix_tid;
     int          debug_level;
-    client_ptr_t teb;
-    client_ptr_t peb;
-    client_ptr_t ldt_copy;
     int          reply_fd;
     int          wait_fd;
 };
@@ -2714,7 +2716,8 @@ struct send_hardware_message_request
     user_handle_t   win;
     hw_input_t      input;
     unsigned int    flags;
-    char __pad_52[4];
+    /* VARARG(report,bytes); */
+    char __pad_60[4];
 };
 struct send_hardware_message_reply
 {
@@ -6484,7 +6487,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 700
+#define SERVER_PROTOCOL_VERSION 704
 
 /* ### protocol_version end ### */
 

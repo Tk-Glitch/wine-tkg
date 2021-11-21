@@ -669,20 +669,23 @@ static _Collvec* getcoll(_Collvec *ret)
 }
 
 /* _Getcoll */
-#if defined(__i386__) || _MSVCP_VER<110
+#if defined(__i386__)
+/* Work around a gcc bug */
 ULONGLONG __cdecl _Getcoll(void)
 {
+    C_ASSERT(sizeof(_Collvec) == sizeof(ULONGLONG));
     ULONGLONG ret;
-
-    C_ASSERT(sizeof(_Collvec) <= sizeof(ULONGLONG));
 
     getcoll((_Collvec*)&ret);
     return ret;
 }
 #else
-_Collvec* __cdecl _Getcoll(_Collvec *ret)
+_Collvec __cdecl _Getcoll(void)
 {
-    return getcoll(ret);
+    _Collvec ret;
+
+    getcoll(&ret);
+    return ret;
 }
 #endif
 
@@ -695,8 +698,9 @@ _Collvec* __thiscall _Locinfo__Getcoll(const _Locinfo *this, _Collvec *ret)
 }
 
 /* _Getctype */
-_Ctypevec* __cdecl _Getctype(_Ctypevec *ret)
+_Ctypevec __cdecl _Getctype(void)
 {
+    _Ctypevec ret;
     short *table;
 #if _MSVCP_VER >= 110
     wchar_t *name;
@@ -705,24 +709,24 @@ _Ctypevec* __cdecl _Getctype(_Ctypevec *ret)
 
     TRACE("\n");
 
-    ret->page = ___lc_codepage_func();
+    ret.page = ___lc_codepage_func();
 #if _MSVCP_VER < 110
-    ret->handle = ___lc_handle_func()[LC_COLLATE];
+    ret.handle = ___lc_handle_func()[LC_COLLATE];
 #else
     if((name = ___lc_locale_name_func()[LC_COLLATE])) {
         size = wcslen(name)+1;
-        ret->name = malloc(size*sizeof(*name));
-        if(!ret->name) throw_exception(EXCEPTION_BAD_ALLOC, NULL);
-        memcpy(ret->name, name, size*sizeof(*name));
+        ret.name = malloc(size*sizeof(*name));
+        if(!ret.name) throw_exception(EXCEPTION_BAD_ALLOC, NULL);
+        memcpy(ret.name, name, size*sizeof(*name));
     } else {
-        ret->name = NULL;
+        ret.name = NULL;
     }
 #endif
-    ret->delfl = TRUE;
+    ret.delfl = TRUE;
     table = malloc(sizeof(short[256]));
     if(!table) throw_exception(EXCEPTION_BAD_ALLOC, NULL);
     memcpy(table, __pctype_func(), sizeof(short[256]));
-    ret->table = table;
+    ret.table = table;
     return ret;
 }
 
@@ -731,13 +735,16 @@ _Ctypevec* __cdecl _Getctype(_Ctypevec *ret)
 DEFINE_THISCALL_WRAPPER(_Locinfo__Getctype, 8)
 _Ctypevec* __thiscall _Locinfo__Getctype(const _Locinfo *this, _Ctypevec *ret)
 {
-    return _Getctype(ret);
+    *ret = _Getctype();
+    return ret;
 }
 
 /* _Getcvt */
-#if _MSVCP_VER < 110
+#if _MSVCP_VER < 110 && defined(__i386__)
+/* Work around a gcc bug */
 ULONGLONG __cdecl _Getcvt(void)
 {
+    C_ASSERT(sizeof(_Cvtvec) == sizeof(ULONGLONG));
     union {
         _Cvtvec cvtvec;
         ULONGLONG ull;
@@ -749,20 +756,32 @@ ULONGLONG __cdecl _Getcvt(void)
     ret.cvtvec.handle = ___lc_handle_func()[LC_CTYPE];
     return ret.ull;
 }
-#else
-_Cvtvec* __cdecl _Getcvt(_Cvtvec *ret)
+#elif _MSVCP_VER < 110
+_Cvtvec __cdecl _Getcvt(void)
 {
+    _Cvtvec ret;
+
+    TRACE("\n");
+
+    ret.page = ___lc_codepage_func();
+    ret.handle = ___lc_handle_func()[LC_CTYPE];
+    return ret;
+}
+#else
+_Cvtvec __cdecl _Getcvt(void)
+{
+    _Cvtvec ret;
     int i;
 
     TRACE("\n");
 
-    memset(ret, 0, sizeof(*ret));
-    ret->page = ___lc_codepage_func();
-    ret->mb_max = ___mb_cur_max_func();
+    memset(&ret, 0, sizeof(ret));
+    ret.page = ___lc_codepage_func();
+    ret.mb_max = ___mb_cur_max_func();
 
-    if(ret->mb_max > 1) {
+    if(ret.mb_max > 1) {
         for(i=0; i<256; i++)
-            if(_ismbblead(i)) ret->isleadbyte[i/8] |= 1 << (i&7);
+            if(_ismbblead(i)) ret.isleadbyte[i/8] |= 1 << (i&7);
     }
     return ret;
 }
@@ -773,14 +792,14 @@ _Cvtvec* __cdecl _Getcvt(_Cvtvec *ret)
 DEFINE_THISCALL_WRAPPER(_Locinfo__Getcvt, 8)
 _Cvtvec* __thiscall _Locinfo__Getcvt(const _Locinfo *this, _Cvtvec *ret)
 {
-#if _MSVCP_VER < 110
-    ULONGLONG ull = _Getcvt();
-    memcpy(ret, &ull, sizeof(ull));
+#if _MSVCP_VER < 110 && defined(__i386__)
+    ULONGLONG cvtvec;
 #else
     _Cvtvec cvtvec;
-    _Getcvt(&cvtvec);
-    memcpy(ret, &cvtvec, sizeof(cvtvec));
 #endif
+
+    cvtvec = _Getcvt();
+    memcpy(ret, &cvtvec, sizeof(cvtvec));
     return ret;
 }
 

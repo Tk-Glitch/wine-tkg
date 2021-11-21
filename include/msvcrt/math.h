@@ -73,6 +73,8 @@ _ACRTIMP double __cdecl fmod(double, double);
 _ACRTIMP double __cdecl fmin(double, double);
 _ACRTIMP double __cdecl fmax(double, double);
 _ACRTIMP double __cdecl erf(double);
+_ACRTIMP double __cdecl remquo(double, double, int*);
+_ACRTIMP float __cdecl remquof(float, float, int*);
 
 _ACRTIMP double __cdecl _hypot(double, double);
 _ACRTIMP double __cdecl _j0(double);
@@ -166,7 +168,20 @@ static inline float fmodf(float x, float y) { return fmod(x, y); }
 
 static inline int   _finitef(float x) { return _finite(x); }
 static inline int   _isnanf(float x) { return _isnan(x); }
-static inline int   _fpclassf(float x) { return _fpclass(x); }
+
+static inline int   _fpclassf(float x)
+{
+    unsigned int ix = *(int*)&x;
+    double d = x;
+
+    /* construct denormal double */
+    if (!(ix >> 23 & 0xff) && (ix << 1))
+    {
+        unsigned __int64 id = (((unsigned __int64)ix >> 31) << 63) | 1;
+        d = *(double*)&id;
+    }
+    return _fpclass(d);
+}
 
 #endif
 

@@ -70,12 +70,6 @@
 /* Define to 1 if you have the <Carbon/Carbon.h> header file. */
 #undef HAVE_CARBON_CARBON_H
 
-/* Define to 1 if you have the `cbrt' function. */
-#undef HAVE_CBRT
-
-/* Define to 1 if you have the `cbrtf' function. */
-#undef HAVE_CBRTF
-
 /* Define to 1 if you have the `clock_gettime' function. */
 #undef HAVE_CLOCK_GETTIME
 
@@ -118,18 +112,6 @@
 
 /* Define to 1 if you have the `epoll_create' function. */
 #undef HAVE_EPOLL_CREATE
-
-/* Define to 1 if you have the `erf' function. */
-#undef HAVE_ERF
-
-/* Define to 1 if you have the `erfc' function. */
-#undef HAVE_ERFC
-
-/* Define to 1 if you have the `erfcf' function. */
-#undef HAVE_ERFCF
-
-/* Define to 1 if you have the `erff' function. */
-#undef HAVE_ERFF
 
 /* Define to 1 if you have the `exp2' function. */
 #undef HAVE_EXP2
@@ -465,12 +447,6 @@
 /* Define to 1 if you have the <linux/videodev2.h> header file. */
 #undef HAVE_LINUX_VIDEODEV2_H
 
-/* Define to 1 if you have the `llrint' function. */
-#undef HAVE_LLRINT
-
-/* Define to 1 if you have the `llrintf' function. */
-#undef HAVE_LLRINTF
-
 /* Define to 1 if you have the `log1p' function. */
 #undef HAVE_LOG1P
 
@@ -482,12 +458,6 @@
 
 /* Define to 1 if you have the `log2f' function. */
 #undef HAVE_LOG2F
-
-/* Define to 1 if you have the `lrint' function. */
-#undef HAVE_LRINT
-
-/* Define to 1 if you have the `lrintf' function. */
-#undef HAVE_LRINTF
 
 /* Define to 1 if you have the `lstat' function. */
 #undef HAVE_LSTAT
@@ -521,12 +491,6 @@
 
 /* Define if MTLDevice protocol has registryID property. */
 #undef HAVE_MTLDEVICE_REGISTRYID
-
-/* Define to 1 if you have the `nearbyint' function. */
-#undef HAVE_NEARBYINT
-
-/* Define to 1 if you have the `nearbyintf' function. */
-#undef HAVE_NEARBYINTF
 
 /* Define to 1 if you have the <netdb.h> header file. */
 #undef HAVE_NETDB_H
@@ -593,12 +557,6 @@
 
 /* Define to 1 if you have the <net/route.h> header file. */
 #undef HAVE_NET_ROUTE_H
-
-/* Define to 1 if you have the `nexttoward' function. */
-#undef HAVE_NEXTTOWARD
-
-/* Define to 1 if you have the `nexttowardf' function. */
-#undef HAVE_NEXTTOWARDF
 
 /* Define to 1 if `_msg_ptr' is a member of `ns_msg'. */
 #undef HAVE_NS_MSG__MSG_PTR
@@ -672,18 +630,6 @@
 /* Define to 1 if you have the `readlink' function. */
 #undef HAVE_READLINK
 
-/* Define to 1 if you have the `remainder' function. */
-#undef HAVE_REMAINDER
-
-/* Define to 1 if you have the `remainderf' function. */
-#undef HAVE_REMAINDERF
-
-/* Define to 1 if you have the `remquo' function. */
-#undef HAVE_REMQUO
-
-/* Define to 1 if you have the `remquof' function. */
-#undef HAVE_REMQUOF
-
 /* Define to 1 if you have the `renameat' function. */
 #undef HAVE_RENAMEAT
 
@@ -701,12 +647,6 @@
 
 /* Define to 1 if you have the `res_getservers' function. */
 #undef HAVE_RES_GETSERVERS
-
-/* Define to 1 if you have the `rint' function. */
-#undef HAVE_RINT
-
-/* Define to 1 if you have the `rintf' function. */
-#undef HAVE_RINTF
 
 /* Define to 1 if you have the <sasl/sasl.h> header file. */
 #undef HAVE_SASL_SASL_H
@@ -1079,12 +1019,6 @@
 /* Define to 1 if you have the <tiffio.h> header file. */
 #undef HAVE_TIFFIO_H
 
-/* Define to 1 if you have the `trunc' function. */
-#undef HAVE_TRUNC
-
-/* Define to 1 if you have the `truncf' function. */
-#undef HAVE_TRUNCF
-
 /* Define to 1 if you have the `udev' library (-ludev). */
 #undef HAVE_UDEV
 
@@ -1294,9 +1228,6 @@
 
 /* Define to the soname of the libOSMesa library. */
 #undef SONAME_LIBOSMESA
-
-/* Define to the soname of the libpcap library. */
-#undef SONAME_LIBPCAP
 
 /* Define to the soname of the libpng library. */
 #undef SONAME_LIBPNG

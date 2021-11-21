@@ -31,7 +31,7 @@
 #define STRING_NO_REMOTE              108
 #define STRING_VALUE_NONEXIST         109
 #define STRING_UNSUPPORTED_TYPE       110
-#define STRING_MISSING_INTEGER        111
+#define STRING_MISSING_NUMBER         111
 #define STRING_MISSING_HEXDATA        112
 #define STRING_UNHANDLED_TYPE         113
 #define STRING_OVERWRITE_VALUE        114
@@ -63,3 +63,4 @@
 #define STRING_KEY_IMPORT_FAILED      140
 #define STRING_REG_VIEW_USAGE         141
 #define STRING_ACCESS_DENIED          142
+#define STRING_COPY_USAGE             143

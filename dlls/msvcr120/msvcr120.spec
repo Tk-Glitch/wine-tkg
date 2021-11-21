@@ -2149,13 +2149,13 @@
 @ cdecl fegetround()
 @ stub feholdexcept
 @ cdecl feof(ptr)
-@ stub feraiseexcept
+@ cdecl feraiseexcept(long)
 @ cdecl ferror(ptr)
 @ cdecl fesetenv(ptr)
 @ cdecl fesetexceptflag(ptr long)
 @ cdecl fesetround(long)
 @ cdecl fetestexcept(long)
-@ stub feupdateenv
+@ cdecl feupdateenv(ptr)
 @ cdecl fflush(ptr)
 @ cdecl fgetc(ptr)
 @ cdecl fgetpos(ptr ptr)

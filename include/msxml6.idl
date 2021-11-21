@@ -52,6 +52,8 @@ interface IXMLDOMEntity;
 interface IXMLDOMEntityReference;
 interface IXMLDOMParseError;
 interface IXMLDOMParseErrorCollection;
+interface IXMLHTTPRequest2Callback;
+interface IXMLHTTPRequest3Callback;
 interface IXTLRuntime;
 interface IXSLTemplate;
 interface IXSLProcessor;
@@ -244,8 +246,6 @@ typedef enum _SCHEMAWHITESPACE
     SCHEMAWHITESPACE_COLLAPSE   =  2,
 } SCHEMAWHITESPACE;
 
-interface IXMLHTTPRequest2Callback;
-interface IXMLHTTPRequest3Callback;
 
 typedef enum _SCHEMATYPEVARIETY
 {
@@ -255,6 +255,35 @@ typedef enum _SCHEMATYPEVARIETY
     SCHEMATYPEVARIETY_UNION     =  2,
 } SCHEMATYPEVARIETY;
 cpp_quote("#endif /* __msxml_som_enums__ */")
+
+typedef [v1_enum] enum _XHR_PROPERTY
+{
+    XHR_PROP_NO_CRED_PROMPT,
+    XHR_PROP_NO_AUTH,
+    XHR_PROP_TIMEOUT,
+    XHR_PROP_NO_DEFAULT_HEADERS,
+    XHR_PROP_REPORT_REDIRECT_STATUS,
+    XHR_PROP_NO_CACHE,
+    XHR_PROP_EXTENDED_ERROR,
+    XHR_PROP_QUERY_STRING_UTF8,
+    XHR_PROP_IGNORE_CERT_ERRORS,
+} XHR_PROPERTY;
+
+typedef struct tagXHR_COOKIE
+{
+    [ref, string] WCHAR *pwszUrl;
+    [ref, string] WCHAR *pwszName;
+    [unique, string] WCHAR *pwszValue;
+    [unique, string] WCHAR *pwszP3PPolicy;
+    FILETIME ftExpires;
+    DWORD dwFlags;
+} XHR_COOKIE;
+
+typedef struct tagXHR_CERT
+{
+    DWORD cbCert;
+    [ref, size_is(cbCert)] BYTE *pbCert;
+} XHR_CERT;
 
 [
 local,
@@ -394,35 +423,6 @@ interface IXMLDOMNode : IDispatch
         [in] IXMLDOMNode *domNode,
         [in] VARIANT var1);
 }
-
-typedef struct tagXHR_COOKIE
-{
-    [ref, string]    WCHAR *pwszUrl;
-    [ref, string]    WCHAR *pwszName;
-    [unique, string] WCHAR *pwszValue;
-    [unique, string] WCHAR *pwszP3PPolicy;
-    FILETIME ftExpires;
-    DWORD dwFlags;
-} XHR_COOKIE;
-
-typedef [v1_enum] enum _XHR_PROPERTY
-{
-    XHR_PROP_NO_CRED_PROMPT         = 0x0,
-    XHR_PROP_NO_AUTH                = 0x1,
-    XHR_PROP_TIMEOUT                = 0x2,
-    XHR_PROP_NO_DEFAULT_HEADERS     = 0x3,
-    XHR_PROP_REPORT_REDIRECT_STATUS = 0x4,
-    XHR_PROP_NO_CACHE               = 0x5,
-    XHR_PROP_EXTENDED_ERROR         = 0x6,
-    XHR_PROP_QUERY_STRING_UTF8      = 0x7,
-    XHR_PROP_IGNORE_CERT_ERRORS     = 0x8,
-} XHR_PROPERTY;
-
-typedef struct tagXHR_CERT
-{
-    DWORD cbCert;
-    [ref, size_is(cbCert)] BYTE  *pbCert;
-} XHR_CERT;
 
 [
 local,
@@ -1343,66 +1343,62 @@ interface IServerXMLHTTPRequest : IXMLHTTPRequest
 [
     object,
     uuid(e5d37dc0-552a-4d52-9cc0-a14d546fbd04),
-    helpstring("IXMLHTTPRequest2 Interface")
 ]
 interface IXMLHTTPRequest2 : IUnknown
 {
     HRESULT Open([in, string, ref] const WCHAR *method, [in, string, ref] const WCHAR *url,
-                 [in] IXMLHTTPRequest2Callback *callback,
-                 [in, string, unique] const WCHAR *username, [in, string, unique] const WCHAR *password,
-                 [in, string, unique] const WCHAR *proxy_username, [in, string, unique] const WCHAR *proxy_password);
-    HRESULT Send([in] ISequentialStream *body, [in] ULONGLONG body_size);
+        [in] IXMLHTTPRequest2Callback *callback,
+        [in, string, unique] const WCHAR *username, [in, string, unique] const WCHAR *password,
+        [in, string, unique] const WCHAR *proxyuser, [in, string, unique] const WCHAR *proxypassword);
+
+    HRESULT Send([in, unique] ISequentialStream *body, [in] ULONGLONG length);
     HRESULT Abort();
     HRESULT SetCookie([in, ref] const XHR_COOKIE *cookie, [out] DWORD *state);
     HRESULT SetCustomResponseStream([in] ISequentialStream *stream);
     HRESULT SetProperty([in] XHR_PROPERTY property, [in] ULONGLONG value);
     HRESULT SetRequestHeader([in, string, ref] const WCHAR *header, [in, string, unique] const WCHAR *value);
     HRESULT GetAllResponseHeaders([out, string] WCHAR **headers);
-    HRESULT GetCookie([in, ref, string] const WCHAR *url, [in, unique, string] const WCHAR *name, [in] DWORD dwFlags,
-                      [out] ULONG *cookies_count, [out, size_is(,*cookies_count)] XHR_COOKIE **cookies);
+    HRESULT GetCookie( [in, ref, string] const WCHAR *url, [in, unique, string] const WCHAR *name,
+        [in] DWORD flags, [out] ULONG *cookies_cnt, [out, size_is(,*cookies_cnt)] XHR_COOKIE **cookies);
     HRESULT GetResponseHeader([in, string, ref] const WCHAR *header, [out, string] WCHAR **value);
-}
+};
 
 [
     object,
-    uuid(a1c9feee-0617-4f23-9d58-8961ea43567c),
-    helpstring("IXMLHttpRequest3 Interface")
+    uuid(a1c9feee-0617-4f23-9d58-8961ea43567c)
 ]
 interface IXMLHTTPRequest3 : IXMLHTTPRequest2
 {
-    HRESULT SetClientCertificate([in] DWORD hash_size, [in, unique, size_is(hash_size)] const BYTE *hash,
-                                 [in, string, unique] const WCHAR *pin);
-}
+    HRESULT SetClientCertificate([in] DWORD count, [in, unique, size_is(count)] const BYTE *hashes,
+        [in, string, unique] const WCHAR *pin);
+};
 
 [
     object,
     uuid(a44a9299-e321-40de-8866-341b41669162),
-    helpstring("IXMLHTTPRequest2Callback Interface"),
     pointer_default(ref)
 ]
 interface IXMLHTTPRequest2Callback : IUnknown
 {
-    HRESULT OnRedirect([in] IXMLHTTPRequest2 *request, [in, string] const WCHAR* redirect_url);
-    HRESULT OnHeadersAvailable([in] IXMLHTTPRequest2 *request, [in] DWORD status, [in, string] const WCHAR *status_str);
-    HRESULT OnDataAvailable([in] IXMLHTTPRequest2 *request, [in] ISequentialStream *response);
-    HRESULT OnResponseReceived([in] IXMLHTTPRequest2 *request, [in] ISequentialStream *response);
-    HRESULT OnError([in] IXMLHTTPRequest2 *request, [in] HRESULT error);
-}
+    HRESULT OnRedirect([in] IXMLHTTPRequest2 *xhr, [in, string] const WCHAR *url);
+    HRESULT OnHeadersAvailable([in] IXMLHTTPRequest2 *xhr, [in] DWORD status, [in, string] const WCHAR *msg);
+    HRESULT OnDataAvailable([in] IXMLHTTPRequest2 *xhr, [in] ISequentialStream *stream);
+    HRESULT OnResponseReceived([in] IXMLHTTPRequest2 *xhr, [in] ISequentialStream *stream);
+    HRESULT OnError([in] IXMLHTTPRequest2 *xhr, [in] HRESULT error);
+};
 
 [
     object,
-    uuid(b9e57830-8c6c-4a6f-9c13-47772bb047bb),
-    helpstring("IXMLHttpRequest3Callback Interface")
+    uuid(b9e57830-8c6c-4a6f-9c13-47772bb047bb)
 ]
 interface IXMLHTTPRequest3Callback : IXMLHTTPRequest2Callback
 {
-    HRESULT OnServerCertificateReceived([in] IXMLHTTPRequest3 *request, [in] DWORD errors,
-                                        [in] DWORD chain_size,
-                                        [in, unique,size_is(chain_size)] const XHR_CERT *chain);
-    HRESULT OnClientCertificateRequested([in] IXMLHTTPRequest3 *request, [in] DWORD issuers_size,
-                                         [in, string, unique, size_is(issuers_size)] const WCHAR **issuers);
-};
+    HRESULT OnServerCertificateReceived([in] IXMLHTTPRequest3 *xhr, [in] DWORD errors,
+        [in] DWORD count, [in, unique, size_is(count)] const XHR_CERT *certificates);
 
+    HRESULT OnClientCertificateRequested([in] IXMLHTTPRequest3 *xhr,
+        [in] DWORD count, [in, string, unique, size_is(count)] const WCHAR **list);
+};
 
 [
 object,
@@ -1700,6 +1696,17 @@ interface ISAXDeclHandler : IUnknown
         [in] int nPublicId,
         [in] const WCHAR * pSystemId,
         [in] int nSystemId);
+}
+
+[
+    helpstring("Free Threaded XML HTTP Request class 6.0"),
+    progid("Msxml2.FreeThreadedXMLHTTP60.6.0"),
+    threading(both),
+    uuid(88d96a09-f192-11d4-a65f-0040963251e5)
+]
+coclass FreeThreadedXMLHTTP60
+{
+    [default] interface IXMLHTTPRequest2;
 }
 
 [
@@ -3156,17 +3163,6 @@ coclass FreeThreadedDOMDocument60
 {
     [default] interface IXMLDOMDocument3;
     [default, source] dispinterface XMLDOMDocumentEvents;
-}
-
-[
-    helpstring("Free Threaded XML HTTP Request class 6.0"),
-    progid("Msxml2.FreeThreadedXMLHTTP60.6.0"),
-    threading(both),
-    uuid(88d96a09-f192-11d4-a65f-0040963251e5)
-]
-coclass FreeThreadedXMLHTTP60
-{
-    interface IXMLHTTPRequest2;
 }
 
 [

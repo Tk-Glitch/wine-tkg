@@ -47,7 +47,7 @@ static NvAPI_Status (CDECL* pNvAPI_EnumNvidiaDisplayHandle)(NvU32 thisEnum, NvDi
 static NvAPI_Status (CDECL* pNvAPI_SYS_GetDriverAndBranchVersion)(NvU32* pDriverVersion, NvAPI_ShortString szBuildBranchString);
 static NvAPI_Status (CDECL* pNvAPI_D3D_GetCurrentSLIState)(IUnknown *pDevice, NV_GET_CURRENT_SLI_STATE *pSliState);
 static NvAPI_Status (CDECL* pNvAPI_GetLogicalGPUFromDisplay)(NvDisplayHandle hNvDisp, NvLogicalGpuHandle *pLogicalGPU);
-static NvAPI_Status (CDECL* pNvAPI_D3D11_SetDepthBoundsTest)(IUnknown*, NvU32, float, float);
+static NvAPI_Status (CDECL* pNvAPI_D3D11_SetDepthBoundsTest)(IUnknown *unk, NvU32 enable, float min, float max);
 static NvAPI_Status (CDECL* pNvAPI_D3D11_CreateDevice)(IDXGIAdapter*, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL*, UINT, UINT,
                                                        ID3D11Device**, D3D_FEATURE_LEVEL*, ID3D11DeviceContext**, NVAPI_DEVICE_FEATURE_LEVEL*);
 

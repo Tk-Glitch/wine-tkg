@@ -300,8 +300,10 @@ union rawinput
         int            type;    /* RIM_TYPEHID */
         unsigned int   device;  /* rawinput device index */
         unsigned int   param;   /* rawinput message param */
+        unsigned short usage_page;/* HID usage page */
+        unsigned short usage;   /* HID usage */
+        unsigned int   count;   /* HID report count */
         unsigned int   length;  /* HID report length */
-        /* followed by length bytes of HID report data  */
     } hid;
 };
 
@@ -356,10 +358,7 @@ typedef union
         int            type;    /* INPUT_HARDWARE */
         unsigned int   msg;     /* message code */
         lparam_t       lparam;  /* message param */
-        union
-        {
-            union rawinput rawinput; /* WM_INPUT and WM_INPUT_DEVICE_CHANGE msg */
-        } data;
+        union rawinput rawinput;/* rawinput message data */
     } hw;
 } hw_input_t;
 
@@ -857,8 +856,10 @@ typedef struct
     unsigned short machine;      /* architecture that the new process will use */
     data_size_t  info_size;      /* size of startup info */
     data_size_t  handles_size;   /* length of explicit handles list */
+    data_size_t  jobs_size;      /* length of jobs list */
     VARARG(objattr,object_attributes);   /* object attributes */
     VARARG(handles,uints,handles_size);  /* handles list */
+    VARARG(jobs,uints,jobs_size);        /* jobs list */
     VARARG(info,startup_info,info_size); /* startup information */
     VARARG(env,unicode_str);     /* environment for new process */
 @REPLY
@@ -901,6 +902,9 @@ typedef struct
 
 /* Signal the end of the process initialization */
 @REQ(init_process_done)
+    client_ptr_t teb;          /* TEB of new thread (in process address space) */
+    client_ptr_t peb;          /* PEB of new process (in process address space) */
+    client_ptr_t ldt_copy;     /* address of LDT copy (in process address space) */
 @REPLY
     client_ptr_t entry;        /* process entry point */
     int          suspend;      /* is process suspended? */
@@ -912,9 +916,6 @@ typedef struct
     int          unix_pid;     /* Unix pid of new process */
     int          unix_tid;     /* Unix tid of new thread */
     int          debug_level;  /* new debug level */
-    client_ptr_t teb;          /* TEB of new thread (in process address space) */
-    client_ptr_t peb;          /* PEB of new process (in process address space) */
-    client_ptr_t ldt_copy;     /* address of LDT copy (in process address space) */
     int          reply_fd;     /* fd for reply pipe */
     int          wait_fd;      /* fd for blocking calls pipe */
 @REPLY
@@ -2036,6 +2037,7 @@ enum message_type
     user_handle_t   win;       /* window handle */
     hw_input_t      input;     /* input data */
     unsigned int    flags;     /* flags (see below) */
+    VARARG(report,bytes);      /* HID report data */
 @REPLY
     int             wait;      /* do we need to wait for a reply? */
     int             prev_x;    /* previous cursor position */

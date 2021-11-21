@@ -35,6 +35,7 @@
 #include "dbt.h"
 #include "dde.h"
 #include "imm.h"
+#include "hidusage.h"
 #include "ddk/imm.h"
 #include "wine/server.h"
 #include "user_private.h"
@@ -3236,6 +3237,7 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
     struct send_message_info info;
     int prev_x, prev_y, new_x, new_y;
     INT counter = global_key_state_counter;
+    USAGE hid_usage_page, hid_usage;
     NTSTATUS ret;
     BOOL wait;
 
@@ -3244,6 +3246,23 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
     info.hwnd     = hwnd;
     info.flags    = 0;
     info.timeout  = 0;
+
+    if (input->type == INPUT_HARDWARE && rawinput->header.dwType == RIM_TYPEHID)
+    {
+        if (input->u.hi.uMsg == WM_INPUT_DEVICE_CHANGE)
+        {
+            hid_usage_page = ((USAGE *)rawinput->data.hid.bRawData)[0];
+            hid_usage = ((USAGE *)rawinput->data.hid.bRawData)[1];
+        }
+        if (input->u.hi.uMsg == WM_INPUT)
+        {
+            if (!rawinput_device_get_usages( rawinput->header.hDevice, &hid_usage_page, &hid_usage ))
+            {
+                WARN( "unable to get HID usages for device %p\n", rawinput->header.hDevice );
+                return STATUS_INVALID_HANDLE;
+            }
+        }
+    }
 
     SERVER_START_REQ( send_hardware_message )
     {
@@ -3276,22 +3295,23 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
             {
             case WM_INPUT:
             case WM_INPUT_DEVICE_CHANGE:
-                req->input.hw.data.rawinput.type = rawinput->header.dwType;
+                req->input.hw.rawinput.type = rawinput->header.dwType;
                 switch (rawinput->header.dwType)
                 {
                 case RIM_TYPEMOUSE:
-                    req->input.hw.data.rawinput.mouse.x = rawinput->data.mouse.lLastX;
-                    req->input.hw.data.rawinput.mouse.y = rawinput->data.mouse.lLastY;
-                    req->input.hw.data.rawinput.mouse.data = rawinput->data.mouse.u.ulButtons;
-                    req->input.hw.lparam = rawinput->data.mouse.ulRawButtons;
+                    req->input.hw.rawinput.mouse.x = rawinput->data.mouse.lLastX;
+                    req->input.hw.rawinput.mouse.y = rawinput->data.mouse.lLastY;
+                    req->input.hw.rawinput.mouse.data = rawinput->data.mouse.ulRawButtons;
+                    req->input.hw.lparam = rawinput->data.mouse.usFlags;
                     break;
                 case RIM_TYPEHID:
-                    assert( rawinput->data.hid.dwCount <= 1 );
-                    req->input.hw.data.rawinput.hid.device = HandleToUlong( rawinput->header.hDevice );
-                    req->input.hw.data.rawinput.hid.param = rawinput->header.wParam;
-                    req->input.hw.data.rawinput.hid.length = rawinput->data.hid.dwSizeHid;
-                    if (rawinput->data.hid.dwSizeHid)
-                        wine_server_add_data( req, rawinput->data.hid.bRawData, rawinput->data.hid.dwSizeHid );
+                    req->input.hw.rawinput.hid.device = HandleToUlong( rawinput->header.hDevice );
+                    req->input.hw.rawinput.hid.param = rawinput->header.wParam;
+                    req->input.hw.rawinput.hid.usage_page = hid_usage_page;
+                    req->input.hw.rawinput.hid.usage = hid_usage;
+                    req->input.hw.rawinput.hid.count = rawinput->data.hid.dwCount;
+                    req->input.hw.rawinput.hid.length = rawinput->data.hid.dwSizeHid;
+                    wine_server_add_data( req, rawinput->data.hid.bRawData, rawinput->data.hid.dwCount * rawinput->data.hid.dwSizeHid );
                     break;
                 default:
                     assert( 0 );
