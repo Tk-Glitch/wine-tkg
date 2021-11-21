@@ -42,10 +42,11 @@ typedef BOOL (CDECL *unrealize_function)(HPALETTE);
 
 typedef struct tagPALETTEOBJ
 {
-    unrealize_function  unrealize;
-    WORD                version;    /* palette version */
-    WORD                count;      /* count of palette entries */
-    PALETTEENTRY       *entries;
+    struct gdi_obj_header obj;
+    unrealize_function    unrealize;
+    WORD                  version;    /* palette version */
+    WORD                  count;      /* count of palette entries */
+    PALETTEENTRY         *entries;
 } PALETTEOBJ;
 
 static INT PALETTE_GetObject( HGDIOBJ handle, INT count, LPVOID buffer );
@@ -54,7 +55,6 @@ static BOOL PALETTE_DeleteObject( HGDIOBJ handle );
 
 static const struct gdi_obj_funcs palette_funcs =
 {
-    NULL,                     /* pSelectObject */
     PALETTE_GetObject,        /* pGetObjectA */
     PALETTE_GetObject,        /* pGetObjectW */
     PALETTE_UnrealizeObject,  /* pUnrealizeObject */
@@ -129,7 +129,7 @@ HPALETTE WINAPI CreatePalette(
         return 0;
     }
     memcpy( palettePtr->entries, palette->palPalEntry, size );
-    if (!(hpalette = alloc_gdi_handle( palettePtr, OBJ_PAL, &palette_funcs )))
+    if (!(hpalette = alloc_gdi_handle( &palettePtr->obj, OBJ_PAL, &palette_funcs )))
     {
         HeapFree( GetProcessHeap(), 0, palettePtr->entries );
         HeapFree( GetProcessHeap(), 0, palettePtr );

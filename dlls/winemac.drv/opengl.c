@@ -1477,7 +1477,7 @@ static BOOL create_context(struct wgl_context *context, CGLContextObj share, uns
         attribs[n++] = pf->samples;
     }
 
-    if (pf->backing_store)
+    if (force_backing_store || pf->backing_store)
         attribs[n++] = kCGLPFABackingStore;
 
 #if defined(MAC_OS_X_VERSION_10_7) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_7

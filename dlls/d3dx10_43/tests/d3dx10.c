@@ -1040,6 +1040,7 @@ static void check_resource_info(ID3D10Resource *resource, const struct test_imag
             ok_(__FILE__, line)(desc_2d.Height == expected_height,
                     "Got unexpected Height %u, expected %u.\n",
                      desc_2d.Height, expected_height);
+            todo_wine_if(expected_mip_levels != 1)
             ok_(__FILE__, line)(desc_2d.MipLevels == expected_mip_levels,
                     "Got unexpected MipLevels %u, expected %u.\n",
                      desc_2d.MipLevels, expected_mip_levels);
@@ -1146,6 +1147,8 @@ static void check_resource_data(ID3D10Resource *resource, const struct test_imag
     {
         line_match = !memcmp(image->expected_data + stride * i,
                 (BYTE *)map.pData + map.RowPitch * i, stride);
+        todo_wine_if(is_block_compressed(image->expected_info.Format)
+                && (image->expected_info.Width % 4 != 0 || image->expected_info.Height % 4 != 0))
         ok_(__FILE__, line)(line_match, "Data mismatch for line %u.\n", i);
         if (!line_match)
             break;
@@ -1971,24 +1974,32 @@ static void test_create_texture(void)
 
     /* D3DX10CreateTextureFromMemory tests */
 
-    todo_wine
-    {
+    resource = (ID3D10Resource *)0xdeadbeef;
     hr = D3DX10CreateTextureFromMemory(device, NULL, 0, NULL, NULL, &resource, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
+
+    resource = (ID3D10Resource *)0xdeadbeef;
     hr = D3DX10CreateTextureFromMemory(device, NULL, sizeof(test_bmp_1bpp), NULL, NULL, &resource, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
+
+    resource = (ID3D10Resource *)0xdeadbeef;
     hr = D3DX10CreateTextureFromMemory(device, test_bmp_1bpp, 0, NULL, NULL, &resource, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
+
+    resource = (ID3D10Resource *)0xdeadbeef;
     hr = D3DX10CreateTextureFromMemory(device, test_bmp_1bpp, sizeof(test_bmp_1bpp) - 1, NULL, NULL, &resource, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    }
+    ok(resource == (ID3D10Resource *)0xdeadbeef, "Got unexpected resource %p.\n", resource);
 
     for (i = 0; i < ARRAY_SIZE(test_image); ++i)
     {
         winetest_push_context("Test %u", i);
 
         hr = D3DX10CreateTextureFromMemory(device, test_image[i].data, test_image[i].size, NULL, NULL, &resource, NULL);
-        todo_wine
+        todo_wine_if(test_image[i].expected_info.MiscFlags & D3D10_RESOURCE_MISC_TEXTURECUBE)
         ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
         if (hr == S_OK)
         {

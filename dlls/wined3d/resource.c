@@ -334,32 +334,24 @@ void CDECL wined3d_resource_preload(struct wined3d_resource *resource)
     wined3d_cs_emit_preload_resource(resource->device->cs, resource);
 }
 
-void *wined3d_allocate_sysmem(SIZE_T size)
+static BOOL wined3d_resource_allocate_sysmem(struct wined3d_resource *resource)
 {
     void **p;
-    static const SIZE_T align = RESOURCE_ALIGNMENT - 1 + sizeof(*p);
+    SIZE_T align = RESOURCE_ALIGNMENT - 1 + sizeof(*p);
     void *mem;
 
-    if (!(mem = heap_alloc_zero(size + align)))
+    if (!(mem = heap_alloc_zero(resource->size + align)))
     {
         ERR("Failed to allocate system memory.\n");
-        return NULL;
+        return FALSE;
     }
 
     p = (void **)(((ULONG_PTR)mem + align) & ~(RESOURCE_ALIGNMENT - 1)) - 1;
     *p = mem;
 
-    return ++p;
-}
+    resource->heap_memory = ++p;
 
-void wined3d_free_sysmem(void *mem)
-{
-    void **p = mem;
-
-    if (!p)
-        return;
-
-    heap_free(*(--p));
+    return TRUE;
 }
 
 BOOL wined3d_resource_prepare_sysmem(struct wined3d_resource *resource)
@@ -367,12 +359,17 @@ BOOL wined3d_resource_prepare_sysmem(struct wined3d_resource *resource)
     if (resource->heap_memory)
         return TRUE;
 
-    return !!(resource->heap_memory = wined3d_allocate_sysmem(resource->size));
+    return wined3d_resource_allocate_sysmem(resource);
 }
 
 void wined3d_resource_free_sysmem(struct wined3d_resource *resource)
 {
-    wined3d_free_sysmem(resource->heap_memory);
+    void **p = resource->heap_memory;
+
+    if (!p)
+        return;
+
+    heap_free(*(--p));
     resource->heap_memory = NULL;
 }
 
@@ -502,6 +499,44 @@ unsigned int wined3d_resource_get_sample_count(const struct wined3d_resource *re
     }
 
     return resource->multisample_type;
+}
+
+HRESULT wined3d_resource_check_box_dimensions(struct wined3d_resource *resource,
+        unsigned int sub_resource_idx, const struct wined3d_box *box)
+{
+    const struct wined3d_format *format = resource->format;
+    struct wined3d_sub_resource_desc desc;
+    unsigned int width_mask, height_mask;
+
+    wined3d_resource_get_sub_resource_desc(resource, sub_resource_idx, &desc);
+
+    if (box->left >= box->right || box->right > desc.width
+            || box->top >= box->bottom || box->bottom > desc.height
+            || box->front >= box->back || box->back > desc.depth)
+    {
+        WARN("Box %s is invalid.\n", debug_box(box));
+        return WINEDDERR_INVALIDRECT;
+    }
+
+    if (resource->format_flags & WINED3DFMT_FLAG_BLOCKS)
+    {
+        /* This assumes power of two block sizes, but NPOT block sizes would
+         * be silly anyway.
+         *
+         * This also assumes that the format's block depth is 1. */
+        width_mask = format->block_width - 1;
+        height_mask = format->block_height - 1;
+
+        if ((box->left & width_mask) || (box->top & height_mask)
+                || (box->right & width_mask && box->right != desc.width)
+                || (box->bottom & height_mask && box->bottom != desc.height))
+        {
+            WARN("Box %s is misaligned for %ux%u blocks.\n", debug_box(box), format->block_width, format->block_height);
+            return WINED3DERR_INVALIDCALL;
+        }
+    }
+
+    return WINED3D_OK;
 }
 
 VkAccessFlags vk_access_mask_from_bind_flags(uint32_t bind_flags)

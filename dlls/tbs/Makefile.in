@@ -1,0 +1,6 @@
+MODULE    = tbs.dll
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	tbs.c

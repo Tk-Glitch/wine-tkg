@@ -27,7 +27,7 @@
 #include <math.h>
 #define COBJMACROS
 #include "d2d1_2.h"
-#include "d3d11.h"
+#include "d3d11_1.h"
 #ifdef D2D1_INIT_GUID
 #include "initguid.h"
 #endif
@@ -73,8 +73,8 @@ struct d2d_error_state
 
 struct d2d_shape_resources
 {
-    ID3D10InputLayout *il;
-    ID3D10VertexShader *vs;
+    ID3D11InputLayout *il;
+    ID3D11VertexShader *vs;
 };
 
 struct d2d_brush_cb
@@ -161,19 +161,19 @@ struct d2d_device_context
 
     ID2D1Factory *factory;
     ID2D1Device *device;
-    ID3D10Device *d3d_device;
+    ID3D11Device1 *d3d_device;
+    ID3DDeviceContextState *d3d_state;
     struct d2d_bitmap *target;
-    ID3D10StateBlock *stateblock;
     struct d2d_shape_resources shape_resources[D2D_SHAPE_TYPE_COUNT];
-    ID3D10Buffer *vs_cb;
-    ID3D10PixelShader *ps;
-    ID3D10Buffer *ps_cb;
-    ID3D10Buffer *ib;
+    ID3D11Buffer *vs_cb;
+    ID3D11PixelShader *ps;
+    ID3D11Buffer *ps_cb;
+    ID3D11Buffer *ib;
     unsigned int vb_stride;
-    ID3D10Buffer *vb;
-    ID3D10RasterizerState *rs;
-    ID3D10BlendState *bs;
-    ID3D10SamplerState *sampler_states
+    ID3D11Buffer *vb;
+    ID3D11RasterizerState *rs;
+    ID3D11BlendState *bs;
+    ID3D11SamplerState *sampler_states
             [D2D_SAMPLER_INTERPOLATION_MODE_COUNT]
             [D2D_SAMPLER_EXTEND_MODE_COUNT]
             [D2D_SAMPLER_EXTEND_MODE_COUNT];
@@ -271,12 +271,12 @@ struct d2d_gradient
     LONG refcount;
 
     ID2D1Factory *factory;
-    ID3D10ShaderResourceView *view;
+    ID3D11ShaderResourceView *view;
     D2D1_GRADIENT_STOP *stops;
     UINT32 stop_count;
 };
 
-HRESULT d2d_gradient_create(ID2D1Factory *factory, ID3D10Device *device, const D2D1_GRADIENT_STOP *stops,
+HRESULT d2d_gradient_create(ID2D1Factory *factory, ID3D11Device1 *device, const D2D1_GRADIENT_STOP *stops,
         UINT32 stop_count, D2D1_GAMMA gamma, D2D1_EXTEND_MODE extend_mode,
         struct d2d_gradient **gradient) DECLSPEC_HIDDEN;
 
@@ -376,10 +376,10 @@ struct d2d_bitmap
     LONG refcount;
 
     ID2D1Factory *factory;
-    ID3D10ShaderResourceView *srv;
-    ID3D10RenderTargetView *rtv;
+    ID3D11ShaderResourceView *srv;
+    ID3D11RenderTargetView *rtv;
     IDXGISurface *surface;
-    ID3D10Resource *resource;
+    ID3D11Resource *resource;
     D2D1_SIZE_U pixel_size;
     D2D1_PIXEL_FORMAT format;
     float dpi_x;

@@ -156,7 +156,7 @@ typedef struct
     } ext;
     union
     {
-        struct { struct { unsigned __int64 low, high; } ymm_high[16]; } ymm_high_regs;
+        struct { struct { unsigned __int64 low, high; } ymm_high[16]; } regs;
     } ymm;
 } context_t;
 
@@ -933,9 +933,9 @@ struct init_first_thread_reply
     process_id_t pid;
     thread_id_t  tid;
     timeout_t    server_start;
+    unsigned int session_id;
     data_size_t  info_size;
     /* VARARG(machines,ushorts); */
-    char __pad_28[4];
 };
 
 
@@ -952,10 +952,8 @@ struct init_thread_request
 struct init_thread_reply
 {
     struct reply_header __header;
-    process_id_t pid;
-    thread_id_t  tid;
     int          suspend;
-    char __pad_20[4];
+    char __pad_12[4];
 };
 
 
@@ -1006,11 +1004,12 @@ struct get_process_info_reply
     client_ptr_t peb;
     timeout_t    start_time;
     timeout_t    end_time;
+    unsigned int session_id;
     int          exit_code;
     int          priority;
     unsigned short machine;
     /* VARARG(image,pe_image_info); */
-    char __pad_58[6];
+    char __pad_62[2];
 };
 
 
@@ -1307,14 +1306,14 @@ struct select_request
     obj_handle_t prev_apc;
     /* VARARG(result,apc_result); */
     /* VARARG(data,select_op,size); */
-    /* VARARG(context,context); */
+    /* VARARG(contexts,contexts); */
 };
 struct select_reply
 {
     struct reply_header __header;
     apc_call_t   call;
     obj_handle_t apc_handle;
-    /* VARARG(context,context); */
+    /* VARARG(contexts,contexts); */
     char __pad_60[4];
 };
 #define SELECT_ALERTABLE     1
@@ -1733,40 +1732,6 @@ struct unlock_file_reply
 
 
 
-struct get_socket_event_request
-{
-    struct request_header __header;
-    obj_handle_t handle;
-    int          service;
-    obj_handle_t c_event;
-};
-struct get_socket_event_reply
-{
-    struct reply_header __header;
-    unsigned int mask;
-    unsigned int pmask;
-    /* VARARG(errors,ints); */
-};
-
-
-
-struct get_socket_info_request
-{
-    struct request_header __header;
-    obj_handle_t handle;
-};
-struct get_socket_info_reply
-{
-    struct reply_header __header;
-    int family;
-    int type;
-    int protocol;
-    char __pad_20[4];
-    timeout_t connect_time;
-};
-
-
-
 struct recv_socket_request
 {
     struct request_header __header;
@@ -2048,9 +2013,9 @@ struct process_info
     int             priority;
     process_id_t    pid;
     process_id_t    parent_pid;
+    unsigned int    session_id;
     int             handle_count;
     int             unix_pid;
-    int             __pad;
 
 
 };
@@ -2497,15 +2462,17 @@ struct get_thread_context_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    obj_handle_t context;
     unsigned int flags;
-    char __pad_20[4];
+    unsigned short machine;
+    char __pad_26[6];
 };
 struct get_thread_context_reply
 {
     struct reply_header __header;
     int          self;
     obj_handle_t handle;
-    /* VARARG(context,context); */
+    /* VARARG(contexts,contexts); */
 };
 
 
@@ -2514,7 +2481,7 @@ struct set_thread_context_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    /* VARARG(context,context); */
+    /* VARARG(contexts,contexts); */
 };
 struct set_thread_context_reply
 {
@@ -4738,8 +4705,22 @@ struct get_object_info_reply
     unsigned int   access;
     unsigned int   ref_count;
     unsigned int   handle_count;
+    char __pad_20[4];
+};
+
+
+
+struct get_object_name_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+};
+struct get_object_name_reply
+{
+    struct reply_header __header;
     data_size_t    total;
     /* VARARG(name,unicode_str); */
+    char __pad_12[4];
 };
 
 
@@ -4949,12 +4930,12 @@ struct get_token_info_reply
     struct reply_header __header;
     luid_t         token_id;
     luid_t         modified_id;
+    unsigned int   session_id;
     int            primary;
     int            impersonation_level;
     int            elevation;
     int            group_count;
     int            privilege_count;
-    char __pad_44[4];
 };
 
 
@@ -5673,8 +5654,6 @@ enum request
     REQ_get_volume_info,
     REQ_lock_file,
     REQ_unlock_file,
-    REQ_get_socket_event,
-    REQ_get_socket_info,
     REQ_recv_socket,
     REQ_poll_socket,
     REQ_send_socket,
@@ -5850,6 +5829,7 @@ enum request
     REQ_open_symlink,
     REQ_query_symlink,
     REQ_get_object_info,
+    REQ_get_object_name,
     REQ_get_object_type,
     REQ_get_object_types,
     REQ_allocate_locally_unique_id,
@@ -5966,8 +5946,6 @@ union generic_request
     struct get_volume_info_request get_volume_info_request;
     struct lock_file_request lock_file_request;
     struct unlock_file_request unlock_file_request;
-    struct get_socket_event_request get_socket_event_request;
-    struct get_socket_info_request get_socket_info_request;
     struct recv_socket_request recv_socket_request;
     struct poll_socket_request poll_socket_request;
     struct send_socket_request send_socket_request;
@@ -6143,6 +6121,7 @@ union generic_request
     struct open_symlink_request open_symlink_request;
     struct query_symlink_request query_symlink_request;
     struct get_object_info_request get_object_info_request;
+    struct get_object_name_request get_object_name_request;
     struct get_object_type_request get_object_type_request;
     struct get_object_types_request get_object_types_request;
     struct allocate_locally_unique_id_request allocate_locally_unique_id_request;
@@ -6257,8 +6236,6 @@ union generic_reply
     struct get_volume_info_reply get_volume_info_reply;
     struct lock_file_reply lock_file_reply;
     struct unlock_file_reply unlock_file_reply;
-    struct get_socket_event_reply get_socket_event_reply;
-    struct get_socket_info_reply get_socket_info_reply;
     struct recv_socket_reply recv_socket_reply;
     struct poll_socket_reply poll_socket_reply;
     struct send_socket_reply send_socket_reply;
@@ -6434,6 +6411,7 @@ union generic_reply
     struct open_symlink_reply open_symlink_reply;
     struct query_symlink_reply query_symlink_reply;
     struct get_object_info_reply get_object_info_reply;
+    struct get_object_name_reply get_object_name_reply;
     struct get_object_type_reply get_object_type_reply;
     struct get_object_types_reply get_object_types_reply;
     struct allocate_locally_unique_id_reply allocate_locally_unique_id_reply;
@@ -6494,7 +6472,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 716
+#define SERVER_PROTOCOL_VERSION 726
 
 /* ### protocol_version end ### */
 

@@ -2671,7 +2671,6 @@ static int is_dir_empty( int fd )
 static void set_fd_disposition( struct fd *fd, int unlink )
 {
     struct stat st;
-    struct list *ptr;
 
     if (!fd->inode)
     {
@@ -2687,6 +2686,17 @@ static void set_fd_disposition( struct fd *fd, int unlink )
 
     if (unlink)
     {
+        struct fd *fd_ptr;
+
+        LIST_FOR_EACH_ENTRY( fd_ptr, &fd->inode->open, struct fd, inode_entry )
+        {
+            if (fd_ptr->access & FILE_MAPPING_ACCESS)
+            {
+                set_error( STATUS_CANNOT_DELETE );
+                return;
+            }
+        }
+
         if (fstat( fd->unix_fd, &st ) == -1)
         {
             file_set_error();
@@ -2715,17 +2725,6 @@ static void set_fd_disposition( struct fd *fd, int unlink )
         else  /* can't unlink special files */
         {
             set_error( STATUS_INVALID_PARAMETER );
-            return;
-        }
-    }
-
-    /* can't unlink files which are mapped to memory */
-    LIST_FOR_EACH( ptr, &fd->inode->open )
-    {
-        struct fd *fd_ptr = LIST_ENTRY( ptr, struct fd, inode_entry );
-        if (fd_ptr != fd && (fd_ptr->access & FILE_MAPPING_ACCESS))
-        {
-            set_error( STATUS_CANNOT_DELETE );
             return;
         }
     }
@@ -2869,9 +2868,7 @@ failed:
 
 static void set_fd_eof( struct fd *fd, file_pos_t eof )
 {
-    static const char zero;
     struct stat st;
-    struct list *ptr;
 
     if (!fd->inode)
     {
@@ -2884,40 +2881,25 @@ static void set_fd_eof( struct fd *fd, file_pos_t eof )
         set_error( fd->no_fd_status );
         return;
     }
-
-    if (fstat( fd->unix_fd, &st ) == -1)
+    if (fstat( fd->unix_fd, &st) == -1)
     {
         file_set_error();
         return;
     }
-
-    /* can't truncate files which are mapped to memory */
     if (eof < st.st_size)
     {
-        LIST_FOR_EACH( ptr, &fd->inode->open )
+        struct fd *fd_ptr;
+        LIST_FOR_EACH_ENTRY( fd_ptr, &fd->inode->open, struct fd, inode_entry )
         {
-            struct fd *fd_ptr = LIST_ENTRY( ptr, struct fd, inode_entry );
-            if (fd_ptr != fd && (fd_ptr->access & FILE_MAPPING_ACCESS))
+            if (fd_ptr->access & FILE_MAPPING_ACCESS)
             {
                 set_error( STATUS_USER_MAPPED_FILE );
                 return;
             }
         }
+        if (ftruncate( fd->unix_fd, eof ) == -1) file_set_error();
     }
-
-    /* first try normal truncate */
-    if (ftruncate( fd->unix_fd, eof ) != -1) return;
-
-    /* now check for the need to extend the file */
-    if (eof > st.st_size)
-    {
-        /* extend the file one byte beyond the requested size and then truncate it */
-        /* this should work around ftruncate implementations that can't extend files */
-        if (pwrite( fd->unix_fd, &zero, 1, eof ) != -1 &&
-            ftruncate( fd->unix_fd, eof) != -1) return;
-    }
-
-    file_set_error();
+    else grow_file( fd->unix_fd, eof );
 }
 
 struct completion *fd_get_completion( struct fd *fd, apc_param_t *p_key )

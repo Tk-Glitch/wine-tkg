@@ -8272,6 +8272,12 @@ static void test_elevation(void)
         ret = GetTokenInformation(linked.LinkedToken, TokenElevation, &elevation, sizeof(elevation), &size);
         ok(ret, "got error %u\n", GetLastError());
         ok(elevation.TokenIsElevated == TRUE, "got elevation %#x\n", elevation.TokenIsElevated);
+        ret = GetTokenInformation(linked.LinkedToken, TokenType, &type, sizeof(type), &size);
+        ok(ret, "got error %u\n", GetLastError());
+        ok(type == TokenImpersonation, "got type %#x\n", type);
+        ret = GetTokenInformation(linked.LinkedToken, TokenImpersonationLevel, &type, sizeof(type), &size);
+        ok(ret, "got error %u\n", GetLastError());
+        ok(type == SecurityIdentification, "got impersonation level %#x\n", type);
 
         /* Asking for the linked token again gives us a different token. */
         ret = GetTokenInformation(token, TokenLinkedToken, &linked2, sizeof(linked2), &size);
@@ -8327,6 +8333,12 @@ static void test_elevation(void)
         ret = GetTokenInformation(linked.LinkedToken, TokenElevation, &elevation, sizeof(elevation), &size);
         ok(ret, "got error %u\n", GetLastError());
         ok(elevation.TokenIsElevated == FALSE, "got elevation %#x\n", elevation.TokenIsElevated);
+        ret = GetTokenInformation(linked.LinkedToken, TokenType, &type, sizeof(type), &size);
+        ok(ret, "got error %u\n", GetLastError());
+        ok(type == TokenImpersonation, "got type %#x\n", type);
+        ret = GetTokenInformation(linked.LinkedToken, TokenImpersonationLevel, &type, sizeof(type), &size);
+        ok(ret, "got error %u\n", GetLastError());
+        ok(type == SecurityIdentification, "got impersonation level %#x\n", type);
 
         /* Asking for the linked token again gives us a different token. */
         ret = GetTokenInformation(token, TokenLinkedToken, &linked2, sizeof(linked2), &size);
@@ -8382,10 +8394,18 @@ static void test_elevation(void)
     ret = GetTokenInformation(token2, TokenLinkedToken, &linked, sizeof(linked), &size);
     ok(ret, "got error %u\n", GetLastError());
     if (type == TokenElevationTypeDefault)
+    {
         ok(!linked.LinkedToken, "expected no linked token\n");
+        ret = GetTokenInformation(linked.LinkedToken, TokenType, &type, sizeof(type), &size);
+        ok(ret, "got error %u\n", GetLastError());
+        ok(type == TokenImpersonation, "got type %#x\n", type);
+        ret = GetTokenInformation(linked.LinkedToken, TokenImpersonationLevel, &type, sizeof(type), &size);
+        ok(ret, "got error %u\n", GetLastError());
+        ok(type == SecurityIdentification, "got impersonation level %#x\n", type);
+        CloseHandle(linked.LinkedToken);
+    }
     else
         ok(!!linked.LinkedToken, "expected a linked token\n");
-    CloseHandle(linked.LinkedToken);
     CloseHandle(token2);
 
     ret = CreateRestrictedToken(token, 0, 0, NULL, 0, NULL, 0, NULL, &token2);

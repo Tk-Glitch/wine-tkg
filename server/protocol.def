@@ -172,7 +172,7 @@ typedef struct
     } ext;                       /* selected by SERVER_CTX_EXTENDED_REGISTERS */
     union
     {
-        struct { struct { unsigned __int64 low, high; } ymm_high[16]; } ymm_high_regs;
+        struct { struct { unsigned __int64 low, high; } ymm_high[16]; } regs;
     } ymm;                       /* selected by SERVER_CTX_YMM_REGISTERS */
 } context_t;
 
@@ -911,6 +911,7 @@ typedef struct
     process_id_t pid;          /* process id of the new thread's process */
     thread_id_t  tid;          /* thread id of the new thread */
     timeout_t    server_start; /* server start time */
+    unsigned int session_id;   /* process session id */
     data_size_t  info_size;    /* total size of startup info */
     VARARG(machines,ushorts);  /* array of supported machines */
 @END
@@ -924,8 +925,6 @@ typedef struct
     client_ptr_t teb;          /* TEB of new thread (in thread address space) */
     client_ptr_t entry;        /* entry point (in thread address space) */
 @REPLY
-    process_id_t pid;          /* process id of the new thread's process */
-    thread_id_t  tid;          /* thread id of the new thread */
     int          suspend;      /* is thread suspended? */
 @END
 
@@ -958,6 +957,7 @@ typedef struct
     client_ptr_t peb;              /* PEB address in process address space */
     timeout_t    start_time;       /* process start time */
     timeout_t    end_time;         /* process end time */
+    unsigned int session_id;       /* process session id */
     int          exit_code;        /* process exit code */
     int          priority;         /* priority class */
     unsigned short machine;        /* process architecture */
@@ -1156,11 +1156,11 @@ typedef struct
     obj_handle_t prev_apc;     /* handle to previous APC */
     VARARG(result,apc_result); /* result of previous APC */
     VARARG(data,select_op,size); /* operation-specific data */
-    VARARG(context,context);   /* suspend context */
+    VARARG(contexts,contexts);   /* suspend context(s) */
 @REPLY
     apc_call_t   call;         /* APC call arguments */
     obj_handle_t apc_handle;   /* handle to next APC */
-    VARARG(context,context);   /* suspend context */
+    VARARG(contexts,contexts); /* suspend context(s) */
 @END
 #define SELECT_ALERTABLE     1
 #define SELECT_INTERRUPTIBLE 2
@@ -1425,29 +1425,6 @@ enum server_fd_type
 @END
 
 
-/* Get socket event parameters */
-@REQ(get_socket_event)
-    obj_handle_t handle;        /* handle to the socket */
-    int          service;       /* clear pending? */
-    obj_handle_t c_event;       /* event to clear */
-@REPLY
-    unsigned int mask;          /* event mask */
-    unsigned int pmask;         /* pending events */
-    VARARG(errors,ints);        /* event errors */
-@END
-
-
-/* Get socket info */
-@REQ(get_socket_info)
-    obj_handle_t handle;        /* handle to the socket */
-@REPLY
-    int family;                 /* family, see socket manpage */
-    int type;                   /* type, see socket manpage */
-    int protocol;               /* protocol, see socket manpage */
-    timeout_t connect_time;     /* time the socket was connected (relative) */
-@END
-
-
 /* Perform a recv on a socket */
 @REQ(recv_socket)
     int          oob;           /* are we receiving OOB data? */
@@ -1634,9 +1611,9 @@ struct process_info
     int             priority;
     process_id_t    pid;
     process_id_t    parent_pid;
+    unsigned int    session_id;
     int             handle_count;
     int             unix_pid;
-    int             __pad;
     /* VARARG(name,unicode_str,name_len); */
     /* VARARG(threads,struct thread_info,thread_count); */
 };
@@ -1907,19 +1884,21 @@ struct process_info
 
 /* Retrieve the current context of a thread */
 @REQ(get_thread_context)
-    obj_handle_t handle;       /* thread or context handle */
+    obj_handle_t handle;       /* thread handle */
+    obj_handle_t context;      /* context handle */
     unsigned int flags;        /* context flags */
+    unsigned short machine;    /* context architecture */
 @REPLY
     int          self;         /* was it a handle to the current thread? */
     obj_handle_t handle;       /* pending context handle */
-    VARARG(context,context);   /* thread context */
+    VARARG(contexts,contexts); /* thread context(s) */
 @END
 
 
 /* Set the current context of a thread */
 @REQ(set_thread_context)
     obj_handle_t handle;       /* thread handle */
-    VARARG(context,context);   /* thread context */
+    VARARG(contexts,contexts); /* thread context(s) */
 @REPLY
     int          self;         /* was it a handle to the current thread? */
 @END
@@ -3332,6 +3311,13 @@ struct handle_info
     unsigned int   access;        /* granted access mask */
     unsigned int   ref_count;     /* object ref count */
     unsigned int   handle_count;  /* object handle count */
+@END
+
+
+/* Query the full name of an object */
+@REQ(get_object_name)
+    obj_handle_t   handle;        /* handle to the object */
+@REPLY
     data_size_t    total;         /* total needed size for name */
     VARARG(name,unicode_str);     /* object name */
 @END
@@ -3456,6 +3442,7 @@ struct handle_info
 @REPLY
     luid_t         token_id;      /* locally-unique identifier of the token */
     luid_t         modified_id;   /* locally-unique identifier of the modified version of the token */
+    unsigned int   session_id;    /* token session id */
     int            primary;       /* is the token primary or impersonation? */
     int            impersonation_level; /* level of impersonation */
     int            elevation;     /* elevation type */

@@ -207,6 +207,10 @@ struct sock
     struct connect_req *connect_req; /* pending connection request */
     union win_sockaddr  addr;        /* socket name */
     int                 addr_len;    /* socket name length */
+    unsigned int        rcvbuf;      /* advisory recv buffer size */
+    unsigned int        sndbuf;      /* advisory send buffer size */
+    unsigned int        rcvtimeo;    /* receive timeout in ms */
+    unsigned int        sndtimeo;    /* send timeout in ms */
     unsigned int        rd_shutdown : 1; /* is the read end shut down? */
     unsigned int        wr_shutdown : 1; /* is the write end shut down? */
     unsigned int        wr_shutdown_pending : 1; /* is a write shutdown pending? */
@@ -1392,6 +1396,10 @@ static struct sock *create_socket(void)
     sock->wr_shutdown_pending = 0;
     sock->nonblocking = 0;
     sock->bound = 0;
+    sock->rcvbuf = 0;
+    sock->sndbuf = 0;
+    sock->rcvtimeo = 0;
+    sock->sndtimeo = 0;
     init_async_queue( &sock->read_q );
     init_async_queue( &sock->write_q );
     init_async_queue( &sock->ifchange_q );
@@ -1483,7 +1491,8 @@ static void set_dont_fragment( int fd, int level, int value )
 static int init_socket( struct sock *sock, int family, int type, int protocol, unsigned int flags )
 {
     unsigned int options = 0;
-    int sockfd, unix_type, unix_family, unix_protocol;
+    int sockfd, unix_type, unix_family, unix_protocol, value;
+    socklen_t len;
 
     unix_family = get_unix_family( family );
     unix_type = get_unix_type( type );
@@ -1548,6 +1557,14 @@ static int init_socket( struct sock *sock, int family, int type, int protocol, u
         setsockopt( sockfd, IPPROTO_IPV6, IPV6_V6ONLY, &enable, sizeof(enable) );
     }
 #endif
+
+    len = sizeof(value);
+    if (!getsockopt( sockfd, SOL_SOCKET, SO_RCVBUF, &value, &len ))
+        sock->rcvbuf = value;
+
+    len = sizeof(value);
+    if (!getsockopt( sockfd, SOL_SOCKET, SO_SNDBUF, &value, &len ))
+        sock->sndbuf = value;
 
     sock->state  = (type == WS_SOCK_STREAM ? SOCK_UNCONNECTED : SOCK_CONNECTIONLESS);
     sock->flags  = flags;
@@ -2150,12 +2167,25 @@ static int sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
             return 0;
         }
 
-        if (sock->state == SOCK_CONNECTING)
+        switch (sock->state)
         {
-            /* FIXME: STATUS_ADDRESS_ALREADY_ASSOCIATED probably isn't right,
-             * but there's no status code that maps to WSAEALREADY... */
-            set_error( params->synchronous ? STATUS_ADDRESS_ALREADY_ASSOCIATED : STATUS_INVALID_PARAMETER );
-            return 0;
+            case SOCK_LISTENING:
+                set_error( STATUS_INVALID_PARAMETER );
+                return 0;
+
+            case SOCK_CONNECTING:
+                /* FIXME: STATUS_ADDRESS_ALREADY_ASSOCIATED probably isn't right,
+                 * but there's no status code that maps to WSAEALREADY... */
+                set_error( params->synchronous ? STATUS_ADDRESS_ALREADY_ASSOCIATED : STATUS_INVALID_PARAMETER );
+                return 0;
+
+            case SOCK_CONNECTED:
+                set_error( STATUS_CONNECTION_ACTIVE );
+                return 0;
+
+            case SOCK_UNCONNECTED:
+            case SOCK_CONNECTIONLESS:
+                break;
         }
 
         unix_len = sockaddr_to_unix( addr, params->addr_len, &unix_addr );
@@ -2521,10 +2551,229 @@ static int sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         return 1;
     }
 
+    case IOCTL_AFD_WINE_GET_INFO:
+    {
+        struct afd_get_info_params params;
+
+        if (get_reply_max_size() < sizeof(params))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+
+        params.family = sock->family;
+        params.type = sock->type;
+        params.protocol = sock->proto;
+        set_reply_data( &params, sizeof(params) );
+        return 0;
+    }
+
+    case IOCTL_AFD_WINE_GET_SO_ACCEPTCONN:
+    {
+        int listening = (sock->state == SOCK_LISTENING);
+
+        if (get_reply_max_size() < sizeof(listening))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+
+        set_reply_data( &listening, sizeof(listening) );
+        return 1;
+    }
+
+    case IOCTL_AFD_WINE_GET_SO_ERROR:
+    {
+        int error;
+        socklen_t len = sizeof(error);
+        unsigned int i;
+
+        if (get_reply_max_size() < sizeof(error))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+
+        if (getsockopt( unix_fd, SOL_SOCKET, SO_ERROR, (char *)&error, &len ) < 0)
+        {
+            set_error( sock_get_ntstatus( errno ) );
+            return 0;
+        }
+
+        if (!error)
+        {
+            for (i = 0; i < ARRAY_SIZE( sock->errors ); ++i)
+            {
+                if (sock->errors[i])
+                {
+                    error = sock_get_error( sock->errors[i] );
+                    break;
+                }
+            }
+        }
+
+        set_reply_data( &error, sizeof(error) );
+        return 1;
+    }
+
+    case IOCTL_AFD_WINE_GET_SO_RCVBUF:
+    {
+        int rcvbuf = sock->rcvbuf;
+
+        if (get_reply_max_size() < sizeof(rcvbuf))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+
+        set_reply_data( &rcvbuf, sizeof(rcvbuf) );
+        return 1;
+    }
+
+    case IOCTL_AFD_WINE_SET_SO_RCVBUF:
+    {
+        DWORD rcvbuf;
+
+        if (get_req_data_size() < sizeof(rcvbuf))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+        rcvbuf = *(DWORD *)get_req_data();
+
+        if (!setsockopt( unix_fd, SOL_SOCKET, SO_RCVBUF, (char *)&rcvbuf, sizeof(rcvbuf) ))
+            sock->rcvbuf = rcvbuf;
+        else
+            set_error( sock_get_ntstatus( errno ) );
+        return 0;
+    }
+
+    case IOCTL_AFD_WINE_GET_SO_RCVTIMEO:
+    {
+        DWORD rcvtimeo = sock->rcvtimeo;
+
+        if (get_reply_max_size() < sizeof(rcvtimeo))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+
+        set_reply_data( &rcvtimeo, sizeof(rcvtimeo) );
+        return 1;
+    }
+
+    case IOCTL_AFD_WINE_SET_SO_RCVTIMEO:
+    {
+        DWORD rcvtimeo;
+
+        if (get_req_data_size() < sizeof(rcvtimeo))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+        rcvtimeo = *(DWORD *)get_req_data();
+
+        sock->rcvtimeo = rcvtimeo;
+        return 0;
+    }
+
+    case IOCTL_AFD_WINE_GET_SO_SNDBUF:
+    {
+        int sndbuf = sock->sndbuf;
+
+        if (get_reply_max_size() < sizeof(sndbuf))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+
+        set_reply_data( &sndbuf, sizeof(sndbuf) );
+        return 1;
+    }
+
+    case IOCTL_AFD_WINE_SET_SO_SNDBUF:
+    {
+        DWORD sndbuf;
+
+        if (get_req_data_size() < sizeof(sndbuf))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+        sndbuf = *(DWORD *)get_req_data();
+
+#ifdef __APPLE__
+        if (!sndbuf)
+        {
+            /* setsockopt fails if a zero value is passed */
+            sock->sndbuf = sndbuf;
+            return 0;
+        }
+#endif
+
+        if (!setsockopt( unix_fd, SOL_SOCKET, SO_SNDBUF, (char *)&sndbuf, sizeof(sndbuf) ))
+            sock->sndbuf = sndbuf;
+        else
+            set_error( sock_get_ntstatus( errno ) );
+        return 0;
+    }
+
+    case IOCTL_AFD_WINE_GET_SO_SNDTIMEO:
+    {
+        DWORD sndtimeo = sock->sndtimeo;
+
+        if (get_reply_max_size() < sizeof(sndtimeo))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+
+        set_reply_data( &sndtimeo, sizeof(sndtimeo) );
+        return 1;
+    }
+
+    case IOCTL_AFD_WINE_SET_SO_SNDTIMEO:
+    {
+        DWORD sndtimeo;
+
+        if (get_req_data_size() < sizeof(sndtimeo))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return 0;
+        }
+        sndtimeo = *(DWORD *)get_req_data();
+
+        sock->sndtimeo = sndtimeo;
+        return 0;
+    }
+
     default:
         set_error( STATUS_NOT_SUPPORTED );
         return 0;
     }
+}
+
+static int poll_single_socket( struct sock *sock, int mask )
+{
+    struct pollfd pollfd;
+
+    pollfd.fd = get_unix_fd( sock->fd );
+    pollfd.events = poll_flags_from_afd( sock, mask );
+    if (pollfd.events < 0 || poll( &pollfd, 1, 0 ) < 0)
+        return 0;
+
+    if ((mask & AFD_POLL_HUP) && (pollfd.revents & POLLIN) && sock->type == WS_SOCK_STREAM)
+    {
+        char dummy;
+
+        if (!recv( get_unix_fd( sock->fd ), &dummy, 1, MSG_PEEK ))
+        {
+            pollfd.revents &= ~POLLIN;
+            pollfd.revents |= POLLHUP;
+        }
+    }
+
+    return get_poll_flags( sock, pollfd.revents ) & mask;
 }
 
 static int poll_socket( struct sock *poll_sock, struct async *async, timeout_t timeout,
@@ -2581,31 +2830,22 @@ static int poll_socket( struct sock *poll_sock, struct async *async, timeout_t t
     for (i = 0; i < count; ++i)
     {
         struct sock *sock = req->sockets[i].sock;
-        struct pollfd pollfd;
-        int flags;
+        int mask = req->sockets[i].flags;
+        int flags = poll_single_socket( sock, mask );
 
-        pollfd.fd = get_unix_fd( sock->fd );
-        pollfd.events = poll_flags_from_afd( sock, req->sockets[i].flags );
-        if (pollfd.events < 0 || poll( &pollfd, 1, 0 ) < 0) continue;
-
-        if ((req->sockets[i].flags & AFD_POLL_HUP) && (pollfd.revents & POLLIN) &&
-            sock->type == WS_SOCK_STREAM)
-        {
-            char dummy;
-
-            if (!recv( get_unix_fd( sock->fd ), &dummy, 1, MSG_PEEK ))
-            {
-                pollfd.revents &= ~POLLIN;
-                pollfd.revents |= POLLHUP;
-            }
-        }
-
-        flags = get_poll_flags( sock, pollfd.revents ) & req->sockets[i].flags;
         if (flags)
         {
             req->iosb->status = STATUS_SUCCESS;
             output[i].flags = flags;
             output[i].status = sock_get_ntstatus( sock_error( sock->fd ) );
+        }
+
+        /* FIXME: do other error conditions deserve a similar treatment? */
+        if (sock->state != SOCK_CONNECTING && sock->errors[AFD_POLL_BIT_CONNECT_ERR] && (mask & AFD_POLL_CONNECT_ERR))
+        {
+            req->iosb->status = STATUS_SUCCESS;
+            output[i].flags |= AFD_POLL_CONNECT_ERR;
+            output[i].status = sock_get_ntstatus( sock->errors[AFD_POLL_BIT_CONNECT_ERR] );
         }
     }
 
@@ -2921,62 +3161,6 @@ struct object *create_socket_device( struct object *root, const struct unicode_s
     return create_named_object( root, &socket_device_ops, name, attr, sd );
 }
 
-/* get socket event parameters */
-DECL_HANDLER(get_socket_event)
-{
-    unsigned int errors[FD_MAX_EVENTS] = {0};
-    struct sock *sock;
-
-    if (!(sock = (struct sock *)get_handle_obj( current->process, req->handle,
-                                                FILE_READ_ATTRIBUTES, &sock_ops ))) return;
-    if (get_unix_fd( sock->fd ) == -1) return;
-    reply->mask  = afd_poll_flag_to_win32( sock->mask );
-    reply->pmask = afd_poll_flag_to_win32( sock->pending_events );
-
-    errors[FD_READ_BIT]     = sock_get_error( sock->errors[AFD_POLL_BIT_READ] );
-    errors[FD_WRITE_BIT]    = sock_get_error( sock->errors[AFD_POLL_BIT_WRITE] );
-    errors[FD_OOB_BIT]      = sock_get_error( sock->errors[AFD_POLL_BIT_OOB] );
-    errors[FD_ACCEPT_BIT]   = sock_get_error( sock->errors[AFD_POLL_BIT_ACCEPT] );
-    errors[FD_CONNECT_BIT]  = sock_get_error( sock->errors[AFD_POLL_BIT_CONNECT_ERR] );
-    if (!(errors[FD_CLOSE_BIT] = sock_get_error( sock->errors[AFD_POLL_BIT_HUP] )))
-        errors[FD_CLOSE_BIT] = sock_get_error( sock->errors[AFD_POLL_BIT_RESET] );
-    set_reply_data( errors, min( get_reply_max_size(), sizeof(errors) ));
-
-    if (req->service)
-    {
-        if (req->c_event)
-        {
-            struct event *cevent = get_event_obj( current->process, req->c_event,
-                                                  EVENT_MODIFY_STATE );
-            if (cevent)
-            {
-                reset_event( cevent );
-                release_object( cevent );
-            }
-        }
-        sock->pending_events = 0;
-        sock_reselect( sock );
-    }
-    release_object( &sock->obj );
-}
-
-DECL_HANDLER(get_socket_info)
-{
-    struct sock *sock;
-
-    sock = (struct sock *)get_handle_obj( current->process, req->handle, FILE_READ_ATTRIBUTES, &sock_ops );
-    if (!sock) return;
-
-    if (get_unix_fd( sock->fd ) == -1) return;
-
-    reply->family   = sock->family;
-    reply->type     = sock->type;
-    reply->protocol = sock->proto;
-    reply->connect_time = -(current_time - sock->connect_time);
-
-    release_object( &sock->obj );
-}
-
 DECL_HANDLER(recv_socket)
 {
     struct sock *sock = (struct sock *)get_handle_obj( current->process, req->async.handle, 0, &sock_ops );
@@ -2991,19 +3175,14 @@ DECL_HANDLER(recv_socket)
     /* recv() returned EWOULDBLOCK, i.e. no data available yet */
     if (status == STATUS_DEVICE_NOT_READY && !sock->nonblocking)
     {
-#ifdef SO_RCVTIMEO
-        struct timeval tv;
-        socklen_t len = sizeof(tv);
-
         /* Set a timeout on the async if necessary.
          *
          * We want to do this *only* if the client gave us STATUS_DEVICE_NOT_READY.
          * If the client gave us STATUS_PENDING, it expects the async to always
          * block (it was triggered by WSARecv*() with a valid OVERLAPPED
          * structure) and for the timeout not to be respected. */
-        if (is_fd_overlapped( fd ) && !getsockopt( get_unix_fd( fd ), SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, &len ))
-            timeout = tv.tv_sec * -10000000 + tv.tv_usec * -10;
-#endif
+        if (is_fd_overlapped( fd ))
+            timeout = (timeout_t)sock->rcvtimeo * -10000;
 
         status = STATUS_PENDING;
     }
@@ -3106,19 +3285,14 @@ DECL_HANDLER(send_socket)
     /* send() returned EWOULDBLOCK or a short write, i.e. cannot send all data yet */
     if (status == STATUS_DEVICE_NOT_READY && !sock->nonblocking)
     {
-#ifdef SO_SNDTIMEO
-        struct timeval tv;
-        socklen_t len = sizeof(tv);
-
         /* Set a timeout on the async if necessary.
          *
          * We want to do this *only* if the client gave us STATUS_DEVICE_NOT_READY.
          * If the client gave us STATUS_PENDING, it expects the async to always
          * block (it was triggered by WSASend*() with a valid OVERLAPPED
          * structure) and for the timeout not to be respected. */
-        if (is_fd_overlapped( fd ) && !getsockopt( get_unix_fd( fd ), SOL_SOCKET, SO_SNDTIMEO, (char *)&tv, &len ))
-            timeout = tv.tv_sec * -10000000 + tv.tv_usec * -10;
-#endif
+        if (is_fd_overlapped( fd ))
+            timeout = (timeout_t)sock->sndtimeo * -10000;
 
         status = STATUS_PENDING;
     }

@@ -1,0 +1,1149 @@
+/*
+ * Copyright 2021 Zhiyi Zhang for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+#include "resources.h"
+
+#pragma makedep po
+
+LANGUAGE LANG_ENGLISH, SUBLANG_DEFAULT
+
+/* Theme color display names */
+STRINGTABLE
+{
+    IDS_COLOR_DISPLAY_NAME_BLUE         "Blue"
+    IDS_COLOR_DISPLAY_NAME_CLASSIC_BLUE "Classic Blue"
+}
+
+/* Theme color tooltips */
+STRINGTABLE
+{
+    IDS_COLOR_TOOLTIP_BLUE         "Blue"
+    IDS_COLOR_TOOLTIP_CLASSIC_BLUE "Classic Blue"
+}
+
+/* Theme size display names */
+STRINGTABLE
+{
+    IDS_SIZE_DISPLAY_NAME_NORMAL "Normal"
+}
+
+/* Theme size tooltips */
+STRINGTABLE
+{
+    IDS_SIZE_TOOLTIP_NORMAL "Normal"
+}
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+
+/* Theme version */
+1 PACKTHEM_VERSION {0x3}
+
+/* Theme color names */
+1 COLORNAMES
+{
+"Blue\0"
+"Classic Blue\0"
+"\0"
+}
+
+/* Theme size names */
+1 SIZENAMES
+{
+"NormalSize\0"
+"\0"
+}
+
+/* Theme ini files */
+1 FILERESNAMES
+{
+"BLUE_INI\0"
+"CLASSIC_BLUE_INI\0"
+"\0"
+}
+
+/* Theme definition */
+THEMES_INI TEXTFILE
+{
+"[documentation]\r\n"
+"DisplayName = Light\r\n"
+"ToolTip = Light Visual Style\r\n"
+}
+
+/* Light theme definition */
+/* Classic blue theme, no bitmaps */
+CLASSIC_BLUE_INI TEXTFILE
+{
+"[Globals]\r\n"
+"EdgeLightColor = 255 255 255\r\n"
+"EdgeHighLightColor = 255 255 255\r\n"
+"EdgeShadowColor = 189 189 189\r\n"
+"EdgeDkShadowColor = 158 158 158\r\n"
+"EdgeFillColor = 255 255 255\r\n"
+
+"\r\n[SysMetrics]\r\n"
+"; System colors\r\n"
+"Scrollbar = 255 255 255\r\n"
+"Background = 37 111 149\r\n"
+"ActiveCaption = 50 150 250\r\n"
+"InactiveCaption = 245 245 245\r\n"
+"Menu = 255 255 255\r\n"
+"Window = 255 255 255\r\n"
+"WindowFrame = 158 158 158\r\n"
+"MenuText = 0 0 0\r\n"
+"WindowText = 0 0 0\r\n"
+"CaptionText = 0 0 0\r\n"
+"ActiveBorder = 255 255 255\r\n"
+"InactiveBorder = 255 255 255\r\n"
+"AppWorkSpace = 128 128 128\r\n"
+"Highlight = 48 150 250\r\n"
+"HighlightText = 255 255 255\r\n"
+"BtnFace = 245 245 245\r\n"
+"BtnShadow = 166 166 166\r\n"
+"GrayText = 166 166 166\r\n"
+"BtnText = 0 0 0\r\n"
+"InactiveCaptionText = 100 100 100\r\n"
+"BtnHighlight = 255 255 255\r\n"
+"DkShadow3d = 106 106 106\r\n"
+"Light3d = 227 227 227\r\n"
+"InfoText = 0 0 0\r\n"
+"InfoBk = 255 255 255\r\n"
+"ButtonAlternateFace = 255 255 255\r\n"
+"HotTracking = 224 224 224\r\n"
+"GradientActiveCaption = 50 150 250\r\n"
+"GradientInactiveCaption = 245 245 245\r\n"
+"MenuHilight = 48 150 250\r\n"
+"MenuBar = 255 255 255\r\n"
+
+"\r\n; Flat menus\r\n"
+"FlatMenus = true\r\n"
+}
+
+/* Blue theme */
+BLUE_INI TEXTFILE
+{
+"[Globals]\r\n"
+"EdgeLightColor = 255 255 255\r\n"
+"EdgeHighLightColor = 255 255 255\r\n"
+"EdgeShadowColor = 189 189 189\r\n"
+"EdgeDkShadowColor = 158 158 158\r\n"
+"EdgeFillColor = 255 255 255\r\n"
+
+"\r\n[SysMetrics]\r\n"
+"; System colors\r\n"
+"Scrollbar = 255 255 255\r\n"
+"Background = 37 111 149\r\n"
+"ActiveCaption = 50 150 250\r\n"
+"InactiveCaption = 245 245 245\r\n"
+"Menu = 255 255 255\r\n"
+"Window = 255 255 255\r\n"
+"WindowFrame = 158 158 158\r\n"
+"MenuText = 0 0 0\r\n"
+"WindowText = 0 0 0\r\n"
+"CaptionText = 0 0 0\r\n"
+"ActiveBorder = 255 255 255\r\n"
+"InactiveBorder = 255 255 255\r\n"
+"AppWorkSpace = 128 128 128\r\n"
+"Highlight = 48 150 250\r\n"
+"HighlightText = 255 255 255\r\n"
+"BtnFace = 245 245 245\r\n"
+"BtnShadow = 166 166 166\r\n"
+"GrayText = 166 166 166\r\n"
+"BtnText = 0 0 0\r\n"
+"InactiveCaptionText = 100 100 100\r\n"
+"BtnHighlight = 255 255 255\r\n"
+"DkShadow3d = 106 106 106\r\n"
+"Light3d = 227 227 227\r\n"
+"InfoText = 0 0 0\r\n"
+"InfoBk = 255 255 255\r\n"
+"ButtonAlternateFace = 255 255 255\r\n"
+"HotTracking = 224 224 224\r\n"
+"GradientActiveCaption = 50 150 250\r\n"
+"GradientInactiveCaption = 245 245 245\r\n"
+"MenuHilight = 48 150 250\r\n"
+"MenuBar = 255 255 255\r\n"
+
+"\r\n; Flat menus\r\n"
+"FlatMenus = true\r\n"
+
+"\r\n; Button\r\n"
+"[Button.Pushbutton]\r\n"
+"BgType = ImageFile\r\n"
+"SizingMargins = 8, 8, 8, 8\r\n"
+"SizingType = Stretch\r\n"
+"ContentMargins = 3, 3, 3, 3\r\n"
+"ImageFile = blue_button.bmp\r\n"
+"ImageCount = 6\r\n"
+"ImageLayout = Vertical\r\n"
+"TextColor = 0 0 0\r\n"
+"MinSize = 10, 5\r\n"
+
+"[Button.Pushbutton(Pressed)]\r\n"
+"TextColor = 255 255 255\r\n"
+
+"[Button.Pushbutton(Disabled)]\r\n"
+"TextColor = 166 166 166\r\n"
+
+"[Button.Checkbox]\r\n"
+"BgType = ImageFile\r\n"
+"ImageLayout = Vertical\r\n"
+"SizingType = TrueSize\r\n"
+"SizingMargins = 0, 0, 0, 0\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"ImageCount = 12\r\n"
+"MirrorImage = False\r\n"
+"ImageSelectType = Dpi\r\n"
+"UniformSizing = True\r\n"
+"Transparent = True\r\n"
+"ImageFile1 = blue_checkbox_13px.bmp\r\n"
+"ImageFile2 = blue_checkbox_16px.bmp\r\n"
+"ImageFile3 = blue_checkbox_25px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 118\r\n"
+"MinDpi3 = 185\r\n"
+
+"[Button.Checkbox(Checkeddisabled)]\r\n"
+"TextColor = 189 189 189\r\n"
+
+"[Button.Checkbox(Uncheckeddisabled)]\r\n"
+"TextColor = 189 189 189\r\n"
+
+"[Button.Checkbox(Mixeddisabled)]\r\n"
+"TextColor = 189 189 189\r\n"
+
+"[Button.Radiobutton]\r\n"
+"BgType = ImageFile\r\n"
+"ImageLayout = Vertical\r\n"
+"Transparent = True\r\n"
+"SizingType = TrueSize\r\n"
+"SizingMargins = 0, 0, 0, 0\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"ImageCount = 8\r\n"
+"ImageSelectType = Dpi\r\n"
+"UniformSizing = True\r\n"
+"ImageFile1 = blue_radiobutton_13px.bmp\r\n"
+"ImageFile2 = blue_radiobutton_16px.bmp\r\n"
+"ImageFile3 = blue_radiobutton_25px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 118\r\n"
+"MinDpi3 = 185\r\n"
+
+"[Button.Radiobutton(Checkeddisabled)]\r\n"
+"TextColor = 189 189 189\r\n"
+
+"[Button.Radiobutton(Uncheckeddisabled)]\r\n"
+"TextColor = 189 189 189\r\n"
+
+"[Button.Groupbox]\r\n"
+"TextColor = 0 0 0\r\n"
+"BgType = ImageFile\r\n"
+"SizingMargins = 5, 5, 5, 5\r\n"
+"SizingType = Tile\r\n"
+"ImageFile = blue_groupbox.bmp\r\n"
+"BorderOnly = True\r\n"
+"Transparent = True\r\n"
+
+"[Button.Commandlink]\r\n"
+"BgType = ImageFile\r\n"
+"BorderSize = 0\r\n"
+"ContentMargins = 7, 7, 10, 10\r\n"
+"Font = Tahoma, 10\r\n"
+"BodyFont = Tahoma, 8\r\n"
+"ImageFile = blue_commandlink.bmp\r\n"
+"ImageCount = 6\r\n"
+"ImageLayout = Vertical\r\n"
+"SizingType = Stretch\r\n"
+"SizingMargins = 5, 5, 24, 24\r\n"
+"Transparent = True\r\n"
+"TextColor = 0 0 0\r\n"
+"MinSize = 10, 5\r\n"
+
+"[Button.Commandlink(Hot)]\r\n"
+"TextColor = 48 150 250\r\n"
+
+"[Button.Commandlink(Pressed)]\r\n"
+"TextColor = 41 121 255\r\n"
+
+"[Button.Commandlink(Disabled)]\r\n"
+"TextColor = 174 174 174\r\n"
+
+"[Button.CommandlinkGlyph]\r\n"
+"BgType = ImageFile\r\n"
+"SizingType = TrueSize\r\n"
+"ImageCount = 5\r\n"
+"Transparent = True\r\n"
+"ImageLayout = Vertical\r\n"
+"ImageSelectType = Dpi\r\n"
+"Transparent = True\r\n"
+"UniformSizing = True\r\n"
+"ImageFile1 = blue_commandlink_glyph_30px.bmp\r\n"
+"ImageFile2 = blue_commandlink_glyph_45px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 144\r\n"
+
+"\r\n; ComboBox\r\n"
+"[ComboBox]\r\n"
+"BgType = BorderFill\r\n"
+"BorderSize = 1\r\n"
+"FillColor = 255 255 255\r\n"
+"BorderColor = 174 174 174\r\n"
+
+"[ComboBox(Disabled)]\r\n"
+"BorderColor = 228 228 228\r\n"
+"FillColor = 231 231 231\r\n"
+
+"[ComboBox.DropDownButton]\r\n"
+"BgType = ImageFile\r\n"
+"ImageLayout = Vertical\r\n"
+"SizingType = Stretch\r\n"
+"ImageFile = blue_combobutton.bmp\r\n"
+"SizingMargins = 3, 3, 3, 3\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"ImageCount = 4\r\n"
+"GlyphType = ImageGlyph\r\n"
+"GlyphImageFile = blue_combobutton_glyph.bmp\r\n"
+"GlyphTransparent = True\r\n"
+"Transparent = True\r\n"
+
+"\r\n; Edit\r\n"
+"[Edit]\r\n"
+"BgType = BorderFill\r\n"
+"BorderSize = 1\r\n"
+"FillColor = 255 255 255\r\n"
+"BorderColor = 174 174 174\r\n"
+
+"[Edit.Edittext(Disabled)]\r\n"
+"FillColor = 245 245 245\r\n"
+"TextColor = 166 166 166\r\n"
+
+"[Edit.Edittext(ReadOnly)]\r\n"
+"FillColor = 245 245 245\r\n"
+"TextColor = 0 0 0\r\n"
+
+"\r\n; Header\r\n"
+"[Header]\r\n"
+"BgType = ImageFile\r\n"
+"SizingMargins = 2, 2, 2, 4\r\n"
+"ImageFile = blue_header.bmp\r\n"
+"SizingType = Tile\r\n"
+
+"[Header.HeaderItem]\r\n"
+"BgType = ImageFile\r\n"
+"SizingMargins = 2, 2, 2, 4\r\n"
+"ContentMargins = 3, 0, 0, 0\r\n"
+"ImageFile = blue_header_item.bmp\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+"SizingType = Tile\r\n"
+"Transparent = True\r\n"
+
+"\r\n; ListBox\r\n"
+"[ListBox]\r\n"
+"BgType = BorderFill\r\n"
+"BorderSize = 1\r\n"
+"FillColor = 255 255 255\r\n"
+"BorderColor = 174 174 174\r\n"
+
+"\r\n; ListView\r\n"
+"[ListView]\r\n"
+"BgType = BorderFill\r\n"
+"BorderSize = 1\r\n"
+"FillColor = 255 255 255\r\n"
+"BorderColor = 174 174 174\r\n"
+
+"\r\n; Progress\r\n"
+"[Progress]\r\n"
+"ProgressChunkSize = 1\r\n"
+"ProgressSpaceSize = 0\r\n"
+"BgType = BorderFill\r\n"
+"FillType = Solid\r\n"
+"FillColor = 255 255 255\r\n"
+"BorderSize = 1\r\n"
+"BorderColor = 174 174 174\r\n"
+
+"[Progress.Bar]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_progress_track_horizontal.bmp\r\n"
+"MinSize = 10, 10\r\n"
+"SizingMargins = 1, 1, 1, 1\r\n"
+"SizingType = Stretch\r\n"
+
+"[Progress.BarVert]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_progress_track_vertical.bmp\r\n"
+"SizingMargins = 1, 1, 1, 1\r\n"
+"SizingType = Stretch\r\n"
+
+"[Progress.Chunk]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_progress_chunk_horizontal.bmp\r\n"
+"SizingMargins = 1, 1, 1, 1\r\n"
+"SizingType = Stretch\r\n"
+
+"[Progress.ChunkVert]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_progress_chunk_vertical.bmp\r\n"
+"SizingMargins = 1, 1, 1, 1\r\n"
+"SizingType = Stretch\r\n"
+
+"\r\n; Rebar\r\n"
+"[Rebar]\r\n"
+"BgType = ImageFile\r\n"
+"SizingType = Stretch\r\n"
+"ImageFile = blue_rebar_background.bmp\r\n"
+"SizingMargins = 1, 1, 9, 2\r\n"
+"Font = Tahoma, 8\r\n"
+"TextColor = 0 0 0\r\n"
+
+"[Rebar.Band]\r\n"
+"BgType = None\r\n"
+"ContentMargins = 2, 0, 0, 0\r\n"
+
+"[Rebar.Gripper]\r\n"
+"Bgtype = imagefile\r\n"
+"SizingMargins = 2, 1, 4, 2\r\n"
+"ContentMargins = 2, 1, 0, 0\r\n"
+"ImageFile = blue_rebar_gripper_horizontal.bmp\r\n"
+"SizingType = Tile\r\n"
+"Transparent = True\r\n"
+
+"[Rebar.GripperVert]\r\n"
+"Bgtype = ImageFile\r\n"
+"SizingMargins = 3, 3, 2, 1\r\n"
+"ContentMargins = 1, 2, 0, 0\r\n"
+"ImageFile = blue_rebar_gripper_vertical.bmp\r\n"
+"SizingType = Tile\r\n"
+"Transparent = True\r\n"
+
+"[Rebar.Chevron]\r\n"
+"SizingMargins = 4, 4, 4, 4\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"; Same as toolbar buttons \r\n"
+"ImageFile = blue_toolbar_buttons.bmp\r\n"
+"Bgtype = ImageFile\r\n"
+"Imagelayout = Vertical\r\n"
+"ImageCount = 6\r\n"
+"SizingType = Stretch\r\n"
+"Transparent = True\r\n"
+"GlyphType = ImageGlyph\r\n"
+"GlyphImageFile = blue_rebar_chevron.bmp\r\n"
+"GlyphTransparent = True\r\n"
+"VAlign = Top\r\n"
+
+"[Rebar.ChevronVert]\r\n"
+"SizingMargins = 4, 4, 4, 4\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"; Same as toolbar buttons \r\n"
+"ImageFile = blue_toolbar_buttons.bmp\r\n"
+"Bgtype = ImageFile\r\n"
+"Imagelayout = Vertical\r\n"
+"ImageCount = 6\r\n"
+"SizingType = Stretch\r\n"
+"Transparent = True\r\n"
+"GlyphType = ImageGlyph\r\n"
+"GlyphImageFile = blue_rebar_chevron.bmp\r\n"
+"GlyphTransparent = True\r\n"
+"VAlign = Top\r\n"
+
+"\r\n; Scroll Bar\r\n"
+"[ScrollBar.ArrowBtn]\r\n"
+"BgType = ImageFile\r\n"
+"SizingMargins = 5, 5, 5, 5\r\n"
+"ContentMargins = 0, 0, 3, 3\r\n"
+"SizingType = Tile\r\n"
+"ImageFile = blue_scrollbar_arrows.bmp\r\n"
+"ImageCount = 16\r\n"
+"ImageLayout = Vertical\r\n"
+"GlyphType = ImageGlyph\r\n"
+"GlyphTransparent = True\r\n"
+"ImageSelectType = Size\r\n"
+"UniformSizing = True\r\n"
+"ImageFile1 = blue_scrollbar_arrow_glyphs_7px.bmp\r\n"
+"ImageFile2 = blue_scrollbar_arrow_glyphs_9px.bmp\r\n"
+"MinSize1 = 7, 7\r\n"
+"MinSize2 = 9, 9\r\n"
+
+"[ScrollBar.ThumbBtnHorz]\r\n"
+"BgType = ImageFile\r\n"
+"SizingMargins = 5, 5, 5, 5\r\n"
+"ContentMargins = 4, 4, 0, 0\r\n"
+"ImageFile = blue_scrollbar_thumb_horizontal.bmp\r\n"
+"ImageCount = 4\r\n"
+"ImageLayout = Vertical\r\n"
+
+"[ScrollBar.ThumbBtnVert]\r\n"
+"BgType = ImageFile\r\n"
+"SizingMargins = 5, 5, 5, 5\r\n"
+"ContentMargins = 0, 0, 4, 4\r\n"
+"ImageFile = blue_scrollbar_thumb_vertical.bmp\r\n"
+"ImageCount = 4\r\n"
+"ImageLayout = Vertical\r\n"
+
+"[ScrollBar.GripperHorz]\r\n"
+"BgType = None\r\n"
+
+"[ScrollBar.GripperVert]\r\n"
+"BgType = None\r\n"
+
+"[ScrollBar.LowerTrackHorz]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_scrollbar_shaft_horizontal.bmp\r\n"
+"SizingMargins = 0, 0, 1, 1\r\n"
+"ImageCount = 4\r\n"
+"ImageLayout = Vertical\r\n"
+
+"[ScrollBar.LowerTrackVert]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_scrollbar_shaft_vertical.bmp\r\n"
+"SizingMargins = 1, 1, 0, 0\r\n"
+"ImageCount = 4\r\n"
+"ImageLayout = Vertical\r\n"
+
+"[ScrollBar.UpperTrackHorz]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_scrollbar_shaft_horizontal.bmp\r\n"
+"SizingMargins = 0, 0, 1, 1\r\n"
+"ImageCount = 4\r\n"
+"ImageLayout = Vertical\r\n"
+
+"[ScrollBar.UpperTrackVert]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_scrollbar_shaft_vertical.bmp\r\n"
+"SizingMargins = 1, 1, 0, 0\r\n"
+"ImageCount = 4\r\n"
+"ImageLayout = Vertical\r\n"
+
+"[ScrollBar.SizeBox]\r\n"
+"ImageFile = blue_scrollbar_resizebox_grip.bmp\r\n"
+"BgType = ImageFile\r\n"
+"ImageCount = 2\r\n"
+"SizingType = TrueSize\r\n"
+"Transparent = True\r\n"
+"VAlign = Bottom\r\n"
+
+"\r\n; Spin\r\n"
+"[Spin]\r\n"
+"BgType = ImageFile\r\n"
+"SizingType = Tile\r\n"
+"ImageFile = blue_spin_background.bmp\r\n"
+"SizingMargins = 2, 2, 2, 2\r\n"
+"ImageCount = 1\r\n"
+
+"[Spin.Up]\r\n"
+"BgType = ImageFile\r\n"
+"SizingType = Stretch\r\n"
+"ImageFile = blue_spin_background_up.bmp\r\n"
+"SizingMargins = 4, 3, 4, 2\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"ImageCount = 4\r\n"
+"ImageLayout = Vertical\r\n"
+"GlyphType = ImageGlyph\r\n"
+"GlyphImageFile = blue_spin_glyph_up.bmp\r\n"
+"GlyphTransparent = True\r\n"
+
+"[Spin.Down]\r\n"
+"BgType = ImageFile\r\n"
+"SizingType = Tile\r\n"
+"ImageFile = blue_spin_background_down.bmp\r\n"
+"SizingMargins = 4, 3, 3, 3\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"ImageCount = 4\r\n"
+"ImageLayout = Vertical\r\n"
+"GlyphType = ImageGlyph\r\n"
+"GlyphImageFile = blue_spin_glyph_down.bmp\r\n"
+"GlyphTransparent = True\r\n"
+
+"[Spin.Uphorz]\r\n"
+"BgType = ImageFile\r\n"
+"SizingType = Stretch\r\n"
+"ImageFile = blue_spin_background_right.bmp\r\n"
+"SizingMargins = 3, 3, 4, 2\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"ImageCount = 4\r\n"
+"ImageLayout = Vertical\r\n"
+"GlyphType = ImageGlyph\r\n"
+"GlyphImageFile = blue_spin_glyph_right.bmp\r\n"
+"GlyphTransparent = True\r\n"
+
+"[Spin.Downhorz]\r\n"
+"BgType = ImageFile\r\n"
+"SizingType = Stretch\r\n"
+"ImageFile = blue_spin_background_left.bmp\r\n"
+"SizingMargins = 4, 2, 4, 2\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"ImageCount = 4\r\n"
+"ImageLayout = Vertical\r\n"
+"GlyphType = ImageGlyph\r\n"
+"GlyphImageFile = blue_spin_glyph_left.bmp\r\n"
+"GlyphTransparent = True\r\n"
+
+"\r\n; Status\r\n"
+"[Status]\r\n"
+"SizingMargins = 1, 1, 2, 1\r\n"
+"ImageFile = blue_status_background.bmp\r\n"
+"BgType = ImageFile\r\n"
+"ImageCount = 1\r\n"
+"SizingType = Stretch\r\n"
+
+"[Status.Pane]\r\n"
+"SizingMargins = 0, 2, 2, 2\r\n"
+"ImageFile = blue_status_pane.bmp\r\n"
+"BgType = ImageFile\r\n"
+"ImageCount = 1\r\n"
+"SizingType = Tile\r\n"
+"Transparent = True\r\n"
+
+"[Status.GripperPane]\r\n"
+"BgType = None\r\n"
+
+"[Status.Gripper]\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"; Same as scrollbar resize box gripper \r\n"
+"ImageFile = blue_scrollbar_resizebox_grip.bmp\r\n"
+"BgType = ImageFile\r\n"
+"ImageCount = 2\r\n"
+"SizingType = TrueSize\r\n"
+"Transparent = True\r\n"
+"VAlign = Bottom\r\n"
+
+"\r\n; Tab\r\n"
+"[Tab]\r\n"
+"BgType = BorderFill\r\n"
+"FillType = Solid\r\n"
+"FillColor = 255 255 255\r\n"
+"BorderSize = 0\r\n"
+
+"[Tab.Pane]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tab_pane_edge.bmp\r\n"
+"SizingMargins = 2, 4, 2, 4\r\n"
+"SizingType = Stretch\r\n"
+"ImageCount = 1\r\n"
+
+"[Tab.TabItem]\r\n"
+"SizingMargins = 2, 2, 6, 6\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tab_item.bmp\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+
+"[Tab.TabItemLeftEdge]\r\n"
+"SizingMargins = 2, 2, 6, 6\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tab_item_left.bmp\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+"Transparent = True\r\n"
+
+"[Tab.TabItemRightEdge]\r\n"
+"SizingMargins = 2, 2, 6, 6\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tab_item_right.bmp\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+"Transparent = True\r\n"
+
+"[Tab.TabItemBothEdge]\r\n"
+"SizingMargins = 2, 2, 6, 6\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tab_item.bmp\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+
+"[Tab.TopTabItem]\r\n"
+"SizingMargins = 2, 2, 6, 6\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tab_item.bmp\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+"Transparent = True\r\n"
+
+"[Tab.TopTabItemLeftEdge]\r\n"
+"SizingMargins = 2, 2, 6, 6\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tab_item_left.bmp\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+"Transparent = True\r\n"
+
+"[Tab.TopTabItemRightEdge]\r\n"
+"SizingMargins = 2, 2, 6, 6\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tab_item_right.bmp\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+"Transparent = True\r\n"
+
+"[Tab.TopTabItemBothEdge]\r\n"
+"SizingMargins = 2, 2, 6, 6\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tab_item.bmp\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+"Transparent = True\r\n"
+
+"[Tab.Body]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tab_background.bmp\r\n"
+
+"\r\n; Toolbar\r\n"
+"[Toolbar]\r\n"
+"BgType = BorderFill\r\n"
+"BorderSize = 0\r\n"
+"FillColor = 244 244 244\r\n"
+"TextColor = 0 0 0\r\n"
+
+"[Toolbar(Pressed)]\r\n"
+"TextColor = 0 0 0\r\n"
+
+"[Toolbar.Button]\r\n"
+"SizingMargins = 3, 3, 3, 3\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"ImageFile = blue_toolbar_buttons.bmp\r\n"
+"BgType = ImageFile\r\n"
+"ImageLayout = Vertical\r\n"
+"ImageCount = 6\r\n"
+"SizingType = Stretch\r\n"
+"Transparent = True\r\n"
+
+"[Toolbar.Separator]\r\n"
+"SizingMargins = 5, 2, 2, 1\r\n"
+"ImageFile = blue_toolbar_separator_horizontal.bmp\r\n"
+"BgType = ImageFile\r\n"
+"ImageCount = 1\r\n"
+"SizingType = Tile\r\n"
+"Transparent = True\r\n"
+
+"[Toolbar.SeparatorVert]\r\n"
+"SizingMargins = 2, 1, 5, 1\r\n"
+"ImageFile = blue_toolbar_separator_vertical.bmp\r\n"
+"BgType = ImageFile\r\n"
+"ImageCount = 1\r\n"
+"SizingType = Tile\r\n"
+"Transparent = True\r\n"
+
+"[Toolbar.DropdownButton]\r\n"
+"SizingMargins = 4, 4, 4, 4\r\n"
+"ContentMargins = 0, 0, 0, 0\r\n"
+"ImageFile = blue_toolbar_buttons.bmp\r\n"
+"BgType = ImageFile\r\n"
+"ImageLayout = Vertical\r\n"
+"ImageCount = 6\r\n"
+"SizingType = Stretch\r\n"
+"Transparent = True\r\n"
+
+"[Toolbar.SplitButton]\r\n"
+"SizingMargins = 3, 2, 3, 3\r\n"
+"ImageFile = blue_toolbar_buttons_split.bmp\r\n"
+"BgType = ImageFile\r\n"
+"ImageLayout = Vertical\r\n"
+"ImageCount = 6\r\n"
+"SizingType = Stretch\r\n"
+"Transparent = True\r\n"
+
+"[Toolbar.SplitButtonDropdown]\r\n"
+"SizingMargins = 1, 3, 3, 3\r\n"
+"ImageFile = blue_toolbar_buttons_split_dropdown.bmp\r\n"
+"BgType = ImageFile\r\n"
+"ImageLayout = Vertical\r\n"
+"ImageCount = 6\r\n"
+"SizingType = Stretch\r\n"
+"Transparent = True\r\n"
+"GlyphType = ImageGlyph\r\n"
+"GlyphImageFile = blue_toolbar_buttons_split_dropdown_glyph.bmp\r\n"
+"GlyphTransparent = True\r\n"
+
+"\r\n; TrackBar\r\n"
+"[TrackBar]\r\n"
+"BgType = BorderFill\r\n"
+"FillType = Solid\r\n"
+"FillColor = 245 245 245\r\n"
+"BorderSize = 1\r\n"
+"BorderColor = 174 174 174\r\n"
+
+"[TrackBar.Thumb]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_trackbar_thumb_horizontal.bmp\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+"SizingMargins = 2, 3, 2, 3\r\n"
+"SizingType = Tile\r\n"
+
+"[TrackBar.ThumbVert]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_trackbar_thumb_vertical.bmp\r\n"
+"SizingMargins = 2, 3, 2, 3\r\n"
+"SizingType = Stretch\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+
+"[TrackBar.ThumbTop]\r\n"
+"BgType = ImageFile\r\n"
+"ImageCount = 5\r\n"
+"ImageLayout = Vertical\r\n"
+"Transparent = True\r\n"
+"SizingType = TrueSize\r\n"
+"ImageSelectType = Dpi\r\n"
+"UniformSizing = true\r\n"
+"ImageFile1 = blue_trackbar_thumb_up_11px.bmp\r\n"
+"ImageFile2 = blue_trackbar_thumb_up_15px.bmp\r\n"
+"ImageFile3 = blue_trackbar_thumb_up_21px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 118\r\n"
+"MinDpi3 = 185\r\n"
+
+"[TrackBar.ThumbBottom]\r\n"
+"BgType = ImageFile\r\n"
+"ImageCount = 5\r\n"
+"Transparent = True\r\n"
+"SizingType = TrueSize\r\n"
+"ImageLayout = Vertical\r\n"
+"ImageSelectType = Dpi\r\n"
+"UniformSizing = True\r\n"
+"ImageFile1 = blue_trackbar_thumb_down_11px.bmp\r\n"
+"ImageFile2 = blue_trackbar_thumb_down_15px.bmp\r\n"
+"ImageFile3 = blue_trackbar_thumb_down_21px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 118\r\n"
+"MinDpi3 = 185\r\n"
+
+"[TrackBar.ThumbLeft]\r\n"
+"BgType = ImageFile\r\n"
+"SizingType = TrueSize\r\n"
+"ImageCount = 5\r\n"
+"Transparent = True\r\n"
+"ImageLayout = Vertical\r\n"
+"ImageSelectType = Dpi\r\n"
+"UniformSizing = True\r\n"
+"ImageFile1 = blue_trackbar_thumb_left_19px.bmp\r\n"
+"ImageFile2 = blue_trackbar_thumb_left_25px.bmp\r\n"
+"ImageFile3 = blue_trackbar_thumb_left_44px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 118\r\n"
+"MinDpi3 = 185\r\n"
+
+"[TrackBar.ThumbRight]\r\n"
+"BgType = ImageFile\r\n"
+"SizingType = TrueSize\r\n"
+"ImageCount = 5\r\n"
+"Transparent = True\r\n"
+"ImageLayout = Vertical\r\n"
+"ImageSelectType = Dpi\r\n"
+"UniformSizing = True\r\n"
+"ImageFile1 = blue_trackbar_thumb_right_19px.bmp\r\n"
+"ImageFile2 = blue_trackbar_thumb_right_25px.bmp\r\n"
+"ImageFile3 = blue_trackbar_thumb_right_44px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 118\r\n"
+"MinDpi3 = 185\r\n"
+
+"[TrackBar.Track]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_trackbar_slider_track.bmp\r\n"
+"ImageCount = 1\r\n"
+"SizingType = Stretch\r\n"
+"SizingMargins = 2, 2, 2, 2\r\n"
+
+"[TrackBar.TrackVert]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_trackbar_slider_track.bmp\r\n"
+"ImageCount = 1\r\n"
+"SizingType = Stretch\r\n"
+"SizingMargins = 2, 2, 2, 2\r\n"
+
+"[TrackBar.Tics]\r\n"
+"Color = 174 174 174\r\n"
+
+"[TrackBar.TicsVert]\r\n"
+"Color = 174 174 174\r\n"
+
+"\r\n; Tooltip\r\n"
+"[Tooltip.Close]\r\n"
+"BgType = ImageFile\r\n"
+"ImageFile = blue_tooltip_close.bmp\r\n"
+"ImageCount = 3\r\n"
+"SizingType = TrueSize\r\n"
+"ImageLayout = Vertical\r\n"
+
+"\r\n; TreeView\r\n"
+"[TreeView]\r\n"
+"BgType = BorderFill\r\n"
+"BorderSize = 1\r\n"
+"FillColor = 255 255 255\r\n"
+"BorderColor = 174 174 174\r\n"
+
+"[TreeView.Glyph]\r\n"
+"BgType = ImageFile\r\n"
+"SizingType = TrueSize\r\n"
+"ImageCount = 2\r\n"
+"ImageLayout = vertical\r\n"
+"ImageSelectType = Dpi\r\n"
+"UniformSizing = True\r\n"
+"ImageFile1 = blue_treeview_expand_collapse_9px.bmp\r\n"
+"ImageFile2 = blue_treeview_expand_collapse_10px.bmp\r\n"
+"ImageFile3 = blue_treeview_expand_collapse_15px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 133\r\n"
+"MinDpi3 = 150\r\n"
+}
+
+/* Button */
+/* @makedep: blue_button.bmp */
+BLUE_BUTTON_BMP BITMAP "blue_button.bmp"
+
+/* @makedep: blue_checkbox_13px.bmp */
+BLUE_CHECKBOX_13PX_BMP BITMAP "blue_checkbox_13px.bmp"
+
+/* @makedep: blue_checkbox_16px.bmp */
+BLUE_CHECKBOX_16PX_BMP BITMAP "blue_checkbox_16px.bmp"
+
+/* @makedep: blue_checkbox_25px.bmp */
+BLUE_CHECKBOX_25PX_BMP BITMAP "blue_checkbox_25px.bmp"
+
+/* @makedep: blue_radiobutton_13px.bmp */
+BLUE_RADIOBUTTON_13PX_BMP BITMAP "blue_radiobutton_13px.bmp"
+
+/* @makedep: blue_radiobutton_16px.bmp */
+BLUE_RADIOBUTTON_16PX_BMP BITMAP "blue_radiobutton_16px.bmp"
+
+/* @makedep: blue_radiobutton_25px.bmp */
+BLUE_RADIOBUTTON_25PX_BMP BITMAP "blue_radiobutton_25px.bmp"
+
+/* @makedep: blue_groupbox.bmp */
+BLUE_GROUPBOX_BMP BITMAP "blue_groupbox.bmp"
+
+/* @makedep: blue_commandlink.bmp */
+BLUE_COMMANDLINK_BMP BITMAP "blue_commandlink.bmp"
+
+/* @makedep: blue_commandlink_glyph_30px.bmp */
+BLUE_COMMANDLINK_GLYPH_30PX_BMP BITMAP "blue_commandlink_glyph_30px.bmp"
+
+/* @makedep: blue_commandlink_glyph_45px.bmp */
+BLUE_COMMANDLINK_GLYPH_45PX_BMP BITMAP "blue_commandlink_glyph_45px.bmp"
+
+/* ComboBox */
+/* @makedep: blue_combobutton.bmp */
+BLUE_COMBOBUTTON_BMP BITMAP "blue_combobutton.bmp"
+
+/* @makedep: blue_combobutton_glyph.bmp */
+BLUE_COMBOBUTTON_GLYPH_BMP BITMAP "blue_combobutton_glyph.bmp"
+
+/* Header */
+/* @makedep: blue_header.bmp */
+BLUE_HEADER_BMP BITMAP "blue_header.bmp"
+
+/* @makedep: blue_header_item.bmp */
+BLUE_HEADER_ITEM_BMP BITMAP "blue_header_item.bmp"
+
+/* Progress */
+/* @makedep: blue_progress_chunk_horizontal.bmp */
+BLUE_PROGRESS_CHUNK_HORIZONTAL_BMP BITMAP "blue_progress_chunk_horizontal.bmp"
+
+/* @makedep: blue_progress_chunk_vertical.bmp */
+BLUE_PROGRESS_CHUNK_VERTICAL_BMP BITMAP "blue_progress_chunk_vertical.bmp"
+
+/* @makedep: blue_progress_track_horizontal.bmp */
+BLUE_PROGRESS_TRACK_HORIZONTAL_BMP BITMAP "blue_progress_track_horizontal.bmp"
+
+/* @makedep: blue_progress_track_vertical.bmp */
+BLUE_PROGRESS_TRACK_VERTICAL_BMP BITMAP "blue_progress_track_vertical.bmp"
+
+/* Rebar */
+/* @makedep: blue_rebar_background.bmp */
+BLUE_REBAR_BACKGROUND_BMP BITMAP "blue_rebar_background.bmp"
+
+/* @makedep: blue_rebar_gripper_horizontal.bmp */
+BLUE_REBAR_GRIPPER_HORIZONTAL_BMP BITMAP "blue_rebar_gripper_horizontal.bmp"
+
+/* @makedep: blue_rebar_gripper_vertical.bmp */
+BLUE_REBAR_GRIPPER_VERTICAL_BMP BITMAP "blue_rebar_gripper_vertical.bmp"
+
+/* @makedep: blue_rebar_chevron.bmp */
+BLUE_REBAR_CHEVRON_BMP BITMAP "blue_rebar_chevron.bmp"
+
+/* Scroll Bar */
+/* @makedep: blue_scrollbar_arrows.bmp */
+BLUE_SCROLLBAR_ARROWS_BMP BITMAP "blue_scrollbar_arrows.bmp"
+
+/* @makedep: blue_scrollbar_arrow_glyphs_7px.bmp */
+BLUE_SCROLLBAR_ARROW_GLYPHS_7PX_BMP BITMAP "blue_scrollbar_arrow_glyphs_7px.bmp"
+
+/* @makedep: blue_scrollbar_arrow_glyphs_9px.bmp */
+BLUE_SCROLLBAR_ARROW_GLYPHS_9PX_BMP BITMAP "blue_scrollbar_arrow_glyphs_9px.bmp"
+
+/* @makedep: blue_scrollbar_resizebox_grip.bmp */
+BLUE_SCROLLBAR_RESIZEBOX_GRIP_BMP BITMAP "blue_scrollbar_resizebox_grip.bmp"
+
+/* @makedep: blue_scrollbar_shaft_horizontal.bmp */
+BLUE_SCROLLBAR_SHAFT_HORIZONTAL_BMP BITMAP "blue_scrollbar_shaft_horizontal.bmp"
+
+/* @makedep: blue_scrollbar_shaft_vertical.bmp */
+BLUE_SCROLLBAR_SHAFT_VERTICAL_BMP BITMAP "blue_scrollbar_shaft_vertical.bmp"
+
+/* @makedep: blue_scrollbar_thumb_horizontal.bmp */
+BLUE_SCROLLBAR_THUMB_HORIZONTAL_BMP BITMAP "blue_scrollbar_thumb_horizontal.bmp"
+
+/* @makedep: blue_scrollbar_thumb_vertical.bmp */
+BLUE_SCROLLBAR_THUMB_VERTICAL_BMP BITMAP "blue_scrollbar_thumb_vertical.bmp"
+
+/* Spin */
+/* @makedep: blue_spin_background.bmp */
+BLUE_SPIN_BACKGROUND_BMP BITMAP "blue_spin_background.bmp"
+
+/* @makedep: blue_spin_background_down.bmp */
+BLUE_SPIN_BACKGROUND_DOWN_BMP BITMAP "blue_spin_background_down.bmp"
+
+/* @makedep: blue_spin_background_right.bmp */
+BLUE_SPIN_BACKGROUND_RIGHT_BMP BITMAP "blue_spin_background_right.bmp"
+
+/* @makedep: blue_spin_background_left.bmp */
+BLUE_SPIN_BACKGROUND_LEFT_BMP BITMAP "blue_spin_background_left.bmp"
+
+/* @makedep: blue_spin_background_up.bmp */
+BLUE_SPIN_BACKGROUND_UP_BMP BITMAP "blue_spin_background_up.bmp"
+
+/* @makedep: blue_spin_glyph_down.bmp */
+BLUE_SPIN_GLYPH_DOWN_BMP BITMAP "blue_spin_glyph_down.bmp"
+
+/* @makedep: blue_spin_glyph_left.bmp */
+BLUE_SPIN_GLYPH_LEFT_BMP BITMAP "blue_spin_glyph_left.bmp"
+
+/* @makedep: blue_spin_glyph_right.bmp */
+BLUE_SPIN_GLYPH_RIGHT_BMP BITMAP "blue_spin_glyph_right.bmp"
+
+/* @makedep: blue_spin_glyph_up.bmp */
+BLUE_SPIN_GLYPH_UP_BMP BITMAP "blue_spin_glyph_up.bmp"
+
+/* Status */
+/* @makedep: blue_status_background.bmp */
+BLUE_STATUS_BACKGROUND_BMP BITMAP "blue_status_background.bmp"
+
+/* @makedep: blue_status_pane.bmp */
+BLUE_STATUS_PANE_BMP BITMAP "blue_status_pane.bmp"
+
+/* Tab */
+/* @makedep: blue_tab_background.bmp */
+BLUE_TAB_BACKGROUND_BMP BITMAP "blue_tab_background.bmp"
+
+/* @makedep: blue_tab_item.bmp */
+BLUE_TAB_ITEM_BMP BITMAP "blue_tab_item.bmp"
+
+/* @makedep: blue_tab_item_left.bmp */
+BLUE_TAB_ITEM_LEFT_BMP BITMAP "blue_tab_item_left.bmp"
+
+/* @makedep: blue_tab_item_right.bmp */
+BLUE_TAB_ITEM_RIGHT_BMP BITMAP "blue_tab_item_right.bmp"
+
+/* @makedep: blue_tab_pane_edge.bmp */
+BLUE_TAB_PANE_EDGE_BMP BITMAP "blue_tab_pane_edge.bmp"
+
+/* ToolBar */
+/* @makedep: blue_toolbar_buttons.bmp */
+BLUE_TOOLBAR_BUTTONS_BMP BITMAP "blue_toolbar_buttons.bmp"
+
+/* @makedep: blue_toolbar_buttons_split.bmp */
+BLUE_TOOLBAR_BUTTONS_SPLIT_BMP BITMAP "blue_toolbar_buttons_split.bmp"
+
+/* @makedep: blue_toolbar_separator_horizontal.bmp */
+BLUE_TOOLBAR_SEPARATOR_HORIZONTAL_BMP BITMAP "blue_toolbar_separator_horizontal.bmp"
+
+/* @makedep: blue_toolbar_separator_vertical.bmp */
+BLUE_TOOLBAR_SEPARATOR_VERTICAL_BMP BITMAP "blue_toolbar_separator_vertical.bmp"
+
+/* @makedep: blue_toolbar_buttons_split_dropdown.bmp */
+BLUE_TOOLBAR_BUTTONS_SPLIT_DROPDOWN_BMP BITMAP "blue_toolbar_buttons_split_dropdown.bmp"
+
+/* @makedep: blue_toolbar_buttons_split_dropdown_glyph.bmp */
+BLUE_TOOLBAR_BUTTONS_SPLIT_DROPDOWN_GLYPH_BMP BITMAP "blue_toolbar_buttons_split_dropdown_glyph.bmp"
+
+/* Tooltip */
+/* @makedep: blue_tooltip_close.bmp */
+BLUE_TOOLTIP_CLOSE_BMP BITMAP "blue_tooltip_close.bmp"
+
+/* TrackBar */
+/* @makedep: blue_trackbar_thumb_horizontal.bmp */
+BLUE_TRACKBAR_THUMB_HORIZONTAL_BMP BITMAP "blue_trackbar_thumb_horizontal.bmp"
+
+/* @makedep: blue_trackbar_thumb_vertical.bmp */
+BLUE_TRACKBAR_THUMB_VERTICAL_BMP BITMAP "blue_trackbar_thumb_vertical.bmp"
+
+/* @makedep: blue_trackbar_slider_track.bmp */
+BLUE_TRACKBAR_SLIDER_TRACK_BMP BITMAP "blue_trackbar_slider_track.bmp"
+
+/* @makedep: blue_trackbar_thumb_down_11px.bmp */
+BLUE_TRACKBAR_THUMB_DOWN_11PX_BMP BITMAP "blue_trackbar_thumb_down_11px.bmp"
+
+/* @makedep: blue_trackbar_thumb_down_15px.bmp */
+BLUE_TRACKBAR_THUMB_DOWN_15PX_BMP BITMAP "blue_trackbar_thumb_down_15px.bmp"
+
+/* @makedep: blue_trackbar_thumb_down_21px.bmp */
+BLUE_TRACKBAR_THUMB_DOWN_21PX_BMP BITMAP "blue_trackbar_thumb_down_21px.bmp"
+
+/* @makedep: blue_trackbar_thumb_left_19px.bmp */
+BLUE_TRACKBAR_THUMB_LEFT_19PX_BMP BITMAP "blue_trackbar_thumb_left_19px.bmp"
+
+/* @makedep: blue_trackbar_thumb_left_25px.bmp */
+BLUE_TRACKBAR_THUMB_LEFT_25PX_BMP BITMAP "blue_trackbar_thumb_left_25px.bmp"
+
+/* @makedep: blue_trackbar_thumb_left_44px.bmp */
+BLUE_TRACKBAR_THUMB_LEFT_44PX_BMP BITMAP "blue_trackbar_thumb_left_44px.bmp"
+
+/* @makedep: blue_trackbar_thumb_right_19px.bmp */
+BLUE_TRACKBAR_THUMB_RIGHT_19PX_BMP BITMAP "blue_trackbar_thumb_right_19px.bmp"
+
+/* @makedep: blue_trackbar_thumb_right_25px.bmp */
+BLUE_TRACKBAR_THUMB_RIGHT_25PX_BMP BITMAP "blue_trackbar_thumb_right_25px.bmp"
+
+/* @makedep: blue_trackbar_thumb_right_44px.bmp */
+BLUE_TRACKBAR_THUMB_RIGHT_44PX_BMP BITMAP "blue_trackbar_thumb_right_44px.bmp"
+
+/* @makedep: blue_trackbar_thumb_up_11px.bmp */
+BLUE_TRACKBAR_THUMB_UP_11PX_BMP BITMAP "blue_trackbar_thumb_up_11px.bmp"
+
+/* @makedep: blue_trackbar_thumb_up_15px.bmp */
+BLUE_TRACKBAR_THUMB_UP_15PX_BMP BITMAP "blue_trackbar_thumb_up_15px.bmp"
+
+/* @makedep: blue_trackbar_thumb_up_21px.bmp */
+BLUE_TRACKBAR_THUMB_UP_21PX_BMP BITMAP "blue_trackbar_thumb_up_21px.bmp"
+
+/* TreeView */
+/* @makedep: blue_treeview_expand_collapse_9px.bmp */
+BLUE_TREEVIEW_EXPAND_COLLAPSE_9PX_BMP BITMAP "blue_treeview_expand_collapse_9px.bmp"
+
+/* @makedep: blue_treeview_expand_collapse_10px.bmp */
+BLUE_TREEVIEW_EXPAND_COLLAPSE_10PX_BMP BITMAP "blue_treeview_expand_collapse_10px.bmp"
+
+/* @makedep: blue_treeview_expand_collapse_15px.bmp */
+BLUE_TREEVIEW_EXPAND_COLLAPSE_15PX_BMP BITMAP "blue_treeview_expand_collapse_15px.bmp"
+
+/* File version */
+#define WINE_FILEDESCRIPTION_STR "Light Theme"
+#define WINE_FILENAME_STR "light.msstyles"
+#define WINE_FILEVERSION 1,0,0,1
+#define WINE_FILEVERSION_STR "1.0.0.1"
+#define WINE_PRODUCTVERSION 1,0,0,1
+#define WINE_PRODUCTVERSION_STR "1.0.0.1"
+
+#include "wine/wine_common_ver.rc"

@@ -1417,11 +1417,19 @@ static HRESULT WINAPI FilterGraph2_RenderFile(IFilterGraph2 *iface, LPCWSTR lpcw
         IEnumPins_Release(penumpins);
 
         if (!any)
+        {
+            if (FAILED(hr = IFilterGraph2_RemoveFilter(iface, preader)))
+                ERR("Failed to remove source filter, hr %#x.\n", hr);
             hr = VFW_E_CANNOT_RENDER;
+        }
         else if (partial)
+        {
             hr = VFW_S_PARTIAL_RENDER;
+        }
         else
+        {
             hr = S_OK;
+        }
     }
     IBaseFilter_Release(preader);
 
@@ -5084,7 +5092,6 @@ static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD timeout, F
 {
     struct filter_graph *graph = impl_from_IMediaFilter(iface);
     DWORD end = GetTickCount() + timeout;
-    FILTER_STATE expect_state;
     HRESULT hr;
 
     TRACE("graph %p, timeout %u, state %p.\n", graph, timeout, state);
@@ -5100,7 +5107,6 @@ static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD timeout, F
 
     EnterCriticalSection(&graph->cs);
     *state = graph->state;
-    expect_state = graph->needs_async_run ? State_Paused : graph->state;
 
     for (;;)
     {
@@ -5132,9 +5138,18 @@ static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD timeout, F
             else if (filter_state != graph->state && filter_state != State_Paused)
                 hr = E_FAIL;
 
-            if (filter_state != expect_state)
-                ERR("Filter %p reported incorrect state %u (expected %u).\n",
-                        filter->filter, filter_state, expect_state);
+            if (graph->needs_async_run)
+            {
+                if (filter_state != State_Paused && filter_state != State_Running)
+                    ERR("Filter %p reported incorrect state %u (expected %u or %u).\n",
+                            filter->filter, filter_state, State_Paused, State_Running);
+            }
+            else
+            {
+                if (filter_state != graph->state)
+                    ERR("Filter %p reported incorrect state %u (expected %u).\n",
+                            filter->filter, filter_state, graph->state);
+            }
         }
 
         LeaveCriticalSection(&graph->cs);

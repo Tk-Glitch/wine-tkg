@@ -437,6 +437,9 @@ static BOOL handle_debug_event(struct gdb_context* gdbctx)
         fprintf(stderr, "%04x:%04x: create thread I @%p\n", de->dwProcessId,
             de->dwThreadId, de->u.CreateProcessInfo.lpStartAddress);
 
+        dbg_load_module(gdbctx->process->handle, de->u.CreateProcessInfo.hFile, u.buffer,
+                        (DWORD_PTR)de->u.CreateProcessInfo.lpBaseOfImage, 0);
+
         dbg_add_thread(gdbctx->process, de->dwThreadId,
                        de->u.CreateProcessInfo.hThread,
                        de->u.CreateProcessInfo.lpThreadLocalBase);
@@ -698,6 +701,13 @@ static void get_thread_info(struct gdb_context* gdbctx, unsigned tid,
  *          P A C K E T        U T I L S           *
  * =============================================== *
  */
+
+static int addr_width(struct gdb_context* gdbctx)
+{
+    int sz = (gdbctx && gdbctx->process && gdbctx->process->be_cpu) ?
+        gdbctx->process->be_cpu->pointer_size : (int)sizeof(void*);
+    return sz * 2;
+}
 
 enum packet_return {packet_error = 0x00, packet_ok = 0x01, packet_done = 0x02,
                     packet_last_f = 0x80};
@@ -1340,7 +1350,7 @@ static void packet_query_monitor_wnd_helper(struct gdb_context* gdbctx, HWND hWn
                 "%*s%04lx%*s%-17.17s %08x %0*lx %.14s\n",
                 indent, "", (ULONG_PTR)hWnd, 13 - indent, "",
                 clsName, GetWindowLongW(hWnd, GWL_STYLE),
-                ADDRWIDTH, (ULONG_PTR)GetWindowLongPtrW(hWnd, GWLP_WNDPROC),
+                addr_width(gdbctx), (ULONG_PTR)GetWindowLongPtrW(hWnd, GWLP_WNDPROC),
                 wndName);
        packet_reply_hex_to_str(gdbctx, buffer);
        packet_reply_close(gdbctx);
@@ -1449,13 +1459,13 @@ static void packet_query_monitor_mem(struct gdb_context* gdbctx, int len, const 
             }
             memset(prot, ' ' , sizeof(prot)-1);
             prot[sizeof(prot)-1] = '\0';
-            if (mbi.AllocationProtect & (PAGE_READONLY|PAGE_READWRITE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE))
+            if (mbi.AllocationProtect & (PAGE_READONLY|PAGE_READWRITE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_WRITECOPY|PAGE_EXECUTE_WRITECOPY))
                 prot[0] = 'R';
             if (mbi.AllocationProtect & (PAGE_READWRITE|PAGE_EXECUTE_READWRITE))
                 prot[1] = 'W';
             if (mbi.AllocationProtect & (PAGE_WRITECOPY|PAGE_EXECUTE_WRITECOPY))
                 prot[1] = 'C';
-            if (mbi.AllocationProtect & (PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE))
+            if (mbi.AllocationProtect & (PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY))
                 prot[2] = 'X';
         }
         else
@@ -1465,8 +1475,8 @@ static void packet_query_monitor_mem(struct gdb_context* gdbctx, int len, const 
         }
         packet_reply_open(gdbctx);
         snprintf(buffer, sizeof(buffer), "%0*lx %0*lx %s %s %s\n",
-                 (unsigned)sizeof(void*), (DWORD_PTR)addr,
-                 (unsigned)sizeof(void*), mbi.RegionSize, state, type, prot);
+                 addr_width(gdbctx), (DWORD_PTR)addr,
+                 addr_width(gdbctx), mbi.RegionSize, state, type, prot);
         packet_reply_add(gdbctx, "O");
         packet_reply_hex_to_str(gdbctx, buffer);
         packet_reply_close(gdbctx);

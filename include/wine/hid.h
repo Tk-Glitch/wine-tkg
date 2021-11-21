@@ -38,41 +38,13 @@ typedef struct __WINE_ELEMENT
     HIDP_VALUE_CAPS caps;
 } WINE_HID_ELEMENT;
 
-/* make sure HIDP_BUTTON_CAPS is a subset of HIDP_VALUE_CAPS */
-C_ASSERT( sizeof(HIDP_BUTTON_CAPS) == sizeof(HIDP_VALUE_CAPS) );
-
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, UsagePage) == offsetof(HIDP_VALUE_CAPS, UsagePage) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, ReportID) == offsetof(HIDP_VALUE_CAPS, ReportID) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, IsAlias) == offsetof(HIDP_VALUE_CAPS, IsAlias) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, BitField) == offsetof(HIDP_VALUE_CAPS, BitField) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, LinkCollection) == offsetof(HIDP_VALUE_CAPS, LinkCollection) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, LinkUsage) == offsetof(HIDP_VALUE_CAPS, LinkUsage) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, LinkUsagePage) == offsetof(HIDP_VALUE_CAPS, LinkUsagePage) );
-
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, IsRange) == offsetof(HIDP_VALUE_CAPS, IsRange) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, IsStringRange) == offsetof(HIDP_VALUE_CAPS, IsStringRange) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, IsDesignatorRange) == offsetof(HIDP_VALUE_CAPS, IsDesignatorRange) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, IsAbsolute) == offsetof(HIDP_VALUE_CAPS, IsAbsolute) );
-
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, Range.UsageMin) == offsetof(HIDP_VALUE_CAPS, Range.UsageMin) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, Range.UsageMax) == offsetof(HIDP_VALUE_CAPS, Range.UsageMax) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, Range.StringMin) == offsetof(HIDP_VALUE_CAPS, Range.StringMin) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, Range.StringMax) == offsetof(HIDP_VALUE_CAPS, Range.StringMax) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, Range.DesignatorMin) == offsetof(HIDP_VALUE_CAPS, Range.DesignatorMin) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, Range.DesignatorMax) == offsetof(HIDP_VALUE_CAPS, Range.DesignatorMax) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, Range.DataIndexMin) == offsetof(HIDP_VALUE_CAPS, Range.DataIndexMin) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, Range.DataIndexMax) == offsetof(HIDP_VALUE_CAPS, Range.DataIndexMax) );
-
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, NotRange.Usage) == offsetof(HIDP_VALUE_CAPS, NotRange.Usage) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, NotRange.StringIndex) == offsetof(HIDP_VALUE_CAPS, NotRange.StringIndex) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, NotRange.DesignatorIndex) == offsetof(HIDP_VALUE_CAPS, NotRange.DesignatorIndex) );
-C_ASSERT( offsetof(HIDP_BUTTON_CAPS, NotRange.DataIndex) == offsetof(HIDP_VALUE_CAPS, NotRange.DataIndex) );
-
 struct hid_value_caps
 {
     USAGE   usage_page;
     USAGE   usage_min;
     USAGE   usage_max;
+    USHORT  data_index_min;
+    USHORT  data_index_max;
     USHORT  string_min;
     USHORT  string_max;
     USHORT  designator_min;
@@ -87,6 +59,7 @@ struct hid_value_caps
     USHORT  bit_field;
     USHORT  bit_size;
     USHORT  report_count;
+    ULONG   start_bit;
     LONG    logical_min;
     LONG    logical_max;
     LONG    physical_min;
@@ -97,6 +70,8 @@ struct hid_value_caps
 
 #define HID_VALUE_CAPS_IS_ABSOLUTE(x) (((x)->bit_field & 0x04) == 0)
 #define HID_VALUE_CAPS_HAS_NULL(x) (((x)->bit_field & 0x40) != 0)
+#define HID_VALUE_CAPS_IS_ARRAY(c) (((c)->bit_field & 2) == 0)
+#define HID_VALUE_CAPS_IS_BUTTON(c) ((c)->bit_size == 1 || HID_VALUE_CAPS_IS_ARRAY(c))
 
 typedef struct __WINE_HID_REPORT
 {
@@ -106,28 +81,19 @@ typedef struct __WINE_HID_REPORT
     DWORD elementIdx;
 } WINE_HID_REPORT;
 
-typedef struct __WINE_HID_LINK_COLLECTION_NODE {
-    USAGE  LinkUsage;
-    USAGE  LinkUsagePage;
-    USHORT Parent;
-    USHORT NumberOfChildren;
-    USHORT NextSibling;
-    USHORT FirstChild;
-    BYTE   CollectionType;
-    BYTE   IsAlias;
-} WINE_HID_LINK_COLLECTION_NODE;
-
 typedef struct __WINE_HIDP_PREPARSED_DATA
 {
     DWORD magic;
     DWORD dwSize;
     HIDP_CAPS caps;
+    HIDP_CAPS new_caps;
 
     DWORD elementOffset;
-    DWORD nodesOffset;
     DWORD reportCount[3];
     BYTE reportIdx[3][256];
 
+    DWORD value_caps_offset;
+    USHORT value_caps_count[3];
     WINE_HID_REPORT reports[1];
 } WINE_HIDP_PREPARSED_DATA, *PWINE_HIDP_PREPARSED_DATA;
 
@@ -135,6 +101,10 @@ typedef struct __WINE_HIDP_PREPARSED_DATA
 #define HID_OUTPUT_REPORTS(d) ((d)->reports + (d)->reportCount[0])
 #define HID_FEATURE_REPORTS(d) ((d)->reports + (d)->reportCount[0] + (d)->reportCount[1])
 #define HID_ELEMS(d) ((WINE_HID_ELEMENT*)((BYTE*)(d) + (d)->elementOffset))
-#define HID_NODES(d) ((WINE_HID_LINK_COLLECTION_NODE*)((BYTE*)(d) + (d)->nodesOffset))
+
+#define HID_INPUT_VALUE_CAPS(d) ((struct hid_value_caps*)((char *)(d) + (d)->value_caps_offset))
+#define HID_OUTPUT_VALUE_CAPS(d) (HID_INPUT_VALUE_CAPS(d) + (d)->value_caps_count[0])
+#define HID_FEATURE_VALUE_CAPS(d) (HID_OUTPUT_VALUE_CAPS(d) + (d)->value_caps_count[1])
+#define HID_COLLECTION_VALUE_CAPS(d) (HID_FEATURE_VALUE_CAPS(d) + (d)->value_caps_count[2])
 
 #endif /* __WINE_PARSE_H */

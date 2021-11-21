@@ -69,6 +69,7 @@ SOURCES = \
 	cmdprp.idl \
 	cmdstrm.idl \
 	cmdtxt.idl \
+	cmdwpr.idl \
 	cmnquery.idl \
 	codecapi.h \
 	colinf.idl \
@@ -526,6 +527,7 @@ SOURCES = \
 	netcon.idl \
 	netfw.idl \
 	netioapi.h \
+	netiodef.h \
 	netlistmgr.idl \
 	newdev.h \
 	nldef.h \
@@ -541,6 +543,7 @@ SOURCES = \
 	ntddvdeo.h \
 	ntdef.h \
 	ntdsapi.h \
+	ntgdi.h \
 	ntifs.h \
 	ntlsa.h \
 	ntquery.h \
@@ -586,6 +589,7 @@ SOURCES = \
 	powrprof.h \
 	prntvpt.h \
 	profinfo.h \
+	proofofpossessioncookieinfo.idl \
 	propidl.idl \
 	propkey.h \
 	propkeydef.h \
@@ -691,6 +695,7 @@ SOURCES = \
 	t2embapi.h \
 	tapi.h \
 	taskschd.idl \
+	tbs.h \
 	tchar.h \
 	tcpestats.h \
 	tcpmib.h \

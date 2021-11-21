@@ -100,6 +100,7 @@ static bool amt_from_wg_format_audio(AM_MEDIA_TYPE *mt, const struct wg_format *
     switch (format->u.audio.format)
     {
     case WG_AUDIO_FORMAT_UNKNOWN:
+    case WG_AUDIO_FORMAT_AAC:
         return false;
 
     case WG_AUDIO_FORMAT_MPEG1_LAYER1:
@@ -268,6 +269,7 @@ static unsigned int get_image_size(const struct wg_format *format)
             return width * height * 3;
 
         case WG_VIDEO_FORMAT_UNKNOWN:
+        case WG_VIDEO_FORMAT_H264:
             break;
     }
 
@@ -798,7 +800,7 @@ static DWORD CALLBACK read_thread(void *arg)
         if (!unix_funcs->wg_parser_get_read_request(filter->wg_parser, &data, &offset, &size))
             continue;
         hr = IAsyncReader_SyncRead(filter->reader, offset, size, data);
-        unix_funcs->wg_parser_complete_read_request(filter->wg_parser, SUCCEEDED(hr));
+        unix_funcs->wg_parser_complete_read_request(filter->wg_parser, SUCCEEDED(hr) ? WG_READ_SUCCESS : WG_READ_FAILURE, size);
     }
 
     TRACE("Streaming stopped; exiting.\n");
@@ -1446,7 +1448,7 @@ static HRESULT WINAPI GSTOutPin_DecideBufferSize(struct strmbase_source *iface,
 
     ret = amt_to_wg_format(&pin->pin.pin.mt, &format);
     assert(ret);
-    unix_funcs->wg_parser_stream_enable(pin->wg_stream, &format);
+    unix_funcs->wg_parser_stream_enable(pin->wg_stream, &format, NULL);
 
     /* We do need to drop any buffers that might have been sent with the old
      * caps, but this will be handled in parser_init_stream(). */

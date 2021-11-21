@@ -26,11 +26,13 @@
 #include "winuser.h"
 #include "winnls.h"
 #include "winreg.h"
-#include "commctrl.h" 
+#include "commctrl.h"
+#include "uxtheme.h"
 
 #include "resources.h"
 
 #include "wine/test.h"
+#include "v6util.h"
 
 #include "msg.h"
 
@@ -43,6 +45,13 @@ static BOOL (WINAPI *pImageList_Destroy)(HIMAGELIST);
 static INT (WINAPI *pImageList_GetImageCount)(HIMAGELIST);
 static BOOL (WINAPI *pImageList_GetIconSize)(HIMAGELIST, int *, int *);
 static HIMAGELIST (WINAPI *pImageList_LoadImageA)(HINSTANCE, LPCSTR, int, int, COLORREF, UINT, UINT);
+
+static HRESULT (WINAPI *pCloseThemeData)(HTHEME);
+static BOOL (WINAPI *pIsThemeActive)(VOID);
+static HTHEME (WINAPI *pGetWindowTheme)(HWND);
+static HTHEME (WINAPI *pOpenThemeData)(HWND, LPCWSTR);
+
+static BOOL is_theme_active;
 
 static struct msg_sequence *sequences[NUM_MSG_SEQUENCES];
 
@@ -131,6 +140,40 @@ static void MakeButton(TBBUTTON *p, int idCommand, int fsStyle, int nString) {
   p->fsState = TBSTATE_ENABLED;
   p->fsStyle = fsStyle;
   p->iString = nString;
+}
+
+/* try to make sure pending X events have been processed before continuing */
+static void flush_events(void)
+{
+    MSG msg;
+    int diff = 200;
+    int min_timeout = 100;
+    DWORD time = GetTickCount() + diff;
+
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE, min_timeout, QS_ALLINPUT) == WAIT_TIMEOUT)
+            break;
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+        diff = time - GetTickCount();
+    }
+}
+
+static BOOL equal_dc(HDC hdc1, HDC hdc2, int width, int height)
+{
+    int x, y;
+
+    for (x = 0; x < width; ++x)
+    {
+        for (y = 0; y < height; ++y)
+        {
+            if (GetPixel(hdc1, x, y) != GetPixel(hdc2, x, y))
+                return FALSE;
+        }
+    }
+
+    return TRUE;
 }
 
 static void *alloced_str;
@@ -2203,7 +2246,7 @@ static LRESULT CALLBACK cbt_hook_proc(int code, WPARAM wParam, LPARAM lParam)
     return CallNextHookEx(g_tbhook, code, wParam, lParam);
 }
 
-static void test_create(void)
+static void test_create(BOOL v6)
 {
     HWND hwnd, tooltip;
     DWORD style;
@@ -2217,16 +2260,32 @@ static void test_create(void)
     hwnd = CreateWindowExA(0, TOOLBARCLASSNAMEA, NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0,
         hMainWnd, (HMENU)5, GetModuleHandleA(NULL), NULL);
 
-    CHECK_CALLED(g_hook_create);
-    CHECK_CALLED(g_hook_WM_NCCREATE);
-    CHECK_CALLED(g_hook_WM_CREATE);
+    if (v6)
+    {
+        expect(called_g_hook_create, FALSE);
+        expect(called_g_hook_WM_NCCREATE, FALSE);
+        expect(called_g_hook_WM_CREATE, FALSE);
+    }
+    else
+    {
+        CHECK_CALLED(g_hook_create);
+        CHECK_CALLED(g_hook_WM_NCCREATE);
+        CHECK_CALLED(g_hook_WM_CREATE);
+    }
 
     style = GetWindowLongA(hwnd, GWL_STYLE);
-    ok((style & TBSTYLE_TOOLTIPS) == TBSTYLE_TOOLTIPS, "got 0x%08x\n", style);
+    if (v6)
+    {
+        ok(!(style & TBSTYLE_TOOLTIPS), "got 0x%08x\n", style);
+    }
+    else
+    {
+        ok((style & TBSTYLE_TOOLTIPS) == TBSTYLE_TOOLTIPS, "got 0x%08x\n", style);
 
-    tooltip = (HWND)SendMessageA(hwnd, TB_GETTOOLTIPS, 0, 0);
-    ok(tooltip != NULL, "got %p\n", tooltip);
-    ok(GetParent(tooltip) == hMainWnd, "got %p, %p\n", hMainWnd, hwnd);
+        tooltip = (HWND)SendMessageA(hwnd, TB_GETTOOLTIPS, 0, 0);
+        ok(tooltip != NULL, "got %p\n", tooltip);
+        ok(GetParent(tooltip) == hMainWnd, "got %p, %p\n", hMainWnd, hwnd);
+    }
 
     DestroyWindow(hwnd);
     UnhookWindowsHook(WH_CBT, cbt_hook_proc);
@@ -2241,6 +2300,24 @@ static void test_create(void)
 
     style = SendMessageA(hwnd, TB_GETSTYLE, 0, 0);
     ok((style & TBSTYLE_TRANSPARENT) == TBSTYLE_TRANSPARENT, "got 0x%08x\n", style);
+
+    DestroyWindow(hwnd);
+
+    if (!is_theme_active)
+    {
+        skip("Theming is not active, skipping following tests.\n");
+        return;
+    }
+
+    hwnd = CreateWindowA(TOOLBARCLASSNAMEA, NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS
+                         | TBSTYLE_TOOLTIPS | TBSTYLE_GROUP, 0, 0, 0, 0, hMainWnd, (HMENU)5,
+                         GetModuleHandleA(NULL), NULL);
+
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & TBSTYLE_TRANSPARENT), "got 0x%08x\n", style);
+
+    style = SendMessageA(hwnd, TB_GETSTYLE, 0, 0);
+    ok(!(style & TBSTYLE_TRANSPARENT), "got 0x%08x\n", style);
 
     DestroyWindow(hwnd);
 }
@@ -2534,9 +2611,83 @@ static void test_imagelist(void)
     DestroyWindow(hwnd);
 }
 
+static void test_visual(void)
+{
+    HBITMAP mem_bitmap1, mem_bitmap2;
+    HDC mem_dc1, mem_dc2, toolbar_dc;
+    TBBUTTON tbbutton;
+    int width, height;
+    HTHEME theme;
+    HWND toolbar;
+    RECT rect;
+    BOOL ret;
+
+    if (!is_theme_active)
+    {
+        skip("Theming is not active, skipping visual tests.\n");
+        return;
+    }
+
+    /* Test that toolbar shouldn't use outside theme handles */
+    toolbar = CreateWindowA(TOOLBARCLASSNAMEA, "", WS_CHILD | WS_VISIBLE, 0, 0, 50, 50, hMainWnd, 0, 0, NULL);
+    ok(!!toolbar, "Failed to create a toolbar window.\n");
+
+    /* Toolbar needs data for it to show */
+    memset(&tbbutton, 0, sizeof(tbbutton));
+    tbbutton.fsState = TBSTATE_ENABLED;
+    tbbutton.iString = (INT_PTR)"test";
+    SendMessageA(toolbar, TB_BUTTONSTRUCTSIZE, sizeof(tbbutton), 0);
+    ret = SendMessageA(toolbar, TB_ADDBUTTONSA, 1, (LPARAM)&tbbutton);
+    ok(ret, "TB_ADDBUTTONSA failed.\n");
+
+    theme = pGetWindowTheme(toolbar);
+    ok(!theme, "Expected theme not opened by window.\n");
+
+    toolbar_dc = GetDC(toolbar);
+    GetClientRect(toolbar, &rect);
+    width = rect.right - rect.left;
+    height = rect.bottom - rect.top;
+
+    ret = RedrawWindow(toolbar, NULL, NULL, RDW_FRAME | RDW_INVALIDATE | RDW_ERASE | RDW_ERASENOW | RDW_UPDATENOW);
+    ok(ret, "RedrawWindow failed.\n");
+    flush_events();
+
+    mem_dc1 = CreateCompatibleDC(toolbar_dc);
+    mem_bitmap1 = CreateCompatibleBitmap(toolbar_dc, width, height);
+    SelectObject(mem_dc1, mem_bitmap1);
+    BitBlt(mem_dc1, 0, 0, width, height, toolbar_dc, 0, 0, SRCCOPY);
+
+    if (theme)
+        pCloseThemeData(theme);
+    theme = pOpenThemeData(toolbar, L"Rebar");
+    ok(!!theme, "OpenThemeData failed.\n");
+
+    ret = RedrawWindow(toolbar, NULL, NULL, RDW_FRAME | RDW_INVALIDATE | RDW_ERASE | RDW_ERASENOW | RDW_UPDATENOW);
+    ok(ret, "RedrawWindow failed.\n");
+
+    mem_dc2 = CreateCompatibleDC(toolbar_dc);
+    mem_bitmap2 = CreateCompatibleBitmap(toolbar_dc, width, height);
+    SelectObject(mem_dc2, mem_bitmap2);
+    BitBlt(mem_dc2, 0, 0, width, height, toolbar_dc, 0, 0, SRCCOPY);
+
+    ret = equal_dc(mem_dc1, mem_dc2, width, height);
+    ok(ret, "Expected same content.\n");
+
+    pCloseThemeData(theme);
+    DeleteObject(mem_bitmap2);
+    DeleteObject(mem_bitmap1);
+    DeleteDC(mem_dc2);
+    DeleteDC(mem_dc1);
+    ReleaseDC(toolbar, toolbar_dc);
+    DestroyWindow(toolbar);
+}
+
 static void init_functions(void)
 {
-    HMODULE hComCtl32 = LoadLibraryA("comctl32.dll");
+    HMODULE hComCtl32, hUxtheme;
+
+    hComCtl32 = LoadLibraryA("comctl32.dll");
+    hUxtheme = LoadLibraryA("uxtheme.dll");
 
 #define X(f) p##f = (void*)GetProcAddress(hComCtl32, #f);
     X(CreateToolbarEx);
@@ -2545,16 +2696,28 @@ static void init_functions(void)
     X(ImageList_LoadImageA);
     X(ImageList_Destroy);
 #undef X
+
+#define X(f) p##f = (void*)GetProcAddress(hUxtheme, #f)
+    X(GetWindowTheme);
+    X(IsThemeActive);
+    X(OpenThemeData);
+    X(CloseThemeData);
+#undef X
 }
 
 START_TEST(toolbar)
 {
+    ULONG_PTR ctx_cookie;
     WNDCLASSA wc;
+    HANDLE ctx;
     MSG msg;
     RECT rc;
 
     init_msg_sequences(sequences, NUM_MSG_SEQUENCES);
     init_functions();
+
+    if (pIsThemeActive)
+        is_theme_active = pIsThemeActive();
 
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.cbClsExtra = 0;
@@ -2586,12 +2749,18 @@ START_TEST(toolbar)
     test_getstring();
     test_tooltip();
     test_get_set_style();
-    test_create();
+    test_create(FALSE);
     test_TB_GET_SET_EXTENDEDSTYLE();
     test_noresize();
     test_save();
     test_drawtext_flags();
     test_imagelist();
+
+    if (!load_v6_module(&ctx_cookie, &ctx))
+        return;
+
+    test_create(TRUE);
+    test_visual();
 
     PostQuitMessage(0);
     while(GetMessageA(&msg,0,0,0)) {
@@ -2599,4 +2768,6 @@ START_TEST(toolbar)
         DispatchMessageA(&msg);
     }
     DestroyWindow(hMainWnd);
+
+    unload_v6_module(ctx_cookie, ctx);
 }

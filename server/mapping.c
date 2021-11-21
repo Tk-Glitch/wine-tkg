@@ -247,7 +247,7 @@ static void shared_map_destroy( struct object *obj )
 }
 
 /* extend a file beyond the current end of file */
-static int grow_file( int unix_fd, file_pos_t new_size )
+int grow_file( int unix_fd, file_pos_t new_size )
 {
     static const char zero;
     off_t size = new_size;
@@ -723,7 +723,7 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
         break;
 
     case IMAGE_NT_OPTIONAL_HDR64_MAGIC:
-        if (!is_machine_64bit( supported_machines[0] )) return STATUS_INVALID_IMAGE_WIN_64;
+        if (!is_machine_64bit( native_machine )) return STATUS_INVALID_IMAGE_WIN_64;
         if (!is_machine_64bit( nt.FileHeader.Machine )) return STATUS_INVALID_IMAGE_FORMAT;
         if (!is_machine_supported( nt.FileHeader.Machine )) return STATUS_INVALID_IMAGE_FORMAT;
 

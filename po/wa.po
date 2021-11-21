@@ -1092,7 +1092,8 @@ msgstr ""
 msgid "Yellow"
 msgstr ""
 
-#: dlls/comdlg32/comdlg32.rc:134 programs/wordpad/wordpad.rc:137
+#: dlls/comdlg32/comdlg32.rc:134 dlls/light.msstyles/light.rc:29
+#: dlls/light.msstyles/light.rc:36 programs/wordpad/wordpad.rc:137
 msgid "Blue"
 msgstr ""
 
@@ -6969,6 +6970,15 @@ msgstr ""
 
 #: dlls/kernel32/winerror.mc:3781
 msgid "Resource is not currently available.\n"
+msgstr ""
+
+#: dlls/light.msstyles/light.rc:30 dlls/light.msstyles/light.rc:37
+msgid "Classic Blue"
+msgstr ""
+
+#: dlls/light.msstyles/light.rc:43 dlls/light.msstyles/light.rc:49
+#: programs/winhlp32/winhlp32.rc:53 programs/winhlp32/winhlp32.rc:73
+msgid "Normal"
 msgstr ""
 
 #: dlls/localspl/localspl.rc:37
@@ -17313,10 +17323,6 @@ msgstr ""
 
 #: programs/winhlp32/winhlp32.rc:52 programs/winhlp32/winhlp32.rc:72
 msgid "Small"
-msgstr ""
-
-#: programs/winhlp32/winhlp32.rc:53 programs/winhlp32/winhlp32.rc:73
-msgid "Normal"
 msgstr ""
 
 #: programs/winhlp32/winhlp32.rc:54 programs/winhlp32/winhlp32.rc:74

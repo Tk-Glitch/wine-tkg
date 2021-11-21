@@ -145,7 +145,6 @@ static void remove_usb_device(libusb_device *libusb_device)
         if (device->libusb_device == libusb_device)
         {
             list_remove(&device->entry);
-            device->removed = TRUE;
             break;
         }
     }
@@ -363,6 +362,20 @@ static NTSTATUS query_id(const struct usb_device *device, IRP *irp, BUS_QUERY_ID
     return STATUS_SUCCESS;
 }
 
+static void remove_pending_irps(struct usb_device *device)
+{
+    LIST_ENTRY *entry;
+    IRP *irp;
+
+    while ((entry = RemoveHeadList(&device->irp_list)) != &device->irp_list)
+    {
+        irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
+        irp->IoStatus.Status = STATUS_DELETE_PENDING;
+        irp->IoStatus.Information = 0;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    }
+}
+
 static NTSTATUS pdo_pnp(DEVICE_OBJECT *device_obj, IRP *irp)
 {
     IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation(irp);
@@ -388,38 +401,26 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device_obj, IRP *irp)
         }
 
         case IRP_MN_START_DEVICE:
+            ret = STATUS_SUCCESS;
+            break;
+
         case IRP_MN_SURPRISE_REMOVAL:
+            EnterCriticalSection(&wineusb_cs);
+            remove_pending_irps(device);
+            device->removed = TRUE;
+            LeaveCriticalSection(&wineusb_cs);
             ret = STATUS_SUCCESS;
             break;
 
         case IRP_MN_REMOVE_DEVICE:
-        {
-            LIST_ENTRY *entry;
+            remove_pending_irps(device);
 
-            EnterCriticalSection(&wineusb_cs);
-            while ((entry = RemoveHeadList(&device->irp_list)) != &device->irp_list)
-            {
-                irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
-                irp->IoStatus.Status = STATUS_DELETE_PENDING;
-                irp->IoStatus.Information = 0;
-                IoCompleteRequest(irp, IO_NO_INCREMENT);
-            }
-            LeaveCriticalSection(&wineusb_cs);
+            libusb_unref_device(device->libusb_device);
+            libusb_close(device->handle);
 
-            if (device->removed)
-            {
-                libusb_unref_device(device->libusb_device);
-                libusb_close(device->handle);
-
-                irp->IoStatus.Status = STATUS_SUCCESS;
-                IoCompleteRequest(irp, IO_NO_INCREMENT);
-                IoDeleteDevice(device->device_obj);
-                return STATUS_SUCCESS;
-            }
-
+            IoDeleteDevice(device->device_obj);
             ret = STATUS_SUCCESS;
             break;
-        }
 
         default:
             FIXME("Unhandled minor function %#x.\n", stack->MinorFunction);
@@ -725,8 +726,20 @@ static NTSTATUS WINAPI driver_internal_ioctl(DEVICE_OBJECT *device_obj, IRP *irp
     ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
     struct usb_device *device = device_obj->DeviceExtension;
     NTSTATUS status = STATUS_NOT_IMPLEMENTED;
+    BOOL removed;
 
     TRACE("device_obj %p, irp %p, code %#x.\n", device_obj, irp, code);
+
+    EnterCriticalSection(&wineusb_cs);
+    removed = device->removed;
+    LeaveCriticalSection(&wineusb_cs);
+
+    if (removed)
+    {
+        irp->IoStatus.Status = STATUS_DELETE_PENDING;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return STATUS_DELETE_PENDING;
+    }
 
     switch (code)
     {

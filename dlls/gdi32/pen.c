@@ -34,18 +34,17 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdi);
   /* GDI logical pen object */
 typedef struct
 {
-    struct brush_pattern pattern;
-    EXTLOGPEN            logpen;
+    struct gdi_obj_header obj;
+    struct brush_pattern  pattern;
+    EXTLOGPEN             logpen;
 } PENOBJ;
 
 
-static HGDIOBJ PEN_SelectObject( HGDIOBJ handle, HDC hdc );
 static INT PEN_GetObject( HGDIOBJ handle, INT count, LPVOID buffer );
 static BOOL PEN_DeleteObject( HGDIOBJ handle );
 
 static const struct gdi_obj_funcs pen_funcs =
 {
-    PEN_SelectObject,  /* pSelectObject */
     PEN_GetObject,     /* pGetObjectA */
     PEN_GetObject,     /* pGetObjectW */
     NULL,              /* pUnrealizeObject */
@@ -110,7 +109,7 @@ HPEN WINAPI CreatePenIndirect( const LOGPEN * pen )
         break;
     }
 
-    if (!(hpen = alloc_gdi_handle( penPtr, OBJ_PEN, &pen_funcs )))
+    if (!(hpen = alloc_gdi_handle( &penPtr->obj, OBJ_PEN, &pen_funcs )))
         HeapFree( GetProcessHeap(), 0, penPtr );
     return hpen;
 }
@@ -200,7 +199,7 @@ HPEN WINAPI ExtCreatePen( DWORD style, DWORD width,
     penPtr->logpen.elpNumEntries = style_count;
     memcpy(penPtr->logpen.elpStyleEntry, style_bits, style_count * sizeof(DWORD));
 
-    if (!(hpen = alloc_gdi_handle( penPtr, OBJ_EXTPEN, &pen_funcs )))
+    if (!(hpen = alloc_gdi_handle( &penPtr->obj, OBJ_EXTPEN, &pen_funcs )))
     {
         free_brush_pattern( &penPtr->pattern );
         HeapFree( GetProcessHeap(), 0, penPtr );
@@ -214,20 +213,16 @@ invalid:
 }
 
 /***********************************************************************
- *           PEN_SelectObject
+ *           NtGdiSelectPen (win32u.@)
  */
-static HGDIOBJ PEN_SelectObject( HGDIOBJ handle, HDC hdc )
+HGDIOBJ WINAPI NtGdiSelectPen( HDC hdc, HGDIOBJ handle )
 {
     PENOBJ *pen;
     HGDIOBJ ret = 0;
-    DC *dc = get_dc_ptr( hdc );
     WORD type;
+    DC *dc;
 
-    if (!dc)
-    {
-        SetLastError( ERROR_INVALID_HANDLE );
-        return 0;
-    }
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
     if ((pen = get_any_obj_ptr( handle, &type )))
     {

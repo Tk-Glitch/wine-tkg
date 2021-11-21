@@ -32,19 +32,18 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdi);
 /* GDI logical brush object */
 typedef struct
 {
+    struct gdi_obj_header obj;
     LOGBRUSH              logbrush;
     struct brush_pattern  pattern;
 } BRUSHOBJ;
 
 #define NB_HATCH_STYLES  6
 
-static HGDIOBJ BRUSH_SelectObject( HGDIOBJ handle, HDC hdc );
 static INT BRUSH_GetObject( HGDIOBJ handle, INT count, LPVOID buffer );
 static BOOL BRUSH_DeleteObject( HGDIOBJ handle );
 
 static const struct gdi_obj_funcs brush_funcs =
 {
-    BRUSH_SelectObject,  /* pSelectObject */
     BRUSH_GetObject,     /* pGetObjectA */
     BRUSH_GetObject,     /* pGetObjectW */
     NULL,                /* pUnrealizeObject */
@@ -198,7 +197,7 @@ HBRUSH WINAPI CreateBrushIndirect( const LOGBRUSH * brush )
     ptr->logbrush = *brush;
 
     if (store_brush_pattern( &ptr->logbrush, &ptr->pattern ) &&
-        (hbrush = alloc_gdi_handle( ptr, OBJ_BRUSH, &brush_funcs )))
+        (hbrush = alloc_gdi_handle( &ptr->obj, OBJ_BRUSH, &brush_funcs )))
     {
         TRACE("%p\n", hbrush);
         return hbrush;
@@ -416,19 +415,15 @@ BOOL WINAPI FixBrushOrgEx( HDC hdc, INT x, INT y, LPPOINT oldorg )
 
 
 /***********************************************************************
- *           BRUSH_SelectObject
+ *           NtGdiSelectBrush (win32u.@)
  */
-static HGDIOBJ BRUSH_SelectObject( HGDIOBJ handle, HDC hdc )
+HGDIOBJ WINAPI NtGdiSelectBrush( HDC hdc, HGDIOBJ handle )
 {
     BRUSHOBJ *brush;
     HGDIOBJ ret = 0;
-    DC *dc = get_dc_ptr( hdc );
+    DC *dc;
 
-    if (!dc)
-    {
-        SetLastError( ERROR_INVALID_HANDLE );
-        return 0;
-    }
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
     if ((brush = GDI_GetObjPtr( handle, OBJ_BRUSH )))
     {

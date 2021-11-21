@@ -27,7 +27,7 @@
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
-#include "wingdi.h"
+#include "ntgdi.h"
 #include "wine/gdi_driver.h"
 
 /* Metafile defines */
@@ -50,15 +50,30 @@ typedef struct {
 
 struct gdi_obj_funcs
 {
-    HGDIOBJ (*pSelectObject)( HGDIOBJ handle, HDC hdc );
     INT     (*pGetObjectA)( HGDIOBJ handle, INT count, LPVOID buffer );
     INT     (*pGetObjectW)( HGDIOBJ handle, INT count, LPVOID buffer );
     BOOL    (*pUnrealizeObject)( HGDIOBJ handle );
     BOOL    (*pDeleteObject)( HGDIOBJ handle );
 };
 
+struct hdc_list
+{
+    HDC hdc;
+    struct hdc_list *next;
+};
+
+struct gdi_obj_header
+{
+    const struct gdi_obj_funcs *funcs;       /* type-specific functions */
+    struct hdc_list            *hdcs;        /* list of HDCs interested in this object */
+    WORD                        selcount;    /* number of times the object is selected in a DC */
+    WORD                        system : 1;  /* system object flag */
+    WORD                        deleted : 1; /* whether DeleteObject has been called on this object */
+};
+
 typedef struct tagDC
 {
+    struct gdi_obj_header obj;     /* object header */
     HDC          hSelf;            /* Handle to this DC */
     struct gdi_physdev nulldrv;    /* physdev for the null driver */
     PHYSDEV      physDev;          /* current top of the physdev stack */
@@ -169,9 +184,10 @@ static inline PHYSDEV find_dc_driver( DC *dc, const struct gdi_dc_funcs *funcs )
 
 typedef struct tagBITMAPOBJ
 {
-    DIBSECTION          dib;
-    SIZE                size;   /* For SetBitmapDimension() */
-    RGBQUAD            *color_table;  /* DIB color table if <= 8bpp (always 1 << bpp in size) */
+    struct gdi_obj_header obj;
+    DIBSECTION            dib;
+    SIZE                  size;   /* For SetBitmapDimension() */
+    RGBQUAD              *color_table;  /* DIB color table if <= 8bpp (always 1 << bpp in size) */
 } BITMAPOBJ;
 
 static inline BOOL is_bitmapobj_dib( const BITMAPOBJ *bmp )
@@ -443,7 +459,8 @@ extern BOOL opentype_get_properties( const void *data, size_t size, const struct
                                      DWORD *version, FONTSIGNATURE *fs, DWORD *ntm_flags ) DECLSPEC_HIDDEN;
 
 /* gdiobj.c */
-extern HGDIOBJ alloc_gdi_handle( void *obj, WORD type, const struct gdi_obj_funcs *funcs ) DECLSPEC_HIDDEN;
+extern HGDIOBJ alloc_gdi_handle( struct gdi_obj_header *obj, WORD type,
+                                 const struct gdi_obj_funcs *funcs ) DECLSPEC_HIDDEN;
 extern void *free_gdi_handle( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern HGDIOBJ get_full_gdi_handle( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern void *GDI_GetObjPtr( HGDIOBJ, WORD ) DECLSPEC_HIDDEN;
@@ -464,7 +481,6 @@ extern void lp_to_dp( DC *dc, POINT *points, INT count ) DECLSPEC_HIDDEN;
 
 /* metafile.c */
 extern HMETAFILE MF_Create_HMETAFILE(METAHEADER *mh) DECLSPEC_HIDDEN;
-extern METAHEADER *MF_CreateMetaHeaderDisk(METAHEADER *mr, LPCVOID filename, BOOL unicode ) DECLSPEC_HIDDEN;
 
 /* Format of comment record added by GetWinMetaFileBits */
 #include <pshpack2.h>
@@ -516,6 +532,7 @@ extern HRGN create_polypolygon_region( const POINT *pts, const INT *count, INT n
 #define RGN_DEFAULT_RECTS 4
 typedef struct
 {
+    struct gdi_obj_header obj;
     INT size;
     INT numRects;
     RECT *rects;

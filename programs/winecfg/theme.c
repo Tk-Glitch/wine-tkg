@@ -435,6 +435,12 @@ static void enable_size_and_color_controls (HWND dialog, BOOL enable)
   
 static void init_dialog (HWND dialog)
 {
+    SendDlgItemMessageW(dialog, IDC_SYSPARAM_SIZE_UD, UDM_SETBUDDY,
+                        (WPARAM)GetDlgItem(dialog, IDC_SYSPARAM_SIZE), 0);
+}
+
+static void update_dialog (HWND dialog)
+{
     updating_ui = TRUE;
     
     scan_theme_files();
@@ -452,7 +458,6 @@ static void init_dialog (HWND dialog)
     }
     theme_dirty = FALSE;
 
-    SendDlgItemMessageW(dialog, IDC_SYSPARAM_SIZE_UD, UDM_SETBUDDY, (WPARAM)GetDlgItem(dialog, IDC_SYSPARAM_SIZE), 0);
     SendDlgItemMessageW(dialog, IDC_SYSPARAM_SIZE_UD, UDM_SETRANGE, 0, MAKELONG(100, 8));
 
     updating_ui = FALSE;
@@ -1030,12 +1035,6 @@ static void apply_sysparams(void)
     ncm.lfStatusFont  = metrics[IDC_SYSPARAMS_TOOLTIP_TEXT - IDC_SYSPARAMS_BUTTON].lf;
     ncm.lfMessageFont = metrics[IDC_SYSPARAMS_MSGBOX_TEXT - IDC_SYSPARAMS_BUTTON].lf;
 
-    ncm.lfMenuFont.lfHeight    = MulDiv( ncm.lfMenuFont.lfHeight, -72, dpi );
-    ncm.lfCaptionFont.lfHeight = MulDiv( ncm.lfCaptionFont.lfHeight, -72, dpi );
-    ncm.lfStatusFont.lfHeight  = MulDiv( ncm.lfStatusFont.lfHeight, -72, dpi );
-    ncm.lfMessageFont.lfHeight = MulDiv( ncm.lfMessageFont.lfHeight, -72, dpi );
-    ncm.lfSmCaptionFont.lfHeight = MulDiv( ncm.lfSmCaptionFont.lfHeight, -72, dpi );
-
     SystemParametersInfoW(SPI_SETNONCLIENTMETRICS, sizeof(ncm), &ncm,
                           SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
 
@@ -1197,6 +1196,7 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
             update_shell_folder_listview(hDlg);
             read_sysparams(hDlg);
             init_mime_types(hDlg);
+            init_dialog(hDlg);
             break;
 
         case WM_DESTROY:
@@ -1349,7 +1349,7 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     break;
                 }
                 case PSN_SETACTIVE: {
-                    init_dialog (hDlg);
+                    update_dialog(hDlg);
                     break;
                 }
             }

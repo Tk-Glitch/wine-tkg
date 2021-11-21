@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2021-06-04 08:43+0300\n"
+"PO-Revision-Date: 2021-06-24 21:06+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: Lithuanian <komp_lt@konf.lt>\n"
 "Language: lt\n"
@@ -1085,7 +1085,8 @@ msgstr "Žalia"
 msgid "Yellow"
 msgstr "Geltona"
 
-#: dlls/comdlg32/comdlg32.rc:134 programs/wordpad/wordpad.rc:137
+#: dlls/comdlg32/comdlg32.rc:134 dlls/light.msstyles/light.rc:29
+#: dlls/light.msstyles/light.rc:36 programs/wordpad/wordpad.rc:137
 msgid "Blue"
 msgstr "Mėlyna"
 
@@ -6971,6 +6972,15 @@ msgstr "Neteisingas kreipinys.\n"
 #: dlls/kernel32/winerror.mc:3781
 msgid "Resource is not currently available.\n"
 msgstr "Išteklius šiuo metu neprieinamas.\n"
+
+#: dlls/light.msstyles/light.rc:30 dlls/light.msstyles/light.rc:37
+msgid "Classic Blue"
+msgstr "Klasikinė mėlyna"
+
+#: dlls/light.msstyles/light.rc:43 dlls/light.msstyles/light.rc:49
+#: programs/winhlp32/winhlp32.rc:53 programs/winhlp32/winhlp32.rc:73
+msgid "Normal"
+msgstr "&Normalus"
 
 #: dlls/localspl/localspl.rc:37
 msgid "Letter"
@@ -17928,10 +17938,6 @@ msgstr "Šriftai"
 #: programs/winhlp32/winhlp32.rc:52 programs/winhlp32/winhlp32.rc:72
 msgid "Small"
 msgstr "&Mažas"
-
-#: programs/winhlp32/winhlp32.rc:53 programs/winhlp32/winhlp32.rc:73
-msgid "Normal"
-msgstr "&Normalus"
 
 #: programs/winhlp32/winhlp32.rc:54 programs/winhlp32/winhlp32.rc:74
 msgid "Large"

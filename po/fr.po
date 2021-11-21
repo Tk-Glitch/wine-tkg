@@ -1102,7 +1102,8 @@ msgstr "Citron vert"
 msgid "Yellow"
 msgstr "Jaune"
 
-#: dlls/comdlg32/comdlg32.rc:134 programs/wordpad/wordpad.rc:137
+#: dlls/comdlg32/comdlg32.rc:134 dlls/light.msstyles/light.rc:29
+#: dlls/light.msstyles/light.rc:36 programs/wordpad/wordpad.rc:137
 msgid "Blue"
 msgstr "Bleu"
 
@@ -7047,6 +7048,17 @@ msgstr "Niveau non valide.\n"
 #| msgid "Help not available."
 msgid "Resource is not currently available.\n"
 msgstr "Impossible d'afficher l'aide."
+
+#: dlls/light.msstyles/light.rc:30 dlls/light.msstyles/light.rc:37
+#, fuzzy
+#| msgid "Class Name:"
+msgid "Classic Blue"
+msgstr "Nom de classe :"
+
+#: dlls/light.msstyles/light.rc:43 dlls/light.msstyles/light.rc:49
+#: programs/winhlp32/winhlp32.rc:53 programs/winhlp32/winhlp32.rc:73
+msgid "Normal"
+msgstr "Normale"
 
 #: dlls/localspl/localspl.rc:37
 #, fuzzy
@@ -18673,10 +18685,6 @@ msgstr "Polices"
 #: programs/winhlp32/winhlp32.rc:52 programs/winhlp32/winhlp32.rc:72
 msgid "Small"
 msgstr "Petite"
-
-#: programs/winhlp32/winhlp32.rc:53 programs/winhlp32/winhlp32.rc:73
-msgid "Normal"
-msgstr "Normale"
 
 #: programs/winhlp32/winhlp32.rc:54 programs/winhlp32/winhlp32.rc:74
 msgid "Large"

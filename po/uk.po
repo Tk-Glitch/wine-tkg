@@ -1089,7 +1089,8 @@ msgstr "Салатовий"
 msgid "Yellow"
 msgstr "Жовтий"
 
-#: dlls/comdlg32/comdlg32.rc:134 programs/wordpad/wordpad.rc:137
+#: dlls/comdlg32/comdlg32.rc:134 dlls/light.msstyles/light.rc:29
+#: dlls/light.msstyles/light.rc:36 programs/wordpad/wordpad.rc:137
 msgid "Blue"
 msgstr "Синій"
 
@@ -6989,6 +6990,17 @@ msgstr "Невірний запит.\n"
 #: dlls/kernel32/winerror.mc:3781
 msgid "Resource is not currently available.\n"
 msgstr "Наразі ресурс недоступний.\n"
+
+#: dlls/light.msstyles/light.rc:30 dlls/light.msstyles/light.rc:37
+#, fuzzy
+#| msgid "Class Name:"
+msgid "Classic Blue"
+msgstr "Ім'я класу:"
+
+#: dlls/light.msstyles/light.rc:43 dlls/light.msstyles/light.rc:49
+#: programs/winhlp32/winhlp32.rc:53 programs/winhlp32/winhlp32.rc:73
+msgid "Normal"
+msgstr "Нормальний"
 
 #: dlls/localspl/localspl.rc:37
 #, fuzzy
@@ -17919,10 +17931,6 @@ msgstr "Шрифти"
 #: programs/winhlp32/winhlp32.rc:52 programs/winhlp32/winhlp32.rc:72
 msgid "Small"
 msgstr "Малий"
-
-#: programs/winhlp32/winhlp32.rc:53 programs/winhlp32/winhlp32.rc:73
-msgid "Normal"
-msgstr "Нормальний"
 
 #: programs/winhlp32/winhlp32.rc:54 programs/winhlp32/winhlp32.rc:74
 msgid "Large"

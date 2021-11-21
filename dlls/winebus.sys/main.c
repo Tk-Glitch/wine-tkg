@@ -235,6 +235,20 @@ static WCHAR *get_compatible_ids(DEVICE_OBJECT *device)
     return dst;
 }
 
+static void remove_pending_irps(DEVICE_OBJECT *device)
+{
+    struct device_extension *ext = device->DeviceExtension;
+    LIST_ENTRY *entry;
+
+    while ((entry = RemoveHeadList(&ext->irp_queue)) != &ext->irp_queue)
+    {
+        IRP *queued_irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.s.ListEntry);
+        queued_irp->IoStatus.u.Status = STATUS_DELETE_PENDING;
+        queued_irp->IoStatus.Information = 0;
+        IoCompleteRequest(queued_irp, IO_NO_INCREMENT);
+    }
+}
+
 DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
                                      WORD input, DWORD version, DWORD uid, const WCHAR *serialW, BOOL is_gamepad,
                                      const platform_vtbl *vtbl, DWORD platform_data_size)
@@ -358,10 +372,6 @@ void bus_unlink_hid_device(DEVICE_OBJECT *device)
     EnterCriticalSection(&device_list_cs);
     list_remove(&pnp_device->entry);
     LeaveCriticalSection(&device_list_cs);
-
-    EnterCriticalSection(&ext->cs);
-    ext->removed = TRUE;
-    LeaveCriticalSection(&ext->cs);
 }
 
 void bus_remove_hid_device(DEVICE_OBJECT *device)
@@ -542,6 +552,10 @@ static void mouse_device_create(void)
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
+static void keyboard_free_device(DEVICE_OBJECT *device)
+{
+}
+
 static NTSTATUS keyboard_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *ret_length)
 {
     TRACE("buffer %p, length %u.\n", buffer, length);
@@ -596,6 +610,7 @@ static NTSTATUS keyboard_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYT
 
 static const platform_vtbl keyboard_vtbl =
 {
+    .free_device = keyboard_free_device,
     .get_reportdescriptor = keyboard_get_reportdescriptor,
     .get_string = keyboard_get_string,
     .begin_report_processing = keyboard_begin_report_processing,
@@ -684,20 +699,18 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
             status = STATUS_SUCCESS;
             break;
 
+        case IRP_MN_SURPRISE_REMOVAL:
+            EnterCriticalSection(&ext->cs);
+            remove_pending_irps(device);
+            ext->removed = TRUE;
+            LeaveCriticalSection(&ext->cs);
+            break;
+
         case IRP_MN_REMOVE_DEVICE:
         {
             struct pnp_device *pnp_device = ext->pnp_device;
-            LIST_ENTRY *entry;
 
-            EnterCriticalSection(&ext->cs);
-            while ((entry = RemoveHeadList(&ext->irp_queue)) != &ext->irp_queue)
-            {
-                IRP *queued_irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.s.ListEntry);
-                queued_irp->IoStatus.u.Status = STATUS_DELETE_PENDING;
-                queued_irp->IoStatus.Information = 0;
-                IoCompleteRequest(queued_irp, IO_NO_INCREMENT);
-            }
-            LeaveCriticalSection(&ext->cs);
+            remove_pending_irps(device);
 
             ext->vtbl->free_device(device);
 

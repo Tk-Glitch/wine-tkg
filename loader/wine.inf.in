@@ -173,6 +173,7 @@ AddService=Schedule,0,TaskSchedulerService
 AddService=Winmgmt,0,WinmgmtService
 AddService=wuauserv,0,wuauService
 AddService=NDIS,0x800,NDISService
+AddService=nsiproxy,0x800,NsiProxyService
 
 [DefaultInstall.NT.Services]
 AddService=BITS,0,BITSService
@@ -192,6 +193,7 @@ AddService=Schedule,0,TaskSchedulerService
 AddService=Winmgmt,0,WinmgmtService
 AddService=wuauserv,0,wuauService
 AddService=NDIS,0x800,NDISService
+AddService=nsiproxy,0x800,NsiProxyService
 
 [DefaultInstall.ntamd64.Services]
 AddService=BITS,0,BITSService
@@ -211,6 +213,7 @@ AddService=Schedule,0,TaskSchedulerService
 AddService=Winmgmt,0,WinmgmtService
 AddService=wuauserv,0,wuauService
 AddService=NDIS,0x800,NDISService
+AddService=nsiproxy,0x800,NsiProxyService
 
 [DefaultInstall.ntarm64.Services]
 AddService=BITS,0,BITSService
@@ -230,6 +233,7 @@ AddService=Schedule,0,TaskSchedulerService
 AddService=Winmgmt,0,WinmgmtService
 AddService=wuauserv,0,wuauService
 AddService=NDIS,0x800,NDISService
+AddService=nsiproxy,0x800,NsiProxyService
 
 [Strings]
 MciExtStr="Software\Microsoft\Windows NT\CurrentVersion\MCI Extensions"
@@ -546,7 +550,7 @@ HKLM,%CurrentVersion%\Explorer\DriveIcons,,16
 HKLM,%CurrentVersion%\Explorer\KindMap,,16
 HKLM,%CurrentVersion%\Group Policy,,16
 HKLM,%CurrentVersion%\Installer,"InstallerLocation",,"%11%"
-HKLM,%CurrentVersion%\Policies\System,"EnableLUA",0x10003,1
+HKLM,%CurrentVersion%\Policies\System,"EnableLUA",0x10001,1
 HKLM,%CurrentVersion%\PreviewHandlers,,16
 HKLM,%CurrentVersion%\Run,,16
 HKLM,%CurrentVersion%\Setup,"BootDir",,"%30%"
@@ -2929,6 +2933,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 16427,System\ADO,msado15.dll
 66000,3,wineps.drv
 12,,*.sys,-
+11,,*.msstyles,-
 11,,*
 
 [FakeDlls]
@@ -2950,6 +2955,8 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,notepad.exe
 11,,win32k.sys
 11,,winetest.exe,-
+; themes
+10,resources\themes\light,light.msstyles
 ; skip .NET fake dlls in Wine Mono package
 11,,aspnet_regiis.exe,-
 11,,ngen.exe,-
@@ -4060,6 +4067,7 @@ ErrorControl=1
 LoadOrderGroup="System Bus Extender"
 
 [NDISService]
+AddReg=NDISServiceKeys
 Description="NDIS service"
 DisplayName="NDIS"
 ServiceBinary="%12%\ndis.sys"
@@ -4067,6 +4075,22 @@ ServiceType=1
 StartType=2
 ErrorControl=1
 LoadOrderGroup="System Bus Extender"
+
+[NDISServiceKeys]
+HKR,,"Tag",0x10001,2
+
+[NsiProxyService]
+AddReg=NsiProxyServiceKeys
+Description="NSI proxy service"
+DisplayName="NSI Proxy"
+ServiceBinary="%12%\nsiproxy.sys"
+ServiceType=1
+StartType=2
+ErrorControl=1
+LoadOrderGroup="System Bus Extender"
+
+[NsiProxyServiceKeys]
+HKR,,"Tag",0x10001,1
 
 [RpcSsService]
 Description="RPC service"

@@ -154,7 +154,7 @@ void delete_key_(const char *file, unsigned line, HKEY root, const char *path, R
     }
 }
 
-LONG delete_tree(const HKEY key, const char *subkey)
+LONG delete_tree_(const char *file, unsigned line, HKEY root, const char *path, REGSAM sam)
 {
     HKEY hkey;
     LONG ret;
@@ -162,7 +162,8 @@ LONG delete_tree(const HKEY key, const char *subkey)
     DWORD max_subkey_len, subkey_len;
     static const char empty[1];
 
-    ret = RegOpenKeyExA(key, subkey, 0, KEY_READ, &hkey);
+    ret = RegOpenKeyExA(root, path, 0, KEY_READ|sam, &hkey);
+    lok(!ret || ret == ERROR_FILE_NOT_FOUND, "RegOpenKeyExA failed, got error %d\n", ret);
     if (ret) return ret;
 
     ret = RegQueryInfoKeyA(hkey, NULL, NULL, NULL, NULL, &max_subkey_len,
@@ -184,13 +185,17 @@ LONG delete_tree(const HKEY key, const char *subkey)
         ret = RegEnumKeyExA(hkey, 0, subkey_name, &subkey_len, NULL, NULL, NULL, NULL);
         if (ret == ERROR_NO_MORE_ITEMS) break;
         if (ret) goto cleanup;
-        ret = delete_tree(hkey, subkey_name);
+        ret = delete_tree_(file, line, hkey, subkey_name, sam);
         if (ret) goto cleanup;
     }
 
-    ret = RegDeleteKeyA(hkey, empty);
+    if (!sam)
+        ret = RegDeleteKeyA(hkey, empty);
+    else
+        ret = RegDeleteKeyExA(hkey, empty, sam, 0);
 
 cleanup:
+    lok(!ret, "Failed to delete registry key, got error %d\n", ret);
     HeapFree(GetProcessHeap(), 0, subkey_name);
     RegCloseKey(hkey);
     return ret;
@@ -219,8 +224,7 @@ static void test_command_syntax(void)
 {
     DWORD r;
 
-    delete_tree(HKEY_CURRENT_USER, KEY_BASE);
-    verify_key_nonexist(HKEY_CURRENT_USER, KEY_BASE, 0);
+    delete_tree(HKEY_CURRENT_USER, KEY_BASE, 0);
 
     run_reg_exe("reg add", &r);
     ok(r == REG_EXIT_FAILURE, "got exit code %d, expected 1\n", r);
@@ -322,7 +326,7 @@ static void test_key_formats(void)
     verify_key(hkey, "https://winehq.org", 0);
 
     close_key(hkey);
-    delete_tree(HKEY_CURRENT_USER, KEY_BASE);
+    delete_tree(HKEY_CURRENT_USER, KEY_BASE, 0);
 
     /* Test validity of trailing backslash after system key */
     run_reg_exe("reg add HKCU\\ /v Value1 /t REG_SZ /d foo /f", &r);
@@ -409,7 +413,7 @@ static void test_add(void)
     verify_reg(hkey, NULL, REG_NONE, "T\0e\0s\0t\0\0", 10, 0);
 
     close_key(hkey);
-    delete_tree(HKEY_CURRENT_USER, KEY_BASE);
+    delete_tree(HKEY_CURRENT_USER, KEY_BASE, 0);
 }
 
 static void test_reg_none(void)
@@ -957,10 +961,6 @@ static void test_registry_view_wow64(void)
     /* Try adding to the 64-bit registry view (WOW64) */
     run_reg_exe("reg add HKLM\\" KEY_BASE " /v Wine64 /d Test /f /reg:64", &r);
     ok(r == REG_EXIT_SUCCESS, "got exit code %d, expected 0\n", r);
-
-    open_key(HKEY_LOCAL_MACHINE, KEY_BASE, KEY_WOW64_64KEY, &hkey);
-    verify_reg(hkey, "Wine64", REG_SZ, "Test", 5, 0);
-    close_key(hkey);
 
     open_key(HKEY_LOCAL_MACHINE, KEY_BASE, KEY_WOW64_64KEY, &hkey);
     verify_reg(hkey, "Wine64", REG_SZ, "Test", 5, 0);

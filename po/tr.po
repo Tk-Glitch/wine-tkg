@@ -1092,7 +1092,8 @@ msgstr "Parlak Yeşil"
 msgid "Yellow"
 msgstr "Sarı"
 
-#: dlls/comdlg32/comdlg32.rc:134 programs/wordpad/wordpad.rc:137
+#: dlls/comdlg32/comdlg32.rc:134 dlls/light.msstyles/light.rc:29
+#: dlls/light.msstyles/light.rc:36 programs/wordpad/wordpad.rc:137
 msgid "Blue"
 msgstr "Mavi"
 
@@ -6975,6 +6976,17 @@ msgstr "Geçersiz çağrı.\n"
 #: dlls/kernel32/winerror.mc:3781
 msgid "Resource is not currently available.\n"
 msgstr "Kaynak şu an kullanılamıyor.\n"
+
+#: dlls/light.msstyles/light.rc:30 dlls/light.msstyles/light.rc:37
+#, fuzzy
+#| msgid "Class Name:"
+msgid "Classic Blue"
+msgstr "Sınıf Adı:"
+
+#: dlls/light.msstyles/light.rc:43 dlls/light.msstyles/light.rc:49
+#: programs/winhlp32/winhlp32.rc:53 programs/winhlp32/winhlp32.rc:73
+msgid "Normal"
+msgstr "Normal"
 
 #: dlls/localspl/localspl.rc:37
 #, fuzzy
@@ -17920,10 +17932,6 @@ msgstr "Yazı Tipleri"
 #: programs/winhlp32/winhlp32.rc:52 programs/winhlp32/winhlp32.rc:72
 msgid "Small"
 msgstr "Küçük"
-
-#: programs/winhlp32/winhlp32.rc:53 programs/winhlp32/winhlp32.rc:73
-msgid "Normal"
-msgstr "Normal"
 
 #: programs/winhlp32/winhlp32.rc:54 programs/winhlp32/winhlp32.rc:74
 msgid "Large"

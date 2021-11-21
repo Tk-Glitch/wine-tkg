@@ -199,7 +199,7 @@ static RTL_USER_PROCESS_PARAMETERS *create_process_params( const WCHAR *filename
         params->hStdOutput = startup->hStdOutput;
         params->hStdError  = startup->hStdError;
     }
-    else if (flags & DETACHED_PROCESS)
+    else if (flags & (DETACHED_PROCESS | CREATE_NEW_CONSOLE))
     {
         params->hStdInput  = INVALID_HANDLE_VALUE;
         params->hStdOutput = INVALID_HANDLE_VALUE;
@@ -884,6 +884,17 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetPriorityClass( HANDLE process )
 }
 
 
+/***********************************************************************
+ *           GetProcessGroupAffinity   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH GetProcessGroupAffinity( HANDLE process, USHORT *count, USHORT *array )
+{
+    FIXME( "(%p,%p,%p): stub\n", process, count, array );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+
 /******************************************************************
  *           GetProcessHandleCount   (kernelbase.@)
  */
@@ -1093,11 +1104,20 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenProcess( DWORD access, BOOL inherit, DWORD i
 /***********************************************************************
  *           ProcessIdToSessionId   (kernelbase.@)
  */
-BOOL WINAPI DECLSPEC_HOTPATCH ProcessIdToSessionId( DWORD procid, DWORD *sessionid )
+BOOL WINAPI DECLSPEC_HOTPATCH ProcessIdToSessionId( DWORD pid, DWORD *id )
 {
-    if (procid != GetCurrentProcessId()) FIXME( "Unsupported for other process %x\n", procid );
-    *sessionid = NtCurrentTeb()->Peb->SessionId;
-    return TRUE;
+    HANDLE process;
+    NTSTATUS status;
+
+    if (pid == GetCurrentProcessId())
+    {
+        *id = NtCurrentTeb()->Peb->SessionId;
+        return TRUE;
+    }
+    if (!(process = OpenProcess( PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid ))) return FALSE;
+    status = NtQueryInformationProcess( process, ProcessSessionInformation, id, sizeof(*id), NULL );
+    CloseHandle( process );
+    return set_ntstatus( status );
 }
 
 
