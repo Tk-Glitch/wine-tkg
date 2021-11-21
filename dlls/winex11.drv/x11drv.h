@@ -338,11 +338,11 @@ struct x11drv_thread_data
     DWORD    clip_reset;           /* time when clipping was last reset */
 #ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
     enum xi2_state xi2_state;      /* XInput2 state */
-    XIValuatorClassInfo x_pos_valuator;
-    XIValuatorClassInfo y_pos_valuator;
+    XIValuatorClassInfo x_valuator;
+    XIValuatorClassInfo y_valuator;
     int      xi2_core_pointer;     /* XInput2 core pointer id */
     int      xi2_rawinput_only;
-#endif
+#endif /* HAVE_X11_EXTENSIONS_XINPUT2_H */
 };
 
 extern struct x11drv_thread_data *x11drv_init_thread_data(void) DECLSPEC_HIDDEN;
@@ -429,8 +429,6 @@ enum x11drv_atoms
     XATOM_RAW_CAP_HEIGHT,
     XATOM_Rel_X,
     XATOM_Rel_Y,
-    XATOM_Abs_X,
-    XATOM_Abs_Y,
     XATOM_WM_PROTOCOLS,
     XATOM_WM_DELETE_WINDOW,
     XATOM_WM_NAME,

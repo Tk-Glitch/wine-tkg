@@ -53,6 +53,12 @@ static void platform_shutdown(void)
         MFShutdown();
 }
 
+static inline const char *debugstr_normalized_rect(const MFVideoNormalizedRect *rect)
+{
+    if (!rect) return "(null)";
+    return wine_dbg_sprintf("(%.8e,%.8e)-(%.8e,%.8e)", rect->left, rect->top, rect->right, rect->bottom);
+}
+
 struct media_item
 {
     IMFPMediaItem IMFPMediaItem_iface;
@@ -705,7 +711,7 @@ static HRESULT WINAPI media_item_GetMetadata(IMFPMediaItem *iface, IPropertyStor
     TRACE("%p, %p.\n", iface, metadata);
 
     return MFGetService((IUnknown *)item->source, &MF_PROPERTY_HANDLER_SERVICE,
-            &IID_IPropertyStore, (void **)&metadata);
+            &IID_IPropertyStore, (void **)metadata);
 }
 
 static const IMFPMediaItemVtbl media_item_vtbl =
@@ -904,16 +910,66 @@ static HRESULT WINAPI media_player_SetPosition(IMFPMediaPlayer *iface, REFGUID p
 
 static HRESULT WINAPI media_player_GetPosition(IMFPMediaPlayer *iface, REFGUID postype, PROPVARIANT *position)
 {
-    FIXME("%p, %s, %p.\n", iface, debugstr_guid(postype), position);
+    struct media_player *player = impl_from_IMFPMediaPlayer(iface);
+    IMFPresentationClock *presentation_clock;
+    IMFClock *clock;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(postype), position);
+
+    if (!position)
+        return E_POINTER;
+
+    if (!IsEqualGUID(postype, &MFP_POSITIONTYPE_100NS))
+        return E_INVALIDARG;
+
+    EnterCriticalSection(&player->cs);
+    if (player->state == MFP_MEDIAPLAYER_STATE_SHUTDOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (!player->item)
+        hr = MF_E_INVALIDREQUEST;
+    else
+    {
+        if (SUCCEEDED(hr = IMFMediaSession_GetClock(player->session, &clock)))
+        {
+            if (SUCCEEDED(hr = IMFClock_QueryInterface(clock, &IID_IMFPresentationClock, (void **)&presentation_clock)))
+            {
+                position->vt = VT_UI8;
+                hr = IMFPresentationClock_GetTime(presentation_clock, (MFTIME *)&position->uhVal.QuadPart);
+                IMFPresentationClock_Release(presentation_clock);
+            }
+            IMFClock_Release(clock);
+        }
+    }
+    LeaveCriticalSection(&player->cs);
+
+    return hr;
 }
 
-static HRESULT WINAPI media_player_GetDuration(IMFPMediaPlayer *iface, REFGUID postype, PROPVARIANT *position)
+static HRESULT WINAPI media_player_GetDuration(IMFPMediaPlayer *iface, REFGUID postype, PROPVARIANT *duration)
 {
-    FIXME("%p, %s, %p.\n", iface, debugstr_guid(postype), position);
+    struct media_player *player = impl_from_IMFPMediaPlayer(iface);
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(postype), duration);
+
+    if (!duration)
+        return E_POINTER;
+
+    if (!IsEqualGUID(postype, &MFP_POSITIONTYPE_100NS))
+        return E_INVALIDARG;
+
+    EnterCriticalSection(&player->cs);
+    if (player->state == MFP_MEDIAPLAYER_STATE_SHUTDOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (!player->item)
+        hr = MF_E_INVALIDREQUEST;
+    else
+        /* FIXME: use start/stop markers for resulting duration */
+        hr = IMFPMediaItem_GetDuration(player->item, postype, duration);
+    LeaveCriticalSection(&player->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_player_SetRate(IMFPMediaPlayer *iface, float rate)
@@ -968,8 +1024,6 @@ static HRESULT media_player_create_item_from_url(struct media_player *player,
     IUnknown *object;
     HRESULT hr;
 
-    *ret = NULL;
-
     if (FAILED(hr = create_media_item(&player->IMFPMediaPlayer_iface, user_data, &item)))
         return hr;
 
@@ -981,6 +1035,11 @@ static HRESULT media_player_create_item_from_url(struct media_player *player,
 
     if (sync)
     {
+        if (!ret)
+            return E_POINTER;
+
+        *ret = NULL;
+
         if (SUCCEEDED(hr = IMFSourceResolver_CreateObjectFromURL(player->resolver, url, MF_RESOLUTION_MEDIASOURCE,
                 player->propstore, &obj_type, &object)))
         {
@@ -1000,6 +1059,14 @@ static HRESULT media_player_create_item_from_url(struct media_player *player,
     }
     else
     {
+        if (!player->callback)
+        {
+            WARN("Asynchronous item creation is not supported without user callback.\n");
+            return MF_E_INVALIDREQUEST;
+        }
+
+        if (ret) *ret = NULL;
+
         hr = IMFSourceResolver_BeginCreateObjectFromURL(player->resolver, url, MF_RESOLUTION_MEDIASOURCE,
             player->propstore, NULL, &player->resolver_callback, (IUnknown *)&item->IMFPMediaItem_iface);
 
@@ -1323,6 +1390,15 @@ static HRESULT WINAPI media_player_SetMute(IMFPMediaPlayer *iface, BOOL mute)
     return E_NOTIMPL;
 }
 
+static HRESULT media_player_get_display_control(const struct media_player *player,
+        IMFVideoDisplayControl **display_control)
+{
+    HRESULT hr = MFGetService((IUnknown *)player->session, &MR_VIDEO_RENDER_SERVICE,
+            &IID_IMFVideoDisplayControl, (void **)display_control);
+    if (SUCCEEDED(hr)) return hr;
+    return hr == MF_E_SHUTDOWN ? hr : MF_E_INVALIDREQUEST;
+}
+
 static HRESULT WINAPI media_player_GetNativeVideoSize(IMFPMediaPlayer *iface,
         SIZE *video, SIZE *arvideo)
 {
@@ -1332,8 +1408,7 @@ static HRESULT WINAPI media_player_GetNativeVideoSize(IMFPMediaPlayer *iface,
 
     TRACE("%p, %p, %p.\n", iface, video, arvideo);
 
-    if (SUCCEEDED(hr = MFGetService((IUnknown *)player->session, &MR_VIDEO_RENDER_SERVICE,
-            &IID_IMFVideoDisplayControl, (void **)&display_control)))
+    if (SUCCEEDED(hr = media_player_get_display_control(player, &display_control)))
     {
         hr = IMFVideoDisplayControl_GetNativeVideoSize(display_control, video, arvideo);
         IMFVideoDisplayControl_Release(display_control);
@@ -1351,8 +1426,7 @@ static HRESULT WINAPI media_player_GetIdealVideoSize(IMFPMediaPlayer *iface,
 
     TRACE("%p, %p, %p.\n", iface, min_size, max_size);
 
-    if (SUCCEEDED(hr = MFGetService((IUnknown *)player->session, &MR_VIDEO_RENDER_SERVICE,
-            &IID_IMFVideoDisplayControl, (void **)&display_control)))
+    if (SUCCEEDED(hr = media_player_get_display_control(player, &display_control)))
     {
         hr = IMFVideoDisplayControl_GetIdealVideoSize(display_control, min_size, max_size);
         IMFVideoDisplayControl_Release(display_control);
@@ -1366,14 +1440,16 @@ static HRESULT WINAPI media_player_SetVideoSourceRect(IMFPMediaPlayer *iface,
 {
     struct media_player *player = impl_from_IMFPMediaPlayer(iface);
     IMFVideoDisplayControl *display_control;
+    RECT dst_rect;
     HRESULT hr;
 
-    TRACE("%p, %p.\n", iface, rect);
+    TRACE("%p, %s.\n", iface, debugstr_normalized_rect(rect));
 
-    if (SUCCEEDED(hr = MFGetService((IUnknown *)player->session, &MR_VIDEO_RENDER_SERVICE,
-            &IID_IMFVideoDisplayControl, (void **)&display_control)))
+    if (!GetClientRect(player->output_window, &dst_rect))
+        hr = HRESULT_FROM_WIN32(GetLastError());
+    else if (SUCCEEDED(hr = media_player_get_display_control(player, &display_control)))
     {
-        hr = IMFVideoDisplayControl_SetVideoPosition(display_control, rect, NULL);
+        hr = IMFVideoDisplayControl_SetVideoPosition(display_control, rect, &dst_rect);
         IMFVideoDisplayControl_Release(display_control);
     }
 
@@ -1390,8 +1466,7 @@ static HRESULT WINAPI media_player_GetVideoSourceRect(IMFPMediaPlayer *iface,
 
     TRACE("%p, %p.\n", iface, rect);
 
-    if (SUCCEEDED(hr = MFGetService((IUnknown *)player->session, &MR_VIDEO_RENDER_SERVICE,
-            &IID_IMFVideoDisplayControl, (void **)&display_control)))
+    if (SUCCEEDED(hr = media_player_get_display_control(player, &display_control)))
     {
         hr = IMFVideoDisplayControl_GetVideoPosition(display_control, rect, &dest);
         IMFVideoDisplayControl_Release(display_control);
@@ -1408,8 +1483,7 @@ static HRESULT WINAPI media_player_SetAspectRatioMode(IMFPMediaPlayer *iface, DW
 
     TRACE("%p, %u.\n", iface, mode);
 
-    if (SUCCEEDED(hr = MFGetService((IUnknown *)player->session, &MR_VIDEO_RENDER_SERVICE,
-            &IID_IMFVideoDisplayControl, (void **)&display_control)))
+    if (SUCCEEDED(hr = media_player_get_display_control(player, &display_control)))
     {
         hr = IMFVideoDisplayControl_SetAspectRatioMode(display_control, mode);
         IMFVideoDisplayControl_Release(display_control);
@@ -1427,8 +1501,7 @@ static HRESULT WINAPI media_player_GetAspectRatioMode(IMFPMediaPlayer *iface,
 
     TRACE("%p, %p.\n", iface, mode);
 
-    if (SUCCEEDED(hr = MFGetService((IUnknown *)player->session, &MR_VIDEO_RENDER_SERVICE,
-            &IID_IMFVideoDisplayControl, (void **)&display_control)))
+    if (SUCCEEDED(hr = media_player_get_display_control(player, &display_control)))
     {
         hr = IMFVideoDisplayControl_GetAspectRatioMode(display_control, mode);
         IMFVideoDisplayControl_Release(display_control);
@@ -1463,8 +1536,7 @@ static HRESULT WINAPI media_player_SetBorderColor(IMFPMediaPlayer *iface, COLORR
 
     TRACE("%p, %#x.\n", iface, color);
 
-    if (SUCCEEDED(hr = MFGetService((IUnknown *)player->session, &MR_VIDEO_RENDER_SERVICE,
-            &IID_IMFVideoDisplayControl, (void **)&display_control)))
+    if (SUCCEEDED(hr = media_player_get_display_control(player, &display_control)))
     {
         hr = IMFVideoDisplayControl_SetBorderColor(display_control, color);
         IMFVideoDisplayControl_Release(display_control);
@@ -1481,8 +1553,7 @@ static HRESULT WINAPI media_player_GetBorderColor(IMFPMediaPlayer *iface, COLORR
 
     TRACE("%p, %p.\n", iface, color);
 
-    if (SUCCEEDED(hr = MFGetService((IUnknown *)player->session, &MR_VIDEO_RENDER_SERVICE,
-            &IID_IMFVideoDisplayControl, (void **)&display_control)))
+    if (SUCCEEDED(hr = media_player_get_display_control(player, &display_control)))
     {
         hr = IMFVideoDisplayControl_GetBorderColor(display_control, color);
         IMFVideoDisplayControl_Release(display_control);
@@ -1864,6 +1935,17 @@ static void media_player_create_forward_event(struct media_player *player, HRESU
     LeaveCriticalSection(&player->cs);
 }
 
+static void media_player_playback_ended(struct media_player *player, HRESULT event_status,
+        struct media_event **event)
+{
+    EnterCriticalSection(&player->cs);
+
+    media_player_set_state(player, MFP_MEDIAPLAYER_STATE_STOPPED);
+    media_event_create(player, MFP_EVENT_TYPE_PLAYBACK_ENDED, event_status, player->item, event);
+
+    LeaveCriticalSection(&player->cs);
+}
+
 static HRESULT WINAPI media_player_session_events_callback_Invoke(IMFAsyncCallback *iface,
         IMFAsyncResult *result)
 {
@@ -1925,7 +2007,7 @@ static HRESULT WINAPI media_player_session_events_callback_Invoke(IMFAsyncCallba
             if (SUCCEEDED(IMFMediaEvent_GetUINT32(session_event, &MF_EVENT_TOPOLOGY_STATUS, &status)) &&
                     status == MF_TOPOSTATUS_ENDED)
             {
-                media_event_create(player, MFP_EVENT_TYPE_PLAYBACK_ENDED, event_status, player->item, &event);
+                media_player_playback_ended(player, event_status, &event);
             }
 
             break;

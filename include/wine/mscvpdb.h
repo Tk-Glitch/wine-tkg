@@ -569,6 +569,14 @@ union codeview_fieldtype
     struct
     {
         unsigned short int      id;
+        short int               _pad0;
+        cv_typ_t                type;
+        char                    name[1];
+    } friendfcn_v3;
+
+    struct
+    {
+        unsigned short int      id;
         cv_typ16_t		type;
         short int		attribute;
         unsigned short int	offset;    /* numeric leaf */
@@ -1266,6 +1274,7 @@ union codeview_fieldtype
 #define LF_STRUCTURE_V3         0x1505
 #define LF_UNION_V3             0x1506
 #define LF_ENUM_V3              0x1507
+#define LF_FRIENDFCN_V3         0x150c
 #define LF_MEMBER_V3            0x150d
 #define LF_STMEMBER_V3          0x150e
 #define LF_METHOD_V3            0x150f
@@ -2153,6 +2162,109 @@ enum BinaryAnnotationOpcode
  *          Line number information
  * ======================================== */
 
+enum DEBUG_S_SUBSECTION_TYPE
+{
+    DEBUG_S_IGNORE = 0x80000000,    /* bit flag: when set, ignore whole subsection content */
+
+    DEBUG_S_SYMBOLS = 0xf1,
+    DEBUG_S_LINES,
+    DEBUG_S_STRINGTABLE,
+    DEBUG_S_FILECHKSMS,
+    DEBUG_S_FRAMEDATA,
+    DEBUG_S_INLINEELINES,
+    DEBUG_S_CROSSSCOPEIMPORTS,
+    DEBUG_S_CROSSSCOPEEXPORTS,
+
+    DEBUG_S_IL_LINES,
+    DEBUG_S_FUNC_MDTOKEN_MAP,
+    DEBUG_S_TYPE_MDTOKEN_MAP,
+    DEBUG_S_MERGED_ASSEMBLYINPUT,
+
+    DEBUG_S_COFF_SYMBOL_RVA,
+};
+
+struct CV_DebugSSubsectionHeader_t
+{
+    enum DEBUG_S_SUBSECTION_TYPE type;
+    unsigned                     cbLen;
+};
+
+struct CV_DebugSLinesHeader_t
+{
+    unsigned       offCon;
+    unsigned short segCon;
+    unsigned short flags;
+    unsigned       cbCon;
+};
+
+struct CV_DebugSLinesFileBlockHeader_t
+{
+    unsigned       offFile;
+    unsigned       nLines;
+    unsigned       cbBlock;
+    /* followed by two variable length arrays
+     * CV_Line_t      lines[nLines];
+     * ^ columns present when CV_DebugSLinesHeader_t.flags has CV_LINES_HAVE_COLUMNS set
+     * CV_Column_t    columns[nLines];
+     */
+};
+
+#define CV_LINES_HAVE_COLUMNS 0x0001
+
+struct CV_Line_t
+{
+    unsigned   offset;
+    unsigned   linenumStart:24;
+    unsigned   deltaLineEnd:7;
+    unsigned   fStatement:1;
+};
+
+struct CV_Column_t
+{
+    unsigned short offColumnStart;
+    unsigned short offColumnEnd;
+};
+
+struct CV_Checksum_t /* this one is not defined in microsoft pdb information */
+{
+    unsigned            strOffset;      /* offset in string table for filename */
+    unsigned char       size;           /* size of checksum */
+    unsigned char       method;         /* method used to compute check sum */
+    unsigned char       checksum[0];    /* (size) bytes */
+    /* result is padded on 4-byte boundary */
+};
+
+#define CV_INLINEE_SOURCE_LINE_SIGNATURE     0x0
+#define CV_INLINEE_SOURCE_LINE_SIGNATURE_EX  0x1
+
+typedef struct CV_InlineeSourceLine_t
+{
+    cv_itemid_t    inlinee;       /* function id */
+    unsigned       fileId;        /* offset in DEBUG_S_FILECHKSMS */
+    unsigned       sourceLineNum; /* first line number */
+} InlineeSourceLine;
+
+typedef struct CV_InlineeSourceLineEx_t
+{
+    cv_itemid_t    inlinee;       /* function id */
+    unsigned       fileId;        /* offset in DEBUG_S_FILECHKSMS */
+    unsigned       sourceLineNum; /* first line number */
+    unsigned int   countOfExtraFiles;
+    unsigned       extraFileId[0];
+} InlineeSourceLineEx;
+
+#ifdef __WINESRC__
+/* those are Wine only helpers */
+/* align ptr on sz boundary; sz must be a power of 2 */
+#define CV_ALIGN(ptr, sz)            ((const void*)(((DWORD_PTR)(ptr) + ((sz) - 1)) & ~((sz) - 1)))
+/* move after (ptr) record */
+#define CV_RECORD_AFTER(ptr)         ((const void*)((ptr) + 1))
+/* move after (ptr) record and a gap of sz bytes */
+#define CV_RECORD_GAP(ptr, sz)       ((const void*)((const char*)((ptr) + 1) + (sz)))
+/* test whether ptr record is within limit boundary */
+#define CV_IS_INSIDE(ptr, limit)     (CV_RECORD_AFTER(ptr) <= (const void*)(limit))
+#endif /* __WINESRC__ */
+
 struct codeview_linetab_block
 {
     unsigned short              seg;
@@ -2165,57 +2277,6 @@ struct startend
 {
     unsigned int	        start;
     unsigned int	        end;
-};
-
-#define LT2_LINES_BLOCK 0x000000f2
-#define LT2_FILES_BLOCK 0x000000f4
-
-/* there's a new line tab structure from MS Studio 2005 and after
- * it's made of a list of codeview_linetab2 blocks.
- * We've only seen (so far) list with a single LT2_FILES_BLOCK and several
- * LT2_LINES_BLOCK. The LT2_FILES block has been encountered either as first
- * or last block of the list.
- * A LT2_FILES contains one or several codeview_linetab2_file:s
- */
-
-struct codeview_linetab2
-{
-    DWORD       header;
-    DWORD       size_of_block;
-};
-
-static inline const struct codeview_linetab2* codeview_linetab2_next_block(const struct codeview_linetab2* lt2)
-{
-    return (const struct codeview_linetab2*)((const char*)(lt2 + 1) + lt2->size_of_block);
-}
-
-struct codeview_linetab2_file
-{
-    DWORD       offset;         /* offset in string table for filename */
-    WORD        unk;            /* always 0x0110... type of following information ??? */
-    BYTE        md5[16];        /* MD5 signature of file (signature on file's content or name ???) */
-    WORD        pad0;           /* always 0 */
-};
-
-struct codeview_lt2blk_files
-{
-    struct codeview_linetab2            lt2;    /* LT2_FILES */
-    struct codeview_linetab2_file       file[1];
-};
-
-struct codeview_lt2blk_lines
-{
-    struct codeview_linetab2    lt2;            /* LT2_LINE_BLOCK */
-    DWORD                       start;          /* start address of function with line numbers */
-    DWORD                       seg;            /* segment of function with line numbers */
-    DWORD                       size;           /* size of function with line numbers */
-    DWORD                       file_offset;    /* offset for accessing corresponding codeview_linetab2_file */
-    DWORD                       nlines;         /* number of lines in this block */
-    DWORD                       size_lines;     /* number of bytes following for line number information */
-    struct {
-        DWORD   offset;         /* offset (from <seg>:<start>) for line number */
-        DWORD   lineno;         /* the line number (OR:ed with 0x80000000 why ???) */
-    } l[1];                     /* actually array of <nlines> */
 };
 
 /* ======================================== *
@@ -2343,7 +2404,7 @@ typedef struct _PDB_SYMBOL_FILE
     WORD        file;
     DWORD       symbol_size;
     DWORD       lineno_size;
-    DWORD       unknown2;
+    DWORD       lineno2_size;
     DWORD       nSrcFiles;
     DWORD       attribute;
     CHAR        filename[1];
@@ -2357,7 +2418,7 @@ typedef struct _PDB_SYMBOL_FILE_EX
     WORD        file;
     DWORD       symbol_size;
     DWORD       lineno_size;
-    DWORD       unknown2;
+    DWORD       lineno2_size;
     DWORD       nSrcFiles;
     DWORD       attribute;
     DWORD       reserved[2];
@@ -2458,29 +2519,6 @@ typedef struct _PDB_FPO_DATA
 } PDB_FPO_DATA;
 
 #include "poppack.h"
-
-/* ----------------------------------------------
- * Information used for parsing
- * ---------------------------------------------- */
-
-typedef struct
-{
-    DWORD  from;
-    DWORD  to;
-} OMAP_DATA;
-
-struct msc_debug_info
-{
-    struct module*              module;
-    int			        nsect;
-    const IMAGE_SECTION_HEADER* sectp;
-    int			        nomap;
-    const OMAP_DATA*            omapp;
-    const BYTE*                 root;
-};
-
-/* coff.c */
-extern BOOL coff_process_info(const struct msc_debug_info* msc_dbg);
 
 /* ===================================================
  * The old CodeView stuff (for NB09 and NB11)

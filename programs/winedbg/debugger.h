@@ -179,7 +179,7 @@ struct dbg_thread
                                                  *      - only valid when in_exception is TRUE
                                                  */
     EXCEPTION_RECORD            excpt_record;   /* only valid when in_exception is TRUE */
-    struct
+    struct dbg_frame
     {
         ADDRESS64               addr_pc;
         ADDRESS64               addr_frame;
@@ -188,6 +188,7 @@ struct dbg_thread
         DWORD_PTR               linear_frame;
         DWORD_PTR               linear_stack;
         dbg_ctx_t               context;        /* context we got out of stackwalk for this frame */
+        DWORD                   inline_ctx;
         BOOL                    is_ctx_valid;   /* is the context above valid */
     }*                          frames;
     int                         num_frames;
@@ -386,10 +387,20 @@ extern void             source_free_files(struct dbg_process* p);
 extern void             stack_info(int len);
 extern void             stack_backtrace(DWORD threadID);
 extern BOOL             stack_set_frame(int newframe);
-extern BOOL             stack_get_current_frame(IMAGEHLP_STACK_FRAME* ihsf);
 extern BOOL             stack_get_register_frame(const struct dbg_internal_var* div, DWORD_PTR** pval);
 extern unsigned         stack_fetch_frames(const dbg_ctx_t *ctx);
 extern BOOL             stack_get_current_symbol(SYMBOL_INFO* sym);
+static inline struct dbg_frame*
+                        stack_get_thread_frame(struct dbg_thread* thd, unsigned nf)
+{
+    if (!thd->frames || nf >= thd->num_frames) return NULL;
+    return &thd->frames[nf];
+}
+static inline struct dbg_frame*
+                        stack_get_curr_frame(void)
+{
+    return stack_get_thread_frame(dbg_curr_thread, dbg_curr_thread->curr_frame);
+}
 
   /* symbol.c */
 extern enum sym_get_lval symbol_get_lvalue(const char* name, const int lineno, struct dbg_lvalue* addr, BOOL bp_disp);

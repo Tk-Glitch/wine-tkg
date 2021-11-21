@@ -52,12 +52,12 @@ struct IDirectInputImpl
 extern const IDirectInput7AVtbl dinput7_a_vtbl DECLSPEC_HIDDEN;
 extern const IDirectInput8AVtbl dinput8_a_vtbl DECLSPEC_HIDDEN;
 
-/* Function called by all devices that Wine supports */
-struct dinput_device {
-    const char *name;
-    HRESULT (*enum_device)(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINSTANCEW lpddi, DWORD version, int id);
-    HRESULT (*create_device)(IDirectInputImpl *dinput, REFGUID rguid, IDirectInputDevice8W **out);
-};
+extern HRESULT mouse_enum_device( DWORD type, DWORD flags, DIDEVICEINSTANCEW *instance, DWORD version, int index );
+extern HRESULT mouse_create_device( IDirectInputImpl *dinput, const GUID *guid, IDirectInputDevice8W **out );
+extern HRESULT keyboard_enum_device( DWORD type, DWORD flags, DIDEVICEINSTANCEW *instance, DWORD version, int index );
+extern HRESULT keyboard_create_device( IDirectInputImpl *dinput, const GUID *guid, IDirectInputDevice8W **out );
+extern HRESULT hid_joystick_enum_device( DWORD type, DWORD flags, DIDEVICEINSTANCEW *instance, DWORD version, int index );
+extern HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, const GUID *guid, IDirectInputDevice8W **out );
 
 struct DevicePlayer {
     GUID instance_guid;
@@ -65,18 +65,14 @@ struct DevicePlayer {
     struct list entry;
 };
 
-extern const struct dinput_device mouse_device DECLSPEC_HIDDEN;
-extern const struct dinput_device keyboard_device DECLSPEC_HIDDEN;
-extern const struct dinput_device joystick_hid_device DECLSPEC_HIDDEN;
-
-extern void dinput_hooks_acquire_device(LPDIRECTINPUTDEVICE8W iface);
-extern void dinput_hooks_unacquire_device(LPDIRECTINPUTDEVICE8W iface);
+extern void dinput_hooks_acquire_device( IDirectInputDevice8W *iface );
+extern void dinput_hooks_unacquire_device( IDirectInputDevice8W *iface );
 extern int dinput_mouse_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam );
 extern int dinput_keyboard_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam );
 extern void dinput_mouse_rawinput_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam,
                                         RAWINPUT *raw );
 
-extern void check_dinput_hooks(LPDIRECTINPUTDEVICE8W, BOOL) DECLSPEC_HIDDEN;
+extern void check_dinput_hooks( IDirectInputDevice8W *iface, BOOL acquired ) DECLSPEC_HIDDEN;
 extern void check_dinput_events(void) DECLSPEC_HIDDEN;
 
 extern HRESULT _configure_devices(IDirectInput8W *iface, LPDICONFIGUREDEVICESCALLBACK lpdiCallback, LPDICONFIGUREDEVICESPARAMSW lpdiCDParams, DWORD dwFlags, LPVOID pvRefData) DECLSPEC_HIDDEN;

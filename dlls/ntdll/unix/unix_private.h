@@ -216,7 +216,7 @@ extern NTSTATUS virtual_map_builtin_module( HANDLE mapping, void **module, SIZE_
 extern NTSTATUS virtual_create_builtin_view( void *module, const UNICODE_STRING *nt_name,
                                              pe_image_info_t *info, void *so_handle ) DECLSPEC_HIDDEN;
 extern TEB *virtual_alloc_first_teb(void) DECLSPEC_HIDDEN;
-extern NTSTATUS virtual_alloc_teb( TEB **ret_teb, ULONG_PTR zero_bits ) DECLSPEC_HIDDEN;
+extern NTSTATUS virtual_alloc_teb( TEB **ret_teb ) DECLSPEC_HIDDEN;
 extern void virtual_free_teb( TEB *teb ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_clear_tls_index( ULONG index ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR zero_bits, SIZE_T reserve_size,

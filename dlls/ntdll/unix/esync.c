@@ -38,9 +38,7 @@
 #ifdef HAVE_SYS_MMAN_H
 # include <sys/mman.h>
 #endif
-#ifdef HAVE_SYS_POLL_H
-# include <sys/poll.h>
-#endif
+#include <poll.h>
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif

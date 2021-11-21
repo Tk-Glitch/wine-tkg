@@ -2006,6 +2006,18 @@ typedef struct _SYSTEM_THREAD_INFORMATION
     DWORD         dwUnknown;           /* 3c/4c */
 } SYSTEM_THREAD_INFORMATION, *PSYSTEM_THREAD_INFORMATION;
 
+typedef struct _SYSTEM_EXTENDED_THREAD_INFORMATION
+{
+    SYSTEM_THREAD_INFORMATION ThreadInfo;          /* 00/00 */
+    void                     *StackBase;           /* 40/50 */
+    void                     *StackLimit;          /* 44/58 */
+    void                     *Win32StartAddress;   /* 48/60 */
+    void                     *TebBase;             /* 4c/68 */
+    ULONG_PTR                 Reserved2;           /* 50/70 */
+    ULONG_PTR                 Reserved3;           /* 54/78 */
+    ULONG_PTR                 Reserved4;           /* 58/80 */
+} SYSTEM_EXTENDED_THREAD_INFORMATION, *PSYSTEM_EXTENDED_THREAD_INFORMATION;
+
 typedef struct _IO_STATUS_BLOCK {
   union {
     NTSTATUS Status;
@@ -3264,9 +3276,9 @@ typedef struct _LDRP_CSLIST
 
 typedef struct _LDR_DEPENDENCY
 {
-    LDRP_CSLIST dependency_to_entry;
+    SINGLE_LIST_ENTRY dependency_to_entry;
     struct _LDR_DDAG_NODE *dependency_to;
-    LDRP_CSLIST dependency_from_entry;
+    SINGLE_LIST_ENTRY dependency_from_entry;
     struct _LDR_DDAG_NODE *dependency_from;
 } LDR_DEPENDENCY, *PLDR_DEPENDENCY;
 

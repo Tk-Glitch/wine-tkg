@@ -157,7 +157,7 @@ struct pid_set_ramp_force
 
 struct hid_joystick
 {
-    IDirectInputDeviceImpl base;
+    struct dinput_device base;
     LONG internal_ref;
 
     HANDLE device;
@@ -189,7 +189,7 @@ struct hid_joystick
 
 static inline struct hid_joystick *impl_from_IDirectInputDevice8W( IDirectInputDevice8W *iface )
 {
-    return CONTAINING_RECORD( CONTAINING_RECORD( iface, IDirectInputDeviceImpl, IDirectInputDevice8W_iface ),
+    return CONTAINING_RECORD( CONTAINING_RECORD( iface, struct dinput_device, IDirectInputDevice8W_iface ),
                               struct hid_joystick, base );
 }
 
@@ -630,7 +630,7 @@ static void hid_joystick_release( IDirectInputDevice8W *iface )
         HidD_FreePreparsedData( impl->preparsed );
         CloseHandle( impl->base.read_event );
         CloseHandle( impl->device );
-        direct_input_device_destroy( iface );
+        dinput_device_destroy( iface );
     }
 }
 
@@ -1115,7 +1115,7 @@ static HRESULT hid_joystick_read( IDirectInputDevice8W *iface )
     };
     struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
     ULONG i, count, report_len = impl->caps.InputReportByteLength;
-    DIDATAFORMAT *format = impl->base.data_format.wine_df;
+    DIDATAFORMAT *format = impl->base.device_format;
     struct parse_device_state_params params = {{0}};
     char *report_buf = impl->input_report_buf;
     USAGE_AND_PAGE *usages;
@@ -1450,8 +1450,7 @@ static HRESULT hid_joystick_device_open( int index, DIDEVICEINSTANCEW *filter, W
     return DI_OK;
 }
 
-static HRESULT hid_joystick_enum_device( DWORD type, DWORD flags, DIDEVICEINSTANCEW *instance,
-                                         DWORD version, int index )
+HRESULT hid_joystick_enum_device( DWORD type, DWORD flags, DIDEVICEINSTANCEW *instance, DWORD version, int index )
 {
     HIDD_ATTRIBUTES attrs = {.Size = sizeof(attrs)};
     PHIDP_PREPARSED_DATA preparsed;
@@ -1738,7 +1737,7 @@ static BOOL init_pid_caps( struct hid_joystick *impl, struct hid_value_caps *cap
     return DIENUM_CONTINUE;
 }
 
-static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, const GUID *guid, IDirectInputDevice8W **out )
+HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, const GUID *guid, IDirectInputDevice8W **out )
 {
     static const DIPROPHEADER filter =
     {
@@ -1782,8 +1781,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, const GUID 
     else
         return DIERR_DEVICENOTREG;
 
-    hr = direct_input_device_alloc( sizeof(struct hid_joystick), &hid_joystick_vtbl,
-                                    guid, dinput, (void **)&impl );
+    hr = dinput_device_alloc( sizeof(struct hid_joystick), &hid_joystick_vtbl, guid, dinput, (void **)&impl );
     if (FAILED(hr)) return hr;
     impl->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": hid_joystick.base.crit");
     impl->base.dwCoopLevel = DISCL_NONEXCLUSIVE | DISCL_BACKGROUND;
@@ -1857,8 +1855,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, const GUID 
         impl->base.caps.dwFFDriverVersion = 1;
     }
 
-    if (FAILED(hr = direct_input_device_init( &impl->base.IDirectInputDevice8W_iface )))
-        goto failed;
+    if (FAILED(hr = dinput_device_init( &impl->base.IDirectInputDevice8W_iface ))) goto failed;
 
     *out = &impl->base.IDirectInputDevice8W_iface;
     return DI_OK;
@@ -1867,13 +1864,6 @@ failed:
     IDirectInputDevice_Release( &impl->base.IDirectInputDevice8W_iface );
     return hr;
 }
-
-const struct dinput_device joystick_hid_device =
-{
-    "Wine HID joystick driver",
-    hid_joystick_enum_device,
-    hid_joystick_create_device,
-};
 
 static HRESULT WINAPI hid_joystick_effect_QueryInterface( IDirectInputEffect *iface, REFIID iid, void **out )
 {
@@ -2019,16 +2009,21 @@ static BOOL get_parameters_object_id( struct hid_joystick *impl, struct hid_valu
 static BOOL get_parameters_object_ofs( struct hid_joystick *impl, struct hid_value_caps *caps,
                                        DIDEVICEOBJECTINSTANCEW *instance, void *data )
 {
-    DIDATAFORMAT *format = impl->base.data_format.wine_df;
-    int *offsets = impl->base.data_format.offsets;
-    ULONG i;
+    DIDATAFORMAT *device_format = impl->base.device_format, *user_format = impl->base.user_format;
+    DIOBJECTDATAFORMAT *device_obj, *user_obj;
 
-    if (!offsets) return DIENUM_CONTINUE;
-    for (i = 0; i < format->dwNumObjs; ++i)
-        if (format->rgodf[i].dwOfs == instance->dwOfs) break;
-    if (i == format->dwNumObjs) return DIENUM_CONTINUE;
-    *(DWORD *)data = offsets[i];
+    if (!user_format) return DIENUM_CONTINUE;
 
+    user_obj = user_format->rgodf + device_format->dwNumObjs;
+    device_obj = device_format->rgodf + device_format->dwNumObjs;
+    while (user_obj-- > user_format->rgodf && device_obj-- > device_format->rgodf)
+    {
+        if (!user_obj->dwType) continue;
+        if (device_obj->dwType == instance->dwType) break;
+    }
+    if (user_obj < user_format->rgodf) return DIENUM_CONTINUE;
+
+    *(DWORD *)data = user_obj->dwOfs;
     return DIENUM_STOP;
 }
 

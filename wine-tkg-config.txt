@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:40:52 PM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:42:11 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.20.r0.gfaf645d0163
-Using wine-staging patchset (version 6.20.r0.g3fb6eb99)
+Wine (plain) version: 6.21.r0.g20f1a677b66
+Using wine-staging patchset (version 6.21.r0.g63c3baa9)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -86,7 +86,7 @@ fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esy
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
 fsync_futex2.patch -- ( Add futex2 support to fsync )
 
-valve_proton_fullscreen_hack-staging-c9c7130.patch -- ( Applied Proton fullscreen hack patch (c9c7130) )
+valve_proton_fullscreen_hack-staging-d1290b6.patch -- ( Applied Proton fullscreen hack patch (d1290b6) )
 LAA-unix-staging.patch -- ( Applied large address aware override support )
 
 proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 2/3 )
@@ -96,11 +96,10 @@ josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
 
 Applied hotfix Return_nt_filename_and_resolve_DOS_drive_path.mypatch
-Applied hotfix memset.mypatch
+Applied hotfix ef6e33f.mypatch
 Applied hotfix 0001-proton-bcrypt_rdr2_fixes.mypatch
 Applied hotfix 0002-bcrypt-Add-support-for-calculating-secret-ecc-keys.mypatch
 Applied hotfix 0003-bcrypt-Add-support-for-OAEP-padded-asymmetric-key-de.mypatch
-Applied hotfix virtual_alloc_remi2.mypatch
 Applied hotfix a608ef1.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch amdags.mypatch

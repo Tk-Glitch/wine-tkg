@@ -34,12 +34,7 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
-#ifdef HAVE_POLL_H
-# include <poll.h>
-#endif
-#ifdef HAVE_SYS_POLL_H
-# include <sys/poll.h>
-#endif
+#include <poll.h>
 #ifdef HAVE_LIBUDEV_H
 # include <libudev.h>
 #endif
@@ -52,6 +47,7 @@
 #ifdef HAVE_SYS_INOTIFY_H
 # include <sys/inotify.h>
 #endif
+#include <limits.h>
 
 #ifdef HAVE_LINUX_INPUT_H
 # include <linux/input.h>
@@ -99,8 +95,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
 
 #ifdef HAVE_UDEV
-
-WINE_DECLARE_DEBUG_CHANNEL(hid_report);
 
 static pthread_mutex_t udev_cs = PTHREAD_MUTEX_INITIALIZER;
 
@@ -343,9 +337,9 @@ static void hidraw_device_read_report(struct unix_device *iface)
 
     int size = read(impl->base.device_fd, report_buffer, sizeof(report_buffer));
     if (size == -1)
-        TRACE_(hid_report)("Read failed. Likely an unplugged device %d %s\n", errno, strerror(errno));
+        TRACE("Read failed. Likely an unplugged device %d %s\n", errno, strerror(errno));
     else if (size == 0)
-        TRACE_(hid_report)("Failed to read report\n");
+        TRACE("Failed to read report\n");
     else
     {
         /* As described in the Linux kernel driver, when connected over bluetooth, DS4 controllers
@@ -379,7 +373,7 @@ static void hidraw_device_set_output_report(struct unix_device *iface, HID_XFER_
     if ((buffer[0] = packet->reportId))
         count = write(impl->base.device_fd, packet->reportBuffer, length);
     else if (length > sizeof(buffer) - 1)
-        ERR_(hid_report)("id %d length %u >= 8192, cannot write\n", packet->reportId, length);
+        ERR("id %d length %u >= 8192, cannot write\n", packet->reportId, length);
     else
     {
         memcpy(buffer + 1, packet->reportBuffer, length);
@@ -393,7 +387,7 @@ static void hidraw_device_set_output_report(struct unix_device *iface, HID_XFER_
     }
     else
     {
-        ERR_(hid_report)("id %d write failed error: %d %s\n", packet->reportId, errno, strerror(errno));
+        ERR("id %d write failed error: %d %s\n", packet->reportId, errno, strerror(errno));
         io->Information = 0;
         io->Status = STATUS_UNSUCCESSFUL;
     }
@@ -411,7 +405,7 @@ static void hidraw_device_get_feature_report(struct unix_device *iface, HID_XFER
     if ((buffer[0] = packet->reportId) && length <= 0x1fff)
         count = ioctl(impl->base.device_fd, HIDIOCGFEATURE(length), packet->reportBuffer);
     else if (length > sizeof(buffer) - 1)
-        ERR_(hid_report)("id %d length %u >= 8192, cannot read\n", packet->reportId, length);
+        ERR("id %d length %u >= 8192, cannot read\n", packet->reportId, length);
     else
     {
         count = ioctl(impl->base.device_fd, HIDIOCGFEATURE(length + 1), buffer);
@@ -425,7 +419,7 @@ static void hidraw_device_get_feature_report(struct unix_device *iface, HID_XFER
     }
     else
     {
-        ERR_(hid_report)("id %d read failed, error: %d %s\n", packet->reportId, errno, strerror(errno));
+        ERR("id %d read failed, error: %d %s\n", packet->reportId, errno, strerror(errno));
         io->Information = 0;
         io->Status = STATUS_UNSUCCESSFUL;
     }
@@ -447,7 +441,7 @@ static void hidraw_device_set_feature_report(struct unix_device *iface, HID_XFER
     if ((buffer[0] = packet->reportId) && length <= 0x1fff)
         count = ioctl(impl->base.device_fd, HIDIOCSFEATURE(length), packet->reportBuffer);
     else if (length > sizeof(buffer) - 1)
-        ERR_(hid_report)("id %d length %u >= 8192, cannot write\n", packet->reportId, length);
+        ERR("id %d length %u >= 8192, cannot write\n", packet->reportId, length);
     else
     {
         memcpy(buffer + 1, packet->reportBuffer, length);
@@ -461,7 +455,7 @@ static void hidraw_device_set_feature_report(struct unix_device *iface, HID_XFER
     }
     else
     {
-        ERR_(hid_report)("id %d write failed, error: %d %s\n", packet->reportId, errno, strerror(errno));
+        ERR("id %d write failed, error: %d %s\n", packet->reportId, errno, strerror(errno));
         io->Information = 0;
         io->Status = STATUS_UNSUCCESSFUL;
     }
@@ -801,9 +795,9 @@ static void lnxev_device_read_report(struct unix_device *iface)
 
     size = read(impl->base.device_fd, &ie, sizeof(ie));
     if (size == -1)
-        TRACE_(hid_report)("Read failed. Likely an unplugged device\n");
+        TRACE("Read failed. Likely an unplugged device\n");
     else if (size == 0)
-        TRACE_(hid_report)("Failed to read report\n");
+        TRACE("Failed to read report\n");
     else if (set_report_from_event(iface, &ie))
         bus_event_queue_input_report(&event_queue, iface, state->report_buf, state->report_len);
 }

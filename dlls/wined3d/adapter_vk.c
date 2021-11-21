@@ -380,7 +380,7 @@ static void wined3d_allocator_vk_destroy_chunk(struct wined3d_allocator_chunk *c
 
     TRACE("chunk %p.\n", chunk);
 
-    device_vk = CONTAINING_RECORD(chunk_vk->c.allocator, struct wined3d_device_vk, allocator);
+    device_vk = wined3d_device_vk_from_allocator(chunk_vk->c.allocator);
     vk_info = &device_vk->vk_info;
 
     if (chunk_vk->c.map_ptr)
@@ -521,6 +521,10 @@ static HRESULT adapter_vk_create_device(struct wined3d *wined3d, const struct wi
         goto fail;
     }
 
+    InitializeCriticalSection(&device_vk->allocator_cs);
+    if (device_vk->allocator_cs.DebugInfo != (RTL_CRITICAL_SECTION_DEBUG *)-1)
+        device_vk->allocator_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": wined3d_device_vk.allocator_cs");
+
     *device = &device_vk->d;
 
     return WINED3D_OK;
@@ -538,6 +542,11 @@ static void adapter_vk_destroy_device(struct wined3d_device *device)
 
     wined3d_device_cleanup(&device_vk->d);
     wined3d_allocator_cleanup(&device_vk->allocator);
+
+    if (device_vk->allocator_cs.DebugInfo != (RTL_CRITICAL_SECTION_DEBUG *)-1)
+        device_vk->allocator_cs.DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection(&device_vk->allocator_cs);
+
     VK_CALL(vkDestroyDevice(device_vk->vk_device, NULL));
     heap_free(device_vk);
 }
@@ -837,28 +846,53 @@ static void wined3d_bo_vk_unmap(struct wined3d_bo_vk *bo, struct wined3d_context
     VK_CALL(vkUnmapMemory(device_vk->vk_device, bo->vk_memory));
 }
 
+static void wined3d_bo_slab_vk_lock(struct wined3d_bo_slab_vk *slab_vk, struct wined3d_context_vk *context_vk)
+{
+    wined3d_device_vk_allocator_lock(wined3d_device_vk(context_vk->c.device));
+}
+
+static void wined3d_bo_slab_vk_unlock(struct wined3d_bo_slab_vk *slab_vk, struct wined3d_context_vk *context_vk)
+{
+    wined3d_device_vk_allocator_unlock(wined3d_device_vk(context_vk->c.device));
+}
+
 void *wined3d_bo_slab_vk_map(struct wined3d_bo_slab_vk *slab_vk, struct wined3d_context_vk *context_vk)
 {
+    void *map_ptr;
+
     TRACE("slab_vk %p, context_vk %p.\n", slab_vk, context_vk);
+
+    wined3d_bo_slab_vk_lock(slab_vk, context_vk);
 
     if (!slab_vk->map_ptr && !(slab_vk->map_ptr = wined3d_bo_vk_map(&slab_vk->bo, context_vk)))
     {
+        wined3d_bo_slab_vk_unlock(slab_vk, context_vk);
         ERR("Failed to map slab.\n");
         return NULL;
     }
 
     ++slab_vk->map_count;
+    map_ptr = slab_vk->map_ptr;
 
-    return slab_vk->map_ptr;
+    wined3d_bo_slab_vk_unlock(slab_vk, context_vk);
+
+    return map_ptr;
 }
 
 void wined3d_bo_slab_vk_unmap(struct wined3d_bo_slab_vk *slab_vk, struct wined3d_context_vk *context_vk)
 {
+    wined3d_bo_slab_vk_lock(slab_vk, context_vk);
+
     if (--slab_vk->map_count)
+    {
+        wined3d_bo_slab_vk_unlock(slab_vk, context_vk);
         return;
+    }
 
     wined3d_bo_vk_unmap(&slab_vk->bo, context_vk);
     slab_vk->map_ptr = NULL;
+
+    wined3d_bo_slab_vk_unlock(slab_vk, context_vk);
 }
 
 VkAccessFlags vk_access_mask_from_buffer_usage(VkBufferUsageFlags usage)
@@ -1712,7 +1746,7 @@ static void adapter_vk_draw_primitive(struct wined3d_device *device,
 
     if (parameters->indirect)
     {
-        struct wined3d_bo_vk *bo = &indirect_vk->bo;
+        struct wined3d_bo_vk *bo = (struct wined3d_bo_vk *)indirect_vk->b.buffer_object;
         uint32_t stride, size;
 
         wined3d_context_vk_reference_bo(context_vk, bo);
@@ -1784,7 +1818,7 @@ static void adapter_vk_dispatch_compute(struct wined3d_device *device,
 
     if (parameters->indirect)
     {
-        struct wined3d_bo_vk *bo = &indirect_vk->bo;
+        struct wined3d_bo_vk *bo = (struct wined3d_bo_vk *)indirect_vk->b.buffer_object;
 
         wined3d_context_vk_reference_bo(context_vk, bo);
         VK_CALL(vkCmdDispatchIndirect(vk_command_buffer, bo->vk_buffer,
@@ -2229,6 +2263,15 @@ static void wined3d_adapter_vk_init_d3d_info(struct wined3d_adapter_vk *adapter_
     d3d_info->scaled_resolve = false;
     d3d_info->pbo = true;
     d3d_info->feature_level = feature_level_from_caps(&shader_caps);
+    d3d_info->subpixel_viewport = true;
+
+    /* Like GL, Vulkan doesn't explicitly specify a filling convention and only mandates that a
+     * shared edge of two adjacent triangles generate a fragment for exactly one of the triangles.
+     *
+     * However, every Vulkan implementation we have seen so far uses a top-left rule. Hardware
+     * that differs either predates Vulkan (d3d9 class HW, GeForce 9xxx) or behaves the way we
+     * want in Vulkan (MacOS Radeon driver through MoltenVK). */
+    d3d_info->filling_convention_offset = 0.0f;
 
     d3d_info->multisample_draw_location = WINED3D_LOCATION_TEXTURE_RGB;
 }

@@ -476,8 +476,15 @@ static HRESULT WINAPI HTMLAnchorElement_put_pathname(IHTMLAnchorElement *iface, 
 static HRESULT WINAPI HTMLAnchorElement_get_pathname(IHTMLAnchorElement *iface, BSTR *p)
 {
     HTMLAnchorElement *This = impl_from_IHTMLAnchorElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString pathname_str;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    /* FIXME: IE prepends a slash for some protocols */
+    nsAString_Init(&pathname_str, NULL);
+    nsres = nsIDOMHTMLAnchorElement_GetPathname(This->nsanchor, &pathname_str);
+    return return_nsstr(nsres, &pathname_str, p);
 }
 
 static HRESULT WINAPI HTMLAnchorElement_put_port(IHTMLAnchorElement *iface, BSTR v)
@@ -490,8 +497,35 @@ static HRESULT WINAPI HTMLAnchorElement_put_port(IHTMLAnchorElement *iface, BSTR
 static HRESULT WINAPI HTMLAnchorElement_get_port(IHTMLAnchorElement *iface, BSTR *p)
 {
     HTMLAnchorElement *This = impl_from_IHTMLAnchorElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    IUri *uri;
+    HRESULT hres;
+    DWORD port;
+    WCHAR buf[11];
+    int len;
+    BSTR str;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    uri = get_anchor_uri(This);
+    if(!uri) {
+        WARN("Could not create IUri\n");
+        *p = NULL;
+        return S_OK;
+    }
+
+    hres = IUri_GetPort(uri, &port);
+    IUri_Release(uri);
+    if(FAILED(hres))
+        return hres;
+
+    len = swprintf(buf, ARRAY_SIZE(buf), L"%u", port);
+    str = SysAllocStringLen(buf, len);
+    if (str)
+        *p = str;
+    else
+        hres = E_OUTOFMEMORY;
+
+    return hres;
 }
 
 static HRESULT WINAPI HTMLAnchorElement_put_protocol(IHTMLAnchorElement *iface, BSTR v)

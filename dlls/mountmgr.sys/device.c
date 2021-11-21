@@ -25,12 +25,14 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
 #ifdef HAVE_TERMIOS_H
 # include <termios.h>
 #endif
 #include <sys/time.h>
+#include <sys/stat.h>
 #ifdef HAVE_SYS_IOCTL_H
 # include <sys/ioctl.h>
 #endif

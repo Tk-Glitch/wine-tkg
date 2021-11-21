@@ -18,13 +18,18 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "wine/heap.h"
+#include <stdlib.h>
+#include "windef.h"
+#include "winbase.h"
+#include "winnls.h"
+#include "winternl.h"
+#include "wine/unixlib.h"
 
 static inline char *strdup_a( const char *src )
 {
     char *dst;
     if (!src) return NULL;
-    dst = heap_alloc( (lstrlenA( src ) + 1) * sizeof(char) );
+    dst = malloc( (lstrlenA( src ) + 1) * sizeof(char) );
     if (dst) lstrcpyA( dst, src );
     return dst;
 }
@@ -33,7 +38,7 @@ static inline char *strdup_u( const char *src )
 {
     char *dst;
     if (!src) return NULL;
-    dst = heap_alloc( (strlen( src ) + 1) * sizeof(char) );
+    dst = malloc( (strlen( src ) + 1) * sizeof(char) );
     if (dst) strcpy( dst, src );
     return dst;
 }
@@ -42,7 +47,7 @@ static inline WCHAR *strdup_w( const WCHAR *src )
 {
     WCHAR *dst;
     if (!src) return NULL;
-    dst = heap_alloc( (lstrlenW( src ) + 1) * sizeof(WCHAR) );
+    dst = malloc( (lstrlenW( src ) + 1) * sizeof(WCHAR) );
     if (dst) lstrcpyW( dst, src );
     return dst;
 }
@@ -53,7 +58,7 @@ static inline WCHAR *strdup_aw( const char *str )
     if (str)
     {
         DWORD len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0 );
-        if ((ret = heap_alloc( len * sizeof(WCHAR) )))
+        if ((ret = malloc( len * sizeof(WCHAR) )))
             MultiByteToWideChar( CP_ACP, 0, str, -1, ret, len );
     }
     return ret;
@@ -65,7 +70,7 @@ static inline WCHAR *strdup_uw( const char *str )
     if (str)
     {
         DWORD len = MultiByteToWideChar( CP_UTF8, 0, str, -1, NULL, 0 );
-        if ((ret = heap_alloc( len * sizeof(WCHAR) )))
+        if ((ret = malloc( len * sizeof(WCHAR) )))
             MultiByteToWideChar( CP_UTF8, 0, str, -1, ret, len );
     }
     return ret;
@@ -77,7 +82,7 @@ static inline char *strdup_wa( const WCHAR *str )
     if (str)
     {
         DWORD len = WideCharToMultiByte( CP_ACP, 0, str, -1, NULL, 0, NULL, NULL );
-        if ((ret = heap_alloc( len )))
+        if ((ret = malloc( len )))
             WideCharToMultiByte( CP_ACP, 0, str, -1, ret, len, NULL, NULL );
     }
     return ret;
@@ -89,7 +94,7 @@ static inline char *strdup_wu( const WCHAR *str )
     if (str)
     {
         DWORD len = WideCharToMultiByte( CP_UTF8, 0, str, -1, NULL, 0, NULL, NULL );
-        if ((ret = heap_alloc( len )))
+        if ((ret = malloc( len )))
             WideCharToMultiByte( CP_UTF8, 0, str, -1, ret, len, NULL, NULL );
     }
     return ret;
@@ -102,7 +107,7 @@ static inline char *strdup_au( const char *src )
     if (ret)
     {
         dst = strdup_wu( ret );
-        heap_free( ret );
+        free( ret );
     }
     return dst;
 }
@@ -114,19 +119,48 @@ static inline char *strdup_ua( const char *src )
     if (ret)
     {
         dst = strdup_wa( ret );
-        heap_free( ret );
+        free( ret );
     }
     return dst;
 }
 
-extern const char *type_to_str( unsigned short ) DECLSPEC_HIDDEN;
+extern const char *debugstr_type( unsigned short ) DECLSPEC_HIDDEN;
 
-struct resolv_funcs
+struct get_searchlist_params
 {
-    DNS_STATUS (CDECL *get_searchlist)( DNS_TXT_DATAW *list, DWORD *len );
-    DNS_STATUS (CDECL *get_serverlist)( USHORT family, DNS_ADDR_ARRAY *addrs, DWORD *len );
-    DNS_STATUS (CDECL *query)( const char *name, WORD type, DWORD options, DNS_RECORDA **result );
-    DNS_STATUS (CDECL *set_serverlist)( const IP4_ARRAY *addrs );
+    DNS_TXT_DATAW   *list;
+    DWORD           *len;
 };
 
-extern const struct resolv_funcs *resolv_funcs;
+struct get_serverlist_params
+{
+    USHORT           family;
+    DNS_ADDR_ARRAY  *addrs;
+    DWORD           *len;
+};
+
+struct set_serverlist_params
+{
+    const IP4_ARRAY *addrs;
+};
+
+struct query_params
+{
+    const char      *name;
+    WORD             type;
+    DWORD            options;
+    void            *buf;
+    DWORD           *len;
+};
+
+enum unix_funcs
+{
+    unix_get_searchlist,
+    unix_get_serverlist,
+    unix_set_serverlist,
+    unix_query,
+};
+
+extern unixlib_handle_t resolv_handle;
+
+#define RESOLV_CALL( func, params ) __wine_unix_call( resolv_handle, unix_ ## func, params )

@@ -2288,7 +2288,7 @@ static void progressbar_update_files(FILE_OPERATION *op, LPCWSTR src, LPCWSTR ds
     }
 
     FormatMessageW(FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_ARGUMENT_ARRAY, op->szBuilderString,
-                   0, 0, final, sizeof(final)/sizeof(final[0]), (__ms_va_list *)&args);
+                   0, 0, final, sizeof(final)/sizeof(final[0]), (va_list *)&args);
 
     IProgressDialog_SetLine(op->progress, 1, src_file, FALSE, NULL);
     IProgressDialog_SetLine(op->progress, 2, final, FALSE, NULL);

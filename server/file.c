@@ -36,9 +36,7 @@
 #ifdef HAVE_UTIME_H
 #include <utime.h>
 #endif
-#ifdef HAVE_POLL_H
 #include <poll.h>
-#endif
 #ifdef HAVE_ATTR_XATTR_H
 #undef XATTR_ADDITIONAL_OPTIONS
 #include <attr/xattr.h>

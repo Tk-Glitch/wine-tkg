@@ -142,9 +142,6 @@ typedef struct _wine_modref
 {
     LDR_DATA_TABLE_ENTRY  ldr;
     struct file_id        id;
-    int                   alloc_deps;
-    int                   nDeps;
-    struct _wine_modref **deps;
     ULONG                 CheckSum;
 } WINE_MODREF;
 
@@ -195,9 +192,11 @@ static WINE_MODREF *cached_modref;
 static WINE_MODREF *current_modref;
 static WINE_MODREF *last_failed_modref;
 
+static LDR_DDAG_NODE *node_ntdll, *node_kernel32;
+
 static NTSTATUS load_dll( const WCHAR *load_path, const WCHAR *libname, const WCHAR *default_ext,
                           DWORD flags, WINE_MODREF** pwm );
-static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved );
+static NTSTATUS process_attach( LDR_DDAG_NODE *node, LPVOID lpReserved );
 static FARPROC find_ordinal_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY *exports,
                                     DWORD exp_size, DWORD ordinal, LPCWSTR load_path );
 static FARPROC find_named_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY *exports,
@@ -625,26 +624,122 @@ static WINE_MODREF *find_fileid_module( const struct file_id *id )
     return NULL;
 }
 
-
-/*************************************************************************
- *		grow_module_deps
+/***********************************************************************
+ *           is_import_dll_system
  */
-static WINE_MODREF **grow_module_deps( WINE_MODREF *wm, int count )
+static BOOL is_import_dll_system( LDR_DATA_TABLE_ENTRY *mod, const IMAGE_IMPORT_DESCRIPTOR *import )
 {
-    WINE_MODREF **deps;
+    const char *name = get_rva( mod->DllBase, import->Name );
 
-    if (wm->alloc_deps)
-        deps = RtlReAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, wm->deps,
-                                  (wm->alloc_deps + count) * sizeof(*deps) );
-    else
-        deps = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, count * sizeof(*deps) );
+    return !strcmp( name, "ntdll.dll" ) || !strcmp( name, "kernel32.dll" );
+}
 
-    if (deps)
+/**********************************************************************
+ *	    insert_single_list_tail
+ */
+static void insert_single_list_after( LDRP_CSLIST *list, SINGLE_LIST_ENTRY *prev, SINGLE_LIST_ENTRY *entry )
+{
+    if (!list->Tail)
     {
-        wm->deps = deps;
-        wm->alloc_deps += count;
+        assert( !prev );
+        entry->Next = entry;
+        list->Tail = entry;
+        return;
     }
-    return deps;
+    if (!prev)
+    {
+        /* Insert at head. */
+        entry->Next = list->Tail->Next;
+        list->Tail->Next = entry;
+        return;
+    }
+    entry->Next = prev->Next;
+    prev->Next = entry;
+    if (prev == list->Tail) list->Tail = entry;
+}
+
+/**********************************************************************
+ *	    remove_single_list_entry
+ */
+static void remove_single_list_entry( LDRP_CSLIST *list, SINGLE_LIST_ENTRY *entry )
+{
+    SINGLE_LIST_ENTRY *prev;
+
+    assert( list->Tail );
+
+    if (entry->Next == entry)
+    {
+        assert( list->Tail == entry );
+        list->Tail = NULL;
+        return;
+    }
+
+    prev = list->Tail->Next;
+    while (prev->Next != entry && prev != list->Tail)
+        prev = prev->Next;
+    assert( prev->Next == entry );
+    prev->Next = entry->Next;
+    if (list->Tail == entry) list->Tail = prev;
+    entry->Next = NULL;
+}
+
+/**********************************************************************
+ *	    add_module_dependency_after
+ */
+static BOOL add_module_dependency_after( LDR_DDAG_NODE *from, LDR_DDAG_NODE *to,
+                                         SINGLE_LIST_ENTRY *dep_after )
+{
+    LDR_DEPENDENCY *dep;
+
+    if (!(dep = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*dep) ))) return FALSE;
+
+    dep->dependency_from = from;
+    insert_single_list_after( &from->Dependencies, dep_after, &dep->dependency_to_entry );
+    dep->dependency_to = to;
+    insert_single_list_after( &to->IncomingDependencies, NULL, &dep->dependency_from_entry );
+
+    return TRUE;
+}
+
+/**********************************************************************
+ *	    add_module_dependency
+ */
+static BOOL add_module_dependency( LDR_DDAG_NODE *from, LDR_DDAG_NODE *to )
+{
+    return add_module_dependency_after( from, to, from->Dependencies.Tail );
+}
+
+/**********************************************************************
+ *	    remove_module_dependency
+ */
+static void remove_module_dependency( LDR_DEPENDENCY *dep )
+{
+    remove_single_list_entry( &dep->dependency_to->IncomingDependencies, &dep->dependency_from_entry );
+    remove_single_list_entry( &dep->dependency_from->Dependencies, &dep->dependency_to_entry );
+    RtlFreeHeap( GetProcessHeap(), 0, dep );
+}
+
+/**********************************************************************
+ *	    walk_node_dependencies
+ */
+static NTSTATUS walk_node_dependencies( LDR_DDAG_NODE *node, void *context,
+                                        NTSTATUS (*callback)( LDR_DDAG_NODE *, void * ))
+{
+    SINGLE_LIST_ENTRY *entry;
+    LDR_DEPENDENCY *dep;
+    NTSTATUS status;
+
+    if (!(entry = node->Dependencies.Tail)) return STATUS_SUCCESS;
+
+    do
+    {
+        entry = entry->Next;
+        dep = CONTAINING_RECORD( entry, LDR_DEPENDENCY, dependency_to_entry );
+        assert( dep->dependency_from == node );
+        if ((status = callback( dep->dependency_to, context ))) break;
+    } while (entry != node->Dependencies.Tail);
+
+    return status;
 }
 
 /*************************************************************************
@@ -682,10 +777,9 @@ static FARPROC find_forwarded_export( HMODULE module, const char *forward, LPCWS
         {
             if (!imports_fixup_done && current_modref)
             {
-                WINE_MODREF **deps = grow_module_deps( current_modref, 1 );
-                if (deps) deps[current_modref->nDeps++] = wm;
+                add_module_dependency( current_modref->ldr.DdagNode, wm->ldr.DdagNode );
             }
-            else if (process_attach( wm, NULL ) != STATUS_SUCCESS)
+            else if (process_attach( wm->ldr.DdagNode, NULL ) != STATUS_SUCCESS)
             {
                 LdrUnloadDll( wm->ldr.DllBase );
                 wm = NULL;
@@ -1021,7 +1115,6 @@ static BOOL is_dll_native_subsystem( LDR_DATA_TABLE_ENTRY *mod, const IMAGE_NT_H
 {
     const IMAGE_IMPORT_DESCRIPTOR *imports;
     DWORD i, size;
-    WCHAR buffer[16];
 
     if (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_NATIVE) return FALSE;
     if (nt->OptionalHeader.SectionAlignment < page_size) return TRUE;
@@ -1031,17 +1124,11 @@ static BOOL is_dll_native_subsystem( LDR_DATA_TABLE_ENTRY *mod, const IMAGE_NT_H
                                                  IMAGE_DIRECTORY_ENTRY_IMPORT, &size )))
     {
         for (i = 0; imports[i].Name; i++)
-        {
-            const char *name = get_rva( mod->DllBase, imports[i].Name );
-            DWORD len = strlen(name);
-            if (len * sizeof(WCHAR) >= sizeof(buffer)) continue;
-            ascii_to_unicode( buffer, name, len + 1 );
-            if (!wcsicmp( buffer, L"ntdll.dll" ) || !wcsicmp( buffer, L"kernel32.dll" ))
+            if (is_import_dll_system( mod, &imports[i] ))
             {
-                TRACE( "%s imports %s, assuming not native\n", debugstr_w(filename), debugstr_w(buffer) );
+                TRACE( "%s imports system dll, assuming not native\n", debugstr_w(filename) );
                 return FALSE;
             }
-        }
     }
     return TRUE;
 }
@@ -1162,12 +1249,12 @@ static NTSTATUS fixup_imports_ilonly( WINE_MODREF *wm, LPCWSTR load_path, void *
     if (!(wm->ldr.Flags & LDR_DONT_RESOLVE_REFS)) return STATUS_SUCCESS;  /* already done */
     wm->ldr.Flags &= ~LDR_DONT_RESOLVE_REFS;
 
-    if (!grow_module_deps( wm, 1 )) return STATUS_NO_MEMORY;
-    wm->nDeps = 1;
-
     prev = current_modref;
     current_modref = wm;
-    if (!(status = load_dll( load_path, L"mscoree.dll", NULL, 0, &imp ))) wm->deps[0] = imp;
+    assert( !wm->ldr.DdagNode->Dependencies.Tail );
+    if (!(status = load_dll( load_path, L"mscoree.dll", NULL, 0, &imp ))
+          && !add_module_dependency_after( wm->ldr.DdagNode, imp->ldr.DdagNode, NULL ))
+        status = STATUS_NO_MEMORY;
     current_modref = prev;
     if (status)
     {
@@ -1193,9 +1280,10 @@ static NTSTATUS fixup_imports_ilonly( WINE_MODREF *wm, LPCWSTR load_path, void *
  */
 static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
 {
-    int i, dep, nb_imports;
     const IMAGE_IMPORT_DESCRIPTOR *imports;
+    SINGLE_LIST_ENTRY *dep_after;
     WINE_MODREF *prev, *imp;
+    int i, nb_imports;
     DWORD size;
     NTSTATUS status;
     ULONG_PTR cookie;
@@ -1213,7 +1301,6 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
     while (imports[nb_imports].Name && imports[nb_imports].FirstThunk) nb_imports++;
 
     if (!nb_imports) return STATUS_SUCCESS;  /* no imports */
-    if (!grow_module_deps( wm, nb_imports )) return STATUS_NO_MEMORY;
 
     if (!create_module_activation_context( &wm->ldr ))
         RtlActivateActivationContext( 0, wm->ldr.ActivationContext, &cookie );
@@ -1226,14 +1313,16 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
     status = STATUS_SUCCESS;
     for (i = 0; i < nb_imports; i++)
     {
-        dep = wm->nDeps++;
-
+        dep_after = wm->ldr.DdagNode->Dependencies.Tail;
         if (!import_dll( wm->ldr.DllBase, &imports[i], load_path, &imp ))
         {
             imp = NULL;
             status = STATUS_DLL_NOT_FOUND;
         }
-        wm->deps[dep] = imp;
+        else if (!is_import_dll_system( &wm->ldr, &imports[i] ))
+        {
+            add_module_dependency_after( wm->ldr.DdagNode, imp->ldr.DdagNode, dep_after );
+        }
     }
     current_modref = prev;
     if (wm->ldr.ActivationContext) RtlDeactivateActivationContext( 0, cookie );
@@ -1269,6 +1358,16 @@ static WINE_MODREF *alloc_module( HMODULE hModule, const UNICODE_STRING *nt_name
         RtlFreeHeap( GetProcessHeap(), 0, wm );
         return NULL;
     }
+
+    if (!(wm->ldr.DdagNode = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wm->ldr.DdagNode) )))
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, buffer );
+        RtlFreeHeap( GetProcessHeap(), 0, wm );
+        return NULL;
+    }
+    InitializeListHead(&wm->ldr.DdagNode->Modules);
+    InsertTailList(&wm->ldr.DdagNode->Modules, &wm->ldr.NodeModuleLink);
+
     memcpy( buffer, nt_name->Buffer + 4 /* \??\ prefix */, nt_name->Length - 4 * sizeof(WCHAR) );
     buffer[nt_name->Length/sizeof(WCHAR) - 4] = 0;
     if ((p = wcsrchr( buffer, '\\' ))) p++;
@@ -1470,13 +1569,17 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved 
  *
  * The loader_section must be locked while calling this function.
  */
-static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved )
+static NTSTATUS process_attach( LDR_DDAG_NODE *node, LPVOID lpReserved )
 {
     NTSTATUS status = STATUS_SUCCESS;
+    LDR_DATA_TABLE_ENTRY *mod;
     ULONG_PTR cookie;
-    int i;
+    WINE_MODREF *wm;
 
     if (process_detaching) return status;
+
+    mod = CONTAINING_RECORD( node->Modules.Flink, LDR_DATA_TABLE_ENTRY, NodeModuleLink );
+    wm = CONTAINING_RECORD( mod, WINE_MODREF, ldr );
 
     /* prevent infinite recursion in case of cyclical dependencies */
     if (    ( wm->ldr.Flags & LDR_LOAD_IN_PROGRESS )
@@ -1491,11 +1594,7 @@ static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved )
     if (wm->ldr.ActivationContext) RtlActivateActivationContext( 0, wm->ldr.ActivationContext, &cookie );
 
     /* Recursively attach all DLLs this one depends on */
-    for ( i = 0; i < wm->nDeps; i++ )
-    {
-        if (!wm->deps[i]) continue;
-        if ((status = process_attach( wm->deps[i], lpReserved )) != STATUS_SUCCESS) break;
-    }
+    walk_node_dependencies( node, lpReserved, process_attach );
 
     if (!wm->ldr.InInitializationOrderLinks.Flink)
         InsertTailList(&NtCurrentTeb()->Peb->LdrData->InInitializationOrderModuleList,
@@ -2115,6 +2214,7 @@ static void build_ntdll_module(void)
     wm = alloc_module( meminfo.AllocationBase, &nt_name, TRUE );
     assert( wm );
     wm->ldr.Flags &= ~LDR_DONT_RESOLVE_REFS;
+    node_ntdll = wm->ldr.DdagNode;
     if (TRACE_ON(relay)) RELAY_SetupDLL( meminfo.AllocationBase );
 
     hidden_exports_init( wm->ldr.FullDllName.Buffer );
@@ -3120,7 +3220,7 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH LdrLoadDll(LPCWSTR path_name, DWORD flags,
 
     if (nts == STATUS_SUCCESS && !(wm->ldr.Flags & LDR_DONT_RESOLVE_REFS))
     {
-        nts = process_attach( wm, NULL );
+        nts = process_attach( wm->ldr.DdagNode, NULL );
         if (nts != STATUS_SUCCESS)
         {
             LdrUnloadDll(wm->ldr.DllBase);
@@ -3650,11 +3750,32 @@ void WINAPI LdrShutdownThread(void)
  */
 static void free_modref( WINE_MODREF *wm )
 {
+    SINGLE_LIST_ENTRY *entry;
+    LDR_DEPENDENCY *dep;
+
     RemoveEntryList(&wm->ldr.InLoadOrderLinks);
     RemoveEntryList(&wm->ldr.InMemoryOrderLinks);
     RemoveEntryList(&wm->ldr.HashLinks);
     if (wm->ldr.InInitializationOrderLinks.Flink)
         RemoveEntryList(&wm->ldr.InInitializationOrderLinks);
+
+    while ((entry = wm->ldr.DdagNode->Dependencies.Tail))
+    {
+        dep = CONTAINING_RECORD( entry, LDR_DEPENDENCY, dependency_to_entry );
+        assert( dep->dependency_from == wm->ldr.DdagNode );
+        remove_module_dependency( dep );
+    }
+
+    while ((entry = wm->ldr.DdagNode->IncomingDependencies.Tail))
+    {
+        dep = CONTAINING_RECORD( entry, LDR_DEPENDENCY, dependency_from_entry );
+        assert( dep->dependency_to == wm->ldr.DdagNode );
+        remove_module_dependency( dep );
+    }
+
+    RemoveEntryList(&wm->ldr.NodeModuleLink);
+    if (IsListEmpty(&wm->ldr.DdagNode->Modules))
+        RtlFreeHeap( GetProcessHeap(), 0, wm->ldr.DdagNode );
 
     TRACE(" unloading %s\n", debugstr_w(wm->ldr.FullDllName.Buffer));
     if (!TRACE_ON(module))
@@ -3667,7 +3788,6 @@ static void free_modref( WINE_MODREF *wm )
     NtUnmapViewOfSection( NtCurrentProcess(), wm->ldr.DllBase );
     if (cached_modref == wm) cached_modref = NULL;
     RtlFreeUnicodeString( &wm->ldr.FullDllName );
-    RtlFreeHeap( GetProcessHeap(), 0, wm->deps );
     RtlFreeHeap( GetProcessHeap(), 0, wm );
 }
 
@@ -3710,15 +3830,19 @@ static void MODULE_FlushModrefs(void)
  *
  * The loader_section must be locked while calling this function.
  */
-static void MODULE_DecRefCount( WINE_MODREF *wm )
+static NTSTATUS MODULE_DecRefCount( LDR_DDAG_NODE *node, void *context )
 {
-    int i;
+    LDR_DATA_TABLE_ENTRY *mod;
+    WINE_MODREF *wm;
+
+    mod = CONTAINING_RECORD( node->Modules.Flink, LDR_DATA_TABLE_ENTRY, NodeModuleLink );
+    wm = CONTAINING_RECORD( mod, WINE_MODREF, ldr );
 
     if ( wm->ldr.Flags & LDR_UNLOAD_IN_PROGRESS )
-        return;
+        return STATUS_SUCCESS;
 
     if ( wm->ldr.LoadCount <= 0 )
-        return;
+        return STATUS_SUCCESS;
 
     --wm->ldr.LoadCount;
     TRACE("(%s) ldr.LoadCount: %d\n", debugstr_w(wm->ldr.BaseDllName.Buffer), wm->ldr.LoadCount );
@@ -3726,15 +3850,11 @@ static void MODULE_DecRefCount( WINE_MODREF *wm )
     if ( wm->ldr.LoadCount == 0 )
     {
         wm->ldr.Flags |= LDR_UNLOAD_IN_PROGRESS;
-
-        for ( i = 0; i < wm->nDeps; i++ )
-            if ( wm->deps[i] )
-                MODULE_DecRefCount( wm->deps[i] );
-
+        walk_node_dependencies( node, context, MODULE_DecRefCount );
         wm->ldr.Flags &= ~LDR_UNLOAD_IN_PROGRESS;
-
         module_push_unload_trace( wm );
     }
+    return STATUS_SUCCESS;
 }
 
 /******************************************************************
@@ -3759,7 +3879,7 @@ NTSTATUS WINAPI LdrUnloadDll( HMODULE hModule )
         TRACE("(%s) - START\n", debugstr_w(wm->ldr.BaseDllName.Buffer));
 
         /* Recursively decrement reference counts */
-        MODULE_DecRefCount( wm );
+        MODULE_DecRefCount( wm->ldr.DdagNode, NULL );
 
         /* Call process detach notifications */
         if ( free_lib_count <= 1 )
@@ -3977,7 +4097,6 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
     UNICODE_STRING staging_event_string;
     HANDLE staging_event;
     static int attach_done;
-    int i;
     NTSTATUS status;
     ULONG_PTR cookie;
     WINE_MODREF *wm;
@@ -3999,6 +4118,7 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
 
     if (!imports_fixup_done)
     {
+        int i;
         ANSI_STRING func_name;
         WINE_MODREF *kernel32;
         PEB *peb = NtCurrentTeb()->Peb;
@@ -4037,6 +4157,7 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
             NtTerminateProcess( GetCurrentProcess(), status );
         }
         kernel32_handle = kernel32->ldr.DllBase;
+        node_kernel32 = kernel32->ldr.DdagNode;
         RtlInitAnsiString( &func_name, "BaseThreadInitThunk" );
         if ((status = LdrGetProcedureAddress( kernel32_handle, &func_name,
                                               0, (void **)&pBaseThreadInitThunk )) != STATUS_SUCCESS)
@@ -4096,18 +4217,22 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
         if (wm->ldr.ActivationContext)
             RtlActivateActivationContext( 0, wm->ldr.ActivationContext, &cookie );
 
-        for (i = 0; i < wm->nDeps; i++)
+        if ((status = process_attach( node_ntdll, context ))
+             || (status = process_attach( node_kernel32, context )))
         {
-            if (!wm->deps[i]) continue;
-            if ((status = process_attach( wm->deps[i], context )) != STATUS_SUCCESS)
-            {
-                if (last_failed_modref)
-                    ERR( "%s failed to initialize, aborting\n",
-                         debugstr_w(last_failed_modref->ldr.BaseDllName.Buffer) + 1 );
-                ERR( "Initializing dlls for %s failed, status %x\n",
-                     debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer), status );
-                NtTerminateProcess( GetCurrentProcess(), status );
-            }
+            ERR( "Initializing system dll for %s failed, status %x\n",
+                 debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer), status );
+            NtTerminateProcess( GetCurrentProcess(), status );
+        }
+
+        if ((status = walk_node_dependencies( wm->ldr.DdagNode, context, process_attach )))
+        {
+            if (last_failed_modref)
+                ERR( "%s failed to initialize, aborting\n",
+                     debugstr_w(last_failed_modref->ldr.BaseDllName.Buffer) + 1 );
+            ERR( "Initializing dlls for %s failed, status %x\n",
+                 debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer), status );
+            NtTerminateProcess( GetCurrentProcess(), status );
         }
         release_address_space();
         if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.DllBase, DLL_PROCESS_ATTACH );

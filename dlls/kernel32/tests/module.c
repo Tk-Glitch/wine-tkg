@@ -1358,7 +1358,7 @@ static void test_ddag_node(void)
 
     if (!(node = mod->DdagNode))
     {
-        skip( "DdagNode is NULL, skipping tests.\n" );
+        win_skip( "DdagNode is NULL, skipping tests.\n" );
         return;
     }
 
@@ -1376,14 +1376,14 @@ static void test_ddag_node(void)
     ok( !node->IncomingDependencies.Tail, "Expected empty incoming dependencies list.\n" );
 
     /* node->Dependencies.Tail is NULL on Windows 10 1507-1607 32 bit test, maybe due to broken structure layout. */
-    ok( !!node->Dependencies.Tail || broken( sizeof(void *) == 4 && !node->Dependencies.Tail),
+    ok( !!node->Dependencies.Tail || broken( sizeof(void *) == 4 && !node->Dependencies.Tail ),
             "Expected nonempty dependencies list.\n" );
     if (!node->Dependencies.Tail)
     {
         win_skip( "Empty dependencies list.\n" );
         return;
     }
-    ok( node->LoadCount == -1, "Got unexpected LoadCount %d.\n", node->LoadCount );
+    todo_wine ok( node->LoadCount == -1, "Got unexpected LoadCount %d.\n", node->LoadCount );
 
     prev_node = NULL;
     se = node->Dependencies.Tail;
@@ -1422,7 +1422,7 @@ static void test_ddag_node(void)
         while (dep2 != dep && se2 != dep_node->IncomingDependencies.Tail);
         ok( dep2 == dep, "Dependency not found in incoming deps list.\n" );
 
-        ok( dep_node->LoadCount > 0 || broken(!dep_node->LoadCount) /* Win8 */,
+        todo_wine ok( dep_node->LoadCount > 0 || broken(!dep_node->LoadCount) /* Win8 */,
                 "Got unexpected LoadCount %d.\n", dep_node->LoadCount );
 
         winetest_pop_context();

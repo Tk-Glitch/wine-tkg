@@ -136,6 +136,34 @@ static void wined3d_buffer_gl_bind(struct wined3d_buffer_gl *buffer_gl, struct w
     wined3d_context_gl_bind_bo(context_gl, buffer_gl->bo.binding, buffer_gl->bo.id);
 }
 
+static GLenum wined3d_buffer_gl_binding_from_bind_flags(const struct wined3d_gl_info *gl_info, uint32_t bind_flags)
+{
+    if (!bind_flags)
+        return GL_PIXEL_UNPACK_BUFFER;
+
+    if (bind_flags == WINED3D_BIND_INDEX_BUFFER)
+        return GL_ELEMENT_ARRAY_BUFFER;
+
+    if (bind_flags & (WINED3D_BIND_SHADER_RESOURCE | WINED3D_BIND_UNORDERED_ACCESS)
+            && gl_info->supported[ARB_TEXTURE_BUFFER_OBJECT])
+        return GL_TEXTURE_BUFFER;
+
+    if (bind_flags & WINED3D_BIND_CONSTANT_BUFFER)
+        return GL_UNIFORM_BUFFER;
+
+    if (bind_flags & WINED3D_BIND_STREAM_OUTPUT)
+        return GL_TRANSFORM_FEEDBACK_BUFFER;
+
+    if (bind_flags & WINED3D_BIND_INDIRECT_BUFFER
+            && gl_info->supported[ARB_DRAW_INDIRECT])
+        return GL_DRAW_INDIRECT_BUFFER;
+
+    if (bind_flags & ~(WINED3D_BIND_VERTEX_BUFFER | WINED3D_BIND_INDEX_BUFFER))
+        FIXME("Unhandled bind flags %#x.\n", bind_flags);
+
+    return GL_ARRAY_BUFFER;
+}
+
 /* Context activation is done by the caller. */
 static void wined3d_buffer_gl_destroy_buffer_object(struct wined3d_buffer_gl *buffer_gl,
         struct wined3d_context_gl *context_gl)
@@ -159,8 +187,8 @@ static void wined3d_buffer_gl_destroy_buffer_object(struct wined3d_buffer_gl *bu
         wined3d_context_gl_end_transform_feedback(context_gl);
     }
 
-    buffer_gl->bo_user.valid = false;
-    list_remove(&buffer_gl->bo_user.entry);
+    buffer_gl->b.bo_user.valid = false;
+    list_remove(&buffer_gl->b.bo_user.entry);
     wined3d_context_gl_destroy_bo(context_gl, &buffer_gl->bo);
     buffer_gl->b.buffer_object = 0;
 }
@@ -197,7 +225,7 @@ static BOOL wined3d_buffer_gl_create_buffer_object(struct wined3d_buffer_gl *buf
         return FALSE;
     }
 
-    list_add_head(&buffer_gl->bo.b.users, &buffer_gl->bo_user.entry);
+    list_add_head(&buffer_gl->bo.b.users, &buffer_gl->b.bo_user.entry);
     buffer_gl->b.buffer_object = (uintptr_t)bo;
     buffer_invalidate_bo_range(&buffer_gl->b, 0, 0);
 
@@ -1116,34 +1144,6 @@ static const struct wined3d_resource_ops buffer_resource_ops =
     buffer_resource_sub_resource_unmap,
 };
 
-GLenum wined3d_buffer_gl_binding_from_bind_flags(const struct wined3d_gl_info *gl_info, uint32_t bind_flags)
-{
-    if (!bind_flags)
-        return GL_PIXEL_UNPACK_BUFFER;
-
-    if (bind_flags == WINED3D_BIND_INDEX_BUFFER)
-        return GL_ELEMENT_ARRAY_BUFFER;
-
-    if (bind_flags & (WINED3D_BIND_SHADER_RESOURCE | WINED3D_BIND_UNORDERED_ACCESS)
-            && gl_info->supported[ARB_TEXTURE_BUFFER_OBJECT])
-        return GL_TEXTURE_BUFFER;
-
-    if (bind_flags & WINED3D_BIND_CONSTANT_BUFFER)
-        return GL_UNIFORM_BUFFER;
-
-    if (bind_flags & WINED3D_BIND_STREAM_OUTPUT)
-        return GL_TRANSFORM_FEEDBACK_BUFFER;
-
-    if (bind_flags & WINED3D_BIND_INDIRECT_BUFFER
-            && gl_info->supported[ARB_DRAW_INDIRECT])
-        return GL_DRAW_INDIRECT_BUFFER;
-
-    if (bind_flags & ~(WINED3D_BIND_VERTEX_BUFFER | WINED3D_BIND_INDEX_BUFFER))
-        FIXME("Unhandled bind flags %#x.\n", bind_flags);
-
-    return GL_ARRAY_BUFFER;
-}
-
 static HRESULT wined3d_buffer_init(struct wined3d_buffer *buffer, struct wined3d_device *device,
         const struct wined3d_buffer_desc *desc, const struct wined3d_sub_resource_data *data,
         void *parent, const struct wined3d_parent_ops *parent_ops, const struct wined3d_buffer_ops *buffer_ops)
@@ -1399,12 +1399,8 @@ HRESULT wined3d_buffer_gl_init(struct wined3d_buffer_gl *buffer_gl, struct wined
     return wined3d_buffer_init(&buffer_gl->b, device, desc, data, parent, parent_ops, &wined3d_buffer_gl_ops);
 }
 
-static BOOL wined3d_buffer_vk_create_buffer_object(struct wined3d_buffer_vk *buffer_vk,
-        struct wined3d_context_vk *context_vk)
+static VkBufferUsageFlags vk_buffer_usage_from_bind_flags(uint32_t bind_flags)
 {
-    struct wined3d_resource *resource = &buffer_vk->b.resource;
-    uint32_t bind_flags = resource->bind_flags;
-    VkMemoryPropertyFlags memory_type;
     VkBufferUsageFlags usage;
 
     usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -1424,24 +1420,42 @@ static BOOL wined3d_buffer_vk_create_buffer_object(struct wined3d_buffer_vk *buf
         usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
     if (bind_flags & (WINED3D_BIND_RENDER_TARGET | WINED3D_BIND_DEPTH_STENCIL))
         FIXME("Ignoring some bind flags %#x.\n", bind_flags);
+    return usage;
+}
 
-    memory_type = 0;
-    if (resource->access & WINED3D_RESOURCE_ACCESS_MAP_R)
+static VkMemoryPropertyFlags vk_memory_type_from_access_flags(uint32_t access, uint32_t usage)
+{
+    VkMemoryPropertyFlags memory_type = 0;
+
+    if (access & WINED3D_RESOURCE_ACCESS_MAP_R)
         memory_type |= VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-    else if (resource->access & WINED3D_RESOURCE_ACCESS_MAP_W)
+    else if (access & WINED3D_RESOURCE_ACCESS_MAP_W)
         memory_type |= VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-    else if (!(resource->usage & WINED3DUSAGE_DYNAMIC))
+    else if (!(usage & WINED3DUSAGE_DYNAMIC))
         memory_type |= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    return memory_type;
+}
 
-    if (!(wined3d_context_vk_create_bo(context_vk, resource->size, usage, memory_type, &buffer_vk->bo)))
+static BOOL wined3d_buffer_vk_create_buffer_object(struct wined3d_buffer_vk *buffer_vk,
+        struct wined3d_context_vk *context_vk)
+{
+    struct wined3d_resource *resource = &buffer_vk->b.resource;
+    struct wined3d_bo_vk *bo_vk;
+
+    if (!(bo_vk = heap_alloc(sizeof(*bo_vk))))
+        return FALSE;
+
+    if (!(wined3d_context_vk_create_bo(context_vk, resource->size,
+            vk_buffer_usage_from_bind_flags(resource->bind_flags),
+            vk_memory_type_from_access_flags(resource->access, resource->usage), bo_vk)))
     {
         WARN("Failed to create Vulkan buffer.\n");
         return FALSE;
     }
 
-    list_init(&buffer_vk->bo_user.entry);
-    list_add_head(&buffer_vk->bo.b.users, &buffer_vk->bo_user.entry);
-    buffer_vk->b.buffer_object = (uintptr_t)&buffer_vk->bo;
+    list_init(&buffer_vk->b.bo_user.entry);
+    list_add_head(&bo_vk->b.users, &buffer_vk->b.bo_user.entry);
+    buffer_vk->b.buffer_object = (uintptr_t)bo_vk;
     buffer_invalidate_bo_range(&buffer_vk->b, 0, 0);
 
     return TRUE;
@@ -1449,13 +1463,15 @@ static BOOL wined3d_buffer_vk_create_buffer_object(struct wined3d_buffer_vk *buf
 
 const VkDescriptorBufferInfo *wined3d_buffer_vk_get_buffer_info(struct wined3d_buffer_vk *buffer_vk)
 {
-    if (buffer_vk->bo_user.valid)
+    struct wined3d_bo_vk *bo = (struct wined3d_bo_vk *)buffer_vk->b.buffer_object;
+
+    if (buffer_vk->b.bo_user.valid)
         return &buffer_vk->buffer_info;
 
-    buffer_vk->buffer_info.buffer = buffer_vk->bo.vk_buffer;
-    buffer_vk->buffer_info.offset = buffer_vk->bo.buffer_offset;
+    buffer_vk->buffer_info.buffer = bo->vk_buffer;
+    buffer_vk->buffer_info.offset = bo->buffer_offset;
     buffer_vk->buffer_info.range = buffer_vk->b.resource.size;
-    buffer_vk->bo_user.valid = true;
+    buffer_vk->b.bo_user.valid = true;
 
     return &buffer_vk->buffer_info;
 }
@@ -1483,20 +1499,19 @@ static BOOL wined3d_buffer_vk_prepare_location(struct wined3d_buffer *buffer,
 static void wined3d_buffer_vk_unload_location(struct wined3d_buffer *buffer,
         struct wined3d_context *context, unsigned int location)
 {
+    struct wined3d_bo_vk *bo_vk = (struct wined3d_bo_vk *)buffer->buffer_object;
     struct wined3d_context_vk *context_vk = wined3d_context_vk(context);
-    struct wined3d_buffer_vk *buffer_vk = wined3d_buffer_vk(buffer);
 
     TRACE("buffer %p, context %p, location %s.\n", buffer, context, wined3d_debug_location(location));
 
     switch (location)
     {
         case WINED3D_LOCATION_BUFFER:
-            buffer_vk->bo_user.valid = false;
-            list_remove(&buffer_vk->bo_user.entry);
-            wined3d_context_vk_destroy_bo(context_vk, &buffer_vk->bo);
-            buffer_vk->bo.vk_buffer = VK_NULL_HANDLE;
-            buffer_vk->bo.memory = NULL;
-            buffer_vk->b.buffer_object = 0u;
+            buffer->bo_user.valid = false;
+            list_remove(&buffer->bo_user.entry);
+            wined3d_context_vk_destroy_bo(context_vk, bo_vk);
+            heap_free(bo_vk);
+            buffer->buffer_object = 0u;
             break;
 
         default:
@@ -1527,7 +1542,7 @@ static void wined3d_buffer_vk_upload_ranges(struct wined3d_buffer *buffer, struc
     if (!ranges->offset && ranges->size == resource->size)
         flags |= WINED3D_MAP_DISCARD;
 
-    dst_bo = &wined3d_buffer_vk(buffer)->bo;
+    dst_bo = (struct wined3d_bo_vk *)buffer->buffer_object;
     if (!(dst_bo->memory_type & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) || (!(flags & WINED3D_MAP_DISCARD)
             && dst_bo->command_buffer_id > context_vk->completed_command_buffer_id))
     {
@@ -1619,6 +1634,7 @@ void wined3d_buffer_vk_barrier(struct wined3d_buffer_vk *buffer_vk,
 
     if (src_bind_mask)
     {
+        const struct wined3d_bo_vk *bo = (struct wined3d_bo_vk *)buffer_vk->b.buffer_object;
         const struct wined3d_vk_info *vk_info = context_vk->vk_info;
         VkBufferMemoryBarrier vk_barrier;
 
@@ -1633,8 +1649,8 @@ void wined3d_buffer_vk_barrier(struct wined3d_buffer_vk *buffer_vk,
         vk_barrier.dstAccessMask = vk_access_mask_from_bind_flags(bind_mask);
         vk_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         vk_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        vk_barrier.buffer = buffer_vk->bo.vk_buffer;
-        vk_barrier.offset = buffer_vk->bo.buffer_offset;
+        vk_barrier.buffer = bo->vk_buffer;
+        vk_barrier.offset = bo->buffer_offset;
         vk_barrier.size = buffer_vk->b.resource.size;
         VK_CALL(vkCmdPipelineBarrier(wined3d_context_vk_get_command_buffer(context_vk),
                 vk_pipeline_stage_mask_from_bind_flags(src_bind_mask),

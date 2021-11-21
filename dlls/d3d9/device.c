@@ -2559,9 +2559,7 @@ static HRESULT WINAPI d3d9_device_EndStateBlock(IDirect3DDevice9Ex *iface, IDire
 
     if (!(object = heap_alloc_zero(sizeof(*object))))
     {
-        wined3d_mutex_lock();
         wined3d_stateblock_decref(wined3d_stateblock);
-        wined3d_mutex_unlock();
         return E_OUTOFMEMORY;
     }
 
@@ -2569,9 +2567,7 @@ static HRESULT WINAPI d3d9_device_EndStateBlock(IDirect3DDevice9Ex *iface, IDire
     if (FAILED(hr))
     {
         WARN("Failed to initialize stateblock, hr %#x.\n", hr);
-        wined3d_mutex_lock();
         wined3d_stateblock_decref(wined3d_stateblock);
-        wined3d_mutex_unlock();
         heap_free(object);
         return hr;
     }

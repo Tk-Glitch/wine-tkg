@@ -216,16 +216,75 @@ struct symt_data
     } u;
 };
 
+/* We must take into account that most debug formats (dwarf and pdb) report for
+ * code (esp. inlined functions) inside functions the following way:
+ * - block
+ *   + is represented by a contiguous area of memory,
+ *     or at least have lo/hi addresses to encompass it's contents
+ *   + but most importantly, block A's lo/hi range is always embedded within
+ *     its parent (block or function)
+ * - inline site:
+ *   + is most of the times represented by a set of ranges (instead of a
+ *     contiguous block)
+ *   + native dbghelp only exports the start address, not its size
+ *   + the set of ranges isn't always embedded in enclosing block (if any)
+ *   + the set of ranges is always embedded in top function
+ * - (top) function
+ *   + is described as a contiguous block of memory
+ *
+ * On top of the items above (taken as assumptions), we also assume that:
+ * - a range in inline site A, is disjoint from all the other ranges in
+ *   inline site A
+ * - a range in inline site A, is either disjoint or embedded into any of
+ *   the ranges of inline sites parent of A
+ *
+ * Therefore, we also store all inline sites inside a function:
+ * - available as a linked list to simplify the walk among them
+ * - this linked list shall preserve the weak order of the lexical-parent
+ *   relationship (eg for any inline site A, which has inline site B
+ *   as lexical parent, then A is present before B in the linked list)
+ * - hence (from the assumptions above), when looking up which inline site
+ *   contains a given address, the first range containing that address found
+ *   while walking the list of inline sites is the right one.
+ */
+
 struct symt_function
 {
-    struct symt                 symt;
+    struct symt                 symt;           /* SymTagFunction (or SymTagInlineSite when embedded in symt_inlinesite) */
     struct hash_table_elt       hash_elt;       /* if global symbol */
     ULONG_PTR                   address;
     struct symt*                container;      /* compiland */
     struct symt*                type;           /* points to function_signature */
     ULONG_PTR                   size;
     struct vector               vlines;
-    struct vector               vchildren;      /* locals, params, blocks, start/end, labels */
+    struct vector               vchildren;      /* locals, params, blocks, start/end, labels, inline sites */
+    struct symt_inlinesite*     next_inlinesite;/* linked list of inline sites in this function */
+};
+
+/* FIXME: this could be optimized later on by using relative offsets and smaller integral sizes */
+struct addr_range
+{
+    DWORD64                     low;            /* absolute address of first byte of the range */
+    DWORD64                     high;           /* absolute address of first byte after the range */
+};
+
+/* tests whether ar2 is inside ar1 */
+static inline BOOL addr_range_inside(const struct addr_range* ar1, const struct addr_range* ar2)
+{
+    return ar1->low <= ar2->low && ar2->high <= ar1->high;
+}
+
+/* tests whether ar1 and ar2 are disjoint */
+static inline BOOL addr_range_disjoint(const struct addr_range* ar1, const struct addr_range* ar2)
+{
+    return ar1->high <= ar2->low || ar2->high <= ar1->low;
+}
+
+/* a symt_inlinesite* can be casted to a symt_function* to access all function bits */
+struct symt_inlinesite
+{
+    struct symt_function        func;
+    struct vector               vranges;        /* of addr_range: where the inline site is actually defined */
 };
 
 struct symt_hierarchy_point
@@ -438,6 +497,8 @@ struct process
     ULONG_PTR                   dbg_hdr_addr;
 
     IMAGEHLP_STACK_FRAME        ctx_frame;
+    DWORD64                     localscope_pc;
+    struct symt*                localscope_symt;
 
     unsigned                    buffer_size;
     void*                       buffer;
@@ -458,7 +519,7 @@ struct line_info
                                 line_number;
     union
     {
-        ULONG_PTR                   pc_offset;   /* if is_source_file isn't set */
+        ULONG_PTR                   address;     /* absolute, if is_source_file isn't set */
         unsigned                    source_file; /* if is_source_file is set */
     } u;
 };
@@ -601,6 +662,21 @@ struct cpu
 };
 
 extern struct cpu*      dbghelp_current_cpu DECLSPEC_HIDDEN;
+
+/* PDB and Codeview */
+
+struct msc_debug_info
+{
+    struct module*              module;
+    int                         nsect;
+    const IMAGE_SECTION_HEADER* sectp;
+    int                         nomap;
+    const OMAP*                 omapp;
+    const BYTE*                 root;
+};
+
+/* coff.c */
+extern BOOL coff_process_info(const struct msc_debug_info* msc_dbg) DECLSPEC_HIDDEN;
 
 /* dbghelp.c */
 extern struct process* process_find_by_handle(HANDLE hProcess) DECLSPEC_HIDDEN;
@@ -756,6 +832,13 @@ extern struct symt_function*
                                       const char* name,
                                       ULONG_PTR addr, ULONG_PTR size,
                                       struct symt* type) DECLSPEC_HIDDEN;
+extern struct symt_inlinesite*
+                    symt_new_inlinesite(struct module* module,
+                                        struct symt_function* func,
+                                        struct symt* parent,
+                                        const char* name,
+                                        ULONG_PTR addr,
+                                        struct symt* type) DECLSPEC_HIDDEN;
 extern void         symt_add_func_line(struct module* module,
                                        struct symt_function* func, 
                                        unsigned source_idx, int line_num, 
@@ -785,6 +868,9 @@ extern struct symt_hierarchy_point*
                                             enum SymTagEnum point, 
                                             const struct location* loc,
                                             const char* name) DECLSPEC_HIDDEN;
+extern BOOL         symt_add_inlinesite_range(struct module* module,
+                                              struct symt_inlinesite* inlined,
+                                              ULONG_PTR low, ULONG_PTR high) DECLSPEC_HIDDEN;
 extern struct symt_thunk*
                     symt_new_thunk(struct module* module, 
                                    struct symt_compiland* parent,
@@ -845,3 +931,39 @@ extern struct symt_pointer*
 extern struct symt_typedef*
                     symt_new_typedef(struct module* module, struct symt* ref, 
                                      const char* name) DECLSPEC_HIDDEN;
+extern struct symt_inlinesite*
+                    symt_find_lowest_inlined(struct symt_function* func, DWORD64 addr) DECLSPEC_HIDDEN;
+extern struct symt*
+                    symt_get_upper_inlined(struct symt_inlinesite* inlined) DECLSPEC_HIDDEN;
+static inline struct symt_function*
+                    symt_get_function_from_inlined(struct symt_inlinesite* inlined)
+{
+    while (!symt_check_tag(&inlined->func.symt, SymTagFunction))
+        inlined = (struct symt_inlinesite*)symt_get_upper_inlined(inlined);
+    return &inlined->func;
+}
+extern struct symt_inlinesite*
+                    symt_find_inlined_site(struct module* module,
+                                           DWORD64 addr, DWORD inline_ctx) DECLSPEC_HIDDEN;
+extern DWORD        symt_get_inlinesite_depth(HANDLE hProcess, DWORD64 addr) DECLSPEC_HIDDEN;
+
+/* Inline context encoding (different from what native does):
+ * bits 31:30: 3 ignore (includes INLINE_FRAME_CONTEXT_IGNORE=0xFFFFFFFF)
+ *             2 regular frame
+ *             1 frame with inlined function(s).
+ *             0 init   (includes INLINE_FRAME_CONTEXT_INIT=0)
+ * so either stackwalkex is called with:
+ * - inlinectx=IGNORE, and we use (old) StackWalk64 behavior:
+ * - inlinectx=INIT, and StackWalkEx will upon return swing back&forth between:
+ *      INLINE when the frame is from an inline site (inside a function)
+ *      REGULAR when the frame is for a function without inline site
+ * bits 29:00  depth of inline site (way too big!!)
+ *             0 being the lowest inline site
+ */
+#define IFC_MODE_IGNORE  0xC0000000
+#define IFC_MODE_REGULAR 0x80000000
+#define IFC_MODE_INLINE  0x40000000
+#define IFC_MODE_INIT    0x00000000
+#define IFC_DEPTH_MASK   0x3FFFFFFF
+#define IFC_MODE(x)      ((x) & ~IFC_DEPTH_MASK)
+#define IFC_DEPTH(x)     ((x) & IFC_DEPTH_MASK)

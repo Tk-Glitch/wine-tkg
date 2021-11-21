@@ -57,7 +57,7 @@ static const print_query_prop pq[] = {
     { L"",                          L"~",                 L"Win32_Processor",            L"MaxClockSpeed",         L"Mhz"}
 };
 
-static int sysinfo_vprintfW(const WCHAR *msg, __ms_va_list va_args)
+static int sysinfo_vprintfW(const WCHAR *msg, va_list va_args)
 {
     int wlen;
     DWORD count, ret;
@@ -92,12 +92,12 @@ static int sysinfo_vprintfW(const WCHAR *msg, __ms_va_list va_args)
 
 static int WINAPIV sysinfo_printfW(const WCHAR *msg, ...)
 {
-    __ms_va_list va_args;
+    va_list va_args;
     int len;
 
-    __ms_va_start(va_args, msg);
+    va_start(va_args, msg);
     len = sysinfo_vprintfW(msg, va_args);
-    __ms_va_end(va_args);
+    va_end(va_args);
 
     return len;
 }

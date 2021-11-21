@@ -1122,7 +1122,7 @@ static void BUTTON_PositionRect(LONG style, const RECT *outerRect, RECT *innerRe
     INT width = innerRect->right - innerRect->left;
     INT height = innerRect->bottom - innerRect->top;
 
-    if ((style & WS_EX_RIGHT) && !(style & BS_CENTER)) style |= BS_CENTER;
+    if ((style & BS_PUSHLIKE) && !(style & BS_CENTER)) style |= BS_CENTER;
 
     if (!(style & BS_CENTER))
     {
@@ -1547,17 +1547,15 @@ static BOOL CL_GetIdealSize(BUTTON_INFO *infoPtr, SIZE *size)
  */
 static UINT BUTTON_CalcLayoutRects(const BUTTON_INFO *infoPtr, HDC hdc, RECT *labelRc, RECT *imageRc, RECT *textRc)
 {
-   LONG style = GetWindowLongW( infoPtr->hwnd, GWL_STYLE );
-   LONG ex_style = GetWindowLongW( infoPtr->hwnd, GWL_EXSTYLE );
-   LONG split_style = infoPtr->imagelist.himl ? BUTTON_ILStoBS(infoPtr->imagelist.uAlign) : style;
    WCHAR *text = get_button_text(infoPtr);
    SIZE imageSize = BUTTON_GetImageSize(infoPtr);
-   UINT dtStyle = BUTTON_BStoDT(style, ex_style);
    RECT labelRect, imageRect, imageRectWithMargin, textRect;
    LONG imageMarginWidth, imageMarginHeight;
    const RECT *textMargin = BUTTON_GetTextMargin(infoPtr);
+   LONG style, ex_style, split_style;
    RECT emptyMargin = {0};
    LONG maxTextWidth;
+   UINT dtStyle;
 
    /* Calculate label rectangle according to label type */
    if ((imageSize.cx == 0 && imageSize.cy == 0) && (text == NULL || text[0] == '\0'))
@@ -1568,6 +1566,14 @@ static UINT BUTTON_CalcLayoutRects(const BUTTON_INFO *infoPtr, HDC hdc, RECT *la
        heap_free(text);
        return (UINT)-1;
    }
+
+   style = GetWindowLongW(infoPtr->hwnd, GWL_STYLE);
+   ex_style = GetWindowLongW(infoPtr->hwnd, GWL_EXSTYLE);
+   /* Add BS_RIGHT directly. When both WS_EX_RIGHT and BS_LEFT are present, it becomes BS_CENTER */
+   if (ex_style & WS_EX_RIGHT)
+       style |= BS_RIGHT;
+   split_style = infoPtr->imagelist.himl ? BUTTON_ILStoBS(infoPtr->imagelist.uAlign) : style;
+   dtStyle = BUTTON_BStoDT(style, ex_style);
 
    SetRect(&imageRect, 0, 0, imageSize.cx, imageSize.cy);
    imageRectWithMargin = imageRect;
@@ -1755,6 +1761,38 @@ static void BUTTON_DrawLabel(const BUTTON_INFO *infoPtr, HDC hdc, UINT dtFlags, 
    heap_free(text);
 }
 
+static void BUTTON_DrawThemedLabel(const BUTTON_INFO *info, HDC hdc, UINT text_flags,
+                                   const RECT *image_rect, const RECT *text_rect, HTHEME theme,
+                                   int part, int state)
+{
+    HBRUSH brush = NULL;
+    UINT image_flags;
+    WCHAR *text;
+
+    if (show_image(info))
+    {
+        image_flags = IsWindowEnabled(info->hwnd) ? DSS_NORMAL : DSS_DISABLED;
+
+        if ((GetWindowLongW(info->hwnd, GWL_STYLE) & BS_PUSHLIKE)
+            && (info->state & BST_INDETERMINATE))
+        {
+            brush = GetSysColorBrush(COLOR_GRAYTEXT);
+            image_flags |= DSS_MONO;
+        }
+
+        BUTTON_DrawImage(info, hdc, brush, image_flags, image_rect);
+    }
+
+   if (show_image_only(info))
+       return;
+
+   if (!(text = get_button_text(info)))
+       return;
+
+   DrawThemeText(theme, hdc, part, state, text, lstrlenW(text), text_flags, 0, text_rect);
+   heap_free(text);
+}
+
 /**********************************************************************
  *       Push Button Functions
  */
@@ -1881,11 +1919,65 @@ static void PB_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
  *       Check Box & Radio Button Functions
  */
 
+/* Get adjusted check box or radio box rectangle */
+static RECT get_box_rect(LONG style, LONG ex_style, const RECT *content_rect,
+                         const RECT *label_rect, BOOL has_label, SIZE box_size)
+{
+    RECT rect;
+    int delta;
+
+    rect = *content_rect;
+
+    if (style & BS_LEFTTEXT || ex_style & WS_EX_RIGHT)
+        rect.left = rect.right - box_size.cx;
+    else
+        rect.right = rect.left + box_size.cx;
+
+    /* Adjust box when label is valid */
+    if (has_label)
+    {
+        rect.top = label_rect->top;
+        rect.bottom = label_rect->bottom;
+    }
+
+    /* Box must have the correct height */
+    delta = rect.bottom - rect.top - box_size.cy;
+    if ((style & BS_VCENTER) == BS_TOP)
+    {
+        if (delta <= 0)
+            rect.top -= -delta / 2 + 1;
+
+        rect.bottom = rect.top + box_size.cy;
+    }
+    else if ((style & BS_VCENTER) == BS_BOTTOM)
+    {
+        if (delta <= 0)
+            rect.bottom += -delta / 2 + 1;
+
+        rect.top = rect.bottom - box_size.cy;
+    }
+    else
+    {
+        if (delta > 0)
+        {
+            rect.bottom -= delta / 2 + 1;
+            rect.top = rect.bottom - box_size.cy;
+        }
+        else if (delta < 0)
+        {
+            rect.top -= -delta / 2 + 1;
+            rect.bottom = rect.top + box_size.cy;
+        }
+    }
+
+    return rect;
+}
+
 static void CB_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
 {
-    RECT rbox, labelRect, imageRect, textRect, client;
+    RECT rbox, labelRect, oldLabelRect, imageRect, textRect, client;
     HBRUSH hBrush;
-    int delta, text_offset, checkBoxWidth, checkBoxHeight;
+    int text_offset;
     UINT dtFlags;
     LRESULT cdrf;
     HFONT hFont;
@@ -1893,6 +1985,7 @@ static void CB_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
     LONG state = infoPtr->state;
     LONG style = GetWindowLongW( infoPtr->hwnd, GWL_STYLE );
     LONG ex_style = GetWindowLongW( infoPtr->hwnd, GWL_EXSTYLE );
+    SIZE box_size;
     HWND parent;
     HRGN hrgn;
 
@@ -1903,10 +1996,10 @@ static void CB_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
     }
 
     GetClientRect(infoPtr->hwnd, &client);
-    rbox = labelRect = client;
+    labelRect = client;
 
-    checkBoxWidth  = 12 * GetDpiForWindow( infoPtr->hwnd ) / 96 + 1;
-    checkBoxHeight = 12 * GetDpiForWindow( infoPtr->hwnd ) / 96 + 1;
+    box_size.cx = 12 * GetDpiForWindow(infoPtr->hwnd) / 96 + 1;
+    box_size.cy = box_size.cx;
 
     if ((hFont = infoPtr->font)) SelectObject( hDC, hFont );
     GetCharWidthW( hDC, '0', '0', &text_offset );
@@ -1920,15 +2013,13 @@ static void CB_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
     hrgn = set_control_clipping( hDC, &client );
 
     if (style & BS_LEFTTEXT || ex_style & WS_EX_RIGHT)
-    {
-        labelRect.right -= checkBoxWidth + text_offset;
-        rbox.left = rbox.right - checkBoxWidth;
-    }
+        labelRect.right -= box_size.cx + text_offset;
     else
-    {
-        labelRect.left += checkBoxWidth + text_offset;
-        rbox.right = checkBoxWidth;
-    }
+        labelRect.left += box_size.cx + text_offset;
+
+    oldLabelRect = labelRect;
+    dtFlags = BUTTON_CalcLayoutRects(infoPtr, hDC, &labelRect, &imageRect, &textRect);
+    rbox = get_box_rect(style, ex_style, &client, &labelRect, dtFlags != (UINT)-1L, box_size);
 
     init_custom_draw(&nmcd, infoPtr, hDC, &client);
 
@@ -1946,16 +2037,6 @@ static void CB_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
     }
 
     /* Draw label */
-    client = labelRect;
-    dtFlags = BUTTON_CalcLayoutRects(infoPtr, hDC, &labelRect, &imageRect, &textRect);
-
-    /* Only adjust rbox when rtext is valid */
-    if (dtFlags != (UINT)-1L)
-    {
-        rbox.top = labelRect.top;
-        rbox.bottom = labelRect.bottom;
-    }
-
     /* Send paint notifications */
     nmcd.dwDrawStage = CDDS_PREPAINT;
     cdrf = SendMessageW(parent, WM_NOTIFY, nmcd.hdr.idFrom, (LPARAM)&nmcd);
@@ -1977,45 +2058,6 @@ static void CB_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
             if (state & BST_PUSHED)  flags |= DFCS_PUSHED;
             if (style & WS_DISABLED) flags |= DFCS_INACTIVE;
 
-            /* rbox must have the correct height */
-            delta = rbox.bottom - rbox.top - checkBoxHeight;
-
-            if ((style & BS_VCENTER) == BS_TOP)
-            {
-                if (delta > 0)
-                    rbox.bottom = rbox.top + checkBoxHeight;
-                else
-                {
-                    rbox.top -= -delta / 2 + 1;
-                    rbox.bottom = rbox.top + checkBoxHeight;
-                }
-            }
-            else if ((style & BS_VCENTER) == BS_BOTTOM)
-            {
-                if (delta > 0)
-                    rbox.top = rbox.bottom - checkBoxHeight;
-                else
-                {
-                    rbox.bottom += -delta / 2 + 1;
-                    rbox.top = rbox.bottom - checkBoxHeight;
-                }
-            }
-            else  /* Default */
-            {
-                if (delta > 0)
-                {
-                    int ofs = delta / 2;
-                    rbox.bottom -= ofs + 1;
-                    rbox.top = rbox.bottom - checkBoxHeight;
-                }
-                else if (delta < 0)
-                {
-                    int ofs = -delta / 2;
-                    rbox.top -= ofs + 1;
-                    rbox.bottom = rbox.top + checkBoxHeight;
-                }
-            }
-
             DrawFrameControl(hDC, &rbox, DFC_BUTTON, flags);
         }
 
@@ -2035,7 +2077,7 @@ static void CB_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
     {
         labelRect.left--;
         labelRect.right++;
-        IntersectRect(&labelRect, &labelRect, &client);
+        IntersectRect(&labelRect, &labelRect, &oldLabelRect);
         DrawFocusRect(hDC, &labelRect);
     }
 
@@ -2113,10 +2155,6 @@ static void GB_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
         labelRect.right++;
         labelRect.bottom++;
         FillRect(hDC, &labelRect, hbr);
-        labelRect.left++;
-        labelRect.right--;
-        labelRect.bottom--;
-
         BUTTON_DrawLabel(infoPtr, hDC, dtFlags, &imageRect, &textRect);
     }
     SelectClipRgn( hDC, hrgn );
@@ -2655,16 +2693,17 @@ cleanup:
  */
 static void PB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, int state, UINT dtFlags, BOOL focused)
 {
-    RECT bgRect, textRect;
+    RECT bgRect, labelRect, imageRect, textRect, focusRect;
     NMCUSTOMDRAW nmcd;
     LRESULT cdrf;
     HWND parent;
-    WCHAR *text;
 
     if (infoPtr->font) SelectObject(hDC, infoPtr->font);
 
     GetClientRect(infoPtr->hwnd, &bgRect);
-    GetThemeBackgroundContentRect(theme, hDC, BP_PUSHBUTTON, state, &bgRect, &textRect);
+    GetThemeBackgroundContentRect(theme, hDC, BP_PUSHBUTTON, state, &bgRect, &labelRect);
+    focusRect = labelRect;
+
     init_custom_draw(&nmcd, infoPtr, hDC, &bgRect);
 
     parent = GetParent(infoPtr->hwnd);
@@ -2689,10 +2728,12 @@ static void PB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     cdrf = SendMessageW(parent, WM_NOTIFY, nmcd.hdr.idFrom, (LPARAM)&nmcd);
     if (cdrf & CDRF_SKIPDEFAULT) return;
 
-    if (!(cdrf & CDRF_DOERASE) && (text = get_button_text(infoPtr)))
+    if (!(cdrf & CDRF_DOERASE))
     {
-        DrawThemeText(theme, hDC, BP_PUSHBUTTON, state, text, lstrlenW(text), dtFlags, 0, &textRect);
-        heap_free(text);
+        dtFlags = BUTTON_CalcLayoutRects(infoPtr, hDC, &labelRect, &imageRect, &textRect);
+        if (dtFlags != (UINT)-1L)
+            BUTTON_DrawThemedLabel(infoPtr, hDC, dtFlags, &imageRect, &textRect, theme,
+                                   BP_PUSHBUTTON, state);
     }
 
     if (cdrf & CDRF_NOTIFYPOSTPAINT)
@@ -2702,36 +2743,25 @@ static void PB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     }
     if (cdrf & CDRF_SKIPPOSTPAINT) return;
 
-    if (focused)
-    {
-        MARGINS margins;
-        RECT focusRect = bgRect;
-
-        GetThemeMargins(theme, hDC, BP_PUSHBUTTON, state, TMT_CONTENTMARGINS, NULL, &margins);
-
-        focusRect.left += margins.cxLeftWidth;
-        focusRect.top += margins.cyTopHeight;
-        focusRect.right -= margins.cxRightWidth;
-        focusRect.bottom -= margins.cyBottomHeight;
-
-        DrawFocusRect( hDC, &focusRect );
-    }
+    if (focused) DrawFocusRect(hDC, &focusRect);
 }
 
 static void CB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, int state, UINT dtFlags, BOOL focused)
 {
-    SIZE sz;
-    RECT bgRect, textRect;
+    RECT client_rect, content_rect, old_label_rect, label_rect, box_rect, image_rect, text_rect;
     HFONT font, hPrevFont = NULL;
     DWORD dwStyle = GetWindowLongW(infoPtr->hwnd, GWL_STYLE);
+    LONG ex_style = GetWindowLongW(infoPtr->hwnd, GWL_EXSTYLE);
     UINT btn_type = get_button_type( dwStyle );
     int part = (btn_type == BS_RADIOBUTTON) || (btn_type == BS_AUTORADIOBUTTON) ? BP_RADIOBUTTON : BP_CHECKBOX;
     NMCUSTOMDRAW nmcd;
     LRESULT cdrf;
     LOGFONTW lf;
     HWND parent;
-    WCHAR *text;
     BOOL created_font = FALSE;
+    int text_offset;
+    SIZE box_size;
+    HRGN region;
 
     HRESULT hr = GetThemeFont(theme, hDC, part, state, TMT_FONT, &lf);
     if (SUCCEEDED(hr)) {
@@ -2747,20 +2777,31 @@ static void CB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
         if (infoPtr->font) SelectObject(hDC, infoPtr->font);
     }
 
-    if (FAILED(GetThemePartSize(theme, hDC, part, state, NULL, TS_DRAW, &sz)))
-        sz.cx = sz.cy = 13;
+    GetClientRect(infoPtr->hwnd, &client_rect);
+    GetThemeBackgroundContentRect(theme, hDC, part, state, &client_rect, &content_rect);
+    region = set_control_clipping(hDC, &client_rect);
 
-    GetClientRect(infoPtr->hwnd, &bgRect);
-    GetThemeBackgroundContentRect(theme, hDC, part, state, &bgRect, &textRect);
-    init_custom_draw(&nmcd, infoPtr, hDC, &bgRect);
+    if (FAILED(GetThemePartSize(theme, hDC, part, state, NULL, TS_DRAW, &box_size)))
+    {
+        box_size.cx = 12 * GetDpiForWindow(infoPtr->hwnd) / 96 + 1;
+        box_size.cy = box_size.cx;
+    }
 
-    if (dtFlags & DT_SINGLELINE) /* Center the checkbox / radio button to the text. */
-        bgRect.top = bgRect.top + (textRect.bottom - textRect.top - sz.cy) / 2;
+    GetCharWidthW(hDC, '0', '0', &text_offset);
+    text_offset /= 2;
 
-    /* adjust for the check/radio marker */
-    bgRect.bottom = bgRect.top + sz.cy;
-    bgRect.right = bgRect.left + sz.cx;
-    textRect.left = bgRect.right + 6;
+    label_rect = content_rect;
+    if (dwStyle & BS_LEFTTEXT || ex_style & WS_EX_RIGHT)
+        label_rect.right -= box_size.cx + text_offset;
+    else
+        label_rect.left += box_size.cx + text_offset;
+
+    old_label_rect = label_rect;
+    dtFlags = BUTTON_CalcLayoutRects(infoPtr, hDC, &label_rect, &image_rect, &text_rect);
+    box_rect = get_box_rect(dwStyle, ex_style, &content_rect, &label_rect, dtFlags != (UINT)-1L,
+                            box_size);
+
+    init_custom_draw(&nmcd, infoPtr, hDC, &client_rect);
 
     parent = GetParent(infoPtr->hwnd);
     if (!parent) parent = infoPtr->hwnd;
@@ -2770,7 +2811,6 @@ static void CB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     if (cdrf & CDRF_SKIPDEFAULT) goto cleanup;
 
     DrawThemeParentBackground(infoPtr->hwnd, hDC, NULL);
-    DrawThemeBackground(theme, hDC, part, state, &bgRect, NULL);
 
     if (cdrf & CDRF_NOTIFYPOSTERASE)
     {
@@ -2783,47 +2823,44 @@ static void CB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     cdrf = SendMessageW(parent, WM_NOTIFY, nmcd.hdr.idFrom, (LPARAM)&nmcd);
     if (cdrf & CDRF_SKIPDEFAULT) goto cleanup;
 
-    text = get_button_text(infoPtr);
-    if (!(cdrf & CDRF_DOERASE) && text)
-        DrawThemeText(theme, hDC, part, state, text, lstrlenW(text), dtFlags, 0, &textRect);
+    /* Draw label */
+    if (!(cdrf & CDRF_DOERASE))
+    {
+        DrawThemeBackground(theme, hDC, part, state, &box_rect, NULL);
+        if (dtFlags != (UINT)-1L)
+            BUTTON_DrawThemedLabel(infoPtr, hDC, dtFlags, &image_rect, &text_rect, theme, part, state);
+    }
 
     if (cdrf & CDRF_NOTIFYPOSTPAINT)
     {
         nmcd.dwDrawStage = CDDS_POSTPAINT;
         SendMessageW(parent, WM_NOTIFY, nmcd.hdr.idFrom, (LPARAM)&nmcd);
     }
+    if ((cdrf & CDRF_SKIPPOSTPAINT) || dtFlags == (UINT)-1L) goto cleanup;
 
-    if (text)
+    if (focused)
     {
-        if (!(cdrf & CDRF_SKIPPOSTPAINT) && focused)
-        {
-            RECT focusRect;
-
-            focusRect = textRect;
-
-            DrawTextW(hDC, text, lstrlenW(text), &focusRect, dtFlags | DT_CALCRECT);
-
-            if (focusRect.right < textRect.right) focusRect.right++;
-            focusRect.bottom = textRect.bottom;
-
-            DrawFocusRect( hDC, &focusRect );
-        }
-
-        heap_free(text);
+        label_rect.left--;
+        label_rect.right++;
+        IntersectRect(&label_rect, &label_rect, &old_label_rect);
+        DrawFocusRect(hDC, &label_rect);
     }
 
 cleanup:
+    SelectClipRgn(hDC, region);
+    if (region) DeleteObject(region);
     if (created_font) DeleteObject(font);
     if (hPrevFont) SelectObject(hDC, hPrevFont);
 }
 
 static void GB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, int state, UINT dtFlags, BOOL focused)
 {
-    RECT bgRect, textRect, contentRect;
-    WCHAR *text = get_button_text(infoPtr);
+    RECT clientRect, contentRect, imageRect, textRect, bgRect;
+    HRGN region, textRegion = NULL;
     LOGFONTW lf;
     HFONT font, hPrevFont = NULL;
     BOOL created_font = FALSE;
+    TEXTMETRICW textMetric;
 
     HRESULT hr = GetThemeFont(theme, hDC, BP_GROUPBOX, state, TMT_FONT, &lf);
     if (SUCCEEDED(hr)) {
@@ -2839,44 +2876,48 @@ static void GB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
             SelectObject(hDC, infoPtr->font);
     }
 
-    GetClientRect(infoPtr->hwnd, &bgRect);
-    textRect = bgRect;
+    GetClientRect(infoPtr->hwnd, &clientRect);
+    GetThemeBackgroundContentRect(theme, hDC, BP_GROUPBOX, state, &clientRect, &contentRect);
+    region = set_control_clipping(hDC, &clientRect);
 
-    if (text)
+    bgRect = contentRect;
+    GetTextMetricsW(hDC, &textMetric);
+    bgRect.top += (textMetric.tmHeight / 2) - 1;
+
+    InflateRect(&contentRect, -7, 1);
+    dtFlags = BUTTON_CalcLayoutRects(infoPtr, hDC, &contentRect, &imageRect, &textRect);
+    if (dtFlags != (UINT)-1 && !show_image_only(infoPtr))
     {
-        SIZE textExtent;
-        GetTextExtentPoint32W(hDC, text, lstrlenW(text), &textExtent);
-        bgRect.top += (textExtent.cy / 2);
-        textRect.left += 10;
-        textRect.bottom = textRect.top + textExtent.cy;
-        textRect.right = textRect.left + textExtent.cx + 4;
-
-        ExcludeClipRect(hDC, textRect.left, textRect.top, textRect.right, textRect.bottom);
+        textRegion = CreateRectRgnIndirect(&textRect);
+        ExtSelectClipRgn(hDC, textRegion, RGN_DIFF);
     }
-
-    GetThemeBackgroundContentRect(theme, hDC, BP_GROUPBOX, state, &bgRect, &contentRect);
-    ExcludeClipRect(hDC, contentRect.left, contentRect.top, contentRect.right, contentRect.bottom);
 
     if (IsThemeBackgroundPartiallyTransparent(theme, BP_GROUPBOX, state))
         DrawThemeParentBackground(infoPtr->hwnd, hDC, NULL);
     DrawThemeBackground(theme, hDC, BP_GROUPBOX, state, &bgRect, NULL);
 
-    SelectClipRgn(hDC, NULL);
-
-    if (text)
+    if (dtFlags != (UINT)-1)
     {
-        InflateRect(&textRect, -2, 0);
-        DrawThemeText(theme, hDC, BP_GROUPBOX, state, text, lstrlenW(text), 0, 0, &textRect);
-        heap_free(text);
+        contentRect.left--;
+        contentRect.right++;
+        contentRect.bottom++;
+        if (textRegion)
+        {
+            SelectClipRgn(hDC, textRegion);
+            DeleteObject(textRegion);
+        }
+        BUTTON_DrawThemedLabel(infoPtr, hDC, dtFlags, &imageRect, &textRect, theme, BP_GROUPBOX, state);
     }
 
+    SelectClipRgn(hDC, region);
+    if (region) DeleteObject(region);
     if (created_font) DeleteObject(font);
     if (hPrevFont) SelectObject(hDC, hPrevFont);
 }
 
 static void SB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, int state, UINT dtFlags, BOOL focused)
 {
-    RECT rc, content_rect, push_rect, dropdown_rect;
+    RECT rc, content_rect, push_rect, dropdown_rect, focus_rect, label_rect, image_rect, text_rect;
     NMCUSTOMDRAW nmcd;
     LRESULT cdrf;
     HWND parent;
@@ -2904,6 +2945,7 @@ static void SB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     {
         push_rect = rc;
         DrawThemeBackground(theme, hDC, BP_PUSHBUTTON, state, &rc, NULL);
+        GetThemeBackgroundContentRect(theme, hDC, BP_PUSHBUTTON, state, &push_rect, &focus_rect);
     }
     else
     {
@@ -2924,6 +2966,7 @@ static void SB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
 
         /* The content rect should be the content area of the push button */
         GetThemeBackgroundContentRect(theme, hDC, BP_PUSHBUTTON, state, &push_rect, &content_rect);
+        focus_rect = content_rect;
     }
 
     if (cdrf & CDRF_NOTIFYPOSTERASE)
@@ -2941,13 +2984,12 @@ static void SB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     {
         COLORREF old_color, color;
         INT old_bk_mode;
-        WCHAR *text;
 
-        if ((text = get_button_text(infoPtr)))
-        {
-            DrawThemeText(theme, hDC, BP_PUSHBUTTON, state, text, lstrlenW(text), dtFlags, 0, &content_rect);
-            heap_free(text);
-        }
+        label_rect = content_rect;
+        dtFlags = BUTTON_CalcLayoutRects(infoPtr, hDC, &label_rect, &image_rect, &text_rect);
+        if (dtFlags != (UINT)-1L)
+            BUTTON_DrawThemedLabel(infoPtr, hDC, dtFlags, &image_rect, &text_rect, theme,
+                                   BP_PUSHBUTTON, state);
 
         GetThemeColor(theme, BP_PUSHBUTTON, state, TMT_TEXTCOLOR, &color);
         old_bk_mode = SetBkMode(hDC, TRANSPARENT);
@@ -2966,18 +3008,7 @@ static void SB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     }
     if (cdrf & CDRF_SKIPPOSTPAINT) return;
 
-    if (focused)
-    {
-        MARGINS margins;
-
-        GetThemeMargins(theme, hDC, BP_PUSHBUTTON, state, TMT_CONTENTMARGINS, NULL, &margins);
-
-        push_rect.left += margins.cxLeftWidth;
-        push_rect.top += margins.cyTopHeight;
-        push_rect.right -= margins.cxRightWidth;
-        push_rect.bottom -= margins.cyBottomHeight;
-        DrawFocusRect(hDC, &push_rect);
-    }
+    if (focused) DrawFocusRect(hDC, &focus_rect);
 }
 
 static void CL_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, int state, UINT dtFlags, BOOL focused)

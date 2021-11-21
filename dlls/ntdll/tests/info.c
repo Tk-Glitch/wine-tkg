@@ -438,7 +438,7 @@ static void test_query_timeofday(void)
     if (winetest_debug > 1) trace("uCurrentTimeZoneId : (%d)\n", sti.uCurrentTimeZoneId);
 }
 
-static void test_query_process(void)
+static void test_query_process( BOOL extended )
 {
     NTSTATUS status;
     DWORD last_pid;
@@ -470,25 +470,47 @@ static void test_query_process(void)
         SYSTEM_THREAD_INFORMATION ti[1];
     } SYSTEM_PROCESS_INFORMATION_PRIVATE;
 
-    ULONG SystemInformationLength = sizeof(SYSTEM_PROCESS_INFORMATION_PRIVATE);
-    SYSTEM_PROCESS_INFORMATION_PRIVATE *spi, *spi_buf = HeapAlloc(GetProcessHeap(), 0, SystemInformationLength);
+    BOOL is_process_wow64 = FALSE, current_process_found = FALSE;
+    SYSTEM_PROCESS_INFORMATION_PRIVATE *spi, *spi_buf;
+    SYSTEM_EXTENDED_THREAD_INFORMATION *ti;
+    SYSTEM_INFORMATION_CLASS info_class;
+    void *expected_address;
+    ULONG thread_info_size;
+
+    if (extended)
+    {
+        info_class = SystemExtendedProcessInformation;
+        thread_info_size = sizeof(SYSTEM_EXTENDED_THREAD_INFORMATION);
+    }
+    else
+    {
+        info_class = SystemProcessInformation;
+        thread_info_size = sizeof(SYSTEM_THREAD_INFORMATION);
+    }
 
     /* test ReturnLength */
     ReturnLength = 0;
-    status = pNtQuerySystemInformation(SystemProcessInformation, NULL, 0, &ReturnLength);
+    status = pNtQuerySystemInformation( info_class, NULL, 0, &ReturnLength);
     ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH got %08x\n", status);
-    ok( ReturnLength > 0, "got 0 length\n");
+    ok( ReturnLength > 0, "got 0 length\n" );
 
-    /* W2K3 and later returns the needed length, the rest returns 0, so we have to loop */
-    for (;;)
+    /* W2K3 and later returns the needed length, the rest returns 0. */
+    if (!ReturnLength)
     {
-        status = pNtQuerySystemInformation(SystemProcessInformation, spi_buf, SystemInformationLength, &ReturnLength);
-
-        if (status != STATUS_INFO_LENGTH_MISMATCH) break;
-        
-        spi_buf = HeapReAlloc(GetProcessHeap(), 0, spi_buf , SystemInformationLength *= 2);
+        win_skip( "Zero return length, skipping tests." );
+        return;
     }
-    ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status);
+
+    winetest_push_context( "extended %d", extended );
+
+    spi_buf = HeapAlloc(GetProcessHeap(), 0, ReturnLength);
+    status = pNtQuerySystemInformation(info_class, spi_buf, ReturnLength, &ReturnLength);
+
+    /* Sometimes new process or threads appear between the call and increase the size,
+     * otherwise the previously returned buffer size should be sufficient. */
+    ok( status == STATUS_SUCCESS || status == STATUS_INFO_LENGTH_MISMATCH,
+        "Expected STATUS_SUCCESS, got %08x\n", status );
+
     spi = spi_buf;
 
     for (;;)
@@ -496,27 +518,90 @@ static void test_query_process(void)
         DWORD_PTR tid;
         DWORD j;
 
+        winetest_push_context( "i %u (%s)", i, debugstr_w(spi->ProcessName.Buffer) );
+
         i++;
 
         last_pid = (DWORD_PTR)spi->UniqueProcessId;
-        ok(!(last_pid & 3), "Unexpected PID low bits: %p\n", spi->UniqueProcessId);
-        for (j = 0; j < spi->dwThreadCount; j++)
-        {
-            k++;
-            ok ( spi->ti[j].ClientId.UniqueProcess == spi->UniqueProcessId,
-                 "The owning pid of the thread (%p) doesn't equal the pid (%p) of the process\n",
-                 spi->ti[j].ClientId.UniqueProcess, spi->UniqueProcessId);
+        ok( !(last_pid & 3), "Unexpected PID low bits: %p\n", spi->UniqueProcessId );
 
-            tid = (DWORD_PTR)spi->ti[j].ClientId.UniqueThread;
-            ok(!(tid & 3), "Unexpected TID low bits: %p\n", spi->ti[j].ClientId.UniqueThread);
+        if (last_pid == GetCurrentProcessId())
+            current_process_found = TRUE;
+
+        if (extended && is_wow64 && spi->UniqueProcessId)
+        {
+            InitializeObjectAttributes( &attr, NULL, 0, NULL, NULL );
+            cid.UniqueProcess = spi->UniqueProcessId;
+            cid.UniqueThread = 0;
+            status = NtOpenProcess( &handle, PROCESS_QUERY_LIMITED_INFORMATION, &attr, &cid );
+            ok( status == STATUS_SUCCESS || status == STATUS_ACCESS_DENIED,
+                "Got unexpected status %#x, pid %p.\n", status, spi->UniqueProcessId );
+
+            if (!status)
+            {
+                ULONG_PTR info;
+
+                status = NtQueryInformationProcess( handle, ProcessWow64Information, &info, sizeof(info), NULL );
+                ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+                is_process_wow64 = !!info;
+                NtClose( handle );
+            }
         }
 
-        if (!spi->NextEntryOffset) break;
+        for (j = 0; j < spi->dwThreadCount; j++)
+        {
+            ti = (SYSTEM_EXTENDED_THREAD_INFORMATION *)((BYTE *)spi->ti + j * thread_info_size);
 
+            k++;
+            ok ( ti->ThreadInfo.ClientId.UniqueProcess == spi->UniqueProcessId,
+                 "The owning pid of the thread (%p) doesn't equal the pid (%p) of the process\n",
+                 ti->ThreadInfo.ClientId.UniqueProcess, spi->UniqueProcessId );
+
+            tid = (DWORD_PTR)ti->ThreadInfo.ClientId.UniqueThread;
+            ok( !(tid & 3), "Unexpected TID low bits: %p\n", ti->ThreadInfo.ClientId.UniqueThread );
+
+            if (extended)
+            {
+                todo_wine ok( !!ti->StackBase, "Got NULL StackBase.\n" );
+                todo_wine ok( !!ti->StackLimit, "Got NULL StackLimit.\n" );
+                ok( !!ti->Win32StartAddress, "Got NULL Win32StartAddress.\n" );
+
+                cid.UniqueProcess = 0;
+                cid.UniqueThread = ti->ThreadInfo.ClientId.UniqueThread;
+
+                InitializeObjectAttributes( &attr, NULL, 0, NULL, NULL );
+                status = NtOpenThread( &handle, THREAD_QUERY_INFORMATION, &attr, &cid );
+                if (!status)
+                {
+                    THREAD_BASIC_INFORMATION tbi;
+
+                    status = pNtQueryInformationThread( handle, ThreadBasicInformation, &tbi, sizeof(tbi), NULL );
+                    ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+                    expected_address = tbi.TebBaseAddress;
+                    if (is_wow64 && is_process_wow64)
+                        expected_address = (BYTE *)expected_address - 0x2000;
+                    if (!is_wow64 && !is_process_wow64 && !tbi.TebBaseAddress)
+                        win_skip( "Could not get TebBaseAddress, thread %u.\n", j );
+                    else
+                        ok( ti->TebBase == expected_address || (is_wow64 && !expected_address && !!ti->TebBase),
+                            "Got unexpected TebBase %p, expected %p.\n", ti->TebBase, expected_address );
+
+                    NtClose( handle );
+                }
+            }
+        }
+
+        if (!spi->NextEntryOffset)
+        {
+            winetest_pop_context();
+            break;
+        }
         one_before_last_pid = last_pid;
 
         spi = (SYSTEM_PROCESS_INFORMATION_PRIVATE*)((char*)spi + spi->NextEntryOffset);
+        winetest_pop_context();
     }
+    ok( current_process_found, "Test process not found.\n" );
     if (winetest_debug > 1) trace("%u processes, %u threads\n", i, k);
 
     if (one_before_last_pid == 0) one_before_last_pid = last_pid;
@@ -560,6 +645,7 @@ static void test_query_process(void)
 
         NtClose( handle );
     }
+    winetest_pop_context();
 }
 
 static void test_query_procperf(void)
@@ -3300,7 +3386,8 @@ START_TEST(info)
     test_query_cpu();
     test_query_performance();
     test_query_timeofday();
-    test_query_process();
+    test_query_process( TRUE );
+    test_query_process( FALSE );
     test_query_procperf();
     test_query_module();
     test_query_handle();

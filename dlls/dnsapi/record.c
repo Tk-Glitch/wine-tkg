@@ -2,6 +2,7 @@
  * DNS support
  *
  * Copyright (C) 2006 Hans Leidekker
+ * Copyright (C) 2021 Alexandre Julliard
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,7 +30,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dnsapi);
 
-const char *type_to_str( unsigned short type )
+const char *debugstr_type( unsigned short type )
 {
     switch (type)
     {
@@ -91,7 +92,19 @@ const char *type_to_str( unsigned short type )
     X(DNS_TYPE_WINS)
     X(DNS_TYPE_WINSR)
 #undef X
-    default: { static char tmp[7]; sprintf( tmp, "0x%04x", type ); return tmp; }
+    default: return wine_dbg_sprintf( "0x%04x", type );
+    }
+}
+
+static const char *debugstr_section( DNS_SECTION section )
+{
+    switch (section)
+    {
+    case DnsSectionQuestion:  return "Question";
+    case DnsSectionAnswer:    return "Answer";
+    case DnsSectionAuthority: return "Authority";
+    case DnsSectionAddtional: return "Additional";
+    default: return "??";
     }
 }
 
@@ -101,6 +114,95 @@ static int strcmpX( LPCVOID str1, LPCVOID str2, BOOL wide )
         return lstrcmpiW( str1, str2 );
     else
         return lstrcmpiA( str1, str2 );
+}
+
+static WORD get_word( const BYTE **ptr )
+{
+    WORD ret = ((*ptr)[0] << 8) + (*ptr)[1];
+    *ptr += sizeof(WORD);
+    return ret;
+}
+
+static DWORD get_dword( const BYTE **ptr )
+{
+    DWORD ret = ((*ptr)[0] << 24) + ((*ptr)[1] << 16) + ((*ptr)[2] << 8) + (*ptr)[3];
+    *ptr += sizeof(DWORD);
+    return ret;
+}
+
+static const BYTE *skip_name( const BYTE *ptr, const BYTE *end )
+{
+    BYTE len;
+
+    while (ptr < end && (len = *ptr++))
+    {
+        switch (len & 0xc0)
+        {
+        case 0:
+            ptr += len;
+            continue;
+        case 0xc0:
+            ptr++;
+            break;
+        default:
+            return NULL;
+        }
+        break;
+    }
+    if (ptr < end) return ptr;
+    return NULL;
+}
+
+static const BYTE *skip_record( const BYTE *ptr, const BYTE *end, DNS_SECTION section )
+{
+    WORD len;
+
+    if (!(ptr = skip_name( ptr, end ))) return NULL;
+    ptr += 2;  /* type */
+    ptr += 2;  /* class */
+    if (section != DnsSectionQuestion)
+    {
+        ptr += 4;  /* ttl */
+        if (ptr + 2 > end) return NULL;
+        len = get_word( &ptr );
+        ptr += len;
+    }
+    if (ptr > end) return NULL;
+    return ptr;
+}
+
+static const BYTE *get_name( const BYTE *base, const BYTE *end, const BYTE *ptr,
+                             char name[DNS_MAX_NAME_BUFFER_LENGTH] )
+{
+    BYTE len;
+    char *out = name;
+    const BYTE *next = NULL;
+    int loop = 0;
+
+    while (ptr < end && (len = *ptr++))
+    {
+        switch (len & 0xc0)
+        {
+        case 0:
+            if (out + len + 1 >= name + DNS_MAX_NAME_BUFFER_LENGTH) return NULL;
+            if (out > name) *out++ = '.';
+            memcpy( out, ptr, len );
+            out += len;
+            ptr += len;
+            continue;
+        case 0xc0:
+            if (!next) next = ptr + 1;
+            if (++loop >= end - base) return NULL;
+            if (ptr < end) ptr = base + ((len & 0x3f) << 8) + *ptr;
+            break;
+        default:
+            return NULL;
+        }
+    }
+    if (ptr >= end) return NULL;
+    if (out == name) *out++ = '.';
+    *out = 0;
+    return next ? next : ptr;
 }
 
 /******************************************************************************
@@ -221,10 +323,10 @@ BOOL WINAPI DnsRecordCompare( PDNS_RECORD r1, PDNS_RECORD r2 )
     {
         if (r1->Data.KEY.wFlags      != r2->Data.KEY.wFlags      ||
             r1->Data.KEY.chProtocol  != r2->Data.KEY.chProtocol  ||
-            r1->Data.KEY.chAlgorithm != r2->Data.KEY.chAlgorithm)
+            r1->Data.KEY.chAlgorithm != r2->Data.KEY.chAlgorithm ||
+            r1->Data.KEY.wKeyLength  != r2->Data.KEY.wKeyLength)
             return FALSE;
-        if (memcmp( r1->Data.KEY.Key, r2->Data.KEY.Key,
-                    r1->wDataLength - sizeof(DNS_KEY_DATA) + 1 ))
+        if (memcmp( r1->Data.KEY.Key, r2->Data.KEY.Key, r1->Data.KEY.wKeyLength ))
             return FALSE;
         break;
     }
@@ -238,10 +340,10 @@ BOOL WINAPI DnsRecordCompare( PDNS_RECORD r1, PDNS_RECORD r2 )
             r1->Data.SIG.dwOriginalTtl != r2->Data.SIG.dwOriginalTtl ||
             r1->Data.SIG.dwExpiration  != r2->Data.SIG.dwExpiration  ||
             r1->Data.SIG.dwTimeSigned  != r2->Data.SIG.dwTimeSigned  ||
-            r1->Data.SIG.wKeyTag       != r2->Data.SIG.wKeyTag)
+            r1->Data.SIG.wKeyTag       != r2->Data.SIG.wKeyTag       ||
+            r1->Data.SIG.wSignatureLength != r2->Data.SIG.wSignatureLength)
             return FALSE;
-        if (memcmp( r1->Data.SIG.Signature, r2->Data.SIG.Signature,
-                    r1->wDataLength - sizeof(DNS_SIG_DATAA) + 1 ))
+        if (memcmp( r1->Data.SIG.Signature, r2->Data.SIG.Signature, r1->Data.SIG.wSignatureLength ))
             return FALSE;
         break;
     }
@@ -339,13 +441,13 @@ BOOL WINAPI DnsRecordCompare( PDNS_RECORD r1, PDNS_RECORD r2 )
         break;
     }
     default:
-        FIXME( "unknown type: %s\n", type_to_str( r1->wType ) );
+        FIXME( "unknown type: %s\n", debugstr_type( r1->wType ) );
         return FALSE;
     }
     return TRUE;
 }
 
-static LPVOID strcpyX( LPCVOID src, DNS_CHARSET in, DNS_CHARSET out )
+static LPVOID strdupX( LPCVOID src, DNS_CHARSET in, DNS_CHARSET out )
 {
     switch (in)
     {
@@ -403,7 +505,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     TRACE( "(%p,%d,%d)\n", src, in, out );
 
     size = FIELD_OFFSET(DNS_RECORD, Data) + src->wDataLength;
-    dst = heap_alloc_zero( size );
+    dst = malloc( size );
     if (!dst) return NULL;
 
     memcpy( dst, src, size );
@@ -413,7 +515,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
         src->Flags.S.CharSet == DnsCharSetUnicode) in = src->Flags.S.CharSet;
 
     dst->Flags.S.CharSet = out;
-    dst->pName = strcpyX( src->pName, in, out );
+    dst->pName = strdupX( src->pName, in, out );
     if (!dst->pName) goto error;
 
     switch (src->wType)
@@ -425,10 +527,10 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     {
         for (i = 0; i < src->Data.TXT.dwStringCount; i++)
         {
-            dst->Data.TXT.pStringArray[i] = strcpyX( src->Data.TXT.pStringArray[i], in, out );
+            dst->Data.TXT.pStringArray[i] = strdupX( src->Data.TXT.pStringArray[i], in, out );
             if (!dst->Data.TXT.pStringArray[i])
             {
-                while (i > 0) heap_free( dst->Data.TXT.pStringArray[--i] );
+                while (i > 0) free( dst->Data.TXT.pStringArray[--i] );
                 goto error;
             }
         }
@@ -437,13 +539,13 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     case DNS_TYPE_MINFO:
     case DNS_TYPE_RP:
     {
-        dst->Data.MINFO.pNameMailbox = strcpyX( src->Data.MINFO.pNameMailbox, in, out );
+        dst->Data.MINFO.pNameMailbox = strdupX( src->Data.MINFO.pNameMailbox, in, out );
         if (!dst->Data.MINFO.pNameMailbox) goto error;
 
-        dst->Data.MINFO.pNameErrorsMailbox = strcpyX( src->Data.MINFO.pNameErrorsMailbox, in, out );
+        dst->Data.MINFO.pNameErrorsMailbox = strdupX( src->Data.MINFO.pNameErrorsMailbox, in, out );
         if (!dst->Data.MINFO.pNameErrorsMailbox)
         {
-            heap_free( dst->Data.MINFO.pNameMailbox );
+            free( dst->Data.MINFO.pNameMailbox );
             goto error;
         }
 
@@ -457,7 +559,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     case DNS_TYPE_RT:
     case DNS_TYPE_MX:
     {
-        dst->Data.MX.pNameExchange = strcpyX( src->Data.MX.pNameExchange, in, out );
+        dst->Data.MX.pNameExchange = strdupX( src->Data.MX.pNameExchange, in, out );
         if (!dst->Data.MX.pNameExchange) goto error;
 
         dst->wDataLength = sizeof(dst->Data.MX);
@@ -467,7 +569,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     }
     case DNS_TYPE_NXT:
     {
-        dst->Data.NXT.pNameNext = strcpyX( src->Data.NXT.pNameNext, in, out );
+        dst->Data.NXT.pNameNext = strdupX( src->Data.NXT.pNameNext, in, out );
         if (!dst->Data.NXT.pNameNext) goto error;
 
         dst->wDataLength = sizeof(dst->Data.NXT);
@@ -484,7 +586,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     case DNS_TYPE_NS:
     case DNS_TYPE_PTR:
     {
-        dst->Data.PTR.pNameHost = strcpyX( src->Data.PTR.pNameHost, in, out );
+        dst->Data.PTR.pNameHost = strdupX( src->Data.PTR.pNameHost, in, out );
         if (!dst->Data.PTR.pNameHost) goto error;
 
         dst->wDataLength = sizeof(dst->Data.PTR);
@@ -494,7 +596,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     }
     case DNS_TYPE_SIG:
     {
-        dst->Data.SIG.pNameSigner = strcpyX( src->Data.SIG.pNameSigner, in, out );
+        dst->Data.SIG.pNameSigner = strdupX( src->Data.SIG.pNameSigner, in, out );
         if (!dst->Data.SIG.pNameSigner) goto error;
 
         dst->wDataLength = sizeof(dst->Data.SIG);
@@ -504,13 +606,13 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     }
     case DNS_TYPE_SOA:
     {
-        dst->Data.SOA.pNamePrimaryServer = strcpyX( src->Data.SOA.pNamePrimaryServer, in, out );
+        dst->Data.SOA.pNamePrimaryServer = strdupX( src->Data.SOA.pNamePrimaryServer, in, out );
         if (!dst->Data.SOA.pNamePrimaryServer) goto error;
 
-        dst->Data.SOA.pNameAdministrator = strcpyX( src->Data.SOA.pNameAdministrator, in, out );
+        dst->Data.SOA.pNameAdministrator = strdupX( src->Data.SOA.pNameAdministrator, in, out );
         if (!dst->Data.SOA.pNameAdministrator)
         {
-            heap_free( dst->Data.SOA.pNamePrimaryServer );
+            free( dst->Data.SOA.pNamePrimaryServer );
             goto error;
         }
 
@@ -522,7 +624,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     }
     case DNS_TYPE_SRV:
     {
-        dst->Data.SRV.pNameTarget = strcpyX( src->Data.SRV.pNameTarget, in, out );
+        dst->Data.SRV.pNameTarget = strdupX( src->Data.SRV.pNameTarget, in, out );
         if (!dst->Data.SRV.pNameTarget) goto error;
 
         dst->wDataLength = sizeof(dst->Data.SRV);
@@ -536,8 +638,8 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     return dst;
 
 error:
-    heap_free( dst->pName );
-    heap_free( dst );
+    free( dst->pName );
+    free( dst );
     return NULL;
 }
 
@@ -560,7 +662,7 @@ VOID WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
     {
         for (r = list; (list = r); r = next)
         {
-            heap_free( r->pName );
+            free( r->pName );
 
             switch (r->wType)
             {
@@ -568,31 +670,27 @@ VOID WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
             case DNS_TYPE_ISDN:
             case DNS_TYPE_TEXT:
             case DNS_TYPE_X25:
-            {
                 for (i = 0; i < r->Data.TXT.dwStringCount; i++)
-                    heap_free( r->Data.TXT.pStringArray[i] );
+                    free( r->Data.TXT.pStringArray[i] );
 
                 break;
-            }
+
             case DNS_TYPE_MINFO:
             case DNS_TYPE_RP:
-            {
-                heap_free( r->Data.MINFO.pNameMailbox );
-                heap_free( r->Data.MINFO.pNameErrorsMailbox );
+                free( r->Data.MINFO.pNameMailbox );
+                free( r->Data.MINFO.pNameErrorsMailbox );
                 break;
-            }
+
             case DNS_TYPE_AFSDB:
             case DNS_TYPE_RT:
             case DNS_TYPE_MX:
-            {
-                heap_free( r->Data.MX.pNameExchange );
+                free( r->Data.MX.pNameExchange );
                 break;
-            }
+
             case DNS_TYPE_NXT:
-            {
-                heap_free( r->Data.NXT.pNameNext );
+                free( r->Data.NXT.pNameNext );
                 break;
-            }
+
             case DNS_TYPE_CNAME:
             case DNS_TYPE_MB:
             case DNS_TYPE_MD:
@@ -601,32 +699,25 @@ VOID WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
             case DNS_TYPE_MR:
             case DNS_TYPE_NS:
             case DNS_TYPE_PTR:
-            {
-                heap_free( r->Data.PTR.pNameHost );
+                free( r->Data.PTR.pNameHost );
                 break;
-            }
+
             case DNS_TYPE_SIG:
-            {
-                heap_free( r->Data.SIG.pNameSigner );
+                free( r->Data.SIG.pNameSigner );
                 break;
-            }
+
             case DNS_TYPE_SOA:
-            {
-                heap_free( r->Data.SOA.pNamePrimaryServer );
-                heap_free( r->Data.SOA.pNameAdministrator );
+                free( r->Data.SOA.pNamePrimaryServer );
+                free( r->Data.SOA.pNameAdministrator );
                 break;
-            }
+
             case DNS_TYPE_SRV:
-            {
-                heap_free( r->Data.SRV.pNameTarget );
-                break;
-            }
-            default:
+                free( r->Data.SRV.pNameTarget );
                 break;
             }
 
             next = r->pNext;
-            heap_free( r );
+            free( r );
         }
         break;
     }
@@ -785,4 +876,335 @@ PDNS_RECORD WINAPI DnsRecordSetDetach( PDNS_RECORD set )
         }
     }
     return NULL;
+}
+
+
+static unsigned int get_record_size( WORD type, const BYTE *data, WORD len )
+{
+    switch (type)
+    {
+    case DNS_TYPE_KEY:
+        return offsetof( DNS_RECORDA, Data.Key.Key[len] );
+
+    case DNS_TYPE_SIG:
+        return offsetof( DNS_RECORDA, Data.Sig.Signature[len] );
+
+    case DNS_TYPE_HINFO:
+    case DNS_TYPE_ISDN:
+    case DNS_TYPE_TEXT:
+    case DNS_TYPE_X25:
+    {
+        int i;
+        const BYTE *pos = data;
+        for (i = 0; pos < data + len; i++) pos += pos[0] + 1;
+        return offsetof( DNS_RECORDA, Data.Txt.pStringArray[i] );
+    }
+
+    case DNS_TYPE_NULL:
+    case DNS_TYPE_OPT:
+        return offsetof( DNS_RECORDA, Data.Null.Data[len] );
+
+    case DNS_TYPE_WKS:
+        return offsetof( DNS_RECORDA, Data.Wks.BitMask[len / 8] );
+
+    case DNS_TYPE_NXT:
+        return offsetof( DNS_RECORDA, Data.Nxt.wTypes[len * 8] );
+
+    case DNS_TYPE_WINS:
+        return offsetof( DNS_RECORDA, Data.Wins.WinsServers[len / 4] );
+
+    default:
+        return sizeof(DNS_RECORDA);
+    }
+}
+
+static DNS_STATUS extract_rdata( const BYTE *base, const BYTE *end, const BYTE *pos, WORD len, WORD type,
+                                 DNS_RECORDA *r )
+{
+    DNS_CHARSET in = DnsCharSetUtf8, out = r->Flags.S.CharSet;
+    char name[DNS_MAX_NAME_BUFFER_LENGTH];
+    DNS_STATUS ret = ERROR_SUCCESS;
+    const BYTE *rrend = pos + len;
+    unsigned int i;
+
+    switch (type)
+    {
+    case DNS_TYPE_A:
+        if (pos + sizeof(DWORD) > rrend) return DNS_ERROR_BAD_PACKET;
+        r->Data.A.IpAddress = *(const DWORD *)pos;
+        r->wDataLength = sizeof(DNS_A_DATA);
+        break;
+
+    case DNS_TYPE_AAAA:
+        if (pos + sizeof(IP6_ADDRESS) > rrend) return DNS_ERROR_BAD_PACKET;
+        for (i = 0; i < sizeof(IP6_ADDRESS)/sizeof(DWORD); i++)
+        {
+            r->Data.AAAA.Ip6Address.IP6Dword[i] = *(const DWORD *)pos;
+            pos += sizeof(DWORD);
+        }
+        r->wDataLength = sizeof(DNS_AAAA_DATA);
+        break;
+
+    case DNS_TYPE_KEY:
+        if (pos + 4 > rrend) return DNS_ERROR_BAD_PACKET;
+        r->Data.KEY.wFlags      = get_word( &pos );
+        r->Data.KEY.chProtocol  = *pos++;
+        r->Data.KEY.chAlgorithm = *pos++;
+        r->Data.KEY.wKeyLength  = rrend - pos;
+        memcpy( r->Data.KEY.Key, pos, r->Data.KEY.wKeyLength );
+        r->wDataLength = offsetof( DNS_KEY_DATA, Key[r->Data.KEY.wKeyLength] );
+        break;
+
+    case DNS_TYPE_RP:
+    case DNS_TYPE_MINFO:
+        if (!(pos = get_name( base, end, pos, name ))) return DNS_ERROR_BAD_PACKET;
+        if (!(r->Data.MINFO.pNameMailbox = strdupX( name, in, out ))) return ERROR_NOT_ENOUGH_MEMORY;
+        if (!get_name( base, end, pos, name )) return DNS_ERROR_BAD_PACKET;
+        if (!(r->Data.MINFO.pNameErrorsMailbox = strdupX( name, in, out )))
+        {
+            free( r->Data.MINFO.pNameMailbox );
+            return ERROR_NOT_ENOUGH_MEMORY;
+        }
+        r->wDataLength = sizeof(DNS_MINFO_DATAA);
+        break;
+
+    case DNS_TYPE_AFSDB:
+    case DNS_TYPE_RT:
+    case DNS_TYPE_MX:
+        if (pos + sizeof(WORD) > rrend) return DNS_ERROR_BAD_PACKET;
+        r->Data.MX.wPreference = get_word( &pos );
+        if (!get_name( base, end, pos, name )) return DNS_ERROR_BAD_PACKET;
+        if (!(r->Data.MX.pNameExchange = strdupX( name, in, out ))) return ERROR_NOT_ENOUGH_MEMORY;
+        r->wDataLength = sizeof(DNS_MX_DATAA) + sizeof(DWORD);
+        break;
+
+    case DNS_TYPE_NULL:
+        r->Data.Null.dwByteCount = len;
+        memcpy( r->Data.Null.Data, pos, len );
+        r->wDataLength = offsetof( DNS_NULL_DATA, Data[len] );
+        break;
+
+    case DNS_TYPE_OPT:
+        r->Data.OPT.wDataLength = len;
+        r->Data.OPT.wPad        = 0;
+        memcpy( r->Data.OPT.Data, pos, len );
+        r->wDataLength = offsetof( DNS_OPT_DATA, Data[len] );
+        break;
+
+    case DNS_TYPE_CNAME:
+    case DNS_TYPE_NS:
+    case DNS_TYPE_MB:
+    case DNS_TYPE_MD:
+    case DNS_TYPE_MF:
+    case DNS_TYPE_MG:
+    case DNS_TYPE_MR:
+    case DNS_TYPE_PTR:
+        if (!get_name( base, end, pos, name )) return DNS_ERROR_BAD_PACKET;
+        if (!(r->Data.PTR.pNameHost = strdupX( name, in, out ))) return ERROR_NOT_ENOUGH_MEMORY;
+        r->wDataLength = sizeof(DNS_PTR_DATAA) + sizeof(DWORD);
+        break;
+
+    case DNS_TYPE_SIG:
+        if (pos + 18 > rrend) return DNS_ERROR_BAD_PACKET;
+        r->Data.SIG.wTypeCovered  = get_word( &pos );
+        r->Data.SIG.chAlgorithm   = *pos++;
+        r->Data.SIG.chLabelCount  = *pos++;
+        r->Data.SIG.dwOriginalTtl = get_dword( &pos );
+        r->Data.SIG.dwExpiration  = get_dword( &pos );
+        r->Data.SIG.dwTimeSigned  = get_dword( &pos );
+        r->Data.SIG.wKeyTag       = get_word( &pos );
+        if (!(pos = get_name( base, end, pos, name ))) return DNS_ERROR_BAD_PACKET;
+        if (!(r->Data.SIG.pNameSigner = strdupX( name, in, out ))) return ERROR_NOT_ENOUGH_MEMORY;
+        r->Data.SIG.wSignatureLength = rrend - pos;
+        memcpy( r->Data.SIG.Signature, pos, r->Data.SIG.wSignatureLength );
+        r->wDataLength = offsetof( DNS_SIG_DATAA, Signature[r->Data.SIG.wSignatureLength] );
+        break;
+
+    case DNS_TYPE_SOA:
+        if (!(pos = get_name( base, end, pos, name ))) return DNS_ERROR_BAD_PACKET;
+        if (!(r->Data.SOA.pNamePrimaryServer = strdupX( name, in, out ))) return ERROR_NOT_ENOUGH_MEMORY;
+        if (!(pos = get_name( base, end, pos, name ))) return DNS_ERROR_BAD_PACKET;
+        if (!(r->Data.SOA.pNameAdministrator = strdupX( name, in, out )))
+        {
+            free( r->Data.SOA.pNamePrimaryServer );
+            return ERROR_NOT_ENOUGH_MEMORY;
+        }
+        if (pos + 5 * sizeof(DWORD) > rrend) return DNS_ERROR_BAD_PACKET;
+        r->Data.SOA.dwSerialNo   = get_dword( &pos );
+        r->Data.SOA.dwRefresh    = get_dword( &pos );
+        r->Data.SOA.dwRetry      = get_dword( &pos );
+        r->Data.SOA.dwExpire     = get_dword( &pos );
+        r->Data.SOA.dwDefaultTtl = get_dword( &pos );
+        r->wDataLength = sizeof(DNS_SOA_DATAA);
+        break;
+
+    case DNS_TYPE_SRV:
+        if (pos + 3 * sizeof(WORD) > rrend) return DNS_ERROR_BAD_PACKET;
+        r->Data.SRV.wPriority = get_word( &pos );
+        r->Data.SRV.wWeight   = get_word( &pos );
+        r->Data.SRV.wPort     = get_word( &pos );
+        if (!get_name( base, end, pos, name )) return DNS_ERROR_BAD_PACKET;
+        if (!(r->Data.SRV.pNameTarget = strdupX( name, in, out ))) return ERROR_NOT_ENOUGH_MEMORY;
+        r->wDataLength = sizeof(DNS_SRV_DATAA);
+        break;
+
+    case DNS_TYPE_HINFO:
+    case DNS_TYPE_ISDN:
+    case DNS_TYPE_X25:
+    case DNS_TYPE_TEXT:
+        for (i = 0; pos < rrend; i++)
+        {
+            BYTE len = pos[0];
+            if (pos + len + 1 > rrend) return DNS_ERROR_BAD_PACKET;
+            memcpy( name, pos + 1, len );
+            name[len] = 0;
+            if (!(r->Data.TXT.pStringArray[i] = strdupX( name, in, out )))
+            {
+                while (i > 0) free( r->Data.TXT.pStringArray[--i] );
+                return ERROR_NOT_ENOUGH_MEMORY;
+            }
+            pos += len + 1;
+        }
+        r->Data.TXT.dwStringCount = i;
+        r->wDataLength = offsetof( DNS_TXT_DATAA, pStringArray[r->Data.TXT.dwStringCount] );
+        break;
+
+    case DNS_TYPE_ATMA:
+    case DNS_TYPE_LOC:
+    case DNS_TYPE_NXT:
+    case DNS_TYPE_TSIG:
+    case DNS_TYPE_WKS:
+    case DNS_TYPE_TKEY:
+    case DNS_TYPE_WINS:
+    case DNS_TYPE_WINSR:
+    default:
+        FIXME( "unhandled type: %s\n", debugstr_type( type ));
+        return DNS_ERROR_RCODE_NOT_IMPLEMENTED;
+    }
+
+    return ret;
+}
+
+static DNS_STATUS extract_record( const DNS_MESSAGE_BUFFER *hdr, const BYTE *end, const BYTE **pos,
+                                  DNS_SECTION section, DNS_CHARSET charset, DNS_RECORDA **recp )
+{
+    DNS_STATUS ret;
+    DNS_RECORDA *record;
+    char name[DNS_MAX_NAME_BUFFER_LENGTH];
+    WORD type, rdlen;
+    DWORD ttl;
+    const BYTE *base = (const BYTE *)hdr;
+    const BYTE *ptr = *pos;
+
+    if (!(ptr = get_name( base, end, ptr, name ))) return DNS_ERROR_BAD_PACKET;
+
+    if (ptr + 10 > end) return DNS_ERROR_BAD_PACKET;
+    type = get_word( &ptr );
+    ptr += sizeof(WORD); /* class */
+    ttl = get_dword( &ptr );
+    rdlen = get_word( &ptr );
+    if (ptr + rdlen > end) return DNS_ERROR_BAD_PACKET;
+    *pos = ptr + rdlen;
+
+    if (!(record = calloc( 1, get_record_size( type, ptr, rdlen ) ))) return ERROR_NOT_ENOUGH_MEMORY;
+
+    record->wType = type;
+    record->Flags.S.Section = section;
+    record->Flags.S.CharSet = charset;
+    record->dwTtl = ttl;
+
+    if (!(record->pName = strdupX( name, DnsCharSetUtf8, charset )))
+    {
+        free( record );
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
+    if ((ret = extract_rdata( base, end, ptr, rdlen, type, record )))
+    {
+        free( record->pName );
+        free( record );
+        return ret;
+    }
+    *recp = record;
+    TRACE( "found %s record in %s section\n", debugstr_type( record->wType ), debugstr_section( section ) );
+    return ERROR_SUCCESS;
+}
+
+static DNS_STATUS extract_message_records( const DNS_MESSAGE_BUFFER *buffer, WORD len, DNS_CHARSET charset,
+                                           DNS_RRSET *rrset )
+{
+    DNS_STATUS ret = ERROR_SUCCESS;
+    const DNS_HEADER *hdr = &buffer->MessageHead;
+    DNS_RECORDA *record;
+    const BYTE *base = (const BYTE *)hdr;
+    const BYTE *end = base + len;
+    const BYTE *ptr = (const BYTE *)buffer->MessageBody;
+    unsigned int num;
+
+    if (hdr->IsResponse && !hdr->AnswerCount) return DNS_ERROR_BAD_PACKET;
+
+    for (num = 0; num < hdr->QuestionCount; num++)
+        if (!(ptr = skip_record( ptr, end, DnsSectionQuestion ))) return DNS_ERROR_BAD_PACKET;
+
+    for (num = 0; num < hdr->AnswerCount; num++)
+    {
+        if ((ret = extract_record( buffer, end, &ptr, DnsSectionAnswer, charset, &record )))
+            return ret;
+        DNS_RRSET_ADD( *rrset, (DNS_RECORD *)record );
+    }
+
+    for (num = 0; num < hdr->NameServerCount; num++)
+        if (!(ptr = skip_record( ptr, end, DnsSectionAuthority ))) return DNS_ERROR_BAD_PACKET;
+
+    for (num = 0; num < hdr->AdditionalCount; num++)
+    {
+        if ((ret = extract_record( buffer, end, &ptr, DnsSectionAddtional, charset, &record ))) return ret;
+        DNS_RRSET_ADD( *rrset, (DNS_RECORD *)record );
+    }
+
+    if (ptr != end) ret = DNS_ERROR_BAD_PACKET;
+    return ret;
+}
+
+/******************************************************************************
+ * DnsExtractRecordsFromMessage_UTF8       [DNSAPI.@]
+ *
+ */
+DNS_STATUS WINAPI DnsExtractRecordsFromMessage_UTF8( DNS_MESSAGE_BUFFER *buffer, WORD len,
+                                                     DNS_RECORDA **result )
+{
+    DNS_STATUS ret = DNS_ERROR_BAD_PACKET;
+    DNS_RRSET rrset;
+
+    if (len < sizeof(*buffer)) return ERROR_INVALID_PARAMETER;
+
+    DNS_RRSET_INIT( rrset );
+    ret = extract_message_records( buffer, len, DnsCharSetUtf8, &rrset );
+    DNS_RRSET_TERMINATE( rrset );
+
+    if (!ret) *result = (DNS_RECORDA *)rrset.pFirstRR;
+    else DnsRecordListFree( rrset.pFirstRR, DnsFreeRecordList );
+
+    return ret;
+}
+
+/******************************************************************************
+ * DnsExtractRecordsFromMessage_W          [DNSAPI.@]
+ *
+ */
+DNS_STATUS WINAPI DnsExtractRecordsFromMessage_W( DNS_MESSAGE_BUFFER *buffer, WORD len,
+                                                  DNS_RECORDW **result )
+{
+    DNS_STATUS ret = DNS_ERROR_BAD_PACKET;
+    DNS_RRSET rrset;
+
+    if (len < sizeof(*buffer)) return ERROR_INVALID_PARAMETER;
+
+    DNS_RRSET_INIT( rrset );
+    ret = extract_message_records( buffer, len, DnsCharSetUnicode, &rrset );
+    DNS_RRSET_TERMINATE( rrset );
+
+    if (!ret) *result = (DNS_RECORDW *)rrset.pFirstRR;
+    else DnsRecordListFree( rrset.pFirstRR, DnsFreeRecordList );
+
+    return ret;
 }

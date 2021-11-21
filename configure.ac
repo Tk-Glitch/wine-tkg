@@ -55,7 +55,6 @@ AC_ARG_WITH(gssapi,    AS_HELP_STRING([--without-gssapi],[do not use GSSAPI (Ker
 AC_ARG_WITH(gstreamer, AS_HELP_STRING([--without-gstreamer],[do not use GStreamer (codecs support)]))
 AC_ARG_WITH(hal,       AS_HELP_STRING([--without-hal],[do not use HAL (dynamic device support)]))
 AC_ARG_WITH(inotify,   AS_HELP_STRING([--without-inotify],[do not use inotify (filesystem change notifications)]))
-AC_ARG_WITH(jpeg,      AS_HELP_STRING([--without-jpeg],[do not use JPEG]))
 AC_ARG_WITH(krb5,      AS_HELP_STRING([--without-krb5],[do not use krb5 (Kerberos)]))
 AC_ARG_WITH(ldap,      AS_HELP_STRING([--without-ldap],[do not use LDAP]),
             [if test "x$withval" = "xno"; then ac_cv_header_ldap_h=no; ac_cv_header_lber_h=no; fi])
@@ -475,7 +474,6 @@ AC_CHECK_HEADERS(\
 	netinet/tcp.h \
 	netinet/tcp_fsm.h \
 	pcap/pcap.h \
-	poll.h \
 	port.h \
 	pthread.h \
 	pwd.h \
@@ -499,7 +497,6 @@ AC_CHECK_HEADERS(\
 	sys/modem.h \
 	sys/mtio.h \
 	sys/param.h \
-	sys/poll.h \
 	sys/prctl.h \
 	sys/protosw.h \
 	sys/ptrace.h \
@@ -763,14 +760,12 @@ case $host_os in
     WINEPRELOADER_LDFLAGS="-nostartfiles -nodefaultlibs -e _start -ldylib1.o -Wl,-image_base,0x7d400000,-segalign,0x1000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,loader/wine_info.plist,-segaddr,WINE_4GB_RESERVE,0x100000000"
     WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main],
                     [WINEPRELOADER_LDFLAGS="-Wl,-no_new_main $WINEPRELOADER_LDFLAGS"
-                     WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main -nostartfiles -nodefaultlibs],,
-                        [WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main -mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs],
-                                         [WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"],
-                                         [wine_can_build_preloader=no])])],
-                    [WINE_TRY_CFLAGS([-nostartfiles -nodefaultlibs],,
-                        [WINE_TRY_CFLAGS([-mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs],
-                                         [WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"],
-                                         [wine_can_build_preloader=no])])])
+                     WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main -mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs],
+                                     [WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"],
+                                     [wine_can_build_preloader=no])],
+                    [WINE_TRY_CFLAGS([-mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs],
+                                     [WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"],
+                                     [wine_can_build_preloader=no])])
     if test "$wine_can_build_preloader" = "yes"
     then
         WINE_TRY_CFLAGS([-Wl,-no_pie],
@@ -1047,11 +1042,20 @@ then
             esac
           done
         fi
-        case $CROSSDEBUG in
-          *dwarf)  WINE_TRY_CROSSCFLAGS([-gdwarf-2])
-                   WINE_TRY_CROSSCFLAGS([-gstrict-dwarf]) ;;
-          pdb)     WINE_TRY_CROSSCFLAGS([-gcodeview]) ;;
-        esac
+
+        ac_debug_format_seen=""
+        for ac_flag in $CROSSCFLAGS; do
+          case $ac_flag in
+           -gdwarf*|-gcodeview)  ac_debug_format_seen=$ac_flag ;;
+          esac
+        done
+        if test "x$ac_debug_format_seen" = x
+        then
+          case $CROSSDEBUG in
+            *dwarf)  WINE_TRY_CROSSCFLAGS([-gdwarf-4]) ;;
+            pdb)     WINE_TRY_CROSSCFLAGS([-gcodeview]) ;;
+          esac
+        fi
 
         WINE_TRY_CROSSCFLAGS([-fexcess-precision=standard],[AC_SUBST(EXCESS_PRECISION_CFLAGS,"-fexcess-precision=standard")])
 
@@ -1381,11 +1385,11 @@ if test "x$with_sane" != "xno"
 then
     WINE_PACKAGE_FLAGS(SANE,[sane-backends],,[`${SANE_CONFIG:-sane-config} --cflags 2>/dev/null`],[`${SANE_CONFIG:-sane-config} --ldflags 2>/dev/null`],
         [AC_CHECK_HEADER(sane/sane.h,
-            [WINE_CHECK_SONAME(sane,sane_init,,[SANE_CFLAGS=""],[$SANE_LIBS])],
-            [SANE_CFLAGS=""])])
+            [AC_CHECK_LIB(sane,sane_init,[:],,[$SANE_LIBS])])])
 fi
-WINE_NOTICE_WITH(sane,[test "x$ac_cv_lib_soname_sane" = "x"],
-                 [libsane ${notice_platform}development files not found, scanners won't be supported.])
+WINE_NOTICE_WITH(sane,[test "$ac_cv_lib_sane_sane_init" != "yes"],
+                 [libsane ${notice_platform}development files not found, scanners won't be supported.],
+                 [enable_sane_ds])
 
 dnl **** Check for libusb ****
 if test "x$with_usb" != "xno"
@@ -1413,11 +1417,7 @@ then
     WINE_PACKAGE_FLAGS(GPHOTO2,[libgphoto2],[-lgphoto2],
                        [`${GPHOTO2_CONFIG:-gphoto2-config} --cflags 2>/dev/null`],[`${GPHOTO2_CONFIG:-gphoto2-config} --libs 2>/dev/null`],
         [AC_CHECK_HEADER(gphoto2-camera.h,
-                        [AC_CHECK_LIB(gphoto2,gp_camera_new,
-                                      [AC_DEFINE(HAVE_GPHOTO2, 1, [Define if we have the libgphoto2 development environment])],
-                                      [GPHOTO2_LIBS=""; GPHOTO2_CFLAGS=""],
-                                      [$GPHOTO2_LIBS])],
-                        [GPHOTO2_LIBS=""; GPHOTO2_CFLAGS=""])])
+                        [AC_CHECK_LIB(gphoto2,gp_camera_new,[:],,[$GPHOTO2_LIBS])])])
     WINE_PACKAGE_FLAGS(GPHOTO2_PORT,[libgphoto2_port],[-lgphoto2_port],
                        [`${GPHOTO2_PORT_CONFIG:-gphoto2-port-config} --cflags 2>/dev/null`],
                        [`${GPHOTO2_PORT_CONFIG:-gphoto2-port-config} --libs 2>/dev/null`],
@@ -1429,7 +1429,8 @@ then
                         [GPHOTO2_PORT_LIBS=""; GPHOTO2_PORT_CFLAGS=""])])
 fi
 WINE_NOTICE_WITH(gphoto,[test "$ac_cv_lib_gphoto2_gp_camera_new" != "yes"],
-                 [libgphoto2 ${notice_platform}development files not found, digital cameras won't be supported.])
+                 [libgphoto2 ${notice_platform}development files not found, digital cameras won't be supported.],
+                 [enable_gphoto2_ds])
 WINE_NOTICE_WITH(gphoto,[test "$ac_cv_lib_gphoto2_port_gp_port_info_list_new" != "yes"],
                  [libgphoto2_port ${notice_platform}development files not found, digital cameras won't be auto-detected.])
 
@@ -1649,11 +1650,12 @@ then
     [AC_CHECK_HEADERS([capi20.h linux/capi.h],,,[#define __user])
     if test "$ac_cv_header_capi20_h" = "yes" -a "$ac_cv_header_linux_capi_h" = "yes"
     then
-        WINE_CHECK_SONAME(capi20,capi20_register,,,[$CAPI20_LIBS])
+        AC_CHECK_LIB(capi20,capi20_register,[:],[CAPI20_LIBS=""],[$CAPI20_LIBS])
     fi])
 fi
-WINE_NOTICE_WITH(capi,[test "x$ac_cv_lib_soname_capi20" = "x"],
-                 [libcapi20 ${notice_platform}development files not found, ISDN won't be supported.])
+WINE_NOTICE_WITH(capi,[test "x$ac_cv_lib_capi20_capi20_register" = "x"],
+                 [libcapi20 ${notice_platform}development files not found, ISDN won't be supported.],
+                 [enable_capi2032])
 
 dnl **** Check for cups ****
 if test "x$with_cups" != "xno"
@@ -1722,21 +1724,6 @@ then
 fi
 WINE_NOTICE_WITH(gssapi,[test "x$ac_cv_lib_soname_gssapi_krb5" = "x"],
                  [libgssapi_krb5 ${notice_platform}development files not found (or too old), no Kerberos SSP support.])
-
-dnl **** Check for libjpeg ****
-if test "x$with_jpeg" != "xno"
-then
-    WINE_PACKAGE_FLAGS(JPEG,[libjpeg],,,,
-        [AC_CHECK_HEADERS([jpeglib.h])
-        if test "$ac_cv_header_jpeglib_h" = "yes"
-        then
-            WINE_CHECK_SONAME(jpeg,jpeg_start_decompress,,[JPEG_CFLAGS=""],[$JPEG_LIBS])
-        else
-            JPEG_CFLAGS=""
-        fi])
-fi
-WINE_WARNING_WITH(jpeg,[test "x$ac_cv_lib_soname_jpeg" = "x"],
-                 [libjpeg ${notice_platform}development files not found, JPEG won't be supported.])
 
 dnl **** Check for OpenAL 1.1 ****
 if test "$ac_cv_header_AL_al_h" = "yes"
@@ -1889,13 +1876,18 @@ char*f(const char *h,char n) {return strchr(h,n);}]])],[ac_cv_c_logicalop_noisy=
       *) EXTRACFLAGS="$EXTRACFLAGS $wine_cv_64bit_compare_swap" ;;
   esac
 
-  dnl Default to dwarf-2 debug info
+  dnl Determine debug info format
+  ac_debug_format_seen=""
   for ac_flag in $CFLAGS; do
     case $ac_flag in
-      -g) WINE_TRY_CFLAGS([-gdwarf-2])
-          WINE_TRY_CFLAGS([-gstrict-dwarf]) ;;
+      -gdwarf*)    ac_debug_format_seen=yes ;;
+      -g)          ac_debug_format_seen=${ac_debug_format_seen:-default} ;;
     esac
   done
+  if test "x$ac_debug_format_seen" = xdefault
+  then
+    WINE_TRY_CFLAGS([-gdwarf-4])
+  fi
 
   dnl Disable gcc builtins except for Mingw
   AC_SUBST(MSVCRTFLAGS,"")
@@ -1986,7 +1978,6 @@ ac_save_CFLAGS="$CFLAGS"
 CFLAGS="$CFLAGS $BUILTINFLAG"
 AC_CHECK_FUNCS(\
 	epoll_create \
-	fork \
 	fstatfs \
 	futimens \
 	futimes \
@@ -2773,6 +2764,7 @@ WINE_CONFIG_MAKEFILE(dlls/cards)
 WINE_CONFIG_MAKEFILE(dlls/cdosys)
 WINE_CONFIG_MAKEFILE(dlls/cfgmgr32)
 WINE_CONFIG_MAKEFILE(dlls/clusapi)
+WINE_CONFIG_MAKEFILE(dlls/cng.sys)
 WINE_CONFIG_MAKEFILE(dlls/combase)
 WINE_CONFIG_MAKEFILE(dlls/combase/tests)
 WINE_CONFIG_MAKEFILE(dlls/comcat)
@@ -3184,6 +3176,8 @@ WINE_CONFIG_MAKEFILE(dlls/msctf)
 WINE_CONFIG_MAKEFILE(dlls/msctf/tests)
 WINE_CONFIG_MAKEFILE(dlls/msctfp)
 WINE_CONFIG_MAKEFILE(dlls/msdaps)
+WINE_CONFIG_MAKEFILE(dlls/msdasql)
+WINE_CONFIG_MAKEFILE(dlls/msdasql/tests)
 WINE_CONFIG_MAKEFILE(dlls/msdelta)
 WINE_CONFIG_MAKEFILE(dlls/msdmo)
 WINE_CONFIG_MAKEFILE(dlls/msdmo/tests)

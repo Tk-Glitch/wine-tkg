@@ -23,13 +23,16 @@
 #endif
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdarg.h>
 
 #ifdef HAVE_GNUTLS_CIPHER_INIT
 
+#include <stdlib.h>
 #include <assert.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <dlfcn.h>
 #include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>
 #include <gnutls/abstract.h>

@@ -606,25 +606,28 @@ BOOL WINAPI SymSetParentWindow(HWND hwnd)
 BOOL WINAPI SymSetContext(HANDLE hProcess, PIMAGEHLP_STACK_FRAME StackFrame,
                           PIMAGEHLP_CONTEXT Context)
 {
-    struct process* pcs = process_find_by_handle(hProcess);
-    if (!pcs) return FALSE;
+    struct process* pcs;
+    BOOL same;
 
-    if (!module_find_by_addr(pcs, StackFrame->InstructionOffset, DMT_UNKNOWN))
+    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+    same = pcs->ctx_frame.ReturnOffset == StackFrame->ReturnOffset &&
+           pcs->ctx_frame.FrameOffset  == StackFrame->FrameOffset  &&
+           pcs->ctx_frame.StackOffset  == StackFrame->StackOffset;
+
+    if (!SymSetScopeFromAddr(hProcess, StackFrame->InstructionOffset))
         return FALSE;
-    if (pcs->ctx_frame.ReturnOffset == StackFrame->ReturnOffset &&
-        pcs->ctx_frame.FrameOffset  == StackFrame->FrameOffset  &&
-        pcs->ctx_frame.StackOffset  == StackFrame->StackOffset)
+
+    pcs->ctx_frame = *StackFrame;
+    if (same)
     {
         TRACE("Setting same frame {rtn=%I64x frm=%I64x stk=%I64x}\n",
               pcs->ctx_frame.ReturnOffset,
               pcs->ctx_frame.FrameOffset,
               pcs->ctx_frame.StackOffset);
-        pcs->ctx_frame.InstructionOffset = StackFrame->InstructionOffset;
         SetLastError(ERROR_SUCCESS);
         return FALSE;
     }
 
-    pcs->ctx_frame = *StackFrame;
     /* Context is not (no longer?) used */
     return TRUE;
 }
@@ -634,11 +637,18 @@ BOOL WINAPI SymSetContext(HANDLE hProcess, PIMAGEHLP_STACK_FRAME StackFrame,
  */
 BOOL WINAPI SymSetScopeFromAddr(HANDLE hProcess, ULONG64 addr)
 {
-    struct process*     pcs;
+    struct module_pair pair;
+    struct symt_ht* sym;
 
-    FIXME("(%p %#I64x): stub\n", hProcess, addr);
+    TRACE("(%p %#I64x)\n", hProcess, addr);
 
-    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+    if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
+    if ((sym = symt_find_nearest(pair.effective, addr)) == NULL) return FALSE;
+    if (sym->symt.tag != SymTagFunction) return FALSE;
+
+    pair.pcs->localscope_pc = addr;
+    pair.pcs->localscope_symt = &sym->symt;
+
     return TRUE;
 }
 
@@ -647,11 +657,18 @@ BOOL WINAPI SymSetScopeFromAddr(HANDLE hProcess, ULONG64 addr)
  */
 BOOL WINAPI SymSetScopeFromIndex(HANDLE hProcess, ULONG64 addr, DWORD index)
 {
-    struct process*     pcs;
+    struct module_pair pair;
+    struct symt* sym;
 
-    FIXME("(%p %#I64x %u): stub\n", hProcess, addr, index);
+    TRACE("(%p %#I64x %u)\n", hProcess, addr, index);
 
-    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+    if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
+    sym = symt_index2ptr(pair.effective, index);
+    if (!symt_check_tag(sym, SymTagFunction)) return FALSE;
+
+    pair.pcs->localscope_pc = ((struct symt_function*)sym)->address; /* FIXME of FuncDebugStart when it exists? */
+    pair.pcs->localscope_symt = sym;
+
     return TRUE;
 }
 
@@ -660,12 +677,29 @@ BOOL WINAPI SymSetScopeFromIndex(HANDLE hProcess, ULONG64 addr, DWORD index)
  */
 BOOL WINAPI SymSetScopeFromInlineContext(HANDLE hProcess, ULONG64 addr, DWORD inlinectx)
 {
-    struct process*     pcs;
+    struct module_pair pair;
+    struct symt_inlinesite* inlined;
 
-    FIXME("(%p %#I64x %u): stub\n", hProcess, addr, inlinectx);
+    TRACE("(%p %I64x %x)\n", hProcess, addr, inlinectx);
 
-    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
-    return TRUE;
+    switch (IFC_MODE(inlinectx))
+    {
+    case IFC_MODE_IGNORE:
+    case IFC_MODE_REGULAR: return SymSetScopeFromAddr(hProcess, addr);
+    case IFC_MODE_INLINE:
+        if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
+        inlined = symt_find_inlined_site(pair.effective, addr, inlinectx);
+        if (inlined)
+        {
+            pair.pcs->localscope_pc = addr;
+            pair.pcs->localscope_symt = &inlined->func.symt;
+            return TRUE;
+        }
+        return FALSE;
+    default:
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
 }
 
 /******************************************************************

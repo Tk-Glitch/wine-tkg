@@ -25,9 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#ifdef HAVE_POLL_H
-# include <poll.h>
-#endif
+#include <poll.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -1528,7 +1526,7 @@ static int queue_hotkey_message( struct desktop *desktop, struct message *msg )
     struct hotkey *hotkey;
     unsigned int modifiers = 0;
 
-    if (msg->msg != WM_KEYDOWN) return 0;
+    if (msg->msg != WM_KEYDOWN && msg->msg != WM_SYSKEYDOWN) return 0;
 
     if (desktop->keystate[VK_MENU] & 0x80) modifiers |= MOD_ALT;
     if (desktop->keystate[VK_CONTROL] & 0x80) modifiers |= MOD_CONTROL;
@@ -1909,8 +1907,8 @@ static int queue_mouse_message( struct desktop *desktop, user_handle_t win, cons
         msg_data->size                = sizeof(*msg_data);
         msg_data->flags               = flags;
         msg_data->rawinput.type       = RIM_TYPEMOUSE;
-        msg_data->rawinput.mouse.x    = input->mouse.x;
-        msg_data->rawinput.mouse.y    = input->mouse.y;
+        msg_data->rawinput.mouse.x    = (flags & MOUSEEVENTF_MOVE) ? input->mouse.x : 0;
+        msg_data->rawinput.mouse.y    = (flags & MOUSEEVENTF_MOVE) ? input->mouse.y : 0;
         msg_data->rawinput.mouse.data = input->mouse.data;
 
         enum_processes( queue_rawinput_message, &raw_msg );

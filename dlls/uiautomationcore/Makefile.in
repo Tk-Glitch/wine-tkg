@@ -1,6 +1,6 @@
 MODULE = uiautomationcore.dll
 IMPORTLIB = uiautomationcore
-IMPORTS   = uuid
+IMPORTS   = uuid ole32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 

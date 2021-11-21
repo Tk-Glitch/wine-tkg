@@ -87,12 +87,20 @@ struct d3d10_effect_shader_variable
         ID3D10VertexShader *vs;
         ID3D10PixelShader *ps;
         ID3D10GeometryShader *gs;
+        IUnknown *object;
     } shader;
 
     unsigned int resource_count;
     struct d3d10_effect_shader_resource *resources;
     char *stream_output_declaration;
     unsigned int isinline : 1;
+};
+
+struct d3d10_effect_prop_dependencies
+{
+    struct d3d10_effect_prop_dependency *entries;
+    SIZE_T count;
+    SIZE_T capacity;
 };
 
 struct d3d10_effect_sampler_desc
@@ -118,6 +126,7 @@ struct d3d10_effect_state_object_variable
         ID3D10SamplerState *sampler;
         IUnknown *object;
     } object;
+    struct d3d10_effect_prop_dependencies dependencies;
 };
 
 struct d3d10_effect_resource_variable
@@ -217,6 +226,7 @@ struct d3d10_effect_pass
     char *name;
     struct d3d10_effect_annotations annotations;
 
+    struct d3d10_effect_prop_dependencies dependencies;
     struct d3d10_effect_pass_shader_desc vs;
     struct d3d10_effect_pass_shader_desc ps;
     struct d3d10_effect_pass_shader_desc gs;

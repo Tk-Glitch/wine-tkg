@@ -30,7 +30,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <signal.h>
-#include <math.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -57,6 +56,10 @@
 #endif
 #ifdef HAVE_SYS_WAIT_H
 #include <sys/wait.h>
+#endif
+#include <limits.h>
+#ifdef HAVE_SYS_SYSCTL_H
+# include <sys/sysctl.h>
 #endif
 #ifdef __APPLE__
 # include <CoreFoundation/CoreFoundation.h>
@@ -603,7 +606,14 @@ static void init_paths( char *argv[] )
 #if (defined(__linux__) && !defined(__ANDROID__)) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
         bin_dir = realpath_dirname( "/proc/self/exe" );
 #elif defined (__FreeBSD__) || defined(__DragonFly__)
-        bin_dir = realpath_dirname( "/proc/curproc/file" );
+        {
+            static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+            size_t path_size = PATH_MAX;
+            char *path = malloc( path_size );
+            if (path && !sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), path, &path_size, NULL, 0 ))
+                bin_dir = realpath_dirname( path );
+            free( path );
+        }
 #else
         bin_dir = realpath_dirname( argv0 );
 #endif
@@ -2129,19 +2139,6 @@ static ULONG_PTR get_image_address(void)
 }
 
 
-/* math function wrappers */
-static double CDECL ntdll_atan( double d )  { return atan( d ); }
-static double CDECL ntdll_ceil( double d )  { return ceil( d ); }
-static double CDECL ntdll_cos( double d )   { return cos( d ); }
-static double CDECL ntdll_fabs( double d )  { return fabs( d ); }
-static double CDECL ntdll_floor( double d ) { return floor( d ); }
-static double CDECL ntdll_log( double d )   { return log( d ); }
-static double CDECL ntdll_pow( double x, double y ) { return pow( x, y ); }
-static double CDECL ntdll_sin( double d )   { return sin( d ); }
-static double CDECL ntdll_sqrt( double d )  { return sqrt( d ); }
-static double CDECL ntdll_tan( double d )   { return tan( d ); }
-
-
 /***********************************************************************
  *           unix_funcs
  */
@@ -2166,16 +2163,6 @@ static struct unix_funcs unix_funcs =
     fast_RtlReleaseSRWLockShared,
     fast_RtlWakeConditionVariable,
     fast_wait_cv,
-    ntdll_atan,
-    ntdll_ceil,
-    ntdll_cos,
-    ntdll_fabs,
-    ntdll_floor,
-    ntdll_log,
-    ntdll_pow,
-    ntdll_sin,
-    ntdll_sqrt,
-    ntdll_tan,
     load_so_dll,
     init_builtin_dll,
     init_unix_lib,

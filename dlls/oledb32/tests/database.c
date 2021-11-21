@@ -82,7 +82,7 @@ static void test_GetDataSource(WCHAR *initstring)
             EXPECT_REF(dbinit, 2);
             EXPECT_REF(props, 2);
             hr = IDBProperties_GetPropertyInfo(props, 0, NULL, &cnt, &pInfoset, &ary);
-            todo_wine ok(hr == S_OK, "got %08x\n", hr);
+            ok(hr == S_OK, "got %08x\n", hr);
             if(hr == S_OK)
             {
                 ULONG i;
@@ -994,7 +994,7 @@ static void test_odbc_provider(void)
     };
 
     hr = CoCreateInstance( &CLSID_MSDASQL, NULL, CLSCTX_ALL, &IID_IDBProperties, (void **)&props);
-    todo_wine ok(hr == S_OK, "Failed to create object 0x%08x\n", hr);
+    ok(hr == S_OK, "Failed to create object 0x%08x\n", hr);
     if (FAILED(hr))
     {
         return;
@@ -1064,14 +1064,14 @@ static void test_odbc_enumerator(void)
     IRowset *rowset;
 
     hr = CoCreateInstance( &CLSID_MSDASQL_ENUMERATOR, NULL, CLSCTX_ALL, &IID_ISourcesRowset, (void **)&source);
-    todo_wine ok(hr == S_OK, "Failed to create object 0x%08x\n", hr);
+    ok(hr == S_OK, "Failed to create object 0x%08x\n", hr);
     if (FAILED(hr))
     {
         return;
     }
 
     hr = ISourcesRowset_GetSourcesRowset(source, NULL, &IID_IRowset, 0, 0, (IUnknown**)&rowset);
-    todo_wine ok(hr == S_OK, "Failed to create object 0x%08x\n", hr);
+    ok(hr == S_OK, "Failed to create object 0x%08x\n", hr);
     if (hr == S_OK)
     {
         IAccessor *accessor;
@@ -1083,7 +1083,7 @@ static void test_odbc_enumerator(void)
             IAccessor_Release(accessor);
 
         hr = IRowset_QueryInterface(rowset, &IID_IRowsetInfo, (void **)&info);
-        ok(hr == S_OK, "got %08x\n", hr);
+        todo_wine ok(hr == S_OK, "got %08x\n", hr);
         if (hr == S_OK)
             IRowsetInfo_Release(info);
 

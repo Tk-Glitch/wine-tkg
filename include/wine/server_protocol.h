@@ -2004,6 +2004,8 @@ struct thread_info
     int             base_priority;
     int             current_priority;
     int             unix_tid;
+    client_ptr_t    teb;
+    client_ptr_t    entry_point;
 };
 
 struct process_info
@@ -2032,6 +2034,8 @@ struct list_processes_reply
     struct reply_header __header;
     data_size_t     info_size;
     int             process_count;
+    int             total_thread_count;
+    data_size_t     total_name_len;
     /* VARARG(data,process_info,info_size); */
 };
 
@@ -6479,7 +6483,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 735
+#define SERVER_PROTOCOL_VERSION 737
 
 /* ### protocol_version end ### */
 

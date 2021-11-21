@@ -254,7 +254,7 @@ static void heap_free( void *ptr )
 
 static WCHAR * WINAPIV heap_wprintf(const WCHAR *format, ...)
 {
-    __ms_va_list args;
+    va_list args;
     int size = 4096;
     WCHAR *buffer;
     int n;
@@ -262,9 +262,9 @@ static WCHAR * WINAPIV heap_wprintf(const WCHAR *format, ...)
     while (1)
     {
         buffer = xmalloc(size * sizeof(WCHAR));
-        __ms_va_start(args, format);
+        va_start(args, format);
         n = _vsnwprintf(buffer, size, format, args);
-        __ms_va_end(args);
+        va_end(args);
         if (n == -1)
             size *= 2;
         else if (n >= size)

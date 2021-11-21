@@ -77,9 +77,6 @@
 /* Define to 1 if you have the <fontconfig/fontconfig.h> header file. */
 #undef HAVE_FONTCONFIG_FONTCONFIG_H
 
-/* Define to 1 if you have the `fork' function. */
-#undef HAVE_FORK
-
 /* Define if FreeType 2 is installed */
 #undef HAVE_FREETYPE
 
@@ -128,9 +125,6 @@
 /* Define to 1 if you have the `gnutls_cipher_init' function. */
 #undef HAVE_GNUTLS_CIPHER_INIT
 
-/* Define if we have the libgphoto2 development environment */
-#undef HAVE_GPHOTO2
-
 /* Define if we have the libgphoto2_port development environment */
 #undef HAVE_GPHOTO2_PORT
 
@@ -166,9 +160,6 @@
 
 /* Define to 1 if you have the `isnan' function. */
 #undef HAVE_ISNAN
-
-/* Define to 1 if you have the <jpeglib.h> header file. */
-#undef HAVE_JPEGLIB_H
 
 /* Define to 1 if you have the `kqueue' function. */
 #undef HAVE_KQUEUE
@@ -406,9 +397,6 @@
 
 /* Define to 1 if you have the `pipe2' function. */
 #undef HAVE_PIPE2
-
-/* Define to 1 if you have the <poll.h> header file. */
-#undef HAVE_POLL_H
 
 /* Define to 1 if you have the `port_create' function. */
 #undef HAVE_PORT_CREATE
@@ -697,9 +685,6 @@
 /* Define to 1 if you have the <sys/param.h> header file. */
 #undef HAVE_SYS_PARAM_H
 
-/* Define to 1 if you have the <sys/poll.h> header file. */
-#undef HAVE_SYS_POLL_H
-
 /* Define to 1 if you have the <sys/prctl.h> header file. */
 #undef HAVE_SYS_PRCTL_H
 
@@ -922,9 +907,6 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
-/* Define to the soname of the libcapi20 library. */
-#undef SONAME_LIBCAPI20
-
 /* Define to the soname of the libcups library. */
 #undef SONAME_LIBCUPS
 
@@ -961,9 +943,6 @@
 /* Define to the soname of the libhal library. */
 #undef SONAME_LIBHAL
 
-/* Define to the soname of the libjpeg library. */
-#undef SONAME_LIBJPEG
-
 /* Define to the soname of the libkrb5 library. */
 #undef SONAME_LIBKRB5
 
@@ -981,9 +960,6 @@
 
 /* Define to the soname of the libOSMesa library. */
 #undef SONAME_LIBOSMESA
-
-/* Define to the soname of the libsane library. */
-#undef SONAME_LIBSANE
 
 /* Define to the soname of the libSDL2 library. */
 #undef SONAME_LIBSDL2

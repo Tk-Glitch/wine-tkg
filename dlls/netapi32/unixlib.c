@@ -24,19 +24,17 @@
 #endif
 
 #include "config.h"
-#include "wine/port.h"
 
 #ifdef SONAME_LIBNETAPI
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
-#ifdef HAVE_SYS_WAIT_H
+#include <sys/types.h>
 #include <sys/wait.h>
-#endif
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
+#include <dlfcn.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS

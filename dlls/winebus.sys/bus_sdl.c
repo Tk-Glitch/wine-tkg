@@ -23,14 +23,14 @@
 #endif
 
 #include "config.h"
-#include "wine/port.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdlib.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <unistd.h>
+#include <sys/types.h>
+#include <dlfcn.h>
 #ifdef HAVE_SDL_H
 # include <SDL.h>
 #endif
@@ -58,8 +58,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
 
 #ifdef SONAME_LIBSDL2
-
-WINE_DECLARE_DEBUG_CHANNEL(hid_report);
 
 static pthread_mutex_t sdl_cs = PTHREAD_MUTEX_INITIALIZER;
 static struct sdl_bus_options options;
@@ -847,7 +845,7 @@ static void process_device_event(SDL_Event *event)
     struct sdl_device *impl;
     SDL_JoystickID id;
 
-    TRACE_(hid_report)("Received action %x\n", event->type);
+    TRACE("Received action %x\n", event->type);
 
     pthread_mutex_lock(&sdl_cs);
 

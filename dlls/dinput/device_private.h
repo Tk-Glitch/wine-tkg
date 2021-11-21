@@ -30,25 +30,6 @@
 
 typedef struct
 {
-    int size;
-    int offset_in;
-    int offset_out;
-    int value;
-} DataTransform;
-
-typedef struct
-{
-    int                         size;
-    int                         internal_format_size;
-    DataTransform              *dt;
-
-    int                        *offsets;     /* object offsets */
-    LPDIDATAFORMAT              wine_df;     /* wine internal data format */
-    LPDIDATAFORMAT              user_df;     /* user defined data format */
-} DataFormat;
-
-typedef struct
-{
     unsigned int offset;
     UINT_PTR uAppData;
 } ActionMap;
@@ -76,8 +57,7 @@ struct dinput_device_vtbl
 #define DEVICE_STATE_MAX_SIZE 1024
 
 /* Device implementation */
-typedef struct IDirectInputDeviceImpl IDirectInputDeviceImpl;
-struct IDirectInputDeviceImpl
+struct dinput_device
 {
     IDirectInputDevice8W        IDirectInputDevice8W_iface;
     IDirectInputDevice8A        IDirectInputDevice8A_iface;
@@ -103,7 +83,8 @@ struct IDirectInputDeviceImpl
     BOOL                        overflow;    /* return DI_BUFFEROVERFLOW in 'GetDeviceData' */
     DWORD                       buffersize;  /* size of the queue - set in 'SetProperty'    */
 
-    DataFormat                  data_format; /* user data format and wine to user format converter */
+    DIDATAFORMAT *device_format;
+    DIDATAFORMAT *user_format;
 
     /* Action mapping */
     int                         num_actions; /* number of actions mapped */
@@ -117,10 +98,10 @@ struct IDirectInputDeviceImpl
     BYTE device_state[DEVICE_STATE_MAX_SIZE];
 };
 
-extern HRESULT direct_input_device_alloc( SIZE_T size, const struct dinput_device_vtbl *vtbl,
-                                          const GUID *guid, IDirectInputImpl *dinput, void **out ) DECLSPEC_HIDDEN;
-extern HRESULT direct_input_device_init( IDirectInputDevice8W *iface );
-extern void direct_input_device_destroy( IDirectInputDevice8W *iface );
+extern HRESULT dinput_device_alloc( SIZE_T size, const struct dinput_device_vtbl *vtbl, const GUID *guid,
+                                    IDirectInputImpl *dinput, void **out ) DECLSPEC_HIDDEN;
+extern HRESULT dinput_device_init( IDirectInputDevice8W *iface );
+extern void dinput_device_destroy( IDirectInputDevice8W *iface );
 
 extern BOOL get_app_key(HKEY*, HKEY*) DECLSPEC_HIDDEN;
 extern DWORD get_config_key( HKEY, HKEY, const WCHAR *, WCHAR *, DWORD ) DECLSPEC_HIDDEN;
