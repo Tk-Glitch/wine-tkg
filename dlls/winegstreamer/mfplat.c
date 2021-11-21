@@ -662,6 +662,7 @@ static IMFMediaType *mf_media_type_from_wg_format_audio(const struct wg_format *
             IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_NUM_CHANNELS, format->u.audio.channels);
             if (format->u.audio.channel_mask)
                 IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_CHANNEL_MASK, format->u.audio.channel_mask);
+            IMFMediaType_SetUINT32(type, &MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
 
             return type;
         }

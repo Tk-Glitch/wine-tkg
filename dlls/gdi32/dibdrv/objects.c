@@ -21,7 +21,7 @@
 #include <assert.h>
 #include <stdlib.h>
 
-#include "gdi_private.h"
+#include "ntgdi_private.h"
 #include "dibdrv.h"
 
 #include "wine/debug.h"
@@ -1259,9 +1259,9 @@ static void add_cap( dibdrv_physdev *pdev, HRGN region, HRGN round_cap, const PO
     default: FIXME( "Unknown end cap %x\n", pdev->pen_endcap );
         /* fall through */
     case PS_ENDCAP_ROUND:
-        OffsetRgn( round_cap, pt->x, pt->y );
-        CombineRgn( region, region, round_cap, RGN_OR );
-        OffsetRgn( round_cap, -pt->x, -pt->y );
+        NtGdiOffsetRgn( round_cap, pt->x, pt->y );
+        NtGdiCombineRgn( region, region, round_cap, RGN_OR );
+        NtGdiOffsetRgn( round_cap, -pt->x, -pt->y );
         return;
 
     case PS_ENDCAP_SQUARE: /* already been handled */
@@ -1341,13 +1341,13 @@ static void add_join( dibdrv_physdev *pdev, HRGN region, HRGN round_cap, const P
     default: FIXME( "Unknown line join %x\n", pdev->pen_join );
         /* fall through */
     case PS_JOIN_ROUND:
-        GetRgnBox( round_cap, &rect );
+        NtGdiGetRgnBox( round_cap, &rect );
         offset_rect( &rect, pt->x, pt->y );
         if (clip_rect_to_dib( &pdev->dib, &rect ))
         {
-            OffsetRgn( round_cap, pt->x, pt->y );
-            CombineRgn( region, region, round_cap, RGN_OR );
-            OffsetRgn( round_cap, -pt->x, -pt->y );
+            NtGdiOffsetRgn( round_cap, pt->x, pt->y );
+            NtGdiCombineRgn( region, region, round_cap, RGN_OR );
+            NtGdiOffsetRgn( round_cap, -pt->x, -pt->y );
         }
         return;
 
@@ -1364,9 +1364,9 @@ static void add_join( dibdrv_physdev *pdev, HRGN region, HRGN round_cap, const P
         break;
     }
 
-    GetRgnBox( join, &rect );
+    NtGdiGetRgnBox( join, &rect );
     if (clip_rect_to_dib( &pdev->dib, &rect ))
-        CombineRgn( region, region, join, RGN_OR );
+        NtGdiCombineRgn( region, region, join, RGN_OR );
     DeleteObject( join );
     return;
 }
@@ -1498,7 +1498,7 @@ static BOOL wide_line_segment( dibdrv_physdev *pdev, HRGN total,
         if (clip_rect_to_dib( &pdev->dib, &clip_rect ))
         {
             segment = CreatePolygonRgn( seg_pts, 4, ALTERNATE );
-            CombineRgn( total, total, segment, RGN_OR );
+            NtGdiCombineRgn( total, total, segment, RGN_OR );
             DeleteObject( segment );
         }
 
@@ -1575,8 +1575,8 @@ static BOOL wide_pen_lines(dibdrv_physdev *pdev, int num, POINT *pts, BOOL close
     while (num > 2 && pts[num - 1].x == pts[num - 2].x && pts[num - 1].y == pts[num - 2].y) num--;
 
     if (pdev->pen_join == PS_JOIN_ROUND || pdev->pen_endcap == PS_ENDCAP_ROUND)
-        round_cap = CreateEllipticRgn( -(pdev->pen_width / 2), -(pdev->pen_width / 2),
-                                       (pdev->pen_width + 1) / 2 + 1, (pdev->pen_width + 1) / 2 + 1 );
+        round_cap = NtGdiCreateEllipticRgn( -(pdev->pen_width / 2), -(pdev->pen_width / 2),
+                                            (pdev->pen_width + 1) / 2 + 1, (pdev->pen_width + 1) / 2 + 1 );
 
     if (close)
         wide_line_segments( pdev, num, pts, TRUE, 0, num, &pts[0], &pts[0], round_cap, total );
@@ -1601,8 +1601,8 @@ static BOOL dashed_wide_pen_lines(dibdrv_physdev *pdev, int num, POINT *pts, BOO
     while (num > 2 && pts[num - 1].x == pts[num - 2].x && pts[num - 1].y == pts[num - 2].y) num--;
 
     if (pdev->pen_join == PS_JOIN_ROUND || pdev->pen_endcap == PS_ENDCAP_ROUND)
-        round_cap = CreateEllipticRgn( -(pdev->pen_width / 2), -(pdev->pen_width / 2),
-                                       (pdev->pen_width + 1) / 2 + 1, (pdev->pen_width + 1) / 2 + 1);
+        round_cap = NtGdiCreateEllipticRgn( -(pdev->pen_width / 2), -(pdev->pen_width / 2),
+                                            (pdev->pen_width + 1) / 2 + 1, (pdev->pen_width + 1) / 2 + 1 );
 
     start = 0;
     cur_len = 0;

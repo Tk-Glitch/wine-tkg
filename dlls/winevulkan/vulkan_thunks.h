@@ -1757,6 +1757,7 @@ struct vulkan_device_funcs
     void (*p_vkCmdBeginTransformFeedbackEXT)(VkCommandBuffer, uint32_t, uint32_t, const VkBuffer *, const VkDeviceSize *);
     void (*p_vkCmdBindDescriptorSets)(VkCommandBuffer, VkPipelineBindPoint, VkPipelineLayout, uint32_t, uint32_t, const VkDescriptorSet *, uint32_t, const uint32_t *);
     void (*p_vkCmdBindIndexBuffer)(VkCommandBuffer, VkBuffer, VkDeviceSize, VkIndexType);
+    void (*p_vkCmdBindInvocationMaskHUAWEI)(VkCommandBuffer, VkImageView, VkImageLayout);
     void (*p_vkCmdBindPipeline)(VkCommandBuffer, VkPipelineBindPoint, VkPipeline);
     void (*p_vkCmdBindPipelineShaderGroupNV)(VkCommandBuffer, VkPipelineBindPoint, VkPipeline, uint32_t);
     void (*p_vkCmdBindShadingRateImageNV)(VkCommandBuffer, VkImageView, VkImageLayout);
@@ -1879,6 +1880,7 @@ struct vulkan_device_funcs
     void (*p_vkCmdSetViewportShadingRatePaletteNV)(VkCommandBuffer, uint32_t, uint32_t, const VkShadingRatePaletteNV *);
     void (*p_vkCmdSetViewportWScalingNV)(VkCommandBuffer, uint32_t, uint32_t, const VkViewportWScalingNV *);
     void (*p_vkCmdSetViewportWithCountEXT)(VkCommandBuffer, uint32_t, const VkViewport *);
+    void (*p_vkCmdSubpassShadingHUAWEI)(VkCommandBuffer);
     void (*p_vkCmdTraceRaysIndirectKHR)(VkCommandBuffer, const VkStridedDeviceAddressRegionKHR_host *, const VkStridedDeviceAddressRegionKHR_host *, const VkStridedDeviceAddressRegionKHR_host *, const VkStridedDeviceAddressRegionKHR_host *, VkDeviceAddress);
     void (*p_vkCmdTraceRaysKHR)(VkCommandBuffer, const VkStridedDeviceAddressRegionKHR_host *, const VkStridedDeviceAddressRegionKHR_host *, const VkStridedDeviceAddressRegionKHR_host *, const VkStridedDeviceAddressRegionKHR_host *, uint32_t, uint32_t, uint32_t);
     void (*p_vkCmdTraceRaysNV)(VkCommandBuffer, VkBuffer, VkDeviceSize, VkBuffer, VkDeviceSize, VkDeviceSize, VkBuffer, VkDeviceSize, VkDeviceSize, VkBuffer, VkDeviceSize, VkDeviceSize, uint32_t, uint32_t, uint32_t);
@@ -1999,6 +2001,7 @@ struct vulkan_device_funcs
     uint64_t (*p_vkGetDeviceMemoryOpaqueCaptureAddressKHR)(VkDevice, const VkDeviceMemoryOpaqueCaptureAddressInfo_host *);
     void (*p_vkGetDeviceQueue)(VkDevice, uint32_t, uint32_t, VkQueue *);
     void (*p_vkGetDeviceQueue2)(VkDevice, const VkDeviceQueueInfo2 *, VkQueue *);
+    VkResult (*p_vkGetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI)(VkDevice, VkRenderPass, VkExtent2D *);
     VkResult (*p_vkGetEventStatus)(VkDevice, VkEvent);
     VkResult (*p_vkGetFenceStatus)(VkDevice, VkFence);
     void (*p_vkGetGeneratedCommandsMemoryRequirementsNV)(VkDevice, const VkGeneratedCommandsMemoryRequirementsInfoNV_host *, VkMemoryRequirements2_host *);
@@ -2068,6 +2071,7 @@ struct vulkan_device_funcs
     void (*p_vkUpdateDescriptorSetWithTemplateKHR)(VkDevice, VkDescriptorSet, VkDescriptorUpdateTemplate, const void *);
     void (*p_vkUpdateDescriptorSets)(VkDevice, uint32_t, const VkWriteDescriptorSet_host *, uint32_t, const VkCopyDescriptorSet_host *);
     VkResult (*p_vkWaitForFences)(VkDevice, uint32_t, const VkFence *, VkBool32, uint64_t);
+    VkResult (*p_vkWaitForPresentKHR)(VkDevice, VkSwapchainKHR, uint64_t, uint64_t);
     VkResult (*p_vkWaitSemaphores)(VkDevice, const VkSemaphoreWaitInfo *, uint64_t);
     VkResult (*p_vkWaitSemaphoresKHR)(VkDevice, const VkSemaphoreWaitInfo *, uint64_t);
     VkResult (*p_vkWriteAccelerationStructuresPropertiesKHR)(VkDevice, uint32_t, const VkAccelerationStructureKHR *, VkQueryType, size_t, void *, size_t);
@@ -2156,6 +2160,7 @@ struct vulkan_instance_funcs
     USE_VK_FUNC(vkCmdBeginTransformFeedbackEXT) \
     USE_VK_FUNC(vkCmdBindDescriptorSets) \
     USE_VK_FUNC(vkCmdBindIndexBuffer) \
+    USE_VK_FUNC(vkCmdBindInvocationMaskHUAWEI) \
     USE_VK_FUNC(vkCmdBindPipeline) \
     USE_VK_FUNC(vkCmdBindPipelineShaderGroupNV) \
     USE_VK_FUNC(vkCmdBindShadingRateImageNV) \
@@ -2278,6 +2283,7 @@ struct vulkan_instance_funcs
     USE_VK_FUNC(vkCmdSetViewportShadingRatePaletteNV) \
     USE_VK_FUNC(vkCmdSetViewportWScalingNV) \
     USE_VK_FUNC(vkCmdSetViewportWithCountEXT) \
+    USE_VK_FUNC(vkCmdSubpassShadingHUAWEI) \
     USE_VK_FUNC(vkCmdTraceRaysIndirectKHR) \
     USE_VK_FUNC(vkCmdTraceRaysKHR) \
     USE_VK_FUNC(vkCmdTraceRaysNV) \
@@ -2398,6 +2404,7 @@ struct vulkan_instance_funcs
     USE_VK_FUNC(vkGetDeviceMemoryOpaqueCaptureAddressKHR) \
     USE_VK_FUNC(vkGetDeviceQueue) \
     USE_VK_FUNC(vkGetDeviceQueue2) \
+    USE_VK_FUNC(vkGetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI) \
     USE_VK_FUNC(vkGetEventStatus) \
     USE_VK_FUNC(vkGetFenceStatus) \
     USE_VK_FUNC(vkGetGeneratedCommandsMemoryRequirementsNV) \
@@ -2467,6 +2474,7 @@ struct vulkan_instance_funcs
     USE_VK_FUNC(vkUpdateDescriptorSetWithTemplateKHR) \
     USE_VK_FUNC(vkUpdateDescriptorSets) \
     USE_VK_FUNC(vkWaitForFences) \
+    USE_VK_FUNC(vkWaitForPresentKHR) \
     USE_VK_FUNC(vkWaitSemaphores) \
     USE_VK_FUNC(vkWaitSemaphoresKHR) \
     USE_VK_FUNC(vkWriteAccelerationStructuresPropertiesKHR)

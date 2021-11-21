@@ -26,7 +26,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "gdi_private.h"
+#include "ntgdi_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(bitblt);
@@ -482,9 +482,9 @@ BOOL CDECL nulldrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert
         pts[i].y -= dst.visrect.top;
     }
 
-    rgn = CreateRectRgn( 0, 0, 0, 0 );
+    rgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
     gradient_bitmapinfo( info, bits.ptr, vert_array, nvert, grad_array, ngrad, mode, pts, rgn );
-    OffsetRgn( rgn, dst.visrect.left, dst.visrect.top );
+    NtGdiOffsetRgn( rgn, dst.visrect.left, dst.visrect.top );
     ret = !dev->funcs->pPutImage( dev, rgn, info, &bits, &src, &dst, SRCCOPY );
 
     if (bits.free) bits.free( &bits );

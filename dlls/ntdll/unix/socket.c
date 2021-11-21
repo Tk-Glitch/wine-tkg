@@ -543,7 +543,7 @@ static NTSTATUS try_recv( int fd, struct async_recv_ioctl *async, ULONG_PTR *siz
     return status;
 }
 
-static NTSTATUS async_recv_proc( void *user, IO_STATUS_BLOCK *io, NTSTATUS status )
+static NTSTATUS async_recv_proc( void *user, ULONG_PTR *info, NTSTATUS status )
 {
     struct async_recv_ioctl *async = user;
     ULONG_PTR information = 0;
@@ -566,8 +566,7 @@ static NTSTATUS async_recv_proc( void *user, IO_STATUS_BLOCK *io, NTSTATUS statu
     }
     if (status != STATUS_PENDING)
     {
-        io->Status = status;
-        io->Information = information;
+        *info = information;
         release_fileio( &async->io );
     }
     return status;
@@ -684,7 +683,7 @@ static ULONG_PTR fill_poll_output( struct async_poll_ioctl *async, NTSTATUS stat
     return offsetof( struct afd_poll_params, sockets[count] );
 }
 
-static NTSTATUS async_poll_proc( void *user, IO_STATUS_BLOCK *io, NTSTATUS status )
+static NTSTATUS async_poll_proc( void *user, ULONG_PTR *info, NTSTATUS status )
 {
     struct async_poll_ioctl *async = user;
     ULONG_PTR information = 0;
@@ -704,8 +703,7 @@ static NTSTATUS async_poll_proc( void *user, IO_STATUS_BLOCK *io, NTSTATUS statu
 
     if (status != STATUS_PENDING)
     {
-        io->Status = status;
-        io->Information = information;
+        *info = information;
         free( async->input );
         release_fileio( &async->io );
     }
@@ -868,7 +866,7 @@ static NTSTATUS try_send( int fd, struct async_send_ioctl *async )
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS async_send_proc( void *user, IO_STATUS_BLOCK *io, NTSTATUS status )
+static NTSTATUS async_send_proc( void *user, ULONG_PTR *info, NTSTATUS status )
 {
     struct async_send_ioctl *async = user;
     int fd, needs_close;
@@ -890,8 +888,7 @@ static NTSTATUS async_send_proc( void *user, IO_STATUS_BLOCK *io, NTSTATUS statu
     }
     if (status != STATUS_PENDING)
     {
-        io->Status = status;
-        io->Information = async->sent_len;
+        *info = async->sent_len;
         release_fileio( &async->io );
     }
     return status;
@@ -1033,7 +1030,7 @@ static NTSTATUS try_transmit( int sock_fd, int file_fd, struct async_transmit_io
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS async_transmit_proc( void *user, IO_STATUS_BLOCK *io, NTSTATUS status )
+static NTSTATUS async_transmit_proc( void *user, ULONG_PTR *info, NTSTATUS status )
 {
     int sock_fd, file_fd = -1, sock_needs_close = FALSE, file_needs_close = FALSE;
     struct async_transmit_ioctl *async = user;
@@ -1062,8 +1059,7 @@ static NTSTATUS async_transmit_proc( void *user, IO_STATUS_BLOCK *io, NTSTATUS s
     }
     if (status != STATUS_PENDING)
     {
-        io->Status = status;
-        io->Information = async->head_cursor + async->file_cursor + async->tail_cursor;
+        *info = async->head_cursor + async->file_cursor + async->tail_cursor;
         release_fileio( &async->io );
     }
     return status;
@@ -1735,6 +1731,67 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             return STATUS_SUCCESS; /* fake success */
         }
 #endif
+
+        case IOCTL_AFD_WINE_SET_IP_DROP_MEMBERSHIP:
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_DROP_MEMBERSHIP, in_buffer, in_size );
+
+        case IOCTL_AFD_WINE_SET_IP_DROP_SOURCE_MEMBERSHIP:
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_DROP_SOURCE_MEMBERSHIP, in_buffer, in_size );
+
+#ifdef IP_HDRINCL
+        case IOCTL_AFD_WINE_GET_IP_HDRINCL:
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_HDRINCL, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IP_HDRINCL:
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_HDRINCL, in_buffer, in_size );
+#endif
+
+        case IOCTL_AFD_WINE_GET_IP_MULTICAST_IF:
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_MULTICAST_IF, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IP_MULTICAST_IF:
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_MULTICAST_IF, in_buffer, in_size );
+
+        case IOCTL_AFD_WINE_GET_IP_MULTICAST_LOOP:
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_MULTICAST_LOOP, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IP_MULTICAST_LOOP:
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_MULTICAST_LOOP, in_buffer, in_size );
+
+        case IOCTL_AFD_WINE_GET_IP_MULTICAST_TTL:
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_MULTICAST_TTL, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IP_MULTICAST_TTL:
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_MULTICAST_TTL, in_buffer, in_size );
+
+        case IOCTL_AFD_WINE_GET_IP_OPTIONS:
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_OPTIONS, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IP_OPTIONS:
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_OPTIONS, in_buffer, in_size );
+
+#ifdef IP_PKTINFO
+        case IOCTL_AFD_WINE_GET_IP_PKTINFO:
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_PKTINFO, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IP_PKTINFO:
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_PKTINFO, in_buffer, in_size );
+#elif defined(IP_RECVDSTADDR)
+        case IOCTL_AFD_WINE_GET_IP_PKTINFO:
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_RECVDSTADDR, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IP_PKTINFO:
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_RECVDSTADDR, in_buffer, in_size );
+#endif
+
+        case IOCTL_AFD_WINE_GET_IP_TOS:
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_TOS, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IP_TOS:
+            return do_setsockopt( handle, io, IPPROTO_IP, IP_TOS, in_buffer, in_size );
+
+        case IOCTL_AFD_WINE_GET_IP_TTL:
+            return do_getsockopt( handle, io, IPPROTO_IP, IP_TTL, out_buffer, out_size );
 
         default:
         {

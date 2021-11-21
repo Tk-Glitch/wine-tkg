@@ -24,7 +24,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
-#include "gdi_private.h"
+#include "ntgdi_private.h"
 #include "mfdrv/metafiledrv.h"
 #include "wine/debug.h"
 
@@ -103,11 +103,11 @@ static const struct gdi_dc_funcs MFDRV_Funcs =
     MFDRV_AbortPath,                 /* pAbortPath */
     NULL,                            /* pAlphaBlend */
     NULL,                            /* pAngleArc */
-    MFDRV_Arc,                       /* pArc */
-    NULL,                            /* pArcTo */
+    NULL,                            /* pArc */
+    MFDRV_ArcTo,                     /* pArcTo */
     MFDRV_BeginPath,                 /* pBeginPath */
     NULL,                            /* pBlendImage */
-    MFDRV_Chord,                     /* pChord */
+    NULL,                            /* pChord */
     MFDRV_CloseFigure,               /* pCloseFigure */
     MFDRV_CreateCompatibleDC,        /* pCreateCompatibleDC */
     NULL,                            /* pCreateDC */
@@ -159,15 +159,15 @@ static const struct gdi_dc_funcs MFDRV_Funcs =
     NULL,                            /* pGradientFill */
     MFDRV_IntersectClipRect,         /* pIntersectClipRect */
     MFDRV_InvertRgn,                 /* pInvertRgn */
-    MFDRV_LineTo,                    /* pLineTo */
+    NULL,                            /* pLineTo */
     NULL,                            /* pModifyWorldTransform */
-    MFDRV_MoveTo,                    /* pMoveTo */
+    NULL,                            /* pMoveTo */
     MFDRV_OffsetClipRgn,             /* pOffsetClipRgn */
     MFDRV_OffsetViewportOrgEx,       /* pOffsetViewportOrgEx */
     MFDRV_OffsetWindowOrgEx,         /* pOffsetWindowOrgEx */
     MFDRV_PaintRgn,                  /* pPaintRgn */
     MFDRV_PatBlt,                    /* pPatBlt */
-    MFDRV_Pie,                       /* pPie */
+    NULL,                            /* pPie */
     MFDRV_PolyBezier,                /* pPolyBezier */
     MFDRV_PolyBezierTo,              /* pPolyBezierTo */
     NULL,                            /* pPolyDraw */
@@ -243,7 +243,7 @@ static DC *MFDRV_AllocMetaFile(void)
     DC *dc;
     METAFILEDRV_PDEVICE *physDev;
 
-    if (!(dc = alloc_dc_ptr( OBJ_METADC ))) return NULL;
+    if (!(dc = alloc_dc_ptr( NTGDI_OBJ_METADC ))) return NULL;
 
     physDev = HeapAlloc(GetProcessHeap(),0,sizeof(*physDev));
     if (!physDev)
@@ -259,6 +259,7 @@ static DC *MFDRV_AllocMetaFile(void)
     }
 
     push_dc_driver( &dc->physDev, &physDev->dev, &MFDRV_Funcs );
+    set_gdi_client_ptr( dc->hSelf, physDev );
 
     physDev->handles = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, HANDLE_LIST_INC * sizeof(physDev->handles[0]));
     physDev->handles_size = HANDLE_LIST_INC;
@@ -596,4 +597,30 @@ BOOL MFDRV_MetaParam8(PHYSDEV dev, short func, short param1, short param2,
     params[6] = param2;
     params[7] = param1;
     return MFDRV_WriteRecord( dev, mr, mr->rdSize * 2);
+}
+
+static METAFILEDRV_PDEVICE *get_metadc_ptr( HDC hdc )
+{
+    METAFILEDRV_PDEVICE *metafile = get_gdi_client_ptr( hdc, NTGDI_OBJ_METADC );
+    if (!metafile) SetLastError( ERROR_INVALID_HANDLE );
+    return metafile;
+}
+
+BOOL metadc_param2( HDC hdc, short func, short param1, short param2 )
+{
+    METAFILEDRV_PDEVICE *dev;
+
+    if (!(dev = get_metadc_ptr( hdc ))) return FALSE;
+    return MFDRV_MetaParam2( &dev->dev, func, param1, param2 );
+}
+
+BOOL metadc_param8( HDC hdc, short func, short param1, short param2,
+                    short param3, short param4, short param5,
+                    short param6, short param7, short param8)
+{
+    METAFILEDRV_PDEVICE *dev;
+
+    if (!(dev = get_metadc_ptr( hdc ))) return FALSE;
+    return MFDRV_MetaParam8( &dev->dev, func, param1, param2, param3,
+                             param4, param5, param6, param7, param8 );
 }

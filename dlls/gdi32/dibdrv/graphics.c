@@ -19,7 +19,7 @@
  */
 
 #include <assert.h>
-#include "gdi_private.h"
+#include "ntgdi_private.h"
 #include "dibdrv.h"
 
 #include "wine/debug.h"
@@ -81,14 +81,14 @@ static BOOL brush_rect( dibdrv_physdev *pdev, dib_brush *brush, const RECT *rect
 /* paint a region with the brush (note: the region can be modified) */
 static BOOL brush_region( dibdrv_physdev *pdev, HRGN region )
 {
-    if (pdev->clip) CombineRgn( region, region, pdev->clip, RGN_AND );
+    if (pdev->clip) NtGdiCombineRgn( region, region, pdev->clip, RGN_AND );
     return brush_rect( pdev, &pdev->brush, NULL, region );
 }
 
 /* paint a region with the pen (note: the region can be modified) */
 static BOOL pen_region( dibdrv_physdev *pdev, HRGN region )
 {
-    if (pdev->clip) CombineRgn( region, region, pdev->clip, RGN_AND );
+    if (pdev->clip) NtGdiCombineRgn( region, region, pdev->clip, RGN_AND );
     return brush_rect( pdev, &pdev->pen_brush, NULL, region );
 }
 
@@ -415,7 +415,7 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
 
     if (extra_lines == -1)
     {
-        points[0] = dc->cur_pos;
+        points[0] = dc->attr->cur_pos;
         lp_to_dp( dc, points, 1 );
         count = 1 + get_arc_points( dc->ArcDirection, &rect, pt[0], pt[1], points + 1 );
     }
@@ -443,7 +443,7 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
         return TRUE;
     }
 
-    if (pdev->pen_uses_region && !(outline = CreateRectRgn( 0, 0, 0, 0 )))
+    if (pdev->pen_uses_region && !(outline = NtGdiCreateRectRgn( 0, 0, 0, 0 )))
     {
         HeapFree( GetProcessHeap(), 0, points );
         return FALSE;
@@ -473,7 +473,7 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
 
     if (interior)
     {
-        CombineRgn( interior, interior, outline, RGN_DIFF );
+        NtGdiCombineRgn( interior, interior, outline, RGN_DIFF );
         ret = brush_region( pdev, interior );
         DeleteObject( interior );
     }
@@ -502,7 +502,7 @@ static BOOL stroke_and_fill_path( dibdrv_physdev *dev, BOOL stroke, BOOL fill )
     if (!(path = get_gdi_flat_path( dc, fill ? &interior : NULL ))) return FALSE;
     if (!(total = get_gdi_path_data( path, &points, &types ))) goto done;
 
-    if (stroke && dev->pen_uses_region) outline = CreateRectRgn( 0, 0, 0, 0 );
+    if (stroke && dev->pen_uses_region) outline = NtGdiCreateRectRgn( 0, 0, 0, 0 );
 
     /* if not using a region, paint the interior first so the outline can overlap it */
     if (interior && !outline)
@@ -538,7 +538,7 @@ static BOOL stroke_and_fill_path( dibdrv_physdev *dev, BOOL stroke, BOOL fill )
 
     if (interior)
     {
-        CombineRgn( interior, interior, outline, RGN_DIFF );
+        NtGdiCombineRgn( interior, interior, outline, RGN_DIFF );
         ret = brush_region( dev, interior );
         DeleteObject( interior );
     }
@@ -1080,7 +1080,7 @@ BOOL CDECL dibdrv_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom
 static inline BOOL is_interior( dib_info *dib, HRGN clip, int x, int y, DWORD pixel, UINT type)
 {
     /* the clip rgn stops the flooding */
-    if (clip && !PtInRegion( clip, x, y )) return FALSE;
+    if (clip && !NtGdiPtInRegion( clip, x, y )) return FALSE;
 
     if (type == FLOODFILLBORDER)
         return dib->funcs->get_pixel( dib, x, y ) != pixel;
@@ -1102,12 +1102,12 @@ static inline void do_next_row( dib_info *dib, HRGN clip, const RECT *row, int o
         if (is_interior( dib, clip, next.right, next.top, pixel, type)) next.right++;
         else
         {
-            if (next.left != next.right && !PtInRegion( rgn, next.left, next.top ))
+            if (next.left != next.right && !NtGdiPtInRegion( rgn, next.left, next.top ))
                 fill_row( dib, clip, &next, pixel, type, rgn );
             next.left = ++next.right;
         }
     }
-    if (next.left != next.right && !PtInRegion( rgn, next.left, next.top ))
+    if (next.left != next.right && !NtGdiPtInRegion( rgn, next.left, next.top ))
         fill_row( dib, clip, &next, pixel, type, rgn );
 }
 
@@ -1143,7 +1143,7 @@ BOOL CDECL dibdrv_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT 
 
     if (!is_interior( &pdev->dib, pdev->clip, x, y, pixel, type )) return FALSE;
 
-    if (!(rgn = CreateRectRgn( 0, 0, 0, 0 ))) return FALSE;
+    if (!(rgn = NtGdiCreateRectRgn( 0, 0, 0, 0 ))) return FALSE;
     row.left = x;
     row.right = x + 1;
     row.top = y;
@@ -1220,13 +1220,13 @@ BOOL CDECL dibdrv_LineTo( PHYSDEV dev, INT x, INT y )
     HRGN region = 0;
     BOOL ret;
 
-    pts[0] = dc->cur_pos;
+    pts[0] = dc->attr->cur_pos;
     pts[1].x = x;
     pts[1].y = y;
 
     lp_to_dp(dc, pts, 2);
 
-    if (pdev->pen_uses_region && !(region = CreateRectRgn( 0, 0, 0, 0 ))) return FALSE;
+    if (pdev->pen_uses_region && !(region = NtGdiCreateRectRgn( 0, 0, 0, 0 ))) return FALSE;
 
     reset_dash_origin(pdev);
 
@@ -1357,7 +1357,7 @@ BOOL CDECL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, 
         goto done;
     }
 
-    if (pdev->pen_uses_region) outline = CreateRectRgn( 0, 0, 0, 0 );
+    if (pdev->pen_uses_region) outline = NtGdiCreateRectRgn( 0, 0, 0, 0 );
 
     /* if not using a region, paint the interior first so the outline can overlap it */
     if (interior && !outline)
@@ -1377,7 +1377,7 @@ BOOL CDECL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, 
 
     if (interior)
     {
-        CombineRgn( interior, interior, outline, RGN_DIFF );
+        NtGdiCombineRgn( interior, interior, outline, RGN_DIFF );
         ret = brush_region( pdev, interior );
         DeleteObject( interior );
     }
@@ -1419,7 +1419,7 @@ BOOL CDECL dibdrv_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* count
     memcpy( points, pt, total * sizeof(*pt) );
     lp_to_dp( dc, points, total );
 
-    if (pdev->pen_uses_region && !(outline = CreateRectRgn( 0, 0, 0, 0 )))
+    if (pdev->pen_uses_region && !(outline = NtGdiCreateRectRgn( 0, 0, 0, 0 )))
     {
         ret = FALSE;
         goto done;
@@ -1490,7 +1490,7 @@ BOOL CDECL dibdrv_Rectangle( PHYSDEV dev, INT left, INT top, INT right, INT bott
 
     if (!get_pen_device_rect( dc, pdev, &rect, left, top, right, bottom )) return TRUE;
 
-    if (pdev->pen_uses_region && !(outline = CreateRectRgn( 0, 0, 0, 0 ))) return FALSE;
+    if (pdev->pen_uses_region && !(outline = NtGdiCreateRectRgn( 0, 0, 0, 0 ))) return FALSE;
 
     rect.right--;
     rect.bottom--;
@@ -1522,7 +1522,7 @@ BOOL CDECL dibdrv_Rectangle( PHYSDEV dev, INT left, INT top, INT right, INT bott
         {
             HRGN interior = CreateRectRgnIndirect( &rect );
 
-            CombineRgn( interior, interior, outline, RGN_DIFF );
+            NtGdiCombineRgn( interior, interior, outline, RGN_DIFF );
             brush_region( pdev, interior );
             DeleteObject( interior );
         }
@@ -1585,7 +1585,7 @@ BOOL CDECL dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
     points = HeapAlloc( GetProcessHeap(), 0, (ellipse_width + ellipse_height) * 2 * sizeof(*points) );
     if (!points) return FALSE;
 
-    if (pdev->pen_uses_region && !(outline = CreateRectRgn( 0, 0, 0, 0 )))
+    if (pdev->pen_uses_region && !(outline = NtGdiCreateRectRgn( 0, 0, 0, 0 )))
     {
         HeapFree( GetProcessHeap(), 0, points );
         return FALSE;

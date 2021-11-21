@@ -29,6 +29,7 @@
 #include "winnls.h"
 #include "winternl.h"
 #include "winerror.h"
+#include "ntgdi_private.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -38,7 +39,6 @@ static BOOL DC_DeleteObject( HGDIOBJ handle );
 
 static const struct gdi_obj_funcs dc_funcs =
 {
-    NULL,             /* pGetObjectA */
     NULL,             /* pGetObjectW */
     NULL,             /* pUnrealizeObject */
     DC_DeleteObject   /* pDeleteObject */
@@ -53,10 +53,10 @@ static inline DC *get_dc_obj( HDC hdc )
 
     switch (type)
     {
-    case OBJ_DC:
-    case OBJ_MEMDC:
-    case OBJ_METADC:
-    case OBJ_ENHMETADC:
+    case NTGDI_OBJ_DC:
+    case NTGDI_OBJ_MEMDC:
+    case NTGDI_OBJ_METADC:
+    case NTGDI_OBJ_ENHMETADC:
         return dc;
     default:
         GDI_ReleaseObj( hdc );
@@ -100,8 +100,8 @@ static void set_initial_dc_state( DC *dc )
     dc->breakRem            = 0;
     dc->MapMode             = MM_TEXT;
     dc->GraphicsMode        = GM_COMPATIBLE;
-    dc->cur_pos.x           = 0;
-    dc->cur_pos.y           = 0;
+    dc->attr->cur_pos.x     = 0;
+    dc->attr->cur_pos.y     = 0;
     dc->ArcDirection        = AD_COUNTERCLOCKWISE;
     dc->xformWorld2Wnd.eM11 = 1.0f;
     dc->xformWorld2Wnd.eM12 = 0.0f;
@@ -124,6 +124,11 @@ DC *alloc_dc_ptr( WORD magic )
     DC *dc;
 
     if (!(dc = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dc) ))) return NULL;
+    if (!(dc->attr = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dc->attr))))
+    {
+        HeapFree( GetProcessHeap(), 0, dc->attr );
+        return NULL;
+    }
 
     dc->nulldrv.funcs       = &null_driver;
     dc->physDev             = &dc->nulldrv;
@@ -138,10 +143,12 @@ DC *alloc_dc_ptr( WORD magic )
 
     if (!(dc->hSelf = alloc_gdi_handle( &dc->obj, magic, &dc_funcs )))
     {
+        HeapFree( GetProcessHeap(), 0, dc->attr );
         HeapFree( GetProcessHeap(), 0, dc );
         return NULL;
     }
     dc->nulldrv.hdc = dc->hSelf;
+    set_gdi_client_ptr( dc->hSelf, dc->attr );
 
     if (!font_driver.pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL ))
     {
@@ -163,6 +170,7 @@ static void free_dc_state( DC *dc )
     if (dc->hVisRgn) DeleteObject( dc->hVisRgn );
     if (dc->region) DeleteObject( dc->region );
     if (dc->path) free_gdi_path( dc->path );
+    HeapFree( GetProcessHeap(), 0, dc->attr );
     HeapFree( GetProcessHeap(), 0, dc );
 }
 
@@ -379,6 +387,11 @@ INT CDECL nulldrv_SaveDC( PHYSDEV dev )
     DC *newdc, *dc = get_nulldrv_dc( dev );
 
     if (!(newdc = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*newdc )))) return 0;
+    if (!(newdc->attr = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*newdc->attr) )))
+    {
+        HeapFree( GetProcessHeap(), 0, newdc );
+        return 0;
+    }
     newdc->layout           = dc->layout;
     newdc->hPen             = dc->hPen;
     newdc->hBrush           = dc->hBrush;
@@ -402,7 +415,7 @@ INT CDECL nulldrv_SaveDC( PHYSDEV dev )
     newdc->breakRem         = dc->breakRem;
     newdc->MapMode          = dc->MapMode;
     newdc->GraphicsMode     = dc->GraphicsMode;
-    newdc->cur_pos          = dc->cur_pos;
+    newdc->attr->cur_pos    = dc->attr->cur_pos;
     newdc->ArcDirection     = dc->ArcDirection;
     newdc->xformWorld2Wnd   = dc->xformWorld2Wnd;
     newdc->xformWorld2Vport = dc->xformWorld2Vport;
@@ -419,13 +432,13 @@ INT CDECL nulldrv_SaveDC( PHYSDEV dev )
 
     if (dc->hClipRgn)
     {
-        newdc->hClipRgn = CreateRectRgn( 0, 0, 0, 0 );
-        CombineRgn( newdc->hClipRgn, dc->hClipRgn, 0, RGN_COPY );
+        newdc->hClipRgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+        NtGdiCombineRgn( newdc->hClipRgn, dc->hClipRgn, 0, RGN_COPY );
     }
     if (dc->hMetaRgn)
     {
-        newdc->hMetaRgn = CreateRectRgn( 0, 0, 0, 0 );
-        CombineRgn( newdc->hMetaRgn, dc->hMetaRgn, 0, RGN_COPY );
+        newdc->hMetaRgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+        NtGdiCombineRgn( newdc->hMetaRgn, dc->hMetaRgn, 0, RGN_COPY );
     }
 
     if (!PATH_SavePath( newdc, dc ))
@@ -479,7 +492,7 @@ BOOL CDECL nulldrv_RestoreDC( PHYSDEV dev, INT level )
     dc->breakRem         = dcs->breakRem;
     dc->MapMode          = dcs->MapMode;
     dc->GraphicsMode     = dcs->GraphicsMode;
-    dc->cur_pos          = dcs->cur_pos;
+    dc->attr->cur_pos    = dcs->attr->cur_pos;
     dc->ArcDirection     = dcs->ArcDirection;
     dc->xformWorld2Wnd   = dcs->xformWorld2Wnd;
     dc->xformWorld2Vport = dcs->xformWorld2Vport;
@@ -494,8 +507,8 @@ BOOL CDECL nulldrv_RestoreDC( PHYSDEV dev, INT level )
 
     if (dcs->hClipRgn)
     {
-        if (!dc->hClipRgn) dc->hClipRgn = CreateRectRgn( 0, 0, 0, 0 );
-        CombineRgn( dc->hClipRgn, dcs->hClipRgn, 0, RGN_COPY );
+        if (!dc->hClipRgn) dc->hClipRgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+        NtGdiCombineRgn( dc->hClipRgn, dcs->hClipRgn, 0, RGN_COPY );
     }
     else
     {
@@ -504,8 +517,8 @@ BOOL CDECL nulldrv_RestoreDC( PHYSDEV dev, INT level )
     }
     if (dcs->hMetaRgn)
     {
-        if (!dc->hMetaRgn) dc->hMetaRgn = CreateRectRgn( 0, 0, 0, 0 );
-        CombineRgn( dc->hMetaRgn, dcs->hMetaRgn, 0, RGN_COPY );
+        if (!dc->hMetaRgn) dc->hMetaRgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+        NtGdiCombineRgn( dc->hMetaRgn, dcs->hMetaRgn, 0, RGN_COPY );
     }
     else
     {
@@ -645,7 +658,7 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         ERR( "no driver found for %s\n", debugstr_w(buf) );
         return 0;
     }
-    if (!(dc = alloc_dc_ptr( OBJ_DC ))) return 0;
+    if (!(dc = alloc_dc_ptr( NTGDI_OBJ_DC ))) return 0;
     hdc = dc->hSelf;
 
     dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
@@ -771,7 +784,7 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
     }
     else funcs = DRIVER_load_driver( L"display" );
 
-    if (!(dc = alloc_dc_ptr( OBJ_MEMDC ))) return 0;
+    if (!(dc = alloc_dc_ptr( NTGDI_OBJ_MEMDC ))) return 0;
 
     TRACE("(%p): returning %p\n", hdc, dc->hSelf );
 
@@ -1827,7 +1840,7 @@ BOOL WINAPI GetCurrentPositionEx( HDC hdc, LPPOINT pt )
 {
     DC * dc = get_dc_ptr( hdc );
     if (!dc) return FALSE;
-    *pt = dc->cur_pos;
+    *pt = dc->attr->cur_pos;
     release_dc_ptr( dc );
     return TRUE;
 }

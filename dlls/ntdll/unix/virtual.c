@@ -243,12 +243,6 @@ static struct range_entry *free_ranges;
 static struct range_entry *free_ranges_end;
 
 
-static inline BOOL is_inside_signal_stack( void *ptr )
-{
-    return ((char *)ptr >= (char *)get_signal_stack() &&
-            (char *)ptr < (char *)get_signal_stack() + signal_stack_size);
-}
-
 static inline BOOL is_beyond_limit( const void *addr, size_t size, const void *limit )
 {
     return (addr >= limit || (const char *)addr + size > (const char *)limit);
@@ -2802,7 +2796,7 @@ ULONG_PTR get_system_affinity_mask(void)
 /***********************************************************************
  *           virtual_get_system_info
  */
-void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info )
+void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info, BOOL wow64 )
 {
 #if defined(HAVE_STRUCT_SYSINFO_TOTALRAM) && defined(HAVE_STRUCT_SYSINFO_MEM_UNIT)
     struct sysinfo sinfo;
@@ -2827,9 +2821,19 @@ void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info )
     info->MmNumberOfPhysicalPages = info->MmHighestPhysicalPage - info->MmLowestPhysicalPage;
     info->AllocationGranularity   = granularity_mask + 1;
     info->LowestUserAddress       = (void *)0x10000;
-    info->HighestUserAddress      = (char *)user_space_limit - 1;
     info->ActiveProcessorsAffinityMask = get_system_affinity_mask();
     info->NumberOfProcessors      = peb->NumberOfProcessors;
+#ifdef _WIN64
+    if (wow64)
+    {
+        if (main_image_info.ImageCharacteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE)
+            info->HighestUserAddress = (char *)0xc0000000 - 1;
+        else
+            info->HighestUserAddress = (char *)0x7fff0000 - 1;
+        return;
+    }
+#endif
+    info->HighestUserAddress = (char *)user_space_limit - 1;
 }
 
 
@@ -5167,6 +5171,29 @@ NTSTATUS WINAPI NtWow64WriteVirtualMemory64( HANDLE process, ULONG64 addr, const
     }
     if (bytes_written) *bytes_written = size;
     return status;
+}
+
+
+/***********************************************************************
+ *             NtWow64GetNativeSystemInformation   (NTDLL.@)
+ *             ZwWow64GetNativeSystemInformation   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtWow64GetNativeSystemInformation( SYSTEM_INFORMATION_CLASS class, void *info,
+                                                   ULONG len, ULONG *retlen )
+{
+    switch (class)
+    {
+    case SystemBasicInformation:
+    case SystemCpuInformation:
+    case SystemEmulationBasicInformation:
+    case SystemEmulationProcessorInformation:
+        return NtQuerySystemInformation( class, info, len, retlen );
+    case SystemNativeBasicInformation:
+        return NtQuerySystemInformation( SystemBasicInformation, info, len, retlen );
+    default:
+        if (is_wow64) return STATUS_INVALID_INFO_CLASS;
+        return NtQuerySystemInformation( class, info, len, retlen );
+    }
 }
 
 #endif  /* _WIN64 */

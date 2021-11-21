@@ -2080,6 +2080,27 @@ static NTSTATUS server_get_file_info( HANDLE handle, IO_STATUS_BLOCK *io, void *
 }
 
 
+static NTSTATUS server_open_file_object( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
+                                         ULONG sharing, ULONG options )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( open_file_object )
+    {
+        req->access     = access;
+        req->attributes = attr->Attributes;
+        req->rootdir    = wine_server_obj_handle( attr->RootDirectory );
+        req->sharing    = sharing;
+        req->options    = options;
+        wine_server_add_data( req, attr->ObjectName->Buffer, attr->ObjectName->Length );
+        status = wine_server_call( req );
+        *handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+
 /* retrieve device/inode number for all the drives */
 static unsigned int get_drives_info( struct file_identity info[MAX_DOS_DRIVES] )
 {
@@ -2206,8 +2227,8 @@ static NTSTATUS get_mountmgr_fs_info( HANDLE handle, int fd, struct mountmgr_uni
 
     init_unicode_string( &string, MOUNTMGR_DEVICE_NAME );
     InitializeObjectAttributes( &attr, &string, 0, NULL, NULL );
-    status = NtOpenFile( &mountmgr, GENERIC_READ | SYNCHRONIZE, &attr, &io,
-                         FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_SYNCHRONOUS_IO_NONALERT );
+    status = server_open_file_object( &mountmgr, GENERIC_READ | SYNCHRONIZE, &attr,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_SYNCHRONOUS_IO_NONALERT );
     if (status) return status;
 
     status = NtDeviceIoControlFile( mountmgr, NULL, NULL, NULL, &io, IOCTL_MOUNTMGR_QUERY_UNIX_DRIVE,
@@ -3090,31 +3111,16 @@ static inline int get_dos_prefix_len( const UNICODE_STRING *name )
 {
     static const WCHAR nt_prefixW[] = {'\\','?','?','\\'};
     static const WCHAR dosdev_prefixW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\'};
-    static const WCHAR globalrootW[] = {'\\','?','?','\\','G','l','o','b','a','l','R','o','o','t'};
-    int prefix_len = 0;
-    WCHAR *prefix;
-    USHORT length;
 
-    prefix = name->Buffer;
-    length = name->Length;
+    if (name->Length >= sizeof(nt_prefixW) &&
+        !memcmp( name->Buffer, nt_prefixW, sizeof(nt_prefixW) ))
+        return ARRAY_SIZE( nt_prefixW );
 
-    if (length >= ARRAY_SIZE( globalrootW ) &&
-        !wcsnicmp( prefix, globalrootW, ARRAY_SIZE( globalrootW )))
-    {
-        WARN("Stripping off GlobalRoot prefix.\n");
-        prefix += ARRAY_SIZE( globalrootW );
-        prefix_len += ARRAY_SIZE( globalrootW );
-        length -= ARRAY_SIZE( globalrootW );
-    }
+    if (name->Length >= sizeof(dosdev_prefixW) &&
+        !wcsnicmp( name->Buffer, dosdev_prefixW, ARRAY_SIZE( dosdev_prefixW )))
+        return ARRAY_SIZE( dosdev_prefixW );
 
-    if (length >= sizeof(nt_prefixW) &&
-        !memcmp( prefix, nt_prefixW, sizeof(nt_prefixW) ))
-        prefix_len += ARRAY_SIZE( nt_prefixW );
-    else if (length >= sizeof(dosdev_prefixW) &&
-        !wcsnicmp( prefix, dosdev_prefixW, ARRAY_SIZE( dosdev_prefixW )))
-        prefix_len += ARRAY_SIZE( dosdev_prefixW );
-
-    return prefix_len;
+    return 0;
 }
 
 
@@ -4030,18 +4036,7 @@ NTSTATUS WINAPI NtCreateFile( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBU
 
     if (io->u.Status == STATUS_BAD_DEVICE_TYPE)
     {
-        SERVER_START_REQ( open_file_object )
-        {
-            req->access     = access;
-            req->attributes = attr->Attributes;
-            req->rootdir    = wine_server_obj_handle( attr->RootDirectory );
-            req->sharing    = sharing;
-            req->options    = options;
-            wine_server_add_data( req, new_attr.ObjectName->Buffer, new_attr.ObjectName->Length );
-            io->u.Status = wine_server_call( req );
-            *handle = wine_server_ptr_handle( reply->handle );
-        }
-        SERVER_END_REQ;
+        io->u.Status = server_open_file_object( handle, access, &new_attr, sharing, options );
         if (io->u.Status == STATUS_SUCCESS) io->Information = FILE_OPENED;
         free( nt_name.Buffer );
         return io->u.Status;
@@ -4199,12 +4194,20 @@ NTSTATUS WINAPI NtDeleteFile( OBJECT_ATTRIBUTES *attr )
 {
     HANDLE handle;
     NTSTATUS status;
-    IO_STATUS_BLOCK io;
+    char *unix_name;
+    UNICODE_STRING nt_name;
+    OBJECT_ATTRIBUTES new_attr = *attr;
 
-    status = NtCreateFile( &handle, GENERIC_READ | GENERIC_WRITE | DELETE, attr, &io, NULL, 0,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_OPEN,
-                           FILE_DELETE_ON_CLOSE, NULL, 0 );
-    if (status == STATUS_SUCCESS) NtClose( handle );
+    get_redirect( &new_attr, &nt_name );
+    if (!(status = nt_to_unix_file_name( &new_attr, &unix_name, FILE_OPEN )))
+    {
+        if (!(status = open_unix_file( &handle, unix_name, GENERIC_READ | GENERIC_WRITE | DELETE, &new_attr,
+                                       0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_OPEN,
+                                       FILE_DELETE_ON_CLOSE, NULL, 0 )))
+            NtClose( handle );
+        free( unix_name );
+    }
+    free( nt_name.Buffer );
     return status;
 }
 
@@ -4642,15 +4645,6 @@ NTSTATUS WINAPI NtSetInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
         else io->u.Status = STATUS_INVALID_PARAMETER_3;
         break;
 
-    case FileAllocationInformation:
-    {
-        const FILE_ALLOCATION_INFORMATION *info = ptr;
-
-        FIXME("FileAllocationInformation AllocationSize %p stub.\n", (void *)(ULONG_PTR)info->AllocationSize.QuadPart);
-        io->u.Status = STATUS_SUCCESS;
-        break;
-    }
-
     case FilePipeInformation:
         if (len >= sizeof(FILE_PIPE_INFORMATION))
         {
@@ -4964,17 +4958,15 @@ static async_data_t server_async( HANDLE handle, struct async_fileio *user, HAND
     return async;
 }
 
-static NTSTATUS wait_async( HANDLE handle, BOOL alertable, IO_STATUS_BLOCK *io )
+static NTSTATUS wait_async( HANDLE handle, BOOL alertable )
 {
-    if (NtWaitForSingleObject( handle, alertable, NULL )) return STATUS_PENDING;
-    return io->u.Status;
+    return NtWaitForSingleObject( handle, alertable, NULL );
 }
 
 /* callback for irp async I/O completion */
-static NTSTATUS irp_completion( void *user, IO_STATUS_BLOCK *io, NTSTATUS status )
+static NTSTATUS irp_completion( void *user, ULONG_PTR *info, NTSTATUS status )
 {
     struct async_irp *async = user;
-    ULONG information = 0;
 
     if (status == STATUS_ALERTED)
     {
@@ -4983,20 +4975,15 @@ static NTSTATUS irp_completion( void *user, IO_STATUS_BLOCK *io, NTSTATUS status
             req->user_arg = wine_server_client_ptr( async );
             wine_server_set_reply( req, async->buffer, async->size );
             status = virtual_locked_server_call( req );
-            information = reply->size;
+            *info = reply->size;
         }
         SERVER_END_REQ;
     }
-    if (status != STATUS_PENDING)
-    {
-        io->u.Status = status;
-        io->Information = information;
-        release_fileio( &async->io );
-    }
+    if (status != STATUS_PENDING) release_fileio( &async->io );
     return status;
 }
 
-static NTSTATUS async_read_proc( void *user, IO_STATUS_BLOCK *iosb, NTSTATUS status )
+static NTSTATUS async_read_proc( void *user, ULONG_PTR *info, NTSTATUS status )
 {
     struct async_fileio_read *fileio = user;
     int fd, needs_close, result;
@@ -5040,14 +5027,13 @@ static NTSTATUS async_read_proc( void *user, IO_STATUS_BLOCK *iosb, NTSTATUS sta
     }
     if (status != STATUS_PENDING)
     {
-        iosb->u.Status = status;
-        iosb->Information = fileio->already;
+        *info = fileio->already;
         release_fileio( &fileio->io );
     }
     return status;
 }
 
-static NTSTATUS async_write_proc( void *user, IO_STATUS_BLOCK *iosb, NTSTATUS status )
+static NTSTATUS async_write_proc( void *user, ULONG_PTR *info, NTSTATUS status )
 {
     struct async_fileio_write *fileio = user;
     int result, fd, needs_close;
@@ -5087,8 +5073,7 @@ static NTSTATUS async_write_proc( void *user, IO_STATUS_BLOCK *iosb, NTSTATUS st
     }
     if (status != STATUS_PENDING)
     {
-        iosb->u.Status = status;
-        iosb->Information = fileio->already;
+        *info = fileio->already;
         release_fileio( &fileio->io );
     }
     return status;
@@ -5128,7 +5113,7 @@ static NTSTATUS server_read_file( HANDLE handle, HANDLE event, PIO_APC_ROUTINE a
 
     if (status != STATUS_PENDING) free( async );
 
-    if (wait_handle) status = wait_async( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT), io );
+    if (wait_handle) status = wait_async( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT) );
     return status;
 }
 
@@ -5166,7 +5151,7 @@ static NTSTATUS server_write_file( HANDLE handle, HANDLE event, PIO_APC_ROUTINE 
 
     if (status != STATUS_PENDING) free( async );
 
-    if (wait_handle) status = wait_async( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT), io );
+    if (wait_handle) status = wait_async( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT) );
     return status;
 }
 
@@ -5211,7 +5196,7 @@ static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
 
     if (status != STATUS_PENDING) free( async );
 
-    if (wait_handle) status = wait_async( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT), io );
+    if (wait_handle) status = wait_async( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT) );
     return status;
 }
 
@@ -6839,7 +6824,7 @@ NTSTATUS WINAPI NtFlushBuffersFile( HANDLE handle, IO_STATUS_BLOCK *io )
 
         if (ret != STATUS_PENDING) free( async );
 
-        if (wait_handle) ret = wait_async( wait_handle, FALSE, io );
+        if (wait_handle) ret = wait_async( wait_handle, FALSE );
     }
 
     if (needs_close) close( fd );
@@ -6852,16 +6837,23 @@ NTSTATUS WINAPI NtFlushBuffersFile( HANDLE handle, IO_STATUS_BLOCK *io )
  */
 NTSTATUS WINAPI NtCancelIoFile( HANDLE handle, IO_STATUS_BLOCK *io_status )
 {
+    NTSTATUS status;
+
     TRACE( "%p %p\n", handle, io_status );
 
     SERVER_START_REQ( cancel_async )
     {
         req->handle      = wine_server_obj_handle( handle );
         req->only_thread = TRUE;
-        io_status->u.Status = wine_server_call( req );
+        if (!(status = wine_server_call( req )))
+        {
+            io_status->u.Status = status;
+            io_status->Information = 0;
+        }
     }
     SERVER_END_REQ;
-    return io_status->u.Status;
+
+    return status;
 }
 
 
@@ -6870,16 +6862,23 @@ NTSTATUS WINAPI NtCancelIoFile( HANDLE handle, IO_STATUS_BLOCK *io_status )
  */
 NTSTATUS WINAPI NtCancelIoFileEx( HANDLE handle, IO_STATUS_BLOCK *io, IO_STATUS_BLOCK *io_status )
 {
+    NTSTATUS status;
+
     TRACE( "%p %p %p\n", handle, io, io_status );
 
     SERVER_START_REQ( cancel_async )
     {
         req->handle = wine_server_obj_handle( handle );
         req->iosb   = wine_server_client_ptr( io );
-        io_status->u.Status = wine_server_call( req );
+        if (!(status = wine_server_call( req )))
+        {
+            io_status->u.Status = status;
+            io_status->Information = 0;
+        }
     }
     SERVER_END_REQ;
-    return io_status->u.Status;
+
+    return status;
 }
 
 
@@ -6971,7 +6970,7 @@ NTSTATUS WINAPI NtUnlockFile( HANDLE handle, IO_STATUS_BLOCK *io_status, LARGE_I
 }
 
 
-static NTSTATUS read_changes_apc( void *user, IO_STATUS_BLOCK *iosb, NTSTATUS status )
+static NTSTATUS read_changes_apc( void *user, ULONG_PTR *info, NTSTATUS status )
 {
     struct async_fileio_read_changes *fileio = user;
     int size = 0;
@@ -7040,8 +7039,7 @@ static NTSTATUS read_changes_apc( void *user, IO_STATUS_BLOCK *iosb, NTSTATUS st
 
     if (status != STATUS_PENDING)
     {
-        iosb->u.Status = status;
-        iosb->Information = size;
+        *info = size;
         release_fileio( &fileio->io );
     }
     return status;
@@ -7338,7 +7336,7 @@ NTSTATUS WINAPI NtQueryVolumeInformationFile( HANDLE handle, IO_STATUS_BLOCK *io
         }
         SERVER_END_REQ;
         if (status != STATUS_PENDING) free( async );
-        if (wait_handle) status = wait_async( wait_handle, FALSE, io );
+        if (wait_handle) status = wait_async( wait_handle, FALSE );
         return status;
     }
     else if (io->u.Status) return io->u.Status;

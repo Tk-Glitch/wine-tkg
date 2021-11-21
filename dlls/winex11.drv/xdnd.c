@@ -479,8 +479,6 @@ void X11DRV_XDND_DropEvent( HWND hWnd, XEvent *xev )
     TRACE("effectRequested(0x%x) accept(%d) performed(0x%x) at x(%d),y(%d)\n",
           XDNDDropEffect, accept, effect, XDNDxy.x, XDNDxy.y);
 
-    X11DRV_XDND_FreeDragDropOp();
-
     /* Tell the target we are finished. */
     memset(&e, 0, sizeof(e));
     e.type = ClientMessage;

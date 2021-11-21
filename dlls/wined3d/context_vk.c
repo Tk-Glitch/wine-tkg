@@ -1154,7 +1154,7 @@ static bool wined3d_render_pass_vk_init(struct wined3d_render_pass_vk *pass,
 
     rt_count = 0;
     attachment_count = 0;
-    mask = key->rt_mask & ((1u << WINED3D_MAX_RENDER_TARGETS) - 1);
+    mask = key->rt_mask & wined3d_mask_from_size(WINED3D_MAX_RENDER_TARGETS);
     while (mask)
     {
         i = wined3d_bit_scan(&mask);
@@ -1181,7 +1181,7 @@ static bool wined3d_render_pass_vk_init(struct wined3d_render_pass_vk *pass,
         rt_count = i + 1;
     }
 
-    mask = ~key->rt_mask & ((1u << rt_count) - 1);
+    mask = ~key->rt_mask & wined3d_mask_from_size(rt_count);
     while (mask)
     {
         i = wined3d_bit_scan(&mask);
@@ -2713,7 +2713,7 @@ static bool wined3d_context_vk_update_descriptors(struct wined3d_context_vk *con
         switch (binding->shader_descriptor_type)
         {
             case WINED3D_SHADER_DESCRIPTOR_TYPE_CBV:
-                if (!(buffer = state->cb[binding->shader_type][binding->resource_idx]))
+                if (!(buffer = state->cb[binding->shader_type][binding->resource_idx].buffer))
                 {
                     if (!wined3d_shader_descriptor_writes_vk_add_write(writes, vk_descriptor_set,
                             binding->binding_idx, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -2988,7 +2988,7 @@ static void wined3d_context_vk_load_shader_resources(struct wined3d_context_vk *
         switch (binding->shader_descriptor_type)
         {
             case WINED3D_SHADER_DESCRIPTOR_TYPE_CBV:
-                if (!(buffer = state->cb[binding->shader_type][binding->resource_idx]))
+                if (!(buffer = state->cb[binding->shader_type][binding->resource_idx].buffer))
                     break;
 
                 buffer_vk = wined3d_buffer_vk(buffer);
@@ -3231,7 +3231,7 @@ VkCommandBuffer wined3d_context_vk_apply_draw_state(struct wined3d_context_vk *c
     if (wined3d_context_is_graphics_state_dirty(&context_vk->c, STATE_STENCIL_REF) && dsv)
     {
         VK_CALL(vkCmdSetStencilReference(vk_command_buffer, VK_STENCIL_FACE_FRONT_AND_BACK,
-            state->stencil_ref & ((1 << dsv->format->stencil_size) - 1)));
+            state->stencil_ref & wined3d_mask_from_size(dsv->format->stencil_size)));
     }
 
     if (wined3d_context_is_graphics_state_dirty(&context_vk->c, STATE_STREAMSRC))

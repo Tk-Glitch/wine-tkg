@@ -1313,8 +1313,8 @@ struct select_reply
     struct reply_header __header;
     apc_call_t   call;
     obj_handle_t apc_handle;
+    int          signaled;
     /* VARARG(contexts,contexts); */
-    char __pad_60[4];
 };
 #define SELECT_ALERTABLE     1
 #define SELECT_INTERRUPTIBLE 2
@@ -6472,7 +6472,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 726
+#define SERVER_PROTOCOL_VERSION 727
 
 /* ### protocol_version end ### */
 

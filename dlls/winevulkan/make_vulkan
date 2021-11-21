@@ -64,7 +64,7 @@ from enum import Enum
 LOGGER = logging.Logger("vulkan")
 LOGGER.addHandler(logging.StreamHandler())
 
-VK_XML_VERSION = "1.2.182"
+VK_XML_VERSION = "1.2.185"
 WINE_VK_VERSION = (1, 2)
 
 # Filenames to create.
@@ -104,6 +104,7 @@ UNSUPPORTED_EXTENSIONS = [
     # Relates to external_semaphore and needs type conversions in bitflags.
     "VK_KHR_shared_presentable_image", # Needs WSI work.
     "VK_KHR_win32_keyed_mutex",
+    "VK_NV_external_memory_rdma", # Needs shared resources work.
 
     # Extensions for other platforms
     "VK_EXT_external_memory_dma_buf",
@@ -115,9 +116,6 @@ UNSUPPORTED_EXTENSIONS = [
 
     # Extensions which require callback handling
     "VK_EXT_device_memory_report",
-
-    # Extensions which are broken
-    "VK_HUAWEI_subpass_shading", # https://github.com/KhronosGroup/Vulkan-Docs/issues/1564
 
     # Deprecated extensions
     "VK_NV_external_memory_capabilities",
@@ -3625,6 +3623,9 @@ class VkRegistry(object):
                 _type = None
                 if not t.find("type") is None:
                     _type = t.find("type").text
+                    tail = t.find("type").tail
+                    if tail is not None:
+                        _type += tail.strip()
                 basetype = VkBaseType(name, _type)
                 base_types.append(basetype)
                 type_info["data"] = basetype

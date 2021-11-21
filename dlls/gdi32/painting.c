@@ -28,7 +28,7 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winerror.h"
-#include "gdi_private.h"
+#include "ntgdi_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(gdi);
@@ -85,7 +85,7 @@ BOOL CDECL nulldrv_FillRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush )
 BOOL CDECL nulldrv_FrameRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush, INT width, INT height )
 {
     BOOL ret = FALSE;
-    HRGN tmp = CreateRectRgn( 0, 0, 0, 0 );
+    HRGN tmp = NtGdiCreateRectRgn( 0, 0, 0, 0 );
 
     if (tmp)
     {
@@ -127,7 +127,7 @@ BOOL CDECL nulldrv_PolyBezierTo( PHYSDEV dev, const POINT *points, DWORD count )
 
     if (pts)
     {
-        pts[0] = dc->cur_pos;
+        pts[0] = dc->attr->cur_pos;
         memcpy( pts + 1, points, sizeof(POINT) * count );
         ret = PolyBezier( dev->hdc, pts, count + 1 );
         HeapFree( GetProcessHeap(), 0, pts );
@@ -166,7 +166,7 @@ BOOL CDECL nulldrv_PolyDraw( PHYSDEV dev, const POINT *points, const BYTE *types
     line_pts = HeapAlloc( GetProcessHeap(), 0, space * sizeof(POINT) );
     num_pts = 1;
 
-    line_pts[0] = dc->cur_pos;
+    line_pts[0] = dc->attr->cur_pos;
     for (i = 0; i < count; i++)
     {
         switch (types[i])
@@ -217,7 +217,7 @@ BOOL CDECL nulldrv_PolylineTo( PHYSDEV dev, const POINT *points, INT count )
     if (!count) return FALSE;
     if ((pts = HeapAlloc( GetProcessHeap(), 0, sizeof(POINT) * (count + 1) )))
     {
-        pts[0] = dc->cur_pos;
+        pts[0] = dc->attr->cur_pos;
         memcpy( pts + 1, points, sizeof(POINT) * count );
         ret = Polyline( dev->hdc, pts, count + 1 );
         HeapFree( GetProcessHeap(), 0, pts );
@@ -226,15 +226,13 @@ BOOL CDECL nulldrv_PolylineTo( PHYSDEV dev, const POINT *points, INT count )
 }
 
 /***********************************************************************
- *           LineTo    (GDI32.@)
+ *           NtGdiLineTo    (win32u.@)
  */
-BOOL WINAPI LineTo( HDC hdc, INT x, INT y )
+BOOL WINAPI NtGdiLineTo( HDC hdc, INT x, INT y )
 {
     DC * dc = get_dc_ptr( hdc );
     PHYSDEV physdev;
     BOOL ret;
-
-    TRACE( "%p, (%d, %d)\n", hdc, x, y );
 
     if(!dc) return FALSE;
 
@@ -244,8 +242,8 @@ BOOL WINAPI LineTo( HDC hdc, INT x, INT y )
 
     if(ret)
     {
-        dc->cur_pos.x = x;
-        dc->cur_pos.y = y;
+        dc->attr->cur_pos.x = x;
+        dc->attr->cur_pos.y = y;
     }
     release_dc_ptr( dc );
     return ret;
@@ -253,23 +251,21 @@ BOOL WINAPI LineTo( HDC hdc, INT x, INT y )
 
 
 /***********************************************************************
- *           MoveToEx    (GDI32.@)
+ *           NtGdiMoveTo    (win32u.@)
  */
-BOOL WINAPI MoveToEx( HDC hdc, INT x, INT y, LPPOINT pt )
+BOOL WINAPI NtGdiMoveTo( HDC hdc, INT x, INT y, POINT *pt )
 {
     BOOL ret;
     PHYSDEV physdev;
     DC * dc = get_dc_ptr( hdc );
 
-    TRACE( "%p, (%d, %d), %p\n", hdc, x, y, pt );
-
     if(!dc) return FALSE;
 
     if(pt)
-        *pt = dc->cur_pos;
+        *pt = dc->attr->cur_pos;
 
-    dc->cur_pos.x = x;
-    dc->cur_pos.y = y;
+    dc->attr->cur_pos.x = x;
+    dc->attr->cur_pos.y = y;
 
     physdev = GET_DC_PHYSDEV( dc, pMoveTo );
     ret = physdev->funcs->pMoveTo( physdev, x, y );
@@ -279,104 +275,64 @@ BOOL WINAPI MoveToEx( HDC hdc, INT x, INT y, LPPOINT pt )
 
 
 /***********************************************************************
- *           Arc    (GDI32.@)
+ *           NtGdiArcInternal    (win32u.@)
  */
-BOOL WINAPI Arc( HDC hdc, INT left, INT top, INT right,
-                     INT bottom, INT xstart, INT ystart,
-                     INT xend, INT yend )
+BOOL WINAPI NtGdiArcInternal( UINT type, HDC hdc, INT left, INT top, INT right,
+                              INT bottom, INT xstart, INT ystart, INT xend, INT yend )
 {
     PHYSDEV physdev;
     BOOL ret;
-    DC * dc = get_dc_ptr( hdc );
+    DC *dc;
 
-    TRACE( "%p, (%d, %d)-(%d, %d), (%d, %d), (%d, %d)\n", hdc, left, top, right, bottom, xstart, ystart, xend, yend );
-
-    if (!dc) return FALSE;
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
     update_dc( dc );
-    physdev = GET_DC_PHYSDEV( dc, pArc );
-    ret = physdev->funcs->pArc( physdev, left, top, right, bottom, xstart, ystart, xend, yend );
-    release_dc_ptr( dc );
-    return ret;
-}
 
-/***********************************************************************
- *           ArcTo    (GDI32.@)
- */
-BOOL WINAPI ArcTo( HDC hdc,
-                     INT left,   INT top,
-                     INT right,  INT bottom,
-                     INT xstart, INT ystart,
-                     INT xend,   INT yend )
-{
-    double width = abs( right - left ),
-        height = abs( bottom - top ),
-        xradius = width/2,
-        yradius = height/2,
-        xcenter = right > left ? left+xradius : right+xradius,
-        ycenter = bottom > top ? top+yradius : bottom+yradius,
-        angle;
-    PHYSDEV physdev;
-    BOOL result;
-    DC * dc = get_dc_ptr( hdc );
-
-    TRACE( "%p, (%d, %d)-(%d, %d), (%d, %d), (%d, %d)\n", hdc, left, top, right, bottom, xstart, ystart, xend, yend );
-
-    if(!dc) return FALSE;
-    update_dc( dc );
-    physdev = GET_DC_PHYSDEV( dc, pArcTo );
-    result = physdev->funcs->pArcTo( physdev, left, top, right, bottom, xstart, ystart, xend, yend );
-
-    if (result)
+    switch (type)
     {
-        angle = atan2(((yend-ycenter)/height),
-                      ((xend-xcenter)/width));
-        dc->cur_pos.x = GDI_ROUND( xcenter + (cos( angle ) * xradius) );
-        dc->cur_pos.y = GDI_ROUND( ycenter + (sin( angle ) * yradius) );
+    case NtGdiArc:
+        physdev = GET_DC_PHYSDEV( dc, pArc );
+        ret = physdev->funcs->pArc( physdev, left, top, right, bottom, xstart, ystart, xend, yend );
+        break;
+
+    case NtGdiArcTo:
+        {
+            double width   = abs( right - left );
+            double height  = abs( bottom - top );
+            double xradius = width / 2;
+            double yradius = height / 2;
+            double xcenter = right > left ? left + xradius : right + xradius;
+            double ycenter = bottom > top ? top + yradius : bottom + yradius;
+
+            physdev = GET_DC_PHYSDEV( dc, pArcTo );
+            ret = physdev->funcs->pArcTo( physdev, left, top, right, bottom,
+                                          xstart, ystart, xend, yend );
+            if (ret)
+            {
+                double angle = atan2(((yend - ycenter) / height),
+                                     ((xend - xcenter) / width));
+                dc->attr->cur_pos.x = GDI_ROUND( xcenter + (cos( angle ) * xradius) );
+                dc->attr->cur_pos.y = GDI_ROUND( ycenter + (sin( angle ) * yradius) );
+            }
+            break;
+        }
+
+    case NtGdiChord:
+        physdev = GET_DC_PHYSDEV( dc, pChord );
+        ret = physdev->funcs->pChord( physdev, left, top, right, bottom,
+                                      xstart, ystart, xend, yend );
+        break;
+
+    case NtGdiPie:
+        physdev = GET_DC_PHYSDEV( dc, pPie );
+        ret = physdev->funcs->pPie( physdev, left, top, right, bottom,
+                                    xstart, ystart, xend, yend );
+        break;
+
+    default:
+        WARN( "invalid arc type %u\n", type );
+        ret = FALSE;
     }
-    release_dc_ptr( dc );
-    return result;
-}
 
-
-/***********************************************************************
- *           Pie   (GDI32.@)
- */
-BOOL WINAPI Pie( HDC hdc, INT left, INT top,
-                     INT right, INT bottom, INT xstart, INT ystart,
-                     INT xend, INT yend )
-{
-    BOOL ret;
-    PHYSDEV physdev;
-    DC * dc = get_dc_ptr( hdc );
-
-    TRACE( "%p, (%d, %d)-(%d, %d), (%d, %d), (%d, %d)\n", hdc, left, top, right, bottom, xstart, ystart, xend, yend );
-
-    if (!dc) return FALSE;
-    update_dc( dc );
-    physdev = GET_DC_PHYSDEV( dc, pPie );
-    ret = physdev->funcs->pPie( physdev, left, top, right, bottom, xstart, ystart, xend, yend );
-    release_dc_ptr( dc );
-    return ret;
-}
-
-
-/***********************************************************************
- *           Chord    (GDI32.@)
- */
-BOOL WINAPI Chord( HDC hdc, INT left, INT top,
-                       INT right, INT bottom, INT xstart, INT ystart,
-                       INT xend, INT yend )
-{
-    BOOL ret;
-    PHYSDEV physdev;
-    DC * dc = get_dc_ptr( hdc );
-
-    TRACE( "%p, (%d, %d)-(%d, %d), (%d, %d), (%d, %d)\n", hdc, left, top, right, bottom, xstart, ystart, xend, yend );
-
-    if (!dc) return FALSE;
-    update_dc( dc );
-    physdev = GET_DC_PHYSDEV( dc, pChord );
-    ret = physdev->funcs->pChord( physdev, left, top, right, bottom, xstart, ystart, xend, yend );
     release_dc_ptr( dc );
     return ret;
 }
@@ -658,7 +614,7 @@ BOOL WINAPI PolylineTo( HDC hdc, const POINT* pt, DWORD cCount )
     ret = physdev->funcs->pPolylineTo( physdev, pt, cCount );
 
     if (ret && cCount)
-        dc->cur_pos = pt[cCount - 1];
+        dc->attr->cur_pos = pt[cCount - 1];
 
     release_dc_ptr( dc );
     return ret;
@@ -821,7 +777,7 @@ BOOL WINAPI PolyBezierTo( HDC hdc, const POINT* lppt, DWORD cPoints )
     ret = physdev->funcs->pPolyBezierTo( physdev, lppt, cPoints );
 
     if(ret)
-        dc->cur_pos = lppt[cPoints - 1];
+        dc->attr->cur_pos = lppt[cPoints - 1];
 
     release_dc_ptr( dc );
     return ret;
@@ -850,8 +806,8 @@ BOOL WINAPI AngleArc(HDC hdc, INT x, INT y, DWORD dwRadius, FLOAT eStartAngle, F
 
     if (result)
     {
-        dc->cur_pos.x = GDI_ROUND( x + cos( (eStartAngle + eSweepAngle) * M_PI / 180 ) * dwRadius );
-        dc->cur_pos.y = GDI_ROUND( y - sin( (eStartAngle + eSweepAngle) * M_PI / 180 ) * dwRadius );
+        dc->attr->cur_pos.x = GDI_ROUND( x + cos( (eStartAngle + eSweepAngle) * M_PI / 180 ) * dwRadius );
+        dc->attr->cur_pos.y = GDI_ROUND( y - sin( (eStartAngle + eSweepAngle) * M_PI / 180 ) * dwRadius );
     }
     release_dc_ptr( dc );
     return result;
@@ -875,7 +831,7 @@ BOOL WINAPI PolyDraw(HDC hdc, const POINT *lppt, const BYTE *lpbTypes,
     physdev = GET_DC_PHYSDEV( dc, pPolyDraw );
     result = physdev->funcs->pPolyDraw( physdev, lppt, lpbTypes, cCount );
     if (result && cCount)
-        dc->cur_pos = lppt[cCount - 1];
+        dc->attr->cur_pos = lppt[cCount - 1];
 
     release_dc_ptr( dc );
     return result;

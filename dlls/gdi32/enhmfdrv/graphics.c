@@ -72,8 +72,8 @@ static void get_points_bounds( RECTL *bounds, const POINT *pts, UINT count, DC *
 
     if (dc)
     {
-        bounds->left = bounds->right = dc->cur_pos.x;
-        bounds->top = bounds->bottom = dc->cur_pos.y;
+        bounds->left = bounds->right = dc->attr->cur_pos.x;
+        bounds->top = bounds->bottom = dc->attr->cur_pos.y;
     }
     else if (count)
     {
@@ -151,7 +151,7 @@ BOOL CDECL EMFDRV_LineTo( PHYSDEV dev, INT x, INT y )
     if(!EMFDRV_WriteRecord( dev, &emr.emr ))
     	return FALSE;
 
-    pt = dc->cur_pos;
+    pt = dc->attr->cur_pos;
 
     bounds.left   = min(x, pt.x);
     bounds.top    = min(y, pt.y);
@@ -266,7 +266,7 @@ EMFDRV_ArcChordPie( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
     if (iType == EMR_ARCTO)
     {
         POINT pt;
-        pt = dc->cur_pos;
+        pt = dc->attr->cur_pos;
         bounds.left   = min( bounds.left, pt.x );
         bounds.top    = min( bounds.top, pt.y );
         bounds.right  = max( bounds.right, pt.x );
@@ -687,11 +687,11 @@ BOOL CDECL EMFDRV_FillRgn( PHYSDEV dev, HRGN hrgn, HBRUSH hbrush )
     index = EMFDRV_CreateBrushIndirect( dev, hbrush );
     if(!index) return FALSE;
 
-    rgnsize = GetRegionData( hrgn, 0, NULL );
+    rgnsize = NtGdiGetRegionData( hrgn, 0, NULL );
     size = rgnsize + offsetof(EMRFILLRGN,RgnData);
     emr = HeapAlloc( GetProcessHeap(), 0, size );
 
-    GetRegionData( hrgn, rgnsize, (RGNDATA *)&emr->RgnData );
+    NtGdiGetRegionData( hrgn, rgnsize, (RGNDATA *)&emr->RgnData );
 
     emr->emr.iType = EMR_FILLRGN;
     emr->emr.nSize = size;
@@ -720,11 +720,11 @@ BOOL CDECL EMFDRV_FrameRgn( PHYSDEV dev, HRGN hrgn, HBRUSH hbrush, INT width, IN
     index = EMFDRV_CreateBrushIndirect( dev, hbrush );
     if(!index) return FALSE;
 
-    rgnsize = GetRegionData( hrgn, 0, NULL );
+    rgnsize = NtGdiGetRegionData( hrgn, 0, NULL );
     size = rgnsize + offsetof(EMRFRAMERGN,RgnData);
     emr = HeapAlloc( GetProcessHeap(), 0, size );
 
-    GetRegionData( hrgn, rgnsize, (RGNDATA *)&emr->RgnData );
+    NtGdiGetRegionData( hrgn, rgnsize, (RGNDATA *)&emr->RgnData );
 
     emr->emr.iType = EMR_FRAMERGN;
     emr->emr.nSize = size;
@@ -756,11 +756,11 @@ static BOOL EMFDRV_PaintInvertRgn( PHYSDEV dev, HRGN hrgn, DWORD iType )
     BOOL ret;
 
 
-    rgnsize = GetRegionData( hrgn, 0, NULL );
+    rgnsize = NtGdiGetRegionData( hrgn, 0, NULL );
     size = rgnsize + offsetof(EMRINVERTRGN,RgnData);
     emr = HeapAlloc( GetProcessHeap(), 0, size );
 
-    GetRegionData( hrgn, rgnsize, (RGNDATA *)&emr->RgnData );
+    NtGdiGetRegionData( hrgn, rgnsize, (RGNDATA *)&emr->RgnData );
 
     emr->emr.iType = iType;
     emr->emr.nSize = size;

@@ -69,6 +69,7 @@ struct thread_wait
     client_ptr_t            cookie;     /* magic cookie to return to client */
     abstime_t               when;
     struct timeout_user    *user;
+    int                     status;     /* status to return (unless STATUS_PENDING) */
     struct wait_queue_entry queues[1];
 };
 
@@ -780,6 +781,11 @@ void make_wait_abandoned( struct wait_queue_entry *entry )
     entry->wait->abandoned = 1;
 }
 
+void set_wait_status( struct wait_queue_entry *entry, int status )
+{
+    entry->wait->status = status;
+}
+
 /* finish waiting */
 static unsigned int end_wait( struct thread *thread, unsigned int status )
 {
@@ -792,6 +798,7 @@ static unsigned int end_wait( struct thread *thread, unsigned int status )
 
     if (status < wait->count)  /* wait satisfied, tell it to the objects */
     {
+        wait->status = status;
         if (wait->select == SELECT_WAIT_ALL)
         {
             for (i = 0, entry = wait->queues; i < wait->count; i++, entry++)
@@ -802,6 +809,7 @@ static unsigned int end_wait( struct thread *thread, unsigned int status )
             entry = wait->queues + status;
             entry->obj->ops->satisfied( entry->obj, entry );
         }
+        status = wait->status;
         if (wait->abandoned) status += STATUS_ABANDONED_WAIT_0;
     }
     for (i = 0, entry = wait->queues; i < wait->count; i++, entry++)
@@ -1014,8 +1022,8 @@ static int signal_object( obj_handle_t handle )
 }
 
 /* select on a list of handles */
-static void select_on( const select_op_t *select_op, data_size_t op_size, client_ptr_t cookie,
-                            int flags, abstime_t when )
+static int select_on( const select_op_t *select_op, data_size_t op_size, client_ptr_t cookie,
+                      int flags, abstime_t when )
 {
     int ret;
     unsigned int count;
@@ -1024,7 +1032,7 @@ static void select_on( const select_op_t *select_op, data_size_t op_size, client
     switch (select_op->op)
     {
     case SELECT_NONE:
-        if (!wait_on( select_op, 0, NULL, flags, when )) return;
+        if (!wait_on( select_op, 0, NULL, flags, when )) return 1;
         break;
 
     case SELECT_WAIT:
@@ -1033,24 +1041,24 @@ static void select_on( const select_op_t *select_op, data_size_t op_size, client
         if (op_size < offsetof( select_op_t, wait.handles ) || count > MAXIMUM_WAIT_OBJECTS)
         {
             set_error( STATUS_INVALID_PARAMETER );
-            return;
+            return 1;
         }
         if (!wait_on_handles( select_op, count, select_op->wait.handles, flags, when ))
-            return;
+            return 1;
         break;
 
     case SELECT_SIGNAL_AND_WAIT:
         if (!wait_on_handles( select_op, 1, &select_op->signal_and_wait.wait, flags, when ))
-            return;
+            return 1;
         if (select_op->signal_and_wait.signal)
         {
             if (!signal_object( select_op->signal_and_wait.signal ))
             {
                 end_wait( current, get_error() );
-                return;
+                return 1;
             }
             /* check if we woke ourselves up */
-            if (!current->wait) return;
+            if (!current->wait) return 1;
         }
         break;
 
@@ -1058,23 +1066,23 @@ static void select_on( const select_op_t *select_op, data_size_t op_size, client
     case SELECT_KEYED_EVENT_RELEASE:
         object = (struct object *)get_keyed_event_obj( current->process, select_op->keyed_event.handle,
                          select_op->op == SELECT_KEYED_EVENT_WAIT ? KEYEDEVENT_WAIT : KEYEDEVENT_WAKE );
-        if (!object) return;
+        if (!object) return 1;
         ret = wait_on( select_op, 1, &object, flags, when );
         release_object( object );
-        if (!ret) return;
+        if (!ret) return 1;
         current->wait->key = select_op->keyed_event.key;
         break;
 
     default:
         set_error( STATUS_INVALID_PARAMETER );
-        return;
+        return 1;
     }
 
     if ((ret = check_wait( current )) != -1)
     {
         /* condition is already satisfied */
         set_error( end_wait( current, ret ));
-        return;
+        return 1;
     }
 
     /* now we need to wait */
@@ -1084,12 +1092,12 @@ static void select_on( const select_op_t *select_op, data_size_t op_size, client
                                                       thread_timeout, current->wait )))
         {
             end_wait( current, get_error() );
-            return;
+            return 1;
         }
     }
     current->wait->cookie = cookie;
     set_error( STATUS_PENDING );
-    return;
+    return 0;
 }
 
 /* attempt to wake threads sleeping on the object wait queue */
@@ -1753,7 +1761,7 @@ DECL_HANDLER(select)
         release_object( apc );
     }
 
-    select_on( &select_op, op_size, req->cookie, req->flags, req->timeout );
+    reply->signaled = select_on( &select_op, op_size, req->cookie, req->flags, req->timeout );
 
     if (get_error() == STATUS_USER_APC)
     {
@@ -1773,7 +1781,7 @@ DECL_HANDLER(select)
         }
         release_object( apc );
     }
-    else if (get_error() != STATUS_PENDING && get_reply_max_size() >= sizeof(context_t) &&
+    else if (reply->signaled && get_reply_max_size() >= sizeof(context_t) &&
              current->context && current->suspend_cookie == req->cookie)
     {
         ctx = current->context;

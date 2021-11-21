@@ -2161,11 +2161,14 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
 
     switch (class)
     {
+    case SystemNativeBasicInformation:  /* 114 */
+        if (!is_win64) return STATUS_INVALID_INFO_CLASS;
+        /* fall through */
     case SystemBasicInformation:  /* 0 */
     {
         SYSTEM_BASIC_INFORMATION sbi;
 
-        virtual_get_system_info( &sbi );
+        virtual_get_system_info( &sbi, FALSE );
         len = sizeof(sbi);
         if (size == len)
         {
@@ -2592,24 +2595,6 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         break;
     }
 
-    case SystemKernelDebuggerInformationEx:
-    {
-        SYSTEM_KERNEL_DEBUGGER_INFORMATION_EX skdi;
-
-        skdi.DebuggerAllowed = FALSE;
-        skdi.DebuggerEnabled = FALSE;
-        skdi.DebuggerPresent = FALSE;
-
-        len = sizeof(skdi);
-        if (size >= len)
-        {
-            if (!info) ret = STATUS_ACCESS_VIOLATION;
-            else memcpy( info, &skdi, len);
-        }
-        else ret = STATUS_INFO_LENGTH_MISMATCH;
-        break;
-    }
-
     case SystemRegistryQuotaInformation:  /* 37 */
     {
         /* Something to do with the size of the registry             *
@@ -2676,6 +2661,37 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
     }
+
+    case SystemEmulationBasicInformation:  /* 62 */
+    {
+        SYSTEM_BASIC_INFORMATION sbi;
+
+        virtual_get_system_info( &sbi, !!NtCurrentTeb()->WowTebOffset );
+        len = sizeof(sbi);
+        if (size == len)
+        {
+            if (!info) ret = STATUS_ACCESS_VIOLATION;
+            else memcpy( info, &sbi, len);
+        }
+        else ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+    }
+
+    case SystemEmulationProcessorInformation:  /* 63 */
+        if (size >= (len = sizeof(cpu_info)))
+        {
+            SYSTEM_CPU_INFORMATION cpu = cpu_info;
+            if (is_win64)
+            {
+                if (cpu_info.ProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
+                    cpu.ProcessorArchitecture = PROCESSOR_ARCHITECTURE_INTEL;
+                else if (cpu_info.ProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64)
+                    cpu.ProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM;
+            }
+            memcpy(info, &cpu, len);
+        }
+        else ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
 
     case SystemExtendedHandleInformation:  /* 64 */
     {
@@ -2841,6 +2857,24 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
             integrity_info->CodeIntegrityOptions = CODEINTEGRITY_OPTION_ENABLED;
         else
             ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+    }
+
+    case SystemKernelDebuggerInformationEx:  /* 149 */
+    {
+        SYSTEM_KERNEL_DEBUGGER_INFORMATION_EX skdi;
+
+        skdi.DebuggerAllowed = FALSE;
+        skdi.DebuggerEnabled = FALSE;
+        skdi.DebuggerPresent = FALSE;
+
+        len = sizeof(skdi);
+        if (size >= len)
+        {
+            if (!info) ret = STATUS_ACCESS_VIOLATION;
+            else memcpy( info, &skdi, len );
+        }
+        else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
     }
 

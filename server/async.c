@@ -120,14 +120,14 @@ static void async_satisfied( struct object *obj, struct wait_queue_entry *entry 
         async->direct_result = 0;
     }
 
+    set_wait_status( entry, async->status );
+
     /* close wait handle here to avoid extra server round trip */
     if (async->wait_handle)
     {
         close_handle( async->thread->process, async->wait_handle );
         async->wait_handle = 0;
     }
-
-    if (async->status == STATUS_PENDING) make_wait_abandoned( entry );
 }
 
 static void async_destroy( struct object *obj )
@@ -163,18 +163,14 @@ void async_terminate( struct async *async, unsigned int status )
 
     if (!async->direct_result)
     {
-        if (async->data.user)
-        {
-            apc_call_t data;
+        apc_call_t data;
 
-            memset( &data, 0, sizeof(data) );
-            data.type            = APC_ASYNC_IO;
-            data.async_io.user   = async->data.user;
-            data.async_io.sb     = async->data.iosb;
-            data.async_io.status = status;
-            thread_queue_apc( async->thread->process, async->thread, &async->obj, &data );
-        }
-        else async_set_result( &async->obj, STATUS_SUCCESS, 0 );
+        memset( &data, 0, sizeof(data) );
+        data.type            = APC_ASYNC_IO;
+        data.async_io.user   = async->data.user;
+        data.async_io.sb     = async->data.iosb;
+        data.async_io.status = status;
+        thread_queue_apc( async->thread->process, async->thread, &async->obj, &data );
     }
 
     async_reselect( async );
@@ -402,7 +398,6 @@ void async_set_result( struct object *obj, unsigned int status, apc_param_t tota
         if (async->timeout) remove_timeout_user( async->timeout );
         async->timeout = NULL;
         async->status = status;
-        if (status == STATUS_MORE_PROCESSING_REQUIRED) return;  /* don't report the completion */
 
         if (async->data.apc)
         {

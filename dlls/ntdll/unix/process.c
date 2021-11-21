@@ -144,7 +144,7 @@ static char **build_argv( const UNICODE_STRING *cmdline, int reserved )
 /***********************************************************************
  *           get_so_file_info
  */
-static BOOL get_so_file_info( HANDLE handle, pe_image_info_t *info )
+static BOOL get_so_file_info( int fd, pe_image_info_t *info )
 {
     union
     {
@@ -185,12 +185,9 @@ static BOOL get_so_file_info( HANDLE handle, pe_image_info_t *info )
         IMAGE_DOS_HEADER mz;
     } header;
 
-    IO_STATUS_BLOCK io;
-    LARGE_INTEGER offset;
+    off_t pos;
 
-    offset.QuadPart = 0;
-    if (NtReadFile( handle, 0, NULL, NULL, &io, &header, sizeof(header), &offset, 0 )) return FALSE;
-    if (io.Information != sizeof(header)) return FALSE;
+    if (pread( fd, &header, sizeof(header), 0 ) != sizeof(header)) return FALSE;
 
     if (!memcmp( header.elf.magic, "\177ELF", 4 ))
     {
@@ -213,20 +210,19 @@ static BOOL get_so_file_info( HANDLE handle, pe_image_info_t *info )
         if (header.elf.type != 3 /* ET_DYN */) return FALSE;
         if (header.elf.class == 2 /* ELFCLASS64 */)
         {
-            offset.QuadPart = header.elf64.phoff;
+            pos = header.elf64.phoff;
             phnum = header.elf64.phnum;
         }
         else
         {
-            offset.QuadPart = header.elf.phoff;
+            pos = header.elf.phoff;
             phnum = header.elf.phnum;
         }
         while (phnum--)
         {
-            if (NtReadFile( handle, 0, NULL, NULL, &io, &type, sizeof(type), &offset, 0 )) return FALSE;
-            if (io.Information < sizeof(type)) return FALSE;
+            if (pread( fd, &type, sizeof(type), pos ) != sizeof(type)) return FALSE;
             if (type == 3 /* PT_INTERP */) return FALSE;
-            offset.QuadPart += (header.elf.class == 2) ? 56 : 32;
+            pos += (header.elf.class == 2) ? 56 : 32;
         }
         return TRUE;
     }
@@ -290,7 +286,13 @@ static NTSTATUS get_pe_file_info( OBJECT_ATTRIBUTES *attr, HANDLE *handle, pe_im
     }
     else if (status == STATUS_INVALID_IMAGE_NOT_MZ)
     {
-        if (get_so_file_info( *handle, info )) return STATUS_SUCCESS;
+        int unix_fd, needs_close;
+
+        if (!server_get_unix_fd( *handle, FILE_READ_DATA, &unix_fd, &needs_close, NULL, NULL ))
+        {
+            if (get_so_file_info( unix_fd, info )) status = STATUS_SUCCESS;
+            if (needs_close) close( unix_fd );
+        }
     }
     return status;
 }
@@ -353,21 +355,26 @@ static WCHAR *get_nt_pathname( const UNICODE_STRING *str )
  */
 static int get_unix_curdir( const RTL_USER_PROCESS_PARAMETERS *params )
 {
-    UNICODE_STRING nt_name;
+    UNICODE_STRING nt_name, redir;
     OBJECT_ATTRIBUTES attr;
-    IO_STATUS_BLOCK io;
     NTSTATUS status;
     HANDLE handle;
     int fd = -1;
+    char *unix_name;
 
     if (!(nt_name.Buffer = get_nt_pathname( &params->CurrentDirectory.DosPath ))) return -1;
     nt_name.Length = wcslen( nt_name.Buffer ) * sizeof(WCHAR);
 
     InitializeObjectAttributes( &attr, &nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
-    status = NtOpenFile( &handle, FILE_TRAVERSE | SYNCHRONIZE, &attr, &io,
-                         FILE_SHARE_READ | FILE_SHARE_WRITE,
-                         FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT );
+    get_redirect( &attr, &redir );
+    status = nt_to_unix_file_name( &attr, &unix_name, FILE_OPEN );
     free( nt_name.Buffer );
+    free( redir.Buffer );
+    if (status) return -1;
+    status = open_unix_file( &handle, unix_name, FILE_TRAVERSE | SYNCHRONIZE, &attr, 0,
+                             FILE_SHARE_READ | FILE_SHARE_DELETE,
+                             FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0 );
+    free( unix_name );
     if (status) return -1;
     wine_server_handle_to_fd( handle, FILE_TRAVERSE, &fd, NULL );
     NtClose( handle );
@@ -1508,6 +1515,17 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
         }
         break;
 
+    case ProcessInstrumentationCallback:
+    {
+        PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION *instr = info;
+
+        FIXME( "ProcessInstrumentationCallback stub.\n" );
+
+        if (size < sizeof(*instr)) return STATUS_INFO_LENGTH_MISMATCH;
+        ret = STATUS_SUCCESS;
+        break;
+    }
+
     case ProcessThreadStackAllocation:
     {
         void *addr = NULL;
@@ -1540,22 +1558,6 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class, 
         }
         SERVER_END_REQ;
         return ret;
-
-    case ProcessInstrumentationCallback:
-    {
-        PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION *instr = info;
-
-        FIXME("ProcessInstrumentationCallback version %#x, reserved %#x, callback %p, size %u stub.\n",
-                instr->version, instr->reserved, instr->callback, size);
-
-        if (size != sizeof(*instr))
-        {
-            WARN("Incorrect size %u.\n", size);
-            return STATUS_INVALID_PARAMETER;
-        }
-        ret = STATUS_SUCCESS;
-        break;
-    }
 
     default:
         FIXME( "(%p,0x%08x,%p,0x%08x) stub\n", handle, class, info, size );

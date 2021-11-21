@@ -1475,9 +1475,9 @@ typedef struct _FILE_IO_COMPLETION_NOTIFICATION_INFORMATION {
 
 typedef struct _PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION
 {
-    ULONG version;
-    ULONG reserved;
-    PVOID callback;
+    ULONG  Version;
+    ULONG  Reserved;
+    VOID  *Callback;
 } PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION, *PPROCESS_INSTRUMENTATION_CALLBACK_INFORMATION;
 
 typedef enum _FSINFOCLASS {
@@ -2494,8 +2494,8 @@ typedef struct _SYSTEM_KERNEL_DEBUGGER_INFORMATION {
 } SYSTEM_KERNEL_DEBUGGER_INFORMATION, *PSYSTEM_KERNEL_DEBUGGER_INFORMATION;
 
 typedef struct _SYSTEM_KERNEL_DEBUGGER_INFORMATION_EX {
-	BOOLEAN  DebuggerAllowed;
-	BOOLEAN  DebuggerEnabled;
+    BOOLEAN  DebuggerAllowed;
+    BOOLEAN  DebuggerEnabled;
     BOOLEAN  DebuggerPresent;
 } SYSTEM_KERNEL_DEBUGGER_INFORMATION_EX, *PSYSTEM_KERNEL_DEBUGGER_INFORMATION_EX;
 
@@ -3728,6 +3728,26 @@ typedef struct _WOW64_CPU_AREA_INFO
     USHORT             Machine;
 } WOW64_CPU_AREA_INFO, *PWOW64_CPU_AREA_INFO;
 
+#ifdef __WINESRC__
+/* undocumented layout of LdrSystemDllInitBlock */
+/* this varies across Windows version; we are using the win10-2004 layout */
+typedef struct
+{
+    ULONG   version;
+    ULONG   unknown1[3];
+    ULONG64 unknown2;
+    ULONG64 pLdrInitializeThunk;
+    ULONG64 pKiUserExceptionDispatcher;
+    ULONG64 pKiUserApcDispatcher;
+    ULONG64 pKiUserCallbackDispatcher;
+    ULONG64 pRtlUserThreadStart;
+    ULONG64 pRtlpQueryProcessDebugInformationRemote;
+    ULONG64 ntdll_handle;
+    ULONG64 pLdrSystemDllInitBlock;
+    ULONG64 pRtlpFreezeTimeBias;
+} SYSTEM_DLL_INIT_BLOCK;
+#endif
+
 /***********************************************************************
  * Function declarations
  */
@@ -4425,6 +4445,7 @@ NTSYSAPI NTSTATUS  WINAPI RtlWow64GetThreadSelectorEntry(HANDLE,THREAD_DESCRIPTO
 NTSYSAPI NTSTATUS  WINAPI RtlWow64SetThreadContext(HANDLE,const WOW64_CONTEXT*);
 #else
 NTSYSAPI NTSTATUS  WINAPI NtWow64AllocateVirtualMemory64(HANDLE,ULONG64*,ULONG64,ULONG64*,ULONG,ULONG);
+NTSYSAPI NTSTATUS  WINAPI NtWow64GetNativeSystemInformation(SYSTEM_INFORMATION_CLASS,void*,ULONG,ULONG*);
 NTSYSAPI NTSTATUS  WINAPI NtWow64ReadVirtualMemory64(HANDLE,ULONG64,void*,ULONG64,ULONG64*);
 NTSYSAPI NTSTATUS  WINAPI NtWow64WriteVirtualMemory64(HANDLE,ULONG64,const void*,ULONG64,ULONG64*);
 NTSYSAPI LONGLONG  WINAPI RtlConvertLongToLargeInteger(LONG);
