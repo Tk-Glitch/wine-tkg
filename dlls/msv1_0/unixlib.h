@@ -57,6 +57,8 @@ struct arc4_info
 #define FLAG_NEGOTIATE_NTLM2        0x00080000
 #define FLAG_NEGOTIATE_KEY_EXCHANGE 0x40000000
 
+typedef UINT64 com_buf_ptr;
+
 struct ntlm_ctx
 {
     enum mode    mode;
@@ -64,11 +66,9 @@ struct ntlm_ctx
     unsigned int attrs;
     int          pipe_in;
     int          pipe_out;
-    char        *com_buf;
-    unsigned int com_buf_size;
-    unsigned int com_buf_offset;
     char         session_key[16];
     unsigned int flags;
+    com_buf_ptr  com_buf;
     struct
     {
         struct
@@ -97,11 +97,6 @@ struct chat_params
     char *buf;
     unsigned int buflen;
     unsigned int *retlen;
-};
-
-struct cleanup_params
-{
-    struct ntlm_ctx *ctx;
 };
 
 struct fork_params

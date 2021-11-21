@@ -18552,6 +18552,7 @@ static void test_create_input_layout(void)
         DXGI_FORMAT_R32_FLOAT,
         DXGI_FORMAT_R32_UINT,
         DXGI_FORMAT_R32_SINT,
+        DXGI_FORMAT_R16_FLOAT,
         DXGI_FORMAT_R16_UINT,
         DXGI_FORMAT_R16_SINT,
         DXGI_FORMAT_R8G8_UNORM,
@@ -20619,6 +20620,12 @@ static void test_format_support(const D3D_FEATURE_LEVEL feature_level)
         {DXGI_FORMAT_R16_UINT, D3D_FEATURE_LEVEL_9_1},
     };
 
+    static const struct format_support vertex_buffers[] =
+    {
+        {DXGI_FORMAT_R8G8_UINT, D3D_FEATURE_LEVEL_10_0},
+        {DXGI_FORMAT_R16_FLOAT, D3D_FEATURE_LEVEL_10_0},
+    };
+
     device_desc.feature_level = &feature_level;
     device_desc.flags = 0;
     if (!(device = create_device(&device_desc)))
@@ -20683,6 +20690,10 @@ static void test_format_support(const D3D_FEATURE_LEVEL feature_level)
     check_format_support(format_support, feature_level,
             index_buffers, ARRAY_SIZE(index_buffers),
             D3D11_FORMAT_SUPPORT_IA_INDEX_BUFFER, "index buffer");
+
+    check_format_support(format_support, feature_level,
+            vertex_buffers, ARRAY_SIZE(vertex_buffers),
+            D3D11_FORMAT_SUPPORT_IA_VERTEX_BUFFER, "vertex buffer");
 
     check_format_support(format_support, feature_level,
             display_format_support, ARRAY_SIZE(display_format_support),

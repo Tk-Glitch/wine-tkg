@@ -2777,7 +2777,7 @@ static void *adapter_no3d_map_bo_address(struct wined3d_context *context,
 {
     if (data->buffer_object)
     {
-        ERR("Unsupported buffer object %#lx.\n", data->buffer_object);
+        ERR("Unsupported buffer object %p.\n", data->buffer_object);
         return NULL;
     }
 
@@ -2788,16 +2788,16 @@ static void adapter_no3d_unmap_bo_address(struct wined3d_context *context,
         const struct wined3d_bo_address *data, unsigned int range_count, const struct wined3d_range *ranges)
 {
     if (data->buffer_object)
-        ERR("Unsupported buffer object %#lx.\n", data->buffer_object);
+        ERR("Unsupported buffer object %p.\n", data->buffer_object);
 }
 
 static void adapter_no3d_copy_bo_address(struct wined3d_context *context,
         const struct wined3d_bo_address *dst, const struct wined3d_bo_address *src, size_t size)
 {
     if (dst->buffer_object)
-        ERR("Unsupported dst buffer object %#lx.\n", dst->buffer_object);
+        ERR("Unsupported dst buffer object %p.\n", dst->buffer_object);
     if (src->buffer_object)
-        ERR("Unsupported src buffer object %#lx.\n", src->buffer_object);
+        ERR("Unsupported src buffer object %p.\n", src->buffer_object);
     if (dst->buffer_object || src->buffer_object)
         return;
     memcpy(dst->addr, src->addr, size);
@@ -2805,6 +2805,16 @@ static void adapter_no3d_copy_bo_address(struct wined3d_context *context,
 
 static void adapter_no3d_flush_bo_address(struct wined3d_context *context,
         const struct wined3d_const_bo_address *data, size_t size)
+{
+}
+
+static bool adapter_no3d_alloc_bo(struct wined3d_device *device, struct wined3d_resource *resource,
+        unsigned int sub_resource_idx, struct wined3d_bo_address *addr)
+{
+    return false;
+}
+
+static void adapter_no3d_destroy_bo(struct wined3d_context *context, struct wined3d_bo *bo)
 {
 }
 
@@ -3078,6 +3088,8 @@ static const struct wined3d_adapter_ops wined3d_adapter_no3d_ops =
     .adapter_unmap_bo_address = adapter_no3d_unmap_bo_address,
     .adapter_copy_bo_address = adapter_no3d_copy_bo_address,
     .adapter_flush_bo_address = adapter_no3d_flush_bo_address,
+    .adapter_alloc_bo = adapter_no3d_alloc_bo,
+    .adapter_destroy_bo = adapter_no3d_destroy_bo,
     .adapter_create_swapchain = adapter_no3d_create_swapchain,
     .adapter_destroy_swapchain = adapter_no3d_destroy_swapchain,
     .adapter_create_buffer = adapter_no3d_create_buffer,

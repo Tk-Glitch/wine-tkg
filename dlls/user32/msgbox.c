@@ -395,7 +395,7 @@ LRESULT CALLBACK msg_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
     MSG *msg = (MSG *)lParam;
     if (nCode == MSGF_DIALOGBOX && msg->message == WM_KEYUP)
     {
-        if ( (msg->wParam == 'C' || msg->wParam == 'c') && (GetKeyState(VK_CONTROL) & 0x8000))
+        if ( (msg->wParam == 'C' || msg->wParam == 'c') && (NtUserGetKeyState(VK_CONTROL) & 0x8000))
         {
             MSGBOX_CopyToClipbaord(GetParent(msg->hwnd));
         }

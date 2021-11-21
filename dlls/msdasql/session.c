@@ -43,6 +43,8 @@ struct msdasql_session
     ISessionProperties ISessionProperties_iface;
     IDBCreateCommand IDBCreateCommand_iface;
     LONG refs;
+
+    IUnknown *datasource;
 };
 
 static inline struct msdasql_session *impl_from_IUnknown( IUnknown *iface )
@@ -102,6 +104,16 @@ static HRESULT WINAPI session_QueryInterface(IUnknown *iface, REFIID riid, void 
         TRACE("(%p)->(IDBCreateCommand_iface %p)\n", iface, ppv);
         *ppv = &session->IDBCreateCommand_iface;
     }
+    else if(IsEqualGUID(&IID_IBindResource, riid))
+    {
+        TRACE("(%p)->(IID_IBindResource not support)\n", iface);
+        return E_NOINTERFACE;
+    }
+    else if(IsEqualGUID(&IID_ICreateRow, riid))
+    {
+        TRACE("(%p)->(IID_ICreateRow not support)\n", iface);
+        return E_NOINTERFACE;
+    }
 
     if(*ppv)
     {
@@ -129,6 +141,8 @@ static ULONG WINAPI session_Release(IUnknown *iface)
     if (!refs)
     {
         TRACE( "destroying %p\n", session );
+
+        IUnknown_Release(session->datasource);
         heap_free( session );
     }
     return refs;
@@ -163,9 +177,13 @@ ULONG WINAPI datasource_Release(IGetDataSource *iface)
 HRESULT WINAPI datasource_GetDataSource(IGetDataSource *iface, REFIID riid, IUnknown **datasource)
 {
     struct msdasql_session *session = impl_from_IGetDataSource( iface );
-    FIXME("%p, %s, %p stub\n", session, debugstr_guid(riid), datasource);
 
-    return E_NOTIMPL;
+    TRACE("%p, %s, %p stub\n", session, debugstr_guid(riid), datasource);
+
+    if (!datasource)
+        return E_INVALIDARG;
+
+    return IUnknown_QueryInterface(session->datasource, riid, (void**)datasource);
 }
 
 static const IGetDataSourceVtbl datasourceVtbl =
@@ -283,6 +301,7 @@ struct command
     IColumnsInfo IColumnsInfo_iface;
     IConvertType IConvertType_iface;
     ICommandPrepare ICommandPrepare_iface;
+    ICommandWithParameters ICommandWithParameters_iface;
     LONG refs;
     WCHAR *query;
     IUnknown *session;
@@ -313,6 +332,11 @@ static inline struct command *impl_from_ICommandPrepare( ICommandPrepare *iface 
     return CONTAINING_RECORD( iface, struct command, ICommandPrepare_iface );
 }
 
+static inline struct command *impl_from_ICommandWithParameters( ICommandWithParameters *iface )
+{
+    return CONTAINING_RECORD( iface, struct command, ICommandWithParameters_iface );
+}
+
 static HRESULT WINAPI command_QueryInterface(ICommandText *iface, REFIID riid, void **ppv)
 {
     struct command *command = impl_from_ICommandText( iface );
@@ -341,6 +365,10 @@ static HRESULT WINAPI command_QueryInterface(ICommandText *iface, REFIID riid, v
     else if(IsEqualGUID(&IID_ICommandPrepare, riid))
     {
          *ppv = &command->ICommandPrepare_iface;
+    }
+    else if(IsEqualGUID(&IID_ICommandWithParameters, riid))
+    {
+        *ppv = &command->ICommandWithParameters_iface;
     }
 
     if(*ppv)
@@ -416,6 +444,7 @@ struct msdasql_rowset
     IColumnsInfo IColumnsInfo_iface;
     IAccessor IAccessor_iface;
     IColumnsRowset IColumnsRowset_iface;
+    IUnknown *caller;
     LONG refs;
 };
 
@@ -514,6 +543,10 @@ static ULONG WINAPI msdasql_rowset_Release(IRowset *iface)
     if (!refs)
     {
         TRACE( "destroying %p\n", rowset );
+
+        if (rowset->caller)
+            IUnknown_Release(rowset->caller);
+
         heap_free( rowset );
     }
     return refs;
@@ -608,8 +641,16 @@ static HRESULT WINAPI rowset_info_GetSpecification(IRowsetInfo *iface, REFIID ri
         IUnknown **specification)
 {
     struct msdasql_rowset *rowset = impl_from_IRowsetInfo( iface );
-    FIXME("%p, %s, %p\n", rowset, debugstr_guid(riid), specification);
-    return E_NOTIMPL;
+
+    TRACE("%p, %s, %p\n", rowset, debugstr_guid(riid), specification);
+
+    if (!specification)
+        return E_INVALIDARG;
+
+    if (!rowset->caller)
+        return S_FALSE;
+
+    return IUnknown_QueryInterface(rowset->caller, riid, (void**)specification);
 }
 
 struct IRowsetInfoVtbl rowset_info_vtbl =
@@ -768,7 +809,6 @@ struct IColumnsRowsetVtbl columnrs_rs_vtbl =
     column_rs_GetColumnsRowset
 };
 
-
 static HRESULT WINAPI command_Execute(ICommandText *iface, IUnknown *outer, REFIID riid,
         DBPARAMS *params, DBROWCOUNT *affected, IUnknown **rowset)
 {
@@ -788,6 +828,7 @@ static HRESULT WINAPI command_Execute(ICommandText *iface, IUnknown *outer, REFI
     msrowset->IAccessor_iface.lpVtbl = &accessor_vtbl;
     msrowset->IColumnsRowset_iface.lpVtbl = &columnrs_rs_vtbl;
     msrowset->refs = 1;
+    ICommandText_QueryInterface(iface, &IID_IUnknown, (void**)&msrowset->caller);
 
     if (affected)
         *affected = 0; /* FIXME */
@@ -824,8 +865,11 @@ static HRESULT WINAPI command_GetCommandText(ICommandText *iface, GUID *dialect,
     if (!command->query)
         return DB_E_NOCOMMAND;
 
-    if (IsEqualGUID(&DBGUID_DEFAULT, dialect))
+    if (dialect && !IsEqualGUID(&DBGUID_DEFAULT, dialect))
+    {
+        *dialect = DBGUID_DEFAULT;
         hr = DB_S_DIALECTIGNORED;
+    }
 
     *commandstr = heap_alloc((lstrlenW(command->query)+1)*sizeof(WCHAR));
     wcscpy(*commandstr, command->query);
@@ -837,7 +881,7 @@ static HRESULT WINAPI command_SetCommandText(ICommandText *iface, REFGUID dialec
     struct command *command = impl_from_ICommandText( iface );
     TRACE("%p, %s, %s\n", command, debugstr_guid(dialect), debugstr_w(commandstr));
 
-    if (IsEqualGUID(&DBGUID_DEFAULT, dialect))
+    if (!IsEqualGUID(&DBGUID_DEFAULT, dialect))
         FIXME("Currently non Default Dialect isn't supported\n");
 
     heap_free(command->query);
@@ -1007,15 +1051,15 @@ static ULONG WINAPI commandprepare_Release(ICommandPrepare *iface)
 static HRESULT WINAPI commandprepare_Prepare(ICommandPrepare *iface, ULONG runs)
 {
     struct command *command = impl_from_ICommandPrepare( iface );
-    FIXME("%p, %u\n", command, runs);
-    return E_NOTIMPL;
+    TRACE("%p, %u\n", command, runs);
+    return S_OK;
 }
 
 static HRESULT WINAPI commandprepare_Unprepare(ICommandPrepare *iface)
 {
     struct command *command = impl_from_ICommandPrepare( iface );
-    FIXME("%p\n", command);
-    return E_NOTIMPL;
+    TRACE("%p\n", command);
+    return S_OK;
 }
 
 struct ICommandPrepareVtbl commandprepareVtbl =
@@ -1025,6 +1069,58 @@ struct ICommandPrepareVtbl commandprepareVtbl =
     commandprepare_Release,
     commandprepare_Prepare,
     commandprepare_Unprepare
+};
+
+static HRESULT WINAPI cmd_with_params_QueryInterface(ICommandWithParameters *iface, REFIID riid, void **out)
+{
+    struct command *command = impl_from_ICommandWithParameters( iface );
+    return ICommandText_QueryInterface(&command->ICommandText_iface, riid, out);
+}
+
+static ULONG WINAPI cmd_with_params_AddRef(ICommandWithParameters *iface)
+{
+    struct command *command = impl_from_ICommandWithParameters( iface );
+    return ICommandText_AddRef(&command->ICommandText_iface);
+}
+
+static ULONG WINAPI cmd_with_params_Release(ICommandWithParameters *iface)
+{
+    struct command *command = impl_from_ICommandWithParameters( iface );
+    return ICommandText_Release(&command->ICommandText_iface);
+}
+
+static HRESULT WINAPI cmd_with_params_GetParameterInfo(ICommandWithParameters *iface, DB_UPARAMS *uparams,
+        DBPARAMINFO **info, OLECHAR **buffer)
+{
+    struct command *command = impl_from_ICommandWithParameters( iface );
+    FIXME("%p, %p, %p, %p\n", command, uparams, info, buffer);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI cmd_with_params_MapParameterNames(ICommandWithParameters *iface, DB_UPARAMS uparams,
+        LPCWSTR names[], DB_LPARAMS ordinals[])
+{
+    struct command *command = impl_from_ICommandWithParameters( iface );
+    FIXME("%p, %ld, %p, %p\n", command, uparams, names, ordinals);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI cmd_with_params_SetParameterInfo(ICommandWithParameters *iface, DB_UPARAMS uparams,
+        const DB_UPARAMS ordinals[], const DBPARAMBINDINFO bindinfo[])
+{
+    struct command *command = impl_from_ICommandWithParameters( iface );
+    FIXME("%p, %ld, %p, %p\n", command, uparams, ordinals, bindinfo);
+    return E_NOTIMPL;
+}
+
+struct ICommandWithParametersVtbl command_with_params_vtbl =
+{
+    cmd_with_params_QueryInterface,
+    cmd_with_params_AddRef,
+    cmd_with_params_Release,
+    cmd_with_params_GetParameterInfo,
+    cmd_with_params_MapParameterNames,
+    cmd_with_params_SetParameterInfo
 };
 
 static HRESULT WINAPI createcommand_CreateCommand(IDBCreateCommand *iface, IUnknown *outer, REFIID riid,
@@ -1048,7 +1144,9 @@ static HRESULT WINAPI createcommand_CreateCommand(IDBCreateCommand *iface, IUnkn
     command->IColumnsInfo_iface.lpVtbl = &columninfoVtbl;
     command->IConvertType_iface.lpVtbl = &converttypeVtbl;
     command->ICommandPrepare_iface.lpVtbl = &commandprepareVtbl;
+    command->ICommandWithParameters_iface.lpVtbl = &command_with_params_vtbl;
     command->refs = 1;
+    command->query = NULL;
 
     IUnknown_QueryInterface(&session->session_iface, &IID_IUnknown, (void**)&command->session);
 
@@ -1065,7 +1163,7 @@ static const IDBCreateCommandVtbl createcommandVtbl =
     createcommand_CreateCommand
 };
 
-HRESULT create_db_session(REFIID riid, void **unk)
+HRESULT create_db_session(REFIID riid, IUnknown *datasource, void **unk)
 {
     struct msdasql_session *session;
     HRESULT hr;
@@ -1079,6 +1177,7 @@ HRESULT create_db_session(REFIID riid, void **unk)
     session->IOpenRowset_iface.lpVtbl = &openrowsetVtbl;
     session->ISessionProperties_iface.lpVtbl = &propertiesVtbl;
     session->IDBCreateCommand_iface.lpVtbl = &createcommandVtbl;
+    IUnknown_QueryInterface(datasource, &IID_IUnknown, (void**)&session->datasource);
     session->refs = 1;
 
     hr = IUnknown_QueryInterface(&session->session_iface, riid, unk);

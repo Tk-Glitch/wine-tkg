@@ -24,10 +24,6 @@
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
-#include <stdarg.h>
-#include "windef.h"
-#include "winbase.h"
-#include "ntgdi.h"
 #include "win32u_private.h"
 
 /* extra stock object: default 1x1 bitmap for memory DCs */
@@ -217,7 +213,6 @@ extern const struct gdi_dc_funcs dib_driver DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs path_driver DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs font_driver DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs *get_display_driver(void) DECLSPEC_HIDDEN;
-extern void CDECL set_display_driver( void *proc ) DECLSPEC_HIDDEN;
 
 /* font.c */
 
@@ -275,6 +270,7 @@ struct gdi_font
     BOOL                   fake_italic : 1;
     BOOL                   fake_bold : 1;
     BOOL                   scalable : 1;
+    BOOL                   use_logfont_name : 1;
     struct gdi_font       *base_font;
     void                  *gsub_table;
     void                  *vert_feature;

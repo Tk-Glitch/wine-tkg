@@ -315,39 +315,17 @@ __ASM_GLOBAL_FUNC( enum_callback_wrapper,
 static HRESULT WINAPI IDirectInputWImpl_EnumDevices( IDirectInput7W *iface, DWORD type, LPDIENUMDEVICESCALLBACKW callback,
                                                      void *context, DWORD flags )
 {
-    DIDEVICEINSTANCEW instance = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
     IDirectInputImpl *impl = impl_from_IDirectInput7W( iface );
-    unsigned int i = 0;
-    HRESULT hr;
 
     TRACE( "iface %p, type %#x, callback %p, context %p, flags %#x\n", iface, type, callback, context, flags );
 
     if (!callback) return DIERR_INVALIDPARAM;
 
-    if ((type > DI8DEVCLASS_GAMECTRL && type < DI8DEVTYPE_DEVICE) || type > DI8DEVTYPE_SUPPLEMENTAL)
+    if (type > DIDEVTYPE_JOYSTICK) return DIERR_INVALIDPARAM;
+    if (flags & ~(DIEDFL_ATTACHEDONLY | DIEDFL_FORCEFEEDBACK | DIEDFL_INCLUDEALIASES | DIEDFL_INCLUDEPHANTOMS))
         return DIERR_INVALIDPARAM;
-    if (flags & ~(DIEDFL_ATTACHEDONLY|DIEDFL_FORCEFEEDBACK|DIEDFL_INCLUDEALIASES|DIEDFL_INCLUDEPHANTOMS|DIEDFL_INCLUDEHIDDEN))
-        return DIERR_INVALIDPARAM;
 
-    if (!impl->initialized)
-        return DIERR_NOTINITIALIZED;
-
-    hr = mouse_enum_device( type, flags, &instance, impl->dwVersion, 0 );
-    if (hr == DI_OK && enum_callback_wrapper( callback, &instance, context ) == DIENUM_STOP)
-        return DI_OK;
-    hr = keyboard_enum_device( type, flags, &instance, impl->dwVersion, 0 );
-    if (hr == DI_OK && enum_callback_wrapper( callback, &instance, context ) == DIENUM_STOP)
-        return DI_OK;
-
-    do
-    {
-        hr = hid_joystick_enum_device( type, flags, &instance, impl->dwVersion, i++ );
-        if (hr == DI_OK && enum_callback_wrapper( callback, &instance, context ) == DIENUM_STOP)
-            return DI_OK;
-    }
-    while (SUCCEEDED(hr));
-
-    return DI_OK;
+    return IDirectInput8_EnumDevices( &impl->IDirectInput8W_iface, type, callback, context, flags );
 }
 
 static ULONG WINAPI IDirectInputWImpl_AddRef( IDirectInput7W *iface )
@@ -659,11 +637,64 @@ static HRESULT WINAPI IDirectInput8WImpl_CreateDevice(LPDIRECTINPUT8W iface, REF
     return IDirectInput7_CreateDeviceEx( &This->IDirectInput7W_iface, rguid, &IID_IDirectInputDevice8W, (LPVOID *)pdev, punk );
 }
 
-static HRESULT WINAPI IDirectInput8WImpl_EnumDevices(LPDIRECTINPUT8W iface, DWORD dwDevType, LPDIENUMDEVICESCALLBACKW lpCallback,
-                                                     LPVOID pvRef, DWORD dwFlags)
+static BOOL try_enum_device( DWORD type, LPDIENUMDEVICESCALLBACKW callback,
+                             DIDEVICEINSTANCEW *instance, void *context, DWORD flags )
 {
-    IDirectInputImpl *This = impl_from_IDirectInput8W( iface );
-    return IDirectInput_EnumDevices( &This->IDirectInput7W_iface, dwDevType, lpCallback, pvRef, dwFlags );
+    if (type && (instance->dwDevType & 0xff) != type) return DIENUM_CONTINUE;
+    if ((flags & DIEDFL_FORCEFEEDBACK) && IsEqualGUID( &instance->guidFFDriver, &GUID_NULL ))
+        return DIENUM_CONTINUE;
+    return enum_callback_wrapper( callback, instance, context );
+}
+
+static HRESULT WINAPI IDirectInput8WImpl_EnumDevices( IDirectInput8W *iface, DWORD type, LPDIENUMDEVICESCALLBACKW callback,
+                                                      void *context, DWORD flags )
+{
+    DIDEVICEINSTANCEW instance = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
+    IDirectInputImpl *impl = impl_from_IDirectInput8W( iface );
+    DWORD device_class = 0, device_type = 0;
+    unsigned int i = 0;
+    HRESULT hr;
+
+    TRACE( "iface %p, type %#x, callback %p, context %p, flags %#x\n", iface, type, callback, context, flags );
+
+    if (!callback) return DIERR_INVALIDPARAM;
+
+    if ((type > DI8DEVCLASS_GAMECTRL && type < DI8DEVTYPE_DEVICE) || type > DI8DEVTYPE_SUPPLEMENTAL)
+        return DIERR_INVALIDPARAM;
+    if (flags & ~(DIEDFL_ATTACHEDONLY | DIEDFL_FORCEFEEDBACK | DIEDFL_INCLUDEALIASES |
+                  DIEDFL_INCLUDEPHANTOMS | DIEDFL_INCLUDEHIDDEN))
+        return DIERR_INVALIDPARAM;
+
+    if (!impl->initialized) return DIERR_NOTINITIALIZED;
+
+    if (type <= DI8DEVCLASS_GAMECTRL) device_class = type;
+    else device_type = type;
+
+    if (device_class == DI8DEVCLASS_ALL || device_class == DI8DEVCLASS_POINTER)
+    {
+        hr = mouse_enum_device( type, flags, &instance, impl->dwVersion );
+        if (hr == DI_OK && try_enum_device( device_type, callback, &instance, context, flags ) == DIENUM_STOP)
+            return DI_OK;
+    }
+
+    if (device_class == DI8DEVCLASS_ALL || device_class == DI8DEVCLASS_KEYBOARD)
+    {
+        hr = keyboard_enum_device( type, flags, &instance, impl->dwVersion );
+        if (hr == DI_OK && try_enum_device( device_type, callback, &instance, context, flags ) == DIENUM_STOP)
+            return DI_OK;
+    }
+
+    if (device_class == DI8DEVCLASS_ALL || device_class == DI8DEVCLASS_GAMECTRL)
+    {
+        do
+        {
+            hr = hid_joystick_enum_device( type, flags, &instance, impl->dwVersion, i++ );
+            if (hr == DI_OK && try_enum_device( device_type, callback, &instance, context, flags ) == DIENUM_STOP)
+                return DI_OK;
+        } while (SUCCEEDED(hr));
+    }
+
+    return DI_OK;
 }
 
 static HRESULT WINAPI IDirectInput8WImpl_GetDeviceStatus(LPDIRECTINPUT8W iface, REFGUID rguid)
@@ -743,42 +774,62 @@ static BOOL should_enumerate_device(const WCHAR *username, DWORD dwFlags,
     return should_enumerate;
 }
 
+struct enum_device_by_semantics_params
+{
+    IDirectInput8W *iface;
+    const WCHAR *username;
+    DWORD flags;
+
+    DIDEVICEINSTANCEW *instances;
+    DWORD instance_count;
+};
+
+static BOOL CALLBACK enum_device_by_semantics( const DIDEVICEINSTANCEW *instance, void *context )
+{
+    struct enum_device_by_semantics_params *params = context;
+    IDirectInputImpl *This = impl_from_IDirectInput8W( params->iface );
+
+    if (should_enumerate_device( params->username, params->flags, &This->device_players, &instance->guidInstance ))
+    {
+        params->instance_count++;
+        params->instances = realloc( params->instances, sizeof(DIDEVICEINSTANCEW) * params->instance_count );
+        params->instances[params->instance_count - 1] = *instance;
+    }
+
+    return DIENUM_CONTINUE;
+}
+
 static HRESULT WINAPI IDirectInput8WImpl_EnumDevicesBySemantics(
       LPDIRECTINPUT8W iface, LPCWSTR ptszUserName, LPDIACTIONFORMATW lpdiActionFormat,
       LPDIENUMDEVICESBYSEMANTICSCBW lpCallback,
       LPVOID pvRef, DWORD dwFlags
 )
 {
+    struct enum_device_by_semantics_params params = {.iface = iface, .username = ptszUserName, .flags = dwFlags};
+    DWORD callbackFlags, enum_flags = DIEDFL_ATTACHEDONLY | (dwFlags & DIEDFL_FORCEFEEDBACK);
     static REFGUID guids[2] = { &GUID_SysKeyboard, &GUID_SysMouse };
     static const DWORD actionMasks[] = { DIKEYBOARD_MASK, DIMOUSE_MASK };
     IDirectInputImpl *This = impl_from_IDirectInput8W(iface);
     DIDEVICEINSTANCEW didevi;
     LPDIRECTINPUTDEVICE8W lpdid;
-    DWORD callbackFlags;
     unsigned int i = 0;
     HRESULT hr;
-    int device_count = 0;
     int remain;
-    DIDEVICEINSTANCEW *didevis = 0;
 
     FIXME("(this=%p,%s,%p,%p,%p,%04x): semi-stub\n", This, debugstr_w(ptszUserName), lpdiActionFormat,
           lpCallback, pvRef, dwFlags);
 
     didevi.dwSize = sizeof(didevi);
 
-    do
+    hr = IDirectInput8_EnumDevices( &This->IDirectInput8W_iface, DI8DEVCLASS_GAMECTRL,
+                                    enum_device_by_semantics, &params, enum_flags );
+    if (FAILED(hr))
     {
-        hr = hid_joystick_enum_device( DI8DEVCLASS_GAMECTRL, DIEDFL_ATTACHEDONLY | dwFlags, &didevi, This->dwVersion, i++ );
-        if (hr != DI_OK) continue;
-        if (should_enumerate_device( ptszUserName, dwFlags, &This->device_players, &didevi.guidInstance ))
-        {
-            device_count++;
-            didevis = realloc( didevis, sizeof(DIDEVICEINSTANCEW) * device_count );
-            didevis[device_count - 1] = didevi;
-        }
-    } while (SUCCEEDED(hr));
+        free( params.instances );
+        return hr;
+    }
 
-    remain = device_count;
+    remain = params.instance_count;
     /* Add keyboard and mouse to remaining device count */
     if (!(dwFlags & DIEDBSFL_FORCEFEEDBACK))
     {
@@ -789,21 +840,21 @@ static HRESULT WINAPI IDirectInput8WImpl_EnumDevicesBySemantics(
         }
     }
 
-    for (i = 0; i < device_count; i++)
+    for (i = 0; i < params.instance_count; i++)
     {
         callbackFlags = diactionformat_priorityW(lpdiActionFormat, lpdiActionFormat->dwGenre);
-        IDirectInput_CreateDevice(iface, &didevis[i].guidInstance, &lpdid, NULL);
+        IDirectInput_CreateDevice( iface, &params.instances[i].guidInstance, &lpdid, NULL );
 
-        if (lpCallback(&didevis[i], lpdid, callbackFlags, --remain, pvRef) == DIENUM_STOP)
+        if (lpCallback( &params.instances[i], lpdid, callbackFlags, --remain, pvRef ) == DIENUM_STOP)
         {
-            free( didevis );
+            free( params.instances );
             IDirectInputDevice_Release(lpdid);
             return DI_OK;
         }
         IDirectInputDevice_Release(lpdid);
     }
 
-    free( didevis );
+    free( params.instances );
 
     if (dwFlags & DIEDBSFL_FORCEFEEDBACK) return DI_OK;
 
@@ -918,12 +969,24 @@ static HRESULT WINAPI JoyConfig8Impl_DeleteType(IDirectInputJoyConfig8 *iface, L
     return E_NOTIMPL;
 }
 
+struct find_device_from_index_params
+{
+    UINT index;
+    DIDEVICEINSTANCEW instance;
+};
+
+static BOOL CALLBACK find_device_from_index( const DIDEVICEINSTANCEW *instance, void *context )
+{
+    struct find_device_from_index_params *params = context;
+    params->instance = *instance;
+    if (!params->index--) return DIENUM_STOP;
+    return DIENUM_CONTINUE;
+}
+
 static HRESULT WINAPI JoyConfig8Impl_GetConfig(IDirectInputJoyConfig8 *iface, UINT id, LPDIJOYCONFIG info, DWORD flags)
 {
-    DIDEVICEINSTANCEW instance = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
     IDirectInputImpl *di = impl_from_IDirectInputJoyConfig8(iface);
-    unsigned int i = 0;
-    UINT found = 0;
+    struct find_device_from_index_params params = {.index = id};
     HRESULT hr;
 
     FIXME("(%p)->(%d, %p, 0x%08x): semi-stub!\n", iface, id, info, flags);
@@ -935,16 +998,11 @@ static HRESULT WINAPI JoyConfig8Impl_GetConfig(IDirectInputJoyConfig8 *iface, UI
     X(DIJC_CALLOUT)
 #undef X
 
-    do
-    {
-        hr = hid_joystick_enum_device( DI8DEVCLASS_GAMECTRL, 0, &instance, di->dwVersion, i++ );
-        if (hr != DI_OK) continue;
-        if (flags & DIJC_GUIDINSTANCE) info->guidInstance = instance.guidInstance;
-        /* Only take into account the chosen id */
-        if (found++ == id) return DI_OK;
-    } while (SUCCEEDED(hr));
-
-    return DIERR_NOMOREITEMS;
+    hr = IDirectInput8_EnumDevices( &di->IDirectInput8W_iface, DI8DEVCLASS_GAMECTRL, find_device_from_index, &params, 0 );
+    if (FAILED(hr)) return hr;
+    if (params.index != ~0) return DIERR_NOMOREITEMS;
+    if (flags & DIJC_GUIDINSTANCE) info->guidInstance = params.instance.guidInstance;
+    return DI_OK;
 }
 
 static HRESULT WINAPI JoyConfig8Impl_SetConfig(IDirectInputJoyConfig8 *iface, UINT id, LPCDIJOYCONFIG info, DWORD flags)
@@ -1430,6 +1488,8 @@ void check_dinput_events(void)
      *   (for example Culpa Innata)
      * - some games only poll the device, and neither keyboard nor mouse
      *   (for example Civilization: Call to Power 2)
+     * - some games do not explicitly poll for keyboard events
+     *   (for example Morrowind in its key binding page)
      */
     MsgWaitForMultipleObjectsEx(0, NULL, 0, QS_ALLINPUT, 0);
 }

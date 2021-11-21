@@ -3176,7 +3176,7 @@ static LRESULT EDIT_WM_Char(EDITSTATE *es, WCHAR c)
 {
         BOOL control;
 
-	control = GetKeyState(VK_CONTROL) & 0x8000;
+	control = NtUserGetKeyState(VK_CONTROL) & 0x8000;
 
 	switch (c) {
 	case '\r':
@@ -3313,7 +3313,7 @@ static void EDIT_WM_ContextMenu(EDITSTATE *es, INT x, INT y)
 	/* copy */
 	EnableMenuItem(popup, 3, MF_BYPOSITION | ((end - start) && !(es->style & ES_PASSWORD) ? MF_ENABLED : MF_GRAYED));
 	/* paste */
-	EnableMenuItem(popup, 4, MF_BYPOSITION | (IsClipboardFormatAvailable(CF_UNICODETEXT) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
+	EnableMenuItem(popup, 4, MF_BYPOSITION | (NtUserIsClipboardFormatAvailable(CF_UNICODETEXT) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
 	/* delete */
 	EnableMenuItem(popup, 5, MF_BYPOSITION | ((end - start) && !(es->style & ES_READONLY) ? MF_ENABLED : MF_GRAYED));
 	/* select all */
@@ -3436,11 +3436,11 @@ static LRESULT EDIT_WM_KeyDown(EDITSTATE *es, INT key)
 	BOOL shift;
 	BOOL control;
 
-	if (GetKeyState(VK_MENU) & 0x8000)
+	if (NtUserGetKeyState(VK_MENU) & 0x8000)
 		return 0;
 
-	shift = GetKeyState(VK_SHIFT) & 0x8000;
-	control = GetKeyState(VK_CONTROL) & 0x8000;
+	shift = NtUserGetKeyState(VK_SHIFT) & 0x8000;
+	control = NtUserGetKeyState(VK_CONTROL) & 0x8000;
 
 	switch (key) {
 	case VK_F4:

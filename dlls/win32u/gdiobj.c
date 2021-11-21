@@ -1167,6 +1167,18 @@ static struct unix_funcs unix_funcs =
     NtGdiUnrealizeObject,
     NtGdiUpdateColors,
     NtGdiWidenPath,
+    NtUserActivateKeyboardLayout,
+    NtUserCountClipboardFormats,
+    NtUserGetKeyNameText,
+    NtUserGetKeyboardLayoutList,
+    NtUserGetPriorityClipboardFormat,
+    NtUserGetUpdatedClipboardFormats,
+    NtUserIsClipboardFormatAvailable,
+    NtUserMapVirtualKeyEx,
+    NtUserScrollDC,
+    NtUserToUnicodeEx,
+    NtUserUnregisterHotKey,
+    NtUserVkKeyScanEx,
 
     GDIRealizePalette,
     GDISelectPalette,
@@ -1181,7 +1193,7 @@ static struct unix_funcs unix_funcs =
     __wine_get_vulkan_driver,
     __wine_get_wgl_driver,
     __wine_make_gdi_object_system,
-    set_display_driver,
+    __wine_set_display_driver,
     __wine_set_visible_region,
 };
 

@@ -42,28 +42,19 @@
 #include "parser.h"
 #include "wpp_private.h"
 
-#ifdef WORDS_BIGENDIAN
-#define ENDIAN	"big"
-#else
-#define ENDIAN	"little"
-#endif
-
 static const char usage[] =
 	"Usage: wrc [options...] [infile[.rc|.res]]\n"
-	"   -b, --target=TARGET        Specify target CPU and platform when cross-compiling\n"
 	"   -D, --define id[=val]      Define preprocessor identifier id=val\n"
 	"   --debug=nn                 Set debug level to 'nn'\n"
 	"   -E                         Preprocess only\n"
-	"   --endianness=e             Set output byte-order e={n[ative], l[ittle], b[ig]}\n"
-	"                              (win32 only; default is " ENDIAN "-endian)\n"
-	"   -F TARGET                  Synonym for -b for compatibility with windres\n"
+	"   -F TARGET                  Ignored, for compatibility with windres\n"
 	"   -fo FILE                   Synonym for -o for compatibility with windres\n"
 	"   -h, --help                 Prints this summary\n"
 	"   -i, --input=FILE           The name of the input file\n"
-	"   -I, --include-dir=PATH     Set include search dir to path (multiple -I allowed)\n"
+	"   -I, --include-dir=DIR      Add dir to the include search path (multiple -I allowed)\n"
 	"   -J, --input-format=FORMAT  The input format (either `rc' or `rc16')\n"
 	"   -l, --language=LANG        Set default language to LANG (default is neutral {0, 0})\n"
-	"   -m16, -m32, -m64           Build for 16-bit, 32-bit resp. 64-bit platforms\n"
+	"   -m16                       Build a 16-bit resource file\n"
 	"   --nls-dir=DIR              Directory containing the NLS codepage mappings\n"
 	"   --no-use-temp-file         Ignored for compatibility with windres\n"
 	"   --nostdinc                 Disables searching the standard include path\n"
@@ -129,11 +120,6 @@ language_t *currentlanguage = NULL;
 int pedantic = 0;
 
 /*
- * The output byte-order of resources (set with -B)
- */
-int byteorder = WRC_BO_NATIVE;
-
-/*
  * Set when _only_ to run the preprocessor (-E option)
  */
 int preprocess_only = 0;
@@ -146,8 +132,6 @@ int no_preprocess = 0;
 int utf8_input = 0;
 
 int check_utf8 = 1;  /* whether to check for valid utf8 */
-
-static int pointer_size = sizeof(void *);
 
 static int verify_translations_mode;
 
@@ -184,7 +168,6 @@ enum long_options_values
     LONG_OPT_SYSROOT,
     LONG_OPT_VERSION,
     LONG_OPT_DEBUG,
-    LONG_OPT_ENDIANNESS,
     LONG_OPT_PEDANTIC,
     LONG_OPT_VERIFY_TRANSL
 };
@@ -194,7 +177,6 @@ static const char short_options[] =
 static const struct long_option long_options[] = {
 	{ "debug", 1, LONG_OPT_DEBUG },
 	{ "define", 1, 'D' },
-	{ "endianness", 1, LONG_OPT_ENDIANNESS },
 	{ "help", 0, 'h' },
 	{ "include-dir", 1, 'I' },
 	{ "input", 1, 'i' },
@@ -317,22 +299,6 @@ static int load_file( const char *input_name, const char *output_name )
     return ret;
 }
 
-static void set_target( const char *target )
-{
-    char *p, *cpu = xstrdup( target );
-
-    /* target specification is in the form CPU-MANUFACTURER-OS or CPU-MANUFACTURER-KERNEL-OS */
-    if (!(p = strchr( cpu, '-' ))) error( "Invalid target specification '%s'\n", target );
-    *p = 0;
-    if (!strcmp( cpu, "amd64" ) || !strcmp( cpu, "x86_64" ) ||
-        !strcmp( cpu, "ia64" )  || !strcmp( cpu, "aarch64" ) ||
-        !strcmp( cpu, "powerpc64" ) || !strcmp( cpu, "powerpc64le" ))
-        pointer_size = 8;
-    else
-        pointer_size = 4;
-    free( cpu );
-}
-
 static void init_argv0_dir( const char *argv0 )
 {
 #ifndef _WIN32
@@ -391,25 +357,6 @@ static void option_callback( int optc, char *optarg )
     case LONG_OPT_DEBUG:
         debuglevel = strtol(optarg, NULL, 0);
         break;
-    case LONG_OPT_ENDIANNESS:
-        switch(optarg[0])
-        {
-        case 'n':
-        case 'N':
-            byteorder = WRC_BO_NATIVE;
-            break;
-        case 'l':
-        case 'L':
-            byteorder = WRC_BO_LITTLE;
-            break;
-        case 'b':
-        case 'B':
-            byteorder = WRC_BO_BIG;
-            break;
-        default:
-            error("Byte ordering must be n[ative], l[ittle] or b[ig]\n");
-        }
-        break;
     case LONG_OPT_PEDANTIC:
         pedantic = 1;
         break;
@@ -424,7 +371,6 @@ static void option_callback( int optc, char *optarg )
         break;
     case 'b':
     case 'F':
-        set_target( optarg );
         break;
     case 'h':
         printf(usage);
@@ -450,8 +396,7 @@ static void option_callback( int optc, char *optarg )
     break;
     case 'm':
         if (!strcmp( optarg, "16" )) win32 = 0;
-        else if (!strcmp( optarg, "32" )) { win32 = 1; pointer_size = 4; }
-        else if (!strcmp( optarg, "64" )) { win32 = 1; pointer_size = 8; }
+        else win32 = 1;
         break;
     case 'f':
         if (*optarg != 'o') error("Unknown option: -f%s\n",  optarg);
@@ -506,11 +451,7 @@ int main(int argc,char *argv[])
         strarray_addall( &input_files,
                          parse_options( argc, argv, short_options, long_options, 0, option_callback ));
 
-	if (win32)
-	{
-		wpp_add_cmdline_define("_WIN32=1");
-		if (pointer_size == 8) wpp_add_cmdline_define("_WIN64=1");
-	}
+	if (win32) wpp_add_cmdline_define("_WIN32=1");
 
 	/* If we do need to search standard includes, add them to the path */
 	if (stdinc)

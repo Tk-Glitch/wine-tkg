@@ -40,7 +40,8 @@
 DEFINE_GUID(control_class,0xdeadbeef,0x29ef,0x4538,0xa5,0xfd,0xb6,0x95,0x73,0xa3,0x62,0xc0);
 
 #define IOCTL_WINETEST_HID_SET_EXPECT    CTL_CODE(FILE_DEVICE_KEYBOARD, 0x800, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
-#define IOCTL_WINETEST_HID_SEND_INPUT    CTL_CODE(FILE_DEVICE_KEYBOARD, 0x801, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
+#define IOCTL_WINETEST_HID_WAIT_EXPECT   CTL_CODE(FILE_DEVICE_KEYBOARD, 0x801, METHOD_NEITHER, FILE_ANY_ACCESS)
+#define IOCTL_WINETEST_HID_SEND_INPUT    CTL_CODE(FILE_DEVICE_KEYBOARD, 0x802, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
 
 struct hid_expect
 {
@@ -147,8 +148,15 @@ static inline void kvprintf( const char *format, va_list ap )
 {
     struct tls_data *data = get_tls_data();
     IO_STATUS_BLOCK io;
-    int len = vsnprintf( data->strings, sizeof(data->strings), format, ap );
-    ZwWriteFile( okfile, NULL, NULL, NULL, &io, data->strings, len, NULL, NULL );
+    int len = vsnprintf( data->str_pos, sizeof(data->strings) - (data->str_pos - data->strings), format, ap );
+    data->str_pos += len;
+
+    if (len && data->str_pos[-1] == '\n')
+    {
+        ZwWriteFile( okfile, NULL, NULL, NULL, &io, data->strings,
+                     strlen( data->strings ), NULL, NULL );
+        data->str_pos = data->strings;
+    }
 }
 
 static inline void WINAPIV kprintf( const char *format, ... ) __WINE_PRINTF_ATTR( 1, 2 );

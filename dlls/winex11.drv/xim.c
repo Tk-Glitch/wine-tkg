@@ -25,8 +25,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winuser.h"
-#include "wingdi.h"
 #include "winnls.h"
 #include "winternl.h"
 #include "x11drv.h"
@@ -462,7 +460,7 @@ static BOOL X11DRV_DestroyIC(XIC xic, XPointer p, XPointer data)
 /***********************************************************************
  *           X11DRV_UpdateCandidatePos
  */
-void X11DRV_UpdateCandidatePos( HWND hwnd, const RECT *caret_rect )
+void CDECL X11DRV_UpdateCandidatePos( HWND hwnd, const RECT *caret_rect )
 {
     if (ximStyle & XIMPreeditPosition)
     {

@@ -134,4 +134,13 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     get_device_desc,
 };
 
-#endif /* HAVE_LINUX_VIDEODEV_2 */
+#ifdef _WIN64
+
+const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+{
+    get_device_desc,
+};
+
+#endif  /* _WIN64 */
+
+#endif /* HAVE_LINUX_VIDEODEV2_H */

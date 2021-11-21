@@ -393,10 +393,21 @@ static int get_draw_state(const BUTTON_INFO *infoPtr)
         { CBS_CHECKEDNORMAL, CBS_CHECKEDDISABLED, CBS_CHECKEDHOT, CBS_CHECKEDPRESSED, CBS_CHECKEDNORMAL },
         { CBS_MIXEDNORMAL, CBS_MIXEDDISABLED, CBS_MIXEDHOT, CBS_MIXEDPRESSED, CBS_MIXEDNORMAL }
     };
+    static const int pushlike_cb_states[3][DRAW_STATE_COUNT] =
+    {
+        { PBS_NORMAL, PBS_DISABLED, PBS_HOT, PBS_PRESSED, PBS_NORMAL },
+        { PBS_PRESSED, PBS_PRESSED, PBS_HOT, PBS_PRESSED, PBS_PRESSED },
+        { PBS_NORMAL, PBS_DISABLED, PBS_HOT, PBS_PRESSED, PBS_NORMAL }
+    };
     static const int rb_states[2][DRAW_STATE_COUNT] =
     {
         { RBS_UNCHECKEDNORMAL, RBS_UNCHECKEDDISABLED, RBS_UNCHECKEDHOT, RBS_UNCHECKEDPRESSED, RBS_UNCHECKEDNORMAL },
         { RBS_CHECKEDNORMAL, RBS_CHECKEDDISABLED, RBS_CHECKEDHOT, RBS_CHECKEDPRESSED, RBS_CHECKEDNORMAL }
+    };
+    static const int pushlike_rb_states[2][DRAW_STATE_COUNT] =
+    {
+        { PBS_NORMAL, PBS_DISABLED, PBS_HOT, PBS_PRESSED, PBS_NORMAL },
+        { PBS_PRESSED, PBS_PRESSED, PBS_HOT, PBS_PRESSED, PBS_PRESSED }
     };
     static const int gb_states[DRAW_STATE_COUNT] = { GBS_NORMAL, GBS_DISABLED, GBS_NORMAL, GBS_NORMAL, GBS_NORMAL };
     LONG style = GetWindowLongW(infoPtr->hwnd, GWL_STYLE);
@@ -410,7 +421,8 @@ static int get_draw_state(const BUTTON_INFO *infoPtr)
         state = STATE_PRESSED;
     else if (infoPtr->state & BST_HOT)
         state = STATE_HOT;
-    else if (infoPtr->state & BST_FOCUS)
+    else if (infoPtr->state & BST_FOCUS || type == BS_DEFPUSHBUTTON || type == BS_DEFSPLITBUTTON
+             || (type == BS_DEFCOMMANDLINK && !(style & BS_PUSHLIKE)))
         state = STATE_DEFAULTED;
     else
         state = STATE_NORMAL;
@@ -427,14 +439,16 @@ static int get_draw_state(const BUTTON_INFO *infoPtr)
         return pb_states[state];
     case BS_CHECKBOX:
     case BS_AUTOCHECKBOX:
-        return cb_states[check_state][state];
-    case BS_RADIOBUTTON:
     case BS_3STATE:
     case BS_AUTO3STATE:
+        return style & BS_PUSHLIKE ? pushlike_cb_states[check_state][state]
+                                   : cb_states[check_state][state];
+    case BS_RADIOBUTTON:
     case BS_AUTORADIOBUTTON:
-        return rb_states[check_state][state];
+        return style & BS_PUSHLIKE ? pushlike_rb_states[check_state][state]
+                                   : rb_states[check_state][state];
     case BS_GROUPBOX:
-        return gb_states[state];
+        return style & BS_PUSHLIKE ? pb_states[state] : gb_states[state];
     default:
         WARN("Unsupported button type 0x%08x\n", type);
         return PBS_NORMAL;
@@ -1575,6 +1589,11 @@ static UINT BUTTON_CalcLayoutRects(const BUTTON_INFO *infoPtr, HDC hdc, RECT *la
    split_style = infoPtr->imagelist.himl ? BUTTON_ILStoBS(infoPtr->imagelist.uAlign) : style;
    dtStyle = BUTTON_BStoDT(style, ex_style);
 
+   /* Group boxes are top aligned unless BS_PUSHLIKE is set and it's not themed */
+   if (get_button_type(style) == BS_GROUPBOX
+       && (!(style & BS_PUSHLIKE) || GetWindowTheme(infoPtr->hwnd)))
+       style &= ~BS_VCENTER | BS_TOP;
+
    SetRect(&imageRect, 0, 0, imageSize.cx, imageSize.cy);
    imageRectWithMargin = imageRect;
    if (infoPtr->imagelist.himl)
@@ -1656,11 +1675,7 @@ static UINT BUTTON_CalcLayoutRects(const BUTTON_INFO *infoPtr, HDC hdc, RECT *la
        /* Show text only */
        else
        {
-           if (get_button_type(style) != BS_GROUPBOX)
-               BUTTON_PositionRect(style, labelRc, &textRect, textMargin);
-           else
-               /* GroupBox is always top aligned */
-               BUTTON_PositionRect((style & ~BS_VCENTER) | BS_TOP, labelRc, &textRect, textMargin);
+           BUTTON_PositionRect(style, labelRc, &textRect, textMargin);
            labelRect = textRect;
            SetRectEmpty(&imageRect);
        }
@@ -2762,8 +2777,15 @@ static void CB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     int text_offset;
     SIZE box_size;
     HRGN region;
+    HRESULT hr;
 
-    HRESULT hr = GetThemeFont(theme, hDC, part, state, TMT_FONT, &lf);
+    if (dwStyle & BS_PUSHLIKE)
+    {
+        PB_ThemedPaint(theme, infoPtr, hDC, state, dtFlags, focused);
+        return;
+    }
+
+    hr = GetThemeFont(theme, hDC, part, state, TMT_FONT, &lf);
     if (SUCCEEDED(hr)) {
         font = CreateFontIndirectW(&lf);
         if (!font)
@@ -2861,6 +2883,7 @@ static void GB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     HFONT font, hPrevFont = NULL;
     BOOL created_font = FALSE;
     TEXTMETRICW textMetric;
+    int part;
 
     HRESULT hr = GetThemeFont(theme, hDC, BP_GROUPBOX, state, TMT_FONT, &lf);
     if (SUCCEEDED(hr)) {
@@ -2877,7 +2900,7 @@ static void GB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     }
 
     GetClientRect(infoPtr->hwnd, &clientRect);
-    GetThemeBackgroundContentRect(theme, hDC, BP_GROUPBOX, state, &clientRect, &contentRect);
+    contentRect = clientRect;
     region = set_control_clipping(hDC, &clientRect);
 
     bgRect = contentRect;
@@ -2892,9 +2915,10 @@ static void GB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
         ExtSelectClipRgn(hDC, textRegion, RGN_DIFF);
     }
 
-    if (IsThemeBackgroundPartiallyTransparent(theme, BP_GROUPBOX, state))
+    part = GetWindowLongW(infoPtr->hwnd, GWL_STYLE) & BS_PUSHLIKE ? BP_PUSHBUTTON : BP_GROUPBOX;
+    if (IsThemeBackgroundPartiallyTransparent(theme, part, state))
         DrawThemeParentBackground(infoPtr->hwnd, hDC, NULL);
-    DrawThemeBackground(theme, hDC, BP_GROUPBOX, state, &bgRect, NULL);
+    DrawThemeBackground(theme, hDC, part, state, &bgRect, NULL);
 
     if (dtFlags != (UINT)-1)
     {
@@ -2906,7 +2930,7 @@ static void GB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
             SelectClipRgn(hDC, textRegion);
             DeleteObject(textRegion);
         }
-        BUTTON_DrawThemedLabel(infoPtr, hDC, dtFlags, &imageRect, &textRect, theme, BP_GROUPBOX, state);
+        BUTTON_DrawThemedLabel(infoPtr, hDC, dtFlags, &imageRect, &textRect, theme, part, state);
     }
 
     SelectClipRgn(hDC, region);
@@ -3016,6 +3040,7 @@ static void CL_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     NMCUSTOMDRAW nmcd;
     LRESULT cdrf;
     HWND parent;
+    int part;
     RECT rc;
 
     if (infoPtr->font) SelectObject(hDC, infoPtr->font);
@@ -3030,9 +3055,10 @@ static void CL_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     cdrf = SendMessageW(parent, WM_NOTIFY, nmcd.hdr.idFrom, (LPARAM)&nmcd);
     if (cdrf & CDRF_SKIPDEFAULT) return;
 
-    if (IsThemeBackgroundPartiallyTransparent(theme, BP_COMMANDLINK, state))
+    part = GetWindowLongW(infoPtr->hwnd, GWL_STYLE) & BS_PUSHLIKE ? BP_PUSHBUTTON : BP_COMMANDLINK;
+    if (IsThemeBackgroundPartiallyTransparent(theme, part, state))
         DrawThemeParentBackground(infoPtr->hwnd, hDC, NULL);
-    DrawThemeBackground(theme, hDC, BP_COMMANDLINK, state, &rc, NULL);
+    DrawThemeBackground(theme, hDC, part, state, &rc, NULL);
 
     if (cdrf & CDRF_NOTIFYPOSTERASE)
     {
@@ -3052,7 +3078,7 @@ static void CL_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
         SIZE img_size;
         WCHAR *text;
 
-        GetThemeBackgroundContentRect(theme, hDC, BP_COMMANDLINK, state, &rc, &r);
+        GetThemeBackgroundContentRect(theme, hDC, part, state, &rc, &r);
 
         /* The text alignment and styles are fixed and don't depend on button styles */
         dtFlags = DT_TOP | DT_LEFT | DT_WORDBREAK;
@@ -3072,10 +3098,9 @@ static void CL_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
             UINT len = lstrlenW(text);
             RECT text_rect;
 
-            GetThemeTextExtent(theme, hDC, BP_COMMANDLINK, state, text, len,
-                               dtFlags | DT_END_ELLIPSIS, &r, &text_rect);
-            DrawThemeText(theme, hDC, BP_COMMANDLINK, state, text, len,
-                          dtFlags | DT_END_ELLIPSIS, 0, &r);
+            GetThemeTextExtent(theme, hDC, part, state, text, len, dtFlags | DT_END_ELLIPSIS, &r,
+                               &text_rect);
+            DrawThemeText(theme, hDC, part, state, text, len, dtFlags | DT_END_ELLIPSIS, 0, &r);
 
             txt_h = text_rect.bottom - text_rect.top;
             heap_free(text);
@@ -3090,8 +3115,7 @@ static void CL_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
             opts.dwSize = sizeof(opts);
             opts.dwFlags = DTT_FONTPROP;
             opts.iFontPropId = TMT_BODYFONT;
-            DrawThemeTextEx(theme, hDC, BP_COMMANDLINK, state,
-                            infoPtr->note, infoPtr->note_length,
+            DrawThemeTextEx(theme, hDC, part, state, infoPtr->note, infoPtr->note_length,
                             dtFlags | DT_NOPREFIX, &r, &opts);
         }
 

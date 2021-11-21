@@ -24,9 +24,6 @@
 #include "ntgdi.h"
 #include "win32u_private.h"
 #include "wine/unixlib.h"
-#include "wine/debug.h"
-
-WINE_DEFAULT_DEBUG_CHANNEL(gdi);
 
 static const struct unix_funcs *unix_funcs;
 
@@ -599,6 +596,68 @@ NTSTATUS WINAPI NtGdiDdDDISetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER 
     return unix_funcs->pNtGdiDdDDISetVidPnSourceOwner( desc );
 }
 
+HKL WINAPI NtUserActivateKeyboardLayout( HKL layout, UINT flags )
+{
+    return unix_funcs->pNtUserActivateKeyboardLayout( layout, flags );
+}
+
+INT WINAPI NtUserCountClipboardFormats(void)
+{
+    return unix_funcs->pNtUserCountClipboardFormats();
+}
+
+UINT WINAPI NtUserGetKeyboardLayoutList( INT size, HKL *layouts )
+{
+    return unix_funcs->pNtUserGetKeyboardLayoutList( size, layouts );
+}
+
+INT WINAPI NtUserGetKeyNameText( LONG lparam, WCHAR *buffer, INT size )
+{
+    return unix_funcs->pNtUserGetKeyNameText( lparam, buffer, size );
+}
+
+INT WINAPI NtUserGetPriorityClipboardFormat( UINT *list, INT count )
+{
+    return unix_funcs->pNtUserGetPriorityClipboardFormat( list, count );
+}
+
+BOOL WINAPI NtUserGetUpdatedClipboardFormats( UINT *formats, UINT size, UINT *out_size )
+{
+    return unix_funcs->pNtUserGetUpdatedClipboardFormats( formats, size, out_size );
+}
+
+BOOL WINAPI NtUserIsClipboardFormatAvailable( UINT format )
+{
+    return unix_funcs->pNtUserIsClipboardFormatAvailable( format );
+}
+
+UINT WINAPI NtUserMapVirtualKeyEx( UINT code, UINT type, HKL layout )
+{
+    return unix_funcs->pNtUserMapVirtualKeyEx( code, type, layout );
+}
+
+BOOL WINAPI NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const RECT *clip,
+                            HRGN ret_update_rgn, RECT *update_rect )
+{
+    return unix_funcs->pNtUserScrollDC( hdc, dx, dy, scroll, clip, ret_update_rgn, update_rect );
+}
+
+INT WINAPI NtUserToUnicodeEx( UINT virt, UINT scan, const BYTE *state,
+                              WCHAR *str, int size, UINT flags, HKL layout )
+{
+    return unix_funcs->pNtUserToUnicodeEx( virt, scan, state, str, size, flags, layout );
+}
+
+BOOL WINAPI NtUserUnregisterHotKey( HWND hwnd, INT id )
+{
+    return unix_funcs->pNtUserUnregisterHotKey( hwnd, id );
+}
+
+WORD WINAPI NtUserVkKeyScanEx( WCHAR chr, HKL layout )
+{
+    return unix_funcs->pNtUserVkKeyScanEx( chr, layout );
+}
+
 UINT WINAPI GDIRealizePalette( HDC hdc )
 {
     return unix_funcs->pGDIRealizePalette( hdc );
@@ -675,21 +734,9 @@ struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version )
 /***********************************************************************
  *           __wine_set_display_driver    (win32u.@)
  */
-void CDECL __wine_set_display_driver( HMODULE module )
+void CDECL __wine_set_display_driver( struct user_driver_funcs *funcs, UINT version )
 {
-    void *wine_get_gdi_driver;
-    ANSI_STRING name_str;
-
-    if (!module) return;
-
-    RtlInitAnsiString( &name_str, "wine_get_gdi_driver" );
-    LdrGetProcedureAddress( module, &name_str, 0, &wine_get_gdi_driver );
-    if (!wine_get_gdi_driver)
-    {
-        ERR( "Could not create graphics driver %p\n", module );
-        return;
-    }
-    unix_funcs->set_display_driver( wine_get_gdi_driver );
+    return unix_funcs->set_display_driver( funcs, version );
 }
 
 static void *get_user_proc( const char *name, BOOL force_load )

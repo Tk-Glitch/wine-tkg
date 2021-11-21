@@ -82,7 +82,7 @@ static const char *debugstr_format( UINT id )
 {
     WCHAR buffer[256];
     DWORD le = GetLastError();
-    BOOL r = GetClipboardFormatNameW( id, buffer, 256 );
+    BOOL r = NtUserGetClipboardFormatName( id, buffer, 256 );
     SetLastError(le);
 
     if (r)
@@ -659,16 +659,6 @@ UINT WINAPI RegisterClipboardFormatA( LPCSTR name )
 
 
 /**************************************************************************
- *		GetClipboardFormatNameW (USER32.@)
- */
-INT WINAPI GetClipboardFormatNameW( UINT format, LPWSTR buffer, INT maxlen )
-{
-    if (format < MAXINTATOM || format > 0xffff) return 0;
-    return GlobalGetAtomNameW( format, buffer, maxlen );
-}
-
-
-/**************************************************************************
  *		GetClipboardFormatNameA (USER32.@)
  */
 INT WINAPI GetClipboardFormatNameA( UINT format, LPSTR buffer, INT maxlen )
@@ -739,7 +729,7 @@ BOOL WINAPI CloseClipboard(void)
 BOOL WINAPI EmptyClipboard(void)
 {
     BOOL ret;
-    HWND owner = GetClipboardOwner();
+    HWND owner = NtUserGetClipboardOwner();
 
     TRACE( "owner %p\n", owner );
 
@@ -757,44 +747,6 @@ BOOL WINAPI EmptyClipboard(void)
 
     LeaveCriticalSection( &clipboard_cs );
     return ret;
-}
-
-
-/**************************************************************************
- *		GetClipboardOwner (USER32.@)
- */
-HWND WINAPI GetClipboardOwner(void)
-{
-    HWND hWndOwner = 0;
-
-    SERVER_START_REQ( get_clipboard_info )
-    {
-        if (!wine_server_call_err( req )) hWndOwner = wine_server_ptr_handle( reply->owner );
-    }
-    SERVER_END_REQ;
-
-    TRACE( "returning %p\n", hWndOwner );
-
-    return hWndOwner;
-}
-
-
-/**************************************************************************
- *		GetOpenClipboardWindow (USER32.@)
- */
-HWND WINAPI GetOpenClipboardWindow(void)
-{
-    HWND hWndOpen = 0;
-
-    SERVER_START_REQ( get_clipboard_info )
-    {
-        if (!wine_server_call_err( req )) hWndOpen = wine_server_ptr_handle( reply->window );
-    }
-    SERVER_END_REQ;
-
-    TRACE( "returning %p\n", hWndOpen );
-
-    return hWndOpen;
 }
 
 
@@ -820,25 +772,6 @@ HWND WINAPI SetClipboardViewer( HWND hwnd )
 
     TRACE( "%p returning %p\n", hwnd, prev );
     return prev;
-}
-
-
-/**************************************************************************
- *              GetClipboardViewer (USER32.@)
- */
-HWND WINAPI GetClipboardViewer(void)
-{
-    HWND hWndViewer = 0;
-
-    SERVER_START_REQ( get_clipboard_info )
-    {
-        if (!wine_server_call_err( req )) hWndViewer = wine_server_ptr_handle( reply->viewer );
-    }
-    SERVER_END_REQ;
-
-    TRACE( "returning %p\n", hWndViewer );
-
-    return hWndViewer;
 }
 
 
@@ -927,27 +860,6 @@ done:
 
 
 /**************************************************************************
- *		CountClipboardFormats (USER32.@)
- */
-INT WINAPI CountClipboardFormats(void)
-{
-    INT count = 0;
-
-    USER_Driver->pUpdateClipboard();
-
-    SERVER_START_REQ( get_clipboard_formats )
-    {
-        wine_server_call( req );
-        count = reply->count;
-    }
-    SERVER_END_REQ;
-
-    TRACE("returning %d\n", count);
-    return count;
-}
-
-
-/**************************************************************************
  *		EnumClipboardFormats (USER32.@)
  */
 UINT WINAPI EnumClipboardFormats( UINT format )
@@ -966,57 +878,6 @@ UINT WINAPI EnumClipboardFormats( UINT format )
     SERVER_END_REQ;
 
     TRACE( "%s -> %s\n", debugstr_format( format ), debugstr_format( ret ));
-    return ret;
-}
-
-
-/**************************************************************************
- *		IsClipboardFormatAvailable (USER32.@)
- */
-BOOL WINAPI IsClipboardFormatAvailable( UINT format )
-{
-    BOOL ret = FALSE;
-
-    if (!format) return FALSE;
-
-    USER_Driver->pUpdateClipboard();
-
-    SERVER_START_REQ( get_clipboard_formats )
-    {
-        req->format = format;
-        if (!wine_server_call_err( req )) ret = (reply->count > 0);
-    }
-    SERVER_END_REQ;
-    TRACE( "%s -> %u\n", debugstr_format( format ), ret );
-    return ret;
-}
-
-
-/**************************************************************************
- *		GetUpdatedClipboardFormats (USER32.@)
- */
-BOOL WINAPI GetUpdatedClipboardFormats( UINT *formats, UINT size, UINT *out_size )
-{
-    BOOL ret;
-
-    if (!out_size)
-    {
-        SetLastError( ERROR_NOACCESS );
-        return FALSE;
-    }
-
-    USER_Driver->pUpdateClipboard();
-
-    SERVER_START_REQ( get_clipboard_formats )
-    {
-        if (formats) wine_server_set_reply( req, formats, size * sizeof(*formats) );
-        ret = !wine_server_call_err( req );
-        *out_size = reply->count;
-    }
-    SERVER_END_REQ;
-
-    TRACE( "%p %u returning %u formats, ret %u\n", formats, size, *out_size, ret );
-    if (!ret && !formats && *out_size) SetLastError( ERROR_NOACCESS );
     return ret;
 }
 
@@ -1095,74 +956,4 @@ HANDLE WINAPI GetClipboardData( UINT format )
         TRACE( "%s returning 0\n", debugstr_format( format ));
         return 0;
     }
-}
-
-
-/**************************************************************************
- *		GetPriorityClipboardFormat (USER32.@)
- */
-INT WINAPI GetPriorityClipboardFormat(UINT *list, INT nCount)
-{
-    int i;
-
-    TRACE( "%p %u\n", list, nCount );
-
-    if(CountClipboardFormats() == 0)
-        return 0;
-
-    for (i = 0; i < nCount; i++)
-        if (IsClipboardFormatAvailable(list[i]))
-            return list[i];
-
-    return -1;
-}
-
-
-/**************************************************************************
- *		GetClipboardSequenceNumber (USER32.@)
- */
-DWORD WINAPI GetClipboardSequenceNumber(VOID)
-{
-    DWORD seqno = 0;
-
-    SERVER_START_REQ( get_clipboard_info )
-    {
-        if (!wine_server_call_err( req )) seqno = reply->seqno;
-    }
-    SERVER_END_REQ;
-
-    TRACE( "returning %u\n", seqno );
-    return seqno;
-}
-
-/**************************************************************************
- *		AddClipboardFormatListener (USER32.@)
- */
-BOOL WINAPI AddClipboardFormatListener(HWND hwnd)
-{
-    BOOL ret;
-
-    SERVER_START_REQ( add_clipboard_listener )
-    {
-        req->window = wine_server_user_handle( hwnd );
-        ret = !wine_server_call_err( req );
-    }
-    SERVER_END_REQ;
-    return ret;
-}
-
-/**************************************************************************
- *		RemoveClipboardFormatListener (USER32.@)
- */
-BOOL WINAPI RemoveClipboardFormatListener(HWND hwnd)
-{
-    BOOL ret;
-
-    SERVER_START_REQ( remove_clipboard_listener )
-    {
-        req->window = wine_server_user_handle( hwnd );
-        ret = !wine_server_call_err( req );
-    }
-    SERVER_END_REQ;
-    return ret;
 }

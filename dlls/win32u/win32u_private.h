@@ -21,9 +21,14 @@
 #ifndef __WINE_WIN32U_PRIVATE
 #define __WINE_WIN32U_PRIVATE
 
-#include "winuser.h"
+#include <stdarg.h>
+#include "windef.h"
+#include "winbase.h"
+#include "ntgdi.h"
+#include "ntuser.h"
 #include "wine/gdi_driver.h"
 #include "wine/unixlib.h"
+#include "wine/debug.h"
 
 struct user_callbacks
 {
@@ -189,6 +194,20 @@ struct unix_funcs
     BOOL     (WINAPI *pNtGdiUnrealizeObject)( HGDIOBJ obj );
     BOOL     (WINAPI *pNtGdiUpdateColors)( HDC hdc );
     BOOL     (WINAPI *pNtGdiWidenPath)( HDC hdc );
+    HKL      (WINAPI *pNtUserActivateKeyboardLayout)( HKL layout, UINT flags );
+    INT      (WINAPI *pNtUserCountClipboardFormats)(void);
+    INT      (WINAPI *pNtUserGetKeyNameText)( LONG lparam, WCHAR *buffer, INT size );
+    UINT     (WINAPI *pNtUserGetKeyboardLayoutList)( INT size, HKL *layouts );
+    INT      (WINAPI *pNtUserGetPriorityClipboardFormat)( UINT *list, INT count );
+    BOOL     (WINAPI *pNtUserGetUpdatedClipboardFormats)( UINT *formats, UINT size, UINT *out_size );
+    BOOL     (WINAPI *pNtUserIsClipboardFormatAvailable)( UINT format );
+    UINT     (WINAPI *pNtUserMapVirtualKeyEx)( UINT code, UINT type, HKL layout );
+    BOOL     (WINAPI *pNtUserScrollDC)( HDC hdc, INT dx, INT dy, const RECT *scroll, const RECT *clip,
+                                        HRGN ret_update_rgn, RECT *update_rect );
+    INT      (WINAPI *pNtUserToUnicodeEx)( UINT virt, UINT scan, const BYTE *state,
+                                           WCHAR *str, int size, UINT flags, HKL layout );
+    BOOL     (WINAPI *pNtUserUnregisterHotKey)( HWND hwnd, INT id );
+    WORD     (WINAPI *pNtUserVkKeyScanEx)( WCHAR chr, HKL layout );
 
     /* Wine-specific functions */
     UINT (WINAPI *pGDIRealizePalette)( HDC hdc );
@@ -206,7 +225,7 @@ struct unix_funcs
     const struct vulkan_funcs * (CDECL *get_vulkan_driver)( HDC hdc, UINT version );
     struct opengl_funcs * (CDECL *get_wgl_driver)( HDC hdc, UINT version );
     void (CDECL *make_gdi_object_system)( HGDIOBJ handle, BOOL set );
-    void (CDECL *set_display_driver)( void *proc );
+    void (CDECL *set_display_driver)( struct user_driver_funcs *funcs, UINT version );
     void (CDECL *set_visible_region)( HDC hdc, HRGN hrgn, const RECT *vis_rect, const RECT *device_rect,
                                       struct window_surface *surface );
 };
@@ -223,6 +242,19 @@ extern HKEY reg_open_hkcu_key( const char *name ) DECLSPEC_HIDDEN;
 extern HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len ) DECLSPEC_HIDDEN;
 extern ULONG query_reg_ascii_value( HKEY hkey, const char *name,
                                     KEY_VALUE_PARTIAL_INFORMATION *info, ULONG size ) DECLSPEC_HIDDEN;
+
+static inline struct user_thread_info *get_user_thread_info(void)
+{
+    return (struct user_thread_info *)NtCurrentTeb()->Win32ClientInfo;
+}
+
+extern const struct user_driver_funcs *user_driver DECLSPEC_HIDDEN;
+
+static inline BOOL set_ntstatus( NTSTATUS status )
+{
+    if (status) SetLastError( RtlNtStatusToDosError( status ));
+    return !status;
+}
 
 static inline WCHAR *win32u_wcsrchr( const WCHAR *str, WCHAR ch )
 {
@@ -307,12 +339,58 @@ static inline LONG win32u_wcstol( LPCWSTR s, LPWSTR *end, INT base )
     return ret;
 }
 
+static inline ULONG win32u_wcstoul( const WCHAR *s, WCHAR **end, int base )
+{
+    BOOL negative = FALSE, empty = TRUE;
+    ULONG ret = 0;
+
+    if (base < 0 || base == 1 || base > 36) return 0;
+    if (end) *end = (WCHAR *)s;
+    while (*s == ' ' || *s == '\t') s++;
+
+    if (*s == '-')
+    {
+        negative = TRUE;
+        s++;
+    }
+    else if (*s == '+') s++;
+
+    if ((base == 0 || base == 16) && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+    {
+        base = 16;
+        s += 2;
+    }
+    if (base == 0) base = s[0] != '0' ? 10 : 8;
+
+    while (*s)
+    {
+        int v;
+
+        if ('0' <= *s && *s <= '9') v = *s - '0';
+        else if ('A' <= *s && *s <= 'Z') v = *s - 'A' + 10;
+        else if ('a' <= *s && *s <= 'z') v = *s - 'a' + 10;
+        else break;
+        if (v >= base) break;
+        s++;
+        empty = FALSE;
+
+        if (ret > MAXDWORD / base || ret * base > MAXDWORD - v)
+            ret = MAXDWORD;
+        else
+            ret = ret * base + v;
+    }
+
+    if (end && !empty) *end = (WCHAR *)s;
+    return negative ? -ret : ret;
+}
+
 #define towupper(c)     win32u_towupper(c)
 #define wcschr(s,c)     win32u_wcschr(s,c)
 #define wcscmp(s1,s2)   win32u_wcscmp(s1,s2)
 #define wcsicmp(s1,s2)  win32u_wcsicmp(s1,s2)
 #define wcsrchr(s,c)    win32u_wcsrchr(s,c)
 #define wcstol(s,e,b)   win32u_wcstol(s,e,b)
+#define wcstoul(s,e,b)  win32u_wcstoul(s,e,b)
 
 static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
 {
@@ -330,5 +408,10 @@ DWORD win32u_mbtowc( CPTABLEINFO *info, WCHAR *dst, DWORD dstlen, const char *sr
                      DWORD srclen ) DECLSPEC_HIDDEN;
 DWORD win32u_wctomb( CPTABLEINFO *info, char *dst, DWORD dstlen, const WCHAR *src,
                      DWORD srclen ) DECLSPEC_HIDDEN;
+
+static inline BOOL is_win9x(void)
+{
+    return NtCurrentTeb()->Peb->OSPlatformId == VER_PLATFORM_WIN32s;
+}
 
 #endif /* __WINE_WIN32U_PRIVATE */

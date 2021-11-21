@@ -705,20 +705,12 @@ static int addr_width(struct gdb_context* gdbctx)
 enum packet_return {packet_error = 0x00, packet_ok = 0x01, packet_done = 0x02,
                     packet_last_f = 0x80};
 
-static char* packet_realloc(char* buf, int size)
-{
-    if (!buf)
-        return HeapAlloc(GetProcessHeap(), 0, size);
-    return HeapReAlloc(GetProcessHeap(), 0, buf, size);
-
-}
-
 static void packet_reply_grow(struct gdb_context* gdbctx, size_t size)
 {
     if (gdbctx->out_buf_alloc < gdbctx->out_len + size)
     {
         gdbctx->out_buf_alloc = ((gdbctx->out_len + size) / 32 + 1) * 32;
-        gdbctx->out_buf = packet_realloc(gdbctx->out_buf, gdbctx->out_buf_alloc);
+        gdbctx->out_buf = realloc(gdbctx->out_buf, gdbctx->out_buf_alloc);
     }
 }
 
@@ -747,18 +739,55 @@ static void packet_reply_val(struct gdb_context* gdbctx, ULONG_PTR val, int len)
     }
 }
 
-static inline void packet_reply_add(struct gdb_context* gdbctx, const char* str)
+static const unsigned char gdb_special_chars_lookup_table[4] = {
+    /* The characters should be indexed by its value modulo table length. */
+
+    0x24, /* $: 001001|00 */
+    0x7D, /* }: 011111|01 */
+    0x2A, /* *: 001010|10 */
+    0x23  /* #: 001000|11 */
+};
+
+static inline BOOL is_gdb_special_char(unsigned char val)
 {
-    int len = strlen(str);
-    packet_reply_grow(gdbctx, len);
-    memcpy(&gdbctx->out_buf[gdbctx->out_len], str, len);
-    gdbctx->out_len += len;
+    /* A note on the GDB special character scanning code:
+     *
+     * We cannot use strcspn() since we plan to transmit binary data in
+     * packet reply, which can contain NULL (0x00) bytes.  We also don't want
+     * to slow down memory dump transfers.  Therefore, we use a tiny lookup
+     * table that contains all the four special characters to speed up scanning.
+     */
+    const size_t length = ARRAY_SIZE(gdb_special_chars_lookup_table);
+    return gdb_special_chars_lookup_table[val % length] == val;
+}
+
+static void packet_reply_add(struct gdb_context* gdbctx, const char* str)
+{
+    const unsigned char *ptr = (unsigned char *)str, *curr;
+
+    while (*ptr)
+    {
+        curr = ptr;
+
+        while (*ptr && !is_gdb_special_char(*ptr))
+            ptr++;
+
+        packet_reply_grow(gdbctx, ptr - curr);
+        memcpy(&gdbctx->out_buf[gdbctx->out_len], curr, ptr - curr);
+        gdbctx->out_len += ptr - curr;
+        if (!*ptr) break;
+
+        packet_reply_grow(gdbctx, 2);
+        gdbctx->out_buf[gdbctx->out_len++] = 0x7D;
+        gdbctx->out_buf[gdbctx->out_len++] = 0x20 ^ *ptr++;
+    }
 }
 
 static void packet_reply_open(struct gdb_context* gdbctx)
 {
     assert(gdbctx->out_curr_packet == -1);
-    packet_reply_add(gdbctx, "$");
+    packet_reply_grow(gdbctx, 1);
+    gdbctx->out_buf[gdbctx->out_len++] = '$';
     gdbctx->out_curr_packet = gdbctx->out_len;
 }
 
@@ -768,7 +797,8 @@ static void packet_reply_close(struct gdb_context* gdbctx)
     int plen;
 
     plen = gdbctx->out_len - gdbctx->out_curr_packet;
-    packet_reply_add(gdbctx, "#");
+    packet_reply_grow(gdbctx, 1);
+    gdbctx->out_buf[gdbctx->out_len++] = '#';
     cksum = checksum(&gdbctx->out_buf[gdbctx->out_curr_packet], plen);
     packet_reply_hex_to(gdbctx, &cksum, 1);
     gdbctx->out_curr_packet = -1;
@@ -780,7 +810,7 @@ static void packet_reply_open_xfer(struct gdb_context* gdbctx)
     packet_reply_add(gdbctx, "m");
 }
 
-static void packet_reply_close_xfer(struct gdb_context* gdbctx, int off, int len)
+static void packet_reply_close_xfer(struct gdb_context* gdbctx, unsigned int off, unsigned int len)
 {
     int begin = gdbctx->out_curr_packet + 1;
     int plen;
@@ -797,7 +827,7 @@ static void packet_reply_close_xfer(struct gdb_context* gdbctx, int off, int len
     }
 
     plen = gdbctx->out_len - begin;
-    if (len >= 0 && plen > len) gdbctx->out_len -= (plen - len);
+    if (plen > len) gdbctx->out_len -= (plen - len);
     else gdbctx->out_buf[gdbctx->out_curr_packet] = 'l';
 
     packet_reply_close(gdbctx);
@@ -806,8 +836,6 @@ static void packet_reply_close_xfer(struct gdb_context* gdbctx, int off, int len
 static enum packet_return packet_reply(struct gdb_context* gdbctx, const char* packet)
 {
     packet_reply_open(gdbctx);
-
-    assert(strchr(packet, '$') == NULL && strchr(packet, '#') == NULL);
 
     packet_reply_add(gdbctx, packet);
 
@@ -867,6 +895,22 @@ static void packet_reply_status_xpoints(struct gdb_context* gdbctx, struct dbg_t
     }
 }
 
+static void packet_reply_begin_stop_reply(struct gdb_context* gdbctx, unsigned char signal)
+{
+    packet_reply_add(gdbctx, "T");
+    packet_reply_val(gdbctx, signal, 1);
+
+    /* We should always report the current thread ID for all stop replies.
+     * Otherwise, GDB complains with the following message:
+     *
+     *   Warning: multi-threaded target stopped without sending a thread-id,
+     *   using first non-exited thread
+     */
+    packet_reply_add(gdbctx, "thread:");
+    packet_reply_val(gdbctx, gdbctx->de.dwThreadId, 4);
+    packet_reply_add(gdbctx, ";");
+}
+
 static enum packet_return packet_reply_status(struct gdb_context* gdbctx)
 {
     struct dbg_process *process = gdbctx->process;
@@ -885,11 +929,7 @@ static enum packet_return packet_reply_status(struct gdb_context* gdbctx)
             return packet_error;
 
         packet_reply_open(gdbctx);
-        packet_reply_add(gdbctx, "T");
-        packet_reply_val(gdbctx, signal_from_debug_event(&gdbctx->de), 1);
-        packet_reply_add(gdbctx, "thread:");
-        packet_reply_val(gdbctx, gdbctx->de.dwThreadId, 4);
-        packet_reply_add(gdbctx, ";");
+        packet_reply_begin_stop_reply(gdbctx, signal_from_debug_event(&gdbctx->de));
         packet_reply_status_xpoints(gdbctx, thread, &ctx);
 
         for (i = 0; i < backend->gdb_num_regs; i++)
@@ -913,8 +953,7 @@ static enum packet_return packet_reply_status(struct gdb_context* gdbctx)
     case LOAD_DLL_DEBUG_EVENT:
     case UNLOAD_DLL_DEBUG_EVENT:
         packet_reply_open(gdbctx);
-        packet_reply_add(gdbctx, "T");
-        packet_reply_val(gdbctx, HOST_SIGTRAP, 1);
+        packet_reply_begin_stop_reply(gdbctx, HOST_SIGTRAP);
         packet_reply_add(gdbctx, "library:;");
         packet_reply_close(gdbctx);
         return packet_done;
@@ -1759,7 +1798,7 @@ static void packet_query_target_xml(struct gdb_context* gdbctx, struct backend_c
 
 static enum packet_return packet_query(struct gdb_context* gdbctx)
 {
-    int off, len;
+    unsigned int off, len;
     struct backend_cpu *cpu;
 
     switch (gdbctx->in_packet[0])
@@ -2085,7 +2124,7 @@ static int fetch_data(struct gdb_context* gdbctx)
     {
 #define STEP 128
         if (gdbctx->in_len + STEP > gdbctx->in_buf_alloc)
-            gdbctx->in_buf = packet_realloc(gdbctx->in_buf, gdbctx->in_buf_alloc += STEP);
+            gdbctx->in_buf = realloc(gdbctx->in_buf, gdbctx->in_buf_alloc += STEP);
 #undef STEP
         len = recv(gdbctx->sock, gdbctx->in_buf + gdbctx->in_len, gdbctx->in_buf_alloc - gdbctx->in_len - 1, 0);
         if (len <= 0) break;
@@ -2146,6 +2185,7 @@ static BOOL gdb_exec(unsigned port, unsigned flags)
 static BOOL gdb_startup(struct gdb_context* gdbctx, unsigned flags, unsigned port)
 {
     SOCKET sock;
+    BOOL reuseaddr = TRUE;
     struct sockaddr_in s_addrs = {0};
     int s_len = sizeof(s_addrs);
     fd_set read_fds;
@@ -2160,6 +2200,8 @@ static BOOL gdb_startup(struct gdb_context* gdbctx, unsigned flags, unsigned por
         ERR("Failed to create socket: %u\n", WSAGetLastError());
         return FALSE;
     }
+
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char*)&reuseaddr, sizeof(reuseaddr));
 
     s_addrs.sin_family = AF_INET;
     s_addrs.sin_addr.S_un.S_addr = INADDR_ANY;

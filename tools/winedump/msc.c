@@ -1102,6 +1102,20 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
         printf("\n");
         break;
 
+    case LF_VFTABLE_V3:
+        printf("\t%x => VFTable V3 base:%x baseVfTable:%x offset%u\n",
+               curr_type, reftype->vftable_v3.type, reftype->vftable_v3.baseVftable, reftype->vftable_v3.offsetInObjectLayout);
+        {
+            const char* str = reftype->vftable_v3.names;
+            const char* last = str + reftype->vftable_v3.cbstr;
+            while (str < last)
+            {
+                printf("\t\t%s\n", str);
+                str += strlen(str) + 1;
+            }
+        }
+        break;
+
     /* types from IPI (aka #4) stream */
     case LF_FUNC_ID:
         printf("\t%x => FuncId %s scopeId:%04x type:%04x\n",
@@ -1182,13 +1196,13 @@ BOOL codeview_dump_types_from_block(const void* table, unsigned long len)
     return TRUE;
 }
 
-static void dump_defrange(const struct cv_addr_range* range, const void* last, const char* pfx)
+static void dump_defrange(const struct cv_addr_range* range, const void* last, unsigned indent)
 {
     const struct cv_addr_gap* gap;
 
-    printf("%s%04x:%08x range:#%x\n", pfx, range->isectStart, range->offStart, range->cbRange);
+    printf("%*s\\- %04x:%08x range:#%x\n", indent, "", range->isectStart, range->offStart, range->cbRange);
     for (gap = (const struct cv_addr_gap*)(range + 1); (const void*)(gap + 1) <= last; ++gap)
-        printf("%s\toffset:%x range:#%x\n", pfx, gap->gapStartOffset, gap->cbRange);
+        printf("%*s  | offset:%x range:#%x\n", indent, "", gap->gapStartOffset, gap->cbRange);
 }
 
 /* return address of first byte after the symbol */
@@ -1221,7 +1235,12 @@ static unsigned binannot_uncompress(const unsigned char** pptr)
     return res;
 }
 
-static void dump_binannot(const unsigned char* ba, const char* last, const char* pfx)
+static inline int binannot_getsigned(unsigned i)
+{
+    return (i & 1) ? -(int)(i >> 1) : (i >> 1);
+}
+
+static void dump_binannot(const unsigned char* ba, const char* last, unsigned indent)
 {
     while (ba < (const unsigned char*)last)
     {
@@ -1230,76 +1249,138 @@ static void dump_binannot(const unsigned char* ba, const char* last, const char*
         {
         case BA_OP_Invalid:
             /* not clear if param? */
-            printf("%sInvalid\n", pfx);
+            printf("%*s  | Invalid\n", indent, "");
             break;
         case BA_OP_CodeOffset:
-            printf("%sCodeOffset %u\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | CodeOffset %u\n", indent, "", binannot_uncompress(&ba));
             break;
         case BA_OP_ChangeCodeOffsetBase:
-            printf("%sChangeCodeOffsetBase %u\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | ChangeCodeOffsetBase %u\n", indent, "", binannot_uncompress(&ba));
             break;
         case BA_OP_ChangeCodeOffset:
-            printf("%sChangeCodeOffset %u\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | ChangeCodeOffset %u\n", indent, "", binannot_uncompress(&ba));
             break;
         case BA_OP_ChangeCodeLength:
-            printf("%sChangeCodeLength %u\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | ChangeCodeLength %u\n", indent, "", binannot_uncompress(&ba));
             break;
         case BA_OP_ChangeFile:
-            printf("%sChangeFile %u\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | ChangeFile %u\n", indent, "", binannot_uncompress(&ba));
             break;
         case BA_OP_ChangeLineOffset:
-            printf("%sChangeLineOffset %d\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | ChangeLineOffset %d\n", indent, "", binannot_getsigned(binannot_uncompress(&ba)));
             break;
         case BA_OP_ChangeLineEndDelta:
-            printf("%sChangeLineEndDelta %u\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | ChangeLineEndDelta %u\n", indent, "", binannot_uncompress(&ba));
             break;
         case BA_OP_ChangeRangeKind:
-            printf("%sChangeRangeKind %u\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | ChangeRangeKind %u\n", indent, "", binannot_uncompress(&ba));
             break;
         case BA_OP_ChangeColumnStart:
-            printf("%sChangeColumnStart %u\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | ChangeColumnStart %u\n", indent, "", binannot_uncompress(&ba));
             break;
         case BA_OP_ChangeColumnEndDelta:
-            printf("%sChangeColumnEndDelta %u\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | ChangeColumnEndDelta %u\n", indent, "", binannot_uncompress(&ba));
             break;
         case BA_OP_ChangeCodeOffsetAndLineOffset:
             {
                 unsigned p1 = binannot_uncompress(&ba);
-                printf("%sChangeCodeOffsetAndLineOffset %u %u (0x%x)\n", pfx, p1 & 0xf, p1 >> 4, p1);
+                printf("%*s  | ChangeCodeOffsetAndLineOffset %u %u (0x%x)\n", indent, "", p1 & 0xf, binannot_getsigned(p1 >> 4), p1);
             }
             break;
         case BA_OP_ChangeCodeLengthAndCodeOffset:
             {
                 unsigned p1 = binannot_uncompress(&ba);
                 unsigned p2 = binannot_uncompress(&ba);
-                printf("%sChangeCodeLengthAndCodeOffset %u %u\n", pfx, p1, p2);
+                printf("%*s  | ChangeCodeLengthAndCodeOffset %u %u\n", indent, "", p1, p2);
             }
             break;
         case BA_OP_ChangeColumnEnd:
-            printf("%sChangeColumnEnd %u\n", pfx, binannot_uncompress(&ba));
+            printf("%*s  | ChangeColumnEnd %u\n", indent, "", binannot_uncompress(&ba));
             break;
 
-        default: printf("%sUnsupported op %d %x\n", pfx, opcode, opcode); /* may cause issues because of param */
+        default: printf(">>> Unsupported op %d %x\n", opcode, opcode); /* may cause issues because of param */
         }
     }
 }
 
-BOOL codeview_dump_symbols(const void* root, unsigned long size)
+struct symbol_dumper
+{
+    unsigned depth;
+    unsigned alloc;
+    struct
+    {
+        unsigned end;
+        const union codeview_symbol* sym;
+    }* stack;
+};
+
+static void init_symbol_dumper(struct symbol_dumper* sd)
+{
+    sd->depth = 0;
+    sd->alloc = 16;
+    sd->stack = malloc(sd->alloc * sizeof(sd->stack[0]));
+}
+
+static void push_symbol_dumper(struct symbol_dumper* sd, const union codeview_symbol* sym, unsigned end)
+{
+    if (!sd->stack) return;
+    if (sd->depth >= sd->alloc &&
+        !(sd->stack = realloc(sd->stack, (sd->alloc *= 2) * sizeof(sd->stack[0]))))
+        return;
+    sd->stack[sd->depth].end = end;
+    sd->stack[sd->depth].sym = sym;
+    sd->depth++;
+}
+
+static unsigned short pop_symbol_dumper(struct symbol_dumper* sd, unsigned end)
+{
+    if (!sd->stack) return 0;
+    if (!sd->depth)
+    {
+        printf(">>> Error in stack\n");
+        return 0;
+    }
+    sd->depth--;
+    if (sd->stack[sd->depth].end != end)
+        printf(">>> Wrong end reference\n");
+    return sd->stack[sd->depth].sym->generic.id;
+}
+
+static void dispose_symbol_dumper(struct symbol_dumper* sd)
+{
+    free(sd->stack);
+}
+
+BOOL codeview_dump_symbols(const void* root, unsigned long start, unsigned long size)
 {
     unsigned int i;
     int          length;
-    char*        curr_func = NULL;
-    int          nest_block = 0;
+    struct symbol_dumper sd;
+
+    init_symbol_dumper(&sd);
     /*
      * Loop over the different types of records and whenever we
      * find something we are interested in, record it and move on.
      */
-    for (i = 0; i < size; i += length)
+    for (i = start; i < size; i += length)
     {
         const union codeview_symbol* sym = (const union codeview_symbol*)((const char*)root + i);
+        unsigned indent, ref;
+
         length = sym->generic.len + 2;
         if (!sym->generic.id || length < 4) break;
-        printf("\t%04x => ", i + 4); /* ref is made after id and len */
+        indent = printf("        %04x => ", i);
+
+        switch (sym->generic.id)
+        {
+        case S_END:
+        case S_INLINESITE_END:
+            indent += printf("%*s", 2 * sd.depth - 2, "");
+            break;
+        default:
+            indent += printf("%*s", 2 * sd.depth, "");
+            break;
+        }
 
         switch (sym->generic.id)
         {
@@ -1366,7 +1447,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                    p_string(&sym->thunk_v1.p_name),
                    sym->thunk_v1.segment, sym->thunk_v1.offset,
                    sym->thunk_v1.thunk_len, sym->thunk_v1.thtype);
-            curr_func = xstrdup(p_string(&sym->thunk_v1.p_name));
+	    push_symbol_dumper(&sd, sym, sym->thunk_v1.pend);
 	    break;
 
 	case S_THUNK32:
@@ -1374,50 +1455,38 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                    sym->thunk_v3.name,
                    sym->thunk_v3.segment, sym->thunk_v3.offset,
                    sym->thunk_v3.thunk_len, sym->thunk_v3.thtype);
-            curr_func = xstrdup(sym->thunk_v3.name);
+	    push_symbol_dumper(&sd, sym, sym->thunk_v3.pend);
 	    break;
 
         /* Global and static functions */
 	case S_GPROC32_16t:
 	case S_LPROC32_16t:
             printf("%s-Proc V1: '%s' (%04x:%08x#%x) type:%x attr:%x\n",
-                   sym->generic.id == S_GPROC32_16t ? "Global" : "-Local",
+                   sym->generic.id == S_GPROC32_16t ? "Global" : "Local",
                    p_string(&sym->proc_v1.p_name),
                    sym->proc_v1.segment, sym->proc_v1.offset,
                    sym->proc_v1.proc_len, sym->proc_v1.proctype,
                    sym->proc_v1.flags);
-            printf("\t\tDebug: start=%08x end=%08x\n",
-                   sym->proc_v1.debug_start, sym->proc_v1.debug_end);
-            if (nest_block)
-            {
-                printf(">>> prev func '%s' still has nest_block %u count\n", curr_func, nest_block);
-                nest_block = 0;
-            }
-            curr_func = xstrdup(p_string(&sym->proc_v1.p_name));
-/* EPP 	unsigned int	pparent; */
-/* EPP 	unsigned int	pend; */
-/* EPP 	unsigned int	next; */
+            printf("%*s\\- Debug: start=%08x end=%08x\n",
+                   indent, "", sym->proc_v1.debug_start, sym->proc_v1.debug_end);
+	    printf("%*s\\- parent:<%x> end:<%x> next<%x>\n",
+                   indent, "", sym->proc_v1.pparent, sym->proc_v1.pend, sym->proc_v1.next);
+	    push_symbol_dumper(&sd, sym, sym->proc_v1.pend);
 	    break;
 
 	case S_GPROC32_ST:
 	case S_LPROC32_ST:
             printf("%s-Proc V2: '%s' (%04x:%08x#%x) type:%x attr:%x\n",
-                   sym->generic.id == S_GPROC32_ST ? "Global" : "-Local",
+                   sym->generic.id == S_GPROC32_ST ? "Global" : "Local",
                    p_string(&sym->proc_v2.p_name),
                    sym->proc_v2.segment, sym->proc_v2.offset,
                    sym->proc_v2.proc_len, sym->proc_v2.proctype,
                    sym->proc_v2.flags);
-            printf("\t\tDebug: start=%08x end=%08x\n",
-                   sym->proc_v2.debug_start, sym->proc_v2.debug_end);
-            if (nest_block)
-            {
-                printf(">>> prev func '%s' still has nest_block %u count\n", curr_func, nest_block);
-                nest_block = 0;
-            }
-            curr_func = xstrdup(p_string(&sym->proc_v2.p_name));
-/* EPP 	unsigned int	pparent; */
-/* EPP 	unsigned int	pend; */
-/* EPP 	unsigned int	next; */
+            printf("%*s\\- Debug: start=%08x end=%08x\n",
+                   indent, "", sym->proc_v2.debug_start, sym->proc_v2.debug_end);
+            printf("%*s\\- parent:<%x> end:<%x> next<%x>\n",
+                   indent, "", sym->proc_v2.pparent, sym->proc_v2.pend, sym->proc_v2.next);
+	    push_symbol_dumper(&sd, sym, sym->proc_v2.pend);
 	    break;
 
         case S_LPROC32:
@@ -1428,77 +1497,69 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                    sym->proc_v3.segment, sym->proc_v3.offset,
                    sym->proc_v3.proc_len, sym->proc_v3.proctype,
                    sym->proc_v3.flags);
-            printf("\t\tDebug: start=%08x end=%08x\n",
-                   sym->proc_v3.debug_start, sym->proc_v3.debug_end);
-            if (nest_block)
-            {
-                printf(">>> prev func '%s' still has nest_block %u count\n", curr_func, nest_block);
-                nest_block = 0;
-            }
-            curr_func = xstrdup(sym->proc_v3.name);
-/* EPP 	unsigned int	pparent; */
-/* EPP 	unsigned int	pend; */
-/* EPP 	unsigned int	next; */
+            printf("%*s\\- Debug: start=%08x end=%08x\n",
+                   indent, "", sym->proc_v3.debug_start, sym->proc_v3.debug_end);
+            printf("%*s\\- parent:<%x> end:<%x> next<%x>\n",
+                   indent, "", sym->proc_v3.pparent, sym->proc_v3.pend, sym->proc_v3.next);
+            push_symbol_dumper(&sd, sym, sym->proc_v3.pend);
             break;
 
         /* Function parameters and stack variables */
 	case S_BPREL32_16t:
-            printf("BP-relative V1: '%s' @%d type:%x (%s)\n",
+            printf("BP-relative V1: '%s' @%d type:%x\n",
                    p_string(&sym->stack_v1.p_name),
-                   sym->stack_v1.offset, sym->stack_v1.symtype, curr_func);
+                   sym->stack_v1.offset, sym->stack_v1.symtype);
             break;
 
 	case S_BPREL32_ST:
-            printf("BP-relative V2: '%s' @%d type:%x (%s)\n",
+            printf("BP-relative V2: '%s' @%d type:%x\n",
                    p_string(&sym->stack_v2.p_name),
-                   sym->stack_v2.offset, sym->stack_v2.symtype, curr_func);
+                   sym->stack_v2.offset, sym->stack_v2.symtype);
             break;
 
         case S_BPREL32:
-            printf("BP-relative V3: '%s' @%d type:%x (in %s)\n",
+            printf("BP-relative V3: '%s' @%d type:%x\n",
                    sym->stack_v3.name, sym->stack_v3.offset,
-                   sym->stack_v3.symtype, curr_func);
+                   sym->stack_v3.symtype);
             break;
 
         case S_REGREL32:
-            printf("Reg-relative V3: '%s' @%d type:%x reg:%x (in %s)\n",
+            printf("Reg-relative V3: '%s' @%d type:%x reg:%x\n",
                    sym->regrel_v3.name, sym->regrel_v3.offset,
-                   sym->regrel_v3.symtype, sym->regrel_v3.reg, curr_func);
+                   sym->regrel_v3.symtype, sym->regrel_v3.reg);
             break;
 
         case S_REGISTER_16t:
-            printf("Register V1 '%s' in %s type:%x register:%x\n",
+            printf("Register V1 '%s' type:%x register:%x\n",
                    p_string(&sym->register_v1.p_name),
-                   curr_func, sym->register_v1.reg, sym->register_v1.type);
+                   sym->register_v1.reg, sym->register_v1.type);
             break;
 
         case S_REGISTER_ST:
-            printf("Register V2 '%s' in %s type:%x register:%x\n",
+            printf("Register V2 '%s' type:%x register:%x\n",
                    p_string(&sym->register_v2.p_name),
-                   curr_func, sym->register_v2.reg, sym->register_v2.type);
+                   sym->register_v2.reg, sym->register_v2.type);
             break;
 
         case S_REGISTER:
-            printf("Register V3 '%s' in %s type:%x register:%x\n",
-                   sym->register_v3.name,
-                   curr_func, sym->register_v3.reg, sym->register_v3.type);
+            printf("Register V3 '%s' type:%x register:%x\n",
+                   sym->register_v3.name, sym->register_v3.reg, sym->register_v3.type);
             break;
 
         case S_BLOCK32_ST:
-            printf("Block V1 '%s' in '%s' (%04x:%08x#%08x)\n",
+            printf("Block V1 '%s' (%04x:%08x#%08x)\n",
                    p_string(&sym->block_v1.p_name),
-                   curr_func,
                    sym->block_v1.segment, sym->block_v1.offset,
                    sym->block_v1.length);
-            nest_block++;
+            push_symbol_dumper(&sd, sym, sym->block_v1.end);
             break;
 
         case S_BLOCK32:
-            printf("Block V3 '%s' in '%s' (%04x:%08x#%08x) parent:%u end:%x\n",
-                   sym->block_v3.name, curr_func,
+            printf("Block V3 '%s' (%04x:%08x#%08x) parent:<%u> end:<%x>\n",
+                   sym->block_v3.name,
                    sym->block_v3.segment, sym->block_v3.offset, sym->block_v3.length,
                    sym->block_v3.parent, sym->block_v3.end);
-            nest_block++;
+            push_symbol_dumper(&sd, sym, sym->block_v3.end);
             break;
 
         /* Additional function information */
@@ -1519,16 +1580,16 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             break;
 
         case S_END:
-            if (nest_block)
+            ref = sd.depth ? (const char*)sd.stack[sd.depth - 1].sym - (const char*)root : 0;
+            switch (pop_symbol_dumper(&sd, i))
             {
-                nest_block--;
-                printf("End-Of block (%u)\n", nest_block);
-            }
-            else
-            {
-                printf("End-Of %s\n", curr_func);
-                free(curr_func);
-                curr_func = NULL;
+            case S_BLOCK32_ST:
+            case S_BLOCK32:
+                printf("End-Of block <%x>\n", ref);
+                break;
+            default:
+                printf("End-Of <%x>\n", ref);
+                break;
             }
             break;
 
@@ -1552,7 +1613,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                 const char* ptr = sym->compile2_v2.p_name.name + sym->compile2_v2.p_name.namelen;
                 while (*ptr)
                 {
-                    printf("\t\t%s => ", ptr); ptr += strlen(ptr) + 1;
+                    printf("%*s| %s => ", indent, "", ptr); ptr += strlen(ptr) + 1;
                     printf("%s\n", ptr); ptr += strlen(ptr) + 1;
                 }
             }
@@ -1570,7 +1631,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                 const char* ptr = sym->compile2_v3.name + strlen(sym->compile2_v3.name) + 1;
                 while (*ptr)
                 {
-                    printf("\t\t%s => ", ptr); ptr += strlen(ptr) + 1;
+                    printf("%*s| %s => ", indent, "", ptr); ptr += strlen(ptr) + 1;
                     printf("%s\n", ptr); ptr += strlen(ptr) + 1;
                 }
             }
@@ -1591,12 +1652,12 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                 const char*             x1 = (const char*)sym + 4 + 1;
                 const char*             x2;
 
-                printf("\tTool conf V3\n");
+                printf("Tool conf V3\n");
                 while (*x1)
                 {
                     x2 = x1 + strlen(x1) + 1;
                     if (!*x2) break;
-                    printf("\t\t%s: %s\n", x1, x2);
+                    printf("%*s| %s: %s\n", indent, "", x1, x2);
                     x1 = x2 + strlen(x2) + 1;
                 }
             }
@@ -1623,14 +1684,14 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             break;
 
         case S_LABEL32_ST:
-            printf("Label V1 '%s' in '%s' (%04x:%08x)\n",
+            printf("Label V1 '%s' (%04x:%08x)\n",
                    p_string(&sym->label_v1.p_name),
-                   curr_func, sym->label_v1.segment, sym->label_v1.offset);
+                   sym->label_v1.segment, sym->label_v1.offset);
             break;
 
         case S_LABEL32:
-            printf("Label V3 '%s' in '%s' (%04x:%08x) flag:%x\n",
-                   sym->label_v3.name, curr_func, sym->label_v3.segment,
+            printf("Label V3 '%s' (%04x:%08x) flag:%x\n",
+                   sym->label_v3.name, sym->label_v3.segment,
                    sym->label_v3.offset, sym->label_v3.flags);
             break;
 
@@ -1689,7 +1750,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
 
                 pname = PSTRING(sym, length);
                 length += (pname->namelen + 1 + 3) & ~3;
-                printf("\t%08x %08x %08x '%s'\n",
+                printf("%08x %08x %08x '%s'\n",
                        *(((const DWORD*)sym) + 1), *(((const DWORD*)sym) + 2), *(((const DWORD*)sym) + 3),
                        p_string(pname));
             }
@@ -1759,22 +1820,22 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
 
         case S_DEFRANGE:
             printf("DefRange dia:%x\n", sym->defrange_v3.program);
-            dump_defrange(&sym->defrange_v3.range, get_last(sym), "\t\t");
+            dump_defrange(&sym->defrange_v3.range, get_last(sym), indent);
             break;
         case S_DEFRANGE_SUBFIELD:
             printf("DefRange-subfield V3 dia:%x off-parent:%x\n",
                    sym->defrange_subfield_v3.program, sym->defrange_subfield_v3.offParent);
-            dump_defrange(&sym->defrange_subfield_v3.range, get_last(sym), "\t\t");
+            dump_defrange(&sym->defrange_subfield_v3.range, get_last(sym), indent);
             break;
         case S_DEFRANGE_REGISTER:
             printf("DefRange-register V3 reg:%x attr-unk:%x\n",
                    sym->defrange_register_v3.reg, sym->defrange_register_v3.attr);
-            dump_defrange(&sym->defrange_register_v3.range, get_last(sym), "\t\t");
+            dump_defrange(&sym->defrange_register_v3.range, get_last(sym), indent);
             break;
         case S_DEFRANGE_FRAMEPOINTER_REL:
             printf("DefRange-framepointer-rel V3 offFP:%x\n",
                    sym->defrange_frameptrrel_v3.offFramePointer);
-            dump_defrange(&sym->defrange_frameptrrel_v3.range, get_last(sym), "\t\t");
+            dump_defrange(&sym->defrange_frameptrrel_v3.range, get_last(sym), indent);
             break;
         case S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE:
             printf("DefRange-framepointer-rel-fullscope V3 offFP:%x\n",
@@ -1785,13 +1846,13 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                    sym->defrange_subfield_register_v3.reg,
                    sym->defrange_subfield_register_v3.attr,
                    sym->defrange_subfield_register_v3.offParent);
-            dump_defrange(&sym->defrange_subfield_register_v3.range, get_last(sym), "\t\t");
+            dump_defrange(&sym->defrange_subfield_register_v3.range, get_last(sym), indent);
             break;
         case S_DEFRANGE_REGISTER_REL:
             printf("DefRange-register-rel V3 reg:%x off-parent:%x off-BP:%x\n",
                    sym->defrange_registerrel_v3.baseReg, sym->defrange_registerrel_v3.offsetParent,
                    sym->defrange_registerrel_v3.offBasePointer);
-            dump_defrange(&sym->defrange_registerrel_v3.range, get_last(sym), "\t\t");
+            dump_defrange(&sym->defrange_registerrel_v3.range, get_last(sym), indent);
             break;
 
         case S_CALLSITEINFO:
@@ -1804,18 +1865,24 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             break;
 
         case S_INLINESITE:
-            printf("Inline-site V3 parent:%x end:%x inlinee:%x\n",
+            printf("Inline-site V3 parent:<%x> end:<%x> inlinee:%x\n",
                    sym->inline_site_v3.pParent, sym->inline_site_v3.pEnd, sym->inline_site_v3.inlinee);
-            dump_binannot(sym->inline_site_v3.binaryAnnotations, get_last(sym), "\t\t");
+            dump_binannot(sym->inline_site_v3.binaryAnnotations, get_last(sym), indent);
+            push_symbol_dumper(&sd, sym, sym->inline_site_v3.pEnd);
             break;
+
         case S_INLINESITE2:
-            printf("Inline-site2 V3 parent:%x end:%x inlinee:%x #inv:%u\n",
+            printf("Inline-site2 V3 parent:<%x> end:<%x> inlinee:%x #inv:%u\n",
                    sym->inline_site2_v3.pParent, sym->inline_site2_v3.pEnd, sym->inline_site2_v3.inlinee,
                    sym->inline_site2_v3.invocations);
-            dump_binannot(sym->inline_site2_v3.binaryAnnotations, get_last(sym), "\t\t");
+            dump_binannot(sym->inline_site2_v3.binaryAnnotations, get_last(sym), indent);
+            push_symbol_dumper(&sd, sym, sym->inline_site2_v3.pEnd);
             break;
+
         case S_INLINESITE_END:
-            printf("Inline-site-end\n");
+            ref = sd.depth ? (const char*)sd.stack[sd.depth - 1].sym - (const char*)root : 0;
+            pop_symbol_dumper(&sd, i);
+            printf("Inline-site-end <%x>\n", ref);
             break;
 
         case S_CALLEES:
@@ -1834,7 +1901,8 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                 ninvoc = (const unsigned*)get_last(sym) - invoc;
 
                 for (i = 0; i < sym->function_list_v3.count; ++i)
-                    printf("\t\tfunc:%x invoc:%u\n", sym->function_list_v3.funcs[i], i < ninvoc ? invoc[i] : 0);
+                    printf("%*s| func:%x invoc:%u\n",
+                           indent, "", sym->function_list_v3.funcs[i], i < ninvoc ? invoc[i] : 0);
             }
             break;
 
@@ -1862,11 +1930,37 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             printf("UNameSpace V3 '%s'\n", sym->unamespace_v3.name);
             break;
 
+        case S_SEPCODE:
+            printf("SepCode V3 parent:<%x> end:<%x> separated:%04x:%08x (#%u) from %04x:%08x\n",
+                   sym->sepcode_v3.pParent, sym->sepcode_v3.pEnd,
+                   sym->sepcode_v3.sect, sym->sepcode_v3.off, sym->sepcode_v3.length,
+                   sym->sepcode_v3.sectParent, sym->sepcode_v3.offParent);
+            push_symbol_dumper(&sd, sym, sym->sepcode_v3.pEnd);
+            break;
+
+        case S_ANNOTATION:
+            printf("Annotation V3 %04x:%08x\n",
+                   sym->annotation_v3.seg, sym->annotation_v3.off);
+            {
+                const char* ptr = sym->annotation_v3.rgsz;
+                const char* last = ptr + sym->annotation_v3.csz;
+                for (; ptr < last; ptr += strlen(ptr) + 1)
+                    printf("%*s| %s\n", indent, "", ptr);
+            }
+            break;
+
+        case S_POGODATA:
+            printf("PogoData V3 inv:%d dynCnt:%lld inst:%d staInst:%d\n",
+                   sym->pogoinfo_v3.invocations, (long long)sym->pogoinfo_v3.dynCount,
+                   sym->pogoinfo_v3.numInstrs, sym->pogoinfo_v3.staInstLive);
+            break;
+
         default:
             printf("\n\t\t>>> Unsupported symbol-id %x sz=%d\n", sym->generic.id, sym->generic.len + 2);
             dump_data((const void*)sym, sym->generic.len + 2, "  ");
         }
     }
+    dispose_symbol_dumper(&sd);
     return TRUE;
 }
 

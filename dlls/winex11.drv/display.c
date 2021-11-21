@@ -25,7 +25,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winuser.h"
 #include "rpc.h"
 #include "winreg.h"
 #include "cfgmgr32.h"

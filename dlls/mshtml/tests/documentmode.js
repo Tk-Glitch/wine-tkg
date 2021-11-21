@@ -488,6 +488,69 @@ sync_test("style_props", function() {
     }
 });
 
+sync_test("createElement_inline_attr", function() {
+    var v = document.documentMode, e, s;
+
+    if(v < 9) {
+        s = document.createElement("<div>").tagName;
+        ok(s === "DIV", "<div>.tagName returned " + s);
+        s = document.createElement("<div >").tagName;
+        ok(s === "DIV", "<div >.tagName returned " + s);
+        s = document.createElement("<div/>").tagName;
+        ok(s === "DIV", "<div/>.tagName returned " + s);
+        e = 0;
+        try {
+            document.createElement("<div");
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0x4005 - 0x80000000, "<div e = " + e);
+        e = 0;
+        try {
+            document.createElement("<div test=1");
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0x4005 - 0x80000000, "<div test=1 e = " + e);
+
+        var tags = [ "div", "head", "body", "title", "html" ];
+
+        for(var i = 0; i < tags.length; i++) {
+            e = document.createElement("<" + tags[i] + " test='a\"' abcd=\"&quot;b&#34;\">");
+            ok(e.tagName === tags[i].toUpperCase(), "<" + tags[i] + " test=\"a\" abcd=\"b\">.tagName returned " + e.tagName);
+            todo_wine_if(v == 8).
+            ok(e.test === "a\"", "<" + tags[i] + " test='a\"' abcd=\"&quot;b&#34;\">.test returned " + e.test);
+            todo_wine_if(v == 8).
+            ok(e.abcd === "\"b\"", "<" + tags[i] + " test='a\"' abcd=\"&quot;b&#34;\">.abcd returned " + e.abcd);
+        }
+    }else {
+        s = "";
+        e = 0;
+        try {
+            document.createElement("<div>");
+        }catch(ex) {
+            s = ex.toString();
+            e = ex.number;
+        }
+        todo_wine.
+        ok(e === undefined, "<div> e = " + e);
+        todo_wine.
+        ok(s === "InvalidCharacterError", "<div> s = " + s);
+        s = "";
+        e = 0;
+        try {
+            document.createElement("<div test=\"a\">");
+        }catch(ex) {
+            s = ex.toString();
+            e = ex.number;
+        }
+        todo_wine.
+        ok(e === undefined, "<div test=\"a\"> e = " + e);
+        todo_wine.
+        ok(s === "InvalidCharacterError", "<div test=\"a\"> s = " + s);
+    }
+});
+
 sync_test("JS objs", function() {
     var g = window;
 
@@ -1024,6 +1087,61 @@ sync_test("elem_attr", function() {
     ok(r === "cls2", "class attr = " + r);
     r = elem.getAttribute("className");
     ok(r === "cls3", "className attr = " + r);
+
+    var func = function() { };
+    elem.onclick = func;
+    ok(elem.onclick === func, "onclick = " + elem.onclick);
+    r = elem.getAttribute("onclick");
+    ok(r === (v < 8 ? func : null), "onclick attr = " + r);
+    r = elem.removeAttribute("onclick");
+    ok(r === (v < 9 ? false : undefined), "removeAttribute returned " + r);
+    todo_wine_if(v === 8).
+    ok(elem.onclick === (v != 8 ? func : null), "removed onclick = " + elem.onclick);
+
+    elem.onclick_test = func;
+    ok(elem.onclick_test === func, "onclick_test = " + elem.onclick_test);
+    r = elem.getAttribute("onclick_test");
+    todo_wine_if(v === 8).
+    ok(r === (v < 8 ? func : (v < 9 ? func.toString() : null)), "onclick_test attr = " + r);
+
+    elem.setAttribute("onclick", "test");
+    r = elem.getAttribute("onclick");
+    ok(r === "test", "onclick attr after setAttribute = " + r);
+    r = elem.removeAttribute("onclick");
+    ok(r === (v < 9 ? true : undefined), "removeAttribute after setAttribute returned " + r);
+
+    /* IE11 returns an empty function, which we can't check directly */
+    todo_wine_if(v >= 8).
+    ok((v < 11) ? (elem.onclick === null) : (elem.onclick !== func), "removed onclick after setAttribute = " + elem.onclick);
+
+    r = Object.prototype.toString.call(elem.onclick);
+    todo_wine_if(v >= 8 && v < 11).
+    ok(r === (v < 9 ? "[object Object]" : (v < 11 ? "[object Null]" : "[object Function]")),
+        "removed onclick after setAttribute Object.toString returned " + r);
+
+    elem.setAttribute("onclick", "string");
+    r = elem.getAttribute("onclick");
+    ok(r === "string", "onclick attr after setAttribute = " + r);
+    elem.onclick = func;
+    ok(elem.onclick === func, "onclick = " + elem.onclick);
+    r = elem.getAttribute("onclick");
+    todo_wine_if(v === 8).
+    ok(r === (v < 8 ? func : (v < 9 ? null : "string")), "onclick attr = " + r);
+    elem.onclick = "test";
+    r = elem.getAttribute("onclick");
+    todo_wine_if(v === 8).
+    ok(r === (v < 9 ? "test" : "string"), "onclick attr = " + r);
+    r = elem.removeAttribute("onclick");
+    ok(r === (v < 9 ? true : undefined), "removeAttribute returned " + r);
+    todo_wine_if(v >= 8).
+    ok(elem.onclick === null, "removed onclick = " + elem.onclick);
+
+    elem.setAttribute("ondblclick", "string");
+    r = elem.getAttribute("ondblclick");
+    ok(r === "string", "ondblclick string = " + r);
+    r = elem.removeAttribute("ondblclick");
+    ok(r === (v < 9 ? true : undefined), "ondblclick string removeAttribute returned " + r);
+    ok(elem.ondblclick === null, "removed ondblclick string = " + elem.ondblclick);
 });
 
 sync_test("__proto__", function() {

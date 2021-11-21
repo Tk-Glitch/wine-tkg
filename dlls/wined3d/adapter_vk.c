@@ -23,6 +23,7 @@
 #include "wine/vulkan_driver.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
+WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
 
 static const struct wined3d_state_entry_template misc_state_template_vk[] =
 {
@@ -960,8 +961,9 @@ static void *adapter_vk_map_bo_address(struct wined3d_context *context,
     VkMappedMemoryRange range;
     void *map_ptr;
 
-    if (!(bo = (struct wined3d_bo_vk *)data->buffer_object))
+    if (!data->buffer_object)
         return data->addr;
+    bo = wined3d_bo_vk(data->buffer_object);
 
     vk_info = context_vk->vk_info;
     device_vk = wined3d_device_vk(context->device);
@@ -1065,8 +1067,9 @@ static void adapter_vk_unmap_bo_address(struct wined3d_context *context,
     struct wined3d_bo_vk *bo;
     unsigned int i;
 
-    if (!(bo = (struct wined3d_bo_vk *)data->buffer_object))
+    if (!data->buffer_object)
         return;
+    bo = wined3d_bo_vk(data->buffer_object);
 
     if (!bo->b.coherent)
     {
@@ -1092,8 +1095,8 @@ void adapter_vk_copy_bo_address(struct wined3d_context *context,
     void *dst_ptr, *src_ptr;
     VkBufferCopy region;
 
-    src_bo = (struct wined3d_bo_vk *)src->buffer_object;
-    dst_bo = (struct wined3d_bo_vk *)dst->buffer_object;
+    src_bo = src->buffer_object ? wined3d_bo_vk(src->buffer_object) : NULL;
+    dst_bo = dst->buffer_object ? wined3d_bo_vk(dst->buffer_object) : NULL;
 
     if (dst_bo && !dst->addr && size == dst_bo->size)
         map_flags |= WINED3D_MAP_DISCARD;
@@ -1164,7 +1167,7 @@ void adapter_vk_copy_bo_address(struct wined3d_context *context,
             return;
         }
 
-        staging.buffer_object = (uintptr_t)&staging_bo;
+        staging.buffer_object = &staging_bo.b;
         staging.addr = NULL;
         adapter_vk_copy_bo_address(context, &staging, src, size);
         adapter_vk_copy_bo_address(context, dst, &staging, size);
@@ -1184,7 +1187,7 @@ void adapter_vk_copy_bo_address(struct wined3d_context *context,
             return;
         }
 
-        staging.buffer_object = (uintptr_t)&staging_bo;
+        staging.buffer_object = &staging_bo.b;
         staging.addr = NULL;
         adapter_vk_copy_bo_address(context, &staging, src, size);
         adapter_vk_copy_bo_address(context, dst, &staging, size);
@@ -1209,12 +1212,59 @@ static void adapter_vk_flush_bo_address(struct wined3d_context *context,
         const struct wined3d_const_bo_address *data, size_t size)
 {
     struct wined3d_context_vk *context_vk = wined3d_context_vk(context);
-    struct wined3d_bo_vk *bo;
+    struct wined3d_bo *bo;
 
-    if (!(bo = (struct wined3d_bo_vk *)data->buffer_object))
+    if (!(bo = data->buffer_object))
         return;
 
-    flush_bo_range(context_vk, bo, (uintptr_t)data->addr, size);
+    flush_bo_range(context_vk, wined3d_bo_vk(bo), (uintptr_t)data->addr, size);
+}
+
+static bool adapter_vk_alloc_bo(struct wined3d_device *device, struct wined3d_resource *resource,
+        unsigned int sub_resource_idx, struct wined3d_bo_address *addr)
+{
+    struct wined3d_device_vk *device_vk = wined3d_device_vk(device);
+    struct wined3d_context_vk *context_vk = &device_vk->context_vk;
+
+    wined3d_not_from_cs(device->cs);
+    assert(device->context_count);
+
+    if (resource->type == WINED3D_RTYPE_BUFFER)
+    {
+        struct wined3d_bo_vk *bo_vk;
+
+        if (!(bo_vk = heap_alloc(sizeof(*bo_vk))))
+            return false;
+
+        if (!(wined3d_context_vk_create_bo(context_vk, resource->size,
+                vk_buffer_usage_from_bind_flags(resource->bind_flags),
+                vk_memory_type_from_access_flags(resource->access, resource->usage), bo_vk)))
+        {
+            WARN("Failed to create Vulkan buffer.\n");
+            heap_free(bo_vk);
+            return false;
+        }
+
+        if (!bo_vk->b.map_ptr)
+        {
+            WARN_(d3d_perf)("BO %p (chunk %p, slab %p) is not persistently mapped.\n",
+                    bo_vk, bo_vk->memory ? bo_vk->memory->chunk : NULL, bo_vk->slab);
+
+            if (!wined3d_bo_vk_map(bo_vk, context_vk))
+                ERR("Failed to map bo.\n");
+        }
+
+        addr->buffer_object = &bo_vk->b;
+        addr->addr = NULL;
+        return true;
+    }
+
+    return false;
+}
+
+static void adapter_vk_destroy_bo(struct wined3d_context *context, struct wined3d_bo *bo)
+{
+    wined3d_context_vk_destroy_bo(wined3d_context_vk(context), wined3d_bo_vk(bo));
 }
 
 static HRESULT adapter_vk_create_swapchain(struct wined3d_device *device,
@@ -1746,7 +1796,7 @@ static void adapter_vk_draw_primitive(struct wined3d_device *device,
 
     if (parameters->indirect)
     {
-        struct wined3d_bo_vk *bo = (struct wined3d_bo_vk *)indirect_vk->b.buffer_object;
+        struct wined3d_bo_vk *bo = wined3d_bo_vk(indirect_vk->b.buffer_object);
         uint32_t stride, size;
 
         wined3d_context_vk_reference_bo(context_vk, bo);
@@ -1818,7 +1868,7 @@ static void adapter_vk_dispatch_compute(struct wined3d_device *device,
 
     if (parameters->indirect)
     {
-        struct wined3d_bo_vk *bo = (struct wined3d_bo_vk *)indirect_vk->b.buffer_object;
+        struct wined3d_bo_vk *bo = wined3d_bo_vk(indirect_vk->b.buffer_object);
 
         wined3d_context_vk_reference_bo(context_vk, bo);
         VK_CALL(vkCmdDispatchIndirect(vk_command_buffer, bo->vk_buffer,
@@ -1869,6 +1919,8 @@ static const struct wined3d_adapter_ops wined3d_adapter_vk_ops =
     .adapter_unmap_bo_address = adapter_vk_unmap_bo_address,
     .adapter_copy_bo_address = adapter_vk_copy_bo_address,
     .adapter_flush_bo_address = adapter_vk_flush_bo_address,
+    .adapter_alloc_bo = adapter_vk_alloc_bo,
+    .adapter_destroy_bo = adapter_vk_destroy_bo,
     .adapter_create_swapchain = adapter_vk_create_swapchain,
     .adapter_destroy_swapchain = adapter_vk_destroy_swapchain,
     .adapter_create_buffer = adapter_vk_create_buffer,

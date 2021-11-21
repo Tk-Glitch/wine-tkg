@@ -55,7 +55,7 @@
 
 #include "unix_private.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
+WINE_DEFAULT_DEBUG_CHANNEL(hid);
 
 #ifdef SONAME_LIBSDL2
 
@@ -480,6 +480,17 @@ static NTSTATUS sdl_device_physical_device_control(struct unix_device *iface, US
     return STATUS_NOT_SUPPORTED;
 }
 
+static NTSTATUS sdl_device_physical_device_set_gain(struct unix_device *iface, BYTE percent)
+{
+    struct sdl_device *impl = impl_from_unix_device(iface);
+
+    TRACE("iface %p, percent %#x.\n", iface, percent);
+
+    pSDL_HapticSetGain(impl->sdl_haptic, percent);
+
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS sdl_device_physical_effect_control(struct unix_device *iface, BYTE index,
                                                    USAGE control, BYTE iterations)
 {
@@ -572,10 +583,10 @@ static NTSTATUS sdl_device_physical_effect_update(struct unix_device *iface, BYT
         effect.periodic.button = params->trigger_button;
         effect.periodic.interval = params->trigger_repeat_interval;
         effect.periodic.direction.type = SDL_HAPTIC_SPHERICAL;
-        effect.periodic.direction.dir[0] = params->direction[0] * 36000 / 256;
-        effect.periodic.direction.dir[1] = params->direction[1] * 36000 / 256;
+        effect.periodic.direction.dir[0] = params->direction[0];
+        effect.periodic.direction.dir[1] = params->direction[1];
         effect.periodic.period = params->periodic.period;
-        effect.periodic.magnitude = params->periodic.magnitude * 128;
+        effect.periodic.magnitude = params->periodic.magnitude;
         effect.periodic.offset = params->periodic.offset;
         effect.periodic.phase = params->periodic.phase;
         effect.periodic.attack_length = params->envelope.attack_time;
@@ -593,8 +604,8 @@ static NTSTATUS sdl_device_physical_effect_update(struct unix_device *iface, BYT
         effect.condition.button = params->trigger_button;
         effect.condition.interval = params->trigger_repeat_interval;
         effect.condition.direction.type = SDL_HAPTIC_SPHERICAL;
-        effect.condition.direction.dir[0] = params->direction[0] * 36000 / 256;
-        effect.condition.direction.dir[1] = params->direction[1] * 36000 / 256;
+        effect.condition.direction.dir[0] = params->direction[0];
+        effect.condition.direction.dir[1] = params->direction[1];
         if (params->condition_count >= 1)
         {
             effect.condition.right_sat[0] = params->condition[0].positive_saturation;
@@ -621,8 +632,8 @@ static NTSTATUS sdl_device_physical_effect_update(struct unix_device *iface, BYT
         effect.constant.button = params->trigger_button;
         effect.constant.interval = params->trigger_repeat_interval;
         effect.constant.direction.type = SDL_HAPTIC_SPHERICAL;
-        effect.constant.direction.dir[0] = params->direction[0] * 36000 / 256;
-        effect.constant.direction.dir[1] = params->direction[1] * 36000 / 256;
+        effect.constant.direction.dir[0] = params->direction[0];
+        effect.constant.direction.dir[1] = params->direction[1];
         effect.constant.level = params->constant_force.magnitude;
         effect.constant.attack_length = params->envelope.attack_time;
         effect.constant.attack_level = params->envelope.attack_level;
@@ -636,8 +647,8 @@ static NTSTATUS sdl_device_physical_effect_update(struct unix_device *iface, BYT
         effect.ramp.button = params->trigger_button;
         effect.ramp.interval = params->trigger_repeat_interval;
         effect.ramp.direction.type = SDL_HAPTIC_SPHERICAL;
-        effect.ramp.direction.dir[0] = params->direction[0] * 36000 / 256;
-        effect.ramp.direction.dir[1] = params->direction[1] * 36000 / 256;
+        effect.ramp.direction.dir[0] = params->direction[0];
+        effect.ramp.direction.dir[1] = params->direction[1];
         effect.ramp.start = params->ramp_force.ramp_start;
         effect.ramp.end = params->ramp_force.ramp_end;
         effect.ramp.attack_length = params->envelope.attack_time;
@@ -664,6 +675,7 @@ static const struct hid_device_vtbl sdl_device_vtbl =
     sdl_device_stop,
     sdl_device_haptics_start,
     sdl_device_physical_device_control,
+    sdl_device_physical_device_set_gain,
     sdl_device_physical_effect_control,
     sdl_device_physical_effect_update,
 };

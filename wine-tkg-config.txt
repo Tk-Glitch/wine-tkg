@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:42:11 PM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:43:28 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.21.r0.g20f1a677b66
-Using wine-staging patchset (version 6.21.r0.g63c3baa9)
+Wine (plain) version: 6.22.r0.g986254d6c17
+Using wine-staging patchset (version 6.22.r0.ga703038b)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -13,7 +13,7 @@ Done applying reverting hotfixes (if any) - list available in prepare.log
 Applied reverting hotfix staging-pulseaudio-reverts.mystagingrevert
 Applied hotfix staging-6dcaff42.mystagingpatch
 Applied hotfix staging-reenable-pulse.mystagingpatch
-Applied hotfix protonify_stg_syscall_emu-007.mystagingpatch
+Applied hotfix protonify_stg_syscall_emu-008.mystagingpatch
 Applied hotfix 0001-Revert-winegstreamer-Get-rid-of-the-WMReader-typedef.myearlypatch
 Applied hotfix 0002-Revert-wmvcore-Move-the-async-reader-implementation-.myearlypatch
 Applied hotfix 0003-Revert-winegstreamer-Get-rid-of-the-WMSyncReader-typ.myearlypatch
@@ -79,14 +79,14 @@ plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W ntdll-NtAlertThreadByThreadId -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW
+Staging overrides, if any: -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW
 
 use_clock_monotonic-staging.patch -- ( Applied clock_monotonic patch )
 fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
 fsync_futex2.patch -- ( Add futex2 support to fsync )
 
-valve_proton_fullscreen_hack-staging-d1290b6.patch -- ( Applied Proton fullscreen hack patch (d1290b6) )
+valve_proton_fullscreen_hack-staging.patch -- ( Applied Proton fullscreen hack patch (staging) )
 LAA-unix-staging.patch -- ( Applied large address aware override support )
 
 proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 2/3 )
@@ -97,7 +97,7 @@ proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (s
 
 Applied hotfix Return_nt_filename_and_resolve_DOS_drive_path.mypatch
 Applied hotfix ef6e33f.mypatch
-Applied hotfix 0001-proton-bcrypt_rdr2_fixes.mypatch
+Applied hotfix 0001-proton-bcrypt_rdr2_fixes2.mypatch
 Applied hotfix 0002-bcrypt-Add-support-for-calculating-secret-ecc-keys.mypatch
 Applied hotfix 0003-bcrypt-Add-support-for-OAEP-padded-asymmetric-key-de.mypatch
 Applied hotfix a608ef1.mypatch

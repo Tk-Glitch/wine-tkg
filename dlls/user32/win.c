@@ -19,22 +19,18 @@
  */
 
 #include <assert.h>
-#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
 
-#include "windef.h"
-#include "winbase.h"
+#include "user_private.h"
 #include "winnls.h"
 #include "winver.h"
 #include "wine/server.h"
 #include "wine/asm.h"
 #include "win.h"
-#include "user_private.h"
 #include "controls.h"
 #include "winerror.h"
-#include "wine/gdi_driver.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
@@ -256,6 +252,7 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
             else assert( full_parent == thread_info->top_window );
             if (full_parent && !USER_Driver->pCreateDesktopWindow( thread_info->top_window ))
                 ERR( "failed to create desktop window\n" );
+            register_builtin_classes();
         }
         else  /* HWND_MESSAGE parent */
         {
@@ -1953,7 +1950,7 @@ static void WIN_SendDestroyMsg( HWND hwnd )
         if (hwnd == info.hwndActive) WINPOS_ActivateOtherWindow( hwnd );
     }
 
-    if (hwnd == GetClipboardOwner()) CLIPBOARD_ReleaseOwner( hwnd );
+    if (hwnd == NtUserGetClipboardOwner()) CLIPBOARD_ReleaseOwner( hwnd );
 
     /*
      * Send the WM_DESTROY to the window.
@@ -2286,6 +2283,7 @@ HWND WINAPI GetDesktopWindow(void)
     if (!thread_info->top_window || !USER_Driver->pCreateDesktopWindow( thread_info->top_window ))
         ERR( "failed to create desktop window\n" );
 
+    register_builtin_classes();
     return thread_info->top_window;
 }
 
@@ -3896,7 +3894,7 @@ BOOL WINAPI DragDetect( HWND hWnd, POINT pt )
 
     TRACE( "%p,%s\n", hWnd, wine_dbgstr_point( &pt ) );
 
-    if (!(GetKeyState( VK_LBUTTON ) & 0x8000))
+    if (!(NtUserGetKeyState( VK_LBUTTON ) & 0x8000))
         return FALSE;
 
     wDragWidth = GetSystemMetrics(SM_CXDRAG);
@@ -4064,29 +4062,6 @@ BOOL WINAPI SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWO
 
 
 /*****************************************************************************
- *              GetLayeredWindowAttributes (USER32.@)
- */
-BOOL WINAPI GetLayeredWindowAttributes( HWND hwnd, COLORREF *key, BYTE *alpha, DWORD *flags )
-{
-    BOOL ret;
-
-    SERVER_START_REQ( get_window_layered_info )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        if ((ret = !wine_server_call_err( req )))
-        {
-            if (key) *key = reply->color_key;
-            if (alpha) *alpha = reply->alpha;
-            if (flags) *flags = reply->flags;
-        }
-    }
-    SERVER_END_REQ;
-
-    return ret;
-}
-
-
-/*****************************************************************************
  *              UpdateLayeredWindowIndirect  (USER32.@)
  */
 BOOL WINAPI UpdateLayeredWindowIndirect( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info )
@@ -4099,7 +4074,7 @@ BOOL WINAPI UpdateLayeredWindowIndirect( HWND hwnd, const UPDATELAYEREDWINDOWINF
         info->cbSize != sizeof(*info) ||
         info->dwFlags & ~(ULW_COLORKEY | ULW_ALPHA | ULW_OPAQUE | ULW_EX_NORESIZE) ||
         !(GetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_LAYERED) ||
-        GetLayeredWindowAttributes( hwnd, NULL, NULL, NULL ))
+        NtUserGetLayeredWindowAttributes( hwnd, NULL, NULL, NULL ))
     {
         SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;

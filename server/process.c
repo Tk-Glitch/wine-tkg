@@ -36,6 +36,23 @@
 #endif
 #include <unistd.h>
 #include <poll.h>
+#ifdef HAVE_SYS_PARAM_H
+# include <sys/param.h>
+#endif
+#ifdef HAVE_SYS_QUEUE_H
+# include <sys/queue.h>
+#endif
+#ifdef HAVE_SYS_SYSCTL_H
+# include <sys/sysctl.h>
+#endif
+#ifdef HAVE_SYS_USER_H
+# define thread __unix_thread
+# include <sys/user.h>
+# undef thread
+#endif
+#ifdef HAVE_LIBPROCSTAT
+# include <libprocstat.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -605,10 +622,20 @@ static void process_died( struct process *process )
 static void process_sigkill( void *private )
 {
     struct process *process = private;
+    int signal = 0;
 
-    process->sigkill_timeout = NULL;
-    kill( process->unix_pid, SIGKILL );
-    process_died( process );
+    process->sigkill_delay *= 2;
+    if (process->sigkill_delay >= TICKS_PER_SEC / 2)
+        signal = SIGKILL;
+
+    if (!kill( process->unix_pid, signal ) && !signal)
+        process->sigkill_timeout = add_timeout_user( -process->sigkill_delay, process_sigkill, process );
+    else
+    {
+        process->sigkill_delay = TICKS_PER_SEC / 64;
+        process->sigkill_timeout = NULL;
+        process_died( process );
+    }
 }
 
 /* start the sigkill timer for a process upon exit */
@@ -616,7 +643,7 @@ static void start_sigkill_timer( struct process *process )
 {
     grab_object( process );
     if (process->unix_pid != -1)
-        process->sigkill_timeout = add_timeout_user( -TICKS_PER_SEC, process_sigkill, process );
+        process->sigkill_timeout = add_timeout_user( -process->sigkill_delay, process_sigkill, process );
     else
         process_died( process );
 }
@@ -640,6 +667,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->handles         = NULL;
     process->msg_fd          = NULL;
     process->sigkill_timeout = NULL;
+    process->sigkill_delay   = TICKS_PER_SEC / 64;
     process->unix_pid        = -1;
     process->exit_code       = STILL_ACTIVE;
     process->running_threads = 0;
@@ -1572,9 +1600,9 @@ DECL_HANDLER(get_process_vm_counters)
     struct process *process = get_process_from_handle( req->handle, PROCESS_QUERY_LIMITED_INFORMATION );
 
     if (!process) return;
-#ifdef linux
     if (process->unix_pid != -1)
     {
+#ifdef linux
         FILE *f;
         char proc_path[32], line[256];
         unsigned long value;
@@ -1601,9 +1629,28 @@ DECL_HANDLER(get_process_vm_counters)
             fclose( f );
         }
         else set_error( STATUS_ACCESS_DENIED );
+#elif defined(HAVE_LIBPROCSTAT)
+        struct procstat *procstat;
+        unsigned int count;
+
+        if ((procstat = procstat_open_sysctl()))
+        {
+            struct kinfo_proc *kp = procstat_getprocs( procstat, KERN_PROC_PID, process->unix_pid, &count );
+            if (kp)
+            {
+                reply->virtual_size = kp->ki_size;
+                reply->peak_virtual_size = reply->virtual_size;
+                reply->working_set_size = kp->ki_rssize << PAGE_SHIFT;
+                reply->peak_working_set_size = kp->ki_rusage.ru_maxrss * 1024;
+                procstat_freeprocs( procstat, kp );
+            }
+            else set_error( STATUS_ACCESS_DENIED );
+            procstat_close( procstat );
+        }
+        else set_error( STATUS_ACCESS_DENIED );
+#endif
     }
     else set_error( STATUS_ACCESS_DENIED );
-#endif
     release_object( process );
 }
 

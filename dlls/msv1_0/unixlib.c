@@ -44,38 +44,51 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #define INITIAL_BUFFER_SIZE 200
 
+struct com_buf
+{
+    char        *buffer;
+    unsigned int size;
+    unsigned int offset;
+};
+
 static SECURITY_STATUS read_line( struct ntlm_ctx *ctx, unsigned int *offset )
 {
     char *newline;
+    struct com_buf *com_buf = (struct com_buf *)(ULONG_PTR)ctx->com_buf;
 
-    if (!ctx->com_buf)
+    if (!com_buf)
     {
-        if (!(ctx->com_buf = malloc( INITIAL_BUFFER_SIZE )))
+        if (!(com_buf = malloc( sizeof(*com_buf) ))) return SEC_E_INSUFFICIENT_MEMORY;
+        if (!(com_buf->buffer = malloc( INITIAL_BUFFER_SIZE )))
+        {
+            free( com_buf );
             return SEC_E_INSUFFICIENT_MEMORY;
-        ctx->com_buf_size = INITIAL_BUFFER_SIZE;
-        ctx->com_buf_offset = 0;
+        }
+        com_buf->size = INITIAL_BUFFER_SIZE;
+        com_buf->offset = 0;
+        ctx->com_buf = (ULONG_PTR)com_buf;
     }
 
     do
     {
         ssize_t size;
-        if (ctx->com_buf_offset + INITIAL_BUFFER_SIZE > ctx->com_buf_size)
+        if (com_buf->offset + INITIAL_BUFFER_SIZE > com_buf->size)
         {
-            char *buf = realloc( ctx->com_buf, ctx->com_buf_size + INITIAL_BUFFER_SIZE );
+            char *buf = realloc( com_buf->buffer, com_buf->size + INITIAL_BUFFER_SIZE );
             if (!buf) return SEC_E_INSUFFICIENT_MEMORY;
-            ctx->com_buf_size += INITIAL_BUFFER_SIZE;
-            ctx->com_buf = buf;
+            com_buf->size += INITIAL_BUFFER_SIZE;
+            com_buf->buffer = buf;
         }
-        size = read( ctx->pipe_in,  ctx->com_buf +  ctx->com_buf_offset,  ctx->com_buf_size -  ctx->com_buf_offset );
+        size = read( ctx->pipe_in, com_buf->buffer + com_buf->offset, com_buf->size - com_buf->offset );
         if (size <= 0) return SEC_E_INTERNAL_ERROR;
 
-        ctx->com_buf_offset += size;
-        newline = memchr( ctx->com_buf, '\n',  ctx->com_buf_offset );
+        com_buf->offset += size;
+        newline = memchr( com_buf->buffer, '\n',  com_buf->offset );
     } while (!newline);
 
     /* if there's a newline character, and we read more than that newline, we have to store the offset so we can
        preserve the additional data */
-    if (newline != ctx->com_buf + ctx->com_buf_offset) *offset = (ctx->com_buf + ctx->com_buf_offset) - (newline + 1);
+    if (newline != com_buf->buffer + com_buf->offset) *offset = (com_buf->buffer + com_buf->offset) - (newline + 1);
     else *offset = 0;
 
     *newline = 0;
@@ -84,8 +97,9 @@ static SECURITY_STATUS read_line( struct ntlm_ctx *ctx, unsigned int *offset )
 
 static NTSTATUS ntlm_chat( void *args )
 {
-    struct chat_params *params = args;
+    const struct chat_params *params = args;
     struct ntlm_ctx *ctx = params->ctx;
+    struct com_buf *com_buf;
     SECURITY_STATUS status = SEC_E_OK;
     unsigned int offset;
 
@@ -93,19 +107,20 @@ static NTSTATUS ntlm_chat( void *args )
     write( ctx->pipe_out, "\n", 1 );
 
     if ((status = read_line( ctx, &offset )) != SEC_E_OK) return status;
-    *params->retlen = strlen( ctx->com_buf );
+    com_buf = (struct com_buf *)(ULONG_PTR)ctx->com_buf;
+    *params->retlen = strlen( com_buf->buffer );
 
     if (*params->retlen > params->buflen) return SEC_E_BUFFER_TOO_SMALL;
     if (*params->retlen < 2) return SEC_E_ILLEGAL_MESSAGE;
-    if (!strncmp( ctx->com_buf, "ERR", 3 )) return SEC_E_INVALID_TOKEN;
+    if (!strncmp( com_buf->buffer, "ERR", 3 )) return SEC_E_INVALID_TOKEN;
 
-    memcpy( params->buf, ctx->com_buf, *params->retlen + 1 );
+    memcpy( params->buf, com_buf->buffer, *params->retlen + 1 );
 
-    if (!offset) ctx->com_buf_offset = 0;
+    if (!offset) com_buf->offset = 0;
     else
     {
-        memmove( ctx->com_buf, ctx->com_buf + ctx->com_buf_offset, offset );
-        ctx->com_buf_offset = offset;
+        memmove( com_buf->buffer, com_buf->buffer + com_buf->offset, offset );
+        com_buf->offset = offset;
     }
 
     return SEC_E_OK;
@@ -113,8 +128,8 @@ static NTSTATUS ntlm_chat( void *args )
 
 static NTSTATUS ntlm_cleanup( void *args )
 {
-    struct cleanup_params *params = args;
-    struct ntlm_ctx *ctx = params->ctx;
+    struct ntlm_ctx *ctx = args;
+    struct com_buf *com_buf = (struct com_buf *)(ULONG_PTR)ctx->com_buf;
 
     if (!ctx || (ctx->mode != MODE_CLIENT && ctx->mode != MODE_SERVER)) return STATUS_INVALID_HANDLE;
     ctx->mode = MODE_INVALID;
@@ -131,13 +146,14 @@ static NTSTATUS ntlm_cleanup( void *args )
         } while (ret < 0 && errno == EINTR);
     }
 
-    free( ctx->com_buf );
+    if (com_buf) free( com_buf->buffer );
+    free( com_buf );
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS ntlm_fork( void *args )
 {
-    struct fork_params *params = args;
+    const struct fork_params *params = args;
     struct ntlm_ctx *ctx = params->ctx;
     int pipe_in[2], pipe_out[2];
 
@@ -199,7 +215,6 @@ static NTSTATUS ntlm_check_version( void *args )
     char *argv[3], buf[80];
     NTSTATUS status = STATUS_DLL_NOT_FOUND;
     struct fork_params params = { &ctx, argv };
-    struct cleanup_params cleanup_params = { &ctx };
     int len;
 
     argv[0] = (char *)"ntlm_auth";
@@ -232,7 +247,7 @@ static NTSTATUS ntlm_check_version( void *args )
                               "Make sure that ntlm_auth >= %d.%d.%d is in your path. "
                               "Usually, you can find it in the winbind package of your distribution.\n",
                               NTLM_AUTH_MAJOR_VERSION, NTLM_AUTH_MINOR_VERSION, NTLM_AUTH_MICRO_VERSION );
-    ntlm_cleanup( &cleanup_params );
+    ntlm_cleanup( &ctx );
     return status;
 }
 
@@ -243,3 +258,63 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     ntlm_fork,
     ntlm_check_version,
 };
+
+#ifdef _WIN64
+
+typedef ULONG PTR32;
+
+static NTSTATUS wow64_ntlm_chat( void *args )
+{
+    struct
+    {
+        PTR32 ctx;
+        PTR32 buf;
+        UINT  buflen;
+        PTR32 retlen;
+    } const *params32 = args;
+
+    struct chat_params params =
+    {
+        ULongToPtr(params32->ctx),
+        ULongToPtr(params32->buf),
+        params32->buflen,
+        ULongToPtr(params32->retlen)
+    };
+
+    return ntlm_chat( &params );
+}
+
+static NTSTATUS wow64_ntlm_fork( void *args )
+{
+    struct
+    {
+        PTR32 ctx;
+        PTR32 argv;
+    } const *params32 = args;
+
+    struct fork_params params;
+    PTR32 *argv32 = ULongToPtr(params32->argv);
+    char **argv;
+    NTSTATUS ret;
+    int i, argc = 0;
+
+    while (argv32[argc]) argc++;
+    argv = malloc( (argc + 1) * sizeof(*argv) );
+    for (i = 0; i <= argc; i++) argv[i] = ULongToPtr( argv32[i] );
+
+    params.ctx = ULongToPtr(params32->ctx);
+    params.argv = argv;
+    ret = ntlm_fork( &params );
+    free( argv );
+    return ret;
+}
+
+const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+{
+    wow64_ntlm_chat,
+    ntlm_cleanup,
+    wow64_ntlm_fork,
+    ntlm_check_version,
+};
+
+#endif  /* _WIN64 */

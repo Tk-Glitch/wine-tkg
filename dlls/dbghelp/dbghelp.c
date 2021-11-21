@@ -175,6 +175,43 @@ struct cpu* cpu_find(DWORD machine)
     return NULL;
 }
 
+static WCHAR* make_default_search_path(void)
+{
+    WCHAR*      search_path;
+    WCHAR*      p;
+    unsigned    sym_path_len;
+    unsigned    alt_sym_path_len;
+
+    sym_path_len = GetEnvironmentVariableW(L"_NT_SYMBOL_PATH", NULL, 0);
+    alt_sym_path_len = GetEnvironmentVariableW(L"_NT_ALT_SYMBOL_PATH", NULL, 0);
+
+    /* The default symbol path is ".[;%_NT_SYMBOL_PATH%][;%_NT_ALT_SYMBOL_PATH%]".
+     * If the variables exist, the lengths include a null-terminator. We use that
+     * space for the semicolons, and only add the initial dot and the final null. */
+    search_path = HeapAlloc(GetProcessHeap(), 0,
+                            (1 + sym_path_len + alt_sym_path_len + 1) * sizeof(WCHAR));
+    if (!search_path) return NULL;
+
+    p = search_path;
+    *p++ = L'.';
+    if (sym_path_len)
+    {
+        *p++ = L';';
+        GetEnvironmentVariableW(L"_NT_SYMBOL_PATH", p, sym_path_len);
+        p += sym_path_len - 1;
+    }
+
+    if (alt_sym_path_len)
+    {
+        *p++ = L';';
+        GetEnvironmentVariableW(L"_NT_ALT_SYMBOL_PATH", p, alt_sym_path_len);
+        p += alt_sym_path_len - 1;
+    }
+    *p = L'\0';
+
+    return search_path;
+}
+
 /******************************************************************
  *		SymSetSearchPathW (DBGHELP.@)
  *
@@ -182,14 +219,24 @@ struct cpu* cpu_find(DWORD machine)
 BOOL WINAPI SymSetSearchPathW(HANDLE hProcess, PCWSTR searchPath)
 {
     struct process* pcs = process_find_by_handle(hProcess);
+    WCHAR*          search_path_buffer;
 
     if (!pcs) return FALSE;
-    if (!searchPath) return FALSE;
 
+    if (searchPath)
+    {
+        search_path_buffer = HeapAlloc(GetProcessHeap(), 0,
+                                       (lstrlenW(searchPath) + 1) * sizeof(WCHAR));
+        if (!search_path_buffer) return FALSE;
+        lstrcpyW(search_path_buffer, searchPath);
+    }
+    else
+    {
+        search_path_buffer = make_default_search_path();
+        if (!search_path_buffer) return FALSE;
+    }
     HeapFree(GetProcessHeap(), 0, pcs->search_path);
-    pcs->search_path = lstrcpyW(HeapAlloc(GetProcessHeap(), 0, 
-                                          (lstrlenW(searchPath) + 1) * sizeof(WCHAR)),
-                                searchPath);
+    pcs->search_path = search_path_buffer;
     return TRUE;
 }
 
@@ -201,16 +248,19 @@ BOOL WINAPI SymSetSearchPath(HANDLE hProcess, PCSTR searchPath)
 {
     BOOL        ret = FALSE;
     unsigned    len;
-    WCHAR*      sp;
+    WCHAR*      sp = NULL;
 
-    len = MultiByteToWideChar(CP_ACP, 0, searchPath, -1, NULL, 0);
-    if ((sp = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR))))
+    if (searchPath)
     {
+        len = MultiByteToWideChar(CP_ACP, 0, searchPath, -1, NULL, 0);
+        sp = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        if (!sp) return FALSE;
         MultiByteToWideChar(CP_ACP, 0, searchPath, -1, sp, len);
-
-        ret = SymSetSearchPathW(hProcess, sp);
-        HeapFree(GetProcessHeap(), 0, sp);
     }
+
+    ret = SymSetSearchPathW(hProcess, sp);
+
+    HeapFree(GetProcessHeap(), 0, sp);
     return ret;
 }
 
@@ -428,29 +478,7 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
     }
     else
     {
-        unsigned        size;
-        unsigned        len;
-
-        pcs->search_path = HeapAlloc(GetProcessHeap(), 0, (len = MAX_PATH) * sizeof(WCHAR));
-        while ((size = GetCurrentDirectoryW(len, pcs->search_path)) >= len)
-            pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (len *= 2) * sizeof(WCHAR));
-        pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (size + 1) * sizeof(WCHAR));
-
-        len = GetEnvironmentVariableW(L"_NT_SYMBOL_PATH", NULL, 0);
-        if (len)
-        {
-            pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (size + 1 + len + 1) * sizeof(WCHAR));
-            pcs->search_path[size] = ';';
-            GetEnvironmentVariableW(L"_NT_SYMBOL_PATH", pcs->search_path + size + 1, len);
-            size += 1 + len;
-        }
-        len = GetEnvironmentVariableW(L"_NT_ALTERNATE_SYMBOL_PATH", NULL, 0);
-        if (len)
-        {
-            pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (size + 1 + len + 1) * sizeof(WCHAR));
-            pcs->search_path[size] = ';';
-            GetEnvironmentVariableW(L"_NT_ALTERNATE_SYMBOL_PATH", pcs->search_path + size + 1, len);
-        }
+        pcs->search_path = make_default_search_path();
     }
 
     pcs->lmodules = NULL;
@@ -607,18 +635,14 @@ BOOL WINAPI SymSetContext(HANDLE hProcess, PIMAGEHLP_STACK_FRAME StackFrame,
                           PIMAGEHLP_CONTEXT Context)
 {
     struct process* pcs;
-    BOOL same;
+
+    TRACE("(%p %p %p)\n", hProcess, StackFrame, Context);
 
     if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
-    same = pcs->ctx_frame.ReturnOffset == StackFrame->ReturnOffset &&
-           pcs->ctx_frame.FrameOffset  == StackFrame->FrameOffset  &&
-           pcs->ctx_frame.StackOffset  == StackFrame->StackOffset;
-
-    if (!SymSetScopeFromAddr(hProcess, StackFrame->InstructionOffset))
-        return FALSE;
-
-    pcs->ctx_frame = *StackFrame;
-    if (same)
+    if (pcs->ctx_frame.ReturnOffset       == StackFrame->ReturnOffset &&
+        pcs->ctx_frame.FrameOffset        == StackFrame->FrameOffset  &&
+        pcs->ctx_frame.StackOffset        == StackFrame->StackOffset  &&
+        pcs->ctx_frame.InstructionOffset  == StackFrame->InstructionOffset)
     {
         TRACE("Setting same frame {rtn=%I64x frm=%I64x stk=%I64x}\n",
               pcs->ctx_frame.ReturnOffset,
@@ -628,7 +652,11 @@ BOOL WINAPI SymSetContext(HANDLE hProcess, PIMAGEHLP_STACK_FRAME StackFrame,
         return FALSE;
     }
 
+    if (!SymSetScopeFromAddr(hProcess, StackFrame->InstructionOffset))
+        return FALSE;
+    pcs->ctx_frame = *StackFrame;
     /* Context is not (no longer?) used */
+
     return TRUE;
 }
 
@@ -643,11 +671,11 @@ BOOL WINAPI SymSetScopeFromAddr(HANDLE hProcess, ULONG64 addr)
     TRACE("(%p %#I64x)\n", hProcess, addr);
 
     if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
-    if ((sym = symt_find_nearest(pair.effective, addr)) == NULL) return FALSE;
-    if (sym->symt.tag != SymTagFunction) return FALSE;
-
     pair.pcs->localscope_pc = addr;
-    pair.pcs->localscope_symt = &sym->symt;
+    if ((sym = symt_find_nearest(pair.effective, addr)) != NULL && sym->symt.tag == SymTagFunction)
+        pair.pcs->localscope_symt = &sym->symt;
+    else
+        pair.pcs->localscope_symt = NULL;
 
     return TRUE;
 }

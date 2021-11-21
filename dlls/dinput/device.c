@@ -27,6 +27,7 @@
 
 #include <stdarg.h>
 #include <string.h>
+#include <math.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -356,12 +357,26 @@ static DWORD semantic_to_obj_id( struct dinput_device *This, DWORD dwSemantic )
     return type | (0x0000ff00 & (instance << 8));
 }
 
+static void del_mapping_key(const WCHAR *device, const WCHAR *username, const WCHAR *guid) {
+    static const WCHAR subkey[] = L"Software\\Wine\\DirectInput\\Mappings\\%s\\%s\\%s";
+    DWORD len = wcslen(subkey) + wcslen(username) + wcslen(device) + wcslen(guid);
+    WCHAR *keyname;
+
+    keyname = malloc(len * sizeof(WCHAR));
+    swprintf(keyname, len, subkey, username, device, guid);
+
+    /* Remove old key mappings so there will be no overlapping mappings */
+    RegDeleteKeyW(HKEY_CURRENT_USER, keyname);
+
+    free(keyname);
+}
+
 /*
  * get_mapping_key
  * Retrieves an open registry key to save the mapping, parametrized for an username,
  * specific device and specific action mapping guid.
  */
-static HKEY get_mapping_key(const WCHAR *device, const WCHAR *username, const WCHAR *guid)
+static HKEY get_mapping_key(const WCHAR *device, const WCHAR *username, const WCHAR *guid, BOOL create)
 {
     static const WCHAR *subkey = L"Software\\Wine\\DirectInput\\Mappings\\%s\\%s\\%s";
     HKEY hkey;
@@ -372,15 +387,18 @@ static HKEY get_mapping_key(const WCHAR *device, const WCHAR *username, const WC
     swprintf( keyname, len, subkey, username, device, guid );
 
     /* The key used is HKCU\Software\Wine\DirectInput\Mappings\[username]\[device]\[mapping_guid] */
-    if (RegCreateKeyW(HKEY_CURRENT_USER, keyname, &hkey))
-        hkey = 0;
+    if (create) {
+        if (RegCreateKeyW(HKEY_CURRENT_USER, keyname, &hkey))
+            hkey = 0;
+    } else if (RegOpenKeyW(HKEY_CURRENT_USER, keyname, &hkey))
+            hkey = 0;
 
     free( keyname );
 
     return hkey;
 }
 
-static HRESULT save_mapping_settings(IDirectInputDevice8W *iface, LPDIACTIONFORMATW lpdiaf, LPCWSTR lpszUsername)
+HRESULT save_mapping_settings(IDirectInputDevice8W *iface, LPDIACTIONFORMATW lpdiaf, LPCWSTR lpszUsername)
 {
     WCHAR *guid_str = NULL;
     DIDEVICEINSTANCEW didev;
@@ -393,7 +411,9 @@ static HRESULT save_mapping_settings(IDirectInputDevice8W *iface, LPDIACTIONFORM
     if (StringFromCLSID(&lpdiaf->guidActionMap, &guid_str) != S_OK)
         return DI_SETTINGSNOTSAVED;
 
-    hkey = get_mapping_key(didev.tszInstanceName, lpszUsername, guid_str);
+    del_mapping_key(didev.tszInstanceName, lpszUsername, guid_str);
+
+    hkey = get_mapping_key(didev.tszInstanceName, lpszUsername, guid_str, TRUE);
 
     if (!hkey)
     {
@@ -428,7 +448,7 @@ static BOOL load_mapping_settings( struct dinput_device *This, LPDIACTIONFORMATW
     HKEY hkey;
     WCHAR *guid_str;
     DIDEVICEINSTANCEW didev;
-    int i, mapped = 0;
+    int i;
 
     didev.dwSize = sizeof(didev);
     IDirectInputDevice8_GetDeviceInfo(&This->IDirectInputDevice8W_iface, &didev);
@@ -436,7 +456,7 @@ static BOOL load_mapping_settings( struct dinput_device *This, LPDIACTIONFORMATW
     if (StringFromCLSID(&lpdiaf->guidActionMap, &guid_str) != S_OK)
         return FALSE;
 
-    hkey = get_mapping_key(didev.tszInstanceName, username, guid_str);
+    hkey = get_mapping_key(didev.tszInstanceName, username, guid_str, FALSE);
 
     if (!hkey)
     {
@@ -456,15 +476,20 @@ static BOOL load_mapping_settings( struct dinput_device *This, LPDIACTIONFORMATW
         {
             lpdiaf->rgoAction[i].dwObjID = id;
             lpdiaf->rgoAction[i].guidInstance = didev.guidInstance;
-            lpdiaf->rgoAction[i].dwHow = DIAH_DEFAULT;
-            mapped += 1;
+            lpdiaf->rgoAction[i].dwHow = DIAH_USERCONFIG;
+        }
+        else
+        {
+            memset(&lpdiaf->rgoAction[i].guidInstance, 0, sizeof(GUID));
+            lpdiaf->rgoAction[i].dwHow = DIAH_UNMAPPED;
         }
     }
 
     RegCloseKey(hkey);
     CoTaskMemFree(guid_str);
 
-    return mapped > 0;
+    /* On Windows BuildActionMap can open empty mapping, so always return TRUE if get_mapping_key is success */
+    return TRUE;
 }
 
 static BOOL set_app_data( struct dinput_device *dev, int offset, UINT_PTR app_data )
@@ -740,10 +765,7 @@ void dinput_device_destroy( IDirectInputDevice8W *iface )
 
     TRACE( "iface %p.\n", iface );
 
-    IDirectInputDevice_Unacquire(iface);
-    /* Reset the FF state, free all effects, etc */
-    IDirectInputDevice8_SendForceFeedbackCommand(iface, DISFFC_RESET);
-
+    free( This->object_properties );
     free( This->data_queue );
 
     /* Free data format */
@@ -770,6 +792,7 @@ static ULONG WINAPI dinput_device_Release( IDirectInputDevice8W *iface )
 
     if (!ref)
     {
+        IDirectInputDevice_Unacquire( iface );
         if (impl->vtbl->release) impl->vtbl->release( iface );
         else dinput_device_destroy( iface );
     }
@@ -906,84 +929,299 @@ static HRESULT enum_object_filter_init( struct dinput_device *impl, DIPROPHEADER
     return DI_OK;
 }
 
+static HRESULT check_property( struct dinput_device *impl, const GUID *guid, const DIPROPHEADER *header, BOOL set )
+{
+    switch (LOWORD( guid ))
+    {
+    case (DWORD_PTR)DIPROP_INSTANCENAME:
+    case (DWORD_PTR)DIPROP_KEYNAME:
+    case (DWORD_PTR)DIPROP_PRODUCTNAME:
+    case (DWORD_PTR)DIPROP_TYPENAME:
+    case (DWORD_PTR)DIPROP_USERNAME:
+        if (header->dwSize != sizeof(DIPROPSTRING)) return DIERR_INVALIDPARAM;
+        break;
+
+    case (DWORD_PTR)DIPROP_AUTOCENTER:
+    case (DWORD_PTR)DIPROP_AXISMODE:
+    case (DWORD_PTR)DIPROP_BUFFERSIZE:
+    case (DWORD_PTR)DIPROP_CALIBRATIONMODE:
+    case (DWORD_PTR)DIPROP_DEADZONE:
+    case (DWORD_PTR)DIPROP_FFGAIN:
+    case (DWORD_PTR)DIPROP_FFLOAD:
+    case (DWORD_PTR)DIPROP_GRANULARITY:
+    case (DWORD_PTR)DIPROP_JOYSTICKID:
+    case (DWORD_PTR)DIPROP_SATURATION:
+    case (DWORD_PTR)DIPROP_SCANCODE:
+    case (DWORD_PTR)DIPROP_VIDPID:
+        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
+        break;
+
+    case (DWORD_PTR)DIPROP_APPDATA:
+        if (header->dwSize != sizeof(DIPROPPOINTER)) return DIERR_INVALIDPARAM;
+        break;
+
+    case (DWORD_PTR)DIPROP_PHYSICALRANGE:
+    case (DWORD_PTR)DIPROP_LOGICALRANGE:
+    case (DWORD_PTR)DIPROP_RANGE:
+        if (header->dwSize != sizeof(DIPROPRANGE)) return DIERR_INVALIDPARAM;
+        break;
+
+    case (DWORD_PTR)DIPROP_GUIDANDPATH:
+        if (header->dwSize != sizeof(DIPROPGUIDANDPATH)) return DIERR_INVALIDPARAM;
+        break;
+    }
+
+    switch (LOWORD( guid ))
+    {
+    case (DWORD_PTR)DIPROP_PRODUCTNAME:
+    case (DWORD_PTR)DIPROP_INSTANCENAME:
+    case (DWORD_PTR)DIPROP_VIDPID:
+    case (DWORD_PTR)DIPROP_JOYSTICKID:
+    case (DWORD_PTR)DIPROP_GUIDANDPATH:
+    case (DWORD_PTR)DIPROP_BUFFERSIZE:
+    case (DWORD_PTR)DIPROP_FFGAIN:
+    case (DWORD_PTR)DIPROP_TYPENAME:
+    case (DWORD_PTR)DIPROP_USERNAME:
+    case (DWORD_PTR)DIPROP_AUTOCENTER:
+    case (DWORD_PTR)DIPROP_AXISMODE:
+    case (DWORD_PTR)DIPROP_FFLOAD:
+        if (header->dwHow != DIPH_DEVICE) return DIERR_UNSUPPORTED;
+        if (header->dwObj) return DIERR_INVALIDPARAM;
+        break;
+
+    case (DWORD_PTR)DIPROP_PHYSICALRANGE:
+    case (DWORD_PTR)DIPROP_LOGICALRANGE:
+    case (DWORD_PTR)DIPROP_RANGE:
+    case (DWORD_PTR)DIPROP_DEADZONE:
+    case (DWORD_PTR)DIPROP_SATURATION:
+    case (DWORD_PTR)DIPROP_GRANULARITY:
+    case (DWORD_PTR)DIPROP_CALIBRATIONMODE:
+        if (header->dwHow == DIPH_DEVICE && !set) return DIERR_UNSUPPORTED;
+        break;
+
+    case (DWORD_PTR)DIPROP_KEYNAME:
+        if (header->dwHow == DIPH_DEVICE) return DIERR_INVALIDPARAM;
+        break;
+
+    case (DWORD_PTR)DIPROP_SCANCODE:
+    case (DWORD_PTR)DIPROP_APPDATA:
+        if (header->dwHow == DIPH_DEVICE) return DIERR_UNSUPPORTED;
+        break;
+    }
+
+    if (set)
+    {
+        switch (LOWORD( guid ))
+        {
+        case (DWORD_PTR)DIPROP_AUTOCENTER:
+        case (DWORD_PTR)DIPROP_AXISMODE:
+        case (DWORD_PTR)DIPROP_BUFFERSIZE:
+        case (DWORD_PTR)DIPROP_PHYSICALRANGE:
+        case (DWORD_PTR)DIPROP_LOGICALRANGE:
+            if (impl->acquired) return DIERR_ACQUIRED;
+            break;
+        case (DWORD_PTR)DIPROP_FFLOAD:
+        case (DWORD_PTR)DIPROP_GRANULARITY:
+        case (DWORD_PTR)DIPROP_VIDPID:
+        case (DWORD_PTR)DIPROP_TYPENAME:
+        case (DWORD_PTR)DIPROP_USERNAME:
+        case (DWORD_PTR)DIPROP_GUIDANDPATH:
+            return DIERR_READONLY;
+        }
+
+        switch (LOWORD( guid ))
+        {
+        case (DWORD_PTR)DIPROP_RANGE:
+        {
+            const DIPROPRANGE *value = (const DIPROPRANGE *)header;
+            if (value->lMin > value->lMax) return DIERR_INVALIDPARAM;
+            break;
+        }
+        case (DWORD_PTR)DIPROP_DEADZONE:
+        case (DWORD_PTR)DIPROP_SATURATION:
+        case (DWORD_PTR)DIPROP_FFGAIN:
+        {
+            const DIPROPDWORD *value = (const DIPROPDWORD *)header;
+            if (value->dwData > 10000) return DIERR_INVALIDPARAM;
+            break;
+        }
+        case (DWORD_PTR)DIPROP_AUTOCENTER:
+        case (DWORD_PTR)DIPROP_AXISMODE:
+        case (DWORD_PTR)DIPROP_CALIBRATIONMODE:
+        {
+            const DIPROPDWORD *value = (const DIPROPDWORD *)header;
+            if (value->dwData > 1) return DIERR_INVALIDPARAM;
+            break;
+        }
+        case (DWORD_PTR)DIPROP_PHYSICALRANGE:
+        case (DWORD_PTR)DIPROP_LOGICALRANGE:
+            return DIERR_UNSUPPORTED;
+        }
+    }
+    else
+    {
+        switch (LOWORD( guid ))
+        {
+        case (DWORD_PTR)DIPROP_RANGE:
+        case (DWORD_PTR)DIPROP_GRANULARITY:
+            if (!impl->caps.dwAxes) return DIERR_UNSUPPORTED;
+            break;
+
+        case (DWORD_PTR)DIPROP_KEYNAME:
+            /* not supported on the mouse */
+            if (impl->caps.dwAxes && !(impl->caps.dwDevType & DIDEVTYPE_HID)) return DIERR_UNSUPPORTED;
+            break;
+
+        case (DWORD_PTR)DIPROP_PHYSICALRANGE:
+        case (DWORD_PTR)DIPROP_LOGICALRANGE:
+        case (DWORD_PTR)DIPROP_DEADZONE:
+        case (DWORD_PTR)DIPROP_SATURATION:
+        case (DWORD_PTR)DIPROP_CALIBRATIONMODE:
+            if (!impl->object_properties) return DIERR_UNSUPPORTED;
+            break;
+
+        case (DWORD_PTR)DIPROP_PRODUCTNAME:
+        case (DWORD_PTR)DIPROP_INSTANCENAME:
+        case (DWORD_PTR)DIPROP_VIDPID:
+        case (DWORD_PTR)DIPROP_JOYSTICKID:
+        case (DWORD_PTR)DIPROP_GUIDANDPATH:
+            if (!impl->vtbl->get_property) return DIERR_UNSUPPORTED;
+            break;
+        }
+    }
+
+    return DI_OK;
+}
+
 static BOOL CALLBACK find_object( const DIDEVICEOBJECTINSTANCEW *instance, void *context )
 {
     *(DIDEVICEOBJECTINSTANCEW *)context = *instance;
     return DIENUM_STOP;
 }
 
-static HRESULT WINAPI dinput_device_GetProperty( IDirectInputDevice8W *iface, const GUID *guid, DIPROPHEADER *header )
+struct get_object_property_params
 {
+    IDirectInputDevice8W *iface;
+    DIPROPHEADER *header;
+    DWORD property;
+};
+
+static BOOL CALLBACK get_object_property( const DIDEVICEOBJECTINSTANCEW *instance, void *context )
+{
+    static const struct object_properties default_properties =
+    {
+        .range_min = DIPROPRANGE_NOMIN,
+        .range_max = DIPROPRANGE_NOMAX,
+    };
+    struct get_object_property_params *params = context;
+    struct dinput_device *impl = impl_from_IDirectInputDevice8W( params->iface );
+    const struct object_properties *properties = NULL;
+
+    if (!impl->object_properties) properties = &default_properties;
+    else properties = impl->object_properties + instance->dwOfs / sizeof(LONG);
+
+    switch (params->property)
+    {
+    case (DWORD_PTR)DIPROP_PHYSICALRANGE:
+    {
+        DIPROPRANGE *value = (DIPROPRANGE *)params->header;
+        value->lMin = properties->physical_min;
+        value->lMax = properties->physical_max;
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_LOGICALRANGE:
+    {
+        DIPROPRANGE *value = (DIPROPRANGE *)params->header;
+        value->lMin = properties->logical_min;
+        value->lMax = properties->logical_max;
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_RANGE:
+    {
+        DIPROPRANGE *value = (DIPROPRANGE *)params->header;
+        value->lMin = properties->range_min;
+        value->lMax = properties->range_max;
+        return DIENUM_STOP;
+    }
+    case (DWORD_PTR)DIPROP_DEADZONE:
+    {
+        DIPROPDWORD *value = (DIPROPDWORD *)params->header;
+        value->dwData = properties->deadzone;
+        return DIENUM_STOP;
+    }
+    case (DWORD_PTR)DIPROP_SATURATION:
+    {
+        DIPROPDWORD *value = (DIPROPDWORD *)params->header;
+        value->dwData = properties->saturation;
+        return DIENUM_STOP;
+    }
+    case (DWORD_PTR)DIPROP_CALIBRATIONMODE:
+    {
+        DIPROPDWORD *value = (DIPROPDWORD *)params->header;
+        value->dwData = properties->calibration_mode;
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_GRANULARITY:
+    {
+        DIPROPDWORD *value = (DIPROPDWORD *)params->header;
+        value->dwData = 1;
+        return DIENUM_STOP;
+    }
+    case (DWORD_PTR)DIPROP_KEYNAME:
+    {
+        DIPROPSTRING *value = (DIPROPSTRING *)params->header;
+        lstrcpynW( value->wsz, instance->tszName, ARRAY_SIZE(value->wsz) );
+        return DIENUM_STOP;
+    }
+    }
+
+    return DIENUM_STOP;
+}
+
+static HRESULT dinput_device_get_property( IDirectInputDevice8W *iface, const GUID *guid, DIPROPHEADER *header )
+{
+    struct get_object_property_params params = {.iface = iface, .header = header, .property = LOWORD( guid )};
     struct dinput_device *impl = impl_from_IDirectInputDevice8W( iface );
     DWORD object_mask = DIDFT_AXIS | DIDFT_BUTTON | DIDFT_POV;
-    DIDEVICEOBJECTINSTANCEW instance;
     DIPROPHEADER filter;
     HRESULT hr;
 
-    TRACE( "iface %p, guid %s, header %p\n", iface, debugstr_guid( guid ), header );
-
-    if (!header) return DIERR_INVALIDPARAM;
-    if (header->dwHeaderSize != sizeof(DIPROPHEADER)) return DIERR_INVALIDPARAM;
-    if (!IS_DIPROP( guid )) return DI_OK;
-
     filter = *header;
     if (FAILED(hr = enum_object_filter_init( impl, &filter ))) return hr;
+    if (FAILED(hr = check_property( impl, guid, header, FALSE ))) return hr;
 
     switch (LOWORD( guid ))
     {
     case (DWORD_PTR)DIPROP_PRODUCTNAME:
     case (DWORD_PTR)DIPROP_INSTANCENAME:
-        if (header->dwSize != sizeof(DIPROPSTRING)) return DIERR_INVALIDPARAM;
-        if (header->dwHow != DIPH_DEVICE) return DIERR_UNSUPPORTED;
-        return impl->vtbl->get_property( iface, LOWORD( guid ), header, NULL );
-
     case (DWORD_PTR)DIPROP_VIDPID:
     case (DWORD_PTR)DIPROP_JOYSTICKID:
-        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
-        if (header->dwHow != DIPH_DEVICE) return DIERR_UNSUPPORTED;
-        return impl->vtbl->get_property( iface, LOWORD( guid ), header, NULL );
-
     case (DWORD_PTR)DIPROP_GUIDANDPATH:
-        if (header->dwSize != sizeof(DIPROPGUIDANDPATH)) return DIERR_INVALIDPARAM;
-        if (header->dwHow != DIPH_DEVICE) return DIERR_UNSUPPORTED;
         return impl->vtbl->get_property( iface, LOWORD( guid ), header, NULL );
 
     case (DWORD_PTR)DIPROP_RANGE:
-        if (header->dwSize != sizeof(DIPROPRANGE)) return DIERR_INVALIDPARAM;
-        if (header->dwHow == DIPH_DEVICE) return DIERR_UNSUPPORTED;
-        hr = impl->vtbl->enum_objects( iface, &filter, object_mask, find_object, &instance );
-        if (FAILED(hr)) return hr;
-        if (hr == DIENUM_CONTINUE) return DIERR_NOTFOUND;
-        if (!(instance.dwType & DIDFT_AXIS)) return DIERR_UNSUPPORTED;
-        return impl->vtbl->get_property( iface, LOWORD( guid ), header, &instance );
-
+    case (DWORD_PTR)DIPROP_PHYSICALRANGE:
+    case (DWORD_PTR)DIPROP_LOGICALRANGE:
     case (DWORD_PTR)DIPROP_DEADZONE:
     case (DWORD_PTR)DIPROP_SATURATION:
     case (DWORD_PTR)DIPROP_GRANULARITY:
-        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
-        if (header->dwHow == DIPH_DEVICE) return DIERR_UNSUPPORTED;
-        hr = impl->vtbl->enum_objects( iface, &filter, object_mask, find_object, &instance );
-        if (FAILED(hr)) return hr;
-        if (hr == DIENUM_CONTINUE) return DIERR_NOTFOUND;
-        if (!(instance.dwType & DIDFT_AXIS)) return DIERR_UNSUPPORTED;
-        return impl->vtbl->get_property( iface, LOWORD( guid ), header, &instance );
-
     case (DWORD_PTR)DIPROP_KEYNAME:
-        if (header->dwSize != sizeof(DIPROPSTRING)) return DIERR_INVALIDPARAM;
-        hr = impl->vtbl->enum_objects( iface, &filter, object_mask, find_object, &instance );
+    case (DWORD_PTR)DIPROP_CALIBRATIONMODE:
+        hr = impl->vtbl->enum_objects( iface, &filter, object_mask, get_object_property, &params );
         if (FAILED(hr)) return hr;
         if (hr == DIENUM_CONTINUE) return DIERR_NOTFOUND;
-        if (!(instance.dwType & DIDFT_BUTTON)) return DIERR_UNSUPPORTED;
-        return impl->vtbl->get_property( iface, LOWORD( guid ), header, &instance );
+        return DI_OK;
 
     case (DWORD_PTR)DIPROP_AUTOCENTER:
-        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
-        return DIERR_UNSUPPORTED;
-
+    {
+        DIPROPDWORD *value = (DIPROPDWORD *)header;
+        if (!(impl->caps.dwFlags & DIDC_FORCEFEEDBACK)) return DIERR_UNSUPPORTED;
+        value->dwData = impl->autocenter;
+        return DI_OK;
+    }
     case (DWORD_PTR)DIPROP_BUFFERSIZE:
     {
         DIPROPDWORD *value = (DIPROPDWORD *)header;
-        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
         value->dwData = impl->buffersize;
         return DI_OK;
     }
@@ -991,7 +1229,6 @@ static HRESULT WINAPI dinput_device_GetProperty( IDirectInputDevice8W *iface, co
     {
         DIPROPSTRING *value = (DIPROPSTRING *)header;
         struct DevicePlayer *device_player;
-        if (header->dwSize != sizeof(DIPROPSTRING)) return DIERR_INVALIDPARAM;
         LIST_FOR_EACH_ENTRY( device_player, &impl->dinput->device_players, struct DevicePlayer, entry )
         {
             if (IsEqualGUID( &device_player->instance_guid, &impl->guid ))
@@ -1006,8 +1243,7 @@ static HRESULT WINAPI dinput_device_GetProperty( IDirectInputDevice8W *iface, co
     case (DWORD_PTR)DIPROP_FFGAIN:
     {
         DIPROPDWORD *value = (DIPROPDWORD *)header;
-        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
-        value->dwData = 10000;
+        value->dwData = impl->device_gain;
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_CALIBRATION:
@@ -1018,6 +1254,24 @@ static HRESULT WINAPI dinput_device_GetProperty( IDirectInputDevice8W *iface, co
     }
 
     return DI_OK;
+}
+
+static HRESULT WINAPI dinput_device_GetProperty( IDirectInputDevice8W *iface, const GUID *guid, DIPROPHEADER *header )
+{
+    struct dinput_device *impl = impl_from_IDirectInputDevice8W( iface );
+    HRESULT hr;
+
+    TRACE( "iface %p, guid %s, header %p\n", iface, debugstr_guid( guid ), header );
+
+    if (!header) return DIERR_INVALIDPARAM;
+    if (header->dwHeaderSize != sizeof(DIPROPHEADER)) return DIERR_INVALIDPARAM;
+    if (!IS_DIPROP( guid )) return DI_OK;
+
+    EnterCriticalSection( &impl->crit );
+    hr = dinput_device_get_property( iface, guid, header );
+    LeaveCriticalSection( &impl->crit );
+
+    return hr;
 }
 
 struct set_object_property_params
@@ -1031,12 +1285,78 @@ static BOOL CALLBACK set_object_property( const DIDEVICEOBJECTINSTANCEW *instanc
 {
     struct set_object_property_params *params = context;
     struct dinput_device *impl = impl_from_IDirectInputDevice8W( params->iface );
-    impl->vtbl->set_property( params->iface, params->property, params->header, instance );
+    struct object_properties *properties = NULL;
+
+    if (!impl->object_properties) return DIENUM_STOP;
+    properties = impl->object_properties + instance->dwOfs / sizeof(LONG);
+
+    switch (params->property)
+    {
+    case (DWORD_PTR)DIPROP_RANGE:
+    {
+        const DIPROPRANGE *value = (const DIPROPRANGE *)params->header;
+        properties->range_min = value->lMin;
+        properties->range_max = value->lMax;
+        return DIENUM_CONTINUE;
+    }
+    case (DWORD_PTR)DIPROP_DEADZONE:
+    {
+        const DIPROPDWORD *value = (const DIPROPDWORD *)params->header;
+        properties->deadzone = value->dwData;
+        return DIENUM_CONTINUE;
+    }
+    case (DWORD_PTR)DIPROP_SATURATION:
+    {
+        const DIPROPDWORD *value = (const DIPROPDWORD *)params->header;
+        properties->saturation = value->dwData;
+        return DIENUM_CONTINUE;
+    }
+    case (DWORD_PTR)DIPROP_CALIBRATIONMODE:
+    {
+        const DIPROPDWORD *value = (const DIPROPDWORD *)params->header;
+        properties->calibration_mode = value->dwData;
+        return DIENUM_CONTINUE;
+    }
+    }
+
+    return DIENUM_STOP;
+}
+
+static BOOL CALLBACK reset_object_value( const DIDEVICEOBJECTINSTANCEW *instance, void *context )
+{
+    struct dinput_device *impl = context;
+    struct object_properties *properties;
+    LONG tmp = -1;
+
+    if (!impl->object_properties) return DIENUM_STOP;
+    properties = impl->object_properties + instance->dwOfs / sizeof(LONG);
+
+    if (instance->dwType & DIDFT_AXIS)
+    {
+        if (!properties->range_min) tmp = properties->range_max / 2;
+        else tmp = round( (properties->range_min + properties->range_max) / 2.0 );
+    }
+
+    *(LONG *)(impl->device_state + instance->dwOfs) = tmp;
     return DIENUM_CONTINUE;
 }
 
-static HRESULT WINAPI dinput_device_SetProperty( IDirectInputDevice8W *iface, const GUID *guid,
-                                                 const DIPROPHEADER *header )
+static void reset_device_state( IDirectInputDevice8W *iface )
+{
+    struct dinput_device *impl = impl_from_IDirectInputDevice8W( iface );
+    DIPROPHEADER filter =
+    {
+        .dwHeaderSize = sizeof(DIPROPHEADER),
+        .dwSize = sizeof(DIPROPHEADER),
+        .dwHow = DIPH_DEVICE,
+        .dwObj = 0,
+    };
+
+    impl->vtbl->enum_objects( iface, &filter, DIDFT_AXIS | DIDFT_POV, reset_object_value, impl );
+}
+
+static HRESULT WINAPI dinput_device_set_property( IDirectInputDevice8W *iface, const GUID *guid,
+                                                  const DIPROPHEADER *header )
 {
     struct set_object_property_params params = {.iface = iface, .header = header, .property = LOWORD( guid )};
     struct dinput_device *impl = impl_from_IDirectInputDevice8W( iface );
@@ -1045,107 +1365,77 @@ static HRESULT WINAPI dinput_device_SetProperty( IDirectInputDevice8W *iface, co
     DIPROPHEADER filter;
     HRESULT hr;
 
-    TRACE( "iface %p, guid %s, header %p\n", iface, debugstr_guid( guid ), header );
-
-    if (!header) return DIERR_INVALIDPARAM;
-    if (header->dwHeaderSize != sizeof(DIPROPHEADER)) return DIERR_INVALIDPARAM;
-    if (!IS_DIPROP( guid )) return DI_OK;
-
     filter = *header;
     if (FAILED(hr = enum_object_filter_init( impl, &filter ))) return hr;
+    if (FAILED(hr = check_property( impl, guid, header, TRUE ))) return hr;
 
     switch (LOWORD( guid ))
     {
     case (DWORD_PTR)DIPROP_RANGE:
-    {
-        const DIPROPRANGE *value = (const DIPROPRANGE *)header;
-        if (header->dwSize != sizeof(DIPROPRANGE)) return DIERR_INVALIDPARAM;
-        if (value->lMin > value->lMax) return DIERR_INVALIDPARAM;
-        hr = impl->vtbl->enum_objects( iface, &filter, DIDFT_AXIS, set_object_property, &params );
-        if (FAILED(hr)) return hr;
-        return DI_OK;
-    }
     case (DWORD_PTR)DIPROP_DEADZONE:
     case (DWORD_PTR)DIPROP_SATURATION:
     {
-        const DIPROPDWORD *value = (const DIPROPDWORD *)header;
-        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
-        if (value->dwData > 10000) return DIERR_INVALIDPARAM;
         hr = impl->vtbl->enum_objects( iface, &filter, DIDFT_AXIS, set_object_property, &params );
         if (FAILED(hr)) return hr;
+        reset_device_state( iface );
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_CALIBRATIONMODE:
+    {
+        const DIPROPDWORD *value = (const DIPROPDWORD *)header;
+        if (value->dwData > DIPROPCALIBRATIONMODE_RAW) return DIERR_INVALIDPARAM;
+        hr = impl->vtbl->enum_objects( iface, &filter, DIDFT_AXIS, set_object_property, &params );
+        if (FAILED(hr)) return hr;
+        reset_device_state( iface );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_AUTOCENTER:
     {
         const DIPROPDWORD *value = (const DIPROPDWORD *)header;
-        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
-        EnterCriticalSection( &impl->crit );
-        if (impl->acquired) hr = DIERR_ACQUIRED;
-        else if (value->dwData > DIPROPAUTOCENTER_ON) hr = DIERR_INVALIDPARAM;
-        else hr = DIERR_UNSUPPORTED;
-        LeaveCriticalSection( &impl->crit );
-        return hr;
+        if (!(impl->caps.dwFlags & DIDC_FORCEFEEDBACK)) return DIERR_UNSUPPORTED;
+
+        FIXME( "DIPROP_AUTOCENTER stub!\n" );
+        impl->autocenter = value->dwData;
+        return DI_OK;
     }
-    case (DWORD_PTR)DIPROP_FFLOAD:
-    case (DWORD_PTR)DIPROP_GRANULARITY:
-    case (DWORD_PTR)DIPROP_VIDPID:
-        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
-        return DIERR_READONLY;
-    case (DWORD_PTR)DIPROP_TYPENAME:
-    case (DWORD_PTR)DIPROP_USERNAME:
-        if (header->dwSize != sizeof(DIPROPSTRING)) return DIERR_INVALIDPARAM;
-        return DIERR_READONLY;
-    case (DWORD_PTR)DIPROP_GUIDANDPATH:
-        if (header->dwSize != sizeof(DIPROPGUIDANDPATH)) return DIERR_INVALIDPARAM;
-        return DIERR_READONLY;
+    case (DWORD_PTR)DIPROP_FFGAIN:
+    {
+        const DIPROPDWORD *value = (const DIPROPDWORD *)header;
+        if (!impl->vtbl->send_device_gain) return DIERR_UNSUPPORTED;
+        impl->device_gain = value->dwData;
+        if (!impl->acquired || !(impl->dwCoopLevel & DISCL_EXCLUSIVE)) return DI_OK;
+        return impl->vtbl->send_device_gain( iface, impl->device_gain );
+    }
     case (DWORD_PTR)DIPROP_AXISMODE:
     {
         const DIPROPDWORD *value = (const DIPROPDWORD *)header;
-        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
-        if (header->dwHow != DIPH_DEVICE) return DIERR_UNSUPPORTED;
-        if (header->dwHow == DIPH_DEVICE && header->dwObj) return DIERR_INVALIDPARAM;
 
         TRACE( "Axis mode: %s\n", value->dwData == DIPROPAXISMODE_ABS ? "absolute" : "relative" );
-        EnterCriticalSection( &impl->crit );
-        if (impl->acquired) hr = DIERR_ACQUIRED;
-        else if (!impl->user_format) hr = DI_OK;
-        else
+        if (impl->user_format)
         {
             impl->user_format->dwFlags &= ~DIDFT_AXIS;
             impl->user_format->dwFlags |= value->dwData == DIPROPAXISMODE_ABS ? DIDF_ABSAXIS : DIDF_RELAXIS;
-            hr = DI_OK;
         }
-        LeaveCriticalSection( &impl->crit );
-        return hr;
+        return DI_OK;
     }
     case (DWORD_PTR)DIPROP_BUFFERSIZE:
     {
         const DIPROPDWORD *value = (const DIPROPDWORD *)header;
-        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
 
         TRACE( "buffersize = %d\n", value->dwData );
 
-        EnterCriticalSection( &impl->crit );
-        if (impl->acquired) hr = DIERR_ACQUIRED;
-        else
-        {
-            impl->buffersize = value->dwData;
-            impl->queue_len = min( impl->buffersize, 1024 );
-            free( impl->data_queue );
+        impl->buffersize = value->dwData;
+        impl->queue_len = min( impl->buffersize, 1024 );
+        free( impl->data_queue );
 
-            impl->data_queue = impl->queue_len ? malloc( impl->queue_len * sizeof(DIDEVICEOBJECTDATA) ) : NULL;
-            impl->queue_head = impl->queue_tail = impl->overflow = 0;
-            hr = DI_OK;
-        }
-        LeaveCriticalSection( &impl->crit );
-        return hr;
+        impl->data_queue = impl->queue_len ? malloc( impl->queue_len * sizeof(DIDEVICEOBJECTDATA) ) : NULL;
+        impl->queue_head = impl->queue_tail = impl->overflow = 0;
+        return DI_OK;
     }
     case (DWORD_PTR)DIPROP_APPDATA:
     {
         const DIPROPPOINTER *value = (const DIPROPPOINTER *)header;
         int user_offset;
-        if (header->dwSize != sizeof(DIPROPPOINTER)) return DIERR_INVALIDPARAM;
-        if (header->dwHow == DIPH_DEVICE) return DIERR_UNSUPPORTED;
         hr = impl->vtbl->enum_objects( iface, &filter, object_mask, find_object, &instance );
         if (FAILED(hr)) return hr;
         if (hr == DIENUM_CONTINUE) return DIERR_OBJECTNOTFOUND;
@@ -1159,6 +1449,25 @@ static HRESULT WINAPI dinput_device_SetProperty( IDirectInputDevice8W *iface, co
     }
 
     return DI_OK;
+}
+
+static HRESULT WINAPI dinput_device_SetProperty( IDirectInputDevice8W *iface, const GUID *guid,
+                                                 const DIPROPHEADER *header )
+{
+    struct dinput_device *impl = impl_from_IDirectInputDevice8W( iface );
+    HRESULT hr;
+
+    TRACE( "iface %p, guid %s, header %p\n", iface, debugstr_guid( guid ), header );
+
+    if (!header) return DIERR_INVALIDPARAM;
+    if (header->dwHeaderSize != sizeof(DIPROPHEADER)) return DIERR_INVALIDPARAM;
+    if (!IS_DIPROP( guid )) return DI_OK;
+
+    EnterCriticalSection( &impl->crit );
+    hr = dinput_device_set_property( iface, guid, header );
+    LeaveCriticalSection( &impl->crit );
+
+    return hr;
 }
 
 static void dinput_device_set_username( struct dinput_device *impl, const DIPROPSTRING *value )
@@ -1356,7 +1665,7 @@ static HRESULT WINAPI dinput_device_CreateEffect( IDirectInputDevice8W *iface, c
                                                   IUnknown *outer )
 {
     struct dinput_device *impl = impl_from_IDirectInputDevice8W( iface );
-    DWORD flags = DIEP_ALLPARAMS;
+    DWORD flags;
     HRESULT hr;
 
     TRACE( "iface %p, guid %s, params %p, out %p, outer %p\n", iface, debugstr_guid( guid ),
@@ -1371,12 +1680,13 @@ static HRESULT WINAPI dinput_device_CreateEffect( IDirectInputDevice8W *iface, c
 
     hr = IDirectInputEffect_Initialize( *out, DINPUT_instance, impl->dinput->dwVersion, guid );
     if (FAILED(hr)) goto failed;
-
     if (!params) return DI_OK;
+
+    flags = params->dwSize == sizeof(DIEFFECT_DX6) ? DIEP_ALLPARAMS : DIEP_ALLPARAMS_DX5;
     if (!impl->acquired || !(impl->dwCoopLevel & DISCL_EXCLUSIVE)) flags |= DIEP_NODOWNLOAD;
     hr = IDirectInputEffect_SetParameters( *out, params, flags );
     if (FAILED(hr)) goto failed;
-    return hr;
+    return DI_OK;
 
 failed:
     IDirectInputEffect_Release( *out );
@@ -1481,7 +1791,7 @@ static HRESULT WINAPI dinput_device_SendForceFeedbackCommand( IDirectInputDevice
     struct dinput_device *impl = impl_from_IDirectInputDevice8W( iface );
     HRESULT hr;
 
-    TRACE( "iface %p, flags %x.\n", iface, command );
+    TRACE( "iface %p, command %#x.\n", iface, command );
 
     switch (command)
     {
@@ -1499,7 +1809,7 @@ static HRESULT WINAPI dinput_device_SendForceFeedbackCommand( IDirectInputDevice
 
     EnterCriticalSection( &impl->crit );
     if (!impl->acquired || !(impl->dwCoopLevel & DISCL_EXCLUSIVE)) hr = DIERR_NOTEXCLUSIVEACQUIRED;
-    else hr = impl->vtbl->send_force_feedback_command( iface, command );
+    else hr = impl->vtbl->send_force_feedback_command( iface, command, FALSE );
     LeaveCriticalSection( &impl->crit );
 
     return hr;
@@ -1535,10 +1845,10 @@ static HRESULT WINAPI dinput_device_Poll( IDirectInputDevice8W *iface )
     EnterCriticalSection( &impl->crit );
     if (!impl->acquired) hr = DIERR_NOTACQUIRED;
     LeaveCriticalSection( &impl->crit );
-    if (hr != DI_OK) return hr;
+    if (FAILED(hr)) return hr;
 
     if (impl->vtbl->poll) return impl->vtbl->poll( iface );
-    return DI_OK;
+    return hr;
 }
 
 static HRESULT WINAPI dinput_device_SendDeviceData( IDirectInputDevice8W *iface, DWORD size,
@@ -1608,13 +1918,18 @@ static HRESULT WINAPI dinput_device_BuildActionMap( IDirectInputDevice8W *iface,
         load_success = load_mapping_settings( impl, format, username_buf );
     }
 
-    if (load_success) return DI_OK;
+    if (load_success) {
+        /* Update dwCRC to track if action format has changed */
+        for (i=0; i < format->dwNumActions; i++)
+        {
+            format->dwCRC ^= (format->rgoAction[i].dwObjID << i * 2) | (format->rgoAction[i].dwObjID >> (sizeof(format->dwCRC) * 8 - i * 2));
+            format->dwCRC ^= (format->rgoAction[i].dwSemantic << (i * 2 + 5)) | (format->rgoAction[i].dwSemantic >> (sizeof(format->dwCRC) * 8 - (i * 2 + 5)));
+        }
+        return DI_OK;
+    }
 
     for (i = 0; i < format->dwNumActions; i++)
     {
-        /* Don't touch a user configured action */
-        if (format->rgoAction[i].dwHow == DIAH_USERCONFIG) continue;
-
         genre = format->rgoAction[i].dwSemantic & DIGENRE_ANY;
         if (devMask == genre || (devMask == DIGENRE_ANY && genre != DIMOUSE_MASK && genre != DIKEYBOARD_MASK))
         {
@@ -1646,6 +1961,14 @@ static HRESULT WINAPI dinput_device_BuildActionMap( IDirectInputDevice8W *iface,
         }
     }
 
+    /* Update dwCRC to track if action format has changed */
+    format->dwCRC = 0;
+    for (i=0; i < format->dwNumActions; i++)
+    {
+        format->dwCRC ^= (format->rgoAction[i].dwObjID << i * 2) | (format->rgoAction[i].dwObjID >> (sizeof(format->dwCRC) * 8 - i * 2));
+        format->dwCRC ^= (format->rgoAction[i].dwSemantic << (i * 2 + 5)) | (format->rgoAction[i].dwSemantic >> (sizeof(format->dwCRC) * 8 - (i * 2 + 5)));
+    }
+
     if (!has_actions) return DI_NOEFFECT;
     if (flags & (DIDBAM_DEFAULT|DIDBAM_PRESERVE|DIDBAM_INITIALIZE|DIDBAM_HWDEFAULTS))
         FIXME("Unimplemented flags %#x\n", flags);
@@ -1663,6 +1986,7 @@ static HRESULT WINAPI dinput_device_SetActionMap( IDirectInputDevice8W *iface, D
     DIPROPSTRING dps;
     WCHAR username_buf[MAX_PATH];
     DWORD username_len = MAX_PATH;
+    DWORD new_crc = 0;
     int i, action = 0, num_actions = 0;
     unsigned int offset = 0;
     const DIDATAFORMAT *df;
@@ -1695,12 +2019,30 @@ static HRESULT WINAPI dinput_device_SetActionMap( IDirectInputDevice8W *iface, D
     data_format.dwFlags = DIDF_RELAXIS;
     data_format.dwDataSize = format->dwDataSize;
 
+    /* Calculate checksum for actionformat */
+    for (i=0; i < format->dwNumActions; i++)
+    {
+        new_crc ^= (format->rgoAction[i].dwObjID << i * 2) | (format->rgoAction[i].dwObjID >> (sizeof(format->dwCRC) * 8 - i * 2));
+        new_crc ^= (format->rgoAction[i].dwSemantic << (i * 2 + 5)) | (format->rgoAction[i].dwSemantic >> (sizeof(format->dwCRC) * 8 - (i * 2 + 5)));
+    }
+
     /* Count the actions */
     for (i = 0; i < format->dwNumActions; i++)
-        if (IsEqualGUID( &impl->guid, &format->rgoAction[i].guidInstance ))
+    {
+        if (IsEqualGUID(&impl->guid, &format->rgoAction[i].guidInstance) ||
+                (IsEqualGUID(&IID_NULL, &format->rgoAction[i].guidInstance) &&
+                  ((format->rgoAction[i].dwSemantic & format->dwGenre) == format->dwGenre ||
+                   (format->rgoAction[i].dwSemantic & 0xff000000) == 0xff000000 /* Any Axis */) ))
+        {
             num_actions++;
+        }
+    }
 
-    if (num_actions == 0) return DI_NOEFFECT;
+    /* Should return DI_NOEFFECT if we dont have any actions and actionformat has not changed */
+    if (num_actions == 0 && format->dwCRC == new_crc && !(flags & DIDSAM_FORCESAVE)) return DI_NOEFFECT;
+
+    /* update dwCRC to track if action format has changed */
+    format->dwCRC = new_crc;
 
     /* Construct the dataformat and actionmap */
     obj_df = malloc( sizeof(DIOBJECTDATAFORMAT) * num_actions );
@@ -1731,7 +2073,39 @@ static HRESULT WINAPI dinput_device_SetActionMap( IDirectInputDevice8W *iface, D
 
             action++;
         }
+        else if ((format->rgoAction[i].dwSemantic & format->dwGenre) == format->dwGenre ||
+                 (format->rgoAction[i].dwSemantic & 0xff000000) == 0xff000000 /* Any Axis */)
+        {
+            DWORD obj_id = semantic_to_obj_id(impl, format->rgoAction[i].dwSemantic);
+            DWORD type = DIDFT_GETTYPE(obj_id);
+            DWORD inst = DIDFT_GETINSTANCE(obj_id);
+            LPDIOBJECTDATAFORMAT obj;
+
+            if (type == DIDFT_PSHBUTTON) type = DIDFT_BUTTON;
+            else if (type == DIDFT_RELAXIS) type = DIDFT_AXIS;
+
+            obj = dataformat_to_odf_by_type(df, inst, type);
+            TRACE("obj %p, inst 0x%08x, type 0x%08x\n", obj, inst, type);
+            if(obj)
+            {
+                memcpy(&obj_df[action], obj, df->dwObjSize);
+
+                impl->action_map[action].uAppData = format->rgoAction[i].uAppData;
+                impl->action_map[action].offset = offset;
+                obj_df[action].dwOfs = offset;
+                offset += (type & DIDFT_BUTTON) ? 1 : 4;
+
+                action++;
+            }
+        }
     }
+
+    if (action == 0)
+    {
+        free( obj_df );
+        return DI_NOEFFECT;
+    }
+    data_format.dwNumObjs = action;
 
     IDirectInputDevice8_SetDataFormat( iface, &data_format );
 
@@ -1745,6 +2119,7 @@ static HRESULT WINAPI dinput_device_SetActionMap( IDirectInputDevice8W *iface, D
     dpr.lMin = format->lAxisMin;
     dpr.lMax = format->lAxisMax;
     dpr.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+    dpr.diph.dwObj = 0;
     dpr.diph.dwHow = DIPH_DEVICE;
     IDirectInputDevice8_SetProperty( iface, DIPROP_RANGE, &dpr.diph );
 
@@ -1753,6 +2128,7 @@ static HRESULT WINAPI dinput_device_SetActionMap( IDirectInputDevice8W *iface, D
         dp.diph.dwSize = sizeof(DIPROPDWORD);
         dp.dwData = format->dwBufferSize;
         dp.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+        dp.diph.dwObj = 0;
         dp.diph.dwHow = DIPH_DEVICE;
         IDirectInputDevice8_SetProperty( iface, DIPROP_BUFFERSIZE, &dp.diph );
     }
@@ -1844,6 +2220,7 @@ HRESULT dinput_device_alloc( SIZE_T size, const struct dinput_device_vtbl *vtbl,
     This->caps.dwSize = sizeof(DIDEVCAPS);
     This->caps.dwFlags = DIDC_ATTACHED | DIDC_EMULATED;
     This->device_format = format;
+    This->device_gain = 10000;
     InitializeCriticalSection( &This->crit );
     This->dinput = dinput;
     IDirectInput_AddRef( &dinput->IDirectInput7A_iface );
@@ -1897,6 +2274,9 @@ static BOOL CALLBACK enum_objects_init( const DIDEVICEOBJECTINSTANCEW *instance,
         obj_format->dwFlags = instance->dwFlags;
     }
 
+    if (impl->object_properties && (instance->dwType & (DIDFT_AXIS | DIDFT_POV)))
+        reset_object_value( instance, impl );
+
     format->dwNumObjs++;
     return DIENUM_CONTINUE;
 }
@@ -1916,6 +2296,7 @@ HRESULT dinput_device_init( IDirectInputDevice8W *iface )
 
     size = format->dwNumObjs * sizeof(*format->rgodf);
     if (!(format->rgodf = calloc( 1, size ))) return DIERR_OUTOFMEMORY;
+
     format->dwSize = sizeof(*format);
     format->dwObjSize = sizeof(*format->rgodf);
     format->dwFlags = DIDF_ABSAXIS;

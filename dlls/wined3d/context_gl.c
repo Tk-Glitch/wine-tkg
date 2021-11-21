@@ -2729,13 +2729,13 @@ map:
 void *wined3d_context_gl_map_bo_address(struct wined3d_context_gl *context_gl,
         const struct wined3d_bo_address *data, size_t size, uint32_t flags)
 {
-    struct wined3d_bo_gl *bo;
+    struct wined3d_bo *bo;
     void *map_ptr;
 
-    if (!(bo = (struct wined3d_bo_gl *)data->buffer_object))
+    if (!(bo = data->buffer_object))
         return data->addr;
 
-    if (!(map_ptr = wined3d_bo_gl_map(bo, context_gl, (uintptr_t)data->addr, size, flags)))
+    if (!(map_ptr = wined3d_bo_gl_map(wined3d_bo_gl(bo), context_gl, (uintptr_t)data->addr, size, flags)))
         ERR("Failed to map bo.\n");
 
     return map_ptr;
@@ -2748,8 +2748,9 @@ static void flush_bo_ranges(struct wined3d_context_gl *context_gl, const struct 
     struct wined3d_bo_gl *bo;
     unsigned int i;
 
-    if (!(bo = (struct wined3d_bo_gl *)data->buffer_object) || bo->b.coherent)
+    if (!data->buffer_object || data->buffer_object->coherent)
         return;
+    bo = wined3d_bo_gl(data->buffer_object);
 
     gl_info = context_gl->gl_info;
     wined3d_context_gl_bind_bo(context_gl, bo->binding, bo->id);
@@ -2782,8 +2783,9 @@ void wined3d_context_gl_unmap_bo_address(struct wined3d_context_gl *context_gl,
     const struct wined3d_gl_info *gl_info;
     struct wined3d_bo_gl *bo;
 
-    if (!(bo = (struct wined3d_bo_gl *)data->buffer_object))
+    if (!data->buffer_object)
         return;
+    bo = wined3d_bo_gl(data->buffer_object);
 
     flush_bo_ranges(context_gl, wined3d_const_bo_address(data), range_count, ranges);
 
@@ -2816,8 +2818,8 @@ void wined3d_context_gl_copy_bo_address(struct wined3d_context_gl *context_gl,
     BYTE *dst_ptr, *src_ptr;
 
     gl_info = context_gl->gl_info;
-    src_bo = (struct wined3d_bo_gl *)src->buffer_object;
-    dst_bo = (struct wined3d_bo_gl *)dst->buffer_object;
+    src_bo = src->buffer_object ? wined3d_bo_gl(src->buffer_object) : NULL;
+    dst_bo = dst->buffer_object ? wined3d_bo_gl(dst->buffer_object) : NULL;
 
     if (dst_bo && src_bo)
     {
@@ -2920,6 +2922,7 @@ bool wined3d_context_gl_create_bo(struct wined3d_context_gl *context_gl, GLsizei
     list_init(&bo->b.users);
     bo->command_fence_id = 0;
     bo->b.memory_offset = 0;
+    bo->buffer_offset = 0;
     bo->b.map_ptr = NULL;
 
     return true;
@@ -3785,7 +3788,8 @@ static void wined3d_context_gl_bind_unordered_access_views(struct wined3d_contex
                 format_gl->internal));
 
         if (view_gl->counter_bo.id)
-            GL_EXTCALL(glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, i, view_gl->counter_bo.id));
+            GL_EXTCALL(glBindBufferRange(GL_ATOMIC_COUNTER_BUFFER, i, view_gl->counter_bo.id,
+                    view_gl->counter_bo.buffer_offset, view_gl->counter_bo.size));
     }
     checkGLcall("Bind unordered access views");
 }
@@ -3796,8 +3800,8 @@ static void context_gl_load_shader_resources(struct wined3d_context_gl *context_
     struct wined3d_shader_sampler_map_entry *entry;
     struct wined3d_shader_resource_view_gl *srv_gl;
     struct wined3d_shader_resource_view *view;
-    struct wined3d_buffer_gl *buffer_gl;
     struct wined3d_shader *shader;
+    struct wined3d_buffer *buffer;
     unsigned int i, j;
 
     for (i = 0; i < WINED3D_SHADER_TYPE_COUNT; ++i)
@@ -3813,10 +3817,10 @@ static void context_gl_load_shader_resources(struct wined3d_context_gl *context_
             if (!state->cb[i][j].buffer)
                 continue;
 
-            buffer_gl = wined3d_buffer_gl(state->cb[i][j].buffer);
-            wined3d_buffer_load(&buffer_gl->b, &context_gl->c, state);
-            wined3d_context_gl_reference_bo(context_gl, &buffer_gl->bo);
-            if (!buffer_gl->b.bo_user.valid)
+            buffer = state->cb[i][j].buffer;
+            wined3d_buffer_load(buffer, &context_gl->c, state);
+            wined3d_context_gl_reference_buffer(context_gl, buffer);
+            if (!buffer->bo_user.valid)
                 device_invalidate_state(context_gl->c.device, STATE_CONSTANT_BUFFER(i));
         }
 
@@ -3829,9 +3833,9 @@ static void context_gl_load_shader_resources(struct wined3d_context_gl *context_
 
             if (view->resource->type == WINED3D_RTYPE_BUFFER)
             {
-                buffer_gl = wined3d_buffer_gl(buffer_from_resource(view->resource));
-                wined3d_buffer_load(&buffer_gl->b, &context_gl->c, state);
-                wined3d_context_gl_reference_bo(context_gl, &buffer_gl->bo);
+                buffer = buffer_from_resource(view->resource);
+                wined3d_buffer_load(buffer, &context_gl->c, state);
+                wined3d_context_gl_reference_buffer(context_gl, buffer);
 
                 srv_gl = wined3d_shader_resource_view_gl(view);
                 if (!srv_gl->bo_user.valid)
@@ -3850,8 +3854,8 @@ static void context_gl_load_unordered_access_resources(struct wined3d_context_gl
 {
     struct wined3d_unordered_access_view_gl *uav_gl;
     struct wined3d_unordered_access_view *view;
-    struct wined3d_buffer_gl *buffer_gl;
     struct wined3d_texture *texture;
+    struct wined3d_buffer *buffer;
     unsigned int i;
 
     context_gl->c.uses_uavs = 0;
@@ -3866,10 +3870,10 @@ static void context_gl_load_unordered_access_resources(struct wined3d_context_gl
 
         if (view->resource->type == WINED3D_RTYPE_BUFFER)
         {
-            buffer_gl = wined3d_buffer_gl(buffer_from_resource(view->resource));
-            wined3d_buffer_load_location(&buffer_gl->b, &context_gl->c, WINED3D_LOCATION_BUFFER);
+            buffer = buffer_from_resource(view->resource);
+            wined3d_buffer_load_location(buffer, &context_gl->c, WINED3D_LOCATION_BUFFER);
             wined3d_unordered_access_view_invalidate_location(view, ~WINED3D_LOCATION_BUFFER);
-            wined3d_context_gl_reference_bo(context_gl, &buffer_gl->bo);
+            wined3d_context_gl_reference_buffer(context_gl, buffer);
 
             uav_gl = wined3d_unordered_access_view_gl(view);
             if (!uav_gl->bo_user.valid)
@@ -3889,20 +3893,18 @@ static void context_gl_load_unordered_access_resources(struct wined3d_context_gl
 static void context_gl_load_stream_output_buffers(struct wined3d_context_gl *context_gl,
         const struct wined3d_state *state)
 {
+    struct wined3d_buffer *buffer;
     unsigned int i;
 
     for (i = 0; i < ARRAY_SIZE(state->stream_output); ++i)
     {
-        struct wined3d_buffer_gl *buffer_gl;
-
-        if (!state->stream_output[i].buffer)
+        if (!(buffer = state->stream_output[i].buffer))
             continue;
 
-        buffer_gl = wined3d_buffer_gl(state->stream_output[i].buffer);
-        wined3d_buffer_load(&buffer_gl->b, &context_gl->c, state);
-        wined3d_buffer_invalidate_location(&buffer_gl->b, ~WINED3D_LOCATION_BUFFER);
-        wined3d_context_gl_reference_bo(context_gl, &buffer_gl->bo);
-        if (!buffer_gl->b.bo_user.valid)
+        wined3d_buffer_load(buffer, &context_gl->c, state);
+        wined3d_buffer_invalidate_location(buffer, ~WINED3D_LOCATION_BUFFER);
+        wined3d_context_gl_reference_buffer(context_gl, buffer);
+        if (!buffer->bo_user.valid)
             device_invalidate_state(context_gl->c.device, STATE_STREAM_OUTPUT);
     }
 }
@@ -3954,35 +3956,46 @@ static BOOL context_apply_draw_state(struct wined3d_context *context,
     while (map)
     {
         const struct wined3d_stream_info_element *e;
-        struct wined3d_buffer_gl *buffer_gl;
+        struct wined3d_buffer *buffer;
 
         e = &context->stream_info.elements[wined3d_bit_scan(&map)];
-        buffer_gl = wined3d_buffer_gl(state->streams[e->stream_idx].buffer);
+        buffer = state->streams[e->stream_idx].buffer;
 
-        if (!buffer_gl->b.bo_user.valid)
+        if (!buffer->bo_user.valid)
             device_invalidate_state(device, STATE_STREAMSRC);
         else
-            wined3d_buffer_load(&buffer_gl->b, context, state);
-        wined3d_context_gl_reference_bo(context_gl, &buffer_gl->bo);
+            wined3d_buffer_load(buffer, context, state);
     }
     /* Loading the buffers above may have invalidated the stream info. */
     if (wined3d_context_is_graphics_state_dirty(context, STATE_STREAMSRC))
         context_update_stream_info(context, state);
 
+    map = context->stream_info.use_map;
+    while (map)
+    {
+        const struct wined3d_stream_info_element *e;
+        struct wined3d_buffer *buffer;
+
+        e = &context->stream_info.elements[wined3d_bit_scan(&map)];
+        buffer = state->streams[e->stream_idx].buffer;
+
+        wined3d_context_gl_reference_buffer(context_gl, buffer);
+    }
+
     if (indexed && state->index_buffer)
     {
-        struct wined3d_buffer_gl *buffer_gl = wined3d_buffer_gl(state->index_buffer);
+        struct wined3d_buffer *buffer = state->index_buffer;
 
         if (context->stream_info.all_vbo)
         {
-            wined3d_buffer_load(&buffer_gl->b, context, state);
-            if (!buffer_gl->b.bo_user.valid)
+            wined3d_buffer_load(buffer, context, state);
+            if (!buffer->bo_user.valid)
                 device_invalidate_state(device, STATE_INDEXBUFFER);
-            wined3d_context_gl_reference_bo(context_gl, &buffer_gl->bo);
+            wined3d_context_gl_reference_buffer(context_gl, buffer);
         }
         else
         {
-            wined3d_buffer_load_sysmem(&buffer_gl->b, context);
+            wined3d_buffer_load_sysmem(buffer, context);
         }
     }
 
@@ -4326,12 +4339,12 @@ void dispatch_compute(struct wined3d_device *device, const struct wined3d_state 
     if (parameters->indirect)
     {
         const struct wined3d_indirect_dispatch_parameters *indirect = &parameters->u.indirect;
-        struct wined3d_buffer_gl *buffer_gl = wined3d_buffer_gl(indirect->buffer);
+        struct wined3d_bo_gl *bo_gl = wined3d_bo_gl(indirect->buffer->buffer_object);
 
-        GL_EXTCALL(glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, buffer_gl->bo.id));
+        GL_EXTCALL(glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, bo_gl->id));
         GL_EXTCALL(glDispatchComputeIndirect((GLintptr)indirect->offset));
         GL_EXTCALL(glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, 0));
-        wined3d_context_gl_reference_bo(context_gl, &buffer_gl->bo);
+        wined3d_context_gl_reference_bo(context_gl, bo_gl);
     }
     else
     {
@@ -4712,8 +4725,8 @@ static void draw_primitive_immediate_mode(struct wined3d_context_gl *context_gl,
 static void wined3d_context_gl_draw_indirect(struct wined3d_context_gl *context_gl, const struct wined3d_state *state,
         const struct wined3d_indirect_draw_parameters *parameters, unsigned int idx_size)
 {
+    struct wined3d_bo_gl *bo_gl = wined3d_bo_gl(parameters->buffer->buffer_object);
     GLenum gl_primitive_type = gl_primitive_type_from_d3d(state->primitive_type);
-    struct wined3d_buffer_gl *buffer_gl = wined3d_buffer_gl(parameters->buffer);
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const void *offset;
 
@@ -4723,7 +4736,7 @@ static void wined3d_context_gl_draw_indirect(struct wined3d_context_gl *context_
         return;
     }
 
-    GL_EXTCALL(glBindBuffer(GL_DRAW_INDIRECT_BUFFER, buffer_gl->bo.id));
+    GL_EXTCALL(glBindBuffer(GL_DRAW_INDIRECT_BUFFER, bo_gl->id));
 
     offset = (void *)(GLintptr)parameters->offset;
     if (idx_size)
@@ -4739,7 +4752,7 @@ static void wined3d_context_gl_draw_indirect(struct wined3d_context_gl *context_
     }
 
     GL_EXTCALL(glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0));
-    wined3d_context_gl_reference_bo(context_gl, &buffer_gl->bo);
+    wined3d_context_gl_reference_bo(context_gl, bo_gl);
 
     checkGLcall("draw indirect");
 }
@@ -4897,10 +4910,12 @@ void draw_primitive(struct wined3d_device *device, const struct wined3d_state *s
     if (parameters->indexed)
     {
         struct wined3d_buffer *index_buffer = state->index_buffer;
-        if (!index_buffer->buffer_object || !stream_info->all_vbo)
+        struct wined3d_bo *bo = index_buffer->buffer_object;
+
+        if (!bo || !stream_info->all_vbo)
             idx_data = index_buffer->resource.heap_memory;
         else
-            idx_data = NULL;
+            idx_data = (void *)wined3d_bo_gl(bo)->buffer_offset;
         idx_data = (const BYTE *)idx_data + state->index_offset;
 
         if (state->index_format == WINED3DFMT_R16_UINT)
@@ -5056,6 +5071,16 @@ void wined3d_context_gl_unload_tex_coords(const struct wined3d_context_gl *conte
     }
 }
 
+static const void *get_vertex_attrib_pointer(const struct wined3d_stream_info_element *element,
+        const struct wined3d_state *state)
+{
+    const uint8_t *offset = element->data.addr + state->load_base_vertex_index * element->stride;
+
+    if (element->data.buffer_object)
+        offset += wined3d_bo_gl(element->data.buffer_object)->buffer_offset;
+    return offset;
+}
+
 void wined3d_context_gl_load_tex_coords(const struct wined3d_context_gl *context_gl,
         const struct wined3d_stream_info *si, GLuint *current_bo, const struct wined3d_state *state)
 {
@@ -5099,7 +5124,7 @@ void wined3d_context_gl_load_tex_coords(const struct wined3d_context_gl *context
             /* The coords to supply depend completely on the fvf/vertex shader. */
             format_gl = wined3d_format_gl(e->format);
             gl_info->gl_ops.gl.p_glTexCoordPointer(format_gl->vtx_format, format_gl->vtx_type, e->stride,
-                    e->data.addr + state->load_base_vertex_index * e->stride);
+                    get_vertex_attrib_pointer(e, state));
             gl_info->gl_ops.gl.p_glEnableClientState(GL_TEXTURE_COORD_ARRAY);
             state->streams[e->stream_idx].buffer->bo_user.valid = true;
         }
@@ -5143,6 +5168,7 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
     const struct wined3d_stream_info_element *e;
     const struct wined3d_format_gl *format_gl;
     GLuint current_bo, bo;
+    const void *offset;
 
     TRACE("context_gl %p, si %p, state %p.\n", context_gl, si, state);
 
@@ -5173,6 +5199,7 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
     {
         e = &si->elements[WINED3D_FFP_POSITION];
         format_gl = wined3d_format_gl(e->format);
+        offset = get_vertex_attrib_pointer(e, state);
 
         bo = wined3d_bo_gl_id(e->data.buffer_object);
         if (current_bo != bo)
@@ -5182,11 +5209,8 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
             current_bo = bo;
         }
 
-        TRACE("glVertexPointer(%#x, %#x, %#x, %p);\n",
-                format_gl->vtx_format, format_gl->vtx_type, e->stride,
-                e->data.addr + state->load_base_vertex_index * e->stride);
-        gl_info->gl_ops.gl.p_glVertexPointer(format_gl->vtx_format, format_gl->vtx_type, e->stride,
-                e->data.addr + state->load_base_vertex_index * e->stride);
+        TRACE("glVertexPointer(%#x, %#x, %#x, %p);\n", format_gl->vtx_format, format_gl->vtx_type, e->stride, offset);
+        gl_info->gl_ops.gl.p_glVertexPointer(format_gl->vtx_format, format_gl->vtx_type, e->stride, offset);
         checkGLcall("glVertexPointer(...)");
         gl_info->gl_ops.gl.p_glEnableClientState(GL_VERTEX_ARRAY);
         checkGLcall("glEnableClientState(GL_VERTEX_ARRAY)");
@@ -5198,6 +5222,7 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
     {
         e = &si->elements[WINED3D_FFP_NORMAL];
         format_gl = wined3d_format_gl(e->format);
+        offset = get_vertex_attrib_pointer(e, state);
 
         bo = wined3d_bo_gl_id(e->data.buffer_object);
         if (current_bo != bo)
@@ -5207,10 +5232,8 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
             current_bo = bo;
         }
 
-        TRACE("glNormalPointer(%#x, %#x, %p);\n", format_gl->vtx_type, e->stride,
-                e->data.addr + state->load_base_vertex_index * e->stride);
-        gl_info->gl_ops.gl.p_glNormalPointer(format_gl->vtx_type, e->stride,
-                e->data.addr + state->load_base_vertex_index * e->stride);
+        TRACE("glNormalPointer(%#x, %#x, %p);\n", format_gl->vtx_type, e->stride, offset);
+        gl_info->gl_ops.gl.p_glNormalPointer(format_gl->vtx_type, e->stride, offset);
         checkGLcall("glNormalPointer(...)");
         gl_info->gl_ops.gl.p_glEnableClientState(GL_NORMAL_ARRAY);
         checkGLcall("glEnableClientState(GL_NORMAL_ARRAY)");
@@ -5227,6 +5250,7 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
     {
         e = &si->elements[WINED3D_FFP_DIFFUSE];
         format_gl = wined3d_format_gl(e->format);
+        offset = get_vertex_attrib_pointer(e, state);
 
         bo = wined3d_bo_gl_id(e->data.buffer_object);
         if (current_bo != bo)
@@ -5237,10 +5261,8 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
         }
 
         TRACE("glColorPointer(%#x, %#x %#x, %p);\n",
-                format_gl->vtx_format, format_gl->vtx_type, e->stride,
-                e->data.addr + state->load_base_vertex_index * e->stride);
-        gl_info->gl_ops.gl.p_glColorPointer(format_gl->vtx_format, format_gl->vtx_type, e->stride,
-                e->data.addr + state->load_base_vertex_index * e->stride);
+                format_gl->vtx_format, format_gl->vtx_type, e->stride, offset);
+        gl_info->gl_ops.gl.p_glColorPointer(format_gl->vtx_format, format_gl->vtx_type, e->stride, offset);
         checkGLcall("glColorPointer(4, GL_UNSIGNED_BYTE, ...)");
         gl_info->gl_ops.gl.p_glEnableClientState(GL_COLOR_ARRAY);
         checkGLcall("glEnableClientState(GL_COLOR_ARRAY)");
@@ -5258,6 +5280,7 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
         TRACE("Setting specular colour.\n");
 
         e = &si->elements[WINED3D_FFP_SPECULAR];
+        offset = get_vertex_attrib_pointer(e, state);
 
         if (gl_info->supported[EXT_SECONDARY_COLOR])
         {
@@ -5283,10 +5306,8 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
                  * vertex pipeline can pass the specular alpha through, and pixel shaders can read it. So it GL accepts
                  * 4 component secondary colors use it
                  */
-                TRACE("glSecondaryColorPointer(%#x, %#x, %#x, %p);\n", format, type, e->stride,
-                        e->data.addr + state->load_base_vertex_index * e->stride);
-                GL_EXTCALL(glSecondaryColorPointerEXT(format, type, e->stride,
-                        e->data.addr + state->load_base_vertex_index * e->stride));
+                TRACE("glSecondaryColorPointer(%#x, %#x, %#x, %p);\n", format, type, e->stride, offset);
+                GL_EXTCALL(glSecondaryColorPointerEXT(format, type, e->stride, offset));
                 checkGLcall("glSecondaryColorPointerEXT(format, type, ...)");
             }
             else
@@ -5294,20 +5315,16 @@ static void wined3d_context_gl_load_vertex_data(struct wined3d_context_gl *conte
                 switch (type)
                 {
                     case GL_UNSIGNED_BYTE:
-                        TRACE("glSecondaryColorPointer(3, GL_UNSIGNED_BYTE, %#x, %p);\n", e->stride,
-                                e->data.addr + state->load_base_vertex_index * e->stride);
-                        GL_EXTCALL(glSecondaryColorPointerEXT(3, GL_UNSIGNED_BYTE, e->stride,
-                                e->data.addr + state->load_base_vertex_index * e->stride));
+                        TRACE("glSecondaryColorPointer(3, GL_UNSIGNED_BYTE, %#x, %p);\n", e->stride, offset);
+                        GL_EXTCALL(glSecondaryColorPointerEXT(3, GL_UNSIGNED_BYTE, e->stride, offset));
                         checkGLcall("glSecondaryColorPointerEXT(3, GL_UNSIGNED_BYTE, ...)");
                         break;
 
                     default:
                         FIXME("Add 4 component specular colour pointers for type %#x.\n", type);
                         /* Make sure that the right colour component is dropped. */
-                        TRACE("glSecondaryColorPointer(3, %#x, %#x, %p);\n", type, e->stride,
-                                e->data.addr + state->load_base_vertex_index * e->stride);
-                        GL_EXTCALL(glSecondaryColorPointerEXT(3, type, e->stride,
-                                e->data.addr + state->load_base_vertex_index * e->stride));
+                        TRACE("glSecondaryColorPointer(3, %#x, %#x, %p);\n", type, e->stride, offset);
+                        GL_EXTCALL(glSecondaryColorPointerEXT(3, type, e->stride, offset));
                         checkGLcall("glSecondaryColorPointerEXT(3, type, ...)");
                 }
             }
@@ -5377,6 +5394,7 @@ static void wined3d_context_gl_load_numbered_arrays(struct wined3d_context_gl *c
     for (i = 0; i < MAX_ATTRIBS; ++i)
     {
         const struct wined3d_stream_info_element *element = &stream_info->elements[i];
+        const void *offset = get_vertex_attrib_pointer(element, state);
         const struct wined3d_stream_state *stream;
         const struct wined3d_format_gl *format_gl;
 
@@ -5449,14 +5467,13 @@ static void wined3d_context_gl_load_numbered_arrays(struct wined3d_context_gl *c
              * won't be load converted attributes anyway. */
             if (vs && vs->reg_maps.shader_version.major >= 4 && (format_flags & WINED3DFMT_FLAG_INTEGER))
             {
-                GL_EXTCALL(glVertexAttribIPointer(i, format_gl->vtx_format, format_gl->vtx_type,
-                        element->stride, element->data.addr + state->load_base_vertex_index * element->stride));
+                GL_EXTCALL(glVertexAttribIPointer(i, format_gl->vtx_format,
+                        format_gl->vtx_type, element->stride, offset));
             }
             else
             {
                 GL_EXTCALL(glVertexAttribPointer(i, format_gl->vtx_format, format_gl->vtx_type,
-                        !!(format_flags & WINED3DFMT_FLAG_NORMALISED), element->stride,
-                        element->data.addr + state->load_base_vertex_index * element->stride));
+                        !!(format_flags & WINED3DFMT_FLAG_NORMALISED), element->stride, offset));
             }
 
             if (!(context->numbered_array_mask & (1u << i)))

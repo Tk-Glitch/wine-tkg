@@ -88,18 +88,35 @@
     SYSCALL_ENTRY( NtGdiSetVirtualResolution ) \
     SYSCALL_ENTRY( NtGdiSwapBuffers ) \
     SYSCALL_ENTRY( NtGdiTransformPoints ) \
+    SYSCALL_ENTRY( NtUserAddClipboardFormatListener ) \
+    SYSCALL_ENTRY( NtUserAttachThreadInput ) \
     SYSCALL_ENTRY( NtUserCloseDesktop ) \
     SYSCALL_ENTRY( NtUserCloseWindowStation ) \
     SYSCALL_ENTRY( NtUserCreateDesktopEx ) \
     SYSCALL_ENTRY( NtUserCreateWindowStation ) \
+    SYSCALL_ENTRY( NtUserGetClipboardFormatName ) \
+    SYSCALL_ENTRY( NtUserGetClipboardOwner ) \
+    SYSCALL_ENTRY( NtUserGetClipboardSequenceNumber ) \
+    SYSCALL_ENTRY( NtUserGetClipboardViewer ) \
+    SYSCALL_ENTRY( NtUserGetKeyState ) \
+    SYSCALL_ENTRY( NtUserGetKeyboardLayout ) \
+    SYSCALL_ENTRY( NtUserGetKeyboardState ) \
+    SYSCALL_ENTRY( NtUserGetLayeredWindowAttributes ) \
+    SYSCALL_ENTRY( NtUserGetMouseMovePointsEx ) \
     SYSCALL_ENTRY( NtUserGetObjectInformation ) \
+    SYSCALL_ENTRY( NtUserGetOpenClipboardWindow ) \
     SYSCALL_ENTRY( NtUserGetProcessWindowStation ) \
+    SYSCALL_ENTRY( NtUserGetProp ) \
     SYSCALL_ENTRY( NtUserGetThreadDesktop ) \
     SYSCALL_ENTRY( NtUserOpenDesktop ) \
     SYSCALL_ENTRY( NtUserOpenInputDesktop ) \
     SYSCALL_ENTRY( NtUserOpenWindowStation ) \
+    SYSCALL_ENTRY( NtUserRemoveClipboardFormatListener ) \
+    SYSCALL_ENTRY( NtUserRemoveProp ) \
+    SYSCALL_ENTRY( NtUserSetKeyboardState ) \
     SYSCALL_ENTRY( NtUserSetObjectInformation ) \
     SYSCALL_ENTRY( NtUserSetProcessWindowStation ) \
+    SYSCALL_ENTRY( NtUserSetProp ) \
     SYSCALL_ENTRY( NtUserSetThreadDesktop )
 
 #endif /* __WOW64WIN_SYSCALL_H */

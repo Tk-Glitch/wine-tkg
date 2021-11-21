@@ -155,3 +155,129 @@ NTSTATUS WINAPI wow64_NtUserSetObjectInformation( UINT *args )
 
     return NtUserSetObjectInformation( handle, index, info, len );
 }
+
+NTSTATUS WINAPI wow64_NtUserGetProp( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    const WCHAR *str = get_ptr( &args );
+
+    return HandleToUlong( NtUserGetProp( hwnd, str ));
+}
+
+NTSTATUS WINAPI wow64_NtUserSetProp( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    const WCHAR *str = get_ptr( &args );
+    HANDLE handle = get_handle( &args );
+
+    return NtUserSetProp( hwnd, str, handle );
+}
+
+NTSTATUS WINAPI wow64_NtUserRemoveProp( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    const WCHAR *str = get_ptr( &args );
+
+    return HandleToUlong( NtUserRemoveProp( hwnd, str ));
+}
+
+NTSTATUS WINAPI wow64_NtUserGetLayeredWindowAttributes( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    COLORREF *key = get_ptr( &args );
+    BYTE *alpha = get_ptr( &args );
+    DWORD *flags = get_ptr( &args );
+
+    return NtUserGetLayeredWindowAttributes( hwnd, key, alpha, flags );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetClipboardFormatName( UINT *args )
+{
+    UINT format = get_ulong( &args );
+    WCHAR *buffer = get_ptr( &args );
+    INT maxlen = get_ulong( &args );
+
+    return NtUserGetClipboardFormatName( format, buffer, maxlen );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetClipboardOwner( UINT *args )
+{
+    return HandleToUlong( NtUserGetClipboardOwner() );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetOpenClipboardWindow( UINT *args )
+{
+    return HandleToUlong( NtUserGetOpenClipboardWindow() );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetClipboardSequenceNumber( UINT *args )
+{
+    return NtUserGetClipboardSequenceNumber();
+}
+
+NTSTATUS WINAPI wow64_NtUserGetClipboardViewer( UINT *args )
+{
+    return HandleToUlong( NtUserGetClipboardViewer() );
+}
+
+NTSTATUS WINAPI wow64_NtUserAddClipboardFormatListener( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+
+    return NtUserAddClipboardFormatListener( hwnd );
+}
+
+NTSTATUS WINAPI wow64_NtUserRemoveClipboardFormatListener( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+
+    return NtUserRemoveClipboardFormatListener( hwnd );
+}
+
+NTSTATUS WINAPI wow64_NtUserAttachThreadInput( UINT *args )
+{
+    DWORD from = get_ulong( &args );
+    DWORD to = get_ulong( &args );
+    BOOL attach = get_ulong( &args );
+
+    return NtUserAttachThreadInput( from, to, attach );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetKeyState( UINT *args )
+{
+    INT vkey = get_ulong( &args );
+
+    return NtUserGetKeyState( vkey );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetKeyboardLayout( UINT *args )
+{
+    DWORD tid = get_ulong( &args );
+
+    return HandleToUlong( NtUserGetKeyboardLayout( tid ));
+}
+
+NTSTATUS WINAPI wow64_NtUserGetKeyboardState( UINT *args )
+{
+    BYTE *state = get_ptr( &args );
+
+    return NtUserGetKeyboardState( state );
+}
+
+NTSTATUS WINAPI wow64_NtUserSetKeyboardState( UINT *args )
+{
+    BYTE *state = get_ptr( &args );
+
+    return NtUserSetKeyboardState( state );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetMouseMovePointsEx( UINT *args )
+{
+    UINT size = get_ulong( &args );
+    MOUSEMOVEPOINT *ptin = get_ptr( &args );
+    MOUSEMOVEPOINT *ptout = get_ptr( &args );
+    int count = get_ulong( &args );
+    DWORD resolution = get_ulong( &args );
+
+    return NtUserGetMouseMovePointsEx( size, ptin, ptout, count, resolution );
+}

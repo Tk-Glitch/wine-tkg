@@ -3997,7 +3997,7 @@ static void test_text_metrics(const LOGFONTA *lf, const NEWTEXTMETRICA *ntm)
                 expect_break_W = os2_first_char;
             expect_default_W  = expect_break_W - 1;
             expect_first_A    = expect_default_W - 1;
-            expect_last_A     = min(expect_last_W, 0xff);
+            expect_last_A     = min(os2_last_char, 0xff);
         }
         expect_break_A    = expect_break_W;
         expect_default_A  = expect_default_W;
@@ -7786,6 +7786,51 @@ static void test_select_object(void)
     DeleteObject(hfont);
 }
 
+static void test_GetOutlineTextMetrics_subst(void)
+{
+    OUTLINETEXTMETRICA *otm;
+    LOGFONTA lf;
+    HFONT hfont, hfont_old;
+    HDC hdc;
+    DWORD ret;
+    char face_name[LF_FACESIZE];
+    const char* family_name;
+
+    if (!is_font_installed("MS SHELL DLG"))
+    {
+        skip("MS Shell Dlg is not installed\n");
+        return;
+    }
+
+    hdc = GetDC(0);
+    memset(&lf, 0, sizeof(lf));
+    strcpy(lf.lfFaceName, "MS SHELL DLG");
+    lf.lfCharSet = DEFAULT_CHARSET;
+    hfont = CreateFontIndirectA(&lf);
+    ok(hfont != NULL, "failed to create a font\n");
+    hfont_old = SelectObject(hdc, hfont);
+
+    /* face name */
+    ret = GetTextFaceA(hdc, sizeof(face_name), face_name);
+    ok(ret, "GetTextFace failed\n");
+    ok(!lstrcmpiA(lf.lfFaceName, face_name), "expected %s, got %s\n", lf.lfFaceName, face_name);
+
+    ret = GetOutlineTextMetricsA(hdc, 0, NULL);
+    otm = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ret);
+    ret = GetOutlineTextMetricsA(hdc, ret, otm);
+    ok(ret != 0, "GetOutlineTextMetrics failed\n");
+
+    /* family name */
+    family_name = (const char*)otm + (UINT_PTR)otm->otmpFamilyName;
+    ok(lstrcmpiA(lf.lfFaceName, family_name), "expected a real family name (e.g. Tahoma), got %s\n", family_name);
+
+    HeapFree(GetProcessHeap(), 0, otm);
+    SelectObject(hdc, hfont_old);
+    DeleteObject(hfont);
+
+    ReleaseDC(0, hdc);
+}
+
 START_TEST(font)
 {
     static const char *test_names[] =
@@ -7818,6 +7863,7 @@ START_TEST(font)
     test_GetGlyphIndices();
     test_GetKerningPairs();
     test_GetOutlineTextMetrics();
+    test_GetOutlineTextMetrics_subst();
     test_SetTextJustification();
     test_font_charset();
     test_GdiGetCodePage();

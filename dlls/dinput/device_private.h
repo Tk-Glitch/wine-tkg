@@ -44,17 +44,30 @@ struct dinput_device_vtbl
     HRESULT (*enum_objects)( IDirectInputDevice8W *iface, const DIPROPHEADER *filter, DWORD flags,
                              LPDIENUMDEVICEOBJECTSCALLBACKW callback, void *context );
     HRESULT (*get_property)( IDirectInputDevice8W *iface, DWORD property, DIPROPHEADER *header,
-                             DIDEVICEOBJECTINSTANCEW *instance );
-    HRESULT (*set_property)( IDirectInputDevice8W *iface, DWORD property, const DIPROPHEADER *header,
                              const DIDEVICEOBJECTINSTANCEW *instance );
     HRESULT (*get_effect_info)( IDirectInputDevice8W *iface, DIEFFECTINFOW *info, const GUID *guid );
     HRESULT (*create_effect)( IDirectInputDevice8W *iface, IDirectInputEffect **out );
-    HRESULT (*send_force_feedback_command)( IDirectInputDevice8W *iface, DWORD command );
+    HRESULT (*send_force_feedback_command)( IDirectInputDevice8W *iface, DWORD command, BOOL unacquire );
+    HRESULT (*send_device_gain)( IDirectInputDevice8W *iface, LONG device_gain );
     HRESULT (*enum_created_effect_objects)( IDirectInputDevice8W *iface, LPDIENUMCREATEDEFFECTOBJECTSCALLBACK callback,
                                             void *context, DWORD flags );
 };
 
 #define DEVICE_STATE_MAX_SIZE 1024
+
+struct object_properties
+{
+    LONG bit_size;
+    LONG physical_min;
+    LONG physical_max;
+    LONG logical_min;
+    LONG logical_max;
+    LONG range_min;
+    LONG range_max;
+    LONG deadzone;
+    LONG saturation;
+    DWORD calibration_mode;
+};
 
 /* Device implementation */
 struct dinput_device
@@ -96,6 +109,10 @@ struct dinput_device
 
     BYTE device_state_report_id;
     BYTE device_state[DEVICE_STATE_MAX_SIZE];
+
+    BOOL autocenter;
+    LONG device_gain;
+    struct object_properties *object_properties;
 };
 
 extern HRESULT dinput_device_alloc( SIZE_T size, const struct dinput_device_vtbl *vtbl, const GUID *guid,

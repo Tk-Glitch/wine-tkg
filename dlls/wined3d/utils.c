@@ -726,6 +726,8 @@ static const struct wined3d_format_vertex_info format_vertex_info[] =
     {WINED3DFMT_R8_UNORM,           WINED3D_FFP_EMIT_INVALID,   GL_UNSIGNED_BYTE},
     {WINED3DFMT_R8_UINT,            WINED3D_FFP_EMIT_INVALID,   GL_UNSIGNED_BYTE},
     {WINED3DFMT_R8_SINT,            WINED3D_FFP_EMIT_INVALID,   GL_BYTE},
+    {WINED3DFMT_R8G8_UINT,          WINED3D_FFP_EMIT_INVALID,   GL_UNSIGNED_BYTE},
+    {WINED3DFMT_R16_FLOAT,          WINED3D_FFP_EMIT_INVALID,   GL_HALF_FLOAT, ARB_HALF_FLOAT_VERTEX},
     {WINED3DFMT_R16_UINT,           WINED3D_FFP_EMIT_INVALID,   GL_UNSIGNED_SHORT},
     {WINED3DFMT_R16_SINT,           WINED3D_FFP_EMIT_INVALID,   GL_SHORT},
     {WINED3DFMT_R32_UINT,           WINED3D_FFP_EMIT_INVALID,   GL_UNSIGNED_INT},
@@ -4613,7 +4615,7 @@ const char *debug_const_bo_address(const struct wined3d_const_bo_address *addres
 {
     if (!address)
         return "(null)";
-    return wine_dbg_sprintf("{%#lx:%p}", address->buffer_object, address->addr);
+    return wine_dbg_sprintf("{%p:%p}", address->buffer_object, address->addr);
 }
 
 const char *debug_bo_address(const struct wined3d_bo_address *address)

@@ -654,6 +654,7 @@ static BOOL process_attach(void)
     fs_hack_init();
 
     X11DRV_DisplayDevices_Init(FALSE);
+    init_user_driver();
     return TRUE;
 }
 

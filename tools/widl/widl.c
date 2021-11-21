@@ -54,7 +54,8 @@ static const char usage[] =
 "   --help             Display this help and exit\n"
 "   -h                 Generate headers\n"
 "   -H file            Name of header file (default is infile.h)\n"
-"   -I path            Set include search dir to path (multiple -I allowed)\n"
+"   -I directory       Add directory to the include search path (multiple -I allowed)\n"
+"   -L directory       Add directory to the library search path (multiple -L allowed)\n"
 "   --local-stubs=file Write empty stubs for call_as/local methods to file\n"
 "   -m32, -m64         Set the target architecture (Win32 or Win64)\n"
 "   -N                 Do not preprocess input\n"
@@ -92,21 +93,7 @@ static const char usage[] =
 static const char version_string[] = "Wine IDL Compiler version " PACKAGE_VERSION "\n"
 			"Copyright 2002 Ove Kaaven\n";
 
-#ifdef __i386__
-enum target_cpu target_cpu = CPU_x86;
-#elif defined(__x86_64__)
-enum target_cpu target_cpu = CPU_x86_64;
-#elif defined(__powerpc64__)
-enum target_cpu target_cpu = CPU_POWERPC64;
-#elif defined(__powerpc__)
-enum target_cpu target_cpu = CPU_POWERPC;
-#elif defined(__arm__)
-enum target_cpu target_cpu = CPU_ARM;
-#elif defined(__aarch64__)
-enum target_cpu target_cpu = CPU_ARM64;
-#else
-#error Unsupported CPU
-#endif
+static struct target target;
 
 int debuglevel = DEBUGLEVEL_NONE;
 int parser_debug, yy_flex_debug;
@@ -153,6 +140,8 @@ char *temp_name;
 const char *prefix_client = "";
 const char *prefix_server = "";
 static const char *includedir;
+static const char *dlldir;
+static struct strarray dlldirs;
 static char *output_name;
 static const char *sysroot = "";
 
@@ -188,7 +177,7 @@ enum {
 };
 
 static const char short_options[] =
-    "b:cC:d:D:EhH:I:m:No:O:pP:rsS:tT:uU:VW";
+    "b:cC:d:D:EhH:I:L:m:No:O:pP:rsS:tT:uU:VW";
 static const struct long_option long_options[] = {
     { "acf", 1, ACF_OPTION },
     { "app_config", 0, APP_CONFIG_OPTION },
@@ -213,31 +202,6 @@ static const struct long_option long_options[] = {
     { "win32-align", 1, WIN32_ALIGN_OPTION },
     { "win64-align", 1, WIN64_ALIGN_OPTION },
     { NULL }
-};
-
-static const struct
-{
-    const char     *name;
-    enum target_cpu cpu;
-} cpu_names[] =
-{
-    { "i386",           CPU_x86 },
-    { "i486",           CPU_x86 },
-    { "i586",           CPU_x86 },
-    { "i686",           CPU_x86 },
-    { "i786",           CPU_x86 },
-    { "amd64",          CPU_x86_64 },
-    { "x86_64",         CPU_x86_64 },
-    { "powerpc",        CPU_POWERPC },
-    { "powerpc64",      CPU_POWERPC64 },
-    { "powerpc64le",    CPU_POWERPC64 },
-    { "arm",            CPU_ARM },
-    { "armv5",          CPU_ARM },
-    { "armv6",          CPU_ARM },
-    { "armv7",          CPU_ARM },
-    { "armv7a",         CPU_ARM },
-    { "arm64",          CPU_ARM64 },
-    { "aarch64",        CPU_ARM64 },
 };
 
 static void rm_tempfile(void);
@@ -294,50 +258,6 @@ static void add_widl_version_define(void)
 
     sprintf(version_str, "__WIDL__=0x%x", version);
     wpp_add_cmdline_define(version_str);
-}
-
-static void set_cpu( const char *cpu, int error_out )
-{
-    unsigned int i;
-    for (i = 0; i < ARRAY_SIZE( cpu_names ); i++)
-    {
-        if (!strcmp( cpu_names[i].name, cpu ))
-        {
-            target_cpu = cpu_names[i].cpu;
-            return;
-        }
-    }
-    if (error_out)
-        error( "Unrecognized CPU '%s'\n", cpu );
-}
-
-/* Set the target platform based on a potential prefix of the executable name.
- * If not found, or not matching a known CPU name, just proceed silently. */
-static void init_argv0_target( const char *argv0 )
-{
-    char *p, *name = get_basename( argv0 );
-
-    if (!(p = strchr(name, '-')))
-    {
-        free( name );
-        return;
-    }
-    *p = 0;
-    set_cpu( name, 0 );
-    free( name );
-}
-
-/* set the target platform */
-static void set_target( const char *target )
-{
-    char *p, *spec = xstrdup( target );
-
-    /* target specification is in the form CPU-MANUFACTURER-OS or CPU-MANUFACTURER-KERNEL-OS */
-
-    if (!(p = strchr( spec, '-' ))) error( "Invalid target specification '%s'\n", target );
-    *p++ = 0;
-    set_cpu( spec, 1 );
-    free( spec );
 }
 
 /* clean things up when aborting on a signal */
@@ -583,6 +503,7 @@ static void init_argv0_dir( const char *argv0 )
 #endif
     if (!dir) return;
     includedir = strmake( "%s/%s", get_dirname( dir ), BIN_TO_INCLUDEDIR );
+    dlldir = strmake( "%s/%s", get_dirname( dir ), BIN_TO_DLLDIR );
 #endif
 }
 
@@ -656,7 +577,8 @@ static void option_callback( int optc, char *optarg )
         /* FIXME: Support robust option */
         break;
     case 'b':
-      set_target( optarg );
+        if (!parse_target( optarg, &target ))
+            error( "Invalid target specification '%s'\n", optarg );
       break;
     case 'c':
       do_everything = 0;
@@ -684,6 +606,9 @@ static void option_callback( int optc, char *optarg )
       break;
     case 'I':
       wpp_add_include_path(optarg);
+      break;
+    case 'L':
+      strarray_add( &dlldirs, optarg );
       break;
     case 'm':
       if (!strcmp( optarg, "32" )) pointer_size = 4;
@@ -750,6 +675,50 @@ static void option_callback( int optc, char *optarg )
     }
 }
 
+int open_typelib( const char *name )
+{
+    static const char *default_dirs[] = { DLLDIR, "/usr/lib/wine", "/usr/local/lib/wine" };
+    struct target win_target = { target.cpu, PLATFORM_WINDOWS };
+    const char *pe_dir = get_arch_dir( win_target );
+    int fd;
+    unsigned int i;
+
+#define TRYOPEN(str) do { \
+        char *file = str; \
+        if ((fd = open( file, O_RDONLY | O_BINARY )) != -1) return fd; \
+        free( file ); } while(0)
+
+    for (i = 0; i < dlldirs.count; i++)
+    {
+        if (strendswith( dlldirs.str[i], "/*" ))  /* special case for wine build tree */
+        {
+            int namelen = strlen( name );
+            if (strendswith( name, ".dll" )) namelen -= 4;
+            TRYOPEN( strmake( "%.*s/%.*s/%s", (int)strlen(dlldirs.str[i]) - 2, dlldirs.str[i],
+                              namelen, name, name ));
+            TRYOPEN( strmake( "%.*s/%.*s/%s.fake", (int)strlen(dlldirs.str[i]) - 2, dlldirs.str[i],
+                              namelen, name, name ));
+        }
+        else
+        {
+            TRYOPEN( strmake( "%s%s/%s", dlldirs.str[i], pe_dir, name ));
+            TRYOPEN( strmake( "%s/%s", dlldirs.str[i], name ));
+        }
+    }
+
+    if (stdinc)
+    {
+        if (dlldir) TRYOPEN( strmake( "%s%s/%s", dlldir, pe_dir, name ));
+        for (i = 0; i < ARRAY_SIZE(default_dirs); i++)
+        {
+            if (i && !strcmp( default_dirs[i], default_dirs[0] )) continue;
+            TRYOPEN( strmake( "%s%s/%s", default_dirs[i], pe_dir, name ));
+        }
+    }
+    error( "cannot find %s\n", name );
+#undef TRYOPEN
+}
+
 int main(int argc,char *argv[])
 {
   int i;
@@ -762,7 +731,7 @@ int main(int argc,char *argv[])
   signal( SIGHUP, exit_on_signal );
 #endif
   init_argv0_dir( argv[0] );
-  init_argv0_target( argv[0] );
+  target = init_argv0_target( argv[0] );
 
   now = time(NULL);
 
@@ -785,33 +754,10 @@ int main(int argc,char *argv[])
       }
   }
 
-  switch (target_cpu)
-  {
-  case CPU_x86:
-      if (pointer_size == 8) target_cpu = CPU_x86_64;
-      else pointer_size = 4;
-      break;
-  case CPU_x86_64:
-      if (pointer_size == 4) target_cpu = CPU_x86;
-      else pointer_size = 8;
-      break;
-  case CPU_ARM:
-      if (pointer_size == 8) target_cpu = CPU_ARM64;
-      else pointer_size = 4;
-      break;
-  case CPU_ARM64:
-      if (pointer_size == 4) target_cpu = CPU_ARM;
-      pointer_size = 8;
-      break;
-  case CPU_POWERPC64:
-      if (pointer_size == 4) error( "Cannot build 32-bit code for this CPU\n" );
-      pointer_size = 8;
-      break;
-  default:
-      if (pointer_size == 8) error( "Cannot build 64-bit code for this CPU\n" );
-      pointer_size = 4;
-      break;
-  }
+  if (pointer_size)
+      set_target_ptr_size( &target, pointer_size );
+  else
+      pointer_size = get_target_ptr_size( target );
 
   /* if nothing specified, try to guess output type from the output file name */
   if (output_name && do_everything && !do_header && !do_typelib && !do_proxies &&
@@ -826,6 +772,7 @@ int main(int argc,char *argv[])
       else if (strendswith( output_name, "_i.c" )) do_idfile = 1;
       else if (strendswith( output_name, "_r.res" )) do_regscript = 1;
       else if (strendswith( output_name, "_t.res" )) do_typelib = 1;
+      else if (strendswith( output_name, "_l.res" )) do_typelib = 1;
       else if (strendswith( output_name, "dlldata.c" )) do_dlldata = 1;
       else do_everything = 1;
   }

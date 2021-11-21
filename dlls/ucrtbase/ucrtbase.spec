@@ -48,7 +48,7 @@
 @ cdecl __AdjustPointer(ptr ptr)
 @ stub __BuildCatchObject
 @ stub __BuildCatchObjectHelper
-@ stdcall -arch=x86_64,arm64 __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
+@ stdcall -arch=x86_64,arm,arm64 __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
 @ cdecl -arch=i386,x86_64,arm,arm64 __CxxDetectRethrow(ptr)
 @ cdecl -arch=i386,x86_64,arm,arm64 __CxxExceptionFilter(ptr ptr long ptr)
 @ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler(ptr ptr ptr ptr)
@@ -94,12 +94,13 @@
 @ cdecl __initialize_lconv_for_unsigned_char() __lconv_init
 @ cdecl __intrinsic_abnormal_termination()
 @ cdecl -arch=i386,x86_64,arm,arm64 -norelay __intrinsic_setjmp(ptr) MSVCRT__setjmp
-@ cdecl -arch=x86_64,arm64 -norelay __intrinsic_setjmpex(ptr ptr) __wine_setjmpex
+@ cdecl -arch=x86_64,arm,arm64 -norelay __intrinsic_setjmpex(ptr ptr) __wine_setjmpex
 @ cdecl __isascii(long)
 @ cdecl __iscsym(long)
 @ cdecl __iscsymf(long)
 @ stub __iswcsym
 @ stub __iswcsymf
+@ stdcall -arch=arm __jump_unwind(ptr ptr) ntdll.__jump_unwind
 @ cdecl -arch=i386 -norelay __libm_sse2_acos()
 @ cdecl -arch=i386 -norelay __libm_sse2_acosf()
 @ cdecl -arch=i386 -norelay __libm_sse2_asin()
@@ -415,9 +416,9 @@
 @ cdecl _heapwalk(ptr)
 @ cdecl _hypot(double double)
 @ cdecl _hypotf(float float)
-@ cdecl _i64toa(int64 ptr long) ntdll._i64toa
+@ cdecl _i64toa(int64 ptr long)
 @ cdecl _i64toa_s(int64 ptr long long)
-@ cdecl _i64tow(int64 ptr long) ntdll._i64tow
+@ cdecl _i64tow(int64 ptr long)
 @ cdecl _i64tow_s(int64 ptr long long)
 @ cdecl _initialize_narrow_environment()
 @ cdecl _initialize_onexit_table(ptr)
@@ -525,7 +526,7 @@
 @ cdecl _isxdigit_l(long ptr)
 @ cdecl _itoa(long ptr long)
 @ cdecl _itoa_s(long ptr long long)
-@ cdecl _itow(long ptr long) ntdll._itow
+@ cdecl _itow(long ptr long)
 @ cdecl _itow_s(long ptr long long)
 @ cdecl _j0(double)
 @ cdecl _j1(double)
@@ -575,9 +576,9 @@
 @ stub _lsearch_s
 @ cdecl _lseek(long long long)
 @ cdecl -ret64 _lseeki64(long int64 long)
-@ cdecl _ltoa(long ptr long) ntdll._ltoa
+@ cdecl _ltoa(long ptr long)
 @ cdecl _ltoa_s(long ptr long long)
-@ cdecl _ltow(long ptr long) ntdll._ltow
+@ cdecl _ltow(long ptr long)
 @ cdecl _ltow_s(long ptr long long)
 @ cdecl _makepath(ptr str str str str)
 @ cdecl _makepath_s(ptr long str str str str)
@@ -718,7 +719,7 @@
 @ cdecl _mbsupr_s(str long)
 @ stub _mbsupr_s_l
 @ cdecl _mbtowc_l(ptr str long ptr)
-@ cdecl _memccpy(ptr ptr long long) ntdll._memccpy
+@ cdecl _memccpy(ptr ptr long long)
 @ cdecl _memicmp(str str long)
 @ cdecl _memicmp_l(str str long ptr)
 @ cdecl _mkdir(str)
@@ -1025,9 +1026,9 @@
 @ cdecl _o__heapmin() _heapmin
 @ cdecl _o__hypot(double double) _hypot
 @ cdecl _o__hypotf(float float) _hypotf
-@ cdecl _o__i64toa(int64 ptr long) ntdll._i64toa
+@ cdecl _o__i64toa(int64 ptr long) _i64toa
 @ cdecl _o__i64toa_s(int64 ptr long long) _i64toa_s
-@ cdecl _o__i64tow(int64 ptr long) ntdll._i64tow
+@ cdecl _o__i64tow(int64 ptr long) _i64tow
 @ cdecl _o__i64tow_s(int64 ptr long long) _i64tow_s
 @ cdecl _o__initialize_narrow_environment() _initialize_narrow_environment
 @ cdecl _o__initialize_onexit_table(ptr) _initialize_onexit_table
@@ -1103,7 +1104,7 @@
 @ cdecl _o__iswctype_l(long long ptr) _iswctype_l
 @ cdecl _o__itoa(long ptr long) _itoa
 @ cdecl _o__itoa_s(long ptr long long) _itoa_s
-@ cdecl _o__itow(long ptr long) ntdll._itow
+@ cdecl _o__itow(long ptr long) _itow
 @ cdecl _o__itow_s(long ptr long long) _itow_s
 @ cdecl _o__j0(double) _j0
 @ cdecl _o__j1(double) _j1
@@ -1146,9 +1147,9 @@
 @ stub _o__lsearch_s
 @ cdecl _o__lseek(long long long) _lseek
 @ cdecl -ret64 _o__lseeki64(long int64 long) _lseeki64
-@ cdecl _o__ltoa(long ptr long) ntdll._ltoa
+@ cdecl _o__ltoa(long ptr long) _ltoa
 @ cdecl _o__ltoa_s(long ptr long long) _ltoa_s
-@ cdecl _o__ltow(long ptr long) ntdll._ltow
+@ cdecl _o__ltow(long ptr long) _ltow
 @ cdecl _o__ltow_s(long ptr long long) _ltow_s
 @ cdecl _o__makepath(ptr str str str str) _makepath
 @ cdecl _o__makepath_s(ptr long str str str str) _makepath_s
@@ -1407,13 +1408,13 @@
 @ cdecl _o__towlower_l(long ptr) _towlower_l
 @ cdecl _o__towupper_l(long ptr) _towupper_l
 @ cdecl _o__tzset() _tzset
-@ cdecl _o__ui64toa(int64 ptr long) ntdll._ui64toa
+@ cdecl _o__ui64toa(int64 ptr long) _ui64toa
 @ cdecl _o__ui64toa_s(int64 ptr long long) _ui64toa_s
-@ cdecl _o__ui64tow(int64 ptr long) ntdll._ui64tow
+@ cdecl _o__ui64tow(int64 ptr long) _ui64tow
 @ cdecl _o__ui64tow_s(int64 ptr long long) _ui64tow_s
-@ cdecl _o__ultoa(long ptr long) ntdll._ultoa
+@ cdecl _o__ultoa(long ptr long) _ultoa
 @ cdecl _o__ultoa_s(long ptr long long) _ultoa_s
-@ cdecl _o__ultow(long ptr long) ntdll._ultow
+@ cdecl _o__ultow(long ptr long) _ultow
 @ cdecl _o__ultow_s(long ptr long long) _ultow_s
 @ cdecl _o__umask(long) _umask
 @ stub _o__umask_s
@@ -1982,13 +1983,13 @@
 @ cdecl _towlower_l(long ptr)
 @ cdecl _towupper_l(long ptr)
 @ cdecl _tzset()
-@ cdecl _ui64toa(int64 ptr long) ntdll._ui64toa
+@ cdecl _ui64toa(int64 ptr long)
 @ cdecl _ui64toa_s(int64 ptr long long)
-@ cdecl _ui64tow(int64 ptr long) ntdll._ui64tow
+@ cdecl _ui64tow(int64 ptr long)
 @ cdecl _ui64tow_s(int64 ptr long long)
-@ cdecl _ultoa(long ptr long) ntdll._ultoa
+@ cdecl _ultoa(long ptr long)
 @ cdecl _ultoa_s(long ptr long long)
-@ cdecl _ultow(long ptr long) ntdll._ultow
+@ cdecl _ultow(long ptr long)
 @ cdecl _ultow_s(long ptr long long)
 @ cdecl _umask(long)
 @ stub _umask_s
@@ -2515,7 +2516,7 @@
 @ cdecl strnlen(str long)
 @ cdecl strpbrk(str str)
 @ cdecl strrchr(str long)
-@ cdecl strspn(str str) ntdll.strspn
+@ cdecl strspn(str str)
 @ cdecl strstr(str str)
 @ cdecl strtod(str ptr)
 @ cdecl strtof(str ptr)
@@ -2562,10 +2563,10 @@
 @ cdecl wcscoll(wstr wstr)
 @ cdecl wcscpy(ptr wstr)
 @ cdecl wcscpy_s(ptr long wstr)
-@ cdecl wcscspn(wstr wstr) ntdll.wcscspn
+@ cdecl wcscspn(wstr wstr)
 @ cdecl wcsftime(ptr long wstr ptr)
 @ cdecl wcslen(wstr)
-@ cdecl wcsncat(wstr wstr long) ntdll.wcsncat
+@ cdecl wcsncat(wstr wstr long)
 @ cdecl wcsncat_s(wstr long wstr long)
 @ cdecl wcsncmp(wstr wstr long)
 @ cdecl wcsncpy(ptr wstr long)
@@ -2575,7 +2576,7 @@
 @ cdecl wcsrchr(wstr long)
 @ cdecl wcsrtombs(ptr ptr long ptr)
 @ cdecl wcsrtombs_s(ptr ptr long ptr long ptr)
-@ cdecl wcsspn(wstr wstr) ntdll.wcsspn
+@ cdecl wcsspn(wstr wstr)
 @ cdecl wcsstr(wstr wstr)
 @ cdecl wcstod(wstr ptr)
 @ cdecl wcstof(ptr ptr)

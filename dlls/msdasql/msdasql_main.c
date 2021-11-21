@@ -35,6 +35,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msdasql);
 
+DEFINE_GUID(DBPROPSET_DATASOURCEINFO, 0xc8b522bb, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);
 DEFINE_GUID(DBPROPSET_DBINIT,    0xc8b522bc, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);
 
 DEFINE_GUID(DBGUID_DEFAULT,      0xc8b521fb, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);
@@ -345,6 +346,26 @@ static HRESULT WINAPI dbprops_GetProperties(IDBProperties *iface, ULONG cPropert
     }
 
     propset = CoTaskMemAlloc(cPropertyIDSets * sizeof(DBPROPSET));
+
+    if (IsEqualGUID(&rgPropertyIDSets[0].guidPropertySet, &DBPROPSET_DATASOURCEINFO))
+    {
+        TRACE("Propertyset DBPROPSET_DATASOURCEINFO not supported\n");
+        propset->guidPropertySet = rgPropertyIDSets[0].guidPropertySet;
+        propset->cProperties = rgPropertyIDSets[0].cPropertyIDs;
+
+        propset->rgProperties = CoTaskMemAlloc(propset->cProperties * sizeof(DBPROP));
+
+        for (j=0; j < propset->cProperties; j++)
+        {
+            propset->rgProperties[j].dwPropertyID = rgPropertyIDSets[0].rgPropertyIDs[j];
+            propset->rgProperties[j].dwStatus = DBPROPSTATUS_NOTSUPPORTED;
+        }
+
+        *prgPropertySets = propset;
+
+        return DB_E_ERRORSOCCURRED;
+    }
+
     propset->guidPropertySet = DBPROPSET_DBINIT;
 
     for (i=0; i < cPropertyIDSets; i++)
@@ -424,10 +445,27 @@ static HRESULT WINAPI dbprops_SetProperties(IDBProperties *iface, ULONG cPropert
             DBPROPSET rgPropertySets[])
 {
     struct msdasql *provider = impl_from_IDBProperties(iface);
+    int i, j, k;
 
-    FIXME("(%p)->(%d %p)\n", provider, cPropertySets, rgPropertySets);
+    TRACE("(%p)->(%d %p)\n", provider, cPropertySets, rgPropertySets);
 
-    return E_NOTIMPL;
+    for (i=0; i < cPropertySets; i++)
+    {
+        for (j=0; j < rgPropertySets[i].cProperties; j++)
+        {
+            for(k=0; k < ARRAY_SIZE(provider->properties); k++)
+            {
+                if (provider->properties[k].id == rgPropertySets[i].rgProperties[j].dwPropertyID)
+                {
+                    TRACE("Found property %d\n", provider->properties[k].id);
+                    VariantCopy(&provider->properties[k].value, &rgPropertySets[i].rgProperties[j].vValue);
+                    break;
+                }
+            }
+        }
+    }
+
+    return S_OK;
 }
 
 static const struct IDBPropertiesVtbl dbprops_vtbl =
@@ -521,7 +559,7 @@ static HRESULT WINAPI dbsess_CreateSession(IDBCreateSession *iface, IUnknown *ou
     if (outer)
         FIXME("outer currently not supported.\n");
 
-    hr = create_db_session(riid, (void**)session);
+    hr = create_db_session(riid, &provider->MSDASQL_iface, (void**)session);
 
     return hr;
 }
