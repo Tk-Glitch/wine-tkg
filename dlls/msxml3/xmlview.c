@@ -16,16 +16,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #define COBJMACROS
 #define NONAMELESSUNION
-
-#ifdef HAVE_LIBXML2
-#include <libxml/parser.h>
-#endif
 
 #include "windef.h"
 #include "winbase.h"
@@ -37,10 +31,9 @@
 #include "docobj.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
-#include "msxml_private.h"
-
-#ifdef HAVE_LIBXML2
+#include "msxml_dispex.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
@@ -399,7 +392,7 @@ static inline HRESULT handle_xml_load(BindStatusCallback *This)
     if(FAILED(hres))
         return display_error_page(This);
 
-    hres = DOMDocument_create(MSXML_DEFAULT, (void**)&xml);
+    hres = dom_document_create(MSXML_DEFAULT, (void **)&xml);
     if(FAILED(hres))
         return display_error_page(This);
 
@@ -475,7 +468,7 @@ static inline HRESULT handle_xml_load(BindStatusCallback *This)
         return display_error_page(This);
     }
 
-    hres = DOMDocument_create(MSXML_DEFAULT, (void**)&xsl);
+    hres = dom_document_create(MSXML_DEFAULT, (void **)&xsl);
     if(FAILED(hres)) {
         VariantClear(&var);
         IXMLDOMDocument3_Release(xml);
@@ -1451,14 +1444,3 @@ HRESULT XMLView_create(void **ppObj)
     *ppObj = &This->IPersistMoniker_iface;
     return S_OK;
 }
-
-#else
-
-HRESULT XMLView_create(void **ppObj)
-{
-    MESSAGE("This program tried to use a XMLView object, but\n"
-            "libxml2 support was not present at compile time.\n");
-    return E_NOTIMPL;
-}
-
-#endif /* HAVE_LIBXML2 */

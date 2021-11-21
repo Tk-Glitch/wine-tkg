@@ -46,19 +46,15 @@ typedef struct {
 /* ?_Xran@std@@YAXXZ */
 void __cdecl _Xran(void)
 {
-    static const char msg[] = "invalid string position";
-
     TRACE("\n");
-    throw_exception(EXCEPTION_OUT_OF_RANGE, msg);
+    _Xout_of_range("invalid string position");
 }
 
 /* ?_Xlen@std@@YAXXZ */
 void __cdecl _Xlen(void)
 {
-    static const char msg[] = "string too long";
-
     TRACE("\n");
-    throw_exception(EXCEPTION_LENGTH_ERROR, msg);
+    _Xlength_error("string too long");
 }
 
 /* ?compare@?$char_traits@D@std@@SAHPBD0I@Z */

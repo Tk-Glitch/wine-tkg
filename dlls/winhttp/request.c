@@ -2815,19 +2815,26 @@ BOOL WINAPI WinHttpReceiveResponse( HINTERNET hrequest, LPVOID reserved )
     return !ret;
 }
 
+static DWORD query_data_ready( struct request *request )
+{
+    DWORD count;
+
+    count = get_available_data( request );
+    if (!request->read_chunked && request->netconn) count += netconn_query_data_available( request->netconn );
+
+    return count;
+}
+
 static DWORD query_data_available( struct request *request, DWORD *available, BOOL async )
 {
     DWORD ret = ERROR_SUCCESS, count = 0;
 
     if (end_of_read_data( request )) goto done;
 
-    count = get_available_data( request );
-    if (!request->read_chunked && request->netconn) count += netconn_query_data_available( request->netconn );
-    if (!count)
+    if (!(count = query_data_ready( request )))
     {
         if ((ret = refill_buffer( request, async ))) goto done;
-        count = get_available_data( request );
-        if (!request->read_chunked && request->netconn) count += netconn_query_data_available( request->netconn );
+        count = query_data_ready( request );
     }
 
 done:
@@ -2866,6 +2873,7 @@ BOOL WINAPI WinHttpQueryDataAvailable( HINTERNET hrequest, LPDWORD available )
 {
     DWORD ret;
     struct request *request;
+    BOOL async;
 
     TRACE("%p, %p\n", hrequest, available);
 
@@ -2881,7 +2889,8 @@ BOOL WINAPI WinHttpQueryDataAvailable( HINTERNET hrequest, LPDWORD available )
         return FALSE;
     }
 
-    if (request->connect->hdr.flags & WINHTTP_FLAG_ASYNC)
+    if ((async = request->connect->hdr.flags & WINHTTP_FLAG_ASYNC) && !end_of_read_data( request )
+                                                                   && !query_data_ready( request ))
     {
         struct query_data *q;
 
@@ -2895,12 +2904,13 @@ BOOL WINAPI WinHttpQueryDataAvailable( HINTERNET hrequest, LPDWORD available )
             release_object( &request->hdr );
             free( q );
         }
+        else ret = ERROR_IO_PENDING;
     }
-    else ret = query_data_available( request, available, FALSE );
+    else ret = query_data_available( request, available, async );
 
     release_object( &request->hdr );
     SetLastError( ret );
-    return !ret;
+    return !ret || ret == ERROR_IO_PENDING;
 }
 
 static void CALLBACK task_read_data( TP_CALLBACK_INSTANCE *instance, void *ctx, TP_WORK *work )
@@ -2921,6 +2931,7 @@ BOOL WINAPI WinHttpReadData( HINTERNET hrequest, LPVOID buffer, DWORD to_read, L
 {
     DWORD ret;
     struct request *request;
+    BOOL async;
 
     TRACE("%p, %p, %d, %p\n", hrequest, buffer, to_read, read);
 
@@ -2936,7 +2947,8 @@ BOOL WINAPI WinHttpReadData( HINTERNET hrequest, LPVOID buffer, DWORD to_read, L
         return FALSE;
     }
 
-    if (request->connect->hdr.flags & WINHTTP_FLAG_ASYNC)
+    if ((async = request->connect->hdr.flags & WINHTTP_FLAG_ASYNC) && !end_of_read_data( request )
+                                                                   && !query_data_ready( request ))
     {
         struct read_data *r;
 
@@ -2952,12 +2964,13 @@ BOOL WINAPI WinHttpReadData( HINTERNET hrequest, LPVOID buffer, DWORD to_read, L
             release_object( &request->hdr );
             free( r );
         }
+        else ret = ERROR_IO_PENDING;
     }
-    else ret = read_data( request, buffer, to_read, read, FALSE );
+    else ret = read_data( request, buffer, to_read, read, async );
 
     release_object( &request->hdr );
     SetLastError( ret );
-    return !ret;
+    return !ret || ret == ERROR_IO_PENDING;
 }
 
 static DWORD write_data( struct request *request, const void *buffer, DWORD to_write, DWORD *written, BOOL async )

@@ -491,9 +491,9 @@ static void test_enum_value(void)
     else
         ok( !res, "RegSetValueExA returned %d\n", res );
     res = RegSetValueExA( test_key, "Test", 0, REG_EXPAND_SZ, NULL, 0 );
-    ok( ERROR_SUCCESS == res || ERROR_INVALID_PARAMETER == res, "RegSetValueExA returned %d\n", res );
+    ok( ERROR_SUCCESS == res, "RegSetValueExA returned %d\n", res );
     res = RegSetValueExA( test_key, "Test", 0, REG_BINARY, NULL, 0 );
-    ok( ERROR_SUCCESS == res || ERROR_INVALID_PARAMETER == res, "RegSetValueExA returned %d\n", res );
+    ok( ERROR_SUCCESS == res, "RegSetValueExA returned %d\n", res );
 
     /* test reading the value and data without setting them */
     val_count = 20;
@@ -3874,6 +3874,7 @@ static void test_performance_keys(void)
         ret = RegSetValueA(keys[i], "Global", REG_SZ, "dummy", 5);
         ok(ret == ERROR_INVALID_HANDLE, "got %u\n", ret);
 
+        key_count = 0x900ddeed;
         ret = RegQueryInfoKeyA(keys[i], NULL, NULL, NULL, &key_count, NULL,
                 NULL, &value_count, NULL, NULL, NULL, NULL);
         todo_wine ok(!ret, "got %u\n", ret);

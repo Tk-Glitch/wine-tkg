@@ -72,7 +72,6 @@ typedef struct tagDC
     DWORD        thread;           /* thread owning the DC */
     LONG         refcount;         /* thread refcount */
     LONG         dirty;            /* dirty flag */
-    INT          saveLevel;
     DC_ATTR     *attr;             /* DC attributes accessible by client */
     struct tagDC *saved_dc;
     DWORD_PTR    dwHookData;
@@ -100,7 +99,6 @@ typedef struct tagDC
 
     const struct font_gamma_ramp *font_gamma_ramp;
 
-    UINT          font_code_page;
     INT           breakExtra;        /* breakTotalExtra / breakCount */
     INT           breakRem;          /* breakTotalExtra % breakCount */
     ABORTPROC     pAbortProc;        /* AbortProc for Printing */
@@ -160,23 +158,6 @@ static inline BOOL is_bitmapobj_dib( const BITMAPOBJ *bmp )
     return bmp->dib.dsBmih.biSize != 0;
 }
 
-/* bidi.c */
-
-/* Wine_GCPW Flags */
-/* Directionality -
- * LOOSE means taking the directionality of the first strong character, if there is found one.
- * FORCE means the paragraph direction is forced. (RLE/LRE)
- */
-#define WINE_GCPW_FORCE_LTR 0
-#define WINE_GCPW_FORCE_RTL 1
-#define WINE_GCPW_LOOSE_LTR 2
-#define WINE_GCPW_LOOSE_RTL 3
-#define WINE_GCPW_DIR_MASK 3
-#define WINE_GCPW_LOOSE_MASK 2
-
-extern BOOL BIDI_Reorder( HDC hDC, LPCWSTR lpString, INT uCount, DWORD dwFlags, DWORD dwWineGCP_Flags,
-                          LPWSTR lpOutString, INT uCountOut, UINT *lpOrder, WORD **lpGlyphs, INT* cGlyphs ) DECLSPEC_HIDDEN;
-
 /* bitblt.c */
 extern DWORD convert_bits( const BITMAPINFO *src_info, struct bitblt_coords *src,
                            BITMAPINFO *dst_info, struct gdi_image_bits *bits ) DECLSPEC_HIDDEN;
@@ -187,6 +168,7 @@ extern DWORD stretch_bits( const BITMAPINFO *src_info, struct bitblt_coords *src
 extern void get_mono_dc_colors( DC *dc, int color_table_size, BITMAPINFO *info, int count ) DECLSPEC_HIDDEN;
 
 /* brush.c */
+extern HBRUSH create_brush( const LOGBRUSH *brush );
 extern BOOL store_brush_pattern( LOGBRUSH *brush, struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern void free_brush_pattern( struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern BOOL get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void **bits, UINT *usage ) DECLSPEC_HIDDEN;
@@ -241,6 +223,10 @@ extern DWORD get_image_from_bitmap( BITMAPOBJ *bmp, BITMAPINFO *info,
 extern DWORD put_image_into_bitmap( BITMAPOBJ *bmp, HRGN clip, BITMAPINFO *info,
                                     const struct gdi_image_bits *bits, struct bitblt_coords *src,
                                     struct bitblt_coords *dst ) DECLSPEC_HIDDEN;
+extern UINT get_dib_dc_color_table( HDC hdc, UINT startpos, UINT entries,
+                                    RGBQUAD *colors ) DECLSPEC_HIDDEN;
+extern UINT set_dib_dc_color_table( HDC hdc, UINT startpos, UINT entries,
+                                    const RGBQUAD *colors ) DECLSPEC_HIDDEN;
 extern void dibdrv_set_window_surface( DC *dc, struct window_surface *surface ) DECLSPEC_HIDDEN;
 
 extern NTSTATUS init_opengl_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out ) DECLSPEC_HIDDEN;
@@ -482,6 +468,8 @@ extern POINT *GDI_Bezier( const POINT *Points, INT count, INT *nPtsOut ) DECLSPE
 /* palette.c */
 extern HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg) DECLSPEC_HIDDEN;
 extern HPALETTE PALETTE_Init(void) DECLSPEC_HIDDEN;
+extern UINT get_palette_entries( HPALETTE hpalette, UINT start, UINT count,
+                                 PALETTEENTRY *entries ) DECLSPEC_HIDDEN;
 
 /* region.c */
 extern BOOL add_rect_to_region( HRGN rgn, const RECT *rect ) DECLSPEC_HIDDEN;
@@ -559,7 +547,6 @@ extern BOOL CDECL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, con
                                       LPCWSTR str, UINT count, const INT *dx ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_FillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_FillRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_FlattenPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_FrameRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush, INT width, INT height ) DECLSPEC_HIDDEN;
 extern LONG CDECL nulldrv_GetBitmapBits( HBITMAP bitmap, void *bits, LONG size ) DECLSPEC_HIDDEN;
 extern COLORREF CDECL nulldrv_GetNearestColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
@@ -572,8 +559,6 @@ extern BOOL CDECL nulldrv_PolyBezier( PHYSDEV dev, const POINT *points, DWORD co
 extern BOOL CDECL nulldrv_PolyBezierTo( PHYSDEV dev, const POINT *points, DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_PolyDraw( PHYSDEV dev, const POINT *points, const BYTE *types, DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_PolylineTo( PHYSDEV dev, const POINT *points, INT count ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_RestoreDC( PHYSDEV dev, INT level ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_SelectClipPath( PHYSDEV dev, INT mode ) DECLSPEC_HIDDEN;
 extern INT CDECL nulldrv_SetDIBitsToDevice( PHYSDEV dev, INT x_dst, INT y_dst, DWORD width, DWORD height,
                                             INT x_src, INT y_src, UINT start, UINT lines,
                                             const void *bits, BITMAPINFO *info, UINT coloruse ) DECLSPEC_HIDDEN;
@@ -584,7 +569,6 @@ extern INT  CDECL nulldrv_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT wi
                                          BITMAPINFO *info, UINT coloruse, DWORD rop ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_StrokeAndFillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_StrokePath( PHYSDEV dev ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_WidenPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
 
 static inline DC *get_nulldrv_dc( PHYSDEV dev )
 {

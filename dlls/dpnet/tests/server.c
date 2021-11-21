@@ -186,7 +186,7 @@ static void test_server_info(void)
 
 static void test_enum_service_providers(void)
 {
-    DPN_SERVICE_PROVIDER_INFO *serv_prov_info;
+    DPN_SERVICE_PROVIDER_INFO *serv_prov_info = NULL;
     IDirectPlay8Server *server = NULL;
     DWORD items, size;
     DWORD i;

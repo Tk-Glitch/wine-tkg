@@ -153,6 +153,15 @@ BOOL WINAPI DeleteObject( HGDIOBJ obj )
     struct hdc_list *hdc_list = NULL;
     struct wine_rb_entry *entry;
 
+    switch (gdi_handle_type( obj ))
+    {
+    case NTGDI_OBJ_DC:
+    case NTGDI_OBJ_MEMDC:
+    case NTGDI_OBJ_ENHMETADC:
+    case NTGDI_OBJ_METADC:
+        return DeleteDC( obj );
+    }
+
     EnterCriticalSection( &obj_map_cs );
 
     if ((entry = wine_rb_get( &obj_map, obj )))
@@ -380,6 +389,80 @@ HPEN WINAPI CreatePen( INT style, INT width, COLORREF color )
 }
 
 /***********************************************************************
+ *           CreateBrushIndirect    (GDI32.@)
+ */
+HBRUSH WINAPI CreateBrushIndirect( const LOGBRUSH *brush )
+{
+    switch (brush->lbStyle)
+    {
+    case BS_NULL:
+        return GetStockObject( NULL_BRUSH );
+    case BS_SOLID:
+        return CreateSolidBrush( brush->lbColor );
+    case BS_HATCHED:
+        return CreateHatchBrush( brush->lbHatch, brush->lbColor );
+    case BS_PATTERN:
+    case BS_PATTERN8X8:
+        return CreatePatternBrush( (HBITMAP)brush->lbHatch );
+    case BS_DIBPATTERN:
+        return CreateDIBPatternBrush( (HGLOBAL)brush->lbHatch, brush->lbColor );
+    case BS_DIBPATTERNPT:
+        return CreateDIBPatternBrushPt( (void *)brush->lbHatch, brush->lbColor );
+    default:
+        WARN( "invalid brush style %u\n", brush->lbStyle );
+        return 0;
+    }
+}
+
+/***********************************************************************
+ *           CreateSolidBrush    (GDI32.@)
+ */
+HBRUSH WINAPI CreateSolidBrush( COLORREF color )
+{
+    return NtGdiCreateSolidBrush( color, NULL );
+}
+
+/***********************************************************************
+ *           CreateHatchBrush    (GDI32.@)
+ */
+HBRUSH WINAPI CreateHatchBrush( INT style, COLORREF color )
+{
+    return NtGdiCreateHatchBrush( style, color, FALSE );
+}
+
+/***********************************************************************
+ *           CreatePatternBrush    (GDI32.@)
+ */
+HBRUSH WINAPI CreatePatternBrush( HBITMAP bitmap )
+{
+    return NtGdiCreatePatternBrushInternal( bitmap, FALSE, FALSE );
+}
+
+/***********************************************************************
+ *           CreateDIBPatternBrush    (GDI32.@)
+ */
+HBRUSH WINAPI CreateDIBPatternBrush( HGLOBAL hbitmap, UINT coloruse )
+{
+    HBRUSH brush;
+    void *mem;
+
+    TRACE( "%p\n", hbitmap );
+
+    if (!(mem = GlobalLock( hbitmap ))) return 0;
+    brush = NtGdiCreateDIBBrush( mem, coloruse, /* FIXME */ 0, FALSE, FALSE, hbitmap );
+    GlobalUnlock( hbitmap );
+    return brush;
+}
+
+/***********************************************************************
+ *           CreateDIBPatternBrushPt    (GDI32.@)
+ */
+HBRUSH WINAPI CreateDIBPatternBrushPt( const void *data, UINT coloruse )
+{
+    return NtGdiCreateDIBBrush( data, coloruse, /* FIXME */ 0, FALSE, FALSE, data );
+}
+
+/***********************************************************************
  *           CreateBitmapIndirect (GDI32.@)
  */
 HBITMAP WINAPI CreateBitmapIndirect( const BITMAP *bmp )
@@ -515,4 +598,98 @@ HCOLORSPACE WINAPI SetColorSpace( HDC hdc, HCOLORSPACE cs )
 {
     FIXME( "stub\n" );
     return cs;
+}
+
+/***********************************************************************
+ *           CreatePalette     (GDI32.@)
+ */
+HPALETTE WINAPI CreatePalette( const LOGPALETTE *palette )
+{
+    if (!palette) return 0;
+    return NtGdiCreatePaletteInternal( palette, palette->palNumEntries );
+}
+
+/***********************************************************************
+ *           GetPaletteEntries    (GDI32.@)
+ */
+UINT WINAPI GetPaletteEntries( HPALETTE palette, UINT start, UINT count, PALETTEENTRY *entries )
+{
+    return NtGdiDoPalette( palette, start, count, entries, NtGdiGetPaletteEntries, TRUE );
+}
+
+/***********************************************************************
+ *           SetPaletteEntries    (GDI32.@)
+ */
+UINT WINAPI SetPaletteEntries( HPALETTE palette, UINT start, UINT count,
+                               const PALETTEENTRY *entries )
+{
+    return NtGdiDoPalette( palette, start, count, (void *)entries, NtGdiSetPaletteEntries, FALSE );
+}
+
+/***********************************************************************
+ *           AnimatePalette    (GDI32.@)
+ */
+BOOL WINAPI AnimatePalette( HPALETTE palette, UINT start, UINT count, const PALETTEENTRY *entries )
+{
+    return NtGdiDoPalette( palette, start, count, (void *)entries, NtGdiAnimatePalette, FALSE );
+}
+
+/* first and last 10 entries are the default system palette entries */
+static const PALETTEENTRY default_system_palette_low[] =
+{
+    { 0x00, 0x00, 0x00 }, { 0x80, 0x00, 0x00 }, { 0x00, 0x80, 0x00 }, { 0x80, 0x80, 0x00 },
+    { 0x00, 0x00, 0x80 }, { 0x80, 0x00, 0x80 }, { 0x00, 0x80, 0x80 }, { 0xc0, 0xc0, 0xc0 },
+    { 0xc0, 0xdc, 0xc0 }, { 0xa6, 0xca, 0xf0 }
+};
+static const PALETTEENTRY default_system_palette_high[] =
+{
+    { 0xff, 0xfb, 0xf0 }, { 0xa0, 0xa0, 0xa4 }, { 0x80, 0x80, 0x80 }, { 0xff, 0x00, 0x00 },
+    { 0x00, 0xff, 0x00 }, { 0xff, 0xff, 0x00 }, { 0x00, 0x00, 0xff }, { 0xff, 0x00, 0xff },
+    { 0x00, 0xff, 0xff }, { 0xff, 0xff, 0xff }
+};
+
+/***********************************************************************
+ *           GetSystemPaletteEntries    (GDI32.@)
+ *
+ * Gets range of palette entries.
+ */
+UINT WINAPI GetSystemPaletteEntries( HDC hdc, UINT start, UINT count, PALETTEENTRY *entries )
+{
+    UINT i, ret;
+
+    ret = NtGdiDoPalette( hdc, start, count, (void *)entries,
+                          NtGdiGetSystemPaletteEntries, FALSE );
+    if (ret) return ret;
+
+    /* always fill output, even if hdc is an invalid handle */
+    if (!entries || start >= 256) return 0;
+    if (start + count > 256) count = 256 - start;
+
+    for (i = 0; i < count; i++)
+    {
+        if (start + i < 10)
+            entries[i] = default_system_palette_low[start + i];
+        else if (start + i >= 246)
+            entries[i] = default_system_palette_high[start + i - 246];
+        else
+            memset( &entries[i], 0, sizeof(entries[i]) );
+    }
+
+    return 0;
+}
+
+/***********************************************************************
+ *           GetDIBColorTable    (GDI32.@)
+ */
+UINT WINAPI GetDIBColorTable( HDC hdc, UINT start, UINT count, RGBQUAD *colors )
+{
+    return NtGdiDoPalette( hdc, start, count, colors, NtGdiGetDIBColorTable, TRUE );
+}
+
+/***********************************************************************
+ *           SetDIBColorTable    (GDI32.@)
+ */
+UINT WINAPI SetDIBColorTable( HDC hdc, UINT start, UINT count, const RGBQUAD *colors )
+{
+    return NtGdiDoPalette( hdc, start, count, (void *)colors, NtGdiSetDIBColorTable, FALSE );
 }

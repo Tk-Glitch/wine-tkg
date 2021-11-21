@@ -624,52 +624,49 @@ BOOL WINAPI NtGdiCloseFigure( HDC hdc )
 
 
 /***********************************************************************
- *           GetPath    (GDI32.@)
+ *           NtGdiGetPath    (win32u.@)
  */
-INT WINAPI GetPath(HDC hdc, LPPOINT pPoints, LPBYTE pTypes, INT nSize)
+INT WINAPI NtGdiGetPath( HDC hdc, POINT *points, BYTE *types, INT size )
 {
-   INT ret = -1;
-   DC *dc = get_dc_ptr( hdc );
+    INT ret = -1;
+    DC *dc = get_dc_ptr( hdc );
 
-   if(!dc) return -1;
+    if (!dc) return -1;
 
-   if (!dc->path)
-   {
-      SetLastError(ERROR_CAN_NOT_COMPLETE);
-      goto done;
-   }
+    if (!dc->path)
+    {
+        SetLastError( ERROR_CAN_NOT_COMPLETE );
+    }
+    else if (size == 0)
+    {
+        ret = dc->path->count;
+    }
+    else if (size < dc->path->count)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+    }
+    else
+    {
+        memcpy( points, dc->path->points, sizeof(POINT) * dc->path->count );
+        memcpy( types, dc->path->flags, sizeof(BYTE) * dc->path->count );
 
-   if(nSize==0)
-      ret = dc->path->count;
-   else if(nSize<dc->path->count)
-   {
-      SetLastError(ERROR_INVALID_PARAMETER);
-      goto done;
-   }
-   else
-   {
-      memcpy(pPoints, dc->path->points, sizeof(POINT)*dc->path->count);
-      memcpy(pTypes, dc->path->flags, sizeof(BYTE)*dc->path->count);
+        /* Convert the points to logical coordinates */
+        if (dp_to_lp( dc, points, dc->path->count ))
+            ret = dc->path->count;
+        else
+            /* FIXME: Is this the correct value? */
+            SetLastError( ERROR_CAN_NOT_COMPLETE );
+    }
 
-      /* Convert the points to logical coordinates */
-      if(!dp_to_lp(dc, pPoints, dc->path->count))
-      {
-	 /* FIXME: Is this the correct value? */
-         SetLastError(ERROR_CAN_NOT_COMPLETE);
-	goto done;
-      }
-     else ret = dc->path->count;
-   }
- done:
-   release_dc_ptr( dc );
-   return ret;
+    release_dc_ptr( dc );
+    return ret;
 }
 
 
 /***********************************************************************
- *           PathToRegion    (GDI32.@)
+ *           NtGdiPathToRegion    (win32u.@)
  */
-HRGN WINAPI PathToRegion(HDC hdc)
+HRGN WINAPI NtGdiPathToRegion( HDC hdc )
 {
     HRGN ret = 0;
     DC *dc = get_dc_ptr( hdc );
@@ -696,12 +693,9 @@ HRGN WINAPI PathToRegion(HDC hdc)
 
 
 /***********************************************************************
- *           FillPath    (GDI32.@)
- *
- * FIXME
- *    Check that SetLastError is being called correctly
+ *           NtGdiFillPath    (win32u.@)
  */
-BOOL WINAPI FillPath(HDC hdc)
+BOOL WINAPI NtGdiFillPath( HDC hdc )
 {
     BOOL ret = FALSE;
     DC *dc = get_dc_ptr( hdc );
@@ -717,18 +711,17 @@ BOOL WINAPI FillPath(HDC hdc)
 
 
 /***********************************************************************
- *           SelectClipPath    (GDI32.@)
+ *           NtGdiSelectClipPath    (win32u.@)
  */
-BOOL WINAPI SelectClipPath(HDC hdc, INT iMode)
+BOOL WINAPI NtGdiSelectClipPath( HDC hdc, INT mode )
 {
     BOOL ret = FALSE;
-    DC *dc = get_dc_ptr( hdc );
+    HRGN rgn;
 
-    if (dc)
+    if ((rgn = NtGdiPathToRegion( hdc )))
     {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSelectClipPath );
-        ret = physdev->funcs->pSelectClipPath( physdev, iMode );
-        release_dc_ptr( dc );
+        ret = NtGdiExtSelectClipRgn( hdc, rgn, mode ) != ERROR;
+        DeleteObject( rgn );
     }
     return ret;
 }
@@ -1592,21 +1585,25 @@ static BOOL CDECL pathdrv_CloseFigure( PHYSDEV dev )
 
 
 /*******************************************************************
- *      FlattenPath [GDI32.@]
- *
- *
+ *           NtGdiFlattenPath   (win32u.@)
  */
-BOOL WINAPI FlattenPath(HDC hdc)
+BOOL WINAPI NtGdiFlattenPath( HDC hdc )
 {
+    struct gdi_path *path;
     BOOL ret = FALSE;
-    DC *dc = get_dc_ptr( hdc );
+    DC *dc;
 
-    if (dc)
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
+
+    if (!dc->path) SetLastError( ERROR_CAN_NOT_COMPLETE );
+    else if ((path = PATH_FlattenPath( dc->path )))
     {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pFlattenPath );
-        ret = physdev->funcs->pFlattenPath( physdev );
-        release_dc_ptr( dc );
+        free_gdi_path( dc->path );
+        dc->path = path;
+        ret = TRUE;
     }
+
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1901,11 +1898,9 @@ static struct gdi_path *PATH_WidenPath(DC *dc)
 
 
 /*******************************************************************
- *      StrokeAndFillPath [GDI32.@]
- *
- *
+ *           NtGdiStrokeAndFillPath   (win32u.@)
  */
-BOOL WINAPI StrokeAndFillPath(HDC hdc)
+BOOL WINAPI NtGdiStrokeAndFillPath( HDC hdc )
 {
     BOOL ret = FALSE;
     DC *dc = get_dc_ptr( hdc );
@@ -1921,11 +1916,9 @@ BOOL WINAPI StrokeAndFillPath(HDC hdc)
 
 
 /*******************************************************************
- *      StrokePath [GDI32.@]
- *
- *
+ *           NtGdiStrokePath   (win32u.@)
  */
-BOOL WINAPI StrokePath(HDC hdc)
+BOOL WINAPI NtGdiStrokePath( HDC hdc )
 {
     BOOL ret = FALSE;
     DC *dc = get_dc_ptr( hdc );
@@ -1941,21 +1934,25 @@ BOOL WINAPI StrokePath(HDC hdc)
 
 
 /*******************************************************************
- *      WidenPath [GDI32.@]
- *
- *
+ *           NtGdiWidenPath   (win32u.@)
  */
-BOOL WINAPI WidenPath(HDC hdc)
+BOOL WINAPI NtGdiWidenPath( HDC hdc )
 {
+    struct gdi_path *path;
     BOOL ret = FALSE;
-    DC *dc = get_dc_ptr( hdc );
+    DC *dc;
 
-    if (dc)
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
+
+    if (!dc->path) SetLastError( ERROR_CAN_NOT_COMPLETE );
+    else if ((path = PATH_WidenPath( dc )))
     {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pWidenPath );
-        ret = physdev->funcs->pWidenPath( physdev );
-        release_dc_ptr( dc );
+        free_gdi_path( dc->path );
+        dc->path = path;
+        ret = TRUE;
     }
+
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -2006,69 +2003,24 @@ BOOL CDECL nulldrv_CloseFigure( PHYSDEV dev )
     return FALSE;
 }
 
-BOOL CDECL nulldrv_SelectClipPath( PHYSDEV dev, INT mode )
-{
-    BOOL ret = FALSE;
-    HRGN hrgn = PathToRegion( dev->hdc );
-
-    if (hrgn)
-    {
-        ret = ExtSelectClipRgn( dev->hdc, hrgn, mode ) != ERROR;
-        DeleteObject( hrgn );
-    }
-    return ret;
-}
-
 BOOL CDECL nulldrv_FillPath( PHYSDEV dev )
 {
-    if (GetPath( dev->hdc, NULL, NULL, 0 ) == -1) return FALSE;
+    if (NtGdiGetPath( dev->hdc, NULL, NULL, 0 ) == -1) return FALSE;
     NtGdiAbortPath( dev->hdc );
     return TRUE;
 }
 
 BOOL CDECL nulldrv_StrokeAndFillPath( PHYSDEV dev )
 {
-    if (GetPath( dev->hdc, NULL, NULL, 0 ) == -1) return FALSE;
+    if (NtGdiGetPath( dev->hdc, NULL, NULL, 0 ) == -1) return FALSE;
     NtGdiAbortPath( dev->hdc );
     return TRUE;
 }
 
 BOOL CDECL nulldrv_StrokePath( PHYSDEV dev )
 {
-    if (GetPath( dev->hdc, NULL, NULL, 0 ) == -1) return FALSE;
+    if (NtGdiGetPath( dev->hdc, NULL, NULL, 0 ) == -1) return FALSE;
     NtGdiAbortPath( dev->hdc );
-    return TRUE;
-}
-
-BOOL CDECL nulldrv_FlattenPath( PHYSDEV dev )
-{
-    DC *dc = get_nulldrv_dc( dev );
-    struct gdi_path *path;
-
-    if (!dc->path)
-    {
-        SetLastError( ERROR_CAN_NOT_COMPLETE );
-        return FALSE;
-    }
-    if (!(path = PATH_FlattenPath( dc->path ))) return FALSE;
-    free_gdi_path( dc->path );
-    dc->path = path;
-    return TRUE;
-}
-
-BOOL CDECL nulldrv_WidenPath( PHYSDEV dev )
-{
-    DC *dc = get_nulldrv_dc( dev );
-    struct gdi_path *path;
-
-    if (!dc->path)
-    {
-        SetLastError( ERROR_CAN_NOT_COMPLETE );
-        return FALSE;
-    }
-    if (!(path = PATH_WidenPath( dc ))) return FALSE;
-    free_gdi_path( dc->path );
-    dc->path = path;
     return TRUE;
 }
 
@@ -2101,10 +2053,8 @@ const struct gdi_dc_funcs path_driver =
     pathdrv_ExtTextOut,                 /* pExtTextOut */
     NULL,                               /* pFillPath */
     NULL,                               /* pFillRgn */
-    NULL,                               /* pFlattenPath */
     NULL,                               /* pFontIsLinked */
     NULL,                               /* pFrameRgn */
-    NULL,                               /* pGdiComment */
     NULL,                               /* pGetBoundsRect */
     NULL,                               /* pGetCharABCWidths */
     NULL,                               /* pGetCharABCWidthsI */
@@ -2147,11 +2097,9 @@ const struct gdi_dc_funcs path_driver =
     NULL,                               /* pRealizePalette */
     pathdrv_Rectangle,                  /* pRectangle */
     NULL,                               /* pResetDC */
-    NULL,                               /* pRestoreDC */
     pathdrv_RoundRect,                  /* pRoundRect */
     NULL,                               /* pSelectBitmap */
     NULL,                               /* pSelectBrush */
-    NULL,                               /* pSelectClipPath */
     NULL,                               /* pSelectFont */
     NULL,                               /* pSelectPen */
     NULL,                               /* pSetBkColor */
@@ -2170,7 +2118,6 @@ const struct gdi_dc_funcs path_driver =
     NULL,                               /* pStrokeAndFillPath */
     NULL,                               /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
-    NULL,                               /* pWidenPath */
     NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
     NULL,                               /* pD3DKMTSetVidPnSourceOwner */
     NULL,                               /* wine_get_wgl_driver */

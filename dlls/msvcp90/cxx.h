@@ -314,22 +314,6 @@ typedef struct __exception
     int               do_free; /* Whether to free 'name' in our dtor */
 } exception;
 
-/* Internal: throws selected exception */
-typedef enum __exception_type {
-    EXCEPTION_RERAISE,
-    EXCEPTION,
-    EXCEPTION_BAD_ALLOC,
-    EXCEPTION_BAD_CAST,
-    EXCEPTION_LOGIC_ERROR,
-    EXCEPTION_LENGTH_ERROR,
-    EXCEPTION_OUT_OF_RANGE,
-    EXCEPTION_INVALID_ARGUMENT,
-    EXCEPTION_RUNTIME_ERROR,
-    EXCEPTION_FAILURE,
-    EXCEPTION_RANGE_ERROR,
-} exception_type;
-void throw_exception(exception_type, const char *);
-
 /* rtti */
 typedef struct __type_info
 {
@@ -464,12 +448,7 @@ typedef struct
 
 #endif
 
-#define CREATE_TYPE_INFO_VTABLE\
-    static void type_info_dtor(type_info * _this) \
-{ \
-    free(_this->name); \
-} \
-\
+#define CREATE_TYPE_INFO_VTABLE \
 DEFINE_THISCALL_WRAPPER(type_info_vector_dtor,8) \
 void * __thiscall type_info_vector_dtor(type_info * _this, unsigned int flags) \
 { \
@@ -478,12 +457,12 @@ void * __thiscall type_info_vector_dtor(type_info * _this, unsigned int flags) \
         /* we have an array, with the number of elements stored before the first object */ \
         INT_PTR i, *ptr = (INT_PTR *)_this - 1; \
 \
-        for (i = *ptr - 1; i >= 0; i--) type_info_dtor(_this + i); \
+        for (i = *ptr - 1; i >= 0; i--) free(_this->name); \
         free(ptr); \
     } \
     else \
     { \
-        type_info_dtor(_this); \
+        free(_this->name); \
         if (flags & 1) free(_this); \
     } \
     return _this; \

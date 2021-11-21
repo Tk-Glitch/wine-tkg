@@ -386,17 +386,13 @@ static BOOL CDECL nulldrv_FontIsLinked( PHYSDEV dev )
     return FALSE;
 }
 
-static BOOL CDECL nulldrv_GdiComment( PHYSDEV dev, UINT size, const BYTE *data )
-{
-    return FALSE;
-}
-
 static UINT CDECL nulldrv_GetBoundsRect( PHYSDEV dev, RECT *rect, UINT flags )
 {
     return DCB_RESET;
 }
 
-static BOOL CDECL nulldrv_GetCharABCWidths( PHYSDEV dev, UINT first, UINT last, LPABC abc )
+static BOOL CDECL nulldrv_GetCharABCWidths( PHYSDEV dev, UINT first, UINT count,
+                                            WCHAR *chars, ABC *abc )
 {
     return FALSE;
 }
@@ -406,7 +402,8 @@ static BOOL CDECL nulldrv_GetCharABCWidthsI( PHYSDEV dev, UINT first, UINT count
     return FALSE;
 }
 
-static BOOL CDECL nulldrv_GetCharWidth( PHYSDEV dev, UINT first, UINT last, INT *buffer )
+static BOOL CDECL nulldrv_GetCharWidth( PHYSDEV dev, UINT first, UINT count,
+                                        const WCHAR *chars, INT *buffer )
 {
     return FALSE;
 }
@@ -725,9 +722,9 @@ static BOOL CDECL nulldrv_Rectangle( PHYSDEV dev, INT left, INT top, INT right, 
     return TRUE;
 }
 
-static HDC CDECL nulldrv_ResetDC( PHYSDEV dev, const DEVMODEW *devmode )
+static BOOL CDECL nulldrv_ResetDC( PHYSDEV dev, const DEVMODEW *devmode )
 {
-    return 0;
+    return FALSE;
 }
 
 static BOOL CDECL nulldrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
@@ -860,10 +857,8 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_ExtTextOut,                 /* pExtTextOut */
     nulldrv_FillPath,                   /* pFillPath */
     nulldrv_FillRgn,                    /* pFillRgn */
-    nulldrv_FlattenPath,                /* pFlattenPath */
     nulldrv_FontIsLinked,               /* pFontIsLinked */
     nulldrv_FrameRgn,                   /* pFrameRgn */
-    nulldrv_GdiComment,                 /* pGdiComment */
     nulldrv_GetBoundsRect,              /* pGetBoundsRect */
     nulldrv_GetCharABCWidths,           /* pGetCharABCWidths */
     nulldrv_GetCharABCWidthsI,          /* pGetCharABCWidthsI */
@@ -906,11 +901,9 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_RealizePalette,             /* pRealizePalette */
     nulldrv_Rectangle,                  /* pRectangle */
     nulldrv_ResetDC,                    /* pResetDC */
-    nulldrv_RestoreDC,                  /* pRestoreDC */
     nulldrv_RoundRect,                  /* pRoundRect */
     nulldrv_SelectBitmap,               /* pSelectBitmap */
     nulldrv_SelectBrush,                /* pSelectBrush */
-    nulldrv_SelectClipPath,             /* pSelectClipPath */
     nulldrv_SelectFont,                 /* pSelectFont */
     nulldrv_SelectPen,                  /* pSelectPen */
     nulldrv_SetBkColor,                 /* pSetBkColor */
@@ -929,7 +922,6 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_StrokeAndFillPath,          /* pStrokeAndFillPath */
     nulldrv_StrokePath,                 /* pStrokePath */
     nulldrv_UnrealizePalette,           /* pUnrealizePalette */
-    nulldrv_WidenPath,                  /* pWidenPath */
     nulldrv_D3DKMTCheckVidPnExclusiveOwnership, /* pD3DKMTCheckVidPnExclusiveOwnership */
     nulldrv_D3DKMTSetVidPnSourceOwner,  /* pD3DKMTSetVidPnSourceOwner */
     nulldrv_wine_get_wgl_driver,        /* wine_get_wgl_driver */
@@ -1213,27 +1205,27 @@ ULONG WINAPI DdQueryDisplaySettingsUniqueness(VOID)
 }
 
 /******************************************************************************
- *		D3DKMTOpenAdapterFromHdc [GDI32.@]
+ *           NtGdiDdDDIOpenAdapterFromHdc    (win32u.@)
  */
-NTSTATUS WINAPI D3DKMTOpenAdapterFromHdc( void *pData )
+NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromHdc( void *pData )
 {
     FIXME("(%p): stub\n", pData);
     return STATUS_NO_MEMORY;
 }
 
 /******************************************************************************
- *		D3DKMTEscape [GDI32.@]
+ *           NtGdiDdDDIEscape    (win32u.@)
  */
-NTSTATUS WINAPI D3DKMTEscape( const void *pData )
+NTSTATUS WINAPI NtGdiDdDDIEscape( const void *pData )
 {
     FIXME("(%p): stub\n", pData);
     return STATUS_NO_MEMORY;
 }
 
 /******************************************************************************
- *		D3DKMTCloseAdapter [GDI32.@]
+ *           NtGdiDdDDICloseAdapter    (win32u.@)
  */
-NTSTATUS WINAPI D3DKMTCloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
+NTSTATUS WINAPI NtGdiDdDDICloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
 {
     NTSTATUS status = STATUS_INVALID_PARAMETER;
     struct d3dkmt_adapter *adapter;
@@ -1349,9 +1341,9 @@ done:
 }
 
 /******************************************************************************
- *		D3DKMTCreateDevice [GDI32.@]
+ *           NtGdiDdDDICreateDevice    (win32u.@)
  */
-NTSTATUS WINAPI D3DKMTCreateDevice( D3DKMT_CREATEDEVICE *desc )
+NTSTATUS WINAPI NtGdiDdDDICreateDevice( D3DKMT_CREATEDEVICE *desc )
 {
     static D3DKMT_HANDLE handle_start = 0;
     struct d3dkmt_adapter *adapter;
@@ -1394,9 +1386,9 @@ NTSTATUS WINAPI D3DKMTCreateDevice( D3DKMT_CREATEDEVICE *desc )
 }
 
 /******************************************************************************
- *		D3DKMTDestroyDevice [GDI32.@]
+ *           NtGdiDdDDIDestroyDevice    (win32u.@)
  */
-NTSTATUS WINAPI D3DKMTDestroyDevice( const D3DKMT_DESTROYDEVICE *desc )
+NTSTATUS WINAPI NtGdiDdDDIDestroyDevice( const D3DKMT_DESTROYDEVICE *desc )
 {
     NTSTATUS status = STATUS_INVALID_PARAMETER;
     D3DKMT_SETVIDPNSOURCEOWNER set_owner_desc;
@@ -1414,7 +1406,7 @@ NTSTATUS WINAPI D3DKMTDestroyDevice( const D3DKMT_DESTROYDEVICE *desc )
         {
             memset( &set_owner_desc, 0, sizeof(set_owner_desc) );
             set_owner_desc.hDevice = desc->hDevice;
-            D3DKMTSetVidPnSourceOwner( &set_owner_desc );
+            NtGdiDdDDISetVidPnSourceOwner( &set_owner_desc );
             list_remove( &device->entry );
             heap_free( device );
             status = STATUS_SUCCESS;
@@ -1427,27 +1419,27 @@ NTSTATUS WINAPI D3DKMTDestroyDevice( const D3DKMT_DESTROYDEVICE *desc )
 }
 
 /******************************************************************************
- *		D3DKMTQueryStatistics [GDI32.@]
+ *           NtGdiDdDDIQueryStatistics    (win32u.@)
  */
-NTSTATUS WINAPI D3DKMTQueryStatistics(D3DKMT_QUERYSTATISTICS *stats)
+NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats )
 {
     FIXME("(%p): stub\n", stats);
     return STATUS_SUCCESS;
 }
 
 /******************************************************************************
- *		D3DKMTSetQueuedLimit [GDI32.@]
+ *           NtGdiDdDDISetQueuedLimit    (win32u.@)
  */
-NTSTATUS WINAPI D3DKMTSetQueuedLimit( D3DKMT_SETQUEUEDLIMIT *desc )
+NTSTATUS WINAPI NtGdiDdDDISetQueuedLimit( D3DKMT_SETQUEUEDLIMIT *desc )
 {
     FIXME( "(%p): stub\n", desc );
     return STATUS_NOT_IMPLEMENTED;
 }
 
 /******************************************************************************
- *		D3DKMTSetVidPnSourceOwner [GDI32.@]
+ *           NtGdiDdDDISetVidPnSourceOwner    (win32u.@)
  */
-NTSTATUS WINAPI D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc )
+NTSTATUS WINAPI NtGdiDdDDISetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc )
 {
     TRACE("(%p)\n", desc);
 
@@ -1465,9 +1457,9 @@ NTSTATUS WINAPI D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *des
 }
 
 /******************************************************************************
- *		D3DKMTCheckVidPnExclusiveOwnership [GDI32.@]
+ *           NtGdiDdDDICheckVidPnExclusiveOwnership    (win32u.@)
  */
-NTSTATUS WINAPI D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc )
+NTSTATUS WINAPI NtGdiDdDDICheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc )
 {
     TRACE("(%p)\n", desc);
 

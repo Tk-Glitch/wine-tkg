@@ -99,7 +99,7 @@
 #include "pshpack1.h"
 
 /* ======================================== *
- *             Type information
+ *             Internal types
  * ======================================== */
 
 struct p_string
@@ -108,34 +108,43 @@ struct p_string
     char                        name[1];
 };
 
+typedef unsigned short  cv_typ16_t;
+typedef unsigned int    cv_typ_t;
+typedef cv_typ_t        cv_itemid_t;
+
+/* ======================================== *
+ *             Type information
+ * ======================================== */
+
 union codeview_type
 {
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
     } generic;
 
+    /* types found in TPI stream (#2) */
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               attribute;
-        short int               type;
+        cv_typ16_t              type;
     } modifier_v1;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
-        int                     type;
+        unsigned short int      id;
+        cv_typ_t                type;
         short int               attribute;
     } modifier_v2;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               attribute;
         short int               datatype;
         struct p_string         p_name;
@@ -144,8 +153,8 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
-        unsigned int            datatype;
+        unsigned short int      id;
+        cv_typ_t                datatype;
         unsigned int            attribute;
         struct p_string         p_name;
     } pointer_v2;
@@ -153,9 +162,9 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
-        short int               elemtype;
-        short int               idxtype;
+        unsigned short int      id;
+        cv_typ16_t              elemtype;
+        cv_typ16_t              idxtype;
         unsigned short int      arrlen;     /* numeric leaf */
 #if 0
         struct p_string         p_name;
@@ -165,9 +174,9 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
-        unsigned int            elemtype;
-        unsigned int            idxtype;
+        unsigned short int      id;
+        cv_typ_t                elemtype;
+        cv_typ_t                idxtype;
         unsigned short int      arrlen;    /* numeric leaf */
 #if 0
         struct p_string         p_name;
@@ -177,9 +186,9 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
-        unsigned int            elemtype;
-        unsigned int            idxtype;
+        unsigned short int      id;
+        cv_typ_t                elemtype;
+        cv_typ_t                idxtype;
         unsigned short int      arrlen;    /* numeric leaf */
 #if 0
         char                    name[1];
@@ -189,12 +198,12 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               n_element;
-        short int               fieldlist;
+        cv_typ16_t              fieldlist;
         short int               property;
-        short int               derived;
-        short int               vshape;
+        cv_typ16_t              derived;
+        cv_typ16_t              vshape;
         unsigned short int      structlen;  /* numeric leaf */
 #if 0
         struct p_string         p_name;
@@ -204,12 +213,12 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               n_element;
         short int               property;
-        unsigned int            fieldlist;
-        unsigned int            derived;
-        unsigned int            vshape;
+        cv_typ_t                fieldlist;
+        cv_typ_t                derived;
+        cv_typ_t                vshape;
         unsigned short int      structlen;  /* numeric leaf */
 #if 0
         struct p_string         p_name;
@@ -219,12 +228,12 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               n_element;
         short int               property;
-        unsigned int            fieldlist;
-        unsigned int            derived;
-        unsigned int            vshape;
+        cv_typ_t                fieldlist;
+        cv_typ_t                derived;
+        cv_typ_t                vshape;
         unsigned short int      structlen;  /* numeric leaf */
 #if 0
         char                    name[1];
@@ -234,9 +243,9 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               count;
-        short int               fieldlist;
+        cv_typ16_t              fieldlist;
         short int               property;
         unsigned short int      un_len;     /* numeric leaf */
 #if 0
@@ -247,10 +256,10 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               count;
         short int               property;
-        unsigned int            fieldlist;
+        cv_typ_t                fieldlist;
         unsigned short int      un_len;     /* numeric leaf */
 #if 0
         struct p_string         p_name;
@@ -260,10 +269,10 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               count;
         short int               property;
-        unsigned int            fieldlist;
+        cv_typ_t                fieldlist;
         unsigned short int      un_len;     /* numeric leaf */
 #if 0
         char                    name[1];
@@ -273,10 +282,10 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               count;
-        short int               type;
-        short int               fieldlist;
+        cv_typ16_t              type;
+        cv_typ16_t              fieldlist;
         short int               property;
         struct p_string         p_name;
     } enumeration_v1;
@@ -284,74 +293,129 @@ union codeview_type
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               count;
         short int               property;
-        unsigned int            type;
-        unsigned int            fieldlist;
+        cv_typ_t                type;
+        cv_typ_t                fieldlist;
         struct p_string         p_name;
     } enumeration_v2;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         short int               count;
         short int               property;
-        unsigned int            type;
-        unsigned int            fieldlist;
+        cv_typ_t                type;
+        cv_typ_t                fieldlist;
         char                    name[1];
     } enumeration_v3;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
-        unsigned short int      rvtype;
-        unsigned char           call;
-        unsigned char           reserved;
+        unsigned short int      id;
+        cv_typ16_t              rvtype;
+        unsigned char           callconv;
+        unsigned char           funcattr;
         unsigned short int      params;
-        unsigned short int      arglist;
+        cv_typ16_t              arglist;
     } procedure_v1;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
-        unsigned int            rvtype;
-        unsigned char           call;
-        unsigned char           reserved;
+        unsigned short int      id;
+        cv_typ_t                rvtype;
+        unsigned char           callconv;
+        unsigned char           funcattr;
         unsigned short int      params;
-        unsigned int            arglist;
+        cv_typ_t                arglist;
     } procedure_v2;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
-        unsigned short int      rvtype;
-        unsigned short int      class_type;
-        unsigned short int      this_type;
-        unsigned char           call;
-        unsigned char           reserved;
+        unsigned short int      id;
+        cv_typ16_t              rvtype;
+        cv_typ16_t              class_type;
+        cv_typ16_t              this_type;
+        unsigned char           callconv;
+        unsigned char           funcattr;
         unsigned short int      params;
-        unsigned short int      arglist;
+        cv_typ16_t              arglist;
         unsigned int            this_adjust;
     } mfunction_v1;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
-        unsigned int            rvtype;
-        unsigned int            class_type;
-        unsigned                this_type;
-        unsigned char           call;
-        unsigned char           reserved;
+        unsigned short int      id;
+        cv_typ_t                rvtype;
+        cv_typ_t                class_type;
+        cv_typ_t                this_type;
+        unsigned char           callconv;
+        unsigned char           funcattr;
         unsigned short          params;
-        unsigned int            arglist;
+        cv_typ_t                arglist;
         unsigned int            this_adjust;
     } mfunction_v2;
+
+    /* types found in IPI stream (#4) */
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id; /* LF_FUNC_ID */
+        cv_itemid_t             scopeId;
+        cv_typ_t                type;
+        char                    name[1];
+    } func_id_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id; /* LF_MFUNC_ID */
+        cv_typ_t                parentType;
+        cv_typ_t                type;
+        char                    name[1];
+    } mfunc_id_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id; /* LF_STRING_ID */
+        cv_itemid_t             strid;
+        char                    name[1];
+    } string_id_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id; /* LF_UDT_SRC_LINE */
+        cv_typ_t                type;
+        cv_itemid_t             src;
+        unsigned int            line;
+    } udt_src_line_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id; /*  LF_UDT_MOD_SRC_LINE */
+        cv_typ_t                type;
+        cv_itemid_t             src;
+        unsigned int            line;
+        unsigned short          imod;
+    } udt_mod_src_line_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id; /*  LF_BUILDINFO */
+        unsigned short          count;
+        cv_itemid_t             arg[1];
+    } buildinfo_v3;
+
 };
 
 union codeview_reftype
@@ -359,30 +423,30 @@ union codeview_reftype
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
     } generic;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         unsigned char           list[1];
     } fieldlist;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         unsigned char           nbits;
         unsigned char           bitoff;
-        unsigned short          type;
+        cv_typ16_t              type;
     } bitfield_v1;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
-        unsigned int            type;
+        unsigned short int      id;
+        cv_typ_t                type;
         unsigned char           nbits;
         unsigned char           bitoff;
     } bitfield_v2;
@@ -390,33 +454,33 @@ union codeview_reftype
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         unsigned short          num;
-        unsigned short          args[1];
+        cv_typ16_t              args[1];
     } arglist_v1;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         unsigned                num;
-        unsigned                args[1];
+        cv_typ_t                args[1];
     } arglist_v2;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         unsigned short          num;
-        unsigned short          drvdcls[1];
+        cv_typ16_t              drvdcls[1];
     } derived_v1;
 
     struct
     {
         unsigned short int      len;
-        short int               id;
+        unsigned short int      id;
         unsigned                num;
-        unsigned                drvdcls[1];
+        cv_typ_t                drvdcls[1];
     } derived_v2;
 };
 
@@ -424,30 +488,30 @@ union codeview_fieldtype
 {
     struct
     {
-        short int		id;
+        unsigned short int      id;
     } generic;
 
     struct
     {
-        short int		id;
-        short int		type;
+        unsigned short int      id;
+        cv_typ16_t		type;
         short int		attribute;
         unsigned short int	offset;     /* numeric leaf */
     } bclass_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int	        type;
+        cv_typ_t	        type;
         unsigned short int	offset;     /* numeric leaf */
     } bclass_v2;
 
     struct
     {
-        short int		id;
-        short int		btype;
-        short int		vbtype;
+        unsigned short int      id;
+        cv_typ16_t		btype;
+        cv_typ16_t		vbtype;
         short int		attribute;
         unsigned short int	vbpoff;     /* numeric leaf */
 #if 0
@@ -457,10 +521,10 @@ union codeview_fieldtype
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int	        btype;
-        unsigned int	        vbtype;
+        cv_typ_t	        btype;
+        cv_typ_t	        vbtype;
         unsigned short int	vbpoff;     /* numeric leaf */
 #if 0
         unsigned short int	vboff;      /* numeric leaf */
@@ -469,7 +533,7 @@ union codeview_fieldtype
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
         unsigned short int	value;     /* numeric leaf */
 #if 0
@@ -479,7 +543,7 @@ union codeview_fieldtype
 
    struct
     {
-        short int               id;
+        unsigned short int      id;
         short int               attribute;
         unsigned short int      value;     /* numeric leaf */
 #if 0
@@ -489,23 +553,23 @@ union codeview_fieldtype
 
     struct
     {
-        short int		id;
-        short int		type;
+        unsigned short int      id;
+        cv_typ16_t	        type;
         struct p_string         p_name;
     } friendfcn_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		_pad0;
-        unsigned int	        type;
+        cv_typ_t	        type;
         struct p_string         p_name;
     } friendfcn_v2;
 
     struct
     {
-        short int		id;
-        short int		type;
+        unsigned short int      id;
+        cv_typ16_t		type;
         short int		attribute;
         unsigned short int	offset;    /* numeric leaf */
 #if 0
@@ -515,9 +579,9 @@ union codeview_fieldtype
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int	        type;
+        cv_typ_t	        type;
         unsigned short int	offset;    /* numeric leaf */
 #if 0
         struct p_string         p_name;
@@ -526,9 +590,9 @@ union codeview_fieldtype
 
     struct
     {
-        short int               id;
+        unsigned short int      id;
         short int               attribute;
-        unsigned int            type;
+        cv_typ_t                type;
         unsigned short int      offset; /* numeric leaf */
 #if 0
         unsigned char           name[1];
@@ -538,202 +602,202 @@ union codeview_fieldtype
 
     struct
     {
-        short int		id;
-        short int		type;
+        unsigned short int      id;
+        cv_typ16_t              type;
         short int		attribute;
         struct p_string         p_name;
     } stmember_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int	        type;
+        cv_typ_t	        type;
         struct p_string         p_name;
     } stmember_v2;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int	        type;
+        cv_typ_t	        type;
         char                    name[1];
     } stmember_v3;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		count;
-        short int		mlist;
+        cv_typ16_t		mlist;
         struct p_string         p_name;
     } method_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		count;
-        unsigned int	        mlist;
+        cv_typ_t	        mlist;
         struct p_string         p_name;
     } method_v2;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		count;
-        unsigned int	        mlist;
+        cv_typ_t	        mlist;
         char                    name[1];
     } method_v3;
 
     struct
     {
-        short int		id;
-        short int		type;
+        unsigned short int      id;
+        cv_typ16_t		type;
         struct p_string         p_name;
     } nesttype_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		_pad0;
-        unsigned int	        type;
+        cv_typ_t	        type;
         struct p_string         p_name;
     } nesttype_v2;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		_pad0;
-        unsigned int	        type;
+        cv_typ_t	        type;
         char                    name[1];
     } nesttype_v3;
 
     struct
     {
-        short int		id;
-        short int		type;
+        unsigned short int      id;
+        cv_typ16_t		type;
     } vfunctab_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		_pad0;
-        unsigned int	        type;
+        cv_typ_t	        type;
     } vfunctab_v2;
 
     struct
     {
-        short int		id;
-        short int		type;
+        unsigned short int      id;
+        cv_typ16_t		type;
     } friendcls_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		_pad0;
-        unsigned int	        type;
+        cv_typ_t	        type;
     } friendcls_v2;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        short int		type;
+        cv_typ16_t		type;
         struct p_string         p_name;
     } onemethod_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int 	        type;
+        cv_typ_t 	        type;
         struct p_string         p_name;
     } onemethod_v2;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int 	        type;
+        cv_typ_t 	        type;
         char                    name[1];
     } onemethod_v3;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        short int		type;
+        cv_typ16_t		type;
         unsigned int	        vtab_offset;
         struct p_string         p_name;
     } onemethod_virt_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int	        type;
+        cv_typ_t	        type;
         unsigned int	        vtab_offset;
         struct p_string         p_name;
     } onemethod_virt_v2;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int	        type;
+        cv_typ_t	        type;
         unsigned int	        vtab_offset;
         char                    name[1];
     } onemethod_virt_v3;
 
     struct
     {
-        short int		id;
-        short int		type;
+        unsigned short int      id;
+        cv_typ16_t		type;
         unsigned int	        offset;
     } vfuncoff_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		_pad0;
-        unsigned int	        type;
+        cv_typ_t	        type;
         unsigned int	        offset;
     } vfuncoff_v2;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        short int		type;
+        cv_typ16_t		type;
         struct p_string         p_name;
     } nesttypeex_v1;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int	        type;
+        cv_typ_t	        type;
         struct p_string         p_name;
     } nesttypeex_v2;
 
     struct
     {
-        short int		id;
+        unsigned short int      id;
         short int		attribute;
-        unsigned int	        type;
+        cv_typ_t	        type;
         struct p_string         p_name;
     } membermodify_v2;
 
     struct
     {
-        short int               id;
-        short int               ref;
+        unsigned short int      id;
+        cv_typ16_t              ref;
     } index_v1;
 
     struct
     {
-        short int               id;
-        short int               unk;
-        unsigned int            ref;
+        unsigned short int      id;
+        short int               _pad0;
+        cv_typ_t                ref;
     } index_v2;
 };
 
@@ -1208,6 +1272,17 @@ union codeview_fieldtype
 #define LF_NESTTYPE_V3          0x1510
 #define LF_ONEMETHOD_V3         0x1511
 
+/* leaves found in second type type (aka IPI)
+ * for simplicity, stored in the same union as other TPI leaves
+ */
+#define LF_FUNC_ID              0x1601
+#define LF_MFUNC_ID             0x1602
+#define LF_BUILDINFO            0x1603
+#define LF_SUBSTR_LIST          0x1604
+#define LF_STRING_ID            0x1605
+#define LF_UDT_SRC_LINE         0x1606
+#define LF_UDT_MOD_SRC_LINE     0x1607
+
 #define LF_NUMERIC              0x8000    /* numeric leaf types */
 #define LF_CHAR                 0x8000
 #define LF_SHORT                0x8001
@@ -1238,29 +1313,42 @@ union codeview_fieldtype
  *            Symbol information
  * ======================================== */
 
+struct cv_addr_range
+{
+    unsigned int                offStart;
+    unsigned short              isectStart;
+    unsigned short              cbRange;
+};
+
+struct cv_addr_gap
+{
+    unsigned short              gapStartOffset;
+    unsigned short              cbRange;
+};
+
 union codeview_symbol
 {
     struct
     {
-        short int	        len;
-        short int	        id;
+        unsigned short int      len;
+        unsigned short int      id;
     } generic;
 
     struct
     {
-	short int	        len;
-	short int	        id;
+	unsigned short int      len;
+	unsigned short int      id;
 	unsigned int	        offset;
 	unsigned short	        segment;
-	unsigned short	        symtype;
+	cv_typ16_t	        symtype;
         struct p_string         p_name;
     } data_v1;
 
     struct
     {
-	short int	        len;
-	short int	        id;
-	unsigned int	        symtype;
+	unsigned short int      len;
+	unsigned short int      id;
+	cv_typ_t	        symtype;
 	unsigned int	        offset;
 	unsigned short	        segment;
         struct p_string         p_name;
@@ -1268,9 +1356,9 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned int            symtype;
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ_t                symtype;
         unsigned int            offset;
         unsigned short          segment;
         char                    name[1];
@@ -1278,8 +1366,8 @@ union codeview_symbol
 
     struct
     {
-	short int	        len;
-	short int	        id;
+	unsigned short int      len;
+	unsigned short int      id;
 	unsigned int	        pparent;
 	unsigned int	        pend;
 	unsigned int	        next;
@@ -1292,8 +1380,8 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            pparent;
         unsigned int            pend;
         unsigned int            next;
@@ -1306,8 +1394,8 @@ union codeview_symbol
 
     struct
     {
-	short int	        len;
-	short int	        id;
+	unsigned short int      len;
+	unsigned short int      id;
 	unsigned int	        pparent;
 	unsigned int	        pend;
 	unsigned int	        next;
@@ -1316,22 +1404,22 @@ union codeview_symbol
 	unsigned int	        debug_end;
 	unsigned int	        offset;
 	unsigned short	        segment;
-	unsigned short	        proctype;
+	cv_typ16_t	        proctype;
 	unsigned char	        flags;
         struct p_string         p_name;
     } proc_v1;
 
     struct
     {
-	short int	        len;
-	short int	        id;
+	unsigned short int      len;
+	unsigned short int      id;
 	unsigned int	        pparent;
 	unsigned int	        pend;
 	unsigned int	        next;
 	unsigned int	        proc_len;
 	unsigned int	        debug_start;
 	unsigned int	        debug_end;
-	unsigned int	        proctype;
+	cv_typ_t	        proctype;
 	unsigned int	        offset;
 	unsigned short	        segment;
 	unsigned char	        flags;
@@ -1340,15 +1428,15 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            pparent;
         unsigned int            pend;
         unsigned int            next;
         unsigned int            proc_len;
         unsigned int            debug_start;
         unsigned int            debug_end;
-        unsigned int            proctype;
+        cv_typ_t                proctype;
         unsigned int            offset;
         unsigned short          segment;
         unsigned char           flags;
@@ -1357,19 +1445,19 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            offset;
         unsigned short          segment;
-        unsigned short          symtype;
+        unsigned short          pubsymflags;
         struct p_string         p_name;
     } public_v1;
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned int            symtype;
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            pubsymflags;
         unsigned int            offset;
         unsigned short          segment;
         struct p_string         p_name;
@@ -1377,9 +1465,9 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned int            symtype;
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            pubsymflags;
         unsigned int            offset;
         unsigned short          segment;
         char                    name[1];
@@ -1387,46 +1475,46 @@ union codeview_symbol
 
     struct
     {
-	short int	        len;	        /* Total length of this entry */
-	short int	        id;		/* Always S_BPREL32_16t */
+	unsigned short int      len;
+	unsigned short int      id;		/* Always S_BPREL32_16t */
 	unsigned int	        offset;	        /* Stack offset relative to BP */
-	unsigned short	        symtype;
+	cv_typ16_t	        symtype;
         struct p_string         p_name;
     } stack_v1;
 
     struct
     {
-	short int	        len;	        /* Total length of this entry */
-	short int	        id;		/* Always S_BPREL32_ST */
+	unsigned short int      len;
+	unsigned short int      id;		/* Always S_BPREL32_ST */
 	unsigned int	        offset;	        /* Stack offset relative to EBP */
-	unsigned int	        symtype;
+	cv_typ_t	        symtype;
         struct p_string         p_name;
     } stack_v2;
 
     struct
     {
-        short int               len;            /* Total length of this entry */
-        short int               id;             /* Always S_BPREL32 */
+        unsigned short int      len;
+        unsigned short int      id;             /* Always S_BPREL32 */
         int                     offset;         /* Stack offset relative to BP */
-        unsigned int            symtype;
+        cv_typ_t                symtype;
         char                    name[1];
     } stack_v3;
 
     struct
     {
-        short int               len;            /* Total length of this entry */
-        short int               id;             /* Always S_BPREL32 */
+        unsigned short int      len;
+        unsigned short int      id;             /* Always S_BPREL32 */
         int                     offset;         /* Stack offset relative to BP */
-        unsigned int            symtype;
+        cv_typ_t                symtype;
         unsigned short          reg;
         char                    name[1];
     } regrel_v3;
 
     struct
     {
-	short int	        len;	        /* Total length of this entry */
-	short int	        id;		/* Always S_REGISTER */
-        unsigned short          type;
+	unsigned short int      len;
+	unsigned short int      id;		/* Always S_REGISTER */
+        cv_typ16_t              type;
         unsigned short          reg;
         struct p_string         p_name;
         /* don't handle register tracking */
@@ -1434,9 +1522,9 @@ union codeview_symbol
 
     struct
     {
-	short int	        len;	        /* Total length of this entry */
-	short int	        id;		/* Always S_REGISTER_ST */
-        unsigned int            type;           /* check whether type & reg are correct */
+	unsigned short int      len;
+	unsigned short int      id;		/* Always S_REGISTER_ST */
+        cv_typ_t                type;           /* check whether type & reg are correct */
         unsigned short          reg;
         struct p_string         p_name;
         /* don't handle register tracking */
@@ -1444,9 +1532,9 @@ union codeview_symbol
 
     struct
     {
-	short int	        len;	        /* Total length of this entry */
-	short int	        id;		/* Always S_REGISTER */
-        unsigned int            type;           /* check whether type & reg are correct */
+	unsigned short int      len;
+	unsigned short int      id;		/* Always S_REGISTER */
+        cv_typ_t                type;           /* check whether type & reg are correct */
         unsigned short          reg;
         char                    name[1];
         /* don't handle register tracking */
@@ -1454,8 +1542,8 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            parent;
         unsigned int            end;
         unsigned int            length;
@@ -1466,8 +1554,8 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            parent;
         unsigned int            end;
         unsigned int            length;
@@ -1478,8 +1566,20 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned short          trampType; /* 0: incremental, 1: branchisland */
+        unsigned short          cbThunk;
+        unsigned int            offThunk;
+        unsigned int            offTarget;
+        unsigned short          sectThunk;
+        unsigned short          sectTarget;
+    } trampoline_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            offset;
         unsigned short          segment;
         unsigned char           flags;
@@ -1488,8 +1588,8 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            offset;
         unsigned short          segment;
         unsigned char           flags;
@@ -1498,9 +1598,9 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned short          type;
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ16_t              type;
         unsigned short          cvalue;         /* numeric leaf */
 #if 0
         struct p_string         p_name;
@@ -1509,9 +1609,9 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned                type;
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ_t                type;
         unsigned short          cvalue;         /* numeric leaf */
 #if 0
         struct p_string         p_name;
@@ -1520,9 +1620,9 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned                type;
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ_t                type;
         unsigned short          cvalue;
 #if 0
         char                    name[1];
@@ -1531,76 +1631,132 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned short          type;
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ16_t              type;
         struct p_string         p_name;
     } udt_v1;
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned                type;
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ_t                type;
         struct p_string         p_name;
     } udt_v2;
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned int            type;
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ_t                type;
         char                    name[1];
     } udt_v3;
 
     struct
     {
-        short int               len;
-        short int               id;
-        char                    signature[4];
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned                signature;
         struct p_string         p_name;
     } objname_v1;
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned int            unknown;
-        struct p_string         p_name;
-    } compiland_v1;
-
-    struct
-    {
-        short int               len;
-        short int               id;
-        unsigned                unknown1[4];
-        unsigned short          unknown2;
-        struct p_string         p_name;
-    } compiland_v2;
-
-    struct
-    {
-        short int               len;
-        short int               id;
-        unsigned int            unknown;
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned                signature;
         char                    name[1];
-    } compiland_v3;
+    } objname_v3;
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned char           machine;
+        struct
+        {
+        unsigned char           language : 8;
+        unsigned char           _dome : 8; /* other missing fields */
+        unsigned char           pad : 8;
+        } flags;
+        struct p_string         p_name;
+    } compile_v1;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        struct {
+        unsigned int            iLanguage :  8;
+        unsigned int            _dome     :  9; /* other missing fields */
+        unsigned int            pad       : 15;
+        } flags;
+        unsigned short          machine;
+        unsigned short          fe_major;
+        unsigned short          fe_minor;
+        unsigned short          fe_build;
+        unsigned short          be_major;
+        unsigned short          be_minor;
+        unsigned short          be_build;
+        struct p_string         p_name;
+    } compile2_v2;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        struct {
+        unsigned int            iLanguage :  8;
+        unsigned int            _dome     :  9; /* other missing fields */
+        unsigned int            pad       : 15;
+        } flags;
+        unsigned short          machine;
+        unsigned short          fe_major;
+        unsigned short          fe_minor;
+        unsigned short          fe_build;
+        unsigned short          be_major;
+        unsigned short          be_minor;
+        unsigned short          be_build;
+        char                    name[1];
+    } compile2_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        struct {
+        unsigned int            iLanguage :  8;
+        unsigned int            _dome     : 12; /* other missing fields */
+        unsigned int            pad       : 12;
+        } flags;
+        unsigned short          machine;
+        unsigned short          fe_major;
+        unsigned short          fe_minor;
+        unsigned short          fe_build;
+        unsigned short          fe_qfe;
+        unsigned short          be_major;
+        unsigned short          be_minor;
+        unsigned short          be_build;
+        unsigned short          be_qfe;
+        char                    name[1];
+    } compile3_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            offset;
         unsigned short          segment;
-        unsigned short          symtype;
+        cv_typ16_t              symtype;
         struct p_string         p_name;
     } thread_v1;
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned int            symtype;
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ_t                symtype;
         unsigned int            offset;
         unsigned short          segment;
         struct p_string         p_name;
@@ -1608,9 +1764,9 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
-        unsigned int            symtype;
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ_t                symtype;
         unsigned int            offset;
         unsigned short          segment;
         char                    name[1];
@@ -1618,24 +1774,34 @@ union codeview_symbol
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            sumName;
+        unsigned int            ibSym;
+        unsigned short          imod;
+        char                    name[1];
+    } refsym2_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            offset;
         unsigned short          segment;
     } ssearch_v1;
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            offset;
         unsigned int            unknown;
     } security_cookie_v3;
 
     struct
     {
-        short int               len;
-        short int               id;
+        unsigned short int      len;
+        unsigned short int      id;
         unsigned int            sz_frame;       /* size of frame */
         unsigned int            unknown2;
         unsigned int            unknown3;
@@ -1647,13 +1813,169 @@ union codeview_symbol
 
     struct
     {
-        unsigned short  len;
-        unsigned short  id;
-        unsigned int    offset;
-        unsigned short  sect_idx;
-        unsigned short  inst_len;
-        unsigned int    index;
-    } heap_alloc_site;
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            offset;
+        unsigned short          sect_idx;
+        unsigned short          inst_len;
+        cv_typ_t                index;
+    } heap_alloc_site_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ_t                symtype;
+        unsigned short          varflags;
+        char                    name[1];
+    } local_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            program;
+        struct cv_addr_range    range;
+        struct cv_addr_gap      gaps[0];
+    } defrange_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            program;
+        unsigned int            offParent;
+        struct cv_addr_range    range;
+        struct cv_addr_gap      gaps[0];
+    } defrange_subfield_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned short          reg;
+        unsigned short          attr;
+        struct cv_addr_range    range;
+        struct cv_addr_gap      gaps[0];
+    } defrange_register_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            offFramePointer;
+        struct cv_addr_range    range;
+        struct cv_addr_gap      gaps[0];
+    } defrange_frameptrrel_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            offFramePointer;
+    } defrange_frameptr_relfullscope_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned short          reg;
+        unsigned short          attr;
+        unsigned int            offParent : 12;
+        unsigned int            padding   : 20;
+        struct cv_addr_range    range;
+        struct cv_addr_gap      gaps[0];
+    } defrange_subfield_register_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned short          baseReg;
+        unsigned short          spilledUdtMember : 1;
+        unsigned short          padding          : 3;
+        unsigned short          offsetParent     : 12;
+        unsigned int            offBasePointer;
+        struct cv_addr_range    range;
+        struct cv_addr_gap      gaps[0];
+    } defrange_registerrel_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_itemid_t             itemid;
+    } build_info_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            pParent;
+        unsigned int            pEnd;
+        cv_itemid_t             inlinee;
+        unsigned char           binaryAnnotations[0];
+    } inline_site_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      typ;
+        unsigned int            off;
+        unsigned short          sect;
+        unsigned short          _pad0;
+        cv_typ_t                typind;
+    } callsiteinfo_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            pParent;
+        unsigned int            pEnd;
+        cv_itemid_t             inlinee;
+        unsigned int            invocations;
+        unsigned char           binaryAnnotations[0];
+    } inline_site2_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        unsigned int            count;
+        cv_typ_t                funcs[0];  /* array of cuntions, count entries */
+#if 0
+        unsigned int            invocations[0]; /* array of count entries, paires with funcs */
+#endif
+    } function_list_v3;
+
+    struct
+    {
+        unsigned short int      len;
+        unsigned short int      id;
+        cv_typ_t                typind;
+        unsigned int            modOffset;
+        unsigned short          varflags;
+        char                    name[1];
+    } file_static_v3;
+};
+
+enum BinaryAnnotationOpcode
+{
+    BA_OP_Invalid,
+    BA_OP_CodeOffset,
+    BA_OP_ChangeCodeOffsetBase,
+    BA_OP_ChangeCodeOffset,
+    BA_OP_ChangeCodeLength,
+    BA_OP_ChangeFile,
+    BA_OP_ChangeLineOffset,
+    BA_OP_ChangeLineEndDelta,
+    BA_OP_ChangeRangeKind,
+    BA_OP_ChangeColumnStart,
+    BA_OP_ChangeColumnEndDelta,
+    BA_OP_ChangeCodeOffsetAndLineOffset,
+    BA_OP_ChangeCodeLengthAndCodeOffset,
+    BA_OP_ChangeColumnEnd,
 };
 
 #define S_COMPILE       0x0001
@@ -1808,6 +2130,9 @@ union codeview_symbol
 #define S_LDATA_HLSL32      0x1163
 #define S_GDATA_HLSL32_EX   0x1164
 #define S_LDATA_HLSL32_EX   0x1165
+
+/* not documented yet on MS CV github repo, but that's how LLVM calls it */
+#define S_INLINEES          0x1168
 
 /* ======================================== *
  *          Line number information
@@ -2042,8 +2367,8 @@ typedef struct _PDB_SYMBOL_IMPORT
 
 typedef struct _PDB_SYMBOLS_OLD
 {
-    WORD        hash1_file;
-    WORD        hash2_file;
+    WORD        global_file;
+    WORD        public_file;
     WORD        gsym_file;
     WORD        pad;
     DWORD       module_size;
@@ -2056,11 +2381,13 @@ typedef struct _PDB_SYMBOLS
 {
     DWORD       signature;
     DWORD       version;
-    DWORD       unknown;
-    DWORD       hash1_file;
-    DWORD       hash2_file;
+    DWORD       age;
+    WORD        global_file;
+    WORD        flags;
+    WORD        public_file;
+    WORD        bldVer;
     WORD        gsym_file;
-    WORD        unknown1;
+    WORD        rbldVer;
     DWORD       module_size;
     DWORD       offset_size;
     DWORD       hash_size;

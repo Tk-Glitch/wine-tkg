@@ -1288,7 +1288,7 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
         break;
 
     case LF_PROCEDURE_V1:
-        symt = codeview_new_func_signature(ctp, existing, type->procedure_v1.call);
+        symt = codeview_new_func_signature(ctp, existing, type->procedure_v1.callconv);
         if (details)
         {
             codeview_add_type(curr_type, symt);
@@ -1299,7 +1299,7 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
         }
         break;
     case LF_PROCEDURE_V2:
-        symt = codeview_new_func_signature(ctp, existing,type->procedure_v2.call);
+        symt = codeview_new_func_signature(ctp, existing,type->procedure_v2.callconv);
         if (details)
         {
             codeview_add_type(curr_type, symt);
@@ -1314,7 +1314,7 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
         /* FIXME: for C++, this is plain wrong, but as we don't use arg types
          * nor class information, this would just do for now
          */
-        symt = codeview_new_func_signature(ctp, existing, type->mfunction_v1.call);
+        symt = codeview_new_func_signature(ctp, existing, type->mfunction_v1.callconv);
         if (details)
         {
             codeview_add_type(curr_type, symt);
@@ -1328,7 +1328,7 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
         /* FIXME: for C++, this is plain wrong, but as we don't use arg types
          * nor class information, this would just do for now
          */
-        symt = codeview_new_func_signature(ctp, existing, type->mfunction_v2.call);
+        symt = codeview_new_func_signature(ctp, existing, type->mfunction_v2.callconv);
         if (details)
         {
             codeview_add_type(curr_type, symt);
@@ -1826,41 +1826,34 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* roo
             break;
 
         case S_COMPILE:
-            TRACE("S-Compiland-V1 %x %s\n",
-                  sym->compiland_v1.unknown, terminate_string(&sym->compiland_v1.p_name));
+            TRACE("S-Compile-V1 machine:%x language:%x %s\n",
+                  sym->compile_v1.machine, sym->compile_v1.flags.language, terminate_string(&sym->compile_v1.p_name));
             break;
 
         case S_COMPILE2_ST:
-            TRACE("S-Compiland-V2 %s\n", terminate_string(&sym->compiland_v2.p_name));
-            if (TRACE_ON(dbghelp_msc))
-            {
-                const char* ptr1 = sym->compiland_v2.p_name.name + sym->compiland_v2.p_name.namelen;
-                const char* ptr2;
-                while (*ptr1)
-                {
-                    ptr2 = ptr1 + strlen(ptr1) + 1;
-                    TRACE("\t%s => %s\n", ptr1, debugstr_a(ptr2));
-                    ptr1 = ptr2 + strlen(ptr2) + 1;
-                }
-            }
-            break;
-        case S_OBJNAME:
-            TRACE("S-Compiland-V3 %s\n", sym->compiland_v3.name);
-            if (TRACE_ON(dbghelp_msc))
-            {
-                const char* ptr1 = sym->compiland_v3.name + strlen(sym->compiland_v3.name);
-                const char* ptr2;
-                while (*ptr1)
-                {
-                    ptr2 = ptr1 + strlen(ptr1) + 1;
-                    TRACE("\t%s => %s\n", ptr1, debugstr_a(ptr2));
-                    ptr1 = ptr2 + strlen(ptr2) + 1;
-                }
-            }
+            TRACE("S-Compile-V2 machine:%x language:%x %s\n",
+                  sym->compile2_v2.machine, sym->compile2_v2.flags.iLanguage, terminate_string(&sym->compile2_v2.p_name));
             break;
 
+        case S_COMPILE2:
+            TRACE("S-Compile-V3 machine:%x language:%x %s\n", sym->compile2_v3.machine, sym->compile2_v3.flags.iLanguage, sym->compile2_v3.name);
+            break;
+
+        case S_COMPILE3:
+            TRACE("S-Compile3-V3 machine:%x language:%x %s\n", sym->compile3_v3.machine, sym->compile3_v3.flags.iLanguage, sym->compile3_v3.name);
+            break;
+
+        case S_ENVBLOCK:
+            break;
+
+        case S_OBJNAME:
+            TRACE("S-ObjName-V3 %s\n", sym->objname_v3.name);
+            compiland = symt_new_compiland(msc_dbg->module, 0 /* FIXME */,
+                                           source_new(msc_dbg->module, NULL,
+                                                      sym->objname_v3.name));
+
         case S_OBJNAME_ST:
-            TRACE("S-ObjName %s\n", terminate_string(&sym->objname_v1.p_name));
+            TRACE("S-ObjName-V1 %s\n", terminate_string(&sym->objname_v1.p_name));
             compiland = symt_new_compiland(msc_dbg->module, 0 /* FIXME */,
                                            source_new(msc_dbg->module, NULL,
                                                       terminate_string(&sym->objname_v1.p_name)));
@@ -1991,11 +1984,6 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* roo
                 break;
             }
 
-        case S_COMPILE2: /* just to silence a few warnings */
-        case S_COMPILE3:
-        case S_ENVBLOCK:
-            break;
-
         case S_SSEARCH:
             TRACE("Start search: seg=0x%x at offset 0x%08x\n",
                   sym->ssearch_v1.segment, sym->ssearch_v1.offset);
@@ -2005,9 +1993,9 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* roo
             TRACE("S-Align V1\n");
             break;
         case S_HEAPALLOCSITE:
-            TRACE("heap site: offset=0x%08x at sect_idx 0x%04x, inst_len 0x%08x, index 0x%08x\n",
-                    sym->heap_alloc_site.offset, sym->heap_alloc_site.sect_idx,
-                    sym->heap_alloc_site.inst_len, sym->heap_alloc_site.index);
+            TRACE("S-heap site V3: offset=0x%08x at sect_idx 0x%04x, inst_len 0x%08x, index 0x%08x\n",
+                  sym->heap_alloc_site_v3.offset, sym->heap_alloc_site_v3.sect_idx,
+                  sym->heap_alloc_site_v3.inst_len, sym->heap_alloc_site_v3.index);
             break;
 
         /* the symbols we can safely ignore for now */
@@ -2070,7 +2058,7 @@ static BOOL codeview_snarf_public(const struct msc_debug_info* msc_dbg, const BY
             {
                 symt_new_public(msc_dbg->module, compiland,
                                 terminate_string(&sym->public_v1.p_name),
-                                sym->public_v1.symtype == SYMTYPE_FUNCTION,
+                                sym->public_v1.pubsymflags == SYMTYPE_FUNCTION,
                                 codeview_get_address(msc_dbg, sym->public_v1.segment, sym->public_v1.offset), 1);
             }
             break;
@@ -2079,7 +2067,7 @@ static BOOL codeview_snarf_public(const struct msc_debug_info* msc_dbg, const BY
             {
                 symt_new_public(msc_dbg->module, compiland,
                                 terminate_string(&sym->public_v2.p_name),
-                                sym->public_v2.symtype == SYMTYPE_FUNCTION,
+                                sym->public_v2.pubsymflags == SYMTYPE_FUNCTION,
                                 codeview_get_address(msc_dbg, sym->public_v2.segment, sym->public_v2.offset), 1);
             }
             break;
@@ -2089,7 +2077,7 @@ static BOOL codeview_snarf_public(const struct msc_debug_info* msc_dbg, const BY
             {
                 symt_new_public(msc_dbg->module, compiland,
                                 sym->public_v3.name,
-                                sym->public_v3.symtype == SYMTYPE_FUNCTION,
+                                sym->public_v3.pubsymflags == SYMTYPE_FUNCTION,
                                 codeview_get_address(msc_dbg, sym->public_v3.segment, sym->public_v3.offset), 1);
             }
             break;
@@ -2404,8 +2392,8 @@ static void pdb_convert_symbols_header(PDB_SYMBOLS* symbols,
         symbols->hash_size       = old->hash_size;
         symbols->srcmodule_size  = old->srcmodule_size;
         symbols->pdbimport_size  = 0;
-        symbols->hash1_file      = old->hash1_file;
-        symbols->hash2_file      = old->hash2_file;
+        symbols->global_file     = old->global_file;
+        symbols->public_file     = old->public_file;
         symbols->gsym_file       = old->gsym_file;
 
         *header_size = sizeof(PDB_SYMBOLS_OLD);

@@ -2351,6 +2351,16 @@ void WINAPI wine_vkDestroyDebugReportCallbackEXT(
     free(object);
 }
 
+BOOL WINAPI wine_vk_is_available_instance_function(VkInstance instance, const char *name)
+{
+    return !!vk_funcs->p_vkGetInstanceProcAddr(instance->instance, name);
+}
+
+BOOL WINAPI wine_vk_is_available_device_function(VkDevice device, const char *name)
+{
+    return !!vk_funcs->p_vkGetDeviceProcAddr(device->device, name);
+}
+
 VkResult WINAPI wine_vkAcquireNextImage2KHR(VkDevice device, const VkAcquireNextImageInfoKHR *pAcquireInfo, uint32_t *pImageIndex)
 {
 #if defined(USE_STRUCT_CONVERSION)

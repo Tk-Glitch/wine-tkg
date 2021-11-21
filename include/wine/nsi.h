@@ -21,6 +21,8 @@
 
 #include "inaddr.h"
 #include "in6addr.h"
+#include "ws2def.h"
+#include "ws2ipdef.h"
 #include "winioctl.h"
 
 /* Undocumented NSI NDIS tables */
@@ -294,6 +296,9 @@ struct nsi_ip_forward_static
 
 /* Undocumented NSI TCP tables */
 #define NSI_TCP_STATS_TABLE                0
+#define NSI_TCP_ALL_TABLE                  3
+#define NSI_TCP_ESTAB_TABLE                4
+#define NSI_TCP_LISTEN_TABLE               5
 
 struct nsi_tcp_stats_dynamic
 {
@@ -319,6 +324,55 @@ struct nsi_tcp_stats_static
     DWORD rto_max;
     DWORD max_conns;
     DWORD unk;
+};
+
+struct nsi_tcp_conn_key
+{
+    SOCKADDR_INET local;
+    SOCKADDR_INET remote;
+};
+
+struct nsi_tcp_conn_dynamic
+{
+    DWORD state;
+    DWORD unk[3];
+};
+
+struct nsi_tcp_conn_static
+{
+    DWORD unk[3];
+    DWORD pid;
+    ULONGLONG create_time;
+    ULONGLONG mod_info;
+};
+
+/* Undocumented NSI UDP tables */
+#define NSI_UDP_STATS_TABLE                0
+#define NSI_UDP_ENDPOINT_TABLE             1
+
+struct nsi_udp_stats_dynamic
+{
+    ULONGLONG in_dgrams;
+    DWORD no_ports;
+    DWORD in_errs;
+    ULONGLONG out_dgrams;
+    DWORD num_addrs;
+    DWORD unk[5];
+};
+
+struct nsi_udp_endpoint_key
+{
+    SOCKADDR_INET local;
+};
+
+struct nsi_udp_endpoint_static
+{
+    DWORD pid;
+    DWORD unk;
+    ULONGLONG create_time;
+    DWORD flags;
+    DWORD unk2;
+    ULONGLONG mod_info;
 };
 
 /* Wine specific ioctl interface */

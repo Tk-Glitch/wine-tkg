@@ -231,6 +231,9 @@ struct afd_get_events_params
 #define IOCTL_AFD_WINE_SET_IPV6_RECVHOPLIMIT            WINE_AFD_IOC(287)
 #define IOCTL_AFD_WINE_GET_IPV6_RECVPKTINFO             WINE_AFD_IOC(288)
 #define IOCTL_AFD_WINE_SET_IPV6_RECVPKTINFO             WINE_AFD_IOC(289)
+#define IOCTL_AFD_WINE_GET_IPV6_RECVTCLASS              WINE_AFD_IOC(290)
+#define IOCTL_AFD_WINE_SET_IPV6_RECVTCLASS              WINE_AFD_IOC(291)
+#define IOCTL_AFD_WINE_GET_SO_CONNECT_TIME              WINE_AFD_IOC(292)
 
 struct afd_create_params
 {

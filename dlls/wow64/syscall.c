@@ -63,9 +63,7 @@ struct mem_header
     BYTE               data[1];
 };
 
-static void **pWow64Transition;
-static void **p__wine_syscall_dispatcher;
-static SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock;
+SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock = NULL;
 
 /* cpu backend dll functions */
 static void *   (WINAPI *pBTCpuGetBopCode)(void);
@@ -421,6 +419,7 @@ static HMODULE load_cpu_dll(void)
  */
 static DWORD WINAPI process_init( RTL_RUN_ONCE *once, void *param, void **context )
 {
+    void **pWow64Transition, **p__wine_syscall_dispatcher;
     HMODULE module;
     UNICODE_STRING str;
 
@@ -521,7 +520,22 @@ static void free_temp_data(void)
 
 
 /**********************************************************************
- *           Wow64SystemServiceEx  (NTDLL.@)
+ *           syscall_filter
+ */
+static LONG CALLBACK syscall_filter( EXCEPTION_POINTERS *ptrs )
+{
+    switch (ptrs->ExceptionRecord->ExceptionCode)
+    {
+    case STATUS_INVALID_HANDLE:
+        Wow64PassExceptionToGuest( ptrs );
+        break;
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+
+/**********************************************************************
+ *           Wow64SystemServiceEx  (wow64.@)
  */
 NTSTATUS WINAPI Wow64SystemServiceEx( UINT num, UINT *args )
 {
@@ -537,7 +551,7 @@ NTSTATUS WINAPI Wow64SystemServiceEx( UINT num, UINT *args )
         syscall_thunk thunk = syscall_thunks[syscall_map[num]];
         status = thunk( args );
     }
-    __EXCEPT_ALL
+    __EXCEPT( syscall_filter )
     {
         status = GetExceptionCode();
     }
@@ -548,7 +562,7 @@ NTSTATUS WINAPI Wow64SystemServiceEx( UINT num, UINT *args )
 
 
 /**********************************************************************
- *           Wow64AllocateTemp
+ *           Wow64AllocateTemp  (wow64.@)
  *
  * FIXME: probably not 100% compatible.
  */
@@ -565,7 +579,7 @@ void * WINAPI Wow64AllocateTemp( SIZE_T size )
 
 
 /**********************************************************************
- *           Wow64ApcRoutine  (NTDLL.@)
+ *           Wow64ApcRoutine  (wow64.@)
  */
 void WINAPI Wow64ApcRoutine( ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3, CONTEXT *context )
 {
@@ -638,7 +652,7 @@ void WINAPI Wow64ApcRoutine( ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3, CON
 
 
 /**********************************************************************
- *           Wow64LdrpInitialize  (NTDLL.@)
+ *           Wow64LdrpInitialize  (wow64.@)
  */
 void WINAPI Wow64LdrpInitialize( CONTEXT *context )
 {

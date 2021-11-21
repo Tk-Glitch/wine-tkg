@@ -62,7 +62,7 @@
 @ stdcall CreateFontIndirectExW(ptr)
 @ stdcall CreateFontIndirectW(ptr)
 @ stdcall CreateFontW(long long long long long long long long long long long long long wstr)
-@ stdcall CreateHalftonePalette(long)
+@ stdcall CreateHalftonePalette(long) NtGdiCreateHalftonePalette
 @ stdcall CreateHatchBrush(long long)
 @ stdcall CreateICA(str str str ptr)
 @ stdcall CreateICW(wstr wstr wstr ptr)
@@ -80,19 +80,19 @@
 @ stdcall CreateScalableFontResourceA(long str str str)
 @ stdcall CreateScalableFontResourceW(long wstr wstr wstr)
 @ stdcall CreateSolidBrush(long)
-@ stdcall D3DKMTCheckVidPnExclusiveOwnership(ptr)
-@ stdcall D3DKMTCloseAdapter(ptr)
-@ stdcall D3DKMTCreateDCFromMemory(ptr)
-@ stdcall D3DKMTCreateDevice(ptr)
-@ stdcall D3DKMTDestroyDCFromMemory(ptr)
-@ stdcall D3DKMTDestroyDevice(ptr)
-@ stdcall D3DKMTEscape(ptr)
+@ stdcall D3DKMTCheckVidPnExclusiveOwnership(ptr) NtGdiDdDDICheckVidPnExclusiveOwnership
+@ stdcall D3DKMTCloseAdapter(ptr) NtGdiDdDDICloseAdapter
+@ stdcall D3DKMTCreateDCFromMemory(ptr) NtGdiDdDDICreateDCFromMemory
+@ stdcall D3DKMTCreateDevice(ptr) NtGdiDdDDICreateDevice
+@ stdcall D3DKMTDestroyDCFromMemory(ptr) NtGdiDdDDIDestroyDCFromMemory
+@ stdcall D3DKMTDestroyDevice(ptr) NtGdiDdDDIDestroyDevice
+@ stdcall D3DKMTEscape(ptr) NtGdiDdDDIEscape
 @ stdcall D3DKMTOpenAdapterFromDeviceName(ptr)
 @ stdcall D3DKMTOpenAdapterFromGdiDisplayName(ptr)
-@ stdcall D3DKMTOpenAdapterFromHdc(ptr)
-@ stdcall D3DKMTQueryStatistics(ptr)
-@ stdcall D3DKMTSetQueuedLimit(ptr)
-@ stdcall D3DKMTSetVidPnSourceOwner(ptr)
+@ stdcall D3DKMTOpenAdapterFromHdc(ptr) NtGdiDdDDIOpenAdapterFromHdc
+@ stdcall D3DKMTQueryStatistics(ptr) NtGdiDdDDIQueryStatistics
+@ stdcall D3DKMTSetQueuedLimit(ptr) NtGdiDdDDISetQueuedLimit
+@ stdcall D3DKMTSetVidPnSourceOwner(ptr) NtGdiDdDDISetVidPnSourceOwner
 @ stdcall DPtoLP(long ptr long)
 @ stdcall DeleteColorSpace(long)
 @ stdcall DeleteDC(long)
@@ -289,7 +289,7 @@
 # @ stub GetEnhMetaFilePixelFormat
 @ stdcall GetEnhMetaFileW(wstr)
 # @ stub GetFontAssocStatus
-@ stdcall GetFontData(long long long ptr long)
+@ stdcall GetFontData(long long long ptr long) NtGdiGetFontData
 @ stdcall GetFontFileData(long long int64 ptr long)
 @ stdcall GetFontFileInfo(long long ptr long ptr)
 @ stdcall GetFontLanguageInfo(long)
@@ -309,7 +309,7 @@
 @ stdcall GetICMProfileW(long ptr ptr)
 @ stdcall GetKerningPairs(long long ptr) GetKerningPairsA
 @ stdcall GetKerningPairsA(long long ptr)
-@ stdcall GetKerningPairsW(long long ptr)
+@ stdcall GetKerningPairsW(long long ptr) NtGdiGetKerningPairsW
 @ stdcall GetLayout(long)
 @ stdcall GetLogColorSpaceA(long ptr long)
 @ stdcall GetLogColorSpaceW(long ptr long)
@@ -319,15 +319,15 @@
 @ stdcall GetMetaFileW(wstr)
 @ stdcall GetMetaRgn(long long)
 @ stdcall GetMiterLimit(long ptr)
-@ stdcall GetNearestColor(long long)
-@ stdcall GetNearestPaletteIndex(long long)
+@ stdcall GetNearestColor(long long) NtGdiGetNearestColor
+@ stdcall GetNearestPaletteIndex(long long) NtGdiGetNearestPaletteIndex
 @ stdcall GetObjectA(long long ptr)
 @ stdcall GetObjectType(long)
 @ stdcall GetObjectW(long long ptr)
 @ stdcall GetOutlineTextMetricsA(long long ptr)
 @ stdcall GetOutlineTextMetricsW(long long ptr)
 @ stdcall GetPaletteEntries(long long long ptr)
-@ stdcall GetPath(long ptr ptr long)
+@ stdcall GetPath(long ptr ptr long) NtGdiGetPath
 @ stdcall GetPixel(long long long) NtGdiGetPixel
 @ stdcall GetPixelFormat(long)
 @ stdcall GetPolyFillMode(long)
@@ -342,7 +342,7 @@
 # @ stub GetStringBitmapA
 # @ stub GetStringBitmapW
 @ stdcall GetSystemPaletteEntries(long long long ptr)
-@ stdcall GetSystemPaletteUse(long)
+@ stdcall GetSystemPaletteUse(long) NtGdiGetSystemPaletteUse
 @ stdcall GetTextAlign(long)
 @ stdcall GetTextCharacterExtra(long)
 @ stdcall GetTextCharset(long)
@@ -389,7 +389,7 @@
 @ stdcall OffsetWindowOrgEx(long long long ptr)
 @ stdcall PaintRgn(long long)
 @ stdcall PatBlt(long long long long long long)
-@ stdcall PathToRegion(long)
+@ stdcall PathToRegion(long) NtGdiPathToRegion
 @ stdcall Pie(long long long long long long long long long)
 @ stdcall PlayEnhMetaFile(long long ptr)
 @ stdcall PlayEnhMetaFileRecord(long ptr ptr long)
@@ -422,7 +422,7 @@
 @ stdcall RemoveFontResourceW(wstr)
 @ stdcall ResetDCA(long ptr)
 @ stdcall ResetDCW(long ptr)
-@ stdcall ResizePalette(long long)
+@ stdcall ResizePalette(long long) NtGdiResizePalette
 @ stdcall RestoreDC(long long)
 @ stdcall RoundRect(long long long long long long long)
 @ stdcall SaveDC(long)
@@ -498,7 +498,7 @@
 @ stdcall SetICMProfileW(long wstr)
 @ stdcall SetLayout(long long)
 # @ stub SetLayoutWidth
-@ stdcall SetMagicColors(ptr long long)
+@ stdcall SetMagicColors(ptr long long) NtGdiSetMagicColors
 @ stdcall SetMapMode(long long)
 @ stdcall SetMapperFlags(long long)
 @ stdcall SetMetaFileBitsEx(long ptr)
@@ -514,7 +514,7 @@
 @ stdcall SetRectRgn(long long long long long) NtGdiSetRectRgn
 @ stdcall SetRelAbs(long long)
 @ stdcall SetStretchBltMode(long long)
-@ stdcall SetSystemPaletteUse(long long)
+@ stdcall SetSystemPaletteUse(long long) NtGdiSetSystemPaletteUse
 @ stdcall SetTextAlign(long long)
 @ stdcall SetTextCharacterExtra(long long)
 @ stdcall SetTextColor(long long)
@@ -540,7 +540,7 @@
 @ stdcall TranslateCharsetInfo(ptr ptr long)
 @ stub UnloadNetworkFonts
 @ stdcall UnrealizeObject(long)
-@ stdcall UpdateColors(long)
+@ stdcall UpdateColors(long) NtGdiUpdateColors
 @ stdcall UpdateICMRegKey(long str str long) UpdateICMRegKeyA
 @ stdcall UpdateICMRegKeyA(long str str long)
 @ stdcall UpdateICMRegKeyW(long wstr wstr long)

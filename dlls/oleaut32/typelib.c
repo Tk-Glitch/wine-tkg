@@ -7315,7 +7315,7 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
     UINT  *pArgErr)
 {
     ITypeInfoImpl *This = impl_from_ITypeInfo2(iface);
-    int i;
+    int i, j;
     unsigned int var_index;
     TYPEKIND type_kind;
     HRESULT hres;
@@ -7422,15 +7422,13 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
 
                 src_arg = NULL;
 
-                if (cNamedArgs)
+                for (j = 0; j < cNamedArgs; j++)
                 {
-                    USHORT j;
-                    for (j = 0; j < cNamedArgs; j++)
-                        if (rgdispidNamedArgs[j] == i || (i == func_desc->cParams-1 && rgdispidNamedArgs[j] == DISPID_PROPERTYPUT))
-                        {
-                            src_arg = &pDispParams->rgvarg[j];
-                            break;
-                        }
+                    if (rgdispidNamedArgs[j] == i || (i == func_desc->cParams-1 && rgdispidNamedArgs[j] == DISPID_PROPERTYPUT))
+                    {
+                        src_arg = &pDispParams->rgvarg[j];
+                        break;
+                    }
                 }
 
                 if (!src_arg && vargs_converted + cNamedArgs < pDispParams->cArgs)
@@ -7499,7 +7497,7 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                         {
                             SAFEARRAYBOUND bound;
                             VARIANT *v;
-                            LONG j;
+
                             bound.lLbound = 0;
                             bound.cElements = pDispParams->cArgs-i;
                             if (!(a = SafeArrayCreate(VT_VARIANT, 1, &bound)))
@@ -7684,7 +7682,7 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                              i == func_desc->cParams-1)
                     {
                         SAFEARRAY *a = V_ARRAY(prgpvarg[i]);
-                        LONG j, ubound;
+                        LONG ubound;
                         VARIANT *v;
                         hres = SafeArrayGetUBound(a, 1, &ubound);
                         if (hres != S_OK)

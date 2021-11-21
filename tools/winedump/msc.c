@@ -42,6 +42,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winedump.h"
+#include "cvconst.h"
 #include "wine/mscvpdb.h"
 
 #define PSTRING(adr, ofs) \
@@ -255,13 +256,246 @@ static const char* get_property(unsigned prop)
     if (prop & 0x0040) X("w/casting-methods");
     if (prop & 0x0080) X("forward");
     if (prop & 0x0100) X("scoped");
+    if (prop & 0x0200) X("decorated-name");
+    if (prop & 0x0400) X("sealed-name");
+    if (prop & 0x1800) pos += sprintf(tmp, "hfa%x", (prop >> 11) & 3);
+    if (prop & 0x2000) X("intrinsic");
+    if (prop & 0xC000) pos += sprintf(tmp, "mocom%x", prop >> 14);
 #undef X
 
-    if (prop & ~0x01FF) pos += sprintf(tmp, "unk%x", prop & ~0x01FF);
-    else tmp[pos] = '\0';
+    tmp[pos] = '\0';
     assert(pos < sizeof(tmp));
 
     return tmp;
+}
+
+static const char* get_funcattr(unsigned attr)
+{
+    static char tmp[1024];
+    unsigned    pos = 0;
+
+    if (!attr) return "none";
+#define X(s) {if (pos) tmp[pos++] = ';'; strcpy(tmp + pos, s); pos += strlen(s);}
+    if (attr & 0x0001) X("C++ReturnUDT");
+    if (attr & 0x0002) X("Ctor");
+    if (attr & 0x0004) X("Ctor-w/virtualbase");
+    if (attr & 0xfff8) pos += sprintf(tmp, "unk:%x", attr & 0xfff8);
+#undef X
+
+    tmp[pos] = '\0';
+    assert(pos < sizeof(tmp));
+
+    return tmp;
+}
+
+static const char* get_varflags(unsigned flags)
+{
+    static char tmp[1024];
+    unsigned    pos = 0;
+
+    if (!flags) return "none";
+#define X(s) {if (pos) tmp[pos++] = ';'; strcpy(tmp + pos, s); pos += strlen(s);}
+    if (flags & 0x0001) X("param");
+    if (flags & 0x0002) X("addr-taken");
+    if (flags & 0x0004) X("compiler-gen");
+    if (flags & 0x0008) X("aggregated");
+    if (flags & 0x0010) X("in-aggregate");
+    if (flags & 0x0020) X("aliased");
+    if (flags & 0x0040) X("alias");
+    if (flags & 0x0080) X("retval");
+    if (flags & 0x0100) X("optimized-out");
+    if (flags & 0x0200) X("enreg-global");
+    if (flags & 0x0400) X("enreg-static");
+    if (flags & 0xf800) pos += sprintf(tmp, "unk:%x", flags & 0xf800);
+#undef X
+
+    tmp[pos] = '\0';
+    assert(pos < sizeof(tmp));
+
+    return tmp;
+}
+
+static const char* get_machine(unsigned m)
+{
+    const char*     machine;
+
+    switch (m)
+    {
+    case CV_CFL_8080:           machine = "Intel 8080"; break;
+    case CV_CFL_8086:           machine = "Intel 8086"; break;
+    case CV_CFL_80286:          machine = "Intel 80286"; break;
+    case CV_CFL_80386:          machine = "Intel 80386"; break;
+    case CV_CFL_80486:          machine = "Intel 80486"; break;
+    case CV_CFL_PENTIUM:        machine = "Intel Pentium"; break;
+    case CV_CFL_PENTIUMII:      machine = "Intel Pentium II"; break;
+    case CV_CFL_PENTIUMIII:     machine = "Intel Pentium III"; break;
+
+    case CV_CFL_MIPS:           machine = "MIPS R4000"; break;
+    case CV_CFL_MIPS16:         machine = "MIPS16"; break;
+    case CV_CFL_MIPS32:         machine = "MIPS32"; break;
+    case CV_CFL_MIPS64:         machine = "MIPS64"; break;
+    case CV_CFL_MIPSI:          machine = "MIPS I"; break;
+    case CV_CFL_MIPSII:         machine = "MIPS II"; break;
+    case CV_CFL_MIPSIII:        machine = "MIPS III"; break;
+    case CV_CFL_MIPSIV:         machine = "MIPS IV"; break;
+    case CV_CFL_MIPSV:          machine = "MIPS V"; break;
+
+    case CV_CFL_M68000:         machine = "M68000"; break;
+    case CV_CFL_M68010:         machine = "M68010"; break;
+    case CV_CFL_M68020:         machine = "M68020"; break;
+    case CV_CFL_M68030:         machine = "M68030"; break;
+    case CV_CFL_M68040:         machine = "M68040"; break;
+
+    case CV_CFL_ALPHA_21064:    machine = "Alpha 21064"; break;
+    case CV_CFL_ALPHA_21164:    machine = "Alpha 21164"; break;
+    case CV_CFL_ALPHA_21164A:   machine = "Alpha 21164A"; break;
+    case CV_CFL_ALPHA_21264:    machine = "Alpha 21264"; break;
+    case CV_CFL_ALPHA_21364:    machine = "Alpha 21364"; break;
+
+    case CV_CFL_PPC601:         machine = "PowerPC 601"; break;
+    case CV_CFL_PPC603:         machine = "PowerPC 603"; break;
+    case CV_CFL_PPC604:         machine = "PowerPC 604"; break;
+    case CV_CFL_PPC620:         machine = "PowerPC 620"; break;
+    case CV_CFL_PPCFP:          machine = "PowerPC FP"; break;
+
+    case CV_CFL_SH3:            machine = "SH3"; break;
+    case CV_CFL_SH3E:           machine = "SH3E"; break;
+    case CV_CFL_SH3DSP:         machine = "SH3DSP"; break;
+    case CV_CFL_SH4:            machine = "SH4"; break;
+    case CV_CFL_SHMEDIA:        machine = "SHMEDIA"; break;
+
+    case CV_CFL_ARM3:           machine = "ARM 3"; break;
+    case CV_CFL_ARM4:           machine = "ARM 4"; break;
+    case CV_CFL_ARM4T:          machine = "ARM 4T"; break;
+    case CV_CFL_ARM5:           machine = "ARM 5"; break;
+    case CV_CFL_ARM5T:          machine = "ARM 5T"; break;
+    case CV_CFL_ARM6:           machine = "ARM 6"; break;
+    case CV_CFL_ARM_XMAC:       machine = "ARM XMAC"; break;
+    case CV_CFL_ARM_WMMX:       machine = "ARM WMMX"; break;
+    case CV_CFL_ARM7:           machine = "ARM 7"; break;
+
+    case CV_CFL_OMNI:           machine = "OMNI"; break;
+
+    case CV_CFL_IA64_1:         machine = "Itanium"; break;
+    case CV_CFL_IA64_2:         machine = "Itanium 2"; break;
+
+    case CV_CFL_CEE:            machine = "CEE"; break;
+
+    case CV_CFL_AM33:           machine = "AM33"; break;
+
+    case CV_CFL_M32R:           machine = "M32R"; break;
+
+    case CV_CFL_TRICORE:        machine = "TRICORE"; break;
+
+    case CV_CFL_X64:            machine = "x86_64"; break;
+
+    case CV_CFL_EBC:            machine = "EBC"; break;
+
+    case CV_CFL_THUMB:          machine = "Thumb"; break;
+    case CV_CFL_ARMNT:          machine = "ARM NT"; break;
+    case CV_CFL_ARM64:          machine = "ARM 64"; break;
+
+    case CV_CFL_D3D11_SHADER:   machine = "D3D11 shader"; break;
+    default:
+        {
+            static char tmp[16];
+            sprintf(tmp, "machine=%x", m);
+            machine = tmp;
+        }
+        break;
+    }
+    return machine;
+}
+
+static const char* get_language(unsigned l)
+{
+    const char* lang;
+
+    switch (l)
+    {
+    case CV_CFL_C:       lang = "C"; break;
+    case CV_CFL_CXX:     lang = "C++"; break;
+    case CV_CFL_FORTRAN: lang = "Fortran"; break;
+    case CV_CFL_MASM:    lang = "Masm"; break;
+    case CV_CFL_PASCAL:  lang = "Pascal"; break;
+    case CV_CFL_BASIC:   lang = "Basic"; break;
+    case CV_CFL_COBOL:   lang = "Cobol"; break;
+    case CV_CFL_LINK:    lang = "Link"; break;
+    case CV_CFL_CVTRES:  lang = "Resource"; break;
+    case CV_CFL_CVTPGD:  lang = "PoGo"; break;
+    case CV_CFL_CSHARP:  lang = "C#"; break;
+    case CV_CFL_VB:      lang = "VisualBasic"; break;
+    case CV_CFL_ILASM:   lang = "IL ASM"; break;
+    case CV_CFL_JAVA:    lang = "Java"; break;
+    case CV_CFL_JSCRIPT: lang = "JavaScript"; break;
+    case CV_CFL_MSIL:    lang = "MSIL"; break;
+    case CV_CFL_HLSL:    lang = "HLSL"; break;
+    default:
+        {
+            static char tmp[16];
+            sprintf(tmp, "lang=%x", l);
+            lang = tmp;
+        }
+        break;
+    }
+    return lang;
+}
+
+static const char* get_callconv(unsigned cc)
+{
+    const char* callconv;
+
+    switch (cc)
+    {
+    case CV_CALL_NEAR_C:        callconv = "near C"; break;
+    case CV_CALL_FAR_C:         callconv = "far C"; break;
+    case CV_CALL_NEAR_PASCAL:   callconv = "near pascal"; break;
+    case CV_CALL_FAR_PASCAL:    callconv = "far pascal"; break;
+    case CV_CALL_NEAR_FAST:     callconv = "near fast"; break;
+    case CV_CALL_FAR_FAST:      callconv = "far fast"; break;
+    case CV_CALL_SKIPPED:       callconv = "skipped"; break;
+    case CV_CALL_NEAR_STD:      callconv = "near std"; break;
+    case CV_CALL_FAR_STD:       callconv = "far std"; break;
+    case CV_CALL_NEAR_SYS:      callconv = "near sys"; break;
+    case CV_CALL_FAR_SYS:       callconv = "far sys"; break;
+    case CV_CALL_THISCALL:      callconv = "this call"; break;
+    case CV_CALL_MIPSCALL:      callconv = "mips call"; break;
+    case CV_CALL_GENERIC:       callconv = "generic"; break;
+    case CV_CALL_ALPHACALL:     callconv = "alpha call"; break;
+    case CV_CALL_PPCCALL:       callconv = "ppc call"; break;
+    case CV_CALL_SHCALL:        callconv = "sh call"; break;
+    case CV_CALL_ARMCALL:       callconv = "arm call"; break;
+    case CV_CALL_AM33CALL:      callconv = "am33 call"; break;
+    case CV_CALL_TRICALL:       callconv = "tri call"; break;
+    case CV_CALL_SH5CALL:       callconv = "sh5 call"; break;
+    case CV_CALL_M32RCALL:      callconv = "m32r call"; break;
+    case CV_CALL_CLRCALL:       callconv = "clr call"; break;
+    case CV_CALL_INLINE:        callconv = "inline"; break;
+    case CV_CALL_NEAR_VECTOR:   callconv = "near vector"; break;
+    case CV_CALL_RESERVED:      callconv = "reserved"; break;
+    default:
+        {
+            static char tmp[16];
+            sprintf(tmp, "callconv=%x", cc);
+            callconv = tmp;
+        }
+        break;
+    }
+    return callconv;
+}
+
+static const char* get_pubflags(unsigned flags)
+{
+    static char ret[32];
+
+    ret[0] = '\0';
+#define X(s) {if (ret[0]) strcat(ret, ";"); strcat(ret, s);}
+    if (flags & 1) X("code");
+    if (flags & 2) X("func");
+    if (flags & 4) X("manage");
+    if (flags & 8) X("msil");
+#undef X
+    return ret;
 }
 
 static void do_field(const unsigned char* start, const unsigned char* end)
@@ -580,6 +814,7 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
 
     switch (type->generic.id)
     {
+    /* types from TPI (aka #2) stream */
     case LF_POINTER_V1:
         printf("\t%x => Pointer V1 to type:%x\n",
                curr_type, type->pointer_v1.datatype);
@@ -664,6 +899,8 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
                str, type->struct_v3.n_element, get_property(type->struct_v3.property),
                type->struct_v3.fieldlist, type->struct_v3.derived,
                type->struct_v3.vshape, value);
+        if (type->union_v3.property & 0x200)
+            printf("\t\tDecorated name:%s\n", str + strlen(str) + 1);
         break;
 
     case LF_UNION_V1:
@@ -689,6 +926,8 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
                curr_type, str, type->union_v3.count,
                get_property(type->union_v3.property),
                type->union_v3.fieldlist, value);
+        if (type->union_v3.property & 0x200)
+            printf("\t\tDecorated name:%s\n", str + strlen(str) + 1);
         break;
 
     case LF_ENUM_V1:
@@ -716,6 +955,8 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
                type->enumeration_v3.fieldlist,
                type->enumeration_v3.count,
                get_property(type->enumeration_v3.property));
+        if (type->union_v3.property & 0x200)
+            printf("\t\tDecorated name:%s\n", type->enumeration_v3.name + strlen(type->enumeration_v3.name) + 1);
         break;
 
     case LF_ARGLIST_V1:
@@ -737,28 +978,28 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
         break;
 
     case LF_PROCEDURE_V1:
-        /* FIXME: unknown could be the calling convention for the proc */
-        printf("\t%x => Procedure V1 ret_type:%x call:%x (#%u args_type:%x)\n",
+        printf("\t%x => Procedure V1 ret_type:%x callconv:%s attr:%s (#%u args_type:%x)\n",
                curr_type, type->procedure_v1.rvtype,
-               type->procedure_v1.call, type->procedure_v1.params,
-               type->procedure_v1.arglist);
+               get_callconv(type->procedure_v1.callconv), get_funcattr(type->procedure_v1.funcattr),
+               type->procedure_v1.params, type->procedure_v1.arglist);
         break;
 
     case LF_PROCEDURE_V2:
-        printf("\t%x => Procedure V2 ret_type:%x unk:%x (#%u args_type:%x)\n",
+        printf("\t%x => Procedure V2 ret_type:%x callconv:%s attr:%s (#%u args_type:%x)\n",
                curr_type, type->procedure_v2.rvtype,
-               type->procedure_v2.call, type->procedure_v2.params,
-               type->procedure_v2.arglist);
+               get_callconv(type->procedure_v2.callconv), get_funcattr(type->procedure_v1.funcattr),
+               type->procedure_v2.params, type->procedure_v2.arglist);
         break;
 
     case LF_MFUNCTION_V2:
-        printf("\t%x => MFunction V2 ret-type:%x call:%x class-type:%x this-type:%x\n"
+        printf("\t%x => MFunction V2 ret-type:%x callconv:%s class-type:%x this-type:%x attr:%s\n"
                "\t\t#args:%x args-type:%x this_adjust:%x\n",
                curr_type,
                type->mfunction_v2.rvtype,
-               type->mfunction_v2.call,
+               get_callconv(type->mfunction_v2.callconv),
                type->mfunction_v2.class_type,
                type->mfunction_v2.this_type,
+               get_funcattr(type->mfunction_v2.funcattr),
                type->mfunction_v2.params,
                type->mfunction_v2.arglist,
                type->mfunction_v2.this_adjust);
@@ -859,6 +1100,49 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
         printf("\n");
         break;
 
+    /* types from IPI (aka #4) stream */
+    case LF_FUNC_ID:
+        printf("\t%x => FuncId %s scopeId:%04x type:%04x\n",
+               curr_type, type->func_id_v3.name,
+               type->func_id_v3.scopeId, type->func_id_v3.type);
+        break;
+    case LF_MFUNC_ID:
+        printf("\t%x => MFuncId %s parent:%04x type:%04x\n",
+               curr_type, type->mfunc_id_v3.name,
+               type->mfunc_id_v3.parentType, type->mfunc_id_v3.type);
+        break;
+    case LF_BUILDINFO:
+        printf("\t%x => BuildInfo count:%d\n", curr_type, type->buildinfo_v3.count);
+        if (type->buildinfo_v3.count >= 1) printf("\t\tcurrent dir: %04x\n", type->buildinfo_v3.arg[0]);
+        if (type->buildinfo_v3.count >= 2) printf("\t\tbuild tool:  %04x\n", type->buildinfo_v3.arg[1]);
+        if (type->buildinfo_v3.count >= 3) printf("\t\tsource file: %04x\n", type->buildinfo_v3.arg[2]);
+        if (type->buildinfo_v3.count >= 4) printf("\t\tPDB file:    %04x\n", type->buildinfo_v3.arg[3]);
+        if (type->buildinfo_v3.count >= 5) printf("\t\tArguments:   %04x\n", type->buildinfo_v3.arg[4]);
+        break;
+    case LF_SUBSTR_LIST:
+        printf("\t%x => SubstrList V3(#%u):", curr_type, reftype->arglist_v2.num);
+        for (j = 0; j < reftype->arglist_v2.num; j++)
+        {
+            printf("\t %x", reftype->arglist_v2.args[j]);
+        }
+        printf("\t\n");
+        break;
+    case LF_STRING_ID:
+        printf("\t%x => StringId %s strid:%04x\n",
+               curr_type, type->string_id_v3.name, type->string_id_v3.strid);
+        break;
+    case LF_UDT_SRC_LINE:
+        printf("\t%x => Udt-SrcLine type:%04x src:%04x line:%d\n",
+               curr_type, type->udt_src_line_v3.type,
+               type->udt_src_line_v3.src, type->udt_src_line_v3.line);
+        break;
+    case LF_UDT_MOD_SRC_LINE:
+        printf("\t%x => Udt-ModSrcLine type:%04x src:%04x line:%d mod:%d\n",
+               curr_type, type->udt_mod_src_line_v3.type,
+               type->udt_mod_src_line_v3.src, type->udt_mod_src_line_v3.line,
+               type->udt_mod_src_line_v3.imod);
+        break;
+
     default:
         printf(">>> Unsupported type-id %x for %x\n", type->generic.id, curr_type);
         dump_data((const void*)type, type->generic.len + 2, "");
@@ -896,6 +1180,108 @@ BOOL codeview_dump_types_from_block(const void* table, unsigned long len)
     return TRUE;
 }
 
+static void dump_defrange(const struct cv_addr_range* range, const void* last, const char* pfx)
+{
+    const struct cv_addr_gap* gap;
+
+    printf("%s%04x:%08x range:#%x\n", pfx, range->isectStart, range->offStart, range->cbRange);
+    for (gap = (const struct cv_addr_gap*)(range + 1); (const void*)(gap + 1) <= last; ++gap)
+        printf("%s\toffset:%x range:#%x\n", pfx, gap->gapStartOffset, gap->cbRange);
+}
+
+/* return address of first byte after the symbol */
+static inline const char* get_last(const union codeview_symbol* sym)
+{
+    return (const char*)sym + sym->generic.len + 2;
+}
+
+static unsigned binannot_uncompress(const unsigned char** pptr)
+{
+    unsigned res = (unsigned)(-1);
+    const unsigned char* ptr = *pptr;
+
+    if ((*ptr & 0x80) == 0x00)
+        res = (unsigned)(*ptr++);
+    else if ((*ptr & 0xC0) == 0x80)
+    {
+        res = (unsigned)((*ptr++ & 0x3f) << 8);
+        res |= *ptr++;
+    }
+    else if ((*ptr & 0xE0) == 0xC0)
+    {
+        res = (*ptr++ & 0x1f) << 24;
+        res |= *ptr++ << 16;
+        res |= *ptr++ << 8;
+        res |= *ptr++;
+    }
+    else res = (unsigned)(-1);
+    *pptr = ptr;
+    return res;
+}
+
+static void dump_binannot(const unsigned char* ba, const char* last, const char* pfx)
+{
+    while (ba < (const unsigned char*)last)
+    {
+        unsigned opcode = binannot_uncompress(&ba);
+        switch (opcode)
+        {
+        case BA_OP_Invalid:
+            /* not clear if param? */
+            printf("%sInvalid\n", pfx);
+            break;
+        case BA_OP_CodeOffset:
+            printf("%sCodeOffset %u\n", pfx, binannot_uncompress(&ba));
+            break;
+        case BA_OP_ChangeCodeOffsetBase:
+            printf("%sChangeCodeOffsetBase %u\n", pfx, binannot_uncompress(&ba));
+            break;
+        case BA_OP_ChangeCodeOffset:
+            printf("%sChangeCodeOffset %u\n", pfx, binannot_uncompress(&ba));
+            break;
+        case BA_OP_ChangeCodeLength:
+            printf("%sChangeCodeLength %u\n", pfx, binannot_uncompress(&ba));
+            break;
+        case BA_OP_ChangeFile:
+            printf("%sChangeFile %u\n", pfx, binannot_uncompress(&ba));
+            break;
+        case BA_OP_ChangeLineOffset:
+            printf("%sChangeLineOffset %d\n", pfx, binannot_uncompress(&ba));
+            break;
+        case BA_OP_ChangeLineEndDelta:
+            printf("%sChangeLineEndDelta %u\n", pfx, binannot_uncompress(&ba));
+            break;
+        case BA_OP_ChangeRangeKind:
+            printf("%sChangeRangeKind %u\n", pfx, binannot_uncompress(&ba));
+            break;
+        case BA_OP_ChangeColumnStart:
+            printf("%sChangeColumnStart %u\n", pfx, binannot_uncompress(&ba));
+            break;
+        case BA_OP_ChangeColumnEndDelta:
+            printf("%sChangeColumnEndDelta %u\n", pfx, binannot_uncompress(&ba));
+            break;
+        case BA_OP_ChangeCodeOffsetAndLineOffset:
+            {
+                unsigned p1 = binannot_uncompress(&ba);
+                printf("%sChangeCodeOffsetAndLineOffset %u %u (0x%x)\n", pfx, p1 & 0xf, p1 >> 4, p1);
+            }
+            break;
+        case BA_OP_ChangeCodeLengthAndCodeOffset:
+            {
+                unsigned p1 = binannot_uncompress(&ba);
+                unsigned p2 = binannot_uncompress(&ba);
+                printf("%sChangeCodeLengthAndCodeOffset %u %u\n", pfx, p1, p2);
+            }
+            break;
+        case BA_OP_ChangeColumnEnd:
+            printf("%sChangeColumnEnd %u\n", pfx, binannot_uncompress(&ba));
+            break;
+
+        default: printf("%sUnsupported op %d %x\n", pfx, opcode, opcode); /* may cause issues because of param */
+        }
+    }
+}
+
 BOOL codeview_dump_symbols(const void* root, unsigned long size)
 {
     unsigned int i;
@@ -911,6 +1297,8 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
         const union codeview_symbol* sym = (const union codeview_symbol*)((const char*)root + i);
         length = sym->generic.len + 2;
         if (!sym->generic.id || length < 4) break;
+        printf("\t%04x => ", i + 4); /* ref is made after id and len */
+
         switch (sym->generic.id)
         {
         /*
@@ -919,7 +1307,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
          */
 	case S_GDATA32_ST:
 	case S_LDATA32_ST:
-            printf("\tS-%s-Data V2 '%s' %04x:%08x type:%08x\n",
+            printf("%s-Data V2 '%s' %04x:%08x type:%08x\n",
                    sym->generic.id == S_GDATA32_ST ? "Global" : "Local",
                    get_symbol_str(p_string(&sym->data_v2.p_name)),
                    sym->data_v2.segment, sym->data_v2.offset, sym->data_v2.symtype);
@@ -928,30 +1316,42 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
         case S_LDATA32:
         case S_GDATA32:
 /* EPP         case S_DATA32: */
-            printf("\tS-%s-Data V3 '%s' (%04x:%08x) type:%08x\n",
+            printf("%s-Data V3 '%s' (%04x:%08x) type:%08x\n",
                    sym->generic.id == S_GDATA32 ? "Global" : "Local",
                    get_symbol_str(sym->data_v3.name),
                    sym->data_v3.segment, sym->data_v3.offset,
                    sym->data_v3.symtype);
             break;
 
+	case S_PUB32_16t:
+            printf("Public V1 '%s' %04x:%08x flags:%s\n",
+                   get_symbol_str(p_string(&sym->public_v1.p_name)),
+                   sym->public_v1.segment, sym->public_v1.offset,
+                   get_pubflags(sym->public_v1.pubsymflags));
+	    break;
+
 	case S_PUB32_ST:
-            printf("\tS-Public V2 '%s' %04x:%08x type:%08x\n",
+            printf("Public V2 '%s' %04x:%08x flags:%s\n",
                    get_symbol_str(p_string(&sym->public_v2.p_name)),
                    sym->public_v2.segment, sym->public_v2.offset,
-                   sym->public_v2.symtype);
+                   get_pubflags(sym->public_v2.pubsymflags));
 	    break;
 
 	case S_PUB32:
-        /* not completely sure of those two anyway */
+            printf("Public V3 '%s' %04x:%08x flags:%s\n",
+                   get_symbol_str(sym->public_v3.name),
+                   sym->public_v3.segment, sym->public_v3.offset,
+                   get_pubflags(sym->public_v3.pubsymflags));
+	    break;
+
+	case S_DATAREF:
 	case S_PROCREF:
 	case S_LPROCREF:
-            printf("\tS-Public%s V3 '%s' %04x:%08x type:%08x\n",
-                   sym->generic.id == S_PUB32 ? "" :
-                                      (sym->generic.id == S_PROCREF ? "<subkind1" : "<subkind2"),
-                   get_symbol_str(sym->public_v3.name),
-                   sym->public_v3.segment,
-                   sym->public_v3.offset, sym->public_v3.symtype);
+            printf("%sref V3 '%s' %04x:%08x name:%08x\n",
+                   sym->generic.id == S_DATAREF ? "Data" :
+                                      (sym->generic.id == S_PROCREF ? "Proc" : "Lproc"),
+                   get_symbol_str(sym->refsym2_v3.name),
+                   sym->refsym2_v3.imod, sym->refsym2_v3.ibSym, sym->refsym2_v3.sumName);
 	    break;
 
         /*
@@ -960,7 +1360,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
          * a PLT slot in the normal jargon that everyone else uses.
          */
 	case S_THUNK32_ST:
-            printf("\tS-Thunk V1 '%s' (%04x:%08x#%x) type:%x\n",
+            printf("Thunk V1 '%s' (%04x:%08x#%x) type:%x\n",
                    p_string(&sym->thunk_v1.p_name),
                    sym->thunk_v1.segment, sym->thunk_v1.offset,
                    sym->thunk_v1.thunk_len, sym->thunk_v1.thtype);
@@ -968,7 +1368,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
 	    break;
 
 	case S_THUNK32:
-            printf("\tS-Thunk V3 '%s' (%04x:%08x#%x) type:%x\n",
+            printf("Thunk V3 '%s' (%04x:%08x#%x) type:%x\n",
                    sym->thunk_v3.name,
                    sym->thunk_v3.segment, sym->thunk_v3.offset,
                    sym->thunk_v3.thunk_len, sym->thunk_v3.thtype);
@@ -978,13 +1378,13 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
         /* Global and static functions */
 	case S_GPROC32_16t:
 	case S_LPROC32_16t:
-            printf("\tS-%s-Proc V1: '%s' (%04x:%08x#%x) type:%x attr:%x\n",
+            printf("%s-Proc V1: '%s' (%04x:%08x#%x) type:%x attr:%x\n",
                    sym->generic.id == S_GPROC32_16t ? "Global" : "-Local",
                    p_string(&sym->proc_v1.p_name),
                    sym->proc_v1.segment, sym->proc_v1.offset,
                    sym->proc_v1.proc_len, sym->proc_v1.proctype,
                    sym->proc_v1.flags);
-            printf("\t  Debug: start=%08x end=%08x\n",
+            printf("\t\tDebug: start=%08x end=%08x\n",
                    sym->proc_v1.debug_start, sym->proc_v1.debug_end);
             if (nest_block)
             {
@@ -999,13 +1399,13 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
 
 	case S_GPROC32_ST:
 	case S_LPROC32_ST:
-            printf("\tS-%s-Proc V2: '%s' (%04x:%08x#%x) type:%x attr:%x\n",
+            printf("%s-Proc V2: '%s' (%04x:%08x#%x) type:%x attr:%x\n",
                    sym->generic.id == S_GPROC32_ST ? "Global" : "-Local",
                    p_string(&sym->proc_v2.p_name),
                    sym->proc_v2.segment, sym->proc_v2.offset,
                    sym->proc_v2.proc_len, sym->proc_v2.proctype,
                    sym->proc_v2.flags);
-            printf("\t  Debug: start=%08x end=%08x\n",
+            printf("\t\tDebug: start=%08x end=%08x\n",
                    sym->proc_v2.debug_start, sym->proc_v2.debug_end);
             if (nest_block)
             {
@@ -1020,13 +1420,13 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
 
         case S_LPROC32:
         case S_GPROC32:
-            printf("\tS-%s-Procedure V3 '%s' (%04x:%08x#%x) type:%x attr:%x\n",
+            printf("%s-Procedure V3 '%s' (%04x:%08x#%x) type:%x attr:%x\n",
                    sym->generic.id == S_GPROC32 ? "Global" : "Local",
                    sym->proc_v3.name,
                    sym->proc_v3.segment, sym->proc_v3.offset,
                    sym->proc_v3.proc_len, sym->proc_v3.proctype,
                    sym->proc_v3.flags);
-            printf("\t  Debug: start=%08x end=%08x\n",
+            printf("\t\tDebug: start=%08x end=%08x\n",
                    sym->proc_v3.debug_start, sym->proc_v3.debug_end);
             if (nest_block)
             {
@@ -1041,49 +1441,49 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
 
         /* Function parameters and stack variables */
 	case S_BPREL32_16t:
-            printf("\tS-BP-relative V1: '%s' @%d type:%x (%s)\n",
+            printf("BP-relative V1: '%s' @%d type:%x (%s)\n",
                    p_string(&sym->stack_v1.p_name),
                    sym->stack_v1.offset, sym->stack_v1.symtype, curr_func);
             break;
 
 	case S_BPREL32_ST:
-            printf("\tS-BP-relative V2: '%s' @%d type:%x (%s)\n",
+            printf("BP-relative V2: '%s' @%d type:%x (%s)\n",
                    p_string(&sym->stack_v2.p_name),
                    sym->stack_v2.offset, sym->stack_v2.symtype, curr_func);
             break;
 
         case S_BPREL32:
-            printf("\tS-BP-relative V3: '%s' @%d type:%x (in %s)\n",
+            printf("BP-relative V3: '%s' @%d type:%x (in %s)\n",
                    sym->stack_v3.name, sym->stack_v3.offset,
                    sym->stack_v3.symtype, curr_func);
             break;
 
         case S_REGREL32:
-            printf("\tS-Reg-relative V3: '%s' @%d type:%x reg:%x (in %s)\n",
+            printf("Reg-relative V3: '%s' @%d type:%x reg:%x (in %s)\n",
                    sym->regrel_v3.name, sym->regrel_v3.offset,
                    sym->regrel_v3.symtype, sym->regrel_v3.reg, curr_func);
             break;
 
         case S_REGISTER_16t:
-            printf("\tS-Register V1 '%s' in %s type:%x register:%x\n",
+            printf("Register V1 '%s' in %s type:%x register:%x\n",
                    p_string(&sym->register_v1.p_name),
                    curr_func, sym->register_v1.reg, sym->register_v1.type);
             break;
 
         case S_REGISTER_ST:
-            printf("\tS-Register V2 '%s' in %s type:%x register:%x\n",
+            printf("Register V2 '%s' in %s type:%x register:%x\n",
                    p_string(&sym->register_v2.p_name),
                    curr_func, sym->register_v2.reg, sym->register_v2.type);
             break;
 
         case S_REGISTER:
-            printf("\tS-Register V3 '%s' in %s type:%x register:%x\n",
+            printf("Register V3 '%s' in %s type:%x register:%x\n",
                    sym->register_v3.name,
                    curr_func, sym->register_v3.reg, sym->register_v3.type);
             break;
 
         case S_BLOCK32_ST:
-            printf("\tS-Block V1 '%s' in '%s' (%04x:%08x#%08x)\n",
+            printf("Block V1 '%s' in '%s' (%04x:%08x#%08x)\n",
                    p_string(&sym->block_v1.p_name),
                    curr_func,
                    sym->block_v1.segment, sym->block_v1.offset,
@@ -1092,7 +1492,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             break;
 
         case S_BLOCK32:
-            printf("\tS-Block V3 '%s' in '%s' (%04x:%08x#%08x) parent:%u end:%x\n",
+            printf("Block V3 '%s' in '%s' (%04x:%08x#%08x) parent:%u end:%x\n",
                    sym->block_v3.name, curr_func,
                    sym->block_v3.segment, sym->block_v3.offset, sym->block_v3.length,
                    sym->block_v3.parent, sym->block_v3.end);
@@ -1101,7 +1501,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
 
         /* Additional function information */
         case S_FRAMEPROC:
-            printf("\tS-Frame-Info V2: frame-size:%x unk2:%x unk3:%x saved-regs-sz:%x eh(%04x:%08x) flags:%08x\n",
+            printf("Frame-Info V2: frame-size:%x unk2:%x unk3:%x saved-regs-sz:%x eh(%04x:%08x) flags:%08x\n",
                    sym->frame_info_v2.sz_frame,
                    sym->frame_info_v2.unknown2,
                    sym->frame_info_v2.unknown3,
@@ -1112,7 +1512,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             break;
 
         case S_FRAMECOOKIE:
-            printf("\tSecurity Cookie V3 @%d unk:%x\n",
+            printf("Security Cookie V3 @%d unk:%x\n",
                    sym->security_cookie_v3.offset, sym->security_cookie_v3.unknown);
             break;
 
@@ -1120,68 +1520,34 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             if (nest_block)
             {
                 nest_block--;
-                printf("\tS-End-Of block (%u)\n", nest_block);
+                printf("End-Of block (%u)\n", nest_block);
             }
             else
             {
-                printf("\tS-End-Of %s\n", curr_func);
+                printf("End-Of %s\n", curr_func);
                 free(curr_func);
                 curr_func = NULL;
             }
             break;
 
         case S_COMPILE:
-            {
-                const char*     machine;
-                const char*     lang;
-
-                switch (sym->compiland_v1.unknown & 0xFF)
-                {
-                case 0x00:      machine = "Intel 8080"; break;
-                case 0x01:      machine = "Intel 8086"; break;
-                case 0x02:      machine = "Intel 80286"; break;
-                case 0x03:      machine = "Intel 80386"; break;
-                case 0x04:      machine = "Intel 80486"; break;
-                case 0x05:      machine = "Intel Pentium"; break;
-                case 0x10:      machine = "MIPS R4000"; break;
-                default:
-                    {
-                        static char tmp[16];
-                        sprintf(tmp, "machine=%x", sym->compiland_v1.unknown & 0xFF);
-                        machine = tmp;
-                    }
-                    break;
-                }
-                switch ((sym->compiland_v1.unknown >> 8) & 0xFF)
-                {
-                case 0x00:      lang = "C"; break;
-                case 0x01:      lang = "C++"; break;
-                case 0x02:      lang = "Fortran"; break;
-                case 0x03:      lang = "Masm"; break;
-                case 0x04:      lang = "Pascal"; break;
-                case 0x05:      lang = "Basic"; break;
-                case 0x06:      lang = "Cobol"; break;
-                default:
-                    {
-                        static char tmp[16];
-                        sprintf(tmp, "language=%x", (sym->compiland_v1.unknown >> 8) & 0xFF);
-                        lang = tmp;
-                    }
-                    break;
-                }
-
-                printf("\tS-Compiland V1 '%s' %s %s unk:%x\n",
-                       p_string(&sym->compiland_v1.p_name), machine, lang,
-                       sym->compiland_v1.unknown >> 16);
-            }
+            printf("Compile V1 machine:%s lang:%s _unk:%x '%s'\n",
+                   get_machine(sym->compile_v1.machine),
+                   get_language(sym->compile_v1.flags.language),
+                   sym->compile_v1.flags._dome,
+                   p_string(&sym->compile_v1.p_name));
             break;
 
         case S_COMPILE2_ST:
-            printf("\tS-Compiland V2 '%s'\n",
-                   p_string(&sym->compiland_v2.p_name));
-            dump_data((const void*)sym, sym->generic.len + 2, "  ");
+            printf("Compile2-V2 lang:%s machine:%s _unk:%x front-end:%d.%d.%d back-end:%d.%d.%d '%s'\n",
+                   get_language(sym->compile2_v2.flags.iLanguage),
+                   get_machine(sym->compile2_v2.machine),
+                   sym->compile2_v2.flags._dome,
+                   sym->compile2_v2.fe_major, sym->compile2_v2.fe_minor, sym->compile2_v2.fe_build,
+                   sym->compile2_v2.be_major, sym->compile2_v2.be_minor, sym->compile2_v2.be_build,
+                   p_string(&sym->compile2_v2.p_name));
             {
-                const char* ptr = sym->compiland_v2.p_name.name + sym->compiland_v2.p_name.namelen;
+                const char* ptr = sym->compile2_v2.p_name.name + sym->compile2_v2.p_name.namelen;
                 while (*ptr)
                 {
                     printf("\t\t%s => ", ptr); ptr += strlen(ptr) + 1;
@@ -1190,116 +1556,32 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             }
             break;
 
-        case S_OBJNAME:
-            printf("\tS-Compiland V3 '%s' unknown:%x\n",
-                   sym->compiland_v3.name, sym->compiland_v3.unknown);
-            break;
-
-        case S_OBJNAME_ST:
-            printf("\tS-ObjName V1 sig:%.4s '%s'\n",
-                   sym->objname_v1.signature, p_string(&sym->objname_v1.p_name));
-            break;
-
-        case S_LABEL32_ST:
-            printf("\tS-Label V1 '%s' in '%s' (%04x:%08x)\n",
-                   p_string(&sym->label_v1.p_name),
-                   curr_func, sym->label_v1.segment, sym->label_v1.offset);
-            break;
-
-        case S_LABEL32:
-            printf("\tS-Label V3 '%s' in '%s' (%04x:%08x) flag:%x\n",
-                   sym->label_v3.name, curr_func, sym->label_v3.segment,
-                   sym->label_v3.offset, sym->label_v3.flags);
-            break;
-
-        case S_CONSTANT_ST:
+        case S_COMPILE2:
+            printf("Compile2-V3 lang:%s machine:%s _unk:%x front-end:%d.%d.%d back-end:%d.%d.%d '%s'\n",
+                   get_language(sym->compile2_v3.flags.iLanguage),
+                   get_machine(sym->compile2_v3.machine),
+                   sym->compile2_v3.flags._dome,
+                   sym->compile2_v3.fe_major, sym->compile2_v3.fe_minor, sym->compile2_v3.fe_build,
+                   sym->compile2_v3.be_major, sym->compile2_v3.be_minor, sym->compile2_v3.be_build,
+                   sym->compile2_v3.name);
             {
-                int             vlen;
-                struct full_value fv;
-
-                vlen = full_numeric_leaf(&fv, &sym->constant_v2.cvalue);
-                printf("\tS-Constant V2 '%s' = %s type:%x\n",
-                       p_string(PSTRING(&sym->constant_v2.cvalue, vlen)),
-                       full_value_string(&fv), sym->constant_v2.type);
-            }
-            break;
-
-        case S_CONSTANT:
-            {
-                int             vlen;
-                struct full_value fv;
-
-                vlen = full_numeric_leaf(&fv, &sym->constant_v3.cvalue);
-                printf("\tS-Constant V3 '%s' =  %s type:%x\n",
-                       (const char*)&sym->constant_v3.cvalue + vlen,
-                       full_value_string(&fv), sym->constant_v3.type);
-            }
-            break;
-
-        case S_UDT_16t:
-            printf("\tS-Udt V1 '%s': type:0x%x\n",
-                   p_string(&sym->udt_v1.p_name), sym->udt_v1.type);
-            break;
-
-        case S_UDT_ST:
-            printf("\tS-Udt V2 '%s': type:0x%x\n",
-                   p_string(&sym->udt_v2.p_name), sym->udt_v2.type);
-            break;
-
-        case S_UDT:
-            printf("\tS-Udt V3 '%s': type:0x%x\n",
-                   sym->udt_v3.name, sym->udt_v3.type);
-            break;
-        /*
-         * These are special, in that they are always followed by an
-         * additional length-prefixed string which is *not* included
-         * into the symbol length count.  We need to skip it.
-         */
-	case S_PROCREF_ST:
-            printf("\tS-Procref V1 "); goto doaref;
-	case S_DATAREF_ST:
-            printf("\tS-Dataref V1 "); goto doaref;
-	case S_LPROCREF_ST:
-            printf("\tS-L-Procref V1 "); goto doaref;
-        doaref:
-            {
-                const struct p_string* pname;
-
-                pname = PSTRING(sym, length);
-                length += (pname->namelen + 1 + 3) & ~3;
-                printf("\t%08x %08x %08x '%s'\n",
-                       *(((const DWORD*)sym) + 1), *(((const DWORD*)sym) + 2), *(((const DWORD*)sym) + 3),
-                       p_string(pname));
-            }
-            break;
-        case S_COMPILE2:    /* info about tool used to create CU */
-            {
-                const unsigned short*   ptr = ((const unsigned short*)sym) + 2;
-                const char*             x1;
-                const char*             x2 = (const char*)&ptr[9];
-                /* FIXME: what are all those values for ? */
-                printf("\tTool V3 unk=%04x%04x%04x front=%d.%d.%d.0 back=%d.%d.%d.0 %s\n",
-                       ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5], ptr[6], ptr[7],
-                       ptr[8], x2);
-                while (*(x1 = x2 + strlen(x2) + 1))
+                const char* ptr = sym->compile2_v3.name + strlen(sym->compile2_v3.name) + 1;
+                while (*ptr)
                 {
-                    x2 = x1 + strlen(x1) + 1;
-                    if (!*x2) break;
-                    printf("\t\t%s: %s\n", x1, x2);
+                    printf("\t\t%s => ", ptr); ptr += strlen(ptr) + 1;
+                    printf("%s\n", ptr); ptr += strlen(ptr) + 1;
                 }
             }
             break;
 
         case S_COMPILE3:
-            {
-                const unsigned short*   ptr = ((const unsigned short*)sym) + 2;
-
-                printf("\tTool info V3: unk=%04x%04x%04x front=%d.%d.%d.%d back=%d.%d.%d.%d %s\n",
-                       ptr[0], ptr[1], ptr[2],
-                       ptr[3], ptr[4], ptr[5], ptr[6],
-                       ptr[7], ptr[8], ptr[9], ptr[10],
-                       (const char*)(ptr + 11));
-            }
+            printf("Compile3-V3 lang:%s machine:%s _unk:%x front-end:%d.%d.%d back-end:%d.%d.%d '%s'\n",
+                   get_language(sym->compile3_v3.flags.iLanguage),
+                   get_machine(sym->compile3_v3.machine),
+                   sym->compile3_v3.flags._dome,
+                   sym->compile3_v3.fe_major, sym->compile3_v3.fe_minor, sym->compile3_v3.fe_build,
+                   sym->compile3_v3.be_major, sym->compile3_v3.be_minor, sym->compile3_v3.be_build,
+                   sym->compile3_v3.name);
             break;
 
         case S_ENVBLOCK:
@@ -1318,17 +1600,110 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             }
             break;
 
+        case S_OBJNAME:
+            printf("ObjName V3 sig:%x '%s'\n",
+                   sym->objname_v3.signature, sym->objname_v3.name);
+            break;
+
+        case S_OBJNAME_ST:
+            printf("ObjName V1 sig:%x '%s'\n",
+                   sym->objname_v1.signature, p_string(&sym->objname_v1.p_name));
+            break;
+
+        case S_TRAMPOLINE:
+            printf("Trampoline V3 kind:%u %04x:%08x#%x -> %04x:%08x\n",
+                   sym->trampoline_v3.trampType,
+                   sym->trampoline_v3.sectThunk,
+                   sym->trampoline_v3.offThunk,
+                   sym->trampoline_v3.cbThunk,
+                   sym->trampoline_v3.sectTarget,
+                   sym->trampoline_v3.offTarget);
+            break;
+
+        case S_LABEL32_ST:
+            printf("Label V1 '%s' in '%s' (%04x:%08x)\n",
+                   p_string(&sym->label_v1.p_name),
+                   curr_func, sym->label_v1.segment, sym->label_v1.offset);
+            break;
+
+        case S_LABEL32:
+            printf("Label V3 '%s' in '%s' (%04x:%08x) flag:%x\n",
+                   sym->label_v3.name, curr_func, sym->label_v3.segment,
+                   sym->label_v3.offset, sym->label_v3.flags);
+            break;
+
+        case S_CONSTANT_ST:
+            {
+                int             vlen;
+                struct full_value fv;
+
+                vlen = full_numeric_leaf(&fv, &sym->constant_v2.cvalue);
+                printf("Constant V2 '%s' = %s type:%x\n",
+                       p_string(PSTRING(&sym->constant_v2.cvalue, vlen)),
+                       full_value_string(&fv), sym->constant_v2.type);
+            }
+            break;
+
+        case S_CONSTANT:
+            {
+                int             vlen;
+                struct full_value fv;
+
+                vlen = full_numeric_leaf(&fv, &sym->constant_v3.cvalue);
+                printf("Constant V3 '%s' =  %s type:%x\n",
+                       (const char*)&sym->constant_v3.cvalue + vlen,
+                       full_value_string(&fv), sym->constant_v3.type);
+            }
+            break;
+
+        case S_UDT_16t:
+            printf("Udt V1 '%s': type:0x%x\n",
+                   p_string(&sym->udt_v1.p_name), sym->udt_v1.type);
+            break;
+
+        case S_UDT_ST:
+            printf("Udt V2 '%s': type:0x%x\n",
+                   p_string(&sym->udt_v2.p_name), sym->udt_v2.type);
+            break;
+
+        case S_UDT:
+            printf("Udt V3 '%s': type:0x%x\n",
+                   sym->udt_v3.name, sym->udt_v3.type);
+            break;
+        /*
+         * These are special, in that they are always followed by an
+         * additional length-prefixed string which is *not* included
+         * into the symbol length count.  We need to skip it.
+         */
+	case S_PROCREF_ST:
+            printf("Procref V1 "); goto doaref;
+	case S_DATAREF_ST:
+            printf("Dataref V1 "); goto doaref;
+	case S_LPROCREF_ST:
+            printf("L-Procref V1 "); goto doaref;
+        doaref:
+            {
+                const struct p_string* pname;
+
+                pname = PSTRING(sym, length);
+                length += (pname->namelen + 1 + 3) & ~3;
+                printf("\t%08x %08x %08x '%s'\n",
+                       *(((const DWORD*)sym) + 1), *(((const DWORD*)sym) + 2), *(((const DWORD*)sym) + 3),
+                       p_string(pname));
+            }
+            break;
+
         case S_ALIGN:
             /* simply skip it */
             break;
 
         case S_SSEARCH:
-            printf("\tSSearch V1: (%04x:%08x)\n",
+            printf("Search V1: (%04x:%08x)\n",
                    sym->ssearch_v1.segment, sym->ssearch_v1.offset);
             break;
 
         case S_SECTION:
-            printf("\tSSection Info: seg=%04x ?=%04x rva=%08x size=%08x attr=%08x %s\n",
+            printf("Section Info: seg=%04x ?=%04x rva=%08x size=%08x attr=%08x %s\n",
                    *(const unsigned short*)((const char*)sym + 4),
                    *(const unsigned short*)((const char*)sym + 6),
                    *(const unsigned*)((const char*)sym + 8),
@@ -1338,7 +1713,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             break;
 
         case S_COFFGROUP:
-            printf("\tSSubSection Info: addr=%04x:%08x size=%08x attr=%08x %s\n",
+            printf("SubSection Info: addr=%04x:%08x size=%08x attr=%08x %s\n",
                    *(const unsigned short*)((const char*)sym + 16),
                    *(const unsigned*)((const char*)sym + 12),
                    *(const unsigned*)((const char*)sym + 4),
@@ -1347,13 +1722,13 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
             break;
 
         case S_EXPORT:
-            printf("\tSEntryPoint: id=%x '%s'\n",
+            printf("EntryPoint: id=%x '%s'\n",
                    *(const unsigned*)((const char*)sym + 4), (const char*)sym + 8);
             break;
 
         case S_LTHREAD32_16t:
         case S_GTHREAD32_16t:
-            printf("\tS-Thread %s Var V1 '%s' seg=%04x offset=%08x type=%x\n",
+            printf("Thread %s Var V1 '%s' seg=%04x offset=%08x type=%x\n",
                    sym->generic.id == S_LTHREAD32_16t ? "global" : "local",
                    p_string(&sym->thread_v1.p_name),
                    sym->thread_v1.segment, sym->thread_v1.offset, sym->thread_v1.symtype);
@@ -1361,7 +1736,7 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
 
         case S_LTHREAD32_ST:
         case S_GTHREAD32_ST:
-            printf("\tS-Thread %s Var V2 '%s' seg=%04x offset=%08x type=%x\n",
+            printf("Thread %s Var V2 '%s' seg=%04x offset=%08x type=%x\n",
                    sym->generic.id == S_LTHREAD32_ST ? "global" : "local",
                    p_string(&sym->thread_v2.p_name),
                    sym->thread_v2.segment, sym->thread_v2.offset, sym->thread_v2.symtype);
@@ -1369,13 +1744,116 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
 
         case S_LTHREAD32:
         case S_GTHREAD32:
-            printf("\tS-Thread %s Var V3 '%s' seg=%04x offset=%08x type=%x\n",
+            printf("Thread %s Var V3 '%s' seg=%04x offset=%08x type=%x\n",
                    sym->generic.id == S_LTHREAD32 ? "global" : "local", sym->thread_v3.name,
                    sym->thread_v3.segment, sym->thread_v3.offset, sym->thread_v3.symtype);
             break;
 
+        case S_LOCAL:
+            printf("Local V3 '%s' type=%x flags=%s\n",
+                   sym->local_v3.name, sym->local_v3.symtype,
+                   get_varflags(sym->local_v3.varflags));
+            break;
+
+        case S_DEFRANGE:
+            printf("DefRange dia:%x\n", sym->defrange_v3.program);
+            dump_defrange(&sym->defrange_v3.range, get_last(sym), "\t\t");
+            break;
+        case S_DEFRANGE_SUBFIELD:
+            printf("DefRange-subfield V3 dia:%x off-parent:%x\n",
+                   sym->defrange_subfield_v3.program, sym->defrange_subfield_v3.offParent);
+            dump_defrange(&sym->defrange_subfield_v3.range, get_last(sym), "\t\t");
+            break;
+        case S_DEFRANGE_REGISTER:
+            printf("DefRange-register V3 reg:%x attr-unk:%x\n",
+                   sym->defrange_register_v3.reg, sym->defrange_register_v3.attr);
+            dump_defrange(&sym->defrange_register_v3.range, get_last(sym), "\t\t");
+            break;
+        case S_DEFRANGE_FRAMEPOINTER_REL:
+            printf("DefRange-framepointer-rel V3 offFP:%x\n",
+                   sym->defrange_frameptrrel_v3.offFramePointer);
+            dump_defrange(&sym->defrange_frameptrrel_v3.range, get_last(sym), "\t\t");
+            break;
+        case S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE:
+            printf("DefRange-framepointer-rel-fullscope V3 offFP:%x\n",
+                   sym->defrange_frameptr_relfullscope_v3.offFramePointer);
+            break;
+        case S_DEFRANGE_SUBFIELD_REGISTER:
+            printf("DefRange-subfield-register V3 reg:%d attr-unk:%x off-parent:%x\n",
+                   sym->defrange_subfield_register_v3.reg,
+                   sym->defrange_subfield_register_v3.attr,
+                   sym->defrange_subfield_register_v3.offParent);
+            dump_defrange(&sym->defrange_subfield_register_v3.range, get_last(sym), "\t\t");
+            break;
+        case S_DEFRANGE_REGISTER_REL:
+            printf("DefRange-register-rel V3 reg:%x off-parent:%x off-BP:%x\n",
+                   sym->defrange_registerrel_v3.baseReg, sym->defrange_registerrel_v3.offsetParent,
+                   sym->defrange_registerrel_v3.offBasePointer);
+            dump_defrange(&sym->defrange_registerrel_v3.range, get_last(sym), "\t\t");
+            break;
+
+        case S_CALLSITEINFO:
+            printf("Call-site-info V3 %04x:%08x typeindex:%x\n",
+                   sym->callsiteinfo_v3.sect, sym->callsiteinfo_v3.off, sym->callsiteinfo_v3.typind);
+            break;
+
+        case S_BUILDINFO:
+            printf("Build-info V3 item:%04x\n", sym->build_info_v3.itemid);
+            break;
+
+        case S_INLINESITE:
+            printf("Inline-site V3 parent:%x end:%x inlinee:%x\n",
+                   sym->inline_site_v3.pParent, sym->inline_site_v3.pEnd, sym->inline_site_v3.inlinee);
+            dump_binannot(sym->inline_site_v3.binaryAnnotations, get_last(sym), "\t\t");
+            break;
+        case S_INLINESITE2:
+            printf("Inline-site2 V3 parent:%x end:%x inlinee:%x #inv:%u\n",
+                   sym->inline_site2_v3.pParent, sym->inline_site2_v3.pEnd, sym->inline_site2_v3.inlinee,
+                   sym->inline_site2_v3.invocations);
+            dump_binannot(sym->inline_site2_v3.binaryAnnotations, get_last(sym), "\t\t");
+            break;
+        case S_INLINESITE_END:
+            printf("Inline-site-end\n");
+            break;
+
+        case S_CALLEES:
+        case S_CALLERS:
+        case S_INLINEES:
+            {
+                unsigned i, ninvoc;
+                const unsigned* invoc;
+                const char* tag;
+
+                if (sym->generic.id == S_CALLERS) tag = "Callers";
+                else if (sym->generic.id == S_CALLEES) tag = "Callees";
+                else tag = "Inlinees";
+                printf("%s V3 count:%u\n", tag, sym->function_list_v3.count);
+                invoc = (const unsigned*)&sym->function_list_v3.funcs[sym->function_list_v3.count];
+                ninvoc = (const unsigned*)get_last(sym) - invoc;
+
+                for (i = 0; i < sym->function_list_v3.count; ++i)
+                    printf("\t\tfunc:%x invoc:%u\n", sym->function_list_v3.funcs[i], i < ninvoc ? invoc[i] : 0);
+            }
+            break;
+
+        case S_HEAPALLOCSITE:
+            printf("Heap-alloc-site V3 %04x:%08x#%x type:%04x\n",
+                   sym->heap_alloc_site_v3.sect_idx,
+                   sym->heap_alloc_site_v3.offset,
+                   sym->heap_alloc_site_v3.inst_len,
+                   sym->heap_alloc_site_v3.index);
+            break;
+
+        case S_FILESTATIC:
+            printf("File-static V3 '%s' type:%04x modOff:%08x flags:%s\n",
+                   sym->file_static_v3.name,
+                   sym->file_static_v3.typind,
+                   sym->file_static_v3.modOffset,
+                   get_varflags(sym->file_static_v3.varflags));
+            break;
+
         default:
-            printf(">>> Unsupported symbol-id %x sz=%d\n", sym->generic.id, sym->generic.len + 2);
+            printf("\n\t\t>>> Unsupported symbol-id %x sz=%d\n", sym->generic.id, sym->generic.len + 2);
             dump_data((const void*)sym, sym->generic.len + 2, "  ");
         }
     }

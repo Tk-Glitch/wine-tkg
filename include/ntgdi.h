@@ -20,6 +20,9 @@
 #define _NTGDI_
 
 #include <wingdi.h>
+#include <winternl.h>
+#include <winspool.h>
+#include <ddk/d3dkmthk.h>
 
 typedef struct _GDI_HANDLE_ENTRY
 {
@@ -103,7 +106,28 @@ enum
 enum
 {
     NtGdiSetMapMode = 8,
+    /* not compatible with Windows */
+    NtGdiSetBkColor = 100,
+    NtGdiSetTextColor,
+    NtGdiSetDCBrushColor,
+    NtGdiSetDCPenColor,
 };
+
+enum
+{
+    NtGdiAnimatePalette,
+    NtGdiSetPaletteEntries,
+    NtGdiGetPaletteEntries,
+    NtGdiGetSystemPaletteEntries,
+    NtGdiGetDIBColorTable,
+    NtGdiSetDIBColorTable,
+};
+
+#define NTGDI_GETCHARWIDTH_INT      0x02
+#define NTGDI_GETCHARWIDTH_INDICES  0x08
+
+#define NTGDI_GETCHARABCWIDTHS_INT      0x01
+#define NTGDI_GETCHARABCWIDTHS_INDICES  0x02
 
 #define MWT_SET  4
 
@@ -113,7 +137,8 @@ enum
 typedef struct DC_ATTR
 {
     HDC       hdc;                 /* handle to self */
-    LONG      disabled;            /* disabled flag, controled by DCHF_(DISABLE|ENABLE)DC */
+    LONG      disabled;            /* disabled flag, controlled by DCHF_(DISABLE|ENABLE)DC */
+    int       save_level;
     COLORREF  background_color;
     COLORREF  brush_color;
     COLORREF  pen_color;
@@ -140,6 +165,8 @@ typedef struct DC_ATTR
     SIZE      vport_ext;           /* viewport extent */
     SIZE      virtual_res;
     SIZE      virtual_size;
+    UINT      font_code_page;
+    RECTL     emf_bounds;
     void     *emf;
 } DC_ATTR;
 
@@ -163,7 +190,10 @@ INT      WINAPI NtGdiCombineRgn( HRGN dest, HRGN src1, HRGN src2, INT mode );
 BOOL     WINAPI NtGdiComputeXformCoefficients( HDC hdc );
 HBITMAP  WINAPI NtGdiCreateBitmap( INT width, INT height, UINT planes,
                                    UINT bpp, const void *bits );
+HPALETTE WINAPI NtGdiCreateHalftonePalette( HDC hdc );
 HBRUSH   WINAPI NtGdiCreateHatchBrushInternal( INT style, COLORREF color, BOOL pen );
+HDC      WINAPI NtGdiCreateMetafileDC( HDC hdc );
+HPALETTE WINAPI NtGdiCreatePaletteInternal( const LOGPALETTE *palette, UINT count );
 BOOL     WINAPI NtGdiEllipse( HDC hdc, INT left, INT top, INT right, INT bottom );
 INT      WINAPI NtGdiEndDoc(HDC hdc);
 BOOL     WINAPI NtGdiEndPath( HDC hdc );
@@ -171,14 +201,16 @@ HANDLE   WINAPI NtGdiCreateClientObj( ULONG type );
 HFONT    WINAPI NtGdiHfontCreate( const ENUMLOGFONTEXDVW *enumex, ULONG unk2, ULONG unk3,
                                   ULONG unk4, void *data );
 HDC      WINAPI NtGdiCreateCompatibleDC( HDC hdc );
-HBRUSH   WINAPI NtGdiCreateDIBBrush( const void* data, UINT coloruse );
+HBRUSH   WINAPI NtGdiCreateDIBBrush( const void *data, UINT coloruse, UINT size,
+                                     BOOL is_8x8, BOOL pen, const void *client );
 HRGN     WINAPI NtGdiCreateEllipticRgn( INT left, INT top, INT right, INT bottom );
-HBRUSH   WINAPI NtGdiCreatePatternBrushInternal( HBITMAP hbitmap, BOOL pen );
+HBRUSH   WINAPI NtGdiCreateHatchBrush( INT style, COLORREF color, BOOL pen );
+HBRUSH   WINAPI NtGdiCreatePatternBrushInternal( HBITMAP hbitmap, BOOL pen, BOOL is_8x8 );
 HPEN     WINAPI NtGdiCreatePen( INT style, INT width, COLORREF color, HBRUSH brush );
 HRGN     WINAPI NtGdiCreateRectRgn( INT left, INT top, INT right, INT bottom );
 HRGN     WINAPI NtGdiCreateRoundRectRgn( INT left, INT top, INT right, INT bottom,
                                          INT ellipse_width, INT ellipse_height );
-HBRUSH   WINAPI NtGdiCreateSolidBrush( COLORREF color );
+HBRUSH   WINAPI NtGdiCreateSolidBrush( COLORREF color, HBRUSH brush );
 BOOL     WINAPI NtGdiDeleteClientObj( HGDIOBJ obj );
 BOOL     WINAPI NtGdiDeleteObjectApp( HGDIOBJ obj );
 LONG     WINAPI NtGdiDoPalette( HGDIOBJ handle, WORD start, WORD count, void *entries,
@@ -193,6 +225,8 @@ BOOL     WINAPI NtGdiFillRgn( HDC hdc, HRGN hrgn, HBRUSH hbrush );
 INT      WINAPI NtGdiExtEscape( HDC hdc, WCHAR *driver, INT driver_id, INT escape, INT input_size,
                                 const char *input, INT output_size, char *output );
 BOOL     WINAPI NtGdiExtFloodFill( HDC hdc, INT x, INT y, COLORREF color, UINT type );
+BOOL     WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *rect,
+                                  const WCHAR *str, UINT count, const INT *dx, DWORD cp );
 BOOL     WINAPI NtGdiFrameRgn( HDC hdc, HRGN hrgn, HBRUSH brush,
                                INT width, INT height );
 BOOL     WINAPI NtGdiFillPath( HDC hdc );
@@ -200,14 +234,19 @@ BOOL     WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD 
 INT      WINAPI NtGdiGetAppClipBox( HDC hdc, RECT *rect );
 BOOL     WINAPI NtGdiGetBitmapDimension( HBITMAP bitmap, SIZE *size );
 UINT     WINAPI NtGdiGetBoundsRect( HDC hdc, RECT *rect, UINT flags );
-BOOL     WINAPI NtGdiGetCharABCWidthsW( HDC hdc, UINT first_char, UINT last_char, ABC *abc );
-BOOL     WINAPI NtGdiGetCharWidthW( HDC hdc, UINT first_char, UINT last_char, INT *buffer );
+BOOL     WINAPI NtGdiGetCharABCWidthsW( HDC hdc, UINT first, UINT last, WCHAR *chars,
+                                        ULONG flags, void *buffer );
+BOOL     WINAPI NtGdiGetCharWidthW( HDC hdc, UINT first_char, UINT last_char, WCHAR *chars,
+                                    ULONG flags, void *buffer );
 BOOL     WINAPI NtGdiGetDCDword( HDC hdc, UINT method, DWORD *result );
 BOOL     WINAPI NtGdiGetDCPoint( HDC hdc, UINT method, POINT *result );
 INT      WINAPI NtGdiGetDeviceCaps( HDC hdc, INT cap );
 BOOL     WINAPI NtGdiGetDeviceGammaRamp( HDC hdc, void *ptr );
-BOOL     WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *rect,
-                                  const WCHAR *str, UINT count, const INT *dx, DWORD cp );
+DWORD    WINAPI NtGdiGetFontData( HDC hdc, DWORD table, DWORD offset, void *buffer, DWORD length );
+DWORD    WINAPI NtGdiGetGlyphOutlineW( HDC hdc, UINT ch, UINT format, GLYPHMETRICS *metrics,
+                                       DWORD size, void *buffer, const MAT2 *mat2,
+                                       BOOL ignore_rotation );
+DWORD    WINAPI NtGdiGetKerningPairsW( HDC hdc, DWORD count, KERNINGPAIR *kern_pair );
 BOOL     WINAPI NtGdiGetMiterLimit( HDC hdc, FLOAT *limit );
 COLORREF WINAPI NtGdiGetNearestColor( HDC hdc, COLORREF color );
 UINT     WINAPI NtGdiGetNearestPaletteIndex( HPALETTE hpalette, COLORREF color );
@@ -218,9 +257,12 @@ COLORREF WINAPI NtGdiGetPixel( HDC hdc, INT x, INT y );
 INT      WINAPI NtGdiGetRandomRgn( HDC hdc, HRGN region, INT code );
 DWORD    WINAPI NtGdiGetRegionData( HRGN hrgn, DWORD count, RGNDATA *data );
 INT      WINAPI NtGdiGetRgnBox( HRGN hrgn, RECT *rect );
+UINT     WINAPI NtGdiGetSystemPaletteUse( HDC hdc );
 UINT     WINAPI NtGdiGetTextCharsetInfo( HDC hdc, FONTSIGNATURE *fs, DWORD flags );
-INT      WINAPI NtGdiGetTextFaceW( HDC hdc, INT count, WCHAR *name );
-BOOL     WINAPI NtGdiGetTextMetricsW( HDC hdc, TEXTMETRICW *metrics );
+BOOL     WINAPI NtGdiGetTextExtentExW( HDC hdc, const WCHAR *str, INT count, INT max_ext,
+                                       INT *nfit, INT *dxs, SIZE *size, UINT flags );
+INT      WINAPI NtGdiGetTextFaceW( HDC hdc, INT count, WCHAR *name, BOOL alias_name );
+BOOL     WINAPI NtGdiGetTextMetricsW( HDC hdc, TEXTMETRICW *metrics, ULONG flags );
 BOOL     WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform );
 BOOL     WINAPI NtGdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
                                    void *grad_array, ULONG ngrad, ULONG mode );
@@ -245,7 +287,9 @@ BOOL     WINAPI NtGdiPtVisible( HDC hdc, INT x, INT y );
 BOOL     WINAPI NtGdiRectInRegion( HRGN hrgn, const RECT *rect );
 BOOL     WINAPI NtGdiRectVisible( HDC hdc, const RECT *rect );
 BOOL     WINAPI NtGdiRectangle( HDC hdc, INT left, INT top, INT right, INT bottom );
-HDC      WINAPI NtGdiResetDC( HDC hdc, const DEVMODEW *devmode );
+BOOL     WINAPI NtGdiResetDC( HDC hdc, const DEVMODEW *devmode, BOOL *banding,
+                              DRIVER_INFO_2W *driver_info, void *dev );
+BOOL     WINAPI NtGdiResizePalette( HPALETTE palette, UINT count );
 BOOL     WINAPI NtGdiRestoreDC( HDC hdc, INT level );
 BOOL     WINAPI NtGdiRoundRect( HDC hdc, INT left, INT top, INT right,
                                 INT bottom, INT ell_width, INT ell_height );
@@ -270,11 +314,13 @@ INT      WINAPI NtGdiSetDIBitsToDeviceInternal( HDC hdc, INT x_dst, INT y_dst, D
                                                 BOOL xform_coords, HANDLE xform );
 BOOL     WINAPI NtGdiSetDeviceGammaRamp( HDC hdc, void *ptr );
 DWORD    WINAPI NtGdiSetLayout( HDC hdc, LONG wox, DWORD layout );
+BOOL     WINAPI NtGdiSetMagicColors( HDC hdc, DWORD magic, ULONG index );
 INT      WINAPI NtGdiSetMetaRgn( HDC hdc );
 BOOL     WINAPI NtGdiSetMiterLimit( HDC hdc, FLOAT limit, FLOAT *prev_limit );
 COLORREF WINAPI NtGdiSetPixel( HDC hdc, INT x, INT y, COLORREF color );
 BOOL     WINAPI NtGdiSetPixelFormat( HDC hdc, INT format );
 BOOL     WINAPI NtGdiSetRectRgn( HRGN hrgn, INT left, INT top, INT right, INT bottom );
+UINT     WINAPI NtGdiSetSystemPaletteUse( HDC hdc, UINT use );
 BOOL     WINAPI NtGdiSetTextJustification( HDC hdc, INT extra, INT breaks );
 BOOL     WINAPI NtGdiSetVirtualResolution( HDC hdc, DWORD horz_res, DWORD vert_res,
                                            DWORD horz_size, DWORD vert_size );
@@ -293,6 +339,17 @@ BOOL     WINAPI NtGdiStrokeAndFillPath( HDC hdc );
 BOOL     WINAPI NtGdiTransformPoints( HDC hdc, const POINT *points_in, POINT *points_out,
                                       INT count, UINT mode );
 BOOL     WINAPI NtGdiUnrealizeObject( HGDIOBJ obj );
+BOOL     WINAPI NtGdiUpdateColors( HDC hdc );
 BOOL     WINAPI NtGdiWidenPath( HDC hdc );
+
+NTSTATUS WINAPI NtGdiDdDDICheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc );
+NTSTATUS WINAPI NtGdiDdDDICloseAdapter( const D3DKMT_CLOSEADAPTER *desc );
+NTSTATUS WINAPI NtGdiDdDDICreateDCFromMemory( D3DKMT_CREATEDCFROMMEMORY *desc );
+NTSTATUS WINAPI NtGdiDdDDICreateDevice( D3DKMT_CREATEDEVICE *desc );
+NTSTATUS WINAPI NtGdiDdDDIDestroyDCFromMemory( const D3DKMT_DESTROYDCFROMMEMORY *desc );
+NTSTATUS WINAPI NtGdiDdDDIDestroyDevice( const D3DKMT_DESTROYDEVICE *desc );
+NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats );
+NTSTATUS WINAPI NtGdiDdDDISetQueuedLimit( D3DKMT_SETQUEUEDLIMIT *desc );
+NTSTATUS WINAPI NtGdiDdDDISetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc );
 
 #endif /* _NTGDI_ */

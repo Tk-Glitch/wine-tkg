@@ -31,7 +31,6 @@ CREATE_TYPE_INFO_VTABLE
 #define CLASS_IS_SIMPLE_TYPE          1
 #define CLASS_HAS_VIRTUAL_BASE_CLASS  4
 
-void WINAPI _CxxThrowException(exception*,const cxx_exception_type*);
 int* __cdecl __processing_throw(void);
 
 #if _MSVCP_VER >= 70 || defined(_MSVCIRT)
@@ -133,11 +132,11 @@ void * __thiscall MSVCP_exception_vector_dtor(exception *this, unsigned int flag
 
         for(i=*ptr-1; i>=0; i--)
             MSVCP_exception_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         MSVCP_exception_dtor(this);
         if(flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
 
     return this;
@@ -149,7 +148,7 @@ void * __thiscall MSVCP_exception_scalar_dtor(exception *this, unsigned int flag
 {
     TRACE("(%p %x)\n", this, flags);
     MSVCP_exception_dtor(this);
-    if (flags & 1) MSVCRT_operator_delete(this);
+    if (flags & 1) operator_delete(this);
     return this;
 }
 
@@ -249,11 +248,11 @@ void * __thiscall MSVCP_bad_alloc_vector_dtor(bad_alloc *this, unsigned int flag
 
         for(i=*ptr-1; i>=0; i--)
             MSVCP_bad_alloc_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         MSVCP_bad_alloc_dtor(this);
         if(flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
 
     return this;
@@ -353,11 +352,11 @@ void* __thiscall MSVCP_logic_error_vector_dtor(
 
         for(i=*ptr-1; i>=0; i--)
             MSVCP_logic_error_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         MSVCP_logic_error_dtor(this);
         if(flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
 
     return this;
@@ -369,7 +368,7 @@ void * __thiscall MSVCP_logic_error_scalar_dtor(logic_error *this, unsigned int 
 {
     TRACE("(%p %x)\n", this, flags);
     MSVCP_logic_error_dtor(this);
-    if (flags & 1) MSVCRT_operator_delete(this);
+    if (flags & 1) operator_delete(this);
     return this;
 }
 
@@ -400,7 +399,7 @@ DEFINE_RTTI_DATA1(logic_error, 0, &exception_rtti_base_descriptor, ".?AVlogic_er
 #else
 DEFINE_RTTI_DATA1(logic_error, 0, &exception_rtti_base_descriptor, ".?AVlogic_error@@")
 #endif
-DEFINE_CXX_DATA1(logic_error, &exception_cxx_type_info, MSVCP_logic_error_dtor)
+DEFINE_CXX_TYPE_INFO(logic_error)
 
 /* length_error class data */
 typedef logic_error length_error;
@@ -597,11 +596,11 @@ void* __thiscall MSVCP_runtime_error_vector_dtor(
 
         for(i=*ptr-1; i>=0; i--)
             MSVCP_runtime_error_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         MSVCP_runtime_error_dtor(this);
         if(flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
 
     return this;
@@ -793,11 +792,11 @@ void * __thiscall MSVCP_bad_cast_vector_dtor(bad_cast *this, unsigned int flags)
 
         for(i=*ptr-1; i>=0; i--)
             MSVCP_bad_cast_dtor(this+i);
-        MSVCRT_operator_delete(ptr);
+        operator_delete(ptr);
     } else {
         MSVCP_bad_cast_dtor(this);
         if(flags & 1)
-            MSVCRT_operator_delete(this);
+            operator_delete(this);
     }
 
     return this;
@@ -818,7 +817,6 @@ bad_cast* __thiscall MSVCP_bad_cast_opequals(bad_cast *this, const bad_cast *rhs
 }
 
 DEFINE_RTTI_DATA1(bad_cast, 0, &exception_rtti_base_descriptor, ".?AVbad_cast@std@@")
-DEFINE_CXX_DATA1(bad_cast, &exception_cxx_type_info, MSVCP_bad_cast_dtor)
 
 /* range_error class data */
 typedef runtime_error range_error;
@@ -868,49 +866,77 @@ DEFINE_RTTI_DATA2(range_error, 0, &runtime_error_rtti_base_descriptor, &exceptio
 DEFINE_CXX_DATA2(range_error, &runtime_error_cxx_type_info, &exception_cxx_type_info, MSVCP_runtime_error_dtor)
 
 /* ?_Nomemory@std@@YAXXZ */
-void __cdecl _Nomemory(void)
+void __cdecl DECLSPEC_NORETURN _Nomemory(void)
 {
+    bad_alloc e;
+
     TRACE("()\n");
-    throw_exception(EXCEPTION_BAD_ALLOC, NULL);
+
+    MSVCP_bad_alloc_default_ctor(&e);
+    _CxxThrowException(&e, &bad_alloc_cxx_type);
 }
 
 /* ?_Xmem@tr1@std@@YAXXZ */
-void __cdecl _Xmem(void)
+void __cdecl DECLSPEC_NORETURN _Xmem(void)
 {
+    bad_alloc e;
+
     TRACE("()\n");
-    throw_exception(EXCEPTION_BAD_ALLOC, NULL);
+
+    MSVCP_bad_alloc_default_ctor(&e);
+    _CxxThrowException(&e, &bad_alloc_cxx_type);
 }
 
 /* ?_Xinvalid_argument@std@@YAXPBD@Z */
 /* ?_Xinvalid_argument@std@@YAXPEBD@Z */
-void __cdecl _Xinvalid_argument(const char *str)
+void __cdecl DECLSPEC_NORETURN _Xinvalid_argument(const char *str)
 {
+    exception_name name = EXCEPTION_NAME(str);
+    invalid_argument e;
+
     TRACE("(%s)\n", debugstr_a(str));
-    throw_exception(EXCEPTION_INVALID_ARGUMENT, str);
+
+    MSVCP_invalid_argument_ctor(&e, name);
+    _CxxThrowException(&e, &invalid_argument_cxx_type);
 }
 
 /* ?_Xlength_error@std@@YAXPBD@Z */
 /* ?_Xlength_error@std@@YAXPEBD@Z */
-void __cdecl _Xlength_error(const char *str)
+void __cdecl DECLSPEC_NORETURN _Xlength_error(const char *str)
 {
+    exception_name name = EXCEPTION_NAME(str);
+    length_error e;
+
     TRACE("(%s)\n", debugstr_a(str));
-    throw_exception(EXCEPTION_LENGTH_ERROR, str);
+
+    MSVCP_length_error_ctor(&e, name);
+    _CxxThrowException(&e, &length_error_cxx_type);
 }
 
 /* ?_Xout_of_range@std@@YAXPBD@Z */
 /* ?_Xout_of_range@std@@YAXPEBD@Z */
-void __cdecl _Xout_of_range(const char *str)
+void __cdecl DECLSPEC_NORETURN _Xout_of_range(const char *str)
 {
+    exception_name name = EXCEPTION_NAME(str);
+    out_of_range e;
+
     TRACE("(%s)\n", debugstr_a(str));
-    throw_exception(EXCEPTION_OUT_OF_RANGE, str);
+
+    MSVCP_out_of_range_ctor(&e, name);
+    _CxxThrowException(&e, &out_of_range_cxx_type);
 }
 
 /* ?_Xruntime_error@std@@YAXPBD@Z */
 /* ?_Xruntime_error@std@@YAXPEBD@Z */
-void __cdecl _Xruntime_error(const char *str)
+void __cdecl DECLSPEC_NORETURN _Xruntime_error(const char *str)
 {
+    exception_name name = EXCEPTION_NAME(str);
+    runtime_error e;
+
     TRACE("(%s)\n", debugstr_a(str));
-    throw_exception(EXCEPTION_RUNTIME_ERROR, str);
+
+    MSVCP_runtime_error_ctor(&e, name);
+    _CxxThrowException(&e, &runtime_error_cxx_type);
 }
 
 /* ?uncaught_exception@std@@YA_NXZ */
@@ -1038,65 +1064,34 @@ __ASM_BLOCK_BEGIN(exception_vtables)
             VTABLE_ADD_FUNC(MSVCP_runtime_error_what));
 __ASM_BLOCK_END
 
-/* Internal: throws selected exception */
-void throw_exception(exception_type et, const char *str)
+/* Internal: throws exception */
+void DECLSPEC_NORETURN throw_exception(const char *str)
 {
     exception_name name = EXCEPTION_NAME(str);
+    exception e;
 
-    switch(et) {
-    case EXCEPTION_RERAISE:
-        _CxxThrowException(NULL, NULL);
-    case EXCEPTION: {
-        exception e;
-        MSVCP_exception_ctor(&e, name);
-        _CxxThrowException(&e, &exception_cxx_type);
-    }
-    case EXCEPTION_BAD_ALLOC: {
-        bad_alloc e;
-        MSVCP_bad_alloc_ctor(&e, name);
-        _CxxThrowException(&e, &bad_alloc_cxx_type);
-    }
-    case EXCEPTION_BAD_CAST: {
-        bad_cast e;
-        MSVCP_bad_cast_ctor(&e, str);
-        _CxxThrowException(&e, &bad_cast_cxx_type);
-    }
-    case EXCEPTION_LOGIC_ERROR: {
-        logic_error e;
-        MSVCP_logic_error_ctor(&e, name);
-        _CxxThrowException((exception*)&e, &logic_error_cxx_type);
-    }
-    case EXCEPTION_LENGTH_ERROR: {
-        length_error e;
-        MSVCP_length_error_ctor(&e, name);
-        _CxxThrowException((exception*)&e, &length_error_cxx_type);
-    }
-    case EXCEPTION_OUT_OF_RANGE: {
-        out_of_range e;
-        MSVCP_out_of_range_ctor(&e, name);
-        _CxxThrowException((exception*)&e, &out_of_range_cxx_type);
-    }
-    case EXCEPTION_INVALID_ARGUMENT: {
-        invalid_argument e;
-        MSVCP_invalid_argument_ctor(&e, name);
-        _CxxThrowException((exception*)&e, &invalid_argument_cxx_type);
-    }
-    case EXCEPTION_RUNTIME_ERROR: {
-        runtime_error e;
-        MSVCP_runtime_error_ctor(&e, name);
-        _CxxThrowException((exception*)&e, &runtime_error_cxx_type);
-    }
-    case EXCEPTION_FAILURE: {
-        failure e;
-        MSVCP_failure_ctor(&e, name);
-        _CxxThrowException((exception*)&e, &failure_cxx_type);
-    }
-    case EXCEPTION_RANGE_ERROR: {
-        range_error e;
-        MSVCP_range_error_ctor(&e, name);
-        _CxxThrowException((exception*)&e, &range_error_cxx_type);
-    }
-    }
+    MSVCP_exception_ctor(&e, name);
+    _CxxThrowException(&e, &exception_cxx_type);
+}
+
+/* Internal: throws range_error exception */
+void DECLSPEC_NORETURN throw_range_error(const char *str)
+{
+    exception_name name = EXCEPTION_NAME(str);
+    range_error e;
+
+    MSVCP_range_error_ctor(&e, name);
+    _CxxThrowException(&e, &range_error_cxx_type);
+}
+
+/* Internal: throws failure exception */
+void DECLSPEC_NORETURN throw_failure(const char *str)
+{
+    exception_name name = EXCEPTION_NAME(str);
+    failure e;
+
+    MSVCP_failure_ctor(&e, name);
+    _CxxThrowException(&e, &failure_cxx_type);
 }
 
 void init_exception(void *base)
@@ -1122,7 +1117,7 @@ void init_exception(void *base)
 
     init_exception_cxx(base);
     init_bad_alloc_cxx(base);
-    init_logic_error_cxx(base);
+    init_logic_error_cxx_type_info(base);
     init_length_error_cxx(base);
     init_out_of_range_cxx(base);
     init_invalid_argument_cxx(base);
@@ -1134,7 +1129,6 @@ void init_exception(void *base)
     init_system_error_cxx_type_info(base);
 #endif
     init_failure_cxx(base);
-    init_bad_cast_cxx(base);
     init_range_error_cxx(base);
 #endif
 }

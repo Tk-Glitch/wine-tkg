@@ -290,10 +290,8 @@ static const struct gdi_dc_funcs macdrv_funcs =
     NULL,                                   /* pExtTextOut */
     NULL,                                   /* pFillPath */
     NULL,                                   /* pFillRgn */
-    NULL,                                   /* pFlattenPath */
     NULL,                                   /* pFontIsLinked */
     NULL,                                   /* pFrameRgn */
-    NULL,                                   /* pGdiComment */
     NULL,                                   /* pGetBoundsRect */
     NULL,                                   /* pGetCharABCWidths */
     NULL,                                   /* pGetCharABCWidthsI */
@@ -336,11 +334,9 @@ static const struct gdi_dc_funcs macdrv_funcs =
     NULL,                                   /* pRealizePalette */
     NULL,                                   /* pRectangle */
     NULL,                                   /* pResetDC */
-    NULL,                                   /* pRestoreDC */
     NULL,                                   /* pRoundRect */
     NULL,                                   /* pSelectBitmap */
     NULL,                                   /* pSelectBrush */
-    NULL,                                   /* pSelectClipPath */
     NULL,                                   /* pSelectFont */
     NULL,                                   /* pSelectPen */
     NULL,                                   /* pSetBkColor */
@@ -359,7 +355,6 @@ static const struct gdi_dc_funcs macdrv_funcs =
     NULL,                                   /* pStrokeAndFillPath */
     NULL,                                   /* pStrokePath */
     NULL,                                   /* pUnrealizePalette */
-    NULL,                                   /* pWidenPath */
     NULL,                                   /* pD3DKMTCheckVidPnExclusiveOwnership */
     NULL,                                   /* pD3DKMTSetVidPnSourceOwner */
     macdrv_wine_get_wgl_driver,             /* wine_get_wgl_driver */

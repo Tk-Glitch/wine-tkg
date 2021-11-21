@@ -187,19 +187,7 @@ extern WORD *MSVCRT__pwctype;
 
 void msvcrt_set_errno(int) DECLSPEC_HIDDEN;
 #if _MSVCR_VER >= 80
-typedef enum {
-    EXCEPTION_BAD_ALLOC,
-#if _MSVCR_VER >= 100
-    EXCEPTION_SCHEDULER_RESOURCE_ALLOCATION_ERROR,
-    EXCEPTION_IMPROPER_LOCK,
-    EXCEPTION_INVALID_SCHEDULER_POLICY_KEY,
-    EXCEPTION_INVALID_SCHEDULER_POLICY_VALUE,
-    EXCEPTION_INVALID_SCHEDULER_POLICY_THREAD_SPECIFICATION,
-    EXCEPTION_IMPROPER_SCHEDULER_ATTACH,
-    EXCEPTION_IMPROPER_SCHEDULER_DETACH,
-#endif
-} exception_type;
-void throw_exception(exception_type, HRESULT, const char*) DECLSPEC_HIDDEN;
+void throw_bad_alloc(void) DECLSPEC_HIDDEN;
 #endif
 
 void __cdecl _purecall(void);
@@ -245,8 +233,8 @@ extern void msvcrt_destroy_heap(void) DECLSPEC_HIDDEN;
 extern void msvcrt_init_clock(void) DECLSPEC_HIDDEN;
 
 #if _MSVCR_VER >= 100
-extern void msvcrt_init_scheduler(void*) DECLSPEC_HIDDEN;
-extern void msvcrt_free_scheduler(void) DECLSPEC_HIDDEN;
+extern void msvcrt_init_concurrency(void*) DECLSPEC_HIDDEN;
+extern void msvcrt_free_concurrency(void) DECLSPEC_HIDDEN;
 extern void msvcrt_free_scheduler_thread(void) DECLSPEC_HIDDEN;
 #endif
 

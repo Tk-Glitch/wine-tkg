@@ -315,7 +315,7 @@ static const NLS_FORMAT_NODE *NLS_GetFormats(LCID lcid, DWORD dwFlags)
 /**************************************************************************
  * NLS_IsUnicodeOnlyLcid <internal>
  *
- * Determine if a locale is Unicode only, and thus invalid in ASCII calls.
+ * Determine if a locale is Unicode only, and thus invalid in ANSI calls.
  */
 static BOOL NLS_IsUnicodeOnlyLcid(LCID lcid)
 {
@@ -737,7 +737,7 @@ invalid_flags:
 /******************************************************************************
  * NLS_GetDateTimeFormatA <internal>
  *
- * ASCII wrapper for GetDateFormatA/GetTimeFormatA.
+ * ANSI wrapper for GetDateFormatA/GetTimeFormatA.
  */
 static INT NLS_GetDateTimeFormatA(LCID lcid, DWORD dwFlags,
                                   const SYSTEMTIME* lpTime,
@@ -745,12 +745,12 @@ static INT NLS_GetDateTimeFormatA(LCID lcid, DWORD dwFlags,
 {
   DWORD cp = CP_ACP;
   WCHAR szFormat[128], szOut[128];
-  INT iRet;
+  INT iRet, cchOutW;
 
   TRACE("(0x%04x,0x%08x,%p,%s,%p,%d)\n", lcid, dwFlags, lpTime,
         debugstr_a(lpFormat), lpStr, cchOut);
 
-  if (NLS_IsUnicodeOnlyLcid(lcid))
+  if ((cchOut && !lpStr) || NLS_IsUnicodeOnlyLcid(lcid))
   {
     SetLastError(ERROR_INVALID_PARAMETER);
     return 0;
@@ -771,21 +771,12 @@ static INT NLS_GetDateTimeFormatA(LCID lcid, DWORD dwFlags,
   if (lpFormat)
     MultiByteToWideChar(cp, 0, lpFormat, -1, szFormat, ARRAY_SIZE(szFormat));
 
-  if (cchOut > (int) ARRAY_SIZE(szOut))
-    cchOut = ARRAY_SIZE(szOut);
-
-  szOut[0] = '\0';
-
+  /* If cchOut == 0 we need the full string to get the accurate ANSI size */
+  cchOutW = (cchOut && cchOut <= ARRAY_SIZE(szOut)) ? cchOut : ARRAY_SIZE(szOut);
   iRet = NLS_GetDateTimeFormatW(lcid, dwFlags, lpTime, lpFormat ? szFormat : NULL,
-                                lpStr ? szOut : NULL, cchOut);
-
-  if (lpStr)
-  {
-    if (szOut[0])
-      WideCharToMultiByte(cp, 0, szOut, iRet ? -1 : cchOut, lpStr, cchOut, 0, 0);
-    else if (cchOut && iRet)
-      *lpStr = '\0';
-  }
+                                szOut, cchOutW);
+  if (iRet)
+      iRet = WideCharToMultiByte(cp, 0, szOut, -1, lpStr, cchOut, NULL, NULL);
   return iRet;
 }
 
@@ -825,7 +816,7 @@ static INT NLS_GetDateTimeFormatA(LCID lcid, DWORD dwFlags,
  *|  gg     Era string, for example 'AD'.
  *  - To output any literal character that could be misidentified as a token,
  *    enclose it in single quotes.
- *  - The Ascii version of this function fails if lcid is Unicode only.
+ *  - The ANSI version of this function fails if lcid is Unicode only.
  *
  * RETURNS
  *  Success: The number of character written to lpDateStr, or that would
@@ -931,7 +922,7 @@ INT WINAPI GetDateFormatW(LCID lcid, DWORD dwFlags, const SYSTEMTIME* lpTime,
  *|  tt     Long time marker (e.g. "AM", "PM")
  *  - To output any literal character that could be misidentified as a token,
  *    enclose it in single quotes.
- *  - The Ascii version of this function fails if lcid is Unicode only.
+ *  - The ANSI version of this function fails if lcid is Unicode only.
  *
  * RETURNS
  *  Success: The number of character written to lpTimeStr, or that would
@@ -1015,7 +1006,7 @@ INT WINAPI GetTimeFormatW(LCID lcid, DWORD dwFlags, const SYSTEMTIME* lpTime,
  *  - This function rounds the number string if the number of decimals exceeds the
  *    locales normal number of decimal places.
  *  - If cchOut is 0, this function does not write to lpNumberStr.
- *  - The Ascii version of this function fails if lcid is Unicode only.
+ *  - The ANSI version of this function fails if lcid is Unicode only.
  *
  * RETURNS
  *  Success: The number of character written to lpNumberStr, or that would
@@ -1379,7 +1370,7 @@ INT WINAPI GetNumberFormatEx(LPCWSTR name, DWORD flags,
  *  - This function rounds the currency if the number of decimals exceeds the
  *    locales number of currency decimal places.
  *  - If cchOut is 0, this function does not write to lpCurrencyStr.
- *  - The Ascii version of this function fails if lcid is Unicode only.
+ *  - The ANSI version of this function fails if lcid is Unicode only.
  *
  * RETURNS
  *  Success: The number of character written to lpNumberStr, or that would

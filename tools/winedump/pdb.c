@@ -222,6 +222,36 @@ static void *read_string_table(struct pdb_reader* reader)
     return NULL;
 }
 
+static void dump_global_symbol(struct pdb_reader* reader, unsigned file)
+{
+    void*  global = NULL;
+    DWORD  size;
+
+    global = reader->read_file(reader, file);
+    if (!global) return;
+
+    size = pdb_get_file_size(reader, file);
+
+    printf("Global symbols table:\n");
+    dump_data(global, size, "\t");
+    free(global);
+}
+
+static void dump_public_symbol(struct pdb_reader* reader, unsigned file)
+{
+    void*  public = NULL;
+    DWORD  size;
+
+    public = reader->read_file(reader, file);
+    if (!public) return;
+
+    size = pdb_get_file_size(reader, file);
+
+    printf("Public symbols table:\n");
+    dump_data(public, size, "\t");
+    free(public);
+}
+
 static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx)
 {
     PDB_SYMBOLS*    symbols;
@@ -229,6 +259,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx
     const char*     file;
     char*           filesimage;
     DWORD           filessize = 0;
+    char            tcver[32];
 
     sidx->FPO = sidx->unk0 = sidx->unk1 = sidx->unk2 = sidx->unk3 = sidx->segments =
         sidx->unk4 = sidx->unk5 = sidx->unk6 = sidx->FPO_EXT = sidx->unk7 = -1;
@@ -246,14 +277,20 @@ static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx
     default:
         printf("-Unknown symbol info version %d\n", symbols->version);
     }
+    if (symbols->flags & 0x8000) /* new */
+        snprintf(tcver, sizeof(tcver), "%u.%u", (symbols->flags >> 8) & 0x7f, symbols->flags & 0xff);
+    else
+        snprintf(tcver, sizeof(tcver), "old-%x", symbols->flags);
     printf("Symbols:\n"
            "\tsignature:       %08x\n"
            "\tversion:         %u\n"
-           "\tunknown:         %08x\n"
-           "\thash1_file:      %08x\n"
-           "\thash2_file:      %08x\n"
-           "\tgsym_file:       %04x\n"
-           "\tunknown1:        %04x\n"
+           "\tage:             %08x\n"
+           "\tglobal_file:     %u\n"
+           "\tbuilder:         %s\n"
+           "\tpublic_file:     %u\n"
+           "\tbldVer:          %u\n"
+           "\tgsym_file:       %u\n"
+           "\trbldVer:         %u\n"
            "\tmodule_size:     %08x\n"
            "\toffset_size:     %08x\n"
            "\thash_size:       %08x\n"
@@ -264,14 +301,16 @@ static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx
            "\tunknown2_size:   %08x\n"
            "\tresvd3:          %04x\n"
            "\tmachine:         %s\n"
-           "\tresvd[4]         %08x\n",
+           "\tresvd4           %08x\n",
            symbols->signature,
            symbols->version,
-           symbols->unknown,
-           symbols->hash1_file,
-           symbols->hash2_file,
+           symbols->age,
+           symbols->global_file,
+           tcver, /* from symbols->flags */
+           symbols->public_file,
+           symbols->bldVer,
            symbols->gsym_file,
-           symbols->unknown1,
+           symbols->rbldVer,
            symbols->module_size,
            symbols->offset_size,
            symbols->hash_size,
@@ -558,15 +597,34 @@ static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx
         file_name += strlen(file_name) + 1;
         file = (char*)((DWORD_PTR)(file_name + strlen(file_name) + 1 + 3) & ~3);
     }
+    dump_global_symbol(reader, symbols->global_file);
+    dump_public_symbol(reader, symbols->public_file);
     free(symbols);
     free(filesimage);
 }
 
-static void pdb_dump_types(struct pdb_reader* reader)
+static void pdb_dump_types_hash(struct pdb_reader* reader, unsigned file, const char* strmname)
+{
+    void*  hash = NULL;
+    DWORD  size;
+
+    hash = reader->read_file(reader, file);
+    if (!hash) return;
+
+    size = pdb_get_file_size(reader, file);
+
+    printf("Types (%s) hash:\n", strmname);
+    dump_data(hash, size, "    ");
+    free(hash);
+}
+
+/* there are two 'type' related streams, but with different indexes... */
+static void pdb_dump_types(struct pdb_reader* reader, unsigned strmidx, const char* strmname)
 {
     PDB_TYPES*  types = NULL;
 
-    types = reader->read_file(reader, 2);
+    types = reader->read_file(reader, strmidx);
+    if (!types) return;
 
     switch (types->version)
     {
@@ -581,7 +639,7 @@ static void pdb_dump_types(struct pdb_reader* reader)
     }
 
     /* Read type table */
-    printf("Types:\n"
+    printf("Types (%s):\n"
            "\tversion:        %u\n"
            "\ttype_offset:    %08x\n"
            "\tfirst_index:    %x\n"
@@ -597,6 +655,7 @@ static void pdb_dump_types(struct pdb_reader* reader)
            "\tsearch_len:     %x\n"
            "\tunknown_offset: %x\n"
            "\tunknown_len:    %x\n",
+           strmname,
            types->version,
            types->type_offset,
            types->first_index,
@@ -613,6 +672,7 @@ static void pdb_dump_types(struct pdb_reader* reader)
            types->unknown_offset,
            types->unknown_len);
     codeview_dump_types_from_block((const char*)types + types->type_offset, types->type_size);
+    pdb_dump_types_hash(reader, types->file, strmname);
     free(types);
 }
 
@@ -782,7 +842,8 @@ static void pdb_jg_dump(void)
         default:
             printf("-Unknown root block version %d\n", reader.u.jg.root->Version);
         }
-        pdb_dump_types(&reader);
+        pdb_dump_types(&reader, 2, "TPI");
+        pdb_dump_types(&reader, 4, "IPI");
         pdb_dump_symbols(&reader, &sidx);
         pdb_dump_fpo(&reader, sidx.FPO);
         pdb_dump_segments(&reader, sidx.segments);
@@ -863,18 +924,22 @@ static void pdb_ds_dump(void)
            reader.u.ds.header->unknown2,
            reader.u.ds.header->toc_page);
 
-    /* files:
-     *  0: JG says old toc pages, I'd say free pages (tbc, low prio)
+    /* files with static indexes:
+     *  0: JG says old toc pages
      *  1: root structure
      *  2: types
      *  3: modules
+     *  4: types (second stream)
      * other known streams:
      * - string table: its index is in the stream table from ROOT object under "/names"
+     * - type hash table: its index is in the types header (2 and 4)
+     * - global and public streams: from symbol stream header
      * those streams get their indexes out of the PDB_STREAM_INDEXES object
      * - FPO data
      * - segments
      * - extended FPO data
      */
+    reader.file_used[0] |= 1; /* mark stream #0 as read */
     reader.u.ds.root = reader.read_file(&reader, 1);
     if (reader.u.ds.root)
     {
@@ -926,7 +991,8 @@ static void pdb_ds_dump(void)
         }
         if (numok) printf(">>> unmatched present field with found\n");
 
-        pdb_dump_types(&reader);
+        pdb_dump_types(&reader, 2, "TPI");
+        pdb_dump_types(&reader, 4, "IPI");
         pdb_dump_symbols(&reader, &sidx);
         pdb_dump_fpo(&reader, sidx.FPO);
         pdb_dump_fpo_ext(&reader, sidx.FPO_EXT);

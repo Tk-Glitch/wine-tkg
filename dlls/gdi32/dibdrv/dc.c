@@ -649,10 +649,8 @@ const struct gdi_dc_funcs dib_driver =
     dibdrv_ExtTextOut,                  /* pExtTextOut */
     dibdrv_FillPath,                    /* pFillPath */
     NULL,                               /* pFillRgn */
-    NULL,                               /* pFlattenPath */
     NULL,                               /* pFontIsLinked */
     NULL,                               /* pFrameRgn */
-    NULL,                               /* pGdiComment */
     NULL,                               /* pGetBoundsRect */
     NULL,                               /* pGetCharABCWidths */
     NULL,                               /* pGetCharABCWidthsI */
@@ -695,11 +693,9 @@ const struct gdi_dc_funcs dib_driver =
     NULL,                               /* pRealizePalette */
     dibdrv_Rectangle,                   /* pRectangle */
     NULL,                               /* pResetDC */
-    NULL,                               /* pRestoreDC */
     dibdrv_RoundRect,                   /* pRoundRect */
     dibdrv_SelectBitmap,                /* pSelectBitmap */
     dibdrv_SelectBrush,                 /* pSelectBrush */
-    NULL,                               /* pSelectClipPath */
     dibdrv_SelectFont,                  /* pSelectFont */
     dibdrv_SelectPen,                   /* pSelectPen */
     NULL,                               /* pSetBkColor */
@@ -718,7 +714,6 @@ const struct gdi_dc_funcs dib_driver =
     dibdrv_StrokeAndFillPath,           /* pStrokeAndFillPath */
     dibdrv_StrokePath,                  /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
-    NULL,                               /* pWidenPath */
     NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
     NULL,                               /* pD3DKMTSetVidPnSourceOwner */
     dibdrv_wine_get_wgl_driver,         /* wine_get_wgl_driver */
@@ -1220,10 +1215,8 @@ static const struct gdi_dc_funcs window_driver =
     windrv_ExtTextOut,                  /* pExtTextOut */
     NULL,                               /* pFillPath */
     NULL,                               /* pFillRgn */
-    NULL,                               /* pFlattenPath */
     NULL,                               /* pFontIsLinked */
     NULL,                               /* pFrameRgn */
-    NULL,                               /* pGdiComment */
     NULL,                               /* pGetBoundsRect */
     NULL,                               /* pGetCharABCWidths */
     NULL,                               /* pGetCharABCWidthsI */
@@ -1266,11 +1259,9 @@ static const struct gdi_dc_funcs window_driver =
     NULL,                               /* pRealizePalette */
     windrv_Rectangle,                   /* pRectangle */
     NULL,                               /* pResetDC */
-    NULL,                               /* pRestoreDC */
     windrv_RoundRect,                   /* pRoundRect */
     NULL,                               /* pSelectBitmap */
     NULL,                               /* pSelectBrush */
-    NULL,                               /* pSelectClipPath */
     NULL,                               /* pSelectFont */
     NULL,                               /* pSelectPen */
     NULL,                               /* pSetBkColor */
@@ -1289,7 +1280,6 @@ static const struct gdi_dc_funcs window_driver =
     NULL,                               /* pStrokeAndFillPath */
     NULL,                               /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
-    NULL,                               /* pWidenPath */
     NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
     NULL,                               /* pD3DKMTSetVidPnSourceOwner */
     windrv_wine_get_wgl_driver,         /* wine_get_wgl_driver */

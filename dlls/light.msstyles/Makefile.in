@@ -6,12 +6,21 @@ SVG_SRCS = \
 	blue_button.svg \
 	blue_checkbox_13px.svg \
 	blue_checkbox_16px.svg \
+	blue_checkbox_19px.svg \
+	blue_checkbox_22px.svg \
 	blue_checkbox_25px.svg \
+	blue_checkbox_28px.svg \
+	blue_checkbox_31px.svg \
 	blue_combobutton.svg \
 	blue_combobutton_glyph.svg \
 	blue_commandlink.svg \
 	blue_commandlink_glyph_30px.svg \
+	blue_commandlink_glyph_37px.svg \
 	blue_commandlink_glyph_45px.svg \
+	blue_commandlink_glyph_52px.svg \
+	blue_commandlink_glyph_60px.svg \
+	blue_commandlink_glyph_67px.svg \
+	blue_commandlink_glyph_75px.svg \
 	blue_groupbox.svg \
 	blue_header.svg \
 	blue_header_item.svg \
@@ -21,7 +30,11 @@ SVG_SRCS = \
 	blue_progress_track_vertical.svg \
 	blue_radiobutton_13px.svg \
 	blue_radiobutton_16px.svg \
+	blue_radiobutton_19px.svg \
+	blue_radiobutton_22px.svg \
 	blue_radiobutton_25px.svg \
+	blue_radiobutton_28px.svg \
+	blue_radiobutton_31px.svg \
 	blue_rebar_background.svg \
 	blue_rebar_chevron.svg \
 	blue_rebar_gripper_horizontal.svg \
@@ -29,7 +42,13 @@ SVG_SRCS = \
 	blue_scrollbar_arrow_glyphs_7px.svg \
 	blue_scrollbar_arrow_glyphs_9px.svg \
 	blue_scrollbar_arrows.svg \
-	blue_scrollbar_resizebox_grip.svg \
+	blue_scrollbar_resizebox_grip_16px.svg \
+	blue_scrollbar_resizebox_grip_20px.svg \
+	blue_scrollbar_resizebox_grip_24px.svg \
+	blue_scrollbar_resizebox_grip_28px.svg \
+	blue_scrollbar_resizebox_grip_32px.svg \
+	blue_scrollbar_resizebox_grip_36px.svg \
+	blue_scrollbar_resizebox_grip_40px.svg \
 	blue_scrollbar_shaft_horizontal.svg \
 	blue_scrollbar_shaft_vertical.svg \
 	blue_scrollbar_thumb_horizontal.svg \
@@ -56,7 +75,13 @@ SVG_SRCS = \
 	blue_toolbar_buttons_split_dropdown_glyph.svg \
 	blue_toolbar_separator_horizontal.svg \
 	blue_toolbar_separator_vertical.svg \
-	blue_tooltip_close.svg \
+	blue_tooltip_close_16px.svg \
+	blue_tooltip_close_20px.svg \
+	blue_tooltip_close_24px.svg \
+	blue_tooltip_close_28px.svg \
+	blue_tooltip_close_32px.svg \
+	blue_tooltip_close_36px.svg \
+	blue_tooltip_close_40px.svg \
 	blue_trackbar_slider_track.svg \
 	blue_trackbar_thumb_down_11px.svg \
 	blue_trackbar_thumb_down_15px.svg \
@@ -72,6 +97,10 @@ SVG_SRCS = \
 	blue_trackbar_thumb_up_15px.svg \
 	blue_trackbar_thumb_up_21px.svg \
 	blue_trackbar_thumb_vertical.svg \
-	blue_treeview_expand_collapse_10px.svg \
-	blue_treeview_expand_collapse_15px.svg \
+	blue_treeview_expand_collapse_11px.svg \
+	blue_treeview_expand_collapse_13px.svg \
+	blue_treeview_expand_collapse_16px.svg \
+	blue_treeview_expand_collapse_18px.svg \
+	blue_treeview_expand_collapse_20px.svg \
+	blue_treeview_expand_collapse_23px.svg \
 	blue_treeview_expand_collapse_9px.svg

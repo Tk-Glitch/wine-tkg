@@ -171,6 +171,7 @@
     SYSCALL_ENTRY( NtQueryVirtualMemory ) \
     SYSCALL_ENTRY( NtQueryVolumeInformationFile ) \
     SYSCALL_ENTRY( NtQueueApcThread ) \
+    SYSCALL_ENTRY( NtRaiseException ) \
     SYSCALL_ENTRY( NtRaiseHardError ) \
     SYSCALL_ENTRY( NtReadFile ) \
     SYSCALL_ENTRY( NtReadFileScatter ) \
@@ -227,6 +228,7 @@
     SYSCALL_ENTRY( NtTerminateProcess ) \
     SYSCALL_ENTRY( NtTerminateThread ) \
     SYSCALL_ENTRY( NtTestAlert ) \
+    SYSCALL_ENTRY( NtTraceControl ) \
     SYSCALL_ENTRY( NtUnloadDriver ) \
     SYSCALL_ENTRY( NtUnloadKey ) \
     SYSCALL_ENTRY( NtUnlockFile ) \

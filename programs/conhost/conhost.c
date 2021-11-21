@@ -97,9 +97,14 @@ static struct screen_buffer *create_screen_buffer( struct console *console, int 
         screen_buffer->popup_attr = console->active->attr;
         screen_buffer->font       = console->active->font;
 
-        if (!(screen_buffer->font.face_name = malloc( screen_buffer->font.face_len ))) return NULL;
-        memcpy( screen_buffer->font.face_name, console->active->font.face_name,
-                screen_buffer->font.face_len );
+        if (screen_buffer->font.face_len)
+        {
+            screen_buffer->font.face_name = malloc( screen_buffer->font.face_len * sizeof(WCHAR) );
+            if (!screen_buffer->font.face_name) return NULL;
+
+            memcpy( screen_buffer->font.face_name, console->active->font.face_name,
+                    screen_buffer->font.face_len * sizeof(WCHAR) );
+        }
     }
     else
     {
@@ -349,7 +354,7 @@ static void update_output( struct screen_buffer *screen_buffer, RECT *rect )
 
     TRACE( "%s\n", wine_dbgstr_rect( rect ));
 
-    if (screen_buffer->console->win)
+    if (screen_buffer->console->window)
     {
         update_window_region( screen_buffer->console, rect );
         return;
@@ -1728,7 +1733,7 @@ static NTSTATUS get_output_info( struct screen_buffer *screen_buffer, size_t *ou
 {
     struct condrv_output_info *info;
 
-    *out_size = min( *out_size, sizeof(*info) + screen_buffer->font.face_len );
+    *out_size = min( *out_size, sizeof(*info) + screen_buffer->font.face_len * sizeof(WCHAR) );
     if (!(info = alloc_ioctl_buffer( *out_size ))) return STATUS_NO_MEMORY;
 
     info->cursor_size    = screen_buffer->cursor_size;
@@ -2519,8 +2524,18 @@ static NTSTATUS console_input_ioctl( struct console *console, unsigned int code,
             if (!(info = alloc_ioctl_buffer( sizeof(*info )))) return STATUS_NO_MEMORY;
             info->input_cp    = console->input_cp;
             info->output_cp   = console->output_cp;
-            info->win         = condrv_handle( console->win );
             info->input_count = console->record_count;
+            return STATUS_SUCCESS;
+        }
+
+    case IOCTL_CONDRV_GET_WINDOW:
+        {
+            condrv_handle_t *result;
+            TRACE( "get window\n" );
+            if (in_size || *out_size != sizeof(*result)) return STATUS_INVALID_PARAMETER;
+            if (!(result = alloc_ioctl_buffer( sizeof(*result )))) return STATUS_NO_MEMORY;
+            if (!console->win) init_message_window( console );
+            *result = condrv_handle( console->win );
             return STATUS_SUCCESS;
         }
 
@@ -2655,7 +2670,6 @@ static int main_loop( struct console *console, HANDLE signal )
     unsigned short signal_id;
     IO_STATUS_BLOCK signal_io;
     NTSTATUS status;
-    BOOL pump_msgs;
     DWORD res;
 
     if (signal)
@@ -2671,11 +2685,10 @@ static int main_loop( struct console *console, HANDLE signal )
     wait_handles[wait_cnt++] = console->server;
     if (signal) wait_handles[wait_cnt++] = signal_event;
     if (console->input_thread) wait_handles[wait_cnt++] = console->input_thread;
-    pump_msgs = console->win != NULL;
 
     for (;;)
     {
-        if (pump_msgs)
+        if (console->win)
             res = MsgWaitForMultipleObjects( wait_cnt, wait_handles, FALSE, INFINITE, QS_ALLINPUT );
         else
             res = WaitForMultipleObjects( wait_cnt, wait_handles, FALSE, INFINITE );

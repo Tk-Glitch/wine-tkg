@@ -28,7 +28,7 @@
  *
  * The Name field of the IP_ADAPTER_INDEX_MAP entries returned by
  * GetInterfaceInfo is declared as a wide string, but the bytes are actually
- * an ASCII string on some versions of the IP helper API under Win9x.  This was
+ * an ANSI string on some versions of the IP helper API under Win9x.  This was
  * apparently an MS bug, it's corrected in later versions.
  *
  * The DomainName field of FIXED_INFO isn't NULL-terminated on Win98.
@@ -1109,7 +1109,6 @@ static void testGetInterfaceInfo(void)
             GetIfEntry( &row );
             ok( !wcscmp( buf->Adapter[i].Name, row.wszName ), "got %s vs %s\n",
                 debugstr_w( buf->Adapter[i].Name ), debugstr_w( row.wszName ) );
-todo_wine_if( row.dwType == IF_TYPE_SOFTWARE_LOOPBACK)
             ok( row.dwType != IF_TYPE_SOFTWARE_LOOPBACK, "got loopback\n" );
         }
         HeapFree(GetProcessHeap(), 0, buf);

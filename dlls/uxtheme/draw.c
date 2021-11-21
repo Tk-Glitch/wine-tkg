@@ -2,6 +2,7 @@
  * Win32 5.1 Theme drawing
  *
  * Copyright (C) 2003 Kevin Koltzau
+ * Copyright 2021 Zhiyi Zhang for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define COBJMACROS
+
 #include <stdlib.h>
 #include <stdarg.h>
 
@@ -25,6 +28,8 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "wingdi.h"
+#include "commctrl.h"
+#include "commoncontrols.h"
 #include "vfwmsgs.h"
 #include "uxtheme.h"
 #include "tmschema.h"
@@ -144,12 +149,31 @@ HRESULT WINAPI DrawThemeBackground(HTHEME hTheme, HDC hdc, int iPartId,
     return DrawThemeBackgroundEx(hTheme, hdc, iPartId, iStateId, pRect, &opts);
 }
 
+/* Map integer 1..7 to TMT_MINDPI1..TMT_MINDPI7 */
+static int mindpi_index_to_property(int index)
+{
+    return index <= 5 ? TMT_MINDPI1 + index - 1 : TMT_MINDPI6 + index - 6;
+}
+
+/* Map integer 1..7 to TMT_MINSIZE1..TMT_MINSIZE7 */
+static int minsize_index_to_property(int index)
+{
+    return index <= 5 ? TMT_MINSIZE1 + index - 1 : TMT_MINSIZE6 + index - 6;
+}
+
+/* Map integer 1..7 to TMT_IMAGEFILE1..TMT_IMAGEFILE7 */
+static int imagefile_index_to_property(int index)
+{
+    return index <= 5 ? TMT_IMAGEFILE1 + index - 1 : TMT_IMAGEFILE6 + index - 6;
+}
+
 /***********************************************************************
  *      UXTHEME_SelectImage
  *
  * Select the image to use
  */
-static PTHEME_PROPERTY UXTHEME_SelectImage(HTHEME hTheme, HDC hdc, int iPartId, int iStateId, const RECT *pRect, BOOL glyph)
+static PTHEME_PROPERTY UXTHEME_SelectImage(HTHEME hTheme, HDC hdc, int iPartId, int iStateId,
+                                           const RECT *pRect, BOOL glyph, int *imageDpi)
 {
     PTHEME_PROPERTY tp;
     int imageselecttype = IST_NONE;
@@ -160,6 +184,9 @@ static PTHEME_PROPERTY UXTHEME_SelectImage(HTHEME hTheme, HDC hdc, int iPartId, 
     else
         image = TMT_IMAGEFILE;
 
+    if (imageDpi)
+        *imageDpi = 96;
+
     if((tp=MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME, image)))
         return tp;
     GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_IMAGESELECTTYPE, &imageselecttype);
@@ -167,12 +194,20 @@ static PTHEME_PROPERTY UXTHEME_SelectImage(HTHEME hTheme, HDC hdc, int iPartId, 
     if(imageselecttype == IST_DPI) {
         int reqdpi = 0;
         int screendpi = GetDeviceCaps(hdc, LOGPIXELSX);
-        for(i=4; i>=0; i--) {
+        for (i = 7; i >= 1; i--)
+        {
             reqdpi = 0;
-            if(SUCCEEDED(GetThemeInt(hTheme, iPartId, iStateId, i + TMT_MINDPI1, &reqdpi))) {
+            if (SUCCEEDED(GetThemeInt(hTheme, iPartId, iStateId, mindpi_index_to_property(i),
+                                      &reqdpi)))
+            {
                 if(reqdpi != 0 && screendpi >= reqdpi) {
-                    TRACE("Using %d DPI, image %d\n", reqdpi, i + TMT_IMAGEFILE1);
-                    return MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME, i + TMT_IMAGEFILE1);
+                    TRACE("Using %d DPI, image %d\n", reqdpi, imagefile_index_to_property(i));
+
+                    if (imageDpi)
+                        *imageDpi = reqdpi;
+
+                    return MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME,
+                                                 imagefile_index_to_property(i));
                 }
             }
         }
@@ -182,11 +217,16 @@ static PTHEME_PROPERTY UXTHEME_SelectImage(HTHEME hTheme, HDC hdc, int iPartId, 
     else if(imageselecttype == IST_SIZE) {
         POINT size = {pRect->right-pRect->left, pRect->bottom-pRect->top};
         POINT reqsize;
-        for(i=4; i>=0; i--) {
-            PTHEME_PROPERTY fileProp = 
-                MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME, i + TMT_IMAGEFILE1);
+        for (i = 7; i >= 1; i--)
+        {
+            PTHEME_PROPERTY fileProp;
+
+            fileProp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME,
+                                             imagefile_index_to_property(i));
             if (!fileProp) continue;
-            if(FAILED(GetThemePosition(hTheme, iPartId, iStateId, i + TMT_MINSIZE1, &reqsize))) {
+            if (FAILED(GetThemePosition(hTheme, iPartId, iStateId, minsize_index_to_property(i),
+                                        &reqsize)))
+            {
                 /* fall back to size of Nth image */
                 WCHAR szPath[MAX_PATH];
                 int imagelayout = IL_HORIZONTAL;
@@ -213,7 +253,8 @@ static PTHEME_PROPERTY UXTHEME_SelectImage(HTHEME hTheme, HDC hdc, int iPartId, 
                 }
             }
             if(reqsize.x <= size.x && reqsize.y <= size.y) {
-                TRACE("Using image size %dx%d, image %d\n", reqsize.x, reqsize.y, i + TMT_IMAGEFILE1);
+                TRACE("Using image size %dx%d, image %d\n", reqsize.x, reqsize.y,
+                      imagefile_index_to_property(i));
                 return fileProp;
             }
         }
@@ -228,15 +269,18 @@ static PTHEME_PROPERTY UXTHEME_SelectImage(HTHEME hTheme, HDC hdc, int iPartId, 
  *
  * Load image for part/state
  */
-static HRESULT UXTHEME_LoadImage(HTHEME hTheme, HDC hdc, int iPartId, int iStateId, const RECT *pRect, BOOL glyph,
-                          HBITMAP *hBmp, RECT *bmpRect, BOOL* hasImageAlpha)
+static HRESULT UXTHEME_LoadImage(HTHEME hTheme, HDC hdc, int iPartId, int iStateId,
+                                 const RECT *pRect, BOOL glyph, HBITMAP *hBmp, RECT *bmpRect,
+                                 BOOL *hasImageAlpha, int *imageDpi)
 {
     int imagelayout = IL_HORIZONTAL;
     int imagecount = 1;
     int imagenum;
     BITMAP bmp;
     WCHAR szPath[MAX_PATH];
-    PTHEME_PROPERTY tp = UXTHEME_SelectImage(hTheme, hdc, iPartId, iStateId, pRect, glyph);
+    PTHEME_PROPERTY tp;
+
+    tp = UXTHEME_SelectImage(hTheme, hdc, iPartId, iStateId, pRect, glyph, imageDpi);
     if(!tp) {
         FIXME("Couldn't determine image for part/state %d/%d, invalid theme?\n", iPartId, iStateId);
         return E_PROP_ID_UNSUPPORTED;
@@ -484,8 +528,8 @@ static HRESULT UXTHEME_DrawImageGlyph(HTHEME hTheme, HDC hdc, int iPartId,
     POINT topleft;
     BOOL hasAlpha;
 
-    hr = UXTHEME_LoadImage(hTheme, hdc, iPartId, iStateId, pRect, TRUE, 
-        &bmpSrc, &rcSrc, &hasAlpha);
+    hr = UXTHEME_LoadImage(hTheme, hdc, iPartId, iStateId, pRect, TRUE, &bmpSrc, &rcSrc, &hasAlpha,
+                           NULL);
     if(FAILED(hr)) return hr;
     hdcSrc = CreateCompatibleDC(hdc);
     if(!hdcSrc) {
@@ -554,81 +598,71 @@ static HRESULT get_image_part_size (HTHEME hTheme, HDC hdc, int iPartId,
                                     int iStateId, RECT *prc, THEMESIZE eSize,
                                     POINT *psz)
 {
+    int imageDpi, dstDpi;
     HRESULT hr = S_OK;
     HBITMAP bmpSrc;
     RECT rcSrc;
     BOOL hasAlpha;
 
-    hr = UXTHEME_LoadImage(hTheme, hdc, iPartId, iStateId, prc, FALSE, 
-        &bmpSrc, &rcSrc, &hasAlpha);
+    hr = UXTHEME_LoadImage(hTheme, hdc, iPartId, iStateId, prc, FALSE, &bmpSrc, &rcSrc, &hasAlpha,
+                           &imageDpi);
     if (FAILED(hr)) return hr;
 
     switch (eSize)
     {
         case TS_DRAW:
+        {
+            int sizingType = ST_STRETCH, scalingType = TSST_NONE, stretchMark = 0;
+            POINT srcSize;
+
+            srcSize.x = rcSrc.right - rcSrc.left;
+            srcSize.y = rcSrc.bottom - rcSrc.top;
+
+            GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_SIZINGTYPE, &sizingType);
+            if (sizingType == ST_TRUESIZE)
+            {
+                GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_TRUESIZESCALINGTYPE, &scalingType);
+                GetThemeInt(hTheme, iPartId, iStateId, TMT_TRUESIZESTRETCHMARK, &stretchMark);
+                if (scalingType == TSST_DPI)
+                {
+                    /* Scale to DPI only if the destination DPI exceeds the source DPI by
+                     * stretchMark percent */
+                    dstDpi = GetDeviceCaps(hdc, LOGPIXELSY);
+                    if (dstDpi && dstDpi != imageDpi && MulDiv(100, dstDpi, imageDpi) >= stretchMark + 100)
+                    {
+                        srcSize.x = MulDiv(srcSize.x, dstDpi, imageDpi);
+                        srcSize.y = MulDiv(srcSize.y, dstDpi, imageDpi);
+                    }
+                }
+            }
+            *psz = srcSize;
+
             if (prc != NULL)
             {
-                RECT rcDst;
                 POINT dstSize;
-                POINT srcSize;
-                int sizingtype = ST_STRETCH;
                 BOOL uniformsizing = FALSE;
 
-                rcDst = *prc;
+                dstSize.x = prc->right - prc->left;
+                dstSize.y = prc->bottom - prc->top;
 
-                dstSize.x = rcDst.right-rcDst.left;
-                dstSize.y = rcDst.bottom-rcDst.top;
-                srcSize.x = rcSrc.right-rcSrc.left;
-                srcSize.y = rcSrc.bottom-rcSrc.top;
-            
                 GetThemeBool(hTheme, iPartId, iStateId, TMT_UNIFORMSIZING, &uniformsizing);
                 if(uniformsizing) {
                     /* Scale height and width equally */
                     if (dstSize.x*srcSize.y < dstSize.y*srcSize.x)
-                    {
                         dstSize.y = MulDiv (srcSize.y, dstSize.x, srcSize.x);
-                        rcDst.bottom = rcDst.top + dstSize.y;
-                    }
                     else
-                    {
                         dstSize.x = MulDiv (srcSize.x, dstSize.y, srcSize.y);
-                        rcDst.right = rcDst.left + dstSize.x;
-                    }
                 }
-            
-                GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_SIZINGTYPE, &sizingtype);
-                if(sizingtype == ST_TRUESIZE) {
-                    int truesizestretchmark = 100;
-            
-                    if(dstSize.x < 0 || dstSize.y < 0) {
-                        BOOL mirrorimage = TRUE;
-                        GetThemeBool(hTheme, iPartId, iStateId, TMT_MIRRORIMAGE, &mirrorimage);
-                        if(mirrorimage) {
-                            if(dstSize.x < 0) {
-                                rcDst.left += dstSize.x;
-                                rcDst.right += dstSize.x;
-                            }
-                            if(dstSize.y < 0) {
-                                rcDst.top += dstSize.y;
-                                rcDst.bottom += dstSize.y;
-                            }
-                        }
-                    }
-                    /* Whatever TrueSizeStretchMark does - it does not seem to
-                     * be what's outlined below. It appears as if native 
-                     * uxtheme always stretches if dest is smaller than source
-                     * (ie as if TrueSizeStretchMark==100 with the code below) */
-#if 0
-                    /* Only stretch when target exceeds source by truesizestretchmark percent */
-                    GetThemeInt(hTheme, iPartId, iStateId, TMT_TRUESIZESTRETCHMARK, &truesizestretchmark);
-#endif
-                    if(dstSize.x < 0 || dstSize.y < 0 ||
-                      (MulDiv(srcSize.x, 100, dstSize.x) > truesizestretchmark &&
-                      MulDiv(srcSize.y, 100, dstSize.y) > truesizestretchmark)) {
-                        memcpy (psz, &dstSize, sizeof (SIZE));
-                    }
-                    else {
-                        memcpy (psz, &srcSize, sizeof (SIZE));
+
+                if (sizingType == ST_TRUESIZE)
+                {
+                    if ((dstSize.x < 0 || dstSize.y < 0)
+                        || (dstSize.x < srcSize.x && dstSize.y < srcSize.y)
+                        || (scalingType == TSST_SIZE
+                            && MulDiv(100, dstSize.x, srcSize.x) >= stretchMark + 100
+                            && MulDiv(100, dstSize.y, srcSize.y) >= stretchMark + 100))
+                    {
+                        *psz = dstSize;
                     }
                 }
                 else
@@ -636,9 +670,10 @@ static HRESULT get_image_part_size (HTHEME hTheme, HDC hdc, int iPartId,
                     psz->x = abs(dstSize.x);
                     psz->y = abs(dstSize.y);
                 }
-                break;
             }
-            /* else fall through */
+
+            break;
+        }
         case TS_MIN:
             /* FIXME: couldn't figure how native uxtheme computes min size */
         case TS_TRUE:
@@ -672,8 +707,8 @@ static HRESULT UXTHEME_DrawImageBackground(HTHEME hTheme, HDC hdc, int iPartId,
     COLORREF transparentcolor = 0;
     BOOL hasAlpha;
 
-    hr = UXTHEME_LoadImage(hTheme, hdc, iPartId, iStateId, pRect, FALSE, 
-        &bmpSrc, &rcSrc, &hasAlpha);
+    hr = UXTHEME_LoadImage(hTheme, hdc, iPartId, iStateId, pRect, FALSE, &bmpSrc, &rcSrc, &hasAlpha,
+                           NULL);
     if(FAILED(hr)) return hr;
     hdcSrc = CreateCompatibleDC(hdc);
     if(!hdcSrc) {
@@ -1619,10 +1654,57 @@ HRESULT WINAPI DrawThemeEdge(HTHEME hTheme, HDC hdc, int iPartId,
 HRESULT WINAPI DrawThemeIcon(HTHEME hTheme, HDC hdc, int iPartId, int iStateId,
                              const RECT *pRect, HIMAGELIST himl, int iImageIndex)
 {
-    FIXME("%d %d: stub\n", iPartId, iStateId);
-    if(!hTheme)
+    INT effect = ICE_NONE, saturation = 0, alpha = 128;
+    IImageList *image_list = (IImageList *)himl;
+    IMAGELISTDRAWPARAMS params = {0};
+    COLORREF color = 0;
+
+    TRACE("%p %p %d %d %s %p %d\n", hTheme, hdc, iPartId, iStateId, wine_dbgstr_rect(pRect), himl,
+          iImageIndex);
+
+    if (!hTheme)
         return E_HANDLE;
-    return E_NOTIMPL;
+
+    GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_ICONEFFECT, &effect);
+    switch (effect)
+    {
+    case ICE_NONE:
+        params.fState = ILS_NORMAL;
+        break;
+    case ICE_GLOW:
+        GetThemeColor(hTheme, iPartId, iStateId, TMT_GLOWCOLOR, &color);
+        params.fState = ILS_GLOW;
+        params.crEffect = color;
+        break;
+    case ICE_SHADOW:
+        GetThemeColor(hTheme, iPartId, iStateId, TMT_SHADOWCOLOR, &color);
+        params.fState = ILS_SHADOW;
+        params.crEffect = color;
+        break;
+    case ICE_PULSE:
+        GetThemeInt(hTheme, iPartId, iStateId, TMT_SATURATION, &saturation);
+        params.fState = ILS_SATURATE;
+        params.Frame = saturation;
+        break;
+    case ICE_ALPHA:
+        GetThemeInt(hTheme, iPartId, iStateId, TMT_ALPHALEVEL, &alpha);
+        params.fState = ILS_ALPHA;
+        params.Frame = alpha;
+        break;
+    }
+
+    params.cbSize = sizeof(params);
+    params.himl = himl;
+    params.i = iImageIndex;
+    params.hdcDst = hdc;
+    params.x = pRect->left;
+    params.y = pRect->top;
+    params.cx = pRect->right - pRect->left;
+    params.cy = pRect->bottom - pRect->top;
+    params.rgbBk = CLR_NONE;
+    params.rgbFg = CLR_NONE;
+    params.fStyle = ILD_TRANSPARENT;
+    return IImageList_Draw(image_list, &params);
 }
 
 /***********************************************************************
@@ -2101,8 +2183,8 @@ BOOL WINAPI IsThemeBackgroundPartiallyTransparent(HTHEME hTheme, int iPartId,
 
     if (bgtype != BT_IMAGEFILE) return FALSE;
 
-    if(FAILED (UXTHEME_LoadImage (hTheme, 0, iPartId, iStateId, &rect, FALSE, 
-                                  &bmpSrc, &rcSrc, &hasAlpha))) 
+    if (FAILED(UXTHEME_LoadImage(hTheme, 0, iPartId, iStateId, &rect, FALSE, &bmpSrc, &rcSrc,
+                                 &hasAlpha, NULL)))
         return FALSE;
 
     get_transparency (hTheme, iPartId, iStateId, hasAlpha, &transparent,

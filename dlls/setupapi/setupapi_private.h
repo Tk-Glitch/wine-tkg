@@ -96,7 +96,7 @@ extern WCHAR *PARSER_get_dest_dir( INFCONTEXT *context ) DECLSPEC_HIDDEN;
 
 extern WCHAR *get_destination_dir( HINF hinf, const WCHAR *section );
 
-/* support for Ascii queue callback functions */
+/* support for ANSI queue callback functions */
 
 struct callback_WtoA_context
 {

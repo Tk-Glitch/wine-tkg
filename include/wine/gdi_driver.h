@@ -95,14 +95,12 @@ struct gdi_dc_funcs
     BOOL     (CDECL *pExtTextOut)(PHYSDEV,INT,INT,UINT,const RECT*,LPCWSTR,UINT,const INT*);
     BOOL     (CDECL *pFillPath)(PHYSDEV);
     BOOL     (CDECL *pFillRgn)(PHYSDEV,HRGN,HBRUSH);
-    BOOL     (CDECL *pFlattenPath)(PHYSDEV);
     BOOL     (CDECL *pFontIsLinked)(PHYSDEV);
     BOOL     (CDECL *pFrameRgn)(PHYSDEV,HRGN,HBRUSH,INT,INT);
-    BOOL     (CDECL *pGdiComment)(PHYSDEV,UINT,const BYTE*);
     UINT     (CDECL *pGetBoundsRect)(PHYSDEV,RECT*,UINT);
-    BOOL     (CDECL *pGetCharABCWidths)(PHYSDEV,UINT,UINT,LPABC);
+    BOOL     (CDECL *pGetCharABCWidths)(PHYSDEV,UINT,UINT,WCHAR*,LPABC);
     BOOL     (CDECL *pGetCharABCWidthsI)(PHYSDEV,UINT,UINT,WORD*,LPABC);
-    BOOL     (CDECL *pGetCharWidth)(PHYSDEV,UINT,UINT,LPINT);
+    BOOL     (CDECL *pGetCharWidth)(PHYSDEV,UINT,UINT,const WCHAR*,LPINT);
     BOOL     (CDECL *pGetCharWidthInfo)(PHYSDEV,void*);
     INT      (CDECL *pGetDeviceCaps)(PHYSDEV,INT);
     BOOL     (CDECL *pGetDeviceGammaRamp)(PHYSDEV,LPVOID);
@@ -140,12 +138,10 @@ struct gdi_dc_funcs
     UINT     (CDECL *pRealizeDefaultPalette)(PHYSDEV);
     UINT     (CDECL *pRealizePalette)(PHYSDEV,HPALETTE,BOOL);
     BOOL     (CDECL *pRectangle)(PHYSDEV,INT,INT,INT,INT);
-    HDC      (CDECL *pResetDC)(PHYSDEV,const DEVMODEW*);
-    BOOL     (CDECL *pRestoreDC)(PHYSDEV,INT);
+    BOOL     (CDECL *pResetDC)(PHYSDEV,const DEVMODEW*);
     BOOL     (CDECL *pRoundRect)(PHYSDEV,INT,INT,INT,INT,INT,INT);
     HBITMAP  (CDECL *pSelectBitmap)(PHYSDEV,HBITMAP);
     HBRUSH   (CDECL *pSelectBrush)(PHYSDEV,HBRUSH,const struct brush_pattern*);
-    BOOL     (CDECL *pSelectClipPath)(PHYSDEV,INT);
     HFONT    (CDECL *pSelectFont)(PHYSDEV,HFONT,UINT*);
     HPEN     (CDECL *pSelectPen)(PHYSDEV,HPEN,const struct brush_pattern*);
     COLORREF (CDECL *pSetBkColor)(PHYSDEV,COLORREF);
@@ -164,7 +160,6 @@ struct gdi_dc_funcs
     BOOL     (CDECL *pStrokeAndFillPath)(PHYSDEV);
     BOOL     (CDECL *pStrokePath)(PHYSDEV);
     BOOL     (CDECL *pUnrealizePalette)(HPALETTE);
-    BOOL     (CDECL *pWidenPath)(PHYSDEV);
     NTSTATUS (CDECL *pD3DKMTCheckVidPnExclusiveOwnership)(const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *);
     NTSTATUS (CDECL *pD3DKMTSetVidPnSourceOwner)(const D3DKMT_SETVIDPNSOURCEOWNER *);
     struct opengl_funcs * (CDECL *wine_get_wgl_driver)(PHYSDEV,UINT);
@@ -175,7 +170,7 @@ struct gdi_dc_funcs
 };
 
 /* increment this when you change the DC function table */
-#define WINE_GDI_DRIVER_VERSION 60
+#define WINE_GDI_DRIVER_VERSION 66
 
 #define GDI_PRIORITY_NULL_DRV        0  /* null driver */
 #define GDI_PRIORITY_FONT_DRV      100  /* any font driver */

@@ -24,7 +24,6 @@
 #define CXX_EXCEPTION       0xe06d7363
 #define ALIGNED_SIZE(size, alignment) (((size)+((alignment)-1))/(alignment)*(alignment))
 
-#define MSVCP_SIZE_T_MAX (~(size_t)0)
 #if _MSVCP_VER >= 100
 typedef __int64 DECLSPEC_ALIGN(8) streamoff;
 typedef __int64 DECLSPEC_ALIGN(8) streamsize;
@@ -41,8 +40,8 @@ void __cdecl _invalid_parameter_noinfo(void);
 BOOL __cdecl __uncaught_exception(void);
 int __cdecl _callnewh(size_t);
 
-extern void* (__cdecl *MSVCRT_operator_new)(size_t);
-extern void (__cdecl *MSVCRT_operator_delete)(void*);
+void* __cdecl operator_new(size_t);
+void __cdecl operator_delete(void*);
 extern void* (__cdecl *MSVCRT_set_new_handler)(void*);
 
 #if _MSVCP_VER >= 110
@@ -622,7 +621,12 @@ void init_exception(void*);
 void init_locale(void*);
 void init_io(void*);
 void free_io(void);
+
+#if _MSVCP_VER >= 100
+void init_concurrency_details(void*);
 void init_misc(void*);
+void free_misc(void);
+#endif
 
 /* class complex<float> */
 typedef struct {
@@ -659,4 +663,12 @@ static inline int mbstowcs_wrapper( size_t *ret, wchar_t *wcs, size_t size, cons
 #define hypotf( x, y ) ((float)hypot( (double)(x), (double)(y) ))
 #endif
 
-void free_misc(void);
+void WINAPI DECLSPEC_NORETURN _CxxThrowException(void*,const cxx_exception_type*);
+void __cdecl DECLSPEC_NORETURN _Xinvalid_argument(const char*);
+void __cdecl DECLSPEC_NORETURN _Xlength_error(const char*);
+void __cdecl DECLSPEC_NORETURN _Xmem(void);
+void __cdecl DECLSPEC_NORETURN _Xout_of_range(const char*);
+void __cdecl DECLSPEC_NORETURN _Xruntime_error(const char*);
+void DECLSPEC_NORETURN throw_exception(const char*);
+void DECLSPEC_NORETURN throw_failure(const char*);
+void DECLSPEC_NORETURN throw_range_error(const char*);

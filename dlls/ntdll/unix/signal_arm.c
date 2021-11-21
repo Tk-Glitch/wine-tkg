@@ -172,30 +172,32 @@ enum arm_trap_code
 
 struct syscall_frame
 {
-    DWORD r0;             /* 000 */
-    DWORD r1;             /* 004 */
-    DWORD r2;             /* 008 */
-    DWORD r3;             /* 00c */
-    DWORD r4;             /* 010 */
-    DWORD r5;             /* 014 */
-    DWORD r6;             /* 018 */
-    DWORD r7;             /* 01c */
-    DWORD r8;             /* 020 */
-    DWORD r9;             /* 024 */
-    DWORD r10;            /* 028 */
-    DWORD r11;            /* 02c */
-    DWORD r12;            /* 030 */
-    DWORD pc;             /* 034 */
-    DWORD sp;             /* 038 */
-    DWORD lr;             /* 03c */
-    DWORD cpsr;           /* 040 */
-    DWORD restore_flags;  /* 044 */
-    DWORD fpscr;          /* 048 */
-    DWORD align;          /* 04c */
-    ULONGLONG d[32];      /* 050 */
+    DWORD                 r0;             /* 000 */
+    DWORD                 r1;             /* 004 */
+    DWORD                 r2;             /* 008 */
+    DWORD                 r3;             /* 00c */
+    DWORD                 r4;             /* 010 */
+    DWORD                 r5;             /* 014 */
+    DWORD                 r6;             /* 018 */
+    DWORD                 r7;             /* 01c */
+    DWORD                 r8;             /* 020 */
+    DWORD                 r9;             /* 024 */
+    DWORD                 r10;            /* 028 */
+    DWORD                 r11;            /* 02c */
+    DWORD                 r12;            /* 030 */
+    DWORD                 pc;             /* 034 */
+    DWORD                 sp;             /* 038 */
+    DWORD                 lr;             /* 03c */
+    DWORD                 cpsr;           /* 040 */
+    DWORD                 restore_flags;  /* 044 */
+    DWORD                 fpscr;          /* 048 */
+    struct syscall_frame *prev_frame;     /* 04c */
+    SYSTEM_SERVICE_TABLE *syscall_table;  /* 050 */
+    DWORD                 align[3];       /* 054 */
+    ULONGLONG             d[32];          /* 060 */
 };
 
-C_ASSERT( sizeof( struct syscall_frame ) == 0x150);
+C_ASSERT( sizeof( struct syscall_frame ) == 0x160);
 
 struct arm_thread_data
 {
@@ -575,6 +577,65 @@ NTSTATUS call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context
 }
 
 
+struct user_callback_frame
+{
+    struct syscall_frame frame;
+    void               **ret_ptr;
+    ULONG               *ret_len;
+    __wine_jmp_buf       jmpbuf;
+    NTSTATUS             status;
+};
+
+/***********************************************************************
+ *           KeUserModeCallback
+ */
+NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len )
+{
+    struct user_callback_frame callback_frame = { { 0 }, ret_ptr, ret_len };
+
+    if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&callback_frame)
+        return STATUS_STACK_OVERFLOW;
+
+    if (!__wine_setjmpex( &callback_frame.jmpbuf, NULL ))
+    {
+        struct syscall_frame *frame = arm_thread_data()->syscall_frame;
+        void *args_data = (void *)((frame->sp - len) & ~15);
+
+        memcpy( args_data, args, len );
+
+        callback_frame.frame.r0            = id;
+        callback_frame.frame.r1            = (ULONG_PTR)args;
+        callback_frame.frame.r2            = len;
+        callback_frame.frame.sp            = (ULONG_PTR)args_data;
+        callback_frame.frame.pc            = (ULONG_PTR)pKiUserCallbackDispatcher;
+        callback_frame.frame.restore_flags = CONTEXT_INTEGER;
+        callback_frame.frame.syscall_table = frame->syscall_table;
+        callback_frame.frame.prev_frame    = frame;
+        arm_thread_data()->syscall_frame = &callback_frame.frame;
+
+        __wine_syscall_dispatcher_return( &callback_frame.frame, 0 );
+    }
+    return callback_frame.status;
+}
+
+
+/***********************************************************************
+ *           NtCallbackReturn  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status )
+{
+    struct user_callback_frame *frame = (struct user_callback_frame *)arm_thread_data()->syscall_frame;
+
+    if (!frame->frame.prev_frame) return STATUS_NO_CALLBACK_ACTIVE;
+
+    *frame->ret_ptr = ret_ptr;
+    *frame->ret_len = ret_len;
+    frame->status = status;
+    arm_thread_data()->syscall_frame = frame->frame.prev_frame;
+    __wine_longjmp( &frame->jmpbuf, 1 );
+}
+
+
 /***********************************************************************
  *           handle_syscall_fault
  *
@@ -939,7 +1000,9 @@ void DECLSPEC_HIDDEN call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, B
     frame->sp = (DWORD)ctx;
     frame->pc = (DWORD)pLdrInitializeThunk;
     frame->r0 = (DWORD)ctx;
+    frame->prev_frame = NULL;
     frame->restore_flags |= CONTEXT_INTEGER;
+    frame->syscall_table = KeServiceDescriptorTable;
 
     pthread_sigmask( SIG_UNBLOCK, &server_block_set, NULL );
     __wine_syscall_dispatcher_return( frame, 0 );
@@ -956,7 +1019,7 @@ __ASM_GLOBAL_FUNC( signal_start_thread,
                    /* set syscall frame */
                    "ldr r6, [r3, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
                    "cbnz r6, 1f\n\t"
-                   "sub r6, sp, #0x150\n\t"   /* sizeof(struct syscall_frame) */
+                   "sub r6, sp, #0x160\n\t"   /* sizeof(struct syscall_frame) */
                    "str r6, [r3, #0x1d8]\n\t" /* arm_thread_data()->syscall_frame */
                    "1:\tmov sp, r6\n\t"
                    "bl " __ASM_NAME("call_init_thunk") )
@@ -973,5 +1036,78 @@ __ASM_GLOBAL_FUNC( signal_exit_thread,
                    "it ne\n\t"
                    "movne sp, r3\n\t"
                    "blx r1" )
+
+
+/***********************************************************************
+ *           __wine_syscall_dispatcher
+ */
+__ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
+                   "mrc p15, 0, r1, c13, c0, 2\n\t" /* NtCurrentTeb() */
+                   "ldr r1, [r1, #0x1d8]\n\t"       /* arm_thread_data()->syscall_frame */
+                   "add r0, r1, #0x10\n\t"
+                   "stm r0, {r4-r12,lr}\n\t"
+                   "str sp, [r1, #0x38]\n\t"
+                   "str r3, [r1, #0x3c]\n\t"
+                   "mrs r0, CPSR\n\t"
+                   "bfi r0, lr, #5, #1\n\t"         /* set thumb bit */
+                   "str r0, [r1, #0x40]\n\t"
+                   "mov r0, #0\n\t"
+                   "str r0, [r1, #0x44]\n\t"        /* frame->restore_flags */
+#ifndef __SOFTFP__
+                   "vmrs r0, fpscr\n\t"
+                   "str r0, [r1, #0x48]\n\t"
+                   "add r0, r1, #0x60\n\t"
+                   "vstm r0, {d0-d15}\n\t"
+#endif
+                   "mov r6, sp\n\t"
+                   "mov sp, r1\n\t"
+                   "mov r8, r1\n\t"
+                   "ldr r5, [r1, #0x50]\n\t"        /* frame->syscall_table */
+                   "ubfx r4, ip, #12, #2\n\t"       /* syscall table number */
+                   "bfc ip, #12, #20\n\t"           /* syscall number */
+                   "add r4, r5, r4, lsl #4\n\t"
+                   "ldr r5, [r4, #8]\n\t"           /* table->ServiceLimit */
+                   "cmp ip, r5\n\t"
+                   "bcs 5f\n\t"
+                   "ldr r5, [r4, #12]\n\t"          /* table->ArgumentTable */
+                   "ldrb r5, [r5, ip]\n\t"
+                   "cmp r5, #16\n\t"
+                   "it le\n\t"
+                   "movle r5, #16\n\t"
+                   "sub r0, sp, r5\n\t"
+                   "and r0, #~7\n\t"
+                   "mov sp, r0\n"
+                   "2:\tsubs r5, r5, #4\n\t"
+                   "ldr r0, [r6, r5]\n\t"
+                   "str r0, [sp, r5]\n\t"
+                   "bgt 2b\n\t"
+                   "pop {r0-r3}\n\t"                /* first 4 args are in registers */
+                   "ldr r5, [r4]\n\t"               /* table->ServiceTable */
+                   "ldr ip, [r5, ip, lsl #2]\n\t"
+                   "blx ip\n"
+                   "4:\tldr ip, [r8, #0x44]\n\t"    /* frame->restore_flags */
+#ifndef __SOFTFP__
+                   "tst ip, #4\n\t"                 /* CONTEXT_FLOATING_POINT */
+                   "beq 3f\n\t"
+                   "ldr r4, [r8, #0x48]\n\t"
+                   "vmsr fpscr, r4\n\t"
+                   "add r4, r8, #0x60\n\t"
+                   "vldm r4, {d0-d15}\n"
+                   "3:\n\t"
+#endif
+                   "tst ip, #2\n\t"                 /* CONTEXT_INTEGER */
+                   "it ne\n\t"
+                   "ldmne r8, {r0-r3}\n\t"
+                   "ldr lr, [r8, #0x3c]\n\t"
+                   "ldr sp, [r8, #0x38]\n\t"
+                   "add r8, r8, #0x10\n\t"
+                   "ldm r8, {r4-r12,pc}\n"
+                   "5:\tmovw r0, #0x000d\n\t" /* STATUS_INVALID_PARAMETER */
+                   "movt r0, #0xc000\n\t"
+                   "b 4b\n"
+                   __ASM_NAME("__wine_syscall_dispatcher_return") ":\n\t"
+                   "mov r8, r0\n\t"
+                   "mov r0, r1\n\t"
+                   "b 4b" )
 
 #endif  /* __arm__ */

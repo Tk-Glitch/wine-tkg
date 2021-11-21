@@ -848,6 +848,192 @@ static void test_tcp_stats( int family )
     winetest_pop_context();
 }
 
+static void test_tcp_tables( int family, int table_type )
+{
+    DWORD dyn_sizes[] = { FIELD_OFFSET(struct nsi_tcp_conn_dynamic, unk[2]), sizeof(struct nsi_tcp_conn_dynamic) };
+    DWORD i, err, count, table_num, dyn_size, size;
+    struct nsi_tcp_conn_key *keys;
+    struct nsi_tcp_conn_dynamic *dyn_tbl, *dyn;
+    struct nsi_tcp_conn_static *stat;
+    MIB_TCPTABLE_OWNER_MODULE *table;
+    MIB_TCP6TABLE_OWNER_MODULE *table6;
+    MIB_TCPROW_OWNER_MODULE *row;
+    MIB_TCP6ROW_OWNER_MODULE *row6;
+
+    winetest_push_context( "%s: %d", family == AF_INET ? "AF_INET" : "AF_INET6", table_type );
+
+    switch (table_type)
+    {
+    case TCP_TABLE_OWNER_MODULE_ALL: table_num = 3; break;
+    case TCP_TABLE_OWNER_MODULE_CONNECTIONS: table_num = 4; break;
+    case TCP_TABLE_OWNER_MODULE_LISTENER: table_num = 5; break;
+    default: return;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(dyn_sizes); i++)
+    {
+        err = NsiAllocateAndGetTable( 1, &NPI_MS_TCP_MODULEID, table_num, (void **)&keys, sizeof(*keys), NULL, 0,
+                                      (void **)&dyn_tbl, dyn_sizes[i], (void **)&stat, sizeof(*stat), &count, 0 );
+        if (!err) break;
+    }
+    ok( !err, "got %d\n", err );
+    dyn_size = dyn_sizes[i];
+
+    size = 0;
+    err = GetExtendedTcpTable( NULL, &size, 0, family, table_type, 0 );
+    size *= 2;
+    table = malloc( size );
+    table6 = (MIB_TCP6TABLE_OWNER_MODULE *)table;
+    err = GetExtendedTcpTable( table, &size, 0, family, table_type, 0 );
+    ok( !err, "got %d\n", err );
+
+    row = table->table;
+    row6 = table6->table;
+
+    for (i = 0; i < count; i++)
+    {
+        dyn = (struct nsi_tcp_conn_dynamic *)((BYTE *)dyn_tbl + i * dyn_size);
+        if (keys[i].local.si_family != family) continue;
+
+        if (family == AF_INET)
+        {
+            ok( unstable( row->dwLocalAddr == keys[i].local.Ipv4.sin_addr.s_addr ), "%08x vs %08x\n",
+                row->dwLocalAddr, keys[i].local.Ipv4.sin_addr.s_addr );
+            ok( unstable( row->dwLocalPort == keys[i].local.Ipv4.sin_port ), "%d vs %d\n",
+                row->dwLocalPort, keys[i].local.Ipv4.sin_port );
+            ok( unstable( row->dwRemoteAddr == keys[i].remote.Ipv4.sin_addr.s_addr ), "%08x vs %08x\n",
+                row->dwRemoteAddr, keys[i].remote.Ipv4.sin_addr.s_addr );
+            ok( unstable( row->dwRemotePort == keys[i].remote.Ipv4.sin_port ), "%d vs %d\n",
+                row->dwRemotePort, keys[i].remote.Ipv4.sin_port );
+            ok( unstable( row->dwState == dyn->state ), "%x vs %x\n", row->dwState, dyn->state );
+            ok( unstable( row->dwOwningPid == stat[i].pid ), "%x vs %x\n", row->dwOwningPid, stat[i].pid );
+            ok( unstable( row->liCreateTimestamp.QuadPart == stat[i].create_time ), "mismatch\n" );
+            ok( unstable( row->OwningModuleInfo[0] == stat[i].mod_info ), "mismatch\n");
+            row++;
+        }
+        else if (family == AF_INET6)
+        {
+            ok( unstable( !memcmp( row6->ucLocalAddr, keys[i].local.Ipv6.sin6_addr.s6_addr, sizeof(IN6_ADDR) ) ),
+                "mismatch\n" );
+            ok( unstable( row6->dwLocalScopeId == keys[i].local.Ipv6.sin6_scope_id ), "%x vs %x\n",
+                row6->dwLocalScopeId, keys[i].local.Ipv6.sin6_scope_id );
+            ok( unstable( row6->dwLocalPort == keys[i].local.Ipv6.sin6_port ), "%d vs %d\n",
+                row6->dwLocalPort, keys[i].local.Ipv6.sin6_port );
+            ok( unstable( !memcmp( row6->ucRemoteAddr, keys[i].remote.Ipv6.sin6_addr.s6_addr, sizeof(IN6_ADDR) ) ),
+                "mismatch\n" );
+            ok( unstable( row6->dwRemoteScopeId == keys[i].remote.Ipv6.sin6_scope_id ), "%x vs %x\n",
+                row6->dwRemoteScopeId, keys[i].remote.Ipv6.sin6_scope_id );
+            ok( unstable( row6->dwRemotePort == keys[i].remote.Ipv6.sin6_port ), "%d vs %d\n",
+                row6->dwRemotePort, keys[i].remote.Ipv6.sin6_port );
+            ok( unstable( row6->dwState == dyn->state ), "%x vs %x\n", row6->dwState, dyn->state );
+            ok( unstable( row6->dwOwningPid == stat[i].pid ), "%x vs %x\n", row6->dwOwningPid, stat[i].pid );
+            ok( unstable( row6->liCreateTimestamp.QuadPart == stat[i].create_time ), "mismatch\n" );
+            ok( unstable( row6->OwningModuleInfo[0] == stat[i].mod_info ), "mismatch\n");
+            row6++;
+        }
+
+    }
+    free( table );
+    NsiFreeTable( keys, NULL, dyn_tbl, stat );
+    winetest_pop_context();
+}
+
+static void test_udp_stats( int family )
+{
+    DWORD err;
+    USHORT key = family;
+    struct nsi_udp_stats_dynamic dyn, dyn2;
+    MIB_UDPSTATS table;
+
+    winetest_push_context( family == AF_INET ? "AF_INET" : "AF_INET6" );
+
+    err = NsiGetAllParameters( 1, &NPI_MS_UDP_MODULEID, NSI_UDP_STATS_TABLE, &key, sizeof(key), NULL, 0,
+                               &dyn, sizeof(dyn), NULL, 0 );
+    ok( !err, "got %x\n", err );
+
+    err = GetUdpStatisticsEx( &table, family );
+    ok( !err, "got %d\n", err );
+
+    err = NsiGetAllParameters( 1, &NPI_MS_UDP_MODULEID, NSI_UDP_STATS_TABLE, &key, sizeof(key), NULL, 0,
+                               &dyn2, sizeof(dyn2), NULL, 0 );
+    ok( !err, "got %x\n", err );
+
+    ok( bounded( table.dwInDatagrams, dyn.in_dgrams, dyn2.in_dgrams ), "%d vs [%I64d %I64d]\n",
+        table.dwInDatagrams, dyn.in_dgrams, dyn2.in_dgrams );
+    ok( bounded( table.dwNoPorts, dyn.no_ports, dyn2.no_ports ), "%d vs [%d %d]\n",
+        table.dwNoPorts, dyn.no_ports, dyn2.no_ports);
+    ok( bounded( table.dwInErrors, dyn.in_errs, dyn2.in_errs ), "%d vs [%d %d]\n",
+        table.dwInErrors, dyn.in_errs, dyn2.in_errs );
+    ok( bounded( table.dwOutDatagrams, dyn.out_dgrams, dyn2.out_dgrams ), "%d vs [%I64d %I64d]\n",
+        table.dwOutDatagrams, dyn.out_dgrams, dyn2.out_dgrams );
+    ok( unstable( table.dwNumAddrs == dyn.num_addrs ), "%d %d\n", table.dwNumAddrs, dyn.num_addrs );
+
+    winetest_pop_context();
+}
+
+static void test_udp_tables( int family )
+{
+    DWORD i, err, count, size;
+    struct nsi_udp_endpoint_key *keys;
+    struct nsi_udp_endpoint_static *stat;
+    MIB_UDPTABLE_OWNER_MODULE *table;
+    MIB_UDP6TABLE_OWNER_MODULE *table6;
+    MIB_UDPROW_OWNER_MODULE *row;
+    MIB_UDP6ROW_OWNER_MODULE *row6;
+
+    winetest_push_context( "%s", family == AF_INET ? "AF_INET" : "AF_INET6" );
+
+    err = NsiAllocateAndGetTable( 1, &NPI_MS_UDP_MODULEID, NSI_UDP_ENDPOINT_TABLE, (void **)&keys, sizeof(*keys),
+                                  NULL, 0, NULL, 0, (void **)&stat, sizeof(*stat), &count, 0 );
+    ok( !err, "got %x\n", err );
+
+    size = 0;
+    err = GetExtendedUdpTable( NULL, &size, 0, family, UDP_TABLE_OWNER_MODULE, 0 );
+    size *= 2;
+    table = malloc( size );
+    table6 = (MIB_UDP6TABLE_OWNER_MODULE *)table;
+    err = GetExtendedUdpTable( table, &size, 0, family, UDP_TABLE_OWNER_MODULE, 0 );
+    ok( !err, "got %d\n", err );
+
+    row = table->table;
+    row6 = table6->table;
+
+    for (i = 0; i < count; i++)
+    {
+        if (keys[i].local.si_family != family) continue;
+
+        if (family == AF_INET)
+        {
+            ok( unstable( row->dwLocalAddr == keys[i].local.Ipv4.sin_addr.s_addr ), "%08x vs %08x\n",
+                row->dwLocalAddr, keys[i].local.Ipv4.sin_addr.s_addr );
+            ok( unstable( row->dwLocalPort == keys[i].local.Ipv4.sin_port ), "%d vs %d\n",
+                row->dwLocalPort, keys[i].local.Ipv4.sin_port );
+            ok( unstable( row->dwOwningPid == stat[i].pid ), "%x vs %x\n", row->dwOwningPid, stat[i].pid );
+            ok( unstable( row->liCreateTimestamp.QuadPart == stat[i].create_time ), "mismatch\n" );
+            ok( unstable( row->dwFlags == stat[i].flags ), "%x vs %x\n", row->dwFlags, stat[i].flags );
+            ok( unstable( row->OwningModuleInfo[0] == stat[i].mod_info ), "mismatch\n");
+            row++;
+        }
+        else if (family == AF_INET6)
+        {
+            ok( unstable( !memcmp( row6->ucLocalAddr, keys[i].local.Ipv6.sin6_addr.s6_addr, sizeof(IN6_ADDR) ) ),
+                "mismatch\n" );
+            ok( unstable( row6->dwLocalScopeId == keys[i].local.Ipv6.sin6_scope_id ), "%x vs %x\n",
+                row6->dwLocalScopeId, keys[i].local.Ipv6.sin6_scope_id );
+            ok( unstable( row6->dwLocalPort == keys[i].local.Ipv6.sin6_port ), "%d vs %d\n",
+                row6->dwLocalPort, keys[i].local.Ipv6.sin6_port );
+            ok( unstable( row6->dwOwningPid == stat[i].pid ), "%x vs %x\n", row6->dwOwningPid, stat[i].pid );
+            ok( unstable( row6->liCreateTimestamp.QuadPart == stat[i].create_time ), "mismatch\n" );
+            ok( unstable( row6->dwFlags == stat[i].flags ), "%x vs %x\n", row6->dwFlags, stat[i].flags );
+            ok( unstable( row6->OwningModuleInfo[0] == stat[i].mod_info ), "mismatch\n");
+            row6++;
+        }
+    }
+    free( table );
+    NsiFreeTable( keys, NULL, NULL, stat );
+    winetest_pop_context();
+}
+
 START_TEST( nsi )
 {
     test_nsi_api();
@@ -870,4 +1056,15 @@ START_TEST( nsi )
 
     test_tcp_stats( AF_INET );
     test_tcp_stats( AF_INET6 );
+    test_tcp_tables( AF_INET, TCP_TABLE_OWNER_MODULE_ALL );
+    test_tcp_tables( AF_INET, TCP_TABLE_OWNER_MODULE_CONNECTIONS );
+    test_tcp_tables( AF_INET, TCP_TABLE_OWNER_MODULE_LISTENER );
+    test_tcp_tables( AF_INET6, TCP_TABLE_OWNER_MODULE_ALL );
+    test_tcp_tables( AF_INET6, TCP_TABLE_OWNER_MODULE_CONNECTIONS );
+    test_tcp_tables( AF_INET6, TCP_TABLE_OWNER_MODULE_LISTENER );
+
+    test_udp_stats( AF_INET );
+    test_udp_stats( AF_INET6 );
+    test_udp_tables( AF_INET );
+    test_udp_tables( AF_INET6 );
 }

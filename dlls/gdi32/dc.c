@@ -55,7 +55,6 @@ static inline DC *get_dc_obj( HDC hdc )
     {
     case NTGDI_OBJ_DC:
     case NTGDI_OBJ_MEMDC:
-    case NTGDI_OBJ_METADC:
     case NTGDI_OBJ_ENHMETADC:
         return dc;
     default:
@@ -81,8 +80,8 @@ static void set_initial_dc_state( DC *dc )
     dc->attr->vport_ext.cy  = 1;
     dc->attr->miter_limit   = 10.0f; /* 10.0 is the default, from MSDN */
     dc->attr->layout        = 0;
-    dc->font_code_page      = CP_ACP;
     dc->attr->rop_mode      = R2_COPYPEN;
+    dc->attr->font_code_page   = CP_ACP;
     dc->attr->poly_fill_mode   = ALTERNATE;
     dc->attr->stretch_blt_mode = BLACKONWHITE;
     dc->attr->rel_abs_mode     = ABSOLUTE;
@@ -257,12 +256,17 @@ void update_dc( DC *dc )
 }
 
 
-/***********************************************************************
- *           DC_DeleteObject
- */
-static BOOL DC_DeleteObject( HGDIOBJ handle )
+static void set_bk_color( DC *dc, COLORREF color )
 {
-    return DeleteDC( handle );
+    PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetBkColor );
+    dc->attr->background_color = physdev->funcs->pSetBkColor( physdev, color );
+}
+
+
+static void set_text_color( DC *dc, COLORREF color )
+{
+    PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetTextColor );
+    dc->attr->text_color = physdev->funcs->pSetTextColor( physdev, color );
 }
 
 
@@ -275,8 +279,8 @@ void DC_InitDC( DC* dc )
 {
     PHYSDEV physdev = GET_DC_PHYSDEV( dc, pRealizeDefaultPalette );
     physdev->funcs->pRealizeDefaultPalette( physdev );
-    SetTextColor( dc->hSelf, dc->attr->text_color );
-    SetBkColor( dc->hSelf, dc->attr->background_color );
+    set_text_color( dc, dc->attr->text_color );
+    set_bk_color( dc, dc->attr->background_color );
     NtGdiSelectPen( dc->hSelf, dc->hPen );
     NtGdiSelectBrush( dc->hSelf, dc->hBrush );
     NtGdiSelectFont( dc->hSelf, dc->hFont );
@@ -381,104 +385,6 @@ void DC_UpdateXforms( DC *dc )
 
 
 /***********************************************************************
- *           nulldrv_RestoreDC
- */
-BOOL CDECL nulldrv_RestoreDC( PHYSDEV dev, INT level )
-{
-    DC *dcs, *first_dcs, *dc = get_nulldrv_dc( dev );
-    INT save_level;
-
-    /* find the state level to restore */
-
-    if (abs(level) > dc->saveLevel || level == 0) return FALSE;
-    if (level < 0) level = dc->saveLevel + level + 1;
-    first_dcs = dc->saved_dc;
-    for (dcs = first_dcs, save_level = dc->saveLevel; save_level > level; save_level--)
-        dcs = dcs->saved_dc;
-
-    /* restore the state */
-
-    if (!PATH_RestorePath( dc, dcs )) return FALSE;
-
-    dc->attr->layout     = dcs->attr->layout;
-    dc->attr->rop_mode   = dcs->attr->rop_mode;
-    dc->attr->poly_fill_mode   = dcs->attr->poly_fill_mode;
-    dc->attr->stretch_blt_mode = dcs->attr->stretch_blt_mode;
-    dc->attr->rel_abs_mode     = dcs->attr->rel_abs_mode;
-    dc->attr->background_mode  = dcs->attr->background_mode;
-    dc->attr->background_color = dcs->attr->background_color;
-    dc->attr->text_color       = dcs->attr->text_color;
-    dc->attr->brush_color      = dcs->attr->brush_color;
-    dc->attr->pen_color        = dcs->attr->pen_color;
-    dc->attr->brush_org        = dcs->attr->brush_org;
-    dc->attr->mapper_flags     = dcs->attr->mapper_flags;
-    dc->attr->text_align       = dcs->attr->text_align;
-    dc->attr->char_extra       = dcs->attr->char_extra;
-    dc->breakExtra       = dcs->breakExtra;
-    dc->breakRem         = dcs->breakRem;
-    dc->attr->map_mode         = dcs->attr->map_mode;
-    dc->attr->graphics_mode    = dcs->attr->graphics_mode;
-    dc->attr->cur_pos          = dcs->attr->cur_pos;
-    dc->attr->arc_direction    = dcs->attr->arc_direction;
-    dc->xformWorld2Wnd   = dcs->xformWorld2Wnd;
-    dc->xformWorld2Vport = dcs->xformWorld2Vport;
-    dc->xformVport2World = dcs->xformVport2World;
-    dc->vport2WorldValid = dcs->vport2WorldValid;
-    dc->attr->wnd_org          = dcs->attr->wnd_org;
-    dc->attr->wnd_ext          = dcs->attr->wnd_ext;
-    dc->attr->vport_org        = dcs->attr->vport_org;
-    dc->attr->vport_ext  = dcs->attr->vport_ext;
-    dc->attr->virtual_res      = dcs->attr->virtual_res;
-    dc->attr->virtual_size     = dcs->attr->virtual_size;
-
-    if (dcs->hClipRgn)
-    {
-        if (!dc->hClipRgn) dc->hClipRgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
-        NtGdiCombineRgn( dc->hClipRgn, dcs->hClipRgn, 0, RGN_COPY );
-    }
-    else
-    {
-        if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
-        dc->hClipRgn = 0;
-    }
-    if (dcs->hMetaRgn)
-    {
-        if (!dc->hMetaRgn) dc->hMetaRgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
-        NtGdiCombineRgn( dc->hMetaRgn, dcs->hMetaRgn, 0, RGN_COPY );
-    }
-    else
-    {
-        if (dc->hMetaRgn) DeleteObject( dc->hMetaRgn );
-        dc->hMetaRgn = 0;
-    }
-    DC_UpdateXforms( dc );
-    update_dc_clipping( dc );
-
-    NtGdiSelectBitmap( dev->hdc, dcs->hBitmap );
-    NtGdiSelectBrush( dev->hdc, dcs->hBrush );
-    NtGdiSelectFont( dev->hdc, dcs->hFont );
-    NtGdiSelectPen( dev->hdc, dcs->hPen );
-    SetBkColor( dev->hdc, dcs->attr->background_color);
-    SetTextColor( dev->hdc, dcs->attr->text_color);
-    GDISelectPalette( dev->hdc, dcs->hPalette, FALSE );
-
-    dc->saved_dc  = dcs->saved_dc;
-    dcs->saved_dc = 0;
-    dc->saveLevel = save_level - 1;
-
-    /* now destroy all the saved DCs */
-
-    while (first_dcs)
-    {
-        DC *next = first_dcs->saved_dc;
-        free_dc_state( first_dcs );
-        first_dcs = next;
-    }
-    return TRUE;
-}
-
-
-/***********************************************************************
  *           reset_dc_state
  */
 static BOOL reset_dc_state( HDC hdc )
@@ -488,15 +394,15 @@ static BOOL reset_dc_state( HDC hdc )
     if (!(dc = get_dc_ptr( hdc ))) return FALSE;
 
     set_initial_dc_state( dc );
-    SetBkColor( hdc, RGB( 255, 255, 255 ));
-    SetTextColor( hdc, RGB( 0, 0, 0 ));
+    set_bk_color( dc, RGB( 255, 255, 255 ));
+    set_text_color( dc, RGB( 0, 0, 0 ));
     NtGdiSelectBrush( hdc, GetStockObject( WHITE_BRUSH ));
     NtGdiSelectFont( hdc, GetStockObject( SYSTEM_FONT ));
     NtGdiSelectPen( hdc, GetStockObject( BLACK_PEN ));
     NtGdiSetVirtualResolution( hdc, 0, 0, 0, 0 );
     GDISelectPalette( hdc, GetStockObject( DEFAULT_PALETTE ), FALSE );
     NtGdiSetBoundsRect( hdc, NULL, DCB_DISABLE );
-    AbortPath( hdc );
+    NtGdiAbortPath( hdc );
 
     if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
     if (dc->hMetaRgn) DeleteObject( dc->hMetaRgn );
@@ -510,8 +416,39 @@ static BOOL reset_dc_state( HDC hdc )
         free_dc_state( dcs );
     }
     dc->saved_dc = NULL;
-    dc->saveLevel = 0;
+    dc->attr->save_level = 0;
     release_dc_ptr( dc );
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           DC_DeleteObject
+ */
+static BOOL DC_DeleteObject( HGDIOBJ handle )
+{
+    DC *dc;
+
+    TRACE( "%p\n", handle );
+
+    GDI_CheckNotLock();
+
+    if (!(dc = get_dc_ptr( handle ))) return FALSE;
+    if (dc->refcount != 1)
+    {
+        FIXME( "not deleting busy DC %p refcount %u\n", dc->hSelf, dc->refcount );
+        release_dc_ptr( dc );
+        return FALSE;
+    }
+
+    /* Call hook procedure to check whether is it OK to delete this DC */
+    if (dc->hookProc && !dc->hookProc( dc->hSelf, DCHC_DELETEDC, dc->dwHookData, 0 ))
+    {
+        release_dc_ptr( dc );
+        return TRUE;
+    }
+    reset_dc_state( handle );
+    free_dc_ptr( dc );
     return TRUE;
 }
 
@@ -573,30 +510,121 @@ INT WINAPI NtGdiSaveDC( HDC hdc )
 
     newdc->saved_dc = dc->saved_dc;
     dc->saved_dc = newdc;
-    ret = ++dc->saveLevel;
+    ret = ++dc->attr->save_level;
     release_dc_ptr( dc );
     return ret;
 }
 
 
 /***********************************************************************
- *           RestoreDC    (GDI32.@)
+ *           NtGdiRestoreDC    (win32u.@)
  */
-BOOL WINAPI RestoreDC( HDC hdc, INT level )
+BOOL WINAPI NtGdiRestoreDC( HDC hdc, INT level )
 {
-    PHYSDEV physdev;
-    DC *dc;
-    BOOL success = FALSE;
+    DC *dc, *dcs, *first_dcs;
+    INT save_level;
 
     TRACE("%p %d\n", hdc, level );
-    if ((dc = get_dc_ptr( hdc )))
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
+    update_dc( dc );
+
+    /* find the state level to restore */
+    if (abs(level) > dc->attr->save_level || level == 0)
     {
-        update_dc( dc );
-        physdev = GET_DC_PHYSDEV( dc, pRestoreDC );
-        success = physdev->funcs->pRestoreDC( physdev, level );
         release_dc_ptr( dc );
+        return FALSE;
     }
-    return success;
+
+    if (level < 0) level = dc->attr->save_level + level + 1;
+    first_dcs = dc->saved_dc;
+    for (dcs = first_dcs, save_level = dc->attr->save_level; save_level > level; save_level--)
+        dcs = dcs->saved_dc;
+
+    /* restore the state */
+
+    if (!PATH_RestorePath( dc, dcs ))
+    {
+        release_dc_ptr( dc );
+        return FALSE;
+    }
+
+    dc->attr->layout           = dcs->attr->layout;
+    dc->attr->rop_mode         = dcs->attr->rop_mode;
+    dc->attr->poly_fill_mode   = dcs->attr->poly_fill_mode;
+    dc->attr->stretch_blt_mode = dcs->attr->stretch_blt_mode;
+    dc->attr->rel_abs_mode     = dcs->attr->rel_abs_mode;
+    dc->attr->background_mode  = dcs->attr->background_mode;
+    dc->attr->background_color = dcs->attr->background_color;
+    dc->attr->text_color       = dcs->attr->text_color;
+    dc->attr->brush_color      = dcs->attr->brush_color;
+    dc->attr->pen_color        = dcs->attr->pen_color;
+    dc->attr->brush_org        = dcs->attr->brush_org;
+    dc->attr->mapper_flags     = dcs->attr->mapper_flags;
+    dc->attr->text_align       = dcs->attr->text_align;
+    dc->attr->char_extra       = dcs->attr->char_extra;
+    dc->attr->map_mode         = dcs->attr->map_mode;
+    dc->attr->graphics_mode    = dcs->attr->graphics_mode;
+    dc->attr->cur_pos          = dcs->attr->cur_pos;
+    dc->attr->arc_direction    = dcs->attr->arc_direction;
+    dc->attr->wnd_org          = dcs->attr->wnd_org;
+    dc->attr->wnd_ext          = dcs->attr->wnd_ext;
+    dc->attr->vport_org        = dcs->attr->vport_org;
+    dc->attr->vport_ext        = dcs->attr->vport_ext;
+    dc->attr->virtual_res      = dcs->attr->virtual_res;
+    dc->attr->virtual_size     = dcs->attr->virtual_size;
+
+    dc->breakExtra       = dcs->breakExtra;
+    dc->breakRem         = dcs->breakRem;
+    dc->xformWorld2Wnd   = dcs->xformWorld2Wnd;
+    dc->xformWorld2Vport = dcs->xformWorld2Vport;
+    dc->xformVport2World = dcs->xformVport2World;
+    dc->vport2WorldValid = dcs->vport2WorldValid;
+
+    if (dcs->hClipRgn)
+    {
+        if (!dc->hClipRgn) dc->hClipRgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+        NtGdiCombineRgn( dc->hClipRgn, dcs->hClipRgn, 0, RGN_COPY );
+    }
+    else
+    {
+        if (dc->hClipRgn) NtGdiDeleteObjectApp( dc->hClipRgn );
+        dc->hClipRgn = 0;
+    }
+    if (dcs->hMetaRgn)
+    {
+        if (!dc->hMetaRgn) dc->hMetaRgn = NtGdiCreateRectRgn( 0, 0, 0, 0 );
+        NtGdiCombineRgn( dc->hMetaRgn, dcs->hMetaRgn, 0, RGN_COPY );
+    }
+    else
+    {
+        if (dc->hMetaRgn) NtGdiDeleteObjectApp( dc->hMetaRgn );
+        dc->hMetaRgn = 0;
+    }
+    DC_UpdateXforms( dc );
+    update_dc_clipping( dc );
+
+    NtGdiSelectBitmap( hdc, dcs->hBitmap );
+    NtGdiSelectBrush( hdc, dcs->hBrush );
+    NtGdiSelectFont( hdc, dcs->hFont );
+    NtGdiSelectPen( hdc, dcs->hPen );
+    set_bk_color( dc, dcs->attr->background_color);
+    set_text_color( dc, dcs->attr->text_color);
+    GDISelectPalette( hdc, dcs->hPalette, FALSE );
+
+    dc->saved_dc  = dcs->saved_dc;
+    dcs->saved_dc = 0;
+    dc->attr->save_level = save_level - 1;
+
+    /* now destroy all the saved DCs */
+
+    while (first_dcs)
+    {
+        DC *next = first_dcs->saved_dc;
+        free_dc_state( first_dcs );
+        first_dcs = next;
+    }
+    release_dc_ptr( dc );
+    return TRUE;
 }
 
 
@@ -731,48 +759,18 @@ HDC WINAPI NtGdiCreateCompatibleDC( HDC hdc )
 
 
 /***********************************************************************
- *           DeleteDC    (GDI32.@)
+ *           NtGdiResetDC    (win32u.@)
  */
-BOOL WINAPI DeleteDC( HDC hdc )
-{
-    DC * dc;
-
-    TRACE("%p\n", hdc );
-
-    GDI_CheckNotLock();
-
-    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
-    if (dc->refcount != 1)
-    {
-        FIXME( "not deleting busy DC %p refcount %u\n", dc->hSelf, dc->refcount );
-        release_dc_ptr( dc );
-        return FALSE;
-    }
-
-    /* Call hook procedure to check whether is it OK to delete this DC */
-    if (dc->hookProc && !dc->hookProc( dc->hSelf, DCHC_DELETEDC, dc->dwHookData, 0 ))
-    {
-        release_dc_ptr( dc );
-        return TRUE;
-    }
-    reset_dc_state( hdc );
-    free_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           ResetDCW    (GDI32.@)
- */
-HDC WINAPI ResetDCW( HDC hdc, const DEVMODEW *devmode )
+BOOL WINAPI NtGdiResetDC( HDC hdc, const DEVMODEW *devmode, BOOL *banding,
+                          DRIVER_INFO_2W *driver_info, void *dev )
 {
     DC *dc;
-    HDC ret = 0;
+    BOOL ret = FALSE;
 
     if ((dc = get_dc_ptr( hdc )))
     {
         PHYSDEV physdev = GET_DC_PHYSDEV( dc, pResetDC );
-        ret = physdev->funcs->pResetDC( physdev, devmode );
+        ret = physdev->funcs->pResetDC( physdev, devmode ) != 0;
         if (ret)  /* reset the visible region */
         {
             dc->dirty = 0;
@@ -780,7 +778,7 @@ HDC WINAPI ResetDCW( HDC hdc, const DEVMODEW *devmode )
             dc->attr->vis_rect.top    = 0;
             dc->attr->vis_rect.right  = GetDeviceCaps( hdc, DESKTOPHORZRES );
             dc->attr->vis_rect.bottom = GetDeviceCaps( hdc, DESKTOPVERTRES );
-            if (dc->hVisRgn) DeleteObject( dc->hVisRgn );
+            if (dc->hVisRgn) NtGdiDeleteObjectApp( dc->hVisRgn );
             dc->hVisRgn = 0;
             update_dc_clipping( dc );
         }
@@ -809,53 +807,12 @@ INT WINAPI NtGdiGetDeviceCaps( HDC hdc, INT cap )
 
 
 /***********************************************************************
- *           SetBkColor    (GDI32.@)
- */
-COLORREF WINAPI SetBkColor( HDC hdc, COLORREF color )
-{
-    COLORREF ret = CLR_INVALID;
-    DC * dc = get_dc_ptr( hdc );
-
-    TRACE("hdc=%p color=0x%08x\n", hdc, color);
-
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetBkColor );
-        ret = dc->attr->background_color;
-        dc->attr->background_color = physdev->funcs->pSetBkColor( physdev, color );
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *           SetTextColor    (GDI32.@)
- */
-COLORREF WINAPI SetTextColor( HDC hdc, COLORREF color )
-{
-    COLORREF ret = CLR_INVALID;
-    DC * dc = get_dc_ptr( hdc );
-
-    TRACE(" hdc=%p color=0x%08x\n", hdc, color);
-
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetTextColor );
-        ret = dc->attr->text_color;
-        dc->attr->text_color = physdev->funcs->pSetTextColor( physdev, color );
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
  *           NtGdiGetAndSetDCDword    (win32u.@)
  */
 BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *prev_value )
 {
-    BOOL ret;
+    PHYSDEV physdev;
+    BOOL ret = TRUE;
     DC *dc;
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
@@ -865,6 +822,30 @@ BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *pre
     case NtGdiSetMapMode:
         *prev_value = dc->attr->map_mode;
         ret = set_map_mode( dc, value );
+        break;
+
+    case NtGdiSetBkColor:
+        *prev_value = dc->attr->background_color;
+        set_bk_color( dc, value );
+        break;
+
+    case NtGdiSetTextColor:
+        *prev_value = dc->attr->text_color;
+        set_text_color( dc, value );
+        break;
+
+    case NtGdiSetDCBrushColor:
+        physdev = GET_DC_PHYSDEV( dc, pSetDCBrushColor );
+        *prev_value = dc->attr->brush_color;
+        value = physdev->funcs->pSetDCBrushColor( physdev, value );
+        if (value != CLR_INVALID) dc->attr->brush_color = value;
+        break;
+
+    case NtGdiSetDCPenColor:
+        physdev = GET_DC_PHYSDEV( dc, pSetDCPenColor );
+        *prev_value = dc->attr->pen_color;
+        value = physdev->funcs->pSetDCPenColor( physdev, value );
+        if (value != CLR_INVALID) dc->attr->pen_color = value;
         break;
 
     default:
@@ -1005,7 +986,7 @@ BOOL WINAPI CombineTransform( LPXFORM xformResult, const XFORM *xform1,
 
 
 /***********************************************************************
- *           SetDCHook   (GDI32.@)
+ *           SetDCHook   (win32u.@)
  *
  * Note: this doesn't exist in Win32, we add it here because user32 needs it.
  */
@@ -1023,7 +1004,7 @@ BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD_PTR dwHookData )
 
 
 /***********************************************************************
- *           GetDCHook   (GDI32.@)
+ *           GetDCHook   (win32u.@)
  *
  * Note: this doesn't exist in Win32, we add it here because user32 needs it.
  */
@@ -1041,7 +1022,7 @@ DWORD_PTR WINAPI GetDCHook( HDC hdc, DCHOOKPROC *proc )
 
 
 /***********************************************************************
- *           SetHookFlags   (GDI32.@)
+ *           SetHookFlags   (win32u.@)
  *
  * Note: this doesn't exist in Win32, we add it here because user32 needs it.
  */
@@ -1303,61 +1284,10 @@ DWORD WINAPI NtGdiSetLayout( HDC hdc, LONG wox, DWORD layout )
             if (layout & LAYOUT_RTL) dc->attr->map_mode = MM_ANISOTROPIC;
             DC_UpdateXforms( dc );
         }
+        release_dc_ptr( dc );
     }
 
     TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, old_layout, layout);
 
     return old_layout;
-}
-
-/***********************************************************************
- *           SetDCBrushColor    (GDI32.@)
- */
-COLORREF WINAPI SetDCBrushColor(HDC hdc, COLORREF crColor)
-{
-    DC *dc;
-    COLORREF oldClr = CLR_INVALID;
-
-    TRACE("hdc(%p) crColor(%08x)\n", hdc, crColor);
-
-    dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetDCBrushColor );
-        crColor = physdev->funcs->pSetDCBrushColor( physdev, crColor );
-        if (crColor != CLR_INVALID)
-        {
-            oldClr = dc->attr->brush_color;
-            dc->attr->brush_color = crColor;
-        }
-        release_dc_ptr( dc );
-    }
-
-    return oldClr;
-}
-
-/***********************************************************************
- *           SetDCPenColor    (GDI32.@)
- */
-COLORREF WINAPI SetDCPenColor(HDC hdc, COLORREF crColor)
-{
-    DC *dc;
-    COLORREF oldClr = CLR_INVALID;
-
-    TRACE("hdc(%p) crColor(%08x)\n", hdc, crColor);
-
-    dc = get_dc_ptr( hdc );
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetDCPenColor );
-        crColor = physdev->funcs->pSetDCPenColor( physdev, crColor );
-        if (crColor != CLR_INVALID)
-        {
-            oldClr = dc->attr->pen_color;
-            dc->attr->pen_color = crColor;
-        }
-        release_dc_ptr( dc );
-    }
-
-    return oldClr;
 }

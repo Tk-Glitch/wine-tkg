@@ -107,14 +107,20 @@ static const char so_dir[] = "";
 
 void     (WINAPI *pDbgUiRemoteBreakin)( void *arg ) = NULL;
 NTSTATUS (WINAPI *pKiRaiseUserExceptionDispatcher)(void) = NULL;
-void     (WINAPI *pKiUserApcDispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PNTAPCFUNC) = NULL;
 NTSTATUS (WINAPI *pKiUserExceptionDispatcher)(EXCEPTION_RECORD*,CONTEXT*) = NULL;
+void     (WINAPI *pKiUserApcDispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PNTAPCFUNC) = NULL;
+void     (WINAPI *pKiUserCallbackDispatcher)(ULONG,void*,ULONG) = NULL;
 void     (WINAPI *pLdrInitializeThunk)(CONTEXT*,void**,ULONG_PTR,ULONG_PTR) = NULL;
 void     (WINAPI *pRtlUserThreadStart)( PRTL_THREAD_START_ROUTINE entry, void *arg ) = NULL;
 void     (WINAPI *p__wine_ctrl_routine)(void*);
 SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock = NULL;
 
 static NTSTATUS (CDECL *p__wine_set_unix_funcs)( int version, const struct unix_funcs *funcs );
+
+extern SYSTEM_SERVICE_TABLE __wine_syscall_table DECLSPEC_HIDDEN;
+
+SYSTEM_SERVICE_TABLE KeServiceDescriptorTable[4];
+
 
 #ifdef __GNUC__
 static void fatal_error( const char *err, ... ) __attribute__((noreturn, format(printf,1,2)));
@@ -834,6 +840,7 @@ static void load_ntdll_functions( HMODULE module )
     GET_FUNC( KiRaiseUserExceptionDispatcher );
     GET_FUNC( KiUserExceptionDispatcher );
     GET_FUNC( KiUserApcDispatcher );
+    GET_FUNC( KiUserCallbackDispatcher );
     GET_FUNC( LdrInitializeThunk );
     GET_FUNC( LdrSystemDllInitBlock );
     GET_FUNC( RtlUserThreadStart );
@@ -1569,7 +1576,11 @@ static NTSTATUS open_main_image( WCHAR *image, void **module, SECTION_IMAGE_INFO
         *module = NULL;
         status = NtMapViewOfSection( mapping, NtCurrentProcess(), module, 0, 0, NULL, &size,
                                      ViewShare, 0, PAGE_EXECUTE_READ );
-        if (!status) NtQuerySection( mapping, SectionImageInformation, info, sizeof(*info), NULL );
+        if (!status)
+        {
+            NtQuerySection( mapping, SectionImageInformation, info, sizeof(*info), NULL );
+            if (info->u.s.ComPlusNativeReady) info->Machine = native_machine;
+        }
         NtClose( mapping );
     }
     else if (status == STATUS_INVALID_IMAGE_NOT_MZ && loadorder != LO_NATIVE)
@@ -1729,7 +1740,8 @@ NTSTATUS get_builtin_init_funcs( void *handle, void **funcs, SIZE_T len, SIZE_T 
 #ifdef __FreeBSD__
         /* On older FreeBSD versions, l_addr was the absolute load address, now it's the relocation offset. */
         if (offsetof(struct link_map, l_addr) == 0)
-            if (!get_relocbase(map->l_addr, &relocbase)) return;
+            if (!get_relocbase(map->l_addr, &relocbase))
+                return STATUS_NOT_SUPPORTED;
 #endif
         switch (dyn->d_tag)
         {
@@ -1957,6 +1969,7 @@ static void start_main_thread(void)
     NtCreateKeyedEvent( &keyed_event, GENERIC_READ | GENERIC_WRITE, NULL, 0 );
     load_ntdll();
     if (main_image_info.Machine != current_machine) load_wow64_ntdll( main_image_info.Machine );
+    KeServiceDescriptorTable[0] = __wine_syscall_table;
     status = p__wine_set_unix_funcs( NTDLL_UNIXLIB_VERSION, &unix_funcs );
     if (status == STATUS_REVISION_MISMATCH)
     {

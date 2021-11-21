@@ -87,6 +87,7 @@ static const SIZE_T teb_size = 0x3800;  /* TEB64 + TEB32 + debug info */
 static const SIZE_T signal_stack_mask = 0xffff;
 static const SIZE_T signal_stack_size = 0x10000 - 0x3800;
 static const SIZE_T kernel_stack_size = 0x20000;
+static const SIZE_T min_kernel_stack  = 0x2000;
 static const LONG teb_offset = 0x2000;
 
 #define FILE_WRITE_TO_END_OF_FILE      ((LONGLONG)-1)
@@ -95,8 +96,9 @@ static const LONG teb_offset = 0x2000;
 /* callbacks to PE ntdll from the Unix side */
 extern void     (WINAPI *pDbgUiRemoteBreakin)( void *arg ) DECLSPEC_HIDDEN;
 extern NTSTATUS (WINAPI *pKiRaiseUserExceptionDispatcher)(void) DECLSPEC_HIDDEN;
-extern void     (WINAPI *pKiUserApcDispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PNTAPCFUNC) DECLSPEC_HIDDEN;
 extern NTSTATUS (WINAPI *pKiUserExceptionDispatcher)(EXCEPTION_RECORD*,CONTEXT*) DECLSPEC_HIDDEN;
+extern void     (WINAPI *pKiUserApcDispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PNTAPCFUNC) DECLSPEC_HIDDEN;
+extern void     (WINAPI *pKiUserCallbackDispatcher)(ULONG,void*,ULONG) DECLSPEC_HIDDEN;
 extern void     (WINAPI *pLdrInitializeThunk)(CONTEXT*,void**,ULONG_PTR,ULONG_PTR) DECLSPEC_HIDDEN;
 extern void     (WINAPI *pRtlUserThreadStart)( PRTL_THREAD_START_ROUTINE entry, void *arg ) DECLSPEC_HIDDEN;
 extern void     (WINAPI *p__wine_ctrl_routine)(void *) DECLSPEC_HIDDEN;
@@ -256,7 +258,6 @@ extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE ent
 extern void DECLSPEC_NORETURN signal_exit_thread( int status, void (*func)(int), TEB *teb ) DECLSPEC_HIDDEN;
 extern void __wine_syscall_dispatcher(void) DECLSPEC_HIDDEN;
 extern void WINAPI DECLSPEC_NORETURN __wine_syscall_dispatcher_return( void *frame, ULONG_PTR retval ) DECLSPEC_HIDDEN;
-extern unsigned int __wine_syscall_flags DECLSPEC_HIDDEN;
 extern NTSTATUS signal_set_full_context( CONTEXT *context ) DECLSPEC_HIDDEN;
 extern NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size ) DECLSPEC_HIDDEN;
 extern NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size ) DECLSPEC_HIDDEN;

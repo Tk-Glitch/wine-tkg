@@ -39,6 +39,7 @@ static NTSTATUS  (WINAPI *pNtGetContextThread)(HANDLE,CONTEXT*);
 static NTSTATUS  (WINAPI *pNtSetContextThread)(HANDLE,CONTEXT*);
 static NTSTATUS  (WINAPI *pNtQueueApcThread)(HANDLE handle, PNTAPCFUNC func,
         ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3);
+static NTSTATUS  (WINAPI *pNtCallbackReturn)( void *ret_ptr, ULONG ret_len, NTSTATUS status );
 static NTSTATUS  (WINAPI *pRtlRaiseException)(EXCEPTION_RECORD *rec);
 static PVOID     (WINAPI *pRtlUnwind)(PVOID, PVOID, PEXCEPTION_RECORD, PVOID);
 static VOID      (WINAPI *pRtlCaptureContext)(CONTEXT*);
@@ -469,7 +470,7 @@ static LONG CALLBACK rtlraiseexception_vectored_handler(EXCEPTION_POINTERS *Exce
     if(rec->ExceptionCode == EXCEPTION_BREAKPOINT)
     {
         ok(context->Eip == (DWORD)code_mem + 0xa ||
-           broken(context->Eip == (DWORD)code_mem + 0xb) /* win2k3 */ ||
+           (is_wow64 && context->Eip == (DWORD)code_mem + 0xb) ||
            broken(context->Eip == (DWORD)code_mem + 0xd) /* w2008 */,
            "Eip at %x instead of %x or %x\n", context->Eip,
            (DWORD)code_mem + 0xa, (DWORD)code_mem + 0xb);
@@ -506,7 +507,7 @@ static DWORD rtlraiseexception_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTR
     if(rec->ExceptionCode == EXCEPTION_BREAKPOINT)
     {
         ok(context->Eip == (DWORD)code_mem + 0xa ||
-           broken(context->Eip == (DWORD)code_mem + 0xb) /* win2k3 */ ||
+           (is_wow64 && context->Eip == (DWORD)code_mem + 0xb) ||
            broken(context->Eip == (DWORD)code_mem + 0xd) /* w2008 */,
            "Eip at %x instead of %x or %x\n", context->Eip,
            (DWORD)code_mem + 0xa, (DWORD)code_mem + 0xb);
@@ -1176,7 +1177,7 @@ static void test_debugger(DWORD cont_status)
                         if (de.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT)
                         {
                             ok((char *)ctx.Eip == (char *)code_mem_address + 0xa ||
-                               broken(is_wow64 && (char *)ctx.Eip == (char *)code_mem_address + 0xb) ||
+                               (is_wow64 && (char *)ctx.Eip == (char *)code_mem_address + 0xb) ||
                                broken((char *)ctx.Eip == (char *)code_mem_address + 0xd) /* w2008 */,
                                "Eip at 0x%x instead of %p\n",
                                 ctx.Eip, (char *)code_mem_address + 0xa);
@@ -1331,8 +1332,11 @@ static DWORD simd_fault_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_R
                 "exception code: %#x, should be %#x\n",
                 rec->ExceptionCode,  STATUS_FLOAT_MULTIPLE_TRAPS);
             ok( rec->NumberParameters == is_wow64 ? 2 : 1, "# of params: %i\n", rec->NumberParameters);
-            if (rec->NumberParameters >= 1)
-                ok( rec->ExceptionInformation[0] == 0, "param #1: %lx, should be 0\n", rec->ExceptionInformation[0]);
+            ok( rec->ExceptionInformation[0] == 0, "param #1: %lx, should be 0\n", rec->ExceptionInformation[0]);
+            if (rec->NumberParameters == 2)
+                ok( rec->ExceptionInformation[1] == ((XSAVE_FORMAT *)context->ExtendedRegisters)->MxCsr,
+                    "param #1: %lx / %x\n", rec->ExceptionInformation[1],
+                    ((XSAVE_FORMAT *)context->ExtendedRegisters)->MxCsr);
         }
         context->Eip += 3; /* skip divps */
     }
@@ -1475,8 +1479,7 @@ static void test_fpu_exceptions(void)
     run_exception_test(fpu_exception_handler, &info, fpu_exception_test_ie, sizeof(fpu_exception_test_ie), 0);
     ok(info.exception_code == EXCEPTION_FLT_STACK_CHECK,
             "Got exception code %#x, expected EXCEPTION_FLT_STACK_CHECK\n", info.exception_code);
-    ok(info.exception_offset == 0x19 ||
-       broken( info.exception_offset == info.eip_offset ),
+    ok(info.exception_offset == 0x19 || info.exception_offset == info.eip_offset,
        "Got exception offset %#x, expected 0x19\n", info.exception_offset);
     ok(info.eip_offset == 0x1b, "Got EIP offset %#x, expected 0x1b\n", info.eip_offset);
 
@@ -1484,8 +1487,7 @@ static void test_fpu_exceptions(void)
     run_exception_test(fpu_exception_handler, &info, fpu_exception_test_de, sizeof(fpu_exception_test_de), 0);
     ok(info.exception_code == EXCEPTION_FLT_DIVIDE_BY_ZERO,
             "Got exception code %#x, expected EXCEPTION_FLT_DIVIDE_BY_ZERO\n", info.exception_code);
-    ok(info.exception_offset == 0x17 ||
-       broken( info.exception_offset == info.eip_offset ),
+    ok(info.exception_offset == 0x17 || info.exception_offset == info.eip_offset,
        "Got exception offset %#x, expected 0x17\n", info.exception_offset);
     ok(info.eip_offset == 0x19, "Got EIP offset %#x, expected 0x19\n", info.eip_offset);
 }
@@ -3378,7 +3380,7 @@ static void test_exceptions(void)
     __asm__ volatile( "movw %%ss,%0" : "=g" (ss) );
     res = pNtGetContextThread( GetCurrentThread(), &ctx );
     ok( res == STATUS_SUCCESS, "NtGetContextThread failed with %x\n", res );
-    ok( ctx.SegDs == ds, "wrong ds %08x / %08x\n", ctx.SegDs, ds );
+    ok( ctx.SegDs == ds, "wrong ds %04x / %04x\n", ctx.SegDs, ds );
     ok( ctx.SegEs == es, "wrong es %04x / %04x\n", ctx.SegEs, es );
     ok( ctx.SegFs == fs, "wrong fs %04x / %04x\n", ctx.SegFs, fs );
     ok( ctx.SegGs == gs, "wrong gs %04x / %04x\n", ctx.SegGs, gs );
@@ -3414,14 +3416,10 @@ static DWORD WINAPI simd_fault_handler( EXCEPTION_RECORD *rec, ULONG64 frame,
             ULONG expect = *stage == 2 ? EXCEPTION_FLT_DIVIDE_BY_ZERO : EXCEPTION_FLT_INVALID_OPERATION;
             ok( rec->ExceptionCode == expect, "exception code: %#x, should be %#x\n",
                 rec->ExceptionCode, expect );
-            todo_wine
             ok( rec->NumberParameters == 2, "# of params: %i, should be 2\n", rec->NumberParameters);
-            if (rec->NumberParameters == 2)
-            {
-                /* no idea what these mean */
-                ok( rec->ExceptionInformation[0] == 0, "param #0: %lx\n", rec->ExceptionInformation[0]);
-                ok( rec->ExceptionInformation[1] != 0, "param #1: %lx\n", rec->ExceptionInformation[1]);
-            }
+            ok( rec->ExceptionInformation[0] == 0, "param #0: %lx\n", rec->ExceptionInformation[0]);
+            ok( rec->ExceptionInformation[1] == context->MxCsr, "param #1: %lx / %lx\n",
+                rec->ExceptionInformation[1], context->MxCsr);
         }
         context->Rip += 3; /* skip divps */
     }
@@ -7251,6 +7249,12 @@ static void test_user_apc(void)
     ok(test_apc_called, "Test user APC was not called.\n");
 }
 
+static void test_user_callback(void)
+{
+    NTSTATUS status = pNtCallbackReturn( NULL, 0, STATUS_SUCCESS );
+    ok( status == STATUS_NO_CALLBACK_ACTIVE, "failed %x\n", status );
+}
+
 static DWORD WINAPI suspend_thread_test( void *arg )
 {
     HANDLE event = arg;
@@ -9134,6 +9138,7 @@ START_TEST(exception)
     X(NtGetContextThread);
     X(NtSetContextThread);
     X(NtQueueApcThread);
+    X(NtCallbackReturn);
     X(NtReadVirtualMemory);
     X(NtClose);
     X(RtlUnwind);
@@ -9328,6 +9333,7 @@ START_TEST(exception)
     NtCurrentTeb()->Peb->BeingDebugged = 0;
 
     test_user_apc();
+    test_user_callback();
     test_vectored_continue_handler();
     test_suspend_thread();
     test_suspend_process();

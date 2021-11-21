@@ -645,16 +645,6 @@ static int kqueue_fd = -1;
 
 static inline void init_epoll(void)
 {
-#ifdef __APPLE__ /* kqueue support is broken in Mac OS < 10.5 */
-    int mib[2];
-    char release[32];
-    size_t len = sizeof(release);
-
-    mib[0] = CTL_KERN;
-    mib[1] = KERN_OSRELEASE;
-    if (sysctl( mib, 2, release, &len, NULL, 0 ) == -1) return;
-    if (atoi(release) < 9) return;
-#endif
     kqueue_fd = kqueue();
 }
 
@@ -2239,6 +2229,19 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
         free( closed_fd );
         fd->cacheable = 1;
     }
+
+#ifdef HAVE_POSIX_FADVISE
+    switch (options & (FILE_SEQUENTIAL_ONLY | FILE_RANDOM_ACCESS))
+    {
+    case FILE_SEQUENTIAL_ONLY:
+        posix_fadvise( fd->unix_fd, 0, 0, POSIX_FADV_SEQUENTIAL );
+        break;
+    case FILE_RANDOM_ACCESS:
+        posix_fadvise( fd->unix_fd, 0, 0, POSIX_FADV_RANDOM );
+        break;
+    }
+#endif
+
     if (root_fd != -1) fchdir( server_dir_fd ); /* go back to the server dir */
     return fd;
 

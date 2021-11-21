@@ -28,8 +28,9 @@
 ALL_SYSCALLS
 #undef SYSCALL_ENTRY
 
-void * WINAPI Wow64AllocateTemp( SIZE_T size ) DECLSPEC_HIDDEN;
-void   WINAPI Wow64ApcRoutine( ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3, CONTEXT *context ) DECLSPEC_HIDDEN;
+void * WINAPI Wow64AllocateTemp( SIZE_T size );
+void   WINAPI Wow64ApcRoutine( ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3, CONTEXT *context );
+void   WINAPI Wow64PassExceptionToGuest( EXCEPTION_POINTERS *ptrs );
 
 extern void init_file_redirects(void) DECLSPEC_HIDDEN;
 extern BOOL get_file_redirect( OBJECT_ATTRIBUTES *attr ) DECLSPEC_HIDDEN;
@@ -37,6 +38,7 @@ extern BOOL get_file_redirect( OBJECT_ATTRIBUTES *attr ) DECLSPEC_HIDDEN;
 extern USHORT native_machine DECLSPEC_HIDDEN;
 extern USHORT current_machine DECLSPEC_HIDDEN;
 extern ULONG_PTR args_alignment DECLSPEC_HIDDEN;
+extern SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock DECLSPEC_HIDDEN;
 
 struct object_attr64
 {

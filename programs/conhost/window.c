@@ -429,7 +429,7 @@ static void fill_mem_dc( struct console *console, const RECT *update )
 /* set a new position for the cursor */
 static void update_window_cursor( struct console *console )
 {
-    if (console->win != GetFocus() || !console->active->cursor_visible) return;
+    if (!console->active->cursor_visible || console->win != GetFocus()) return;
 
     SetCaretPos( (get_bounded_cursor_x( console->active ) - console->active->win.left) * console->active->font.width,
                  (console->active->cursor_y - console->active->win.top)  * console->active->font.height );
@@ -683,9 +683,9 @@ static BOOL set_console_font( struct console *console, const LOGFONTW *logfont )
     if (console->window->font && logfont->lfHeight == console->active->font.height &&
         logfont->lfWeight == console->active->font.weight &&
         !logfont->lfItalic && !logfont->lfUnderline && !logfont->lfStrikeOut &&
-        console->active->font.face_len == wcslen( logfont->lfFaceName ) * sizeof(WCHAR) &&
+        console->active->font.face_len == wcslen( logfont->lfFaceName ) &&
         !memcmp( logfont->lfFaceName, console->active->font.face_name,
-                 console->active->font.face_len ))
+                 console->active->font.face_len * sizeof(WCHAR) ))
     {
         TRACE( "equal to current\n" );
         return TRUE;
@@ -708,9 +708,9 @@ static BOOL set_console_font( struct console *console, const LOGFONTW *logfont )
     font_info->weight = tm.tmWeight;
 
     free( font_info->face_name );
-    font_info->face_len = wcslen( logfont->lfFaceName ) * sizeof(WCHAR);
-    font_info->face_name = malloc( font_info->face_len );
-    memcpy( font_info->face_name, logfont->lfFaceName, font_info->face_len );
+    font_info->face_len = wcslen( logfont->lfFaceName );
+    font_info->face_name = malloc( font_info->face_len * sizeof(WCHAR) );
+    memcpy( font_info->face_name, logfont->lfFaceName, font_info->face_len * sizeof(WCHAR) );
 
     /* FIXME: use maximum width for DBCS codepages since some chars take two cells */
     if (GetCPInfo( console->output_cp, &cpinfo ) && cpinfo.MaxCharSize > 1)
@@ -819,9 +819,10 @@ static int WINAPI get_first_font_sub_enum( const LOGFONTW *lf, const TEXTMETRICW
             load_config( fc->console->window->config_key, &config );
             config.cell_width  = fc->console->active->font.width;
             config.cell_height = fc->console->active->font.height;
-            fc->console->active->font.face_len = wcslen( config.face_name ) * sizeof(WCHAR);
-            memcpy( fc->console->active->font.face_name, config.face_name,
-                    fc->console->active->font.face_len );
+            memcpy( config.face_name, fc->console->active->font.face_name,
+                    fc->console->active->font.face_len * sizeof(WCHAR) );
+            config.face_name[fc->console->active->font.face_len] = 0;
+
             /* Force also its writing back to the registry so that we can get it
              * the next time.
              */
@@ -1895,8 +1896,9 @@ static void apply_config( struct console *console, const struct console_config *
         console->active->font.height != config->cell_height ||
         console->active->font.weight != config->font_weight ||
         console->active->font.pitch_family != config->font_pitch_family ||
-        console->active->font.face_len != wcslen( config->face_name ) * sizeof(WCHAR) ||
-        memcmp( console->active->font.face_name, config->face_name, console->active->font.face_len ))
+        console->active->font.face_len != wcslen( config->face_name ) ||
+        memcmp( console->active->font.face_name, config->face_name,
+                console->active->font.face_len * sizeof(WCHAR) ))
     {
         update_console_font( console, config->face_name, config->cell_height, config->font_weight );
     }
@@ -1930,7 +1932,7 @@ static void current_config( struct console *console, struct console_config *conf
     config->cell_height = console->active->font.height;
     config->font_weight = console->active->font.weight;
     config->font_pitch_family = console->active->font.pitch_family;
-    len = min( ARRAY_SIZE(config->face_name) - 1, console->active->font.face_len / sizeof(WCHAR) );
+    len = min( ARRAY_SIZE(config->face_name) - 1, console->active->font.face_len );
     if (len) memcpy( config->face_name, console->active->font.face_name, len * sizeof(WCHAR) );
     config->face_name[len] = 0;
 
@@ -2143,15 +2145,18 @@ static LRESULT window_create( HWND hwnd, const CREATESTRUCTW *create )
     SetWindowLongPtrW( hwnd, 0, (DWORD_PTR)console );
     console->win = hwnd;
 
-    sys_menu = GetSystemMenu( hwnd, FALSE );
-    if (!sys_menu) return 0;
-    console->window->popup_menu = CreatePopupMenu();
-    if (!console->window->popup_menu) return 0;
+    if (console->window)
+    {
+        sys_menu = GetSystemMenu( hwnd, FALSE );
+        if (!sys_menu) return 0;
+        console->window->popup_menu = CreatePopupMenu();
+        if (!console->window->popup_menu) return 0;
 
-    fill_menu( sys_menu, TRUE );
-    fill_menu( console->window->popup_menu, FALSE );
+        fill_menu( sys_menu, TRUE );
+        fill_menu( console->window->popup_menu, FALSE );
 
-    console->window->mem_dc = CreateCompatibleDC( 0 );
+        console->window->mem_dc = CreateCompatibleDC( 0 );
+    }
     return 0;
 }
 
@@ -2171,13 +2176,15 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
 
     case WM_TIMER:
     case WM_UPDATE_CONFIG:
-        if (console->window->update_state == UPDATE_PENDING)
+        if (console->window && console->window->update_state == UPDATE_PENDING)
             update_window( console );
         break;
 
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
+
+            if (!console->window) break;
 
             BeginPaint( console->win, &ps );
             BitBlt( ps.hdc, 0, 0,
@@ -2193,6 +2200,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         }
 
     case WM_SHOWWINDOW:
+        if (!console->window) break;
         if (wparam)
             update_window( console );
         else
@@ -2204,7 +2212,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
 
     case WM_KEYDOWN:
     case WM_KEYUP:
-        if (console->window->in_selection)
+        if (console->window && console->window->in_selection)
             handle_selection_key( console, msg == WM_KEYDOWN, wparam, lparam );
         else
             record_key_input( console, msg == WM_KEYDOWN, wparam, lparam );
@@ -2216,7 +2224,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         break;
 
     case WM_LBUTTONDOWN:
-        if (console->window->quick_edit || console->window->in_selection)
+        if (console->window && (console->window->quick_edit || console->window->in_selection))
         {
             if (console->window->in_selection)
                 update_selection( console, 0 );
@@ -2241,7 +2249,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         break;
 
     case WM_MOUSEMOVE:
-        if (console->window->quick_edit || console->window->in_selection)
+        if (console->window && (console->window->quick_edit || console->window->in_selection))
         {
             if (GetCapture() == console->win && console->window->in_selection &&
                 (wparam & MK_LBUTTON))
@@ -2257,7 +2265,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         break;
 
     case WM_LBUTTONUP:
-        if (console->window->quick_edit || console->window->in_selection)
+        if (console->window && (console->window->quick_edit || console->window->in_selection))
         {
             if (GetCapture() == console->win && console->window->in_selection)
             {
@@ -2273,7 +2281,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         break;
 
     case WM_RBUTTONDOWN:
-        if ((wparam & (MK_CONTROL|MK_SHIFT)) == console->window->menu_mask)
+        if (console->window && (wparam & (MK_CONTROL|MK_SHIFT)) == console->window->menu_mask)
         {
             POINT       pt;
             pt.x = (short)LOWORD(lparam);
@@ -2304,7 +2312,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         break;
 
     case WM_SETFOCUS:
-        if (console->active->cursor_visible)
+        if (console->window && console->active->cursor_visible)
         {
             CreateCaret( console->win, console->window->cursor_bitmap,
                          console->active->font.width, console->active->font.height );
@@ -2313,12 +2321,12 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         break;
 
     case WM_KILLFOCUS:
-        if (console->active->cursor_visible)
+        if (console->window && console->active->cursor_visible)
             DestroyCaret();
         break;
 
     case WM_SIZE:
-        if (console->window->update_state != UPDATE_BUSY)
+        if (console->window && console->window->update_state != UPDATE_BUSY)
             resize_window( console,
                            max( LOWORD(lparam) / console->active->font.width, 20 ),
                            max( HIWORD(lparam) / console->active->font.height, 20 ));
@@ -2329,6 +2337,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
             int win_width = console->active->win.right - console->active->win.left + 1;
             int x = console->active->win.left;
 
+            if (!console->window) break;
             switch (LOWORD(wparam))
             {
             case SB_PAGEUP:     x -= 8;              break;
@@ -2359,6 +2368,8 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         {
             int win_height = console->active->win.bottom - console->active->win.top + 1;
             int y = console->active->win.top;
+
+            if (!console->window) break;
 
             if (msg == WM_MOUSEWHEEL)
             {
@@ -2391,6 +2402,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         }
 
     case WM_SYSCOMMAND:
+        if (!console->window) break;
         switch (wparam)
         {
         case IDS_DEFAULT:
@@ -2405,6 +2417,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         break;
 
     case WM_COMMAND:
+        if (!console->window) break;
         switch (wparam)
         {
         case IDS_DEFAULT:
@@ -2447,7 +2460,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         break;
 
     case WM_INITMENUPOPUP:
-        if (!HIWORD(lparam)) return DefWindowProcW( hwnd, msg, wparam, lparam );
+        if (!console->window || !HIWORD(lparam)) return DefWindowProcW( hwnd, msg, wparam, lparam );
         set_menu_details( console, GetSystemMenu(console->win, FALSE) );
         break;
 
@@ -2462,7 +2475,7 @@ void update_window_config( struct console *console, BOOL delay )
 {
     const int delay_timeout = 50;
 
-    if (!console->win || console->window->update_state != UPDATE_NONE) return;
+    if (!console->window || console->window->update_state != UPDATE_NONE) return;
     console->window->update_state = UPDATE_PENDING;
     if (delay)
         SetTimer( console->win, 1, delay_timeout, NULL );
@@ -2535,4 +2548,26 @@ BOOL init_window( struct console *console )
 
     apply_config( console, &config );
     return TRUE;
+}
+
+void init_message_window( struct console *console )
+{
+    WNDCLASSW wndclass;
+
+    wndclass.style         = CS_DBLCLKS;
+    wndclass.lpfnWndProc   = window_proc;
+    wndclass.cbClsExtra    = 0;
+    wndclass.cbWndExtra    = sizeof(DWORD_PTR);
+    wndclass.hInstance     = GetModuleHandleW( NULL );
+    wndclass.hIcon         = 0;
+    wndclass.hCursor       = 0;
+    wndclass.hbrBackground = GetStockObject( BLACK_BRUSH );
+    wndclass.lpszMenuName  = NULL;
+    wndclass.lpszClassName = L"WineConsoleClass";
+    RegisterClassW(&wndclass);
+
+    CreateWindowW( wndclass.lpszClassName, NULL,
+                   WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_THICKFRAME|WS_MINIMIZEBOX|
+                   WS_MAXIMIZEBOX|WS_HSCROLL|WS_VSCROLL, CW_USEDEFAULT, CW_USEDEFAULT,
+                   0, 0, HWND_MESSAGE, 0, wndclass.hInstance, console );
 }

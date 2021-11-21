@@ -85,19 +85,27 @@ NTSTATUS WINAPI RtlWow64EnableFsRedirectionEx( ULONG disable, ULONG *old_value )
 }
 
 
-static BOOL image_needs_elevation( const WCHAR *path )
+static BOOL image_needs_elevation( const UNICODE_STRING *path )
 {
     ACTIVATION_CONTEXT_RUN_LEVEL_INFORMATION run_level;
+    UNICODE_STRING path0;
     BOOL ret = FALSE;
     HANDLE handle;
     ACTCTXW ctx;
 
+    if (RtlDuplicateUnicodeString( 1, path, &path0 ))
+        return FALSE;
+
     ctx.cbSize = sizeof(ctx);
     ctx.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID;
-    ctx.lpSource = path;
+    ctx.lpSource = path0.Buffer;
     ctx.lpResourceName = (const WCHAR *)CREATEPROCESS_MANIFEST_RESOURCE_ID;
 
-    if (RtlCreateActivationContext( &handle, &ctx )) return FALSE;
+    if (RtlCreateActivationContext( &handle, &ctx ))
+    {
+        RtlFreeUnicodeString( &path0 );
+        return FALSE;
+    }
 
     if (!RtlQueryInformationActivationContext( 0, handle, NULL, RunlevelInformationInActivationContext,
                                                &run_level, sizeof(run_level), NULL ))
@@ -108,7 +116,7 @@ static BOOL image_needs_elevation( const WCHAR *path )
             ret = TRUE;
     }
     RtlReleaseActivationContext( handle );
-
+    RtlFreeUnicodeString( &path0 );
     return ret;
 }
 
@@ -350,7 +358,9 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
     NTSTATUS status;
     UINT pos = 0;
 
-    if (!token && image_needs_elevation( params->ImagePathName.Buffer ))
+    /* It's not clear whether we should use path or &params->ImagePathName here,
+     * but Roblox Player tries to pass an empty string for the latter. */
+    if (!token && image_needs_elevation( path ))
         token = elevated_token = get_elevated_token();
 
     RtlNormalizeProcessParams( params );

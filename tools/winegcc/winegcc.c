@@ -492,6 +492,11 @@ static strarray *get_link_args( struct options *opts, const char *output_name )
             strarray_add( flags, opts->image_base );
         }
         if (opts->strip) strarray_add( flags, "-Wl,-x" );
+        if (opts->unix_lib)
+        {
+            strarray_add( flags, "-install_name" );
+            strarray_add( flags, strmake( "@loader_path/%s.so", output_name ) );
+        }
         strarray_addall( link_args, flags );
         return link_args;
 
@@ -1382,7 +1387,7 @@ static void build(struct options* opts)
     else entry_point = opts->entry_point;
 
     /* run winebuild to generate the .spec.o file */
-    if (!(opts->unix_lib && opts->subsystem && !strcmp(opts->subsystem, "native")))
+    if (!(opts->unix_lib && opts->subsystem && !strcmp(opts->subsystem, "unixlib")))
         spec_o_name = build_spec_obj( opts, spec_file, output_file, files, lib_dirs, entry_point );
 
     if (fake_module) return;  /* nothing else to do */

@@ -27,67 +27,15 @@
 #include "wine/heap.h"
 #include "wine/list.h"
 
+#include "msxml_dispex.h"
+
 #ifndef __WINE_CONFIG_H
 # error You must include config.h to use this header
 #endif
 
-typedef enum {
-    MSXML_DEFAULT = 0,
-    MSXML2        = 20,
-    MSXML26       = 26,
-    MSXML3        = 30,
-    MSXML4        = 40,
-    MSXML6        = 60
-} MSXML_VERSION;
-
 extern const CLSID * DOMDocument_version(MSXML_VERSION v) DECLSPEC_HIDDEN;
 extern const CLSID * SchemaCache_version(MSXML_VERSION v) DECLSPEC_HIDDEN;
 
-/* typelibs */
-typedef enum tid_t {
-    NULL_tid,
-    IXMLDOMAttribute_tid,
-    IXMLDOMCDATASection_tid,
-    IXMLDOMComment_tid,
-    IXMLDOMDocument_tid,
-    IXMLDOMDocument2_tid,
-    IXMLDOMDocument3_tid,
-    IXMLDOMDocumentFragment_tid,
-    IXMLDOMDocumentType_tid,
-    IXMLDOMElement_tid,
-    IXMLDOMEntityReference_tid,
-    IXMLDOMImplementation_tid,
-    IXMLDOMNamedNodeMap_tid,
-    IXMLDOMNode_tid,
-    IXMLDOMNodeList_tid,
-    IXMLDOMParseError2_tid,
-    IXMLDOMProcessingInstruction_tid,
-    IXMLDOMSchemaCollection_tid,
-    IXMLDOMSchemaCollection2_tid,
-    IXMLDOMSelection_tid,
-    IXMLDOMText_tid,
-    IXMLElement_tid,
-    IXMLDocument_tid,
-    IXMLHTTPRequest_tid,
-    IXSLProcessor_tid,
-    IXSLTemplate_tid,
-    IVBSAXAttributes_tid,
-    IVBSAXContentHandler_tid,
-    IVBSAXDeclHandler_tid,
-    IVBSAXDTDHandler_tid,
-    IVBSAXEntityResolver_tid,
-    IVBSAXErrorHandler_tid,
-    IVBSAXLexicalHandler_tid,
-    IVBSAXLocator_tid,
-    IVBSAXXMLFilter_tid,
-    IVBSAXXMLReader_tid,
-    IMXAttributes_tid,
-    IMXReaderControl_tid,
-    IMXWriter_tid,
-    IVBMXNamespaceManager_tid,
-    IServerXMLHTTPRequest_tid,
-    LAST_tid
-} tid_t;
 
 /* The XDR datatypes (urn:schemas-microsoft-com:datatypes)
  * These are actually valid for XSD schemas as well
@@ -134,37 +82,7 @@ typedef enum _XDR_DT {
     LAST_DT
 } XDR_DT;
 
-extern HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo) DECLSPEC_HIDDEN;
-extern void release_typelib(void) DECLSPEC_HIDDEN;
-
-typedef struct dispex_data_t dispex_data_t;
-
-typedef struct {
-    HRESULT (*get_dispid)(IUnknown*,BSTR,DWORD,DISPID*);
-    HRESULT (*invoke)(IUnknown*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*);
-} dispex_static_data_vtbl_t;
-
-typedef struct {
-    const dispex_static_data_vtbl_t *vtbl;
-    const tid_t disp_tid;
-    dispex_data_t *data;
-    const tid_t* const iface_tids;
-} dispex_static_data_t;
-
-typedef struct {
-    IDispatchEx IDispatchEx_iface;
-
-    IUnknown *outer;
-
-    dispex_static_data_t *data;
-} DispatchEx;
-
 extern HINSTANCE MSXML_hInstance DECLSPEC_HIDDEN;
-
-void init_dispex(DispatchEx*,IUnknown*,dispex_static_data_t*) DECLSPEC_HIDDEN;
-void release_dispex(DispatchEx*) DECLSPEC_HIDDEN;
-BOOL dispex_query_interface(DispatchEx*,REFIID,void**) DECLSPEC_HIDDEN;
-const IID *get_riid_from_tid(enum tid_t tid) DECLSPEC_HIDDEN;
 
 /* memory allocation functions */
 
@@ -262,12 +180,12 @@ extern IUnknown         *create_comment( xmlNodePtr ) DECLSPEC_HIDDEN;
 extern IUnknown         *create_cdata( xmlNodePtr ) DECLSPEC_HIDDEN;
 extern IXMLDOMNodeList  *create_children_nodelist( xmlNodePtr ) DECLSPEC_HIDDEN;
 extern IXMLDOMNamedNodeMap *create_nodemap( xmlNodePtr, const struct nodemap_funcs* ) DECLSPEC_HIDDEN;
-extern IUnknown         *create_doc_Implementation(void) DECLSPEC_HIDDEN;
 extern IUnknown         *create_doc_fragment( xmlNodePtr ) DECLSPEC_HIDDEN;
 extern IUnknown         *create_doc_entity_ref( xmlNodePtr ) DECLSPEC_HIDDEN;
 extern IUnknown         *create_doc_type( xmlNodePtr ) DECLSPEC_HIDDEN;
 extern HRESULT           create_selection( xmlNodePtr, xmlChar*, IXMLDOMNodeList** ) DECLSPEC_HIDDEN;
 extern HRESULT           create_enumvariant( IUnknown*, BOOL, const struct enumvariant_funcs*, IEnumVARIANT**) DECLSPEC_HIDDEN;
+extern HRESULT           create_dom_implementation(IXMLDOMImplementation **obj) DECLSPEC_HIDDEN;
 
 /* data accessors */
 xmlNodePtr xmlNodePtr_from_domnode( IXMLDOMNode *iface, xmlElementType type ) DECLSPEC_HIDDEN;
@@ -422,34 +340,6 @@ static inline xmlChar *heap_strdupxmlChar(const xmlChar *str)
 
 #endif
 
-static inline HRESULT return_bstr(const WCHAR *value, BSTR *p)
-{
-    if(!p)
-        return E_INVALIDARG;
-
-    if(value) {
-        *p = SysAllocString(value);
-        if(!*p)
-            return E_OUTOFMEMORY;
-    }else {
-        *p = NULL;
-    }
-
-    return S_OK;
-}
-
-static inline HRESULT return_bstrn(const WCHAR *value, int len, BSTR *p)
-{
-    if(value) {
-        *p = SysAllocStringLen(value, len);
-        if(!*p)
-            return E_OUTOFMEMORY;
-    }else
-        *p = NULL;
-
-    return S_OK;
-}
-
 static inline HRESULT return_null_node(IXMLDOMNode **p)
 {
     if(!p)
@@ -495,7 +385,6 @@ static inline HRESULT return_var_false(VARIANT_BOOL *p)
 
 extern IXMLDOMParseError *create_parseError( LONG code, BSTR url, BSTR reason, BSTR srcText,
                                              LONG line, LONG linepos, LONG filepos ) DECLSPEC_HIDDEN;
-extern HRESULT DOMDocument_create(MSXML_VERSION, void**) DECLSPEC_HIDDEN;
 extern HRESULT SchemaCache_create(MSXML_VERSION, void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLDocument_create(void**) DECLSPEC_HIDDEN;
 extern HRESULT SAXXMLReader_create(MSXML_VERSION, void**) DECLSPEC_HIDDEN;
@@ -508,14 +397,6 @@ extern HRESULT MXWriter_create(MSXML_VERSION, void**) DECLSPEC_HIDDEN;
 extern HRESULT MXNamespaceManager_create(void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLParser_create(void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLView_create(void**) DECLSPEC_HIDDEN;
-
-typedef struct bsc_t bsc_t;
-
-HRESULT create_moniker_from_url(LPCWSTR, IMoniker**) DECLSPEC_HIDDEN;
-HRESULT create_uri(IUri *base, const WCHAR *, IUri **) DECLSPEC_HIDDEN;
-HRESULT bind_url(IMoniker*, HRESULT (*onDataAvailable)(void*,char*,DWORD), void*, bsc_t**) DECLSPEC_HIDDEN;
-HRESULT detach_bsc(bsc_t*) DECLSPEC_HIDDEN;
-IUri *get_base_uri(IUnknown *) DECLSPEC_HIDDEN;
 
 /* Error Codes - not defined anywhere in the public headers */
 #define E_XML_ELEMENT_UNDECLARED            0xC00CE00D

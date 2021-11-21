@@ -7886,9 +7886,9 @@ static void test_effect_find_next_valid_technique(void)
     D3DPRESENT_PARAMETERS present_parameters = {0};
     IDirect3DDevice9 *device;
     D3DXTECHNIQUE_DESC desc;
+    D3DXHANDLE tech, tech2;
     ID3DXEffect *effect;
     IDirect3D9 *d3d;
-    D3DXHANDLE tech;
     ULONG refcount;
     HWND window;
     HRESULT hr;
@@ -7933,9 +7933,12 @@ static void test_effect_find_next_valid_technique(void)
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     ok(!strcmp(desc.Name, "tech1"), "Got unexpected technique %s.\n", desc.Name);
 
-    hr = effect->lpVtbl->FindNextValidTechnique(effect, tech, &tech);
+    tech2 = tech;
+    hr = effect->lpVtbl->FindNextValidTechnique(effect, tech, &tech2);
     ok(hr == S_FALSE, "Got result %#x.\n", hr);
-    hr = effect->lpVtbl->GetTechniqueDesc(effect, tech, &desc);
+    ok(!tech2, "Unexpected technique handle %p.\n", tech2);
+    /* Test GetTechniqueDesc() with a NULL handle. */
+    hr = effect->lpVtbl->GetTechniqueDesc(effect, tech2, &desc);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     ok(!strcmp(desc.Name, "tech0"), "Got unexpected technique %s.\n", desc.Name);
 
@@ -7951,9 +7954,10 @@ static void test_effect_find_next_valid_technique(void)
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     ok(!strcmp(desc.Name, "tech1"), "Got unexpected technique %s.\n", desc.Name);
 
-    hr = effect->lpVtbl->FindNextValidTechnique(effect, tech, &tech);
+    hr = effect->lpVtbl->FindNextValidTechnique(effect, tech, &tech2);
     ok(hr == S_FALSE, "Got result %#x.\n", hr);
-    hr = effect->lpVtbl->GetTechniqueDesc(effect, tech, &desc);
+    ok(!tech2, "Unexpected technique handle %p.\n", tech2);
+    hr = effect->lpVtbl->GetTechniqueDesc(effect, tech2, &desc);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     ok(!strcmp(desc.Name, "tech0"), "Got unexpected technique %s.\n", desc.Name);
 
@@ -7979,8 +7983,9 @@ static void test_effect_find_next_valid_technique(void)
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     ok(!strcmp(desc.Name, "tech1"), "Got unexpected technique %s.\n", desc.Name);
 
-    hr = effect->lpVtbl->FindNextValidTechnique(effect, tech, &tech);
+    hr = effect->lpVtbl->FindNextValidTechnique(effect, tech, &tech2);
     ok(hr == S_FALSE, "Got result %#x.\n", hr);
+    ok(!tech2, "Unexpected technique handle %p.\n", tech2);
 
     hr = effect->lpVtbl->FindNextValidTechnique(effect, "nope", &tech);
     ok(hr == D3DERR_INVALIDCALL, "Got result %#x.\n", hr);

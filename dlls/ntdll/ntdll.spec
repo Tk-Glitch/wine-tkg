@@ -68,7 +68,7 @@
 # @ stub KiIntSystemCall
 @ stdcall -norelay KiRaiseUserExceptionDispatcher()
 @ stdcall -norelay KiUserApcDispatcher(ptr long long long ptr)
-@ stub KiUserCallbackDispatcher
+@ stdcall -norelay KiUserCallbackDispatcher(long ptr long)
 @ stdcall -norelay KiUserExceptionDispatcher(ptr ptr)
 # @ stub LdrAccessOutOfProcessResource
 @ stdcall LdrAccessResource(long ptr ptr ptr)
@@ -145,7 +145,7 @@
 @ stdcall -syscall NtAllocateVirtualMemoryEx(long ptr ptr long long ptr long)
 @ stdcall -syscall NtAreMappedFilesTheSame(ptr ptr)
 @ stdcall -syscall NtAssignProcessToJobObject(long long)
-# @ stub NtCallbackReturn
+@ stdcall -syscall NtCallbackReturn(ptr long long)
 # @ stub NtCancelDeviceWakeupRequest
 @ stdcall -syscall NtCancelIoFile(long ptr)
 @ stdcall -syscall NtCancelIoFileEx(long ptr ptr)
@@ -414,6 +414,7 @@
 @ stdcall -syscall NtTerminateProcess(long long)
 @ stdcall -syscall NtTerminateThread(long long)
 @ stdcall -syscall NtTestAlert()
+@ stdcall -syscall NtTraceControl(long ptr long ptr long long)
 # @ stub NtTraceEvent
 # @ stub NtTranslateFilePath
 @ stdcall -syscall NtUnloadDriver(ptr)
@@ -1435,6 +1436,7 @@
 @ stdcall -private -syscall ZwTerminateProcess(long long) NtTerminateProcess
 @ stdcall -private -syscall ZwTerminateThread(long long) NtTerminateThread
 @ stdcall -private -syscall ZwTestAlert() NtTestAlert
+@ stdcall -private -syscall ZwTraceControl(long ptr long ptr long long) NtTraceControl
 # @ stub ZwTraceEvent
 # @ stub ZwTranslateFilePath
 @ stdcall -private -syscall ZwUnloadDriver(ptr) NtUnloadDriver

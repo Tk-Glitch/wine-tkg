@@ -207,14 +207,23 @@ BLUE_INI TEXTFILE
 "ImageCount = 12\r\n"
 "MirrorImage = False\r\n"
 "ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "UniformSizing = True\r\n"
 "Transparent = True\r\n"
 "ImageFile1 = blue_checkbox_13px.bmp\r\n"
 "ImageFile2 = blue_checkbox_16px.bmp\r\n"
-"ImageFile3 = blue_checkbox_25px.bmp\r\n"
+"ImageFile3 = blue_checkbox_19px.bmp\r\n"
+"ImageFile4 = blue_checkbox_22px.bmp\r\n"
+"ImageFile5 = blue_checkbox_25px.bmp\r\n"
+"ImageFile6 = blue_checkbox_28px.bmp\r\n"
+"ImageFile7 = blue_checkbox_31px.bmp\r\n"
 "MinDpi1 = 96\r\n"
-"MinDpi2 = 118\r\n"
-"MinDpi3 = 185\r\n"
+"MinDpi2 = 120\r\n"
+"MinDpi3 = 144\r\n"
+"MinDpi4 = 168\r\n"
+"MinDpi5 = 192\r\n"
+"MinDpi6 = 216\r\n"
+"MinDpi7 = 240\r\n"
 
 "[Button.Checkbox(Checkeddisabled)]\r\n"
 "TextColor = 189 189 189\r\n"
@@ -234,13 +243,22 @@ BLUE_INI TEXTFILE
 "ContentMargins = 0, 0, 0, 0\r\n"
 "ImageCount = 8\r\n"
 "ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "UniformSizing = True\r\n"
 "ImageFile1 = blue_radiobutton_13px.bmp\r\n"
 "ImageFile2 = blue_radiobutton_16px.bmp\r\n"
-"ImageFile3 = blue_radiobutton_25px.bmp\r\n"
+"ImageFile3 = blue_radiobutton_19px.bmp\r\n"
+"ImageFile4 = blue_radiobutton_22px.bmp\r\n"
+"ImageFile5 = blue_radiobutton_25px.bmp\r\n"
+"ImageFile6 = blue_radiobutton_28px.bmp\r\n"
+"ImageFile7 = blue_radiobutton_31px.bmp\r\n"
 "MinDpi1 = 96\r\n"
-"MinDpi2 = 118\r\n"
-"MinDpi3 = 185\r\n"
+"MinDpi2 = 120\r\n"
+"MinDpi3 = 144\r\n"
+"MinDpi4 = 168\r\n"
+"MinDpi5 = 192\r\n"
+"MinDpi6 = 216\r\n"
+"MinDpi7 = 240\r\n"
 
 "[Button.Radiobutton(Checkeddisabled)]\r\n"
 "TextColor = 189 189 189\r\n"
@@ -288,12 +306,23 @@ BLUE_INI TEXTFILE
 "Transparent = True\r\n"
 "ImageLayout = Vertical\r\n"
 "ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "Transparent = True\r\n"
 "UniformSizing = True\r\n"
 "ImageFile1 = blue_commandlink_glyph_30px.bmp\r\n"
-"ImageFile2 = blue_commandlink_glyph_45px.bmp\r\n"
+"ImageFile2 = blue_commandlink_glyph_37px.bmp\r\n"
+"ImageFile3 = blue_commandlink_glyph_45px.bmp\r\n"
+"ImageFile4 = blue_commandlink_glyph_52px.bmp\r\n"
+"ImageFile5 = blue_commandlink_glyph_60px.bmp\r\n"
+"ImageFile6 = blue_commandlink_glyph_67px.bmp\r\n"
+"ImageFile7 = blue_commandlink_glyph_75px.bmp\r\n"
 "MinDpi1 = 96\r\n"
-"MinDpi2 = 144\r\n"
+"MinDpi2 = 120\r\n"
+"MinDpi3 = 144\r\n"
+"MinDpi4 = 168\r\n"
+"MinDpi5 = 192\r\n"
+"MinDpi6 = 216\r\n"
+"MinDpi7 = 240\r\n"
 
 "\r\n; ComboBox\r\n"
 "[ComboBox]\r\n"
@@ -528,12 +557,27 @@ BLUE_INI TEXTFILE
 "ImageLayout = Vertical\r\n"
 
 "[ScrollBar.SizeBox]\r\n"
-"ImageFile = blue_scrollbar_resizebox_grip.bmp\r\n"
 "BgType = ImageFile\r\n"
+"ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "ImageCount = 2\r\n"
 "SizingType = TrueSize\r\n"
 "Transparent = True\r\n"
 "VAlign = Bottom\r\n"
+"ImageFile1 = blue_scrollbar_resizebox_grip_16px.bmp\r\n"
+"ImageFile2 = blue_scrollbar_resizebox_grip_20px.bmp\r\n"
+"ImageFile3 = blue_scrollbar_resizebox_grip_24px.bmp\r\n"
+"ImageFile4 = blue_scrollbar_resizebox_grip_28px.bmp\r\n"
+"ImageFile5 = blue_scrollbar_resizebox_grip_32px.bmp\r\n"
+"ImageFile6 = blue_scrollbar_resizebox_grip_36px.bmp\r\n"
+"ImageFile7 = blue_scrollbar_resizebox_grip_40px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 120\r\n"
+"MinDpi3 = 144\r\n"
+"MinDpi4 = 168\r\n"
+"MinDpi5 = 192\r\n"
+"MinDpi6 = 216\r\n"
+"MinDpi7 = 240\r\n"
 
 "\r\n; Spin\r\n"
 "[Spin]\r\n"
@@ -612,13 +656,28 @@ BLUE_INI TEXTFILE
 
 "[Status.Gripper]\r\n"
 "ContentMargins = 0, 0, 0, 0\r\n"
-"; Same as scrollbar resize box gripper \r\n"
-"ImageFile = blue_scrollbar_resizebox_grip.bmp\r\n"
 "BgType = ImageFile\r\n"
+"ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "ImageCount = 2\r\n"
 "SizingType = TrueSize\r\n"
 "Transparent = True\r\n"
 "VAlign = Bottom\r\n"
+"; Same as scrollbar resize box gripper \r\n"
+"ImageFile1 = blue_scrollbar_resizebox_grip_16px.bmp\r\n"
+"ImageFile2 = blue_scrollbar_resizebox_grip_20px.bmp\r\n"
+"ImageFile3 = blue_scrollbar_resizebox_grip_24px.bmp\r\n"
+"ImageFile4 = blue_scrollbar_resizebox_grip_28px.bmp\r\n"
+"ImageFile5 = blue_scrollbar_resizebox_grip_32px.bmp\r\n"
+"ImageFile6 = blue_scrollbar_resizebox_grip_36px.bmp\r\n"
+"ImageFile7 = blue_scrollbar_resizebox_grip_40px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 120\r\n"
+"MinDpi3 = 144\r\n"
+"MinDpi4 = 168\r\n"
+"MinDpi5 = 192\r\n"
+"MinDpi6 = 216\r\n"
+"MinDpi7 = 240\r\n"
 
 "\r\n; Tab\r\n"
 "[Tab]\r\n"
@@ -806,6 +865,7 @@ BLUE_INI TEXTFILE
 "Transparent = True\r\n"
 "SizingType = TrueSize\r\n"
 "ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "UniformSizing = true\r\n"
 "ImageFile1 = blue_trackbar_thumb_up_11px.bmp\r\n"
 "ImageFile2 = blue_trackbar_thumb_up_15px.bmp\r\n"
@@ -821,6 +881,7 @@ BLUE_INI TEXTFILE
 "SizingType = TrueSize\r\n"
 "ImageLayout = Vertical\r\n"
 "ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "UniformSizing = True\r\n"
 "ImageFile1 = blue_trackbar_thumb_down_11px.bmp\r\n"
 "ImageFile2 = blue_trackbar_thumb_down_15px.bmp\r\n"
@@ -836,6 +897,7 @@ BLUE_INI TEXTFILE
 "Transparent = True\r\n"
 "ImageLayout = Vertical\r\n"
 "ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "UniformSizing = True\r\n"
 "ImageFile1 = blue_trackbar_thumb_left_19px.bmp\r\n"
 "ImageFile2 = blue_trackbar_thumb_left_25px.bmp\r\n"
@@ -851,6 +913,7 @@ BLUE_INI TEXTFILE
 "Transparent = True\r\n"
 "ImageLayout = Vertical\r\n"
 "ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "UniformSizing = True\r\n"
 "ImageFile1 = blue_trackbar_thumb_right_19px.bmp\r\n"
 "ImageFile2 = blue_trackbar_thumb_right_25px.bmp\r\n"
@@ -882,10 +945,25 @@ BLUE_INI TEXTFILE
 "\r\n; Tooltip\r\n"
 "[Tooltip.Close]\r\n"
 "BgType = ImageFile\r\n"
-"ImageFile = blue_tooltip_close.bmp\r\n"
+"ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "ImageCount = 3\r\n"
 "SizingType = TrueSize\r\n"
 "ImageLayout = Vertical\r\n"
+"ImageFile1 = blue_tooltip_close_16px.bmp\r\n"
+"ImageFile2 = blue_tooltip_close_20px.bmp\r\n"
+"ImageFile3 = blue_tooltip_close_24px.bmp\r\n"
+"ImageFile4 = blue_tooltip_close_28px.bmp\r\n"
+"ImageFile5 = blue_tooltip_close_32px.bmp\r\n"
+"ImageFile6 = blue_tooltip_close_36px.bmp\r\n"
+"ImageFile7 = blue_tooltip_close_40px.bmp\r\n"
+"MinDpi1 = 96\r\n"
+"MinDpi2 = 120\r\n"
+"MinDpi3 = 144\r\n"
+"MinDpi4 = 168\r\n"
+"MinDpi5 = 192\r\n"
+"MinDpi6 = 216\r\n"
+"MinDpi7 = 240\r\n"
 
 "\r\n; TreeView\r\n"
 "[TreeView]\r\n"
@@ -900,13 +978,22 @@ BLUE_INI TEXTFILE
 "ImageCount = 2\r\n"
 "ImageLayout = vertical\r\n"
 "ImageSelectType = Dpi\r\n"
+"TrueSizeScalingType = Dpi\r\n"
 "UniformSizing = True\r\n"
 "ImageFile1 = blue_treeview_expand_collapse_9px.bmp\r\n"
-"ImageFile2 = blue_treeview_expand_collapse_10px.bmp\r\n"
-"ImageFile3 = blue_treeview_expand_collapse_15px.bmp\r\n"
+"ImageFile2 = blue_treeview_expand_collapse_11px.bmp\r\n"
+"ImageFile3 = blue_treeview_expand_collapse_13px.bmp\r\n"
+"ImageFile4 = blue_treeview_expand_collapse_16px.bmp\r\n"
+"ImageFile5 = blue_treeview_expand_collapse_18px.bmp\r\n"
+"ImageFile6 = blue_treeview_expand_collapse_20px.bmp\r\n"
+"ImageFile7 = blue_treeview_expand_collapse_23px.bmp\r\n"
 "MinDpi1 = 96\r\n"
-"MinDpi2 = 133\r\n"
-"MinDpi3 = 150\r\n"
+"MinDpi2 = 120\r\n"
+"MinDpi3 = 144\r\n"
+"MinDpi4 = 168\r\n"
+"MinDpi5 = 192\r\n"
+"MinDpi6 = 216\r\n"
+"MinDpi7 = 240\r\n"
 }
 
 /* Button */
@@ -919,8 +1006,20 @@ BLUE_CHECKBOX_13PX_BMP BITMAP "blue_checkbox_13px.bmp"
 /* @makedep: blue_checkbox_16px.bmp */
 BLUE_CHECKBOX_16PX_BMP BITMAP "blue_checkbox_16px.bmp"
 
+/* @makedep: blue_checkbox_19px.bmp */
+BLUE_CHECKBOX_19PX_BMP BITMAP "blue_checkbox_19px.bmp"
+
+/* @makedep: blue_checkbox_22px.bmp */
+BLUE_CHECKBOX_22PX_BMP BITMAP "blue_checkbox_22px.bmp"
+
 /* @makedep: blue_checkbox_25px.bmp */
 BLUE_CHECKBOX_25PX_BMP BITMAP "blue_checkbox_25px.bmp"
+
+/* @makedep: blue_checkbox_28px.bmp */
+BLUE_CHECKBOX_28PX_BMP BITMAP "blue_checkbox_28px.bmp"
+
+/* @makedep: blue_checkbox_31px.bmp */
+BLUE_CHECKBOX_31PX_BMP BITMAP "blue_checkbox_31px.bmp"
 
 /* @makedep: blue_radiobutton_13px.bmp */
 BLUE_RADIOBUTTON_13PX_BMP BITMAP "blue_radiobutton_13px.bmp"
@@ -928,8 +1027,20 @@ BLUE_RADIOBUTTON_13PX_BMP BITMAP "blue_radiobutton_13px.bmp"
 /* @makedep: blue_radiobutton_16px.bmp */
 BLUE_RADIOBUTTON_16PX_BMP BITMAP "blue_radiobutton_16px.bmp"
 
+/* @makedep: blue_radiobutton_19px.bmp */
+BLUE_RADIOBUTTON_19PX_BMP BITMAP "blue_radiobutton_19px.bmp"
+
+/* @makedep: blue_radiobutton_22px.bmp */
+BLUE_RADIOBUTTON_22PX_BMP BITMAP "blue_radiobutton_22px.bmp"
+
 /* @makedep: blue_radiobutton_25px.bmp */
 BLUE_RADIOBUTTON_25PX_BMP BITMAP "blue_radiobutton_25px.bmp"
+
+/* @makedep: blue_radiobutton_28px.bmp */
+BLUE_RADIOBUTTON_28PX_BMP BITMAP "blue_radiobutton_28px.bmp"
+
+/* @makedep: blue_radiobutton_31px.bmp */
+BLUE_RADIOBUTTON_31PX_BMP BITMAP "blue_radiobutton_31px.bmp"
 
 /* @makedep: blue_groupbox.bmp */
 BLUE_GROUPBOX_BMP BITMAP "blue_groupbox.bmp"
@@ -940,8 +1051,23 @@ BLUE_COMMANDLINK_BMP BITMAP "blue_commandlink.bmp"
 /* @makedep: blue_commandlink_glyph_30px.bmp */
 BLUE_COMMANDLINK_GLYPH_30PX_BMP BITMAP "blue_commandlink_glyph_30px.bmp"
 
+/* @makedep: blue_commandlink_glyph_37px.bmp */
+BLUE_COMMANDLINK_GLYPH_37PX_BMP BITMAP "blue_commandlink_glyph_37px.bmp"
+
 /* @makedep: blue_commandlink_glyph_45px.bmp */
 BLUE_COMMANDLINK_GLYPH_45PX_BMP BITMAP "blue_commandlink_glyph_45px.bmp"
+
+/* @makedep: blue_commandlink_glyph_52px.bmp */
+BLUE_COMMANDLINK_GLYPH_52PX_BMP BITMAP "blue_commandlink_glyph_52px.bmp"
+
+/* @makedep: blue_commandlink_glyph_60px.bmp */
+BLUE_COMMANDLINK_GLYPH_60PX_BMP BITMAP "blue_commandlink_glyph_60px.bmp"
+
+/* @makedep: blue_commandlink_glyph_67px.bmp */
+BLUE_COMMANDLINK_GLYPH_67PX_BMP BITMAP "blue_commandlink_glyph_67px.bmp"
+
+/* @makedep: blue_commandlink_glyph_75px.bmp */
+BLUE_COMMANDLINK_GLYPH_75PX_BMP BITMAP "blue_commandlink_glyph_75px.bmp"
 
 /* ComboBox */
 /* @makedep: blue_combobutton.bmp */
@@ -993,8 +1119,26 @@ BLUE_SCROLLBAR_ARROW_GLYPHS_7PX_BMP BITMAP "blue_scrollbar_arrow_glyphs_7px.bmp"
 /* @makedep: blue_scrollbar_arrow_glyphs_9px.bmp */
 BLUE_SCROLLBAR_ARROW_GLYPHS_9PX_BMP BITMAP "blue_scrollbar_arrow_glyphs_9px.bmp"
 
-/* @makedep: blue_scrollbar_resizebox_grip.bmp */
-BLUE_SCROLLBAR_RESIZEBOX_GRIP_BMP BITMAP "blue_scrollbar_resizebox_grip.bmp"
+/* @makedep: blue_scrollbar_resizebox_grip_16px.bmp */
+BLUE_SCROLLBAR_RESIZEBOX_GRIP_16PX_BMP BITMAP "blue_scrollbar_resizebox_grip_16px.bmp"
+
+/* @makedep: blue_scrollbar_resizebox_grip_20px.bmp */
+BLUE_SCROLLBAR_RESIZEBOX_GRIP_20PX_BMP BITMAP "blue_scrollbar_resizebox_grip_20px.bmp"
+
+/* @makedep: blue_scrollbar_resizebox_grip_24px.bmp */
+BLUE_SCROLLBAR_RESIZEBOX_GRIP_24PX_BMP BITMAP "blue_scrollbar_resizebox_grip_24px.bmp"
+
+/* @makedep: blue_scrollbar_resizebox_grip_28px.bmp */
+BLUE_SCROLLBAR_RESIZEBOX_GRIP_28PX_BMP BITMAP "blue_scrollbar_resizebox_grip_28px.bmp"
+
+/* @makedep: blue_scrollbar_resizebox_grip_32px.bmp */
+BLUE_SCROLLBAR_RESIZEBOX_GRIP_32PX_BMP BITMAP "blue_scrollbar_resizebox_grip_32px.bmp"
+
+/* @makedep: blue_scrollbar_resizebox_grip_36px.bmp */
+BLUE_SCROLLBAR_RESIZEBOX_GRIP_36PX_BMP BITMAP "blue_scrollbar_resizebox_grip_36px.bmp"
+
+/* @makedep: blue_scrollbar_resizebox_grip_40px.bmp */
+BLUE_SCROLLBAR_RESIZEBOX_GRIP_40PX_BMP BITMAP "blue_scrollbar_resizebox_grip_40px.bmp"
 
 /* @makedep: blue_scrollbar_shaft_horizontal.bmp */
 BLUE_SCROLLBAR_SHAFT_HORIZONTAL_BMP BITMAP "blue_scrollbar_shaft_horizontal.bmp"
@@ -1079,8 +1223,26 @@ BLUE_TOOLBAR_BUTTONS_SPLIT_DROPDOWN_BMP BITMAP "blue_toolbar_buttons_split_dropd
 BLUE_TOOLBAR_BUTTONS_SPLIT_DROPDOWN_GLYPH_BMP BITMAP "blue_toolbar_buttons_split_dropdown_glyph.bmp"
 
 /* Tooltip */
-/* @makedep: blue_tooltip_close.bmp */
-BLUE_TOOLTIP_CLOSE_BMP BITMAP "blue_tooltip_close.bmp"
+/* @makedep: blue_tooltip_close_16px.bmp */
+BLUE_TOOLTIP_CLOSE_16PX_BMP BITMAP "blue_tooltip_close_16px.bmp"
+
+/* @makedep: blue_tooltip_close_20px.bmp */
+BLUE_TOOLTIP_CLOSE_20PX_BMP BITMAP "blue_tooltip_close_20px.bmp"
+
+/* @makedep: blue_tooltip_close_24px.bmp */
+BLUE_TOOLTIP_CLOSE_24PX_BMP BITMAP "blue_tooltip_close_24px.bmp"
+
+/* @makedep: blue_tooltip_close_28px.bmp */
+BLUE_TOOLTIP_CLOSE_28PX_BMP BITMAP "blue_tooltip_close_28px.bmp"
+
+/* @makedep: blue_tooltip_close_32px.bmp */
+BLUE_TOOLTIP_CLOSE_32PX_BMP BITMAP "blue_tooltip_close_32px.bmp"
+
+/* @makedep: blue_tooltip_close_36px.bmp */
+BLUE_TOOLTIP_CLOSE_36PX_BMP BITMAP "blue_tooltip_close_36px.bmp"
+
+/* @makedep: blue_tooltip_close_40px.bmp */
+BLUE_TOOLTIP_CLOSE_40PX_BMP BITMAP "blue_tooltip_close_40px.bmp"
 
 /* TrackBar */
 /* @makedep: blue_trackbar_thumb_horizontal.bmp */
@@ -1132,11 +1294,23 @@ BLUE_TRACKBAR_THUMB_UP_21PX_BMP BITMAP "blue_trackbar_thumb_up_21px.bmp"
 /* @makedep: blue_treeview_expand_collapse_9px.bmp */
 BLUE_TREEVIEW_EXPAND_COLLAPSE_9PX_BMP BITMAP "blue_treeview_expand_collapse_9px.bmp"
 
-/* @makedep: blue_treeview_expand_collapse_10px.bmp */
-BLUE_TREEVIEW_EXPAND_COLLAPSE_10PX_BMP BITMAP "blue_treeview_expand_collapse_10px.bmp"
+/* @makedep: blue_treeview_expand_collapse_11px.bmp */
+BLUE_TREEVIEW_EXPAND_COLLAPSE_11PX_BMP BITMAP "blue_treeview_expand_collapse_11px.bmp"
 
-/* @makedep: blue_treeview_expand_collapse_15px.bmp */
-BLUE_TREEVIEW_EXPAND_COLLAPSE_15PX_BMP BITMAP "blue_treeview_expand_collapse_15px.bmp"
+/* @makedep: blue_treeview_expand_collapse_13px.bmp */
+BLUE_TREEVIEW_EXPAND_COLLAPSE_13PX_BMP BITMAP "blue_treeview_expand_collapse_13px.bmp"
+
+/* @makedep: blue_treeview_expand_collapse_16px.bmp */
+BLUE_TREEVIEW_EXPAND_COLLAPSE_16PX_BMP BITMAP "blue_treeview_expand_collapse_16px.bmp"
+
+/* @makedep: blue_treeview_expand_collapse_18px.bmp */
+BLUE_TREEVIEW_EXPAND_COLLAPSE_18PX_BMP BITMAP "blue_treeview_expand_collapse_18px.bmp"
+
+/* @makedep: blue_treeview_expand_collapse_20px.bmp */
+BLUE_TREEVIEW_EXPAND_COLLAPSE_20PX_BMP BITMAP "blue_treeview_expand_collapse_20px.bmp"
+
+/* @makedep: blue_treeview_expand_collapse_23px.bmp */
+BLUE_TREEVIEW_EXPAND_COLLAPSE_23PX_BMP BITMAP "blue_treeview_expand_collapse_23px.bmp"
 
 /* File version */
 #define WINE_FILEDESCRIPTION_STR "Light Theme"

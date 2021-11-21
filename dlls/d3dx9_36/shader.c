@@ -2372,7 +2372,6 @@ HRESULT WINAPI D3DXGetShaderSamplers(const DWORD *byte_code, const char **sample
     return D3D_OK;
 }
 
-
 static const char *decl_usage[] = { "position", "blendweight", "blendindices", "normal", "psize", "texcoord",
                                     "tangent", "binormal", "tessfactor", "positiont", "color" };
 
@@ -2637,7 +2636,8 @@ const struct instr_info instructions[] =
     { D3DSIO_COMMENT,      "",              0, instr_comment, 0x0100, 0xFFFF }
 };
 
-HRESULT WINAPI D3DXDisassembleShader(const DWORD *shader, BOOL colorcode, const char *comments, ID3DXBuffer **disassembly)
+HRESULT WINAPI D3DXDisassembleShader(const DWORD *shader, BOOL colorcode, const char *comments,
+        ID3DXBuffer **disassembly)
 {
     DWORD *ptr = (DWORD *)shader;
     char *buffer, *buf;
@@ -2667,7 +2667,7 @@ HRESULT WINAPI D3DXDisassembleShader(const DWORD *shader, BOOL colorcode, const 
         if ((buf - buffer + 128) > capacity)
         {
             UINT count = buf - buffer;
-            char *new_buffer = HeapReAlloc(GetProcessHeap(), 0, buffer, capacity * 2);
+           char *new_buffer = HeapReAlloc(GetProcessHeap(), 0, buffer, capacity * 2);
             if (!new_buffer)
             {
                 HeapFree(GetProcessHeap(), 0, buffer);
