@@ -5696,6 +5696,17 @@ float4 main(float4 color : COLOR) : SV_TARGET
     ok(tmp_ds_state == ds_state, "Got unexpected depth stencil state %p, expected %p.\n", tmp_ds_state, ds_state);
     ID3D10DepthStencilState_Release(tmp_ds_state);
     ok(stencil_ref == 3, "Got unexpected stencil ref %u.\n", stencil_ref);
+    /* For OMGetDepthStencilState() both arguments are optional. */
+    ID3D10Device_OMGetDepthStencilState(device, NULL, NULL);
+    stencil_ref = 0;
+    ID3D10Device_OMGetDepthStencilState(device, NULL, &stencil_ref);
+    ok(stencil_ref == 3, "Got unexpected stencil ref %u.\n", stencil_ref);
+    tmp_ds_state = NULL;
+    ID3D10Device_OMGetDepthStencilState(device, &tmp_ds_state, NULL);
+    ok(stencil_ref == 3, "Got unexpected stencil ref %u.\n", stencil_ref);
+    ok(tmp_ds_state == ds_state, "Got unexpected depth stencil state %p, expected %p.\n", tmp_ds_state, ds_state);
+    ID3D10DepthStencilState_Release(tmp_ds_state);
+
     ID3D10Device_OMGetRenderTargets(device, D3D10_SIMULTANEOUS_RENDER_TARGET_COUNT, tmp_rtv, &tmp_dsv);
     for (i = 0; i < D3D10_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
     {
@@ -15504,8 +15515,8 @@ static void test_stream_output(void)
 
 static void test_stream_output_resume(void)
 {
+    ID3D10Buffer *cb, *so_buffer, *so_buffer2, *buffer;
     struct d3d10core_test_context test_context;
-    ID3D10Buffer *cb, *so_buffer, *buffer;
     unsigned int i, j, idx, offset;
     struct resource_readback rb;
     ID3D10GeometryShader *gs;
@@ -15582,16 +15593,22 @@ static void test_stream_output_resume(void)
 
     cb = create_buffer(device, D3D10_BIND_CONSTANT_BUFFER, sizeof(constants[0]), &constants[0]);
     so_buffer = create_buffer(device, D3D10_BIND_STREAM_OUTPUT, 1024, NULL);
+    so_buffer2 = create_buffer(device, D3D10_BIND_STREAM_OUTPUT, 1024, NULL);
 
     ID3D10Device_GSSetShader(device, gs);
     ID3D10Device_GSSetConstantBuffers(device, 0, 1, &cb);
 
-    offset = 0;
-    ID3D10Device_SOSetTargets(device, 1, &so_buffer, &offset);
-
     ID3D10Device_ClearRenderTargetView(device, test_context.backbuffer_rtv, &white.x);
     check_texture_color(test_context.backbuffer, 0xffffffff, 0);
 
+    /* Draw into a SO buffer and then immediately destroy it, to make sure that
+     * wined3d doesn't try to rebind transform feedback buffers while transform
+     * feedback is active. */
+    offset = 0;
+    ID3D10Device_SOSetTargets(device, 1, &so_buffer2, &offset);
+    draw_color_quad(&test_context, &red);
+    ID3D10Device_SOSetTargets(device, 1, &so_buffer, &offset);
+    ID3D10Buffer_Release(so_buffer2);
     draw_color_quad(&test_context, &red);
     check_texture_color(test_context.backbuffer, 0xff0000ff, 0);
 

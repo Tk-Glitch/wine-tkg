@@ -20,13 +20,9 @@
 
 #define COBJMACROS
 
-#include "config.h"
-
 #include <stdarg.h>
-#ifdef HAVE_LIBXML2
-# include <libxml/parser.h>
-# include <libxml/xmlerror.h>
-#endif
+#include <libxml/parser.h>
+#include <libxml/xmlerror.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -38,8 +34,6 @@
 #include "msxml_private.h"
 
 #include "wine/debug.h"
-
-#ifdef HAVE_LIBXML2
 
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
@@ -198,7 +192,7 @@ static HRESULT WINAPI dom_pi_put_nodeValue(
     if(hr == S_OK)
     {
         static const WCHAR xmlW[] = {'x','m','l',0};
-        if(!strcmpW(target, xmlW))
+        if(!wcscmp(target, xmlW))
         {
             SysFreeString(target);
             return E_FAIL;
@@ -290,7 +284,7 @@ static HRESULT WINAPI dom_pi_get_nextSibling(
 
 static HRESULT xml_get_value(xmlChar **p, xmlChar **value)
 {
-    xmlChar *v;
+    xmlChar *v, q;
     int len;
 
     while (isspace(**p)) *p += 1;
@@ -298,12 +292,13 @@ static HRESULT xml_get_value(xmlChar **p, xmlChar **value)
     *p += 1;
 
     while (isspace(**p)) *p += 1;
-    if (**p != '"') return XML_E_MISSINGQUOTE;
+    if (**p != '"' && **p != '\'') return XML_E_MISSINGQUOTE;
+    q = **p;
     *p += 1;
 
     v = *p;
-    while (**p && **p != '"') *p += 1;
-    if (!**p) return XML_E_EXPECTINGCLOSEQUOTE;
+    while (**p && **p != q) *p += 1;
+    if (!**p) return XML_E_BADCHARINSTRING;
     len = *p - v;
     if (!len) return XML_E_MISSINGNAME;
     *p += 1;
@@ -438,26 +433,12 @@ static HRESULT WINAPI dom_pi_get_attributes(
     hr = node_get_nodeName(&This->node, &name);
     if (hr != S_OK) return hr;
 
-    if (!strcmpW(name, xmlW))
-    {
-        if (!This->node.node->properties)
-        {
-            hr = parse_xml_decl(This->node.node);
-            if (hr != S_OK)
-            {
-                SysFreeString(name);
-                return S_FALSE;
-            }
-        }
-
+    if (!wcscmp(name, xmlW))
         *map = create_nodemap(This->node.node, &dom_pi_attr_map);
-        SysFreeString(name);
-        return S_OK;
-    }
 
     SysFreeString(name);
 
-    return S_FALSE;
+    return *map ? S_OK : S_FALSE;
 }
 
 static HRESULT WINAPI dom_pi_insertBefore(
@@ -754,7 +735,7 @@ static HRESULT WINAPI dom_pi_put_data(
     if(hr == S_OK)
     {
         static const WCHAR xmlW[] = {'x','m','l',0};
-        if(!strcmpW(target, xmlW))
+        if(!wcscmp(target, xmlW))
         {
             SysFreeString(target);
             return E_FAIL;
@@ -764,6 +745,34 @@ static HRESULT WINAPI dom_pi_put_data(
     }
 
     return node_set_content(&This->node, data);
+}
+
+HRESULT dom_pi_put_xml_decl(IXMLDOMNode *node, BSTR data)
+{
+    static const WCHAR xmlW[] = {'x','m','l',0};
+    xmlnode *node_obj;
+    HRESULT hr;
+    BSTR name;
+
+    if (!data)
+        return XML_E_XMLDECLSYNTAX;
+
+    node_obj = get_node_obj(node);
+    hr = node_set_content(node_obj, data);
+    if (FAILED(hr))
+        return hr;
+
+    hr = node_get_nodeName(node_obj, &name);
+    if (FAILED(hr))
+        return hr;
+
+    if (!lstrcmpW(name, xmlW) && !node_obj->node->properties)
+        hr = parse_xml_decl(node_obj->node);
+    else
+        hr = S_OK;
+
+    SysFreeString(name);
+    return hr;
 }
 
 static const struct IXMLDOMProcessingInstructionVtbl dom_pi_vtbl =
@@ -947,5 +956,3 @@ IUnknown* create_pi( xmlNodePtr pi )
 
     return (IUnknown*)&This->IXMLDOMProcessingInstruction_iface;
 }
-
-#endif

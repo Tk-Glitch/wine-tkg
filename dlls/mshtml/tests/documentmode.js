@@ -210,15 +210,18 @@ sync_test("builtin_toString", function() {
     if(clientRects) test("clientRect", clientRects[0], "ClientRect");
     if(clientRects) test("clientRects", clientRects, "ClientRectList");
     if(currentStyle) test("currentStyle", currentStyle, "MSCurrentStyleCSSProperties");
+    if(v >= 11 /* todo_wine */) test("document", document, v < 11 ? "Document" : "HTMLDocument");
     test("elements", document.getElementsByTagName("body"), "HTMLCollection");
     test("history", window.history, "History");
     test("implementation", document.implementation, "DOMImplementation");
     if(localStorage) test("localStorage", localStorage, "Storage");
     test("location", window.location, "Object", window.location.href);
+    if(v >= 11 /* todo_wine */) test("mimeTypes", window.navigator.mimeTypes, v < 11 ? "MSMimeTypesCollection" : "MimeTypeArray");
     test("navigator", window.navigator, "Navigator");
     test("performance", window.performance, "Performance");
     test("performanceNavigation", window.performance.navigation, "PerformanceNavigation");
     test("performanceTiming", window.performance.timing, "PerformanceTiming");
+    if(v >= 11 /* todo_wine */) test("plugins", window.navigator.plugins, v < 11 ? "MSPluginsCollection" : "PluginArray");
     test("screen", window.screen, "Screen");
     test("sessionStorage", window.sessionStorage, "Storage");
     test("style", document.body.style, "MSStyleCSSProperties");

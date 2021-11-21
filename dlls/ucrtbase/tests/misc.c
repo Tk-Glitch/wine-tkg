@@ -538,16 +538,19 @@ static void test_lldiv(void)
 
 static void test_isblank(void)
 {
-    int c;
+    int c, r;
 
     for(c = 0; c <= 0xff; c++) {
-        if(c == '\t' || c == ' ') {
-            if(c == '\t')
-                ok(!_isctype(c, _BLANK), "tab shouldn't be blank\n");
-            else
-                ok(_isctype(c, _BLANK), "space should be blank\n");
+        if(c == '\t') {
+            ok(!_isctype(c, _BLANK), "tab shouldn't be blank\n");
             ok(isblank(c), "%d should be blank\n", c);
-            ok(_isblank_l(c, NULL), "%d should be blank\n", c);
+            r = _isblank_l(c, NULL);
+            ok(!r || broken(r == _BLANK), "tab shouldn't be blank (got %x)\n", r);
+        } else if(c == ' ') {
+            ok(_isctype(c, _BLANK), "space should be blank\n");
+            ok(isblank(c), "%d should be blank\n", c);
+            r = _isblank_l(c, NULL);
+            ok(r == _BLANK, "space should be blank (got %x)\n", r);
         } else {
             ok(!_isctype(c, _BLANK), "%d shouldn't be blank\n", c);
             ok(!isblank(c), "%d shouldn't be blank\n", c);
@@ -1539,6 +1542,55 @@ static void test_fenv(void)
     ok(!except, "expected 0, got %lx\n", except);
 }
 
+static void test_fopen_exclusive( void )
+{
+    char path[MAX_PATH*2];
+    DWORD len;
+    FILE *fp;
+
+    len = GetTempPathA(MAX_PATH, path);
+    ok(len, "GetTempPathA failed\n");
+    strcat(path, "\\fileexcl.tst");
+
+    SET_EXPECT(global_invalid_parameter_handler);
+    fp = fopen(path, "wx");
+    if(called_global_invalid_parameter_handler)
+    {
+        win_skip("skipping fopen x mode tests.\n");
+        return;
+    }
+    expect_global_invalid_parameter_handler = FALSE;
+    ok(fp != NULL, "creating file with mode wx failed\n");
+    fclose(fp);
+
+    fp = fopen(path, "wx");
+    ok(!fp, "overwrote existing file with mode wx\n");
+    unlink(path);
+
+    fp = fopen(path, "w+x");
+    ok(fp != NULL, "creating file with mode w+x failed\n");
+    fclose(fp);
+
+    fp = fopen(path, "w+x");
+    ok(!fp, "overwrote existing file with mode w+x\n");
+
+    SET_EXPECT(global_invalid_parameter_handler);
+    fp = fopen(path, "rx");
+    CHECK_CALLED(global_invalid_parameter_handler);
+    ok(!fp, "opening file with mode rx succeeded\n");
+    unlink(path);
+
+    SET_EXPECT(global_invalid_parameter_handler);
+    fp = fopen(path, "xw");
+    CHECK_CALLED(global_invalid_parameter_handler);
+    ok(!fp, "creating file with mode xw succeeded\n");
+
+    fp = fopen(path, "wbx");
+    ok(fp != NULL, "creating file with mode wbx failed\n");
+    fclose(fp);
+    unlink(path);
+}
+
 START_TEST(misc)
 {
     int arg_c;
@@ -1580,4 +1632,5 @@ START_TEST(misc)
     test_clock();
     test_thread_storage();
     test_fenv();
+    test_fopen_exclusive();
 }

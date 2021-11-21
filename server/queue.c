@@ -1897,12 +1897,12 @@ static int queue_mouse_message( struct desktop *desktop, user_handle_t win, cons
 
     if ((req_flags & SEND_HWMSG_RAWINPUT) && (foreground = get_foreground_thread( desktop, win )))
     {
+        memset( &raw_msg, 0, sizeof(raw_msg) );
         raw_msg.foreground = foreground;
         raw_msg.desktop    = desktop;
         raw_msg.source     = source;
         raw_msg.time       = time;
         raw_msg.message    = WM_INPUT;
-        raw_msg.hid_report = NULL;
 
         msg_data = &raw_msg.data;
         msg_data->info                = input->mouse.info;
@@ -2034,12 +2034,12 @@ static int queue_keyboard_message( struct desktop *desktop, user_handle_t win, c
 
     if ((req_flags & SEND_HWMSG_RAWINPUT) && (foreground = get_foreground_thread( desktop, win )))
     {
+        memset( &raw_msg, 0, sizeof(raw_msg) );
         raw_msg.foreground = foreground;
         raw_msg.desktop    = desktop;
         raw_msg.source     = source;
         raw_msg.time       = time;
         raw_msg.message    = WM_INPUT;
-        raw_msg.hid_report = NULL;
 
         msg_data = &raw_msg.data;
         msg_data->info                 = input->kbd.info;
@@ -2105,12 +2105,10 @@ static void queue_custom_hardware_message( struct desktop *desktop, user_handle_
     {
     case WM_INPUT:
     case WM_INPUT_DEVICE_CHANGE:
-        raw_msg.foreground = NULL;
-        raw_msg.desktop    = NULL;
+        memset( &raw_msg, 0, sizeof(raw_msg) );
         raw_msg.source     = source;
         raw_msg.time       = get_tick_count();
         raw_msg.message    = input->hw.msg;
-        raw_msg.hid_report = NULL;
 
         if (input->hw.rawinput.type == RIM_TYPEHID)
         {
@@ -2125,9 +2123,7 @@ static void queue_custom_hardware_message( struct desktop *desktop, user_handle_
         }
 
         msg_data = &raw_msg.data;
-        msg_data->info     = 0;
         msg_data->size     = sizeof(*msg_data) + report_size;
-        msg_data->flags    = 0;
         msg_data->rawinput = input->hw.rawinput;
 
         if (input->hw.msg == WM_INPUT && input->hw.rawinput.type == RIM_TYPEMOUSE)

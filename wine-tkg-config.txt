@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:39:30 PM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:40:52 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.19.r0.g7554bd4b41a
-Using wine-staging patchset (version 6.19.r0.gd1ea5ced)
+Wine (plain) version: 6.20.r0.gfaf645d0163
+Using wine-staging patchset (version 6.20.r0.g3fb6eb99)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -11,14 +11,75 @@ Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
 Applied reverting hotfix staging-pulseaudio-reverts.mystagingrevert
+Applied hotfix staging-6dcaff42.mystagingpatch
 Applied hotfix staging-reenable-pulse.mystagingpatch
-Applied hotfix protonify_stg_syscall_emu-006.mystagingpatch
+Applied hotfix protonify_stg_syscall_emu-007.mystagingpatch
+Applied hotfix 0001-Revert-winegstreamer-Get-rid-of-the-WMReader-typedef.myearlypatch
+Applied hotfix 0002-Revert-wmvcore-Move-the-async-reader-implementation-.myearlypatch
+Applied hotfix 0003-Revert-winegstreamer-Get-rid-of-the-WMSyncReader-typ.myearlypatch
+Applied hotfix 0004-Revert-wmvcore-Move-the-sync-reader-implementation-t.myearlypatch
+Applied hotfix 0005-Revert-winegstreamer-Translate-GST_AUDIO_CHANNEL_POS.myearlypatch
+Applied hotfix 0006-Revert-winegstreamer-Trace-the-unfiltered-caps-in-si.myearlypatch
+Applied hotfix 0007-Revert-winegstreamer-Avoid-seeking-past-the-end-of-a.myearlypatch
+Applied hotfix 0008-Revert-winegstreamer-Avoid-passing-a-NULL-buffer-to-.myearlypatch
+Applied hotfix 0009-Revert-winegstreamer-Use-array_reserve-to-reallocate.myearlypatch
+Applied hotfix 0010-Revert-winegstreamer-Handle-zero-length-reads-in-src.myearlypatch
+Applied hotfix 0011-Revert-winegstreamer-Convert-the-Unix-library-to-the.myearlypatch
+Applied hotfix 0012-Revert-winegstreamer-Return-void-from-wg_parser_stre.myearlypatch
+Applied hotfix 0013-Revert-winegstreamer-Move-Unix-library-definitions-i.myearlypatch
+Applied hotfix 0014-Revert-winegstreamer-Remove-the-no-longer-used-start.myearlypatch
+Applied hotfix 0015-Revert-winegstreamer-Set-unlimited-buffering-using-a.myearlypatch
+Applied hotfix 0016-Revert-winegstreamer-Initialize-GStreamer-in-wg_pars.myearlypatch
+Applied hotfix 0017-Revert-winegstreamer-Use-a-single-wg_parser_create-e.myearlypatch
+Applied hotfix 0018-Revert-winegstreamer-Fix-return-code-in-init_gst-fai.myearlypatch
+Applied hotfix 0019-Revert-winegstreamer-Allocate-source-media-buffers-i.myearlypatch
+Applied hotfix 0020-Revert-winegstreamer-Duplicate-source-shutdown-path-.myearlypatch
+Applied hotfix 0021-Revert-winegstreamer-Properly-clean-up-from-failure-.myearlypatch
+Applied hotfix 0022-Revert-winegstreamer-Factor-out-more-of-the-init_gst.myearlypatch
+Applied hotfix 0001-winegstreamer-Activate-source-pad-in-push-mode-if-it.myearlypatch
+Applied hotfix 0002-winegstreamer-Push-stream-start-and-segment-events-i.myearlypatch
+Applied hotfix 0003-winegstreamer-Introduce-H.264-decoder-transform.myearlypatch
+Applied hotfix 0004-winegstreamer-Implement-GetInputAvailableType-for-de.myearlypatch
+Applied hotfix 0005-winegstreamer-Implement-GetOutputAvailableType-for-d.myearlypatch
+Applied hotfix 0006-winegstreamer-Implement-SetInputType-for-decode-tran.myearlypatch
+Applied hotfix 0007-winegstreamer-Implement-SetOutputType-for-decode-tra.myearlypatch
+Applied hotfix 0008-winegstreamer-Implement-Get-Input-Output-StreamInfo-.myearlypatch
+Applied hotfix 0009-winegstreamer-Add-push-mode-path-for-wg_parser.myearlypatch
+Applied hotfix 0010-winegstreamer-Implement-Process-Input-Output-for-dec.myearlypatch
+Applied hotfix 0011-winestreamer-Implement-ProcessMessage-for-decoder-tr.myearlypatch
+Applied hotfix 0012-winegstreamer-Semi-stub-GetAttributes-for-decoder-tr.myearlypatch
+Applied hotfix 0013-winegstreamer-Register-the-H.264-decoder-transform.myearlypatch
+Applied hotfix 0014-winegstreamer-Introduce-AAC-decoder-transform.myearlypatch
+Applied hotfix 0015-winegstreamer-Register-the-AAC-decoder-transform.myearlypatch
+Applied hotfix 0016-winegstreamer-Rename-GStreamer-objects-to-be-more-ge.myearlypatch
+Applied hotfix 0017-winegstreamer-Report-streams-backwards-in-media-sour.myearlypatch
+Applied hotfix 0018-winegstreamer-Implement-Process-Input-Output-for-aud.myearlypatch
+Applied hotfix 0019-winegstreamer-Implement-Get-Input-Output-StreamInfo-.myearlypatch
+Applied hotfix 0020-winegstreamer-Semi-stub-Get-Attributes-functions-for.myearlypatch
+Applied hotfix 0021-winegstreamer-Introduce-color-conversion-transform.myearlypatch
+Applied hotfix 0022-winegstreamer-Register-the-color-conversion-transfor.myearlypatch
+Applied hotfix 0023-winegstreamer-Implement-GetInputAvailableType-for-co.myearlypatch
+Applied hotfix 0024-winegstreamer-Implement-SetInputType-for-color-conve.myearlypatch
+Applied hotfix 0025-winegstreamer-Implement-GetOutputAvailableType-for-c.myearlypatch
+Applied hotfix 0026-winegstreamer-Implement-SetOutputType-for-color-conv.myearlypatch
+Applied hotfix 0027-winegstreamer-Implement-Process-Input-Output-for-col.myearlypatch
+Applied hotfix 0028-winegstreamer-Implement-ProcessMessage-for-color-con.myearlypatch
+Applied hotfix 0029-winegstreamer-Implement-Get-Input-Output-StreamInfo-.myearlypatch
+Applied hotfix 0030-mf-topology-Forward-failure-from-SetOutputType-when-.myearlypatch
+Applied hotfix 0031-winegstreamer-Handle-flush-command-in-audio-converst.myearlypatch
+Applied hotfix 0032-winegstreamer-In-the-default-configuration-select-on.myearlypatch
+Applied hotfix 0033-winegstreamer-Implement-MF_SD_LANGUAGE.myearlypatch
+Applied hotfix 0034-winegstreamer-Only-require-videobox-element-for-pars.myearlypatch
+Applied hotfix 0035-winegstreamer-Don-t-rely-on-max_size-in-unseekable-p.myearlypatch
+Applied hotfix 0036-winegstreamer-Implement-MFT_MESSAGE_COMMAND_FLUSH-fo.myearlypatch
+Applied hotfix 0037-winegstreamer-Default-Frame-size-if-one-isn-t-availa.myearlypatch
+Applied hotfix 0038-mfplat-Stub-out-MFCreateDXGIDeviceManager-to-avoid-t.myearlypatch
 Applied hotfix pulse_reverts-6.myearlypatch
 plasma_systray_fix.patch -- ( Applied plasma 5 systray fix )
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W ntdll-NtAlertThreadByThreadId -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W imm32-com-initialization
+Staging overrides, if any: -W ntdll-NtAlertThreadByThreadId -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW
 
 use_clock_monotonic-staging.patch -- ( Applied clock_monotonic patch )
 fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
@@ -28,7 +89,7 @@ fsync_futex2.patch -- ( Add futex2 support to fsync )
 valve_proton_fullscreen_hack-staging-c9c7130.patch -- ( Applied Proton fullscreen hack patch (c9c7130) )
 LAA-unix-staging.patch -- ( Applied large address aware override support )
 
-proton-tkg-staging-d8be858.patch -- ( Using Steam-specific Proton-tkg patches (staging-d8be858) 2/2 )
+proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 2/3 )
 rdr2.patch -- ( Enable Proton's RDR2 fixes from Paul Gofman )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 josh-flat-theme.patch -- ( Add Josh's better-theme )
@@ -39,7 +100,6 @@ Applied hotfix memset.mypatch
 Applied hotfix 0001-proton-bcrypt_rdr2_fixes.mypatch
 Applied hotfix 0002-bcrypt-Add-support-for-calculating-secret-ecc-keys.mypatch
 Applied hotfix 0003-bcrypt-Add-support-for-OAEP-padded-asymmetric-key-de.mypatch
-Applied hotfix imm32-com-initialization_no_net_active_window.mypatch
 Applied hotfix virtual_alloc_remi2.mypatch
 Applied hotfix a608ef1.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch

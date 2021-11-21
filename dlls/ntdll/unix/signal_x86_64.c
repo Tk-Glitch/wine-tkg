@@ -25,7 +25,6 @@
 #ifdef __x86_64__
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -34,11 +33,10 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/mman.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <unistd.h>
 #ifdef HAVE_MACHINE_SYSARCH_H
 # include <machine/sysarch.h>
 #endif

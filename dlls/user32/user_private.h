@@ -25,7 +25,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "winuser.h"
+#include "ntuser.h"
 #include "winreg.h"
 #include "winternl.h"
 #include "hidusage.h"
@@ -210,7 +210,9 @@ C_ASSERT( sizeof(struct user_thread_info) <= sizeof(((TEB *)0)->Win32ClientInfo)
 extern INT global_key_state_counter DECLSPEC_HIDDEN;
 extern BOOL (WINAPI *imm_register_window)(HWND) DECLSPEC_HIDDEN;
 extern void (WINAPI *imm_unregister_window)(HWND) DECLSPEC_HIDDEN;
-extern void (WINAPI *imm_activate_window)(HWND) DECLSPEC_HIDDEN;
+#define WM_IME_INTERNAL 0x287
+#define IME_INTERNAL_ACTIVATE 0x17
+#define IME_INTERNAL_DEACTIVATE 0x18
 
 struct user_key_state_info
 {
@@ -377,15 +379,6 @@ typedef struct
 
 extern int bitmap_info_size( const BITMAPINFO * info, WORD coloruse ) DECLSPEC_HIDDEN;
 extern BOOL get_icon_size( HICON handle, SIZE *size ) DECLSPEC_HIDDEN;
-
-struct png_funcs
-{
-    BOOL (CDECL *get_png_info)(const void *png_data, DWORD size, int *width, int *height, int *bpp);
-    BITMAPINFO * (CDECL *load_png)(const char *png_data, DWORD *size);
-};
-
-/* May be NULL if libpng cannot be loaded. */
-extern const struct png_funcs *png_funcs DECLSPEC_HIDDEN;
 
 /* Mingw's assert() imports MessageBoxA and gets confused by user32 exporting it */
 #ifdef __MINGW32__

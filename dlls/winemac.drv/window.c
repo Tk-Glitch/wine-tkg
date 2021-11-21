@@ -2406,6 +2406,8 @@ void macdrv_app_activated(void)
  */
 void macdrv_app_deactivated(void)
 {
+    ClipCursor(NULL);
+
     if (GetActiveWindow() == GetForegroundWindow())
     {
         TRACE("setting fg to desktop\n");
@@ -2433,6 +2435,21 @@ void macdrv_window_maximize_requested(HWND hwnd)
 void macdrv_window_minimize_requested(HWND hwnd)
 {
     perform_window_command(hwnd, WS_MINIMIZEBOX, WS_MINIMIZE, SC_MINIMIZE, HTMINBUTTON);
+}
+
+
+/***********************************************************************
+ *              macdrv_window_did_minimize
+ *
+ * Handler for WINDOW_DID_MINIMIZE events.
+ */
+void macdrv_window_did_minimize(HWND hwnd)
+{
+    TRACE("win %p\n", hwnd);
+
+    /* If all our windows are minimized, disable cursor clipping. */
+    if (!macdrv_is_any_wine_window_visible())
+        ClipCursor(NULL);
 }
 
 
@@ -2870,6 +2887,8 @@ BOOL query_resize_size(HWND hwnd, macdrv_query *query)
 BOOL query_resize_start(HWND hwnd)
 {
     TRACE("hwnd %p\n", hwnd);
+
+    ClipCursor(NULL);
 
     sync_window_min_max_info(hwnd);
     SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0);

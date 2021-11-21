@@ -42,7 +42,6 @@
 #include "rtworkq.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xmlhttp);
 
@@ -392,7 +391,7 @@ static HRESULT WINAPI BindStatusCallback_GetBindInfo(IBindStatusCallback *iface,
     if (This->request->verb == BINDVERB_CUSTOM)
     {
         pbindinfo->szCustomVerb = CoTaskMemAlloc(SysStringByteLen(This->request->custom)+sizeof(WCHAR));
-        strcpyW(pbindinfo->szCustomVerb, This->request->custom);
+        lstrcpyW(pbindinfo->szCustomVerb, This->request->custom);
     }
 
     return S_OK;
@@ -515,10 +514,10 @@ static HRESULT WINAPI BSCHttpNegotiate_BeginningTransaction(IHttpNegotiate *ifac
 
     if (base_uri)
     {
-        strcpyW(ptr, refererW);
-        strcatW(ptr, base_uri);
-        strcatW(ptr, crlfW);
-        ptr += strlenW(refererW) + SysStringLen(base_uri) + strlenW(crlfW);
+        lstrcpyW(ptr, refererW);
+        lstrcatW(ptr, base_uri);
+        lstrcatW(ptr, crlfW);
+        ptr += lstrlenW(refererW) + SysStringLen(base_uri) + lstrlenW(crlfW);
         SysFreeString(base_uri);
     }
 
@@ -594,11 +593,11 @@ static HRESULT WINAPI BSCHttpNegotiate_OnResponse(IHttpNegotiate *iface, DWORD c
         ptr = line = resp_headers;
 
         /* skip HTTP-Version */
-        ptr = strchrW(ptr, ' ');
+        ptr = wcschr(ptr, ' ');
         if (ptr)
         {
             /* skip Status-Code */
-            ptr = strchrW(++ptr, ' ');
+            ptr = wcschr(++ptr, ' ');
             if (ptr)
             {
                 status_text = ++ptr;
@@ -866,7 +865,7 @@ static HRESULT verify_uri(httprequest *This, IUri *uri)
 
     hr = IUri_GetHost(This->base_uri, &base_host);
     if(SUCCEEDED(hr)) {
-        if(strcmpiW(host, base_host)) {
+        if(wcsicmp(host, base_host)) {
             WARN("Hosts don't match\n");
             hr = E_ACCESSDENIED;
         }
@@ -903,21 +902,21 @@ static HRESULT httprequest_open(httprequest *This, BSTR method, BSTR url,
     This->user = This->password = NULL;
     free_request_headers(This);
 
-    if (!strcmpiW(method, MethodGetW))
+    if (!wcsicmp(method, MethodGetW))
     {
         This->verb = BINDVERB_GET;
     }
-    else if (!strcmpiW(method, MethodPutW))
+    else if (!wcsicmp(method, MethodPutW))
     {
         This->verb = BINDVERB_PUT;
     }
-    else if (!strcmpiW(method, MethodPostW))
+    else if (!wcsicmp(method, MethodPostW))
     {
         This->verb = BINDVERB_POST;
     }
-    else if (!strcmpiW(method, MethodDeleteW) ||
-             !strcmpiW(method, MethodHeadW) ||
-             !strcmpiW(method, MethodPropFindW))
+    else if (!wcsicmp(method, MethodDeleteW) ||
+             !wcsicmp(method, MethodHeadW) ||
+             !wcsicmp(method, MethodPropFindW))
     {
         This->verb = BINDVERB_CUSTOM;
         SysReAllocString(&This->custom, method);
@@ -1002,7 +1001,7 @@ static HRESULT httprequest_setRequestHeader(httprequest *This, BSTR header, BSTR
     /* replace existing header value if already added */
     LIST_FOR_EACH_ENTRY(entry, &This->reqheaders, struct httpheader, entry)
     {
-        if (lstrcmpW(entry->header, header) == 0)
+        if (wcscmp(entry->header, header) == 0)
         {
             LONG length = SysStringLen(entry->value);
             HRESULT hr;
@@ -1058,7 +1057,7 @@ static HRESULT httprequest_getResponseHeader(httprequest *This, BSTR header, BST
 
     LIST_FOR_EACH_ENTRY(entry, &This->respheaders, struct httpheader, entry)
     {
-        if (!strcmpiW(entry->header, header))
+        if (!wcsicmp(entry->header, header))
         {
             *value = SysAllocString(entry->value);
             TRACE("header value %s\n", debugstr_w(*value));

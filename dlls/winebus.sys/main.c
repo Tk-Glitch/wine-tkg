@@ -343,7 +343,7 @@ static void bus_unlink_hid_device(DEVICE_OBJECT *device)
     RtlLeaveCriticalSection(&device_list_cs);
 }
 
-#if defined(__i386__) && !defined(_WIN32)
+#ifdef __ASM_USE_FASTCALL_WRAPPER
 extern void * WINAPI wrap_fastcall_func1(void *func, const void *a);
 __ASM_STDCALL_FUNC(wrap_fastcall_func1, 8,
                    "popl %ecx\n\t"
@@ -730,6 +730,8 @@ static NTSTATUS udev_driver_init(void)
     if (bus_options.disable_hidraw) TRACE("UDEV hidraw devices disabled in registry\n");
     bus_options.disable_input = check_bus_option(L"DisableInput", 0);
     if (bus_options.disable_input) TRACE("UDEV input devices disabled in registry\n");
+    bus_options.disable_udevd = check_bus_option(L"DisableUdevd", 0);
+    if (bus_options.disable_udevd) TRACE("UDEV udevd use disabled in registry\n");
 
     return bus_main_thread_start(&bus);
 }

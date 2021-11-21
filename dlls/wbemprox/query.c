@@ -1006,6 +1006,19 @@ static HRESULT get_system_propval( const struct view *view, UINT table_index, UI
         if (type) *type = CIM_STRING;
         return S_OK;
     }
+    if (!wcsicmp( name, L"__DERIVATION" ))
+    {
+        if (ret)
+        {
+            SAFEARRAY *sa;
+            FIXME( "returning empty array for __DERIVATION\n" );
+            if (!(sa = SafeArrayCreateVector( VT_BSTR, 0, 0 ))) return E_OUTOFMEMORY;
+            V_VT( ret ) = VT_BSTR | VT_ARRAY;
+            V_ARRAY( ret ) = sa;
+        }
+        if (type) *type = CIM_STRING | CIM_FLAG_ARRAY;
+        return S_OK;
+    }
     FIXME("system property %s not implemented\n", debugstr_w(name));
     return WBEM_E_NOT_FOUND;
 }
@@ -1385,7 +1398,8 @@ HRESULT put_propval( const struct view *view, UINT index, const WCHAR *name, VAR
 HRESULT get_properties( const struct view *view, UINT index, LONG flags, SAFEARRAY **props )
 {
     static const WCHAR * const system_props[] =
-        { L"__GENUS", L"__CLASS", L"__RELPATH", L"__PROPERTY_COUNT", L"__SERVER", L"__NAMESPACE", L"__PATH" };
+        { L"__GENUS", L"__CLASS", L"__RELPATH", L"__PROPERTY_COUNT", L"__DERIVATION", L"__SERVER", L"__NAMESPACE",
+          L"__PATH" };
     SAFEARRAY *sa;
     BSTR str;
     UINT i, table_index, result_index, count = 0;

@@ -1068,7 +1068,7 @@ int WINAPI bind( SOCKET s, const struct sockaddr *addr, int len )
 
     if (!addr)
     {
-        SetLastError( WSAEAFNOSUPPORT );
+        SetLastError( WSAEFAULT );
         return -1;
     }
 
@@ -3363,6 +3363,7 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
         CloseHandle(handle);
         return INVALID_SOCKET;
     }
+    WSASetLastError(0);
     return ret;
 
 done:

@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <stdarg.h>
+#include <zlib.h>
 
 #include "windef.h"
 #include "winternl.h"
@@ -38,7 +39,6 @@
 
 #include "dbghelp_private.h"
 #include "image_private.h"
-#include "zlib.h"
 
 #include "wine/debug.h"
 
@@ -1888,19 +1888,19 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
         case DW_FORM_data4:
         case DW_FORM_udata:
         case DW_FORM_addr:
-            v.n1.n2.vt = VT_UI4;
-            v.n1.n2.n3.lVal = value.u.uvalue;
+            V_VT(&v) = VT_UI4;
+            V_UI4(&v) = value.u.uvalue;
             break;
 
         case DW_FORM_data8:
         case DW_FORM_sec_offset:
-            v.n1.n2.vt = VT_UI8;
-            v.n1.n2.n3.llVal = value.u.lluvalue;
+            V_VT(&v) = VT_UI8;
+            V_UI8(&v) = value.u.lluvalue;
             break;
 
         case DW_FORM_sdata:
-            v.n1.n2.vt = VT_I4;
-            v.n1.n2.n3.lVal = value.u.svalue;
+            V_VT(&v) = VT_I4;
+            V_I4(&v) = value.u.svalue;
             break;
 
         case DW_FORM_strp:
@@ -1908,8 +1908,8 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
             /* FIXME: native doesn't report const strings from here !!
              * however, the value of the string is in the code somewhere
              */
-            v.n1.n2.vt = VT_I1 | VT_BYREF;
-            v.n1.n2.n3.byref = pool_strdup(&subpgm->ctx->module_ctx->module->pool, value.u.string);
+            V_VT(&v) = VT_BYREF;
+            V_BYREF(&v) = pool_strdup(&subpgm->ctx->module_ctx->module->pool, value.u.string);
             break;
 
         case DW_FORM_block:
@@ -1917,23 +1917,23 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
         case DW_FORM_block2:
         case DW_FORM_block4:
         case DW_FORM_exprloc:
-            v.n1.n2.vt = VT_I4;
+            V_VT(&v) = VT_I4;
             switch (value.u.block.size)
             {
-            case 1:     v.n1.n2.n3.lVal = *(BYTE*)value.u.block.ptr;    break;
-            case 2:     v.n1.n2.n3.lVal = *(USHORT*)value.u.block.ptr;  break;
-            case 4:     v.n1.n2.n3.lVal = *(DWORD*)value.u.block.ptr;   break;
+            case 1:     V_I4(&v) = *(BYTE*)value.u.block.ptr;    break;
+            case 2:     V_I4(&v) = *(USHORT*)value.u.block.ptr;  break;
+            case 4:     V_I4(&v) = *(DWORD*)value.u.block.ptr;   break;
             default:
-                v.n1.n2.vt = VT_I1 | VT_BYREF;
-                v.n1.n2.n3.byref = pool_alloc(&subpgm->ctx->module_ctx->module->pool, value.u.block.size);
-                memcpy(v.n1.n2.n3.byref, value.u.block.ptr, value.u.block.size);
+                V_VT(&v) = VT_BYREF;
+                V_BYREF(&v) = pool_alloc(&subpgm->ctx->module_ctx->module->pool, value.u.block.size);
+                memcpy(V_BYREF(&v), value.u.block.ptr, value.u.block.size);
             }
             break;
 
         default:
             FIXME("Unsupported form for const value %s (%lx)\n",
                   debugstr_a(name.u.string), value.form);
-            v.n1.n2.vt = VT_EMPTY;
+            V_VT(&v) = VT_EMPTY;
         }
         if (subpgm->func)
         {
@@ -3652,10 +3652,7 @@ BOOL dwarf2_virtual_unwind(struct cpu_stack_walk *csw, ULONG_PTR ip,
     struct module_pair pair;
     struct frame_info info;
 
-    if (!(pair.pcs = process_find_by_handle(csw->hProcess)) ||
-        !(pair.requested = module_find_by_addr(pair.pcs, ip, DMT_UNKNOWN)) ||
-        !module_get_debug(&pair))
-        return FALSE;
+    if (!module_init_pair(&pair, csw->hProcess, ip)) return FALSE;
     if (!dwarf2_fetch_frame_info(pair.effective, csw->cpu, ip, &info)) return FALSE;
 
     /* if at very beginning of function, return and use default unwinder */
@@ -3692,10 +3689,10 @@ static BOOL compute_call_frame_cfa(struct module* module, ULONG_PTR ip, struct l
         {
         case RULE_EXPRESSION:
             FIXME("Too complex expression for frame_CFA resolution (RULE_EXPRESSION)\n");
-            break;
+            return FALSE;
         case RULE_VAL_EXPRESSION:
             FIXME("Too complex expression for frame_CFA resolution (RULE_VAL_EXPRESSION)\n");
-            break;
+            return FALSE;
         default:
             frame->kind = loc_regrel;
             frame->reg = dbghelp_current_cpu->map_dwarf_register(info.state.cfa_reg, module, TRUE);

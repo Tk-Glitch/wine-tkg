@@ -161,14 +161,14 @@ static void set_hat_value(struct unix_device *iface, int index, int value)
     switch (value)
     {
     case SDL_HAT_CENTERED: break;
-    case SDL_HAT_UP: y = 1; break;
-    case SDL_HAT_RIGHTUP: y = x = 1; break;
+    case SDL_HAT_DOWN: y = 1; break;
+    case SDL_HAT_RIGHTDOWN: y = x = 1; break;
     case SDL_HAT_RIGHT: x = 1; break;
-    case SDL_HAT_RIGHTDOWN: x = 1; y = -1; break;
-    case SDL_HAT_DOWN: y = -1; break;
-    case SDL_HAT_LEFTDOWN: x = y = -1; break;
+    case SDL_HAT_RIGHTUP: x = 1; y = -1; break;
+    case SDL_HAT_UP: y = -1; break;
+    case SDL_HAT_LEFTUP: x = y = -1; break;
     case SDL_HAT_LEFT: x = -1; break;
-    case SDL_HAT_LEFTUP: x = -1; y = 1; break;
+    case SDL_HAT_LEFTDOWN: x = -1; y = 1; break;
     }
     hid_device_set_hatswitch_x(iface, index, x);
     hid_device_set_hatswitch_y(iface, index, y);
@@ -192,7 +192,8 @@ static BOOL descriptor_add_haptic(struct sdl_device *impl)
         pSDL_HapticRumbleInit(impl->sdl_haptic);
     }
 
-    if (pSDL_JoystickRumble && !pSDL_JoystickRumble(impl->sdl_joystick, 0, 0, 0))
+    if (!(impl->effect_support & EFFECT_SUPPORT_HAPTICS) && pSDL_JoystickRumble &&
+        !pSDL_JoystickRumble(impl->sdl_joystick, 0, 0, 0))
         impl->effect_support |= WINE_SDL_JOYSTICK_RUMBLE;
 
     if (impl->effect_support & EFFECT_SUPPORT_HAPTICS)
@@ -226,33 +227,47 @@ static BOOL descriptor_add_haptic(struct sdl_device *impl)
 
 static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
 {
-    static const USAGE joystick_usages[] =
+    static const USAGE_AND_PAGE absolute_usages[] =
     {
-        HID_USAGE_GENERIC_X,
-        HID_USAGE_GENERIC_Y,
-        HID_USAGE_GENERIC_Z,
-        HID_USAGE_GENERIC_RX,
-        HID_USAGE_GENERIC_RY,
-        HID_USAGE_GENERIC_RZ,
-        HID_USAGE_GENERIC_SLIDER,
-        HID_USAGE_GENERIC_DIAL,
-        HID_USAGE_GENERIC_WHEEL
+        {.UsagePage = HID_USAGE_PAGE_GENERIC,    .Usage = HID_USAGE_GENERIC_X},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC,    .Usage = HID_USAGE_GENERIC_Y},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC,    .Usage = HID_USAGE_GENERIC_Z},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC,    .Usage = HID_USAGE_GENERIC_RX},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC,    .Usage = HID_USAGE_GENERIC_RY},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC,    .Usage = HID_USAGE_GENERIC_RZ},
+        {.UsagePage = HID_USAGE_PAGE_SIMULATION, .Usage = HID_USAGE_SIMULATION_THROTTLE},
+        {.UsagePage = HID_USAGE_PAGE_SIMULATION, .Usage = HID_USAGE_SIMULATION_RUDDER},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC,    .Usage = HID_USAGE_GENERIC_WHEEL},
+        {.UsagePage = HID_USAGE_PAGE_SIMULATION, .Usage = HID_USAGE_SIMULATION_ACCELERATOR},
+        {.UsagePage = HID_USAGE_PAGE_SIMULATION, .Usage = HID_USAGE_SIMULATION_BRAKE},
+    };
+    static const USAGE_AND_PAGE relative_usages[] =
+    {
+        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_X},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_Y},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_RX},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_RY},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_Z},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_RZ},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_SLIDER},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_DIAL},
+        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_WHEEL},
     };
     struct sdl_device *impl = impl_from_unix_device(iface);
     int i, button_count, axis_count, ball_count, hat_count;
 
     axis_count = pSDL_JoystickNumAxes(impl->sdl_joystick);
-    if (axis_count > 6)
+    if (axis_count > ARRAY_SIZE(absolute_usages))
     {
-        FIXME("Clamping joystick to 6 axis\n");
-        axis_count = 6;
+        FIXME("More than %zu absolute axes found, ignoring.\n", ARRAY_SIZE(absolute_usages));
+        axis_count = ARRAY_SIZE(absolute_usages);
     }
 
     ball_count = pSDL_JoystickNumBalls(impl->sdl_joystick);
-    if (axis_count + ball_count * 2 > ARRAY_SIZE(joystick_usages))
+    if (ball_count > ARRAY_SIZE(relative_usages) / 2)
     {
-        FIXME("Capping ball + axis at 9\n");
-        ball_count = (ARRAY_SIZE(joystick_usages) - axis_count) / 2;
+        FIXME("More than %zu relative axes found, ignoring.\n", ARRAY_SIZE(relative_usages));
+        ball_count = ARRAY_SIZE(relative_usages) / 2;
     }
 
     hat_count = pSDL_JoystickNumHats(impl->sdl_joystick);
@@ -264,13 +279,19 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
     if (!hid_device_begin_input_report(iface))
         return STATUS_NO_MEMORY;
 
-    if (axis_count && !hid_device_add_axes(iface, axis_count, HID_USAGE_PAGE_GENERIC,
-                                           joystick_usages, FALSE, -32768, 32767))
-        return STATUS_NO_MEMORY;
+    for (i = 0; i < axis_count; i++)
+    {
+        if (!hid_device_add_axes(iface, 1, absolute_usages[i].UsagePage,
+                                 &absolute_usages[i].Usage, FALSE, -32768, 32767))
+            return STATUS_NO_MEMORY;
+    }
 
-    if (ball_count && !hid_device_add_axes(iface, ball_count * 2, HID_USAGE_PAGE_GENERIC,
-                                           &joystick_usages[axis_count], TRUE, INT32_MIN, INT32_MAX))
-        return STATUS_NO_MEMORY;
+    for (i = 0; i < ball_count; i++)
+    {
+        if (!hid_device_add_axes(iface, 2, relative_usages[2 * i].UsagePage,
+                                 &relative_usages[2 * i].Usage, TRUE, INT32_MIN, INT32_MAX))
+            return STATUS_NO_MEMORY;
+    }
 
     if (hat_count && !hid_device_add_hatswitch(iface, hat_count))
         return STATUS_NO_MEMORY;
@@ -394,9 +415,10 @@ NTSTATUS sdl_device_haptics_start(struct unix_device *iface, DWORD duration_ms,
     effect.leftright.large_magnitude = rumble_intensity;
     effect.leftright.small_magnitude = buzz_intensity;
 
-    if (impl->sdl_haptic) pSDL_HapticStopAll(impl->sdl_haptic);
     if (impl->effect_support & WINE_SDL_JOYSTICK_RUMBLE)
         pSDL_JoystickRumble(impl->sdl_joystick, 0, 0, 0);
+    else if (impl->sdl_haptic)
+        pSDL_HapticStopAll(impl->sdl_haptic);
     if (!effect.leftright.large_magnitude && !effect.leftright.small_magnitude)
         return STATUS_SUCCESS;
 
@@ -416,7 +438,7 @@ NTSTATUS sdl_device_haptics_start(struct unix_device *iface, DWORD duration_ms,
     else if (impl->effect_support & WINE_SDL_JOYSTICK_RUMBLE)
     {
         pSDL_JoystickRumble(impl->sdl_joystick, effect.leftright.large_magnitude,
-                            effect.leftright.small_magnitude, -1);
+                            effect.leftright.small_magnitude, duration_ms);
     }
 
     return STATUS_SUCCESS;
@@ -627,7 +649,7 @@ static NTSTATUS sdl_device_physical_effect_update(struct unix_device *iface, BYT
         break;
 
     case PID_USAGE_ET_CUSTOM_FORCE_DATA:
-        FIXME("not implemented!");
+        FIXME("not implemented!\n");
         break;
     }
 

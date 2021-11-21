@@ -29,11 +29,7 @@
 # error You must include port.h before all other headers
 #endif
 
-#ifndef _GNU_SOURCE
-# define _GNU_SOURCE  /* for pread/pwrite, isfinite */
-#endif
 #include <fcntl.h>
-#include <math.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <string.h>
@@ -47,15 +43,12 @@
  * Hard-coded values for the Windows platform
  */
 
-#if defined(_WIN32) && !defined(__CYGWIN__)
+#ifdef _WIN32
 
-#include <direct.h>
 #include <errno.h>
-#include <io.h>
-#include <process.h>
 
-static inline void *dlopen(const char *name, int flags) { return NULL; }
-static inline void *dlsym(void *handle, const char *name) { return NULL; }
+#define dlopen(name,flags)   NULL
+#define dlsym(handle,name)   NULL
 static inline int dlclose(void *handle) { return 0; }
 static inline const char *dlerror(void) { return "No dlopen support on Windows"; }
 static inline int symlink(const char *from, const char *to) { errno = ENOSYS; return -1; }
@@ -70,30 +63,10 @@ static inline int symlink(const char *from, const char *to) { errno = ENOSYS; re
 #endif
 #endif
 
-#endif  /* _WIN32 */
-
-/****************************************************************
- * Macro definitions
- */
-
-#ifdef HAVE_DLFCN_H
-#include <dlfcn.h>
 #else
-#define RTLD_LAZY    0x001
-#define RTLD_NOW     0x002
-#define RTLD_GLOBAL  0x100
-#endif
 
-/****************************************************************
- * Constants
- */
+#include <dlfcn.h>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-#ifndef M_PI_2
-#define M_PI_2 1.570796326794896619
-#endif
+#endif  /* _WIN32 */
 
 #endif /* !defined(__WINE_WINE_PORT_H) */

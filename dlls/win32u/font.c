@@ -49,6 +49,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(font);
 
 static HKEY wine_fonts_key;
 static HKEY wine_fonts_cache_key;
+static HKEY hkcu_key;
 
 struct font_physdev
 {
@@ -197,18 +198,6 @@ static struct font_gamma_ramp font_gamma_ramp;
 
 static void add_face_to_cache( struct gdi_font_face *face );
 static void remove_face_from_cache( struct gdi_font_face *face );
-
-static void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
-{
-    while (len--) *dst++ = (unsigned char)*src++;
-}
-
-static UINT asciiz_to_unicode( WCHAR *dst, const char *src )
-{
-    WCHAR *p = dst;
-    while ((*p++ = *src++));
-    return (p - dst) * sizeof(WCHAR);
-}
 
 UINT get_acp(void)
 {
@@ -552,7 +541,7 @@ static void get_fonts_win_dir_path( const WCHAR *file, WCHAR *path )
     if (file) lstrcatW( path, file );
 }
 
-static HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len )
+HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len )
 {
     UNICODE_STRING nameW = { name_len, name_len, (WCHAR *)name };
     OBJECT_ATTRIBUTES attr;
@@ -616,6 +605,12 @@ static HKEY reg_create_key( HKEY root, const WCHAR *name, ULONG name_len,
     return ret;
 }
 
+HKEY reg_open_hkcu_key( const char *name )
+{
+    WCHAR nameW[128];
+    return reg_open_key( hkcu_key, nameW, asciiz_to_unicode( nameW, name ) - sizeof(WCHAR) );
+}
+
 static void set_reg_value( HKEY hkey, const WCHAR *name, UINT type, const void *value, DWORD count )
 {
     unsigned int name_size = name ? lstrlenW( name ) * sizeof(WCHAR) : 0;
@@ -643,8 +638,8 @@ static ULONG query_reg_value( HKEY hkey, const WCHAR *name,
     return size - FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data);
 }
 
-static ULONG query_reg_ascii_value( HKEY hkey, const char *name,
-                                    KEY_VALUE_PARTIAL_INFORMATION *info, ULONG size )
+ULONG query_reg_ascii_value( HKEY hkey, const char *name,
+                             KEY_VALUE_PARTIAL_INFORMATION *info, ULONG size )
 {
     WCHAR nameW[64];
     asciiz_to_unicode( nameW, name );
@@ -4371,16 +4366,13 @@ static BOOL get_key_value( HKEY key, const char *name, DWORD *value )
     return !!count;
 }
 
-static UINT init_font_options( HKEY hkcu )
+static UINT init_font_options(void)
 {
     char value_buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[20 * sizeof(WCHAR)])];
     KEY_VALUE_PARTIAL_INFORMATION *info = (void *)value_buffer;
     HKEY key;
     DWORD i, val, gamma = 1400;
     UINT dpi = 0;
-
-    static const WCHAR desktop_keyW[] =
-        { 'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\','D','e','s','k','t','o','p' };
 
     if (query_reg_ascii_value( wine_fonts_key, "AntialiasFakeBoldOrItalic",
                                info, sizeof(value_buffer) ) && info->Type == REG_SZ)
@@ -4389,7 +4381,7 @@ static UINT init_font_options( HKEY hkcu )
         antialias_fakes = (wcschr( valsW, *(const WCHAR *)info->Data ) != NULL);
     }
 
-    if ((key = reg_open_key( hkcu, desktop_keyW, sizeof(desktop_keyW) )))
+    if ((key = reg_open_hkcu_key( "Control Panel\\Desktop" )))
     {
         /* FIXME: handle vertical orientations even though Windows doesn't */
         if (get_key_value( key, "FontSmoothingOrientation", &val ))
@@ -6355,7 +6347,7 @@ UINT font_init(void)
 {
     OBJECT_ATTRIBUTES attr = { sizeof(attr) };
     UNICODE_STRING name;
-    HANDLE mutex, hkcu;
+    HANDLE mutex;
     DWORD disposition;
     UINT dpi = 0;
 
@@ -6366,10 +6358,9 @@ UINT font_init(void)
         {'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\','F','o','n','t','s'};
     static const WCHAR cacheW[] = {'C','a','c','h','e'};
 
-    if (!(hkcu = open_hkcu())) return 0;
-    wine_fonts_key = reg_create_key( hkcu, wine_fonts_keyW, sizeof(wine_fonts_keyW), 0, NULL );
-    if (wine_fonts_key) dpi = init_font_options( hkcu );
-    NtClose( hkcu );
+    if (!(hkcu_key = open_hkcu())) return 0;
+    wine_fonts_key = reg_create_key( hkcu_key, wine_fonts_keyW, sizeof(wine_fonts_keyW), 0, NULL );
+    if (wine_fonts_key) dpi = init_font_options();
     if (!dpi) return 96;
     update_codepage( dpi );
 

@@ -4600,6 +4600,7 @@ static void adapter_gl_uninit_3d(struct wined3d_device *device)
 {
     TRACE("device %p.\n", device);
 
+    wined3d_device_destroy_default_samplers(device);
     wined3d_cs_destroy_object(device->cs, wined3d_device_delete_opengl_contexts_cs, device);
     wined3d_cs_finish(device->cs, WINED3D_CS_QUEUE_DEFAULT);
 }
@@ -4620,6 +4621,12 @@ static void adapter_gl_copy_bo_address(struct wined3d_context *context,
         const struct wined3d_bo_address *dst, const struct wined3d_bo_address *src, size_t size)
 {
     wined3d_context_gl_copy_bo_address(wined3d_context_gl(context), dst, src, size);
+}
+
+static void adapter_gl_flush_bo_address(struct wined3d_context *context,
+        const struct wined3d_const_bo_address *data, size_t size)
+{
+    wined3d_context_gl_flush_bo_address(wined3d_context_gl(context), data, size);
 }
 
 static HRESULT adapter_gl_create_swapchain(struct wined3d_device *device,
@@ -5074,6 +5081,7 @@ static const struct wined3d_adapter_ops wined3d_adapter_gl_ops =
     .adapter_map_bo_address = adapter_gl_map_bo_address,
     .adapter_unmap_bo_address = adapter_gl_unmap_bo_address,
     .adapter_copy_bo_address = adapter_gl_copy_bo_address,
+    .adapter_flush_bo_address = adapter_gl_flush_bo_address,
     .adapter_create_swapchain = adapter_gl_create_swapchain,
     .adapter_destroy_swapchain = adapter_gl_destroy_swapchain,
     .adapter_create_buffer = adapter_gl_create_buffer,

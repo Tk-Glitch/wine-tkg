@@ -87,11 +87,6 @@ F:	dlls/d3dx11*/
 F:	dlls/d3dx9*/
 F:	dlls/d3dxof/
 
-DirectInput
-P:	Andrew Eikum <aeikum@codeweavers.com>
-P:	Rémi Bernon <rbernon@codeweavers.com>
-F:	dlls/dinput/
-
 DirectMusic
 M:	Michael Stefaniuc <mstefani@winehq.org>
 F:	dlls/dm*/
@@ -129,6 +124,26 @@ F:	dlls/mscoree/
 GDI
 M:	Huw Davies <huw@codeweavers.com>
 F:	dlls/gdi32/
+F:	dlls/win32u/bitblt.c
+F:	dlls/win32u/bitmap.c
+F:	dlls/win32u/brush.c
+F:	dlls/win32u/clipping.c
+F:	dlls/win32u/dc.c
+F:	dlls/win32u/dib.c
+F:	dlls/win32u/dibdrv/
+F:	dlls/win32u/driver.c
+F:	dlls/win32u/emfdrv.c
+F:	dlls/win32u/font.c
+F:	dlls/win32u/freetype.c
+F:	dlls/win32u/gdiobj.c
+F:	dlls/win32u/mapping.c
+F:	dlls/win32u/opentype.c
+F:	dlls/win32u/painting.c
+F:	dlls/win32u/palette.c
+F:	dlls/win32u/path.c
+F:	dlls/win32u/pen.c
+F:	dlls/win32u/printdrv.c
+F:	dlls/win32u/region.c
 
 GDIPlus
 M:	Esme Povirk <vincent@codeweavers.com>
@@ -143,6 +158,7 @@ M:	Aric Stewart <aric@codeweavers.com>
 P:	Rémi Bernon <rbernon@codeweavers.com>
 F:	dlls/hid/
 F:	dlls/hidclass.sys/
+F:	dlls/hidparse.sys/
 F:	dlls/winehid.sys/
 
 HTTP server
@@ -163,6 +179,15 @@ F:	dlls/imm32/
 JavaScript
 M:	Jacek Caban <jacek@codeweavers.com>
 F:	dlls/jscript/
+
+Joystick input
+M:	Rémi Bernon <rbernon@codeweavers.com>
+P:	Andrew Eikum <aeikum@codeweavers.com>
+F:	dlls/dinput*/
+F:	dlls/windows.gaming.input/
+F:	dlls/winebus.sys/
+F:	dlls/winexinput.sys/
+F:	dlls/xinput*/
 
 Mac OS X graphics driver
 M:	Ken Thomases <ken@codeweavers.com>

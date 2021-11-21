@@ -2909,9 +2909,11 @@ static void test_effect_local_shader(void)
     D3D10_EFFECT_DESC effect_desc;
     ID3D10EffectShaderVariable *null_shader, *null_anon_vs, *null_anon_ps, *null_anon_gs,
         *p3_anon_vs, *p3_anon_ps, *p3_anon_gs, *p6_vs, *p6_ps, *p6_gs, *gs, *ps, *vs;
+    ID3D10PixelShader *ps_d3d, *ps_d3d_2;
     D3D10_EFFECT_SHADER_DESC shaderdesc;
     D3D10_SIGNATURE_PARAMETER_DESC sign;
     D3D10_STATE_BLOCK_MASK mask;
+    D3D10_PASS_DESC pass_desc;
     ID3D10Device *device;
     ULONG refcount;
 
@@ -3005,6 +3007,12 @@ if (0)
     hr = p->lpVtbl->GetGeometryShaderDesc(p, NULL);
     ok(hr == E_INVALIDARG, "GetGeometryShaderDesc got %x, expected %x\n", hr, E_INVALIDARG);
 
+    v = effect->lpVtbl->GetVariableByName(effect, "p");
+    ps = v->lpVtbl->AsShader(v);
+
+    hr = ps->lpVtbl->GetPixelShader(ps, 0, &ps_d3d);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
     /* get the null_shader_variable */
     v = effect->lpVtbl->GetVariableByIndex(effect, 10000);
     null_shader = v->lpVtbl->AsShader(v);
@@ -3023,6 +3031,13 @@ if (0)
     ok(!ret, "Unexpected mask.\n");
     ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_GS, 0);
     ok(!ret, "Unexpected mask.\n");
+
+    ID3D10Device_PSSetShader(device, ps_d3d);
+    hr = p->lpVtbl->Apply(p, 0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10Device_PSGetShader(device, &ps_d3d_2);
+    ok(ps_d3d_2 == ps_d3d, "Unexpected shader object.\n");
+    ID3D10PixelShader_Release(ps_d3d_2);
 
     hr = p->lpVtbl->GetVertexShaderDesc(p, &pdesc);
     ok(hr == S_OK, "GetVertexShaderDesc got %x, expected %x\n", hr, S_OK);
@@ -3050,6 +3065,12 @@ if (0)
 
     /* pass 1 */
     p = t->lpVtbl->GetPassByIndex(t, 1);
+
+    ID3D10Device_PSSetShader(device, ps_d3d);
+    hr = p->lpVtbl->Apply(p, 0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10Device_PSGetShader(device, &ps_d3d_2);
+    ok(!ps_d3d_2, "Unexpected shader object.\n");
 
     /* pass 1 vertexshader */
     hr = p->lpVtbl->GetVertexShaderDesc(p, &pdesc);
@@ -3591,6 +3612,12 @@ if (0)
     ok(typedesc.UnpackedSize == 0x0, "UnpackedSize is %#x, expected 0x0\n", typedesc.UnpackedSize);
     ok(typedesc.Stride == 0x0, "Stride is %#x, expected 0x0\n", typedesc.Stride);
 
+    /* Get input signature from vertex shader set from array element. */
+    hr = p->lpVtbl->GetDesc(p, &pass_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!!pass_desc.pIAInputSignature, "Expected input signature.\n");
+    ok(pass_desc.IAInputSignatureSize == 88, "Unexpected input signature size.\n");
+
     /* pass 6 pixelshader */
     hr = p->lpVtbl->GetPixelShaderDesc(p, &pdesc);
     ok(hr == S_OK, "GetPixelShaderDesc got %x, expected %x\n", hr, S_OK);
@@ -3881,6 +3908,8 @@ todo_wine
 
     effect->lpVtbl->Release(effect);
 
+    ID3D10PixelShader_Release(ps_d3d);
+
     refcount = ID3D10Device_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
 }
@@ -4104,6 +4133,53 @@ SamplerState sampler0
     Texture = NULL;                             /* 0x37 */
 };
 
+Texture t0;
+Texture1D t1;
+Texture1DArray t1a;
+Texture2D t2;
+Texture2DArray t2a;
+Texture2DMS<float4, 4> t2dms;
+Texture2DMSArray <float4, 4> t2dmsa;
+Texture3D t3;
+TextureCube tq;
+
+SamplerState sampler1 { Texture = t0; };
+SamplerState sampler2 { Texture = t1; };
+SamplerState sampler2a { Texture = t1a; };
+SamplerState sampler3 { Texture = t2; };
+SamplerState sampler3a { Texture = t2a; };
+SamplerState sampler4 { Texture = t2dms; };
+SamplerState sampler4a { Texture = t2dmsa; };
+SamplerState sampler5 { Texture = t3; };
+SamplerState sampler6 { Texture = tq; };
+
+Texture t0_a[3];
+Texture1D t1_a[3];
+Texture1DArray t1a_a[3];
+Texture2D t2_a[3];
+Texture2DArray t2a_a[3];
+Texture2DMS<float4, 4> t2dms_a[3];
+Texture2DMSArray <float4, 4> t2dmsa_a[3];
+Texture3D t3_a[3];
+TextureCube tq_a[3];
+
+SamplerState sampler7 { Texture = t0_a[0]; };
+SamplerState sampler8 { Texture = t1_a[1]; };
+SamplerState sampler9 { Texture = t1a_a[2]; };
+SamplerState sampler10 { Texture = t2_a[0]; };
+SamplerState sampler11 { Texture = t2a_a[1]; };
+SamplerState sampler12 { Texture = t2dms_a[2]; };
+SamplerState sampler13 { Texture = t2dmsa_a[0]; };
+SamplerState sampler14 { Texture = t3_a[1]; };
+SamplerState sampler15 { Texture = tq_a[2]; };
+
+SamplerState ss { Texture = NULL; };
+
+float4 PS() : COLOR
+{
+    return tex2D( ss, float2(0.0f, 0.0f) );
+}
+
 technique10 tech0
 {
     pass pass0
@@ -4112,14 +4188,18 @@ technique10 tech0
         SetDepthStencilState(ds_state, 1.0f);
         SetRasterizerState(rast_state);
     }
+    pass pass1
+    {
+        SetPixelShader( CompileShader(ps_4_0, PS()) );
+    }
 };
 #endif
 static DWORD fx_test_state_groups[] =
 {
-    0x43425844, 0xf231bc81, 0x3edcd6f4, 0x932fe6e0, 0x86fbdec1, 0x00000001, 0x0000078f, 0x00000001,
-    0x00000024, 0x30315846, 0x00000763, 0xfeff1001, 0x00000000, 0x00000000, 0x00000004, 0x00000000,
-    0x00000000, 0x00000000, 0x00000001, 0x0000035f, 0x00000000, 0x00000000, 0x00000001, 0x00000001,
-    0x00000001, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x74736152,
+    0x43425844, 0x61e5a938, 0x1d4228df, 0x536560dd, 0x76c777b2, 0x00000001, 0x000011ce, 0x00000001,
+    0x00000024, 0x30315846, 0x000011a2, 0xfeff1001, 0x00000000, 0x00000000, 0x00000029, 0x00000000,
+    0x00000000, 0x00000000, 0x00000001, 0x00000922, 0x00000000, 0x00000024, 0x00000001, 0x00000001,
+    0x00000001, 0x00000014, 0x00000000, 0x00000000, 0x00000001, 0x00000001, 0x00000000, 0x74736152,
     0x7a697265, 0x74537265, 0x00657461, 0x00000004, 0x00000002, 0x00000000, 0x00000000, 0x00000000,
     0x00000000, 0x00000004, 0x74736172, 0x6174735f, 0x01006574, 0x02000000, 0x02000000, 0x01000000,
     0x02000000, 0x02000000, 0x01000000, 0x04000000, 0x01000000, 0x01000000, 0x02000000, 0xfc000000,
@@ -4144,43 +4224,150 @@ static DWORD fx_test_state_groups[] =
     0x01000000, 0x02000000, 0xff000000, 0x01ffffff, 0x03000000, 0x04000000, 0x01000000, 0x02000000,
     0x08000000, 0x04000000, 0x01000000, 0x00000000, 0x013f8000, 0x00000000, 0x01400000, 0x00000000,
     0x01404000, 0x00000000, 0x01408000, 0x03000000, 0x06000000, 0x01000000, 0x03000000, 0x05000000,
-    0x01000000, 0x02000000, 0x00000000, 0x74000000, 0x30686365, 0x73617000, 0x04003073, 0x01000000,
-    0x00000000, 0x013f0000, 0x9a000000, 0x013f1999, 0x33000000, 0x013f3333, 0xcd000000, 0x013f4ccc,
-    0x03000000, 0xff000000, 0x010000ff, 0x01000000, 0x00000000, 0x303f8000, 0x14000000, 0x00000000,
-    0xff000000, 0x0affffff, 0x0c000000, 0x00000000, 0x01000000, 0x3b000000, 0x0d000000, 0x00000000,
-    0x01000000, 0x47000000, 0x0e000000, 0x00000000, 0x01000000, 0x53000000, 0x0f000000, 0x00000000,
-    0x01000000, 0x5f000000, 0x10000000, 0x00000000, 0x01000000, 0x6b000000, 0x11000000, 0x00000000,
-    0x01000000, 0x77000000, 0x12000000, 0x00000000, 0x01000000, 0x83000000, 0x13000000, 0x00000000,
-    0x01000000, 0x8f000000, 0x14000000, 0x00000000, 0x01000000, 0x9b000000, 0x15000000, 0x00000000,
-    0x01000000, 0xa7000000, 0x00000000, 0xe1000000, 0xc5000000, 0x00000000, 0xff000000, 0x0effffff,
-    0x16000000, 0x00000000, 0x01000000, 0xea000000, 0x17000000, 0x00000000, 0x01000000, 0xf6000000,
-    0x18000000, 0x00000000, 0x01000000, 0x02000000, 0x19000001, 0x00000000, 0x01000000, 0x0e000000,
-    0x1a000001, 0x00000000, 0x01000000, 0x1a000000, 0x1b000001, 0x00000000, 0x01000000, 0x26000000,
-    0x1c000001, 0x00000000, 0x01000000, 0x32000000, 0x1d000001, 0x00000000, 0x01000000, 0x3e000000,
-    0x1e000001, 0x00000000, 0x01000000, 0x4a000000, 0x1f000001, 0x00000000, 0x01000000, 0x56000000,
-    0x20000001, 0x00000000, 0x01000000, 0x62000000, 0x21000001, 0x00000000, 0x01000000, 0x6e000000,
-    0x22000001, 0x00000000, 0x01000000, 0x7a000000, 0x23000001, 0x00000000, 0x01000000, 0x86000000,
-    0x00000001, 0xb9000000, 0x9d000001, 0x00000001, 0xff000000, 0x0bffffff, 0x24000000, 0x00000000,
-    0x01000000, 0xc5000000, 0x25000001, 0x00000000, 0x01000000, 0xd1000000, 0x25000001, 0x07000000,
-    0x01000000, 0xdd000000, 0x26000001, 0x00000000, 0x01000000, 0xe9000000, 0x27000001, 0x00000000,
-    0x01000000, 0xf5000000, 0x28000001, 0x00000000, 0x01000000, 0x01000000, 0x29000002, 0x00000000,
-    0x01000000, 0x0d000000, 0x2a000002, 0x00000000, 0x01000000, 0x19000000, 0x2b000002, 0x00000000,
-    0x01000000, 0x25000000, 0x2c000002, 0x00000000, 0x01000000, 0x31000000, 0x2c000002, 0x07000000,
-    0x01000000, 0x3d000000, 0x00000002, 0x72000000, 0x56000002, 0x00000002, 0xff000000, 0x0bffffff,
-    0x2d000000, 0x00000000, 0x01000000, 0x7b000000, 0x2e000002, 0x00000000, 0x01000000, 0x87000000,
-    0x2f000002, 0x00000000, 0x01000000, 0x93000000, 0x30000002, 0x00000000, 0x01000000, 0x9f000000,
-    0x31000002, 0x00000000, 0x01000000, 0xab000000, 0x32000002, 0x00000000, 0x01000000, 0xb7000000,
-    0x33000002, 0x00000000, 0x01000000, 0xc3000000, 0x34000002, 0x00000000, 0x01000000, 0xcf000000,
-    0x35000002, 0x00000000, 0x01000000, 0xf3000000, 0x36000002, 0x00000000, 0x01000000, 0xff000000,
-    0x37000002, 0x00000000, 0x01000000, 0x0b000000, 0x00000003, 0x17000000, 0x01000003, 0x00000000,
-    0x1d000000, 0x06000003, 0x00000000, 0x0a000000, 0x00000000, 0x01000000, 0x23000000, 0x0b000003,
-    0x00000000, 0x01000000, 0x47000000, 0x02000003, 0x00000000, 0x02000000, 0xb9000000, 0x09000001,
-    0x00000000, 0x01000000, 0x53000000, 0x01000003, 0x00000000, 0x02000000, 0xe1000000, 0x00000000,
-    0x00000000, 0x02000000, 0x30000000, 0x00000000,
+    0x01000000, 0x02000000, 0x00000000, 0x74000000, 0x75747865, 0x17006572, 0x02000003, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x09000000, 0x74000000, 0x65540030, 0x72757478, 0x00443165,
+    0x0000033e, 0x00000002, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0000000a, 0x54003174,
+    0x75747865, 0x44316572, 0x61727241, 0x03670079, 0x00020000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x000b0000, 0x31740000, 0x65540061, 0x72757478, 0x00443265, 0x00000396, 0x00000002,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0000000c, 0x54003274, 0x75747865, 0x44326572,
+    0x61727241, 0x03bf0079, 0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x000d0000,
+    0x32740000, 0x65540061, 0x72757478, 0x4d443265, 0x03ee0053, 0x00020000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x000e0000, 0x32740000, 0x00736d64, 0x74786554, 0x32657275, 0x41534d44,
+    0x79617272, 0x00041c00, 0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000f00,
+    0x64327400, 0x0061736d, 0x74786554, 0x33657275, 0x04500044, 0x00020000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00100000, 0x33740000, 0x78655400, 0x65727574, 0x65627543, 0x00047900,
+    0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00001100, 0x00717400, 0x706d6173,
+    0x3172656c, 0x6d617300, 0x72656c70, 0x61730032, 0x656c706d, 0x00613272, 0x706d6173, 0x3372656c,
+    0x6d617300, 0x72656c70, 0x73006133, 0x6c706d61, 0x00347265, 0x706d6173, 0x3472656c, 0x61730061,
+    0x656c706d, 0x73003572, 0x6c706d61, 0x00367265, 0x00000317, 0x00000002, 0x00000003, 0x00000000,
+    0x00000000, 0x00000000, 0x00000009, 0x615f3074, 0x00033e00, 0x00000200, 0x00000300, 0x00000000,
+    0x00000000, 0x00000000, 0x00000a00, 0x5f317400, 0x03670061, 0x00020000, 0x00030000, 0x00000000,
+    0x00000000, 0x00000000, 0x000b0000, 0x31740000, 0x00615f61, 0x00000396, 0x00000002, 0x00000003,
+    0x00000000, 0x00000000, 0x00000000, 0x0000000c, 0x615f3274, 0x0003bf00, 0x00000200, 0x00000300,
+    0x00000000, 0x00000000, 0x00000000, 0x00000d00, 0x61327400, 0xee00615f, 0x02000003, 0x03000000,
+    0x00000000, 0x00000000, 0x00000000, 0x0e000000, 0x74000000, 0x736d6432, 0x1c00615f, 0x02000004,
+    0x03000000, 0x00000000, 0x00000000, 0x00000000, 0x0f000000, 0x74000000, 0x736d6432, 0x00615f61,
+    0x00000450, 0x00000002, 0x00000003, 0x00000000, 0x00000000, 0x00000000, 0x00000010, 0x615f3374,
+    0x00047900, 0x00000200, 0x00000300, 0x00000000, 0x00000000, 0x00000000, 0x00001100, 0x5f717400,
+    0x61730061, 0x656c706d, 0x14003772, 0x00000005, 0x73000000, 0x6c706d61, 0x00387265, 0x00000535,
+    0x00000001, 0x706d6173, 0x3972656c, 0x00055600, 0x00000200, 0x6d617300, 0x72656c70, 0x78003031,
+    0x00000005, 0x73000000, 0x6c706d61, 0x31317265, 0x00059900, 0x00000100, 0x6d617300, 0x72656c70,
+    0xbb003231, 0x02000005, 0x73000000, 0x6c706d61, 0x33317265, 0x0005df00, 0x00000000, 0x6d617300,
+    0x72656c70, 0x04003431, 0x01000006, 0x73000000, 0x6c706d61, 0x35317265, 0x00062500, 0x00000200,
+    0x00737300, 0x00000001, 0x00000002, 0x00000000, 0x68636574, 0x61700030, 0x00307373, 0x00000004,
+    0x00000001, 0x3f000000, 0x00000001, 0x3f19999a, 0x00000001, 0x3f333333, 0x00000001, 0x3f4ccccd,
+    0x00000001, 0x00000003, 0x0000ffff, 0x00000001, 0x00000001, 0x3f800000, 0x73736170, 0x01f00031,
+    0x58440000, 0x35034342, 0x3e91426d, 0x2799a172, 0x010d4956, 0x00016c60, 0x01f00000, 0x00050000,
+    0x00340000, 0x00c40000, 0x00d40000, 0x01080000, 0x01740000, 0x44520000, 0x00884645, 0x00000000,
+    0x00000000, 0x00020000, 0x001c0000, 0x04000000, 0x1100ffff, 0x005f0000, 0x005c0000, 0x00030000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x00000000, 0x005c0000, 0x00020000,
+    0x00050000, 0x00040000, 0xffff0000, 0x0000ffff, 0x00010000, 0x000c0000, 0x73730000, 0x63694d00,
+    0x6f736f72, 0x28207466, 0x48202952, 0x204c534c, 0x64616853, 0x43207265, 0x69706d6f, 0x2072656c,
+    0x312e3031, 0x5349ab00, 0x00084e47, 0x00000000, 0x00080000, 0x534f0000, 0x002c4e47, 0x00010000,
+    0x00080000, 0x00200000, 0x00000000, 0x00000000, 0x00030000, 0x00000000, 0x000f0000, 0x56530000,
+    0x7261545f, 0x00746567, 0x4853abab, 0x00645244, 0x00400000, 0x00190000, 0x005a0000, 0x60000300,
+    0x00000010, 0x18580000, 0x70000400, 0x00000010, 0x55550000, 0x00650000, 0x20f20300, 0x00000010,
+    0x00450000, 0x20f20c00, 0x00000010, 0x40020000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x7e460000, 0x00000010, 0x60000000, 0x00000010, 0x003e0000, 0x54530100, 0x00745441, 0x00020000,
+    0x00000000, 0x00000000, 0x00010000, 0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x07260000, 0x00000000, 0x00300000, 0x00140000,
+    0x00000000, 0xffff0000, 0x000affff, 0x000c0000, 0x00000000, 0x00010000, 0x003b0000, 0x000d0000,
+    0x00000000, 0x00010000, 0x00470000, 0x000e0000, 0x00000000, 0x00010000, 0x00530000, 0x000f0000,
+    0x00000000, 0x00010000, 0x005f0000, 0x00100000, 0x00000000, 0x00010000, 0x006b0000, 0x00110000,
+    0x00000000, 0x00010000, 0x00770000, 0x00120000, 0x00000000, 0x00010000, 0x00830000, 0x00130000,
+    0x00000000, 0x00010000, 0x008f0000, 0x00140000, 0x00000000, 0x00010000, 0x009b0000, 0x00150000,
+    0x00000000, 0x00010000, 0x00a70000, 0x00000000, 0x00e10000, 0x00c50000, 0x00000000, 0xffff0000,
+    0x000effff, 0x00160000, 0x00000000, 0x00010000, 0x00ea0000, 0x00170000, 0x00000000, 0x00010000,
+    0x00f60000, 0x00180000, 0x00000000, 0x00010000, 0x01020000, 0x00190000, 0x00000000, 0x00010000,
+    0x010e0000, 0x001a0000, 0x00000000, 0x00010000, 0x011a0000, 0x001b0000, 0x00000000, 0x00010000,
+    0x01260000, 0x001c0000, 0x00000000, 0x00010000, 0x01320000, 0x001d0000, 0x00000000, 0x00010000,
+    0x013e0000, 0x001e0000, 0x00000000, 0x00010000, 0x014a0000, 0x001f0000, 0x00000000, 0x00010000,
+    0x01560000, 0x00200000, 0x00000000, 0x00010000, 0x01620000, 0x00210000, 0x00000000, 0x00010000,
+    0x016e0000, 0x00220000, 0x00000000, 0x00010000, 0x017a0000, 0x00230000, 0x00000000, 0x00010000,
+    0x01860000, 0x00000000, 0x01b90000, 0x019d0000, 0x00000000, 0xffff0000, 0x000bffff, 0x00240000,
+    0x00000000, 0x00010000, 0x01c50000, 0x00250000, 0x00000000, 0x00010000, 0x01d10000, 0x00250000,
+    0x00070000, 0x00010000, 0x01dd0000, 0x00260000, 0x00000000, 0x00010000, 0x01e90000, 0x00270000,
+    0x00000000, 0x00010000, 0x01f50000, 0x00280000, 0x00000000, 0x00010000, 0x02010000, 0x00290000,
+    0x00000000, 0x00010000, 0x020d0000, 0x002a0000, 0x00000000, 0x00010000, 0x02190000, 0x002b0000,
+    0x00000000, 0x00010000, 0x02250000, 0x002c0000, 0x00000000, 0x00010000, 0x02310000, 0x002c0000,
+    0x00070000, 0x00010000, 0x023d0000, 0x00000000, 0x02720000, 0x02560000, 0x00000000, 0xffff0000,
+    0x000bffff, 0x002d0000, 0x00000000, 0x00010000, 0x027b0000, 0x002e0000, 0x00000000, 0x00010000,
+    0x02870000, 0x002f0000, 0x00000000, 0x00010000, 0x02930000, 0x00300000, 0x00000000, 0x00010000,
+    0x029f0000, 0x00310000, 0x00000000, 0x00010000, 0x02ab0000, 0x00320000, 0x00000000, 0x00010000,
+    0x02b70000, 0x00330000, 0x00000000, 0x00010000, 0x02c30000, 0x00340000, 0x00000000, 0x00010000,
+    0x02cf0000, 0x00350000, 0x00000000, 0x00010000, 0x02f30000, 0x00360000, 0x00000000, 0x00010000,
+    0x02ff0000, 0x00370000, 0x00000000, 0x00010000, 0x030b0000, 0x00000000, 0x033b0000, 0x031f0000,
+    0x00000000, 0xffff0000, 0x0000ffff, 0x03640000, 0x03480000, 0x00000000, 0xffff0000, 0x0000ffff,
+    0x03920000, 0x03760000, 0x00000000, 0xffff0000, 0x0000ffff, 0x03bc0000, 0x03a00000, 0x00000000,
+    0xffff0000, 0x0000ffff, 0x03ea0000, 0x03ce0000, 0x00000000, 0xffff0000, 0x0000ffff, 0x04160000,
+    0x03fa0000, 0x00000000, 0xffff0000, 0x0000ffff, 0x04490000, 0x042d0000, 0x00000000, 0xffff0000,
+    0x0000ffff, 0x04760000, 0x045a0000, 0x00000000, 0xffff0000, 0x0000ffff, 0x04a10000, 0x04850000,
+    0x00000000, 0xffff0000, 0x0000ffff, 0x04a40000, 0x02560000, 0x00000000, 0xffff0000, 0x0001ffff,
+    0x00370000, 0x00000000, 0x00020000, 0x033b0000, 0x00000000, 0x04ad0000, 0x02560000, 0x00000000,
+    0xffff0000, 0x0001ffff, 0x00370000, 0x00000000, 0x00020000, 0x03640000, 0x00000000, 0x04b60000,
+    0x02560000, 0x00000000, 0xffff0000, 0x0001ffff, 0x00370000, 0x00000000, 0x00020000, 0x03920000,
+    0x00000000, 0x04c00000, 0x02560000, 0x00000000, 0xffff0000, 0x0001ffff, 0x00370000, 0x00000000,
+    0x00020000, 0x03bc0000, 0x00000000, 0x04c90000, 0x02560000, 0x00000000, 0xffff0000, 0x0001ffff,
+    0x00370000, 0x00000000, 0x00020000, 0x03ea0000, 0x00000000, 0x04d30000, 0x02560000, 0x00000000,
+    0xffff0000, 0x0001ffff, 0x00370000, 0x00000000, 0x00020000, 0x04160000, 0x00000000, 0x04dc0000,
+    0x02560000, 0x00000000, 0xffff0000, 0x0001ffff, 0x00370000, 0x00000000, 0x00020000, 0x04490000,
+    0x00000000, 0x04e60000, 0x02560000, 0x00000000, 0xffff0000, 0x0001ffff, 0x00370000, 0x00000000,
+    0x00020000, 0x04760000, 0x00000000, 0x04ef0000, 0x02560000, 0x00000000, 0xffff0000, 0x0001ffff,
+    0x00370000, 0x00000000, 0x00020000, 0x04a10000, 0x00000000, 0x05140000, 0x04f80000, 0x00000000,
+    0xffff0000, 0x0000ffff, 0x05350000, 0x05190000, 0x00000000, 0xffff0000, 0x0000ffff, 0x05560000,
+    0x053a0000, 0x00000000, 0xffff0000, 0x0000ffff, 0x05780000, 0x055c0000, 0x00000000, 0xffff0000,
+    0x0000ffff, 0x05990000, 0x057d0000, 0x00000000, 0xffff0000, 0x0000ffff, 0x05bb0000, 0x059f0000,
+    0x00000000, 0xffff0000, 0x0000ffff, 0x05df0000, 0x05c30000, 0x00000000, 0xffff0000, 0x0000ffff,
+    0x06040000, 0x05e80000, 0x00000000, 0xffff0000, 0x0000ffff, 0x06250000, 0x06090000, 0x00000000,
+    0xffff0000, 0x0000ffff, 0x062a0000, 0x02560000, 0x00000000, 0xffff0000, 0x0001ffff, 0x00370000,
+    0x00000000, 0x00030000, 0x06330000, 0x00000000, 0x063b0000, 0x02560000, 0x00000000, 0xffff0000,
+    0x0001ffff, 0x00370000, 0x00000000, 0x00030000, 0x06440000, 0x00000000, 0x064c0000, 0x02560000,
+    0x00000000, 0xffff0000, 0x0001ffff, 0x00370000, 0x00000000, 0x00030000, 0x06550000, 0x00000000,
+    0x065d0000, 0x02560000, 0x00000000, 0xffff0000, 0x0001ffff, 0x00370000, 0x00000000, 0x00030000,
+    0x06670000, 0x00000000, 0x066f0000, 0x02560000, 0x00000000, 0xffff0000, 0x0001ffff, 0x00370000,
+    0x00000000, 0x00030000, 0x06790000, 0x00000000, 0x06810000, 0x02560000, 0x00000000, 0xffff0000,
+    0x0001ffff, 0x00370000, 0x00000000, 0x00030000, 0x068b0000, 0x00000000, 0x06930000, 0x02560000,
+    0x00000000, 0xffff0000, 0x0001ffff, 0x00370000, 0x00000000, 0x00030000, 0x069d0000, 0x00000000,
+    0x06a50000, 0x02560000, 0x00000000, 0xffff0000, 0x0001ffff, 0x00370000, 0x00000000, 0x00030000,
+    0x06af0000, 0x00000000, 0x06b70000, 0x02560000, 0x00000000, 0xffff0000, 0x0001ffff, 0x00370000,
+    0x00000000, 0x00030000, 0x06c10000, 0x00000000, 0x06c90000, 0x02560000, 0x00000000, 0xffff0000,
+    0x0001ffff, 0x00370000, 0x00000000, 0x00010000, 0x06cc0000, 0x00000000, 0x06d80000, 0x00020000,
+    0x00000000, 0x06de0000, 0x00060000, 0x00000000, 0x000a0000, 0x00000000, 0x00010000, 0x06e40000,
+    0x000b0000, 0x00000000, 0x00010000, 0x07080000, 0x00020000, 0x00000000, 0x00020000, 0x01b90000,
+    0x00090000, 0x00000000, 0x00010000, 0x07140000, 0x00010000, 0x00000000, 0x00020000, 0x00e10000,
+    0x00000000, 0x00000000, 0x00020000, 0x00300000, 0x07200000, 0x00010000, 0x00000000, 0x00070000,
+    0x00000000, 0x00070000, 0x091a0000, 0x00000000,
 };
+
+static void create_effect_texture_resource(ID3D10Device *device, ID3D10ShaderResourceView **srv,
+        ID3D10Texture2D **tex)
+{
+    D3D10_TEXTURE2D_DESC tex_desc;
+    HRESULT hr;
+
+    tex_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    tex_desc.Width  = 8;
+    tex_desc.Height = 8;
+    tex_desc.ArraySize = 1;
+    tex_desc.MipLevels = 0;
+    tex_desc.BindFlags = D3D10_BIND_SHADER_RESOURCE;
+    tex_desc.Usage = D3D10_USAGE_DEFAULT;
+    tex_desc.CPUAccessFlags = 0;
+    tex_desc.SampleDesc.Count = 1;
+    tex_desc.SampleDesc.Quality = 0;
+    tex_desc.MiscFlags = 0;
+
+    hr = ID3D10Device_CreateTexture2D(device, &tex_desc, NULL, tex);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)*tex, NULL, srv);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+}
 
 static void test_effect_state_groups(void)
 {
+    ID3D10ShaderResourceView *srv0, *srv1;
     ID3D10EffectDepthStencilVariable *d;
     ID3D10EffectRasterizerVariable *r;
     ID3D10DepthStencilState *ds_state;
@@ -4200,6 +4387,7 @@ static void test_effect_state_groups(void)
     ID3D10EffectVariable *v;
     ID3D10EffectPass *pass;
     float blend_factor[4];
+    ID3D10Texture2D *tex0;
     ID3D10Effect *effect;
     ID3D10Device *device;
     ULONG refcount;
@@ -4222,7 +4410,7 @@ static void test_effect_state_groups(void)
             effect_desc.ConstantBuffers);
     ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
             effect_desc.SharedConstantBuffers);
-    ok(effect_desc.GlobalVariables == 4, "Unexpected global variables count %u.\n",
+    ok(effect_desc.GlobalVariables == 41, "Unexpected global variables count %u.\n",
             effect_desc.GlobalVariables);
     ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
             effect_desc.SharedGlobalVariables);
@@ -4311,9 +4499,9 @@ static void test_effect_state_groups(void)
             rast_desc.AntialiasedLineEnable);
 
     technique = effect->lpVtbl->GetTechniqueByName(effect, "tech0");
-    ok(!!technique, "Failed to get technique.\n");
+    ok(technique->lpVtbl->IsValid(technique), "Expected valid technique.\n");
     pass = technique->lpVtbl->GetPassByName(technique, "pass0");
-    ok(!!pass, "Failed to get pass.\n");
+    ok(pass->lpVtbl->IsValid(pass), "Expected valid pass.\n");
     hr = pass->lpVtbl->GetDesc(pass, &pass_desc);
     ok(SUCCEEDED(hr), "Failed to get pass desc, hr %#x.\n", hr);
     ok(!strcmp(pass_desc.Name, "pass0"), "Got unexpected Name \"%s\".\n", pass_desc.Name);
@@ -4410,6 +4598,29 @@ static void test_effect_state_groups(void)
     ID3D10RasterizerState_Release(rast_state);
     ID3D10DepthStencilState_Release(ds_state);
     ID3D10BlendState_Release(blend_state);
+
+    /* pass 1 - uses SamplerState.Texture = NULL, resource slot is reset. */
+    pass = technique->lpVtbl->GetPassByName(technique, "pass1");
+    ok(pass->lpVtbl->IsValid(pass), "Failed to get pass.\n");
+
+    create_effect_texture_resource(device, &srv0, &tex0);
+
+    hr = D3D10StateBlockMaskDisableAll(&mask);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = pass->lpVtbl->ComputeStateBlockMask(pass, &mask);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ret = D3D10StateBlockMaskGetSetting(&mask, D3D10_DST_VS_SHADER_RESOURCES, 0);
+    ok(!ret, "Unexpected mask.\n");
+
+    ID3D10Device_PSSetShaderResources(device, 0, 1, &srv0);
+    hr = pass->lpVtbl->Apply(pass, 0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ID3D10Device_PSGetShaderResources(device, 0, 1, &srv1);
+    ok(!srv1, "Unexpected resource pointer.\n");
+
+    ID3D10ShaderResourceView_Release(srv0);
+    ID3D10Texture2D_Release(tex0);
+
     effect->lpVtbl->Release(effect);
 
     refcount = ID3D10Device_Release(device);
@@ -4578,9 +4789,9 @@ static void test_effect_state_group_defaults(void)
             rast_desc.AntialiasedLineEnable);
 
     technique = effect->lpVtbl->GetTechniqueByName(effect, "tech0");
-    ok(!!technique, "Failed to get technique.\n");
+    ok(technique->lpVtbl->IsValid(technique), "Expected valid technique.\n");
     pass = technique->lpVtbl->GetPassByName(technique, "pass0");
-    ok(!!pass, "Failed to get pass.\n");
+    ok(pass->lpVtbl->IsValid(pass), "Failed to get pass.\n");
     hr = pass->lpVtbl->GetDesc(pass, &pass_desc);
     ok(SUCCEEDED(hr), "Failed to get pass desc, hr %#x.\n", hr);
     ok(!strcmp(pass_desc.Name, "pass0"), "Got unexpected Name \"%s\".\n", pass_desc.Name);
@@ -5821,68 +6032,48 @@ float4 PS( float4 pos : SV_POSITION ) : SV_Target
     return t_a[1].Sample(s[1], float2(0, 0));
 }
 
+PixelShader ps[1] = { CompileShader(ps_4_0, PS()) };
+
 technique10 rsrc_test
 {
     pass p0
     {
-        SetPixelShader(CompileShader(ps_4_0, PS()));
+        SetPixelShader(ps[0]);
     }
 }
 #endif
 static DWORD fx_test_resource_variable2[] =
 {
-    0x43425844, 0xb62313ac, 0x8116090b, 0xdc1d2951, 0xfc18ca42, 0x00000001, 0x0000035a, 0x00000001,
-    0x00000024, 0x30315846, 0x0000032e, 0xfeff1001, 0x00000000, 0x00000000, 0x00000002, 0x00000000,
-    0x00000000, 0x00000000, 0x00000001, 0x0000028a, 0x00000000, 0x00000002, 0x00000000, 0x00000000,
-    0x00000000, 0x00000002, 0x00000000, 0x00000000, 0x00000001, 0x00000001, 0x00000000, 0x74786554,
+    0x43425844, 0xecd43fcd, 0x0654927c, 0x71931f03, 0xf166cc09, 0x00000001, 0x0000039d, 0x00000001,
+    0x00000024, 0x30315846, 0x00000371, 0xfeff1001, 0x00000000, 0x00000000, 0x00000003, 0x00000000,
+    0x00000000, 0x00000000, 0x00000001, 0x000002b5, 0x00000000, 0x00000002, 0x00000000, 0x00000000,
+    0x00000000, 0x00000002, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x74786554,
     0x32657275, 0x00040044, 0x00020000, 0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x000c0000,
     0x5f740000, 0x61530061, 0x656c706d, 0x61745372, 0x2e006574, 0x02000000, 0x02000000, 0x00000000,
-    0x00000000, 0x00000000, 0x15000000, 0x73000000, 0x72737200, 0x65745f63, 0x70007473, 0x02180030,
-    0x58440000, 0xb2424342, 0x3c889e83, 0xb8b8fc18, 0x749f2920, 0x0001877a, 0x02180000, 0x00050000,
-    0x00340000, 0x00c80000, 0x00fc0000, 0x01300000, 0x019c0000, 0x44520000, 0x008c4645, 0x00000000,
-    0x00000000, 0x00020000, 0x001c0000, 0x04000000, 0x0100ffff, 0x00620000, 0x005c0000, 0x00030000,
-    0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x00020000, 0x00010000, 0x005e0000, 0x00020000,
-    0x00050000, 0x00040000, 0xffff0000, 0x0000ffff, 0x00020000, 0x000c0000, 0x00730000, 0x00615f74,
-    0x7263694d, 0x666f736f, 0x52282074, 0x4c482029, 0x53204c53, 0x65646168, 0x6f432072, 0x6c69706d,
-    0x31207265, 0x00312e30, 0x5349abab, 0x002c4e47, 0x00010000, 0x00080000, 0x00200000, 0x00000000,
-    0x00010000, 0x00030000, 0x00000000, 0x000f0000, 0x56530000, 0x534f505f, 0x4f495449, 0x534f004e,
-    0x002c4e47, 0x00010000, 0x00080000, 0x00200000, 0x00000000, 0x00000000, 0x00030000, 0x00000000,
-    0x000f0000, 0x56530000, 0x7261545f, 0x00746567, 0x4853abab, 0x00645244, 0x00400000, 0x00190000,
-    0x005a0000, 0x60000300, 0x00020010, 0x18580000, 0x70000400, 0x00010010, 0x55550000, 0x00650000,
-    0x20f20300, 0x00000010, 0x00450000, 0x20f20c00, 0x00000010, 0x40020000, 0x00000000, 0x00000000,
-    0x00000000, 0x00000000, 0x7e460000, 0x00010010, 0x60000000, 0x00020010, 0x003e0000, 0x54530100,
-    0x00745441, 0x00020000, 0x00000000, 0x00000000, 0x00010000, 0x00000000, 0x00000000, 0x00000000,
-    0x00010000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00010000,
+    0x00000000, 0x00000000, 0x15000000, 0x73000000, 0x78695000, 0x68536c65, 0x72656461, 0x00005900,
+    0x00000200, 0x00000100, 0x00000000, 0x00000000, 0x00000000, 0x00000500, 0x00737000, 0x00000218,
+    0x43425844, 0x9e83b242, 0xfc183c88, 0x2920b8b8, 0x877a749f, 0x00000001, 0x00000218, 0x00000005,
+    0x00000034, 0x000000c8, 0x000000fc, 0x00000130, 0x0000019c, 0x46454452, 0x0000008c, 0x00000000,
+    0x00000000, 0x00000002, 0x0000001c, 0xffff0400, 0x00000100, 0x00000062, 0x0000005c, 0x00000003,
+    0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000002, 0x00000001, 0x0000005e, 0x00000002,
+    0x00000005, 0x00000004, 0xffffffff, 0x00000000, 0x00000002, 0x0000000c, 0x5f740073, 0x694d0061,
+    0x736f7263, 0x2074666f, 0x20295228, 0x4c534c48, 0x61685320, 0x20726564, 0x706d6f43, 0x72656c69,
+    0x2e303120, 0xabab0031, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000,
+    0x00000001, 0x00000003, 0x00000000, 0x0000000f, 0x505f5653, 0x5449534f, 0x004e4f49, 0x4e47534f,
+    0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003, 0x00000000,
+    0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00000064, 0x00000040, 0x00000019,
+    0x0300005a, 0x00106000, 0x00000002, 0x04001858, 0x00107000, 0x00000001, 0x00005555, 0x03000065,
+    0x001020f2, 0x00000000, 0x0c000045, 0x001020f2, 0x00000000, 0x00004002, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00107e46, 0x00000001, 0x00106000, 0x00000002, 0x0100003e, 0x54415453,
+    0x00000074, 0x00000002, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x00000000,
+    0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001,
     0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00660000, 0x00000000,
-    0x002a0000, 0x000e0000, 0x00000000, 0xffff0000, 0x0000ffff, 0x00570000, 0x003b0000, 0x00000000,
-    0xffff0000, 0x0000ffff, 0x00000000, 0x00000000, 0x00590000, 0x00010000, 0x00000000, 0x00630000,
-    0x00010000, 0x00000000, 0x00070000, 0x00000000, 0x00070000, 0x02820000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x63727372, 0x7365745f,
+    0x30700074, 0x00008100, 0x00000000, 0x00002a00, 0x00000e00, 0x00000000, 0xffffff00, 0x000000ff,
+    0x00005700, 0x00003b00, 0x00000000, 0xffffff00, 0x000000ff, 0x00000000, 0x00000000, 0x00008100,
+    0x00006500, 0x00000000, 0xffffff00, 0x000084ff, 0x00000000, 0x0002a000, 0x00000100, 0x00000000,
+    0x0002aa00, 0x00000100, 0x00000000, 0x00000700, 0x00000000, 0x00000300, 0x0002ad00, 0x00000000,
 };
-
-static void create_effect_texture_resource(ID3D10Device *device, ID3D10ShaderResourceView **srv,
-        ID3D10Texture2D **tex)
-{
-    D3D10_TEXTURE2D_DESC tex_desc;
-    HRESULT hr;
-
-    tex_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    tex_desc.Width  = 8;
-    tex_desc.Height = 8;
-    tex_desc.ArraySize = 1;
-    tex_desc.MipLevels = 0;
-    tex_desc.BindFlags = D3D10_BIND_SHADER_RESOURCE;
-    tex_desc.Usage = D3D10_USAGE_DEFAULT;
-    tex_desc.CPUAccessFlags = 0;
-    tex_desc.SampleDesc.Count = 1;
-    tex_desc.SampleDesc.Quality = 0;
-    tex_desc.MiscFlags = 0;
-
-    hr = ID3D10Device_CreateTexture2D(device, &tex_desc, NULL, tex);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)*tex, NULL, srv);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-}
 
 #define get_effect_shader_resource_variable(a) get_effect_shader_resource_variable_(__LINE__, a)
 static ID3D10EffectShaderResourceVariable *get_effect_shader_resource_variable_(unsigned int line,
@@ -5964,9 +6155,9 @@ static void test_effect_resource_variable(void)
 
     /* Apply the pass to bind the resource to the shader. */
     technique = effect->lpVtbl->GetTechniqueByName(effect, "rsrc_test");
-    ok(!!technique, "Got unexpected technique %p.\n", technique);
+    ok(technique->lpVtbl->IsValid(technique), "Expected valid technique.\n");
     pass = technique->lpVtbl->GetPassByName(technique, "p0");
-    ok(!!pass, "Got unexpected pass %p.\n", pass);
+    ok(pass->lpVtbl->IsValid(pass), "Expected valid pass.\n");
     hr = pass->lpVtbl->GetDesc(pass, &pass_desc);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     ok(!!pass_desc.pIAInputSignature, "Unexpected input signature.\n");
@@ -6036,9 +6227,9 @@ static void test_effect_resource_variable(void)
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
 
     technique = effect->lpVtbl->GetTechniqueByName(effect, "rsrc_test");
-    ok(!!technique, "Got unexpected technique %p.\n", technique);
+    ok(technique->lpVtbl->IsValid(technique), "Expected valid technique.\n");
     pass = technique->lpVtbl->GetPassByName(technique, "p0");
-    ok(!!pass, "Got unexpected pass %p.\n", pass);
+    ok(pass->lpVtbl->IsValid(pass), "Expected valid pass.\n");
 
     var = effect->lpVtbl->GetVariableByName(effect, "s");
     ok(var->lpVtbl->IsValid(var), "Expected valid variable.\n");
@@ -6075,18 +6266,149 @@ static void test_effect_resource_variable(void)
     ok(!refcount, "Device has %u references left.\n", refcount);
 }
 
+#if 0
+cbuffer cb <string s = "cb_a"; >
+{
+    float f1 : COLOR0 <string s = "f1_a"; >;
+};
+
+BlendState blendstate <string s = "bs_a"; >;
+Texture2D tex <string s = "tex_a"; >;
+PixelShader ps <string s = "ps_a"; >;
+VertexShader vs <string s = "vs_a"; >;
+GeometryShader gs <string s = "gs_a"; >;
+DepthStencilState ds <string s = "ds_a"; >;
+RasterizerState rs <string s = "rs_a"; >;
+SamplerState s <string s = "s_a"; >;
+RenderTargetView rtv <string s = "rtv_a"; >;
+DepthStencilView dsv <string s = "dsv_a"; >;
+
+technique10 tech <string s = "tech_a"; >
+{
+    pass P0 <string s = "P0_a"; >
+    {
+    }
+};
+#endif
+static DWORD fx_test_annotations[] =
+{
+    0x43425844, 0x2b3e08d4, 0xe3eda7bb, 0x36982de8, 0x0dcab1aa, 0x00000001, 0x000004c6, 0x00000001,
+    0x00000024, 0x30315846, 0x0000049a, 0xfeff1001, 0x00000001, 0x00000001, 0x0000000a, 0x00000000,
+    0x00000000, 0x00000000, 0x00000001, 0x00000276, 0x00000000, 0x00000001, 0x00000001, 0x00000001,
+    0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000003, 0x00000000, 0x00000000, 0x53006263,
+    0x6e697274, 0x00070067, 0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00010000,
+    0x00730000, 0x615f6263, 0x6f6c6600, 0x31007461, 0x01000000, 0x00000000, 0x04000000, 0x10000000,
+    0x04000000, 0x09000000, 0x66000009, 0x4f430031, 0x30524f4c, 0x5f316600, 0x6c420061, 0x53646e65,
+    0x65746174, 0x00006200, 0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000200,
+    0x656c6200, 0x7473646e, 0x00657461, 0x615f7362, 0x78655400, 0x65727574, 0x99004432, 0x02000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0c000000, 0x74000000, 0x74007865, 0x615f7865,
+    0x78695000, 0x68536c65, 0x72656461, 0x0000c900, 0x00000200, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000500, 0x00737000, 0x615f7370, 0x72655600, 0x53786574, 0x65646168, 0x00f90072,
+    0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00060000, 0x73760000, 0x5f737600,
+    0x65470061, 0x74656d6f, 0x68537972, 0x72656461, 0x00012a00, 0x00000200, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000700, 0x00736700, 0x615f7367, 0x70654400, 0x74536874, 0x69636e65,
+    0x6174536c, 0x5d006574, 0x02000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x03000000,
+    0x64000000, 0x73640073, 0x5200615f, 0x65747361, 0x657a6972, 0x61745372, 0x93006574, 0x02000001,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x04000000, 0x72000000, 0x73720073, 0x5300615f,
+    0x6c706d61, 0x74537265, 0x00657461, 0x000001c7, 0x00000002, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000015, 0x00615f73, 0x646e6552, 0x61547265, 0x74656772, 0x77656956, 0x0001f400,
+    0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00001300, 0x76747200, 0x76747200,
+    0x4400615f, 0x68747065, 0x6e657453, 0x566c6963, 0x00776569, 0x0000022b, 0x00000002, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000014, 0x00767364, 0x5f767364, 0x65740061, 0x74006863,
+    0x5f686365, 0x30500061, 0x5f305000, 0x00040061, 0x00100000, 0x00000000, 0x00010000, 0xffff0000,
+    0x0001ffff, 0x002a0000, 0x000e0000, 0x002c0000, 0x00530000, 0x00370000, 0x00560000, 0x00000000,
+    0x00000000, 0x00000000, 0x00010000, 0x002a0000, 0x000e0000, 0x005d0000, 0x00890000, 0x006d0000,
+    0x00000000, 0xffff0000, 0x0000ffff, 0x00010000, 0x002a0000, 0x000e0000, 0x00940000, 0x00bf0000,
+    0x00a30000, 0x00000000, 0xffff0000, 0x0001ffff, 0x002a0000, 0x000e0000, 0x00c30000, 0x00f10000,
+    0x00d50000, 0x00000000, 0xffff0000, 0x0000ffff, 0x00010000, 0x002a0000, 0x000e0000, 0x00f40000,
+    0x01220000, 0x01060000, 0x00000000, 0xffff0000, 0x0000ffff, 0x00010000, 0x002a0000, 0x000e0000,
+    0x01250000, 0x01550000, 0x01390000, 0x00000000, 0xffff0000, 0x0000ffff, 0x00010000, 0x002a0000,
+    0x000e0000, 0x01580000, 0x018b0000, 0x016f0000, 0x00000000, 0xffff0000, 0x0000ffff, 0x00010000,
+    0x002a0000, 0x000e0000, 0x018e0000, 0x01bf0000, 0x01a30000, 0x00000000, 0xffff0000, 0x0000ffff,
+    0x00010000, 0x002a0000, 0x000e0000, 0x01c20000, 0x002a0000, 0x01d40000, 0x00000000, 0xffff0000,
+    0x0000ffff, 0x00010000, 0x002a0000, 0x000e0000, 0x01f00000, 0x02210000, 0x02050000, 0x00000000,
+    0xffff0000, 0x0001ffff, 0x002a0000, 0x000e0000, 0x02250000, 0x02580000, 0x023c0000, 0x00000000,
+    0xffff0000, 0x0001ffff, 0x002a0000, 0x000e0000, 0x025c0000, 0x02620000, 0x00010000, 0x00010000,
+    0x002a0000, 0x000e0000, 0x02670000, 0x026e0000, 0x00000000, 0x00010000, 0x002a0000, 0x000e0000,
+    0x02710000, 0x00000000,
+};
+
+static void test_effect_annotations(void)
+{
+    D3D10_EFFECT_VARIABLE_DESC var_desc;
+    ID3D10EffectConstantBuffer *cb;
+    D3D10_EFFECT_DESC effect_desc;
+    ID3D10EffectTechnique *tech;
+    ID3D10EffectVariable *v, *a;
+    ID3D10EffectPass *pass;
+    ID3D10Effect *effect;
+    ID3D10Device *device;
+    ULONG i, refcount;
+    HRESULT hr;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    hr = create_effect(fx_test_annotations, 0, device, NULL, &effect);
+    ok(SUCCEEDED(hr), "Failed to create an effect.\n");
+
+    cb = effect->lpVtbl->GetConstantBufferByName(effect, "cb");
+    a = cb->lpVtbl->GetAnnotationByName(cb, "s");
+    ok(a->lpVtbl->IsValid(a), "Expected valid variable.\n");
+    a = cb->lpVtbl->GetAnnotationByName(cb, "S");
+    ok(!a->lpVtbl->IsValid(a), "Unexpected valid variable.\n");
+
+    effect->lpVtbl->GetDesc(effect, &effect_desc);
+    for (i = 0; i < effect_desc.GlobalVariables; ++i)
+    {
+        v = effect->lpVtbl->GetVariableByIndex(effect, i);
+        hr = v->lpVtbl->GetDesc(v, &var_desc);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+        ok(var_desc.Annotations == 1, "Unexpected annotations count %u.\n", var_desc.Annotations);
+        v = v->lpVtbl->GetAnnotationByName(v, "s");
+        ok(v->lpVtbl->IsValid(v), "Expected valid variable.\n");
+        a = cb->lpVtbl->GetAnnotationByName(cb, "S");
+        ok(!a->lpVtbl->IsValid(a), "Unexpected valid variable.\n");
+    }
+
+    tech = effect->lpVtbl->GetTechniqueByIndex(effect, 0);
+    ok(tech->lpVtbl->IsValid(tech), "Expected valid technique.\n");
+    a = tech->lpVtbl->GetAnnotationByName(tech, "s");
+    ok(a->lpVtbl->IsValid(a), "Expected valid variable.\n");
+    a = tech->lpVtbl->GetAnnotationByName(tech, "S");
+    ok(!a->lpVtbl->IsValid(a), "Unexpected valid variable.\n");
+
+    pass = tech->lpVtbl->GetPassByIndex(tech, 0);
+    ok(pass->lpVtbl->IsValid(pass), "Expected valid technique.\n");
+    a = pass->lpVtbl->GetAnnotationByName(pass, "s");
+    ok(a->lpVtbl->IsValid(a), "Expected valid variable.\n");
+    a = pass->lpVtbl->GetAnnotationByName(pass, "S");
+    ok(!a->lpVtbl->IsValid(a), "Unexpected valid variable.\n");
+
+    effect->lpVtbl->Release(effect);
+
+    refcount = ID3D10Device_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+}
+
 static void test_effect_optimize(void)
 {
     D3D10_EFFECT_SHADER_DESC shaderdesc;
+    D3D10_EFFECT_VARIABLE_DESC var_desc;
+    ID3D10EffectConstantBuffer *cb;
     ID3D10EffectShaderVariable *gs;
     D3D10_TECHNIQUE_DESC tech_desc;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10EffectTechnique *tech;
     D3D10_PASS_DESC pass_desc;
     ID3D10EffectVariable *v;
     ID3D10EffectPass *pass;
     ID3D10Effect *effect;
     ID3D10Device *device;
-    ULONG refcount;
+    ULONG i, refcount;
     HRESULT hr;
     BOOL ret;
 
@@ -6162,6 +6484,91 @@ static void test_effect_optimize(void)
     /* Already optimized */
     hr = effect->lpVtbl->Optimize(effect);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    effect->lpVtbl->Release(effect);
+
+    /* Annotations are stripped. */
+    hr = create_effect(fx_test_annotations, 0, device, NULL, &effect);
+    ok(SUCCEEDED(hr), "Failed to create an effect.\n");
+
+    cb = effect->lpVtbl->GetConstantBufferByName(effect, "cb");
+    hr = cb->lpVtbl->GetDesc(cb, &var_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(var_desc.Annotations == 1, "Unexpected annotations count %u.\n", var_desc.Annotations);
+    v = cb->lpVtbl->GetAnnotationByName(cb, "s");
+    ok(v->lpVtbl->IsValid(v), "Expected valid variable.\n");
+
+    effect->lpVtbl->GetDesc(effect, &effect_desc);
+
+    for (i = 0; i < effect_desc.GlobalVariables; ++i)
+    {
+        v = effect->lpVtbl->GetVariableByIndex(effect, i);
+        hr = v->lpVtbl->GetDesc(v, &var_desc);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+        ok(var_desc.Annotations == 1, "Unexpected annotations count %u.\n", var_desc.Annotations);
+        v = v->lpVtbl->GetAnnotationByName(v, "s");
+        ok(v->lpVtbl->IsValid(v), "Expected valid variable.\n");
+    }
+
+    tech = effect->lpVtbl->GetTechniqueByIndex(effect, 0);
+    hr = tech->lpVtbl->GetDesc(tech, &tech_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(tech_desc.Annotations == 1, "Unexpected annotations count %u.\n", tech_desc.Annotations);
+    v = tech->lpVtbl->GetAnnotationByName(tech, "s");
+    ok(v->lpVtbl->IsValid(v), "Expected valid variable.\n");
+
+    pass = tech->lpVtbl->GetPassByIndex(tech, 0);
+    ok(pass->lpVtbl->IsValid(pass), "Expected valid technique.\n");
+    hr = pass->lpVtbl->GetDesc(pass, &pass_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(pass_desc.Annotations == 1, "Unexpected annotations count %u.\n", pass_desc.Annotations);
+    v = pass->lpVtbl->GetAnnotationByName(pass, "s");
+    ok(v->lpVtbl->IsValid(v), "Expected valid variable.\n");
+
+    hr = effect->lpVtbl->Optimize(effect);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    cb = effect->lpVtbl->GetConstantBufferByIndex(effect, 0);
+    hr = cb->lpVtbl->GetDesc(cb, &var_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+todo_wine {
+    ok(!var_desc.Annotations, "Unexpected annotations count %u.\n", var_desc.Annotations);
+    v = cb->lpVtbl->GetAnnotationByName(cb, "s");
+    ok(!v->lpVtbl->IsValid(v), "Expected valid variable.\n");
+}
+
+    effect->lpVtbl->GetDesc(effect, &effect_desc);
+
+    for (i = 0; i < effect_desc.GlobalVariables; ++i)
+    {
+        v = effect->lpVtbl->GetVariableByIndex(effect, i);
+        hr = v->lpVtbl->GetDesc(v, &var_desc);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    todo_wine {
+        ok(!var_desc.Annotations, "Unexpected annotations count %u.\n", var_desc.Annotations);
+        v = v->lpVtbl->GetAnnotationByName(v, "s");
+        ok(!v->lpVtbl->IsValid(v), "Expected valid variable.\n");
+    }
+    }
+
+    tech = effect->lpVtbl->GetTechniqueByIndex(effect, 0);
+    hr = tech->lpVtbl->GetDesc(tech, &tech_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+todo_wine {
+    ok(!tech_desc.Annotations, "Unexpected annotations count %u.\n", tech_desc.Annotations);
+    v = tech->lpVtbl->GetAnnotationByName(tech, "s");
+    ok(!v->lpVtbl->IsValid(v), "Expected valid variable.\n");
+}
+
+    pass = tech->lpVtbl->GetPassByIndex(tech, 0);
+    ok(pass->lpVtbl->IsValid(pass), "Expected valid technique.\n");
+    hr = pass->lpVtbl->GetDesc(pass, &pass_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+todo_wine {
+    ok(!pass_desc.Annotations, "Unexpected annotations count %u.\n", pass_desc.Annotations);
+    v = pass->lpVtbl->GetAnnotationByName(pass, "s");
+    ok(!v->lpVtbl->IsValid(v), "Expected valid variable.\n");
+}
 
     effect->lpVtbl->Release(effect);
 
@@ -6997,6 +7404,7 @@ START_TEST(effect)
     test_effect_vector_variable();
     test_effect_matrix_variable();
     test_effect_resource_variable();
+    test_effect_annotations();
     test_effect_optimize();
     test_effect_shader_description();
     test_effect_shader_object();

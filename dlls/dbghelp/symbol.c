@@ -37,8 +37,6 @@ WINE_DECLARE_DEBUG_CHANNEL(dbghelp_symt);
 extern char * CDECL __unDName(char *buffer, const char *mangled, int len,
         void * (CDECL *pfn_alloc)(size_t), void (CDECL *pfn_free)(void *), unsigned short flags);
 
-static const WCHAR starW[] = {'*','\0'};
-
 static inline int cmp_addr(ULONG64 a1, ULONG64 a2)
 {
     if (a1 > a2) return 1;
@@ -748,18 +746,21 @@ static void symt_fill_sym_info(struct module_pair* pair,
                 if (data->container &&
                     (data->container->tag == SymTagFunction || data->container->tag == SymTagBlock))
                     sym_info->Flags |= SYMFLAG_LOCAL;
-                switch (data->u.value.n1.n2.vt)
+                switch (V_VT(&data->u.value))
                 {
-                case VT_I4:  sym_info->Value = (ULONG)data->u.value.n1.n2.n3.lVal; break;
-                case VT_I2:  sym_info->Value = (ULONG)(LONG_PTR)data->u.value.n1.n2.n3.iVal; break;
-                case VT_I1:  sym_info->Value = (ULONG)(LONG_PTR)data->u.value.n1.n2.n3.cVal; break;
-                case VT_UI4: sym_info->Value = (ULONG)data->u.value.n1.n2.n3.ulVal; break;
-                case VT_UI2: sym_info->Value = (ULONG)data->u.value.n1.n2.n3.uiVal; break;
-                case VT_UI1: sym_info->Value = (ULONG)data->u.value.n1.n2.n3.bVal; break;
-                case VT_I1 | VT_BYREF: sym_info->Value = (ULONG64)(DWORD_PTR)data->u.value.n1.n2.n3.byref; break;
+                case VT_I8:  sym_info->Value = (LONG64)V_I8(&data->u.value); break;
+                case VT_I4:  sym_info->Value = (LONG64)V_I4(&data->u.value); break;
+                case VT_I2:  sym_info->Value = (LONG64)V_I2(&data->u.value); break;
+                case VT_I1:  sym_info->Value = (LONG64)V_I1(&data->u.value); break;
+                case VT_UINT:sym_info->Value = V_UINT(&data->u.value); break;
+                case VT_UI8: sym_info->Value = V_UI8(&data->u.value); break;
+                case VT_UI4: sym_info->Value = V_UI4(&data->u.value); break;
+                case VT_UI2: sym_info->Value = V_UI2(&data->u.value); break;
+                case VT_UI1: sym_info->Value = V_UI1(&data->u.value); break;
+                case VT_BYREF: sym_info->Value = (DWORD_PTR)V_BYREF(&data->u.value); break;
                 case VT_EMPTY: sym_info->Value = 0; break;
                 default:
-                    FIXME("Unsupported variant type (%u)\n", data->u.value.n1.n2.vt);
+                    FIXME("Unsupported variant type (%u)\n", V_VT(&data->u.value));
                     sym_info->Value = 0;
                     break;
                 }
@@ -1086,7 +1087,7 @@ static BOOL symt_enum_locals(struct process* pcs, const WCHAR* mask,
 
     if (sym->symt.tag == SymTagFunction)
     {
-        return symt_enum_locals_helper(&pair, mask ? mask : starW, se, (struct symt_function*)sym,
+        return symt_enum_locals_helper(&pair, mask ? mask : L"*", se, (struct symt_function*)sym,
                                        &((struct symt_function*)sym)->vchildren);
     }
     return FALSE;
@@ -1207,7 +1208,7 @@ static BOOL sym_enum(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR Mask,
         Mask = bang + 1;
     }
 
-    symt_enum_module(&pair, Mask ? Mask : starW, se);
+    symt_enum_module(&pair, Mask ? Mask : L"*", se);
 
     return TRUE;
 }
@@ -1360,10 +1361,7 @@ BOOL WINAPI SymFromAddr(HANDLE hProcess, DWORD64 Address,
     struct module_pair  pair;
     struct symt_ht*     sym;
 
-    pair.pcs = process_find_by_handle(hProcess);
-    if (!pair.pcs) return FALSE;
-    pair.requested = module_find_by_addr(pair.pcs, Address, DMT_UNKNOWN);
-    if (!module_get_debug(&pair)) return FALSE;
+    if (!module_init_pair(&pair, hProcess, Address)) return FALSE;
     if ((sym = symt_find_nearest(pair.effective, Address)) == NULL) return FALSE;
 
     symt_fill_sym_info(&pair, NULL, &sym->symt, Symbol);
@@ -1714,10 +1712,7 @@ static BOOL get_line_from_addr(HANDLE hProcess, DWORD64 addr,
     struct symt_ht*             symt;
     struct symt_function*       func;
 
-    pair.pcs = process_find_by_handle(hProcess);
-    if (!pair.pcs) return FALSE;
-    pair.requested = module_find_by_addr(pair.pcs, addr, DMT_UNKNOWN);
-    if (!module_get_debug(&pair)) return FALSE;
+    if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
     if ((symt = symt_find_nearest(pair.effective, addr)) == NULL) return FALSE;
 
     if (symt->symt.tag != SymTagFunction) return FALSE;
@@ -1859,10 +1854,7 @@ static BOOL symt_get_func_line_prev(HANDLE hProcess, struct internal_line_t* int
     struct line_info*   li;
     struct line_info*   srcli;
 
-    pair.pcs = process_find_by_handle(hProcess);
-    if (!pair.pcs) return FALSE;
-    pair.requested = module_find_by_addr(pair.pcs, addr, DMT_UNKNOWN);
-    if (!module_get_debug(&pair)) return FALSE;
+    if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
 
     if (key == NULL) return FALSE;
 
@@ -1941,10 +1933,7 @@ static BOOL symt_get_func_line_next(HANDLE hProcess, struct internal_line_t* int
     struct line_info*   srcli;
 
     if (key == NULL) return FALSE;
-    pair.pcs = process_find_by_handle(hProcess);
-    if (!pair.pcs) return FALSE;
-    pair.requested = module_find_by_addr(pair.pcs, addr, DMT_UNKNOWN);
-    if (!module_get_debug(&pair)) return FALSE;
+    if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
 
     /* search current source file */
     for (srcli = key; !srcli->is_source_file; srcli--);
@@ -2163,7 +2152,7 @@ static BOOL re_match_multi(const WCHAR** pstring, const WCHAR** pre, BOOL _case)
         case WILDCHAR(']'): case WILDCHAR('+'): case WILDCHAR('#'): return FALSE;
         case WILDCHAR('*'):
             /* transform '*' into '?#' */
-            {static const WCHAR qmW[] = {'?',0}; re_beg = qmW;}
+            re_beg = L"?";
             goto closure;
         case WILDCHAR('['):
             do
@@ -2341,10 +2330,7 @@ BOOL WINAPI SymAddSymbol(HANDLE hProcess, ULONG64 BaseOfDll, PCSTR name,
 
     TRACE("(%p %s %s %u)\n", hProcess, wine_dbgstr_a(name), wine_dbgstr_longlong(addr), size);
 
-    pair.pcs = process_find_by_handle(hProcess);
-    if (!pair.pcs) return FALSE;
-    pair.requested = module_find_by_addr(pair.pcs, BaseOfDll, DMT_UNKNOWN);
-    if (!module_get_debug(&pair)) return FALSE;
+    if (!module_init_pair(&pair, hProcess, BaseOfDll)) return FALSE;
 
     return symt_new_custom(pair.effective, name, addr, size) != NULL;
 }
@@ -2366,19 +2352,6 @@ BOOL WINAPI SymAddSymbolW(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR nameW,
 }
 
 /******************************************************************
- *		SymSetScopeFromAddr (DBGHELP.@)
- */
-BOOL WINAPI SymSetScopeFromAddr(HANDLE hProcess, ULONG64 addr)
-{
-    struct process*     pcs;
-
-    FIXME("(%p %s): stub\n", hProcess, wine_dbgstr_longlong(addr));
-
-    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
-    return TRUE;
-}
-
-/******************************************************************
  *		SymEnumLines (DBGHELP.@)
  *
  */
@@ -2397,11 +2370,8 @@ BOOL WINAPI SymEnumLines(HANDLE hProcess, ULONG64 base, PCSTR compiland,
     if (!cb) return FALSE;
     if (!(dbghelp_options & SYMOPT_LOAD_LINES)) return TRUE;
 
-    pair.pcs = process_find_by_handle(hProcess);
-    if (!pair.pcs) return FALSE;
+    if (!module_init_pair(&pair, hProcess, base)) return FALSE;
     if (compiland) FIXME("Unsupported yet (filtering on compiland %s)\n", compiland);
-    pair.requested = module_find_by_addr(pair.pcs, base, DMT_UNKNOWN);
-    if (!module_get_debug(&pair)) return FALSE;
     if (!(srcmask = file_regex(srcfile))) return FALSE;
 
     sci.SizeOfStruct = sizeof(sci);
@@ -2519,4 +2489,65 @@ PWSTR WINAPI SymSetHomeDirectoryW(HANDLE hProcess, PCWSTR dir)
     FIXME("(%p, %s): stub\n", hProcess, debugstr_w(dir));
 
     return NULL;
+}
+
+/******************************************************************
+ *		SymFromInlineContext (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymFromInlineContext(HANDLE hProcess, DWORD64 addr, ULONG inline_ctx, PDWORD64 disp, PSYMBOL_INFO si)
+{
+    FIXME("(%p, %#I64x, 0x%x, %p, %p): stub\n", hProcess, addr, inline_ctx, disp, si);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/******************************************************************
+ *		SymFromInlineContextW (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymFromInlineContextW(HANDLE hProcess, DWORD64 addr, ULONG inline_ctx, PDWORD64 disp, PSYMBOL_INFOW siW)
+{
+    PSYMBOL_INFO        si;
+    unsigned            len;
+    BOOL                ret;
+
+    TRACE("(%p, %#I64x, 0x%x, %p, %p)\n", hProcess, addr, inline_ctx, disp, siW);
+
+    len = sizeof(*si) + siW->MaxNameLen * sizeof(WCHAR);
+    si = HeapAlloc(GetProcessHeap(), 0, len);
+    if (!si) return FALSE;
+
+    si->SizeOfStruct = sizeof(*si);
+    si->MaxNameLen = siW->MaxNameLen;
+    if ((ret = SymFromInlineContext(hProcess, addr, inline_ctx, disp, si)))
+    {
+        copy_symbolW(siW, si);
+    }
+    HeapFree(GetProcessHeap(), 0, si);
+    return ret;
+}
+
+/******************************************************************
+ *		SymGetLineFromInlineContext (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymGetLineFromInlineContext(HANDLE hProcess, DWORD64 addr, ULONG inline_ctx, DWORD64 mod_addr, PDWORD disp, PIMAGEHLP_LINE64 line)
+{
+    FIXME("(%p, %#I64x, 0x%x, %#I64x, %p, %p): stub!\n",
+          hProcess, addr, inline_ctx, mod_addr, disp, line);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/******************************************************************
+ *		SymGetLineFromInlineContextW (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymGetLineFromInlineContextW(HANDLE hProcess, DWORD64 addr, ULONG inline_ctx, DWORD64 mod_addr, PDWORD disp, PIMAGEHLP_LINEW64 line)
+{
+    FIXME("(%p, %#I64x, 0x%x, %#I64x, %p, %p): stub!\n",
+          hProcess, addr, inline_ctx, mod_addr, disp, line);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }

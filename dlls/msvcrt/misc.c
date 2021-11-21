@@ -490,7 +490,7 @@ unsigned short CDECL _byteswap_ushort(unsigned short s)
 /*********************************************************************
  * _byteswap_ulong (MSVCR80.@)
  */
-ULONG CDECL _byteswap_ulong(ULONG l)
+__msvcrt_ulong CDECL _byteswap_ulong(__msvcrt_ulong l)
 {
     return (l<<24) + ((l<<8)&0xFF0000) + ((l>>8)&0xFF00) + (l>>24);
 }
@@ -536,9 +536,9 @@ BOOL CDECL __crtInitializeCriticalSectionEx(
 /*********************************************************************
  * _vacopy (MSVCR120.@)
  */
-void CDECL _vacopy(__ms_va_list *dest, __ms_va_list src)
+void CDECL _vacopy(va_list *dest, va_list src)
 {
-    __ms_va_copy(*dest, src);
+    va_copy(*dest, src);
 }
 #endif
 

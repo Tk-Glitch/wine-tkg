@@ -5944,11 +5944,10 @@ static HRESULT resolver_create_registered_handler(HKEY hkey, REFIID riid, void *
 static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHAR *url, DWORD flags,
         IMFByteStreamHandler **handler)
 {
-    static const char streamhandlerspath[] = "Software\\Microsoft\\Windows Media Foundation\\ByteStreamHandlers";
     static const HKEY hkey_roots[2] = { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE };
+    WCHAR *mimeW = NULL, *urlW = NULL;
     IMFAttributes *attributes;
     const WCHAR *url_ext;
-    WCHAR *mimeW = NULL;
     HRESULT hr = E_FAIL;
     unsigned int i, j;
     UINT32 length;
@@ -5959,6 +5958,11 @@ static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHA
     if (SUCCEEDED(IMFByteStream_QueryInterface(stream, &IID_IMFAttributes, (void **)&attributes)))
     {
         IMFAttributes_GetAllocatedString(attributes, &MF_BYTESTREAM_CONTENT_TYPE, &mimeW, &length);
+        if (!url)
+        {
+            IMFAttributes_GetAllocatedString(attributes, &MF_BYTESTREAM_ORIGIN_NAME, &urlW, &length);
+            url = urlW;
+        }
         IMFAttributes_Release(attributes);
     }
 
@@ -5967,7 +5971,7 @@ static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHA
 
     if (!url_ext && !mimeW)
     {
-        CoTaskMemFree(mimeW);
+        CoTaskMemFree(urlW);
         return MF_E_UNSUPPORTED_BYTESTREAM_TYPE;
     }
 
@@ -5991,7 +5995,11 @@ static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHA
         LeaveCriticalSection(&local_handlers_section);
 
         if (*handler)
+        {
+            CoTaskMemFree(mimeW);
+            CoTaskMemFree(urlW);
             return hr;
+        }
     }
 
     for (i = 0, hr = E_FAIL; i < ARRAY_SIZE(hkey_roots); ++i)
@@ -5999,7 +6007,7 @@ static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHA
         const WCHAR *namesW[2] = { mimeW, url_ext };
         HKEY hkey, hkey_handler;
 
-        if (RegOpenKeyA(hkey_roots[i], streamhandlerspath, &hkey))
+        if (RegOpenKeyW(hkey_roots[i], L"Software\\Microsoft\\Windows Media Foundation\\ByteStreamHandlers", &hkey))
             continue;
 
         for (j = 0; j < ARRAY_SIZE(namesW); ++j)
@@ -6030,12 +6038,12 @@ static HRESULT resolver_get_bytestream_handler(IMFByteStream *stream, const WCHA
     }
 
     CoTaskMemFree(mimeW);
+    CoTaskMemFree(urlW);
     return hr;
 }
 
 static HRESULT resolver_create_scheme_handler(const WCHAR *scheme, DWORD flags, IMFSchemeHandler **handler)
 {
-    static const char schemehandlerspath[] = "Software\\Microsoft\\Windows Media Foundation\\SchemeHandlers";
     static const HKEY hkey_roots[2] = { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE };
     HRESULT hr = MF_E_UNSUPPORTED_SCHEME;
     unsigned int i;
@@ -6072,7 +6080,7 @@ static HRESULT resolver_create_scheme_handler(const WCHAR *scheme, DWORD flags, 
 
         hr = MF_E_UNSUPPORTED_SCHEME;
 
-        if (RegOpenKeyA(hkey_roots[i], schemehandlerspath, &hkey))
+        if (RegOpenKeyW(hkey_roots[i], L"Software\\Microsoft\\Windows Media Foundation\\SchemeHandlers", &hkey))
             continue;
 
         if (!RegOpenKeyW(hkey, scheme, &hkey_handler))

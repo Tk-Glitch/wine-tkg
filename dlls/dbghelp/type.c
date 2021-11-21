@@ -371,8 +371,8 @@ BOOL symt_add_enum_element(struct module* module, struct symt_enum* enum_type,
     e->kind = DataIsConstant;
     e->container = &enum_type->symt;
     e->type = enum_type->base_type;
-    e->u.value.n1.n2.vt = VT_I4;
-    e->u.value.n1.n2.n3.lVal = value;
+    V_VT(&e->u.value) = VT_I4;
+    V_I4(&e->u.value) = value;
 
     p = vector_add(&enum_type->vchildren, &module->pool);
     if (!p) return FALSE; /* FIXME we leak e */
@@ -483,9 +483,7 @@ BOOL WINAPI SymEnumTypes(HANDLE hProcess, ULONG64 BaseOfDll,
           hProcess, wine_dbgstr_longlong(BaseOfDll), EnumSymbolsCallback,
           UserContext);
 
-    if (!(pair.pcs = process_find_by_handle(hProcess))) return FALSE;
-    pair.requested = module_find_by_addr(pair.pcs, BaseOfDll, DMT_UNKNOWN);
-    if (!module_get_debug(&pair)) return FALSE;
+    if (!module_init_pair(&pair, hProcess, BaseOfDll)) return FALSE;
 
     sym_info->SizeOfStruct = sizeof(SYMBOL_INFO);
     sym_info->MaxNameLen = sizeof(buffer) - sizeof(SYMBOL_INFO);
@@ -748,6 +746,8 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         case SymTagFunctionType:
         case SymTagFunctionArgType:
         case SymTagLabel:
+        case SymTagFuncDebugStart:
+        case SymTagFuncDebugEnd:
             return FALSE;
         }
         break;
@@ -841,6 +841,7 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
         case SymTagArrayType:
         case SymTagBaseType:
         case SymTagTypedef:
+        case SymTagFunction:
         case SymTagBlock:
         case SymTagFuncDebugStart:
         case SymTagFuncDebugEnd:
@@ -952,8 +953,8 @@ BOOL symt_get_info(struct module* module, const struct symt* type,
                     }
                 }
                 if (loc.kind != loc_absolute) return FALSE;
-                X(VARIANT).n1.n2.vt = VT_UI4; /* FIXME */
-                X(VARIANT).n1.n2.n3.uiVal = loc.offset;
+                V_VT(&X(VARIANT)) = VT_UI4; /* FIXME */
+                V_UI4(&X(VARIANT)) = loc.offset;
             }
             break;
         default: return FALSE;
@@ -1007,16 +1008,7 @@ BOOL WINAPI SymGetTypeInfo(HANDLE hProcess, DWORD64 ModBase,
 {
     struct module_pair  pair;
 
-    pair.pcs = process_find_by_handle(hProcess);
-    if (!pair.pcs) return FALSE;
-
-    pair.requested = module_find_by_addr(pair.pcs, ModBase, DMT_UNKNOWN);
-    if (!module_get_debug(&pair))
-    {
-        FIXME("Someone didn't properly set ModBase (%s)\n", wine_dbgstr_longlong(ModBase));
-        return FALSE;
-    }
-
+    if (!module_init_pair(&pair, hProcess, ModBase)) return FALSE;
     return symt_get_info(pair.effective, symt_index2ptr(pair.effective, TypeId), GetType, pInfo);
 }
 
@@ -1031,10 +1023,7 @@ BOOL WINAPI SymGetTypeFromName(HANDLE hProcess, ULONG64 BaseOfDll,
     struct symt*        type;
     DWORD64             size;
 
-    pair.pcs = process_find_by_handle(hProcess);
-    if (!pair.pcs) return FALSE;
-    pair.requested = module_find_by_addr(pair.pcs, BaseOfDll, DMT_UNKNOWN);
-    if (!module_get_debug(&pair)) return FALSE;
+    if (!module_init_pair(&pair, hProcess, BaseOfDll)) return FALSE;
     type = symt_find_type_by_name(pair.effective, SymTagNull, Name);
     if (!type) return FALSE;
     Symbol->Index = Symbol->TypeIndex = symt_ptr2index(pair.effective, type);

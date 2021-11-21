@@ -145,12 +145,16 @@ static void wined3d_buffer_gl_destroy_buffer_object(struct wined3d_buffer_gl *bu
     if (!buffer_gl->b.buffer_object)
         return;
 
-    if (context_gl->c.transform_feedback_active && resource->bind_count
-            && resource->bind_flags & WINED3D_BIND_STREAM_OUTPUT)
+    if (context_gl->c.transform_feedback_active && (resource->bind_flags & WINED3D_BIND_STREAM_OUTPUT)
+            && wined3d_context_is_graphics_state_dirty(&context_gl->c, STATE_STREAM_OUTPUT))
     {
-        /* We have to make sure that transform feedback is not active
-         * when deleting a potentially bound transform feedback buffer.
-         * This may happen when the device is being destroyed. */
+        /* It's illegal to (un)bind GL_TRANSFORM_FEEDBACK_BUFFER while transform
+         * feedback is active. Deleting a buffer implicitly unbinds it, so we
+         * need to end transform feedback here if this buffer was bound.
+         *
+         * This should only be possible if STATE_STREAM_OUTPUT is dirty; if we
+         * do a draw call before destroying this buffer then the draw call will
+         * already rebind the GL target. */
         WARN("Deleting buffer object for buffer %p, disabling transform feedback.\n", buffer_gl);
         wined3d_context_gl_end_transform_feedback(context_gl);
     }
@@ -193,7 +197,7 @@ static BOOL wined3d_buffer_gl_create_buffer_object(struct wined3d_buffer_gl *buf
         return FALSE;
     }
 
-    list_add_head(&buffer_gl->bo.users, &buffer_gl->bo_user.entry);
+    list_add_head(&buffer_gl->bo.b.users, &buffer_gl->bo_user.entry);
     buffer_gl->b.buffer_object = (uintptr_t)bo;
     buffer_invalidate_bo_range(&buffer_gl->b, 0, 0);
 
@@ -708,8 +712,10 @@ ULONG CDECL wined3d_buffer_decref(struct wined3d_buffer *buffer)
 
     if (!refcount)
     {
+        wined3d_mutex_lock();
         buffer->resource.parent_ops->wined3d_object_destroyed(buffer->resource.parent);
         buffer->resource.device->adapter->adapter_ops->adapter_destroy_buffer(buffer);
+        wined3d_mutex_unlock();
     }
 
     return refcount;
@@ -938,6 +944,11 @@ static HRESULT buffer_resource_sub_resource_map(struct wined3d_resource *resourc
                 addr.buffer_object = buffer->buffer_object;
                 addr.addr = 0;
                 buffer->map_ptr = wined3d_context_map_bo_address(context, &addr, resource->size, flags);
+                /* We are accessing buffer->resource.client from the CS thread,
+                 * but it's safe because the client thread will wait for the
+                 * map to return, thus completely serializing this call with
+                 * other client code. */
+                buffer->resource.client.addr = addr;
 
                 if (((DWORD_PTR)buffer->map_ptr) & (RESOURCE_ALIGNMENT - 1))
                 {
@@ -1429,7 +1440,7 @@ static BOOL wined3d_buffer_vk_create_buffer_object(struct wined3d_buffer_vk *buf
     }
 
     list_init(&buffer_vk->bo_user.entry);
-    list_add_head(&buffer_vk->bo.users, &buffer_vk->bo_user.entry);
+    list_add_head(&buffer_vk->bo.b.users, &buffer_vk->bo_user.entry);
     buffer_vk->b.buffer_object = (uintptr_t)&buffer_vk->bo;
     buffer_invalidate_bo_range(&buffer_vk->b, 0, 0);
 

@@ -1797,13 +1797,11 @@ static void finished_reading( struct request *request )
         if (!wcsicmp( connection, L"close" )) close = TRUE;
     }
     else if (!wcscmp( request->version, L"HTTP/1.0" )) close = TRUE;
-    if (close)
-    {
-        close_connection( request );
-        return;
-    }
 
-    cache_connection( request->netconn );
+    if (close)
+        netconn_close( request->netconn );
+    else
+        cache_connection( request->netconn );
     request->netconn = NULL;
 }
 
@@ -1850,6 +1848,7 @@ static DWORD read_data( struct request *request, void *buffer, DWORD size, DWORD
 
 done:
     TRACE( "retrieved %u bytes (%u/%u)\n", bytes_read, request->content_read, request->content_length );
+    if (end_of_read_data( request )) finished_reading( request );
     if (async)
     {
         if (!ret) send_callback( &request->hdr, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, buffer, bytes_read );
@@ -1863,7 +1862,6 @@ done:
     }
 
     if (!ret && read) *read = bytes_read;
-    if (end_of_read_data( request )) finished_reading( request );
     return ret;
 }
 

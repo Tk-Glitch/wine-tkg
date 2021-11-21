@@ -1161,7 +1161,7 @@ BOOL codeview_dump_types_from_block(const void* table, unsigned long len)
 
         codeview_dump_one_type(curr_type, type);
         curr_type++;
-        ptr += (type->generic.len + 2 + 3) & ~3;
+        ptr += type->generic.len + 2;
     }
 
     return TRUE;
@@ -1837,6 +1837,14 @@ BOOL codeview_dump_symbols(const void* root, unsigned long size)
                    sym->file_static_v3.typind,
                    sym->file_static_v3.modOffset,
                    get_varflags(sym->file_static_v3.varflags));
+            break;
+
+        case S_UNAMESPACE_ST:
+            printf("UNameSpace V2 '%s'\n", p_string(&sym->unamespace_v2.pname));
+            break;
+
+        case S_UNAMESPACE:
+            printf("UNameSpace V3 '%s'\n", sym->unamespace_v3.name);
             break;
 
         default:

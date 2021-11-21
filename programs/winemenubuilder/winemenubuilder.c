@@ -189,8 +189,6 @@ struct rb_string_entry
     struct wine_rb_entry entry;
 };
 
-DEFINE_GUID(CLSID_WICIcnsEncoder, 0x312fb6f1,0xb767,0x409d,0x8a,0x6d,0x0f,0xc1,0x54,0xd4,0xf0,0x5c);
-
 static WCHAR *xdg_menu_dir;
 static WCHAR *xdg_data_dir;
 static WCHAR xdg_desktop_dir[MAX_PATH];
@@ -363,7 +361,6 @@ static HRESULT convert_to_native_icon(IStream *icoFile, int *indices, int numInd
     IWICImagingFactory *factory = NULL;
     IWICBitmapDecoder *decoder = NULL;
     IWICBitmapEncoder *encoder = NULL;
-    IWICBitmapScaler *scaler = NULL;
     IStream *outputFile = NULL;
     int i;
     HRESULT hr = E_FAIL;
@@ -381,14 +378,6 @@ static HRESULT convert_to_native_icon(IStream *icoFile, int *indices, int numInd
     {
         WINE_ERR("error 0x%08X creating IWICBitmapDecoder\n", hr);
         goto end;
-    }
-    if (IsEqualCLSID(outputFormat,&CLSID_WICIcnsEncoder))
-    {
-        hr = IWICImagingFactory_CreateBitmapScaler(factory, &scaler);
-        if (FAILED(hr))
-        {
-            WINE_WARN("error 0x%08X creating IWICBitmapScaler\n", hr);
-        }
     }
     hr = CoCreateInstance(outputFormat, NULL, CLSCTX_INPROC_SERVER,
         &IID_IWICBitmapEncoder, (void**)&encoder);
@@ -429,22 +418,6 @@ static HRESULT convert_to_native_icon(IStream *icoFile, int *indices, int numInd
         {
             WINE_ERR("error 0x%08X converting bitmap to 32bppBGRA\n", hr);
             goto endloop;
-        }
-        if ( scaler)
-        {
-            IWICBitmapSource_GetSize(sourceBitmap, &width, &height);
-            if (width == 64) /* Classic Mode */
-            {
-                hr = IWICBitmapScaler_Initialize( scaler, sourceBitmap, 128, 128,
-                                  WICBitmapInterpolationModeNearestNeighbor);
-                if (FAILED(hr))
-                    WINE_ERR("error 0x%08X scaling bitmap\n", hr);
-                else
-                {
-                    IWICBitmapSource_Release(sourceBitmap);
-                    IWICBitmapScaler_QueryInterface(scaler, &IID_IWICBitmapSource, (LPVOID)&sourceBitmap);
-                }
-            }
         }
         hr = IWICBitmapEncoder_CreateNewFrame(encoder, &dstFrame, &options);
         if (FAILED(hr))
@@ -511,8 +484,6 @@ end:
         IWICImagingFactory_Release(factory);
     if (decoder)
         IWICBitmapDecoder_Release(decoder);
-    if (scaler)
-        IWICBitmapScaler_Release(scaler);
     if (encoder)
         IWICBitmapEncoder_Release(encoder);
     if (outputFile)
@@ -1089,119 +1060,6 @@ static WCHAR *compute_native_identifier(int exeIndex, LPCWSTR icoPathW, LPCWSTR 
     return heap_wprintf(L"%04X_%.*s.%d", crc, (int)(ext - basename), basename, exeIndex);
 }
 
-#ifdef __APPLE__
-#define ICNS_SLOTS 6
-
-static inline int size_to_slot(int size)
-{
-    switch (size)
-    {
-        case 16: return 0;
-        case 32: return 1;
-        case 48: return 2;
-        case 64: return -2;  /* Classic Mode */
-        case 128: return 3;
-        case 256: return 4;
-        case 512: return 5;
-    }
-
-    return -1;
-}
-
-#define CLASSIC_SLOT 3
-
-static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntries,
-                                   int numEntries, int exeIndex, LPCWSTR icoPathW,
-                                   const WCHAR *destFilename, WCHAR **nativeIdentifier)
-{
-    struct {
-        int index;
-        int maxBits;
-        BOOL scaled;
-    } best[ICNS_SLOTS];
-    int indexes[ICNS_SLOTS];
-    int i;
-    WCHAR tmpdir[MAX_PATH];
-    WCHAR *icnsPath;
-    LARGE_INTEGER zero;
-    HRESULT hr;
-
-    for (i = 0; i < ICNS_SLOTS; i++)
-    {
-        best[i].index = -1;
-        best[i].maxBits = 0;
-    }
-    for (i = 0; i < numEntries; i++)
-    {
-        int slot;
-        int width = iconDirEntries[i].bWidth ? iconDirEntries[i].bWidth : 256;
-        int height = iconDirEntries[i].bHeight ? iconDirEntries[i].bHeight : 256;
-        BOOL scaled = FALSE;
-
-        WINE_TRACE("[%d]: %d x %d @ %d\n", i, width, height, iconDirEntries[i].wBitCount);
-        if (height != width)
-            continue;
-        slot = size_to_slot(width);
-        if (slot == -2)
-        {
-            scaled = TRUE;
-            slot = CLASSIC_SLOT;
-        }
-        else if (slot < 0)
-            continue;
-        if (scaled && best[slot].maxBits && !best[slot].scaled)
-            continue; /* don't replace unscaled with scaled */
-        if (iconDirEntries[i].wBitCount >= best[slot].maxBits || (!scaled && best[slot].scaled))
-        {
-            best[slot].index = i;
-            best[slot].maxBits = iconDirEntries[i].wBitCount;
-            best[slot].scaled = scaled;
-        }
-    }
-    /* remove the scaled icon if a larger unscaled icon exists */
-    if (best[CLASSIC_SLOT].scaled)
-    {
-        for (i = CLASSIC_SLOT+1; i < ICNS_SLOTS; i++)
-            if (best[i].index >= 0 && !best[i].scaled)
-            {
-                best[CLASSIC_SLOT].index = -1;
-                break;
-            }
-    }
-
-    numEntries = 0;
-    for (i = 0; i < ICNS_SLOTS; i++)
-    {
-        if (best[i].index >= 0)
-        {
-            indexes[numEntries] = best[i].index;
-            numEntries++;
-        }
-    }
-
-    *nativeIdentifier = compute_native_identifier(exeIndex, icoPathW, destFilename);
-    GetTempPathW( MAX_PATH, tmpdir );
-    icnsPath = heap_wprintf(L"%s\\%s.icns", tmpdir, *nativeIdentifier);
-    zero.QuadPart = 0;
-    hr = IStream_Seek(icoStream, zero, STREAM_SEEK_SET, NULL);
-    if (FAILED(hr))
-    {
-        WINE_WARN("seeking icon stream failed, error 0x%08X\n", hr);
-        goto end;
-    }
-    hr = convert_to_native_icon(icoStream, indexes, numEntries, &CLSID_WICIcnsEncoder, icnsPath);
-    if (FAILED(hr))
-    {
-        WINE_WARN("converting %s to %s failed, error 0x%08X\n",
-            wine_dbgstr_w(icoPathW), wine_dbgstr_w(icnsPath), hr);
-        goto end;
-    }
-
-end:
-    heap_free(icnsPath);
-    return hr;
-}
-#else
 static void refresh_icon_cache(const WCHAR *iconsDir)
 {
     WCHAR buffer[MAX_PATH];
@@ -1278,7 +1136,6 @@ static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntr
     heap_free(iconsDir);
     return hr;
 }
-#endif /* defined(__APPLE__) */
 
 /* extract an icon from an exe or icon file; helper for IPersistFile_fnSave */
 static WCHAR *extract_icon(LPCWSTR icoPathW, int index, const WCHAR *destFilename, BOOL bWait)
@@ -1882,29 +1739,50 @@ static BOOL build_native_mime_types(struct list *mime_types)
     return ret;
 }
 
-static BOOL freedesktop_mime_type_for_extension(struct list *native_mime_types,
-                                                LPCWSTR extensionW,
-                                                WCHAR **match)
+static WCHAR *freedesktop_mime_type_for_extension(struct list *native_mime_types,
+                                                  const WCHAR *extensionW)
 {
     struct xdg_mime_type *mime_type_entry;
     int matchLength = 0;
-
-    *match = NULL;
+    const WCHAR* match = NULL;
 
     LIST_FOR_EACH_ENTRY(mime_type_entry, native_mime_types, struct xdg_mime_type, entry)
     {
         if (PathMatchSpecW( extensionW, mime_type_entry->glob ))
         {
-            if (*match == NULL || matchLength < lstrlenW(mime_type_entry->glob))
+            if (match == NULL || matchLength < lstrlenW(mime_type_entry->glob))
             {
-                *match = mime_type_entry->mimeType;
+                match = mime_type_entry->mimeType;
                 matchLength = lstrlenW(mime_type_entry->glob);
             }
         }
     }
 
-    if (*match != NULL) *match = xwcsdup(*match);
-    return TRUE;
+    return match ? xwcsdup(match) : NULL;
+}
+
+static WCHAR *reg_enum_keyW(HKEY key, DWORD index)
+{
+    WCHAR *subkey;
+    DWORD size = 1024 * sizeof(WCHAR);
+    LSTATUS ret;
+
+    for (;;)
+    {
+        subkey = xmalloc(size);
+        ret = RegEnumKeyExW(key, index, subkey, &size, NULL, NULL, NULL, NULL);
+        if (ret == ERROR_SUCCESS)
+        {
+            return subkey;
+        }
+        if (ret != ERROR_MORE_DATA)
+        {
+            heap_free(subkey);
+            return NULL;
+        }
+        size *= 2;
+        heap_free(subkey);
+    }
 }
 
 static WCHAR* reg_get_valW(HKEY key, LPCWSTR subkey, LPCWSTR name)
@@ -2011,47 +1889,31 @@ static BOOL cleanup_associations(void)
     BOOL hasChanged = FALSE;
     if ((assocKey = open_associations_reg_key()))
     {
-        int i;
-        BOOL done = FALSE;
-        for (i = 0; !done;)
+        int i = 0;
+        for (;;)
         {
-            WCHAR *extensionW = NULL;
-            DWORD size = 1024;
-            LSTATUS ret;
+            WCHAR *extensionW;
+            WCHAR *command;
 
-            do
-            {
-                heap_free(extensionW);
-                extensionW = xmalloc(size * sizeof(WCHAR));
-                ret = RegEnumKeyExW(assocKey, i, extensionW, &size, NULL, NULL, NULL, NULL);
-                size *= 2;
-            } while (ret == ERROR_MORE_DATA);
+            if (!(extensionW = reg_enum_keyW(assocKey, i)))
+                break;
 
-            if (ret == ERROR_SUCCESS)
+            if (!(command = assoc_query(ASSOCSTR_COMMAND, extensionW, L"open")))
             {
-                WCHAR *command;
-                command = assoc_query(ASSOCSTR_COMMAND, extensionW, L"open");
-                if (command == NULL)
+                WCHAR *desktopFile = reg_get_valW(assocKey, extensionW, L"DesktopFile");
+                if (desktopFile)
                 {
-                    WCHAR *desktopFile = reg_get_valW(assocKey, extensionW, L"DesktopFile");
-                    if (desktopFile)
-                    {
-                        WINE_TRACE("removing file type association for %s\n", wine_dbgstr_w(extensionW));
-                        DeleteFileW(desktopFile);
-                    }
-                    RegDeleteKeyW(assocKey, extensionW);
-                    hasChanged = TRUE;
-                    heap_free(desktopFile);
+                    WINE_TRACE("removing file type association for %s\n", wine_dbgstr_w(extensionW));
+                    DeleteFileW(desktopFile);
                 }
-                else
-                    i++;
-                heap_free(command);
+                RegDeleteKeyW(assocKey, extensionW);
+                hasChanged = TRUE;
+                heap_free(desktopFile);
             }
             else
             {
-                if (ret != ERROR_NO_MORE_ITEMS)
-                    WINE_ERR("error %d while reading registry\n", ret);
-                done = TRUE;
+                i++;
+                heap_free(command);
             }
             heap_free(extensionW);
         }
@@ -2188,7 +2050,6 @@ static BOOL generate_associations(const WCHAR *packages_dir, const WCHAR *applic
 {
     struct wine_rb_tree mimeProgidTree = { winemenubuilder_rb_string_compare };
     struct list nativeMimeTypes = LIST_INIT(nativeMimeTypes);
-    LSTATUS ret = 0;
     int i;
     BOOL hasChanged = FALSE;
 
@@ -2200,18 +2061,12 @@ static BOOL generate_associations(const WCHAR *packages_dir, const WCHAR *applic
 
     for (i = 0; ; i++)
     {
-        WCHAR *extensionW = NULL;
-        DWORD size = 1024;
+        WCHAR *extensionW;
 
-        do
-        {
-            heap_free(extensionW);
-            extensionW = xmalloc(size * sizeof(WCHAR));
-            ret = RegEnumKeyExW(HKEY_CLASSES_ROOT, i, extensionW, &size, NULL, NULL, NULL, NULL);
-            size *= 2;
-        } while (ret == ERROR_MORE_DATA);
+        if (!(extensionW = reg_enum_keyW(HKEY_CLASSES_ROOT, i)))
+            break;
 
-        if (ret == ERROR_SUCCESS && extensionW[0] == '.' && !is_extension_banned(extensionW))
+        if (extensionW[0] == '.' && !is_extension_banned(extensionW))
         {
             WCHAR *commandW = NULL;
             WCHAR *executableW = NULL;
@@ -2243,8 +2098,7 @@ static BOOL generate_associations(const WCHAR *packages_dir, const WCHAR *applic
             if (contentTypeW)
                 wcslwr(contentTypeW);
 
-            if (!freedesktop_mime_type_for_extension(&nativeMimeTypes, extensionW, &mimeType))
-                goto end;
+            mimeType = freedesktop_mime_type_for_extension(&nativeMimeTypes, extensionW);
 
             if (mimeType == NULL)
             {
@@ -2324,8 +2178,6 @@ static BOOL generate_associations(const WCHAR *packages_dir, const WCHAR *applic
             heap_free(progIdW);
         }
         heap_free(extensionW);
-        if (ret != ERROR_SUCCESS)
-            break;
     }
 
     wine_rb_destroy(&mimeProgidTree, winemenubuilder_rb_destroy, NULL);

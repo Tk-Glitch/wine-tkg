@@ -24,6 +24,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#include "initguid.h"
+#include "objbase.h"
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -34,8 +36,6 @@
 #include "ddk/imm.h"
 #include "winnls.h"
 #include "winreg.h"
-#include "initguid.h"
-#include "objbase.h"
 #include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(imm);
@@ -100,13 +100,14 @@ typedef struct _tagIMMThreadData {
     DWORD windowRefs;
     IInitializeSpy IInitializeSpy_iface;
     ULARGE_INTEGER spy_cookie;
-    BOOL apt_initialized;
+    enum
+    {
+        IMM_APT_INIT = 0x1,
+        IMM_APT_CREATED = 0x2,
+        IMM_APT_CAN_FREE = 0x4,
+        IMM_APT_BROKEN = 0x8
+    } apt_flags;
 } IMMThreadData;
-
-static inline IMMThreadData *impl_from_IInitializeSpy(IInitializeSpy *iface)
-{
-    return CONTAINING_RECORD(iface, IMMThreadData, IInitializeSpy_iface);
-}
 
 static struct list ImmHklList = LIST_INIT(ImmHklList);
 static struct list ImmThreadDataList = LIST_INIT(ImmThreadDataList);
@@ -239,7 +240,65 @@ static DWORD convert_candidatelist_AtoW(
     return ret;
 }
 
-static HRESULT WINAPI initializespy_QueryInterface(IInitializeSpy *iface, REFIID riid, void **obj)
+static void imm_coinit_thread(IMMThreadData *thread_data)
+{
+    HRESULT hr;
+
+    TRACE("implicit COM initialization\n");
+
+    if (thread_data->threadID != GetCurrentThreadId())
+        return;
+
+    if (thread_data->apt_flags & (IMM_APT_INIT | IMM_APT_BROKEN))
+        return;
+    thread_data->apt_flags |= IMM_APT_INIT;
+
+    if(!thread_data->spy_cookie.QuadPart)
+    {
+        hr = CoRegisterInitializeSpy(&thread_data->IInitializeSpy_iface,
+                &thread_data->spy_cookie);
+        if (FAILED(hr))
+            return;
+    }
+
+    hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (SUCCEEDED(hr))
+        thread_data->apt_flags |= IMM_APT_CREATED;
+}
+
+static void imm_couninit_thread(IMMThreadData *thread_data, BOOL cleanup)
+{
+    TRACE("implicit COM deinitialization\n");
+
+    if (thread_data->apt_flags & IMM_APT_BROKEN)
+        return;
+
+    if (cleanup && thread_data->spy_cookie.QuadPart)
+    {
+        CoRevokeInitializeSpy(thread_data->spy_cookie);
+        thread_data->spy_cookie.QuadPart = 0;
+    }
+
+    if (!(thread_data->apt_flags & IMM_APT_INIT))
+        return;
+    thread_data->apt_flags &= ~IMM_APT_INIT;
+
+    if (thread_data->apt_flags & IMM_APT_CREATED)
+    {
+        thread_data->apt_flags &= ~IMM_APT_CREATED;
+        if (thread_data->apt_flags & IMM_APT_CAN_FREE)
+            CoUninitialize();
+    }
+    if (cleanup)
+        thread_data->apt_flags = 0;
+}
+
+static inline IMMThreadData *impl_from_IInitializeSpy(IInitializeSpy *iface)
+{
+    return CONTAINING_RECORD(iface, IMMThreadData, IInitializeSpy_iface);
+}
+
+static HRESULT WINAPI InitializeSpy_QueryInterface(IInitializeSpy *iface, REFIID riid, void **obj)
 {
     if (IsEqualIID(&IID_IInitializeSpy, riid) ||
             IsEqualIID(&IID_IUnknown, riid))
@@ -253,72 +312,67 @@ static HRESULT WINAPI initializespy_QueryInterface(IInitializeSpy *iface, REFIID
     return E_NOINTERFACE;
 }
 
-static ULONG WINAPI initializespy_AddRef(IInitializeSpy *iface)
+static ULONG WINAPI InitializeSpy_AddRef(IInitializeSpy *iface)
 {
     return 2;
 }
 
-static ULONG WINAPI initializespy_Release(IInitializeSpy *iface)
+static ULONG WINAPI InitializeSpy_Release(IInitializeSpy *iface)
 {
     return 1;
 }
 
-static void imm_couninit_thread(IMMThreadData *thread_data)
-{
-    if (!thread_data->apt_initialized)
-        return;
-
-    thread_data->apt_initialized = FALSE;
-    CoUninitialize();
-}
-
-static HRESULT WINAPI initializespy_PreInitialize(IInitializeSpy *iface, DWORD coinit, DWORD refs)
+static HRESULT WINAPI InitializeSpy_PreInitialize(IInitializeSpy *iface,
+        DWORD coinit, DWORD refs)
 {
     IMMThreadData *thread_data = impl_from_IInitializeSpy(iface);
 
-    /* Application requested initialization of different apartment type. */
-    if (!(coinit & COINIT_APARTMENTTHREADED))
-        imm_couninit_thread(thread_data);
-
+    if ((thread_data->apt_flags & IMM_APT_CREATED) &&
+            !(coinit & COINIT_APARTMENTTHREADED) && refs == 1)
+    {
+        imm_couninit_thread(thread_data, TRUE);
+        thread_data->apt_flags |= IMM_APT_BROKEN;
+    }
     return S_OK;
 }
 
-static HRESULT WINAPI initializespy_PostInitialize(IInitializeSpy *iface, HRESULT hr, DWORD coinit, DWORD refs)
+static HRESULT WINAPI InitializeSpy_PostInitialize(IInitializeSpy *iface,
+        HRESULT hr, DWORD coinit, DWORD refs)
 {
     IMMThreadData *thread_data = impl_from_IInitializeSpy(iface);
 
-    /* Explicit initialization call should return S_OK first time. */
-    if (thread_data->apt_initialized && hr == S_FALSE && refs == 2)
+    if ((thread_data->apt_flags & IMM_APT_CREATED) && hr == S_FALSE && refs == 2)
         hr = S_OK;
-
+    if (SUCCEEDED(hr))
+        thread_data->apt_flags |= IMM_APT_CAN_FREE;
     return hr;
 }
 
-static HRESULT WINAPI initializespy_PreUninitialize(IInitializeSpy *iface, DWORD refs)
+static HRESULT WINAPI InitializeSpy_PreUninitialize(IInitializeSpy *iface, DWORD refs)
+{
+    return S_OK;
+}
+
+static HRESULT WINAPI InitializeSpy_PostUninitialize(IInitializeSpy *iface, DWORD refs)
 {
     IMMThreadData *thread_data = impl_from_IInitializeSpy(iface);
 
-    /* Account for explicit uninitialization calls. */
-    if (thread_data->apt_initialized && refs == 1)
-        thread_data->apt_initialized = FALSE;
-
+    if (refs == 1 && !thread_data->windowRefs)
+        imm_couninit_thread(thread_data, FALSE);
+    else if (!refs)
+        thread_data->apt_flags &= ~IMM_APT_CAN_FREE;
     return S_OK;
 }
 
-static HRESULT WINAPI initializespy_PostUninitialize(IInitializeSpy *iface, DWORD refs)
+static const IInitializeSpyVtbl InitializeSpyVtbl =
 {
-    return S_OK;
-}
-
-static const IInitializeSpyVtbl initializespyvtbl =
-{
-    initializespy_QueryInterface,
-    initializespy_AddRef,
-    initializespy_Release,
-    initializespy_PreInitialize,
-    initializespy_PostInitialize,
-    initializespy_PreUninitialize,
-    initializespy_PostUninitialize,
+    InitializeSpy_QueryInterface,
+    InitializeSpy_AddRef,
+    InitializeSpy_Release,
+    InitializeSpy_PreInitialize,
+    InitializeSpy_PostInitialize,
+    InitializeSpy_PreUninitialize,
+    InitializeSpy_PostUninitialize,
 };
 
 static IMMThreadData *IMM_GetThreadData(HWND hwnd, DWORD thread)
@@ -347,7 +401,7 @@ static IMMThreadData *IMM_GetThreadData(HWND hwnd, DWORD thread)
         if (data->threadID == thread) return data;
 
     data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data));
-    data->IInitializeSpy_iface.lpVtbl = &initializespyvtbl;
+    data->IInitializeSpy_iface.lpVtbl = &InitializeSpyVtbl;
     data->threadID = thread;
     list_add_head(&ImmThreadDataList,&data->entry);
     TRACE("Thread Data Created (%x)\n",thread);
@@ -376,7 +430,7 @@ static void IMM_FreeThreadData(void)
             list_remove(&data->entry);
             LeaveCriticalSection(&threaddata_cs);
             IMM_DestroyContext(data->defaultContext);
-            imm_couninit_thread(data);
+            imm_couninit_thread(data, TRUE);
             HeapFree(GetProcessHeap(),0,data);
             TRACE("Thread Data Destroyed\n");
             return;
@@ -647,63 +701,81 @@ static BOOL IMM_IsCrossThreadAccess(HWND hWnd,  HIMC hIMC)
 }
 
 /***********************************************************************
+ *		ImmSetActiveContext (IMM32.@)
+ */
+BOOL WINAPI ImmSetActiveContext(HWND hwnd, HIMC himc, BOOL activate)
+{
+    InputContextData *data = get_imc_data(himc);
+    IMMThreadData *thread_data;
+
+    TRACE("(%p, %p, %x)\n", hwnd, himc, activate);
+
+    if (himc && !data && activate)
+        return FALSE;
+
+    thread_data = IMM_GetThreadData(hwnd, 0);
+    if (thread_data)
+    {
+        imm_coinit_thread(thread_data);
+        LeaveCriticalSection(&threaddata_cs);
+    }
+
+    if (data)
+    {
+        data->IMC.hWnd = activate ? hwnd : NULL;
+
+        if (data->immKbd->hIME && data->immKbd->pImeSetActiveContext)
+            data->immKbd->pImeSetActiveContext(himc, activate);
+    }
+
+    if (IsWindow(hwnd))
+    {
+        SendMessageW(hwnd, WM_IME_SETCONTEXT, activate, ISC_SHOWUIALL);
+        /* TODO: send WM_IME_NOTIFY */
+    }
+    return TRUE;
+}
+
+/***********************************************************************
  *		ImmAssociateContext (IMM32.@)
  */
 HIMC WINAPI ImmAssociateContext(HWND hWnd, HIMC hIMC)
 {
-    HIMC old = NULL;
     InputContextData *data = get_imc_data(hIMC);
+    HIMC defaultContext;
+    HIMC old;
 
     TRACE("(%p, %p):\n", hWnd, hIMC);
 
-    if(hIMC && !data)
+    if (!IsWindow(hWnd) || (hIMC && !data))
         return NULL;
-
-    /*
-     * If already associated just return
-     */
-    if (hIMC && data->IMC.hWnd == hWnd)
-        return hIMC;
 
     if (hIMC && IMM_IsCrossThreadAccess(hWnd, hIMC))
         return NULL;
 
-    if (hWnd)
+    old = GetPropW(hWnd, szwWineIMCProperty);
+    defaultContext = get_default_context( hWnd );
+    if (!old)
+        old = defaultContext;
+    else if (old == (HIMC)-1)
+        old = NULL;
+
+    /* If already associated just return */
+    if (old == hIMC)
+        return hIMC;
+
+    if (!hIMC) /* Meaning disable imm for that window*/
+        SetPropW(hWnd, szwWineIMCProperty, (HANDLE)-1);
+    else if (hIMC == defaultContext)
+        RemovePropW(hWnd, szwWineIMCProperty);
+    else
+        SetPropW(hWnd, szwWineIMCProperty, hIMC);
+
+    if (GetFocus() == hWnd)
     {
-        HIMC defaultContext = get_default_context( hWnd );
-        old = RemovePropW(hWnd,szwWineIMCProperty);
-
-        if (old == NULL)
-            old = defaultContext;
-        else if (old == (HIMC)-1)
-            old = NULL;
-
-        if (hIMC != defaultContext)
-        {
-            if (hIMC == NULL) /* Meaning disable imm for that window*/
-                SetPropW(hWnd,szwWineIMCProperty,(HANDLE)-1);
-            else
-                SetPropW(hWnd,szwWineIMCProperty,hIMC);
-        }
-
-        if (old)
-        {
-            InputContextData *old_data = old;
-            if (old_data->IMC.hWnd == hWnd)
-                old_data->IMC.hWnd = NULL;
-        }
+        ImmSetActiveContext(hWnd, old, FALSE);
+        ImmSetActiveContext(hWnd, hIMC, TRUE);
     }
-
-    if (!hIMC)
-        return old;
-
-    if(GetActiveWindow() == data->IMC.hWnd)
-    {
-        SendMessageW(data->IMC.hWnd, WM_IME_SETCONTEXT, FALSE, ISC_SHOWUIALL);
-        data->IMC.hWnd = hWnd;
-        SendMessageW(data->IMC.hWnd, WM_IME_SETCONTEXT, TRUE, ISC_SHOWUIALL);
-    }
-
     return old;
 }
 
@@ -920,18 +992,58 @@ BOOL WINAPI ImmDestroyContext(HIMC hIMC)
         return FALSE;
 }
 
+static HWND imm_detach_default_window(IMMThreadData *thread_data)
+{
+    HWND to_destroy;
+
+    imm_couninit_thread(thread_data, TRUE);
+    to_destroy = thread_data->hwndDefault;
+    thread_data->hwndDefault = NULL;
+    thread_data->windowRefs = 0;
+    return to_destroy;
+}
+
 /***********************************************************************
  *		ImmDisableIME (IMM32.@)
  */
 BOOL WINAPI ImmDisableIME(DWORD idThread)
 {
+    IMMThreadData *thread_data;
+    HWND to_destroy;
+
     if (idThread == (DWORD)-1)
+    {
         disable_ime = TRUE;
-    else {
-        IMMThreadData *thread_data = IMM_GetThreadData(NULL, idThread);
+
+        while (1)
+        {
+            to_destroy = 0;
+            EnterCriticalSection(&threaddata_cs);
+            LIST_FOR_EACH_ENTRY(thread_data, &ImmThreadDataList, IMMThreadData, entry)
+            {
+                if (thread_data->hwndDefault)
+                {
+                    to_destroy = imm_detach_default_window(thread_data);
+                    break;
+                }
+            }
+            LeaveCriticalSection(&threaddata_cs);
+
+            if (!to_destroy)
+                break;
+            DestroyWindow(to_destroy);
+        }
+    }
+    else
+    {
+        thread_data = IMM_GetThreadData(NULL, idThread);
         if (!thread_data) return FALSE;
         thread_data->disableIME = TRUE;
+        to_destroy = imm_detach_default_window(thread_data);
         LeaveCriticalSection(&threaddata_cs);
+
+        if (to_destroy)
+            DestroyWindow(to_destroy);
     }
     return TRUE;
 }
@@ -1735,32 +1847,6 @@ static BOOL needs_ime_window(HWND hwnd)
     return TRUE;
 }
 
-void WINAPI __wine_activate_window(HWND hwnd)
-{
-    IMMThreadData *thread_data;
-
-    TRACE("(%p)\n", hwnd);
-
-    if (!needs_ime_window(hwnd))
-        return;
-
-    thread_data = IMM_GetThreadData(hwnd, 0);
-    if (!thread_data)
-        return;
-
-    if (thread_data->disableIME || disable_ime)
-    {
-        TRACE("IME for this thread is disabled\n");
-        LeaveCriticalSection(&threaddata_cs);
-        return;
-    }
-
-    if (!thread_data->apt_initialized)
-        thread_data->apt_initialized = SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED));
-
-    LeaveCriticalSection(&threaddata_cs);
-}
-
 /***********************************************************************
  *		__wine_register_window (IMM32.@)
  */
@@ -1790,8 +1876,6 @@ BOOL WINAPI __wine_register_window(HWND hwnd)
     /* Create default IME window */
     if (thread_data->windowRefs == 1)
     {
-        CoRegisterInitializeSpy(&thread_data->IInitializeSpy_iface, &thread_data->spy_cookie);
-
         /* Do not create the window inside of a critical section */
         LeaveCriticalSection(&threaddata_cs);
         new = CreateWindowExW( 0, L"IME", L"Default IME",
@@ -1834,13 +1918,7 @@ void WINAPI __wine_unregister_window(HWND hwnd)
 
     /* Destroy default IME window */
     if (thread_data->windowRefs == 0)
-    {
-        CoRevokeInitializeSpy(thread_data->spy_cookie);
-        thread_data->spy_cookie.QuadPart = 0;
-        imm_couninit_thread(thread_data);
-        to_destroy = thread_data->hwndDefault;
-        thread_data->hwndDefault = NULL;
-    }
+        to_destroy = imm_detach_default_window(thread_data);
     LeaveCriticalSection(&threaddata_cs);
 
     if (to_destroy) DestroyWindow( to_destroy );

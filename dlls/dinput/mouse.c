@@ -19,9 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 #include <string.h>
 
@@ -37,7 +34,6 @@
 #include "dinput_private.h"
 #include "device_private.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dinput);
 
@@ -47,7 +43,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dinput);
 #define WINE_MOUSE_Z_AXIS_INSTANCE   2
 #define WINE_MOUSE_BUTTONS_INSTANCE  3
 
-static const IDirectInputDevice8WVtbl SysMouseWvt;
+static const struct dinput_device_vtbl mouse_vtbl;
 
 typedef struct SysMouseImpl SysMouseImpl;
 
@@ -71,9 +67,6 @@ struct SysMouseImpl
     BOOL                            need_warp;
     DWORD                           last_warped;
 
-    /* This is for mouse reporting. */
-    DIMOUSESTATE2                   m_state;
-
     WARP_MOUSE                      warp_override;
 };
 
@@ -82,146 +75,88 @@ static inline SysMouseImpl *impl_from_IDirectInputDevice8W(IDirectInputDevice8W 
     return CONTAINING_RECORD(CONTAINING_RECORD(iface, IDirectInputDeviceImpl, IDirectInputDevice8W_iface), SysMouseImpl, base);
 }
 
-static void _dump_mouse_state(const DIMOUSESTATE2 *m_state)
+static HRESULT mouse_enum_device( DWORD type, DWORD flags, DIDEVICEINSTANCEW *instance, DWORD version, int index )
 {
-    int i;
+    DWORD size;
 
-    if (!TRACE_ON(dinput)) return;
+    TRACE( "type %#x, flags %#x, instance %p, version %#04x, index %d\n", type, flags, instance, version, index );
 
-    TRACE("(X: %d Y: %d Z: %d", m_state->lX, m_state->lY, m_state->lZ);
-    for (i = 0; i < 5; i++) TRACE(" B%d: %02x", i, m_state->rgbButtons[i]);
-    TRACE(")\n");
+    if (index != 0) return DIERR_GENERIC;
+    if (flags & DIEDFL_FORCEFEEDBACK) return DI_NOEFFECT;
+    if (version < 0x0800 && type != 0 && type != DIDEVTYPE_MOUSE) return DI_NOEFFECT;
+    if (version >= 0x0800 && type != DI8DEVCLASS_ALL && type != DI8DEVCLASS_POINTER && type != DI8DEVTYPE_MOUSE)
+        return DI_NOEFFECT;
+
+    if (instance->dwSize != sizeof(DIDEVICEINSTANCEW) &&
+        instance->dwSize != sizeof(DIDEVICEINSTANCE_DX3W))
+        return DIERR_INVALIDPARAM;
+
+    size = instance->dwSize;
+    memset( instance, 0, size );
+    instance->dwSize = size;
+    instance->guidInstance = GUID_SysMouse;
+    instance->guidProduct = GUID_SysMouse;
+    if (version >= 0x0800) instance->dwDevType = DI8DEVTYPE_MOUSE | (DI8DEVTYPEMOUSE_TRADITIONAL << 8);
+    else instance->dwDevType = DIDEVTYPE_MOUSE | (DIDEVTYPEMOUSE_TRADITIONAL << 8);
+    MultiByteToWideChar( CP_ACP, 0, "Mouse", -1, instance->tszInstanceName, MAX_PATH );
+    MultiByteToWideChar( CP_ACP, 0, "Wine Mouse", -1, instance->tszProductName, MAX_PATH );
+
+    return DI_OK;
 }
 
-static void fill_mouse_dideviceinstanceW(LPDIDEVICEINSTANCEW lpddi, DWORD version) {
-    DWORD dwSize;
-    DIDEVICEINSTANCEW ddi;
-    
-    dwSize = lpddi->dwSize;
-
-    TRACE("%d %p\n", dwSize, lpddi);
-    
-    memset(lpddi, 0, dwSize);
-    memset(&ddi, 0, sizeof(ddi));
-
-    ddi.dwSize = dwSize;
-    ddi.guidInstance = GUID_SysMouse;/* DInput's GUID */
-    ddi.guidProduct = GUID_SysMouse;
-    if (version >= 0x0800)
-        ddi.dwDevType = DI8DEVTYPE_MOUSE | (DI8DEVTYPEMOUSE_TRADITIONAL << 8);
-    else
-        ddi.dwDevType = DIDEVTYPE_MOUSE | (DIDEVTYPEMOUSE_TRADITIONAL << 8);
-    MultiByteToWideChar(CP_ACP, 0, "Mouse", -1, ddi.tszInstanceName, MAX_PATH);
-    MultiByteToWideChar(CP_ACP, 0, "Wine Mouse", -1, ddi.tszProductName, MAX_PATH);
-
-    memcpy(lpddi, &ddi, (dwSize < sizeof(ddi) ? dwSize : sizeof(ddi)));
-}
-
-static HRESULT mousedev_enum_device(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINSTANCEW lpddi, DWORD version, int id)
+static HRESULT mouse_create_device( IDirectInputImpl *dinput, const GUID *guid, IDirectInputDevice8W **out )
 {
-    if (id != 0)
-        return E_FAIL;
-
-    if (dwFlags & DIEDFL_FORCEFEEDBACK)
-        return S_FALSE;
-
-    if ((dwDevType == 0) ||
-	((dwDevType == DIDEVTYPE_MOUSE) && (version < 0x0800)) ||
-	(((dwDevType == DI8DEVCLASS_POINTER) || (dwDevType == DI8DEVTYPE_MOUSE)) && (version >= 0x0800))) {
-	TRACE("Enumerating the mouse device\n");
-	
-	fill_mouse_dideviceinstanceW(lpddi, version);
-	
-	return S_OK;
-    }
-    
-    return S_FALSE;
-}
-
-static HRESULT alloc_device( REFGUID rguid, IDirectInputImpl *dinput, SysMouseImpl **out )
-{
-    static const WCHAR mouse_wrap_override_w[] = {'M','o','u','s','e','W','a','r','p','O','v','e','r','r','i','d','e',0};
-    static const WCHAR disable_w[] = {'d','i','s','a','b','l','e',0};
-    static const WCHAR force_w[] = {'f','o','r','c','e',0};
-    SysMouseImpl* newDevice;
-    LPDIDATAFORMAT df = NULL;
-    unsigned i;
-    WCHAR buffer[20];
+    SysMouseImpl *impl;
     HKEY hkey, appkey;
+    WCHAR buffer[20];
     HRESULT hr;
 
-    if (FAILED(hr = direct_input_device_alloc( sizeof(SysMouseImpl), &SysMouseWvt, rguid, dinput, (void **)&newDevice )))
-        return hr;
-    df = newDevice->base.data_format.wine_df;
-    newDevice->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": SysMouseImpl*->base.crit");
+    TRACE( "dinput %p, guid %s, out %p\n", dinput, debugstr_guid( guid ), out );
 
-    newDevice->base.dwCoopLevel = DISCL_NONEXCLUSIVE | DISCL_BACKGROUND;
+    *out = NULL;
+    if (!IsEqualGUID( &GUID_SysMouse, guid )) return DIERR_DEVICENOTREG;
+
+    if (FAILED(hr = direct_input_device_alloc( sizeof(SysMouseImpl), &mouse_vtbl,
+                                               guid, dinput, (void **)&impl )))
+        return hr;
+    impl->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": SysMouseImpl*->base.crit");
+
+    mouse_enum_device( 0, 0, &impl->base.instance, dinput->dwVersion, 0 );
+    impl->base.caps.dwDevType = impl->base.instance.dwDevType;
+    impl->base.caps.dwFirmwareRevision = 100;
+    impl->base.caps.dwHardwareRevision = 100;
+    impl->base.dwCoopLevel = DISCL_NONEXCLUSIVE | DISCL_BACKGROUND;
 
     get_app_key(&hkey, &appkey);
-    if (!get_config_key(hkey, appkey, mouse_wrap_override_w, buffer, sizeof(buffer)))
+    if (!get_config_key( hkey, appkey, L"MouseWarpOverride", buffer, sizeof(buffer) ))
     {
-        if (!strncmpiW(buffer, disable_w, -1))
-            newDevice->warp_override = WARP_DISABLE;
-        else if (!strncmpiW(buffer, force_w, -1))
-            newDevice->warp_override = WARP_FORCE_ON;
+        if (!wcsnicmp( buffer, L"disable", -1 )) impl->warp_override = WARP_DISABLE;
+        else if (!wcsnicmp( buffer, L"force", -1 )) impl->warp_override = WARP_FORCE_ON;
     }
     if (appkey) RegCloseKey(appkey);
     if (hkey) RegCloseKey(hkey);
 
-    /* Create copy of default data format */
-    memcpy(df, &c_dfDIMouse2, c_dfDIMouse2.dwSize);
-    if (!(df->rgodf = HeapAlloc(GetProcessHeap(), 0, df->dwNumObjs * df->dwObjSize))) goto failed;
-    memcpy(df->rgodf, c_dfDIMouse2.rgodf, df->dwNumObjs * df->dwObjSize);
-
-    /* Because we don't do any detection yet just modify instance and type */
-    for (i = 0; i < df->dwNumObjs; i++)
-        if (DIDFT_GETTYPE(df->rgodf[i].dwType) & DIDFT_AXIS)
-            df->rgodf[i].dwType = DIDFT_MAKEINSTANCE(i) | DIDFT_RELAXIS;
-        else
-            df->rgodf[i].dwType = DIDFT_MAKEINSTANCE(i) | DIDFT_PSHBUTTON;
+    if (FAILED(hr = direct_input_device_init( &impl->base.IDirectInputDevice8W_iface )))
+    {
+        IDirectInputDevice_Release( &impl->base.IDirectInputDevice8W_iface );
+        return hr;
+    }
 
     if (dinput->dwVersion >= 0x0800)
     {
-        newDevice->base.use_raw_input = TRUE;
-        newDevice->base.raw_device.usUsagePage = 1; /* HID generic device page */
-        newDevice->base.raw_device.usUsage = 2; /* HID generic mouse */
+        impl->base.use_raw_input = TRUE;
+        impl->base.raw_device.usUsagePage = 1; /* HID generic device page */
+        impl->base.raw_device.usUsage = 2;     /* HID generic mouse */
     }
 
-    *out = newDevice;
+    *out = &impl->base.IDirectInputDevice8W_iface;
     return DI_OK;
-
-failed:
-    if (df) HeapFree(GetProcessHeap(), 0, df->rgodf);
-    HeapFree(GetProcessHeap(), 0, df);
-    HeapFree(GetProcessHeap(), 0, newDevice);
-    return DIERR_OUTOFMEMORY;
-}
-
-static HRESULT mousedev_create_device( IDirectInputImpl *dinput, REFGUID rguid, IDirectInputDevice8W **out )
-{
-    TRACE( "%p %s %p\n", dinput, debugstr_guid( rguid ), out );
-    *out = NULL;
-
-    if (IsEqualGUID(&GUID_SysMouse, rguid)) /* Wine Mouse */
-    {
-        SysMouseImpl *This;
-        HRESULT hr;
-
-        if (FAILED(hr = alloc_device( rguid, dinput, &This ))) return hr;
-
-        TRACE( "Created a Mouse device (%p)\n", This );
-
-        *out = &This->base.IDirectInputDevice8W_iface;
-        return DI_OK;
-    }
-
-    return DIERR_DEVICENOTREG;
 }
 
 const struct dinput_device mouse_device = {
     "Wine mouse driver",
-    mousedev_enum_device,
-    mousedev_create_device
+    mouse_enum_device,
+    mouse_create_device
 };
 
 /******************************************************************************
@@ -231,6 +166,7 @@ const struct dinput_device mouse_device = {
 void dinput_mouse_rawinput_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam, RAWINPUT *ri )
 {
     SysMouseImpl *This = impl_from_IDirectInputDevice8W( iface );
+    DIMOUSESTATE2 *state = (DIMOUSESTATE2 *)This->base.device_state;
     POINT rel, pt;
     DWORD seq;
     int i, wdata = 0;
@@ -264,13 +200,13 @@ void dinput_mouse_rawinput_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPA
         rel.y -= pt.y;
     }
 
-    This->m_state.lX += rel.x;
-    This->m_state.lY += rel.y;
+    state->lX += rel.x;
+    state->lY += rel.y;
 
     if (This->base.data_format.user_df->dwFlags & DIDF_ABSAXIS)
     {
-        pt.x = This->m_state.lX;
-        pt.y = This->m_state.lY;
+        pt.x = state->lX;
+        pt.y = state->lY;
     }
     else
     {
@@ -300,7 +236,7 @@ void dinput_mouse_rawinput_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPA
 
     if (ri->data.mouse.usButtonFlags & RI_MOUSE_WHEEL)
     {
-        This->m_state.lZ += (wdata = (SHORT)ri->data.mouse.usButtonData);
+        state->lZ += (wdata = (SHORT)ri->data.mouse.usButtonData);
         queue_event( iface, DIDFT_MAKEINSTANCE(WINE_MOUSE_Z_AXIS_INSTANCE) | DIDFT_RELAXIS,
                      wdata, GetCurrentTime(), seq );
         notify = TRUE;
@@ -310,12 +246,16 @@ void dinput_mouse_rawinput_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPA
     {
         if (ri->data.mouse.usButtonFlags & mouse_button_flags[i])
         {
-            This->m_state.rgbButtons[i / 2] = 0x80 - (i % 2) * 0x80;
-            queue_event( iface, DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE +(i / 2) ) | DIDFT_PSHBUTTON,
-                         This->m_state.rgbButtons[i / 2], GetCurrentTime(), seq );
+            state->rgbButtons[i / 2] = 0x80 - (i % 2) * 0x80;
+            queue_event( iface, DIDFT_MAKEINSTANCE( WINE_MOUSE_BUTTONS_INSTANCE + (i / 2) ) | DIDFT_PSHBUTTON,
+                         state->rgbButtons[i / 2], GetCurrentTime(), seq );
             notify = TRUE;
         }
     }
+
+    TRACE( "buttons %02x %02x %02x %02x %02x, x %d, y %d, w %d\n", state->rgbButtons[0],
+           state->rgbButtons[1], state->rgbButtons[2], state->rgbButtons[3], state->rgbButtons[4],
+           state->lX, state->lY, state->lZ );
 
     if (notify && This->base.hEvent) SetEvent( This->base.hEvent );
     LeaveCriticalSection( &This->base.crit );
@@ -326,6 +266,7 @@ int dinput_mouse_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam
 {
     MSLLHOOKSTRUCT *hook = (MSLLHOOKSTRUCT *)lparam;
     SysMouseImpl *This = impl_from_IDirectInputDevice8W( iface );
+    DIMOUSESTATE2 *state = (DIMOUSESTATE2 *)This->base.device_state;
     int wdata = 0, inst_id = -1, ret = 0;
     BOOL notify = FALSE;
 
@@ -339,13 +280,13 @@ int dinput_mouse_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam
             POINT pt, pt1;
 
             GetCursorPos(&pt);
-            This->m_state.lX += pt.x = hook->pt.x - pt.x;
-            This->m_state.lY += pt.y = hook->pt.y - pt.y;
+            state->lX += pt.x = hook->pt.x - pt.x;
+            state->lY += pt.y = hook->pt.y - pt.y;
 
             if (This->base.data_format.user_df->dwFlags & DIDF_ABSAXIS)
             {
-                pt1.x = This->m_state.lX;
-                pt1.y = This->m_state.lY;
+                pt1.x = state->lX;
+                pt1.y = state->lY;
             } else
                 pt1 = pt;
 
@@ -377,53 +318,56 @@ int dinput_mouse_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam
         }
         case WM_MOUSEWHEEL:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_Z_AXIS_INSTANCE) | DIDFT_RELAXIS;
-            This->m_state.lZ += wdata = (short)HIWORD(hook->mouseData);
+            state->lZ += wdata = (short)HIWORD( hook->mouseData );
             /* FarCry crashes if it gets a mouse wheel message */
             /* FIXME: should probably filter out other messages too */
             ret = This->clipped;
             break;
         case WM_LBUTTONDOWN:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 0) | DIDFT_PSHBUTTON;
-            This->m_state.rgbButtons[0] = wdata = 0x80;
-	    break;
-	case WM_LBUTTONUP:
+            state->rgbButtons[0] = wdata = 0x80;
+            break;
+        case WM_LBUTTONUP:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 0) | DIDFT_PSHBUTTON;
-            This->m_state.rgbButtons[0] = wdata = 0x00;
-	    break;
-	case WM_RBUTTONDOWN:
+            state->rgbButtons[0] = wdata = 0x00;
+            break;
+        case WM_RBUTTONDOWN:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 1) | DIDFT_PSHBUTTON;
-            This->m_state.rgbButtons[1] = wdata = 0x80;
-	    break;
-	case WM_RBUTTONUP:
+            state->rgbButtons[1] = wdata = 0x80;
+            break;
+        case WM_RBUTTONUP:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 1) | DIDFT_PSHBUTTON;
-            This->m_state.rgbButtons[1] = wdata = 0x00;
-	    break;
-	case WM_MBUTTONDOWN:
+            state->rgbButtons[1] = wdata = 0x00;
+            break;
+        case WM_MBUTTONDOWN:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 2) | DIDFT_PSHBUTTON;
-            This->m_state.rgbButtons[2] = wdata = 0x80;
-	    break;
-	case WM_MBUTTONUP:
+            state->rgbButtons[2] = wdata = 0x80;
+            break;
+        case WM_MBUTTONUP:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 2) | DIDFT_PSHBUTTON;
-            This->m_state.rgbButtons[2] = wdata = 0x00;
-	    break;
+            state->rgbButtons[2] = wdata = 0x00;
+            break;
         case WM_XBUTTONDOWN:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 2 + HIWORD(hook->mouseData)) | DIDFT_PSHBUTTON;
-            This->m_state.rgbButtons[2 + HIWORD(hook->mouseData)] = wdata = 0x80;
+            state->rgbButtons[2 + HIWORD( hook->mouseData )] = wdata = 0x80;
             break;
         case WM_XBUTTONUP:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 2 + HIWORD(hook->mouseData)) | DIDFT_PSHBUTTON;
-            This->m_state.rgbButtons[2 + HIWORD(hook->mouseData)] = wdata = 0x00;
+            state->rgbButtons[2 + HIWORD( hook->mouseData )] = wdata = 0x00;
             break;
     }
 
 
     if (inst_id != -1)
     {
-        _dump_mouse_state(&This->m_state);
         queue_event(iface, inst_id,
                     wdata, GetCurrentTime(), This->base.dinput->evsequence++);
         notify = TRUE;
     }
+
+    TRACE( "buttons %02x %02x %02x %02x %02x, x %d, y %d, w %d\n", state->rgbButtons[0],
+           state->rgbButtons[1], state->rgbButtons[2], state->rgbButtons[3], state->rgbButtons[4],
+           state->lX, state->lY, state->lZ );
 
     if (notify && This->base.hEvent) SetEvent( This->base.hEvent );
     LeaveCriticalSection(&This->base.crit);
@@ -465,327 +409,217 @@ static void warp_check( SysMouseImpl* This, BOOL force )
     }
 }
 
-
-/******************************************************************************
-  *     Acquire : gets exclusive control of the mouse
-  */
-static HRESULT WINAPI SysMouseWImpl_Acquire(LPDIRECTINPUTDEVICE8W iface)
+static HRESULT mouse_poll( IDirectInputDevice8W *iface )
 {
-    SysMouseImpl *This = impl_from_IDirectInputDevice8W(iface);
+    SysMouseImpl *impl = impl_from_IDirectInputDevice8W( iface );
+    check_dinput_events();
+    warp_check( impl, FALSE );
+    return DI_OK;
+}
+
+static HRESULT mouse_acquire( IDirectInputDevice8W *iface )
+{
+    SysMouseImpl *impl = impl_from_IDirectInputDevice8W( iface );
+    DIMOUSESTATE2 *state = (DIMOUSESTATE2 *)impl->base.device_state;
     POINT point;
-    HRESULT res;
-
-    TRACE("(this=%p)\n",This);
-
-    if ((res = IDirectInputDevice2WImpl_Acquire(iface)) != DI_OK) return res;
 
     /* Init the mouse state */
     GetCursorPos( &point );
-    if (This->base.data_format.user_df->dwFlags & DIDF_ABSAXIS)
+    if (impl->base.data_format.user_df->dwFlags & DIDF_ABSAXIS)
     {
-      This->m_state.lX = point.x;
-      This->m_state.lY = point.y;
-    } else {
-      This->m_state.lX = 0;
-      This->m_state.lY = 0;
-      This->org_coords = point;
+        state->lX = point.x;
+        state->lY = point.y;
     }
-    This->m_state.lZ = 0;
-    This->m_state.rgbButtons[0] = GetKeyState(VK_LBUTTON) & 0x80;
-    This->m_state.rgbButtons[1] = GetKeyState(VK_RBUTTON) & 0x80;
-    This->m_state.rgbButtons[2] = GetKeyState(VK_MBUTTON) & 0x80;
+    else
+    {
+        state->lX = 0;
+        state->lY = 0;
+        impl->org_coords = point;
+    }
+    state->lZ = 0;
+    state->rgbButtons[0] = GetKeyState( VK_LBUTTON ) & 0x80;
+    state->rgbButtons[1] = GetKeyState( VK_RBUTTON ) & 0x80;
+    state->rgbButtons[2] = GetKeyState( VK_MBUTTON ) & 0x80;
 
-    if (This->base.dwCoopLevel & DISCL_EXCLUSIVE)
+    if (impl->base.dwCoopLevel & DISCL_EXCLUSIVE)
     {
-        ShowCursor(FALSE); /* hide cursor */
-        warp_check( This, TRUE );
+        ShowCursor( FALSE ); /* hide cursor */
+        warp_check( impl, TRUE );
     }
-    else if (This->warp_override == WARP_FORCE_ON)
+    else if (impl->warp_override == WARP_FORCE_ON)
     {
         /* Need a window to warp mouse in. */
-        if (!This->base.win) This->base.win = GetDesktopWindow();
-        warp_check( This, TRUE );
+        if (!impl->base.win) impl->base.win = GetDesktopWindow();
+        warp_check( impl, TRUE );
     }
-    else if (This->clipped)
+    else if (impl->clipped)
     {
         ClipCursor( NULL );
-        This->clipped = FALSE;
+        impl->clipped = FALSE;
     }
 
     return DI_OK;
 }
 
-/******************************************************************************
-  *     Unacquire : frees the mouse
-  */
-static HRESULT WINAPI SysMouseWImpl_Unacquire(LPDIRECTINPUTDEVICE8W iface)
+static HRESULT mouse_unacquire( IDirectInputDevice8W *iface )
 {
-    SysMouseImpl *This = impl_from_IDirectInputDevice8W(iface);
-    HRESULT res;
+    SysMouseImpl *impl = impl_from_IDirectInputDevice8W( iface );
 
-    TRACE("(this=%p)\n",This);
-
-    if ((res = IDirectInputDevice2WImpl_Unacquire(iface)) != DI_OK) return res;
-
-    if (This->base.dwCoopLevel & DISCL_EXCLUSIVE)
+    if (impl->base.dwCoopLevel & DISCL_EXCLUSIVE)
     {
-        ClipCursor(NULL);
-        ShowCursor(TRUE); /* show cursor */
-        This->clipped = FALSE;
+        ClipCursor( NULL );
+        ShowCursor( TRUE ); /* show cursor */
+        impl->clipped = FALSE;
     }
 
     /* And put the mouse cursor back where it was at acquire time */
-    if (This->base.dwCoopLevel & DISCL_EXCLUSIVE || This->warp_override == WARP_FORCE_ON)
+    if (impl->base.dwCoopLevel & DISCL_EXCLUSIVE || impl->warp_override == WARP_FORCE_ON)
     {
-        TRACE("warping mouse back to %s\n", wine_dbgstr_point(&This->org_coords));
-        SetCursorPos(This->org_coords.x, This->org_coords.y);
+        TRACE( "warping mouse back to %s\n", wine_dbgstr_point( &impl->org_coords ) );
+        SetCursorPos( impl->org_coords.x, impl->org_coords.y );
     }
 
     return DI_OK;
 }
 
-/******************************************************************************
-  *     GetDeviceState : returns the "state" of the mouse.
-  *
-  *   For the moment, only the "standard" return structure (DIMOUSESTATE) is
-  *   supported.
-  */
-static HRESULT WINAPI SysMouseWImpl_GetDeviceState(LPDIRECTINPUTDEVICE8W iface, DWORD len, LPVOID ptr)
+static BOOL try_enum_object( const DIPROPHEADER *filter, DWORD flags, LPDIENUMDEVICEOBJECTSCALLBACKW callback,
+                             DIDEVICEOBJECTINSTANCEW *instance, void *data )
 {
-    SysMouseImpl *This = impl_from_IDirectInputDevice8W(iface);
-    TRACE("(%p)->(%u,%p)\n", This, len, ptr);
+    if (flags != DIDFT_ALL && !(flags & DIDFT_GETTYPE( instance->dwType ))) return DIENUM_CONTINUE;
 
-    if(This->base.acquired == 0) return DIERR_NOTACQUIRED;
-
-    check_dinput_events();
-
-    EnterCriticalSection(&This->base.crit);
-    _dump_mouse_state(&This->m_state);
-
-    /* Copy the current mouse state */
-    fill_DataFormat(ptr, len, &This->m_state, &This->base.data_format);
-
-    /* Initialize the buffer when in relative mode */
-    if (!(This->base.data_format.user_df->dwFlags & DIDF_ABSAXIS))
+    switch (filter->dwHow)
     {
-	This->m_state.lX = 0;
-	This->m_state.lY = 0;
-	This->m_state.lZ = 0;
-    }
-    LeaveCriticalSection(&This->base.crit);
-
-    warp_check( This, FALSE );
-    return DI_OK;
-}
-
-/******************************************************************************
-  *     GetDeviceData : gets buffered input data.
-  */
-static HRESULT WINAPI SysMouseWImpl_GetDeviceData(LPDIRECTINPUTDEVICE8W iface,
-        DWORD dodsize, LPDIDEVICEOBJECTDATA dod, LPDWORD entries, DWORD flags)
-{
-    SysMouseImpl *This = impl_from_IDirectInputDevice8W(iface);
-    HRESULT res;
-
-    res = IDirectInputDevice2WImpl_GetDeviceData(iface, dodsize, dod, entries, flags);
-    if (SUCCEEDED(res)) warp_check( This, FALSE );
-    return res;
-}
-
-/******************************************************************************
-  *     GetProperty : get input device properties
-  */
-static HRESULT WINAPI SysMouseWImpl_GetProperty(LPDIRECTINPUTDEVICE8W iface, REFGUID rguid, LPDIPROPHEADER pdiph)
-{
-    SysMouseImpl *This = impl_from_IDirectInputDevice8W(iface);
-
-    TRACE("(%p) %s,%p\n", This, debugstr_guid(rguid), pdiph);
-    _dump_DIPROPHEADER(pdiph);
-
-    if (IS_DIPROP(rguid)) {
-	switch (LOWORD(rguid)) {
-	    case (DWORD_PTR) DIPROP_GRANULARITY: {
-		LPDIPROPDWORD pr = (LPDIPROPDWORD) pdiph;
-		
-		if (
-		    ((pdiph->dwHow == DIPH_BYOFFSET) &&
-		     ((pdiph->dwObj == DIMOFS_X) ||
-		      (pdiph->dwObj == DIMOFS_Y)))
-		    ||
-		    ((pdiph->dwHow == DIPH_BYID) &&
-		     ((pdiph->dwObj == (DIDFT_MAKEINSTANCE(WINE_MOUSE_X_AXIS_INSTANCE) | DIDFT_RELAXIS)) ||
-		      (pdiph->dwObj == (DIDFT_MAKEINSTANCE(WINE_MOUSE_Y_AXIS_INSTANCE) | DIDFT_RELAXIS))))
-		){
-		    /* Set granularity of X/Y Axis to 1. See MSDN on DIPROP_GRANULARITY */
-		    pr->dwData = 1;
-		} else {
-		    /* We'll just assume that the app asks about the Z axis */
-		    pr->dwData = WHEEL_DELTA;
-		}
-		
-		break;
-	    }
-	      
-	    case (DWORD_PTR) DIPROP_RANGE: {
-		LPDIPROPRANGE pr = (LPDIPROPRANGE) pdiph;
-		
-		if ((pdiph->dwHow == DIPH_BYID) &&
-		    ((pdiph->dwObj == (DIDFT_MAKEINSTANCE(WINE_MOUSE_X_AXIS_INSTANCE) | DIDFT_RELAXIS)) ||
-		     (pdiph->dwObj == (DIDFT_MAKEINSTANCE(WINE_MOUSE_Y_AXIS_INSTANCE) | DIDFT_RELAXIS)))) {
-		    /* Querying the range of either the X or the Y axis.  As I do
-		       not know the range, do as if the range were
-		       unrestricted...*/
-		    pr->lMin = DIPROPRANGE_NOMIN;
-		    pr->lMax = DIPROPRANGE_NOMAX;
-		}
-		
-		break;
-	    }
-            case (DWORD_PTR) DIPROP_VIDPID:
-                return DIERR_UNSUPPORTED;
-	    default:
-                return IDirectInputDevice2WImpl_GetProperty(iface, rguid, pdiph);
-        }
+    case DIPH_DEVICE:
+        return callback( instance, data );
+    case DIPH_BYOFFSET:
+        if (filter->dwObj != instance->dwOfs) return DIENUM_CONTINUE;
+        return callback( instance, data );
+    case DIPH_BYID:
+        if ((filter->dwObj & 0x00ffffff) != (instance->dwType & 0x00ffffff)) return DIENUM_CONTINUE;
+        return callback( instance, data );
     }
 
-    return DI_OK;
+    return DIENUM_CONTINUE;
 }
 
-/******************************************************************************
-  *     GetCapabilities : get the device capabilities
-  */
-static HRESULT WINAPI SysMouseWImpl_GetCapabilities(LPDIRECTINPUTDEVICE8W iface, LPDIDEVCAPS lpDIDevCaps)
+static HRESULT mouse_enum_objects( IDirectInputDevice8W *iface, const DIPROPHEADER *filter,
+                                   DWORD flags, LPDIENUMDEVICEOBJECTSCALLBACKW callback, void *context )
 {
-    SysMouseImpl *This = impl_from_IDirectInputDevice8W(iface);
-    DIDEVCAPS devcaps;
+    DIDEVICEOBJECTINSTANCEW instances[] =
+    {
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_XAxis,
+            .dwOfs = DIMOFS_X,
+            .dwType = DIDFT_RELAXIS|DIDFT_MAKEINSTANCE(0),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"X-axis",
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_YAxis,
+            .dwOfs = DIMOFS_Y,
+            .dwType = DIDFT_RELAXIS|DIDFT_MAKEINSTANCE(1),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Y-axis",
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_ZAxis,
+            .dwOfs = DIMOFS_Z,
+            .dwType = DIDFT_RELAXIS|DIDFT_MAKEINSTANCE(2),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Wheel",
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Button,
+            .dwOfs = DIMOFS_BUTTON0,
+            .dwType = DIDFT_PSHBUTTON|DIDFT_MAKEINSTANCE(3),
+            .tszName = L"Button 0",
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Button,
+            .dwOfs = DIMOFS_BUTTON1,
+            .dwType = DIDFT_PSHBUTTON|DIDFT_MAKEINSTANCE(4),
+            .tszName = L"Button 1",
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Button,
+            .dwOfs = DIMOFS_BUTTON2,
+            .dwType = DIDFT_PSHBUTTON|DIDFT_MAKEINSTANCE(5),
+            .tszName = L"Button 2",
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Button,
+            .dwOfs = DIMOFS_BUTTON3,
+            .dwType = DIDFT_PSHBUTTON|DIDFT_MAKEINSTANCE(6),
+            .tszName = L"Button 3",
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Button,
+            .dwOfs = DIMOFS_BUTTON4,
+            .dwType = DIDFT_PSHBUTTON|DIDFT_MAKEINSTANCE(7),
+            .tszName = L"Button 4",
+        },
+    };
+    BOOL ret;
+    DWORD i;
 
-    TRACE("(this=%p,%p)\n",This,lpDIDevCaps);
-
-    if ((lpDIDevCaps->dwSize != sizeof(DIDEVCAPS)) && (lpDIDevCaps->dwSize != sizeof(DIDEVCAPS_DX3))) {
-        WARN("invalid parameter\n");
-        return DIERR_INVALIDPARAM;
+    for (i = 0; i < ARRAY_SIZE(instances); ++i)
+    {
+        ret = try_enum_object( filter, flags, callback, instances + i, context );
+        if (ret != DIENUM_CONTINUE) return DIENUM_STOP;
     }
 
-    devcaps.dwSize = lpDIDevCaps->dwSize;
-    devcaps.dwFlags = DIDC_ATTACHED | DIDC_EMULATED;
-    if (This->base.dinput->dwVersion >= 0x0800)
-	devcaps.dwDevType = DI8DEVTYPE_MOUSE | (DI8DEVTYPEMOUSE_TRADITIONAL << 8);
-    else
-	devcaps.dwDevType = DIDEVTYPE_MOUSE | (DIDEVTYPEMOUSE_TRADITIONAL << 8);
-    devcaps.dwAxes = 3;
-    devcaps.dwButtons = 8;
-    devcaps.dwPOVs = 0;
-    devcaps.dwFFSamplePeriod = 0;
-    devcaps.dwFFMinTimeResolution = 0;
-    devcaps.dwFirmwareRevision = 100;
-    devcaps.dwHardwareRevision = 100;
-    devcaps.dwFFDriverVersion = 0;
-
-    memcpy(lpDIDevCaps, &devcaps, lpDIDevCaps->dwSize);
-
-    return DI_OK;
+    return DIENUM_CONTINUE;
 }
 
-/******************************************************************************
-  *     GetObjectInfo : get information about a device object such as a button
-  *                     or axis
-  */
-static HRESULT WINAPI SysMouseWImpl_GetObjectInfo(LPDIRECTINPUTDEVICE8W iface,
-        LPDIDEVICEOBJECTINSTANCEW pdidoi, DWORD dwObj, DWORD dwHow)
+static HRESULT mouse_get_property( IDirectInputDevice8W *iface, DWORD property,
+                                   DIPROPHEADER *header, DIDEVICEOBJECTINSTANCEW *instance )
 {
-    static const WCHAR x_axisW[] = {'X','-','A','x','i','s',0};
-    static const WCHAR y_axisW[] = {'Y','-','A','x','i','s',0};
-    static const WCHAR wheelW[] = {'W','h','e','e','l',0};
-    static const WCHAR buttonW[] = {'B','u','t','t','o','n',' ','%','d',0};
-    HRESULT res;
-
-    res = IDirectInputDevice2WImpl_GetObjectInfo(iface, pdidoi, dwObj, dwHow);
-    if (res != DI_OK) return res;
-
-    if      (IsEqualGUID(&pdidoi->guidType, &GUID_XAxis)) strcpyW(pdidoi->tszName, x_axisW);
-    else if (IsEqualGUID(&pdidoi->guidType, &GUID_YAxis)) strcpyW(pdidoi->tszName, y_axisW);
-    else if (IsEqualGUID(&pdidoi->guidType, &GUID_ZAxis)) strcpyW(pdidoi->tszName, wheelW);
-    else if (pdidoi->dwType & DIDFT_BUTTON)
-        wsprintfW(pdidoi->tszName, buttonW, DIDFT_GETINSTANCE(pdidoi->dwType) - 3);
-
-    if(pdidoi->dwType & DIDFT_AXIS)
-        pdidoi->dwFlags |= DIDOI_ASPECTPOSITION;
-
-    _dump_OBJECTINSTANCEW(pdidoi);
-    return res;
-}
-
-/******************************************************************************
-  *     GetDeviceInfo : get information about a device's identity
-  */
-static HRESULT WINAPI SysMouseWImpl_GetDeviceInfo(LPDIRECTINPUTDEVICE8W iface, LPDIDEVICEINSTANCEW pdidi)
-{
-    SysMouseImpl *This = impl_from_IDirectInputDevice8W(iface);
-    TRACE("(this=%p,%p)\n", This, pdidi);
-
-    if (pdidi->dwSize != sizeof(DIDEVICEINSTANCEW)) {
-        WARN(" dinput3 not supported yet...\n");
-	return DI_OK;
+    switch (property)
+    {
+    case (DWORD_PTR)DIPROP_RANGE:
+    {
+        DIPROPRANGE *range = (DIPROPRANGE *)header;
+        range->lMin = DIPROPRANGE_NOMIN;
+        range->lMax = DIPROPRANGE_NOMAX;
+        return DI_OK;
     }
-
-    fill_mouse_dideviceinstanceW(pdidi, This->base.dinput->dwVersion);
-    
-    return DI_OK;
+    case (DWORD_PTR)DIPROP_GRANULARITY:
+    {
+        DIPROPDWORD *value = (DIPROPDWORD *)header;
+        if (instance->dwType == DIMOFS_Z) value->dwData = WHEEL_DELTA;
+        else value->dwData = 1;
+        return DI_OK;
+    }
+    }
+    return DIERR_UNSUPPORTED;
 }
 
-static HRESULT WINAPI SysMouseWImpl_BuildActionMap(LPDIRECTINPUTDEVICE8W iface,
-                                                   LPDIACTIONFORMATW lpdiaf,
-                                                   LPCWSTR lpszUserName,
-                                                   DWORD dwFlags)
+static HRESULT mouse_set_property( IDirectInputDevice8W *iface, DWORD property,
+                                   const DIPROPHEADER *header, const DIDEVICEOBJECTINSTANCEW *instance )
 {
-    FIXME("(%p)->(%p,%s,%08x): semi-stub !\n", iface, lpdiaf, debugstr_w(lpszUserName), dwFlags);
-
-    return _build_action_map(iface, lpdiaf, lpszUserName, dwFlags, DIMOUSE_MASK, &c_dfDIMouse2);
+    return DIERR_UNSUPPORTED;
 }
 
-static HRESULT WINAPI SysMouseWImpl_SetActionMap(LPDIRECTINPUTDEVICE8W iface,
-                                                 LPDIACTIONFORMATW lpdiaf,
-                                                 LPCWSTR lpszUserName,
-                                                 DWORD dwFlags)
+static const struct dinput_device_vtbl mouse_vtbl =
 {
-    SysMouseImpl *This = impl_from_IDirectInputDevice8W(iface);
-    FIXME("(%p)->(%p,%s,%08x): semi-stub !\n", This, lpdiaf, debugstr_w(lpszUserName), dwFlags);
-
-    return _set_action_map(iface, lpdiaf, lpszUserName, dwFlags, &c_dfDIMouse2);
-}
-
-static const IDirectInputDevice8WVtbl SysMouseWvt =
-{
-    IDirectInputDevice2WImpl_QueryInterface,
-    IDirectInputDevice2WImpl_AddRef,
-    IDirectInputDevice2WImpl_Release,
-    SysMouseWImpl_GetCapabilities,
-    IDirectInputDevice2WImpl_EnumObjects,
-    SysMouseWImpl_GetProperty,
-    IDirectInputDevice2WImpl_SetProperty,
-    SysMouseWImpl_Acquire,
-    SysMouseWImpl_Unacquire,
-    SysMouseWImpl_GetDeviceState,
-    SysMouseWImpl_GetDeviceData,
-    IDirectInputDevice2WImpl_SetDataFormat,
-    IDirectInputDevice2WImpl_SetEventNotification,
-    IDirectInputDevice2WImpl_SetCooperativeLevel,
-    SysMouseWImpl_GetObjectInfo,
-    SysMouseWImpl_GetDeviceInfo,
-    IDirectInputDevice2WImpl_RunControlPanel,
-    IDirectInputDevice2WImpl_Initialize,
-    IDirectInputDevice2WImpl_CreateEffect,
-    IDirectInputDevice2WImpl_EnumEffects,
-    IDirectInputDevice2WImpl_GetEffectInfo,
-    IDirectInputDevice2WImpl_GetForceFeedbackState,
-    IDirectInputDevice2WImpl_SendForceFeedbackCommand,
-    IDirectInputDevice2WImpl_EnumCreatedEffectObjects,
-    IDirectInputDevice2WImpl_Escape,
-    IDirectInputDevice2WImpl_Poll,
-    IDirectInputDevice2WImpl_SendDeviceData,
-    IDirectInputDevice7WImpl_EnumEffectsInFile,
-    IDirectInputDevice7WImpl_WriteEffectToFile,
-    SysMouseWImpl_BuildActionMap,
-    SysMouseWImpl_SetActionMap,
-    IDirectInputDevice8WImpl_GetImageInfo
+    NULL,
+    mouse_poll,
+    NULL,
+    mouse_acquire,
+    mouse_unacquire,
+    mouse_enum_objects,
+    mouse_get_property,
+    mouse_set_property,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };

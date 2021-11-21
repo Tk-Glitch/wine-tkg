@@ -411,9 +411,9 @@ static bool wined3d_context_vk_create_slab_bo(struct wined3d_context_vk *context
     bo->memory = NULL;
     bo->slab = slab;
     bo->buffer_offset = idx * object_size;
-    bo->memory_offset = slab->bo.memory_offset + bo->buffer_offset;
+    bo->b.memory_offset = slab->bo.b.memory_offset + bo->buffer_offset;
     bo->size = size;
-    list_init(&bo->users);
+    list_init(&bo->b.users);
     bo->command_buffer_id = 0;
     bo->host_synced = false;
 
@@ -473,10 +473,10 @@ BOOL wined3d_context_vk_create_bo(struct wined3d_context_vk *context_vk, VkDevic
         VK_CALL(vkDestroyBuffer(device_vk->vk_device, bo->vk_buffer, NULL));
         return FALSE;
     }
-    bo->memory_offset = bo->memory ? bo->memory->offset : 0;
+    bo->b.memory_offset = bo->memory ? bo->memory->offset : 0;
 
     if ((vr = VK_CALL(vkBindBufferMemory(device_vk->vk_device, bo->vk_buffer,
-            bo->vk_memory, bo->memory_offset))) < 0)
+            bo->vk_memory, bo->b.memory_offset))) < 0)
     {
         ERR("Failed to bind buffer memory, vr %s.\n", wined3d_debug_vkresult(vr));
         if (bo->memory)
@@ -487,12 +487,13 @@ BOOL wined3d_context_vk_create_bo(struct wined3d_context_vk *context_vk, VkDevic
         return FALSE;
     }
 
-    bo->map_ptr = NULL;
+    bo->b.map_ptr = NULL;
     bo->buffer_offset = 0;
     bo->size = size;
     bo->usage = usage;
     bo->memory_type = adapter_vk->memory_properties.memoryTypes[memory_type_idx].propertyFlags;
-    list_init(&bo->users);
+    bo->b.coherent = !!(bo->memory_type & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    list_init(&bo->b.users);
     bo->command_buffer_id = 0;
     bo->slab = NULL;
     bo->host_synced = false;
@@ -901,9 +902,12 @@ void wined3d_context_vk_destroy_bo(struct wined3d_context_vk *context_vk, const 
 
     TRACE("context_vk %p, bo %p.\n", context_vk, bo);
 
+    if (bo->command_buffer_id == context_vk->current_command_buffer.id)
+        context_vk->retired_bo_size += bo->size;
+
     if ((slab_vk = bo->slab))
     {
-        if (bo->map_ptr)
+        if (bo->b.map_ptr)
             wined3d_bo_slab_vk_unmap(slab_vk, context_vk);
         object_size = slab_vk->bo.size / 32;
         idx = bo->buffer_offset / object_size;
@@ -914,18 +918,15 @@ void wined3d_context_vk_destroy_bo(struct wined3d_context_vk *context_vk, const 
     wined3d_context_vk_destroy_vk_buffer(context_vk, bo->vk_buffer, bo->command_buffer_id);
     if (bo->memory)
     {
-        if (bo->map_ptr)
+        if (bo->b.map_ptr)
             wined3d_allocator_chunk_vk_unmap(wined3d_allocator_chunk_vk(bo->memory->chunk), context_vk);
         wined3d_context_vk_destroy_allocator_block(context_vk, bo->memory, bo->command_buffer_id);
         return;
     }
 
-    if (bo->map_ptr)
+    if (bo->b.map_ptr)
         VK_CALL(vkUnmapMemory(device_vk->vk_device, bo->vk_memory));
     wined3d_context_vk_destroy_vk_memory(context_vk, bo->vk_memory, bo->command_buffer_id);
-
-    if (bo->command_buffer_id == context_vk->current_command_buffer.id)
-        context_vk->retired_bo_size += bo->size;
 }
 
 void wined3d_context_vk_poll_command_buffers(struct wined3d_context_vk *context_vk)

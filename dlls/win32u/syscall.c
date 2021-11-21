@@ -29,16 +29,91 @@
 #include "windef.h"
 #include "winnt.h"
 #include "ntgdi_private.h"
+#include "ntuser.h"
 #include "wine/unixlib.h"
 
 
 static void * const syscalls[] =
 {
+    NtGdiAddFontMemResourceEx,
+    NtGdiAddFontResourceW,
+    NtGdiCombineRgn,
+    NtGdiCreateBitmap,
+    NtGdiCreateClientObj,
     NtGdiCreateDIBBrush,
+    NtGdiCreateDIBSection,
+    NtGdiCreateEllipticRgn,
+    NtGdiCreateHalftonePalette,
     NtGdiCreateHatchBrushInternal,
+    NtGdiCreatePaletteInternal,
     NtGdiCreatePatternBrushInternal,
+    NtGdiCreatePen,
+    NtGdiCreateRectRgn,
+    NtGdiCreateRoundRectRgn,
     NtGdiCreateSolidBrush,
+    NtGdiDdDDICloseAdapter,
+    NtGdiDdDDICreateDevice,
+    NtGdiDdDDIOpenAdapterFromDeviceName,
+    NtGdiDdDDIOpenAdapterFromHdc,
+    NtGdiDdDDIOpenAdapterFromLuid,
+    NtGdiDdDDIQueryStatistics,
+    NtGdiDdDDISetQueuedLimit,
+    NtGdiDeleteClientObj,
+    NtGdiDescribePixelFormat,
+    NtGdiDrawStream,
+    NtGdiEqualRgn,
+    NtGdiExtCreatePen,
+    NtGdiExtCreateRegion,
+    NtGdiExtGetObjectW,
+    NtGdiFlattenPath,
     NtGdiFlush,
+    NtGdiGetBitmapBits,
+    NtGdiGetBitmapDimension,
+    NtGdiGetColorAdjustment,
+    NtGdiGetDCObject,
+    NtGdiGetFontFileData,
+    NtGdiGetFontFileInfo,
+    NtGdiGetNearestPaletteIndex,
+    NtGdiGetPath,
+    NtGdiGetRegionData,
+    NtGdiGetRgnBox,
+    NtGdiGetSpoolMessage,
+    NtGdiGetSystemPaletteUse,
+    NtGdiGetTransform,
+    NtGdiHfontCreate,
+    NtGdiInitSpool,
+    NtGdiOffsetRgn,
+    NtGdiPathToRegion,
+    NtGdiPtInRegion,
+    NtGdiRectInRegion,
+    NtGdiRemoveFontMemResourceEx,
+    NtGdiRemoveFontResourceW,
+    NtGdiSaveDC,
+    NtGdiSetBitmapBits,
+    NtGdiSetBitmapDimension,
+    NtGdiSetBrushOrg,
+    NtGdiSetColorAdjustment,
+    NtGdiSetMagicColors,
+    NtGdiSetMetaRgn,
+    NtGdiSetPixelFormat,
+    NtGdiSetRectRgn,
+    NtGdiSetTextJustification,
+    NtGdiSetVirtualResolution,
+    NtGdiSwapBuffers,
+    NtGdiTransformPoints,
+    NtUserCloseDesktop,
+    NtUserCloseWindowStation,
+    NtUserCreateDesktopEx,
+    NtUserCreateWindowStation,
+    NtUserGetObjectInformation,
+    NtUserGetProcessWindowStation,
+    NtUserGetThreadDesktop,
+    NtUserOpenDesktop,
+    NtUserOpenInputDesktop,
+    NtUserOpenWindowStation,
+    NtUserSetObjectInformation,
+    NtUserSetProcessWindowStation,
+    NtUserSetThreadDesktop,
 };
 
 static BYTE arguments[ARRAY_SIZE(syscalls)];
@@ -55,7 +130,9 @@ static NTSTATUS init( void *dispatcher )
 {
     NTSTATUS status;
     if ((status = ntdll_init_syscalls( 1, &syscall_table, dispatcher ))) return status;
-    return gdi_init();
+    if ((status = gdi_init())) return status;
+    winstation_init();
+    return STATUS_SUCCESS;
 }
 
 unixlib_entry_t __wine_unix_call_funcs[] =

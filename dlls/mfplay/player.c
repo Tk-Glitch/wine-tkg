@@ -1224,12 +1224,16 @@ static HRESULT media_item_create_topology(struct media_player *player, struct me
 static HRESULT WINAPI media_player_SetMediaItem(IMFPMediaPlayer *iface, IMFPMediaItem *item_iface)
 {
     struct media_player *player = impl_from_IMFPMediaPlayer(iface);
-    struct media_item *item = unsafe_impl_from_IMFPMediaItem(item_iface);
+    struct media_item *item;
     IMFTopology *topology;
     HRESULT hr;
 
     TRACE("%p, %p.\n", iface, item_iface);
 
+    if (!item_iface)
+        return E_POINTER;
+
+    item = unsafe_impl_from_IMFPMediaItem(item_iface);
     if (item->player != iface)
         return E_INVALIDARG;
 
@@ -1860,21 +1864,6 @@ static void media_player_create_forward_event(struct media_player *player, HRESU
     LeaveCriticalSection(&player->cs);
 }
 
-static void media_player_create_playback_ended_event(struct media_player *player, HRESULT event_status,
-        struct media_event **event)
-{
-    EnterCriticalSection(&player->cs);
-
-    if (SUCCEEDED(media_event_create(player, MFP_EVENT_TYPE_PLAYBACK_ENDED, event_status, player->item, event)))
-    {
-        if (player->item)
-            IMFPMediaItem_Release(player->item);
-        player->item = NULL;
-    }
-
-    LeaveCriticalSection(&player->cs);
-}
-
 static HRESULT WINAPI media_player_session_events_callback_Invoke(IMFAsyncCallback *iface,
         IMFAsyncResult *result)
 {
@@ -1936,7 +1925,7 @@ static HRESULT WINAPI media_player_session_events_callback_Invoke(IMFAsyncCallba
             if (SUCCEEDED(IMFMediaEvent_GetUINT32(session_event, &MF_EVENT_TOPOLOGY_STATUS, &status)) &&
                     status == MF_TOPOSTATUS_ENDED)
             {
-                media_player_create_playback_ended_event(player, event_status, &event);
+                media_event_create(player, MFP_EVENT_TYPE_PLAYBACK_ENDED, event_status, player->item, &event);
             }
 
             break;

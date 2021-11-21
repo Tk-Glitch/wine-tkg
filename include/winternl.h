@@ -2470,7 +2470,12 @@ typedef struct _SYSTEM_CACHE_INFORMATION {
 /* System Information Class 0x17 */
 
 typedef struct _SYSTEM_INTERRUPT_INFORMATION {
-    BYTE Reserved1[24];
+    ULONG ContextSwitches;
+    ULONG DpcCount;
+    ULONG DpcRate;
+    ULONG TimeIncrement;
+    ULONG DpcBypassCount;
+    ULONG ApcBypassCount;
 } SYSTEM_INTERRUPT_INFORMATION, *PSYSTEM_INTERRUPT_INFORMATION;
 
 typedef struct _SYSTEM_CONFIGURATION_INFO {
@@ -3257,6 +3262,14 @@ typedef struct _LDRP_CSLIST
     SINGLE_LIST_ENTRY *Tail;
 } LDRP_CSLIST, *PLDRP_CSLIST;
 
+typedef struct _LDR_DEPENDENCY
+{
+    LDRP_CSLIST dependency_to_entry;
+    struct _LDR_DDAG_NODE *dependency_to;
+    LDRP_CSLIST dependency_from_entry;
+    struct _LDR_DDAG_NODE *dependency_from;
+} LDR_DEPENDENCY, *PLDR_DEPENDENCY;
+
 typedef enum _LDR_DDAG_STATE
 {
     LdrModulesMerged = -5,
@@ -3280,19 +3293,14 @@ typedef struct _LDR_DDAG_NODE
 {
     LIST_ENTRY Modules;
     LDR_SERVICE_TAG_RECORD *ServiceTagList;
-    ULONG LoadCount;
-    ULONG ReferenceCount;
-    ULONG DependencyCount;
-    union
-    {
-        LDRP_CSLIST Dependencies;
-        SINGLE_LIST_ENTRY RemovalLink;
-    };
+    LONG LoadCount;
+    ULONG LoadWhileUnloadingCount;
+    ULONG LowestLink;
+    LDRP_CSLIST Dependencies;
     LDRP_CSLIST IncomingDependencies;
     LDR_DDAG_STATE State;
     SINGLE_LIST_ENTRY CondenseLink;
     ULONG PreorderNumber;
-    ULONG LowestLink;
 } LDR_DDAG_NODE, *PLDR_DDAG_NODE;
 
 typedef enum _LDR_DLL_LOAD_REASON
@@ -3320,7 +3328,6 @@ typedef struct _LDR_DATA_TABLE_ENTRY
     ULONG               Flags;
     SHORT               LoadCount;
     SHORT               TlsIndex;
-    ULONG               CheckSum;
     LIST_ENTRY          HashLinks;
     ULONG               TimeDateStamp;
     HANDLE              ActivationContext;

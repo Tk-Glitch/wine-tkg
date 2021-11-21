@@ -86,7 +86,7 @@
 @ stub ImmSendIMEMessageExA
 @ stub ImmSendIMEMessageExW
 @ stub ImmSendMessageToActiveDefImeWndW
-@ stub ImmSetActiveContext
+@ stdcall ImmSetActiveContext(long long long)
 @ stub ImmSetActiveContextConsoleIME
 @ stdcall ImmSetCandidateWindow(long ptr)
 @ stdcall ImmSetCompositionFontA(long ptr)
@@ -117,4 +117,3 @@
 @ stdcall __wine_get_ui_window(ptr)
 @ stdcall __wine_register_window(long)
 @ stdcall __wine_unregister_window(long)
-@ stdcall __wine_activate_window(long)

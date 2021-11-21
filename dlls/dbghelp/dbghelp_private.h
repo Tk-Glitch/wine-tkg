@@ -626,9 +626,10 @@ void minidump_add_memory_block(struct dump_context* dc, ULONG64 base, ULONG size
 /* module.c */
 extern const WCHAR      S_ElfW[] DECLSPEC_HIDDEN;
 extern const WCHAR      S_WineLoaderW[] DECLSPEC_HIDDEN;
-extern const WCHAR      S_SlashW[] DECLSPEC_HIDDEN;
 extern const struct loader_ops no_loader_ops DECLSPEC_HIDDEN;
 
+extern BOOL         module_init_pair(struct module_pair* pair, HANDLE hProcess,
+                                     DWORD64 addr) DECLSPEC_HIDDEN;
 extern struct module*
                     module_find_by_addr(const struct process* pcs, DWORD64 addr,
                                         enum module_type type) DECLSPEC_HIDDEN;

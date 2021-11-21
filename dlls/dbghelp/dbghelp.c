@@ -430,28 +430,26 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
     {
         unsigned        size;
         unsigned        len;
-        static const WCHAR      sym_path[] = {'_','N','T','_','S','Y','M','B','O','L','_','P','A','T','H',0};
-        static const WCHAR      alt_sym_path[] = {'_','N','T','_','A','L','T','E','R','N','A','T','E','_','S','Y','M','B','O','L','_','P','A','T','H',0};
 
         pcs->search_path = HeapAlloc(GetProcessHeap(), 0, (len = MAX_PATH) * sizeof(WCHAR));
         while ((size = GetCurrentDirectoryW(len, pcs->search_path)) >= len)
             pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (len *= 2) * sizeof(WCHAR));
         pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (size + 1) * sizeof(WCHAR));
 
-        len = GetEnvironmentVariableW(sym_path, NULL, 0);
+        len = GetEnvironmentVariableW(L"_NT_SYMBOL_PATH", NULL, 0);
         if (len)
         {
             pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (size + 1 + len + 1) * sizeof(WCHAR));
             pcs->search_path[size] = ';';
-            GetEnvironmentVariableW(sym_path, pcs->search_path + size + 1, len);
+            GetEnvironmentVariableW(L"_NT_SYMBOL_PATH", pcs->search_path + size + 1, len);
             size += 1 + len;
         }
-        len = GetEnvironmentVariableW(alt_sym_path, NULL, 0);
+        len = GetEnvironmentVariableW(L"_NT_ALTERNATE_SYMBOL_PATH", NULL, 0);
         if (len)
         {
             pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (size + 1 + len + 1) * sizeof(WCHAR));
             pcs->search_path[size] = ';';
-            GetEnvironmentVariableW(alt_sym_path, pcs->search_path + size + 1, len);
+            GetEnvironmentVariableW(L"_NT_ALTERNATE_SYMBOL_PATH", pcs->search_path + size + 1, len);
         }
     }
 
@@ -611,21 +609,62 @@ BOOL WINAPI SymSetContext(HANDLE hProcess, PIMAGEHLP_STACK_FRAME StackFrame,
     struct process* pcs = process_find_by_handle(hProcess);
     if (!pcs) return FALSE;
 
+    if (!module_find_by_addr(pcs, StackFrame->InstructionOffset, DMT_UNKNOWN))
+        return FALSE;
     if (pcs->ctx_frame.ReturnOffset == StackFrame->ReturnOffset &&
         pcs->ctx_frame.FrameOffset  == StackFrame->FrameOffset  &&
         pcs->ctx_frame.StackOffset  == StackFrame->StackOffset)
     {
-        TRACE("Setting same frame {rtn=%s frm=%s stk=%s}\n",
-              wine_dbgstr_longlong(pcs->ctx_frame.ReturnOffset),
-              wine_dbgstr_longlong(pcs->ctx_frame.FrameOffset),
-              wine_dbgstr_longlong(pcs->ctx_frame.StackOffset));
+        TRACE("Setting same frame {rtn=%I64x frm=%I64x stk=%I64x}\n",
+              pcs->ctx_frame.ReturnOffset,
+              pcs->ctx_frame.FrameOffset,
+              pcs->ctx_frame.StackOffset);
         pcs->ctx_frame.InstructionOffset = StackFrame->InstructionOffset;
-        SetLastError(ERROR_ACCESS_DENIED); /* latest MSDN says ERROR_SUCCESS */
+        SetLastError(ERROR_SUCCESS);
         return FALSE;
     }
 
     pcs->ctx_frame = *StackFrame;
-    /* MSDN states that Context is not (no longer?) used */
+    /* Context is not (no longer?) used */
+    return TRUE;
+}
+
+/******************************************************************
+ *		SymSetScopeFromAddr (DBGHELP.@)
+ */
+BOOL WINAPI SymSetScopeFromAddr(HANDLE hProcess, ULONG64 addr)
+{
+    struct process*     pcs;
+
+    FIXME("(%p %#I64x): stub\n", hProcess, addr);
+
+    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+    return TRUE;
+}
+
+/******************************************************************
+ *		SymSetScopeFromIndex (DBGHELP.@)
+ */
+BOOL WINAPI SymSetScopeFromIndex(HANDLE hProcess, ULONG64 addr, DWORD index)
+{
+    struct process*     pcs;
+
+    FIXME("(%p %#I64x %u): stub\n", hProcess, addr, index);
+
+    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+    return TRUE;
+}
+
+/******************************************************************
+ *		SymSetScopeFromInlineContext (DBGHELP.@)
+ */
+BOOL WINAPI SymSetScopeFromInlineContext(HANDLE hProcess, ULONG64 addr, DWORD inlinectx)
+{
+    struct process*     pcs;
+
+    FIXME("(%p %#I64x %u): stub\n", hProcess, addr, inlinectx);
+
+    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
     return TRUE;
 }
 

@@ -74,10 +74,10 @@
 @ stdcall ClientToScreen(long ptr)
 @ stdcall ClipCursor(ptr)
 @ stdcall CloseClipboard()
-@ stdcall CloseDesktop(long)
+@ stdcall CloseDesktop(long) NtUserCloseDesktop
 @ stdcall CloseTouchInputHandle(long)
 @ stdcall CloseWindow(long)
-@ stdcall CloseWindowStation(long)
+@ stdcall CloseWindowStation(long) NtUserCloseWindowStation
 @ stdcall CopyAcceleratorTableA(long ptr long)
 @ stdcall CopyAcceleratorTableW(long ptr long)
 @ stdcall CopyIcon(long)
@@ -361,7 +361,7 @@
 @ stdcall GetPriorityClipboardFormat(ptr long)
 @ stdcall GetProcessDefaultLayout(ptr)
 @ stdcall GetProcessDpiAwarenessInternal(long ptr)
-@ stdcall GetProcessWindowStation()
+@ stdcall GetProcessWindowStation() NtUserGetProcessWindowStation
 @ stdcall GetProgmanWindow ()
 @ stdcall GetPropA(long str)
 @ stdcall GetPropW(long wstr)
@@ -387,7 +387,7 @@
 @ stdcall GetTabbedTextExtentA(long str long long ptr)
 @ stdcall GetTabbedTextExtentW(long wstr long long ptr)
 @ stdcall GetTaskmanWindow ()
-@ stdcall GetThreadDesktop(long)
+@ stdcall GetThreadDesktop(long) NtUserGetThreadDesktop
 @ stdcall GetThreadDpiAwarenessContext()
 @ stdcall GetTitleBarInfo(long ptr)
 @ stdcall GetTopWindow(long)
@@ -396,7 +396,7 @@
 @ stdcall GetUpdateRgn(long long long)
 @ stdcall GetUpdatedClipboardFormats(ptr long ptr)
 @ stdcall GetUserObjectInformationA (long long ptr long ptr)
-@ stdcall GetUserObjectInformationW (long long ptr long ptr)
+@ stdcall GetUserObjectInformationW (long long ptr long ptr) NtUserGetObjectInformation
 @ stdcall GetUserObjectSecurity (long ptr ptr long ptr)
 # @ stub GetWinStationInfo
 @ stdcall GetWindow(long long)
@@ -556,7 +556,7 @@
 @ stdcall OpenDesktopA(str long long long)
 @ stdcall OpenDesktopW(wstr long long long)
 @ stdcall OpenIcon(long)
-@ stdcall OpenInputDesktop(long long long)
+@ stdcall OpenInputDesktop(long long long) NtUserOpenInputDesktop
 @ stdcall OpenWindowStationA(str long long)
 @ stdcall OpenWindowStationW(wstr long long)
 @ stdcall PackDDElParam(long long long)
@@ -692,7 +692,7 @@
 @ stdcall SetProcessDefaultLayout(long)
 @ stdcall SetProcessDpiAwarenessContext(long)
 @ stdcall SetProcessDpiAwarenessInternal(long)
-@ stdcall SetProcessWindowStation(long)
+@ stdcall SetProcessWindowStation(long) NtUserSetProcessWindowStation
 @ stdcall SetProgmanWindow (long)
 @ stdcall SetPropA(long str long)
 @ stdcall SetPropW(long wstr long)
@@ -713,7 +713,7 @@
 @ stdcall SetThreadDpiAwarenessContext(ptr)
 @ stdcall SetTimer(long long long ptr)
 @ stdcall SetUserObjectInformationA(long long ptr long)
-@ stdcall SetUserObjectInformationW(long long ptr long)
+@ stdcall SetUserObjectInformationW(long long ptr long) NtUserSetObjectInformation
 @ stdcall SetUserObjectSecurity(long ptr ptr)
 @ stdcall SetWinEventHook(long long long ptr long long long)
 @ stdcall SetWindowCompositionAttribute(ptr ptr)

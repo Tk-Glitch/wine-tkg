@@ -2684,14 +2684,14 @@ static void *wined3d_bo_gl_map(struct wined3d_bo_gl *bo,
     if ((flags & WINED3D_MAP_DISCARD) && bo->command_fence_id > device_gl->completed_fence_id)
     {
         if (wined3d_context_gl_create_bo(context_gl, bo->size,
-                bo->binding, bo->usage, bo->coherent, bo->flags, &tmp))
+                bo->binding, bo->usage, bo->b.coherent, bo->flags, &tmp))
         {
-            list_move_head(&tmp.users, &bo->users);
+            list_move_head(&tmp.b.users, &bo->b.users);
             wined3d_context_gl_destroy_bo(context_gl, bo);
             *bo = tmp;
-            list_init(&bo->users);
-            list_move_head(&bo->users, &tmp.users);
-            LIST_FOR_EACH_ENTRY(bo_user, &bo->users, struct wined3d_bo_user, entry)
+            list_init(&bo->b.users);
+            list_move_head(&bo->b.users, &tmp.b.users);
+            LIST_FOR_EACH_ENTRY(bo_user, &bo->b.users, struct wined3d_bo_user, entry)
             {
                 bo_user->valid = false;
             }
@@ -2712,7 +2712,7 @@ map:
 
     if (gl_info->supported[ARB_MAP_BUFFER_RANGE])
     {
-        map_ptr = GL_EXTCALL(glMapBufferRange(bo->binding, offset, size, wined3d_resource_gl_map_flags(flags)));
+        map_ptr = GL_EXTCALL(glMapBufferRange(bo->binding, offset, size, wined3d_resource_gl_map_flags(bo, flags)));
     }
     else
     {
@@ -2741,14 +2741,14 @@ void *wined3d_context_gl_map_bo_address(struct wined3d_context_gl *context_gl,
     return map_ptr;
 }
 
-void wined3d_context_gl_unmap_bo_address(struct wined3d_context_gl *context_gl,
-        const struct wined3d_bo_address *data, unsigned int range_count, const struct wined3d_range *ranges)
+static void flush_bo_ranges(struct wined3d_context_gl *context_gl, const struct wined3d_const_bo_address *data,
+        unsigned int range_count, const struct wined3d_range *ranges)
 {
     const struct wined3d_gl_info *gl_info;
     struct wined3d_bo_gl *bo;
     unsigned int i;
 
-    if (!(bo = (struct wined3d_bo_gl *)data->buffer_object))
+    if (!(bo = (struct wined3d_bo_gl *)data->buffer_object) || bo->b.coherent)
         return;
 
     gl_info = context_gl->gl_info;
@@ -2762,7 +2762,7 @@ void wined3d_context_gl_unmap_bo_address(struct wined3d_context_gl *context_gl,
                     (UINT_PTR)data->addr + ranges[i].offset, ranges[i].size));
         }
     }
-    else if (!bo->coherent && gl_info->supported[APPLE_FLUSH_BUFFER_RANGE])
+    else if (gl_info->supported[APPLE_FLUSH_BUFFER_RANGE])
     {
         for (i = 0; i < range_count; ++i)
         {
@@ -2772,9 +2772,39 @@ void wined3d_context_gl_unmap_bo_address(struct wined3d_context_gl *context_gl,
         }
     }
 
+    wined3d_context_gl_bind_bo(context_gl, bo->binding, 0);
+    checkGLcall("Flush buffer object");
+}
+
+void wined3d_context_gl_unmap_bo_address(struct wined3d_context_gl *context_gl,
+        const struct wined3d_bo_address *data, unsigned int range_count, const struct wined3d_range *ranges)
+{
+    const struct wined3d_gl_info *gl_info;
+    struct wined3d_bo_gl *bo;
+
+    if (!(bo = (struct wined3d_bo_gl *)data->buffer_object))
+        return;
+
+    flush_bo_ranges(context_gl, wined3d_const_bo_address(data), range_count, ranges);
+
+    gl_info = context_gl->gl_info;
+    wined3d_context_gl_bind_bo(context_gl, bo->binding, bo->id);
     GL_EXTCALL(glUnmapBuffer(bo->binding));
     wined3d_context_gl_bind_bo(context_gl, bo->binding, 0);
     checkGLcall("Unmap buffer object");
+}
+
+void wined3d_context_gl_flush_bo_address(struct wined3d_context_gl *context_gl,
+        const struct wined3d_const_bo_address *data, size_t size)
+{
+    struct wined3d_range range;
+
+    TRACE("context_gl %p, data %s, size %zu.\n", context_gl, debug_const_bo_address(data), size);
+
+    range.offset = (uintptr_t)data->addr;
+    range.size = size;
+
+    flush_bo_ranges(context_gl, data, 1, &range);
 }
 
 void wined3d_context_gl_copy_bo_address(struct wined3d_context_gl *context_gl,
@@ -2886,9 +2916,11 @@ bool wined3d_context_gl_create_bo(struct wined3d_context_gl *context_gl, GLsizei
     bo->binding = binding;
     bo->usage = usage;
     bo->flags = flags;
-    bo->coherent = coherent;
-    list_init(&bo->users);
+    bo->b.coherent = coherent;
+    list_init(&bo->b.users);
     bo->command_fence_id = 0;
+    bo->b.memory_offset = 0;
+    bo->b.map_ptr = NULL;
 
     return true;
 }

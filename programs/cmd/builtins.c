@@ -4766,7 +4766,7 @@ void WCMD_assoc (const WCHAR *args, BOOL assoc) {
     WCHAR   *newValue;
     LONG    rc = ERROR_SUCCESS;
     WCHAR    keyValue[MAXSTRING];
-    DWORD   valueLen = MAXSTRING;
+    DWORD   valueLen;
     HKEY    readKey;
 
     /* See if parameter includes '=' */
@@ -4806,7 +4806,7 @@ void WCMD_assoc (const WCHAR *args, BOOL assoc) {
 
             if (RegOpenKeyExW(key, subkey, 0, accessOptions, &readKey) == ERROR_SUCCESS) {
 
-              valueLen = ARRAY_SIZE(keyValue);
+              valueLen = sizeof(keyValue);
               rc = RegQueryValueExW(readKey, NULL, NULL, NULL, (LPBYTE)keyValue, &valueLen);
               WCMD_output_asis(keyName);
               WCMD_output_asis(L"=");
@@ -4839,6 +4839,7 @@ void WCMD_assoc (const WCHAR *args, BOOL assoc) {
 
         if (RegOpenKeyExW(key, subkey, 0, accessOptions, &readKey) == ERROR_SUCCESS) {
 
+          valueLen = sizeof(keyValue);
           rc = RegQueryValueExW(readKey, NULL, NULL, NULL, (LPBYTE)keyValue, &valueLen);
           WCMD_output_asis(args);
           WCMD_output_asis(L"=");

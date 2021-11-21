@@ -2231,7 +2231,7 @@ HWND WINAPI GetDesktopWindow(void)
 
         SERVER_START_REQ( set_user_object_info )
         {
-            req->handle = wine_server_obj_handle( GetThreadDesktop(GetCurrentThreadId()) );
+            req->handle = wine_server_obj_handle( NtUserGetThreadDesktop(GetCurrentThreadId()) );
             req->flags  = SET_USER_OBJECT_GET_FULL_NAME;
             wine_server_set_reply( req, desktop, sizeof(desktop) - sizeof(WCHAR) );
             if (!wine_server_call( req ))
@@ -4133,10 +4133,8 @@ BOOL WINAPI UpdateLayeredWindowIndirect( HWND hwnd, const UPDATELAYEREDWINDOWINF
     TRACE( "window %p win %s client %s\n", hwnd,
            wine_dbgstr_rect(&window_rect), wine_dbgstr_rect(&client_rect) );
 
-    if (!USER_Driver->pUpdateLayeredWindow( hwnd, info, &window_rect )) return FALSE;
-
     set_window_pos( hwnd, 0, flags, &window_rect, &client_rect, NULL );
-    return TRUE;
+    return USER_Driver->pUpdateLayeredWindow( hwnd, info, &window_rect );
 }
 
 

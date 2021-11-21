@@ -251,6 +251,7 @@ static const struct column col_operatingsystem[] =
     { L"SerialNumber",            CIM_STRING|COL_FLAG_DYNAMIC },
     { L"ServicePackMajorVersion", CIM_UINT16 },
     { L"ServicePackMinorVersion", CIM_UINT16 },
+    { L"Status",                  CIM_STRING },
     { L"SuiteMask",               CIM_UINT32 },
     { L"SystemDirectory",         CIM_STRING|COL_FLAG_DYNAMIC },
     { L"SystemDrive",             CIM_STRING|COL_FLAG_DYNAMIC },
@@ -286,7 +287,9 @@ static const struct column col_physicalmemory[] =
 };
 static const struct column col_pnpentity[] =
 {
-    { L"DeviceId", CIM_STRING|COL_FLAG_DYNAMIC },
+    { L"DeviceId",             CIM_STRING|COL_FLAG_DYNAMIC },
+    { L"Manufacturer",         CIM_STRING },
+    { L"Name",                 CIM_STRING },
 };
 static const struct column col_printer[] =
 {
@@ -665,6 +668,7 @@ struct record_operatingsystem
     const WCHAR *serialnumber;
     UINT16       servicepackmajor;
     UINT16       servicepackminor;
+    const WCHAR *status;
     UINT32       suitemask;
     const WCHAR *systemdirectory;
     const WCHAR *systemdrive;
@@ -701,6 +705,8 @@ struct record_physicalmemory
 struct record_pnpentity
 {
     const WCHAR *device_id;
+    const WCHAR *manufacturer;
+    const WCHAR *name;
 };
 struct record_printer
 {
@@ -3063,6 +3069,8 @@ static enum fill_status fill_pnpentity( struct table *table, const struct expr *
                     ARRAY_SIZE(device_id), NULL ))
         {
             rec->device_id = heap_strdupW( device_id );
+            rec->manufacturer = L"The Wine Project";
+            rec->name = L"Wine PnP Device";
 
             table->num_rows++;
             if (!match_row( table, table->num_rows - 1, cond, &status ))
@@ -3592,6 +3600,7 @@ static enum fill_status fill_operatingsystem( struct table *table, const struct 
     rec->serialnumber           = get_osserialnumber();
     rec->servicepackmajor       = ver.wServicePackMajor;
     rec->servicepackminor       = ver.wServicePackMinor;
+    rec->status                 = L"OK";
     rec->suitemask              = 272;     /* Single User + Terminal */
     rec->systemdirectory        = get_systemdirectory();
     rec->systemdrive            = get_systemdrive();
@@ -4129,6 +4138,7 @@ builtin_namespaces[WBEMPROX_NAMESPACE_LAST] =
 {
     {L"cimv2", cimv2_builtin_classes, ARRAY_SIZE(cimv2_builtin_classes)},
     {L"Microsoft\\Windows\\Storage", NULL, 0},
+    {L"wmi", NULL, 0},
 };
 
 void init_table_list( void )

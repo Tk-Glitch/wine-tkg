@@ -30,7 +30,6 @@
  * - Fallout : works great in X and DGA mode
  */
 
-#include "config.h"
 #include <assert.h>
 #include <stdarg.h>
 #include <string.h>
@@ -38,10 +37,6 @@
 #define COBJMACROS
 #define NONAMELESSUNION
 
-#include "wine/debug.h"
-#include "wine/heap.h"
-#include "wine/unicode.h"
-#include "wine/asm.h"
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -50,9 +45,13 @@
 #include "rpcproxy.h"
 #include "initguid.h"
 #include "devguid.h"
+#include "dinputd.h"
+
 #include "dinput_private.h"
 #include "device_private.h"
-#include "dinputd.h"
+
+#include "wine/asm.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dinput);
 
@@ -79,15 +78,11 @@ static const struct dinput_device *dinput_devices[] =
 {
     &mouse_device,
     &keyboard_device,
-    &joystick_linuxinput_device,
-    &joystick_linux_device,
-    &joystick_osx_device,
     &joystick_hid_device,
 };
 
 HINSTANCE DINPUT_instance;
 
-static const WCHAR di_em_win_w[] = {'D','I','E','m','W','i','n',0};
 static HWND di_em_win;
 
 static BOOL check_hook_thread(void);
@@ -124,9 +119,25 @@ void dinput_hooks_unacquire_device(LPDIRECTINPUTDEVICE8W iface)
     LeaveCriticalSection( &dinput_hook_crit );
 }
 
+static void dinput_device_internal_unacquire( IDirectInputDevice8W *iface )
+{
+    IDirectInputDeviceImpl *impl = impl_from_IDirectInputDevice8W( iface );
+
+    TRACE( "iface %p.\n", iface );
+
+    EnterCriticalSection( &impl->crit );
+    if (impl->acquired)
+    {
+        impl->vtbl->unacquire( iface );
+        impl->acquired = FALSE;
+        list_remove( &impl->entry );
+    }
+    LeaveCriticalSection( &impl->crit );
+}
+
 static HRESULT create_directinput_instance(REFIID riid, LPVOID *ppDI, IDirectInputImpl **out)
 {
-    IDirectInputImpl *This = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectInputImpl) );
+    IDirectInputImpl *This = calloc( 1, sizeof(IDirectInputImpl) );
     HRESULT hr;
 
     if (!This)
@@ -141,7 +152,7 @@ static HRESULT create_directinput_instance(REFIID riid, LPVOID *ppDI, IDirectInp
     hr = IDirectInput_QueryInterface( &This->IDirectInput7A_iface, riid, ppDI );
     if (FAILED(hr))
     {
-        HeapFree( GetProcessHeap(), 0, This );
+        free( This );
         return hr;
     }
 
@@ -417,7 +428,7 @@ static ULONG WINAPI IDirectInputWImpl_Release( IDirectInput7W *iface )
     if (ref == 0)
     {
         uninitialize_directinput_instance( This );
-        HeapFree( GetProcessHeap(), 0, This );
+        free( This );
     }
 
     return ref;
@@ -502,7 +513,7 @@ static void register_di_em_win_class(void)
     class.cbSize = sizeof(class);
     class.lpfnWndProc = di_em_win_wndproc;
     class.hInstance = DINPUT_instance;
-    class.lpszClassName = di_em_win_w;
+    class.lpszClassName = L"DIEmWin";
 
     if (!RegisterClassExW( &class ) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
         WARN( "Unable to register message window class\n" );
@@ -510,7 +521,7 @@ static void register_di_em_win_class(void)
 
 static void unregister_di_em_win_class(void)
 {
-    if (!UnregisterClassW( di_em_win_w, NULL ) && GetLastError() != ERROR_CLASS_DOES_NOT_EXIST)
+    if (!UnregisterClassW( L"DIEmWin", NULL ) && GetLastError() != ERROR_CLASS_DOES_NOT_EXIST)
         WARN( "Unable to unregister message window class\n" );
 }
 
@@ -552,7 +563,7 @@ static void uninitialize_directinput_instance(IDirectInputImpl *This)
 
         LIST_FOR_EACH_ENTRY_SAFE( device_player, device_player2,
                 &This->device_players, struct DevicePlayer, entry )
-            HeapFree(GetProcessHeap(), 0, device_player);
+            free( device_player );
 
         check_hook_thread();
 
@@ -615,7 +626,7 @@ static HRESULT WINAPI IDirectInputWImpl_GetDeviceStatus( IDirectInput7W *iface, 
 static HRESULT WINAPI IDirectInputWImpl_RunControlPanel( IDirectInput7W *iface, HWND hwndOwner, DWORD dwFlags )
 {
     IDirectInputImpl *This = impl_from_IDirectInput7W( iface );
-    WCHAR control_exeW[] = {'c','o','n','t','r','o','l','.','e','x','e',0};
+    WCHAR control_exe[] = {L"control.exe"};
     STARTUPINFOW si = {0};
     PROCESS_INFORMATION pi;
 
@@ -630,7 +641,7 @@ static HRESULT WINAPI IDirectInputWImpl_RunControlPanel( IDirectInput7W *iface, 
     if (!This->initialized)
         return DIERR_NOTINITIALIZED;
 
-    if (!CreateProcessW(NULL, control_exeW, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
+    if (!CreateProcessW( NULL, control_exe, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi ))
         return HRESULT_FROM_WIN32(GetLastError());
 
     return DI_OK;
@@ -773,7 +784,7 @@ static BOOL should_enumerate_device(const WCHAR *username, DWORD dwFlags,
         {
             if (IsEqualGUID(&device_player->instance_guid, guid))
             {
-                if (*device_player->username && !lstrcmpW(username, device_player->username))
+                if (*device_player->username && !wcscmp( username, device_player->username ))
                     return TRUE; /* Device username matches */
                 break;
             }
@@ -838,10 +849,8 @@ static HRESULT WINAPI IDirectInput8WImpl_EnumDevicesBySemantics(
             if (enumSuccess == S_OK &&
                 should_enumerate_device(ptszUserName, dwFlags, &This->device_players, &didevi.guidInstance))
             {
-                if (device_count++)
-                    didevis = HeapReAlloc(GetProcessHeap(), 0, didevis, sizeof(DIDEVICEINSTANCEW)*device_count);
-                else
-                    didevis = HeapAlloc(GetProcessHeap(), 0, sizeof(DIDEVICEINSTANCEW)*device_count);
+                device_count++;
+                didevis = realloc( didevis, sizeof(DIDEVICEINSTANCEW) * device_count );
                 didevis[device_count-1] = didevi;
             }
         }
@@ -865,14 +874,14 @@ static HRESULT WINAPI IDirectInput8WImpl_EnumDevicesBySemantics(
 
         if (lpCallback(&didevis[i], lpdid, callbackFlags, --remain, pvRef) == DIENUM_STOP)
         {
-            HeapFree(GetProcessHeap(), 0, didevis);
+            free( didevis );
             IDirectInputDevice_Release(lpdid);
             return DI_OK;
         }
         IDirectInputDevice_Release(lpdid);
     }
 
-    HeapFree(GetProcessHeap(), 0, didevis);
+    free( didevis );
 
     if (dwFlags & DIEDBSFL_FORCEFEEDBACK) return DI_OK;
 
@@ -1255,7 +1264,7 @@ static LRESULT CALLBACK callwndproc_proc( int code, WPARAM wparam, LPARAM lparam
         if (msg->hwnd == dev->win && msg->hwnd != foreground)
         {
             TRACE( "%p window is not foreground - unacquiring %p\n", dev->win, dev );
-            IDirectInputDevice_Unacquire( &dev->IDirectInputDevice8W_iface );
+            dinput_device_internal_unacquire( &dev->IDirectInputDevice8W_iface );
         }
     }
     LIST_FOR_EACH_ENTRY_SAFE( dev, next, &acquired_mouse_list, IDirectInputDeviceImpl, entry )
@@ -1263,7 +1272,7 @@ static LRESULT CALLBACK callwndproc_proc( int code, WPARAM wparam, LPARAM lparam
         if (msg->hwnd == dev->win && msg->hwnd != foreground)
         {
             TRACE( "%p window is not foreground - unacquiring %p\n", dev->win, dev );
-            IDirectInputDevice_Unacquire( &dev->IDirectInputDevice8W_iface );
+            dinput_device_internal_unacquire( &dev->IDirectInputDevice8W_iface );
         }
     }
     LIST_FOR_EACH_ENTRY_SAFE( dev, next, &acquired_rawmouse_list, IDirectInputDeviceImpl, entry )
@@ -1271,7 +1280,7 @@ static LRESULT CALLBACK callwndproc_proc( int code, WPARAM wparam, LPARAM lparam
         if (msg->hwnd == dev->win && msg->hwnd != foreground)
         {
             TRACE( "%p window is not foreground - unacquiring %p\n", dev->win, dev );
-            IDirectInputDevice_Unacquire( &dev->IDirectInputDevice8W_iface );
+            dinput_device_internal_unacquire( &dev->IDirectInputDevice8W_iface );
         }
     }
     LIST_FOR_EACH_ENTRY_SAFE( dev, next, &acquired_keyboard_list, IDirectInputDeviceImpl, entry )
@@ -1279,7 +1288,7 @@ static LRESULT CALLBACK callwndproc_proc( int code, WPARAM wparam, LPARAM lparam
         if (msg->hwnd == dev->win && msg->hwnd != foreground)
         {
             TRACE( "%p window is not foreground - unacquiring %p\n", dev->win, dev );
-            IDirectInputDevice_Unacquire( &dev->IDirectInputDevice8W_iface );
+            dinput_device_internal_unacquire( &dev->IDirectInputDevice8W_iface );
         }
     }
     LeaveCriticalSection( &dinput_hook_crit );
@@ -1298,8 +1307,7 @@ static DWORD WINAPI hook_thread_proc(void *param)
     DWORD ret;
     MSG msg;
 
-    di_em_win = CreateWindowW( di_em_win_w, di_em_win_w, 0, 0, 0, 0, 0,
-                               HWND_MESSAGE, 0, DINPUT_instance, NULL );
+    di_em_win = CreateWindowW( L"DIEmWin", L"DIEmWin", 0, 0, 0, 0, 0, HWND_MESSAGE, 0, DINPUT_instance, NULL );
 
     /* Force creation of the message queue */
     PeekMessageW( &msg, 0, 0, 0, PM_NOREMOVE );
@@ -1316,8 +1324,8 @@ static DWORD WINAPI hook_thread_proc(void *param)
             {
                 if (impl->read_event == events[ret])
                 {
-                    hr = impl->read_callback( &impl->IDirectInputDevice8W_iface );
-                    if (FAILED(hr)) list_remove( &impl->entry );
+                    hr = impl->vtbl->read( &impl->IDirectInputDevice8W_iface );
+                    if (FAILED( hr )) dinput_device_internal_unacquire( &impl->IDirectInputDevice8W_iface );
                     break;
                 }
             }
@@ -1351,7 +1359,7 @@ static DWORD WINAPI hook_thread_proc(void *param)
             mice_cnt = list_count( &acquired_mouse_list );
             LIST_FOR_EACH_ENTRY( impl, &acquired_device_list, IDirectInputDeviceImpl, entry )
             {
-                if (!impl->read_event || !impl->read_callback) continue;
+                if (!impl->read_event || !impl->vtbl->read) continue;
                 if (events_count >= ARRAY_SIZE(events)) break;
                 events[events_count++] = impl->read_event;
             }
@@ -1373,8 +1381,7 @@ static DWORD WINAPI hook_thread_proc(void *param)
                 mouse_hook = NULL;
             }
 
-            if (finished_event)
-                SetEvent(finished_event);
+            SetEvent(finished_event);
         }
     }
 
@@ -1496,17 +1503,13 @@ void check_dinput_hooks(LPDIRECTINPUTDEVICE8W iface, BOOL acquired)
             WARN( "Unable to (un)register raw device %x:%x\n", dev->raw_device.usUsagePage, dev->raw_device.usUsage );
     }
 
-    if (acquired)
-        hook_change_finished_event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    hook_change_finished_event = CreateEventW( NULL, FALSE, FALSE, NULL );
     PostThreadMessageW( hook_thread_id, WM_USER+0x10, 1, (LPARAM)hook_change_finished_event );
 
     LeaveCriticalSection(&dinput_hook_crit);
 
-    if (acquired)
-    {
-        WaitForSingleObject(hook_change_finished_event, INFINITE);
-        CloseHandle(hook_change_finished_event);
-    }
+    WaitForSingleObject(hook_change_finished_event, INFINITE);
+    CloseHandle(hook_change_finished_event);
 }
 
 void check_dinput_events(void)

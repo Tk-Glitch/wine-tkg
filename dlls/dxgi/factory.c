@@ -80,9 +80,7 @@ static ULONG STDMETHODCALLTYPE DECLSPEC_HOTPATCH dxgi_factory_Release(IWineDXGIF
         if (factory->device_window)
             DestroyWindow(factory->device_window);
 
-        wined3d_mutex_lock();
         wined3d_decref(factory->wined3d);
-        wined3d_mutex_unlock();
         wined3d_private_store_cleanup(&factory->private_store);
         heap_free(factory);
     }

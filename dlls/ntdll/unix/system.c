@@ -23,12 +23,15 @@
 #endif
 
 #include "config.h"
-#include "wine/port.h"
 
+#include <fcntl.h>
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <errno.h>
 #ifdef HAVE_SYS_TIME_H
 # include <sys/time.h>
@@ -3061,7 +3064,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
 
         len = sizeof(SYSTEM_CODEINTEGRITY_INFORMATION);
 
-        if (size < len)
+        if (size >= len)
             integrity_info->CodeIntegrityOptions = CODEINTEGRITY_OPTION_ENABLED;
         else
             ret = STATUS_INFO_LENGTH_MISMATCH;
