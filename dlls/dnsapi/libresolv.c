@@ -28,6 +28,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 
 #ifdef HAVE_NETINET_IN_H
@@ -50,12 +51,63 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "windns.h"
+#define USE_WS_PREFIX
+#include "ws2def.h"
+#include "ws2ipdef.h"
 
 #include "wine/debug.h"
 #include "wine/heap.h"
 #include "dnsapi.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dnsapi);
+
+static CPTABLEINFO unix_cptable;
+static ULONG unix_cp = CP_UTF8;
+
+static DWORD WINAPI get_unix_codepage_once( RTL_RUN_ONCE *once, void *param, void **context )
+{
+    static const WCHAR wineunixcpW[] = { 'W','I','N','E','U','N','I','X','C','P',0 };
+    UNICODE_STRING name, value;
+    WCHAR value_buffer[13];
+    SIZE_T size;
+    void *ptr;
+
+    RtlInitUnicodeString( &name, wineunixcpW );
+    value.Buffer = value_buffer;
+    value.MaximumLength = sizeof(value_buffer);
+    if (!RtlQueryEnvironmentVariable_U( NULL, &name, &value ))
+        RtlUnicodeStringToInteger( &value, 10, &unix_cp );
+    if (unix_cp != CP_UTF8 && !NtGetNlsSectionPtr( 11, unix_cp, NULL, &ptr, &size ))
+        RtlInitCodePageTable( ptr, &unix_cptable );
+    return TRUE;
+}
+
+static BOOL get_unix_codepage( void )
+{
+    static RTL_RUN_ONCE once = RTL_RUN_ONCE_INIT;
+
+    return !RtlRunOnceExecuteOnce( &once, get_unix_codepage_once, NULL, NULL );
+}
+
+static DWORD dnsapi_umbstowcs( const char *src, WCHAR *dst, DWORD dstlen )
+{
+    DWORD srclen = strlen( src ) + 1;
+    DWORD len;
+
+    get_unix_codepage();
+
+    if (unix_cp == CP_UTF8)
+    {
+        RtlUTF8ToUnicodeN( dst, dstlen, &len, src, srclen );
+        return len;
+    }
+    else
+    {
+        len = srclen * sizeof(WCHAR);
+        if (dst) RtlCustomCPToUnicodeN( &unix_cptable, dst, dstlen, &len, src, srclen );
+        return len;
+    }
+}
 
 static const char *debugstr_type( unsigned short type )
 {
@@ -225,27 +277,179 @@ static DNS_STATUS map_h_errno( int error )
     }
 }
 
-DNS_STATUS CDECL resolv_get_serverlist( IP4_ARRAY *addrs, DWORD *len )
+DNS_STATUS CDECL resolv_get_searchlist( DNS_TXT_DATAW *list, DWORD *len )
 {
-    unsigned int size;
-    int i;
+    DWORD i, needed, str_needed = 0;
+    char *ptr, *end;
 
     init_resolver();
 
-    size = FIELD_OFFSET(IP4_ARRAY, AddrArray[_res.nscount]);
-    if (!addrs || *len < size)
+    for (i = 0; i < MAXDNSRCH + 1 && _res.dnsrch[i]; i++)
+        str_needed += dnsapi_umbstowcs( _res.dnsrch[i], NULL, 0 );
+
+    needed = FIELD_OFFSET(DNS_TXT_DATAW, pStringArray[i]) + str_needed;
+
+    if (!list || *len < needed)
     {
-        *len = size;
-        return ERROR_INSUFFICIENT_BUFFER;
+        *len = needed;
+        return !list ? ERROR_SUCCESS : ERROR_MORE_DATA;
     }
 
-    addrs->AddrCount = _res.nscount;
+    *len = needed;
+    list->dwStringCount = i;
 
-    for (i = 0; i < _res.nscount; i++)
-        addrs->AddrArray[i] = _res.nsaddr_list[i].sin_addr.s_addr;
+    ptr = (char *)(list->pStringArray + i);
+    end = ptr + str_needed;
+    for (i = 0; i < MAXDNSRCH + 1 && _res.dnsrch[i]; i++)
+    {
+        list->pStringArray[i] = (WCHAR *)ptr;
+        ptr += dnsapi_umbstowcs( _res.dnsrch[i], list->pStringArray[i], end - ptr );
+    }
+    return ERROR_SUCCESS;
+}
+
+
+static inline int filter( unsigned short sin_family, USHORT family )
+{
+    if (sin_family != AF_INET && sin_family != AF_INET6) return TRUE;
+    if (sin_family == AF_INET6 && family == WS_AF_INET) return TRUE;
+    if (sin_family == AF_INET && family == WS_AF_INET6) return TRUE;
+
+    return FALSE;
+}
+
+#ifdef HAVE_RES_GETSERVERS
+
+DNS_STATUS CDECL resolv_get_serverlist( USHORT family, DNS_ADDR_ARRAY *addrs, DWORD *len )
+{
+    struct __res_state *state = &_res;
+    DWORD i, found, total, needed;
+    union res_sockaddr_union *buf;
+
+    init_resolver();
+
+    total = res_getservers( state, NULL, 0 );
+    if (!total) return DNS_ERROR_NO_DNS_SERVERS;
+
+    if (!addrs && family != WS_AF_INET && family != WS_AF_INET6)
+    {
+        *len = FIELD_OFFSET(DNS_ADDR_ARRAY, AddrArray[total]);
+        return ERROR_SUCCESS;
+    }
+
+    buf = malloc( total * sizeof(union res_sockaddr_union) );
+    if (!buf) return ERROR_NOT_ENOUGH_MEMORY;
+
+    total = res_getservers( state, buf, total );
+
+    for (i = 0, found = 0; i < total; i++)
+    {
+        if (filter( buf[i].sin.sin_family, family )) continue;
+        found++;
+    }
+    if (!found) return DNS_ERROR_NO_DNS_SERVERS;
+
+    needed = FIELD_OFFSET(DNS_ADDR_ARRAY, AddrArray[found]);
+    if (!addrs || *len < needed)
+    {
+        *len = needed;
+        return !addrs ? ERROR_SUCCESS : ERROR_MORE_DATA;
+    }
+    *len = needed;
+    memset( addrs, 0, needed );
+    addrs->AddrCount = addrs->MaxCount = found;
+
+    for (i = 0, found = 0; i < total; i++)
+    {
+        if (filter( buf[i].sin.sin_family, family )) continue;
+
+        if (buf[i].sin6.sin6_family == AF_INET6)
+        {
+            SOCKADDR_IN6 *sa = (SOCKADDR_IN6 *)addrs->AddrArray[found].MaxSa;
+            sa->sin6_family = WS_AF_INET6;
+            memcpy( &sa->sin6_addr, &buf[i].sin6.sin6_addr, sizeof(sa->sin6_addr) );
+            addrs->AddrArray[found].Data.DnsAddrUserDword[0] = sizeof(*sa);
+        }
+        else
+        {
+            SOCKADDR_IN *sa = (SOCKADDR_IN *)addrs->AddrArray[found].MaxSa;
+            sa->sin_family = WS_AF_INET;
+            sa->sin_addr.WS_s_addr = buf[i].sin.sin_addr.s_addr;
+            addrs->AddrArray[found].Data.DnsAddrUserDword[0] = sizeof(*sa);
+        }
+        found++;
+    }
+
+    free( buf );
+    return ERROR_SUCCESS;
+}
+
+#else
+
+DNS_STATUS CDECL resolv_get_serverlist( USHORT family, DNS_ADDR_ARRAY *addrs, DWORD *len )
+{
+    DWORD needed, found, i;
+
+    init_resolver();
+
+    if (!_res.nscount) return DNS_ERROR_NO_DNS_SERVERS;
+    if (!addrs && family != WS_AF_INET && family != WS_AF_INET6)
+    {
+        *len = FIELD_OFFSET(DNS_ADDR_ARRAY, AddrArray[_res.nscount]);
+        return ERROR_SUCCESS;
+    }
+
+    for (i = 0, found = 0; i < _res.nscount; i++)
+    {
+        unsigned short sin_family = AF_INET;
+#ifdef HAVE_STRUCT___RES_STATE__U__EXT_NSCOUNT6
+        if (_res._u._ext.nsaddrs[i]) sin_family = _res._u._ext.nsaddrs[i]->sin6_family;
+#endif
+        if (filter( sin_family, family )) continue;
+        found++;
+    }
+    if (!found) return DNS_ERROR_NO_DNS_SERVERS;
+
+    needed = FIELD_OFFSET(DNS_ADDR_ARRAY, AddrArray[found]);
+    if (!addrs || *len < needed)
+    {
+        *len = needed;
+        return !addrs ? ERROR_SUCCESS : ERROR_MORE_DATA;
+    }
+    *len = needed;
+    memset( addrs, 0, needed );
+    addrs->AddrCount = addrs->MaxCount = found;
+
+    for (i = 0, found = 0; i < _res.nscount; i++)
+    {
+        unsigned short sin_family = AF_INET;
+#ifdef HAVE_STRUCT___RES_STATE__U__EXT_NSCOUNT6
+        if (_res._u._ext.nsaddrs[i]) sin_family = _res._u._ext.nsaddrs[i]->sin6_family;
+#endif
+        if (filter( sin_family, family )) continue;
+
+#ifdef HAVE_STRUCT___RES_STATE__U__EXT_NSCOUNT6
+        if (sin_family == AF_INET6)
+        {
+            SOCKADDR_IN6 *sa = (SOCKADDR_IN6 *)addrs->AddrArray[found].MaxSa;
+            sa->sin6_family = WS_AF_INET6;
+            memcpy( &sa->sin6_addr, &_res._u._ext.nsaddrs[i]->sin6_addr, sizeof(sa->sin6_addr) );
+            addrs->AddrArray[found].Data.DnsAddrUserDword[0] = sizeof(*sa);
+        }
+        else
+#endif
+        {
+            SOCKADDR_IN *sa = (SOCKADDR_IN *)addrs->AddrArray[found].MaxSa;
+            sa->sin_family = WS_AF_INET;
+            sa->sin_addr.WS_s_addr = _res.nsaddr_list[i].sin_addr.s_addr;
+            addrs->AddrArray[found].Data.DnsAddrUserDword[0] = sizeof(*sa);
+        }
+        found++;
+    }
 
     return ERROR_SUCCESS;
 }
+#endif
 
 DNS_STATUS CDECL resolv_set_serverlist( const IP4_ARRAY *addrs )
 {
@@ -727,6 +931,7 @@ exit:
 
 static const struct resolv_funcs funcs =
 {
+    resolv_get_searchlist,
     resolv_get_serverlist,
     resolv_query,
     resolv_set_serverlist

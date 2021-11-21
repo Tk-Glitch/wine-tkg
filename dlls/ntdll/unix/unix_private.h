@@ -24,6 +24,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include "unixlib.h"
+#include "wine/unixlib.h"
 #include "wine/server.h"
 #include "wine/list.h"
 
@@ -88,6 +89,9 @@ static const SIZE_T signal_stack_size = 0x10000 - 0x3800;
 static const SIZE_T kernel_stack_size = 0x20000;
 static const LONG teb_offset = 0x2000;
 
+#define FILE_WRITE_TO_END_OF_FILE      ((LONGLONG)-1)
+#define FILE_USE_FILE_POINTER_POSITION ((LONGLONG)-2)
+
 /* callbacks to PE ntdll from the Unix side */
 extern void     (WINAPI *pDbgUiRemoteBreakin)( void *arg ) DECLSPEC_HIDDEN;
 extern NTSTATUS (WINAPI *pKiRaiseUserExceptionDispatcher)(void) DECLSPEC_HIDDEN;
@@ -112,10 +116,10 @@ extern LONGLONG CDECL fast_RtlGetSystemTimePrecise(void) DECLSPEC_HIDDEN;
 extern NTSTATUS CDECL fast_wait_cv( RTL_CONDITION_VARIABLE *variable, const void *value,
                                     const LARGE_INTEGER *timeout ) DECLSPEC_HIDDEN;
 
-extern void CDECL virtual_release_address_space(void) DECLSPEC_HIDDEN;
-
 extern NTSTATUS CDECL unwind_builtin_dll( ULONG type, struct _DISPATCHER_CONTEXT *dispatch,
                                           CONTEXT *context ) DECLSPEC_HIDDEN;
+
+extern const char wine_build[] DECLSPEC_HIDDEN;
 
 extern const char *home_dir DECLSPEC_HIDDEN;
 extern const char *data_dir DECLSPEC_HIDDEN;
@@ -155,8 +159,6 @@ extern void init_environment( int argc, char *argv[], char *envp[] ) DECLSPEC_HI
 extern void init_startup_info(void) DECLSPEC_HIDDEN;
 extern void *create_startup_info( const UNICODE_STRING *nt_image, const RTL_USER_PROCESS_PARAMETERS *params,
                                   DWORD *info_size ) DECLSPEC_HIDDEN;
-extern DWORD ntdll_umbstowcs( const char *src, DWORD srclen, WCHAR *dst, DWORD dstlen ) DECLSPEC_HIDDEN;
-extern int ntdll_wcstoumbs( const WCHAR *src, DWORD srclen, char *dst, DWORD dstlen, BOOL strict ) DECLSPEC_HIDDEN;
 extern char **build_envp( const WCHAR *envW ) DECLSPEC_HIDDEN;
 extern NTSTATUS exec_wineloader( char **argv, int socketfd, const pe_image_info_t *pe_info ) DECLSPEC_HIDDEN;
 extern NTSTATUS load_builtin( const pe_image_info_t *image_info, WCHAR *filename,
@@ -165,6 +167,7 @@ extern BOOL is_builtin_path( const UNICODE_STRING *path, WORD *machine ) DECLSPE
 extern NTSTATUS load_main_exe( const WCHAR *name, const char *unix_name, const WCHAR *curdir, WCHAR **image,
                                void **module ) DECLSPEC_HIDDEN;
 extern NTSTATUS load_start_exe( WCHAR **image, void **module ) DECLSPEC_HIDDEN;
+extern NTSTATUS get_builtin_init_funcs( void *handle, void **funcs, SIZE_T len, SIZE_T *retlen ) DECLSPEC_HIDDEN;
 extern void start_server( BOOL debug ) DECLSPEC_HIDDEN;
 
 extern unsigned int server_call_unlocked( void *req_ptr ) DECLSPEC_HIDDEN;
@@ -232,10 +235,10 @@ extern void virtual_set_force_exec( BOOL enable ) DECLSPEC_HIDDEN;
 extern void virtual_set_large_address_space(void) DECLSPEC_HIDDEN;
 extern void virtual_fill_image_information( const pe_image_info_t *pe_info,
                                             SECTION_IMAGE_INFORMATION *info ) DECLSPEC_HIDDEN;
-extern NTSTATUS release_builtin_module( void *module ) DECLSPEC_HIDDEN;
 extern void *get_builtin_so_handle( void *module ) DECLSPEC_HIDDEN;
 extern NTSTATUS get_builtin_unix_info( void *module, const char **name, void **handle, void **entry ) DECLSPEC_HIDDEN;
-extern NTSTATUS set_builtin_unix_info( void *module, const char *name, void *handle, void *entry ) DECLSPEC_HIDDEN;
+extern NTSTATUS set_builtin_unix_handle( void *module, const char *name, void *handle ) DECLSPEC_HIDDEN;
+extern NTSTATUS set_builtin_unix_entry( void *module, void *entry ) DECLSPEC_HIDDEN;
 
 extern NTSTATUS get_thread_ldt_entry( HANDLE handle, void *data, ULONG len, ULONG *ret_len ) DECLSPEC_HIDDEN;
 extern void *get_native_context( CONTEXT *context ) DECLSPEC_HIDDEN;
@@ -338,6 +341,63 @@ static inline void mutex_lock( pthread_mutex_t *mutex )
 static inline void mutex_unlock( pthread_mutex_t *mutex )
 {
     if (!process_exiting) pthread_mutex_unlock( mutex );
+}
+
+static inline async_data_t server_async( HANDLE handle, struct async_fileio *user, HANDLE event,
+                                         PIO_APC_ROUTINE apc, void *apc_context, client_ptr_t iosb )
+{
+    async_data_t async;
+    async.handle      = wine_server_obj_handle( handle );
+    async.user        = wine_server_client_ptr( user );
+    async.iosb        = iosb;
+    async.event       = wine_server_obj_handle( event );
+    async.apc         = wine_server_client_ptr( apc );
+    async.apc_context = wine_server_client_ptr( apc_context );
+    return async;
+}
+
+static inline NTSTATUS wait_async( HANDLE handle, BOOL alertable )
+{
+    return NtWaitForSingleObject( handle, alertable, NULL );
+}
+
+static inline void set_async_iosb( client_ptr_t iosb, NTSTATUS status, ULONG_PTR info )
+{
+    if (!iosb) return;
+#ifdef _WIN64
+    if (NtCurrentTeb()->WowTebOffset)
+    {
+        struct iosb32
+        {
+            NTSTATUS Status;
+            ULONG    Information;
+        } *io = wine_server_get_ptr( iosb );
+        io->Status = status;
+        io->Information = info;
+    }
+    else
+#endif
+    {
+        IO_STATUS_BLOCK *io = wine_server_get_ptr( iosb );
+#ifdef NONAMELESSUNION
+        io->u.Status = status;
+#else
+        io->Status = status;
+#endif
+        io->Information = info;
+    }
+}
+
+static inline client_ptr_t iosb_client_ptr( IO_STATUS_BLOCK *io )
+{
+#ifdef _WIN64
+#ifdef NONAMELESSUNION
+    if (io && NtCurrentTeb()->WowTebOffset) return wine_server_client_ptr( io->u.Pointer );
+#else
+    if (io && NtCurrentTeb()->WowTebOffset) return wine_server_client_ptr( io->Pointer );
+#endif
+#endif
+    return wine_server_client_ptr( io );
 }
 
 #ifdef _WIN64

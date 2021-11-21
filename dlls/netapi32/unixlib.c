@@ -26,6 +26,8 @@
 #include "config.h"
 #include "wine/port.h"
 
+#ifdef SONAME_LIBNETAPI
+
 #include <stdarg.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -46,8 +48,6 @@
 
 #include "unixlib.h"
 
-#ifdef SONAME_LIBNETAPI
-
 WINE_DEFAULT_DEBUG_CHANNEL(netapi32);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
@@ -67,72 +67,16 @@ static NET_API_STATUS (*pNetShareAdd)( const char *, unsigned int, unsigned char
 static NET_API_STATUS (*pNetShareDel)( const char *, const char *, unsigned int );
 static NET_API_STATUS (*pNetWkstaGetInfo)( const char *, unsigned int, unsigned char ** );
 
-static CPTABLEINFO unix_cptable;
-static ULONG unix_cp = CP_UTF8;
-
-static DWORD WINAPI get_unix_codepage_once( RTL_RUN_ONCE *once, void *param, void **context )
-{
-    static const WCHAR wineunixcpW[] = {'W','I','N','E','U','N','I','X','C','P',0};
-    UNICODE_STRING name, value;
-    WCHAR value_buffer[13];
-    SIZE_T size;
-    void *ptr;
-
-    RtlInitUnicodeString( &name, wineunixcpW );
-    value.Buffer = value_buffer;
-    value.MaximumLength = sizeof(value_buffer);
-    if (!RtlQueryEnvironmentVariable_U( NULL, &name, &value ))
-        RtlUnicodeStringToInteger( &value, 10, &unix_cp );
-    if (unix_cp != CP_UTF8 && !NtGetNlsSectionPtr( 11, unix_cp, NULL, &ptr, &size ))
-        RtlInitCodePageTable( ptr, &unix_cptable );
-    return TRUE;
-}
-
-static BOOL get_unix_codepage( void )
-{
-    static RTL_RUN_ONCE once = RTL_RUN_ONCE_INIT;
-
-    return !RtlRunOnceExecuteOnce( &once, get_unix_codepage_once, NULL, NULL );
-}
-
 static DWORD netapi_wcstoumbs( const WCHAR *src, char *dst, DWORD dstlen )
 {
-    DWORD srclen = (strlenW( src ) + 1) * sizeof(WCHAR);
-    DWORD len;
-
-    get_unix_codepage();
-
-    if (unix_cp == CP_UTF8)
-    {
-        RtlUnicodeToUTF8N( dst, dstlen, &len, src, srclen );
-        return len;
-    }
-    else
-    {
-        len = (strlenW( src ) * 2) + 1;
-        if (dst) RtlUnicodeToCustomCPN( &unix_cptable, dst, dstlen, &len, src, srclen );
-        return len;
-    }
+    if (!dst) return 3 * strlenW( src ) + 1;
+    return ntdll_wcstoumbs( src, strlenW( src ) + 1, dst, dstlen, FALSE );
 }
 
 static DWORD netapi_umbstowcs( const char *src, WCHAR *dst, DWORD dstlen )
 {
-    DWORD srclen = strlen( src ) + 1;
-    DWORD len;
-
-    get_unix_codepage();
-
-    if (unix_cp == CP_UTF8)
-    {
-        RtlUTF8ToUnicodeN( dst, dstlen, &len, src, srclen );
-        return len;
-    }
-    else
-    {
-        len = srclen * sizeof(WCHAR);
-        if (dst) RtlCustomCPToUnicodeN( &unix_cptable, dst, dstlen, &len, src, srclen );
-        return len;
-    }
+    if (!dst) return (strlen( src ) + 1) * sizeof(WCHAR);
+    return ntdll_umbstowcs( src, strlen( src ) + 1, dst, dstlen );
 }
 
 static char *strdup_unixcp( const WCHAR *str )
@@ -140,7 +84,7 @@ static char *strdup_unixcp( const WCHAR *str )
     char *ret;
 
     int len = netapi_wcstoumbs( str, NULL, 0 );
-    if ((ret = RtlAllocateHeap( GetProcessHeap(), 0, len )))
+    if ((ret = malloc( len )))
         netapi_wcstoumbs( str, ret, len );
     return ret;
 }
@@ -155,17 +99,20 @@ struct server_info_101
     const char  *sv101_comment;
 };
 
-static NET_API_STATUS server_info_101_from_samba( const unsigned char *buf, BYTE **bufptr )
+static NET_API_STATUS server_info_101_from_samba( const unsigned char *buf, void *buffer, ULONG *size )
 {
-    SERVER_INFO_101 *ret;
-    struct server_info_101 *info = (struct server_info_101 *)buf;
+    SERVER_INFO_101 *ret = (SERVER_INFO_101 *)buffer;
+    const struct server_info_101 *info = (const struct server_info_101 *)buf;
     DWORD len = 0;
     WCHAR *ptr;
 
     if (info->sv101_name) len += netapi_umbstowcs( info->sv101_name, NULL, 0 );
     if (info->sv101_comment) len += netapi_umbstowcs( info->sv101_comment, NULL, 0 );
-    if (!(ret = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*ret) + (len * sizeof(WCHAR) ))))
-        return ERROR_OUTOFMEMORY;
+    if (*size < sizeof(*ret) + (len * sizeof(WCHAR) ))
+    {
+        *size = sizeof(*ret) + (len * sizeof(WCHAR) );
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
 
     ptr = (WCHAR *)(ret + 1);
     ret->sv101_platform_id = info->sv101_platform_id;
@@ -182,37 +129,38 @@ static NET_API_STATUS server_info_101_from_samba( const unsigned char *buf, BYTE
     else
     {
         ret->sv101_comment = ptr;
-        netapi_umbstowcs( info->sv101_comment, ptr, len );
+        ptr += netapi_umbstowcs( info->sv101_comment, ptr, len );
     }
-    *bufptr = (BYTE *)ret;
+    *size = (char *)ptr - (char *)buffer;
     return NERR_Success;
 }
 
-static NET_API_STATUS server_info_from_samba( DWORD level, const unsigned char *buf, BYTE **bufptr )
+static NET_API_STATUS server_info_from_samba( DWORD level, const unsigned char *buf, void *buffer, ULONG *size )
 {
     switch (level)
     {
-    case 101: return server_info_101_from_samba( buf, bufptr );
+    case 101: return server_info_101_from_samba( buf, buffer, size );
     default:
         FIXME( "level %u not supported\n", level );
         return ERROR_NOT_SUPPORTED;
     }
 }
 
-static NET_API_STATUS WINAPI server_getinfo( const WCHAR *server, DWORD level, BYTE **buffer )
+static NTSTATUS server_getinfo( void *args )
 {
+    struct server_getinfo_params *params = args;
     NET_API_STATUS status;
     char *samba_server = NULL;
     unsigned char *samba_buffer = NULL;
 
     if (!libnetapi_ctx) return ERROR_NOT_SUPPORTED;
 
-    if (server && !(samba_server = strdup_unixcp( server ))) return ERROR_OUTOFMEMORY;
-    status = pNetServerGetInfo( samba_server, level, &samba_buffer );
-    RtlFreeHeap( GetProcessHeap(), 0, samba_server );
+    if (params->server && !(samba_server = strdup_unixcp( params->server ))) return ERROR_OUTOFMEMORY;
+    status = pNetServerGetInfo( samba_server, params->level, &samba_buffer );
+    free( samba_server );
     if (!status)
     {
-        status = server_info_from_samba( level, samba_buffer, buffer );
+        status = server_info_from_samba( params->level, samba_buffer, params->buffer, params->size );
         pNetApiBufferFree( samba_buffer );
     }
     return status;
@@ -245,7 +193,7 @@ static NET_API_STATUS share_info_2_to_samba( const BYTE *buf, unsigned char **bu
         len += netapi_wcstoumbs( info->shi2_path, NULL, 0 );
     if (info->shi2_passwd)
         len += netapi_wcstoumbs( info->shi2_passwd, NULL, 0 );
-    if (!(ret = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret) + len )))
+    if (!(ret = malloc( sizeof(*ret) + len )))
         return ERROR_OUTOFMEMORY;
 
     ptr = (char *)(ret + 1);
@@ -253,14 +201,14 @@ static NET_API_STATUS share_info_2_to_samba( const BYTE *buf, unsigned char **bu
     else
     {
         ret->shi2_netname = ptr;
-        ptr += netapi_wcstoumbs( info->shi2_netname, ptr, len );
+        ptr += netapi_wcstoumbs( info->shi2_netname, ptr, len - (ptr - (char *)(ret + 1)) );
     }
     ret->shi2_type = info->shi2_type;
     if (!info->shi2_remark) ret->shi2_remark = NULL;
     else
     {
         ret->shi2_remark = ptr;
-        ptr += netapi_wcstoumbs( info->shi2_remark, ptr, len );
+        ptr += netapi_wcstoumbs( info->shi2_remark, ptr, len - (ptr - (char *)(ret + 1)) );
     }
     ret->shi2_permissions  = info->shi2_permissions;
     ret->shi2_max_uses     = info->shi2_max_uses;
@@ -269,13 +217,13 @@ static NET_API_STATUS share_info_2_to_samba( const BYTE *buf, unsigned char **bu
     else
     {
         ret->shi2_path = ptr;
-        ptr += netapi_wcstoumbs( info->shi2_path, ptr, len );
+        ptr += netapi_wcstoumbs( info->shi2_path, ptr, len - (ptr - (char *)(ret + 1)) );
     }
     if (!info->shi2_passwd) ret->shi2_passwd = NULL;
     else
     {
         ret->shi2_passwd = ptr;
-        netapi_wcstoumbs( info->shi2_passwd, ptr, len );
+        netapi_wcstoumbs( info->shi2_passwd, ptr, len - (ptr - (char *)(ret + 1)) );
     }
     *bufptr = (unsigned char *)ret;
     return NERR_Success;
@@ -699,7 +647,7 @@ static NET_API_STATUS share_info_502_to_samba( const BYTE *buf, unsigned char **
         len += netapi_wcstoumbs( info->shi502_passwd, NULL, 0 );
     if (info->shi502_security_descriptor)
         size = sd_to_samba_size( info->shi502_security_descriptor );
-    if (!(ret = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*ret) + (len * sizeof(WCHAR)) + size )))
+    if (!(ret = malloc( sizeof(*ret) + (len * sizeof(WCHAR)) + size )))
         return ERROR_OUTOFMEMORY;
 
     ptr = (char *)(ret + 1);
@@ -707,14 +655,14 @@ static NET_API_STATUS share_info_502_to_samba( const BYTE *buf, unsigned char **
     else
     {
         ret->shi502_netname = ptr;
-        ptr += netapi_wcstoumbs( info->shi502_netname, ptr, len );
+        ptr += netapi_wcstoumbs( info->shi502_netname, ptr, len - (ptr - (char *)(ret + 1)) );
     }
     ret->shi502_type = info->shi502_type;
     if (!info->shi502_remark) ret->shi502_remark = NULL;
     else
     {
         ret->shi502_remark = ptr;
-        ptr += netapi_wcstoumbs( info->shi502_remark, ptr, len );
+        ptr += netapi_wcstoumbs( info->shi502_remark, ptr, len - (ptr - (char *)(ret + 1)) );
     }
     ret->shi502_permissions  = info->shi502_permissions;
     ret->shi502_max_uses     = info->shi502_max_uses;
@@ -723,13 +671,13 @@ static NET_API_STATUS share_info_502_to_samba( const BYTE *buf, unsigned char **
     else
     {
         ret->shi502_path = ptr;
-        ptr += netapi_wcstoumbs( info->shi502_path, ptr, len );
+        ptr += netapi_wcstoumbs( info->shi502_path, ptr, len - (ptr - (char *)(ret + 1)) );
     }
     if (!info->shi502_passwd) ret->shi502_passwd = NULL;
     else
     {
         ret->shi502_passwd = ptr;
-        ptr += netapi_wcstoumbs( info->shi502_passwd, ptr, len );
+        ptr += netapi_wcstoumbs( info->shi502_passwd, ptr, len - (ptr - (char *)(ret + 1)) );
     }
     ret->shi502_reserved = info->shi502_reserved;
     if (!info->shi502_security_descriptor) ret->shi502_security_descriptor = NULL;
@@ -738,7 +686,7 @@ static NET_API_STATUS share_info_502_to_samba( const BYTE *buf, unsigned char **
         status = sd_to_samba( info->shi502_security_descriptor, (struct security_descriptor *)ptr );
         if (status)
         {
-            RtlFreeHeap( GetProcessHeap(), 0, ret );
+            free( ret );
             return status;
         }
         ret->shi502_security_descriptor = (struct security_descriptor *)ptr;
@@ -759,44 +707,46 @@ static NET_API_STATUS share_info_to_samba( DWORD level, const BYTE *buf, unsigne
     }
 }
 
-static NET_API_STATUS WINAPI share_add( const WCHAR *server, DWORD level, const BYTE *info, DWORD *err )
+static NTSTATUS share_add( void *args )
 {
+    struct share_add_params *params = args;
     char *samba_server = NULL;
     unsigned char *samba_info;
     NET_API_STATUS status;
 
     if (!libnetapi_ctx) return ERROR_NOT_SUPPORTED;
 
-    if (server && !(samba_server = strdup_unixcp( server ))) return ERROR_OUTOFMEMORY;
-    status = share_info_to_samba( level, info, &samba_info );
+    if (params->server && !(samba_server = strdup_unixcp( params->server ))) return ERROR_OUTOFMEMORY;
+    status = share_info_to_samba( params->level, params->info, &samba_info );
     if (!status)
     {
         unsigned int samba_err;
 
-        status = pNetShareAdd( samba_server, level, samba_info, &samba_err );
-        RtlFreeHeap( GetProcessHeap(), 0, samba_info );
-        if (err) *err = samba_err;
+        status = pNetShareAdd( samba_server, params->level, samba_info, &samba_err );
+        free( samba_info );
+        if (params->err) *params->err = samba_err;
     }
-    RtlFreeHeap( GetProcessHeap(), 0, samba_server );
+    free( samba_server );
     return status;
 }
 
-static NET_API_STATUS WINAPI share_del( const WCHAR *server, const WCHAR *share, DWORD reserved )
+static NTSTATUS share_del( void *args )
 {
+    struct share_del_params *params = args;
     char *samba_server = NULL, *samba_share;
     NET_API_STATUS status;
 
     if (!libnetapi_ctx) return ERROR_NOT_SUPPORTED;
 
-    if (server && !(samba_server = strdup_unixcp( server ))) return ERROR_OUTOFMEMORY;
-    if (!(samba_share = strdup_unixcp( share )))
+    if (params->server && !(samba_server = strdup_unixcp( params->server ))) return ERROR_OUTOFMEMORY;
+    if (!(samba_share = strdup_unixcp( params->share )))
     {
-        RtlFreeHeap( GetProcessHeap(), 0, samba_server );
+        free( samba_server );
         return ERROR_OUTOFMEMORY;
     }
-    status = pNetShareDel( samba_server, samba_share, reserved );
-    RtlFreeHeap( GetProcessHeap(), 0, samba_server );
-    RtlFreeHeap( GetProcessHeap(), 0, samba_share );
+    status = pNetShareDel( samba_server, samba_share, params->reserved );
+    free( samba_server );
+    free( samba_share );
     return status;
 }
 
@@ -809,10 +759,10 @@ struct wksta_info_100
     unsigned int wki100_ver_minor;
 };
 
-static NET_API_STATUS wksta_info_100_from_samba( const unsigned char *buf, BYTE **bufptr )
+static NET_API_STATUS wksta_info_100_from_samba( const unsigned char *buf, void *buffer, ULONG *size )
 {
-    WKSTA_INFO_100 *ret;
-    struct wksta_info_100 *info = (struct wksta_info_100 *)buf;
+    WKSTA_INFO_100 *ret = (WKSTA_INFO_100 *)buffer;
+    const struct wksta_info_100 *info = (const struct wksta_info_100 *)buf;
     DWORD len = 0;
     WCHAR *ptr;
 
@@ -820,8 +770,11 @@ static NET_API_STATUS wksta_info_100_from_samba( const unsigned char *buf, BYTE 
         len += netapi_umbstowcs( info->wki100_computername, NULL, 0 );
     if (info->wki100_langroup)
         len += netapi_umbstowcs( info->wki100_langroup, NULL, 0 );
-    if (!(ret = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*ret) + (len * sizeof(WCHAR) ))))
-        return ERROR_OUTOFMEMORY;
+    if (*size < sizeof(*ret) + (len * sizeof(WCHAR) ))
+    {
+        *size = sizeof(*ret) + (len * sizeof(WCHAR) );
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
 
     ptr = (WCHAR *)(ret + 1);
     ret->wki100_platform_id = info->wki100_platform_id;
@@ -835,45 +788,46 @@ static NET_API_STATUS wksta_info_100_from_samba( const unsigned char *buf, BYTE 
     else
     {
         ret->wki100_langroup = ptr;
-        netapi_umbstowcs( info->wki100_langroup, ptr, len );
+        ptr += netapi_umbstowcs( info->wki100_langroup, ptr, len );
     }
     ret->wki100_ver_major = info->wki100_ver_major;
     ret->wki100_ver_minor = info->wki100_ver_minor;
-    *bufptr = (BYTE *)ret;
+    *size = (char *)ptr - (char *)buffer;
     return NERR_Success;
 }
 
-static NET_API_STATUS wksta_info_from_samba( DWORD level, const unsigned char *buf, BYTE **bufptr )
+static NET_API_STATUS wksta_info_from_samba( DWORD level, const unsigned char *buf, void *buffer, ULONG *size )
 {
     switch (level)
     {
-    case 100: return wksta_info_100_from_samba( buf, bufptr );
+    case 100: return wksta_info_100_from_samba( buf, buffer, size );
     default:
         FIXME( "level %u not supported\n", level );
         return ERROR_NOT_SUPPORTED;
     }
 }
 
-static NET_API_STATUS WINAPI wksta_getinfo( const WCHAR *server, DWORD level, BYTE **buffer )
+static NTSTATUS wksta_getinfo( void *args )
 {
+    struct wksta_getinfo_params *params = args;
     unsigned char *samba_buffer = NULL;
     char *samba_server = NULL;
     NET_API_STATUS status;
 
     if (!libnetapi_ctx) return ERROR_NOT_SUPPORTED;
 
-    if (server && !(samba_server = strdup_unixcp( server ))) return ERROR_OUTOFMEMORY;
-    status = pNetWkstaGetInfo( samba_server, level, &samba_buffer );
-    RtlFreeHeap( GetProcessHeap(), 0, samba_server );
+    if (params->server && !(samba_server = strdup_unixcp( params->server ))) return ERROR_OUTOFMEMORY;
+    status = pNetWkstaGetInfo( samba_server, params->level, &samba_buffer );
+    free( samba_server );
     if (!status)
     {
-        status = wksta_info_from_samba( level, samba_buffer, buffer );
+        status = wksta_info_from_samba( params->level, samba_buffer, params->buffer, params->size );
         pNetApiBufferFree( samba_buffer );
     }
     return status;
 }
 
-static void libnetapi_init(void)
+static NTSTATUS netapi_init( void *args )
 {
     DWORD status;
     void *ctx;
@@ -881,14 +835,14 @@ static void libnetapi_init(void)
     if (!(libnetapi_handle = dlopen( SONAME_LIBNETAPI, RTLD_NOW )))
     {
         ERR_(winediag)( "failed to load %s\n", SONAME_LIBNETAPI );
-        return;
+        return STATUS_DLL_NOT_FOUND;
     }
 
 #define LOAD_FUNCPTR(f) \
     if (!(p##f = dlsym( libnetapi_handle, #f ))) \
     { \
         ERR_(winediag)( "%s not found in %s\n", #f, SONAME_LIBNETAPI ); \
-        return; \
+        return STATUS_DLL_NOT_FOUND; \
     }
 
     LOAD_FUNCPTR(libnetapi_init)
@@ -908,34 +862,35 @@ static void libnetapi_init(void)
     if ((status = plibnetapi_init( &ctx )))
     {
         ERR( "Failed to initialize context, status %u\n", status );
-        return;
+        return STATUS_DLL_NOT_FOUND;
     }
     if (TRACE_ON(netapi32) && (status = plibnetapi_set_debuglevel( ctx, "10" )))
     {
         ERR( "Failed to set debug level, status %u\n", status );
         plibnetapi_free( ctx );
-        return;
+        return STATUS_DLL_NOT_FOUND;
     }
     /* perform an anonymous login by default (avoids a password prompt) */
     if ((status = plibnetapi_set_username( ctx, "Guest" )))
     {
         ERR( "Failed to set username, status %u\n", status );
         plibnetapi_free( ctx );
-        return;
+        return STATUS_DLL_NOT_FOUND;
     }
     if ((status = plibnetapi_set_password( ctx, "" )))
     {
         ERR( "Failed to set password, status %u\n", status );
         plibnetapi_free( ctx );
-        return;
+        return STATUS_DLL_NOT_FOUND;
     }
 
     libnetapi_ctx = ctx;
+    return STATUS_SUCCESS;
 }
 
-static NET_API_STATUS WINAPI change_password( const WCHAR *domainname, const WCHAR *username,
-                                              const WCHAR *oldpassword, const WCHAR *newpassword )
+static NTSTATUS change_password( void *args )
 {
+    struct change_password_params *params = args;
     NET_API_STATUS ret = NERR_Success;
     static char option_silent[] = "-s";
     static char option_user[] = "-U";
@@ -946,18 +901,18 @@ static NET_API_STATUS WINAPI change_password( const WCHAR *domainname, const WCH
     int status;
     char *server = NULL, *user, *argv[7], *old = NULL, *new = NULL;
 
-    if (domainname && !(server = strdup_unixcp( domainname ))) return ERROR_OUTOFMEMORY;
-    if (!(user = strdup_unixcp( username )))
+    if (params->domain && !(server = strdup_unixcp( params->domain ))) return ERROR_OUTOFMEMORY;
+    if (!(user = strdup_unixcp( params->user )))
     {
         ret = ERROR_OUTOFMEMORY;
         goto end;
     }
-    if (!(old = strdup_unixcp( oldpassword )))
+    if (!(old = strdup_unixcp( params->old )))
     {
         ret = ERROR_OUTOFMEMORY;
         goto end;
     }
-    if (!(new = strdup_unixcp( newpassword )))
+    if (!(new = strdup_unixcp( params->new )))
     {
         ret = ERROR_OUTOFMEMORY;
         goto end;
@@ -1016,49 +971,16 @@ static NET_API_STATUS WINAPI change_password( const WCHAR *domainname, const WCH
         ret = NERR_InternalError;
 
 end:
-    RtlFreeHeap( GetProcessHeap(), 0, server );
-    RtlFreeHeap( GetProcessHeap(), 0, user );
-    RtlFreeHeap( GetProcessHeap(), 0, old );
-    RtlFreeHeap( GetProcessHeap(), 0, new );
+    free( server );
+    free( user );
+    free( old );
+    free( new );
     return ret;
 }
 
-#else
-
-static NET_API_STATUS WINAPI server_getinfo( const WCHAR *server, DWORD level, BYTE **buffer )
+const unixlib_entry_t __wine_unix_call_funcs[] =
 {
-    return ERROR_NOT_SUPPORTED;
-}
-
-static NET_API_STATUS WINAPI share_add( const WCHAR *server, DWORD level, const BYTE *info, DWORD *err )
-{
-    return ERROR_NOT_SUPPORTED;
-}
-
-static NET_API_STATUS WINAPI share_del( const WCHAR *server, const WCHAR *share, DWORD reserved )
-{
-    return ERROR_NOT_SUPPORTED;
-}
-
-static NET_API_STATUS WINAPI wksta_getinfo( const WCHAR *server, DWORD level, BYTE **buffer )
-{
-    return ERROR_NOT_SUPPORTED;
-}
-
-static NET_API_STATUS WINAPI change_password( const WCHAR *domainname, const WCHAR *username,
-                                              const WCHAR *oldpassword, const WCHAR *newpassword )
-{
-    return ERROR_NOT_SUPPORTED;
-}
-
-static void libnetapi_init(void)
-{
-}
-
-#endif /* SONAME_LIBNETAPI */
-
-static const struct samba_funcs samba_funcs =
-{
+    netapi_init,
     server_getinfo,
     share_add,
     share_del,
@@ -1066,11 +988,4 @@ static const struct samba_funcs samba_funcs =
     change_password,
 };
 
-NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out )
-{
-    if (reason != DLL_PROCESS_ATTACH) return STATUS_SUCCESS;
-
-    libnetapi_init();
-    *(const struct samba_funcs **)ptr_out = &samba_funcs;
-    return STATUS_SUCCESS;
-}
+#endif /* SONAME_LIBNETAPI */

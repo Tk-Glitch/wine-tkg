@@ -71,14 +71,14 @@ static inline DC *get_dc_obj( HDC hdc )
  */
 static void set_initial_dc_state( DC *dc )
 {
-    dc->wnd_org.x           = 0;
-    dc->wnd_org.y           = 0;
-    dc->wnd_ext.cx          = 1;
-    dc->wnd_ext.cy          = 1;
-    dc->vport_org.x         = 0;
-    dc->vport_org.y         = 0;
-    dc->vport_ext.cx        = 1;
-    dc->vport_ext.cy        = 1;
+    dc->attr->wnd_org.x     = 0;
+    dc->attr->wnd_org.y     = 0;
+    dc->attr->wnd_ext.cx    = 1;
+    dc->attr->wnd_ext.cy    = 1;
+    dc->attr->vport_org.x   = 0;
+    dc->attr->vport_org.y   = 0;
+    dc->attr->vport_ext.cx  = 1;
+    dc->attr->vport_ext.cy  = 1;
     dc->attr->miter_limit   = 10.0f; /* 10.0 is the default, from MSDN */
     dc->attr->layout        = 0;
     dc->font_code_page      = CP_ACP;
@@ -91,11 +91,11 @@ static void set_initial_dc_state( DC *dc )
     dc->attr->brush_color      = RGB( 255, 255, 255 );
     dc->attr->pen_color        = RGB( 0, 0, 0 );
     dc->attr->text_color    = RGB( 0, 0, 0 );
-    dc->brush_org.x         = 0;
-    dc->brush_org.y         = 0;
-    dc->mapperFlags         = 0;
+    dc->attr->brush_org.x   = 0;
+    dc->attr->brush_org.y   = 0;
+    dc->attr->mapper_flags  = 0;
     dc->attr->text_align    = TA_LEFT | TA_TOP | TA_NOUPDATECP;
-    dc->charExtra           = 0;
+    dc->attr->char_extra    = 0;
     dc->breakExtra          = 0;
     dc->breakRem            = 0;
     dc->attr->map_mode      = MM_TEXT;
@@ -147,7 +147,7 @@ DC *alloc_dc_ptr( WORD magic )
         HeapFree( GetProcessHeap(), 0, dc );
         return NULL;
     }
-    dc->nulldrv.hdc = dc->hSelf;
+    dc->attr->hdc = dc->nulldrv.hdc = dc->hSelf;
     set_gdi_client_ptr( dc->hSelf, dc->attr );
 
     if (!font_driver.pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL ))
@@ -281,7 +281,7 @@ void DC_InitDC( DC* dc )
     NtGdiSelectBrush( dc->hSelf, dc->hBrush );
     NtGdiSelectFont( dc->hSelf, dc->hFont );
     update_dc_clipping( dc );
-    SetVirtualResolution( dc->hSelf, 0, 0, 0, 0 );
+    NtGdiSetVirtualResolution( dc->hSelf, 0, 0, 0, 0 );
     physdev = GET_DC_PHYSDEV( dc, pSetBoundsRect );
     physdev->funcs->pSetBoundsRect( physdev, &dc->bounds, dc->bounds_enabled ? DCB_ENABLE : DCB_DISABLE );
 }
@@ -319,17 +319,18 @@ static BOOL DC_InvertXform( const XFORM *xformSrc, XFORM *xformDest )
 static void construct_window_to_viewport(DC *dc, XFORM *xform)
 {
     double scaleX, scaleY;
-    scaleX = (double)dc->vport_ext.cx / (double)dc->wnd_ext.cx;
-    scaleY = (double)dc->vport_ext.cy / (double)dc->wnd_ext.cy;
+    scaleX = (double)dc->attr->vport_ext.cx / (double)dc->attr->wnd_ext.cx;
+    scaleY = (double)dc->attr->vport_ext.cy / (double)dc->attr->wnd_ext.cy;
 
     if (dc->attr->layout & LAYOUT_RTL) scaleX = -scaleX;
     xform->eM11 = scaleX;
     xform->eM12 = 0.0;
     xform->eM21 = 0.0;
     xform->eM22 = scaleY;
-    xform->eDx  = (double)dc->vport_org.x - scaleX * (double)dc->wnd_org.x;
-    xform->eDy  = (double)dc->vport_org.y - scaleY * (double)dc->wnd_org.y;
-    if (dc->attr->layout & LAYOUT_RTL) xform->eDx = dc->vis_rect.right - dc->vis_rect.left - 1 - xform->eDx;
+    xform->eDx  = (double)dc->attr->vport_org.x - scaleX * (double)dc->attr->wnd_org.x;
+    xform->eDy  = (double)dc->attr->vport_org.y - scaleY * (double)dc->attr->wnd_org.y;
+    if (dc->attr->layout & LAYOUT_RTL)
+        xform->eDx = dc->attr->vis_rect.right - dc->attr->vis_rect.left - 1 - xform->eDx;
 }
 
 /***********************************************************************
@@ -409,10 +410,10 @@ BOOL CDECL nulldrv_RestoreDC( PHYSDEV dev, INT level )
     dc->attr->text_color       = dcs->attr->text_color;
     dc->attr->brush_color      = dcs->attr->brush_color;
     dc->attr->pen_color        = dcs->attr->pen_color;
-    dc->brush_org        = dcs->brush_org;
-    dc->mapperFlags      = dcs->mapperFlags;
-    dc->attr->text_align = dcs->attr->text_align;
-    dc->charExtra        = dcs->charExtra;
+    dc->attr->brush_org        = dcs->attr->brush_org;
+    dc->attr->mapper_flags     = dcs->attr->mapper_flags;
+    dc->attr->text_align       = dcs->attr->text_align;
+    dc->attr->char_extra       = dcs->attr->char_extra;
     dc->breakExtra       = dcs->breakExtra;
     dc->breakRem         = dcs->breakRem;
     dc->attr->map_mode         = dcs->attr->map_mode;
@@ -423,12 +424,12 @@ BOOL CDECL nulldrv_RestoreDC( PHYSDEV dev, INT level )
     dc->xformWorld2Vport = dcs->xformWorld2Vport;
     dc->xformVport2World = dcs->xformVport2World;
     dc->vport2WorldValid = dcs->vport2WorldValid;
-    dc->wnd_org          = dcs->wnd_org;
-    dc->wnd_ext          = dcs->wnd_ext;
-    dc->vport_org        = dcs->vport_org;
-    dc->vport_ext        = dcs->vport_ext;
-    dc->virtual_res      = dcs->virtual_res;
-    dc->virtual_size     = dcs->virtual_size;
+    dc->attr->wnd_org          = dcs->attr->wnd_org;
+    dc->attr->wnd_ext          = dcs->attr->wnd_ext;
+    dc->attr->vport_org        = dcs->attr->vport_org;
+    dc->attr->vport_ext  = dcs->attr->vport_ext;
+    dc->attr->virtual_res      = dcs->attr->virtual_res;
+    dc->attr->virtual_size     = dcs->attr->virtual_size;
 
     if (dcs->hClipRgn)
     {
@@ -492,9 +493,9 @@ static BOOL reset_dc_state( HDC hdc )
     NtGdiSelectBrush( hdc, GetStockObject( WHITE_BRUSH ));
     NtGdiSelectFont( hdc, GetStockObject( SYSTEM_FONT ));
     NtGdiSelectPen( hdc, GetStockObject( BLACK_PEN ));
-    SetVirtualResolution( hdc, 0, 0, 0, 0 );
+    NtGdiSetVirtualResolution( hdc, 0, 0, 0, 0 );
     GDISelectPalette( hdc, GetStockObject( DEFAULT_PALETTE ), FALSE );
-    SetBoundsRect( hdc, NULL, DCB_DISABLE );
+    NtGdiSetBoundsRect( hdc, NULL, DCB_DISABLE );
     AbortPath( hdc );
 
     if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
@@ -543,21 +544,12 @@ INT WINAPI NtGdiSaveDC( HDC hdc )
     newdc->hFont            = dc->hFont;
     newdc->hBitmap          = dc->hBitmap;
     newdc->hPalette         = dc->hPalette;
-    newdc->brush_org        = dc->brush_org;
-    newdc->mapperFlags      = dc->mapperFlags;
-    newdc->charExtra        = dc->charExtra;
     newdc->breakExtra       = dc->breakExtra;
     newdc->breakRem         = dc->breakRem;
     newdc->xformWorld2Wnd   = dc->xformWorld2Wnd;
     newdc->xformWorld2Vport = dc->xformWorld2Vport;
     newdc->xformVport2World = dc->xformVport2World;
     newdc->vport2WorldValid = dc->vport2WorldValid;
-    newdc->wnd_org          = dc->wnd_org;
-    newdc->wnd_ext          = dc->wnd_ext;
-    newdc->vport_org        = dc->vport_org;
-    newdc->vport_ext        = dc->vport_ext;
-    newdc->virtual_res      = dc->virtual_res;
-    newdc->virtual_size     = dc->virtual_size;
 
     /* Get/SetDCState() don't change hVisRgn field ("Undoc. Windows" p.559). */
 
@@ -672,10 +664,10 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         dc->display[p - display] = '\0';
     }
 
-    dc->vis_rect.left   = 0;
-    dc->vis_rect.top    = 0;
-    dc->vis_rect.right  = GetDeviceCaps( hdc, DESKTOPHORZRES );
-    dc->vis_rect.bottom = GetDeviceCaps( hdc, DESKTOPVERTRES );
+    dc->attr->vis_rect.left   = 0;
+    dc->attr->vis_rect.top    = 0;
+    dc->attr->vis_rect.right  = GetDeviceCaps( hdc, DESKTOPHORZRES );
+    dc->attr->vis_rect.bottom = GetDeviceCaps( hdc, DESKTOPVERTRES );
 
     DC_InitDC( dc );
     release_dc_ptr( dc );
@@ -709,11 +701,11 @@ HDC WINAPI NtGdiCreateCompatibleDC( HDC hdc )
     TRACE("(%p): returning %p\n", hdc, dc->hSelf );
 
     dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
-    dc->vis_rect.left   = 0;
-    dc->vis_rect.top    = 0;
-    dc->vis_rect.right  = 1;
-    dc->vis_rect.bottom = 1;
-    dc->device_rect = dc->vis_rect;
+    dc->attr->vis_rect.left   = 0;
+    dc->attr->vis_rect.top    = 0;
+    dc->attr->vis_rect.right  = 1;
+    dc->attr->vis_rect.bottom = 1;
+    dc->device_rect = dc->attr->vis_rect;
 
     ret = dc->hSelf;
 
@@ -784,10 +776,10 @@ HDC WINAPI ResetDCW( HDC hdc, const DEVMODEW *devmode )
         if (ret)  /* reset the visible region */
         {
             dc->dirty = 0;
-            dc->vis_rect.left   = 0;
-            dc->vis_rect.top    = 0;
-            dc->vis_rect.right  = GetDeviceCaps( hdc, DESKTOPHORZRES );
-            dc->vis_rect.bottom = GetDeviceCaps( hdc, DESKTOPVERTRES );
+            dc->attr->vis_rect.left   = 0;
+            dc->attr->vis_rect.top    = 0;
+            dc->attr->vis_rect.right  = GetDeviceCaps( hdc, DESKTOPHORZRES );
+            dc->attr->vis_rect.bottom = GetDeviceCaps( hdc, DESKTOPVERTRES );
             if (dc->hVisRgn) DeleteObject( dc->hVisRgn );
             dc->hVisRgn = 0;
             update_dc_clipping( dc );
@@ -859,18 +851,30 @@ COLORREF WINAPI SetTextColor( HDC hdc, COLORREF color )
 
 
 /***********************************************************************
- *           GetDCOrgEx  (GDI32.@)
+ *           NtGdiGetAndSetDCDword    (win32u.@)
  */
-BOOL WINAPI GetDCOrgEx( HDC hDC, LPPOINT lpp )
+BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *prev_value )
 {
-    DC * dc;
+    BOOL ret;
+    DC *dc;
 
-    if (!lpp) return FALSE;
-    if (!(dc = get_dc_ptr( hDC ))) return FALSE;
-    lpp->x = dc->vis_rect.left;
-    lpp->y = dc->vis_rect.top;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
+
+    switch (method)
+    {
+    case NtGdiSetMapMode:
+        *prev_value = dc->attr->map_mode;
+        ret = set_map_mode( dc, value );
+        break;
+
+    default:
+        WARN( "unknown method %u\n", method );
+        ret = FALSE;
+        break;
+    }
+
     release_dc_ptr( dc );
-    return TRUE;
+    return ret;
 }
 
 
@@ -901,21 +905,7 @@ INT WINAPI SetGraphicsMode( HDC hdc, INT mode )
 
 
 /***********************************************************************
- *           GetWorldTransform    (GDI32.@)
- */
-BOOL WINAPI GetWorldTransform( HDC hdc, LPXFORM xform )
-{
-    DC * dc;
-    if (!xform) return FALSE;
-    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
-    *xform = dc->xformWorld2Wnd;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           GetTransform    (GDI32.@)
+ *           NtGdiGetTransform    (win32u.@)
  *
  * Undocumented
  *
@@ -931,7 +921,7 @@ BOOL WINAPI GetWorldTransform( HDC hdc, LPXFORM xform )
  *    xform [O] The xform.
  *
  */
-BOOL WINAPI GetTransform( HDC hdc, DWORD which, XFORM *xform )
+BOOL WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform )
 {
     BOOL ret = TRUE;
     DC *dc = get_dc_ptr( hdc );
@@ -1081,17 +1071,17 @@ WORD WINAPI SetHookFlags( HDC hdc, WORD flags )
 }
 
 /***********************************************************************
- *           GetDeviceGammaRamp    (GDI32.@)
+ *           NtGdiGetDeviceGammaRamp    (win32u.@)
  */
-BOOL WINAPI GetDeviceGammaRamp(HDC hDC, LPVOID ptr)
+BOOL WINAPI NtGdiGetDeviceGammaRamp( HDC hdc, void *ptr )
 {
     BOOL ret = FALSE;
-    DC *dc = get_dc_ptr( hDC );
+    DC *dc = get_dc_ptr( hdc );
 
-    TRACE("%p, %p\n", hDC, ptr);
+    TRACE("%p, %p\n", hdc, ptr);
     if( dc )
     {
-        if (GetObjectType( hDC ) != OBJ_MEMDC)
+        if (GetObjectType( hdc ) != OBJ_MEMDC)
         {
             PHYSDEV physdev = GET_DC_PHYSDEV( dc, pGetDeviceGammaRamp );
             ret = physdev->funcs->pGetDeviceGammaRamp( physdev, ptr );
@@ -1181,17 +1171,17 @@ static BOOL check_gamma_ramps(void *ptr)
 }
 
 /***********************************************************************
- *           SetDeviceGammaRamp    (GDI32.@)
+ *           NtGdiSetDeviceGammaRamp    (win32u.@)
  */
-BOOL WINAPI SetDeviceGammaRamp(HDC hDC, LPVOID ptr)
+BOOL WINAPI NtGdiSetDeviceGammaRamp( HDC hdc, void *ptr )
 {
     BOOL ret = FALSE;
-    DC *dc = get_dc_ptr( hDC );
+    DC *dc = get_dc_ptr( hdc );
 
-    TRACE("%p, %p\n", hDC, ptr);
+    TRACE( "%p, %p\n", hdc, ptr );
     if( dc )
     {
-        if (GetObjectType( hDC ) != OBJ_MEMDC)
+        if (GetObjectType( hdc ) != OBJ_MEMDC)
         {
             PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetDeviceGammaRamp );
 
@@ -1206,9 +1196,9 @@ BOOL WINAPI SetDeviceGammaRamp(HDC hDC, LPVOID ptr)
 
 
 /***********************************************************************
- *           GetBoundsRect    (GDI32.@)
+ *           NtGdiGetBoundsRect    (win32u.@)
  */
-UINT WINAPI GetBoundsRect(HDC hdc, LPRECT rect, UINT flags)
+UINT WINAPI NtGdiGetBoundsRect( HDC hdc, RECT *rect, UINT flags )
 {
     PHYSDEV physdev;
     RECT device_rect;
@@ -1238,8 +1228,8 @@ UINT WINAPI GetBoundsRect(HDC hdc, LPRECT rect, UINT flags)
             *rect = dc->bounds;
             rect->left   = max( rect->left, 0 );
             rect->top    = max( rect->top, 0 );
-            rect->right  = min( rect->right, dc->vis_rect.right - dc->vis_rect.left );
-            rect->bottom = min( rect->bottom, dc->vis_rect.bottom - dc->vis_rect.top );
+            rect->right  = min( rect->right, dc->attr->vis_rect.right - dc->attr->vis_rect.left );
+            rect->bottom = min( rect->bottom, dc->attr->vis_rect.bottom - dc->attr->vis_rect.top );
             ret = DCB_SET;
         }
         dp_to_lp( dc, (POINT *)rect, 2 );
@@ -1253,9 +1243,9 @@ UINT WINAPI GetBoundsRect(HDC hdc, LPRECT rect, UINT flags)
 
 
 /***********************************************************************
- *           SetBoundsRect    (GDI32.@)
+ *           NtGdiSetBoundsRect    (win32u.@)
  */
-UINT WINAPI SetBoundsRect(HDC hdc, const RECT* rect, UINT flags)
+UINT WINAPI NtGdiSetBoundsRect( HDC hdc, const RECT *rect, UINT flags )
 {
     PHYSDEV physdev;
     UINT ret;
@@ -1294,91 +1284,30 @@ UINT WINAPI SetBoundsRect(HDC hdc, const RECT* rect, UINT flags)
 
 
 /***********************************************************************
- *		GetBrushOrgEx (GDI32.@)
- */
-BOOL WINAPI GetBrushOrgEx( HDC hdc, LPPOINT pt )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *pt = dc->brush_org;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		GetViewportExtEx (GDI32.@)
- */
-BOOL WINAPI GetViewportExtEx( HDC hdc, LPSIZE size )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *size = dc->vport_ext;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		GetViewportOrgEx (GDI32.@)
- */
-BOOL WINAPI GetViewportOrgEx( HDC hdc, LPPOINT pt )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *pt = dc->vport_org;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		GetWindowExtEx (GDI32.@)
- */
-BOOL WINAPI GetWindowExtEx( HDC hdc, LPSIZE size )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *size = dc->wnd_ext;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		GetWindowOrgEx (GDI32.@)
- */
-BOOL WINAPI GetWindowOrgEx( HDC hdc, LPPOINT pt )
-{
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return FALSE;
-    *pt = dc->wnd_org;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           SetLayout    (GDI32.@)
+ *           NtGdiSetLayout    (win32u.@)
  *
  * Sets left->right or right->left text layout flags of a dc.
  *
  */
-DWORD WINAPI SetLayout(HDC hdc, DWORD layout)
+DWORD WINAPI NtGdiSetLayout( HDC hdc, LONG wox, DWORD layout )
 {
-    DWORD oldlayout = GDI_ERROR;
+    DWORD old_layout = GDI_ERROR;
+    DC *dc;
 
-    DC * dc = get_dc_ptr( hdc );
-    if (dc)
+    if ((dc = get_dc_ptr( hdc )))
     {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetLayout );
-        oldlayout = physdev->funcs->pSetLayout( physdev, layout );
-        release_dc_ptr( dc );
+        old_layout = dc->attr->layout;
+        dc->attr->layout = layout;
+        if (layout != old_layout)
+        {
+            if (layout & LAYOUT_RTL) dc->attr->map_mode = MM_ANISOTROPIC;
+            DC_UpdateXforms( dc );
+        }
     }
 
-    TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, oldlayout, layout);
+    TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, old_layout, layout);
 
-    return oldlayout;
+    return old_layout;
 }
 
 /***********************************************************************

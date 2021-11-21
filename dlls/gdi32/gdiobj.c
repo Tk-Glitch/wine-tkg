@@ -613,6 +613,16 @@ static void set_gdi_shared(void)
     NtCurrentTeb()->Peb->GdiSharedHandleTable = &gdi_shared;
 }
 
+static HGDIOBJ make_stock_object( HGDIOBJ obj )
+{
+    GDI_HANDLE_ENTRY *entry;
+
+    if (!(entry = handle_entry( obj ))) return 0;
+    entry_obj( entry )->system = TRUE;
+    entry->StockFlag = 1;
+    return entry_to_handle( entry );
+}
+
 /***********************************************************************
  *           DllMain
  *
@@ -668,8 +678,8 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
     /* clear the NOSYSTEM bit on all stock objects*/
     for (i = 0; i < NB_STOCK_OBJECTS; i++)
     {
-        if (stock_objects[i]) __wine_make_gdi_object_system( stock_objects[i], TRUE );
-        if (scaled_stock_objects[i]) __wine_make_gdi_object_system( scaled_stock_objects[i], TRUE );
+        stock_objects[i] = make_stock_object( stock_objects[i] );
+        scaled_stock_objects[i] = make_stock_object( scaled_stock_objects[i] );
     }
     return TRUE;
 }
@@ -755,7 +765,6 @@ HGDIOBJ alloc_gdi_handle( struct gdi_obj_header *obj, WORD type, const struct gd
         return 0;
     }
     obj->funcs    = funcs;
-    obj->hdcs     = NULL;
     obj->selcount = 0;
     obj->system   = 0;
     obj->deleted  = 0;
@@ -897,7 +906,6 @@ void GDI_CheckNotLock(void)
 BOOL WINAPI NtGdiDeleteObjectApp( HGDIOBJ obj )
 {
     GDI_HANDLE_ENTRY *entry;
-    struct hdc_list *hdcs_head;
     const struct gdi_obj_funcs *funcs = NULL;
     struct gdi_obj_header *header;
 
@@ -918,9 +926,6 @@ BOOL WINAPI NtGdiDeleteObjectApp( HGDIOBJ obj )
 
     obj = entry_to_handle( entry );  /* make it a full handle */
 
-    hdcs_head = header->hdcs;
-    header->hdcs = NULL;
-
     if (header->selcount)
     {
         TRACE("delayed for %p because object in use, count %u\n", obj, header->selcount );
@@ -929,22 +934,6 @@ BOOL WINAPI NtGdiDeleteObjectApp( HGDIOBJ obj )
     else funcs = header->funcs;
 
     LeaveCriticalSection( &gdi_section );
-
-    while (hdcs_head)
-    {
-        struct hdc_list *next = hdcs_head->next;
-        DC *dc = get_dc_ptr(hdcs_head->hdc);
-
-        TRACE("hdc %p has interest in %p\n", hdcs_head->hdc, obj);
-        if(dc)
-        {
-            PHYSDEV physdev = GET_DC_PHYSDEV( dc, pDeleteObject );
-            physdev->funcs->pDeleteObject( physdev, obj );
-            release_dc_ptr( dc );
-        }
-        HeapFree(GetProcessHeap(), 0, hdcs_head);
-        hdcs_head = next;
-    }
 
     TRACE("%p\n", obj );
 
@@ -977,62 +966,6 @@ BOOL WINAPI NtGdiDeleteClientObj( HGDIOBJ handle )
     if (!(obj = free_gdi_handle( handle ))) return FALSE;
     HeapFree( GetProcessHeap(), 0, obj );
     return TRUE;
-}
-
-/***********************************************************************
- *           GDI_hdc_using_object
- *
- * Call this if the dc requires DeleteObject notification
- */
-void GDI_hdc_using_object(HGDIOBJ obj, HDC hdc)
-{
-    GDI_HANDLE_ENTRY *entry;
-    struct hdc_list *phdc;
-
-    TRACE("obj %p hdc %p\n", obj, hdc);
-
-    EnterCriticalSection( &gdi_section );
-    if ((entry = handle_entry( obj )) && !entry_obj( entry )->system)
-    {
-        struct gdi_obj_header *header = entry_obj( entry );
-        for (phdc = header->hdcs; phdc; phdc = phdc->next)
-            if (phdc->hdc == hdc) break;
-
-        if (!phdc)
-        {
-            phdc = HeapAlloc(GetProcessHeap(), 0, sizeof(*phdc));
-            phdc->hdc = hdc;
-            phdc->next = header->hdcs;
-            header->hdcs = phdc;
-        }
-    }
-    LeaveCriticalSection( &gdi_section );
-}
-
-/***********************************************************************
- *           GDI_hdc_not_using_object
- *
- */
-void GDI_hdc_not_using_object(HGDIOBJ obj, HDC hdc)
-{
-    GDI_HANDLE_ENTRY *entry;
-    struct hdc_list **pphdc;
-
-    TRACE("obj %p hdc %p\n", obj, hdc);
-
-    EnterCriticalSection( &gdi_section );
-    if ((entry = handle_entry( obj )) && !entry_obj( entry )->system)
-    {
-        for (pphdc = &entry_obj( entry )->hdcs; *pphdc; pphdc = &(*pphdc)->next)
-            if ((*pphdc)->hdc == hdc)
-            {
-                struct hdc_list *phdc = *pphdc;
-                *pphdc = phdc->next;
-                HeapFree(GetProcessHeap(), 0, phdc);
-                break;
-            }
-    }
-    LeaveCriticalSection( &gdi_section );
 }
 
 /***********************************************************************

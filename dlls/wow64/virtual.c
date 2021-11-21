@@ -328,7 +328,7 @@ NTSTATUS WINAPI wow64_NtQueryVirtualMemory( UINT *args )
         res_len = sizeof(MEMORY_BASIC_INFORMATION32);
         break;
 
-    case MemorySectionName:  /* MEMORY_SECTION_NAME */
+    case MemoryMappedFilenameInformation:  /* MEMORY_SECTION_NAME */
     {
         MEMORY_SECTION_NAME *info;
         MEMORY_SECTION_NAME32 *info32 = ptr;
@@ -362,6 +362,14 @@ NTSTATUS WINAPI wow64_NtQueryVirtualMemory( UINT *args )
         }
         break;
     }
+
+    case MemoryWineImageInitFuncs:
+    case MemoryWineUnixWow64Funcs:
+        return STATUS_INVALID_INFO_CLASS;
+
+    case MemoryWineUnixFuncs:
+        status = NtQueryVirtualMemory( handle, addr, MemoryWineUnixWow64Funcs, ptr, len, &res_len );
+        break;
 
     default:
         FIXME( "unsupported class %u\n", class );
@@ -402,6 +410,24 @@ NTSTATUS WINAPI wow64_NtResetWriteWatch( UINT *args )
     SIZE_T size = get_ulong( &args );
 
     return NtResetWriteWatch( process, base, size );
+}
+
+
+/**********************************************************************
+ *           wow64_NtSetLdtEntries
+ */
+NTSTATUS WINAPI wow64_NtSetLdtEntries( UINT *args )
+{
+    ULONG sel1 = get_ulong( &args );
+    ULONG entry1_low = get_ulong( &args );
+    ULONG entry1_high = get_ulong( &args );
+    ULONG sel2 = get_ulong( &args );
+    ULONG entry2_low = get_ulong( &args );
+    ULONG entry2_high = get_ulong( &args );
+
+    FIXME( "%04x %08x %08x %04x %08x %08x: stub\n",
+           sel1, entry1_low, entry1_high, sel2, entry2_low, entry2_high );
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 

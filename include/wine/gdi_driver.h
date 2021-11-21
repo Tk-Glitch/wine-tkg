@@ -89,11 +89,9 @@ struct gdi_dc_funcs
     BOOL     (CDECL *pEndPath)(PHYSDEV);
     BOOL     (CDECL *pEnumFonts)(PHYSDEV,LPLOGFONTW,FONTENUMPROCW,LPARAM);
     INT      (CDECL *pEnumICMProfiles)(PHYSDEV,ICMENUMPROCW,LPARAM);
-    INT      (CDECL *pExcludeClipRect)(PHYSDEV,INT,INT,INT,INT);
     INT      (CDECL *pExtDeviceMode)(LPSTR,HWND,LPDEVMODEA,LPSTR,LPSTR,LPDEVMODEA,LPSTR,DWORD);
     INT      (CDECL *pExtEscape)(PHYSDEV,INT,INT,LPCVOID,INT,LPVOID);
     BOOL     (CDECL *pExtFloodFill)(PHYSDEV,INT,INT,COLORREF,UINT);
-    INT      (CDECL *pExtSelectClipRgn)(PHYSDEV,HRGN,INT);
     BOOL     (CDECL *pExtTextOut)(PHYSDEV,INT,INT,UINT,const RECT*,LPCWSTR,UINT,const INT*);
     BOOL     (CDECL *pFillPath)(PHYSDEV);
     BOOL     (CDECL *pFillRgn)(PHYSDEV,HRGN,HBRUSH);
@@ -126,14 +124,9 @@ struct gdi_dc_funcs
     INT      (CDECL *pGetTextFace)(PHYSDEV,INT,LPWSTR);
     BOOL     (CDECL *pGetTextMetrics)(PHYSDEV,TEXTMETRICW*);
     BOOL     (CDECL *pGradientFill)(PHYSDEV,TRIVERTEX*,ULONG,void*,ULONG,ULONG);
-    INT      (CDECL *pIntersectClipRect)(PHYSDEV,INT,INT,INT,INT);
     BOOL     (CDECL *pInvertRgn)(PHYSDEV,HRGN);
     BOOL     (CDECL *pLineTo)(PHYSDEV,INT,INT);
-    BOOL     (CDECL *pModifyWorldTransform)(PHYSDEV,const XFORM*,DWORD);
     BOOL     (CDECL *pMoveTo)(PHYSDEV,INT,INT);
-    INT      (CDECL *pOffsetClipRgn)(PHYSDEV,INT,INT);
-    BOOL     (CDECL *pOffsetViewportOrgEx)(PHYSDEV,INT,INT,POINT*);
-    BOOL     (CDECL *pOffsetWindowOrgEx)(PHYSDEV,INT,INT,POINT*);
     BOOL     (CDECL *pPaintRgn)(PHYSDEV,HRGN);
     BOOL     (CDECL *pPatBlt)(PHYSDEV,struct bitblt_coords*,DWORD);
     BOOL     (CDECL *pPie)(PHYSDEV,INT,INT,INT,INT,INT,INT,INT,INT);
@@ -150,13 +143,10 @@ struct gdi_dc_funcs
     HDC      (CDECL *pResetDC)(PHYSDEV,const DEVMODEW*);
     BOOL     (CDECL *pRestoreDC)(PHYSDEV,INT);
     BOOL     (CDECL *pRoundRect)(PHYSDEV,INT,INT,INT,INT,INT,INT);
-    BOOL     (CDECL *pScaleViewportExtEx)(PHYSDEV,INT,INT,INT,INT,SIZE*);
-    BOOL     (CDECL *pScaleWindowExtEx)(PHYSDEV,INT,INT,INT,INT,SIZE*);
     HBITMAP  (CDECL *pSelectBitmap)(PHYSDEV,HBITMAP);
     HBRUSH   (CDECL *pSelectBrush)(PHYSDEV,HBRUSH,const struct brush_pattern*);
     BOOL     (CDECL *pSelectClipPath)(PHYSDEV,INT);
     HFONT    (CDECL *pSelectFont)(PHYSDEV,HFONT,UINT*);
-    HPALETTE (CDECL *pSelectPalette)(PHYSDEV,HPALETTE,BOOL);
     HPEN     (CDECL *pSelectPen)(PHYSDEV,HPEN,const struct brush_pattern*);
     COLORREF (CDECL *pSetBkColor)(PHYSDEV,COLORREF);
     UINT     (CDECL *pSetBoundsRect)(PHYSDEV,RECT*,UINT);
@@ -165,18 +155,8 @@ struct gdi_dc_funcs
     INT      (CDECL *pSetDIBitsToDevice)(PHYSDEV,INT,INT,DWORD,DWORD,INT,INT,UINT,UINT,LPCVOID,BITMAPINFO*,UINT);
     VOID     (CDECL *pSetDeviceClipping)(PHYSDEV,HRGN);
     BOOL     (CDECL *pSetDeviceGammaRamp)(PHYSDEV,LPVOID);
-    DWORD    (CDECL *pSetLayout)(PHYSDEV,DWORD);
-    INT      (CDECL *pSetMapMode)(PHYSDEV,INT);
-    DWORD    (CDECL *pSetMapperFlags)(PHYSDEV,DWORD);
     COLORREF (CDECL *pSetPixel)(PHYSDEV,INT,INT,COLORREF);
-    INT      (CDECL *pSetTextCharacterExtra)(PHYSDEV,INT);
     COLORREF (CDECL *pSetTextColor)(PHYSDEV,COLORREF);
-    BOOL     (CDECL *pSetTextJustification)(PHYSDEV,INT,INT);
-    BOOL     (CDECL *pSetViewportExtEx)(PHYSDEV,INT,INT,SIZE*);
-    BOOL     (CDECL *pSetViewportOrgEx)(PHYSDEV,INT,INT,POINT*);
-    BOOL     (CDECL *pSetWindowExtEx)(PHYSDEV,INT,INT,SIZE*);
-    BOOL     (CDECL *pSetWindowOrgEx)(PHYSDEV,INT,INT,POINT*);
-    BOOL     (CDECL *pSetWorldTransform)(PHYSDEV,const XFORM*);
     INT      (CDECL *pStartDoc)(PHYSDEV,const DOCINFOW*);
     INT      (CDECL *pStartPage)(PHYSDEV);
     BOOL     (CDECL *pStretchBlt)(PHYSDEV,struct bitblt_coords*,PHYSDEV,struct bitblt_coords*,DWORD);
@@ -195,7 +175,7 @@ struct gdi_dc_funcs
 };
 
 /* increment this when you change the DC function table */
-#define WINE_GDI_DRIVER_VERSION 55
+#define WINE_GDI_DRIVER_VERSION 60
 
 #define GDI_PRIORITY_NULL_DRV        0  /* null driver */
 #define GDI_PRIORITY_FONT_DRV      100  /* any font driver */

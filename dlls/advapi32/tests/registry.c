@@ -99,6 +99,11 @@ static void InitFunctionPtrs(void)
     pNtUnloadKey = (void *)GetProcAddress( hntdll, "NtUnloadKey" );
 }
 
+static BOOL is_special_key(HKEY key)
+{
+    return !!((ULONG_PTR)key & 0x80000000);
+}
+
 /* delete key and all its subkeys */
 static DWORD delete_key( HKEY hkey )
 {
@@ -3291,38 +3296,6 @@ static void test_classesroot_mask(void)
     RegCloseKey( hkey );
 }
 
-static void test_perflib_key(void)
-{
-    DWORD size;
-    LONG ret;
-    HKEY key;
-
-    ret = RegOpenKeyA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Perflib\\009", &key);
-    ok(ret == ERROR_SUCCESS, "RegOpenKeyA failed with error %u\n", ret);
-
-    ret = RegQueryValueExA(key, "Counter", NULL, NULL, NULL, &size);
-    if (ret != ERROR_SUCCESS)
-    {
-        skip("Perflib\\009\\Counter does not exist, skipping perflib test\n");
-        goto done;
-    }
-    ok(ret == ERROR_SUCCESS, "RegQueryValueExA failed with error %u\n", ret);
-
-    /* Windows only compares the first few characters of the value name.
-     * On Windows XP / 2003, it is sufficient to use "Cou", newer versions
-     * require a longer substring. */
-
-    ret = RegQueryValueExA(key, "Counters", NULL, NULL, NULL, &size);
-    ok(ret == ERROR_SUCCESS, "RegQueryValueExA failed with error %u\n", ret);
-    ret = RegQueryValueExA(key, "Counter2", NULL, NULL, NULL, &size);
-    todo_wine ok(ret == ERROR_SUCCESS, "RegQueryValueExA failed with error %u\n", ret);
-    ret = RegQueryValueExA(key, "CounterWine", NULL, NULL, NULL, &size);
-    todo_wine ok(ret == ERROR_SUCCESS, "RegQueryValueExA failed with error %u\n", ret);
-
-done:
-    RegCloseKey(key);
-}
-
 static void test_deleted_key(void)
 {
     HKEY hkey, hkey2;
@@ -3634,218 +3607,457 @@ static void test_RegNotifyChangeKeyValue(void)
     CloseHandle(event);
 }
 
-#define cmp_li(a, b, c) cmp_li_real(a, b, c, __LINE__)
-static void cmp_li_real(LARGE_INTEGER *l1, LARGE_INTEGER *l2, LONGLONG slack, int line)
+static const char *find_counter_value(const char *text, const char *index)
 {
-    LONGLONG diff = l2->QuadPart - l1->QuadPart;
-    if (diff < 0) diff = -diff;
-    ok_(__FILE__, line)(diff <= slack, "values don't match: %s/%s\n",
-                        wine_dbgstr_longlong(l1->QuadPart), wine_dbgstr_longlong(l2->QuadPart));
+    const char *p = text;
+
+    while (*p)
+    {
+        if (!strcmp(p, index))
+            return p + strlen(p) + 1;
+
+        p += strlen(p) + 1;
+        p += strlen(p) + 1;
+    }
+
+    return NULL;
 }
 
-static void test_RegQueryValueExPerformanceData(void)
+static void test_counter_values(const char *text, HKEY key)
 {
-    static const char * const names[] = { NULL, "", "Global", "2", "invalid counter name" };
-    DWORD cbData, len, i, type;
-    BYTE *value;
-    DWORD dwret;
-    LONG limit = 6;
-    PERF_DATA_BLOCK *pdb;
-    HKEY hkey;
-    BYTE buf[256 + sizeof(PERF_DATA_BLOCK)];
+    const char *p = text;
+    const char *name;
 
-    /* Test with data == NULL */
-    dwret = RegQueryValueExA( HKEY_PERFORMANCE_DATA, "Global", NULL, NULL, NULL, &cbData );
-    ok( dwret == ERROR_MORE_DATA, "expected ERROR_MORE_DATA, got %d\n", dwret );
+    ok(!strcmp(p, "1"), "got first index %s\n", debugstr_a(p));
+    p += strlen(p) + 1;
+    ok(!strcmp(p, "1847"), "got first name %s\n", debugstr_a(p));
+    p += strlen(p) + 1;
 
-    dwret = RegQueryValueExW( HKEY_PERFORMANCE_DATA, L"Global", NULL, NULL, NULL, &cbData );
-    ok( dwret == ERROR_MORE_DATA, "expected ERROR_MORE_DATA, got %d\n", dwret );
-
-    /* Test ERROR_MORE_DATA, start with small buffer */
-    len = 10;
-    value = HeapAlloc(GetProcessHeap(), 0, len);
-    cbData = len;
-    type = 0xdeadbeef;
-    dwret = RegQueryValueExA( HKEY_PERFORMANCE_DATA, "Global", NULL, &type, value, &cbData );
-    ok( dwret == ERROR_MORE_DATA, "expected ERROR_MORE_DATA, got %d\n", dwret );
-    ok(type == REG_BINARY, "got %u\n", type);
-    while( dwret == ERROR_MORE_DATA && limit)
+    while (*p)
     {
-        len = len * 10;
-        value = HeapReAlloc( GetProcessHeap(), 0, value, len );
-        cbData = len;
-        type = 0xdeadbeef;
-        dwret = RegQueryValueExA( HKEY_PERFORMANCE_DATA, "Global", NULL, &type, value, &cbData );
-        limit--;
-    }
-    ok(limit > 0, "too many times ERROR_MORE_DATA returned\n");
+        unsigned int index = atoi(p);
 
-    ok(dwret == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %d\n", dwret);
-    ok(type == REG_BINARY, "got %u\n", type);
+        ok(index > 0, "expected nonzero index\n");
 
-    /* Check returned data */
-    if (dwret == ERROR_SUCCESS)
-    {
-        ok(len >= sizeof(PERF_DATA_BLOCK), "got size %d\n", len);
-        if (len >= sizeof(PERF_DATA_BLOCK)) {
-            pdb = (PERF_DATA_BLOCK*) value;
-            ok(pdb->Signature[0] == 'P', "expected Signature[0] = 'P', got 0x%x\n", pdb->Signature[0]);
-            ok(pdb->Signature[1] == 'E', "expected Signature[1] = 'E', got 0x%x\n", pdb->Signature[1]);
-            ok(pdb->Signature[2] == 'R', "expected Signature[2] = 'R', got 0x%x\n", pdb->Signature[2]);
-            ok(pdb->Signature[3] == 'F', "expected Signature[3] = 'F', got 0x%x\n", pdb->Signature[3]);
-            /* TODO: check other field */
-        }
+        p += strlen(p) + 1;
+        ok(*p, "name missing for %u\n", index);
+        p += strlen(p) + 1;
     }
 
-    HeapFree(GetProcessHeap(), 0, value);
+    name = find_counter_value(text, "1846");
+    ok(name != NULL, "did not find name\n");
+    if (key != HKEY_PERFORMANCE_NLSTEXT)
+        ok(!strcmp(name, "End Marker"), "got name %s\n", debugstr_a(name));
+}
 
-    for (i = 0; i < ARRAY_SIZE(names); i++)
+static void test_help_values(const char *text, HKEY key)
+{
+    const char *p = text;
+    const char *name;
+
+    while (*p)
     {
-        cbData = 0xdeadbeef;
-        dwret = RegQueryValueExA(HKEY_PERFORMANCE_DATA, names[i], NULL, NULL, NULL, &cbData);
-        ok(dwret == ERROR_MORE_DATA, "%u/%s: got %u\n", i, names[i], dwret);
-        ok(cbData == 0, "got %u\n", cbData);
+        unsigned int index = atoi(p);
 
-        cbData = 0;
-        dwret = RegQueryValueExA(HKEY_PERFORMANCE_DATA, names[i], NULL, NULL, NULL, &cbData);
-        ok(dwret == ERROR_MORE_DATA, "%u/%s: got %u\n", i, names[i], dwret);
-        ok(cbData == 0, "got %u\n", cbData);
+        ok(index > 0, "expected nonzero index\n");
 
-        cbData = 0xdeadbeef;
-        dwret = RegQueryValueExA(HKEY_PERFORMANCE_TEXT, names[i], NULL, NULL, NULL, &cbData);
-todo_wine
-        ok(dwret == ERROR_MORE_DATA, "%u/%s: got %u\n", i, names[i], dwret);
-        ok(cbData == 0, "got %u\n", cbData);
-
-        cbData = 0;
-        dwret = RegQueryValueExA(HKEY_PERFORMANCE_TEXT, names[i], NULL, NULL, NULL, &cbData);
-todo_wine
-        ok(dwret == ERROR_MORE_DATA, "%u/%s: got %u\n", i, names[i], dwret);
-        ok(cbData == 0, "got %u\n", cbData);
-
-        cbData = 0xdeadbeef;
-        dwret = RegQueryValueExA(HKEY_PERFORMANCE_NLSTEXT, names[i], NULL, NULL, NULL, &cbData);
-todo_wine
-        ok(dwret == ERROR_MORE_DATA, "%u/%s: got %u\n", i, names[i], dwret);
-        ok(cbData == 0, "got %u\n", cbData);
-
-        cbData = 0;
-        dwret = RegQueryValueExA(HKEY_PERFORMANCE_NLSTEXT, names[i], NULL, NULL, NULL, &cbData);
-todo_wine
-        ok(dwret == ERROR_MORE_DATA, "%u/%s: got %u\n", i, names[i], dwret);
-        ok(cbData == 0, "got %u\n", cbData);
+        p += strlen(p) + 1;
+        p += strlen(p) + 1;
     }
 
-    memset(buf, 0x77, sizeof(buf));
-    type = 0xdeadbeef;
-    cbData = sizeof(buf);
-    dwret = RegQueryValueExA(HKEY_PERFORMANCE_DATA, "invalid counter name", NULL, &type, buf, &cbData);
-    ok(dwret == ERROR_SUCCESS, "got %u\n", dwret);
-    ok(type == REG_BINARY, "got %u\n", type);
-    if (dwret == ERROR_SUCCESS)
+    name = find_counter_value(text, "1847");
+    ok(name != NULL, "did not find name\n");
+    if (key != HKEY_PERFORMANCE_NLSTEXT)
+        ok(!strcmp(name, "End Marker"), "got name %s\n", debugstr_a(name));
+}
+
+static void test_performance_keys(void)
+{
+    static const HKEY keys[] = {HKEY_PERFORMANCE_DATA, HKEY_PERFORMANCE_TEXT, HKEY_PERFORMANCE_NLSTEXT};
+    static const char *const names[] = {NULL, "", "Global", "2", "invalid counter name", "System"};
+    DWORD size, type, sysname_len, expect_size, key_count, value_count;
+    LARGE_INTEGER perftime1, perftime2, systime1, systime2, freq;
+    WCHAR sysname[MAX_COMPUTERNAME_LENGTH + 1];
+    unsigned int buffer_size = 1024 * 1024;
+    void *buffer, *bufferW;
+    PERF_DATA_BLOCK *data;
+    union
     {
-        SYSTEMTIME st;
-        WCHAR sysname[MAX_COMPUTERNAME_LENGTH + 1];
-        DWORD sysname_len;
-        LARGE_INTEGER counter, freq, ftime;
+        FILETIME f;
+        LONGLONG l;
+    } file_time;
+    unsigned int i, j;
+    HKEY key;
+    LONG ret;
 
-        GetSystemTime(&st);
-        GetSystemTimeAsFileTime((FILETIME *)&ftime);
-        QueryPerformanceCounter(&counter);
-        QueryPerformanceFrequency(&freq);
+    buffer = malloc(buffer_size);
 
-        sysname_len = MAX_COMPUTERNAME_LENGTH + 1;
-        GetComputerNameW(sysname, &sysname_len);
+    sysname_len = ARRAY_SIZE(sysname);
+    GetComputerNameW(sysname, &sysname_len);
 
-        pdb = (PERF_DATA_BLOCK *)buf;
-        ok(pdb->Signature[0] == 'P', "got '%c'\n", pdb->Signature[0]);
-        ok(pdb->Signature[1] == 'E', "got '%c'\n", pdb->Signature[1]);
-        ok(pdb->Signature[2] == 'R', "got '%c'\n", pdb->Signature[2]);
-        ok(pdb->Signature[3] == 'F', "got '%c'\n", pdb->Signature[3]);
+    for (i = 0; i < ARRAY_SIZE(keys); ++i)
+    {
+        winetest_push_context("key %p", keys[i]);
 
-        ok(pdb->LittleEndian == 1, "got %u\n", pdb->LittleEndian);
-        ok(pdb->Version == 1, "got %u\n", pdb->Version);
-        ok(pdb->Revision == 1, "got %u\n", pdb->Revision);
-        len = (sizeof(*pdb) + pdb->SystemNameLength + 7) & ~7;
-        ok(pdb->TotalByteLength == len, "got %u vs %u\n", pdb->TotalByteLength, len);
-        ok(pdb->HeaderLength == pdb->TotalByteLength, "got %u\n", pdb->HeaderLength);
-        ok(pdb->NumObjectTypes == 0, "got %u\n", pdb->NumObjectTypes);
-todo_wine
-        ok(pdb->DefaultObject != 0, "got %u\n", pdb->DefaultObject);
-        ok(pdb->SystemTime.wYear == st.wYear, "got %u\n", pdb->SystemTime.wYear);
-        ok(pdb->SystemTime.wMonth == st.wMonth, "got %u\n", pdb->SystemTime.wMonth);
-        ok(pdb->SystemTime.wDayOfWeek == st.wDayOfWeek, "got %u\n", pdb->SystemTime.wDayOfWeek);
-        ok(pdb->SystemTime.wDay == st.wDay, "got %u\n", pdb->SystemTime.wDay);
-        if (U(pdb->PerfTime).LowPart != 0x77777777) /* TestBot is broken */
-            cmp_li(&pdb->PerfTime, &counter, freq.QuadPart);
-        if (U(pdb->PerfFreq).LowPart != 0x77777777) /* TestBot is broken */
-            cmp_li(&pdb->PerfFreq, &freq, 0);
-        cmp_li(&pdb->PerfTime100nSec, &ftime, 200000); /* TestBot needs huge slack value */
-        ok(pdb->SystemNameLength == (sysname_len + 1) * sizeof(WCHAR), "expected %u, got %u\n",
-           (sysname_len + 1) * 2 /*sizeof(WCHAR)*/, pdb->SystemNameLength);
-        ok(pdb->SystemNameOffset == sizeof(*pdb), "got %u\n", pdb->SystemNameOffset);
-        ok(!lstrcmpW(sysname, (LPCWSTR)(pdb + 1)), "%s != %s\n",
-           wine_dbgstr_w(sysname), wine_dbgstr_w((LPCWSTR)(pdb + 1)));
-
-        len = pdb->TotalByteLength - (sizeof(*pdb) + pdb->SystemNameLength);
-        if (len)
+        for (j = 0; j < ARRAY_SIZE(names); ++j)
         {
-            BYTE remainder[8], *p;
+            winetest_push_context("value %s", debugstr_a(names[j]));
 
-            memset(remainder, 0x77, sizeof(remainder));
-            p = buf + sizeof(*pdb) + pdb->SystemNameLength;
-            ok(!memcmp(p, remainder, len), "remainder: %02x,%02x...\n", p[0], p[1]);
+            QueryPerformanceFrequency(&freq);
+
+            size = 0;
+            ret = RegQueryValueExA(keys[i], names[j], NULL, NULL, NULL, &size);
+            ok(ret == ERROR_MORE_DATA, "got %u\n", ret);
+            ok(!size, "got size %u\n", size);
+
+            size = 10;
+            ret = RegQueryValueExA(keys[i], names[j], NULL, NULL, buffer, &size);
+            ok(ret == ERROR_MORE_DATA, "got %u\n", ret);
+            todo_wine
+                ok(size == 10, "got size %u\n", size);
+
+            size = buffer_size;
+            ret = RegQueryValueExA(keys[i], names[j], NULL, NULL, NULL, &size);
+            ok(ret == ERROR_MORE_DATA, "got %u\n", ret);
+
+            QueryPerformanceCounter(&perftime1);
+            NtQuerySystemTime(&systime1);
+
+            size = buffer_size;
+            type = 0xdeadbeef;
+            ret = RegQueryValueExA(keys[i], names[j], NULL, &type, buffer, &size);
+            ok(!ret, "got %u\n", ret);
+            ok(type == REG_BINARY, "got type %u\n", type);
+            ok(size >= sizeof(PERF_DATA_BLOCK) && size < buffer_size, "got size %u\n", size);
+
+            QueryPerformanceCounter(&perftime2);
+            NtQuerySystemTime(&systime2);
+
+            data = buffer;
+            ok(!wcsncmp(data->Signature, L"PERF", 4), "got signature %s\n",
+                    debugstr_wn(data->Signature, 4));
+            ok(data->LittleEndian == 1, "got endianness %u\n", data->LittleEndian);
+            ok(data->Version == 1, "got version %u\n", data->Version);
+            ok(data->Revision == 1, "got version %u\n", data->Revision);
+            ok(data->TotalByteLength == size, "expected size %u, got %u\n",
+                    size, data->TotalByteLength);
+
+            expect_size = sizeof(PERF_DATA_BLOCK) + data->SystemNameLength;
+            expect_size = (expect_size + 7) & ~7;
+
+            ok(data->HeaderLength == expect_size, "expected header size %u, got %u\n",
+                    expect_size, data->HeaderLength);
+            /* todo: test objects... */
+            todo_wine ok(data->DefaultObject == 238, "got default object %u\n", data->DefaultObject);
+
+            ok(data->PerfTime.QuadPart >= perftime1.QuadPart
+                    && data->PerfTime.QuadPart <= perftime2.QuadPart,
+                    "got times %I64u, %I64u, %I64u\n",
+                    perftime1.QuadPart, data->PerfTime.QuadPart, perftime2.QuadPart);
+            ok(data->PerfFreq.QuadPart == freq.QuadPart, "expected frequency %I64u, got %I64u\n",
+                    freq.QuadPart, data->PerfFreq.QuadPart);
+            ok(data->PerfTime100nSec.QuadPart >= systime1.QuadPart
+                    && data->PerfTime100nSec.QuadPart <= systime2.QuadPart,
+                    "got times %I64u, %I64u, %I64u\n",
+                    systime1.QuadPart, data->PerfTime100nSec.QuadPart, systime2.QuadPart);
+            SystemTimeToFileTime(&data->SystemTime, &file_time.f);
+            /* SYSTEMTIME has a granularity of 1 ms */
+            ok(file_time.l >= systime1.QuadPart - 10000 && file_time.l <= systime2.QuadPart,
+                    "got times %I64u, %I64u, %I64u\n", systime1.QuadPart, file_time.l, systime2.QuadPart);
+
+            ok(data->SystemNameLength == (sysname_len + 1) * sizeof(WCHAR),
+                    "expected name len %u, got %u\n",
+                    (sysname_len + 1) * sizeof(WCHAR), data->SystemNameLength);
+            ok(data->SystemNameOffset == sizeof(PERF_DATA_BLOCK),
+                    "got name offset %u\n", data->SystemNameOffset);
+            ok(!wcscmp(sysname, (const WCHAR *)(data + 1)), "expected name %s, got %s\n",
+                    debugstr_w(sysname), debugstr_w((const WCHAR *)(data + 1)));
+
+            winetest_pop_context();
         }
+
+        /* test the "Counter" value */
+
+        size = 0xdeadbeef;
+        ret = RegQueryValueExA(keys[i], "cOuNtEr", NULL, NULL, NULL, &size);
+        ok(!ret, "got %u\n", ret);
+        ok(size > 0 && size < 0xdeadbeef, "got size %u\n", size);
+
+        type = 0xdeadbeef;
+        size = 0;
+        ret = RegQueryValueExA(keys[i], "cOuNtEr", NULL, &type, buffer, &size);
+        ok(ret == ERROR_MORE_DATA, "got %u\n", ret);
+        ok(size > 0, "got size %u\n", size);
+
+        type = 0xdeadbeef;
+        size = buffer_size;
+        ret = RegQueryValueExA(keys[i], "cOuNtEr", NULL, &type, buffer, &size);
+        ok(!ret, "got %u\n", ret);
+        ok(type == REG_MULTI_SZ, "got type %u\n", type);
+        test_counter_values(buffer, keys[i]);
+
+        type = 0xdeadbeef;
+        size = buffer_size;
+        ret = RegQueryValueExA(keys[i], "cOuNtErwine", NULL, &type, buffer, &size);
+        ok(!ret, "got %u\n", ret);
+        ok(type == REG_MULTI_SZ, "got type %u\n", type);
+        test_counter_values(buffer, keys[i]);
+
+        size = 0;
+        ret = RegQueryValueExW(keys[i], L"cOuNtEr", NULL, NULL, NULL, &size);
+        ok(!ret, "got %u\n", ret);
+        ok(size > 0, "got size %u\n", size);
+
+        bufferW = malloc(size);
+
+        type = 0xdeadbeef;
+        ret = RegQueryValueExW(keys[i], L"cOuNtEr", NULL, &type, bufferW, &size);
+        ok(!ret, "got %u\n", ret);
+        ok(type == REG_MULTI_SZ, "got type %u\n", type);
+        WideCharToMultiByte(CP_ACP, 0, bufferW, size / sizeof(WCHAR), buffer, buffer_size, NULL, NULL);
+        test_counter_values(buffer, keys[i]);
+
+        /* test the "Help" value */
+
+        size = 0xdeadbeef;
+        ret = RegQueryValueExA(keys[i], "hElP", NULL, NULL, NULL, &size);
+        ok(!ret, "got %u\n", ret);
+        ok(size > 0 && size < 0xdeadbeef, "got size %u\n", size);
+
+        type = 0xdeadbeef;
+        size = 0;
+        ret = RegQueryValueExA(keys[i], "hElP", NULL, &type, buffer, &size);
+        ok(ret == ERROR_MORE_DATA, "got %u\n", ret);
+        ok(size > 0, "got size %u\n", size);
+
+        type = 0xdeadbeef;
+        size = buffer_size;
+        ret = RegQueryValueExA(keys[i], "hElP", NULL, &type, buffer, &size);
+        test_help_values(buffer, keys[i]);
+
+        type = 0xdeadbeef;
+        size = buffer_size;
+        ret = RegQueryValueExA(keys[i], "hElPwine", NULL, &type, buffer, &size);
+        ok(!ret, "got %u\n", ret);
+        ok(type == REG_MULTI_SZ, "got type %u\n", type);
+        test_help_values(buffer, keys[i]);
+
+        size = 0;
+        ret = RegQueryValueExW(keys[i], L"hElP", NULL, NULL, NULL, &size);
+        ok(!ret, "got %u\n", ret);
+        ok(size > 0, "got size %u\n", size);
+
+        bufferW = malloc(size);
+
+        type = 0xdeadbeef;
+        ret = RegQueryValueExW(keys[i], L"hElP", NULL, &type, bufferW, &size);
+        ok(!ret, "got %u\n", ret);
+        ok(type == REG_MULTI_SZ, "got type %u\n", type);
+        WideCharToMultiByte(CP_ACP, 0, bufferW, size / sizeof(WCHAR), buffer, buffer_size, NULL, NULL);
+        test_help_values(buffer, keys[i]);
+
+        /* test other registry APIs */
+
+        ret = RegOpenKeyA(keys[i], NULL, &key);
+        todo_wine ok(ret == ERROR_INVALID_HANDLE, "got %u\n", ret);
+
+        ret = RegOpenKeyA(keys[i], "Global", &key);
+        ok(ret == ERROR_INVALID_HANDLE, "got %u\n", ret);
+
+        ret = RegOpenKeyExA(keys[i], "Global", 0, KEY_READ, &key);
+        ok(ret == ERROR_INVALID_HANDLE, "got %u\n", ret);
+
+        size = 0;
+        ret = RegQueryValueA(keys[i], "Global", NULL, (LONG *)&size);
+        ok(ret == ERROR_INVALID_HANDLE, "got %u\n", ret);
+
+        ret = RegSetValueA(keys[i], "Global", REG_SZ, "dummy", 5);
+        ok(ret == ERROR_INVALID_HANDLE, "got %u\n", ret);
+
+        ret = RegQueryInfoKeyA(keys[i], NULL, NULL, NULL, &key_count, NULL,
+                NULL, &value_count, NULL, NULL, NULL, NULL);
+        todo_wine ok(!ret, "got %u\n", ret);
+        todo_wine ok(!key_count, "got %u subkeys\n", key_count);
+        todo_wine ok(value_count == 2, "got %u values\n", value_count);
+
+        size = buffer_size;
+        ret = RegEnumValueA(keys[i], 0, buffer, &size, NULL, NULL, NULL, NULL);
+        todo_wine ok(ret == ERROR_MORE_DATA, "got %u\n", ret);
+        ok(size == buffer_size, "got size %u\n", size);
+
+        ret = RegCloseKey(keys[i]);
+        ok(!ret, "got %u\n", ret);
+
+        ret = RegCloseKey(keys[i]);
+        ok(!ret, "got %u\n", ret);
+
+        winetest_pop_context();
     }
 
-    dwret = RegOpenKeyA(HKEY_PERFORMANCE_DATA, NULL, &hkey);
-todo_wine
-    ok(dwret == ERROR_INVALID_HANDLE, "got %u\n", dwret);
+    ret = RegSetValueExA(HKEY_PERFORMANCE_DATA, "Global", 0, REG_SZ, (const BYTE *)"dummy", 5);
+    ok(ret == ERROR_INVALID_HANDLE, "got %u\n", ret);
 
-    dwret = RegOpenKeyA(HKEY_PERFORMANCE_DATA, "Global", &hkey);
-todo_wine
-    ok(dwret == ERROR_INVALID_HANDLE, "got %u\n", dwret);
+    ret = RegSetValueExA(HKEY_PERFORMANCE_TEXT, "Global", 0, REG_SZ, (const BYTE *)"dummy", 5);
+    todo_wine ok(ret == ERROR_BADKEY, "got %u\n", ret);
 
-    dwret = RegOpenKeyExA(HKEY_PERFORMANCE_DATA, "Global", 0, KEY_READ, &hkey);
-todo_wine
-    ok(dwret == ERROR_INVALID_HANDLE, "got %u\n", dwret);
-
-    dwret = RegQueryValueA(HKEY_PERFORMANCE_DATA, "Global", NULL, (LONG *)&cbData);
-todo_wine
-    ok(dwret == ERROR_INVALID_HANDLE, "got %u\n", dwret);
-
-    dwret = RegSetValueA(HKEY_PERFORMANCE_DATA, "Global", REG_SZ, "dummy", 4);
-todo_wine
-    ok(dwret == ERROR_INVALID_HANDLE, "got %u\n", dwret);
-
-    dwret = RegSetValueExA(HKEY_PERFORMANCE_DATA, "Global", 0, REG_SZ, (const BYTE *)"dummy", 40);
-todo_wine
-    ok(dwret == ERROR_INVALID_HANDLE, "got %u\n", dwret);
-
-    cbData = sizeof(buf);
-    dwret = RegEnumKeyA(HKEY_PERFORMANCE_DATA, 0, (LPSTR)buf, cbData);
-todo_wine
-    ok(dwret == ERROR_INVALID_HANDLE, "got %u\n", dwret);
-
-    cbData = sizeof(buf);
-    dwret = RegEnumValueA(HKEY_PERFORMANCE_DATA, 0, (LPSTR)buf, &cbData, NULL, NULL, NULL, NULL);
-todo_wine
-    ok(dwret == ERROR_MORE_DATA, "got %u\n", dwret);
-todo_wine
-    ok(cbData == sizeof(buf), "got %u\n", cbData);
-
-    dwret = RegEnumValueA(HKEY_PERFORMANCE_DATA, 0, NULL, &cbData, NULL, NULL, NULL, NULL);
-    ok(dwret == ERROR_INVALID_PARAMETER, "got %u\n", dwret);
+    ret = RegSetValueExA(HKEY_PERFORMANCE_NLSTEXT, "Global", 0, REG_SZ, (const BYTE *)"dummy", 5);
+    todo_wine ok(ret == ERROR_BADKEY, "got %u\n", ret);
 
     if (pRegSetKeyValueW)
     {
-        dwret = pRegSetKeyValueW(HKEY_PERFORMANCE_DATA, NULL, L"Global", REG_SZ, L"dummy", 10);
-todo_wine
-        ok(dwret == ERROR_INVALID_HANDLE, "got %u\n", dwret);
+        ret = pRegSetKeyValueW(HKEY_PERFORMANCE_DATA, NULL, L"Global", REG_SZ, L"dummy", 10);
+        ok(ret == ERROR_INVALID_HANDLE, "got %u\n", ret);
+
+        ret = pRegSetKeyValueW(HKEY_PERFORMANCE_TEXT, NULL, L"Global", REG_SZ, L"dummy", 10);
+        todo_wine ok(ret == ERROR_BADKEY, "got %u\n", ret);
+
+        ret = pRegSetKeyValueW(HKEY_PERFORMANCE_NLSTEXT, NULL, L"Global", REG_SZ, L"dummy", 10);
+        todo_wine ok(ret == ERROR_BADKEY, "got %u\n", ret);
     }
 
-    dwret = RegCloseKey(HKEY_PERFORMANCE_DATA);
-    ok(dwret == ERROR_SUCCESS, "got %u\n", dwret);
+    ret = RegEnumKeyA(HKEY_PERFORMANCE_DATA, 0, buffer, buffer_size);
+    ok(ret == ERROR_INVALID_HANDLE, "got %u\n", ret);
+
+    ret = RegEnumKeyA(HKEY_PERFORMANCE_TEXT, 0, buffer, buffer_size);
+    todo_wine ok(ret == ERROR_NO_MORE_ITEMS, "got %u\n", ret);
+
+    ret = RegEnumKeyA(HKEY_PERFORMANCE_NLSTEXT, 0, buffer, buffer_size);
+    todo_wine ok(ret == ERROR_NO_MORE_ITEMS, "got %u\n", ret);
+
+    free(buffer);
+}
+
+static void test_perflib_key(void)
+{
+    unsigned int primary_lang = PRIMARYLANGID(GetUserDefaultLangID());
+    unsigned int buffer_size = 1024 * 1024;
+    OBJECT_NAME_INFORMATION *name_info;
+    HKEY perflib_key, key, key2;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING string;
+    char lang_name[4];
+    char *buffer;
+    DWORD size;
+    LONG ret;
+
+    ret = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+            "Software\\Microsoft\\Windows NT\\CurrentVersion\\Perflib", 0, KEY_READ, &perflib_key);
+    ok(!ret, "got %u\n", ret);
+
+    ret = RegOpenKeyExA(perflib_key, "009", 0, KEY_READ, &key);
+    ok(!ret, "got %u\n", ret);
+    /* English always returns TEXT; most other languages return NLSTEXT, but
+     * some (e.g. Hindi) return TEXT */
+    ok(key == HKEY_PERFORMANCE_TEXT || key == HKEY_PERFORMANCE_NLSTEXT, "got key %p\n", key);
+
+    ret = RegCloseKey(key);
+    ok(!ret, "got %u\n", ret);
+
+    RtlInitUnicodeString(&string, L"009");
+    InitializeObjectAttributes(&attr, &string, OBJ_CASE_INSENSITIVE, perflib_key, NULL);
+    ret = NtOpenKey((HANDLE *)&key, KEY_ALL_ACCESS, &attr);
+    ok(ret == STATUS_PREDEFINED_HANDLE || ret == STATUS_ACCESS_DENIED
+            || ret == STATUS_SUCCESS /* Win < 7 */, "got %#x\n", ret);
+    if (ret == STATUS_PREDEFINED_HANDLE)
+        ok(!is_special_key(key), "expected a normal handle, got %p\n", key);
+    else if (ret == STATUS_SUCCESS)
+        ok(key == HKEY_PERFORMANCE_TEXT, "got key %p\n", key);
+    else
+    {
+        skip("Not enough permissions to test the perflib key.\n");
+        RegCloseKey(perflib_key);
+        return;
+    }
+
+    buffer = malloc(buffer_size);
+
+    ret = NtQueryKey(key, KeyFullInformation, buffer, buffer_size, &size);
+    ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+
+    ret = NtEnumerateKey(key, 0, KeyFullInformation, buffer, buffer_size, &size);
+    ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+
+    RtlInitUnicodeString(&string, L"counter");
+    ret = NtQueryValueKey(key, &string, KeyValuePartialInformation, buffer, buffer_size, &size);
+    ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+
+    ret = NtEnumerateValueKey(key, 0, KeyValuePartialInformation, buffer, buffer_size, &size);
+    ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+
+    ret = NtSetValueKey(key, &string, 0, REG_SZ, "test", 5);
+    ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+
+    ret = NtDeleteValueKey(key, &string);
+    ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+
+    ret = NtDeleteKey(key);
+    ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+
+    RtlInitUnicodeString(&string, L"subkey");
+    InitializeObjectAttributes(&attr, &string, OBJ_CASE_INSENSITIVE, key, NULL);
+    ret = NtOpenKey((HANDLE *)&key2, KEY_READ, &attr);
+    if (is_special_key(key))
+        ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+    else
+        ok(ret == STATUS_OBJECT_NAME_NOT_FOUND
+                || broken(ret == STATUS_INVALID_HANDLE) /* WoW64 */, "got %#x\n", ret);
+
+    ret = NtCreateKey((HANDLE *)&key2, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL);
+    if (is_special_key(key))
+        ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+    else
+        ok(!ret || broken(ret == STATUS_ACCESS_DENIED) /* w8adm */
+                || broken(ret == STATUS_INVALID_HANDLE) /* WoW64 */, "got %#x\n", ret);
+    if (!ret)
+    {
+        NtDeleteKey(key2);
+        NtClose(key2);
+    }
+
+    /* it's a real handle, though */
+    ret = NtQueryObject(key, ObjectNameInformation, buffer, buffer_size, &size);
+    if (is_special_key(key))
+        ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+    else
+        ok(!ret, "got %#x\n", ret);
+    if (!ret)
+    {
+        name_info = (OBJECT_NAME_INFORMATION *)buffer;
+        ok(!wcsicmp(name_info->Name.Buffer, L"\\REGISTRY\\MACHINE\\SOFTWARE\\Microsoft\\Windows NT"
+                "\\CurrentVersion\\Perflib\\009"), "got name %s\n", debugstr_w(name_info->Name.Buffer));
+    }
+
+    ret = NtClose(key);
+    if (is_special_key(key))
+        ok(ret == STATUS_INVALID_HANDLE, "got %#x\n", ret);
+    else
+        ok(!ret, "got %#x\n", ret);
+
+    /* multilingual support was not really completely thought through */
+
+    sprintf(lang_name, "%03x", primary_lang);
+    if (primary_lang != LANG_ENGLISH)
+    {
+        ret = RegOpenKeyExA(perflib_key, lang_name, 0, KEY_READ, &key);
+        todo_wine ok(!ret, "got %u\n", ret);
+        ok(!is_special_key(key), "expected a normal handle, got %p\n", key);
+
+        ret = RegQueryValueExA(key, "counter", NULL, NULL, (BYTE *)buffer, &size);
+        todo_wine ok(ret == ERROR_FILE_NOT_FOUND, "got %u\n", ret);
+
+        ret = RegCloseKey(key);
+        todo_wine ok(!ret, "got %u\n", ret);
+    }
+
+    ret = RegCloseKey(perflib_key);
+    ok(!ret, "got %u\n", ret);
+
+    RtlInitUnicodeString(&string, L"\\Registry\\PerfData");
+    InitializeObjectAttributes(&attr, &string, OBJ_CASE_INSENSITIVE, NULL, NULL);
+    ret = NtOpenKey((HANDLE *)&key, KEY_READ, &attr);
+    ok(ret == STATUS_OBJECT_NAME_NOT_FOUND, "got %#x\n", ret);
+
+    free(buffer);
 }
 
 static void test_RegLoadMUIString(void)
@@ -4238,7 +4450,6 @@ START_TEST(registry)
     test_classesroot();
     test_classesroot_enum();
     test_classesroot_mask();
-    test_perflib_key();
     test_reg_save_key();
     test_reg_load_key();
     test_reg_unload_key();
@@ -4250,9 +4461,10 @@ START_TEST(registry)
     test_delete_key_value();
     test_RegOpenCurrentUser();
     test_RegNotifyChangeKeyValue();
-    test_RegQueryValueExPerformanceData();
+    test_performance_keys();
     test_RegLoadMUIString();
     test_EnumDynamicTimeZoneInformation();
+    test_perflib_key();
 
     /* cleanup */
     delete_key( hkey_main );

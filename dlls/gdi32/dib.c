@@ -604,12 +604,12 @@ done:
 }
 
 /***********************************************************************
- *           StretchDIBits   (GDI32.@)
+ *           NtGdiStretchDIBitsInternal   (win32u.@)
  */
-INT WINAPI DECLSPEC_HOTPATCH StretchDIBits( HDC hdc, INT xDst, INT yDst, INT widthDst, INT heightDst,
-                                            INT xSrc, INT ySrc, INT widthSrc, INT heightSrc,
-                                            const void *bits, const BITMAPINFO *bmi, UINT coloruse,
-                                            DWORD rop )
+INT WINAPI NtGdiStretchDIBitsInternal( HDC hdc, INT xDst, INT yDst, INT widthDst, INT heightDst,
+                                       INT xSrc, INT ySrc, INT widthSrc, INT heightSrc,
+                                       const void *bits, const BITMAPINFO *bmi, UINT coloruse,
+                                       DWORD rop, UINT max_info, UINT max_bits, HANDLE xform )
 {
     char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
     BITMAPINFO *info = (BITMAPINFO *)buffer;
@@ -878,12 +878,13 @@ done:
 }
 
 /***********************************************************************
- *           SetDIBitsToDevice   (GDI32.@)
+ *           NtGdiSetDIBitsToDeviceInternal   (win32u.@)
  */
-INT WINAPI SetDIBitsToDevice(HDC hdc, INT xDest, INT yDest, DWORD cx,
-                           DWORD cy, INT xSrc, INT ySrc, UINT startscan,
-                           UINT lines, LPCVOID bits, const BITMAPINFO *bmi,
-                           UINT coloruse )
+INT WINAPI NtGdiSetDIBitsToDeviceInternal( HDC hdc, INT xDest, INT yDest, DWORD cx,
+                                           DWORD cy, INT xSrc, INT ySrc, UINT startscan,
+                                           UINT lines, const void *bits, const BITMAPINFO *bmi,
+                                           UINT coloruse, UINT max_bits, UINT max_info,
+                                           BOOL xform_coords, HANDLE xform )
 {
     char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
     BITMAPINFO *info = (BITMAPINFO *)buffer;

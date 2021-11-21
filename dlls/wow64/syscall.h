@@ -26,6 +26,7 @@
     SYSCALL_ENTRY( NtAccessCheck ) \
     SYSCALL_ENTRY( NtAccessCheckAndAuditAlarm ) \
     SYSCALL_ENTRY( NtAddAtom ) \
+    SYSCALL_ENTRY( NtAdjustGroupsToken ) \
     SYSCALL_ENTRY( NtAdjustPrivilegesToken ) \
     SYSCALL_ENTRY( NtAlertResumeThread ) \
     SYSCALL_ENTRY( NtAlertThread ) \
@@ -43,6 +44,7 @@
     SYSCALL_ENTRY( NtClose ) \
     SYSCALL_ENTRY( NtCompleteConnectPort ) \
     SYSCALL_ENTRY( NtConnectPort ) \
+    SYSCALL_ENTRY( NtContinue ) \
     SYSCALL_ENTRY( NtCreateDebugObject ) \
     SYSCALL_ENTRY( NtCreateDirectoryObject ) \
     SYSCALL_ENTRY( NtCreateEvent ) \
@@ -52,6 +54,7 @@
     SYSCALL_ENTRY( NtCreateKey ) \
     SYSCALL_ENTRY( NtCreateKeyTransacted ) \
     SYSCALL_ENTRY( NtCreateKeyedEvent ) \
+    SYSCALL_ENTRY( NtCreateLowBoxToken ) \
     SYSCALL_ENTRY( NtCreateMailslotFile ) \
     SYSCALL_ENTRY( NtCreateMutant ) \
     SYSCALL_ENTRY( NtCreateNamedPipeFile ) \
@@ -72,6 +75,7 @@
     SYSCALL_ENTRY( NtDeleteFile ) \
     SYSCALL_ENTRY( NtDeleteKey ) \
     SYSCALL_ENTRY( NtDeleteValueKey ) \
+    SYSCALL_ENTRY( NtDeviceIoControlFile ) \
     SYSCALL_ENTRY( NtDisplayString ) \
     SYSCALL_ENTRY( NtDuplicateObject ) \
     SYSCALL_ENTRY( NtDuplicateToken ) \
@@ -85,8 +89,10 @@
     SYSCALL_ENTRY( NtFlushProcessWriteBuffers ) \
     SYSCALL_ENTRY( NtFlushVirtualMemory ) \
     SYSCALL_ENTRY( NtFreeVirtualMemory ) \
+    SYSCALL_ENTRY( NtFsControlFile ) \
     SYSCALL_ENTRY( NtGetContextThread ) \
     SYSCALL_ENTRY( NtGetCurrentProcessorNumber ) \
+    SYSCALL_ENTRY( NtGetNextThread ) \
     SYSCALL_ENTRY( NtGetNlsSectionPtr ) \
     SYSCALL_ENTRY( NtGetWriteWatch ) \
     SYSCALL_ENTRY( NtImpersonateAnonymousToken ) \
@@ -156,6 +162,8 @@
     SYSCALL_ENTRY( NtQuerySymbolicLinkObject ) \
     SYSCALL_ENTRY( NtQuerySystemEnvironmentValue ) \
     SYSCALL_ENTRY( NtQuerySystemEnvironmentValueEx ) \
+    SYSCALL_ENTRY( NtQuerySystemInformation ) \
+    SYSCALL_ENTRY( NtQuerySystemInformationEx ) \
     SYSCALL_ENTRY( NtQuerySystemTime ) \
     SYSCALL_ENTRY( NtQueryTimer ) \
     SYSCALL_ENTRY( NtQueryTimerResolution ) \
@@ -163,9 +171,11 @@
     SYSCALL_ENTRY( NtQueryVirtualMemory ) \
     SYSCALL_ENTRY( NtQueryVolumeInformationFile ) \
     SYSCALL_ENTRY( NtQueueApcThread ) \
+    SYSCALL_ENTRY( NtRaiseHardError ) \
     SYSCALL_ENTRY( NtReadFile ) \
     SYSCALL_ENTRY( NtReadFileScatter ) \
     SYSCALL_ENTRY( NtReadVirtualMemory ) \
+    SYSCALL_ENTRY( NtRegisterThreadTerminatePort ) \
     SYSCALL_ENTRY( NtReleaseKeyedEvent ) \
     SYSCALL_ENTRY( NtReleaseMutant ) \
     SYSCALL_ENTRY( NtReleaseSemaphore ) \
@@ -198,6 +208,7 @@
     SYSCALL_ENTRY( NtSetInformationToken ) \
     SYSCALL_ENTRY( NtSetIntervalProfile ) \
     SYSCALL_ENTRY( NtSetIoCompletion ) \
+    SYSCALL_ENTRY( NtSetLdtEntries ) \
     SYSCALL_ENTRY( NtSetPowerRequest ) \
     SYSCALL_ENTRY( NtSetSecurityObject ) \
     SYSCALL_ENTRY( NtSetSystemInformation ) \
@@ -215,6 +226,7 @@
     SYSCALL_ENTRY( NtTerminateJobObject ) \
     SYSCALL_ENTRY( NtTerminateProcess ) \
     SYSCALL_ENTRY( NtTerminateThread ) \
+    SYSCALL_ENTRY( NtTestAlert ) \
     SYSCALL_ENTRY( NtUnloadDriver ) \
     SYSCALL_ENTRY( NtUnloadKey ) \
     SYSCALL_ENTRY( NtUnlockFile ) \
@@ -225,11 +237,19 @@
     SYSCALL_ENTRY( NtWaitForMultipleObjects ) \
     SYSCALL_ENTRY( NtWaitForSingleObject ) \
     SYSCALL_ENTRY( NtWow64AllocateVirtualMemory64 ) \
+    SYSCALL_ENTRY( NtWow64GetNativeSystemInformation ) \
     SYSCALL_ENTRY( NtWow64ReadVirtualMemory64 ) \
     SYSCALL_ENTRY( NtWow64WriteVirtualMemory64 ) \
     SYSCALL_ENTRY( NtWriteFile ) \
     SYSCALL_ENTRY( NtWriteFileGather ) \
     SYSCALL_ENTRY( NtWriteVirtualMemory ) \
-    SYSCALL_ENTRY( NtYieldExecution )
+    SYSCALL_ENTRY( NtYieldExecution ) \
+    SYSCALL_ENTRY( __wine_dbg_write ) \
+    SYSCALL_ENTRY( __wine_unix_call ) \
+    SYSCALL_ENTRY( wine_nt_to_unix_file_name ) \
+    SYSCALL_ENTRY( wine_server_call ) \
+    SYSCALL_ENTRY( wine_server_fd_to_handle ) \
+    SYSCALL_ENTRY( wine_server_handle_to_fd ) \
+    SYSCALL_ENTRY( wine_unix_to_nt_file_name )
 
 #endif /* __WOW64_SYSCALL_H */

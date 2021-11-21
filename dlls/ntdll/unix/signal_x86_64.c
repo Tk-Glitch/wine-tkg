@@ -100,7 +100,7 @@ WINE_DECLARE_DEBUG_CHANNEL(seh);
 #include <asm/prctl.h>
 static inline int arch_prctl( int func, void *ptr ) { return syscall( __NR_arch_prctl, func, ptr ); }
 
-extern int CDECL alloc_fs_sel( int sel, void *base );
+extern int CDECL alloc_fs_sel( int sel, void *base ) DECLSPEC_HIDDEN;
 __ASM_GLOBAL_FUNC( alloc_fs_sel,
                    /* switch to 32-bit stack */
                    "pushq %rbx\n\t"
@@ -1965,12 +1965,15 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
     }
     if (flags & CONTEXT_I386_CONTROL)
     {
+        WOW64_CPURESERVED *cpu = NtCurrentTeb()->TlsSlots[WOW64_TLS_CPURESERVED];
+
         wow_frame->Esp    = context->Esp;
         wow_frame->Ebp    = context->Ebp;
         wow_frame->Eip    = context->Eip;
         wow_frame->EFlags = context->EFlags;
         wow_frame->SegCs  = cs32_sel;
         wow_frame->SegSs  = ds64_sel;
+        cpu->Flags |= WOW64_CPURESERVED_FLAG_RESET_STATE;
     }
     if (flags & CONTEXT_I386_SEGMENTS)
     {
@@ -3199,7 +3202,7 @@ void DECLSPEC_HIDDEN call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, B
     {
         wow_context->ContextFlags = CONTEXT_I386_ALL;
         wow_context->Eax = (ULONG_PTR)entry;
-        wow_context->Ebx = (ULONG_PTR)arg;
+        wow_context->Ebx = (arg == peb ? get_wow_teb( teb )->Peb : (ULONG_PTR)arg);
         wow_context->Esp = get_wow_teb( teb )->Tib.StackBase - 16;
         wow_context->Eip = pLdrSystemDllInitBlock->pRtlUserThreadStart;
         wow_context->SegCs = cs32_sel;

@@ -9680,13 +9680,17 @@ static void test_mt_factory(BOOL d3d11)
 
 static void test_effect(BOOL d3d11)
 {
-    unsigned int i, min_inputs, max_inputs;
+    unsigned int i, j, min_inputs, max_inputs, str_size, input_count;
+    D2D1_BITMAP_PROPERTIES bitmap_desc;
     D2D1_BUFFER_PRECISION precision;
     ID2D1Image *image_a, *image_b;
     struct d2d1_test_context ctx;
     ID2D1DeviceContext *context;
     ID2D1Factory1 *factory;
+    ID2D1Bitmap *bitmap;
     ID2D1Effect *effect;
+    D2D1_SIZE_U size;
+    BYTE buffer[64];
     BOOL cached;
     CLSID clsid;
     HRESULT hr;
@@ -9694,14 +9698,16 @@ static void test_effect(BOOL d3d11)
     const struct effect_test
     {
         const CLSID *clsid;
+        UINT32 default_input_count;
         UINT32 min_inputs;
         UINT32 max_inputs;
     }
     effect_tests[] =
     {
-        {&CLSID_D2D12DAffineTransform,       1, 1},
-        {&CLSID_D2D13DPerspectiveTransform,  1, 1},
-        {&CLSID_D2D1Composite,               1, 0xffffffff},
+        {&CLSID_D2D12DAffineTransform,       1, 1, 1},
+        {&CLSID_D2D13DPerspectiveTransform,  1, 1, 1},
+        {&CLSID_D2D1Composite,               2, 1, 0xffffffff},
+        {&CLSID_D2D1Crop,                    1, 1, 1},
     };
 
     if (!init_test_context(&ctx, d3d11))
@@ -9733,8 +9739,36 @@ static void test_effect(BOOL d3d11)
         ID2D1Image_Release(image_b);
         ID2D1Image_Release(image_a);
 
+        hr = ID2D1Effect_GetValue(effect, 0xdeadbeef, D2D1_PROPERTY_TYPE_CLSID, (BYTE *)&clsid, sizeof(clsid));
+        ok(hr == D2DERR_INVALID_PROPERTY, "Got unexpected hr %#x.\n", hr);
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_CLSID, buffer, sizeof(clsid) + 1);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_CLSID, buffer, sizeof(clsid) - 1);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_CLSID, buffer, sizeof(clsid));
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME, D2D1_PROPERTY_TYPE_STRING, buffer, sizeof(buffer));
         todo_wine
-        {
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        str_size = (wcslen((WCHAR *)buffer) + 1) * sizeof(WCHAR);
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME, D2D1_PROPERTY_TYPE_STRING, buffer, str_size);
+        todo_wine
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME, D2D1_PROPERTY_TYPE_STRING, buffer, str_size - 1);
+        todo_wine
+        ok(hr == D2DERR_INSUFFICIENT_BUFFER, "Got unexpected hr %#x.\n", hr);
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, 0xdeadbeef, (BYTE *)&clsid, sizeof(clsid));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_UNKNOWN, (BYTE *)&clsid, sizeof(clsid));
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_VECTOR4, (BYTE *)&clsid, sizeof(clsid));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_VECTOR4, buffer, sizeof(buffer));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID,
                 D2D1_PROPERTY_TYPE_CLSID, (BYTE *)&clsid, sizeof(clsid));
         ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
@@ -9744,12 +9778,14 @@ static void test_effect(BOOL d3d11)
 
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CACHED,
                 D2D1_PROPERTY_TYPE_BOOL, (BYTE *)&cached, sizeof(cached));
+        todo_wine
         ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
         if (hr == S_OK)
             ok(cached == FALSE, "Got unexpected cached %d.\n", cached);
 
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_PRECISION,
                 D2D1_PROPERTY_TYPE_ENUM, (BYTE *)&precision, sizeof(precision));
+        todo_wine
         ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
         if (hr == S_OK)
             ok(precision == D2D1_BUFFER_PRECISION_UNKNOWN, "Got unexpected precision %u.\n", precision);
@@ -9767,7 +9803,68 @@ static void test_effect(BOOL d3d11)
         if (hr == S_OK)
             ok(max_inputs == test->max_inputs, "Got unexpected max inputs %u, expected %u.\n",
                     max_inputs, test->max_inputs);
+
+        input_count = ID2D1Effect_GetInputCount(effect);
+        ok (input_count == test->default_input_count, "Got unexpected input count %u, expected %u.\n",
+                input_count, test->default_input_count);
+
+        input_count = (test->max_inputs < 16 ? test->max_inputs : 16);
+        for (j = 0; j < input_count + 4; ++j)
+        {
+            winetest_push_context("Input %u", j);
+            hr = ID2D1Effect_SetInputCount(effect, j);
+            if (j < test->min_inputs || j > test->max_inputs)
+                ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+            else
+                ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+            winetest_pop_context();
         }
+
+        input_count = ID2D1Effect_GetInputCount(effect);
+        for (j = 0; j < input_count + 4; ++j)
+        {
+            winetest_push_context("Input %u", j);
+            ID2D1Effect_GetInput(effect, j, &image_a);
+            ok(image_a == NULL, "Got unexpected image_a %p.\n", image_a);
+            winetest_pop_context();
+        }
+
+        set_size_u(&size, 1, 1);
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        hr = ID2D1RenderTarget_CreateBitmap(ctx.rt, size, NULL, 4, &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+        ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
+        for (j = 0; j < input_count + 4; ++j)
+        {
+            winetest_push_context("Input %u", j);
+            image_a = (ID2D1Image *)0xdeadbeef;
+            ID2D1Effect_GetInput(effect, j, &image_a);
+            if (j == 0)
+            {
+                ok(image_a == (ID2D1Image *)bitmap, "Got unexpected image_a %p.\n", image_a);
+                ID2D1Image_Release(image_a);
+            }
+            else
+            {
+                ok(image_a == NULL, "Got unexpected image_a %p.\n", image_a);
+            }
+            winetest_pop_context();
+        }
+
+        for (j = input_count; j < input_count + 4; ++j)
+        {
+            winetest_push_context("Input %u", j);
+            image_a = (ID2D1Image *)0xdeadbeef;
+            ID2D1Effect_SetInput(effect, j, (ID2D1Image *)bitmap, FALSE);
+            ID2D1Effect_GetInput(effect, j, &image_a);
+            ok(image_a == NULL, "Got unexpected image_a %p.\n", image_a);
+            winetest_pop_context();
+        }
+        ID2D1Bitmap_Release(bitmap);
 
         ID2D1Effect_Release(effect);
         winetest_pop_context();

@@ -33,6 +33,11 @@ static int bounded( ULONG64 val, ULONG64 lo, ULONG64 hi )
     return lo <= val && val <= hi;
 }
 
+static int unstable( int val )
+{
+    return !winetest_interactive || val;
+}
+
 static void test_nsi_api( void )
 {
     DWORD rw_sizes[] = { FIELD_OFFSET(struct nsi_ndis_ifinfo_rw, name2), FIELD_OFFSET(struct nsi_ndis_ifinfo_rw, unk),
@@ -411,6 +416,130 @@ static void test_ndis_index_luid( void )
     ok( err == ERROR_FILE_NOT_FOUND, "got %d\n", err );
 }
 
+static void test_ip_cmpt( int family )
+{
+    DWORD rw_sizes[] = { FIELD_OFFSET(struct nsi_ip_cmpt_rw, unk2), sizeof(struct nsi_ip_cmpt_rw) };
+    const NPI_MODULEID *mod = (family == AF_INET) ? &NPI_MS_IPV4_MODULEID : &NPI_MS_IPV6_MODULEID;
+    struct nsi_ip_cmpt_dynamic dyn;
+    struct nsi_ip_cmpt_rw rw;
+    MIB_IPSTATS table;
+    DWORD err, key, i;
+
+    winetest_push_context( family == AF_INET ? "AF_INET" : "AF_INET6" );
+
+    /* key = 0 also seems to work, but NsiAllocateAndGetTable returns
+       a single table with key == 1.  Presumably this is the compartment id */
+    key = 1;
+    for (i = 0; i < ARRAY_SIZE(rw_sizes); i++)
+    {
+        err = NsiGetAllParameters( 1, mod, 2, &key, sizeof(key), &rw, rw_sizes[i], &dyn, sizeof(dyn), NULL, 0 );
+        if (!err) break;
+    }
+    ok( !err, "got %x\n", err );
+
+    err = GetIpStatisticsEx( &table, family );
+    ok( !err, "got %d\n", err );
+    if (err) goto err;
+
+    ok( table.dwForwarding - 1 == rw.not_forwarding, "%x vs %x\n", table.dwForwarding, rw.not_forwarding );
+    ok( table.dwDefaultTTL == rw.default_ttl, "%x vs %x\n", table.dwDefaultTTL, rw.default_ttl );
+    ok( table.dwNumIf == dyn.num_ifs, "%x vs %x\n", table.dwNumIf, dyn.num_ifs );
+    ok( table.dwNumAddr == dyn.num_addrs, "%x vs %x\n", table.dwNumAddr, dyn.num_addrs );
+    ok( table.dwNumRoutes == dyn.num_routes, "%x vs %x\n", table.dwNumRoutes, dyn.num_routes );
+
+err:
+    winetest_pop_context();
+}
+
+static void test_ip_icmpstats( int family )
+{
+    const NPI_MODULEID *mod = (family == AF_INET) ? &NPI_MS_IPV4_MODULEID : &NPI_MS_IPV6_MODULEID;
+    struct nsi_ip_icmpstats_dynamic nsi_stats, nsi_stats2;
+    MIB_ICMP_EX table;
+    DWORD err, i;
+
+    winetest_push_context( family == AF_INET ? "AF_INET" : "AF_INET6" );
+
+    err = NsiGetAllParameters( 1, mod, NSI_IP_ICMPSTATS_TABLE, NULL, 0, NULL, 0, &nsi_stats, sizeof(nsi_stats), NULL, 0 );
+    ok( !err, "got %d\n", err );
+    if (err) goto err;
+
+    err = GetIcmpStatisticsEx( &table, family );
+    ok( !err, "got %d\n", err );
+    if (err) goto err;
+
+    err = NsiGetAllParameters( 1, mod, NSI_IP_ICMPSTATS_TABLE, NULL, 0, NULL, 0, &nsi_stats2, sizeof(nsi_stats2), NULL, 0 );
+    ok( !err, "got %d\n", err );
+
+    ok( bounded( table.icmpInStats.dwMsgs, nsi_stats.in_msgs, nsi_stats2.in_msgs ),
+        "%d vs [%d %d]\n", table.icmpInStats.dwMsgs, nsi_stats.in_msgs, nsi_stats2.in_msgs );
+    ok( bounded( table.icmpInStats.dwErrors, nsi_stats.in_errors, nsi_stats2.in_errors ),
+        "%d vs [%d %d]\n", table.icmpInStats.dwErrors, nsi_stats.in_errors, nsi_stats2.in_errors );
+    ok( bounded( table.icmpOutStats.dwMsgs, nsi_stats.out_msgs, nsi_stats2.out_msgs ),
+        "%d vs [%d %d]\n", table.icmpOutStats.dwMsgs, nsi_stats.out_msgs, nsi_stats2.out_msgs );
+    ok( bounded( table.icmpOutStats.dwErrors, nsi_stats.out_errors, nsi_stats2.out_errors ),
+        "%d vs [%d %d]\n", table.icmpOutStats.dwErrors, nsi_stats.out_errors, nsi_stats2.out_errors );
+    for (i = 0; i < ARRAY_SIZE(nsi_stats.in_type_counts); i++)
+    {
+        winetest_push_context( "%d", i );
+        ok( bounded( table.icmpInStats.rgdwTypeCount[i], nsi_stats.in_type_counts[i], nsi_stats2.in_type_counts[i] ),
+            "%d vs [%d %d]\n", table.icmpInStats.rgdwTypeCount[i], nsi_stats.in_type_counts[i], nsi_stats2.in_type_counts[i] );
+        ok( bounded( table.icmpOutStats.rgdwTypeCount[i], nsi_stats.out_type_counts[i], nsi_stats2.out_type_counts[i] ),
+            "%d vs [%d %d]\n", table.icmpOutStats.rgdwTypeCount[i], nsi_stats.out_type_counts[i], nsi_stats2.out_type_counts[i] );
+        winetest_pop_context();
+    }
+err:
+    winetest_pop_context();
+}
+
+
+static void test_ip_ipstats( int family )
+{
+    const NPI_MODULEID *mod = (family == AF_INET) ? &NPI_MS_IPV4_MODULEID : &NPI_MS_IPV6_MODULEID;
+    struct nsi_ip_ipstats_dynamic dyn, dyn2;
+    struct nsi_ip_ipstats_static stat;
+    MIB_IPSTATS table;
+    DWORD err;
+
+    winetest_push_context( family == AF_INET ? "AF_INET" : "AF_INET6" );
+
+    /* The table appears to consist of a single object without a key.  The rw data does exist but
+       isn't part of GetIpStatisticsEx() and isn't yet tested */
+    err = NsiGetAllParameters( 1, mod, NSI_IP_IPSTATS_TABLE, NULL, 0, NULL, 0, &dyn, sizeof(dyn), &stat, sizeof(stat) );
+    ok( !err, "got %x\n", err );
+    if (err) goto err;
+
+    err = GetIpStatisticsEx( &table, family );
+    ok( !err, "got %d\n", err );
+
+    err = NsiGetAllParameters( 1, mod, NSI_IP_IPSTATS_TABLE, NULL, 0, NULL, 0, &dyn2, sizeof(dyn2), NULL, 0 );
+    ok( !err, "got %x\n", err );
+
+    /* dwForwarding and dwDefaultTTL come from the compartment table */
+    ok( bounded( table.dwInReceives, dyn.in_recv, dyn2.in_recv ), "mismatch\n" );
+    ok( bounded( table.dwInHdrErrors, dyn.in_hdr_errs, dyn2.in_hdr_errs ), "mismatch\n" );
+    ok( bounded( table.dwInAddrErrors, dyn.in_addr_errs, dyn2.in_addr_errs ), "mismatch\n" );
+    ok( bounded( table.dwForwDatagrams, dyn.fwd_dgrams, dyn2.fwd_dgrams ), "mismatch\n" );
+    ok( bounded( table.dwInUnknownProtos, dyn.in_unk_protos, dyn2.in_unk_protos ), "mismatch\n" );
+    ok( bounded( table.dwInDiscards, dyn.in_discards, dyn2.in_discards ), "mismatch\n" );
+    ok( bounded( table.dwInDelivers, dyn.in_delivers, dyn2.in_delivers ), "mismatch\n" );
+    ok( bounded( table.dwOutRequests, dyn.out_reqs, dyn2.out_reqs ), "mismatch\n" );
+    ok( bounded( table.dwRoutingDiscards, dyn.routing_discards, dyn2.routing_discards ), "mismatch\n" );
+    ok( bounded( table.dwOutDiscards, dyn.out_discards, dyn2.out_discards ), "mismatch\n" );
+    ok( bounded( table.dwOutNoRoutes, dyn.out_no_routes, dyn2.out_no_routes ), "mismatch\n" );
+    ok( table.dwReasmTimeout == stat.reasm_timeout, "mismatch\n" );
+    ok( bounded( table.dwReasmReqds, dyn.reasm_reqds, dyn2.reasm_reqds ), "mismatch\n" );
+    ok( bounded( table.dwReasmOks, dyn.reasm_oks, dyn2.reasm_oks ), "mismatch\n" );
+    ok( bounded( table.dwReasmFails, dyn.reasm_fails, dyn2.reasm_fails ), "mismatch\n" );
+    ok( bounded( table.dwFragOks, dyn.frag_oks, dyn2.frag_oks ), "mismatch\n" );
+    ok( bounded( table.dwFragFails, dyn.frag_fails, dyn2.frag_fails ), "mismatch\n" );
+    ok( bounded( table.dwFragCreates, dyn.frag_creates, dyn2.frag_creates ), "mismatch\n" );
+    /* dwNumIf, dwNumAddr and dwNumRoutes come from the compartment table */
+
+err:
+    winetest_pop_context();
+}
+
 static void test_ip_unicast( int family )
 {
     DWORD rw_sizes[] = { FIELD_OFFSET(struct nsi_ip_unicast_rw, unk[0]), FIELD_OFFSET(struct nsi_ip_unicast_rw, unk[1]),
@@ -485,6 +614,240 @@ static void test_ip_unicast( int family )
     winetest_pop_context();
 }
 
+static void test_ip_neighbour( int family )
+{
+    const NPI_MODULEID *mod = (family == AF_INET) ? &NPI_MS_IPV4_MODULEID : &NPI_MS_IPV6_MODULEID;
+    DWORD err, i, count, count2, attempt;
+    struct nsi_ipv4_neighbour_key *key_tbl, *key_tbl_2, *key4;
+    struct nsi_ipv6_neighbour_key *key6;
+    struct nsi_ip_neighbour_rw *rw_tbl, *rw;
+    struct nsi_ip_neighbour_dynamic *dyn_tbl, *dyn_tbl_2, *dyn;
+    MIB_IPNET_TABLE2 *table;
+    DWORD key_size = (family == AF_INET) ? sizeof(struct nsi_ipv4_neighbour_key) : sizeof(struct nsi_ipv6_neighbour_key);
+
+    winetest_push_context( family == AF_INET ? "AF_INET" : "AF_INET6" );
+
+    for (attempt = 0; attempt < 5; attempt++)
+    {
+        err = NsiAllocateAndGetTable( 1, mod, NSI_IP_NEIGHBOUR_TABLE, (void **)&key_tbl, key_size,
+                                      (void **)&rw_tbl, sizeof(*rw), (void **)&dyn_tbl, sizeof(*dyn),
+                                      NULL, 0, &count, 0 );
+todo_wine_if( family == AF_INET6 )
+        ok( !err, "got %x\n", err );
+        if (err) goto err;
+
+        err = GetIpNetTable2( family, &table );
+        ok( !err, "got %x\n", err );
+
+        err = NsiAllocateAndGetTable( 1, mod, NSI_IP_NEIGHBOUR_TABLE, (void **)&key_tbl_2, key_size,
+                                      NULL, 0, (void **)&dyn_tbl_2, sizeof(*dyn),
+                                      NULL, 0, &count2, 0 );
+        ok( !err, "got %x\n", err );
+        if (count == count2 && !memcmp( dyn_tbl, dyn_tbl_2, count * sizeof(*dyn) )) break;
+        NsiFreeTable( key_tbl_2, NULL, dyn_tbl_2, NULL );
+        NsiFreeTable( key_tbl, rw_tbl, dyn_tbl, NULL );
+    }
+
+    ok( count == table->NumEntries, "%d vs %d\n", count, table->NumEntries );
+
+    for (i = 0; i < count; i++)
+    {
+        MIB_IPNET_ROW2 *row = table->Table + i;
+        rw = rw_tbl + i;
+        dyn = dyn_tbl + i;
+
+        if (family == AF_INET)
+        {
+            key4 = key_tbl + i;
+            ok( key4->addr.s_addr == row->Address.Ipv4.sin_addr.s_addr, "%08x vs %08x\n", key4->addr.s_addr,
+                row->Address.Ipv4.sin_addr.s_addr );
+            ok( key4->luid.Value == row->InterfaceLuid.Value, "%s vs %s\n", wine_dbgstr_longlong( key4->luid.Value ),
+                wine_dbgstr_longlong( row->InterfaceLuid.Value ) );
+            ok( key4->luid2.Value == row->InterfaceLuid.Value, "mismatch\n" );
+        }
+        else if (family == AF_INET6)
+        {
+            key6 = (struct nsi_ipv6_neighbour_key *)key_tbl + i;
+            ok( !memcmp( key6->addr.s6_addr, row->Address.Ipv6.sin6_addr.s6_addr, sizeof(IN6_ADDR) ), "mismatch\n" );
+            ok( key6->luid.Value == row->InterfaceLuid.Value, "mismatch\n" );
+            ok( key6->luid2.Value == row->InterfaceLuid.Value, "mismatch\n" );
+        }
+
+        ok( dyn->phys_addr_len == row->PhysicalAddressLength, "mismatch\n" );
+        ok( !memcmp( rw->phys_addr, row->PhysicalAddress, dyn->phys_addr_len ), "mismatch\n" );
+        ok( dyn->state == row->State, "%x vs %x\n", dyn->state, row->State );
+        ok( dyn->flags.is_router == row->IsRouter, "%x vs %x\n", dyn->flags.is_router, row->IsRouter );
+        ok( dyn->flags.is_unreachable == row->IsUnreachable, "%x vs %x\n", dyn->flags.is_unreachable, row->IsUnreachable );
+        ok( dyn->time == row->ReachabilityTime.LastReachable, "%x vs %x\n", dyn->time, row->ReachabilityTime.LastReachable );
+    }
+
+    NsiFreeTable( key_tbl_2, NULL, dyn_tbl_2, NULL );
+    NsiFreeTable( key_tbl, rw_tbl, dyn_tbl, NULL );
+
+err:
+    winetest_pop_context();
+}
+
+static void test_ip_forward( int family )
+{
+    DWORD rw_sizes[] = { FIELD_OFFSET(struct nsi_ip_forward_rw, unk),
+                         FIELD_OFFSET(struct nsi_ip_forward_rw, unk2), sizeof(struct nsi_ip_forward_rw) };
+    DWORD dyn_sizes4[] = { sizeof(struct nsi_ipv4_forward_dynamic) - 3 * sizeof(DWORD),
+                           sizeof(struct nsi_ipv4_forward_dynamic) };
+    DWORD dyn_sizes6[] = { sizeof(struct nsi_ipv6_forward_dynamic) - 3 * sizeof(DWORD),
+                           sizeof(struct nsi_ipv6_forward_dynamic) };
+    DWORD *dyn_sizes = family == AF_INET ? dyn_sizes4 : dyn_sizes6;
+    struct nsi_ipv4_forward_key *key_tbl, *key4;
+    struct nsi_ipv6_forward_key *key6;
+    struct nsi_ip_forward_rw *rw_tbl, *rw;
+    struct nsi_ipv4_forward_dynamic *dyn_tbl, *dyn4;
+    struct nsi_ipv6_forward_dynamic *dyn6;
+    struct nsi_ip_forward_static *stat_tbl, *stat;
+    MIB_IPFORWARD_TABLE2 *table;
+    const NPI_MODULEID *mod = (family == AF_INET) ? &NPI_MS_IPV4_MODULEID : &NPI_MS_IPV6_MODULEID;
+    DWORD key_size = (family == AF_INET) ? sizeof(*key4) : sizeof(*key6);
+    DWORD err, count, i, rw_size, dyn_size;
+
+    winetest_push_context( family == AF_INET ? "AF_INET" : "AF_INET6" );
+
+    for (i = 0; i < ARRAY_SIZE(rw_sizes); i++)
+    {
+        err = NsiAllocateAndGetTable( 1, mod, NSI_IP_FORWARD_TABLE, (void **)&key_tbl, key_size,
+                                      (void **)&rw_tbl, rw_sizes[i], NULL, 0,
+                                      NULL, 0, &count, 0 );
+        if (!err) break;
+    }
+    ok( !err, "got %d\n", err );
+    if (err) { winetest_pop_context(); return; }
+    rw_size = rw_sizes[i];
+    NsiFreeTable( key_tbl, rw_tbl, NULL, NULL );
+
+    for (i = 0; i < ARRAY_SIZE(dyn_sizes4); i++)
+    {
+        err = NsiAllocateAndGetTable( 1, mod, NSI_IP_FORWARD_TABLE, (void **)&key_tbl, key_size,
+                                      (void **)&rw_tbl, rw_size, (void **)&dyn_tbl, dyn_sizes[i],
+                                      (void **)&stat_tbl, sizeof(*stat_tbl), &count, 0 );
+        if (!err) break;
+    }
+    ok( !err, "got %d\n", err );
+    dyn_size = dyn_sizes[i];
+
+    err = GetIpForwardTable2( family, &table );
+    ok( !err, "got %d\n", err );
+    ok( table->NumEntries == count, "table entries %d count %d\n", table->NumEntries, count );
+
+    for (i = 0; i < count; i++)
+    {
+        MIB_IPFORWARD_ROW2 *row = table->Table + i;
+        rw = (struct nsi_ip_forward_rw *)((BYTE *)rw_tbl + i * rw_size);
+        stat = stat_tbl + i;
+        winetest_push_context( "%d", i );
+
+        ok( row->DestinationPrefix.Prefix.si_family == family, "mismatch\n" );
+
+        if (family == AF_INET)
+        {
+            key4 = key_tbl + i;
+            dyn4 = (struct nsi_ipv4_forward_dynamic *)((BYTE *)dyn_tbl + i * dyn_size);
+
+            ok( row->InterfaceLuid.Value == key4->luid.Value, "mismatch\n" );
+            ok( row->InterfaceLuid.Value == key4->luid2.Value, "mismatch\n" );
+            ok( row->DestinationPrefix.Prefix.Ipv4.sin_addr.s_addr == key4->prefix.s_addr, "mismatch\n" );
+            ok( row->DestinationPrefix.Prefix.Ipv4.sin_port == 0, "mismatch\n" );
+            ok( row->DestinationPrefix.PrefixLength == key4->prefix_len, "mismatch\n" );
+            ok( row->NextHop.Ipv4.sin_addr.s_addr == key4->next_hop.s_addr, "mismatch\n" );
+            ok( row->NextHop.Ipv4.sin_port == 0, "mismatch\n" );
+            ok( row->Age == dyn4->age, "mismatch\n" );
+        }
+        else
+        {
+            key6 = (struct nsi_ipv6_forward_key *)key_tbl + i;
+            dyn6 = (struct nsi_ipv6_forward_dynamic *)((BYTE *)dyn_tbl + i * dyn_size);
+
+            ok( row->InterfaceLuid.Value == key6->luid.Value, "mismatch\n" );
+            ok( row->InterfaceLuid.Value == key6->luid2.Value, "mismatch\n" );
+            ok( !memcmp( &row->DestinationPrefix.Prefix.Ipv6.sin6_addr, &key6->prefix, sizeof(key6->prefix) ),
+                "mismatch\n" );
+            ok( row->DestinationPrefix.Prefix.Ipv6.sin6_port == 0, "mismatch\n" );
+            ok( row->DestinationPrefix.Prefix.Ipv6.sin6_flowinfo == 0, "mismatch\n" );
+            ok( row->DestinationPrefix.Prefix.Ipv6.sin6_scope_id == 0, "mismatch\n" );
+            ok( row->DestinationPrefix.PrefixLength == key6->prefix_len, "mismatch\n" );
+            ok( !memcmp( &row->NextHop.Ipv6.sin6_addr, &key6->next_hop, sizeof(key6->next_hop) ), "mismatch\n" );
+            ok( row->NextHop.Ipv6.sin6_port == 0, "mismatch\n" );
+            ok( row->NextHop.Ipv6.sin6_flowinfo == 0, "mismatch\n" );
+            ok( row->NextHop.Ipv6.sin6_scope_id == 0, "mismatch\n" );
+            ok( row->Age == dyn6->age, "mismatch\n" );
+        }
+
+        ok( row->InterfaceIndex == stat->if_index, "mismatch\n" );
+        ok( row->SitePrefixLength == rw->site_prefix_len, "mismatch\n" );
+        ok( row->ValidLifetime == rw->valid_lifetime, "mismatch\n" );
+        ok( row->PreferredLifetime == rw->preferred_lifetime, "mismatch\n" );
+
+        ok( row->Metric == rw->metric, "mismatch\n" );
+        ok( row->Protocol == rw->protocol, "mismatch\n" );
+        ok( row->Loopback == rw->loopback, "mismatch\n" );
+        ok( row->AutoconfigureAddress == rw->autoconf, "mismatch\n" );
+        ok( row->Publish == rw->publish, "mismatch\n" );
+        ok( row->Immortal == rw->immortal, "mismatch\n" );
+        ok( row->Origin == stat->origin, "mismatch\n" );
+
+        winetest_pop_context();
+    }
+
+    FreeMibTable( table );
+    NsiFreeTable( key_tbl, rw_tbl, dyn_tbl, stat_tbl );
+    winetest_pop_context();
+}
+
+static void test_tcp_stats( int family )
+{
+    DWORD err;
+    USHORT key = family;
+    struct nsi_tcp_stats_dynamic dyn, dyn2;
+    struct nsi_tcp_stats_static stat;
+    MIB_TCPSTATS table;
+
+    winetest_push_context( family == AF_INET ? "AF_INET" : "AF_INET6" );
+
+    err = NsiGetAllParameters( 1, &NPI_MS_TCP_MODULEID, NSI_TCP_STATS_TABLE, &key, sizeof(key), NULL, 0,
+                               &dyn, sizeof(dyn), &stat, sizeof(stat) );
+    ok( !err, "got %x\n", err );
+
+    err = GetTcpStatisticsEx( &table, family );
+    ok( !err, "got %d\n", err );
+
+    err = NsiGetAllParameters( 1, &NPI_MS_TCP_MODULEID, NSI_TCP_STATS_TABLE, &key, sizeof(key), NULL, 0,
+                               &dyn2, sizeof(dyn), NULL, 0 );
+    ok( !err, "got %x\n", err );
+
+    ok( table.dwRtoAlgorithm == stat.rto_algo, "%d vs %d\n", table.dwRtoAlgorithm, stat.rto_algo );
+    ok( table.dwRtoMin == stat.rto_min, "%d vs %d\n", table.dwRtoMin, stat.rto_min );
+    ok( table.dwRtoMax == stat.rto_max,  "%d vs %d\n", table.dwRtoMax, stat.rto_max );
+    ok( table.dwMaxConn == stat.max_conns, "%d vs %d\n", table.dwMaxConn, stat.max_conns );
+
+    ok( unstable( table.dwActiveOpens == dyn.active_opens ), "%d vs %d\n", table.dwActiveOpens, dyn.active_opens );
+    ok( unstable( table.dwPassiveOpens == dyn.passive_opens ), "%d vs %d\n", table.dwPassiveOpens, dyn.passive_opens );
+    ok( bounded( table.dwAttemptFails, dyn.attempt_fails, dyn2.attempt_fails ), "%d vs [%d %d]\n",
+        table.dwAttemptFails, dyn.attempt_fails, dyn2.attempt_fails );
+    ok( bounded( table.dwEstabResets, dyn.est_rsts, dyn2.est_rsts ), "%d vs [%d %d]\n",
+        table.dwEstabResets, dyn.est_rsts, dyn2.est_rsts );
+    ok( unstable( table.dwCurrEstab == dyn.cur_est ), "%d vs %d\n", table.dwCurrEstab, dyn.cur_est );
+    ok( bounded( table.dwInSegs, dyn.in_segs, dyn2.in_segs ), "%d vs [%I64d %I64d]\n",
+        table.dwInSegs, dyn.in_segs, dyn2.in_segs );
+    ok( bounded( table.dwOutSegs, dyn.out_segs, dyn2.out_segs ), "%d vs [%I64d %I64d]\n",
+        table.dwOutSegs, dyn.out_segs, dyn2.out_segs );
+    ok( bounded( table.dwRetransSegs, dyn.retrans_segs, dyn2.retrans_segs ), "%d vs [%d %d]\n",
+        table.dwRetransSegs, dyn.retrans_segs, dyn2.retrans_segs );
+    ok( bounded( table.dwInErrs, dyn.in_errs, dyn2.in_errs ), "%d vs [%d %d]\n",
+        table.dwInErrs, dyn.in_errs, dyn2.in_errs );
+    ok( bounded( table.dwOutRsts, dyn.out_rsts, dyn2.out_rsts ), "%d vs [%d %d]\n",
+        table.dwOutRsts, dyn.out_rsts, dyn2.out_rsts );
+    ok( unstable( table.dwNumConns == dyn.num_conns ), "%d vs %d\n", table.dwNumConns, dyn.num_conns );
+
+    winetest_pop_context();
+}
+
 START_TEST( nsi )
 {
     test_nsi_api();
@@ -492,6 +855,19 @@ START_TEST( nsi )
     test_ndis_ifinfo();
     test_ndis_index_luid();
 
+    test_ip_cmpt( AF_INET );
+    test_ip_cmpt( AF_INET6 );
+    test_ip_icmpstats( AF_INET );
+    test_ip_icmpstats( AF_INET6 );
+    test_ip_ipstats( AF_INET );
+    test_ip_ipstats( AF_INET6 );
     test_ip_unicast( AF_INET );
     test_ip_unicast( AF_INET6 );
+    test_ip_neighbour( AF_INET );
+    test_ip_neighbour( AF_INET6 );
+    test_ip_forward( AF_INET );
+    test_ip_forward( AF_INET6 );
+
+    test_tcp_stats( AF_INET );
+    test_tcp_stats( AF_INET6 );
 }

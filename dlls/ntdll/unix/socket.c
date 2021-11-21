@@ -23,6 +23,7 @@
 #endif
 
 #include "config.h"
+#define _GNU_SOURCE /* for struct in6_pktinfo */
 #include <errno.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -39,7 +40,8 @@
 #include <sys/socket.h>
 #endif
 #ifdef HAVE_NETINET_IN_H
-#include <netinet/in.h>
+# define __APPLE_USE_RFC_3542
+# include <netinet/in.h>
 #endif
 #ifdef HAVE_NETINET_TCP_H
 # include <netinet/tcp.h>
@@ -93,26 +95,6 @@
 #endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(winsock);
-
-#define FILE_USE_FILE_POINTER_POSITION ((LONGLONG)-2)
-
-static async_data_t server_async( HANDLE handle, struct async_fileio *user, HANDLE event,
-                                  PIO_APC_ROUTINE apc, void *apc_context, IO_STATUS_BLOCK *io )
-{
-    async_data_t async;
-    async.handle      = wine_server_obj_handle( handle );
-    async.user        = wine_server_client_ptr( user );
-    async.iosb        = wine_server_client_ptr( io );
-    async.event       = wine_server_obj_handle( event );
-    async.apc         = wine_server_client_ptr( apc );
-    async.apc_context = wine_server_client_ptr( apc_context );
-    return async;
-}
-
-static NTSTATUS wait_async( HANDLE handle, BOOL alertable )
-{
-    return NtWaitForSingleObject( handle, alertable, NULL );
-}
 
 union unix_sockaddr
 {
@@ -452,6 +434,40 @@ static int convert_control_headers(struct msghdr *hdr, WSABUF *control)
                 }
                 break;
 
+            case IPPROTO_IPV6:
+                switch (cmsg_unix->cmsg_type)
+                {
+#if defined(IPV6_HOPLIMIT)
+                    case IPV6_HOPLIMIT:
+                    {
+                        ptr = fill_control_message( WS_IPPROTO_IPV6, WS_IPV6_HOPLIMIT, ptr, &ctlsize,
+                                                    CMSG_DATA(cmsg_unix), sizeof(INT) );
+                        if (!ptr) goto error;
+                        break;
+                    }
+#endif /* IPV6_HOPLIMIT */
+
+#if defined(IPV6_PKTINFO) && defined(HAVE_STRUCT_IN6_PKTINFO_IPI6_ADDR)
+                    case IPV6_PKTINFO:
+                    {
+                        struct in6_pktinfo *data_unix = (struct in6_pktinfo *)CMSG_DATA(cmsg_unix);
+                        struct WS_in6_pktinfo data_win;
+
+                        memcpy(&data_win.ipi6_addr, &data_unix->ipi6_addr.s6_addr, 16);
+                        data_win.ipi6_ifindex = data_unix->ipi6_ifindex;
+                        ptr = fill_control_message( WS_IPPROTO_IPV6, WS_IPV6_PKTINFO, ptr, &ctlsize,
+                                                    (void *)&data_win, sizeof(data_win) );
+                        if (!ptr) goto error;
+                        break;
+                    }
+#endif /* IPV6_PKTINFO */
+
+                    default:
+                        FIXME("Unhandled IPPROTO_IPV6 message header type %d\n", cmsg_unix->cmsg_type);
+                        break;
+                }
+                break;
+
             default:
                 FIXME("Unhandled message header level %d\n", cmsg_unix->cmsg_level);
                 break;
@@ -623,7 +639,7 @@ static NTSTATUS sock_recv( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
     {
         req->status = status;
         req->total  = information;
-        req->async  = server_async( handle, &async->io, event, apc, apc_user, io );
+        req->async  = server_async( handle, &async->io, event, apc, apc_user, iosb_client_ptr(io) );
         req->oob    = !!(unix_flags & MSG_OOB);
         status = wine_server_call( req );
         wait_handle = wine_server_ptr_handle( reply->wait );
@@ -766,7 +782,7 @@ static NTSTATUS sock_poll( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
 
     SERVER_START_REQ( poll_socket )
     {
-        req->async = server_async( handle, &async->io, event, apc, apc_user, io );
+        req->async = server_async( handle, &async->io, event, apc, apc_user, iosb_client_ptr(io) );
         req->timeout = params->timeout;
         wine_server_add_data( req, input, params->count * sizeof(*input) );
         wine_server_set_reply( req, async->sockets, params->count * sizeof(async->sockets[0]) );
@@ -929,7 +945,7 @@ static NTSTATUS sock_send( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
     {
         req->status = status;
         req->total  = async->sent_len;
-        req->async  = server_async( handle, &async->io, event, apc, apc_user, io );
+        req->async  = server_async( handle, &async->io, event, apc, apc_user, iosb_client_ptr(io) );
         status = wine_server_call( req );
         wait_handle = wine_server_ptr_handle( reply->wait );
         options     = reply->options;
@@ -1109,7 +1125,7 @@ static NTSTATUS sock_transmit( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc,
     {
         req->status = STATUS_PENDING;
         req->total  = 0;
-        req->async  = server_async( handle, &async->io, event, apc, apc_user, io );
+        req->async  = server_async( handle, &async->io, event, apc, apc_user, iosb_client_ptr(io) );
         status = wine_server_call( req );
         wait_handle = wine_server_ptr_handle( reply->wait );
         options     = reply->options;
@@ -1129,10 +1145,12 @@ static NTSTATUS sock_transmit( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc,
 static void complete_async( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
                             IO_STATUS_BLOCK *io, NTSTATUS status, ULONG_PTR information )
 {
+    ULONG_PTR iosb_ptr = iosb_client_ptr(io);
+
     io->Status = status;
     io->Information = information;
     if (event) NtSetEvent( event, NULL );
-    if (apc) NtQueueApcThread( GetCurrentThread(), (PNTAPCFUNC)apc, (ULONG_PTR)apc_user, (ULONG_PTR)io, 0 );
+    if (apc) NtQueueApcThread( GetCurrentThread(), (PNTAPCFUNC)apc, (ULONG_PTR)apc_user, iosb_ptr, 0 );
     if (apc_user) add_completion( handle, (ULONG_PTR)apc_user, status, information, FALSE );
 }
 
@@ -1882,6 +1900,22 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         case IOCTL_AFD_WINE_SET_IPV6_MULTICAST_LOOP:
             return do_setsockopt( handle, io, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, in_buffer, in_size );
 
+#ifdef IPV6_RECVHOPLIMIT
+        case IOCTL_AFD_WINE_GET_IPV6_RECVHOPLIMIT:
+            return do_getsockopt( handle, io, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IPV6_RECVHOPLIMIT:
+            return do_setsockopt( handle, io, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, in_buffer, in_size );
+#endif
+
+#ifdef IPV6_RECVPKTINFO
+        case IOCTL_AFD_WINE_GET_IPV6_RECVPKTINFO:
+            return do_getsockopt( handle, io, IPPROTO_IPV6, IPV6_RECVPKTINFO, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IPV6_RECVPKTINFO:
+            return do_setsockopt( handle, io, IPPROTO_IPV6, IPV6_RECVPKTINFO, in_buffer, in_size );
+#endif
+
         case IOCTL_AFD_WINE_GET_IPV6_UNICAST_HOPS:
             return do_getsockopt( handle, io, IPPROTO_IPV6, IPV6_UNICAST_HOPS, out_buffer, out_size );
 
@@ -1921,6 +1955,89 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             if (needs_close) close( fd );
             return ret ? sock_errno_to_status( errno ) : STATUS_SUCCESS;
         }
+
+#ifdef SOL_IPX
+        case IOCTL_AFD_WINE_GET_IPX_PTYPE:
+            return do_getsockopt( handle, io, SOL_IPX, IPX_TYPE, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_IPX_PTYPE:
+            return do_setsockopt( handle, io, SOL_IPX, IPX_TYPE, in_buffer, in_size );
+#elif defined(SO_DEFAULT_HEADERS)
+        case IOCTL_AFD_WINE_GET_IPX_PTYPE:
+        {
+            int fd, needs_close = FALSE;
+            struct ipx value;
+            socklen_t len = sizeof(value);
+            int ret;
+
+            if ((status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL, NULL )))
+                return status;
+
+            ret = getsockopt( fd, 0, SO_DEFAULT_HEADERS, &value, &len );
+            if (needs_close) close( fd );
+            if (ret) return sock_errno_to_status( errno );
+            *(DWORD *)out_buffer = value.ipx_pt;
+            return STATUS_SUCCESS;
+        }
+
+        case IOCTL_AFD_WINE_SET_IPX_PTYPE:
+        {
+            struct ipx value = {0};
+
+            /* FIXME: should we retrieve SO_DEFAULT_HEADERS first and modify it? */
+            value.ipx_pt = *(DWORD *)in_buffer;
+            return do_setsockopt( handle, io, 0, SO_DEFAULT_HEADERS, &value, sizeof(value) );
+        }
+#endif
+
+#ifdef HAS_IRDA
+#define MAX_IRDA_DEVICES 10
+        case IOCTL_AFD_WINE_GET_IRLMP_ENUMDEVICES:
+        {
+            char buffer[offsetof( struct irda_device_list, dev[MAX_IRDA_DEVICES] )];
+            struct irda_device_list *unix_list = (struct irda_device_list *)buffer;
+            socklen_t len = sizeof(buffer);
+            DEVICELIST *ws_list = out_buffer;
+            int fd, needs_close = FALSE;
+            NTSTATUS status;
+            unsigned int i;
+            int ret;
+
+            if ((status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL, NULL )))
+                return status;
+
+            ret = getsockopt( fd, SOL_IRLMP, IRLMP_ENUMDEVICES, buffer, &len );
+            if (needs_close) close( fd );
+            if (ret) return sock_errno_to_status( errno );
+
+            io->Information = offsetof( DEVICELIST, Device[unix_list->len] );
+            if (out_size < io->Information)
+                return STATUS_BUFFER_TOO_SMALL;
+
+            TRACE( "IRLMP_ENUMDEVICES: got %u devices:\n", unix_list->len );
+            ws_list->numDevice = unix_list->len;
+            for (i = 0; i < unix_list->len; ++i)
+            {
+                const struct irda_device_info *unix_dev = &unix_list->dev[i];
+                IRDA_DEVICE_INFO *ws_dev = &ws_list->Device[i];
+
+                TRACE( "saddr %#08x, daddr %#08x, info %s, hints 0x%02x%02x\n",
+                       unix_dev->saddr, unix_dev->daddr, unix_dev->info, unix_dev->hints[0], unix_dev->hints[1] );
+                memcpy( ws_dev->irdaDeviceID, &unix_dev->daddr, sizeof(unix_dev->daddr) );
+                memcpy( ws_dev->irdaDeviceName, unix_dev->info, sizeof(unix_dev->info) );
+                ws_dev->irdaDeviceHints1 = unix_dev->hints[0];
+                ws_dev->irdaDeviceHints2 = unix_dev->hints[1];
+                ws_dev->irdaCharSet = unix_dev->charset;
+            }
+            return STATUS_SUCCESS;
+        }
+#endif
+
+        case IOCTL_AFD_WINE_GET_TCP_NODELAY:
+            return do_getsockopt( handle, io, IPPROTO_TCP, TCP_NODELAY, out_buffer, out_size );
+
+        case IOCTL_AFD_WINE_SET_TCP_NODELAY:
+            return do_setsockopt( handle, io, IPPROTO_TCP, TCP_NODELAY, in_buffer, in_size );
 
         default:
         {

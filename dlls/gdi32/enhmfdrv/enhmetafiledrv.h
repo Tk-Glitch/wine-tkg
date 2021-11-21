@@ -41,7 +41,6 @@ typedef struct
     HBRUSH     dc_brush;
     HPEN       dc_pen;
     INT        restoring;          /* RestoreDC counter */
-    INT        modifying_transform;/* Counter for functions that can change world transform */
     BOOL       path;
     INT        dev_caps[COLORMGMTCAPS + 1];
 } EMFDRV_PDEVICE;
@@ -68,10 +67,7 @@ extern BOOL     CDECL EMFDRV_BitBlt( PHYSDEV devDst, INT xDst, INT yDst, INT wid
                                      PHYSDEV devSrc, INT xSrc, INT ySrc, DWORD rop ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                                     INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
-extern INT      CDECL EMFDRV_ExcludeClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
-extern INT      CDECL EMFDRV_ExtSelectClipRgn( PHYSDEV dev, HRGN hrgn, INT mode ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *lprect, LPCWSTR str,
                                          UINT count, const INT *lpDx ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_FillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
@@ -82,13 +78,8 @@ extern BOOL     CDECL EMFDRV_GdiComment( PHYSDEV dev, UINT bytes, const BYTE *bu
 extern INT      CDECL EMFDRV_GetDeviceCaps( PHYSDEV dev, INT cap ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
                                            void *grad_array, ULONG ngrad, ULONG mode ) DECLSPEC_HIDDEN;
-extern INT      CDECL EMFDRV_IntersectClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_InvertRgn( PHYSDEV dev, HRGN hrgn ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_LineTo( PHYSDEV dev, INT x, INT y ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_ModifyWorldTransform( PHYSDEV dev, const XFORM *xform, DWORD mode ) DECLSPEC_HIDDEN;
-extern INT      CDECL EMFDRV_OffsetClipRgn( PHYSDEV dev, INT x, INT y ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_OffsetViewportOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_OffsetWindowOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_Pie( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                                   INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
@@ -102,35 +93,19 @@ extern BOOL     CDECL EMFDRV_Rectangle( PHYSDEV dev, INT left, INT top, INT righ
 extern BOOL     CDECL EMFDRV_RestoreDC( PHYSDEV dev, INT level ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                                         INT ell_width, INT ell_height ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_ScaleViewportExtEx( PHYSDEV dev, INT xNum, INT xDenom,
-                                                 INT yNum, INT yDenom, SIZE *size ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_ScaleWindowExtEx( PHYSDEV dev, INT xNum, INT xDenom,
                                                INT yNum, INT yDenom, SIZE *size ) DECLSPEC_HIDDEN;
 extern HBITMAP  CDECL EMFDRV_SelectBitmap( PHYSDEV dev, HBITMAP handle ) DECLSPEC_HIDDEN;
-extern HBRUSH   CDECL EMFDRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern BOOL     CDECL EMFDRV_SelectClipPath( PHYSDEV dev, INT iMode ) DECLSPEC_HIDDEN;
 extern HFONT    CDECL EMFDRV_SelectFont( PHYSDEV dev, HFONT handle, UINT *aa_flags ) DECLSPEC_HIDDEN;
-extern HPEN     CDECL EMFDRV_SelectPen( PHYSDEV dev, HPEN handle, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
-extern HPALETTE CDECL EMFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPal, BOOL force ) DECLSPEC_HIDDEN;
 extern COLORREF CDECL EMFDRV_SetBkColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
 extern COLORREF CDECL EMFDRV_SetDCBrushColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
 extern COLORREF CDECL EMFDRV_SetDCPenColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
 extern INT      CDECL EMFDRV_SetDIBitsToDevice( PHYSDEV dev, INT xDest, INT yDest, DWORD cx, DWORD cy, INT xSrc,
                                                 INT ySrc, UINT startscan, UINT lines, LPCVOID bits,
                                                 BITMAPINFO *info, UINT coloruse ) DECLSPEC_HIDDEN;
-extern DWORD    CDECL EMFDRV_SetLayout( PHYSDEV dev, DWORD layout ) DECLSPEC_HIDDEN;
-extern INT      CDECL EMFDRV_SetMapMode( PHYSDEV dev, INT mode ) DECLSPEC_HIDDEN;
-extern DWORD    CDECL EMFDRV_SetMapperFlags( PHYSDEV dev, DWORD flags ) DECLSPEC_HIDDEN;
 extern COLORREF CDECL EMFDRV_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color ) DECLSPEC_HIDDEN;
 extern COLORREF CDECL EMFDRV_SetTextColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_SetTextJustification( PHYSDEV dev, INT nBreakExtra, INT nBreakCount ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_SetViewportExtEx( PHYSDEV dev, INT x, INT y, SIZE *size ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_SetViewportOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_SetWindowExtEx( PHYSDEV dev, INT x, INT y, SIZE *size ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_SetWindowOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_SetWorldTransform( PHYSDEV dev, const XFORM *xform ) DECLSPEC_HIDDEN;
-extern BOOL     CDECL EMFDRV_StretchBlt( PHYSDEV devDst, struct bitblt_coords *dst,
-                                         PHYSDEV devSrc, struct bitblt_coords *src, DWORD rop ) DECLSPEC_HIDDEN;
 extern INT      CDECL EMFDRV_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst, INT heightDst,
                                             INT xSrc, INT ySrc, INT widthSrc, INT heightSrc,
                                             const void *bits, BITMAPINFO *info, UINT wUsage, DWORD dwRop ) DECLSPEC_HIDDEN;

@@ -55,16 +55,9 @@ struct gdi_obj_funcs
     BOOL    (*pDeleteObject)( HGDIOBJ handle );
 };
 
-struct hdc_list
-{
-    HDC hdc;
-    struct hdc_list *next;
-};
-
 struct gdi_obj_header
 {
     const struct gdi_obj_funcs *funcs;       /* type-specific functions */
-    struct hdc_list            *hdcs;        /* list of HDCs interested in this object */
     WORD                        selcount;    /* number of times the object is selected in a DC */
     WORD                        system : 1;  /* system object flag */
     WORD                        deleted : 1; /* whether DeleteObject has been called on this object */
@@ -87,13 +80,6 @@ typedef struct tagDC
     BOOL         bounds_enabled:1; /* bounds tracking is enabled */
     BOOL         path_open:1;      /* path is currently open (only for saved DCs) */
 
-    POINT        wnd_org;          /* Window origin */
-    SIZE         wnd_ext;          /* Window extent */
-    POINT        vport_org;        /* Viewport origin */
-    SIZE         vport_ext;        /* Viewport extent */
-    SIZE         virtual_res;      /* Initially HORZRES,VERTRES. Changed by SetVirtualResolution */
-    SIZE         virtual_size;     /* Initially HORZSIZE,VERTSIZE. Changed by SetVirtualResolution */
-    RECT         vis_rect;         /* visible rectangle in screen coords */
     RECT         device_rect;      /* rectangle for the whole device */
     int          pixel_format;     /* pixel format (for memory DCs) */
     UINT         aa_flags;         /* anti-aliasing flags to pass to GetGlyphOutline for current font */
@@ -115,10 +101,6 @@ typedef struct tagDC
     const struct font_gamma_ramp *font_gamma_ramp;
 
     UINT          font_code_page;
-    POINT         brush_org;
-
-    DWORD         mapperFlags;       /* Font mapper flags */
-    INT           charExtra;         /* Spacing from SetTextCharacterExtra() */
     INT           breakExtra;        /* breakTotalExtra / breakCount */
     INT           breakRem;          /* breakTotalExtra % breakCount */
     ABORTPROC     pAbortProc;        /* AbortProc for Printing */
@@ -290,7 +272,7 @@ struct font_realization_info
     DWORD flags;       /* 1 for bitmap fonts, 3 for scalable fonts */
     DWORD cache_num;   /* keeps incrementing - num of fonts that have been created allowing for caching?? */
     DWORD instance_id; /* identifies a realized font instance */
-    DWORD unk;         /* unknown */
+    DWORD file_count;  /* number of files that make up this font */
     WORD  face_index;  /* face index in case of font collections */
     WORD  simulations; /* 0 bit - bold simulation, 1 bit - oblique simulation */
 };
@@ -453,14 +435,13 @@ extern void GDI_CheckNotLock(void) DECLSPEC_HIDDEN;
 extern UINT GDI_get_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern HGDIOBJ GDI_inc_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern BOOL GDI_dec_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
-extern void GDI_hdc_using_object(HGDIOBJ obj, HDC hdc) DECLSPEC_HIDDEN;
-extern void GDI_hdc_not_using_object(HGDIOBJ obj, HDC hdc) DECLSPEC_HIDDEN;
 extern DWORD get_dpi(void) DECLSPEC_HIDDEN;
 extern DWORD get_system_dpi(void) DECLSPEC_HIDDEN;
 
 /* mapping.c */
 extern BOOL dp_to_lp( DC *dc, POINT *points, INT count ) DECLSPEC_HIDDEN;
 extern void lp_to_dp( DC *dc, POINT *points, INT count ) DECLSPEC_HIDDEN;
+extern BOOL set_map_mode( DC *dc, int mode ) DECLSPEC_HIDDEN;
 
 /* metafile.c */
 extern HMETAFILE MF_Create_HMETAFILE(METAHEADER *mh) DECLSPEC_HIDDEN;
@@ -469,13 +450,11 @@ extern HMETAFILE MF_Create_HMETAFILE(METAHEADER *mh) DECLSPEC_HIDDEN;
 #include <pshpack2.h>
 typedef struct
 {
-    DWORD magic;   /* WMFC */
-    WORD unk04;    /* 1 */
-    WORD unk06;    /* 0 */
-    WORD unk08;    /* 0 */
-    WORD unk0a;    /* 1 */
+    DWORD comment_id;   /* WMFC */
+    DWORD comment_type; /* Always 0x00000001 */
+    DWORD version;      /* Always 0x00010000 */
     WORD checksum;
-    DWORD unk0e;   /* 0 */
+    DWORD flags;        /* Always 0 */
     DWORD num_chunks;
     DWORD chunk_size;
     DWORD remaining_size;
@@ -502,7 +481,6 @@ extern POINT *GDI_Bezier( const POINT *Points, INT count, INT *nPtsOut ) DECLSPE
 
 /* palette.c */
 extern HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg) DECLSPEC_HIDDEN;
-extern UINT WINAPI GDIRealizePalette( HDC hdc ) DECLSPEC_HIDDEN;
 extern HPALETTE PALETTE_Init(void) DECLSPEC_HIDDEN;
 
 /* region.c */
@@ -577,8 +555,6 @@ extern DWORD CDECL nulldrv_BlendImage( PHYSDEV dev, BITMAPINFO *info, const stru
                                        struct bitblt_coords *src, struct bitblt_coords *dst, BLENDFUNCTION func ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_CloseFigure( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_EndPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
-extern INT  CDECL nulldrv_ExcludeClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
-extern INT  CDECL nulldrv_ExtSelectClipRgn( PHYSDEV dev, HRGN rgn, INT mode ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *rect,
                                       LPCWSTR str, UINT count, const INT *dx ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_FillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
@@ -591,29 +567,16 @@ extern COLORREF CDECL nulldrv_GetPixel( PHYSDEV dev, INT x, INT y ) DECLSPEC_HID
 extern UINT CDECL nulldrv_GetSystemPaletteEntries( PHYSDEV dev, UINT start, UINT count, PALETTEENTRY *entries ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
                                         void * grad_array, ULONG ngrad, ULONG mode ) DECLSPEC_HIDDEN;
-extern INT  CDECL nulldrv_IntersectClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_InvertRgn( PHYSDEV dev, HRGN rgn ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_ModifyWorldTransform( PHYSDEV dev, const XFORM *xform, DWORD mode ) DECLSPEC_HIDDEN;
-extern INT  CDECL nulldrv_OffsetClipRgn( PHYSDEV dev, INT x, INT y ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_OffsetViewportOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_OffsetWindowOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_PolyBezier( PHYSDEV dev, const POINT *points, DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_PolyBezierTo( PHYSDEV dev, const POINT *points, DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_PolyDraw( PHYSDEV dev, const POINT *points, const BYTE *types, DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_PolylineTo( PHYSDEV dev, const POINT *points, INT count ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_RestoreDC( PHYSDEV dev, INT level ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_ScaleViewportExtEx( PHYSDEV dev, INT x_num, INT x_denom, INT y_num, INT y_denom, SIZE *size ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_ScaleWindowExtEx( PHYSDEV dev, INT x_num, INT x_denom, INT y_num, INT y_denom, SIZE *size ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_SelectClipPath( PHYSDEV dev, INT mode ) DECLSPEC_HIDDEN;
 extern INT CDECL nulldrv_SetDIBitsToDevice( PHYSDEV dev, INT x_dst, INT y_dst, DWORD width, DWORD height,
                                             INT x_src, INT y_src, UINT start, UINT lines,
                                             const void *bits, BITMAPINFO *info, UINT coloruse ) DECLSPEC_HIDDEN;
-extern INT  CDECL nulldrv_SetMapMode( PHYSDEV dev, INT mode ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_SetViewportExtEx( PHYSDEV dev, INT cx, INT cy, SIZE *size ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_SetViewportOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_SetWindowExtEx( PHYSDEV dev, INT cx, INT cy, SIZE *size ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_SetWindowOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt ) DECLSPEC_HIDDEN;
-extern BOOL CDECL nulldrv_SetWorldTransform( PHYSDEV dev, const XFORM *xform ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
                                       PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop ) DECLSPEC_HIDDEN;
 extern INT  CDECL nulldrv_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst, INT heightDst,

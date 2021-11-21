@@ -24,7 +24,6 @@
 #include <winternl.h>
 #include <winioctl.h>
 #include <mswsock.h>
-#include "wine/server_protocol.h"
 
 #ifdef USE_WS_PREFIX
 # define WS(x)    WS_##x
@@ -223,6 +222,15 @@ struct afd_get_events_params
 #define IOCTL_AFD_WINE_SET_IPV6_UNICAST_IF              WINE_AFD_IOC(278)
 #define IOCTL_AFD_WINE_GET_IPV6_V6ONLY                  WINE_AFD_IOC(279)
 #define IOCTL_AFD_WINE_SET_IPV6_V6ONLY                  WINE_AFD_IOC(280)
+#define IOCTL_AFD_WINE_GET_IPX_PTYPE                    WINE_AFD_IOC(281)
+#define IOCTL_AFD_WINE_SET_IPX_PTYPE                    WINE_AFD_IOC(282)
+#define IOCTL_AFD_WINE_GET_IRLMP_ENUMDEVICES            WINE_AFD_IOC(283)
+#define IOCTL_AFD_WINE_GET_TCP_NODELAY                  WINE_AFD_IOC(284)
+#define IOCTL_AFD_WINE_SET_TCP_NODELAY                  WINE_AFD_IOC(285)
+#define IOCTL_AFD_WINE_GET_IPV6_RECVHOPLIMIT            WINE_AFD_IOC(286)
+#define IOCTL_AFD_WINE_SET_IPV6_RECVHOPLIMIT            WINE_AFD_IOC(287)
+#define IOCTL_AFD_WINE_GET_IPV6_RECVPKTINFO             WINE_AFD_IOC(288)
+#define IOCTL_AFD_WINE_SET_IPV6_RECVPKTINFO             WINE_AFD_IOC(289)
 
 struct afd_create_params
 {
@@ -232,7 +240,7 @@ struct afd_create_params
 
 struct afd_accept_into_params
 {
-    obj_handle_t accept_handle;
+    ULONG accept_handle;
     unsigned int recv_len, local_len;
 };
 
@@ -277,8 +285,8 @@ struct afd_transmit_params
 
 struct afd_message_select_params
 {
-    obj_handle_t handle;
-    user_handle_t window;
+    ULONG handle;
+    ULONG window;
     unsigned int message;
     int mask;
 };

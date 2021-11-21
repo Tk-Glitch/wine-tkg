@@ -751,11 +751,6 @@ static HFONT CDECL nulldrv_SelectFont( PHYSDEV dev, HFONT font, UINT *aa_flags )
     return font;
 }
 
-static HPALETTE CDECL nulldrv_SelectPalette( PHYSDEV dev, HPALETTE palette, BOOL bkgnd )
-{
-    return palette;
-}
-
 static HPEN CDECL nulldrv_SelectPen( PHYSDEV dev, HPEN pen, const struct brush_pattern *pattern )
 {
     return pen;
@@ -785,31 +780,10 @@ static void CDECL nulldrv_SetDeviceClipping( PHYSDEV dev, HRGN rgn )
 {
 }
 
-static DWORD CDECL nulldrv_SetLayout( PHYSDEV dev, DWORD layout )
-{
-    DC *dc = get_nulldrv_dc( dev );
-    DWORD old_layout;
-
-    old_layout = dc->attr->layout;
-    dc->attr->layout = layout;
-    if (layout != old_layout)
-    {
-        if (layout & LAYOUT_RTL) dc->attr->map_mode = MM_ANISOTROPIC;
-        DC_UpdateXforms( dc );
-    }
-
-    return old_layout;
-}
-
 static BOOL CDECL nulldrv_SetDeviceGammaRamp( PHYSDEV dev, void *ramp )
 {
     SetLastError( ERROR_INVALID_PARAMETER );
     return FALSE;
-}
-
-static DWORD CDECL nulldrv_SetMapperFlags( PHYSDEV dev, DWORD flags )
-{
-    return flags;
 }
 
 static COLORREF CDECL nulldrv_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color )
@@ -817,19 +791,9 @@ static COLORREF CDECL nulldrv_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF colo
     return color;
 }
 
-static INT CDECL nulldrv_SetTextCharacterExtra( PHYSDEV dev, INT extra )
-{
-    return extra;
-}
-
 static COLORREF CDECL nulldrv_SetTextColor( PHYSDEV dev, COLORREF color )
 {
     return color;
-}
-
-static BOOL CDECL nulldrv_SetTextJustification( PHYSDEV dev, INT extra, INT breaks )
-{
-    return TRUE;
 }
 
 static INT CDECL nulldrv_StartDoc( PHYSDEV dev, const DOCINFOW *info )
@@ -890,11 +854,9 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_EndPath,                    /* pEndPath */
     nulldrv_EnumFonts,                  /* pEnumFonts */
     nulldrv_EnumICMProfiles,            /* pEnumICMProfiles */
-    nulldrv_ExcludeClipRect,            /* pExcludeClipRect */
     nulldrv_ExtDeviceMode,              /* pExtDeviceMode */
     nulldrv_ExtEscape,                  /* pExtEscape */
     nulldrv_ExtFloodFill,               /* pExtFloodFill */
-    nulldrv_ExtSelectClipRgn,           /* pExtSelectClipRgn */
     nulldrv_ExtTextOut,                 /* pExtTextOut */
     nulldrv_FillPath,                   /* pFillPath */
     nulldrv_FillRgn,                    /* pFillRgn */
@@ -927,14 +889,9 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_GetTextFace,                /* pGetTextFace */
     nulldrv_GetTextMetrics,             /* pGetTextMetrics */
     nulldrv_GradientFill,               /* pGradientFill */
-    nulldrv_IntersectClipRect,          /* pIntersectClipRect */
     nulldrv_InvertRgn,                  /* pInvertRgn */
     nulldrv_LineTo,                     /* pLineTo */
-    nulldrv_ModifyWorldTransform,       /* pModifyWorldTransform */
     nulldrv_MoveTo,                     /* pMoveTo */
-    nulldrv_OffsetClipRgn,              /* pOffsetClipRgn */
-    nulldrv_OffsetViewportOrgEx,        /* pOffsetViewportOrg */
-    nulldrv_OffsetWindowOrgEx,          /* pOffsetWindowOrg */
     nulldrv_PaintRgn,                   /* pPaintRgn */
     nulldrv_PatBlt,                     /* pPatBlt */
     nulldrv_Pie,                        /* pPie */
@@ -951,13 +908,10 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_ResetDC,                    /* pResetDC */
     nulldrv_RestoreDC,                  /* pRestoreDC */
     nulldrv_RoundRect,                  /* pRoundRect */
-    nulldrv_ScaleViewportExtEx,         /* pScaleViewportExt */
-    nulldrv_ScaleWindowExtEx,           /* pScaleWindowExt */
     nulldrv_SelectBitmap,               /* pSelectBitmap */
     nulldrv_SelectBrush,                /* pSelectBrush */
     nulldrv_SelectClipPath,             /* pSelectClipPath */
     nulldrv_SelectFont,                 /* pSelectFont */
-    nulldrv_SelectPalette,              /* pSelectPalette */
     nulldrv_SelectPen,                  /* pSelectPen */
     nulldrv_SetBkColor,                 /* pSetBkColor */
     nulldrv_SetBoundsRect,              /* pSetBoundsRect */
@@ -966,18 +920,8 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_SetDIBitsToDevice,          /* pSetDIBitsToDevice */
     nulldrv_SetDeviceClipping,          /* pSetDeviceClipping */
     nulldrv_SetDeviceGammaRamp,         /* pSetDeviceGammaRamp */
-    nulldrv_SetLayout,                  /* pSetLayout */
-    nulldrv_SetMapMode,                 /* pSetMapMode */
-    nulldrv_SetMapperFlags,             /* pSetMapperFlags */
     nulldrv_SetPixel,                   /* pSetPixel */
-    nulldrv_SetTextCharacterExtra,      /* pSetTextCharacterExtra */
     nulldrv_SetTextColor,               /* pSetTextColor */
-    nulldrv_SetTextJustification,       /* pSetTextJustification */
-    nulldrv_SetViewportExtEx,           /* pSetViewportExt */
-    nulldrv_SetViewportOrgEx,           /* pSetViewportOrg */
-    nulldrv_SetWindowExtEx,             /* pSetWindowExt */
-    nulldrv_SetWindowOrgEx,             /* pSetWindowOrg */
-    nulldrv_SetWorldTransform,          /* pSetWorldTransform */
     nulldrv_StartDoc,                   /* pStartDoc */
     nulldrv_StartPage,                  /* pStartPage */
     nulldrv_StretchBlt,                 /* pStretchBlt */
@@ -1211,123 +1155,13 @@ DWORD WINAPI GDI_CallDeviceCapabilities16( LPCSTR lpszDevice, LPCSTR lpszPort,
 }
 
 
-/************************************************************************
- *             Escape  [GDI32.@]
- */
-INT WINAPI Escape( HDC hdc, INT escape, INT in_count, LPCSTR in_data, LPVOID out_data )
-{
-    INT ret;
-    POINT *pt;
-
-    switch (escape)
-    {
-    case ABORTDOC:
-        return AbortDoc( hdc );
-
-    case ENDDOC:
-        return EndDoc( hdc );
-
-    case GETPHYSPAGESIZE:
-        pt = out_data;
-        pt->x = GetDeviceCaps( hdc, PHYSICALWIDTH );
-        pt->y = GetDeviceCaps( hdc, PHYSICALHEIGHT );
-        return 1;
-
-    case GETPRINTINGOFFSET:
-        pt = out_data;
-        pt->x = GetDeviceCaps( hdc, PHYSICALOFFSETX );
-        pt->y = GetDeviceCaps( hdc, PHYSICALOFFSETY );
-        return 1;
-
-    case GETSCALINGFACTOR:
-        pt = out_data;
-        pt->x = GetDeviceCaps( hdc, SCALINGFACTORX );
-        pt->y = GetDeviceCaps( hdc, SCALINGFACTORY );
-        return 1;
-
-    case NEWFRAME:
-        return EndPage( hdc );
-
-    case SETABORTPROC:
-        return SetAbortProc( hdc, (ABORTPROC)in_data );
-
-    case STARTDOC:
-        {
-            DOCINFOA doc;
-            char *name = NULL;
-
-            /* in_data may not be 0 terminated so we must copy it */
-            if (in_data)
-            {
-                name = HeapAlloc( GetProcessHeap(), 0, in_count+1 );
-                memcpy( name, in_data, in_count );
-                name[in_count] = 0;
-            }
-            /* out_data is actually a pointer to the DocInfo structure and used as
-             * a second input parameter */
-            if (out_data) doc = *(DOCINFOA *)out_data;
-            else
-            {
-                doc.cbSize = sizeof(doc);
-                doc.lpszOutput = NULL;
-                doc.lpszDatatype = NULL;
-                doc.fwType = 0;
-            }
-            doc.lpszDocName = name;
-            ret = StartDocA( hdc, &doc );
-            HeapFree( GetProcessHeap(), 0, name );
-            if (ret > 0) ret = StartPage( hdc );
-            return ret;
-        }
-
-    case QUERYESCSUPPORT:
-        {
-            DWORD code;
-
-            if (in_count < sizeof(SHORT)) return 0;
-            code = (in_count < sizeof(DWORD)) ? *(const USHORT *)in_data : *(const DWORD *)in_data;
-            switch (code)
-            {
-            case ABORTDOC:
-            case ENDDOC:
-            case GETPHYSPAGESIZE:
-            case GETPRINTINGOFFSET:
-            case GETSCALINGFACTOR:
-            case NEWFRAME:
-            case QUERYESCSUPPORT:
-            case SETABORTPROC:
-            case STARTDOC:
-                return TRUE;
-            }
-            break;
-        }
-    }
-
-    /* if not handled internally, pass it to the driver */
-    return ExtEscape( hdc, escape, in_count, in_data, 0, out_data );
-}
-
-
 /******************************************************************************
- *		ExtEscape	[GDI32.@]
+ *		NtGdiExtEscape   (win32u.@)
  *
  * Access capabilities of a particular device that are not available through GDI.
- *
- * PARAMS
- *    hdc         [I] Handle to device context
- *    nEscape     [I] Escape function
- *    cbInput     [I] Number of bytes in input structure
- *    lpszInData  [I] Pointer to input structure
- *    cbOutput    [I] Number of bytes in output structure
- *    lpszOutData [O] Pointer to output structure
- *
- * RETURNS
- *    Success: >0
- *    Not implemented: 0
- *    Failure: <0
  */
-INT WINAPI ExtEscape( HDC hdc, INT nEscape, INT cbInput, LPCSTR lpszInData,
-                      INT cbOutput, LPSTR lpszOutData )
+INT WINAPI NtGdiExtEscape( HDC hdc, WCHAR *driver, int driver_id, INT escape, INT input_size,
+                           const char *input, INT output_size, char *output )
 {
     PHYSDEV physdev;
     INT ret;
@@ -1336,7 +1170,7 @@ INT WINAPI ExtEscape( HDC hdc, INT nEscape, INT cbInput, LPCSTR lpszInData,
     if (!dc) return 0;
     update_dc( dc );
     physdev = GET_DC_PHYSDEV( dc, pExtEscape );
-    ret = physdev->funcs->pExtEscape( physdev, nEscape, cbInput, lpszInData, cbOutput, lpszOutData );
+    ret = physdev->funcs->pExtEscape( physdev, escape, input_size, input, output_size, output );
     release_dc_ptr( dc );
     return ret;
 }

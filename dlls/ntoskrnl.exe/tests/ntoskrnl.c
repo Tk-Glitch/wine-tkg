@@ -1676,7 +1676,7 @@ static BOOL sync_ioctl(HANDLE file, DWORD code, void *in_buf, DWORD in_len, void
     return ret;
 }
 
-static void test_hidp(HANDLE file, int report_id, BOOL polled)
+static void test_hidp(HANDLE file, HANDLE async_file, int report_id, BOOL polled)
 {
     const HIDP_CAPS expect_hidp_caps[] =
     {
@@ -1868,6 +1868,7 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
         { .DataIndex = 39, .RawValue = 1, },
     };
 
+    OVERLAPPED overlapped = {0}, overlapped2 = {0};
     HIDP_LINK_COLLECTION_NODE collections[16];
     PHIDP_PREPARSED_DATA preparsed_data;
     USAGE_AND_PAGE usage_and_pages[16];
@@ -2219,6 +2220,12 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
                             report, caps.InputReportByteLength);
     ok(status == HIDP_STATUS_SUCCESS, "HidP_SetUsages returned %#x\n", status);
 
+    value = ARRAY_SIZE(usages);
+    status = HidP_GetUsages(HidP_Input, HID_USAGE_PAGE_KEYBOARD, 0, usages, &value, preparsed_data,
+                            report, caps.InputReportByteLength);
+    ok(status == HIDP_STATUS_SUCCESS, "HidP_GetUsages returned %#x\n", status);
+    ok(value == 0, "got usage count %d, expected %d\n", value, 2);
+
     usages[0] = 0x9;
     usages[1] = 0xb;
     usages[2] = 0xa;
@@ -2228,10 +2235,10 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     memcpy(buffer, report, caps.InputReportByteLength);
     status = HidP_SetUsages(HidP_Input, HID_USAGE_PAGE_KEYBOARD, 0, usages, &value, preparsed_data,
                             report, caps.InputReportByteLength);
-    todo_wine ok(status == HIDP_STATUS_BUFFER_TOO_SMALL, "HidP_SetUsages returned %#x\n", status);
+    ok(status == HIDP_STATUS_BUFFER_TOO_SMALL, "HidP_SetUsages returned %#x\n", status);
     buffer[6] = 2;
     buffer[7] = 4;
-    todo_wine ok(!memcmp(buffer, report, caps.InputReportByteLength), "unexpected report data\n");
+    ok(!memcmp(buffer, report, caps.InputReportByteLength), "unexpected report data\n");
 
     status = HidP_SetUsageValue(HidP_Input, HID_USAGE_PAGE_LED, 0, 6, 1,
                                 preparsed_data, report, caps.InputReportByteLength);
@@ -2271,7 +2278,7 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     status = HidP_GetUsagesEx(HidP_Input, 0, usage_and_pages, &value, preparsed_data, report,
                               caps.InputReportByteLength);
     ok(status == HIDP_STATUS_SUCCESS, "HidP_GetUsagesEx returned %#x\n", status);
-    todo_wine ok(value == 6, "got usage count %d, expected %d\n", value, 4);
+    ok(value == 6, "got usage count %d, expected %d\n", value, 4);
     ok(usage_and_pages[0].UsagePage == HID_USAGE_PAGE_BUTTON, "got usage_and_pages[0] UsagePage %x, expected %x\n",
        usage_and_pages[0].UsagePage, HID_USAGE_PAGE_BUTTON);
     ok(usage_and_pages[1].UsagePage == HID_USAGE_PAGE_BUTTON, "got usage_and_pages[1] UsagePage %x, expected %x\n",
@@ -2280,7 +2287,6 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
        usage_and_pages[2].UsagePage, HID_USAGE_PAGE_KEYBOARD);
     ok(usage_and_pages[3].UsagePage == HID_USAGE_PAGE_KEYBOARD, "got usage_and_pages[3] UsagePage %x, expected %x\n",
        usage_and_pages[3].UsagePage, HID_USAGE_PAGE_KEYBOARD);
-    todo_wine
     ok(usage_and_pages[4].UsagePage == HID_USAGE_PAGE_LED, "got usage_and_pages[4] UsagePage %x, expected %x\n",
        usage_and_pages[4].UsagePage, HID_USAGE_PAGE_LED);
     ok(usage_and_pages[5].UsagePage == HID_USAGE_PAGE_LED, "got usage_and_pages[5] UsagePage %x, expected %x\n",
@@ -2291,13 +2297,10 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
        usage_and_pages[1].Usage, 6);
     ok(usage_and_pages[2].Usage == 9, "got usage_and_pages[2] Usage %x, expected %x\n",
        usage_and_pages[2].Usage, 9);
-    todo_wine
     ok(usage_and_pages[3].Usage == 11, "got usage_and_pages[3] Usage %x, expected %x\n",
        usage_and_pages[3].Usage, 11);
-    todo_wine
     ok(usage_and_pages[4].Usage == 6, "got usage_and_pages[4] Usage %x, expected %x\n",
        usage_and_pages[4].Usage, 6);
-    todo_wine
     ok(usage_and_pages[5].Usage == 4, "got usage_and_pages[5] Usage %x, expected %x\n",
        usage_and_pages[5].Usage, 4);
 
@@ -2313,15 +2316,15 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     value = 1;
     status = HidP_GetData(HidP_Input, data, &value, preparsed_data, report, caps.InputReportByteLength);
     ok(status == HIDP_STATUS_BUFFER_TOO_SMALL, "HidP_GetData returned %#x\n", status);
-    todo_wine ok(value == 11, "got data count %d, expected %d\n", value, 11);
+    ok(value == 11, "got data count %d, expected %d\n", value, 11);
     memset(data, 0, sizeof(data));
     status = HidP_GetData(HidP_Input, data, &value, preparsed_data, report, caps.InputReportByteLength);
     ok(status == HIDP_STATUS_SUCCESS, "HidP_GetData returned %#x\n", status);
     for (i = 0; i < ARRAY_SIZE(expect_data); ++i)
     {
         winetest_push_context("data[%d]", i);
-        todo_wine_if(i >= 4) check_member(data[i], expect_data[i], "%d", DataIndex);
-        todo_wine_if(i >= 4) check_member(data[i], expect_data[i], "%d", RawValue);
+        check_member(data[i], expect_data[i], "%d", DataIndex);
+        check_member(data[i], expect_data[i], "%d", RawValue);
         winetest_pop_context();
     }
 
@@ -2444,13 +2447,11 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     SetLastError(0xdeadbeef);
     ret = HidD_GetInputReport(file, report, 0);
     ok(!ret, "HidD_GetInputReport succeeded\n");
-    todo_wine ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_GetInputReport returned error %u\n", GetLastError());
+    ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_GetInputReport returned error %u\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = HidD_GetInputReport(file, report, caps.InputReportByteLength - 1);
-    todo_wine
     ok(!ret, "HidD_GetInputReport succeeded\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == ERROR_CRC),
        "HidD_GetInputReport returned error %u\n", GetLastError());
 
@@ -2459,16 +2460,14 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     ret = HidD_GetInputReport(file, buffer, caps.InputReportByteLength);
     if (report_id || broken(!ret) /* w7u */)
     {
-        todo_wine
         ok(!ret, "HidD_GetInputReport succeeded, last error %u\n", GetLastError());
-        todo_wine
         ok(GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == ERROR_CRC),
            "HidD_GetInputReport returned error %u\n", GetLastError());
     }
     else
     {
         ok(ret, "HidD_GetInputReport failed, last error %u\n", GetLastError());
-        todo_wine ok(buffer[0] == 0x5a, "got buffer[0] %x, expected 0x5a\n", (BYTE)buffer[0]);
+        ok(buffer[0] == 0x5a, "got buffer[0] %x, expected 0x5a\n", (BYTE)buffer[0]);
     }
 
     SetLastError(0xdeadbeef);
@@ -2480,7 +2479,7 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     value = caps.InputReportByteLength * 2;
     ret = sync_ioctl(file, IOCTL_HID_GET_INPUT_REPORT, NULL, 0, report, &value);
     ok(ret, "IOCTL_HID_GET_INPUT_REPORT failed, last error %u\n", GetLastError());
-    todo_wine ok(value == 3, "got length %u, expected 3\n", value);
+    ok(value == 3, "got length %u, expected 3\n", value);
     ok(report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id);
 
 
@@ -2491,13 +2490,11 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     SetLastError(0xdeadbeef);
     ret = HidD_GetFeature(file, report, 0);
     ok(!ret, "HidD_GetFeature succeeded\n");
-    todo_wine ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_GetFeature returned error %u\n", GetLastError());
+    ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_GetFeature returned error %u\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = HidD_GetFeature(file, report, caps.FeatureReportByteLength - 1);
-    todo_wine
     ok(!ret, "HidD_GetFeature succeeded\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == ERROR_CRC),
        "HidD_GetFeature returned error %u\n", GetLastError());
 
@@ -2506,30 +2503,26 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     ret = HidD_GetFeature(file, buffer, caps.FeatureReportByteLength);
     if (report_id || broken(!ret))
     {
-        todo_wine
         ok(!ret, "HidD_GetFeature succeeded, last error %u\n", GetLastError());
-        todo_wine
         ok(GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == ERROR_CRC),
            "HidD_GetFeature returned error %u\n", GetLastError());
     }
     else
     {
         ok(ret, "HidD_GetFeature failed, last error %u\n", GetLastError());
-        todo_wine ok(buffer[0] == 0x5a, "got buffer[0] %x, expected 0x5a\n", (BYTE)buffer[0]);
+        ok(buffer[0] == 0x5a, "got buffer[0] %x, expected 0x5a\n", (BYTE)buffer[0]);
     }
 
     SetLastError(0xdeadbeef);
     ret = HidD_GetFeature(file, report, caps.FeatureReportByteLength);
     ok(ret, "HidD_GetFeature failed, last error %u\n", GetLastError());
-    todo_wine_if(!report_id)
     ok(report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id);
 
     value = caps.FeatureReportByteLength * 2;
     SetLastError(0xdeadbeef);
     ret = sync_ioctl(file, IOCTL_HID_GET_FEATURE, NULL, 0, report, &value);
     ok(ret, "IOCTL_HID_GET_FEATURE failed, last error %u\n", GetLastError());
-    todo_wine ok(value == 3, "got length %u, expected 3\n", value);
-    todo_wine_if(!report_id)
+    ok(value == 3, "got length %u, expected 3\n", value);
     ok(report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id);
 
 
@@ -2539,14 +2532,12 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
 
     SetLastError(0xdeadbeef);
     ret = HidD_SetFeature(file, report, 0);
-    todo_wine ok(!ret, "HidD_SetFeature succeeded\n");
-    todo_wine ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_SetFeature returned error %u\n", GetLastError());
+    ok(!ret, "HidD_SetFeature succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_SetFeature returned error %u\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = HidD_SetFeature(file, report, caps.FeatureReportByteLength - 1);
-    todo_wine
     ok(!ret, "HidD_SetFeature succeeded\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == ERROR_CRC),
        "HidD_SetFeature returned error %u\n", GetLastError());
 
@@ -2555,9 +2546,7 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     ret = HidD_SetFeature(file, buffer, caps.FeatureReportByteLength);
     if (report_id || broken(!ret))
     {
-        todo_wine
         ok(!ret, "HidD_SetFeature succeeded, last error %u\n", GetLastError());
-        todo_wine
         ok(GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == ERROR_CRC),
            "HidD_SetFeature returned error %u\n", GetLastError());
     }
@@ -2573,13 +2562,13 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     value = caps.FeatureReportByteLength * 2;
     SetLastError(0xdeadbeef);
     ret = sync_ioctl(file, IOCTL_HID_SET_FEATURE, NULL, 0, report, &value);
-    todo_wine ok(!ret, "IOCTL_HID_SET_FEATURE succeeded\n");
-    todo_wine ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "IOCTL_HID_SET_FEATURE returned error %u\n", GetLastError());
+    ok(!ret, "IOCTL_HID_SET_FEATURE succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "IOCTL_HID_SET_FEATURE returned error %u\n", GetLastError());
     value = 0;
     SetLastError(0xdeadbeef);
     ret = sync_ioctl(file, IOCTL_HID_SET_FEATURE, report, caps.FeatureReportByteLength * 2, NULL, &value);
     ok(ret, "IOCTL_HID_SET_FEATURE failed, last error %u\n", GetLastError());
-    todo_wine ok(value == 3, "got length %u, expected 3\n", value);
+    ok(value == 3, "got length %u, expected 3\n", value);
 
 
     memset(report, 0xcd, sizeof(report));
@@ -2590,14 +2579,12 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
 
     SetLastError(0xdeadbeef);
     ret = HidD_SetOutputReport(file, report, 0);
-    todo_wine ok(!ret, "HidD_SetOutputReport succeeded\n");
-    todo_wine ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_SetOutputReport returned error %u\n", GetLastError());
+    ok(!ret, "HidD_SetOutputReport succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_SetOutputReport returned error %u\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = HidD_SetOutputReport(file, report, caps.OutputReportByteLength - 1);
-    todo_wine
     ok(!ret, "HidD_SetOutputReport succeeded\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == ERROR_CRC),
        "HidD_SetOutputReport returned error %u\n", GetLastError());
 
@@ -2606,9 +2593,7 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     ret = HidD_SetOutputReport(file, buffer, caps.OutputReportByteLength);
     if (report_id || broken(!ret))
     {
-        todo_wine
         ok(!ret, "HidD_SetOutputReport succeeded, last error %u\n", GetLastError());
-        todo_wine
         ok(GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == ERROR_CRC),
            "HidD_SetOutputReport returned error %u\n", GetLastError());
     }
@@ -2624,13 +2609,13 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     value = caps.OutputReportByteLength * 2;
     SetLastError(0xdeadbeef);
     ret = sync_ioctl(file, IOCTL_HID_SET_OUTPUT_REPORT, NULL, 0, report, &value);
-    todo_wine ok(!ret, "IOCTL_HID_SET_OUTPUT_REPORT succeeded\n");
-    todo_wine ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "IOCTL_HID_SET_OUTPUT_REPORT returned error %u\n", GetLastError());
+    ok(!ret, "IOCTL_HID_SET_OUTPUT_REPORT succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "IOCTL_HID_SET_OUTPUT_REPORT returned error %u\n", GetLastError());
     value = 0;
     SetLastError(0xdeadbeef);
     ret = sync_ioctl(file, IOCTL_HID_SET_OUTPUT_REPORT, report, caps.OutputReportByteLength * 2, NULL, &value);
     ok(ret, "IOCTL_HID_SET_OUTPUT_REPORT failed, last error %u\n", GetLastError());
-    todo_wine ok(value == 3, "got length %u, expected 3\n", value);
+    ok(value == 3, "got length %u, expected 3\n", value);
 
 
     SetLastError(0xdeadbeef);
@@ -2651,11 +2636,8 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     ret = WriteFile(file, report, caps.OutputReportByteLength * 2, &value, NULL);
     if (report_id || broken(!ret) /* w7u */)
     {
-        todo_wine
         ok(!ret, "WriteFile succeeded\n");
-        todo_wine
         ok(GetLastError() == ERROR_INVALID_PARAMETER, "WriteFile returned error %u\n", GetLastError());
-        todo_wine
         ok(value == 0, "WriteFile wrote %u\n", value);
         SetLastError(0xdeadbeef);
         report[0] = report_id;
@@ -2670,7 +2652,7 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
     else
     {
         ok(ret, "WriteFile failed, last error %u\n", GetLastError());
-        todo_wine ok(value == 3, "WriteFile wrote %u\n", value);
+        ok(value == 3, "WriteFile wrote %u\n", value);
     }
 
 
@@ -2689,14 +2671,54 @@ static void test_hidp(HANDLE file, int report_id, BOOL polled)
         memset(report, 0xcd, sizeof(report));
         SetLastError(0xdeadbeef);
         ret = ReadFile(file, report, caps.InputReportByteLength, &value, NULL);
-        todo_wine ok(ret, "ReadFile failed, last error %u\n", GetLastError());
-        todo_wine ok(value == (report_id ? 3 : 4), "ReadFile returned %x\n", value);
-        todo_wine ok(report[0] == report_id, "unexpected report data\n");
+        ok(ret, "ReadFile failed, last error %u\n", GetLastError());
+        ok(value == (report_id ? 3 : 4), "ReadFile returned %x\n", value);
+        ok(report[0] == report_id, "unexpected report data\n");
+
+        overlapped.hEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
+        overlapped2.hEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
+
+        /* drain available input reports */
+        SetLastError(0xdeadbeef);
+        while (ReadFile(async_file, report, caps.InputReportByteLength, NULL, &overlapped))
+            ResetEvent(overlapped.hEvent);
+        ok(GetLastError() == ERROR_IO_PENDING, "ReadFile returned error %u\n", GetLastError());
+        ret = GetOverlappedResult(async_file, &overlapped, &value, TRUE);
+        ok(ret, "GetOverlappedResult failed, last error %u\n", GetLastError());
+        ok(value == (report_id ? 3 : 4), "GetOverlappedResult returned length %u, expected 3\n", value);
+        ResetEvent(overlapped.hEvent);
+
+        memcpy(buffer, report, caps.InputReportByteLength);
+        memcpy(buffer + caps.InputReportByteLength, report, caps.InputReportByteLength);
+
+        SetLastError(0xdeadbeef);
+        ret = ReadFile(async_file, report, caps.InputReportByteLength, NULL, &overlapped);
+        ok(!ret, "ReadFile succeded\n");
+        ok(GetLastError() == ERROR_IO_PENDING, "ReadFile returned error %u\n", GetLastError());
+
+        SetLastError(0xdeadbeef);
+        ret = ReadFile(async_file, buffer, caps.InputReportByteLength, NULL, &overlapped2);
+        ok(!ret, "ReadFile succeded\n");
+        ok(GetLastError() == ERROR_IO_PENDING, "ReadFile returned error %u\n", GetLastError());
+
+        /* wait for second report to be ready */
+        ret = GetOverlappedResult(async_file, &overlapped2, &value, TRUE);
+        ok(ret, "GetOverlappedResult failed, last error %u\n", GetLastError());
+        ok(value == (report_id ? 3 : 4), "GetOverlappedResult returned length %u, expected 3\n", value);
+        /* first report should be ready and the same */
+        ret = GetOverlappedResult(async_file, &overlapped, &value, FALSE);
+        ok(ret, "GetOverlappedResult failed, last error %u\n", GetLastError());
+        ok(value == (report_id ? 3 : 4), "GetOverlappedResult returned length %u, expected 3\n", value);
+        ok(memcmp(report, buffer + caps.InputReportByteLength, caps.InputReportByteLength),
+           "expected different report\n");
+        ok(!memcmp(report, buffer, caps.InputReportByteLength), "expected identical reports\n");
+
+        CloseHandle(overlapped.hEvent);
+        CloseHandle(overlapped2.hEvent);
     }
 
 
     HidD_FreePreparsedData(preparsed_data);
-    CloseHandle(file);
 }
 
 static void test_hid_device(DWORD report_id, DWORD polled)
@@ -2705,6 +2727,8 @@ static void test_hid_device(DWORD report_id, DWORD polled)
     SP_DEVICE_INTERFACE_DETAIL_DATA_A *iface_detail = (void *)buffer;
     SP_DEVICE_INTERFACE_DATA iface = {sizeof(iface)};
     SP_DEVINFO_DATA device = {sizeof(device)};
+    ULONG count, poll_freq, out_len;
+    HANDLE file, async_file;
     BOOL ret, found = FALSE;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING string;
@@ -2712,9 +2736,8 @@ static void test_hid_device(DWORD report_id, DWORD polled)
     NTSTATUS status;
     unsigned int i;
     HDEVINFO set;
-    HANDLE file;
 
-    winetest_push_context("report %d, polled %d", report_id, polled);
+    winetest_push_context("id %d%s", report_id, polled ? " poll" : "");
 
     set = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_HID, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
     ok(set != INVALID_HANDLE_VALUE, "failed to get device list, error %#x\n", GetLastError());
@@ -2746,8 +2769,91 @@ static void test_hid_device(DWORD report_id, DWORD polled)
             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
     ok(file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
 
-    test_hidp(file, report_id, polled);
+    count = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = HidD_GetNumInputBuffers(file, &count);
+    ok(ret, "HidD_GetNumInputBuffers failed last error %u\n", GetLastError());
+    ok(count == 32, "HidD_GetNumInputBuffers returned %u\n", count);
 
+    SetLastError(0xdeadbeef);
+    ret = HidD_SetNumInputBuffers(file, 1);
+    ok(!ret, "HidD_SetNumInputBuffers succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "HidD_SetNumInputBuffers returned error %u\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = HidD_SetNumInputBuffers(file, 513);
+    ok(!ret, "HidD_SetNumInputBuffers succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "HidD_SetNumInputBuffers returned error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = HidD_SetNumInputBuffers(file, 16);
+    ok(ret, "HidD_SetNumInputBuffers failed last error %u\n", GetLastError());
+
+    count = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = HidD_GetNumInputBuffers(file, &count);
+    ok(ret, "HidD_GetNumInputBuffers failed last error %u\n", GetLastError());
+    ok(count == 16, "HidD_GetNumInputBuffers returned %u\n", count);
+
+    async_file = CreateFileA(iface_detail->DevicePath, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+            FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, NULL);
+    ok(async_file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
+
+    count = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = HidD_GetNumInputBuffers(async_file, &count);
+    ok(ret, "HidD_GetNumInputBuffers failed last error %u\n", GetLastError());
+    ok(count == 32, "HidD_GetNumInputBuffers returned %u\n", count);
+
+    SetLastError(0xdeadbeef);
+    ret = HidD_SetNumInputBuffers(async_file, 2);
+    ok(ret, "HidD_SetNumInputBuffers failed last error %u\n", GetLastError());
+
+    count = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = HidD_GetNumInputBuffers(async_file, &count);
+    ok(ret, "HidD_GetNumInputBuffers failed last error %u\n", GetLastError());
+    ok(count == 2, "HidD_GetNumInputBuffers returned %u\n", count);
+    count = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = HidD_GetNumInputBuffers(file, &count);
+    ok(ret, "HidD_GetNumInputBuffers failed last error %u\n", GetLastError());
+    ok(count == 16, "HidD_GetNumInputBuffers returned %u\n", count);
+
+    if (polled)
+    {
+        out_len = sizeof(ULONG);
+        SetLastError(0xdeadbeef);
+        ret = sync_ioctl(file, IOCTL_HID_GET_POLL_FREQUENCY_MSEC, NULL, 0, &poll_freq, &out_len);
+        ok(ret, "IOCTL_HID_GET_POLL_FREQUENCY_MSEC failed last error %u\n", GetLastError());
+        ok(out_len == sizeof(ULONG), "got out_len %u, expected sizeof(ULONG)\n", out_len);
+        todo_wine ok(poll_freq == 5, "got poll_freq %u, expected 5\n", poll_freq);
+
+        out_len = 0;
+        poll_freq = 500;
+        SetLastError(0xdeadbeef);
+        ret = sync_ioctl(file, IOCTL_HID_SET_POLL_FREQUENCY_MSEC, &poll_freq, sizeof(ULONG), NULL, &out_len);
+        ok(ret, "IOCTL_HID_GET_POLL_FREQUENCY_MSEC failed last error %u\n", GetLastError());
+        ok(out_len == 0, "got out_len %u, expected 0\n", out_len);
+
+        out_len = sizeof(ULONG);
+        SetLastError(0xdeadbeef);
+        ret = sync_ioctl(file, IOCTL_HID_GET_POLL_FREQUENCY_MSEC, NULL, 0, &poll_freq, &out_len);
+        ok(ret, "IOCTL_HID_GET_POLL_FREQUENCY_MSEC failed last error %u\n", GetLastError());
+        ok(out_len == sizeof(ULONG), "got out_len %u, expected sizeof(ULONG)\n", out_len);
+        ok(poll_freq == 500, "got poll_freq %u, expected 100\n", poll_freq);
+
+        out_len = sizeof(ULONG);
+        SetLastError(0xdeadbeef);
+        ret = sync_ioctl(async_file, IOCTL_HID_GET_POLL_FREQUENCY_MSEC, NULL, 0, &poll_freq, &out_len);
+        ok(ret, "IOCTL_HID_GET_POLL_FREQUENCY_MSEC failed last error %u\n", GetLastError());
+        ok(out_len == sizeof(ULONG), "got out_len %u, expected sizeof(ULONG)\n", out_len);
+        ok(poll_freq == 500, "got poll_freq %u, expected 100\n", poll_freq);
+    }
+
+    test_hidp(file, async_file, report_id, polled);
+
+    CloseHandle(async_file);
     CloseHandle(file);
 
     RtlInitUnicodeString(&string, L"\\??\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}");

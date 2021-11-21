@@ -525,9 +525,9 @@ COLORREF CDECL nulldrv_GetPixel( PHYSDEV dev, INT x, INT y )
 
 
 /***********************************************************************
- *           PatBlt    (GDI32.@)
+ *           NtGdiPatBlt    (win32u.@)
  */
-BOOL WINAPI PatBlt( HDC hdc, INT left, INT top, INT width, INT height, DWORD rop)
+BOOL WINAPI NtGdiPatBlt( HDC hdc, INT left, INT top, INT width, INT height, DWORD rop )
 {
     DC * dc;
     BOOL ret = FALSE;
@@ -569,25 +569,25 @@ BOOL WINAPI PatBlt( HDC hdc, INT left, INT top, INT width, INT height, DWORD rop
 /***********************************************************************
  *           BitBlt    (GDI32.@)
  */
-BOOL WINAPI DECLSPEC_HOTPATCH BitBlt( HDC hdcDst, INT xDst, INT yDst, INT width,
-                                      INT height, HDC hdcSrc, INT xSrc, INT ySrc, DWORD rop )
+BOOL WINAPI NtGdiBitBlt( HDC hdc_dst, INT x_dst, INT y_dst, INT width, INT height,
+                         HDC hdc_src, INT x_src, INT y_src, DWORD rop, DWORD bk_color, FLONG fl )
 {
-    if (!rop_uses_src( rop )) return PatBlt( hdcDst, xDst, yDst, width, height, rop );
-    else return StretchBlt( hdcDst, xDst, yDst, width, height,
-                            hdcSrc, xSrc, ySrc, width, height, rop );
+    return NtGdiStretchBlt( hdc_dst, x_dst, y_dst, width, height,
+                            hdc_src, x_src, y_src, width, height, rop, bk_color );
 }
 
 
 /***********************************************************************
- *           StretchBlt    (GDI32.@)
+ *           NtGdiStretchBlt    (win32u.@)
  */
-BOOL WINAPI StretchBlt( HDC hdcDst, INT xDst, INT yDst, INT widthDst, INT heightDst,
-                        HDC hdcSrc, INT xSrc, INT ySrc, INT widthSrc, INT heightSrc, DWORD rop )
+BOOL WINAPI NtGdiStretchBlt( HDC hdcDst, INT xDst, INT yDst, INT widthDst, INT heightDst,
+                             HDC hdcSrc, INT xSrc, INT ySrc, INT widthSrc, INT heightSrc,
+                             DWORD rop, COLORREF bk_color )
 {
     BOOL ret = FALSE;
     DC *dcDst, *dcSrc;
 
-    if (!rop_uses_src( rop )) return PatBlt( hdcDst, xDst, yDst, widthDst, heightDst, rop );
+    if (!rop_uses_src( rop )) return NtGdiPatBlt( hdcDst, xDst, yDst, widthDst, heightDst, rop );
 
     if (!(dcDst = get_dc_ptr( hdcDst ))) return FALSE;
 
@@ -935,11 +935,11 @@ error:
 }
 
 /******************************************************************************
- *           GdiAlphaBlend [GDI32.@]
+ *           NtGdiAlphaBlend   (win32u.@)
  */
-BOOL WINAPI GdiAlphaBlend(HDC hdcDst, int xDst, int yDst, int widthDst, int heightDst,
-                          HDC hdcSrc, int xSrc, int ySrc, int widthSrc, int heightSrc,
-                          BLENDFUNCTION blendFunction)
+BOOL WINAPI NtGdiAlphaBlend( HDC hdcDst, int xDst, int yDst, int widthDst, int heightDst,
+                             HDC hdcSrc, int xSrc, int ySrc, int widthSrc, int heightSrc,
+                             BLENDFUNCTION blendFunction, HANDLE xform )
 {
     BOOL ret = FALSE;
     DC *dcDst, *dcSrc;
@@ -977,8 +977,8 @@ BOOL WINAPI GdiAlphaBlend(HDC hdcDst, int xDst, int yDst, int widthDst, int heig
         if (src.x < 0 || src.y < 0 || src.width < 0 || src.height < 0 ||
             src.log_width < 0 || src.log_height < 0 ||
             (!is_rect_empty( &dcSrc->device_rect ) &&
-             (src.width > dcSrc->device_rect.right - dcSrc->vis_rect.left - src.x ||
-              src.height > dcSrc->device_rect.bottom - dcSrc->vis_rect.top - src.y)))
+             (src.width > dcSrc->device_rect.right - dcSrc->attr->vis_rect.left - src.x ||
+              src.height > dcSrc->device_rect.bottom - dcSrc->attr->vis_rect.top - src.y)))
         {
             WARN( "Invalid src coords: (%d,%d), size %dx%d\n", src.x, src.y, src.width, src.height );
             SetLastError( ERROR_INVALID_PARAMETER );

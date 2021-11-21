@@ -219,13 +219,8 @@ case $host in
         [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <stdarg.h>]], [[void func(__builtin_ms_va_list *args);]])],
                       [wine_cv_builtin_ms_va_list=yes],[wine_cv_builtin_ms_va_list=no])])
     test $wine_cv_builtin_ms_va_list != no || AC_MSG_ERROR([You need clang >= 5.0 to build Wine for arm64.])
-
     enable_wow64=${enable_wow64:-yes}
     enable_wow64win=${enable_wow64win:-yes}
-    # Avoid clobbering the x18 register which is reserved in windows.
-    # This isn't complete/enough unless all of the system libraries have
-    # been built with the same flag though.
-    WINE_TRY_CFLAGS([-ffixed-x18], [CFLAGS="$CFLAGS -ffixed-x18"])
     ;;
   i[[3456789]]86*)
     enable_win16=${enable_win16:-yes}
@@ -969,7 +964,7 @@ case $host_os in
       WINEPRELOADER_LDFLAGS="-static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7d400000"
 
       case $host_cpu in
-        *i[[3456789]]86* | x86_64 | *aarch64*)
+        *i[[3456789]]86* | x86_64 | *aarch64* | arm*)
           WINE_TRY_CFLAGS([-Wl,-Ttext-segment=0x7bc00000],
                           [case $host_os in
                            freebsd* | kfreebsd*-gnu) WINELOADER_LDFLAGS="$WINELOADER_LDFLAGS -Wl,-Ttext-segment=0x60000000" ;;
@@ -2211,7 +2206,7 @@ esac
 case $host_os in
   linux*)
     case $host_cpu in
-      *i[[3456789]]86*|x86_64*|*aarch64*)
+      *i[[3456789]]86*|x86_64*|*aarch64*|arm*)
         test "$wine_binary" = wine || WINE_IGNORE_FILE("loader/wine-preloader")
         WINELOADER_PROGRAMS="$WINELOADER_PROGRAMS $wine_binary-preloader"
         ;;
@@ -2258,6 +2253,7 @@ AC_CHECK_FUNCS(\
 	setprogname \
 	sigprocmask \
 	symlink \
+	sysinfo \
 	tcdrain \
 	thr_kill2 \
 	utimensat
@@ -2608,6 +2604,13 @@ AC_CHECK_MEMBERS([struct icmpstat.icps_outhist],,,
 #endif
 #ifdef HAVE_NETINET_ICMP_VAR_H
 #include <netinet/icmp_var.h>
+#endif])
+
+dnl Check for struct in6_pktinfo
+AC_CHECK_MEMBERS([struct in6_pktinfo.ipi6_addr],,,
+[#ifdef HAVE_NETINET_IN_H
+#define _GNU_SOURCE
+#include <netinet/in.h>
 #endif])
 
 dnl Check for struct ipstat
@@ -3266,6 +3269,7 @@ WINE_CONFIG_MAKEFILE(dlls/dxgi/tests)
 WINE_CONFIG_MAKEFILE(dlls/dxgkrnl.sys)
 WINE_CONFIG_MAKEFILE(dlls/dxgmms1.sys)
 WINE_CONFIG_MAKEFILE(dlls/dxguid)
+WINE_CONFIG_MAKEFILE(dlls/dxtrans)
 WINE_CONFIG_MAKEFILE(dlls/dxva2)
 WINE_CONFIG_MAKEFILE(dlls/dxva2/tests)
 WINE_CONFIG_MAKEFILE(dlls/esent)

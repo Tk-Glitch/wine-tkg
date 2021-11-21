@@ -1642,7 +1642,7 @@ static HRESULT paste_pidls(ContextMenu *This, IDataObject *pda, ITEMIDLIST **pid
         if (psfFrom)
         {
             /* get source and destination shellfolder */
-            ISFHelper *psfhlpdst, *psfhlpsrc;
+            ISFHelper *psfhlpdst = NULL, *psfhlpsrc = NULL;
             hr = IShellFolder_QueryInterface(This->parent, &IID_ISFHelper, (void**)&psfhlpdst);
             if (SUCCEEDED(hr))
                 hr = IShellFolder_QueryInterface(psfFrom, &IID_ISFHelper, (void**)&psfhlpsrc);

@@ -22,109 +22,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/types.h>
 #include <limits.h>
-#ifdef HAVE_SYS_IPC_H
-# include <sys/ipc.h>
-#endif
-#ifdef HAVE_SYS_IOCTL_H
-# include <sys/ioctl.h>
-#endif
-#ifdef HAVE_SYS_FILIO_H
-# include <sys/filio.h>
-#endif
-#ifdef HAVE_SYS_SOCKIO_H
-# include <sys/sockio.h>
-#endif
-
-#if defined(__EMX__)
-# include <sys/so_ioctl.h>
-#endif
-
-#ifdef HAVE_SYS_PARAM_H
-# include <sys/param.h>
-#endif
-
-#ifdef HAVE_SYS_MSG_H
-# include <sys/msg.h>
-#endif
-#ifdef HAVE_SYS_WAIT_H
-# include <sys/wait.h>
-#endif
-#ifdef HAVE_SYS_UIO_H
-# include <sys/uio.h>
-#endif
-#ifdef HAVE_SYS_SOCKET_H
-#include <sys/socket.h>
-#endif
-#ifdef HAVE_NETINET_IN_H
-# include <netinet/in.h>
-#endif
-#ifdef HAVE_NETINET_TCP_H
-# include <netinet/tcp.h>
-#endif
-#ifdef HAVE_ARPA_INET_H
-# include <arpa/inet.h>
-#endif
-#include <ctype.h>
-#include <fcntl.h>
-#include <errno.h>
-#ifdef HAVE_NETDB_H
-#include <netdb.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-#include <stdlib.h>
-#ifdef HAVE_ARPA_NAMESER_H
-# include <arpa/nameser.h>
-#endif
-#ifdef HAVE_RESOLV_H
-# include <resolv.h>
-#endif
-#ifdef HAVE_NET_IF_H
-# define if_indextoname unix_if_indextoname
-# define if_nametoindex unix_if_nametoindex
-# include <net/if.h>
-# undef if_indextoname
-# undef if_nametoindex
-#endif
-#ifdef HAVE_IFADDRS_H
-# include <ifaddrs.h>
-#endif
-
-#ifdef HAVE_NETIPX_IPX_H
-# include <netipx/ipx.h>
-#elif defined(HAVE_LINUX_IPX_H)
-# ifdef HAVE_ASM_TYPES_H
-#  include <asm/types.h>
-# endif
-# ifdef HAVE_LINUX_TYPES_H
-#  include <linux/types.h>
-# endif
-# include <linux/ipx.h>
-#endif
-#if defined(SOL_IPX) || defined(SO_DEFAULT_HEADERS)
-# define HAS_IPX
-#endif
-
-#ifdef HAVE_LINUX_IRDA_H
-# ifdef HAVE_LINUX_TYPES_H
-#  include <linux/types.h>
-# endif
-# include <linux/irda.h>
-# define HAS_IRDA
-#endif
-
-#ifdef HAVE_POLL_H
-#include <poll.h>
-#endif
-#ifdef HAVE_SYS_POLL_H
-# include <sys/poll.h>
-#endif
-#ifdef HAVE_SYS_TIME_H
-# include <sys/time.h>
-#endif
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
@@ -150,11 +48,10 @@
 #include "iphlpapi.h"
 #include "ip2string.h"
 #include "wine/afd.h"
-#include "wine/server.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
-#include "wine/unicode.h"
 #include "wine/heap.h"
+#include "wine/unixlib.h"
 
 #define DECLARE_CRITICAL_SECTION(cs) \
     static CRITICAL_SECTION cs; \
@@ -165,31 +62,15 @@
 
 static const char magic_loopback_addr[] = {127, 12, 34, 56};
 
-union generic_unix_sockaddr
-{
-    struct sockaddr addr;
-    char data[128]; /* should be big enough for all families */
-};
-
-int convert_eai_u2w( int ret ) DECLSPEC_HIDDEN;
-int convert_socktype_u2w( int type ) DECLSPEC_HIDDEN;
-int convert_socktype_w2u( int type ) DECLSPEC_HIDDEN;
-int ws_sockaddr_u2ws( const struct sockaddr *unix_addr, struct WS_sockaddr *win_addr,
-                      int *win_addr_len ) DECLSPEC_HIDDEN;
-unsigned int ws_sockaddr_ws2u( const struct WS_sockaddr *win_addr, int win_addr_len,
-                               union generic_unix_sockaddr *unix_addr ) DECLSPEC_HIDDEN;
-
-const char *debugstr_sockaddr( const struct WS_sockaddr *addr ) DECLSPEC_HIDDEN;
-
-UINT sock_get_error( int err ) DECLSPEC_HIDDEN;
+const char *debugstr_sockaddr( const struct sockaddr *addr ) DECLSPEC_HIDDEN;
 
 struct per_thread_data
 {
     HANDLE sync_event; /* event to wait on for synchronous ioctls */
     int opentype;
-    struct WS_hostent *he_buffer;
-    struct WS_servent *se_buffer;
-    struct WS_protoent *pe_buffer;
+    struct hostent *he_buffer;
+    struct servent *se_buffer;
+    struct protoent *pe_buffer;
     int he_len;
     int se_len;
     int pe_len;
@@ -199,5 +80,58 @@ struct per_thread_data
 extern int num_startup;
 
 struct per_thread_data *get_per_thread_data(void) DECLSPEC_HIDDEN;
+
+struct getaddrinfo_params
+{
+    const char *node;
+    const char *service;
+    const struct WS(addrinfo) *hints;
+    struct WS(addrinfo) *info;
+    unsigned int *size;
+};
+
+struct gethostbyaddr_params
+{
+    const void *addr;
+    int len;
+    int family;
+    struct WS(hostent) *host;
+    unsigned int *size;
+};
+
+struct gethostbyname_params
+{
+    const char *name;
+    struct WS(hostent) *host;
+    unsigned int *size;
+};
+
+struct gethostname_params
+{
+    char *name;
+    unsigned int size;
+};
+
+struct getnameinfo_params
+{
+    const struct WS(sockaddr) *addr;
+    int addr_len;
+    char *host;
+    DWORD host_len;
+    char *serv;
+    DWORD serv_len;
+    int flags;
+};
+
+enum ws_unix_funcs
+{
+    ws_unix_getaddrinfo,
+    ws_unix_gethostbyaddr,
+    ws_unix_gethostbyname,
+    ws_unix_gethostname,
+    ws_unix_getnameinfo,
+};
+
+extern unixlib_handle_t ws_unix_handle DECLSPEC_HIDDEN;
 
 #endif

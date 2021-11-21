@@ -188,14 +188,15 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
     BYTE *reportDescriptor;
     UNICODE_STRING string;
     WCHAR pdo_name[255];
+    IO_STATUS_BLOCK io;
     USAGE page, usage;
     NTSTATUS status;
     INT i;
 
-    status = call_minidriver(IOCTL_HID_GET_DEVICE_ATTRIBUTES, fdo, NULL, 0, &attr, sizeof(attr));
-    if (status != STATUS_SUCCESS)
+    call_minidriver( IOCTL_HID_GET_DEVICE_ATTRIBUTES, fdo, NULL, 0, &attr, sizeof(attr), &io );
+    if (io.Status != STATUS_SUCCESS)
     {
-        ERR("Minidriver failed to get Attributes(%x)\n",status);
+        ERR( "Minidriver failed to get attributes, status %#x.\n", io.Status );
         return;
     }
 
@@ -204,13 +205,15 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
     RtlInitUnicodeString(&string, pdo_name);
     if ((status = IoCreateDevice(fdo->DriverObject, sizeof(*pdo_ext), &string, 0, 0, FALSE, &child_pdo)))
     {
-        ERR("Failed to create child PDO, status %#x.\n", status);
+        ERR( "Failed to create child PDO, status %#x.\n", io.Status );
         return;
     }
     fdo_ext->u.fdo.child_pdo = child_pdo;
 
     pdo_ext = child_pdo->DeviceExtension;
     pdo_ext->u.pdo.parent_fdo = fdo;
+    list_init( &pdo_ext->u.pdo.report_queues );
+    KeInitializeSpinLock( &pdo_ext->u.pdo.report_queues_lock );
     InitializeListHead(&pdo_ext->u.pdo.irp_queue);
     KeInitializeSpinLock(&pdo_ext->u.pdo.irp_queue_lock);
     wcscpy(pdo_ext->device_id, fdo_ext->device_id);
@@ -221,8 +224,8 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
     pdo_ext->u.pdo.information.VersionNumber = attr.VersionNumber;
     pdo_ext->u.pdo.information.Polled = minidriver->minidriver.DevicesArePolled;
 
-    status = call_minidriver(IOCTL_HID_GET_DEVICE_DESCRIPTOR, fdo, NULL, 0, &descriptor, sizeof(descriptor));
-    if (status != STATUS_SUCCESS)
+    call_minidriver( IOCTL_HID_GET_DEVICE_DESCRIPTOR, fdo, NULL, 0, &descriptor, sizeof(descriptor), &io );
+    if (io.Status != STATUS_SUCCESS)
     {
         ERR("Cannot get Device Descriptor(%x)\n",status);
         IoDeleteDevice(child_pdo);
@@ -240,9 +243,9 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
     }
 
     reportDescriptor = malloc(descriptor.DescriptorList[i].wReportLength);
-    status = call_minidriver(IOCTL_HID_GET_REPORT_DESCRIPTOR, fdo, NULL, 0,
-        reportDescriptor, descriptor.DescriptorList[i].wReportLength);
-    if (status != STATUS_SUCCESS)
+    call_minidriver( IOCTL_HID_GET_REPORT_DESCRIPTOR, fdo, NULL, 0, reportDescriptor,
+                     descriptor.DescriptorList[i].wReportLength, &io );
+    if (io.Status != STATUS_SUCCESS)
     {
         ERR("Cannot get Report Descriptor(%x)\n",status);
         free(reportDescriptor);
@@ -250,7 +253,7 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
         return;
     }
 
-    pdo_ext->u.pdo.preparsed_data = ParseDescriptor(reportDescriptor, descriptor.DescriptorList[i].wReportLength);
+    pdo_ext->u.pdo.preparsed_data = parse_descriptor( reportDescriptor, descriptor.DescriptorList[i].wReportLength );
     free(reportDescriptor);
     if (!pdo_ext->u.pdo.preparsed_data)
     {
@@ -259,7 +262,7 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
         return;
     }
 
-    pdo_ext->u.pdo.information.DescriptorSize = pdo_ext->u.pdo.preparsed_data->dwSize;
+    pdo_ext->u.pdo.information.DescriptorSize = pdo_ext->u.pdo.preparsed_data->size;
 
     page = pdo_ext->u.pdo.preparsed_data->caps.UsagePage;
     usage = pdo_ext->u.pdo.preparsed_data->caps.Usage;
@@ -282,9 +285,6 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
     }
 
     pdo_ext->u.pdo.poll_interval = DEFAULT_POLL_INTERVAL;
-
-    pdo_ext->u.pdo.ring_buffer = RingBuffer_Create(
-            sizeof(HID_XFER_PACKET) + pdo_ext->u.pdo.preparsed_data->caps.InputReportByteLength);
 
     HID_StartDeviceThread(child_pdo);
 
@@ -489,8 +489,6 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device, IRP *irp)
             CloseHandle(ext->u.pdo.halt_event);
 
             free(ext->u.pdo.preparsed_data);
-            if (ext->u.pdo.ring_buffer)
-                RingBuffer_Destroy(ext->u.pdo.ring_buffer);
 
             RtlFreeUnicodeString(&ext->u.pdo.link_name);
 
@@ -606,19 +604,16 @@ NTSTATUS WINAPI HidRegisterMinidriver(HID_MINIDRIVER_REGISTRATION *registration)
     return STATUS_SUCCESS;
 }
 
-NTSTATUS call_minidriver(ULONG code, DEVICE_OBJECT *device, void *in_buff, ULONG in_size, void *out_buff, ULONG out_size)
+void call_minidriver( ULONG code, DEVICE_OBJECT *device, void *in_buff, ULONG in_size,
+                      void *out_buff, ULONG out_size, IO_STATUS_BLOCK *io )
 {
     IRP *irp;
-    IO_STATUS_BLOCK io;
     KEVENT event;
 
     KeInitializeEvent(&event, NotificationEvent, FALSE);
 
-    irp = IoBuildDeviceIoControlRequest(code, device, in_buff, in_size,
-        out_buff, out_size, TRUE, &event, &io);
+    irp = IoBuildDeviceIoControlRequest( code, device, in_buff, in_size, out_buff, out_size, TRUE, &event, io );
 
     if (IoCallDriver(device, irp) == STATUS_PENDING)
         KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
-
-    return io.Status;
 }

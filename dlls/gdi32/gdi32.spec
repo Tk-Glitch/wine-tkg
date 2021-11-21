@@ -245,7 +245,7 @@
 @ stdcall GetBitmapDimensionEx(long ptr) NtGdiGetBitmapDimension
 @ stdcall GetBkColor(long)
 @ stdcall GetBkMode(long)
-@ stdcall GetBoundsRect(long ptr long)
+@ stdcall GetBoundsRect(long ptr long) NtGdiGetBoundsRect
 # @ stub GetBrushAttributes
 @ stdcall GetBrushOrgEx(long ptr)
 @ stdcall GetCharABCWidthsA(long long long ptr)
@@ -276,7 +276,7 @@
 @ stdcall GetDIBColorTable(long long long ptr)
 @ stdcall GetDIBits(long long long long ptr ptr long)
 @ stdcall GetDeviceCaps(long long)
-@ stdcall GetDeviceGammaRamp(long ptr)
+@ stdcall GetDeviceGammaRamp(long ptr) NtGdiGetDeviceGammaRamp
 @ stub GetETM
 # @ stub GetEUDCTimeStamp
 # @ stub GetEUDCTimeStampExW
@@ -346,7 +346,7 @@
 @ stdcall GetTextAlign(long)
 @ stdcall GetTextCharacterExtra(long)
 @ stdcall GetTextCharset(long)
-@ stdcall GetTextCharsetInfo(long ptr long)
+@ stdcall GetTextCharsetInfo(long ptr long) NtGdiGetTextCharsetInfo
 @ stdcall GetTextColor(long)
 @ stdcall GetTextExtentExPointA(long str long long ptr ptr ptr)
 @ stdcall GetTextExtentExPointI(long ptr long long ptr ptr ptr)
@@ -362,7 +362,7 @@
 @ stdcall GetTextFaceW(long long ptr)
 @ stdcall GetTextMetricsA(long ptr)
 @ stdcall GetTextMetricsW(long ptr)
-@ stdcall GetTransform(long long ptr)
+@ stdcall GetTransform(long long ptr) NtGdiGetTransform
 @ stdcall GetViewportExtEx(long ptr)
 @ stdcall GetViewportOrgEx(long ptr)
 @ stdcall GetWinMetaFileBits(long long ptr long long)
@@ -408,11 +408,11 @@
 @ stdcall Polyline(long ptr long)
 @ stdcall PolylineTo(long ptr long)
 @ stdcall PtInRegion(long long long) NtGdiPtInRegion
-@ stdcall PtVisible(long long long)
+@ stdcall PtVisible(long long long) NtGdiPtVisible
 # @ stub QueryFontAssocStatus
 @ stdcall RealizePalette(long)
 @ stdcall RectInRegion(long ptr) NtGdiRectInRegion
-@ stdcall RectVisible(long ptr)
+@ stdcall RectVisible(long ptr) NtGdiRectVisible
 @ stdcall Rectangle(long long long long long)
 @ stdcall RemoveFontMemResourceEx(ptr)
 @ stdcall RemoveFontResourceA(str)
@@ -479,7 +479,7 @@
 @ stdcall SetBitmapDimensionEx(long long long ptr) NtGdiSetBitmapDimension
 @ stdcall SetBkColor(long long)
 @ stdcall SetBkMode(long long)
-@ stdcall SetBoundsRect(long ptr long)
+@ stdcall SetBoundsRect(long ptr long) NtGdiSetBoundsRect
 # @ stub SetBrushAttributes
 @ stdcall SetBrushOrgEx(long long long ptr)
 @ stdcall SetColorAdjustment(long ptr)
@@ -489,7 +489,7 @@
 @ stdcall SetDIBColorTable(long long long ptr)
 @ stdcall SetDIBits(long long long long ptr ptr long)
 @ stdcall SetDIBitsToDevice(long long long long long long long long long ptr ptr long)
-@ stdcall SetDeviceGammaRamp(long ptr)
+@ stdcall SetDeviceGammaRamp(long ptr) NtGdiSetDeviceGammaRamp
 @ stdcall SetEnhMetaFileBits(long ptr)
 @ stub SetFontEnumeration
 @ stdcall SetGraphicsMode(long long)
@@ -521,7 +521,7 @@
 @ stdcall SetTextJustification(long long long)
 @ stdcall SetViewportExtEx(long long long ptr)
 @ stdcall SetViewportOrgEx(long long long ptr)
-@ stdcall SetVirtualResolution(long long long long long)
+@ stdcall SetVirtualResolution(long long long long long) NtGdiSetVirtualResolution
 @ stdcall SetWinMetaFileBits(long ptr long ptr)
 @ stdcall SetWindowExtEx(long long long ptr)
 @ stdcall SetWindowOrgEx(long long long ptr)

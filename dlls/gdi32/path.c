@@ -2095,11 +2095,9 @@ const struct gdi_dc_funcs path_driver =
     pathdrv_EndPath,                    /* pEndPath */
     NULL,                               /* pEnumFonts */
     NULL,                               /* pEnumICMProfiles */
-    NULL,                               /* pExcludeClipRect */
     NULL,                               /* pExtDeviceMode */
     NULL,                               /* pExtEscape */
     NULL,                               /* pExtFloodFill */
-    NULL,                               /* pExtSelectClipRgn */
     pathdrv_ExtTextOut,                 /* pExtTextOut */
     NULL,                               /* pFillPath */
     NULL,                               /* pFillRgn */
@@ -2132,14 +2130,9 @@ const struct gdi_dc_funcs path_driver =
     NULL,                               /* pGetTextFace */
     NULL,                               /* pGetTextMetrics */
     NULL,                               /* pGradientFill */
-    NULL,                               /* pIntersectClipRect */
     NULL,                               /* pInvertRgn */
     pathdrv_LineTo,                     /* pLineTo */
-    NULL,                               /* pModifyWorldTransform */
     pathdrv_MoveTo,                     /* pMoveTo */
-    NULL,                               /* pOffsetClipRgn */
-    NULL,                               /* pOffsetViewportOrg */
-    NULL,                               /* pOffsetWindowOrg */
     NULL,                               /* pPaintRgn */
     NULL,                               /* pPatBlt */
     pathdrv_Pie,                        /* pPie */
@@ -2156,13 +2149,10 @@ const struct gdi_dc_funcs path_driver =
     NULL,                               /* pResetDC */
     NULL,                               /* pRestoreDC */
     pathdrv_RoundRect,                  /* pRoundRect */
-    NULL,                               /* pScaleViewportExt */
-    NULL,                               /* pScaleWindowExt */
     NULL,                               /* pSelectBitmap */
     NULL,                               /* pSelectBrush */
     NULL,                               /* pSelectClipPath */
     NULL,                               /* pSelectFont */
-    NULL,                               /* pSelectPalette */
     NULL,                               /* pSelectPen */
     NULL,                               /* pSetBkColor */
     NULL,                               /* pSetBoundsRect */
@@ -2171,18 +2161,8 @@ const struct gdi_dc_funcs path_driver =
     NULL,                               /* pSetDIBitsToDevice */
     NULL,                               /* pSetDeviceClipping */
     NULL,                               /* pSetDeviceGammaRamp */
-    NULL,                               /* pSetLayout */
-    NULL,                               /* pSetMapMode */
-    NULL,                               /* pSetMapperFlags */
     NULL,                               /* pSetPixel */
-    NULL,                               /* pSetTextCharacterExtra */
     NULL,                               /* pSetTextColor */
-    NULL,                               /* pSetTextJustification */
-    NULL,                               /* pSetViewportExt */
-    NULL,                               /* pSetViewportOrg */
-    NULL,                               /* pSetWindowExt */
-    NULL,                               /* pSetWindowOrg */
-    NULL,                               /* pSetWorldTransform */
     NULL,                               /* pStartDoc */
     NULL,                               /* pStartPage */
     NULL,                               /* pStretchBlt */

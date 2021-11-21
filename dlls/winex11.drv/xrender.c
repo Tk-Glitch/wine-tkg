@@ -2286,11 +2286,9 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pEndPath */
     NULL,                               /* pEnumFonts */
     NULL,                               /* pEnumICMProfiles */
-    NULL,                               /* pExcludeClipRect */
     NULL,                               /* pExtDeviceMode */
     xrenderdrv_ExtEscape,               /* pExtEscape */
     NULL,                               /* pExtFloodFill */
-    NULL,                               /* pExtSelectClipRgn */
     xrenderdrv_ExtTextOut,              /* pExtTextOut */
     NULL,                               /* pFillPath */
     NULL,                               /* pFillRgn */
@@ -2323,14 +2321,9 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pGetTextFace */
     NULL,                               /* pGetTextMetrics */
     xrenderdrv_GradientFill,            /* pGradientFill */
-    NULL,                               /* pIntersectClipRect */
     NULL,                               /* pInvertRgn */
     NULL,                               /* pLineTo */
-    NULL,                               /* pModifyWorldTransform */
     NULL,                               /* pMoveTo */
-    NULL,                               /* pOffsetClipRgn */
-    NULL,                               /* pOffsetViewportOrg */
-    NULL,                               /* pOffsetWindowOrg */
     NULL,                               /* pPaintRgn */
     NULL,                               /* pPatBlt */
     NULL,                               /* pPie */
@@ -2347,13 +2340,10 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pResetDC */
     NULL,                               /* pRestoreDC */
     NULL,                               /* pRoundRect */
-    NULL,                               /* pScaleViewportExt */
-    NULL,                               /* pScaleWindowExt */
     NULL,                               /* pSelectBitmap */
     xrenderdrv_SelectBrush,             /* pSelectBrush */
     NULL,                               /* pSelectClipPath */
     xrenderdrv_SelectFont,              /* pSelectFont */
-    NULL,                               /* pSelectPalette */
     NULL,                               /* pSelectPen */
     NULL,                               /* pSetBkColor */
     NULL,                               /* pSetBoundsRect */
@@ -2362,18 +2352,8 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pSetDIBitsToDevice */
     xrenderdrv_SetDeviceClipping,       /* pSetDeviceClipping */
     NULL,                               /* pSetDeviceGammaRamp */
-    NULL,                               /* pSetLayout */
-    NULL,                               /* pSetMapMode */
-    NULL,                               /* pSetMapperFlags */
     NULL,                               /* pSetPixel */
-    NULL,                               /* pSetTextCharacterExtra */
     NULL,                               /* pSetTextColor */
-    NULL,                               /* pSetTextJustification */
-    NULL,                               /* pSetViewportExt */
-    NULL,                               /* pSetViewportOrg */
-    NULL,                               /* pSetWindowExt */
-    NULL,                               /* pSetWindowOrg */
-    NULL,                               /* pSetWorldTransform */
     NULL,                               /* pStartDoc */
     NULL,                               /* pStartPage */
     xrenderdrv_StretchBlt,              /* pStretchBlt */

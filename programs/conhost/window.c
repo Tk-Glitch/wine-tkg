@@ -256,7 +256,7 @@ static void load_config( const WCHAR *key_name, struct console_config *config )
     config->menu_mask    = 0;
     config->popup_attr   = 0xF5;
     config->quick_edit   = 0;
-    config->sb_height    = 25;
+    config->sb_height    = 150;
     config->sb_width     = 80;
     config->attr         = 0x000F;
     config->win_height   = 25;
@@ -303,7 +303,8 @@ static void save_registry_key( HKEY key, const struct console_config *config )
     val = config->edition_mode;
     RegSetValueExW( key, L"EditionMode", 0, REG_DWORD, (BYTE *)&val, sizeof(val) );
 
-    RegSetValueExW( key, L"FaceName", 0, REG_SZ, (BYTE *)&config->face_name, sizeof(config->face_name) );
+    RegSetValueExW( key, L"FaceName", 0, REG_SZ, (BYTE *)&config->face_name,
+                    (lstrlenW(config->face_name) + 1) * sizeof(WCHAR) );
 
     val = config->font_pitch_family;
     RegSetValueExW( key, L"FontPitchFamily", 0, REG_DWORD, (BYTE *)&val, sizeof(val) );
@@ -1925,8 +1926,6 @@ static void current_config( struct console *console, struct console_config *conf
     config->popup_attr = console->active->popup_attr;
     memcpy( config->color_map, console->active->color_map, sizeof(config->color_map) );
 
-    config->win_height  = console->active->win.bottom - console->active->win.top + 1;
-    config->win_width   = console->active->win.right - console->active->win.left + 1;
     config->cell_width  = console->active->font.width;
     config->cell_height = console->active->font.height;
     config->font_weight = console->active->font.weight;

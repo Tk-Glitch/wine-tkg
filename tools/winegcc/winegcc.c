@@ -478,7 +478,7 @@ static strarray *get_link_args( struct options *opts, const char *output_name )
     switch (opts->target_platform)
     {
     case PLATFORM_APPLE:
-        strarray_add( flags, "-bundle" );
+        strarray_add( flags, opts->unix_lib ? "-dynamiclib" : "-bundle" );
         strarray_add( flags, "-multiply_defined" );
         strarray_add( flags, "suppress" );
         if (opts->target_cpu == CPU_POWERPC)
@@ -523,7 +523,7 @@ static strarray *get_link_args( struct options *opts, const char *output_name )
         if (opts->unicode_app) strarray_add( flags, "-municode" );
         if (opts->nodefaultlibs || opts->use_msvcrt) strarray_add( flags, "-nodefaultlibs" );
         if (opts->nostartfiles || opts->use_msvcrt) strarray_add( flags, "-nostartfiles" );
-        if (opts->subsystem) strarray_add( flags, strmake("-Wl,--subsystem,%s", opts->subsystem ));
+        if (opts->subsystem && strcmp(opts->subsystem, "unixlib")) strarray_add( flags, strmake("-Wl,--subsystem,%s", opts->subsystem ));
 
         strarray_add( flags, "-Wl,--nxcompat" );
 
@@ -563,7 +563,7 @@ static strarray *get_link_args( struct options *opts, const char *output_name )
         if (opts->nodefaultlibs || opts->use_msvcrt) strarray_add( flags, "-nodefaultlibs" );
         if (opts->nostartfiles || opts->use_msvcrt) strarray_add( flags, "-nostartfiles" );
         if (opts->image_base) strarray_add( flags, strmake("-Wl,-base:%s", opts->image_base ));
-        if (opts->subsystem)
+        if (opts->subsystem && strcmp(opts->subsystem, "unixlib"))
             strarray_add( flags, strmake("-Wl,-subsystem:%s", opts->subsystem ));
         else
             strarray_add( flags, strmake("-Wl,-subsystem:%s", opts->gui_app ? "windows" : "console" ));
@@ -1091,7 +1091,7 @@ static void add_library( struct options *opts, strarray *lib_dirs, strarray *fil
         strarray_add(files, strmake("-a%s", fullname));
         break;
     case file_dll:
-        if (opts->unix_lib && opts->subsystem && !strcmp(opts->subsystem, "native"))
+        if (opts->unix_lib && opts->subsystem && !strcmp(opts->subsystem, "unixlib"))
         {
             if (get_lib_type(opts->target_platform, lib_dirs, library, "", ".so", &unixlib) == file_so)
             {
@@ -1120,12 +1120,107 @@ static void add_library( struct options *opts, strarray *lib_dirs, strarray *fil
     free(fullname);
 }
 
+/* run winebuild to generate the .spec.o file */
+static const char *build_spec_obj( struct options *opts, const char *spec_file, const char *output_file,
+                                   strarray *files, strarray *lib_dirs, const char *entry_point )
+{
+    unsigned int i;
+    int is_pe = is_pe_target( opts );
+    strarray *spec_args = get_winebuild_args( opts );
+    strarray *tool;
+    const char *spec_o_name, *output_name;
+    int fake_module = strendswith(output_file, ".fake");
+
+    /* get the filename from the path */
+    if ((output_name = strrchr(output_file, '/'))) output_name++;
+    else output_name = output_file;
+
+    if ((tool = build_tool_name( opts, TOOL_CC ))) strarray_add( spec_args, strmake( "--cc-cmd=%s", strarray_tostring( tool, " " )));
+    if (!is_pe && (tool = build_tool_name( opts, TOOL_LD ))) strarray_add( spec_args, strmake( "--ld-cmd=%s", strarray_tostring( tool, " " )));
+
+    spec_o_name = get_temp_file(output_name, ".spec.o");
+    if (opts->force_pointer_size)
+        strarray_add(spec_args, strmake("-m%u", 8 * opts->force_pointer_size ));
+    if (opts->pic && !is_pe) strarray_add(spec_args, "-fPIC");
+    strarray_add(spec_args, opts->shared ? "--dll" : "--exe");
+    if (fake_module)
+    {
+        strarray_add(spec_args, "--fake-module");
+        strarray_add(spec_args, "-o");
+        strarray_add(spec_args, output_file);
+    }
+    else
+    {
+        strarray_add(spec_args, "-o");
+        strarray_add(spec_args, spec_o_name);
+    }
+    if (spec_file)
+    {
+        strarray_add(spec_args, "-E");
+        strarray_add(spec_args, spec_file);
+    }
+
+    if (!opts->shared)
+    {
+        strarray_add(spec_args, "-F");
+        strarray_add(spec_args, output_name);
+        strarray_add(spec_args, "--subsystem");
+        strarray_add(spec_args, opts->gui_app ? "windows" : "console");
+        if (opts->large_address_aware) strarray_add( spec_args, "--large-address-aware" );
+    }
+
+    if (opts->target_platform == PLATFORM_WINDOWS) strarray_add(spec_args, "--safeseh");
+
+    if (entry_point)
+    {
+        strarray_add(spec_args, "--entry");
+        strarray_add(spec_args, entry_point);
+    }
+
+    if (opts->subsystem && strcmp( opts->subsystem, "unixlib" ))
+    {
+        strarray_add(spec_args, "--subsystem");
+        strarray_add(spec_args, opts->subsystem);
+    }
+
+    for (i = 0; i < lib_dirs->size; i++)
+	strarray_add(spec_args, strmake("-L%s", lib_dirs->base[i]));
+
+    if (!is_pe)
+    {
+        for (i = 0; i < opts->delayimports->size; i++)
+            strarray_add(spec_args, strmake("-d%s", opts->delayimports->base[i]));
+    }
+
+    /* add resource files */
+    for (i = 0; i < files->size; i++)
+	if (files->base[i][1] == 'r') strarray_add(spec_args, files->base[i]);
+
+    /* add other files */
+    strarray_add(spec_args, "--");
+    for (i = 0; i < files->size; i++)
+    {
+	switch(files->base[i][1])
+	{
+	    case 'd':
+	    case 'a':
+	    case 'o':
+		strarray_add(spec_args, files->base[i] + 2);
+		break;
+	}
+    }
+
+    spawn(opts->prefix, spec_args, 0);
+    strarray_free (spec_args);
+    return spec_o_name;
+}
+
 static void build(struct options* opts)
 {
     strarray *lib_dirs, *files;
-    strarray *spec_args, *link_args, *implib_args, *tool;
+    strarray *link_args, *implib_args, *tool;
     char *output_file, *output_path;
-    const char *spec_o_name, *libgcc = NULL;
+    const char *spec_o_name = NULL, *libgcc = NULL;
     const char *output_name, *spec_file, *lang;
     int generate_app_loader = 1;
     const char *crt_lib = NULL, *entry_point = NULL;
@@ -1287,85 +1382,9 @@ static void build(struct options* opts)
     else entry_point = opts->entry_point;
 
     /* run winebuild to generate the .spec.o file */
-    spec_args = get_winebuild_args( opts );
-    if ((tool = build_tool_name( opts, TOOL_CC ))) strarray_add( spec_args, strmake( "--cc-cmd=%s", strarray_tostring( tool, " " )));
-    if (!is_pe && (tool = build_tool_name( opts, TOOL_LD ))) strarray_add( spec_args, strmake( "--ld-cmd=%s", strarray_tostring( tool, " " )));
+    if (!(opts->unix_lib && opts->subsystem && !strcmp(opts->subsystem, "native")))
+        spec_o_name = build_spec_obj( opts, spec_file, output_file, files, lib_dirs, entry_point );
 
-    spec_o_name = get_temp_file(output_name, ".spec.o");
-    if (opts->force_pointer_size)
-        strarray_add(spec_args, strmake("-m%u", 8 * opts->force_pointer_size ));
-    strarray_add(spec_args, "-D_REENTRANT");
-    if (opts->pic && !is_pe) strarray_add(spec_args, "-fPIC");
-    strarray_add(spec_args, opts->shared ? "--dll" : "--exe");
-    if (fake_module)
-    {
-        strarray_add(spec_args, "--fake-module");
-        strarray_add(spec_args, "-o");
-        strarray_add(spec_args, output_file);
-    }
-    else
-    {
-        strarray_add(spec_args, "-o");
-        strarray_add(spec_args, spec_o_name);
-    }
-    if (spec_file)
-    {
-        strarray_add(spec_args, "-E");
-        strarray_add(spec_args, spec_file);
-    }
-
-    if (!opts->shared)
-    {
-        strarray_add(spec_args, "-F");
-        strarray_add(spec_args, output_name);
-        strarray_add(spec_args, "--subsystem");
-        strarray_add(spec_args, opts->gui_app ? "windows" : "console");
-        if (opts->large_address_aware) strarray_add( spec_args, "--large-address-aware" );
-    }
-
-    if (opts->target_platform == PLATFORM_WINDOWS) strarray_add(spec_args, "--safeseh");
-
-    if (entry_point)
-    {
-        strarray_add(spec_args, "--entry");
-        strarray_add(spec_args, entry_point);
-    }
-
-    if (opts->subsystem)
-    {
-        strarray_add(spec_args, "--subsystem");
-        strarray_add(spec_args, opts->subsystem);
-    }
-
-    for ( j = 0; j < lib_dirs->size; j++ )
-	strarray_add(spec_args, strmake("-L%s", lib_dirs->base[j]));
-
-    if (!is_pe)
-    {
-        for (j = 0; j < opts->delayimports->size; j++)
-            strarray_add(spec_args, strmake("-d%s", opts->delayimports->base[j]));
-    }
-
-    /* add resource files */
-    for ( j = 0; j < files->size; j++ )
-	if (files->base[j][1] == 'r') strarray_add(spec_args, files->base[j]);
-
-    /* add other files */
-    strarray_add(spec_args, "--");
-    for ( j = 0; j < files->size; j++ )
-    {
-	switch(files->base[j][1])
-	{
-	    case 'd':
-	    case 'a':
-	    case 'o':
-		strarray_add(spec_args, files->base[j] + 2);
-		break;
-	}
-    }
-
-    spawn(opts->prefix, spec_args, 0);
-    strarray_free (spec_args);
     if (fake_module) return;  /* nothing else to do */
 
     /* link everything together now */
@@ -1396,7 +1415,7 @@ static void build(struct options* opts)
                                             entry_point));
     }
 
-    strarray_add(link_args, spec_o_name);
+    if (spec_o_name) strarray_add(link_args, spec_o_name);
 
     if (is_pe)
     {

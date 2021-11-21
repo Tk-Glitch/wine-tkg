@@ -30,12 +30,6 @@
 #ifdef HAVE_ARPA_INET_H
 # include <arpa/inet.h>
 #endif
-#ifdef HAVE_ARPA_NAMESER_H
-# include <arpa/nameser.h>
-#endif
-#ifdef HAVE_RESOLV_H
-# include <resolv.h>
-#endif
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
@@ -113,6 +107,15 @@ DWORD WINAPI ConvertStringToGuidW( const WCHAR *str, GUID *guid )
 
     RtlInitUnicodeString( &ustr, str );
     return RtlNtStatusToDosError( RtlGUIDFromString( &ustr, guid ) );
+}
+
+static void if_counted_string_copy( WCHAR *dst, unsigned int len, IF_COUNTED_STRING *src )
+{
+    unsigned int copy = src->Length;
+
+    if (copy >= len * sizeof(WCHAR)) copy = 0;
+    memcpy( dst, src->String, copy );
+    memset( (char *)dst + copy, 0, len * sizeof(WCHAR) - copy );
 }
 
 /******************************************************************
@@ -573,6 +576,51 @@ DWORD WINAPI GetAdapterIndex( WCHAR *adapter_name, ULONG *index )
     return err;
 }
 
+static DWORD get_wins_servers( SOCKADDR_INET **servers )
+{
+    HKEY key;
+    char buf[4 * 4];
+    DWORD size, i, count = 0;
+    static const char *values[] = { "WinsServer", "BackupWinsServer" };
+    IN_ADDR addrs[ARRAY_SIZE(values)];
+
+    *servers = NULL;
+    /* @@ Wine registry key: HKCU\Software\Wine\Network */
+    if (RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\Network", &key )) return 0;
+
+    for (i = 0; i < ARRAY_SIZE(values); i++)
+    {
+        size = sizeof(buf);
+        if (!RegQueryValueExA( key, values[i], NULL, NULL, (LPBYTE)buf, &size ))
+            if (!RtlIpv4StringToAddressA( buf, TRUE, NULL, addrs + count ) &&
+                addrs[count].WS_s_addr != INADDR_NONE && addrs[count].WS_s_addr != INADDR_ANY)
+                count++;
+    }
+    RegCloseKey( key );
+
+    if (count)
+    {
+        *servers = heap_alloc_zero( count * sizeof(**servers) );
+        if (!*servers) return 0;
+        for (i = 0; i < count; i++)
+        {
+            (*servers)[i].Ipv4.sin_family = WS_AF_INET;
+            (*servers)[i].Ipv4.sin_addr = addrs[i];
+        }
+    }
+    return count;
+}
+
+static void ip_addr_string_init( IP_ADDR_STRING *s, const IN_ADDR *addr, const IN_ADDR *mask, DWORD ctxt )
+{
+    s->Next = NULL;
+
+    if (addr) RtlIpv4AddressToStringA( addr, s->IpAddress.String );
+    else s->IpAddress.String[0] = '\0';
+    if (mask) RtlIpv4AddressToStringA( mask, s->IpMask.String );
+    else s->IpMask.String[0] = '\0';
+    s->Context = ctxt;
+}
 
 /******************************************************************
  *    GetAdaptersInfo (IPHLPAPI.@)
@@ -580,971 +628,729 @@ DWORD WINAPI GetAdapterIndex( WCHAR *adapter_name, ULONG *index )
  * Get information about adapters.
  *
  * PARAMS
- *  pAdapterInfo [Out] buffer for adapter infos
- *  pOutBufLen   [In]  length of output buffer
- *
- * RETURNS
- *  Success: NO_ERROR
- *  Failure: error code from winerror.h
+ *  info [Out] buffer for adapter infos
+ *  size [In]  length of output buffer
  */
-DWORD WINAPI GetAdaptersInfo(PIP_ADAPTER_INFO pAdapterInfo, PULONG pOutBufLen)
+DWORD WINAPI GetAdaptersInfo( IP_ADAPTER_INFO *info, ULONG *size )
 {
-  DWORD ret;
+    DWORD err, if_count, if_num = 0, uni_count, fwd_count, needed, wins_server_count;
+    DWORD len, i, uni, fwd;
+    NET_LUID *if_keys = NULL;
+    struct nsi_ndis_ifinfo_rw *if_rw = NULL;
+    struct nsi_ndis_ifinfo_dynamic *if_dyn = NULL;
+    struct nsi_ndis_ifinfo_static *if_stat = NULL;
+    struct nsi_ipv4_unicast_key *uni_keys = NULL;
+    struct nsi_ip_unicast_rw *uni_rw = NULL;
+    struct nsi_ipv4_forward_key *fwd_keys = NULL;
+    SOCKADDR_INET *wins_servers = NULL;
+    IP_ADDR_STRING *extra_ip_addrs, *cursor;
+    IN_ADDR gw, mask;
 
-  TRACE("pAdapterInfo %p, pOutBufLen %p\n", pAdapterInfo, pOutBufLen);
-  if (!pOutBufLen)
-    ret = ERROR_INVALID_PARAMETER;
-  else {
-    DWORD numNonLoopbackInterfaces = get_interface_indices( TRUE, NULL );
+    TRACE( "info %p, size %p\n", info, size );
+    if (!size) return ERROR_INVALID_PARAMETER;
 
-    if (numNonLoopbackInterfaces > 0) {
-      DWORD numIPAddresses = getNumIPAddresses();
-      ULONG size;
-
-      /* This may slightly overestimate the amount of space needed, because
-       * the IP addresses include the loopback address, but it's easier
-       * to make sure there's more than enough space than to make sure there's
-       * precisely enough space.
-       */
-      size = sizeof(IP_ADAPTER_INFO) * numNonLoopbackInterfaces;
-      size += numIPAddresses  * sizeof(IP_ADDR_STRING); 
-      if (!pAdapterInfo || *pOutBufLen < size) {
-        *pOutBufLen = size;
-        ret = ERROR_BUFFER_OVERFLOW;
-      }
-      else {
-        InterfaceIndexTable *table = NULL;
-        PMIB_IPADDRTABLE ipAddrTable = NULL;
-        PMIB_IPFORWARDTABLE routeTable = NULL;
-
-        ret = getIPAddrTable(&ipAddrTable, GetProcessHeap(), 0);
-        if (!ret)
-          ret = AllocateAndGetIpForwardTableFromStack(&routeTable, FALSE, GetProcessHeap(), 0);
-        if (!ret)
-          get_interface_indices( TRUE, &table );
-        if (table) {
-          size = sizeof(IP_ADAPTER_INFO) * table->numIndexes;
-          size += ipAddrTable->dwNumEntries * sizeof(IP_ADDR_STRING); 
-          if (*pOutBufLen < size) {
-            *pOutBufLen = size;
-            ret = ERROR_INSUFFICIENT_BUFFER;
-          }
-          else {
-            DWORD ndx;
-            HKEY hKey;
-            BOOL winsEnabled = FALSE;
-            IP_ADDRESS_STRING primaryWINS, secondaryWINS;
-            PIP_ADDR_STRING nextIPAddr = (PIP_ADDR_STRING)((LPBYTE)pAdapterInfo
-             + numNonLoopbackInterfaces * sizeof(IP_ADAPTER_INFO));
-
-            memset(pAdapterInfo, 0, size);
-            /* @@ Wine registry key: HKCU\Software\Wine\Network */
-            if (RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Network",
-             &hKey) == ERROR_SUCCESS) {
-              DWORD size = sizeof(primaryWINS.String);
-              unsigned long addr;
-
-              RegQueryValueExA(hKey, "WinsServer", NULL, NULL,
-               (LPBYTE)primaryWINS.String, &size);
-              addr = inet_addr(primaryWINS.String);
-              if (addr != INADDR_NONE && addr != INADDR_ANY)
-                winsEnabled = TRUE;
-              size = sizeof(secondaryWINS.String);
-              RegQueryValueExA(hKey, "BackupWinsServer", NULL, NULL,
-               (LPBYTE)secondaryWINS.String, &size);
-              addr = inet_addr(secondaryWINS.String);
-              if (addr != INADDR_NONE && addr != INADDR_ANY)
-                winsEnabled = TRUE;
-              RegCloseKey(hKey);
-            }
-            for (ndx = 0; ndx < table->numIndexes; ndx++) {
-              PIP_ADAPTER_INFO ptr = &pAdapterInfo[ndx];
-              DWORD i;
-              PIP_ADDR_STRING currentIPAddr = &ptr->IpAddressList;
-              BOOL firstIPAddr = TRUE;
-              NET_LUID luid;
-              GUID guid;
-
-              /* on Win98 this is left empty, but whatever */
-              ConvertInterfaceIndexToLuid(table->indexes[ndx], &luid);
-              ConvertInterfaceLuidToGuid(&luid, &guid);
-              ConvertGuidToStringA( &guid, ptr->AdapterName, ARRAY_SIZE(ptr->AdapterName) );
-              getInterfaceNameByIndex(table->indexes[ndx], ptr->Description);
-              ptr->AddressLength = sizeof(ptr->Address);
-              getInterfacePhysicalByIndex(table->indexes[ndx],
-               &ptr->AddressLength, ptr->Address, &ptr->Type);
-              ptr->Index = table->indexes[ndx];
-              for (i = 0; i < ipAddrTable->dwNumEntries; i++) {
-                if (ipAddrTable->table[i].dwIndex == ptr->Index) {
-                  if (firstIPAddr) {
-                    RtlIpv4AddressToStringA((IN_ADDR *)&ipAddrTable->table[i].dwAddr,
-                     ptr->IpAddressList.IpAddress.String);
-                    RtlIpv4AddressToStringA((IN_ADDR *)&ipAddrTable->table[i].dwMask,
-                     ptr->IpAddressList.IpMask.String);
-                    firstIPAddr = FALSE;
-                  }
-                  else {
-                    currentIPAddr->Next = nextIPAddr;
-                    currentIPAddr = nextIPAddr;
-                    RtlIpv4AddressToStringA((IN_ADDR *)&ipAddrTable->table[i].dwAddr,
-                     currentIPAddr->IpAddress.String);
-                    RtlIpv4AddressToStringA((IN_ADDR *)&ipAddrTable->table[i].dwMask,
-                     currentIPAddr->IpMask.String);
-                    nextIPAddr++;
-                  }
-                }
-              }
-              /* If no IP was found it probably means that the interface is not
-               * configured. In this case we have to return a zeroed IP and mask. */
-              if (firstIPAddr) {
-                strcpy(ptr->IpAddressList.IpAddress.String, "0.0.0.0");
-                strcpy(ptr->IpAddressList.IpMask.String, "0.0.0.0");
-              }
-              /* Find first router through this interface, which we'll assume
-               * is the default gateway for this adapter */
-              strcpy(ptr->GatewayList.IpAddress.String, "0.0.0.0");
-              strcpy(ptr->GatewayList.IpMask.String, "255.255.255.255");
-              for (i = 0; i < routeTable->dwNumEntries; i++)
-                if (routeTable->table[i].dwForwardIfIndex == ptr->Index
-                 && routeTable->table[i].u1.ForwardType ==
-                 MIB_IPROUTE_TYPE_INDIRECT)
-                {
-                  RtlIpv4AddressToStringA((IN_ADDR *)&routeTable->table[i].dwForwardNextHop,
-                   ptr->GatewayList.IpAddress.String);
-                  RtlIpv4AddressToStringA((IN_ADDR *)&routeTable->table[i].dwForwardMask,
-                   ptr->GatewayList.IpMask.String);
-                }
-              if (winsEnabled) {
-                ptr->HaveWins = TRUE;
-                memcpy(ptr->PrimaryWinsServer.IpAddress.String,
-                 primaryWINS.String, sizeof(primaryWINS.String));
-                memcpy(ptr->SecondaryWinsServer.IpAddress.String,
-                 secondaryWINS.String, sizeof(secondaryWINS.String));
-              }
-              if (ndx < table->numIndexes - 1)
-                ptr->Next = &pAdapterInfo[ndx + 1];
-              else
-                ptr->Next = NULL;
-
-              ptr->DhcpEnabled = TRUE;
-            }
-            ret = NO_ERROR;
-          }
-          HeapFree(GetProcessHeap(), 0, table);
-        }
-        else
-          ret = ERROR_OUTOFMEMORY;
-        HeapFree(GetProcessHeap(), 0, routeTable);
-        HeapFree(GetProcessHeap(), 0, ipAddrTable);
-      }
-    }
-    else
-      ret = ERROR_NO_DATA;
-  }
-  TRACE("returning %d\n", ret);
-  return ret;
-}
-
-static DWORD typeFromMibType(DWORD mib_type)
-{
-    switch (mib_type)
+    err = NsiAllocateAndGetTable( 1, &NPI_MS_NDIS_MODULEID, NSI_NDIS_IFINFO_TABLE,
+                                  (void **)&if_keys, sizeof(*if_keys), (void **)&if_rw, sizeof(*if_rw),
+                                  (void **)&if_dyn, sizeof(*if_dyn), (void **)&if_stat, sizeof(*if_stat), &if_count, 0 );
+    if (err) return err;
+    for (i = 0; i < if_count; i++)
     {
-    case MIB_IF_TYPE_ETHERNET:  return IF_TYPE_ETHERNET_CSMACD;
-    case MIB_IF_TYPE_TOKENRING: return IF_TYPE_ISO88025_TOKENRING;
-    case MIB_IF_TYPE_PPP:       return IF_TYPE_PPP;
-    case MIB_IF_TYPE_LOOPBACK:  return IF_TYPE_SOFTWARE_LOOPBACK;
-    default:                    return IF_TYPE_OTHER;
+        if (if_stat[i].type == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+        if_num++;
     }
-}
 
-static NET_IF_CONNECTION_TYPE connectionTypeFromMibType(DWORD mib_type)
-{
-    switch (mib_type)
+    if (!if_num)
     {
-    case MIB_IF_TYPE_PPP:       return NET_IF_CONNECTION_DEMAND;
-    case MIB_IF_TYPE_SLIP:      return NET_IF_CONNECTION_DEMAND;
-    default:                    return NET_IF_CONNECTION_DEDICATED;
+        err = ERROR_NO_DATA;
+        goto err;
     }
-}
 
-static ULONG v4addressesFromIndex(IF_INDEX index, DWORD **addrs, ULONG *num_addrs, DWORD **masks)
-{
-    ULONG ret, i, j;
-    MIB_IPADDRTABLE *at;
+    err = NsiAllocateAndGetTable( 1, &NPI_MS_IPV4_MODULEID, NSI_IP_UNICAST_TABLE,
+                                  (void **)&uni_keys, sizeof(*uni_keys), (void **)&uni_rw, sizeof(*uni_rw),
+                                  NULL, 0, NULL, 0, &uni_count, 0 );
+    if (err) goto err;
 
-    *num_addrs = 0;
-    if ((ret = getIPAddrTable(&at, GetProcessHeap(), 0))) return ret;
-    for (i = 0; i < at->dwNumEntries; i++)
+    /* Slightly overestimate the needed size by assuming that all
+       unicast addresses require a separate IP_ADDR_STRING. */
+
+    needed = if_num * sizeof(*info) + uni_count * sizeof(IP_ADDR_STRING);
+    if (!info || *size < needed)
     {
-        if (at->table[i].dwIndex == index) (*num_addrs)++;
+        *size = needed;
+        err = ERROR_BUFFER_OVERFLOW;
+        goto err;
     }
-    if (!(*addrs = HeapAlloc(GetProcessHeap(), 0, *num_addrs * sizeof(DWORD))))
+
+    err = NsiAllocateAndGetTable( 1, &NPI_MS_IPV4_MODULEID, NSI_IP_FORWARD_TABLE,
+                                  (void **)&fwd_keys, sizeof(*fwd_keys), NULL, 0,
+                                  NULL, 0, NULL, 0, &fwd_count, 0 );
+    if (err) goto err;
+
+    wins_server_count = get_wins_servers( &wins_servers );
+
+    extra_ip_addrs = (IP_ADDR_STRING *)(info + if_num);
+    for (i = 0; i < if_count; i++)
     {
-        HeapFree(GetProcessHeap(), 0, at);
-        return ERROR_OUTOFMEMORY;
-    }
-    if (!(*masks = HeapAlloc(GetProcessHeap(), 0, *num_addrs * sizeof(DWORD))))
-    {
-        HeapFree(GetProcessHeap(), 0, *addrs);
-        HeapFree(GetProcessHeap(), 0, at);
-        return ERROR_OUTOFMEMORY;
-    }
-    for (i = 0, j = 0; i < at->dwNumEntries; i++)
-    {
-        if (at->table[i].dwIndex == index)
+        if (if_stat[i].type == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+
+        info->Next = info + 1;
+        info->ComboIndex = 0;
+        ConvertGuidToStringA( &if_stat[i].if_guid, info->AdapterName, sizeof(info->AdapterName) );
+        len = WideCharToMultiByte( CP_ACP, 0, if_stat[i].descr.String, if_stat[i].descr.Length / sizeof(WCHAR),
+                                   info->Description, sizeof(info->Description) - 1, NULL, NULL );
+        info->Description[len] = '\0';
+        info->AddressLength = if_rw[i].phys_addr.Length;
+        if (info->AddressLength > sizeof(info->Address)) info->AddressLength = 0;
+        memcpy( info->Address, if_rw[i].phys_addr.Address, info->AddressLength );
+        memset( info->Address + info->AddressLength, 0, sizeof(info->Address) - info->AddressLength );
+        info->Index = if_stat[i].if_index;
+        info->Type = if_stat[i].type;
+        info->DhcpEnabled = TRUE; /* FIXME */
+        info->CurrentIpAddress = NULL;
+
+        cursor = NULL;
+        for (uni = 0; uni < uni_count; uni++)
         {
-            (*addrs)[j] = at->table[i].dwAddr;
-            (*masks)[j] = at->table[i].dwMask;
-            j++;
+            if (uni_keys[uni].luid.Value != if_keys[i].Value) continue;
+            if (!cursor) cursor = &info->IpAddressList;
+            else
+            {
+                cursor->Next = extra_ip_addrs++;
+                cursor = cursor->Next;
+            }
+            ConvertLengthToIpv4Mask( uni_rw[uni].on_link_prefix, &mask.WS_s_addr );
+            ip_addr_string_init( cursor, &uni_keys[uni].addr, &mask, 0 );
         }
+        if (!cursor)
+        {
+            mask.WS_s_addr = INADDR_ANY;
+            ip_addr_string_init( &info->IpAddressList, &mask, &mask, 0 );
+        }
+
+        gw.WS_s_addr = INADDR_ANY;
+        mask.WS_s_addr = INADDR_NONE;
+        for (fwd = 0; fwd < fwd_count; fwd++)
+        { /* find the first router on this interface */
+            if (fwd_keys[fwd].luid.Value == if_keys[i].Value &&
+                fwd_keys[fwd].next_hop.WS_s_addr != INADDR_ANY &&
+                !fwd_keys[fwd].prefix_len)
+            {
+                gw = fwd_keys[fwd].next_hop;
+                break;
+            }
+        }
+        ip_addr_string_init( &info->GatewayList, &gw, &mask, 0 );
+
+        ip_addr_string_init( &info->DhcpServer, NULL, NULL, 0 );
+
+        info->HaveWins = !!wins_server_count;
+        ip_addr_string_init( &info->PrimaryWinsServer, NULL, NULL, 0 );
+        ip_addr_string_init( &info->SecondaryWinsServer, NULL, NULL, 0 );
+        if (info->HaveWins)
+        {
+            mask.WS_s_addr = INADDR_NONE;
+            ip_addr_string_init( &info->PrimaryWinsServer, &wins_servers[0].Ipv4.sin_addr, &mask, 0 );
+            if (wins_server_count > 1)
+                ip_addr_string_init( &info->SecondaryWinsServer, &wins_servers[1].Ipv4.sin_addr, &mask, 0 );
+        }
+
+        info->LeaseObtained = 0;
+        info->LeaseExpires = 0;
+
+        info++;
     }
-    HeapFree(GetProcessHeap(), 0, at);
-    return ERROR_SUCCESS;
+    info[-1].Next = NULL;
+
+err:
+    heap_free( wins_servers );
+    NsiFreeTable( fwd_keys, NULL, NULL, NULL );
+    NsiFreeTable( uni_keys, uni_rw, NULL, NULL );
+    NsiFreeTable( if_keys, if_rw, if_dyn, if_stat );
+    return err;
 }
 
-static char *debugstr_ipv4(const in_addr_t *in_addr, char *buf)
+static void address_entry_free( void *ptr, ULONG offset, void *ctxt )
 {
-    const BYTE *addrp;
-    char *p = buf;
-
-    for (addrp = (const BYTE *)in_addr;
-     addrp - (const BYTE *)in_addr < sizeof(*in_addr);
-     addrp++)
-    {
-        if (addrp == (const BYTE *)in_addr + sizeof(*in_addr) - 1)
-            sprintf(p, "%d", *addrp);
-        else
-            p += sprintf(p, "%d.", *addrp);
-    }
-    return buf;
+    heap_free( ptr );
 }
 
-static ULONG count_v4_gateways(DWORD index, PMIB_IPFORWARDTABLE routeTable)
+static void address_entry_size( void *ptr, ULONG offset, void *ctxt )
 {
-    DWORD i, num_gateways = 0;
+    IP_ADAPTER_DNS_SERVER_ADDRESS *src_addr = ptr; /* all list types are super-sets of this type */
+    ULONG *total = (ULONG *)ctxt, align = sizeof(ULONGLONG) - 1;
 
-    for (i = 0; i < routeTable->dwNumEntries; i++)
-    {
-        if (routeTable->table[i].dwForwardIfIndex == index &&
-            routeTable->table[i].u1.ForwardType == MIB_IPROUTE_TYPE_INDIRECT)
-            num_gateways++;
-    }
-    return num_gateways;
+    *total = (*total + src_addr->u.s.Length + src_addr->Address.iSockaddrLength + align) & ~align;
 }
 
-static DWORD mask_v4_to_prefix(DWORD m)
+struct address_entry_copy_params
 {
-#ifdef HAVE___BUILTIN_POPCOUNT
-    return __builtin_popcount(m);
-#else
-    m -= m >> 1 & 0x55555555;
-    m = (m & 0x33333333) + (m >> 2 & 0x33333333);
-    return ((m + (m >> 4)) & 0x0f0f0f0f) * 0x01010101 >> 24;
-#endif
+    IP_ADAPTER_ADDRESSES *src, *dst;
+    char *ptr;
+    void *next;
+    ULONG cur_offset;
+};
+
+static void address_entry_copy( void *ptr, ULONG offset, void *ctxt )
+{
+    struct address_entry_copy_params *params = ctxt;
+    IP_ADAPTER_DNS_SERVER_ADDRESS *src_addr = ptr; /* all list types are super-sets of this type */
+    IP_ADAPTER_DNS_SERVER_ADDRESS *dst_addr = (IP_ADAPTER_DNS_SERVER_ADDRESS *)params->ptr;
+    ULONG align = sizeof(ULONGLONG) - 1;
+
+    memcpy( dst_addr, src_addr, src_addr->u.s.Length );
+    params->ptr += src_addr->u.s.Length;
+    dst_addr->Address.lpSockaddr = (SOCKADDR *)params->ptr;
+    memcpy( dst_addr->Address.lpSockaddr, src_addr->Address.lpSockaddr, src_addr->Address.iSockaddrLength );
+    params->ptr += (src_addr->Address.iSockaddrLength + align) & ~align;
+
+    if (params->cur_offset != offset) /* new list */
+    {
+        params->next = (BYTE *)params->dst + offset;
+        params->cur_offset = offset;
+    }
+    *(IP_ADAPTER_DNS_SERVER_ADDRESS **)params->next = dst_addr;
+    params->next = &dst_addr->Next;
 }
 
-static DWORD mask_v6_to_prefix(SOCKET_ADDRESS *m)
+static void address_lists_iterate( IP_ADAPTER_ADDRESSES *aa, void (*fn)(void *entry, ULONG offset, void *ctxt), void *ctxt )
 {
-    const IN6_ADDR *mask = &((struct WS_sockaddr_in6 *)m->lpSockaddr)->sin6_addr;
-    DWORD ret = 0, i;
+    IP_ADAPTER_UNICAST_ADDRESS *uni;
+    IP_ADAPTER_DNS_SERVER_ADDRESS *dns;
+    IP_ADAPTER_GATEWAY_ADDRESS *gw;
+    IP_ADAPTER_PREFIX *prefix;
+    void *next;
 
-    for (i = 0; i < 8; i++)
-        ret += mask_v4_to_prefix(mask->u.Word[i]);
-    return ret;
+    for (uni = aa->FirstUnicastAddress; uni; uni = next)
+    {
+        next = uni->Next;
+        fn( uni, FIELD_OFFSET( IP_ADAPTER_ADDRESSES, FirstUnicastAddress ), ctxt );
+    }
+
+    for (dns = aa->FirstDnsServerAddress; dns; dns = next)
+    {
+        next = dns->Next;
+        fn( dns, FIELD_OFFSET( IP_ADAPTER_ADDRESSES, FirstDnsServerAddress ), ctxt );
+    }
+
+    for (gw = aa->FirstGatewayAddress; gw; gw = next)
+    {
+        next = gw->Next;
+        fn( gw, FIELD_OFFSET( IP_ADAPTER_ADDRESSES, FirstGatewayAddress ), ctxt );
+    }
+
+    for (prefix = aa->FirstPrefix; prefix; prefix = next)
+    {
+        next = prefix->Next;
+        fn( prefix, FIELD_OFFSET( IP_ADAPTER_ADDRESSES, FirstPrefix ), ctxt );
+    }
 }
 
-static PMIB_IPFORWARDROW findIPv4Gateway(DWORD index,
-                                         PMIB_IPFORWARDTABLE routeTable)
+void adapters_addresses_free( IP_ADAPTER_ADDRESSES *info )
 {
-    DWORD i;
-    PMIB_IPFORWARDROW row = NULL;
+    IP_ADAPTER_ADDRESSES *aa;
 
-    for (i = 0; !row && i < routeTable->dwNumEntries; i++)
+    for (aa = info; aa; aa = aa->Next)
     {
-        if (routeTable->table[i].dwForwardIfIndex == index &&
-            routeTable->table[i].u1.ForwardType == MIB_IPROUTE_TYPE_INDIRECT)
-            row = &routeTable->table[i];
+        address_lists_iterate( aa, address_entry_free, NULL );
+
+        heap_free( aa->DnsSuffix );
     }
-    return row;
+    heap_free( info );
 }
 
-static void fill_unicast_addr_data(IP_ADAPTER_ADDRESSES *aa, IP_ADAPTER_UNICAST_ADDRESS *ua)
+ULONG adapters_addresses_size( IP_ADAPTER_ADDRESSES *info )
 {
-    /* Actually this information should be read somewhere from the system
-     * but it doesn't matter much for the bugs found so far.
-     * This information is required for DirectPlay8 games. */
-    if (aa->IfType != IF_TYPE_SOFTWARE_LOOPBACK)
-    {
-        ua->PrefixOrigin = IpPrefixOriginDhcp;
-        ua->SuffixOrigin = IpSuffixOriginDhcp;
-    }
-    else
-    {
-        ua->PrefixOrigin = IpPrefixOriginManual;
-        ua->SuffixOrigin = IpSuffixOriginManual;
-    }
+    IP_ADAPTER_ADDRESSES *aa;
+    ULONG size = 0, align = sizeof(ULONGLONG) - 1;
 
-    /* The address is not duplicated in the network */
-    ua->DadState = IpDadStatePreferred;
-
-    /* Some address life time values, required even for non-dhcp addresses */
-    ua->ValidLifetime = 60000;
-    ua->PreferredLifetime = 60000;
-    ua->LeaseLifetime = 60000;
+    for (aa = info; aa; aa = aa->Next)
+    {
+        size += sizeof(*aa) + ((strlen( aa->AdapterName ) + 1 + 1) & ~1);
+        size += (strlenW( aa->Description ) + 1 + strlenW( aa->DnsSuffix ) + 1) * sizeof(WCHAR);
+        if (aa->FriendlyName) size += (strlenW(aa->FriendlyName) + 1) * sizeof(WCHAR);
+        size = (size + align) & ~align;
+        address_lists_iterate( aa, address_entry_size, &size );
+    }
+    return size;
 }
 
-static ULONG adapterAddressesFromIndex(ULONG family, ULONG flags, IF_INDEX index,
-                                       IP_ADAPTER_ADDRESSES *aa, ULONG *size)
+void adapters_addresses_copy( IP_ADAPTER_ADDRESSES *dst, IP_ADAPTER_ADDRESSES *src )
 {
-    ULONG ret = ERROR_SUCCESS, i, j, num_v4addrs = 0, num_v4_gateways = 0, num_v6addrs = 0, total_size;
-    DWORD *v4addrs = NULL, *v4masks = NULL;
-    SOCKET_ADDRESS *v6addrs = NULL, *v6masks = NULL;
-    PMIB_IPFORWARDTABLE routeTable = NULL;
-    BOOL output_gateways;
+    char *ptr;
+    DWORD len, align = sizeof(ULONGLONG) - 1;
+    struct address_entry_copy_params params;
 
-    if ((flags & GAA_FLAG_INCLUDE_ALL_GATEWAYS) || !(flags & GAA_FLAG_SKIP_UNICAST))
+    while (src)
     {
-        ret = AllocateAndGetIpForwardTableFromStack(&routeTable, FALSE, GetProcessHeap(), 0);
-        if (ret) return ret;
-        num_v4_gateways = count_v4_gateways(index, routeTable);
-    }
-    output_gateways = (flags & GAA_FLAG_INCLUDE_ALL_GATEWAYS) && (family == WS_AF_INET || family == WS_AF_UNSPEC);
+        ptr = (char *)(dst + 1);
+        *dst = *src;
+        dst->AdapterName = ptr;
+        len = strlen( src->AdapterName ) + 1;
+        memcpy( dst->AdapterName, src->AdapterName, len );
+        ptr += (len + 1) & ~1;
+        dst->Description = (WCHAR *)ptr;
+        len = (strlenW( src->Description ) + 1) * sizeof(WCHAR);
+        memcpy( dst->Description, src->Description, len );
+        ptr += len;
+        dst->DnsSuffix = (WCHAR *)ptr;
+        len = (strlenW( src->DnsSuffix ) + 1) * sizeof(WCHAR);
+        memcpy( dst->DnsSuffix, src->DnsSuffix, len );
+        ptr += len;
+        if (src->FriendlyName)
+        {
+            dst->FriendlyName = (WCHAR *)ptr;
+            len = (strlenW( src->FriendlyName ) + 1) * sizeof(WCHAR);
+            memcpy( dst->FriendlyName, src->FriendlyName, len );
+            ptr += len;
+        }
+        ptr = (char *)(((UINT_PTR)ptr + align) & ~align);
 
-    if (family == WS_AF_INET)
-    {
-        ret = v4addressesFromIndex(index, &v4addrs, &num_v4addrs, &v4masks);
+        params.src = src;
+        params.dst = dst;
+        params.ptr = ptr;
+        params.next = NULL;
+        params.cur_offset = ~0u;
+        address_lists_iterate( src, address_entry_copy, &params );
+        ptr = params.ptr;
+
+        if (src->Next)
+        {
+            dst->Next = (IP_ADAPTER_ADDRESSES *)ptr;
+            dst = dst->Next;
+        }
+        src = src->Next;
     }
-    else if (family == WS_AF_INET6)
+}
+
+static BOOL sockaddr_is_loopback( SOCKADDR *sock )
+{
+    if (sock->sa_family == WS_AF_INET)
     {
-        ret = v6addressesFromIndex(index, &v6addrs, &num_v6addrs, &v6masks);
+        SOCKADDR_IN *sin = (SOCKADDR_IN *)sock;
+        return (sin->sin_addr.WS_s_addr & 0xff) == 127;
     }
-    else if (family == WS_AF_UNSPEC)
+    else if (sock->sa_family == WS_AF_INET6)
     {
-        ret = v4addressesFromIndex(index, &v4addrs, &num_v4addrs, &v4masks);
-        if (!ret) ret = v6addressesFromIndex(index, &v6addrs, &num_v6addrs, &v6masks);
+        SOCKADDR_IN6 *sin6 = (SOCKADDR_IN6 *)sock;
+        return WS_IN6_IS_ADDR_LOOPBACK( &sin6->sin6_addr );
     }
-    else
+    return FALSE;
+}
+
+static BOOL sockaddr_is_linklocal( SOCKADDR *sock )
+{
+    if (sock->sa_family == WS_AF_INET6)
     {
-        FIXME("address family %u unsupported\n", family);
-        ret = ERROR_NO_DATA;
+        SOCKADDR_IN6 *sin6 = (SOCKADDR_IN6 *)sock;
+        return WS_IN6_IS_ADDR_LINKLOCAL( &sin6->sin6_addr );
     }
-    if (ret)
+    return FALSE;
+}
+
+static BOOL unicast_is_dns_eligible( IP_ADAPTER_UNICAST_ADDRESS *uni )
+{
+    return !sockaddr_is_loopback( uni->Address.lpSockaddr ) &&
+        !sockaddr_is_linklocal( uni->Address.lpSockaddr );
+}
+
+static DWORD unicast_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags )
+{
+    struct nsi_ipv4_unicast_key *key4;
+    struct nsi_ipv6_unicast_key *key6;
+    struct nsi_ip_unicast_rw *rw;
+    struct nsi_ip_unicast_dynamic *dyn;
+    struct nsi_ip_unicast_static *stat;
+    IP_ADAPTER_UNICAST_ADDRESS *addr, **next;
+    DWORD err, count, i, key_size = (family == WS_AF_INET) ? sizeof(*key4) : sizeof(*key6);
+    DWORD sockaddr_size = (family == WS_AF_INET) ? sizeof(SOCKADDR_IN) : sizeof(SOCKADDR_IN6);
+    NET_LUID *luid;
+    void *key;
+
+    err = NsiAllocateAndGetTable( 1, ip_module_id( family ), NSI_IP_UNICAST_TABLE, &key, key_size,
+                                  (void **)&rw, sizeof(*rw), (void **)&dyn, sizeof(*dyn),
+                                  (void **)&stat, sizeof(*stat), &count, 0 );
+    if (err) return err;
+
+
+    while (aa)
     {
-        HeapFree(GetProcessHeap(), 0, v4addrs);
-        HeapFree(GetProcessHeap(), 0, v4masks);
-        HeapFree(GetProcessHeap(), 0, v6addrs);
-        HeapFree(GetProcessHeap(), 0, v6masks);
-        HeapFree(GetProcessHeap(), 0, routeTable);
-        return ret;
+        for (next = &aa->FirstUnicastAddress; *next; next = &(*next)->Next)
+            ;
+
+        for (i = 0; i < count; i++)
+        {
+            key4 = (struct nsi_ipv4_unicast_key *)key + i;
+            key6 = (struct nsi_ipv6_unicast_key *)key + i;
+            luid = (family == WS_AF_INET) ? &key4->luid : &key6->luid;
+            if (luid->Value != aa->Luid.Value) continue;
+            addr = heap_alloc_zero( sizeof(*addr) + sockaddr_size );
+            if (!addr)
+            {
+                err = ERROR_NOT_ENOUGH_MEMORY;
+                goto err;
+            }
+            addr->u.s.Length = sizeof(*addr);
+            addr->Address.lpSockaddr = (SOCKADDR *)(addr + 1);
+            addr->Address.iSockaddrLength = sockaddr_size;
+            addr->Address.lpSockaddr->sa_family = family;
+            if (family == WS_AF_INET)
+            {
+                SOCKADDR_IN *in = (SOCKADDR_IN *)addr->Address.lpSockaddr;
+                in->sin_addr = key4->addr;
+            }
+            else
+            {
+                SOCKADDR_IN6 *in6 = (SOCKADDR_IN6 *)addr->Address.lpSockaddr;
+                in6->sin6_addr = key6->addr;
+                in6->sin6_scope_id = dyn[i].scope_id;
+            }
+            addr->PrefixOrigin = rw[i].prefix_origin;
+            addr->SuffixOrigin = rw[i].suffix_origin;
+            addr->DadState = dyn[i].dad_state;
+            addr->ValidLifetime = rw[i].valid_lifetime;
+            addr->PreferredLifetime = rw[i].preferred_lifetime;
+            addr->LeaseLifetime = rw[i].valid_lifetime; /* FIXME */
+            addr->OnLinkPrefixLength = rw[i].on_link_prefix;
+            if (unicast_is_dns_eligible( addr )) addr->u.s.Flags |= IP_ADAPTER_ADDRESS_DNS_ELIGIBLE;
+
+            *next = addr;
+            next = &addr->Next;
+        }
+        aa = aa->Next;
     }
 
-    total_size = sizeof(IP_ADAPTER_ADDRESSES);
-    total_size += CHARS_IN_GUID;
-    total_size += IF_NAMESIZE * sizeof(WCHAR);
-    if (!(flags & GAA_FLAG_SKIP_FRIENDLY_NAME))
-        total_size += IF_NAMESIZE * sizeof(WCHAR);
-    if (flags & GAA_FLAG_INCLUDE_PREFIX)
+err:
+    NsiFreeTable( key, rw, dyn, stat );
+    return err;
+}
+
+static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags )
+{
+    struct nsi_ipv4_forward_key *key4;
+    struct nsi_ipv6_forward_key *key6;
+    IP_ADAPTER_GATEWAY_ADDRESS *gw, **gw_next;
+    IP_ADAPTER_PREFIX *prefix, **prefix_next;
+    DWORD err, count, i, prefix_len, key_size = (family == WS_AF_INET) ? sizeof(*key4) : sizeof(*key6);
+    DWORD sockaddr_size = (family == WS_AF_INET) ? sizeof(SOCKADDR_IN) : sizeof(SOCKADDR_IN6);
+    SOCKADDR_INET sockaddr;
+    NET_LUID *luid;
+    void *key;
+
+    err = NsiAllocateAndGetTable( 1, ip_module_id( family ), NSI_IP_FORWARD_TABLE, &key, key_size,
+                                  NULL, 0, NULL, 0, NULL, 0, &count, 0 );
+    if (err) return err;
+
+    while (aa)
     {
-        total_size += sizeof(IP_ADAPTER_PREFIX) * num_v4addrs;
-        total_size += sizeof(IP_ADAPTER_PREFIX) * num_v6addrs;
-        total_size += sizeof(struct sockaddr_in) * num_v4addrs;
-        for (i = 0; i < num_v6addrs; i++)
-            total_size += v6masks[i].iSockaddrLength;
+        for (gw_next = &aa->FirstGatewayAddress; *gw_next; gw_next = &(*gw_next)->Next)
+            ;
+        for (prefix_next = &aa->FirstPrefix; *prefix_next; prefix_next = &(*prefix_next)->Next)
+            ;
+
+        for (i = 0; i < count; i++)
+        {
+            key4 = (struct nsi_ipv4_forward_key *)key + i;
+            key6 = (struct nsi_ipv6_forward_key *)key + i;
+            luid = (family == WS_AF_INET) ? &key4->luid : &key6->luid;
+            if (luid->Value != aa->Luid.Value) continue;
+
+            if (flags & GAA_FLAG_INCLUDE_ALL_GATEWAYS)
+            {
+                memset( &sockaddr, 0, sizeof(sockaddr) );
+                if (family == WS_AF_INET)
+                {
+                    if (key4->next_hop.WS_s_addr != 0)
+                    {
+                        sockaddr.si_family = family;
+                        sockaddr.Ipv4.sin_addr = key4->next_hop;
+                    }
+                }
+                else
+                {
+                    static const IN6_ADDR zero;
+                    if (memcmp( &key6->next_hop, &zero, sizeof(zero) ))
+                    {
+                        sockaddr.si_family = family;
+                        sockaddr.Ipv6.sin6_addr = key6->next_hop;
+                    }
+                }
+
+                if (sockaddr.si_family)
+                {
+                    gw = heap_alloc_zero( sizeof(*gw) + sockaddr_size );
+                    if (!gw)
+                    {
+                        err = ERROR_NOT_ENOUGH_MEMORY;
+                        goto err;
+                    }
+                    gw->u.s.Length = sizeof(*gw);
+                    gw->Address.lpSockaddr = (SOCKADDR *)(gw + 1);
+                    gw->Address.iSockaddrLength = sockaddr_size;
+                    memcpy( gw->Address.lpSockaddr, &sockaddr, sockaddr_size );
+                    *gw_next = gw;
+                    gw_next = &gw->Next;
+                }
+            }
+
+            if (flags & GAA_FLAG_INCLUDE_PREFIX)
+            {
+                memset( &sockaddr, 0, sizeof(sockaddr) );
+                if (family == WS_AF_INET)
+                {
+                    if (!key4->next_hop.WS_s_addr)
+                    {
+                        sockaddr.si_family = family;
+                        sockaddr.Ipv4.sin_addr = key4->prefix;
+                        prefix_len = key4->prefix_len;
+                    }
+                }
+                else
+                {
+                    static const IN6_ADDR zero;
+                    if (!memcmp( &key6->next_hop, &zero, sizeof(zero) ))
+                    {
+                        sockaddr.si_family = family;
+                        sockaddr.Ipv6.sin6_addr = key6->prefix;
+                        prefix_len = key6->prefix_len;
+                    }
+                }
+
+                if (sockaddr.si_family)
+                {
+                    prefix = heap_alloc_zero( sizeof(*prefix) + sockaddr_size );
+                    if (!prefix)
+                    {
+                        err = ERROR_NOT_ENOUGH_MEMORY;
+                        goto err;
+                    }
+                    prefix->u.s.Length = sizeof(*prefix);
+                    prefix->Address.lpSockaddr = (SOCKADDR *)(prefix + 1);
+                    prefix->Address.iSockaddrLength = sockaddr_size;
+                    memcpy( prefix->Address.lpSockaddr, &sockaddr, sockaddr_size );
+                    prefix->PrefixLength = prefix_len;
+                    *prefix_next = prefix;
+                    prefix_next = &prefix->Next;
+                }
+            }
+        }
+        aa = aa->Next;
     }
-    total_size += sizeof(IP_ADAPTER_UNICAST_ADDRESS) * num_v4addrs;
-    total_size += sizeof(struct sockaddr_in) * num_v4addrs;
-    if (output_gateways)
-        total_size += (sizeof(IP_ADAPTER_GATEWAY_ADDRESS) + sizeof(SOCKADDR_IN)) * num_v4_gateways;
-    total_size += sizeof(IP_ADAPTER_UNICAST_ADDRESS) * num_v6addrs;
-    total_size += sizeof(SOCKET_ADDRESS) * num_v6addrs;
-    for (i = 0; i < num_v6addrs; i++)
-        total_size += v6addrs[i].iSockaddrLength;
 
-    if (aa && *size >= total_size)
+err:
+    NsiFreeTable( key, NULL, NULL, NULL );
+    return err;
+}
+
+static DWORD call_families( DWORD (*fn)( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags ),
+                            IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags )
+{
+    DWORD err;
+
+    if (family != WS_AF_INET)
     {
-        char name[IF_NAMESIZE], *ptr = (char *)aa + sizeof(IP_ADAPTER_ADDRESSES), *src;
-        WCHAR *dst;
-        DWORD buflen, type;
-        INTERNAL_IF_OPER_STATUS status;
-        NET_LUID luid;
-        GUID guid;
+        err = fn( aa, WS_AF_INET6, flags );
+        if (err) return err;
+    }
 
-        memset(aa, 0, sizeof(IP_ADAPTER_ADDRESSES));
-        aa->u.s.Length  = sizeof(IP_ADAPTER_ADDRESSES);
-        aa->u.s.IfIndex = index;
+    if (family != WS_AF_INET6)
+    {
+        err = fn( aa, WS_AF_INET, flags );
+        if (err) return err;
+    }
+    return err;
+}
 
-        ConvertInterfaceIndexToLuid(index, &luid);
-        ConvertInterfaceLuidToGuid(&luid, &guid);
-        ConvertGuidToStringA( &guid, ptr, CHARS_IN_GUID );
-        aa->AdapterName = ptr;
-        ptr += CHARS_IN_GUID;
+static DWORD dns_servers_query_code( ULONG family )
+{
+    if (family == WS_AF_INET) return DnsConfigDnsServersIpv4;
+    if (family == WS_AF_INET6) return DnsConfigDnsServersIpv6;
+    return DnsConfigDnsServersUnspec;
+}
 
-        getInterfaceNameByIndex(index, name);
+static DWORD dns_info_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags )
+{
+    char buf[FIELD_OFFSET(DNS_ADDR_ARRAY, AddrArray[3])];
+    IP_ADAPTER_DNS_SERVER_ADDRESS *dns, **next;
+    DWORD query = dns_servers_query_code( family );
+    DWORD err, i, size, attempt, sockaddr_len;
+    WCHAR name[MAX_ADAPTER_NAME_LENGTH + 1];
+    DNS_ADDR_ARRAY *servers;
+    DNS_TXT_DATAW *search;
+
+    while (aa)
+    {
+        MultiByteToWideChar( CP_ACP, 0, aa->AdapterName, -1, name, ARRAY_SIZE(name) );
+        if (!(flags & GAA_FLAG_SKIP_DNS_SERVER))
+        {
+            servers = (DNS_ADDR_ARRAY *)buf;
+            for (attempt = 0; attempt < 5; attempt++)
+            {
+                err = DnsQueryConfig( query, 0, name, NULL, servers, &size );
+                if (err != ERROR_MORE_DATA) break;
+                if (servers != (DNS_ADDR_ARRAY *)buf) heap_free( servers );
+                servers = heap_alloc( size );
+                if (!servers)
+                {
+                    err = ERROR_NOT_ENOUGH_MEMORY;
+                    break;
+                }
+            }
+            if (!err)
+            {
+                next = &aa->FirstDnsServerAddress;
+                for (i = 0; i < servers->AddrCount; i++)
+                {
+                    sockaddr_len = servers->AddrArray[i].Data.DnsAddrUserDword[0];
+                    if (sockaddr_len > sizeof(servers->AddrArray[i].MaxSa))
+                        sockaddr_len = sizeof(servers->AddrArray[i].MaxSa);
+                    dns = heap_alloc_zero( sizeof(*dns) + sockaddr_len );
+                    if (!dns)
+                    {
+                        err = ERROR_NOT_ENOUGH_MEMORY;
+                        break;
+                    }
+                    dns->u.s.Length = sizeof(*dns);
+                    dns->Address.lpSockaddr = (SOCKADDR *)(dns + 1);
+                    dns->Address.iSockaddrLength = sockaddr_len;
+                    memcpy( dns->Address.lpSockaddr, servers->AddrArray[i].MaxSa, sockaddr_len );
+                    *next = dns;
+                    next = &dns->Next;
+                }
+            }
+            if (servers != (DNS_ADDR_ARRAY *)buf) heap_free( servers );
+            if (err) goto err;
+        }
+
+        aa->DnsSuffix = heap_alloc( MAX_DNS_SUFFIX_STRING_LENGTH * sizeof(WCHAR) );
+        if (!aa->DnsSuffix)
+        {
+            err = ERROR_NOT_ENOUGH_MEMORY;
+            goto err;
+        }
+        aa->DnsSuffix[0] = '\0';
+
+        if (!DnsQueryConfig( DnsConfigSearchList, 0, name, NULL, NULL, &size ) &&
+            (search = heap_alloc( size )))
+        {
+            if (!DnsQueryConfig( DnsConfigSearchList, 0, name, NULL, search, &size ) &&
+                search->dwStringCount && strlenW( search->pStringArray[0] ) < MAX_DNS_SUFFIX_STRING_LENGTH)
+            {
+                strcpyW( aa->DnsSuffix, search->pStringArray[0] );
+            }
+            heap_free( search );
+        }
+
+        aa = aa->Next;
+    }
+
+err:
+    return err;
+}
+
+static DWORD adapters_addresses_alloc( ULONG family, ULONG flags, IP_ADAPTER_ADDRESSES **info )
+{
+    IP_ADAPTER_ADDRESSES *aa;
+    NET_LUID *luids;
+    struct nsi_ndis_ifinfo_rw *rw;
+    struct nsi_ndis_ifinfo_dynamic *dyn;
+    struct nsi_ndis_ifinfo_static *stat;
+    DWORD err, i, count, needed;
+    GUID guid;
+    char *str_ptr;
+
+    err = NsiAllocateAndGetTable( 1, &NPI_MS_NDIS_MODULEID, NSI_NDIS_IFINFO_TABLE, (void **)&luids, sizeof(*luids),
+                                  (void **)&rw, sizeof(*rw), (void **)&dyn, sizeof(*dyn),
+                                  (void **)&stat, sizeof(*stat), &count, 0 );
+    if (err) return err;
+
+    needed = count * (sizeof(*aa) + ((CHARS_IN_GUID + 1) & ~1) + sizeof(stat->descr.String));
+    if (!(flags & GAA_FLAG_SKIP_FRIENDLY_NAME)) needed += count * sizeof(rw->alias.String);
+
+    aa = heap_alloc_zero( needed );
+    if (!aa)
+    {
+        err = ERROR_NOT_ENOUGH_MEMORY;
+        goto err;
+    }
+
+    str_ptr = (char *)(aa + count);
+    for (i = 0; i < count; i++)
+    {
+        aa[i].u.s.Length = sizeof(*aa);
+        aa[i].u.s.IfIndex = stat[i].if_index;
+        if (i < count - 1) aa[i].Next = aa + i + 1;
+        ConvertInterfaceLuidToGuid( luids + i, &guid );
+        ConvertGuidToStringA( &guid, str_ptr, CHARS_IN_GUID );
+        aa[i].AdapterName = str_ptr;
+        str_ptr += (CHARS_IN_GUID + 1) & ~1;
+        if_counted_string_copy( (WCHAR *)str_ptr, ARRAY_SIZE(stat[i].descr.String), &stat[i].descr );
+        aa[i].Description = (WCHAR *)str_ptr;
+        str_ptr += sizeof(stat[i].descr.String);
         if (!(flags & GAA_FLAG_SKIP_FRIENDLY_NAME))
         {
-            aa->FriendlyName = (WCHAR *)ptr;
-            for (src = name, dst = (WCHAR *)ptr; *src; src++, dst++)
-                *dst = *src;
-            *dst++ = 0;
-            ptr = (char *)dst;
+            if_counted_string_copy( (WCHAR *)str_ptr, ARRAY_SIZE(rw[i].alias.String), &rw[i].alias );
+            aa[i].FriendlyName = (WCHAR *)str_ptr;
+            str_ptr += sizeof(rw[i].alias.String);
         }
-        aa->Description = (WCHAR *)ptr;
-        for (src = name, dst = (WCHAR *)ptr; *src; src++, dst++)
-            *dst = *src;
-        *dst++ = 0;
-        ptr = (char *)dst;
-
-        TRACE("%s: %d IPv4 addresses, %d IPv6 addresses:\n", name, num_v4addrs,
-              num_v6addrs);
-
-        buflen = MAX_INTERFACE_PHYSADDR;
-        getInterfacePhysicalByIndex(index, &buflen, aa->PhysicalAddress, &type);
-        aa->PhysicalAddressLength = buflen;
-        aa->IfType = typeFromMibType(type);
-        aa->ConnectionType = connectionTypeFromMibType(type);
-        ConvertInterfaceIndexToLuid( index, &aa->Luid );
-
-        if (output_gateways && num_v4_gateways)
-        {
-            PMIB_IPFORWARDROW adapterRow;
-
-            if ((adapterRow = findIPv4Gateway(index, routeTable)))
-            {
-                PIP_ADAPTER_GATEWAY_ADDRESS gw;
-                PSOCKADDR_IN sin;
-
-                gw = (PIP_ADAPTER_GATEWAY_ADDRESS)ptr;
-                aa->FirstGatewayAddress = gw;
-
-                gw->u.s.Length = sizeof(IP_ADAPTER_GATEWAY_ADDRESS);
-                ptr += sizeof(IP_ADAPTER_GATEWAY_ADDRESS);
-                sin = (PSOCKADDR_IN)ptr;
-                sin->sin_family = WS_AF_INET;
-                sin->sin_port = 0;
-                memcpy(&sin->sin_addr, &adapterRow->dwForwardNextHop,
-                       sizeof(DWORD));
-                gw->Address.lpSockaddr = (LPSOCKADDR)sin;
-                gw->Address.iSockaddrLength = sizeof(SOCKADDR_IN);
-                gw->Next = NULL;
-                ptr += sizeof(SOCKADDR_IN);
-            }
-        }
-        if (num_v4addrs && !(flags & GAA_FLAG_SKIP_UNICAST))
-        {
-            IP_ADAPTER_UNICAST_ADDRESS *ua;
-            struct WS_sockaddr_in *sa;
-            aa->u1.s1.Ipv4Enabled = TRUE;
-            ua = aa->FirstUnicastAddress = (IP_ADAPTER_UNICAST_ADDRESS *)ptr;
-            for (i = 0; i < num_v4addrs; i++)
-            {
-                char addr_buf[16];
-
-                memset(ua, 0, sizeof(IP_ADAPTER_UNICAST_ADDRESS));
-                ua->u.s.Length              = sizeof(IP_ADAPTER_UNICAST_ADDRESS);
-                ua->Address.iSockaddrLength = sizeof(struct sockaddr_in);
-                ua->Address.lpSockaddr      = (SOCKADDR *)((char *)ua + ua->u.s.Length);
-                if (num_v4_gateways)
-                    ua->u.s.Flags |= IP_ADAPTER_ADDRESS_DNS_ELIGIBLE;
-
-                sa = (struct WS_sockaddr_in *)ua->Address.lpSockaddr;
-                sa->sin_family           = WS_AF_INET;
-                sa->sin_addr.S_un.S_addr = v4addrs[i];
-                sa->sin_port             = 0;
-                TRACE("IPv4 %d/%d: %s\n", i + 1, num_v4addrs,
-                      debugstr_ipv4(&sa->sin_addr.S_un.S_addr, addr_buf));
-                fill_unicast_addr_data(aa, ua);
-
-                ua->OnLinkPrefixLength = mask_v4_to_prefix(v4masks[i]);
-
-                ptr += ua->u.s.Length + ua->Address.iSockaddrLength;
-                if (i < num_v4addrs - 1)
-                {
-                    ua->Next = (IP_ADAPTER_UNICAST_ADDRESS *)ptr;
-                    ua = ua->Next;
-                }
-            }
-        }
-        if (num_v6addrs && !(flags & GAA_FLAG_SKIP_UNICAST))
-        {
-            IP_ADAPTER_UNICAST_ADDRESS *ua;
-            struct WS_sockaddr_in6 *sa;
-
-            aa->u1.s1.Ipv6Enabled = TRUE;
-            if (aa->FirstUnicastAddress)
-            {
-                for (ua = aa->FirstUnicastAddress; ua->Next; ua = ua->Next)
-                    ;
-                ua->Next = (IP_ADAPTER_UNICAST_ADDRESS *)ptr;
-                ua = (IP_ADAPTER_UNICAST_ADDRESS *)ptr;
-            }
-            else
-                ua = aa->FirstUnicastAddress = (IP_ADAPTER_UNICAST_ADDRESS *)ptr;
-            for (i = 0; i < num_v6addrs; i++)
-            {
-                char addr_buf[46];
-
-                memset(ua, 0, sizeof(IP_ADAPTER_UNICAST_ADDRESS));
-                ua->u.s.Length              = sizeof(IP_ADAPTER_UNICAST_ADDRESS);
-                ua->Address.iSockaddrLength = v6addrs[i].iSockaddrLength;
-                ua->Address.lpSockaddr      = (SOCKADDR *)((char *)ua + ua->u.s.Length);
-
-                sa = (struct WS_sockaddr_in6 *)ua->Address.lpSockaddr;
-                memcpy(sa, v6addrs[i].lpSockaddr, sizeof(*sa));
-                TRACE("IPv6 %d/%d: %s\n", i + 1, num_v6addrs,
-                      debugstr_ipv6(sa, addr_buf));
-                fill_unicast_addr_data(aa, ua);
-
-                ua->OnLinkPrefixLength = mask_v6_to_prefix(&v6masks[i]);
-
-                ptr += ua->u.s.Length + ua->Address.iSockaddrLength;
-                if (i < num_v6addrs - 1)
-                {
-                    ua->Next = (IP_ADAPTER_UNICAST_ADDRESS *)ptr;
-                    ua = ua->Next;
-                }
-            }
-        }
-        if (num_v4addrs && (flags & GAA_FLAG_INCLUDE_PREFIX))
-        {
-            IP_ADAPTER_PREFIX *prefix;
-
-            prefix = aa->FirstPrefix = (IP_ADAPTER_PREFIX *)ptr;
-            for (i = 0; i < num_v4addrs; i++)
-            {
-                char addr_buf[16];
-                struct WS_sockaddr_in *sa;
-
-                prefix->u.s.Length = sizeof(*prefix);
-                prefix->u.s.Flags  = 0;
-                prefix->Next       = NULL;
-                prefix->Address.iSockaddrLength = sizeof(struct sockaddr_in);
-                prefix->Address.lpSockaddr      = (SOCKADDR *)((char *)prefix + prefix->u.s.Length);
-
-                sa = (struct WS_sockaddr_in *)prefix->Address.lpSockaddr;
-                sa->sin_family           = WS_AF_INET;
-                sa->sin_addr.S_un.S_addr = v4addrs[i] & v4masks[i];
-                sa->sin_port             = 0;
-
-                prefix->PrefixLength = mask_v4_to_prefix(v4masks[i]);
-
-                TRACE("IPv4 network: %s/%u\n",
-                      debugstr_ipv4((const in_addr_t *)&sa->sin_addr.S_un.S_addr, addr_buf),
-                      prefix->PrefixLength);
-
-                ptr += prefix->u.s.Length + prefix->Address.iSockaddrLength;
-                if (i < num_v4addrs - 1)
-                {
-                    prefix->Next = (IP_ADAPTER_PREFIX *)ptr;
-                    prefix = prefix->Next;
-                }
-            }
-        }
-        if (num_v6addrs && (flags & GAA_FLAG_INCLUDE_PREFIX))
-        {
-            IP_ADAPTER_PREFIX *prefix;
-
-            if (aa->FirstPrefix)
-            {
-                for (prefix = aa->FirstPrefix; prefix->Next; prefix = prefix->Next)
-                    ;
-                prefix->Next = (IP_ADAPTER_PREFIX *)ptr;
-                prefix = (IP_ADAPTER_PREFIX *)ptr;
-            }
-            else
-                prefix = aa->FirstPrefix = (IP_ADAPTER_PREFIX *)ptr;
-            for (i = 0; i < num_v6addrs; i++)
-            {
-                char addr_buf[46];
-                struct WS_sockaddr_in6 *sa;
-                const IN6_ADDR *addr, *mask;
-
-                prefix->u.s.Length = sizeof(*prefix);
-                prefix->u.s.Flags  = 0;
-                prefix->Next       = NULL;
-                prefix->Address.iSockaddrLength = sizeof(struct sockaddr_in6);
-                prefix->Address.lpSockaddr      = (SOCKADDR *)((char *)prefix + prefix->u.s.Length);
-
-                sa = (struct WS_sockaddr_in6 *)prefix->Address.lpSockaddr;
-                sa->sin6_family   = WS_AF_INET6;
-                sa->sin6_port     = 0;
-                sa->sin6_flowinfo = 0;
-                addr = &((struct WS_sockaddr_in6 *)v6addrs[i].lpSockaddr)->sin6_addr;
-                mask = &((struct WS_sockaddr_in6 *)v6masks[i].lpSockaddr)->sin6_addr;
-                for (j = 0; j < 8; j++) sa->sin6_addr.u.Word[j] = addr->u.Word[j] & mask->u.Word[j];
-                sa->sin6_scope_id = 0;
-
-                prefix->PrefixLength = mask_v6_to_prefix(&v6masks[i]);
-
-                TRACE("IPv6 network: %s/%u\n", debugstr_ipv6(sa, addr_buf), prefix->PrefixLength);
-
-                ptr += prefix->u.s.Length + prefix->Address.iSockaddrLength;
-                if (i < num_v6addrs - 1)
-                {
-                    prefix->Next = (IP_ADAPTER_PREFIX *)ptr;
-                    prefix = prefix->Next;
-                }
-            }
-        }
-
-        getInterfaceMtuByName(name, &aa->Mtu);
-
-        getInterfaceStatusByName(name, &status);
-        if (status == MIB_IF_OPER_STATUS_OPERATIONAL) aa->OperStatus = IfOperStatusUp;
-        else if (status == MIB_IF_OPER_STATUS_NON_OPERATIONAL) aa->OperStatus = IfOperStatusDown;
-        else aa->OperStatus = IfOperStatusUnknown;
+        aa[i].PhysicalAddressLength = rw->phys_addr.Length;
+        if (aa[i].PhysicalAddressLength > sizeof(aa[i].PhysicalAddress)) aa[i].PhysicalAddressLength = 0;
+        memcpy( aa[i].PhysicalAddress, rw->phys_addr.Address, aa[i].PhysicalAddressLength );
+        aa[i].Mtu = dyn[i].mtu;
+        aa[i].IfType = stat[i].type;
+        aa[i].OperStatus = dyn[i].oper_status;
+        aa[i].TransmitLinkSpeed = dyn[i].xmit_speed;
+        aa[i].ReceiveLinkSpeed = dyn[i].rcv_speed;
+        aa[i].Luid = luids[i];
+        aa[i].NetworkGuid = rw[i].network_guid;
+        aa[i].ConnectionType = stat[i].conn_type;
     }
-    *size = total_size;
-    HeapFree(GetProcessHeap(), 0, routeTable);
-    HeapFree(GetProcessHeap(), 0, v6addrs);
-    HeapFree(GetProcessHeap(), 0, v6masks);
-    HeapFree(GetProcessHeap(), 0, v4addrs);
-    HeapFree(GetProcessHeap(), 0, v4masks);
-    return ERROR_SUCCESS;
+
+    if (!(flags & GAA_FLAG_SKIP_UNICAST))
+    {
+        err = call_families( unicast_addresses_alloc, aa, family, flags );
+        if (err) goto err;
+    }
+
+    if (flags & (GAA_FLAG_INCLUDE_ALL_GATEWAYS | GAA_FLAG_INCLUDE_PREFIX))
+    {
+        err = call_families( gateway_and_prefix_addresses_alloc, aa, family, flags );
+        if (err) goto err;
+    }
+
+    err = dns_info_alloc( aa, family, flags );
+    if (err) goto err;
+
+err:
+    NsiFreeTable( luids, rw, dyn, stat );
+    if (!err) *info = aa;
+    else adapters_addresses_free( aa );
+    return err;
 }
 
-static void sockaddr_in_to_WS_storage( SOCKADDR_STORAGE *dst, const struct sockaddr_in *src )
+ULONG WINAPI DECLSPEC_HOTPATCH GetAdaptersAddresses( ULONG family, ULONG flags, void *reserved,
+                                                     IP_ADAPTER_ADDRESSES *aa, ULONG *size )
 {
-    SOCKADDR_IN *s = (SOCKADDR_IN *)dst;
+    IP_ADAPTER_ADDRESSES *info;
+    DWORD err, needed;
 
-    s->sin_family = WS_AF_INET;
-    s->sin_port = src->sin_port;
-    memcpy( &s->sin_addr, &src->sin_addr, sizeof(IN_ADDR) );
-    memset( (char *)s + FIELD_OFFSET( SOCKADDR_IN, sin_zero ), 0,
-            sizeof(SOCKADDR_STORAGE) - FIELD_OFFSET( SOCKADDR_IN, sin_zero) );
-}
+    TRACE( "(%d, %08x, %p, %p, %p)\n", family, flags, reserved, aa, size );
 
-#if defined(HAVE_STRUCT___RES_STATE__U__EXT_NSCOUNT6) || \
-    (defined(HAVE___RES_GET_STATE) && defined(HAVE___RES_GETSERVERS)) || \
-    defined(HAVE_RES_GETSERVERS)
-static void sockaddr_in6_to_WS_storage( SOCKADDR_STORAGE *dst, const struct sockaddr_in6 *src )
-{
-    SOCKADDR_IN6 *s = (SOCKADDR_IN6 *)dst;
+    if (!size) return ERROR_INVALID_PARAMETER;
 
-    s->sin6_family = WS_AF_INET6;
-    s->sin6_port = src->sin6_port;
-    s->sin6_flowinfo = src->sin6_flowinfo;
-    memcpy( &s->sin6_addr, &src->sin6_addr, sizeof(IN6_ADDR) );
-    s->sin6_scope_id = src->sin6_scope_id;
-    memset( (char *)s + sizeof(SOCKADDR_IN6), 0,
-                    sizeof(SOCKADDR_STORAGE) - sizeof(SOCKADDR_IN6) );
-}
-#endif
+    err = adapters_addresses_alloc( family, flags, &info );
+    if (err) return err;
 
-#ifdef HAVE_STRUCT___RES_STATE
-/* call res_init() just once because of a bug in Mac OS X 10.4 */
-/* Call once per thread on systems that have per-thread _res. */
-
-static CRITICAL_SECTION res_init_cs;
-static CRITICAL_SECTION_DEBUG res_init_cs_debug = {
-    0, 0, &res_init_cs,
-    { &res_init_cs_debug.ProcessLocksList, &res_init_cs_debug.ProcessLocksList },
-    0, 0, { (DWORD_PTR)(__FILE__ ": res_init_cs") }
-};
-static CRITICAL_SECTION res_init_cs = { &res_init_cs_debug, -1, 0, 0, 0, 0 };
-
-static void initialise_resolver(void)
-{
-    EnterCriticalSection(&res_init_cs);
-    if ((_res.options & RES_INIT) == 0)
-        res_init();
-    LeaveCriticalSection(&res_init_cs);
-}
-
-#ifdef HAVE_RES_GETSERVERS
-static int get_dns_servers( SOCKADDR_STORAGE *servers, int num, BOOL ip4_only )
-{
-    struct __res_state *state = &_res;
-    int i, found = 0, total;
-    SOCKADDR_STORAGE *addr = servers;
-    union res_sockaddr_union *buf;
-
-    initialise_resolver();
-
-    total = res_getservers( state, NULL, 0 );
-
-    if ((!servers || !num) && !ip4_only) return total;
-
-    buf = HeapAlloc( GetProcessHeap(), 0, total * sizeof(union res_sockaddr_union) );
-    total = res_getservers( state, buf, total );
-
-    for (i = 0; i < total; i++)
+    needed = adapters_addresses_size( info );
+    if (!aa || *size < needed)
     {
-        if (buf[i].sin6.sin6_family == AF_INET6 && ip4_only) continue;
-        if (buf[i].sin.sin_family != AF_INET && buf[i].sin6.sin6_family != AF_INET6) continue;
-
-        found++;
-        if (!servers || !num) continue;
-
-        if (buf[i].sin6.sin6_family == AF_INET6)
-        {
-            sockaddr_in6_to_WS_storage( addr, &buf[i].sin6 );
-        }
-        else
-        {
-            sockaddr_in_to_WS_storage( addr, &buf[i].sin );
-        }
-        if (++addr >= servers + num) break;
-    }
-
-    HeapFree( GetProcessHeap(), 0, buf );
-    return found;
-}
-#else
-
-static int get_dns_servers( SOCKADDR_STORAGE *servers, int num, BOOL ip4_only )
-{
-    int i, ip6_count = 0;
-    SOCKADDR_STORAGE *addr;
-
-    initialise_resolver();
-
-#ifdef HAVE_STRUCT___RES_STATE__U__EXT_NSCOUNT6
-    ip6_count = _res._u._ext.nscount6;
-#endif
-
-    if (!servers || !num)
-    {
-        num = _res.nscount;
-        if (ip4_only) num -= ip6_count;
-        return num;
-    }
-
-    for (i = 0, addr = servers; addr < (servers + num) && i < _res.nscount; i++)
-    {
-#ifdef HAVE_STRUCT___RES_STATE__U__EXT_NSCOUNT6
-        if (_res._u._ext.nsaddrs[i] && _res._u._ext.nsaddrs[i]->sin6_family == AF_INET6)
-        {
-            if (ip4_only) continue;
-            sockaddr_in6_to_WS_storage( addr, _res._u._ext.nsaddrs[i] );
-        }
-        else
-#endif
-        {
-            sockaddr_in_to_WS_storage( addr, _res.nsaddr_list + i );
-        }
-        addr++;
-    }
-    return addr - servers;
-}
-#endif
-#elif defined(HAVE___RES_GET_STATE) && defined(HAVE___RES_GETSERVERS)
-
-static int get_dns_servers( SOCKADDR_STORAGE *servers, int num, BOOL ip4_only )
-{
-    extern struct res_state *__res_get_state( void );
-    extern int __res_getservers( struct res_state *, struct sockaddr_storage *, int );
-    struct res_state *state = __res_get_state();
-    int i, found = 0, total = __res_getservers( state, NULL, 0 );
-    SOCKADDR_STORAGE *addr = servers;
-    struct sockaddr_storage *buf;
-
-    if ((!servers || !num) && !ip4_only) return total;
-
-    buf = HeapAlloc( GetProcessHeap(), 0, total * sizeof(struct sockaddr_storage) );
-    total = __res_getservers( state, buf, total );
-
-    for (i = 0; i < total; i++)
-    {
-        if (buf[i].ss_family == AF_INET6 && ip4_only) continue;
-        if (buf[i].ss_family != AF_INET && buf[i].ss_family != AF_INET6) continue;
-
-        found++;
-        if (!servers || !num) continue;
-
-        if (buf[i].ss_family == AF_INET6)
-        {
-            sockaddr_in6_to_WS_storage( addr, (struct sockaddr_in6 *)(buf + i) );
-        }
-        else
-        {
-            sockaddr_in_to_WS_storage( addr, (struct sockaddr_in *)(buf + i) );
-        }
-        if (++addr >= servers + num) break;
-    }
-
-    HeapFree( GetProcessHeap(), 0, buf );
-    return found;
-}
-#else
-
-static int get_dns_servers( SOCKADDR_STORAGE *servers, int num, BOOL ip4_only )
-{
-    FIXME("Unimplemented on this system\n");
-    return 0;
-}
-#endif
-
-static ULONG get_dns_server_addresses(PIP_ADAPTER_DNS_SERVER_ADDRESS address, ULONG *len)
-{
-    int num = get_dns_servers( NULL, 0, FALSE );
-    DWORD size;
-
-    size = num * (sizeof(IP_ADAPTER_DNS_SERVER_ADDRESS) + sizeof(SOCKADDR_STORAGE));
-    if (!address || *len < size)
-    {
-        *len = size;
-        return ERROR_BUFFER_OVERFLOW;
-    }
-    *len = size;
-    if (num > 0)
-    {
-        PIP_ADAPTER_DNS_SERVER_ADDRESS addr = address;
-        SOCKADDR_STORAGE *sock_addrs = (SOCKADDR_STORAGE *)(address + num);
-        int i;
-
-        get_dns_servers( sock_addrs, num, FALSE );
-
-        for (i = 0; i < num; i++, addr = addr->Next)
-        {
-            addr->u.s.Length = sizeof(*addr);
-            if (sock_addrs[i].ss_family == WS_AF_INET6)
-                addr->Address.iSockaddrLength = sizeof(SOCKADDR_IN6);
-            else
-                addr->Address.iSockaddrLength = sizeof(SOCKADDR_IN);
-            addr->Address.lpSockaddr = (SOCKADDR *)(sock_addrs + i);
-            if (i == num - 1)
-                addr->Next = NULL;
-            else
-                addr->Next = addr + 1;
-        }
-    }
-    return ERROR_SUCCESS;
-}
-
-#ifdef HAVE_STRUCT___RES_STATE
-static BOOL is_ip_address_string(const char *str)
-{
-    struct in_addr in;
-    int ret;
-
-    ret = inet_aton(str, &in);
-    return ret != 0;
-}
-#endif
-
-static ULONG get_dns_suffix(WCHAR *suffix, ULONG *len)
-{
-    ULONG size;
-    const char *found_suffix = "";
-    /* Always return a NULL-terminated string, even if it's empty. */
-
-#ifdef HAVE_STRUCT___RES_STATE
-    {
-        ULONG i;
-        initialise_resolver();
-        for (i = 0; !*found_suffix && i < MAXDNSRCH + 1 && _res.dnsrch[i]; i++)
-        {
-            /* This uses a heuristic to select a DNS suffix:
-             * the first, non-IP address string is selected.
-             */
-            if (!is_ip_address_string(_res.dnsrch[i]))
-                found_suffix = _res.dnsrch[i];
-        }
-    }
-#endif
-
-    size = MultiByteToWideChar( CP_UNIXCP, 0, found_suffix, -1, NULL, 0 ) * sizeof(WCHAR);
-    if (!suffix || *len < size)
-    {
-        *len = size;
-        return ERROR_BUFFER_OVERFLOW;
-    }
-    *len = MultiByteToWideChar( CP_UNIXCP, 0, found_suffix, -1, suffix, *len / sizeof(WCHAR) ) * sizeof(WCHAR);
-    return ERROR_SUCCESS;
-}
-
-ULONG WINAPI DECLSPEC_HOTPATCH GetAdaptersAddresses(ULONG family, ULONG flags, PVOID reserved,
-                                                    PIP_ADAPTER_ADDRESSES aa, PULONG buflen)
-{
-    InterfaceIndexTable *table;
-    ULONG i, size, dns_server_size = 0, dns_suffix_size, total_size, ret = ERROR_NO_DATA;
-
-    TRACE("(%d, %08x, %p, %p, %p)\n", family, flags, reserved, aa, buflen);
-
-    if (!buflen) return ERROR_INVALID_PARAMETER;
-
-    get_interface_indices( FALSE, &table );
-    if (!table || !table->numIndexes)
-    {
-        HeapFree(GetProcessHeap(), 0, table);
-        return ERROR_NO_DATA;
-    }
-    total_size = 0;
-    for (i = 0; i < table->numIndexes; i++)
-    {
-        size = 0;
-        if ((ret = adapterAddressesFromIndex(family, flags, table->indexes[i], NULL, &size)))
-        {
-            HeapFree(GetProcessHeap(), 0, table);
-            return ret;
-        }
-        total_size += size;
-    }
-    if (!(flags & GAA_FLAG_SKIP_DNS_SERVER))
-    {
-        /* Since DNS servers aren't really per adapter, get enough space for a
-         * single copy of them.
-         */
-        get_dns_server_addresses(NULL, &dns_server_size);
-        total_size += dns_server_size;
-    }
-    /* Since DNS suffix also isn't really per adapter, get enough space for a
-     * single copy of it.
-     */
-    get_dns_suffix(NULL, &dns_suffix_size);
-    total_size += dns_suffix_size;
-    if (aa && *buflen >= total_size)
-    {
-        ULONG bytes_left = size = total_size;
-        PIP_ADAPTER_ADDRESSES first_aa = aa;
-        PIP_ADAPTER_DNS_SERVER_ADDRESS firstDns;
-        WCHAR *dnsSuffix;
-
-        for (i = 0; i < table->numIndexes; i++)
-        {
-            if ((ret = adapterAddressesFromIndex(family, flags, table->indexes[i], aa, &size)))
-            {
-                HeapFree(GetProcessHeap(), 0, table);
-                return ret;
-            }
-            if (i < table->numIndexes - 1)
-            {
-                aa->Next = (IP_ADAPTER_ADDRESSES *)((char *)aa + size);
-                aa = aa->Next;
-                size = bytes_left -= size;
-            }
-        }
-        if (dns_server_size)
-        {
-            firstDns = (PIP_ADAPTER_DNS_SERVER_ADDRESS)((BYTE *)first_aa + total_size - dns_server_size - dns_suffix_size);
-            get_dns_server_addresses(firstDns, &dns_server_size);
-            for (aa = first_aa; aa; aa = aa->Next)
-            {
-                if (aa->IfType != IF_TYPE_SOFTWARE_LOOPBACK && aa->OperStatus == IfOperStatusUp)
-                    aa->FirstDnsServerAddress = firstDns;
-            }
-        }
-        aa = first_aa;
-        dnsSuffix = (WCHAR *)((BYTE *)aa + total_size - dns_suffix_size);
-        get_dns_suffix(dnsSuffix, &dns_suffix_size);
-        for (; aa; aa = aa->Next)
-        {
-            if (aa->IfType != IF_TYPE_SOFTWARE_LOOPBACK && aa->OperStatus == IfOperStatusUp)
-                aa->DnsSuffix = dnsSuffix;
-            else
-                aa->DnsSuffix = dnsSuffix + dns_suffix_size / sizeof(WCHAR) - 1;
-        }
-        ret = ERROR_SUCCESS;
+        *size = needed;
+        err = ERROR_BUFFER_OVERFLOW;
     }
     else
-    {
-        ret = ERROR_BUFFER_OVERFLOW;
-        *buflen = total_size;
-    }
+        adapters_addresses_copy( aa, info );
 
-    TRACE("num adapters %u\n", table->numIndexes);
-    HeapFree(GetProcessHeap(), 0, table);
-    return ret;
+    adapters_addresses_free( info );
+    return err;
 }
 
 /******************************************************************
@@ -1687,6 +1493,83 @@ DWORD WINAPI GetFriendlyIfIndex(DWORD IfIndex)
      byte set. */
   TRACE("returning %d\n", IfIndex);
   return IfIndex;
+}
+
+static void icmp_stats_ex_to_icmp_stats( MIBICMPSTATS_EX *stats_ex, MIBICMPSTATS *stats )
+{
+    stats->dwMsgs = stats_ex->dwMsgs;
+    stats->dwErrors = stats_ex->dwErrors;
+    stats->dwDestUnreachs = stats_ex->rgdwTypeCount[ICMP4_DST_UNREACH];
+    stats->dwTimeExcds = stats_ex->rgdwTypeCount[ICMP4_TIME_EXCEEDED];
+    stats->dwParmProbs = stats_ex->rgdwTypeCount[ICMP4_PARAM_PROB];
+    stats->dwSrcQuenchs = stats_ex->rgdwTypeCount[ICMP4_SOURCE_QUENCH];
+    stats->dwRedirects = stats_ex->rgdwTypeCount[ICMP4_REDIRECT];
+    stats->dwEchos = stats_ex->rgdwTypeCount[ICMP4_ECHO_REQUEST];
+    stats->dwEchoReps = stats_ex->rgdwTypeCount[ICMP4_ECHO_REPLY];
+    stats->dwTimestamps = stats_ex->rgdwTypeCount[ICMP4_TIMESTAMP_REQUEST];
+    stats->dwTimestampReps = stats_ex->rgdwTypeCount[ICMP4_TIMESTAMP_REPLY];
+    stats->dwAddrMasks = stats_ex->rgdwTypeCount[ICMP4_MASK_REQUEST];
+    stats->dwAddrMaskReps = stats_ex->rgdwTypeCount[ICMP4_MASK_REPLY];
+}
+
+/******************************************************************
+ *    GetIcmpStatistics (IPHLPAPI.@)
+ *
+ * Get the ICMP statistics for the local computer.
+ *
+ * PARAMS
+ *  stats [Out] buffer for ICMP statistics
+ *
+ * RETURNS
+ *  Success: NO_ERROR
+ *  Failure: error code from winerror.h
+ */
+DWORD WINAPI GetIcmpStatistics( MIB_ICMP *stats )
+{
+    MIB_ICMP_EX stats_ex;
+    DWORD err = GetIcmpStatisticsEx( &stats_ex, WS_AF_INET );
+
+    if (err) return err;
+
+    icmp_stats_ex_to_icmp_stats( &stats_ex.icmpInStats, &stats->stats.icmpInStats );
+    icmp_stats_ex_to_icmp_stats( &stats_ex.icmpOutStats, &stats->stats.icmpOutStats );
+    return err;
+}
+
+/******************************************************************
+ *    GetIcmpStatisticsEx (IPHLPAPI.@)
+ *
+ * Get the IPv4 and IPv6 ICMP statistics for the local computer.
+ *
+ * PARAMS
+ *  stats [Out] buffer for ICMP statistics
+ *  family [In] specifies whether IPv4 or IPv6 statistics are returned
+ *
+ * RETURNS
+ *  Success: NO_ERROR
+ *  Failure: error code from winerror.h
+ */
+DWORD WINAPI GetIcmpStatisticsEx( MIB_ICMP_EX *stats, DWORD family )
+{
+    const NPI_MODULEID *mod = ip_module_id( family );
+    struct nsi_ip_icmpstats_dynamic dyn;
+    DWORD err;
+
+    if (!stats || !mod) return ERROR_INVALID_PARAMETER;
+    memset( stats, 0, sizeof(*stats) );
+
+    err = NsiGetAllParameters( 1, mod, NSI_IP_ICMPSTATS_TABLE, NULL, 0, NULL, 0,
+                               &dyn, sizeof(dyn), NULL, 0 );
+    if (err) return err;
+
+    stats->icmpInStats.dwMsgs = dyn.in_msgs;
+    stats->icmpInStats.dwErrors = dyn.in_errors;
+    memcpy( stats->icmpInStats.rgdwTypeCount, dyn.in_type_counts, sizeof( dyn.in_type_counts ) );
+    stats->icmpOutStats.dwMsgs = dyn.out_msgs;
+    stats->icmpOutStats.dwErrors = dyn.out_errors;
+    memcpy( stats->icmpOutStats.rgdwTypeCount, dyn.out_type_counts, sizeof( dyn.out_type_counts ) );
+
+    return ERROR_SUCCESS;
 }
 
 static void if_row_fill( MIB_IFROW *row, struct nsi_ndis_ifinfo_rw *rw, struct nsi_ndis_ifinfo_dynamic *dyn,
@@ -1877,15 +1760,6 @@ DWORD WINAPI AllocateAndGetIfTableFromStack( MIB_IFTABLE **table, BOOL sort, HAN
 err:
     NsiFreeTable( keys, rw, dyn, stat );
     return err;
-}
-
-static void if_counted_string_copy( WCHAR *dst, unsigned int len, IF_COUNTED_STRING *src )
-{
-    unsigned int copy = src->Length;
-
-    if (copy >= len * sizeof(WCHAR)) copy = 0;
-    memcpy( dst, src->String, copy );
-    memset( (char *)dst + copy, 0, len * sizeof(WCHAR) - copy );
 }
 
 static void if_row2_fill( MIB_IF_ROW2 *row, struct nsi_ndis_ifinfo_rw *rw, struct nsi_ndis_ifinfo_dynamic *dyn,
@@ -2182,53 +2056,264 @@ DWORD WINAPI AllocateAndGetIpAddrTableFromStack( MIB_IPADDRTABLE **table, BOOL s
     return err;
 }
 
+static int ipforward_row_cmp( const void *a, const void *b )
+{
+    const MIB_IPFORWARDROW *rowA = a;
+    const MIB_IPFORWARDROW *rowB = b;
+    int ret;
+
+    if ((ret = rowA->dwForwardDest - rowB->dwForwardDest) != 0) return ret;
+    if ((ret = rowA->u2.dwForwardProto - rowB->u2.dwForwardProto) != 0) return ret;
+    if ((ret = rowA->dwForwardPolicy - rowB->dwForwardPolicy) != 0) return ret;
+    return rowA->dwForwardNextHop - rowB->dwForwardNextHop;
+}
+
 /******************************************************************
  *    GetIpForwardTable (IPHLPAPI.@)
  *
  * Get the route table.
  *
  * PARAMS
- *  pIpForwardTable [Out]    buffer for route table
- *  pdwSize         [In/Out] length of output buffer
- *  bOrder          [In]     whether to sort the table
+ *  table           [Out]    buffer for route table
+ *  size            [In/Out] length of output buffer
+ *  sort            [In]     whether to sort the table
  *
  * RETURNS
  *  Success: NO_ERROR
  *  Failure: error code from winerror.h
- *
- * NOTES
- *  If pdwSize is less than required, the function will return
- *  ERROR_INSUFFICIENT_BUFFER, and *pdwSize will be set to the required byte
- *  size.
- *  If bOrder is true, the returned table will be sorted by the next hop and
- *  an assortment of arbitrary parameters.
  */
-DWORD WINAPI GetIpForwardTable(PMIB_IPFORWARDTABLE pIpForwardTable, PULONG pdwSize, BOOL bOrder)
+DWORD WINAPI GetIpForwardTable( MIB_IPFORWARDTABLE *table, ULONG *size, BOOL sort )
 {
-    DWORD ret;
-    PMIB_IPFORWARDTABLE table;
+    DWORD err, count, uni_count, needed, i, addr;
+    struct nsi_ipv4_forward_key *keys;
+    struct nsi_ip_forward_rw *rw;
+    struct nsi_ipv4_forward_dynamic *dyn;
+    struct nsi_ip_forward_static *stat;
+    struct nsi_ipv4_unicast_key *uni_keys = NULL;
 
-    TRACE("pIpForwardTable %p, pdwSize %p, bOrder %d\n", pIpForwardTable, pdwSize, bOrder);
+    TRACE( "table %p, size %p, sort %d\n", table, size, sort );
+    if (!size) return ERROR_INVALID_PARAMETER;
 
-    if (!pdwSize) return ERROR_INVALID_PARAMETER;
+    err = NsiAllocateAndGetTable( 1, &NPI_MS_IPV4_MODULEID, NSI_IP_FORWARD_TABLE, (void **)&keys, sizeof(*keys),
+                                  (void **)&rw, sizeof(*rw), (void **)&dyn, sizeof(*dyn),
+                                  (void **)&stat, sizeof(*stat), &count, 0 );
+    if (err) return err;
 
-    ret = AllocateAndGetIpForwardTableFromStack(&table, bOrder, GetProcessHeap(), 0);
-    if (!ret) {
-        DWORD size = FIELD_OFFSET( MIB_IPFORWARDTABLE, table[table->dwNumEntries] );
-        if (!pIpForwardTable || *pdwSize < size) {
-          *pdwSize = size;
-          ret = ERROR_INSUFFICIENT_BUFFER;
-        }
-        else {
-          *pdwSize = size;
-          memcpy(pIpForwardTable, table, size);
-        }
-        HeapFree(GetProcessHeap(), 0, table);
+    needed = FIELD_OFFSET( MIB_IPFORWARDTABLE, table[count] );
+
+    if (!table || *size < needed)
+    {
+        *size = needed;
+        err = ERROR_INSUFFICIENT_BUFFER;
+        goto err;
     }
-    TRACE("returning %d\n", ret);
-    return ret;
+
+    err = NsiAllocateAndGetTable( 1, &NPI_MS_IPV4_MODULEID, NSI_IP_UNICAST_TABLE, (void **)&uni_keys, sizeof(*uni_keys),
+                                  NULL, 0, NULL, 0, NULL, 0, &uni_count, 0 );
+    if (err) goto err;
+
+    table->dwNumEntries = count;
+    for (i = 0; i < count; i++)
+    {
+        MIB_IPFORWARDROW *row = table->table + i;
+
+        row->dwForwardDest = keys[i].prefix.WS_s_addr;
+        ConvertLengthToIpv4Mask( keys[i].prefix_len, &row->dwForwardMask );
+        row->dwForwardPolicy = 0;
+        row->dwForwardNextHop = keys[i].next_hop.WS_s_addr;
+        row->u1.dwForwardType = row->dwForwardNextHop ? MIB_IPROUTE_TYPE_INDIRECT : MIB_IPROUTE_TYPE_DIRECT;
+        if (!row->dwForwardNextHop) /* find the interface's addr */
+        {
+            for (addr = 0; addr < uni_count; addr++)
+            {
+                if (uni_keys[addr].luid.Value == keys[i].luid.Value)
+                {
+                    row->dwForwardNextHop = uni_keys[addr].addr.WS_s_addr;
+                    break;
+                }
+            }
+        }
+        row->dwForwardIfIndex = stat[i].if_index;
+        row->u2.dwForwardProto = rw[i].protocol;
+        row->dwForwardAge = dyn[i].age;
+        row->dwForwardNextHopAS = 0;
+        row->dwForwardMetric1 = rw[i].metric; /* FIXME: add interface metric */
+        row->dwForwardMetric2 = 0;
+        row->dwForwardMetric3 = 0;
+        row->dwForwardMetric4 = 0;
+        row->dwForwardMetric5 = 0;
+    }
+
+    if (sort) qsort( table->table, count, sizeof(MIB_IPFORWARDROW), ipforward_row_cmp );
+err:
+    NsiFreeTable( uni_keys, NULL, NULL, NULL );
+    NsiFreeTable( keys, rw, dyn, stat );
+
+    return err;
 }
 
+/******************************************************************
+ *    AllocateAndGetIpForwardTableFromStack (IPHLPAPI.@)
+ *
+ * Get the route table.
+ * Like GetIpForwardTable(), but allocate the returned table from heap.
+ *
+ * PARAMS
+ *  table            [Out] pointer into which the MIB_IPFORWARDTABLE is
+ *                         allocated and returned.
+ *  sort             [In]  whether to sort the table
+ *  heap             [In]  heap from which the table is allocated
+ *  flags            [In]  flags to HeapAlloc
+ *
+ * RETURNS
+ *  ERROR_INVALID_PARAMETER if ppIfTable is NULL, other error codes
+ *  on failure, NO_ERROR on success.
+ */
+DWORD WINAPI AllocateAndGetIpForwardTableFromStack( MIB_IPFORWARDTABLE **table, BOOL sort, HANDLE heap, DWORD flags )
+{
+    DWORD err, size = FIELD_OFFSET(MIB_IPFORWARDTABLE, table[2]), attempt;
+
+    TRACE( "table %p, sort %d, heap %p, flags 0x%08x\n", table, sort, heap, flags );
+
+    for (attempt = 0; attempt < 5; attempt++)
+    {
+        *table = HeapAlloc( heap, flags, size );
+        if (!*table) return ERROR_NOT_ENOUGH_MEMORY;
+
+        err = GetIpForwardTable( *table, &size, sort );
+        if (!err) break;
+        HeapFree( heap, flags, *table );
+        if (err != ERROR_INSUFFICIENT_BUFFER) break;
+    }
+
+    return err;
+}
+
+static void forward_row2_fill( MIB_IPFORWARD_ROW2 *row, USHORT fam, void *key, struct nsi_ip_forward_rw *rw,
+                               void *dyn, struct nsi_ip_forward_static *stat )
+{
+    struct nsi_ipv4_forward_key *key4 = (struct nsi_ipv4_forward_key *)key;
+    struct nsi_ipv6_forward_key *key6 = (struct nsi_ipv6_forward_key *)key;
+    struct nsi_ipv4_forward_dynamic *dyn4 = (struct nsi_ipv4_forward_dynamic *)dyn;
+    struct nsi_ipv6_forward_dynamic *dyn6 = (struct nsi_ipv6_forward_dynamic *)dyn;
+
+    if (fam == WS_AF_INET)
+    {
+        row->InterfaceLuid = key4->luid;
+        row->DestinationPrefix.Prefix.Ipv4.sin_family = fam;
+        row->DestinationPrefix.Prefix.Ipv4.sin_port = 0;
+        row->DestinationPrefix.Prefix.Ipv4.sin_addr = key4->prefix;
+        memset( &row->DestinationPrefix.Prefix.Ipv4.sin_zero, 0, sizeof(row->DestinationPrefix.Prefix.Ipv4.sin_zero) );
+        row->DestinationPrefix.PrefixLength = key4->prefix_len;
+        row->NextHop.Ipv4.sin_family = fam;
+        row->NextHop.Ipv4.sin_port = 0;
+        row->NextHop.Ipv4.sin_addr = key4->next_hop;
+        memset( &row->NextHop.Ipv4.sin_zero, 0, sizeof(row->NextHop.Ipv4.sin_zero) );
+
+        row->Age = dyn4->age;
+    }
+    else
+    {
+        row->InterfaceLuid = key6->luid;
+
+        row->DestinationPrefix.Prefix.Ipv6.sin6_family = fam;
+        row->DestinationPrefix.Prefix.Ipv6.sin6_port = 0;
+        row->DestinationPrefix.Prefix.Ipv6.sin6_flowinfo = 0;
+        row->DestinationPrefix.Prefix.Ipv6.sin6_addr = key6->prefix;
+        row->DestinationPrefix.Prefix.Ipv6.sin6_scope_id = 0;
+        row->DestinationPrefix.PrefixLength = key6->prefix_len;
+        row->NextHop.Ipv6.sin6_family = fam;
+        row->NextHop.Ipv6.sin6_port = 0;
+        row->NextHop.Ipv6.sin6_flowinfo = 0;
+        row->NextHop.Ipv6.sin6_addr = key6->next_hop;
+        row->NextHop.Ipv6.sin6_scope_id = 0;
+
+        row->Age = dyn6->age;
+    }
+
+    row->InterfaceIndex = stat->if_index;
+
+    row->SitePrefixLength = rw->site_prefix_len;
+    row->ValidLifetime = rw->valid_lifetime;
+    row->PreferredLifetime = rw->preferred_lifetime;
+    row->Metric = rw->metric;
+    row->Protocol = rw->protocol;
+    row->Loopback = rw->loopback;
+    row->AutoconfigureAddress = rw->autoconf;
+    row->Publish = rw->publish;
+    row->Immortal = rw->immortal;
+
+    row->Origin = stat->origin;
+}
+
+/******************************************************************
+ *    GetIpForwardTable2 (IPHLPAPI.@)
+ */
+DWORD WINAPI GetIpForwardTable2( ADDRESS_FAMILY family, MIB_IPFORWARD_TABLE2 **table )
+{
+    void *key[2] = { NULL, NULL };
+    struct nsi_ip_forward_rw *rw[2] = { NULL, NULL };
+    void *dyn[2] = { NULL, NULL };
+    struct nsi_ip_forward_static *stat[2] = { NULL, NULL };
+    static const USHORT fam[2] = { WS_AF_INET, WS_AF_INET6 };
+    static const DWORD key_size[2] = { sizeof(struct nsi_ipv4_forward_key), sizeof(struct nsi_ipv6_forward_key) };
+    static const DWORD dyn_size[2] = { sizeof(struct nsi_ipv4_forward_dynamic), sizeof(struct nsi_ipv6_forward_dynamic) };
+    DWORD err = ERROR_SUCCESS, i, size, count[2] = { 0, 0 };
+
+    TRACE( "%u, %p\n", family, table );
+
+    if (!table || (family != WS_AF_INET && family != WS_AF_INET6 && family != WS_AF_UNSPEC))
+        return ERROR_INVALID_PARAMETER;
+
+    for (i = 0; i < 2; i++)
+    {
+        if (family != WS_AF_UNSPEC && family != fam[i]) continue;
+
+        err = NsiAllocateAndGetTable( 1, ip_module_id( fam[i] ), NSI_IP_FORWARD_TABLE, key + i, key_size[i],
+                                      (void **)rw + i, sizeof(**rw), dyn + i, dyn_size[i],
+                                      (void **)stat + i, sizeof(**stat), count + i, 0 );
+        if (err) count[i] = 0;
+    }
+
+    size = FIELD_OFFSET(MIB_IPFORWARD_TABLE2, Table[ count[0] + count[1] ]);
+    *table = heap_alloc( size );
+    if (!*table)
+    {
+        err = ERROR_NOT_ENOUGH_MEMORY;
+        goto err;
+    }
+
+    (*table)->NumEntries = count[0] + count[1];
+    for (i = 0; i < count[0]; i++)
+    {
+        MIB_IPFORWARD_ROW2 *row = (*table)->Table + i;
+        struct nsi_ipv4_forward_key *key4 = (struct nsi_ipv4_forward_key *)key[0];
+        struct nsi_ipv4_forward_dynamic *dyn4 = (struct nsi_ipv4_forward_dynamic *)dyn[0];
+
+        forward_row2_fill( row, fam[0], key4 + i, rw[0] + i, dyn4 + i, stat[0] + i );
+    }
+
+    for (i = 0; i < count[1]; i++)
+    {
+        MIB_IPFORWARD_ROW2 *row = (*table)->Table + count[0] + i;
+        struct nsi_ipv6_forward_key *key6 = (struct nsi_ipv6_forward_key *)key[1];
+        struct nsi_ipv6_forward_dynamic *dyn6 = (struct nsi_ipv6_forward_dynamic *)dyn[1];
+
+        forward_row2_fill( row, fam[1], key6 + i, rw[1] + i, dyn6 + i, stat[1] + i );
+    }
+
+err:
+    for (i = 0; i < 2; i++) NsiFreeTable( key[i], rw[i], dyn[i], stat[i] );
+    return err;
+}
+
+static int ipnetrow_cmp( const void *a, const void *b )
+{
+    const MIB_IPNETROW *row_a = a;
+    const MIB_IPNETROW *row_b = b;
+
+    return RtlUlongByteSwap( row_a->dwAddr ) - RtlUlongByteSwap( row_b->dwAddr );
+}
 
 /******************************************************************
  *    GetIpNetTable (IPHLPAPI.@)
@@ -2236,89 +2321,335 @@ DWORD WINAPI GetIpForwardTable(PMIB_IPFORWARDTABLE pIpForwardTable, PULONG pdwSi
  * Get the IP-to-physical address mapping table.
  *
  * PARAMS
- *  pIpNetTable [Out]    buffer for mapping table
- *  pdwSize     [In/Out] length of output buffer
- *  bOrder      [In]     whether to sort the table
+ *  table       [Out]    buffer for mapping table
+ *  size        [In/Out] length of output buffer
+ *  sort        [In]     whether to sort the table
  *
  * RETURNS
  *  Success: NO_ERROR
  *  Failure: error code from winerror.h
  *
- * NOTES
- *  If pdwSize is less than required, the function will return
- *  ERROR_INSUFFICIENT_BUFFER, and *pdwSize will be set to the required byte
- *  size.
- *  If bOrder is true, the returned table will be sorted by IP address.
  */
-DWORD WINAPI GetIpNetTable(PMIB_IPNETTABLE pIpNetTable, PULONG pdwSize, BOOL bOrder)
+DWORD WINAPI GetIpNetTable( MIB_IPNETTABLE *table, ULONG *size, BOOL sort )
 {
-    DWORD ret;
-    PMIB_IPNETTABLE table;
+    DWORD err, count, needed, i;
+    struct nsi_ipv4_neighbour_key *keys;
+    struct nsi_ip_neighbour_rw *rw;
+    struct nsi_ip_neighbour_dynamic *dyn;
 
-    TRACE("pIpNetTable %p, pdwSize %p, bOrder %d\n", pIpNetTable, pdwSize, bOrder);
+    TRACE( "table %p, size %p, sort %d\n", table, size, sort );
 
-    if (!pdwSize) return ERROR_INVALID_PARAMETER;
+    if (!size) return ERROR_INVALID_PARAMETER;
 
-    ret = AllocateAndGetIpNetTableFromStack( &table, bOrder, GetProcessHeap(), 0 );
-    if (!ret) {
-        DWORD size = FIELD_OFFSET( MIB_IPNETTABLE, table[table->dwNumEntries] );
-        if (!pIpNetTable || *pdwSize < size) {
-          *pdwSize = size;
-          ret = ERROR_INSUFFICIENT_BUFFER;
-        }
-        else {
-          *pdwSize = size;
-          memcpy(pIpNetTable, table, size);
-        }
-        HeapFree(GetProcessHeap(), 0, table);
+    err = NsiAllocateAndGetTable( 1, &NPI_MS_IPV4_MODULEID, NSI_IP_NEIGHBOUR_TABLE, (void **)&keys, sizeof(*keys),
+                                  (void **)&rw, sizeof(*rw), (void **)&dyn, sizeof(*dyn),
+                                  NULL, 0, &count, 0 );
+    if (err) return err;
+
+    needed = FIELD_OFFSET( MIB_IPNETTABLE, table[count] );
+
+    if (!table || *size < needed)
+    {
+        *size = needed;
+        err = ERROR_INSUFFICIENT_BUFFER;
+        goto err;
     }
-    TRACE("returning %d\n", ret);
-    return ret;
+
+    table->dwNumEntries = count;
+    for (i = 0; i < count; i++)
+    {
+        MIB_IPNETROW *row = table->table + i;
+
+        ConvertInterfaceLuidToIndex( &keys[i].luid, &row->dwIndex );
+        row->dwPhysAddrLen = dyn[i].phys_addr_len;
+        if (row->dwPhysAddrLen > sizeof(row->bPhysAddr)) row->dwPhysAddrLen = 0;
+        memcpy( row->bPhysAddr, rw[i].phys_addr, row->dwPhysAddrLen );
+        memset( row->bPhysAddr + row->dwPhysAddrLen, 0,
+                sizeof(row->bPhysAddr) - row->dwPhysAddrLen );
+        row->dwAddr = keys[i].addr.WS_s_addr;
+        switch (dyn->state)
+        {
+        case NlnsUnreachable:
+        case NlnsIncomplete:
+            row->u.Type = MIB_IPNET_TYPE_INVALID;
+            break;
+        case NlnsProbe:
+        case NlnsDelay:
+        case NlnsStale:
+        case NlnsReachable:
+            row->u.Type = MIB_IPNET_TYPE_DYNAMIC;
+            break;
+        case NlnsPermanent:
+            row->u.Type = MIB_IPNET_TYPE_STATIC;
+            break;
+        default:
+            row->u.Type = MIB_IPNET_TYPE_OTHER;
+        }
+    }
+
+    if (sort) qsort( table->table, table->dwNumEntries, sizeof(*table->table), ipnetrow_cmp );
+
+err:
+    NsiFreeTable( keys, rw, dyn, NULL );
+    return err;
+}
+
+/******************************************************************
+ *    AllocateAndGetIpNetTableFromStack (IPHLPAPI.@)
+ */
+DWORD WINAPI AllocateAndGetIpNetTableFromStack( MIB_IPNETTABLE **table, BOOL sort, HANDLE heap, DWORD flags )
+{
+    DWORD err, size = FIELD_OFFSET(MIB_IPNETTABLE, table[2]), attempt;
+
+    TRACE( "table %p, sort %d, heap %p, flags 0x%08x\n", table, sort, heap, flags );
+
+    for (attempt = 0; attempt < 5; attempt++)
+    {
+        *table = HeapAlloc( heap, flags, size );
+        if (!*table) return ERROR_NOT_ENOUGH_MEMORY;
+
+        err = GetIpNetTable( *table, &size, sort );
+        if (!err) break;
+        HeapFree( heap, flags, *table );
+        if (err != ERROR_INSUFFICIENT_BUFFER) break;
+    }
+
+    return err;
+}
+
+static void ipnet_row2_fill( MIB_IPNET_ROW2 *row, USHORT fam, void *key, struct nsi_ip_neighbour_rw *rw,
+                             struct nsi_ip_neighbour_dynamic *dyn )
+{
+    struct nsi_ipv4_neighbour_key *key4 = (struct nsi_ipv4_neighbour_key *)key;
+    struct nsi_ipv6_neighbour_key *key6 = (struct nsi_ipv6_neighbour_key *)key;
+
+    if (fam == WS_AF_INET)
+    {
+        row->Address.Ipv4.sin_family = fam;
+        row->Address.Ipv4.sin_port = 0;
+        row->Address.Ipv4.sin_addr = key4->addr;
+        memset( &row->Address.Ipv4.sin_zero, 0, sizeof(row->Address.Ipv4.sin_zero) );
+        row->InterfaceLuid = key4->luid;
+    }
+    else
+    {
+        row->Address.Ipv6.sin6_family = fam;
+        row->Address.Ipv6.sin6_port = 0;
+        row->Address.Ipv6.sin6_flowinfo = 0;
+        row->Address.Ipv6.sin6_addr = key6->addr;
+        row->Address.Ipv6.sin6_scope_id = 0;
+        row->InterfaceLuid = key6->luid;
+    }
+
+    ConvertInterfaceLuidToIndex( &row->InterfaceLuid, &row->InterfaceIndex );
+
+    row->PhysicalAddressLength = dyn->phys_addr_len;
+    if (row->PhysicalAddressLength > sizeof(row->PhysicalAddress))
+        row->PhysicalAddressLength = 0;
+    memcpy( row->PhysicalAddress, rw->phys_addr, row->PhysicalAddressLength );
+    memset( row->PhysicalAddress + row->PhysicalAddressLength, 0,
+            sizeof(row->PhysicalAddress) - row->PhysicalAddressLength );
+    row->State = dyn->state;
+    row->u.Flags = 0;
+    row->u.s.IsRouter = dyn->flags.is_router;
+    row->u.s.IsUnreachable = dyn->flags.is_unreachable;
+    row->ReachabilityTime.LastReachable = dyn->time;
+}
+
+/******************************************************************
+ *    GetIpNetTable2 (IPHLPAPI.@)
+ */
+DWORD WINAPI GetIpNetTable2( ADDRESS_FAMILY family, MIB_IPNET_TABLE2 **table )
+{
+    void *key[2] = { NULL, NULL };
+    struct nsi_ip_neighbour_rw *rw[2] = { NULL, NULL };
+    struct nsi_ip_neighbour_dynamic *dyn[2] = { NULL, NULL };
+    static const USHORT fam[2] = { WS_AF_INET, WS_AF_INET6 };
+    static const DWORD key_size[2] = { sizeof(struct nsi_ipv4_neighbour_key), sizeof(struct nsi_ipv6_neighbour_key) };
+    DWORD err = ERROR_SUCCESS, i, size, count[2] = { 0, 0 };
+
+    TRACE( "%u, %p\n", family, table );
+
+    if (!table || (family != WS_AF_INET && family != WS_AF_INET6 && family != WS_AF_UNSPEC))
+        return ERROR_INVALID_PARAMETER;
+
+    for (i = 0; i < 2; i++)
+    {
+        if (family != WS_AF_UNSPEC && family != fam[i]) continue;
+
+        err = NsiAllocateAndGetTable( 1, ip_module_id( fam[i] ), NSI_IP_NEIGHBOUR_TABLE, key + i, key_size[i],
+                                      (void **)rw + i, sizeof(**rw), (void **)dyn + i, sizeof(**dyn),
+                                      NULL, 0, count + i, 0 );
+        if (err) count[i] = 0;
+    }
+
+    size = FIELD_OFFSET(MIB_IPNET_TABLE2, Table[ count[0] + count[1] ]);
+    *table = heap_alloc( size );
+    if (!*table)
+    {
+        err = ERROR_NOT_ENOUGH_MEMORY;
+        goto err;
+    }
+
+    (*table)->NumEntries = count[0] + count[1];
+    for (i = 0; i < count[0]; i++)
+    {
+        MIB_IPNET_ROW2 *row = (*table)->Table + i;
+        struct nsi_ipv4_neighbour_key *key4 = (struct nsi_ipv4_neighbour_key *)key[0];
+
+        ipnet_row2_fill( row, fam[0], key4 + i, rw[0] + i, dyn[0] + i );
+    }
+
+    for (i = 0; i < count[1]; i++)
+    {
+        MIB_IPNET_ROW2 *row = (*table)->Table + count[0] + i;
+        struct nsi_ipv6_neighbour_key *key6 = (struct nsi_ipv6_neighbour_key *)key[1];
+
+        ipnet_row2_fill( row, fam[1], key6 + i, rw[1] + i, dyn[1] + i );
+    }
+
+err:
+    for (i = 0; i < 2; i++) NsiFreeTable( key[i], rw[i], dyn[i], NULL );
+    return err;
+}
+
+/******************************************************************
+ *    GetIpStatistics (IPHLPAPI.@)
+ *
+ * Get the IP statistics for the local computer.
+ *
+ * PARAMS
+ *  stats [Out] buffer for IP statistics
+ *
+ * RETURNS
+ *  Success: NO_ERROR
+ *  Failure: error code from winerror.h
+ */
+DWORD WINAPI GetIpStatistics( MIB_IPSTATS *stats )
+{
+    return GetIpStatisticsEx( stats, WS_AF_INET );
+}
+
+/******************************************************************
+ *    GetIpStatisticsEx (IPHLPAPI.@)
+ *
+ * Get the IPv4 and IPv6 statistics for the local computer.
+ *
+ * PARAMS
+ *  stats [Out] buffer for IP statistics
+ *  family [In] specifies whether IPv4 or IPv6 statistics are returned
+ *
+ * RETURNS
+ *  Success: NO_ERROR
+ *  Failure: error code from winerror.h
+ */
+DWORD WINAPI GetIpStatisticsEx( MIB_IPSTATS *stats, DWORD family )
+{
+    struct nsi_ip_ipstats_dynamic dyn;
+    struct nsi_ip_ipstats_static stat;
+    struct nsi_ip_cmpt_rw cmpt_rw;
+    struct nsi_ip_cmpt_dynamic cmpt_dyn;
+    const NPI_MODULEID *mod;
+    DWORD err, cmpt = 1;
+
+    TRACE( "%p %d\n", stats, family );
+
+    if (!stats) return ERROR_INVALID_PARAMETER;
+    mod = ip_module_id( family );
+    if (!mod) return ERROR_INVALID_PARAMETER;
+
+    memset( stats, 0, sizeof(*stats) );
+
+    err = NsiGetAllParameters( 1, mod, NSI_IP_IPSTATS_TABLE, NULL, 0, NULL, 0,
+                               &dyn, sizeof(dyn), &stat, sizeof(stat) );
+    if (err) return err;
+
+    err = NsiGetAllParameters( 1, mod, NSI_IP_COMPARTMENT_TABLE, &cmpt, sizeof(cmpt), &cmpt_rw, sizeof(cmpt_rw),
+                               &cmpt_dyn, sizeof(cmpt_dyn), NULL, 0 );
+    if (err) return err;
+
+    stats->u.Forwarding = cmpt_rw.not_forwarding + 1;
+    stats->dwDefaultTTL = cmpt_rw.default_ttl;
+    stats->dwInReceives = dyn.in_recv;
+    stats->dwInHdrErrors = dyn.in_hdr_errs;
+    stats->dwInAddrErrors = dyn.in_addr_errs;
+    stats->dwForwDatagrams = dyn.fwd_dgrams;
+    stats->dwInUnknownProtos = dyn.in_unk_protos;
+    stats->dwInDiscards = dyn.in_discards;
+    stats->dwInDelivers = dyn.in_delivers;
+    stats->dwOutRequests = dyn.out_reqs;
+    stats->dwRoutingDiscards = dyn.routing_discards;
+    stats->dwOutDiscards = dyn.out_discards;
+    stats->dwOutNoRoutes = dyn.out_no_routes;
+    stats->dwReasmTimeout = stat.reasm_timeout;
+    stats->dwReasmReqds = dyn.reasm_reqds;
+    stats->dwReasmOks = dyn.reasm_oks;
+    stats->dwReasmFails = dyn.reasm_fails;
+    stats->dwFragOks = dyn.frag_oks;
+    stats->dwFragFails = dyn.frag_fails;
+    stats->dwFragCreates = dyn.frag_creates;
+    stats->dwNumIf = cmpt_dyn.num_ifs;
+    stats->dwNumAddr = cmpt_dyn.num_addrs;
+    stats->dwNumRoutes = cmpt_dyn.num_routes;
+
+    return err;
 }
 
 /* Gets the DNS server list into the list beginning at list.  Assumes that
  * a single server address may be placed at list if *len is at least
  * sizeof(IP_ADDR_STRING) long.  Otherwise, list->Next is set to firstDynamic,
  * and assumes that all remaining DNS servers are contiguously located
- * beginning at firstDynamic.  On input, *len is assumed to be the total number
+ * beginning at second.  On input, *len is assumed to be the total number
  * of bytes available for all DNS servers, and is ignored if list is NULL.
  * On return, *len is set to the total number of bytes required for all DNS
  * servers.
  * Returns ERROR_BUFFER_OVERFLOW if *len is insufficient,
  * ERROR_SUCCESS otherwise.
  */
-static DWORD get_dns_server_list(PIP_ADDR_STRING list,
- PIP_ADDR_STRING firstDynamic, DWORD *len)
+static DWORD get_dns_server_list( const NET_LUID *luid, IP_ADDR_STRING *list, IP_ADDR_STRING *second, DWORD *len )
 {
-  DWORD size;
-  int num = get_dns_servers( NULL, 0, TRUE );
+    char buf[FIELD_OFFSET(IP4_ARRAY, AddrArray[3])];
+    IP4_ARRAY *servers = (IP4_ARRAY *)buf;
+    DWORD needed, num, err, i, array_len = sizeof(buf);
+    IP_ADDR_STRING *ptr;
 
-  size = num * sizeof(IP_ADDR_STRING);
-  if (!list || *len < size) {
-    *len = size;
-    return ERROR_BUFFER_OVERFLOW;
-  }
-  *len = size;
-  if (num > 0) {
-    PIP_ADDR_STRING ptr;
-    int i;
-    SOCKADDR_STORAGE *addr = HeapAlloc( GetProcessHeap(), 0, num * sizeof(SOCKADDR_STORAGE) );
+    if (luid && luid->Info.IfType == MIB_IF_TYPE_LOOPBACK) return ERROR_NO_DATA;
 
-    get_dns_servers( addr, num, TRUE );
+    for (;;)
+    {
+        err = DnsQueryConfig( DnsConfigDnsServerList, 0, NULL, NULL, servers, &array_len );
+        num = (array_len - FIELD_OFFSET(IP4_ARRAY, AddrArray[0])) / sizeof(IP4_ADDRESS);
+        needed = num * sizeof(IP_ADDR_STRING);
+        if (!list || *len < needed)
+        {
+            *len = needed;
+            err = ERROR_BUFFER_OVERFLOW;
+            goto err;
+        }
+        if (!err) break;
 
-    for (i = 0, ptr = list; i < num; i++, ptr = ptr->Next) {
-        RtlIpv4AddressToStringA((IN_ADDR *)&((struct sockaddr_in *)(addr + i))->sin_addr.s_addr,
-       ptr->IpAddress.String);
-      if (i == num - 1)
-        ptr->Next = NULL;
-      else if (i == 0)
-        ptr->Next = firstDynamic;
-      else
-        ptr->Next = (PIP_ADDR_STRING)((PBYTE)ptr + sizeof(IP_ADDR_STRING));
+        if ((char *)servers != buf) heap_free( servers );
+        servers = heap_alloc( array_len );
+        if (!servers)
+        {
+            err = ERROR_NOT_ENOUGH_MEMORY;
+            goto err;
+        }
     }
-    HeapFree( GetProcessHeap(), 0, addr );
-  }
-  return ERROR_SUCCESS;
+
+    *len = needed;
+
+    for (i = 0, ptr = list; i < num; i++, ptr = ptr->Next)
+    {
+        RtlIpv4AddressToStringA( (IN_ADDR *)&servers->AddrArray[i], ptr->IpAddress.String );
+        if (i == num - 1) ptr->Next = NULL;
+        else if (i == 0) ptr->Next = second;
+        else ptr->Next = ptr + 1;
+    }
+
+err:
+    if ((char *)servers != buf) heap_free( servers );
+    return err;
 }
 
 /******************************************************************
@@ -2327,65 +2658,60 @@ static DWORD get_dns_server_list(PIP_ADDR_STRING list,
  * Get the network parameters for the local computer.
  *
  * PARAMS
- *  pFixedInfo [Out]    buffer for network parameters
- *  pOutBufLen [In/Out] length of output buffer
+ *  info [Out]    buffer for network parameters
+ *  size [In/Out] length of output buffer
  *
  * RETURNS
  *  Success: NO_ERROR
  *  Failure: error code from winerror.h
  *
  * NOTES
- *  If pOutBufLen is less than required, the function will return
- *  ERROR_INSUFFICIENT_BUFFER, and pOutBufLen will be set to the required byte
+ *  If size is less than required, the function will return
+ *  ERROR_INSUFFICIENT_BUFFER, and size will be set to the required byte
  *  size.
  */
-DWORD WINAPI GetNetworkParams(PFIXED_INFO pFixedInfo, PULONG pOutBufLen)
+DWORD WINAPI GetNetworkParams( FIXED_INFO *info, ULONG *size )
 {
-  DWORD ret, size, serverListSize;
-  LONG regReturn;
-  HKEY hKey;
+    DWORD needed = sizeof(*info), dns_size, err;
+    MIB_IPSTATS ip_stats;
+    HKEY key;
 
-  TRACE("pFixedInfo %p, pOutBufLen %p\n", pFixedInfo, pOutBufLen);
-  if (!pOutBufLen)
-    return ERROR_INVALID_PARAMETER;
+    TRACE( "info %p, size %p\n", info, size );
+    if (!size) return ERROR_INVALID_PARAMETER;
 
-  get_dns_server_list(NULL, NULL, &serverListSize);
-  size = sizeof(FIXED_INFO) + serverListSize - sizeof(IP_ADDR_STRING);
-  if (!pFixedInfo || *pOutBufLen < size) {
-    *pOutBufLen = size;
-    return ERROR_BUFFER_OVERFLOW;
-  }
+    if (get_dns_server_list( NULL, NULL, NULL, &dns_size ) == ERROR_BUFFER_OVERFLOW)
+        needed += dns_size - sizeof(IP_ADDR_STRING);
+    if (!info || *size < needed)
+    {
+        *size = needed;
+        return ERROR_BUFFER_OVERFLOW;
+    }
 
-  memset(pFixedInfo, 0, size);
-  size = sizeof(pFixedInfo->HostName);
-  GetComputerNameExA(ComputerNameDnsHostname, pFixedInfo->HostName, &size);
-  size = sizeof(pFixedInfo->DomainName);
-  GetComputerNameExA(ComputerNameDnsDomain, pFixedInfo->DomainName, &size);
-  get_dns_server_list(&pFixedInfo->DnsServerList,
-   (PIP_ADDR_STRING)((BYTE *)pFixedInfo + sizeof(FIXED_INFO)),
-   &serverListSize);
-  /* Assume the first DNS server in the list is the "current" DNS server: */
-  pFixedInfo->CurrentDnsServer = &pFixedInfo->DnsServerList;
-  pFixedInfo->NodeType = HYBRID_NODETYPE;
-  regReturn = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-   "SYSTEM\\CurrentControlSet\\Services\\VxD\\MSTCP", 0, KEY_READ, &hKey);
-  if (regReturn != ERROR_SUCCESS)
-    regReturn = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-     "SYSTEM\\CurrentControlSet\\Services\\NetBT\\Parameters", 0, KEY_READ,
-     &hKey);
-  if (regReturn == ERROR_SUCCESS)
-  {
-    DWORD size = sizeof(pFixedInfo->ScopeId);
+    *size = needed;
+    memset( info, 0, needed );
+    needed = sizeof(info->HostName);
+    GetComputerNameExA( ComputerNameDnsHostname, info->HostName, &needed );
+    needed = sizeof(info->DomainName);
+    GetComputerNameExA( ComputerNameDnsDomain, info->DomainName, &needed );
+    get_dns_server_list( NULL, &info->DnsServerList, (IP_ADDR_STRING *)(info + 1), &dns_size );
+    info->CurrentDnsServer = &info->DnsServerList;
+    info->NodeType = HYBRID_NODETYPE;
+    err = RegOpenKeyExA( HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\VxD\\MSTCP",
+                         0, KEY_READ, &key );
+    if (err)
+        err = RegOpenKeyExA( HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\NetBT\\Parameters",
+                             0, KEY_READ, &key );
+    if (!err)
+    {
+        needed = sizeof(info->ScopeId);
+        RegQueryValueExA( key, "ScopeID", NULL, NULL, (BYTE *)info->ScopeId, &needed );
+        RegCloseKey( key );
+    }
 
-    RegQueryValueExA(hKey, "ScopeID", NULL, NULL, (LPBYTE)pFixedInfo->ScopeId, &size);
-    RegCloseKey(hKey);
-  }
+    if (!GetIpStatistics( &ip_stats ))
+        info->EnableRouting = (ip_stats.u.Forwarding == MIB_IP_FORWARDING);
 
-  /* FIXME: can check whether routing's enabled in /proc/sys/net/ipv4/ip_forward
-     I suppose could also check for a listener on port 53 to set EnableDns */
-  ret = NO_ERROR;
-  TRACE("returning %d\n", ret);
-  return ret;
+    return ERROR_SUCCESS;
 }
 
 
@@ -2427,35 +2753,31 @@ DWORD WINAPI GetNumberOfInterfaces( DWORD *count )
  *  Success: NO_ERROR
  *  Failure: error code from winerror.h
  */
-DWORD WINAPI GetPerAdapterInfo(ULONG IfIndex, PIP_PER_ADAPTER_INFO pPerAdapterInfo, PULONG pOutBufLen)
+DWORD WINAPI GetPerAdapterInfo( ULONG index, IP_PER_ADAPTER_INFO *info, ULONG *size )
 {
-  ULONG bytesNeeded = sizeof(IP_PER_ADAPTER_INFO), serverListSize = 0;
-  DWORD ret = NO_ERROR;
+    DWORD needed = sizeof(*info), dns_size;
+    NET_LUID luid;
 
-  TRACE("(IfIndex %d, pPerAdapterInfo %p, pOutBufLen %p)\n", IfIndex, pPerAdapterInfo, pOutBufLen);
+    TRACE( "(index %d, info %p, size %p)\n", index, info, size );
 
-  if (!pOutBufLen) return ERROR_INVALID_PARAMETER;
+    if (!size) return ERROR_INVALID_PARAMETER;
+    if (ConvertInterfaceIndexToLuid( index, &luid )) return ERROR_NO_DATA;
 
-  if (!isIfIndexLoopback(IfIndex)) {
-    get_dns_server_list(NULL, NULL, &serverListSize);
-    if (serverListSize > sizeof(IP_ADDR_STRING))
-      bytesNeeded += serverListSize - sizeof(IP_ADDR_STRING);
-  }
-  if (!pPerAdapterInfo || *pOutBufLen < bytesNeeded)
-  {
-    *pOutBufLen = bytesNeeded;
-    return ERROR_BUFFER_OVERFLOW;
-  }
+    if (get_dns_server_list( &luid, NULL, NULL, &dns_size ) == ERROR_BUFFER_OVERFLOW)
+        needed += dns_size - sizeof(IP_ADDR_STRING);
 
-  memset(pPerAdapterInfo, 0, bytesNeeded);
-  if (!isIfIndexLoopback(IfIndex)) {
-    ret = get_dns_server_list(&pPerAdapterInfo->DnsServerList,
-     (PIP_ADDR_STRING)((PBYTE)pPerAdapterInfo + sizeof(IP_PER_ADAPTER_INFO)),
-     &serverListSize);
-    /* Assume the first DNS server in the list is the "current" DNS server: */
-    pPerAdapterInfo->CurrentDnsServer = &pPerAdapterInfo->DnsServerList;
-  }
-  return ret;
+    if (!info || *size < needed)
+    {
+        *size = needed;
+        return ERROR_BUFFER_OVERFLOW;
+    }
+
+    memset( info, 0, needed );
+    get_dns_server_list( &luid, &info->DnsServerList, (IP_ADDR_STRING *)(info + 1), &dns_size );
+    info->CurrentDnsServer = &info->DnsServerList;
+
+    /* FIXME Autoconfig: get unicast addresses and compare to 169.254.x.x */
+    return ERROR_SUCCESS;
 }
 
 
@@ -2485,6 +2807,68 @@ BOOL WINAPI GetRTTAndHopCount(IPAddr DestIpAddress, PULONG HopCount, ULONG MaxHo
   return FALSE;
 }
 
+/******************************************************************
+ *    GetTcpStatistics (IPHLPAPI.@)
+ *
+ * Get the TCP statistics for the local computer.
+ *
+ * PARAMS
+ *  stats [Out] buffer for TCP statistics
+ *
+ * RETURNS
+ *  Success: NO_ERROR
+ *  Failure: error code from winerror.h
+ */
+DWORD WINAPI GetTcpStatistics( MIB_TCPSTATS *stats )
+{
+    return GetTcpStatisticsEx( stats, WS_AF_INET );
+}
+
+/******************************************************************
+ *    GetTcpStatisticsEx (IPHLPAPI.@)
+ *
+ * Get the IPv4 and IPv6 TCP statistics for the local computer.
+ *
+ * PARAMS
+ *  stats [Out] buffer for TCP statistics
+ *  family [In] specifies whether IPv4 or IPv6 statistics are returned
+ *
+ * RETURNS
+ *  Success: NO_ERROR
+ *  Failure: error code from winerror.h
+ */
+DWORD WINAPI GetTcpStatisticsEx( MIB_TCPSTATS *stats, DWORD family )
+{
+    struct nsi_tcp_stats_dynamic dyn;
+    struct nsi_tcp_stats_static stat;
+    USHORT key = (USHORT)family;
+    DWORD err;
+
+    if (!stats || !ip_module_id( family )) return ERROR_INVALID_PARAMETER;
+    memset( stats, 0, sizeof(*stats) );
+
+    err = NsiGetAllParameters( 1, &NPI_MS_TCP_MODULEID, NSI_TCP_STATS_TABLE, &key, sizeof(key), NULL, 0,
+                               &dyn, sizeof(dyn), &stat, sizeof(stat) );
+    if (err) return err;
+
+    stats->u.RtoAlgorithm = stat.rto_algo;
+    stats->dwRtoMin = stat.rto_min;
+    stats->dwRtoMax = stat.rto_max;
+    stats->dwMaxConn = stat.max_conns;
+    stats->dwActiveOpens = dyn.active_opens;
+    stats->dwPassiveOpens = dyn.passive_opens;
+    stats->dwAttemptFails = dyn.attempt_fails;
+    stats->dwEstabResets = dyn.est_rsts;
+    stats->dwCurrEstab = dyn.cur_est;
+    stats->dwInSegs = (DWORD)dyn.in_segs;
+    stats->dwOutSegs = (DWORD)dyn.out_segs;
+    stats->dwRetransSegs = dyn.retrans_segs;
+    stats->dwInErrs = dyn.in_errs;
+    stats->dwOutRsts = dyn.out_rsts;
+    stats->dwNumConns = dyn.num_conns;
+
+    return err;
+}
 
 /******************************************************************
  *    GetTcpTable (IPHLPAPI.@)
@@ -3554,28 +3938,6 @@ char *WINAPI IPHLP_if_indextoname( NET_IFINDEX index, char *name )
     err = ConvertInterfaceLuidToNameA( &luid, name, IF_MAX_STRING_SIZE );
     if (err) return NULL;
     return name;
-}
-
-/******************************************************************
- *    GetIpForwardTable2 (IPHLPAPI.@)
- */
-DWORD WINAPI GetIpForwardTable2(ADDRESS_FAMILY family, PMIB_IPFORWARD_TABLE2 *table)
-{
-    static int once;
-
-    if (!once++) FIXME("(%u %p): stub\n", family, table);
-    return ERROR_NOT_SUPPORTED;
-}
-
-/******************************************************************
- *    GetIpNetTable2 (IPHLPAPI.@)
- */
-DWORD WINAPI GetIpNetTable2(ADDRESS_FAMILY family, PMIB_IPNET_TABLE2 *table)
-{
-    static int once;
-
-    if (!once++) FIXME("(%u %p): stub\n", family, table);
-    return ERROR_NOT_SUPPORTED;
 }
 
 /******************************************************************

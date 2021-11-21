@@ -310,6 +310,21 @@ NTSTATUS WINAPI wow64_NtAssignProcessToJobObject( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtContinue
+ */
+NTSTATUS WINAPI wow64_NtContinue( UINT *args )
+{
+    void *context = get_ptr( &args );
+    BOOLEAN alertable = get_ulong( &args );
+
+    NtSetInformationThread( GetCurrentThread(), ThreadWow64Context,
+                            context, get_machine_context_size( current_machine ));
+    if (alertable) NtTestAlert();
+    return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
  *           wow64_NtCreateThread
  */
 NTSTATUS WINAPI wow64_NtCreateThread( UINT *args )
@@ -453,6 +468,28 @@ NTSTATUS WINAPI wow64_NtGetContextThread( UINT *args )
 
     return NtQueryInformationThread( handle, ThreadWow64Context, context,
                                      get_machine_context_size( current_machine ), NULL );
+}
+
+
+/**********************************************************************
+ *           wow64_NtGetNextThread
+ */
+NTSTATUS WINAPI wow64_NtGetNextThread( UINT *args )
+{
+    HANDLE process = get_handle( &args );
+    HANDLE thread = get_handle( &args );
+    ACCESS_MASK access = get_ulong( &args );
+    ULONG attributes = get_ulong( &args );
+    ULONG flags = get_ulong( &args );
+    ULONG *handle_ptr = get_ptr( &args );
+
+    HANDLE handle = 0;
+    NTSTATUS status;
+
+    *handle_ptr = 0;
+    status = NtGetNextThread( process, thread, access, attributes, flags, &handle );
+    put_handle( handle_ptr, handle );
+    return status;
 }
 
 

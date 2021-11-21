@@ -93,29 +93,29 @@ static INT16 MFDRV_FindObject( PHYSDEV dev, HGDIOBJ obj )
 
 
 /******************************************************************
- *         MFDRV_DeleteObject
+ *         METADC_DeleteObject
  */
-BOOL CDECL MFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
+void METADC_DeleteObject( HDC hdc, HGDIOBJ obj )
 {
+    METAFILEDRV_PDEVICE *metadc = get_metadc_ptr( hdc );
     METARECORD mr;
-    METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
     INT16 index;
-    BOOL ret = TRUE;
 
-    index = MFDRV_FindObject(dev, obj);
-    if( index < 0 )
-        return FALSE;
+    if ((index = MFDRV_FindObject( &metadc->dev, obj )) < 0) return;
+    if (obj == metadc->pen || obj == metadc->brush || obj == metadc->font)
+    {
+        WARN( "deleting selected object %p\n", obj );
+        return;
+    }
 
     mr.rdSize = sizeof mr / 2;
     mr.rdFunction = META_DELETEOBJECT;
     mr.rdParm[0] = index;
 
-    if(!MFDRV_WriteRecord( dev, &mr, mr.rdSize*2 ))
-        ret = FALSE;
+    MFDRV_WriteRecord( &metadc->dev, &mr, mr.rdSize*2 );
 
-    physDev->handles[index] = 0;
-    physDev->cur_handles--;
-    return ret;
+    metadc->handles[index] = 0;
+    metadc->cur_handles--;
 }
 
 
@@ -133,14 +133,6 @@ static BOOL MFDRV_SelectObject( PHYSDEV dev, INT16 index)
     return MFDRV_WriteRecord( dev, &mr, mr.rdSize*2 );
 }
 
-
-/***********************************************************************
- *           MFDRV_SelectBitmap
- */
-HBITMAP CDECL MFDRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap )
-{
-    return 0;
-}
 
 /******************************************************************
  *         MFDRV_CreateBrushIndirect
@@ -227,21 +219,26 @@ done:
 
 
 /***********************************************************************
- *           MFDRV_SelectBrush
+ *           METADC_SelectBrush
  */
-HBRUSH CDECL MFDRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern )
+static HBRUSH METADC_SelectBrush( HDC hdc, HBRUSH hbrush )
 {
+    METAFILEDRV_PDEVICE *metadc = get_metadc_ptr( hdc );
     INT16 index;
+    HBRUSH ret;
 
-    index = MFDRV_FindObject(dev, hbrush);
+    index = MFDRV_FindObject( &metadc->dev, hbrush );
     if( index < 0 )
     {
-        index = MFDRV_CreateBrushIndirect( dev, hbrush );
+        index = MFDRV_CreateBrushIndirect( &metadc->dev, hbrush );
         if( index < 0 )
             return 0;
-        GDI_hdc_using_object(hbrush, dev->hdc);
+        GDI_hdc_using_object( hbrush, hdc, METADC_DeleteObject );
     }
-    return MFDRV_SelectObject( dev, index ) ? hbrush : 0;
+    if (!MFDRV_SelectObject( &metadc->dev, index )) return 0;
+    ret = metadc->brush;
+    metadc->brush = hbrush;
+    return ret;
 }
 
 /******************************************************************
@@ -283,25 +280,29 @@ static UINT16 MFDRV_CreateFontIndirect(PHYSDEV dev, HFONT hFont, LOGFONTW *logfo
 
 
 /***********************************************************************
- *           MFDRV_SelectFont
+ *           METADC_SelectFont
  */
-HFONT CDECL MFDRV_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
+static HFONT METADC_SelectFont( HDC hdc, HFONT hfont )
 {
+    METAFILEDRV_PDEVICE *metadc = get_metadc_ptr( hdc );
     LOGFONTW font;
     INT16 index;
+    HFONT ret;
 
-    *aa_flags = GGO_BITMAP;  /* no point in anti-aliasing on metafiles */
-    index = MFDRV_FindObject(dev, hfont);
+    index = MFDRV_FindObject( &metadc->dev, hfont );
     if( index < 0 )
     {
         if (!GetObjectW( hfont, sizeof(font), &font ))
             return 0;
-        index = MFDRV_CreateFontIndirect(dev, hfont, &font);
+        index = MFDRV_CreateFontIndirect( &metadc->dev, hfont, &font );
         if( index < 0 )
             return 0;
-        GDI_hdc_using_object(hfont, dev->hdc);
+        GDI_hdc_using_object( hfont, hdc, METADC_DeleteObject );
     }
-    return MFDRV_SelectObject( dev, index ) ? hfont : 0;
+    if (!MFDRV_SelectObject( &metadc->dev, index )) return 0;
+    ret = metadc->font;
+    metadc->font = hfont;
+    return ret;
 }
 
 /******************************************************************
@@ -322,14 +323,16 @@ static UINT16 MFDRV_CreatePenIndirect(PHYSDEV dev, HPEN hPen, LOGPEN16 *logpen)
 
 
 /***********************************************************************
- *           MFDRV_SelectPen
+ *           METADC_SelectPen
  */
-HPEN CDECL MFDRV_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *pattern )
+static HPEN METADC_SelectPen( HDC hdc, HPEN hpen )
 {
+    METAFILEDRV_PDEVICE *metadc = get_metadc_ptr( hdc );
     LOGPEN16 logpen;
     INT16 index;
+    HPEN ret;
 
-    index = MFDRV_FindObject(dev, hpen);
+    index = MFDRV_FindObject( &metadc->dev, hpen );
     if( index < 0 )
     {
         /* must be an extended pen */
@@ -361,12 +364,16 @@ HPEN CDECL MFDRV_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *
             HeapFree( GetProcessHeap(), 0, elp );
         }
 
-        index = MFDRV_CreatePenIndirect( dev, hpen, &logpen );
+        index = MFDRV_CreatePenIndirect( &metadc->dev, hpen, &logpen );
         if( index < 0 )
             return 0;
-        GDI_hdc_using_object(hpen, dev->hdc);
+        GDI_hdc_using_object( hpen, hdc, METADC_DeleteObject );
     }
-    return MFDRV_SelectObject( dev, index ) ? hpen : 0;
+
+    if (!MFDRV_SelectObject( &metadc->dev, index )) return 0;
+    ret = metadc->pen;
+    metadc->pen = hpen;
+    return ret;
 }
 
 
@@ -404,18 +411,20 @@ static BOOL MFDRV_CreatePalette(PHYSDEV dev, HPALETTE hPalette, LOGPALETTE* logP
 
 
 /***********************************************************************
- *           MFDRV_SelectPalette
+ *           METADC_SelectPalette
  */
-HPALETTE CDECL MFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPalette, BOOL bForceBackground )
+BOOL METADC_SelectPalette( HDC hdc, HPALETTE palette )
 {
 #define PALVERSION 0x0300
 
+    METAFILEDRV_PDEVICE *metadc;
     PLOGPALETTE logPalette;
     WORD        wNumEntries = 0;
-    BOOL        creationSucceed;
+    BOOL        ret;
     int         sizeofPalette;
 
-    GetObjectA(hPalette, sizeof(WORD), &wNumEntries);
+    if (!(metadc = get_metadc_ptr( hdc ))) return FALSE;
+    GetObjectA( palette, sizeof(WORD), &wNumEntries );
 
     if (wNumEntries == 0) return 0;
 
@@ -427,35 +436,36 @@ HPALETTE CDECL MFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPalette, BOOL bForceB
     logPalette->palVersion = PALVERSION;
     logPalette->palNumEntries = wNumEntries;
 
-    GetPaletteEntries(hPalette, 0, wNumEntries, logPalette->palPalEntry);
+    GetPaletteEntries( palette, 0, wNumEntries, logPalette->palPalEntry );
 
-    creationSucceed = MFDRV_CreatePalette( dev, hPalette, logPalette, sizeofPalette );
+    ret = MFDRV_CreatePalette( &metadc->dev, palette, logPalette, sizeofPalette );
 
     HeapFree( GetProcessHeap(), 0, logPalette );
-
-    if (creationSucceed)
-        return hPalette;
-
-    return 0;
+    return ret;
 }
 
 /***********************************************************************
- *           MFDRV_RealizePalette
+ *           METADC_RealizePalette
  */
-UINT CDECL MFDRV_RealizePalette(PHYSDEV dev, HPALETTE hPalette, BOOL dummy)
+BOOL METADC_RealizePalette( HDC hdc )
 {
-    char buffer[sizeof(METARECORD) - sizeof(WORD)];
-    METARECORD *mr = (METARECORD *)&buffer;
+    return metadc_param0( hdc, META_REALIZEPALETTE );
+}
 
-    mr->rdSize = (sizeof(METARECORD) - sizeof(WORD)) / sizeof(WORD);
-    mr->rdFunction = META_REALIZEPALETTE;
 
-    if (!(MFDRV_WriteRecord( dev, mr, mr->rdSize * sizeof(WORD)))) return 0;
-
-    /* The return value is suppose to be the number of entries
-       in the logical palette mapped to the system palette or 0
-       if the function failed. Since it's not trivial here to
-       get that kind of information and since it's of little
-       use in the case of metafiles, we'll always return 1. */
-    return 1;
+HGDIOBJ METADC_SelectObject( HDC hdc, HGDIOBJ obj )
+{
+    switch (gdi_handle_type( obj ))
+    {
+    case NTGDI_OBJ_BRUSH:
+        return METADC_SelectBrush( hdc, obj );
+    case NTGDI_OBJ_FONT:
+        return METADC_SelectFont( hdc, obj );
+    case NTGDI_OBJ_PEN:
+    case NTGDI_OBJ_EXTPEN:
+        return METADC_SelectPen( hdc, obj );
+    default:
+        SetLastError( ERROR_INVALID_FUNCTION );
+        return 0;
+    }
 }

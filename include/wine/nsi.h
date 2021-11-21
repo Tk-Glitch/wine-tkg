@@ -97,7 +97,72 @@ struct nsi_ndis_ifinfo_static
 };
 
 /* Undocumented NSI IP tables */
+#define NSI_IP_COMPARTMENT_TABLE           2
+#define NSI_IP_ICMPSTATS_TABLE             3
+#define NSI_IP_IPSTATS_TABLE               6
 #define NSI_IP_UNICAST_TABLE              10
+#define NSI_IP_NEIGHBOUR_TABLE            11
+#define NSI_IP_FORWARD_TABLE              16
+
+struct nsi_ip_cmpt_rw
+{
+    DWORD not_forwarding;
+    DWORD unk;
+    DWORD default_ttl;
+    DWORD unk2;
+};
+
+struct nsi_ip_cmpt_dynamic
+{
+    DWORD num_ifs;
+    DWORD num_routes;
+    DWORD unk;
+    DWORD num_addrs;
+};
+
+struct nsi_ip_icmpstats_dynamic
+{
+    DWORD in_msgs;
+    DWORD in_errors;
+    DWORD in_type_counts[256];
+    DWORD out_msgs;
+    DWORD out_errors;
+    DWORD out_type_counts[256];
+};
+
+struct nsi_ip_ipstats_dynamic
+{
+    DWORD unk[4];
+    ULONGLONG in_recv;
+    ULONGLONG in_octets;
+    ULONGLONG fwd_dgrams;
+    ULONGLONG in_delivers;
+    ULONGLONG out_reqs;
+    ULONGLONG unk2;
+    ULONGLONG unk3;
+    ULONGLONG out_octets;
+    ULONGLONG unk4[6];
+    ULONGLONG in_hdr_errs;
+    DWORD in_addr_errs;
+    DWORD in_unk_protos;
+    DWORD unk5;
+    DWORD reasm_reqds;
+    DWORD reasm_oks;
+    DWORD reasm_fails;
+    DWORD in_discards;
+    DWORD out_no_routes;
+    DWORD out_discards;
+    DWORD routing_discards;
+    DWORD frag_oks;
+    DWORD frag_fails;
+    DWORD frag_creates;
+    DWORD unk6[7];
+};
+
+struct nsi_ip_ipstats_static
+{
+    DWORD reasm_timeout;
+};
 
 struct nsi_ipv4_unicast_key
 {
@@ -131,6 +196,129 @@ struct nsi_ip_unicast_dynamic
 struct nsi_ip_unicast_static
 {
     ULONG64 creation_time;
+};
+
+struct nsi_ipv4_neighbour_key
+{
+    NET_LUID luid;
+    NET_LUID luid2;
+    IN_ADDR addr;
+    DWORD pad;
+};
+
+struct nsi_ipv6_neighbour_key
+{
+    NET_LUID luid;
+    NET_LUID luid2;
+    IN6_ADDR addr;
+};
+
+struct nsi_ip_neighbour_rw
+{
+    BYTE phys_addr[IF_MAX_PHYS_ADDRESS_LENGTH];
+};
+
+struct nsi_ip_neighbour_dynamic
+{
+    DWORD state;
+    DWORD time;
+    struct
+    {
+        USHORT is_router : 1;
+        USHORT is_unreachable : 1;
+    } flags;
+    USHORT phys_addr_len;
+    DWORD unk;
+};
+
+struct nsi_ipv4_forward_key
+{
+    DWORD unk;
+    IN_ADDR prefix;
+    BYTE prefix_len;
+    BYTE unk2[3];
+    DWORD unk3[3];
+    NET_LUID luid;
+    NET_LUID luid2;
+    IN_ADDR next_hop;
+    DWORD pad;
+};
+
+struct nsi_ipv6_forward_key
+{
+    DWORD unk;
+    IN6_ADDR prefix;
+    BYTE prefix_len;
+    BYTE unk2[3];
+    DWORD unk3[3];
+    DWORD pad;
+    NET_LUID luid;
+    NET_LUID luid2;
+    IN6_ADDR next_hop;
+};
+
+struct nsi_ip_forward_rw
+{
+    DWORD site_prefix_len;
+    DWORD valid_lifetime;
+    DWORD preferred_lifetime;
+    DWORD metric;
+    DWORD protocol;
+    BYTE loopback;
+    BYTE autoconf;
+    BYTE publish;
+    BYTE immortal;
+    BYTE unk[4];
+    DWORD unk2;
+};
+
+struct nsi_ipv4_forward_dynamic
+{
+    DWORD age;
+    DWORD unk[3];
+    IN_ADDR addr2; /* often a repeat of prefix */
+};
+
+struct nsi_ipv6_forward_dynamic
+{
+    DWORD age;
+    DWORD unk[3];
+    IN6_ADDR addr2; /* often a repeat of prefix */
+};
+
+struct nsi_ip_forward_static
+{
+    DWORD origin;
+    DWORD if_index;
+};
+
+/* Undocumented NSI TCP tables */
+#define NSI_TCP_STATS_TABLE                0
+
+struct nsi_tcp_stats_dynamic
+{
+    DWORD active_opens;
+    DWORD passive_opens;
+    DWORD attempt_fails;
+    DWORD est_rsts;
+    DWORD cur_est;
+    DWORD pad; /* ? */
+    ULONGLONG in_segs;
+    ULONGLONG out_segs;
+    DWORD retrans_segs;
+    DWORD out_rsts;
+    DWORD in_errs;
+    DWORD num_conns;
+    DWORD unk[12];
+};
+
+struct nsi_tcp_stats_static
+{
+    DWORD rto_algo;
+    DWORD rto_min;
+    DWORD rto_max;
+    DWORD max_conns;
+    DWORD unk;
 };
 
 /* Wine specific ioctl interface */

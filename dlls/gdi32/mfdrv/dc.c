@@ -70,84 +70,84 @@ BOOL METADC_SetStretchBltMode( HDC hdc, INT mode )
     return metadc_param1( hdc, META_SETSTRETCHBLTMODE, mode );
 }
 
-INT CDECL MFDRV_IntersectClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom )
+BOOL METADC_IntersectClipRect( HDC hdc, INT left, INT top, INT right, INT bottom )
 {
-    return MFDRV_MetaParam4( dev, META_INTERSECTCLIPRECT, left, top, right, bottom );
+    return metadc_param4( hdc, META_INTERSECTCLIPRECT, left, top, right, bottom );
 }
 
-INT CDECL MFDRV_ExcludeClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom )
+BOOL METADC_ExcludeClipRect( HDC hdc, INT left, INT top, INT right, INT bottom )
 {
-    return MFDRV_MetaParam4( dev, META_EXCLUDECLIPRECT, left, top, right, bottom );
+    return metadc_param4( hdc, META_EXCLUDECLIPRECT, left, top, right, bottom );
 }
 
-INT CDECL MFDRV_OffsetClipRgn( PHYSDEV dev, INT x, INT y )
+BOOL METADC_OffsetClipRgn( HDC hdc, INT x, INT y )
 {
-    return MFDRV_MetaParam2( dev, META_OFFSETCLIPRGN, x, y );
+    return metadc_param2( hdc, META_OFFSETCLIPRGN, x, y );
 }
 
-DWORD CDECL MFDRV_SetLayout( PHYSDEV dev, DWORD layout )
+BOOL METADC_SetLayout( HDC hdc, DWORD layout )
 {
-    return MFDRV_MetaParam2( dev, META_SETLAYOUT, HIWORD(layout), LOWORD(layout) );
+    return metadc_param2( hdc, META_SETLAYOUT, HIWORD(layout), LOWORD(layout) );
 }
 
-INT CDECL MFDRV_SetMapMode( PHYSDEV dev, INT mode )
+BOOL METADC_SetMapMode( HDC hdc, INT mode )
 {
-    return MFDRV_MetaParam1( dev, META_SETMAPMODE, mode );
+    return metadc_param1( hdc, META_SETMAPMODE, mode );
 }
 
-BOOL CDECL MFDRV_SetViewportExtEx( PHYSDEV dev, INT x, INT y, SIZE *size )
+BOOL METADC_SetViewportExtEx( HDC hdc, INT x, INT y )
 {
-    return MFDRV_MetaParam2( dev, META_SETVIEWPORTEXT, x, y );
+    return metadc_param2( hdc, META_SETVIEWPORTEXT, x, y );
 }
 
-BOOL CDECL MFDRV_SetViewportOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt )
+BOOL METADC_SetViewportOrgEx( HDC hdc, INT x, INT y )
 {
-    return MFDRV_MetaParam2( dev, META_SETVIEWPORTORG, x, y );
+    return metadc_param2( hdc, META_SETVIEWPORTORG, x, y );
 }
 
-BOOL CDECL MFDRV_SetWindowExtEx( PHYSDEV dev, INT x, INT y, SIZE *size )
+BOOL METADC_SetWindowExtEx( HDC hdc, INT x, INT y )
 {
-    return MFDRV_MetaParam2( dev, META_SETWINDOWEXT, x, y );
+    return metadc_param2( hdc, META_SETWINDOWEXT, x, y );
 }
 
-BOOL CDECL MFDRV_SetWindowOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt )
+BOOL METADC_SetWindowOrgEx( HDC hdc, INT x, INT y )
 {
-    return MFDRV_MetaParam2( dev, META_SETWINDOWORG, x, y );
+    return metadc_param2( hdc, META_SETWINDOWORG, x, y );
 }
 
-BOOL CDECL MFDRV_OffsetViewportOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt )
+BOOL METADC_OffsetViewportOrgEx( HDC hdc, INT x, INT y )
 {
-    return MFDRV_MetaParam2( dev, META_OFFSETVIEWPORTORG, x, y );
+    return metadc_param2( hdc, META_OFFSETVIEWPORTORG, x, y );
 }
 
-BOOL CDECL MFDRV_OffsetWindowOrgEx( PHYSDEV dev, INT x, INT y, POINT *pt )
+BOOL METADC_OffsetWindowOrgEx( HDC hdc, INT x, INT y )
 {
-    return MFDRV_MetaParam2( dev, META_OFFSETWINDOWORG, x, y );
+    return metadc_param2( hdc, META_OFFSETWINDOWORG, x, y );
 }
 
-BOOL CDECL MFDRV_ScaleViewportExtEx( PHYSDEV dev, INT xNum, INT xDenom, INT yNum, INT yDenom, SIZE *size )
+BOOL METADC_ScaleViewportExtEx( HDC hdc, INT x_num, INT x_denom, INT y_num, INT y_denom )
 {
-    return MFDRV_MetaParam4( dev, META_SCALEVIEWPORTEXT, xNum, xDenom, yNum, yDenom );
+    return metadc_param4( hdc, META_SCALEVIEWPORTEXT, x_num, x_denom, y_num, y_denom );
 }
 
-BOOL CDECL MFDRV_ScaleWindowExtEx( PHYSDEV dev, INT xNum, INT xDenom, INT yNum, INT yDenom, SIZE *size )
+BOOL METADC_ScaleWindowExtEx( HDC hdc, INT x_num, INT x_denom, INT y_num, INT y_denom )
 {
-    return MFDRV_MetaParam4( dev, META_SCALEWINDOWEXT, xNum, xDenom, yNum, yDenom );
+    return metadc_param4( hdc, META_SCALEWINDOWEXT, x_num, x_denom, y_num, y_denom );
 }
 
-BOOL CDECL MFDRV_SetTextJustification( PHYSDEV dev, INT extra, INT breaks )
+BOOL METADC_SetTextJustification( HDC hdc, INT extra, INT breaks )
 {
-    return MFDRV_MetaParam2( dev, META_SETTEXTJUSTIFICATION, extra, breaks );
+    return metadc_param2( hdc, META_SETTEXTJUSTIFICATION, extra, breaks );
 }
 
-INT CDECL MFDRV_SetTextCharacterExtra( PHYSDEV dev, INT extra )
+BOOL METADC_SetTextCharacterExtra( HDC hdc, INT extra )
 {
-    return MFDRV_MetaParam1( dev, META_SETTEXTCHAREXTRA, extra ) ? extra : 0x80000000;
+    return metadc_param1( hdc, META_SETTEXTCHAREXTRA, extra );
 }
 
-DWORD CDECL MFDRV_SetMapperFlags( PHYSDEV dev, DWORD flags )
+BOOL METADC_SetMapperFlags( HDC hdc, DWORD flags )
 {
-    return MFDRV_MetaParam2( dev, META_SETMAPPERFLAGS, HIWORD(flags), LOWORD(flags) ) ? flags : GDI_ERROR;
+    return metadc_param2( hdc, META_SETMAPPERFLAGS, HIWORD(flags), LOWORD(flags) );
 }
 
 BOOL CDECL MFDRV_AbortPath( PHYSDEV dev )

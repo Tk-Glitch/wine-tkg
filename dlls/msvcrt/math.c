@@ -35,6 +35,7 @@
  * ====================================================
  */
 
+#include <assert.h>
 #include <complex.h>
 #include <stdio.h>
 #include <fenv.h>
@@ -66,8 +67,6 @@ static MSVCRT_matherr_func MSVCRT_default_matherr_func = NULL;
 BOOL sse2_supported;
 static BOOL sse2_enabled;
 
-static const struct unix_funcs *unix_funcs;
-
 void msvcrt_init_math( void *module )
 {
     sse2_supported = IsProcessorFeaturePresent( PF_XMMI64_INSTRUCTIONS_AVAILABLE );
@@ -76,7 +75,6 @@ void msvcrt_init_math( void *module )
 #else
     sse2_enabled = sse2_supported;
 #endif
-    __wine_init_unix_lib( module, DLL_PROCESS_ATTACH, NULL, &unix_funcs );
 }
 
 /* Copied from musl: src/internal/libm.h */
@@ -5138,49 +5136,394 @@ double CDECL modf( double x, double *iptr )
     return x - u.f;
 }
 
-/**********************************************************************
- *		_statusfp2 (MSVCRT.@)
- *
- * Not exported by native msvcrt, added in msvcr80.
- */
 #if defined(__i386__) || defined(__x86_64__)
-void CDECL _statusfp2( unsigned int *x86_sw, unsigned int *sse2_sw )
+static BOOL _setfp_sse( unsigned int *cw, unsigned int cw_mask,
+        unsigned int *sw, unsigned int sw_mask )
 {
 #if defined(__GNUC__) || defined(__clang__)
+    unsigned long old_fpword, fpword;
     unsigned int flags;
-    unsigned long fpword;
 
-    if (x86_sw)
+    __asm__ __volatile__( "stmxcsr %0" : "=m" (fpword) );
+    old_fpword = fpword;
+
+    cw_mask &= _MCW_EM | _MCW_RC | _MCW_DN;
+    sw_mask &= _MCW_EM;
+
+    if (sw)
     {
-        __asm__ __volatile__( "fstsw %0" : "=m" (fpword) );
         flags = 0;
-        if (fpword & 0x1)  flags |= _SW_INVALID;
-        if (fpword & 0x2)  flags |= _SW_DENORMAL;
-        if (fpword & 0x4)  flags |= _SW_ZERODIVIDE;
-        if (fpword & 0x8)  flags |= _SW_OVERFLOW;
+        if (fpword & 0x1) flags |= _SW_INVALID;
+        if (fpword & 0x2) flags |= _SW_DENORMAL;
+        if (fpword & 0x4) flags |= _SW_ZERODIVIDE;
+        if (fpword & 0x8) flags |= _SW_OVERFLOW;
         if (fpword & 0x10) flags |= _SW_UNDERFLOW;
         if (fpword & 0x20) flags |= _SW_INEXACT;
-        *x86_sw = flags;
+
+        *sw = (flags & ~sw_mask) | (*sw & sw_mask);
+        TRACE("sse2 update sw %08x to %08x\n", flags, *sw);
+        fpword &= ~0x3f;
+        if (*sw & _SW_INVALID) fpword |= 0x1;
+        if (*sw & _SW_DENORMAL) fpword |= 0x2;
+        if (*sw & _SW_ZERODIVIDE) fpword |= 0x4;
+        if (*sw & _SW_OVERFLOW) fpword |= 0x8;
+        if (*sw & _SW_UNDERFLOW) fpword |= 0x10;
+        if (*sw & _SW_INEXACT) fpword |= 0x20;
+        *sw = flags;
     }
 
-    if (!sse2_sw) return;
-
-    if (sse2_supported)
+    if (cw)
     {
-        __asm__ __volatile__( "stmxcsr %0" : "=m" (fpword) );
         flags = 0;
-        if (fpword & 0x1)  flags |= _SW_INVALID;
-        if (fpword & 0x2)  flags |= _SW_DENORMAL;
-        if (fpword & 0x4)  flags |= _SW_ZERODIVIDE;
-        if (fpword & 0x8)  flags |= _SW_OVERFLOW;
-        if (fpword & 0x10) flags |= _SW_UNDERFLOW;
-        if (fpword & 0x20) flags |= _SW_INEXACT;
-        *sse2_sw = flags;
+        if (fpword & 0x80) flags |= _EM_INVALID;
+        if (fpword & 0x100) flags |= _EM_DENORMAL;
+        if (fpword & 0x200) flags |= _EM_ZERODIVIDE;
+        if (fpword & 0x400) flags |= _EM_OVERFLOW;
+        if (fpword & 0x800) flags |= _EM_UNDERFLOW;
+        if (fpword & 0x1000) flags |= _EM_INEXACT;
+        switch (fpword & 0x6000)
+        {
+        case 0x6000: flags |= _RC_UP|_RC_DOWN; break;
+        case 0x4000: flags |= _RC_UP; break;
+        case 0x2000: flags |= _RC_DOWN; break;
+        }
+        switch (fpword & 0x8040)
+        {
+        case 0x0040: flags |= _DN_FLUSH_OPERANDS_SAVE_RESULTS; break;
+        case 0x8000: flags |= _DN_SAVE_OPERANDS_FLUSH_RESULTS; break;
+        case 0x8040: flags |= _DN_FLUSH; break;
+        }
+
+        *cw = (flags & ~cw_mask) | (*cw & cw_mask);
+        TRACE("sse2 update cw %08x to %08x\n", flags, *cw);
+        fpword &= ~0xffc0;
+        if (*cw & _EM_INVALID) fpword |= 0x80;
+        if (*cw & _EM_DENORMAL) fpword |= 0x100;
+        if (*cw & _EM_ZERODIVIDE) fpword |= 0x200;
+        if (*cw & _EM_OVERFLOW) fpword |= 0x400;
+        if (*cw & _EM_UNDERFLOW) fpword |= 0x800;
+        if (*cw & _EM_INEXACT) fpword |= 0x1000;
+        switch (*cw & _MCW_RC)
+        {
+        case _RC_UP|_RC_DOWN: fpword |= 0x6000; break;
+        case _RC_UP: fpword |= 0x4000; break;
+        case _RC_DOWN: fpword |= 0x2000; break;
+        }
+        switch (*cw & _MCW_DN)
+        {
+        case _DN_FLUSH_OPERANDS_SAVE_RESULTS: fpword |= 0x0040; break;
+        case _DN_SAVE_OPERANDS_FLUSH_RESULTS: fpword |= 0x8000; break;
+        case _DN_FLUSH: fpword |= 0x8040; break;
+        }
+
+        /* clear status word if anything changes */
+        if (fpword != old_fpword && !sw)
+        {
+            TRACE("sse2 clear status word\n");
+            fpword &= ~0x3f;
+        }
     }
-    else *sse2_sw = 0;
+
+    if (fpword != old_fpword)
+        __asm__ __volatile__( "ldmxcsr %0" : : "m" (fpword) );
+    return TRUE;
 #else
-    FIXME( "not implemented\n" );
+    FIXME("not implemented\n");
+    if (cw) *cw = 0;
+    if (sw) *sw = 0;
+    return FALSE;
 #endif
+}
+#endif
+
+static BOOL _setfp( unsigned int *cw, unsigned int cw_mask,
+        unsigned int *sw, unsigned int sw_mask )
+{
+#if (defined(__GNUC__) || defined(__clang__)) && defined(__i386__)
+    unsigned long oldcw = 0, newcw = 0;
+    unsigned long oldsw = 0, newsw = 0;
+    unsigned int flags;
+
+    cw_mask &= _MCW_EM | _MCW_IC | _MCW_RC | _MCW_PC;
+    sw_mask &= _MCW_EM;
+
+    if (sw)
+    {
+        __asm__ __volatile__( "fstsw %0" : "=m" (newsw) );
+        oldsw = newsw;
+
+        flags = 0;
+        if (newsw & 0x1) flags |= _SW_INVALID;
+        if (newsw & 0x2) flags |= _SW_DENORMAL;
+        if (newsw & 0x4) flags |= _SW_ZERODIVIDE;
+        if (newsw & 0x8) flags |= _SW_OVERFLOW;
+        if (newsw & 0x10) flags |= _SW_UNDERFLOW;
+        if (newsw & 0x20) flags |= _SW_INEXACT;
+
+        *sw = (flags & ~sw_mask) | (*sw & sw_mask);
+        TRACE("x86 update sw %08x to %08x\n", flags, *sw);
+        newsw &= ~0x3f;
+        if (*sw & _SW_INVALID) newsw |= 0x1;
+        if (*sw & _SW_DENORMAL) newsw |= 0x2;
+        if (*sw & _SW_ZERODIVIDE) newsw |= 0x4;
+        if (*sw & _SW_OVERFLOW) newsw |= 0x8;
+        if (*sw & _SW_UNDERFLOW) newsw |= 0x10;
+        if (*sw & _SW_INEXACT) newsw |= 0x20;
+        *sw = flags;
+    }
+
+    if (cw)
+    {
+        __asm__ __volatile__( "fstcw %0" : "=m" (newcw) );
+        oldcw = newcw;
+
+        flags = 0;
+        if (newcw & 0x1) flags |= _EM_INVALID;
+        if (newcw & 0x2) flags |= _EM_DENORMAL;
+        if (newcw & 0x4) flags |= _EM_ZERODIVIDE;
+        if (newcw & 0x8) flags |= _EM_OVERFLOW;
+        if (newcw & 0x10) flags |= _EM_UNDERFLOW;
+        if (newcw & 0x20) flags |= _EM_INEXACT;
+        switch (newcw & 0xc00)
+        {
+        case 0xc00: flags |= _RC_UP|_RC_DOWN; break;
+        case 0x800: flags |= _RC_UP; break;
+        case 0x400: flags |= _RC_DOWN; break;
+        }
+        switch (newcw & 0x300)
+        {
+        case 0x0: flags |= _PC_24; break;
+        case 0x200: flags |= _PC_53; break;
+        case 0x300: flags |= _PC_64; break;
+        }
+        if (newcw & 0x1000) flags |= _IC_AFFINE;
+
+        *cw = (flags & ~cw_mask) | (*cw & cw_mask);
+        TRACE("x86 update cw %08x to %08x\n", flags, *cw);
+        newcw &= ~0x1e3f;
+        if (*cw & _EM_INVALID) newcw |= 0x1;
+        if (*cw & _EM_DENORMAL) newcw |= 0x2;
+        if (*cw & _EM_ZERODIVIDE) newcw |= 0x4;
+        if (*cw & _EM_OVERFLOW) newcw |= 0x8;
+        if (*cw & _EM_UNDERFLOW) newcw |= 0x10;
+        if (*cw & _EM_INEXACT) newcw |= 0x20;
+        switch (*cw & _MCW_RC)
+        {
+        case _RC_UP|_RC_DOWN: newcw |= 0xc00; break;
+        case _RC_UP: newcw |= 0x800; break;
+        case _RC_DOWN: newcw |= 0x400; break;
+        }
+        switch (*cw & _MCW_PC)
+        {
+        case _PC_64: newcw |= 0x300; break;
+        case _PC_53: newcw |= 0x200; break;
+        case _PC_24: newcw |= 0x0; break;
+        }
+        if (*cw & _IC_AFFINE) newcw |= 0x1000;
+    }
+
+    if (oldsw != newsw && (newsw & 0x3f))
+    {
+        struct {
+            WORD control_word;
+            WORD unused1;
+            WORD status_word;
+            WORD unused2;
+            WORD tag_word;
+            WORD unused3;
+            DWORD instruction_pointer;
+            WORD code_segment;
+            WORD unused4;
+            DWORD operand_addr;
+            WORD data_segment;
+            WORD unused5;
+        } fenv;
+
+        assert(cw);
+
+        __asm__ __volatile__( "fnstenv %0" : "=m" (fenv) );
+        fenv.control_word = newcw;
+        fenv.status_word = newsw;
+        __asm__ __volatile__( "fldenv %0" : : "m" (fenv) : "st", "st(1)",
+                "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)" );
+        return TRUE;
+    }
+
+    if (oldsw != newsw)
+        __asm__ __volatile__( "fnclex" );
+    if (oldcw != newcw)
+        __asm__ __volatile__( "fldcw %0" : : "m" (newcw) );
+    return TRUE;
+#elif defined(__x86_64__)
+    return _setfp_sse(cw, cw_mask, sw, sw_mask);
+#elif defined(__aarch64__)
+    ULONG_PTR old_fpsr = 0, fpsr = 0, old_fpcr = 0, fpcr = 0;
+    unsigned int flags;
+
+    cw_mask &= _MCW_EM | _MCW_RC;
+    sw_mask &= _MCW_EM;
+
+    if (sw)
+    {
+        __asm__ __volatile__( "mrs %0, fpsr" : "=r" (fpsr) );
+        old_fpsr = fpsr;
+
+        flags = 0;
+        if (fpsr & 0x1) flags |= _SW_INVALID;
+        if (fpsr & 0x2) flags |= _SW_ZERODIVIDE;
+        if (fpsr & 0x4) flags |= _SW_OVERFLOW;
+        if (fpsr & 0x8) flags |= _SW_UNDERFLOW;
+        if (fpsr & 0x10) flags |= _SW_INEXACT;
+        if (fpsr & 0x80) flags |= _SW_DENORMAL;
+
+        *sw = (flags & ~sw_mask) | (*sw & sw_mask);
+        TRACE("aarch64 update sw %08x to %08x\n", flags, *sw);
+        fpsr &= ~0x9f;
+        if (*sw & _SW_INVALID) fpsr |= 0x1;
+        if (*sw & _SW_ZERODIVIDE) fpsr |= 0x2;
+        if (*sw & _SW_OVERFLOW) fpsr |= 0x4;
+        if (*sw & _SW_UNDERFLOW) fpsr |= 0x8;
+        if (*sw & _SW_INEXACT) fpsr |= 0x10;
+        if (*sw & _SW_DENORMAL) fpsr |= 0x80;
+        *sw = flags;
+    }
+
+    if (cw)
+    {
+        __asm__ __volatile__( "mrs %0, fpcr" : "=r" (fpcr) );
+        old_fpcr = fpcr;
+
+        flags = 0;
+        if (!(fpcr & 0x100)) flags |= _EM_INVALID;
+        if (!(fpcr & 0x200)) flags |= _EM_ZERODIVIDE;
+        if (!(fpcr & 0x400)) flags |= _EM_OVERFLOW;
+        if (!(fpcr & 0x800)) flags |= _EM_UNDERFLOW;
+        if (!(fpcr & 0x1000)) flags |= _EM_INEXACT;
+        if (!(fpcr & 0x8000)) flags |= _EM_DENORMAL;
+        switch (fpcr & 0xc00000)
+        {
+        case 0x400000: flags |= _RC_UP; break;
+        case 0x800000: flags |= _RC_DOWN; break;
+        case 0xc00000: flags |= _RC_CHOP; break;
+        }
+
+        *cw = (flags & ~cw_mask) | (*cw & cw_mask);
+        TRACE("aarch64 update cw %08x to %08x\n", flags, *cw);
+        fpcr &= ~0xc09f00ul;
+        if (!(*cw & _EM_INVALID)) fpcr |= 0x100;
+        if (!(*cw & _EM_ZERODIVIDE)) fpcr |= 0x200;
+        if (!(*cw & _EM_OVERFLOW)) fpcr |= 0x400;
+        if (!(*cw & _EM_UNDERFLOW)) fpcr |= 0x800;
+        if (!(*cw & _EM_INEXACT)) fpcr |= 0x1000;
+        if (!(*cw & _EM_DENORMAL)) fpcr |= 0x8000;
+        switch (*cw & _MCW_RC)
+        {
+        case _RC_CHOP: fpcr |= 0xc00000; break;
+        case _RC_UP: fpcr |= 0x400000; break;
+        case _RC_DOWN: fpcr |= 0x800000; break;
+        }
+    }
+
+    /* mask exceptions if needed */
+    if (old_fpcr != fpcr && ~(old_fpcr >> 8) & fpsr & 0x9f != fpsr & 0x9f)
+    {
+        ULONG_PTR mask = fpcr & ~0x9f00;
+        __asm__ __volatile__( "msr fpcr, %0" :: "r" (mask) );
+    }
+
+    if (old_fpsr != fpsr)
+        __asm__ __volatile__( "msr fpsr, %0" :: "r" (fpsr) );
+    if (old_fpcr != fpcr)
+        __asm__ __volatile__( "msr fpcr, %0" :: "r" (fpcr) );
+    return TRUE;
+#elif defined(__arm__) && !defined(__SOFTFP__)
+    DWORD old_fpscr, fpscr;
+    unsigned int flags;
+
+    __asm__ __volatile__( "vmrs %0, fpscr" : "=r" (fpscr) );
+    old_fpscr = fpscr;
+
+    cw_mask &= _MCW_EM | _MCW_RC;
+    sw_mask &= _MCW_EM;
+
+    if (sw)
+    {
+        flags = 0;
+        if (fpscr & 0x1) flags |= _SW_INVALID;
+        if (fpscr & 0x2) flags |= _SW_ZERODIVIDE;
+        if (fpscr & 0x4) flags |= _SW_OVERFLOW;
+        if (fpscr & 0x8) flags |= _SW_UNDERFLOW;
+        if (fpscr & 0x10) flags |= _SW_INEXACT;
+        if (fpscr & 0x80) flags |= _SW_DENORMAL;
+
+        *sw = (flags & ~sw_mask) | (*sw & sw_mask);
+        TRACE("arm update sw %08x to %08x\n", flags, *sw);
+        fpscr &= ~0x9f;
+        if (*sw & _SW_INVALID) fpscr |= 0x1;
+        if (*sw & _SW_ZERODIVIDE) fpscr |= 0x2;
+        if (*sw & _SW_OVERFLOW) fpscr |= 0x4;
+        if (*sw & _SW_UNDERFLOW) fpscr |= 0x8;
+        if (*sw & _SW_INEXACT) fpscr |= 0x10;
+        if (*sw & _SW_DENORMAL) fpscr |= 0x80;
+        *sw = flags;
+    }
+
+    if (cw)
+    {
+        flags = 0;
+        if (!(fpscr & 0x100)) flags |= _EM_INVALID;
+        if (!(fpscr & 0x200)) flags |= _EM_ZERODIVIDE;
+        if (!(fpscr & 0x400)) flags |= _EM_OVERFLOW;
+        if (!(fpscr & 0x800)) flags |= _EM_UNDERFLOW;
+        if (!(fpscr & 0x1000)) flags |= _EM_INEXACT;
+        if (!(fpscr & 0x8000)) flags |= _EM_DENORMAL;
+        switch (fpscr & 0xc00000)
+        {
+        case 0x400000: flags |= _RC_UP; break;
+        case 0x800000: flags |= _RC_DOWN; break;
+        case 0xc00000: flags |= _RC_CHOP; break;
+        }
+
+        *cw = (flags & ~cw_mask) | (*cw & cw_mask);
+        TRACE("arm update cw %08x to %08x\n", flags, *cw);
+        fpscr &= ~0xc09f00ul;
+        if (!(*cw & _EM_INVALID)) fpscr |= 0x100;
+        if (!(*cw & _EM_ZERODIVIDE)) fpscr |= 0x200;
+        if (!(*cw & _EM_OVERFLOW)) fpscr |= 0x400;
+        if (!(*cw & _EM_UNDERFLOW)) fpscr |= 0x800;
+        if (!(*cw & _EM_INEXACT)) fpscr |= 0x1000;
+        if (!(*cw & _EM_DENORMAL)) fpscr |= 0x8000;
+        switch (*cw & _MCW_RC)
+        {
+        case _RC_CHOP: fpscr |= 0xc00000; break;
+        case _RC_UP: fpscr |= 0x400000; break;
+        case _RC_DOWN: fpscr |= 0x800000; break;
+        }
+    }
+
+    if (old_fpscr != fpscr)
+        __asm__ __volatile__( "vmsr fpscr, %0" :: "r" (fpscr) );
+    return TRUE;
+#else
+    FIXME("not implemented\n");
+    if (cw) *cw = 0;
+    if (sw) *sw = 0;
+    return FALSE;
+#endif
+}
+
+/**********************************************************************
+ *		_statusfp2 (MSVCR80.@)
+ */
+#if defined(__i386__)
+void CDECL _statusfp2( unsigned int *x86_sw, unsigned int *sse2_sw )
+{
+    if (x86_sw)
+        _setfp(NULL, 0, x86_sw, 0);
+    if (!sse2_sw) return;
+    if (sse2_supported)
+        _setfp_sse(NULL, 0, sse2_sw, 0);
+    else *sse2_sw = 0;
 }
 #endif
 
@@ -5190,24 +5533,14 @@ void CDECL _statusfp2( unsigned int *x86_sw, unsigned int *sse2_sw )
 unsigned int CDECL _statusfp(void)
 {
     unsigned int flags = 0;
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__)
     unsigned int x86_sw, sse2_sw;
 
     _statusfp2( &x86_sw, &sse2_sw );
     /* FIXME: there's no definition for ambiguous status, just return all status bits for now */
     flags = x86_sw | sse2_sw;
-#elif defined(__aarch64__)
-    ULONG_PTR fpsr;
-
-    __asm__ __volatile__( "mrs %0, fpsr" : "=r" (fpsr) );
-    if (fpsr & 0x1)  flags |= _SW_INVALID;
-    if (fpsr & 0x2)  flags |= _SW_ZERODIVIDE;
-    if (fpsr & 0x4)  flags |= _SW_OVERFLOW;
-    if (fpsr & 0x8)  flags |= _SW_UNDERFLOW;
-    if (fpsr & 0x10) flags |= _SW_INEXACT;
-    if (fpsr & 0x80) flags |= _SW_DENORMAL;
 #else
-    FIXME( "not implemented\n" );
+    _setfp(NULL, 0, &flags, 0);
 #endif
     return flags;
 }
@@ -5218,43 +5551,17 @@ unsigned int CDECL _statusfp(void)
 unsigned int CDECL _clearfp(void)
 {
     unsigned int flags = 0;
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__i386__) || defined(__x86_64__))
-    unsigned long fpword;
-
-    __asm__ __volatile__( "fnstsw %0; fnclex" : "=m" (fpword) );
-    if (fpword & 0x1)  flags |= _SW_INVALID;
-    if (fpword & 0x2)  flags |= _SW_DENORMAL;
-    if (fpword & 0x4)  flags |= _SW_ZERODIVIDE;
-    if (fpword & 0x8)  flags |= _SW_OVERFLOW;
-    if (fpword & 0x10) flags |= _SW_UNDERFLOW;
-    if (fpword & 0x20) flags |= _SW_INEXACT;
-
+#ifdef __i386__
+    _setfp(NULL, 0, &flags, _MCW_EM);
     if (sse2_supported)
     {
-        __asm__ __volatile__( "stmxcsr %0" : "=m" (fpword) );
-        if (fpword & 0x1)  flags |= _SW_INVALID;
-        if (fpword & 0x2)  flags |= _SW_DENORMAL;
-        if (fpword & 0x4)  flags |= _SW_ZERODIVIDE;
-        if (fpword & 0x8)  flags |= _SW_OVERFLOW;
-        if (fpword & 0x10) flags |= _SW_UNDERFLOW;
-        if (fpword & 0x20) flags |= _SW_INEXACT;
-        fpword &= ~0x3f;
-        __asm__ __volatile__( "ldmxcsr %0" : : "m" (fpword) );
-    }
-#elif defined(__aarch64__)
-    ULONG_PTR fpsr;
+        unsigned int sse_sw = 0;
 
-    __asm__ __volatile__( "mrs %0, fpsr" : "=r" (fpsr) );
-    if (fpsr & 0x1)  flags |= _SW_INVALID;
-    if (fpsr & 0x2)  flags |= _SW_ZERODIVIDE;
-    if (fpsr & 0x4)  flags |= _SW_OVERFLOW;
-    if (fpsr & 0x8)  flags |= _SW_UNDERFLOW;
-    if (fpsr & 0x10) flags |= _SW_INEXACT;
-    if (fpsr & 0x80) flags |= _SW_DENORMAL;
-    fpsr &= ~0x9f;
-    __asm__ __volatile__( "msr fpsr, %0" :: "r" (fpsr) );
+        _setfp_sse(NULL, 0, &sse_sw, _MCW_EM);
+        flags |= sse_sw;
+    }
 #else
-    FIXME( "not implemented\n" );
+    _setfp(NULL, 0, &flags, _MCW_EM);
 #endif
     return flags;
 }
@@ -5308,137 +5615,24 @@ double CDECL _chgsign(double num)
 int CDECL __control87_2( unsigned int newval, unsigned int mask,
                          unsigned int *x86_cw, unsigned int *sse2_cw )
 {
-#if defined(__GNUC__) || defined(__clang__)
-    unsigned long fpword;
-    unsigned int flags;
-    unsigned int old_flags;
-
     if (x86_cw)
     {
-        __asm__ __volatile__( "fstcw %0" : "=m" (fpword) );
-
-        /* Convert into mask constants */
-        flags = 0;
-        if (fpword & 0x1)  flags |= _EM_INVALID;
-        if (fpword & 0x2)  flags |= _EM_DENORMAL;
-        if (fpword & 0x4)  flags |= _EM_ZERODIVIDE;
-        if (fpword & 0x8)  flags |= _EM_OVERFLOW;
-        if (fpword & 0x10) flags |= _EM_UNDERFLOW;
-        if (fpword & 0x20) flags |= _EM_INEXACT;
-        switch (fpword & 0xc00)
-        {
-        case 0xc00: flags |= _RC_UP|_RC_DOWN; break;
-        case 0x800: flags |= _RC_UP; break;
-        case 0x400: flags |= _RC_DOWN; break;
-        }
-        switch (fpword & 0x300)
-        {
-        case 0x0:   flags |= _PC_24; break;
-        case 0x200: flags |= _PC_53; break;
-        case 0x300: flags |= _PC_64; break;
-        }
-        if (fpword & 0x1000) flags |= _IC_AFFINE;
-
-        TRACE( "x86 flags=%08x newval=%08x mask=%08x\n", flags, newval, mask );
-        if (mask)
-        {
-            flags = (flags & ~mask) | (newval & mask);
-
-            /* Convert (masked) value back to fp word */
-            fpword = 0;
-            if (flags & _EM_INVALID)    fpword |= 0x1;
-            if (flags & _EM_DENORMAL)   fpword |= 0x2;
-            if (flags & _EM_ZERODIVIDE) fpword |= 0x4;
-            if (flags & _EM_OVERFLOW)   fpword |= 0x8;
-            if (flags & _EM_UNDERFLOW)  fpword |= 0x10;
-            if (flags & _EM_INEXACT)    fpword |= 0x20;
-            switch (flags & _MCW_RC)
-            {
-            case _RC_UP|_RC_DOWN:   fpword |= 0xc00; break;
-            case _RC_UP:            fpword |= 0x800; break;
-            case _RC_DOWN:          fpword |= 0x400; break;
-            }
-            switch (flags & _MCW_PC)
-            {
-            case _PC_64: fpword |= 0x300; break;
-            case _PC_53: fpword |= 0x200; break;
-            case _PC_24: fpword |= 0x0; break;
-            }
-            if (flags & _IC_AFFINE) fpword |= 0x1000;
-
-            __asm__ __volatile__( "fldcw %0" : : "m" (fpword) );
-        }
-        *x86_cw = flags;
+        *x86_cw = newval;
+        if (!_setfp(x86_cw, mask, NULL, 0))
+            return 0;
     }
 
     if (!sse2_cw) return 1;
 
     if (sse2_supported)
     {
-        __asm__ __volatile__( "stmxcsr %0" : "=m" (fpword) );
-
-        /* Convert into mask constants */
-        flags = 0;
-        if (fpword & 0x80)   flags |= _EM_INVALID;
-        if (fpword & 0x100)  flags |= _EM_DENORMAL;
-        if (fpword & 0x200)  flags |= _EM_ZERODIVIDE;
-        if (fpword & 0x400)  flags |= _EM_OVERFLOW;
-        if (fpword & 0x800)  flags |= _EM_UNDERFLOW;
-        if (fpword & 0x1000) flags |= _EM_INEXACT;
-        switch (fpword & 0x6000)
-        {
-        case 0x6000: flags |= _RC_UP|_RC_DOWN; break;
-        case 0x4000: flags |= _RC_UP; break;
-        case 0x2000: flags |= _RC_DOWN; break;
-        }
-        switch (fpword & 0x8040)
-        {
-        case 0x0040: flags |= _DN_FLUSH_OPERANDS_SAVE_RESULTS; break;
-        case 0x8000: flags |= _DN_SAVE_OPERANDS_FLUSH_RESULTS; break;
-        case 0x8040: flags |= _DN_FLUSH; break;
-        }
-
-        TRACE( "sse2 flags=%08x newval=%08x mask=%08x\n", flags, newval, mask );
-        if (mask)
-        {
-            old_flags = flags;
-            mask &= _MCW_EM | _MCW_RC | _MCW_DN;
-            flags = (flags & ~mask) | (newval & mask);
-
-            if (flags != old_flags)
-            {
-                /* Convert (masked) value back to fp word */
-                fpword = 0;
-                if (flags & _EM_INVALID)    fpword |= 0x80;
-                if (flags & _EM_DENORMAL)   fpword |= 0x100;
-                if (flags & _EM_ZERODIVIDE) fpword |= 0x200;
-                if (flags & _EM_OVERFLOW)   fpword |= 0x400;
-                if (flags & _EM_UNDERFLOW)  fpword |= 0x800;
-                if (flags & _EM_INEXACT)    fpword |= 0x1000;
-                switch (flags & _MCW_RC)
-                {
-                case _RC_UP|_RC_DOWN:   fpword |= 0x6000; break;
-                case _RC_UP:            fpword |= 0x4000; break;
-                case _RC_DOWN:          fpword |= 0x2000; break;
-                }
-                switch (flags & _MCW_DN)
-                {
-                case _DN_FLUSH_OPERANDS_SAVE_RESULTS: fpword |= 0x0040; break;
-                case _DN_SAVE_OPERANDS_FLUSH_RESULTS: fpword |= 0x8000; break;
-                case _DN_FLUSH:                       fpword |= 0x8040; break;
-                }
-                __asm__ __volatile__( "ldmxcsr %0" : : "m" (fpword) );
-            }
-        }
-        *sse2_cw = flags;
+        *sse2_cw = newval;
+        if (!_setfp_sse(sse2_cw, mask, NULL, 0))
+            return 0;
     }
     else *sse2_cw = 0;
 
     return 1;
-#else
-    FIXME( "not implemented\n" );
-    return 0;
-#endif
 }
 #endif
 
@@ -5455,88 +5649,9 @@ unsigned int CDECL _control87(unsigned int newval, unsigned int mask)
 
     if ((flags ^ sse2_cw) & (_MCW_EM | _MCW_RC)) flags |= _EM_AMBIGUOUS;
     flags |= sse2_cw;
-#elif defined(__x86_64__)
-    unsigned long fpword;
-    unsigned int old_flags;
-
-    __asm__ __volatile__( "stmxcsr %0" : "=m" (fpword) );
-    if (fpword & 0x80)   flags |= _EM_INVALID;
-    if (fpword & 0x100)  flags |= _EM_DENORMAL;
-    if (fpword & 0x200)  flags |= _EM_ZERODIVIDE;
-    if (fpword & 0x400)  flags |= _EM_OVERFLOW;
-    if (fpword & 0x800)  flags |= _EM_UNDERFLOW;
-    if (fpword & 0x1000) flags |= _EM_INEXACT;
-    switch (fpword & 0x6000)
-    {
-    case 0x6000: flags |= _RC_CHOP; break;
-    case 0x4000: flags |= _RC_UP; break;
-    case 0x2000: flags |= _RC_DOWN; break;
-    }
-    switch (fpword & 0x8040)
-    {
-    case 0x0040: flags |= _DN_FLUSH_OPERANDS_SAVE_RESULTS; break;
-    case 0x8000: flags |= _DN_SAVE_OPERANDS_FLUSH_RESULTS; break;
-    case 0x8040: flags |= _DN_FLUSH; break;
-    }
-    old_flags = flags;
-    mask &= _MCW_EM | _MCW_RC | _MCW_DN;
-    flags = (flags & ~mask) | (newval & mask);
-    if (flags != old_flags)
-    {
-        fpword = 0;
-        if (flags & _EM_INVALID)    fpword |= 0x80;
-        if (flags & _EM_DENORMAL)   fpword |= 0x100;
-        if (flags & _EM_ZERODIVIDE) fpword |= 0x200;
-        if (flags & _EM_OVERFLOW)   fpword |= 0x400;
-        if (flags & _EM_UNDERFLOW)  fpword |= 0x800;
-        if (flags & _EM_INEXACT)    fpword |= 0x1000;
-        switch (flags & _MCW_RC)
-        {
-        case _RC_CHOP: fpword |= 0x6000; break;
-        case _RC_UP:   fpword |= 0x4000; break;
-        case _RC_DOWN: fpword |= 0x2000; break;
-        }
-        switch (flags & _MCW_DN)
-        {
-        case _DN_FLUSH_OPERANDS_SAVE_RESULTS: fpword |= 0x0040; break;
-        case _DN_SAVE_OPERANDS_FLUSH_RESULTS: fpword |= 0x8000; break;
-        case _DN_FLUSH:                       fpword |= 0x8040; break;
-        }
-        __asm__ __volatile__( "ldmxcsr %0" :: "m" (fpword) );
-    }
-#elif defined(__aarch64__)
-    ULONG_PTR fpcr;
-
-    __asm__ __volatile__( "mrs %0, fpcr" : "=r" (fpcr) );
-    if (!(fpcr & 0x100))  flags |= _EM_INVALID;
-    if (!(fpcr & 0x200))  flags |= _EM_ZERODIVIDE;
-    if (!(fpcr & 0x400))  flags |= _EM_OVERFLOW;
-    if (!(fpcr & 0x800))  flags |= _EM_UNDERFLOW;
-    if (!(fpcr & 0x1000)) flags |= _EM_INEXACT;
-    if (!(fpcr & 0x8000)) flags |= _EM_DENORMAL;
-    switch (fpcr & 0xc00000)
-    {
-    case 0x400000: flags |= _RC_UP; break;
-    case 0x800000: flags |= _RC_DOWN; break;
-    case 0xc00000: flags |= _RC_CHOP; break;
-    }
-    flags = (flags & ~mask) | (newval & mask);
-    fpcr &= ~0xc09f00ul;
-    if (!(flags & _EM_INVALID)) fpcr |= 0x100;
-    if (!(flags & _EM_ZERODIVIDE)) fpcr |= 0x200;
-    if (!(flags & _EM_OVERFLOW)) fpcr |= 0x400;
-    if (!(flags & _EM_UNDERFLOW)) fpcr |= 0x800;
-    if (!(flags & _EM_INEXACT)) fpcr |= 0x1000;
-    if (!(flags & _EM_DENORMAL)) fpcr |= 0x8000;
-    switch (flags & _MCW_RC)
-    {
-    case _RC_CHOP: fpcr |= 0xc00000; break;
-    case _RC_UP:   fpcr |= 0x400000; break;
-    case _RC_DOWN: fpcr |= 0x800000; break;
-    }
-    __asm__ __volatile__( "msr fpcr, %0" :: "r" (fpcr) );
 #else
-    FIXME( "not implemented\n" );
+    flags = newval;
+    _setfp(&flags, mask, NULL, 0);
 #endif
     return flags;
 }
@@ -5576,7 +5691,7 @@ int CDECL _controlfp_s(unsigned int *cur, unsigned int newval, unsigned int mask
     return 0;
 }
 
-#if _MSVCR_VER >= 140
+#if _MSVCR_VER >= 140 && (defined(__i386__) || defined(__x86_64__))
 enum fenv_masks
 {
     FENV_X_INVALID = 0x00100010,
@@ -5639,7 +5754,6 @@ static __msvcrt_ulong fenv_encode(unsigned int x, unsigned int y)
 }
 
 /* decodes x87/sse control/status word, returns FALSE on error */
-#if (defined(__i386__) || defined(__x86_64__))
 static BOOL fenv_decode(__msvcrt_ulong enc, unsigned int *x, unsigned int *y)
 {
     *x = *y = 0;
@@ -5673,20 +5787,23 @@ static BOOL fenv_decode(__msvcrt_ulong enc, unsigned int *x, unsigned int *y)
     }
     return TRUE;
 }
-#endif
 #elif _MSVCR_VER >= 120
 static __msvcrt_ulong fenv_encode(unsigned int x, unsigned int y)
 {
+    if (y & _EM_DENORMAL)
+        y = (y & ~_EM_DENORMAL) | 0x20;
+
     return x | y;
 }
 
-#if (defined(__i386__) || defined(__x86_64__))
 static BOOL fenv_decode(__msvcrt_ulong enc, unsigned int *x, unsigned int *y)
 {
+    if (enc & 0x20)
+        enc = (enc & ~0x20) | _EM_DENORMAL;
+
     *x = *y = enc;
     return TRUE;
 }
-#endif
 #endif
 
 #if _MSVCR_VER>=120
@@ -5706,7 +5823,7 @@ int CDECL fegetenv(fenv_t *env)
     env->_Fe_stat = fenv_encode(0, _statusfp());
 #else
     env->_Fe_ctl = _controlfp(0, 0) & (_EM_INEXACT | _EM_UNDERFLOW |
-            _EM_OVERFLOW | _EM_ZERODIVIDE | _EM_INVALID | _RC_CHOP);
+            _EM_OVERFLOW | _EM_ZERODIVIDE | _EM_INVALID | _MCW_RC);
     env->_Fe_stat = _statusfp();
 #endif
     return 0;
@@ -5860,16 +5977,17 @@ int CDECL _finite(double num)
  */
 void CDECL _fpreset(void)
 {
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__i386__) || defined(__x86_64__))
+#if (defined(__GNUC__) || defined(__clang__)) && defined(__i386__)
     const unsigned int x86_cw = 0x27f;
     __asm__ __volatile__( "fninit; fldcw %0" : : "m" (x86_cw) );
     if (sse2_supported)
     {
-        const unsigned long sse2_cw = 0x1f80;
-        __asm__ __volatile__( "ldmxcsr %0" : : "m" (sse2_cw) );
+        unsigned int cw = _MCW_EM, sw = 0;
+        _setfp_sse(&cw, ~0, &sw, ~0);
     }
 #else
-    FIXME( "not implemented\n" );
+    unsigned int cw = _MCW_EM, sw = 0;
+    _setfp(&cw, ~0, &sw, ~0);
 #endif
 }
 
@@ -5879,24 +5997,8 @@ void CDECL _fpreset(void)
  */
 int CDECL fesetenv(const fenv_t *env)
 {
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__i386__) || defined(__x86_64__))
-    unsigned int x87_cw, sse_cw, x87_stat, sse_stat;
-#ifdef __i386__
-    struct {
-        WORD control_word;
-        WORD unused1;
-        WORD status_word;
-        WORD unused2;
-        WORD tag_word;
-        WORD unused3;
-        DWORD instruction_pointer;
-        WORD code_segment;
-        WORD unused4;
-        DWORD operand_addr;
-        WORD data_segment;
-        WORD unused5;
-    } fenv;
-#endif
+    unsigned int x87_cw, cw, x87_stat, stat;
+    unsigned int mask;
 
     TRACE( "(%p)\n", env );
 
@@ -5905,94 +6007,32 @@ int CDECL fesetenv(const fenv_t *env)
         return 0;
     }
 
-    if (!fenv_decode(env->_Fe_ctl, &x87_cw, &sse_cw))
+    if (!fenv_decode(env->_Fe_ctl, &x87_cw, &cw))
         return 1;
-    if (!fenv_decode(env->_Fe_stat, &x87_stat, &sse_stat))
+    if (!fenv_decode(env->_Fe_stat, &x87_stat, &stat))
         return 1;
+
+#if _MSVCR_VER >= 140
+    mask = ~0;
+#else
+    mask = _EM_INEXACT | _EM_UNDERFLOW | _EM_OVERFLOW
+        | _EM_ZERODIVIDE | _EM_INVALID | _MCW_RC;
+#endif
 
 #ifdef __i386__
-    __asm__ __volatile__( "fnstenv %0" : "=m" (fenv) );
-
-    fenv.control_word &= ~0xc3d;
-#if _MSVCR_VER>=140
-    fenv.control_word &= ~0x1302;
-#endif
-    if (x87_cw & _EM_INVALID) fenv.control_word |= 0x1;
-    if (x87_cw & _EM_ZERODIVIDE) fenv.control_word |= 0x4;
-    if (x87_cw & _EM_OVERFLOW) fenv.control_word |= 0x8;
-    if (x87_cw & _EM_UNDERFLOW) fenv.control_word |= 0x10;
-    if (x87_cw & _EM_INEXACT) fenv.control_word |= 0x20;
-    switch (x87_cw & _MCW_RC)
-    {
-        case _RC_UP|_RC_DOWN:   fenv.control_word |= 0xc00; break;
-        case _RC_UP:            fenv.control_word |= 0x800; break;
-        case _RC_DOWN:          fenv.control_word |= 0x400; break;
-    }
-#if _MSVCR_VER>=140
-    if (x87_cw & _EM_DENORMAL) fenv.control_word |= 0x2;
-    switch (x87_cw & _MCW_PC)
-    {
-        case _PC_64: fenv.control_word |= 0x300; break;
-        case _PC_53: fenv.control_word |= 0x200; break;
-        case _PC_24: fenv.control_word |= 0x0; break;
-    }
-    if (x87_cw & _IC_AFFINE) fenv.control_word |= 0x1000;
-#endif
-
-    fenv.status_word &= ~0x3f;
-    if (x87_stat & _SW_INVALID) fenv.status_word |= 0x1;
-    if (x87_stat & _SW_DENORMAL) fenv.status_word |= 0x2;
-    if (x87_stat & _SW_ZERODIVIDE) fenv.status_word |= 0x4;
-    if (x87_stat & _SW_OVERFLOW) fenv.status_word |= 0x8;
-    if (x87_stat & _SW_UNDERFLOW) fenv.status_word |= 0x10;
-    if (x87_stat & _SW_INEXACT) fenv.status_word |= 0x20;
-
-    __asm__ __volatile__( "fldenv %0" : : "m" (fenv) : "st", "st(1)",
-            "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)" );
-#endif
-
+    if (!_setfp(&x87_cw, mask, &x87_stat, ~0))
+        return 1;
     if (sse2_supported)
     {
-        DWORD fpword;
-        __asm__ __volatile__( "stmxcsr %0" : "=m" (fpword) );
-        fpword &= ~0x7ebf;
-#if _MSVCR_VER>=140
-        fpword &= ~0x8140;
-#endif
-        if (sse_cw & _EM_INVALID) fpword |= 0x80;
-        if (sse_cw & _EM_ZERODIVIDE) fpword |= 0x200;
-        if (sse_cw & _EM_OVERFLOW) fpword |= 0x400;
-        if (sse_cw & _EM_UNDERFLOW) fpword |= 0x800;
-        if (sse_cw & _EM_INEXACT) fpword |= 0x1000;
-        switch (sse_cw & _MCW_RC)
-        {
-            case _RC_CHOP: fpword |= 0x6000; break;
-            case _RC_UP:   fpword |= 0x4000; break;
-            case _RC_DOWN: fpword |= 0x2000; break;
-        }
-        if (sse_stat & _SW_INVALID) fpword |= 0x1;
-        if (sse_stat & _SW_DENORMAL) fpword |= 0x2;
-        if (sse_stat & _SW_ZERODIVIDE) fpword |= 0x4;
-        if (sse_stat & _SW_OVERFLOW) fpword |= 0x8;
-        if (sse_stat & _SW_UNDERFLOW) fpword |= 0x10;
-        if (sse_stat & _SW_INEXACT) fpword |= 0x20;
-#if _MSVCR_VER>=140
-        if (sse_cw & _EM_DENORMAL) fpword |= 0x100;
-        switch (sse_cw & _MCW_DN)
-        {
-            case _DN_FLUSH_OPERANDS_SAVE_RESULTS: fpword |= 0x0040; break;
-            case _DN_SAVE_OPERANDS_FLUSH_RESULTS: fpword |= 0x8000; break;
-            case _DN_FLUSH:                       fpword |= 0x8040; break;
-        }
-#endif
-        __asm__ __volatile__( "ldmxcsr %0" : : "m" (fpword) );
+        if (!_setfp_sse(&cw, mask, &stat, ~0))
+            return 1;
     }
-
     return 0;
 #else
-    FIXME( "not implemented\n" );
+    if (!_setfp(&cw, mask, &stat, ~0))
+        return 1;
+    return 0;
 #endif
-    return 1;
 }
 #endif
 

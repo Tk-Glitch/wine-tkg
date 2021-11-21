@@ -1773,14 +1773,14 @@ static void output_syscall_dispatcher(void)
         output( "\tstp x4, x5, [sp, #32]\n" );
         output( "\tstp x6, x7, [sp, #48]\n" );
         output( "\tstp x8, x9, [sp, #64]\n" );
-        output( "\tstr lr, [sp, #80]\n" );
+        output( "\tstr x30,    [sp, #80]\n" );
         output( "\tbl %s\n", asm_name("NtCurrentTeb") );
         output( "\tmov x18, x0\n" );
         output( "\tldp x2, x3, [sp, #16]\n" );
         output( "\tldp x4, x5, [sp, #32]\n" );
         output( "\tldp x6, x7, [sp, #48]\n" );
         output( "\tldp x8, x9, [sp, #64]\n" );
-        output( "\tldr lr, [sp, #80]\n" );
+        output( "\tldr x30,    [sp, #80]\n" );
         output( "\tldp x0, x1, [sp], #96\n" );
 
         output( "\tldr x10, [x18, #0x2f8]\n" );  /* arm64_thread_data()->syscall_frame */
@@ -1793,7 +1793,7 @@ static void output_syscall_dispatcher(void)
         output( "\tmov x19, sp\n" );
         output( "\tstp x9, x19, [x10, #0xf0]\n" );
         output( "\tmrs x9, NZCV\n" );
-        output( "\tstp lr, x9, [x10, #0x100]\n" );
+        output( "\tstp x30, x9, [x10, #0x100]\n" );
         output( "\tstr xzr, [x10, #0x110]\n" );  /* frame->restore_flags */
         output( "\tmrs x9, FPCR\n" );
         output( "\tstr w9, [x10, #0x118]\n" );
@@ -1951,19 +1951,9 @@ void output_syscalls( DLLSPEC *spec )
         switch (target_cpu)
         {
         case CPU_x86:
-            if (UsePIC)
-            {
-                output( "\tcall %s\n", asm_name("__wine_spec_get_pc_thunk_eax") );
-                output( "1:\tmovl %s-1b(%%eax),%%edx\n", asm_name("__wine_syscall_dispatcher") );
-                output( "\tmovl $%u,%%eax\n", i );
-                needs_get_pc_thunk = 1;
-            }
-            else
-            {
-                output( "\tmovl $%u,%%eax\n", i );
-                output( "\tmovl $%s,%%edx\n", asm_name("__wine_syscall") );
-            }
-            output( "\tcall *%%edx\n" );
+            output( "\t.byte 0xb8\n" );                               /* mov eax, SYSCALL */
+            output( "\t.long %d\n", i );
+            output( "\t.byte 0x64,0xff,0x15,0xc0,0x00,0x00,0x00\n" ); /* call dword ptr fs:[0C0h] */
             output( "\tret $%u\n", odp->type == TYPE_STDCALL ? get_args_size( odp ) : 0 );
             break;
         case CPU_x86_64:

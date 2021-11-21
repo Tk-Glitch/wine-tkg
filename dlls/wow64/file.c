@@ -353,6 +353,32 @@ NTSTATUS WINAPI wow64_NtDeleteFile( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtDeviceIoControlFile
+ */
+NTSTATUS WINAPI wow64_NtDeviceIoControlFile( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    HANDLE event = get_handle( &args );
+    ULONG apc = get_ulong( &args );
+    ULONG apc_param = get_ulong( &args );
+    IO_STATUS_BLOCK32 *io32 = get_ptr( &args );
+    ULONG code = get_ulong( &args );
+    void *in_buf = get_ptr( &args );
+    ULONG in_len = get_ulong( &args );
+    void *out_buf = get_ptr( &args );
+    ULONG out_len = get_ulong( &args );
+
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+
+    status = NtDeviceIoControlFile( handle, event, apc_32to64( apc ), apc_param_32to64( apc, apc_param ),
+                                    iosb_32to64( &io, io32 ), code, in_buf, in_len, out_buf, out_len );
+    put_iosb( io32, &io );
+    return status;
+}
+
+
+/**********************************************************************
  *           wow64_NtFlushBuffersFile
  */
 NTSTATUS WINAPI wow64_NtFlushBuffersFile( UINT *args )
@@ -364,6 +390,32 @@ NTSTATUS WINAPI wow64_NtFlushBuffersFile( UINT *args )
     NTSTATUS status;
 
     status = NtFlushBuffersFile( handle, iosb_32to64( &io, io32 ));
+    put_iosb( io32, &io );
+    return status;
+}
+
+
+/**********************************************************************
+ *           wow64_NtFsControlFile
+ */
+NTSTATUS WINAPI wow64_NtFsControlFile( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    HANDLE event = get_handle( &args );
+    ULONG apc = get_ulong( &args );
+    ULONG apc_param = get_ulong( &args );
+    IO_STATUS_BLOCK32 *io32 = get_ptr( &args );
+    ULONG code = get_ulong( &args );
+    void *in_buf = get_ptr( &args );
+    ULONG in_len = get_ulong( &args );
+    void *out_buf = get_ptr( &args );
+    ULONG out_len = get_ulong( &args );
+
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+
+    status = NtFsControlFile( handle, event, apc_32to64( apc ), apc_param_32to64( apc, apc_param ),
+                              iosb_32to64( &io, io32 ), code, in_buf, in_len, out_buf, out_len );
     put_iosb( io32, &io );
     return status;
 }
@@ -855,4 +907,67 @@ NTSTATUS WINAPI wow64_NtWriteFileGather( UINT *args )
                                 iosb_32to64( &io, io32 ), segments, len, offset, key );
     put_iosb( io32, &io );
     return status;
+}
+
+
+/**********************************************************************
+ *           wow64_wine_nt_to_unix_file_name
+ */
+NTSTATUS WINAPI wow64_wine_nt_to_unix_file_name( UINT *args )
+{
+    OBJECT_ATTRIBUTES32 *attr32 = get_ptr( &args );
+    char *nameA = get_ptr( &args );
+    ULONG *size = get_ptr( &args );
+    UINT disposition = get_ulong( &args );
+
+    struct object_attr64 attr;
+
+    return wine_nt_to_unix_file_name( objattr_32to64_redirect( &attr, attr32 ), nameA, size, disposition );
+}
+
+
+/**********************************************************************
+ *           wow64_wine_server_fd_to_handle
+ */
+NTSTATUS WINAPI wow64_wine_server_fd_to_handle( UINT *args )
+{
+    int fd = get_ulong( &args );
+    ACCESS_MASK access = get_ulong( &args );
+    ULONG attributes = get_ulong( &args );
+    ULONG *handle_ptr = get_ptr( &args );
+
+    HANDLE handle = 0;
+    NTSTATUS status;
+
+    *handle_ptr = 0;
+    status = wine_server_fd_to_handle( fd, access, attributes, &handle );
+    put_handle( handle_ptr, handle );
+    return status;
+}
+
+
+/**********************************************************************
+ *           wow64_wine_server_handle_to_fd
+ */
+NTSTATUS WINAPI wow64_wine_server_handle_to_fd( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    ACCESS_MASK access = get_ulong( &args );
+    int *unix_fd = get_ptr( &args );
+    unsigned int *options = get_ptr( &args );
+
+    return wine_server_handle_to_fd( handle, access, unix_fd, options );
+}
+
+
+/**********************************************************************
+ *           wow64_wine_unix_to_nt_file_name
+ */
+NTSTATUS WINAPI wow64_wine_unix_to_nt_file_name( UINT *args )
+{
+    const char *name = get_ptr( &args );
+    WCHAR *buffer = get_ptr( &args );
+    ULONG *size = get_ptr( &args );
+
+    return wine_unix_to_nt_file_name( name, buffer, size );
 }

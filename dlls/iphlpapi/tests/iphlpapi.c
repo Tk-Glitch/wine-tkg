@@ -286,63 +286,83 @@ static void testGetIfTable(void)
 
 static void testGetIpForwardTable(void)
 {
-    DWORD apiReturn;
-    ULONG dwSize = 0;
+    DWORD err, i, j;
+    ULONG size = 0;
+    MIB_IPFORWARDTABLE *buf;
+    MIB_IPFORWARD_TABLE2 *table2;
+    MIB_UNICASTIPADDRESS_TABLE *unicast;
 
-    apiReturn = GetIpForwardTable(NULL, NULL, FALSE);
-    if (apiReturn == ERROR_NOT_SUPPORTED) {
-        skip("GetIpForwardTable is not supported\n");
-        return;
-    }
-    ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetIpForwardTable(NULL, NULL, FALSE) returned %d, expected ERROR_INVALID_PARAMETER\n",
-       apiReturn);
-    apiReturn = GetIpForwardTable(NULL, &dwSize, FALSE);
-    ok(apiReturn == ERROR_INSUFFICIENT_BUFFER,
-       "GetIpForwardTable(NULL, &dwSize, FALSE) returned %d, expected ERROR_INSUFFICIENT_BUFFER\n",
-       apiReturn);
-    if (apiReturn == ERROR_INSUFFICIENT_BUFFER) {
-        PMIB_IPFORWARDTABLE buf = HeapAlloc(GetProcessHeap(), 0, dwSize);
+    err = GetIpForwardTable( NULL, NULL, FALSE );
+    ok( err == ERROR_INVALID_PARAMETER, "got %d\n", err );
 
-        apiReturn = GetIpForwardTable(buf, &dwSize, FALSE);
-        ok(apiReturn == NO_ERROR,
-           "GetIpForwardTable(buf, &dwSize, FALSE) returned %d, expected NO_ERROR\n",
-           apiReturn);
+    err = GetIpForwardTable( NULL, &size, FALSE );
+    ok( err == ERROR_INSUFFICIENT_BUFFER, "got %d\n", err );
 
-        if (apiReturn == NO_ERROR)
+    buf = malloc( size );
+    err = GetIpForwardTable( buf, &size, FALSE );
+    ok( !err, "got %d\n", err );
+
+    err = GetIpForwardTable2( AF_INET, &table2 );
+    ok( !err, "got %d\n", err );
+    ok( buf->dwNumEntries == table2->NumEntries, "got %d vs %d\n",
+        buf->dwNumEntries, table2->NumEntries );
+
+    err = GetUnicastIpAddressTable( AF_INET, &unicast );
+    ok( !err, "got %d\n", err );
+
+    trace( "IP forward table: %u entries\n", buf->dwNumEntries );
+    for (i = 0; i < buf->dwNumEntries; i++)
+    {
+        MIB_IPFORWARDROW *row = buf->table + i;
+        MIB_IPFORWARD_ROW2 *row2 = table2->Table + i;
+        DWORD mask, next_hop;
+
+        winetest_push_context( "%d", i );
+
+        trace( "dest %s mask %s gw %s if %u type %u proto %u\n",
+               ntoa( row->dwForwardDest ), ntoa( row->dwForwardMask ),
+               ntoa( row->dwForwardNextHop ), row->dwForwardIfIndex,
+               row->dwForwardType, row->dwForwardProto );
+        ok( row->dwForwardDest == row2->DestinationPrefix.Prefix.Ipv4.sin_addr.s_addr,
+            "got %08x vs %08x\n", row->dwForwardDest, row2->DestinationPrefix.Prefix.Ipv4.sin_addr.s_addr );
+        ConvertLengthToIpv4Mask( row2->DestinationPrefix.PrefixLength, &mask );
+        ok( row->dwForwardMask == mask, "got %08x vs %08x\n", row->dwForwardMask, mask );
+        ok( row->dwForwardPolicy == 0, "got %d\n", row->dwForwardPolicy );
+
+        next_hop = row2->NextHop.Ipv4.sin_addr.s_addr;
+        if (!next_hop) /* for direct addresses, dwForwardNextHop is set to the address of the appropriate interface */
         {
-            DWORD i;
-
-            trace( "IP forward table: %u entries\n", buf->dwNumEntries );
-            for (i = 0; i < buf->dwNumEntries; i++)
+            for (j = 0; j < unicast->NumEntries; j++)
             {
-                if (!U1(buf->table[i]).dwForwardDest) /* Default route */
+                if (unicast->Table[j].InterfaceLuid.Value == row2->InterfaceLuid.Value)
                 {
-                    todo_wine
-                    ok (U1(buf->table[i]).dwForwardProto == MIB_IPPROTO_NETMGMT,
-                            "Unexpected dwForwardProto %d\n", U1(buf->table[i]).dwForwardProto);
-                    ok (U1(buf->table[i]).dwForwardType == MIB_IPROUTE_TYPE_INDIRECT,
-                        "Unexpected dwForwardType %d\n",  U1(buf->table[i]).dwForwardType);
+                    next_hop = unicast->Table[j].Address.Ipv4.sin_addr.s_addr;
+                    break;
                 }
-                else
-                {
-                    /* In general we should get MIB_IPPROTO_LOCAL but does not work
-                     * for Vista, 2008 and 7. */
-                    ok (U1(buf->table[i]).dwForwardProto == MIB_IPPROTO_LOCAL ||
-                        broken(U1(buf->table[i]).dwForwardProto == MIB_IPPROTO_NETMGMT),
-                        "Unexpected dwForwardProto %d\n", U1(buf->table[i]).dwForwardProto);
-                    /* The forward type varies depending on the address and gateway
-                     * value so it is not worth testing in this case. */
-                }
-
-                trace( "%u: dest %s mask %s gw %s if %u type %u proto %u\n", i,
-                       ntoa( buf->table[i].dwForwardDest ), ntoa( buf->table[i].dwForwardMask ),
-                       ntoa( buf->table[i].dwForwardNextHop ), buf->table[i].dwForwardIfIndex,
-                       U1(buf->table[i]).dwForwardType, U1(buf->table[i]).dwForwardProto );
             }
         }
-        HeapFree(GetProcessHeap(), 0, buf);
+        ok( row->dwForwardNextHop == next_hop, "got %08x vs %08x\n", row->dwForwardNextHop, next_hop );
+
+        ok( row->dwForwardIfIndex == row2->InterfaceIndex, "got %d vs %d\n", row->dwForwardIfIndex, row2->InterfaceIndex );
+        if (!row2->NextHop.Ipv4.sin_addr.s_addr)
+            ok( buf->table[i].dwForwardType == MIB_IPROUTE_TYPE_DIRECT, "got %d\n", buf->table[i].dwForwardType );
+        else
+            ok( buf->table[i].dwForwardType == MIB_IPROUTE_TYPE_INDIRECT, "got %d\n", buf->table[i].dwForwardType );
+        ok( row->dwForwardProto == row2->Protocol, "got %d vs %d\n", row->dwForwardProto, row2->Protocol );
+        ok( row->dwForwardAge == row2->Age, "got %d vs %d\n", row->dwForwardAge, row2->Age );
+        ok( row->dwForwardNextHopAS == 0, "got %08x\n", row->dwForwardNextHopAS );
+        /* FIXME: need to add the interface's metric from GetIpInterfaceTable() */
+        ok( row->dwForwardMetric1 >= row2->Metric, "got %d vs %d\n", row->dwForwardMetric1, row2->Metric );
+        ok( row->dwForwardMetric2 == 0, "got %d\n", row->dwForwardMetric2 );
+        ok( row->dwForwardMetric3 == 0, "got %d\n", row->dwForwardMetric3 );
+        ok( row->dwForwardMetric4 == 0, "got %d\n", row->dwForwardMetric4 );
+        ok( row->dwForwardMetric5 == 0, "got %d\n", row->dwForwardMetric5 );
+
+        winetest_pop_context();
     }
+    FreeMibTable( unicast );
+    FreeMibTable( table2 );
+    free( buf );
 }
 
 static void testGetIpNetTable(void)
@@ -695,8 +715,8 @@ static void testGetTcpStatisticsEx(void)
     }
 
     apiReturn = GetTcpStatisticsEx(&stats, AF_INET6);
-    todo_wine ok(apiReturn == NO_ERROR || broken(apiReturn == ERROR_NOT_SUPPORTED),
-                 "GetTcpStatisticsEx returned %d, expected NO_ERROR\n", apiReturn);
+    ok(apiReturn == NO_ERROR || broken(apiReturn == ERROR_NOT_SUPPORTED),
+       "GetTcpStatisticsEx returned %d, expected NO_ERROR\n", apiReturn);
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "TCP IPv6 Ex stats:\n" );
@@ -1098,53 +1118,50 @@ todo_wine_if( row.dwType == IF_TYPE_SOFTWARE_LOOPBACK)
 
 static void testGetAdaptersInfo(void)
 {
-    DWORD apiReturn;
+    IP_ADAPTER_INFO *ptr, *buf;
+    NET_LUID luid;
+    GUID guid;
+    char name[ARRAY_SIZE(ptr->AdapterName)];
+    DWORD err;
     ULONG len = 0;
+    MIB_IFROW row;
 
-    apiReturn = GetAdaptersInfo(NULL, NULL);
-    if (apiReturn == ERROR_NOT_SUPPORTED) {
-        skip("GetAdaptersInfo is not supported\n");
-        return;
-    }
-    ok(apiReturn == ERROR_INVALID_PARAMETER,
-       "GetAdaptersInfo returned %d, expected ERROR_INVALID_PARAMETER\n",
-       apiReturn);
-    apiReturn = GetAdaptersInfo(NULL, &len);
-    ok(apiReturn == ERROR_NO_DATA || apiReturn == ERROR_BUFFER_OVERFLOW,
-       "GetAdaptersInfo returned %d, expected ERROR_NO_DATA or ERROR_BUFFER_OVERFLOW\n",
-       apiReturn);
-    if (apiReturn == ERROR_NO_DATA)
-        ; /* no adapter's, that's okay */
-    else if (apiReturn == ERROR_BUFFER_OVERFLOW) {
-        PIP_ADAPTER_INFO ptr, buf = HeapAlloc(GetProcessHeap(), 0, len);
-        NET_LUID luid;
-        GUID guid;
-        char AdapterName[ARRAY_SIZE(ptr->AdapterName)];
+    err = GetAdaptersInfo( NULL, NULL );
+    ok( err == ERROR_INVALID_PARAMETER, "got %d\n", err );
+    err = GetAdaptersInfo( NULL, &len );
+    ok( err == ERROR_NO_DATA || err == ERROR_BUFFER_OVERFLOW, "got %d\n", err );
+    if (err == ERROR_NO_DATA) return;
 
-        apiReturn = GetAdaptersInfo(buf, &len);
-        ok(apiReturn == NO_ERROR,
-           "GetAdaptersInfo(buf, &dwSize) returned %d, expected NO_ERROR\n",
-           apiReturn);
-        ptr = buf;
-        while (ptr) {
-            ConvertInterfaceIndexToLuid(ptr->Index, &luid);
-            ConvertInterfaceLuidToGuid(&luid, &guid);
-            sprintf(AdapterName, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
-                    guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1],
-                    guid.Data4[2], guid.Data4[3], guid.Data4[4], guid.Data4[5],
-                    guid.Data4[6], guid.Data4[7]);
-            ok(!strcmp(ptr->AdapterName, AdapterName), "expected '%s' got '%s'\n", ptr->AdapterName, AdapterName);
-            ok(ptr->IpAddressList.IpAddress.String[0], "A valid IP address must be present\n");
-            ok(ptr->IpAddressList.IpMask.String[0], "A valid mask must be present\n");
-            ok(ptr->GatewayList.IpAddress.String[0], "A valid IP address must be present\n");
-            ok(ptr->GatewayList.IpMask.String[0], "A valid mask must be present\n");
-            trace("adapter '%s', address %s/%s gateway %s/%s\n", ptr->AdapterName,
-                  ptr->IpAddressList.IpAddress.String, ptr->IpAddressList.IpMask.String,
-                  ptr->GatewayList.IpAddress.String, ptr->GatewayList.IpMask.String);
-            ptr = ptr->Next;
-        }
-        HeapFree(GetProcessHeap(), 0, buf);
+    buf = malloc( len );
+    err = GetAdaptersInfo( buf, &len );
+    ok( !err, "got %d\n", err );
+    ptr = buf;
+    while (ptr)
+    {
+        trace( "adapter '%s', address %s/%s gateway %s/%s\n", ptr->AdapterName,
+               ptr->IpAddressList.IpAddress.String, ptr->IpAddressList.IpMask.String,
+               ptr->GatewayList.IpAddress.String, ptr->GatewayList.IpMask.String );
+        row.dwIndex = ptr->Index;
+        GetIfEntry( &row );
+        ConvertInterfaceIndexToLuid( ptr->Index, &luid );
+        ConvertInterfaceLuidToGuid( &luid, &guid );
+        sprintf( name, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                 guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1],
+                 guid.Data4[2], guid.Data4[3], guid.Data4[4], guid.Data4[5],
+                 guid.Data4[6], guid.Data4[7] );
+        ok( !strcmp( ptr->AdapterName, name ), "expected '%s' got '%s'\n", ptr->AdapterName, name );
+        ok( !strcmp( ptr->Description, (char *)row.bDescr ), "got %s vs %s\n", ptr->Description, (char *)row.bDescr );
+        ok( ptr->AddressLength == row.dwPhysAddrLen, "got %d vs %d\n", ptr->AddressLength, row.dwPhysAddrLen );
+        ok( !memcmp(ptr->Address, row.bPhysAddr, ptr->AddressLength ), "mismatch\n" );
+        ok( ptr->Type == row.dwType, "got %d vs %d\n", ptr->Type, row.dwType );
+        ok( ptr->Type != MIB_IF_TYPE_LOOPBACK, "shouldn't get loopback\n" );
+        ok( ptr->IpAddressList.IpAddress.String[0], "A valid IP address must be present\n" );
+        ok( ptr->IpAddressList.IpMask.String[0], "A valid mask must be present\n" );
+        ok( ptr->GatewayList.IpAddress.String[0], "A valid IP address must be present\n" );
+        ok( ptr->GatewayList.IpMask.String[0], "A valid mask must be present\n" );
+        ptr = ptr->Next;
     }
+    free( buf );
 }
 
 static void testGetNetworkParams(void)
@@ -1196,10 +1213,6 @@ static void testGetPerAdapterInfo(void)
     void *buffer;
 
     ret = GetPerAdapterInfo(1, NULL, NULL);
-    if (ret == ERROR_NOT_SUPPORTED) {
-      skip("GetPerAdapterInfo is not supported\n");
-      return;
-    }
     ok( ret == ERROR_INVALID_PARAMETER, "got %u instead of ERROR_INVALID_PARAMETER\n", ret );
     needed = 0xdeadbeef;
     ret = GetPerAdapterInfo(1, NULL, &needed);

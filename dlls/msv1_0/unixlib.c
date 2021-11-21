@@ -24,6 +24,7 @@
 #endif
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -49,7 +50,7 @@ static SECURITY_STATUS read_line( struct ntlm_ctx *ctx, unsigned int *offset )
 
     if (!ctx->com_buf)
     {
-        if (!(ctx->com_buf = RtlAllocateHeap( GetProcessHeap(), 0, INITIAL_BUFFER_SIZE )))
+        if (!(ctx->com_buf = malloc( INITIAL_BUFFER_SIZE )))
             return SEC_E_INSUFFICIENT_MEMORY;
         ctx->com_buf_size = INITIAL_BUFFER_SIZE;
         ctx->com_buf_offset = 0;
@@ -60,7 +61,7 @@ static SECURITY_STATUS read_line( struct ntlm_ctx *ctx, unsigned int *offset )
         ssize_t size;
         if (ctx->com_buf_offset + INITIAL_BUFFER_SIZE > ctx->com_buf_size)
         {
-            char *buf = RtlReAllocateHeap( GetProcessHeap(), 0, ctx->com_buf, ctx->com_buf_size + INITIAL_BUFFER_SIZE );
+            char *buf = realloc( ctx->com_buf, ctx->com_buf_size + INITIAL_BUFFER_SIZE );
             if (!buf) return SEC_E_INSUFFICIENT_MEMORY;
             ctx->com_buf_size += INITIAL_BUFFER_SIZE;
             ctx->com_buf = buf;
@@ -81,22 +82,24 @@ static SECURITY_STATUS read_line( struct ntlm_ctx *ctx, unsigned int *offset )
     return SEC_E_OK;
 }
 
-static SECURITY_STATUS CDECL ntlm_chat( struct ntlm_ctx *ctx, char *buf, unsigned int buflen, unsigned int *retlen )
+static NTSTATUS ntlm_chat( void *args )
 {
+    struct chat_params *params = args;
+    struct ntlm_ctx *ctx = params->ctx;
     SECURITY_STATUS status = SEC_E_OK;
     unsigned int offset;
 
-    write( ctx->pipe_out, buf, strlen(buf) );
+    write( ctx->pipe_out, params->buf, strlen(params->buf) );
     write( ctx->pipe_out, "\n", 1 );
 
     if ((status = read_line( ctx, &offset )) != SEC_E_OK) return status;
-    *retlen = strlen( ctx->com_buf );
+    *params->retlen = strlen( ctx->com_buf );
 
-    if (*retlen > buflen) return SEC_E_BUFFER_TOO_SMALL;
-    if (*retlen < 2) return SEC_E_ILLEGAL_MESSAGE;
+    if (*params->retlen > params->buflen) return SEC_E_BUFFER_TOO_SMALL;
+    if (*params->retlen < 2) return SEC_E_ILLEGAL_MESSAGE;
     if (!strncmp( ctx->com_buf, "ERR", 3 )) return SEC_E_INVALID_TOKEN;
 
-    memcpy( buf, ctx->com_buf, *retlen + 1 );
+    memcpy( params->buf, ctx->com_buf, *params->retlen + 1 );
 
     if (!offset) ctx->com_buf_offset = 0;
     else
@@ -108,9 +111,12 @@ static SECURITY_STATUS CDECL ntlm_chat( struct ntlm_ctx *ctx, char *buf, unsigne
     return SEC_E_OK;
 }
 
-static void CDECL ntlm_cleanup( struct ntlm_ctx *ctx )
+static NTSTATUS ntlm_cleanup( void *args )
 {
-    if (!ctx || (ctx->mode != MODE_CLIENT && ctx->mode != MODE_SERVER)) return;
+    struct cleanup_params *params = args;
+    struct ntlm_ctx *ctx = params->ctx;
+
+    if (!ctx || (ctx->mode != MODE_CLIENT && ctx->mode != MODE_SERVER)) return STATUS_INVALID_HANDLE;
     ctx->mode = MODE_INVALID;
 
     /* closing stdin will terminate ntlm_auth */
@@ -125,14 +131,15 @@ static void CDECL ntlm_cleanup( struct ntlm_ctx *ctx )
         } while (ret < 0 && errno == EINTR);
     }
 
-    RtlFreeHeap( GetProcessHeap(), 0, ctx->com_buf );
-    RtlFreeHeap( GetProcessHeap(), 0, ctx );
+    free( ctx->com_buf );
+    return STATUS_SUCCESS;
 }
 
-static SECURITY_STATUS CDECL ntlm_fork( char **argv, struct ntlm_ctx **ret_ctx )
+static NTSTATUS ntlm_fork( void *args )
 {
+    struct fork_params *params = args;
+    struct ntlm_ctx *ctx = params->ctx;
     int pipe_in[2], pipe_out[2];
-    struct ntlm_ctx *ctx;
 
 #ifdef HAVE_PIPE2
     if (pipe2( pipe_in, O_CLOEXEC ) < 0)
@@ -156,15 +163,6 @@ static SECURITY_STATUS CDECL ntlm_fork( char **argv, struct ntlm_ctx **ret_ctx )
         fcntl( pipe_out[1], F_SETFD, FD_CLOEXEC );
     }
 
-    if (!(ctx = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ctx) )))
-    {
-        close( pipe_in[0] );
-        close( pipe_in[1] );
-        close( pipe_out[0] );
-        close( pipe_out[1] );
-        return SEC_E_INSUFFICIENT_MEMORY;
-    }
-
     if (!(ctx->pid = fork())) /* child */
     {
         dup2( pipe_out[0], 0 );
@@ -175,7 +173,7 @@ static SECURITY_STATUS CDECL ntlm_fork( char **argv, struct ntlm_ctx **ret_ctx )
         close( pipe_in[0] );
         close( pipe_in[1] );
 
-        execvp( argv[0], argv );
+        execvp( params->argv[0], params->argv );
 
         write( 1, "BH\n", 3 );
         _exit( 1 );
@@ -186,7 +184,6 @@ static SECURITY_STATUS CDECL ntlm_fork( char **argv, struct ntlm_ctx **ret_ctx )
         close( pipe_in[1] );
         ctx->pipe_out = pipe_out[1];
         close( pipe_out[0] );
-        *ret_ctx = ctx;
     }
 
     return SEC_E_OK;
@@ -196,19 +193,20 @@ static SECURITY_STATUS CDECL ntlm_fork( char **argv, struct ntlm_ctx **ret_ctx )
 #define NTLM_AUTH_MINOR_VERSION 0
 #define NTLM_AUTH_MICRO_VERSION 25
 
-static BOOL check_version( void )
+static NTSTATUS ntlm_check_version( void *args )
 {
-    struct ntlm_ctx *ctx;
+    struct ntlm_ctx ctx = { 0 };
     char *argv[3], buf[80];
-    BOOL ret = FALSE;
+    NTSTATUS status = STATUS_DLL_NOT_FOUND;
+    struct fork_params params = { &ctx, argv };
     int len;
 
     argv[0] = (char *)"ntlm_auth";
     argv[1] = (char *)"--version";
     argv[2] = NULL;
-    if (ntlm_fork( argv, &ctx ) != SEC_E_OK) return FALSE;
+    if (ntlm_fork( &params ) != SEC_E_OK) return status;
 
-    if ((len = read( ctx->pipe_in, buf, sizeof(buf) - 1 )) > 8)
+    if ((len = read( ctx.pipe_in, buf, sizeof(buf) - 1 )) > 8)
     {
         char *newline;
         int major = 0, minor = 0, micro = 0;
@@ -224,30 +222,23 @@ static BOOL check_version( void )
                   micro >= NTLM_AUTH_MICRO_VERSION)))
             {
                 TRACE( "detected ntlm_auth version %d.%d.%d\n", major, minor, micro );
-                ret = TRUE;
+                status = STATUS_SUCCESS;
             }
         }
     }
 
-    if (!ret) ERR_(winediag)( "ntlm_auth was not found or is outdated. "
+    if (status) ERR_(winediag)( "ntlm_auth was not found or is outdated. "
                               "Make sure that ntlm_auth >= %d.%d.%d is in your path. "
                               "Usually, you can find it in the winbind package of your distribution.\n",
                               NTLM_AUTH_MAJOR_VERSION, NTLM_AUTH_MINOR_VERSION, NTLM_AUTH_MICRO_VERSION );
-    ntlm_cleanup( ctx );
-    return ret;
+    ntlm_cleanup( &ctx );
+    return status;
 }
 
-static const struct ntlm_funcs funcs =
+const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     ntlm_chat,
     ntlm_cleanup,
     ntlm_fork,
+    ntlm_check_version,
 };
-
-NTSTATUS CDECL __wine_init_unix_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out )
-{
-    if (reason != DLL_PROCESS_ATTACH) return STATUS_SUCCESS;
-    if (!check_version()) return STATUS_DLL_NOT_FOUND;
-    *(const struct ntlm_funcs **)ptr_out = &funcs;
-    return STATUS_SUCCESS;
-}

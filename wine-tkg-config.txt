@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:32:19 PM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:33:34 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.14.r0.g7bedd313c88
-Using wine-staging patchset (version 6.14.r0.g069adfd1)
+Wine (plain) version: 6.15.r0.g7f144646ffa
+Using wine-staging patchset (version 6.15.r0.g4b6879f3)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -20,6 +20,7 @@ CSMT-toggle-ef11bb6.patch -- ( Applied CSMT toggle logic patch )
 Staging overrides, if any: -W ntdll-NtAlertThreadByThreadId -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW -W imm32-com-initialization -W bcrypt-ECDHSecretAgreement
 
 use_clock_monotonic-staging.patch -- ( Applied clock_monotonic patch )
+leagueoflolfix-3513a17.patch -- ( Applied LoL 9.20+ fix - Requires vdso32 disabled (echo 0 > /proc/sys/abi/vsyscall32) )
 fsync-unix-staging-10ca57f.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
 fsync_futex2.patch -- ( Add futex2 support to fsync )
@@ -27,12 +28,13 @@ fsync_futex2.patch -- ( Add futex2 support to fsync )
 valve_proton_fullscreen_hack-staging-a7ec245.patch -- ( Applied Proton fullscreen hack patch (a7ec245) )
 LAA-unix-staging-ea6308e.patch -- ( Applied large address aware override support )
 
-proton-tkg-staging-e584050.patch -- ( Using Steam-specific Proton-tkg patches (staging-e584050) 2/2 )
+proton-tkg-staging-d127a14.patch -- ( Using Steam-specific Proton-tkg patches (staging-d127a14) 2/2 )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 proton-bcrypt-staging-b3cd21c.patch -- ( Using Proton Bcrypt patches )
 josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging-d02d502.patch -- ( Enforce win10 as default wine version (staging) )
 
+Applied hotfix wine-pulseaudio-fixup.mypatch
 Applied hotfix imm32-com-initialization_no_net_active_window.mypatch
 Applied hotfix virtual_alloc_remi2.mypatch
 Applied hotfix a608ef1.mypatch

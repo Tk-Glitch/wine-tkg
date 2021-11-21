@@ -56,7 +56,7 @@ static const WCHAR * const root_key_names[] =
     NULL,         /* HKEY_CURRENT_USER is determined dynamically */
     L"\\Registry\\Machine",
     L"\\Registry\\User",
-    L"\\Registry\\PerfData",
+    NULL,         /* HKEY_PERFORMANCE_DATA is not a real key */
     L"\\Registry\\Machine\\System\\CurrentControlSet\\Hardware Profiles\\Current",
     L"\\Registry\\DynData"
 };
@@ -121,6 +121,25 @@ static HANDLE open_wow6432node( HANDLE key )
     return ret;
 }
 
+static HKEY get_perflib_key( HANDLE key )
+{
+    static const WCHAR performance_text[] =
+            L"\\Registry\\Machine\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Perflib\\009";
+    char buffer[200];
+    OBJECT_NAME_INFORMATION *info = (OBJECT_NAME_INFORMATION *)buffer;
+
+    if (!NtQueryObject( key, ObjectNameInformation, buffer, sizeof(buffer), NULL ))
+    {
+        if (!wcsicmp( info->Name.Buffer, performance_text ))
+        {
+            NtClose( key );
+            return HKEY_PERFORMANCE_TEXT;
+        }
+    }
+
+    return key;
+}
+
 /* wrapper for NtCreateKey that creates the key recursively if necessary */
 static NTSTATUS create_key( HKEY *retkey, ACCESS_MASK access, OBJECT_ATTRIBUTES *attr,
                             const UNICODE_STRING *class, ULONG options, PULONG dispos )
@@ -172,7 +191,7 @@ static NTSTATUS create_key( HKEY *retkey, ACCESS_MASK access, OBJECT_ATTRIBUTES 
                                       options & ~REG_OPTION_CREATE_LINK, dispos );
             }
             if (attr->RootDirectory != root) NtClose( attr->RootDirectory );
-            if (status) return status;
+            if (!NT_SUCCESS(status)) return status;
             if (i == len) break;
             attr->RootDirectory = subkey;
             while (i < len && buffer[i] == '\\') i++;
@@ -185,6 +204,11 @@ static NTSTATUS create_key( HKEY *retkey, ACCESS_MASK access, OBJECT_ATTRIBUTES 
     {
         if (attr->RootDirectory != root) NtClose( attr->RootDirectory );
         attr->RootDirectory = subkey;
+    }
+    if (status == STATUS_PREDEFINED_HANDLE)
+    {
+        attr->RootDirectory = get_perflib_key( attr->RootDirectory );
+        status = STATUS_SUCCESS;
     }
     *retkey = attr->RootDirectory;
     return status;
@@ -205,7 +229,13 @@ static NTSTATUS open_key( HKEY *retkey, DWORD options, ACCESS_MASK access, OBJEC
     if (!force_wow32)
     {
         if (options & REG_OPTION_OPEN_LINK) attr->Attributes |= OBJ_OPENLINK;
-        return NtOpenKeyEx( (HANDLE *)retkey, access, attr, options );
+        status = NtOpenKeyEx( (HANDLE *)retkey, access, attr, options );
+        if (status == STATUS_PREDEFINED_HANDLE)
+        {
+            *retkey = get_perflib_key( *retkey );
+            status = STATUS_SUCCESS;
+        }
+        return status;
     }
 
     if (len && buffer[0] == '\\') return STATUS_OBJECT_PATH_INVALID;
@@ -248,6 +278,11 @@ static NTSTATUS open_key( HKEY *retkey, DWORD options, ACCESS_MASK access, OBJEC
     {
         if (attr->RootDirectory != root) NtClose( attr->RootDirectory );
         attr->RootDirectory = subkey;
+    }
+    if (status == STATUS_PREDEFINED_HANDLE)
+    {
+        attr->RootDirectory = get_perflib_key( attr->RootDirectory );
+        status = STATUS_SUCCESS;
     }
     *retkey = attr->RootDirectory;
     return status;
@@ -295,21 +330,35 @@ static HKEY create_special_root_hkey( HKEY hkey, DWORD access )
 /* map the hkey from special root to normal key if necessary */
 static inline HKEY get_special_root_hkey( HKEY hkey, REGSAM access )
 {
-    HKEY ret = hkey;
+    unsigned int index = HandleToUlong(hkey) - HandleToUlong(HKEY_SPECIAL_ROOT_FIRST);
+    DWORD wow64_flags = access & (KEY_WOW64_32KEY | KEY_WOW64_64KEY);
 
-    if ((HandleToUlong(hkey) >= HandleToUlong(HKEY_SPECIAL_ROOT_FIRST))
-            && (HandleToUlong(hkey) <= HandleToUlong(HKEY_SPECIAL_ROOT_LAST)))
+    switch (HandleToUlong(hkey))
     {
-        REGSAM mask = 0;
+        case (LONG)(LONG_PTR)HKEY_CLASSES_ROOT:
+            if (wow64_flags)
+                return create_special_root_hkey( hkey, MAXIMUM_ALLOWED | wow64_flags );
+            /* fall through */
 
-        if (HandleToUlong(hkey) == HandleToUlong(HKEY_CLASSES_ROOT))
-            mask = KEY_WOW64_32KEY | KEY_WOW64_64KEY;
+        case (LONG)(LONG_PTR)HKEY_CURRENT_USER:
+        case (LONG)(LONG_PTR)HKEY_LOCAL_MACHINE:
+        case (LONG)(LONG_PTR)HKEY_USERS:
+        case (LONG)(LONG_PTR)HKEY_CURRENT_CONFIG:
+        case (LONG)(LONG_PTR)HKEY_DYN_DATA:
+            if (special_root_keys[index])
+                return special_root_keys[index];
+            return create_special_root_hkey( hkey, MAXIMUM_ALLOWED );
 
-        if ((access & mask) ||
-                !(ret = special_root_keys[HandleToUlong(hkey) - HandleToUlong(HKEY_SPECIAL_ROOT_FIRST)]))
-            ret = create_special_root_hkey( hkey, MAXIMUM_ALLOWED | (access & mask) );
+        default:
+            return hkey;
     }
-    return ret;
+}
+
+static BOOL is_perf_key( HKEY key )
+{
+    return HandleToUlong(key) == HandleToUlong(HKEY_PERFORMANCE_DATA)
+            || HandleToUlong(key) == HandleToUlong(HKEY_PERFORMANCE_TEXT)
+            || HandleToUlong(key) == HandleToUlong(HKEY_PERFORMANCE_NLSTEXT);
 }
 
 
@@ -1162,6 +1211,48 @@ LONG WINAPI RegSetKeyValueA( HKEY hkey, LPCSTR subkey, LPCSTR name, DWORD type, 
     return ret;
 }
 
+/* FIXME: we should read data from system32/perf009c.dat (or perf###c depending
+ * on locale) instead */
+static DWORD query_perf_names( DWORD *type, void *data, DWORD *ret_size, BOOL unicode )
+{
+    static const WCHAR names[] = L"1\0" "1847\0" "1846\0End Marker\0";
+    DWORD size = *ret_size;
+
+    if (type) *type = REG_MULTI_SZ;
+    *ret_size = sizeof(names);
+    if (!unicode) *ret_size /= sizeof(WCHAR);
+
+    if (!data) return ERROR_SUCCESS;
+    if (size < *ret_size) return ERROR_MORE_DATA;
+
+    if (unicode)
+        memcpy( data, names, sizeof(names) );
+    else
+        RtlUnicodeToMultiByteN( data, size, NULL, names, sizeof(names) );
+    return ERROR_SUCCESS;
+}
+
+/* FIXME: we should read data from system32/perf009h.dat (or perf###h depending
+ * on locale) instead */
+static DWORD query_perf_help( DWORD *type, void *data, DWORD *ret_size, BOOL unicode )
+{
+    static const WCHAR names[] = L"1847\0End Marker\0";
+    DWORD size = *ret_size;
+
+    if (type) *type = REG_MULTI_SZ;
+    *ret_size = sizeof(names);
+    if (!unicode) *ret_size /= sizeof(WCHAR);
+
+    if (!data) return ERROR_SUCCESS;
+    if (size < *ret_size) return ERROR_MORE_DATA;
+
+    if (unicode)
+        memcpy( data, names, sizeof(names) );
+    else
+        RtlUnicodeToMultiByteN( data, size, NULL, names, sizeof(names) );
+    return ERROR_SUCCESS;
+}
+
 struct perf_provider
 {
     HMODULE perflib;
@@ -1296,7 +1387,7 @@ static DWORD collect_data(struct perf_provider *provider, const WCHAR *query, vo
 
 #define MAX_SERVICE_NAME 260
 
-static DWORD query_perf_data(const WCHAR *query, DWORD *type, void *data, DWORD *ret_size)
+static DWORD query_perf_data( const WCHAR *query, DWORD *type, void *data, DWORD *ret_size, BOOL unicode )
 {
     DWORD err, i, data_size;
     HKEY root;
@@ -1304,6 +1395,11 @@ static DWORD query_perf_data(const WCHAR *query, DWORD *type, void *data, DWORD 
 
     if (!ret_size)
         return ERROR_INVALID_PARAMETER;
+
+    if (!wcsnicmp( query, L"counter", 7 ))
+        return query_perf_names( type, data, ret_size, unicode );
+    if (!wcsnicmp( query, L"help", 4 ))
+        return query_perf_help( type, data, ret_size, unicode );
 
     data_size = *ret_size;
     *ret_size = 0;
@@ -1437,8 +1533,8 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegQueryValueExW( HKEY hkey, LPCWSTR name, LPDW
 
     if ((data && !count) || reserved) return ERROR_INVALID_PARAMETER;
 
-    if (hkey == HKEY_PERFORMANCE_DATA)
-        return query_perf_data(name, type, data, count);
+    if (is_perf_key( hkey ))
+        return query_perf_data( name, type, data, count, TRUE );
 
     if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
 
@@ -1530,7 +1626,7 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegQueryValueExA( HKEY hkey, LPCSTR name, LPDWO
           hkey, debugstr_a(name), reserved, type, data, count, count ? *count : 0 );
 
     if ((data && !count) || reserved) return ERROR_INVALID_PARAMETER;
-    if (hkey != HKEY_PERFORMANCE_DATA && !(hkey = get_special_root_hkey( hkey, 0 )))
+    if (!(hkey = get_special_root_hkey( hkey, 0 )))
         return ERROR_INVALID_HANDLE;
 
     if (count) datalen = *count;
@@ -1543,9 +1639,9 @@ LSTATUS WINAPI DECLSPEC_HOTPATCH RegQueryValueExA( HKEY hkey, LPCSTR name, LPDWO
     if ((status = RtlAnsiStringToUnicodeString( &nameW, &nameA, TRUE )))
         return RtlNtStatusToDosError(status);
 
-    if (hkey == HKEY_PERFORMANCE_DATA)
+    if (is_perf_key( hkey ))
     {
-        DWORD ret = query_perf_data( nameW.Buffer, type, data, count );
+        DWORD ret = query_perf_data( nameW.Buffer, type, data, count, FALSE );
         RtlFreeUnicodeString( &nameW );
         return ret;
     }

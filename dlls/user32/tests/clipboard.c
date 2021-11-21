@@ -949,6 +949,47 @@ static void test_synthesized(void)
     r = CloseClipboard();
     ok(r, "gle %d\n", GetLastError());
     DestroyWindow( hwnd );
+
+    /* Check what happens to the delayed rendering clipboard formats when the
+     * owner window is destroyed.
+     */
+    hwnd = CreateWindowA( "static", NULL, WS_POPUP, 0, 0, 10, 10, 0, 0, 0, NULL );
+    SetWindowLongPtrA( hwnd, GWLP_WNDPROC, (LONG_PTR)renderer_winproc );
+
+    r = open_clipboard(hwnd);
+    ok(r, "gle %d\n", GetLastError());
+    r = EmptyClipboard();
+    ok(r, "gle %d\n", GetLastError());
+    SetClipboardData( CF_UNICODETEXT, NULL );
+    r = CloseClipboard();
+    ok(r, "gle %d\n", GetLastError());
+
+    r = open_clipboard(NULL);
+    ok(r, "gle %d\n", GetLastError());
+    count = CountClipboardFormats();
+    ok(count == 4, "count %u\n", count );
+
+    DestroyWindow( hwnd );
+
+    /* CF_UNICODETEXT and derivatives, CF_TEXT + CF_OEMTEXT, should be gone */
+    count = CountClipboardFormats();
+    ok(count == 1, "count %u\n", count );
+    cf = EnumClipboardFormats( 0 );
+    ok(cf == CF_LOCALE, "unexpected clipboard format %u\n", cf);
+
+    r = CloseClipboard();
+    ok(r, "gle %d\n", GetLastError());
+
+    r = open_clipboard(NULL);
+    ok(r, "gle %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    data = GetClipboardData( CF_TEXT );
+    ok(GetLastError() == 0xdeadbeef, "bad last error %d\n", GetLastError());
+    ok(!data, "GetClipboardData() should have returned NULL\n");
+
+    r = CloseClipboard();
+    ok(r, "gle %d\n", GetLastError());
 }
 
 static DWORD WINAPI clipboard_render_data_thread(void *param)
@@ -1543,6 +1584,11 @@ static void test_handles( HWND hwnd )
     data = GetClipboardData( 0xdeadfade );
     ok( data == ptr, "wrong data %p\n", data );
 
+    SetLastError( 0xdeadbeef );
+    data = GetClipboardData( CF_RIFF );
+    ok( GetLastError() == 0xdeadbeef, "unexpected last error %d\n", GetLastError() );
+    ok( !data, "wrong data %p\n", data );
+
     h = SetClipboardData( CF_PRIVATEFIRST + 7, htext4 );
     ok( h == htext4, "got %p\n", h );
     ok( is_moveable( h ), "expected moveable mem %p\n", h );
@@ -1927,7 +1973,7 @@ static void test_data_handles(void)
     ok( is_fixed( h ), "expected fixed mem %p\n", h );
     ok( is_moveable( text ), "expected moveable mem %p\n", text );
     ptr = GlobalLock( h );
-    ok( !strcmp( ptr, "foobar" ), "wrong data '%.8s'\n", ptr );
+    ok( ptr && !strcmp( ptr, "foobar" ), "wrong data %s\n", wine_dbgstr_a(ptr) );
     GlobalUnlock( h );
 
     r = EmptyClipboard();

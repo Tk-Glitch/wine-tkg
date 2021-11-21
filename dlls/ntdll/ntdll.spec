@@ -1625,7 +1625,7 @@
 @ cdecl -syscall wine_server_handle_to_fd(long long ptr ptr)
 
 # Unix interface
-@ cdecl -syscall __wine_unix_call(int64 long ptr)
+@ stdcall -syscall __wine_unix_call(int64 long ptr)
 @ cdecl __wine_set_unix_funcs(long ptr)
 @ cdecl __wine_init_unix_lib(long long ptr ptr)
 @ stdcall __wine_ctrl_routine(ptr)
@@ -1648,5 +1648,5 @@
 @ cdecl wine_get_host_version(ptr ptr)
 
 # Filesystem
-@ cdecl -syscall wine_nt_to_unix_file_name(ptr ptr ptr long)
-@ cdecl -syscall wine_unix_to_nt_file_name(str ptr ptr)
+@ stdcall -syscall wine_nt_to_unix_file_name(ptr ptr ptr long)
+@ stdcall -syscall wine_unix_to_nt_file_name(str ptr ptr)

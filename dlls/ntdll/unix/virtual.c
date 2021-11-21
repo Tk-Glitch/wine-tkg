@@ -387,7 +387,7 @@ static int mmap_is_in_reserved_area( void *addr, SIZE_T size )
     return 0;
 }
 
-static int mmap_enum_reserved_areas( int (CDECL *enum_func)(void *base, SIZE_T size, void *arg),
+static int mmap_enum_reserved_areas( int (*enum_func)(void *base, SIZE_T size, void *arg),
                                      void *arg, int top_down )
 {
     int ret = 0;
@@ -601,6 +601,20 @@ static void mmap_init( const struct preload_info *preload_info )
 #endif
 }
 
+
+/***********************************************************************
+ *           get_wow_user_space_limit
+ */
+static void *get_wow_user_space_limit(void)
+{
+#ifdef _WIN64
+    if (main_image_info.ImageCharacteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) return (void *)0xc0000000;
+    return (void *)0x7fff0000;
+#endif
+    return user_space_limit;
+}
+
+
 /***********************************************************************
  *           add_builtin_module
  */
@@ -622,7 +636,7 @@ static void add_builtin_module( void *module, void *handle )
 /***********************************************************************
  *           release_builtin_module
  */
-NTSTATUS release_builtin_module( void *module )
+static void release_builtin_module( void *module )
 {
     struct builtin_module *builtin;
 
@@ -637,9 +651,8 @@ NTSTATUS release_builtin_module( void *module )
             free( builtin->unix_name );
             free( builtin );
         }
-        return STATUS_SUCCESS;
+        break;
     }
-    return STATUS_INVALID_PARAMETER;
 }
 
 
@@ -662,6 +675,29 @@ void *get_builtin_so_handle( void *module )
     }
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
     return ret;
+}
+
+
+/***********************************************************************
+ *           get_builtin_unix_funcs
+ */
+static NTSTATUS get_builtin_unix_funcs( void *module, BOOL wow, void **funcs )
+{
+    const char *ptr_name = wow ? "__wine_unix_call_wow64_funcs" : "__wine_unix_call_funcs";
+    sigset_t sigset;
+    NTSTATUS status = STATUS_DLL_NOT_FOUND;
+    struct builtin_module *builtin;
+
+    server_enter_uninterrupted_section( &virtual_mutex, &sigset );
+    LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
+    {
+        if (builtin->module != module) continue;
+        *funcs = dlsym( builtin->unix_handle, ptr_name );
+        status = STATUS_SUCCESS;
+        break;
+    }
+    server_leave_uninterrupted_section( &virtual_mutex, &sigset );
+    return status;
 }
 
 
@@ -690,9 +726,9 @@ NTSTATUS get_builtin_unix_info( void *module, const char **name, void **handle, 
 
 
 /***********************************************************************
- *           set_builtin_unix_info
+ *           set_builtin_unix_handle
  */
-NTSTATUS set_builtin_unix_info( void *module, const char *name, void *handle, void *entry )
+NTSTATUS set_builtin_unix_handle( void *module, const char *name, void *handle )
 {
     sigset_t sigset;
     NTSTATUS status = STATUS_DLL_NOT_FOUND;
@@ -704,13 +740,36 @@ NTSTATUS set_builtin_unix_info( void *module, const char *name, void *handle, vo
         if (builtin->module != module) continue;
         if (!builtin->unix_handle)
         {
-            free( builtin->unix_name );
-            builtin->unix_name = name ? strdup( name ) : NULL;
+            builtin->unix_name = strdup( name );
             builtin->unix_handle = handle;
-            builtin->unix_entry = entry;
             status = STATUS_SUCCESS;
         }
         else status = STATUS_IMAGE_ALREADY_LOADED;
+        break;
+    }
+    server_leave_uninterrupted_section( &virtual_mutex, &sigset );
+    return status;
+}
+
+
+/***********************************************************************
+ *           set_builtin_unix_entry
+ */
+NTSTATUS set_builtin_unix_entry( void *module, void *entry )
+{
+    sigset_t sigset;
+    NTSTATUS status = STATUS_DLL_NOT_FOUND;
+    struct builtin_module *builtin;
+
+    server_enter_uninterrupted_section( &virtual_mutex, &sigset );
+    LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
+    {
+        if (builtin->module != module) continue;
+        if (builtin->unix_handle)
+        {
+            builtin->unix_entry = entry;
+            status = STATUS_SUCCESS;
+        }
         break;
     }
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
@@ -1311,7 +1370,7 @@ struct area_boundary
  * in the specified region. If no boundaries are found, result is NULL.
  * virtual_mutex must be held by caller.
  */
-static int CDECL get_area_boundary_callback( void *start, SIZE_T size, void *arg )
+static int get_area_boundary_callback( void *start, SIZE_T size, void *arg )
 {
     struct area_boundary *area = arg;
     void *end = (char *)start + size;
@@ -1676,7 +1735,8 @@ static inline void *unmap_extra_space( void *ptr, size_t total_size, size_t want
     return ptr;
 }
 
-static int CDECL alloc_area_in_reserved_or_between_callback( void *start, SIZE_T size, void *arg )
+
+static int alloc_area_in_reserved_or_between_callback( void *start, SIZE_T size, void *arg )
 {
     char *intersect_start, *intersect_end;
     char *end = (char *)start + size;
@@ -2693,7 +2753,7 @@ struct alloc_virtual_heap
 };
 
 /* callback for mmap_enum_reserved_areas to allocate space for the virtual heap */
-static int CDECL alloc_virtual_heap( void *base, SIZE_T size, void *arg )
+static int alloc_virtual_heap( void *base, SIZE_T size, void *arg )
 {
     struct alloc_virtual_heap *alloc = arg;
     void *end = (char *)base + size;
@@ -2798,7 +2858,8 @@ ULONG_PTR get_system_affinity_mask(void)
  */
 void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info, BOOL wow64 )
 {
-#if defined(HAVE_STRUCT_SYSINFO_TOTALRAM) && defined(HAVE_STRUCT_SYSINFO_MEM_UNIT)
+#if defined(HAVE_SYSINFO) \
+    && defined(HAVE_STRUCT_SYSINFO_TOTALRAM) && defined(HAVE_STRUCT_SYSINFO_MEM_UNIT)
     struct sysinfo sinfo;
 
     if (!sysinfo(&sinfo))
@@ -2823,17 +2884,8 @@ void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info, BOOL wow64 )
     info->LowestUserAddress       = (void *)0x10000;
     info->ActiveProcessorsAffinityMask = get_system_affinity_mask();
     info->NumberOfProcessors      = peb->NumberOfProcessors;
-#ifdef _WIN64
-    if (wow64)
-    {
-        if (main_image_info.ImageCharacteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE)
-            info->HighestUserAddress = (char *)0xc0000000 - 1;
-        else
-            info->HighestUserAddress = (char *)0x7fff0000 - 1;
-        return;
-    }
-#endif
-    info->HighestUserAddress = (char *)user_space_limit - 1;
+    if (wow64) info->HighestUserAddress = (char *)get_wow_user_space_limit() - 1;
+    else info->HighestUserAddress = (char *)user_space_limit - 1;
 }
 
 
@@ -3335,6 +3387,19 @@ static NTSTATUS grow_thread_stack( char *page, struct thread_stack_info *stack_i
     return ret;
 }
 
+BOOL CDECL __wine_needs_override_large_address_aware(void)
+{
+    static int needs_override = -1;
+
+    if (needs_override == -1)
+    {
+        const char *str = getenv( "WINE_LARGE_ADDRESS_AWARE" );
+
+        needs_override = !str || atoi(str) == 1;
+    }
+    return needs_override;
+}
+
 
 /***********************************************************************
  *           virtual_handle_fault
@@ -3780,7 +3845,7 @@ struct free_range
 };
 
 /* free reserved areas above the limit; callback for mmap_enum_reserved_areas */
-static int CDECL free_reserved_memory( void *base, SIZE_T size, void *arg )
+static int free_reserved_memory( void *base, SIZE_T size, void *arg )
 {
     struct free_range *range = arg;
 
@@ -3801,51 +3866,29 @@ static int CDECL free_reserved_memory( void *base, SIZE_T size, void *arg )
  *
  * Release some address space once we have loaded and initialized the app.
  */
-void CDECL virtual_release_address_space(void)
+static void virtual_release_address_space(void)
 {
     struct free_range range;
-    sigset_t sigset;
-
-    if (is_win64) return;
-
-    server_enter_uninterrupted_section( &virtual_mutex, &sigset );
 
     range.base  = (char *)0x82000000;
-    range.limit = user_space_limit;
+    range.limit = get_wow_user_space_limit();
+
+    if (range.limit > (char *)0xfffff000) return;  /* 64-bit limit, nothing to do */
 
     if (range.limit > range.base)
     {
         while (mmap_enum_reserved_areas( free_reserved_memory, &range, 1 )) /* nothing */;
 #ifdef __APPLE__
         /* On macOS, we still want to free some of low memory, for OpenGL resources */
-        range.base  = (char *)0x40000000;
+        range.base = (char *)0x40000000;
 #else
-        range.base  = NULL;
+        return;
 #endif
     }
-    else
-        range.base = (char *)0x20000000;
+    else range.base = (char *)0x20000000;
 
-    if (range.base)
-    {
-        range.limit = (char *)0x7f000000;
-        while (mmap_enum_reserved_areas( free_reserved_memory, &range, 0 )) /* nothing */;
-    }
-
-    server_leave_uninterrupted_section( &virtual_mutex, &sigset );
-}
-
-BOOL CDECL __wine_needs_override_large_address_aware(void)
-{
-    static int needs_override = -1;
-
-    if (needs_override == -1)
-    {
-        const char *str = getenv( "WINE_LARGE_ADDRESS_AWARE" );
-
-        needs_override = !str || atoi(str) == 1;
-    }
-    return needs_override;
+    range.limit = (char *)0x7f000000;
+    while (mmap_enum_reserved_areas( free_reserved_memory, &range, 0 )) /* nothing */;
 }
 
 
@@ -4075,12 +4118,16 @@ NTSTATUS WINAPI NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *si
     size = ROUND_SIZE( addr, size );
     base = ROUND_ADDR( addr, page_mask );
 
-    /* avoid freeing the DOS area when a broken app passes a NULL pointer */
-    if (!base) return STATUS_INVALID_PARAMETER;
-
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
 
-    if (!(view = find_view( base, size )) || !is_view_valloc( view ))
+    /* avoid freeing the DOS area when a broken app passes a NULL pointer */
+    if (!base)
+    {
+        /* address 1 is magic to mean release reserved space */
+        if (addr == (void *)1 && !*size_ptr && type == MEM_RELEASE) virtual_release_address_space();
+        else status = STATUS_INVALID_PARAMETER;
+    }
+    else if (!(view = find_view( base, size )) || !is_view_valloc( view ))
     {
         status = STATUS_INVALID_PARAMETER;
     }
@@ -4194,7 +4241,7 @@ NTSTATUS WINAPI NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T 
 
 
 /* retrieve state for a free memory area; callback for mmap_enum_reserved_areas */
-static int CDECL get_free_mem_state_callback( void *start, SIZE_T size, void *arg )
+static int get_free_mem_state_callback( void *start, SIZE_T size, void *arg )
 {
     MEMORY_BASIC_INFORMATION *info = arg;
     void *end = (char *)start + size;
@@ -4449,10 +4496,6 @@ static NTSTATUS get_memory_section_name( HANDLE process, LPCVOID addr,
     return status;
 }
 
-#define UNIMPLEMENTED_INFO_CLASS(c) \
-    case c: \
-        FIXME("(process=%p,addr=%p) Unimplemented information class: " #c "\n", process, addr); \
-        return STATUS_INVALID_INFO_CLASS
 
 /***********************************************************************
  *             NtQueryVirtualMemory   (NTDLL.@)
@@ -4462,6 +4505,8 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
                                       MEMORY_INFORMATION_CLASS info_class,
                                       PVOID buffer, SIZE_T len, SIZE_T *res_len )
 {
+    NTSTATUS status;
+
     TRACE("(%p, %p, info_class=%d, %p, %ld, %p)\n",
           process, addr, info_class, buffer, len, res_len);
 
@@ -4469,13 +4514,41 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
     {
         case MemoryBasicInformation:
             return get_basic_memory_info( process, addr, buffer, len, res_len );
+
         case MemoryWorkingSetExInformation:
             return get_working_set_ex( process, addr, buffer, len, res_len );
-        case MemorySectionName:
+
+        case MemoryMappedFilenameInformation:
             return get_memory_section_name( process, addr, buffer, len, res_len );
 
-        UNIMPLEMENTED_INFO_CLASS(MemoryWorkingSetList);
-        UNIMPLEMENTED_INFO_CLASS(MemoryBasicVlmInformation);
+        case MemoryWineImageInitFuncs:
+            if (process == GetCurrentProcess())
+            {
+                void *module = (void *)addr;
+                void *handle = get_builtin_so_handle( module );
+
+                if (handle)
+                {
+                    status = get_builtin_init_funcs( handle, buffer, len, res_len );
+                    release_builtin_module( module );
+                    return status;
+                }
+            }
+            return STATUS_INVALID_HANDLE;
+
+        case MemoryWineUnixFuncs:
+        case MemoryWineUnixWow64Funcs:
+            if (len != sizeof(unixlib_handle_t)) return STATUS_INFO_LENGTH_MISMATCH;
+            if (process == GetCurrentProcess())
+            {
+                void *module = (void *)addr;
+                void *funcs = NULL;
+
+                status = get_builtin_unix_funcs( module, info_class == MemoryWineUnixWow64Funcs, &funcs );
+                if (!status) *(unixlib_handle_t *)buffer = (UINT_PTR)funcs;
+                return status;
+            }
+            return STATUS_INVALID_HANDLE;
 
         default:
             FIXME("(%p,%p,info_class=%d,%p,%ld,%p) Unknown information class\n",

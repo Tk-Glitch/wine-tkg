@@ -1380,6 +1380,31 @@ static void call_tls_callbacks( HMODULE module, UINT reason )
     }
 }
 
+
+/*************************************************************************
+ *              init_builtin_dll
+ */
+static void init_builtin_dll( HMODULE module )
+{
+    void *buffer[16];
+    void (**funcs)(int, char **, char **) = (void *)buffer;
+    SIZE_T i, size;
+    NTSTATUS status;
+
+    status = NtQueryVirtualMemory( GetCurrentProcess(), module, MemoryWineImageInitFuncs,
+                                   buffer, sizeof(buffer), &size );
+    if (status == STATUS_BUFFER_TOO_SMALL)
+    {
+        if (!(funcs = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return;
+        status = NtQueryVirtualMemory( GetCurrentProcess(), module, MemoryWineImageInitFuncs,
+                                       funcs, size, &size );
+    }
+    if (!status) for (i = 0; i < size / sizeof(*funcs); i++) funcs[i]( 0, NULL, NULL );
+
+    if ((void *)funcs != (void *)buffer) RtlFreeHeap( GetProcessHeap(), 0, funcs );
+}
+
+
 /*************************************************************************
  *              MODULE_InitDLL
  */
@@ -1396,7 +1421,7 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved 
     if (wm->ldr.Flags & LDR_DONT_RESOLVE_REFS) return STATUS_SUCCESS;
     if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.DllBase, reason );
     if (wm->ldr.Flags & LDR_WINE_INTERNAL && reason == DLL_PROCESS_ATTACH)
-        unix_funcs->init_builtin_dll( wm->ldr.DllBase );
+        init_builtin_dll( wm->ldr.DllBase );
     if (!entry) return STATUS_SUCCESS;
 
     memset( mod_name, 0, sizeof(mod_name) );
@@ -2081,13 +2106,7 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
 
     if (is_builtin)
     {
-#ifdef __aarch64__
-        /* Always enable relay entry points on aarch64, to allow restoring
-         * the TEB to x18. */
-#else
-        if (TRACE_ON(relay))
-#endif
-            RELAY_SetupDLL( *module );
+        if (TRACE_ON(relay)) RELAY_SetupDLL( *module );
     }
     else
     {
@@ -3783,7 +3802,6 @@ static void load_global_options(void)
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING name_str, val_str;
     HANDLE hkey;
-    ULONG value;
 
     RtlInitUnicodeString( &name_str, L"WINEBOOTSTRAPMODE" );
     val_str.MaximumLength = 0;
@@ -3799,31 +3817,10 @@ static void load_global_options(void)
 
     if (!NtOpenKey( &hkey, KEY_QUERY_VALUE, &attr ))
     {
-        query_dword_option( hkey, L"GlobalFlag", &NtCurrentTeb()->Peb->NtGlobalFlag );
         query_dword_option( hkey, L"SafeProcessSearchMode", &path_safe_mode );
         query_dword_option( hkey, L"SafeDllSearchMode", &dll_safe_mode );
-
-        if (!query_dword_option( hkey, L"CriticalSectionTimeout", &value ))
-            NtCurrentTeb()->Peb->CriticalSectionTimeout.QuadPart = (ULONGLONG)value * -10000000;
-
-        if (!query_dword_option( hkey, L"HeapSegmentReserve", &value ))
-            NtCurrentTeb()->Peb->HeapSegmentReserve = value;
-
-        if (!query_dword_option( hkey, L"HeapSegmentCommit", &value ))
-            NtCurrentTeb()->Peb->HeapSegmentCommit = value;
-
-        if (!query_dword_option( hkey, L"HeapDeCommitTotalFreeThreshold", &value ))
-            NtCurrentTeb()->Peb->HeapDeCommitTotalFreeThreshold = value;
-
-        if (!query_dword_option( hkey, L"HeapDeCommitFreeBlockThreshold", &value ))
-            NtCurrentTeb()->Peb->HeapDeCommitFreeBlockThreshold = value;
-
         NtClose( hkey );
     }
-    LdrQueryImageFileExecutionOptions( &NtCurrentTeb()->Peb->ProcessParameters->ImagePathName,
-                                       L"GlobalFlag", REG_DWORD, &NtCurrentTeb()->Peb->NtGlobalFlag,
-                                       sizeof(DWORD), NULL );
-    heap_set_debug_flags( GetProcessHeap() );
 }
 
 
@@ -3920,6 +3917,17 @@ static void init_wow64( CONTEXT *context )
 }
 #endif
 
+
+/* release some address space once dlls are loaded*/
+static void release_address_space(void)
+{
+#ifndef _WIN64
+    void *addr = (void *)1;
+    SIZE_T size = 0;
+
+    NtFreeVirtualMemory( GetCurrentProcess(), &addr, &size, MEM_RELEASE );
+#endif
+}
 
 /******************************************************************
  *		LdrInitializeThunk (NTDLL.@)
@@ -4065,9 +4073,9 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
                 NtTerminateProcess( GetCurrentProcess(), status );
             }
         }
-        unix_funcs->virtual_release_address_space();
+        release_address_space();
         if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.DllBase, DLL_PROCESS_ATTACH );
-        if (wm->ldr.Flags & LDR_WINE_INTERNAL) unix_funcs->init_builtin_dll( wm->ldr.DllBase );
+        if (wm->ldr.Flags & LDR_WINE_INTERNAL) init_builtin_dll( wm->ldr.DllBase );
         if (wm->ldr.ActivationContext) RtlDeactivateActivationContext( 0, cookie );
         process_breakpoint();
     }

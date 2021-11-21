@@ -1330,12 +1330,28 @@ static HRESULT parse_fx10_variable_head(const char *data, size_t data_size,
 static HRESULT parse_fx10_annotation(const char *data, size_t data_size,
         const char **ptr, struct d3d10_effect_variable *a)
 {
+    DWORD offset;
     HRESULT hr;
 
     if (FAILED(hr = parse_fx10_variable_head(data, data_size, ptr, a)))
         return hr;
 
-    skip_dword_unknown("annotation", ptr, 1);
+    read_dword(ptr, &offset);
+    TRACE("Annotation value is at offset %#x.\n", offset);
+
+    switch (a->type->basetype)
+    {
+        case D3D10_SVT_STRING:
+            if (!fx10_copy_string(data, data_size, offset, (char **)&a->u.buffer.local_buffer))
+            {
+                ERR("Failed to copy name.\n");
+                return E_OUTOFMEMORY;
+            }
+            break;
+
+        default:
+            FIXME("Unhandled object type %#x.\n", a->type->basetype);
+    }
 
     /* mark the variable as annotation */
     a->flag = D3D10_EFFECT_VARIABLE_ANNOTATION;
@@ -2826,6 +2842,10 @@ static void d3d10_effect_variable_destroy(struct d3d10_effect_variable *v)
                 heap_free(v->u.resource.srv);
                 break;
 
+            case D3D10_SVT_STRING:
+                heap_free(v->u.buffer.local_buffer);
+                break;
+
             default:
                 break;
         }
@@ -3084,9 +3104,29 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_GetDevice(ID3D10Effect *iface, ID3
 
 static HRESULT STDMETHODCALLTYPE d3d10_effect_GetDesc(ID3D10Effect *iface, D3D10_EFFECT_DESC *desc)
 {
-    FIXME("iface %p, desc %p stub!\n", iface, desc);
+    struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
+    unsigned int i;
 
-    return E_NOTIMPL;
+    FIXME("iface %p, desc %p.\n", iface, desc);
+
+    if (!desc)
+        return E_INVALIDARG;
+
+    /* FIXME */
+    desc->IsChildEffect = FALSE;
+    desc->SharedConstantBuffers = 0;
+    desc->SharedGlobalVariables = 0;
+
+    desc->ConstantBuffers = effect->local_buffer_count;
+    desc->Techniques = effect->technique_count;
+    desc->GlobalVariables = effect->local_variable_count;
+    for (i = 0; i < effect->local_buffer_count; ++i)
+    {
+        struct d3d10_effect_variable *l = &effect->local_buffers[i];
+        desc->GlobalVariables += l->type->member_count;
+    }
+
+    return S_OK;
 }
 
 static struct ID3D10EffectConstantBuffer * STDMETHODCALLTYPE d3d10_effect_GetConstantBufferByIndex(ID3D10Effect *iface,
@@ -5774,6 +5814,11 @@ static const struct ID3D10EffectMatrixVariableVtbl d3d10_effect_matrix_variable_
 
 /* ID3D10EffectVariable methods */
 
+static inline struct d3d10_effect_variable *impl_from_ID3D10EffectStringVariable(ID3D10EffectStringVariable *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d10_effect_variable, ID3D10EffectVariable_iface);
+}
+
 static BOOL STDMETHODCALLTYPE d3d10_effect_string_variable_IsValid(ID3D10EffectStringVariable *iface)
 {
     TRACE("iface %p\n", iface);
@@ -5930,9 +5975,20 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_string_variable_GetRawValue(ID3D10
 static HRESULT STDMETHODCALLTYPE d3d10_effect_string_variable_GetString(ID3D10EffectStringVariable *iface,
         const char **str)
 {
-    FIXME("iface %p, str %p stub!\n", iface, str);
+    struct d3d10_effect_variable *var = impl_from_ID3D10EffectStringVariable(iface);
+    char *value = (char *)var->u.buffer.local_buffer;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, str %p.\n", iface, str);
+
+    if (!value)
+        return E_FAIL;
+
+    if (!str)
+        return E_INVALIDARG;
+
+    *str = value;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_effect_string_variable_GetStringArray(ID3D10EffectStringVariable *iface,
