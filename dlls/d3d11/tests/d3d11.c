@@ -32742,7 +32742,7 @@ static void test_deferred_context_map(void)
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     map_data = map_desc.pData;
     for (i = 0; i < ARRAY_SIZE(data); ++i)
-        map_data[i] = 2 * i;
+        map_data[i] = 3 * i;
     ID3D11DeviceContext_Unmap(deferred, (ID3D11Resource *)buffer, 0);
 
     hr = ID3D11DeviceContext_FinishCommandList(deferred, FALSE, &list);
@@ -32762,7 +32762,7 @@ static void test_deferred_context_map(void)
     for (i = 0; i < ARRAY_SIZE(data); ++i)
     {
         value = get_readback_float(&rb, i, 0);
-        ok(value == 2 * i, "Got unexpected value %.8e at %u.\n", value, i);
+        ok(value == 3 * i, "Got unexpected value %.8e at %u.\n", value, i);
     }
     release_resource_readback(&rb);
 

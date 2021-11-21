@@ -242,15 +242,24 @@ static HRESULT renderer_init_stream(struct strmbase_filter *iface)
 static HRESULT renderer_start_stream(struct strmbase_filter *iface, REFERENCE_TIME start)
 {
     struct strmbase_renderer *filter = impl_from_strmbase_filter(iface);
+    IFilterGraph *graph = filter->filter.graph;
+    IMediaEventSink *event_sink;
 
     filter->stream_start = start;
     SetEvent(filter->state_event);
     SetEvent(filter->run_event);
-    if (filter->sink.pin.peer)
-        filter->eos = FALSE;
     reset_qos(filter);
     if (filter->sink.pin.peer && filter->ops->renderer_start_stream)
         filter->ops->renderer_start_stream(filter);
+
+    if (filter->eos && graph
+            && SUCCEEDED(IFilterGraph_QueryInterface(graph,
+            &IID_IMediaEventSink, (void **)&event_sink)))
+    {
+        IMediaEventSink_Notify(event_sink, EC_COMPLETE, S_OK,
+                (LONG_PTR)&filter->filter.IBaseFilter_iface);
+        IMediaEventSink_Release(event_sink);
+    }
 
     return S_OK;
 }
@@ -439,7 +448,8 @@ static HRESULT sink_eos(struct strmbase_sink *iface)
 
     filter->eos = TRUE;
 
-    if (graph && SUCCEEDED(IFilterGraph_QueryInterface(graph,
+    if (filter->filter.state == State_Running && graph
+            && SUCCEEDED(IFilterGraph_QueryInterface(graph,
             &IID_IMediaEventSink, (void **)&event_sink)))
     {
         IMediaEventSink_Notify(event_sink, EC_COMPLETE, S_OK,

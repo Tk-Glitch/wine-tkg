@@ -3212,15 +3212,36 @@ static void fill_reobject_struct(REOBJECT *reobj, LONG cp, LPOLEOBJECT poleobj,
   reobj->dwUser = user;
 }
 
-#define CHECK_REOBJECT_STRUCT(reobj,poleobj,pstg,polesite,user) \
-  _check_reobject_struct(reobj, poleobj, pstg, polesite, user, __LINE__)
-static void _check_reobject_struct(REOBJECT reobj, LPOLEOBJECT poleobj, LPSTORAGE pstg,
-                                  LPOLECLIENTSITE polesite, DWORD user, int line)
+#define CHECK_REOBJECT_STRUCT(reole,index,flags,cp,poleobj,pstg,polesite,user) \
+  _check_reobject_struct(reole, index, flags, cp, poleobj, pstg, polesite, user, __LINE__)
+static void _check_reobject_struct(IRichEditOle *reole, LONG index, DWORD flags, LONG cp,
+    LPOLEOBJECT poleobj, LPSTORAGE pstg, LPOLECLIENTSITE polesite, DWORD user, int line)
 {
+  REOBJECT reobj;
+  HRESULT hr;
+
+  reobj.cbStruct = sizeof(reobj);
+  reobj.cp = cp;
+  hr = IRichEditOle_GetObject(reole, index, &reobj, flags);
+  ok(hr == S_OK, "IRichEditOle_GetObject failed: %#x.\n", hr);
   ok_(__FILE__,line)(reobj.poleobj == poleobj, "got wrong object interface.\n");
   ok_(__FILE__,line)(reobj.pstg == pstg, "got wrong storage interface.\n");
   ok_(__FILE__,line)(reobj.polesite == polesite, "got wrong site interface.\n");
   ok_(__FILE__,line)(reobj.dwUser == user, "got wrong user-defined value.\n");
+}
+
+#define INSERT_REOBJECT(reole,reobj,cp,user) \
+  _insert_reobject(reole, reobj, cp, user, __LINE__)
+static void _insert_reobject(IRichEditOle *reole, REOBJECT *reobj, LONG cp, DWORD user, int line)
+{
+  IOleClientSite *clientsite;
+  HRESULT hr;
+  hr = IRichEditOle_GetClientSite(reole, &clientsite);
+  ok_(__FILE__,line)(hr == S_OK, "IRichEditOle_GetClientSite got hr %#x.\n", hr);
+  fill_reobject_struct(reobj, cp, NULL, NULL, clientsite, 10, 10, DVASPECT_CONTENT, 0, user);
+  hr = IRichEditOle_InsertObject(reole, reobj);
+  ok_(__FILE__,line)(hr == S_OK, "IRichEditOle_InsertObject got hr %#x.\n", hr);
+  IOleClientSite_Release(clientsite);
 }
 
 static void test_InsertObject(void)
@@ -3228,13 +3249,25 @@ static void test_InsertObject(void)
   static CHAR test_text1[] = "abcdefg";
   IRichEditOle *reole = NULL;
   ITextDocument *doc = NULL;
-  IOleClientSite *clientsite;
-  REOBJECT reo1, reo2, reo3, received_reo1, received_reo2, received_reo3, received_reo4;
+  REOBJECT reo1, reo2, reo3, received_reo;
   HRESULT hr;
   HWND hwnd;
-  LONG count;
+  const WCHAR *expected_string;
+  const CHAR *expected_stringA;
+  ITextSelection *selection;
+  IDataObject *dataobject;
+  TEXTRANGEA textrange;
+  FORMATETC formatetc;
+  CHARRANGE charrange;
+  GETTEXTEX gettextex;
+  STGMEDIUM stgmedium;
+  WCHAR buffer[1024];
+  CHAR bufferA[1024];
+  LONG count, result;
+  ITextRange *range;
+  BSTR bstr;
 
-  create_interfaces(&hwnd, &reole, &doc, NULL);
+  create_interfaces(&hwnd, &reole, &doc, &selection);
   SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)test_text1);
 
   hr = IRichEditOle_InsertObject(reole, NULL);
@@ -3242,167 +3275,258 @@ static void test_InsertObject(void)
 
   /* insert object1 in (0, 1)*/
   SendMessageA(hwnd, EM_SETSEL, 0, 1);
-  hr = IRichEditOle_GetClientSite(reole, &clientsite);
-  ok(hr == S_OK, "IRichEditOle_GetClientSite failed: 0x%08x\n", hr);
-  fill_reobject_struct(&reo1, REO_CP_SELECTION, NULL, NULL, clientsite, 10, 10, DVASPECT_CONTENT, 0, 1);
-  hr = IRichEditOle_InsertObject(reole, &reo1);
-  ok(hr == S_OK, "IRichEditOle_InsertObject failed: 0x%08x\n", hr);
+  INSERT_REOBJECT(reole, &reo1, REO_CP_SELECTION, 1);
   count = IRichEditOle_GetObjectCount(reole);
   ok(count == 1, "got wrong object count: %d\n", count);
-  IOleClientSite_Release(clientsite);
 
   /* insert object2 in (2, 3)*/
   SendMessageA(hwnd, EM_SETSEL, 2, 3);
-  hr = IRichEditOle_GetClientSite(reole, &clientsite);
-  ok(hr == S_OK, "IRichEditOle_GetClientSite failed: 0x%08x\n", hr);
-  fill_reobject_struct(&reo2, REO_CP_SELECTION, NULL, NULL, clientsite, 10, 10, DVASPECT_CONTENT, 0, 2);
-  hr = IRichEditOle_InsertObject(reole, &reo2);
-  ok(hr == S_OK, "IRichEditOle_InsertObject failed: 0x%08x\n", hr);
+  INSERT_REOBJECT(reole, &reo2, REO_CP_SELECTION, 2);
   count = IRichEditOle_GetObjectCount(reole);
   ok(count == 2, "got wrong object count: %d\n", count);
-  IOleClientSite_Release(clientsite);
 
   /* insert object3 in (1, 2)*/
   SendMessageA(hwnd, EM_SETSEL, 1, 2);
-  hr = IRichEditOle_GetClientSite(reole, &clientsite);
-  ok(hr == S_OK, "IRichEditOle_GetClientSite failed: 0x%08x\n", hr);
-  fill_reobject_struct(&reo3, REO_CP_SELECTION, NULL, NULL, clientsite, 10, 10, DVASPECT_CONTENT, 0, 3);
-  hr = IRichEditOle_InsertObject(reole, &reo3);
-  ok(hr == S_OK, "IRichEditOle_InsertObject failed: 0x%08x\n", hr);
+  INSERT_REOBJECT(reole, &reo3, REO_CP_SELECTION, 3);
   count = IRichEditOle_GetObjectCount(reole);
   ok(count == 3, "got wrong object count: %d\n", count);
-  IOleClientSite_Release(clientsite);
 
   /* tests below show that order of rebject (from 0 to 2) is: reo1,reo3,reo2 */
-  received_reo1.cbStruct = sizeof(received_reo1);
-  hr = IRichEditOle_GetObject(reole, 0, &received_reo1, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo1, NULL, NULL, reo1.polesite, 1);
-
-  received_reo2.cbStruct = sizeof(received_reo2);
-  hr = IRichEditOle_GetObject(reole, 1, &received_reo2, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo2, NULL, NULL, reo3.polesite, 3);
-
-  received_reo3.cbStruct = sizeof(received_reo3);
-  hr = IRichEditOle_GetObject(reole, 2, &received_reo3, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo3, NULL, NULL, reo2.polesite, 2);
+  CHECK_REOBJECT_STRUCT(reole, 0, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo1.polesite, 1);
+  CHECK_REOBJECT_STRUCT(reole, 1, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo3.polesite, 3);
+  CHECK_REOBJECT_STRUCT(reole, 2, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo2.polesite, 2);
 
   hr = IRichEditOle_GetObject(reole, 2, NULL, REO_GETOBJ_ALL_INTERFACES);
   ok(hr == E_INVALIDARG, "IRichEditOle_GetObject should fail: 0x%08x\n", hr);
 
-  received_reo4.cbStruct = 0;
-  hr = IRichEditOle_GetObject(reole, 2, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
+  received_reo.cbStruct = 0;
+  hr = IRichEditOle_GetObject(reole, 2, &received_reo, REO_GETOBJ_ALL_INTERFACES);
   ok(hr == E_INVALIDARG, "IRichEditOle_GetObject should fail: 0x%08x\n", hr);
 
-  received_reo4.cbStruct = sizeof(received_reo4);
-  hr = IRichEditOle_GetObject(reole, 2, &received_reo4, REO_GETOBJ_PSTG);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, NULL, 2);
+  CHECK_REOBJECT_STRUCT(reole, 2, REO_GETOBJ_PSTG, 0, NULL, NULL, NULL, 2);
+  CHECK_REOBJECT_STRUCT(reole, 2, REO_GETOBJ_POLESITE, 0, NULL, NULL, reo2.polesite, 2);
 
-  hr = IRichEditOle_GetObject(reole, 2, &received_reo4, REO_GETOBJ_POLESITE);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo2.polesite, 2);
-
-  hr = IRichEditOle_GetObject(reole, 3, &received_reo4, REO_GETOBJ_POLESITE);
+  hr = IRichEditOle_GetObject(reole, 3, &received_reo, REO_GETOBJ_POLESITE);
   ok(hr == E_INVALIDARG, "IRichEditOle_GetObject should fail: 0x%08x\n", hr);
 
-  hr = IRichEditOle_GetObject(reole, 4, &received_reo4, REO_GETOBJ_POLESITE);
+  hr = IRichEditOle_GetObject(reole, 4, &received_reo, REO_GETOBJ_POLESITE);
   ok(hr == E_INVALIDARG, "IRichEditOle_GetObject should fail: 0x%08x\n", hr);
 
-  hr = IRichEditOle_GetObject(reole, 1024, &received_reo4, REO_GETOBJ_POLESITE);
+  hr = IRichEditOle_GetObject(reole, 1024, &received_reo, REO_GETOBJ_POLESITE);
   ok(hr == E_INVALIDARG, "IRichEditOle_GetObject should fail: 0x%08x\n", hr);
 
-  hr = IRichEditOle_GetObject(reole, -10, &received_reo4, REO_GETOBJ_POLESITE);
+  hr = IRichEditOle_GetObject(reole, -10, &received_reo, REO_GETOBJ_POLESITE);
   ok(hr == E_INVALIDARG, "IRichEditOle_GetObject should fail: 0x%08x\n", hr);
 
-  /* received_reo4 will be zeroed before be used */
-  hr = IRichEditOle_GetObject(reole, 2, &received_reo4, REO_GETOBJ_NO_INTERFACES);
+  /* received_reo will be zeroed before be used */
+  received_reo.cbStruct = sizeof(received_reo);
+  received_reo.polesite = (IOleClientSite *)0xdeadbeef;
+  hr = IRichEditOle_GetObject(reole, 2, &received_reo, REO_GETOBJ_NO_INTERFACES);
   ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, NULL, 2);
+  ok(received_reo.polesite == (IOleClientSite *)NULL, "Got wrong site interface.\n");
 
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 0;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_USE_CP, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo1.polesite, 1);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_USE_CP, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo1.polesite, 1);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_USE_CP, REO_GETOBJ_ALL_INTERFACES, 1, NULL, NULL, reo3.polesite, 3);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_USE_CP, REO_GETOBJ_ALL_INTERFACES, 2, NULL, NULL, reo2.polesite, 2);
 
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 1;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_USE_CP, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo3.polesite, 3);
-
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 2;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_USE_CP, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo2.polesite, 2);
-
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 4;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_USE_CP, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
+  received_reo.cbStruct = sizeof(received_reo);
+  received_reo.polesite = (IOleClientSite *)0xdeadbeef;
+  received_reo.dwUser = 4;
+  received_reo.cp = 4;
+  hr = IRichEditOle_GetObject(reole, REO_IOB_USE_CP, &received_reo, REO_GETOBJ_ALL_INTERFACES);
   ok(hr == E_INVALIDARG, "IRichEditOle_GetObject should fail: 0x%08x\n", hr);
-  /* received_reo4 didn't be zeroed in E_INVALIDARG case */
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo2.polesite, 2);
+  ok(received_reo.polesite == (IOleClientSite *)0xdeadbeef, "Got wrong site interface.\n");
+  ok(received_reo.dwUser == 4, "Got wrong user-defined value: %d.\n", received_reo.dwUser);
 
   SendMessageA(hwnd, EM_SETSEL, 0, 1);
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 1;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_SELECTION, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo1.polesite, 1);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo1.polesite, 1);
 
   SendMessageA(hwnd, EM_SETSEL, 1, 2);
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 0;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_SELECTION, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo3.polesite, 3);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo3.polesite, 3);
 
   SendMessageA(hwnd, EM_SETSEL, 2, 3);
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 0;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_SELECTION, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo2.polesite, 2);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo2.polesite, 2);
 
   SendMessageA(hwnd, EM_SETSEL, 0, 2);
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 0;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_SELECTION, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo1.polesite, 1);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo1.polesite, 1);
 
   SendMessageA(hwnd, EM_SETSEL, 1, 3);
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 0;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_SELECTION, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo3.polesite, 3);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo3.polesite, 3);
 
   SendMessageA(hwnd, EM_SETSEL, 2, 0);
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 0;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_SELECTION, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo1.polesite, 1);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo1.polesite, 1);
 
   SendMessageA(hwnd, EM_SETSEL, 0, 6);
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 0;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_SELECTION, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
-  ok(hr == S_OK, "IRichEditOle_GetObject failed: 0x%08x\n", hr);
-  CHECK_REOBJECT_STRUCT(received_reo4, NULL, NULL, reo1.polesite, 1);
+  CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 0, NULL, NULL, reo1.polesite, 1);
 
   SendMessageA(hwnd, EM_SETSEL, 4, 5);
-  received_reo4.cbStruct = sizeof(received_reo4);
-  received_reo4.cp = 0;
-  hr = IRichEditOle_GetObject(reole, REO_IOB_SELECTION, &received_reo4, REO_GETOBJ_ALL_INTERFACES);
+  received_reo.cbStruct = sizeof(received_reo);
+  received_reo.cp = 0;
+  hr = IRichEditOle_GetObject(reole, REO_IOB_SELECTION, &received_reo, REO_GETOBJ_ALL_INTERFACES);
   ok(hr == E_INVALIDARG, "IRichEditOle_GetObject should fail: 0x%08x\n", hr);
 
-  release_interfaces(&hwnd, &reole, &doc, NULL);
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)test_text1);
+
+  /* "abc|d|efg" */
+  INSERT_REOBJECT(reole, &reo1, 3, 1);
+  INSERT_REOBJECT(reole, &reo2, 5, 2);
+
+  SendMessageW(hwnd, EM_SETSEL, 2, 3);
+  result = SendMessageW(hwnd, EM_SELECTIONTYPE, 0, 0);
+  ok(result == SEL_TEXT, "Got selection type: %x.\n", result);
+
+  SendMessageW(hwnd, EM_SETSEL, 3, 4);
+  result = SendMessageW(hwnd, EM_SELECTIONTYPE, 0, 0);
+  todo_wine ok(result == SEL_OBJECT, "Got selection type: %x.\n", result);
+  todo_wine CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 1, NULL, NULL, reo1.polesite, 1);
+
+  SendMessageW(hwnd, EM_SETSEL, 2, 4);
+  result = SendMessageW(hwnd, EM_SELECTIONTYPE, 0, 0);
+  todo_wine ok(result == (SEL_TEXT | SEL_OBJECT), "Got selection type: %x.\n", result);
+
+  SendMessageW(hwnd, EM_SETSEL, 5, 6);
+  todo_wine CHECK_REOBJECT_STRUCT(reole, REO_IOB_SELECTION, REO_GETOBJ_ALL_INTERFACES, 1, NULL, NULL, reo2.polesite, 2);
+
+  expected_string = L"abc\xfffc""d\xfffc""efg";
+  gettextex.cb = sizeof(buffer);
+  gettextex.flags = GT_DEFAULT;
+  gettextex.codepage = 1200;
+  gettextex.lpDefaultChar = NULL;
+  gettextex.lpUsedDefChar = NULL;
+  result = SendMessageW(hwnd, EM_GETTEXTEX, (WPARAM)&gettextex, (LPARAM)buffer);
+  ok(result == lstrlenW(expected_string), "Got wrong length: %d.\n", result);
+  todo_wine ok(!lstrcmpW(buffer, expected_string), "Got wrong content: %s.\n", debugstr_w(buffer));
+
+  gettextex.flags = GT_RAWTEXT;
+  memset(buffer, 0, sizeof(buffer));
+  result = SendMessageW(hwnd, EM_GETTEXTEX, (WPARAM)&gettextex, (LPARAM)buffer);
+  ok(result == lstrlenW(expected_string), "Got wrong length: %d.\n", result);
+  todo_wine ok(!lstrcmpW(buffer, expected_string), "Got wrong content: %s.\n", debugstr_w(buffer));
+
+  expected_stringA = "abc d efg";
+  memset(bufferA, 0, sizeof(bufferA));
+  SendMessageA(hwnd, EM_SETSEL, 0, -1);
+  result = SendMessageA(hwnd, EM_GETSELTEXT, (WPARAM)sizeof(bufferA), (LPARAM)bufferA);
+  ok(result == strlen(expected_stringA), "Got wrong length: %d.\n", result);
+  todo_wine ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+
+  memset(bufferA, 0, sizeof(bufferA));
+  textrange.lpstrText = bufferA;
+  textrange.chrg.cpMin = 0;
+  textrange.chrg.cpMax = 11;
+  result = SendMessageA(hwnd, EM_GETTEXTRANGE, 0, (LPARAM)&textrange);
+  ok(result == strlen(expected_stringA), "Got wrong length: %d.\n", result);
+  todo_wine ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+
+  expected_string = L"abc\xfffc""d\xfffc""efg\r";
+  hr = ITextDocument_Range(doc, 0, 11, &range);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  hr = ITextRange_GetText(range, &bstr);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  ok(lstrlenW(bstr) == lstrlenW(expected_string), "Got wrong length: %d.\n", lstrlenW(bstr));
+  todo_wine ok(!lstrcmpW(bstr, expected_string), "Got text: %s.\n", wine_dbgstr_w(bstr));
+  SysFreeString(bstr);
+  hr = ITextRange_SetRange(range, 3, 4);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  hr = ITextRange_GetChar(range, &result);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  todo_wine ok(result == 0xfffc, "Got char: %c\n", result);
+  ITextRange_Release(range);
+
+  SendMessageW(hwnd, EM_SETSEL, 0, -1);
+  hr = ITextSelection_GetText(selection, &bstr);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  ok(lstrlenW(bstr) == lstrlenW(expected_string), "Got wrong length: %d.\n", lstrlenW(bstr));
+  todo_wine ok(!lstrcmpW(bstr, expected_string), "Got text: %s.\n", wine_dbgstr_w(bstr));
+  SysFreeString(bstr);
+  SendMessageW(hwnd, EM_SETSEL, 3, 4);
+  result = 0;
+  hr = ITextSelection_GetChar(selection, &result);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  todo_wine ok(result == 0xfffc, "Got char: %c\n", result);
+
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"");
+  result = SendMessageW(hwnd, EM_SETTEXTMODE, (WPARAM)TM_PLAINTEXT, 0);
+  ok(!result, "Got result %x.\n", result);
+  /* "abc|d|efg" */
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)test_text1);
+  INSERT_REOBJECT(reole, &reo1, 3, 1);
+  INSERT_REOBJECT(reole, &reo2, 5, 2);
+
+  expected_string = L"abc d efg";
+  charrange.cpMin = 0;
+  charrange.cpMax = 11;
+  hr = IRichEditOle_GetClipboardData(reole, &charrange, 1, &dataobject);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  formatetc.cfFormat = CF_UNICODETEXT;
+  formatetc.dwAspect = DVASPECT_CONTENT;
+  formatetc.ptd = NULL;
+  formatetc.tymed = TYMED_HGLOBAL;
+  formatetc.lindex = -1;
+  hr = IDataObject_GetData(dataobject, &formatetc, &stgmedium);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  todo_wine ok(lstrlenW(stgmedium.hGlobal) == lstrlenW(expected_string), "Got wrong length: %d.\n", result);
+  todo_wine ok(!lstrcmpW(stgmedium.hGlobal, expected_string), "Got wrong content: %s.\n", debugstr_w(stgmedium.hGlobal));
+
+  expected_string = L"abc\xfffc""d\xfffc""efg";
+  gettextex.cb = sizeof(buffer);
+  gettextex.flags = GT_DEFAULT;
+  gettextex.codepage = 1200;
+  gettextex.lpDefaultChar = NULL;
+  gettextex.lpUsedDefChar = NULL;
+  result = SendMessageW(hwnd, EM_GETTEXTEX, (WPARAM)&gettextex, (LPARAM)buffer);
+  ok(result == lstrlenW(expected_string), "Got wrong length: %d.\n", result);
+  todo_wine ok(!lstrcmpW(buffer, expected_string), "Got wrong content: %s.\n", debugstr_w(buffer));
+
+  gettextex.flags = GT_RAWTEXT;
+  memset(buffer, 0, sizeof(buffer));
+  result = SendMessageW(hwnd, EM_GETTEXTEX, (WPARAM)&gettextex, (LPARAM)buffer);
+  ok(result == lstrlenW(expected_string), "Got wrong length: %d.\n", result);
+  todo_wine ok(!lstrcmpW(buffer, expected_string), "Got wrong content: %s.\n", debugstr_w(buffer));
+
+  expected_stringA = "abc d efg";
+  memset(bufferA, 0, sizeof(bufferA));
+  SendMessageA(hwnd, EM_SETSEL, 0, -1);
+  result = SendMessageA(hwnd, EM_GETSELTEXT, (WPARAM)sizeof(bufferA), (LPARAM)bufferA);
+  ok(result == strlen(expected_stringA), "Got wrong length: %d.\n", result);
+  todo_wine ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+
+  memset(bufferA, 0, sizeof(bufferA));
+  textrange.lpstrText = bufferA;
+  textrange.chrg.cpMin = 0;
+  textrange.chrg.cpMax = 11;
+  result = SendMessageA(hwnd, EM_GETTEXTRANGE, 0, (LPARAM)&textrange);
+  ok(result == strlen(expected_stringA), "Got wrong length: %d.\n", result);
+  todo_wine ok(!strcmp(bufferA, expected_stringA), "Got wrong content: %s.\n", bufferA);
+
+  expected_string = L"abc\xfffc""d\xfffc""efg";
+  hr = ITextDocument_Range(doc, 0, 11, &range);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  hr = ITextRange_GetText(range, &bstr);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  todo_wine ok(lstrlenW(bstr) == lstrlenW(expected_string), "Got wrong length: %d.\n", lstrlenW(bstr));
+  todo_wine ok(!lstrcmpW(bstr, expected_string), "Got text: %s.\n", wine_dbgstr_w(bstr));
+  SysFreeString(bstr);
+  hr = ITextRange_SetRange(range, 3, 4);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  hr = ITextRange_GetChar(range, &result);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  todo_wine ok(result == 0xfffc, "Got char: %c\n", result);
+  ITextRange_Release(range);
+
+  SendMessageW(hwnd, EM_SETSEL, 0, -1);
+  hr = ITextSelection_GetText(selection, &bstr);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  todo_wine ok(lstrlenW(bstr) == lstrlenW(expected_string), "Got wrong length: %d.\n", lstrlenW(bstr));
+  todo_wine ok(!lstrcmpW(bstr, expected_string), "Got text: %s.\n", wine_dbgstr_w(bstr));
+  SysFreeString(bstr);
+  SendMessageW(hwnd, EM_SETSEL, 3, 4);
+  result = 0;
+  hr = ITextSelection_GetChar(selection, &result);
+  ok(hr == S_OK, "Got hr %#x.\n", hr);
+  todo_wine ok(result == 0xfffc, "Got char: %c\n", result);
+
+  release_interfaces(&hwnd, &reole, &doc, &selection);
 }
 
 static void test_GetStoryLength(void)

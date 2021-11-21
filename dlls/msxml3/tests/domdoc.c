@@ -8579,13 +8579,9 @@ todo_wine
 
     item = NULL;
     hr = IXMLDOMNamedNodeMap_getNamedItem(node_map, _bstr_("encoding"), &item);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
-todo_wine
     ok(item != NULL, "got NULL\n");
 
-if (hr == S_OK)
-{
     hr = IXMLDOMNode_get_nodeName(item, &bstr);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(!lstrcmpW(bstr, L"encoding"), "got %s\n", wine_dbgstr_w(bstr));
@@ -8597,7 +8593,6 @@ if (hr == S_OK)
     ok(V_VT(&var) == VT_BSTR, "got %u\n", V_VT(&var));
     ok(!lstrcmpW(V_BSTR(&var), L"windows-1252"), "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
     VariantClear(&var);
-}
 
     IXMLDOMNamedNodeMap_Release(node_map);
     IXMLDOMNode_Release(node);
@@ -9240,6 +9235,13 @@ static void test_insertBefore(void)
     doc = create_document(&IID_IXMLDOMDocument);
     doc3 = create_document(&IID_IXMLDOMDocument);
 
+    /* NULL to document */
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMDocument_insertBefore(doc, NULL, v, &node);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(node == (void*)0xdeadbeef, "got %p\n", node);
+
     /* document to document */
     V_VT(&v) = VT_NULL;
     node = (void*)0xdeadbeef;
@@ -9408,6 +9410,13 @@ static void test_insertBefore(void)
     EXPECT_NO_CHILDREN(elem3);
 
     todo_wine EXPECT_REF(elem2, 2);
+
+    /* NULL to element */
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMElement_insertBefore(elem1, NULL, v, &node);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(node == (void*)0xdeadbeef, "got %p\n", node);
 
     /* document to element */
     V_VT(&v) = VT_DISPATCH;

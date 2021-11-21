@@ -2292,6 +2292,7 @@ static BOOL process_rawinput_message( MSG *msg, UINT hw_id, const struct hardwar
 
     if (msg->message == WM_INPUT)
     {
+        thread_data->buffer->header.dwSize = RAWINPUT_BUFFER_SIZE;
         if (!rawinput_from_hardware_message( thread_data->buffer, msg_data )) return FALSE;
         thread_data->hw_id = hw_id;
         msg->lParam = (LPARAM)hw_id;
@@ -3311,7 +3312,8 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
                     req->input.hw.rawinput.hid.usage = hid_usage;
                     req->input.hw.rawinput.hid.count = rawinput->data.hid.dwCount;
                     req->input.hw.rawinput.hid.length = rawinput->data.hid.dwSizeHid;
-                    wine_server_add_data( req, rawinput->data.hid.bRawData, rawinput->data.hid.dwCount * rawinput->data.hid.dwSizeHid );
+                    wine_server_add_data( req, rawinput->data.hid.bRawData,
+                                          rawinput->data.hid.dwCount * rawinput->data.hid.dwSizeHid );
                     break;
                 default:
                     assert( 0 );

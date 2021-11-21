@@ -2719,24 +2719,9 @@ then
 fi
 
 AC_CHECK_FUNCS(\
-	acosh \
-	acoshf \
-	asinh \
-	asinhf \
-	atanh \
-	atanhf \
 	exp2 \
 	exp2f \
-	expm1 \
-	expm1f \
-	fma \
 	fmaf \
-	lgamma \
-	lgammaf \
-	log1p \
-	log1pf \
-	log2 \
-	log2f \
 	tgamma \
 	tgammaf
 )
@@ -3747,6 +3732,7 @@ WINE_CONFIG_MAKEFILE(dlls/softpub)
 WINE_CONFIG_MAKEFILE(dlls/sound.drv16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/spoolss)
 WINE_CONFIG_MAKEFILE(dlls/spoolss/tests)
+WINE_CONFIG_MAKEFILE(dlls/sppc)
 WINE_CONFIG_MAKEFILE(dlls/srclient)
 WINE_CONFIG_MAKEFILE(dlls/srvcli)
 WINE_CONFIG_MAKEFILE(dlls/sspicli)
@@ -3862,6 +3848,7 @@ WINE_CONFIG_MAKEFILE(dlls/windows.media.devices)
 WINE_CONFIG_MAKEFILE(dlls/windows.media.devices/tests)
 WINE_CONFIG_MAKEFILE(dlls/windows.media.speech)
 WINE_CONFIG_MAKEFILE(dlls/windows.media.speech/tests)
+WINE_CONFIG_MAKEFILE(dlls/windows.networking.connectivity)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecs)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecs/tests)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecsext)

@@ -113,7 +113,6 @@ void     (WINAPI *pLdrInitializeThunk)(CONTEXT*,void**,ULONG_PTR,ULONG_PTR) = NU
 void     (WINAPI *pRtlUserThreadStart)( PRTL_THREAD_START_ROUTINE entry, void *arg ) = NULL;
 
 static NTSTATUS (CDECL *p__wine_set_unix_funcs)( int version, const struct unix_funcs *funcs );
-static void *syscall_dispatcher;
 
 #ifdef __GNUC__
 static void fatal_error( const char *err, ... ) __attribute__((noreturn, format(printf,1,2)));
@@ -845,7 +844,7 @@ static void load_ntdll_functions( HMODULE module )
     if ((ptr = (void *)find_named_export( module, ntdll_exports, #name ))) *ptr = val; \
     else ERR( "%s not found\n", #name )
 
-    SET_PTR( __wine_syscall_dispatcher, syscall_dispatcher );
+    SET_PTR( __wine_syscall_dispatcher, __wine_syscall_dispatcher );
 #ifdef __i386__
     SET_PTR( __wine_ldt_copy, &__wine_ldt_copy );
 #endif
@@ -1122,6 +1121,15 @@ static NTSTATUS CDECL init_unix_lib( void *module, DWORD reason, const void *ptr
     }
     init_func = entry;
     return init_func( module, reason, ptr_in, ptr_out );
+}
+
+
+/***********************************************************************
+ *           __wine_unix_call
+ */
+NTSTATUS CDECL __wine_unix_call( UINT64 handle, unsigned int code, void *args )
+{
+    return ((unixlib_entry_t*)(UINT_PTR)handle)[code]( args );
 }
 
 
@@ -1460,7 +1468,7 @@ NTSTATUS load_builtin( const pe_image_info_t *image_info, WCHAR *filename,
  *
  * cf. GetSystemWow64Directory2.
  */
-const WCHAR *get_machine_wow64_dir( WORD machine )
+static const WCHAR *get_machine_wow64_dir( WORD machine )
 {
     static const WCHAR system32[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\','s','y','s','t','e','m','3','2','\\',0};
     static const WCHAR syswow64[] = {'\\','?','?','\\','C',':','\\','w','i','n','d','o','w','s','\\','s','y','s','w','o','w','6','4','\\',0};
@@ -1842,7 +1850,6 @@ static struct unix_funcs unix_funcs =
     init_builtin_dll,
     init_unix_lib,
     unwind_builtin_dll,
-    __wine_dbg_get_channel_flags,
     __wine_dbg_strdup,
     __wine_dbg_output,
     __wine_dbg_header,
@@ -1887,7 +1894,6 @@ static void start_main_thread(void)
     esync_init();
     virtual_map_user_shared_data();
     init_cpu_info();
-    syscall_dispatcher = signal_init_syscalls();
     init_files();
     load_libwine();
     init_startup_info();

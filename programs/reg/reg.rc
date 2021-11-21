@@ -122,9 +122,11 @@ STRINGTABLE
     STRING_MISSING_HEXDATA, "reg: The option [/d] must be followed by a valid hexadecimal value\n"
     STRING_UNHANDLED_TYPE, "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
     STRING_OVERWRITE_VALUE, "The registry value '%1' already exists. Do you want to overwrite it?"
-    STRING_YESNO, " (Yes|No)"
     STRING_YES, "#msgctxt#Yes key#Y"
     STRING_NO, "#msgctxt#No key#N"
+    STRING_ALL, "#msgctxt#All key#A"
+    STRING_YESNO, " (Yes|No)"
+    STRING_YESNOALL, " (Yes|No|All)"
     STRING_CANCELLED, "reg: The registry operation was cancelled\n"
     STRING_DEFAULT_VALUE, "(Default)"
     STRING_DELETE_VALUE, "Are you sure you want to delete the registry value '%1'?"
@@ -132,7 +134,6 @@ STRINGTABLE
     STRING_DELETE_SUBKEY, "Are you sure you want to delete the registry key '%1'?"
     STRING_INVALID_STRING, "reg: The option [/d] must be followed by a valid string\n"
     STRING_VALUEALL_FAILED, "reg: Unable to delete all registry values in '%1'\n"
-    STRING_GENERAL_FAILURE, "reg: Unable to complete the specified operation. An unexpected error occurred.\n"
     STRING_MATCHES_FOUND, "Search complete. Number of matches found: %1!d!\n"
     STRING_INVALID_SYNTAX, "reg: Invalid syntax. "
     STRING_INVALID_OPTION, "reg: Invalid option [%1]. "
@@ -146,7 +147,6 @@ STRINGTABLE
 \     The name and path of the registry file to import.\n\n"
 
     STRING_FILE_NOT_FOUND, "reg: The file '%1' was not found.\n"
-    STRING_OPEN_KEY_FAILED, "reg: Unable to open the registry key '%1'.\n"
     STRING_ESCAPE_SEQUENCE, "reg: Unrecognized escape sequence [\\%1!c!]\n"
 
     STRING_EXPORT_USAGE, "REG EXPORT <key> <file> [/y]\n\n\
@@ -199,4 +199,7 @@ STRINGTABLE
 \  /f\n\
 \     Overwrite all registry data in <key2> without prompting for confirmation.\n\
 \     This option does not modify subkeys and values that only exist in <key2>.\n\n"
+
+    STRING_COPY_SRC_DEST_SAME, "reg: The source and destination keys cannot be the same\n"
+    STRING_COPY_CONFIRM, "The value '%1\\%2' already exists in the destination key. Do you want to overwrite it?"
 }

@@ -1932,14 +1932,12 @@ class VkStruct(Sequence):
                 text += "    {0};\n".format(m.definition())
 
         if postfix is not None:
-            text += "}} {0}{1};\n\n".format(self.name, postfix)
+            text += "}} {0}{1};\n".format(self.name, postfix)
         else:
             text += "}} {0};\n".format(self.name)
 
         for aliasee in self.aliased_by:
             text += "typedef {0} {1};\n".format(self.name, aliasee.name)
-
-        text += "\n"
 
         return text
 
@@ -2667,13 +2665,10 @@ class VkGenerator(object):
             if not vk_func.needs_thunk():
                 continue
 
-            # Exports symbols for Core functions.
-            if not vk_func.is_core_func() and not vk_func.needs_private_thunk():
-                f.write("static ")
-
             if vk_func.needs_private_thunk():
                 f.write(vk_func.thunk(prefix="thunk_"))
             else:
+                f.write("static ")
                 f.write(vk_func.thunk(prefix=prefix, call_conv="WINAPI"))
 
         # Create array of device extensions.
@@ -2786,7 +2781,11 @@ class VkGenerator(object):
         f.write("\n")
 
         for struct in self.host_structs:
+            f.write("#if defined(USE_STRUCT_CONVERSION)\n")
             f.write(struct.definition(align=False, conv=True, postfix="_host"))
+            f.write("#else\n")
+            f.write("typedef {0} {0}_host;\n".format(struct.name))
+            f.write("#endif\n\n")
         f.write("\n")
 
         for func in self.struct_chain_conversions:
@@ -2803,14 +2802,7 @@ class VkGenerator(object):
                 LOGGER.debug("skipping {0} in vulkan_device_funcs".format(vk_func.name))
                 continue
 
-            if vk_func.needs_conversion():
-                f.write("#if defined(USE_STRUCT_CONVERSION)\n")
-                f.write("    {0};\n".format(vk_func.pfn(conv=True)))
-                f.write("#else\n")
-                f.write("    {0};\n".format(vk_func.pfn(conv=False)))
-                f.write("#endif\n")
-            else:
-                f.write("    {0};\n".format(vk_func.pfn(conv=False)))
+            f.write("    {0};\n".format(vk_func.pfn(conv=vk_func.needs_conversion())))
         f.write("};\n\n")
 
         f.write("/* For use by vkInstance and children */\n")
@@ -2823,14 +2815,7 @@ class VkGenerator(object):
                 LOGGER.debug("skipping {0} in vulkan_instance_funcs".format(vk_func.name))
                 continue
 
-            if vk_func.needs_conversion():
-                f.write("#if defined(USE_STRUCT_CONVERSION)\n")
-                f.write("    {0};\n".format(vk_func.pfn(conv=True)))
-                f.write("#else\n")
-                f.write("    {0};\n".format(vk_func.pfn(conv=False)))
-                f.write("#endif\n")
-            else:
-                f.write("    {0};\n".format(vk_func.pfn(conv=False)))
+            f.write("    {0};\n".format(vk_func.pfn(conv=vk_func.needs_conversion())))
         f.write("};\n\n")
 
         f.write("#define ALL_VK_DEVICE_FUNCS() \\\n")
@@ -3042,6 +3027,7 @@ class VkGenerator(object):
         for struct in structs:
             LOGGER.debug("Generating struct: {0}".format(struct.name))
             f.write(struct.definition(align=True))
+            f.write("\n")
 
         for func in self.registry.funcs.values():
             if not func.is_required():

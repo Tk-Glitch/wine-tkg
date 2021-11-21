@@ -93,7 +93,7 @@ static void test_device_input(IDirectInputDevice8A *lpdid, DWORD event_type, DWO
     ok (SUCCEEDED(hr), "Failed to acquire device hr=%08x\n", hr);
 
     if (event_type == INPUT_KEYBOARD)
-        keybd_event(event, MapVirtualKeyA(event, MAPVK_VK_TO_VSC), 0, 0);
+        keybd_event(0, event, KEYEVENTF_SCANCODE, 0);
 
     if (event_type == INPUT_MOUSE)
         mouse_event( event, 0, 0, 0, 0);
@@ -309,7 +309,7 @@ static void test_appdata_property_vs_map(struct enum_data *data)
     hr = IDirectInputDevice8_SetProperty(data->keyboard, DIPROP_APPDATA, &(dp.diph));
     ok(SUCCEEDED(hr), "IDirectInputDevice8_SetProperty failed hr=%08x\n", hr);
 
-    test_device_input(data->keyboard, INPUT_KEYBOARD, VK_SPACE, 10);
+    test_device_input(data->keyboard, INPUT_KEYBOARD, DIK_SPACE, 10);
 
     dp.diph.dwHow = DIPH_BYID;
     dp.diph.dwObj = DIDFT_MAKEINSTANCE(DIK_V) | DIDFT_PSHBUTTON;
@@ -321,7 +321,7 @@ static void test_appdata_property_vs_map(struct enum_data *data)
     hr = IDirectInputDevice8_SetDataFormat(data->keyboard, &c_dfDIKeyboard);
     ok(SUCCEEDED(hr), "SetDataFormat failed: %08x\n", hr);
 
-    test_device_input(data->keyboard, INPUT_KEYBOARD, VK_SPACE, -1);
+    test_device_input(data->keyboard, INPUT_KEYBOARD, DIK_SPACE, -1);
 
     dp.diph.dwHow = DIPH_BYID;
     dp.diph.dwObj = DIDFT_MAKEINSTANCE(DIK_V) | DIDFT_PSHBUTTON;
@@ -329,13 +329,13 @@ static void test_appdata_property_vs_map(struct enum_data *data)
     hr = IDirectInputDevice8_SetProperty(data->keyboard, DIPROP_APPDATA, &(dp.diph));
     ok(SUCCEEDED(hr), "IDirectInputDevice8_SetProperty failed hr=%08x\n", hr);
 
-    test_device_input(data->keyboard, INPUT_KEYBOARD, 'V', 11);
+    test_device_input(data->keyboard, INPUT_KEYBOARD, DIK_V, 11);
 
     /* back to action map */
     hr = IDirectInputDevice8_SetActionMap(data->keyboard, data->lpdiaf, NULL, 0);
     ok(SUCCEEDED(hr), "SetActionMap failed hr=%08x\n", hr);
 
-    test_device_input(data->keyboard, INPUT_KEYBOARD, VK_SPACE, 2);
+    test_device_input(data->keyboard, INPUT_KEYBOARD, DIK_SPACE, 2);
 }
 
 static void test_action_mapping(void)
@@ -404,19 +404,19 @@ static void test_action_mapping(void)
         /* Test keyboard BuildActionMap */
         test_build_action_map(data.keyboard, data.lpdiaf, DITEST_KEYBOARDSPACE, DIDFT_PSHBUTTON, DIK_SPACE);
         /* Test keyboard input */
-        test_device_input(data.keyboard, INPUT_KEYBOARD, VK_SPACE, 2);
+        test_device_input(data.keyboard, INPUT_KEYBOARD, DIK_SPACE, 2);
 
         /* setting format should reset action map */
         hr = IDirectInputDevice8_SetDataFormat(data.keyboard, &c_dfDIKeyboard);
         ok (SUCCEEDED(hr), "IDirectInputDevice8_SetDataFormat failed: %08x\n", hr);
 
-        test_device_input(data.keyboard, INPUT_KEYBOARD, VK_SPACE, -1);
+        test_device_input(data.keyboard, INPUT_KEYBOARD, DIK_SPACE, -1);
 
         /* back to action map */
         hr = IDirectInputDevice8_SetActionMap(data.keyboard, data.lpdiaf, NULL, 0);
         ok (SUCCEEDED(hr), "SetActionMap should succeed hr=%08x\n", hr);
 
-        test_device_input(data.keyboard, INPUT_KEYBOARD, VK_SPACE, 2);
+        test_device_input(data.keyboard, INPUT_KEYBOARD, DIK_SPACE, 2);
 
         test_appdata_property_vs_map(&data);
 
@@ -1008,7 +1008,7 @@ static void test_appdata_property(void)
     ok(SUCCEEDED(hr), "IDirectInputDevice8_SetProperty failed hr=%08x\n", hr);
 
     /* the default value */
-    test_device_input(di_keyboard, INPUT_KEYBOARD, 'A', -1);
+    test_device_input(di_keyboard, INPUT_KEYBOARD, DIK_A, -1);
 
     dp.diph.dwHow = DIPH_DEVICE;
     dp.diph.dwObj = 0;
@@ -1042,19 +1042,19 @@ static void test_appdata_property(void)
     hr = IDirectInputDevice8_SetProperty(di_keyboard, DIPROP_APPDATA, &(dp.diph));
     ok(SUCCEEDED(hr), "IDirectInputDevice8_SetProperty failed hr=%08x\n", hr);
 
-    test_device_input(di_keyboard, INPUT_KEYBOARD, VK_SPACE, 3);
-    test_device_input(di_keyboard, INPUT_KEYBOARD, 'A', 4);
-    test_device_input(di_keyboard, INPUT_KEYBOARD, 'B', 5);
-    test_device_input(di_keyboard, INPUT_KEYBOARD, 'C', -1);
+    test_device_input(di_keyboard, INPUT_KEYBOARD, DIK_SPACE, 3);
+    test_device_input(di_keyboard, INPUT_KEYBOARD, DIK_A, 4);
+    test_device_input(di_keyboard, INPUT_KEYBOARD, DIK_B, 5);
+    test_device_input(di_keyboard, INPUT_KEYBOARD, DIK_C, -1);
 
     /* setting data format resets APPDATA */
     hr = IDirectInputDevice8_SetDataFormat(di_keyboard, &c_dfDIKeyboard);
     ok(SUCCEEDED(hr), "IDirectInputDevice8_SetDataFormat failed: %08x\n", hr);
 
     test_device_input(di_keyboard, INPUT_KEYBOARD, VK_SPACE, -1);
-    test_device_input(di_keyboard, INPUT_KEYBOARD, 'A', -1);
-    test_device_input(di_keyboard, INPUT_KEYBOARD, 'B', -1);
-    test_device_input(di_keyboard, INPUT_KEYBOARD, 'C', -1);
+    test_device_input(di_keyboard, INPUT_KEYBOARD, DIK_A, -1);
+    test_device_input(di_keyboard, INPUT_KEYBOARD, DIK_B, -1);
+    test_device_input(di_keyboard, INPUT_KEYBOARD, DIK_C, -1);
 
     DestroyWindow(hwnd);
     IDirectInputDevice_Release(di_keyboard);

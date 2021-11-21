@@ -259,6 +259,10 @@ C_ASSERT((offsetof(struct stack_layout, xstate) == sizeof(struct stack_layout)))
 C_ASSERT( sizeof(XSTATE) == 0x140 );
 C_ASSERT( sizeof(struct stack_layout) == 0x590 ); /* Should match the size in call_user_exception_dispatcher(). */
 
+/* flags to control the behavior of the syscall dispatcher */
+#define SYSCALL_HAVE_XSAVE    1
+#define SYSCALL_HAVE_XSAVEC   2
+
 /* stack layout when calling an user apc function.
  * FIXME: match Windows ABI. */
 struct apc_stack_layout
@@ -335,15 +339,6 @@ static inline struct amd64_thread_data *amd64_thread_data(void)
     return (struct amd64_thread_data *)ntdll_get_thread_data()->cpu_data;
 }
 
-void *get_syscall_frame(void)
-{
-    return amd64_thread_data()->syscall_frame;
-}
-
-void set_syscall_frame(void *frame)
-{
-    amd64_thread_data()->syscall_frame = frame;
-}
 
 static struct syscall_xsave *get_syscall_xsave( struct syscall_frame *frame )
 {
@@ -1576,7 +1571,7 @@ static void restore_context( const struct xcontext *xcontext, ucontext_t *sigcon
  *
  * Set the new CPU context.
  */
-extern void set_full_cpu_context(void);
+extern void set_full_cpu_context(void) DECLSPEC_HIDDEN;
 __ASM_GLOBAL_FUNC( set_full_cpu_context,
                    "movq %gs:0x30,%rdx\n\t"
                    "movq 0x328(%rdx),%rsp\n\t"      /* amd64_thread_data()->syscall_frame */
@@ -1606,7 +1601,7 @@ __ASM_GLOBAL_FUNC( set_full_cpu_context,
  */
 void signal_restore_full_cpu_context(void)
 {
-    struct syscall_xsave *xsave = get_syscall_xsave( get_syscall_frame() );
+    struct syscall_xsave *xsave = get_syscall_xsave( amd64_thread_data()->syscall_frame );
 
     if (cpu_info.ProcessorFeatureBits & CPU_FEATURE_XSAVE)
     {
@@ -1882,11 +1877,6 @@ NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size )
 }
 
 
-extern void CDECL raise_func_trampoline( void *dispatcher );
-
-__ASM_GLOBAL_FUNC( raise_func_trampoline,
-                   "jmpq *%r8\n\t")
-
 /***********************************************************************
  *           setup_raise_exception
  */
@@ -1951,8 +1941,7 @@ static void setup_raise_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec
         }
     }
 
-    RIP_sig(sigcontext) = (ULONG_PTR)raise_func_trampoline;
-    R8_sig(sigcontext)  = (ULONG_PTR)pKiUserExceptionDispatcher;
+    RIP_sig(sigcontext) = (ULONG_PTR)pKiUserExceptionDispatcher;
     RSP_sig(sigcontext) = (ULONG_PTR)stack;
     /* clear single-step, direction, and align check flag */
     EFL_sig(sigcontext) &= ~(0x100|0x400|0x40000);
@@ -1979,7 +1968,12 @@ static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
 /***********************************************************************
  *           call_user_apc_dispatcher
  */
-struct apc_stack_layout * WINAPI setup_user_apc_dispatcher_stack( CONTEXT *context, struct apc_stack_layout *stack )
+struct apc_stack_layout * WINAPI setup_user_apc_dispatcher_stack( CONTEXT *context,
+                                                                  struct apc_stack_layout *stack,
+                                                                  NTSTATUS status ) DECLSPEC_HIDDEN;
+struct apc_stack_layout * WINAPI setup_user_apc_dispatcher_stack( CONTEXT *context,
+                                                                  struct apc_stack_layout *stack,
+                                                                  NTSTATUS status )
 {
     CONTEXT c;
 
@@ -1987,7 +1981,7 @@ struct apc_stack_layout * WINAPI setup_user_apc_dispatcher_stack( CONTEXT *conte
     {
         c.ContextFlags = CONTEXT_FULL;
         NtGetContextThread( GetCurrentThread(), &c );
-        c.Rax = STATUS_USER_APC;
+        c.Rax = status;
         context = &c;
     }
     memmove( &stack->context, context, sizeof(stack->context) );
@@ -1998,9 +1992,10 @@ __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
                    "movq 0x28(%rsp),%rsi\n\t"       /* func */
                    "movq 0x30(%rsp),%rdi\n\t"       /* dispatcher */
                    "movq %gs:0x30,%rbx\n\t"
-                   "movq %rdx,%r12\n\t"             /* ctx */
-                   "movq %r8,%r13\n\t"              /* arg1 */
-                   "movq %r9,%r14\n\t"              /* arg2 */
+                   "movq %rdx,%r12\n\t"             /* arg1 */
+                   "movq %r8,%r13\n\t"              /* arg2 */
+                   "movq %r9,%r14\n\t"              /* arg3 */
+                   "movq 0x38(%rsp),%r8\n\t"        /* status */
                    "jrcxz 1f\n\t"
                    "movq 0x98(%rcx),%rdx\n\t"        /* context->Rsp */
                    "jmp 2f\n\t"
@@ -2015,9 +2010,9 @@ __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
                    "call " __ASM_NAME("setup_user_apc_dispatcher_stack") "\n\t"
                    "movq %rax,%rsp\n\t"
                    "leaq 0x30(%rsp),%rcx\n\t"       /* context */
-                   "movq %r12,%rdx\n\t"             /* ctx */
-                   "movq %r13,%r8\n\t"              /* arg1 */
-                   "movq %r14,%r9\n"                /* arg2 */
+                   "movq %r12,%rdx\n\t"             /* arg1 */
+                   "movq %r13,%r8\n\t"              /* arg2 */
+                   "movq %r14,%r9\n"                /* arg3 */
                    "movq $0,0x328(%rbx)\n\t"        /* amd64_thread_data()->syscall_frame */
                    "movq %rsi,0x20(%rsp)\n\t"       /* func */
                    "movq %rdi,%r10\n\t"
@@ -2056,6 +2051,9 @@ void WINAPI call_raise_user_exception_dispatcher( NTSTATUS (WINAPI *dispatcher)(
 /***********************************************************************
  *           call_user_exception_dispatcher
  */
+struct stack_layout * WINAPI setup_user_exception_dispatcher_stack( EXCEPTION_RECORD *rec, CONTEXT *context,
+                                               NTSTATUS (WINAPI *dispatcher)(EXCEPTION_RECORD*,CONTEXT*),
+                                               struct stack_layout *stack ) DECLSPEC_HIDDEN;
 struct stack_layout * WINAPI setup_user_exception_dispatcher_stack( EXCEPTION_RECORD *rec, CONTEXT *context,
                                                NTSTATUS (WINAPI *dispatcher)(EXCEPTION_RECORD*,CONTEXT*),
                                                struct stack_layout *stack )
@@ -2475,7 +2473,6 @@ static inline BOOL handle_interrupt( ucontext_t *sigcontext, EXCEPTION_RECORD *r
 static BOOL handle_syscall_fault( ucontext_t *sigcontext, EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
-    __WINE_FRAME *wine_frame = (__WINE_FRAME *)NtCurrentTeb()->Tib.ExceptionList;
     DWORD i;
 
     if (!frame) return FALSE;
@@ -2494,12 +2491,13 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, EXCEPTION_RECORD *rec,
     TRACE(" r12=%016lx r13=%016lx r14=%016lx r15=%016lx\n",
           context->R12, context->R13, context->R14, context->R15 );
 
-    if ((char *)wine_frame < (char *)frame)
+    if (ntdll_get_thread_data()->jmp_buf)
     {
         TRACE( "returning to handler\n" );
-        RCX_sig(sigcontext) = (ULONG_PTR)&wine_frame->jmp;
+        RCX_sig(sigcontext) = (ULONG_PTR)ntdll_get_thread_data()->jmp_buf;
         RDX_sig(sigcontext) = 1;
         RIP_sig(sigcontext) = (ULONG_PTR)__wine_longjmp;
+        ntdll_get_thread_data()->jmp_buf = NULL;
     }
     else
     {
@@ -2904,6 +2902,15 @@ void signal_init_thread( TEB *teb )
 void signal_init_process(void)
 {
     struct sigaction sig_act;
+    void *ptr;
+
+    /* sneak in a syscall dispatcher pointer at a fixed address (7ffe1000) */
+    ptr = (char *)user_shared_data + page_size;
+    anon_mmap_fixed( ptr, page_size, PROT_READ | PROT_WRITE, 0 );
+    *(void **)ptr = __wine_syscall_dispatcher;
+
+    if (cpu_info.ProcessorFeatureBits & CPU_FEATURE_XSAVE) __wine_syscall_flags |= SYSCALL_HAVE_XSAVE;
+    if (xstate_compaction_enabled) __wine_syscall_flags |= SYSCALL_HAVE_XSAVEC;
 
     sig_act.sa_mask = server_block_set;
     sig_act.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
@@ -2930,32 +2937,6 @@ void signal_init_process(void)
  error:
     perror("sigaction");
     exit(1);
-}
-
-
-/**********************************************************************
- *		signal_init_syscalls
- */
-void *signal_init_syscalls(void)
-{
-    void *ptr, *syscall_dispatcher;
-
-    extern void __wine_syscall_dispatcher_xsave(void) DECLSPEC_HIDDEN;
-    extern void __wine_syscall_dispatcher_xsavec(void) DECLSPEC_HIDDEN;
-
-    if (xstate_compaction_enabled)
-        syscall_dispatcher = __wine_syscall_dispatcher_xsavec;
-    else if (cpu_info.ProcessorFeatureBits & CPU_FEATURE_XSAVE)
-        syscall_dispatcher = __wine_syscall_dispatcher_xsave;
-    else
-        syscall_dispatcher = __wine_syscall_dispatcher;
-
-    /* sneak in a syscall dispatcher pointer at a fixed address (7ffe1000) */
-    ptr = (char *)user_shared_data + page_size;
-    anon_mmap_fixed( ptr, page_size, PROT_READ | PROT_WRITE, 0 );
-    *(void **)ptr = syscall_dispatcher;
-
-    return syscall_dispatcher;
 }
 
 /**********************************************************************

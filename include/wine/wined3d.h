@@ -2349,7 +2349,7 @@ ULONG __cdecl wined3d_command_list_incref(struct wined3d_command_list *list);
 HRESULT __cdecl wined3d_deferred_context_create(struct wined3d_device *device, struct wined3d_device_context **context);
 void __cdecl wined3d_deferred_context_destroy(struct wined3d_device_context *context);
 HRESULT __cdecl wined3d_deferred_context_record_command_list(struct wined3d_device_context *context,
-        BOOL restore, struct wined3d_command_list **list);
+        bool restore, struct wined3d_command_list **list);
 
 HRESULT __cdecl wined3d_depth_stencil_state_create(struct wined3d_device *device,
         const struct wined3d_depth_stencil_state_desc *desc, void *parent,
@@ -2445,7 +2445,7 @@ void __cdecl wined3d_device_context_draw_indexed(struct wined3d_device_context *
 void __cdecl wined3d_device_context_draw_indirect(struct wined3d_device_context *context,
         struct wined3d_buffer *buffer, unsigned int offset, bool indexed);
 void __cdecl wined3d_device_context_execute_command_list(struct wined3d_device_context *context,
-        struct wined3d_command_list *list, BOOL restore_state);
+        struct wined3d_command_list *list, bool restore_state);
 void __cdecl wined3d_device_context_flush(struct wined3d_device_context *context);
 void __cdecl wined3d_device_context_generate_mipmaps(struct wined3d_device_context *context,
         struct wined3d_shader_resource_view *view);

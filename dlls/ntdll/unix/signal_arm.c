@@ -174,6 +174,7 @@ struct syscall_frame
 {
     DWORD                 pad;
     DWORD                 cpsr;
+    DWORD                 r4;
     DWORD                 r5;
     DWORD                 r6;
     DWORD                 r7;
@@ -181,9 +182,8 @@ struct syscall_frame
     DWORD                 r9;
     DWORD                 r10;
     DWORD                 r11;
-    DWORD                 thunk_addr;
-    DWORD                 r4;
     DWORD                 ret_addr;
+    DWORD                 thunk_addr;
 };
 
 struct arm_thread_data
@@ -201,15 +201,6 @@ static inline struct arm_thread_data *arm_thread_data(void)
     return (struct arm_thread_data *)ntdll_get_thread_data()->cpu_data;
 }
 
-void *get_syscall_frame(void)
-{
-    return arm_thread_data()->syscall_frame;
-}
-
-void set_syscall_frame(void *frame)
-{
-    arm_thread_data()->syscall_frame = frame;
-}
 
 /***********************************************************************
  *           unwind_builtin_dll
@@ -476,21 +467,22 @@ static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
  *           call_user_apc_dispatcher
  */
 __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
-                   "mov r5, r1\n\t"           /* ctx */
-                   "mov r6, r2\n\t"           /* arg1 */
-                   "mov r7, r3\n\t"           /* arg2 */
+                   "mov r5, r1\n\t"           /* arg1 */
+                   "mov r6, r2\n\t"           /* arg2 */
+                   "mov r7, r3\n\t"           /* arg3 */
                    "ldr r8, [sp]\n\t"         /* func */
                    "ldr r9, [sp, #4]\n\t"     /* dispatcher */
-                   "mrc p15, 0, r10, c13, c0, 2\n\t"  /* NtCurrentTeb() */
+                   "ldr r10, [sp, #8]\n\t"    /* status */
+                   "mrc p15, 0, r11, c13, c0, 2\n\t"  /* NtCurrentTeb() */
                    "cmp r0, #0\n\t"           /* context_ptr */
                    "beq 1f\n\t"
                    "ldr r0, [r0, #0x38]\n\t"  /* context_ptr->Sp */
                    "sub r0, r0, #0x1c8\n\t"   /* sizeof(CONTEXT) + offsetof(frame,r4) */
                    "mov ip, #0\n\t"
-                   "str ip, [r10, #0x1d8]\n\t"  /* arm_thread_data()->syscall_frame */
+                   "str ip, [r11, #0x1d8]\n\t"  /* arm_thread_data()->syscall_frame */
                    "mov sp, r0\n\t"
                    "b 2f\n"
-                   "1:\tldr r0, [r10, #0x1d8]\n\t"
+                   "1:\tldr r0, [r11, #0x1d8]\n\t"
                    "sub r0, #0x1a0\n\t"
                    "mov sp, r0\n\t"
                    "mov r0, #3\n\t"
@@ -499,14 +491,13 @@ __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
                    "mov r1, sp\n\t"
                    "mov r0, #~1\n\t"
                    "bl " __ASM_NAME("NtGetContextThread") "\n\t"
-                   "mov r0, #0xc0\n\t"
-                   "str r0, [sp, #4]\n\t"     /* context.R0 = STATUS_USER_APC */
+                   "str r10, [sp, #4]\n\t"    /* context.R0 = status */
                    "mov r0, sp\n\t"
                    "mov ip, #0\n\t"
-                   "str ip, [r10, #0x1d8]\n\t"
-                   "2:\tmov r1, r5\n\t"       /* ctx */
-                   "mov r2, r6\n\t"           /* arg1 */
-                   "mov r3, r7\n\t"           /* arg2 */
+                   "str ip, [r11, #0x1d8]\n\t"
+                   "2:\tmov r1, r5\n\t"       /* arg1 */
+                   "mov r2, r6\n\t"           /* arg2 */
+                   "mov r3, r7\n\t"           /* arg3 */
                    "push {r8, r9}\n\t"        /* func */
                    "ldr lr, [r0, #0x3c]\n\t"  /* context.Lr */
                    "bx r9" )
@@ -545,7 +536,6 @@ __ASM_GLOBAL_FUNC( call_user_exception_dispatcher,
 static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
 {
     struct syscall_frame *frame = arm_thread_data()->syscall_frame;
-    __WINE_FRAME *wine_frame = (__WINE_FRAME *)NtCurrentTeb()->Tib.ExceptionList;
     DWORD i;
 
     if (!frame) return FALSE;
@@ -566,12 +556,13 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
            (DWORD)IP_sig(context), (DWORD)SP_sig(context), (DWORD)LR_sig(context),
            (DWORD)PC_sig(context), (DWORD)CPSR_sig(context) );
 
-    if ((char *)wine_frame < (char *)frame)
+    if (ntdll_get_thread_data()->jmp_buf)
     {
         TRACE( "returning to handler\n" );
-        REGn_sig(0, context) = (DWORD)&wine_frame->jmp;
+        REGn_sig(0, context) = (DWORD)ntdll_get_thread_data()->jmp_buf;
         REGn_sig(1, context) = 1;
         PC_sig(context)      = (DWORD)__wine_longjmp;
+        ntdll_get_thread_data()->jmp_buf = NULL;
     }
     else
     {
@@ -855,15 +846,6 @@ void signal_init_process(void)
  error:
     perror("sigaction");
     exit(1);
-}
-
-
-/**********************************************************************
- *		signal_init_syscalls
- */
-void *signal_init_syscalls(void)
-{
-    return __wine_syscall_dispatcher;
 }
 
 /**********************************************************************

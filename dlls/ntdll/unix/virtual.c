@@ -104,7 +104,34 @@ struct file_view
     unsigned int  protect;       /* protection for all pages at allocation time and SEC_* flags */
 };
 
-#define __EXCEPT_SYSCALL __EXCEPT_HANDLER(0)
+#undef __TRY
+#undef __EXCEPT
+#undef __ENDTRY
+
+#define __TRY \
+    do { __wine_jmp_buf __jmp; \
+         int __first = 1; \
+         assert( !ntdll_get_thread_data()->jmp_buf ); \
+         for (;;) if (!__first) \
+         { \
+             do {
+
+#define __EXCEPT \
+             } while(0); \
+             ntdll_get_thread_data()->jmp_buf = NULL; \
+             break; \
+         } else { \
+             if (__wine_setjmpex( &__jmp, NULL )) { \
+                 do {
+
+#define __ENDTRY \
+                 } while (0); \
+                 break; \
+             } \
+             ntdll_get_thread_data()->jmp_buf = &__jmp; \
+             __first = 0; \
+         } \
+    } while (0);
 
 /* per-page protection flags */
 #define VPROT_READ       0x01
@@ -2931,25 +2958,6 @@ NTSTATUS virtual_create_builtin_view( void *module, const UNICODE_STRING *nt_nam
 }
 
 
-/* set some initial values in the new PEB */
-static PEB *init_peb( void *ptr )
-{
-    PEB64 *peb64 = ptr;
-    PEB32 *peb32 = (PEB32 *)((char *)ptr + page_size);
-
-    peb32->OSMajorVersion = peb64->OSMajorVersion = 6;
-    peb32->OSMinorVersion = peb64->OSMinorVersion = 1;
-    peb32->OSBuildNumber  = peb64->OSBuildNumber  = 0x1db1;
-    peb32->OSPlatformId   = peb64->OSPlatformId   = VER_PLATFORM_WIN32_NT;
-    peb32->SessionId      = peb64->SessionId      = 1;
-#ifdef _WIN64
-    return (PEB *)peb64;
-#else
-    return (PEB *)peb32;
-#endif
-}
-
-
 /* set some initial values in a new TEB */
 static TEB *init_teb( void *ptr, PEB *peb, BOOL is_wow )
 {
@@ -3015,7 +3023,6 @@ static TEB *init_teb( void *ptr, PEB *peb, BOOL is_wow )
  */
 TEB *virtual_alloc_first_teb(void)
 {
-    struct ntdll_thread_data *thread_data;
     TEB *teb;
     PEB *peb;
     void *ptr;
@@ -3039,11 +3046,9 @@ TEB *virtual_alloc_first_teb(void)
     ptr = (char *)teb_block + 30 * block_size;
     data_size = 2 * block_size;
     NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&ptr, 0, &data_size, MEM_COMMIT, PAGE_READWRITE );
-    peb = init_peb( (char *)teb_block + 31 * block_size );
+    peb = (PEB *)((char *)teb_block + 31 * block_size + (is_win64 ? 0 : page_size));
     teb = init_teb( ptr, peb, FALSE );
     *(ULONG_PTR *)&peb->CloudFileFlags = get_image_address();
-    thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
-    thread_data->debug_info = (struct debug_info *)((char *)teb_block + 31 * block_size + 2 * page_size);
     return teb;
 }
 
@@ -3536,9 +3541,9 @@ ssize_t virtual_locked_pread( int fd, void *addr, size_t size, off_t offset )
 
 
 /***********************************************************************
- *           __wine_locked_recvmsg   (NTDLL.@)
+ *           virtual_locked_recvmsg
  */
-ssize_t CDECL __wine_locked_recvmsg( int fd, struct msghdr *hdr, int flags )
+ssize_t virtual_locked_recvmsg( int fd, struct msghdr *hdr, int flags )
 {
     sigset_t sigset;
     size_t i;
@@ -3608,7 +3613,7 @@ BOOL virtual_check_buffer_for_read( const void *ptr, SIZE_T size )
         dummy = p[0];
         dummy = p[count - 1];
     }
-    __EXCEPT_SYSCALL
+    __EXCEPT
     {
         return FALSE;
     }
@@ -3641,7 +3646,7 @@ BOOL virtual_check_buffer_for_write( void *ptr, SIZE_T size )
         p[0] |= 0;
         p[count - 1] |= 0;
     }
-    __EXCEPT_SYSCALL
+    __EXCEPT
     {
         return FALSE;
     }

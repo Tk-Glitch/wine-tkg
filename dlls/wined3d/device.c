@@ -4964,7 +4964,7 @@ void CDECL wined3d_device_context_issue_query(struct wined3d_device_context *con
 }
 
 void CDECL wined3d_device_context_execute_command_list(struct wined3d_device_context *context,
-        struct wined3d_command_list *list, BOOL restore_state)
+        struct wined3d_command_list *list, bool restore_state)
 {
     TRACE("context %p, list %p, restore_state %d.\n", context, list, restore_state);
 

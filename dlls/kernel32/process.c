@@ -604,13 +604,39 @@ HRESULT WINAPI RegisterApplicationRecoveryCallback(APPLICATION_RECOVERY_CALLBACK
     return S_OK;
 }
 
+static SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *get_logical_processor_info(void)
+{
+    DWORD size = 0;
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *info;
+
+    GetLogicalProcessorInformationEx( RelationGroup, NULL, &size );
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return NULL;
+    if (!(info = HeapAlloc( GetProcessHeap(), 0, size ))) return NULL;
+    if (!GetLogicalProcessorInformationEx( RelationGroup, info, &size ))
+    {
+        HeapFree( GetProcessHeap(), 0, info );
+        return NULL;
+    }
+    return info;
+}
+
+
 /***********************************************************************
  *           GetActiveProcessorGroupCount (KERNEL32.@)
  */
 WORD WINAPI GetActiveProcessorGroupCount(void)
 {
-    FIXME("semi-stub, always returning 1\n");
-    return 1;
+    WORD groups;
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *info;
+
+    TRACE("()\n");
+
+    if (!(info = get_logical_processor_info())) return 0;
+
+    groups = info->Group.ActiveGroupCount;
+
+    HeapFree(GetProcessHeap(), 0, info);
+    return groups;
 }
 
 /***********************************************************************
@@ -618,9 +644,25 @@ WORD WINAPI GetActiveProcessorGroupCount(void)
  */
 DWORD WINAPI GetActiveProcessorCount(WORD group)
 {
-    DWORD cpus = system_info.NumberOfProcessors;
+    DWORD cpus = 0;
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *info;
 
-    FIXME("(0x%x): semi-stub, returning %u\n", group, cpus);
+    TRACE("(0x%x)\n", group);
+
+    if (!(info = get_logical_processor_info())) return 0;
+
+    if (group == ALL_PROCESSOR_GROUPS)
+    {
+        for (group = 0; group < info->Group.ActiveGroupCount; group++)
+            cpus += info->Group.GroupInfo[group].ActiveProcessorCount;
+    }
+    else
+    {
+        if (group < info->Group.ActiveGroupCount)
+            cpus = info->Group.GroupInfo[group].ActiveProcessorCount;
+    }
+
+    HeapFree(GetProcessHeap(), 0, info);
     return cpus;
 }
 
@@ -629,19 +671,44 @@ DWORD WINAPI GetActiveProcessorCount(WORD group)
  */
 DWORD WINAPI GetMaximumProcessorCount(WORD group)
 {
-    DWORD cpus = system_info.NumberOfProcessors;
+    DWORD cpus = 0;
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *info;
 
-    FIXME("(0x%x): semi-stub, returning %u\n", group, cpus);
+    TRACE("(0x%x)\n", group);
+
+    if (!(info = get_logical_processor_info())) return 0;
+
+    if (group == ALL_PROCESSOR_GROUPS)
+    {
+        for (group = 0; group < info->Group.MaximumGroupCount; group++)
+            cpus += info->Group.GroupInfo[group].MaximumProcessorCount;
+    }
+    else
+    {
+        if (group < info->Group.MaximumGroupCount)
+            cpus = info->Group.GroupInfo[group].MaximumProcessorCount;
+    }
+
+    HeapFree(GetProcessHeap(), 0, info);
     return cpus;
 }
 
 /***********************************************************************
  *           GetMaximumProcessorGroupCount (KERNEL32.@)
  */
-DWORD WINAPI GetMaximumProcessorGroupCount(void)
+WORD WINAPI GetMaximumProcessorGroupCount(void)
 {
-    FIXME("semi-stub, always returning 1\n");
-    return 1;
+    WORD groups;
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *info;
+
+    TRACE("()\n");
+
+    if (!(info = get_logical_processor_info())) return 0;
+
+    groups = info->Group.MaximumGroupCount;
+
+    HeapFree(GetProcessHeap(), 0, info);
+    return groups;
 }
 
 /***********************************************************************

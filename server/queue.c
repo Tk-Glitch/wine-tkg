@@ -405,13 +405,13 @@ static int assign_thread_input( struct thread *thread, struct thread_input *new_
 
 /* allocate a hardware message and its data */
 static struct message *alloc_hardware_message( lparam_t info, struct hw_msg_source source,
-                                               unsigned int time, data_size_t extra_len )
+                                               unsigned int time, data_size_t extra_size )
 {
     struct hardware_msg_data *msg_data;
     struct message *msg;
 
     if (!(msg = mem_alloc( sizeof(*msg) ))) return NULL;
-    if (!(msg_data = mem_alloc( sizeof(*msg_data) + extra_len )))
+    if (!(msg_data = mem_alloc( sizeof(*msg_data) + extra_size )))
     {
         free( msg );
         return NULL;
@@ -420,10 +420,11 @@ static struct message *alloc_hardware_message( lparam_t info, struct hw_msg_sour
     msg->type      = MSG_HARDWARE;
     msg->time      = time;
     msg->data      = msg_data;
-    msg->data_size = sizeof(*msg_data) + extra_len;
+    msg->data_size = sizeof(*msg_data) + extra_size;
 
-    memset( msg_data, 0, sizeof(*msg_data) + extra_len );
+    memset( msg_data, 0, sizeof(*msg_data) + extra_size );
     msg_data->info   = info;
+    msg_data->size   = msg->data_size;
     msg_data->source = source;
     return msg;
 }
@@ -1768,8 +1769,7 @@ struct rawinput_message
     unsigned int             time;
     unsigned int             message;
     struct hardware_msg_data data;
-    const void              *extra;
-    data_size_t              extra_len;
+    const void              *hid_report;
 };
 
 /* check if process is supposed to receive a WM_INPUT message and eventually queue it */
@@ -1781,6 +1781,7 @@ static int queue_rawinput_message( struct process* process, void *arg )
     struct desktop *target_desktop = NULL, *desktop = NULL;
     struct thread *target_thread = NULL, *foreground = NULL;
     struct message *msg;
+    data_size_t report_size;
     int wparam = RIM_INPUT;
 
     if (raw_msg->data.rawinput.type == RIM_TYPEMOUSE)
@@ -1808,7 +1809,10 @@ static int queue_rawinput_message( struct process* process, void *arg )
         wparam = RIM_INPUTSINK;
     }
 
-    if (!(msg = alloc_hardware_message( raw_msg->data.info, raw_msg->source, raw_msg->time, raw_msg->extra_len )))
+    if (raw_msg->data.rawinput.type != RIM_TYPEHID || !raw_msg->hid_report) report_size = 0;
+    else report_size = raw_msg->data.size - sizeof(raw_msg->data);
+
+    if (!(msg = alloc_hardware_message( raw_msg->data.info, raw_msg->source, raw_msg->time, report_size )))
         goto done;
 
     msg->win    = device->target;
@@ -1816,7 +1820,7 @@ static int queue_rawinput_message( struct process* process, void *arg )
     msg->wparam = wparam;
     msg->lparam = 0;
     memcpy( msg->data, &raw_msg->data, sizeof(raw_msg->data) );
-    if (raw_msg->extra) memcpy( (struct hardware_msg_data *)msg->data + 1, raw_msg->extra, raw_msg->extra_len );
+    if (report_size) memcpy( (struct hardware_msg_data *)msg->data + 1, raw_msg->hid_report, report_size );
 
     if (raw_msg->message == WM_INPUT_DEVICE_CHANGE && raw_msg->data.rawinput.type == RIM_TYPEHID)
     {
@@ -1898,11 +1902,11 @@ static int queue_mouse_message( struct desktop *desktop, user_handle_t win, cons
         raw_msg.source     = source;
         raw_msg.time       = time;
         raw_msg.message    = WM_INPUT;
-        raw_msg.extra      = NULL;
-        raw_msg.extra_len  = 0;
+        raw_msg.hid_report = NULL;
 
         msg_data = &raw_msg.data;
         msg_data->info                = input->mouse.info;
+        msg_data->size                = sizeof(*msg_data);
         msg_data->flags               = flags;
         msg_data->rawinput.type       = RIM_TYPEMOUSE;
         msg_data->rawinput.mouse.x    = input->mouse.x;
@@ -2035,11 +2039,11 @@ static int queue_keyboard_message( struct desktop *desktop, user_handle_t win, c
         raw_msg.source     = source;
         raw_msg.time       = time;
         raw_msg.message    = WM_INPUT;
-        raw_msg.extra      = NULL;
-        raw_msg.extra_len  = 0;
+        raw_msg.hid_report = NULL;
 
         msg_data = &raw_msg.data;
         msg_data->info                 = input->kbd.info;
+        msg_data->size                 = sizeof(*msg_data);
         msg_data->flags                = input->kbd.flags;
         msg_data->rawinput.type        = RIM_TYPEKEYBOARD;
         msg_data->rawinput.kbd.message = message_code;
@@ -2095,6 +2099,7 @@ static void queue_custom_hardware_message( struct desktop *desktop, user_handle_
     struct hardware_msg_data *msg_data;
     struct rawinput_message raw_msg;
     struct message *msg;
+    data_size_t report_size = 0;
 
     switch (input->hw.msg)
     {
@@ -2105,11 +2110,15 @@ static void queue_custom_hardware_message( struct desktop *desktop, user_handle_
         raw_msg.source     = source;
         raw_msg.time       = get_tick_count();
         raw_msg.message    = input->hw.msg;
-        raw_msg.extra      = get_req_data();
-        raw_msg.extra_len  = get_req_data_size();
+        raw_msg.hid_report = NULL;
 
-        if (input->hw.rawinput.type == RIM_TYPEHID &&
-            raw_msg.extra_len != input->hw.rawinput.hid.length * input->hw.rawinput.hid.count)
+        if (input->hw.rawinput.type == RIM_TYPEHID)
+        {
+            raw_msg.hid_report = get_req_data();
+            report_size = input->hw.rawinput.hid.length * input->hw.rawinput.hid.count;
+        }
+
+        if (report_size != get_req_data_size())
         {
             set_error( STATUS_INVALID_PARAMETER );
             return;
@@ -2117,6 +2126,7 @@ static void queue_custom_hardware_message( struct desktop *desktop, user_handle_
 
         msg_data = &raw_msg.data;
         msg_data->info     = 0;
+        msg_data->size     = sizeof(*msg_data) + report_size;
         msg_data->flags    = 0;
         msg_data->rawinput = input->hw.rawinput;
 
@@ -3441,17 +3451,17 @@ DECL_HANDLER(get_rawinput_buffer)
     {
         struct message *msg = LIST_ENTRY( ptr, struct message, entry );
         struct hardware_msg_data *data = msg->data;
-        data_size_t hid_size = data->rawinput.type != RIM_TYPEHID ? 0 : msg->data_size - sizeof(*data);
+        data_size_t extra_size = data->size - sizeof(*data);
 
         ptr = list_next( &input->msg_list, ptr );
         if (msg->msg != WM_INPUT) continue;
 
-        next_size = req->rawinput_size + hid_size;
+        next_size = req->rawinput_size + extra_size;
         if (size + next_size > req->buffer_size) break;
-        if (cur + msg->data_size > buf + get_reply_max_size()) break;
-        if (cur + msg->data_size > buf + buf_size)
+        if (cur + data->size > buf + get_reply_max_size()) break;
+        if (cur + data->size > buf + buf_size)
         {
-            buf_size += buf_size / 2 + hid_size;
+            buf_size += buf_size / 2 + extra_size;
             if (!(tmp = realloc( buf, buf_size )))
             {
                 set_error( STATUS_NO_MEMORY );
@@ -3461,7 +3471,7 @@ DECL_HANDLER(get_rawinput_buffer)
             buf = tmp;
         }
 
-        memcpy( cur, data, msg->data_size );
+        memcpy( cur, data, data->size );
         list_remove( &msg->entry );
         free_message( msg );
 

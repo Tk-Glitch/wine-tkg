@@ -79,7 +79,6 @@ const struct unix_funcs *unix_funcs = NULL;
 const WCHAR windows_dir[] = L"C:\\windows";
 /* system directory with trailing backslash */
 const WCHAR system_dir[] = L"C:\\windows\\system32\\";
-const WCHAR syswow64_dir[] = L"C:\\windows\\syswow64\\";
 
 HMODULE kernel32_handle = 0;
 
@@ -3860,12 +3859,10 @@ static void init_wow64(void)
 
     if (!NtCurrentTeb64()) return;
     peb64 = UlongToPtr( NtCurrentTeb64()->Peb );
-    peb64->ImageBaseAddress = PtrToUlong( peb->ImageBaseAddress );
     peb64->OSMajorVersion   = peb->OSMajorVersion;
     peb64->OSMinorVersion   = peb->OSMinorVersion;
     peb64->OSBuildNumber    = peb->OSBuildNumber;
     peb64->OSPlatformId     = peb->OSPlatformId;
-    peb64->SessionId        = peb->SessionId;
 
     map_wow64cpu();
 }

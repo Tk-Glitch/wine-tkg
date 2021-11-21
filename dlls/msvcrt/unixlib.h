@@ -23,48 +23,13 @@
 
 struct unix_funcs
 {
-    double          (CDECL *acosh)(double x);
-    float           (CDECL *acoshf)(float x);
-    double          (CDECL *asinh)(double x);
-    float           (CDECL *asinhf)(float x);
-    double          (CDECL *atanh)(double x);
-    float           (CDECL *atanhf)(float x);
-    double          (CDECL *cos)(double x);
-    float           (CDECL *cosf)(float x);
-    double          (CDECL *cosh)(double x);
-    float           (CDECL *coshf)(float x);
     double          (CDECL *exp)(double x);
     float           (CDECL *expf)(float x);
     double          (CDECL *exp2)(double x);
     float           (CDECL *exp2f)(float x);
-    double          (CDECL *expm1)(double x);
-    float           (CDECL *expm1f)(float x);
-    double          (CDECL *fma)(double x, double y, double z);
     float           (CDECL *fmaf)(float x, float y, float z);
-    double          (CDECL *frexp)(double x, int *exp);
-    float           (CDECL *frexpf)(float x, int *exp);
-    double          (CDECL *hypot)(double x, double y);
-    float           (CDECL *hypotf)(float x, float y);
-    double          (CDECL *ldexp)(double x, int exp);
-    double          (CDECL *lgamma)(double x);
-    float           (CDECL *lgammaf)(float x);
-    double          (CDECL *log)(double x);
-    float           (CDECL *logf)(float x);
-    double          (CDECL *log10)(double x);
-    float           (CDECL *log10f)(float x);
-    double          (CDECL *log1p)(double x);
-    float           (CDECL *log1pf)(float x);
-    double          (CDECL *log2)(double x);
-    float           (CDECL *log2f)(float x);
     double          (CDECL *pow)(double x, double y);
     float           (CDECL *powf)(float x, float y);
-    float           (CDECL *sinf)(float x);
-    double          (CDECL *sinh)(double x);
-    float           (CDECL *sinhf)(float x);
-    double          (CDECL *tan)(double x);
-    float           (CDECL *tanf)(float x);
-    double          (CDECL *tanh)(double x);
-    float           (CDECL *tanhf)(float x);
     double          (CDECL *tgamma)(double x);
     float           (CDECL *tgammaf)(float x);
 };

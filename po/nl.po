@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2021-05-20 14:10+0200\n"
+"PO-Revision-Date: 2021-06-04 19:40+0200\n"
 "Last-Translator: Floris Renaud <jkfloris@dds.nl>\n"
 "Language-Team: Dutch\n"
 "Language: nl\n"
@@ -4515,7 +4515,7 @@ msgstr "Pad is ongeldig.\n"
 
 #: dlls/kernel32/winerror.mc:678
 msgid "Signal pending.\n"
-msgstr "Signaal wachtende.\n"
+msgstr "Signaal in behandeling.\n"
 
 #: dlls/kernel32/winerror.mc:683
 msgid "Max system-wide thread count reached.\n"
@@ -4527,7 +4527,7 @@ msgstr "Vergrendelen mislukt.\n"
 
 #: dlls/kernel32/winerror.mc:693
 msgid "Resource in use.\n"
-msgstr "Resource in gebruik.\n"
+msgstr "Bron in gebruik.\n"
 
 #: dlls/kernel32/winerror.mc:698
 msgid "Cancel violation.\n"
@@ -6088,11 +6088,11 @@ msgstr "Geen systeembronnen.\n"
 
 #: dlls/kernel32/winerror.mc:2653
 msgid "No non-paged system resources.\n"
-msgstr "Geen nonpaged systeembronnen.\n"
+msgstr "Geen niet-wisselbare systeembronnen.\n"
 
 #: dlls/kernel32/winerror.mc:2658
 msgid "No paged system resources.\n"
-msgstr "Geen paged systeembronnen.\n"
+msgstr "Geen wisselbare systeembronnen.\n"
 
 #: dlls/kernel32/winerror.mc:2663
 msgid "No working set quota.\n"
@@ -6112,7 +6112,7 @@ msgstr "Menu-item niet gevonden.\n"
 
 #: dlls/kernel32/winerror.mc:2683
 msgid "Invalid keyboard handle.\n"
-msgstr "Ongeldige toestenbordhandle.\n"
+msgstr "Ongeldige toestenbordbeschrijving.\n"
 
 #: dlls/kernel32/winerror.mc:2688
 msgid "Hook type not allowed.\n"
@@ -6124,15 +6124,15 @@ msgstr "Interactief windowstation vereist.\n"
 
 #: dlls/kernel32/winerror.mc:2698
 msgid "Timeout.\n"
-msgstr "Timeout.\n"
+msgstr "Time-out.\n"
 
 #: dlls/kernel32/winerror.mc:2703
 msgid "Invalid monitor handle.\n"
-msgstr "Ongeldige monitorhandle.\n"
+msgstr "Ongeldige monitorbeschrijving.\n"
 
 #: dlls/kernel32/winerror.mc:2708
 msgid "Event log file corrupt.\n"
-msgstr "Gebeurtenislogbestand corrupt.\n"
+msgstr "Gebeurtenislogbestand beschadigd.\n"
 
 #: dlls/kernel32/winerror.mc:2713
 msgid "Event log can't start.\n"
@@ -6384,7 +6384,7 @@ msgstr "Onbekende interface.\n"
 
 #: dlls/kernel32/winerror.mc:3023
 msgid "No bindings.\n"
-msgstr "Geen bindings.\n"
+msgstr "Geen bindingen.\n"
 
 #: dlls/kernel32/winerror.mc:3028
 msgid "No protocol sequences.\n"
@@ -6392,11 +6392,11 @@ msgstr "Geen protocol volgordes.\n"
 
 #: dlls/kernel32/winerror.mc:3033
 msgid "Can't create endpoint.\n"
-msgstr "Kan eindpunt niet creëren.\n"
+msgstr "Kan eindpunt niet aanmaken.\n"
 
 #: dlls/kernel32/winerror.mc:3038
 msgid "Out of resources.\n"
-msgstr "Resources zijn op.\n"
+msgstr "Onvoldoende bronnen.\n"
 
 #: dlls/kernel32/winerror.mc:3043
 msgid "RPC server unavailable.\n"
@@ -6412,15 +6412,15 @@ msgstr "Ongeldige netwerkopties.\n"
 
 #: dlls/kernel32/winerror.mc:3058
 msgid "No RPC call active.\n"
-msgstr "Geen RPC-call actief.\n"
+msgstr "Geen RPC-oproep actief.\n"
 
 #: dlls/kernel32/winerror.mc:3063
 msgid "RPC call failed.\n"
-msgstr "RPC-call mislukt.\n"
+msgstr "RPC-oproep mislukt.\n"
 
 #: dlls/kernel32/winerror.mc:3068
 msgid "RPC call failed and didn't execute.\n"
-msgstr "RPC-call mislukt en niet uitgevoerd.\n"
+msgstr "RPC-oproep mislukt en niet uitgevoerd.\n"
 
 #: dlls/kernel32/winerror.mc:3073
 msgid "RPC protocol error.\n"
@@ -6740,23 +6740,23 @@ msgstr "Server heeft open handles.\n"
 
 #: dlls/kernel32/winerror.mc:3473
 msgid "Resource data not found.\n"
-msgstr "Resourcedata niet gevonden.\n"
+msgstr "Brongegevens niet gevonden.\n"
 
 #: dlls/kernel32/winerror.mc:3478
 msgid "Resource type not found.\n"
-msgstr "Resourcetype niet gevonden.\n"
+msgstr "Brontype niet gevonden.\n"
 
 #: dlls/kernel32/winerror.mc:3483
 msgid "Resource name not found.\n"
-msgstr "Resourcenaam niet gevonden.\n"
+msgstr "Bronnaam niet gevonden.\n"
 
 #: dlls/kernel32/winerror.mc:3488
 msgid "Resource language not found.\n"
-msgstr "Resourcetaal niet gevonden.\n"
+msgstr "Brontaal niet gevonden.\n"
 
 #: dlls/kernel32/winerror.mc:3493
 msgid "Not enough quota.\n"
-msgstr "Niet genoeg quota.\n"
+msgstr "Onvoldoende quota.\n"
 
 #: dlls/kernel32/winerror.mc:3498
 msgid "No interfaces.\n"
@@ -9573,55 +9573,55 @@ msgstr "Terugspoelen"
 
 #: dlls/shdoclc/shdoclc.rc:199
 msgid "Trace Tags"
-msgstr "Traceer Labels"
+msgstr "Markeringen"
 
 #: dlls/shdoclc/shdoclc.rc:200
 msgid "Resource Failures"
-msgstr "Resource Fouten"
+msgstr "Bronfouten"
 
 #: dlls/shdoclc/shdoclc.rc:201
 msgid "Dump Tracking Info"
-msgstr "Log Tracerings Informatie"
+msgstr "Traceerinformatie Dumpen"
 
 #: dlls/shdoclc/shdoclc.rc:202
 msgid "Debug Break"
-msgstr "Debug Onderbreking"
+msgstr "Foutopsporing Onderbreking"
 
 #: dlls/shdoclc/shdoclc.rc:203
 msgid "Debug View"
-msgstr "Debug Beeld"
+msgstr "Foutopsporingsbeeld"
 
 #: dlls/shdoclc/shdoclc.rc:204
 msgid "Dump Tree"
-msgstr "Log Gehele Boom"
+msgstr "Boom Dumpen"
 
 #: dlls/shdoclc/shdoclc.rc:205
 msgid "Dump Lines"
-msgstr "Log Regels"
+msgstr "Regels Dumpen"
 
 #: dlls/shdoclc/shdoclc.rc:206
 msgid "Dump DisplayTree"
-msgstr "Log Beeld Boom"
+msgstr "BeeldBoom Dumpen"
 
 #: dlls/shdoclc/shdoclc.rc:207
 msgid "Dump FormatCaches"
-msgstr "Log Formaat Caches"
+msgstr "FormaatCaches Dumpen"
 
 #: dlls/shdoclc/shdoclc.rc:208
 msgid "Dump LayoutRects"
-msgstr "Log Layout Rects"
+msgstr "LayoutRects Dumpen"
 
 #: dlls/shdoclc/shdoclc.rc:209
 msgid "Memory Monitor"
-msgstr "Geheugen Monitor"
+msgstr "Geheugenmonitor"
 
 #: dlls/shdoclc/shdoclc.rc:210
 msgid "Performance Meters"
-msgstr "Performance Meters"
+msgstr "Prestatiemeters"
 
 #: dlls/shdoclc/shdoclc.rc:211
 msgid "Save HTML"
-msgstr "Sla HTML op"
+msgstr "HTML Opslaan"
 
 #: dlls/shdoclc/shdoclc.rc:213
 msgid "&Browse View"
@@ -9989,9 +9989,10 @@ msgstr "Wilt u uw Wine sessie afsluiten?"
 msgid "Programs"
 msgstr "Programma's"
 
-#: dlls/shell32/shell32.rc:204
-msgid "My Documents"
-msgstr "Mijn Documenten"
+#: dlls/shell32/shell32.rc:204 dlls/shell32/shell32.rc:219
+#: dlls/shell32/shell32.rc:150 dlls/shell32/shell32.rc:235
+msgid "Documents"
+msgstr "Documenten"
 
 #: dlls/shell32/shell32.rc:205
 msgid "Favorites"
@@ -10005,13 +10006,13 @@ msgstr "Opstarten"
 msgid "Start Menu"
 msgstr "Start Menu"
 
-#: dlls/shell32/shell32.rc:208
-msgid "My Music"
-msgstr "Mijn Muziek"
+#: dlls/shell32/shell32.rc:208 dlls/shell32/shell32.rc:221
+msgid "Music"
+msgstr "Muziek"
 
-#: dlls/shell32/shell32.rc:209
-msgid "My Videos"
-msgstr "Mijn Video's"
+#: dlls/shell32/shell32.rc:209 dlls/shell32/shell32.rc:223
+msgid "Videos"
+msgstr "Video's"
 
 #: dlls/shell32/shell32.rc:210
 msgctxt "directory"
@@ -10038,34 +10039,17 @@ msgstr "Geschiedenis"
 msgid "Program Files"
 msgstr "Program Files"
 
-#: dlls/shell32/shell32.rc:217
-msgid "My Pictures"
-msgstr "Mijn Afbeeldingen"
+#: dlls/shell32/shell32.rc:217 dlls/shell32/shell32.rc:222
+msgid "Pictures"
+msgstr "Afbeeldingen"
 
 #: dlls/shell32/shell32.rc:218
 msgid "Common Files"
 msgstr "Gemeenschappelijke Bestanden"
 
-#: dlls/shell32/shell32.rc:219 dlls/shell32/shell32.rc:150
-#: dlls/shell32/shell32.rc:235
-msgid "Documents"
-msgstr "Documenten"
-
 #: dlls/shell32/shell32.rc:220
 msgid "Administrative Tools"
 msgstr "Administratief gereedschap"
-
-#: dlls/shell32/shell32.rc:221
-msgid "Music"
-msgstr "Muziek"
-
-#: dlls/shell32/shell32.rc:222
-msgid "Pictures"
-msgstr "Afbeeldingen"
-
-#: dlls/shell32/shell32.rc:223
-msgid "Videos"
-msgstr "Video's"
 
 #: dlls/shell32/shell32.rc:216
 msgid "Program Files (x86)"
@@ -13238,12 +13222,12 @@ msgstr ""
 msgid "Are you sure?"
 msgstr "Weet u het zeker?"
 
-#: programs/cmd/cmd.rc:366 programs/reg/reg.rc:127 programs/xcopy/xcopy.rc:43
+#: programs/cmd/cmd.rc:366 programs/reg/reg.rc:126 programs/xcopy/xcopy.rc:43
 msgctxt "Yes key"
 msgid "Y"
 msgstr "J"
 
-#: programs/cmd/cmd.rc:367 programs/reg/reg.rc:128 programs/xcopy/xcopy.rc:44
+#: programs/cmd/cmd.rc:367 programs/reg/reg.rc:127 programs/xcopy/xcopy.rc:44
 msgctxt "No key"
 msgid "N"
 msgstr "N"
@@ -13313,7 +13297,7 @@ msgid "Cannot call batch label outside of a batch script\n"
 msgstr ""
 "Onmogelijk om een batch label aan te roepen van buiten een batch script\n"
 
-#: programs/cmd/cmd.rc:386 programs/xcopy/xcopy.rc:45
+#: programs/cmd/cmd.rc:386 programs/reg/reg.rc:128 programs/xcopy/xcopy.rc:45
 msgctxt "All key"
 msgid "A"
 msgstr "A"
@@ -13382,11 +13366,11 @@ msgstr "Volume in schijfstation %1!c! is %2\n"
 msgid "Volume in drive %1!c! has no label.\n"
 msgstr "Volume in schijfstation %1!c! heeft geen label.\n"
 
-#: programs/cmd/cmd.rc:402 programs/reg/reg.rc:126
+#: programs/cmd/cmd.rc:402 programs/reg/reg.rc:129
 msgid " (Yes|No)"
 msgstr " (Ja|Nee)"
 
-#: programs/cmd/cmd.rc:403
+#: programs/cmd/cmd.rc:403 programs/reg/reg.rc:130
 msgid " (Yes|No|All)"
 msgstr " (Ja|Nee|Alles)"
 
@@ -13826,7 +13810,7 @@ msgstr ""
 
 #: programs/net/net.rc:46
 msgid "%1      %2      %3      Open resources: %4!u!\n"
-msgstr "%1      %2      %3      Open resources: %4!u!\n"
+msgstr "%1      %2      %3      Open bronnen: %4!u!\n"
 
 #: programs/net/net.rc:48
 msgid "Paused"
@@ -14763,6 +14747,42 @@ msgstr "Pictogrambestanden"
 msgid "Icons (*.ico)"
 msgstr "Pictogrammen (*.ico)"
 
+#: programs/reg/reg.rc:139
+msgid "reg: Invalid syntax. "
+msgstr "reg: Foutieve syntax. "
+
+#: programs/reg/reg.rc:142
+msgid "Type \"REG %1 /?\" for help.\n"
+msgstr "Type \"REG %1 /?\" voor hulp.\n"
+
+#: programs/reg/reg.rc:181
+msgid "reg: Unable to access or create the specified registry key\n"
+msgstr "reg: Kan de gegeven registersleutel niet openen of aanmaken\n"
+
+#: programs/reg/reg.rc:116
+msgid "reg: The operation completed successfully\n"
+msgstr "reg: De bewerking is succesvol voltooid\n"
+
+#: programs/reg/reg.rc:131
+msgid "reg: The registry operation was cancelled\n"
+msgstr "reg: De register bewerking is afgebroken\n"
+
+#: programs/reg/reg.rc:174
+msgid "reg: Unable to find the specified registry key\n"
+msgstr "reg: Kan de gegeven registersleutel niet vinden\n"
+
+#: programs/reg/reg.rc:120
+msgid "reg: Unable to find the specified registry value\n"
+msgstr "reg: Kan de gegeven registerwaarde niet vinden\n"
+
+#: programs/reg/reg.rc:132 programs/regedit/regedit.rc:239
+msgid "(Default)"
+msgstr "(Standaard)"
+
+#: programs/reg/reg.rc:141
+msgid "Type \"REG /?\" for help.\n"
+msgstr "Type \"REG /?\" voor hulp.\n"
+
 #: programs/reg/reg.rc:35
 msgid ""
 "Usage:\n"
@@ -14886,6 +14906,75 @@ msgstr ""
 "     Wijzig het register zonder bevestiging te vragen.\n"
 "\n"
 
+#: programs/reg/reg.rc:202
+msgid ""
+"REG COPY <key1> <key2> [/s] [/f]\n"
+"\n"
+"  Copies the contents of a specified registry key to another location.\n"
+"  By default, this operation only copies registry values. Use [/s] to\n"
+"  recursively copy all subkeys and values.\n"
+"\n"
+"  <key1>, <key2>\n"
+"     Registry keys specifying the source (<key1>) and destination (<key2>)\n"
+"     of the data. If <key2> does not exist, it is created.\n"
+"\n"
+"     Format: ROOT\\Subkey\n"
+"\n"
+"     ROOT: A predefined registry key. This must be one of the following:\n"
+"\n"
+"         HKEY_LOCAL_MACHINE  | HKLM\n"
+"         HKEY_CURRENT_USER   | HKCU\n"
+"         HKEY_CLASSES_ROOT   | HKCR\n"
+"         HKEY_USERS          | HKU\n"
+"         HKEY_CURRENT_CONFIG | HKCC\n"
+"\n"
+"     Subkey: The full path to a registry key under a given ROOT key.\n"
+"\n"
+"  /s\n"
+"     Copy all subkeys and values from <key1> to <key2>.\n"
+"\n"
+"  /f\n"
+"     Overwrite all registry data in <key2> without prompting for "
+"confirmation.\n"
+"     This option does not modify subkeys and values that only exist in "
+"<key2>.\n"
+"\n"
+msgstr ""
+"REG COPY <sleutel1> <sleutel2> [/s] [/f]\n"
+"\n"
+"  Kopieert de inhoud van een registersleutel naar een andere plek.\n"
+"  Standaard worden alleen de registerwaarden gekopieerd. Gebruik [/s] om\n"
+"  ook de onderliggende sleutels en waarden te kopiëren.\n"
+"\n"
+"  <sleutel1>, <sleutel2>\n"
+"     De registersleutel (<sleutel1>) die gekopieerd wordt naar <sleutel2>.\n"
+"     <sleutel2> wordt aangemaakt als deze niet bestaat.\n"
+"\n"
+"     Formaat: HOOFDSLEUTEL\\Subsleutel\n"
+"\n"
+"     HOOFDSLEUTEL: Een voorgedefinieerde registersleutel. Dit is één van:\n"
+"\n"
+"         HKEY_LOCAL_MACHINE  | HKLM\n"
+"         HKEY_CURRENT_USER   | HKCU\n"
+"         HKEY_CLASSES_ROOT   | HKCR\n"
+"         HKEY_USERS          | HKU\n"
+"         HKEY_CURRENT_CONFIG | HKCC\n"
+"\n"
+"     Subsleutel: Het volledige pad naar een registersleutel onder de "
+"gegeven\n"
+"     HOOFDSLEUTEL.\n"
+"\n"
+"  /s\n"
+"     Kopieer alle onderliggende sleutels en waarden van <sleutel1> naar "
+"<sleutel2>.\n"
+"\n"
+"  /f\n"
+"     Overschrijf alle register gegevens in <sleutel2> zonder om bevestiging "
+"te vragen.\n"
+"     Deze optie wijzigt geen onderliggende sleutels en waarden die alleen in "
+"<sleutel2> bestaan.\n"
+"\n"
+
 #: programs/reg/reg.rc:92
 msgid ""
 "REG DELETE <key> [/v value_name | /ve | /va] [/f]\n"
@@ -14964,6 +15053,85 @@ msgstr ""
 "     zonder bevestiging te vragen.\n"
 "\n"
 
+#: programs/reg/reg.rc:170
+msgid ""
+"REG EXPORT <key> <file> [/y]\n"
+"\n"
+"  Exports a specified registry key (including all subkeys and values)\n"
+"  to a file.\n"
+"\n"
+"  <key>\n"
+"     The registry key to export.\n"
+"\n"
+"     Format: ROOT\\Subkey\n"
+"\n"
+"     ROOT: A predefined registry key. This must be one of the following:\n"
+"\n"
+"         HKEY_LOCAL_MACHINE  | HKLM\n"
+"         HKEY_CURRENT_USER   | HKCU\n"
+"         HKEY_CLASSES_ROOT   | HKCR\n"
+"         HKEY_USERS          | HKU\n"
+"         HKEY_CURRENT_CONFIG | HKCC\n"
+"\n"
+"     Subkey: The full path to a registry key under a given ROOT key.\n"
+"\n"
+"  <file>\n"
+"     The name and path of the registry file that will be created.\n"
+"     This file must have a .reg extension.\n"
+"\n"
+"  /y\n"
+"     Overwrite <file> without prompting for confirmation.\n"
+"\n"
+msgstr ""
+"REG EXPORT <sleutel> <bestand> [/y]\n"
+"\n"
+"  Exporteer een registersleutel (inclusief alle subsleutels en waardes)\n"
+"  naar een bestand.\n"
+"\n"
+"  <sleutel>\n"
+"     De registersleutel die geëxporteerd moet worden.\n"
+"\n"
+"     Formaat: HOOFDSLEUTEL\\Subsleutel\n"
+"\n"
+"     HOOFDSLEUTEL: Een voorgedefinieerde registersleutel. Dit is één van:\n"
+"\n"
+"         HKEY_LOCAL_MACHINE  | HKLM\n"
+"         HKEY_CURRENT_USER   | HKCU\n"
+"         HKEY_CLASSES_ROOT   | HKCR\n"
+"         HKEY_USERS          | HKU\n"
+"         HKEY_CURRENT_CONFIG | HKCC\n"
+"\n"
+"     Subsleutel: Het volledige pad naar een registersleutel onder de "
+"gegeven\n"
+"     HOOFDSLEUTEL.\n"
+"\n"
+"  <bestand>\n"
+"     De naam en pad van het registerbestand dat aangemaakt wordt.\n"
+"     Dit bestand moet de extensie .reg hebben.\n"
+"\n"
+"  /y\n"
+"     <bestand> overschrijven zonder een bevestiging te vragen.\n"
+"\n"
+
+#: programs/reg/reg.rc:148
+msgid ""
+"REG IMPORT <file>\n"
+"\n"
+"  Imports keys, values and data from a given file into the registry.\n"
+"\n"
+"  <file>\n"
+"     The name and path of the registry file to import.\n"
+"\n"
+msgstr ""
+"REG IMPORT <bestand>\n"
+"\n"
+"  Importeer sleutels, waardes en gegevens uit een bestand in het register.\n"
+"\n"
+"  <bestand>\n"
+"     De naam en het pad van het registerbestand dat geïmporteerd moet "
+"worden.\n"
+"\n"
+
 #: programs/reg/reg.rc:114
 msgid ""
 "REG QUERY <key> [/v value_name | /ve] [/s]\n"
@@ -15033,213 +15201,6 @@ msgstr ""
 "     Toon alle registervermeldingen onder <sleutel> en zijn subsleutels.\n"
 "\n"
 
-#: programs/reg/reg.rc:116
-msgid "reg: The operation completed successfully\n"
-msgstr "reg: De bewerking is succesvol voltooid\n"
-
-#: programs/reg/reg.rc:117
-msgid "reg: Invalid registry key\n"
-msgstr "reg: Foutieve registersleutel\n"
-
-#: programs/reg/reg.rc:118
-msgid "reg: Invalid command line parameters\n"
-msgstr "reg: Foutieve opdrachtregel-parameters\n"
-
-#: programs/reg/reg.rc:119
-msgid "reg: Unable to access remote machine\n"
-msgstr "reg: Kan de computer op afstand niet benaderen\n"
-
-#: programs/reg/reg.rc:120
-msgid "reg: Unable to find the specified registry value\n"
-msgstr "reg: Kan de gegeven registerwaarde niet vinden\n"
-
-#: programs/reg/reg.rc:121
-msgid "reg: Unsupported registry data type [%1]\n"
-msgstr "reg: Register data type wordt niet ondersteund [%1]\n"
-
-#: programs/reg/reg.rc:122
-msgid "reg: The option [/d] must be followed by a valid numeric value\n"
-msgstr "reg: De optie [/d] moet gevolgd worden door een numerieke waarde\n"
-
-#: programs/reg/reg.rc:123
-msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
-msgstr "reg: De optie [/d] moet gevolgd worden door een hexadecimale waarde\n"
-
-#: programs/reg/reg.rc:124
-msgid "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
-msgstr "reg: Onverwerkte registergegevenstypen [/t 0x%1!x!, /d %2]\n"
-
-#: programs/reg/reg.rc:125
-msgid "The registry value '%1' already exists. Do you want to overwrite it?"
-msgstr "De registerwaarde '%1' bestand bestaat al. Wilt u het vervangen?"
-
-#: programs/reg/reg.rc:129
-msgid "reg: The registry operation was cancelled\n"
-msgstr "reg: De register bewerking is afgebroken\n"
-
-#: programs/reg/reg.rc:130 programs/regedit/regedit.rc:239
-msgid "(Default)"
-msgstr "(Standaard)"
-
-#: programs/reg/reg.rc:131
-msgid "Are you sure you want to delete the registry value '%1'?"
-msgstr "Weet u zeker dat u de registerwaarde '%1' wilt verwijderen?"
-
-#: programs/reg/reg.rc:132
-msgid "Are you sure you want to delete all registry values in '%1'?"
-msgstr "Weet u zeker dat u alle registerwaardes in '%1' wilt verwijderen?"
-
-#: programs/reg/reg.rc:133
-msgid "Are you sure you want to delete the registry key '%1'?"
-msgstr "Weet u zeker dat u registersleutel '%1' wilt verwijderen?"
-
-#: programs/reg/reg.rc:134
-msgid "reg: The option [/d] must be followed by a valid string\n"
-msgstr "reg: De optie [/d] moet gevolgd worden door tekenreeks\n"
-
-#: programs/reg/reg.rc:135
-msgid "reg: Unable to delete all registry values in '%1'\n"
-msgstr "reg: Kan niet alle registerwaardes in '%1' verwijderen.\n"
-
-#: programs/reg/reg.rc:136
-msgid ""
-"reg: Unable to complete the specified operation. An unexpected error "
-"occurred.\n"
-msgstr ""
-"reg: Onmogelijk om de gevraagde opdracht uit te voeren. Er is een "
-"onverwachte fout opgetreden.\n"
-
-#: programs/reg/reg.rc:137
-msgid "Search complete. Number of matches found: %1!d!\n"
-msgstr "Zoeken voltooid. Aantal gevonden resultaten: %1!d!\n"
-
-#: programs/reg/reg.rc:138
-msgid "reg: Invalid syntax. "
-msgstr "reg: Foutieve syntax. "
-
-#: programs/reg/reg.rc:139
-msgid "reg: Invalid option [%1]. "
-msgstr "reg: Ongeldige optie [%1]. "
-
-#: programs/reg/reg.rc:140
-msgid "Type \"REG /?\" for help.\n"
-msgstr "Type \"REG /?\" voor hulp.\n"
-
-#: programs/reg/reg.rc:141
-msgid "Type \"REG %1 /?\" for help.\n"
-msgstr "Type \"REG %1 /?\" voor hulp.\n"
-
-#: programs/reg/reg.rc:142 programs/regedit/regedit.rc:240
-msgid "(value not set)"
-msgstr "(Geen waarde ingesteld)"
-
-#: programs/reg/reg.rc:147
-msgid ""
-"REG IMPORT <file>\n"
-"\n"
-"  Imports keys, values and data from a given file into the registry.\n"
-"\n"
-"  <file>\n"
-"     The name and path of the registry file to import.\n"
-"\n"
-msgstr ""
-"REG IMPORT <bestand>\n"
-"\n"
-"  Importeer sleutels, waardes en gegevens uit een bestand in het register.\n"
-"\n"
-"  <bestand>\n"
-"     De naam en het pad van het registerbestand dat geïmporteerd moet "
-"worden.\n"
-"\n"
-
-#: programs/reg/reg.rc:149
-msgid "reg: The file '%1' was not found.\n"
-msgstr "reg: Het bestand '%1' is niet gevonden.\n"
-
-#: programs/reg/reg.rc:150
-msgid "reg: Unable to open the registry key '%1'.\n"
-msgstr "reg: Onmogelijk om de registersleutel '%1' te openen.\n"
-
-#: programs/reg/reg.rc:151
-msgid "reg: Unrecognized escape sequence [\\%1!c!]\n"
-msgstr "reg: Escape-tekenreeks niet herkend [\\%1!c!]\n"
-
-#: programs/reg/reg.rc:170
-msgid ""
-"REG EXPORT <key> <file> [/y]\n"
-"\n"
-"  Exports a specified registry key (including all subkeys and values)\n"
-"  to a file.\n"
-"\n"
-"  <key>\n"
-"     The registry key to export.\n"
-"\n"
-"     Format: ROOT\\Subkey\n"
-"\n"
-"     ROOT: A predefined registry key. This must be one of the following:\n"
-"\n"
-"         HKEY_LOCAL_MACHINE  | HKLM\n"
-"         HKEY_CURRENT_USER   | HKCU\n"
-"         HKEY_CLASSES_ROOT   | HKCR\n"
-"         HKEY_USERS          | HKU\n"
-"         HKEY_CURRENT_CONFIG | HKCC\n"
-"\n"
-"     Subkey: The full path to a registry key under a given ROOT key.\n"
-"\n"
-"  <file>\n"
-"     The name and path of the registry file that will be created.\n"
-"     This file must have a .reg extension.\n"
-"\n"
-"  /y\n"
-"     Overwrite <file> without prompting for confirmation.\n"
-"\n"
-msgstr ""
-"REG EXPORT <sleutel> <bestand> [/y]\n"
-"\n"
-"  Exporteer een registersleutel (inclusief alle subsleutels en waardes)\n"
-"  naar een bestand.\n"
-"\n"
-"  <sleutel>\n"
-"     De registersleutel die geëxporteerd moet worden.\n"
-"\n"
-"     Formaat: HOOFDSLEUTEL\\Subsleutel\n"
-"\n"
-"     HOOFDSLEUTEL: Een voorgedefinieerde registersleutel. Dit is één van:\n"
-"\n"
-"         HKEY_LOCAL_MACHINE  | HKLM\n"
-"         HKEY_CURRENT_USER   | HKCU\n"
-"         HKEY_CLASSES_ROOT   | HKCR\n"
-"         HKEY_USERS          | HKU\n"
-"         HKEY_CURRENT_CONFIG | HKCC\n"
-"\n"
-"     Subsleutel: Het volledige pad naar een registersleutel onder de "
-"gegeven\n"
-"     HOOFDSLEUTEL.\n"
-"\n"
-"  <bestand>\n"
-"     De naam en pad van het registerbestand dat aangemaakt wordt.\n"
-"     Dit bestand moet de extensie .reg hebben.\n"
-"\n"
-"  /y\n"
-"     <bestand> overschrijven zonder een bevestiging te vragen.\n"
-"\n"
-
-#: programs/reg/reg.rc:172
-msgid "reg: Invalid system key\n"
-msgstr "reg: Foutieve systeemsleutel\n"
-
-#: programs/reg/reg.rc:173
-msgid "The file '%1' already exists. Do you want to overwrite it?"
-msgstr "Het bestand '%1' bestaat al. Wilt u het overschrijven?"
-
-#: programs/reg/reg.rc:174
-msgid "reg: Unable to find the specified registry key\n"
-msgstr "reg: Kan de gegeven registersleutel niet vinden\n"
-
-#: programs/reg/reg.rc:175
-msgid "reg: Unable to import the registry key '%1'\n"
-msgstr "reg: Importeren van de registersleutel '%1' is niet mogelijk.\n"
-
 #: programs/reg/reg.rc:180
 msgid ""
 "  /reg:32\n"
@@ -15256,78 +15217,100 @@ msgstr ""
 "     Open de 64-bits weergave van het register.\n"
 "\n"
 
-#: programs/reg/reg.rc:181
-msgid "reg: Unable to access or create the specified registry key\n"
-msgstr "reg: Kan de gegeven registersleutel niet openen of aanmaken\n"
+#: programs/reg/reg.rc:117
+msgid "reg: Invalid registry key\n"
+msgstr "reg: Foutieve registersleutel\n"
 
-#: programs/reg/reg.rc:202
+#: programs/reg/reg.rc:119
+msgid "reg: Unable to access remote machine\n"
+msgstr "reg: Kan de computer op afstand niet benaderen\n"
+
+#: programs/reg/reg.rc:172
+msgid "reg: Invalid system key\n"
+msgstr "reg: Foutieve systeemsleutel\n"
+
+#: programs/reg/reg.rc:140
+msgid "reg: Invalid option [%1]. "
+msgstr "reg: Ongeldige optie [%1]. "
+
+#: programs/reg/reg.rc:122
+msgid "reg: The option [/d] must be followed by a valid numeric value\n"
+msgstr "reg: De optie [/d] moet gevolgd worden door een numerieke waarde\n"
+
+#: programs/reg/reg.rc:123
+msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
+msgstr "reg: De optie [/d] moet gevolgd worden door een hexadecimale waarde\n"
+
+#: programs/reg/reg.rc:136
+msgid "reg: The option [/d] must be followed by a valid string\n"
+msgstr "reg: De optie [/d] moet gevolgd worden door tekenreeks\n"
+
+#: programs/reg/reg.rc:124
+msgid "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
+msgstr "reg: Onverwerkte registergegevenstypen [/t 0x%1!x!, /d %2]\n"
+
+#: programs/reg/reg.rc:121
+msgid "reg: Unsupported registry data type [%1]\n"
+msgstr "reg: Register data type wordt niet ondersteund [%1]\n"
+
+#: programs/reg/reg.rc:125
+msgid "The registry value '%1' already exists. Do you want to overwrite it?"
+msgstr "De registerwaarde '%1' bestand bestaat al. Wilt u het vervangen?"
+
+#: programs/reg/reg.rc:118
+msgid "reg: Invalid command line parameters\n"
+msgstr "reg: Foutieve opdrachtregel-parameters\n"
+
+#: programs/reg/reg.rc:204
+msgid "reg: The source and destination keys cannot be the same\n"
+msgstr "reg: De bron- en de doelsleutel kunnen niet hetzelfde zijn\n"
+
+#: programs/reg/reg.rc:205
 msgid ""
-"REG COPY <key1> <key2> [/s] [/f]\n"
-"\n"
-"  Copies the contents of a specified registry key to another location.\n"
-"  By default, this operation only copies registry values. Use [/s] to\n"
-"  recursively copy all subkeys and values.\n"
-"\n"
-"  <key1>, <key2>\n"
-"     Registry keys specifying the source (<key1>) and destination (<key2>)\n"
-"     of the data. If <key2> does not exist, it is created.\n"
-"\n"
-"     Format: ROOT\\Subkey\n"
-"\n"
-"     ROOT: A predefined registry key. This must be one of the following:\n"
-"\n"
-"         HKEY_LOCAL_MACHINE  | HKLM\n"
-"         HKEY_CURRENT_USER   | HKCU\n"
-"         HKEY_CLASSES_ROOT   | HKCR\n"
-"         HKEY_USERS          | HKU\n"
-"         HKEY_CURRENT_CONFIG | HKCC\n"
-"\n"
-"     Subkey: The full path to a registry key under a given ROOT key.\n"
-"\n"
-"  /s\n"
-"     Copy all subkeys and values from <key1> to <key2>.\n"
-"\n"
-"  /f\n"
-"     Overwrite all registry data in <key2> without prompting for "
-"confirmation.\n"
-"     This option does not modify subkeys and values that only exist in "
-"<key2>.\n"
-"\n"
+"The value '%1\\%2' already exists in the destination key. Do you want to "
+"overwrite it?"
 msgstr ""
-"REG COPY <sleutel1> <sleutel2> [/s] [/f]\n"
-"\n"
-"  Kopieert de inhoud van een registersleutel naar een andere plek.\n"
-"  Standaard worden alleen de registerwaarden gekopieerd. Gebruik [/s] om\n"
-"  ook de onderliggende sleutels en waarden te kopiëren.\n"
-"\n"
-"  <sleutel1>, <sleutel2>\n"
-"     De registersleutel (<sleutel1>) die gekopieerd wordt naar <sleutel2>.\n"
-"     <sleutel2> wordt aangemaakt als deze niet bestaat.\n"
-"\n"
-"     Formaat: HOOFDSLEUTEL\\Subsleutel\n"
-"\n"
-"     HOOFDSLEUTEL: Een voorgedefinieerde registersleutel. Dit is één van:\n"
-"\n"
-"         HKEY_LOCAL_MACHINE  | HKLM\n"
-"         HKEY_CURRENT_USER   | HKCU\n"
-"         HKEY_CLASSES_ROOT   | HKCR\n"
-"         HKEY_USERS          | HKU\n"
-"         HKEY_CURRENT_CONFIG | HKCC\n"
-"\n"
-"     Subsleutel: Het volledige pad naar een registersleutel onder de "
-"gegeven\n"
-"     HOOFDSLEUTEL.\n"
-"\n"
-"  /s\n"
-"     Kopieer alle onderliggende sleutels en waarden van <sleutel1> naar "
-"<sleutel2>.\n"
-"\n"
-"  /f\n"
-"     Overschrijf alle register gegevens in <sleutel2> zonder om bevestiging "
-"te vragen.\n"
-"     Deze optie wijzigt geen onderliggende sleutels en waarden die alleen in "
-"<sleutel2> bestaan.\n"
-"\n"
+"De waarde '%1\\%2' komt al voor in de doelsleutel. Wilt u het overschrijven?"
+
+#: programs/reg/reg.rc:133
+msgid "Are you sure you want to delete the registry value '%1'?"
+msgstr "Weet u zeker dat u de registerwaarde '%1' wilt verwijderen?"
+
+#: programs/reg/reg.rc:134
+msgid "Are you sure you want to delete all registry values in '%1'?"
+msgstr "Weet u zeker dat u alle registerwaardes in '%1' wilt verwijderen?"
+
+#: programs/reg/reg.rc:135
+msgid "Are you sure you want to delete the registry key '%1'?"
+msgstr "Weet u zeker dat u registersleutel '%1' wilt verwijderen?"
+
+#: programs/reg/reg.rc:137
+msgid "reg: Unable to delete all registry values in '%1'\n"
+msgstr "reg: Kan niet alle registerwaardes in '%1' verwijderen.\n"
+
+#: programs/reg/reg.rc:173
+msgid "The file '%1' already exists. Do you want to overwrite it?"
+msgstr "Het bestand '%1' bestaat al. Wilt u het overschrijven?"
+
+#: programs/reg/reg.rc:151
+msgid "reg: Unrecognized escape sequence [\\%1!c!]\n"
+msgstr "reg: Escape-tekenreeks niet herkend [\\%1!c!]\n"
+
+#: programs/reg/reg.rc:175
+msgid "reg: Unable to import the registry key '%1'\n"
+msgstr "reg: Importeren van de registersleutel '%1' is niet mogelijk.\n"
+
+#: programs/reg/reg.rc:150
+msgid "reg: The file '%1' was not found.\n"
+msgstr "reg: Het bestand '%1' is niet gevonden.\n"
+
+#: programs/reg/reg.rc:143 programs/regedit/regedit.rc:240
+msgid "(value not set)"
+msgstr "(Geen waarde ingesteld)"
+
+#: programs/reg/reg.rc:138
+msgid "Search complete. Number of matches found: %1!d!\n"
+msgstr "Zoeken voltooid. Aantal gevonden resultaten: %1!d!\n"
 
 #: programs/regedit/regedit.rc:34
 msgid "&Registry"

@@ -383,30 +383,18 @@ static int wait_select_reply( void *cookie )
 }
 
 
-static void invoke_apc( CONTEXT *context, const user_apc_t *apc )
+/***********************************************************************
+ *              invoke_user_apc
+ */
+static void invoke_user_apc( CONTEXT *context, const user_apc_t *apc, NTSTATUS status )
 {
-    switch( apc->type )
-    {
-    case APC_USER:
-        call_user_apc_dispatcher( context, apc->user.args[0], apc->user.args[1], apc->user.args[2],
-                                  wine_server_get_ptr( apc->user.func ), pKiUserApcDispatcher );
-        break;
-    case APC_TIMER:
-        call_user_apc_dispatcher( context, (ULONG_PTR)wine_server_get_ptr( apc->user.args[1] ),
-                                  (DWORD)apc->timer.time, (DWORD)(apc->timer.time >> 32),
-                                  wine_server_get_ptr( apc->user.func ), pKiUserApcDispatcher );
-        break;
-    default:
-        server_protocol_error( "get_apc_request: bad type %d\n", apc->type );
-        break;
-    }
+    call_user_apc_dispatcher( context, apc->args[0], apc->args[1], apc->args[2],
+                              wine_server_get_ptr( apc->func ), pKiUserApcDispatcher, status );
 }
 
+
 /***********************************************************************
- *              invoke_apc
- *
- * Invoke a single APC.
- *
+ *              invoke_system_apc
  */
 static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOOL self )
 {
@@ -422,25 +410,10 @@ static void invoke_system_apc( const apc_call_t *call, apc_result_t *result, BOO
     case APC_ASYNC_IO:
     {
         IO_STATUS_BLOCK *iosb = wine_server_get_ptr( call->async_io.sb );
-        NTSTATUS (**user)(void *, IO_STATUS_BLOCK *, NTSTATUS) = wine_server_get_ptr( call->async_io.user );
-        void *saved_frame = get_syscall_frame();
-        void *frame;
+        struct async_fileio *user = wine_server_get_ptr( call->async_io.user );
 
         result->type = call->type;
-        result->async_io.status = (*user)( user, iosb, call->async_io.status );
-
-        if ((frame = get_syscall_frame()) != saved_frame)
-        {
-            /* The frame can be altered by syscalls from ws2_32 async callbacks
-             * which are currently in the user part. */
-            static unsigned int once;
-
-            if (!once++)
-                FIXME( "syscall frame changed in APC function, frame %p, saved_frame %p.\n", frame, saved_frame );
-
-            set_syscall_frame( saved_frame );
-        }
-
+        result->async_io.status = user->callback( user, iosb, call->async_io.status );
         if (result->async_io.status != STATUS_PENDING)
             result->async_io.total = iosb->Information;
         break;
@@ -734,7 +707,7 @@ unsigned int server_wait( const select_op_t *select_op, data_size_t size, UINT f
     }
 
     ret = server_select( select_op, size, flags, abs_timeout, NULL, NULL, &apc );
-    if (ret == STATUS_USER_APC) invoke_apc( NULL, &apc );
+    if (ret == STATUS_USER_APC) invoke_user_apc( NULL, &apc, ret );
 
     /* A test on Windows 2000 shows that Windows always yields during
        a wait, but a wait that is hit by an event gets a priority
@@ -755,12 +728,26 @@ NTSTATUS WINAPI NtContinue( CONTEXT *context, BOOLEAN alertable )
     if (alertable)
     {
         status = server_select( NULL, 0, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE, 0, NULL, NULL, &apc );
-        if (status == STATUS_USER_APC) invoke_apc( context, &apc );
+        if (status == STATUS_USER_APC) invoke_user_apc( context, &apc, status );
     }
     status = NtSetContextThread( GetCurrentThread(), context );
     if (!status && (context->ContextFlags & CONTEXT_INTEGER) == CONTEXT_INTEGER)
         signal_restore_full_cpu_context();
     return status;
+}
+
+
+/***********************************************************************
+ *              NtTestAlert  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtTestAlert(void)
+{
+    user_apc_t apc;
+    NTSTATUS status;
+
+    status = server_select( NULL, 0, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE, 0, NULL, NULL, &apc );
+    if (status == STATUS_USER_APC) invoke_user_apc( NULL, &apc, STATUS_SUCCESS );
+    return STATUS_SUCCESS;
 }
 
 

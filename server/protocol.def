@@ -310,6 +310,8 @@ union rawinput
 struct hardware_msg_data
 {
     lparam_t             info;      /* extra info */
+    data_size_t          size;      /* size of hardware message data */
+    int                  __pad;
     unsigned int         hw_id;     /* unique id */
     unsigned int         flags;     /* hook flags */
     struct hw_msg_source source;    /* message source */
@@ -473,7 +475,6 @@ enum apc_type
 {
     APC_NONE,
     APC_USER,
-    APC_TIMER,
     APC_ASYNC_IO,
     APC_VIRTUAL_ALLOC,
     APC_VIRTUAL_FREE,
@@ -489,24 +490,12 @@ enum apc_type
     APC_BREAK_PROCESS
 };
 
-typedef union
+typedef struct
 {
-    enum apc_type type;
-    struct
-    {
-        enum apc_type    type;     /* APC_USER */
-        int              __pad;
-        client_ptr_t     func;     /* void (__stdcall *func)(ULONG_PTR,ULONG_PTR,ULONG_PTR); */
-        apc_param_t      args[3];  /* arguments for user function */
-    } user;
-    struct
-    {
-        enum apc_type    type;     /* APC_TIMER */
-        int              __pad;
-        client_ptr_t     func;     /* void (__stdcall *func)(void*, unsigned int, unsigned int); */
-        abstime_t        time;     /* time of expiration */
-        client_ptr_t     arg;      /* user argument */
-    } timer;
+    enum apc_type    type;     /* APC_USER */
+    int              __pad;
+    client_ptr_t     func;     /* void (__stdcall *func)(ULONG_PTR,ULONG_PTR,ULONG_PTR); */
+    apc_param_t      args[3];  /* arguments for user function */
 } user_apc_t;
 
 typedef union
@@ -1470,17 +1459,56 @@ enum server_fd_type
 @END
 
 
-/* Re-enable pending socket events */
-@REQ(enable_socket_event)
-    obj_handle_t handle;        /* handle to the socket */
-    unsigned int mask;          /* events to re-enable */
-    unsigned int sstate;        /* status bits to set */
-    unsigned int cstate;        /* status bits to clear */
-@END
-
 @REQ(set_socket_deferred)
     obj_handle_t handle;        /* handle to the socket */
     obj_handle_t deferred;      /* handle to the socket for which accept() is deferred */
+@END
+
+
+/* Perform a recv on a socket */
+@REQ(recv_socket)
+    int          oob;           /* are we receiving OOB data? */
+    async_data_t async;         /* async I/O parameters */
+    unsigned int status;        /* status of initial call */
+    unsigned int total;         /* number of bytes already read */
+@REPLY
+    obj_handle_t wait;          /* handle to wait on for blocking recv */
+    unsigned int options;       /* device open options */
+@END
+
+
+struct poll_socket_input
+{
+    obj_handle_t socket;        /* socket handle */
+    int flags;                  /* events to poll for */
+};
+
+struct poll_socket_output
+{
+    int flags;                  /* events signaled */
+    unsigned int status;        /* socket status */
+};
+
+/* Perform an async poll on a socket */
+@REQ(poll_socket)
+    async_data_t async;         /* async I/O parameters */
+    timeout_t    timeout;       /* timeout */
+    VARARG(sockets,poll_socket_input); /* list of sockets to poll */
+@REPLY
+    obj_handle_t wait;          /* handle to wait on for blocking poll */
+    unsigned int options;       /* file open options */
+    VARARG(sockets,poll_socket_output); /* data returned */
+@END
+
+
+/* Perform a send on a socket */
+@REQ(send_socket)
+    async_data_t async;         /* async I/O parameters */
+    unsigned int status;        /* status of initial call */
+    unsigned int total;         /* number of bytes already sent */
+@REPLY
+    obj_handle_t wait;          /* handle to wait on for blocking send */
+    unsigned int options;       /* device open options */
 @END
 
 
@@ -3433,6 +3461,7 @@ struct handle_info
 
 /* Make the current process a system process */
 @REQ(make_process_system)
+    obj_handle_t handle;          /* handle to the process */
 @REPLY
     obj_handle_t event;           /* event signaled when all user processes have exited */
 @END

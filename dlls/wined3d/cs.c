@@ -2385,7 +2385,7 @@ static void wined3d_cs_issue_query(struct wined3d_device_context *context,
 }
 
 static void wined3d_cs_execute_command_list(struct wined3d_device_context *context,
-        struct wined3d_command_list *list, BOOL restore_state)
+        struct wined3d_command_list *list, bool restore_state)
 {
     struct wined3d_cs_execute_command_list *op;
     SIZE_T i;
@@ -2746,13 +2746,13 @@ static void wined3d_cs_update_sub_resource(struct wined3d_device_context *contex
         const struct wined3d_format *format = resource->format;
 
         data_size = (box->back - box->front - 1) * slice_pitch
-                + ((box->bottom - box->top) / format->block_height - 1) * row_pitch
-                + ((box->right - box->left) / format->block_width) * format->block_byte_count;
+                + ((box->bottom - box->top - 1) / format->block_height) * row_pitch
+                + ((box->right - box->left + format->block_width - 1) / format->block_width) * format->block_byte_count;
     }
 
     if (context->ops->check_space(context, sizeof(*op) + data_size, WINED3D_CS_QUEUE_DEFAULT))
     {
-        op = wined3d_device_context_require_space(context, sizeof(*op), WINED3D_CS_QUEUE_DEFAULT);
+        op = wined3d_device_context_require_space(context, sizeof(*op) + data_size, WINED3D_CS_QUEUE_DEFAULT);
         op->opcode = WINED3D_CS_OP_UPDATE_SUB_RESOURCE;
         op->resource = resource;
         op->sub_resource_idx = sub_resource_idx;
@@ -3598,8 +3598,8 @@ static void wined3d_deferred_context_update_sub_resource(struct wined3d_device_c
         const struct wined3d_format *format = resource->format;
 
         data_size = (box->back - box->front - 1) * slice_pitch
-                + ((box->bottom - box->top) / format->block_height - 1) * row_pitch
-                + ((box->right - box->left) / format->block_width) * format->block_byte_count;
+                + ((box->bottom - box->top - 1) / format->block_height) * row_pitch
+                + ((box->right - box->left + format->block_width - 1) / format->block_width) * format->block_byte_count;
     }
 
     op = wined3d_device_context_require_space(context, sizeof(*op) + data_size, WINED3D_CS_QUEUE_DEFAULT);
@@ -3646,11 +3646,10 @@ static void wined3d_deferred_context_acquire_resource(struct wined3d_device_cont
 }
 
 static void wined3d_deferred_context_execute_command_list(struct wined3d_device_context *context,
-        struct wined3d_command_list *list, BOOL restore_state)
+        struct wined3d_command_list *list, bool restore_state)
 {
     struct wined3d_deferred_context *deferred = wined3d_deferred_context_from_context(context);
     struct wined3d_cs_execute_command_list *op;
-    SIZE_T i;
 
     op = wined3d_device_context_require_space(context, sizeof(*op), WINED3D_CS_QUEUE_DEFAULT);
     op->opcode = WINED3D_CS_OP_EXECUTE_COMMAND_LIST;
@@ -3661,20 +3660,13 @@ static void wined3d_deferred_context_execute_command_list(struct wined3d_device_
     else
         wined3d_device_context_reset_state(context);
 
-    /* Grab a reference to each command list queued on this command list, as
-     * well as the command list itself. */
+    /* Grab a reference to the command list. Note that this implicitly prevents
+     * any dependent command lists or resources from being freed as well. */
     if (!wined3d_array_reserve((void **)&deferred->command_lists, &deferred->command_lists_capacity,
-            deferred->command_list_count + list->command_list_count + 1, sizeof(*deferred->command_lists)))
+            deferred->command_list_count + 1, sizeof(*deferred->command_lists)))
         return;
 
-    for (i = 0; i < list->command_list_count; ++i)
-        wined3d_command_list_incref(deferred->command_lists[deferred->command_list_count++] = list->command_lists[i]);
     wined3d_command_list_incref(deferred->command_lists[deferred->command_list_count++] = list);
-
-    /* And grab a reference to each of the command list's resources. */
-    for (i = 0; i < list->resource_count; ++i)
-        /* Don't store the sysmem pointer; the original command list will free it. */
-        wined3d_deferred_context_acquire_resource(context, list->resources[i].resource);
 }
 
 static const struct wined3d_device_context_ops wined3d_deferred_context_ops =
@@ -3738,7 +3730,7 @@ void CDECL wined3d_deferred_context_destroy(struct wined3d_device_context *conte
 }
 
 HRESULT CDECL wined3d_deferred_context_record_command_list(struct wined3d_device_context *context,
-        BOOL restore, struct wined3d_command_list **list)
+        bool restore, struct wined3d_command_list **list)
 {
     struct wined3d_deferred_context *deferred = wined3d_deferred_context_from_context(context);
     struct wined3d_command_list *object;

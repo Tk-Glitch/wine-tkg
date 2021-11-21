@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:22:45 PM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sun Nov 21 06:24:24 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.9.r0.g9561af9a7d8
-Using wine-staging patchset (version 6.9.r0.gcfe44f6d)
+Wine (plain) version: 6.10.r0.g649385e7d47
+Using wine-staging patchset (version 6.10.r0.g8a3554ad)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -24,8 +24,8 @@ fsync-unix-staging-10ca57f.patch -- ( Applied fsync, an experimental replacement
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
 fsync_futex2.patch -- ( Add futex2 support to fsync )
 
-valve_proton_fullscreen_hack-staging-211da18.patch -- ( Applied Proton fullscreen hack patch (211da18) )
-LAA-unix-staging-ac3ec2d.patch -- ( Applied large address aware override support )
+valve_proton_fullscreen_hack-staging-f46c4a3.patch -- ( Applied Proton fullscreen hack patch (f46c4a3) )
+LAA-unix-staging-ea6308e.patch -- ( Applied large address aware override support )
 
 proton-tkg-staging-5c009c1.patch -- ( Using Steam-specific Proton-tkg patches (staging-5c009c1) 2/2 )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
@@ -33,6 +33,7 @@ proton-bcrypt-staging-b3cd21c.patch -- ( Using Proton Bcrypt patches )
 josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging-d02d502.patch -- ( Enforce win10 as default wine version (staging) )
 
+Applied hotfix msvcrt_Fix_logf_implementation.mypatch
 Applied hotfix imm32-com-initialization_no_net_active_window.mypatch
 Applied hotfix virtual_alloc_remi2.mypatch
 Applied hotfix a608ef1.mypatch

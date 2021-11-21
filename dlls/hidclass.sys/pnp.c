@@ -18,9 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
 #include <unistd.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include "initguid.h"
 #include "hid.h"
 #include "devguid.h"
@@ -90,7 +90,7 @@ static NTSTATUS get_device_id(DEVICE_OBJECT *device, BUS_QUERY_ID_TYPE type, WCH
 
     wcscpy(id, (WCHAR *)irp_status.Information);
     ExFreePool((WCHAR *)irp_status.Information);
-    return irp_status.u.Status;
+    return irp_status.Status;
 }
 
 /* user32 reserves 1 & 2 for winemouse and winekeyboard,
@@ -122,9 +122,9 @@ static void send_wm_input_device_change(BASE_DEVICE_EXTENSION *ext, LPARAM param
     ((USAGE *)rawinput.data.hid.bRawData)[1] = ext->u.pdo.preparsed_data->caps.Usage;
 
     input.type = INPUT_HARDWARE;
-    input.u.hi.uMsg = WM_INPUT_DEVICE_CHANGE;
-    input.u.hi.wParamH = 0;
-    input.u.hi.wParamL = 0;
+    input.hi.uMsg = WM_INPUT_DEVICE_CHANGE;
+    input.hi.wParamH = 0;
+    input.hi.wParamL = 0;
     __wine_send_input(0, &input, &rawinput);
 }
 
@@ -239,19 +239,19 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
         return;
     }
 
-    reportDescriptor = HeapAlloc(GetProcessHeap(), 0, descriptor.DescriptorList[i].wReportLength);
+    reportDescriptor = malloc(descriptor.DescriptorList[i].wReportLength);
     status = call_minidriver(IOCTL_HID_GET_REPORT_DESCRIPTOR, fdo, NULL, 0,
         reportDescriptor, descriptor.DescriptorList[i].wReportLength);
     if (status != STATUS_SUCCESS)
     {
         ERR("Cannot get Report Descriptor(%x)\n",status);
-        HeapFree(GetProcessHeap(), 0, reportDescriptor);
+        free(reportDescriptor);
         IoDeleteDevice(child_pdo);
         return;
     }
 
     pdo_ext->u.pdo.preparsed_data = ParseDescriptor(reportDescriptor, descriptor.DescriptorList[i].wReportLength);
-    HeapFree(GetProcessHeap(), 0, reportDescriptor);
+    free(reportDescriptor);
     if (!pdo_ext->u.pdo.preparsed_data)
     {
         ERR("Cannot parse Report Descriptor\n");
@@ -311,7 +311,7 @@ static NTSTATUS fdo_pnp(DEVICE_OBJECT *device, IRP *irp)
 
             if (!(devices = ExAllocatePool(PagedPool, offsetof(DEVICE_RELATIONS, Objects[1]))))
             {
-                irp->IoStatus.u.Status = STATUS_NO_MEMORY;
+                irp->IoStatus.Status = STATUS_NO_MEMORY;
                 IoCompleteRequest(irp, IO_NO_INCREMENT);
                 return STATUS_NO_MEMORY;
             }
@@ -328,7 +328,7 @@ static NTSTATUS fdo_pnp(DEVICE_OBJECT *device, IRP *irp)
             }
 
             irp->IoStatus.Information = (ULONG_PTR)devices;
-            irp->IoStatus.u.Status = STATUS_SUCCESS;
+            irp->IoStatus.Status = STATUS_SUCCESS;
             IoSkipCurrentIrpStackLocation(irp);
             return IoCallDriver(ext->u.fdo.hid_ext.NextDeviceObject, irp);
         }
@@ -363,7 +363,7 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device, IRP *irp)
 {
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
     BASE_DEVICE_EXTENSION *ext = device->DeviceExtension;
-    NTSTATUS status = irp->IoStatus.u.Status;
+    NTSTATUS status = irp->IoStatus.Status;
 
     TRACE("irp %p, minor function %#x.\n", irp, irpsp->MinorFunction);
 
@@ -475,19 +475,19 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device, IRP *irp)
             }
             CloseHandle(ext->u.pdo.halt_event);
 
-            HeapFree(GetProcessHeap(), 0, ext->u.pdo.preparsed_data);
+            free(ext->u.pdo.preparsed_data);
             if (ext->u.pdo.ring_buffer)
                 RingBuffer_Destroy(ext->u.pdo.ring_buffer);
 
             while ((queued_irp = pop_irp_from_queue(ext)))
             {
-                queued_irp->IoStatus.u.Status = STATUS_DEVICE_REMOVED;
+                queued_irp->IoStatus.Status = STATUS_DEVICE_REMOVED;
                 IoCompleteRequest(queued_irp, IO_NO_INCREMENT);
             }
 
             RtlFreeUnicodeString(&ext->u.pdo.link_name);
 
-            irp->IoStatus.u.Status = STATUS_SUCCESS;
+            irp->IoStatus.Status = STATUS_SUCCESS;
             IoCompleteRequest(irp, IO_NO_INCREMENT);
             IoDeleteDevice(device);
             return STATUS_SUCCESS;
@@ -501,7 +501,7 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device, IRP *irp)
             FIXME("Unhandled minor function %#x.\n", irpsp->MinorFunction);
     }
 
-    irp->IoStatus.u.Status = status;
+    irp->IoStatus.Status = status;
     IoCompleteRequest( irp, IO_NO_INCREMENT );
     return status;
 }
@@ -522,7 +522,7 @@ static NTSTATUS WINAPI driver_create(DEVICE_OBJECT *device, IRP *irp)
 
     if (ext->is_fdo)
     {
-        irp->IoStatus.u.Status = STATUS_UNSUCCESSFUL;
+        irp->IoStatus.Status = STATUS_UNSUCCESSFUL;
         IoCompleteRequest(irp, IO_NO_INCREMENT);
         return STATUS_UNSUCCESSFUL;
     }
@@ -561,7 +561,7 @@ static void WINAPI driver_unload(DRIVER_OBJECT *driver)
         if (md->DriverUnload)
             md->DriverUnload(md->minidriver.DriverObject);
         list_remove(&md->entry);
-        HeapFree(GetProcessHeap(), 0, md);
+        free(md);
     }
 }
 
@@ -569,7 +569,7 @@ NTSTATUS WINAPI HidRegisterMinidriver(HID_MINIDRIVER_REGISTRATION *registration)
 {
     minidriver *driver;
 
-    if (!(driver = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*driver))))
+    if (!(driver = calloc(1, sizeof(*driver))))
         return STATUS_NO_MEMORY;
 
     driver->DriverUnload = registration->DriverObject->DriverUnload;
@@ -607,5 +607,5 @@ NTSTATUS call_minidriver(ULONG code, DEVICE_OBJECT *device, void *in_buff, ULONG
     if (IoCallDriver(device, irp) == STATUS_PENDING)
         KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
 
-    return io.u.Status;
+    return io.Status;
 }

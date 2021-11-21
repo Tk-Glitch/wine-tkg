@@ -520,21 +520,14 @@ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct x86_thread_data, gs ) 
 C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct x86_thread_data, exit_frame ) == 0x1f4 );
 C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct x86_thread_data, syscall_frame ) == 0x1f8 );
 
-static void *syscall_dispatcher;
+/* flags to control the behavior of the syscall dispatcher */
+#define SYSCALL_HAVE_XSAVE    1
+#define SYSCALL_HAVE_XSAVEC   2
+#define SYSCALL_HAVE_FXSAVE   4
 
 static inline struct x86_thread_data *x86_thread_data(void)
 {
     return (struct x86_thread_data *)ntdll_get_thread_data()->cpu_data;
-}
-
-void *get_syscall_frame(void)
-{
-    return x86_thread_data()->syscall_frame;
-}
-
-void set_syscall_frame(void *frame)
-{
-    x86_thread_data()->syscall_frame = frame;
 }
 
 static struct syscall_xsave *get_syscall_xsave( struct syscall_frame *frame )
@@ -638,7 +631,7 @@ static int solaris_sigaction( int sig, const struct sigaction *new, struct sigac
 
 #endif
 
-extern void clear_alignment_flag(void);
+extern void clear_alignment_flag(void) DECLSPEC_HIDDEN;
 __ASM_GLOBAL_FUNC( clear_alignment_flag,
                    "pushfl\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
@@ -914,7 +907,7 @@ static inline void restore_context( const struct xcontext *xcontext, ucontext_t 
  *
  * Set the new CPU context.
  */
-extern void set_full_cpu_context(void);
+extern void set_full_cpu_context(void) DECLSPEC_HIDDEN;
 __ASM_GLOBAL_FUNC( set_full_cpu_context,
                    "movl %fs:0x1f8,%ecx\n\t"
                    "movl $0,%fs:0x1f8\n\t"    /* x86_thread_data()->syscall_frame = NULL */
@@ -973,7 +966,7 @@ __ASM_GLOBAL_FUNC( set_full_cpu_context,
  */
 void signal_restore_full_cpu_context(void)
 {
-    struct syscall_xsave *xsave = get_syscall_xsave( get_syscall_frame() );
+    struct syscall_xsave *xsave = get_syscall_xsave( x86_thread_data()->syscall_frame );
 
     if (cpu_info.ProcessorFeatureBits & CPU_FEATURE_XSAVE)
     {
@@ -1615,15 +1608,19 @@ static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
 struct apc_stack_layout
 {
     void         *context_ptr;
-    void         *ctx;
     void         *arg1;
     void         *arg2;
+    void         *arg3;
     void         *func;
     CONTEXT       context;
 };
 
 struct apc_stack_layout * WINAPI setup_user_apc_dispatcher_stack( CONTEXT *context, struct apc_stack_layout *stack,
-        void *ctx, void *arg1, void *arg2, void *func )
+                                                                  void *arg1, void *arg2, void *arg3,
+                                                                  void *func, NTSTATUS status ) DECLSPEC_HIDDEN;
+struct apc_stack_layout * WINAPI setup_user_apc_dispatcher_stack( CONTEXT *context, struct apc_stack_layout *stack,
+                                                                  void *arg1, void *arg2, void *arg3,
+                                                                  void *func, NTSTATUS status )
 {
     CONTEXT c;
 
@@ -1631,14 +1628,14 @@ struct apc_stack_layout * WINAPI setup_user_apc_dispatcher_stack( CONTEXT *conte
     {
         c.ContextFlags = CONTEXT_FULL;
         NtGetContextThread( GetCurrentThread(), &c );
-        c.Eax = STATUS_USER_APC;
+        c.Eax = status;
         context = &c;
     }
     memmove( &stack->context, context, sizeof(stack->context) );
     stack->context_ptr = &stack->context;
-    stack->ctx = ctx;
     stack->arg1 = arg1;
     stack->arg2 = arg2;
+    stack->arg3 = arg3;
     stack->func = func;
     return stack;
 }
@@ -1663,10 +1660,11 @@ __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
                    "movl %ebp,%esp\n\t"          /* pop return address */
                    "cmpl %esp,%eax\n\t"
                    "cmovbl %eax,%esp\n\t"
+                   "pushl 24(%ebp)\n\t"          /* status */
                    "pushl 16(%ebp)\n\t"          /* func */
-                   "pushl 12(%ebp)\n\t"          /* arg2 */
-                   "pushl 8(%ebp)\n\t"           /* arg1 */
-                   "pushl 4(%ebp)\n\t"           /* ctx */
+                   "pushl 12(%ebp)\n\t"          /* arg3 */
+                   "pushl 8(%ebp)\n\t"           /* arg2 */
+                   "pushl 4(%ebp)\n\t"           /* arg1 */
                    "pushl %eax\n\t"
                    "pushl %esi\n\t"
                    "call " __ASM_STDCALL("setup_user_apc_dispatcher_stack",24) "\n\t"
@@ -1784,7 +1782,6 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, void *stack_ptr,
                                   EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     struct syscall_frame *frame = x86_thread_data()->syscall_frame;
-    __WINE_FRAME *wine_frame = (__WINE_FRAME *)NtCurrentTeb()->Tib.ExceptionList;
     DWORD i;
 
     if (!frame) return FALSE;
@@ -1801,7 +1798,7 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, void *stack_ptr,
           context->Ebp, context->Esp, context->SegCs, context->SegDs,
           context->SegEs, context->SegFs, context->SegGs, context->EFlags );
 
-    if ((char *)wine_frame < (char *)frame)
+    if (ntdll_get_thread_data()->jmp_buf)
     {
         /* stack frame for calling __wine_longjmp */
         struct
@@ -1814,10 +1811,11 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, void *stack_ptr,
         TRACE( "returning to handler\n" );
         stack = virtual_setup_exception( stack_ptr, sizeof(*stack), rec );
         stack->retval  = 1;
-        stack->jmp     = &wine_frame->jmp;
+        stack->jmp     = ntdll_get_thread_data()->jmp_buf;
         stack->retaddr = (void *)0xdeadbabe;
         ESP_sig(sigcontext) = (DWORD)stack;
         EIP_sig(sigcontext) = (DWORD)__wine_longjmp;
+        ntdll_get_thread_data()->jmp_buf = NULL;
     }
     else
     {
@@ -2358,7 +2356,7 @@ NTSTATUS signal_alloc_thread( TEB *teb )
     }
     else thread_data->fs = gdt_fs_sel;
 
-    teb->WOW32Reserved = syscall_dispatcher;
+    teb->WOW32Reserved = __wine_syscall_dispatcher;
     return STATUS_SUCCESS;
 }
 
@@ -2401,6 +2399,10 @@ void signal_init_process(void)
 {
     struct sigaction sig_act;
 
+    if (cpu_info.ProcessorFeatureBits & CPU_FEATURE_FXSR) __wine_syscall_flags |= SYSCALL_HAVE_FXSAVE;
+    if (cpu_info.ProcessorFeatureBits & CPU_FEATURE_XSAVE) __wine_syscall_flags |= SYSCALL_HAVE_XSAVE;
+    if (xstate_compaction_enabled) __wine_syscall_flags |= SYSCALL_HAVE_XSAVEC;
+
     sig_act.sa_mask = server_block_set;
     sig_act.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
 #ifdef __ANDROID__
@@ -2428,28 +2430,6 @@ void signal_init_process(void)
  error:
     perror("sigaction");
     exit(1);
-}
-
-
-/**********************************************************************
- *		signal_init_syscalls
- */
-void *signal_init_syscalls(void)
-{
-    extern void __wine_syscall_dispatcher_fxsave(void) DECLSPEC_HIDDEN;
-    extern void __wine_syscall_dispatcher_xsave(void) DECLSPEC_HIDDEN;
-    extern void __wine_syscall_dispatcher_xsavec(void) DECLSPEC_HIDDEN;
-
-    if (xstate_compaction_enabled)
-        syscall_dispatcher = __wine_syscall_dispatcher_xsavec;
-    else if (cpu_info.ProcessorFeatureBits & CPU_FEATURE_XSAVE)
-        syscall_dispatcher = __wine_syscall_dispatcher_xsave;
-    else if (cpu_info.ProcessorFeatureBits & CPU_FEATURE_FXSR)
-        syscall_dispatcher = __wine_syscall_dispatcher_fxsave;
-    else
-        syscall_dispatcher = __wine_syscall_dispatcher;
-
-    return NtCurrentTeb()->WOW32Reserved = syscall_dispatcher;
 }
 
 /**********************************************************************

@@ -10070,9 +10070,10 @@ msgstr "ඔබගේ Wine සැසිම වසා දමන්න ඕනෙද
 msgid "Programs"
 msgstr "ක්‍රමලේඛයන්"
 
-#: dlls/shell32/shell32.rc:204
-msgid "My Documents"
-msgstr "මගේ ලේඛන"
+#: dlls/shell32/shell32.rc:204 dlls/shell32/shell32.rc:219
+#: dlls/shell32/shell32.rc:150 dlls/shell32/shell32.rc:235
+msgid "Documents"
+msgstr "ලේඛ"
 
 #: dlls/shell32/shell32.rc:205
 msgid "Favorites"
@@ -10086,13 +10087,13 @@ msgstr "StartUp"
 msgid "Start Menu"
 msgstr "ඇරඹුම් මෙනුව"
 
-#: dlls/shell32/shell32.rc:208
-msgid "My Music"
-msgstr "මගේ සංගීත"
+#: dlls/shell32/shell32.rc:208 dlls/shell32/shell32.rc:221
+msgid "Music"
+msgstr "සංගීත"
 
-#: dlls/shell32/shell32.rc:209
-msgid "My Videos"
-msgstr "මගේ වීඩියෝ"
+#: dlls/shell32/shell32.rc:209 dlls/shell32/shell32.rc:223
+msgid "Videos"
+msgstr "වීඩියෝ"
 
 #: dlls/shell32/shell32.rc:210
 msgctxt "directory"
@@ -10119,34 +10120,17 @@ msgstr "ඉතිහාසය"
 msgid "Program Files"
 msgstr "ක්‍රමලේඛ ගොනු"
 
-#: dlls/shell32/shell32.rc:217
-msgid "My Pictures"
-msgstr "මගේ පින්තූර"
+#: dlls/shell32/shell32.rc:217 dlls/shell32/shell32.rc:222
+msgid "Pictures"
+msgstr "පින්තූර"
 
 #: dlls/shell32/shell32.rc:218
 msgid "Common Files"
 msgstr "පොදු ගොනු"
 
-#: dlls/shell32/shell32.rc:219 dlls/shell32/shell32.rc:150
-#: dlls/shell32/shell32.rc:235
-msgid "Documents"
-msgstr "ලේඛ"
-
 #: dlls/shell32/shell32.rc:220
 msgid "Administrative Tools"
 msgstr "පරිපාලක මෙවලම්"
-
-#: dlls/shell32/shell32.rc:221
-msgid "Music"
-msgstr "සංගීත"
-
-#: dlls/shell32/shell32.rc:222
-msgid "Pictures"
-msgstr "පින්තූර"
-
-#: dlls/shell32/shell32.rc:223
-msgid "Videos"
-msgstr "වීඩියෝ"
 
 #: dlls/shell32/shell32.rc:216
 msgid "Program Files (x86)"
@@ -13098,12 +13082,12 @@ msgstr ""
 msgid "Are you sure?"
 msgstr "ඔබට විශ්වාසද?"
 
-#: programs/cmd/cmd.rc:366 programs/reg/reg.rc:127 programs/xcopy/xcopy.rc:43
+#: programs/cmd/cmd.rc:366 programs/reg/reg.rc:126 programs/xcopy/xcopy.rc:43
 msgctxt "Yes key"
 msgid "Y"
 msgstr "Y"
 
-#: programs/cmd/cmd.rc:367 programs/reg/reg.rc:128 programs/xcopy/xcopy.rc:44
+#: programs/cmd/cmd.rc:367 programs/reg/reg.rc:127 programs/xcopy/xcopy.rc:44
 msgctxt "No key"
 msgid "N"
 msgstr "N"
@@ -13172,7 +13156,7 @@ msgstr "'%1' විවෘත කරන්න බැරි උනා\n"
 msgid "Cannot call batch label outside of a batch script\n"
 msgstr ""
 
-#: programs/cmd/cmd.rc:386 programs/xcopy/xcopy.rc:45
+#: programs/cmd/cmd.rc:386 programs/reg/reg.rc:128 programs/xcopy/xcopy.rc:45
 msgctxt "All key"
 msgid "A"
 msgstr "A"
@@ -13241,11 +13225,11 @@ msgstr "ධාවකය %1!c! ඇතුලේ තියෙන වෙළුම %2
 msgid "Volume in drive %1!c! has no label.\n"
 msgstr "ධාවකය %1!c! ඇතුලේ තියෙන වෙළුමට ලේබලයක් නැහැ.\n"
 
-#: programs/cmd/cmd.rc:402 programs/reg/reg.rc:126
+#: programs/cmd/cmd.rc:402 programs/reg/reg.rc:129
 msgid " (Yes|No)"
 msgstr " (ඔව්|නෑ)"
 
-#: programs/cmd/cmd.rc:403
+#: programs/cmd/cmd.rc:403 programs/reg/reg.rc:130
 msgid " (Yes|No|All)"
 msgstr " (ඔව්|නෑ|ඔක්කොම)"
 
@@ -14591,6 +14575,52 @@ msgstr "අයිකන ගොනු"
 msgid "Icons (*.ico)"
 msgstr "අයිකන (*.ico)"
 
+#: programs/reg/reg.rc:139
+msgid "reg: Invalid syntax. "
+msgstr "reg: අවලංගු රීති."
+
+#: programs/reg/reg.rc:142
+msgid "Type \"REG %1 /?\" for help.\n"
+msgstr "\"REG %1 /?\" ගහන්න උදව්වට.\n"
+
+#: programs/reg/reg.rc:181
+#, fuzzy
+#| msgid "reg: Unable to open the registry key '%1'.\n"
+msgid "reg: Unable to access or create the specified registry key\n"
+msgstr "reg: රෙජිස්තරයේ යතුර '%1' අරින්න බැහැ.\n"
+
+#: programs/reg/reg.rc:116
+#, fuzzy
+#| msgid "The operation completed successfully\n"
+msgid "reg: The operation completed successfully\n"
+msgstr "මෙහෙයුම හරියට ඉවර උනා\n"
+
+#: programs/reg/reg.rc:131
+#, fuzzy
+#| msgid "The registry operation was cancelled\n"
+msgid "reg: The registry operation was cancelled\n"
+msgstr "රෙජිස්තරයේ මෙහෙයුම අවලංගු කරා\n"
+
+#: programs/reg/reg.rc:174
+#, fuzzy
+#| msgid "reg: Unable to open the registry key '%1'.\n"
+msgid "reg: Unable to find the specified registry key\n"
+msgstr "reg: රෙජිස්තරයේ යතුර '%1' අරින්න බැහැ.\n"
+
+#: programs/reg/reg.rc:120
+#, fuzzy
+#| msgid "reg: Unable to open the registry key '%1'.\n"
+msgid "reg: Unable to find the specified registry value\n"
+msgstr "reg: රෙජිස්තරයේ යතුර '%1' අරින්න බැහැ.\n"
+
+#: programs/reg/reg.rc:132 programs/regedit/regedit.rc:239
+msgid "(Default)"
+msgstr "(පෙරනිමිය)"
+
+#: programs/reg/reg.rc:141
+msgid "Type \"REG /?\" for help.\n"
+msgstr "\"REG /?\" ගහන්න උදව්වට.\n"
+
 #: programs/reg/reg.rc:35
 #, fuzzy
 #| msgid ""
@@ -14674,6 +14704,41 @@ msgid ""
 "\n"
 msgstr ""
 
+#: programs/reg/reg.rc:202
+msgid ""
+"REG COPY <key1> <key2> [/s] [/f]\n"
+"\n"
+"  Copies the contents of a specified registry key to another location.\n"
+"  By default, this operation only copies registry values. Use [/s] to\n"
+"  recursively copy all subkeys and values.\n"
+"\n"
+"  <key1>, <key2>\n"
+"     Registry keys specifying the source (<key1>) and destination (<key2>)\n"
+"     of the data. If <key2> does not exist, it is created.\n"
+"\n"
+"     Format: ROOT\\Subkey\n"
+"\n"
+"     ROOT: A predefined registry key. This must be one of the following:\n"
+"\n"
+"         HKEY_LOCAL_MACHINE  | HKLM\n"
+"         HKEY_CURRENT_USER   | HKCU\n"
+"         HKEY_CLASSES_ROOT   | HKCR\n"
+"         HKEY_USERS          | HKU\n"
+"         HKEY_CURRENT_CONFIG | HKCC\n"
+"\n"
+"     Subkey: The full path to a registry key under a given ROOT key.\n"
+"\n"
+"  /s\n"
+"     Copy all subkeys and values from <key1> to <key2>.\n"
+"\n"
+"  /f\n"
+"     Overwrite all registry data in <key2> without prompting for "
+"confirmation.\n"
+"     This option does not modify subkeys and values that only exist in "
+"<key2>.\n"
+"\n"
+msgstr ""
+
 #: programs/reg/reg.rc:92
 msgid ""
 "REG DELETE <key> [/v value_name | /ve | /va] [/f]\n"
@@ -14713,6 +14778,48 @@ msgid ""
 "\n"
 msgstr ""
 
+#: programs/reg/reg.rc:170
+msgid ""
+"REG EXPORT <key> <file> [/y]\n"
+"\n"
+"  Exports a specified registry key (including all subkeys and values)\n"
+"  to a file.\n"
+"\n"
+"  <key>\n"
+"     The registry key to export.\n"
+"\n"
+"     Format: ROOT\\Subkey\n"
+"\n"
+"     ROOT: A predefined registry key. This must be one of the following:\n"
+"\n"
+"         HKEY_LOCAL_MACHINE  | HKLM\n"
+"         HKEY_CURRENT_USER   | HKCU\n"
+"         HKEY_CLASSES_ROOT   | HKCR\n"
+"         HKEY_USERS          | HKU\n"
+"         HKEY_CURRENT_CONFIG | HKCC\n"
+"\n"
+"     Subkey: The full path to a registry key under a given ROOT key.\n"
+"\n"
+"  <file>\n"
+"     The name and path of the registry file that will be created.\n"
+"     This file must have a .reg extension.\n"
+"\n"
+"  /y\n"
+"     Overwrite <file> without prompting for confirmation.\n"
+"\n"
+msgstr ""
+
+#: programs/reg/reg.rc:148
+msgid ""
+"REG IMPORT <file>\n"
+"\n"
+"  Imports keys, values and data from a given file into the registry.\n"
+"\n"
+"  <file>\n"
+"     The name and path of the registry file to import.\n"
+"\n"
+msgstr ""
+
 #: programs/reg/reg.rc:114
 msgid ""
 "REG QUERY <key> [/v value_name | /ve] [/s]\n"
@@ -14748,11 +14855,15 @@ msgid ""
 "\n"
 msgstr ""
 
-#: programs/reg/reg.rc:116
-#, fuzzy
-#| msgid "The operation completed successfully\n"
-msgid "reg: The operation completed successfully\n"
-msgstr "මෙහෙයුම හරියට ඉවර උනා\n"
+#: programs/reg/reg.rc:180
+msgid ""
+"  /reg:32\n"
+"     Access the registry using the 32-bit view.\n"
+"\n"
+"  /reg:64\n"
+"     Access the registry using the 64-bit view.\n"
+"\n"
+msgstr ""
 
 #: programs/reg/reg.rc:117
 #, fuzzy
@@ -14760,23 +14871,19 @@ msgstr "මෙහෙයුම හරියට ඉවර උනා\n"
 msgid "reg: Invalid registry key\n"
 msgstr "reg: අවලංගු යතුරේ නම\n"
 
-#: programs/reg/reg.rc:118
-msgid "reg: Invalid command line parameters\n"
-msgstr "reg: අවලංගු විධාන රේඛා පරාමිති\n"
-
 #: programs/reg/reg.rc:119
 msgid "reg: Unable to access remote machine\n"
 msgstr ""
 
-#: programs/reg/reg.rc:120
+#: programs/reg/reg.rc:172
 #, fuzzy
-#| msgid "reg: Unable to open the registry key '%1'.\n"
-msgid "reg: Unable to find the specified registry value\n"
-msgstr "reg: රෙජිස්තරයේ යතුර '%1' අරින්න බැහැ.\n"
+#| msgid "reg: Invalid system key [%1]\n"
+msgid "reg: Invalid system key\n"
+msgstr "reg: අවලංගු පද්ධතිය යතුර [%1]\n"
 
-#: programs/reg/reg.rc:121
-msgid "reg: Unsupported registry data type [%1]\n"
-msgstr "reg: රෙජිස්තරය දත්ත වර්ගය [%1] සහාය නොදක්වයි\n"
+#: programs/reg/reg.rc:140
+msgid "reg: Invalid option [%1]. "
+msgstr "reg: අවලංගු විකල්පය [%1]."
 
 #: programs/reg/reg.rc:122
 #, fuzzy
@@ -14788,145 +14895,63 @@ msgstr "reg: [/d] විකල්පයට පස්සේ වලංගු හ�
 msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
 msgstr "reg: [/d] විකල්පයට පස්සේ වලංගු හෙක්සාඩෙසිමල් අගයක් තියෙන්න ඕනේ\n"
 
+#: programs/reg/reg.rc:136
+msgid "reg: The option [/d] must be followed by a valid string\n"
+msgstr "reg: [/d] විකල්පයට පස්සේ වලංගු අනුලකුණු වැලක් තියෙන්න ඕනේ\n"
+
 #: programs/reg/reg.rc:124
 msgid "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
 msgstr ""
+
+#: programs/reg/reg.rc:121
+msgid "reg: Unsupported registry data type [%1]\n"
+msgstr "reg: රෙජිස්තරය දත්ත වර්ගය [%1] සහාය නොදක්වයි\n"
 
 #: programs/reg/reg.rc:125
 msgid "The registry value '%1' already exists. Do you want to overwrite it?"
 msgstr "රෙජිස්තරයේ අගය '%1' දැනටමත් තියෙනවා. ඔබට ඒක උඩින් ලියන්න ඕනෙද?"
 
-#: programs/reg/reg.rc:129
+#: programs/reg/reg.rc:118
+msgid "reg: Invalid command line parameters\n"
+msgstr "reg: අවලංගු විධාන රේඛා පරාමිති\n"
+
+#: programs/reg/reg.rc:204
+msgid "reg: The source and destination keys cannot be the same\n"
+msgstr ""
+
+#: programs/reg/reg.rc:205
 #, fuzzy
-#| msgid "The registry operation was cancelled\n"
-msgid "reg: The registry operation was cancelled\n"
-msgstr "රෙජිස්තරයේ මෙහෙයුම අවලංගු කරා\n"
+#| msgid "The file '%1' already exists. Do you want to overwrite it?"
+msgid ""
+"The value '%1\\%2' already exists in the destination key. Do you want to "
+"overwrite it?"
+msgstr "'%1' ගොනුව දැනටමත් තියෙනවා. ඔබට ඒක උඩින් ලියන්න ඕනෙද?"
 
-#: programs/reg/reg.rc:130 programs/regedit/regedit.rc:239
-msgid "(Default)"
-msgstr "(පෙරනිමිය)"
-
-#: programs/reg/reg.rc:131
+#: programs/reg/reg.rc:133
 msgid "Are you sure you want to delete the registry value '%1'?"
 msgstr ""
 
-#: programs/reg/reg.rc:132
+#: programs/reg/reg.rc:134
 msgid "Are you sure you want to delete all registry values in '%1'?"
 msgstr ""
 
-#: programs/reg/reg.rc:133
+#: programs/reg/reg.rc:135
 msgid "Are you sure you want to delete the registry key '%1'?"
 msgstr ""
 
-#: programs/reg/reg.rc:134
-msgid "reg: The option [/d] must be followed by a valid string\n"
-msgstr "reg: [/d] විකල්පයට පස්සේ වලංගු අනුලකුණු වැලක් තියෙන්න ඕනේ\n"
-
-#: programs/reg/reg.rc:135
+#: programs/reg/reg.rc:137
 #, fuzzy
 #| msgid "regedit: Unable to delete the registry key '%1'.\n"
 msgid "reg: Unable to delete all registry values in '%1'\n"
 msgstr "regedit: රෙජිස්තරයෙ යතුර '%1' මකන්න බැහැ.\n"
 
-#: programs/reg/reg.rc:136
-msgid ""
-"reg: Unable to complete the specified operation. An unexpected error "
-"occurred.\n"
-msgstr ""
-
-#: programs/reg/reg.rc:137
-msgid "Search complete. Number of matches found: %1!d!\n"
-msgstr ""
-
-#: programs/reg/reg.rc:138
-msgid "reg: Invalid syntax. "
-msgstr "reg: අවලංගු රීති."
-
-#: programs/reg/reg.rc:139
-msgid "reg: Invalid option [%1]. "
-msgstr "reg: අවලංගු විකල්පය [%1]."
-
-#: programs/reg/reg.rc:140
-msgid "Type \"REG /?\" for help.\n"
-msgstr "\"REG /?\" ගහන්න උදව්වට.\n"
-
-#: programs/reg/reg.rc:141
-msgid "Type \"REG %1 /?\" for help.\n"
-msgstr "\"REG %1 /?\" ගහන්න උදව්වට.\n"
-
-#: programs/reg/reg.rc:142 programs/regedit/regedit.rc:240
-msgid "(value not set)"
-msgstr ""
-
-#: programs/reg/reg.rc:147
-msgid ""
-"REG IMPORT <file>\n"
-"\n"
-"  Imports keys, values and data from a given file into the registry.\n"
-"\n"
-"  <file>\n"
-"     The name and path of the registry file to import.\n"
-"\n"
-msgstr ""
-
-#: programs/reg/reg.rc:149
-msgid "reg: The file '%1' was not found.\n"
-msgstr "reg: '%1' ගොනුව හම්බු උනේ නැහැ.\n"
-
-#: programs/reg/reg.rc:150
-msgid "reg: Unable to open the registry key '%1'.\n"
-msgstr "reg: රෙජිස්තරයේ යතුර '%1' අරින්න බැහැ.\n"
-
-#: programs/reg/reg.rc:151
-msgid "reg: Unrecognized escape sequence [\\%1!c!]\n"
-msgstr "reg: හඳුනගත්තු නැති escape sequence එකක් [\\%1!c!]\n"
-
-#: programs/reg/reg.rc:170
-msgid ""
-"REG EXPORT <key> <file> [/y]\n"
-"\n"
-"  Exports a specified registry key (including all subkeys and values)\n"
-"  to a file.\n"
-"\n"
-"  <key>\n"
-"     The registry key to export.\n"
-"\n"
-"     Format: ROOT\\Subkey\n"
-"\n"
-"     ROOT: A predefined registry key. This must be one of the following:\n"
-"\n"
-"         HKEY_LOCAL_MACHINE  | HKLM\n"
-"         HKEY_CURRENT_USER   | HKCU\n"
-"         HKEY_CLASSES_ROOT   | HKCR\n"
-"         HKEY_USERS          | HKU\n"
-"         HKEY_CURRENT_CONFIG | HKCC\n"
-"\n"
-"     Subkey: The full path to a registry key under a given ROOT key.\n"
-"\n"
-"  <file>\n"
-"     The name and path of the registry file that will be created.\n"
-"     This file must have a .reg extension.\n"
-"\n"
-"  /y\n"
-"     Overwrite <file> without prompting for confirmation.\n"
-"\n"
-msgstr ""
-
-#: programs/reg/reg.rc:172
-#, fuzzy
-#| msgid "reg: Invalid system key [%1]\n"
-msgid "reg: Invalid system key\n"
-msgstr "reg: අවලංගු පද්ධතිය යතුර [%1]\n"
-
 #: programs/reg/reg.rc:173
 msgid "The file '%1' already exists. Do you want to overwrite it?"
 msgstr "'%1' ගොනුව දැනටමත් තියෙනවා. ඔබට ඒක උඩින් ලියන්න ඕනෙද?"
 
-#: programs/reg/reg.rc:174
-#, fuzzy
-#| msgid "reg: Unable to open the registry key '%1'.\n"
-msgid "reg: Unable to find the specified registry key\n"
-msgstr "reg: රෙජිස්තරයේ යතුර '%1' අරින්න බැහැ.\n"
+#: programs/reg/reg.rc:151
+msgid "reg: Unrecognized escape sequence [\\%1!c!]\n"
+msgstr "reg: හඳුනගත්තු නැති escape sequence එකක් [\\%1!c!]\n"
 
 #: programs/reg/reg.rc:175
 #, fuzzy
@@ -14934,55 +14959,16 @@ msgstr "reg: රෙජිස්තරයේ යතුර '%1' අරින්න
 msgid "reg: Unable to import the registry key '%1'\n"
 msgstr "reg: රෙජිස්තරයේ යතුර '%1' අරින්න බැහැ.\n"
 
-#: programs/reg/reg.rc:180
-msgid ""
-"  /reg:32\n"
-"     Access the registry using the 32-bit view.\n"
-"\n"
-"  /reg:64\n"
-"     Access the registry using the 64-bit view.\n"
-"\n"
+#: programs/reg/reg.rc:150
+msgid "reg: The file '%1' was not found.\n"
+msgstr "reg: '%1' ගොනුව හම්බු උනේ නැහැ.\n"
+
+#: programs/reg/reg.rc:143 programs/regedit/regedit.rc:240
+msgid "(value not set)"
 msgstr ""
 
-#: programs/reg/reg.rc:181
-#, fuzzy
-#| msgid "reg: Unable to open the registry key '%1'.\n"
-msgid "reg: Unable to access or create the specified registry key\n"
-msgstr "reg: රෙජිස්තරයේ යතුර '%1' අරින්න බැහැ.\n"
-
-#: programs/reg/reg.rc:202
-msgid ""
-"REG COPY <key1> <key2> [/s] [/f]\n"
-"\n"
-"  Copies the contents of a specified registry key to another location.\n"
-"  By default, this operation only copies registry values. Use [/s] to\n"
-"  recursively copy all subkeys and values.\n"
-"\n"
-"  <key1>, <key2>\n"
-"     Registry keys specifying the source (<key1>) and destination (<key2>)\n"
-"     of the data. If <key2> does not exist, it is created.\n"
-"\n"
-"     Format: ROOT\\Subkey\n"
-"\n"
-"     ROOT: A predefined registry key. This must be one of the following:\n"
-"\n"
-"         HKEY_LOCAL_MACHINE  | HKLM\n"
-"         HKEY_CURRENT_USER   | HKCU\n"
-"         HKEY_CLASSES_ROOT   | HKCR\n"
-"         HKEY_USERS          | HKU\n"
-"         HKEY_CURRENT_CONFIG | HKCC\n"
-"\n"
-"     Subkey: The full path to a registry key under a given ROOT key.\n"
-"\n"
-"  /s\n"
-"     Copy all subkeys and values from <key1> to <key2>.\n"
-"\n"
-"  /f\n"
-"     Overwrite all registry data in <key2> without prompting for "
-"confirmation.\n"
-"     This option does not modify subkeys and values that only exist in "
-"<key2>.\n"
-"\n"
+#: programs/reg/reg.rc:138
+msgid "Search complete. Number of matches found: %1!d!\n"
 msgstr ""
 
 #: programs/regedit/regedit.rc:34

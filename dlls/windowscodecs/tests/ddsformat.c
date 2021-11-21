@@ -546,6 +546,57 @@ static HRESULT init_decoder(IWICBitmapDecoder *decoder, IWICStream *stream, HRES
     return hr;
 }
 
+static void release_encoder(IWICBitmapEncoder *encoder, IWICDdsEncoder *dds_encoder, IWICStream *stream)
+{
+    if (dds_encoder) IWICDdsEncoder_Release(dds_encoder);
+    if (stream) IWICStream_Release(stream);
+    if (encoder) IWICBitmapEncoder_Release(encoder);
+}
+
+static HRESULT create_and_init_encoder(BYTE *image_buffer, UINT buffer_size, WICDdsParameters *params,
+                                       IWICBitmapEncoder **encoder, IWICDdsEncoder **dds_encoder, IWICStream **stream)
+{
+    IWICDdsEncoder *dds = NULL;
+    HRESULT hr;
+
+    *encoder = create_encoder();
+    if (!*encoder) goto fail;
+
+    *stream = create_stream(image_buffer, buffer_size);
+    if (!*stream) goto fail;
+
+    hr = IWICBitmapEncoder_Initialize(*encoder, (IStream *)*stream, WICBitmapEncoderNoCache);
+    ok(hr == S_OK, "Initialize failed, hr %#x\n", hr);
+    if (hr != S_OK) goto fail;
+
+    hr = IWICBitmapEncoder_QueryInterface(*encoder, &IID_IWICDdsEncoder, (void **)&dds);
+    ok(hr == S_OK, "QueryInterface failed, hr %#x\n", hr);
+    if (hr != S_OK) goto fail;
+
+    if (params)
+    {
+        hr = IWICDdsEncoder_SetParameters(dds, params);
+        ok(hr == S_OK, "SetParameters failed, hr %#x\n", hr);
+        if (hr != S_OK) goto fail;
+    }
+
+    if (dds_encoder)
+    {
+        *dds_encoder = dds;
+    }
+    else
+    {
+        IWICDdsEncoder_Release(dds);
+        dds = NULL;
+    }
+
+    return S_OK;
+
+fail:
+    release_encoder(*encoder, dds, *stream);
+    return E_FAIL;
+}
+
 static BOOL is_compressed(DXGI_FORMAT format)
 {
     UINT i;
@@ -1310,18 +1361,26 @@ end:
     if (encoder) IWICBitmapEncoder_Release(encoder);
 }
 
-static void test_dds_encoder_params(IWICBitmapEncoder *encoder, IWICDdsEncoder *dds_encoder)
+static void test_dds_encoder_params(void)
 {
     WICDdsParameters params, params_set = { 4, 4, 4, 3, 1,   DXGI_FORMAT_BC1_UNORM,
                                             WICDdsTexture3D, WICDdsAlphaModePremultiplied };
+    IWICDdsEncoder *dds_encoder = NULL;
+    IWICBitmapEncoder *encoder = NULL;
+    IWICStream *stream = NULL;
+    BYTE buffer[1024];
     HRESULT hr;
+    UINT i;
+
+    hr = create_and_init_encoder(buffer, sizeof(buffer), NULL, &encoder, &dds_encoder, &stream);
+    if (hr != S_OK) goto end;
 
     hr = IWICDdsEncoder_GetParameters(dds_encoder, NULL);
     ok(hr == E_INVALIDARG, "GetParameters got unexpected hr %#x\n", hr);
 
     hr = IWICDdsEncoder_GetParameters(dds_encoder, &params);
     ok(hr == S_OK, "GetParameters failed, hr %#x\n", hr);
-    if (hr != S_OK) return;
+    if (hr != S_OK) goto end;
 
     /* default DDS parameters for encoder */
     ok(params.Width      == 1, "Got unexpected Width %u\n",     params.Width);
@@ -1338,7 +1397,7 @@ static void test_dds_encoder_params(IWICBitmapEncoder *encoder, IWICDdsEncoder *
 
     hr = IWICDdsEncoder_SetParameters(dds_encoder, &params_set);
     ok(hr == S_OK, "SetParameters failed, hr %#x\n", hr);
-    if (hr != S_OK) return;
+    if (hr != S_OK) goto end;
 
     IWICDdsEncoder_GetParameters(dds_encoder, &params);
 
@@ -1358,38 +1417,132 @@ static void test_dds_encoder_params(IWICBitmapEncoder *encoder, IWICDdsEncoder *
        "Expected Dimension %u, got %#x\n",  params_set.Dimension,  params.Dimension);
     ok(params.AlphaMode == params_set.AlphaMode,
        "Expected AlphaMode %u, got %#x\n",  params_set.AlphaMode,  params.AlphaMode);
+
+    for (i = 0; i < ARRAY_SIZE(test_data); ++i)
+    {
+        hr = IWICDdsEncoder_SetParameters(dds_encoder, &test_data[i].expected_parameters);
+        todo_wine_if(test_data[i].init_hr != S_OK)
+        ok((hr == S_OK && test_data[i].init_hr == S_OK) || hr == WINCODEC_ERR_BADHEADER,
+           "Test %u: SetParameters got unexpected hr %#x\n", i, hr);
+    }
+
+end:
+    release_encoder(encoder, dds_encoder, stream);
 }
 
-static void test_dds_encoder(void)
+static void test_dds_encoder_create_frame(void)
 {
+    WICDdsParameters params = { 4, 4, 1, 3, 1,   DXGI_FORMAT_BC1_UNORM,
+                                WICDdsTexture2D, WICDdsAlphaModePremultiplied };
+    IWICBitmapFrameEncode *frame0 = NULL, *frame1 = NULL;
+    UINT array_index, mip_level, slice_index;
     IWICDdsEncoder *dds_encoder = NULL;
     IWICBitmapEncoder *encoder = NULL;
     IWICStream *stream = NULL;
     BYTE buffer[1024];
     HRESULT hr;
 
-    test_dds_encoder_initialize();
-
-    encoder = create_encoder();
-    if (!encoder) goto end;
-
-    stream = create_stream(buffer, sizeof(buffer));
-    if (!stream) goto end;
-
-    hr = IWICBitmapEncoder_Initialize(encoder, (IStream *)stream, WICBitmapEncoderNoCache);
-    ok(hr == S_OK, "Initialize failed, hr %#x\n", hr);
+    hr = create_and_init_encoder(buffer, sizeof(buffer), &params, &encoder, &dds_encoder, &stream);
     if (hr != S_OK) goto end;
 
-    hr = IWICBitmapEncoder_QueryInterface(encoder, &IID_IWICDdsEncoder, (void **)&dds_encoder);
-    ok(hr == S_OK, "QueryInterface failed, hr %#x\n", hr);
-    if (hr != S_OK) goto end;
+    hr = IWICBitmapEncoder_CreateNewFrame(encoder, &frame0, NULL);
+    ok(hr == S_OK, "CreateNewFrame failed, hr %#x\n", hr);
+    hr = IWICBitmapEncoder_CreateNewFrame(encoder, &frame1, NULL);
+    ok(hr == WINCODEC_ERR_WRONGSTATE, "CreateNewFrame got unexpected hr %#x\n", hr);
 
-    test_dds_encoder_params(encoder, dds_encoder);
+    IWICBitmapFrameEncode_Release(frame0);
+    hr = IWICBitmapEncoder_CreateNewFrame(encoder, &frame1, NULL);
+    ok(hr == WINCODEC_ERR_WRONGSTATE, "CreateNewFrame got unexpected hr %#x\n", hr);
+
+    release_encoder(encoder, dds_encoder, stream);
+
+    create_and_init_encoder(buffer, sizeof(buffer), &params, &encoder, &dds_encoder, &stream);
+    hr = IWICDdsEncoder_CreateNewFrame(dds_encoder, &frame0, &array_index, &mip_level, &slice_index);
+    ok(hr == S_OK, "CreateNewFrame failed, hr %#x\n", hr);
+    IWICBitmapFrameEncode_Release(frame0);
+    release_encoder(encoder, dds_encoder, stream);
+
+    create_and_init_encoder(buffer, sizeof(buffer), &params, &encoder, &dds_encoder, &stream);
+    hr = IWICDdsEncoder_CreateNewFrame(dds_encoder, &frame0, NULL, NULL, NULL);
+    ok(hr == S_OK, "CreateNewFrame failed, hr %#x\n", hr);
+    IWICBitmapFrameEncode_Release(frame0);
 
 end:
-    if (dds_encoder) IWICDdsEncoder_Release(dds_encoder);
-    if (stream) IWICStream_Release(stream);
-    if (encoder) IWICBitmapEncoder_Release(encoder);
+    release_encoder(encoder, dds_encoder, stream);
+}
+
+static void test_dds_encoder_pixel_format(void)
+{
+    DXGI_FORMAT image_formats[] = { DXGI_FORMAT_BC1_UNORM, DXGI_FORMAT_BC2_UNORM, DXGI_FORMAT_BC3_UNORM };
+    const WICPixelFormatGUID *test_formats[] =
+    {
+        &GUID_WICPixelFormat8bppIndexed,
+        &GUID_WICPixelFormatBlackWhite,
+        &GUID_WICPixelFormat16bppGray,
+        &GUID_WICPixelFormat8bppAlpha,
+        &GUID_WICPixelFormat16bppBGR555,
+        &GUID_WICPixelFormat16bppBGR565,
+        &GUID_WICPixelFormat24bppBGR,
+        &GUID_WICPixelFormat32bppBGR,
+        &GUID_WICPixelFormat32bppBGRA,
+        &GUID_WICPixelFormat32bppPBGRA,
+        &GUID_WICPixelFormat32bppRGB,
+        &GUID_WICPixelFormat32bppRGBA,
+        &GUID_WICPixelFormat32bppPRGBA,
+        &GUID_WICPixelFormat48bppRGB,
+        &GUID_WICPixelFormat64bppRGB,
+        &GUID_WICPixelFormat64bppRGBA
+    };
+    IWICBitmapFrameEncode *frame = NULL;
+    IWICDdsEncoder *dds_encoder = NULL;
+    IWICBitmapEncoder *encoder = NULL;
+    IWICStream *stream = NULL;
+    WICPixelFormatGUID format;
+    WICDdsParameters params;
+    BYTE buffer[1];
+    HRESULT hr;
+    UINT i, j;
+
+    for (i = 0; i < ARRAY_SIZE(image_formats); ++i)
+    {
+        hr = create_and_init_encoder(buffer, sizeof(buffer), NULL, &encoder, &dds_encoder, &stream);
+        if (hr != S_OK)
+        {
+            release_encoder(encoder, dds_encoder, stream);
+            return;
+        }
+
+        IWICDdsEncoder_GetParameters(dds_encoder, &params);
+        params.DxgiFormat = image_formats[i];
+        IWICDdsEncoder_SetParameters(dds_encoder, &params);
+
+        IWICBitmapEncoder_CreateNewFrame(encoder, &frame, NULL);
+
+        hr = IWICBitmapFrameEncode_SetPixelFormat(frame, &format);
+        ok(hr == WINCODEC_ERR_NOTINITIALIZED, "SetPixelFormat got unexpected hr %#x\n", hr);
+
+        IWICBitmapFrameEncode_Initialize(frame, NULL);
+
+        for (j = 0; j < ARRAY_SIZE(test_formats); ++j)
+        {
+            format = *(test_formats[j]);
+            hr = IWICBitmapFrameEncode_SetPixelFormat(frame, &format);
+            ok(hr == S_OK, "Test %u: SetPixelFormat failed, hr %#x\n", j, hr);
+            ok(IsEqualGUID(&format, &GUID_WICPixelFormat32bppBGRA),
+               "Test %u: Got unexpected GUID %s\n", j, debugstr_guid(&format));
+        }
+
+        IWICBitmapFrameEncode_Release(frame);
+        release_encoder(encoder, dds_encoder, stream);
+    }
+}
+
+static void test_dds_encoder(void)
+{
+    test_dds_encoder_initialize();
+    test_dds_encoder_params();
+    test_dds_encoder_create_frame();
+    test_dds_encoder_pixel_format();
 }
 
 START_TEST(ddsformat)

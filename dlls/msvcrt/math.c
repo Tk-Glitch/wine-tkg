@@ -311,6 +311,365 @@ float CDECL _logbf(float x)
 
 #endif
 
+/* Copied from musl: src/math/scalbn.c */
+static double __scalbn(double x, int n)
+{
+    union {double f; UINT64 i;} u;
+    double y = x;
+
+    if (n > 1023) {
+        y *= 0x1p1023;
+        n -= 1023;
+        if (n > 1023) {
+            y *= 0x1p1023;
+            n -= 1023;
+            if (n > 1023)
+                n = 1023;
+        }
+    } else if (n < -1022) {
+        /* make sure final n < -53 to avoid double
+           rounding in the subnormal range */
+        y *= 0x1p-1022 * 0x1p53;
+        n += 1022 - 53;
+        if (n < -1022) {
+            y *= 0x1p-1022 * 0x1p53;
+            n += 1022 - 53;
+            if (n < -1022)
+                n = -1022;
+        }
+    }
+    u.i = (UINT64)(0x3ff + n) << 52;
+    x = y * u.f;
+    return x;
+}
+
+/* Copied from musl: src/math/__rem_pio2_large.c */
+static int __rem_pio2_large(double *x, double *y, int e0, int nx, int prec)
+{
+    static const int init_jk[] = {3, 4};
+    static const INT32 ipio2[] = {
+        0xA2F983, 0x6E4E44, 0x1529FC, 0x2757D1, 0xF534DD, 0xC0DB62,
+        0x95993C, 0x439041, 0xFE5163, 0xABDEBB, 0xC561B7, 0x246E3A,
+        0x424DD2, 0xE00649, 0x2EEA09, 0xD1921C, 0xFE1DEB, 0x1CB129,
+        0xA73EE8, 0x8235F5, 0x2EBB44, 0x84E99C, 0x7026B4, 0x5F7E41,
+        0x3991D6, 0x398353, 0x39F49C, 0x845F8B, 0xBDF928, 0x3B1FF8,
+        0x97FFDE, 0x05980F, 0xEF2F11, 0x8B5A0A, 0x6D1F6D, 0x367ECF,
+        0x27CB09, 0xB74F46, 0x3F669E, 0x5FEA2D, 0x7527BA, 0xC7EBE5,
+        0xF17B3D, 0x0739F7, 0x8A5292, 0xEA6BFB, 0x5FB11F, 0x8D5D08,
+        0x560330, 0x46FC7B, 0x6BABF0, 0xCFBC20, 0x9AF436, 0x1DA9E3,
+        0x91615E, 0xE61B08, 0x659985, 0x5F14A0, 0x68408D, 0xFFD880,
+        0x4D7327, 0x310606, 0x1556CA, 0x73A8C9, 0x60E27B, 0xC08C6B,
+    };
+    static const double PIo2[] = {
+        1.57079625129699707031e+00,
+        7.54978941586159635335e-08,
+        5.39030252995776476554e-15,
+        3.28200341580791294123e-22,
+        1.27065575308067607349e-29,
+        1.22933308981111328932e-36,
+        2.73370053816464559624e-44,
+        2.16741683877804819444e-51,
+    };
+
+    INT32 jz, jx, jv, jp, jk, carry, n, iq[20], i, j, k, m, q0, ih;
+    double z, fw, f[20], fq[20] = {0}, q[20];
+
+    /* initialize jk*/
+    jk = init_jk[prec];
+    jp = jk;
+
+    /* determine jx,jv,q0, note that 3>q0 */
+    jx = nx - 1;
+    jv = (e0 - 3) / 24;
+    if(jv < 0) jv = 0;
+    q0 = e0 - 24 * (jv + 1);
+
+    /* set up f[0] to f[jx+jk] where f[jx+jk] = ipio2[jv+jk] */
+    j = jv - jx;
+    m = jx + jk;
+    for (i = 0; i <= m; i++, j++)
+        f[i] = j < 0 ? 0.0 : (double)ipio2[j];
+
+    /* compute q[0],q[1],...q[jk] */
+    for (i = 0; i <= jk; i++) {
+        for (j = 0, fw = 0.0; j <= jx; j++)
+            fw += x[j] * f[jx + i - j];
+        q[i] = fw;
+    }
+
+    jz = jk;
+recompute:
+    /* distill q[] into iq[] reversingly */
+    for (i = 0, j = jz, z = q[jz]; j > 0; i++, j--) {
+        fw = (double)(INT32)(0x1p-24 * z);
+        iq[i] = (INT32)(z - 0x1p24 * fw);
+        z = q[j - 1] + fw;
+    }
+
+    /* compute n */
+    z = __scalbn(z, q0); /* actual value of z */
+    z -= 8.0 * floor(z * 0.125); /* trim off integer >= 8 */
+    n = (INT32)z;
+    z -= (double)n;
+    ih = 0;
+    if (q0 > 0) {  /* need iq[jz-1] to determine n */
+        i = iq[jz - 1] >> (24 - q0);
+        n += i;
+        iq[jz - 1] -= i << (24 - q0);
+        ih = iq[jz - 1] >> (23 - q0);
+    }
+    else if (q0 == 0) ih = iq[jz - 1] >> 23;
+    else if (z >= 0.5) ih = 2;
+
+    if (ih > 0) {  /* q > 0.5 */
+        n += 1;
+        carry = 0;
+        for (i = 0; i < jz; i++) {  /* compute 1-q */
+            j = iq[i];
+            if (carry == 0) {
+                if (j != 0) {
+                    carry = 1;
+                    iq[i] = 0x1000000 - j;
+                }
+            } else
+                iq[i] = 0xffffff - j;
+        }
+        if (q0 > 0) {  /* rare case: chance is 1 in 12 */
+            switch(q0) {
+            case 1:
+                iq[jz - 1] &= 0x7fffff;
+                break;
+            case 2:
+                iq[jz - 1] &= 0x3fffff;
+                break;
+            }
+        }
+        if (ih == 2) {
+            z = 1.0 - z;
+            if (carry != 0)
+                z -= __scalbn(1.0, q0);
+        }
+    }
+
+    /* check if recomputation is needed */
+    if (z == 0.0) {
+        j = 0;
+        for (i = jz - 1; i >= jk; i--) j |= iq[i];
+        if (j == 0) {  /* need recomputation */
+            for (k = 1; iq[jk - k] == 0; k++);  /* k = no. of terms needed */
+
+            for (i = jz + 1; i <= jz + k; i++) {  /* add q[jz+1] to q[jz+k] */
+                f[jx + i] = (double)ipio2[jv + i];
+                for (j = 0, fw = 0.0; j <= jx; j++)
+                    fw += x[j] * f[jx + i - j];
+                q[i] = fw;
+            }
+            jz += k;
+            goto recompute;
+        }
+    }
+
+    /* chop off zero terms */
+    if (z == 0.0) {
+        jz -= 1;
+        q0 -= 24;
+        while (iq[jz] == 0) {
+            jz--;
+            q0 -= 24;
+        }
+    } else { /* break z into 24-bit if necessary */
+        z = __scalbn(z, -q0);
+        if (z >= 0x1p24) {
+            fw = (double)(INT32)(0x1p-24 * z);
+            iq[jz] = (INT32)(z - 0x1p24 * fw);
+            jz += 1;
+            q0 += 24;
+            iq[jz] = (INT32)fw;
+        } else
+            iq[jz] = (INT32)z;
+    }
+
+    /* convert integer "bit" chunk to floating-point value */
+    fw = __scalbn(1.0, q0);
+    for (i = jz; i >= 0; i--) {
+        q[i] = fw * (double)iq[i];
+        fw *= 0x1p-24;
+    }
+
+    /* compute PIo2[0,...,jp]*q[jz,...,0] */
+    for(i = jz; i >= 0; i--) {
+        for (fw = 0.0, k = 0; k <= jp && k <= jz - i; k++)
+            fw += PIo2[k] * q[i + k];
+        fq[jz - i] = fw;
+    }
+
+    /* compress fq[] into y[] */
+    switch(prec) {
+    case 0:
+        fw = 0.0;
+        for (i = jz; i >= 0; i--)
+            fw += fq[i];
+        y[0] = ih == 0 ? fw : -fw;
+        break;
+    case 1:
+    case 2:
+        fw = 0.0;
+        for (i = jz; i >= 0; i--)
+            fw += fq[i];
+        fw = (double)fw;
+        y[0] = ih==0 ? fw : -fw;
+        fw = fq[0] - fw;
+        for (i = 1; i <= jz; i++)
+            fw += fq[i];
+        y[1] = ih == 0 ? fw : -fw;
+        break;
+    case 3:  /* painful */
+        for (i = jz; i > 0; i--) {
+            fw = fq[i - 1] + fq[i];
+            fq[i] += fq[i - 1] - fw;
+            fq[i - 1] = fw;
+        }
+        for (i = jz; i > 1; i--) {
+            fw = fq[i - 1] + fq[i];
+            fq[i] += fq[i - 1] - fw;
+            fq[i - 1] = fw;
+        }
+        for (fw = 0.0, i = jz; i >= 2; i--)
+            fw += fq[i];
+        if (ih == 0) {
+            y[0] = fq[0];
+            y[1] = fq[1];
+            y[2] = fw;
+        } else {
+            y[0] = -fq[0];
+            y[1] = -fq[1];
+            y[2] = -fw;
+        }
+    }
+    return n & 7;
+}
+
+#if !defined(__i386__) || _MSVCR_VER >= 120
+/* Copied from musl: src/math/expm1f.c */
+static float __expm1f(float x)
+{
+    static const float ln2_hi = 6.9313812256e-01,
+        ln2_lo = 9.0580006145e-06,
+        invln2 = 1.4426950216e+00,
+        Q1 = -3.3333212137e-2,
+        Q2 = 1.5807170421e-3;
+
+    float y, hi, lo, c, t, e, hxs, hfx, r1, twopk;
+    union {float f; UINT32 i;} u = {x};
+    UINT32 hx = u.i & 0x7fffffff;
+    int k, sign = u.i >> 31;
+
+    /* filter out huge and non-finite argument */
+    if (hx >= 0x4195b844) { /* if |x|>=27*ln2 */
+        if (hx >= 0x7f800000) /* NaN */
+            return u.i == 0xff800000 ? -1 : x;
+        if (sign)
+            return math_error(_UNDERFLOW, "exp", x, 0, -1);
+        if (hx > 0x42b17217) /* x > log(FLT_MAX) */
+            return math_error(_OVERFLOW, "exp", x, 0, fp_barrierf(x * FLT_MAX));
+    }
+
+    /* argument reduction */
+    if (hx > 0x3eb17218) { /* if |x| > 0.5 ln2 */
+        if (hx < 0x3F851592) { /* and |x| < 1.5 ln2 */
+            if (!sign) {
+                hi = x - ln2_hi;
+                lo = ln2_lo;
+                k = 1;
+            } else {
+                hi = x + ln2_hi;
+                lo = -ln2_lo;
+                k = -1;
+            }
+        } else {
+            k = invln2 * x + (sign ? -0.5f : 0.5f);
+            t = k;
+            hi = x - t * ln2_hi; /* t*ln2_hi is exact here */
+            lo = t * ln2_lo;
+        }
+        x = hi - lo;
+        c = (hi - x) - lo;
+    } else if (hx < 0x33000000) { /* when |x|<2**-25, return x */
+        if (hx < 0x00800000)
+            fp_barrierf(x * x);
+        return x;
+    } else
+        k = 0;
+
+    /* x is now in primary range */
+    hfx = 0.5f * x;
+    hxs = x * hfx;
+    r1 = 1.0f + hxs * (Q1 + hxs * Q2);
+    t = 3.0f - r1 * hfx;
+    e = hxs * ((r1 - t) / (6.0f - x * t));
+    if (k == 0) /* c is 0 */
+        return x - (x * e - hxs);
+    e = x * (e - c) - c;
+    e -= hxs;
+    /* exp(x) ~ 2^k (x_reduced - e + 1) */
+    if (k == -1)
+        return 0.5f * (x - e) - 0.5f;
+    if (k == 1) {
+        if (x < -0.25f)
+            return -2.0f * (e - (x + 0.5f));
+        return 1.0f + 2.0f * (x - e);
+    }
+    u.i = (0x7f + k) << 23; /* 2^k */
+    twopk = u.f;
+    if (k < 0 || k > 56) { /* suffice to return exp(x)-1 */
+        y = x - e + 1.0f;
+        if (k == 128)
+            y = y * 2.0f * 0x1p127f;
+        else
+            y = y * twopk;
+        return y - 1.0f;
+    }
+    u.i = (0x7f-k) << 23; /* 2^-k */
+    if (k < 23)
+        y = (x - e + (1 - u.f)) * twopk;
+    else
+        y = (x - (e + u.f) + 1) * twopk;
+    return y;
+}
+
+/* Copied from musl: src/math/__sindf.c */
+static float __sindf(double x)
+{
+    static const double S1 = -0x15555554cbac77.0p-55,
+        S2 = 0x111110896efbb2.0p-59,
+        S3 = -0x1a00f9e2cae774.0p-65,
+        S4 = 0x16cd878c3b46a7.0p-71;
+
+    double r, s, w, z;
+
+    z = x * x;
+    w = z * z;
+    r = S3 + z * S4;
+    s = z * x;
+    return (x + s * (S1 + z * S2)) + s * w * r;
+}
+
+/* Copied from musl: src/math/__cosdf.c */
+static float __cosdf(double x)
+{
+    static const double C0 = -0x1ffffffd0c5e81.0p-54,
+        C1 = 0x155553e1053a42.0p-57,
+        C2 = -0x16c087e80f1e27.0p-62,
+        C3 = 0x199342e0ee5069.0p-68;
+    double r, w, z;
+
+    z = x * x;
+    w = z * z;
+    r = C2 + z * C3;
+    return ((1.0 + z * C0) + w * C1) + (w * z) * r;
+}
+#endif
+
 #ifndef __i386__
 
 /*********************************************************************
@@ -609,24 +968,165 @@ float CDECL atan2f( float y, float x )
     }
 }
 
+/* Copied from musl: src/math/__rem_pio2f.c */
+static int __rem_pio2f(float x, double *y)
+{
+    static const double toint = 1.5 / DBL_EPSILON,
+        pio4 = 0x1.921fb6p-1,
+        invpio2 = 6.36619772367581382433e-01,
+        pio2_1 = 1.57079631090164184570e+00,
+        pio2_1t = 1.58932547735281966916e-08;
+
+    union {float f; uint32_t i;} u = {x};
+    double tx[1], ty[1], fn;
+    UINT32 ix;
+    int n, sign, e0;
+
+    ix = u.i & 0x7fffffff;
+    /* 25+53 bit pi is good enough for medium size */
+    if (ix < 0x4dc90fdb) { /* |x| ~< 2^28*(pi/2), medium size */
+        /* Use a specialized rint() to get fn. */
+        fn = fp_barrier(x * invpio2 + toint) - toint;
+        n  = (int)fn;
+        *y = x - fn * pio2_1 - fn * pio2_1t;
+        /* Matters with directed rounding. */
+        if (*y < -pio4) {
+            n--;
+            fn--;
+            *y = x - fn * pio2_1 - fn * pio2_1t;
+        } else if (*y > pio4) {
+            n++;
+            fn++;
+            *y = x - fn * pio2_1 - fn * pio2_1t;
+        }
+        return n;
+    }
+    if(ix >= 0x7f800000) { /* x is inf or NaN */
+        *y = x - x;
+        return 0;
+    }
+    /* scale x into [2^23, 2^24-1] */
+    sign = u.i >> 31;
+    e0 = (ix >> 23) - (0x7f + 23); /* e0 = ilogb(|x|)-23, positive */
+    u.i = ix - (e0 << 23);
+    tx[0] = u.f;
+    n = __rem_pio2_large(tx, ty, e0, 1, 0);
+    if (sign) {
+        *y = -ty[0];
+        return -n;
+    }
+    *y = ty[0];
+    return n;
+}
+
 /*********************************************************************
  *      cosf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/cosf.c
  */
 float CDECL cosf( float x )
 {
-  float ret = unix_funcs->cosf( x );
-  if (!isfinite(x)) return math_error(_DOMAIN, "cosf", x, 0, ret);
-  return ret;
+    static const double c1pio2 = 1*M_PI_2,
+        c2pio2 = 2*M_PI_2,
+        c3pio2 = 3*M_PI_2,
+        c4pio2 = 4*M_PI_2;
+
+    double y;
+    UINT32 ix;
+    unsigned n, sign;
+
+    ix = *(UINT32*)&x;
+    sign = ix >> 31;
+    ix &= 0x7fffffff;
+
+    if (ix <= 0x3f490fda) { /* |x| ~<= pi/4 */
+        if (ix < 0x39800000) { /* |x| < 2**-12 */
+            /* raise inexact if x != 0 */
+            fp_barrierf(x + 0x1p120f);
+            return 1.0f;
+        }
+        return __cosdf(x);
+    }
+    if (ix <= 0x407b53d1) { /* |x| ~<= 5*pi/4 */
+        if (ix > 0x4016cbe3) /* |x| ~> 3*pi/4 */
+            return -__cosdf(sign ? x + c2pio2 : x - c2pio2);
+        else {
+            if (sign)
+                return __sindf(x + c1pio2);
+            else
+                return __sindf(c1pio2 - x);
+        }
+    }
+    if (ix <= 0x40e231d5) { /* |x| ~<= 9*pi/4 */
+        if (ix > 0x40afeddf) /* |x| ~> 7*pi/4 */
+            return __cosdf(sign ? x + c4pio2 : x - c4pio2);
+        else {
+            if (sign)
+                return __sindf(-x - c3pio2);
+            else
+                return __sindf(x - c3pio2);
+        }
+    }
+
+    /* cos(Inf or NaN) is NaN */
+    if (isinf(x)) return math_error(_DOMAIN, "cosf", x, 0, x - x);
+    if (ix >= 0x7f800000)
+        return x - x;
+
+    /* general argument reduction needed */
+    n = __rem_pio2f(x, &y);
+    switch (n & 3) {
+    case 0: return __cosdf(y);
+    case 1: return __sindf(-y);
+    case 2: return -__cosdf(y);
+    default: return __sindf(y);
+    }
+}
+
+/* Copied from musl: src/math/__expo2f.c */
+static float __expo2f(float x, float sign)
+{
+    static const int k = 235;
+    static const float kln2 = 0x1.45c778p+7f;
+    float scale;
+
+    *(UINT32*)&scale = (UINT32)(0x7f + k/2) << 23;
+    return expf(x - kln2) * (sign * scale) * scale;
 }
 
 /*********************************************************************
  *      coshf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/coshf.c
  */
 float CDECL coshf( float x )
 {
-  float ret = unix_funcs->coshf( x );
-  if (isnan(x)) return math_error(_DOMAIN, "coshf", x, 0, ret);
-  return ret;
+    UINT32 ui = *(UINT32*)&x;
+    float t;
+
+    /* |x| */
+    ui &= 0x7fffffff;
+    x = *(float*)&ui;
+
+    /* |x| < log(2) */
+    if (ui < 0x3f317217) {
+        if (ui < 0x3f800000 - (12 << 23)) {
+            fp_barrierf(x + 0x1p120f);
+            return 1;
+        }
+        t = __expm1f(x);
+        return 1 + t * t / (2 * (1 + t));
+    }
+
+    /* |x| < log(FLT_MAX) */
+    if (ui < 0x42b17217) {
+        t = expf(x);
+        return 0.5f * (t + 1 / t);
+    }
+
+    /* |x| > log(FLT_MAX) or nan */
+    t = __expo2f(x, 1.0f);
+    return t;
 }
 
 /*********************************************************************
@@ -711,13 +1211,83 @@ float CDECL fmodf( float x, float y )
 
 /*********************************************************************
  *      logf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/logf.c src/math/logf_data.c
  */
 float CDECL logf( float x )
 {
-    float ret = unix_funcs->logf( x );
-    if (x < 0.0) return math_error(_DOMAIN, "logf", x, 0, ret);
-    if (x == 0.0) return math_error(_SING, "logf", x, 0, ret);
-  return ret;
+    static const double Ln2 = 0x1.62e42fefa39efp-1;
+    static const double A[] = {
+        -0x1.00ea348b88334p-2,
+        0x1.5575b0be00b6ap-2,
+        -0x1.ffffef20a4123p-2
+    };
+    static const struct {
+        double invc, logc;
+    } T[] = {
+        { 0x1.661ec79f8f3bep+0, -0x1.57bf7808caadep-2 },
+        { 0x1.571ed4aaf883dp+0, -0x1.2bef0a7c06ddbp-2 },
+        { 0x1.49539f0f010bp+0, -0x1.01eae7f513a67p-2 },
+        { 0x1.3c995b0b80385p+0, -0x1.b31d8a68224e9p-3 },
+        { 0x1.30d190c8864a5p+0, -0x1.6574f0ac07758p-3 },
+        { 0x1.25e227b0b8eap+0, -0x1.1aa2bc79c81p-3 },
+        { 0x1.1bb4a4a1a343fp+0, -0x1.a4e76ce8c0e5ep-4 },
+        { 0x1.12358f08ae5bap+0, -0x1.1973c5a611cccp-4 },
+        { 0x1.0953f419900a7p+0, -0x1.252f438e10c1ep-5 },
+        { 0x1p+0, 0x0p+0 },
+        { 0x1.e608cfd9a47acp-1, 0x1.aa5aa5df25984p-5 },
+        { 0x1.ca4b31f026aap-1, 0x1.c5e53aa362eb4p-4 },
+        { 0x1.b2036576afce6p-1, 0x1.526e57720db08p-3 },
+        { 0x1.9c2d163a1aa2dp-1, 0x1.bc2860d22477p-3 },
+        { 0x1.886e6037841edp-1, 0x1.1058bc8a07ee1p-2 },
+        { 0x1.767dcf5534862p-1, 0x1.4043057b6ee09p-2 }
+    };
+
+    double z, r, r2, y, y0, invc, logc;
+    UINT32 ix, iz, tmp;
+    int k, i;
+
+    ix = *(UINT32*)&x;
+    /* Fix sign of zero with downward rounding when x==1. */
+    if (ix == 0x3f800000)
+        return 0;
+    if (ix - 0x00800000 >= 0x7f800000 - 0x00800000) {
+        /* x < 0x1p-126 or inf or nan. */
+        if (ix * 2 == 0)
+            return math_error(_SING, "logf", x, 0, (ix & 0x80000000 ? 1.0 : -1.0) / x);
+        if (ix == 0x7f800000) /* log(inf) == inf. */
+            return x;
+        if (ix * 2 > 0xff000000)
+            return x;
+        if (ix & 0x80000000)
+            return math_error(_DOMAIN, "logf", x, 0, (x - x) / (x - x));
+        /* x is subnormal, normalize it. */
+        x *= 0x1p23f;
+        ix = *(UINT32*)&x;
+        ix -= 23 << 23;
+    }
+
+    /* x = 2^k z; where z is in range [OFF,2*OFF] and exact.
+       The range is split into N subintervals.
+       The ith subinterval contains z and c is near its center. */
+    tmp = ix - 0x3f330000;
+    i = (tmp >> (23 - 4)) % (1 << 4);
+    k = (INT32)tmp >> 23; /* arithmetic shift */
+    iz = ix - (tmp & (0x1ffu << 23));
+    invc = T[i].invc;
+    logc = T[i].logc;
+    z = *(float*)&iz;
+
+    /* log(x) = log1p(z/c-1) + log(c) + k*Ln2 */
+    r = z * invc - 1;
+    y0 = logc + (double)k * Ln2;
+
+    /* Pipelined polynomial evaluation to approximate log1p(r). */
+    r2 = r * r;
+    y = A[1] * r + A[2];
+    y = A[0] * r2 + y;
+    y = y * r2 + (y0 + r);
+    return y;
 }
 
 /*********************************************************************
@@ -725,10 +1295,62 @@ float CDECL logf( float x )
  */
 float CDECL log10f( float x )
 {
-  float ret = unix_funcs->log10f( x );
-  if (x < 0.0) return math_error(_DOMAIN, "log10f", x, 0, ret);
-  if (x == 0.0) return math_error(_SING, "log10f", x, 0, ret);
-  return ret;
+    static const float ivln10hi = 4.3432617188e-01,
+        ivln10lo = -3.1689971365e-05,
+        log10_2hi = 3.0102920532e-01,
+        log10_2lo = 7.9034151668e-07,
+        Lg1 = 0xaaaaaa.0p-24,
+        Lg2 = 0xccce13.0p-25,
+        Lg3 = 0x91e9ee.0p-25,
+        Lg4 = 0xf89e26.0p-26;
+
+    union {float f; UINT32 i;} u = {x};
+    float hfsq, f, s, z, R, w, t1, t2, dk, hi, lo;
+    UINT32 ix;
+    int k;
+
+    ix = u.i;
+    k = 0;
+    if (ix < 0x00800000 || ix >> 31) { /* x < 2**-126 */
+        if (ix << 1 == 0)
+            return math_error(_SING, "log10f", x, 0, -1 / (x * x));
+        if ((ix & ~(1u << 31)) > 0x7f800000)
+            return x;
+        if (ix >> 31)
+            return math_error(_DOMAIN, "log10f", x, 0, (x - x) / (x - x));
+        /* subnormal number, scale up x */
+        k -= 25;
+        x *= 0x1p25f;
+        u.f = x;
+        ix = u.i;
+    } else if (ix >= 0x7f800000) {
+        return x;
+    } else if (ix == 0x3f800000)
+        return 0;
+
+    /* reduce x into [sqrt(2)/2, sqrt(2)] */
+    ix += 0x3f800000 - 0x3f3504f3;
+    k += (int)(ix >> 23) - 0x7f;
+    ix = (ix & 0x007fffff) + 0x3f3504f3;
+    u.i = ix;
+    x = u.f;
+
+    f = x - 1.0f;
+    s = f / (2.0f + f);
+    z = s * s;
+    w = z * z;
+    t1= w * (Lg2 + w * Lg4);
+    t2= z * (Lg1 + w * Lg3);
+    R = t2 + t1;
+    hfsq = 0.5f * f * f;
+
+    hi = f - hfsq;
+    u.f = hi;
+    u.i &= 0xfffff000;
+    hi = u.f;
+    lo = f - hi - hfsq + s * (hfsq + R);
+    dk = k;
+    return dk * log10_2lo + (lo + hi) * ivln10lo + lo * ivln10hi + hi * ivln10hi + dk * log10_2hi;
 }
 
 /*********************************************************************
@@ -746,12 +1368,65 @@ float CDECL powf( float x, float y )
 
 /*********************************************************************
  *      sinf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/sinf.c
  */
 float CDECL sinf( float x )
 {
-  float ret = unix_funcs->sinf( x );
-  if (!isfinite(x)) return math_error(_DOMAIN, "sinf", x, 0, ret);
-  return ret;
+    static const double s1pio2 = 1*M_PI_2,
+        s2pio2 = 2*M_PI_2,
+        s3pio2 = 3*M_PI_2,
+        s4pio2 = 4*M_PI_2;
+
+    double y;
+    UINT32 ix;
+    int n, sign;
+
+    ix = *(UINT32*)&x;
+    sign = ix >> 31;
+    ix &= 0x7fffffff;
+
+    if (ix <= 0x3f490fda) { /* |x| ~<= pi/4 */
+        if (ix < 0x39800000) { /* |x| < 2**-12 */
+            /* raise inexact if x!=0 and underflow if subnormal */
+            fp_barrierf(ix < 0x00800000 ? x / 0x1p120f : x + 0x1p120f);
+            return x;
+        }
+        return __sindf(x);
+    }
+    if (ix <= 0x407b53d1) { /* |x| ~<= 5*pi/4 */
+        if (ix <= 0x4016cbe3) { /* |x| ~<= 3pi/4 */
+            if (sign)
+                return -__cosdf(x + s1pio2);
+            else
+                return __cosdf(x - s1pio2);
+        }
+        return __sindf(sign ? -(x + s2pio2) : -(x - s2pio2));
+    }
+    if (ix <= 0x40e231d5) { /* |x| ~<= 9*pi/4 */
+        if (ix <= 0x40afeddf) { /* |x| ~<= 7*pi/4 */
+            if (sign)
+                return __cosdf(x + s3pio2);
+            else
+                return -__cosdf(x - s3pio2);
+        }
+        return __sindf(sign ? x + s4pio2 : x - s4pio2);
+    }
+
+    /* sin(Inf or NaN) is NaN */
+    if (isinf(x))
+        return math_error(_DOMAIN, "sinf", x, 0, x - x);
+    if (ix >= 0x7f800000)
+        return x - x;
+
+    /* general argument reduction needed */
+    n = __rem_pio2f(x, &y);
+    switch (n&3) {
+    case 0: return __sindf(y);
+    case 1: return __cosdf(y);
+    case 2: return __sindf(-y);
+    default: return -__cosdf(y);
+    }
 }
 
 /*********************************************************************
@@ -759,9 +1434,30 @@ float CDECL sinf( float x )
  */
 float CDECL sinhf( float x )
 {
-  float ret = unix_funcs->sinhf( x );
-  if (isnan(x)) return math_error(_DOMAIN, "sinhf", x, 0, ret);
-  return ret;
+    UINT32 ui = *(UINT32*)&x;
+    float t, h, absx;
+
+    h = 0.5;
+    if (ui >> 31)
+        h = -h;
+    /* |x| */
+    ui &= 0x7fffffff;
+    absx = *(float*)&ui;
+
+    /* |x| < log(FLT_MAX) */
+    if (ui < 0x42b17217) {
+        t = __expm1f(absx);
+        if (ui < 0x3f800000) {
+            if (ui < 0x3f800000 - (12 << 23))
+                return x;
+            return h * (2 * t - t * t / (t + 1));
+        }
+        return h * (t + t / (t + 1));
+    }
+
+    /* |x| > logf(FLT_MAX) or nan */
+    t = __expo2f(absx, 2 * h);
+    return t;
 }
 
 static BOOL sqrtf_validate( float *x )
@@ -857,14 +1553,80 @@ float CDECL sqrtf( float x )
 #endif
 }
 
+/* Copied from musl: src/math/__tandf.c */
+static float __tandf(double x, int odd)
+{
+    static const double T[] = {
+        0x15554d3418c99f.0p-54,
+        0x1112fd38999f72.0p-55,
+        0x1b54c91d865afe.0p-57,
+        0x191df3908c33ce.0p-58,
+        0x185dadfcecf44e.0p-61,
+        0x1362b9bf971bcd.0p-59,
+    };
+
+    double z, r, w, s, t, u;
+
+    z = x * x;
+    r = T[4] + z * T[5];
+    t = T[2] + z * T[3];
+    w = z * z;
+    s = z * x;
+    u = T[0] + z * T[1];
+    r = (x + s * u) + (s * w) * (t + w * r);
+    return odd ? -1.0 / r : r;
+}
+
 /*********************************************************************
  *      tanf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/tanf.c
  */
 float CDECL tanf( float x )
 {
-  float ret = unix_funcs->tanf(x);
-  if (!isfinite(x)) return math_error(_DOMAIN, "tanf", x, 0, ret);
-  return ret;
+    static const double t1pio2 = 1*M_PI_2,
+        t2pio2 = 2*M_PI_2,
+        t3pio2 = 3*M_PI_2,
+        t4pio2 = 4*M_PI_2;
+
+    double y;
+    UINT32 ix;
+    unsigned n, sign;
+
+    ix = *(UINT32*)&x;
+    sign = ix >> 31;
+    ix &= 0x7fffffff;
+
+    if (ix <= 0x3f490fda) { /* |x| ~<= pi/4 */
+        if (ix < 0x39800000) { /* |x| < 2**-12 */
+            /* raise inexact if x!=0 and underflow if subnormal */
+            fp_barrierf(ix < 0x00800000 ? x / 0x1p120f : x + 0x1p120f);
+            return x;
+        }
+        return __tandf(x, 0);
+    }
+    if (ix <= 0x407b53d1) { /* |x| ~<= 5*pi/4 */
+        if (ix <= 0x4016cbe3) /* |x| ~<= 3pi/4 */
+            return __tandf((sign ? x + t1pio2 : x - t1pio2), 1);
+        else
+            return __tandf((sign ? x + t2pio2 : x - t2pio2), 0);
+    }
+    if (ix <= 0x40e231d5) { /* |x| ~<= 9*pi/4 */
+        if (ix <= 0x40afeddf) /* |x| ~<= 7*pi/4 */
+            return __tandf((sign ? x + t3pio2 : x - t3pio2), 1);
+        else
+            return __tandf((sign ? x + t4pio2 : x - t4pio2), 0);
+    }
+
+    /* tan(Inf or NaN) is NaN */
+    if (isinf(x))
+        return math_error(_DOMAIN, "tanf", x, 0, x - x);
+    if (ix >= 0x7f800000)
+        return x - x;
+
+    /* argument reduction */
+    n = __rem_pio2f(x, &y);
+    return __tandf(y, n & 1);
 }
 
 /*********************************************************************
@@ -872,9 +1634,43 @@ float CDECL tanf( float x )
  */
 float CDECL tanhf( float x )
 {
-  float ret = unix_funcs->tanhf(x);
-  if (!isfinite(x)) return math_error(_DOMAIN, "tanhf", x, 0, ret);
-  return ret;
+    UINT32 ui = *(UINT32*)&x;
+    int sign;
+    float t;
+
+    /* x = |x| */
+    sign = ui >> 31;
+    ui &= 0x7fffffff;
+    x = *(float*)&ui;
+
+    if (ui > 0x3f0c9f54) {
+        /* |x| > log(3)/2 ~= 0.5493 or nan */
+        if (ui > 0x41200000) {
+#if _MSVCR_VER < 140
+            if (isnan(x))
+                return math_error(_DOMAIN, "tanhf", x, 0, x);
+#endif
+            /* |x| > 10 */
+            fp_barrierf(x + 0x1p120f);
+            t = 1 + 0 / x;
+        } else {
+            t = __expm1f(2 * x);
+            t = 1 - 2 / (t + 2);
+        }
+    } else if (ui > 0x3e82c578) {
+        /* |x| > log(5/3)/2 ~= 0.2554 */
+        t = __expm1f(2 * x);
+        t = t / (t + 2);
+    } else if (ui >= 0x00800000) {
+        /* |x| >= 0x1p-126 */
+        t = __expm1f(-2 * x);
+        t = -t / (t + 2);
+    } else {
+        /* |x| is subnormal */
+        fp_barrierf(x * x);
+        t = x;
+    }
+    return sign ? -t : t;
 }
 
 /*********************************************************************
@@ -937,10 +1733,28 @@ float CDECL floorf( float x )
 
 /*********************************************************************
  *      frexpf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/frexpf.c
  */
-float CDECL frexpf( float x, int *exp )
+float CDECL frexpf( float x, int *e )
 {
-  return unix_funcs->frexpf( x, exp );
+    UINT32 ux = *(UINT32*)&x;
+    int ee = ux >> 23 & 0xff;
+
+    if (!ee) {
+        if (x) {
+            x = frexpf(x * 0x1p64, e);
+            *e -= 64;
+        } else *e = 0;
+        return x;
+    } else if (ee == 0xff) {
+        return x;
+    }
+
+    *e = ee - 0x7e;
+    ux &= 0x807ffffful;
+    ux |= 0x3f000000ul;
+    return *(float*)&ux;
 }
 
 /*********************************************************************
@@ -1343,38 +2157,6 @@ double CDECL atan2( double y, double x )
     }
 }
 
-/* Copied from musl: src/math/scalbn.c */
-static double __scalbn(double x, int n)
-{
-    union {double f; UINT64 i;} u;
-    double y = x;
-
-    if (n > 1023) {
-        y *= 0x1p1023;
-        n -= 1023;
-        if (n > 1023) {
-            y *= 0x1p1023;
-            n -= 1023;
-            if (n > 1023)
-                n = 1023;
-        }
-    } else if (n < -1022) {
-        /* make sure final n < -53 to avoid double
-           rounding in the subnormal range */
-        y *= 0x1p-1022 * 0x1p53;
-        n += 1022 - 53;
-        if (n < -1022) {
-            y *= 0x1p-1022 * 0x1p53;
-            n += 1022 - 53;
-            if (n < -1022)
-                n = -1022;
-        }
-    }
-    u.i = (UINT64)(0x3ff + n) << 52;
-    x = y * u.f;
-    return x;
-}
-
 /* Copied from musl: src/math/rint.c */
 static double __rint(double x)
 {
@@ -1400,212 +2182,6 @@ static double __rint(double x)
     if (y == 0)
         return s ? -0.0 : 0;
     return y;
-}
-
-/* Copied from musl: src/math/__rem_pio2_large.c */
-static int __rem_pio2_large(double *x, double *y, int e0, int nx, int prec)
-{
-    static const int init_jk[] = {3, 4};
-    static const INT32 ipio2[] = {
-        0xA2F983, 0x6E4E44, 0x1529FC, 0x2757D1, 0xF534DD, 0xC0DB62,
-        0x95993C, 0x439041, 0xFE5163, 0xABDEBB, 0xC561B7, 0x246E3A,
-        0x424DD2, 0xE00649, 0x2EEA09, 0xD1921C, 0xFE1DEB, 0x1CB129,
-        0xA73EE8, 0x8235F5, 0x2EBB44, 0x84E99C, 0x7026B4, 0x5F7E41,
-        0x3991D6, 0x398353, 0x39F49C, 0x845F8B, 0xBDF928, 0x3B1FF8,
-        0x97FFDE, 0x05980F, 0xEF2F11, 0x8B5A0A, 0x6D1F6D, 0x367ECF,
-        0x27CB09, 0xB74F46, 0x3F669E, 0x5FEA2D, 0x7527BA, 0xC7EBE5,
-        0xF17B3D, 0x0739F7, 0x8A5292, 0xEA6BFB, 0x5FB11F, 0x8D5D08,
-        0x560330, 0x46FC7B, 0x6BABF0, 0xCFBC20, 0x9AF436, 0x1DA9E3,
-        0x91615E, 0xE61B08, 0x659985, 0x5F14A0, 0x68408D, 0xFFD880,
-        0x4D7327, 0x310606, 0x1556CA, 0x73A8C9, 0x60E27B, 0xC08C6B,
-    };
-    static const double PIo2[] = {
-        1.57079625129699707031e+00,
-        7.54978941586159635335e-08,
-        5.39030252995776476554e-15,
-        3.28200341580791294123e-22,
-        1.27065575308067607349e-29,
-        1.22933308981111328932e-36,
-        2.73370053816464559624e-44,
-        2.16741683877804819444e-51,
-    };
-
-    INT32 jz, jx, jv, jp, jk, carry, n, iq[20], i, j, k, m, q0, ih;
-    double z, fw, f[20], fq[20], q[20];
-
-    /* initialize jk*/
-    jk = init_jk[prec];
-    jp = jk;
-
-    /* determine jx,jv,q0, note that 3>q0 */
-    jx = nx - 1;
-    jv = (e0 - 3) / 24;
-    if(jv < 0) jv = 0;
-    q0 = e0 - 24 * (jv + 1);
-
-    /* set up f[0] to f[jx+jk] where f[jx+jk] = ipio2[jv+jk] */
-    j = jv - jx;
-    m = jx + jk;
-    for (i = 0; i <= m; i++, j++)
-        f[i] = j < 0 ? 0.0 : (double)ipio2[j];
-
-    /* compute q[0],q[1],...q[jk] */
-    for (i = 0; i <= jk; i++) {
-        for (j = 0, fw = 0.0; j <= jx; j++)
-            fw += x[j] * f[jx + i - j];
-        q[i] = fw;
-    }
-
-    jz = jk;
-recompute:
-    /* distill q[] into iq[] reversingly */
-    for (i = 0, j = jz, z = q[jz]; j > 0; i++, j--) {
-        fw = (double)(INT32)(0x1p-24 * z);
-        iq[i] = (INT32)(z - 0x1p24 * fw);
-        z = q[j - 1] + fw;
-    }
-
-    /* compute n */
-    z = __scalbn(z, q0); /* actual value of z */
-    z -= 8.0 * floor(z * 0.125); /* trim off integer >= 8 */
-    n = (INT32)z;
-    z -= (double)n;
-    ih = 0;
-    if (q0 > 0) {  /* need iq[jz-1] to determine n */
-        i = iq[jz - 1] >> (24 - q0);
-        n += i;
-        iq[jz - 1] -= i << (24 - q0);
-        ih = iq[jz - 1] >> (23 - q0);
-    }
-    else if (q0 == 0) ih = iq[jz - 1] >> 23;
-    else if (z >= 0.5) ih = 2;
-
-    if (ih > 0) {  /* q > 0.5 */
-        n += 1;
-        carry = 0;
-        for (i = 0; i < jz; i++) {  /* compute 1-q */
-            j = iq[i];
-            if (carry == 0) {
-                if (j != 0) {
-                    carry = 1;
-                    iq[i] = 0x1000000 - j;
-                }
-            } else
-                iq[i] = 0xffffff - j;
-        }
-        if (q0 > 0) {  /* rare case: chance is 1 in 12 */
-            switch(q0) {
-            case 1:
-                iq[jz - 1] &= 0x7fffff;
-                break;
-            case 2:
-                iq[jz - 1] &= 0x3fffff;
-                break;
-            }
-        }
-        if (ih == 2) {
-            z = 1.0 - z;
-            if (carry != 0)
-                z -= __scalbn(1.0, q0);
-        }
-    }
-
-    /* check if recomputation is needed */
-    if (z == 0.0) {
-        j = 0;
-        for (i = jz - 1; i >= jk; i--) j |= iq[i];
-        if (j == 0) {  /* need recomputation */
-            for (k = 1; iq[jk - k] == 0; k++);  /* k = no. of terms needed */
-
-            for (i = jz + 1; i <= jz + k; i++) {  /* add q[jz+1] to q[jz+k] */
-                f[jx + i] = (double)ipio2[jv + i];
-                for (j = 0, fw = 0.0; j <= jx; j++)
-                    fw += x[j] * f[jx + i - j];
-                q[i] = fw;
-            }
-            jz += k;
-            goto recompute;
-        }
-    }
-
-    /* chop off zero terms */
-    if (z == 0.0) {
-        jz -= 1;
-        q0 -= 24;
-        while (iq[jz] == 0) {
-            jz--;
-            q0 -= 24;
-        }
-    } else { /* break z into 24-bit if necessary */
-        z = __scalbn(z, -q0);
-        if (z >= 0x1p24) {
-            fw = (double)(INT32)(0x1p-24 * z);
-            iq[jz] = (INT32)(z - 0x1p24 * fw);
-            jz += 1;
-            q0 += 24;
-            iq[jz] = (INT32)fw;
-        } else
-            iq[jz] = (INT32)z;
-    }
-
-    /* convert integer "bit" chunk to floating-point value */
-    fw = __scalbn(1.0, q0);
-    for (i = jz; i >= 0; i--) {
-        q[i] = fw * (double)iq[i];
-        fw *= 0x1p-24;
-    }
-
-    /* compute PIo2[0,...,jp]*q[jz,...,0] */
-    for(i = jz; i >= 0; i--) {
-        for (fw = 0.0, k = 0; k <= jp && k <= jz - i; k++)
-            fw += PIo2[k] * q[i + k];
-        fq[jz - i] = fw;
-    }
-
-    /* compress fq[] into y[] */
-    switch(prec) {
-    case 0:
-        fw = 0.0;
-        for (i = jz; i >= 0; i--)
-            fw += fq[i];
-        y[0] = ih == 0 ? fw : -fw;
-        break;
-    case 1:
-    case 2:
-        fw = 0.0;
-        for (i = jz; i >= 0; i--)
-            fw += fq[i];
-        fw = (double)fw;
-        y[0] = ih==0 ? fw : -fw;
-        fw = fq[0] - fw;
-        for (i = 1; i <= jz; i++)
-            fw += fq[i];
-        y[1] = ih == 0 ? fw : -fw;
-        break;
-    case 3:  /* painful */
-        for (i = jz; i > 0; i--) {
-            fw = fq[i - 1] + fq[i];
-            fq[i] += fq[i - 1] - fw;
-            fq[i - 1] = fw;
-        }
-        for (i = jz; i > 1; i--) {
-            fw = fq[i - 1] + fq[i];
-            fq[i] += fq[i - 1] - fw;
-            fq[i - 1] = fw;
-        }
-        for (fw = 0.0, i = jz; i >= 2; i--)
-            fw += fq[i];
-        if (ih == 0) {
-            y[0] = fq[0];
-            y[1] = fq[1];
-            y[2] = fw;
-        } else {
-            y[0] = -fq[0];
-            y[1] = -fq[1];
-            y[2] = -fw;
-        }
-    }
-    return n & 7;
 }
 
 /* Copied from musl: src/math/__rem_pio2.c */
@@ -1839,14 +2415,147 @@ double CDECL cos( double x )
     }
 }
 
+/* Copied from musl: src/math/expm1.c */
+static double CDECL __expm1(double x)
+{
+    static const double o_threshold = 7.09782712893383973096e+02,
+        ln2_hi = 6.93147180369123816490e-01,
+        ln2_lo = 1.90821492927058770002e-10,
+        invln2 = 1.44269504088896338700e+00,
+        Q1 = -3.33333333333331316428e-02,
+        Q2 = 1.58730158725481460165e-03,
+        Q3 = -7.93650757867487942473e-05,
+        Q4 = 4.00821782732936239552e-06,
+        Q5 = -2.01099218183624371326e-07;
+
+    double y, hi, lo, c, t, e, hxs, hfx, r1, twopk;
+    union {double f; UINT64 i;} u = {x};
+    UINT32 hx = u.i >> 32 & 0x7fffffff;
+    int k, sign = u.i >> 63;
+
+    /* filter out huge and non-finite argument */
+    if (hx >= 0x4043687A) { /* if |x|>=56*ln2 */
+        if (isnan(x))
+            return x;
+        if (isinf(x))
+            return sign ? -1 : x;
+        if (sign)
+            return math_error(_UNDERFLOW, "exp", x, 0, -1);
+        if (x > o_threshold)
+            return math_error(_OVERFLOW, "exp", x, 0, x * 0x1p1023);
+    }
+
+    /* argument reduction */
+    if (hx > 0x3fd62e42) { /* if |x| > 0.5 ln2 */
+        if (hx < 0x3FF0A2B2) { /* and |x| < 1.5 ln2 */
+            if (!sign) {
+                hi = x - ln2_hi;
+                lo = ln2_lo;
+                k = 1;
+            } else {
+                hi = x + ln2_hi;
+                lo = -ln2_lo;
+                k = -1;
+            }
+        } else {
+            k = invln2 * x + (sign ? -0.5 : 0.5);
+            t = k;
+            hi = x - t * ln2_hi; /* t*ln2_hi is exact here */
+            lo = t * ln2_lo;
+        }
+        x = hi - lo;
+        c = (hi - x) - lo;
+    } else if (hx < 0x3c900000) { /* |x| < 2**-54, return x */
+        fp_barrier(x + 0x1p120f);
+        if (hx < 0x00100000)
+            fp_barrier((float)x);
+        return x;
+    } else
+        k = 0;
+
+    /* x is now in primary range */
+    hfx = 0.5 * x;
+    hxs = x * hfx;
+    r1 = 1.0 + hxs * (Q1 + hxs * (Q2 + hxs * (Q3 + hxs * (Q4 + hxs * Q5))));
+    t = 3.0 - r1 * hfx;
+    e = hxs * ((r1 - t) / (6.0 - x * t));
+    if (k == 0) /* c is 0 */
+        return x - (x * e - hxs);
+    e = x * (e - c) - c;
+    e -= hxs;
+    /* exp(x) ~ 2^k (x_reduced - e + 1) */
+    if (k == -1)
+        return 0.5 * (x - e) - 0.5;
+    if (k == 1) {
+        if (x < -0.25)
+            return -2.0 * (e - (x + 0.5));
+        return 1.0 + 2.0 * (x - e);
+    }
+    u.i = (UINT64)(0x3ff + k) << 52; /* 2^k */
+    twopk = u.f;
+    if (k < 0 || k > 56) { /* suffice to return exp(x)-1 */
+        y = x - e + 1.0;
+        if (k == 1024)
+            y = y * 2.0 * 0x1p1023;
+        else
+            y = y * twopk;
+        return y - 1.0;
+    }
+    u.i = (UINT64)(0x3ff - k) << 52; /* 2^-k */
+    if (k < 20)
+        y = (x - e + (1 - u.f)) * twopk;
+    else
+        y = (x - (e + u.f) + 1) * twopk;
+    return y;
+}
+
+static double __expo2(double x, double sign)
+{
+    static const int k = 2043;
+    static const double kln2 = 0x1.62066151add8bp+10;
+    double scale;
+
+    *(UINT64*)&scale = (UINT64)(0x3ff + k / 2) << 52;
+    return exp(x - kln2) * (sign * scale) * scale;
+}
+
 /*********************************************************************
  *		cosh (MSVCRT.@)
+ *
+ * Copied from musl: src/math/cosh.c
  */
 double CDECL cosh( double x )
 {
-  double ret = unix_funcs->cosh( x );
-  if (isnan(x)) return math_error(_DOMAIN, "cosh", x, 0, ret);
-  return ret;
+    UINT64 ux = *(UINT64*)&x;
+    UINT32 w;
+    double t;
+
+    /* |x| */
+    ux &= (uint64_t)-1 / 2;
+    x = *(double*)&ux;
+    w = ux >> 32;
+
+    /* |x| < log(2) */
+    if (w < 0x3fe62e42) {
+        if (w < 0x3ff00000 - (26 << 20)) {
+            fp_barrier(x + 0x1p120f);
+            return 1;
+        }
+        t = __expm1(x);
+        return 1 + t * t / (2 * (1 + t));
+    }
+
+    /* |x| < log(DBL_MAX) */
+    if (w < 0x40862e42) {
+        t = exp(x);
+        /* note: if x>log(0x1p26) then the 1/t is not needed */
+        return 0.5 * (t + 1 / t);
+    }
+
+    /* |x| > log(DBL_MAX) or nan */
+    /* note: the result is stored to handle overflow */
+    t = __expo2(x, 1.0);
+    return t;
 }
 
 /*********************************************************************
@@ -1931,13 +2640,375 @@ double CDECL fmod( double x, double y )
 
 /*********************************************************************
  *		log (MSVCRT.@)
+ *
+ * Copied from musl: src/math/log.c src/math/log_data.c
  */
 double CDECL log( double x )
 {
-  double ret = unix_funcs->log( x );
-  if (x < 0.0) return math_error(_DOMAIN, "log", x, 0, ret);
-  if (x == 0.0) return math_error(_SING, "log", x, 0, ret);
-  return ret;
+    static const double Ln2hi = 0x1.62e42fefa3800p-1,
+        Ln2lo = 0x1.ef35793c76730p-45;
+    static const double A[] = {
+        -0x1.0000000000001p-1,
+        0x1.555555551305bp-2,
+        -0x1.fffffffeb459p-3,
+        0x1.999b324f10111p-3,
+        -0x1.55575e506c89fp-3
+    };
+    static const double B[] = {
+        -0x1p-1,
+        0x1.5555555555577p-2,
+        -0x1.ffffffffffdcbp-3,
+        0x1.999999995dd0cp-3,
+        -0x1.55555556745a7p-3,
+        0x1.24924a344de3p-3,
+        -0x1.fffffa4423d65p-4,
+        0x1.c7184282ad6cap-4,
+        -0x1.999eb43b068ffp-4,
+        0x1.78182f7afd085p-4,
+        -0x1.5521375d145cdp-4
+    };
+    static const struct {
+        double invc, logc;
+    } T[] = {
+        {0x1.734f0c3e0de9fp+0, -0x1.7cc7f79e69000p-2},
+        {0x1.713786a2ce91fp+0, -0x1.76feec20d0000p-2},
+        {0x1.6f26008fab5a0p+0, -0x1.713e31351e000p-2},
+        {0x1.6d1a61f138c7dp+0, -0x1.6b85b38287800p-2},
+        {0x1.6b1490bc5b4d1p+0, -0x1.65d5590807800p-2},
+        {0x1.69147332f0cbap+0, -0x1.602d076180000p-2},
+        {0x1.6719f18224223p+0, -0x1.5a8ca86909000p-2},
+        {0x1.6524f99a51ed9p+0, -0x1.54f4356035000p-2},
+        {0x1.63356aa8f24c4p+0, -0x1.4f637c36b4000p-2},
+        {0x1.614b36b9ddc14p+0, -0x1.49da7fda85000p-2},
+        {0x1.5f66452c65c4cp+0, -0x1.445923989a800p-2},
+        {0x1.5d867b5912c4fp+0, -0x1.3edf439b0b800p-2},
+        {0x1.5babccb5b90dep+0, -0x1.396ce448f7000p-2},
+        {0x1.59d61f2d91a78p+0, -0x1.3401e17bda000p-2},
+        {0x1.5805612465687p+0, -0x1.2e9e2ef468000p-2},
+        {0x1.56397cee76bd3p+0, -0x1.2941b3830e000p-2},
+        {0x1.54725e2a77f93p+0, -0x1.23ec58cda8800p-2},
+        {0x1.52aff42064583p+0, -0x1.1e9e129279000p-2},
+        {0x1.50f22dbb2bddfp+0, -0x1.1956d2b48f800p-2},
+        {0x1.4f38f4734ded7p+0, -0x1.141679ab9f800p-2},
+        {0x1.4d843cfde2840p+0, -0x1.0edd094ef9800p-2},
+        {0x1.4bd3ec078a3c8p+0, -0x1.09aa518db1000p-2},
+        {0x1.4a27fc3e0258ap+0, -0x1.047e65263b800p-2},
+        {0x1.4880524d48434p+0, -0x1.feb224586f000p-3},
+        {0x1.46dce1b192d0bp+0, -0x1.f474a7517b000p-3},
+        {0x1.453d9d3391854p+0, -0x1.ea4443d103000p-3},
+        {0x1.43a2744b4845ap+0, -0x1.e020d44e9b000p-3},
+        {0x1.420b54115f8fbp+0, -0x1.d60a22977f000p-3},
+        {0x1.40782da3ef4b1p+0, -0x1.cc00104959000p-3},
+        {0x1.3ee8f5d57fe8fp+0, -0x1.c202956891000p-3},
+        {0x1.3d5d9a00b4ce9p+0, -0x1.b81178d811000p-3},
+        {0x1.3bd60c010c12bp+0, -0x1.ae2c9ccd3d000p-3},
+        {0x1.3a5242b75dab8p+0, -0x1.a45402e129000p-3},
+        {0x1.38d22cd9fd002p+0, -0x1.9a877681df000p-3},
+        {0x1.3755bc5847a1cp+0, -0x1.90c6d69483000p-3},
+        {0x1.35dce49ad36e2p+0, -0x1.87120a645c000p-3},
+        {0x1.34679984dd440p+0, -0x1.7d68fb4143000p-3},
+        {0x1.32f5cceffcb24p+0, -0x1.73cb83c627000p-3},
+        {0x1.3187775a10d49p+0, -0x1.6a39a9b376000p-3},
+        {0x1.301c8373e3990p+0, -0x1.60b3154b7a000p-3},
+        {0x1.2eb4ebb95f841p+0, -0x1.5737d76243000p-3},
+        {0x1.2d50a0219a9d1p+0, -0x1.4dc7b8fc23000p-3},
+        {0x1.2bef9a8b7fd2ap+0, -0x1.4462c51d20000p-3},
+        {0x1.2a91c7a0c1babp+0, -0x1.3b08abc830000p-3},
+        {0x1.293726014b530p+0, -0x1.31b996b490000p-3},
+        {0x1.27dfa5757a1f5p+0, -0x1.2875490a44000p-3},
+        {0x1.268b39b1d3bbfp+0, -0x1.1f3b9f879a000p-3},
+        {0x1.2539d838ff5bdp+0, -0x1.160c8252ca000p-3},
+        {0x1.23eb7aac9083bp+0, -0x1.0ce7f57f72000p-3},
+        {0x1.22a012ba940b6p+0, -0x1.03cdc49fea000p-3},
+        {0x1.2157996cc4132p+0, -0x1.f57bdbc4b8000p-4},
+        {0x1.201201dd2fc9bp+0, -0x1.e370896404000p-4},
+        {0x1.1ecf4494d480bp+0, -0x1.d17983ef94000p-4},
+        {0x1.1d8f5528f6569p+0, -0x1.bf9674ed8a000p-4},
+        {0x1.1c52311577e7cp+0, -0x1.adc79202f6000p-4},
+        {0x1.1b17c74cb26e9p+0, -0x1.9c0c3e7288000p-4},
+        {0x1.19e010c2c1ab6p+0, -0x1.8a646b372c000p-4},
+        {0x1.18ab07bb670bdp+0, -0x1.78d01b3ac0000p-4},
+        {0x1.1778a25efbcb6p+0, -0x1.674f145380000p-4},
+        {0x1.1648d354c31dap+0, -0x1.55e0e6d878000p-4},
+        {0x1.151b990275fddp+0, -0x1.4485cdea1e000p-4},
+        {0x1.13f0ea432d24cp+0, -0x1.333d94d6aa000p-4},
+        {0x1.12c8b7210f9dap+0, -0x1.22079f8c56000p-4},
+        {0x1.11a3028ecb531p+0, -0x1.10e4698622000p-4},
+        {0x1.107fbda8434afp+0, -0x1.ffa6c6ad20000p-5},
+        {0x1.0f5ee0f4e6bb3p+0, -0x1.dda8d4a774000p-5},
+        {0x1.0e4065d2a9fcep+0, -0x1.bbcece4850000p-5},
+        {0x1.0d244632ca521p+0, -0x1.9a1894012c000p-5},
+        {0x1.0c0a77ce2981ap+0, -0x1.788583302c000p-5},
+        {0x1.0af2f83c636d1p+0, -0x1.5715e67d68000p-5},
+        {0x1.09ddb98a01339p+0, -0x1.35c8a49658000p-5},
+        {0x1.08cabaf52e7dfp+0, -0x1.149e364154000p-5},
+        {0x1.07b9f2f4e28fbp+0, -0x1.e72c082eb8000p-6},
+        {0x1.06ab58c358f19p+0, -0x1.a55f152528000p-6},
+        {0x1.059eea5ecf92cp+0, -0x1.63d62cf818000p-6},
+        {0x1.04949cdd12c90p+0, -0x1.228fb8caa0000p-6},
+        {0x1.038c6c6f0ada9p+0, -0x1.c317b20f90000p-7},
+        {0x1.02865137932a9p+0, -0x1.419355daa0000p-7},
+        {0x1.0182427ea7348p+0, -0x1.81203c2ec0000p-8},
+        {0x1.008040614b195p+0, -0x1.0040979240000p-9},
+        {0x1.fe01ff726fa1ap-1, 0x1.feff384900000p-9},
+        {0x1.fa11cc261ea74p-1, 0x1.7dc41353d0000p-7},
+        {0x1.f6310b081992ep-1, 0x1.3cea3c4c28000p-6},
+        {0x1.f25f63ceeadcdp-1, 0x1.b9fc114890000p-6},
+        {0x1.ee9c8039113e7p-1, 0x1.1b0d8ce110000p-5},
+        {0x1.eae8078cbb1abp-1, 0x1.58a5bd001c000p-5},
+        {0x1.e741aa29d0c9bp-1, 0x1.95c8340d88000p-5},
+        {0x1.e3a91830a99b5p-1, 0x1.d276aef578000p-5},
+        {0x1.e01e009609a56p-1, 0x1.07598e598c000p-4},
+        {0x1.dca01e577bb98p-1, 0x1.253f5e30d2000p-4},
+        {0x1.d92f20b7c9103p-1, 0x1.42edd8b380000p-4},
+        {0x1.d5cac66fb5ccep-1, 0x1.606598757c000p-4},
+        {0x1.d272caa5ede9dp-1, 0x1.7da76356a0000p-4},
+        {0x1.cf26e3e6b2ccdp-1, 0x1.9ab434e1c6000p-4},
+        {0x1.cbe6da2a77902p-1, 0x1.b78c7bb0d6000p-4},
+        {0x1.c8b266d37086dp-1, 0x1.d431332e72000p-4},
+        {0x1.c5894bd5d5804p-1, 0x1.f0a3171de6000p-4},
+        {0x1.c26b533bb9f8cp-1, 0x1.067152b914000p-3},
+        {0x1.bf583eeece73fp-1, 0x1.147858292b000p-3},
+        {0x1.bc4fd75db96c1p-1, 0x1.2266ecdca3000p-3},
+        {0x1.b951e0c864a28p-1, 0x1.303d7a6c55000p-3},
+        {0x1.b65e2c5ef3e2cp-1, 0x1.3dfc33c331000p-3},
+        {0x1.b374867c9888bp-1, 0x1.4ba366b7a8000p-3},
+        {0x1.b094b211d304ap-1, 0x1.5933928d1f000p-3},
+        {0x1.adbe885f2ef7ep-1, 0x1.66acd2418f000p-3},
+        {0x1.aaf1d31603da2p-1, 0x1.740f8ec669000p-3},
+        {0x1.a82e63fd358a7p-1, 0x1.815c0f51af000p-3},
+        {0x1.a5740ef09738bp-1, 0x1.8e92954f68000p-3},
+        {0x1.a2c2a90ab4b27p-1, 0x1.9bb3602f84000p-3},
+        {0x1.a01a01393f2d1p-1, 0x1.a8bed1c2c0000p-3},
+        {0x1.9d79f24db3c1bp-1, 0x1.b5b515c01d000p-3},
+        {0x1.9ae2505c7b190p-1, 0x1.c2967ccbcc000p-3},
+        {0x1.9852ef297ce2fp-1, 0x1.cf635d5486000p-3},
+        {0x1.95cbaeea44b75p-1, 0x1.dc1bd3446c000p-3},
+        {0x1.934c69de74838p-1, 0x1.e8c01b8cfe000p-3},
+        {0x1.90d4f2f6752e6p-1, 0x1.f5509c0179000p-3},
+        {0x1.8e6528effd79dp-1, 0x1.00e6c121fb800p-2},
+        {0x1.8bfce9fcc007cp-1, 0x1.071b80e93d000p-2},
+        {0x1.899c0dabec30ep-1, 0x1.0d46b9e867000p-2},
+        {0x1.87427aa2317fbp-1, 0x1.13687334bd000p-2},
+        {0x1.84f00acb39a08p-1, 0x1.1980d67234800p-2},
+        {0x1.82a49e8653e55p-1, 0x1.1f8ffe0cc8000p-2},
+        {0x1.8060195f40260p-1, 0x1.2595fd7636800p-2},
+        {0x1.7e22563e0a329p-1, 0x1.2b9300914a800p-2},
+        {0x1.7beb377dcb5adp-1, 0x1.3187210436000p-2},
+        {0x1.79baa679725c2p-1, 0x1.377266dec1800p-2},
+        {0x1.77907f2170657p-1, 0x1.3d54ffbaf3000p-2},
+        {0x1.756cadbd6130cp-1, 0x1.432eee32fe000p-2}
+    };
+    static const struct {
+        double chi, clo;
+    } T2[] = {
+        {0x1.61000014fb66bp-1, 0x1.e026c91425b3cp-56},
+        {0x1.63000034db495p-1, 0x1.dbfea48005d41p-55},
+        {0x1.650000d94d478p-1, 0x1.e7fa786d6a5b7p-55},
+        {0x1.67000074e6fadp-1, 0x1.1fcea6b54254cp-57},
+        {0x1.68ffffedf0faep-1, -0x1.c7e274c590efdp-56},
+        {0x1.6b0000763c5bcp-1, -0x1.ac16848dcda01p-55},
+        {0x1.6d0001e5cc1f6p-1, 0x1.33f1c9d499311p-55},
+        {0x1.6efffeb05f63ep-1, -0x1.e80041ae22d53p-56},
+        {0x1.710000e86978p-1, 0x1.bff6671097952p-56},
+        {0x1.72ffffc67e912p-1, 0x1.c00e226bd8724p-55},
+        {0x1.74fffdf81116ap-1, -0x1.e02916ef101d2p-57},
+        {0x1.770000f679c9p-1, -0x1.7fc71cd549c74p-57},
+        {0x1.78ffffa7ec835p-1, 0x1.1bec19ef50483p-55},
+        {0x1.7affffe20c2e6p-1, -0x1.07e1729cc6465p-56},
+        {0x1.7cfffed3fc9p-1, -0x1.08072087b8b1cp-55},
+        {0x1.7efffe9261a76p-1, 0x1.dc0286d9df9aep-55},
+        {0x1.81000049ca3e8p-1, 0x1.97fd251e54c33p-55},
+        {0x1.8300017932c8fp-1, -0x1.afee9b630f381p-55},
+        {0x1.850000633739cp-1, 0x1.9bfbf6b6535bcp-55},
+        {0x1.87000204289c6p-1, -0x1.bbf65f3117b75p-55},
+        {0x1.88fffebf57904p-1, -0x1.9006ea23dcb57p-55},
+        {0x1.8b00022bc04dfp-1, -0x1.d00df38e04b0ap-56},
+        {0x1.8cfffe50c1b8ap-1, -0x1.8007146ff9f05p-55},
+        {0x1.8effffc918e43p-1, 0x1.3817bd07a7038p-55},
+        {0x1.910001efa5fc7p-1, 0x1.93e9176dfb403p-55},
+        {0x1.9300013467bb9p-1, 0x1.f804e4b980276p-56},
+        {0x1.94fffe6ee076fp-1, -0x1.f7ef0d9ff622ep-55},
+        {0x1.96fffde3c12d1p-1, -0x1.082aa962638bap-56},
+        {0x1.98ffff4458a0dp-1, -0x1.7801b9164a8efp-55},
+        {0x1.9afffdd982e3ep-1, -0x1.740e08a5a9337p-55},
+        {0x1.9cfffed49fb66p-1, 0x1.fce08c19bep-60},
+        {0x1.9f00020f19c51p-1, -0x1.a3faa27885b0ap-55},
+        {0x1.a10001145b006p-1, 0x1.4ff489958da56p-56},
+        {0x1.a300007bbf6fap-1, 0x1.cbeab8a2b6d18p-55},
+        {0x1.a500010971d79p-1, 0x1.8fecadd78793p-55},
+        {0x1.a70001df52e48p-1, -0x1.f41763dd8abdbp-55},
+        {0x1.a90001c593352p-1, -0x1.ebf0284c27612p-55},
+        {0x1.ab0002a4f3e4bp-1, -0x1.9fd043cff3f5fp-57},
+        {0x1.acfffd7ae1ed1p-1, -0x1.23ee7129070b4p-55},
+        {0x1.aefffee510478p-1, 0x1.a063ee00edea3p-57},
+        {0x1.b0fffdb650d5bp-1, 0x1.a06c8381f0ab9p-58},
+        {0x1.b2ffffeaaca57p-1, -0x1.9011e74233c1dp-56},
+        {0x1.b4fffd995badcp-1, -0x1.9ff1068862a9fp-56},
+        {0x1.b7000249e659cp-1, 0x1.aff45d0864f3ep-55},
+        {0x1.b8ffff987164p-1, 0x1.cfe7796c2c3f9p-56},
+        {0x1.bafffd204cb4fp-1, -0x1.3ff27eef22bc4p-57},
+        {0x1.bcfffd2415c45p-1, -0x1.cffb7ee3bea21p-57},
+        {0x1.beffff86309dfp-1, -0x1.14103972e0b5cp-55},
+        {0x1.c0fffe1b57653p-1, 0x1.bc16494b76a19p-55},
+        {0x1.c2ffff1fa57e3p-1, -0x1.4feef8d30c6edp-57},
+        {0x1.c4fffdcbfe424p-1, -0x1.43f68bcec4775p-55},
+        {0x1.c6fffed54b9f7p-1, 0x1.47ea3f053e0ecp-55},
+        {0x1.c8fffeb998fd5p-1, 0x1.383068df992f1p-56},
+        {0x1.cb0002125219ap-1, -0x1.8fd8e64180e04p-57},
+        {0x1.ccfffdd94469cp-1, 0x1.e7ebe1cc7ea72p-55},
+        {0x1.cefffeafdc476p-1, 0x1.ebe39ad9f88fep-55},
+        {0x1.d1000169af82bp-1, 0x1.57d91a8b95a71p-56},
+        {0x1.d30000d0ff71dp-1, 0x1.9c1906970c7dap-55},
+        {0x1.d4fffea790fc4p-1, -0x1.80e37c558fe0cp-58},
+        {0x1.d70002edc87e5p-1, -0x1.f80d64dc10f44p-56},
+        {0x1.d900021dc82aap-1, -0x1.47c8f94fd5c5cp-56},
+        {0x1.dafffd86b0283p-1, 0x1.c7f1dc521617ep-55},
+        {0x1.dd000296c4739p-1, 0x1.8019eb2ffb153p-55},
+        {0x1.defffe54490f5p-1, 0x1.e00d2c652cc89p-57},
+        {0x1.e0fffcdabf694p-1, -0x1.f8340202d69d2p-56},
+        {0x1.e2fffdb52c8ddp-1, 0x1.b00c1ca1b0864p-56},
+        {0x1.e4ffff24216efp-1, 0x1.2ffa8b094ab51p-56},
+        {0x1.e6fffe88a5e11p-1, -0x1.7f673b1efbe59p-58},
+        {0x1.e9000119eff0dp-1, -0x1.4808d5e0bc801p-55},
+        {0x1.eafffdfa51744p-1, 0x1.80006d54320b5p-56},
+        {0x1.ed0001a127fa1p-1, -0x1.002f860565c92p-58},
+        {0x1.ef00007babcc4p-1, -0x1.540445d35e611p-55},
+        {0x1.f0ffff57a8d02p-1, -0x1.ffb3139ef9105p-59},
+        {0x1.f30001ee58ac7p-1, 0x1.a81acf2731155p-55},
+        {0x1.f4ffff5823494p-1, 0x1.a3f41d4d7c743p-55},
+        {0x1.f6ffffca94c6bp-1, -0x1.202f41c987875p-57},
+        {0x1.f8fffe1f9c441p-1, 0x1.77dd1f477e74bp-56},
+        {0x1.fafffd2e0e37ep-1, -0x1.f01199a7ca331p-57},
+        {0x1.fd0001c77e49ep-1, 0x1.181ee4bceacb1p-56},
+        {0x1.feffff7e0c331p-1, -0x1.e05370170875ap-57},
+        {0x1.00ffff465606ep+0, -0x1.a7ead491c0adap-55},
+        {0x1.02ffff3867a58p+0, -0x1.77f69c3fcb2ep-54},
+        {0x1.04ffffdfc0d17p+0, 0x1.7bffe34cb945bp-54},
+        {0x1.0700003cd4d82p+0, 0x1.20083c0e456cbp-55},
+        {0x1.08ffff9f2cbe8p+0, -0x1.dffdfbe37751ap-57},
+        {0x1.0b000010cda65p+0, -0x1.13f7faee626ebp-54},
+        {0x1.0d00001a4d338p+0, 0x1.07dfa79489ff7p-55},
+        {0x1.0effffadafdfdp+0, -0x1.7040570d66bcp-56},
+        {0x1.110000bbafd96p+0, 0x1.e80d4846d0b62p-55},
+        {0x1.12ffffae5f45dp+0, 0x1.dbffa64fd36efp-54},
+        {0x1.150000dd59ad9p+0, 0x1.a0077701250aep-54},
+        {0x1.170000f21559ap+0, 0x1.dfdf9e2e3deeep-55},
+        {0x1.18ffffc275426p+0, 0x1.10030dc3b7273p-54},
+        {0x1.1b000123d3c59p+0, 0x1.97f7980030188p-54},
+        {0x1.1cffff8299eb7p+0, -0x1.5f932ab9f8c67p-57},
+        {0x1.1effff48ad4p+0, 0x1.37fbf9da75bebp-54},
+        {0x1.210000c8b86a4p+0, 0x1.f806b91fd5b22p-54},
+        {0x1.2300003854303p+0, 0x1.3ffc2eb9fbf33p-54},
+        {0x1.24fffffbcf684p+0, 0x1.601e77e2e2e72p-56},
+        {0x1.26ffff52921d9p+0, 0x1.ffcbb767f0c61p-56},
+        {0x1.2900014933a3cp+0, -0x1.202ca3c02412bp-56},
+        {0x1.2b00014556313p+0, -0x1.2808233f21f02p-54},
+        {0x1.2cfffebfe523bp+0, -0x1.8ff7e384fdcf2p-55},
+        {0x1.2f0000bb8ad96p+0, -0x1.5ff51503041c5p-55},
+        {0x1.30ffffb7ae2afp+0, -0x1.10071885e289dp-55},
+        {0x1.32ffffeac5f7fp+0, -0x1.1ff5d3fb7b715p-54},
+        {0x1.350000ca66756p+0, 0x1.57f82228b82bdp-54},
+        {0x1.3700011fbf721p+0, 0x1.000bac40dd5ccp-55},
+        {0x1.38ffff9592fb9p+0, -0x1.43f9d2db2a751p-54},
+        {0x1.3b00004ddd242p+0, 0x1.57f6b707638e1p-55},
+        {0x1.3cffff5b2c957p+0, 0x1.a023a10bf1231p-56},
+        {0x1.3efffeab0b418p+0, 0x1.87f6d66b152bp-54},
+        {0x1.410001532aff4p+0, 0x1.7f8375f198524p-57},
+        {0x1.4300017478b29p+0, 0x1.301e672dc5143p-55},
+        {0x1.44fffe795b463p+0, 0x1.9ff69b8b2895ap-55},
+        {0x1.46fffe80475ep+0, -0x1.5c0b19bc2f254p-54},
+        {0x1.48fffef6fc1e7p+0, 0x1.b4009f23a2a72p-54},
+        {0x1.4afffe5bea704p+0, -0x1.4ffb7bf0d7d45p-54},
+        {0x1.4d000171027dep+0, -0x1.9c06471dc6a3dp-54},
+        {0x1.4f0000ff03ee2p+0, 0x1.77f890b85531cp-54},
+        {0x1.5100012dc4bd1p+0, 0x1.004657166a436p-57},
+        {0x1.530001605277ap+0, -0x1.6bfcece233209p-54},
+        {0x1.54fffecdb704cp+0, -0x1.902720505a1d7p-55},
+        {0x1.56fffef5f54a9p+0, 0x1.bbfe60ec96412p-54},
+        {0x1.5900017e61012p+0, 0x1.87ec581afef9p-55},
+        {0x1.5b00003c93e92p+0, -0x1.f41080abf0ccp-54},
+        {0x1.5d0001d4919bcp+0, -0x1.8812afb254729p-54},
+        {0x1.5efffe7b87a89p+0, -0x1.47eb780ed6904p-54}
+    };
+
+    double w, z, r, r2, r3, y, invc, logc, kd, hi, lo;
+    UINT64 ix, iz, tmp;
+    UINT32 top;
+    int k, i;
+
+    ix = *(UINT64*)&x;
+    top = ix >> 48;
+    if (ix - 0x3fee000000000000ULL < 0x3090000000000ULL) {
+        double rhi, rlo;
+
+        /* Handle close to 1.0 inputs separately. */
+        /* Fix sign of zero with downward rounding when x==1. */
+        if (ix == 0x3ff0000000000000ULL)
+            return 0;
+        r = x - 1.0;
+        r2 = r * r;
+        r3 = r * r2;
+        y = r3 * (B[1] + r * B[2] + r2 * B[3] + r3 * (B[4] + r * B[5] + r2 * B[6] +
+                    r3 * (B[7] + r * B[8] + r2 * B[9] + r3 * B[10])));
+        /* Worst-case error is around 0.507 ULP. */
+        w = r * 0x1p27;
+        rhi = r + w - w;
+        rlo = r - rhi;
+        w = rhi * rhi * B[0]; /* B[0] == -0.5. */
+        hi = r + w;
+        lo = r - hi + w;
+        lo += B[0] * rlo * (rhi + r);
+        y += lo;
+        y += hi;
+        return y;
+    }
+    if (top - 0x0010 >= 0x7ff0 - 0x0010) {
+        /* x < 0x1p-1022 or inf or nan. */
+        if (ix * 2 == 0)
+            return math_error(_SING, "log", x, 0, (top & 0x8000 ? 1.0 : -1.0) / x);
+        if (ix == 0x7ff0000000000000ULL) /* log(inf) == inf. */
+            return x;
+        if ((top & 0x7ff0) == 0x7ff0 && (ix & 0xfffffffffffffULL))
+            return x;
+        if (top & 0x8000)
+            return math_error(_DOMAIN, "log", x, 0, (x - x) / (x - x));
+        /* x is subnormal, normalize it. */
+        x *= 0x1p52;
+        ix = *(UINT64*)&x;
+        ix -= 52ULL << 52;
+    }
+
+    /* x = 2^k z; where z is in range [OFF,2*OFF) and exact.
+       The range is split into N subintervals.
+       The ith subinterval contains z and c is near its center. */
+    tmp = ix - 0x3fe6000000000000ULL;
+    i = (tmp >> (52 - 7)) % (1 << 7);
+    k = (INT64)tmp >> 52; /* arithmetic shift */
+    iz = ix - (tmp & 0xfffULL << 52);
+    invc = T[i].invc;
+    logc = T[i].logc;
+    z = *(double*)&iz;
+
+    /* log(x) = log1p(z/c-1) + log(c) + k*Ln2. */
+    /* r ~= z/c - 1, |r| < 1/(2*N). */
+    r = (z - T2[i].chi - T2[i].clo) * invc;
+    kd = (double)k;
+
+    /* hi + lo = r + log(c) + k*Ln2. */
+    w = kd * Ln2hi + logc;
+    hi = w + r;
+    lo = w - hi + r + kd * Ln2lo;
+
+    /* log(x) = lo + (log1p(r) - r) + hi. */
+    r2 = r * r; /* rounding error: 0x1p-54/N^2. */
+    /* Worst case error if |y| > 0x1p-5:
+       0.5 + 4.13/N + abs-poly-error*2^57 ULP (+ 0.002 ULP without fma)
+       Worst case error if |y| > 0x1p-4:
+       0.5 + 2.06/N + abs-poly-error*2^56 ULP (+ 0.001 ULP without fma). */
+    y = lo + r2 * A[0] +
+        r * r2 * (A[1] + r * A[2] + r2 * (A[3] + r * A[4])) + hi;
+    return y;
 }
 
 /*********************************************************************
@@ -1945,10 +3016,82 @@ double CDECL log( double x )
  */
 double CDECL log10( double x )
 {
-  double ret = unix_funcs->log10( x );
-  if (x < 0.0) return math_error(_DOMAIN, "log10", x, 0, ret);
-  if (x == 0.0) return math_error(_SING, "log10", x, 0, ret);
-  return ret;
+    static const double ivln10hi = 4.34294481878168880939e-01,
+        ivln10lo = 2.50829467116452752298e-11,
+        log10_2hi = 3.01029995663611771306e-01,
+        log10_2lo = 3.69423907715893078616e-13,
+        Lg1 = 6.666666666666735130e-01,
+        Lg2 = 3.999999999940941908e-01,
+        Lg3 = 2.857142874366239149e-01,
+        Lg4 = 2.222219843214978396e-01,
+        Lg5 = 1.818357216161805012e-01,
+        Lg6 = 1.531383769920937332e-01,
+        Lg7 = 1.479819860511658591e-01;
+
+    union {double f; UINT64 i;} u = {x};
+    double hfsq, f, s, z, R, w, t1, t2, dk, y, hi, lo, val_hi, val_lo;
+    UINT32 hx;
+    int k;
+
+    hx = u.i >> 32;
+    k = 0;
+    if (hx < 0x00100000 || hx >> 31) {
+        if (u.i << 1 == 0)
+            return math_error(_SING, "log10", x, 0, -1 / (x * x));
+        if ((u.i & ~(1ULL << 63)) > 0x7ff0000000000000ULL)
+            return x;
+        if (hx >> 31)
+            return math_error(_DOMAIN, "log10", x, 0, (x - x) / (x - x));
+        /* subnormal number, scale x up */
+        k -= 54;
+        x *= 0x1p54;
+        u.f = x;
+        hx = u.i >> 32;
+    } else if (hx >= 0x7ff00000) {
+        return x;
+    } else if (hx == 0x3ff00000 && u.i<<32 == 0)
+        return 0;
+
+    /* reduce x into [sqrt(2)/2, sqrt(2)] */
+    hx += 0x3ff00000 - 0x3fe6a09e;
+    k += (int)(hx >> 20) - 0x3ff;
+    hx = (hx & 0x000fffff) + 0x3fe6a09e;
+    u.i = (UINT64)hx << 32 | (u.i & 0xffffffff);
+    x = u.f;
+
+    f = x - 1.0;
+    hfsq = 0.5 * f * f;
+    s = f / (2.0 + f);
+    z = s * s;
+    w = z * z;
+    t1 = w * (Lg2 + w * (Lg4 + w * Lg6));
+    t2 = z * (Lg1 + w * (Lg3 + w * (Lg5 + w * Lg7)));
+    R = t2 + t1;
+
+    /* hi+lo = f - hfsq + s*(hfsq+R) ~ log(1+f) */
+    hi = f - hfsq;
+    u.f = hi;
+    u.i &= (UINT64)-1 << 32;
+    hi = u.f;
+    lo = f - hi - hfsq + s * (hfsq + R);
+
+    /* val_hi+val_lo ~ log10(1+f) + k*log10(2) */
+    val_hi = hi * ivln10hi;
+    dk = k;
+    y = dk * log10_2hi;
+    val_lo = dk * log10_2lo + (lo + hi) * ivln10lo + lo * ivln10hi;
+
+    /*
+     * Extra precision in for adding y is not strictly needed
+     * since there is no very large cancellation near x = sqrt(2) or
+     * x = 1/sqrt(2), but we do it anyway since it costs little on CPUs
+     * with some parallelism and it reduces the error for many args.
+     */
+    w = y + val_hi;
+    val_lo += (y - w) + val_hi;
+    val_hi = w;
+
+    return val_lo + val_hi;
 }
 
 /*********************************************************************
@@ -2013,9 +3156,33 @@ double CDECL sin( double x )
  */
 double CDECL sinh( double x )
 {
-  double ret = unix_funcs->sinh( x );
-  if (isnan(x)) return math_error(_DOMAIN, "sinh", x, 0, ret);
-  return ret;
+    UINT64 ux = *(UINT64*)&x;
+    UINT32 w;
+    double t, h, absx;
+
+    h = 0.5;
+    if (ux >> 63)
+        h = -h;
+    /* |x| */
+    ux &= (UINT64)-1 / 2;
+    absx = *(double*)&ux;
+    w = ux >> 32;
+
+    /* |x| < log(DBL_MAX) */
+    if (w < 0x40862e42) {
+        t = __expm1(absx);
+        if (w < 0x3ff00000) {
+            if (w < 0x3ff00000 - (26 << 20))
+                return x;
+            return h * (2 * t - t * t / (t + 1));
+        }
+        return h * (t + t / (t + 1));
+    }
+
+    /* |x| > log(DBL_MAX) or nan */
+    /* note: the result is stored to handle overflow */
+    t = __expo2(absx, 2 * h);
+    return t;
 }
 
 static BOOL sqrt_validate( double *x, BOOL update_sw )
@@ -2179,14 +3346,95 @@ double CDECL sqrt( double x )
 #endif
 }
 
+/* Copied from musl: src/math/__tan.c */
+static double __tan(double x, double y, int odd)
+{
+    static const double T[] = {
+        3.33333333333334091986e-01,
+        1.33333333333201242699e-01,
+        5.39682539762260521377e-02,
+        2.18694882948595424599e-02,
+        8.86323982359930005737e-03,
+        3.59207910759131235356e-03,
+        1.45620945432529025516e-03,
+        5.88041240820264096874e-04,
+        2.46463134818469906812e-04,
+        7.81794442939557092300e-05,
+        7.14072491382608190305e-05,
+        -1.85586374855275456654e-05,
+        2.59073051863633712884e-05,
+    };
+    static const double pio4 = 7.85398163397448278999e-01;
+    static const double pio4lo = 3.06161699786838301793e-17;
+
+    double z, r, v, w, s, a, w0, a0;
+    UINT32 hx;
+    int big, sign;
+
+    hx = *(ULONGLONG*)&x >> 32;
+    big = (hx & 0x7fffffff) >= 0x3FE59428; /* |x| >= 0.6744 */
+    if (big) {
+        sign = hx >> 31;
+        if (sign) {
+            x = -x;
+            y = -y;
+        }
+        x = (pio4 - x) + (pio4lo - y);
+        y = 0.0;
+    }
+    z = x * x;
+    w = z * z;
+    r = T[1] + w * (T[3] + w * (T[5] + w * (T[7] + w * (T[9] + w * T[11]))));
+    v = z * (T[2] + w * (T[4] + w * (T[6] + w * (T[8] + w * (T[10] + w * T[12])))));
+    s = z * x;
+    r = y + z * (s * (r + v) + y) + s * T[0];
+    w = x + r;
+    if (big) {
+        s = 1 - 2 * odd;
+        v = s - 2.0 * (x + (r - w * w / (w + s)));
+        return sign ? -v : v;
+    }
+    if (!odd)
+        return w;
+    /* -1.0/(x+r) has up to 2ulp error, so compute it accurately */
+    w0 = w;
+    *(LONGLONG*)&w0 = *(LONGLONG*)&w0 & 0xffffffff00000000ULL;
+    v = r - (w0 - x);       /* w0+v = r+x */
+    a0 = a = -1.0 / w;
+    *(LONGLONG*)&a0 = *(LONGLONG*)&a0 & 0xffffffff00000000ULL;
+    return a0 + a * (1.0 + a0 * w0 + a0 * v);
+}
+
 /*********************************************************************
  *		tan (MSVCRT.@)
+ *
+ * Copied from musl: src/math/tan.c
  */
 double CDECL tan( double x )
 {
-  double ret = unix_funcs->tan(x);
-  if (!isfinite(x)) return math_error(_DOMAIN, "tan", x, 0, ret);
-  return ret;
+    double y[2];
+    UINT32 ix;
+    unsigned n;
+
+    ix = *(ULONGLONG*)&x >> 32;
+    ix &= 0x7fffffff;
+
+    if (ix <= 0x3fe921fb) { /* |x| ~< pi/4 */
+        if (ix < 0x3e400000) { /* |x| < 2**-27 */
+            /* raise inexact if x!=0 and underflow if subnormal */
+            fp_barrier(ix < 0x00100000 ? x / 0x1p120f : x + 0x1p120f);
+            return x;
+        }
+        return __tan(x, 0.0, 0);
+    }
+
+    if (isinf(x))
+        return math_error(_DOMAIN, "tan", x, 0, x - x);
+    if (ix >= 0x7ff00000)
+        return x - x;
+
+    n = __rem_pio2(x, y);
+    return __tan(y[0], y[1], n & 1);
 }
 
 /*********************************************************************
@@ -2194,9 +3442,47 @@ double CDECL tan( double x )
  */
 double CDECL tanh( double x )
 {
-  double ret = unix_funcs->tanh(x);
-  if (isnan(x)) return math_error(_DOMAIN, "tanh", x, 0, ret);
-  return ret;
+    UINT64 ui = *(UINT64*)&x;
+    UINT32 w;
+    int sign;
+    double t;
+
+    /* x = |x| */
+    sign = ui >> 63;
+    ui &= (UINT64)-1 / 2;
+    x = *(double*)&ui;
+    w = ui >> 32;
+
+    if (w > 0x3fe193ea) {
+        /* |x| > log(3)/2 ~= 0.5493 or nan */
+        if (w > 0x40340000) {
+#if _MSVCR_VER < 140
+            if (isnan(x))
+                return math_error(_DOMAIN, "tanh", x, 0, x);
+#endif
+            /* |x| > 20 or nan */
+            /* note: this branch avoids raising overflow */
+            fp_barrier(x + 0x1p120f);
+            t = 1 - 0 / x;
+        } else {
+            t = __expm1(2 * x);
+            t = 1 - 2 / (t + 2);
+        }
+    } else if (w > 0x3fd058ae) {
+        /* |x| > log(5/3)/2 ~= 0.2554 */
+        t = __expm1(2 * x);
+        t = t / (t + 2);
+    } else if (w >= 0x00100000) {
+        /* |x| >= 0x1p-1022, up to 2ulp error in [0.1,0.2554] */
+        t = __expm1(-2 * x);
+        t = -t / (t + 2);
+    } else {
+        /* |x| is subnormal */
+        /* note: the branch above would not raise underflow in [0x1p-1023,0x1p-1022) */
+        fp_barrier((float)x);
+        t = x;
+    }
+    return sign ? -t : t;
 }
 
 
@@ -2468,22 +3754,105 @@ double CDECL _logb(double x)
     return __ilogb(x);
 }
 
+static void sq(double *hi, double *lo, double x)
+{
+    double xh, xl, xc;
+
+    xc = x * (0x1p27 + 1);
+    xh = x - xc + xc;
+    xl = x - xh;
+    *hi = x * x;
+    *lo = xh * xh - *hi + 2 * xh * xl + xl * xl;
+}
+
 /*********************************************************************
  *		_hypot (MSVCRT.@)
+ *
+ * Copied from musl: src/math/hypot.c
  */
 double CDECL _hypot(double x, double y)
 {
-  /* FIXME: errno handling */
-  return unix_funcs->hypot( x, y );
+    UINT64 ux = *(UINT64*)&x, uy = *(UINT64*)&y, ut;
+    double hx, lx, hy, ly, z;
+    int ex, ey;
+
+    /* arrange |x| >= |y| */
+    ux &= -1ULL >> 1;
+    uy &= -1ULL >> 1;
+    if (ux < uy) {
+        ut = ux;
+        ux = uy;
+        uy = ut;
+    }
+
+    /* special cases */
+    ex = ux >> 52;
+    ey = uy >> 52;
+    x = *(double*)&ux;
+    y = *(double*)&uy;
+    /* note: hypot(inf,nan) == inf */
+    if (ey == 0x7ff)
+        return y;
+    if (ex == 0x7ff || uy == 0)
+        return x;
+    /* note: hypot(x,y) ~= x + y*y/x/2 with inexact for small y/x */
+    /* 64 difference is enough for ld80 double_t */
+    if (ex - ey > 64)
+        return x + y;
+
+    /* precise sqrt argument in nearest rounding mode without overflow */
+    /* xh*xh must not overflow and xl*xl must not underflow in sq */
+    z = 1;
+    if (ex > 0x3ff + 510) {
+        z = 0x1p700;
+        x *= 0x1p-700;
+        y *= 0x1p-700;
+    } else if (ey < 0x3ff - 450) {
+        z = 0x1p-700;
+        x *= 0x1p700;
+        y *= 0x1p700;
+    }
+    sq(&hx, &lx, x);
+    sq(&hy, &ly, y);
+    return z * sqrt(ly + lx + hy + hx);
 }
 
 /*********************************************************************
  *      _hypotf (MSVCRT.@)
+ *
+ * Copied from musl: src/math/hypotf.c
  */
 float CDECL _hypotf(float x, float y)
 {
-  /* FIXME: errno handling */
-  return unix_funcs->hypotf( x, y );
+    UINT32 ux = *(UINT32*)&x, uy = *(UINT32*)&y, ut;
+    float z;
+
+    ux &= -1U >> 1;
+    uy &= -1U >> 1;
+    if (ux < uy) {
+        ut = ux;
+        ux = uy;
+        uy = ut;
+    }
+
+    x = *(float*)&ux;
+    y = *(float*)&uy;
+    if (uy == 0xff << 23)
+        return y;
+    if (ux >= 0xff << 23 || uy == 0 || ux - uy >= 25 << 23)
+        return x + y;
+
+    z = 1;
+    if (ux >= (0x7f + 60) << 23) {
+        z = 0x1p90f;
+        x *= 0x1p-90f;
+        y *= 0x1p-90f;
+    } else if (uy < (0x7f - 60) << 23) {
+        z = 0x1p-90f;
+        x *= 0x1p90f;
+        y *= 0x1p90f;
+    }
+    return z * sqrtf((double)x * x + (double)y * y);
 }
 
 /*********************************************************************
@@ -2546,14 +3915,214 @@ double CDECL floor( double x )
 
 /*********************************************************************
  *      fma (MSVCRT.@)
+ *
+ * Copied from musl: src/math/fma.c
  */
+struct fma_num
+{
+    UINT64 m;
+    int e;
+    int sign;
+};
+
+static struct fma_num normalize(double x)
+{
+    UINT64 ix = *(UINT64*)&x;
+    int e = ix >> 52;
+    int sign = e & 0x800;
+    struct fma_num ret;
+
+    e &= 0x7ff;
+    if (!e) {
+        x *= 0x1p63;
+        ix = *(UINT64*)&x;
+        e = ix >> 52 & 0x7ff;
+        e = e ? e - 63 : 0x800;
+    }
+    ix &= (1ull << 52) - 1;
+    ix |= 1ull << 52;
+    ix <<= 1;
+    e -= 0x3ff + 52 + 1;
+
+    ret.m = ix;
+    ret.e = e;
+    ret.sign = sign;
+    return ret;
+}
+
+static void mul(UINT64 *hi, UINT64 *lo, UINT64 x, UINT64 y)
+{
+    UINT64 t1, t2, t3;
+    UINT64 xlo = (UINT32)x, xhi = x >> 32;
+    UINT64 ylo = (UINT32)y, yhi = y >> 32;
+
+    t1 = xlo * ylo;
+    t2 = xlo * yhi + xhi * ylo;
+    t3 = xhi * yhi;
+    *lo = t1 + (t2 << 32);
+    *hi = t3 + (t2 >> 32) + (t1 > *lo);
+}
+
 double CDECL fma( double x, double y, double z )
 {
-  double w = unix_funcs->fma(x, y, z);
-  if ((isinf(x) && y == 0) || (x == 0 && isinf(y))) *_errno() = EDOM;
-  else if (isinf(x) && isinf(z) && x != z) *_errno() = EDOM;
-  else if (isinf(y) && isinf(z) && y != z) *_errno() = EDOM;
-  return w;
+    int e, d, sign, samesign, nonzero;
+    UINT64 rhi, rlo, zhi, zlo;
+    struct fma_num nx, ny, nz;
+    double r;
+    INT64 i;
+
+    /* normalize so top 10bits and last bit are 0 */
+    nx = normalize(x);
+    ny = normalize(y);
+    nz = normalize(z);
+
+    if (nx.e >= 0x7ff - 0x3ff - 52 - 1 || ny.e >= 0x7ff - 0x3ff - 52 - 1) {
+        r = x * y + z;
+        if (!isnan(x) && !isnan(y) && !isnan(z) && isnan(r)) *_errno() = EDOM;
+        return r;
+    }
+    if (nz.e >= 0x7ff - 0x3ff - 52 - 1) {
+        if (nz.e > 0x7ff - 0x3ff - 52 - 1) {/* z==0 */
+            r = x * y + z;
+            if (!isnan(x) && !isnan(y) && isnan(r)) *_errno() = EDOM;
+            return r;
+        }
+        return z;
+    }
+
+    /* mul: r = x*y */
+    mul(&rhi, &rlo, nx.m, ny.m);
+    /* either top 20 or 21 bits of rhi and last 2 bits of rlo are 0 */
+
+    /* align exponents */
+    e = nx.e + ny.e;
+    d = nz.e - e;
+    /* shift bits z<<=kz, r>>=kr, so kz+kr == d, set e = e+kr (== ez-kz) */
+    if (d > 0) {
+        if (d < 64) {
+            zlo = nz.m << d;
+            zhi = nz.m >> (64 - d);
+        } else {
+            zlo = 0;
+            zhi = nz.m;
+            e = nz.e - 64;
+            d -= 64;
+            if (d < 64 && d) {
+                rlo = rhi << (64 - d) | rlo >> d | !!(rlo << (64 - d));
+                rhi = rhi >> d;
+            } else if (d) {
+                rlo = 1;
+                rhi = 0;
+            }
+        }
+    } else {
+        zhi = 0;
+        d = -d;
+        if (d == 0) {
+            zlo = nz.m;
+        } else if (d < 64) {
+            zlo = nz.m >> d | !!(nz.m << (64 - d));
+        } else {
+            zlo = 1;
+        }
+    }
+
+    /* add */
+    sign = nx.sign ^ ny.sign;
+    samesign = !(sign ^ nz.sign);
+    nonzero = 1;
+    if (samesign) {
+        /* r += z */
+        rlo += zlo;
+        rhi += zhi + (rlo < zlo);
+    } else {
+        /* r -= z */
+        UINT64 t = rlo;
+        rlo -= zlo;
+        rhi = rhi - zhi - (t < rlo);
+        if (rhi >> 63) {
+            rlo = -rlo;
+            rhi = -rhi - !!rlo;
+            sign = !sign;
+        }
+        nonzero = !!rhi;
+    }
+
+    /* set rhi to top 63bit of the result (last bit is sticky) */
+    if (nonzero) {
+        e += 64;
+        if (rhi >> 32) {
+            BitScanReverse((DWORD*)&d, rhi >> 32);
+            d = 31 - d - 1;
+        } else {
+            BitScanReverse((DWORD*)&d, rhi);
+            d = 63 - d - 1;
+        }
+        /* note: d > 0 */
+        rhi = rhi << d | rlo >> (64 - d) | !!(rlo << d);
+    } else if (rlo) {
+        if (rlo >> 32) {
+            BitScanReverse((DWORD*)&d, rlo >> 32);
+            d = 31 - d - 1;
+        } else {
+            BitScanReverse((DWORD*)&d, rlo);
+            d = 63 - d - 1;
+        }
+        if (d < 0)
+            rhi = rlo >> 1 | (rlo & 1);
+        else
+            rhi = rlo << d;
+    } else {
+        /* exact +-0 */
+        return x * y + z;
+    }
+    e -= d;
+
+    /* convert to double */
+    i = rhi; /* i is in [1<<62,(1<<63)-1] */
+    if (sign)
+        i = -i;
+    r = i; /* |r| is in [0x1p62,0x1p63] */
+
+    if (e < -1022 - 62) {
+        /* result is subnormal before rounding */
+        if (e == -1022 - 63) {
+            double c = 0x1p63;
+            if (sign)
+                c = -c;
+            if (r == c) {
+                /* min normal after rounding, underflow depends
+                   on arch behaviour which can be imitated by
+                   a double to float conversion */
+                float fltmin = 0x0.ffffff8p-63 * FLT_MIN * r;
+                return DBL_MIN / FLT_MIN * fltmin;
+            }
+            /* one bit is lost when scaled, add another top bit to
+               only round once at conversion if it is inexact */
+            if (rhi << 53) {
+                double tiny;
+
+                i = rhi >> 1 | (rhi & 1) | 1ull << 62;
+                if (sign)
+                    i = -i;
+                r = i;
+                r = 2 * r - c; /* remove top bit */
+
+                /* raise underflow portably, such that it
+                   cannot be optimized away */
+                tiny = DBL_MIN / FLT_MIN * r;
+                r += (double)(tiny * tiny) * (r - r);
+            }
+        } else {
+            /* only round once when scaled */
+            d = 10;
+            i = (rhi >> d | !!(rhi << (64 - d))) << d;
+            if (sign)
+                i = -i;
+            r = i;
+        }
+    }
+    return __scalbn(r, e);
 }
 
 /*********************************************************************
@@ -2582,10 +4151,28 @@ double CDECL fabs( double x )
 
 /*********************************************************************
  *		frexp (MSVCRT.@)
+ *
+ * Copied from musl: src/math/frexp.c
  */
-double CDECL frexp( double x, int *exp )
+double CDECL frexp( double x, int *e )
 {
-  return unix_funcs->frexp( x, exp );
+    UINT64 ux = *(UINT64*)&x;
+    int ee = ux >> 52 & 0x7ff;
+
+    if (!ee) {
+        if (x) {
+            x = frexp(x * 0x1p64, e);
+            *e -= 64;
+        } else *e = 0;
+        return x;
+    } else if (ee == 0x7ff) {
+        return x;
+    }
+
+    *e = ee - 0x3fe;
+    ux &= 0x800fffffffffffffull;
+    ux |= 0x3fe0000000000000ull;
+    return *(double*)&ux;
 }
 
 /*********************************************************************
@@ -2760,14 +4347,12 @@ int * CDECL __fpecode(void)
  */
 double CDECL ldexp(double num, int exp)
 {
-  double z = unix_funcs->ldexp(num,exp);
+  double z = __scalbn(num, exp);
 
   if (isfinite(num) && !isfinite(z))
     return math_error(_OVERFLOW, "ldexp", num, exp, z);
   if (num && isfinite(num) && !z)
     return math_error(_UNDERFLOW, "ldexp", num, exp, z);
-  if (z == 0 && signbit(z))
-    z = 0.0; /* Convert -0 -> +0 */
   return z;
 }
 
@@ -5424,9 +7009,7 @@ float CDECL exp2f(float x)
  */
 double CDECL expm1(double x)
 {
-    double ret = unix_funcs->expm1( x );
-    if (isfinite(x) && !isfinite(ret)) *_errno() = ERANGE;
-    return ret;
+    return __expm1(x);
 }
 
 /*********************************************************************
@@ -5434,49 +7017,489 @@ double CDECL expm1(double x)
  */
 float CDECL expm1f(float x)
 {
-    float ret = unix_funcs->expm1f( x );
-    if (isfinite(x) && !isfinite(ret)) *_errno() = ERANGE;
-    return ret;
+    return __expm1f(x);
 }
 
 /*********************************************************************
  *      log1p (MSVCR120.@)
+ *
+ * Copied from musl: src/math/log1p.c
  */
 double CDECL log1p(double x)
 {
-    if (x < -1) *_errno() = EDOM;
-    else if (x == -1) *_errno() = ERANGE;
-    return unix_funcs->log1p( x );
+    static const double ln2_hi = 6.93147180369123816490e-01,
+        ln2_lo = 1.90821492927058770002e-10,
+        Lg1 = 6.666666666666735130e-01,
+        Lg2 = 3.999999999940941908e-01,
+        Lg3 = 2.857142874366239149e-01,
+        Lg4 = 2.222219843214978396e-01,
+        Lg5 = 1.818357216161805012e-01,
+        Lg6 = 1.531383769920937332e-01,
+        Lg7 = 1.479819860511658591e-01;
+
+    union {double f; UINT64 i;} u = {x};
+    double hfsq, f, c, s, z, R, w, t1, t2, dk;
+    UINT32 hx, hu;
+    int k;
+
+    hx = u.i >> 32;
+    k = 1;
+    if (hx < 0x3fda827a || hx >> 31) { /* 1+x < sqrt(2)+ */
+        if (hx >= 0xbff00000) { /* x <= -1.0 */
+            if (x == -1) {
+                *_errno() = ERANGE;
+                return x / 0.0; /* og1p(-1) = -inf */
+            }
+            *_errno() = EDOM;
+            return (x-x) / 0.0; /* log1p(x<-1) = NaN */
+        }
+        if (hx << 1 < 0x3ca00000 << 1) { /* |x| < 2**-53 */
+            fp_barrier(x + 0x1p120f);
+            /* underflow if subnormal */
+            if ((hx & 0x7ff00000) == 0)
+                fp_barrierf(x);
+            return x;
+        }
+        if (hx <= 0xbfd2bec4) { /* sqrt(2)/2- <= 1+x < sqrt(2)+ */
+            k = 0;
+            c = 0;
+            f = x;
+        }
+    } else if (hx >= 0x7ff00000)
+        return x;
+    if (k) {
+        u.f = 1 + x;
+        hu = u.i >> 32;
+        hu += 0x3ff00000 - 0x3fe6a09e;
+        k = (int)(hu >> 20) - 0x3ff;
+        /* correction term ~ log(1+x)-log(u), avoid underflow in c/u */
+        if (k < 54) {
+            c = k >= 2 ? 1 - (u.f - x) : x - (u.f - 1);
+            c /= u.f;
+        } else
+            c = 0;
+        /* reduce u into [sqrt(2)/2, sqrt(2)] */
+        hu = (hu & 0x000fffff) + 0x3fe6a09e;
+        u.i = (UINT64)hu << 32 | (u.i & 0xffffffff);
+        f = u.f - 1;
+    }
+    hfsq = 0.5 * f * f;
+    s = f / (2.0 + f);
+    z = s * s;
+    w = z * z;
+    t1 = w * (Lg2 + w * (Lg4 + w * Lg6));
+    t2 = z * (Lg1 + w * (Lg3 + w * (Lg5 + w * Lg7)));
+    R = t2 + t1;
+    dk = k;
+    return s * (hfsq + R) + (dk * ln2_lo + c) - hfsq + f + dk * ln2_hi;
 }
 
 /*********************************************************************
  *      log1pf (MSVCR120.@)
+ *
+ * Copied from musl: src/math/log1pf.c
  */
 float CDECL log1pf(float x)
 {
-    if (x < -1) *_errno() = EDOM;
-    else if (x == -1) *_errno() = ERANGE;
-    return unix_funcs->log1pf( x );
+    static const float ln2_hi = 6.9313812256e-01,
+        ln2_lo = 9.0580006145e-06,
+        Lg1 = 0xaaaaaa.0p-24,
+        Lg2 = 0xccce13.0p-25,
+        Lg3 = 0x91e9ee.0p-25,
+        Lg4 = 0xf89e26.0p-26;
+
+    union {float f; UINT32 i;} u = {x};
+    float hfsq, f, c, s, z, R, w, t1, t2, dk;
+    UINT32 ix, iu;
+    int k;
+
+    ix = u.i;
+    k = 1;
+    if (ix < 0x3ed413d0 || ix >> 31) { /* 1+x < sqrt(2)+ */
+        if (ix >= 0xbf800000) { /* x <= -1.0 */
+            if (x == -1) {
+                *_errno() = ERANGE;
+                return x / 0.0f; /* log1p(-1)=+inf */
+            }
+            *_errno() = EDOM;
+            return (x - x) / 0.0f; /* log1p(x<-1)=NaN */
+        }
+        if (ix<<1 < 0x33800000<<1) { /* |x| < 2**-24 */
+            /* underflow if subnormal */
+            if ((ix & 0x7f800000) == 0)
+                fp_barrierf(x * x);
+            return x;
+        }
+        if (ix <= 0xbe95f619) { /* sqrt(2)/2- <= 1+x < sqrt(2)+ */
+            k = 0;
+            c = 0;
+            f = x;
+        }
+    } else if (ix >= 0x7f800000)
+        return x;
+    if (k) {
+        u.f = 1 + x;
+        iu = u.i;
+        iu += 0x3f800000 - 0x3f3504f3;
+        k = (int)(iu >> 23) - 0x7f;
+        /* correction term ~ log(1+x)-log(u), avoid underflow in c/u */
+        if (k < 25) {
+            c = k >= 2 ? 1 - (u.f - x) : x - (u.f - 1);
+            c /= u.f;
+        } else
+            c = 0;
+        /* reduce u into [sqrt(2)/2, sqrt(2)] */
+        iu = (iu & 0x007fffff) + 0x3f3504f3;
+        u.i = iu;
+        f = u.f - 1;
+    }
+    s = f / (2.0f + f);
+    z = s * s;
+    w = z * z;
+    t1= w * (Lg2 + w * Lg4);
+    t2= z * (Lg1 + w * Lg3);
+    R = t2 + t1;
+    hfsq = 0.5f * f * f;
+    dk = k;
+    return s * (hfsq + R) + (dk * ln2_lo + c) - hfsq + f + dk * ln2_hi;
 }
 
 /*********************************************************************
  *      log2 (MSVCR120.@)
+ *
+ * Copied from musl: src/math/log2.c
  */
 double CDECL log2(double x)
 {
-    if (x < 0) *_errno() = EDOM;
-    else if (x == 0) *_errno() = ERANGE;
-    return unix_funcs->log2( x );
+    static const double invln2hi = 0x1.7154765200000p+0,
+        invln2lo = 0x1.705fc2eefa200p-33;
+    static const double A[] = {
+        -0x1.71547652b8339p-1,
+        0x1.ec709dc3a04bep-2,
+        -0x1.7154764702ffbp-2,
+        0x1.2776c50034c48p-2,
+        -0x1.ec7b328ea92bcp-3,
+        0x1.a6225e117f92ep-3
+    };
+    static const double B[] = {
+        -0x1.71547652b82fep-1,
+        0x1.ec709dc3a03f7p-2,
+        -0x1.71547652b7c3fp-2,
+        0x1.2776c50f05be4p-2,
+        -0x1.ec709dd768fe5p-3,
+        0x1.a61761ec4e736p-3,
+        -0x1.7153fbc64a79bp-3,
+        0x1.484d154f01b4ap-3,
+        -0x1.289e4a72c383cp-3,
+        0x1.0b32f285aee66p-3
+    };
+    static const struct {
+        double invc, logc;
+    } T[] = {
+        {0x1.724286bb1acf8p+0, -0x1.1095feecdb000p-1},
+        {0x1.6e1f766d2cca1p+0, -0x1.08494bd76d000p-1},
+        {0x1.6a13d0e30d48ap+0, -0x1.00143aee8f800p-1},
+        {0x1.661ec32d06c85p+0, -0x1.efec5360b4000p-2},
+        {0x1.623fa951198f8p+0, -0x1.dfdd91ab7e000p-2},
+        {0x1.5e75ba4cf026cp+0, -0x1.cffae0cc79000p-2},
+        {0x1.5ac055a214fb8p+0, -0x1.c043811fda000p-2},
+        {0x1.571ed0f166e1ep+0, -0x1.b0b67323ae000p-2},
+        {0x1.53909590bf835p+0, -0x1.a152f5a2db000p-2},
+        {0x1.5014fed61adddp+0, -0x1.9217f5af86000p-2},
+        {0x1.4cab88e487bd0p+0, -0x1.8304db0719000p-2},
+        {0x1.49539b4334feep+0, -0x1.74189f9a9e000p-2},
+        {0x1.460cbdfafd569p+0, -0x1.6552bb5199000p-2},
+        {0x1.42d664ee4b953p+0, -0x1.56b23a29b1000p-2},
+        {0x1.3fb01111dd8a6p+0, -0x1.483650f5fa000p-2},
+        {0x1.3c995b70c5836p+0, -0x1.39de937f6a000p-2},
+        {0x1.3991c4ab6fd4ap+0, -0x1.2baa1538d6000p-2},
+        {0x1.3698e0ce099b5p+0, -0x1.1d98340ca4000p-2},
+        {0x1.33ae48213e7b2p+0, -0x1.0fa853a40e000p-2},
+        {0x1.30d191985bdb1p+0, -0x1.01d9c32e73000p-2},
+        {0x1.2e025cab271d7p+0, -0x1.e857da2fa6000p-3},
+        {0x1.2b404cf13cd82p+0, -0x1.cd3c8633d8000p-3},
+        {0x1.288b02c7ccb50p+0, -0x1.b26034c14a000p-3},
+        {0x1.25e2263944de5p+0, -0x1.97c1c2f4fe000p-3},
+        {0x1.234563d8615b1p+0, -0x1.7d6023f800000p-3},
+        {0x1.20b46e33eaf38p+0, -0x1.633a71a05e000p-3},
+        {0x1.1e2eefdcda3ddp+0, -0x1.494f5e9570000p-3},
+        {0x1.1bb4a580b3930p+0, -0x1.2f9e424e0a000p-3},
+        {0x1.19453847f2200p+0, -0x1.162595afdc000p-3},
+        {0x1.16e06c0d5d73cp+0, -0x1.f9c9a75bd8000p-4},
+        {0x1.1485f47b7e4c2p+0, -0x1.c7b575bf9c000p-4},
+        {0x1.12358ad0085d1p+0, -0x1.960c60ff48000p-4},
+        {0x1.0fef00f532227p+0, -0x1.64ce247b60000p-4},
+        {0x1.0db2077d03a8fp+0, -0x1.33f78b2014000p-4},
+        {0x1.0b7e6d65980d9p+0, -0x1.0387d1a42c000p-4},
+        {0x1.0953efe7b408dp+0, -0x1.a6f9208b50000p-5},
+        {0x1.07325cac53b83p+0, -0x1.47a954f770000p-5},
+        {0x1.05197e40d1b5cp+0, -0x1.d23a8c50c0000p-6},
+        {0x1.03091c1208ea2p+0, -0x1.16a2629780000p-6},
+        {0x1.0101025b37e21p+0, -0x1.720f8d8e80000p-8},
+        {0x1.fc07ef9caa76bp-1, 0x1.6fe53b1500000p-7},
+        {0x1.f4465d3f6f184p-1, 0x1.11ccce10f8000p-5},
+        {0x1.ecc079f84107fp-1, 0x1.c4dfc8c8b8000p-5},
+        {0x1.e573a99975ae8p-1, 0x1.3aa321e574000p-4},
+        {0x1.de5d6f0bd3de6p-1, 0x1.918a0d08b8000p-4},
+        {0x1.d77b681ff38b3p-1, 0x1.e72e9da044000p-4},
+        {0x1.d0cb5724de943p-1, 0x1.1dcd2507f6000p-3},
+        {0x1.ca4b2dc0e7563p-1, 0x1.476ab03dea000p-3},
+        {0x1.c3f8ee8d6cb51p-1, 0x1.7074377e22000p-3},
+        {0x1.bdd2b4f020c4cp-1, 0x1.98ede8ba94000p-3},
+        {0x1.b7d6c006015cap-1, 0x1.c0db86ad2e000p-3},
+        {0x1.b20366e2e338fp-1, 0x1.e840aafcee000p-3},
+        {0x1.ac57026295039p-1, 0x1.0790ab4678000p-2},
+        {0x1.a6d01bc2731ddp-1, 0x1.1ac056801c000p-2},
+        {0x1.a16d3bc3ff18bp-1, 0x1.2db11d4fee000p-2},
+        {0x1.9c2d14967feadp-1, 0x1.406464ec58000p-2},
+        {0x1.970e4f47c9902p-1, 0x1.52dbe093af000p-2},
+        {0x1.920fb3982bcf2p-1, 0x1.651902050d000p-2},
+        {0x1.8d30187f759f1p-1, 0x1.771d2cdeaf000p-2},
+        {0x1.886e5ebb9f66dp-1, 0x1.88e9c857d9000p-2},
+        {0x1.83c97b658b994p-1, 0x1.9a80155e16000p-2},
+        {0x1.7f405ffc61022p-1, 0x1.abe186ed3d000p-2},
+        {0x1.7ad22181415cap-1, 0x1.bd0f2aea0e000p-2},
+        {0x1.767dcf99eff8cp-1, 0x1.ce0a43dbf4000p-2}
+    };
+    static const struct {
+        double chi, clo;
+    } T2[] = {
+        {0x1.6200012b90a8ep-1, 0x1.904ab0644b605p-55},
+        {0x1.66000045734a6p-1, 0x1.1ff9bea62f7a9p-57},
+        {0x1.69fffc325f2c5p-1, 0x1.27ecfcb3c90bap-55},
+        {0x1.6e00038b95a04p-1, 0x1.8ff8856739326p-55},
+        {0x1.71fffe09994e3p-1, 0x1.afd40275f82b1p-55},
+        {0x1.7600015590e1p-1, -0x1.2fd75b4238341p-56},
+        {0x1.7a00012655bd5p-1, 0x1.808e67c242b76p-56},
+        {0x1.7e0003259e9a6p-1, -0x1.208e426f622b7p-57},
+        {0x1.81fffedb4b2d2p-1, -0x1.402461ea5c92fp-55},
+        {0x1.860002dfafcc3p-1, 0x1.df7f4a2f29a1fp-57},
+        {0x1.89ffff78c6b5p-1, -0x1.e0453094995fdp-55},
+        {0x1.8e00039671566p-1, -0x1.a04f3bec77b45p-55},
+        {0x1.91fffe2bf1745p-1, -0x1.7fa34400e203cp-56},
+        {0x1.95fffcc5c9fd1p-1, -0x1.6ff8005a0695dp-56},
+        {0x1.9a0003bba4767p-1, 0x1.0f8c4c4ec7e03p-56},
+        {0x1.9dfffe7b92da5p-1, 0x1.e7fd9478c4602p-55},
+        {0x1.a1fffd72efdafp-1, -0x1.a0c554dcdae7ep-57},
+        {0x1.a5fffde04ff95p-1, 0x1.67da98ce9b26bp-55},
+        {0x1.a9fffca5e8d2bp-1, -0x1.284c9b54c13dep-55},
+        {0x1.adfffddad03eap-1, 0x1.812c8ea602e3cp-58},
+        {0x1.b1ffff10d3d4dp-1, -0x1.efaddad27789cp-55},
+        {0x1.b5fffce21165ap-1, 0x1.3cb1719c61237p-58},
+        {0x1.b9fffd950e674p-1, 0x1.3f7d94194cep-56},
+        {0x1.be000139ca8afp-1, 0x1.50ac4215d9bcp-56},
+        {0x1.c20005b46df99p-1, 0x1.beea653e9c1c9p-57},
+        {0x1.c600040b9f7aep-1, -0x1.c079f274a70d6p-56},
+        {0x1.ca0006255fd8ap-1, -0x1.a0b4076e84c1fp-56},
+        {0x1.cdfffd94c095dp-1, 0x1.8f933f99ab5d7p-55},
+        {0x1.d1ffff975d6cfp-1, -0x1.82c08665fe1bep-58},
+        {0x1.d5fffa2561c93p-1, -0x1.b04289bd295f3p-56},
+        {0x1.d9fff9d228b0cp-1, 0x1.70251340fa236p-55},
+        {0x1.de00065bc7e16p-1, -0x1.5011e16a4d80cp-56},
+        {0x1.e200002f64791p-1, 0x1.9802f09ef62ep-55},
+        {0x1.e600057d7a6d8p-1, -0x1.e0b75580cf7fap-56},
+        {0x1.ea00027edc00cp-1, -0x1.c848309459811p-55},
+        {0x1.ee0006cf5cb7cp-1, -0x1.f8027951576f4p-55},
+        {0x1.f2000782b7dccp-1, -0x1.f81d97274538fp-55},
+        {0x1.f6000260c450ap-1, -0x1.071002727ffdcp-59},
+        {0x1.f9fffe88cd533p-1, -0x1.81bdce1fda8bp-58},
+        {0x1.fdfffd50f8689p-1, 0x1.7f91acb918e6ep-55},
+        {0x1.0200004292367p+0, 0x1.b7ff365324681p-54},
+        {0x1.05fffe3e3d668p+0, 0x1.6fa08ddae957bp-55},
+        {0x1.0a0000a85a757p+0, -0x1.7e2de80d3fb91p-58},
+        {0x1.0e0001a5f3fccp+0, -0x1.1823305c5f014p-54},
+        {0x1.11ffff8afbaf5p+0, -0x1.bfabb6680bac2p-55},
+        {0x1.15fffe54d91adp+0, -0x1.d7f121737e7efp-54},
+        {0x1.1a00011ac36e1p+0, 0x1.c000a0516f5ffp-54},
+        {0x1.1e00019c84248p+0, -0x1.082fbe4da5dap-54},
+        {0x1.220000ffe5e6ep+0, -0x1.8fdd04c9cfb43p-55},
+        {0x1.26000269fd891p+0, 0x1.cfe2a7994d182p-55},
+        {0x1.2a00029a6e6dap+0, -0x1.00273715e8bc5p-56},
+        {0x1.2dfffe0293e39p+0, 0x1.b7c39dab2a6f9p-54},
+        {0x1.31ffff7dcf082p+0, 0x1.df1336edc5254p-56},
+        {0x1.35ffff05a8b6p+0, -0x1.e03564ccd31ebp-54},
+        {0x1.3a0002e0eaeccp+0, 0x1.5f0e74bd3a477p-56},
+        {0x1.3e000043bb236p+0, 0x1.c7dcb149d8833p-54},
+        {0x1.4200002d187ffp+0, 0x1.e08afcf2d3d28p-56},
+        {0x1.460000d387cb1p+0, 0x1.20837856599a6p-55},
+        {0x1.4a00004569f89p+0, -0x1.9fa5c904fbcd2p-55},
+        {0x1.4e000043543f3p+0, -0x1.81125ed175329p-56},
+        {0x1.51fffcc027f0fp+0, 0x1.883d8847754dcp-54},
+        {0x1.55ffffd87b36fp+0, -0x1.709e731d02807p-55},
+        {0x1.59ffff21df7bap+0, 0x1.7f79f68727b02p-55},
+        {0x1.5dfffebfc3481p+0, -0x1.180902e30e93ep-54}
+    };
+
+    double z, r, r2, r4, y, invc, logc, kd, hi, lo, t1, t2, t3, p, rhi, rlo;
+    UINT64 ix, iz, tmp;
+    UINT32 top;
+    int k, i;
+
+    ix = *(UINT64*)&x;
+    top = ix >> 48;
+    if (ix - 0x3feea4af00000000ULL < 0x210aa00000000ULL) {
+        /* Handle close to 1.0 inputs separately.  */
+        /* Fix sign of zero with downward rounding when x==1.  */
+        if (ix == 0x3ff0000000000000ULL)
+            return 0;
+        r = x - 1.0;
+        *(UINT64*)&rhi = *(UINT64*)&r & -1ULL << 32;
+        rlo = r - rhi;
+        hi = rhi * invln2hi;
+        lo = rlo * invln2hi + r * invln2lo;
+        r2 = r * r; /* rounding error: 0x1p-62.  */
+        r4 = r2 * r2;
+        /* Worst-case error is less than 0.54 ULP (0.55 ULP without fma).  */
+        p = r2 * (B[0] + r * B[1]);
+        y = hi + p;
+        lo += hi - y + p;
+        lo += r4 * (B[2] + r * B[3] + r2 * (B[4] + r * B[5]) +
+                r4 * (B[6] + r * B[7] + r2 * (B[8] + r * B[9])));
+        y += lo;
+        return y;
+    }
+    if (top - 0x0010 >= 0x7ff0 - 0x0010) {
+        /* x < 0x1p-1022 or inf or nan.  */
+        if (ix * 2 == 0) {
+            *_errno() = ERANGE;
+            return -1.0 / x;
+        }
+        if (ix == 0x7ff0000000000000ULL) /* log(inf) == inf.  */
+            return x;
+        if ((top & 0x7ff0) == 0x7ff0 && (ix & 0xfffffffffffffULL))
+            return x;
+        if (top & 0x8000) {
+            *_errno() = EDOM;
+            return (x - x) / (x - x);
+        }
+        /* x is subnormal, normalize it.  */
+        x *= 0x1p52;
+        ix = *(UINT64*)&x;
+        ix -= 52ULL << 52;
+    }
+
+    /* x = 2^k z; where z is in range [OFF,2*OFF) and exact.
+       The range is split into N subintervals.
+       The ith subinterval contains z and c is near its center.  */
+    tmp = ix - 0x3fe6000000000000ULL;
+    i = (tmp >> (52 - 6)) % (1 << 6);
+    k = (INT64)tmp >> 52; /* arithmetic shift */
+    iz = ix - (tmp & 0xfffULL << 52);
+    invc = T[i].invc;
+    logc = T[i].logc;
+    z = *(double*)&iz;
+    kd = k;
+
+    /* log2(x) = log2(z/c) + log2(c) + k.  */
+    /* r ~= z/c - 1, |r| < 1/(2*N).  */
+    /* rounding error: 0x1p-55/N + 0x1p-65.  */
+    r = (z - T2[i].chi - T2[i].clo) * invc;
+    *(UINT64*)&rhi = *(UINT64*)&r & -1ULL << 32;
+    rlo = r - rhi;
+    t1 = rhi * invln2hi;
+    t2 = rlo * invln2hi + r * invln2lo;
+
+    /* hi + lo = r/ln2 + log2(c) + k.  */
+    t3 = kd + logc;
+    hi = t3 + t1;
+    lo = t3 - hi + t1 + t2;
+
+    /* log2(r+1) = r/ln2 + r^2*poly(r).  */
+    /* Evaluation is optimized assuming superscalar pipelined execution.  */
+    r2 = r * r; /* rounding error: 0x1p-54/N^2.  */
+    r4 = r2 * r2;
+    /* Worst-case error if |y| > 0x1p-4: 0.547 ULP (0.550 ULP without fma).
+       ~ 0.5 + 2/N/ln2 + abs-poly-error*0x1p56 ULP (+ 0.003 ULP without fma).  */
+    p = A[0] + r * A[1] + r2 * (A[2] + r * A[3]) + r4 * (A[4] + r * A[5]);
+    y = lo + r2 * p + hi;
+    return y;
 }
 
 /*********************************************************************
  *      log2f (MSVCR120.@)
+ *
+ * Copied from musl: src/math/log2f.c
  */
 float CDECL log2f(float x)
 {
-    if (x < 0) *_errno() = EDOM;
-    else if (x == 0) *_errno() = ERANGE;
-    return unix_funcs->log2f( x );
+    static const double A[] = {
+        -0x1.712b6f70a7e4dp-2,
+        0x1.ecabf496832ep-2,
+        -0x1.715479ffae3dep-1,
+        0x1.715475f35c8b8p0
+    };
+    static const struct {
+        double invc, logc;
+    } T[] = {
+        { 0x1.661ec79f8f3bep+0, -0x1.efec65b963019p-2 },
+        { 0x1.571ed4aaf883dp+0, -0x1.b0b6832d4fca4p-2 },
+        { 0x1.49539f0f010bp+0, -0x1.7418b0a1fb77bp-2 },
+        { 0x1.3c995b0b80385p+0, -0x1.39de91a6dcf7bp-2 },
+        { 0x1.30d190c8864a5p+0, -0x1.01d9bf3f2b631p-2 },
+        { 0x1.25e227b0b8eap+0, -0x1.97c1d1b3b7afp-3 },
+        { 0x1.1bb4a4a1a343fp+0, -0x1.2f9e393af3c9fp-3 },
+        { 0x1.12358f08ae5bap+0, -0x1.960cbbf788d5cp-4 },
+        { 0x1.0953f419900a7p+0, -0x1.a6f9db6475fcep-5 },
+        { 0x1p+0, 0x0p+0 },
+        { 0x1.e608cfd9a47acp-1, 0x1.338ca9f24f53dp-4 },
+        { 0x1.ca4b31f026aap-1, 0x1.476a9543891bap-3 },
+        { 0x1.b2036576afce6p-1, 0x1.e840b4ac4e4d2p-3 },
+        { 0x1.9c2d163a1aa2dp-1, 0x1.40645f0c6651cp-2 },
+        { 0x1.886e6037841edp-1, 0x1.88e9c2c1b9ff8p-2 },
+        { 0x1.767dcf5534862p-1, 0x1.ce0a44eb17bccp-2 }
+    };
+
+    double z, r, r2, p, y, y0, invc, logc;
+    UINT32 ix, iz, top, tmp;
+    int k, i;
+
+    ix = *(UINT32*)&x;
+    /* Fix sign of zero with downward rounding when x==1. */
+    if (ix == 0x3f800000)
+        return 0;
+    if (ix - 0x00800000 >= 0x7f800000 - 0x00800000) {
+        /* x < 0x1p-126 or inf or nan. */
+        if (ix * 2 == 0) {
+            *_errno() = ERANGE;
+            return -1.0f / x;
+        }
+        if (ix == 0x7f800000) /* log2(inf) == inf. */
+            return x;
+        if (ix * 2 > 0xff000000)
+            return x;
+        if (ix & 0x80000000) {
+            *_errno() = EDOM;
+            return (x - x) / (x - x);
+        }
+        /* x is subnormal, normalize it. */
+        x *= 0x1p23f;
+        ix = *(UINT32*)&x;
+        ix -= 23 << 23;
+    }
+
+    /* x = 2^k z; where z is in range [OFF,2*OFF] and exact.
+       The range is split into N subintervals.
+       The ith subinterval contains z and c is near its center. */
+    tmp = ix - 0x3f330000;
+    i = (tmp >> (23 - 4)) % (1 << 4);
+    top = tmp & 0xff800000;
+    iz = ix - top;
+    k = (INT32)tmp >> 23; /* arithmetic shift */
+    invc = T[i].invc;
+    logc = T[i].logc;
+    z = *(float*)&iz;
+
+    /* log2(x) = log1p(z/c-1)/ln2 + log2(c) + k */
+    r = z * invc - 1;
+    y0 = logc + (double)k;
+
+    /* Pipelined polynomial evaluation to approximate log1p(r)/ln2. */
+    r2 = r * r;
+    y = A[1] * r + A[2];
+    y = A[0] * r2 + y;
+    p = A[3] * r + y0;
+    y = y * r2 + p;
+    return y;
 }
 
 /*********************************************************************
@@ -6232,84 +8255,172 @@ double CDECL fmin(double x, double y)
 
 /*********************************************************************
  *      asinh (MSVCR120.@)
+ *
+ * Copied from musl: src/math/asinh.c
  */
 double CDECL asinh(double x)
 {
-    return unix_funcs->asinh( x );
+    UINT64 ux = *(UINT64*)&x;
+    int e = ux >> 52 & 0x7ff;
+    int s = ux >> 63;
+
+    /* |x| */
+    ux &= (UINT64)-1 / 2;
+    x = *(double*)&ux;
+
+    if (e >= 0x3ff + 26) /* |x| >= 0x1p26 or inf or nan */
+        x = log(x) + 0.693147180559945309417232121458176568;
+    else if (e >= 0x3ff + 1) /* |x| >= 2 */
+        x = log(2 * x + 1 / (sqrt(x * x + 1) + x));
+    else if (e >= 0x3ff - 26) /* |x| >= 0x1p-26 */
+        x = log1p(x + x * x / (sqrt(x * x + 1) + 1));
+    else /* |x| < 0x1p-26, raise inexact if x != 0 */
+        fp_barrier(x + 0x1p120f);
+    return s ? -x : x;
 }
 
 /*********************************************************************
  *      asinhf (MSVCR120.@)
+ *
+ * Copied from musl: src/math/asinhf.c
  */
 float CDECL asinhf(float x)
 {
-    return unix_funcs->asinhf( x );
+    UINT32 ux = *(UINT32*)&x;
+    UINT32 i = ux & 0x7fffffff;
+    int s = ux >> 31;
+
+    /* |x| */
+    x = *(float*)&i;
+
+    if (i >= 0x3f800000 + (12 << 23))/* |x| >= 0x1p12 or inf or nan */
+        x = logf(x) + 0.693147180559945309417232121458176568f;
+    else if (i >= 0x3f800000 + (1 << 23)) /* |x| >= 2 */
+        x = logf(2 * x + 1 / (sqrtf(x * x + 1) + x));
+    else if (i >= 0x3f800000 - (12 << 23)) /* |x| >= 0x1p-12 */
+        x = log1pf(x + x * x / (sqrtf(x * x + 1) + 1));
+    else /* |x| < 0x1p-12, raise inexact if x!=0 */
+        fp_barrierf(x + 0x1p120f);
+    return s ? -x : x;
 }
 
 /*********************************************************************
  *      acosh (MSVCR120.@)
+ *
+ * Copied from musl: src/math/acosh.c
  */
 double CDECL acosh(double x)
 {
+    int e = *(UINT64*)&x >> 52 & 0x7ff;
+
     if (x < 1)
     {
         *_errno() = EDOM;
         feraiseexcept(FE_INVALID);
         return NAN;
     }
-    return unix_funcs->acosh( x );
+
+    if (e < 0x3ff + 1) /* |x| < 2, up to 2ulp error in [1,1.125] */
+        return log1p(x - 1 + sqrt((x - 1) * (x - 1) + 2 * (x - 1)));
+    if (e < 0x3ff + 26) /* |x| < 0x1p26 */
+        return log(2 * x - 1 / (x + sqrt(x * x - 1)));
+    /* |x| >= 0x1p26 or nan */
+    return log(x) + 0.693147180559945309417232121458176568;
 }
 
 /*********************************************************************
  *      acoshf (MSVCR120.@)
+ *
+ * Copied from musl: src/math/acoshf.c
  */
 float CDECL acoshf(float x)
 {
+    UINT32 a = *(UINT32*)&x & 0x7fffffff;
+
     if (x < 1)
     {
         *_errno() = EDOM;
         feraiseexcept(FE_INVALID);
         return NAN;
     }
-    return unix_funcs->acoshf( x );
+
+    if (a < 0x3f800000 + (1 << 23)) /* |x| < 2, up to 2ulp error in [1,1.125] */
+        return log1pf(x - 1 + sqrtf((x - 1) * (x - 1) + 2 * (x - 1)));
+    if (*(UINT32*)&x < 0x3f800000 + (12 << 23)) /* 2 <= x < 0x1p12 */
+        return logf(2 * x - 1 / (x + sqrtf(x * x - 1)));
+    /* x >= 0x1p12 or x <= -2 or nan */
+    return logf(x) + 0.693147180559945309417232121458176568f;
 }
 
 /*********************************************************************
  *      atanh (MSVCR120.@)
+ *
+ * Copied from musl: src/math/atanh.c
  */
 double CDECL atanh(double x)
 {
-    double ret;
+    UINT64 ux = *(UINT64*)&x;
+    int e = ux >> 52 & 0x7ff;
+    int s = ux >> 63;
 
-    if (x > 1 || x < -1) {
+    /* |x| */
+    ux &= (UINT64)-1 / 2;
+    x = *(double*)&ux;
+
+    if (x > 1) {
         *_errno() = EDOM;
-        /* on Linux atanh returns -NAN in this case */
         feraiseexcept(FE_INVALID);
         return NAN;
     }
-    ret = unix_funcs->atanh( x );
 
-    if (!isfinite(ret)) *_errno() = ERANGE;
-    return ret;
+    if (e < 0x3ff - 1) {
+        if (e < 0x3ff - 32) {
+            fp_barrier(x + 0x1p120f);
+            if (e == 0) /* handle underflow */
+                fp_barrier(x * x);
+        } else { /* |x| < 0.5, up to 1.7ulp error */
+            x = 0.5 * log1p(2 * x + 2 * x * x / (1 - x));
+        }
+    } else { /* avoid overflow */
+        x = 0.5 * log1p(2 * (x / (1 - x)));
+        if (isinf(x)) *_errno() = ERANGE;
+    }
+    return s ? -x : x;
 }
 
 /*********************************************************************
  *      atanhf (MSVCR120.@)
+ *
+ * Copied from musl: src/math/atanhf.c
  */
 float CDECL atanhf(float x)
 {
-    float ret;
+    UINT32 ux = *(UINT32*)&x;
+    int s = ux >> 31;
 
-    if (x > 1 || x < -1) {
+    /* |x| */
+    ux &= 0x7fffffff;
+    x = *(float*)&ux;
+
+    if (x > 1) {
         *_errno() = EDOM;
         feraiseexcept(FE_INVALID);
         return NAN;
     }
 
-    ret = unix_funcs->atanh( x );
-
-    if (!isfinite(ret)) *_errno() = ERANGE;
-    return ret;
+    if (ux < 0x3f800000 - (1 << 23)) {
+        if (ux < 0x3f800000 - (32 << 23)) {
+            fp_barrierf(x + 0x1p120f);
+            if (ux < (1 << 23)) /* handle underflow */
+                fp_barrierf(x * x);
+        } else { /* |x| < 0.5, up to 1.7ulp error */
+            x = 0.5f * log1pf(2 * x + 2 * x * x / (1 - x));
+        }
+    } else { /* avoid overflow */
+        x = 0.5f * log1pf(2 * (x / (1 - x)));
+        if (isinf(x)) *_errno() = ERANGE;
+    }
+    return s ? -x : x;
 }
 
 #endif /* _MSVCR_VER>=120 */
@@ -6533,20 +8644,407 @@ end:
     return sx ? -x : x;
 }
 
+/* sin(pi*x) assuming x > 2^-100, if sin(pi*x)==0 the sign is arbitrary */
+static double sin_pi(double x)
+{
+    static const double pi = 3.14159265358979311600e+00;
+    int n;
+
+    /* spurious inexact if odd int */
+    x = 2.0 * (x * 0.5 - floor(x * 0.5)); /* x mod 2.0 */
+
+    n = (int)(x * 4.0);
+    n = (n + 1) / 2;
+    x -= n * 0.5f;
+    x *= pi;
+
+    switch (n) {
+    default: /* case 4: */
+    case 0: return __sin(x, 0.0, 0);
+    case 1: return __cos(x, 0.0);
+    case 2: return __sin(-x, 0.0, 0);
+    case 3: return -__cos(x, 0.0);
+    }
+}
+
 /*********************************************************************
  *      lgamma (MSVCR120.@)
+ *
+ * Copied from musl: src/math/lgamma_r.c
  */
 double CDECL lgamma(double x)
 {
-    return unix_funcs->lgamma( x );
+    static const double pi = 3.14159265358979311600e+00,
+        a0 = 7.72156649015328655494e-02,
+        a1 = 3.22467033424113591611e-01,
+        a2 = 6.73523010531292681824e-02,
+        a3 = 2.05808084325167332806e-02,
+        a4 = 7.38555086081402883957e-03,
+        a5 = 2.89051383673415629091e-03,
+        a6 = 1.19270763183362067845e-03,
+        a7 = 5.10069792153511336608e-04,
+        a8 = 2.20862790713908385557e-04,
+        a9 = 1.08011567247583939954e-04,
+        a10 = 2.52144565451257326939e-05,
+        a11 = 4.48640949618915160150e-05,
+        tc = 1.46163214496836224576e+00,
+        tf = -1.21486290535849611461e-01,
+        tt = -3.63867699703950536541e-18,
+        t0 = 4.83836122723810047042e-01,
+        t1 = -1.47587722994593911752e-01,
+        t2 = 6.46249402391333854778e-02,
+        t3 = -3.27885410759859649565e-02,
+        t4 = 1.79706750811820387126e-02,
+        t5 = -1.03142241298341437450e-02,
+        t6 = 6.10053870246291332635e-03,
+        t7 = -3.68452016781138256760e-03,
+        t8 = 2.25964780900612472250e-03,
+        t9 = -1.40346469989232843813e-03,
+        t10 = 8.81081882437654011382e-04,
+        t11 = -5.38595305356740546715e-04,
+        t12 = 3.15632070903625950361e-04,
+        t13 = -3.12754168375120860518e-04,
+        t14 = 3.35529192635519073543e-04,
+        u0 = -7.72156649015328655494e-02,
+        u1 = 6.32827064025093366517e-01,
+        u2 = 1.45492250137234768737e+00,
+        u3 = 9.77717527963372745603e-01,
+        u4 = 2.28963728064692451092e-01,
+        u5 = 1.33810918536787660377e-02,
+        v1 = 2.45597793713041134822e+00,
+        v2 = 2.12848976379893395361e+00,
+        v3 = 7.69285150456672783825e-01,
+        v4 = 1.04222645593369134254e-01,
+        v5 = 3.21709242282423911810e-03,
+        s0 = -7.72156649015328655494e-02,
+        s1 = 2.14982415960608852501e-01,
+        s2 = 3.25778796408930981787e-01,
+        s3 = 1.46350472652464452805e-01,
+        s4 = 2.66422703033638609560e-02,
+        s5 = 1.84028451407337715652e-03,
+        s6 = 3.19475326584100867617e-05,
+        r1 = 1.39200533467621045958e+00,
+        r2 = 7.21935547567138069525e-01,
+        r3 = 1.71933865632803078993e-01,
+        r4 = 1.86459191715652901344e-02,
+        r5 = 7.77942496381893596434e-04,
+        r6 = 7.32668430744625636189e-06,
+        w0 = 4.18938533204672725052e-01,
+        w1 = 8.33333333333329678849e-02,
+        w2 = -2.77777777728775536470e-03,
+        w3 = 7.93650558643019558500e-04,
+        w4 = -5.95187557450339963135e-04,
+        w5 = 8.36339918996282139126e-04,
+        w6 = -1.63092934096575273989e-03;
+
+    union {double f; UINT64 i;} u = {x};
+    double t, y, z, nadj, p, p1, p2, p3, q, r, w;
+    UINT32 ix;
+    int sign,i;
+
+    /* purge off +-inf, NaN, +-0, tiny and negative arguments */
+    sign = u.i >> 63;
+    ix = u.i >> 32 & 0x7fffffff;
+    if (ix >= 0x7ff00000)
+        return x * x;
+    if (ix < (0x3ff - 70) << 20) { /* |x|<2**-70, return -log(|x|) */
+        if(sign)
+            x = -x;
+        return -log(x);
+    }
+    if (sign) {
+        x = -x;
+        t = sin_pi(x);
+        if (t == 0.0) { /* -integer */
+            *_errno() = ERANGE;
+            return 1.0 / (x - x);
+        }
+        if (t <= 0.0)
+            t = -t;
+        nadj = log(pi / (t * x));
+    }
+
+    /* purge off 1 and 2 */
+    if ((ix == 0x3ff00000 || ix == 0x40000000) && (UINT32)u.i == 0)
+        r = 0;
+    /* for x < 2.0 */
+    else if (ix < 0x40000000) {
+        if (ix <= 0x3feccccc) { /* lgamma(x) = lgamma(x+1)-log(x) */
+            r = -log(x);
+            if (ix >= 0x3FE76944) {
+                y = 1.0 - x;
+                i = 0;
+            } else if (ix >= 0x3FCDA661) {
+                y = x - (tc - 1.0);
+                i = 1;
+            } else {
+                y = x;
+                i = 2;
+            }
+        } else {
+            r = 0.0;
+            if (ix >= 0x3FFBB4C3) { /* [1.7316,2] */
+                y = 2.0 - x;
+                i = 0;
+            } else if(ix >= 0x3FF3B4C4) { /* [1.23,1.73] */
+                y = x - tc;
+                i = 1;
+            } else {
+                y = x - 1.0;
+                i = 2;
+            }
+        }
+        switch (i) {
+        case 0:
+            z = y * y;
+            p1 = a0 + z * (a2 + z * (a4 + z * (a6 + z * (a8 + z * a10))));
+            p2 = z * (a1 + z * (a3 + z * (a5 + z * (a7 + z * (a9 + z * a11)))));
+            p = y * p1 + p2;
+            r += (p - 0.5 * y);
+            break;
+        case 1:
+            z = y * y;
+            w = z * y;
+            p1 = t0 + w * (t3 + w * (t6 + w * (t9 + w * t12))); /* parallel comp */
+            p2 = t1 + w * (t4 + w * (t7 + w * (t10 + w * t13)));
+            p3 = t2 + w * (t5 + w * (t8 + w * (t11 + w * t14)));
+            p = z * p1 - (tt - w * (p2 + y * p3));
+            r += tf + p;
+            break;
+        case 2:
+            p1 = y * (u0 + y * (u1 + y * (u2 + y * (u3 + y * (u4 + y * u5)))));
+            p2 = 1.0 + y * (v1 + y * (v2 + y * (v3 + y * (v4 + y * v5))));
+            r += -0.5 * y + p1 / p2;
+        }
+    } else if (ix < 0x40200000) { /* x < 8.0 */
+        i = (int)x;
+        y = x - (double)i;
+        p = y * (s0 + y * (s1 + y * (s2 + y * (s3 + y * (s4 + y * (s5 + y * s6))))));
+        q = 1.0 + y * (r1 + y * (r2 + y * (r3 + y * (r4 + y * (r5 + y * r6)))));
+        r = 0.5 * y + p / q;
+        z = 1.0; /* lgamma(1+s) = log(s) + lgamma(s) */
+        switch (i) {
+        case 7: z *= y + 6.0; /* fall through */
+        case 6: z *= y + 5.0; /* fall through */
+        case 5: z *= y + 4.0; /* fall through */
+        case 4: z *= y + 3.0; /* fall through */
+        case 3:
+            z *= y + 2.0;
+            r += log(z);
+            break;
+        }
+    } else if (ix < 0x43900000) { /* 8.0 <= x < 2**58 */
+        t = log(x);
+        z = 1.0 / x;
+        y = z * z;
+        w = w0 + z * (w1 + y * (w2 + y * (w3 + y * (w4 + y * (w5 + y * w6)))));
+        r = (x - 0.5) * (t - 1.0) + w;
+    } else /* 2**58 <= x <= inf */
+        r = x * (log(x) - 1.0);
+    if (sign)
+        r = nadj - r;
+    return r;
+}
+
+/* sin(pi*x) assuming x > 2^-100, if sin(pi*x)==0 the sign is arbitrary */
+static float sinf_pi(float x)
+{
+    double y;
+    int n;
+
+    /* spurious inexact if odd int */
+    x = 2 * (x * 0.5f - floorf(x * 0.5f)); /* x mod 2.0 */
+
+    n = (int)(x * 4);
+    n = (n + 1) / 2;
+    y = x - n * 0.5f;
+    y *= M_PI;
+    switch (n) {
+    default: /* case 4: */
+    case 0: return __sindf(y);
+    case 1: return __cosdf(y);
+    case 2: return __sindf(-y);
+    case 3: return -__cosdf(y);
+    }
 }
 
 /*********************************************************************
  *      lgammaf (MSVCR120.@)
+ *
+ * Copied from musl: src/math/lgammaf_r.c
  */
 float CDECL lgammaf(float x)
 {
-    return unix_funcs->lgammaf( x );
+    static const float pi = 3.1415927410e+00,
+        a0 = 7.7215664089e-02,
+        a1 = 3.2246702909e-01,
+        a2 = 6.7352302372e-02,
+        a3 = 2.0580807701e-02,
+        a4 = 7.3855509982e-03,
+        a5 = 2.8905137442e-03,
+        a6 = 1.1927076848e-03,
+        a7 = 5.1006977446e-04,
+        a8 = 2.2086278477e-04,
+        a9 = 1.0801156895e-04,
+        a10 = 2.5214456400e-05,
+        a11 = 4.4864096708e-05,
+        tc = 1.4616321325e+00,
+        tf = -1.2148628384e-01,
+        tt = 6.6971006518e-09,
+        t0 = 4.8383611441e-01,
+        t1 = -1.4758771658e-01,
+        t2 = 6.4624942839e-02,
+        t3 = -3.2788541168e-02,
+        t4 = 1.7970675603e-02,
+        t5 = -1.0314224288e-02,
+        t6 = 6.1005386524e-03,
+        t7 = -3.6845202558e-03,
+        t8 = 2.2596477065e-03,
+        t9 = -1.4034647029e-03,
+        t10 = 8.8108185446e-04,
+        t11 = -5.3859531181e-04,
+        t12 = 3.1563205994e-04,
+        t13 = -3.1275415677e-04,
+        t14 = 3.3552918467e-04,
+        u0 = -7.7215664089e-02,
+        u1 = 6.3282704353e-01,
+        u2 = 1.4549225569e+00,
+        u3 = 9.7771751881e-01,
+        u4 = 2.2896373272e-01,
+        u5 = 1.3381091878e-02,
+        v1 = 2.4559779167e+00,
+        v2 = 2.1284897327e+00,
+        v3 = 7.6928514242e-01,
+        v4 = 1.0422264785e-01,
+        v5 = 3.2170924824e-03,
+        s0 = -7.7215664089e-02,
+        s1 = 2.1498242021e-01,
+        s2 = 3.2577878237e-01,
+        s3 = 1.4635047317e-01,
+        s4 = 2.6642270386e-02,
+        s5 = 1.8402845599e-03,
+        s6 = 3.1947532989e-05,
+        r1 = 1.3920053244e+00,
+        r2 = 7.2193557024e-01,
+        r3 = 1.7193385959e-01,
+        r4 = 1.8645919859e-02,
+        r5 = 7.7794247773e-04,
+        r6 = 7.3266842264e-06,
+        w0 = 4.1893854737e-01,
+        w1 = 8.3333335817e-02,
+        w2 = -2.7777778450e-03,
+        w3 = 7.9365057172e-04,
+        w4 = -5.9518753551e-04,
+        w5 = 8.3633989561e-04,
+        w6 = -1.6309292987e-03;
+
+    union {float f; UINT32 i;} u = {x};
+    float t, y, z, nadj, p, p1, p2, p3, q, r, w;
+    UINT32 ix;
+    int i, sign;
+
+    /* purge off +-inf, NaN, +-0, tiny and negative arguments */
+    sign = u.i >> 31;
+    ix = u.i & 0x7fffffff;
+    if (ix >= 0x7f800000)
+        return x * x;
+    if (ix < 0x35000000) { /* |x| < 2**-21, return -log(|x|) */
+        if (sign)
+            x = -x;
+        return -logf(x);
+    }
+    if (sign) {
+        x = -x;
+        t = sinf_pi(x);
+        if (t == 0.0f) { /* -integer */
+            *_errno() = ERANGE;
+            return 1.0f / (x - x);
+        }
+        if (t <= 0.0f)
+            t = -t;
+        nadj = logf(pi / (t * x));
+    }
+
+    /* purge off 1 and 2 */
+    if (ix == 0x3f800000 || ix == 0x40000000)
+        r = 0;
+    /* for x < 2.0 */
+    else if (ix < 0x40000000) {
+        if (ix <= 0x3f666666) { /* lgamma(x) = lgamma(x+1)-log(x) */
+            r = -logf(x);
+            if (ix >= 0x3f3b4a20) {
+                y = 1.0f - x;
+                i = 0;
+            } else if (ix >= 0x3e6d3308) {
+                y = x - (tc - 1.0f);
+                i = 1;
+            } else {
+                y = x;
+                i = 2;
+            }
+        } else {
+            r = 0.0f;
+            if (ix >= 0x3fdda618) { /* [1.7316,2] */
+                y = 2.0f - x;
+                i = 0;
+            } else if (ix >= 0x3F9da620) { /* [1.23,1.73] */
+                y = x - tc;
+                i = 1;
+            } else {
+                y = x - 1.0f;
+                i = 2;
+            }
+        }
+        switch(i) {
+        case 0:
+            z = y * y;
+            p1 = a0 + z * (a2 + z * (a4 + z * (a6 + z * (a8 + z * a10))));
+            p2 = z * (a1 + z * (a3 + z * (a5 + z * (a7 + z * (a9 + z * a11)))));
+            p = y * p1 + p2;
+            r += p - 0.5f * y;
+            break;
+        case 1:
+            z = y * y;
+            w = z * y;
+            p1 = t0 + w * (t3 + w * (t6 + w * (t9 + w * t12))); /* parallel comp */
+            p2 = t1 + w * (t4 + w * (t7 + w * (t10 + w * t13)));
+            p3 = t2 + w * (t5 + w * (t8 + w * (t11 + w * t14)));
+            p = z * p1 - (tt - w * (p2 + y * p3));
+            r += (tf + p);
+            break;
+        case 2:
+            p1 = y * (u0 + y * (u1 + y * (u2 + y * (u3 + y * (u4 + y * u5)))));
+            p2 = 1.0f + y * (v1 + y * (v2 + y * (v3 + y * (v4 + y * v5))));
+            r += -0.5f * y + p1 / p2;
+        }
+    } else if (ix < 0x41000000) { /* x < 8.0 */
+        i = (int)x;
+        y = x - (float)i;
+        p = y * (s0 + y * (s1 + y * (s2 + y * (s3 + y * (s4 + y * (s5 + y * s6))))));
+        q = 1.0f + y * (r1 + y * (r2 + y * (r3 + y * (r4 + y * (r5 + y * r6)))));
+        r = 0.5f * y + p / q;
+        z = 1.0f; /* lgamma(1+s) = log(s) + lgamma(s) */
+        switch (i) {
+        case 7: z *= y + 6.0f; /* fall through */
+        case 6: z *= y + 5.0f; /* fall through */
+        case 5: z *= y + 4.0f; /* fall through */
+        case 4: z *= y + 3.0f; /* fall through */
+        case 3:
+            z *= y + 2.0f;
+            r += logf(z);
+            break;
+        }
+    } else if (ix < 0x5c800000) { /* 8.0 <= x < 2**58 */
+        t = logf(x);
+        z = 1.0f / x;
+        y = z * z;
+        w = w0 + z * (w1 + y * (w2 + y * (w3 + y * (w4 + y * (w5 + y * w6)))));
+        r = (x - 0.5f) * (t - 1.0f) + w;
+    } else /* 2**58 <= x <= inf */
+        r = x * (logf(x) - 1.0f);
+    if (sign)
+        r = nadj - r;
+    return r;
 }
 
 /*********************************************************************

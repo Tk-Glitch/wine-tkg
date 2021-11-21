@@ -412,7 +412,7 @@
 @ stdcall -syscall NtTerminateJobObject(long long)
 @ stdcall -syscall NtTerminateProcess(long long)
 @ stdcall -syscall NtTerminateThread(long long)
-@ stub NtTestAlert
+@ stdcall -syscall NtTestAlert()
 # @ stub NtTraceEvent
 # @ stub NtTranslateFilePath
 @ stdcall -syscall NtUnloadDriver(ptr)
@@ -527,6 +527,7 @@
 @ stub RtlConvertUiListToApiList
 @ stdcall -arch=win32 -ret64 RtlConvertUlongToLargeInteger(long)
 # @ stub RtlConvertVariantToProperty
+@ stdcall RtlCopyContext(ptr long ptr)
 @ stdcall RtlCopyExtendedContext(ptr long ptr)
 @ stdcall RtlCopyLuid(ptr ptr)
 @ stdcall RtlCopyLuidAndAttributesArray(long ptr ptr)
@@ -1425,7 +1426,7 @@
 @ stdcall -private -syscall ZwTerminateJobObject(long long) NtTerminateJobObject
 @ stdcall -private -syscall ZwTerminateProcess(long long) NtTerminateProcess
 @ stdcall -private -syscall ZwTerminateThread(long long) NtTerminateThread
-@ stub ZwTestAlert
+@ stdcall -private -syscall ZwTestAlert() NtTestAlert
 # @ stub ZwTraceEvent
 # @ stub ZwTranslateFilePath
 @ stdcall -private -syscall ZwUnloadDriver(ptr) NtUnloadDriver
@@ -1610,9 +1611,9 @@
 @ cdecl -syscall -norelay wine_server_call(ptr)
 @ cdecl -syscall wine_server_fd_to_handle(long long long ptr)
 @ cdecl -syscall wine_server_handle_to_fd(long long ptr ptr)
-@ cdecl -syscall __wine_make_process_system()
 
 # Unix interface
+@ cdecl -syscall __wine_unix_call(int64 long ptr)
 @ cdecl __wine_set_unix_funcs(long ptr)
 @ cdecl __wine_init_unix_lib(long long ptr ptr)
 @ extern __wine_syscall_dispatcher
@@ -1625,7 +1626,6 @@
 @ cdecl -norelay __wine_dbg_strdup(str)
 
 # Virtual memory
-@ cdecl -syscall __wine_locked_recvmsg(long ptr long)
 @ cdecl -syscall __wine_needs_override_large_address_aware()
 
 # Version

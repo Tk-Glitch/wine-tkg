@@ -21,8 +21,8 @@
 
 #include <stdarg.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -209,9 +209,9 @@ static void find_devices(void)
             WARN("Failed to get attributes.\n");
 
         device->info.dwType = RIM_TYPEHID;
-        device->info.u.hid.dwVendorId = attr.VendorID;
-        device->info.u.hid.dwProductId = attr.ProductID;
-        device->info.u.hid.dwVersionNumber = attr.VersionNumber;
+        device->info.hid.dwVendorId = attr.VendorID;
+        device->info.hid.dwProductId = attr.ProductID;
+        device->info.hid.dwVersionNumber = attr.VersionNumber;
 
         if (!HidD_GetPreparsedData(device->file, &device->data))
             WARN("Failed to get preparsed data.\n");
@@ -219,8 +219,8 @@ static void find_devices(void)
         if (!HidP_GetCaps(device->data, &caps))
             WARN("Failed to get caps.\n");
 
-        device->info.u.hid.usUsagePage = caps.UsagePage;
-        device->info.u.hid.usUsage = caps.Usage;
+        device->info.hid.usUsagePage = caps.UsagePage;
+        device->info.hid.usUsage = caps.Usage;
     }
 
     SetupDiDestroyDeviceInfoList(set);
@@ -235,7 +235,7 @@ static void find_devices(void)
             continue;
 
         device->info.dwType = RIM_TYPEMOUSE;
-        device->info.u.mouse = mouse_info;
+        device->info.mouse = mouse_info;
     }
 
     SetupDiDestroyDeviceInfoList(set);
@@ -250,7 +250,7 @@ static void find_devices(void)
             continue;
 
         device->info.dwType = RIM_TYPEKEYBOARD;
-        device->info.u.keyboard = keyboard_info;
+        device->info.keyboard = keyboard_info;
     }
 
     SetupDiDestroyDeviceInfoList(set);
@@ -282,8 +282,8 @@ BOOL rawinput_device_get_usages(HANDLE handle, USAGE *usage_page, USAGE *usage)
     if (!(device = find_device_from_handle(handle))) return FALSE;
     if (device->info.dwType != RIM_TYPEHID) return FALSE;
 
-    *usage_page = device->info.u.hid.usUsagePage;
-    *usage = device->info.u.hid.usUsage;
+    *usage_page = device->info.hid.usUsagePage;
+    *usage = device->info.hid.usUsage;
     return TRUE;
 }
 
@@ -328,36 +328,37 @@ BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hardware_ms
             rawinput->data.mouse.usFlags = MOUSE_MOVE_RELATIVE;
         if (msg_data->flags & MOUSEEVENTF_VIRTUALDESK)
             rawinput->data.mouse.usFlags |= MOUSE_VIRTUAL_DESKTOP;
-        rawinput->data.mouse.u.s.usButtonFlags = 0;
-        rawinput->data.mouse.u.s.usButtonData  = 0;
+        rawinput->data.mouse.usButtonFlags = 0;
+        rawinput->data.mouse.usButtonData  = 0;
+
         for (i = 1; i < ARRAY_SIZE(button_flags); ++i)
         {
             if (msg_data->flags & (1 << i))
-                rawinput->data.mouse.u.s.usButtonFlags |= button_flags[i];
+                rawinput->data.mouse.usButtonFlags |= button_flags[i];
         }
         if (msg_data->flags & MOUSEEVENTF_WHEEL)
         {
-            rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_WHEEL;
-            rawinput->data.mouse.u.s.usButtonData   = msg_data->rawinput.mouse.data;
+            rawinput->data.mouse.usButtonFlags |= RI_MOUSE_WHEEL;
+            rawinput->data.mouse.usButtonData   = msg_data->rawinput.mouse.data;
         }
         if (msg_data->flags & MOUSEEVENTF_HWHEEL)
         {
-            rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_HORIZONTAL_WHEEL;
-            rawinput->data.mouse.u.s.usButtonData   = msg_data->rawinput.mouse.data;
+            rawinput->data.mouse.usButtonFlags |= RI_MOUSE_HORIZONTAL_WHEEL;
+            rawinput->data.mouse.usButtonData   = msg_data->rawinput.mouse.data;
         }
         if (msg_data->flags & MOUSEEVENTF_XDOWN)
         {
             if (msg_data->rawinput.mouse.data == XBUTTON1)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_4_DOWN;
+                rawinput->data.mouse.usButtonFlags |= RI_MOUSE_BUTTON_4_DOWN;
             else if (msg_data->rawinput.mouse.data == XBUTTON2)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_5_DOWN;
+                rawinput->data.mouse.usButtonFlags |= RI_MOUSE_BUTTON_5_DOWN;
         }
         if (msg_data->flags & MOUSEEVENTF_XUP)
         {
             if (msg_data->rawinput.mouse.data == XBUTTON1)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_4_UP;
+                rawinput->data.mouse.usButtonFlags |= RI_MOUSE_BUTTON_4_UP;
             else if (msg_data->rawinput.mouse.data == XBUTTON2)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_5_UP;
+                rawinput->data.mouse.usButtonFlags |= RI_MOUSE_BUTTON_5_UP;
         }
 
         rawinput->data.mouse.ulRawButtons       = 0;
@@ -401,12 +402,8 @@ BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hardware_ms
     }
     else if (msg_data->rawinput.type == RIM_TYPEHID)
     {
-        size = msg_data->rawinput.hid.count * msg_data->rawinput.hid.length;
-        if (size > RAWINPUT_BUFFER_SIZE - sizeof(*rawinput))
-        {
-            ERR( "Dropping unexpectedly large HID hardware message.\n" );
-            return FALSE;
-        }
+        size = msg_data->size - sizeof(*msg_data);
+        if (size > rawinput->header.dwSize - sizeof(*rawinput)) return FALSE;
 
         rawinput->header.dwSize  = FIELD_OFFSET( RAWINPUT, data.hid.bRawData ) + size;
         rawinput->header.hDevice = ULongToHandle( msg_data->rawinput.hid.device );
@@ -609,7 +606,7 @@ UINT WINAPI DECLSPEC_HOTPATCH GetRawInputBuffer(RAWINPUT *data, UINT *data_size,
     struct hardware_msg_data *msg_data;
     struct rawinput_thread_data *thread_data;
     RAWINPUT *rawinput;
-    UINT count = 0, rawinput_size, msg_size, next_size, overhead;
+    UINT count = 0, remaining, rawinput_size, next_size, overhead;
     BOOL is_wow64;
     int i;
 
@@ -662,17 +659,17 @@ UINT WINAPI DECLSPEC_HOTPATCH GetRawInputBuffer(RAWINPUT *data, UINT *data_size,
     }
     SERVER_END_REQ;
 
+    remaining = *data_size;
     for (i = 0; i < count; ++i)
     {
+        data->header.dwSize = remaining;
         if (!rawinput_from_hardware_message(data, msg_data)) break;
         if (overhead) memmove((char *)&data->data + overhead, &data->data,
                               data->header.dwSize - sizeof(RAWINPUTHEADER));
         data->header.dwSize += overhead;
+        remaining -= data->header.dwSize;
         data = NEXTRAWINPUTBLOCK(data);
-        msg_size = sizeof(*msg_data);
-        if (msg_data->rawinput.type == RIM_TYPEHID)
-            msg_size += msg_data->rawinput.hid.count * msg_data->rawinput.hid.length;
-        msg_data = (struct hardware_msg_data *)((char *)msg_data + msg_size);
+        msg_data = (struct hardware_msg_data *)((char *)msg_data + msg_data->size);
     }
 
     if (count == 0 && next_size == 0) *data_size = 0;

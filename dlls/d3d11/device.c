@@ -378,7 +378,8 @@ static ULONG STDMETHODCALLTYPE d3d11_command_list_Release(ID3D11CommandList *ifa
         wined3d_mutex_lock();
         wined3d_command_list_decref(list->wined3d_list);
         wined3d_mutex_unlock();
-        ID3D11Device_Release(list->device);
+        wined3d_private_store_cleanup(&list->private_store);
+        ID3D11Device2_Release(list->device);
         heap_free(list);
     }
 
@@ -392,7 +393,7 @@ static void STDMETHODCALLTYPE d3d11_command_list_GetDevice(ID3D11CommandList *if
     TRACE("iface %p, device %p.\n", iface, device);
 
     *device = (ID3D11Device *)list->device;
-    ID3D11Device_AddRef(*device);
+    ID3D11Device2_AddRef(list->device);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_command_list_GetPrivateData(ID3D11CommandList *iface, REFGUID guid,
@@ -453,6 +454,11 @@ static struct d3d11_command_list *unsafe_impl_from_ID3D11CommandList(ID3D11Comma
         return NULL;
     assert(iface->lpVtbl == &d3d11_command_list_vtbl);
     return impl_from_ID3D11CommandList(iface);
+}
+
+static void d3d11_device_context_cleanup(struct d3d11_device_context *context)
+{
+    wined3d_private_store_cleanup(&context->private_store);
 }
 
 /* ID3D11DeviceContext - immediate context methods */
@@ -518,6 +524,7 @@ static ULONG STDMETHODCALLTYPE d3d11_device_context_Release(ID3D11DeviceContext1
         if (context->type != D3D11_DEVICE_CONTEXT_IMMEDIATE)
         {
             wined3d_deferred_context_destroy(context->wined3d_context);
+            d3d11_device_context_cleanup(context);
             heap_free(context);
         }
         ID3D11Device2_Release(&context->device->ID3D11Device2_iface);
@@ -1527,7 +1534,7 @@ static void STDMETHODCALLTYPE d3d11_device_context_ExecuteCommandList(ID3D11Devi
     TRACE("iface %p, command_list %p, restore_state %#x.\n", iface, command_list, restore_state);
 
     wined3d_mutex_lock();
-    wined3d_device_context_execute_command_list(context->wined3d_context, list_impl->wined3d_list, restore_state);
+    wined3d_device_context_execute_command_list(context->wined3d_context, list_impl->wined3d_list, !!restore_state);
     wined3d_mutex_unlock();
 }
 
@@ -2776,24 +2783,24 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_context_FinishCommandList(ID3D11De
     if (!(object = heap_alloc_zero(sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    object->ID3D11CommandList_iface.lpVtbl = &d3d11_command_list_vtbl;
-    object->refcount = 1;
-    object->device = (ID3D11Device *)&context->device->ID3D11Device2_iface;
-    wined3d_private_store_init(&object->private_store);
-
     wined3d_mutex_lock();
 
     if (FAILED(hr = wined3d_deferred_context_record_command_list(context->wined3d_context,
-            restore, &object->wined3d_list)))
+            !!restore, &object->wined3d_list)))
     {
         WARN("Failed to record wined3d command list, hr %#x.\n", hr);
         heap_free(object);
         return hr;
     }
 
-    ID3D11Device2_AddRef(&context->device->ID3D11Device2_iface);
-
     wined3d_mutex_unlock();
+
+    object->ID3D11CommandList_iface.lpVtbl = &d3d11_command_list_vtbl;
+    object->refcount = 1;
+    object->device = &context->device->ID3D11Device2_iface;
+    wined3d_private_store_init(&object->private_store);
+
+    ID3D11Device2_AddRef(object->device);
 
     TRACE("Created command list %p.\n", object);
     *command_list = &object->ID3D11CommandList_iface;
@@ -3291,11 +3298,6 @@ static void d3d11_device_context_init(struct d3d11_device_context *context, stru
     ID3D11Device2_AddRef(&device->ID3D11Device2_iface);
 
     wined3d_private_store_init(&context->private_store);
-}
-
-static void d3d11_device_context_destroy(struct d3d11_device_context *context)
-{
-    wined3d_private_store_cleanup(&context->private_store);
 }
 
 /* ID3D11Device methods */
@@ -4545,7 +4547,7 @@ static ULONG STDMETHODCALLTYPE d3d_device_inner_Release(IUnknown *iface)
             d3d_device_context_state_remove_entry(device->context_states[i], device);
         }
         heap_free(device->context_states);
-        d3d11_device_context_destroy(&device->immediate_context);
+        d3d11_device_context_cleanup(&device->immediate_context);
         if (device->wined3d_device)
         {
             wined3d_mutex_lock();

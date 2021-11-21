@@ -84,6 +84,9 @@ static void test_object_info(IDirectInputDeviceA *device, HWND hwnd)
     DWORD cnt = 0;
     DIDEVICEOBJECTDATA buffer[5];
 
+    hr = IDirectInputDevice_EnumObjects(device, NULL, &cnt, DIDFT_ALL);
+    ok(hr == DIERR_INVALIDPARAM, "IDirectInputDevice_EnumObjects returned %08x, expected %08x\n", hr, DIERR_INVALIDPARAM);
+
     hr = IDirectInputDevice_EnumObjects(device, enum_callback, &cnt, DIDFT_ALL);
     ok(SUCCEEDED(hr), "EnumObjects() failed: %08x\n", hr);
 
@@ -155,6 +158,16 @@ static void test_object_info(IDirectInputDeviceA *device, HWND hwnd)
     hr = IDirectInputDevice_GetDeviceData(device, sizeof(buffer[0]), buffer, &cnt, 0);
     ok(hr == DI_OK, "GetDeviceData() failed: %08x\n", hr);
 
+    hr = IDirectInputDevice_GetObjectInfo(device, NULL, 16, DIPH_BYOFFSET);
+    ok(hr == E_POINTER, "IDirectInputDevice_GetObjectInfo returned %08x, expected %08x\n", hr, E_POINTER);
+
+    obj_info.dwSize = 1;
+    hr = IDirectInputDevice_GetObjectInfo(device, &obj_info, 16, DIPH_BYOFFSET);
+    ok(hr == DIERR_INVALIDPARAM, "IDirectInputDevice_GetObjectInfo returned %08x, expected %08x\n", hr, DIERR_INVALIDPARAM);
+    obj_info.dwSize = 0xdeadbeef;
+    hr = IDirectInputDevice_GetObjectInfo(device, &obj_info, 16, DIPH_BYOFFSET);
+    ok(hr == DIERR_INVALIDPARAM, "IDirectInputDevice_GetObjectInfo returned %08x, expected %08x\n", hr, DIERR_INVALIDPARAM);
+
     /* No need to test devices without axis */
     obj_info.dwSize = sizeof(obj_info);
     hr = IDirectInputDevice_GetObjectInfo(device, &obj_info, 16, DIPH_BYOFFSET);
@@ -206,6 +219,7 @@ static BOOL CALLBACK enum_devices(const DIDEVICEINSTANCEA *lpddi, void *pvRef)
     IDirectInputDeviceA *device, *obj = NULL;
     DIDEVICEINSTANCEA ddi2;
     HRESULT hr;
+    IUnknown *iface, *tmp_iface;
 
     hr = IDirectInput_GetDeviceStatus(data->pDI, &lpddi->guidInstance);
     ok(hr == DI_OK, "IDirectInput_GetDeviceStatus() failed: %08x\n", hr);
@@ -226,6 +240,34 @@ static BOOL CALLBACK enum_devices(const DIDEVICEINSTANCEA *lpddi, void *pvRef)
         ok(SUCCEEDED(hr), "IUnknown_QueryInterface(IID_IDirectInputDevice2W) failed: %08x\n", hr);
         test_object_info(obj, data->hwnd);
         IUnknown_Release(obj);
+
+        hr = IUnknown_QueryInterface( device, &IID_IDirectInputDeviceA, (void **)&iface );
+        ok( SUCCEEDED(hr), "IUnknown_QueryInterface(IID_IDirectInputDeviceA) failed: %08x\n", hr );
+        hr = IUnknown_QueryInterface( device, &IID_IDirectInputDevice2A, (void **)&tmp_iface );
+        ok( SUCCEEDED(hr), "IUnknown_QueryInterface(IID_IDirectInputDevice2A) failed: %08x\n", hr );
+        ok( tmp_iface == iface, "IDirectInputDevice2A iface differs from IDirectInputDeviceA\n" );
+        IUnknown_Release( tmp_iface );
+        hr = IUnknown_QueryInterface( device, &IID_IDirectInputDevice7A, (void **)&tmp_iface );
+        ok( SUCCEEDED(hr), "IUnknown_QueryInterface(IID_IDirectInputDevice7A) failed: %08x\n", hr );
+        ok( tmp_iface == iface, "IDirectInputDevice7A iface differs from IDirectInputDeviceA\n" );
+        IUnknown_Release( tmp_iface );
+        IUnknown_Release( iface );
+
+        hr = IUnknown_QueryInterface( device, &IID_IUnknown, (void **)&iface );
+        ok( SUCCEEDED(hr), "IUnknown_QueryInterface(IID_IUnknown) failed: %08x\n", hr );
+        hr = IUnknown_QueryInterface( device, &IID_IDirectInputDeviceW, (void **)&tmp_iface );
+        ok( SUCCEEDED(hr), "IUnknown_QueryInterface(IID_IDirectInputDeviceW) failed: %08x\n", hr );
+        ok( tmp_iface == iface, "IDirectInputDeviceW iface differs from IUnknown\n" );
+        IUnknown_Release( tmp_iface );
+        hr = IUnknown_QueryInterface( device, &IID_IDirectInputDevice2W, (void **)&tmp_iface );
+        ok( SUCCEEDED(hr), "IUnknown_QueryInterface(IID_IDirectInputDevice2W) failed: %08x\n", hr );
+        ok( tmp_iface == iface, "IDirectInputDevice2W iface differs from IUnknown\n" );
+        IUnknown_Release( tmp_iface );
+        hr = IUnknown_QueryInterface( device, &IID_IDirectInputDevice7W, (void **)&tmp_iface );
+        ok( SUCCEEDED(hr), "IUnknown_QueryInterface(IID_IDirectInputDevice7W) failed: %08x\n", hr );
+        ok( tmp_iface == iface, "IDirectInputDevice7W iface differs from IUnknown\n" );
+        IUnknown_Release( tmp_iface );
+        IUnknown_Release( iface );
 
         IUnknown_Release(device);
 

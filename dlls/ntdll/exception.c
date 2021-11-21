@@ -736,8 +736,28 @@ static const struct context_parameters
 }
 arch_context_parameters[] =
 {
-    {0x00100000, 0xd810005f, 0x4d0, 0x4d0, 0x20, 7, 0xf, 0x30, copy_ranges_amd64},
-    {0x00010000, 0xd801007f, 0x2cc,  0xcc, 0x18, 3, 0x3,    0,   copy_ranges_x86},
+    {
+        CONTEXT_AMD64,
+        0xd8000000 | CONTEXT_AMD64_ALL | CONTEXT_AMD64_XSTATE,
+        sizeof(AMD64_CONTEXT),
+        sizeof(AMD64_CONTEXT),
+        0x20,
+        7,
+        TYPE_ALIGNMENT(AMD64_CONTEXT) - 1,
+        offsetof(AMD64_CONTEXT,ContextFlags),
+        copy_ranges_amd64
+    },
+    {
+        CONTEXT_i386,
+        0xd8000000 | CONTEXT_I386_ALL | CONTEXT_I386_XSTATE,
+        sizeof(I386_CONTEXT),
+        offsetof(I386_CONTEXT,ExtendedRegisters),
+        0x18,
+        3,
+        TYPE_ALIGNMENT(I386_CONTEXT) - 1,
+        offsetof(I386_CONTEXT,ContextFlags),
+        copy_ranges_x86
+    },
 };
 
 static const struct context_parameters *context_get_parameters( ULONG context_flags )
@@ -938,6 +958,50 @@ ULONG64 WINAPI RtlGetExtendedFeaturesMask( CONTEXT_EX *context_ex )
     XSTATE *xs = (XSTATE *)((BYTE *)context_ex + context_ex->XState.Offset);
 
     return xs->Mask & ~(ULONG64)3;
+}
+
+
+/***********************************************************************
+ *              RtlCopyContext  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlCopyContext( CONTEXT *dst, DWORD context_flags, CONTEXT *src )
+{
+    DWORD context_size, arch_flag, flags_offset, dst_flags, src_flags;
+    static const DWORD arch_mask = CONTEXT_i386 | CONTEXT_AMD64;
+    BYTE *d, *s;
+
+    TRACE("dst %p, context_flags %#x, src %p.\n", dst, context_flags, src);
+
+    if (context_flags & 0x40 && !RtlGetEnabledExtendedFeatures( ~(ULONG64)0 )) return STATUS_NOT_SUPPORTED;
+
+    arch_flag = context_flags & arch_mask;
+    switch (arch_flag)
+    {
+    case CONTEXT_i386:
+        context_size = sizeof( I386_CONTEXT );
+        flags_offset = offsetof( I386_CONTEXT, ContextFlags );
+        break;
+    case CONTEXT_AMD64:
+        context_size = sizeof( AMD64_CONTEXT );
+        flags_offset = offsetof( AMD64_CONTEXT, ContextFlags );
+        break;
+    default:
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    d = (BYTE *)dst;
+    s = (BYTE *)src;
+    dst_flags = *(DWORD *)(d + flags_offset);
+    src_flags = *(DWORD *)(s + flags_offset);
+
+    if ((dst_flags & arch_mask) != arch_flag || (src_flags & arch_mask) != arch_flag)
+        return STATUS_INVALID_PARAMETER;
+
+    context_flags &= src_flags;
+    if (context_flags & ~dst_flags & 0x40) return STATUS_BUFFER_OVERFLOW;
+
+    return RtlCopyExtendedContext( (CONTEXT_EX *)(d + context_size), context_flags,
+                                   (CONTEXT_EX *)(s + context_size) );
 }
 
 

@@ -49,12 +49,14 @@ struct IDirectInputImpl
     struct list                 device_players; /* device instance guid to player name */
 };
 
+extern const IDirectInput7AVtbl dinput7_a_vtbl DECLSPEC_HIDDEN;
+extern const IDirectInput8AVtbl dinput8_a_vtbl DECLSPEC_HIDDEN;
+
 /* Function called by all devices that Wine supports */
 struct dinput_device {
     const char *name;
-    HRESULT (*enum_deviceA)(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINSTANCEA lpddi, DWORD version, int id);
-    HRESULT (*enum_deviceW)(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINSTANCEW lpddi, DWORD version, int id);
-    HRESULT (*create_device)(IDirectInputImpl *dinput, REFGUID rguid, REFIID riid, LPVOID *pdev, int unicode);
+    HRESULT (*enum_device)(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINSTANCEW lpddi, DWORD version, int id);
+    HRESULT (*create_device)(IDirectInputImpl *dinput, REFGUID rguid, IDirectInputDevice8W **out);
 };
 
 struct DevicePlayer {
@@ -71,15 +73,13 @@ extern const struct dinput_device joystick_osx_device DECLSPEC_HIDDEN;
 
 extern void dinput_hooks_acquire_device(LPDIRECTINPUTDEVICE8W iface);
 extern void dinput_hooks_unacquire_device(LPDIRECTINPUTDEVICE8W iface);
-extern int dinput_mouse_hook(LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam);
-extern int dinput_keyboard_hook(LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam);
-extern void dinput_mouse_rawinput_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam, RAWINPUT *raw );
+extern int dinput_mouse_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam );
+extern int dinput_keyboard_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam );
+extern void dinput_mouse_rawinput_hook( IDirectInputDevice8W *iface, WPARAM wparam, LPARAM lparam,
+                                        RAWINPUT *raw );
 
 extern void check_dinput_hooks(LPDIRECTINPUTDEVICE8W, BOOL) DECLSPEC_HIDDEN;
 extern void check_dinput_events(void) DECLSPEC_HIDDEN;
-
-extern void _copy_diactionformatAtoW(LPDIACTIONFORMATW, LPDIACTIONFORMATA) DECLSPEC_HIDDEN;
-extern void _copy_diactionformatWtoA(LPDIACTIONFORMATA, LPDIACTIONFORMATW) DECLSPEC_HIDDEN;
 
 extern HRESULT _configure_devices(IDirectInput8W *iface, LPDICONFIGUREDEVICESCALLBACK lpdiCallback, LPDICONFIGUREDEVICESPARAMSW lpdiCDParams, DWORD dwFlags, LPVOID pvRefData) DECLSPEC_HIDDEN;
 

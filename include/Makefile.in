@@ -768,6 +768,8 @@ SOURCES = \
 	windows.h \
 	windows.media.devices.idl \
 	windows.media.speechsynthesis.idl \
+	windows.networking.connectivity.idl \
+	windows.networking.idl \
 	windows.system.idl \
 	windows.system.userprofile.idl \
 	windowscontracts.idl \

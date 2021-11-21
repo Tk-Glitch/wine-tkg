@@ -53,6 +53,7 @@ static NTSTATUS  (WINAPI *pRtlGetExtendedContextLength2)(ULONG context_flags, UL
 static NTSTATUS  (WINAPI *pRtlInitializeExtendedContext)(void *context, ULONG context_flags, CONTEXT_EX **context_ex);
 static NTSTATUS  (WINAPI *pRtlInitializeExtendedContext2)(void *context, ULONG context_flags, CONTEXT_EX **context_ex,
         ULONG64 compaction_mask);
+static NTSTATUS  (WINAPI *pRtlCopyContext)(CONTEXT *dst, DWORD context_flags, CONTEXT *src);
 static NTSTATUS  (WINAPI *pRtlCopyExtendedContext)(CONTEXT_EX *dst, ULONG context_flags, CONTEXT_EX *src);
 static void *    (WINAPI *pRtlLocateExtendedFeature)(CONTEXT_EX *context_ex, ULONG feature_id, ULONG *length);
 static void *    (WINAPI *pRtlLocateLegacyContext)(CONTEXT_EX *context_ex, ULONG *length);
@@ -75,7 +76,6 @@ static BOOL      (WINAPI *pInitializeContext2)(void *buffer, DWORD context_flags
 static void *    (WINAPI *pLocateXStateFeature)(CONTEXT *context, DWORD feature_id, DWORD *length);
 static BOOL      (WINAPI *pSetXStateFeaturesMask)(CONTEXT *context, DWORD64 feature_mask);
 static BOOL      (WINAPI *pGetXStateFeaturesMask)(CONTEXT *context, DWORD64 *feature_mask);
-static BOOL      (WINAPI *pCopyContext)(CONTEXT *dst, DWORD context_flags, CONTEXT *src);
 
 #define RTL_UNLOAD_EVENT_TRACE_NUMBER 64
 
@@ -8041,32 +8041,28 @@ static void test_copy_context(void)
         {0x0, 0x1}, {0x1000, 0},
     };
 
-    static const struct
-    {
-        ULONG flags;
-    }
-    tests[] =
+    static const ULONG tests[] =
     {
         /* AMD64 */
-        {0x100000 | 0x01}, /* CONTEXT_CONTROL */
-        {0x100000 | 0x02}, /* CONTEXT_INTEGER */
-        {0x100000 | 0x04}, /* CONTEXT_SEGMENTS */
-        {0x100000 | 0x08}, /* CONTEXT_FLOATING_POINT */
-        {0x100000 | 0x10}, /* CONTEXT_DEBUG_REGISTERS */
-        {0x100000 | 0x0b}, /* CONTEXT_FULL */
-        {0x100000 | 0x40}, /* CONTEXT_XSTATE */
-        {0x100000 | 0x1f}, /* CONTEXT_ALL */
+        CONTEXT_AMD64_CONTROL,
+        CONTEXT_AMD64_INTEGER,
+        CONTEXT_AMD64_SEGMENTS,
+        CONTEXT_AMD64_FLOATING_POINT,
+        CONTEXT_AMD64_DEBUG_REGISTERS,
+        CONTEXT_AMD64_FULL,
+        CONTEXT_AMD64_XSTATE,
+        CONTEXT_AMD64_ALL,
         /* X86 */
-        { 0x10000 | 0x01}, /* CONTEXT_CONTROL */
-        { 0x10000 | 0x02}, /* CONTEXT_INTEGER */
-        { 0x10000 | 0x04}, /* CONTEXT_SEGMENTS */
-        { 0x10000 | 0x08}, /* CONTEXT_FLOATING_POINT */
-        { 0x10000 | 0x10}, /* CONTEXT_DEBUG_REGISTERS */
-        { 0x10000 | 0x20}, /* CONTEXT_EXTENDED_REGISTERS */
-        { 0x10000 | 0x40}, /* CONTEXT_XSTATE */
-        { 0x10000 | 0x3f}, /* CONTEXT_ALL */
+        CONTEXT_I386_CONTROL,
+        CONTEXT_I386_INTEGER,
+        CONTEXT_I386_SEGMENTS,
+        CONTEXT_I386_FLOATING_POINT,
+        CONTEXT_I386_DEBUG_REGISTERS,
+        CONTEXT_I386_EXTENDED_REGISTERS,
+        CONTEXT_I386_XSTATE,
+        CONTEXT_I386_ALL
     };
-    static const ULONG arch_flags[] = {0x100000, 0x10000};
+    static const ULONG arch_flags[] = {CONTEXT_AMD64, CONTEXT_i386};
 
     DECLSPEC_ALIGN(64) BYTE src_context_buffer[4096];
     DECLSPEC_ALIGN(64) BYTE dst_context_buffer[4096];
@@ -8096,8 +8092,9 @@ static void test_copy_context(void)
 
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
-        flags = tests[i].flags;
-        flags_offset = (flags & 0x100000) ? 0x30 : 0;
+        flags = tests[i];
+        flags_offset = (flags & CONTEXT_AMD64) ? offsetof(AMD64_CONTEXT,ContextFlags)
+                                               : offsetof(I386_CONTEXT,ContextFlags);
 
         memset(dst_context_buffer, 0xdd, sizeof(dst_context_buffer));
         memset(src_context_buffer, 0xcc, sizeof(src_context_buffer));
@@ -8130,7 +8127,7 @@ static void test_copy_context(void)
         ok(!status, "Got unexpected status %#x, flags %#x.\n", status, flags);
 
         context_length = (BYTE *)dst_ex - (BYTE *)dst + dst_ex->All.Length;
-        check_changes_in_range((BYTE *)dst, flags & 0x100000 ? &ranges_amd64[0] : &ranges_x86[0],
+        check_changes_in_range((BYTE *)dst, flags & CONTEXT_AMD64 ? &ranges_amd64[0] : &ranges_x86[0],
                 flags, context_length);
 
         ok(*(DWORD *)((BYTE *)dst + flags_offset) == flags, "Got unexpected ContextFlags %#x, flags %#x.\n",
@@ -8142,35 +8139,30 @@ static void test_copy_context(void)
         *(DWORD *)((BYTE *)src + flags_offset) = 0;
         *(DWORD *)((BYTE *)dst + flags_offset) = 0;
         SetLastError(0xdeadbeef);
-        bret = pCopyContext(dst, flags | 0x40, src);
-        ok((!bret && GetLastError() == (enabled_features ? ERROR_INVALID_PARAMETER : ERROR_NOT_SUPPORTED))
-                || broken(!bret && GetLastError() == ERROR_INVALID_PARAMETER),
-                "Got unexpected bret %#x, GetLastError() %#x, flags %#x.\n",
-                bret, GetLastError(), flags);
+        status = pRtlCopyContext(dst, flags | 0x40, src);
+        ok(status == (enabled_features ? STATUS_INVALID_PARAMETER : STATUS_NOT_SUPPORTED)
+           || broken(status == STATUS_INVALID_PARAMETER),
+           "Got unexpected status %#x, flags %#x.\n", status, flags);
         ok(*(DWORD *)((BYTE *)dst + flags_offset) == 0, "Got unexpected ContextFlags %#x, flags %#x.\n",
                 *(DWORD *)((BYTE *)dst + flags_offset), flags);
-        check_changes_in_range((BYTE *)dst, flags & 0x100000 ? &ranges_amd64[0] : &ranges_x86[0],
+        check_changes_in_range((BYTE *)dst, flags & CONTEXT_AMD64 ? &ranges_amd64[0] : &ranges_x86[0],
                 0, context_length);
 
-        *(DWORD *)((BYTE *)dst + flags_offset) = flags & 0x110000;
+        *(DWORD *)((BYTE *)dst + flags_offset) = flags & (CONTEXT_AMD64 | CONTEXT_i386);
         *(DWORD *)((BYTE *)src + flags_offset) = flags;
-        SetLastError(0xdeadbeef);
-        bret = pCopyContext(dst, flags, src);
+        status = pRtlCopyContext(dst, flags, src);
         if (flags & 0x40)
-            ok((!bret && GetLastError() == ERROR_MORE_DATA)
-                    || broken(!(flags & CONTEXT_NATIVE) && !bret && GetLastError() == ERROR_INVALID_PARAMETER),
-                    "Got unexpected bret %#x, GetLastError() %#x, flags %#x.\n",
-                    bret, GetLastError(), flags);
+            ok((status == STATUS_BUFFER_OVERFLOW)
+               || broken(!(flags & CONTEXT_NATIVE) && status == STATUS_INVALID_PARAMETER),
+               "Got unexpected status %#x, flags %#x.\n", status, flags);
         else
-            ok((bret && GetLastError() == 0xdeadbeef)
-                    || broken(!(flags & CONTEXT_NATIVE) && !bret && GetLastError() == ERROR_INVALID_PARAMETER),
-                    "Got unexpected bret %#x, GetLastError() %#x, flags %#x.\n",
-                    bret, GetLastError(), flags);
-        if (bret)
+            ok(!status || broken(!(flags & CONTEXT_NATIVE) && status == STATUS_INVALID_PARAMETER),
+               "Got unexpected status %#x, flags %#x.\n", status, flags);
+        if (!status)
         {
             ok(*(DWORD *)((BYTE *)dst + flags_offset) == flags, "Got unexpected ContextFlags %#x, flags %#x.\n",
                     *(DWORD *)((BYTE *)dst + flags_offset), flags);
-            check_changes_in_range((BYTE *)dst, flags & 0x100000 ? &ranges_amd64[0] : &ranges_x86[0],
+            check_changes_in_range((BYTE *)dst, flags & CONTEXT_AMD64 ? &ranges_amd64[0] : &ranges_x86[0],
                     flags, context_length);
         }
         else
@@ -8178,7 +8170,7 @@ static void test_copy_context(void)
             ok(*(DWORD *)((BYTE *)dst + flags_offset) == (flags & 0x110000),
                     "Got unexpected ContextFlags %#x, flags %#x.\n",
                     *(DWORD *)((BYTE *)dst + flags_offset), flags);
-            check_changes_in_range((BYTE *)dst, flags & 0x100000 ? &ranges_amd64[0] : &ranges_x86[0],
+            check_changes_in_range((BYTE *)dst, flags & CONTEXT_AMD64 ? &ranges_amd64[0] : &ranges_x86[0],
                     0, context_length);
         }
     }
@@ -8186,8 +8178,9 @@ static void test_copy_context(void)
     for (i = 0; i < ARRAY_SIZE(arch_flags); ++i)
     {
         flags = arch_flags[i] | 0x42;
-        flags_offset = (flags & 0x100000) ? 0x30 : 0;
-        context_length = (flags & 0x100000) ? 0x4d0 : 0x2cc;
+        flags_offset = (flags & CONTEXT_AMD64) ? offsetof(AMD64_CONTEXT,ContextFlags)
+                                               : offsetof(I386_CONTEXT,ContextFlags);
+        context_length = (flags & CONTEXT_AMD64) ? sizeof(AMD64_CONTEXT) : sizeof(I386_CONTEXT);
 
         memset(dst_context_buffer, 0xdd, sizeof(dst_context_buffer));
         memset(src_context_buffer, 0xcc, sizeof(src_context_buffer));
@@ -8316,12 +8309,9 @@ static void test_copy_context(void)
         memset(&dst_xs->YmmContext, 0xdd, sizeof(dst_xs->YmmContext));
         dst_xs->CompactionMask = 0xdddddddddddddddd;
         dst_xs->Mask = 0xdddddddddddddddd;
-        SetLastError(0xdeadbeef);
-        bret = pCopyContext(dst, flags, src);
-        ok((bret && GetLastError() == 0xdeadbeef)
-                || broken(!(flags & CONTEXT_NATIVE) && !bret && GetLastError() == ERROR_INVALID_PARAMETER),
-                "Got unexpected bret %#x, GetLastError() %#x, flags %#x.\n",
-                bret, GetLastError(), flags);
+        status = pRtlCopyContext(dst, flags, src);
+        ok(!status || broken(!(flags & CONTEXT_NATIVE) && status == STATUS_INVALID_PARAMETER),
+           "Got unexpected status %#x, flags %#x.\n", status, flags);
         ok(dst_xs->Mask == 0xdddddddddddddddd || broken(dst_xs->Mask == 4), "Got unexpected Mask %s, flags %#x.\n",
                 wine_dbgstr_longlong(dst_xs->Mask), flags);
         ok(dst_xs->CompactionMask == 0xdddddddddddddddd || broken(dst_xs->CompactionMask == expected_compaction),
@@ -8386,6 +8376,7 @@ START_TEST(exception)
     X(RtlLocateLegacyContext);
     X(RtlSetExtendedFeaturesMask);
     X(RtlGetExtendedFeaturesMask);
+    X(RtlCopyContext);
     X(RtlCopyExtendedContext);
 #undef X
 
@@ -8398,7 +8389,6 @@ START_TEST(exception)
     X(LocateXStateFeature);
     X(SetXStateFeaturesMask);
     X(GetXStateFeaturesMask);
-    X(CopyContext);
 #undef X
 
     if (pRtlAddVectoredExceptionHandler && pRtlRemoveVectoredExceptionHandler)

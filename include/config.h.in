@@ -9,12 +9,6 @@
 /* Define to the file extension for executables. */
 #undef EXEEXT
 
-/* Define to 1 if you have the `acosh' function. */
-#undef HAVE_ACOSH
-
-/* Define to 1 if you have the `acoshf' function. */
-#undef HAVE_ACOSHF
-
 /* Define to 1 if you have the <alias.h> header file. */
 #undef HAVE_ALIAS_H
 
@@ -31,23 +25,11 @@
 /* Define to 1 if you have the <arpa/nameser.h> header file. */
 #undef HAVE_ARPA_NAMESER_H
 
-/* Define to 1 if you have the `asinh' function. */
-#undef HAVE_ASINH
-
-/* Define to 1 if you have the `asinhf' function. */
-#undef HAVE_ASINHF
-
 /* Define to 1 if you have the <asm/types.h> header file. */
 #undef HAVE_ASM_TYPES_H
 
 /* Define to 1 if you have the <asm/user.h> header file. */
 #undef HAVE_ASM_USER_H
-
-/* Define to 1 if you have the `atanh' function. */
-#undef HAVE_ATANH
-
-/* Define to 1 if you have the `atanhf' function. */
-#undef HAVE_ATANHF
 
 /* Define to 1 if you have the <attr/xattr.h> header file. */
 #undef HAVE_ATTR_XATTR_H
@@ -119,12 +101,6 @@
 /* Define to 1 if you have the `exp2f' function. */
 #undef HAVE_EXP2F
 
-/* Define to 1 if you have the `expm1' function. */
-#undef HAVE_EXPM1
-
-/* Define to 1 if you have the `expm1f' function. */
-#undef HAVE_EXPM1F
-
 /* Define to 1 if you have the `F3DAudioInitialize8' function. */
 #undef HAVE_F3DAUDIOINITIALIZE8
 
@@ -146,9 +122,6 @@
 
 /* Define to 1 if you have the <float.h> header file. */
 #undef HAVE_FLOAT_H
-
-/* Define to 1 if you have the `fma' function. */
-#undef HAVE_FMA
 
 /* Define to 1 if you have the `fmaf' function. */
 #undef HAVE_FMAF
@@ -333,12 +306,6 @@
 /* Define to 1 if you have the `ldap_parse_vlv_control' function. */
 #undef HAVE_LDAP_PARSE_VLV_CONTROL
 
-/* Define to 1 if you have the `lgamma' function. */
-#undef HAVE_LGAMMA
-
-/* Define to 1 if you have the `lgammaf' function. */
-#undef HAVE_LGAMMAF
-
 /* Define to 1 if you have the `gettextpo' library (-lgettextpo). */
 #undef HAVE_LIBGETTEXTPO
 
@@ -446,18 +413,6 @@
 
 /* Define to 1 if you have the <linux/videodev2.h> header file. */
 #undef HAVE_LINUX_VIDEODEV2_H
-
-/* Define to 1 if you have the `log1p' function. */
-#undef HAVE_LOG1P
-
-/* Define to 1 if you have the `log1pf' function. */
-#undef HAVE_LOG1PF
-
-/* Define to 1 if you have the `log2' function. */
-#undef HAVE_LOG2
-
-/* Define to 1 if you have the `log2f' function. */
-#undef HAVE_LOG2F
 
 /* Define to 1 if you have the `lstat' function. */
 #undef HAVE_LSTAT

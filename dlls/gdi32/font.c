@@ -2485,7 +2485,8 @@ static void update_codepage(void)
                 add_font_list(hkey, &nls_update_font_list[i], screen_dpi);
                 RegCloseKey(hkey);
             }
-            if (!RegCreateKeyW( HKEY_LOCAL_MACHINE,
+            /* Only update these if the Codepage changed. */
+            if (strcmp( buf, cpbuf ) && !RegCreateKeyW( HKEY_LOCAL_MACHINE,
                                 L"Software\\Microsoft\\Windows NT\\CurrentVersion\\FontSubstitutes", &hkey ))
             {
                 RegSetValueExA(hkey, "MS Shell Dlg", 0, REG_SZ, (const BYTE *)nls_update_font_list[i].shelldlg,
@@ -7881,9 +7882,9 @@ static void update_external_font_keys(void)
     {
         if (type != REG_SZ) goto next;
         if ((tmp = wcsrchr( value, ' ' )) && !facename_compare( tmp, L" (TrueType)", -1 )) *tmp = 0;
-        if ((face = find_face_from_full_name( value )))
+        if ((face = find_face_from_full_name( value )) && !wcsicmp( face->file, path ))
         {
-            if (!wcsicmp( face->file, path )) face->flags |= ADDFONT_EXTERNAL_FOUND;
+            face->flags |= ADDFONT_EXTERNAL_FOUND;
             goto next;
         }
         if (tmp && !*tmp) *tmp = ' ';

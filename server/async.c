@@ -156,12 +156,7 @@ void async_terminate( struct async *async, unsigned int status )
 {
     assert( status != STATUS_PENDING );
 
-    if (async->status != STATUS_PENDING)
-    {
-        /* already terminated, just update status */
-        async->status = status;
-        return;
-    }
+    if (async->status != STATUS_PENDING) return; /* already terminated */
 
     async->status = status;
     if (async->iosb && async->iosb->status == STATUS_PENDING) async->iosb->status = status;
@@ -413,11 +408,11 @@ void async_set_result( struct object *obj, unsigned int status, apc_param_t tota
         {
             apc_call_t data;
             memset( &data, 0, sizeof(data) );
-            data.type              = APC_USER;
-            data.user.user.func    = async->data.apc;
-            data.user.user.args[0] = async->data.apc_context;
-            data.user.user.args[1] = async->data.iosb;
-            data.user.user.args[2] = 0;
+            data.type         = APC_USER;
+            data.user.func    = async->data.apc;
+            data.user.args[0] = async->data.apc_context;
+            data.user.args[1] = async->data.iosb;
+            data.user.args[2] = 0;
             thread_queue_apc( NULL, async->thread, NULL, &data );
         }
         else if (async->data.apc_context && (async->pending ||
@@ -459,7 +454,7 @@ static int cancel_async( struct process *process, struct object *obj, struct thr
 restart:
     LIST_FOR_EACH_ENTRY( async, &process->asyncs, struct async, process_entry )
     {
-        if (async->status == STATUS_CANCELLED) continue;
+        if (async->status != STATUS_PENDING) continue;
         if ((!obj || (async->fd && get_fd_user( async->fd ) == obj)) &&
             (!thread || async->thread == thread) &&
             (!iosb || async->data.iosb == iosb))

@@ -62,21 +62,9 @@ const GUID DInput_PIDVID_Product_GUID = { /* device_pidvid-0000-0000-0000-504944
     0x00000000, 0x0000, 0x0000, {0x00, 0x00, 0x50, 0x49, 0x44, 0x56, 0x49, 0x44}
 };
 
-static inline JoystickGenericImpl *impl_from_IDirectInputDevice8A(IDirectInputDevice8A *iface)
-{
-    return CONTAINING_RECORD(CONTAINING_RECORD(iface, IDirectInputDeviceImpl, IDirectInputDevice8A_iface), JoystickGenericImpl, base);
-}
 static inline JoystickGenericImpl *impl_from_IDirectInputDevice8W(IDirectInputDevice8W *iface)
 {
     return CONTAINING_RECORD(CONTAINING_RECORD(iface, IDirectInputDeviceImpl, IDirectInputDevice8W_iface), JoystickGenericImpl, base);
-}
-static inline IDirectInputDevice8A *IDirectInputDevice8A_from_impl(JoystickGenericImpl *This)
-{
-    return &This->base.IDirectInputDevice8A_iface;
-}
-static inline IDirectInputDevice8W *IDirectInputDevice8W_from_impl(JoystickGenericImpl *This)
-{
-    return &This->base.IDirectInputDevice8W_iface;
 }
 
 DWORD typeFromGUID(REFGUID guid)
@@ -484,12 +472,6 @@ HRESULT WINAPI JoystickWGenericImpl_SetProperty(LPDIRECTINPUTDEVICE8W iface, REF
     return DI_OK;
 }
 
-HRESULT WINAPI JoystickAGenericImpl_SetProperty(LPDIRECTINPUTDEVICE8A iface, REFGUID rguid, LPCDIPROPHEADER ph)
-{
-    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
-    return JoystickWGenericImpl_SetProperty(IDirectInputDevice8W_from_impl(This), rguid, ph);
-}
-
 #define DEBUG_TYPE(x) case (x): str = #x; break
 void _dump_DIDEVCAPS(const DIDEVCAPS *lpDIDevCaps)
 {
@@ -565,11 +547,16 @@ HRESULT WINAPI JoystickWGenericImpl_GetCapabilities(LPDIRECTINPUTDEVICE8W iface,
     return DI_OK;
 }
 
-HRESULT WINAPI JoystickAGenericImpl_GetCapabilities(LPDIRECTINPUTDEVICE8A iface, LPDIDEVCAPS lpDIDevCaps)
+
+ULONG WINAPI JoystickWGenericImpl_Release(LPDIRECTINPUTDEVICE8W iface)
 {
-    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
-    return JoystickWGenericImpl_GetCapabilities(IDirectInputDevice8W_from_impl(This), lpDIDevCaps);
+    JoystickGenericImpl *This = impl_from_IDirectInputDevice8W(iface);
+    void *axis_map = This->axis_map;
+    ULONG res = IDirectInputDevice2WImpl_Release(iface);
+    if (!res) HeapFree(GetProcessHeap(), 0, axis_map);
+    return res;
 }
+
 
 /******************************************************************************
   *     GetObjectInfo : get object info
@@ -594,27 +581,6 @@ HRESULT WINAPI JoystickWGenericImpl_GetObjectInfo(LPDIRECTINPUTDEVICE8W iface,
         sprintfW(pdidoi->tszName, buttonW, DIDFT_GETINSTANCE(pdidoi->dwType));
 
     _dump_OBJECTINSTANCEW(pdidoi);
-    return res;
-}
-
-HRESULT WINAPI JoystickAGenericImpl_GetObjectInfo(LPDIRECTINPUTDEVICE8A iface,
-        LPDIDEVICEOBJECTINSTANCEA pdidoi, DWORD dwObj, DWORD dwHow)
-{
-    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
-    HRESULT res;
-    DIDEVICEOBJECTINSTANCEW didoiW;
-    DWORD dwSize = pdidoi->dwSize;
-
-    didoiW.dwSize = sizeof(didoiW);
-    res = JoystickWGenericImpl_GetObjectInfo(IDirectInputDevice8W_from_impl(This), &didoiW, dwObj, dwHow);
-    if (res != DI_OK) return res;
-
-    memset(pdidoi, 0, pdidoi->dwSize);
-    memcpy(pdidoi, &didoiW, FIELD_OFFSET(DIDEVICEOBJECTINSTANCEW, tszName));
-    pdidoi->dwSize = dwSize;
-    WideCharToMultiByte(CP_ACP, 0, didoiW.tszName, -1, pdidoi->tszName,
-                        sizeof(pdidoi->tszName), NULL, NULL);
-
     return res;
 }
 
@@ -691,60 +657,6 @@ HRESULT WINAPI JoystickWGenericImpl_GetProperty(LPDIRECTINPUTDEVICE8W iface, REF
     return DI_OK;
 }
 
-HRESULT WINAPI JoystickAGenericImpl_GetProperty(LPDIRECTINPUTDEVICE8A iface, REFGUID rguid, LPDIPROPHEADER pdiph)
-{
-    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
-    return JoystickWGenericImpl_GetProperty(IDirectInputDevice8W_from_impl(This), rguid, pdiph);
-}
-
-/******************************************************************************
-  *     GetDeviceInfo : get information about a device's identity
-  */
-HRESULT WINAPI JoystickAGenericImpl_GetDeviceInfo(
-    LPDIRECTINPUTDEVICE8A iface,
-    LPDIDEVICEINSTANCEA pdidi)
-{
-    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
-    DIPROPDWORD pd;
-    DWORD index = 0;
-
-    TRACE("(%p,%p)\n", This, pdidi);
-
-    if (pdidi == NULL) {
-        WARN("invalid pointer\n");
-        return E_POINTER;
-    }
-
-    if ((pdidi->dwSize != sizeof(DIDEVICEINSTANCE_DX3A)) &&
-        (pdidi->dwSize != sizeof(DIDEVICEINSTANCEA))) {
-        WARN("invalid parameter: pdidi->dwSize = %d\n", pdidi->dwSize);
-        return DIERR_INVALIDPARAM;
-    }
-
-    /* Try to get joystick index */
-    pd.diph.dwSize = sizeof(pd);
-    pd.diph.dwHeaderSize = sizeof(pd.diph);
-    pd.diph.dwObj = 0;
-    pd.diph.dwHow = DIPH_DEVICE;
-    if (SUCCEEDED(IDirectInputDevice2_GetProperty(iface, DIPROP_JOYSTICKID, &pd.diph)))
-        index = pd.dwData;
-
-    /* Return joystick */
-    pdidi->guidInstance = This->base.guid;
-    pdidi->guidProduct = This->guidProduct;
-    /* we only support traditional joysticks for now */
-    pdidi->dwDevType = This->devcaps.dwDevType;
-    snprintf(pdidi->tszInstanceName, MAX_PATH, "Joystick %d", index);
-    lstrcpynA(pdidi->tszProductName, This->name, MAX_PATH);
-    if (pdidi->dwSize > sizeof(DIDEVICEINSTANCE_DX3A)) {
-        pdidi->guidFFDriver = GUID_NULL;
-        pdidi->wUsagePage = 0;
-        pdidi->wUsage = 0;
-    }
-
-    return DI_OK;
-}
-
 /******************************************************************************
   *     GetDeviceInfo : get information about a device's identity
   */
@@ -801,14 +713,8 @@ HRESULT WINAPI JoystickWGenericImpl_Poll(LPDIRECTINPUTDEVICE8W iface)
         return DIERR_NOTACQUIRED;
     }
 
-    This->joy_polldev(IDirectInputDevice8A_from_impl(This));
+    This->joy_polldev( iface );
     return DI_OK;
-}
-
-HRESULT WINAPI JoystickAGenericImpl_Poll(LPDIRECTINPUTDEVICE8A iface)
-{
-    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
-    return JoystickWGenericImpl_Poll(IDirectInputDevice8W_from_impl(This));
 }
 
 /******************************************************************************
@@ -827,20 +733,13 @@ HRESULT WINAPI JoystickWGenericImpl_GetDeviceState(LPDIRECTINPUTDEVICE8W iface, 
     }
 
     /* update joystick state */
-    This->joy_polldev(IDirectInputDevice8A_from_impl(This));
+    This->joy_polldev( iface );
 
     /* convert and copy data to user supplied buffer */
     fill_DataFormat(ptr, len, &This->js, &This->base.data_format);
 
     return DI_OK;
 }
-
-HRESULT WINAPI JoystickAGenericImpl_GetDeviceState(LPDIRECTINPUTDEVICE8A iface, DWORD len, LPVOID ptr)
-{
-    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
-    return JoystickWGenericImpl_GetDeviceState(IDirectInputDevice8W_from_impl(This), len, ptr);
-}
-
 
 HRESULT WINAPI JoystickWGenericImpl_BuildActionMap(LPDIRECTINPUTDEVICE8W iface,
                                                    LPDIACTIONFORMATW lpdiaf,
@@ -917,36 +816,6 @@ HRESULT WINAPI JoystickWGenericImpl_BuildActionMap(LPDIRECTINPUTDEVICE8W iface,
     return IDirectInputDevice8WImpl_BuildActionMap(iface, lpdiaf, lpszUserName, dwFlags);
 }
 
-HRESULT WINAPI JoystickAGenericImpl_BuildActionMap(LPDIRECTINPUTDEVICE8A iface,
-                                                   LPDIACTIONFORMATA lpdiaf,
-                                                   LPCSTR lpszUserName,
-                                                   DWORD dwFlags)
-{
-    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
-    DIACTIONFORMATW diafW;
-    HRESULT hr;
-    WCHAR *lpszUserNameW = NULL;
-    int username_size;
-
-    diafW.rgoAction = HeapAlloc(GetProcessHeap(), 0, sizeof(DIACTIONW)*lpdiaf->dwNumActions);
-    _copy_diactionformatAtoW(&diafW, lpdiaf);
-
-    if (lpszUserName != NULL)
-    {
-        username_size = MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, NULL, 0);
-        lpszUserNameW = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*username_size);
-        MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, lpszUserNameW, username_size);
-    }
-
-    hr = JoystickWGenericImpl_BuildActionMap(&This->base.IDirectInputDevice8W_iface, &diafW, lpszUserNameW, dwFlags);
-
-    _copy_diactionformatWtoA(lpdiaf, &diafW);
-    HeapFree(GetProcessHeap(), 0, diafW.rgoAction);
-    HeapFree(GetProcessHeap(), 0, lpszUserNameW);
-
-    return hr;
-}
-
 HRESULT WINAPI JoystickWGenericImpl_SetActionMap(LPDIRECTINPUTDEVICE8W iface,
                                                  LPDIACTIONFORMATW lpdiaf,
                                                  LPCWSTR lpszUserName,
@@ -957,37 +826,6 @@ HRESULT WINAPI JoystickWGenericImpl_SetActionMap(LPDIRECTINPUTDEVICE8W iface,
     FIXME("(%p)->(%p,%s,%08x): semi-stub !\n", This, lpdiaf, debugstr_w(lpszUserName), dwFlags);
 
     return _set_action_map(iface, lpdiaf, lpszUserName, dwFlags, This->base.data_format.wine_df);
-}
-
-HRESULT WINAPI JoystickAGenericImpl_SetActionMap(LPDIRECTINPUTDEVICE8A iface,
-                                                 LPDIACTIONFORMATA lpdiaf,
-                                                 LPCSTR lpszUserName,
-                                                 DWORD dwFlags)
-{
-    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
-    DIACTIONFORMATW diafW;
-    HRESULT hr;
-    WCHAR *lpszUserNameW = NULL;
-    int username_size;
-
-    diafW.rgoAction = HeapAlloc(GetProcessHeap(), 0, sizeof(DIACTIONW)*lpdiaf->dwNumActions);
-    _copy_diactionformatAtoW(&diafW, lpdiaf);
-
-    if (lpszUserName != NULL)
-    {
-        username_size = MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, NULL, 0);
-        lpszUserNameW = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*username_size);
-        MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, lpszUserNameW, username_size);
-    }
-
-    hr = JoystickWGenericImpl_SetActionMap(&This->base.IDirectInputDevice8W_iface, &diafW, lpszUserNameW, dwFlags);
-
-    lpdiaf->dwCRC = diafW.dwCRC;
-
-    HeapFree(GetProcessHeap(), 0, diafW.rgoAction);
-    HeapFree(GetProcessHeap(), 0, lpszUserNameW);
-
-    return hr;
 }
 
 /*

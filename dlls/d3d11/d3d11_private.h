@@ -590,7 +590,7 @@ struct d3d11_command_list
     ID3D11CommandList ID3D11CommandList_iface;
     LONG refcount;
 
-    ID3D11Device *device;
+    ID3D11Device2 *device;
     struct wined3d_command_list *wined3d_list;
     struct wined3d_private_store private_store;
 };

@@ -3016,13 +3016,6 @@ INT WINAPI GetWindowTextA( HWND hwnd, LPSTR lpString, INT nMaxCount )
     return strlen(lpString);
 }
 
-/*******************************************************************
- *		InternalGetWindowIcon (USER32.@)
- */
-INT WINAPI InternalGetWindowIcon(HWND hwnd, UINT iconType )
-{
-    return NULL;
-}
 
 /*******************************************************************
  *		InternalGetWindowText (USER32.@)
@@ -4374,4 +4367,51 @@ BOOL WINAPI SetWindowCompositionAttribute(HWND hwnd, void *data)
     FIXME("(%p, %p): stub\n", hwnd, data);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
+}
+
+/***********************************************************************
+ *              InternalGetWindowIcon   (USER32.@)
+ */
+HICON WINAPI InternalGetWindowIcon( HWND hwnd, UINT type )
+{
+    WND *win = WIN_GetPtr( hwnd );
+    HICON ret;
+
+    TRACE( "hwnd %p, type %#x\n", hwnd, type );
+
+    if (!win)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return 0;
+    }
+    if (win == WND_OTHER_PROCESS || win == WND_DESKTOP)
+    {
+        if (IsWindow( hwnd )) FIXME( "not supported on other process window %p\n", hwnd );
+        return 0;
+    }
+
+    switch (type)
+    {
+        case ICON_BIG:
+            ret = win->hIcon;
+            if (!ret) ret = (HICON)GetClassLongPtrW( hwnd, GCLP_HICON );
+            break;
+
+        case ICON_SMALL:
+        case ICON_SMALL2:
+            ret = win->hIconSmall ? win->hIconSmall : win->hIconSmall2;
+            if (!ret) ret = (HICON)GetClassLongPtrW( hwnd, GCLP_HICONSM );
+            if (!ret) ret = (HICON)GetClassLongPtrW( hwnd, GCLP_HICON );
+            break;
+
+        default:
+            SetLastError( ERROR_INVALID_PARAMETER );
+            WIN_ReleasePtr( win );
+            return 0;
+    }
+
+    if (!ret) ret = LoadIconW( 0, (const WCHAR *)IDI_APPLICATION );
+
+    WIN_ReleasePtr( win );
+    return CopyIcon( ret );
 }

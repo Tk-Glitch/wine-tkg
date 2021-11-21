@@ -157,16 +157,6 @@ static inline struct arm64_thread_data *arm64_thread_data(void)
     return (struct arm64_thread_data *)ntdll_get_thread_data()->cpu_data;
 }
 
-void *get_syscall_frame(void)
-{
-    return arm64_thread_data()->syscall_frame;
-}
-
-void set_syscall_frame(void *frame)
-{
-    arm64_thread_data()->syscall_frame = frame;
-}
-
 extern void raise_func_trampoline( EXCEPTION_RECORD *rec, CONTEXT *context, void *dispatcher );
 
 /***********************************************************************
@@ -613,20 +603,21 @@ static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
  */
 __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
                    "mov x19, x0\n\t"             /* context */
-                   "mov x20, x1\n\t"             /* ctx */
-                   "mov x21, x2\n\t"             /* arg1 */
-                   "mov x22, x3\n\t"             /* arg2 */
+                   "mov x20, x1\n\t"             /* arg1 */
+                   "mov x21, x2\n\t"             /* arg2 */
+                   "mov x22, x3\n\t"             /* arg3 */
                    "mov x23, x4\n\t"             /* func */
                    "mov x24, x5\n\t"             /* dispatcher */
+                   "mov x25, x6\n\t"             /* status */
                    "bl " __ASM_NAME("NtCurrentTeb") "\n\t"
-                   "add x25, x0, #0x2f8\n\t"     /* arm64_thread_data()->syscall_frame */
+                   "add x26, x0, #0x2f8\n\t"     /* arm64_thread_data()->syscall_frame */
                    "cbz x19, 1f\n\t"
                    "ldr x0, [x19, #0x100]\n\t"   /* context.Sp */
                    "sub x0, x0, #0x430\n\t"      /* sizeof(CONTEXT) + offsetof(frame,thunk_x29) */
-                   "str xzr, [x25]\n\t"
+                   "str xzr, [x26]\n\t"
                    "mov sp, x0\n\t"
                    "b 2f\n"
-                   "1:\tldr x0, [x25]\n\t"
+                   "1:\tldr x0, [x26]\n\t"
                    "sub sp, x0, #0x390\n\t"
                    "mov w2, #0x400000\n\t"       /* context.ContextFlags = CONTEXT_FULL */
                    "movk w2, #7\n\t"
@@ -634,14 +625,13 @@ __ASM_GLOBAL_FUNC( call_user_apc_dispatcher,
                    "mov x1, sp\n\t"
                    "mov x0, #~1\n\t"
                    "bl " __ASM_NAME("NtGetContextThread") "\n\t"
-                   "mov w2, #0xc0\n\t"           /* context.X0 = STATUS_USER_APC */
-                   "str x2, [sp, #8]\n\t"
-                   "str xzr, [x25]\n\t"
+                   "str x25, [sp, #8]\n\t"       /* context.X0 = status */
+                   "str xzr, [x26]\n\t"
                    "mov x0, sp\n"                /* context */
                    "2:\tldr lr, [x0, #0xf8]\n\t" /* context.Lr */
-                   "mov x1, x20\n\t"             /* ctx */
-                   "mov x2, x21\n\t"             /* arg1 */
-                   "mov x3, x22\n\t"             /* arg2 */
+                   "mov x1, x20\n\t"             /* arg1 */
+                   "mov x2, x21\n\t"             /* arg2 */
+                   "mov x3, x22\n\t"             /* arg3 */
                    "mov x4, x23\n\t"             /* func */
                    "br x24" )
 
@@ -686,7 +676,6 @@ __ASM_GLOBAL_FUNC( call_user_exception_dispatcher,
 static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
 {
     struct syscall_frame *frame = arm64_thread_data()->syscall_frame;
-    __WINE_FRAME *wine_frame = (__WINE_FRAME *)NtCurrentTeb()->Tib.ExceptionList;
     DWORD i;
 
     if (!frame) return FALSE;
@@ -722,12 +711,13 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
           (DWORD64)REGn_sig(28, context), (DWORD64)FP_sig(context),
           (DWORD64)LR_sig(context), (DWORD64)SP_sig(context) );
 
-    if ((char *)wine_frame < (char *)frame)
+    if (ntdll_get_thread_data()->jmp_buf)
     {
         TRACE( "returning to handler\n" );
-        REGn_sig(0, context) = (ULONG_PTR)&wine_frame->jmp;
+        REGn_sig(0, context) = (ULONG_PTR)ntdll_get_thread_data()->jmp_buf;
         REGn_sig(1, context) = 1;
         PC_sig(context)      = (ULONG_PTR)__wine_longjmp;
+        ntdll_get_thread_data()->jmp_buf = NULL;
     }
     else
     {
@@ -1041,16 +1031,6 @@ void signal_init_process(void)
     perror("sigaction");
     exit(1);
 }
-
-
-/**********************************************************************
- *		signal_init_syscalls
- */
-void *signal_init_syscalls(void)
-{
-    return __wine_syscall_dispatcher;
-}
-
 
 /**********************************************************************
  *    signal_init_early
