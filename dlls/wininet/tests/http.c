@@ -2397,6 +2397,11 @@ static DWORD CALLBACK server_thread(LPVOID param)
             static const char nocontentmsg[] = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n";
             send(c, nocontentmsg, sizeof(nocontentmsg)-1, 0);
         }
+        if (strstr(buffer, "GET /test_not_modified"))
+        {
+            static const char notmodifiedmsg[] = "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n";
+            send(c, notmodifiedmsg, sizeof(notmodifiedmsg)-1, 0);
+        }
         if (strstr(buffer, "GET /test_conn_close"))
         {
             static const char conn_close_response[] = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nsome content";
@@ -3707,6 +3712,37 @@ static void test_no_content(int port)
      */
     CHECK_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
     CHECK_NOTIFIED(INTERNET_STATUS_CONNECTION_CLOSED);
+}
+
+static void test_not_modified(int port)
+{
+    DWORD len;
+    char buf[256];
+    HINTERNET ses, con, req;
+    BOOL ret;
+
+    ses = InternetOpenA("winetest", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    ok(ses != NULL, "InternetOpen failed\n");
+
+    con = InternetConnectA(ses, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    ok(con != NULL, "InternetConnect failed\n");
+
+    req = HttpOpenRequestA(con, NULL, "/test_not_modified", NULL, NULL, NULL, 0, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    SetLastError(0xdeadbeef);
+    ret = HttpSendRequestW(req, NULL, 0, NULL, 0);
+    ok(ret, "HttpSendRequest failed: %u\n", GetLastError());
+    test_status_code(req, 304);
+
+    len = sizeof(buf)-1;
+    ret = HttpQueryInfoA(req, HTTP_QUERY_CONTENT_LENGTH, buf, &len, 0);
+    ok(!ret, "HttpQueryInfo should have failed\n");
+    ok(GetLastError() == ERROR_HTTP_HEADER_NOT_FOUND , "got %u\n", GetLastError());
+
+    InternetCloseHandle(req);
+    InternetCloseHandle(con);
+    InternetCloseHandle(ses);
 }
 
 static void test_conn_close(int port)
@@ -6334,6 +6370,7 @@ static void test_http_connection(void)
     test_HttpSendRequestW(si.port);
     test_options(si.port);
     test_no_content(si.port);
+    test_not_modified(si.port);
     test_conn_close(si.port);
     test_no_cache(si.port);
     test_cache_read_gzipped(si.port);

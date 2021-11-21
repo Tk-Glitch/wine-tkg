@@ -43,6 +43,7 @@ static GDI_HANDLE_ENTRY *next_free;
 static GDI_HANDLE_ENTRY *next_unused = gdi_shared.Handles + FIRST_GDI_HANDLE;
 static LONG debug_count;
 HMODULE gdi32_module = 0;
+SYSTEM_BASIC_INFORMATION system_info;
 
 static inline HGDIOBJ entry_to_handle( GDI_HANDLE_ENTRY *entry )
 {
@@ -591,7 +592,7 @@ static HFONT create_scaled_font( const LOGFONTW *deffont )
     }
 
     lf = *deffont;
-    lf.lfHeight = MulDiv( lf.lfHeight, dpi, 96 );
+    lf.lfHeight = muldiv( lf.lfHeight, dpi, 96 );
     return create_font( &lf );
 }
 
@@ -702,6 +703,7 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
 
     gdi32_module = inst;
     DisableThreadLibraryCalls( inst );
+    NtQuerySystemInformation( SystemBasicInformation, &system_info, sizeof(system_info), NULL );
     set_gdi_shared();
     font_init();
     init_stock_objects();
@@ -816,6 +818,11 @@ void *free_gdi_handle( HGDIOBJ handle )
     return object;
 }
 
+DWORD get_gdi_object_type( HGDIOBJ obj )
+{
+    GDI_HANDLE_ENTRY *entry = handle_entry( obj );
+    return entry ? entry->ExtType << NTGDI_HANDLE_TYPE_SHIFT : 0;
+}
 
 /***********************************************************************
  *           get_any_obj_ptr
@@ -878,7 +885,7 @@ void GDI_CheckNotLock(void)
     if (RtlIsCriticalSectionLockedByThread(&gdi_section))
     {
         ERR( "BUG: holding GDI lock\n" );
-        DebugBreak();
+        assert( 0 );
     }
 }
 

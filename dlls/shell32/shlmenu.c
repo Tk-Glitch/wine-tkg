@@ -236,8 +236,7 @@ static int FM_InitMenuPopup(HMENU hmenu, LPCITEMIDLIST pAlternatePidl)
 
 	if ( GetMenuItemCount (hmenu) == 0 )
 	{
-          static const WCHAR szEmpty[] = { '(','e','m','p','t','y',')',0 };
-	  FileMenu_AppendItemW (hmenu, szEmpty, uID, FM_BLANK_ICON, 0, FM_DEFAULT_HEIGHT);
+	  FileMenu_AppendItemW (hmenu, L"(empty)", uID, FM_BLANK_ICON, 0, FM_DEFAULT_HEIGHT);
 	  NumberOfItems++;
 	}
 
@@ -331,9 +330,9 @@ static BOOL FileMenu_AppendItemW(
 
 	if (lpText != FM_SEPARATOR)
 	{
-	  int len = strlenW (lpText);
+	  int len = lstrlenW (lpText);
           myItem = SHAlloc(sizeof(FMITEM) + len*sizeof(WCHAR));
-	  strcpyW (myItem->szItemText, lpText);
+	  lstrcpyW (myItem->szItemText, lpText);
 	  myItem->cchItemText = len;
 	  myItem->iIconIndex = icon;
 	  myItem->hMenu = hMenu;

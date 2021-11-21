@@ -383,6 +383,7 @@ extern BOOL GDI_dec_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern DWORD get_dpi(void) DECLSPEC_HIDDEN;
 extern DWORD get_system_dpi(void) DECLSPEC_HIDDEN;
 extern HGDIOBJ get_stock_object( INT obj ) DECLSPEC_HIDDEN;
+extern DWORD get_gdi_object_type( HGDIOBJ obj ) DECLSPEC_HIDDEN;
 
 /* mapping.c */
 extern BOOL dp_to_lp( DC *dc, POINT *points, INT count ) DECLSPEC_HIDDEN;
@@ -390,6 +391,7 @@ extern void lp_to_dp( DC *dc, POINT *points, INT count ) DECLSPEC_HIDDEN;
 extern BOOL set_map_mode( DC *dc, int mode ) DECLSPEC_HIDDEN;
 extern void combine_transform( XFORM *result, const XFORM *xform1,
                                const XFORM *xform2 ) DECLSPEC_HIDDEN;
+extern int muldiv( int a, int b, int c ) DECLSPEC_HIDDEN;
 
 /* driver.c */
 extern BOOL is_display_device( LPCWSTR name ) DECLSPEC_HIDDEN;
@@ -647,5 +649,6 @@ extern void CDECL free_heap_bits( struct gdi_image_bits *bits ) DECLSPEC_HIDDEN;
 void set_gdi_client_ptr( HGDIOBJ handle, void *ptr ) DECLSPEC_HIDDEN;
 
 extern HMODULE gdi32_module DECLSPEC_HIDDEN;
+extern SYSTEM_BASIC_INFORMATION system_info DECLSPEC_HIDDEN;
 
 #endif /* __WINE_NTGDI_PRIVATE_H */

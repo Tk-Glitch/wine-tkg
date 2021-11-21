@@ -76,6 +76,14 @@ static void *ldr_notify_cookie;
 static PLOAD_IMAGE_NOTIFY_ROUTINE load_image_notify_routines[8];
 static unsigned int load_image_notify_routine_count;
 
+struct irp_data
+{
+    HANDLE handle;
+    IRP *irp;
+    BOOL async;
+    BOOL complete;
+};
+
 static int wine_drivers_rb_compare( const void *key, const struct wine_rb_entry *entry )
 {
     const struct wine_driver *driver = WINE_RB_ENTRY_VALUE( entry, const struct wine_driver, entry );
@@ -419,36 +427,80 @@ static void *create_file_object( HANDLE handle )
 
 DECLARE_CRITICAL_SECTION(irp_completion_cs);
 
-/* transfer result of IRP back to wineserver */
-static NTSTATUS WINAPI dispatch_irp_completion( DEVICE_OBJECT *device, IRP *irp, void *context )
+static void free_dispatch_irp( struct irp_data *irp_data )
 {
-    HANDLE irp_handle = context;
-    void *out_buff = irp->UserBuffer;
-    NTSTATUS status;
-
-    if (irp->Flags & IRP_WRITE_OPERATION)
-        out_buff = NULL;  /* do not transfer back input buffer */
-
-    EnterCriticalSection( &irp_completion_cs );
-
-    SERVER_START_REQ( set_irp_result )
-    {
-        req->handle   = wine_server_obj_handle( irp_handle );
-        req->status   = irp->IoStatus.u.Status;
-        req->size     = irp->IoStatus.Information;
-        if (!NT_ERROR(irp->IoStatus.u.Status))
-        {
-            if (out_buff) wine_server_add_data( req, out_buff, irp->IoStatus.Information );
-        }
-        status = wine_server_call( req );
-    }
-    SERVER_END_REQ;
+    IRP *irp = irp_data->irp;
 
     if (irp->UserBuffer != irp->AssociatedIrp.SystemBuffer)
     {
         HeapFree( GetProcessHeap(), 0, irp->UserBuffer );
         irp->UserBuffer = NULL;
     }
+
+    free( irp_data );
+}
+
+static ULONG get_irp_output_size( IRP *irp )
+{
+    IO_STACK_LOCATION *stack = IoGetNextIrpStackLocation( irp );
+
+    if (!irp->UserBuffer || (irp->Flags & IRP_WRITE_OPERATION))
+        return 0;
+
+    /* For IRPs not using buffered I/O, the driver is supposed to have direct
+     * access to the user's output buffer, either via an MDL (direct I/O) or
+     * with the raw user VA (neither). We can't fully support this, but we
+     * should at least copy the entire buffer back to the caller. */
+    switch (stack->MajorFunction)
+    {
+        case IRP_MJ_FILE_SYSTEM_CONTROL:
+        case IRP_MJ_DEVICE_CONTROL:
+        case IRP_MJ_INTERNAL_DEVICE_CONTROL:
+            if ((stack->Parameters.DeviceIoControl.IoControlCode & 3) != METHOD_BUFFERED)
+                return stack->Parameters.DeviceIoControl.OutputBufferLength;
+            break;
+
+        case IRP_MJ_READ:
+            /* FIXME: Handle non-buffered reads. */
+        default:
+            break;
+    }
+
+    if (NT_ERROR(irp->IoStatus.u.Status))
+        return 0;
+    return irp->IoStatus.Information;
+}
+
+/* transfer result of IRP back to wineserver */
+static NTSTATUS WINAPI dispatch_irp_completion( DEVICE_OBJECT *device, IRP *irp, void *context )
+{
+    struct irp_data *irp_data = context;
+    NTSTATUS status;
+    ULONG out_size;
+
+    EnterCriticalSection( &irp_completion_cs );
+
+    irp_data->complete = TRUE;
+    if (!irp_data->async)
+    {
+        /* main loop will report completion via get_next_device_request */
+        LeaveCriticalSection( &irp_completion_cs );
+        return STATUS_MORE_PROCESSING_REQUIRED;
+    }
+
+    out_size = get_irp_output_size( irp );
+
+    SERVER_START_REQ( set_irp_result )
+    {
+        req->handle   = wine_server_obj_handle( irp_data->handle );
+        req->status   = irp->IoStatus.u.Status;
+        req->size     = irp->IoStatus.Information;
+        if (out_size) wine_server_add_data( req, irp->UserBuffer, out_size );
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+
+    free_dispatch_irp( irp_data );
 
     LeaveCriticalSection( &irp_completion_cs );
     return status;
@@ -458,26 +510,40 @@ struct dispatch_context
 {
     irp_params_t params;
     HANDLE handle;
-    IRP   *irp;
+    struct irp_data *irp_data;
     ULONG  in_size;
     void  *in_buff;
 };
 
-static void dispatch_irp( DEVICE_OBJECT *device, IRP *irp, struct dispatch_context *context )
+static NTSTATUS dispatch_irp( DEVICE_OBJECT *device, IRP *irp, struct dispatch_context *context )
 {
+    struct irp_data *irp_data;
     LARGE_INTEGER count;
+    NTSTATUS status;
 
-    IoSetCompletionRoutine( irp, dispatch_irp_completion, context->handle, TRUE, TRUE, TRUE );
+    if (!(irp_data = malloc( sizeof(*irp_data) )))
+        return STATUS_NO_MEMORY;
+    irp_data->handle = context->handle;
+    irp_data->irp = irp;
+    irp_data->async = FALSE;
+    irp_data->complete = FALSE;
+
+    IoSetCompletionRoutine( irp, dispatch_irp_completion, irp_data, TRUE, TRUE, TRUE );
+    context->irp_data = irp_data;
     context->handle = 0;
 
     KeQueryTickCount( &count );  /* update the global KeTickCount */
 
-    context->irp = irp;
     device->CurrentIrp = irp;
     KeEnterCriticalRegion();
-    IoCallDriver( device, irp );
+    status = IoCallDriver( device, irp );
     KeLeaveCriticalRegion();
     device->CurrentIrp = NULL;
+
+    if (status != STATUS_PENDING && !irp_data->complete)
+        ERR( "dispatch routine returned %#x but didn't complete the IRP\n", status );
+
+    return status;
 }
 
 /* process a create request for a given file */
@@ -520,9 +586,7 @@ static NTSTATUS dispatch_create( struct dispatch_context *context )
     irp->UserEvent = NULL;
 
     irp->Flags |= IRP_CREATE_OPERATION;
-    dispatch_irp( device, irp, context );
-
-    return STATUS_SUCCESS;
+    return dispatch_irp( device, irp, context );
 }
 
 /* process a close request for a given file */
@@ -558,9 +622,7 @@ static NTSTATUS dispatch_close( struct dispatch_context *context )
     irp->UserEvent = NULL;
 
     irp->Flags |= IRP_CLOSE_OPERATION;
-    dispatch_irp( device, irp, context );
-
-    return STATUS_SUCCESS;
+    return dispatch_irp( device, irp, context );
 }
 
 /* process a read request for a given device */
@@ -600,9 +662,7 @@ static NTSTATUS dispatch_read( struct dispatch_context *context )
 
     irp->Flags |= IRP_READ_OPERATION;
     irp->Flags |= IRP_DEALLOCATE_BUFFER;  /* deallocate out_buff */
-    dispatch_irp( device, irp, context );
-
-    return STATUS_SUCCESS;
+    return dispatch_irp( device, irp, context );
 }
 
 /* process a write request for a given device */
@@ -636,9 +696,7 @@ static NTSTATUS dispatch_write( struct dispatch_context *context )
 
     irp->Flags |= IRP_WRITE_OPERATION;
     irp->Flags |= IRP_DEALLOCATE_BUFFER;  /* deallocate in_buff */
-    dispatch_irp( device, irp, context );
-
-    return STATUS_SUCCESS;
+    return dispatch_irp( device, irp, context );
 }
 
 /* process a flush request for a given device */
@@ -665,9 +723,7 @@ static NTSTATUS dispatch_flush( struct dispatch_context *context )
     irpsp = IoGetNextIrpStackLocation( irp );
     irpsp->FileObject = file;
 
-    dispatch_irp( device, irp, context );
-
-    return STATUS_SUCCESS;
+    return dispatch_irp( device, irp, context );
 }
 
 /* process an ioctl request for a given device */
@@ -680,6 +736,7 @@ static NTSTATUS dispatch_ioctl( struct dispatch_context *context )
     DEVICE_OBJECT *device;
     FILE_OBJECT *file = wine_server_get_ptr( context->params.ioctl.file );
     ULONG out_size = context->params.ioctl.out_size;
+    NTSTATUS status;
 
     if (!file) return STATUS_INVALID_HANDLE;
 
@@ -728,10 +785,10 @@ static NTSTATUS dispatch_ioctl( struct dispatch_context *context )
     context->in_buff = NULL;
 
     irp->Flags |= IRP_DEALLOCATE_BUFFER;  /* deallocate in_buff */
-    dispatch_irp( device, irp, context );
+    status = dispatch_irp( device, irp, context );
 
     HeapFree( GetProcessHeap(), 0, to_free );
-    return STATUS_SUCCESS;
+    return status;
 }
 
 /* process a volume information request for a given device */
@@ -778,9 +835,7 @@ static NTSTATUS dispatch_volume( struct dispatch_context *context )
     context->in_buff = NULL;
 
     irp->Flags |= IRP_DEALLOCATE_BUFFER;  /* deallocate out_buff */
-    dispatch_irp( device, irp, context );
-
-    return STATUS_SUCCESS;
+    return dispatch_irp( device, irp, context );
 }
 
 static NTSTATUS dispatch_free( struct dispatch_context *context )
@@ -874,15 +929,10 @@ PEPROCESS PsInitialSystemProcess = NULL;
 NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
 {
     HANDLE manager = get_device_manager();
-    struct dispatch_context context;
+    struct dispatch_context context = {.in_size = 4096};
     NTSTATUS status = STATUS_SUCCESS;
     struct wine_driver *driver;
     HANDLE handles[2];
-
-    context.handle  = NULL;
-    context.irp     = NULL;
-    context.in_size = 4096;
-    context.in_buff = NULL;
 
     /* Set the system process global before setting up the request thread trickery  */
     PsInitialSystemProcess = IoGetCurrentProcess();
@@ -903,12 +953,42 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
             goto done;
         }
 
+        EnterCriticalSection( &irp_completion_cs );
+
         SERVER_START_REQ( get_next_device_request )
         {
             req->manager  = wine_server_obj_handle( manager );
             req->prev     = wine_server_obj_handle( context.handle );
-            req->user_ptr = wine_server_client_ptr( context.irp );
-            req->status   = status;
+
+            if (context.irp_data)
+            {
+                IRP *irp = context.irp_data->irp;
+
+                req->user_ptr = wine_server_client_ptr( irp );
+                req->status   = status;
+
+                if (context.irp_data->complete)
+                {
+                    /* IRP completed even before we got here; we can report completion now */
+                    unsigned int out_size = get_irp_output_size( irp );
+
+                    req->prev        = wine_server_obj_handle( context.irp_data->handle );
+                    req->pending     = irp->PendingReturned;
+                    req->iosb_status = irp->IoStatus.u.Status;
+                    req->result      = irp->IoStatus.Information;
+                    if (out_size) wine_server_add_data( req, irp->UserBuffer, out_size );
+                }
+                else
+                {
+                    req->pending     = 1;
+                }
+            }
+            else
+            {
+                req->user_ptr = 0;
+                req->status   = status;
+            }
+
             wine_server_set_reply( req, context.in_buff, context.in_size );
             if (!(status = wine_server_call( req )))
             {
@@ -924,9 +1004,25 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
                 if (status == STATUS_BUFFER_OVERFLOW)
                     context.in_size = reply->in_size;
             }
-            context.irp = NULL;
         }
         SERVER_END_REQ;
+
+        if (context.irp_data)
+        {
+            if (context.irp_data->complete)
+            {
+                IoCompleteRequest( context.irp_data->irp, IO_NO_INCREMENT );
+                free_dispatch_irp( context.irp_data );
+            }
+            else
+            {
+                context.irp_data->async = TRUE;
+            }
+        }
+
+        LeaveCriticalSection( &irp_completion_cs );
+
+        context.irp_data = NULL;
 
         switch (status)
         {

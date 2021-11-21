@@ -45,6 +45,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dinput);
 
+DEFINE_GUID( GUID_DEVINTERFACE_WINEXINPUT,0x6c53d5fd,0x6480,0x440f,0xb6,0x18,0x47,0x67,0x50,0xc5,0xe1,0xa6 );
 DEFINE_GUID( hid_joystick_guid, 0x9e573edb, 0x7734, 0x11d2, 0x8d, 0x4a, 0x23, 0x90, 0x3f, 0xb6, 0xbd, 0xf7 );
 DEFINE_DEVPROPKEY( DEVPROPKEY_HID_HANDLE, 0xbc62e415, 0xf4fe, 0x405c, 0x8e, 0xda, 0x63, 0x6f, 0xb5, 0x9f, 0x08, 0x98, 2 );
 
@@ -178,6 +179,7 @@ static const GUID *object_usage_to_guid( USAGE usage_page, USAGE usage )
         case HID_USAGE_GENERIC_X: return &GUID_XAxis;
         case HID_USAGE_GENERIC_Y: return &GUID_YAxis;
         case HID_USAGE_GENERIC_Z: return &GUID_ZAxis;
+        case HID_USAGE_GENERIC_WHEEL: return &GUID_ZAxis;
         case HID_USAGE_GENERIC_RX: return &GUID_RxAxis;
         case HID_USAGE_GENERIC_RY: return &GUID_RyAxis;
         case HID_USAGE_GENERIC_RZ: return &GUID_RzAxis;
@@ -209,7 +211,8 @@ static BOOL enum_object( struct hid_joystick *impl, const DIPROPHEADER *filter, 
         if ((filter->dwObj & 0x00ffffff) != (instance->dwType & 0x00ffffff)) return DIENUM_CONTINUE;
         return callback( impl, caps, instance, data );
     case DIPH_BYUSAGE:
-        if (LOWORD(filter->dwObj) != instance->wUsagePage || HIWORD(filter->dwObj) != instance->wUsage) return DIENUM_CONTINUE;
+        if (HIWORD( filter->dwObj ) != instance->wUsagePage) return DIENUM_CONTINUE;
+        if (LOWORD( filter->dwObj ) != instance->wUsage) return DIENUM_CONTINUE;
         return callback( impl, caps, instance, data );
     default:
         FIXME( "unimplemented filter dwHow %#x dwObj %#x\n", filter->dwHow, filter->dwObj );
@@ -219,13 +222,20 @@ static BOOL enum_object( struct hid_joystick *impl, const DIPROPHEADER *filter, 
     return DIENUM_CONTINUE;
 }
 
+static void set_axis_type( DIDEVICEOBJECTINSTANCEW *instance, BOOL *seen, DWORD i, DWORD *count )
+{
+    if (!seen[i]) instance->dwType = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE( i );
+    else instance->dwType = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE( 6 + *count++ );
+    seen[i] = TRUE;
+}
+
 static BOOL enum_value_objects( struct hid_joystick *impl, const DIPROPHEADER *filter,
                                 DWORD flags, enum_object_callback callback, void *data )
 {
     DIDEVICEOBJECTINSTANCEW instance = {.dwSize = sizeof(DIDEVICEOBJECTINSTANCEW)};
     struct hid_caps caps = {.type = VALUE_CAPS};
+    BOOL ret, seen_axis[6] = {0};
     DWORD axis = 0, pov = 0, i;
-    BOOL ret;
 
     for (i = 0; i < impl->caps.NumberInputValueCaps; ++i)
     {
@@ -247,54 +257,57 @@ static BOOL enum_value_objects( struct hid_joystick *impl, const DIPROPHEADER *f
             instance.wUsage = caps.value->NotRange.Usage;
             instance.guidType = *object_usage_to_guid( instance.wUsagePage, instance.wUsage );
             instance.wReportId = caps.value->ReportID;
+            instance.wCollectionNumber = caps.value->LinkCollection;
 
             switch (instance.wUsage)
             {
             case HID_USAGE_GENERIC_X:
                 instance.dwOfs = DIJOFS_X;
-                instance.dwType = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE( axis++ );
+                set_axis_type( &instance, seen_axis, 0, &axis );
                 instance.dwFlags = DIDOI_ASPECTPOSITION;
                 ret = enum_object( impl, filter, flags, callback, &caps, &instance, data );
                 if (ret != DIENUM_CONTINUE) return ret;
                 break;
             case HID_USAGE_GENERIC_Y:
                 instance.dwOfs = DIJOFS_Y;
-                instance.dwType = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE( axis++ );
+                set_axis_type( &instance, seen_axis, 1, &axis );
                 instance.dwFlags = DIDOI_ASPECTPOSITION;
                 ret = enum_object( impl, filter, flags, callback, &caps, &instance, data );
                 if (ret != DIENUM_CONTINUE) return ret;
                 break;
             case HID_USAGE_GENERIC_Z:
+            case HID_USAGE_GENERIC_WHEEL:
                 instance.dwOfs = DIJOFS_Z;
-                instance.dwType = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE( axis++ );
+                set_axis_type( &instance, seen_axis, 2, &axis );
                 instance.dwFlags = DIDOI_ASPECTPOSITION;
                 ret = enum_object( impl, filter, flags, callback, &caps, &instance, data );
                 if (ret != DIENUM_CONTINUE) return ret;
                 break;
             case HID_USAGE_GENERIC_RX:
                 instance.dwOfs = DIJOFS_RX;
-                instance.dwType = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE( axis++ );
+                set_axis_type( &instance, seen_axis, 3, &axis );
                 instance.dwFlags = DIDOI_ASPECTPOSITION;
                 ret = enum_object( impl, filter, flags, callback, &caps, &instance, data );
                 if (ret != DIENUM_CONTINUE) return ret;
                 break;
             case HID_USAGE_GENERIC_RY:
                 instance.dwOfs = DIJOFS_RY;
-                instance.dwType = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE( axis++ );
+                set_axis_type( &instance, seen_axis, 4, &axis );
                 instance.dwFlags = DIDOI_ASPECTPOSITION;
                 ret = enum_object( impl, filter, flags, callback, &caps, &instance, data );
                 if (ret != DIENUM_CONTINUE) return ret;
                 break;
             case HID_USAGE_GENERIC_RZ:
                 instance.dwOfs = DIJOFS_RZ;
-                instance.dwType = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE( axis++ );
+                set_axis_type( &instance, seen_axis, 5, &axis );
                 instance.dwFlags = DIDOI_ASPECTPOSITION;
                 ret = enum_object( impl, filter, flags, callback, &caps, &instance, data );
                 if (ret != DIENUM_CONTINUE) return ret;
                 break;
+            case HID_USAGE_GENERIC_DIAL:
             case HID_USAGE_GENERIC_SLIDER:
                 instance.dwOfs = DIJOFS_SLIDER( 0 );
-                instance.dwType = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE( axis++ );
+                instance.dwType = DIDFT_ABSAXIS | DIDFT_MAKEINSTANCE( 6 + axis++ );
                 instance.dwFlags = DIDOI_ASPECTPOSITION;
                 ret = enum_object( impl, filter, flags, callback, &caps, &instance, data );
                 if (ret != DIENUM_CONTINUE) return ret;
@@ -347,6 +360,7 @@ static BOOL enum_button_objects( struct hid_joystick *impl, const DIPROPHEADER *
                 instance.wUsage = j;
                 instance.guidType = *object_usage_to_guid( instance.wUsagePage, instance.wUsage );
                 instance.wReportId = caps.button->ReportID;
+                instance.wCollectionNumber = caps.button->LinkCollection;
                 ret = enum_object( impl, filter, flags, callback, &caps, &instance, data );
                 if (ret != DIENUM_CONTINUE) return ret;
             }
@@ -362,6 +376,7 @@ static BOOL enum_button_objects( struct hid_joystick *impl, const DIPROPHEADER *
             instance.wUsage = caps.button->NotRange.Usage;
             instance.guidType = *object_usage_to_guid( instance.wUsagePage, instance.wUsage );
             instance.wReportId = caps.button->ReportID;
+            instance.wCollectionNumber = caps.button->LinkCollection;
             ret = enum_object( impl, filter, flags, callback, &caps, &instance, data );
             if (ret != DIENUM_CONTINUE) return ret;
         }
@@ -375,8 +390,8 @@ static BOOL enum_collections_objects( struct hid_joystick *impl, const DIPROPHEA
 {
     DIDEVICEOBJECTINSTANCEW instance = {.dwSize = sizeof(DIDEVICEOBJECTINSTANCEW)};
     struct hid_caps caps = {.type = LINK_COLLECTION_NODE};
+    DWORD collection = 0, i;
     BOOL ret;
-    DWORD i;
 
     for (i = 0; i < impl->caps.NumberLinkCollectionNodes; ++i)
     {
@@ -389,12 +404,13 @@ static BOOL enum_collections_objects( struct hid_joystick *impl, const DIPROPHEA
         else
         {
             instance.dwOfs = 0;
-            instance.dwType = DIDFT_COLLECTION | DIDFT_NODATA;
+            instance.dwType = DIDFT_COLLECTION | DIDFT_MAKEINSTANCE( collection++ ) | DIDFT_NODATA;
             instance.dwFlags = 0;
             instance.wUsagePage = caps.node->LinkUsagePage;
             instance.wUsage = caps.node->LinkUsage;
             instance.guidType = *object_usage_to_guid( instance.wUsagePage, instance.wUsage );
             instance.wReportId = 0;
+            instance.wCollectionNumber = caps.node->Parent;
             ret = enum_object( impl, filter, flags, callback, &caps, &instance, data );
             if (ret != DIENUM_CONTINUE) return ret;
         }
@@ -499,28 +515,33 @@ static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, con
     TRACE( "iface %p, guid %s, header %p\n", iface, debugstr_guid( guid ), header );
 
     if (!header) return DIERR_INVALIDPARAM;
+    if (header->dwHeaderSize != sizeof(DIPROPHEADER)) return DIERR_INVALIDPARAM;
     if (!IS_DIPROP( guid )) return DI_OK;
 
     switch (LOWORD( guid ))
     {
     case (DWORD_PTR)DIPROP_RANGE:
+        if (header->dwSize != sizeof(DIPROPRANGE)) return DIERR_INVALIDPARAM;
         enum_value_objects( impl, header, DIDFT_AXIS, get_property_prop_range, header );
         return DI_OK;
     case (DWORD_PTR)DIPROP_PRODUCTNAME:
     {
         DIPROPSTRING *value = (DIPROPSTRING *)header;
+        if (header->dwSize != sizeof(DIPROPSTRING)) return DIERR_INVALIDPARAM;
         lstrcpynW( value->wsz, impl->instance.tszProductName, MAX_PATH );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_INSTANCENAME:
     {
         DIPROPSTRING *value = (DIPROPSTRING *)header;
+        if (header->dwSize != sizeof(DIPROPSTRING)) return DIERR_INVALIDPARAM;
         lstrcpynW( value->wsz, impl->instance.tszInstanceName, MAX_PATH );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_VIDPID:
     {
         DIPROPDWORD *value = (DIPROPDWORD *)header;
+        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
         if (!impl->attrs.VendorID || !impl->attrs.ProductID) return DIERR_UNSUPPORTED;
         value->dwData = MAKELONG( impl->attrs.VendorID, impl->attrs.ProductID );
         return DI_OK;
@@ -528,12 +549,14 @@ static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, con
     case (DWORD_PTR)DIPROP_JOYSTICKID:
     {
         DIPROPDWORD *value = (DIPROPDWORD *)header;
+        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
         value->dwData = impl->instance.guidInstance.Data3;
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_GUIDANDPATH:
     {
         DIPROPGUIDANDPATH *value = (DIPROPGUIDANDPATH *)header;
+        if (header->dwSize != sizeof(DIPROPGUIDANDPATH)) return DIERR_INVALIDPARAM;
         lstrcpynW( value->wszPath, impl->device_path, MAX_PATH );
         return DI_OK;
     }
@@ -565,13 +588,27 @@ static HRESULT WINAPI hid_joystick_SetProperty( IDirectInputDevice8W *iface, con
     TRACE( "iface %p, guid %s, header %p\n", iface, debugstr_guid( guid ), header );
 
     if (!header) return DIERR_INVALIDPARAM;
+    if (header->dwHeaderSize != sizeof(DIPROPHEADER)) return DIERR_INVALIDPARAM;
     if (!IS_DIPROP( guid )) return DI_OK;
 
     switch (LOWORD( guid ))
     {
     case (DWORD_PTR)DIPROP_RANGE:
+        if (header->dwSize != sizeof(DIPROPRANGE)) return DIERR_INVALIDPARAM;
         enum_value_objects( impl, header, DIDFT_AXIS, set_property_prop_range, (void *)header );
         return DI_OK;
+    case (DWORD_PTR)DIPROP_FFLOAD:
+    case (DWORD_PTR)DIPROP_GRANULARITY:
+    case (DWORD_PTR)DIPROP_VIDPID:
+        if (header->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
+        return DIERR_READONLY;
+    case (DWORD_PTR)DIPROP_TYPENAME:
+    case (DWORD_PTR)DIPROP_USERNAME:
+        if (header->dwSize != sizeof(DIPROPSTRING)) return DIERR_INVALIDPARAM;
+        return DIERR_READONLY;
+    case (DWORD_PTR)DIPROP_GUIDANDPATH:
+        if (header->dwSize != sizeof(DIPROPGUIDANDPATH)) return DIERR_INVALIDPARAM;
+        return DIERR_READONLY;
     default:
         return IDirectInputDevice2WImpl_SetProperty( iface, guid, header );
     }
@@ -616,12 +653,17 @@ static HRESULT WINAPI hid_joystick_Unacquire( IDirectInputDevice8W *iface )
 static HRESULT WINAPI hid_joystick_GetDeviceState( IDirectInputDevice8W *iface, DWORD len, void *ptr )
 {
     struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+    HRESULT hr = DI_OK;
 
     if (!ptr) return DIERR_INVALIDPARAM;
+    if (len != impl->base.data_format.user_df->dwDataSize) return DIERR_INVALIDPARAM;
 
-    fill_DataFormat( ptr, len, &impl->state, &impl->base.data_format );
+    EnterCriticalSection( &impl->base.crit );
+    if (!impl->base.acquired) hr = DIERR_NOTACQUIRED;
+    else fill_DataFormat( ptr, len, &impl->state, &impl->base.data_format );
+    LeaveCriticalSection( &impl->base.crit );
 
-    return DI_OK;
+    return hr;
 }
 
 static BOOL get_object_info( struct hid_joystick *impl, struct hid_caps *caps,
@@ -652,11 +694,11 @@ static HRESULT WINAPI hid_joystick_GetObjectInfo( IDirectInputDevice8W *iface, D
         instance->dwSize != sizeof(DIDEVICEOBJECTINSTANCEW))
         return DIERR_INVALIDPARAM;
 
-    ret = enum_value_objects( impl, &filter, DIDFT_ALL, get_object_info, NULL );
+    ret = enum_value_objects( impl, &filter, DIDFT_ALL, get_object_info, instance );
     if (ret != DIENUM_CONTINUE) return S_OK;
-    ret = enum_button_objects( impl, &filter, DIDFT_ALL, get_object_info, NULL );
+    ret = enum_button_objects( impl, &filter, DIDFT_ALL, get_object_info, instance );
     if (ret != DIENUM_CONTINUE) return S_OK;
-    enum_collections_objects( impl, &filter, DIDFT_ALL, get_object_info, NULL );
+    enum_collections_objects( impl, &filter, DIDFT_ALL, get_object_info, instance );
 
     return S_OK;
 }
@@ -675,6 +717,18 @@ static HRESULT WINAPI hid_joystick_GetDeviceInfo( IDirectInputDevice8W *iface, D
     memcpy( instance, &impl->instance, instance->dwSize );
 
     return S_OK;
+}
+
+static HRESULT WINAPI hid_joystick_Poll( IDirectInputDevice8W *iface )
+{
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+    HRESULT hr = DI_NOEFFECT;
+
+    EnterCriticalSection( &impl->base.crit );
+    if (!impl->base.acquired) hr = DIERR_NOTACQUIRED;
+    LeaveCriticalSection( &impl->base.crit );
+
+    return hr;
 }
 
 static HRESULT WINAPI hid_joystick_BuildActionMap( IDirectInputDevice8W *iface, DIACTIONFORMATW *format,
@@ -729,7 +783,7 @@ static const IDirectInputDevice8WVtbl hid_joystick_vtbl =
     IDirectInputDevice2WImpl_SendForceFeedbackCommand,
     IDirectInputDevice2WImpl_EnumCreatedEffectObjects,
     IDirectInputDevice2WImpl_Escape,
-    IDirectInputDevice2WImpl_Poll,
+    hid_joystick_Poll,
     IDirectInputDevice2WImpl_SendDeviceData,
     /*** IDirectInputDevice7 methods ***/
     IDirectInputDevice7WImpl_EnumEffectsInFile,
@@ -908,6 +962,8 @@ static HRESULT hid_joystick_read_state( IDirectInputDevice8W *iface )
 
             enum_value_objects( impl, &filter, DIDFT_ALL, read_device_state_value, &params );
             enum_button_objects( impl, &filter, DIDFT_ALL, check_device_state_button, &params );
+            if (memcmp( &params.old_state, &impl->state, sizeof(impl->state) ) && impl->base.hEvent)
+                SetEvent( impl->base.hEvent );
         }
 
         memset( &impl->read_ovl, 0, sizeof(impl->read_ovl) );
@@ -917,12 +973,52 @@ static HRESULT hid_joystick_read_state( IDirectInputDevice8W *iface )
     return DI_OK;
 }
 
+static DWORD device_type_for_version( DWORD type, DWORD version )
+{
+    if (version >= 0x0800) return type;
+
+    switch (GET_DIDEVICE_TYPE( type ))
+    {
+    case DI8DEVTYPE_JOYSTICK:
+        if (GET_DIDEVICE_SUBTYPE( type ) == DI8DEVTYPEJOYSTICK_LIMITED)
+            return DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_UNKNOWN << 8) | DIDEVTYPE_HID;
+        return DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_TRADITIONAL << 8) | DIDEVTYPE_HID;
+
+    case DI8DEVTYPE_GAMEPAD:
+        return DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_GAMEPAD << 8) | DIDEVTYPE_HID;
+
+    case DI8DEVTYPE_DRIVING:
+        return DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_WHEEL << 8) | DIDEVTYPE_HID;
+
+    case DI8DEVTYPE_FLIGHT:
+        return DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_FLIGHTSTICK << 8) | DIDEVTYPE_HID;
+
+    case DI8DEVTYPE_SUPPLEMENTAL:
+        if (GET_DIDEVICE_SUBTYPE( type ) == DI8DEVTYPESUPPLEMENTAL_HEADTRACKER)
+            return DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_HEADTRACKER << 8) | DIDEVTYPE_HID;
+        if (GET_DIDEVICE_SUBTYPE( type ) == DI8DEVTYPESUPPLEMENTAL_RUDDERPEDALS)
+            return DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_RUDDER << 8) | DIDEVTYPE_HID;
+        return DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_UNKNOWN << 8) | DIDEVTYPE_HID;
+
+    case DI8DEVTYPE_1STPERSON:
+        return DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_UNKNOWN << 8) | DIDEVTYPE_HID;
+
+    default:
+        return DIDEVTYPE_DEVICE | DIDEVTYPE_HID;
+    }
+}
+
 static BOOL hid_joystick_device_try_open( UINT32 handle, const WCHAR *path, HANDLE *device,
                                           PHIDP_PREPARSED_DATA *preparsed, HIDD_ATTRIBUTES *attrs,
                                           HIDP_CAPS *caps, DIDEVICEINSTANCEW *instance, DWORD version )
 {
     PHIDP_PREPARSED_DATA preparsed_data = NULL;
+    DWORD type = 0, button_count = 0;
+    HIDP_BUTTON_CAPS buttons[10];
+    HIDP_VALUE_CAPS value;
     HANDLE device_file;
+    NTSTATUS status;
+    USHORT count;
 
     device_file = CreateFileW( path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, 0 );
@@ -944,10 +1040,59 @@ static BOOL hid_joystick_device_try_open( UINT32 handle, const WCHAR *path, HAND
     instance->guidInstance.Data1 ^= handle;
     instance->guidProduct = DInput_PIDVID_Product_GUID;
     instance->guidProduct.Data1 = MAKELONG( attrs->VendorID, attrs->ProductID );
-    instance->dwDevType = get_device_type( version, caps->Usage != HID_USAGE_GENERIC_GAMEPAD ) | DIDEVTYPE_HID;
     instance->guidFFDriver = GUID_NULL;
     instance->wUsagePage = caps->UsagePage;
     instance->wUsage = caps->Usage;
+
+    count = ARRAY_SIZE(buttons);
+    status = HidP_GetSpecificButtonCaps( HidP_Input, HID_USAGE_PAGE_BUTTON, 0, 0, buttons, &count, preparsed_data );
+    if (status != HIDP_STATUS_SUCCESS) count = button_count = 0;
+    while (count--)
+    {
+        if (!buttons[count].IsRange) button_count += 1;
+        else button_count += buttons[count].Range.UsageMax - buttons[count].Range.UsageMin + 1;
+    }
+
+    switch (caps->Usage)
+    {
+    case HID_USAGE_GENERIC_GAMEPAD:
+        type = DI8DEVTYPE_GAMEPAD | DIDEVTYPE_HID;
+        if (button_count < 6) type |= DI8DEVTYPEGAMEPAD_LIMITED << 8;
+        else type |= DI8DEVTYPEGAMEPAD_STANDARD << 8;
+        break;
+    case HID_USAGE_GENERIC_JOYSTICK:
+        type = DI8DEVTYPE_JOYSTICK | DIDEVTYPE_HID;
+        if (button_count < 5) type |= DI8DEVTYPEJOYSTICK_LIMITED << 8;
+        else type |= DI8DEVTYPEJOYSTICK_STANDARD << 8;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_GENERIC, 0,
+                                            HID_USAGE_GENERIC_Z, &value, &count, preparsed_data );
+        if (status != HIDP_STATUS_SUCCESS || !count)
+            type = DI8DEVTYPE_JOYSTICK | (DI8DEVTYPEJOYSTICK_LIMITED << 8) | DIDEVTYPE_HID;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_GENERIC, 0,
+                                            HID_USAGE_GENERIC_HATSWITCH, &value, &count, preparsed_data );
+        if (status != HIDP_STATUS_SUCCESS || !count)
+            type = DI8DEVTYPE_JOYSTICK | (DI8DEVTYPEJOYSTICK_LIMITED << 8) | DIDEVTYPE_HID;
+
+        break;
+    }
+
+    count = 1;
+    status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_GENERIC, 0, HID_USAGE_GENERIC_X,
+                                        &value, &count, preparsed_data );
+    if (status != HIDP_STATUS_SUCCESS || !count)
+        type = DI8DEVTYPE_SUPPLEMENTAL | (DI8DEVTYPESUPPLEMENTAL_UNKNOWN << 8) | DIDEVTYPE_HID;
+
+    count = 1;
+    status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_GENERIC, 0, HID_USAGE_GENERIC_Y,
+                                        &value, &count, preparsed_data );
+    if (status != HIDP_STATUS_SUCCESS || !count)
+        type = DI8DEVTYPE_SUPPLEMENTAL | (DI8DEVTYPESUPPLEMENTAL_UNKNOWN << 8) | DIDEVTYPE_HID;
+
+    instance->dwDevType = device_type_for_version( type, version );
 
     *device = device_file;
     *preparsed = preparsed_data;
@@ -963,13 +1108,17 @@ static HRESULT hid_joystick_device_open( int index, DIDEVICEINSTANCEW *filter, W
                                          HANDLE *device, PHIDP_PREPARSED_DATA *preparsed,
                                          HIDD_ATTRIBUTES *attrs, HIDP_CAPS *caps, DWORD version )
 {
+    static const WCHAR ig_w[] = {'&','I','G','_',0};
+    static const WCHAR xi_w[] = {'&','X','I','_',0};
     char buffer[sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) + MAX_PATH * sizeof(WCHAR)];
     SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail = (void *)buffer;
     SP_DEVICE_INTERFACE_DATA iface = {.cbSize = sizeof(iface)};
     SP_DEVINFO_DATA devinfo = {.cbSize = sizeof(devinfo)};
     DIDEVICEINSTANCEW instance = *filter;
+    WCHAR device_id[MAX_PATH], *tmp;
+    HDEVINFO set, xi_set;
     UINT32 i = 0, handle;
-    HDEVINFO set;
+    BOOL override;
     DWORD type;
     GUID hid;
 
@@ -980,6 +1129,7 @@ static HRESULT hid_joystick_device_open( int index, DIDEVICEINSTANCEW *filter, W
 
     set = SetupDiGetClassDevsW( &hid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT );
     if (set == INVALID_HANDLE_VALUE) return DIERR_DEVICENOTREG;
+    xi_set = SetupDiGetClassDevsW( &GUID_DEVINTERFACE_WINEXINPUT, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT );
 
     *device = NULL;
     *preparsed = NULL;
@@ -996,6 +1146,29 @@ static HRESULT hid_joystick_device_open( int index, DIDEVICEINSTANCEW *filter, W
                                            attrs, caps, &instance, version ))
             continue;
 
+        if (device_instance_is_disabled( &instance, &override ))
+            goto next;
+
+        if (override)
+        {
+            if (!SetupDiGetDeviceInstanceIdW( set, &devinfo, device_id, MAX_PATH, NULL ) ||
+                !(tmp = strstrW( device_id, ig_w )))
+                goto next;
+            memcpy( tmp, xi_w, sizeof(xi_w) - sizeof(WCHAR) );
+            if (!SetupDiOpenDeviceInfoW( xi_set, device_id, NULL, 0, &devinfo ))
+                goto next;
+            if (!SetupDiEnumDeviceInterfaces( xi_set, &devinfo, &GUID_DEVINTERFACE_WINEXINPUT, 0, &iface ))
+                goto next;
+            if (!SetupDiGetDeviceInterfaceDetailW( xi_set, &iface, detail, sizeof(buffer), NULL, &devinfo ))
+                goto next;
+
+            CloseHandle( *device );
+            HidD_FreePreparsedData( *preparsed );
+            if (!hid_joystick_device_try_open( handle, detail->DevicePath, device, preparsed,
+                                               attrs, caps, &instance, version ))
+                continue;
+        }
+
         /* enumerate device by GUID */
         if (index < 0 && IsEqualGUID( &filter->guidProduct, &instance.guidProduct )) break;
         if (index < 0 && IsEqualGUID( &filter->guidInstance, &instance.guidInstance )) break;
@@ -1003,12 +1176,14 @@ static HRESULT hid_joystick_device_open( int index, DIDEVICEINSTANCEW *filter, W
         /* enumerate all devices */
         if (index >= 0 && !index--) break;
 
+    next:
         CloseHandle( *device );
         HidD_FreePreparsedData( *preparsed );
         *device = NULL;
         *preparsed = NULL;
     }
 
+    if (xi_set != INVALID_HANDLE_VALUE) SetupDiDestroyDeviceInfoList( xi_set );
     SetupDiDestroyDeviceInfoList( set );
     if (!*device || !*preparsed) return DIERR_DEVICENOTREG;
 
@@ -1043,9 +1218,6 @@ static HRESULT hid_joystick_enum_device( DWORD type, DWORD flags, DIDEVICEINSTAN
     if (version >= 0x0800 && type != DI8DEVCLASS_ALL && type != DI8DEVCLASS_GAMECTRL)
         return S_FALSE;
 
-    if (device_disabled_registry( "HID", TRUE ))
-        return DIERR_DEVICENOTREG;
-
     TRACE( "found device %s, usage %04x:%04x, product %s, instance %s, name %s\n", debugstr_w(device_path),
            instance->wUsagePage, instance->wUsage, debugstr_guid( &instance->guidProduct ),
            debugstr_guid( &instance->guidInstance ), debugstr_w(instance->tszInstanceName) );
@@ -1059,7 +1231,7 @@ static BOOL init_objects( struct hid_joystick *impl, struct hid_caps *caps,
     DIDATAFORMAT *format = impl->base.data_format.wine_df;
 
     format->dwNumObjs++;
-    if (instance->dwType & DIDFT_PSHBUTTON) impl->dev_caps.dwButtons++;
+    if (instance->dwType & DIDFT_BUTTON) impl->dev_caps.dwButtons++;
     if (instance->dwType & DIDFT_AXIS) impl->dev_caps.dwAxes++;
     if (instance->dwType & DIDFT_POV) impl->dev_caps.dwPOVs++;
 

@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define DIRECTINPUT_VERSION 0x0800
+
 #include <stdarg.h>
 #include <stddef.h>
 
@@ -40,17 +42,32 @@
 
 #include "objbase.h"
 
+#define COBJMACROS
+#include "wingdi.h"
+#include "dinput.h"
+
 #include "initguid.h"
 #include "ddk/wdm.h"
 #include "ddk/hidclass.h"
 #include "ddk/hidsdi.h"
 #include "ddk/hidpi.h"
 #include "ddk/hidport.h"
+#include "hidusage.h"
+#include "devguid.h"
 
 #include "wine/test.h"
 #include "wine/mssign.h"
 
 #include "driver_hid.h"
+
+static HINSTANCE instance;
+static BOOL localized; /* object names get translated */
+
+#define EXPECT_VIDPID MAKELONG( 0x1209, 0x0001 )
+static const WCHAR expect_vidpid_str[] = L"VID_1209&PID_0001";
+static const GUID expect_guid_product = {EXPECT_VIDPID,0x0000,0x0000,{0x00,0x00,'P','I','D','V','I','D'}};
+static const WCHAR expect_path[] = L"\\\\?\\hid#winetest#1&2fafeb0&";
+static const WCHAR expect_path_end[] = L"&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
 
 static struct winetest_shared_data *test_data;
 static HANDLE okfile;
@@ -574,6 +591,18 @@ static BOOL pnp_driver_start( const WCHAR *resource )
 #define check_member( val, exp, fmt, member )                                                      \
     check_member_( __FILE__, __LINE__, val, exp, fmt, member )
 
+#define check_member_guid_( file, line, val, exp, member )                                              \
+    ok_( file, line )(IsEqualGUID( &(val).member, &(exp).member ), "got " #member " %s, expected %s\n", \
+                      debugstr_guid( &(val).member ), debugstr_guid( &(exp).member ))
+#define check_member_guid( val, exp, member )                                                      \
+    check_member_guid_( __FILE__, __LINE__, val, exp, member )
+
+#define check_member_wstr_( file, line, val, exp, member )                                         \
+    ok_( file, line )(!wcscmp( (val).member, (exp).member ), "got " #member " %s, expected %s\n",  \
+                      debugstr_w((val).member), debugstr_w((exp).member))
+#define check_member_wstr( val, exp, member )                                                      \
+    check_member_wstr_( __FILE__, __LINE__, val, exp, member )
+
 #define check_hidp_caps( a, b ) check_hidp_caps_( __LINE__, a, b )
 static inline void check_hidp_caps_( int line, HIDP_CAPS *caps, const HIDP_CAPS *exp )
 {
@@ -722,6 +751,486 @@ static BOOL sync_ioctl( HANDLE file, DWORD code, void *in_buf, DWORD in_len, voi
 
     if (ret_len) *ret_len = out_len;
     return ret;
+}
+
+#define set_hid_expect( a, b, c ) set_hid_expect_( __LINE__, a, b, c )
+static void set_hid_expect_( int line, HANDLE file, struct hid_expect *expect, DWORD expect_size )
+{
+    const char *source_file;
+    BOOL ret;
+    int i;
+
+    source_file = strrchr( __FILE__, '/' );
+    if (!source_file) source_file = strrchr( __FILE__, '\\' );
+    if (!source_file) source_file = __FILE__;
+    else source_file++;
+
+    for (i = 0; i < expect_size / sizeof(struct hid_expect); ++i)
+        snprintf( expect[i].context, ARRAY_SIZE(expect[i].context), "%s:%d", source_file, line );
+
+    ret = sync_ioctl( file, IOCTL_WINETEST_HID_SET_EXPECT, expect, expect_size, NULL, 0 );
+    ok( ret, "IOCTL_WINETEST_HID_SET_EXPECT failed, last error %u\n", GetLastError() );
+}
+
+#define send_hid_input( a, b, c ) send_hid_input_( __LINE__, a, b, c )
+static void send_hid_input_( int line, HANDLE file, struct hid_expect *expect, DWORD expect_size )
+{
+    const char *source_file;
+    BOOL ret;
+    int i;
+
+    source_file = strrchr( __FILE__, '/' );
+    if (!source_file) source_file = strrchr( __FILE__, '\\' );
+    if (!source_file) source_file = __FILE__;
+    else source_file++;
+
+    for (i = 0; i < expect_size / sizeof(struct hid_expect); ++i)
+        snprintf( expect[i].context, ARRAY_SIZE(expect[i].context), "%s:%d", source_file, line );
+
+    ret = sync_ioctl( file, IOCTL_WINETEST_HID_SEND_INPUT, expect, expect_size, NULL, 0 );
+    ok( ret, "IOCTL_WINETEST_HID_SEND_INPUT failed, last error %u\n", GetLastError() );
+}
+
+static void test_hidp_get_input( HANDLE file, int report_id, ULONG report_len, PHIDP_PREPARSED_DATA preparsed )
+{
+    struct hid_expect expect[] =
+    {
+        {
+            .code = IOCTL_HID_GET_INPUT_REPORT,
+            .report_id = report_id,
+            .report_len = report_len - (report_id ? 0 : 1),
+            .report_buf = {report_id ? report_id : 0xa5,0xa5,2},
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        },
+        {
+            .code = IOCTL_HID_GET_INPUT_REPORT,
+            .report_id = report_id,
+            .report_len = 2 * report_len - (report_id ? 0 : 1),
+            .report_buf = {report_id ? report_id : 0xa5,0xa5,1},
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        },
+    };
+
+    char buffer[200], report[200];
+    NTSTATUS status;
+    ULONG length;
+    BOOL ret;
+
+    memset( report, 0xcd, sizeof(report) );
+    status = HidP_InitializeReportForID( HidP_Input, report_id, preparsed, report, report_len );
+    ok( status == HIDP_STATUS_SUCCESS, "HidP_InitializeReportForID returned %#x\n", status );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_GetInputReport( file, report, 0 );
+    ok( !ret, "HidD_GetInputReport succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_GetInputReport returned error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_GetInputReport( file, report, report_len - 1 );
+    ok( !ret, "HidD_GetInputReport succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
+        "HidD_GetInputReport returned error %u\n", GetLastError() );
+
+    if (!report_id)
+    {
+        struct hid_expect broken_expect =
+        {
+            .code = IOCTL_HID_GET_INPUT_REPORT,
+            .broken = TRUE,
+            .report_len = report_len - 1,
+            .report_buf =
+            {
+                0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,
+                0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,
+                0x5a,0x5a,0x5a,0x5a,0x5a,
+            },
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        };
+
+        set_hid_expect( file, &broken_expect, sizeof(broken_expect) );
+    }
+
+    SetLastError( 0xdeadbeef );
+    memset( buffer, 0x5a, sizeof(buffer) );
+    ret = HidD_GetInputReport( file, buffer, report_len );
+    if (report_id || broken( !ret ) /* w7u */)
+    {
+        ok( !ret, "HidD_GetInputReport succeeded, last error %u\n", GetLastError() );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
+            "HidD_GetInputReport returned error %u\n", GetLastError() );
+    }
+    else
+    {
+        ok( ret, "HidD_GetInputReport failed, last error %u\n", GetLastError() );
+        ok( buffer[0] == 0x5a, "got buffer[0] %x, expected 0x5a\n", (BYTE)buffer[0] );
+    }
+
+    set_hid_expect( file, expect, sizeof(expect) );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_GetInputReport( file, report, report_len );
+    ok( ret, "HidD_GetInputReport failed, last error %u\n", GetLastError() );
+    ok( report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id );
+
+    SetLastError( 0xdeadbeef );
+    length = report_len * 2;
+    ret = sync_ioctl( file, IOCTL_HID_GET_INPUT_REPORT, NULL, 0, report, &length );
+    ok( ret, "IOCTL_HID_GET_INPUT_REPORT failed, last error %u\n", GetLastError() );
+    ok( length == 3, "got length %u, expected 3\n", length );
+    ok( report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id );
+
+    set_hid_expect( file, NULL, 0 );
+}
+
+static void test_hidp_get_feature( HANDLE file, int report_id, ULONG report_len, PHIDP_PREPARSED_DATA preparsed )
+{
+    struct hid_expect expect[] =
+    {
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = report_id,
+            .report_len = report_len - (report_id ? 0 : 1),
+            .report_buf = {report_id ? report_id : 0xa5,0xa5,0xa5},
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        },
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .report_id = report_id,
+            .report_len = 2 * report_len - (report_id ? 0 : 1),
+            .report_buf = {report_id ? report_id : 0xa5,0xa5,0xa5},
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        },
+    };
+
+    char buffer[200], report[200];
+    NTSTATUS status;
+    ULONG length;
+    BOOL ret;
+
+    memset( report, 0xcd, sizeof(report) );
+    status = HidP_InitializeReportForID( HidP_Feature, report_id, preparsed, report, report_len );
+    ok( status == HIDP_STATUS_SUCCESS, "HidP_InitializeReportForID returned %#x\n", status );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_GetFeature( file, report, 0 );
+    ok( !ret, "HidD_GetFeature succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_GetFeature returned error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_GetFeature( file, report, report_len - 1 );
+    ok( !ret, "HidD_GetFeature succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
+        "HidD_GetFeature returned error %u\n", GetLastError() );
+
+    if (!report_id)
+    {
+        struct hid_expect broken_expect =
+        {
+            .code = IOCTL_HID_GET_FEATURE,
+            .broken = TRUE,
+            .report_len = report_len - 1,
+            .report_buf =
+            {
+                0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,
+                0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,
+                0x5a,0x5a,0x5a,0x5a,0x5a,
+            },
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        };
+
+        set_hid_expect( file, &broken_expect, sizeof(broken_expect) );
+    }
+
+    SetLastError( 0xdeadbeef );
+    memset( buffer, 0x5a, sizeof(buffer) );
+    ret = HidD_GetFeature( file, buffer, report_len );
+    if (report_id || broken( !ret ))
+    {
+        ok( !ret, "HidD_GetFeature succeeded, last error %u\n", GetLastError() );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
+            "HidD_GetFeature returned error %u\n", GetLastError() );
+    }
+    else
+    {
+        ok( ret, "HidD_GetFeature failed, last error %u\n", GetLastError() );
+        ok( buffer[0] == 0x5a, "got buffer[0] %x, expected 0x5a\n", (BYTE)buffer[0] );
+    }
+
+    set_hid_expect( file, expect, sizeof(expect) );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_GetFeature( file, report, report_len );
+    ok( ret, "HidD_GetFeature failed, last error %u\n", GetLastError() );
+    ok( report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id );
+
+    length = report_len * 2;
+    SetLastError( 0xdeadbeef );
+    ret = sync_ioctl( file, IOCTL_HID_GET_FEATURE, NULL, 0, report, &length );
+    ok( ret, "IOCTL_HID_GET_FEATURE failed, last error %u\n", GetLastError() );
+    ok( length == 3, "got length %u, expected 3\n", length );
+    ok( report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id );
+
+    set_hid_expect( file, NULL, 0 );
+}
+
+static void test_hidp_set_feature( HANDLE file, int report_id, ULONG report_len, PHIDP_PREPARSED_DATA preparsed )
+{
+    struct hid_expect expect[] =
+    {
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = report_id,
+            .report_len = report_len - (report_id ? 0 : 1),
+            .report_buf = {report_id},
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        },
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .report_id = report_id,
+            .report_len = report_len - (report_id ? 0 : 1),
+            .report_buf =
+            {
+                report_id,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                0,0,0,0,0,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,
+                0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,0xcd,
+            },
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        },
+    };
+    char buffer[200], report[200];
+    NTSTATUS status;
+    ULONG length;
+    BOOL ret;
+
+    memset( report, 0xcd, sizeof(report) );
+    status = HidP_InitializeReportForID( HidP_Feature, report_id, preparsed, report, report_len );
+    ok( status == HIDP_STATUS_SUCCESS, "HidP_InitializeReportForID returned %#x\n", status );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_SetFeature( file, report, 0 );
+    ok( !ret, "HidD_SetFeature succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_SetFeature returned error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_SetFeature( file, report, report_len - 1 );
+    ok( !ret, "HidD_SetFeature succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
+        "HidD_SetFeature returned error %u\n", GetLastError() );
+
+    if (!report_id)
+    {
+        struct hid_expect broken_expect =
+        {
+            .code = IOCTL_HID_SET_FEATURE,
+            .broken = TRUE,
+            .report_len = report_len - 1,
+            .report_buf =
+            {
+                0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,
+                0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,0x5a,
+                0x5a,0x5a,0x5a,0x5a,0x5a,
+            },
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        };
+
+        set_hid_expect( file, &broken_expect, sizeof(broken_expect) );
+    }
+
+    SetLastError( 0xdeadbeef );
+    memset( buffer, 0x5a, sizeof(buffer) );
+    ret = HidD_SetFeature( file, buffer, report_len );
+    if (report_id || broken( !ret ))
+    {
+        ok( !ret, "HidD_SetFeature succeeded, last error %u\n", GetLastError() );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
+            "HidD_SetFeature returned error %u\n", GetLastError() );
+    }
+    else
+    {
+        ok( ret, "HidD_SetFeature failed, last error %u\n", GetLastError() );
+    }
+
+    set_hid_expect( file, expect, sizeof(expect) );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_SetFeature( file, report, report_len );
+    ok( ret, "HidD_SetFeature failed, last error %u\n", GetLastError() );
+
+    length = report_len * 2;
+    SetLastError( 0xdeadbeef );
+    ret = sync_ioctl( file, IOCTL_HID_SET_FEATURE, NULL, 0, report, &length );
+    ok( !ret, "IOCTL_HID_SET_FEATURE succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "IOCTL_HID_SET_FEATURE returned error %u\n",
+        GetLastError() );
+    length = 0;
+    SetLastError( 0xdeadbeef );
+    ret = sync_ioctl( file, IOCTL_HID_SET_FEATURE, report, report_len * 2, NULL, &length );
+    ok( ret, "IOCTL_HID_SET_FEATURE failed, last error %u\n", GetLastError() );
+    ok( length == 3, "got length %u, expected 3\n", length );
+
+    set_hid_expect( file, NULL, 0 );
+}
+
+static void test_hidp_set_output( HANDLE file, int report_id, ULONG report_len, PHIDP_PREPARSED_DATA preparsed )
+{
+    struct hid_expect expect[] =
+    {
+        {
+            .code = IOCTL_HID_SET_OUTPUT_REPORT,
+            .report_id = report_id,
+            .report_len = report_len - (report_id ? 0 : 1),
+            .report_buf = {report_id},
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        },
+        {
+            .code = IOCTL_HID_SET_OUTPUT_REPORT,
+            .report_id = report_id,
+            .report_len = report_len - (report_id ? 0 : 1),
+            .report_buf = {report_id,0,0xcd,0xcd,0xcd},
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        },
+    };
+
+    char buffer[200], report[200];
+    NTSTATUS status;
+    ULONG length;
+    BOOL ret;
+
+    memset( report, 0xcd, sizeof(report) );
+    status = HidP_InitializeReportForID( HidP_Output, report_id, preparsed, report, report_len );
+    ok( status == HIDP_STATUS_REPORT_DOES_NOT_EXIST, "HidP_InitializeReportForID returned %#x\n", status );
+    memset( report, 0, report_len );
+    report[0] = report_id;
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_SetOutputReport( file, report, 0 );
+    ok( !ret, "HidD_SetOutputReport succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_SetOutputReport returned error %u\n",
+        GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_SetOutputReport( file, report, report_len - 1 );
+    ok( !ret, "HidD_SetOutputReport succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
+        "HidD_SetOutputReport returned error %u\n", GetLastError() );
+
+    if (!report_id)
+    {
+        struct hid_expect broken_expect =
+        {
+            .code = IOCTL_HID_SET_OUTPUT_REPORT,
+            .broken = TRUE,
+            .report_len = report_len - 1,
+            .report_buf = {0x5a,0x5a},
+            .ret_length = 3,
+            .ret_status = STATUS_SUCCESS,
+        };
+
+        set_hid_expect( file, &broken_expect, sizeof(broken_expect) );
+    }
+
+    SetLastError( 0xdeadbeef );
+    memset( buffer, 0x5a, sizeof(buffer) );
+    ret = HidD_SetOutputReport( file, buffer, report_len );
+    if (report_id || broken( !ret ))
+    {
+        ok( !ret, "HidD_SetOutputReport succeeded, last error %u\n", GetLastError() );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
+            "HidD_SetOutputReport returned error %u\n", GetLastError() );
+    }
+    else
+    {
+        ok( ret, "HidD_SetOutputReport failed, last error %u\n", GetLastError() );
+    }
+
+    set_hid_expect( file, expect, sizeof(expect) );
+
+    SetLastError( 0xdeadbeef );
+    ret = HidD_SetOutputReport( file, report, report_len );
+    ok( ret, "HidD_SetOutputReport failed, last error %u\n", GetLastError() );
+
+    length = report_len * 2;
+    SetLastError( 0xdeadbeef );
+    ret = sync_ioctl( file, IOCTL_HID_SET_OUTPUT_REPORT, NULL, 0, report, &length );
+    ok( !ret, "IOCTL_HID_SET_OUTPUT_REPORT succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_USER_BUFFER,
+        "IOCTL_HID_SET_OUTPUT_REPORT returned error %u\n", GetLastError() );
+    length = 0;
+    SetLastError( 0xdeadbeef );
+    ret = sync_ioctl( file, IOCTL_HID_SET_OUTPUT_REPORT, report, report_len * 2, NULL, &length );
+    ok( ret, "IOCTL_HID_SET_OUTPUT_REPORT failed, last error %u\n", GetLastError() );
+    ok( length == 3, "got length %u, expected 3\n", length );
+
+    set_hid_expect( file, NULL, 0 );
+}
+
+static void test_write_file( HANDLE file, int report_id, ULONG report_len )
+{
+    struct hid_expect expect =
+    {
+        .code = IOCTL_HID_WRITE_REPORT,
+        .report_id = report_id,
+        .report_len = report_len - (report_id ? 0 : 1),
+        .report_buf = {report_id ? report_id : 0xcd,0xcd,0xcd,0xcd,0xcd},
+        .ret_length = 3,
+        .ret_status = STATUS_SUCCESS,
+    };
+
+    char report[200];
+    ULONG length;
+    BOOL ret;
+
+    SetLastError( 0xdeadbeef );
+    ret = WriteFile( file, report, 0, &length, NULL );
+    ok( !ret, "WriteFile succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "WriteFile returned error %u\n", GetLastError() );
+    ok( length == 0, "WriteFile returned %x\n", length );
+    SetLastError( 0xdeadbeef );
+    ret = WriteFile( file, report, report_len - 1, &length, NULL );
+    ok( !ret, "WriteFile succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == ERROR_INVALID_USER_BUFFER,
+        "WriteFile returned error %u\n", GetLastError() );
+    ok( length == 0, "WriteFile returned %x\n", length );
+
+    set_hid_expect( file, &expect, sizeof(expect) );
+
+    memset( report, 0xcd, sizeof(report) );
+    report[0] = 0xa5;
+    SetLastError( 0xdeadbeef );
+    ret = WriteFile( file, report, report_len * 2, &length, NULL );
+    if (report_id || broken( !ret ) /* w7u */)
+    {
+        ok( !ret, "WriteFile succeeded\n" );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER, "WriteFile returned error %u\n", GetLastError() );
+        ok( length == 0, "WriteFile wrote %u\n", length );
+        SetLastError( 0xdeadbeef );
+        report[0] = report_id;
+        ret = WriteFile( file, report, report_len, &length, NULL );
+    }
+
+    if (report_id)
+    {
+        ok( ret, "WriteFile failed, last error %u\n", GetLastError() );
+        ok( length == 2, "WriteFile wrote %u\n", length );
+    }
+    else
+    {
+        ok( ret, "WriteFile failed, last error %u\n", GetLastError() );
+        ok( length == 3, "WriteFile wrote %u\n", length );
+    }
+
+    set_hid_expect( file, NULL, 0 );
 }
 
 static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polled, const HIDP_CAPS *expect_caps )
@@ -894,11 +1403,11 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
     DWORD waveform_list;
     HIDP_DATA data[64];
     USAGE usages[16];
+    ULONG off, value;
     NTSTATUS status;
     HIDP_CAPS caps;
     unsigned int i;
     USHORT count;
-    ULONG value;
     BOOL ret;
 
     ret = HidD_GetPreparsedData( file, &preparsed_data );
@@ -1568,221 +2077,11 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
     ok( status == HIDP_STATUS_SUCCESS, "HidP_GetUsageValue returned %#x\n", status );
     ok( value == 0xfffffd0b, "got value %x, expected %#x\n", value, 0xfffffd0b );
 
-    memset( report, 0xcd, sizeof(report) );
-    status = HidP_InitializeReportForID( HidP_Input, report_id, preparsed_data, report, caps.InputReportByteLength );
-    ok( status == HIDP_STATUS_SUCCESS, "HidP_InitializeReportForID returned %#x\n", status );
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_GetInputReport( file, report, 0 );
-    ok( !ret, "HidD_GetInputReport succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_GetInputReport returned error %u\n", GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_GetInputReport( file, report, caps.InputReportByteLength - 1 );
-    ok( !ret, "HidD_GetInputReport succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
-        "HidD_GetInputReport returned error %u\n", GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    memset( buffer, 0x5a, sizeof(buffer) );
-    ret = HidD_GetInputReport( file, buffer, caps.InputReportByteLength );
-    if (report_id || broken( !ret ) /* w7u */)
-    {
-        ok( !ret, "HidD_GetInputReport succeeded, last error %u\n", GetLastError() );
-        ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
-            "HidD_GetInputReport returned error %u\n", GetLastError() );
-    }
-    else
-    {
-        ok( ret, "HidD_GetInputReport failed, last error %u\n", GetLastError() );
-        ok( buffer[0] == 0x5a, "got buffer[0] %x, expected 0x5a\n", (BYTE)buffer[0] );
-    }
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_GetInputReport( file, report, caps.InputReportByteLength );
-    ok( ret, "HidD_GetInputReport failed, last error %u\n", GetLastError() );
-    ok( report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id );
-
-    SetLastError( 0xdeadbeef );
-    value = caps.InputReportByteLength * 2;
-    ret = sync_ioctl( file, IOCTL_HID_GET_INPUT_REPORT, NULL, 0, report, &value );
-    ok( ret, "IOCTL_HID_GET_INPUT_REPORT failed, last error %u\n", GetLastError() );
-    ok( value == 3, "got length %u, expected 3\n", value );
-    ok( report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id );
-
-    memset( report, 0xcd, sizeof(report) );
-    status = HidP_InitializeReportForID( HidP_Feature, report_id, preparsed_data, report,
-                                         caps.FeatureReportByteLength );
-    ok( status == HIDP_STATUS_SUCCESS, "HidP_InitializeReportForID returned %#x\n", status );
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_GetFeature( file, report, 0 );
-    ok( !ret, "HidD_GetFeature succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_GetFeature returned error %u\n", GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_GetFeature( file, report, caps.FeatureReportByteLength - 1 );
-    ok( !ret, "HidD_GetFeature succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
-        "HidD_GetFeature returned error %u\n", GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    memset( buffer, 0x5a, sizeof(buffer) );
-    ret = HidD_GetFeature( file, buffer, caps.FeatureReportByteLength );
-    if (report_id || broken( !ret ))
-    {
-        ok( !ret, "HidD_GetFeature succeeded, last error %u\n", GetLastError() );
-        ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
-            "HidD_GetFeature returned error %u\n", GetLastError() );
-    }
-    else
-    {
-        ok( ret, "HidD_GetFeature failed, last error %u\n", GetLastError() );
-        ok( buffer[0] == 0x5a, "got buffer[0] %x, expected 0x5a\n", (BYTE)buffer[0] );
-    }
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_GetFeature( file, report, caps.FeatureReportByteLength );
-    ok( ret, "HidD_GetFeature failed, last error %u\n", GetLastError() );
-    ok( report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id );
-
-    value = caps.FeatureReportByteLength * 2;
-    SetLastError( 0xdeadbeef );
-    ret = sync_ioctl( file, IOCTL_HID_GET_FEATURE, NULL, 0, report, &value );
-    ok( ret, "IOCTL_HID_GET_FEATURE failed, last error %u\n", GetLastError() );
-    ok( value == 3, "got length %u, expected 3\n", value );
-    ok( report[0] == report_id, "got report[0] %02x, expected %02x\n", report[0], report_id );
-
-    memset( report, 0xcd, sizeof(report) );
-    status = HidP_InitializeReportForID( HidP_Feature, report_id, preparsed_data, report,
-                                         caps.FeatureReportByteLength );
-    ok( status == HIDP_STATUS_SUCCESS, "HidP_InitializeReportForID returned %#x\n", status );
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_SetFeature( file, report, 0 );
-    ok( !ret, "HidD_SetFeature succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_SetFeature returned error %u\n", GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_SetFeature( file, report, caps.FeatureReportByteLength - 1 );
-    ok( !ret, "HidD_SetFeature succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
-        "HidD_SetFeature returned error %u\n", GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    memset( buffer, 0x5a, sizeof(buffer) );
-    ret = HidD_SetFeature( file, buffer, caps.FeatureReportByteLength );
-    if (report_id || broken( !ret ))
-    {
-        ok( !ret, "HidD_SetFeature succeeded, last error %u\n", GetLastError() );
-        ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
-            "HidD_SetFeature returned error %u\n", GetLastError() );
-    }
-    else
-    {
-        ok( ret, "HidD_SetFeature failed, last error %u\n", GetLastError() );
-    }
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_SetFeature( file, report, caps.FeatureReportByteLength );
-    ok( ret, "HidD_SetFeature failed, last error %u\n", GetLastError() );
-
-    value = caps.FeatureReportByteLength * 2;
-    SetLastError( 0xdeadbeef );
-    ret = sync_ioctl( file, IOCTL_HID_SET_FEATURE, NULL, 0, report, &value );
-    ok( !ret, "IOCTL_HID_SET_FEATURE succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "IOCTL_HID_SET_FEATURE returned error %u\n",
-        GetLastError() );
-    value = 0;
-    SetLastError( 0xdeadbeef );
-    ret = sync_ioctl( file, IOCTL_HID_SET_FEATURE, report, caps.FeatureReportByteLength * 2, NULL, &value );
-    ok( ret, "IOCTL_HID_SET_FEATURE failed, last error %u\n", GetLastError() );
-    ok( value == 3, "got length %u, expected 3\n", value );
-
-    memset( report, 0xcd, sizeof(report) );
-    status = HidP_InitializeReportForID( HidP_Output, report_id, preparsed_data, report, caps.OutputReportByteLength );
-    ok( status == HIDP_STATUS_REPORT_DOES_NOT_EXIST, "HidP_InitializeReportForID returned %#x\n", status );
-    memset( report, 0, caps.OutputReportByteLength );
-    report[0] = report_id;
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_SetOutputReport( file, report, 0 );
-    ok( !ret, "HidD_SetOutputReport succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "HidD_SetOutputReport returned error %u\n",
-        GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_SetOutputReport( file, report, caps.OutputReportByteLength - 1 );
-    ok( !ret, "HidD_SetOutputReport succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
-        "HidD_SetOutputReport returned error %u\n", GetLastError() );
-
-    SetLastError( 0xdeadbeef );
-    memset( buffer, 0x5a, sizeof(buffer) );
-    ret = HidD_SetOutputReport( file, buffer, caps.OutputReportByteLength );
-    if (report_id || broken( !ret ))
-    {
-        ok( !ret, "HidD_SetOutputReport succeeded, last error %u\n", GetLastError() );
-        ok( GetLastError() == ERROR_INVALID_PARAMETER || broken( GetLastError() == ERROR_CRC ),
-            "HidD_SetOutputReport returned error %u\n", GetLastError() );
-    }
-    else
-    {
-        ok( ret, "HidD_SetOutputReport failed, last error %u\n", GetLastError() );
-    }
-
-    SetLastError( 0xdeadbeef );
-    ret = HidD_SetOutputReport( file, report, caps.OutputReportByteLength );
-    ok( ret, "HidD_SetOutputReport failed, last error %u\n", GetLastError() );
-
-    value = caps.OutputReportByteLength * 2;
-    SetLastError( 0xdeadbeef );
-    ret = sync_ioctl( file, IOCTL_HID_SET_OUTPUT_REPORT, NULL, 0, report, &value );
-    ok( !ret, "IOCTL_HID_SET_OUTPUT_REPORT succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_USER_BUFFER,
-        "IOCTL_HID_SET_OUTPUT_REPORT returned error %u\n", GetLastError() );
-    value = 0;
-    SetLastError( 0xdeadbeef );
-    ret = sync_ioctl( file, IOCTL_HID_SET_OUTPUT_REPORT, report, caps.OutputReportByteLength * 2, NULL, &value );
-    ok( ret, "IOCTL_HID_SET_OUTPUT_REPORT failed, last error %u\n", GetLastError() );
-    ok( value == 3, "got length %u, expected 3\n", value );
-
-    SetLastError( 0xdeadbeef );
-    ret = WriteFile( file, report, 0, &value, NULL );
-    ok( !ret, "WriteFile succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_USER_BUFFER, "WriteFile returned error %u\n", GetLastError() );
-    ok( value == 0, "WriteFile returned %x\n", value );
-    SetLastError( 0xdeadbeef );
-    ret = WriteFile( file, report, caps.OutputReportByteLength - 1, &value, NULL );
-    ok( !ret, "WriteFile succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == ERROR_INVALID_USER_BUFFER,
-        "WriteFile returned error %u\n", GetLastError() );
-    ok( value == 0, "WriteFile returned %x\n", value );
-
-    memset( report, 0xcd, sizeof(report) );
-    report[0] = 0xa5;
-    SetLastError( 0xdeadbeef );
-    ret = WriteFile( file, report, caps.OutputReportByteLength * 2, &value, NULL );
-    if (report_id || broken( !ret ) /* w7u */)
-    {
-        ok( !ret, "WriteFile succeeded\n" );
-        ok( GetLastError() == ERROR_INVALID_PARAMETER, "WriteFile returned error %u\n", GetLastError() );
-        ok( value == 0, "WriteFile wrote %u\n", value );
-        SetLastError( 0xdeadbeef );
-        report[0] = report_id;
-        ret = WriteFile( file, report, caps.OutputReportByteLength, &value, NULL );
-    }
-
-    if (report_id)
-    {
-        ok( ret, "WriteFile failed, last error %u\n", GetLastError() );
-        ok( value == 2, "WriteFile wrote %u\n", value );
-    }
-    else
-    {
-        ok( ret, "WriteFile failed, last error %u\n", GetLastError() );
-        ok( value == 3, "WriteFile wrote %u\n", value );
-    }
+    test_hidp_get_input( file, report_id, caps.InputReportByteLength, preparsed_data );
+    test_hidp_get_feature( file, report_id, caps.FeatureReportByteLength, preparsed_data );
+    test_hidp_set_feature( file, report_id, caps.FeatureReportByteLength, preparsed_data );
+    test_hidp_set_output( file, report_id, caps.OutputReportByteLength, preparsed_data );
+    test_write_file( file, report_id, caps.OutputReportByteLength );
 
     memset( report, 0xcd, sizeof(report) );
     SetLastError( 0xdeadbeef );
@@ -1798,6 +2097,26 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
 
     if (polled)
     {
+        struct hid_expect expect[] =
+        {
+            {
+                .code = IOCTL_HID_READ_REPORT,
+                .report_len = caps.InputReportByteLength - (report_id ? 0 : 1),
+                .report_buf = {report_id ? report_id : 0x5a,0x5a,0},
+                .ret_length = 3,
+                .ret_status = STATUS_SUCCESS,
+            },
+            {
+                .code = IOCTL_HID_READ_REPORT,
+                .report_len = caps.InputReportByteLength - (report_id ? 0 : 1),
+                .report_buf = {report_id ? report_id : 0x5a,0x5a,1},
+                .ret_length = 3,
+                .ret_status = STATUS_SUCCESS,
+            },
+        };
+
+        send_hid_input( file, expect, sizeof(expect) );
+
         memset( report, 0xcd, sizeof(report) );
         SetLastError( 0xdeadbeef );
         ret = ReadFile( file, report, caps.InputReportByteLength, &value, NULL );
@@ -1815,7 +2134,8 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
         ok( GetLastError() == ERROR_IO_PENDING, "ReadFile returned error %u\n", GetLastError() );
         ret = GetOverlappedResult( async_file, &overlapped, &value, TRUE );
         ok( ret, "GetOverlappedResult failed, last error %u\n", GetLastError() );
-        ok( value == (report_id ? 3 : 4), "GetOverlappedResult returned length %u, expected 3\n", value );
+        ok( value == (report_id ? 3 : 4), "GetOverlappedResult returned length %u, expected %u\n",
+            value, (report_id ? 3 : 4) );
         ResetEvent( overlapped.hEvent );
 
         memcpy( buffer, report, caps.InputReportByteLength );
@@ -1834,14 +2154,95 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
         /* wait for second report to be ready */
         ret = GetOverlappedResult( async_file, &overlapped2, &value, TRUE );
         ok( ret, "GetOverlappedResult failed, last error %u\n", GetLastError() );
-        ok( value == (report_id ? 3 : 4), "GetOverlappedResult returned length %u, expected 3\n", value );
+        ok( value == (report_id ? 3 : 4), "GetOverlappedResult returned length %u, expected %u\n",
+            value, (report_id ? 3 : 4) );
         /* first report should be ready and the same */
         ret = GetOverlappedResult( async_file, &overlapped, &value, FALSE );
         ok( ret, "GetOverlappedResult failed, last error %u\n", GetLastError() );
-        ok( value == (report_id ? 3 : 4), "GetOverlappedResult returned length %u, expected 3\n", value );
+        ok( value == (report_id ? 3 : 4), "GetOverlappedResult returned length %u, expected %u\n",
+            value, (report_id ? 3 : 4) );
         ok( memcmp( report, buffer + caps.InputReportByteLength, caps.InputReportByteLength ),
             "expected different report\n" );
         ok( !memcmp( report, buffer, caps.InputReportByteLength ), "expected identical reports\n" );
+
+        CloseHandle( overlapped.hEvent );
+        CloseHandle( overlapped2.hEvent );
+    }
+    else
+    {
+        struct hid_expect expect[] =
+        {
+            {
+                .code = IOCTL_HID_READ_REPORT,
+                .report_len = caps.InputReportByteLength - (report_id ? 0 : 1),
+                .report_buf = {report_id ? report_id : 0x5a,0x5a,0x5a},
+                .ret_length = 3,
+                .ret_status = STATUS_SUCCESS,
+            },
+            {
+                .code = IOCTL_HID_READ_REPORT,
+                .report_len = caps.InputReportByteLength - (report_id ? 0 : 1),
+                .report_buf = {report_id ? report_id : 0xa5,0xa5,0xa5,0xa5,0xa5},
+                .ret_length = caps.InputReportByteLength - (report_id ? 0 : 1),
+                .ret_status = STATUS_SUCCESS,
+            },
+        };
+
+        overlapped.hEvent = CreateEventW( NULL, FALSE, FALSE, NULL );
+        overlapped2.hEvent = CreateEventW( NULL, FALSE, FALSE, NULL );
+
+        SetLastError( 0xdeadbeef );
+        memset( report, 0, sizeof(report) );
+        ret = ReadFile( async_file, report, caps.InputReportByteLength, NULL, &overlapped );
+        ok( !ret, "ReadFile succeeded\n" );
+        ok( GetLastError() == ERROR_IO_PENDING, "ReadFile returned error %u\n", GetLastError() );
+        Sleep( 50 );
+        ret = GetOverlappedResult( async_file, &overlapped, &value, FALSE );
+        ok( !ret, "GetOverlappedResult succeeded\n" );
+        ok( GetLastError() == ERROR_IO_INCOMPLETE, "GetOverlappedResult returned error %u\n", GetLastError() );
+
+        SetLastError( 0xdeadbeef );
+        memset( buffer, 0, sizeof(buffer) );
+        ret = ReadFile( async_file, buffer, caps.InputReportByteLength, NULL, &overlapped2 );
+        ok( !ret, "ReadFile succeeded\n" );
+        ok( GetLastError() == ERROR_IO_PENDING, "ReadFile returned error %u\n", GetLastError() );
+        Sleep( 50 );
+        ret = GetOverlappedResult( async_file, &overlapped2, &value, FALSE );
+        ok( !ret, "GetOverlappedResult succeeded\n" );
+        ok( GetLastError() == ERROR_IO_INCOMPLETE, "GetOverlappedResult returned error %u\n", GetLastError() );
+
+        memset( report + caps.InputReportByteLength, 0xa5, 5 );
+        if (report_id) report[caps.InputReportByteLength] = report_id;
+
+        send_hid_input( file, expect, sizeof(expect) );
+
+        /* first read should be completed */
+        ret = GetOverlappedResult( async_file, &overlapped, &value, TRUE );
+        ok( ret, "GetOverlappedResult failed, last error %u\n", GetLastError() );
+        ok( value == caps.InputReportByteLength, "got length %u, expected %u\n", value, caps.InputReportByteLength );
+        /* second read should still be pending */
+        Sleep( 50 );
+        ret = GetOverlappedResult( async_file, &overlapped2, &value, FALSE );
+        ok( !ret, "GetOverlappedResult succeeded\n" );
+        ok( GetLastError() == ERROR_IO_INCOMPLETE, "GetOverlappedResult returned error %u\n", GetLastError() );
+
+        memset( buffer + caps.InputReportByteLength, 0x3b, 5 );
+        if (report_id) buffer[caps.InputReportByteLength] = report_id;
+        memset( expect[1].report_buf, 0x3b, 5 );
+        if (report_id) expect[1].report_buf[0] = report_id;
+
+        send_hid_input( file, expect, sizeof(expect) );
+
+        ret = GetOverlappedResult( async_file, &overlapped2, &value, TRUE );
+        ok( ret, "GetOverlappedResult failed, last error %u\n", GetLastError() );
+        ok( value == caps.InputReportByteLength, "got length %u, expected %u\n", value, caps.InputReportByteLength );
+
+        off = report_id ? 0 : 1;
+        ok( memcmp( report, buffer, caps.InputReportByteLength ), "expected different report\n" );
+        ok( !memcmp( report + off, report + caps.InputReportByteLength, caps.InputReportByteLength - off ),
+            "expected identical reports\n" );
+        ok( !memcmp( buffer + off, buffer + caps.InputReportByteLength, caps.InputReportByteLength - off ),
+            "expected identical reports\n" );
 
         CloseHandle( overlapped.hEvent );
         CloseHandle( overlapped2.hEvent );
@@ -2290,6 +2691,14 @@ static void test_hid_driver( DWORD report_id, DWORD polled )
         .NumberFeatureValueCaps = 6,
         .NumberFeatureDataIndices = 8,
     };
+    const struct hid_expect expect_in =
+    {
+        .code = IOCTL_HID_READ_REPORT,
+        .report_len = caps.InputReportByteLength - (report_id ? 0 : 1),
+        .report_buf = {report_id ? report_id : 0x5a,0x5a,0x5a},
+        .ret_length = 3,
+        .ret_status = STATUS_SUCCESS,
+    };
 
     WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
     LSTATUS status;
@@ -2318,10 +2727,2269 @@ static void test_hid_driver( DWORD report_id, DWORD polled )
     status = RegSetValueExW( hkey, L"Caps", 0, REG_BINARY, (void *)&caps, sizeof(caps) );
     ok( !status, "RegSetValueExW returned %#x\n", status );
 
+    status = RegSetValueExW( hkey, L"Expect", 0, REG_BINARY, NULL, 0 );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
+    status = RegSetValueExW( hkey, L"Input", 0, REG_BINARY, (void *)&expect_in, polled ? sizeof(expect_in) : 0 );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
     if (pnp_driver_start( L"driver_hid.dll" )) test_hid_device( report_id, polled, &caps );
 
     pnp_driver_stop();
     SetCurrentDirectoryW( cwd );
+}
+
+/* undocumented HID internal preparsed data structure */
+
+struct hidp_kdr_caps
+{
+    USHORT usage_page;
+    UCHAR report_id;
+    UCHAR start_bit;
+    USHORT bit_size;
+    USHORT report_count;
+    USHORT start_byte;
+    USHORT total_bits;
+    ULONG bit_field;
+    USHORT end_byte;
+    USHORT link_collection;
+    USAGE link_usage_page;
+    USAGE link_usage;
+    ULONG flags;
+    ULONG padding[8];
+    USAGE usage_min;
+    USAGE usage_max;
+    USHORT string_min;
+    USHORT string_max;
+    USHORT designator_min;
+    USHORT designator_max;
+    USHORT data_index_min;
+    USHORT data_index_max;
+    USHORT null_value;
+    USHORT unknown;
+    LONG logical_min;
+    LONG logical_max;
+    LONG physical_min;
+    LONG physical_max;
+    LONG units;
+    LONG units_exp;
+};
+
+/* named array continues on next caps */
+#define HIDP_KDR_CAPS_ARRAY_HAS_MORE       0x01
+#define HIDP_KDR_CAPS_IS_CONSTANT          0x02
+#define HIDP_KDR_CAPS_IS_BUTTON            0x04
+#define HIDP_KDR_CAPS_IS_ABSOLUTE          0x08
+#define HIDP_KDR_CAPS_IS_RANGE             0x10
+#define HIDP_KDR_CAPS_IS_STRING_RANGE      0x40
+#define HIDP_KDR_CAPS_IS_DESIGNATOR_RANGE  0x80
+
+struct hidp_kdr_node
+{
+    USAGE usage;
+    USAGE usage_page;
+    USHORT parent;
+    USHORT number_of_children;
+    USHORT next_sibling;
+    USHORT first_child;
+    ULONG collection_type;
+};
+
+struct hidp_kdr
+{
+    char magic[8];
+    USAGE usage;
+    USAGE usage_page;
+    USHORT unknown[2];
+    USHORT input_caps_start;
+    USHORT input_caps_count;
+    USHORT input_caps_end;
+    USHORT input_report_byte_length;
+    USHORT output_caps_start;
+    USHORT output_caps_count;
+    USHORT output_caps_end;
+    USHORT output_report_byte_length;
+    USHORT feature_caps_start;
+    USHORT feature_caps_count;
+    USHORT feature_caps_end;
+    USHORT feature_report_byte_length;
+    USHORT caps_size;
+    USHORT number_link_collection_nodes;
+    struct hidp_kdr_caps caps[1];
+    /* struct hidp_kdr_node nodes[1] */
+};
+
+static void test_hidp_kdr(void)
+{
+#include "psh_hid_macros.h"
+    const unsigned char report_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+            LOGICAL_MINIMUM(1, 1),
+            LOGICAL_MAXIMUM(1, 127),
+            PHYSICAL_MINIMUM(1, -128),
+            PHYSICAL_MAXIMUM(1, 127),
+
+            USAGE(1, HID_USAGE_GENERIC_RZ),
+            REPORT_SIZE(1, 16),
+            REPORT_COUNT(1, 0),
+            FEATURE(1, Data|Var|Abs),
+            USAGE(1, HID_USAGE_GENERIC_SLIDER),
+            REPORT_SIZE(1, 16),
+            REPORT_COUNT(1, 1),
+            FEATURE(1, Data|Var|Abs),
+
+            USAGE(1, HID_USAGE_GENERIC_X),
+            REPORT_SIZE(1, 8),
+            REPORT_COUNT(1, 1),
+            UNIT(1, 0x100e),
+            UNIT_EXPONENT(1, -3),
+            INPUT(1, Data|Var|Abs),
+            UNIT_EXPONENT(1, 0),
+            UNIT(1, 0),
+            USAGE(1, HID_USAGE_GENERIC_Y),
+            DESIGNATOR_MINIMUM(1, 1),
+            DESIGNATOR_MAXIMUM(1, 4),
+            REPORT_SIZE(1, 8),
+            REPORT_COUNT(1, 1),
+            INPUT(1, Cnst|Var|Abs),
+            USAGE(1, HID_USAGE_GENERIC_Z),
+            REPORT_SIZE(1, 8),
+            REPORT_COUNT(1, 1),
+            INPUT(1, Data|Var|Rel),
+            USAGE(1, HID_USAGE_GENERIC_RX),
+            USAGE(1, HID_USAGE_GENERIC_RY),
+            REPORT_SIZE(1, 16),
+            REPORT_COUNT(1, 2),
+            LOGICAL_MINIMUM(1, 7),
+            INPUT(1, Data|Var|Abs|Null),
+
+            COLLECTION(1, Application),
+                USAGE(4, (HID_USAGE_PAGE_BUTTON << 16)|1),
+                USAGE(4, (HID_USAGE_PAGE_BUTTON << 16)|2),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 8),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE_MINIMUM(4, (HID_USAGE_PAGE_BUTTON << 16)|3),
+                USAGE_MAXIMUM(4, (HID_USAGE_PAGE_BUTTON << 16)|8),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                LOGICAL_MINIMUM(1, 3),
+                LOGICAL_MAXIMUM(1, 8),
+                INPUT(1, Data|Ary|Abs),
+
+                USAGE_MINIMUM(4, (HID_USAGE_PAGE_BUTTON << 16)|9),
+                USAGE_MAXIMUM(4, (HID_USAGE_PAGE_BUTTON << 16)|12),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 4),
+                LOGICAL_MINIMUM(1, 9),
+                LOGICAL_MAXIMUM(1, 12),
+                INPUT(2, Data|Ary|Abs|Buff),
+
+                USAGE(4, (HID_USAGE_PAGE_BUTTON << 16)|13),
+                USAGE(4, (HID_USAGE_PAGE_BUTTON << 16)|14),
+                USAGE(4, (HID_USAGE_PAGE_BUTTON << 16)|15),
+                USAGE(4, (HID_USAGE_PAGE_BUTTON << 16)|16),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                LOGICAL_MINIMUM(1, 13),
+                LOGICAL_MAXIMUM(1, 16),
+                INPUT(1, Data|Ary|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+#include "pop_hid_macros.h"
+
+    static const HIDP_CAPS expect_hidp_caps =
+    {
+        .Usage = HID_USAGE_GENERIC_JOYSTICK,
+        .UsagePage = HID_USAGE_PAGE_GENERIC,
+        .InputReportByteLength = 15,
+    };
+    static const HID_DEVICE_ATTRIBUTES attributes =
+    {
+        .Size = sizeof(HID_DEVICE_ATTRIBUTES),
+        .VendorID = 0x1209,
+        .ProductID = 0x0001,
+        .VersionNumber = 0x0100,
+    };
+    static const struct hidp_kdr expect_kdr =
+    {
+        .magic = "HidP KDR",
+        .usage = 0x04,
+        .usage_page = 0x01,
+        .input_caps_count = 13,
+        .input_caps_end = 13,
+        .input_report_byte_length = 15,
+        .output_caps_start = 13,
+        .output_caps_end = 13,
+        .feature_caps_start = 13,
+        .feature_caps_count = 2,
+        .feature_caps_end = 14,
+        .feature_report_byte_length = 3,
+        .caps_size = 1560,
+        .number_link_collection_nodes = 2,
+    };
+    static const struct hidp_kdr_caps expect_caps[] =
+    {
+        {
+            .usage_page = 0x01, .bit_size = 0x08, .report_count = 0x1, .start_byte = 0x1, .total_bits = 0x08,
+            .bit_field = 0x002, .end_byte = 0x2, .link_usage_page = 0x01, .link_usage = 0x04, .flags = 0x08,
+            .usage_min = 0x30, .usage_max = 0x30, .logical_min = 1, .logical_max = 127, .physical_min = -128,
+            .physical_max = 127, .units = 0xe, .units_exp = -3
+        },
+        {
+            .usage_page = 0x01, .bit_size = 0x08, .report_count = 0x1, .start_byte = 0x2, .total_bits = 0x08,
+            .bit_field = 0x003, .end_byte = 0x3, .link_usage_page = 0x01, .link_usage = 0x04, .flags = 0x8a,
+            .usage_min = 0x31, .usage_max = 0x31, .designator_min = 1, .designator_max = 4, .data_index_min = 0x01,
+            .data_index_max = 0x01, .logical_min = 1, .logical_max = 127, .physical_min = -128, .physical_max = 127
+        },
+        {
+            .usage_page = 0x01, .bit_size = 0x08, .report_count = 0x1, .start_byte = 0x3, .total_bits = 0x08,
+            .bit_field = 0x006, .end_byte = 0x4, .link_usage_page = 0x01, .link_usage = 0x04, .usage_min = 0x32,
+            .usage_max = 0x32, .data_index_min = 0x02, .data_index_max = 0x02, .logical_min = 1, .logical_max = 127,
+            .physical_min = -128, .physical_max = 127
+        },
+        {
+            .usage_page = 0x01, .bit_size = 0x10, .report_count = 0x1, .start_byte = 0x6, .total_bits = 0x10,
+            .bit_field = 0x042, .end_byte = 0x8, .link_usage_page = 0x01, .link_usage = 0x04, .flags = 0x08,
+            .usage_min = 0x34, .usage_max = 0x34, .data_index_min = 0x03, .data_index_max = 0x03, .null_value = 1,
+            .logical_min = 7, .logical_max = 127, .physical_min = -128, .physical_max = 127
+        },
+        {
+            .usage_page = 0x01, .bit_size = 0x10, .report_count = 0x1, .start_byte = 0x4, .total_bits = 0x10,
+            .bit_field = 0x042, .end_byte = 0x6, .link_usage_page = 0x01, .link_usage = 0x04, .flags = 0x08,
+            .usage_min = 0x33, .usage_max = 0x33, .data_index_min = 0x04, .data_index_max = 0x04, .null_value = 1,
+            .logical_min = 7, .logical_max = 127, .physical_min = -128, .physical_max = 127
+        },
+        {
+            .usage_page = 0x09, .start_bit = 1, .bit_size = 0x01, .report_count = 0x7, .start_byte = 0x8, .total_bits = 0x07,
+            .bit_field = 0x002, .end_byte = 0x9, .link_collection = 1, .link_usage_page = 0x01, .flags = 0x0c,
+            .usage_min = 0x02, .usage_max = 0x02, .data_index_min = 0x05, .data_index_max = 0x05,
+        },
+        {
+            .usage_page = 0x09, .bit_size = 0x01, .report_count = 0x1, .start_byte = 0x8, .total_bits = 0x01,
+            .bit_field = 0x002, .end_byte = 0x9, .link_collection = 1, .link_usage_page = 0x01, .flags = 0x0c,
+            .usage_min = 0x01, .usage_max = 0x01, .data_index_min = 0x06, .data_index_max = 0x06,
+        },
+        {
+            .usage_page = 0x09, .bit_size = 0x08, .report_count = 0x1, .start_byte = 0x9, .total_bits = 0x08,
+            .bit_field = 0x000, .end_byte = 0xa, .link_collection = 1, .link_usage_page = 0x01, .flags = 0x1c,
+            .usage_min = 0x03, .usage_max = 0x08, .data_index_min = 0x07, .data_index_max = 0x0c, .null_value = 3,
+            .logical_min = 8
+        },
+        {
+            .usage_page = 0x09, .bit_size = 0x08, .report_count = 0x4, .start_byte = 0xa, .total_bits = 0x20,
+            .bit_field = 0x100, .end_byte = 0xe, .link_collection = 1, .link_usage_page = 0x01, .flags = 0x1c,
+            .usage_min = 0x09, .usage_max = 0x0c, .data_index_min = 0x0d, .data_index_max = 0x10, .null_value = 9,
+            .logical_min = 12
+        },
+        {
+            .usage_page = 0x09, .bit_size = 0x08, .report_count = 0x1, .start_byte = 0xe, .total_bits = 0x08,
+            .bit_field = 0x000, .end_byte = 0xf, .link_collection = 1, .link_usage_page = 0x01, .flags = 0x0d,
+            .usage_min = 0x10, .usage_max = 0x10, .data_index_min = 0x14, .data_index_max = 0x14, .null_value = 13,
+            .logical_min = 16
+        },
+        {
+            .usage_page = 0x09, .bit_size = 0x08, .report_count = 0x1, .start_byte = 0xe, .total_bits = 0x08,
+            .bit_field = 0x000, .end_byte = 0xf, .link_collection = 1, .link_usage_page = 0x01, .flags = 0x0d,
+            .usage_min = 0x0f, .usage_max = 0x0f, .data_index_min = 0x13, .data_index_max = 0x13, .null_value = 13,
+            .logical_min = 16
+        },
+        {
+            .usage_page = 0x09, .bit_size = 0x08, .report_count = 0x1, .start_byte = 0xe, .total_bits = 0x08,
+            .bit_field = 0x000, .end_byte = 0xf, .link_collection = 1, .link_usage_page = 0x01, .flags = 0x0d,
+            .usage_min = 0x0e, .usage_max = 0x0e, .data_index_min = 0x12, .data_index_max = 0x12, .null_value = 13,
+            .logical_min = 16
+        },
+        {
+            .usage_page = 0x09, .bit_size = 0x08, .report_count = 0x1, .start_byte = 0xe, .total_bits = 0x08,
+            .bit_field = 0x000, .end_byte = 0xf, .link_collection = 1, .link_usage_page = 0x01, .flags = 0x0c,
+            .usage_min = 0x0d, .usage_max = 0x0d, .data_index_min = 0x11, .data_index_max = 0x11, .null_value = 13,
+            .logical_min = 16
+        },
+        {
+            .usage_page = 0x01, .bit_size = 0x10, .report_count = 0x1, .start_byte = 0x1, .total_bits = 0x10,
+            .bit_field = 0x002, .end_byte = 0x3, .link_usage_page = 0x01, .link_usage = 0x04, .flags = 0x08,
+            .usage_min = 0x36, .usage_max = 0x36, .logical_min = 1, .logical_max = 127, .physical_min = -128,
+            .physical_max = 127
+        },
+        {
+        },
+    };
+    static const struct hidp_kdr_node expect_nodes[] =
+    {
+        {
+            .usage = 0x04,
+            .usage_page = 0x01,
+            .parent = 0,
+            .number_of_children = 0x1,
+            .next_sibling = 0,
+            .first_child = 0x1,
+            .collection_type = 0x1,
+        },
+        {
+            .usage = 0x00,
+            .usage_page = 0x01,
+            .parent = 0,
+            .number_of_children = 0,
+            .next_sibling = 0,
+            .first_child = 0,
+            .collection_type = 0x1,
+        },
+    };
+
+    char buffer[FIELD_OFFSET( SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath[MAX_PATH] )];
+    SP_DEVICE_INTERFACE_DATA iface = {sizeof(SP_DEVICE_INTERFACE_DATA)};
+    SP_DEVICE_INTERFACE_DETAIL_DATA_W *iface_detail = (void *)buffer;
+    SP_DEVINFO_DATA device = {sizeof(SP_DEVINFO_DATA)};
+    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
+    PHIDP_PREPARSED_DATA preparsed_data;
+    DWORD i, report_id = 0, polled = 0;
+    struct hidp_kdr *kdr;
+    LSTATUS status;
+    HDEVINFO set;
+    HANDLE file;
+    HKEY hkey;
+    BOOL ret;
+
+    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
+    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
+    SetCurrentDirectoryW( tempdir );
+
+    status = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\winetest",
+                              0, NULL, REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, NULL );
+    ok( !status, "RegCreateKeyExW returned %#x\n", status );
+
+    status = RegSetValueExW( hkey, L"ReportID", 0, REG_DWORD, (void *)&report_id, sizeof(report_id) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
+    status = RegSetValueExW( hkey, L"PolledMode", 0, REG_DWORD, (void *)&polled, sizeof(polled) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
+    status = RegSetValueExW( hkey, L"Descriptor", 0, REG_BINARY, (void *)report_desc, sizeof(report_desc) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
+    status = RegSetValueExW( hkey, L"Attributes", 0, REG_BINARY, (void *)&attributes, sizeof(attributes) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
+    status = RegSetValueExW( hkey, L"Caps", 0, REG_BINARY, (void *)&expect_hidp_caps, sizeof(expect_hidp_caps) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
+    status = RegSetValueExW( hkey, L"Expect", 0, REG_BINARY, NULL, 0 );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
+    status = RegSetValueExW( hkey, L"Input", 0, REG_BINARY, NULL, 0 );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
+    if (!pnp_driver_start( L"driver_hid.dll" )) goto done;
+
+    set = SetupDiGetClassDevsW( &GUID_DEVINTERFACE_HID, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT );
+    ok( set != INVALID_HANDLE_VALUE, "failed to get device list, error %#x\n", GetLastError() );
+    for (i = 0; SetupDiEnumDeviceInfo( set, i, &device ); ++i)
+    {
+        ret = SetupDiEnumDeviceInterfaces( set, &device, &GUID_DEVINTERFACE_HID, 0, &iface );
+        ok( ret, "failed to get interface, error %#x\n", GetLastError() );
+        ok( IsEqualGUID( &iface.InterfaceClassGuid, &GUID_DEVINTERFACE_HID ), "wrong class %s\n",
+            debugstr_guid( &iface.InterfaceClassGuid ) );
+        ok( iface.Flags == SPINT_ACTIVE, "got flags %#x\n", iface.Flags );
+
+        iface_detail->cbSize = sizeof(*iface_detail);
+        ret = SetupDiGetDeviceInterfaceDetailW( set, &iface, iface_detail, sizeof(buffer), NULL, NULL );
+        ok( ret, "failed to get interface path, error %#x\n", GetLastError() );
+
+        if (wcsstr( iface_detail->DevicePath, L"\\\\?\\hid#winetest#1" )) break;
+    }
+    SetupDiDestroyDeviceInfoList( set );
+
+    file = CreateFileW( iface_detail->DevicePath, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL );
+    ok( file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError() );
+
+    ret = HidD_GetPreparsedData( file, &preparsed_data );
+    ok( ret, "HidD_GetPreparsedData failed with error %u\n", GetLastError() );
+
+    kdr = (struct hidp_kdr *)preparsed_data;
+    ok( !strncmp( kdr->magic, expect_kdr.magic, 8 ), "got %s expected %s\n",
+        debugstr_an(kdr->magic, 8), debugstr_an(expect_kdr.magic, 8) );
+
+    if (!strncmp( kdr->magic, expect_kdr.magic, 8 ))
+    {
+        check_member( *kdr, expect_kdr, "%04x", usage );
+        check_member( *kdr, expect_kdr, "%04x", usage_page );
+        check_member( *kdr, expect_kdr, "%#x", unknown[0] );
+        check_member( *kdr, expect_kdr, "%#x", unknown[1] );
+        check_member( *kdr, expect_kdr, "%d", input_caps_start );
+        check_member( *kdr, expect_kdr, "%d", input_caps_count );
+        check_member( *kdr, expect_kdr, "%d", input_caps_end );
+        check_member( *kdr, expect_kdr, "%d", input_report_byte_length );
+        check_member( *kdr, expect_kdr, "%d", output_caps_start );
+        check_member( *kdr, expect_kdr, "%d", output_caps_count );
+        check_member( *kdr, expect_kdr, "%d", output_caps_end );
+        check_member( *kdr, expect_kdr, "%d", output_report_byte_length );
+        check_member( *kdr, expect_kdr, "%d", feature_caps_start );
+        todo_wine
+        check_member( *kdr, expect_kdr, "%d", feature_caps_count );
+        check_member( *kdr, expect_kdr, "%d", feature_caps_end );
+        check_member( *kdr, expect_kdr, "%d", feature_report_byte_length );
+        todo_wine
+        check_member( *kdr, expect_kdr, "%d", caps_size );
+        check_member( *kdr, expect_kdr, "%d", number_link_collection_nodes );
+
+        for (i = 0; i < min( ARRAY_SIZE(expect_caps), kdr->caps_size / sizeof(struct hidp_kdr_caps) ); ++i)
+        {
+            winetest_push_context( "caps[%d]", i );
+            check_member( kdr->caps[i], expect_caps[i], "%04x", usage_page );
+            check_member( kdr->caps[i], expect_caps[i], "%d", report_id );
+            check_member( kdr->caps[i], expect_caps[i], "%d", start_bit );
+            check_member( kdr->caps[i], expect_caps[i], "%d", bit_size );
+            check_member( kdr->caps[i], expect_caps[i], "%d", report_count );
+            check_member( kdr->caps[i], expect_caps[i], "%d", start_byte );
+            check_member( kdr->caps[i], expect_caps[i], "%d", total_bits );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", bit_field );
+            check_member( kdr->caps[i], expect_caps[i], "%d", end_byte );
+            check_member( kdr->caps[i], expect_caps[i], "%d", link_collection );
+            check_member( kdr->caps[i], expect_caps[i], "%04x", link_usage_page );
+            check_member( kdr->caps[i], expect_caps[i], "%04x", link_usage );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", flags );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", padding[0] );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", padding[1] );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", padding[2] );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", padding[3] );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", padding[4] );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", padding[5] );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", padding[6] );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", padding[7] );
+            check_member( kdr->caps[i], expect_caps[i], "%04x", usage_min );
+            check_member( kdr->caps[i], expect_caps[i], "%04x", usage_max );
+            check_member( kdr->caps[i], expect_caps[i], "%d", string_min );
+            check_member( kdr->caps[i], expect_caps[i], "%d", string_max );
+            check_member( kdr->caps[i], expect_caps[i], "%d", designator_min );
+            check_member( kdr->caps[i], expect_caps[i], "%d", designator_max );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", data_index_min );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", data_index_max );
+            check_member( kdr->caps[i], expect_caps[i], "%d", null_value );
+            check_member( kdr->caps[i], expect_caps[i], "%d", unknown );
+            check_member( kdr->caps[i], expect_caps[i], "%d", logical_min );
+            check_member( kdr->caps[i], expect_caps[i], "%d", logical_max );
+            check_member( kdr->caps[i], expect_caps[i], "%d", physical_min );
+            check_member( kdr->caps[i], expect_caps[i], "%d", physical_max );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", units );
+            check_member( kdr->caps[i], expect_caps[i], "%#x", units_exp );
+            winetest_pop_context();
+        }
+
+        for (i = 0; i < ARRAY_SIZE(expect_nodes); ++i)
+        {
+            struct hidp_kdr_node *nodes = (struct hidp_kdr_node *)((char *)kdr->caps + kdr->caps_size);
+            winetest_push_context( "nodes[%d]", i );
+            check_member( nodes[i], expect_nodes[i], "%04x", usage );
+            check_member( nodes[i], expect_nodes[i], "%04x", usage_page );
+            check_member( nodes[i], expect_nodes[i], "%d", parent );
+            check_member( nodes[i], expect_nodes[i], "%d", number_of_children );
+            check_member( nodes[i], expect_nodes[i], "%d", next_sibling );
+            check_member( nodes[i], expect_nodes[i], "%d", first_child );
+            check_member( nodes[i], expect_nodes[i], "%#x", collection_type );
+            winetest_pop_context();
+        }
+    }
+
+    HidD_FreePreparsedData( preparsed_data );
+
+    CloseHandle( file );
+
+done:
+    pnp_driver_stop();
+    SetCurrentDirectoryW( cwd );
+}
+
+static void cleanup_registry_keys(void)
+{
+    static const WCHAR joystick_oem_path[] = L"System\\CurrentControlSet\\Control\\MediaProperties\\"
+                                              "PrivateProperties\\Joystick\\OEM";
+    static const WCHAR dinput_path[] = L"System\\CurrentControlSet\\Control\\MediaProperties\\"
+                                       "PrivateProperties\\DirectInput";
+    HKEY root_key;
+
+    /* These keys are automatically created by DInput and they store the
+       list of supported force-feedback effects. OEM drivers are supposed
+       to provide a list in HKLM for the vendor-specific force-feedback
+       support.
+
+       We need to clean them up, or DInput will not refresh the list of
+       effects from the PID report changes.
+    */
+    RegCreateKeyExW( HKEY_CURRENT_USER, joystick_oem_path, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &root_key, NULL );
+    RegDeleteTreeW( root_key, expect_vidpid_str );
+    RegCloseKey( root_key );
+
+    RegCreateKeyExW( HKEY_CURRENT_USER, dinput_path, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &root_key, NULL );
+    RegDeleteTreeW( root_key, expect_vidpid_str );
+    RegCloseKey( root_key );
+
+    RegCreateKeyExW( HKEY_LOCAL_MACHINE, joystick_oem_path, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &root_key, NULL );
+    RegDeleteTreeW( root_key, expect_vidpid_str );
+    RegCloseKey( root_key );
+
+    RegCreateKeyExW( HKEY_LOCAL_MACHINE, dinput_path, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &root_key, NULL );
+    RegDeleteTreeW( root_key, expect_vidpid_str );
+    RegCloseKey( root_key );
+}
+
+static BOOL dinput_driver_start( const BYTE *desc_buf, ULONG desc_len, const HIDP_CAPS *caps )
+{
+    static const HID_DEVICE_ATTRIBUTES attributes =
+    {
+        .Size = sizeof(HID_DEVICE_ATTRIBUTES),
+        .VendorID = LOWORD( EXPECT_VIDPID ),
+        .ProductID = HIWORD( EXPECT_VIDPID ),
+        .VersionNumber = 0x0100,
+    };
+    DWORD report_id = 1;
+    DWORD polled = 0;
+    LSTATUS status;
+    HKEY hkey;
+
+    status = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\winetest",
+                              0, NULL, REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, NULL );
+    ok( !status, "RegCreateKeyExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"ReportID", 0, REG_DWORD, (void *)&report_id, sizeof(report_id) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"PolledMode", 0, REG_DWORD, (void *)&polled, sizeof(polled) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"Descriptor", 0, REG_BINARY, (void *)desc_buf, desc_len );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"Attributes", 0, REG_BINARY, (void *)&attributes, sizeof(attributes) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"Caps", 0, REG_BINARY, (void *)caps, sizeof(*caps) );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"Expect", 0, REG_BINARY, NULL, 0 );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+    status = RegSetValueExW( hkey, L"Input", 0, REG_BINARY, NULL, 0 );
+    ok( !status, "RegSetValueExW returned %#x\n", status );
+
+    return pnp_driver_start( L"driver_hid.dll" );
+}
+
+static BOOL CALLBACK find_test_device( const DIDEVICEINSTANCEW *devinst, void *context )
+{
+    if (IsEqualGUID( &devinst->guidProduct, &expect_guid_product ))
+        *(DIDEVICEINSTANCEW *)context = *devinst;
+    return DIENUM_CONTINUE;
+}
+
+struct check_objects_todos
+{
+    BOOL ofs;
+    BOOL type;
+    BOOL collection_number;
+};
+
+struct check_objects_params
+{
+    UINT index;
+    UINT expect_count;
+    const DIDEVICEOBJECTINSTANCEW *expect_objs;
+    const struct check_objects_todos *todo_objs;
+};
+
+static BOOL CALLBACK check_objects( const DIDEVICEOBJECTINSTANCEW *obj, void *args )
+{
+    static const DIDEVICEOBJECTINSTANCEW unexpected_obj = {0};
+    struct check_objects_params *params = args;
+    const DIDEVICEOBJECTINSTANCEW *exp = params->expect_objs + params->index;
+    const struct check_objects_todos *todo = params->todo_objs + params->index;
+
+    winetest_push_context( "obj[%d]", params->index );
+
+    ok( params->index < params->expect_count, "unexpected extra object\n" );
+    if (params->index >= params->expect_count) exp = &unexpected_obj;
+
+    check_member( *obj, *exp, "%u", dwSize );
+    check_member_guid( *obj, *exp, guidType );
+    todo_wine_if( todo->ofs )
+    check_member( *obj, *exp, "%#x", dwOfs );
+    todo_wine_if( todo->type )
+    check_member( *obj, *exp, "%#x", dwType );
+    check_member( *obj, *exp, "%#x", dwFlags );
+    if (!localized) todo_wine check_member_wstr( *obj, *exp, tszName );
+    check_member( *obj, *exp, "%u", dwFFMaxForce );
+    check_member( *obj, *exp, "%u", dwFFForceResolution );
+    todo_wine_if( todo->collection_number )
+    check_member( *obj, *exp, "%u", wCollectionNumber );
+    check_member( *obj, *exp, "%u", wDesignatorIndex );
+    check_member( *obj, *exp, "%#04x", wUsagePage );
+    check_member( *obj, *exp, "%#04x", wUsage );
+    check_member( *obj, *exp, "%#04x", dwDimension );
+    check_member( *obj, *exp, "%#04x", wExponent );
+    check_member( *obj, *exp, "%u", wReportId );
+
+    winetest_pop_context();
+
+    params->index++;
+    return DIENUM_CONTINUE;
+}
+
+static BOOL CALLBACK check_object_count( const DIDEVICEOBJECTINSTANCEW *obj, void *args )
+{
+    DWORD *count = args;
+    *count = *count + 1;
+    return DIENUM_CONTINUE;
+}
+
+static void test_simple_joystick(void)
+{
+#include "psh_hid_macros.h"
+    static const unsigned char report_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Report),
+                REPORT_ID(1, 1),
+
+                USAGE(1, HID_USAGE_GENERIC_WHEEL),
+                USAGE(4, (0xff01u<<16)|(0x1234)),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                LOGICAL_MINIMUM(1, 0xe7),
+                LOGICAL_MAXIMUM(1, 0x38),
+                PHYSICAL_MINIMUM(1, 0xe7),
+                PHYSICAL_MAXIMUM(1, 0x38),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 4),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, HID_USAGE_GENERIC_HATSWITCH),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 8),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 8),
+                REPORT_SIZE(1, 4),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs|Null),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 2),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 4),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+#undef REPORT_ID_OR_USAGE_PAGE
+#include "pop_hid_macros.h"
+
+    static const HIDP_CAPS hid_caps =
+    {
+        .InputReportByteLength = 6,
+    };
+    static const DIDEVCAPS expect_caps =
+    {
+        .dwSize = sizeof(DIDEVCAPS),
+        .dwFlags = DIDC_ATTACHED | DIDC_EMULATED,
+        .dwDevType = DIDEVTYPE_HID | (DI8DEVTYPEJOYSTICK_LIMITED << 8) | DI8DEVTYPE_JOYSTICK,
+        .dwAxes = 3,
+        .dwPOVs = 1,
+        .dwButtons = 2,
+    };
+    struct hid_expect injected_input[] =
+    {
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x10,0x10,0},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x38,0x38,0xf8},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x01,0x01,0x00},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x01,0x01,0x00},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x80,0x80,0xff},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x10,0x10,0x10,0xee,0x54},
+        },
+    };
+    static const struct DIJOYSTATE2 expect_state[] =
+    {
+        {.lX = 32767, .lY = 32767, .lZ = 32767, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = 32767, .lY = 32767, .lZ = 32767, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = 65535, .lY = 65535, .lZ = 32767, .rgdwPOV = {31500, -1, -1, -1}, .rgbButtons = {0x80, 0x80}},
+        {.lX = 20779, .lY = 20779, .lZ = 32767, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = 20779, .lY = 20779, .lZ = 32767, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = 0, .lY = 0, .lZ = 32767, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0x80, 0x80}},
+        {.lX = 32767, .lY = 5594, .lZ = 32767, .rgdwPOV = {13500, -1, -1, -1}, .rgbButtons = {0x80}},
+    };
+    static const struct DIJOYSTATE2 expect_state_abs[] =
+    {
+        {.lX = -9000, .lY = 26000, .lZ = 26000, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = -9000, .lY = 26000, .lZ = 26000, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = -4000, .lY = 51000, .lZ = 26000, .rgdwPOV = {31500, -1, -1, -1}, .rgbButtons = {0x80, 0x80}},
+        {.lX = -10667, .lY = 12905, .lZ = 26000, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = -10667, .lY = 12905, .lZ = 26000, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = -14000, .lY = 1000, .lZ = 26000, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0x80, 0x80}},
+        {.lX = -9000, .lY = 1000, .lZ = 26000, .rgdwPOV = {13500, -1, -1, -1}, .rgbButtons = {0x80}},
+    };
+    static const struct DIJOYSTATE2 expect_state_rel[] =
+    {
+        {.lX = 0, .lY = 0, .rgdwPOV = {13500, -1, -1, -1}, .rgbButtons = {0x80, 0}},
+        {.lX = 9016, .lY = -984, .lZ = -25984, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = 40, .lY = 40, .rgdwPOV = {31500, -1, -1, -1}, .rgbButtons = {0x80, 0x80}},
+        {.lX = -55, .lY = -55, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = 0, .lY = 0, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0, 0}},
+        {.lX = -129, .lY = -129, .rgdwPOV = {-1, -1, -1, -1}, .rgbButtons = {0x80, 0x80}},
+        {.lX = 144, .lY = 110, .rgdwPOV = {13500, -1, -1, -1}, .rgbButtons = {0x80}},
+    };
+    static const DIDEVICEOBJECTDATA expect_objdata[] =
+    {
+        {.dwOfs = 0x4, .dwData = 0xffff, .dwSequence = 0xa},
+        {.dwOfs = 0x4, .dwData = 0xffff, .dwSequence = 0xa},
+        {.dwOfs = 0, .dwData = 0xffff, .dwSequence = 0xa},
+        {.dwOfs = 0x20, .dwData = 31500, .dwSequence = 0xa},
+        {.dwOfs = 0x30, .dwData = 0x80, .dwSequence = 0xa},
+        {.dwOfs = 0x4, .dwData = 0x512b, .dwSequence = 0xd},
+        {.dwOfs = 0, .dwData = 0x512b, .dwSequence = 0xd},
+        {.dwOfs = 0x20, .dwData = -1, .dwSequence = 0xd},
+        {.dwOfs = 0x30, .dwData = 0, .dwSequence = 0xd},
+        {.dwOfs = 0x31, .dwData = 0, .dwSequence = 0xd},
+        {.dwOfs = 0x4, .dwData = 0, .dwSequence = 0xf},
+        {.dwOfs = 0, .dwData = 0, .dwSequence = 0xf},
+        {.dwOfs = 0x30, .dwData = 0x80, .dwSequence = 0xf},
+        {.dwOfs = 0x31, .dwData = 0x80, .dwSequence = 0xf},
+    };
+
+    const DIDEVICEINSTANCEW expect_devinst =
+    {
+        .dwSize = sizeof(DIDEVICEINSTANCEW),
+        .guidInstance = expect_guid_product,
+        .guidProduct = expect_guid_product,
+        .dwDevType = DIDEVTYPE_HID | (DI8DEVTYPEJOYSTICK_LIMITED << 8) | DI8DEVTYPE_JOYSTICK,
+        .tszInstanceName = L"Wine test root driver",
+        .tszProductName = L"Wine test root driver",
+        .guidFFDriver = GUID_NULL,
+        .wUsagePage = HID_USAGE_PAGE_GENERIC,
+        .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+    };
+    const DIDEVICEOBJECTINSTANCEW expect_objects[] =
+    {
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_YAxis,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(1),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Y Axis",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_Y,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_XAxis,
+            .dwOfs = 0x4,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(0),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"X Axis",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_X,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_ZAxis,
+            .dwOfs = 0xc,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(2),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Wheel",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_WHEEL,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_POV,
+            .dwOfs = 0x10,
+            .dwType = DIDFT_POV|DIDFT_MAKEINSTANCE(0),
+            .tszName = L"Hat Switch",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_HATSWITCH,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Button,
+            .dwOfs = 0x14,
+            .dwType = DIDFT_PSHBUTTON|DIDFT_MAKEINSTANCE(0),
+            .tszName = L"Button 0",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_BUTTON,
+            .wUsage = 0x1,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Button,
+            .dwOfs = 0x15,
+            .dwType = DIDFT_PSHBUTTON|DIDFT_MAKEINSTANCE(1),
+            .tszName = L"Button 1",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_BUTTON,
+            .wUsage = 0x2,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Unknown,
+            .dwType = DIDFT_COLLECTION|DIDFT_NODATA|DIDFT_MAKEINSTANCE(0),
+            .tszName = L"Collection 0 - Joystick",
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Unknown,
+            .dwType = DIDFT_COLLECTION|DIDFT_NODATA|DIDFT_MAKEINSTANCE(1),
+            .tszName = L"Collection 1 - Joystick",
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+        },
+    };
+    const struct check_objects_todos objects_todos[ARRAY_SIZE(expect_objects)] =
+    {
+        {.ofs = TRUE},
+        {.ofs = TRUE},
+        {.ofs = TRUE},
+        {.ofs = TRUE},
+        {.ofs = TRUE},
+        {.ofs = TRUE},
+    };
+
+    struct check_objects_params check_objects_params =
+    {
+        .expect_count = ARRAY_SIZE(expect_objects),
+        .expect_objs = expect_objects,
+        .todo_objs = objects_todos,
+    };
+    DIPROPGUIDANDPATH prop_guid_path =
+    {
+        .diph =
+            {
+                .dwSize = sizeof(DIPROPGUIDANDPATH),
+                .dwHeaderSize = sizeof(DIPROPHEADER),
+                .dwHow = DIPH_DEVICE,
+            },
+    };
+    DIPROPSTRING prop_string =
+    {
+        .diph =
+            {
+                .dwSize = sizeof(DIPROPSTRING),
+                .dwHeaderSize = sizeof(DIPROPHEADER),
+                .dwHow = DIPH_DEVICE,
+            },
+    };
+    DIPROPDWORD prop_dword =
+    {
+        .diph =
+            {
+                .dwSize = sizeof(DIPROPDWORD),
+                .dwHeaderSize = sizeof(DIPROPHEADER),
+                .dwHow = DIPH_DEVICE,
+            },
+    };
+    DIPROPRANGE prop_range =
+    {
+        .diph =
+            {
+                .dwSize = sizeof(DIPROPRANGE),
+                .dwHeaderSize = sizeof(DIPROPHEADER),
+                .dwHow = DIPH_DEVICE,
+            },
+    };
+    DIPROPPOINTER prop_pointer =
+    {
+        .diph =
+            {
+                .dwSize = sizeof(DIPROPPOINTER),
+                .dwHeaderSize = sizeof(DIPROPHEADER),
+            },
+    };
+    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
+    DIDEVICEOBJECTDATA objdata[32] = {{0}};
+    DIDEVICEOBJECTINSTANCEW objinst = {0};
+    DIDEVICEINSTANCEW devinst = {0};
+    DIDATAFORMAT dataformat = {0};
+    IDirectInputDevice8W *device;
+    DIDEVCAPS caps = {0};
+    IDirectInput8W *di;
+    HANDLE event, file;
+    DIJOYSTATE2 state;
+    ULONG i, res, ref;
+    HRESULT hr;
+    WCHAR *tmp;
+    GUID guid;
+    HWND hwnd;
+
+    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
+    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
+    SetCurrentDirectoryW( tempdir );
+
+    cleanup_registry_keys();
+    if (!dinput_driver_start( report_desc, sizeof(report_desc), &hid_caps )) goto done;
+
+    hr = DirectInput8Create( instance, DIRECTINPUT_VERSION, &IID_IDirectInput8W, (void **)&di, NULL );
+    if (FAILED(hr))
+    {
+        win_skip( "DirectInput8Create returned %#x\n", hr );
+        goto done;
+    }
+
+    hr = IDirectInput8_EnumDevices( di, DI8DEVCLASS_ALL, find_test_device, &devinst, DIEDFL_ALLDEVICES );
+    ok( hr == DI_OK, "IDirectInput8_EnumDevices returned: %#x\n", hr );
+    if (!IsEqualGUID( &devinst.guidProduct, &expect_guid_product ))
+    {
+        win_skip( "device not found, skipping tests\n" );
+        IDirectInput8_Release( di );
+        goto done;
+    }
+
+    check_member( devinst, expect_devinst, "%d", dwSize );
+    check_member_guid( devinst, expect_devinst, guidProduct );
+    check_member( devinst, expect_devinst, "%#x", dwDevType );
+    todo_wine
+    check_member_wstr( devinst, expect_devinst, tszInstanceName );
+    todo_wine
+    check_member_wstr( devinst, expect_devinst, tszProductName );
+    check_member_guid( devinst, expect_devinst, guidFFDriver );
+    check_member( devinst, expect_devinst, "%04x", wUsagePage );
+    check_member( devinst, expect_devinst, "%04x", wUsage );
+
+    hr = IDirectInput8_CreateDevice( di, &devinst.guidInstance, NULL, NULL );
+    ok( hr == E_POINTER, "IDirectInput8_CreateDevice returned %#x\n", hr );
+    hr = IDirectInput8_CreateDevice( di, NULL, &device, NULL );
+    ok( hr == E_POINTER, "IDirectInput8_CreateDevice returned %#x\n", hr );
+    hr = IDirectInput8_CreateDevice( di, &GUID_NULL, &device, NULL );
+    ok( hr == DIERR_DEVICENOTREG, "IDirectInput8_CreateDevice returned %#x\n", hr );
+    hr = IDirectInput8_CreateDevice( di, &devinst.guidInstance, &device, NULL );
+    ok( hr == DI_OK, "IDirectInput8_CreateDevice returned %#x\n", hr );
+
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_VIDPID, &prop_dword.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_VIDPID returned %#x\n", hr );
+    /* Wine may get the wrong device here, because the test driver creates another instance of
+       hidclass.sys, and gets duplicate rawinput handles, which we use in the guidInstance */
+    todo_wine_if( prop_dword.dwData != EXPECT_VIDPID )
+    ok( prop_dword.dwData == EXPECT_VIDPID, "got %#x expected %#x\n", prop_dword.dwData, EXPECT_VIDPID );
+
+    ref = IDirectInputDevice8_Release( device );
+    ok( ref == 0, "IDirectInputDeviceW_Release returned %d\n", ref );
+
+    hr = IDirectInput8_CreateDevice( di, &expect_guid_product, &device, NULL );
+    ok( hr == DI_OK, "IDirectInput8_CreateDevice returned %#x\n", hr );
+
+    hr = IDirectInputDevice8_Initialize( device, instance, 0x0700, &GUID_NULL );
+    todo_wine
+    ok( hr == DIERR_BETADIRECTINPUTVERSION, "IDirectInputDevice8_Initialize returned %#x\n", hr );
+    hr = IDirectInputDevice8_Initialize( device, instance, DIRECTINPUT_VERSION, NULL );
+    todo_wine
+    ok( hr == E_POINTER, "IDirectInputDevice8_Initialize returned %#x\n", hr );
+    hr = IDirectInputDevice8_Initialize( device, NULL, DIRECTINPUT_VERSION, &GUID_NULL );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_Initialize returned %#x\n", hr );
+    hr = IDirectInputDevice8_Initialize( device, instance, DIRECTINPUT_VERSION, &GUID_NULL );
+    todo_wine
+    ok( hr == REGDB_E_CLASSNOTREG, "IDirectInputDevice8_Initialize returned %#x\n", hr );
+
+    hr = IDirectInputDevice8_Initialize( device, instance, DIRECTINPUT_VERSION, &devinst.guidInstance );
+    ok( hr == DI_OK, "IDirectInputDevice8_Initialize returned %#x\n", hr );
+    guid = devinst.guidInstance;
+    memset( &devinst, 0, sizeof(devinst) );
+    devinst.dwSize = sizeof(DIDEVICEINSTANCEW);
+    hr = IDirectInputDevice8_GetDeviceInfo( device, &devinst );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceInfo returned %#x\n", hr );
+    ok( IsEqualGUID( &guid, &devinst.guidInstance ), "got %s expected %s\n", debugstr_guid( &guid ),
+        debugstr_guid( &devinst.guidInstance ) );
+    hr = IDirectInputDevice8_Initialize( device, instance, DIRECTINPUT_VERSION, &devinst.guidProduct );
+    ok( hr == DI_OK, "IDirectInputDevice8_Initialize returned %#x\n", hr );
+
+    hr = IDirectInputDevice8_GetDeviceInfo( device, NULL );
+    ok( hr == E_POINTER, "IDirectInputDevice8_GetDeviceInfo returned %#x\n", hr );
+    devinst.dwSize = sizeof(DIDEVICEINSTANCEW) + 1;
+    hr = IDirectInputDevice8_GetDeviceInfo( device, &devinst );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetDeviceInfo returned %#x\n", hr );
+
+    devinst.dwSize = sizeof(DIDEVICEINSTANCE_DX3W);
+    hr = IDirectInputDevice8_GetDeviceInfo( device, &devinst );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceInfo returned %#x\n", hr );
+    todo_wine
+    check_member_guid( devinst, expect_devinst, guidInstance );
+    check_member_guid( devinst, expect_devinst, guidProduct );
+    check_member( devinst, expect_devinst, "%#x", dwDevType );
+    todo_wine
+    check_member_wstr( devinst, expect_devinst, tszInstanceName );
+    todo_wine
+    check_member_wstr( devinst, expect_devinst, tszProductName );
+
+    memset( &devinst, 0, sizeof(devinst) );
+    devinst.dwSize = sizeof(DIDEVICEINSTANCEW);
+    hr = IDirectInputDevice8_GetDeviceInfo( device, &devinst );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceInfo returned %#x\n", hr );
+    check_member( devinst, expect_devinst, "%d", dwSize );
+    todo_wine
+    check_member_guid( devinst, expect_devinst, guidInstance );
+    check_member_guid( devinst, expect_devinst, guidProduct );
+    check_member( devinst, expect_devinst, "%#x", dwDevType );
+    todo_wine
+    check_member_wstr( devinst, expect_devinst, tszInstanceName );
+    todo_wine
+    check_member_wstr( devinst, expect_devinst, tszProductName );
+    check_member_guid( devinst, expect_devinst, guidFFDriver );
+    check_member( devinst, expect_devinst, "%04x", wUsagePage );
+    check_member( devinst, expect_devinst, "%04x", wUsage );
+
+    hr = IDirectInputDevice8_GetCapabilities( device, NULL );
+    ok( hr == E_POINTER, "IDirectInputDevice8_GetCapabilities returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetCapabilities( device, &caps );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetCapabilities returned %#x\n", hr );
+    caps.dwSize = sizeof(DIDEVCAPS);
+    hr = IDirectInputDevice8_GetCapabilities( device, &caps );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetCapabilities returned %#x\n", hr );
+    check_member( caps, expect_caps, "%d", dwSize );
+    check_member( caps, expect_caps, "%#x", dwFlags );
+    check_member( caps, expect_caps, "%#x", dwDevType );
+    check_member( caps, expect_caps, "%d", dwAxes );
+    check_member( caps, expect_caps, "%d", dwButtons );
+    check_member( caps, expect_caps, "%d", dwPOVs );
+    check_member( caps, expect_caps, "%d", dwFFSamplePeriod );
+    check_member( caps, expect_caps, "%d", dwFFMinTimeResolution );
+    check_member( caps, expect_caps, "%d", dwFirmwareRevision );
+    check_member( caps, expect_caps, "%d", dwHardwareRevision );
+    check_member( caps, expect_caps, "%d", dwFFDriverVersion );
+
+    hr = IDirectInputDevice8_GetProperty( device, NULL, NULL );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetProperty returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, &GUID_NULL, NULL );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetProperty returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_VIDPID, NULL );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetProperty returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_VIDPID, &prop_string.diph );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetProperty returned %#x\n", hr );
+    prop_dword.diph.dwHeaderSize = sizeof(DIPROPHEADER) - 1;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_VIDPID, &prop_dword.diph );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetProperty returned %#x\n", hr );
+    prop_dword.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_VIDPID, &prop_dword.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_VIDPID returned %#x\n", hr );
+    ok( prop_dword.dwData == EXPECT_VIDPID, "got %#x expected %#x\n", prop_dword.dwData, EXPECT_VIDPID );
+
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_GUIDANDPATH, &prop_guid_path.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_GUIDANDPATH returned %#x\n", hr );
+    todo_wine
+    ok( IsEqualGUID( &prop_guid_path.guidClass, &GUID_DEVCLASS_HIDCLASS ), "got guid %s\n",
+        debugstr_guid( &prop_guid_path.guidClass ) );
+    todo_wine
+    ok( !wcsncmp( prop_guid_path.wszPath, expect_path, wcslen( expect_path ) ), "got path %s\n",
+        debugstr_w(prop_guid_path.wszPath) );
+    if (!(tmp = wcsrchr( prop_guid_path.wszPath, '&' )))
+        todo_wine ok( 0, "got path %s\n", debugstr_w(prop_guid_path.wszPath) );
+    else
+    {
+        ok( !wcscmp( wcsrchr( prop_guid_path.wszPath, '&' ), expect_path_end ), "got path %s\n",
+            debugstr_w(prop_guid_path.wszPath) );
+    }
+
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_INSTANCENAME, &prop_string.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_INSTANCENAME returned %#x\n", hr );
+    todo_wine
+    ok( !wcscmp( prop_string.wsz, expect_devinst.tszInstanceName ), "got instance %s\n",
+        debugstr_w(prop_string.wsz) );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_PRODUCTNAME, &prop_string.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_PRODUCTNAME returned %#x\n", hr );
+    todo_wine
+    ok( !wcscmp( prop_string.wsz, expect_devinst.tszProductName ), "got product %s\n",
+        debugstr_w(prop_string.wsz) );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_TYPENAME, &prop_string.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_TYPENAME returned %#x\n", hr );
+    todo_wine
+    ok( !wcscmp( prop_string.wsz, expect_vidpid_str ), "got type %s\n", debugstr_w(prop_string.wsz) );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_USERNAME, &prop_string.diph );
+    ok( hr == S_FALSE, "IDirectInputDevice8_GetProperty DIPROP_USERNAME returned %#x\n", hr );
+    todo_wine
+    ok( !wcscmp( prop_string.wsz, L"" ), "got user %s\n", debugstr_w(prop_string.wsz) );
+
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_JOYSTICKID, &prop_dword.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_JOYSTICKID returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == 0, "got %#x expected %#x\n", prop_dword.dwData, 0 );
+
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_AXISMODE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_AXISMODE returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == DIPROPAXISMODE_ABS, "got %u expected %u\n", prop_dword.dwData, DIPROPAXISMODE_ABS );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_BUFFERSIZE, &prop_dword.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_BUFFERSIZE returned %#x\n", hr );
+    ok( prop_dword.dwData == 0, "got %#x expected %#x\n", prop_dword.dwData, 0 );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_FFGAIN, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_FFGAIN returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == 10000, "got %u expected %u\n", prop_dword.dwData, 10000 );
+
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_CALIBRATION, &prop_dword.diph );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetProperty DIPROP_CALIBRATION returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_AUTOCENTER, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_GetProperty DIPROP_AUTOCENTER returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_DEADZONE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_GetProperty DIPROP_DEADZONE returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_FFLOAD, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_GetProperty DIPROP_FFLOAD returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_GRANULARITY, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_GetProperty DIPROP_GRANULARITY returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_SATURATION, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_GetProperty DIPROP_SATURATION returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    todo_wine
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_GetProperty DIPROP_RANGE returned %#x\n", hr );
+
+    prop_dword.diph.dwHow = DIPH_BYUSAGE;
+    prop_dword.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_DEADZONE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_DEADZONE returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == 0, "got %u expected %u\n", prop_dword.dwData, 0 );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_GRANULARITY, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_GRANULARITY returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == 1, "got %u expected %u\n", prop_dword.dwData, 1 );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_SATURATION, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_SATURATION returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == 10000, "got %u expected %u\n", prop_dword.dwData, 10000 );
+
+    prop_range.diph.dwHow = DIPH_BYUSAGE;
+    prop_range.diph.dwObj = MAKELONG( 0, 0 );
+    prop_range.lMin = 0xdeadbeef;
+    prop_range.lMax = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    todo_wine
+    ok( hr == DIERR_NOTFOUND, "IDirectInputDevice8_GetProperty DIPROP_RANGE returned %#x\n", hr );
+    prop_range.diph.dwObj = MAKELONG( 0, HID_USAGE_PAGE_GENERIC );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    todo_wine
+    ok( hr == DIERR_NOTFOUND, "IDirectInputDevice8_GetProperty DIPROP_RANGE returned %#x\n", hr );
+    prop_range.diph.dwObj = MAKELONG( HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_X );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    todo_wine
+    ok( hr == DIERR_NOTFOUND, "IDirectInputDevice8_GetProperty DIPROP_RANGE returned %#x\n", hr );
+    prop_range.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    prop_range.lMin = 0xdeadbeef;
+    prop_range.lMax = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_RANGE returned %#x\n", hr );
+    ok( prop_range.lMin == 0, "got %d expected %d\n", prop_range.lMin, 0 );
+    ok( prop_range.lMax == 65535, "got %d expected %d\n", prop_range.lMax, 65535 );
+
+    prop_pointer.diph.dwHow = DIPH_BYUSAGE;
+    prop_pointer.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_APPDATA, &prop_pointer.diph );
+    todo_wine
+    ok( hr == DIERR_NOTINITIALIZED, "IDirectInputDevice8_GetProperty DIPROP_APPDATA returned %#x\n", hr );
+
+    hr = IDirectInputDevice8_EnumObjects( device, NULL, NULL, DIDFT_ALL );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_EnumObjects returned %#x\n", hr );
+    hr = IDirectInputDevice8_EnumObjects( device, check_object_count, &res, 0x20 );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_EnumObjects returned %#x\n", hr );
+    res = 0;
+    hr = IDirectInputDevice8_EnumObjects( device, check_object_count, &res, DIDFT_AXIS | DIDFT_PSHBUTTON );
+    ok( hr == DI_OK, "IDirectInputDevice8_EnumObjects returned %#x\n", hr );
+    ok( res == 5, "got %u expected %u\n", res, 5 );
+    hr = IDirectInputDevice8_EnumObjects( device, check_objects, &check_objects_params, DIDFT_ALL );
+    ok( hr == DI_OK, "IDirectInputDevice8_EnumObjects returned %#x\n", hr );
+    ok( check_objects_params.index >= check_objects_params.expect_count, "missing %u objects\n",
+        check_objects_params.expect_count - check_objects_params.index );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, NULL, 0, DIPH_DEVICE );
+    ok( hr == E_POINTER, "IDirectInputDevice8_GetObjectInfo returned: %#x\n", hr );
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, 0, DIPH_DEVICE );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetObjectInfo returned: %#x\n", hr );
+    objinst.dwSize = sizeof(DIDEVICEOBJECTINSTANCEW);
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, 0, DIPH_DEVICE );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetObjectInfo returned: %#x\n", hr );
+
+    res = MAKELONG( HID_USAGE_GENERIC_Z, HID_USAGE_PAGE_GENERIC );
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, res, DIPH_BYUSAGE );
+    todo_wine
+    ok( hr == DIERR_NOTFOUND, "IDirectInputDevice8_GetObjectInfo returned: %#x\n", hr );
+    res = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, res, DIPH_BYUSAGE );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetObjectInfo returned: %#x\n", hr );
+
+    check_member( objinst, expect_objects[1], "%u", dwSize );
+    check_member_guid( objinst, expect_objects[1], guidType );
+    todo_wine
+    check_member( objinst, expect_objects[1], "%#x", dwOfs );
+    check_member( objinst, expect_objects[1], "%#x", dwType );
+    check_member( objinst, expect_objects[1], "%#x", dwFlags );
+    if (!localized) todo_wine check_member_wstr( objinst, expect_objects[1], tszName );
+    check_member( objinst, expect_objects[1], "%u", dwFFMaxForce );
+    check_member( objinst, expect_objects[1], "%u", dwFFForceResolution );
+    check_member( objinst, expect_objects[1], "%u", wCollectionNumber );
+    check_member( objinst, expect_objects[1], "%u", wDesignatorIndex );
+    check_member( objinst, expect_objects[1], "%#04x", wUsagePage );
+    check_member( objinst, expect_objects[1], "%#04x", wUsage );
+    check_member( objinst, expect_objects[1], "%#04x", dwDimension );
+    check_member( objinst, expect_objects[1], "%#04x", wExponent );
+    check_member( objinst, expect_objects[1], "%u", wReportId );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, 0x14, DIPH_BYOFFSET );
+    todo_wine
+    ok( hr == DIERR_NOTFOUND, "IDirectInputDevice8_GetObjectInfo returned: %#x\n", hr );
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, 0, DIPH_BYOFFSET );
+    todo_wine
+    ok( hr == DIERR_NOTFOUND, "IDirectInputDevice8_GetObjectInfo returned: %#x\n", hr );
+    res = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( 3 );
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, res, DIPH_BYID );
+    todo_wine
+    ok( hr == DIERR_NOTFOUND, "IDirectInputDevice8_GetObjectInfo returned: %#x\n", hr );
+    res = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( 1 );
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, res, DIPH_BYID );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetObjectInfo returned: %#x\n", hr );
+
+    check_member( objinst, expect_objects[5], "%u", dwSize );
+    check_member_guid( objinst, expect_objects[5], guidType );
+    todo_wine
+    check_member( objinst, expect_objects[5], "%#x", dwOfs );
+    check_member( objinst, expect_objects[5], "%#x", dwType );
+    check_member( objinst, expect_objects[5], "%#x", dwFlags );
+    if (!localized) todo_wine check_member_wstr( objinst, expect_objects[5], tszName );
+    check_member( objinst, expect_objects[5], "%u", dwFFMaxForce );
+    check_member( objinst, expect_objects[5], "%u", dwFFForceResolution );
+    check_member( objinst, expect_objects[5], "%u", wCollectionNumber );
+    check_member( objinst, expect_objects[5], "%u", wDesignatorIndex );
+    check_member( objinst, expect_objects[5], "%#04x", wUsagePage );
+    check_member( objinst, expect_objects[5], "%#04x", wUsage );
+    check_member( objinst, expect_objects[5], "%#04x", dwDimension );
+    check_member( objinst, expect_objects[5], "%#04x", wExponent );
+    check_member( objinst, expect_objects[5], "%u", wReportId );
+
+    hr = IDirectInputDevice8_SetDataFormat( device, NULL );
+    ok( hr == E_POINTER, "IDirectInputDevice8_SetDataFormat returned: %#x\n", hr );
+    hr = IDirectInputDevice8_SetDataFormat( device, &dataformat );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetDataFormat returned: %#x\n", hr );
+    dataformat.dwSize = sizeof(DIDATAFORMAT);
+    hr = IDirectInputDevice8_SetDataFormat( device, &dataformat );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetDataFormat returned: %#x\n", hr );
+    dataformat.dwObjSize = sizeof(DIOBJECTDATAFORMAT);
+    hr = IDirectInputDevice8_SetDataFormat( device, &dataformat );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetDataFormat returned: %#x\n", hr );
+    hr = IDirectInputDevice8_SetDataFormat( device, &c_dfDIJoystick2 );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetDataFormat returned: %#x\n", hr );
+
+    hr = IDirectInputDevice8_GetObjectInfo( device, &objinst, DIJOFS_Y, DIPH_BYOFFSET );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetObjectInfo returned: %#x\n", hr );
+
+    check_member( objinst, expect_objects[0], "%u", dwSize );
+    check_member_guid( objinst, expect_objects[0], guidType );
+    todo_wine
+    check_member( objinst, expect_objects[0], "%#x", dwOfs );
+    check_member( objinst, expect_objects[0], "%#x", dwType );
+    check_member( objinst, expect_objects[0], "%#x", dwFlags );
+    if (!localized) todo_wine check_member_wstr( objinst, expect_objects[0], tszName );
+    check_member( objinst, expect_objects[0], "%u", dwFFMaxForce );
+    check_member( objinst, expect_objects[0], "%u", dwFFForceResolution );
+    check_member( objinst, expect_objects[0], "%u", wCollectionNumber );
+    check_member( objinst, expect_objects[0], "%u", wDesignatorIndex );
+    check_member( objinst, expect_objects[0], "%#04x", wUsagePage );
+    check_member( objinst, expect_objects[0], "%#04x", wUsage );
+    check_member( objinst, expect_objects[0], "%#04x", dwDimension );
+    check_member( objinst, expect_objects[0], "%#04x", wExponent );
+    check_member( objinst, expect_objects[0], "%u", wReportId );
+
+    hr = IDirectInputDevice8_SetEventNotification( device, (HANDLE)0xdeadbeef );
+    todo_wine
+    ok( hr == E_HANDLE, "IDirectInputDevice8_SetEventNotification returned: %#x\n", hr );
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( event != NULL, "CreateEventW failed, last error %u\n", GetLastError() );
+    hr = IDirectInputDevice8_SetEventNotification( device, event );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetEventNotification returned: %#x\n", hr );
+
+    file = CreateFileW( prop_guid_path.wszPath, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL );
+    ok( file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError() );
+
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, NULL, 0 );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetCooperativeLevel returned: %#x\n", hr );
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, NULL, DISCL_BACKGROUND );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetCooperativeLevel returned: %#x\n", hr );
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, NULL, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE );
+    ok( hr == E_HANDLE, "IDirectInputDevice8_SetCooperativeLevel returned: %#x\n", hr );
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, NULL, DISCL_BACKGROUND | DISCL_EXCLUSIVE );
+    ok( hr == E_HANDLE, "IDirectInputDevice8_SetCooperativeLevel returned: %#x\n", hr );
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, NULL, DISCL_FOREGROUND | DISCL_EXCLUSIVE );
+    ok( hr == E_HANDLE, "IDirectInputDevice8_SetCooperativeLevel returned: %#x\n", hr );
+
+    hwnd = CreateWindowW( L"static", L"dinput", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 10, 10, 200, 200,
+                          NULL, NULL, NULL, NULL );
+
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, hwnd, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetCooperativeLevel returned: %#x\n", hr );
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, hwnd, DISCL_BACKGROUND | DISCL_EXCLUSIVE );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetCooperativeLevel returned: %#x\n", hr );
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, hwnd, DISCL_FOREGROUND | DISCL_EXCLUSIVE );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetCooperativeLevel returned: %#x\n", hr );
+
+    hr = IDirectInputDevice8_Unacquire( device );
+    ok( hr == DI_NOEFFECT, "IDirectInputDevice8_Unacquire returned: %#x\n", hr );
+    hr = IDirectInputDevice8_Acquire( device );
+    ok( hr == DI_OK, "IDirectInputDevice8_Acquire returned: %#x\n", hr );
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, hwnd, DISCL_FOREGROUND | DISCL_EXCLUSIVE );
+    ok( hr == DIERR_ACQUIRED, "IDirectInputDevice8_SetCooperativeLevel returned: %#x\n", hr );
+    hr = IDirectInputDevice8_Unacquire( device );
+    ok( hr == DI_OK, "IDirectInputDevice8_Unacquire returned: %#x\n", hr );
+
+    DestroyWindow( hwnd );
+
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, NULL, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetCooperativeLevel returned: %#x\n", hr );
+
+    hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
+    ok( hr == DIERR_NOTACQUIRED, "IDirectInputDevice8_GetDeviceState returned: %#x\n", hr );
+
+    hr = IDirectInputDevice8_Poll( device );
+    ok( hr == DIERR_NOTACQUIRED, "IDirectInputDevice8_Poll returned: %#x\n", hr );
+
+    hr = IDirectInputDevice8_Acquire( device );
+    ok( hr == DI_OK, "IDirectInputDevice8_Acquire returned: %#x\n", hr );
+
+    hr = IDirectInputDevice8_Poll( device );
+    ok( hr == DI_NOEFFECT, "IDirectInputDevice8_Poll returned: %#x\n", hr );
+
+    hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2) + 1, &state );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetDeviceState returned: %#x\n", hr );
+
+    for (i = 0; i < ARRAY_SIZE(injected_input); ++i)
+    {
+        winetest_push_context( "state[%d]", i );
+        hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
+        ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceState returned: %#x\n", hr );
+        todo_wine_if( i != 2 )
+        check_member( state, expect_state[i], "%d", lX );
+        todo_wine_if( i != 2 )
+        check_member( state, expect_state[i], "%d", lY );
+        todo_wine
+        check_member( state, expect_state[i], "%d", lZ );
+        check_member( state, expect_state[i], "%d", lRx );
+        todo_wine_if( i == 0 )
+        check_member( state, expect_state[i], "%#x", rgdwPOV[0] );
+        check_member( state, expect_state[i], "%#x", rgdwPOV[1] );
+        check_member( state, expect_state[i], "%#x", rgbButtons[0] );
+        check_member( state, expect_state[i], "%#x", rgbButtons[1] );
+        check_member( state, expect_state[i], "%#x", rgbButtons[2] );
+
+        send_hid_input( file, &injected_input[i], sizeof(*injected_input) );
+
+        res = WaitForSingleObject( event, 100 );
+        if (i == 0 || i == 3) todo_wine_if( i == 0 )
+        ok( res == WAIT_TIMEOUT, "WaitForSingleObject succeeded\n" );
+        else ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" ); ResetEvent( event );
+        winetest_pop_context();
+    }
+
+    hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceState returned: %#x\n", hr );
+    winetest_push_context( "state[%d]", i );
+    todo_wine
+    check_member( state, expect_state[i], "%d", lX );
+    todo_wine
+    check_member( state, expect_state[i], "%d", lY );
+    todo_wine
+    check_member( state, expect_state[i], "%d", lZ );
+    check_member( state, expect_state[i], "%d", lRx );
+    check_member( state, expect_state[i], "%#x", rgdwPOV[0] );
+    check_member( state, expect_state[i], "%#x", rgdwPOV[1] );
+    check_member( state, expect_state[i], "%#x", rgbButtons[0] );
+    check_member( state, expect_state[i], "%#x", rgbButtons[1] );
+    check_member( state, expect_state[i], "%#x", rgbButtons[2] );
+    winetest_pop_context();
+
+    res = 1;
+    hr = IDirectInputDevice8_GetDeviceData( device, sizeof(DIDEVICEOBJECTDATA) - 1, objdata, &res, DIGDD_PEEK );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_GetDeviceData returned %#x\n", hr );
+    res = 1;
+    hr = IDirectInputDevice8_GetDeviceData( device, sizeof(DIDEVICEOBJECTDATA), objdata, &res, DIGDD_PEEK );
+    ok( hr == DIERR_NOTBUFFERED, "IDirectInputDevice8_GetDeviceData returned %#x\n", hr );
+
+    hr = IDirectInputDevice8_Unacquire( device );
+    ok( hr == DI_OK, "IDirectInputDevice8_Unacquire returned: %#x\n", hr );
+    prop_dword.diph.dwHow = DIPH_DEVICE;
+    prop_dword.diph.dwObj = 0;
+    prop_dword.dwData = 1;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_BUFFERSIZE, &prop_dword.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_BUFFERSIZE returned %#x\n", hr );
+    hr = IDirectInputDevice8_Acquire( device );
+    ok( hr == DI_OK, "IDirectInputDevice8_Unacquire returned: %#x\n", hr );
+
+    res = 1;
+    hr = IDirectInputDevice8_GetDeviceData( device, sizeof(DIDEVICEOBJECTDATA), objdata, &res, DIGDD_PEEK );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceData returned %#x\n", hr );
+    ok( res == 0, "got %u expected %u\n", res, 0 );
+
+    send_hid_input( file, &injected_input[0], sizeof(*injected_input) );
+    res = WaitForSingleObject( event, 100 );
+    ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
+    ResetEvent( event );
+
+    res = 1;
+    hr = IDirectInputDevice8_GetDeviceData( device, sizeof(DIDEVICEOBJECTDATA), objdata, &res, DIGDD_PEEK );
+    ok( hr == DI_BUFFEROVERFLOW, "IDirectInputDevice8_GetDeviceData returned %#x\n", hr );
+    ok( res == 0, "got %u expected %u\n", res, 0 );
+    res = 1;
+    hr = IDirectInputDevice8_GetDeviceData( device, sizeof(DIDEVICEOBJECTDATA), objdata, &res, 0 );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceData returned %#x\n", hr );
+    ok( res == 0, "got %u expected %u\n", res, 0 );
+
+    hr = IDirectInputDevice8_Unacquire( device );
+    ok( hr == DI_OK, "IDirectInputDevice8_Unacquire returned: %#x\n", hr );
+    prop_dword.diph.dwHow = DIPH_DEVICE;
+    prop_dword.diph.dwObj = 0;
+    prop_dword.dwData = 10;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_BUFFERSIZE, &prop_dword.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_BUFFERSIZE returned %#x\n", hr );
+    hr = IDirectInputDevice8_Acquire( device );
+    ok( hr == DI_OK, "IDirectInputDevice8_Unacquire returned: %#x\n", hr );
+
+    send_hid_input( file, &injected_input[1], sizeof(*injected_input) );
+    res = WaitForSingleObject( event, 100 );
+    ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
+    ResetEvent( event );
+
+    res = 1;
+    hr = IDirectInputDevice8_GetDeviceData( device, sizeof(DIDEVICEOBJECTDATA), objdata, &res, DIGDD_PEEK );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceData returned %#x\n", hr );
+    ok( res == 1, "got %u expected %u\n", res, 1 );
+    check_member( objdata[0], expect_objdata[0], "%#x", dwOfs );
+    check_member( objdata[0], expect_objdata[0], "%#x", dwData );
+    ok( objdata[0].uAppData == -1, "got %p, expected %p\n", (void *)objdata[0].uAppData, (void *)-1 );
+    res = 4;
+    hr = IDirectInputDevice8_GetDeviceData( device, sizeof(DIDEVICEOBJECTDATA), objdata, &res, 0 );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceData returned %#x\n", hr );
+    ok( res == 4, "got %u expected %u\n", res, 4 );
+    for (i = 0; i < 4; ++i)
+    {
+        winetest_push_context( "objdata[%d]", i );
+        check_member( objdata[i], expect_objdata[1 + i], "%#x", dwOfs );
+        check_member( objdata[i], expect_objdata[1 + i], "%#x", dwData );
+        ok( objdata[i].uAppData == -1, "got %p, expected %p\n", (void *)objdata[i].uAppData, (void *)-1 );
+        winetest_pop_context();
+    }
+
+    send_hid_input( file, &injected_input[2], sizeof(*injected_input) );
+    res = WaitForSingleObject( event, 100 );
+    ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
+    ResetEvent( event );
+    send_hid_input( file, &injected_input[4], sizeof(*injected_input) );
+    res = WaitForSingleObject( event, 100 );
+    ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
+    ResetEvent( event );
+
+    res = 1;
+    hr = IDirectInputDevice8_GetDeviceData( device, sizeof(DIDEVICEOBJECTDATA), objdata, &res, 0 );
+    ok( hr == DI_BUFFEROVERFLOW, "IDirectInputDevice8_GetDeviceData returned %#x\n", hr );
+    ok( res == 1, "got %u expected %u\n", res, 1 );
+    todo_wine
+    check_member( objdata[0], expect_objdata[5], "%#x", dwOfs );
+    todo_wine
+    check_member( objdata[0], expect_objdata[5], "%#x", dwData );
+    ok( objdata[0].uAppData == -1, "got %p, expected %p\n", (void *)objdata[0].uAppData, (void *)-1 );
+    res = ARRAY_SIZE(objdata);
+    hr = IDirectInputDevice8_GetDeviceData( device, sizeof(DIDEVICEOBJECTDATA), objdata, &res, 0 );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceData returned %#x\n", hr );
+    ok( res == 8, "got %u expected %u\n", res, 8 );
+    for (i = 0; i < 8; ++i)
+    {
+        winetest_push_context( "objdata[%d]", i );
+        todo_wine
+        check_member( objdata[i], expect_objdata[6 + i], "%#x", dwOfs );
+        todo_wine_if( i != 3 && i != 4 && i != 7 )
+        check_member( objdata[i], expect_objdata[6 + i], "%#x", dwData );
+        ok( objdata[i].uAppData == -1, "got %p, expected %p\n", (void *)objdata[i].uAppData, (void *)-1 );
+        winetest_pop_context();
+    }
+
+    send_hid_input( file, &injected_input[3], sizeof(*injected_input) );
+    res = WaitForSingleObject( event, 100 );
+    ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
+    ResetEvent( event );
+
+    hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceState returned: %#x\n", hr );
+    todo_wine
+    check_member( state, expect_state[3], "%d", lX );
+    todo_wine
+    check_member( state, expect_state[3], "%d", lY );
+    todo_wine
+    check_member( state, expect_state[3], "%d", lZ );
+    check_member( state, expect_state[3], "%d", lRx );
+    check_member( state, expect_state[3], "%d", rgdwPOV[0] );
+    check_member( state, expect_state[3], "%d", rgdwPOV[1] );
+    check_member( state, expect_state[3], "%#x", rgbButtons[0] );
+    check_member( state, expect_state[3], "%#x", rgbButtons[1] );
+    check_member( state, expect_state[3], "%#x", rgbButtons[2] );
+
+    prop_range.diph.dwHow = DIPH_DEVICE;
+    prop_range.diph.dwObj = 0;
+    prop_range.lMin = 1000;
+    prop_range.lMax = 51000;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_RANGE returned %#x\n", hr );
+    prop_range.diph.dwHow = DIPH_BYUSAGE;
+    prop_range.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    prop_range.lMin = -4000;
+    prop_range.lMax = -14000;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty DIPROP_RANGE returned %#x\n", hr );
+    prop_range.lMin = -14000;
+    prop_range.lMax = -4000;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_RANGE returned %#x\n", hr );
+
+    prop_range.diph.dwHow = DIPH_DEVICE;
+    prop_range.diph.dwObj = 0;
+    prop_range.lMin = 0xdeadbeef;
+    prop_range.lMax = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    todo_wine
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_GetProperty DIPROP_RANGE returned %#x\n", hr );
+    prop_range.diph.dwHow = DIPH_BYUSAGE;
+    prop_range.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    prop_range.lMin = 0xdeadbeef;
+    prop_range.lMax = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_RANGE returned %#x\n", hr );
+    ok( prop_range.lMin == -14000, "got %d expected %d\n", prop_range.lMin, -14000 );
+    ok( prop_range.lMax == -4000, "got %d expected %d\n", prop_range.lMax, -4000 );
+    prop_range.diph.dwHow = DIPH_BYUSAGE;
+    prop_range.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_Y, HID_USAGE_PAGE_GENERIC );
+    prop_range.lMin = 0xdeadbeef;
+    prop_range.lMax = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_RANGE, &prop_range.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_RANGE returned %#x\n", hr );
+    ok( prop_range.lMin == 1000, "got %d expected %d\n", prop_range.lMin, 1000 );
+    ok( prop_range.lMax == 51000, "got %d expected %d\n", prop_range.lMax, 51000 );
+
+    hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceState returned: %#x\n", hr );
+    todo_wine
+    check_member( state, expect_state_abs[1], "%d", lX );
+    todo_wine
+    check_member( state, expect_state_abs[1], "%d", lY );
+    todo_wine
+    check_member( state, expect_state_abs[1], "%d", lZ );
+    check_member( state, expect_state_abs[1], "%d", lRx );
+    check_member( state, expect_state_abs[1], "%d", rgdwPOV[0] );
+    check_member( state, expect_state_abs[1], "%d", rgdwPOV[1] );
+    check_member( state, expect_state_abs[1], "%#x", rgbButtons[0] );
+    check_member( state, expect_state_abs[1], "%#x", rgbButtons[1] );
+    check_member( state, expect_state_abs[1], "%#x", rgbButtons[2] );
+
+    hr = IDirectInputDevice8_SetProperty( device, NULL, NULL );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, &GUID_NULL, NULL );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_VIDPID, NULL );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_VIDPID, &prop_string.diph );
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty returned %#x\n", hr );
+
+    prop_dword.diph.dwHow = DIPH_DEVICE;
+    prop_dword.diph.dwObj = 0;
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_VIDPID, &prop_dword.diph );
+    ok( hr == DIERR_READONLY, "IDirectInputDevice8_SetProperty DIPROP_VIDPID returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_GUIDANDPATH, &prop_guid_path.diph );
+    ok( hr == DIERR_READONLY, "IDirectInputDevice8_SetProperty DIPROP_GUIDANDPATH returned %#x\n", hr );
+
+    prop_string.diph.dwHow = DIPH_DEVICE;
+    prop_string.diph.dwObj = 0;
+    wcscpy( prop_string.wsz, L"instance name" );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_INSTANCENAME, &prop_string.diph );
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_SetProperty DIPROP_INSTANCENAME returned %#x\n", hr );
+
+    wcscpy( prop_string.wsz, L"product name" );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_PRODUCTNAME, &prop_string.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_PRODUCTNAME returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_PRODUCTNAME, &prop_string.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_PRODUCTNAME returned %#x\n", hr );
+    todo_wine
+    ok( !wcscmp( prop_string.wsz, expect_devinst.tszProductName ), "got product %s\n",
+        debugstr_w(prop_string.wsz) );
+
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_TYPENAME, &prop_string.diph );
+    ok( hr == DIERR_READONLY, "IDirectInputDevice8_SetProperty DIPROP_TYPENAME returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_USERNAME, &prop_string.diph );
+    ok( hr == DIERR_READONLY, "IDirectInputDevice8_SetProperty DIPROP_USERNAME returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_FFLOAD, &prop_dword.diph );
+    ok( hr == DIERR_READONLY, "IDirectInputDevice8_SetProperty DIPROP_FFLOAD returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_GRANULARITY, &prop_dword.diph );
+    ok( hr == DIERR_READONLY, "IDirectInputDevice8_SetProperty DIPROP_GRANULARITY returned %#x\n", hr );
+
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_JOYSTICKID, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_ACQUIRED, "IDirectInputDevice8_SetProperty DIPROP_JOYSTICKID returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_AXISMODE, &prop_dword.diph );
+    ok( hr == DIERR_ACQUIRED, "IDirectInputDevice8_SetProperty DIPROP_AXISMODE returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_BUFFERSIZE, &prop_dword.diph );
+    ok( hr == DIERR_ACQUIRED, "IDirectInputDevice8_SetProperty DIPROP_BUFFERSIZE returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_AUTOCENTER, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_ACQUIRED, "IDirectInputDevice8_SetProperty DIPROP_AUTOCENTER returned %#x\n", hr );
+    prop_pointer.diph.dwHow = DIPH_BYUSAGE;
+    prop_pointer.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_APPDATA, &prop_pointer.diph );
+    todo_wine
+    ok( hr == DIERR_ACQUIRED, "IDirectInputDevice8_SetProperty DIPROP_APPDATA returned %#x\n", hr );
+
+    prop_dword.diph.dwHow = DIPH_DEVICE;
+    prop_dword.diph.dwObj = 0;
+    prop_dword.dwData = 10001;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_DEADZONE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty DIPROP_DEADZONE returned %#x\n", hr );
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_SATURATION, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty DIPROP_SATURATION returned %#x\n", hr );
+    prop_dword.dwData = 1000;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_DEADZONE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_DEADZONE returned %#x\n", hr );
+    prop_dword.dwData = 6000;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_SATURATION, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_SATURATION returned %#x\n", hr );
+
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_DEADZONE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_GetProperty DIPROP_DEADZONE returned %#x\n", hr );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_SATURATION, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_GetProperty DIPROP_SATURATION returned %#x\n", hr );
+
+    prop_dword.diph.dwHow = DIPH_BYUSAGE;
+    prop_dword.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    prop_dword.dwData = 2000;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_DEADZONE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_DEADZONE returned %#x\n", hr );
+    ok( prop_dword.dwData == 2000, "got %u expected %u\n", prop_dword.dwData, 2000 );
+    prop_dword.dwData = 7000;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_SATURATION, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_SATURATION returned %#x\n", hr );
+
+    prop_dword.diph.dwHow = DIPH_BYUSAGE;
+    prop_dword.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_DEADZONE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_DEADZONE returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == 2000, "got %u expected %u\n", prop_dword.dwData, 2000 );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_SATURATION, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_SATURATION returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == 7000, "got %u expected %u\n", prop_dword.dwData, 7000 );
+
+    prop_dword.diph.dwHow = DIPH_BYUSAGE;
+    prop_dword.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_Y, HID_USAGE_PAGE_GENERIC );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_DEADZONE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_DEADZONE returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == 1000, "got %u expected %u\n", prop_dword.dwData, 1000 );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_SATURATION, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_SATURATION returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == 6000, "got %u expected %u\n", prop_dword.dwData, 6000 );
+
+    for (i = 0; i < ARRAY_SIZE(injected_input); ++i)
+    {
+        winetest_push_context( "state[%d]", i );
+        hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
+        ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceState returned: %#x\n", hr );
+        if (broken( state.lX == -10750 )) win_skip( "Ignoring 32-bit rounding\n" );
+        else
+        {
+            todo_wine_if( i != 2 )
+            check_member( state, expect_state_abs[i], "%d", lX );
+            todo_wine_if( i != 2 )
+            check_member( state, expect_state_abs[i], "%d", lY );
+        }
+        todo_wine
+        check_member( state, expect_state_abs[i], "%d", lZ );
+        check_member( state, expect_state_abs[i], "%d", lRx );
+        check_member( state, expect_state_abs[i], "%d", rgdwPOV[0] );
+        check_member( state, expect_state_abs[i], "%d", rgdwPOV[1] );
+        check_member( state, expect_state_abs[i], "%#x", rgbButtons[0] );
+        check_member( state, expect_state_abs[i], "%#x", rgbButtons[1] );
+        check_member( state, expect_state_abs[i], "%#x", rgbButtons[2] );
+
+        send_hid_input( file, &injected_input[i], sizeof(*injected_input) );
+
+        res = WaitForSingleObject( event, 100 );
+        if (i == 0 || i == 3) todo_wine_if( i == 0 )
+        ok( res == WAIT_TIMEOUT, "WaitForSingleObject succeeded\n" );
+        else ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" ); ResetEvent( event );
+        winetest_pop_context();
+    }
+
+    hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceState returned: %#x\n", hr );
+    winetest_push_context( "state[%d]", i );
+    todo_wine
+    check_member( state, expect_state_abs[i], "%d", lX );
+    todo_wine
+    check_member( state, expect_state_abs[i], "%d", lY );
+    todo_wine
+    check_member( state, expect_state_abs[i], "%d", lZ );
+    check_member( state, expect_state_abs[i], "%d", lRx );
+    check_member( state, expect_state_abs[i], "%d", rgdwPOV[0] );
+    check_member( state, expect_state_abs[i], "%d", rgdwPOV[1] );
+    check_member( state, expect_state_abs[i], "%#x", rgbButtons[0] );
+    check_member( state, expect_state_abs[i], "%#x", rgbButtons[1] );
+    check_member( state, expect_state_abs[i], "%#x", rgbButtons[2] );
+    winetest_pop_context();
+
+    hr = IDirectInputDevice8_Unacquire( device );
+    ok( hr == DI_OK, "IDirectInputDevice8_Unacquire returned: %#x\n", hr );
+
+    prop_dword.diph.dwHow = DIPH_DEVICE;
+    prop_dword.diph.dwObj = 0;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_JOYSTICKID, &prop_dword.diph );
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_SetProperty DIPROP_JOYSTICKID returned %#x\n", hr );
+    prop_dword.dwData = 0x1000;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_BUFFERSIZE, &prop_dword.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_BUFFERSIZE returned %#x\n", hr );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_AUTOCENTER, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty DIPROP_AUTOCENTER returned %#x\n", hr );
+    prop_dword.dwData = DIPROPAUTOCENTER_ON;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_AUTOCENTER, &prop_dword.diph );
+    ok( hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_SetProperty DIPROP_AUTOCENTER returned %#x\n", hr );
+    prop_pointer.diph.dwHow = DIPH_BYUSAGE;
+    prop_pointer.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    prop_pointer.uData = 0xfeedcafe;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_APPDATA, &prop_pointer.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_APPDATA returned %#x\n", hr );
+
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_AXISMODE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty DIPROP_AXISMODE returned %#x\n", hr );
+    prop_dword.dwData = DIPROPAXISMODE_REL;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_AXISMODE, &prop_dword.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_AXISMODE returned %#x\n", hr );
+
+    hr = IDirectInputDevice8_Acquire( device );
+    ok( hr == DI_OK, "IDirectInputDevice8_Unacquire returned: %#x\n", hr );
+
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_AXISMODE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_AXISMODE returned %#x\n", hr );
+    todo_wine
+    ok( prop_dword.dwData == DIPROPAXISMODE_REL, "got %u expected %u\n", prop_dword.dwData, DIPROPAXISMODE_REL );
+
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_BUFFERSIZE, &prop_dword.diph );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_BUFFERSIZE returned %#x\n", hr );
+    ok( prop_dword.dwData == 0x1000, "got %#x expected %#x\n", prop_dword.dwData, 0x1000 );
+
+    prop_pointer.diph.dwHow = DIPH_BYUSAGE;
+    prop_pointer.diph.dwObj = MAKELONG( HID_USAGE_GENERIC_X, HID_USAGE_PAGE_GENERIC );
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_APPDATA, &prop_pointer.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_GetProperty DIPROP_APPDATA returned %#x\n", hr );
+    ok( prop_pointer.uData == 0xfeedcafe, "got %p expected %p\n", (void *)prop_pointer.uData, (void *)0xfeedcafe );
+
+    prop_dword.diph.dwHow = DIPH_DEVICE;
+    prop_dword.diph.dwObj = 0;
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_FFGAIN, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty DIPROP_FFGAIN returned %#x\n", hr );
+    prop_dword.dwData = 1000;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_FFGAIN, &prop_dword.diph );
+    todo_wine
+    ok( hr == DI_OK, "IDirectInputDevice8_SetProperty DIPROP_FFGAIN returned %#x\n", hr );
+
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_CALIBRATION, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty DIPROP_CALIBRATION returned %#x\n", hr );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_DEADZONE, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty DIPROP_DEADZONE returned %#x\n", hr );
+    prop_dword.dwData = 0xdeadbeef;
+    hr = IDirectInputDevice8_SetProperty( device, DIPROP_SATURATION, &prop_dword.diph );
+    todo_wine
+    ok( hr == DIERR_INVALIDPARAM, "IDirectInputDevice8_SetProperty DIPROP_SATURATION returned %#x\n", hr );
+
+    for (i = 0; i < ARRAY_SIZE(injected_input); ++i)
+    {
+        winetest_push_context( "state[%d]", i );
+        hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
+        ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceState returned: %#x\n", hr );
+        todo_wine
+        check_member( state, expect_state_rel[i], "%d", lX );
+        todo_wine
+        check_member( state, expect_state_rel[i], "%d", lY );
+        todo_wine
+        check_member( state, expect_state_rel[i], "%d", lZ );
+        check_member( state, expect_state_rel[i], "%d", lRx );
+        check_member( state, expect_state_rel[i], "%d", rgdwPOV[0] );
+        check_member( state, expect_state_rel[i], "%d", rgdwPOV[1] );
+        check_member( state, expect_state_rel[i], "%#x", rgbButtons[0] );
+        check_member( state, expect_state_rel[i], "%#x", rgbButtons[1] );
+        check_member( state, expect_state_rel[i], "%#x", rgbButtons[2] );
+
+        send_hid_input( file, &injected_input[i], sizeof(*injected_input) );
+
+        res = WaitForSingleObject( event, 100 );
+        if (i == 3) ok( res == WAIT_TIMEOUT, "WaitForSingleObject succeeded\n" );
+        else ok( res == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
+        ResetEvent( event );
+        winetest_pop_context();
+    }
+
+    hr = IDirectInputDevice8_GetDeviceState( device, sizeof(DIJOYSTATE2), &state );
+    ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceState returned: %#x\n", hr );
+    winetest_push_context( "state[%d]", i );
+    todo_wine
+    check_member( state, expect_state_rel[i], "%d", lX );
+    todo_wine
+    check_member( state, expect_state_rel[i], "%d", lY );
+    todo_wine
+    check_member( state, expect_state_rel[i], "%d", lZ );
+    check_member( state, expect_state_rel[i], "%d", lRx );
+    check_member( state, expect_state_rel[i], "%d", rgdwPOV[0] );
+    check_member( state, expect_state_rel[i], "%d", rgdwPOV[1] );
+    check_member( state, expect_state_rel[i], "%#x", rgbButtons[0] );
+    check_member( state, expect_state_rel[i], "%#x", rgbButtons[1] );
+    check_member( state, expect_state_rel[i], "%#x", rgbButtons[2] );
+    winetest_pop_context();
+
+    hr = IDirectInputDevice8_Unacquire( device );
+    ok( hr == DI_OK, "IDirectInputDevice8_Unacquire returned: %#x\n", hr );
+
+    /* FIXME: we have to wait a bit because Wine DInput internal thread keeps a reference */
+    Sleep( 100 );
+
+    ref = IDirectInputDevice8_Release( device );
+    ok( ref == 0, "IDirectInputDeviceW_Release returned %d\n", ref );
+
+    CloseHandle( event );
+    CloseHandle( file );
+
+    ref = IDirectInput8_Release( di );
+    ok( ref == 0, "IDirectInput8_Release returned %d\n", ref );
+
+done:
+    pnp_driver_stop();
+    cleanup_registry_keys();
+    SetCurrentDirectoryW( cwd );
+}
+
+struct device_desc
+{
+    const BYTE *report_desc_buf;
+    ULONG report_desc_len;
+    HIDP_CAPS hid_caps;
+};
+
+static void test_device_types( void )
+{
+#include "psh_hid_macros.h"
+    static const unsigned char unknown_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Physical),
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 6),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 8),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+    static const unsigned char limited_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Physical),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 127),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 127),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 2),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 6),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 8),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+    static const unsigned char gamepad_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_GAMEPAD),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_GAMEPAD),
+            COLLECTION(1, Physical),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 127),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 127),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 2),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 6),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 8),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+    static const unsigned char joystick_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Physical),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                USAGE(1, HID_USAGE_GENERIC_Z),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 127),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 127),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 3),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, HID_USAGE_GENERIC_HATSWITCH),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 8),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 8),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs|Null),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 5),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 8),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+#include "pop_hid_macros.h"
+
+    static struct device_desc device_desc[] =
+    {
+        {
+            .report_desc_buf = unknown_desc,
+            .report_desc_len = sizeof(unknown_desc),
+            .hid_caps =
+            {
+                .InputReportByteLength = 1,
+            },
+        },
+        {
+            .report_desc_buf = limited_desc,
+            .report_desc_len = sizeof(limited_desc),
+            .hid_caps =
+            {
+                .InputReportByteLength = 3,
+            },
+        },
+        {
+            .report_desc_buf = gamepad_desc,
+            .report_desc_len = sizeof(gamepad_desc),
+            .hid_caps =
+            {
+                .InputReportByteLength = 3,
+            },
+        },
+        {
+            .report_desc_buf = joystick_desc,
+            .report_desc_len = sizeof(joystick_desc),
+            .hid_caps =
+            {
+                .InputReportByteLength = 5,
+            },
+        },
+    };
+    static const DIDEVCAPS expect_caps[] =
+    {
+        {
+            .dwSize = sizeof(DIDEVCAPS),
+            .dwFlags = DIDC_ATTACHED|DIDC_EMULATED,
+            .dwDevType = DIDEVTYPE_HID|(DI8DEVTYPESUPPLEMENTAL_UNKNOWN << 8)|DI8DEVTYPE_SUPPLEMENTAL,
+            .dwButtons = 6,
+        },
+        {
+            .dwSize = sizeof(DIDEVCAPS),
+            .dwFlags = DIDC_ATTACHED|DIDC_EMULATED,
+            .dwDevType = DIDEVTYPE_HID|(DI8DEVTYPEJOYSTICK_LIMITED << 8)|DI8DEVTYPE_JOYSTICK,
+            .dwAxes = 2,
+            .dwButtons = 6,
+        },
+        {
+            .dwSize = sizeof(DIDEVCAPS),
+            .dwFlags = DIDC_ATTACHED|DIDC_EMULATED,
+            .dwDevType = DIDEVTYPE_HID|(DI8DEVTYPEGAMEPAD_STANDARD << 8)|DI8DEVTYPE_GAMEPAD,
+            .dwAxes = 2,
+            .dwButtons = 6,
+        },
+        {
+            .dwSize = sizeof(DIDEVCAPS),
+            .dwFlags = DIDC_ATTACHED|DIDC_EMULATED,
+            .dwDevType = DIDEVTYPE_HID|(DI8DEVTYPEJOYSTICK_STANDARD << 8)|DI8DEVTYPE_JOYSTICK,
+            .dwAxes = 3,
+            .dwPOVs = 1,
+            .dwButtons = 5,
+        },
+    };
+
+    const DIDEVICEINSTANCEW expect_devinst[] =
+    {
+        {
+            .dwSize = sizeof(DIDEVICEINSTANCEW),
+            .guidInstance = expect_guid_product,
+            .guidProduct = expect_guid_product,
+            .dwDevType = DIDEVTYPE_HID|(DI8DEVTYPESUPPLEMENTAL_UNKNOWN << 8)|DI8DEVTYPE_SUPPLEMENTAL,
+            .tszInstanceName = L"Wine test root driver",
+            .tszProductName = L"Wine test root driver",
+            .guidFFDriver = GUID_NULL,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEINSTANCEW),
+            .guidInstance = expect_guid_product,
+            .guidProduct = expect_guid_product,
+            .dwDevType = DIDEVTYPE_HID|(DI8DEVTYPEJOYSTICK_LIMITED << 8)|DI8DEVTYPE_JOYSTICK,
+            .tszInstanceName = L"Wine test root driver",
+            .tszProductName = L"Wine test root driver",
+            .guidFFDriver = GUID_NULL,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEINSTANCEW),
+            .guidInstance = expect_guid_product,
+            .guidProduct = expect_guid_product,
+            .dwDevType = DIDEVTYPE_HID|(DI8DEVTYPEGAMEPAD_STANDARD << 8)|DI8DEVTYPE_GAMEPAD,
+            .tszInstanceName = L"Wine test root driver",
+            .tszProductName = L"Wine test root driver",
+            .guidFFDriver = GUID_NULL,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_GAMEPAD,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEINSTANCEW),
+            .guidInstance = expect_guid_product,
+            .guidProduct = expect_guid_product,
+            .dwDevType = DIDEVTYPE_HID|(DI8DEVTYPEJOYSTICK_STANDARD << 8)|DI8DEVTYPE_JOYSTICK,
+            .tszInstanceName = L"Wine test root driver",
+            .tszProductName = L"Wine test root driver",
+            .guidFFDriver = GUID_NULL,
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+        },
+    };
+
+    DIDEVICEINSTANCEW devinst = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
+    DIDEVCAPS caps = {.dwSize = sizeof(DIDEVCAPS)};
+    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
+    IDirectInputDevice8W *device;
+    IDirectInput8W *di;
+    ULONG i, ref;
+    HRESULT hr;
+
+    for (i = 0; i < ARRAY_SIZE(device_desc); ++i)
+    {
+        winetest_push_context( "desc[%d]", i );
+        GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
+        GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
+        SetCurrentDirectoryW( tempdir );
+
+        cleanup_registry_keys();
+        if (!dinput_driver_start( device_desc[i].report_desc_buf, device_desc[i].report_desc_len,
+                                  &device_desc[i].hid_caps ))
+        {
+            i = ARRAY_SIZE(device_desc);
+            goto done;
+        }
+
+        hr = DirectInput8Create( instance, DIRECTINPUT_VERSION, &IID_IDirectInput8W, (void **)&di, NULL );
+        if (FAILED(hr))
+        {
+            win_skip( "DirectInput8Create returned %#x\n", hr );
+            i = ARRAY_SIZE(device_desc);
+            goto done;
+        }
+
+        hr = IDirectInput8_EnumDevices( di, DI8DEVCLASS_ALL, find_test_device, &devinst, DIEDFL_ALLDEVICES );
+        ok( hr == DI_OK, "IDirectInput8_EnumDevices returned: %#x\n", hr );
+        if (!IsEqualGUID( &devinst.guidProduct, &expect_guid_product ))
+        {
+            win_skip( "device not found, skipping tests\n" );
+            IDirectInput8_Release( di );
+            i = ARRAY_SIZE(device_desc);
+            goto done;
+        }
+
+        hr = IDirectInput8_CreateDevice( di, &expect_guid_product, &device, NULL );
+        ok( hr == DI_OK, "IDirectInput8_CreateDevice returned %#x\n", hr );
+
+        hr = IDirectInputDevice8_GetDeviceInfo( device, &devinst );
+        ok( hr == DI_OK, "IDirectInputDevice8_GetDeviceInfo returned %#x\n", hr );
+        check_member( devinst, expect_devinst[i], "%d", dwSize );
+        todo_wine
+        check_member_guid( devinst, expect_devinst[i], guidInstance );
+        check_member_guid( devinst, expect_devinst[i], guidProduct );
+        check_member( devinst, expect_devinst[i], "%#x", dwDevType );
+        todo_wine
+        check_member_wstr( devinst, expect_devinst[i], tszInstanceName );
+        todo_wine
+        check_member_wstr( devinst, expect_devinst[i], tszProductName );
+        check_member_guid( devinst, expect_devinst[i], guidFFDriver );
+        check_member( devinst, expect_devinst[i], "%04x", wUsagePage );
+        check_member( devinst, expect_devinst[i], "%04x", wUsage );
+
+        hr = IDirectInputDevice8_GetCapabilities( device, &caps );
+        ok( hr == DI_OK, "IDirectInputDevice8_GetCapabilities returned %#x\n", hr );
+        check_member( caps, expect_caps[i], "%d", dwSize );
+        check_member( caps, expect_caps[i], "%#x", dwFlags );
+        check_member( caps, expect_caps[i], "%#x", dwDevType );
+        check_member( caps, expect_caps[i], "%d", dwAxes );
+        check_member( caps, expect_caps[i], "%d", dwButtons );
+        check_member( caps, expect_caps[i], "%d", dwPOVs );
+        check_member( caps, expect_caps[i], "%d", dwFFSamplePeriod );
+        check_member( caps, expect_caps[i], "%d", dwFFMinTimeResolution );
+        check_member( caps, expect_caps[i], "%d", dwFirmwareRevision );
+        check_member( caps, expect_caps[i], "%d", dwHardwareRevision );
+        check_member( caps, expect_caps[i], "%d", dwFFDriverVersion );
+
+        ref = IDirectInputDevice8_Release( device );
+        ok( ref == 0, "IDirectInputDeviceW_Release returned %d\n", ref );
+
+        ref = IDirectInput8_Release( di );
+        ok( ref == 0, "IDirectInput8_Release returned %d\n", ref );
+
+    done:
+        pnp_driver_stop();
+        cleanup_registry_keys();
+        SetCurrentDirectoryW( cwd );
+        winetest_pop_context();
+    }
 }
 
 START_TEST( hid )
@@ -2329,6 +4997,8 @@ START_TEST( hid )
     HANDLE mapping;
     BOOL is_wow64;
 
+    instance = GetModuleHandleW( NULL );
+    localized = GetUserDefaultLCID() != MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
     pSignerSign = (void *)GetProcAddress( LoadLibraryW( L"mssign32" ), "SignerSign" );
 
     if (IsWow64Process( GetCurrentProcess(), &is_wow64 ) && is_wow64)
@@ -2355,10 +5025,16 @@ START_TEST( hid )
     ok( okfile != INVALID_HANDLE_VALUE, "failed to create file, error %u\n", GetLastError() );
 
     subtest( "driver_hid" );
+    test_hidp_kdr();
     test_hid_driver( 0, FALSE );
     test_hid_driver( 1, FALSE );
     test_hid_driver( 0, TRUE );
     test_hid_driver( 1, TRUE );
+
+    CoInitialize( NULL );
+    test_device_types();
+    test_simple_joystick();
+    CoUninitialize();
 
     UnmapViewOfFile( test_data );
     CloseHandle( mapping );

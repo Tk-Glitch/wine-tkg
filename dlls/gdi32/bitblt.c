@@ -810,7 +810,7 @@ BOOL WINAPI NtGdiMaskBlt( HDC hdcDest, INT nXDest, INT nYDest, INT nWidth, INT n
 
     /* combine both using the mask as a pattern brush */
     NtGdiSelectBrush(hDC2, hbrMask);
-    SetBrushOrgEx(hDC2, -xMask, -yMask, NULL);
+    NtGdiSetBrushOrg( hDC2, -xMask, -yMask, NULL );
     /* (D & P) | (S & ~P) */
     NtGdiBitBlt(hDC2, 0, 0, nWidth, nHeight, hDC1, 0, 0, 0xac0744, 0, 0 );
     NtGdiSelectBrush(hDC2, hbrTmp);
@@ -852,21 +852,24 @@ BOOL WINAPI NtGdiTransparentBlt( HDC hdcDest, int xDest, int yDest, int widthDes
     COLORREF oldForeground;
     int oldStretchMode;
     DIBSECTION dib;
+    DC *dc_src;
 
     if(widthDest < 0 || heightDest < 0 || widthSrc < 0 || heightSrc < 0) {
         TRACE("Cannot mirror\n");
         return FALSE;
     }
 
+    if (!(dc_src = get_dc_ptr( hdcSrc ))) return FALSE;
+
     NtGdiGetAndSetDCDword( hdcDest, NtGdiSetBkColor, RGB(255,255,255), &oldBackground );
     NtGdiGetAndSetDCDword( hdcDest, NtGdiSetTextColor, RGB(0,0,0), &oldForeground );
 
     /* Stretch bitmap */
-    oldStretchMode = GetStretchBltMode(hdcSrc);
-    if(oldStretchMode == BLACKONWHITE || oldStretchMode == WHITEONBLACK)
-        SetStretchBltMode(hdcSrc, COLORONCOLOR);
+    oldStretchMode = dc_src->attr->stretch_blt_mode;
+    if (oldStretchMode == BLACKONWHITE || oldStretchMode == WHITEONBLACK)
+        dc_src->attr->stretch_blt_mode = COLORONCOLOR;
     hdcWork = NtGdiCreateCompatibleDC( hdcDest );
-    if ((GetObjectType( hdcDest ) != OBJ_MEMDC ||
+    if ((get_gdi_object_type( hdcDest ) != NTGDI_OBJ_MEMDC ||
          NtGdiExtGetObjectW( NtGdiGetDCObject( hdcDest, NTGDI_OBJ_SURF ),
                              sizeof(dib), &dib ) == sizeof(BITMAP)) &&
         NtGdiGetDeviceCaps( hdcDest, BITSPIXEL ) == 32)
@@ -926,7 +929,8 @@ BOOL WINAPI NtGdiTransparentBlt( HDC hdcDest, int xDest, int yDest, int widthDes
 
     ret = TRUE;
 error:
-    SetStretchBltMode(hdcSrc, oldStretchMode);
+    dc_src->attr->stretch_blt_mode = oldStretchMode;
+    release_dc_ptr( dc_src );
     NtGdiGetAndSetDCDword( hdcDest, NtGdiSetBkColor, oldBackground, NULL );
     NtGdiGetAndSetDCDword( hdcDest, NtGdiSetTextColor, oldForeground, NULL );
     if(hdcWork) {

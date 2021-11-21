@@ -1399,8 +1399,6 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved 
         unix_funcs->init_builtin_dll( wm->ldr.DllBase );
     if (!entry) return STATUS_SUCCESS;
 
-    memset( mod_name, 0, sizeof(mod_name) );
-
     if (TRACE_ON(relay))
     {
         size_t len = min( wm->ldr.BaseDllName.Length, sizeof(mod_name)-sizeof(WCHAR) );

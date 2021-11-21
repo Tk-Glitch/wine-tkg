@@ -48,6 +48,36 @@ static struct data_key *impl_from_ISpRegDataKey( ISpRegDataKey *iface )
     return CONTAINING_RECORD( iface, struct data_key, ISpRegDataKey_iface );
 }
 
+struct token_enum
+{
+    ISpObjectTokenEnumBuilder ISpObjectTokenEnumBuilder_iface;
+    LONG ref;
+
+    BOOL init;
+    WCHAR *req, *opt;
+    ULONG count;
+    HKEY key;
+};
+
+static struct token_enum *impl_from_ISpObjectTokenEnumBuilder( ISpObjectTokenEnumBuilder *iface )
+{
+    return CONTAINING_RECORD( iface, struct token_enum, ISpObjectTokenEnumBuilder_iface );
+}
+
+struct object_token
+{
+    ISpObjectToken ISpObjectToken_iface;
+    LONG ref;
+
+    HKEY token_key;
+    WCHAR *token_id;
+};
+
+static struct object_token *impl_from_ISpObjectToken( ISpObjectToken *iface )
+{
+    return CONTAINING_RECORD( iface, struct object_token, ISpObjectToken_iface );
+}
+
 static HRESULT WINAPI data_key_QueryInterface( ISpRegDataKey *iface, REFIID iid, void **obj )
 {
     struct data_key *This = impl_from_ISpRegDataKey( iface );
@@ -117,8 +147,32 @@ static HRESULT WINAPI data_key_SetStringValue( ISpRegDataKey *iface,
 static HRESULT WINAPI data_key_GetStringValue( ISpRegDataKey *iface,
                                                LPCWSTR name, LPWSTR *value )
 {
-    FIXME( "stub\n" );
-    return E_NOTIMPL;
+    struct data_key *This = impl_from_ISpRegDataKey( iface );
+    DWORD ret, size;
+    WCHAR *content;
+
+    FIXME( "%p, %s, %p\n", This, debugstr_w(name), value);
+
+    if (!This->key) return E_INVALIDARG; /* FIXME */
+
+    size = 0;
+    ret = RegGetValueW( This->key, NULL, name, RRF_RT_REG_SZ, NULL, NULL, &size );
+    if (ret == ERROR_FILE_NOT_FOUND)
+        return SPERR_NOT_FOUND;
+
+    content = CoTaskMemAlloc(size);
+    if (!content)
+        return E_OUTOFMEMORY;
+
+    ret = RegGetValueW( This->key, NULL, name, RRF_RT_REG_SZ, NULL, content, &size );
+    if (ret != ERROR_SUCCESS)
+    {
+        CoTaskMemFree(content);
+        return HRESULT_FROM_WIN32(ret);
+    }
+
+    *value = content;
+    return S_OK;
 }
 
 static HRESULT WINAPI data_key_SetDWORD( ISpRegDataKey *iface,
@@ -145,8 +199,30 @@ static HRESULT WINAPI data_key_OpenKey( ISpRegDataKey *iface,
 static HRESULT WINAPI data_key_CreateKey( ISpRegDataKey *iface,
                                           LPCWSTR name, ISpDataKey **sub_key )
 {
-    FIXME( "stub\n" );
-    return E_NOTIMPL;
+    struct data_key *This = impl_from_ISpRegDataKey( iface );
+    ISpRegDataKey *spregkey;
+    HRESULT hr;
+    HKEY key;
+    LONG res;
+
+    TRACE( "%p, %s, %p\n", This, debugstr_w(name), sub_key );
+
+    if (!This->key) return E_INVALIDARG; /* FIXME */
+
+    res = RegCreateKeyExW( This->key, name, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &key, NULL );
+    if (res != ERROR_SUCCESS)
+        return HRESULT_FROM_WIN32(res);
+
+    hr = data_key_create(NULL, &IID_ISpRegDataKey, (void**)&spregkey);
+    if (hr == S_OK)
+    {
+        hr = ISpRegDataKey_SetKey(spregkey, key, FALSE);
+        if (hr == S_OK)
+            hr = ISpRegDataKey_QueryInterface(spregkey, &IID_ISpDataKey, (void**)sub_key);
+        ISpRegDataKey_Release(spregkey);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI data_key_DeleteKey( ISpRegDataKey *iface, LPCWSTR name )
@@ -416,9 +492,10 @@ static HRESULT WINAPI token_category_SetId( ISpObjectTokenCategory *iface,
     hr = parse_cat_id( id, &root, &subkey );
     if (hr != S_OK) return SPERR_INVALID_REGISTRY_KEY;
 
-    if (create) FIXME( "Ignoring create\n" );
-
-    res = RegOpenKeyExW( root, subkey, 0, KEY_ALL_ACCESS, &key );
+    if (create)
+        res = RegCreateKeyExW( root, subkey, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &key, NULL );
+    else
+        res = RegOpenKeyExW( root, subkey, 0, KEY_ALL_ACCESS, &key );
     if (res) return SPERR_INVALID_REGISTRY_KEY;
 
     hr = CoCreateInstance( &CLSID_SpDataKey, NULL, CLSCTX_ALL,
@@ -456,9 +533,11 @@ static HRESULT WINAPI token_category_EnumTokens( ISpObjectTokenCategory *iface,
 {
     struct token_category *This = impl_from_ISpObjectTokenCategory( iface );
     ISpObjectTokenEnumBuilder *builder;
+    struct token_enum *tokenenum;
+    struct data_key *this_data_key;
     HRESULT hr;
 
-    FIXME( "(%p)->(%s %s %p): semi-stub\n", This, debugstr_w( req ), debugstr_w( opt ), enum_tokens );
+    TRACE( "(%p)->(%s %s %p)\n", This, debugstr_w( req ), debugstr_w( opt ), enum_tokens );
 
     if (!This->data_key) return SPERR_UNINITIALIZED;
 
@@ -469,7 +548,15 @@ static HRESULT WINAPI token_category_EnumTokens( ISpObjectTokenCategory *iface,
     hr = ISpObjectTokenEnumBuilder_SetAttribs( builder, req, opt );
     if (FAILED(hr)) goto fail;
 
-    /* FIXME: Build the enumerator */
+    this_data_key = impl_from_ISpRegDataKey( This->data_key );
+
+    tokenenum = impl_from_ISpObjectTokenEnumBuilder( builder );
+
+    if(!RegOpenKeyExW( this_data_key->key, L"Tokens", 0, KEY_ALL_ACCESS, &tokenenum->key ))
+    {
+        RegQueryInfoKeyW(tokenenum->key, NULL, NULL, NULL, &tokenenum->count, NULL, NULL,
+                NULL, NULL, NULL, NULL, NULL);
+    }
 
     hr = ISpObjectTokenEnumBuilder_QueryInterface( builder, &IID_IEnumSpObjectTokens,
                                                    (void **)enum_tokens );
@@ -564,21 +651,6 @@ HRESULT token_category_create( IUnknown *outer, REFIID iid, void **obj )
     return hr;
 }
 
-struct token_enum
-{
-    ISpObjectTokenEnumBuilder ISpObjectTokenEnumBuilder_iface;
-    LONG ref;
-
-    BOOL init;
-    WCHAR *req, *opt;
-    ULONG count;
-};
-
-static struct token_enum *impl_from_ISpObjectTokenEnumBuilder( ISpObjectTokenEnumBuilder *iface )
-{
-    return CONTAINING_RECORD( iface, struct token_enum, ISpObjectTokenEnumBuilder_iface );
-}
-
 static HRESULT WINAPI token_enum_QueryInterface( ISpObjectTokenEnumBuilder *iface,
                                                  REFIID iid, void **obj )
 {
@@ -618,6 +690,8 @@ static ULONG WINAPI token_enum_Release( ISpObjectTokenEnumBuilder *iface )
 
     if (!ref)
     {
+        if (This->key)
+            RegCloseKey(This->key);
         heap_free( This->req );
         heap_free( This->opt );
         heap_free( This );
@@ -665,8 +739,45 @@ static HRESULT WINAPI token_enum_Clone( ISpObjectTokenEnumBuilder *iface,
 static HRESULT WINAPI token_enum_Item( ISpObjectTokenEnumBuilder *iface,
                                        ULONG index, ISpObjectToken **token )
 {
-    FIXME( "stub\n" );
-    return E_NOTIMPL;
+    struct token_enum *This = impl_from_ISpObjectTokenEnumBuilder( iface );
+    struct object_token *object;
+    ISpObjectToken *subtoken;
+    HRESULT hr;
+    WCHAR *subkey;
+    DWORD size;
+    LONG ret;
+    HKEY key;
+
+    TRACE( "%p, %d, %p\n", This, index, token );
+
+    if (!This->init)
+        return SPERR_UNINITIALIZED;
+
+    RegQueryInfoKeyW(This->key, NULL, NULL, NULL, NULL, &size, NULL, NULL, NULL, NULL, NULL, NULL);
+    size = (size+1) * sizeof(WCHAR);
+    subkey = heap_alloc(size);
+    if (!subkey)
+        return E_OUTOFMEMORY;
+
+    ret = RegEnumKeyExW(This->key, index, subkey, &size, NULL, NULL, NULL, NULL);
+    if (ret != ERROR_SUCCESS)
+        return HRESULT_FROM_WIN32(ret);
+
+    ret = RegOpenKeyExW (This->key, subkey, 0, KEY_READ, &key);
+    if (ret != ERROR_SUCCESS)
+        return HRESULT_FROM_WIN32(ret);
+
+    hr = token_create( NULL, &IID_ISpObjectToken, (void**)&subtoken );
+    if (FAILED(hr))
+        return hr;
+
+    object = impl_from_ISpObjectToken( subtoken );
+    object->token_key = key;
+    object->token_id = subkey;
+
+    *token = subtoken;
+
+    return hr;
 }
 
 static HRESULT WINAPI token_enum_GetCount( ISpObjectTokenEnumBuilder *iface,
@@ -777,19 +888,6 @@ HRESULT token_enum_create( IUnknown *outer, REFIID iid, void **obj )
     return hr;
 }
 
-struct object_token
-{
-    ISpObjectToken ISpObjectToken_iface;
-    LONG ref;
-
-    HKEY token_key;
-};
-
-static struct object_token *impl_from_ISpObjectToken( ISpObjectToken *iface )
-{
-    return CONTAINING_RECORD( iface, struct object_token, ISpObjectToken_iface );
-}
-
 static HRESULT WINAPI token_QueryInterface( ISpObjectToken *iface,
                                             REFIID iid, void **obj )
 {
@@ -830,6 +928,7 @@ static ULONG WINAPI token_Release( ISpObjectToken *iface )
     if (!ref)
     {
         if (This->token_key) RegCloseKey( This->token_key );
+        heap_free(This->token_id);
         heap_free( This );
     }
 
@@ -883,8 +982,29 @@ static HRESULT WINAPI token_GetDWORD( ISpObjectToken *iface,
 static HRESULT WINAPI token_OpenKey( ISpObjectToken *iface,
                                      LPCWSTR name, ISpDataKey **sub_key )
 {
-    FIXME( "stub\n" );
-    return E_NOTIMPL;
+    struct object_token *This = impl_from_ISpObjectToken( iface );
+    ISpRegDataKey *spregkey;
+    HRESULT hr;
+    HKEY key;
+    LONG ret;
+
+    TRACE( "%p, %s, %p\n", This, debugstr_w(name), sub_key );
+
+    ret = RegOpenKeyExW (This->token_key, name, 0, KEY_ALL_ACCESS, &key);
+    if (ret != ERROR_SUCCESS)
+        return HRESULT_FROM_WIN32(ret);
+
+    hr = data_key_create(NULL, &IID_ISpRegDataKey, (void**)&spregkey);
+    if (hr == S_OK)
+    {
+        hr = ISpRegDataKey_SetKey(spregkey, key, FALSE);
+        if (hr == S_OK)
+        {
+            hr = ISpRegDataKey_QueryInterface(spregkey, &IID_ISpDataKey, (void**)sub_key);
+            ISpRegDataKey_Release(spregkey);
+        }
+    }
+    return hr;
 }
 
 static HRESULT WINAPI token_CreateKey( ISpObjectToken *iface,
@@ -942,7 +1062,10 @@ static HRESULT WINAPI token_SetId( ISpObjectToken *iface,
     hr = parse_cat_id( token_id, &root, &subkey );
     if (hr != S_OK) return SPERR_NOT_FOUND;
 
-    res = RegOpenKeyExW( root, subkey, 0, KEY_ALL_ACCESS, &key );
+    if (create)
+        res = RegCreateKeyExW( root, subkey, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &key, NULL);
+    else
+        res = RegOpenKeyExW( root, subkey, 0, KEY_ALL_ACCESS, &key );
     if (res) return SPERR_NOT_FOUND;
 
     This->token_key = key;
@@ -953,8 +1076,19 @@ static HRESULT WINAPI token_SetId( ISpObjectToken *iface,
 static HRESULT WINAPI token_GetId( ISpObjectToken *iface,
                                    LPWSTR *token_id )
 {
-    FIXME( "stub\n" );
-    return E_NOTIMPL;
+    struct object_token *This = impl_from_ISpObjectToken( iface );
+
+    TRACE( "%p, %p\n", This, token_id);
+
+    if (!This->token_key)
+        return SPERR_UNINITIALIZED;
+
+    *token_id = CoTaskMemAlloc( (wcslen(This->token_id) + 1) * sizeof(WCHAR));
+    if (!*token_id)
+        return E_OUTOFMEMORY;
+
+    wcscpy(*token_id, This->token_id);
+    return S_OK;
 }
 
 static HRESULT WINAPI token_GetCategory( ISpObjectToken *iface,
@@ -964,13 +1098,290 @@ static HRESULT WINAPI token_GetCategory( ISpObjectToken *iface,
     return E_NOTIMPL;
 }
 
+struct speech_audio
+{
+    ISpAudio ISpAudio_iface;
+    LONG ref;
+};
+
+static inline struct speech_audio *impl_from_ISpAudio(ISpAudio *iface)
+{
+    return CONTAINING_RECORD(iface, struct speech_audio, ISpAudio_iface);
+}
+
+static HRESULT WINAPI spaudio_QueryInterface(ISpAudio *iface, REFIID iid, void **obj)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+
+    TRACE("(%p, %s %p).\n", audio, debugstr_guid(iid), obj);
+
+    if (IsEqualIID(iid, &IID_IUnknown) ||
+        IsEqualIID(iid, &IID_ISequentialStream) ||
+        IsEqualIID(iid, &IID_IStream) ||
+        IsEqualIID(iid, &IID_ISpStreamFormat) ||
+        IsEqualIID(iid, &IID_ISpAudio))
+        *obj = &audio->ISpAudio_iface;
+    else
+    {
+        *obj = NULL;
+        FIXME("interface %s not implemented.\n", debugstr_guid(iid));
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown *)*obj);
+    return S_OK;
+}
+
+static ULONG WINAPI spaudio_AddRef(ISpAudio *iface)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    ULONG ref = InterlockedIncrement(&audio->ref);
+
+    TRACE("(%p): ref=%u.\n", audio, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI spaudio_Release(ISpAudio *iface)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    ULONG ref = InterlockedDecrement(&audio->ref);
+
+    TRACE("(%p): ref=%u.\n", audio, ref);
+
+    if (!ref)
+    {
+        heap_free(audio);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI spaudio_Read(ISpAudio *iface,void *pv, ULONG cb, ULONG *pcbRead)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+
+    FIXME("%p, %p, %d %p\n", audio, pv, cb, pcbRead);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_Write(ISpAudio *iface, const void *pv, ULONG cb, ULONG *pcbWritten)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+
+    FIXME("%p, %p, %d %p\n", audio, pv, cb, pcbWritten);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_Seek(ISpAudio *iface, LARGE_INTEGER dlibMove, DWORD dwOrigin, ULARGE_INTEGER *plibNewPosition)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %s, %d, %p\n", audio, wine_dbgstr_longlong(dlibMove.QuadPart), dwOrigin, plibNewPosition);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_SetSize(ISpAudio *iface, ULARGE_INTEGER libNewSize)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("(%p, %s)\n", audio, wine_dbgstr_longlong(libNewSize.QuadPart));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_CopyTo(ISpAudio *iface,IStream *pstm, ULARGE_INTEGER cb,
+        ULARGE_INTEGER *pcbRead, ULARGE_INTEGER *pcbWritten)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("(%p, %p, %s, %p, %p)\n", audio, pstm, wine_dbgstr_longlong(cb.QuadPart), pcbRead, pcbWritten);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_Commit(ISpAudio *iface,DWORD grfCommitFlags)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("(%p, %#x)\n", audio, grfCommitFlags);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_Revert(ISpAudio *iface)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("(%p)\n", audio);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_LockRegion(ISpAudio *iface, ULARGE_INTEGER offset, ULARGE_INTEGER cb, DWORD dwLockType)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("(%p, %s, %s, %d)\n", audio, wine_dbgstr_longlong(offset.QuadPart),
+        wine_dbgstr_longlong(cb.QuadPart), dwLockType);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_UnlockRegion(ISpAudio *iface,ULARGE_INTEGER offset, ULARGE_INTEGER cb, DWORD dwLockType)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("(%p, %s, %s, %d)\n", audio, wine_dbgstr_longlong(offset.QuadPart),
+        wine_dbgstr_longlong(cb.QuadPart), dwLockType);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_Stat(ISpAudio *iface, STATSTG *stg, DWORD flag)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %p, %d\n", audio, stg, flag);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_Clone(ISpAudio *iface, IStream **ppstm)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %p\n", audio, ppstm);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_GetFormat(ISpAudio *iface, GUID *format, WAVEFORMATEX **wave)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %p, %p\n", audio, format, wave);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_SetState(ISpAudio *iface, SPAUDIOSTATE state, ULONGLONG reserved)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %d, %s\n", audio, state, wine_dbgstr_longlong(reserved));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_SetFormat(ISpAudio *iface, REFGUID guid, const WAVEFORMATEX *wave)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %s, %p\n", audio, debugstr_guid(guid), wave);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_GetStatus(ISpAudio *iface, SPAUDIOSTATUS *status)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %p\n", audio, status);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_SetBufferInfo(ISpAudio *iface,const SPAUDIOBUFFERINFO *buffer)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %p\n", audio, buffer);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_GetBufferInfo(ISpAudio *iface, SPAUDIOBUFFERINFO *buffer)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %p\n", audio, buffer);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_GetDefaultFormat(ISpAudio *iface, GUID *guid, WAVEFORMATEX **wave)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %p, %p\n", audio, guid, wave);
+    return E_NOTIMPL;
+}
+
+static HANDLE WINAPI spaudio_EventHandle(ISpAudio *iface)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p\n", audio);
+    return NULL;
+}
+
+static HRESULT WINAPI spaudio_GetVolumeLevel(ISpAudio *iface, ULONG *level)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %p\n", audio, level);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_SetVolumeLevel(ISpAudio *iface, ULONG level)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %d\n", audio, level);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_GetBufferNotifySize(ISpAudio *iface, ULONG *size)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %p\n", audio, size);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI spaudio_SetBufferNotifySize(ISpAudio *iface, ULONG size)
+{
+    struct speech_audio *audio = impl_from_ISpAudio(iface);
+    FIXME("%p, %d\n", audio, size);
+    return E_NOTIMPL;
+}
+
+const struct ISpAudioVtbl spaudio_vtbl =
+{
+    spaudio_QueryInterface,
+    spaudio_AddRef,
+    spaudio_Release,
+    spaudio_Read,
+    spaudio_Write,
+    spaudio_Seek,
+    spaudio_SetSize,
+    spaudio_CopyTo,
+    spaudio_Commit,
+    spaudio_Revert,
+    spaudio_LockRegion,
+    spaudio_UnlockRegion,
+    spaudio_Stat,
+    spaudio_Clone,
+    spaudio_GetFormat,
+    spaudio_SetState,
+    spaudio_SetFormat,
+    spaudio_GetStatus,
+    spaudio_SetBufferInfo,
+    spaudio_GetBufferInfo,
+    spaudio_GetDefaultFormat,
+    spaudio_EventHandle,
+    spaudio_GetVolumeLevel,
+    spaudio_SetVolumeLevel,
+    spaudio_GetBufferNotifySize,
+    spaudio_SetBufferNotifySize
+};
+
+static HRESULT speech_audio_create(void **obj)
+{
+    struct speech_audio *This = heap_alloc(sizeof(*This));
+
+    if (!This)
+        return E_OUTOFMEMORY;
+    This->ISpAudio_iface.lpVtbl = &spaudio_vtbl;
+    This->ref = 1;
+
+    *obj = &This->ISpAudio_iface;
+    return S_OK;
+}
+
 static HRESULT WINAPI token_CreateInstance( ISpObjectToken *iface,
                                             IUnknown *outer,
                                             DWORD class_context,
                                             REFIID riid,
                                             void **object )
 {
-    FIXME( "stub\n" );
+    struct object_token *This = impl_from_ISpObjectToken( iface );
+
+    FIXME( "(%p)->(%p 0x%08x %s, %p): semi-stub\n", This, outer, class_context, debugstr_guid( riid ), object);
+
+    if (IsEqualIID(riid, &IID_ISpAudio))
+    {
+        return speech_audio_create(object);
+    }
     return E_NOTIMPL;
 }
 

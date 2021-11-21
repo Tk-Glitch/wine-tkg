@@ -29,14 +29,38 @@
 WINE_DEFAULT_DEBUG_CHANNEL(dc);
 
 
+/* copied from kernelbase */
+int muldiv( int a, int b, int c )
+{
+    LONGLONG ret;
+
+    if (!c) return -1;
+
+    /* We want to deal with a positive divisor to simplify the logic. */
+    if (c < 0)
+    {
+        a = -a;
+        c = -c;
+    }
+
+    /* If the result is positive, we "add" to round. else, we subtract to round. */
+    if ((a < 0 && b < 0) || (a >= 0 && b >= 0))
+        ret = (((LONGLONG)a * b) + (c / 2)) / c;
+    else
+        ret = (((LONGLONG)a * b) - (c / 2)) / c;
+
+    if (ret > 2147483647 || ret < -2147483647) return -1;
+    return ret;
+}
+
 static SIZE get_dc_virtual_size( DC *dc )
 {
     SIZE ret = dc->attr->virtual_size;
 
     if (!ret.cx)
     {
-        ret.cx = GetDeviceCaps( dc->hSelf, HORZSIZE );
-        ret.cy = GetDeviceCaps( dc->hSelf, VERTSIZE );
+        ret.cx = NtGdiGetDeviceCaps( dc->hSelf, HORZSIZE );
+        ret.cy = NtGdiGetDeviceCaps( dc->hSelf, VERTSIZE );
     }
     return ret;
 }
@@ -47,8 +71,8 @@ static SIZE get_dc_virtual_res( DC *dc )
 
     if (!ret.cx)
     {
-        ret.cx = GetDeviceCaps( dc->hSelf, HORZRES );
-        ret.cy = GetDeviceCaps( dc->hSelf, VERTRES );
+        ret.cx = NtGdiGetDeviceCaps( dc->hSelf, HORZRES );
+        ret.cy = NtGdiGetDeviceCaps( dc->hSelf, VERTRES );
     }
     return ret;
 }
@@ -113,20 +137,20 @@ BOOL set_map_mode( DC *dc, int mode )
         dc->attr->vport_ext.cy = -virtual_res.cy;
         break;
     case MM_LOENGLISH:
-        dc->attr->wnd_ext.cx   = MulDiv(1000, virtual_size.cx, 254);
-        dc->attr->wnd_ext.cy   = MulDiv(1000, virtual_size.cy, 254);
+        dc->attr->wnd_ext.cx   = muldiv(1000, virtual_size.cx, 254);
+        dc->attr->wnd_ext.cy   = muldiv(1000, virtual_size.cy, 254);
         dc->attr->vport_ext.cx = virtual_res.cx;
         dc->attr->vport_ext.cy = -virtual_res.cy;
         break;
     case MM_HIENGLISH:
-        dc->attr->wnd_ext.cx   = MulDiv(10000, virtual_size.cx, 254);
-        dc->attr->wnd_ext.cy   = MulDiv(10000, virtual_size.cy, 254);
+        dc->attr->wnd_ext.cx   = muldiv(10000, virtual_size.cx, 254);
+        dc->attr->wnd_ext.cy   = muldiv(10000, virtual_size.cy, 254);
         dc->attr->vport_ext.cx = virtual_res.cx;
         dc->attr->vport_ext.cy = -virtual_res.cy;
         break;
     case MM_TWIPS:
-        dc->attr->wnd_ext.cx   = MulDiv(14400, virtual_size.cx, 254);
-        dc->attr->wnd_ext.cy   = MulDiv(14400, virtual_size.cy, 254);
+        dc->attr->wnd_ext.cx   = muldiv(14400, virtual_size.cx, 254);
+        dc->attr->wnd_ext.cy   = muldiv(14400, virtual_size.cy, 254);
         dc->attr->vport_ext.cx = virtual_res.cx;
         dc->attr->vport_ext.cy = -virtual_res.cy;
         break;
@@ -387,11 +411,11 @@ BOOL WINAPI NtGdiModifyWorldTransform( HDC hdc, const XFORM *xform, DWORD mode )
  *    FALSE if any (but not all) of the last four params are zero.
  *
  * NOTES
- *    This doesn't change the values returned by GetDeviceCaps, just the
+ *    This doesn't change the values returned by NtGdiGetDeviceCaps, just the
  *    scaling of the mapping modes.
  *
  *    Calling with the last four params equal to zero sets the values
- *    back to their defaults obtained by calls to GetDeviceCaps.
+ *    back to their defaults obtained by calls to NtGdiGetDeviceCaps.
  */
 BOOL WINAPI NtGdiSetVirtualResolution( HDC hdc, DWORD horz_res, DWORD vert_res,
                                        DWORD horz_size, DWORD vert_size )

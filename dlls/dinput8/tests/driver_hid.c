@@ -46,6 +46,114 @@ static HIDP_CAPS caps;
 static DWORD report_id;
 static DWORD polled;
 
+#define EXPECT_QUEUE_BUFFER_SIZE (64 * sizeof(struct hid_expect))
+
+struct expect_queue
+{
+    KSPIN_LOCK lock;
+    struct hid_expect *pos;
+    struct hid_expect *end;
+    struct hid_expect spurious;
+    struct hid_expect *buffer;
+};
+
+static void expect_queue_init( struct expect_queue *queue )
+{
+    KeInitializeSpinLock( &queue->lock );
+    queue->buffer = ExAllocatePool( PagedPool, EXPECT_QUEUE_BUFFER_SIZE );
+    RtlSecureZeroMemory( queue->buffer, EXPECT_QUEUE_BUFFER_SIZE );
+    queue->pos = queue->buffer;
+    queue->end = queue->buffer;
+}
+
+static void expect_queue_cleanup( struct expect_queue *queue )
+{
+    ExFreePool( queue->buffer );
+}
+
+static void expect_queue_reset( struct expect_queue *queue, void *buffer, unsigned int size )
+{
+    struct hid_expect *missing, *missing_end, *tmp;
+    KIRQL irql;
+
+    missing = ExAllocatePool( PagedPool, EXPECT_QUEUE_BUFFER_SIZE );
+    RtlSecureZeroMemory( missing, EXPECT_QUEUE_BUFFER_SIZE );
+    missing_end = missing;
+
+    KeAcquireSpinLock( &queue->lock, &irql );
+    tmp = queue->pos;
+    while (tmp < queue->end) *missing_end++ = *tmp++;
+
+    queue->pos = queue->buffer;
+    queue->end = queue->buffer;
+
+    if (size) memcpy( queue->end, buffer, size );
+    queue->end = queue->end + size / sizeof(struct hid_expect);
+    KeReleaseSpinLock( &queue->lock, irql );
+
+    tmp = missing;
+    while (tmp != missing_end)
+    {
+        winetest_push_context( "%s expect[%d]", tmp->context, tmp - missing );
+        if (tmp->broken)
+            win_skip( "broken (code %#x id %u len %u)\n", tmp->code, tmp->report_id, tmp->report_len );
+        else
+            ok( 0, "missing (code %#x id %u len %u)\n", tmp->code, tmp->report_id, tmp->report_len );
+        winetest_pop_context();
+        tmp++;
+    }
+
+    ExFreePool( missing );
+}
+
+static void expect_queue_next( struct expect_queue *queue, ULONG code, HID_XFER_PACKET *packet,
+                               LONG *index, struct hid_expect *expect, BOOL compare_buf )
+{
+    struct hid_expect *missing, *missing_end, *tmp;
+    ULONG len = packet->reportBufferLen;
+    BYTE *buf = packet->reportBuffer;
+    BYTE id = packet->reportId;
+    KIRQL irql;
+
+    missing = ExAllocatePool( PagedPool, EXPECT_QUEUE_BUFFER_SIZE );
+    RtlSecureZeroMemory( missing, EXPECT_QUEUE_BUFFER_SIZE );
+    missing_end = missing;
+
+    KeAcquireSpinLock( &queue->lock, &irql );
+    tmp = queue->pos;
+    while (tmp < queue->end)
+    {
+        if (!tmp->broken || running_under_wine) break;
+        if (tmp->code == code && tmp->report_id == id && tmp->report_len == len &&
+            (!compare_buf || RtlCompareMemory( tmp->report_buf, buf, len ) == len))
+            break;
+        *missing_end++ = *tmp++;
+    }
+    *index = tmp - queue->buffer;
+    if (tmp < queue->end) queue->pos = tmp + 1;
+    else tmp = &queue->spurious;
+    *expect = *tmp;
+    KeReleaseSpinLock( &queue->lock, irql );
+
+    ok( tmp != &queue->spurious, "got spurious packet\n" );
+
+    tmp = missing;
+    while (tmp != missing_end)
+    {
+        winetest_push_context( "%s expect[%d]", tmp->context, tmp - missing );
+        if (tmp->broken)
+            win_skip( "broken (code %#x id %u len %u)\n", tmp->code, tmp->report_id, tmp->report_len );
+        else
+            ok( 0, "missing (code %#x id %u len %u)\n", tmp->code, tmp->report_id, tmp->report_len );
+        winetest_pop_context();
+        tmp++;
+    }
+
+    ExFreePool( missing );
+}
+
+static struct expect_queue expect_queue;
+
 struct irp_queue
 {
     KSPIN_LOCK lock;
@@ -91,11 +199,101 @@ static void irp_queue_init( struct irp_queue *queue )
     InitializeListHead( &queue->list );
 }
 
+struct input_queue
+{
+    KSPIN_LOCK lock;
+    struct hid_expect *pos;
+    struct hid_expect *end;
+    struct hid_expect *buffer;
+    struct irp_queue pending;
+};
+
+static void input_queue_init( struct input_queue *queue )
+{
+    KeInitializeSpinLock( &queue->lock );
+    queue->buffer = ExAllocatePool( PagedPool, EXPECT_QUEUE_BUFFER_SIZE );
+    RtlSecureZeroMemory( queue->buffer, EXPECT_QUEUE_BUFFER_SIZE );
+    queue->pos = queue->buffer;
+    queue->end = queue->buffer;
+    irp_queue_init( &queue->pending );
+}
+
+static void input_queue_cleanup( struct input_queue *queue )
+{
+    ExFreePool( queue->buffer );
+}
+
+static BOOL input_queue_read_locked( struct input_queue *queue, IRP *irp )
+{
+    IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation( irp );
+    ULONG out_size = stack->Parameters.DeviceIoControl.OutputBufferLength;
+    struct hid_expect *tmp = queue->pos;
+
+    if (tmp >= queue->end) return FALSE;
+    if (tmp->ret_length) out_size = tmp->ret_length;
+
+    memcpy( irp->UserBuffer, tmp->report_buf, out_size );
+    irp->IoStatus.Information = out_size;
+    irp->IoStatus.Status = tmp->ret_status;
+    if (tmp < queue->end) queue->pos = tmp + 1;
+
+    /* loop on the queue data in polled mode */
+    if (polled && queue->pos == queue->end) queue->pos = queue->buffer;
+    return TRUE;
+}
+
+static NTSTATUS input_queue_read( struct input_queue *queue, IRP *irp )
+{
+    NTSTATUS status;
+    KIRQL irql;
+
+    KeAcquireSpinLock( &queue->lock, &irql );
+    if (input_queue_read_locked( queue, irp )) status = STATUS_SUCCESS;
+    else
+    {
+        IoMarkIrpPending( irp );
+        irp_queue_push( &queue->pending, irp );
+        status = STATUS_PENDING;
+    }
+    KeReleaseSpinLock( &queue->lock, irql );
+
+    return status;
+}
+
+static void input_queue_reset( struct input_queue *queue, void *in_buf, ULONG in_size )
+{
+    struct irp_queue completed;
+    ULONG remaining;
+    KIRQL irql;
+    IRP *irp;
+
+    irp_queue_init( &completed );
+
+    KeAcquireSpinLock( &queue->lock, &irql );
+    remaining = queue->end - queue->pos;
+    queue->pos = queue->buffer;
+    queue->end = queue->buffer;
+    memcpy( queue->end, in_buf, in_size );
+    queue->end += in_size / sizeof(struct hid_expect);
+
+    while (!polled && queue->pos < queue->end && (irp = irp_queue_pop( &queue->pending )))
+    {
+        input_queue_read_locked( queue, irp );
+        irp_queue_push( &completed, irp );
+    }
+    KeReleaseSpinLock( &queue->lock, irql );
+
+    if (!polled) ok( !remaining, "unread input\n" );
+
+    while ((irp = irp_queue_pop( &completed ))) IoCompleteRequest( irp, IO_NO_INCREMENT );
+}
+
+static struct input_queue input_queue;
+
 struct hid_device
 {
     BOOL removed;
     KSPIN_LOCK lock;
-    struct irp_queue irp_queue;
 };
 
 static NTSTATUS WINAPI driver_pnp( DEVICE_OBJECT *device, IRP *irp )
@@ -113,7 +311,6 @@ static NTSTATUS WINAPI driver_pnp( DEVICE_OBJECT *device, IRP *irp )
         ++got_start_device;
         impl->removed = FALSE;
         KeInitializeSpinLock( &impl->lock );
-        irp_queue_init( &impl->irp_queue );
         IoSetDeviceInterfaceState( &control_symlink, TRUE );
         irp->IoStatus.Status = STATUS_SUCCESS;
         break;
@@ -123,7 +320,7 @@ static NTSTATUS WINAPI driver_pnp( DEVICE_OBJECT *device, IRP *irp )
         KeAcquireSpinLock( &impl->lock, &irql );
         impl->removed = TRUE;
         KeReleaseSpinLock( &impl->lock, irql );
-        irp_queue_clear( &impl->irp_queue );
+        irp_queue_clear( &input_queue.pending );
         irp->IoStatus.Status = STATUS_SUCCESS;
         break;
 
@@ -139,7 +336,7 @@ static NTSTATUS WINAPI driver_pnp( DEVICE_OBJECT *device, IRP *irp )
         break;
 
     case IRP_MN_REMOVE_DEVICE:
-        irp_queue_clear( &impl->irp_queue );
+        irp_queue_clear( &input_queue.pending );
         IoSetDeviceInterfaceState( &control_symlink, FALSE );
         irp->IoStatus.Status = STATUS_SUCCESS;
         break;
@@ -167,12 +364,13 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
     HID_DEVICE_EXTENSION *ext = device->DeviceExtension;
     struct hid_device *impl = ext->MiniDeviceExtension;
     const ULONG in_size = stack->Parameters.DeviceIoControl.InputBufferLength;
-    const ULONG out_size = stack->Parameters.DeviceIoControl.OutputBufferLength;
+    ULONG out_size = stack->Parameters.DeviceIoControl.OutputBufferLength;
     const ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
-    static BYTE seq = 0;
+    struct hid_expect expect = {0};
     NTSTATUS ret;
     BOOL removed;
     KIRQL irql;
+    LONG index;
 
     if (winetest_debug > 1) trace( "ioctl %#x\n", code );
 
@@ -190,6 +388,8 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
         IoCompleteRequest( irp, IO_NO_INCREMENT );
         return STATUS_DELETE_PENDING;
     }
+
+    winetest_push_context( "id %d%s", report_id, polled ? " poll" : "" );
 
     switch (code)
     {
@@ -246,21 +446,7 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
         ULONG expected_size = caps.InputReportByteLength - (report_id ? 0 : 1);
         ok( !in_size, "got input size %u\n", in_size );
         ok( out_size == expected_size, "got output size %u\n", out_size );
-
-        if (polled)
-        {
-            memset( irp->UserBuffer, 0xa5, expected_size );
-            if (report_id) ((char *)irp->UserBuffer)[0] = report_id;
-            ((char *)irp->UserBuffer)[1] = seq++;
-            irp->IoStatus.Information = 3;
-            ret = STATUS_SUCCESS;
-        }
-        else
-        {
-            IoMarkIrpPending( irp );
-            irp_queue_push( &impl->irp_queue, irp );
-            ret = STATUS_PENDING;
-        }
+        ret = input_queue_read( &input_queue, irp );
         break;
     }
 
@@ -273,12 +459,17 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
         ok( !out_size, "got output size %u\n", out_size );
         ok( packet->reportBufferLen >= expected_size, "got report size %u\n", packet->reportBufferLen );
 
-        if (report_id)
-            ok( packet->reportBuffer[0] == report_id, "got report id %x\n", packet->reportBuffer[0] );
-        else ok( packet->reportBuffer[0] == 0xcd, "got first byte %x\n", packet->reportBuffer[0] );
+        expect_queue_next( &expect_queue, code, packet, &index, &expect, TRUE );
+        winetest_push_context( "%s expect[%d]", expect.context, index );
+        ok( expect.code == code, "got %#x, expected %#x\n", expect.code, code );
+        ok( packet->reportId == expect.report_id, "got id %u\n", packet->reportId );
+        ok( packet->reportBufferLen == expect.report_len, "got len %u\n", packet->reportBufferLen );
+        ok( RtlCompareMemory( packet->reportBuffer, expect.report_buf, expect.report_len ) == expect.report_len,
+            "unexpected data\n" );
+        winetest_pop_context();
 
-        irp->IoStatus.Information = 3;
-        ret = STATUS_SUCCESS;
+        irp->IoStatus.Information = expect.ret_length ? expect.ret_length : expect.report_len;
+        ret = expect.ret_status;
         break;
     }
 
@@ -293,10 +484,16 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
         ok( packet->reportBufferLen >= expected_size, "got len %u\n", packet->reportBufferLen );
         ok( !!packet->reportBuffer, "got buffer %p\n", packet->reportBuffer );
 
-        memset( packet->reportBuffer, 0xa5, 3 );
-        if (report_id) ((char *)packet->reportBuffer)[0] = report_id;
-        irp->IoStatus.Information = 3;
-        ret = STATUS_SUCCESS;
+        expect_queue_next( &expect_queue, code, packet, &index, &expect, FALSE );
+        winetest_push_context( "%s expect[%d]", expect.context, index );
+        ok( expect.code == code, "got %#x, expected %#x\n", expect.code, code );
+        ok( packet->reportId == expect.report_id, "got id %u\n", packet->reportId );
+        ok( packet->reportBufferLen == expect.report_len, "got len %u\n", packet->reportBufferLen );
+        winetest_pop_context();
+
+        irp->IoStatus.Information = expect.ret_length ? expect.ret_length : expect.report_len;
+        memcpy( packet->reportBuffer, expect.report_buf, irp->IoStatus.Information );
+        ret = expect.ret_status;
         break;
     }
 
@@ -311,8 +508,17 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
         ok( packet->reportBufferLen >= expected_size, "got len %u\n", packet->reportBufferLen );
         ok( !!packet->reportBuffer, "got buffer %p\n", packet->reportBuffer );
 
-        irp->IoStatus.Information = 3;
-        ret = STATUS_SUCCESS;
+        expect_queue_next( &expect_queue, code, packet, &index, &expect, TRUE );
+        winetest_push_context( "%s expect[%d]", expect.context, index );
+        ok( expect.code == code, "got %#x, expected %#x\n", expect.code, code );
+        ok( packet->reportId == expect.report_id, "got id %u\n", packet->reportId );
+        ok( packet->reportBufferLen == expect.report_len, "got len %u\n", packet->reportBufferLen );
+        ok( RtlCompareMemory( packet->reportBuffer, expect.report_buf, expect.report_len ) == expect.report_len,
+            "unexpected data\n" );
+        winetest_pop_context();
+
+        irp->IoStatus.Information = expect.ret_length ? expect.ret_length : expect.report_len;
+        ret = expect.ret_status;
         break;
     }
 
@@ -327,10 +533,16 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
         ok( packet->reportBufferLen >= expected_size, "got len %u\n", packet->reportBufferLen );
         ok( !!packet->reportBuffer, "got buffer %p\n", packet->reportBuffer );
 
-        memset( packet->reportBuffer, 0xa5, 3 );
-        if (report_id) ((char *)packet->reportBuffer)[0] = report_id;
-        irp->IoStatus.Information = 3;
-        ret = STATUS_SUCCESS;
+        expect_queue_next( &expect_queue, code, packet, &index, &expect, FALSE );
+        winetest_push_context( "%s expect[%d]", expect.context, index );
+        ok( expect.code == code, "got %#x, expected %#x\n", expect.code, code );
+        ok( packet->reportId == expect.report_id, "got id %u\n", packet->reportId );
+        ok( packet->reportBufferLen == expect.report_len, "got len %u\n", packet->reportBufferLen );
+        winetest_pop_context();
+
+        irp->IoStatus.Information = expect.ret_length ? expect.ret_length : expect.report_len;
+        memcpy( packet->reportBuffer, expect.report_buf, irp->IoStatus.Information );
+        ret = expect.ret_status;
         break;
     }
 
@@ -345,15 +557,23 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
         ok( packet->reportBufferLen >= expected_size, "got len %u\n", packet->reportBufferLen );
         ok( !!packet->reportBuffer, "got buffer %p\n", packet->reportBuffer );
 
-        irp->IoStatus.Information = 3;
-        ret = STATUS_SUCCESS;
+        expect_queue_next( &expect_queue, code, packet, &index, &expect, TRUE );
+        winetest_push_context( "%s expect[%d]", expect.context, index );
+        ok( expect.code == code, "got %#x, expected %#x\n", expect.code, code );
+        ok( packet->reportId == expect.report_id, "got id %u\n", packet->reportId );
+        ok( packet->reportBufferLen == expect.report_len, "got len %u\n", packet->reportBufferLen );
+        ok( RtlCompareMemory( packet->reportBuffer, expect.report_buf, expect.report_len ) == expect.report_len,
+            "unexpected data\n" );
+        winetest_pop_context();
+
+        irp->IoStatus.Information = expect.ret_length ? expect.ret_length : expect.report_len;
+        ret = expect.ret_status;
         break;
     }
 
     case IOCTL_HID_GET_STRING:
-        ok( !in_size, "got input size %u\n", in_size );
-        ok( out_size == 128, "got output size %u\n", out_size );
-
+        todo_wine
+        ok( 0, "unexpected IOCTL_HID_GET_STRING\n" );
         memcpy( irp->UserBuffer, L"Wine Test", sizeof(L"Wine Test") );
         irp->IoStatus.Information = sizeof(L"Wine Test");
         ret = STATUS_SUCCESS;
@@ -364,6 +584,8 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
         ret = STATUS_NOT_IMPLEMENTED;
     }
 
+    winetest_pop_context();
+
     if (ret != STATUS_PENDING)
     {
         irp->IoStatus.Status = ret;
@@ -372,13 +594,28 @@ static NTSTATUS WINAPI driver_internal_ioctl( DEVICE_OBJECT *device, IRP *irp )
     return ret;
 }
 
+static NTSTATUS( WINAPI *hidclass_driver_ioctl )(DEVICE_OBJECT *device, IRP *irp);
 static NTSTATUS WINAPI driver_ioctl( DEVICE_OBJECT *device, IRP *irp )
 {
-    HID_DEVICE_EXTENSION *ext = device->DeviceExtension;
+    IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation( irp );
+    ULONG in_size = stack->Parameters.DeviceIoControl.InputBufferLength;
+    ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
 
-    ok( 0, "unexpected call\n" );
-    IoSkipCurrentIrpStackLocation( irp );
-    return IoCallDriver( ext->NextDeviceObject, irp );
+    switch (code)
+    {
+    case IOCTL_WINETEST_HID_SET_EXPECT:
+        expect_queue_reset( &expect_queue, irp->AssociatedIrp.SystemBuffer, in_size );
+        irp->IoStatus.Status = STATUS_SUCCESS;
+        IoCompleteRequest( irp, IO_NO_INCREMENT );
+        return STATUS_SUCCESS;
+    case IOCTL_WINETEST_HID_SEND_INPUT:
+        input_queue_reset( &input_queue, irp->AssociatedIrp.SystemBuffer, in_size );
+        irp->IoStatus.Status = STATUS_SUCCESS;
+        IoCompleteRequest( irp, IO_NO_INCREMENT );
+        return STATUS_SUCCESS;
+    }
+
+    return hidclass_driver_ioctl( device, irp );
 }
 
 static NTSTATUS WINAPI driver_add_device( DRIVER_OBJECT *driver, DEVICE_OBJECT *fdo )
@@ -418,13 +655,14 @@ static NTSTATUS WINAPI driver_close( DEVICE_OBJECT *device, IRP *irp )
 
 static void WINAPI driver_unload( DRIVER_OBJECT *driver )
 {
+    input_queue_cleanup( &input_queue );
+    expect_queue_cleanup( &expect_queue );
     winetest_cleanup();
 }
 
 NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *registry )
 {
     static const int info_size = offsetof( KEY_VALUE_PARTIAL_INFORMATION, Data );
-    char buffer[offsetof( KEY_VALUE_PARTIAL_INFORMATION, Data ) + sizeof(report_descriptor_buf)];
     HID_MINIDRIVER_REGISTRATION params =
     {
         .Revision = HID_REVISION,
@@ -435,6 +673,7 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *registry )
     UNICODE_STRING name_str;
     OBJECT_ATTRIBUTES attr;
     NTSTATUS ret;
+    char *buffer;
     HANDLE hkey;
     DWORD size;
 
@@ -443,6 +682,10 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *registry )
     InitializeObjectAttributes( &attr, registry, 0, NULL, NULL );
     ret = ZwOpenKey( &hkey, KEY_ALL_ACCESS, &attr );
     ok( !ret, "ZwOpenKey returned %#x\n", ret );
+
+    buffer = ExAllocatePool( PagedPool, info_size + EXPECT_QUEUE_BUFFER_SIZE );
+    ok( buffer != NULL, "ExAllocatePool failed\n" );
+    if (!buffer) return STATUS_NO_MEMORY;
 
     RtlInitUnicodeString( &name_str, L"ReportID" );
     size = info_size + sizeof(report_id);
@@ -476,6 +719,20 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *registry )
     ok( !ret, "ZwQueryValueKey returned %#x\n", ret );
     memcpy( &caps, buffer + info_size, size - info_size );
 
+    expect_queue_init( &expect_queue );
+    RtlInitUnicodeString( &name_str, L"Expect" );
+    size = info_size + EXPECT_QUEUE_BUFFER_SIZE;
+    ret = ZwQueryValueKey( hkey, &name_str, KeyValuePartialInformation, buffer, size, &size );
+    ok( !ret, "ZwQueryValueKey returned %#x\n", ret );
+    expect_queue_reset( &expect_queue, buffer + info_size, size - info_size );
+
+    input_queue_init( &input_queue );
+    RtlInitUnicodeString( &name_str, L"Input" );
+    size = info_size + EXPECT_QUEUE_BUFFER_SIZE;
+    ret = ZwQueryValueKey( hkey, &name_str, KeyValuePartialInformation, buffer, size, &size );
+    ok( !ret, "ZwQueryValueKey returned %#x\n", ret );
+    input_queue_reset( &input_queue, buffer + info_size, size - info_size );
+
     driver->DriverExtension->AddDevice = driver_add_device;
     driver->DriverUnload = driver_unload;
     driver->MajorFunction[IRP_MJ_PNP] = driver_pnp;
@@ -485,8 +742,13 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *registry )
     driver->MajorFunction[IRP_MJ_CREATE] = driver_create;
     driver->MajorFunction[IRP_MJ_CLOSE] = driver_close;
 
+    ExFreePool( buffer );
+
     ret = HidRegisterMinidriver( &params );
     ok( !ret, "got %#x\n", ret );
+
+    hidclass_driver_ioctl = driver->MajorFunction[IRP_MJ_DEVICE_CONTROL];
+    driver->MajorFunction[IRP_MJ_DEVICE_CONTROL] = driver_ioctl;
 
     return STATUS_SUCCESS;
 }

@@ -7368,10 +7368,11 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
 	case FUNC_VIRTUAL: {
             void *buffer = heap_alloc_zero(INVBUF_ELEMENT_SIZE * func_desc->cParams);
             VARIANT varresult;
-            VARIANT retval; /* pointer for storing byref retvals in */
+            VARIANT retval = {{{0}}}; /* pointer for storing byref retvals in */
             VARIANTARG **prgpvarg = INVBUF_GET_ARG_PTR_ARRAY(buffer, func_desc->cParams);
             VARIANTARG *rgvarg = INVBUF_GET_ARG_ARRAY(buffer, func_desc->cParams);
             VARTYPE *rgvt = INVBUF_GET_ARG_TYPE_ARRAY(buffer, func_desc->cParams);
+            VARIANTARG *missing_arg = INVBUF_GET_MISSING_ARG_ARRAY(buffer, func_desc->cParams);
             UINT cNamedArgs = pDispParams->cNamedArgs;
             DISPID *rgdispidNamedArgs = pDispParams->rgdispidNamedArgs;
             UINT vargs_converted=0;
@@ -7413,10 +7414,9 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
 
                 if (wParamFlags & PARAMFLAG_FLCID)
                 {
-                    VARIANTARG *arg;
-                    arg = prgpvarg[i] = &rgvarg[i];
-                    V_VT(arg) = VT_I4;
-                    V_I4(arg) = This->pTypeLib->lcid;
+                    prgpvarg[i] = &rgvarg[i];
+                    V_VT(prgpvarg[i]) = VT_I4;
+                    V_I4(prgpvarg[i]) = This->pTypeLib->lcid;
                     continue;
                 }
 
@@ -7457,12 +7457,9 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                      * native does */
                     if (i == func_desc->cParams - 1)
                     {
-                        VARIANTARG *arg;
-                        arg = prgpvarg[i] = &rgvarg[i];
-                        memset(arg, 0, sizeof(*arg));
-                        V_VT(arg) = rgvt[i];
-                        memset(&retval, 0, sizeof(retval));
-                        V_BYREF(arg) = &retval;
+                        prgpvarg[i] = &rgvarg[i];
+                        V_BYREF(prgpvarg[i]) = &retval;
+                        V_VT(prgpvarg[i]) = rgvt[i];
                     }
                     else
                     {
@@ -7486,7 +7483,6 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                                 V_VARIANTREF(&rgvarg[i]) = V_VARIANTREF(src_arg);
                             else
                             {
-                                VARIANTARG *missing_arg = INVBUF_GET_MISSING_ARG_ARRAY(buffer, func_desc->cParams);
                                 if (wParamFlags & PARAMFLAG_FIN)
                                     hres = VariantCopy(&missing_arg[i], src_arg);
                                 V_VARIANTREF(&rgvarg[i]) = &missing_arg[i];
@@ -7529,7 +7525,6 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                         }
                         else if ((rgvt[i] & VT_BYREF) && !V_ISBYREF(src_arg))
                         {
-                            VARIANTARG *missing_arg = INVBUF_GET_MISSING_ARG_ARRAY(buffer, func_desc->cParams);
                             if (wParamFlags & PARAMFLAG_FIN)
                                 hres = VariantChangeType(&missing_arg[i], src_arg, 0, rgvt[i] & ~VT_BYREF);
                             else
@@ -7599,20 +7594,22 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                     }
                     else
                     {
-                        VARIANTARG *missing_arg;
                         /* if the function wants a pointer to a variant then
                          * set that up, otherwise just pass the VT_ERROR in
                          * the argument by value */
                         if (rgvt[i] & VT_BYREF)
                         {
-                            missing_arg = INVBUF_GET_MISSING_ARG_ARRAY(buffer, func_desc->cParams) + i;
+                            V_VT(&missing_arg[i]) = VT_ERROR;
+                            V_ERROR(&missing_arg[i]) = DISP_E_PARAMNOTFOUND;
+
                             V_VT(arg) = VT_VARIANT | VT_BYREF;
-                            V_VARIANTREF(arg) = missing_arg;
+                            V_VARIANTREF(arg) = &missing_arg[i];
                         }
                         else
-                            missing_arg = arg;
-                        V_VT(missing_arg) = VT_ERROR;
-                        V_ERROR(missing_arg) = DISP_E_PARAMNOTFOUND;
+                        {
+                            V_VT(arg) = VT_ERROR;
+                            V_ERROR(arg) = DISP_E_PARAMNOTFOUND;
+                        }
                     }
                 }
                 else
@@ -7643,7 +7640,6 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
             for (i = 0; i < func_desc->cParams; i++)
             {
                 USHORT wParamFlags = func_desc->lprgelemdescParam[i].u.paramdesc.wParamFlags;
-                VARIANTARG *missing_arg = INVBUF_GET_MISSING_ARG_ARRAY(buffer, func_desc->cParams);
 
                 if (wParamFlags & PARAMFLAG_FLCID)
                     continue;

@@ -41,7 +41,7 @@
 #include "genres.h"
 #include "newstruc.h"
 #include "parser.h"
-#include "wine/wpp.h"
+#include "wpp_private.h"
 
 #ifdef WORDS_BIGENDIAN
 #define ENDIAN	"big"
@@ -161,8 +161,6 @@ const char *nlsdirs[3] = { NULL, NLSDIR, NULL };
 
 int line_number = 1;		/* The current line */
 int char_number = 1;		/* The current char pos within the line */
-
-char *cmdline;			/* The entire commandline */
 
 int parser_debug, yy_flex_debug;
 
@@ -367,7 +365,6 @@ int main(int argc,char *argv[])
 	int lose = 0;
 	int nb_files = 0;
 	int i;
-	int cmdlen;
         int po_mode = 0;
         char *po_dir = NULL;
         const char *sysroot = "";
@@ -386,20 +383,6 @@ int main(int argc,char *argv[])
 	wpp_add_cmdline_define("RC_INVOKED=1");
 	/* Microsoft RC always searches current directory */
 	wpp_add_include_path(".");
-
-	/* First rebuild the commandline to put in destination */
-	/* Could be done through env[], but not all OS-es support it */
-	cmdlen = 4; /* for "wrc " */
-	for(i = 1; i < argc; i++)
-		cmdlen += strlen(argv[i]) + 1;
-	cmdline = xmalloc(cmdlen);
-	strcpy(cmdline, "wrc ");
-	for(i = 1; i < argc; i++)
-	{
-		strcat(cmdline, argv[i]);
-		if(i < argc-1)
-			strcat(cmdline, " ");
-	}
 
 	while((optc = getopt_long(argc, argv, short_options, long_options, &opti)) != EOF)
 	{
@@ -456,7 +439,6 @@ int main(int argc,char *argv[])
 			break;
 		case LONG_OPT_PEDANTIC:
 			pedantic = 1;
-			wpp_set_pedantic(1);
 			break;
 		case LONG_OPT_VERIFY_TRANSL:
 			verify_translations_mode = 1;

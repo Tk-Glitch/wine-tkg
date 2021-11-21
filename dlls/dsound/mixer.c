@@ -276,21 +276,33 @@ void DSOUND_CheckEvent(const IDirectSoundBufferImpl *dsb, DWORD playpos, int len
 }
 
 static inline float get_current_sample(const IDirectSoundBufferImpl *dsb,
-        DWORD mixpos, DWORD channel)
+        BYTE *buffer, DWORD buflen, DWORD mixpos, DWORD channel)
 {
-    if (mixpos >= dsb->buflen && !(dsb->playflags & DSBPLAY_LOOPING))
+    if (mixpos >= buflen && !(dsb->playflags & DSBPLAY_LOOPING))
         return 0.0f;
-    return dsb->get(dsb, mixpos % dsb->buflen, channel);
+    return dsb->get(dsb, buffer + (mixpos % buflen), channel);
 }
 
 static UINT cp_fields_noresample(IDirectSoundBufferImpl *dsb, bitsputfunc put, UINT ostride, UINT count)
 {
     UINT istride = dsb->pwfx->nBlockAlign;
+    UINT committed_samples = 0;
     DWORD channel, i;
-    for (i = 0; i < count; i++)
+
+    if(dsb->use_committed) {
+        committed_samples = (dsb->writelead - dsb->committed_mixpos) / istride;
+        committed_samples = committed_samples <= count ? committed_samples : count;
+    }
+
+    for (i = 0; i < committed_samples; i++)
         for (channel = 0; channel < dsb->mix_channels; channel++)
-            put(dsb, i * ostride, channel, get_current_sample(dsb,
-                dsb->sec_mixpos + i * istride, channel));
+            dsb->put(dsb, i * ostride, channel, get_current_sample(dsb, dsb->committedbuff,
+                dsb->writelead, dsb->committed_mixpos + i * istride, channel));
+
+    for (; i < count; i++)
+        for (channel = 0; channel < dsb->mix_channels; channel++)
+            put(dsb, i * ostride, channel, get_current_sample(dsb, dsb->buffer->memory,
+                dsb->buflen, dsb->sec_mixpos + i * istride, channel));
     return count;
 }
 
@@ -323,8 +335,8 @@ static UINT cp_fields_resample_lq(IDirectSoundBufferImpl *dsb, bitsputfunc put,
              * So far, this possibility of saving calls to
              * get_current_sample() is ignored.
              */
-            float s1 = get_current_sample(dsb, idx, channel);
-            float s2 = get_current_sample(dsb, idx + istride, channel);
+            float s1 = get_current_sample(dsb, dsb->buffer->memory, dsb->buflen, idx, channel);
+            float s2 = get_current_sample(dsb, dsb->buffer->memory, dsb->buflen, idx + istride, channel);
             float result = s1 * cur_freqAcc2 + s2 * cur_freqAcc;
             put(dsb, i * ostride, channel, result);
         }
@@ -339,6 +351,7 @@ static UINT cp_fields_resample_hq(IDirectSoundBufferImpl *dsb, bitsputfunc put,
 {
     UINT i, channel;
     UINT istride = dsb->pwfx->nBlockAlign;
+    UINT committed_samples = 0;
 
     LONG64 freqAcc_start = *freqAccNum;
     LONG64 freqAcc_end = freqAcc_start + count * dsb->freqAdjustNum;
@@ -365,16 +378,24 @@ static UINT cp_fields_resample_hq(IDirectSoundBufferImpl *dsb, bitsputfunc put,
     fir_copy = dsb->device->cp_buffer;
     intermediate = fir_copy + fir_cachesize;
 
+    if(dsb->use_committed) {
+        committed_samples = (dsb->writelead - dsb->committed_mixpos) / istride;
+        committed_samples = committed_samples <= required_input ? committed_samples : required_input;
+    }
 
     /* Important: this buffer MUST be non-interleaved
      * if you want -msse3 to have any effect.
      * This is good for CPU cache effects, too.
      */
     itmp = intermediate;
-    for (channel = 0; channel < channels; channel++)
-        for (i = 0; i < required_input; i++)
-            *(itmp++) = get_current_sample(dsb,
-                    dsb->sec_mixpos + i * istride, channel);
+    for (channel = 0; channel < channels; channel++) {
+        for (i = 0; i < committed_samples; i++)
+            *(itmp++) = get_current_sample(dsb, dsb->committedbuff,
+                dsb->writelead, dsb->committed_mixpos + i * istride, channel);
+        for (; i < required_input; i++)
+            *(itmp++) = get_current_sample(dsb, dsb->buffer->memory,
+                    dsb->buflen, dsb->sec_mixpos + i * istride, channel);
+    }
 
     for(i = 0; i < count; ++i) {
         UINT int_fir_steps = (freqAcc_start + i * dsb->freqAdjustNum) * dsbfirstep / dsb->freqAdjustDen;
@@ -431,6 +452,12 @@ static void cp_fields(IDirectSoundBufferImpl *dsb, bitsputfunc put,
     }
 
     dsb->sec_mixpos = ipos;
+
+    if(dsb->use_committed) {
+        dsb->committed_mixpos += adv * dsb->pwfx->nBlockAlign;
+        if(dsb->committed_mixpos >= dsb->writelead)
+            dsb->use_committed = FALSE;
+    }
 }
 
 /**

@@ -58,7 +58,7 @@ HBITMAP WINAPI NtGdiCreateCompatibleBitmap( HDC hdc, INT width, INT height )
 
     if (!width || !height) return 0;
 
-    if (GetObjectType( hdc ) != OBJ_MEMDC)
+    if (get_gdi_object_type( hdc ) != NTGDI_OBJ_MEMDC)
         return NtGdiCreateBitmap( width, height,
                                   NtGdiGetDeviceCaps( hdc, PLANES ),
                                   NtGdiGetDeviceCaps( hdc, BITSPIXEL ), NULL );
@@ -373,7 +373,7 @@ HGDIOBJ WINAPI NtGdiSelectBitmap( HDC hdc, HGDIOBJ handle )
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
 
-    if (GetObjectType( hdc ) != OBJ_MEMDC)
+    if (get_gdi_object_type( hdc ) != NTGDI_OBJ_MEMDC)
     {
         ret = 0;
         goto done;
@@ -397,7 +397,7 @@ HGDIOBJ WINAPI NtGdiSelectBitmap( HDC hdc, HGDIOBJ handle )
 
     if (!is_bitmapobj_dib( bitmap ) &&
         bitmap->dib.dsBm.bmBitsPixel != 1 &&
-        bitmap->dib.dsBm.bmBitsPixel != GetDeviceCaps( hdc, BITSPIXEL ))
+        bitmap->dib.dsBm.bmBitsPixel != NtGdiGetDeviceCaps( hdc, BITSPIXEL ))
     {
         WARN( "Wrong format bitmap %u bpp\n", bitmap->dib.dsBm.bmBitsPixel );
         GDI_ReleaseObj( handle );

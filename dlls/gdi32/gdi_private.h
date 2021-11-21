@@ -283,6 +283,8 @@ extern BOOL get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void *bits,
                                    UINT *usage ) DECLSPEC_HIDDEN;
 extern BOOL get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size,
                              WCHAR *filename ) DECLSPEC_HIDDEN;
+extern BOOL get_file_outline_text_metric( const WCHAR *path, OUTLINETEXTMETRICW *otm ) DECLSPEC_HIDDEN;
+
 
 static inline int get_dib_stride( int width, int bpp )
 {
@@ -298,6 +300,8 @@ static inline int get_dib_info_size( const BITMAPINFO *info, UINT coloruse )
         return sizeof(BITMAPINFOHEADER) + info->bmiHeader.biClrUsed * sizeof(WORD);
     return FIELD_OFFSET( BITMAPINFO, bmiColors[info->bmiHeader.biClrUsed] );
 }
+
+extern HMODULE gdi32_module DECLSPEC_HIDDEN;
 
 BOOL xform_has_rotate_and_uniform_scale_and_shear( const XFORM *xform ) DECLSPEC_HIDDEN;
 BOOL xform_decompose_rotation_and_translation( XFORM *xform, XFORM *rotation_and_translation ) DECLSPEC_HIDDEN;

@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -32,7 +30,6 @@
 #include "winuser.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(appbar);
 
@@ -70,8 +67,6 @@ UINT_PTR WINAPI SHAppBarMessage(DWORD msg, PAPPBARDATA data)
     HWND appbarmsg_window;
     COPYDATASTRUCT cds;
     DWORD_PTR msg_result;
-    static const WCHAR classname[] = {'W','i','n','e','A','p','p','B','a','r',0};
-
     UINT_PTR ret = 0;
 
     TRACE("msg=%d, data={cb=%d, hwnd=%p}\n", msg, data->cbSize, data->hWnd);
@@ -127,7 +122,7 @@ UINT_PTR WINAPI SHAppBarMessage(DWORD msg, PAPPBARDATA data)
 
     command.return_process = GetCurrentProcessId();
 
-    appbarmsg_window = FindWindowW(classname, NULL);
+    appbarmsg_window = FindWindowW(L"WineAppBar", NULL);
     if (appbarmsg_window == NULL)
     {
         ERR("couldn't find appbar window\n");

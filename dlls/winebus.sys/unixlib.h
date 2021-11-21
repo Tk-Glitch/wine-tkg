@@ -24,29 +24,32 @@
 #include <windef.h>
 #include <winbase.h>
 #include <winternl.h>
-#include <ddk/wdm.h>
 #include <ddk/hidclass.h>
 #include <hidusage.h>
 
 #include "wine/debug.h"
 #include "wine/list.h"
-#include "wine/unixlib.h"
 
 struct device_desc
 {
-    const WCHAR *busid;
     DWORD vid;
     DWORD pid;
     DWORD version;
     DWORD input;
     DWORD uid;
-    WCHAR serial[256];
     BOOL is_gamepad;
+
+    char manufacturer[MAX_PATH];
+    char product[MAX_PATH];
+    char serialnumber[MAX_PATH];
 };
 
 struct sdl_bus_options
 {
     BOOL map_controllers;
+    /* freed after bus_init */
+    DWORD mappings_count;
+    char **mappings;
 };
 
 struct udev_bus_options
@@ -66,6 +69,7 @@ enum bus_event_type
     BUS_EVENT_TYPE_NONE,
     BUS_EVENT_TYPE_DEVICE_REMOVED,
     BUS_EVENT_TYPE_DEVICE_CREATED,
+    BUS_EVENT_TYPE_INPUT_REPORT,
 };
 
 struct bus_event
@@ -73,19 +77,19 @@ struct bus_event
     enum bus_event_type type;
     struct list entry;
 
+    struct unix_device *device;
     union
     {
         struct
         {
-            const WCHAR *bus_id;
-            void *context;
-        } device_removed;
+            struct device_desc desc;
+        } device_created;
 
         struct
         {
-            struct unix_device *device;
-            struct device_desc desc;
-        } device_created;
+            USHORT length;
+            BYTE buffer[1];
+        } input_report;
     };
 };
 
@@ -95,32 +99,12 @@ struct device_create_params
     struct unix_device *device;
 };
 
-struct device_compare_params
-{
-    struct unix_device *iface;
-    void *context;
-};
-
-struct device_start_params
-{
-    struct unix_device *iface;
-    DEVICE_OBJECT *device;
-};
-
 struct device_descriptor_params
 {
     struct unix_device *iface;
     BYTE *buffer;
     DWORD length;
     DWORD *out_length;
-};
-
-struct device_string_params
-{
-    struct unix_device *iface;
-    DWORD index;
-    WCHAR *buffer;
-    DWORD length;
 };
 
 struct device_report_params
@@ -144,23 +128,18 @@ enum unix_funcs
     mouse_create,
     keyboard_create,
     device_remove,
-    device_compare,
     device_start,
     device_get_report_descriptor,
-    device_get_string,
     device_set_output_report,
     device_get_feature_report,
     device_set_feature_report,
 };
 
-extern const unixlib_entry_t __wine_unix_call_funcs[] DECLSPEC_HIDDEN;
-
 static inline const char *debugstr_device_desc(struct device_desc *desc)
 {
     if (!desc) return "(null)";
-    return wine_dbg_sprintf("{busid %s, vid %04x, pid %04x, version %04x, input %d, uid %08x, serial %s, is_gamepad %u}",
-                            debugstr_w(desc->busid), desc->vid, desc->pid, desc->version,
-                            desc->input, desc->uid, debugstr_w(desc->serial), desc->is_gamepad);
+    return wine_dbg_sprintf("{vid %04x, pid %04x, version %04x, input %d, uid %08x, is_gamepad %u}",
+                            desc->vid, desc->pid, desc->version, desc->input, desc->uid, desc->is_gamepad);
 }
 
 #endif /* __WINEBUS_UNIXLIB_H */

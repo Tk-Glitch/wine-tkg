@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2021-09-09 23:13+0300\n"
+"PO-Revision-Date: 2021-09-11 13:26+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: Lithuanian <komp_lt@konf.lt>\n"
 "Language: lt\n"
@@ -95,8 +95,8 @@ msgstr "Priežiūros informacija"
 #: dlls/mshtml/mshtml.rc:47 dlls/mshtml/mshtml.rc:57 dlls/msvfw32/msvfw32.rc:36
 #: dlls/oledlg/oledlg.rc:62 dlls/oledlg/oledlg.rc:94
 #: dlls/serialui/serialui.rc:41 dlls/setupapi/setupapi.rc:59
-#: dlls/shell32/shell32.rc:276 dlls/shell32/shell32.rc:300
-#: dlls/shell32/shell32.rc:322 dlls/shell32/shell32.rc:341
+#: dlls/shell32/shell32.rc:274 dlls/shell32/shell32.rc:298
+#: dlls/shell32/shell32.rc:320 dlls/shell32/shell32.rc:339
 #: dlls/shlwapi/shlwapi.rc:44 dlls/twain_32/twain.rc:32
 #: dlls/user32/user32.rc:83 dlls/user32/user32.rc:98 dlls/wininet/wininet.rc:62
 #: dlls/wininet/wininet.rc:82 dlls/winspool.drv/winspool.rc:42
@@ -200,9 +200,9 @@ msgstr "&Įdiegti"
 #: dlls/mshtml/mshtml.rc:48 dlls/mshtml/mshtml.rc:58 dlls/msvfw32/msvfw32.rc:37
 #: dlls/oledlg/oledlg.rc:63 dlls/oledlg/oledlg.rc:95
 #: dlls/serialui/serialui.rc:42 dlls/setupapi/setupapi.rc:42
-#: dlls/setupapi/setupapi.rc:60 dlls/shell32/shell32.rc:277
-#: dlls/shell32/shell32.rc:301 dlls/shell32/shell32.rc:312
-#: dlls/shell32/shell32.rc:342 dlls/shlwapi/shlwapi.rc:45
+#: dlls/setupapi/setupapi.rc:60 dlls/shell32/shell32.rc:275
+#: dlls/shell32/shell32.rc:299 dlls/shell32/shell32.rc:310
+#: dlls/shell32/shell32.rc:340 dlls/shlwapi/shlwapi.rc:45
 #: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:84 dlls/user32/user32.rc:99
 #: dlls/wininet/wininet.rc:63 dlls/wininet/wininet.rc:83
 #: dlls/winspool.drv/winspool.rc:43 programs/conhost/conhost.rc:127
@@ -274,7 +274,7 @@ msgid "Not specified"
 msgstr "Nenurodyta"
 
 #: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
-#: dlls/shell32/shell32.rc:144 dlls/shell32/shell32.rc:241
+#: dlls/shell32/shell32.rc:144 dlls/shell32/shell32.rc:239
 #: programs/regedit/regedit.rc:147 programs/winefile/winefile.rc:106
 msgid "Name"
 msgstr "Vardas"
@@ -296,7 +296,7 @@ msgid "Programs (*.exe)"
 msgstr "Programos (*.exe)"
 
 #: dlls/appwiz.cpl/appwiz.rc:43 dlls/avifil32/avifil32.rc:33
-#: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:199
+#: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:197
 #: programs/notepad/notepad.rc:76 programs/oleview/oleview.rc:103
 #: programs/progman/progman.rc:82 programs/regedit/regedit.rc:225
 #: programs/winedbg/winedbg.rc:43 programs/winhlp32/winhlp32.rc:90
@@ -497,12 +497,12 @@ msgctxt "hotkey"
 msgid "None"
 msgstr "Joks"
 
-#: dlls/comctl32/comctl32.rc:52 dlls/shell32/shell32.rc:309
+#: dlls/comctl32/comctl32.rc:52 dlls/shell32/shell32.rc:307
 #: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:79
 msgid "&Yes"
 msgstr "&Taip"
 
-#: dlls/comctl32/comctl32.rc:53 dlls/shell32/shell32.rc:311
+#: dlls/comctl32/comctl32.rc:53 dlls/shell32/shell32.rc:309
 #: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:80
 msgid "&No"
 msgstr "&Ne"
@@ -536,7 +536,7 @@ msgstr "Eiti į šiandien"
 
 #: dlls/comdlg32/comdlg32.rc:158 dlls/comdlg32/comdlg32.rc:171
 #: dlls/comdlg32/comdlg32.rc:462 dlls/comdlg32/comdlg32.rc:487
-#: dlls/comdlg32/comdlg32.rc:514 dlls/shell32/shell32.rc:167
+#: dlls/comdlg32/comdlg32.rc:514 dlls/shell32/shell32.rc:165
 #: programs/oleview/oleview.rc:101
 msgid "Open"
 msgstr "Atverti"
@@ -558,7 +558,7 @@ msgid "Dri&ves:"
 msgstr "&Diskai:"
 
 #: dlls/comdlg32/comdlg32.rc:174 dlls/comdlg32/comdlg32.rc:196
-#: dlls/shell32/shell32.rc:370 dlls/shell32/shell32.rc:407
+#: dlls/shell32/shell32.rc:368 dlls/shell32/shell32.rc:405
 #: programs/winefile/winefile.rc:172
 msgid "&Read Only"
 msgstr "&Tik skaitymui"
@@ -783,7 +783,7 @@ msgstr "Tenkina tik &visas žodis"
 msgid "Match &Case"
 msgstr "Skirti raidžių &dydį"
 
-#: dlls/comdlg32/comdlg32.rc:325 dlls/joy.cpl/joy.rc:72
+#: dlls/comdlg32/comdlg32.rc:325 dlls/joy.cpl/joy.rc:76
 msgid "Direction"
 msgstr "Kryptis"
 
@@ -2232,8 +2232,8 @@ msgid "Notice Text="
 msgstr "Pranešimo tekstas="
 
 #: dlls/cryptui/cryptui.rc:185 dlls/cryptui/cryptui.rc:240
-#: dlls/inetcpl.cpl/inetcpl.rc:46 dlls/shell32/shell32.rc:348
-#: dlls/shell32/shell32.rc:377
+#: dlls/inetcpl.cpl/inetcpl.rc:46 dlls/shell32/shell32.rc:346
+#: dlls/shell32/shell32.rc:375
 msgid "General"
 msgstr "Bendrosios"
 
@@ -2732,7 +2732,7 @@ msgstr "Ypatingas rakto naudojimas (savybė)"
 msgid "Friendly name"
 msgstr "Draugiškas vardas"
 
-#: dlls/cryptui/cryptui.rc:65 dlls/shell32/shell32.rc:242
+#: dlls/cryptui/cryptui.rc:65 dlls/shell32/shell32.rc:240
 #: programs/ipconfig/ipconfig.rc:44
 msgid "Description"
 msgstr "Aprašas"
@@ -3118,7 +3118,7 @@ msgstr "Pastaba: šio liudijimo privatusis raktas neišeksportuojamas."
 msgid "Intended Use"
 msgstr "Numatyta paskirtis"
 
-#: dlls/cryptui/cryptui.rc:178 dlls/shell32/shell32.rc:152
+#: dlls/cryptui/cryptui.rc:178 dlls/shell32/shell32.rc:150
 msgid "Location"
 msgstr "Vieta"
 
@@ -3711,18 +3711,36 @@ msgid "&Disable"
 msgstr "&Išjungti"
 
 #: dlls/joy.cpl/joy.rc:41
+#, fuzzy
+#| msgid "Reset"
+msgid "&Reset"
+msgstr "Atkurti"
+
+#: dlls/joy.cpl/joy.rc:42
 msgid "&Enable"
 msgstr "Įj&ungti"
 
-#: dlls/joy.cpl/joy.rc:42
+#: dlls/joy.cpl/joy.rc:43
+#, fuzzy
+#| msgid "Edit Override"
+msgid "&Override"
+msgstr "Redaguoti nustelbimą"
+
+#: dlls/joy.cpl/joy.rc:44
 msgid "Connected"
 msgstr "Prijungta"
 
-#: dlls/joy.cpl/joy.rc:44
+#: dlls/joy.cpl/joy.rc:46
+#, fuzzy
+#| msgid "Voice input device:"
+msgid "Connected (xinput device)"
+msgstr "Balso įvedimo įtaisas:"
+
+#: dlls/joy.cpl/joy.rc:48
 msgid "Disabled"
 msgstr "Išjungta"
 
-#: dlls/joy.cpl/joy.rc:46
+#: dlls/joy.cpl/joy.rc:50
 msgid ""
 "After disabling or enabling a device, the connected joysticks won't be "
 "updated here until you restart this applet."
@@ -3730,23 +3748,23 @@ msgstr ""
 "Po įtaiso išjungimo ar įjungimo, prijungtos vairasvirtės nebus automatiškai "
 "čia atnaujintos, kol nepaleisite šios programėlės iš naujo."
 
-#: dlls/joy.cpl/joy.rc:51
+#: dlls/joy.cpl/joy.rc:55
 msgid "Test Joystick"
 msgstr "Testuoti vairasvirtę"
 
-#: dlls/joy.cpl/joy.rc:55
+#: dlls/joy.cpl/joy.rc:59
 msgid "Buttons"
 msgstr "Mygtukai"
 
-#: dlls/joy.cpl/joy.rc:64
+#: dlls/joy.cpl/joy.rc:68
 msgid "Test Force Feedback"
 msgstr "Testuoti „Force Feedback“"
 
-#: dlls/joy.cpl/joy.rc:68
+#: dlls/joy.cpl/joy.rc:72
 msgid "Available Effects"
 msgstr "Prieinami efektai"
 
-#: dlls/joy.cpl/joy.rc:70
+#: dlls/joy.cpl/joy.rc:74
 msgid ""
 "Press any button in the controller to activate the chosen effect. The effect "
 "direction can be changed with the controller axis."
@@ -8058,7 +8076,7 @@ msgstr "komponentas iš:"
 msgid "choose which folder contains %s"
 msgstr "parinkite aplanką, kuris turi %s"
 
-#: dlls/msi/msi.rc:66 dlls/shell32/shell32.rc:238
+#: dlls/msi/msi.rc:66 dlls/shell32/shell32.rc:236
 msgid "New Folder"
 msgstr "Naujas aplankas"
 
@@ -9217,7 +9235,7 @@ msgstr ""
 "Įterpia failo turinį kaip objektą į dokumentą, kad galėtumėte jį aktyvuoti "
 "naudodami programą, kuri jį sukūrė."
 
-#: dlls/oledlg/oledlg.rc:30 dlls/shell32/shell32.rc:197
+#: dlls/oledlg/oledlg.rc:30 dlls/shell32/shell32.rc:195
 msgid "Browse"
 msgstr "Parinkti"
 
@@ -9687,26 +9705,26 @@ msgid "&w&bPage &p"
 msgstr "&w&bPuslapis &p"
 
 #: dlls/shell32/shell32.rc:30 dlls/shell32/shell32.rc:45
-#: dlls/shell32/shell32.rc:122 dlls/shell32/shell32.rc:162
+#: dlls/shell32/shell32.rc:122 dlls/shell32/shell32.rc:160
 #: programs/taskmgr/taskmgr.rc:65 programs/taskmgr/taskmgr.rc:110
 #: programs/taskmgr/taskmgr.rc:252
 msgid "Lar&ge Icons"
 msgstr "&Didelės piktogramos"
 
 #: dlls/shell32/shell32.rc:31 dlls/shell32/shell32.rc:46
-#: dlls/shell32/shell32.rc:123 dlls/shell32/shell32.rc:163
+#: dlls/shell32/shell32.rc:123 dlls/shell32/shell32.rc:161
 #: programs/taskmgr/taskmgr.rc:66 programs/taskmgr/taskmgr.rc:111
 #: programs/taskmgr/taskmgr.rc:253
 msgid "S&mall Icons"
 msgstr "&Mažos piktogramos"
 
 #: dlls/shell32/shell32.rc:32 dlls/shell32/shell32.rc:47
-#: dlls/shell32/shell32.rc:124 dlls/shell32/shell32.rc:164
+#: dlls/shell32/shell32.rc:124 dlls/shell32/shell32.rc:162
 msgid "&List"
 msgstr "&Sąrašas"
 
 #: dlls/shell32/shell32.rc:33 dlls/shell32/shell32.rc:48
-#: dlls/shell32/shell32.rc:125 dlls/shell32/shell32.rc:165
+#: dlls/shell32/shell32.rc:125 dlls/shell32/shell32.rc:163
 #: programs/taskmgr/taskmgr.rc:67 programs/taskmgr/taskmgr.rc:112
 #: programs/taskmgr/taskmgr.rc:254
 msgid "&Details"
@@ -9798,47 +9816,47 @@ msgstr "Iš&eiti"
 msgid "&About Control Panel"
 msgstr "&Apie valdymo skydelį"
 
-#: dlls/shell32/shell32.rc:273 dlls/shell32/shell32.rc:288
+#: dlls/shell32/shell32.rc:271 dlls/shell32/shell32.rc:286
 msgid "Browse for Folder"
 msgstr "Parinkti aplanką"
 
-#: dlls/shell32/shell32.rc:293
+#: dlls/shell32/shell32.rc:291
 msgid "Folder:"
 msgstr "Aplankas:"
 
-#: dlls/shell32/shell32.rc:299
+#: dlls/shell32/shell32.rc:297
 msgid "&Make New Folder"
 msgstr "&Kurti naują aplanką"
 
-#: dlls/shell32/shell32.rc:306
+#: dlls/shell32/shell32.rc:304
 msgid "Message"
 msgstr "Pranešimas"
 
-#: dlls/shell32/shell32.rc:310
+#: dlls/shell32/shell32.rc:308
 msgid "Yes to &all"
 msgstr "Taip &visiems"
 
-#: dlls/shell32/shell32.rc:319
+#: dlls/shell32/shell32.rc:317
 msgid "About %s"
 msgstr "Apie %s"
 
-#: dlls/shell32/shell32.rc:323
+#: dlls/shell32/shell32.rc:321
 msgid "Wine &license"
 msgstr "„Wine“ &licencija"
 
-#: dlls/shell32/shell32.rc:328
+#: dlls/shell32/shell32.rc:326
 msgid "Running on %s"
 msgstr "Paleista su %s"
 
-#: dlls/shell32/shell32.rc:329
+#: dlls/shell32/shell32.rc:327
 msgid "Wine was brought to you by:"
 msgstr "Prie „Wine“ kūrimo prisidėjo:"
 
-#: dlls/shell32/shell32.rc:334
+#: dlls/shell32/shell32.rc:332
 msgid "Run"
 msgstr "Paleidimas"
 
-#: dlls/shell32/shell32.rc:338
+#: dlls/shell32/shell32.rc:336
 msgid ""
 "Type the name of a program, folder, document, or Internet resource, and Wine "
 "will open it for you."
@@ -9846,61 +9864,61 @@ msgstr ""
 "Įrašykite programos pavadinimą, aplanką, dokumentą ar interneto resursą ir "
 "„Wine“ jums jį atvers."
 
-#: dlls/shell32/shell32.rc:339
+#: dlls/shell32/shell32.rc:337
 msgid "&Open:"
 msgstr "&Atverti:"
 
-#: dlls/shell32/shell32.rc:343 programs/progman/progman.rc:182
+#: dlls/shell32/shell32.rc:341 programs/progman/progman.rc:182
 #: programs/progman/progman.rc:201 programs/progman/progman.rc:218
 #: programs/winecfg/winecfg.rc:241 programs/winefile/winefile.rc:129
 msgid "&Browse..."
 msgstr "&Parinkti..."
 
-#: dlls/shell32/shell32.rc:355 dlls/shell32/shell32.rc:384
+#: dlls/shell32/shell32.rc:353 dlls/shell32/shell32.rc:382
 msgid "File type:"
 msgstr "Failo tipas:"
 
-#: dlls/shell32/shell32.rc:359 dlls/shell32/shell32.rc:392
+#: dlls/shell32/shell32.rc:357 dlls/shell32/shell32.rc:390
 #: dlls/urlmon/urlmon.rc:37 programs/explorer/explorer.rc:33
 msgid "Location:"
 msgstr "Vieta:"
 
-#: dlls/shell32/shell32.rc:361 dlls/shell32/shell32.rc:394
+#: dlls/shell32/shell32.rc:359 dlls/shell32/shell32.rc:392
 #: programs/winefile/winefile.rc:169
 msgid "Size:"
 msgstr "Dydis:"
 
-#: dlls/shell32/shell32.rc:365 dlls/shell32/shell32.rc:398
+#: dlls/shell32/shell32.rc:363 dlls/shell32/shell32.rc:396
 msgid "Creation date:"
 msgstr "Sukūrimo data:"
 
-#: dlls/shell32/shell32.rc:369 dlls/shell32/shell32.rc:406
+#: dlls/shell32/shell32.rc:367 dlls/shell32/shell32.rc:404
 msgid "Attributes:"
 msgstr "Atributai:"
 
-#: dlls/shell32/shell32.rc:371 dlls/shell32/shell32.rc:408
+#: dlls/shell32/shell32.rc:369 dlls/shell32/shell32.rc:406
 #: programs/winefile/winefile.rc:173
 msgid "H&idden"
 msgstr "&Paslėptas"
 
-#: dlls/shell32/shell32.rc:372 dlls/shell32/shell32.rc:409
+#: dlls/shell32/shell32.rc:370 dlls/shell32/shell32.rc:407
 #: programs/winefile/winefile.rc:174
 msgid "&Archive"
 msgstr "&Archyvuotinas"
 
-#: dlls/shell32/shell32.rc:386
+#: dlls/shell32/shell32.rc:384
 msgid "Open with:"
 msgstr "Atverti su:"
 
-#: dlls/shell32/shell32.rc:389
+#: dlls/shell32/shell32.rc:387
 msgid "&Change..."
 msgstr "&Keisti..."
 
-#: dlls/shell32/shell32.rc:400
+#: dlls/shell32/shell32.rc:398
 msgid "Last modified:"
 msgstr "Paskutinis pakeitimas:"
 
-#: dlls/shell32/shell32.rc:402
+#: dlls/shell32/shell32.rc:400
 msgid "Last accessed:"
 msgstr "Paskutinė prieiga:"
 
@@ -9931,210 +9949,202 @@ msgid "Comments"
 msgstr "Komentarai"
 
 #: dlls/shell32/shell32.rc:146
-msgid "Owner"
-msgstr "Savininkas"
-
-#: dlls/shell32/shell32.rc:147
-msgid "Group"
-msgstr "Grupė"
-
-#: dlls/shell32/shell32.rc:148
 msgid "Original location"
 msgstr "Originali vieta"
 
-#: dlls/shell32/shell32.rc:149
+#: dlls/shell32/shell32.rc:147
 msgid "Date deleted"
 msgstr "Pašalinimo data"
 
-#: dlls/shell32/shell32.rc:156 programs/winecfg/winecfg.rc:100
+#: dlls/shell32/shell32.rc:154 programs/winecfg/winecfg.rc:100
 #: programs/winefile/winefile.rc:99
 msgctxt "display name"
 msgid "Desktop"
 msgstr "Darbalaukis"
 
-#: dlls/shell32/shell32.rc:157 programs/regedit/regedit.rc:238
+#: dlls/shell32/shell32.rc:155 programs/regedit/regedit.rc:238
 msgid "My Computer"
 msgstr "Kompiuteris"
 
-#: dlls/shell32/shell32.rc:159
+#: dlls/shell32/shell32.rc:157
 msgid "Control Panel"
 msgstr "Valdymo skydelis"
 
-#: dlls/shell32/shell32.rc:166
+#: dlls/shell32/shell32.rc:164
 msgid "Select"
 msgstr "Iš&rinkti"
 
-#: dlls/shell32/shell32.rc:189
+#: dlls/shell32/shell32.rc:187
 msgid "Restart"
 msgstr "Paleisti iš naujo"
 
-#: dlls/shell32/shell32.rc:190
+#: dlls/shell32/shell32.rc:188
 msgid "Do you want to simulate a Windows reboot?"
 msgstr "Ar norite simuliuoti „Windows“ paleidimą iš naujo?"
 
-#: dlls/shell32/shell32.rc:191
+#: dlls/shell32/shell32.rc:189
 msgid "Shutdown"
 msgstr "Stabdyti"
 
-#: dlls/shell32/shell32.rc:192
+#: dlls/shell32/shell32.rc:190
 msgid "Do you want to shutdown your Wine session?"
 msgstr "Ar norite sustabdyti šį „Wine“ seansą?"
 
-#: dlls/shell32/shell32.rc:203 programs/progman/progman.rc:83
+#: dlls/shell32/shell32.rc:201 programs/progman/progman.rc:83
 msgid "Programs"
 msgstr "Programos"
 
-#: dlls/shell32/shell32.rc:204 dlls/shell32/shell32.rc:219
-#: dlls/shell32/shell32.rc:150 dlls/shell32/shell32.rc:235
+#: dlls/shell32/shell32.rc:202 dlls/shell32/shell32.rc:217
+#: dlls/shell32/shell32.rc:148 dlls/shell32/shell32.rc:233
 msgid "Documents"
 msgstr "Dokumentai"
 
-#: dlls/shell32/shell32.rc:205
+#: dlls/shell32/shell32.rc:203
 msgid "Favorites"
 msgstr "Adresynas"
 
-#: dlls/shell32/shell32.rc:206
+#: dlls/shell32/shell32.rc:204
 msgid "StartUp"
 msgstr "Paleidimas"
 
-#: dlls/shell32/shell32.rc:207
+#: dlls/shell32/shell32.rc:205
 msgid "Start Menu"
 msgstr "Pradžios meniu"
 
-#: dlls/shell32/shell32.rc:208 dlls/shell32/shell32.rc:221
+#: dlls/shell32/shell32.rc:206 dlls/shell32/shell32.rc:219
 msgid "Music"
 msgstr "Muzika"
 
-#: dlls/shell32/shell32.rc:209 dlls/shell32/shell32.rc:223
+#: dlls/shell32/shell32.rc:207 dlls/shell32/shell32.rc:221
 msgid "Videos"
 msgstr "Vaizdai"
 
-#: dlls/shell32/shell32.rc:210
+#: dlls/shell32/shell32.rc:208
 msgctxt "directory"
 msgid "Desktop"
 msgstr "Darbalaukis"
 
-#: dlls/shell32/shell32.rc:211
+#: dlls/shell32/shell32.rc:209
 msgid "NetHood"
 msgstr "Tinkle"
 
-#: dlls/shell32/shell32.rc:212
+#: dlls/shell32/shell32.rc:210
 msgid "Templates"
 msgstr "Šablonai"
 
-#: dlls/shell32/shell32.rc:213
+#: dlls/shell32/shell32.rc:211
 msgid "PrintHood"
 msgstr "Spausdintuvai"
 
-#: dlls/shell32/shell32.rc:214 programs/winhlp32/winhlp32.rc:49
+#: dlls/shell32/shell32.rc:212 programs/winhlp32/winhlp32.rc:49
 msgid "History"
 msgstr "Istorija"
 
-#: dlls/shell32/shell32.rc:215
+#: dlls/shell32/shell32.rc:213
 msgid "Program Files"
 msgstr "Program Files"
 
-#: dlls/shell32/shell32.rc:217 dlls/shell32/shell32.rc:222
+#: dlls/shell32/shell32.rc:215 dlls/shell32/shell32.rc:220
 msgid "Pictures"
 msgstr "Paveikslai"
 
-#: dlls/shell32/shell32.rc:218
+#: dlls/shell32/shell32.rc:216
 msgid "Common Files"
 msgstr "Bendrieji failai"
 
-#: dlls/shell32/shell32.rc:220
+#: dlls/shell32/shell32.rc:218
 msgid "Administrative Tools"
 msgstr "Administravimo įrankiai"
 
-#: dlls/shell32/shell32.rc:216
+#: dlls/shell32/shell32.rc:214
 msgid "Program Files (x86)"
 msgstr "Program Files (x86)"
 
-#: dlls/shell32/shell32.rc:224
+#: dlls/shell32/shell32.rc:222
 msgid "Contacts"
 msgstr "Kontaktai"
 
-#: dlls/shell32/shell32.rc:225 programs/winefile/winefile.rc:112
+#: dlls/shell32/shell32.rc:223 programs/winefile/winefile.rc:112
 msgid "Links"
 msgstr "Saitai"
 
-#: dlls/shell32/shell32.rc:226
+#: dlls/shell32/shell32.rc:224
 msgid "Slide Shows"
 msgstr "Skaidrių peržiūros"
 
-#: dlls/shell32/shell32.rc:227
+#: dlls/shell32/shell32.rc:225
 msgid "Playlists"
 msgstr "Grojaraščiai"
 
-#: dlls/shell32/shell32.rc:151 programs/taskmgr/taskmgr.rc:326
+#: dlls/shell32/shell32.rc:149 programs/taskmgr/taskmgr.rc:326
 msgid "Status"
 msgstr "Būsena"
 
-#: dlls/shell32/shell32.rc:153
+#: dlls/shell32/shell32.rc:151
 msgid "Model"
 msgstr "Modelis"
 
-#: dlls/shell32/shell32.rc:228
+#: dlls/shell32/shell32.rc:226
 msgid "Sample Music"
 msgstr "Muzikos pavyzdžiai"
 
-#: dlls/shell32/shell32.rc:229
+#: dlls/shell32/shell32.rc:227
 msgid "Sample Pictures"
 msgstr "Paveikslų pavyzdžiai"
 
-#: dlls/shell32/shell32.rc:230
+#: dlls/shell32/shell32.rc:228
 msgid "Sample Playlists"
 msgstr "Grojaraščių pavyzdžiai"
 
-#: dlls/shell32/shell32.rc:231
+#: dlls/shell32/shell32.rc:229
 msgid "Sample Videos"
 msgstr "Vaizdų pavyzdžiai"
 
-#: dlls/shell32/shell32.rc:232
+#: dlls/shell32/shell32.rc:230
 msgid "Saved Games"
 msgstr "Išsaugoti žaidimai"
 
-#: dlls/shell32/shell32.rc:233
+#: dlls/shell32/shell32.rc:231
 msgid "Searches"
 msgstr "Paieškos"
 
-#: dlls/shell32/shell32.rc:234
+#: dlls/shell32/shell32.rc:232
 msgid "Users"
 msgstr "Naudotojai"
 
-#: dlls/shell32/shell32.rc:236
+#: dlls/shell32/shell32.rc:234
 msgid "Downloads"
 msgstr "Atsiuntimai"
 
-#: dlls/shell32/shell32.rc:169
+#: dlls/shell32/shell32.rc:167
 msgid "Unable to create new Folder: Permission denied."
 msgstr "Nepavyko sukurti naujo aplanko: neužtenka teisių."
 
-#: dlls/shell32/shell32.rc:170
+#: dlls/shell32/shell32.rc:168
 msgid "Error during creation of a new folder"
 msgstr "Klaida kuriant naują aplanką"
 
-#: dlls/shell32/shell32.rc:171
+#: dlls/shell32/shell32.rc:169
 msgid "Confirm file deletion"
 msgstr "Patvirtinti failo šalinimą"
 
-#: dlls/shell32/shell32.rc:172
+#: dlls/shell32/shell32.rc:170
 msgid "Confirm folder deletion"
 msgstr "Patvirtinti aplanko šalinimą"
 
-#: dlls/shell32/shell32.rc:173
+#: dlls/shell32/shell32.rc:171
 msgid "Are you sure you want to delete '%1'?"
 msgstr "Ar tikrai norite pašalinti „%1“?"
 
-#: dlls/shell32/shell32.rc:174
+#: dlls/shell32/shell32.rc:172
 msgid "Are you sure you want to delete these %1 items?"
 msgstr "Ar tikrai norite pašalinti šiuos %1 elementus?"
 
-#: dlls/shell32/shell32.rc:181
+#: dlls/shell32/shell32.rc:179
 msgid "Confirm file overwrite"
 msgstr "Patvirtinti failo perrašymą"
 
-#: dlls/shell32/shell32.rc:180
+#: dlls/shell32/shell32.rc:178
 msgid ""
 "This folder already contains a file called '%1'.\n"
 "\n"
@@ -10144,30 +10154,30 @@ msgstr ""
 "\n"
 "Ar norite jį pakeisti?"
 
-#: dlls/shell32/shell32.rc:175
+#: dlls/shell32/shell32.rc:173
 msgid "Are you sure you want to delete the selected item(s)?"
 msgstr "Ar tikrai norite pašalinti išrinktus elementus?"
 
-#: dlls/shell32/shell32.rc:177
+#: dlls/shell32/shell32.rc:175
 msgid ""
 "Are you sure that you want to send '%1' and all its content to the Trash?"
 msgstr "Ar tikrai norite perkelti „%1“ ir jo turinį į šiukšlinę?"
 
-#: dlls/shell32/shell32.rc:176
+#: dlls/shell32/shell32.rc:174
 msgid "Are you sure that you want to send '%1' to the Trash?"
 msgstr "Ar tikrai norite perkelti „%1“ į šiukšlinę?"
 
-#: dlls/shell32/shell32.rc:178
+#: dlls/shell32/shell32.rc:176
 msgid "Are you sure that you want to send these %1 items to the Trash?"
 msgstr "Ar tikrai norite perkelti šiuos %1 elementus į šiukšlinę?"
 
-#: dlls/shell32/shell32.rc:179
+#: dlls/shell32/shell32.rc:177
 msgid "The item '%1' can't be sent to Trash. Do you want to delete it instead?"
 msgstr ""
 "Šis elementas „%1“ negali būti perkeltas į šiukšlinę. Ar norite jį pašalinti "
 "vietoj šiukšlinės?"
 
-#: dlls/shell32/shell32.rc:186
+#: dlls/shell32/shell32.rc:184
 msgid ""
 "This folder already contains a folder named '%1'.\n"
 "\n"
@@ -10182,39 +10192,39 @@ msgstr ""
 "kopijuoti\n"
 "šį aplanką?"
 
-#: dlls/shell32/shell32.rc:240
+#: dlls/shell32/shell32.rc:238
 msgid "Wine Control Panel"
 msgstr "„Wine“ valdymo skydelis"
 
-#: dlls/shell32/shell32.rc:195
+#: dlls/shell32/shell32.rc:193
 msgid "Unable to display Run dialog box (internal error)"
 msgstr "Nepavyko parodyti paleidimo dialogo lango (vidinė klaida)"
 
-#: dlls/shell32/shell32.rc:196
+#: dlls/shell32/shell32.rc:194
 msgid "Unable to display Browse dialog box (internal error)"
 msgstr "Nepavyko parodyti parinkimo dialogo lango (vidinė klaida)"
 
-#: dlls/shell32/shell32.rc:198
+#: dlls/shell32/shell32.rc:196
 msgid "Executable files (*.exe)"
 msgstr "Vykdomieji failai (*.exe)"
 
-#: dlls/shell32/shell32.rc:244
+#: dlls/shell32/shell32.rc:242
 msgid "There is no Windows program configured to open this type of file."
 msgstr "Jokia „Windows“ programa nėra sukonfigūruota atidaryti šio tipo failų."
 
-#: dlls/shell32/shell32.rc:246
+#: dlls/shell32/shell32.rc:244
 msgid "Are you sure you wish to permanently delete '%1'?"
 msgstr "Ar tikrai norite negrįžtamai pašalinti „%1“?"
 
-#: dlls/shell32/shell32.rc:247
+#: dlls/shell32/shell32.rc:245
 msgid "Are you sure you wish to permanently delete these %1 items?"
 msgstr "Ar tikrai norite negrįžtamai pašalinti šiuos %1 elementus?"
 
-#: dlls/shell32/shell32.rc:248
+#: dlls/shell32/shell32.rc:246
 msgid "Confirm deletion"
 msgstr "Patvirtinti šalinimą"
 
-#: dlls/shell32/shell32.rc:249
+#: dlls/shell32/shell32.rc:247
 msgid ""
 "A file already exists at the path %1.\n"
 "\n"
@@ -10224,7 +10234,7 @@ msgstr ""
 "\n"
 "Ar norite jį pakeisti?"
 
-#: dlls/shell32/shell32.rc:250
+#: dlls/shell32/shell32.rc:248
 msgid ""
 "A folder already exists at the path %1.\n"
 "\n"
@@ -10234,11 +10244,11 @@ msgstr ""
 "\n"
 "Ar norite jį pakeisti?"
 
-#: dlls/shell32/shell32.rc:251
+#: dlls/shell32/shell32.rc:249
 msgid "Confirm overwrite"
 msgstr "Patvirtinti perrašymą"
 
-#: dlls/shell32/shell32.rc:268
+#: dlls/shell32/shell32.rc:266
 msgid ""
 "Wine is free software; you can redistribute it and/or modify it under the "
 "terms of the GNU Lesser General Public License as published by the Free "
@@ -10267,11 +10277,11 @@ msgstr ""
 "kartu su „Wine“; jei negavote, rašykite adresu Free Software Foundation, "
 "Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
 
-#: dlls/shell32/shell32.rc:256
+#: dlls/shell32/shell32.rc:254
 msgid "Wine License"
 msgstr "„Wine“ licencija"
 
-#: dlls/shell32/shell32.rc:158
+#: dlls/shell32/shell32.rc:156
 msgid "Trash"
 msgstr "Šiukšlinė"
 
@@ -10630,7 +10640,7 @@ msgstr "Ramiojo vandenyno vasaros laikas"
 
 #: dlls/tzres/tzres.rc:281
 msgid "(UTC-08:00) Pacific Time (US & Canada)"
-msgstr ""
+msgstr "(UTC-08:00) Ramiojo vandenyno laikas (JAV ir Kanada)"
 
 #: dlls/tzres/tzres.rc:69
 msgid "Azerbaijan Standard Time"
@@ -10762,11 +10772,11 @@ msgstr "Centrinis vasaros laikas"
 
 #: dlls/tzres/tzres.rc:119
 msgid "(UTC-06:00) Central Time (US & Canada)"
-msgstr ""
+msgstr "(UTC-08:00) Centrinis laikas (JAV ir Kanada)"
 
 #: dlls/tzres/tzres.rc:303 dlls/tzres/tzres.rc:304
 msgid "Russia Time Zone 3"
-msgstr ""
+msgstr "Rusijos laiko juosta 3"
 
 #: dlls/tzres/tzres.rc:305
 msgid "(UTC+04:00) Izhevsk, Samara"
@@ -10862,7 +10872,7 @@ msgstr "Mianmaro vasaros laikas"
 
 #: dlls/tzres/tzres.rc:245
 msgid "(UTC+06:30) Yangon (Rangoon)"
-msgstr ""
+msgstr "(UTC+06:30) Jangonas"
 
 #: dlls/tzres/tzres.rc:387 dlls/tzres/tzres.rc:388
 msgid "Coordinated Universal Time"
@@ -10882,7 +10892,7 @@ msgstr "Indijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:191
 msgid "(UTC+05:30) Chennai, Kolkata, Mumbai, New Delhi"
-msgstr ""
+msgstr "(UTC+05:30) Čenajus, Kolkata, Mumbajus, Naujasis Delis"
 
 #: dlls/tzres/tzres.rc:180
 msgid "GTB Standard Time"
@@ -10894,7 +10904,7 @@ msgstr "GTB vasaros laikas"
 
 #: dlls/tzres/tzres.rc:182
 msgid "(UTC+02:00) Athens, Bucharest"
-msgstr ""
+msgstr "(UTC+02:00) Atėnai, Bukareštas"
 
 #: dlls/tzres/tzres.rc:372
 msgid "Turkey Standard Time"
@@ -10906,7 +10916,7 @@ msgstr "Turkijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:374
 msgid "(UTC+03:00) Istanbul"
-msgstr ""
+msgstr "(UTC+03:00) Stambulas"
 
 #: dlls/tzres/tzres.rc:54
 msgid "Astrakhan Standard Time"
@@ -10918,7 +10928,7 @@ msgstr "Astrachanės vasaros laikas"
 
 #: dlls/tzres/tzres.rc:56
 msgid "(UTC+04:00) Astrakhan, Ulyanovsk"
-msgstr ""
+msgstr "(UTC+04:00) Astrachanė, Uljanovskas"
 
 #: dlls/tzres/tzres.rc:162
 msgid "Fiji Standard Time"
@@ -10930,7 +10940,7 @@ msgstr "Fidžio vasaros laikas"
 
 #: dlls/tzres/tzres.rc:164
 msgid "(UTC+12:00) Fiji"
-msgstr ""
+msgstr "(UTC+12:00) Fidžis"
 
 #: dlls/tzres/tzres.rc:87
 msgid "Canada Central Standard Time"
@@ -10942,7 +10952,7 @@ msgstr "Kanados centrinis vasaros laikas"
 
 #: dlls/tzres/tzres.rc:89
 msgid "(UTC-06:00) Saskatchewan"
-msgstr ""
+msgstr "(UTC-06:00) Saskačevanas"
 
 #: dlls/tzres/tzres.rc:441
 msgid "Yukon Standard Time"
@@ -10954,7 +10964,7 @@ msgstr "Jukono vasaros laikas"
 
 #: dlls/tzres/tzres.rc:443
 msgid "(UTC-07:00) Yukon"
-msgstr ""
+msgstr "(UTC-07:00) Jukonas"
 
 #: dlls/tzres/tzres.rc:351
 msgid "Taipei Standard Time"
@@ -10966,7 +10976,7 @@ msgstr "Taipėjaus vasaros laikas"
 
 #: dlls/tzres/tzres.rc:353
 msgid "(UTC+08:00) Taipei"
-msgstr ""
+msgstr "(UTC+08:00) Taipėjus"
 
 #: dlls/tzres/tzres.rc:423
 msgid "W. Europe Standard Time"
@@ -10978,7 +10988,7 @@ msgstr "Vakarinės Europos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:425
 msgid "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna"
-msgstr ""
+msgstr "(UTC+01:00) Amsterdamas, Berlynas, Bernas, Roma, Stokholmas, Viena"
 
 #: dlls/tzres/tzres.rc:231
 msgid "Montevideo Standard Time"
@@ -10990,7 +11000,7 @@ msgstr "Montevidėjo vasaros laikas"
 
 #: dlls/tzres/tzres.rc:233
 msgid "(UTC-03:00) Montevideo"
-msgstr ""
+msgstr "(UTC-03:00) Montevidėjas"
 
 #: dlls/tzres/tzres.rc:285
 msgid "Pakistan Standard Time"
@@ -11002,7 +11012,7 @@ msgstr "Pakistano vasaros laikas"
 
 #: dlls/tzres/tzres.rc:287
 msgid "(UTC+05:00) Islamabad, Karachi"
-msgstr ""
+msgstr "(UTC+05:00) Islamabadas, Karačis"
 
 #: dlls/tzres/tzres.rc:363
 msgid "Tomsk Standard Time"
@@ -11014,7 +11024,7 @@ msgstr "Tomsko vasaros laikas"
 
 #: dlls/tzres/tzres.rc:365
 msgid "(UTC+07:00) Tomsk"
-msgstr ""
+msgstr "(UTC+07:00) Tomskas"
 
 #: dlls/tzres/tzres.rc:93
 msgid "Caucasus Standard Time"
@@ -11026,7 +11036,7 @@ msgstr "Kaukazo vasaros laikas"
 
 #: dlls/tzres/tzres.rc:95
 msgid "(UTC+04:00) Yerevan"
-msgstr ""
+msgstr "(UTC+04:00) Jerevanas"
 
 #: dlls/tzres/tzres.rc:66
 msgid "AUS Eastern Standard Time"
@@ -11038,7 +11048,7 @@ msgstr "AUS Rytinis vasaros laikas"
 
 #: dlls/tzres/tzres.rc:68
 msgid "(UTC+10:00) Canberra, Melbourne, Sydney"
-msgstr ""
+msgstr "(UTC+10:00) Kanbera, Melburnas, Sidnėjus"
 
 #: dlls/tzres/tzres.rc:246
 msgid "N. Central Asia Standard Time"
@@ -11050,7 +11060,7 @@ msgstr "Š. Vidurio Azijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:248
 msgid "(UTC+07:00) Novosibirsk"
-msgstr ""
+msgstr "(UTC+07:00) Novosibirskas"
 
 #: dlls/tzres/tzres.rc:150
 msgid "Eastern Standard Time"
@@ -11062,7 +11072,7 @@ msgstr "Rytinis vasaros laikas"
 
 #: dlls/tzres/tzres.rc:152
 msgid "(UTC-05:00) Eastern Time (US & Canada)"
-msgstr ""
+msgstr "(UTC-05:00) Rytinis laikas (JAV ir Kanada)"
 
 #: dlls/tzres/tzres.rc:369
 msgid "Transbaikal Standard Time"
@@ -11074,7 +11084,7 @@ msgstr "Užbaikalės vasaros laikas"
 
 #: dlls/tzres/tzres.rc:371
 msgid "(UTC+09:00) Chita"
-msgstr ""
+msgstr "(UTC+09:00) Čita"
 
 #: dlls/tzres/tzres.rc:141
 msgid "E. Europe Standard Time"
@@ -11086,7 +11096,7 @@ msgstr "R. Europos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:143
 msgid "(UTC+02:00) Chisinau"
-msgstr ""
+msgstr "(UTC+02:00) Kišiniovas"
 
 #: dlls/tzres/tzres.rc:120
 msgid "Central Standard Time (Mexico)"
@@ -11098,7 +11108,7 @@ msgstr "Centrinis vasaros laikas (Meksika)"
 
 #: dlls/tzres/tzres.rc:122
 msgid "(UTC-06:00) Guadalajara, Mexico City, Monterrey"
-msgstr ""
+msgstr "(UTC-06:00) Gvadalachara, Meksikas, Monterėjus"
 
 #: dlls/tzres/tzres.rc:330
 msgid "Saratov Standard Time"
@@ -11110,7 +11120,7 @@ msgstr "Saratovo vasaros laikas"
 
 #: dlls/tzres/tzres.rc:332
 msgid "(UTC+04:00) Saratov"
-msgstr ""
+msgstr "(UTC+04:00) Saratovas"
 
 #: dlls/tzres/tzres.rc:57
 msgid "Atlantic Standard Time"
@@ -11122,7 +11132,7 @@ msgstr "Atlanto vandenyno vasaros laikas"
 
 #: dlls/tzres/tzres.rc:59
 msgid "(UTC-04:00) Atlantic Time (Canada)"
-msgstr ""
+msgstr "(UTC-04:00) Atlanto vandenyno laikas (Kanada)"
 
 #: dlls/tzres/tzres.rc:237
 msgid "Mountain Standard Time"
@@ -11134,7 +11144,7 @@ msgstr "Kalnų vasaros laikas"
 
 #: dlls/tzres/tzres.rc:239
 msgid "(UTC-07:00) Mountain Time (US & Canada)"
-msgstr ""
+msgstr "(UTC-07:00) Kalnų laikas (JAV ir Kanada)"
 
 #: dlls/tzres/tzres.rc:381
 msgid "US Eastern Standard Time"
@@ -11146,7 +11156,7 @@ msgstr "JAV Rytinis vasaros laikas"
 
 #: dlls/tzres/tzres.rc:383
 msgid "(UTC-05:00) Indiana (East)"
-msgstr ""
+msgstr "(UTC-05:00) Indiana (Rytų)"
 
 #: dlls/tzres/tzres.rc:321
 msgid "Sakhalin Standard Time"
@@ -11158,7 +11168,7 @@ msgstr "Sachalino vasaros laikas"
 
 #: dlls/tzres/tzres.rc:323
 msgid "(UTC+11:00) Sakhalin"
-msgstr ""
+msgstr "(UTC+11:00) Sachalinas"
 
 #: dlls/tzres/tzres.rc:270
 msgid "North Korea Standard Time"
@@ -11170,7 +11180,7 @@ msgstr "Šiaurės Korėjos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:272
 msgid "(UTC+09:00) Pyongyang"
-msgstr ""
+msgstr "(UTC+09:00) Pchenjanas"
 
 #: dlls/tzres/tzres.rc:354
 msgid "Tasmania Standard Time"
@@ -11182,7 +11192,7 @@ msgstr "Tasmanijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:356
 msgid "(UTC+10:00) Hobart"
-msgstr ""
+msgstr "(UTC+10:00) Hobartas"
 
 #: dlls/tzres/tzres.rc:99
 msgid "Central America Standard Time"
@@ -11194,7 +11204,7 @@ msgstr "Centrinės Amerikos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:101
 msgid "(UTC-06:00) Central America"
-msgstr ""
+msgstr "(UTC-06:00) Centrinė Amerika"
 
 #: dlls/tzres/tzres.rc:396 dlls/tzres/tzres.rc:397
 msgid "UTC-02"
@@ -11214,7 +11224,7 @@ msgstr "JAV Kalnų vasaros laikas"
 
 #: dlls/tzres/tzres.rc:386
 msgid "(UTC-07:00) Arizona"
-msgstr ""
+msgstr "(UTC-07:00) Arizona"
 
 #: dlls/tzres/tzres.rc:339
 msgid "South Africa Standard Time"
@@ -11226,7 +11236,7 @@ msgstr "Pietų Afrikos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:341
 msgid "(UTC+02:00) Harare, Pretoria"
-msgstr ""
+msgstr "(UTC+02:00) Hararė, Pretorija"
 
 #: dlls/tzres/tzres.rc:96
 msgid "Cen. Australia Standard Time"
@@ -11238,7 +11248,7 @@ msgstr "Vid. Australijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:98
 msgid "(UTC+09:30) Adelaide"
-msgstr ""
+msgstr "(UTC+09:30) Adelaidė"
 
 #: dlls/tzres/tzres.rc:402 dlls/tzres/tzres.rc:403
 msgid "UTC-09"
@@ -11258,7 +11268,7 @@ msgstr "Šri Lankos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:344
 msgid "(UTC+05:30) Sri Jayawardenepura"
-msgstr ""
+msgstr "(UTC+05:30) Šri Džajavardenepura"
 
 #: dlls/tzres/tzres.rc:30
 msgid "Afghanistan Standard Time"
@@ -11270,7 +11280,7 @@ msgstr "Afganistano vasaros laikas"
 
 #: dlls/tzres/tzres.rc:32
 msgid "(UTC+04:30) Kabul"
-msgstr ""
+msgstr "(UTC+04:30) Kabulas"
 
 #: dlls/tzres/tzres.rc:438
 msgid "Yakutsk Standard Time"
@@ -11282,7 +11292,7 @@ msgstr "Jakutsko vasaros laikas"
 
 #: dlls/tzres/tzres.rc:440
 msgid "(UTC+09:00) Yakutsk"
-msgstr ""
+msgstr "(UTC+09:00) Jakutskas"
 
 #: dlls/tzres/tzres.rc:309
 msgid "SA Eastern Standard Time"
@@ -11294,7 +11304,7 @@ msgstr "PA Rytinis vasaros laikas"
 
 #: dlls/tzres/tzres.rc:311
 msgid "(UTC-03:00) Cayenne, Fortaleza"
-msgstr ""
+msgstr "(UTC-03:00) Kajena, Fortaleza"
 
 #: dlls/tzres/tzres.rc:42
 msgid "Arab Standard Time"
@@ -11306,7 +11316,7 @@ msgstr "Arabų vasaros laikas"
 
 #: dlls/tzres/tzres.rc:44
 msgid "(UTC+03:00) Kuwait, Riyadh"
-msgstr ""
+msgstr "(UTC+03:00) Kuveitas, Rijadas"
 
 #: dlls/tzres/tzres.rc:45
 msgid "Arabian Standard Time"
@@ -11318,7 +11328,7 @@ msgstr "Arabų vasaros laikas"
 
 #: dlls/tzres/tzres.rc:47
 msgid "(UTC+04:00) Abu Dhabi, Muscat"
-msgstr ""
+msgstr "(UTC+04:00) Abu Dabis, Maskatas"
 
 #: dlls/tzres/tzres.rc:357
 msgid "Tocantins Standard Time"
@@ -11330,7 +11340,7 @@ msgstr "Tokantinso vasaros laikas"
 
 #: dlls/tzres/tzres.rc:359
 msgid "(UTC-03:00) Araguaina"
-msgstr ""
+msgstr "(UTC-03:00) Araguaina"
 
 #: dlls/tzres/tzres.rc:306
 msgid "Russian Standard Time"
@@ -11342,7 +11352,7 @@ msgstr "Rusijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:308
 msgid "(UTC+03:00) Moscow, St. Petersburg"
-msgstr ""
+msgstr "(UTC+03:00) Maskva, Sankt Peterburgas"
 
 #: dlls/tzres/tzres.rc:63
 msgid "Aus Central W. Standard Time"
@@ -11354,7 +11364,7 @@ msgstr "AUS Centrinis v. vasaros laikas"
 
 #: dlls/tzres/tzres.rc:65
 msgid "(UTC+08:45) Eucla"
-msgstr ""
+msgstr "(UTC+08:45) Jukla"
 
 #: dlls/tzres/tzres.rc:294
 msgid "Romance Standard Time"
@@ -11366,7 +11376,7 @@ msgstr "Romanų vasaros laikas"
 
 #: dlls/tzres/tzres.rc:296
 msgid "(UTC+01:00) Brussels, Copenhagen, Madrid, Paris"
-msgstr ""
+msgstr "(UTC+01:00) Briuselis, Kopenhaga, Madridas, Paryžius"
 
 #: dlls/tzres/tzres.rc:159
 msgid "Ekaterinburg Standard Time"
@@ -11378,15 +11388,15 @@ msgstr "Jekaterinburgo vasaros laikas"
 
 #: dlls/tzres/tzres.rc:161
 msgid "(UTC+05:00) Ekaterinburg"
-msgstr ""
+msgstr "(UTC+05:00) Jekaterinburgas"
 
 #: dlls/tzres/tzres.rc:300 dlls/tzres/tzres.rc:301
 msgid "Russia Time Zone 11"
-msgstr ""
+msgstr "Rusijos laiko juosta 11"
 
 #: dlls/tzres/tzres.rc:302
 msgid "(UTC+12:00) Anadyr, Petropavlovsk-Kamchatsky"
-msgstr ""
+msgstr "(UTC+12:00) Anadyris, Kamčiatkos Petropavlovskas"
 
 #: dlls/tzres/tzres.rc:432
 msgid "West Bank Standard Time"
@@ -11398,7 +11408,7 @@ msgstr "Vakarų Kranto vasaros laikas"
 
 #: dlls/tzres/tzres.rc:434
 msgid "(UTC+02:00) Gaza, Hebron"
-msgstr ""
+msgstr "(UTC+02:00) Gaza, Hebronas"
 
 #: dlls/tzres/tzres.rc:348
 msgid "Syria Standard Time"
@@ -11410,7 +11420,7 @@ msgstr "Sirijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:350
 msgid "(UTC+02:00) Damascus"
-msgstr ""
+msgstr "(UTC+02:00) Damaskas"
 
 #: dlls/tzres/tzres.rc:60
 msgid "AUS Central Standard Time"
@@ -11422,7 +11432,7 @@ msgstr "AUS Centrinis vasaros laikas"
 
 #: dlls/tzres/tzres.rc:62
 msgid "(UTC+09:30) Darwin"
-msgstr ""
+msgstr "(UTC+09:30) Darvinas"
 
 #: dlls/tzres/tzres.rc:177
 msgid "Greenwich Standard Time"
@@ -11434,7 +11444,7 @@ msgstr "Grinvičo vasaros laikas"
 
 #: dlls/tzres/tzres.rc:179
 msgid "(UTC+00:00) Monrovia, Reykjavik"
-msgstr ""
+msgstr "(UTC+00:00) Monrovija, Reikjavikas"
 
 #: dlls/tzres/tzres.rc:378
 msgid "Ulaanbaatar Standard Time"
@@ -11446,7 +11456,7 @@ msgstr "Ulan Batoro vasaros laikas"
 
 #: dlls/tzres/tzres.rc:380
 msgid "(UTC+08:00) Ulaanbaatar"
-msgstr ""
+msgstr "(UTC+08:00) Ulan Batoras"
 
 #: dlls/tzres/tzres.rc:261
 msgid "Norfolk Standard Time"
@@ -11458,7 +11468,7 @@ msgstr "Norfolko vasaros laikas"
 
 #: dlls/tzres/tzres.rc:263
 msgid "(UTC+11:00) Norfolk Island"
-msgstr ""
+msgstr "(UTC+11:00) Norfolko sala"
 
 #: dlls/tzres/tzres.rc:195
 msgid "Israel Standard Time"
@@ -11470,7 +11480,7 @@ msgstr "Izraelio vasaros laikas"
 
 #: dlls/tzres/tzres.rc:197
 msgid "(UTC+02:00) Jerusalem"
-msgstr ""
+msgstr "(UTC+02:00) Jeruzalė"
 
 #: dlls/tzres/tzres.rc:78
 msgid "Bangladesh Standard Time"
@@ -11482,7 +11492,7 @@ msgstr "Bangladešo vasaros laikas"
 
 #: dlls/tzres/tzres.rc:80
 msgid "(UTC+06:00) Dhaka"
-msgstr ""
+msgstr "(UTC+06:00) Daka"
 
 #: dlls/tzres/tzres.rc:312
 msgid "SA Pacific Standard Time"
@@ -11494,7 +11504,7 @@ msgstr "PA Ramiojo vandenyno vasaros laikas"
 
 #: dlls/tzres/tzres.rc:314
 msgid "(UTC-05:00) Bogota, Lima, Quito, Rio Branco"
-msgstr ""
+msgstr "(UTC-05:00) Bogota, Lima, Kitas, Rio Brankas"
 
 #: dlls/tzres/tzres.rc:429
 msgid "West Asia Standard Time"
@@ -11506,7 +11516,7 @@ msgstr "Vakarų Azijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:431
 msgid "(UTC+05:00) Ashgabat, Tashkent"
-msgstr ""
+msgstr "(UTC+05:00) Ašchabadas, Taškentas"
 
 #: dlls/tzres/tzres.rc:33
 msgid "Alaskan Standard Time"
@@ -11518,7 +11528,7 @@ msgstr "Aliaskos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:35
 msgid "(UTC-09:00) Alaska"
-msgstr ""
+msgstr "(UTC-09:00) Aliaska"
 
 #: dlls/tzres/tzres.rc:288
 msgid "Paraguay Standard Time"
@@ -11530,7 +11540,7 @@ msgstr "Paragvajaus vasaros laikas"
 
 #: dlls/tzres/tzres.rc:290
 msgid "(UTC-04:00) Asuncion"
-msgstr ""
+msgstr "(UTC-04:00) Asunsjonas"
 
 #: dlls/tzres/tzres.rc:132
 msgid "Dateline Standard Time"
@@ -11542,7 +11552,7 @@ msgstr "Datos keitimosi linijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:134
 msgid "(UTC-12:00) International Date Line West"
-msgstr ""
+msgstr "(UTC-12:00) Datos keitimosi linija vakarų"
 
 #: dlls/tzres/tzres.rc:207
 msgid "Libya Standard Time"
@@ -11554,7 +11564,7 @@ msgstr "Libijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:209
 msgid "(UTC+02:00) Tripoli"
-msgstr ""
+msgstr "(UTC+02:00) Tripolis"
 
 #: dlls/tzres/tzres.rc:75
 msgid "Bahia Standard Time"
@@ -11566,7 +11576,7 @@ msgstr "Bahijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:77
 msgid "(UTC-03:00) Salvador"
-msgstr ""
+msgstr "(UTC-03:00) Salvadoras"
 
 #: dlls/tzres/tzres.rc:408
 msgid "Venezuela Standard Time"
@@ -11578,7 +11588,7 @@ msgstr "Venesuelos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:410
 msgid "(UTC-04:00) Caracas"
-msgstr ""
+msgstr "(UTC-04:00) Karakasas"
 
 #: dlls/tzres/tzres.rc:84
 msgid "Bougainville Standard Time"
@@ -11590,7 +11600,7 @@ msgstr "Bugenvilio vasaros laikas"
 
 #: dlls/tzres/tzres.rc:86
 msgid "(UTC+11:00) Bougainville Island"
-msgstr ""
+msgstr "(UTC+11:00) Bugenvilio sala"
 
 #: dlls/tzres/tzres.rc:186
 msgid "Hawaiian Standard Time"
@@ -11602,7 +11612,7 @@ msgstr "Havajų vasaros laikas"
 
 #: dlls/tzres/tzres.rc:188
 msgid "(UTC-10:00) Hawaii"
-msgstr ""
+msgstr "(UTC-10:00) Havajai"
 
 #: dlls/tzres/tzres.rc:333
 msgid "SE Asia Standard Time"
@@ -11614,7 +11624,7 @@ msgstr "Pietryčių Azijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:335
 msgid "(UTC+07:00) Bangkok, Hanoi, Jakarta"
-msgstr ""
+msgstr "(UTC+07:00) Bankokas, Hanojus, Džakarta"
 
 #: dlls/tzres/tzres.rc:291
 msgid "Qyzylorda Standard Time"
@@ -11626,7 +11636,7 @@ msgstr "Kyzylordos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:293
 msgid "(UTC+05:00) Qyzylorda"
-msgstr ""
+msgstr "(UTC+05:00) Kyzylorda"
 
 #: dlls/tzres/tzres.rc:426
 msgid "W. Mongolia Standard Time"
@@ -11638,7 +11648,7 @@ msgstr "V. Mongolijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:428
 msgid "(UTC+07:00) Hovd"
-msgstr ""
+msgstr "(UTC+07:00) Chovdas"
 
 #: dlls/tzres/tzres.rc:255
 msgid "New Zealand Standard Time"
@@ -11650,7 +11660,7 @@ msgstr "Naujosios Zelandijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:257
 msgid "(UTC+12:00) Auckland, Wellington"
-msgstr ""
+msgstr "(UTC+12:00) Oklandas, Velingtonas"
 
 #: dlls/tzres/tzres.rc:36
 msgid "Aleutian Standard Time"
@@ -11662,7 +11672,7 @@ msgstr "Aleutų vasaros laikas"
 
 #: dlls/tzres/tzres.rc:38
 msgid "(UTC-10:00) Aleutian Islands"
-msgstr ""
+msgstr "(UTC-10:00) Aleutų salos"
 
 #: dlls/tzres/tzres.rc:273
 msgid "Omsk Standard Time"
@@ -11674,7 +11684,7 @@ msgstr "Omsko vasaros laikas"
 
 #: dlls/tzres/tzres.rc:275
 msgid "(UTC+06:00) Omsk"
-msgstr ""
+msgstr "(UTC+06:00) Omskas"
 
 #: dlls/tzres/tzres.rc:105
 msgid "Central Brazilian Standard Time"
@@ -11686,7 +11696,7 @@ msgstr "Centrinės Brazilijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:107
 msgid "(UTC-04:00) Cuiaba"
-msgstr ""
+msgstr "(UTC-04:00) Kujaba"
 
 #: dlls/tzres/tzres.rc:81
 msgid "Belarus Standard Time"
@@ -11698,7 +11708,7 @@ msgstr "Baltarusijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:83
 msgid "(UTC+03:00) Minsk"
-msgstr ""
+msgstr "(UTC+03:00) Minskas"
 
 #: dlls/tzres/tzres.rc:315
 msgid "SA Western Standard Time"
@@ -11710,7 +11720,7 @@ msgstr "PA Vakarinis vasaros laikas"
 
 #: dlls/tzres/tzres.rc:317
 msgid "(UTC-04:00) Georgetown, La Paz, Manaus, San Juan"
-msgstr ""
+msgstr "(UTC-04:00) Džordžtaunas, La Pasas, Manausas, San Chuanas"
 
 #: dlls/tzres/tzres.rc:174
 msgid "Greenland Standard Time"
@@ -11722,7 +11732,7 @@ msgstr "Grenlandijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:176
 msgid "(UTC-03:00) Greenland"
-msgstr ""
+msgstr "(UTC-03:00) Grenlandija"
 
 #: dlls/tzres/tzres.rc:147
 msgid "Easter Island Standard Time"
@@ -11734,15 +11744,15 @@ msgstr "Velykų salos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:149
 msgid "(UTC-06:00) Easter Island"
-msgstr ""
+msgstr "(UTC-06:00) Velykų sala"
 
 #: dlls/tzres/tzres.rc:297 dlls/tzres/tzres.rc:298
 msgid "Russia Time Zone 10"
-msgstr ""
+msgstr "Rusijos laiko juosta 10"
 
 #: dlls/tzres/tzres.rc:299
 msgid "(UTC+11:00) Chokurdakh"
-msgstr ""
+msgstr "(UTC+11:00) Čokurdachas"
 
 #: dlls/tzres/tzres.rc:156
 msgid "Egypt Standard Time"
@@ -11754,7 +11764,7 @@ msgstr "Egipto vasaros laikas"
 
 #: dlls/tzres/tzres.rc:158
 msgid "(UTC+02:00) Cairo"
-msgstr ""
+msgstr "(UTC+02:00) Kairas"
 
 #: dlls/tzres/tzres.rc:153
 msgid "Eastern Standard Time (Mexico)"
@@ -11766,7 +11776,7 @@ msgstr "Rytinis vasaros laikas (Meksika)"
 
 #: dlls/tzres/tzres.rc:155
 msgid "(UTC-05:00) Chetumal"
-msgstr ""
+msgstr "(UTC-05:00) Četumalis"
 
 #: dlls/tzres/tzres.rc:225
 msgid "Mauritius Standard Time"
@@ -11778,7 +11788,7 @@ msgstr "Mauricijaus vasaros laikas"
 
 #: dlls/tzres/tzres.rc:227
 msgid "(UTC+04:00) Port Louis"
-msgstr ""
+msgstr "(UTC+04:00) Port Luisas"
 
 #: dlls/tzres/tzres.rc:411
 msgid "Vladivostok Standard Time"
@@ -11790,7 +11800,7 @@ msgstr "Vladivostoko vasaros laikas"
 
 #: dlls/tzres/tzres.rc:413
 msgid "(UTC+10:00) Vladivostok"
-msgstr ""
+msgstr "(UTC+10:00) Vladivostokas"
 
 #: dlls/tzres/tzres.rc:336
 msgid "Singapore Standard Time"
@@ -11802,7 +11812,7 @@ msgstr "Singapūro vasaros laikas"
 
 #: dlls/tzres/tzres.rc:338
 msgid "(UTC+08:00) Kuala Lumpur, Singapore"
-msgstr ""
+msgstr "(UTC+08:00) Kvala Lumpūras, Singapūras"
 
 #: dlls/tzres/tzres.rc:204
 msgid "Korea Standard Time"
@@ -11814,7 +11824,7 @@ msgstr "Korėjos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:206
 msgid "(UTC+09:00) Seoul"
-msgstr ""
+msgstr "(UTC+09:00) Seulas"
 
 #: dlls/tzres/tzres.rc:123
 msgid "Chatham Islands Standard Time"
@@ -11826,7 +11836,7 @@ msgstr "Čatamo salų vasaros laikas"
 
 #: dlls/tzres/tzres.rc:125
 msgid "(UTC+12:45) Chatham Islands"
-msgstr ""
+msgstr "(UTC+12:45) Čatamo salos"
 
 #: dlls/tzres/tzres.rc:135
 msgid "E. Africa Standard Time"
@@ -11838,7 +11848,7 @@ msgstr "R. Afrikos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:137
 msgid "(UTC+03:00) Nairobi"
-msgstr ""
+msgstr "(UTC+03:00) Nairobis"
 
 #: dlls/tzres/tzres.rc:165
 msgid "FLE Standard Time"
@@ -11850,7 +11860,7 @@ msgstr "SLE vasaros laikas"
 
 #: dlls/tzres/tzres.rc:167
 msgid "(UTC+02:00) Helsinki, Kyiv, Riga, Sofia, Tallinn, Vilnius"
-msgstr ""
+msgstr "(UTC+02:00) Helsinkis, Kijevas, Ryga, Sofija, Talinas, Vilnius"
 
 #: dlls/tzres/tzres.rc:144
 msgid "E. South America Standard Time"
@@ -11862,7 +11872,7 @@ msgstr "R. Pietų Amerikos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:146
 msgid "(UTC-03:00) Brasilia"
-msgstr ""
+msgstr "(UTC-03:00) Brazilija"
 
 #: dlls/tzres/tzres.rc:114
 msgid "Central Pacific Standard Time"
@@ -11874,7 +11884,7 @@ msgstr "Vidurio Ramiojo vandenyno vasaros laikas"
 
 #: dlls/tzres/tzres.rc:116
 msgid "(UTC+11:00) Solomon Is., New Caledonia"
-msgstr ""
+msgstr "(UTC+11:00) Saliamono Salos, Naujoji Kaledonija"
 
 #: dlls/tzres/tzres.rc:420
 msgid "W. Central Africa Standard Time"
@@ -11886,7 +11896,7 @@ msgstr "V. Vidurio Afrikos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:422
 msgid "(UTC+01:00) West Central Africa"
-msgstr ""
+msgstr "(UTC+01:00) Vakarų vidurio Afrika"
 
 #: dlls/tzres/tzres.rc:276
 msgid "Pacific SA Standard Time"
@@ -11898,7 +11908,7 @@ msgstr "Ramiojo vandenyno PA vasaros laikas"
 
 #: dlls/tzres/tzres.rc:278
 msgid "(UTC-04:00) Santiago"
-msgstr ""
+msgstr "(UTC-04:00) Santjagas"
 
 #: dlls/tzres/tzres.rc:138
 msgid "E. Australia Standard Time"
@@ -11910,7 +11920,7 @@ msgstr "R. Australijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:140
 msgid "(UTC+10:00) Brisbane"
-msgstr ""
+msgstr "(UTC+10:00) Brisbanas"
 
 #: dlls/tzres/tzres.rc:417
 msgid "W. Australia Standard Time"
@@ -11922,7 +11932,7 @@ msgstr "V. Australijos vasaros laikas"
 
 #: dlls/tzres/tzres.rc:419
 msgid "(UTC+08:00) Perth"
-msgstr ""
+msgstr "(UTC+08:00) Pertas"
 
 #: dlls/urlmon/urlmon.rc:32 dlls/wininet/wininet.rc:88
 msgid "Security Warning"

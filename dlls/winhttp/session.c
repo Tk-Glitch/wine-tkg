@@ -48,8 +48,10 @@ void send_callback( struct object_header *hdr, DWORD status, void *info, DWORD b
 {
     if (hdr->callback && (hdr->notify_mask & status))
     {
-        TRACE("%p, 0x%08x, %p, %u\n", hdr, status, info, buflen);
+        TRACE("%p, 0x%08x, %p, %u, %u\n", hdr, status, info, buflen, hdr->recursion_count);
+        InterlockedIncrement( &hdr->recursion_count );
         hdr->callback( hdr->handle, hdr->context, status, info, buflen );
+        InterlockedDecrement( &hdr->recursion_count );
         TRACE("returning from 0x%08x callback\n", status);
     }
 }
@@ -82,6 +84,17 @@ static void session_destroy( struct object_header *hdr )
     free( session );
 }
 
+static BOOL validate_buffer( void *buffer, DWORD *buflen, DWORD required )
+{
+    if (!buffer || *buflen < required)
+    {
+        *buflen = required;
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static BOOL session_query_option( struct object_header *hdr, DWORD option, void *buffer, DWORD *buflen )
 {
     struct session *session = (struct session *)hdr;
@@ -90,38 +103,43 @@ static BOOL session_query_option( struct object_header *hdr, DWORD option, void 
     {
     case WINHTTP_OPTION_REDIRECT_POLICY:
     {
-        if (!buffer || *buflen < sizeof(DWORD))
-        {
-            *buflen = sizeof(DWORD);
-            SetLastError( ERROR_INSUFFICIENT_BUFFER );
-            return FALSE;
-        }
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
 
         *(DWORD *)buffer = hdr->redirect_policy;
         *buflen = sizeof(DWORD);
         return TRUE;
     }
     case WINHTTP_OPTION_RESOLVE_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = session->resolve_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_CONNECT_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = session->connect_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_SEND_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = session->send_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_RECEIVE_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = session->receive_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = session->receive_response_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
@@ -314,38 +332,43 @@ static BOOL connect_query_option( struct object_header *hdr, DWORD option, void 
     {
     case WINHTTP_OPTION_PARENT_HANDLE:
     {
-        if (!buffer || *buflen < sizeof(HINTERNET))
-        {
-            *buflen = sizeof(HINTERNET);
-            SetLastError( ERROR_INSUFFICIENT_BUFFER );
-            return FALSE;
-        }
+        if (!validate_buffer( buffer, buflen, sizeof(HINTERNET) )) return FALSE;
 
         *(HINTERNET *)buffer = ((struct object_header *)connect->session)->handle;
         *buflen = sizeof(HINTERNET);
         return TRUE;
     }
     case WINHTTP_OPTION_RESOLVE_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = connect->session->resolve_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_CONNECT_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = connect->session->connect_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_SEND_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = connect->session->send_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_RECEIVE_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = connect->session->receive_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = connect->session->receive_response_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
@@ -669,12 +692,7 @@ static BOOL request_query_option( struct object_header *hdr, DWORD option, void 
         DWORD flags;
         int bits;
 
-        if (!buffer || *buflen < sizeof(flags))
-        {
-            *buflen = sizeof(flags);
-            SetLastError( ERROR_INSUFFICIENT_BUFFER );
-            return FALSE;
-        }
+        if (!validate_buffer( buffer, buflen, sizeof(flags) )) return FALSE;
 
         flags = request->security_flags;
         if (request->netconn)
@@ -695,12 +713,7 @@ static BOOL request_query_option( struct object_header *hdr, DWORD option, void 
     {
         const CERT_CONTEXT *cert;
 
-        if (!buffer || *buflen < sizeof(cert))
-        {
-            *buflen = sizeof(cert);
-            SetLastError( ERROR_INSUFFICIENT_BUFFER );
-            return FALSE;
-        }
+        if (!validate_buffer( buffer, buflen, sizeof(cert) )) return FALSE;
 
         if (!(cert = CertDuplicateCertificateContext( request->server_cert ))) return FALSE;
         *(CERT_CONTEXT **)buffer = (CERT_CONTEXT *)cert;
@@ -715,13 +728,7 @@ static BOOL request_query_option( struct object_header *hdr, DWORD option, void 
 
         FIXME("partial stub\n");
 
-        if (!buffer || *buflen < sizeof(*ci))
-        {
-            *buflen = sizeof(*ci);
-            SetLastError( ERROR_INSUFFICIENT_BUFFER );
-            return FALSE;
-        }
-        if (!cert) return FALSE;
+        if (!validate_buffer( buffer, buflen, sizeof(*ci) ) || !cert) return FALSE;
 
         ci->ftExpiry = cert->pCertInfo->NotAfter;
         ci->ftStart  = cert->pCertInfo->NotBefore;
@@ -741,12 +748,7 @@ static BOOL request_query_option( struct object_header *hdr, DWORD option, void 
     }
     case WINHTTP_OPTION_SECURITY_KEY_BITNESS:
     {
-        if (!buffer || *buflen < sizeof(DWORD))
-        {
-            *buflen = sizeof(DWORD);
-            SetLastError( ERROR_INSUFFICIENT_BUFFER );
-            return FALSE;
-        }
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
 
         *(DWORD *)buffer = request->netconn ? netconn_get_cipher_strength( request->netconn ) : 0;
         *buflen = sizeof(DWORD);
@@ -759,12 +761,8 @@ static BOOL request_query_option( struct object_header *hdr, DWORD option, void 
         socklen_t len = sizeof(local);
         const struct sockaddr *remote = (const struct sockaddr *)&request->connect->sockaddr;
 
-        if (!buffer || *buflen < sizeof(*info))
-        {
-            *buflen = sizeof(*info);
-            SetLastError( ERROR_INSUFFICIENT_BUFFER );
-            return FALSE;
-        }
+        if (!validate_buffer( buffer, buflen, sizeof(*info) )) return FALSE;
+
         if (!request->netconn)
         {
             SetLastError( ERROR_WINHTTP_INCORRECT_HANDLE_STATE );
@@ -777,26 +775,36 @@ static BOOL request_query_option( struct object_header *hdr, DWORD option, void 
         return TRUE;
     }
     case WINHTTP_OPTION_RESOLVE_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = request->resolve_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_CONNECT_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = request->connect_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_SEND_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = request->send_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_RECEIVE_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = request->receive_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
 
     case WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = request->receive_response_timeout;
         *buflen = sizeof(DWORD);
         return TRUE;
@@ -818,7 +826,17 @@ static BOOL request_query_option( struct object_header *hdr, DWORD option, void 
         return TRUE;
 
     case WINHTTP_OPTION_MAX_HTTP_AUTOMATIC_REDIRECTS:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
         *(DWORD *)buffer = request->max_redirects;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+
+    case WINHTTP_OPTION_HTTP_PROTOCOL_USED:
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD) )) return FALSE;
+
+        FIXME("WINHTTP_OPTION_HTTP_PROTOCOL_USED\n");
+        *(DWORD *)buffer = 0;
         *buflen = sizeof(DWORD);
         return TRUE;
 
@@ -1049,6 +1067,15 @@ static BOOL request_set_option( struct object_header *hdr, DWORD option, void *b
         FIXME("WINHTTP_OPTION_MAX_RESPONSE_DRAIN_SIZE\n");
         return TRUE;
 
+    case WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL:
+        if (buflen == sizeof(DWORD))
+        {
+            FIXME("WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL %08x\n", *(DWORD *)buffer);
+            return TRUE;
+        }
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+
     default:
         FIXME("unimplemented option %u\n", option);
         SetLastError( ERROR_WINHTTP_INVALID_OPTION );
@@ -1199,12 +1226,7 @@ static BOOL query_option( struct object_header *hdr, DWORD option, void *buffer,
     {
     case WINHTTP_OPTION_CONTEXT_VALUE:
     {
-        if (!buffer || *buflen < sizeof(DWORD_PTR))
-        {
-            *buflen = sizeof(DWORD_PTR);
-            SetLastError( ERROR_INSUFFICIENT_BUFFER );
-            return FALSE;
-        }
+        if (!validate_buffer( buffer, buflen, sizeof(DWORD_PTR) )) return FALSE;
 
         *(DWORD_PTR *)buffer = hdr->context;
         *buflen = sizeof(DWORD_PTR);

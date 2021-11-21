@@ -308,7 +308,8 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
     UNICODE_STRING name;
     NTSTATUS status;
     ULONG size = 256;
-    char *buffer, *backup = NULL;
+    const char *home;
+    char *buffer = NULL, *backup = NULL, *homelink = NULL;
     struct stat st;
     unsigned int i;
 
@@ -326,8 +327,21 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
         if (!link[0]) link = NULL;
     }
 
+    if (link && (!strcmp( link, "$HOME" ) || !strncmp( link, "$HOME/", 6 )) && (home = getenv( "HOME" )))
+    {
+        link += 5;
+        homelink = HeapAlloc( GetProcessHeap(), 0, strlen(home) + strlen(link) + 1 );
+        strcpy( homelink, home );
+        strcat( homelink, link );
+        link = homelink;
+    }
+
     /* ignore nonexistent link targets */
-    if (link && stat( link, &st )) return STATUS_OBJECT_NAME_NOT_FOUND;
+    if (link && (stat( link, &st ) || !S_ISDIR( st.st_mode )))
+    {
+        status = STATUS_OBJECT_NAME_NOT_FOUND;
+        goto done;
+    }
 
     name.Buffer = (WCHAR *)((char *)in_buff + input->folder_offset);
     name.Length = input->folder_size;
@@ -335,20 +349,28 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
 
     for (;;)
     {
-        if (!(buffer = HeapAlloc( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
-        status = wine_nt_to_unix_file_name( &attr, buffer, &size, FILE_OPEN );
-        if (!status) break;
+        if (!(buffer = HeapAlloc( GetProcessHeap(), 0, size )))
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        status = wine_nt_to_unix_file_name( &attr, buffer, &size, FILE_OPEN_IF );
+        if (status == STATUS_NO_SUCH_FILE) status = STATUS_SUCCESS;
+        if (status == STATUS_SUCCESS) break;
+        if (status != STATUS_BUFFER_TOO_SMALL) goto done;
         HeapFree( GetProcessHeap(), 0, buffer );
-        if (status != STATUS_BUFFER_TOO_SMALL) return status;
     }
 
-    if (!(backup = HeapAlloc( GetProcessHeap(), 0, strlen(buffer) + sizeof(".backup" ) )))
+    if (input->create_backup)
     {
-        status = STATUS_NO_MEMORY;
-        goto done;
+        if (!(backup = HeapAlloc( GetProcessHeap(), 0, strlen(buffer) + sizeof(".backup" ) )))
+        {
+            status = STATUS_NO_MEMORY;
+            goto done;
+        }
+        strcpy( backup, buffer );
+        strcat( backup, ".backup" );
     }
-    strcpy( backup, buffer );
-    strcat( backup, ".backup" );
 
     if (!lstat( buffer, &st )) /* move old folder/link out of the way */
     {
@@ -380,6 +402,7 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
 done:
     HeapFree( GetProcessHeap(), 0, buffer );
     HeapFree( GetProcessHeap(), 0, backup );
+    HeapFree( GetProcessHeap(), 0, homelink );
     return status;
 }
 

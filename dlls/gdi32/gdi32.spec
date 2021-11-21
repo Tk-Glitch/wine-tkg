@@ -1,10 +1,3 @@
-# ordinal exports
-100 stdcall @(long long str str str) GDI_CallDevInstall16
-101 stdcall @(long str str ptr) GDI_CallExtDeviceModePropSheet16
-102 stdcall @(long ptr str str ptr str long) GDI_CallExtDeviceMode16
-103 stdcall @(long str ptr ptr) GDI_CallAdvancedSetupDialog16
-104 stdcall @(str str long ptr ptr) GDI_CallDeviceCapabilities16
-
 @ stdcall AbortDoc(long)
 @ stdcall AbortPath(long)
 @ stdcall AddFontMemResourceEx(ptr long ptr ptr)
@@ -87,6 +80,7 @@
 @ stdcall D3DKMTDestroyDCFromMemory(ptr) NtGdiDdDDIDestroyDCFromMemory
 @ stdcall D3DKMTDestroyDevice(ptr) NtGdiDdDDIDestroyDevice
 @ stdcall D3DKMTEscape(ptr) NtGdiDdDDIEscape
+@ stdcall D3DKMTOpenAdapterFromDeviceName(ptr) NtGdiDdDDIOpenAdapterFromDeviceName
 @ stdcall D3DKMTOpenAdapterFromGdiDisplayName(ptr)
 @ stdcall D3DKMTOpenAdapterFromHdc(ptr) NtGdiDdDDIOpenAdapterFromHdc
 @ stdcall D3DKMTOpenAdapterFromLuid(ptr) NtGdiDdDDIOpenAdapterFromLuid

@@ -348,7 +348,7 @@ static HRGN path_to_region( const struct gdi_path *path, int mode )
     if (i > pos + 1) counts[polygons++] = i - pos;
 
     assert( polygons <= path->count / 2 );
-    hrgn = CreatePolyPolygonRgn( path->points, counts, polygons, mode );
+    hrgn = create_polypolygon_region( path->points, counts, polygons, mode, NULL );
     HeapFree( GetProcessHeap(), 0, counts );
     return hrgn;
 }
@@ -1535,7 +1535,7 @@ static BOOL CDECL pathdrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, con
         DWORD dwSize;
         void *outline;
 
-        dwSize = GetGlyphOutlineW(dev->hdc, str[idx], ggo_flags, &gm, 0, NULL, &identity);
+        dwSize = NtGdiGetGlyphOutline( dev->hdc, str[idx], ggo_flags, &gm, 0, NULL, &identity, FALSE );
         if (dwSize == GDI_ERROR) continue;
 
         /* add outline only if char is printable */
@@ -1544,7 +1544,7 @@ static BOOL CDECL pathdrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, con
             outline = HeapAlloc(GetProcessHeap(), 0, dwSize);
             if (!outline) return FALSE;
 
-            GetGlyphOutlineW(dev->hdc, str[idx], ggo_flags, &gm, dwSize, outline, &identity);
+            NtGdiGetGlyphOutline( dev->hdc, str[idx], ggo_flags, &gm, dwSize, outline, &identity, FALSE );
             PATH_add_outline(physdev, x + offset.x, y + offset.y, outline, dwSize);
 
             HeapFree(GetProcessHeap(), 0, outline);
@@ -1618,23 +1618,25 @@ static struct gdi_path *PATH_WidenPath(DC *dc)
     BYTE *type;
     DWORD obj_type, joint, endcap, penType;
 
-    size = GetObjectW( dc->hPen, 0, NULL );
+    size = NtGdiExtGetObjectW( dc->hPen, 0, NULL );
     if (!size) {
         SetLastError(ERROR_CAN_NOT_COMPLETE);
         return NULL;
     }
 
     elp = HeapAlloc( GetProcessHeap(), 0, size );
-    GetObjectW( dc->hPen, size, elp );
+    NtGdiExtGetObjectW( dc->hPen, size, elp );
 
-    obj_type = GetObjectType(dc->hPen);
-    if(obj_type == OBJ_PEN) {
+    obj_type = get_gdi_object_type(dc->hPen);
+    switch (obj_type)
+    {
+    case NTGDI_OBJ_PEN:
         penStyle = ((LOGPEN*)elp)->lopnStyle;
-    }
-    else if(obj_type == OBJ_EXTPEN) {
+        break;
+    case NTGDI_OBJ_EXTPEN:
         penStyle = elp->elpPenStyle;
-    }
-    else {
+        break;
+    default:
         SetLastError(ERROR_CAN_NOT_COMPLETE);
         HeapFree( GetProcessHeap(), 0, elp );
         return NULL;
@@ -2040,13 +2042,11 @@ const struct gdi_dc_funcs path_driver =
     pathdrv_CreateDC,                   /* pCreateDC */
     pathdrv_DeleteDC,                   /* pDeleteDC */
     NULL,                               /* pDeleteObject */
-    NULL,                               /* pDeviceCapabilities */
     pathdrv_Ellipse,                    /* pEllipse */
     NULL,                               /* pEndDoc */
     NULL,                               /* pEndPage */
     pathdrv_EndPath,                    /* pEndPath */
     NULL,                               /* pEnumFonts */
-    NULL,                               /* pExtDeviceMode */
     NULL,                               /* pExtEscape */
     NULL,                               /* pExtFloodFill */
     pathdrv_ExtTextOut,                 /* pExtTextOut */

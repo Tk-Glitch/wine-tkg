@@ -93,3 +93,74 @@ void* WINAPI FltGetRoutineAddress(LPCSTR name)
 
     return func;
 }
+
+NTSTATUS WINAPI FltBuildDefaultSecurityDescriptor(PSECURITY_DESCRIPTOR *descriptor, ACCESS_MASK access)
+{
+    PACL dacl;
+    NTSTATUS ret = STATUS_INSUFFICIENT_RESOURCES;
+    ULONG sid_len;
+    PSID sid;
+    PSID sid_system;
+    PSECURITY_DESCRIPTOR sec_desc = NULL;
+    SID_IDENTIFIER_AUTHORITY auth = { SECURITY_NULL_SID_AUTHORITY };
+
+    *descriptor = NULL;
+
+    ret = RtlAllocateAndInitializeSid(&auth, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_GROUP_RID_ADMINS,
+                                         0, 0, 0, 0, 0, 0, &sid);
+    if (ret != STATUS_SUCCESS)
+        goto done;
+
+    ret = RtlAllocateAndInitializeSid(&auth, 1, SECURITY_LOCAL_SYSTEM_RID, 0, 0, 0, 0, 0, 0, 0, &sid_system);
+    if (ret != STATUS_SUCCESS)
+        goto done;
+
+    sid_len = SECURITY_DESCRIPTOR_MIN_LENGTH + sizeof(ACL) +
+            sizeof(ACCESS_ALLOWED_ACE) + RtlLengthSid(sid) +
+            sizeof(ACCESS_ALLOWED_ACE) + RtlLengthSid(sid_system);
+
+    sec_desc = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, sid_len);
+    if (!sec_desc)
+    {
+        ret = STATUS_NO_MEMORY;
+        goto done;
+    }
+
+    ret = RtlCreateSecurityDescriptor(sec_desc, SECURITY_DESCRIPTOR_REVISION);
+    if (ret != STATUS_SUCCESS)
+        goto done;
+
+    dacl = (PACL)((char*)sec_desc + SECURITY_DESCRIPTOR_MIN_LENGTH);
+    ret = RtlCreateAcl(dacl, sid_len - SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION);
+    if (ret != STATUS_SUCCESS)
+        goto done;
+
+    ret = RtlAddAccessAllowedAce(dacl, ACL_REVISION, access, sid);
+    if (ret != STATUS_SUCCESS)
+        goto done;
+
+    ret = RtlAddAccessAllowedAce(dacl, ACL_REVISION, access, sid_system);
+    if (ret != STATUS_SUCCESS)
+        goto done;
+
+    ret = RtlSetDaclSecurityDescriptor(sec_desc, 1, dacl, 0);
+    if (ret == STATUS_SUCCESS)
+        *descriptor = sec_desc;
+
+done:
+    if (ret != STATUS_SUCCESS && sec_desc != NULL)
+        RtlFreeHeap(GetProcessHeap(), 0, sec_desc);
+
+    if (sid != NULL)
+        RtlFreeHeap(GetProcessHeap(), 0, sid);
+
+    if (sid_system != NULL)
+        RtlFreeHeap(GetProcessHeap(), 0, sid_system);
+
+    return ret;
+}
+
+void WINAPI FltFreeSecurityDescriptor(PSECURITY_DESCRIPTOR descriptor)
+{
+    RtlFreeHeap(GetProcessHeap(), 0, descriptor);
+}

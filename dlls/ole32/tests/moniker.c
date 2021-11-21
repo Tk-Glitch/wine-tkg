@@ -36,8 +36,6 @@
 #include "wine/test.h"
 #include "wine/heap.h"
 
-#define ok_more_than_one_lock() ok(cLocks > 0, "Number of locks should be > 0, but actually is %d\n", cLocks)
-#define ok_no_locks() ok(cLocks == 0, "Number of locks should be 0, but actually is %d\n", cLocks)
 #define ok_ole_success(hr, func) ok(hr == S_OK, #func " failed with error 0x%08x\n", hr)
 
 #define CHECK_EXPECTED_METHOD(method_name) \
@@ -69,15 +67,6 @@ DEFINE_OLEGUID(CLSID_AntiMoniker,      0x305, 0, 0);
 DEFINE_OLEGUID(CLSID_CompositeMoniker, 0x309, 0, 0);
 DEFINE_OLEGUID(CLSID_ClassMoniker,     0x31a, 0, 0);
 DEFINE_OLEGUID(CLSID_PointerMoniker,   0x306, 0, 0);
-
-#define EXPECT_REF(obj,ref) _expect_ref((IUnknown *)obj, ref, __LINE__)
-static void _expect_ref(IUnknown* obj, ULONG ref, int line)
-{
-    ULONG refcount;
-    IUnknown_AddRef(obj);
-    refcount = IUnknown_Release(obj);
-    ok_(__FILE__, line)(refcount == ref, "Unexpected got %u.\n", refcount);
-}
 
 #define TEST_MONIKER_TYPE_TODO(m,t) _test_moniker_type(m, t, TRUE, __LINE__)
 #define TEST_MONIKER_TYPE(m,t) _test_moniker_type(m, t, FALSE, __LINE__)
@@ -138,16 +127,55 @@ static IMoniker *create_antimoniker(DWORD level)
     return moniker;
 }
 
-static LONG cLocks;
-
-static void LockModule(void)
+static HRESULT create_moniker_parse_desc(const char *desc, unsigned int *eaten,
+        IMoniker **moniker)
 {
-    InterlockedIncrement(&cLocks);
+    unsigned int comp_len = 0;
+    WCHAR itemnameW[3] = L"Ix";
+    IMoniker *left, *right;
+    HRESULT hr;
+
+    switch (*desc)
+    {
+        case 'I':
+            itemnameW[1] = desc[1];
+            *eaten = 2;
+            return CreateItemMoniker(L"!", itemnameW, moniker);
+        case 'A':
+            *eaten = 2;
+            *moniker = create_antimoniker(desc[1] - '0');
+            return S_OK;
+        case 'C':
+            *eaten = 1;
+            desc++;
+
+            comp_len = 0;
+            hr = create_moniker_parse_desc(desc, &comp_len, &left);
+            ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+            *eaten += comp_len;
+            desc += comp_len;
+
+            comp_len = 0;
+            hr = create_moniker_parse_desc(desc, &comp_len, &right);
+            ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+            *eaten += comp_len;
+
+            hr = CreateGenericComposite(left, right, moniker);
+            IMoniker_Release(left);
+            IMoniker_Release(right);
+            return hr;
+        default:
+            ok(0, "Unexpected description %s.\n", desc);
+            return E_NOTIMPL;
+    }
 }
 
-static void UnlockModule(void)
+static HRESULT create_moniker_from_desc(const char *desc, IMoniker **moniker)
 {
-    InterlockedDecrement(&cLocks);
+    unsigned int eaten = 0;
+    return create_moniker_parse_desc(desc, &eaten, moniker);
 }
 
 static SIZE_T round_global_size(SIZE_T size)
@@ -163,7 +191,23 @@ static SIZE_T round_global_size(SIZE_T size)
     return ((size + global_size_alignment - 1) & ~(global_size_alignment - 1));
 }
 
-static DWORD external_connections;
+struct test_factory
+{
+    IClassFactory IClassFactory_iface;
+    IExternalConnection IExternalConnection_iface;
+    LONG refcount;
+    unsigned int external_connections;
+};
+
+static struct test_factory *impl_from_IClassFactory(IClassFactory *iface)
+{
+    return CONTAINING_RECORD(iface, struct test_factory, IClassFactory_iface);
+}
+
+static struct test_factory *impl_from_IExternalConnection(IExternalConnection *iface)
+{
+    return CONTAINING_RECORD(iface, struct test_factory, IExternalConnection_iface);
+}
 
 static HRESULT WINAPI ExternalConnection_QueryInterface(IExternalConnection *iface, REFIID riid, void **ppv)
 {
@@ -174,28 +218,31 @@ static HRESULT WINAPI ExternalConnection_QueryInterface(IExternalConnection *ifa
 
 static ULONG WINAPI ExternalConnection_AddRef(IExternalConnection *iface)
 {
-    return 2;
+    struct test_factory *factory = impl_from_IExternalConnection(iface);
+    return IClassFactory_AddRef(&factory->IClassFactory_iface);
 }
 
 static ULONG WINAPI ExternalConnection_Release(IExternalConnection *iface)
 {
-    return 1;
+    struct test_factory *factory = impl_from_IExternalConnection(iface);
+    return IClassFactory_Release(&factory->IClassFactory_iface);
 }
 
 static DWORD WINAPI ExternalConnection_AddConnection(IExternalConnection *iface, DWORD extconn, DWORD reserved)
 {
-    ok(extconn == EXTCONN_STRONG, "extconn = %d\n", extconn);
+    struct test_factory *factory = impl_from_IExternalConnection(iface);
+    ok(extconn == EXTCONN_STRONG, "Unexpected connection type %d\n", extconn);
     ok(!reserved, "reserved = %x\n", reserved);
-    return ++external_connections;
+    return ++factory->external_connections;
 }
 
 static DWORD WINAPI ExternalConnection_ReleaseConnection(IExternalConnection *iface, DWORD extconn,
         DWORD reserved, BOOL fLastReleaseCloses)
 {
-    ok(extconn == EXTCONN_STRONG, "extconn = %d\n", extconn);
+    struct test_factory *factory = impl_from_IExternalConnection(iface);
+    ok(extconn == EXTCONN_STRONG, "Unexpected connection type %d\n", extconn);
     ok(!reserved, "reserved = %x\n", reserved);
-
-    return --external_connections;
+    return --factory->external_connections;
 }
 
 static const IExternalConnectionVtbl ExternalConnectionVtbl = {
@@ -206,70 +253,70 @@ static const IExternalConnectionVtbl ExternalConnectionVtbl = {
     ExternalConnection_ReleaseConnection
 };
 
-static IExternalConnection ExternalConnection = { &ExternalConnectionVtbl };
-
-static HRESULT WINAPI Test_IClassFactory_QueryInterface(
-    LPCLASSFACTORY iface,
-    REFIID riid,
-    LPVOID *ppvObj)
+static HRESULT WINAPI test_factory_QueryInterface(IClassFactory *iface, REFIID riid, void **obj)
 {
-    if (ppvObj == NULL) return E_POINTER;
+    struct test_factory *factory = impl_from_IClassFactory(iface);
+
+    if (!obj) return E_POINTER;
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IClassFactory))
     {
-        *ppvObj = iface;
-        IClassFactory_AddRef(iface);
-        return S_OK;
+        *obj = iface;
+    }
+    else if (IsEqualGUID(riid, &IID_IExternalConnection))
+    {
+        *obj = &factory->IExternalConnection_iface;
+    }
+    else
+    {
+        *obj = NULL;
+        return E_NOINTERFACE;
     }
 
-    if(IsEqualGUID(riid, &IID_IExternalConnection)) {
-        *ppvObj = &ExternalConnection;
-        return S_OK;
-    }
-
-    *ppvObj = NULL;
-    return E_NOINTERFACE;
+    IUnknown_AddRef((IUnknown *)*obj);
+    return S_OK;
 }
 
-static ULONG WINAPI Test_IClassFactory_AddRef(LPCLASSFACTORY iface)
+static ULONG WINAPI test_factory_AddRef(IClassFactory *iface)
 {
-    LockModule();
-    return 2; /* non-heap-based object */
+    struct test_factory *factory = impl_from_IClassFactory(iface);
+    return InterlockedIncrement(&factory->refcount);
 }
 
-static ULONG WINAPI Test_IClassFactory_Release(LPCLASSFACTORY iface)
+static ULONG WINAPI test_factory_Release(IClassFactory *iface)
 {
-    UnlockModule();
-    return 1; /* non-heap-based object */
+    struct test_factory *factory = impl_from_IClassFactory(iface);
+    return InterlockedDecrement(&factory->refcount);
 }
 
-static HRESULT WINAPI Test_IClassFactory_CreateInstance(
-    LPCLASSFACTORY iface,
-    LPUNKNOWN pUnkOuter,
-    REFIID riid,
-    LPVOID *ppvObj)
+static HRESULT WINAPI test_factory_CreateInstance(IClassFactory *iface, IUnknown *outer,
+        REFIID riid, void **obj)
 {
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI Test_IClassFactory_LockServer(
-    LPCLASSFACTORY iface,
-    BOOL fLock)
+static HRESULT WINAPI test_factory_LockServer(IClassFactory *iface, BOOL lock)
 {
     return S_OK;
 }
 
-static const IClassFactoryVtbl TestClassFactory_Vtbl =
+static const IClassFactoryVtbl test_factory_vtbl =
 {
-    Test_IClassFactory_QueryInterface,
-    Test_IClassFactory_AddRef,
-    Test_IClassFactory_Release,
-    Test_IClassFactory_CreateInstance,
-    Test_IClassFactory_LockServer
+    test_factory_QueryInterface,
+    test_factory_AddRef,
+    test_factory_Release,
+    test_factory_CreateInstance,
+    test_factory_LockServer
 };
 
-static IClassFactory Test_ClassFactory = { &TestClassFactory_Vtbl };
+static void test_factory_init(struct test_factory *factory)
+{
+    factory->IClassFactory_iface.lpVtbl = &test_factory_vtbl;
+    factory->IExternalConnection_iface.lpVtbl = &ExternalConnectionVtbl;
+    factory->refcount = 1;
+    factory->external_connections = 0;
+}
 
 typedef struct
 {
@@ -796,6 +843,7 @@ static void test_ROT(void)
     IMoniker *pMoniker = NULL;
     struct test_moniker *test_moniker;
     IRunningObjectTable *pROT = NULL;
+    struct test_factory factory;
     DWORD dwCookie;
     static const char *methods_register_no_ROTData[] =
     {
@@ -830,7 +878,7 @@ static void test_ROT(void)
         NULL
     };
 
-    cLocks = 0;
+    test_factory_init(&factory);
 
     hr = GetRunningObjectTable(0, &pROT);
     ok_ole_success(hr, GetRunningObjectTable);
@@ -839,15 +887,13 @@ static void test_ROT(void)
     test_moniker->no_IROTData = TRUE;
 
     expected_method_list = methods_register_no_ROTData;
-    external_connections = 0;
     /* try with our own moniker that doesn't support IROTData */
-    hr = IRunningObjectTable_Register(pROT, ROTFLAGS_REGISTRATIONKEEPSALIVE, (IUnknown *)&Test_ClassFactory,
+    hr = IRunningObjectTable_Register(pROT, ROTFLAGS_REGISTRATIONKEEPSALIVE, (IUnknown *)&factory.IClassFactory_iface,
             &test_moniker->IMoniker_iface, &dwCookie);
     ok(hr == S_OK, "Failed to register interface, hr %#x.\n", hr);
     ok(!*expected_method_list, "Method sequence starting from %s not called\n", *expected_method_list);
-    ok(external_connections == 1, "external_connections = %d\n", external_connections);
-
-    ok_more_than_one_lock();
+    ok(factory.external_connections == 1, "external_connections = %d\n", factory.external_connections);
+    ok(factory.refcount > 1, "Unexpected factory refcount %u.\n", factory.refcount);
 
     expected_method_list = methods_isrunning_no_ROTData;
     hr = IRunningObjectTable_IsRunning(pROT, &test_moniker->IMoniker_iface);
@@ -856,19 +902,17 @@ static void test_ROT(void)
 
     hr = IRunningObjectTable_Revoke(pROT, dwCookie);
     ok_ole_success(hr, IRunningObjectTable_Revoke);
-    ok(external_connections == 0, "external_connections = %d\n", external_connections);
-
-    ok_no_locks();
+    ok(!factory.external_connections, "external_connections = %d\n", factory.external_connections);
+    ok(factory.refcount == 1, "Unexpected factory refcount %u.\n", factory.refcount);
 
     expected_method_list = methods_register;
     /* try with our own moniker */
     test_moniker->no_IROTData = FALSE;
-    hr = IRunningObjectTable_Register(pROT, ROTFLAGS_REGISTRATIONKEEPSALIVE,
-        (IUnknown *)&Test_ClassFactory, &test_moniker->IMoniker_iface, &dwCookie);
+    hr = IRunningObjectTable_Register(pROT, ROTFLAGS_REGISTRATIONKEEPSALIVE, (IUnknown *)&factory.IClassFactory_iface,
+            &test_moniker->IMoniker_iface, &dwCookie);
     ok_ole_success(hr, IRunningObjectTable_Register);
     ok(!*expected_method_list, "Method sequence starting from %s not called\n", *expected_method_list);
-
-    ok_more_than_one_lock();
+    ok(factory.refcount > 1, "Unexpected factory refcount %u.\n", factory.refcount);
 
     expected_method_list = methods_isrunning;
     hr = IRunningObjectTable_IsRunning(pROT, &test_moniker->IMoniker_iface);
@@ -877,50 +921,47 @@ static void test_ROT(void)
 
     hr = IRunningObjectTable_Revoke(pROT, dwCookie);
     ok_ole_success(hr, IRunningObjectTable_Revoke);
-
-    ok_no_locks();
+    ok(factory.refcount == 1, "Unexpected factory refcount %u.\n", factory.refcount);
 
     hr = CreateFileMoniker(wszFileName, &pMoniker);
     ok_ole_success(hr, CreateClassMoniker);
 
     /* test flags: 0 */
-    external_connections = 0;
-    hr = IRunningObjectTable_Register(pROT, 0, (IUnknown*)&Test_ClassFactory,
-                                      pMoniker, &dwCookie);
+    factory.external_connections = 0;
+    hr = IRunningObjectTable_Register(pROT, 0, (IUnknown *)&factory.IClassFactory_iface, pMoniker, &dwCookie);
     ok_ole_success(hr, IRunningObjectTable_Register);
-    ok(external_connections == 0, "external_connections = %d\n", external_connections);
-
-    ok_more_than_one_lock();
+    ok(!factory.external_connections, "external_connections = %d\n", factory.external_connections);
+    ok(factory.refcount > 1, "Unexpected factory refcount %u.\n", factory.refcount);
 
     hr = IRunningObjectTable_Revoke(pROT, dwCookie);
     ok_ole_success(hr, IRunningObjectTable_Revoke);
-
-    ok_no_locks();
+    ok(factory.refcount == 1, "Unexpected factory refcount %u.\n", factory.refcount);
 
     /* test flags: ROTFLAGS_REGISTRATIONKEEPSALIVE */
-    hr = IRunningObjectTable_Register(pROT, ROTFLAGS_REGISTRATIONKEEPSALIVE,
-        (IUnknown*)&Test_ClassFactory, pMoniker, &dwCookie);
+    hr = IRunningObjectTable_Register(pROT, ROTFLAGS_REGISTRATIONKEEPSALIVE, (IUnknown *)&factory.IClassFactory_iface,
+            pMoniker, &dwCookie);
     ok_ole_success(hr, IRunningObjectTable_Register);
-
-    ok_more_than_one_lock();
+    ok(factory.refcount > 1, "Unexpected factory refcount %u.\n", factory.refcount);
 
     hr = IRunningObjectTable_Revoke(pROT, dwCookie);
     ok_ole_success(hr, IRunningObjectTable_Revoke);
-
-    ok_no_locks();
+    ok(factory.refcount == 1, "Unexpected factory refcount %u.\n", factory.refcount);
 
     /* test flags: ROTFLAGS_REGISTRATIONKEEPSALIVE|ROTFLAGS_ALLOWANYCLIENT */
     /* only succeeds when process is started by SCM and has LocalService
      * or RunAs AppId values */
-    hr = IRunningObjectTable_Register(pROT,
-        ROTFLAGS_REGISTRATIONKEEPSALIVE|ROTFLAGS_ALLOWANYCLIENT,
-        (IUnknown*)&Test_ClassFactory, pMoniker, &dwCookie);
+    hr = IRunningObjectTable_Register(pROT, ROTFLAGS_REGISTRATIONKEEPSALIVE | ROTFLAGS_ALLOWANYCLIENT,
+            (IUnknown *)&factory.IClassFactory_iface, pMoniker, &dwCookie);
     todo_wine {
     ok(hr == CO_E_WRONG_SERVER_IDENTITY, "Unexpected hr %#x.\n", hr);
     }
+    if (SUCCEEDED(hr))
+    {
+        hr = IRunningObjectTable_Revoke(pROT, dwCookie);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    }
 
-    hr = IRunningObjectTable_Register(pROT, 0xdeadbeef,
-        (IUnknown*)&Test_ClassFactory, pMoniker, &dwCookie);
+    hr = IRunningObjectTable_Register(pROT, 0xdeadbeef, (IUnknown *)&factory.IClassFactory_iface, pMoniker, &dwCookie);
     ok(hr == E_INVALIDARG, "IRunningObjectTable_Register should have returned E_INVALIDARG instead of 0x%08x\n", hr);
 
     IMoniker_Release(pMoniker);
@@ -938,6 +979,9 @@ static void test_ROT_multiple_entries(void)
     IUnknown *pObject = NULL;
     static const WCHAR moniker_path[] =
         {'\\', 'w','i','n','d','o','w','s','\\','s','y','s','t','e','m','\\','t','e','s','t','1','.','d','o','c',0};
+    struct test_factory factory;
+
+    test_factory_init(&factory);
 
     hr = GetRunningObjectTable(0, &pROT);
     ok_ole_success(hr, GetRunningObjectTable);
@@ -945,10 +989,10 @@ static void test_ROT_multiple_entries(void)
     hr = CreateFileMoniker(moniker_path, &pMoniker);
     ok_ole_success(hr, CreateFileMoniker);
 
-    hr = IRunningObjectTable_Register(pROT, 0, (IUnknown *)&Test_ClassFactory, pMoniker, &dwCookie1);
+    hr = IRunningObjectTable_Register(pROT, 0, (IUnknown *)&factory.IClassFactory_iface, pMoniker, &dwCookie1);
     ok_ole_success(hr, IRunningObjectTable_Register);
 
-    hr = IRunningObjectTable_Register(pROT, 0, (IUnknown *)&Test_ClassFactory, pMoniker, &dwCookie2);
+    hr = IRunningObjectTable_Register(pROT, 0, (IUnknown *)&factory.IClassFactory_iface, pMoniker, &dwCookie2);
     ok(hr == MK_S_MONIKERALREADYREGISTERED, "IRunningObjectTable_Register should have returned MK_S_MONIKERALREADYREGISTERED instead of 0x%08x\n", hr);
 
     ok(dwCookie1 != dwCookie2, "cookie returned for registering duplicate object shouldn't match cookie of original object (0x%x)\n", dwCookie1);
@@ -1103,6 +1147,9 @@ static void test_MkParseDisplayName(void)
         {&pbc,  wszEmpty, &eaten, NULL},
         {&pbc,  wszEmpty, &eaten, &pmk},
     };
+    struct test_factory factory;
+
+    test_factory_init(&factory);
 
     hr = CreateBindCtx(0, &pbc);
     ok_ole_success(hr, CreateBindCtx);
@@ -1143,7 +1190,7 @@ todo_wine
     ok_ole_success(hr, CreateFileMoniker);
     hr = IBindCtx_GetRunningObjectTable(pbc, &pprot);
     ok_ole_success(hr, IBindCtx_GetRunningObjectTable);
-    hr = IRunningObjectTable_Register(pprot, 0, (IUnknown *)&Test_ClassFactory, pmk, &pdwReg1);
+    hr = IRunningObjectTable_Register(pprot, 0, (IUnknown *)&factory.IClassFactory_iface, pmk, &pdwReg1);
     ok_ole_success(hr, IRunningObjectTable_Register);
     IMoniker_Release(pmk);
     pmk = NULL;
@@ -1164,7 +1211,7 @@ todo_wine
     ok_ole_success(hr, CreateFileMoniker);
     hr = IBindCtx_GetRunningObjectTable(pbc, &pprot);
     ok_ole_success(hr, IBindCtx_GetRunningObjectTable);
-    hr = IRunningObjectTable_Register(pprot, 0, (IUnknown *)&Test_ClassFactory, pmk, &pdwReg1);
+    hr = IRunningObjectTable_Register(pprot, 0, (IUnknown *)&factory.IClassFactory_iface, pmk, &pdwReg1);
     ok_ole_success(hr, IRunningObjectTable_Register);
     IMoniker_Release(pmk);
     pmk = NULL;
@@ -1767,16 +1814,149 @@ todo_wine_if(moniker_type == MKSYS_GENERICCOMPOSITE)
 
 static void test_class_moniker(void)
 {
-    IMoniker *moniker, *moniker2, *inverse, *reduced, *anti;
+    static const struct parse_test
+    {
+        const WCHAR *name;
+        ULONG eaten;
+        HRESULT hr;
+    }
+    tests[] =
+    {
+        { L"clsid:11111111-0000-0000-2222-444444444444;extra data:", 54 },
+        { L"clsid:11111111-0000-0000-2222-444444444444extra data", 52 },
+        { L"clsid:11111111-0000-0000-2222-444444444444:", 43 },
+        { L"clsid:11111111-0000-0000-2222-444444444444", 42 },
+        { L"clsid:{11111111-0000-0000-2222-444444444444}", 44 },
+        { L"clsid:{11111111-0000-0000-2222-444444444444", 0, MK_E_SYNTAX },
+        { L"clsid:11111111-0000-0000-2222-444444444444}", 43 },
+    };
+    IMoniker *moniker, *moniker2, *inverse, *reduced, *anti, *c;
     IEnumMoniker *enummoniker;
+    ULONG length, eaten;
+    ULARGE_INTEGER size;
+    LARGE_INTEGER pos;
+    IROTData *rotdata;
     HRESULT hr;
     DWORD hash;
     IBindCtx *bindctx;
     IUnknown *unknown;
     FILETIME filetime;
+    IStream *stream;
+    BYTE buffer[100];
+    HGLOBAL hglobal;
+    unsigned int i;
+    DWORD *data;
+
+    hr = CreateBindCtx(0, &bindctx);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        eaten = 0xdeadbeef;
+        hr = MkParseDisplayName(bindctx, tests[i].name, &eaten, &moniker);
+    todo_wine_if(i == 5)
+        ok(hr == tests[i].hr, "%u: unexpected hr %#x.\n", i, hr);
+        ok(eaten == tests[i].eaten, "%u: unexpected eaten length %u, expected %u.\n", i, eaten, tests[i].eaten);
+        if (SUCCEEDED(hr))
+        {
+            TEST_MONIKER_TYPE(moniker, MKSYS_CLASSMONIKER);
+            IMoniker_Release(moniker);
+        }
+    }
+
+    /* Extended syntax, handled by class moniker directly, only CLSID is meaningful for equality. */
+    hr = MkParseDisplayName(bindctx, L"clsid:11111111-0000-0000-2222-444444444444;extra data:", &eaten, &moniker);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(eaten == 54, "Unexpected length %u.\n", eaten);
+
+    hr = MkParseDisplayName(bindctx, L"clsid:11111111-0000-0000-2222-444444444444;different extra data:", &eaten, &moniker2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    TEST_DISPLAY_NAME(moniker, L"clsid:11111111-0000-0000-2222-444444444444;extra data:");
+    TEST_MONIKER_TYPE(moniker, MKSYS_CLASSMONIKER);
+    hr = IMoniker_GetSizeMax(moniker, &size);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(size.LowPart == 44, "Unexpected size %u.\n", size.LowPart);
+
+    TEST_MONIKER_TYPE(moniker2, MKSYS_CLASSMONIKER);
+
+    hr = IMoniker_IsEqual(moniker, moniker2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_IsEqual(moniker2, moniker);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    IMoniker_Release(moniker2);
+    IMoniker_Release(moniker);
+
+    /* From persistent state */
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = CreateClassMoniker(&GUID_NULL, &moniker);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_GetSizeMax(moniker, &size);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(size.QuadPart == 20, "Unexpected size %u.\n", size.LowPart);
+
+    hr = IStream_Write(stream, &CLSID_StdComponentCategoriesMgr, sizeof(CLSID), NULL);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    length = 5 * sizeof(WCHAR);
+    hr = IStream_Write(stream, &length, sizeof(length), NULL);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = IStream_Write(stream, L"data", length, NULL);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    pos.QuadPart = 0;
+    hr = IStream_Seek(stream, pos, STREAM_SEEK_SET, NULL);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_Load(moniker, stream);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_GetSizeMax(moniker, &size);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(size.QuadPart == 30, "Unexpected size %u.\n", size.LowPart);
+    TEST_DISPLAY_NAME(moniker, L"clsid:0002E005-0000-0000-C000-000000000046data:");
+    IStream_Release(stream);
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = GetHGlobalFromStream(stream, &hglobal);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_Save(moniker, stream, FALSE);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    length = GlobalSize(hglobal);
+    data = GlobalLock(hglobal);
+    ok(length == 30, "Unexpected stream size %u.\n", length);
+    ok(IsEqualGUID((CLSID *)data, &CLSID_StdComponentCategoriesMgr), "Unexpected clsid.\n");
+    data += sizeof(CLSID) / sizeof(*data);
+    ok(*data == 10, "Unexpected data length %u.\n", *data);
+    data++;
+    ok(!lstrcmpW((WCHAR *)data, L"data"), "Unexpected data.\n");
+
+    IStream_Release(stream);
+
+    /* Extra data does not affect comparison */
+    hr = IMoniker_QueryInterface(moniker, &IID_IROTData, (void **)&rotdata);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = IROTData_GetComparisonData(rotdata, buffer, sizeof(buffer), &length);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(length == sizeof(expected_class_moniker_comparison_data), "Unexpected comparison data length %u.\n", length);
+    ok(!memcmp(buffer, expected_class_moniker_comparison_data, length), "Unexpected data.\n");
+    IROTData_Release(rotdata);
+
+    IMoniker_Release(moniker);
 
     hr = CreateClassMoniker(&CLSID_StdComponentCategoriesMgr, &moniker);
     ok_ole_success(hr, CreateClassMoniker);
+
+    hr = IMoniker_GetSizeMax(moniker, &size);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(size.LowPart == 20, "Unexpected size %u.\n", size.LowPart);
 
     hr = IMoniker_QueryInterface(moniker, &CLSID_ClassMoniker, (void **)&unknown);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
@@ -1800,9 +1980,6 @@ static void test_class_moniker(void)
 
     /* IsSystemMoniker test */
     TEST_MONIKER_TYPE(moniker, MKSYS_CLASSMONIKER);
-
-    hr = CreateBindCtx(0, &bindctx);
-    ok_ole_success(hr, CreateBindCtx);
 
     /* IsRunning test */
     hr = IMoniker_IsRunning(moniker, NULL, NULL, NULL);
@@ -1859,12 +2036,34 @@ todo_wine
     ok(!moniker2, "Unexpected pointer.\n");
     IMoniker_Release(anti);
 
-    /* C + A2 -> A */
+    /* C + A2 -> () */
     anti = create_antimoniker(2);
     hr = IMoniker_ComposeWith(moniker, anti, TRUE, &moniker2);
     ok(hr == S_OK, "Failed to compose, hr %#x.\n", hr);
     ok(!moniker2, "Unexpected pointer.\n");
     IMoniker_Release(anti);
+
+    /* C + (A,I) -> I */
+    hr = create_moniker_from_desc("CA1I1", &c);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = IMoniker_ComposeWith(moniker, c, TRUE, &moniker2);
+    ok(hr == MK_E_NEEDGENERIC, "Unexpected hr %#x.\n", hr);
+    hr = IMoniker_ComposeWith(moniker, c, FALSE, &moniker2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    TEST_MONIKER_TYPE(moniker2, MKSYS_ITEMMONIKER);
+    IMoniker_Release(moniker2);
+    IMoniker_Release(c);
+
+    /* C + (A2,I) -> I */
+    hr = create_moniker_from_desc("CA1I1", &c);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = IMoniker_ComposeWith(moniker, c, TRUE, &moniker2);
+    ok(hr == MK_E_NEEDGENERIC, "Unexpected hr %#x.\n", hr);
+    hr = IMoniker_ComposeWith(moniker, c, FALSE, &moniker2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    TEST_MONIKER_TYPE(moniker2, MKSYS_ITEMMONIKER);
+    IMoniker_Release(moniker2);
+    IMoniker_Release(c);
 
     IMoniker_Release(moniker);
 }
@@ -1980,7 +2179,13 @@ static void test_file_monikers(void)
          */ 
         {0x20ac, 0x2020, 0x100, 0x101, 0x102, 0x103, 0x104, 0x105, 0x106, 0x107, 0x108, 0x109, 0x10a, 0x10b, 0x10c,  0},
         };
-
+    WCHAR filename[MAX_PATH], path[MAX_PATH];
+    IMoniker *moniker, *moniker2;
+    BIND_OPTS bind_opts;
+    IStorage *storage;
+    IBindCtx *bindctx;
+    STATSTG statstg;
+    HRESULT hr;
     int i; 
 
     trace("ACP is %u\n", GetACP());
@@ -2004,6 +2209,69 @@ static void test_file_monikers(void)
             test_file_moniker(wszFile[i]);
         }
     }
+
+    /* BindToStorage() */
+    GetTempPathW(MAX_PATH, path);
+    GetTempFileNameW(path, L"stg", 1, filename);
+
+    hr = StgCreateStorageEx(filename, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, STGFMT_STORAGE,
+            0, NULL, NULL, &IID_IStorage, (void **)&storage);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    IStorage_Release(storage);
+
+    hr = CreateFileMoniker(filename, &moniker);
+    ok(hr == S_OK, "Failed to create a moniker, hr %#x.\n", hr);
+
+    hr = IMoniker_BindToStorage(moniker, NULL, NULL, &IID_IStorage, (void **)&storage);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = CreateBindCtx(0, &bindctx);
+    ok(hr == S_OK, "Failed to create bind context, hr %#x.\n", hr);
+
+    hr = IMoniker_BindToStorage(moniker, bindctx, NULL, &IID_IStorage, (void **)&storage);
+    ok(hr == STG_E_INVALIDFLAG, "Unexpected hr %#x.\n", hr);
+
+    bind_opts.cbStruct = sizeof(bind_opts);
+    bind_opts.grfMode = STGM_READWRITE | STGM_SHARE_DENY_WRITE;
+    hr = IBindCtx_SetBindOptions(bindctx, &bind_opts);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_BindToStorage(moniker, bindctx, NULL, &IID_IStorage, (void **)&storage);
+    ok(hr == STG_E_INVALIDFLAG, "Unexpected hr %#x.\n", hr);
+
+    bind_opts.grfMode = STGM_READ | STGM_SHARE_DENY_WRITE;
+    hr = IBindCtx_SetBindOptions(bindctx, &bind_opts);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_BindToStorage(moniker, bindctx, NULL, &IID_IStorage, (void **)&storage);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    memset(&statstg, 0, sizeof(statstg));
+    hr = IStorage_Stat(storage, &statstg, STATFLAG_NONAME);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(statstg.grfMode == (STGM_READ | STGM_SHARE_DENY_WRITE), "Unexpected mode %#x.\n", statstg.grfMode);
+
+    IStorage_Release(storage);
+    IBindCtx_Release(bindctx);
+    IMoniker_Release(moniker);
+
+    DeleteFileW(filename);
+
+    /* IsEqual() */
+    hr = CreateFileMoniker(L"test.bmp", &moniker);
+    ok(hr == S_OK, "Failed to create a moniker, hr %#x.\n", hr);
+
+    hr = CreateFileMoniker(L"TEST.bmp", &moniker2);
+    ok(hr == S_OK, "Failed to create a moniker, hr %#x.\n", hr);
+
+    hr = IMoniker_IsEqual(moniker, moniker2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_IsEqual(moniker, NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    IMoniker_Release(moniker2);
+    IMoniker_Release(moniker);
 }
 
 static void test_item_moniker(void)
@@ -2072,7 +2340,7 @@ static void test_item_moniker(void)
         "Moniker_IsRunning",
         NULL
     };
-    IMoniker *moniker, *moniker2, *reduced, *anti, *inverse;
+    IMoniker *moniker, *moniker2, *moniker3, *reduced, *anti, *inverse, *c;
     DWORD i, hash, eaten, cookie;
     HRESULT hr;
     IBindCtx *bindctx;
@@ -2394,7 +2662,7 @@ todo_wine
     ok(!moniker2, "Unexpected pointer.\n");
     IMoniker_Release(anti);
 
-    /* I + A2 -> (A) */
+    /* I + A2 -> A */
     anti = create_antimoniker(2);
     hr = IMoniker_ComposeWith(moniker, anti, TRUE, &moniker2);
     ok(hr == S_OK, "Failed to compose, hr %#x.\n", hr);
@@ -2405,6 +2673,51 @@ todo_wine
     IMoniker_Release(moniker2);
 
     IMoniker_Release(anti);
+
+    /* I + (A,A3) -> A3 */
+
+    /* Simplification has to through generic composite logic,
+       even when resolved to non-composite, generic composite option has to be enabled. */
+    hr = create_moniker_from_desc("CA1A3", &c);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = IMoniker_ComposeWith(moniker, c, TRUE, &moniker2);
+    ok(hr == MK_E_NEEDGENERIC, "Unexpected hr %#x.\n", hr);
+    hr = IMoniker_ComposeWith(moniker, c, FALSE, &moniker2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    TEST_MONIKER_TYPE(moniker2, MKSYS_ANTIMONIKER);
+    hr = IMoniker_Hash(moniker2, &hash);
+    ok(hr == S_OK, "Failed to get hash, hr %#x.\n", hr);
+    ok(hash == 0x80000003, "Unexpected hash.\n");
+    IMoniker_Release(moniker2);
+    IMoniker_Release(c);
+
+    IMoniker_Release(moniker);
+
+    /* CommonPrefixWith */
+    hr = CreateItemMoniker(L"!", L"Item", &moniker);
+    ok(hr == S_OK, "Failed to create a moniker, hr %#x.\n", hr);
+    hr = CreateItemMoniker(L"#", L"Item", &moniker2);
+    ok(hr == S_OK, "Failed to create a moniker, hr %#x.\n", hr);
+
+    hr = IMoniker_CommonPrefixWith(moniker, moniker2, &moniker3);
+    ok(hr == MK_S_US, "Unexpected hr %#x.\n", hr);
+    ok(moniker3 == moniker, "Unexpected object.\n");
+    IMoniker_Release(moniker3);
+
+    IMoniker_Release(moniker2);
+
+    hr = CreateItemMoniker(L"!", L"Item2", &moniker2);
+    ok(hr == S_OK, "Failed to create a moniker, hr %#x.\n", hr);
+
+    moniker3 = (void *)0xdeadbeef;
+    hr = IMoniker_CommonPrefixWith(moniker, moniker2, &moniker3);
+todo_wine
+{
+    ok(hr == MK_E_NOPREFIX, "Unexpected hr %#x.\n", hr);
+    ok(!moniker3, "Unexpected object.\n");
+}
+
+    IMoniker_Release(moniker2);
 
     IMoniker_Release(moniker);
 }
@@ -2672,16 +2985,80 @@ todo_wine
 
 static void test_generic_composite_moniker(void)
 {
-    IMoniker *moniker, *inverse, *inverse2, *moniker1, *moniker2, *moniker3, *moniker4;
+    static const struct simplify_test
+    {
+        const char *left;
+        const char *right;
+        unsigned int result_type;
+        const WCHAR *name;
+    }
+    simplify_tests[] =
+    {
+        { "I1", "I2", MKSYS_GENERICCOMPOSITE, L"!I1!I2" },
+        { "I1", "A2", MKSYS_ANTIMONIKER, L"\\.." },
+        { "A1", "A1", MKSYS_GENERICCOMPOSITE, L"\\..\\.." },
+        { "A2", "A1", MKSYS_GENERICCOMPOSITE, L"\\..\\..\\.." },
+        { "CI1I2", "A1", MKSYS_ITEMMONIKER, L"!I1" },
+        { "I1", "A1", MKSYS_NONE },
+        { "CI1I2", "A2", MKSYS_NONE },
+        { "CI1I2", "A3", MKSYS_ANTIMONIKER, L"\\.." },
+        { "CI1I3", "CA1I2", MKSYS_GENERICCOMPOSITE, L"!I1!I2" },
+    };
+    IMoniker *moniker, *inverse, *moniker1, *moniker2;
     IEnumMoniker *enummoniker;
+    IRunningObjectTable *rot;
+    DWORD hash, cookie;
     HRESULT hr;
-    DWORD hash;
     IBindCtx *bindctx;
     FILETIME filetime;
     IUnknown *unknown;
+    IROTData *rotdata;
+    IMarshal *marshal;
+    IStream *stream;
+    unsigned int i;
+    FILETIME ft;
+    WCHAR *str;
+    ULONG len;
 
     hr = CreateBindCtx(0, &bindctx);
     ok(hr == S_OK, "Failed to create bind context, hr %#x.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(simplify_tests); ++i)
+    {
+        IMoniker *left, *right, *composite = NULL;
+        unsigned int moniker_type;
+        WCHAR *name;
+
+        winetest_push_context("simplify[%u]", i);
+
+        hr = create_moniker_from_desc(simplify_tests[i].left, &left);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+        hr = create_moniker_from_desc(simplify_tests[i].right, &right);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+        hr = CreateGenericComposite(left, right, &composite);
+        ok(hr == S_OK, "Failed to create a composite, hr %#x.\n", hr);
+
+        if (composite)
+        {
+            hr = IMoniker_IsSystemMoniker(composite, &moniker_type);
+            ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+            ok(moniker_type == simplify_tests[i].result_type, "Unexpected result type %u.\n", moniker_type);
+
+            hr = IMoniker_GetDisplayName(composite, bindctx, NULL, &name);
+            ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+            ok(!lstrcmpW(name, simplify_tests[i].name), "Unexpected result name %s.\n", wine_dbgstr_w(name));
+            CoTaskMemFree(name);
+
+            IMoniker_Release(composite);
+        }
+        else
+            ok(simplify_tests[i].result_type == MKSYS_NONE, "Unexpected result type.\n");
+
+        winetest_pop_context();
+
+        IMoniker_Release(left);
+        IMoniker_Release(right);
+    }
 
     hr = CreateItemMoniker(L"!", L"Test", &moniker1);
     ok(hr == S_OK, "Failed to create a moniker, hr %#x.\n", hr);
@@ -2690,77 +3067,9 @@ static void test_generic_composite_moniker(void)
     hr = CreateGenericComposite(moniker1, moniker2, &moniker);
     ok(hr == S_OK, "Failed to create a moniker, hr %#x.\n", hr);
 
-    /* Compose with itself. */
-    EXPECT_REF(moniker1, 2);
-    hr = CreateGenericComposite(moniker1, moniker1, &moniker);
+    hr = CreateGenericComposite(moniker1, moniker2, &moniker);
     ok(hr == S_OK, "Failed to create composite, hr %#x.\n", hr);
-    EXPECT_REF(moniker1, 4);
     TEST_MONIKER_TYPE(moniker, MKSYS_GENERICCOMPOSITE);
-    IMoniker_Release(moniker);
-
-    /* (I) + (A) -> () */
-    hr = IMoniker_Inverse(moniker1, &inverse);
-    ok(hr == S_OK, "Failed to invert, hr %#x.\n", hr);
-    hr = CreateGenericComposite(moniker1, inverse, &moniker);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-todo_wine
-    ok(!moniker, "Unexpected pointer.\n");
-    if (moniker)
-        IMoniker_Release(moniker);
-
-    /* (I1,I2) + (A,A) -> (I1,I2+A,A) -> (I1,A) -> () */
-    hr = CreateGenericComposite(moniker1, moniker2, &moniker);
-    ok(hr == S_OK, "Failed to create composite, hr %#x.\n", hr);
-    hr = CreateGenericComposite(inverse, inverse, &moniker3);
-    ok(hr == S_OK, "Failed to create composite, hr %#x.\n", hr);
-    TEST_MONIKER_TYPE(moniker3, MKSYS_GENERICCOMPOSITE);
-
-    hr = CreateGenericComposite(moniker, moniker3, &moniker4);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-todo_wine
-    ok(!moniker4, "Unexpected pointer.\n");
-    if (moniker4)
-        IMoniker_Release(moniker4);
-
-    IMoniker_Release(moniker);
-    IMoniker_Release(moniker3);
-
-    /* (I1,I2) + (A2,A) -> (I1,I2+A2,A) -> (I1,A,A) -> (I1+A,A) -> (A) */
-    hr = CreateGenericComposite(moniker1, moniker2, &moniker);
-    ok(hr == S_OK, "Failed to create composite, hr %#x.\n", hr);
-    ok(!!moniker, "Unexpected pointer.\n");
-    inverse2 = create_antimoniker(2);
-    hr = CreateGenericComposite(inverse2, inverse, &moniker3);
-    ok(hr == S_OK, "Failed to create composite, hr %#x.\n", hr);
-    ok(!!moniker3, "Unexpected pointer.\n");
-    IMoniker_Release(inverse2);
-
-    hr = CreateGenericComposite(moniker, moniker3, &moniker4);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-    TEST_MONIKER_TYPE_TODO(moniker4, MKSYS_ANTIMONIKER);
-    IMoniker_Release(moniker4);
-    IMoniker_Release(moniker);
-    IMoniker_Release(moniker3);
-
-    /* (I1,I2) + (A,I2) -> (I1,I2+A,I2) -> (I1,I2) */
-    hr = CreateGenericComposite(moniker1, moniker2, &moniker);
-    ok(hr == S_OK, "Failed to create composite, hr %#x.\n", hr);
-    ok(!!moniker, "Unexpected pointer.\n");
-
-    hr = CreateGenericComposite(inverse, moniker2, &moniker3);
-    ok(hr == S_OK, "Failed to create composite, hr %#x.\n", hr);
-    ok(!!moniker3, "Unexpected pointer.\n");
-
-    hr = CreateGenericComposite(moniker, moniker3, &moniker4);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-    TEST_MONIKER_TYPE(moniker4, MKSYS_GENERICCOMPOSITE);
-
-    TEST_DISPLAY_NAME(moniker4, L"!Test#Wine");
-
-    IMoniker_Release(moniker4);
-    IMoniker_Release(moniker3);
-
-    IMoniker_Release(inverse);
 
     /* Generic composite is special, as it does not addref in this case. */
     hr = IMoniker_QueryInterface(moniker, &CLSID_CompositeMoniker, (void **)&unknown);
@@ -2800,14 +3109,8 @@ todo_wine
     hr = IMoniker_GetTimeOfLastChange(moniker, bindctx, NULL, &filetime);
     ok(hr == MK_E_NOTBINDABLE, "IMoniker_GetTimeOfLastChange should return MK_E_NOTBINDABLE, not 0x%08x\n", hr);
 
-    hr = IMoniker_BindToObject(moniker, bindctx, NULL, &IID_IUnknown, (void **)&unknown);
-    todo_wine
-    ok(hr == E_INVALIDARG, "IMoniker_BindToObject should return E_INVALIDARG, not 0x%08x\n", hr);
-
     hr = IMoniker_BindToStorage(moniker, bindctx, NULL, &IID_IUnknown, (void **)&unknown);
     ok(hr == E_INVALIDARG, "IMoniker_BindToStorage should return E_INVALIDARG, not 0x%08x\n", hr);
-
-    IBindCtx_Release(bindctx);
 
     hr = IMoniker_Inverse(moniker, &inverse);
     ok(hr == S_OK, "Failed to get inverse, hr %#x.\n", hr);
@@ -2827,12 +3130,122 @@ todo_wine
 todo_wine
     ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
 
+    /* BindToObject() */
+    hr = IMoniker_BindToObject(moniker, bindctx, NULL, &IID_IUnknown, (void **)&unknown);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = IBindCtx_GetRunningObjectTable(bindctx, &rot);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IRunningObjectTable_Register(rot, ROTFLAGS_REGISTRATIONKEEPSALIVE, (IUnknown *)moniker,
+            moniker, &cookie);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_BindToObject(moniker, bindctx, NULL, &IID_IUnknown, (void **)&unknown);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    IUnknown_Release(unknown);
+
+    hr = IMoniker_BindToObject(moniker, bindctx, NULL, &IID_IMoniker, (void **)&unknown);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    IUnknown_Release(unknown);
+
+    hr = IMoniker_BindToObject(moniker, bindctx, NULL, &IID_IDispatch, (void **)&unknown);
+    ok(hr == E_NOINTERFACE, "Unexpected hr %#x.\n", hr);
+
+    hr = IRunningObjectTable_Revoke(rot, cookie);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    IRunningObjectTable_Release(rot);
+
     IMoniker_Release(moniker);
+
+    /* Uninitialized composite */
+    hr = CoCreateInstance(&CLSID_CompositeMoniker, NULL, CLSCTX_SERVER, &IID_IMoniker, (void **)&moniker);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    ok(hr == S_OK, "Failed to create a stream, hr %#x.\n", hr);
+    /* Exact error is E_OUTOFMEMORY */
+    hr = IMoniker_Save(moniker, stream, TRUE);
+    ok(FAILED(hr), "Unexpected hr %#x.\n", hr);
+    IStream_Release(stream);
+
+    hash = 0xdeadbeef;
+    hr = IMoniker_Hash(moniker, &hash);
+    ok(hr == E_UNEXPECTED, "Unexpected hr %#x.\n", hr);
+    ok(hash == 0xdeadbeef, "Unexpected hash %#x.\n", hash);
+
+    hr = IMoniker_GetDisplayName(moniker, bindctx, NULL, &str);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_QueryInterface(moniker, &IID_IROTData, (void **)&rotdata);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = IROTData_GetComparisonData(rotdata, NULL, 0, &len);
+    ok(FAILED(hr), "Unexpected hr %#x.\n", hr);
+    IROTData_Release(rotdata);
+
+    hr = IMoniker_QueryInterface(moniker, &IID_IMarshal, (void **)&marshal);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = IMarshal_GetMarshalSizeMax(marshal, &IID_IMoniker, NULL, MSHCTX_INPROC, NULL, MSHLFLAGS_NORMAL, &len);
+    ok(FAILED(hr), "Unexpected hr %#x.\n", hr);
+    hr = IMarshal_MarshalInterface(marshal, stream, &IID_IMoniker, NULL, MSHCTX_INPROC, NULL, MSHLFLAGS_NORMAL);
+    ok(FAILED(hr), "Unexpected hr %#x.\n", hr);
+    IMarshal_Release(marshal);
+
+    IMoniker_Release(moniker);
+
+    /* GetTimeOfLastChange() */
+    hr = create_moniker_from_desc("CI1I2", &moniker);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = create_moniker_from_desc("I1", &moniker1);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    /* See if non-generic composition is possible */
+    hr = IMoniker_ComposeWith(moniker1, moniker, TRUE, &moniker2);
+    ok(hr == MK_E_NEEDGENERIC, "Unexpected hr %#x.\n", hr);
+
+    hr = IBindCtx_GetRunningObjectTable(bindctx, &rot);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_GetTimeOfLastChange(moniker, bindctx, moniker1, &ft);
+    ok(hr == MK_E_NOTBINDABLE, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_GetTimeOfLastChange(moniker, bindctx, NULL, &ft);
+    ok(hr == MK_E_NOTBINDABLE, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_GetTimeOfLastChange(moniker, bindctx, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_GetTimeOfLastChange(moniker, NULL, NULL, &ft);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = IRunningObjectTable_Register(rot, ROTFLAGS_REGISTRATIONKEEPSALIVE, (IUnknown *)moniker,
+            moniker, &cookie);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_GetTimeOfLastChange(moniker, bindctx, NULL, &ft);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMoniker_GetTimeOfLastChange(moniker, bindctx, moniker1, &ft);
+todo_wine
+    ok(hr == MK_E_NOTBINDABLE, "Unexpected hr %#x.\n", hr);
+
+    hr = IRunningObjectTable_Revoke(rot, cookie);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    IRunningObjectTable_Release(rot);
+
+    IMoniker_Release(moniker);
+    IMoniker_Release(moniker1);
+
+    IBindCtx_Release(bindctx);
 }
 
 static void test_pointer_moniker(void)
 {
-    IMoniker *moniker, *moniker2, *prefix, *inverse, *anti;
+    IMoniker *moniker, *moniker2, *prefix, *inverse, *anti, *c;
+    struct test_factory factory;
     IEnumMoniker *enummoniker;
     DWORD hash, size;
     HRESULT hr;
@@ -2846,13 +3259,13 @@ static void test_pointer_moniker(void)
     LARGE_INTEGER pos;
     CLSID clsid;
 
-    cLocks = 0;
+    test_factory_init(&factory);
 
-    hr = CreatePointerMoniker((IUnknown *)&Test_ClassFactory, NULL);
-    ok(hr == E_INVALIDARG, "CreatePointerMoniker(x, NULL) should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+    hr = CreatePointerMoniker((IUnknown *)&factory.IClassFactory_iface, NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
 
-    hr = CreatePointerMoniker((IUnknown *)&Test_ClassFactory, &moniker);
-    ok_ole_success(hr, CreatePointerMoniker);
+    hr = CreatePointerMoniker((IUnknown *)&factory.IClassFactory_iface, &moniker);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     hr = IMoniker_QueryInterface(moniker, &IID_IMoniker, NULL);
     ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
@@ -2890,7 +3303,7 @@ static void test_pointer_moniker(void)
 
     IMarshal_Release(marshal);
 
-    ok_more_than_one_lock();
+    ok(factory.refcount > 1, "Unexpected factory refcount %u.\n", factory.refcount);
 
     /* Display Name */
 
@@ -2923,9 +3336,7 @@ static void test_pointer_moniker(void)
     /* Hashing */
     hr = IMoniker_Hash(moniker, &hash);
     ok_ole_success(hr, IMoniker_Hash);
-    ok(hash == PtrToUlong(&Test_ClassFactory),
-        "Hash value should have been 0x%08x, instead of 0x%08x\n",
-        PtrToUlong(&Test_ClassFactory), hash);
+    ok(hash == PtrToUlong(&factory.IClassFactory_iface), "Unexpected hash value %#x.\n", hash);
 
     /* IsSystemMoniker test */
     TEST_MONIKER_TYPE(moniker, MKSYS_POINTERMONIKER);
@@ -2955,8 +3366,7 @@ static void test_pointer_moniker(void)
 
     IMoniker_Release(moniker);
 
-todo_wine
-    ok(cLocks == 0, "Number of locks should be 0, but actually is %d.\n", cLocks);
+    ok(factory.refcount == 1, "Unexpected factory refcount %u.\n", factory.refcount);
 
     hr = CreatePointerMoniker(NULL, &moniker);
     ok_ole_success(hr, CreatePointerMoniker);
@@ -2979,10 +3389,10 @@ todo_wine
     IMoniker_Release(moniker);
 
     /* CommonPrefixWith() */
-    hr = CreatePointerMoniker((IUnknown *)&Test_ClassFactory, &moniker);
+    hr = CreatePointerMoniker((IUnknown *)&factory.IClassFactory_iface, &moniker);
     ok(hr == S_OK, "Failed to create moniker, hr %#x.\n", hr);
 
-    hr = CreatePointerMoniker((IUnknown *)&Test_ClassFactory, &moniker2);
+    hr = CreatePointerMoniker((IUnknown *)&factory.IClassFactory_iface, &moniker2);
     ok(hr == S_OK, "Failed to create moniker, hr %#x.\n", hr);
 
     hr = IMoniker_IsEqual(moniker, NULL);
@@ -3033,11 +3443,40 @@ todo_wine
 
     IMoniker_Release(anti);
 
+    /* Simplification has to through generic composite logic,
+       even when resolved to non-composite, generic composite option has to be enabled. */
+
+    /* P + (A,A3) -> A3 */
+    hr = create_moniker_from_desc("CA1A3", &c);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = IMoniker_ComposeWith(moniker, c, TRUE, &moniker2);
+    ok(hr == MK_E_NEEDGENERIC, "Unexpected hr %#x.\n", hr);
+    hr = IMoniker_ComposeWith(moniker, c, FALSE, &moniker2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    TEST_MONIKER_TYPE(moniker2, MKSYS_ANTIMONIKER);
+    hr = IMoniker_Hash(moniker2, &hash);
+    ok(hr == S_OK, "Failed to get hash, hr %#x.\n", hr);
+    ok(hash == 0x80000003, "Unexpected hash.\n");
+    IMoniker_Release(moniker2);
+    IMoniker_Release(c);
+
+    /* P + (A,I) -> I */
+    hr = create_moniker_from_desc("CA1I1", &c);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    hr = IMoniker_ComposeWith(moniker, c, TRUE, &moniker2);
+    ok(hr == MK_E_NEEDGENERIC, "Unexpected hr %#x.\n", hr);
+    hr = IMoniker_ComposeWith(moniker, c, FALSE, &moniker2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    TEST_MONIKER_TYPE(moniker2, MKSYS_ITEMMONIKER);
+    IMoniker_Release(moniker2);
+    IMoniker_Release(c);
+
     IMoniker_Release(moniker);
 }
 
 static void test_bind_context(void)
 {
+    IRunningObjectTable *rot, *rot2;
     HRESULT hr;
     IBindCtx *pBindCtx;
     IEnumString *pEnumString;
@@ -3057,6 +3496,18 @@ static void test_bind_context(void)
 
     hr = CreateBindCtx(0, &pBindCtx);
     ok_ole_success(hr, "CreateBindCtx");
+
+    hr = IBindCtx_GetRunningObjectTable(pBindCtx, NULL);
+    ok(FAILED(hr), "Unexpected hr %#x.\n", hr);
+
+    hr = IBindCtx_GetRunningObjectTable(pBindCtx, &rot);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = GetRunningObjectTable(0, &rot2);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(rot == rot2, "Unexpected ROT instance.\n");
+    IRunningObjectTable_Release(rot);
+    IRunningObjectTable_Release(rot2);
 
     bind_opts.cbStruct = -1;
     hr = IBindCtx_GetBindOptions(pBindCtx, (BIND_OPTS *)&bind_opts);

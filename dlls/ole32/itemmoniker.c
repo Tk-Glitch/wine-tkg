@@ -511,77 +511,23 @@ static HRESULT WINAPI ItemMonikerImpl_Reduce(IMoniker* iface,
 
     return MK_S_REDUCED_TO_SELF;
 }
-/******************************************************************************
- *        ItemMoniker_ComposeWith
- ******************************************************************************/
-static HRESULT WINAPI ItemMonikerImpl_ComposeWith(IMoniker* iface,
-                                                  IMoniker* pmkRight,
-                                                  BOOL fOnlyIfNotGeneric,
-                                                  IMoniker** ppmkComposite)
+
+static HRESULT WINAPI ItemMonikerImpl_ComposeWith(IMoniker *iface, IMoniker *right,
+        BOOL only_if_not_generic, IMoniker **result)
 {
-    HRESULT res=S_OK;
-    DWORD mkSys,mkSys2, order;
-    IEnumMoniker* penumMk=0;
-    IMoniker *pmostLeftMk=0;
-    IMoniker* tempMkComposite=0;
+    DWORD order;
 
-    TRACE("(%p,%p,%d,%p)\n",iface,pmkRight,fOnlyIfNotGeneric,ppmkComposite);
+    TRACE("%p, %p, %d, %p\n", iface, right, only_if_not_generic, result);
 
-    if ((ppmkComposite==NULL)||(pmkRight==NULL))
-	return E_POINTER;
+    if (!result || !right)
+        return E_POINTER;
 
-    *ppmkComposite=0;
+    *result = NULL;
 
-    if (is_anti_moniker(pmkRight, &order))
-    {
-        return order > 1 ? create_anti_moniker(order - 1, ppmkComposite) : S_OK;
-    }
-    else
-        /* if pmkRight is a composite whose leftmost component is an anti-moniker,           */
-        /* the returned moniker is the composite after the leftmost anti-moniker is removed. */
-        IMoniker_IsSystemMoniker(pmkRight,&mkSys);
-         if(mkSys==MKSYS_GENERICCOMPOSITE){
+    if (is_anti_moniker(right, &order))
+        return order > 1 ? create_anti_moniker(order - 1, result) : S_OK;
 
-            res=IMoniker_Enum(pmkRight,TRUE,&penumMk);
-
-            if (FAILED(res))
-                return res;
-
-            res=IEnumMoniker_Next(penumMk,1,&pmostLeftMk,NULL);
-
-            IMoniker_IsSystemMoniker(pmostLeftMk,&mkSys2);
-
-            if(mkSys2==MKSYS_ANTIMONIKER){
-
-                IMoniker_Release(pmostLeftMk);
-
-                tempMkComposite=iface;
-                IMoniker_AddRef(iface);
-
-                while(IEnumMoniker_Next(penumMk,1,&pmostLeftMk,NULL)==S_OK){
-
-                    res=CreateGenericComposite(tempMkComposite,pmostLeftMk,ppmkComposite);
-
-                    IMoniker_Release(tempMkComposite);
-                    IMoniker_Release(pmostLeftMk);
-
-                    tempMkComposite=*ppmkComposite;
-                    IMoniker_AddRef(tempMkComposite);
-                }
-                return res;
-            }
-            else
-                return CreateGenericComposite(iface,pmkRight,ppmkComposite);
-         }
-         /* If pmkRight is not an anti-moniker, the method combines the two monikers into a generic
-          composite if fOnlyIfNotGeneric is FALSE; if fOnlyIfNotGeneric is TRUE, the method returns
-          a NULL moniker and a return value of MK_E_NEEDGENERIC */
-          else
-            if (!fOnlyIfNotGeneric)
-                return CreateGenericComposite(iface,pmkRight,ppmkComposite);
-
-            else
-                return MK_E_NEEDGENERIC;
+    return only_if_not_generic ? MK_E_NEEDGENERIC : CreateGenericComposite(iface, right, result);
 }
 
 /******************************************************************************
@@ -753,31 +699,19 @@ static HRESULT WINAPI ItemMonikerImpl_Inverse(IMoniker* iface,IMoniker** ppmk)
     return CreateAntiMoniker(ppmk);
 }
 
-/******************************************************************************
- *        ItemMoniker_CommonPrefixWith
- ******************************************************************************/
-static HRESULT WINAPI ItemMonikerImpl_CommonPrefixWith(IMoniker* iface,IMoniker* pmkOther,IMoniker** ppmkPrefix)
+static HRESULT WINAPI ItemMonikerImpl_CommonPrefixWith(IMoniker *iface, IMoniker *other,
+        IMoniker **prefix)
 {
-    DWORD mkSys;
-    
-    TRACE("(%p,%p)\n", pmkOther, ppmkPrefix);
+    TRACE("%p, %p, %p\n", iface, other, prefix);
 
-    IMoniker_IsSystemMoniker(pmkOther,&mkSys);
-    /* If the other moniker is an item moniker that is equal to this moniker, this method sets *ppmkPrefix */
-    /* to this moniker and returns MK_S_US */
-
-    if((mkSys==MKSYS_ITEMMONIKER) && (IMoniker_IsEqual(iface,pmkOther)==S_OK) ){
-
-        *ppmkPrefix=iface;
-
+    if (IMoniker_IsEqual(iface, other) == S_OK)
+    {
+        *prefix = iface;
         IMoniker_AddRef(iface);
-
         return MK_S_US;
     }
-    else
-        /* otherwise, the method calls the MonikerCommonPrefixWith function. This function correctly handles */
-        /* the case where the other moniker is a generic composite. */
-        return MonikerCommonPrefixWith(iface,pmkOther,ppmkPrefix);
+
+    return MonikerCommonPrefixWith(iface, other, prefix);
 }
 
 /******************************************************************************

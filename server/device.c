@@ -989,22 +989,38 @@ DECL_HANDLER(get_next_device_request)
                                                              0, &device_manager_ops )))
         return;
 
-    if (req->prev) close_handle( current->process, req->prev );  /* avoid an extra round-trip for close */
-
     /* process result of previous call */
     if (manager->current_call)
     {
         irp = manager->current_call;
         irp->user_ptr = req->user_ptr;
 
-        if (req->status)
+        if (irp->async)
+        {
+            if (req->pending)
+                set_async_pending( irp->async );
+            async_set_initial_status( irp->async, req->status );
+
+            if (req->prev)
+            {
+                set_irp_result( irp, req->iosb_status, get_req_data(), get_req_data_size(), req->result );
+                close_handle( current->process, req->prev );  /* avoid an extra round-trip for close */
+            }
+            else
+            {
+                async_wake_obj( irp->async );
+                if (irp->canceled)
+                {
+                    /* if it was canceled during dispatch, we couldn't queue cancel
+                     * call without client pointer, so we need to do it now */
+                    cancel_irp_call( irp );
+                }
+            }
+        }
+        else
+        {
             set_irp_result( irp, req->status, NULL, 0, 0 );
-        if (irp->canceled)
-            /* if it was canceled during dispatch, we couldn't queue cancel call without client pointer,
-             * so we need to do it now */
-            cancel_irp_call( irp );
-        else if (irp->async)
-            set_async_pending( irp->async );
+        }
 
         free_irp_params( irp );
         release_object( irp );
@@ -1068,8 +1084,6 @@ DECL_HANDLER(set_irp_result)
     if ((irp = (struct irp_call *)get_handle_obj( current->process, req->handle, 0, &irp_call_ops )))
     {
         set_irp_result( irp, req->status, get_req_data(), get_req_data_size(), req->size );
-        /* we may be still dispatching the IRP. don't bother queuing cancel if it's already complete */
-        irp->canceled = 0;
         close_handle( current->process, req->handle );  /* avoid an extra round-trip for close */
         release_object( irp );
     }

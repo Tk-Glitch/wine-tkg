@@ -467,8 +467,40 @@ static BOOL module_is_container_loaded(const struct process* pcs,
     return FALSE;
 }
 
-static BOOL image_check_debug_link(const WCHAR* file, struct image_file_map* fmap, DWORD link_crc)
+static BOOL image_check_debug_link_crc(const WCHAR* file, struct image_file_map* fmap, DWORD link_crc)
 {
+    DWORD read_bytes;
+    HANDLE handle;
+    WCHAR *path;
+    WORD magic;
+    DWORD crc;
+    BOOL ret;
+
+    path = get_dos_file_name(file);
+    handle = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    heap_free(path);
+    if (handle == INVALID_HANDLE_VALUE) return FALSE;
+
+    crc = calc_crc32(handle);
+    if (crc != link_crc)
+    {
+        WARN("Bad CRC for file %s (got %08x while expecting %08x)\n",  debugstr_w(file), crc, link_crc);
+        CloseHandle(handle);
+        return FALSE;
+    }
+
+    SetFilePointer(handle, 0, 0, FILE_BEGIN);
+    if (ReadFile(handle, &magic, sizeof(magic), &read_bytes, NULL) && magic == IMAGE_DOS_SIGNATURE)
+        ret = pe_map_file(handle, fmap, DMT_PE);
+    else
+        ret = elf_map_handle(handle, fmap);
+    CloseHandle(handle);
+    return ret;
+}
+
+static BOOL image_check_debug_link_gnu_id(const WCHAR* file, struct image_file_map* fmap, const BYTE* id, unsigned idlen)
+{
+    struct image_section_map buildid_sect;
     DWORD read_bytes;
     HANDLE handle;
     WCHAR *path;
@@ -480,24 +512,33 @@ static BOOL image_check_debug_link(const WCHAR* file, struct image_file_map* fma
     heap_free(path);
     if (handle == INVALID_HANDLE_VALUE) return FALSE;
 
-    if (link_crc)
-    {
-        DWORD crc = calc_crc32(handle);
-        if (crc != link_crc)
-        {
-            WARN("Bad CRC for file %s (got %08x while expecting %08x)\n",  debugstr_w(file), crc, link_crc);
-            CloseHandle(handle);
-            return FALSE;
-        }
-    }
+    TRACE("Located debug information file at %s\n", debugstr_w(file));
 
-    SetFilePointer(handle, 0, 0, FILE_BEGIN);
     if (ReadFile(handle, &magic, sizeof(magic), &read_bytes, NULL) && magic == IMAGE_DOS_SIGNATURE)
         ret = pe_map_file(handle, fmap, DMT_PE);
     else
         ret = elf_map_handle(handle, fmap);
     CloseHandle(handle);
-    return ret;
+
+    if (ret && image_find_section(fmap, ".note.gnu.build-id", &buildid_sect))
+    {
+        const UINT32* note;
+
+        note = (const UINT32*)image_map_section(&buildid_sect);
+        if (note != IMAGE_NO_MAP)
+        {
+            /* the usual ELF note structure: name-size desc-size type <name> <desc> */
+            if (note[2] == NOTE_GNU_BUILD_ID)
+            {
+                if (note[1] == idlen && !memcmp(note + 3 + ((note[0] + 3) >> 2), id, idlen))
+                    return TRUE;
+                WARN("mismatch in buildid information for %s\n", wine_dbgstr_w(file));
+            }
+        }
+        image_unmap_section(&buildid_sect);
+        image_unmap_file(fmap);
+    }
+    return FALSE;
 }
 
 /******************************************************************
@@ -548,12 +589,12 @@ static BOOL image_locate_debug_link(const struct module* module, struct image_fi
 
     /* testing execdir/filename */
     MultiByteToWideChar(CP_UNIXCP, 0, filename, -1, slash, filename_len);
-    if (image_check_debug_link(p, fmap_link, crc)) goto found;
+    if (image_check_debug_link_crc(p, fmap_link, crc)) goto found;
 
     /* testing execdir/.debug/filename */
     memcpy(slash, dotDebugW, sizeof(dotDebugW));
     MultiByteToWideChar(CP_UNIXCP, 0, filename, -1, slash + ARRAY_SIZE(dotDebugW), filename_len);
-    if (image_check_debug_link(p, fmap_link, crc)) goto found;
+    if (image_check_debug_link_crc(p, fmap_link, crc)) goto found;
 
     if (module->real_path)
     {
@@ -562,7 +603,7 @@ static BOOL image_locate_debug_link(const struct module* module, struct image_fi
         if ((slash2 = wcsrchr(slash, '/'))) slash = slash2 + 1;
         if ((slash2 = wcsrchr(slash, '\\'))) slash = slash2 + 1;
         MultiByteToWideChar(CP_UNIXCP, 0, filename, -1, slash, filename_len);
-        if (image_check_debug_link(p, fmap_link, crc)) goto found;
+        if (image_check_debug_link_crc(p, fmap_link, crc)) goto found;
     }
 
     /* testing globaldebugdir/execdir/filename */
@@ -570,10 +611,10 @@ static BOOL image_locate_debug_link(const struct module* module, struct image_fi
     memcpy(p, globalDebugDirW, globalDebugDirLen * sizeof(WCHAR));
     slash += globalDebugDirLen;
     MultiByteToWideChar(CP_UNIXCP, 0, filename, -1, slash, filename_len);
-    if (image_check_debug_link(p, fmap_link, crc)) goto found;
+    if (image_check_debug_link_crc(p, fmap_link, crc)) goto found;
 
     /* finally testing filename */
-    if (image_check_debug_link(slash, fmap_link, crc)) goto found;
+    if (image_check_debug_link_crc(slash, fmap_link, crc)) goto found;
 
 
     WARN("Couldn't locate or map %s\n", filename);
@@ -586,6 +627,106 @@ found:
     HeapFree(GetProcessHeap(), 0, p);
     fmap->alternate = fmap_link;
     return TRUE;
+}
+
+/******************************************************************
+ *		image_load_debugaltlink
+ *
+ * Handle a (potential) .gnu_debugaltlink section and the link to
+ * (another) alternate debug file.
+ * Return an heap-allocated image_file_map when the section .gnu_debugaltlink is present,
+ * and a matching debug file has been located.
+ */
+struct image_file_map* image_load_debugaltlink(struct image_file_map* fmap, struct module* module)
+{
+    struct image_section_map debugaltlink_sect;
+    const char* data;
+    struct image_file_map* fmap_link = NULL;
+    BOOL ret = FALSE;
+
+    for (; fmap; fmap = fmap->alternate)
+    {
+        if (image_find_section(fmap, ".gnu_debugaltlink", &debugaltlink_sect)) break;
+    }
+    if (!fmap)
+    {
+        TRACE("No .gnu_debugaltlink section found for %s\n", debugstr_w(module->modulename));
+        return NULL;
+    }
+
+    data = image_map_section(&debugaltlink_sect);
+    if (data != IMAGE_NO_MAP)
+    {
+        unsigned sect_len;
+        const BYTE* id;
+        /* The content of the section is:
+         * + a \0 terminated string
+         * + followed by the build-id
+         * We try loading the dwz_alternate, either as absolute path, or relative to the embedded build-id
+         */
+        sect_len = image_get_map_size(&debugaltlink_sect);
+        id = memchr(data, '\0', sect_len);
+        if (id)
+        {
+            id++;
+            fmap_link = HeapAlloc(GetProcessHeap(), 0, sizeof(*fmap_link));
+            if (fmap_link)
+            {
+                unsigned filename_len = MultiByteToWideChar(CP_UNIXCP, 0, data, -1, NULL, 0);
+                /* Trying absolute path */
+                WCHAR* dst = HeapAlloc(GetProcessHeap(), 0, filename_len * sizeof(WCHAR));
+                if (dst)
+                {
+                    MultiByteToWideChar(CP_UNIXCP, 0, data, -1, dst, filename_len);
+                    ret = image_check_debug_link_gnu_id(dst, fmap_link, id, data + sect_len - (const char*)id);
+                    HeapFree(GetProcessHeap(), 0, dst);
+                }
+                /* Trying relative path to build-id directory */
+                if (!ret)
+                {
+                    static const WCHAR globalDebugDirW[] =
+                        {'/','u','s','r','/','l','i','b','/','d','e','b','u','g','/','.','b','u','i','l','d','-','i','d','/'};
+                    dst = HeapAlloc(GetProcessHeap(), 0, sizeof(globalDebugDirW) + (3 + filename_len) * sizeof(WCHAR));
+                    if (dst)
+                    {
+                        WCHAR* p;
+
+                        /* SIGH....
+                         * some relative links are relative to /usr/lib/debug/.build-id, some others are from the directory
+                         * where the alternate file is...
+                         * so try both
+                         */
+                        p = memcpy(dst, globalDebugDirW, sizeof(globalDebugDirW));
+                        p += ARRAY_SIZE(globalDebugDirW);
+                        MultiByteToWideChar(CP_UNIXCP, 0, data, -1, p, filename_len);
+                        ret = image_check_debug_link_gnu_id(dst, fmap_link, id, data + sect_len - (const char*)id);
+                        if (!ret)
+                        {
+                            p = dst + ARRAY_SIZE(globalDebugDirW);
+                            if ((const char*)id < data + sect_len)
+                            {
+                                *p++ = "0123456789abcdef"[*id >> 4  ];
+                                *p++ = "0123456789abcdef"[*id & 0x0F];
+                            }
+                            *p++ = '/';
+                            MultiByteToWideChar(CP_UNIXCP, 0, data, -1, p, filename_len);
+                            ret = image_check_debug_link_gnu_id(dst, fmap_link, id, data + sect_len - (const char*)id);
+                        }
+                        HeapFree(GetProcessHeap(), 0, dst);
+                    }
+                }
+                if (!ret)
+                {
+                    HeapFree(GetProcessHeap(), 0, fmap_link);
+                    WARN("Couldn't find a match for .gnu_debugaltlink section %s for %s\n", data, debugstr_w(module->modulename));
+                    fmap_link = NULL;
+                }
+            }
+        }
+    }
+    image_unmap_section(&debugaltlink_sect);
+    if (fmap_link) TRACE("Found match .gnu_debugaltlink section for %s\n", debugstr_w(module->modulename));
+    return fmap_link;
 }
 
 /******************************************************************
@@ -632,33 +773,11 @@ static BOOL image_locate_build_id_target(struct image_file_map* fmap, const BYTE
     memcpy(z, dotDebug0W, sizeof(dotDebug0W));
     TRACE("checking %s\n", wine_dbgstr_w(p));
 
-    if (image_check_debug_link(p, fmap_link, 0))
+    if (image_check_debug_link_gnu_id(p, fmap_link, idend - idlen, idlen))
     {
-        struct image_section_map buildid_sect;
-        if (image_find_section(fmap_link, ".note.gnu.build-id", &buildid_sect))
-        {
-            const UINT32* note;
-
-            note = (const UINT32*)image_map_section(&buildid_sect);
-            if (note != IMAGE_NO_MAP)
-            {
-                /* the usual ELF note structure: name-size desc-size type <name> <desc> */
-                if (note[2] == NOTE_GNU_BUILD_ID)
-                {
-                    if (note[1] == idlen &&
-                        !memcmp(note + 3 + ((note[0] + 3) >> 2), idend - idlen, idlen))
-                    {
-                        TRACE("Located debug information file at %s\n", debugstr_w(p));
-                        HeapFree(GetProcessHeap(), 0, p);
-                        fmap->alternate = fmap_link;
-                        return TRUE;
-                    }
-                    WARN("mismatch in buildid information for %s\n", wine_dbgstr_w(p));
-                }
-            }
-            image_unmap_section(&buildid_sect);
-        }
-        image_unmap_file(fmap_link);
+        HeapFree(GetProcessHeap(), 0, p);
+        fmap->alternate = fmap_link;
+        return TRUE;
     }
 
     TRACE("not found\n");

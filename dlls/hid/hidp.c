@@ -39,30 +39,32 @@ WINE_DEFAULT_DEBUG_CHANNEL(hidp);
 static NTSTATUS get_value_caps_range( struct hid_preparsed_data *preparsed, HIDP_REPORT_TYPE report_type, ULONG report_len,
                                       const struct hid_value_caps **caps, const struct hid_value_caps **caps_end )
 {
-    if (!preparsed || preparsed->magic != HID_MAGIC) return HIDP_STATUS_INVALID_PREPARSED_DATA;
+    if (!preparsed || memcmp( preparsed->magic, "HidP KDR", 8 )) return HIDP_STATUS_INVALID_PREPARSED_DATA;
 
     switch (report_type)
     {
     case HidP_Input:
-        if (report_len && report_len != preparsed->caps.InputReportByteLength)
+        if (report_len && report_len != preparsed->input_report_byte_length)
             return HIDP_STATUS_INVALID_REPORT_LENGTH;
         *caps = HID_INPUT_VALUE_CAPS( preparsed );
+        *caps_end = *caps + preparsed->input_caps_count;
         break;
     case HidP_Output:
-        if (report_len && report_len != preparsed->caps.OutputReportByteLength)
+        if (report_len && report_len != preparsed->output_report_byte_length)
             return HIDP_STATUS_INVALID_REPORT_LENGTH;
         *caps = HID_OUTPUT_VALUE_CAPS( preparsed );
+        *caps_end = *caps + preparsed->output_caps_count;
         break;
     case HidP_Feature:
-        if (report_len && report_len != preparsed->caps.FeatureReportByteLength)
+        if (report_len && report_len != preparsed->feature_report_byte_length)
             return HIDP_STATUS_INVALID_REPORT_LENGTH;
         *caps = HID_FEATURE_VALUE_CAPS( preparsed );
+        *caps_end = *caps + preparsed->feature_caps_count;
         break;
     default:
         return HIDP_STATUS_INVALID_REPORT_TYPE;
     }
 
-    *caps_end = *caps + preparsed->value_caps_count[report_type];
     return HIDP_STATUS_SUCCESS;
 }
 
@@ -80,8 +82,8 @@ struct caps_filter
 static BOOL match_value_caps( const struct hid_value_caps *caps, const struct caps_filter *filter )
 {
     if (!caps->usage_min && !caps->usage_max) return FALSE;
-    if (filter->buttons && !HID_VALUE_CAPS_IS_BUTTON( caps )) return FALSE;
-    if (filter->values && HID_VALUE_CAPS_IS_BUTTON( caps )) return FALSE;
+    if (filter->buttons && !(caps->flags & HID_VALUE_CAPS_IS_BUTTON)) return FALSE;
+    if (filter->values && (caps->flags & HID_VALUE_CAPS_IS_BUTTON)) return FALSE;
     if (filter->usage_page && filter->usage_page != caps->usage_page) return FALSE;
     if (filter->collection && filter->collection != caps->link_collection) return FALSE;
     if (!filter->usage) return TRUE;
@@ -95,16 +97,17 @@ static NTSTATUS enum_value_caps( struct hid_preparsed_data *preparsed, HIDP_REPO
                                  enum_value_caps_callback callback, void *user, USHORT *count )
 {
     const struct hid_value_caps *caps, *caps_end;
-    NTSTATUS status;
-    BOOL incompatible = FALSE;
+    BOOL is_range, incompatible = FALSE;
     LONG remaining = *count;
+    NTSTATUS status;
 
     for (status = get_value_caps_range( preparsed, report_type, report_len, &caps, &caps_end );
          status == HIDP_STATUS_SUCCESS && caps != caps_end; caps++)
     {
+        is_range = caps->flags & HID_VALUE_CAPS_IS_RANGE;
         if (!match_value_caps( caps, filter )) continue;
         if (filter->report_id && caps->report_id != filter->report_id) incompatible = TRUE;
-        else if (filter->array && (caps->is_range || caps->report_count <= 1)) return HIDP_STATUS_NOT_VALUE_ARRAY;
+        else if (filter->array && (is_range || caps->report_count <= 1)) return HIDP_STATUS_NOT_VALUE_ARRAY;
         else if (remaining-- > 0) status = callback( caps, user );
     }
 
@@ -164,12 +167,58 @@ NTSTATUS WINAPI HidP_GetButtonCaps( HIDP_REPORT_TYPE report_type, HIDP_BUTTON_CA
 NTSTATUS WINAPI HidP_GetCaps( PHIDP_PREPARSED_DATA preparsed_data, HIDP_CAPS *caps )
 {
     struct hid_preparsed_data *preparsed = (struct hid_preparsed_data *)preparsed_data;
+    struct hid_value_caps *it, *end;
 
     TRACE( "preparsed_data %p, caps %p.\n", preparsed_data, caps );
 
-    if (!preparsed || preparsed->magic != HID_MAGIC) return HIDP_STATUS_INVALID_PREPARSED_DATA;
+    if (!preparsed || memcmp( preparsed->magic, "HidP KDR", 8 )) return HIDP_STATUS_INVALID_PREPARSED_DATA;
 
-    *caps = preparsed->caps;
+    caps->Usage = preparsed->usage;
+    caps->UsagePage = preparsed->usage_page;
+    caps->InputReportByteLength = preparsed->input_report_byte_length;
+    caps->OutputReportByteLength = preparsed->output_report_byte_length;
+    caps->FeatureReportByteLength = preparsed->feature_report_byte_length;
+    caps->NumberLinkCollectionNodes = preparsed->number_link_collection_nodes;
+    caps->NumberInputButtonCaps = 0;
+    caps->NumberInputValueCaps = 0;
+    caps->NumberInputDataIndices = 0;
+    caps->NumberOutputButtonCaps = 0;
+    caps->NumberOutputValueCaps = 0;
+    caps->NumberOutputDataIndices = 0;
+    caps->NumberFeatureButtonCaps = 0;
+    caps->NumberFeatureValueCaps = 0;
+    caps->NumberFeatureDataIndices = 0;
+
+    for (it = HID_INPUT_VALUE_CAPS( preparsed ), end = it + preparsed->input_caps_count;
+         it != end; ++it)
+    {
+        if (!it->usage_min && !it->usage_max) continue;
+        if (it->flags & HID_VALUE_CAPS_IS_BUTTON) caps->NumberInputButtonCaps++;
+        else caps->NumberInputValueCaps++;
+        if (!(it->flags & HID_VALUE_CAPS_IS_RANGE)) caps->NumberInputDataIndices++;
+        else caps->NumberInputDataIndices += it->data_index_max - it->data_index_min + 1;
+    }
+
+    for (it = HID_OUTPUT_VALUE_CAPS( preparsed ), end = it + preparsed->output_caps_count;
+         it != end; ++it)
+    {
+        if (!it->usage_min && !it->usage_max) continue;
+        if (it->flags & HID_VALUE_CAPS_IS_BUTTON) caps->NumberOutputButtonCaps++;
+        else caps->NumberOutputValueCaps++;
+        if (!(it->flags & HID_VALUE_CAPS_IS_RANGE)) caps->NumberOutputDataIndices++;
+        else caps->NumberOutputDataIndices += it->data_index_max - it->data_index_min + 1;
+    }
+
+    for (it = HID_FEATURE_VALUE_CAPS( preparsed ), end = it + preparsed->feature_caps_count;
+         it != end; ++it)
+    {
+        if (!it->usage_min && !it->usage_max) continue;
+        if (it->flags & HID_VALUE_CAPS_IS_BUTTON) caps->NumberFeatureButtonCaps++;
+        else caps->NumberFeatureValueCaps++;
+        if (!(it->flags & HID_VALUE_CAPS_IS_RANGE)) caps->NumberFeatureDataIndices++;
+        else caps->NumberFeatureDataIndices += it->data_index_max - it->data_index_min + 1;
+    }
+
     return HIDP_STATUS_SUCCESS;
 }
 
@@ -192,10 +241,13 @@ static NTSTATUS get_scaled_usage_value( const struct hid_value_caps *caps, void 
     struct usage_value_params *params = user;
     ULONG unsigned_value = 0, bit_count = caps->bit_size * caps->report_count;
     LONG signed_value, *value = params->value_buf;
+    unsigned char *report_buf;
 
     if ((bit_count + 7) / 8 > sizeof(unsigned_value)) return HIDP_STATUS_BUFFER_TOO_SMALL;
     if (sizeof(LONG) > params->value_len) return HIDP_STATUS_BUFFER_TOO_SMALL;
-    copy_bits( (unsigned char *)&unsigned_value, params->report_buf, bit_count, -caps->start_bit );
+
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
+    copy_bits( (unsigned char *)&unsigned_value, report_buf, bit_count, -caps->start_bit );
     signed_value = sign_extend( unsigned_value, caps );
 
     if (caps->logical_min > caps->logical_max || caps->physical_min > caps->physical_max)
@@ -232,9 +284,14 @@ static NTSTATUS get_usage_value( const struct hid_value_caps *caps, void *user )
 {
     struct usage_value_params *params = user;
     ULONG bit_count = caps->bit_size * caps->report_count;
+    unsigned char *report_buf;
+
     if ((bit_count + 7) / 8 > params->value_len) return HIDP_STATUS_BUFFER_TOO_SMALL;
     memset( params->value_buf, 0, params->value_len );
-    copy_bits( params->value_buf, params->report_buf, bit_count, -caps->start_bit );
+
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
+    copy_bits( params->value_buf, report_buf, bit_count, -caps->start_bit );
+
     return HIDP_STATUS_NULL;
 }
 
@@ -284,16 +341,24 @@ struct get_usage_params
 
 static NTSTATUS get_usage( const struct hid_value_caps *caps, void *user )
 {
+    const struct hid_value_caps *end = caps;
+    ULONG index_min, index_max, bit, last;
     struct get_usage_params *params = user;
-    ULONG bit, last;
+    unsigned char *report_buf;
     BYTE index;
+
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
 
     if (HID_VALUE_CAPS_IS_ARRAY( caps ))
     {
+        while (end->flags & HID_VALUE_CAPS_ARRAY_HAS_MORE) end++;
+        index_min = end - caps + 1;
+        index_max = index_min + caps->usage_max - caps->usage_min;
+
         for (bit = caps->start_bit, last = bit + caps->report_count * caps->bit_size - 1; bit <= last; bit += 8)
         {
-            if (!(index = params->report_buf[bit / 8])) continue;
-            if (params->usages < params->usages_end) *params->usages = caps->usage_min + index - caps->start_index;
+            if (!(index = report_buf[bit / 8]) || index < index_min || index > index_max) continue;
+            if (params->usages < params->usages_end) *params->usages = caps->usage_min + index - index_min;
             params->usages++;
         }
         return HIDP_STATUS_SUCCESS;
@@ -301,7 +366,7 @@ static NTSTATUS get_usage( const struct hid_value_caps *caps, void *user )
 
     for (bit = caps->start_bit, last = bit + caps->usage_max - caps->usage_min; bit <= last; ++bit)
     {
-        if (!(params->report_buf[bit / 8] & (1 << (bit % 8)))) continue;
+        if (!(report_buf[bit / 8] & (1 << (bit % 8)))) continue;
         if (params->usages < params->usages_end) *params->usages = caps->usage_min + bit - caps->start_bit;
         params->usages++;
     }
@@ -384,6 +449,7 @@ static NTSTATUS set_scaled_usage_value( const struct hid_value_caps *caps, void 
 {
     ULONG bit_count = caps->bit_size * caps->report_count;
     struct usage_value_params *params = user;
+    unsigned char *report_buf;
     LONG value, log_range, phy_range;
 
     if (caps->logical_min > caps->logical_max) return HIDP_STATUS_BAD_LOG_PHY_VALUES;
@@ -404,7 +470,8 @@ static NTSTATUS set_scaled_usage_value( const struct hid_value_caps *caps, void 
         value = caps->logical_min + value;
     }
 
-    copy_bits( params->report_buf, (unsigned char *)&value, bit_count, caps->start_bit );
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
+    copy_bits( report_buf, (unsigned char *)&value, bit_count, caps->start_bit );
 
     return HIDP_STATUS_NULL;
 }
@@ -431,8 +498,13 @@ static NTSTATUS set_usage_value( const struct hid_value_caps *caps, void *user )
 {
     struct usage_value_params *params = user;
     ULONG bit_count = caps->bit_size * caps->report_count;
+    unsigned char *report_buf;
+
     if ((bit_count + 7) / 8 > params->value_len) return HIDP_STATUS_BUFFER_TOO_SMALL;
-    copy_bits( params->report_buf, params->value_buf, bit_count, caps->start_bit );
+
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
+    copy_bits( report_buf, params->value_buf, bit_count, caps->start_bit );
+
     return HIDP_STATUS_NULL;
 }
 
@@ -480,15 +552,22 @@ struct set_usage_params
 
 static NTSTATUS set_usage( const struct hid_value_caps *caps, void *user )
 {
+    const struct hid_value_caps *end = caps;
     struct set_usage_params *params = user;
-    ULONG bit, last;
+    ULONG index_min, bit, last;
+    unsigned char *report_buf;
+
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
 
     if (HID_VALUE_CAPS_IS_ARRAY( caps ))
     {
+        while (end->flags & HID_VALUE_CAPS_ARRAY_HAS_MORE) end++;
+        index_min = end - caps + 1;
+
         for (bit = caps->start_bit, last = bit + caps->report_count * caps->bit_size - 1; bit <= last; bit += 8)
         {
-            if (params->report_buf[bit / 8]) continue;
-            params->report_buf[bit / 8] = caps->start_index + params->usage - caps->usage_min;
+            if (report_buf[bit / 8]) continue;
+            report_buf[bit / 8] = index_min + params->usage - caps->usage_min;
             break;
         }
 
@@ -497,7 +576,7 @@ static NTSTATUS set_usage( const struct hid_value_caps *caps, void *user )
     }
 
     bit = caps->start_bit + params->usage - caps->usage_min;
-    params->report_buf[bit / 8] |= (1 << (bit % 8));
+    report_buf[bit / 8] |= (1 << (bit % 8));
     return HIDP_STATUS_NULL;
 }
 
@@ -537,16 +616,23 @@ struct unset_usage_params
 
 static NTSTATUS unset_usage( const struct hid_value_caps *caps, void *user )
 {
+    ULONG index, index_min, index_max, bit, last;
+    const struct hid_value_caps *end = caps;
     struct unset_usage_params *params = user;
-    ULONG bit, index, last;
+    unsigned char *report_buf;
+
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
 
     if (HID_VALUE_CAPS_IS_ARRAY( caps ))
     {
+        while (end->flags & HID_VALUE_CAPS_ARRAY_HAS_MORE) end++;
+        index_min = end - caps + 1;
+        index_max = index_min + caps->usage_max - caps->usage_min;
+
         for (bit = caps->start_bit, last = bit + caps->report_count * caps->bit_size - 1; bit <= last; bit += 8)
         {
-            index = caps->start_index + params->usage - caps->usage_min;
-            if (params->report_buf[bit / 8] != index) continue;
-            params->report_buf[bit / 8] = 0;
+            if (!(index = report_buf[bit / 8]) || index < index_min || index > index_max) continue;
+            report_buf[bit / 8] = 0;
             params->found = TRUE;
             break;
         }
@@ -555,8 +641,8 @@ static NTSTATUS unset_usage( const struct hid_value_caps *caps, void *user )
     }
 
     bit = caps->start_bit + params->usage - caps->usage_min;
-    if (params->report_buf[bit / 8] & (1 << (bit % 8))) params->found = TRUE;
-    params->report_buf[bit / 8] &= ~(1 << (bit % 8));
+    if (report_buf[bit / 8] & (1 << (bit % 8))) params->found = TRUE;
+    report_buf[bit / 8] &= ~(1 << (bit % 8));
     return HIDP_STATUS_NULL;
 }
 
@@ -609,8 +695,9 @@ static NTSTATUS get_button_caps( const struct hid_value_caps *caps, void *user )
     dst->LinkUsage = caps->link_usage;
     dst->BitField = caps->bit_field;
     dst->IsAlias = FALSE;
-    dst->IsAbsolute = HID_VALUE_CAPS_IS_ABSOLUTE( caps );
-    if (!(dst->IsRange = caps->is_range))
+    dst->IsAbsolute = (caps->flags & HID_VALUE_CAPS_IS_ABSOLUTE) ? 1 : 0;
+    dst->IsRange = (caps->flags & HID_VALUE_CAPS_IS_RANGE) ? 1 : 0;
+    if (!dst->IsRange)
     {
         dst->NotRange.Usage = caps->usage_min;
         dst->NotRange.DataIndex = caps->data_index_min;
@@ -622,14 +709,16 @@ static NTSTATUS get_button_caps( const struct hid_value_caps *caps, void *user )
         dst->Range.DataIndexMin = caps->data_index_min;
         dst->Range.DataIndexMax = caps->data_index_max;
     }
-    if (!(dst->IsStringRange = caps->is_string_range))
+    dst->IsStringRange = (caps->flags & HID_VALUE_CAPS_IS_STRING_RANGE) ? 1 : 0;
+    if (!dst->IsStringRange)
         dst->NotRange.StringIndex = caps->string_min;
     else
     {
         dst->Range.StringMin = caps->string_min;
         dst->Range.StringMax = caps->string_max;
     }
-    if ((dst->IsDesignatorRange = caps->is_designator_range))
+    dst->IsDesignatorRange = (caps->flags & HID_VALUE_CAPS_IS_DESIGNATOR_RANGE) ? 1 : 0;
+    if (!dst->IsDesignatorRange)
         dst->NotRange.DesignatorIndex = caps->designator_min;
     else
     {
@@ -663,36 +752,40 @@ static NTSTATUS get_value_caps( const struct hid_value_caps *caps, void *user )
     dst->LinkUsage = caps->link_usage;
     dst->BitField = caps->bit_field;
     dst->IsAlias = FALSE;
-    dst->IsAbsolute = HID_VALUE_CAPS_IS_ABSOLUTE( caps );
+    dst->IsAbsolute = (caps->flags & HID_VALUE_CAPS_IS_ABSOLUTE) ? 1 : 0;
     dst->HasNull = HID_VALUE_CAPS_HAS_NULL( caps );
     dst->BitSize = caps->bit_size;
-    dst->ReportCount = caps->is_range ? 1 : caps->report_count;
     dst->UnitsExp = caps->units_exp;
     dst->Units = caps->units;
     dst->LogicalMin = caps->logical_min;
     dst->LogicalMax = caps->logical_max;
     dst->PhysicalMin = caps->physical_min;
     dst->PhysicalMax = caps->physical_max;
-    if (!(dst->IsRange = caps->is_range))
+    dst->IsRange = (caps->flags & HID_VALUE_CAPS_IS_RANGE) ? 1 : 0;
+    if (!dst->IsRange)
     {
+        dst->ReportCount = caps->report_count;
         dst->NotRange.Usage = caps->usage_min;
         dst->NotRange.DataIndex = caps->data_index_min;
     }
     else
     {
+        dst->ReportCount = 1;
         dst->Range.UsageMin = caps->usage_min;
         dst->Range.UsageMax = caps->usage_max;
         dst->Range.DataIndexMin = caps->data_index_min;
         dst->Range.DataIndexMax = caps->data_index_max;
     }
-    if (!(dst->IsStringRange = caps->is_string_range))
+    dst->IsStringRange = (caps->flags & HID_VALUE_CAPS_IS_STRING_RANGE) ? 1 : 0;
+    if (!dst->IsStringRange)
         dst->NotRange.StringIndex = caps->string_min;
     else
     {
         dst->Range.StringMin = caps->string_min;
         dst->Range.StringMax = caps->string_max;
     }
-    if ((dst->IsDesignatorRange = caps->is_designator_range))
+    dst->IsDesignatorRange = (caps->flags & HID_VALUE_CAPS_IS_DESIGNATOR_RANGE) ? 1 : 0;
+    if (!dst->IsDesignatorRange)
         dst->NotRange.DesignatorIndex = caps->designator_min;
     else
     {
@@ -726,18 +819,26 @@ struct get_usage_and_page_params
 static NTSTATUS get_usage_and_page( const struct hid_value_caps *caps, void *user )
 {
     struct get_usage_and_page_params *params = user;
-    ULONG bit, last;
+    const struct hid_value_caps *end = caps;
+    ULONG index_min, index_max, bit, last;
+    unsigned char *report_buf;
     BYTE index;
+
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
 
     if (HID_VALUE_CAPS_IS_ARRAY( caps ))
     {
+        while (end->flags & HID_VALUE_CAPS_ARRAY_HAS_MORE) end++;
+        index_min = end - caps + 1;
+        index_max = index_min + caps->usage_max - caps->usage_min;
+
         for (bit = caps->start_bit, last = bit + caps->report_count * caps->bit_size - 1; bit <= last; bit += 8)
         {
-            if (!(index = params->report_buf[bit / 8])) continue;
+            if (!(index = report_buf[bit / 8]) || index < index_min || index > index_max) continue;
             if (params->usages < params->usages_end)
             {
                 params->usages->UsagePage = caps->usage_page;
-                params->usages->Usage = caps->usage_min + index - caps->start_index;
+                params->usages->Usage = caps->usage_min + index - index_min;
             }
             params->usages++;
         }
@@ -746,7 +847,7 @@ static NTSTATUS get_usage_and_page( const struct hid_value_caps *caps, void *use
 
     for (bit = caps->start_bit, last = bit + caps->usage_max - caps->usage_min; bit <= last; bit++)
     {
-        if (!(params->report_buf[bit / 8] & (1 << (bit % 8)))) continue;
+        if (!(report_buf[bit / 8] & (1 << (bit % 8)))) continue;
         if (params->usages < params->usages_end)
         {
             params->usages->UsagePage = caps->usage_page;
@@ -783,7 +884,9 @@ NTSTATUS WINAPI HidP_GetUsagesEx( HIDP_REPORT_TYPE report_type, USHORT collectio
 
 static NTSTATUS count_data( const struct hid_value_caps *caps, void *user )
 {
-    if (caps->is_range || HID_VALUE_CAPS_IS_BUTTON( caps )) *(ULONG *)user += caps->report_count;
+    BOOL is_button = caps->flags & HID_VALUE_CAPS_IS_BUTTON;
+    BOOL is_range = caps->flags & HID_VALUE_CAPS_IS_RANGE;
+    if (is_range || is_button) *(ULONG *)user += caps->report_count;
     else *(ULONG *)user += 1;
     return HIDP_STATUS_SUCCESS;
 }
@@ -812,26 +915,33 @@ static NTSTATUS find_all_data( const struct hid_value_caps *caps, void *user )
 {
     struct find_all_data_params *params = user;
     HIDP_DATA *data = params->data, *data_end = params->data_end;
-    ULONG bit, last, bit_count = caps->bit_size * caps->report_count;
-    char *report_buf = params->report_buf;
+    ULONG index_min, index_max, bit, last, bit_count;
+    const struct hid_value_caps *end = caps;
+    unsigned char *report_buf;
     BYTE index;
 
     if (!caps->bit_size) return HIDP_STATUS_SUCCESS;
 
+    report_buf = (unsigned char *)params->report_buf + caps->start_byte;
+
     if (HID_VALUE_CAPS_IS_ARRAY( caps ))
     {
+        while (end->flags & HID_VALUE_CAPS_ARRAY_HAS_MORE) end++;
+        index_min = end - caps + 1;
+        index_max = index_min + caps->usage_max - caps->usage_min;
+
         for (bit = caps->start_bit, last = bit + caps->report_count * caps->bit_size - 1; bit <= last; bit += 8)
         {
-            if (!(index = report_buf[bit / 8])) continue;
+            if (!(index = report_buf[bit / 8]) || index < index_min || index > index_max) continue;
             if (data < data_end)
             {
-                data->DataIndex = caps->data_index_min + index - caps->start_index;
+                data->DataIndex = caps->data_index_min + index - index_min;
                 data->On = 1;
             }
             data++;
         }
     }
-    else if (HID_VALUE_CAPS_IS_BUTTON( caps ))
+    else if (caps->flags & HID_VALUE_CAPS_IS_BUTTON)
     {
         for (bit = caps->start_bit, last = bit + caps->usage_max - caps->usage_min; bit <= last; bit++)
         {
@@ -850,8 +960,9 @@ static NTSTATUS find_all_data( const struct hid_value_caps *caps, void *user )
         {
             data->DataIndex = caps->data_index_min;
             data->RawValue = 0;
+            bit_count = caps->bit_size * caps->report_count;
             if ((bit_count + 7) / 8 > sizeof(data->RawValue)) return HIDP_STATUS_BUFFER_TOO_SMALL;
-            copy_bits( (void *)&data->RawValue, (void *)report_buf, bit_count, -caps->start_bit );
+            copy_bits( (void *)&data->RawValue, report_buf, bit_count, -caps->start_bit );
         }
         data++;
     }
@@ -886,33 +997,26 @@ NTSTATUS WINAPI HidP_GetData( HIDP_REPORT_TYPE report_type, HIDP_DATA *data, ULO
 NTSTATUS WINAPI HidP_GetLinkCollectionNodes( HIDP_LINK_COLLECTION_NODE *nodes, ULONG *nodes_len, PHIDP_PREPARSED_DATA preparsed_data )
 {
     struct hid_preparsed_data *preparsed = (struct hid_preparsed_data *)preparsed_data;
-    struct hid_value_caps *caps = HID_COLLECTION_VALUE_CAPS( preparsed );
+    struct hid_collection_node *collections = HID_COLLECTION_NODES( preparsed );
     ULONG i, count, capacity = *nodes_len;
 
     TRACE( "nodes %p, nodes_len %p, preparsed_data %p.\n", nodes, nodes_len, preparsed_data );
 
-    if (!preparsed || preparsed->magic != HID_MAGIC) return HIDP_STATUS_INVALID_PREPARSED_DATA;
+    if (!preparsed || memcmp( preparsed->magic, "HidP KDR", 8 )) return HIDP_STATUS_INVALID_PREPARSED_DATA;
 
-    count = *nodes_len = preparsed->caps.NumberLinkCollectionNodes;
+    count = *nodes_len = preparsed->number_link_collection_nodes;
     if (capacity < count) return HIDP_STATUS_BUFFER_TOO_SMALL;
 
     for (i = 0; i < count; ++i)
     {
-        nodes[i].LinkUsagePage = caps[i].usage_page;
-        nodes[i].LinkUsage = caps[i].usage_min;
-        nodes[i].Parent = caps[i].link_collection;
-        nodes[i].CollectionType = caps[i].bit_field;
+        nodes[i].LinkUsagePage = collections[i].usage_page;
+        nodes[i].LinkUsage = collections[i].usage;
+        nodes[i].Parent = collections[i].parent;
+        nodes[i].CollectionType = collections[i].collection_type;
+        nodes[i].FirstChild = collections[i].first_child;
+        nodes[i].NextSibling = collections[i].next_sibling;
+        nodes[i].NumberOfChildren = collections[i].number_of_children;
         nodes[i].IsAlias = 0;
-        nodes[i].FirstChild = 0;
-        nodes[i].NextSibling = 0;
-        nodes[i].NumberOfChildren = 0;
-
-        if (i > 0)
-        {
-            nodes[i].NextSibling = nodes[nodes[i].Parent].FirstChild;
-            nodes[nodes[i].Parent].FirstChild = i;
-            nodes[nodes[i].Parent].NumberOfChildren++;
-        }
     }
 
     return HIDP_STATUS_SUCCESS;

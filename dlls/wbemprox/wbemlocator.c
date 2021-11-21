@@ -134,12 +134,10 @@ static HRESULT parse_resource( const WCHAR *resource, WCHAR **server, WCHAR **na
     }
     q++;
     len = lstrlenW( q );
-    if (wcsicmp( q, L"cimv2" ) && wcsicmp( q, L"default" ))
-        goto done;
     if (!(*namespace = heap_alloc( (len + 1) * sizeof(WCHAR) ))) hr = E_OUTOFMEMORY;
     else
     {
-        memcpy( *namespace, p, len * sizeof(WCHAR) );
+        memcpy( *namespace, q, len * sizeof(WCHAR) );
         (*namespace)[len] = 0;
         hr = S_OK;
     }
@@ -193,7 +191,7 @@ static HRESULT WINAPI wbem_locator_ConnectServer(
     if (SUCCEEDED( hr ))
         return WBEM_NO_ERROR;
 
-    return WBEM_E_FAILED;
+    return hr;
 }
 
 static const IWbemLocatorVtbl wbem_locator_vtbl =

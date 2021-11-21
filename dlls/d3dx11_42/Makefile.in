@@ -5,7 +5,7 @@ IMPORTS = d3dcompiler
 DELAYIMPORTS = windowscodecs
 PARENTSRC = ../d3dx11_43
 
-EXTRADLLFLAGS = -mno-cygwin -Wb,--prefer-native
+EXTRADLLFLAGS = -Wb,--prefer-native
 
 C_SRCS = \
 	async.c \

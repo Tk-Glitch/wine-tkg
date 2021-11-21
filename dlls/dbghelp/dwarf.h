@@ -266,6 +266,10 @@ typedef enum dwarf_form_e
   DW_FORM_exprloc                       = 0x18,
   DW_FORM_flag_present                  = 0x19,
   DW_FORM_ref_sig8                      = 0x20,
+
+  /** GNU extensions */
+  DW_FORM_GNU_ref_alt                   = 0x1f20,
+  DW_FORM_GNU_strp_alt                  = 0x1f21,
 } dwarf_form_t;
 
 /** type encoding */
@@ -504,6 +508,7 @@ enum dwarf_calling_convention
 #define DW_LNE_hi_user                  0xff
 
 #define DW_CIE_ID                       ~(0x0U)
+#define DW64_CIE_ID                     ~((ULONG64)0x0)
 
 enum dwarf_call_frame_info
 {

@@ -3,5 +3,7 @@ IMPORTS   = dxguid uuid winmm user32 advapi32 ole32 version
 EXTRALIBS = $(PULSE_LIBS) $(PTHREAD_LIBS)
 EXTRAINCL = $(PULSE_CFLAGS)
 
+EXTRADLLFLAGS = -mcygwin
+
 C_SRCS = \
 	mmdevdrv.c

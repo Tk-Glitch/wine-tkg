@@ -7468,6 +7468,7 @@ static void test_XSLPattern(void)
         ok(hr == S_OK, "query=%s, failed with 0x%08x\n", ptr->query, hr);
         len = 0;
         hr = IXMLDOMNodeList_get_length(list, &len);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
         ok(len != 0, "query=%s, empty list\n", ptr->query);
         if (len) {
             if (ptr->todo) {
@@ -13643,11 +13644,11 @@ todo_wine
     ok(hr == S_OK, "got %#x\n", hr);
     ok(b == VARIANT_TRUE, "got %d\n", b);
     ok(qi_count == 0, "got %d QI calls\n", qi_count);
-    SysFreeString(V_BSTR(&var));
 
     IXMLDOMDocument2_Release(doc);
 
     DeleteFileA(path);
+    free_bstrs();
 }
 
 START_TEST(domdoc)

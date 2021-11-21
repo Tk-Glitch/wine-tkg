@@ -506,13 +506,13 @@ static inline HRESULT VARIANT_CoerceArray(VARIANTARG* pd, VARIANTARG* ps, VARTYP
 
 static HRESULT VARIANT_FetchDispatchValue(LPVARIANT pvDispatch, LPVARIANT pValue)
 {
+    DISPPARAMS params = { 0 };
     HRESULT hres;
-    static DISPPARAMS emptyParams = { NULL, NULL, 0, 0 };
 
     if ((V_VT(pvDispatch) & VT_TYPEMASK) == VT_DISPATCH) {
         if (NULL == V_DISPATCH(pvDispatch)) return DISP_E_TYPEMISMATCH;
         hres = IDispatch_Invoke(V_DISPATCH(pvDispatch), DISPID_VALUE, &IID_NULL,
-            LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &emptyParams, pValue,
+            LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &params, pValue,
             NULL, NULL);
     } else {
         hres = DISP_E_TYPEMISMATCH;
@@ -4635,6 +4635,7 @@ HRESULT WINAPI VarXor(LPVARIANT pVarLeft, LPVARIANT pVarRight, LPVARIANT pVarOut
         return S_OK;
     }
 
+    V_VT(&varLeft) = V_VT(&varRight) = VT_EMPTY;
     VariantInit(&tempLeft);
     VariantInit(&tempRight);
 
@@ -4653,8 +4654,6 @@ HRESULT WINAPI VarXor(LPVARIANT pVarLeft, LPVARIANT pVarRight, LPVARIANT pVarOut
     }
 
     /* Copy our inputs so we don't disturb anything */
-    V_VT(&varLeft) = V_VT(&varRight) = VT_EMPTY;
-
     hRet = VariantCopy(&varLeft, pVarLeft);
     if (FAILED(hRet))
         goto VarXor_Exit;

@@ -1,7 +1,7 @@
 MODULE    = systeminfo.exe
 IMPORTS   = ole32 oleaut32
 
-EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+EXTRADLLFLAGS = -mconsole -municode
 
 C_SRCS = \
 	main.c

@@ -158,7 +158,7 @@ HPALETTE WINAPI NtGdiCreateHalftonePalette( HDC hdc )
         pal->palPalEntry[i].peBlue  = entries[i].rgbBlue;
         pal->palPalEntry[i].peFlags = 0;
     }
-    return CreatePalette( pal );
+    return NtGdiCreatePaletteInternal( pal, pal->palNumEntries );
 }
 
 
@@ -304,9 +304,8 @@ UINT WINAPI NtGdiSetSystemPaletteUse( HDC hdc, UINT use )
     UINT old = SystemPaletteUse;
 
     /* Device doesn't support colour palettes */
-    if (!(GetDeviceCaps(hdc, RASTERCAPS) & RC_PALETTE)) {
+    if (!(NtGdiGetDeviceCaps( hdc, RASTERCAPS ) & RC_PALETTE))
         return SYSPAL_ERROR;
-    }
 
     switch (use) {
         case SYSPAL_NOSTATIC:
@@ -400,7 +399,7 @@ COLORREF CDECL nulldrv_GetNearestColor( PHYSDEV dev, COLORREF color )
     unsigned char spec_type;
     DC *dc = get_nulldrv_dc( dev );
 
-    if (!(GetDeviceCaps( dev->hdc, RASTERCAPS ) & RC_PALETTE)) return color;
+    if (!(NtGdiGetDeviceCaps( dev->hdc, RASTERCAPS ) & RC_PALETTE)) return color;
 
     spec_type = color >> 24;
     if (spec_type == 1 || spec_type == 2)
@@ -518,7 +517,7 @@ HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg)
 
     TRACE("%p %p\n", hdc, hpal );
 
-    if (GetObjectType(hpal) != OBJ_PAL)
+    if (get_gdi_object_type(hpal) != NTGDI_OBJ_PAL)
     {
       WARN("invalid selected palette %p\n",hpal);
       return 0;
@@ -582,7 +581,7 @@ typedef BOOL (WINAPI *RedrawWindow_funcptr)( HWND, const RECT *, HRGN, UINT );
 BOOL WINAPI NtGdiUpdateColors( HDC hDC )
 {
     HMODULE mod;
-    int size = GetDeviceCaps( hDC, SIZEPALETTE );
+    int size = NtGdiGetDeviceCaps( hDC, SIZEPALETTE );
 
     if (!size) return FALSE;
 

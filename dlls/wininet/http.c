@@ -2927,7 +2927,9 @@ static DWORD set_content_length(http_request_t *request)
     WCHAR encoding[20];
     DWORD size;
 
-    if(request->status_code == HTTP_STATUS_NO_CONTENT || !wcscmp(request->verb, L"HEAD")) {
+    if(request->status_code == HTTP_STATUS_NO_CONTENT || request->status_code == HTTP_STATUS_NOT_MODIFIED ||
+       !wcscmp(request->verb, L"HEAD"))
+    {
         request->contentLength = request->netconn_stream.content_length = 0;
         return ERROR_SUCCESS;
     }

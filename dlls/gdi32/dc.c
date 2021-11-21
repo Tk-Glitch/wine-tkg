@@ -125,7 +125,7 @@ DC *alloc_dc_ptr( DWORD magic )
     if (!(dc = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dc) ))) return NULL;
     if (!(dc->attr = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dc->attr))))
     {
-        HeapFree( GetProcessHeap(), 0, dc->attr );
+        HeapFree( GetProcessHeap(), 0, dc );
         return NULL;
     }
 
@@ -375,7 +375,7 @@ void DC_UpdateXforms( DC *dc )
     /* Reselect the font and pen back into the dc so that the size
        gets updated. */
     if (linear_xform_cmp( &oldworld2vport, &dc->xformWorld2Vport ) &&
-        GetObjectType( dc->hSelf ) != OBJ_METADC)
+        get_gdi_object_type( dc->hSelf ) != NTGDI_OBJ_METADC)
     {
         NtGdiSelectFont(dc->hSelf, dc->hFont);
         NtGdiSelectPen(dc->hSelf, dc->hPen);
@@ -693,8 +693,8 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
 
     dc->attr->vis_rect.left   = 0;
     dc->attr->vis_rect.top    = 0;
-    dc->attr->vis_rect.right  = GetDeviceCaps( hdc, DESKTOPHORZRES );
-    dc->attr->vis_rect.bottom = GetDeviceCaps( hdc, DESKTOPVERTRES );
+    dc->attr->vis_rect.right  = NtGdiGetDeviceCaps( hdc, DESKTOPHORZRES );
+    dc->attr->vis_rect.bottom = NtGdiGetDeviceCaps( hdc, DESKTOPVERTRES );
 
     DC_InitDC( dc );
     release_dc_ptr( dc );
@@ -775,8 +775,8 @@ BOOL WINAPI NtGdiResetDC( HDC hdc, const DEVMODEW *devmode, BOOL *banding,
             dc->dirty = 0;
             dc->attr->vis_rect.left   = 0;
             dc->attr->vis_rect.top    = 0;
-            dc->attr->vis_rect.right  = GetDeviceCaps( hdc, DESKTOPHORZRES );
-            dc->attr->vis_rect.bottom = GetDeviceCaps( hdc, DESKTOPVERTRES );
+            dc->attr->vis_rect.right  = NtGdiGetDeviceCaps( hdc, DESKTOPHORZRES );
+            dc->attr->vis_rect.bottom = NtGdiGetDeviceCaps( hdc, DESKTOPVERTRES );
             if (dc->hVisRgn) NtGdiDeleteObjectApp( dc->hVisRgn );
             dc->hVisRgn = 0;
             update_dc_clipping( dc );
@@ -880,6 +880,22 @@ BOOL WINAPI NtGdiGetAndSetDCDword( HDC hdc, UINT method, DWORD value, DWORD *pre
     release_dc_ptr( dc );
     if (!ret || !prev_value) return FALSE;
     *prev_value = prev;
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           NtGdiSetBrushOrg    (win32u.@)
+ */
+BOOL WINAPI NtGdiSetBrushOrg( HDC hdc, INT x, INT y, POINT *oldorg )
+{
+    DC *dc;
+
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
+    if (oldorg) *oldorg = dc->attr->brush_org;
+    dc->attr->brush_org.x = x;
+    dc->attr->brush_org.y = y;
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -1012,7 +1028,7 @@ BOOL WINAPI NtGdiGetDeviceGammaRamp( HDC hdc, void *ptr )
     TRACE("%p, %p\n", hdc, ptr);
     if( dc )
     {
-        if (GetObjectType( hdc ) != OBJ_MEMDC)
+        if (get_gdi_object_type( hdc ) != NTGDI_OBJ_MEMDC)
         {
             PHYSDEV physdev = GET_DC_PHYSDEV( dc, pGetDeviceGammaRamp );
             ret = physdev->funcs->pGetDeviceGammaRamp( physdev, ptr );
@@ -1112,7 +1128,7 @@ BOOL WINAPI NtGdiSetDeviceGammaRamp( HDC hdc, void *ptr )
     TRACE( "%p, %p\n", hdc, ptr );
     if( dc )
     {
-        if (GetObjectType( hdc ) != OBJ_MEMDC)
+        if (get_gdi_object_type( hdc ) != NTGDI_OBJ_MEMDC)
         {
             PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetDeviceGammaRamp );
 

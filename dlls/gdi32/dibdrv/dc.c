@@ -30,8 +30,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dib);
 
-extern BOOL WINAPI GdiSetPixelFormat( HDC hdc, INT fmt, const PIXELFORMATDESCRIPTOR *pfd );
-
 static const struct osmesa_funcs *osmesa_funcs;
 
 static const DWORD bit_fields_888[3] = {0xff0000, 0x00ff00, 0x0000ff};
@@ -472,21 +470,6 @@ static BOOL WINAPI dibdrv_wglCopyContext( struct wgl_context *src, struct wgl_co
 }
 
 /***********************************************************************
- *		dibdrv_wglCreateContext
- */
-static struct wgl_context * WINAPI dibdrv_wglCreateContext( HDC hdc )
-{
-    PIXELFORMATDESCRIPTOR descr;
-    int format = GetPixelFormat( hdc );
-
-    if (!format) format = 1;
-    if (!DescribePixelFormat( hdc, format, sizeof(descr), &descr )) return NULL;
-
-    if (!osmesa_funcs) return NULL;
-    return osmesa_funcs->create_context( hdc, &descr );
-}
-
-/***********************************************************************
  *		dibdrv_wglDeleteContext
  */
 static BOOL WINAPI dibdrv_wglDeleteContext( struct wgl_context *context )
@@ -509,6 +492,21 @@ static int WINAPI dibdrv_wglGetPixelFormat( HDC hdc )
         release_dc_ptr( dc );
     }
     return ret;
+}
+
+/***********************************************************************
+ *		dibdrv_wglCreateContext
+ */
+static struct wgl_context * WINAPI dibdrv_wglCreateContext( HDC hdc )
+{
+    PIXELFORMATDESCRIPTOR descr;
+    int format = dibdrv_wglGetPixelFormat( hdc );
+
+    if (!format) format = 1;
+    if (!dibdrv_wglDescribePixelFormat( hdc, format, sizeof(descr), &descr )) return NULL;
+
+    if (!osmesa_funcs) return NULL;
+    return osmesa_funcs->create_context( hdc, &descr );
 }
 
 /***********************************************************************
@@ -564,7 +562,7 @@ static BOOL WINAPI dibdrv_wglMakeCurrent( HDC hdc, struct wgl_context *context )
 static BOOL WINAPI dibdrv_wglSetPixelFormat( HDC hdc, int fmt, const PIXELFORMATDESCRIPTOR *descr )
 {
     if (fmt <= 0 || fmt > ARRAY_SIZE( pixel_formats )) return FALSE;
-    return GdiSetPixelFormat( hdc, fmt, descr );
+    return NtGdiSetPixelFormat( hdc, fmt );
 }
 
 /***********************************************************************
@@ -636,13 +634,11 @@ const struct gdi_dc_funcs dib_driver =
     dibdrv_CreateDC,                    /* pCreateDC */
     dibdrv_DeleteDC,                    /* pDeleteDC */
     NULL,                               /* pDeleteObject */
-    NULL,                               /* pDeviceCapabilities */
     dibdrv_Ellipse,                     /* pEllipse */
     NULL,                               /* pEndDoc */
     NULL,                               /* pEndPage */
     NULL,                               /* pEndPath */
     NULL,                               /* pEnumFonts */
-    NULL,                               /* pExtDeviceMode */
     NULL,                               /* pExtEscape */
     dibdrv_ExtFloodFill,                /* pExtFloodFill */
     dibdrv_ExtTextOut,                  /* pExtTextOut */
@@ -749,13 +745,13 @@ static inline void lock_surface( struct windrv_physdev *dev )
 {
     GDI_CheckNotLock();
     dev->surface->funcs->lock( dev->surface );
-    if (is_rect_empty( dev->dibdrv->bounds )) dev->start_ticks = GetTickCount();
+    if (is_rect_empty( dev->dibdrv->bounds )) dev->start_ticks = NtGetTickCount();
 }
 
 static inline void unlock_surface( struct windrv_physdev *dev )
 {
     dev->surface->funcs->unlock( dev->surface );
-    if (GetTickCount() - dev->start_ticks > FLUSH_PERIOD) dev->surface->funcs->flush( dev->surface );
+    if (NtGetTickCount() - dev->start_ticks > FLUSH_PERIOD) dev->surface->funcs->flush( dev->surface );
 }
 
 static void CDECL unlock_bits_surface( struct gdi_image_bits *bits )
@@ -1201,13 +1197,11 @@ static const struct gdi_dc_funcs window_driver =
     windrv_CreateDC,                    /* pCreateDC */
     windrv_DeleteDC,                    /* pDeleteDC */
     NULL,                               /* pDeleteObject */
-    NULL,                               /* pDeviceCapabilities */
     windrv_Ellipse,                     /* pEllipse */
     NULL,                               /* pEndDoc */
     NULL,                               /* pEndPage */
     NULL,                               /* pEndPath */
     NULL,                               /* pEnumFonts */
-    NULL,                               /* pExtDeviceMode */
     NULL,                               /* pExtEscape */
     windrv_ExtFloodFill,                /* pExtFloodFill */
     windrv_ExtTextOut,                  /* pExtTextOut */

@@ -1,5 +1,7 @@
 MODULE    = fltmgr.sys
-EXTRADLLFLAGS = -mno-cygwin -Wl,--subsystem,native
+IMPORTLIB = fltmgr
+EXTRADLLFLAGS = -Wl,--subsystem,native
+IMPORTS = ntoskrnl
 
 C_SRCS = \
 	main.c

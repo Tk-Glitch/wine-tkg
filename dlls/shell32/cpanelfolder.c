@@ -18,9 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -471,7 +468,7 @@ static HRESULT WINAPI ISF_ControlPanel_fnBindToObject(IShellFolder2 *iface, LPCI
 
     TRACE("(%p)->(pidl=%p,%p,%s,%p)\n", This, pidl, pbcReserved, shdebugstr_guid(riid), ppvOut);
 
-    return SHELL32_BindToChild(This->pidlRoot, NULL, pidl, riid, ppvOut);
+    return SHELL32_BindToChild(This->pidlRoot, &CLSID_ShellFSFolder, NULL, pidl, riid, ppvOut);
 }
 
 /**************************************************************************
@@ -963,8 +960,6 @@ static HRESULT WINAPI IShellExecuteHookW_fnExecute(IShellExecuteHookW *iface,
         LPSHELLEXECUTEINFOW psei)
 {
     ICPanelImpl *This = impl_from_IShellExecuteHookW(iface);
-    static const WCHAR wCplopen[] = {'c','p','l','o','p','e','n','\0'};
-
     SHELLEXECUTEINFOW sei_tmp;
     PIDLCPanelStruct* pcpanel;
     WCHAR path[MAX_PATH];
@@ -997,7 +992,7 @@ static HRESULT WINAPI IShellExecuteHookW_fnExecute(IShellExecuteHookW *iface,
     sei_tmp.lpFile = path;
     sei_tmp.lpParameters = params;
     sei_tmp.fMask &= ~SEE_MASK_INVOKEIDLIST;
-    sei_tmp.lpVerb = wCplopen;
+    sei_tmp.lpVerb = L"cplopen";
 
     ret = ShellExecuteExW(&sei_tmp);
     if (ret)

@@ -3,7 +3,7 @@ IMPORTLIB = dxgi
 IMPORTS   = gdi32 dxguid uuid wined3d user32
 EXTRAINCL = $(VKD3D_CFLAGS)
 
-EXTRADLLFLAGS = -Wl,--image-base,0x7bb00000
+EXTRADLLFLAGS = -Wl,--image-base,0x7bb00000 -mcygwin
 
 C_SRCS = \
 	adapter.c \

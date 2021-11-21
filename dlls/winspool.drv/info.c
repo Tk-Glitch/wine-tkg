@@ -119,6 +119,7 @@
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/list.h"
+#include "wine/rbtree.h"
 #include "wine/heap.h"
 #include "winnls.h"
 
@@ -178,19 +179,24 @@ typedef struct {
     LPCWSTR  versionsubdir;
 } printenv_t;
 
+typedef struct
+{
+    struct wine_rb_entry entry;
+    HMODULE module;
+    LONG ref;
+
+    /* entry points */
+    DWORD (WINAPI *pDrvDeviceCapabilities)(HANDLE, const WCHAR *, WORD, void *, const DEVMODEW *);
+    INT   (WINAPI *pDrvDocumentProperties)(HWND, const WCHAR *, DEVMODEW *, DEVMODEW *, DWORD);
+
+    WCHAR name[1];
+} config_module_t;
+
 /* ############################### */
 
 static opened_printer_t **printer_handles;
 static UINT nb_printer_handles;
 static LONG next_job_id = 1;
-
-static DWORD (WINAPI *GDI_CallDeviceCapabilities16)( LPCSTR lpszDevice, LPCSTR lpszPort,
-                                                     WORD fwCapability, LPSTR lpszOutput,
-                                                     LPDEVMODEA lpdm );
-static INT (WINAPI *GDI_CallExtDeviceMode16)( HWND hwnd, LPDEVMODEA lpdmOutput,
-                                              LPSTR lpszDevice, LPSTR lpszPort,
-                                              LPDEVMODEA lpdmInput, LPSTR lpszProfile,
-                                              DWORD fwMode );
 
 static const WCHAR DriversW[] = { 'S','y','s','t','e','m','\\',
                                   'C','u', 'r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
@@ -383,18 +389,6 @@ static LPWSTR strdupW(LPCWSTR p)
     return ret;
 }
 
-static LPSTR strdupWtoA( LPCWSTR str )
-{
-    LPSTR ret;
-    INT len;
-
-    if (!str) return NULL;
-    len = WideCharToMultiByte( CP_ACP, 0, str, -1, NULL, 0, NULL, NULL );
-    ret = HeapAlloc( GetProcessHeap(), 0, len );
-    if(ret) WideCharToMultiByte( CP_ACP, 0, str, -1, ret, len, NULL, NULL );
-    return ret;
-}
-
 static DEVMODEW *dup_devmode( const DEVMODEW *dm )
 {
     DEVMODEW *ret;
@@ -498,6 +492,128 @@ static inline const DWORD *form_string_info( DWORD level )
 
     SetLastError( ERROR_INVALID_LEVEL );
     return NULL;
+}
+
+/*****************************************************************************
+ *          WINSPOOL_OpenDriverReg [internal]
+ *
+ * opens the registry for the printer drivers depending on the given input
+ * variable pEnvironment
+ *
+ * RETURNS:
+ *    the opened hkey on success
+ *    NULL on error
+ */
+static HKEY WINSPOOL_OpenDriverReg(const void *pEnvironment)
+{
+    HKEY  retval = NULL;
+    LPWSTR buffer;
+    const printenv_t *env;
+
+    TRACE("(%s)\n", debugstr_w(pEnvironment));
+
+    env = validate_envW(pEnvironment);
+    if (!env) return NULL;
+
+    buffer = HeapAlloc( GetProcessHeap(), 0,
+                (strlenW(DriversW) + strlenW(env->envname) +
+                 strlenW(env->versionregpath) + 1) * sizeof(WCHAR));
+    if(buffer) {
+        wsprintfW(buffer, DriversW, env->envname, env->versionregpath);
+        RegCreateKeyW(HKEY_LOCAL_MACHINE, buffer, &retval);
+        HeapFree(GetProcessHeap(), 0, buffer);
+    }
+    return retval;
+}
+
+static CRITICAL_SECTION config_modules_cs;
+static CRITICAL_SECTION_DEBUG config_modules_cs_debug =
+{
+    0, 0, &config_modules_cs,
+    { &config_modules_cs_debug.ProcessLocksList, &config_modules_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": config_modules_cs") }
+};
+static CRITICAL_SECTION config_modules_cs = { &config_modules_cs_debug, -1, 0, 0, 0, 0 };
+
+static int compare_config_modules(const void *key, const struct wine_rb_entry *entry)
+{
+    config_module_t *module = WINE_RB_ENTRY_VALUE(entry, config_module_t, entry);
+    return lstrcmpiW(key, module->name);
+}
+
+static struct wine_rb_tree config_modules = { compare_config_modules };
+
+static void release_config_module(config_module_t *config_module)
+{
+    if (InterlockedDecrement(&config_module->ref)) return;
+    FreeLibrary(config_module->module);
+    HeapFree(GetProcessHeap(), 0, config_module);
+}
+
+static config_module_t *get_config_module(const WCHAR *device, BOOL grab)
+{
+    WCHAR driver[MAX_PATH];
+    DWORD size, len;
+    HKEY driver_key, device_key;
+    HMODULE driver_module;
+    config_module_t *ret = NULL;
+    struct wine_rb_entry *entry;
+    DWORD type;
+    LSTATUS res;
+
+    EnterCriticalSection(&config_modules_cs);
+    entry = wine_rb_get(&config_modules, device);
+    if (entry) {
+        ret = WINE_RB_ENTRY_VALUE(entry, config_module_t, entry);
+        if (grab) InterlockedIncrement(&ret->ref);
+        goto ret;
+    }
+    if (!grab) goto ret;
+
+    if (!(driver_key = WINSPOOL_OpenDriverReg(NULL))) goto ret;
+
+    res = RegOpenKeyW(driver_key, device, &device_key);
+    RegCloseKey(driver_key);
+    if (res) {
+        WARN("Device %s key not found\n", debugstr_w(device));
+        goto ret;
+    }
+
+    size = sizeof(driver);
+    if (!GetPrinterDriverDirectoryW(NULL, NULL, 1, (LPBYTE)driver, size, &size)) goto ret;
+
+    len = size / sizeof(WCHAR) - 1;
+    driver[len++] = '\\';
+    driver[len++] = '3';
+    driver[len++] = '\\';
+    size = sizeof(driver) - len * sizeof(WCHAR);
+    res = RegQueryValueExW(device_key, Configuration_FileW, NULL, &type,
+                           (BYTE *)(driver + len), &size);
+    RegCloseKey(device_key);
+    if (res || type != REG_SZ) {
+        WARN("no configuration file: %u\n", res);
+        goto ret;
+    }
+
+    if (!(driver_module = LoadLibraryW(driver))) {
+        WARN("Could not load %s\n", debugstr_w(driver));
+        goto ret;
+    }
+
+    len = lstrlenW(device);
+    if (!(ret = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(config_module_t, name[len + 1]))))
+        goto ret;
+
+    ret->ref = 2; /* one for config_module and one for the caller */
+    ret->module = driver_module;
+    ret->pDrvDeviceCapabilities = (void *)GetProcAddress(driver_module, "DrvDeviceCapabilities");
+    ret->pDrvDocumentProperties = (void *)GetProcAddress(driver_module, "DrvDocumentProperties");
+    lstrcpyW(ret->name, device);
+
+    wine_rb_put(&config_modules, ret->name, &ret->entry);
+ret:
+    LeaveCriticalSection(&config_modules_cs);
+    return ret;
 }
 
 /******************************************************************
@@ -1747,36 +1863,6 @@ static job_t *get_job(HANDLE hprn, DWORD JobId)
     return NULL;
 }
 
-/***********************************************************
- *      DEVMODEcpyAtoW
- */
-static LPDEVMODEW DEVMODEcpyAtoW(DEVMODEW *dmW, const DEVMODEA *dmA)
-{
-    BOOL Formname;
-    ptrdiff_t off_formname = (const char *)dmA->dmFormName - (const char *)dmA;
-    DWORD size;
-
-    Formname = (dmA->dmSize > off_formname);
-    size = dmA->dmSize + CCHDEVICENAME + (Formname ? CCHFORMNAME : 0);
-    MultiByteToWideChar(CP_ACP, 0, (LPCSTR)dmA->dmDeviceName, -1,
-                        dmW->dmDeviceName, CCHDEVICENAME);
-    if(!Formname) {
-      memcpy(&dmW->dmSpecVersion, &dmA->dmSpecVersion,
-	     dmA->dmSize - CCHDEVICENAME);
-    } else {
-      memcpy(&dmW->dmSpecVersion, &dmA->dmSpecVersion,
-	     off_formname - CCHDEVICENAME);
-      MultiByteToWideChar(CP_ACP, 0, (LPCSTR)dmA->dmFormName, -1,
-                          dmW->dmFormName, CCHFORMNAME);
-      memcpy(&dmW->dmLogPixels, &dmA->dmLogPixels, dmA->dmSize -
-	     (off_formname + CCHFORMNAME));
-    }
-    dmW->dmSize = size;
-    memcpy((char *)dmW + dmW->dmSize, (const char *)dmA + dmA->dmSize,
-	   dmA->dmDriverExtra);
-    return dmW;
-}
-
 /******************************************************************
  * convert_printerinfo_W_to_A [internal]
  *
@@ -2330,172 +2416,163 @@ static void free_printer_info( void *data, DWORD level )
  *              DeviceCapabilitiesA    [WINSPOOL.@]
  *
  */
-INT WINAPI DeviceCapabilitiesA(LPCSTR pDevice,LPCSTR pPort, WORD cap,
-			       LPSTR pOutput, LPDEVMODEA lpdm)
+INT WINAPI DeviceCapabilitiesA(const char *device, const char *portA, WORD cap,
+                               char *output, DEVMODEA *devmodeA)
 {
-    INT ret;
+    WCHAR *device_name = NULL, *port = NULL;
+    DEVMODEW *devmode = NULL;
+    DWORD ret, len;
 
-    TRACE("%s,%s,%u,%p,%p\n", debugstr_a(pDevice), debugstr_a(pPort), cap, pOutput, lpdm);
-
-    if (!GDI_CallDeviceCapabilities16)
-    {
-        GDI_CallDeviceCapabilities16 = (void*)GetProcAddress( GetModuleHandleA("gdi32"),
-                                                              (LPCSTR)104 );
-        if (!GDI_CallDeviceCapabilities16) return -1;
+    len = MultiByteToWideChar(CP_ACP, 0, device, -1, NULL, 0);
+    if (len) {
+        device_name = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, device, -1, device_name, len);
     }
-    ret = GDI_CallDeviceCapabilities16(pDevice, pPort, cap, pOutput, lpdm);
 
-    /* If DC_PAPERSIZE map POINT16s to POINTs */
-    if(ret != -1 && cap == DC_PAPERSIZE && pOutput) {
-        POINT16 *tmp = HeapAlloc( GetProcessHeap(), 0, ret * sizeof(POINT16) );
-        POINT *pt = (POINT *)pOutput;
-	INT i;
-	memcpy(tmp, pOutput, ret * sizeof(POINT16));
-	for(i = 0; i < ret; i++, pt++)
-        {
-            pt->x = tmp[i].x;
-            pt->y = tmp[i].y;
+    len = MultiByteToWideChar(CP_ACP, 0, portA, -1, NULL, 0);
+    if (len) {
+        port = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, portA, -1, port, len);
+    }
+
+    if (devmodeA) devmode = GdiConvertToDevmodeW( devmodeA );
+
+    if (output && (cap == DC_BINNAMES || cap == DC_FILEDEPENDENCIES || cap == DC_PAPERNAMES)) {
+        /* These need A -> W translation */
+        unsigned int size = 0, i;
+        WCHAR *outputW;
+
+        ret = DeviceCapabilitiesW(device_name, port, cap, NULL, devmode);
+        if (ret == -1) return ret;
+
+        switch (cap) {
+        case DC_BINNAMES:
+            size = 24;
+            break;
+        case DC_PAPERNAMES:
+        case DC_FILEDEPENDENCIES:
+            size = 64;
+            break;
         }
-	HeapFree( GetProcessHeap(), 0, tmp );
+        outputW = HeapAlloc(GetProcessHeap(), 0, size * ret * sizeof(WCHAR));
+        ret = DeviceCapabilitiesW(device_name, port, cap, outputW, devmode);
+        for (i = 0; i < ret; i++)
+            WideCharToMultiByte(CP_ACP, 0, outputW + (i * size), -1,
+                                output + (i * size), size, NULL, NULL);
+        HeapFree(GetProcessHeap(), 0, outputW);
+    } else {
+        ret = DeviceCapabilitiesW(device_name, port, cap, (WCHAR *)output, devmode);
     }
+    HeapFree(GetProcessHeap(), 0, device_name);
+    HeapFree(GetProcessHeap(), 0, devmode);
+    HeapFree(GetProcessHeap(), 0, port);
     return ret;
 }
 
-
 /*****************************************************************************
  *          DeviceCapabilitiesW        [WINSPOOL.@]
- *
- * Call DeviceCapabilitiesA since we later call 16bit stuff anyway
  *
  */
 INT WINAPI DeviceCapabilitiesW(LPCWSTR pDevice, LPCWSTR pPort,
 			       WORD fwCapability, LPWSTR pOutput,
 			       const DEVMODEW *pDevMode)
 {
-    LPDEVMODEA dmA = DEVMODEdupWtoA(pDevMode);
-    LPSTR pDeviceA = strdupWtoA(pDevice);
-    LPSTR pPortA = strdupWtoA(pPort);
-    INT ret;
+    config_module_t *config;
+    int ret;
 
-    TRACE("%s,%s,%u,%p,%p\n", debugstr_w(pDevice), debugstr_w(pPort), fwCapability, pOutput, pDevMode);
+    TRACE("%s,%s,%u,%p,%p\n", debugstr_w(pDevice), debugstr_w(pPort), fwCapability,
+          pOutput, pDevMode);
 
-    if(pOutput && (fwCapability == DC_BINNAMES ||
-		   fwCapability == DC_FILEDEPENDENCIES ||
-		   fwCapability == DC_PAPERNAMES)) {
-      /* These need A -> W translation */
-        INT size = 0, i;
-	LPSTR pOutputA;
-        ret = DeviceCapabilitiesA(pDeviceA, pPortA, fwCapability, NULL,
-				  dmA);
-	if(ret == -1)
-	    return ret;
-	switch(fwCapability) {
-	case DC_BINNAMES:
-	    size = 24;
-	    break;
-	case DC_PAPERNAMES:
-	case DC_FILEDEPENDENCIES:
-	    size = 64;
-	    break;
-	}
-	pOutputA = HeapAlloc(GetProcessHeap(), 0, size * ret);
-	ret = DeviceCapabilitiesA(pDeviceA, pPortA, fwCapability, pOutputA,
-				  dmA);
-	for(i = 0; i < ret; i++)
-	    MultiByteToWideChar(CP_ACP, 0, pOutputA + (i * size), -1,
-				pOutput + (i * size), size);
-	HeapFree(GetProcessHeap(), 0, pOutputA);
-    } else {
-        ret = DeviceCapabilitiesA(pDeviceA, pPortA, fwCapability,
-				  (LPSTR)pOutput, dmA);
+    if (!(config = get_config_module(pDevice, TRUE))) {
+        WARN("Could not load config module for %s\n", debugstr_w(pDevice));
+        return 0;
     }
-    HeapFree(GetProcessHeap(),0,pPortA);
-    HeapFree(GetProcessHeap(),0,pDeviceA);
-    HeapFree(GetProcessHeap(),0,dmA);
+
+    ret = config->pDrvDeviceCapabilities(NULL /* FIXME */, pDevice, fwCapability,
+                                         pOutput, pDevMode);
+    release_config_module(config);
     return ret;
 }
 
 /******************************************************************
  *              DocumentPropertiesA   [WINSPOOL.@]
- *
- * FIXME: implement DocumentPropertiesA via DocumentPropertiesW, not vice versa
  */
-LONG WINAPI DocumentPropertiesA(HWND hWnd,HANDLE hPrinter,
-                                LPSTR pDeviceName, LPDEVMODEA pDevModeOutput,
-				LPDEVMODEA pDevModeInput,DWORD fMode )
+LONG WINAPI DocumentPropertiesA(HWND hwnd, HANDLE printer, char *device_name, DEVMODEA *output,
+				DEVMODEA *input, DWORD mode)
 {
-    LPSTR lpName = pDeviceName, dupname = NULL;
-    static CHAR port[] = "LPT1:";
-    LONG ret;
+    DEVMODEW *outputW = NULL, *inputW = NULL;
+    WCHAR *device = NULL;
+    unsigned int len;
+    int ret;
 
-    TRACE("(%p,%p,%s,%p,%p,%d)\n",
-	hWnd,hPrinter,pDeviceName,pDevModeOutput,pDevModeInput,fMode
-    );
+    TRACE("(%p,%p,%s,%p,%p,%d)\n", hwnd, printer, debugstr_a(device_name), output, input, mode);
 
-    if(!pDeviceName || !*pDeviceName) {
-        LPCWSTR lpNameW = get_opened_printer_name(hPrinter);
-        if(!lpNameW) {
-		ERR("no name from hPrinter?\n");
-                SetLastError(ERROR_INVALID_HANDLE);
-		return -1;
-	}
-	lpName = dupname = strdupWtoA(lpNameW);
+    len = MultiByteToWideChar(CP_ACP, 0, device_name, -1, NULL, 0);
+    if (len) {
+        device = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, device_name, -1, device, len);
     }
 
-    if (!GDI_CallExtDeviceMode16)
-    {
-        GDI_CallExtDeviceMode16 = (void*)GetProcAddress( GetModuleHandleA("gdi32"),
-                                                         (LPCSTR)102 );
-        if (!GDI_CallExtDeviceMode16) {
-		ERR("No CallExtDeviceMode16?\n");
-		ret = -1;
-		goto end;
-	}
+    if (output && (mode & (DM_COPY | DM_UPDATE))) {
+        ret = DocumentPropertiesW(hwnd, printer, device, NULL, NULL, 0);
+        if (ret <= 0) {
+            HeapFree(GetProcessHeap(), 0, device);
+            return -1;
+        }
+        outputW = HeapAlloc(GetProcessHeap(), 0, ret);
     }
-    ret = GDI_CallExtDeviceMode16(hWnd, pDevModeOutput, lpName, port,
-				  pDevModeInput, NULL, fMode);
 
-end:
-    HeapFree(GetProcessHeap(), 0, dupname);
+    if (input) inputW = GdiConvertToDevmodeW(input);
+
+    ret = DocumentPropertiesW(hwnd, printer, device, outputW, inputW, mode);
+
+    if (ret >= 0 && outputW && (mode & (DM_COPY | DM_UPDATE))) {
+        DEVMODEA *dmA = DEVMODEdupWtoA( outputW );
+        if (dmA) memcpy(output, dmA, dmA->dmSize + dmA->dmDriverExtra);
+        HeapFree(GetProcessHeap(), 0, dmA);
+    }
+
+    HeapFree(GetProcessHeap(), 0, device);
+    HeapFree(GetProcessHeap(), 0, inputW);
+    HeapFree(GetProcessHeap(), 0, outputW);
+
+    if (!mode && ret > 0) ret -= CCHDEVICENAME + CCHFORMNAME;
     return ret;
 }
 
 
 /*****************************************************************************
  *          DocumentPropertiesW (WINSPOOL.@)
- *
- * FIXME: implement DocumentPropertiesA via DocumentPropertiesW, not vice versa
  */
 LONG WINAPI DocumentPropertiesW(HWND hWnd, HANDLE hPrinter,
 				LPWSTR pDeviceName,
 				LPDEVMODEW pDevModeOutput,
 				LPDEVMODEW pDevModeInput, DWORD fMode)
 {
-
-    LPSTR pDeviceNameA = strdupWtoA(pDeviceName);
-    LPDEVMODEA pDevModeInputA;
-    LPDEVMODEA pDevModeOutputA = NULL;
+    config_module_t *config = NULL;
+    const WCHAR *device = NULL;
     LONG ret;
 
     TRACE("(%p,%p,%s,%p,%p,%d)\n",
-          hWnd,hPrinter,debugstr_w(pDeviceName),pDevModeOutput,pDevModeInput,
-	  fMode);
-    if(pDevModeOutput) {
-        ret = DocumentPropertiesA(hWnd, hPrinter, pDeviceNameA, NULL, NULL, 0);
-	if(ret < 0) return ret;
-	pDevModeOutputA = HeapAlloc(GetProcessHeap(), 0, ret);
+          hWnd, hPrinter, debugstr_w(pDeviceName), pDevModeOutput, pDevModeInput, fMode);
+
+    device = pDeviceName && pDeviceName[0] ? pDeviceName : get_opened_printer_name(hPrinter);
+    if (!device) {
+        ERR("no device name\n");
+        return -1;
     }
-    pDevModeInputA = (fMode & DM_IN_BUFFER) ? DEVMODEdupWtoA(pDevModeInput) : NULL;
-    ret = DocumentPropertiesA(hWnd, hPrinter, pDeviceNameA, pDevModeOutputA,
-			      pDevModeInputA, fMode);
-    if(pDevModeOutput) {
-        DEVMODEcpyAtoW(pDevModeOutput, pDevModeOutputA);
-	HeapFree(GetProcessHeap(),0,pDevModeOutputA);
+
+    config = get_config_module(device, TRUE);
+    if (!config) {
+        ERR("Could not load config module for %s\n", debugstr_w(device));
+        return -1;
     }
-    if(fMode == 0 && ret > 0)
-        ret += (CCHDEVICENAME + CCHFORMNAME);
-    HeapFree(GetProcessHeap(),0,pDevModeInputA);
-    HeapFree(GetProcessHeap(),0,pDeviceNameA);
+
+    /* FIXME: This uses Wine-specific config file entry point.
+     * We should use DrvDevicePropertySheets instead (requires CPSUI support first).
+     */
+    ret = config->pDrvDocumentProperties(hWnd, device, pDevModeOutput, pDevModeInput, fMode);
+    release_config_module(config);
     return ret;
 }
 
@@ -3187,38 +3264,6 @@ BOOL WINAPI GetPrintProcessorDirectoryW(LPWSTR server, LPWSTR env,
 }
 
 /*****************************************************************************
- *          WINSPOOL_OpenDriverReg [internal]
- *
- * opens the registry for the printer drivers depending on the given input
- * variable pEnvironment
- *
- * RETURNS:
- *    the opened hkey on success
- *    NULL on error
- */
-static HKEY WINSPOOL_OpenDriverReg( LPCVOID pEnvironment)
-{   
-    HKEY  retval = NULL;
-    LPWSTR buffer;
-    const printenv_t * env;
-
-    TRACE("(%s)\n", debugstr_w(pEnvironment));
-
-    env = validate_envW(pEnvironment);
-    if (!env) return NULL;
-
-    buffer = HeapAlloc( GetProcessHeap(), 0,
-                (strlenW(DriversW) + strlenW(env->envname) + 
-                 strlenW(env->versionregpath) + 1) * sizeof(WCHAR));
-    if(buffer) {
-        wsprintfW(buffer, DriversW, env->envname, env->versionregpath);
-        RegCreateKeyW(HKEY_LOCAL_MACHINE, buffer, &retval);
-        HeapFree(GetProcessHeap(), 0, buffer);
-    }
-    return retval;
-}
-
-/*****************************************************************************
  * set_devices_and_printerports [internal]
  *
  * set the [Devices] and [PrinterPorts] entries for a printer.
@@ -3499,6 +3544,7 @@ BOOL WINAPI DeleteFormW( HANDLE printer, WCHAR *name )
 BOOL WINAPI DeletePrinter(HANDLE hPrinter)
 {
     LPCWSTR lpNameW = get_opened_printer_name(hPrinter);
+    config_module_t *config_module;
     HKEY hkeyPrinters, hkey;
     WCHAR def[MAX_PATH];
     DWORD size = ARRAY_SIZE(def);
@@ -3507,6 +3553,14 @@ BOOL WINAPI DeletePrinter(HANDLE hPrinter)
         SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
     }
+
+    EnterCriticalSection(&config_modules_cs);
+    if ((config_module = get_config_module(lpNameW, FALSE))) {
+        wine_rb_remove(&config_modules, &config_module->entry);
+        release_config_module(config_module);
+    }
+    LeaveCriticalSection(&config_modules_cs);
+
     if(RegOpenKeyW(HKEY_LOCAL_MACHINE, PrintersW, &hkeyPrinters) == ERROR_SUCCESS) {
         RegDeleteTreeW(hkeyPrinters, lpNameW);
         RegCloseKey(hkeyPrinters);

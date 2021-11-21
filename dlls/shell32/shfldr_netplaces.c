@@ -20,9 +20,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -40,7 +37,6 @@
 #include "shell32_main.h"
 #include "shresdef.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "debughlp.h"
 #include "shfldr.h"
 
@@ -181,13 +177,11 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnParseDisplayName (IShellFolder2 * ifac
                HWND hwndOwner, LPBC pbcReserved, LPOLESTR lpszDisplayName,
                DWORD * pchEaten, LPITEMIDLIST * ppidl, DWORD * pdwAttributes)
 {
-    static const WCHAR wszEntireNetwork[] = {'E','n','t','i','r','e','N','e','t','w','o','r','k'}; /* not nul-terminated */
     IGenericSFImpl *This = impl_from_IShellFolder2(iface);
     HRESULT hr = E_INVALIDARG;
     LPCWSTR szNext = NULL;
     WCHAR szElement[MAX_PATH];
     LPITEMIDLIST pidlTemp = NULL;
-    int len;
 
     TRACE ("(%p)->(HWND=%p,%p,%p=%s,%p,pidl=%p,%p)\n", This,
             hwndOwner, pbcReserved, lpszDisplayName, debugstr_w (lpszDisplayName),
@@ -196,8 +190,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnParseDisplayName (IShellFolder2 * ifac
     *ppidl = NULL;
 
     szNext = GetNextElementW (lpszDisplayName, szElement, MAX_PATH);
-    len = strlenW(szElement);
-    if (len == ARRAY_SIZE(wszEntireNetwork) && !strncmpiW(szElement, wszEntireNetwork, ARRAY_SIZE(wszEntireNetwork)))
+    if (!wcsicmp(szElement, L"EntireNetwork"))
     {
         pidlTemp = _ILCreateEntireNetwork();
         if (pidlTemp)
@@ -264,7 +257,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnBindToObject (IShellFolder2 * iface,
     TRACE ("(%p)->(pidl=%p,%p,%s,%p)\n", This,
             pidl, pbcReserved, shdebugstr_guid (riid), ppvOut);
 
-    return SHELL32_BindToChild (This->pidlRoot, NULL, pidl, riid, ppvOut);
+    return SHELL32_BindToChild (This->pidlRoot, &CLSID_ShellFSFolder, NULL, pidl, riid, ppvOut);
 }
 
 /**************************************************************************

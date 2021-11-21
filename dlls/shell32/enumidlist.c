@@ -25,7 +25,6 @@
 #define COBJMACROS
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -69,17 +68,14 @@ BOOL CreateFolderEnumList(IEnumIDListImpl *list, LPCWSTR lpszPath, DWORD dwFlags
     HANDLE hFile;
     WCHAR  szPath[MAX_PATH];
     BOOL succeeded = TRUE;
-    static const WCHAR stars[] = { '*','.','*',0 };
-    static const WCHAR dot[] = { '.',0 };
-    static const WCHAR dotdot[] = { '.','.',0 };
 
     TRACE("(%p)->(path=%s flags=0x%08x)\n", list, debugstr_w(lpszPath), dwFlags);
 
     if(!lpszPath || !lpszPath[0]) return FALSE;
 
-    strcpyW(szPath, lpszPath);
+    lstrcpyW(szPath, lpszPath);
     PathAddBackslashW(szPath);
-    strcatW(szPath,stars);
+    lstrcatW(szPath,L"*");
 
     hFile = FindFirstFileW(szPath,&stffile);
     if ( hFile != INVALID_HANDLE_VALUE )
@@ -93,7 +89,7 @@ BOOL CreateFolderEnumList(IEnumIDListImpl *list, LPCWSTR lpszPath, DWORD dwFlags
             {
                 if ( (stffile.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
                  dwFlags & SHCONTF_FOLDERS &&
-                 strcmpW(stffile.cFileName, dot) && strcmpW(stffile.cFileName, dotdot))
+                 wcscmp(stffile.cFileName, L".") && wcscmp(stffile.cFileName, L".."))
                 {
                     pidl = _ILCreateFromFindDataW(&stffile);
                     succeeded = succeeded && AddToEnumList(list, pidl);

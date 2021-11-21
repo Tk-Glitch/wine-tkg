@@ -15,7 +15,6 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-#include "config.h"
 
 #define COBJMACROS
 #define NONAMELESSUNION
@@ -351,7 +350,7 @@ static UINT insert_new_menu_items(NewMenuImpl *This, HMENU menu, UINT pos, UINT 
 
     item.fMask      = MIIM_ID | MIIM_BITMAP | MIIM_STRING;
     item.dwTypeData = buffer;
-    item.cch        = strlenW(buffer);
+    item.cch        = wcslen(buffer);
     item.wID        = cmd_first;
     item.hbmpItem   = HBMMENU_CALLBACK;
     if (InsertMenuItemW(menu, pos, TRUE, &item))
@@ -390,7 +389,7 @@ NewMenu_ContextMenu3_QueryContextMenu(IContextMenu3 *iface, HMENU menu, UINT ind
     item.fType      = MFT_STRING;
     item.wID        = -1;
     item.dwTypeData = newW; /* FIXME: load from resource file */
-    item.cch        = strlenW(newW);
+    item.cch        = wcslen(newW);
     item.fState     = MFS_ENABLED;
     item.hSubMenu   = submenu;
 

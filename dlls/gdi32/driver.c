@@ -235,7 +235,7 @@ void CDECL __wine_set_display_driver( HMODULE module )
     if (!(driver = create_driver( module )))
     {
         ERR( "Could not create graphics driver\n" );
-        ExitProcess(1);
+        NtTerminateProcess( GetCurrentThread(), 1 );
     }
     if (InterlockedCompareExchangePointer( (void **)&display_driver, driver, NULL ))
         HeapFree( GetProcessHeap(), 0, driver );
@@ -311,12 +311,6 @@ static BOOL CDECL nulldrv_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
     return TRUE;
 }
 
-static DWORD CDECL nulldrv_DeviceCapabilities( LPSTR buffer, LPCSTR device, LPCSTR port,
-                                               WORD cap, LPSTR output, DEVMODEA *devmode )
-{
-    return -1;
-}
-
 static BOOL CDECL nulldrv_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom )
 {
     return TRUE;
@@ -335,12 +329,6 @@ static INT CDECL nulldrv_EndPage( PHYSDEV dev )
 static BOOL CDECL nulldrv_EnumFonts( PHYSDEV dev, LOGFONTW *logfont, FONTENUMPROCW proc, LPARAM lParam )
 {
     return TRUE;
-}
-
-static INT CDECL nulldrv_ExtDeviceMode( LPSTR buffer, HWND hwnd, DEVMODEA *output, LPSTR device,
-                                        LPSTR port, DEVMODEA *input, LPSTR profile, DWORD mode )
-{
-    return -1;
 }
 
 static INT CDECL nulldrv_ExtEscape( PHYSDEV dev, INT escape, INT in_size, const void *in_data,
@@ -394,10 +382,10 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
     {
     case DRIVERVERSION:   return 0x4000;
     case TECHNOLOGY:      return DT_RASDISPLAY;
-    case HORZSIZE:        return MulDiv( GetDeviceCaps( dev->hdc, HORZRES ), 254,
-                                         GetDeviceCaps( dev->hdc, LOGPIXELSX ) * 10 );
-    case VERTSIZE:        return MulDiv( GetDeviceCaps( dev->hdc, VERTRES ), 254,
-                                         GetDeviceCaps( dev->hdc, LOGPIXELSY ) * 10 );
+    case HORZSIZE:        return muldiv( NtGdiGetDeviceCaps( dev->hdc, HORZRES ), 254,
+                                         NtGdiGetDeviceCaps( dev->hdc, LOGPIXELSX ) * 10 );
+    case VERTSIZE:        return muldiv( NtGdiGetDeviceCaps( dev->hdc, VERTRES ), 254,
+                                         NtGdiGetDeviceCaps( dev->hdc, LOGPIXELSY ) * 10 );
     case HORZRES:
     {
         DC *dc = get_nulldrv_dc( dev );
@@ -436,7 +424,7 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
         WCHAR *display;
         DC *dc;
 
-        if (GetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY && pEnumDisplaySettingsW)
+        if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY && pEnumDisplaySettingsW)
         {
             dc = get_nulldrv_dc( dev );
             display = dc->display[0] ? dc->display : NULL;
@@ -466,11 +454,11 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
     case CLIPCAPS:        return CP_RECTANGLE;
     case RASTERCAPS:      return (RC_BITBLT | RC_BITMAP64 | RC_GDI20_OUTPUT | RC_DI_BITMAP | RC_DIBTODEV |
                                   RC_BIGFONT | RC_STRETCHBLT | RC_FLOODFILL | RC_STRETCHDIB | RC_DEVBITS |
-                                  (GetDeviceCaps( dev->hdc, SIZEPALETTE ) ? RC_PALETTE : 0));
+                                  (NtGdiGetDeviceCaps( dev->hdc, SIZEPALETTE ) ? RC_PALETTE : 0));
     case ASPECTX:         return 36;
     case ASPECTY:         return 36;
-    case ASPECTXY:        return (int)(hypot( GetDeviceCaps( dev->hdc, ASPECTX ),
-                                              GetDeviceCaps( dev->hdc, ASPECTY )) + 0.5);
+    case ASPECTXY:        return (int)(hypot( NtGdiGetDeviceCaps( dev->hdc, ASPECTX ),
+                                              NtGdiGetDeviceCaps( dev->hdc, ASPECTY )) + 0.5);
     case CAPS1:           return 0;
     case SIZEPALETTE:     return 0;
     case NUMRESERVED:     return 20;
@@ -486,7 +474,7 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
         WCHAR *display;
         DC *dc;
 
-        if (GetDeviceCaps( dev->hdc, TECHNOLOGY ) != DT_RASDISPLAY)
+        if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) != DT_RASDISPLAY)
             return 0;
 
         if (pEnumDisplaySettingsW)
@@ -503,7 +491,7 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
         return 1;
     }
     case DESKTOPHORZRES:
-        if (GetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY && pGetSystemMetrics)
+        if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY && pGetSystemMetrics)
         {
             DPI_AWARENESS_CONTEXT context;
             UINT ret;
@@ -512,9 +500,9 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
             pSetThreadDpiAwarenessContext( context );
             return ret;
         }
-        return GetDeviceCaps( dev->hdc, HORZRES );
+        return NtGdiGetDeviceCaps( dev->hdc, HORZRES );
     case DESKTOPVERTRES:
-        if (GetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY && pGetSystemMetrics)
+        if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY && pGetSystemMetrics)
         {
             DPI_AWARENESS_CONTEXT context;
             UINT ret;
@@ -523,14 +511,14 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
             pSetThreadDpiAwarenessContext( context );
             return ret;
         }
-        return GetDeviceCaps( dev->hdc, VERTRES );
+        return NtGdiGetDeviceCaps( dev->hdc, VERTRES );
     case BLTALIGNMENT:    return 0;
     case SHADEBLENDCAPS:  return 0;
     case COLORMGMTCAPS:   return 0;
     case LOGPIXELSX:
     case LOGPIXELSY:      return get_system_dpi();
     case NUMCOLORS:
-        bpp = GetDeviceCaps( dev->hdc, BITSPIXEL );
+        bpp = NtGdiGetDeviceCaps( dev->hdc, BITSPIXEL );
         return (bpp > 8) ? -1 : (1 << bpp);
     case COLORRES:
         /* The observed correspondence between BITSPIXEL and COLORRES is:
@@ -538,7 +526,7 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
          * BITSPIXEL: 16 -> COLORRES: 16
          * BITSPIXEL: 24 -> COLORRES: 24
          * BITSPIXEL: 32 -> COLORRES: 24 */
-        bpp = GetDeviceCaps( dev->hdc, BITSPIXEL );
+        bpp = NtGdiGetDeviceCaps( dev->hdc, BITSPIXEL );
         return (bpp <= 8) ? 18 : min( 24, bpp );
     default:
         FIXME("(%p): unsupported capability %d, will return 0\n", dev->hdc, cap );
@@ -620,7 +608,7 @@ static INT CDECL nulldrv_GetTextFace( PHYSDEV dev, INT size, LPWSTR name )
     LOGFONTW font;
     DC *dc = get_nulldrv_dc( dev );
 
-    if (GetObjectW( dc->hFont, sizeof(font), &font ))
+    if (NtGdiExtGetObjectW( dc->hFont, sizeof(font), &font ))
     {
         ret = lstrlenW( font.lfFaceName ) + 1;
         if (name)
@@ -817,13 +805,11 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_CreateDC,                   /* pCreateDC */
     nulldrv_DeleteDC,                   /* pDeleteDC */
     nulldrv_DeleteObject,               /* pDeleteObject */
-    nulldrv_DeviceCapabilities,         /* pDeviceCapabilities */
     nulldrv_Ellipse,                    /* pEllipse */
     nulldrv_EndDoc,                     /* pEndDoc */
     nulldrv_EndPage,                    /* pEndPage */
     nulldrv_EndPath,                    /* pEndPath */
     nulldrv_EnumFonts,                  /* pEnumFonts */
-    nulldrv_ExtDeviceMode,              /* pExtDeviceMode */
     nulldrv_ExtEscape,                  /* pExtEscape */
     nulldrv_ExtFloodFill,               /* pExtFloodFill */
     nulldrv_ExtTextOut,                 /* pExtTextOut */
@@ -935,140 +921,6 @@ BOOL DRIVER_GetDriverName( LPCWSTR device, LPWSTR driver, DWORD size )
 }
 
 
-/*****************************************************************************
- *      @ [GDI32.100]
- *
- * This should thunk to 16-bit and simply call the proc with the given args.
- */
-INT WINAPI GDI_CallDevInstall16( FARPROC16 lpfnDevInstallProc, HWND hWnd,
-                                 LPSTR lpModelName, LPSTR OldPort, LPSTR NewPort )
-{
-    FIXME("(%p, %p, %s, %s, %s)\n", lpfnDevInstallProc, hWnd, lpModelName, OldPort, NewPort );
-    return -1;
-}
-
-/*****************************************************************************
- *      @ [GDI32.101]
- *
- * This should load the correct driver for lpszDevice and calls this driver's
- * ExtDeviceModePropSheet proc.
- *
- * Note: The driver calls a callback routine for each property sheet page; these
- * pages are supposed to be filled into the structure pointed to by lpPropSheet.
- * The layout of this structure is:
- *
- * struct
- * {
- *   DWORD  nPages;
- *   DWORD  unknown;
- *   HPROPSHEETPAGE  pages[10];
- * };
- */
-INT WINAPI GDI_CallExtDeviceModePropSheet16( HWND hWnd, LPCSTR lpszDevice,
-                                             LPCSTR lpszPort, LPVOID lpPropSheet )
-{
-    FIXME("(%p, %s, %s, %p)\n", hWnd, lpszDevice, lpszPort, lpPropSheet );
-    return -1;
-}
-
-/*****************************************************************************
- *      @ [GDI32.102]
- *
- * This should load the correct driver for lpszDevice and call this driver's
- * ExtDeviceMode proc.
- *
- * FIXME: convert ExtDeviceMode to unicode in the driver interface
- */
-INT WINAPI GDI_CallExtDeviceMode16( HWND hwnd,
-                                    LPDEVMODEA lpdmOutput, LPSTR lpszDevice,
-                                    LPSTR lpszPort, LPDEVMODEA lpdmInput,
-                                    LPSTR lpszProfile, DWORD fwMode )
-{
-    WCHAR deviceW[300];
-    WCHAR bufW[300];
-    char buf[300];
-    HDC hdc;
-    DC *dc;
-    INT ret = -1;
-
-    TRACE("(%p, %p, %s, %s, %p, %s, %d)\n",
-          hwnd, lpdmOutput, lpszDevice, lpszPort, lpdmInput, lpszProfile, fwMode );
-
-    if (!lpszDevice) return -1;
-    if (!MultiByteToWideChar(CP_ACP, 0, lpszDevice, -1, deviceW, 300)) return -1;
-
-    if(!DRIVER_GetDriverName( deviceW, bufW, 300 )) return -1;
-
-    if (!WideCharToMultiByte(CP_ACP, 0, bufW, -1, buf, 300, NULL, NULL)) return -1;
-
-    if (!(hdc = CreateICA( buf, lpszDevice, lpszPort, NULL ))) return -1;
-
-    if ((dc = get_dc_ptr( hdc )))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pExtDeviceMode );
-        ret = physdev->funcs->pExtDeviceMode( buf, hwnd, lpdmOutput, lpszDevice, lpszPort,
-                                              lpdmInput, lpszProfile, fwMode );
-	release_dc_ptr( dc );
-    }
-    DeleteDC( hdc );
-    return ret;
-}
-
-/****************************************************************************
- *      @ [GDI32.103]
- *
- * This should load the correct driver for lpszDevice and calls this driver's
- * AdvancedSetupDialog proc.
- */
-INT WINAPI GDI_CallAdvancedSetupDialog16( HWND hwnd, LPSTR lpszDevice,
-                                          LPDEVMODEA devin, LPDEVMODEA devout )
-{
-    TRACE("(%p, %s, %p, %p)\n", hwnd, lpszDevice, devin, devout );
-    return -1;
-}
-
-/*****************************************************************************
- *      @ [GDI32.104]
- *
- * This should load the correct driver for lpszDevice and calls this driver's
- * DeviceCapabilities proc.
- *
- * FIXME: convert DeviceCapabilities to unicode in the driver interface
- */
-DWORD WINAPI GDI_CallDeviceCapabilities16( LPCSTR lpszDevice, LPCSTR lpszPort,
-                                           WORD fwCapability, LPSTR lpszOutput,
-                                           LPDEVMODEA lpdm )
-{
-    WCHAR deviceW[300];
-    WCHAR bufW[300];
-    char buf[300];
-    HDC hdc;
-    DC *dc;
-    INT ret = -1;
-
-    TRACE("(%s, %s, %d, %p, %p)\n", lpszDevice, lpszPort, fwCapability, lpszOutput, lpdm );
-
-    if (!lpszDevice) return -1;
-    if (!MultiByteToWideChar(CP_ACP, 0, lpszDevice, -1, deviceW, 300)) return -1;
-
-    if(!DRIVER_GetDriverName( deviceW, bufW, 300 )) return -1;
-
-    if (!WideCharToMultiByte(CP_ACP, 0, bufW, -1, buf, 300, NULL, NULL)) return -1;
-
-    if (!(hdc = CreateICA( buf, lpszDevice, lpszPort, NULL ))) return -1;
-
-    if ((dc = get_dc_ptr( hdc )))
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pDeviceCapabilities );
-        ret = physdev->funcs->pDeviceCapabilities( buf, lpszDevice, lpszPort,
-                                                   fwCapability, lpszOutput, lpdm );
-        release_dc_ptr( dc );
-    }
-    DeleteDC( hdc );
-    return ret;
-}
-
-
 /******************************************************************************
  *		NtGdiExtEscape   (win32u.@)
  *
@@ -1093,18 +945,18 @@ INT WINAPI NtGdiExtEscape( HDC hdc, WCHAR *driver, int driver_id, INT escape, IN
 /******************************************************************************
  *           NtGdiDdDDIOpenAdapterFromHdc    (win32u.@)
  */
-NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromHdc( void *pData )
+NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromHdc( D3DKMT_OPENADAPTERFROMHDC *desc )
 {
-    FIXME("(%p): stub\n", pData);
+    FIXME( "(%p): stub\n", desc );
     return STATUS_NO_MEMORY;
 }
 
 /******************************************************************************
  *           NtGdiDdDDIEscape    (win32u.@)
  */
-NTSTATUS WINAPI NtGdiDdDDIEscape( const void *pData )
+NTSTATUS WINAPI NtGdiDdDDIEscape( const D3DKMT_ESCAPE *desc )
 {
-    FIXME("(%p): stub\n", pData);
+    FIXME( "(%p): stub\n", desc );
     return STATUS_NO_MEMORY;
 }
 
@@ -1135,6 +987,26 @@ NTSTATUS WINAPI NtGdiDdDDICloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
     LeaveCriticalSection( &driver_section );
 
     return status;
+}
+
+/******************************************************************************
+ *           NtGdiDdDDIOpenAdapterFromDeviceName    (win32u.@)
+ */
+NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromDeviceName( D3DKMT_OPENADAPTERFROMDEVICENAME *desc )
+{
+    D3DKMT_OPENADAPTERFROMLUID desc_luid;
+    NTSTATUS status;
+
+    FIXME( "desc %p stub.\n", desc );
+
+    if (!desc || !desc->pDeviceName) return STATUS_INVALID_PARAMETER;
+
+    memset( &desc_luid, 0, sizeof( desc_luid ));
+    if ((status = NtGdiDdDDIOpenAdapterFromLuid( &desc_luid ))) return status;
+
+    desc->AdapterLuid = desc_luid.AdapterLuid;
+    desc->hAdapter = desc_luid.hAdapter;
+    return STATUS_SUCCESS;
 }
 
 /******************************************************************************

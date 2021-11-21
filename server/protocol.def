@@ -508,6 +508,7 @@ typedef union
         unsigned int     status;   /* I/O status */
         client_ptr_t     user;     /* user pointer */
         client_ptr_t     sb;       /* status block */
+        data_size_t      result;   /* result size */
     } async_io;
     struct
     {
@@ -1452,6 +1453,7 @@ struct poll_socket_output
 
 /* Perform an async poll on a socket */
 @REQ(poll_socket)
+    int          exclusive;     /* is the poll exclusive? */
     async_data_t async;         /* async I/O parameters */
     timeout_t    timeout;       /* timeout */
     VARARG(sockets,poll_socket_input); /* list of sockets to poll */
@@ -2159,7 +2161,6 @@ enum message_type
 @REQ(get_async_result)
     client_ptr_t   user_arg;      /* user arg used to identify async */
 @REPLY
-    data_size_t    size;          /* result size (input or output depending on the operation) */
     VARARG(out_data,bytes);       /* iosb output data */
 @END
 
@@ -3378,6 +3379,10 @@ struct handle_info
     obj_handle_t prev;            /* handle to the previous irp */
     unsigned int status;          /* status of the previous irp */
     client_ptr_t user_ptr;        /* user pointer of the previous irp */
+    int          pending;         /* was the previous irp marked pending? */
+    unsigned int iosb_status;     /* IOSB status of the previous irp */
+    data_size_t  result;          /* IOSB result of the previous irp */
+    VARARG(data,bytes);           /* output data of the previous irp */
 @REPLY
     irp_params_t params;          /* irp parameters */
     obj_handle_t next;            /* handle to the next irp */
@@ -3702,6 +3707,7 @@ struct handle_info
 @REPLY
     int total_processes;          /* total count of processes */
     int active_processes;         /* count of running processes */
+    VARARG(pids,uints);           /* list of active pids */
 @END
 
 

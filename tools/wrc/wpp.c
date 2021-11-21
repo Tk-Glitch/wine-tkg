@@ -34,8 +34,8 @@
 # include <unistd.h>
 #endif
 
+#include "utils.h"
 #include "wpp_private.h"
-#include "wine/wpp.h"
 
 struct pp_status pp_status;
 
@@ -58,42 +58,8 @@ struct define
 
 static struct list cmdline_defines = LIST_INIT( cmdline_defines );
 
-void *pp_xmalloc(size_t size)
-{
-    void *res;
-
-    assert(size > 0);
-    res = malloc(size);
-    if(res == NULL)
-    {
-        fprintf( stderr, "Virtual memory exhausted\n" );
-        exit(1);
-    }
-    return res;
-}
-
-void *pp_xrealloc(void *p, size_t size)
-{
-    void *res;
-
-    assert(size > 0);
-    res = realloc(p, size);
-    if(res == NULL)
-    {
-        fprintf( stderr, "Virtual memory exhausted\n" );
-        exit(1);
-    }
-    return res;
-}
-
-char *pp_xstrdup(const char *str)
-{
-	int len = strlen(str)+1;
-	return memcpy(pp_xmalloc(len), str, len);
-}
-
-char *wpp_lookup(const char *name, int type, const char *parent_name,
-                 char **include_path, int include_path_count)
+static char *wpp_lookup(const char *name, int type, const char *parent_name,
+                        char **include_path, int include_path_count)
 {
     char *cpy;
     char *cptr;
@@ -101,7 +67,7 @@ char *wpp_lookup(const char *name, int type, const char *parent_name,
     const char *ccptr;
     int i, fd;
 
-    cpy = pp_xmalloc(strlen(name)+1);
+    cpy = xmalloc(strlen(name)+1);
     cptr = cpy;
 
     for(ccptr = name; *ccptr; ccptr++)
@@ -126,7 +92,7 @@ char *wpp_lookup(const char *name, int type, const char *parent_name,
 
         if ((p = strrchr( parent_name, '/' ))) p++;
         else p = parent_name;
-        path = pp_xmalloc( (p - parent_name) + strlen(cpy) + 1 );
+        path = xmalloc( (p - parent_name) + strlen(cpy) + 1 );
         memcpy( path, parent_name, p - parent_name );
         strcpy( path + (p - parent_name), cpy );
         fd = open( path, O_RDONLY );
@@ -141,10 +107,7 @@ char *wpp_lookup(const char *name, int type, const char *parent_name,
     /* Search -I path */
     for(i = 0; i < include_path_count; i++)
     {
-        path = pp_xmalloc(strlen(include_path[i]) + strlen(cpy) + 2);
-        strcpy(path, include_path[i]);
-        strcat(path, "/");
-        strcat(path, cpy);
+        path = strmake("%s/%s", include_path[i], cpy);
         fd = open( path, O_RDONLY );
         if (fd != -1)
         {
@@ -196,7 +159,7 @@ static void free_pp_entry( pp_entry_t *ppp, int idx )
 }
 
 /* initialize the define state */
-void pp_init_define_state(void)
+static void pp_init_define_state(void)
 {
     int i;
 
@@ -204,7 +167,7 @@ void pp_init_define_state(void)
 }
 
 /* free the current define state */
-void pp_free_define_state(void)
+static void pp_free_define_state(void)
 {
     int i;
     pp_entry_t *ppp, *ppp2;
@@ -228,7 +191,7 @@ void pp_del_define(const char *name)
 
 	if((ppp = pplookup(name)) == NULL)
 	{
-		if(pp_status.pedantic)
+		if(pedantic)
 			ppy_warning("%s was not defined", name);
 		return;
 	}
@@ -252,16 +215,17 @@ pp_entry_t *pp_add_define(const char *def, const char *text)
 	idx = pphash(def);
 	if((ppp = pplookup(def)) != NULL)
 	{
-		if(pp_status.pedantic)
-			ppy_warning("Redefinition of %s\n\tPrevious definition: %s:%d", def, ppp->filename, ppp->linenumber);
+		if(pedantic)
+			ppy_warning("Redefinition of %s\n%s:%d: note: previous definition was here",
+                                    def, ppp->filename, ppp->linenumber);
 		pp_del_define(def);
 	}
-	ppp = pp_xmalloc(sizeof(pp_entry_t));
+	ppp = xmalloc(sizeof(pp_entry_t));
 	memset( ppp, 0, sizeof(*ppp) );
-	ppp->ident = pp_xstrdup(def);
+	ppp->ident = xstrdup(def);
 	ppp->type = def_define;
-	ppp->subst.text = text ? pp_xstrdup(text) : NULL;
-	ppp->filename = pp_xstrdup(pp_status.input ? pp_status.input : "<internal or cmdline>");
+	ppp->subst.text = text ? xstrdup(text) : NULL;
+	ppp->filename = xstrdup(pp_status.input ? pp_status.input : "<internal or cmdline>");
 	ppp->linenumber = pp_status.input ? pp_status.line_number : 0;
         list_add_head( &pp_defines[idx], &ppp->entry );
 	if(ppp->subst.text)
@@ -292,18 +256,19 @@ pp_entry_t *pp_add_macro(char *id, char *args[], int nargs, mtext_t *exp)
 	idx = pphash(id);
 	if((ppp = pplookup(id)) != NULL)
 	{
-		if(pp_status.pedantic)
-			ppy_warning("Redefinition of %s\n\tPrevious definition: %s:%d", id, ppp->filename, ppp->linenumber);
+		if(pedantic)
+			ppy_warning("Redefinition of %s\n%s:%d: note: previous definition was here",
+                                    id, ppp->filename, ppp->linenumber);
 		pp_del_define(id);
 	}
-	ppp = pp_xmalloc(sizeof(pp_entry_t));
+	ppp = xmalloc(sizeof(pp_entry_t));
 	memset( ppp, 0, sizeof(*ppp) );
 	ppp->ident	= id;
 	ppp->type	= def_macro;
 	ppp->margs	= args;
 	ppp->nargs	= nargs;
 	ppp->subst.mtext= exp;
-	ppp->filename = pp_xstrdup(pp_status.input ? pp_status.input : "<internal or cmdline>");
+	ppp->filename = xstrdup(pp_status.input ? pp_status.input : "<internal or cmdline>");
 	ppp->linenumber = pp_status.input ? pp_status.line_number : 0;
         list_add_head( &pp_defines[idx], &ppp->entry );
 	if(pp_status.debug)
@@ -350,7 +315,7 @@ static int nincludepath = 0;
 void wpp_add_include_path(const char *path)
 {
 	char *tok;
-	char *cpy = pp_xstrdup(path);
+	char *cpy = xstrdup(path);
 
 	tok = strtok(cpy, INCLUDESEPARATOR);
 	while(tok)
@@ -359,7 +324,7 @@ void wpp_add_include_path(const char *path)
 			char *dir;
 			char *cptr;
 
-			dir = pp_xstrdup(tok);
+			dir = xstrdup(tok);
 			for(cptr = dir; *cptr; cptr++)
 			{
 				/* Convert to forward slash */
@@ -371,7 +336,7 @@ void wpp_add_include_path(const char *path)
 				*cptr = '\0';
 
 			/* Add to list */
-			includepath = pp_xrealloc(includepath, (nincludepath+1) * sizeof(*includepath));
+			includepath = xrealloc(includepath, (nincludepath+1) * sizeof(*includepath));
 			includepath[nincludepath] = dir;
 			nincludepath++;
 		}
@@ -465,7 +430,7 @@ static const char * const pp_if_state_str[] = {
 void pp_push_if(pp_if_state_t s)
 {
 	if(if_stack_idx >= MAXIFSTACK)
-		pp_internal_error(__FILE__, __LINE__, "#if-stack overflow; #{if,ifdef,ifndef} nested too deeply (> %d)", MAXIFSTACK);
+		error("#if-stack overflow; #{if,ifdef,ifndef} nested too deeply (> %d)", MAXIFSTACK);
 
 	if(pp_flex_debug)
 		fprintf(stderr, "Push if %s:%d: %s(%d) -> %s(%d)\n", pp_status.input, pp_status.line_number, pp_if_state_str[pp_if_state()], if_stack_idx, pp_if_state_str[s], if_stack_idx+1);
@@ -483,8 +448,8 @@ void pp_push_if(pp_if_state_t s)
 	case if_ignore:
 		pp_push_ignore_state();
 		break;
-	default:
-		pp_internal_error(__FILE__, __LINE__, "Invalid pp_if_state (%d)", (int)pp_if_state());
+	case if_error:
+		assert(0);
 	}
 }
 
@@ -507,8 +472,8 @@ pp_if_state_t pp_pop_if(void)
 	case if_ignore:
 		pp_pop_ignore_state();
 		break;
-	default:
-		pp_internal_error(__FILE__, __LINE__, "Invalid pp_if_state (%d)", (int)pp_if_state());
+	case if_error:
+		assert(0);
 	}
 
 	if(pp_flex_debug)
@@ -546,8 +511,8 @@ void pp_next_if_state(int i)
 	case if_ignore:
 		pp_push_if(if_ignore);
 		break;
-	default:
-		pp_internal_error(__FILE__, __LINE__, "Invalid pp_if_state (%d) in #{if,ifdef,ifndef} directive", (int)pp_if_state());
+	case if_error:
+		assert(0);
 	}
 }
 
@@ -580,17 +545,6 @@ int ppy_warning(const char *s, ...)
 	generic_msg(s, "warning", ppy_text, ap);
 	va_end(ap);
 	return 0;
-}
-
-void pp_internal_error(const char *file, int line, const char *s, ...)
-{
-	va_list ap;
-	va_start(ap, s);
-	fprintf(stderr, "Internal error (please report) %s %d: ", file, line);
-	vfprintf(stderr, s, ap);
-	fprintf(stderr, "\n");
-	va_end(ap);
-	exit(3);
 }
 
 static void add_cmdline_defines(void)
@@ -634,14 +588,14 @@ static void wpp_add_define( const char *name, const char *value )
         if (!strcmp( def->name, name ))
         {
             free( def->value );
-            def->value = pp_xstrdup(value);
+            def->value = xstrdup(value);
             return;
         }
     }
 
-    def = pp_xmalloc( sizeof(*def) );
-    def->name  = pp_xstrdup(name);
-    def->value = pp_xstrdup(value);
+    def = xmalloc( sizeof(*def) );
+    def->name  = xstrdup(name);
+    def->value = xstrdup(value);
     list_add_head( &cmdline_defines, &def->entry );
 }
 
@@ -667,7 +621,7 @@ void wpp_del_define( const char *name )
 void wpp_add_cmdline_define( const char *value )
 {
     char *p;
-    char *str = pp_xstrdup(value);
+    char *str = xstrdup(value);
 
     p = strchr( str, '=' );
     if (p) *p++ = 0;
@@ -682,13 +636,6 @@ void wpp_set_debug( int lex_debug, int parser_debug, int msg_debug )
     pp_flex_debug   = lex_debug;
     ppy_debug       = parser_debug;
     pp_status.debug = msg_debug;
-}
-
-
-/* set the pedantic mode */
-void wpp_set_pedantic( int on )
-{
-    pp_status.pedantic = on;
 }
 
 
@@ -709,10 +656,10 @@ int wpp_parse( const char *input, FILE *output )
     else if (!(pp_status.file = fopen(input, "rt")))
         ppy_error("Could not open %s\n", input);
 
-    pp_status.input = input ? pp_xstrdup(input) : NULL;
+    pp_status.input = input ? xstrdup(input) : NULL;
 
     ppy_out = output;
-    pp_writestring("# 1 \"%s\" 1\n", input ? input : "");
+    fprintf(ppy_out, "# 1 \"%s\" 1\n", input ? input : "");
 
     ret = ppy_parse();
 

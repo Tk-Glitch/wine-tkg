@@ -48,6 +48,7 @@ struct async
     async_data_t         data;            /* data for async I/O call */
     struct iosb         *iosb;            /* I/O status block */
     obj_handle_t         wait_handle;     /* pre-allocated wait handle */
+    unsigned int         initial_status;  /* status returned from initial request */
     unsigned int         signaled :1;
     unsigned int         pending :1;      /* request successfully queued, but pending */
     unsigned int         direct_result :1;/* a flag if we're passing result directly from request instead of APC  */
@@ -127,7 +128,10 @@ static void async_satisfied( struct object *obj, struct wait_queue_entry *entry 
         async->direct_result = 0;
     }
 
-    set_wait_status( entry, async->iosb->status );
+    if (async->initial_status == STATUS_PENDING && async->blocking)
+        set_wait_status( entry, async->iosb->status );
+    else
+        set_wait_status( entry, async->initial_status );
 
     /* close wait handle here to avoid extra server round trip */
     if (async->wait_handle)
@@ -182,12 +186,20 @@ void async_terminate( struct async *async, unsigned int status )
         memset( &data, 0, sizeof(data) );
         data.type            = APC_ASYNC_IO;
         data.async_io.user   = async->data.user;
-        data.async_io.sb     = async->data.iosb;
+        data.async_io.result = iosb ? iosb->result : 0;
 
-        /* if the result is nonzero or there is output data, the client needs to
-         * make an extra request to retrieve them; use STATUS_ALERTED to signal
-         * this case */
-        if (iosb && (iosb->result || iosb->out_data))
+        /* this can happen if the initial status was unknown (i.e. for device
+         * files). the client should not fill the IOSB in this case; pass it as
+         * NULL to communicate that.
+         * note that we check the IOSB status and not the initial status */
+        if (NT_ERROR( status ) && (!is_fd_overlapped( async->fd ) || !async->pending))
+            data.async_io.sb = 0;
+        else
+            data.async_io.sb = async->data.iosb;
+
+        /* if there is output data, the client needs to make an extra request
+         * to retrieve it; use STATUS_ALERTED to signal this case */
+        if (iosb && iosb->out_data)
             data.async_io.status = STATUS_ALERTED;
         else
             data.async_io.status = status;
@@ -257,6 +269,7 @@ struct async *create_async( struct fd *fd, struct thread *thread, const async_da
     async->timeout       = NULL;
     async->queue         = NULL;
     async->fd            = (struct fd *)grab_object( fd );
+    async->initial_status = STATUS_PENDING;
     async->signaled      = 0;
     async->pending       = 1;
     async->wait_handle   = 0;
@@ -287,17 +300,31 @@ struct async *create_async( struct fd *fd, struct thread *thread, const async_da
     return async;
 }
 
+/* set the initial status of an async whose status was previously unknown
+ * the initial status may be STATUS_PENDING */
+void async_set_initial_status( struct async *async, unsigned int status )
+{
+    assert( async->unknown_status );
+    if (!async->terminated)
+    {
+        async->initial_status = status;
+        async->unknown_status = 0;
+    }
+}
+
 void set_async_pending( struct async *async )
 {
     if (!async->terminated)
-    {
         async->pending = 1;
-        async->unknown_status = 0;
-        if (!async->blocking && !async->signaled)
-        {
-            async->signaled = 1;
-            wake_up( &async->obj, 0 );
-        }
+}
+
+void async_wake_obj( struct async *async )
+{
+    assert( !async->unknown_status );
+    if (!async->blocking)
+    {
+        async->signaled = 1;
+        wake_up( &async->obj, 0 );
     }
 }
 
@@ -312,6 +339,8 @@ obj_handle_t async_handoff( struct async *async, data_size_t *result, int force_
         set_error( STATUS_PENDING );
         return async->wait_handle;
     }
+
+    async->initial_status = get_error();
 
     if (!async->pending && NT_ERROR( get_error() ))
     {
@@ -350,6 +379,7 @@ obj_handle_t async_handoff( struct async *async, data_size_t *result, int force_
             async->wait_handle = 0;
         }
     }
+    async->initial_status = async->iosb->status;
     set_error( async->iosb->status );
     return async->wait_handle;
 }
@@ -445,25 +475,32 @@ void async_set_result( struct object *obj, unsigned int status, apc_param_t tota
         async->terminated = 1;
         if (async->iosb) async->iosb->status = status;
 
-        if (async->data.apc)
+        /* don't signal completion if the async failed synchronously
+         * this can happen if the initial status was unknown (i.e. for device files)
+         * note that we check the IOSB status here, not the initial status */
+        if (async->pending || !NT_ERROR( status ))
         {
-            apc_call_t data;
-            memset( &data, 0, sizeof(data) );
-            data.type         = APC_USER;
-            data.user.func    = async->data.apc;
-            data.user.args[0] = async->data.apc_context;
-            data.user.args[1] = async->data.iosb;
-            data.user.args[2] = 0;
-            thread_queue_apc( NULL, async->thread, NULL, &data );
-        }
-        else if (async->data.apc_context && (async->pending ||
-                 !(async->comp_flags & FILE_SKIP_COMPLETION_PORT_ON_SUCCESS)))
-        {
-            add_async_completion( async, async->data.apc_context, status, total );
+            if (async->data.apc)
+            {
+                apc_call_t data;
+                memset( &data, 0, sizeof(data) );
+                data.type         = APC_USER;
+                data.user.func    = async->data.apc;
+                data.user.args[0] = async->data.apc_context;
+                data.user.args[1] = async->data.iosb;
+                data.user.args[2] = 0;
+                thread_queue_apc( NULL, async->thread, NULL, &data );
+            }
+            else if (async->data.apc_context && (async->pending ||
+                     !(async->comp_flags & FILE_SKIP_COMPLETION_PORT_ON_SUCCESS)))
+            {
+                add_async_completion( async, async->data.apc_context, status, total );
+            }
+
+            if (async->event) set_event( async->event );
+            else if (async->fd) set_fd_signaled( async->fd, 1 );
         }
 
-        if (async->event) set_event( async->event );
-        else if (async->fd) set_fd_signaled( async->fd, 1 );
         if (!async->signaled)
         {
             async->signaled = 1;
@@ -694,6 +731,5 @@ DECL_HANDLER(get_async_result)
             iosb->out_data = NULL;
         }
     }
-    reply->size = iosb->result;
     set_error( iosb->status );
 }

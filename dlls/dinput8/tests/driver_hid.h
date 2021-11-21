@@ -39,6 +39,21 @@
 
 DEFINE_GUID(control_class,0xdeadbeef,0x29ef,0x4538,0xa5,0xfd,0xb6,0x95,0x73,0xa3,0x62,0xc0);
 
+#define IOCTL_WINETEST_HID_SET_EXPECT    CTL_CODE(FILE_DEVICE_KEYBOARD, 0x800, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
+#define IOCTL_WINETEST_HID_SEND_INPUT    CTL_CODE(FILE_DEVICE_KEYBOARD, 0x801, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
+
+struct hid_expect
+{
+    DWORD code;
+    DWORD ret_length;
+    DWORD ret_status;
+    BYTE broken; /* missing on some win versions */
+    BYTE report_id;
+    BYTE report_len;
+    BYTE report_buf[128];
+    char context[64];
+};
+
 /* kernel/user shared data */
 struct winetest_shared_data
 {
@@ -326,7 +341,7 @@ static inline void winetest_vskip( const char *msg, __ms_va_list args )
 {
     if (winetest_add_line() < winetest_mute_threshold)
     {
-        winetest_print_context( "Tests skipped: " );
+        winetest_print_context( "Driver tests skipped: " );
         kvprintf( msg, args );
         InterlockedIncrement( &skipped );
     }
@@ -347,7 +362,7 @@ static inline void WINAPIV winetest_win_skip( const char *msg, ... )
 {
     __ms_va_list args;
     __ms_va_start( args, msg );
-    if (running_under_wine) winetest_vskip( msg, args );
+    if (!running_under_wine) winetest_vskip( msg, args );
     else winetest_vok( 0, msg, args );
     __ms_va_end( args );
 }

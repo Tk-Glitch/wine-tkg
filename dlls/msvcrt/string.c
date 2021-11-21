@@ -2732,6 +2732,13 @@ __ASM_GLOBAL_FUNC( sse2_memmove,
         MEMMOVE_CLEANUP
         "ret" )
 
+#undef MEMMOVE_INIT
+#undef MEMMOVE_CLEANUP
+#undef DEST_REG
+#undef SRC_REG
+#undef LEN_REG
+#undef TMP_REG
+
 #endif
 
 /*********************************************************************
@@ -2855,13 +2862,162 @@ void * __cdecl memcpy(void *dst, const void *src, size_t n)
     return memmove(dst, src, n);
 }
 
+#if defined(__i386__) || defined(__x86_64__)
+
+#ifdef __i386__
+#define DEST_REG "%edi"
+#define LEN_REG "%ecx"
+#define VAL_REG "%eax"
+
+#define MEMSET_INIT \
+    "movl " DEST_REG ", %edx\n\t" \
+    "movl 4(%esp), " DEST_REG "\n\t" \
+    "movl 8(%esp), " VAL_REG "\n\t" \
+    "movl 12(%esp), " LEN_REG "\n\t"
+
+#define MEMSET_RET \
+    "movl %edx, " DEST_REG "\n\t" \
+    "ret"
+
+#else
+
+#define DEST_REG "%rdi"
+#define LEN_REG "%rcx"
+#define VAL_REG "%eax"
+
+#define MEMSET_INIT \
+    "movq " DEST_REG ", %r9\n\t" \
+    "movq %rcx, " DEST_REG "\n\t" \
+    "movl %edx, " VAL_REG "\n\t" \
+    "movq %r8, " LEN_REG "\n\t"
+
+#define MEMSET_RET \
+    "movq %r9, " DEST_REG "\n\t" \
+    "ret"
+
+#endif
+
+void __cdecl erms_memset_aligned_32(unsigned char *d, unsigned int c, size_t n);
+__ASM_GLOBAL_FUNC( erms_memset_aligned_32,
+        MEMSET_INIT
+        "rep\n\t"
+        "stosb\n\t"
+        MEMSET_RET )
+
+void __cdecl sse2_memset_aligned_32(unsigned char *d, unsigned int c, size_t n);
+__ASM_GLOBAL_FUNC( sse2_memset_aligned_32,
+        MEMSET_INIT
+        "movd " VAL_REG ", %xmm0\n\t"
+        "pshufd $0, %xmm0, %xmm0\n\t"
+        "test $0x20, " LEN_REG "\n\t"
+        "je 1f\n\t"
+        "sub $0x20, " LEN_REG "\n\t"
+        "movdqa %xmm0, 0x00(" DEST_REG ", " LEN_REG ")\n\t"
+        "movdqa %xmm0, 0x10(" DEST_REG ", " LEN_REG ")\n\t"
+        "je 2f\n\t"
+        "1:\n\t"
+        "sub $0x40, " LEN_REG "\n\t"
+        "movdqa %xmm0, 0x00(" DEST_REG ", " LEN_REG ")\n\t"
+        "movdqa %xmm0, 0x10(" DEST_REG ", " LEN_REG ")\n\t"
+        "movdqa %xmm0, 0x20(" DEST_REG ", " LEN_REG ")\n\t"
+        "movdqa %xmm0, 0x30(" DEST_REG ", " LEN_REG ")\n\t"
+        "ja 1b\n\t"
+        "2:\n\t"
+        MEMSET_RET )
+
+#undef MEMSET_INIT
+#undef MEMSET_RET
+#undef DEST_REG
+#undef LEN_REG
+#undef VAL_REG
+
+#endif
+
+static inline void memset_aligned_32(unsigned char *d, uint64_t v, size_t n)
+{
+    unsigned char *end = d + n;
+    while (d < end)
+    {
+        *(uint64_t *)(d + 0) = v;
+        *(uint64_t *)(d + 8) = v;
+        *(uint64_t *)(d + 16) = v;
+        *(uint64_t *)(d + 24) = v;
+        d += 32;
+    }
+}
+
 /*********************************************************************
  *		    memset (MSVCRT.@)
  */
-void* __cdecl memset(void *dst, int c, size_t n)
+void *__cdecl memset(void *dst, int c, size_t n)
 {
-    volatile unsigned char *d = dst;  /* avoid gcc optimizations */
-    while (n--) *d++ = c;
+    typedef uint64_t DECLSPEC_ALIGN(1) unaligned_ui64;
+    typedef uint32_t DECLSPEC_ALIGN(1) unaligned_ui32;
+    typedef uint16_t DECLSPEC_ALIGN(1) unaligned_ui16;
+
+    uint64_t v = 0x101010101010101ull * (unsigned char)c;
+    unsigned char *d = (unsigned char *)dst;
+    size_t a = 0x20 - ((uintptr_t)d & 0x1f);
+
+    if (n >= 16)
+    {
+        *(unaligned_ui64 *)(d + 0) = v;
+        *(unaligned_ui64 *)(d + 8) = v;
+        *(unaligned_ui64 *)(d + n - 16) = v;
+        *(unaligned_ui64 *)(d + n - 8) = v;
+        if (n <= 32) return dst;
+        *(unaligned_ui64 *)(d + 16) = v;
+        *(unaligned_ui64 *)(d + 24) = v;
+        *(unaligned_ui64 *)(d + n - 32) = v;
+        *(unaligned_ui64 *)(d + n - 24) = v;
+        if (n <= 64) return dst;
+
+        n = (n - a) & ~0x1f;
+#if defined(__i386__) || defined(__x86_64__)
+        if (n >= 2048 && erms_supported)
+        {
+            erms_memset_aligned_32(d + a, v, n);
+            return dst;
+        }
+#ifdef __x86_64__
+        sse2_memset_aligned_32(d + a, v, n);
+        return dst;
+#else
+        if (sse2_supported)
+        {
+            sse2_memset_aligned_32(d + a, v, n);
+            return dst;
+        }
+#endif
+#endif
+#ifndef __x86_64__
+        memset_aligned_32(d + a, v, n);
+        return dst;
+#endif
+    }
+    if (n >= 8)
+    {
+        *(unaligned_ui64 *)d = v;
+        *(unaligned_ui64 *)(d + n - 8) = v;
+        return dst;
+    }
+    if (n >= 4)
+    {
+        *(unaligned_ui32 *)d = v;
+        *(unaligned_ui32 *)(d + n - 4) = v;
+        return dst;
+    }
+    if (n >= 2)
+    {
+        *(unaligned_ui16 *)d = v;
+        *(unaligned_ui16 *)(d + n - 2) = v;
+        return dst;
+    }
+    if (n >= 1)
+    {
+        *(uint8_t *)d = v;
+        return dst;
+    }
     return dst;
 }
 

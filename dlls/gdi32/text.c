@@ -54,6 +54,7 @@
 #include "usp10.h"
 #include "wine/debug.h"
 #include "gdi_private.h"
+#include "resource.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(bidi);
 
@@ -2037,6 +2038,29 @@ BOOL WINAPI GdiRealizationInfo( HDC hdc, struct realization_info *info )
     return TRUE;
 }
 
+static void load_script_name( UINT id, WCHAR buffer[LF_FACESIZE] )
+{
+    HRSRC rsrc;
+    HGLOBAL hMem;
+    WCHAR *p;
+    int i;
+
+    id += IDS_FIRST_SCRIPT;
+    buffer[0] = 0;
+    rsrc = FindResourceW( gdi32_module, (LPCWSTR)(ULONG_PTR)((id >> 4) + 1), (LPCWSTR)6 /*RT_STRING*/ );
+    if (!rsrc) return;
+    hMem = LoadResource( gdi32_module, rsrc );
+    if (!hMem) return;
+
+    p = LockResource( hMem );
+    id &= 0x000f;
+    while (id--) p += *p + 1;
+
+    i = min( LF_FACESIZE - 1, *p );
+    memcpy( buffer, p + 1, i * sizeof(WCHAR) );
+    buffer[i] = 0;
+}
+
 /***********************************************************************
  *           EnumFontFamiliesExW    (GDI32.@)
  */
@@ -2072,6 +2096,7 @@ INT WINAPI EnumFontFamiliesExW( HDC hdc, LOGFONTW *lf, FONTENUMPROCW efproc,
     count /= sizeof(*entries);
     for (i = 0; ret && i < count; i++)
     {
+        load_script_name( entries[i].lf.elfScript[0], entries[i].lf.elfScript );
         ret = efproc( (const LOGFONTW *)&entries[i].lf, (const TEXTMETRICW *)&entries[i].tm,
                       entries[i].type, lparam );
     }
@@ -2275,12 +2300,141 @@ BOOL WINAPI RemoveFontResourceExA( const char *str, DWORD fl, void *pdv )
     return ret;
 }
 
+static void *map_file( const WCHAR *filename, LARGE_INTEGER *size )
+{
+    HANDLE file, mapping;
+    void *ptr;
+
+    file = CreateFileW( filename, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
+    if (file == INVALID_HANDLE_VALUE) return NULL;
+
+    if (!GetFileSizeEx( file, size ) || size->u.HighPart)
+    {
+        CloseHandle( file );
+        return NULL;
+    }
+
+    mapping = CreateFileMappingW( file, NULL, PAGE_READONLY, 0, 0, NULL );
+    CloseHandle( file );
+    if (!mapping) return NULL;
+
+    ptr = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, 0 );
+    CloseHandle( mapping );
+
+    return ptr;
+}
+
+static void *find_resource( BYTE *ptr, WORD type, DWORD rsrc_off, DWORD size, DWORD *len )
+{
+    WORD align, type_id, count;
+    DWORD res_off;
+
+    if (size < rsrc_off + 10) return NULL;
+    align = *(WORD *)(ptr + rsrc_off);
+    rsrc_off += 2;
+    type_id = *(WORD *)(ptr + rsrc_off);
+    while (type_id && type_id != type)
+    {
+        count = *(WORD *)(ptr + rsrc_off + 2);
+        rsrc_off += 8 + count * 12;
+        if (size < rsrc_off + 8) return NULL;
+        type_id = *(WORD *)(ptr + rsrc_off);
+    }
+    if (!type_id) return NULL;
+    count = *(WORD *)(ptr + rsrc_off + 2);
+    if (size < rsrc_off + 8 + count * 12) return NULL;
+    res_off = *(WORD *)(ptr + rsrc_off + 8) << align;
+    *len = *(WORD *)(ptr + rsrc_off + 10) << align;
+    if (size < res_off + *len) return NULL;
+    return ptr + res_off;
+}
+
+static WCHAR *get_scalable_filename( const WCHAR *res, BOOL *hidden )
+{
+    LARGE_INTEGER size;
+    BYTE *ptr = map_file( res, &size );
+    const IMAGE_DOS_HEADER *dos;
+    const IMAGE_OS2_HEADER *ne;
+    WORD *fontdir;
+    char *data;
+    WCHAR *name = NULL;
+    DWORD len;
+
+    if (!ptr) return NULL;
+
+    if (size.u.LowPart < sizeof( *dos )) goto fail;
+    dos = (const IMAGE_DOS_HEADER *)ptr;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) goto fail;
+    if (size.u.LowPart < dos->e_lfanew + sizeof( *ne )) goto fail;
+    ne = (const IMAGE_OS2_HEADER *)(ptr + dos->e_lfanew);
+
+    fontdir = find_resource( ptr, 0x8007, dos->e_lfanew + ne->ne_rsrctab, size.u.LowPart, &len );
+    if (!fontdir) goto fail;
+    *hidden = (fontdir[35] & 0x80) != 0;  /* fontdir->dfType */
+
+    data = find_resource( ptr, 0x80cc, dos->e_lfanew + ne->ne_rsrctab, size.u.LowPart, &len );
+    if (!data) goto fail;
+    if (!memchr( data, 0, len )) goto fail;
+
+    len = MultiByteToWideChar( CP_ACP, 0, data, -1, NULL, 0 );
+    name = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+    if (name) MultiByteToWideChar( CP_ACP, 0, data, -1, name, len );
+
+fail:
+    UnmapViewOfFile( ptr );
+    return name;
+}
+
+static int add_font_resource( const WCHAR *str, DWORD flags, void *dv )
+{
+    UNICODE_STRING nt_name;
+    int ret;
+
+    if (!RtlDosPathNameToNtPathName_U( str, &nt_name, NULL, NULL )) return 0;
+    ret = NtGdiAddFontResourceW( nt_name.Buffer, nt_name.Length / sizeof(WCHAR) + 1,
+                                 1, flags, 0, dv );
+    RtlFreeUnicodeString( &nt_name );
+    if (!ret && !wcschr( str, '\\' ))
+    {
+        /* try as system font */
+        ret = NtGdiAddFontResourceW( str, lstrlenW( str ) + 1, 1, flags, 0, dv );
+    }
+    return ret;
+}
+
 /***********************************************************************
  *           AddFontResourceExW    (GDI32.@)
  */
 INT WINAPI AddFontResourceExW( const WCHAR *str, DWORD flags, void *dv )
 {
-    return NtGdiAddFontResourceW( str, 0, 1, flags, 0, dv );
+    WCHAR *filename = NULL;
+    BOOL hidden;
+    INT ret;
+
+    if ((ret = add_font_resource( str, flags, dv ))) return ret;
+
+    if (!(filename = get_scalable_filename( str, &hidden ))) return 0;
+    if (hidden) flags |= FR_PRIVATE | FR_NOT_ENUM;
+    ret = add_font_resource( filename, flags, dv );
+    HeapFree( GetProcessHeap(), 0, filename );
+    return ret;
+}
+
+static int remove_font_resource( const WCHAR *str, DWORD flags, void *dv )
+{
+    UNICODE_STRING nt_name;
+    int ret;
+
+    if (!RtlDosPathNameToNtPathName_U( str, &nt_name, NULL, NULL )) return 0;
+    ret = NtGdiRemoveFontResourceW( nt_name.Buffer, nt_name.Length / sizeof(WCHAR) + 1,
+                                 1, flags, 0, dv );
+    RtlFreeUnicodeString( &nt_name );
+    if (!ret && !wcschr( str, '\\' ))
+    {
+        /* try as system font */
+        ret = NtGdiRemoveFontResourceW( str, lstrlenW( str ) + 1, 1, flags, 0, dv );
+    }
+    return ret;
 }
 
 /***********************************************************************
@@ -2288,7 +2442,17 @@ INT WINAPI AddFontResourceExW( const WCHAR *str, DWORD flags, void *dv )
  */
 BOOL WINAPI RemoveFontResourceExW( const WCHAR *str, DWORD flags, void *dv )
 {
-    return NtGdiRemoveFontResourceW( str, 0, 1, flags, 0, dv );
+    WCHAR *filename = NULL;
+    BOOL hidden;
+    INT ret;
+
+    if ((ret = remove_font_resource( str, flags, dv ))) return ret;
+
+    if (!(filename = get_scalable_filename( str, &hidden ))) return 0;
+    if (hidden) flags |= FR_PRIVATE | FR_NOT_ENUM;
+    ret = remove_font_resource( filename, flags, dv );
+    HeapFree( GetProcessHeap(), 0, filename );
+    return ret;
 }
 
 /***********************************************************************
@@ -2306,6 +2470,262 @@ BOOL WINAPI GetFontResourceInfoW( const WCHAR *str, DWORD *size, void *buffer, D
 HANDLE WINAPI AddFontMemResourceEx( void *ptr, DWORD size, void *dv, DWORD *count )
 {
     return NtGdiAddFontMemResourceEx( ptr, size, dv, 0, count );
+}
+
+#define NE_FFLAGS_LIBMODULE     0x8000
+#define NE_OSFLAGS_WINDOWS      0x02
+
+static const char dos_string[0x40] = "This is a TrueType resource file";
+static const char FONTRES[] = {'F','O','N','T','R','E','S',':'};
+
+#include <pshpack1.h>
+struct fontdir
+{
+    WORD   num_of_resources;
+    WORD   res_id;
+    WORD   dfVersion;
+    DWORD  dfSize;
+    CHAR   dfCopyright[60];
+    WORD   dfType;
+    WORD   dfPoints;
+    WORD   dfVertRes;
+    WORD   dfHorizRes;
+    WORD   dfAscent;
+    WORD   dfInternalLeading;
+    WORD   dfExternalLeading;
+    BYTE   dfItalic;
+    BYTE   dfUnderline;
+    BYTE   dfStrikeOut;
+    WORD   dfWeight;
+    BYTE   dfCharSet;
+    WORD   dfPixWidth;
+    WORD   dfPixHeight;
+    BYTE   dfPitchAndFamily;
+    WORD   dfAvgWidth;
+    WORD   dfMaxWidth;
+    BYTE   dfFirstChar;
+    BYTE   dfLastChar;
+    BYTE   dfDefaultChar;
+    BYTE   dfBreakChar;
+    WORD   dfWidthBytes;
+    DWORD  dfDevice;
+    DWORD  dfFace;
+    DWORD  dfReserved;
+    CHAR   szFaceName[LF_FACESIZE];
+};
+#include <poppack.h>
+
+#include <pshpack2.h>
+
+struct ne_typeinfo
+{
+    WORD type_id;
+    WORD count;
+    DWORD res;
+};
+
+struct ne_nameinfo
+{
+    WORD off;
+    WORD len;
+    WORD flags;
+    WORD id;
+    DWORD res;
+};
+
+struct rsrc_tab
+{
+    WORD align;
+    struct ne_typeinfo fontdir_type;
+    struct ne_nameinfo fontdir_name;
+    struct ne_typeinfo scalable_type;
+    struct ne_nameinfo scalable_name;
+    WORD end_of_rsrc;
+    BYTE fontdir_res_name[8];
+};
+
+#include <poppack.h>
+
+static BOOL create_fot( const WCHAR *resource, const WCHAR *font_file, const struct fontdir *fontdir )
+{
+    BOOL ret = FALSE;
+    HANDLE file;
+    DWORD size, written;
+    BYTE *ptr, *start;
+    BYTE import_name_len, res_name_len, non_res_name_len, font_file_len;
+    char *font_fileA, *last_part, *ext;
+    IMAGE_DOS_HEADER dos;
+    IMAGE_OS2_HEADER ne =
+    {
+        IMAGE_OS2_SIGNATURE, 5, 1, 0, 0, 0, NE_FFLAGS_LIBMODULE, 0,
+        0, 0, 0, 0, 0, 0,
+        0, sizeof(ne), sizeof(ne), 0, 0, 0, 0,
+        0, 4, 2, NE_OSFLAGS_WINDOWS, 0, 0, 0, 0, 0x300
+    };
+    struct rsrc_tab rsrc_tab =
+    {
+        4,
+        { 0x8007, 1, 0 },
+        { 0, 0, 0x0c50, 0x2c, 0 },
+        { 0x80cc, 1, 0 },
+        { 0, 0, 0x0c50, 0x8001, 0 },
+        0,
+        { 7,'F','O','N','T','D','I','R'}
+    };
+
+    memset( &dos, 0, sizeof(dos) );
+    dos.e_magic = IMAGE_DOS_SIGNATURE;
+    dos.e_lfanew = sizeof(dos) + sizeof(dos_string);
+
+    /* import name is last part\0, resident name is last part without extension
+       non-resident name is "FONTRES:" + lfFaceName */
+
+    font_file_len = WideCharToMultiByte( CP_ACP, 0, font_file, -1, NULL, 0, NULL, NULL );
+    font_fileA = HeapAlloc( GetProcessHeap(), 0, font_file_len );
+    WideCharToMultiByte( CP_ACP, 0, font_file, -1, font_fileA, font_file_len, NULL, NULL );
+
+    last_part = strrchr( font_fileA, '\\' );
+    if (last_part) last_part++;
+    else last_part = font_fileA;
+    import_name_len = strlen( last_part ) + 1;
+
+    ext = strchr( last_part, '.' );
+    if (ext) res_name_len = ext - last_part;
+    else res_name_len = import_name_len - 1;
+
+    non_res_name_len = sizeof( FONTRES ) + strlen( fontdir->szFaceName );
+
+    ne.ne_cbnrestab = 1 + non_res_name_len + 2 + 1; /* len + string + (WORD) ord_num + 1 byte eod */
+    ne.ne_restab = ne.ne_rsrctab + sizeof(rsrc_tab);
+    ne.ne_modtab = ne.ne_imptab = ne.ne_restab + 1 + res_name_len + 2 + 3; /* len + string + (WORD) ord_num + 3 bytes eod */
+    ne.ne_enttab = ne.ne_imptab + 1 + import_name_len; /* len + string */
+    ne.ne_cbenttab = 2;
+    ne.ne_nrestab = ne.ne_enttab + ne.ne_cbenttab + 2 + dos.e_lfanew; /* there are 2 bytes of 0 after entry tab */
+
+    rsrc_tab.scalable_name.off = (ne.ne_nrestab + ne.ne_cbnrestab + 0xf) >> 4;
+    rsrc_tab.scalable_name.len = (font_file_len + 0xf) >> 4;
+    rsrc_tab.fontdir_name.off  = rsrc_tab.scalable_name.off + rsrc_tab.scalable_name.len;
+    rsrc_tab.fontdir_name.len  = (fontdir->dfSize + 0xf) >> 4;
+
+    size = (rsrc_tab.fontdir_name.off + rsrc_tab.fontdir_name.len) << 4;
+    start = ptr = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, size );
+
+    if (!ptr)
+    {
+        HeapFree( GetProcessHeap(), 0, font_fileA );
+        return FALSE;
+    }
+
+    memcpy( ptr, &dos, sizeof(dos) );
+    memcpy( ptr + sizeof(dos), dos_string, sizeof(dos_string) );
+    memcpy( ptr + dos.e_lfanew, &ne, sizeof(ne) );
+
+    ptr = start + dos.e_lfanew + ne.ne_rsrctab;
+    memcpy( ptr, &rsrc_tab, sizeof(rsrc_tab) );
+
+    ptr = start + dos.e_lfanew + ne.ne_restab;
+    *ptr++ = res_name_len;
+    memcpy( ptr, last_part, res_name_len );
+
+    ptr = start + dos.e_lfanew + ne.ne_imptab;
+    *ptr++ = import_name_len;
+    memcpy( ptr, last_part, import_name_len );
+
+    ptr = start + ne.ne_nrestab;
+    *ptr++ = non_res_name_len;
+    memcpy( ptr, FONTRES, sizeof(FONTRES) );
+    memcpy( ptr + sizeof(FONTRES), fontdir->szFaceName, strlen( fontdir->szFaceName ) );
+
+    ptr = start + (rsrc_tab.scalable_name.off << 4);
+    memcpy( ptr, font_fileA, font_file_len );
+
+    ptr = start + (rsrc_tab.fontdir_name.off << 4);
+    memcpy( ptr, fontdir, fontdir->dfSize );
+
+    file = CreateFileW( resource, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL );
+    if (file != INVALID_HANDLE_VALUE)
+    {
+        if (WriteFile( file, start, size, &written, NULL ) && written == size)
+            ret = TRUE;
+        CloseHandle( file );
+    }
+
+    HeapFree( GetProcessHeap(), 0, start );
+    HeapFree( GetProcessHeap(), 0, font_fileA );
+
+    return ret;
+}
+
+/***********************************************************************
+ *           CreateScalableFontResourceW   (GDI32.@)
+ */
+BOOL WINAPI CreateScalableFontResourceW( DWORD hidden, const WCHAR *resource_file,
+                                         const WCHAR *font_file, const WCHAR *font_path )
+{
+    struct fontdir fontdir = { 0 };
+    UNICODE_STRING nt_name;
+    OUTLINETEXTMETRICW otm;
+    WCHAR path[MAX_PATH];
+    BOOL ret;
+
+    TRACE("(%d, %s, %s, %s)\n", hidden, debugstr_w(resource_file),
+          debugstr_w(font_file), debugstr_w(font_path) );
+
+    if (!font_file) goto done;
+    if (font_path && font_path[0])
+    {
+        int len = lstrlenW( font_path ) + lstrlenW( font_file ) + 2;
+        if (len > MAX_PATH) goto done;
+        lstrcpynW( path, font_path, MAX_PATH );
+        lstrcatW( path, L"\\" );
+        lstrcatW( path, font_file );
+        if (!RtlDosPathNameToNtPathName_U( path, &nt_name, NULL, NULL )) goto done;
+    }
+    else if (!RtlDosPathNameToNtPathName_U( font_file, &nt_name, NULL, NULL )) goto done;
+    ret = get_file_outline_text_metric( nt_name.Buffer, &otm );
+    RtlFreeUnicodeString( &nt_name );
+    if (!ret) goto done;
+    if (!(otm.otmTextMetrics.tmPitchAndFamily & TMPF_TRUETYPE)) goto done;
+
+    fontdir.num_of_resources  = 1;
+    fontdir.res_id            = 0;
+    fontdir.dfVersion         = 0x200;
+    fontdir.dfSize            = sizeof(fontdir);
+    strcpy( fontdir.dfCopyright, "Wine fontdir" );
+    fontdir.dfType            = 0x4003;  /* 0x0080 set if private */
+    fontdir.dfPoints          = otm.otmEMSquare;
+    fontdir.dfVertRes         = 72;
+    fontdir.dfHorizRes        = 72;
+    fontdir.dfAscent          = otm.otmTextMetrics.tmAscent;
+    fontdir.dfInternalLeading = otm.otmTextMetrics.tmInternalLeading;
+    fontdir.dfExternalLeading = otm.otmTextMetrics.tmExternalLeading;
+    fontdir.dfItalic          = otm.otmTextMetrics.tmItalic;
+    fontdir.dfUnderline       = otm.otmTextMetrics.tmUnderlined;
+    fontdir.dfStrikeOut       = otm.otmTextMetrics.tmStruckOut;
+    fontdir.dfWeight          = otm.otmTextMetrics.tmWeight;
+    fontdir.dfCharSet         = otm.otmTextMetrics.tmCharSet;
+    fontdir.dfPixWidth        = 0;
+    fontdir.dfPixHeight       = otm.otmTextMetrics.tmHeight;
+    fontdir.dfPitchAndFamily  = otm.otmTextMetrics.tmPitchAndFamily;
+    fontdir.dfAvgWidth        = otm.otmTextMetrics.tmAveCharWidth;
+    fontdir.dfMaxWidth        = otm.otmTextMetrics.tmMaxCharWidth;
+    fontdir.dfFirstChar       = otm.otmTextMetrics.tmFirstChar;
+    fontdir.dfLastChar        = otm.otmTextMetrics.tmLastChar;
+    fontdir.dfDefaultChar     = otm.otmTextMetrics.tmDefaultChar;
+    fontdir.dfBreakChar       = otm.otmTextMetrics.tmBreakChar;
+    fontdir.dfWidthBytes      = 0;
+    fontdir.dfDevice          = 0;
+    fontdir.dfFace            = FIELD_OFFSET( struct fontdir, szFaceName );
+    fontdir.dfReserved        = 0;
+    WideCharToMultiByte( CP_ACP, 0, (WCHAR *)otm.otmpFamilyName, -1,
+                         fontdir.szFaceName, LF_FACESIZE, NULL, NULL );
+
+    if (hidden) fontdir.dfType |= 0x80;
+    return create_fot( resource_file, font_file, &fontdir );
+
+done:
+    SetLastError( ERROR_INVALID_PARAMETER );
+    return FALSE;
 }
 
 static const CHARSETINFO charset_info[] = {

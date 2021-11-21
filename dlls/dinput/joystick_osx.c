@@ -842,6 +842,8 @@ static void poll_osx_device_state( IDirectInputDevice8W *iface )
 
                             inst_id = DIDFT_MAKEINSTANCE(button_idx) | DIDFT_PSHBUTTON;
                             queue_event(iface,inst_id,newVal,GetCurrentTime(),device->generic.base.dinput->evsequence++);
+                            if (device->generic.base.hEvent)
+                                SetEvent( device->generic.base.hEvent );
                         }
                         button_idx ++;
                     }
@@ -872,6 +874,8 @@ static void poll_osx_device_state( IDirectInputDevice8W *iface )
                             {
                                 inst_id = DIDFT_MAKEINSTANCE(pov_idx) | DIDFT_POV;
                                 queue_event(iface,inst_id,newVal,GetCurrentTime(),device->generic.base.dinput->evsequence++);
+                                if (device->generic.base.hEvent)
+                                    SetEvent( device->generic.base.hEvent );
                             }
                             pov_idx ++;
                             break;
@@ -949,6 +953,8 @@ static void poll_osx_device_state( IDirectInputDevice8W *iface )
                             {
                                 inst_id = DIDFT_MAKEINSTANCE(wine_obj) | DIDFT_ABSAXIS;
                                 queue_event(iface,inst_id,newVal,GetCurrentTime(),device->generic.base.dinput->evsequence++);
+                                if (device->generic.base.hEvent)
+                                    SetEvent( device->generic.base.hEvent );
                             }
 
                             break;

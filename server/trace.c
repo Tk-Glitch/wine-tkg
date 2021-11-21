@@ -181,7 +181,7 @@ static void dump_apc_call( const char *prefix, const apc_call_t *call )
     case APC_ASYNC_IO:
         dump_uint64( "APC_ASYNC_IO,user=", &call->async_io.user );
         dump_uint64( ",sb=", &call->async_io.sb );
-        fprintf( stderr, ",status=%s", get_status_name(call->async_io.status) );
+        fprintf( stderr, ",status=%s,result=%u", get_status_name(call->async_io.status), call->async_io.result );
         break;
     case APC_VIRTUAL_ALLOC:
         dump_uint64( "APC_VIRTUAL_ALLOC,addr==", &call->virtual_alloc.addr );
@@ -2123,7 +2123,8 @@ static void dump_recv_socket_reply( const struct recv_socket_reply *req )
 
 static void dump_poll_socket_request( const struct poll_socket_request *req )
 {
-    dump_async_data( " async=", &req->async );
+    fprintf( stderr, " exclusive=%d", req->exclusive );
+    dump_async_data( ", async=", &req->async );
     dump_timeout( ", timeout=", &req->timeout );
     dump_varargs_poll_socket_input( ", sockets=", cur_size );
 }
@@ -2846,8 +2847,7 @@ static void dump_get_async_result_request( const struct get_async_result_request
 
 static void dump_get_async_result_reply( const struct get_async_result_reply *req )
 {
-    fprintf( stderr, " size=%u", req->size );
-    dump_varargs_bytes( ", out_data=", cur_size );
+    dump_varargs_bytes( " out_data=", cur_size );
 }
 
 static void dump_read_request( const struct read_request *req )
@@ -4184,6 +4184,10 @@ static void dump_get_next_device_request_request( const struct get_next_device_r
     fprintf( stderr, ", prev=%04x", req->prev );
     fprintf( stderr, ", status=%08x", req->status );
     dump_uint64( ", user_ptr=", &req->user_ptr );
+    fprintf( stderr, ", pending=%d", req->pending );
+    fprintf( stderr, ", iosb_status=%08x", req->iosb_status );
+    fprintf( stderr, ", result=%u", req->result );
+    dump_varargs_bytes( ", data=", cur_size );
 }
 
 static void dump_get_next_device_request_reply( const struct get_next_device_request_reply *req )
@@ -4529,6 +4533,7 @@ static void dump_get_job_info_reply( const struct get_job_info_reply *req )
 {
     fprintf( stderr, " total_processes=%d", req->total_processes );
     fprintf( stderr, ", active_processes=%d", req->active_processes );
+    dump_varargs_uints( ", pids=", cur_size );
 }
 
 static void dump_terminate_job_request( const struct terminate_job_request *req )

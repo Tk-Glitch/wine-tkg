@@ -16,9 +16,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
 
 #include <stdarg.h>
+#include <stdlib.h>
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -32,216 +38,176 @@
 
 #include "unix_private.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
-
-static struct hid_descriptor mouse_desc;
-static struct hid_descriptor keyboard_desc;
-
-static void mouse_remove(struct unix_device *iface)
+BOOL is_xbox_gamepad(WORD vid, WORD pid)
 {
+    if (vid != 0x045e) return FALSE;
+    if (pid == 0x0202) return TRUE; /* Xbox Controller */
+    if (pid == 0x0285) return TRUE; /* Xbox Controller S */
+    if (pid == 0x0289) return TRUE; /* Xbox Controller S */
+    if (pid == 0x028e) return TRUE; /* Xbox360 Controller */
+    if (pid == 0x028f) return TRUE; /* Xbox360 Wireless Controller */
+    if (pid == 0x02d1) return TRUE; /* Xbox One Controller */
+    if (pid == 0x02dd) return TRUE; /* Xbox One Controller (Covert Forces/Firmware 2015) */
+    if (pid == 0x02e0) return TRUE; /* Xbox One X Controller */
+    if (pid == 0x02e3) return TRUE; /* Xbox One Elite Controller */
+    if (pid == 0x02e6) return TRUE; /* Wireless XBox Controller Dongle */
+    if (pid == 0x02ea) return TRUE; /* Xbox One S Controller */
+    if (pid == 0x02fd) return TRUE; /* Xbox One S Controller (Firmware 2017) */
+    if (pid == 0x0719) return TRUE; /* Xbox 360 Wireless Adapter */
+    return FALSE;
 }
 
-static int mouse_compare(struct unix_device *iface, void *context)
+struct mouse_device
 {
-    return 0;
-}
-
-static NTSTATUS mouse_start(struct unix_device *iface, DEVICE_OBJECT *device)
-{
-    if (!hid_descriptor_begin(&mouse_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_MOUSE))
-        return STATUS_NO_MEMORY;
-    if (!hid_descriptor_add_buttons(&mouse_desc, HID_USAGE_PAGE_BUTTON, 1, 3))
-        return STATUS_NO_MEMORY;
-    if (!hid_descriptor_end(&mouse_desc))
-        return STATUS_NO_MEMORY;
-
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS mouse_get_report_descriptor(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *ret_length)
-{
-    TRACE("buffer %p, length %u.\n", buffer, length);
-
-    *ret_length = mouse_desc.size;
-    if (length < mouse_desc.size) return STATUS_BUFFER_TOO_SMALL;
-
-    memcpy(buffer, mouse_desc.data, mouse_desc.size);
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS mouse_get_string(struct unix_device *iface, DWORD index, WCHAR *buffer, DWORD length)
-{
-    static const WCHAR nameW[] = {'W','i','n','e',' ','H','I','D',' ','m','o','u','s','e',0};
-    if (index != HID_STRING_ID_IPRODUCT)
-        return STATUS_NOT_IMPLEMENTED;
-    if (length < ARRAY_SIZE(nameW))
-        return STATUS_BUFFER_TOO_SMALL;
-    lstrcpyW(buffer, nameW);
-    return STATUS_SUCCESS;
-}
-
-static void mouse_set_output_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
-{
-    FIXME("id %u, stub!\n", packet->reportId);
-    io->Information = 0;
-    io->Status = STATUS_NOT_IMPLEMENTED;
-}
-
-static void mouse_get_feature_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
-{
-    FIXME("id %u, stub!\n", packet->reportId);
-    io->Information = 0;
-    io->Status = STATUS_NOT_IMPLEMENTED;
-}
-
-static void mouse_set_feature_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
-{
-    FIXME("id %u, stub!\n", packet->reportId);
-    io->Information = 0;
-    io->Status = STATUS_NOT_IMPLEMENTED;
-}
-
-static const struct unix_device_vtbl mouse_vtbl =
-{
-    mouse_remove,
-    mouse_compare,
-    mouse_start,
-    mouse_get_report_descriptor,
-    mouse_get_string,
-    mouse_set_output_report,
-    mouse_get_feature_report,
-    mouse_set_feature_report,
+    struct unix_device unix_device;
 };
 
-static const WCHAR mouse_bus_id[] = {'W','I','N','E','M','O','U','S','E',0};
+static void mouse_destroy(struct unix_device *iface)
+{
+}
+
+static NTSTATUS mouse_start(struct unix_device *iface)
+{
+    if (!hid_device_begin_report_descriptor(iface, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_MOUSE))
+        return STATUS_NO_MEMORY;
+    if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_BUTTON, 1, 3))
+        return STATUS_NO_MEMORY;
+    if (!hid_device_end_report_descriptor(iface))
+        return STATUS_NO_MEMORY;
+
+    return STATUS_SUCCESS;
+}
+
+static void mouse_stop(struct unix_device *iface)
+{
+}
+
+static NTSTATUS mouse_haptics_start(struct unix_device *iface, DWORD duration,
+                                    USHORT rumble_intensity, USHORT buzz_intensity)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+static const struct hid_device_vtbl mouse_vtbl =
+{
+    mouse_destroy,
+    mouse_start,
+    mouse_stop,
+    mouse_haptics_start,
+};
+
 static const struct device_desc mouse_device_desc =
 {
-    .busid = mouse_bus_id,
+    .vid = 0x845e,
+    .pid = 0x0001,
     .input = -1,
-    .serial = {'0','0','0','0',0},
+    .manufacturer = {"The Wine Project"},
+    .product = {"Wine HID mouse"},
+    .serialnumber = {"0000"},
 };
-static struct unix_device mouse_device = {.vtbl = &mouse_vtbl};
 
 static NTSTATUS mouse_device_create(void *args)
 {
     struct device_create_params *params = args;
     params->desc = mouse_device_desc;
-    params->device = &mouse_device;
+    params->device = hid_device_create(&mouse_vtbl, sizeof(struct mouse_device));
     return STATUS_SUCCESS;
 }
 
-static void keyboard_remove(struct unix_device *iface)
+struct keyboard_device
 {
-}
-
-static int keyboard_compare(struct unix_device *iface, void *context)
-{
-    return 0;
-}
-
-static NTSTATUS keyboard_start(struct unix_device *iface, DEVICE_OBJECT *device)
-{
-    if (!hid_descriptor_begin(&keyboard_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_KEYBOARD))
-        return STATUS_NO_MEMORY;
-    if (!hid_descriptor_add_buttons(&keyboard_desc, HID_USAGE_PAGE_KEYBOARD, 0, 101))
-        return STATUS_NO_MEMORY;
-    if (!hid_descriptor_end(&keyboard_desc))
-        return STATUS_NO_MEMORY;
-
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS keyboard_get_report_descriptor(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *ret_length)
-{
-    TRACE("buffer %p, length %u.\n", buffer, length);
-
-    *ret_length = keyboard_desc.size;
-    if (length < keyboard_desc.size) return STATUS_BUFFER_TOO_SMALL;
-
-    memcpy(buffer, keyboard_desc.data, keyboard_desc.size);
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS keyboard_get_string(struct unix_device *iface, DWORD index, WCHAR *buffer, DWORD length)
-{
-    static const WCHAR nameW[] = {'W','i','n','e',' ','H','I','D',' ','k','e','y','b','o','a','r','d',0};
-    if (index != HID_STRING_ID_IPRODUCT)
-        return STATUS_NOT_IMPLEMENTED;
-    if (length < ARRAY_SIZE(nameW))
-        return STATUS_BUFFER_TOO_SMALL;
-    lstrcpyW(buffer, nameW);
-    return STATUS_SUCCESS;
-}
-
-static void keyboard_set_output_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
-{
-    FIXME("id %u, stub!\n", packet->reportId);
-    io->Information = 0;
-    io->Status = STATUS_NOT_IMPLEMENTED;
-}
-
-static void keyboard_get_feature_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
-{
-    FIXME("id %u, stub!\n", packet->reportId);
-    io->Information = 0;
-    io->Status = STATUS_NOT_IMPLEMENTED;
-}
-
-static void keyboard_set_feature_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
-{
-    FIXME("id %u, stub!\n", packet->reportId);
-    io->Information = 0;
-    io->Status = STATUS_NOT_IMPLEMENTED;
-}
-
-static const struct unix_device_vtbl keyboard_vtbl =
-{
-    keyboard_remove,
-    keyboard_compare,
-    keyboard_start,
-    keyboard_get_report_descriptor,
-    keyboard_get_string,
-    keyboard_set_output_report,
-    keyboard_get_feature_report,
-    keyboard_set_feature_report,
+    struct unix_device unix_device;
 };
 
-static const WCHAR keyboard_bus_id[] = {'W','I','N','E','K','E','Y','B','O','A','R','D',0};
+static void keyboard_destroy(struct unix_device *iface)
+{
+}
+
+static NTSTATUS keyboard_start(struct unix_device *iface)
+{
+    if (!hid_device_begin_report_descriptor(iface, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_KEYBOARD))
+        return STATUS_NO_MEMORY;
+    if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_KEYBOARD, 0, 101))
+        return STATUS_NO_MEMORY;
+    if (!hid_device_end_report_descriptor(iface))
+        return STATUS_NO_MEMORY;
+
+    return STATUS_SUCCESS;
+}
+
+static void keyboard_stop(struct unix_device *iface)
+{
+}
+
+static NTSTATUS keyboard_haptics_start(struct unix_device *iface, DWORD duration,
+                                       USHORT rumble_intensity, USHORT buzz_intensity)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+static const struct hid_device_vtbl keyboard_vtbl =
+{
+    keyboard_destroy,
+    keyboard_start,
+    keyboard_stop,
+    keyboard_haptics_start,
+};
+
 static const struct device_desc keyboard_device_desc =
 {
-    .busid = keyboard_bus_id,
+    .vid = 0x845e,
+    .pid = 0x0002,
     .input = -1,
-    .serial = {'0','0','0','0',0},
+    .manufacturer = {"The Wine Project"},
+    .product = {"Wine HID keyboard"},
+    .serialnumber = {"0000"},
 };
-static struct unix_device keyboard_device = {.vtbl = &keyboard_vtbl};
 
 static NTSTATUS keyboard_device_create(void *args)
 {
     struct device_create_params *params = args;
     params->desc = keyboard_device_desc;
-    params->device = &keyboard_device;
+    params->device = hid_device_create(&keyboard_vtbl, sizeof(struct keyboard_device));
     return STATUS_SUCCESS;
+}
+
+void *raw_device_create(const struct raw_device_vtbl *vtbl, SIZE_T size)
+{
+    struct unix_device *iface;
+
+    if (!(iface = calloc(1, size))) return NULL;
+    iface->vtbl = vtbl;
+    iface->ref = 1;
+
+    return iface;
+}
+
+static void unix_device_decref(struct unix_device *iface)
+{
+    if (!InterlockedDecrement(&iface->ref))
+    {
+        iface->vtbl->destroy(iface);
+        free(iface);
+    }
+}
+
+static ULONG unix_device_incref(struct unix_device *iface)
+{
+    return InterlockedIncrement(&iface->ref);
 }
 
 static NTSTATUS unix_device_remove(void *args)
 {
     struct unix_device *iface = args;
-    iface->vtbl->destroy(iface);
+    iface->vtbl->stop(iface);
+    unix_device_decref(iface);
     return STATUS_SUCCESS;
-}
-
-static NTSTATUS unix_device_compare(void *args)
-{
-    struct device_compare_params *params = args;
-    struct unix_device *iface = params->iface;
-    return iface->vtbl->compare(iface, params->context);
 }
 
 static NTSTATUS unix_device_start(void *args)
 {
-    struct device_start_params *params = args;
-    struct unix_device *iface = params->iface;
-    return iface->vtbl->start(iface, params->device);
+    struct unix_device *iface = args;
+    return iface->vtbl->start(iface);
 }
 
 static NTSTATUS unix_device_get_report_descriptor(void *args)
@@ -249,13 +215,6 @@ static NTSTATUS unix_device_get_report_descriptor(void *args)
     struct device_descriptor_params *params = args;
     struct unix_device *iface = params->iface;
     return iface->vtbl->get_report_descriptor(iface, params->buffer, params->length, params->out_length);
-}
-
-static NTSTATUS unix_device_get_string(void *args)
-{
-    struct device_string_params *params = args;
-    struct unix_device *iface = params->iface;
-    return iface->vtbl->get_string(iface, params->index, params->buffer, params->length);
 }
 
 static NTSTATUS unix_device_set_output_report(void *args)
@@ -296,32 +255,40 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     mouse_device_create,
     keyboard_device_create,
     unix_device_remove,
-    unix_device_compare,
     unix_device_start,
     unix_device_get_report_descriptor,
-    unix_device_get_string,
     unix_device_set_output_report,
     unix_device_get_feature_report,
     unix_device_set_feature_report,
 };
+
+void bus_event_cleanup(struct bus_event *event)
+{
+    if (event->type == BUS_EVENT_TYPE_NONE) return;
+    unix_device_decref(event->device);
+}
 
 void bus_event_queue_destroy(struct list *queue)
 {
     struct bus_event *event, *next;
 
     LIST_FOR_EACH_ENTRY_SAFE(event, next, queue, struct bus_event, entry)
-        HeapFree(GetProcessHeap(), 0, event);
+    {
+        bus_event_cleanup(event);
+        free(event);
+    }
 }
 
-BOOL bus_event_queue_device_removed(struct list *queue, const WCHAR *bus_id, void *context)
+BOOL bus_event_queue_device_removed(struct list *queue, struct unix_device *device)
 {
     ULONG size = sizeof(struct bus_event);
-    struct bus_event *event = HeapAlloc(GetProcessHeap(), 0, size);
+    struct bus_event *event = malloc(size);
     if (!event) return FALSE;
 
+    if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */
+
     event->type = BUS_EVENT_TYPE_DEVICE_REMOVED;
-    event->device_removed.bus_id = bus_id;
-    event->device_removed.context = context;
+    event->device = device;
     list_add_tail(queue, &event->entry);
 
     return TRUE;
@@ -330,12 +297,31 @@ BOOL bus_event_queue_device_removed(struct list *queue, const WCHAR *bus_id, voi
 BOOL bus_event_queue_device_created(struct list *queue, struct unix_device *device, struct device_desc *desc)
 {
     ULONG size = sizeof(struct bus_event);
-    struct bus_event *event = HeapAlloc(GetProcessHeap(), 0, size);
+    struct bus_event *event = malloc(size);
     if (!event) return FALSE;
 
+    if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */
+
     event->type = BUS_EVENT_TYPE_DEVICE_CREATED;
-    event->device_created.device = device;
+    event->device = device;
     event->device_created.desc = *desc;
+    list_add_tail(queue, &event->entry);
+
+    return TRUE;
+}
+
+BOOL bus_event_queue_input_report(struct list *queue, struct unix_device *device, BYTE *report, USHORT length)
+{
+    ULONG size = offsetof(struct bus_event, input_report.buffer[length]);
+    struct bus_event *event = malloc(size);
+    if (!event) return FALSE;
+
+    if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */
+
+    event->type = BUS_EVENT_TYPE_INPUT_REPORT;
+    event->device = device;
+    event->input_report.length = length;
+    memcpy(event->input_report.buffer, report, length);
     list_add_tail(queue, &event->entry);
 
     return TRUE;
@@ -345,14 +331,18 @@ BOOL bus_event_queue_pop(struct list *queue, struct bus_event *event)
 {
     struct list *entry = list_head(queue);
     struct bus_event *tmp;
+    ULONG size;
 
     if (!entry) return FALSE;
 
     tmp = LIST_ENTRY(entry, struct bus_event, entry);
     list_remove(entry);
 
-    memcpy(event, tmp, sizeof(*event));
-    HeapFree(GetProcessHeap(), 0, tmp);
+    if (event->type != BUS_EVENT_TYPE_INPUT_REPORT) size = sizeof(*event);
+    else size = offsetof(struct bus_event, input_report.buffer[event->input_report.length]);
+
+    memcpy(event, tmp, size);
+    free(tmp);
 
     return TRUE;
 }

@@ -130,10 +130,10 @@ static inline void create_default_clip_region( DC * dc )
     {
         rect.left = 0;
         rect.top = 0;
-        rect.right = GetDeviceCaps( dc->hSelf, DESKTOPHORZRES );
-        rect.bottom = GetDeviceCaps( dc->hSelf, DESKTOPVERTRES );
+        rect.right = NtGdiGetDeviceCaps( dc->hSelf, DESKTOPHORZRES );
+        rect.bottom = NtGdiGetDeviceCaps( dc->hSelf, DESKTOPVERTRES );
     }
-    dc->hClipRgn = CreateRectRgnIndirect( &rect );
+    dc->hClipRgn = NtGdiCreateRectRgn( rect.left, rect.top, rect.right, rect.bottom );
 }
 
 
@@ -237,8 +237,8 @@ INT WINAPI NtGdiOffsetClipRgn( HDC hdc, INT x, INT y )
 
     if (dc->hClipRgn)
     {
-        x = MulDiv( x, dc->attr->vport_ext.cx, dc->attr->wnd_ext.cx );
-        y = MulDiv( y, dc->attr->vport_ext.cy, dc->attr->wnd_ext.cy );
+        x = muldiv( x, dc->attr->vport_ext.cx, dc->attr->wnd_ext.cx );
+        y = muldiv( y, dc->attr->vport_ext.cy, dc->attr->wnd_ext.cy );
         if (dc->attr->layout & LAYOUT_RTL) x = -x;
         ret = NtGdiOffsetRgn( dc->hClipRgn, x, y );
         update_dc_clipping( dc );
@@ -265,7 +265,7 @@ INT WINAPI NtGdiExcludeClipRect( HDC hdc, INT left, INT top, INT right, INT bott
 
     rect = get_clip_rect( dc, left, top, right, bottom );
 
-    if ((rgn = CreateRectRgnIndirect( &rect )))
+    if ((rgn = NtGdiCreateRectRgn( rect.left, rect.top, rect.right, rect.bottom )))
     {
         if (!dc->hClipRgn) create_default_clip_region( dc );
         ret = NtGdiCombineRgn( dc->hClipRgn, dc->hClipRgn, rgn, RGN_DIFF );
@@ -293,10 +293,10 @@ INT WINAPI NtGdiIntersectClipRect( HDC hdc, INT left, INT top, INT right, INT bo
     rect = get_clip_rect( dc, left, top, right, bottom );
     if (!dc->hClipRgn)
     {
-        if ((dc->hClipRgn = CreateRectRgnIndirect( &rect )))
+        if ((dc->hClipRgn = NtGdiCreateRectRgn( rect.left, rect.top, rect.right, rect.bottom )))
             ret = SIMPLEREGION;
     }
-    else if ((rgn = CreateRectRgnIndirect( &rect )))
+    else if ((rgn = NtGdiCreateRectRgn( rect.left, rect.top, rect.right, rect.bottom )))
     {
         ret = NtGdiCombineRgn( dc->hClipRgn, dc->hClipRgn, rgn, RGN_AND );
         NtGdiDeleteObjectApp( rgn );

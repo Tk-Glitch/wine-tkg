@@ -29,9 +29,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d10);
     ((DWORD)(ch2) << 16) | ((DWORD)(ch3) << 24 ))
 #define TAG_DXBC MAKE_TAG('D', 'X', 'B', 'C')
 #define TAG_FX10 MAKE_TAG('F', 'X', '1', '0')
-#define TAG_ISGN MAKE_TAG('I', 'S', 'G', 'N')
-#define TAG_OSGN MAKE_TAG('O', 'S', 'G', 'N')
-#define TAG_SHDR MAKE_TAG('S', 'H', 'D', 'R')
 
 #define D3D10_FX10_TYPE_COLUMN_SHIFT    11
 #define D3D10_FX10_TYPE_COLUMN_MASK     (0x7 << D3D10_FX10_TYPE_COLUMN_SHIFT)
@@ -46,6 +43,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d10);
 #define D3D10_FX10_TYPE_CLASS_MASK      (0x7 << D3D10_FX10_TYPE_CLASS_SHIFT)
 
 #define D3D10_FX10_TYPE_MATRIX_COLUMN_MAJOR_MASK 0x4000
+
+static inline struct d3d10_effect *impl_from_ID3D10EffectPool(ID3D10EffectPool *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d10_effect, ID3D10EffectPool_iface);
+}
+
+static const struct ID3D10EffectVtbl d3d10_effect_pool_effect_vtbl;
 
 static const struct ID3D10EffectTechniqueVtbl d3d10_effect_technique_vtbl;
 static const struct ID3D10EffectPassVtbl d3d10_effect_pass_vtbl;
@@ -836,6 +840,7 @@ static D3D10_SHADER_VARIABLE_TYPE d3d10_variable_type(DWORD t, BOOL is_object, D
                 *flags = D3D10_EOT_FLAG_GS_SO;
                 return D3D10_SVT_GEOMETRYSHADER;
 
+            case  9: return D3D10_SVT_TEXTURE;
             case 10: return D3D10_SVT_TEXTURE1D;
             case 11: return D3D10_SVT_TEXTURE1DARRAY;
             case 12: return D3D10_SVT_TEXTURE2D;
@@ -1158,6 +1163,7 @@ static void set_variable_vtbl(struct d3d10_effect_variable *v)
                     *vtbl = (const ID3D10EffectVariableVtbl *)&d3d10_effect_string_variable_vtbl;
                     break;
 
+                case D3D10_SVT_TEXTURE:
                 case D3D10_SVT_TEXTURE1D:
                 case D3D10_SVT_TEXTURE1DARRAY:
                 case D3D10_SVT_TEXTURE2D:
@@ -1367,6 +1373,33 @@ static HRESULT parse_fx10_annotation(const char *data, size_t data_size,
     a->flag = D3D10_EFFECT_VARIABLE_ANNOTATION;
 
     return S_OK;
+}
+
+static HRESULT parse_fx10_annotations(const char *data, size_t data_size, const char **ptr,
+        struct d3d10_effect *effect, unsigned int annotation_count,
+        struct d3d10_effect_variable **annotations)
+{
+    unsigned int i;
+    HRESULT hr;
+
+    if (!(*annotations = heap_calloc(annotation_count, sizeof(**annotations))))
+    {
+        ERR("Failed to allocate annotations memory.\n");
+        return E_OUTOFMEMORY;
+    }
+
+    for (i = 0; i < annotation_count; ++i)
+    {
+        struct d3d10_effect_variable *a = &(*annotations)[i];
+
+        a->effect = effect;
+        a->buffer = &null_local_buffer;
+
+        if (FAILED(hr = parse_fx10_annotation(data, data_size, ptr, a)))
+            return hr;
+    }
+
+    return hr;
 }
 
 static HRESULT parse_fx10_anonymous_shader(struct d3d10_effect *e, struct d3d10_effect_anonymous_shader *s,
@@ -1898,21 +1931,11 @@ static HRESULT parse_fx10_pass(const char *data, size_t data_size,
     read_dword(ptr, &p->annotation_count);
     TRACE("Pass has %u annotations.\n", p->annotation_count);
 
-    if (!(p->annotations = heap_calloc(p->annotation_count, sizeof(*p->annotations))))
+    if (FAILED(hr = parse_fx10_annotations(data, data_size, ptr, p->technique->effect,
+            p->annotation_count, &p->annotations)))
     {
-        ERR("Failed to allocate pass annotations memory.\n");
-        return E_OUTOFMEMORY;
-    }
-
-    for (i = 0; i < p->annotation_count; ++i)
-    {
-        struct d3d10_effect_variable *a = &p->annotations[i];
-
-        a->effect = p->technique->effect;
-        a->buffer = &null_local_buffer;
-
-        if (FAILED(hr = parse_fx10_annotation(data, data_size, ptr, a)))
-            return hr;
+        ERR("Failed to parse pass annotations, hr %#x.\n", hr);
+        return hr;
     }
 
     if (!(p->objects = heap_calloc(p->object_count, sizeof(*p->objects))))
@@ -1961,21 +1984,11 @@ static HRESULT parse_fx10_technique(const char *data, size_t data_size,
     read_dword(ptr, &t->annotation_count);
     TRACE("Technique has %u annotations.\n", t->annotation_count);
 
-    if (!(t->annotations = heap_calloc(t->annotation_count, sizeof(*t->annotations))))
+    if (FAILED(hr = parse_fx10_annotations(data, data_size, ptr, t->effect,
+            t->annotation_count, &t->annotations)))
     {
-        ERR("Failed to allocate technique annotations memory.\n");
-        return E_OUTOFMEMORY;
-    }
-
-    for (i = 0; i < t->annotation_count; ++i)
-    {
-        struct d3d10_effect_variable *a = &t->annotations[i];
-
-        a->effect = t->effect;
-        a->buffer = &null_local_buffer;
-
-        if (FAILED(hr = parse_fx10_annotation(data, data_size, ptr, a)))
-            return hr;
+        ERR("Failed to parse technique annotations, hr %#x.\n", hr);
+        return hr;
     }
 
     if (!(t->passes = heap_calloc(t->pass_count, sizeof(*t->passes))))
@@ -2002,7 +2015,6 @@ static HRESULT parse_fx10_numeric_variable(const char *data, size_t data_size,
         const char **ptr, struct d3d10_effect_variable *v)
 {
     DWORD offset, default_value_offset;
-    unsigned int i;
     HRESULT hr;
 
     if (FAILED(hr = parse_fx10_variable_head(data, data_size, ptr, v)))
@@ -2032,21 +2044,11 @@ static HRESULT parse_fx10_numeric_variable(const char *data, size_t data_size,
     read_dword(ptr, &v->annotation_count);
     TRACE("Variable has %u annotations.\n", v->annotation_count);
 
-    if (!(v->annotations = heap_calloc(v->annotation_count, sizeof(*v->annotations))))
+    if (FAILED(hr = parse_fx10_annotations(data, data_size, ptr, v->effect,
+            v->annotation_count, &v->annotations)))
     {
-        ERR("Failed to allocate variable annotations memory.\n");
-        return E_OUTOFMEMORY;
-    }
-
-    for (i = 0; i < v->annotation_count; ++i)
-    {
-        struct d3d10_effect_variable *a = &v->annotations[i];
-
-        a->effect = v->effect;
-        a->buffer = &null_local_buffer;
-
-        if (FAILED(hr = parse_fx10_annotation(data, data_size, ptr, a)))
-            return hr;
+        ERR("Failed to parse variable annotations, hr %#x.\n", hr);
+        return hr;
     }
 
     if (v->flag & D3D10_EFFECT_VARIABLE_EXPLICIT_BIND_POINT)
@@ -2119,6 +2121,7 @@ static HRESULT parse_fx10_local_variable(const char *data, size_t data_size,
 
     switch (v->type->basetype)
     {
+        case D3D10_SVT_TEXTURE:
         case D3D10_SVT_TEXTURE1D:
         case D3D10_SVT_TEXTURE1DARRAY:
         case D3D10_SVT_TEXTURE2D:
@@ -2247,21 +2250,11 @@ static HRESULT parse_fx10_local_variable(const char *data, size_t data_size,
     read_dword(ptr, &v->annotation_count);
     TRACE("Variable has %u annotations.\n", v->annotation_count);
 
-    if (!(v->annotations = heap_calloc(v->annotation_count, sizeof(*v->annotations))))
+    if (FAILED(hr = parse_fx10_annotations(data, data_size, ptr, v->effect,
+            v->annotation_count, &v->annotations)))
     {
-        ERR("Failed to allocate variable annotations memory.\n");
-        return E_OUTOFMEMORY;
-    }
-
-    for (i = 0; i < v->annotation_count; ++i)
-    {
-        struct d3d10_effect_variable *a = &v->annotations[i];
-
-        a->effect = v->effect;
-        a->buffer = &null_local_buffer;
-
-        if (FAILED(hr = parse_fx10_annotation(data, data_size, ptr, a)))
-            return hr;
+        ERR("Failed to parse variable annotations, hr %#x.\n", hr);
+        return hr;
     }
 
     return S_OK;
@@ -2385,21 +2378,11 @@ static HRESULT parse_fx10_local_buffer(const char *data, size_t data_size,
     read_dword(ptr, &l->annotation_count);
     TRACE("Local buffer has %u annotations.\n", l->annotation_count);
 
-    if (!(l->annotations = heap_calloc(l->annotation_count, sizeof(*l->annotations))))
+    if (FAILED(hr = parse_fx10_annotations(data, data_size, ptr, l->effect,
+            l->annotation_count, &l->annotations)))
     {
-        ERR("Failed to allocate local buffer annotations memory.\n");
-        return E_OUTOFMEMORY;
-    }
-
-    for (i = 0; i < l->annotation_count; ++i)
-    {
-        struct d3d10_effect_variable *a = &l->annotations[i];
-
-        a->effect = l->effect;
-        a->buffer = &null_local_buffer;
-
-        if (FAILED(hr = parse_fx10_annotation(data, data_size, ptr, a)))
-            return hr;
+        ERR("Failed to parse buffer annotations, hr %#x.\n", hr);
+        return hr;
     }
 
     if (!(l->members = heap_calloc(l->type->member_count, sizeof(*l->members))))
@@ -3121,6 +3104,8 @@ static ULONG STDMETHODCALLTYPE d3d10_effect_Release(ID3D10Effect *iface)
 
         wine_rb_destroy(&This->types, d3d10_effect_type_destroy, NULL);
 
+        if (This->pool)
+            This->pool->lpVtbl->Release(This->pool);
         ID3D10Device_Release(This->device);
         heap_free(This);
     }
@@ -3139,9 +3124,11 @@ static BOOL STDMETHODCALLTYPE d3d10_effect_IsValid(ID3D10Effect *iface)
 
 static BOOL STDMETHODCALLTYPE d3d10_effect_IsPool(ID3D10Effect *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
 
-    return FALSE;
+    TRACE("iface %p.\n", iface);
+
+    return effect->ID3D10Effect_iface.lpVtbl == &d3d10_effect_pool_effect_vtbl;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_effect_GetDevice(ID3D10Effect *iface, ID3D10Device **device)
@@ -3159,26 +3146,32 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_GetDevice(ID3D10Effect *iface, ID3
 static HRESULT STDMETHODCALLTYPE d3d10_effect_GetDesc(ID3D10Effect *iface, D3D10_EFFECT_DESC *desc)
 {
     struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
+    D3D10_EFFECT_DESC pool_desc = { 0 };
     unsigned int i;
+    HRESULT hr;
 
-    FIXME("iface %p, desc %p.\n", iface, desc);
+    TRACE("iface %p, desc %p.\n", iface, desc);
 
     if (!desc)
         return E_INVALIDARG;
 
-    /* FIXME */
-    desc->IsChildEffect = FALSE;
-    desc->SharedConstantBuffers = 0;
-    desc->SharedGlobalVariables = 0;
+    if (effect->pool && FAILED(hr = effect->pool->lpVtbl->GetDesc(effect->pool, &pool_desc)))
+    {
+        WARN("Failed to get pool description, hr %#x.\n", hr);
+        return hr;
+    }
 
+    desc->IsChildEffect = !!effect->pool;
     desc->ConstantBuffers = effect->local_buffer_count;
-    desc->Techniques = effect->technique_count;
+    desc->SharedConstantBuffers = pool_desc.ConstantBuffers;
     desc->GlobalVariables = effect->local_variable_count;
     for (i = 0; i < effect->local_buffer_count; ++i)
     {
         struct d3d10_effect_variable *l = &effect->local_buffers[i];
         desc->GlobalVariables += l->type->member_count;
     }
+    desc->SharedGlobalVariables = pool_desc.GlobalVariables;
+    desc->Techniques = effect->technique_count;
 
     return S_OK;
 }
@@ -3186,35 +3179,40 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_GetDesc(ID3D10Effect *iface, D3D10
 static struct ID3D10EffectConstantBuffer * STDMETHODCALLTYPE d3d10_effect_GetConstantBufferByIndex(ID3D10Effect *iface,
         UINT index)
 {
-    struct d3d10_effect *This = impl_from_ID3D10Effect(iface);
+    struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
     struct d3d10_effect_variable *l;
 
     TRACE("iface %p, index %u\n", iface, index);
 
-    if (index >= This->local_buffer_count)
+    if (index < effect->local_buffer_count)
     {
-        WARN("Invalid index specified\n");
-        return (ID3D10EffectConstantBuffer *)&null_local_buffer.ID3D10EffectVariable_iface;
+        l = &effect->local_buffers[index];
+
+        TRACE("Returning buffer %p, %s.\n", l, debugstr_a(l->name));
+
+        return (ID3D10EffectConstantBuffer *)&l->ID3D10EffectVariable_iface;
     }
+    index -= effect->local_buffer_count;
 
-    l = &This->local_buffers[index];
+    if (effect->pool)
+        return effect->pool->lpVtbl->GetConstantBufferByIndex(effect->pool, index);
 
-    TRACE("Returning buffer %p, %s.\n", l, debugstr_a(l->name));
+    WARN("Invalid index specified\n");
 
-    return (ID3D10EffectConstantBuffer *)&l->ID3D10EffectVariable_iface;
+    return (ID3D10EffectConstantBuffer *)&null_local_buffer.ID3D10EffectVariable_iface;
 }
 
 static struct ID3D10EffectConstantBuffer * STDMETHODCALLTYPE d3d10_effect_GetConstantBufferByName(ID3D10Effect *iface,
         const char *name)
 {
-    struct d3d10_effect *This = impl_from_ID3D10Effect(iface);
+    struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
     unsigned int i;
 
     TRACE("iface %p, name %s.\n", iface, debugstr_a(name));
 
-    for (i = 0; i < This->local_buffer_count; ++i)
+    for (i = 0; i < effect->local_buffer_count; ++i)
     {
-        struct d3d10_effect_variable *l = &This->local_buffers[i];
+        struct d3d10_effect_variable *l = &effect->local_buffers[i];
 
         if (l->name && !strcmp(l->name, name))
         {
@@ -3223,6 +3221,9 @@ static struct ID3D10EffectConstantBuffer * STDMETHODCALLTYPE d3d10_effect_GetCon
         }
     }
 
+    if (effect->pool)
+        return effect->pool->lpVtbl->GetConstantBufferByName(effect->pool, name);
+
     WARN("Invalid name specified\n");
 
     return (ID3D10EffectConstantBuffer *)&null_local_buffer.ID3D10EffectVariable_iface;
@@ -3230,14 +3231,14 @@ static struct ID3D10EffectConstantBuffer * STDMETHODCALLTYPE d3d10_effect_GetCon
 
 static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableByIndex(ID3D10Effect *iface, UINT index)
 {
-    struct d3d10_effect *This = impl_from_ID3D10Effect(iface);
+    struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
     unsigned int i;
 
     TRACE("iface %p, index %u\n", iface, index);
 
-    for (i = 0; i < This->local_buffer_count; ++i)
+    for (i = 0; i < effect->local_buffer_count; ++i)
     {
-        struct d3d10_effect_variable *l = &This->local_buffers[i];
+        struct d3d10_effect_variable *l = &effect->local_buffers[i];
 
         if (index < l->type->member_count)
         {
@@ -3249,13 +3250,17 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
         index -= l->type->member_count;
     }
 
-    if (index < This->local_variable_count)
+    if (index < effect->local_variable_count)
     {
-        struct d3d10_effect_variable *v = &This->local_variables[index];
+        struct d3d10_effect_variable *v = &effect->local_variables[index];
 
         TRACE("Returning variable %p.\n", v);
         return &v->ID3D10EffectVariable_iface;
     }
+    index -= effect->local_variable_count;
+
+    if (effect->pool)
+        return effect->pool->lpVtbl->GetVariableByIndex(effect->pool, index);
 
     WARN("Invalid index specified\n");
 
@@ -3265,7 +3270,7 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
 static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableByName(ID3D10Effect *iface,
         const char *name)
 {
-    struct d3d10_effect *This = impl_from_ID3D10Effect(iface);
+    struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
     unsigned int i;
 
     TRACE("iface %p, name %s.\n", iface, debugstr_a(name));
@@ -3276,9 +3281,9 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
         return &null_variable.ID3D10EffectVariable_iface;
     }
 
-    for (i = 0; i < This->local_buffer_count; ++i)
+    for (i = 0; i < effect->local_buffer_count; ++i)
     {
-        struct d3d10_effect_variable *l = &This->local_buffers[i];
+        struct d3d10_effect_variable *l = &effect->local_buffers[i];
         unsigned int j;
 
         for (j = 0; j < l->type->member_count; ++j)
@@ -3293,9 +3298,9 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
         }
     }
 
-    for (i = 0; i < This->local_variable_count; ++i)
+    for (i = 0; i < effect->local_variable_count; ++i)
     {
-        struct d3d10_effect_variable *v = &This->local_variables[i];
+        struct d3d10_effect_variable *v = &effect->local_variables[i];
 
         if (v->name && !strcmp(v->name, name))
         {
@@ -3303,6 +3308,9 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
             return &v->ID3D10EffectVariable_iface;
         }
     }
+
+    if (effect->pool)
+        return effect->pool->lpVtbl->GetVariableByName(effect->pool, name);
 
     WARN("Invalid name specified\n");
 
@@ -3312,7 +3320,7 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
 static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableBySemantic(ID3D10Effect *iface,
         const char *semantic)
 {
-    struct d3d10_effect *This = impl_from_ID3D10Effect(iface);
+    struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
     unsigned int i;
 
     TRACE("iface %p, semantic %s\n", iface, debugstr_a(semantic));
@@ -3323,9 +3331,9 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
         return &null_variable.ID3D10EffectVariable_iface;
     }
 
-    for (i = 0; i < This->local_buffer_count; ++i)
+    for (i = 0; i < effect->local_buffer_count; ++i)
     {
-        struct d3d10_effect_variable *l = &This->local_buffers[i];
+        struct d3d10_effect_variable *l = &effect->local_buffers[i];
         unsigned int j;
 
         for (j = 0; j < l->type->member_count; ++j)
@@ -3340,9 +3348,9 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
         }
     }
 
-    for (i = 0; i < This->local_variable_count; ++i)
+    for (i = 0; i < effect->local_variable_count; ++i)
     {
-        struct d3d10_effect_variable *v = &This->local_variables[i];
+        struct d3d10_effect_variable *v = &effect->local_variables[i];
 
         if (v->semantic && !stricmp(v->semantic, semantic))
         {
@@ -3350,6 +3358,9 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
             return &v->ID3D10EffectVariable_iface;
         }
     }
+
+    if (effect->pool)
+        return effect->pool->lpVtbl->GetVariableBySemantic(effect->pool, semantic);
 
     WARN("Invalid semantic specified\n");
 
@@ -3410,7 +3421,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_Optimize(ID3D10Effect *iface)
 {
     struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
     struct d3d10_effect_variable *v;
-    unsigned int i;
+    unsigned int i, j;
 
     FIXME("iface %p semi-stub!\n", iface);
 
@@ -3430,6 +3441,18 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_Optimize(ID3D10Effect *iface)
         }
         heap_free(v->u.shader.stream_output_declaration);
         v->u.shader.stream_output_declaration = NULL;
+    }
+
+    for (i = 0; i < effect->technique_count; ++i)
+    {
+        for (j = 0; j < effect->techniques[i].pass_count; ++j)
+        {
+            heap_free(effect->techniques[i].passes[j].name);
+            effect->techniques[i].passes[j].name = NULL;
+        }
+
+        heap_free(effect->techniques[i].name);
+        effect->techniques[i].name = NULL;
     }
 
     return S_OK;
@@ -8348,3 +8371,183 @@ static const struct ID3D10EffectTypeVtbl d3d10_effect_type_vtbl =
     d3d10_effect_type_GetMemberName,
     d3d10_effect_type_GetMemberSemantic,
 };
+
+static HRESULT STDMETHODCALLTYPE d3d10_effect_pool_QueryInterface(ID3D10EffectPool *iface,
+        REFIID riid, void **object)
+{
+    TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), object);
+
+    if (IsEqualGUID(riid, &IID_ID3D10EffectPool) ||
+            IsEqualGUID(riid, &IID_IUnknown))
+    {
+        IUnknown_AddRef(iface);
+        *object = iface;
+        return S_OK;
+    }
+
+    WARN("%s not implemented, returning E_NOINTERFACE\n", debugstr_guid(riid));
+
+    *object = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE d3d10_effect_pool_AddRef(ID3D10EffectPool *iface)
+{
+    struct d3d10_effect *effect = impl_from_ID3D10EffectPool(iface);
+    return d3d10_effect_AddRef(&effect->ID3D10Effect_iface);
+}
+
+static ULONG STDMETHODCALLTYPE d3d10_effect_pool_Release(ID3D10EffectPool *iface)
+{
+    struct d3d10_effect *effect = impl_from_ID3D10EffectPool(iface);
+    return d3d10_effect_Release(&effect->ID3D10Effect_iface);
+}
+
+static ID3D10Effect * STDMETHODCALLTYPE d3d10_effect_pool_AsEffect(ID3D10EffectPool *iface)
+{
+    struct d3d10_effect *effect = impl_from_ID3D10EffectPool(iface);
+
+    TRACE("%p.\n", iface);
+
+    return &effect->ID3D10Effect_iface;
+}
+
+const struct ID3D10EffectPoolVtbl d3d10_effect_pool_vtbl =
+{
+    /* IUnknown methods */
+    d3d10_effect_pool_QueryInterface,
+    d3d10_effect_pool_AddRef,
+    d3d10_effect_pool_Release,
+    /* ID3D10EffectPool methods */
+    d3d10_effect_pool_AsEffect,
+};
+
+
+static int d3d10_effect_type_compare(const void *key, const struct wine_rb_entry *entry)
+{
+    const struct d3d10_effect_type *t = WINE_RB_ENTRY_VALUE(entry, const struct d3d10_effect_type, entry);
+    const DWORD *id = key;
+
+    return *id - t->id;
+}
+
+static HRESULT d3d10_create_effect(void *data, SIZE_T data_size, ID3D10Device *device,
+        ID3D10Effect *pool, const ID3D10EffectVtbl *vtbl, struct d3d10_effect **effect)
+{
+    struct d3d10_effect *object;
+    HRESULT hr;
+
+    if (!(object = heap_alloc_zero(sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    wine_rb_init(&object->types, d3d10_effect_type_compare);
+    object->ID3D10Effect_iface.lpVtbl = vtbl;
+    object->ID3D10EffectPool_iface.lpVtbl = &d3d10_effect_pool_vtbl;
+    object->refcount = 1;
+    ID3D10Device_AddRef(device);
+    object->device = device;
+    object->pool = pool;
+    if (pool) pool->lpVtbl->AddRef(pool);
+
+    hr = d3d10_effect_parse(object, data, data_size);
+    if (FAILED(hr))
+    {
+        ERR("Failed to parse effect\n");
+        IUnknown_Release(&object->ID3D10Effect_iface);
+        return hr;
+    }
+
+    *effect = object;
+
+    return S_OK;
+}
+
+HRESULT WINAPI D3D10CreateEffectFromMemory(void *data, SIZE_T data_size, UINT flags,
+        ID3D10Device *device, ID3D10EffectPool *effect_pool, ID3D10Effect **effect)
+{
+    struct d3d10_effect *object;
+    ID3D10Effect *pool = NULL;
+    HRESULT hr;
+
+    FIXME("data %p, data_size %lu, flags %#x, device %p, effect_pool %p, effect %p stub!\n",
+            data, data_size, flags, device, effect_pool, effect);
+
+    if (!(flags & D3D10_EFFECT_COMPILE_CHILD_EFFECT) != !effect_pool)
+        return E_INVALIDARG;
+
+    if (effect_pool)
+    {
+        pool = effect_pool->lpVtbl->AsEffect(effect_pool);
+        if (pool->lpVtbl != &d3d10_effect_pool_effect_vtbl)
+        {
+            WARN("External pool implementations are not supported.\n");
+            return E_INVALIDARG;
+        }
+    }
+
+    if (FAILED(hr = d3d10_create_effect(data, data_size, device, pool, &d3d10_effect_vtbl, &object)))
+    {
+        WARN("Failed to create an effect, hr %#x.\n", hr);
+    }
+
+    *effect = &object->ID3D10Effect_iface;
+
+    TRACE("Created effect %p\n", object);
+
+    return hr;
+}
+
+static HRESULT STDMETHODCALLTYPE d3d10_effect_pool_effect_QueryInterface(ID3D10Effect *iface,
+        REFIID riid, void **object)
+{
+    struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
+
+    TRACE("iface %p, riid %s, obj %p.\n", iface, debugstr_guid(riid), object);
+
+    return IUnknown_QueryInterface(&effect->ID3D10EffectPool_iface, riid, object);
+}
+
+static const struct ID3D10EffectVtbl d3d10_effect_pool_effect_vtbl =
+{
+    /* IUnknown methods */
+    d3d10_effect_pool_effect_QueryInterface,
+    d3d10_effect_AddRef,
+    d3d10_effect_Release,
+    /* ID3D10Effect methods */
+    d3d10_effect_IsValid,
+    d3d10_effect_IsPool,
+    d3d10_effect_GetDevice,
+    d3d10_effect_GetDesc,
+    d3d10_effect_GetConstantBufferByIndex,
+    d3d10_effect_GetConstantBufferByName,
+    d3d10_effect_GetVariableByIndex,
+    d3d10_effect_GetVariableByName,
+    d3d10_effect_GetVariableBySemantic,
+    d3d10_effect_GetTechniqueByIndex,
+    d3d10_effect_GetTechniqueByName,
+    d3d10_effect_Optimize,
+    d3d10_effect_IsOptimized,
+};
+
+HRESULT WINAPI D3D10CreateEffectPoolFromMemory(void *data, SIZE_T data_size, UINT fx_flags,
+        ID3D10Device *device, ID3D10EffectPool **effect_pool)
+{
+    struct d3d10_effect *object;
+    HRESULT hr;
+
+    TRACE("data %p, data_size %lu, fx_flags %#x, device %p, effect_pool %p.\n",
+            data, data_size, fx_flags, device, effect_pool);
+
+    if (FAILED(hr = d3d10_create_effect(data, data_size, device, NULL,
+            &d3d10_effect_pool_effect_vtbl, &object)))
+    {
+        WARN("Failed to create an effect, hr %#x.\n", hr);
+        return hr;
+    }
+
+    *effect_pool = &object->ID3D10EffectPool_iface;
+
+    TRACE("Created effect pool %p.\n", object);
+
+    return hr;
+}

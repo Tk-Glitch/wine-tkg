@@ -1,9 +1,7 @@
 MODULE    = avicap32.dll
+UNIXLIB   = avicap32.so
 IMPORTLIB = avicap32
 IMPORTS   = user32
-EXTRALIBS = -Wl,--subsystem,unixlib
-
-EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	avicap32_main.c \
