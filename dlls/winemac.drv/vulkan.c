@@ -22,15 +22,12 @@
  * the other drivers. */
 
 #include "config.h"
-#include "wine/port.h"
-#include "macdrv.h"
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <dlfcn.h>
 
-#include "windef.h"
-#include "winbase.h"
-
+#include "macdrv.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
 

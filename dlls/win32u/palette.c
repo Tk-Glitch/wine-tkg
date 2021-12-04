@@ -513,14 +513,16 @@ static BOOL PALETTE_DeleteObject( HGDIOBJ handle )
 
 
 /***********************************************************************
- *           GDISelectPalette    (Not a Windows API)
+ *           NtUserSelectPalette    (win32u.@)
  */
-HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg)
+HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE hpal, WORD bkg )
 {
     HPALETTE ret = 0;
     DC *dc;
 
     TRACE("%p %p\n", hdc, hpal );
+
+    /* FIXME: move primary palette handling from user32 */
 
     if (get_gdi_object_type(hpal) != NTGDI_OBJ_PAL)
     {
@@ -531,7 +533,7 @@ HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg)
     {
         ret = dc->hPalette;
         dc->hPalette = hpal;
-        if (!wBkg) hPrimaryPalette = hpal;
+        if (!bkg) hPrimaryPalette = hpal;
         release_dc_ptr( dc );
     }
     return ret;
@@ -539,16 +541,17 @@ HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg)
 
 
 /***********************************************************************
- *           GDIRealizePalette    (Not a Windows API)
+ *           realize_palette
  */
-UINT WINAPI GDIRealizePalette( HDC hdc )
+UINT realize_palette( HDC hdc )
 {
     UINT realized = 0;
     DC* dc = get_dc_ptr( hdc );
 
+    TRACE( "%p\n", hdc );
     if (!dc) return 0;
 
-    TRACE("%p...\n", hdc );
+    /* FIXME: move primary palette handling from user32 */
 
     if( dc->hPalette == get_stock_object( DEFAULT_PALETTE ))
     {

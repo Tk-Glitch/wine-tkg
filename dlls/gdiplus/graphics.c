@@ -3457,7 +3457,7 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
                     dst_format = PixelFormat32bppRGB;
 
                 convert_pixels(bitmap->width, bitmap->height,
-                    bitmap->width*4, temp_bits, dst_format,
+                    bitmap->width*4, temp_bits, dst_format, bitmap->image.palette,
                     bitmap->stride, bitmap->bits, bitmap->format,
                     bitmap->image.palette);
             }

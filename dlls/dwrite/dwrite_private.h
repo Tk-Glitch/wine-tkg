@@ -21,7 +21,6 @@
 #include "winternl.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 
 #define MS_GSUB_TAG DWRITE_MAKE_OPENTYPE_TAG('G','S','U','B')
@@ -34,29 +33,13 @@ static const DWRITE_MATRIX identity =
     0.0f, 0.0f
 };
 
-static inline LPWSTR heap_strdupW(const WCHAR *str)
-{
-    LPWSTR ret = NULL;
-
-    if(str) {
-        DWORD size;
-
-        size = (lstrlenW(str) + 1)*sizeof(WCHAR);
-        ret = heap_alloc(size);
-        if(ret)
-            memcpy(ret, str, size);
-    }
-
-    return ret;
-}
-
 static inline LPWSTR heap_strdupnW(const WCHAR *str, UINT32 len)
 {
     WCHAR *ret = NULL;
 
     if (len)
     {
-        ret = heap_alloc((len+1)*sizeof(WCHAR));
+        ret = malloc((len+1)*sizeof(WCHAR));
         if(ret)
         {
             memcpy(ret, str, len*sizeof(WCHAR));
@@ -97,10 +80,7 @@ static inline BOOL dwrite_array_reserve(void **elements, size_t *capacity, size_
     if (new_capacity < count)
         new_capacity = max_capacity;
 
-    if (!*elements)
-        new_elements = RtlAllocateHeap(GetProcessHeap(), 0, new_capacity * size);
-    else
-        new_elements = RtlReAllocateHeap(GetProcessHeap(), 0, *elements, new_capacity * size);
+    new_elements = realloc(*elements, new_capacity * size);
     if (!new_elements)
         return FALSE;
 
@@ -241,6 +221,10 @@ extern UINT16 opentype_cmap_get_glyph(const struct dwrite_cmap *cmap, unsigned i
 extern HRESULT opentype_cmap_get_unicode_ranges(const struct dwrite_cmap *cmap, unsigned int max_count,
         DWRITE_UNICODE_RANGE *ranges, unsigned int *count) DECLSPEC_HIDDEN;
 
+struct dwrite_fontface;
+typedef void * font_object_handle;
+typedef font_object_handle (*p_dwrite_fontface_get_font_object)(struct dwrite_fontface *fontface);
+
 struct dwrite_fontface
 {
     IDWriteFontFace5 IDWriteFontFace5_iface;
@@ -253,6 +237,10 @@ struct dwrite_fontface
 
     IDWriteFactory7 *factory;
     struct fontfacecached *cached;
+    font_object_handle font_object;
+    void *data_context;
+    p_dwrite_fontface_get_font_object get_font_object;
+    CRITICAL_SECTION cs;
 
     USHORT simulations;
     DWRITE_FONT_FACE_TYPE type;
@@ -731,15 +719,17 @@ struct font_callback_funcs
 
 struct font_backend_funcs
 {
+    font_object_handle (CDECL *create_font_object)(const void *data_ptr, UINT64 data_size, unsigned int index);
+    void (CDECL *release_font_object)(font_object_handle object);
     void (CDECL *notify_release)(void *key);
-    int (CDECL *get_glyph_outline)(void *key, float em_size, unsigned int simulations, UINT16 glyph,
+    int (CDECL *get_glyph_outline)(font_object_handle object, float emsize, unsigned int simulations, UINT16 glyph,
             struct dwrite_outline *outline);
-    UINT16 (CDECL *get_glyph_count)(void *key);
+    UINT16 (CDECL *get_glyph_count)(font_object_handle object);
     INT32 (CDECL *get_glyph_advance)(void *key, float em_size, UINT16 index, DWRITE_MEASURING_MODE measuring_mode,
             BOOL *has_contours);
     void (CDECL *get_glyph_bbox)(struct dwrite_glyphbitmap *bitmap_desc);
     BOOL (CDECL *get_glyph_bitmap)(struct dwrite_glyphbitmap *bitmap_desc);
-    void (CDECL *get_design_glyph_metrics)(void *key, UINT16 upem, UINT16 ascent, unsigned int simulations,
+    void (CDECL *get_design_glyph_metrics)(font_object_handle object, UINT16 upem, UINT16 ascent, unsigned int simulations,
             UINT16 glyph, DWRITE_GLYPH_METRICS *metrics);
 };
 

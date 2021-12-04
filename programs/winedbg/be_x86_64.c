@@ -702,8 +702,8 @@ static int be_x86_64_adjust_pc_for_break(dbg_ctx_t *ctx, BOOL way)
 static BOOL be_x86_64_fetch_integer(const struct dbg_lvalue* lvalue, unsigned size,
                                     BOOL is_signed, LONGLONG* ret)
 {
-    if (size != 1 && size != 2 && size != 4 && size != 8 && size != 16)
-        return FALSE;
+    /* size must fit in ret and be a power of two */
+    if (size > sizeof(*ret) || (size & (size - 1))) return FALSE;
 
     memset(ret, 0, sizeof(*ret)); /* clear unread bytes */
     /* FIXME: this assumes that debuggee and debugger use the same
@@ -727,6 +727,7 @@ static BOOL be_x86_64_fetch_float(const struct dbg_lvalue* lvalue, unsigned size
     /* FIXME: this assumes that debuggee and debugger use the same
      * representation for reals
      */
+    if (size > sizeof(tmp)) return FALSE;
     if (!memory_read_value(lvalue, size, tmp)) return FALSE;
 
     if (size == sizeof(float)) *ret = *(float*)tmp;

@@ -21,7 +21,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
@@ -35,6 +34,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(xrandr);
 #include <assert.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
+#include <dlfcn.h>
 #include "x11drv.h"
 
 #define VK_NO_PROTOTYPES

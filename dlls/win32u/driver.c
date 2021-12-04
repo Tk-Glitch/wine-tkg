@@ -263,18 +263,18 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
     }
     case BITSPIXEL:
     {
+        UNICODE_STRING display;
         DEVMODEW devmode;
-        WCHAR *display;
         DC *dc;
 
-        if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY && user_callbacks)
+        if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY)
         {
             dc = get_nulldrv_dc( dev );
-            display = dc->display[0] ? dc->display : NULL;
             memset( &devmode, 0, sizeof(devmode) );
             devmode.dmSize = sizeof(devmode);
-            if (user_callbacks->pEnumDisplaySettingsW( display, ENUM_CURRENT_SETTINGS, &devmode )
-                && devmode.dmFields & DM_BITSPERPEL && devmode.dmBitsPerPel)
+            init_unicode_string( &display, dc->display );
+            if (NtUserEnumDisplaySettings( &display, ENUM_CURRENT_SETTINGS, &devmode, 0 ) &&
+                (devmode.dmFields & DM_BITSPERPEL) && devmode.dmBitsPerPel)
                 return devmode.dmBitsPerPel;
         }
         return 32;
@@ -313,46 +313,35 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
     case SCALINGFACTORY:  return 0;
     case VREFRESH:
     {
+        UNICODE_STRING display;
         DEVMODEW devmode;
-        WCHAR *display;
         DC *dc;
 
         if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) != DT_RASDISPLAY)
             return 0;
 
-        if (user_callbacks)
-        {
-            dc = get_nulldrv_dc( dev );
+        dc = get_nulldrv_dc( dev );
 
-            memset( &devmode, 0, sizeof(devmode) );
-            devmode.dmSize = sizeof(devmode);
-            display = dc->display[0] ? dc->display : NULL;
-            if (user_callbacks->pEnumDisplaySettingsW( display, ENUM_CURRENT_SETTINGS, &devmode ))
-                return devmode.dmDisplayFrequency ? devmode.dmDisplayFrequency : 1;
-        }
-
+        memset( &devmode, 0, sizeof(devmode) );
+        devmode.dmSize = sizeof(devmode);
+        init_unicode_string( &display, dc->display );
+        if (NtUserEnumDisplaySettings( &display, ENUM_CURRENT_SETTINGS, &devmode, 0 ) &&
+            devmode.dmDisplayFrequency)
+            return devmode.dmDisplayFrequency;
         return 1;
     }
     case DESKTOPHORZRES:
-        if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY && user_callbacks)
+        if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY)
         {
-            DPI_AWARENESS_CONTEXT context;
-            UINT ret;
-            context = user_callbacks->pSetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
-            ret = user_callbacks->pGetSystemMetrics( SM_CXVIRTUALSCREEN );
-            user_callbacks->pSetThreadDpiAwarenessContext( context );
-            if (ret) return ret;
+            RECT rect = get_virtual_screen_rect();
+            return rect.right - rect.left;
         }
         return NtGdiGetDeviceCaps( dev->hdc, HORZRES );
     case DESKTOPVERTRES:
-        if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY && user_callbacks)
+        if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY)
         {
-            DPI_AWARENESS_CONTEXT context;
-            UINT ret;
-            context = user_callbacks->pSetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
-            ret = user_callbacks->pGetSystemMetrics( SM_CYVIRTUALSCREEN );
-            user_callbacks->pSetThreadDpiAwarenessContext( context );
-            if (ret) return ret;
+            RECT rect = get_virtual_screen_rect();
+            return rect.bottom - rect.top;
         }
         return NtGdiGetDeviceCaps( dev->hdc, VERTRES );
     case BLTALIGNMENT:    return 0;
@@ -810,15 +799,9 @@ static void CDECL nulldrv_UpdateClipboard(void)
 }
 
 static LONG CDECL nulldrv_ChangeDisplaySettingsEx( LPCWSTR name, LPDEVMODEW mode, HWND hwnd,
-                                             DWORD flags, LPVOID lparam )
+                                                   DWORD flags, LPVOID lparam )
 {
     return DISP_CHANGE_FAILED;
-}
-
-static BOOL CDECL nulldrv_EnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc, LPARAM lp )
-{
-    /* FIXME: move from user32 */
-    return FALSE;
 }
 
 static BOOL CDECL nulldrv_EnumDisplaySettingsEx( LPCWSTR name, DWORD num, LPDEVMODEW mode, DWORD flags )
@@ -826,10 +809,9 @@ static BOOL CDECL nulldrv_EnumDisplaySettingsEx( LPCWSTR name, DWORD num, LPDEVM
     return FALSE;
 }
 
-static BOOL CDECL nulldrv_GetMonitorInfo( HMONITOR handle, MONITORINFO *info )
+static void CDECL nulldrv_UpdateDisplayDevices( const struct gdi_device_manager *manager,
+                                                BOOL force, void *param )
 {
-    /* FIXME: move from user32 */
-    return FALSE;
 }
 
 static BOOL CDECL nulldrv_CreateDesktopWindow( HWND hwnd )
@@ -1043,9 +1025,31 @@ static SHORT CDECL loaderdrv_VkKeyScanEx( WCHAR ch, HKL layout )
     return load_driver()->pVkKeyScanEx( ch, layout );
 }
 
+static LONG CDECL loaderdrv_ChangeDisplaySettingsEx( LPCWSTR name, LPDEVMODEW mode, HWND hwnd,
+                                                     DWORD flags, LPVOID lparam )
+{
+    return load_driver()->pChangeDisplaySettingsEx( name, mode, hwnd, flags, lparam );
+}
+
+static BOOL CDECL loaderdrv_EnumDisplaySettingsEx( LPCWSTR name, DWORD num, LPDEVMODEW mode, DWORD flags )
+{
+    return load_driver()->pEnumDisplaySettingsEx( name, num, mode, flags );
+}
+
+static void CDECL loaderdrv_SetCursor( HCURSOR cursor )
+{
+    load_driver()->pSetCursor( cursor );
+}
+
 static void CDECL loaderdrv_UpdateClipboard(void)
 {
     load_driver()->pUpdateClipboard();
+}
+
+static void CDECL loaderdrv_UpdateDisplayDevices( const struct gdi_device_manager *manager,
+                                                  BOOL force, void *param )
+{
+    load_driver()->pUpdateDisplayDevices( manager, force, param );
 }
 
 static const struct user_driver_funcs lazy_load_driver =
@@ -1057,6 +1061,10 @@ static const struct user_driver_funcs lazy_load_driver =
     .pToUnicodeEx = loaderdrv_ToUnicodeEx,
     .pUnregisterHotKey = loaderdrv_UnregisterHotKey,
     .pVkKeyScanEx = loaderdrv_VkKeyScanEx,
+    .pChangeDisplaySettingsEx = loaderdrv_ChangeDisplaySettingsEx,
+    .pEnumDisplaySettingsEx = loaderdrv_EnumDisplaySettingsEx,
+    .pUpdateDisplayDevices = loaderdrv_UpdateDisplayDevices,
+    .pSetCursor = loaderdrv_SetCursor,
     .pUpdateClipboard = loaderdrv_UpdateClipboard,
     .pScrollDC = nulldrv_ScrollDC,
 };
@@ -1094,9 +1102,8 @@ void CDECL __wine_set_display_driver( struct user_driver_funcs *driver, UINT ver
     SET_USER_FUNC(ClipCursor);
     SET_USER_FUNC(UpdateClipboard);
     SET_USER_FUNC(ChangeDisplaySettingsEx);
-    SET_USER_FUNC(EnumDisplayMonitors);
     SET_USER_FUNC(EnumDisplaySettingsEx);
-    SET_USER_FUNC(GetMonitorInfo);
+    SET_USER_FUNC(UpdateDisplayDevices);
     SET_USER_FUNC(CreateDesktopWindow);
     SET_USER_FUNC(CreateWindow);
     SET_USER_FUNC(DestroyWindow);

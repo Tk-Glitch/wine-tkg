@@ -429,7 +429,18 @@ void WINAPI RtlInitializeGenericTable(RTL_GENERIC_TABLE *table, PRTL_GENERIC_COM
                                       PRTL_GENERIC_ALLOCATE_ROUTINE allocate, PRTL_GENERIC_FREE_ROUTINE free,
                                       void *context)
 {
-    FIXME("(%p, %p, %p, %p, %p) stub!\n", table, compare, allocate, free, context);
+    TRACE("(%p, %p, %p, %p, %p)\n", table, compare, allocate, free, context);
+
+    table->TableRoot = NULL;
+    table->InsertOrderList.Flink = &table->InsertOrderList;
+    table->InsertOrderList.Blink = &table->InsertOrderList;
+    table->OrderedPointer = &table->InsertOrderList;
+    table->NumberGenericTableElements = 0;
+    table->WhichOrderedElement = 0;
+    table->CompareRoutine = compare;
+    table->AllocateRoutine = allocate;
+    table->FreeRoutine = free;
+    table->TableContext = context;
 }
 
 /******************************************************************************
@@ -449,8 +460,26 @@ void * WINAPI RtlEnumerateGenericTableWithoutSplaying(RTL_GENERIC_TABLE *table, 
  */
 ULONG WINAPI RtlNumberGenericTableElements(RTL_GENERIC_TABLE *table)
 {
-    FIXME("(%p) stub!\n", table);
-    return 0;
+    TRACE("(%p)\n", table);
+    return table->NumberGenericTableElements;
+}
+
+/******************************************************************************
+ *  RtlGetElementGenericTable           [NTDLL.@]
+ */
+void * WINAPI RtlGetElementGenericTable(RTL_GENERIC_TABLE *table, ULONG index)
+{
+    FIXME("(%p, %u) stub!\n", table, index);
+    return NULL;
+}
+
+/******************************************************************************
+ *  RtlLookupElementGenericTable           [NTDLL.@]
+ */
+void * WINAPI RtlLookupElementGenericTable(RTL_GENERIC_TABLE *table, void *buffer)
+{
+    FIXME("(%p, %p) stub!\n", table, buffer);
+    return NULL;
 }
 
 /******************************************************************************

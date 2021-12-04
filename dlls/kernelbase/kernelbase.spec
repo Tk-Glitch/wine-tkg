@@ -153,7 +153,7 @@
 @ stdcall CloseThreadpoolWork(ptr) ntdll.TpReleaseWork
 # @ stub CommitStateAtom
 @ stdcall CompareFileTime(ptr ptr)
-# @ stub CompareObjectHandles
+@ stdcall CompareObjectHandles(ptr ptr)
 @ stdcall CompareStringA(long long str long str long)
 @ stdcall CompareStringEx(wstr long wstr long wstr long ptr ptr long)
 @ stdcall CompareStringOrdinal(wstr long wstr long long)
@@ -1164,7 +1164,7 @@
 @ stdcall PerfStopProvider(long)
 # @ stub PoolPerAppKeyStateInternal
 @ stdcall PostQueuedCompletionStatus(long long ptr ptr)
-# @ stub PrefetchVirtualMemory
+@ stdcall PrefetchVirtualMemory(ptr ptr ptr long)
 @ stub PrivCopyFileExW
 @ stdcall PrivilegeCheck(ptr ptr ptr)
 @ stdcall PrivilegedServiceAuditAlarmW(wstr wstr long ptr long)
@@ -1393,7 +1393,7 @@
 @ stdcall SearchPathA(str str str long ptr ptr)
 @ stdcall SearchPathW(wstr wstr wstr long ptr ptr)
 @ stdcall SetAclInformation(ptr ptr long long)
-# @ stub SetCachedSigningLevel
+@ stdcall SetCachedSigningLevel(ptr long long long)
 @ stdcall SetCalendarInfoW(long long long wstr)
 # @ stub SetClientDynamicTimeZoneInformation
 # @ stub SetClientTimeZoneInformation

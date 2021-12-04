@@ -634,6 +634,17 @@ found:
     return TRUE;
 }
 
+static WCHAR* append_hex(WCHAR* dst, const BYTE* id, const BYTE* end)
+{
+    while (id < end)
+    {
+        *dst++ = "0123456789abcdef"[*id >> 4  ];
+        *dst++ = "0123456789abcdef"[*id & 0x0F];
+        id++;
+    }
+    return dst;
+}
+
 /******************************************************************
  *		image_load_debugaltlink
  *
@@ -671,9 +682,9 @@ struct image_file_map* image_load_debugaltlink(struct image_file_map* fmap, stru
          */
         sect_len = image_get_map_size(&debugaltlink_sect);
         id = memchr(data, '\0', sect_len);
-        if (id)
+        if (id++)
         {
-            id++;
+            unsigned idlen = (const BYTE*)data + sect_len - id;
             fmap_link = HeapAlloc(GetProcessHeap(), 0, sizeof(*fmap_link));
             if (fmap_link)
             {
@@ -683,15 +694,14 @@ struct image_file_map* image_load_debugaltlink(struct image_file_map* fmap, stru
                 if (dst)
                 {
                     MultiByteToWideChar(CP_UNIXCP, 0, data, -1, dst, filename_len);
-                    ret = image_check_debug_link_gnu_id(dst, fmap_link, id, data + sect_len - (const char*)id);
+                    ret = image_check_debug_link_gnu_id(dst, fmap_link, id, idlen);
                     HeapFree(GetProcessHeap(), 0, dst);
                 }
                 /* Trying relative path to build-id directory */
                 if (!ret)
                 {
-                    static const WCHAR globalDebugDirW[] =
-                        {'/','u','s','r','/','l','i','b','/','d','e','b','u','g','/','.','b','u','i','l','d','-','i','d','/'};
-                    dst = HeapAlloc(GetProcessHeap(), 0, sizeof(globalDebugDirW) + (3 + filename_len) * sizeof(WCHAR));
+                    dst = HeapAlloc(GetProcessHeap(), 0,
+                                    sizeof(L"/usr/lib/debug/.build-id/") + (3 + filename_len + idlen * 2) * sizeof(WCHAR));
                     if (dst)
                     {
                         WCHAR* p;
@@ -701,21 +711,16 @@ struct image_file_map* image_load_debugaltlink(struct image_file_map* fmap, stru
                          * where the alternate file is...
                          * so try both
                          */
-                        p = memcpy(dst, globalDebugDirW, sizeof(globalDebugDirW));
-                        p += ARRAY_SIZE(globalDebugDirW);
+                        p = memcpy(dst, L"/usr/lib/debug/.build-id/", sizeof(L"/usr/lib/debug/.build-id/"));
+                        p += wcslen(dst);
                         MultiByteToWideChar(CP_UNIXCP, 0, data, -1, p, filename_len);
-                        ret = image_check_debug_link_gnu_id(dst, fmap_link, id, data + sect_len - (const char*)id);
+                        ret = image_check_debug_link_gnu_id(dst, fmap_link, id, idlen);
                         if (!ret)
                         {
-                            p = dst + ARRAY_SIZE(globalDebugDirW);
-                            if ((const char*)id < data + sect_len)
-                            {
-                                *p++ = "0123456789abcdef"[*id >> 4  ];
-                                *p++ = "0123456789abcdef"[*id & 0x0F];
-                            }
+                            p = append_hex(p, id, id + idlen);
                             *p++ = '/';
                             MultiByteToWideChar(CP_UNIXCP, 0, data, -1, p, filename_len);
-                            ret = image_check_debug_link_gnu_id(dst, fmap_link, id, data + sect_len - (const char*)id);
+                            ret = image_check_debug_link_gnu_id(dst, fmap_link, id, idlen);
                         }
                         HeapFree(GetProcessHeap(), 0, dst);
                     }
@@ -741,51 +746,38 @@ struct image_file_map* image_load_debugaltlink(struct image_file_map* fmap, stru
  */
 static BOOL image_locate_build_id_target(struct image_file_map* fmap, const BYTE* id, unsigned idlen)
 {
-    static const WCHAR globalDebugDirW[] = {'/','u','s','r','/','l','i','b','/','d','e','b','u','g','/'};
-    static const WCHAR buildidW[] = {'.','b','u','i','l','d','-','i','d','/'};
     struct image_file_map* fmap_link = NULL;
     WCHAR* p;
     WCHAR* z;
-    const BYTE* idend = id + idlen;
 
     fmap_link = HeapAlloc(GetProcessHeap(), 0, sizeof(*fmap_link));
     if (!fmap_link) return FALSE;
 
-    p = HeapAlloc(GetProcessHeap(), 0,
-                  sizeof(globalDebugDirW) + sizeof(buildidW) +
-                  (idlen * 2 + 1) * sizeof(WCHAR) + sizeof(L".debug"));
-    z = p;
-    memcpy(z, globalDebugDirW, sizeof(globalDebugDirW));
-    z += ARRAY_SIZE(globalDebugDirW);
-    memcpy(z, buildidW, sizeof(buildidW));
-    z += ARRAY_SIZE(buildidW);
-
-    if (id < idend)
+    p = malloc(sizeof(L"/usr/lib/debug/.build-id/") +
+               (idlen * 2 + 1) * sizeof(WCHAR) + sizeof(L".debug"));
+    wcscpy(p, L"/usr/lib/debug/.build-id/");
+    z = p + wcslen(p);
+    if (idlen)
     {
-        *z++ = "0123456789abcdef"[*id >> 4  ];
-        *z++ = "0123456789abcdef"[*id & 0x0F];
-        id++;
-    }
-    if (id < idend)
-        *z++ = '/';
-    while (id < idend)
-    {
-        *z++ = "0123456789abcdef"[*id >> 4  ];
-        *z++ = "0123456789abcdef"[*id & 0x0F];
-        id++;
+        z = append_hex(z, id, id + 1);
+        if (idlen > 1)
+        {
+            *z++ = L'/';
+            z = append_hex(z, id + 1, id + idlen);
+        }
     }
     memcpy(z, L".debug", sizeof(L".debug"));
     TRACE("checking %s\n", wine_dbgstr_w(p));
 
-    if (image_check_debug_link_gnu_id(p, fmap_link, idend - idlen, idlen))
+    if (image_check_debug_link_gnu_id(p, fmap_link, id, idlen))
     {
-        HeapFree(GetProcessHeap(), 0, p);
+        free(p);
         fmap->alternate = fmap_link;
         return TRUE;
     }
 
     TRACE("not found\n");
-    HeapFree(GetProcessHeap(), 0, p);
+    free(p);
     HeapFree(GetProcessHeap(), 0, fmap_link);
     return FALSE;
 }
@@ -990,7 +982,7 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
         module_remove(pcs, altmodule);
     }
 
-    if ((dbghelp_options & SYMOPT_DEFERRED_LOADS) == 0)
+    if ((dbghelp_options & SYMOPT_DEFERRED_LOADS) == 0 && !module_get_container(pcs, module))
         module_load_debug(module);
     return module->module.BaseOfImage;
 }
@@ -1246,9 +1238,14 @@ BOOL  WINAPI EnumerateLoadedModulesW64(HANDLE hProcess,
     if (!EnumProcessModules(hProcess, hMods, 256 * sizeof(hMods[0]), &sz))
     {
         /* hProcess should also be a valid process handle !! */
-        FIXME("If this happens, bump the number in mod\n");
         HeapFree(GetProcessHeap(), 0, hMods);
         return FALSE;
+    }
+    if (sz > 256 * sizeof(hMods[0]))
+    {
+        hMods = HeapReAlloc(GetProcessHeap(), 0, hMods, sz);
+        if (!hMods || !EnumProcessModules(hProcess, hMods, sz, &sz))
+            return FALSE;
     }
     sz /= sizeof(HMODULE);
     for (i = 0; i < sz; i++)

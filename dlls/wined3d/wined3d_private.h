@@ -34,6 +34,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <sys/types.h>
 #include <math.h>
 #include <limits.h>
 #include "ntstatus.h"
@@ -50,7 +51,6 @@
 #include "ddk/d3dkmthk.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
-#include "wine/unicode.h"
 #ifdef HAVE_FLOAT_H
 # include <float.h>
 #endif
@@ -1602,6 +1602,7 @@ struct wined3d_bo
 {
     struct list users;
     void *map_ptr;
+    size_t buffer_offset;
     size_t memory_offset;
     bool coherent;
 };
@@ -1611,7 +1612,6 @@ struct wined3d_bo_gl
     struct wined3d_bo b;
 
     GLuint id;
-    GLsizeiptr buffer_offset;
     GLsizeiptr size;
     GLenum binding;
     GLenum usage;
@@ -1646,7 +1646,6 @@ struct wined3d_bo_vk
 
     VkDeviceMemory vk_memory;
 
-    VkDeviceSize buffer_offset;
     VkDeviceSize size;
     VkBufferUsageFlags usage;
     VkMemoryPropertyFlags memory_type;

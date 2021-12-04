@@ -168,7 +168,7 @@ struct gdi_dc_funcs
 };
 
 /* increment this when you change the DC function table */
-#define WINE_GDI_DRIVER_VERSION 71
+#define WINE_GDI_DRIVER_VERSION 73
 
 #define GDI_PRIORITY_NULL_DRV        0  /* null driver */
 #define GDI_PRIORITY_FONT_DRV      100  /* any font driver */
@@ -230,6 +230,42 @@ static inline ULONG window_surface_release( struct window_surface *surface )
     return ret;
 }
 
+/* display manager interface, used to initialize display device registry data */
+
+struct gdi_gpu
+{
+    ULONG_PTR id;
+    WCHAR name[128];      /* name */
+    UINT vendor_id;       /* PCI ID */
+    UINT device_id;
+    UINT subsys_id;
+    UINT revision_id;
+    GUID vulkan_uuid;     /* Vulkan device UUID */
+};
+
+struct gdi_adapter
+{
+    ULONG_PTR id;
+    DWORD state_flags;
+};
+
+struct gdi_monitor
+{
+    WCHAR name[128];      /* name */
+    RECT rc_monitor;      /* RcMonitor in MONITORINFO struct */
+    RECT rc_work;         /* RcWork in MONITORINFO struct */
+    DWORD state_flags;    /* StateFlags in DISPLAY_DEVICE struct */
+    unsigned char *edid;  /* Extended Device Identification Data */
+    UINT edid_len;
+};
+
+struct gdi_device_manager
+{
+    void (*add_gpu)( const struct gdi_gpu *gpu, void *param );
+    void (*add_adapter)( const struct gdi_adapter *adapter, void *param );
+    void (*add_monitor)( const struct gdi_monitor *monitor, void *param );
+};
+
 struct tagUPDATELAYEREDWINDOWINFO;
 
 struct user_driver_funcs
@@ -256,9 +292,8 @@ struct user_driver_funcs
     void    (CDECL *pUpdateClipboard)(void);
     /* display modes */
     LONG    (CDECL *pChangeDisplaySettingsEx)(LPCWSTR,LPDEVMODEW,HWND,DWORD,LPVOID);
-    BOOL    (CDECL *pEnumDisplayMonitors)(HDC,LPRECT,MONITORENUMPROC,LPARAM);
     BOOL    (CDECL *pEnumDisplaySettingsEx)(LPCWSTR,DWORD,LPDEVMODEW,DWORD);
-    BOOL    (CDECL *pGetMonitorInfo)(HMONITOR,MONITORINFO*);
+    void    (CDECL *pUpdateDisplayDevices)(const struct gdi_device_manager *,BOOL,void*);
     /* windowing functions */
     BOOL    (CDECL *pCreateDesktopWindow)(HWND);
     BOOL    (CDECL *pCreateWindow)(HWND);

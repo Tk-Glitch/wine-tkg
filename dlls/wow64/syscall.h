@@ -37,11 +37,13 @@
     SYSCALL_ENTRY( NtAllocateVirtualMemoryEx ) \
     SYSCALL_ENTRY( NtAreMappedFilesTheSame ) \
     SYSCALL_ENTRY( NtAssignProcessToJobObject ) \
+    SYSCALL_ENTRY( NtCallbackReturn ) \
     SYSCALL_ENTRY( NtCancelIoFile ) \
     SYSCALL_ENTRY( NtCancelIoFileEx ) \
     SYSCALL_ENTRY( NtCancelTimer ) \
     SYSCALL_ENTRY( NtClearEvent ) \
     SYSCALL_ENTRY( NtClose ) \
+    SYSCALL_ENTRY( NtCompareObjects ) \
     SYSCALL_ENTRY( NtCompleteConnectPort ) \
     SYSCALL_ENTRY( NtConnectPort ) \
     SYSCALL_ENTRY( NtContinue ) \

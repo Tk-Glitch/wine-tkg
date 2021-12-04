@@ -60,53 +60,36 @@ void lexeme_flush(void)
     next_lexeme = 0;
 }
 
-static size_t read_input(const char* pfx, char* buf, int size)
+/* called with quoted string, unescape all elements inside the quotes */
+static char* unescape_string(const char* str)
 {
-    int len;
-    static char*  last_line = NULL;
-    static size_t last_line_idx = 0;
-
-    /* try first to fetch the remaining of an existing line */
-    if (last_line_idx == 0)
+    size_t len = strlen(str) - 2;
+    char* ret = lexeme_alloc_size(len + 1);
+    char* dst = ret;
+    const char* ptr;
+    for (ptr = str + 1; ptr < str + 1 + len; ptr++)
     {
-        char* tmp = NULL;
-        /* no remaining chars to be read from last line, grab a brand new line up to '\n' */
-        lexeme_flush();
-        len = input_fetch_entire_line(pfx, &tmp);
-        if (len < 0) return 0;  /* eof */
-
-        /* remove carriage return in newline */
-        if (len >= 2 && tmp[len - 2] == '\r')
+        if (*ptr == '\\')
         {
-            tmp[len - 2] = '\n';
-            tmp[len - 1] = '\0';
-            len--;
-        }
-
-        /* FIXME: should have a pair of buffers, and switch between the two, instead of
-         * reallocating a new one for each line
-         */
-        if (last_line && (len == 0 || (len == 1 && tmp[0] == '\n')))
-        {
-            HeapFree(GetProcessHeap(), 0, tmp);
+            switch (*++ptr)
+            {
+            case 't':  *dst++ = '\t'; break;
+            case 'r':  *dst++ = '\r'; break;
+            case 'n':  *dst++ = '\n'; break;
+            case '\\': *dst++ = '\\'; break;
+            case '"':  *dst++ = '"';  break;
+            default: *dst++ = '\\'; *dst++ = *ptr; /* not handled, don't change */
+            }
         }
         else
-        {
-            HeapFree(GetProcessHeap(), 0, last_line);
-            last_line = tmp;
-        }
+            *dst++ = *ptr;
     }
-
-    len = min(strlen(last_line + last_line_idx), size - 1);
-    memcpy(buf, last_line + last_line_idx, len);
-    buf[len] = '\0';
-    if ((last_line_idx += len) >= strlen(last_line))
-        last_line_idx = 0;
-    return len;
+    *dst = '\0';
+    return ret;
 }
 
 #define YY_INPUT(buf,result,max_size) \
-        (result = read_input("Wine-dbg>", buf, max_size))
+        (result = input_lex_read_buffer(buf, max_size))
 
 static int syntax_error;
 %}
@@ -117,7 +100,7 @@ HEXDIGIT   [0-9a-fA-F]
 FORMAT     [ubcdgiswxa]
 IDENTIFIER [_a-zA-Z~?][_a-zA-Z0-9~?@]*
 PATHNAME   [\\/_a-zA-Z0-9\.~@][\\/\-_a-zA-Z0-9\.~@]*
-STRING     \"[^\n"]+\"
+STRING     \"(\\[^\n]|[^\\"\n])*\"
 
 %s FORMAT_EXPECTED
 %s INFO_CMD
@@ -132,12 +115,14 @@ STRING     \"[^\n"]+\"
 
 %x PATH_EXPECTED
 %x ASTRING_EXPECTED
+%x AWORD_EXPECTED
 %x NOPROCESS
 %%
                                         /* set to special state when no process is loaded. */
                                         if (!dbg_num_processes() && YYSTATE == INITIAL) {BEGIN(NOPROCESS);}
 
 <<EOF>>                                 { return tEOF; }
+<*>"#"[^\n]*                            /* Skip comments */
 <*>\n		                        { BEGIN(INITIAL); syntax_error = 0; return tEOL; }
                                         /* Indicates end of command. Reset state. */
 
@@ -169,10 +154,11 @@ STRING     \"[^\n"]+\"
 
 <FORMAT_EXPECTED>"/"{FORMAT}          	{ dbg_lval.integer = (1 << 8) | yytext[1]; return tFORMAT; }
 
-{STRING} 				{ dbg_lval.string = lexeme_alloc(yytext + 1); dbg_lval.string[strlen(dbg_lval.string) - 1] = '\0'; return tSTRING; }
+<*>{STRING}	                        { dbg_lval.string = unescape_string(yytext); return tSTRING;}
 <ASTRING_EXPECTED>[^\n]+                { char* p = yytext; while (*p == ' ' || *p == '\t') p++;
                                           dbg_lval.string = lexeme_alloc(p); return tSTRING; }
-
+<AWORD_EXPECTED>[^ \t\n]+               { char* p = yytext; while (*p == ' ' || *p == '\t') p++;
+                                          dbg_lval.string = lexeme_alloc(p); return tSTRING; }
 <INITIAL,NOPROCESS>info|inf|in		{ BEGIN(INFO_CMD); return tINFO; }
 <INITIAL>up				{ BEGIN(NOCMD); return tUP; }
 <INITIAL>down|dow|do			{ BEGIN(NOCMD); return tDOWN; }
@@ -216,7 +202,7 @@ STRING     \"[^\n"]+\"
 <INITIAL>watch|watc|wat			{ BEGIN(NOCMD); return tWATCH; }
 <INITIAL>rwatch|rwatc|rwat		{ BEGIN(NOCMD); return tRWATCH; }
 <INITIAL>whatis|whati|what		{ BEGIN(NOCMD); return tWHATIS; }
-<INITIAL,NOPROCESS>run|ru|r     	{ BEGIN(ASTRING_EXPECTED); return tRUN;}
+<INITIAL,NOPROCESS>run|ru|r     	{ BEGIN(AWORD_EXPECTED); return tRUN;}
 <INITIAL>detach|detac|deta|det   	{ BEGIN(NOCMD); return tDETACH; }
 <INITIAL>kill|kil|ki|k                  { BEGIN(NOCMD); return tKILL; }
 <INITIAL,NOPROCESS>maintenance|maint    { BEGIN(MAINT_CMD); return tMAINTENANCE; }

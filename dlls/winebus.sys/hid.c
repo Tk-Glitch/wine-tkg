@@ -475,6 +475,12 @@ struct pid_set_ramp_force
     INT16 ramp_start;
     INT16 ramp_end;
 };
+
+struct pid_effect_state
+{
+    BYTE flags;
+    BYTE index;
+};
 #include "poppack.h"
 
 static BOOL hid_descriptor_add_set_periodic(struct unix_device *iface)
@@ -883,6 +889,33 @@ BOOL hid_device_add_physical(struct unix_device *iface, USAGE *usages, USHORT co
             UNIT(1, 0), /* None */
         END_COLLECTION,
     };
+
+    const BYTE effect_state_report = ++desc->next_report_id[HidP_Input];
+    const BYTE effect_state_template[] =
+    {
+        /* Report effect state */
+        USAGE(1, PID_USAGE_STATE_REPORT),
+        COLLECTION(1, Logical),
+            REPORT_ID(1, effect_state_report),
+
+            USAGE(1, PID_USAGE_DEVICE_PAUSED),
+            USAGE(1, PID_USAGE_ACTUATORS_ENABLED),
+            USAGE(1, PID_USAGE_EFFECT_PLAYING),
+            LOGICAL_MINIMUM(1, 0),
+            LOGICAL_MAXIMUM(1, 1),
+            REPORT_SIZE(1, 1),
+            REPORT_COUNT(1, 8),
+            INPUT(1, Data|Var|Abs),
+
+            USAGE(1, PID_USAGE_EFFECT_BLOCK_INDEX),
+            LOGICAL_MINIMUM(1, 0),
+            LOGICAL_MAXIMUM(1, 0x7f),
+            REPORT_SIZE(1, 8),
+            REPORT_COUNT(1, 1),
+            INPUT(1, Data|Var|Abs),
+        END_COLLECTION,
+    };
+    struct hid_effect_state *effect_state = &iface->hid_physical.effect_state;
     BOOL periodic = FALSE;
     BOOL envelope = FALSE;
     BOOL condition = FALSE;
@@ -953,6 +986,9 @@ BOOL hid_device_add_physical(struct unix_device *iface, USAGE *usages, USHORT co
     if (ramp_force && !hid_descriptor_add_set_ramp_force(iface))
         return FALSE;
 
+    if (!hid_report_descriptor_append(desc, effect_state_template, sizeof(effect_state_template)))
+        return FALSE;
+
     /* HID nary collection indexes start at 1 */
     memcpy(iface->hid_physical.effect_types + 1, usages, count * sizeof(*usages));
 
@@ -960,6 +996,12 @@ BOOL hid_device_add_physical(struct unix_device *iface, USAGE *usages, USHORT co
     iface->hid_physical.device_gain_report = device_gain_report;
     iface->hid_physical.effect_control_report = effect_control_report;
     iface->hid_physical.effect_update_report = effect_update_report;
+
+    effect_state->id = effect_state_report;
+    effect_state->report_len = sizeof(struct pid_effect_state) + 1;
+    if (!(effect_state->report_buf = calloc(1, effect_state->report_len))) return FALSE;
+    effect_state->report_buf[0] = effect_state->id;
+
     return TRUE;
 }
 
@@ -1033,7 +1075,11 @@ static void hid_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
         else if (!(control = pid_device_control_usages[report->control_index]))
             io->Status = STATUS_INVALID_PARAMETER;
         else
+        {
             io->Status = iface->hid_vtbl->physical_device_control(iface, control);
+            if (control == PID_USAGE_DC_DEVICE_RESET && io->Status == STATUS_SUCCESS)
+                memset(physical->effect_params, 0, sizeof(physical->effect_params));
+        }
     }
     else if (packet->reportId == physical->device_gain_report)
     {
@@ -1088,8 +1134,6 @@ static void hid_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
             params->direction[1] = report->direction[1];
 
             io->Status = iface->hid_vtbl->physical_effect_update(iface, report->index, params);
-
-            params->condition_count = 0;
         }
     }
     else if (packet->reportId == physical->set_periodic_report)
@@ -1106,6 +1150,8 @@ static void hid_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
             params->periodic.offset = report->offset;
             params->periodic.phase = report->phase;
             params->periodic.period = report->period;
+
+            io->Status = iface->hid_vtbl->physical_effect_update(iface, report->index, params);
         }
     }
     else if (packet->reportId == physical->set_envelope_report)
@@ -1122,6 +1168,8 @@ static void hid_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
             params->envelope.fade_level = report->fade_level;
             params->envelope.attack_time = report->attack_time;
             params->envelope.fade_time = report->fade_time;
+
+            io->Status = iface->hid_vtbl->physical_effect_update(iface, report->index, params);
         }
     }
     else if (packet->reportId == physical->set_condition_report)
@@ -1134,10 +1182,11 @@ static void hid_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
         io->Information = sizeof(*report) + 1;
         if (packet->reportBufferLen < io->Information)
             io->Status = STATUS_BUFFER_TOO_SMALL;
-        else if ((index = params->condition_count++) >= ARRAY_SIZE(params->condition))
+        else if ((index = report->condition_index) >= ARRAY_SIZE(params->condition))
             io->Status = STATUS_INVALID_PARAMETER;
         else
         {
+            if (params->condition_count <= index) params->condition_count = index + 1;
             condition = params->condition + index;
             condition->center_point_offset = report->center_point_offset;
             condition->positive_coefficient = report->positive_coefficient;
@@ -1145,6 +1194,8 @@ static void hid_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
             condition->positive_saturation = report->positive_saturation;
             condition->negative_saturation = report->negative_saturation;
             condition->dead_band = report->dead_band;
+
+            io->Status = iface->hid_vtbl->physical_effect_update(iface, report->index, params);
         }
     }
     else if (packet->reportId == physical->set_constant_force_report)
@@ -1156,7 +1207,11 @@ static void hid_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
         if (packet->reportBufferLen < io->Information)
             io->Status = STATUS_BUFFER_TOO_SMALL;
         else
+        {
             params->constant_force.magnitude = report->magnitude;
+
+            io->Status = iface->hid_vtbl->physical_effect_update(iface, report->index, params);
+        }
     }
     else if (packet->reportId == physical->set_ramp_force_report)
     {
@@ -1170,6 +1225,8 @@ static void hid_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
         {
             params->ramp_force.ramp_start = report->ramp_start;
             params->ramp_force.ramp_end = report->ramp_end;
+
+            io->Status = iface->hid_vtbl->physical_effect_update(iface, report->index, params);
         }
     }
     else
@@ -1347,4 +1404,12 @@ BOOL hid_device_sync_report(struct unix_device *iface)
 void hid_device_drop_report(struct unix_device *iface)
 {
     iface->hid_device_state.dropped = TRUE;
+}
+
+void hid_device_set_effect_state(struct unix_device *iface, BYTE index, BYTE flags)
+{
+    struct hid_effect_state *state = &iface->hid_physical.effect_state;
+    struct pid_effect_state *report = (struct pid_effect_state *)(state->report_buf + 1);
+    report->index = index;
+    report->flags = flags;
 }

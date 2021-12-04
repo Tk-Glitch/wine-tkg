@@ -2426,7 +2426,7 @@ todo_wine
 
 static void test_thread_description(void)
 {
-    THREAD_DESCRIPTION_INFORMATION *thread_desc;
+    THREAD_NAME_INFORMATION *thread_desc;
     static const WCHAR *desc = L"thread_desc";
     ULONG len, len2, desc_len;
     NTSTATUS status;
@@ -2441,7 +2441,7 @@ static void test_thread_description(void)
     }
 
     desc_len = lstrlenW(desc) * sizeof(*desc);
-    thread_desc = (THREAD_DESCRIPTION_INFORMATION *)buff;
+    thread_desc = (THREAD_NAME_INFORMATION *)buff;
 
     /* Initial description. */
     ptr = NULL;
@@ -2451,20 +2451,20 @@ static void test_thread_description(void)
     LocalFree(ptr);
 
     len = 0;
-    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, NULL, 0, &len);
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadNameInformation, NULL, 0, &len);
     ok(status == STATUS_BUFFER_TOO_SMALL, "Unexpected status %#x.\n", status);
     ok(len == sizeof(*thread_desc), "Unexpected structure length %u.\n", len);
 
     len2 = 0;
-    thread_desc->Description.Length = 1;
-    thread_desc->Description.MaximumLength = 0;
-    thread_desc->Description.Buffer = (WCHAR *)thread_desc;
-    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, thread_desc, len, &len2);
+    thread_desc->ThreadName.Length = 1;
+    thread_desc->ThreadName.MaximumLength = 0;
+    thread_desc->ThreadName.Buffer = (WCHAR *)thread_desc;
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadNameInformation, thread_desc, len, &len2);
     ok(!status, "Failed to get thread info, status %#x.\n", status);
     ok(len2 == sizeof(*thread_desc), "Unexpected structure length %u.\n", len);
-    ok(!thread_desc->Description.Length, "Unexpected description length %#x.\n", thread_desc->Description.Length);
-    ok(thread_desc->Description.Buffer == (WCHAR *)(thread_desc + 1),
-            "Unexpected description string pointer %p, %p.\n", thread_desc->Description.Buffer, thread_desc);
+    ok(!thread_desc->ThreadName.Length, "Unexpected description length %#x.\n", thread_desc->ThreadName.Length);
+    ok(thread_desc->ThreadName.Buffer == (WCHAR *)(thread_desc + 1),
+            "Unexpected description string pointer %p, %p.\n", thread_desc->ThreadName.Buffer, thread_desc);
 
     hr = pSetThreadDescription(GetCurrentThread(), NULL);
     ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to set thread description, hr %#x.\n", hr);
@@ -2479,36 +2479,36 @@ static void test_thread_description(void)
     LocalFree(ptr);
 
     len = 0;
-    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, NULL, 0, &len);
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadNameInformation, NULL, 0, &len);
     ok(status == STATUS_BUFFER_TOO_SMALL, "Failed to get thread info, status %#x.\n", status);
     ok(len == sizeof(*thread_desc) + desc_len, "Unexpected structure length %u.\n", len);
 
     len = 0;
-    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, buff, sizeof(buff), &len);
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadNameInformation, buff, sizeof(buff), &len);
     ok(!status, "Failed to get thread info.\n");
     ok(len == sizeof(*thread_desc) + desc_len, "Unexpected structure length %u.\n", len);
 
-    ok(thread_desc->Description.Length == desc_len && thread_desc->Description.MaximumLength == desc_len,
-            "Unexpected description length %u.\n", thread_desc->Description.Length);
-    ok(thread_desc->Description.Buffer == (WCHAR *)(thread_desc + 1),
-            "Unexpected description string pointer %p, %p.\n", thread_desc->Description.Buffer, thread_desc);
-    ok(!memcmp(thread_desc->Description.Buffer, desc, desc_len), "Unexpected description string.\n");
+    ok(thread_desc->ThreadName.Length == desc_len && thread_desc->ThreadName.MaximumLength == desc_len,
+            "Unexpected description length %u.\n", thread_desc->ThreadName.Length);
+    ok(thread_desc->ThreadName.Buffer == (WCHAR *)(thread_desc + 1),
+            "Unexpected description string pointer %p, %p.\n", thread_desc->ThreadName.Buffer, thread_desc);
+    ok(!memcmp(thread_desc->ThreadName.Buffer, desc, desc_len), "Unexpected description string.\n");
 
     /* Partial results. */
     len = 0;
-    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, NULL, 0, &len);
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadNameInformation, NULL, 0, &len);
     ok(status == STATUS_BUFFER_TOO_SMALL, "Unexpected status %#x.\n", status);
     ok(len == sizeof(*thread_desc) + desc_len, "Unexpected structure length %u.\n", len);
 
-    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, buff, len - sizeof(WCHAR), &len);
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadNameInformation, buff, len - sizeof(WCHAR), &len);
     ok(status == STATUS_BUFFER_TOO_SMALL, "Unexpected status %#x.\n", status);
     ok(len == sizeof(*thread_desc) + desc_len, "Unexpected structure length %u.\n", len);
 
     /* Change description. */
-    thread_desc->Description.Length = thread_desc->Description.MaximumLength = 8;
+    thread_desc->ThreadName.Length = thread_desc->ThreadName.MaximumLength = 8;
     lstrcpyW((WCHAR *)(thread_desc + 1), L"desc");
 
-    status = pNtSetInformationThread(GetCurrentThread(), ThreadDescription, thread_desc, sizeof(*thread_desc));
+    status = pNtSetInformationThread(GetCurrentThread(), ThreadNameInformation, thread_desc, sizeof(*thread_desc));
     ok(status == STATUS_SUCCESS, "Failed to set thread description, status %#x.\n", status);
 
     ptr = NULL;
@@ -2517,14 +2517,14 @@ static void test_thread_description(void)
     ok(!lstrcmpW(ptr, L"desc"), "Unexpected description %s.\n", wine_dbgstr_w(ptr));
     LocalFree(ptr);
 
-    status = pNtSetInformationThread(GetCurrentThread(), ThreadDescription, thread_desc, sizeof(*thread_desc) - 1);
+    status = pNtSetInformationThread(GetCurrentThread(), ThreadNameInformation, thread_desc, sizeof(*thread_desc) - 1);
     ok(status == STATUS_INFO_LENGTH_MISMATCH, "Unexpected status %#x.\n", status);
 
-    status = NtSetInformationThread(GetCurrentThread(), ThreadDescription, NULL, sizeof(*thread_desc));
+    status = NtSetInformationThread(GetCurrentThread(), ThreadNameInformation, NULL, sizeof(*thread_desc));
     ok(status == STATUS_ACCESS_VIOLATION, "Unexpected status %#x.\n", status);
 
-    thread_desc->Description.Buffer = NULL;
-    status = pNtSetInformationThread(GetCurrentThread(), ThreadDescription, thread_desc, sizeof(*thread_desc));
+    thread_desc->ThreadName.Buffer = NULL;
+    status = pNtSetInformationThread(GetCurrentThread(), ThreadNameInformation, thread_desc, sizeof(*thread_desc));
     ok(status == STATUS_ACCESS_VIOLATION, "Unexpected status %#x.\n", status);
 
     hr = pSetThreadDescription(GetCurrentThread(), NULL);
@@ -2541,7 +2541,7 @@ static void test_thread_description(void)
     ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to set thread description, hr %#x.\n", hr);
 
     memset(thread_desc, 0, sizeof(*thread_desc));
-    status = pNtSetInformationThread(GetCurrentThread(), ThreadDescription, thread_desc, sizeof(*thread_desc));
+    status = pNtSetInformationThread(GetCurrentThread(), ThreadNameInformation, thread_desc, sizeof(*thread_desc));
     ok(!status, "Failed to set thread description, status %#x.\n", status);
 
     ptr = NULL;

@@ -1,4 +1,6 @@
 /*
+ * Copyright (C) 2021 Alex Henrie
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -14,15 +16,34 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define WINE_FILEDESCRIPTION_STR "Wine QT Decoder"
-#define WINE_FILENAME_STR "wineqtdecoder.dll"
-#define WINE_FILEVERSION 0,0,1,0
-#define WINE_FILEVERSION_STR "0.0.1.0"
-#define WINE_PRODUCTVERSION 0,0,1,0
-#define WINE_PRODUCTVERSION_STR "1.0.1.0"
-#define WINE_EXTRAVALUES VALUE "OLESelfRegister",""
+#ifndef _FEATURESTAGINGAPI_H_
+#define _FEATURESTAGINGAPI_H_
 
-#include "wine/wine_common_ver.rc"
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-/* @makedep: wineqtdecoder.rgs */
-2 WINE_REGISTRY wineqtdecoder.rgs
+DECLARE_HANDLE(FEATURE_STATE_CHANGE_SUBSCRIPTION);
+
+typedef void WINAPI FEATURE_STATE_CHANGE_CALLBACK(void*);
+
+typedef enum FEATURE_CHANGE_TIME
+{
+    FEATURE_CHANGE_TIME_READ,
+    FEATURE_CHANGE_TIME_MODULE_RELOAD,
+    FEATURE_CHANGE_TIME_SESSION,
+    FEATURE_CHANGE_TIME_REBOOT
+} FEATURE_CHANGE_TIME;
+
+typedef enum FEATURE_ENABLED_STATE
+{
+    FEATURE_ENABLED_STATE_DEFAULT,
+    FEATURE_ENABLED_STATE_DISABLED,
+    FEATURE_ENABLED_STATE_ENABLED
+} FEATURE_ENABLED_STATE;
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

@@ -1081,9 +1081,10 @@ typedef struct _TEB64
 } TEB64;
 
 /* reserved TEB64 TLS slots for Wow64 */
-#define WOW64_TLS_CPURESERVED  1
-#define WOW64_TLS_TEMPLIST     3
-#define WOW64_TLS_FILESYSREDIR 8
+#define WOW64_TLS_CPURESERVED      1
+#define WOW64_TLS_TEMPLIST         3
+#define WOW64_TLS_USERCALLBACKDATA 5
+#define WOW64_TLS_FILESYSREDIR     8
 
 
 /***********************************************************************
@@ -1869,8 +1870,23 @@ typedef enum _THREADINFOCLASS {
     ThreadUmsInformation,
     ThreadCounterProfiling,
     ThreadIdealProcessorEx,
-    ThreadSuspendCount = 35,
-    ThreadDescription = 38,
+    ThreadCpuAccountingInformation,
+    ThreadSuspendCount,
+    ThreadHeterogeneousCpuPolicy,
+    ThreadContainerId,
+    ThreadNameInformation,
+    ThreadSelectedCpuSets,
+    ThreadSystemThreadInformation,
+    ThreadActualGroupAffinity,
+    ThreadDynamicCodePolicyInfo,
+    ThreadExplicitCaseSensitivity,
+    ThreadWorkOnBehalfTicket,
+    ThreadSubsystemInformation,
+    ThreadDbgkWerReportActive,
+    ThreadAttachContainer,
+    ThreadManageWritesToExecutableMemory,
+    ThreadPowerThrottlingState,
+    ThreadWorkloadClass,
     MaxThreadInfoClass
 } THREADINFOCLASS;
 
@@ -1890,10 +1906,10 @@ typedef struct _THREAD_DESCRIPTOR_INFORMATION
     LDT_ENTRY   Entry;
 } THREAD_DESCRIPTOR_INFORMATION, *PTHREAD_DESCRIPTOR_INFORMATION;
 
-typedef struct _THREAD_DESCRIPTION_INFORMATION
+typedef struct _THREAD_NAME_INFORMATION
 {
-    UNICODE_STRING Description;
-} THREAD_DESCRIPTION_INFORMATION, *PTHREAD_DESCRIPTION_INFORMATION;
+    UNICODE_STRING ThreadName;
+} THREAD_NAME_INFORMATION, *PTHREAD_NAME_INFORMATION;
 
 typedef struct _KERNEL_USER_TIMES {
     LARGE_INTEGER  CreateTime;
@@ -3874,6 +3890,7 @@ NTSYSAPI NTSTATUS  WINAPI NtCancelTimer(HANDLE, BOOLEAN*);
 NTSYSAPI NTSTATUS  WINAPI NtClearEvent(HANDLE);
 NTSYSAPI NTSTATUS  WINAPI NtClose(HANDLE);
 NTSYSAPI NTSTATUS  WINAPI NtCloseObjectAuditAlarm(PUNICODE_STRING,HANDLE,BOOLEAN);
+NTSYSAPI NTSTATUS  WINAPI NtCompareObjects(HANDLE,HANDLE);
 NTSYSAPI NTSTATUS  WINAPI NtCompleteConnectPort(HANDLE);
 NTSYSAPI NTSTATUS  WINAPI NtConnectPort(PHANDLE,PUNICODE_STRING,PSECURITY_QUALITY_OF_SERVICE,PLPC_SECTION_WRITE,PLPC_SECTION_READ,PULONG,PVOID,PULONG);
 NTSYSAPI NTSTATUS  WINAPI NtContinue(PCONTEXT,BOOLEAN);

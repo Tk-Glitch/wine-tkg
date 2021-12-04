@@ -594,6 +594,8 @@ enum x11drv_window_messages
     WM_X11DRV_SET_CURSOR,
     WM_X11DRV_CLIP_CURSOR_NOTIFY,
     WM_X11DRV_CLIP_CURSOR_REQUEST,
+    WM_X11DRV_DELETE_TAB,
+    WM_X11DRV_ADD_TAB,
     WM_X11DRV_RELEASE_CURSOR
 };
 
@@ -629,6 +631,8 @@ struct x11drv_win_data
     BOOL        shaped : 1;     /* is window using a custom region shape? */
     BOOL        layered : 1;    /* is window layered and with valid attributes? */
     BOOL        use_alpha : 1;  /* does window use an alpha channel? */
+    BOOL        skip_taskbar : 1; /* does window should be deleted from taskbar */
+    BOOL        add_taskbar : 1; /* does window should be added to taskbar regardless of style */
     BOOL        fs_hack : 1;
     BOOL        pending_fullscreen : 1;
     ULONGLONG   take_focus_back;

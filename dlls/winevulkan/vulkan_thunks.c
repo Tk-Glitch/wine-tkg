@@ -4429,6 +4429,22 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
             break;
         }
 
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT:
+        {
+            const VkPhysicalDeviceDepthClipControlFeaturesEXT *in = (const VkPhysicalDeviceDepthClipControlFeaturesEXT *)in_header;
+            VkPhysicalDeviceDepthClipControlFeaturesEXT *out;
+
+            if (!(out = malloc(sizeof(*out)))) goto out_of_memory;
+
+            out->sType = in->sType;
+            out->pNext = NULL;
+            out->depthClipControl = in->depthClipControl;
+
+            out_header->pNext = (VkBaseOutStructure *)out;
+            out_header = out_header->pNext;
+            break;
+        }
+
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT:
         {
             const VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT *in = (const VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT *)in_header;
@@ -4601,6 +4617,24 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
             out->sType = in->sType;
             out->pNext = NULL;
             out->minLod = in->minLod;
+
+            out_header->pNext = (VkBaseOutStructure *)out;
+            out_header = out_header->pNext;
+            break;
+        }
+
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_ARM:
+        {
+            const VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesARM *in = (const VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesARM *)in_header;
+            VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesARM *out;
+
+            if (!(out = malloc(sizeof(*out)))) goto out_of_memory;
+
+            out->sType = in->sType;
+            out->pNext = NULL;
+            out->rasterizationOrderColorAttachmentAccess = in->rasterizationOrderColorAttachmentAccess;
+            out->rasterizationOrderDepthAttachmentAccess = in->rasterizationOrderDepthAttachmentAccess;
+            out->rasterizationOrderStencilAttachmentAccess = in->rasterizationOrderStencilAttachmentAccess;
 
             out_header->pNext = (VkBaseOutStructure *)out;
             out_header = out_header->pNext;
@@ -8279,6 +8313,7 @@ static const char * const vk_device_extensions[] =
     "VK_AMD_shader_info",
     "VK_AMD_shader_trinary_minmax",
     "VK_AMD_texture_gather_bias_lod",
+    "VK_ARM_rasterization_order_attachment_access",
     "VK_EXT_4444_formats",
     "VK_EXT_astc_decode_mode",
     "VK_EXT_blend_operation_advanced",
@@ -8290,6 +8325,7 @@ static const char * const vk_device_extensions[] =
     "VK_EXT_conservative_rasterization",
     "VK_EXT_custom_border_color",
     "VK_EXT_debug_marker",
+    "VK_EXT_depth_clip_control",
     "VK_EXT_depth_clip_enable",
     "VK_EXT_depth_range_unrestricted",
     "VK_EXT_descriptor_indexing",

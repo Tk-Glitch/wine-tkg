@@ -399,10 +399,10 @@ extern BOOL PATH_RestorePath( DC *dst, DC *src ) DECLSPEC_HIDDEN;
 extern POINT *GDI_Bezier( const POINT *Points, INT count, INT *nPtsOut ) DECLSPEC_HIDDEN;
 
 /* palette.c */
-extern HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg) DECLSPEC_HIDDEN;
 extern HPALETTE PALETTE_Init(void) DECLSPEC_HIDDEN;
 extern UINT get_palette_entries( HPALETTE hpalette, UINT start, UINT count,
                                  PALETTEENTRY *entries ) DECLSPEC_HIDDEN;
+extern UINT realize_palette( HDC hdc ) DECLSPEC_HIDDEN;
 
 /* pen.c */
 extern HPEN create_pen( INT style, INT width, COLORREF color ) DECLSPEC_HIDDEN;
@@ -594,6 +594,30 @@ static inline void reset_bounds( RECT *bounds )
     bounds->right = bounds->bottom = INT_MIN;
 }
 
+static inline void union_rect( RECT *dest, const RECT *src1, const RECT *src2 )
+{
+    if (is_rect_empty( src1 ))
+    {
+        if (is_rect_empty( src2 ))
+        {
+            reset_bounds( dest );
+            return;
+        }
+        else *dest = *src2;
+    }
+    else
+    {
+        if (is_rect_empty( src2 )) *dest = *src1;
+        else
+        {
+            dest->left   = min( src1->left, src2->left );
+            dest->right  = max( src1->right, src2->right );
+            dest->top    = min( src1->top, src2->top );
+            dest->bottom = max( src1->bottom, src2->bottom );
+        }
+    }
+}
+
 static inline void add_bounds_rect( RECT *bounds, const RECT *rect )
 {
     if (is_rect_empty( rect )) return;
@@ -640,6 +664,5 @@ extern void CDECL free_heap_bits( struct gdi_image_bits *bits ) DECLSPEC_HIDDEN;
 void set_gdi_client_ptr( HGDIOBJ handle, void *ptr ) DECLSPEC_HIDDEN;
 
 extern SYSTEM_BASIC_INFORMATION system_info DECLSPEC_HIDDEN;
-extern const struct user_callbacks *user_callbacks DECLSPEC_HIDDEN;
 
 #endif /* __WINE_NTGDI_PRIVATE_H */

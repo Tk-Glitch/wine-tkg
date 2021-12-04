@@ -6403,7 +6403,7 @@ done:
         p = tmp;
         reparse_tag = IO_REPARSE_TAG_LX_SYMLINK;
         if (flags && *p != '/') *flags = SYMLINK_FLAG_RELATIVE;
-        if (!stat( tmp, &st ))
+        if (!fstatat( fd, unix_src, &st, 0 ))
             dir_flag = S_ISDIR(st.st_mode);
         else
             dir_flag = FALSE; /* treat dangling symlinks as files */
@@ -6424,7 +6424,7 @@ cleanup:
  * Retrieve the unix name corresponding to a file handle and use that to find the destination of the
  * symlink corresponding to that file handle.
  */
-NTSTATUS get_reparse_point(HANDLE handle, REPARSE_DATA_BUFFER *buffer, ULONG out_size)
+NTSTATUS get_reparse_point(HANDLE handle, REPARSE_DATA_BUFFER *buffer, ULONG *size)
 {
     VOID *subst_name = NULL, *print_name = NULL, *unix_name = NULL;
     INT prefix_len, path_len, total_len;
@@ -6433,6 +6433,7 @@ NTSTATUS get_reparse_point(HANDLE handle, REPARSE_DATA_BUFFER *buffer, ULONG out
     int unix_dest_len = PATH_MAX;
     BOOL dest_allocated = FALSE;
     int dest_fd, needs_close;
+    ULONG out_size = *size;
     DWORD max_length;
     NTSTATUS status;
     ULONG flags = 0;
@@ -6535,6 +6536,7 @@ NTSTATUS get_reparse_point(HANDLE handle, REPARSE_DATA_BUFFER *buffer, ULONG out
     if (subst_name) memcpy( subst_name, nt_dest, nt_dest_len );
     if (print_name) memcpy( print_name, &nt_dest[prefix_len], nt_dest_len - prefix_len*sizeof(WCHAR) );
     if (unix_name) memcpy( unix_name, unix_dest, unix_dest_len );
+    *size = total_len;
     buffer->ReparseDataLength = total_len - FIELD_OFFSET(typeof(*buffer), GenericReparseBuffer);
     status = STATUS_SUCCESS;
 
@@ -6740,7 +6742,9 @@ NTSTATUS WINAPI NtFsControlFile( HANDLE handle, HANDLE event, PIO_APC_ROUTINE ap
     case FSCTL_GET_REPARSE_POINT:
     {
         REPARSE_DATA_BUFFER *buffer = (REPARSE_DATA_BUFFER *)out_buffer;
-        status = get_reparse_point( handle, buffer, out_size );
+        ULONG size = out_size;
+        status = get_reparse_point( handle, buffer, &size );
+        io->Information = size;
         break;
     }
     case FSCTL_SET_REPARSE_POINT:

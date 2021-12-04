@@ -4,10 +4,7 @@ IMPORTS   = uuid ole32 user32 advapi32
 DELAYIMPORTS = winmm
 EXTRALIBS = $(COREAUDIO_LIBS)
 
-EXTRADLLFLAGS = -mcygwin
-
 C_SRCS = \
-	audiounit.c \
 	coreaudio.c \
 	coremidi.c \
 	midi.c \

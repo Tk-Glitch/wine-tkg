@@ -319,7 +319,7 @@ void break_add_break_from_lineno(const char *filename, int lineno, BOOL swbp)
         il.SizeOfStruct = sizeof(il);
         if (!SymGetLineFromAddr64(dbg_curr_process->handle, linear, &disp, &il))
         {
-            dbg_printf("Unable to add breakpoint (unknown address %lx)\n", linear);
+            dbg_printf("Unable to add breakpoint (unknown address %Ix)\n", linear);
             return;
         }
         filename = il.FileName;
@@ -402,8 +402,7 @@ static void break_add_watch(const struct dbg_lvalue* lvalue, BOOL is_write)
             {
             case 4: case 2: case 1: break;
             default:
-                dbg_printf("Unsupported length (%s) for watch-points, defaulting to 4\n",
-                           wine_dbgstr_longlong(l));
+                dbg_printf("Unsupported length (%I64x) for watch-points, defaulting to 4\n", l);
                 break;
             }
         }
@@ -752,8 +751,8 @@ BOOL break_should_continue(ADDRESS64* addr, DWORD code)
         case be_xpoint_watch_write:
             dbg_printf("Stopped on watchpoint %d at ", dbg_curr_thread->stopped_xpoint);
             print_address(addr, TRUE);
-            dbg_printf(" new value %s\n",
-                       wine_dbgstr_longlong(dbg_curr_process->bp[dbg_curr_thread->stopped_xpoint].w.oldval));
+            dbg_printf(" new value %I64x\n",
+                       dbg_curr_process->bp[dbg_curr_thread->stopped_xpoint].w.oldval);
         }
         return FALSE;
     }

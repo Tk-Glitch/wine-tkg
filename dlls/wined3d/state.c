@@ -26,12 +26,8 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdio.h>
-#ifdef HAVE_FLOAT_H
-# include <float.h>
-#endif
 
 #include "wined3d_private.h"
 
@@ -4594,7 +4590,7 @@ static void state_cb(struct wined3d_context *context, const struct wined3d_state
         buffer = buffer_state->buffer;
         bo_gl = wined3d_bo_gl(buffer->buffer_object);
         GL_EXTCALL(glBindBufferRange(GL_UNIFORM_BUFFER, base + i,
-                bo_gl->id, bo_gl->buffer_offset + buffer_state->offset, buffer_state->size));
+                bo_gl->id, bo_gl->b.buffer_offset + buffer_state->offset, buffer_state->size));
         buffer->bo_user.valid = true;
     }
     checkGLcall("bind constant buffers");
@@ -4671,7 +4667,7 @@ static void state_so(struct wined3d_context *context, const struct wined3d_state
         }
         size = buffer->resource.size - offset;
         GL_EXTCALL(glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, i,
-                bo_gl->id, bo_gl->buffer_offset + offset, size));
+                bo_gl->id, bo_gl->b.buffer_offset + offset, size));
         buffer->bo_user.valid = true;
     }
     checkGLcall("bind transform feedback buffers");

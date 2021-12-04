@@ -18,7 +18,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include "dxgi_private.h"
 
@@ -253,7 +252,12 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_CreateSoftwareAdapter(IWineDXGIFac
 
 static BOOL STDMETHODCALLTYPE dxgi_factory_IsCurrent(IWineDXGIFactory *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    static BOOL once = FALSE;
+
+    if (!once++)
+        FIXME("iface %p stub!\n", iface);
+    else
+        WARN("iface %p stub!\n", iface);
 
     return TRUE;
 }

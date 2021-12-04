@@ -19,7 +19,6 @@
 #define NONAMELESSUNION
 #define COBJMACROS
 #include "config.h"
-#include "wine/port.h"
 
 #include <stdarg.h>
 #include <errno.h>
@@ -33,6 +32,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <math.h>
+#include <dlfcn.h>
 
 #include <SLES/OpenSLES.h>
 #include <SLES/OpenSLES_Android.h>
@@ -44,7 +44,6 @@
 #include "winnls.h"
 #include "winreg.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "wine/list.h"
 
 #include "ole2.h"

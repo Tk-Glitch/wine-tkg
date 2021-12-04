@@ -43,9 +43,30 @@
 #include "x11drv.h"
 #include "wine/list.h"
 #include "wine/debug.h"
-#include "systray.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(systray);
+
+/* an individual systray icon */
+struct tray_icon
+{
+    struct list    entry;
+    HICON          image;    /* the image to render */
+    HWND           owner;    /* the HWND passed in to the Shell_NotifyIcon call */
+    HWND           window;   /* the adaptor window */
+    BOOL           layered;  /* whether we are using a layered window */
+    HWND           tooltip;  /* Icon tooltip */
+    UINT           state;    /* state flags */
+    UINT           id;       /* the unique id given by the app */
+    UINT           callback_message;
+    int            display;  /* display index, or -1 if hidden */
+    WCHAR          tiptext[128];    /* tooltip text */
+    WCHAR          info_text[256];  /* info balloon text */
+    WCHAR          info_title[64];  /* info balloon title */
+    UINT           info_flags;      /* flags for info balloon */
+    UINT           info_timeout;    /* timeout for info balloon */
+    HICON          info_icon;       /* info balloon icon */
+    UINT           version;         /* notify icon api version */
+};
 
 static struct list icon_list = LIST_INIT( icon_list );
 
@@ -67,6 +88,10 @@ Atom systray_atom = 0;
 
 #define BALLOON_CREATE_TIMER 1
 #define BALLOON_SHOW_TIMER   2
+
+#define BALLOON_CREATE_TIMEOUT   2000
+#define BALLOON_SHOW_MIN_TIMEOUT 10000
+#define BALLOON_SHOW_MAX_TIMEOUT 30000
 
 static struct tray_icon *balloon_icon;
 static HWND balloon_window;
@@ -826,35 +851,14 @@ int CDECL wine_notify_icon( DWORD msg, NOTIFYICONDATAW *data )
     switch (msg)
     {
     case NIM_ADD:
-        if (can_use_dbus_sni_systray())
-        {
-            ret = add_sni_icon( data );
-        }
-        else
-        {
-            if (!init_systray()) return -1;  /* fall back to default handling */
-            ret = add_icon( data );
-        }
+        if (!init_systray()) return -1;  /* fall back to default handling */
+        ret = add_icon( data );
         break;
     case NIM_DELETE:
-        if (can_use_dbus_sni_systray())
-        {
-            ret = delete_sni_icon( data );
-        }
-        else
-        {
-            if ((icon = get_icon( data->hWnd, data->uID ))) ret = delete_icon( icon );
-        }
+        if ((icon = get_icon( data->hWnd, data->uID ))) ret = delete_icon( icon );
         break;
     case NIM_MODIFY:
-        if (can_use_dbus_sni_systray())
-        {
-            ret = modify_sni_icon( data );
-        }
-        else
-        {
-            if ((icon = get_icon( data->hWnd, data->uID ))) ret = modify_icon( icon, data );
-        }
+        if ((icon = get_icon( data->hWnd, data->uID ))) ret = modify_icon( icon, data );
         break;
     case NIM_SETVERSION:
         if ((icon = get_icon( data->hWnd, data->uID )))

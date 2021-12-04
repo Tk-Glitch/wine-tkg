@@ -4276,6 +4276,7 @@ static void test_GetCPInfo(void)
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
 
+    memset(cpinfo.LeadByte, '-', ARRAY_SIZE(cpinfo.LeadByte));
     SetLastError(0xdeadbeef);
     ret = GetCPInfo(CP_UTF7, &cpinfo);
     if (!ret && GetLastError() == ERROR_INVALID_PARAMETER)
@@ -4284,14 +4285,17 @@ static void test_GetCPInfo(void)
     }
     else
     {
+        unsigned int i;
+
         ok(ret, "GetCPInfo(CP_UTF7) error %u\n", GetLastError());
         ok(cpinfo.DefaultChar[0] == 0x3f, "expected 0x3f, got 0x%x\n", cpinfo.DefaultChar[0]);
         ok(cpinfo.DefaultChar[1] == 0, "expected 0, got 0x%x\n", cpinfo.DefaultChar[1]);
-        ok(cpinfo.LeadByte[0] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[0]);
-        ok(cpinfo.LeadByte[1] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[1]);
+        for (i = 0; i < sizeof(cpinfo.LeadByte); i++)
+            ok(!cpinfo.LeadByte[i], "expected NUL byte in index %u\n", i);
         ok(cpinfo.MaxCharSize == 5, "expected 5, got 0x%x\n", cpinfo.MaxCharSize);
     }
 
+    memset(cpinfo.LeadByte, '-', ARRAY_SIZE(cpinfo.LeadByte));
     SetLastError(0xdeadbeef);
     ret = GetCPInfo(CP_UTF8, &cpinfo);
     if (!ret && GetLastError() == ERROR_INVALID_PARAMETER)
@@ -4300,11 +4304,13 @@ static void test_GetCPInfo(void)
     }
     else
     {
+        unsigned int i;
+
         ok(ret, "GetCPInfo(CP_UTF8) error %u\n", GetLastError());
         ok(cpinfo.DefaultChar[0] == 0x3f, "expected 0x3f, got 0x%x\n", cpinfo.DefaultChar[0]);
         ok(cpinfo.DefaultChar[1] == 0, "expected 0, got 0x%x\n", cpinfo.DefaultChar[1]);
-        ok(cpinfo.LeadByte[0] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[0]);
-        ok(cpinfo.LeadByte[1] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[1]);
+        for (i = 0; i < sizeof(cpinfo.LeadByte); i++)
+            ok(!cpinfo.LeadByte[i], "expected NUL byte in index %u\n", i);
         ok(cpinfo.MaxCharSize == 4 || broken(cpinfo.MaxCharSize == 3) /* win9x */,
            "expected 4, got %u\n", cpinfo.MaxCharSize);
     }
@@ -7316,6 +7322,147 @@ static void test_geo_name(void)
     RegCloseKey(key);
 }
 
+static const LCID locales_with_optional_calendars[] = {
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_SAUDI_ARABIA), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_LEBANON), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_EGYPT), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_ALGERIA), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_BAHRAIN), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_IRAQ), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_JORDAN), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_KUWAIT), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_LIBYA), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_MOROCCO), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_OMAN), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_QATAR), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_SYRIA), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_TUNISIA), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_UAE), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_ARABIC, SUBLANG_ARABIC_YEMEN), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_DIVEHI, SUBLANG_DEFAULT), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_PERSIAN, SUBLANG_DEFAULT), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_HEBREW, SUBLANG_DEFAULT), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_JAPANESE, SUBLANG_DEFAULT), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_KOREAN, SUBLANG_KOREAN), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_THAI, SUBLANG_DEFAULT), SORT_DEFAULT),
+    MAKELCID(MAKELANGID(LANG_URDU, SUBLANG_URDU_PAKISTAN), SORT_DEFAULT)
+};
+
+static BOOL CALLBACK calinfo_procA(LPSTR calinfo)
+{
+    (void)calinfo;
+    return TRUE;
+}
+
+static void test_EnumCalendarInfoA(void)
+{
+    INT i;
+
+    ok( EnumCalendarInfoA( calinfo_procA,
+                           LOCALE_USER_DEFAULT,
+                           ENUM_ALL_CALENDARS,
+                           CAL_RETURN_NUMBER | CAL_ICALINTVALUE ),
+        "EnumCalendarInfoA for user default locale failed: %u\n", GetLastError() );
+
+    for (i = 0; i < ARRAY_SIZE( locales_with_optional_calendars ); i++)
+    {
+        LCID lcid = locales_with_optional_calendars[i];
+        ok( EnumCalendarInfoA( calinfo_procA,
+                               lcid,
+                               ENUM_ALL_CALENDARS,
+                               CAL_RETURN_NUMBER | CAL_ICALINTVALUE ) ||
+            broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
+            "EnumCalendarInfoA for LCID %#06x failed: %u\n", lcid, GetLastError() );
+    }
+}
+
+static BOOL CALLBACK calinfo_procW(LPWSTR calinfo)
+{
+    (void)calinfo;
+    return TRUE;
+}
+
+static void test_EnumCalendarInfoW(void)
+{
+    INT i;
+
+    ok( EnumCalendarInfoW( calinfo_procW,
+                           LOCALE_USER_DEFAULT,
+                           ENUM_ALL_CALENDARS,
+                           CAL_RETURN_NUMBER | CAL_ICALINTVALUE ),
+        "EnumCalendarInfoW for user default locale failed: %u\n", GetLastError() );
+
+    for (i = 0; i < ARRAY_SIZE( locales_with_optional_calendars ); i++)
+    {
+        LCID lcid = locales_with_optional_calendars[i];
+        ok( EnumCalendarInfoW( calinfo_procW,
+                               lcid,
+                               ENUM_ALL_CALENDARS,
+                               CAL_RETURN_NUMBER | CAL_ICALINTVALUE ) ||
+            broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
+            "EnumCalendarInfoW for LCID %#06x failed: %u\n", lcid, GetLastError() );
+    }
+}
+
+static BOOL CALLBACK calinfoex_procA(LPSTR calinfo, LCID calid)
+{
+    (void)calinfo;
+    (void)calid;
+    return TRUE;
+}
+
+static void test_EnumCalendarInfoExA(void)
+{
+    INT i;
+
+    ok( EnumCalendarInfoExA( calinfoex_procA,
+                             LOCALE_USER_DEFAULT,
+                             ENUM_ALL_CALENDARS,
+                             CAL_RETURN_NUMBER | CAL_ICALINTVALUE ),
+        "EnumCalendarInfoExA for user default locale failed: %u\n", GetLastError() );
+
+    for (i = 0; i < ARRAY_SIZE( locales_with_optional_calendars ); i++)
+    {
+        LCID lcid = locales_with_optional_calendars[i];
+        ok( EnumCalendarInfoExA( calinfoex_procA,
+                                 lcid,
+                                 ENUM_ALL_CALENDARS,
+                                 CAL_RETURN_NUMBER | CAL_ICALINTVALUE ) ||
+            broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
+            "EnumCalendarInfoExA for LCID %#06x failed: %u\n", lcid, GetLastError() );
+    }
+}
+
+static BOOL CALLBACK calinfoex_procW(LPWSTR calinfo, LCID calid)
+{
+    (void)calinfo;
+    (void)calid;
+    return TRUE;
+}
+
+static void test_EnumCalendarInfoExW(void)
+{
+    INT i;
+
+    ok( EnumCalendarInfoExW( calinfoex_procW,
+                             LOCALE_USER_DEFAULT,
+                             ENUM_ALL_CALENDARS,
+                             CAL_RETURN_NUMBER | CAL_ICALINTVALUE ),
+        "EnumCalendarInfoExW for user default locale failed: %u\n", GetLastError() );
+
+    for (i = 0; i < ARRAY_SIZE( locales_with_optional_calendars ); i++)
+    {
+        LCID lcid = locales_with_optional_calendars[i];
+        ok( EnumCalendarInfoExW( calinfoex_procW,
+                                 lcid,
+                                 ENUM_ALL_CALENDARS,
+                                 CAL_RETURN_NUMBER | CAL_ICALINTVALUE ) ||
+            broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
+            "EnumCalendarInfoExW for LCID %#06x failed: %u\n", lcid, GetLastError() );
+    }
+}
+
 START_TEST(locale)
 {
   InitFunctionPointers();
@@ -7369,4 +7516,8 @@ START_TEST(locale)
   test_geo_name();
   test_sorting();
   test_unicode_sorting();
+  test_EnumCalendarInfoA();
+  test_EnumCalendarInfoW();
+  test_EnumCalendarInfoExA();
+  test_EnumCalendarInfoExW();
 }

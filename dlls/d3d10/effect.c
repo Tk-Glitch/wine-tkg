@@ -191,17 +191,27 @@ struct preshader_instr
     unsigned int scalar     :  1;
 };
 
-typedef float (*pres_op_func)(float **args, unsigned int n);
+typedef void (*pres_op_func)(float **args, unsigned int n, const struct preshader_instr *instr);
 
-static float pres_ftou(float **args, unsigned int n)
+static void pres_ftou(float **args, unsigned int n, const struct preshader_instr *instr)
 {
-    unsigned int u = *args[0];
-    return *(float *)&u;
+    float *retval = args[1];
+    unsigned int i;
+
+    for (i = 0; i < instr->comp_count; ++i)
+    {
+        unsigned int u = args[0][i];
+        retval[i] = *(float *)&u;
+    }
 }
 
-static float pres_add(float **args, unsigned int n)
+static void pres_add(float **args, unsigned int n, const struct preshader_instr *instr)
 {
-    return *args[0] + *args[1];
+    float *retval = args[2];
+    unsigned int i;
+
+    for (i = 0; i < instr->comp_count; ++i)
+        retval[i] = args[0][instr->scalar ? 0 : i] + args[1][i];
 }
 
 struct preshader_op_info
@@ -289,6 +299,10 @@ struct d3d10_effect_prop_dependency
             struct d3d10_effect_variable *v;
             struct d3d10_effect_preshader index;
         } index_expr;
+        struct
+        {
+            struct d3d10_effect_preshader value;
+        } value_expr;
     };
 };
 
@@ -305,7 +319,7 @@ static void d3d10_effect_preshader_clear(struct d3d10_effect_preshader *p)
     unsigned int i;
 
     for (i = 0; i < ARRAY_SIZE(p->reg_tables); ++i)
-        heap_free(&p->reg_tables[i].f);
+        heap_free(p->reg_tables[i].f);
     if (p->code)
         ID3D10Blob_Release(p->code);
     heap_free(p->vars);
@@ -329,10 +343,10 @@ static float * d3d10_effect_preshader_get_reg_ptr(const struct d3d10_effect_pres
 
 static HRESULT d3d10_effect_preshader_eval(struct d3d10_effect_preshader *p)
 {
-    unsigned int i, j, regt, offset, instr_count, input_count;
+    unsigned int i, j, regt, offset, instr_count, arg_count;
     const DWORD *ip = ID3D10Blob_GetBufferPointer(p->code);
-    float *dst, *args[4], *retval;
     struct preshader_instr ins;
+    float *dst, *args[4];
 
     dst = d3d10_effect_preshader_get_reg_ptr(p, D3D10_REG_TABLE_RESULT, 0);
     memset(dst, 0, sizeof(float) * p->reg_tables[D3D10_REG_TABLE_RESULT].count);
@@ -351,16 +365,16 @@ static HRESULT d3d10_effect_preshader_eval(struct d3d10_effect_preshader *p)
     for (i = 0; i < instr_count; ++i)
     {
         *(DWORD *)&ins = *ip++;
-        input_count = *ip++;
+        arg_count = 1 + *ip++;
 
-        if (input_count > ARRAY_SIZE(args))
+        if (arg_count > ARRAY_SIZE(args))
         {
-            FIXME("Unexpected argument count %u.\n", input_count);
+            FIXME("Unexpected argument count %u.\n", arg_count);
             return E_FAIL;
         }
 
-        /* Arguments */
-        for (j = 0; j < input_count; ++j)
+        /* Arguments are followed by the return value. */
+        for (j = 0; j < arg_count; ++j)
         {
             ip++; /* TODO: argument register flags are currently ignored */
             regt = *ip++;
@@ -369,12 +383,7 @@ static HRESULT d3d10_effect_preshader_eval(struct d3d10_effect_preshader *p)
             args[j] = d3d10_effect_preshader_get_reg_ptr(p, regt, offset);
         }
 
-        ip++; /* TODO: result register flags are currently ignored */
-        regt = *ip++;
-        offset = *ip++;
-        retval = d3d10_effect_preshader_get_reg_ptr(p, regt, offset);
-
-        *retval = d3d10_effect_get_op_info(ins.opcode)->func(args, input_count);
+        d3d10_effect_get_op_info(ins.opcode)->func(args, arg_count, &ins);
     }
 
     return S_OK;
@@ -391,6 +400,9 @@ static void d3d10_effect_clear_prop_dependencies(struct d3d10_effect_prop_depend
         {
             case D3D10_EOO_INDEX_EXPRESSION:
                 d3d10_effect_preshader_clear(&dep->index_expr.index);
+                break;
+            case D3D10_EOO_VALUE_EXPRESSION:
+                d3d10_effect_preshader_clear(&dep->value_expr.value);
                 break;
         }
     }
@@ -762,7 +774,7 @@ static void d3d10_effect_update_dependent_props(struct d3d10_effect_prop_depende
                 {
                     WARN("Expression evaluated to invalid index value %u, array %s of size %u.\n",
                             variable_idx, debugstr_a(v->name), v->type->element_count);
-                    return;
+                    variable_idx = 0;
                 }
 
                 /* Ignoring destination index here, there are no object typed array properties. */
@@ -2093,7 +2105,7 @@ static HRESULT parse_fx10_preshader_instr(struct d3d10_preshader_parse_context *
         unsigned int *offset, const char **ptr, unsigned int data_size)
 {
     const struct preshader_op_info *op_info;
-    unsigned int i, param_count;
+    unsigned int i, param_count, size;
     struct preshader_instr ins;
     uint32_t input_count;
 
@@ -2145,7 +2157,8 @@ static HRESULT parse_fx10_preshader_instr(struct d3d10_preshader_parse_context *
             case D3D10_REG_TABLE_CB:
             case D3D10_REG_TABLE_RESULT:
             case D3D10_REG_TABLE_TEMP:
-                context->table_sizes[regt] = max(context->table_sizes[regt], param_offset + 1);
+                size = param_offset + (ins.scalar && i == 0 ? 1 : ins.comp_count);
+                context->table_sizes[regt] = max(context->table_sizes[regt], size);
                 break;
             default:
                 FIXME("Unexpected register table index %u.\n", regt);
@@ -2625,6 +2638,34 @@ static HRESULT parse_fx10_property_assignment(const char *data, size_t data_size
             dep.operation = operation;
             dep.index_expr.v = variable;
             if (FAILED(hr = parse_fx10_preshader(data_ptr, blob_size, effect, &dep.index_expr.index)))
+            {
+                WARN("Failed to parse preshader, hr %#x.\n", hr);
+                return hr;
+            }
+
+            return d3d10_effect_add_prop_dependency(d, &dep);
+
+        case D3D10_EOO_VALUE_EXPRESSION:
+
+            if (value_offset >= data_size || !require_space(value_offset, 1, sizeof(uint32_t), data_size))
+            {
+                WARN("Invalid offset %#x (data size %#lx).\n", value_offset, (long)data_size);
+                return E_FAIL;
+            }
+
+            data_ptr = data + value_offset;
+            read_dword(&data_ptr, &blob_size);
+
+            if (!require_space(value_offset, 1, sizeof(uint32_t) + blob_size, data_size))
+            {
+                WARN("Invalid offset %#x (data size %#lx).\n", value_offset, (long)data_size);
+                return E_FAIL;
+            }
+
+            dep.id = id;
+            dep.idx = idx;
+            dep.operation = operation;
+            if (FAILED(hr = parse_fx10_preshader(data_ptr, blob_size, effect, &dep.value_expr.value)))
             {
                 WARN("Failed to parse preshader, hr %#x.\n", hr);
                 return hr;

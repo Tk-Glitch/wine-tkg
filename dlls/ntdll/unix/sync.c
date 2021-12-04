@@ -1598,8 +1598,12 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
  */
 NTSTATUS WINAPI NtYieldExecution(void)
 {
-    usleep(0);
+#ifdef HAVE_SCHED_YIELD
+    sched_yield();
     return STATUS_SUCCESS;
+#else
+    return STATUS_NO_YIELD_PERFORMED;
+#endif
 }
 
 
@@ -1644,7 +1648,7 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
         }
 
         /* Note that we yield after establishing the desired timeout */
-        NtYieldExecution();
+        usleep(0);
         if (!when) return STATUS_SUCCESS;
 
         for (;;)

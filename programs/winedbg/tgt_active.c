@@ -31,6 +31,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
+static char*            dbg_executable;
 static char*            dbg_last_cmd_line;
 static struct be_process_io be_process_active_io;
 
@@ -294,8 +295,6 @@ static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill)
 
 void fetch_module_name(void* name_addr, void* mod_addr, WCHAR* buffer, size_t bufsz)
 {
-    static const WCHAR dlladdr[] = {'D','L','L','_','%','0','8','l','x',0};
-
     memory_get_string_indirect(dbg_curr_process, name_addr, TRUE, buffer, bufsz);
     if (!buffer[0] && !GetModuleFileNameExW(dbg_curr_process->handle, mod_addr, buffer, bufsz))
     {
@@ -308,7 +307,7 @@ void fetch_module_name(void* name_addr, void* mod_addr, WCHAR* buffer, size_t bu
                 memmove( buffer, buffer + 4, (lstrlenW(buffer + 4) + 1) * sizeof(WCHAR) );
         }
         else
-            swprintf(buffer, bufsz, dlladdr, (ULONG_PTR)mod_addr);
+            swprintf(buffer, bufsz, L"DLL_%08lx", (ULONG_PTR)mod_addr);
     }
 }
 
@@ -371,8 +370,7 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         size = ARRAY_SIZE(u.buffer);
         if (!QueryFullProcessImageNameW( dbg_curr_process->handle, 0, u.buffer, &size ))
         {
-            static const WCHAR pcspid[] = {'P','r','o','c','e','s','s','_','%','0','8','x',0};
-            swprintf( u.buffer, ARRAY_SIZE(u.buffer), pcspid, dbg_curr_pid);
+            swprintf( u.buffer, ARRAY_SIZE(u.buffer), L"Process_%08x", dbg_curr_pid);
         }
 
         WINE_TRACE("%04x:%04x: create process '%s'/%p @%p (%u<%u>)\n",
@@ -539,12 +537,12 @@ static void dbg_resume_debuggee(DWORD cont)
         if (dbg_curr_thread)
         {
             if (!dbg_curr_process->be_cpu->set_context(dbg_curr_thread->handle, &dbg_context))
-                dbg_printf("Cannot set ctx on %04lx\n", dbg_curr_tid);
+                dbg_printf("Cannot set ctx on %04Ix\n", dbg_curr_tid);
         }
     }
     dbg_interactiveP = FALSE;
     if (!ContinueDebugEvent(dbg_curr_pid, dbg_curr_tid, cont))
-        dbg_printf("Cannot continue on %04lx (%08x)\n", dbg_curr_tid, cont);
+        dbg_printf("Cannot continue on %04Ix (%08x)\n", dbg_curr_tid, cont);
 }
 
 static void wait_exception(void)
@@ -635,28 +633,137 @@ static BOOL dbg_start_debuggee(LPSTR cmdLine)
     dbg_curr_pid = info.dwProcessId;
     if (!(dbg_curr_process = dbg_add_process(&be_process_active_io, dbg_curr_pid, 0))) return FALSE;
     dbg_curr_process->active_debuggee = TRUE;
+    if (cmdLine != dbg_last_cmd_line)
+    {
+        free(dbg_last_cmd_line);
+        dbg_last_cmd_line = cmdLine;
+    }
 
     return TRUE;
 }
 
-void	dbg_run_debuggee(const char* args)
+/***********************************************************************
+ *           dbg_build_command_line
+ *
+ * (converted from dlls/ntdll/unix/env.c)
+ *
+ * Build the command line of a process from the argv array.
+ *
+ * We must quote and escape characters so that the argv array can be rebuilt
+ * from the command line:
+ * - spaces and tabs must be quoted
+ *   'a b'   -> '"a b"'
+ * - quotes must be escaped
+ *   '"'     -> '\"'
+ * - if '\'s are followed by a '"', they must be doubled and followed by '\"',
+ *   resulting in an odd number of '\' followed by a '"'
+ *   '\"'    -> '\\\"'
+ *   '\\"'   -> '\\\\\"'
+ * - '\'s are followed by the closing '"' must be doubled,
+ *   resulting in an even number of '\' followed by a '"'
+ *   ' \'    -> '" \\"'
+ *   ' \\'    -> '" \\\\"'
+ * - '\'s that are not followed by a '"' can be left as is
+ *   'a\b'   == 'a\b'
+ *   'a\\b'  == 'a\\b'
+ */
+static char *dbg_build_command_line( char **argv )
 {
-    if (args)
+    int len;
+    char **arg, *ret;
+    LPSTR p;
+
+    len = 1;
+    for (arg = argv; *arg; arg++) len += 3 + 2 * strlen( *arg );
+    if (!(ret = malloc( len ))) return NULL;
+
+    p = ret;
+    for (arg = argv; *arg; arg++)
     {
-        WINE_FIXME("Re-running current program with %s as args is broken\n", wine_dbgstr_a(args));
+        BOOL has_space, has_quote;
+        int i, bcount;
+        char *a;
+
+        /* check for quotes and spaces in this argument (first arg is always quoted) */
+        has_space = (arg == argv) || !**arg || strchr( *arg, ' ' ) || strchr( *arg, '\t' );
+        has_quote = strchr( *arg, '"' ) != NULL;
+
+        /* now transfer it to the command line */
+        if (has_space) *p++ = '"';
+        if (has_quote || has_space)
+        {
+            bcount = 0;
+            for (a = *arg; *a; a++)
+            {
+                if (*a == '\\') bcount++;
+                else
+                {
+                    if (*a == '"') /* double all the '\\' preceding this '"', plus one */
+                        for (i = 0; i <= bcount; i++) *p++ = '\\';
+                    bcount = 0;
+                }
+                *p++ = *a;
+            }
+        }
+        else
+        {
+            strcpy( p, *arg );
+            p += strlen( p );
+        }
+        if (has_space)
+        {
+            /* Double all the '\' preceding the closing quote */
+            for (i = 0; i < bcount; i++) *p++ = '\\';
+            *p++ = '"';
+        }
+        *p++ = ' ';
+    }
+    if (p > ret) p--;  /* remove last space */
+    *p = 0;
+    return ret;
+}
+
+
+void	dbg_run_debuggee(struct list_string* ls)
+{
+    if (dbg_curr_process)
+    {
+        dbg_printf("Already attached to a process. Use 'detach' or 'kill' before using 'run'\n");
         return;
     }
-    else 
+    if (!dbg_executable)
     {
-	if (!dbg_last_cmd_line)
-        {
-	    dbg_printf("Cannot find previously used command line.\n");
-	    return;
-	}
-	dbg_start_debuggee(dbg_last_cmd_line);
-        dbg_active_wait_for_first_exception();
-        source_list_from_addr(NULL, 0);
+        dbg_printf("No active target to be restarted\n");
+        return;
     }
+    if (ls)
+    {
+        char* cl;
+        char** argv;
+        unsigned argc = 2, i;
+        struct list_string* cls;
+
+        for (cls = ls; cls; cls = cls->next) argc++;
+        if (!(argv = malloc(argc * sizeof(argv[0])))) return;
+        argv[0] = dbg_executable;
+        for (i = 1, cls = ls; cls; cls = cls->next, i++) argv[i] = cls->string;
+        argv[i] = NULL;
+        cl = dbg_build_command_line(argv);
+        free(argv);
+
+        if (!cl || !dbg_start_debuggee(cl))
+        {
+            free(cl);
+            return;
+        }
+    }
+    else
+    {
+        if (!dbg_last_cmd_line) dbg_last_cmd_line = strdup(dbg_executable);
+        dbg_start_debuggee(dbg_last_cmd_line);
+    }
+    dbg_active_wait_for_first_exception();
+    source_list_from_addr(NULL, 0);
 }
 
 static BOOL str2int(const char* str, DWORD_PTR* val)
@@ -669,10 +776,9 @@ static BOOL str2int(const char* str, DWORD_PTR* val)
 
 static HANDLE create_temp_file(void)
 {
-    static const WCHAR prefixW[] = {'w','d','b',0};
     WCHAR path[MAX_PATH], name[MAX_PATH];
 
-    if (!GetTempPathW( MAX_PATH, path ) || !GetTempFileNameW( path, prefixW, 0, name ))
+    if (!GetTempPathW( MAX_PATH, path ) || !GetTempFileNameW( path, L"wdb", 0, name ))
         return INVALID_HANDLE_VALUE;
     return CreateFileW( name, GENERIC_READ|GENERIC_WRITE|DELETE, FILE_SHARE_DELETE,
                         NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, 0 );
@@ -811,36 +917,19 @@ enum dbg_start  dbg_active_attach(int argc, char* argv[])
  */
 enum dbg_start    dbg_active_launch(int argc, char* argv[])
 {
-    int         i, len;
     LPSTR	cmd_line;
 
     if (argc == 0) return start_error_parse;
 
-    if (!(cmd_line = HeapAlloc(GetProcessHeap(), 0, len = 1)))
-    {
-    oom_leave:
-        dbg_printf("Out of memory\n");
-        return start_error_init;
-    }
-    cmd_line[0] = '\0';
-
-    for (i = 0; i < argc; i++)
-    {
-        len += strlen(argv[i]) + 1;
-        if (!(cmd_line = HeapReAlloc(GetProcessHeap(), 0, cmd_line, len)))
-            goto oom_leave;
-        strcat(cmd_line, argv[i]);
-        cmd_line[len - 2] = ' ';
-        cmd_line[len - 1] = '\0';
-    }
+    dbg_executable = strdup(argv[0]);
+    cmd_line = dbg_build_command_line(argv);
 
     if (!dbg_start_debuggee(cmd_line))
     {
-        HeapFree(GetProcessHeap(), 0, cmd_line);
+        free(cmd_line);
         return start_error_init;
     }
-    HeapFree(GetProcessHeap(), 0, dbg_last_cmd_line);
-    dbg_last_cmd_line = cmd_line;
+
     return start_ok;
 }
 
@@ -869,7 +958,7 @@ enum dbg_start dbg_active_auto(int argc, char* argv[])
     case ID_DEBUG:
         AllocConsole();
         dbg_init_console();
-        dbg_start_interactive(INVALID_HANDLE_VALUE);
+        dbg_start_interactive(NULL, INVALID_HANDLE_VALUE);
         return start_ok;
     case ID_DETAILS:
         event = CreateEventW( NULL, TRUE, FALSE, NULL );
@@ -886,7 +975,7 @@ enum dbg_start dbg_active_auto(int argc, char* argv[])
         dbg_active_wait_for_first_exception();
 
     dbg_interactiveP = TRUE;
-    parser_handle(input);
+    parser_handle(NULL, input);
     output_system_info();
 
     if (output != INVALID_HANDLE_VALUE)
@@ -967,7 +1056,7 @@ enum dbg_start dbg_active_minidump(int argc, char* argv[])
         dbg_active_wait_for_first_exception();
 
     dbg_interactiveP = TRUE;
-    parser_handle(hFile);
+    parser_handle(NULL, hFile);
 
     return start_ok;
 }

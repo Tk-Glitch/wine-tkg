@@ -38,7 +38,6 @@
 #include "winnls.h"
 #include "winreg.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "wine/list.h"
 
 #include "ole2.h"
@@ -1086,22 +1085,26 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
         }
     }
 
+    EnterCriticalSection(&g_sessions_lock);
     EnterCriticalSection(&This->lock);
 
     if(This->initted){
         LeaveCriticalSection(&This->lock);
+        LeaveCriticalSection(&g_sessions_lock);
         return AUDCLNT_E_ALREADY_INITIALIZED;
     }
 
     hr = setup_oss_device(mode, This->fd, fmt, NULL);
     if(FAILED(hr)){
         LeaveCriticalSection(&This->lock);
+        LeaveCriticalSection(&g_sessions_lock);
         return hr;
     }
 
     This->fmt = clone_format(fmt);
     if(!This->fmt){
         LeaveCriticalSection(&This->lock);
+        LeaveCriticalSection(&g_sessions_lock);
         return E_OUTOFMEMORY;
     }
 
@@ -1117,6 +1120,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
         CoTaskMemFree(This->fmt);
         This->fmt = NULL;
         LeaveCriticalSection(&This->lock);
+        LeaveCriticalSection(&g_sessions_lock);
         return E_OUTOFMEMORY;
     }
 
@@ -1125,6 +1129,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
         CoTaskMemFree(This->fmt);
         This->fmt = NULL;
         LeaveCriticalSection(&This->lock);
+        LeaveCriticalSection(&g_sessions_lock);
         return E_OUTOFMEMORY;
     }
 
@@ -1135,27 +1140,24 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient3 *iface,
     This->flags = flags;
     This->oss_bufsize_bytes = 0;
 
-    EnterCriticalSection(&g_sessions_lock);
-
     hr = get_audio_session(sessionguid, This->parent, fmt->nChannels,
             &This->session);
     if(FAILED(hr)){
-        LeaveCriticalSection(&g_sessions_lock);
         HeapFree(GetProcessHeap(), 0, This->vols);
         This->vols = NULL;
         CoTaskMemFree(This->fmt);
         This->fmt = NULL;
         LeaveCriticalSection(&This->lock);
+        LeaveCriticalSection(&g_sessions_lock);
         return hr;
     }
 
     list_add_tail(&This->session->clients, &This->entry);
 
-    LeaveCriticalSection(&g_sessions_lock);
-
     This->initted = TRUE;
 
     LeaveCriticalSection(&This->lock);
+    LeaveCriticalSection(&g_sessions_lock);
 
     return S_OK;
 }

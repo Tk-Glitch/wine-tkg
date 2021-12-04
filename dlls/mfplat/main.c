@@ -46,6 +46,12 @@
 #include "strsafe.h"
 #undef INITGUID
 #include "evr.h"
+/* mfd3d12 guids are not included in mfuuid */
+#define INITGUID
+#undef EXTERN_GUID
+#define EXTERN_GUID DEFINE_GUID
+#include "initguid.h"
+#include "mfd3d12.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
@@ -83,6 +89,12 @@ struct mft_registration
     UINT32 output_types_count;
     BOOL local;
 };
+
+static const char *debugstr_reg_typeinfo(const MFT_REGISTER_TYPE_INFO *info)
+{
+    return info ? wine_dbg_sprintf("%p{%s,%s}", info, debugstr_mf_guid(&info->guidMajorType),
+            debugstr_mf_guid(&info->guidSubtype)) : wine_dbg_sprintf("%p", info);
+}
 
 static CRITICAL_SECTION local_mfts_section = { NULL, -1, 0, 0, 0, 0 };
 
@@ -1325,8 +1337,8 @@ HRESULT WINAPI MFTEnum(GUID category, UINT32 flags, MFT_REGISTER_TYPE_INFO *inpu
     struct list mfts;
     HRESULT hr;
 
-    TRACE("%s, %#x, %p, %p, %p, %p, %p.\n", debugstr_guid(&category), flags, input_type, output_type, attributes,
-            clsids, count);
+    TRACE("%s, %#x, %s, %s, %p, %p, %p.\n", debugstr_mf_guid(&category), flags, debugstr_reg_typeinfo(input_type),
+            debugstr_reg_typeinfo(output_type), attributes, clsids, count);
 
     if (!clsids || !count)
         return E_INVALIDARG;
@@ -1371,7 +1383,8 @@ HRESULT WINAPI MFTEnum(GUID category, UINT32 flags, MFT_REGISTER_TYPE_INFO *inpu
 HRESULT WINAPI MFTEnumEx(GUID category, UINT32 flags, const MFT_REGISTER_TYPE_INFO *input_type,
         const MFT_REGISTER_TYPE_INFO *output_type, IMFActivate ***activate, UINT32 *count)
 {
-    TRACE("%s, %#x, %p, %p, %p, %p.\n", debugstr_guid(&category), flags, input_type, output_type, activate, count);
+    TRACE("%s, %#x, %s, %s, %p, %p.\n", debugstr_mf_guid(&category), flags, debugstr_reg_typeinfo(input_type),
+            debugstr_reg_typeinfo(output_type), activate, count);
 
     return mft_enum(category, flags, input_type, output_type, NULL, activate, count);
 }
@@ -1382,8 +1395,8 @@ HRESULT WINAPI MFTEnumEx(GUID category, UINT32 flags, const MFT_REGISTER_TYPE_IN
 HRESULT WINAPI MFTEnum2(GUID category, UINT32 flags, const MFT_REGISTER_TYPE_INFO *input_type,
         const MFT_REGISTER_TYPE_INFO *output_type, IMFAttributes *attributes, IMFActivate ***activate, UINT32 *count)
 {
-    TRACE("%s, %#x, %p, %p, %p, %p, %p.\n", debugstr_guid(&category), flags, input_type, output_type, attributes,
-            activate, count);
+    TRACE("%s, %#x, %s, %s, %p, %p, %p.\n", debugstr_mf_guid(&category), flags, debugstr_reg_typeinfo(input_type),
+            debugstr_reg_typeinfo(output_type), attributes, activate, count);
 
     if (attributes)
         FIXME("Ignoring attributes.\n");
@@ -1572,6 +1585,8 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_PD_PLAYBACK_ELEMENT_ID),
         X(MF_MEDIA_ENGINE_BROWSER_COMPATIBILITY_MODE_IE9),
         X(MF_MT_ALL_SAMPLES_INDEPENDENT),
+        X(MF_SA_D3D12_CLEAR_VALUE),
+        X(MF_MT_D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER),
         X(MF_PD_PREFERRED_LANGUAGE),
         X(MF_PD_PLAYBACK_BOUNDARY_TIME),
         X(MF_MEDIA_ENGINE_TELEMETRY_APPLICATION_ID),
@@ -1596,6 +1611,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_MEDIA_ENGINE_STREAM_CONTAINS_ALPHA_CHANNEL),
         X(MF_MEDIA_ENGINE_MEDIA_PLAYER_MODE),
         X(MF_MEDIA_ENGINE_EXTENSION),
+        X(MF_MT_D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
         X(MF_MT_DEFAULT_STRIDE),
         X(MF_MT_ARBITRARY_FORMAT),
         X(MF_TRANSFORM_CATEGORY_Attribute),
@@ -1629,9 +1645,11 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_READWRITE_DISABLE_CONVERTERS),
         X(MF_MEDIA_ENGINE_BROWSER_COMPATIBILITY_MODE_IE_EDGE),
         X(MF_ACTIVATE_CUSTOM_VIDEO_PRESENTER_FLAGS),
+        X(MF_SA_D3D12_HEAP_FLAGS),
         X(MF_MT_MINIMUM_DISPLAY_APERTURE),
         X(MFSampleExtension_Token),
         X(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_CATEGORY),
+        X(MF_D3D12_SYNCHRONIZATION_OBJECT),
         X(MF_MT_AUDIO_VALID_BITS_PER_SAMPLE),
         X(MF_TRANSFORM_ASYNC_UNLOCK),
         X(MF_DISABLE_FRAME_CORRUPTION_INFO),
@@ -1644,6 +1662,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MFSampleExtension_3DVideo_SampleFormat),
         X(MF_MT_H264_RESOLUTION_SCALING),
         X(MF_MT_VIDEO_LEVEL),
+        X(MF_SA_D3D12_HEAP_TYPE),
         X(MF_SAMPLEGRABBERSINK_SAMPLE_TIME_OFFSET),
         X(MF_MT_SAMPLE_SIZE),
         X(MF_MT_AAC_PAYLOAD_TYPE),
@@ -1665,6 +1684,8 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_SESSION_QUALITY_MANAGER),
         X(MF_SESSION_CONTENT_PROTECTION_MANAGER),
         X(MF_MT_MPEG4_SAMPLE_DESCRIPTION),
+        X(MF_MT_D3D_RESOURCE_VERSION),
+        X(MF_MT_D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET),
         X(MF_MT_MPEG_START_TIME_CODE),
         X(MFT_REMUX_MARK_I_PICTURE_AS_CLEAN_POINT),
         X(MFT_REMUX_MARK_I_PICTURE_AS_CLEAN_POINT),
@@ -1724,10 +1745,12 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_EVENT_SOURCE_FAKE_START),
         X(MF_EVENT_SOURCE_PROJECTSTART),
         X(MF_EVENT_SOURCE_ACTUAL_START),
+        X(MF_MT_D3D12_TEXTURE_LAYOUT),
         X(MF_MEDIA_ENGINE_CONTENT_PROTECTION_MANAGER),
         X(MF_MT_AUDIO_SAMPLES_PER_BLOCK),
         X(MFT_ENUM_HARDWARE_URL_Attribute),
         X(MF_SOURCE_READER_ASYNC_CALLBACK),
+        X(MF_MT_D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE),
         X(MF_MT_OUTPUT_BUFFER_NUM),
         X(MF_SA_D3D11_BINDFLAGS),
         X(MFT_ENCODER_SUPPORTS_CONFIG_EVENT),
@@ -1737,6 +1760,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MFT_SUPPORT_3DVIDEO),
         X(MFT_SUPPORT_3DVIDEO),
         X(MFT_INPUT_TYPES_Attributes),
+        X(MF_MT_D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS),
         X(MF_MT_H264_LAYOUT_PER_STREAM),
         X(MF_EVENT_SCRUBSAMPLE_TIME),
         X(MF_MT_SPATIAL_AUDIO_MAX_METADATA_ITEMS),
@@ -1754,6 +1778,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_SAMPLEGRABBERSINK_IGNORE_CLOCK),
         X(MF_SA_D3D11_SHARED),
         X(MF_MT_PAN_SCAN_ENABLED),
+        X(MF_MT_D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
         X(MF_AUDIO_RENDERER_ATTRIBUTE_ENDPOINT_ID),
         X(MF_MT_DV_VAUX_CTRL_PACK),
         X(MFSampleExtension_ForwardedDecodeUnitType),
@@ -1798,6 +1823,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_PD_AUDIO_ISVARIABLEBITRATE),
         X(MF_AUDIO_RENDERER_ATTRIBUTE_FLAGS),
         X(MF_MEDIA_ENGINE_BROWSER_COMPATIBILITY_MODE),
+        X(MF_MT_D3D12_CPU_READBACK),
         X(MF_AUDIO_RENDERER_ATTRIBUTE_SESSION_ID),
         X(MF_MT_MPEG2_CONTENT_PACKET),
         X(MFT_PROCESS_LOCAL_Attribute),
@@ -1884,7 +1910,9 @@ const char *debugstr_mf_guid(const GUID *guid)
         X(MFVideoFormat_RGB565),
         X(MFVideoFormat_RGB555),
         X(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_GUID),
+        X(MFT_CATEGORY_MULTIPLEXER),
         X(MFVideoFormat_A2R10G10B10),
+        X(MFT_CATEGORY_VIDEO_EFFECT),
         X(MFMediaType_Script),
         X(MFMediaType_Image),
         X(MFMediaType_HTML),
@@ -1904,8 +1932,10 @@ const char *debugstr_mf_guid(const GUID *guid)
         X(MFVideoFormat_H265),
         X(MFVideoFormat_HEVC),
         X(MFVideoFormat_HEVC_ES),
+        X(MFT_CATEGORY_AUDIO_EFFECT),
         X(MFVideoFormat_I420),
         X(MFVideoFormat_IYUV),
+        X(MFT_CATEGORY_VIDEO_DECODER),
         X(MFVideoFormat_M4S2),
         X(MFVideoFormat_MJPG),
         X(MFVideoFormat_MP43),
@@ -1918,8 +1948,8 @@ const char *debugstr_mf_guid(const GUID *guid)
         X(MFVideoFormat_NV12),
         X(MFVideoFormat_ORAW),
         X(MFAudioFormat_Opus),
-        X(MFVideoFormat_D16),
         X(MFAudioFormat_MPEG),
+        X(MFVideoFormat_D16),
         X(MFVideoFormat_P010),
         X(MFVideoFormat_P016),
         X(MFVideoFormat_P210),
@@ -1934,6 +1964,7 @@ const char *debugstr_mf_guid(const GUID *guid)
         X(MFVideoFormat_WMV2),
         X(MFVideoFormat_WMV3),
         X(MFVideoFormat_WVC1),
+        X(MFT_CATEGORY_OTHER),
         X(MFVideoFormat_Y210),
         X(MFVideoFormat_Y216),
         X(MFVideoFormat_Y410),
@@ -1967,7 +1998,9 @@ const char *debugstr_mf_guid(const GUID *guid)
         X(MFVideoFormat_v410),
         X(MFMediaType_Video),
         X(MFAudioFormat_AAC_HDCP),
+        X(MFT_CATEGORY_DEMULTIPLEXER),
         X(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID),
+        X(MFT_CATEGORY_VIDEO_ENCODER),
         X(MFAudioFormat_Dolby_AC3_HDCP),
         X(MFMediaType_Subtitle),
         X(MFMediaType_Stream),
@@ -1978,7 +2011,9 @@ const char *debugstr_mf_guid(const GUID *guid)
         X(MFAudioFormat_FLAC),
         X(MFAudioFormat_Dolby_DDPlus),
         X(MFMediaType_MultiplexedFrames),
+        X(MFT_CATEGORY_AUDIO_DECODER),
         X(MFAudioFormat_Base_HDCP),
+        X(MFT_CATEGORY_AUDIO_ENCODER),
         X(MFVideoFormat_Base_HDCP),
         X(MFVideoFormat_H264_HDCP),
         X(MFVideoFormat_HEVC_HDCP),
@@ -1986,6 +2021,7 @@ const char *debugstr_mf_guid(const GUID *guid)
         X(MFMediaType_Protected),
         X(MFVideoFormat_H264_ES),
         X(MFMediaType_Perception),
+        X(MFT_CATEGORY_VIDEO_PROCESSOR),
 #undef X
     };
     struct guid_def *ret = NULL;
@@ -8551,7 +8587,7 @@ struct dxgi_device_manager
     IMFDXGIDeviceManager IMFDXGIDeviceManager_iface;
     LONG refcount;
     UINT token;
-    IDXGIDevice *device;
+    IUnknown *device;
 
     unsigned int *handles;
     size_t count;
@@ -8614,7 +8650,7 @@ static ULONG WINAPI dxgi_device_manager_Release(IMFDXGIDeviceManager *iface)
     if (!refcount)
     {
         if (manager->device)
-            IDXGIDevice_Release(manager->device);
+            IUnknown_Release(manager->device);
         DeleteCriticalSection(&manager->cs);
         free(manager->handles);
         free(manager);
@@ -8690,7 +8726,7 @@ static HRESULT WINAPI dxgi_device_manager_GetVideoService(IMFDXGIDeviceManager *
         if (manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_INVALID)
             hr = MF_E_DXGI_NEW_VIDEO_DEVICE;
         else if (manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_OPEN)
-            hr = IDXGIDevice_QueryInterface(manager->device, riid, service);
+            hr = IUnknown_QueryInterface(manager->device, riid, service);
         else
             hr = E_HANDLE;
     }
@@ -8719,7 +8755,7 @@ static HRESULT WINAPI dxgi_device_manager_LockDevice(IMFDXGIDeviceManager *iface
         }
         else if (manager->locking_tid == GetCurrentThreadId())
         {
-            if (SUCCEEDED(hr = IDXGIDevice_QueryInterface(manager->device, riid, obj)))
+            if (SUCCEEDED(hr = IUnknown_QueryInterface(manager->device, riid, obj)))
                 dxgi_device_manager_lock_handle(manager, idx);
         }
         else if (manager->locking_tid && !block)
@@ -8737,7 +8773,7 @@ static HRESULT WINAPI dxgi_device_manager_LockDevice(IMFDXGIDeviceManager *iface
             {
                 if (manager->handles[idx] & DXGI_DEVICE_HANDLE_FLAG_INVALID)
                     hr = MF_E_DXGI_NEW_VIDEO_DEVICE;
-                else if (SUCCEEDED(hr = IDXGIDevice_QueryInterface(manager->device, riid, obj)))
+                else if (SUCCEEDED(hr = IUnknown_QueryInterface(manager->device, riid, obj)))
                 {
                     manager->locking_tid = GetCurrentThreadId();
                     dxgi_device_manager_lock_handle(manager, idx);
@@ -8795,7 +8831,7 @@ static HRESULT WINAPI dxgi_device_manager_OpenDeviceHandle(IMFDXGIDeviceManager 
 static HRESULT WINAPI dxgi_device_manager_ResetDevice(IMFDXGIDeviceManager *iface, IUnknown *device, UINT token)
 {
     struct dxgi_device_manager *manager = impl_from_IMFDXGIDeviceManager(iface);
-    IDXGIDevice *dxgi_device;
+    IUnknown *d3d_device;
     size_t i;
 
     TRACE("%p, %p, %u.\n", iface, device, token);
@@ -8803,8 +8839,14 @@ static HRESULT WINAPI dxgi_device_manager_ResetDevice(IMFDXGIDeviceManager *ifac
     if (!device || token != manager->token)
         return E_INVALIDARG;
 
-    if (FAILED(IUnknown_QueryInterface(device, &IID_IDXGIDevice, (void **)&dxgi_device)))
-        return E_INVALIDARG;
+    if (FAILED(IUnknown_QueryInterface(device, &IID_ID3D11Device, (void **)&d3d_device)))
+    {
+        if (FAILED(IUnknown_QueryInterface(device, &IID_ID3D12Device, (void **)&d3d_device)))
+        {
+            WARN("Unsupported device interface.\n");
+            return E_INVALIDARG;
+        }
+    }
 
     EnterCriticalSection(&manager->cs);
 
@@ -8817,9 +8859,9 @@ static HRESULT WINAPI dxgi_device_manager_ResetDevice(IMFDXGIDeviceManager *ifac
         }
         manager->locking_tid = 0;
         manager->locks = 0;
-        IDXGIDevice_Release(manager->device);
+        IUnknown_Release(manager->device);
     }
-    manager->device = dxgi_device;
+    manager->device = d3d_device;
 
     LeaveCriticalSection(&manager->cs);
 

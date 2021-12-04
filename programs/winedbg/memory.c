@@ -219,11 +219,11 @@ void memory_examine(const struct dbg_lvalue *lvalue, int count, char format)
     case 'a':
         if (sizeof(DWORD_PTR) == 4)
         {
-            DO_DUMP(DWORD_PTR, 4, " %8.8lx");
+            DO_DUMP(DWORD_PTR, 4, " %8.8Ix");
         }
         else
         {
-            DO_DUMP(DWORD_PTR, 2, " %16.16lx");
+            DO_DUMP(DWORD_PTR, 2, " %16.16Ix");
         }
         break;
     case 'c': DO_DUMP2(char, 32, " %c", (_v < 0x20) ? ' ' : _v); break;
@@ -337,7 +337,8 @@ static void dbg_print_hex(DWORD size, ULONGLONG sv)
     if (!sv)
         dbg_printf("0");
     else
-        dbg_printf("%#I64x", sv);
+        /* clear unneeded high bits, esp. sign extension */
+        dbg_printf("%#I64x", sv & (~0LLU >> (64 - 8 * size)));
 }
 
 static void print_typed_basic(const struct dbg_lvalue* lvalue)
@@ -439,18 +440,14 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
         {
             BOOL        ok = FALSE;
 
-            /* FIXME: it depends on underlying type for enums 
-             * (not supported yet in dbghelp)
-             * Assuming 4 as for an int
-             */
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, 4, TRUE, &val_int)) return;
+            if (!types_get_info(&type, TI_GET_LENGTH, &size64) ||
+                !dbg_curr_process->be_cpu->fetch_integer(lvalue, size64, TRUE, &val_int)) return;
 
             if (types_get_info(&type, TI_GET_CHILDRENCOUNT, &count))
             {
                 char                    buffer[sizeof(TI_FINDCHILDREN_PARAMS) + 256 * sizeof(DWORD)];
                 TI_FINDCHILDREN_PARAMS* fcp = (TI_FINDCHILDREN_PARAMS*)buffer;
                 WCHAR*                  ptr;
-                char                    tmp[256];
                 VARIANT                 variant;
                 int                     i;
 
@@ -466,19 +463,18 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
                             sub_type.id = fcp->ChildId[i];
                             if (!types_get_info(&sub_type, TI_GET_VALUE, &variant)) 
                                 continue;
-                            switch (variant.n1.n2.vt)
+                            switch (V_VT(&variant))
                             {
-                            case VT_I4: ok = (val_int == variant.n1.n2.n3.lVal); break;
-                            default: WINE_FIXME("Unsupported variant type (%u)\n", variant.n1.n2.vt);
+                            case VT_I1: ok = (val_int == V_I1(&variant)); break;
+                            case VT_I2: ok = (val_int == V_I2(&variant)); break;
+                            case VT_I4: ok = (val_int == V_I4(&variant)); break;
+                            case VT_I8: ok = (val_int == V_I8(&variant)); break;
+                            default: WINE_FIXME("Unsupported variant type (%u)\n", V_VT(&variant));
                             }
-                            if (ok)
+                            if (ok && types_get_info(&sub_type, TI_GET_SYMNAME, &ptr) && ptr)
                             {
-                                ptr = NULL;
-                                types_get_info(&sub_type, TI_GET_SYMNAME, &ptr);
-                                if (!ptr) continue;
-                                WideCharToMultiByte(CP_ACP, 0, ptr, -1, tmp, sizeof(tmp), NULL, NULL);
+                                dbg_printf("%ls", ptr);
                                 HeapFree(GetProcessHeap(), 0, ptr);
-                                dbg_printf("%s", tmp);
                                 count = 0; /* so that we'll get away from outer loop */
                                 break;
                             }
@@ -583,28 +579,42 @@ void print_address(const ADDRESS64* addr, BOOLEAN with_line)
 {
     char                buffer[sizeof(SYMBOL_INFO) + 256];
     SYMBOL_INFO*        si = (SYMBOL_INFO*)buffer;
-    void*               lin = memory_to_linear_addr(addr);
+    DWORD_PTR           lin = (DWORD_PTR)memory_to_linear_addr(addr);
     DWORD64             disp64;
     DWORD               disp;
+    IMAGEHLP_MODULE     im;
 
     print_bare_address(addr);
 
     si->SizeOfStruct = sizeof(*si);
     si->MaxNameLen   = 256;
-    if (!SymFromAddr(dbg_curr_process->handle, (DWORD_PTR)lin, &disp64, si)) return;
-    dbg_printf(" %s", si->Name);
-    if (disp64) dbg_printf("+0x%I64x", disp64);
+    im.SizeOfStruct  = 0;
+    if (SymFromAddr(dbg_curr_process->handle, lin, &disp64, si) && disp64 < si->Size)
+    {
+        dbg_printf(" %s", si->Name);
+        if (disp64) dbg_printf("+0x%I64x", disp64);
+    }
+    else
+    {
+        im.SizeOfStruct = sizeof(im);
+        if (!SymGetModuleInfo(dbg_curr_process->handle, lin, &im)) return;
+        dbg_printf(" %s", im.ModuleName);
+        if (lin > im.BaseOfImage)
+            dbg_printf("+0x%Ix", lin - im.BaseOfImage);
+    }
     if (with_line)
     {
         IMAGEHLP_LINE64             il;
-        IMAGEHLP_MODULE             im;
 
         il.SizeOfStruct = sizeof(il);
-        if (SymGetLineFromAddr64(dbg_curr_process->handle, (DWORD_PTR)lin, &disp, &il))
+        if (SymGetLineFromAddr64(dbg_curr_process->handle, lin, &disp, &il))
             dbg_printf(" [%s:%u]", il.FileName, il.LineNumber);
-        im.SizeOfStruct = sizeof(im);
-        if (SymGetModuleInfo(dbg_curr_process->handle, (DWORD_PTR)lin, &im))
-            dbg_printf(" in %s", im.ModuleName);
+        if (im.SizeOfStruct == 0) /* don't display again module if address is in module+disp form */
+        {
+            im.SizeOfStruct = sizeof(im);
+            if (SymGetModuleInfo(dbg_curr_process->handle, lin, &im))
+                dbg_printf(" in %s", im.ModuleName);
+        }
     }
 }
 

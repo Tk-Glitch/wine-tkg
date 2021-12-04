@@ -601,9 +601,48 @@ HKL WINAPI NtUserActivateKeyboardLayout( HKL layout, UINT flags )
     return unix_funcs->pNtUserActivateKeyboardLayout( layout, flags );
 }
 
+ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
+{
+    return unix_funcs->pNtUserCallOneParam( arg, code );
+}
+
+ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code )
+{
+    return unix_funcs->pNtUserCallTwoParam( arg1, arg2, code );
+}
+
+LONG WINAPI NtUserChangeDisplaySettings( UNICODE_STRING *devname, DEVMODEW *devmode, HWND hwnd,
+                                         DWORD flags, void *lparam )
+{
+    return unix_funcs->pNtUserChangeDisplaySettings( devname, devmode, hwnd, flags, lparam );
+}
+
 INT WINAPI NtUserCountClipboardFormats(void)
 {
     return unix_funcs->pNtUserCountClipboardFormats();
+}
+
+BOOL WINAPI NtUserEnumDisplayDevices( UNICODE_STRING *device, DWORD index,
+                                      DISPLAY_DEVICEW *info, DWORD flags )
+{
+    return unix_funcs->pNtUserEnumDisplayDevices( device, index, info, flags );
+}
+
+BOOL WINAPI NtUserEnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc, LPARAM lp )
+{
+    return unix_funcs->pNtUserEnumDisplayMonitors( hdc, rect, proc, lp );
+}
+
+BOOL WINAPI NtUserEnumDisplaySettings( UNICODE_STRING *device, DWORD mode,
+                                       DEVMODEW *dev_mode, DWORD flags )
+{
+    return unix_funcs->pNtUserEnumDisplaySettings( device, mode, dev_mode, flags );
+}
+
+LONG WINAPI NtUserGetDisplayConfigBufferSizes( UINT32 flags, UINT32 *num_path_info,
+                                               UINT32 *num_mode_info )
+{
+    return unix_funcs->pNtUserGetDisplayConfigBufferSizes( flags, num_path_info, num_mode_info );
 }
 
 UINT WINAPI NtUserGetKeyboardLayoutList( INT size, HKL *layouts )
@@ -642,6 +681,16 @@ BOOL WINAPI NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const R
     return unix_funcs->pNtUserScrollDC( hdc, dx, dy, scroll, clip, ret_update_rgn, update_rect );
 }
 
+HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE hpal, WORD bkg )
+{
+    return unix_funcs->pNtUserSelectPalette( hdc, hpal, bkg );
+}
+
+INT WINAPI NtUserShowCursor( BOOL show )
+{
+    return unix_funcs->pNtUserShowCursor( show );
+}
+
 INT WINAPI NtUserToUnicodeEx( UINT virt, UINT scan, const BYTE *state,
                               WCHAR *str, int size, UINT flags, HKL layout )
 {
@@ -656,16 +705,6 @@ BOOL WINAPI NtUserUnregisterHotKey( HWND hwnd, INT id )
 WORD WINAPI NtUserVkKeyScanEx( WCHAR chr, HKL layout )
 {
     return unix_funcs->pNtUserVkKeyScanEx( chr, layout );
-}
-
-UINT WINAPI GDIRealizePalette( HDC hdc )
-{
-    return unix_funcs->pGDIRealizePalette( hdc );
-}
-
-HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD bkg )
-{
-    return unix_funcs->pGDISelectPalette( hdc, hpal, bkg );
 }
 
 DWORD_PTR WINAPI GetDCHook( HDC hdc, DCHOOKPROC *proc )
@@ -809,28 +848,12 @@ static BOOL WINAPI call_EnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPRO
     return pEnumDisplayMonitors && pEnumDisplayMonitors( hdc, rect, proc, lparam );
 }
 
-static BOOL WINAPI call_EnumDisplaySettingsW( const WCHAR *device, DWORD mode, DEVMODEW *devmode )
-{
-    static BOOL (WINAPI *pEnumDisplaySettingsW)(LPCWSTR, DWORD, LPDEVMODEW );
-    if (!pEnumDisplaySettingsW)
-        pEnumDisplaySettingsW = get_user_proc( "EnumDisplaySettingsW", FALSE );
-    return pEnumDisplaySettingsW && pEnumDisplaySettingsW( device, mode, devmode );
-}
-
 static BOOL WINAPI call_RedrawWindow( HWND hwnd, const RECT *rect, HRGN rgn, UINT flags )
 {
     static BOOL (WINAPI *pRedrawWindow)( HWND, const RECT*, HRGN, UINT );
     if (!pRedrawWindow)
         pRedrawWindow = get_user_proc( "RedrawWindow", FALSE );
     return pRedrawWindow && pRedrawWindow( hwnd, rect, rgn, flags );
-}
-
-static DPI_AWARENESS_CONTEXT WINAPI call_SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT ctx )
-{
-    static DPI_AWARENESS_CONTEXT (WINAPI *pSetThreadDpiAwarenessContext)( DPI_AWARENESS_CONTEXT );
-    if (!pSetThreadDpiAwarenessContext)
-        pSetThreadDpiAwarenessContext = get_user_proc( "SetThreadDpiAwarenessContext", FALSE );
-    return pSetThreadDpiAwarenessContext ? pSetThreadDpiAwarenessContext( ctx ) : 0;
 }
 
 static HWND WINAPI call_WindowFromDC( HDC hdc )
@@ -841,7 +864,7 @@ static HWND WINAPI call_WindowFromDC( HDC hdc )
     return pWindowFromDC ? pWindowFromDC( hdc ) : NULL;
 }
 
-static const struct user_callbacks user_callbacks =
+static const struct user_callbacks user_funcs =
 {
     call_GetDesktopWindow,
     call_GetDpiForSystem,
@@ -849,14 +872,12 @@ static const struct user_callbacks user_callbacks =
     call_GetSystemMetrics,
     call_GetWindowRect,
     call_EnumDisplayMonitors,
-    call_EnumDisplaySettingsW,
     call_RedrawWindow,
-    call_SetThreadDpiAwarenessContext,
     call_WindowFromDC,
 };
 
 extern void wrappers_init( unixlib_handle_t handle )
 {
-    const void *args = &user_callbacks;
+    const void *args = &user_funcs;
     if (!__wine_unix_call( handle, 1, &args )) unix_funcs = args;
 }

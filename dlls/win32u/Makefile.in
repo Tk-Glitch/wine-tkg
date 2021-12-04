@@ -13,6 +13,7 @@ C_SRCS = \
 	brush.c \
 	clipboard.c \
 	clipping.c \
+	cursoricon.c \
 	dc.c \
 	dib.c \
 	dibdrv/bitblt.c \
@@ -37,6 +38,7 @@ C_SRCS = \
 	printdrv.c \
 	region.c \
 	syscall.c \
+	sysparams.c \
 	vertical.c \
 	vulkan.c \
 	window.c \

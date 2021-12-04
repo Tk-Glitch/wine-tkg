@@ -1080,6 +1080,10 @@ static HRESULT check_property( struct dinput_device *impl, const GUID *guid, con
             if (!impl->object_properties) return DIERR_UNSUPPORTED;
             break;
 
+        case (DWORD_PTR)DIPROP_FFLOAD:
+            if (!(impl->caps.dwFlags & DIDC_FORCEFEEDBACK)) return DIERR_UNSUPPORTED;
+            if (!impl->acquired || !(impl->dwCoopLevel & DISCL_EXCLUSIVE)) return DIERR_NOTEXCLUSIVEACQUIRED;
+            /* fallthrough */
         case (DWORD_PTR)DIPROP_PRODUCTNAME:
         case (DWORD_PTR)DIPROP_INSTANCENAME:
         case (DWORD_PTR)DIPROP_VIDPID:
@@ -1197,6 +1201,7 @@ static HRESULT dinput_device_get_property( IDirectInputDevice8W *iface, const GU
     case (DWORD_PTR)DIPROP_VIDPID:
     case (DWORD_PTR)DIPROP_JOYSTICKID:
     case (DWORD_PTR)DIPROP_GUIDANDPATH:
+    case (DWORD_PTR)DIPROP_FFLOAD:
         return impl->vtbl->get_property( iface, LOWORD( guid ), header, NULL );
 
     case (DWORD_PTR)DIPROP_RANGE:
@@ -1781,9 +1786,24 @@ static HRESULT WINAPI dinput_device_GetEffectInfo( IDirectInputDevice8W *iface, 
 
 static HRESULT WINAPI dinput_device_GetForceFeedbackState( IDirectInputDevice8W *iface, DWORD *out )
 {
-    FIXME( "iface %p, out %p stub!\n", iface, out );
+    struct dinput_device *impl = impl_from_IDirectInputDevice8W( iface );
+    HRESULT hr = DI_OK;
+
+    TRACE( "iface %p, out %p.\n", iface, out );
+
     if (!out) return E_POINTER;
-    return DIERR_UNSUPPORTED;
+    *out = 0;
+
+    if (!(impl->caps.dwFlags & DIDC_FORCEFEEDBACK)) return DIERR_UNSUPPORTED;
+
+    EnterCriticalSection( &impl->crit );
+    if (!impl->acquired || !(impl->dwCoopLevel & DISCL_EXCLUSIVE))
+        hr = DIERR_NOTEXCLUSIVEACQUIRED;
+    else
+        *out = impl->force_feedback_state;
+    LeaveCriticalSection( &impl->crit );
+
+    return hr;
 }
 
 static HRESULT WINAPI dinput_device_SendForceFeedbackCommand( IDirectInputDevice8W *iface, DWORD command )
@@ -2221,6 +2241,7 @@ HRESULT dinput_device_alloc( SIZE_T size, const struct dinput_device_vtbl *vtbl,
     This->caps.dwFlags = DIDC_ATTACHED | DIDC_EMULATED;
     This->device_format = format;
     This->device_gain = 10000;
+    This->force_feedback_state = DIGFFS_STOPPED | DIGFFS_EMPTY;
     InitializeCriticalSection( &This->crit );
     This->dinput = dinput;
     IDirectInput_AddRef( &dinput->IDirectInput7A_iface );

@@ -147,6 +147,7 @@ static void * const syscalls[] =
     NtCancelTimer,
     NtClearEvent,
     NtClose,
+    NtCompareObjects,
     NtCompleteConnectPort,
     NtConnectPort,
     NtContinue,
@@ -391,6 +392,7 @@ const char *data_dir = NULL;
 const char *build_dir = NULL;
 const char *config_dir = NULL;
 const char **dll_paths = NULL;
+const char **system_dll_paths = NULL;
 const char *user_name = NULL;
 SECTION_IMAGE_INFORMATION main_image_info = { NULL };
 static HMODULE ntdll_module;
@@ -549,6 +551,27 @@ static void set_dll_path(void)
 }
 
 
+static void set_system_dll_path(void)
+{
+    const char *p, *path = SYSTEMDLLPATH;
+    int count = 0;
+
+    if (path && *path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
+
+    system_dll_paths = malloc( (count + 1) * sizeof(*system_dll_paths) );
+    count = 0;
+
+    if (path && *path)
+    {
+        char *path_copy = strdup(path);
+        for (p = strtok( path_copy, ":" ); p; p = strtok( NULL, ":" ))
+            system_dll_paths[count++] = strdup( p );
+        free( path_copy );
+    }
+    system_dll_paths[count] = NULL;
+}
+
+
 static void set_home_dir(void)
 {
     const char *home = getenv( "HOME" );
@@ -623,6 +646,7 @@ static void init_paths( char *argv[] )
     }
 
     set_dll_path();
+    set_system_dll_path();
     set_home_dir();
     set_config_dir();
 }
@@ -1723,16 +1747,6 @@ NTSTATUS load_builtin( const pe_image_info_t *image_info, WCHAR *filename,
     SECTION_IMAGE_INFORMATION info;
     enum loadorder loadorder;
 
-    /* remove .fake extension if present */
-    if (image_info->image_flags & IMAGE_FLAGS_WineFakeDll)
-    {
-        static const WCHAR fakeW[] = {'.','f','a','k','e',0};
-        WCHAR *ext = wcsrchr( filename, '.' );
-
-        TRACE( "%s is a fake Wine dll\n", debugstr_w(filename) );
-        if (ext && !wcsicmp( ext, fakeW )) *ext = 0;
-    }
-
     init_unicode_string( &nt_name, filename );
     loadorder = get_load_order( &nt_name );
 
@@ -1745,6 +1759,7 @@ NTSTATUS load_builtin( const pe_image_info_t *image_info, WCHAR *filename,
     }
     else if (image_info->image_flags & IMAGE_FLAGS_WineFakeDll)
     {
+        TRACE( "%s is a fake Wine dll\n", debugstr_w(filename) );
         if (loadorder == LO_NATIVE) return STATUS_DLL_NOT_FOUND;
         loadorder = LO_BUILTIN;  /* builtin with no fallback since mapping a fake dll is not useful */
     }
@@ -2144,14 +2159,14 @@ static ULONG_PTR get_image_address(void)
  */
 static struct unix_funcs unix_funcs =
 {
-#ifdef __aarch64__
-    NtCurrentTeb,
-#endif
-    RtlGetSystemTimePrecise,
     load_so_dll,
     init_builtin_dll,
     init_unix_lib,
     unwind_builtin_dll,
+    RtlGetSystemTimePrecise,
+#ifdef __aarch64__
+    NtCurrentTeb,
+#endif
 };
 
 BOOL ac_odyssey;

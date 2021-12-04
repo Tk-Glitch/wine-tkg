@@ -779,11 +779,11 @@
 @ stub NtUserCallMsgFilter
 @ stub NtUserCallNextHookEx
 @ stub NtUserCallNoParam
-@ stub NtUserCallOneParam
-@ stub NtUserCallTwoParam
+@ stdcall NtUserCallOneParam(long long)
+@ stdcall NtUserCallTwoParam(long long long)
 @ stub NtUserCanBrokerForceForeground
 @ stub NtUserChangeClipboardChain
-@ stub NtUserChangeDisplaySettings
+@ stdcall NtUserChangeDisplaySettings(ptr ptr long long ptr)
 @ stub NtUserChangeWindowMessageFilterEx
 @ stub NtUserCheckAccessForIntegrityLevel
 @ stub NtUserCheckMenuItem
@@ -875,9 +875,9 @@
 @ stub NtUserEndDeferWindowPosEx
 @ stub NtUserEndMenu
 @ stub NtUserEndPaint
-@ stub NtUserEnumDisplayDevices
-@ stub NtUserEnumDisplayMonitors
-@ stub NtUserEnumDisplaySettings
+@ stdcall NtUserEnumDisplayDevices(ptr long ptr long)
+@ stdcall NtUserEnumDisplayMonitors(long ptr ptr long)
+@ stdcall NtUserEnumDisplaySettings(ptr long ptr long)
 @ stub NtUserEvent
 @ stub NtUserExcludeUpdateRgn
 @ stub NtUserFillWindow
@@ -912,7 +912,7 @@
 @ stub NtUserGetControlColor
 @ stub NtUserGetCurrentDpiInfoForWindow
 @ stub NtUserGetCurrentInputMessageSource
-@ stub NtUserGetCursor
+@ stdcall -syscall NtUserGetCursor()
 @ stub NtUserGetCursorFrameInfo
 @ stub NtUserGetCursorInfo
 @ stub NtUserGetDC
@@ -921,7 +921,7 @@
 @ stub NtUserGetDesktopID
 @ stub NtUserGetDisplayAutoRotationPreferences
 @ stub NtUserGetDisplayAutoRotationPreferencesByProcessId
-@ stub NtUserGetDisplayConfigBufferSizes
+@ stdcall NtUserGetDisplayConfigBufferSizes(long ptr ptr)
 @ stub NtUserGetDoubleClickTime
 @ stub NtUserGetDpiForCurrentProcess
 @ stub NtUserGetDpiForMonitor
@@ -948,7 +948,7 @@
 @ stdcall -syscall NtUserGetKeyState(long)
 @ stdcall -syscall NtUserGetKeyboardLayout(long)
 @ stdcall NtUserGetKeyboardLayoutList(long ptr)
-@ stub NtUserGetKeyboardLayoutName
+@ stdcall -syscall NtUserGetKeyboardLayoutName(ptr)
 @ stdcall -syscall NtUserGetKeyboardState(ptr)
 @ stdcall -syscall NtUserGetLayeredWindowAttributes(long ptr ptr ptr)
 @ stub NtUserGetListBoxInfo
@@ -1157,7 +1157,7 @@
 @ stub NtUserSBGetParms
 @ stdcall NtUserScrollDC(long long long ptr ptr long ptr)
 @ stub NtUserScrollWindowEx
-@ stub NtUserSelectPalette
+@ stdcall NtUserSelectPalette(long long long)
 @ stub NtUserSendEventMessage
 @ stub NtUserSendInput
 @ stub NtUserSendInteractiveControlHapticsReport
@@ -1258,7 +1258,7 @@
 @ stub NtUserSetWindowsHookAW
 @ stub NtUserSetWindowsHookEx
 @ stub NtUserShowCaret
-@ stub NtUserShowCursor
+@ stdcall NtUserShowCursor(long)
 @ stub NtUserShowScrollBar
 @ stub NtUserShowSystemCursor
 @ stub NtUserShowWindow
@@ -1324,13 +1324,11 @@
 @ stdcall GetDCHook(long ptr)
 @ stdcall SetDCHook(long ptr long)
 @ stdcall SetHookFlags(long long)
-@ stdcall GDISelectPalette(long long long)
-@ stdcall GDIRealizePalette(long)
 @ cdecl __wine_make_gdi_object_system(long long)
 @ cdecl __wine_set_visible_region(long long ptr ptr ptr)
 
 # Graphics drivers
-@ cdecl __wine_set_display_driver(long)
+@ cdecl __wine_set_display_driver(ptr long)
 
 # OpenGL
 @ cdecl __wine_get_wgl_driver(long long)

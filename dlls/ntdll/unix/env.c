@@ -612,7 +612,7 @@ static unsigned int decode_utf8_char( unsigned char ch, const char **str, const 
 
 
 /******************************************************************
- *      ntdll_umbstowcs
+ *      ntdll_umbstowcs  (ntdll.so)
  */
 DWORD ntdll_umbstowcs( const char *src, DWORD srclen, WCHAR *dst, DWORD dstlen )
 {
@@ -657,7 +657,7 @@ DWORD ntdll_umbstowcs( const char *src, DWORD srclen, WCHAR *dst, DWORD dstlen )
 
 
 /******************************************************************
- *      ntdll_wcstoumbs
+ *      ntdll_wcstoumbs  (ntdll.so)
  */
 int ntdll_wcstoumbs( const WCHAR *src, DWORD srclen, char *dst, DWORD dstlen, BOOL strict )
 {
@@ -758,8 +758,35 @@ int ntdll_wcstoumbs( const WCHAR *src, DWORD srclen, char *dst, DWORD dstlen, BO
 }
 
 
+/**********************************************************************
+ *      ntdll_wcsicmp  (ntdll.so)
+ */
+int ntdll_wcsicmp( const WCHAR *str1, const WCHAR *str2 )
+{
+    int ret;
+    for (;;)
+    {
+        if ((ret = ntdll_towupper( *str1 ) - ntdll_towupper( *str2 )) || !*str1) return ret;
+        str1++;
+        str2++;
+    }
+}
+
+
+/**********************************************************************
+ *      ntdll_wcsnicmp  (ntdll.so)
+ */
+int ntdll_wcsnicmp( const WCHAR *str1, const WCHAR *str2, int n )
+{
+    int ret;
+    for (ret = 0; n > 0; n--, str1++, str2++)
+        if ((ret = ntdll_towupper(*str1) - ntdll_towupper(*str2)) || !*str1) break;
+    return ret;
+}
+
+
 /***********************************************************************
- *           ntdll_get_build_dir
+ *           ntdll_get_build_dir  (ntdll.so)
  */
 const char *ntdll_get_build_dir(void)
 {
@@ -768,7 +795,7 @@ const char *ntdll_get_build_dir(void)
 
 
 /***********************************************************************
- *           ntdll_get_data_dir
+ *           ntdll_get_data_dir  (ntdll.so)
  */
 const char *ntdll_get_data_dir(void)
 {
@@ -1281,6 +1308,35 @@ static void add_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size, const char *na
 }
 
 
+static void add_system_dll_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size )
+{
+    WCHAR *path = NULL;
+    size_t path_len = 0;
+    DWORD i;
+
+    for (i = 0; system_dll_paths[i]; ++i)
+    {
+        WCHAR *nt_name = NULL;
+
+        if (!unix_to_nt_file_name( system_dll_paths[i], &nt_name ))
+        {
+            size_t len = wcslen( nt_name );
+            path = realloc( path, (path_len + len + 1) * sizeof(WCHAR) );
+            memcpy( path + path_len, nt_name, len * sizeof(WCHAR) );
+            path[path_len + len] = ';';
+            path_len += len + 1;
+            free( nt_name );
+        }
+    }
+    if (path_len)
+    {
+        path[path_len - 1] = 0;
+        append_envW( env, pos, size, "WINESYSTEMDLLPATH", path );
+        free( path );
+    }
+}
+
+
 /*************************************************************************
  *		add_dynamic_environment
  *
@@ -1303,6 +1359,7 @@ static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
     }
     sprintf( str, "WINEDLLDIR%u", i );
     append_envW( env, pos, size, str, NULL );
+    add_system_dll_path_var( env, pos, size );
     append_envA( env, pos, size, "WINEUSERNAME", user_name );
     append_envA( env, pos, size, "WINEDLLOVERRIDES", overrides );
     if (unix_cp.data)
@@ -1321,7 +1378,7 @@ static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
 
 static WCHAR *expand_value( WCHAR *env, SIZE_T size, const WCHAR *src, SIZE_T src_len )
 {
-    SIZE_T len, retlen = src_len, count = 0;
+    SIZE_T len, retlen = src_len + 1, count = 0;
     const WCHAR *var;
     WCHAR *ret;
 
@@ -1364,7 +1421,7 @@ static WCHAR *expand_value( WCHAR *env, SIZE_T size, const WCHAR *src, SIZE_T sr
         }
         if (len >= retlen - count)
         {
-            retlen *= 2;
+            retlen = max( retlen * 2, count + len + 1 );
             ret = realloc( ret, retlen * sizeof(WCHAR) );
         }
         memcpy( ret + count, var, len * sizeof(WCHAR) );
@@ -2070,6 +2127,15 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module )
     peb->ImageSubSystem             = main_image_info.SubSystemType;
     peb->ImageSubSystemMajorVersion = main_image_info.MajorSubsystemVersion;
     peb->ImageSubSystemMinorVersion = main_image_info.MinorSubsystemVersion;
+
+#ifdef _WIN64
+    if (main_image_info.Machine != current_machine)
+    {
+        NtCurrentTeb()->WowTebOffset = teb_offset;
+        NtCurrentTeb()->Tib.ExceptionList = (void *)((char *)NtCurrentTeb() + teb_offset);
+        set_thread_id( NtCurrentTeb(),  GetCurrentProcessId(), GetCurrentThreadId() );
+    }
+#endif
 
     load_global_options( &params->ImagePathName );
 

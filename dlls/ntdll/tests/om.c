@@ -71,6 +71,7 @@ static NTSTATUS (WINAPI *pNtOpenProcessToken)(HANDLE,DWORD,HANDLE*);
 static NTSTATUS (WINAPI *pNtOpenThreadToken)(HANDLE,DWORD,BOOLEAN,HANDLE*);
 static NTSTATUS (WINAPI *pNtDuplicateToken)(HANDLE,ACCESS_MASK,OBJECT_ATTRIBUTES*,SECURITY_IMPERSONATION_LEVEL,TOKEN_TYPE,HANDLE*);
 static NTSTATUS (WINAPI *pNtDuplicateObject)(HANDLE,HANDLE,HANDLE,HANDLE*,ACCESS_MASK,ULONG,ULONG);
+static NTSTATUS (WINAPI *pNtCompareObjects)(HANDLE,HANDLE);
 
 #define KEYEDEVENT_WAIT       0x0001
 #define KEYEDEVENT_WAKE       0x0002
@@ -2388,6 +2389,117 @@ static void test_get_next_thread(void)
     CloseHandle(thread);
 }
 
+static void test_globalroot(void)
+{
+    NTSTATUS status;
+    IO_STATUS_BLOCK iosb;
+    UNICODE_STRING str;
+    OBJECT_ATTRIBUTES attr;
+    HANDLE h;
+    WCHAR buffer[256];
+    ULONG len, full_len, i;
+    static const struct { const WCHAR *name, *target; } symlinks[] = {
+        { L"\\??\\GLOBALROOT", L"" },
+        { L"\\??\\GLOBALROOT\\??\\GLOBALROOT", L"" },
+        { L"\\??\\GLOBALROOT\\??\\GLOBALROOT\\??\\GLOBALROOT", L"" },
+        { L"\\??\\GLOBALROOT\\DosDevices", L"\\??" },
+        { L"\\??\\GLOBALROOT\\BaseNamedObjects\\Global", NULL },
+    };
+
+    for (i = 0; i < ARRAY_SIZE(symlinks); i++)
+    {
+        pRtlInitUnicodeString(&str, symlinks[i].name);
+        InitializeObjectAttributes(&attr, &str, 0, 0, NULL);
+        status = pNtOpenSymbolicLinkObject( &h, SYMBOLIC_LINK_QUERY, &attr );
+        ok(status == STATUS_SUCCESS, "NtOpenSymbolicLinkObject failed %08x\n", status);
+
+        str.Buffer = buffer;
+        str.MaximumLength = sizeof(buffer);
+        len = 0xdeadbeef;
+        memset( buffer, 0xaa, sizeof(buffer) );
+        status = pNtQuerySymbolicLinkObject( h, &str, &len);
+        ok( status == STATUS_SUCCESS, "NtQuerySymbolicLinkObject failed %08x\n", status );
+        full_len = str.Length + sizeof(WCHAR);
+        ok( len == full_len, "bad length %u (expected %u)\n", len, full_len );
+        ok( buffer[len / sizeof(WCHAR) - 1] == 0, "no terminating null\n" );
+
+        if (symlinks[i].target)
+        {
+            ok( compare_unicode_string( &str, symlinks[i].target ),
+                "symlink %s: target expected %s, got %s\n",
+                debugstr_w( symlinks[i].name ),
+                debugstr_w( symlinks[i].target ),
+                debugstr_w( str.Buffer ) );
+        }
+
+        pNtClose(h);
+    }
+
+    pRtlInitUnicodeString(&str, L"\\??\\GLOBALROOT\\Device\\Null");
+    InitializeObjectAttributes(&attr, &str, OBJ_CASE_INSENSITIVE, 0, NULL);
+    status = pNtOpenFile(&h, GENERIC_READ | GENERIC_WRITE, &attr, &iosb,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE, 0);
+    ok(status == STATUS_SUCCESS,
+       "expected STATUS_SUCCESS, got %08x\n", status);
+
+    test_object_type(h, L"File");
+
+    pNtClose(h);
+}
+
+static void test_object_identity(void)
+{
+    NTSTATUS status;
+    HANDLE h1, h2;
+
+    if (!pNtCompareObjects)
+    {
+        skip("NtCompareObjects is not available.\n");
+        return;
+    }
+
+    status = pNtCompareObjects( GetCurrentProcess(), GetCurrentProcess() );
+    ok( status == STATUS_SUCCESS, "comparing GetCurrentProcess() to self failed with %08x\n", status );
+
+    status = pNtCompareObjects( GetCurrentThread(), GetCurrentThread() );
+    ok( status == STATUS_SUCCESS, "comparing GetCurrentThread() to self failed with %08x\n", status );
+
+    status = pNtCompareObjects( GetCurrentProcess(), GetCurrentThread() );
+    ok( status == STATUS_NOT_SAME_OBJECT, "comparing GetCurrentProcess() to GetCurrentThread() returned %08x\n", status );
+
+    h1 = NULL;
+    status = pNtDuplicateObject( GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
+                                 &h1, 0, 0, DUPLICATE_SAME_ACCESS );
+    ok( status == STATUS_SUCCESS, "failed to duplicate current process handle: %08x\n", status);
+
+    status = pNtCompareObjects( GetCurrentProcess(), h1 );
+    ok( status == STATUS_SUCCESS, "comparing GetCurrentProcess() with %p failed with %08x\n", h1, status );
+
+    pNtClose( h1 );
+
+    h1 = CreateFileA( "\\\\.\\NUL", GENERIC_ALL, 0, NULL, OPEN_EXISTING, 0, 0 );
+    ok( h1 != INVALID_HANDLE_VALUE, "CreateFile failed (%d)\n", GetLastError() );
+
+    h2 = NULL;
+    status = pNtDuplicateObject( GetCurrentProcess(), h1, GetCurrentProcess(),
+                                  &h2, 0, 0, DUPLICATE_SAME_ACCESS );
+    ok( status == STATUS_SUCCESS, "failed to duplicate handle %p: %08x\n", h1, status);
+
+    status = pNtCompareObjects( h1, h2 );
+    ok( status == STATUS_SUCCESS, "comparing %p with %p failed with %08x\n", h1, h2, status );
+
+    pNtClose( h2 );
+
+    h2 = CreateFileA( "\\\\.\\NUL", GENERIC_ALL, 0, NULL, OPEN_EXISTING, 0, 0 );
+    ok( h2 != INVALID_HANDLE_VALUE, "CreateFile failed (%d)\n", GetLastError() );
+
+    status = pNtCompareObjects( h1, h2 );
+    ok( status == STATUS_NOT_SAME_OBJECT, "comparing %p with %p returned %08x\n", h1, h2, status );
+
+    pNtClose( h2 );
+    pNtClose( h1 );
+}
+
 START_TEST(om)
 {
     HMODULE hntdll = GetModuleHandleA("ntdll.dll");
@@ -2431,6 +2543,7 @@ START_TEST(om)
     pNtOpenThreadToken      =  (void *)GetProcAddress(hntdll, "NtOpenThreadToken");
     pNtDuplicateToken       =  (void *)GetProcAddress(hntdll, "NtDuplicateToken");
     pNtDuplicateObject      =  (void *)GetProcAddress(hntdll, "NtDuplicateObject");
+    pNtCompareObjects       =  (void *)GetProcAddress(hntdll, "NtCompareObjects");
 
     test_case_sensitive();
     test_namespace_pipe();
@@ -2446,4 +2559,6 @@ START_TEST(om)
     test_duplicate_object();
     test_object_types();
     test_get_next_thread();
+    test_globalroot();
+    test_object_identity();
 }

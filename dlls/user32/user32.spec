@@ -282,7 +282,7 @@
 @ stdcall GetClipboardViewer() NtUserGetClipboardViewer
 @ stdcall GetComboBoxInfo(long ptr)
 @ stdcall GetCurrentInputMessageSource(ptr)
-@ stdcall GetCursor()
+@ stdcall GetCursor() NtUserGetCursor
 @ stdcall GetCursorFrameInfo(long long long ptr ptr)
 @ stdcall GetCursorInfo(ptr)
 @ stdcall GetCursorPos(ptr)
@@ -291,7 +291,7 @@
 @ stdcall GetDesktopWindow()
 @ stdcall GetDialogBaseUnits()
 @ stdcall GetDisplayAutoRotationPreferences(ptr)
-@ stdcall GetDisplayConfigBufferSizes(long ptr ptr)
+@ stdcall GetDisplayConfigBufferSizes(long ptr ptr) NtUserGetDisplayConfigBufferSizes
 @ stdcall GetDlgCtrlID(long)
 @ stdcall GetDlgItem(long long)
 @ stdcall GetDlgItemInt(long long ptr long)
@@ -320,7 +320,7 @@
 @ stdcall GetKeyboardLayout(long) NtUserGetKeyboardLayout
 @ stdcall GetKeyboardLayoutList(long ptr) NtUserGetKeyboardLayoutList
 @ stdcall GetKeyboardLayoutNameA(ptr)
-@ stdcall GetKeyboardLayoutNameW(ptr)
+@ stdcall GetKeyboardLayoutNameW(ptr) NtUserGetKeyboardLayoutName
 @ stdcall -import GetKeyboardState(ptr) NtUserGetKeyboardState
 @ stdcall GetKeyboardType(long)
 @ stdcall GetLastActivePopup(long)
@@ -736,7 +736,7 @@
 @ stdcall SetWindowsHookExW(long long long long)
 @ stdcall SetWindowsHookW(long ptr)
 @ stdcall ShowCaret(long)
-@ stdcall ShowCursor(long)
+@ stdcall -import ShowCursor(long) NtUserShowCursor
 @ stdcall ShowOwnedPopups(long long)
 @ stdcall ShowScrollBar(long long long)
 @ stub ShowStartGlass

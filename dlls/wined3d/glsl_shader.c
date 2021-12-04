@@ -30,7 +30,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -2324,6 +2323,14 @@ static void shader_generate_glsl_declarations(const struct wined3d_context_gl *c
     for (i = 0, map = reg_maps->labels; map; map >>= 1, ++i)
     {
         if (map & 1) shader_addline(buffer, "void subroutine%u();\n", i);
+    }
+
+    if (version->type != WINED3D_SHADER_TYPE_PIXEL && version->type != WINED3D_SHADER_TYPE_COMPUTE)
+    {
+        if (version->type == WINED3D_SHADER_TYPE_HULL)
+            shader_addline(buffer, "out gl_PerVertex { invariant vec4 gl_Position; } gl_out[];\n");
+        else
+            shader_addline(buffer, "invariant gl_Position;\n");
     }
 
     /* Declare the constants (aka uniforms) */
@@ -7371,6 +7378,8 @@ static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl
 
     shader_glsl_add_version_declaration(buffer, gl_info);
 
+    shader_addline(buffer, "invariant gl_Position;\n");
+
     if (per_vertex_point_size)
     {
         shader_addline(buffer, "uniform struct\n{\n");
@@ -9241,6 +9250,8 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
 
     if (shader_glsl_use_explicit_attrib_location(gl_info))
         shader_addline(buffer, "#extension GL_ARB_explicit_attrib_location : enable\n");
+
+    shader_addline(buffer, "invariant gl_Position;\n");
 
     for (i = 0; i < WINED3D_FFP_ATTRIBS_COUNT; ++i)
     {
@@ -13580,6 +13591,9 @@ static void glsl_blitter_upload_palette(struct wined3d_glsl_blitter *blitter,
     gl_info->gl_ops.gl.p_glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     gl_info->gl_ops.gl.p_glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     gl_info->gl_ops.gl.p_glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+
+    GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0));
+    checkGLcall("glBindBuffer");
 
     if (palette)
     {

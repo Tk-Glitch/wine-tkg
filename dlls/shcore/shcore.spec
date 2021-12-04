@@ -9,7 +9,7 @@
 @ stdcall GetCurrentProcessExplicitAppUserModelID(ptr)
 @ stdcall GetDpiForMonitor(long long ptr ptr)
 @ stub GetDpiForShellUIComponent
-# @ stub GetFeatureEnabledState
+@ stdcall GetFeatureEnabledState(long long)
 # @ stub GetFeatureVariant
 @ stdcall GetProcessDpiAwareness(long ptr)
 @ stdcall GetProcessReference(ptr)
@@ -92,7 +92,7 @@
 @ stdcall SetCurrentProcessExplicitAppUserModelID(wstr)
 @ stdcall SetProcessDpiAwareness(long)
 @ stdcall SetProcessReference(ptr)
-# @ stub SubscribeFeatureStateChangeNotification
+@ stdcall SubscribeFeatureStateChangeNotification(ptr ptr ptr)
 @ stub UnregisterScaleChangeEvent
 # @ stub UnsubscribeFeatureStateChangeNotification
 

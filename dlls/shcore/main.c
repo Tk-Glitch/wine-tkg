@@ -27,6 +27,7 @@
 #include "winuser.h"
 #include "initguid.h"
 #include "ocidl.h"
+#include "featurestagingapi.h"
 #include "shellscalingapi.h"
 #include "shlwapi.h"
 
@@ -2504,4 +2505,22 @@ BOOL WINAPI IsOS(DWORD feature)
     WARN("(0x%x) unknown parameter\n", feature);
 
     return FALSE;
+}
+
+/*************************************************************************
+ * SubscribeFeatureStateChangeNotification        [SHCORE.@]
+ */
+void WINAPI SubscribeFeatureStateChangeNotification(FEATURE_STATE_CHANGE_SUBSCRIPTION *subscription,
+                                                    FEATURE_STATE_CHANGE_CALLBACK *callback, void *context)
+{
+    FIXME("(%p, %p, %p) stub\n", subscription, callback, context);
+}
+
+/*************************************************************************
+ * GetFeatureEnabledState        [SHCORE.@]
+ */
+FEATURE_ENABLED_STATE WINAPI GetFeatureEnabledState(UINT32 feature, FEATURE_CHANGE_TIME change_time)
+{
+    FIXME("(%u, %u) stub\n", feature, change_time);
+    return FEATURE_ENABLED_STATE_DEFAULT;
 }

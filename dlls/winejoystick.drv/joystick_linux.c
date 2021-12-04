@@ -36,7 +36,6 @@
  */
 
 #include "config.h"
-#include "wine/port.h"
 
 #ifdef HAVE_LINUX_22_JOYSTICK_API
 
@@ -66,8 +65,6 @@
 #include "wingdi.h"
 #include "winnls.h"
 #include "wine/debug.h"
-
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(joystick);
 

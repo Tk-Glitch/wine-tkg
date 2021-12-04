@@ -54,6 +54,16 @@ struct gdb_xpoint
     unsigned int value;
 };
 
+struct reply_buffer
+{
+    unsigned char* base;
+    size_t len;
+    size_t alloc;
+};
+
+#define QX_NAME_SIZE 32
+#define QX_ANNEX_SIZE MAX_PATH
+
 struct gdb_context
 {
     /* gdb information */
@@ -66,9 +76,7 @@ struct gdb_context
     char*                       in_packet;
     int                         in_packet_len;
     /* outgoing buffer */
-    char*                       out_buf;
-    int                         out_buf_alloc;
-    int                         out_len;
+    struct reply_buffer         out_buf;
     int                         out_curr_packet;
     /* generic GDB thread information */
     int                         exec_tid; /* tid used in step & continue */
@@ -82,12 +90,18 @@ struct gdb_context
     /* Unix environment */
     ULONG_PTR                   wine_segs[3];   /* load addresses of the ELF wine exec segments (text, bss and data) */
     BOOL                        no_ack_mode;
+    int                         qxfer_object_idx;
+    char                        qxfer_object_annex[QX_ANNEX_SIZE];
+    struct reply_buffer         qxfer_buffer;
 };
 
 /* assume standard signal and errno values */
 enum host_error
 {
+    HOST_EPERM  = 1,
+    HOST_ENOENT = 2,
     HOST_ESRCH  = 3,
+    HOST_ENOMEM = 12,
     HOST_EFAULT = 14,
     HOST_EINVAL = 22,
 };
@@ -224,12 +238,116 @@ static void hex_to(char* dst, const void* src, size_t len)
     }
 }
 
-static unsigned char checksum(const char* ptr, int len)
+static void reply_buffer_clear(struct reply_buffer* reply)
+{
+    reply->len = 0;
+}
+
+static void reply_buffer_grow(struct reply_buffer* reply, size_t size)
+{
+    size_t required_alloc = reply->len + size;
+
+    if (reply->alloc < required_alloc)
+    {
+        reply->alloc = reply->alloc * 3 / 2;
+        if (reply->alloc < required_alloc)
+            reply->alloc = required_alloc;
+
+        reply->base = realloc(reply->base, reply->alloc);
+    }
+}
+
+static void reply_buffer_append(struct reply_buffer* reply, const void* data, size_t size)
+{
+    reply_buffer_grow(reply, size);
+    memcpy(reply->base + reply->len, data, size);
+    reply->len += size;
+}
+
+static inline void reply_buffer_append_str(struct reply_buffer* reply, const char* str)
+{
+    reply_buffer_append(reply, str, strlen(str));
+}
+
+static inline void reply_buffer_append_hex(struct reply_buffer* reply, const void* src, size_t len)
+{
+    reply_buffer_grow(reply, len * 2);
+    hex_to((char *)reply->base + reply->len, src, len);
+    reply->len += len * 2;
+}
+
+static inline void reply_buffer_append_uinthex(struct reply_buffer* reply, ULONG_PTR val, int len)
+{
+    char buf[sizeof(ULONG_PTR) * 2], *ptr;
+
+    assert(len <= sizeof(ULONG_PTR));
+
+    ptr = buf + len * 2;
+    while (ptr != buf)
+    {
+        *--ptr = hex_to0(val & 0x0F);
+        val >>= 4;
+    }
+
+    reply_buffer_append(reply, ptr, len * 2);
+}
+
+static const unsigned char xml_special_chars_lookup_table[16] = {
+    /* The characters should be sorted by its value modulo table length. */
+
+    0x00,       /* NUL */
+    0,
+    0x22,       /* ": 0010|0010 */
+    0, 0, 0,
+    0x26,       /* &: 0010|0110 */
+    0x27,       /* ': 0010|0111 */
+    0, 0, 0, 0,
+    0x3C,       /* <: 0011|1100 */
+    0,
+    0x3E,       /* >: 0011|1110 */
+    0
+};
+
+static inline BOOL is_nul_or_xml_special_char(unsigned char val)
+{
+    const size_t length = ARRAY_SIZE(xml_special_chars_lookup_table);
+    return xml_special_chars_lookup_table[val % length] == val;
+}
+
+static void reply_buffer_append_xmlstr(struct reply_buffer* reply, const char* str)
+{
+    const char *ptr = str, *curr;
+
+    for (;;)
+    {
+        curr = ptr;
+
+        while (!is_nul_or_xml_special_char((unsigned char)*ptr))
+            ptr++;
+
+        reply_buffer_append(reply, curr, ptr - curr);
+
+        switch (*ptr++)
+        {
+        case '"': reply_buffer_append_str(reply, "&quot;"); break;
+        case '&': reply_buffer_append_str(reply, "&amp;"); break;
+        case '\'': reply_buffer_append_str(reply, "&apos;"); break;
+        case '<': reply_buffer_append_str(reply, "&lt;"); break;
+        case '>': reply_buffer_append_str(reply, "&gt;"); break;
+        case '\0':
+        default:
+            return;
+        }
+    }
+}
+
+static unsigned char checksum(const void* data, int len)
 {
     unsigned cksum = 0;
+    const unsigned char* ptr = data;
 
     while (len-- > 0)
-        cksum += (unsigned char)*ptr++;
+        cksum += *ptr++;
     return cksum;
 }
 
@@ -703,22 +821,11 @@ static int addr_width(struct gdb_context* gdbctx)
 }
 
 enum packet_return {packet_error = 0x00, packet_ok = 0x01, packet_done = 0x02,
-                    packet_last_f = 0x80};
-
-static void packet_reply_grow(struct gdb_context* gdbctx, size_t size)
-{
-    if (gdbctx->out_buf_alloc < gdbctx->out_len + size)
-    {
-        gdbctx->out_buf_alloc = ((gdbctx->out_len + size) / 32 + 1) * 32;
-        gdbctx->out_buf = realloc(gdbctx->out_buf, gdbctx->out_buf_alloc);
-    }
-}
+                    packet_send_buffer = 0x03, packet_last_f = 0x80};
 
 static void packet_reply_hex_to(struct gdb_context* gdbctx, const void* src, int len)
 {
-    packet_reply_grow(gdbctx, len * 2);
-    hex_to(&gdbctx->out_buf[gdbctx->out_len], src, len);
-    gdbctx->out_len += len * 2;
+    reply_buffer_append_hex(&gdbctx->out_buf, src, len);
 }
 
 static inline void packet_reply_hex_to_str(struct gdb_context* gdbctx, const char* src)
@@ -728,15 +835,7 @@ static inline void packet_reply_hex_to_str(struct gdb_context* gdbctx, const cha
 
 static void packet_reply_val(struct gdb_context* gdbctx, ULONG_PTR val, int len)
 {
-    int i, shift;
-
-    shift = (len - 1) * 8;
-    packet_reply_grow(gdbctx, len * 2);
-    for (i = 0; i < len; i++, shift -= 8)
-    {
-        gdbctx->out_buf[gdbctx->out_len++] = hex_to0((val >> (shift + 4)) & 0x0F);
-        gdbctx->out_buf[gdbctx->out_len++] = hex_to0((val >>  shift     ) & 0x0F);
-    }
+    reply_buffer_append_uinthex(&gdbctx->out_buf, val, len);
 }
 
 static const unsigned char gdb_special_chars_lookup_table[4] = {
@@ -761,34 +860,37 @@ static inline BOOL is_gdb_special_char(unsigned char val)
     return gdb_special_chars_lookup_table[val % length] == val;
 }
 
-static void packet_reply_add(struct gdb_context* gdbctx, const char* str)
+static void packet_reply_add_data(struct gdb_context* gdbctx, const void* data, size_t len)
 {
-    const unsigned char *ptr = (unsigned char *)str, *curr;
+    const unsigned char *ptr = data, *end = ptr + len, *curr;
+    unsigned char esc_seq[2];
 
-    while (*ptr)
+    while (ptr != end)
     {
         curr = ptr;
 
-        while (*ptr && !is_gdb_special_char(*ptr))
+        while (ptr != end && !is_gdb_special_char(*ptr))
             ptr++;
 
-        packet_reply_grow(gdbctx, ptr - curr);
-        memcpy(&gdbctx->out_buf[gdbctx->out_len], curr, ptr - curr);
-        gdbctx->out_len += ptr - curr;
-        if (!*ptr) break;
+        reply_buffer_append(&gdbctx->out_buf, curr, ptr - curr);
+        if (ptr == end) break;
 
-        packet_reply_grow(gdbctx, 2);
-        gdbctx->out_buf[gdbctx->out_len++] = 0x7D;
-        gdbctx->out_buf[gdbctx->out_len++] = 0x20 ^ *ptr++;
+        esc_seq[0] = 0x7D;
+        esc_seq[1] = 0x20 ^ *ptr++;
+        reply_buffer_append(&gdbctx->out_buf, esc_seq, 2);
     }
+}
+
+static inline void packet_reply_add(struct gdb_context* gdbctx, const char* str)
+{
+    packet_reply_add_data(gdbctx, str, strlen(str));
 }
 
 static void packet_reply_open(struct gdb_context* gdbctx)
 {
     assert(gdbctx->out_curr_packet == -1);
-    packet_reply_grow(gdbctx, 1);
-    gdbctx->out_buf[gdbctx->out_len++] = '$';
-    gdbctx->out_curr_packet = gdbctx->out_len;
+    reply_buffer_append(&gdbctx->out_buf, "$", 1);
+    gdbctx->out_curr_packet = gdbctx->out_buf.len;
 }
 
 static void packet_reply_close(struct gdb_context* gdbctx)
@@ -796,41 +898,11 @@ static void packet_reply_close(struct gdb_context* gdbctx)
     unsigned char       cksum;
     int plen;
 
-    plen = gdbctx->out_len - gdbctx->out_curr_packet;
-    packet_reply_grow(gdbctx, 1);
-    gdbctx->out_buf[gdbctx->out_len++] = '#';
-    cksum = checksum(&gdbctx->out_buf[gdbctx->out_curr_packet], plen);
+    plen = gdbctx->out_buf.len - gdbctx->out_curr_packet;
+    reply_buffer_append(&gdbctx->out_buf, "#", 1);
+    cksum = checksum(gdbctx->out_buf.base + gdbctx->out_curr_packet, plen);
     packet_reply_hex_to(gdbctx, &cksum, 1);
     gdbctx->out_curr_packet = -1;
-}
-
-static void packet_reply_open_xfer(struct gdb_context* gdbctx)
-{
-    packet_reply_open(gdbctx);
-    packet_reply_add(gdbctx, "m");
-}
-
-static void packet_reply_close_xfer(struct gdb_context* gdbctx, unsigned int off, unsigned int len)
-{
-    int begin = gdbctx->out_curr_packet + 1;
-    int plen;
-
-    if (begin + off < gdbctx->out_len)
-    {
-        gdbctx->out_len -= off;
-        memmove(gdbctx->out_buf + begin, gdbctx->out_buf + begin + off, gdbctx->out_len);
-    }
-    else
-    {
-        gdbctx->out_buf[gdbctx->out_curr_packet] = 'l';
-        gdbctx->out_len = gdbctx->out_curr_packet + 1;
-    }
-
-    plen = gdbctx->out_len - begin;
-    if (plen > len) gdbctx->out_len -= (plen - len);
-    else gdbctx->out_buf[gdbctx->out_curr_packet] = 'l';
-
-    packet_reply_close(gdbctx);
 }
 
 static enum packet_return packet_reply(struct gdb_context* gdbctx, const char* packet)
@@ -860,6 +932,32 @@ static inline void packet_reply_register_hex_to(struct gdb_context* gdbctx, dbg_
 {
     const struct gdb_register *cpu_register_map = gdbctx->process->be_cpu->gdb_register_map;
     packet_reply_hex_to(gdbctx, cpu_register_ptr(gdbctx, ctx, idx), cpu_register_map[idx].length);
+}
+
+static void packet_reply_xfer(struct gdb_context* gdbctx, size_t off, size_t len, BOOL* more_p)
+{
+    BOOL more;
+    size_t data_len, trunc_len;
+
+    packet_reply_open(gdbctx);
+    data_len = gdbctx->qxfer_buffer.len;
+
+    /* check if off + len would overflow */
+    more = off < data_len && off + len < data_len;
+    if (more)
+        packet_reply_add(gdbctx, "m");
+    else
+        packet_reply_add(gdbctx, "l");
+
+    if (off < data_len)
+    {
+        trunc_len = min(len, data_len - off);
+        packet_reply_add_data(gdbctx, gdbctx->qxfer_buffer.base + off, trunc_len);
+    }
+
+    packet_reply_close(gdbctx);
+
+    *more_p = more;
 }
 
 /* =============================================== *
@@ -1322,7 +1420,7 @@ static enum packet_return packet_read_register(struct gdb_context* gdbctx)
         return packet_error;
     }
 
-    TRACE("%Iu => %s\n", reg, wine_dbgstr_longlong(cpu_register(gdbctx, &ctx, reg)));
+    TRACE("%Iu => %I64x\n", reg, cpu_register(gdbctx, &ctx, reg));
 
     packet_reply_open(gdbctx);
     packet_reply_register_hex_to(gdbctx, &ctx, reg);
@@ -1388,7 +1486,7 @@ static void packet_query_monitor_wnd_helper(struct gdb_context* gdbctx, HWND hWn
        packet_reply_open(gdbctx);
        packet_reply_add(gdbctx, "O");
        snprintf(buffer, sizeof(buffer),
-                "%*s%04lx%*s%-17.17s %08x %0*lx %.14s\n",
+                "%*s%04Ix%*s%-17.17s %08x %0*Ix %.14s\n",
                 indent, "", (ULONG_PTR)hWnd, 13 - indent, "",
                 clsName, GetWindowLongW(hWnd, GWL_STYLE),
                 addr_width(gdbctx), (ULONG_PTR)GetWindowLongPtrW(hWnd, GWLP_WNDPROC),
@@ -1515,7 +1613,7 @@ static void packet_query_monitor_mem(struct gdb_context* gdbctx, int len, const 
             prot[0] = '\0';
         }
         packet_reply_open(gdbctx);
-        snprintf(buffer, sizeof(buffer), "%0*lx %0*lx %s %s %s\n",
+        snprintf(buffer, sizeof(buffer), "%0*Ix %0*Ix %s %s %s\n",
                  addr_width(gdbctx), (DWORD_PTR)addr,
                  addr_width(gdbctx), mbi.RegionSize, state, type, prot);
         packet_reply_add(gdbctx, "O");
@@ -1569,6 +1667,7 @@ static enum packet_return packet_query_remote_command(struct gdb_context* gdbctx
 static BOOL CALLBACK packet_query_libraries_cb(PCSTR mod_name, DWORD64 base, PVOID ctx)
 {
     struct gdb_context* gdbctx = ctx;
+    struct reply_buffer* reply = &gdbctx->qxfer_buffer;
     MEMORY_BASIC_INFORMATION mbi;
     IMAGE_SECTION_HEADER *sec;
     IMAGE_DOS_HEADER *dos = NULL;
@@ -1581,11 +1680,11 @@ static BOOL CALLBACK packet_query_libraries_cb(PCSTR mod_name, DWORD64 base, PVO
     mod.SizeOfStruct = sizeof(mod);
     SymGetModuleInfo64(gdbctx->process->handle, base, &mod);
 
-    packet_reply_add(gdbctx, "<library name=\"");
+    reply_buffer_append_str(reply, "<library name=\"");
     if (strcmp(mod.LoadedImageName, "[vdso].so") == 0)
-        packet_reply_add(gdbctx, "linux-vdso.so.1");
+        reply_buffer_append_xmlstr(reply, "linux-vdso.so.1");
     else if (mod.LoadedImageName[0] == '/')
-        packet_reply_add(gdbctx, mod.LoadedImageName);
+        reply_buffer_append_xmlstr(reply, mod.LoadedImageName);
     else
     {
         UNICODE_STRING nt_name;
@@ -1600,15 +1699,15 @@ static BOOL CALLBACK packet_query_libraries_cb(PCSTR mod_name, DWORD64 base, PVO
             if (IsWow64Process(gdbctx->process->handle, &is_wow64) &&
                 is_wow64 && (tmp = strstr(unix_path, "system32")))
                 memcpy(tmp, "syswow64", 8);
-            packet_reply_add(gdbctx, unix_path);
+            reply_buffer_append_xmlstr(reply, unix_path);
         }
         else
-            packet_reply_add(gdbctx, mod.LoadedImageName);
+            reply_buffer_append_xmlstr(reply, mod.LoadedImageName);
 
         HeapFree(GetProcessHeap(), 0, unix_path);
         RtlFreeUnicodeString(&nt_name);
     }
-    packet_reply_add(gdbctx, "\">");
+    reply_buffer_append_str(reply, "\">");
 
     size = sizeof(buffer);
     if (VirtualQueryEx(gdbctx->process->handle, (void *)(UINT_PTR)mod.BaseOfImage, &mbi, sizeof(mbi)) >= sizeof(mbi) &&
@@ -1639,72 +1738,88 @@ static BOOL CALLBACK packet_query_libraries_cb(PCSTR mod_name, DWORD64 base, PVO
     for (i = 0; i < max(nth->FileHeader.NumberOfSections, 1); ++i)
     {
         if ((char *)(sec + i) >= buffer + size) break;
-        packet_reply_add(gdbctx, "<segment address=\"0x");
-        packet_reply_val(gdbctx, mod.BaseOfImage + sec[i].VirtualAddress, sizeof(ULONG_PTR));
-        packet_reply_add(gdbctx, "\"/>");
+        reply_buffer_append_str(reply, "<segment address=\"0x");
+        reply_buffer_append_uinthex(reply, mod.BaseOfImage + sec[i].VirtualAddress, sizeof(ULONG_PTR));
+        reply_buffer_append_str(reply, "\"/>");
     }
 
-    packet_reply_add(gdbctx, "</library>");
+    reply_buffer_append_str(reply, "</library>");
 
     return TRUE;
 }
 
-static void packet_query_libraries(struct gdb_context* gdbctx)
+static enum packet_return packet_query_libraries(struct gdb_context* gdbctx)
 {
+    struct reply_buffer* reply = &gdbctx->qxfer_buffer;
     BOOL opt;
+
+    if (!gdbctx->process) return packet_error;
+
+    if (gdbctx->qxfer_object_annex[0])
+        return packet_reply_error(gdbctx, 0);
 
     /* this will resynchronize builtin dbghelp's internal ELF module list */
     SymLoadModule(gdbctx->process->handle, 0, 0, 0, 0, 0);
 
-    packet_reply_add(gdbctx, "<library-list>");
+    reply_buffer_append_str(reply, "<library-list>");
     opt = SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, TRUE);
     SymEnumerateModules64(gdbctx->process->handle, packet_query_libraries_cb, gdbctx);
     SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, opt);
-    packet_reply_add(gdbctx, "</library-list>");
+    reply_buffer_append_str(reply, "</library-list>");
+
+    return packet_send_buffer;
 }
 
-static void packet_query_threads(struct gdb_context* gdbctx)
+static enum packet_return packet_query_threads(struct gdb_context* gdbctx)
 {
+    struct reply_buffer* reply = &gdbctx->qxfer_buffer;
     struct dbg_process* process = gdbctx->process;
     struct dbg_thread* thread;
 
-    packet_reply_add(gdbctx, "<threads>");
+    if (!process) return packet_error;
+
+    if (gdbctx->qxfer_object_annex[0])
+        return packet_reply_error(gdbctx, 0);
+
+    reply_buffer_append_str(reply, "<threads>");
     LIST_FOR_EACH_ENTRY(thread, &process->threads, struct dbg_thread, entry)
     {
-        packet_reply_add(gdbctx, "<thread ");
-        packet_reply_add(gdbctx, "id=\"");
-        packet_reply_val(gdbctx, thread->tid, 4);
-        packet_reply_add(gdbctx, "\" name=\"");
-        packet_reply_add(gdbctx, thread->name);
-        packet_reply_add(gdbctx, "\"/>");
+        reply_buffer_append_str(reply, "<thread ");
+        reply_buffer_append_str(reply, "id=\"");
+        reply_buffer_append_uinthex(reply, thread->tid, 4);
+        reply_buffer_append_str(reply, "\" name=\"");
+        reply_buffer_append_str(reply, thread->name);
+        reply_buffer_append_str(reply, "\"/>");
     }
-    packet_reply_add(gdbctx, "</threads>");
+    reply_buffer_append_str(reply, "</threads>");
+
+    return packet_send_buffer;
 }
 
-static void packet_query_target_xml(struct gdb_context* gdbctx, struct backend_cpu* cpu)
+static void packet_query_target_xml(struct gdb_context* gdbctx, struct reply_buffer* reply, struct backend_cpu* cpu)
 {
     const char* feature_prefix = NULL;
     const char* feature = NULL;
     char buffer[256];
     int i;
 
-    packet_reply_add(gdbctx, "<target>");
+    reply_buffer_append_str(reply, "<target>");
     switch (cpu->machine)
     {
     case IMAGE_FILE_MACHINE_AMD64:
-        packet_reply_add(gdbctx, "<architecture>i386:x86-64</architecture>");
+        reply_buffer_append_str(reply, "<architecture>i386:x86-64</architecture>");
         feature_prefix = "org.gnu.gdb.i386.";
         break;
     case IMAGE_FILE_MACHINE_I386:
-        packet_reply_add(gdbctx, "<architecture>i386</architecture>");
+        reply_buffer_append_str(reply, "<architecture>i386</architecture>");
         feature_prefix = "org.gnu.gdb.i386.";
         break;
     case IMAGE_FILE_MACHINE_ARMNT:
-        packet_reply_add(gdbctx, "<architecture>arm</architecture>");
+        reply_buffer_append_str(reply, "<architecture>arm</architecture>");
         feature_prefix = "org.gnu.gdb.arm.";
         break;
     case IMAGE_FILE_MACHINE_ARM64:
-        packet_reply_add(gdbctx, "<architecture>aarch64</architecture>");
+        reply_buffer_append_str(reply, "<architecture>aarch64</architecture>");
         feature_prefix = "org.gnu.gdb.aarch64.";
         break;
     }
@@ -1713,93 +1828,152 @@ static void packet_query_target_xml(struct gdb_context* gdbctx, struct backend_c
     {
         if (cpu->gdb_register_map[i].feature)
         {
-            if (feature) packet_reply_add(gdbctx, "</feature>");
+            if (feature) reply_buffer_append_str(reply, "</feature>");
             feature = cpu->gdb_register_map[i].feature;
 
-            packet_reply_add(gdbctx, "<feature name=\"");
-            if (feature_prefix) packet_reply_add(gdbctx, feature_prefix);
-            packet_reply_add(gdbctx, feature);
-            packet_reply_add(gdbctx, "\">");
+            reply_buffer_append_str(reply, "<feature name=\"");
+            if (feature_prefix) reply_buffer_append_xmlstr(reply, feature_prefix);
+            reply_buffer_append_xmlstr(reply, feature);
+            reply_buffer_append_str(reply, "\">");
 
             if (strcmp(feature_prefix, "org.gnu.gdb.i386.") == 0 &&
                 strcmp(feature, "core") == 0)
-                packet_reply_add(gdbctx, "<flags id=\"i386_eflags\" size=\"4\">"
-                                         "<field name=\"CF\" start=\"0\" end=\"0\"/>"
-                                         "<field name=\"\" start=\"1\" end=\"1\"/>"
-                                         "<field name=\"PF\" start=\"2\" end=\"2\"/>"
-                                         "<field name=\"AF\" start=\"4\" end=\"4\"/>"
-                                         "<field name=\"ZF\" start=\"6\" end=\"6\"/>"
-                                         "<field name=\"SF\" start=\"7\" end=\"7\"/>"
-                                         "<field name=\"TF\" start=\"8\" end=\"8\"/>"
-                                         "<field name=\"IF\" start=\"9\" end=\"9\"/>"
-                                         "<field name=\"DF\" start=\"10\" end=\"10\"/>"
-                                         "<field name=\"OF\" start=\"11\" end=\"11\"/>"
-                                         "<field name=\"NT\" start=\"14\" end=\"14\"/>"
-                                         "<field name=\"RF\" start=\"16\" end=\"16\"/>"
-                                         "<field name=\"VM\" start=\"17\" end=\"17\"/>"
-                                         "<field name=\"AC\" start=\"18\" end=\"18\"/>"
-                                         "<field name=\"VIF\" start=\"19\" end=\"19\"/>"
-                                         "<field name=\"VIP\" start=\"20\" end=\"20\"/>"
-                                         "<field name=\"ID\" start=\"21\" end=\"21\"/>"
-                                         "</flags>");
+                reply_buffer_append_str(reply, "<flags id=\"i386_eflags\" size=\"4\">"
+                                               "<field name=\"CF\" start=\"0\" end=\"0\"/>"
+                                               "<field name=\"\" start=\"1\" end=\"1\"/>"
+                                               "<field name=\"PF\" start=\"2\" end=\"2\"/>"
+                                               "<field name=\"AF\" start=\"4\" end=\"4\"/>"
+                                               "<field name=\"ZF\" start=\"6\" end=\"6\"/>"
+                                               "<field name=\"SF\" start=\"7\" end=\"7\"/>"
+                                               "<field name=\"TF\" start=\"8\" end=\"8\"/>"
+                                               "<field name=\"IF\" start=\"9\" end=\"9\"/>"
+                                               "<field name=\"DF\" start=\"10\" end=\"10\"/>"
+                                               "<field name=\"OF\" start=\"11\" end=\"11\"/>"
+                                               "<field name=\"NT\" start=\"14\" end=\"14\"/>"
+                                               "<field name=\"RF\" start=\"16\" end=\"16\"/>"
+                                               "<field name=\"VM\" start=\"17\" end=\"17\"/>"
+                                               "<field name=\"AC\" start=\"18\" end=\"18\"/>"
+                                               "<field name=\"VIF\" start=\"19\" end=\"19\"/>"
+                                               "<field name=\"VIP\" start=\"20\" end=\"20\"/>"
+                                               "<field name=\"ID\" start=\"21\" end=\"21\"/>"
+                                               "</flags>");
 
             if (strcmp(feature_prefix, "org.gnu.gdb.i386.") == 0 &&
                 strcmp(feature, "sse") == 0)
-                packet_reply_add(gdbctx, "<vector id=\"v4f\" type=\"ieee_single\" count=\"4\"/>"
-                                         "<vector id=\"v2d\" type=\"ieee_double\" count=\"2\"/>"
-                                         "<vector id=\"v16i8\" type=\"int8\" count=\"16\"/>"
-                                         "<vector id=\"v8i16\" type=\"int16\" count=\"8\"/>"
-                                         "<vector id=\"v4i32\" type=\"int32\" count=\"4\"/>"
-                                         "<vector id=\"v2i64\" type=\"int64\" count=\"2\"/>"
-                                         "<union id=\"vec128\">"
-                                         "<field name=\"v4_float\" type=\"v4f\"/>"
-                                         "<field name=\"v2_double\" type=\"v2d\"/>"
-                                         "<field name=\"v16_int8\" type=\"v16i8\"/>"
-                                         "<field name=\"v8_int16\" type=\"v8i16\"/>"
-                                         "<field name=\"v4_int32\" type=\"v4i32\"/>"
-                                         "<field name=\"v2_int64\" type=\"v2i64\"/>"
-                                         "<field name=\"uint128\" type=\"uint128\"/>"
-                                         "</union>"
-                                         "<flags id=\"i386_mxcsr\" size=\"4\">"
-                                         "<field name=\"IE\" start=\"0\" end=\"0\"/>"
-                                         "<field name=\"DE\" start=\"1\" end=\"1\"/>"
-                                         "<field name=\"ZE\" start=\"2\" end=\"2\"/>"
-                                         "<field name=\"OE\" start=\"3\" end=\"3\"/>"
-                                         "<field name=\"UE\" start=\"4\" end=\"4\"/>"
-                                         "<field name=\"PE\" start=\"5\" end=\"5\"/>"
-                                         "<field name=\"DAZ\" start=\"6\" end=\"6\"/>"
-                                         "<field name=\"IM\" start=\"7\" end=\"7\"/>"
-                                         "<field name=\"DM\" start=\"8\" end=\"8\"/>"
-                                         "<field name=\"ZM\" start=\"9\" end=\"9\"/>"
-                                         "<field name=\"OM\" start=\"10\" end=\"10\"/>"
-                                         "<field name=\"UM\" start=\"11\" end=\"11\"/>"
-                                         "<field name=\"PM\" start=\"12\" end=\"12\"/>"
-                                         "<field name=\"FZ\" start=\"15\" end=\"15\"/>"
-                                         "</flags>");
+                reply_buffer_append_str(reply, "<vector id=\"v4f\" type=\"ieee_single\" count=\"4\"/>"
+                                               "<vector id=\"v2d\" type=\"ieee_double\" count=\"2\"/>"
+                                               "<vector id=\"v16i8\" type=\"int8\" count=\"16\"/>"
+                                               "<vector id=\"v8i16\" type=\"int16\" count=\"8\"/>"
+                                               "<vector id=\"v4i32\" type=\"int32\" count=\"4\"/>"
+                                               "<vector id=\"v2i64\" type=\"int64\" count=\"2\"/>"
+                                               "<union id=\"vec128\">"
+                                               "<field name=\"v4_float\" type=\"v4f\"/>"
+                                               "<field name=\"v2_double\" type=\"v2d\"/>"
+                                               "<field name=\"v16_int8\" type=\"v16i8\"/>"
+                                               "<field name=\"v8_int16\" type=\"v8i16\"/>"
+                                               "<field name=\"v4_int32\" type=\"v4i32\"/>"
+                                               "<field name=\"v2_int64\" type=\"v2i64\"/>"
+                                               "<field name=\"uint128\" type=\"uint128\"/>"
+                                               "</union>"
+                                               "<flags id=\"i386_mxcsr\" size=\"4\">"
+                                               "<field name=\"IE\" start=\"0\" end=\"0\"/>"
+                                               "<field name=\"DE\" start=\"1\" end=\"1\"/>"
+                                               "<field name=\"ZE\" start=\"2\" end=\"2\"/>"
+                                               "<field name=\"OE\" start=\"3\" end=\"3\"/>"
+                                               "<field name=\"UE\" start=\"4\" end=\"4\"/>"
+                                               "<field name=\"PE\" start=\"5\" end=\"5\"/>"
+                                               "<field name=\"DAZ\" start=\"6\" end=\"6\"/>"
+                                               "<field name=\"IM\" start=\"7\" end=\"7\"/>"
+                                               "<field name=\"DM\" start=\"8\" end=\"8\"/>"
+                                               "<field name=\"ZM\" start=\"9\" end=\"9\"/>"
+                                               "<field name=\"OM\" start=\"10\" end=\"10\"/>"
+                                               "<field name=\"UM\" start=\"11\" end=\"11\"/>"
+                                               "<field name=\"PM\" start=\"12\" end=\"12\"/>"
+                                               "<field name=\"FZ\" start=\"15\" end=\"15\"/>"
+                                               "</flags>");
         }
 
         snprintf(buffer, ARRAY_SIZE(buffer), "<reg name=\"%s\" bitsize=\"%Iu\"",
                  cpu->gdb_register_map[i].name, 8 * cpu->gdb_register_map[i].length);
-        packet_reply_add(gdbctx, buffer);
+        reply_buffer_append_str(reply, buffer);
 
         if (cpu->gdb_register_map[i].type)
         {
-            packet_reply_add(gdbctx, " type=\"");
-            packet_reply_add(gdbctx, cpu->gdb_register_map[i].type);
-            packet_reply_add(gdbctx, "\"");
+            reply_buffer_append_str(reply, " type=\"");
+            reply_buffer_append_xmlstr(reply, cpu->gdb_register_map[i].type);
+            reply_buffer_append_str(reply, "\"");
         }
 
-        packet_reply_add(gdbctx, "/>");
+        reply_buffer_append_str(reply, "/>");
     }
 
-    if (feature) packet_reply_add(gdbctx, "</feature>");
-    packet_reply_add(gdbctx, "</target>");
+    if (feature) reply_buffer_append_str(reply, "</feature>");
+    reply_buffer_append_str(reply, "</target>");
 }
+
+static enum packet_return packet_query_features(struct gdb_context* gdbctx)
+{
+    struct reply_buffer* reply = &gdbctx->qxfer_buffer;
+    struct dbg_process* process = gdbctx->process;
+
+    if (!process) return packet_error;
+
+    if (strncmp(gdbctx->qxfer_object_annex, "target.xml", QX_ANNEX_SIZE) == 0)
+    {
+        struct backend_cpu *cpu = process->be_cpu;
+        if (!cpu) return packet_error;
+
+        packet_query_target_xml(gdbctx, reply, cpu);
+
+        return packet_send_buffer;
+    }
+
+    return packet_reply_error(gdbctx, 0);
+}
+
+static enum packet_return packet_query_exec_file(struct gdb_context* gdbctx)
+{
+    struct reply_buffer* reply = &gdbctx->qxfer_buffer;
+    struct dbg_process* process = gdbctx->process;
+    char *unix_path;
+    BOOL is_wow64;
+    char *tmp;
+
+    if (!process) return packet_error;
+
+    if (gdbctx->qxfer_object_annex[0] || !process->imageName)
+        return packet_reply_error(gdbctx, HOST_EPERM);
+
+    if (!(unix_path = wine_get_unix_file_name(process->imageName)))
+        return packet_reply_error(gdbctx, GetLastError() == ERROR_NOT_ENOUGH_MEMORY ? HOST_ENOMEM : HOST_ENOENT);
+
+    if (IsWow64Process(process->handle, &is_wow64) &&
+        is_wow64 && (tmp = strstr(unix_path, "system32")))
+        memcpy(tmp, "syswow64", 8);
+
+    reply_buffer_append_str(reply, unix_path);
+
+    HeapFree(GetProcessHeap(), 0, unix_path);
+
+    return packet_send_buffer;
+}
+
+struct qxfer
+{
+    const char*        name;
+    enum packet_return (*handler)(struct gdb_context* gdbctx);
+} qxfer_handlers[] =
+{
+    {"libraries", packet_query_libraries},
+    {"threads"  , packet_query_threads  },
+    {"features" , packet_query_features },
+    {"exec-file", packet_query_exec_file},
+};
 
 static enum packet_return packet_query(struct gdb_context* gdbctx)
 {
+    char object_name[QX_NAME_SIZE], annex[QX_ANNEX_SIZE];
     unsigned int off, len;
-    struct backend_cpu *cpu;
 
     switch (gdbctx->in_packet[0])
     {
@@ -1868,7 +2042,7 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
             char    buf[64];
 
             snprintf(buf, sizeof(buf),
-                     "Text=%08lx;Data=%08lx;Bss=%08lx",
+                     "Text=%08Ix;Data=%08Ix;Bss=%08Ix",
                      gdbctx->wine_segs[0], gdbctx->wine_segs[1],
                      gdbctx->wine_segs[2]);
             return packet_reply(gdbctx, buf);
@@ -1886,11 +2060,16 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
             return packet_ok;
         if (strncmp(gdbctx->in_packet, "Supported", 9) == 0)
         {
+            size_t i;
+
             packet_reply_open(gdbctx);
             packet_reply_add(gdbctx, "QStartNoAckMode+;");
-            packet_reply_add(gdbctx, "qXfer:libraries:read+;");
-            packet_reply_add(gdbctx, "qXfer:threads:read+;");
-            packet_reply_add(gdbctx, "qXfer:features:read+;");
+            for (i = 0; i < ARRAY_SIZE(qxfer_handlers); i++)
+            {
+                packet_reply_add(gdbctx, "qXfer:");
+                packet_reply_add(gdbctx, qxfer_handlers[i].name);
+                packet_reply_add(gdbctx, ":read+;");
+            }
             packet_reply_close(gdbctx);
             return packet_done;
         }
@@ -1921,35 +2100,62 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
         }
         break;
     case 'X':
-        if (sscanf(gdbctx->in_packet, "Xfer:libraries:read::%x,%x", &off, &len) == 2)
+        annex[0] = '\0';
+        if (sscanf(gdbctx->in_packet, "Xfer:%31[^:]:read::%x,%x", object_name, &off, &len) == 3 ||
+            sscanf(gdbctx->in_packet, "Xfer:%31[^:]:read:%255[^:]:%x,%x", object_name, annex, &off, &len) == 4)
         {
-            if (!gdbctx->process) return packet_error;
+            enum packet_return result;
+            int i;
+            BOOL more;
 
-            packet_reply_open_xfer(gdbctx);
-            packet_query_libraries(gdbctx);
-            packet_reply_close_xfer(gdbctx, off, len);
-            return packet_done;
-        }
+            for (i = 0; i < ARRAY_SIZE(qxfer_handlers); i++)
+            {
+                if (strcmp(qxfer_handlers[i].name, object_name) == 0)
+                    break;
+            }
 
-        if (sscanf(gdbctx->in_packet, "Xfer:threads:read::%x,%x", &off, &len) == 2)
-        {
-            if (!gdbctx->process) return packet_error;
+            if (i >= ARRAY_SIZE(qxfer_handlers))
+            {
+                ERR("unhandled qXfer %s read %s %u,%u\n", debugstr_a(object_name), debugstr_a(annex), off, len);
+                return packet_error;
+            }
 
-            packet_reply_open_xfer(gdbctx);
-            packet_query_threads(gdbctx);
-            packet_reply_close_xfer(gdbctx, off, len);
-            return packet_done;
-        }
+            TRACE("qXfer %s read %s %u,%u\n", debugstr_a(object_name), debugstr_a(annex), off, len);
 
-        if (sscanf(gdbctx->in_packet, "Xfer:features:read:target.xml:%x,%x", &off, &len) == 2)
-        {
-            if (!gdbctx->process) return packet_error;
-            if (!(cpu = gdbctx->process->be_cpu)) return packet_error;
+            if (off > 0 &&
+                gdbctx->qxfer_buffer.len > 0 &&
+                gdbctx->qxfer_object_idx == i &&
+                strcmp(gdbctx->qxfer_object_annex, annex) == 0)
+            {
+                result = packet_send_buffer;
+                TRACE("qXfer read result = %d (cached)\n", result);
+            }
+            else
+            {
+                reply_buffer_clear(&gdbctx->qxfer_buffer);
 
-            packet_reply_open_xfer(gdbctx);
-            packet_query_target_xml(gdbctx, cpu);
-            packet_reply_close_xfer(gdbctx, off, len);
-            return packet_done;
+                gdbctx->qxfer_object_idx = i;
+                strcpy(gdbctx->qxfer_object_annex, annex);
+
+                result = (*qxfer_handlers[i].handler)(gdbctx);
+                TRACE("qXfer read result = %d\n", result);
+            }
+
+            more = FALSE;
+            if ((result & ~packet_last_f) == packet_send_buffer)
+            {
+                packet_reply_xfer(gdbctx, off, len, &more);
+                result = (result & packet_last_f) | packet_done;
+            }
+
+            if (!more)
+            {
+                gdbctx->qxfer_object_idx = -1;
+                gdbctx->qxfer_object_annex[0] = '\0';
+                reply_buffer_clear(&gdbctx->qxfer_buffer);
+            }
+
+            return result;
         }
         break;
     }
@@ -2098,10 +2304,10 @@ static BOOL extract_packets(struct gdb_context* gdbctx)
             case packet_done:   break;
             }
 
-            TRACE("Reply: %s\n", debugstr_an(gdbctx->out_buf, gdbctx->out_len));
-            i = send(gdbctx->sock, gdbctx->out_buf, gdbctx->out_len, 0);
-            assert(i == gdbctx->out_len);
-            gdbctx->out_len = 0;
+            TRACE("Reply: %s\n", debugstr_an((char *)gdbctx->out_buf.base, gdbctx->out_buf.len));
+            i = send(gdbctx->sock, (char *)gdbctx->out_buf.base, gdbctx->out_buf.len, 0);
+            assert(i == gdbctx->out_buf.len);
+            reply_buffer_clear(&gdbctx->out_buf);
         }
         else
             WARN("Ignoring: %s (checksum: %d != %d)\n", debugstr_an(ptr, sum - ptr),
@@ -2233,7 +2439,7 @@ static BOOL gdb_startup(struct gdb_context* gdbctx, unsigned flags, unsigned por
         if (gdbctx->sock != INVALID_SOCKET)
         {
             ret = TRUE;
-            TRACE("connected on %lu\n", gdbctx->sock);
+            TRACE("connected on %Iu\n", gdbctx->sock);
             /* don't keep our small packets too long: send them ASAP back to GDB
              * without this, GDB really crawls
              */
@@ -2255,9 +2461,7 @@ static BOOL gdb_init_context(struct gdb_context* gdbctx, unsigned flags, unsigne
     gdbctx->in_buf = NULL;
     gdbctx->in_buf_alloc = 0;
     gdbctx->in_len = 0;
-    gdbctx->out_buf = NULL;
-    gdbctx->out_buf_alloc = 0;
-    gdbctx->out_len = 0;
+    memset(&gdbctx->out_buf, 0, sizeof(gdbctx->out_buf));
     gdbctx->out_curr_packet = -1;
 
     gdbctx->exec_tid = -1;
@@ -2267,6 +2471,10 @@ static BOOL gdb_init_context(struct gdb_context* gdbctx, unsigned flags, unsigne
     gdbctx->no_ack_mode = FALSE;
     for (i = 0; i < ARRAY_SIZE(gdbctx->wine_segs); i++)
         gdbctx->wine_segs[i] = 0;
+
+    gdbctx->qxfer_object_idx = -1;
+    memset(gdbctx->qxfer_object_annex, 0, sizeof(gdbctx->qxfer_object_annex));
+    memset(&gdbctx->qxfer_buffer, 0, sizeof(gdbctx->qxfer_buffer));
 
     /* wait for first trap */
     while (WaitForDebugEvent(&gdbctx->de, INFINITE))

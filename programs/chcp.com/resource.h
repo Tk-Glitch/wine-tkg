@@ -1,7 +1,5 @@
 /*
- * COM classes for wineqtdecoder
- *
- * Copyright 2019 Zebediah Figura
+ * Copyright 2021 Hugh McMaster
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,20 +16,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#pragma makedep header
-#pragma makedep ident
-#pragma makedep register
+#include <windef.h>
 
-[
-    helpstring("Wine QuickTime splitter"),
-    threading(both),
-    uuid(d0e70e49-5927-4894-a386-359460ee87c9)
-]
-coclass QTSplitter {}
+/* Translation IDs */
 
-[
-    helpstring("Wine QuickTime video decoder"),
-    threading(both),
-    uuid(683ddacb-4354-490c-a058-e05ad0f20537)
-]
-coclass QTVDecoder {}
+#define STRING_ACTIVE_CODE_PAGE   100
+#define STRING_INVALID_CODE_PAGE  101
+#define STRING_USAGE              102

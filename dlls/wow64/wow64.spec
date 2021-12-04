@@ -9,13 +9,13 @@
 @ stub Wow64GetWow64ImageOption
 @ stub Wow64IsControlFlowGuardEnforced
 @ stub Wow64IsStackExtentsCheckEnforced
-@ stub Wow64KiUserCallbackDispatcher
+@ stdcall Wow64KiUserCallbackDispatcher(long ptr long ptr ptr)
 @ stdcall Wow64LdrpInitialize(ptr)
 @ stub Wow64LogPrint
 @ stub Wow64NotifyUnsimulateComplete
 @ stdcall Wow64PassExceptionToGuest(ptr)
 @ stub Wow64PrepareForDebuggerAttach
-@ stub Wow64PrepareForException
+@ stdcall Wow64PrepareForException(ptr ptr)
 @ stub Wow64RaiseException
 @ stub Wow64ShallowThunkAllocObjectAttributes32TO64_FNC
 @ stub Wow64ShallowThunkAllocSecurityQualityOfService32TO64_FNC

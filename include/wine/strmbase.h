@@ -20,7 +20,6 @@
  */
 
 #include "dshow.h"
-#include "wine/list.h"
 
 HRESULT WINAPI CopyMediaType(AM_MEDIA_TYPE * pDest, const AM_MEDIA_TYPE *pSrc);
 void WINAPI FreeMediaType(AM_MEDIA_TYPE * pMediaType);
@@ -200,42 +199,6 @@ HRESULT WINAPI SourceSeekingImpl_GetAvailable(IMediaSeeking * iface, LONGLONG * 
 HRESULT WINAPI SourceSeekingImpl_SetRate(IMediaSeeking * iface, double dRate);
 HRESULT WINAPI SourceSeekingImpl_GetRate(IMediaSeeking * iface, double * dRate);
 HRESULT WINAPI SourceSeekingImpl_GetPreroll(IMediaSeeking * iface, LONGLONG * pPreroll);
-
-/* Output Queue */
-typedef struct tagOutputQueue {
-    CRITICAL_SECTION csQueue;
-
-    struct strmbase_source *pInputPin;
-
-    HANDLE hThread;
-    HANDLE hProcessQueue;
-
-    LONG lBatchSize;
-    BOOL bBatchExact;
-    BOOL bTerminate;
-    BOOL bSendAnyway;
-
-    struct list SampleList;
-
-    const struct OutputQueueFuncTable* pFuncsTable;
-} OutputQueue;
-
-typedef DWORD (WINAPI *OutputQueue_ThreadProc)(OutputQueue *This);
-
-typedef struct OutputQueueFuncTable
-{
-    OutputQueue_ThreadProc pfnThreadProc;
-} OutputQueueFuncTable;
-
-HRESULT WINAPI OutputQueue_Construct( struct strmbase_source *pin, BOOL bAuto,
-    BOOL bQueue, LONG lBatchSize, BOOL bBatchExact, DWORD dwPriority,
-    const OutputQueueFuncTable* pFuncsTable, OutputQueue **ppOutputQueue );
-HRESULT WINAPI OutputQueue_Destroy(OutputQueue *pOutputQueue);
-HRESULT WINAPI OutputQueue_ReceiveMultiple(OutputQueue *pOutputQueue, IMediaSample **ppSamples, LONG nSamples, LONG *nSamplesProcessed);
-HRESULT WINAPI OutputQueue_Receive(OutputQueue *pOutputQueue, IMediaSample *pSample);
-VOID WINAPI OutputQueue_EOS(OutputQueue *pOutputQueue);
-VOID WINAPI OutputQueue_SendAnyway(OutputQueue *pOutputQueue);
-DWORD WINAPI OutputQueueImpl_ThreadProc(OutputQueue *pOutputQueue);
 
 enum strmbase_type_id
 {

@@ -1565,6 +1565,13 @@ ok(arr["test1"] === true, "arr[test1] !== true");
 ok(arr["test2"] === true, "arr[test2] !== true");
 ok(arr["test3"] === true, "arr[test3] !== true");
 
+ok((delete inobj.test1) === true, "delete inobj.test1 returned false");
+ok(!("test1" in inobj), "test1 is still in inobj after delete");
+ok((delete inobj.test3) === true, "delete inobj.test3 returned false");
+ok("test3" in inobj, "test3 is not in inobj after delete");
+ok((delete forinTestObj.prototype.test3) === true, "delete forinTestObj.prototype.test3 returned false");
+ok(!("test3" in inobj), "test3 is still in inobj after delete on prototype");
+
 tmp = new Object();
 tmp.test = false;
 ok((delete tmp.test) === true, "delete returned false");
@@ -1581,6 +1588,13 @@ tmp.test = false;
 ok((delete tmp["test"]) === true, "delete returned false");
 ok(typeof(tmp.test) === "undefined", "tmp.test type = " + typeof(tmp.test));
 ok(!("test" in tmp), "test is still in tmp after delete?");
+
+arr = [1, 2, 3];
+ok(arr.length === 3, "arr.length = " + arr.length);
+ok((delete arr.length) === false, "delete arr.length returned true");
+ok("reverse" in arr, "reverse not in arr");
+ok((delete Array.prototype.reverse) === true, "delete Array.prototype.reverse returned false");
+ok(!("reverse" in arr), "reverse is still in arr after delete from prototype");
 
 tmp.testWith = true;
 with(tmp)
