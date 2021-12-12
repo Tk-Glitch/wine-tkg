@@ -30,6 +30,7 @@
 
 #include <stdlib.h>
 #include <assert.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <dlfcn.h>
 #include <gnutls/gnutls.h>
@@ -48,6 +49,17 @@
 #include "bcrypt_internal.h"
 
 #include "wine/debug.h"
+
+#include <assert.h>
+
+#ifdef HAVE_GMP_H
+#include <gmp.h>
+#endif
+
+#ifdef HAVE_GCRYPT_H
+#include <gcrypt.h>
+#endif
+
 
 WINE_DEFAULT_DEBUG_CHANNEL(bcrypt);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
@@ -117,7 +129,16 @@ static int (*pgnutls_privkey_decrypt_data)(gnutls_privkey_t, unsigned int flags,
 /* Not present in gnutls version < 3.6.0 */
 static int (*pgnutls_decode_rs_value)(const gnutls_datum_t *, gnutls_datum_t *, gnutls_datum_t *);
 
+static int (*pgnutls_dh_params_init)(gnutls_dh_params_t * dh_params);
+static void (*pgnutls_dh_params_deinit)(gnutls_dh_params_t dh_params);
+static int (*pgnutls_dh_params_generate2)(gnutls_dh_params_t dparams, unsigned int bits);
+static int (*pgnutls_dh_params_import_raw2)(gnutls_dh_params_t dh_params, const gnutls_datum_t * prime,
+        const gnutls_datum_t * generator, unsigned key_bits);
+static int (*pgnutls_dh_params_export_raw)(gnutls_dh_params_t params, gnutls_datum_t * prime,
+        gnutls_datum_t * generator, unsigned int *bits);
+
 static void *libgnutls_handle;
+
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(gnutls_cipher_decrypt2);
 MAKE_FUNCPTR(gnutls_cipher_deinit);
@@ -135,6 +156,40 @@ MAKE_FUNCPTR(gnutls_privkey_init);
 MAKE_FUNCPTR(gnutls_privkey_sign_hash);
 MAKE_FUNCPTR(gnutls_pubkey_deinit);
 MAKE_FUNCPTR(gnutls_pubkey_init);
+
+#if defined(HAVE_GMP_H) && defined(SONAME_LIBGMP)
+static BOOL dh_supported;
+static void *libgmp_handle;
+
+MAKE_FUNCPTR(mpz_init);
+MAKE_FUNCPTR(mpz_clear);
+MAKE_FUNCPTR(mpz_cmp);
+MAKE_FUNCPTR(_mpz_cmp_ui);
+MAKE_FUNCPTR(mpz_sizeinbase);
+MAKE_FUNCPTR(mpz_import);
+MAKE_FUNCPTR(mpz_export);
+MAKE_FUNCPTR(mpz_mod);
+MAKE_FUNCPTR(mpz_powm);
+MAKE_FUNCPTR(mpz_sub_ui);
+#endif
+
+#if defined(HAVE_GCRYPT_H) && defined(SONAME_LIBGCRYPT)
+static BOOL gcrypt_available;
+static void *libgcrypt_handle;
+
+MAKE_FUNCPTR(gcry_check_version);
+MAKE_FUNCPTR(gcry_sexp_build);
+MAKE_FUNCPTR(gcry_pk_encrypt);
+MAKE_FUNCPTR(gcry_mpi_new);
+MAKE_FUNCPTR(gcry_mpi_print);
+MAKE_FUNCPTR(gcry_sexp_release);
+MAKE_FUNCPTR(gcry_mpi_release);
+MAKE_FUNCPTR(gcry_strsource);
+MAKE_FUNCPTR(gcry_strerror);
+MAKE_FUNCPTR(gcry_sexp_find_token);
+MAKE_FUNCPTR(gcry_sexp_nth_mpi);
+#endif
+
 #undef MAKE_FUNCPTR
 
 static int compat_gnutls_cipher_tag(gnutls_cipher_hd_t handle, void *tag, size_t tag_size)
@@ -276,6 +331,67 @@ static NTSTATUS gnutls_process_attach( void *args )
     LOAD_FUNCPTR(gnutls_pubkey_init);
 #undef LOAD_FUNCPTR
 
+#if defined(HAVE_GMP_H) && defined(SONAME_LIBGMP)
+#define LOAD_FUNCPTR_STR(f) #f
+#define LOAD_FUNCPTR(f) \
+    if (!(p##f = dlsym( libgmp_handle, LOAD_FUNCPTR_STR(f) ))) \
+    { \
+        ERR( "failed to load %s\n", LOAD_FUNCPTR_STR(f) ); \
+        goto fail; \
+    }
+
+    if ((libgmp_handle = dlopen( SONAME_LIBGMP, RTLD_NOW )))
+    {
+        LOAD_FUNCPTR(mpz_init);
+        LOAD_FUNCPTR(mpz_clear);
+        LOAD_FUNCPTR(mpz_cmp);
+        LOAD_FUNCPTR(_mpz_cmp_ui);
+        LOAD_FUNCPTR(mpz_sizeinbase);
+        LOAD_FUNCPTR(mpz_import);
+        LOAD_FUNCPTR(mpz_export);
+        LOAD_FUNCPTR(mpz_mod);
+        LOAD_FUNCPTR(mpz_powm);
+        LOAD_FUNCPTR(mpz_sub_ui);
+    }
+    else
+    {
+        ERR_(winediag)( "failed to load libgmp, no support for DH\n" );
+        goto fail;
+    }
+#undef LOAD_FUNCPTR
+#undef LOAD_FUNCPTR_STR
+#endif
+
+#if defined(HAVE_GCRYPT_H) && defined(SONAME_LIBGCRYPT)
+#define LOAD_FUNCPTR(f) \
+    if (!(p##f = dlsym( libgcrypt_handle, #f ))) \
+    { \
+        WARN( "failed to load %s\n", #f ); \
+        gcrypt_available = FALSE; \
+    }
+
+    if ((libgcrypt_handle = dlopen( SONAME_LIBGCRYPT, RTLD_NOW )))
+    {
+        gcrypt_available = TRUE;
+
+        LOAD_FUNCPTR(gcry_check_version);
+        LOAD_FUNCPTR(gcry_sexp_build);
+        LOAD_FUNCPTR(gcry_pk_encrypt);
+        LOAD_FUNCPTR(gcry_mpi_new);
+        LOAD_FUNCPTR(gcry_mpi_print);
+        LOAD_FUNCPTR(gcry_sexp_release);
+        LOAD_FUNCPTR(gcry_mpi_release);
+        LOAD_FUNCPTR(gcry_strsource);
+        LOAD_FUNCPTR(gcry_strerror);
+        LOAD_FUNCPTR(gcry_sexp_find_token);
+        LOAD_FUNCPTR(gcry_sexp_nth_mpi);
+    }
+    else
+        WARN("failed to load gcrypt, no support for ECC secret agreement\n");
+
+#undef LOAD_FUNCPTR
+#endif
+
 #define LOAD_FUNCPTR_OPT(f) \
     if (!(p##f = dlsym( libgnutls_handle, #f ))) \
     { \
@@ -305,6 +421,33 @@ static NTSTATUS gnutls_process_attach( void *args )
         pgnutls_perror( ret );
         goto fail;
     }
+    if (!(pgnutls_dh_params_init = dlsym( libgnutls_handle, "gnutls_dh_params_init" )))
+    {
+        WARN("gnutls_dh_params_init not found\n");
+    }
+    if (!(pgnutls_dh_params_deinit = dlsym( libgnutls_handle, "gnutls_dh_params_deinit" )))
+    {
+        WARN("gnutls_dh_params_deinit not found\n");
+    }
+    if (!(pgnutls_dh_params_generate2 = dlsym( libgnutls_handle, "gnutls_dh_params_generate2" )))
+    {
+        WARN("gnutls_dh_params_generate2 not found\n");
+    }
+    if (!(pgnutls_dh_params_import_raw2 = dlsym( libgnutls_handle, "gnutls_dh_params_import_raw2" )))
+    {
+        WARN("gnutls_dh_params_import_raw2 not found\n");
+    }
+    if (!(pgnutls_dh_params_export_raw = dlsym( libgnutls_handle, "gnutls_dh_params_export_raw" )))
+    {
+        WARN("gnutls_dh_params_export_raw not found\n");
+    }
+
+#if defined(HAVE_GMP_H) && defined(SONAME_LIBGMP)
+    dh_supported = pgnutls_dh_params_init && pgnutls_dh_params_generate2 && pgnutls_dh_params_import_raw2
+            && libgmp_handle;
+#else
+    ERR_(winediag)("Compiled without DH support.\n");
+#endif
 
     if (TRACE_ON( bcrypt ))
     {
@@ -317,6 +460,14 @@ static NTSTATUS gnutls_process_attach( void *args )
 fail:
     dlclose( libgnutls_handle );
     libgnutls_handle = NULL;
+
+#if defined(HAVE_GMP_H) && defined(SONAME_LIBGMP)
+    if (libgmp_handle)
+    {
+        dlclose( libgmp_handle );
+        libgmp_handle = NULL;
+    }
+#endif
     return STATUS_DLL_NOT_FOUND;
 }
 
@@ -329,6 +480,16 @@ static NTSTATUS gnutls_process_detach( void *args )
         libgnutls_handle = NULL;
     }
     return STATUS_SUCCESS;
+
+#if defined(HAVE_GMP_H) && defined(SONAME_LIBGMP)
+    dlclose( libgmp_handle );
+    libgmp_handle = NULL;
+#endif
+
+#if defined(HAVE_GCRYPT_H) && defined(SONAME_LIBGCRYPT)
+    dlclose( libgcrypt_handle );
+    libgcrypt_handle = NULL;
+#endif
 }
 
 struct buffer
@@ -665,6 +826,10 @@ static NTSTATUS export_gnutls_pubkey_ecc( gnutls_privkey_t gnutls_key, enum alg_
         magic = BCRYPT_ECDH_PUBLIC_P256_MAGIC;
         size = 32;
         break;
+    case ALG_ID_ECDH_P384:
+        magic = BCRYPT_ECDH_PUBLIC_P384_MAGIC;
+        size = 48;
+        break;
     case ALG_ID_ECDSA_P256:
         magic = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
         size = 32;
@@ -680,7 +845,7 @@ static NTSTATUS export_gnutls_pubkey_ecc( gnutls_privkey_t gnutls_key, enum alg_
         return STATUS_INTERNAL_ERROR;
     }
 
-    if (curve != GNUTLS_ECC_CURVE_SECP256R1)
+    if (curve != GNUTLS_ECC_CURVE_SECP256R1 && curve != GNUTLS_ECC_CURVE_SECP384R1)
     {
         FIXME( "curve %u not supported\n", curve );
         free( x.data ); free( y.data );
@@ -837,6 +1002,173 @@ static NTSTATUS export_gnutls_pubkey_dsa_capi( gnutls_privkey_t gnutls_key, cons
     return STATUS_SUCCESS;
 }
 
+#if defined(HAVE_GMP_H) && defined(SONAME_LIBGMP)
+static NTSTATUS CDECL gen_random(void *buffer, unsigned int length)
+{
+    unsigned int read_size;
+    int dev_random;
+
+    dev_random = open("/dev/urandom", O_RDONLY);
+    if (dev_random == -1)
+    {
+        FIXME("couldn't open /dev/urandom.\n");
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    read_size = read(dev_random, buffer, length);
+    close(dev_random);
+    if (read_size != length)
+    {
+        FIXME("Could not read from /dev/urandom.");
+        return STATUS_INTERNAL_ERROR;
+    }
+    return STATUS_SUCCESS;
+}
+
+static void import_mpz(mpz_t value, const void *input, unsigned int length)
+{
+    pmpz_import(value, length, 1, 1, 0, 0, input);
+}
+
+static void export_mpz(void *output, unsigned int length, const mpz_t value)
+{
+    size_t export_length;
+    unsigned int offset;
+
+    export_length = (pmpz_sizeinbase(value, 2) + 7) / 8;
+    assert(export_length <= length);
+    offset = length - export_length;
+    memset(output, 0, offset);
+    pmpz_export((BYTE *)output + offset, &export_length, 1, 1, 0, 0, value);
+    if (!export_length)
+    {
+        ERR("Zero export length, value bits %u.\n", (unsigned)pmpz_sizeinbase(value, 2));
+        memset((BYTE *)output + offset, 0, length - offset);
+    }
+    else
+    {
+        assert(export_length + offset == length);
+    }
+}
+
+static NTSTATUS CDECL key_dh_generate( struct key *key )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    mpz_t p, psub1, g, privkey, pubkey;
+    ULONG key_length;
+    unsigned int i;
+    int ret;
+
+    if (!dh_supported)
+    {
+        ERR("DH is not available.\n");
+        return STATUS_NOT_IMPLEMENTED;
+    }
+
+    key_length = key->u.a.bitlen / 8;
+
+    if (!(key->u.a.flags & KEY_FLAG_DH_PARAMS_SET))
+    {
+        gnutls_datum_t prime, generator;
+        gnutls_dh_params_t dh_params;
+
+        if ((ret = pgnutls_dh_params_init( &dh_params )))
+        {
+            pgnutls_perror( ret );
+            return STATUS_INTERNAL_ERROR;
+        }
+        if ((ret = pgnutls_dh_params_generate2( dh_params, key->u.a.bitlen )))
+        {
+            pgnutls_perror( ret );
+            pgnutls_dh_params_deinit( dh_params );
+            return STATUS_INTERNAL_ERROR;
+        }
+        if ((ret = pgnutls_dh_params_export_raw( dh_params, &prime, &generator, NULL )))
+        {
+            pgnutls_perror( ret );
+            pgnutls_dh_params_deinit( dh_params );
+            return STATUS_INTERNAL_ERROR;
+        }
+        pgnutls_dh_params_deinit( dh_params );
+
+
+        export_gnutls_datum( (UCHAR *)((BCRYPT_DH_KEY_BLOB *)key->u.a.pubkey + 1), key_length, &prime, NULL );
+        export_gnutls_datum( (UCHAR *)((BCRYPT_DH_KEY_BLOB *)key->u.a.pubkey + 1) + key_length,
+                key_length, &generator, NULL );
+        free( prime.data );
+        free( generator.data );
+
+        key->u.a.flags |= KEY_FLAG_DH_PARAMS_SET;
+    }
+
+    pmpz_init(p);
+    pmpz_init(psub1);
+    pmpz_init(g);
+    pmpz_init(pubkey);
+    pmpz_init(privkey);
+
+    import_mpz(p, (BCRYPT_DH_KEY_BLOB *)key->u.a.pubkey + 1, key_length);
+    if (!mpz_sgn(p))
+    {
+        ERR("Got zero modulus.\n");
+        status = STATUS_INTERNAL_ERROR;
+        goto done;
+    }
+    pmpz_sub_ui(psub1, p, 1);
+
+    import_mpz(g, (UCHAR *)((BCRYPT_DH_KEY_BLOB *)key->u.a.pubkey + 1) + key_length, key_length);
+    if (!mpz_sgn(g))
+    {
+        ERR("Got zero generator.\n");
+        status = STATUS_INTERNAL_ERROR;
+        goto done;
+    }
+    for (i = 0; i < 3; ++i)
+    {
+        if ((status = gen_random(key->u.a.privkey, key_length)))
+        {
+            goto done;
+        }
+        import_mpz(privkey, key->u.a.privkey, key_length);
+
+        pmpz_mod(privkey, privkey, p);
+        pmpz_powm(pubkey, g, privkey, p);
+        if (p_mpz_cmp_ui(pubkey, 1))
+            break;
+    }
+    if (i == 3)
+    {
+        ERR("Could not generate key after 3 iterations.\n");
+        status = STATUS_INTERNAL_ERROR;
+        goto done;
+    }
+
+    if (pmpz_cmp(pubkey, psub1) >= 0)
+    {
+        ERR("pubkey > p - 1.\n");
+        status = STATUS_INTERNAL_ERROR;
+        goto done;
+    }
+
+    export_mpz(key->u.a.privkey, key_length, privkey);
+    export_mpz((UCHAR *)((BCRYPT_DH_KEY_BLOB *)key->u.a.pubkey + 1) + 2 * key_length, key_length, pubkey);
+
+done:
+    pmpz_clear(psub1);
+    pmpz_clear(p);
+    pmpz_clear(g);
+    pmpz_clear(pubkey);
+    pmpz_clear(privkey);
+    return status;
+}
+#else
+static NTSTATUS CDECL key_dh_generate( struct key *key )
+{
+    ERR("Compiled without DH support.\n");
+    return STATUS_NOT_IMPLEMENTED;
+}
+#endif
+
 static NTSTATUS key_asymmetric_generate( void *args )
 {
     struct key *key = args;
@@ -867,6 +1199,14 @@ static NTSTATUS key_asymmetric_generate( void *args )
         bitlen = GNUTLS_CURVE_TO_BITS( GNUTLS_ECC_CURVE_SECP256R1 );
         break;
 
+    case ALG_ID_ECDH_P384:
+        pk_alg = GNUTLS_PK_ECC;
+        bitlen = GNUTLS_CURVE_TO_BITS( GNUTLS_ECC_CURVE_SECP384R1 );
+        break;
+
+    case ALG_ID_DH:
+        return key_dh_generate( key );
+
     default:
         FIXME( "algorithm %u not supported\n", key->alg_id );
         return STATUS_NOT_SUPPORTED;
@@ -880,6 +1220,7 @@ static NTSTATUS key_asymmetric_generate( void *args )
 
     if ((ret = pgnutls_privkey_generate( handle, pk_alg, bitlen, 0 )))
     {
+        ERR("gnutls error bitlen %u.\n", bitlen);
         pgnutls_perror( ret );
         pgnutls_privkey_deinit( handle );
         return STATUS_INTERNAL_ERROR;
@@ -931,6 +1272,10 @@ static NTSTATUS key_export_ecc( void *args )
         magic = BCRYPT_ECDH_PRIVATE_P256_MAGIC;
         size = 32;
         break;
+    case ALG_ID_ECDH_P384:
+        magic = BCRYPT_ECDH_PRIVATE_P384_MAGIC;
+        size = 48;
+        break;
     case ALG_ID_ECDSA_P256:
         magic = BCRYPT_ECDSA_PRIVATE_P256_MAGIC;
         size = 32;
@@ -947,7 +1292,7 @@ static NTSTATUS key_export_ecc( void *args )
         return STATUS_INTERNAL_ERROR;
     }
 
-    if (curve != GNUTLS_ECC_CURVE_SECP256R1)
+    if (curve != GNUTLS_ECC_CURVE_SECP256R1 && curve != GNUTLS_ECC_CURVE_SECP384R1)
     {
         FIXME( "curve %u not supported\n", curve );
         free( x.data ); free( y.data ); free( d.data );
@@ -989,6 +1334,7 @@ static NTSTATUS key_import_ecc( void *args )
     switch (key->alg_id)
     {
     case ALG_ID_ECDH_P256:
+    case ALG_ID_ECDH_P384:
     case ALG_ID_ECDSA_P256:
         curve = GNUTLS_ECC_CURVE_SECP256R1;
         break;
@@ -1846,6 +2192,252 @@ static NTSTATUS key_asymmetric_decrypt( void *args )
     return status;
 }
 
+#if defined(HAVE_GCRYPT_H) && defined(SONAME_LIBGCRYPT)
+static NTSTATUS gcrypt_extract_result_into_secret(gcry_sexp_t result, struct secret *secret)
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    gcry_mpi_t fullcoords = NULL;
+    gcry_sexp_t fragment = NULL;
+    UCHAR *tmp_buffer = NULL;
+    gcry_error_t err;
+    size_t size;
+
+    fragment = pgcry_sexp_find_token(result, "s", 0);
+    if (!fragment)
+    {
+        status = STATUS_NO_MEMORY;
+        goto done;
+    }
+
+    fullcoords = pgcry_sexp_nth_mpi(fragment, 1, GCRYMPI_FMT_USG);
+    if (!fullcoords)
+    {
+        status = STATUS_NO_MEMORY;
+        goto done;
+    }
+
+    if ((err = pgcry_mpi_print(GCRYMPI_FMT_USG, NULL, 0, &size, fullcoords)))
+    {
+        ERR("Error = %s/%s.\n", pgcry_strsource(err), pgcry_strerror(err));
+        status = STATUS_INTERNAL_ERROR;
+        goto done;
+    }
+
+    tmp_buffer = malloc(size);
+    if ((err = pgcry_mpi_print(GCRYMPI_FMT_STD, tmp_buffer, size, NULL, fullcoords)))
+    {
+        ERR("Error = %s/%s.\n", pgcry_strsource(err), pgcry_strerror(err));
+        status = STATUS_INTERNAL_ERROR;
+        goto done;
+    }
+
+    secret->data = malloc(size / 2);
+    memcpy(secret->data, tmp_buffer + size % 2, size / 2);
+    secret->data_len = size / 2;
+
+done:
+    free(tmp_buffer);
+
+    pgcry_mpi_release(fullcoords);
+    pgcry_sexp_release(fragment);
+
+    return status;
+}
+#endif
+
+static NTSTATUS key_secret_agreement( void *args )
+{
+    struct key_secret_agreement_params *params = args;
+    struct secret *secret;
+    struct key *priv_key;
+    struct key *peer_key;
+    priv_key = params->privkey;
+    peer_key = params->pubkey;
+    secret = params->secret;
+
+    switch (priv_key->alg_id)
+    {
+        case ALG_ID_DH:
+#if defined(HAVE_GMP_H) && defined(SONAME_LIBGMP)
+        {
+            mpz_t p, priv, peer, k;
+            ULONG key_length;
+
+            if (!dh_supported)
+            {
+                ERR("DH is not available.\n");
+                return STATUS_NOT_IMPLEMENTED;
+            }
+
+            key_length = priv_key->u.a.bitlen / 8;
+
+            if (memcmp((BCRYPT_DH_KEY_BLOB *)priv_key->u.a.pubkey + 1,
+                    peer_key->u.a.pubkey + sizeof(BCRYPT_DH_KEY_BLOB), key_length * 2))
+            {
+                ERR("peer DH paramaters do not match.\n");
+                return STATUS_INTERNAL_ERROR;
+            }
+
+            pmpz_init(p);
+            pmpz_init(priv);
+            pmpz_init(peer);
+            pmpz_init(k);
+
+            import_mpz(p, (BCRYPT_DH_KEY_BLOB *)priv_key->u.a.pubkey + 1, key_length);
+            if (pmpz_sizeinbase(p, 2) < 2)
+            {
+                ERR("Invalid prime.\n");
+                pmpz_clear(p);
+                pmpz_clear(priv);
+                pmpz_clear(peer);
+                pmpz_clear(k);
+                return STATUS_INTERNAL_ERROR;
+            }
+            import_mpz(priv, priv_key->u.a.privkey, key_length);
+            import_mpz(peer, peer_key->u.a.pubkey + sizeof(BCRYPT_DH_KEY_BLOB) + key_length * 2, key_length);
+            pmpz_powm(k, peer, priv, p);
+            export_mpz(secret->data, key_length, k);
+            secret->data_len = key_length;
+
+            pmpz_clear(p);
+            pmpz_clear(priv);
+            pmpz_clear(peer);
+            pmpz_clear(k);
+            break;
+        }
+#else
+            ERR_(winediag)("Compiled without DH support.\n");
+            return STATUS_NOT_IMPLEMENTED;
+#endif
+
+        case ALG_ID_ECDH_P256:
+        case ALG_ID_ECDH_P384:
+/* this is necessary since GNUTLS doesn't support ECDH public key encryption, maybe we can replace this when it does:
+   https://github.com/gnutls/gnutls/blob/cdc4fc288d87f91f974aa23b6e8595a53970ce00/lib/nettle/pk.c#L495 */
+#if defined(HAVE_GCRYPT_H) && defined(SONAME_LIBGCRYPT)
+        {
+            const char *pubkey_format;
+            struct key_export_params key_export;
+            DWORD key_size;
+            UCHAR *pubkey_raw;
+            gcry_sexp_t pubkey = NULL;
+            UCHAR *privkey_raw;
+            ULONG privkey_size;
+            gcry_sexp_t privkey = NULL;
+            gcry_sexp_t xchg_result = NULL;
+            gcry_error_t err;
+            NTSTATUS status = STATUS_SUCCESS;
+
+            if (!gcrypt_available)
+            {
+                WARN("ECC secret support not available.\n");
+                return STATUS_NOT_IMPLEMENTED;
+            }
+
+            if (priv_key->alg_id == ALG_ID_ECDH_P256)
+            {
+                pubkey_format = "NIST P-256";
+                key_size = 32;
+            }
+            else if (priv_key->alg_id == ALG_ID_ECDH_P384)
+            {
+                pubkey_format = "NIST P-384";
+                key_size = 48;
+            }
+
+            /* copy public key into temporary buffer so we can prepend 0x04 (to indicate it is uncompressed) */
+            pubkey_raw = malloc((key_size * 2) + 1);
+            pubkey_raw[0] = 0x04;
+            memcpy(pubkey_raw + 1, peer_key->u.a.pubkey + sizeof(BCRYPT_ECCKEY_BLOB), key_size * 2);
+
+            err = pgcry_sexp_build(&pubkey, NULL,
+                                "(key-data(public-key(ecdh(curve %s)(q %b))))",
+                                pubkey_format,
+                                (key_size * 2) + 1,
+                                pubkey_raw);
+
+            free(pubkey_raw);
+
+            if (err)
+            {
+                ERR("Failed to build gcrypt public key. err %s/%s\n", pgcry_strsource (err), pgcry_strerror (err));
+                return STATUS_INTERNAL_ERROR;
+            }
+
+            /* copy private key from gnutls to gcrypt */
+            privkey_size = sizeof(BCRYPT_ECCKEY_BLOB) + key_size * 3;
+            privkey_raw = malloc(privkey_size);
+            key_export.key = priv_key;
+            key_export.buf = privkey_raw;
+            key_export.len = privkey_size;
+            key_export.ret_len = &privkey_size;
+            status = key_export_ecc( &key_export );
+
+            if (status)
+            {
+                ERR("Failed to extra gnutls private key\n");
+                free(privkey_raw);
+                pgcry_sexp_release(pubkey);
+                return status;
+            }
+
+            err = pgcry_sexp_build(&privkey, NULL,
+                                "(data(flags raw)(value %b))",
+                                key_size,
+                                privkey_raw + sizeof(BCRYPT_ECCKEY_BLOB) + key_size * 2);
+
+            free(privkey_raw);
+
+            if (err)
+            {
+                ERR("Failed to build gcrypt private key. err %s/%s\n", pgcry_strsource (err), pgcry_strerror (err));
+                pgcry_sexp_release(pubkey);
+                return STATUS_INTERNAL_ERROR;
+            }
+
+            err = pgcry_pk_encrypt(&xchg_result, privkey, pubkey);
+
+            pgcry_sexp_release(privkey);
+            pgcry_sexp_release(pubkey);
+
+            if (err)
+            {
+                ERR("Failed to perform key exchange. err %s/%s\n", pgcry_strsource (err), pgcry_strerror (err));
+                return STATUS_INTERNAL_ERROR;
+            }
+
+            status = gcrypt_extract_result_into_secret(xchg_result, secret);
+
+            pgcry_sexp_release(xchg_result);
+
+            if (status)
+            {
+                ERR("Failed to extract secret key.\n");
+                return status;
+            }
+
+            if (secret->data_len != key_size)
+            {
+                ERR("got secret size %u, expected %u.\n", secret->data_len, key_size);
+
+                free(secret->data);
+                return STATUS_INTERNAL_ERROR;
+            }
+
+            break;
+        }
+#else
+            WARN("Compiled without ECC secret support.\n");
+            return STATUS_NOT_IMPLEMENTED;
+#endif
+
+        default:
+            ERR( "unhandled algorithm %u\n", priv_key->alg_id );
+            return STATUS_INVALID_HANDLE;
+    }
+    return STATUS_SUCCESS;
+}
+
 const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     gnutls_process_attach,
@@ -1867,7 +2459,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     key_export_rsa,
     key_import_dsa_capi,
     key_import_ecc,
-    key_import_rsa
+    key_import_rsa,
+    key_secret_agreement,
 };
 
 #ifdef _WIN64

@@ -33,13 +33,9 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <sys/types.h>
-#ifdef HAVE_SYS_SOCKET_H
-# include <sys/socket.h>
-#endif
+#include <sys/socket.h>
 #include <sys/stat.h>
-#ifdef HAVE_SYS_MMAN_H
-# include <sys/mman.h>
-#endif
+#include <sys/mman.h>
 #ifdef HAVE_SYS_SYSINFO_H
 # include <sys/sysinfo.h>
 #endif
@@ -678,8 +674,11 @@ static NTSTATUS get_builtin_unix_funcs( void *module, BOOL wow, void **funcs )
     LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
     {
         if (builtin->module != module) continue;
-        *funcs = dlsym( builtin->unix_handle, ptr_name );
-        status = *funcs ? STATUS_SUCCESS : STATUS_ENTRYPOINT_NOT_FOUND;
+        if (builtin->unix_handle)
+        {
+            *funcs = dlsym( builtin->unix_handle, ptr_name );
+            status = *funcs ? STATUS_SUCCESS : STATUS_ENTRYPOINT_NOT_FOUND;
+        }
         break;
     }
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
@@ -2530,11 +2529,6 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
         if (sec->Characteristics & IMAGE_SCN_MEM_READ)    vprot |= VPROT_READ;
         if (sec->Characteristics & IMAGE_SCN_MEM_WRITE)   vprot |= VPROT_WRITECOPY;
         if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE) vprot |= VPROT_EXEC;
-
-        /* Dumb game crack lets the AOEP point into a data section. Adjust. */
-        if ((nt->OptionalHeader.AddressOfEntryPoint >= sec->VirtualAddress) &&
-            (nt->OptionalHeader.AddressOfEntryPoint < sec->VirtualAddress + size))
-            vprot |= VPROT_EXEC;
 
         if (!set_vprot( view, ptr + sec->VirtualAddress, size, vprot ) && (vprot & VPROT_EXEC))
             ERR( "failed to set %08x protection on %s section %.8s, noexec filesystem?\n",

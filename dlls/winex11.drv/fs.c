@@ -447,9 +447,9 @@ static LONG fs_set_current_mode(ULONG_PTR id, DEVMODEW *user_mode)
 
 /* Display device handler functions */
 
-static BOOL fs_get_monitors(ULONG_PTR adapter_id, struct x11drv_monitor **new_monitors, int *count)
+static BOOL fs_get_monitors(ULONG_PTR adapter_id, struct gdi_monitor **new_monitors, int *count)
 {
-    struct x11drv_monitor *monitor;
+    struct gdi_monitor *monitor;
     struct fs_monitor *fs_monitor;
     RECT rect;
     INT i;

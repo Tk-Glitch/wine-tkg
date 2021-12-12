@@ -33,12 +33,9 @@
 struct user_callbacks
 {
     HWND (WINAPI *pGetDesktopWindow)(void);
-    UINT (WINAPI *pGetDpiForSystem)(void);
-    BOOL (WINAPI *pGetMonitorInfoW)( HMONITOR, LPMONITORINFO );
-    INT (WINAPI *pGetSystemMetrics)(INT);
     BOOL (WINAPI *pGetWindowRect)( HWND hwnd, LPRECT rect );
-    BOOL (WINAPI *pEnumDisplayMonitors)( HDC, LPRECT, MONITORENUMPROC, LPARAM );
     BOOL (WINAPI *pRedrawWindow)( HWND, const RECT*, HRGN, UINT );
+    LRESULT (WINAPI *pSendMessageTimeoutW)( HWND, UINT, WPARAM, LPARAM, UINT, UINT, PDWORD_PTR );
     HWND (WINAPI *pWindowFromDC)( HDC );
 };
 
@@ -200,7 +197,7 @@ struct unix_funcs
     LONG     (WINAPI *pNtUserChangeDisplaySettings)( UNICODE_STRING *devname, DEVMODEW *devmode, HWND hwnd,
                                                      DWORD flags, void *lparam );
     INT      (WINAPI *pNtUserCountClipboardFormats)(void);
-    BOOL     (WINAPI *pNtUserEnumDisplayDevices)( UNICODE_STRING *device, DWORD index,
+    NTSTATUS (WINAPI *pNtUserEnumDisplayDevices)( UNICODE_STRING *device, DWORD index,
                                                   DISPLAY_DEVICEW *info, DWORD flags );
     BOOL     (WINAPI *pNtUserEnumDisplayMonitors)( HDC hdc, RECT *rect, MONITORENUMPROC proc, LPARAM lp );
     BOOL     (WINAPI *pNtUserEnumDisplaySettings)( UNICODE_STRING *device, DWORD mode,
@@ -216,7 +213,11 @@ struct unix_funcs
     BOOL     (WINAPI *pNtUserScrollDC)( HDC hdc, INT dx, INT dy, const RECT *scroll, const RECT *clip,
                                         HRGN ret_update_rgn, RECT *update_rect );
     HPALETTE (WINAPI *pNtUserSelectPalette)( HDC hdc, HPALETTE hpal, WORD bkg );
+    BOOL     (WINAPI *pNtUserSetSysColors)( INT count, const INT *colors, const COLORREF *values );
     INT      (WINAPI *pNtUserShowCursor)( BOOL show );
+    BOOL     (WINAPI *pNtUserSystemParametersInfo)( UINT action, UINT val, PVOID ptr, UINT winini );
+    BOOL     (WINAPI *pNtUserSystemParametersInfoForDpi)( UINT action, UINT val, PVOID ptr,
+                                                         UINT winini, UINT dpi );
     INT      (WINAPI *pNtUserToUnicodeEx)( UINT virt, UINT scan, const BYTE *state,
                                            WCHAR *str, int size, UINT flags, HKL layout );
     BOOL     (WINAPI *pNtUserUnregisterHotKey)( HWND hwnd, INT id );
@@ -224,7 +225,6 @@ struct unix_funcs
 
     /* Wine-specific functions */
     DWORD_PTR (WINAPI *pGetDCHook)( HDC hdc, DCHOOKPROC *proc );
-    BOOL (WINAPI *pMirrorRgn)( HWND hwnd, HRGN hrgn );
     BOOL (WINAPI *pSetDCHook)( HDC hdc, DCHOOKPROC proc, DWORD_PTR data );
     INT (WINAPI *pSetDIBits)( HDC hdc, HBITMAP hbitmap, UINT startscan,
                               UINT lines, const void *bits, const BITMAPINFO *info,
@@ -233,15 +233,17 @@ struct unix_funcs
     BOOL (CDECL *get_brush_bitmap_info)( HBRUSH handle, BITMAPINFO *info, void *bits, UINT *usage );
     BOOL (CDECL *get_file_outline_text_metric)( const WCHAR *path, OUTLINETEXTMETRICW *otm );
     BOOL (CDECL *get_icm_profile)( HDC hdc, BOOL allow_default, DWORD *size, WCHAR *filename );
-    const struct vulkan_funcs * (CDECL *get_vulkan_driver)( HDC hdc, UINT version );
+    const struct vulkan_funcs * (CDECL *get_vulkan_driver)( UINT version );
     struct opengl_funcs * (CDECL *get_wgl_driver)( HDC hdc, UINT version );
-    void (CDECL *make_gdi_object_system)( HGDIOBJ handle, BOOL set );
     void (CDECL *set_display_driver)( struct user_driver_funcs *funcs, UINT version );
     void (CDECL *set_visible_region)( HDC hdc, HRGN hrgn, const RECT *vis_rect, const RECT *device_rect,
                                       struct window_surface *surface );
 };
 
-extern RECT get_virtual_screen_rect(void) DECLSPEC_HIDDEN;
+extern RECT get_display_rect( const WCHAR *display ) DECLSPEC_HIDDEN;
+extern UINT get_system_dpi(void) DECLSPEC_HIDDEN;
+extern int get_system_metrics( int index ) DECLSPEC_HIDDEN;
+extern RECT get_virtual_screen_rect( UINT dpi ) DECLSPEC_HIDDEN;
 
 extern void wrappers_init( unixlib_handle_t handle ) DECLSPEC_HIDDEN;
 extern NTSTATUS gdi_init(void) DECLSPEC_HIDDEN;
@@ -258,9 +260,10 @@ extern ULONG query_reg_value( HKEY hkey, const WCHAR *name,
 extern ULONG query_reg_ascii_value( HKEY hkey, const char *name,
                                     KEY_VALUE_PARTIAL_INFORMATION *info, ULONG size ) DECLSPEC_HIDDEN;
 extern void set_reg_ascii_value( HKEY hkey, const char *name, const char *value ) DECLSPEC_HIDDEN;
-extern void set_reg_value( HKEY hkey, const WCHAR *name, UINT type, const void *value,
+extern BOOL set_reg_value( HKEY hkey, const WCHAR *name, UINT type, const void *value,
                            DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL reg_delete_tree( HKEY parent, const WCHAR *name, ULONG name_len ) DECLSPEC_HIDDEN;
+extern void reg_delete_value( HKEY hkey, const WCHAR *name ) DECLSPEC_HIDDEN;
 
 extern HKEY hkcu_key DECLSPEC_HIDDEN;
 

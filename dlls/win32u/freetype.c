@@ -33,13 +33,9 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <dlfcn.h>
-#ifdef HAVE_SYS_MMAN_H
-# include <sys/mman.h>
-#endif
+#include <sys/mman.h>
 #include <string.h>
-#ifdef HAVE_DIRENT_H
-# include <dirent.h>
-#endif
+#include <dirent.h>
 #include <stdio.h>
 #include <assert.h>
 #include <unistd.h>

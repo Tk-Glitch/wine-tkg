@@ -31,18 +31,14 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <dirent.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <unistd.h>
 #include <poll.h>
+#include <sys/ioctl.h>
 #ifdef HAVE_LIBUDEV_H
 # include <libudev.h>
 #endif
 #ifdef HAVE_LINUX_HIDRAW_H
 # include <linux/hidraw.h>
-#endif
-#ifdef HAVE_SYS_IOCTL_H
-# include <sys/ioctl.h>
 #endif
 #ifdef HAVE_SYS_INOTIFY_H
 # include <sys/inotify.h>
@@ -949,7 +945,7 @@ static NTSTATUS lnxev_device_physical_device_set_gain(struct unix_device *iface,
     {
         .type = EV_FF,
         .code = FF_GAIN,
-        .value = percent,
+        .value = 0xffff * percent / 100,
     };
 
     TRACE("iface %p, percent %#x.\n", iface, percent);
@@ -1045,19 +1041,14 @@ static NTSTATUS lnxev_device_physical_effect_update(struct unix_device *iface, B
     if (params->effect_type == PID_USAGE_UNDEFINED) return STATUS_SUCCESS;
     if ((status = set_effect_type_from_usage(&effect, params->effect_type))) return status;
 
-    effect.replay.length = params->duration;
+    effect.replay.length = (params->duration == 0xffff ? 0 : params->duration);
     effect.replay.delay = params->start_delay;
     effect.trigger.button = params->trigger_button;
     effect.trigger.interval = params->trigger_repeat_interval;
 
-    /* Linux FF only supports polar direction, and uses an inverted convention compared
-     * to SDL or dinput (see SDL src/haptic/linux/SDL_syshaptic.c), where the force pulls
-     * into the specified direction, instead of coming from it.
-     *
-     * The first direction we get from PID is in polar coordinate space, so we need to
-     * add 180° to make it match Linux coordinates. */
-    effect.direction = (params->direction[0] + 18000) % 36000;
-    effect.direction = effect.direction * 0x800 / 1125;
+    /* Linux FF only supports polar direction, and the first direction we get from PID
+     * is in polar coordinate space already. */
+    effect.direction = params->direction[0] * 0x800 / 1125;
 
     switch (params->effect_type)
     {

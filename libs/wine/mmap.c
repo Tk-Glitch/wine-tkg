@@ -28,12 +28,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
-#ifdef HAVE_SYS_WAIT_H
 #include <sys/wait.h>
-#endif
-#ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
-#endif
 #include <unistd.h>
 #ifdef HAVE_STDINT_H
 # include <stdint.h>

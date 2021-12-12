@@ -831,6 +831,12 @@ typedef struct
     lparam_t info;
 } cursor_pos_t;
 
+struct cpu_topology_override
+{
+    unsigned int cpu_count;
+    unsigned char host_cpu_id[64];
+};
+
 /****************************************************************/
 /* Request declarations */
 
@@ -871,7 +877,7 @@ typedef struct
 @REQ(new_thread)
     obj_handle_t process;      /* process in which to create thread */
     unsigned int access;       /* wanted access rights */
-    int          suspend;      /* new thread should be suspended on creation */
+    unsigned int flags;        /* thread creation flags */
     int          request_fd;   /* fd for request pipe */
     VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
@@ -891,6 +897,7 @@ typedef struct
 
 /* Signal the end of the process initialization */
 @REQ(init_process_done)
+    VARARG(cpu_override,cpu_topology_override); /* Overridden CPUs to host CPUs mapping. */
     client_ptr_t teb;          /* TEB of new thread (in process address space) */
     client_ptr_t peb;          /* PEB of new process (in process address space) */
     client_ptr_t ldt_copy;     /* address of LDT copy (in process address space) */
@@ -1442,31 +1449,6 @@ enum server_fd_type
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking recv */
     unsigned int options;       /* device open options */
-@END
-
-
-struct poll_socket_input
-{
-    obj_handle_t socket;        /* socket handle */
-    int flags;                  /* events to poll for */
-};
-
-struct poll_socket_output
-{
-    int flags;                  /* events signaled */
-    unsigned int status;        /* socket status */
-};
-
-/* Perform an async poll on a socket */
-@REQ(poll_socket)
-    int          exclusive;     /* is the poll exclusive? */
-    async_data_t async;         /* async I/O parameters */
-    timeout_t    timeout;       /* timeout */
-    VARARG(sockets,poll_socket_input); /* list of sockets to poll */
-@REPLY
-    obj_handle_t wait;          /* handle to wait on for blocking poll */
-    unsigned int options;       /* file open options */
-    VARARG(sockets,poll_socket_output); /* data returned */
 @END
 
 

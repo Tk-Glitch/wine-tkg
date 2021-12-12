@@ -10134,6 +10134,269 @@ static void test_effect_crop(BOOL d3d11)
     release_test_context(&ctx);
 }
 
+static void test_stroke_contains_point(BOOL d3d11)
+{
+    ID2D1RectangleGeometry *rectangle;
+    ID2D1GeometrySink *sink;
+    ID2D1PathGeometry *path;
+    ID2D1Factory *factory;
+    D2D1_POINT_2F point;
+    D2D1_RECT_F rect;
+    unsigned int i;
+    BOOL contains;
+    HRESULT hr;
+
+    static const struct contains_point_test
+    {
+        D2D1_MATRIX_3X2_F transform;
+        D2D1_POINT_2F point;
+        float tolerance;
+        float stroke_width;
+        BOOL matrix;
+        BOOL contains;
+    }
+    rectangle_tests[] =
+    {
+        /* 0. Stroked area hittesting. Edge. */
+        {{{{0.0f}}}, { 0.4f, 10.0f},  0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, { 0.5f, 10.0f},  0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, { 0.6f, 10.0f},  0.0f, 1.0f, FALSE, FALSE},
+
+        /* 3. Negative tolerance. */
+        {{{{0.0f}}}, {-0.6f, 10.0f}, -1.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, { 0.6f, 10.0f}, -1.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, { 1.4f, 10.0f}, -1.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, { 1.5f, 10.0f}, -1.0f, 1.0f, FALSE, FALSE},
+
+        /* 7. Within tolerance limit around corner. */
+        {{{{0.0f}}}, {-D2D1_DEFAULT_FLATTENING_TOLERANCE - 1.00f, 0.0f}, 0.0f, 2.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {-D2D1_DEFAULT_FLATTENING_TOLERANCE - 1.01f, 0.0f}, 0.0f, 2.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {-D2D1_DEFAULT_FLATTENING_TOLERANCE, -D2D1_DEFAULT_FLATTENING_TOLERANCE},
+                0.0f, 2.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {-D2D1_DEFAULT_FLATTENING_TOLERANCE, -D2D1_DEFAULT_FLATTENING_TOLERANCE - 1.01f},
+                0.0f, 2.0f, FALSE, FALSE},
+
+        /* 11. Center point. */
+        {{{{0.0f}}}, { 5.0f, 10.0f},  0.0f, 1.0f, FALSE, FALSE},
+
+        /* 12. Center point, large stroke width. */
+        {{{{0.0f}}}, { 5.0f, 10.0f},  0.0f, 100.0f, FALSE, TRUE},
+
+        /* 13. Center point, large tolerance. */
+        {{{{0.0f}}}, { 5.0f, 10.0f}, 50.0f, 10.0f, FALSE, TRUE},
+
+        /* With transformation matrix. */
+
+        /* 14. */
+        {{{{0.0f, 0.0f, 0.0f, 1.0f}}}, {0.1f, 10.0f},  0.0f, 1.0f, TRUE, FALSE},
+        {{{{0.0f, 0.0f, 0.0f, 1.0f}}}, {5.0f, 10.0f},  5.0f, 1.0f, TRUE, FALSE},
+        {{{{0.0f, 0.0f, 0.0f, 1.0f}}}, {4.9f, 10.0f},  5.0f, 1.0f, TRUE, TRUE},
+        {{{{0.0f, 0.0f, 0.0f, 1.0f}}}, {5.0f, 10.0f}, -5.0f, 1.0f, TRUE, FALSE},
+        {{{{0.0f, 0.0f, 0.0f, 1.0f}}}, {4.9f, 10.0f}, -5.0f, 1.0f, TRUE, TRUE},
+
+        /* 19. */
+        {{{{1.0f, 0.0f, 0.0f, 1.0f}}}, {0.0f, 10.0f}, 0.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f}}}, {0.1f, 10.0f}, 0.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f}}}, {0.5f, 10.0f}, 0.0f, 1.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f}}}, {0.0f, 10.0f}, 1.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f}}}, {0.59f, 10.0f}, 1.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f}}}, {-0.59f, 10.0f}, 1.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f}}}, {0.59f, 10.0f}, -1.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f}}}, {-0.59f, 10.0f}, -1.0f, 1.0f, TRUE, TRUE},
+
+        /* 27. */
+        {{{{1.0f, 1.0f, 0.0f, 1.0f}}}, {5.0f, 4.4f}, 0.0f, 1.0f, TRUE, FALSE},
+        {{{{1.0f, 1.0f, 0.0f, 1.0f}}}, {5.0f, 4.6f}, 0.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 1.0f, 0.0f, 1.0f}}}, {5.0f, 5.4f}, 0.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 1.0f, 0.0f, 1.0f}}}, {5.0f, 5.6f}, 0.0f, 1.0f, TRUE, FALSE},
+
+        /* 31. */
+        {{{{1.0f, 1.0f, 0.0f, 1.0f}}}, {5.0f, 6.9f}, 1.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 1.0f, 0.0f, 1.0f}}}, {5.0f, 7.0f}, 1.0f, 1.0f, TRUE, FALSE},
+
+        /* 33. Offset matrix */
+        {{{{1.0f, 0.0f, 0.0f, 1.0f, -11.0f,   0.0f}}}, { 5.0f,  20.0f}, 0.0f, 1.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f,   0.0f,  21.0f}}}, {10.0f,  10.0f}, 0.0f, 1.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f,  11.0f,   0.0f}}}, { 5.0f,   0.0f}, 0.0f, 1.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f,   0.0f, -21.0f}}}, { 0.0f,  10.0f}, 0.0f, 1.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f, -11.0f,   0.0f}}}, {-6.0f,  20.0f}, 0.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f,   0.0f,  21.0f}}}, {10.0f,  31.0f}, 0.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f,  11.0f,   0.0f}}}, {16.0f,   0.0f}, 0.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f,   0.0f, -21.0f}}}, { 0.0f, -11.0f}, 0.0f, 1.0f, TRUE, TRUE},
+    },
+    path_tests[] =
+    {
+        /* 0. Stroked area hittesting. Edge. */
+        {{{{0.0f}}}, {160.0f,  600.0f},  0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {239.24f, 600.0f},  0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {239.26f, 600.0f},  0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {240.74f, 600.0f},  0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {240.76f, 600.0f},  0.0f, 1.0f, FALSE, FALSE},
+
+        /* 5. Negative tolerance. */
+        {{{{0.0f}}}, {239.24f, 600.0f}, -1.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {239.26f, 600.0f}, -1.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {240.74f, 600.0f}, -1.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {240.76f, 600.0f}, -1.0f, 1.0f, FALSE, FALSE},
+
+        /* 9. Less than default tolerance. */
+        {{{{0.0f}}}, {239.39f, 600.0f},  0.1f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {239.41f, 600.0f},  0.1f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {240.59f, 600.0f},  0.1f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {240.61f, 600.0f},  0.1f, 1.0f, FALSE, FALSE},
+
+        /* 13. Curves. */
+        {{{{1.0f, 0.0f, 0.0f, 1.0f, 10.0f, 10.0f}}}, {170.0f, 418.6f}, 0.0f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f, 10.0f, 10.0f}}}, {170.0f, 420.1f}, 0.0f, 1.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f, 10.0f, 10.0f}}}, {170.0f, 417.7f}, 0.0f, 1.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f, 10.0f, 10.0f}}}, { 89.5f, 485.3f}, 0.1f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f, 10.0f, 10.0f}}}, { 90.5f, 485.3f}, 0.1f, 1.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f, 10.0f, 10.0f}}}, { 91.5f, 485.3f}, 0.1f, 1.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 0.0f, 1.0f, 10.0f, 10.0f}}}, { 89.0f, 485.3f}, 0.1f, 1.0f, TRUE, FALSE},
+
+        /* 20. A curve where the control points project beyond the endpoints
+         *     onto the line through the endpoints. */
+        {{{{0.0f}}}, {306.97f, 791.67f}, 0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {307.27f, 791.67f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {308.47f, 791.67f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {308.77f, 791.67f}, 0.0f, 1.0f, FALSE, FALSE},
+
+        {{{{0.0f}}}, {350.00f, 824.10f}, 0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {350.00f, 824.40f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {350.00f, 825.60f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {350.00f, 825.90f}, 0.0f, 1.0f, FALSE, FALSE},
+
+        {{{{0.0f}}}, {391.23f, 791.67f}, 0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {391.53f, 791.67f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {392.73f, 791.67f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {393.03f, 791.67f}, 0.0f, 1.0f, FALSE, FALSE},
+
+        /* 32. A curve where the endpoints coincide. */
+        {{{{0.0f}}}, {570.23f, 799.77f}, 0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {570.53f, 799.77f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {571.73f, 799.77f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {572.03f, 799.77f}, 0.0f, 1.0f, FALSE, FALSE},
+
+        {{{{0.0f}}}, {600.00f, 824.10f}, 0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {600.00f, 824.40f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {600.00f, 825.60f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {600.00f, 825.90f}, 0.0f, 1.0f, FALSE, FALSE},
+
+        {{{{0.0f}}}, {627.97f, 799.77f}, 0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {628.27f, 799.77f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {629.47f, 799.77f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {629.77f, 799.77f}, 0.0f, 1.0f, FALSE, FALSE},
+
+        /* 44. A curve with coinciding endpoints, as well as coinciding
+         *     control points. */
+        {{{{0.0f}}}, {825.00f, 800.00f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {861.00f, 824.00f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {861.00f, 826.00f}, 0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {862.50f, 825.00f}, 0.0f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {864.00f, 824.00f}, 0.0f, 1.0f, FALSE, FALSE},
+        {{{{0.0f}}}, {864.00f, 826.00f}, 0.0f, 1.0f, FALSE, FALSE},
+
+        /* 50. Shear transforms. */
+        {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, { 837.2f, 600.0f}, 0.1f, 5.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, { 837.5f, 600.0f}, 0.1f, 5.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1186.3f, 791.7f}, 0.1f, 5.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1186.6f, 791.7f}, 0.1f, 5.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1425.0f, 827.3f}, 0.1f, 5.0f, TRUE, TRUE},
+        {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1425.0f, 827.6f}, 0.1f, 5.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1620.1f, 800.0f}, 0.1f, 5.0f, TRUE, FALSE},
+        {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1620.4f, 800.0f}, 0.1f, 5.0f, TRUE, TRUE},
+    };
+
+    hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    set_rect(&rect, 0.0f, 0.0f, 10.0f, 20.0f);
+    hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &rectangle);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    for (i = 0; i < ARRAY_SIZE(rectangle_tests); ++i)
+    {
+        const struct contains_point_test *test = &rectangle_tests[i];
+
+        winetest_push_context("Test %u", i);
+
+        contains = !test->contains;
+        hr = ID2D1RectangleGeometry_StrokeContainsPoint(rectangle, test->point, test->stroke_width,
+                NULL, test->matrix ? &test->transform : NULL, test->tolerance, &contains);
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(contains == test->contains, "Got unexpected result %#x.\n", contains);
+
+        winetest_pop_context();
+    }
+    ID2D1RectangleGeometry_Release(rectangle);
+
+    hr = ID2D1Factory_CreatePathGeometry(factory, &path);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(path, &sink);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    /* A limaçon. */
+    set_point(&point, 160.0f, 720.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    cubic_to(sink, 119.0f, 720.0f,  83.0f, 600.0f,  80.0f, 474.0f);
+    cubic_to(sink,  78.0f, 349.0f, 108.0f, 245.0f, 135.0f, 240.0f);
+    cubic_to(sink, 163.0f, 235.0f, 180.0f, 318.0f, 176.0f, 370.0f);
+    cubic_to(sink, 171.0f, 422.0f, 149.0f, 422.0f, 144.0f, 370.0f);
+    cubic_to(sink, 140.0f, 318.0f, 157.0f, 235.0f, 185.0f, 240.0f);
+    cubic_to(sink, 212.0f, 245.0f, 242.0f, 349.0f, 240.0f, 474.0f);
+    cubic_to(sink, 238.0f, 600.0f, 201.0f, 720.0f, 160.0f, 720.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+
+    /* Some straight lines. */
+    set_point(&point, 160.0f, 240.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    line_to(sink, 240.0f, 240.0f);
+    line_to(sink, 240.0f, 720.0f);
+    line_to(sink, 160.0f, 720.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
+
+    /* Projected control points extending beyond the line segment through the
+     * endpoints. */
+    set_point(&point, 325.0f, 750.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    cubic_to(sink, 250.0f, 850.0f, 450.0f, 850.0f, 375.0f, 750.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
+
+    /* Coinciding endpoints. */
+    set_point(&point, 600.0f, 750.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    cubic_to(sink, 500.0f, 850.0f, 700.0f, 850.0f, 600.0f, 750.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
+
+    /* Coinciding endpoints, as well as coinciding control points. */
+    set_point(&point, 750.0f, 750.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    cubic_to(sink, 900.0f, 850.0f, 900.0f, 850.0f, 750.0f, 750.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
+
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+
+    for (i = 0; i < ARRAY_SIZE(path_tests); ++i)
+    {
+        const struct contains_point_test *test = &path_tests[i];
+
+        winetest_push_context("Test %u", i);
+
+        contains = !test->contains;
+        hr = ID2D1PathGeometry_StrokeContainsPoint(path, test->point, test->stroke_width,
+                NULL, test->matrix ? &test->transform : NULL, test->tolerance, &contains);
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(contains == test->contains, "Got unexpected result %#x.\n", contains);
+
+        winetest_pop_context();
+    }
+
+    ID2D1PathGeometry_Release(path);
+
+    ID2D1Factory_Release(factory);
+}
+
 START_TEST(d2d1)
 {
     HMODULE d2d1_dll = GetModuleHandleA("d2d1.dll");
@@ -10198,6 +10461,7 @@ START_TEST(d2d1)
     queue_test(test_effect);
     queue_test(test_effect_2d_affine);
     queue_test(test_effect_crop);
+    queue_d3d10_test(test_stroke_contains_point);
 
     run_queued_tests();
 }

@@ -25,9 +25,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <unistd.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
@@ -1710,7 +1708,7 @@ static void move_window_bits( HWND hwnd, Window window, const RECT *old_rect, co
  *
  * Create a dummy parent window for child windows that don't have a true X11 parent.
  */
-static Window get_dummy_parent(void)
+Window get_dummy_parent(void)
 {
     static Window dummy_parent;
 
@@ -1731,19 +1729,18 @@ static Window get_dummy_parent(void)
 
 
 /**********************************************************************
- *		destroy_client_window
+ *		update_client_window
  */
-void destroy_client_window( HWND hwnd, Window old_window, Window new_window )
+void update_client_window( HWND hwnd )
 {
     struct x11drv_win_data *data;
     if ((data = get_win_data( hwnd )))
     {
-        if (data->client_window == old_window) data->client_window = new_window;
-        /* make sure any request that could use old_window has been flushed */
+        data->client_window = wine_vk_active_surface( hwnd );
+        /* make sure any request that could use old client window has been flushed */
         XFlush( data->display );
         release_win_data( data );
     }
-    XDestroyWindow( gdi_display, old_window );
 }
 
 
@@ -2089,7 +2086,7 @@ void CDECL X11DRV_DestroyWindow( HWND hwnd )
     release_win_data( data );
     HeapFree( GetProcessHeap(), 0, data );
     destroy_gl_drawable( hwnd );
-    wine_vk_surface_destroy( hwnd );
+    destroy_vk_surface( hwnd );
 }
 
 

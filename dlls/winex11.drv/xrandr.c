@@ -65,6 +65,7 @@ MAKE_FUNCPTR(XRRFreeOutputInfo)
 MAKE_FUNCPTR(XRRFreeScreenResources)
 MAKE_FUNCPTR(XRRGetCrtcInfo)
 MAKE_FUNCPTR(XRRGetOutputInfo)
+MAKE_FUNCPTR(XRRGetOutputProperty)
 MAKE_FUNCPTR(XRRGetScreenResources)
 MAKE_FUNCPTR(XRRGetScreenResourcesCurrent)
 MAKE_FUNCPTR(XRRGetScreenSizeRange)
@@ -109,6 +110,7 @@ static int load_xrandr(void)
         LOAD_FUNCPTR(XRRFreeScreenResources);
         LOAD_FUNCPTR(XRRGetCrtcInfo);
         LOAD_FUNCPTR(XRRGetOutputInfo);
+        LOAD_FUNCPTR(XRRGetOutputProperty);
         LOAD_FUNCPTR(XRRGetScreenResources);
         LOAD_FUNCPTR(XRRGetScreenResourcesCurrent);
         LOAD_FUNCPTR(XRRGetScreenSizeRange);
@@ -453,6 +455,25 @@ static void get_screen_size( XRRScreenResources *resources, unsigned int *width,
     }
 }
 
+static unsigned int get_edid( RROutput output, unsigned char **prop )
+{
+    int result, actual_format;
+    unsigned long bytes_after, len;
+    Atom actual_type;
+
+    result = pXRRGetOutputProperty( gdi_display, output, x11drv_atom(EDID), 0, 128, FALSE, FALSE,
+                                    AnyPropertyType, &actual_type, &actual_format, &len,
+                                    &bytes_after, prop );
+
+    if (result != Success)
+    {
+        WARN("Could not retrieve EDID property for output %#lx.\n", output);
+        *prop = NULL;
+        return 0;
+    }
+    return len;
+}
+
 static void set_screen_size( int width, int height )
 {
     int screen = default_visual.screen;
@@ -602,7 +623,7 @@ static BOOL is_crtc_primary( RECT primary, const XRRCrtcInfo *crtc )
            crtc->y + crtc->height == primary.bottom;
 }
 
-static void add_remaining_gpus_via_vulkan( struct x11drv_gpu **gpus, int *count )
+static void add_remaining_gpus_via_vulkan( struct gdi_gpu **gpus, int *count )
 {
     static const char *extensions[] =
     {
@@ -619,7 +640,7 @@ static void add_remaining_gpus_via_vulkan( struct x11drv_gpu **gpus, int *count 
     VkInstance vk_instance = NULL;
     INT gpu_idx, device_idx;
     INT original_gpu_count = *count;
-    struct x11drv_gpu *new_gpu;
+    struct gdi_gpu *new_gpu;
     BOOL new;
     VkResult vr;
 
@@ -711,7 +732,7 @@ done:
 
 VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkDisplayKHR)
 
-static BOOL get_gpu_properties_from_vulkan( struct x11drv_gpu *gpu, const XRRProviderInfo *provider_info )
+static BOOL get_gpu_properties_from_vulkan( struct gdi_gpu *gpu, const XRRProviderInfo *provider_info )
 {
     static const char *extensions[] =
     {
@@ -819,10 +840,10 @@ done:
 
 /* Get a list of GPUs reported by XRandR 1.4. Set get_properties to FALSE if GPU properties are
  * not needed to avoid unnecessary querying */
-static BOOL xrandr14_get_gpus2( struct x11drv_gpu **new_gpus, int *count, BOOL get_properties )
+static BOOL xrandr14_get_gpus2( struct gdi_gpu **new_gpus, int *count, BOOL get_properties )
 {
     static const WCHAR wine_adapterW[] = {'W','i','n','e',' ','A','d','a','p','t','e','r',0};
-    struct x11drv_gpu *gpus = NULL;
+    struct gdi_gpu *gpus = NULL;
     XRRScreenResources *screen_resources = NULL;
     XRRProviderResources *provider_resources = NULL;
     XRRProviderInfo *provider_info = NULL;
@@ -890,7 +911,7 @@ static BOOL xrandr14_get_gpus2( struct x11drv_gpu **new_gpus, int *count, BOOL g
     /* Make primary GPU the first */
     if (primary_provider > 0)
     {
-        struct x11drv_gpu tmp = gpus[0];
+        struct gdi_gpu tmp = gpus[0];
         gpus[0] = gpus[primary_provider];
         gpus[primary_provider] = tmp;
     }
@@ -932,19 +953,19 @@ done:
     return ret;
 }
 
-static BOOL xrandr14_get_gpus( struct x11drv_gpu **new_gpus, int *count )
+static BOOL xrandr14_get_gpus( struct gdi_gpu **new_gpus, int *count )
 {
     return xrandr14_get_gpus2( new_gpus, count, TRUE );
 }
 
-static void xrandr14_free_gpus( struct x11drv_gpu *gpus )
+static void xrandr14_free_gpus( struct gdi_gpu *gpus )
 {
     heap_free( gpus );
 }
 
-static BOOL xrandr14_get_adapters( ULONG_PTR gpu_id, struct x11drv_adapter **new_adapters, int *count )
+static BOOL xrandr14_get_adapters( ULONG_PTR gpu_id, struct gdi_adapter **new_adapters, int *count )
 {
-    struct x11drv_adapter *adapters = NULL;
+    struct gdi_adapter *adapters = NULL;
     XRRScreenResources *screen_resources = NULL;
     XRRProviderInfo *provider_info = NULL;
     XRRCrtcInfo *enum_crtc_info, *crtc_info = NULL;
@@ -1082,7 +1103,7 @@ static BOOL xrandr14_get_adapters( ULONG_PTR gpu_id, struct x11drv_adapter **new
     /* Make primary adapter the first */
     if (primary_adapter)
     {
-        struct x11drv_adapter tmp = adapters[0];
+        struct gdi_adapter tmp = adapters[0];
         adapters[0] = adapters[primary_adapter];
         adapters[primary_adapter] = tmp;
     }
@@ -1107,17 +1128,17 @@ done:
     return ret;
 }
 
-static void xrandr14_free_adapters( struct x11drv_adapter *adapters )
+static void xrandr14_free_adapters( struct gdi_adapter *adapters )
 {
     heap_free( adapters );
 }
 
-static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor **new_monitors, int *count )
+static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **new_monitors, int *count )
 {
     static const WCHAR generic_nonpnp_monitorW[] = {
         'G','e','n','e','r','i','c',' ',
         'N','o','n','-','P','n','P',' ','M','o','n','i','t','o','r',0};
-    struct x11drv_monitor *realloc_monitors, *monitors = NULL;
+    struct gdi_monitor *realloc_monitors, *monitors = NULL;
     XRRScreenResources *screen_resources = NULL;
     XRROutputInfo *output_info = NULL, *enum_output_info = NULL;
     XRRCrtcInfo *crtc_info = NULL, *enum_crtc_info;
@@ -1152,6 +1173,7 @@ static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor *
     {
         lstrcpyW( monitors[monitor_count].name, generic_nonpnp_monitorW );
         monitors[monitor_count].state_flags = DISPLAY_DEVICE_ATTACHED;
+        monitors[monitor_count].edid_len = get_edid( adapter_id, &monitors[monitor_count].edid );
         monitor_count = 1;
     }
     /* Active monitors, need to find other monitors with the same coordinates as mirrored */
@@ -1207,6 +1229,9 @@ static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor *
 
                     if (is_crtc_primary( primary_rect, crtc_info ))
                         primary_index = monitor_count;
+
+                    monitors[monitor_count].edid_len = get_edid( screen_resources->outputs[i],
+                                                                 &monitors[monitor_count].edid );
                     monitor_count++;
                 }
 
@@ -1220,7 +1245,7 @@ static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor *
         /* Make sure the first monitor is the primary */
         if (primary_index)
         {
-            struct x11drv_monitor tmp = monitors[0];
+            struct gdi_monitor tmp = monitors[0];
             monitors[0] = monitors[primary_index];
             monitors[primary_index] = tmp;
         }
@@ -1247,14 +1272,26 @@ done:
         pXRRFreeOutputInfo( enum_output_info );
     if (!ret)
     {
+        for (i = 0; i < monitor_count; i++)
+        {
+            if (monitors[i].edid)
+                XFree( monitors[i].edid );
+        }
         heap_free( monitors );
         ERR("Failed to get monitors\n");
     }
     return ret;
 }
 
-static void xrandr14_free_monitors( struct x11drv_monitor *monitors )
+static void xrandr14_free_monitors( struct gdi_monitor *monitors, int count )
 {
+    int i;
+
+    for (i = 0; i < count; i++)
+    {
+        if (monitors[i].edid)
+            XFree( monitors[i].edid );
+    }
     heap_free( monitors );
 }
 
@@ -1297,8 +1334,8 @@ static BOOL xrandr14_get_id( const WCHAR *device_name, ULONG_PTR *id )
     struct current_mode *tmp_modes, *new_current_modes = NULL;
     INT gpu_count, adapter_count, new_current_mode_count = 0;
     INT gpu_idx, adapter_idx, display_idx;
-    struct x11drv_adapter *adapters;
-    struct x11drv_gpu *gpus;
+    struct gdi_adapter *adapters;
+    struct gdi_gpu *gpus;
     WCHAR *end;
 
     /* Parse \\.\DISPLAY%d */

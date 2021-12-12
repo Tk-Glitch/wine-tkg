@@ -47,15 +47,15 @@ BOOL types_get_real_type(struct dbg_type* type, DWORD* tag)
 }
 
 /******************************************************************
- *		types_extract_as_longlong
+ *		types_extract_as_lgint
  *
  * Given a lvalue, try to get an integral (or pointer/address) value
  * out of it
  */
-LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue,
+dbg_lgint_t types_extract_as_lgint(const struct dbg_lvalue* lvalue,
                                    unsigned* psize, BOOL *issigned)
 {
-    LONGLONG            rtn = 0;
+    dbg_lgint_t         rtn = 0;
     DWORD               tag, bt;
     DWORD64             size;
     struct dbg_type     type = lvalue->type;
@@ -68,6 +68,7 @@ LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue,
     {
         return (LONG_PTR)memory_to_linear_addr(&lvalue->addr);
     }
+    if (tag != SymTagBaseType && lvalue->bitlen) dbg_printf("Unexpected bitfield on tag %d\n", tag);
 
     if (psize) *psize = 0;
     if (issigned) *issigned = FALSE;
@@ -91,11 +92,11 @@ LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue,
         {
         case btChar:
         case btInt:
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, (unsigned)size, s = TRUE, &rtn))
+            if (!memory_fetch_integer(lvalue, (unsigned)size, s = TRUE, &rtn))
                 RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
             break;
         case btUInt:
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, (unsigned)size, s = FALSE, &rtn))
+            if (!memory_fetch_integer(lvalue, (unsigned)size, s = FALSE, &rtn))
                 RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
             break;
         case btFloat:
@@ -106,17 +107,17 @@ LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue,
         break;
     case SymTagPointerType:
         if (!types_get_info(&type, TI_GET_LENGTH, &size) ||
-            !dbg_curr_process->be_cpu->fetch_integer(lvalue, (unsigned)size, s = FALSE, &rtn))
+            !memory_fetch_integer(lvalue, (unsigned)size, s = FALSE, &rtn))
             RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
         break;
     case SymTagArrayType:
     case SymTagUDT:
-        if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, sizeof(unsigned), s = FALSE, &rtn))
+        if (!memory_fetch_integer(lvalue, sizeof(unsigned), s = FALSE, &rtn))
             RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
         break;
     case SymTagEnum:
         if (!types_get_info(&type, TI_GET_LENGTH, &size) ||
-            !dbg_curr_process->be_cpu->fetch_integer(lvalue, (unsigned)size, s = FALSE, &rtn))
+            !memory_fetch_integer(lvalue, (unsigned)size, s = FALSE, &rtn))
             RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
         break;
     case SymTagFunctionType:
@@ -136,9 +137,9 @@ LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue,
  * Given a lvalue, try to get an integral (or pointer/address) value
  * out of it
  */
-INT_PTR types_extract_as_integer(const struct dbg_lvalue* lvalue)
+dbg_lgint_t types_extract_as_integer(const struct dbg_lvalue* lvalue)
 {
-    return types_extract_as_longlong(lvalue, NULL, NULL);
+    return types_extract_as_lgint(lvalue, NULL, NULL);
 }
 
 /******************************************************************
@@ -155,25 +156,33 @@ void types_extract_as_address(const struct dbg_lvalue* lvalue, ADDRESS64* addr)
     else
     {
         addr->Mode = AddrModeFlat;
-        addr->Offset = types_extract_as_longlong(lvalue, NULL, NULL);
+        addr->Offset = types_extract_as_lgint(lvalue, NULL, NULL);
     }
 }
 
 BOOL types_store_value(struct dbg_lvalue* lvalue_to, const struct dbg_lvalue* lvalue_from)
 {
-    LONGLONG    val;
-    DWORD64     size;
-    BOOL        is_signed;
-
-    if (!types_get_info(&lvalue_to->type, TI_GET_LENGTH, &size)) return FALSE;
-    if (sizeof(val) < size)
+    if (!lvalue_to->bitlen && !lvalue_from->bitlen)
     {
-        dbg_printf("Insufficient size\n");
-        return FALSE;
+        BOOL equal;
+        if (!types_compare(lvalue_to->type, lvalue_from->type, &equal)) return FALSE;
+        if (equal)
+            return memory_transfer_value(lvalue_to, lvalue_from);
+        if (types_is_float_type(lvalue_from) && types_is_float_type(lvalue_to))
+        {
+            double d;
+            return memory_fetch_float(lvalue_from, &d) &&
+                memory_store_float(lvalue_to, &d);
+        }
     }
-    /* FIXME: should support floats as well */
-    val = types_extract_as_longlong(lvalue_from, NULL, &is_signed);
-    return dbg_curr_process->be_cpu->store_integer(lvalue_to, size, is_signed, val);
+    if (types_is_integral_type(lvalue_from) && types_is_integral_type(lvalue_to))
+    {
+        /* doing integer conversion (about sign, size) */
+        dbg_lgint_t val = types_extract_as_integer(lvalue_from);
+        return memory_store_integer(lvalue_to, val);
+    }
+    dbg_printf("Cannot assign (different types)\n"); return FALSE;
+    return FALSE;
 }
 
 /******************************************************************
@@ -181,14 +190,10 @@ BOOL types_store_value(struct dbg_lvalue* lvalue_to, const struct dbg_lvalue* lv
  *
  * Implement a structure derefencement
  */
-static BOOL types_get_udt_element_lvalue(struct dbg_lvalue* lvalue, 
-                                         const struct dbg_type* type, ULONG *tmpbuf)
+static BOOL types_get_udt_element_lvalue(struct dbg_lvalue* lvalue, const struct dbg_type* type)
 {
     DWORD       offset, bitoffset;
-    DWORD       bt;
     DWORD64     length;
-
-    unsigned    mask;
 
     types_get_info(type, TI_GET_TYPE, &lvalue->type.id);
     lvalue->type.module = type->module;
@@ -198,38 +203,17 @@ static BOOL types_get_udt_element_lvalue(struct dbg_lvalue* lvalue,
     if (types_get_info(type, TI_GET_BITPOSITION, &bitoffset))
     {
         types_get_info(type, TI_GET_LENGTH, &length);
-        /* FIXME: this test isn't sufficient, depending on start of bitfield
-         * (ie a 32 bit field can spread across 5 bytes)
-         */
-        if (length > 8 * sizeof(*tmpbuf)) return FALSE;
-        lvalue->addr.Offset += bitoffset >> 3;
-        /*
-         * Bitfield operation.  We have to extract the field and store
-         * it in a temporary buffer so that we get it all right.
-         */
-        if (!memory_read_value(lvalue, sizeof(*tmpbuf), tmpbuf)) return FALSE;
-        mask = 0xffffffff << (DWORD)length;
-        *tmpbuf >>= bitoffset & 7;
-        *tmpbuf &= ~mask;
-
-        lvalue->cookie      = DLV_HOST;
-        lvalue->addr.Offset = (ULONG_PTR)tmpbuf;
-
-        /*
-         * OK, now we have the correct part of the number.
-         * Check to see whether the basic type is signed or not, and if so,
-         * we need to sign extend the number.
-         */
-        if (types_get_info(&lvalue->type, TI_GET_BASETYPE, &bt) && 
-            bt == btInt && (*tmpbuf & (1 << ((DWORD)length - 1))))
+        lvalue->bitlen = length;
+        lvalue->bitstart = bitoffset;
+        if (lvalue->bitlen != length || lvalue->bitstart != bitoffset)
         {
-            *tmpbuf |= mask;
+            dbg_printf("too wide bitfields\n"); /* shouldn't happen */
+            return FALSE;
         }
     }
     else
-    {
-        if (!memory_read_value(lvalue, sizeof(*tmpbuf), tmpbuf)) return FALSE;
-    }
+        lvalue->bitlen = lvalue->bitstart = 0;
+
     return TRUE;
 }
 
@@ -237,7 +221,7 @@ static BOOL types_get_udt_element_lvalue(struct dbg_lvalue* lvalue,
  *		types_udt_find_element
  *
  */
-BOOL types_udt_find_element(struct dbg_lvalue* lvalue, const char* name, ULONG *tmpbuf)
+BOOL types_udt_find_element(struct dbg_lvalue* lvalue, const char* name)
 {
     DWORD                       tag, count;
     char                        buffer[sizeof(TI_FINDCHILDREN_PARAMS) + 256 * sizeof(DWORD)];
@@ -267,7 +251,7 @@ BOOL types_udt_find_element(struct dbg_lvalue* lvalue, const char* name, ULONG *
                         WideCharToMultiByte(CP_ACP, 0, ptr, -1, tmp, sizeof(tmp), NULL, NULL);
                         HeapFree(GetProcessHeap(), 0, ptr);
                         if (!strcmp(tmp, name))
-                            return types_get_udt_element_lvalue(lvalue, &type, tmpbuf);
+                            return types_get_udt_element_lvalue(lvalue, &type);
                     }
                 }
             }
@@ -338,7 +322,7 @@ BOOL types_array_index(const struct dbg_lvalue* lvalue, int index, struct dbg_lv
      * internal variables is very unlikely. A correct fix would be
      * rather large.
      */
-    result->cookie = DLV_TARGET;
+    result->in_debuggee = 1;
     return TRUE;
 }
 
@@ -476,7 +460,6 @@ void print_value(const struct dbg_lvalue* lvalue, char format, int level)
             char                        buffer[sizeof(TI_FINDCHILDREN_PARAMS) + 256 * sizeof(DWORD)];
             TI_FINDCHILDREN_PARAMS*     fcp = (TI_FINDCHILDREN_PARAMS*)buffer;
             WCHAR*                      ptr;
-            ULONG                       tmpbuf;
             struct dbg_type             sub_type;
 
             dbg_printf("{");
@@ -494,7 +477,7 @@ void print_value(const struct dbg_lvalue* lvalue, char format, int level)
                         dbg_printf("%ls=", ptr);
                         HeapFree(GetProcessHeap(), 0, ptr);
                         lvalue_field = *lvalue;
-                        if (types_get_udt_element_lvalue(&lvalue_field, &sub_type, &tmpbuf))
+                        if (types_get_udt_element_lvalue(&lvalue_field, &sub_type))
                         {
                             print_value(&lvalue_field, format, level + 1);
                         }
@@ -532,7 +515,7 @@ void print_value(const struct dbg_lvalue* lvalue, char format, int level)
                 unsigned len = min(count, sizeof(buffer));
                 memory_get_string(dbg_curr_process,
                                   memory_to_linear_addr(&lvalue->addr),
-                                  lvalue->cookie == DLV_TARGET, TRUE, buffer, len);
+                                  lvalue->in_debuggee, TRUE, buffer, len);
                 dbg_printf("\"%s%s\"", buffer, (len < count) ? "..." : "");
                 break;
             }
@@ -777,6 +760,24 @@ BOOL types_get_info(const struct dbg_type* type, IMAGEHLP_SYMBOL_TYPE_INFO ti, v
 
     switch (type->id)
     {
+    case dbg_itype_lguint:
+        switch (ti)
+        {
+        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
+        case TI_GET_LENGTH:     X(DWORD64) = sizeof(dbg_lguint_t); break;
+        case TI_GET_BASETYPE:   X(DWORD)   = btUInt; break;
+        default: WINE_FIXME("unsupported %u for lguint_t\n", ti); return FALSE;
+        }
+        break;
+    case dbg_itype_lgint:
+        switch (ti)
+        {
+        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
+        case TI_GET_LENGTH:     X(DWORD64) = sizeof(dbg_lgint_t); break;
+        case TI_GET_BASETYPE:   X(DWORD)   = btInt; break;
+        default: WINE_FIXME("unsupported %u for lgint_t\n", ti); return FALSE;
+        }
+        break;
     case dbg_itype_unsigned_long_int:
         switch (ti)
         {
@@ -917,4 +918,175 @@ BOOL types_get_info(const struct dbg_type* type, IMAGEHLP_SYMBOL_TYPE_INFO ti, v
 
 #undef X
     return TRUE;
+}
+
+static BOOL types_compare_name(struct dbg_type type1, struct dbg_type type2, BOOL* equal)
+{
+    LPWSTR name1, name2;
+    BOOL ret;
+
+    if (types_get_info(&type1, TI_GET_SYMNAME, &name1))
+    {
+        if (types_get_info(&type2, TI_GET_SYMNAME, &name2))
+        {
+            *equal = !wcscmp(name1, name2);
+            ret = TRUE;
+            HeapFree(GetProcessHeap(), 0, name2);
+        }
+        else ret = FALSE;
+        HeapFree(GetProcessHeap(), 0, name1);
+    }
+    else ret = FALSE;
+    return ret;
+}
+
+static BOOL types_compare_children(struct dbg_type type1, struct dbg_type type2, BOOL* equal, DWORD tag)
+{
+    DWORD count1, count2, i;
+    DWORD* children;
+    BOOL ret;
+
+    if (!types_get_info(&type1, TI_GET_CHILDRENCOUNT, &count1) ||
+        !types_get_info(&type2, TI_GET_CHILDRENCOUNT, &count2)) return FALSE;
+    if (count1 != count2) {*equal = FALSE; return TRUE;}
+    if (!count1) return *equal = TRUE;
+    if ((children = malloc(sizeof(*children) * 2 * count1)) == NULL) return FALSE;
+    if (types_get_info(&type1, TI_FINDCHILDREN, &children[0]) &&
+        types_get_info(&type2, TI_FINDCHILDREN, &children[count1]))
+    {
+        for (i = 0; i < count1; ++i)
+        {
+            type1.id = children[i];
+            type2.id = children[count1 + i];
+            switch (tag)
+            {
+            case SymTagFunctionType: ret = types_compare(type1, type2, equal); break;
+            case SymTagUDT:
+                /* each child is a SymTagData that describes the member */
+                ret = types_compare_name(type1, type2, equal);
+                if (ret && *equal)
+                {
+                    /* compare type of member */
+                    ret = types_get_info(&type1, TI_GET_TYPE, &type1.id) &&
+                        types_get_info(&type2, TI_GET_TYPE, &type2.id);
+                    if (ret) ret = types_compare(type1, type2, equal);
+                    /* FIXME should compare bitfield info when present */
+                }
+                break;
+            default: ret = FALSE; break;
+            }
+            if (!ret || !*equal) break;
+        }
+        if (i == count1) ret = *equal = TRUE;
+    }
+    else ret = FALSE;
+
+    free(children);
+    return ret;
+}
+
+BOOL types_compare(struct dbg_type type1, struct dbg_type type2, BOOL* equal)
+{
+    DWORD           tag1, tag2;
+    DWORD64         size1, size2;
+    DWORD           bt1, bt2;
+    DWORD           count1, count2;
+    BOOL            ret;
+
+    do
+    {
+        if (type1.module == type2.module && type1.id == type2.id)
+            return *equal = TRUE;
+
+        if (!types_get_real_type(&type1, &tag1) ||
+            !types_get_real_type(&type2, &tag2)) return FALSE;
+
+        if (type1.module == type2.module && type1.id == type2.id)
+            return *equal = TRUE;
+
+        if (tag1 != tag2) return !(*equal = FALSE);
+
+        switch (tag1)
+        {
+        case SymTagBaseType:
+            if (!types_get_info(&type1, TI_GET_BASETYPE, &bt1) ||
+                !types_get_info(&type2, TI_GET_BASETYPE, &bt2) ||
+                !types_get_info(&type1, TI_GET_LENGTH,   &size1) ||
+                !types_get_info(&type2, TI_GET_LENGTH,   &size2))
+                return FALSE;
+            *equal = bt1 == bt2 && size1 == size2;
+            return TRUE;
+        case SymTagPointerType:
+            /* compare sub types */
+            break;
+        case SymTagUDT:
+        case SymTagEnum:
+            ret = types_compare_name(type1, type2, equal);
+            if (!ret || !*equal) return ret;
+            ret = types_compare_children(type1, type2, equal, tag1);
+            if (!ret || !*equal) return ret;
+            if (tag1 == SymTagUDT) return TRUE;
+            /* compare underlying type for enums */
+            break;
+        case SymTagArrayType:
+            if (!types_get_info(&type1, TI_GET_LENGTH, &size1) ||
+                !types_get_info(&type2, TI_GET_LENGTH, &size2) ||
+                !types_get_info(&type1, TI_GET_COUNT,  &count1) ||
+                !types_get_info(&type2, TI_GET_COUNT,  &count2)) return FALSE;
+            if (size1 == size2 && count1 == count2)
+            {
+                struct dbg_type subtype1 = type1, subtype2 = type2;
+                if (!types_get_info(&type1, TI_GET_ARRAYINDEXTYPEID, &subtype1.id) ||
+                    !types_get_info(&type2, TI_GET_ARRAYINDEXTYPEID, &subtype2.id)) return FALSE;
+                if (!types_compare(subtype1, subtype2, equal)) return FALSE;
+                if (!*equal) return TRUE;
+            }
+            else return !(*equal = FALSE);
+            /* compare subtypes */
+            break;
+        case SymTagFunctionType:
+            if (!types_compare_children(type1, type2, equal, tag1)) return FALSE;
+            if (!*equal) return TRUE;
+            /* compare return:ed type */
+            break;
+        case SymTagFunctionArgType:
+            /* compare argument type */
+            break;
+        default:
+            dbg_printf("Unsupported yet tag %d\n", tag1);
+            return FALSE;
+        }
+    } while (types_get_info(&type1, TI_GET_TYPE, &type1.id) &&
+             types_get_info(&type2, TI_GET_TYPE, &type2.id));
+    return FALSE;
+}
+
+static BOOL is_basetype_char(DWORD bt)
+{
+    return bt == btChar || bt == btWChar || bt == btChar8 || bt == btChar16 || bt == btChar32;
+}
+
+static BOOL is_basetype_integer(DWORD bt)
+{
+    return is_basetype_char(bt) || bt == btInt || bt == btUInt || bt == btLong || bt == btULong;
+}
+
+BOOL types_is_integral_type(const struct dbg_lvalue* lv)
+{
+    struct dbg_type type = lv->type;
+    DWORD tag, bt;
+    if (lv->bitlen) return TRUE;
+    if (!types_get_real_type(&type, &tag) ||
+        !types_get_info(&type, TI_GET_BASETYPE, &bt)) return FALSE;
+    return is_basetype_integer(bt);
+}
+
+BOOL types_is_float_type(const struct dbg_lvalue* lv)
+{
+    struct dbg_type type = lv->type;
+    DWORD tag, bt;
+    if (lv->bitlen) return FALSE;
+    if (!types_get_real_type(&type, &tag) ||
+        !types_get_info(&type, TI_GET_BASETYPE, &bt)) return FALSE;
+    return bt == btFloat;
 }

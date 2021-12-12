@@ -738,11 +738,16 @@ static HRESULT dispex_value(DispatchEx *This, LCID lcid, WORD flags, DISPPARAMS 
 static HRESULT typeinfo_invoke(DispatchEx *This, func_info_t *func, WORD flags, DISPPARAMS *dp, VARIANT *res,
         EXCEPINFO *ei)
 {
-    DISPPARAMS params = {dp->rgvarg+dp->cNamedArgs, NULL, dp->cArgs-dp->cNamedArgs, 0};
+    DISPPARAMS params = {dp->rgvarg, NULL, dp->cArgs, 0};
     ITypeInfo *ti;
     IUnknown *unk;
     UINT argerr=0;
     HRESULT hres;
+
+    if(params.cArgs > func->argc) {
+        params.rgvarg += params.cArgs - func->argc;
+        params.cArgs = func->argc;
+    }
 
     hres = get_typeinfo(func->tid, &ti);
     if(FAILED(hres)) {
@@ -837,7 +842,7 @@ static HRESULT function_value(DispatchEx *dispex, LCID lcid, WORD flags, DISPPAR
     case DISPATCH_METHOD:
         if(!This->obj)
             return E_UNEXPECTED;
-        hres = typeinfo_invoke(This->obj, This->info, flags, params, res, ei);
+        hres = dispex_call_builtin(This->obj, This->info->id, params, res, ei, caller);
         break;
     case DISPATCH_PROPERTYGET: {
         unsigned name_len;
@@ -1163,19 +1168,24 @@ static HRESULT builtin_propput(DispatchEx *This, func_info_t *func, DISPPARAMS *
     return hres;
 }
 
-static HRESULT invoke_builtin_function(DispatchEx *This, func_info_t *func, DISPPARAMS *dp, VARIANT *res, IServiceProvider *caller)
+static HRESULT invoke_builtin_function(DispatchEx *This, func_info_t *func, DISPPARAMS *dp,
+                                       VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
     VARIANT arg_buf[MAX_ARGS], *arg_ptrs[MAX_ARGS], *arg, retv, ret_ref, vhres;
     unsigned i, nconv = 0;
     IUnknown *iface;
     HRESULT hres;
 
-    if(dp->cNamedArgs) {
-        FIXME("Named arguments not supported\n");
-        return E_NOTIMPL;
+    if(func->hook) {
+        hres = func->hook(This, DISPATCH_METHOD, dp, res, ei, caller);
+        if(hres != S_FALSE)
+            return hres;
     }
 
-    if(dp->cArgs > func->argc || dp->cArgs + func->default_value_cnt < func->argc) {
+    if(!func->call_vtbl_off)
+        return typeinfo_invoke(This, func, DISPATCH_METHOD, dp, res, ei);
+
+    if(dp->cArgs + func->default_value_cnt < func->argc) {
         FIXME("Invalid argument count (expected %u, got %u)\n", func->argc, dp->cArgs);
         return E_INVALIDARG;
     }
@@ -1296,10 +1306,7 @@ static HRESULT function_invoke(DispatchEx *This, func_info_t *func, WORD flags, 
             }
         }
 
-        if(func->call_vtbl_off)
-            hres = invoke_builtin_function(This, func, dp, res, caller);
-        else
-            hres = typeinfo_invoke(This, func, flags, dp, res, ei);
+        hres = invoke_builtin_function(This, func, dp, res, ei, caller);
         break;
     case DISPATCH_PROPERTYGET: {
         func_obj_entry_t *entry;
@@ -1364,14 +1371,14 @@ static HRESULT invoke_builtin_prop(DispatchEx *This, DISPID id, LCID lcid, WORD 
     if(FAILED(hres))
         return hres;
 
+    if(func->func_disp_idx != -1)
+        return function_invoke(This, func, flags, dp, res, ei, caller);
+
     if(func->hook) {
-        hres = func->hook(This, lcid, flags, dp, res, ei, caller);
+        hres = func->hook(This, flags, dp, res, ei, caller);
         if(hres != S_FALSE)
             return hres;
     }
-
-    if(func->func_disp_idx != -1)
-        return function_invoke(This, func, flags, dp, res, ei, caller);
 
     switch(flags) {
     case DISPATCH_PROPERTYPUT:
@@ -1410,6 +1417,19 @@ static HRESULT invoke_builtin_prop(DispatchEx *This, DISPID id, LCID lcid, WORD 
     }
 
     return hres;
+}
+
+HRESULT dispex_call_builtin(DispatchEx *dispex, DISPID id, DISPPARAMS *dp,
+                            VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
+{
+    func_info_t *func;
+    HRESULT hres;
+
+    hres = get_builtin_func(dispex->info, id, &func);
+    if(FAILED(hres))
+        return hres;
+
+    return invoke_builtin_function(dispex, func, dp, res, ei, caller);
 }
 
 HRESULT remove_attribute(DispatchEx *This, DISPID id, VARIANT_BOOL *success)

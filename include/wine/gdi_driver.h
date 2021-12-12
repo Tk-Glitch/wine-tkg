@@ -161,14 +161,13 @@ struct gdi_dc_funcs
     NTSTATUS (CDECL *pD3DKMTCheckVidPnExclusiveOwnership)(const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *);
     NTSTATUS (CDECL *pD3DKMTSetVidPnSourceOwner)(const D3DKMT_SETVIDPNSOURCEOWNER *);
     struct opengl_funcs * (CDECL *wine_get_wgl_driver)(PHYSDEV,UINT);
-    const struct vulkan_funcs * (CDECL *wine_get_vulkan_driver)(PHYSDEV,UINT);
 
     /* priority order for the driver on the stack */
     UINT       priority;
 };
 
 /* increment this when you change the DC function table */
-#define WINE_GDI_DRIVER_VERSION 73
+#define WINE_GDI_DRIVER_VERSION 74
 
 #define GDI_PRIORITY_NULL_DRV        0  /* null driver */
 #define GDI_PRIORITY_FONT_DRV      100  /* any font driver */
@@ -321,8 +320,13 @@ struct user_driver_funcs
                                        const RECT *,struct window_surface*);
     /* system parameters */
     BOOL    (CDECL *pSystemParametersInfo)(UINT,UINT,void*,UINT);
+
+    /* vulkan support */
+    const struct vulkan_funcs * (CDECL *pwine_get_vulkan_driver)(UINT);
+
     /* IME functions */
     void    (CDECL *pUpdateCandidatePos)(HWND, const RECT *);
+
     /* thread management */
     void    (CDECL *pThreadDetach)(void);
 };
@@ -345,12 +349,11 @@ WINGDIAPI DWORD_PTR WINAPI GetDCHook(HDC,DCHOOKPROC*);
 WINGDIAPI BOOL      WINAPI SetDCHook(HDC,DCHOOKPROC,DWORD_PTR);
 WINGDIAPI WORD      WINAPI SetHookFlags(HDC,WORD);
 
-extern void CDECL __wine_make_gdi_object_system( HGDIOBJ handle, BOOL set );
 extern void CDECL __wine_set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect,
                                              const RECT *device_rect, struct window_surface *surface );
 extern void CDECL __wine_set_display_driver( struct user_driver_funcs *funcs, UINT version );
 extern struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version );
-extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver( HDC hdc, UINT version );
+extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver( UINT version );
 
 /* HACK: We use some WM specific hacks in user32 and we need the user
  * driver to export that information. */

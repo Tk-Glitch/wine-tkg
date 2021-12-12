@@ -1568,6 +1568,14 @@ int WINAPI SHFileOperationW(LPSHFILEOPSTRUCTW lpFileOp)
     ZeroMemory(&flFrom, sizeof(FILE_LIST));
     ZeroMemory(&flTo, sizeof(FILE_LIST));
 
+    //windows seems to take the first path as a valid path when lpFileOp->pTo has multiple paths
+    if(lpFileOp->wFunc == FO_RENAME)
+    {
+        LPWSTR lpRefTo = lpFileOp->pTo;
+        while(*lpRefTo++);
+        if(*lpRefTo) *lpRefTo = '\0';
+    }
+
     if ((ret = parse_file_list(&flFrom, lpFileOp->pFrom)))
         return ret;
 

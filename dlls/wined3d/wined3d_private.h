@@ -3940,8 +3940,6 @@ BOOL device_context_add(struct wined3d_device *device, struct wined3d_context *c
 void device_context_remove(struct wined3d_device *device, struct wined3d_context *context) DECLSPEC_HIDDEN;
 void wined3d_device_create_default_samplers(struct wined3d_device *device,
         struct wined3d_context *context) DECLSPEC_HIDDEN;
-void wined3d_device_create_primary_opengl_context_cs(void *object) DECLSPEC_HIDDEN;
-void wined3d_device_delete_opengl_contexts_cs(void *object) DECLSPEC_HIDDEN;
 void wined3d_device_destroy_default_samplers(struct wined3d_device *device) DECLSPEC_HIDDEN;
 HRESULT wined3d_device_init(struct wined3d_device *device, struct wined3d *wined3d,
         unsigned int adapter_idx, enum wined3d_device_type device_type, HWND focus_window, unsigned int flags,
@@ -3999,6 +3997,9 @@ static inline struct wined3d_device_gl *wined3d_device_gl(struct wined3d_device 
 {
     return CONTAINING_RECORD(device, struct wined3d_device_gl, d);
 }
+
+void wined3d_device_gl_create_primary_opengl_context_cs(void *object) DECLSPEC_HIDDEN;
+void wined3d_device_gl_delete_opengl_contexts_cs(void *object) DECLSPEC_HIDDEN;
 
 struct wined3d_null_resources_vk
 {
@@ -4190,6 +4191,26 @@ const char *wined3d_debug_bind_flags(DWORD bind_flags) DECLSPEC_HIDDEN;
 const char *wined3d_debug_view_desc(const struct wined3d_view_desc *d,
         const struct wined3d_resource *resource) DECLSPEC_HIDDEN;
 const char *wined3d_debug_vkresult(VkResult vr) DECLSPEC_HIDDEN;
+
+static inline ULONG wined3d_atomic_decrement_mutex_lock(volatile LONG *refcount)
+{
+    ULONG count, old_count = *refcount;
+    do
+    {
+        if ((count = old_count) == 1)
+        {
+            wined3d_mutex_lock();
+            count = InterlockedDecrement(refcount);
+            if (count) wined3d_mutex_unlock();
+            return count;
+        }
+
+        old_count = InterlockedCompareExchange(refcount, count - 1, count);
+    }
+    while (old_count != count);
+
+    return count - 1;
+}
 
 struct wined3d_client_resource
 {
@@ -4889,9 +4910,6 @@ struct wined3d_device_context_ops
             struct wined3d_rasterizer_state *rasterizer_state);
     void (*acquire_depth_stencil_state)(struct wined3d_device_context *context,
             struct wined3d_depth_stencil_state *depth_stencil_state);
-    void (*acquire_shader)(struct wined3d_device_context *context, struct wined3d_shader *shader);
-    void (*acquire_samplers)(struct wined3d_device_context *context, struct wined3d_sampler * const *samplers,
-            unsigned int count);
 };
 
 struct wined3d_device_context

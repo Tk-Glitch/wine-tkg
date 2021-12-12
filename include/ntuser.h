@@ -27,6 +27,9 @@
 enum
 {
     NtUserCallEnumDisplayMonitor,
+    NtUserCallVulkanDebugReportCallback,
+    NtUserCallVulkanDebugUtilsCallback,
+    NtUserCallCount
 };
 
 /* NtUserCallEnumDisplayMonitor params */
@@ -39,17 +42,35 @@ struct enum_display_monitor_params
     LPARAM lparam;
 };
 
+/* process DPI awareness contexts */
+#define NTUSER_DPI_UNAWARE                0x00006010
+#define NTUSER_DPI_SYSTEM_AWARE           0x00006011
+#define NTUSER_DPI_PER_MONITOR_AWARE      0x00000012
+#define NTUSER_DPI_PER_MONITOR_AWARE_V2   0x00000022
+#define NTUSER_DPI_PER_UNAWARE_GDISCALED  0x40006010
+
 /* NtUserCallOneParam codes, not compatible with Windows */
 enum
 {
+    NtUserGetSysColor,
+    NtUserGetSysColorBrush,
+    NtUserGetSysColorPen,
+    NtUserGetSystemMetrics,
     NtUserRealizePalette,
+    /* temporary exports */
+    NtUserGetDeskPattern,
 };
 
 /* NtUserCallTwoParam codes, not compatible with Windows */
 enum
 {
     NtUserGetMonitorInfo,
+    NtUserGetSystemMetricsForDpi,
+    NtUserMirrorRgn,
 };
+
+/* color index used to retrieve system 55aa brush */
+#define COLOR_55AA_BRUSH  0x100
 
 /* this is the structure stored in TEB->Win32ClientInfo */
 /* no attempt is made to keep the layout compatible with the Windows one */
@@ -96,8 +117,8 @@ HDESK   WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *d
                                       ULONG heap_size );
 HWINSTA WINAPI NtUserCreateWindowStation( OBJECT_ATTRIBUTES *attr, ACCESS_MASK mask, ULONG arg3,
                                           ULONG arg4, ULONG arg5, ULONG arg6, ULONG arg7 );
-BOOL    WINAPI NtUserEnumDisplayDevices( UNICODE_STRING *device, DWORD index,
-                                         DISPLAY_DEVICEW *info, DWORD flags );
+NTSTATUS WINAPI NtUserEnumDisplayDevices( UNICODE_STRING *device, DWORD index,
+                                          DISPLAY_DEVICEW *info, DWORD flags );
 BOOL    WINAPI NtUserEnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc, LPARAM lp );
 BOOL    WINAPI NtUserEnumDisplaySettings( UNICODE_STRING *device, DWORD mode,
                                           DEVMODEW *dev_mode, DWORD flags );
@@ -108,6 +129,8 @@ HWND    WINAPI NtUserGetClipboardViewer(void);
 HCURSOR WINAPI NtUserGetCursor(void);
 LONG    WINAPI NtUserGetDisplayConfigBufferSizes( UINT32 flags, UINT32 *num_path_info,
                                                   UINT32 *num_mode_info );
+UINT    WINAPI NtUserGetDoubleClickTime(void);
+BOOL    WINAPI NtUserGetDpiForMonitor( HMONITOR monitor, UINT type, UINT *x, UINT *y );
 INT     WINAPI NtUserGetKeyNameText( LONG lparam, WCHAR *buffer, INT size );
 SHORT   WINAPI NtUserGetKeyState( INT vkey );
 HKL     WINAPI NtUserGetKeyboardLayout( DWORD thread_id );
@@ -123,6 +146,8 @@ HWND    WINAPI NtUserGetOpenClipboardWindow(void);
 INT     WINAPI NtUserGetPriorityClipboardFormat( UINT *list, INT count );
 HWINSTA WINAPI NtUserGetProcessWindowStation(void);
 HANDLE  WINAPI NtUserGetProp( HWND hwnd, const WCHAR *str );
+ULONG   WINAPI NtUserGetProcessDpiAwarenessContext( HANDLE process );
+ULONG   WINAPI NtUserGetSystemDpiForProcess( HANDLE process );
 HDESK   WINAPI NtUserGetThreadDesktop( DWORD thread );
 BOOL    WINAPI NtUserGetUpdatedClipboardFormats( UINT *formats, UINT size, UINT *out_size );
 BOOL    WINAPI NtUserIsClipboardFormatAvailable( UINT format );
@@ -137,10 +162,14 @@ BOOL    WINAPI NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, cons
                                HRGN ret_update_rgn, RECT *update_rect );
 HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE palette, WORD force_background );
 BOOL    WINAPI NtUserSetKeyboardState( BYTE *state );
+BOOL    WINAPI NtUserSetProcessDpiAwarenessContext( ULONG awareness, ULONG unknown );
 BOOL    WINAPI NtUserSetProcessWindowStation( HWINSTA handle );
 BOOL    WINAPI NtUserSetProp( HWND hwnd, const WCHAR *str, HANDLE handle );
+BOOL    WINAPI NtUserSetSysColors( INT count, const INT *colors, const COLORREF *values );
 BOOL    WINAPI NtUserSetThreadDesktop( HDESK handle );
 INT     WINAPI NtUserShowCursor( BOOL show );
+BOOL    WINAPI NtUserSystemParametersInfo( UINT action, UINT val, void *ptr, UINT winini );
+BOOL    WINAPI NtUserSystemParametersInfoForDpi( UINT action, UINT val, PVOID ptr, UINT winini, UINT dpi );
 INT     WINAPI NtUserToUnicodeEx( UINT virt, UINT scan, const BYTE *state,
                                   WCHAR *str, int size, UINT flags, HKL layout );
 BOOL    WINAPI NtUserUnregisterHotKey( HWND hwnd, INT id );

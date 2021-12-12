@@ -37,7 +37,6 @@
 #include "wrc.h"
 #include "utils.h"
 #include "dumpres.h"
-#include "genres.h"
 #include "newstruc.h"
 #include "parser.h"
 #include "wpp_private.h"
@@ -155,7 +154,6 @@ int parser_debug, yy_flex_debug;
 resource_t *resource_top;	/* The top of the parsed resources */
 
 static void cleanup_files(void);
-static void segvhandler(int sig);
 
 enum long_options_values
 {
@@ -434,7 +432,6 @@ int main(int argc,char *argv[])
 {
 	int i;
 
-	signal(SIGSEGV, segvhandler);
         signal( SIGTERM, exit_on_signal );
         signal( SIGINT, exit_on_signal );
 #ifdef SIGHUP
@@ -530,9 +527,6 @@ int main(int argc,char *argv[])
 	}
         if (win32) add_translations( po_dir );
 
-	/* Convert the internal lists to binary data */
-	resources2res(resource_top);
-
 	chat("Writing .res-file\n");
         if (!output_name)
         {
@@ -550,12 +544,4 @@ static void cleanup_files(void)
 {
 	if (output_name) unlink(output_name);
 	if (temp_name) unlink(temp_name);
-}
-
-static void segvhandler(int sig)
-{
-	fprintf(stderr, "\n%s:%d: Oops, segment violation\n", input_name, line_number);
-	fflush(stdout);
-	fflush(stderr);
-	abort();
 }

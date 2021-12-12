@@ -211,6 +211,8 @@ extern LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW de
                                                   HWND hwnd, DWORD flags, LPVOID lpvoid ) DECLSPEC_HIDDEN;
 extern BOOL CDECL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode,
                                                 DWORD flags ) DECLSPEC_HIDDEN;
+extern void CDECL X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
+                                               BOOL force, void *param ) DECLSPEC_HIDDEN;
 extern BOOL CDECL X11DRV_CreateDesktopWindow( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL CDECL X11DRV_CreateWindow( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void CDECL X11DRV_DestroyWindow( HWND hwnd ) DECLSPEC_HIDDEN;
@@ -445,6 +447,8 @@ extern BOOL show_systray DECLSPEC_HIDDEN;
 extern BOOL grab_pointer DECLSPEC_HIDDEN;
 extern BOOL grab_fullscreen DECLSPEC_HIDDEN;
 extern BOOL usexcomposite DECLSPEC_HIDDEN;
+extern BOOL use_xfixes DECLSPEC_HIDDEN;
+extern BOOL use_xpresent DECLSPEC_HIDDEN;
 extern BOOL managed_mode DECLSPEC_HIDDEN;
 extern BOOL decorated_mode DECLSPEC_HIDDEN;
 extern BOOL private_color_map DECLSPEC_HIDDEN;
@@ -453,6 +457,7 @@ extern int copy_default_colors DECLSPEC_HIDDEN;
 extern int alloc_system_colors DECLSPEC_HIDDEN;
 extern int limit_number_of_resolutions DECLSPEC_HIDDEN;
 extern int xrender_error_base DECLSPEC_HIDDEN;
+extern int xfixes_event_base DECLSPEC_HIDDEN;
 extern HMODULE x11drv_module DECLSPEC_HIDDEN;
 extern char *process_name DECLSPEC_HIDDEN;
 extern Display *clipboard_display DECLSPEC_HIDDEN;
@@ -465,6 +470,7 @@ enum x11drv_atoms
     FIRST_XATOM = XA_LAST_PREDEFINED + 1,
     XATOM_CLIPBOARD = FIRST_XATOM,
     XATOM_COMPOUND_TEXT,
+    XATOM_EDID,
     XATOM_INCR,
     XATOM_MANAGER,
     XATOM_MULTIPLE,
@@ -594,9 +600,9 @@ enum x11drv_window_messages
     WM_X11DRV_SET_CURSOR,
     WM_X11DRV_CLIP_CURSOR_NOTIFY,
     WM_X11DRV_CLIP_CURSOR_REQUEST,
+    WM_X11DRV_RELEASE_CURSOR,
     WM_X11DRV_DELETE_TAB,
-    WM_X11DRV_ADD_TAB,
-    WM_X11DRV_RELEASE_CURSOR
+    WM_X11DRV_ADD_TAB
 };
 
 /* _NET_WM_STATE properties that we keep track of */
@@ -653,13 +659,16 @@ extern struct x11drv_win_data *get_win_data( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void release_win_data( struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
 extern Window X11DRV_get_whole_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern XIC X11DRV_get_ic( HWND hwnd ) DECLSPEC_HIDDEN;
+extern Window get_dummy_parent(void) DECLSPEC_HIDDEN;
 
 extern void sync_gl_drawable( HWND hwnd, BOOL known_child ) DECLSPEC_HIDDEN;
 extern void set_gl_drawable_parent( HWND hwnd, HWND parent ) DECLSPEC_HIDDEN;
 extern void destroy_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
-extern void wine_vk_surface_destroy( HWND hwnd ) DECLSPEC_HIDDEN;
-extern void resize_vk_surfaces( HWND hwnd, Window active, int mask, XWindowChanges *changes ) DECLSPEC_HIDDEN;
+extern void destroy_vk_surface( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void sync_vk_surface( HWND hwnd, BOOL known_child ) DECLSPEC_HIDDEN;
+extern void resize_vk_surfaces( HWND hwnd, Window active, int mask, XWindowChanges *changes ) DECLSPEC_HIDDEN;
+extern Window wine_vk_active_surface( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void vulkan_thread_detach(void) DECLSPEC_HIDDEN;
 
 extern void wait_for_withdrawn_state( HWND hwnd, BOOL set ) DECLSPEC_HIDDEN;
 extern Window init_clip_window(void) DECLSPEC_HIDDEN;
@@ -669,7 +678,7 @@ extern void update_net_wm_states( struct x11drv_win_data *data ) DECLSPEC_HIDDEN
 extern void make_window_embedded( struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
 extern Window create_dummy_client_window(void) DECLSPEC_HIDDEN;
 extern Window create_client_window( HWND hwnd, const XVisualInfo *visual ) DECLSPEC_HIDDEN;
-extern void destroy_client_window( HWND hwnd, Window old_window, Window new_window ) DECLSPEC_HIDDEN;
+extern void update_client_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void set_window_visual( struct x11drv_win_data *data, const XVisualInfo *vis, BOOL use_alpha ) DECLSPEC_HIDDEN;
 extern void change_systray_owner( Display *display, Window systray_window ) DECLSPEC_HIDDEN;
 extern void update_systray_balloon_position(void) DECLSPEC_HIDDEN;
@@ -824,44 +833,6 @@ void init_user_driver(void) DECLSPEC_HIDDEN;
 
 /* X11 display device handler. Used to initialize display device registry data */
 
-/* Represent a physical GPU in the PCI slots */
-struct x11drv_gpu
-{
-    /* ID to uniquely identify a GPU in handler */
-    ULONG_PTR id;
-    /* Name */
-    WCHAR name[128];
-    /* PCI ID */
-    UINT vendor_id;
-    UINT device_id;
-    UINT subsys_id;
-    UINT revision_id;
-    /* Vulkan device UUID */
-    GUID vulkan_uuid;
-};
-
-/* Represent an adapter in EnumDisplayDevices context */
-struct x11drv_adapter
-{
-    /* ID to uniquely identify an adapter in handler */
-    ULONG_PTR id;
-    /* as StateFlags in DISPLAY_DEVICE struct */
-    DWORD state_flags;
-};
-
-/* Represent a monitor in EnumDisplayDevices context */
-struct x11drv_monitor
-{
-    /* Name */
-    WCHAR name[128];
-    /* RcMonitor in MONITORINFO struct */
-    RECT rc_monitor;
-    /* RcWork in MONITORINFO struct */
-    RECT rc_work;
-    /* StateFlags in DISPLAY_DEVICE struct */
-    DWORD state_flags;
-};
-
 /* Required functions for display device registry initialization */
 struct x11drv_display_device_handler
 {
@@ -874,28 +845,28 @@ struct x11drv_display_device_handler
     /* get_gpus will be called to get a list of GPUs. First GPU has to be where the primary adapter is.
      *
      * Return FALSE on failure with parameters unchanged */
-    BOOL (*get_gpus)(struct x11drv_gpu **gpus, int *count);
+    BOOL (*get_gpus)(struct gdi_gpu **gpus, int *count);
 
     /* get_adapters will be called to get a list of adapters in EnumDisplayDevices context under a GPU.
      * The first adapter has to be primary if GPU is primary.
      *
      * Return FALSE on failure with parameters unchanged */
-    BOOL (*get_adapters)(ULONG_PTR gpu_id, struct x11drv_adapter **adapters, int *count);
+    BOOL (*get_adapters)(ULONG_PTR gpu_id, struct gdi_adapter **adapters, int *count);
 
     /* get_monitors will be called to get a list of monitors in EnumDisplayDevices context under an adapter.
      * The first monitor has to be primary if adapter is primary.
      *
      * Return FALSE on failure with parameters unchanged */
-    BOOL (*get_monitors)(ULONG_PTR adapter_id, struct x11drv_monitor **monitors, int *count);
+    BOOL (*get_monitors)(ULONG_PTR adapter_id, struct gdi_monitor **monitors, int *count);
 
     /* free_gpus will be called to free a GPU list from get_gpus */
-    void (*free_gpus)(struct x11drv_gpu *gpus);
+    void (*free_gpus)(struct gdi_gpu *gpus);
 
     /* free_adapters will be called to free an adapter list from get_adapters */
-    void (*free_adapters)(struct x11drv_adapter *adapters);
+    void (*free_adapters)(struct gdi_adapter *adapters);
 
     /* free_monitors will be called to free a monitor list from get_monitors */
-    void (*free_monitors)(struct x11drv_monitor *monitors);
+    void (*free_monitors)(struct gdi_monitor *monitors, int count);
 
     /* register_event_handlers will be called to register event handlers.
      * This function pointer is optional and can be NULL when driver doesn't support it */
@@ -903,7 +874,7 @@ struct x11drv_display_device_handler
 };
 
 extern HANDLE get_display_device_init_mutex(void) DECLSPEC_HIDDEN;
-extern BOOL get_host_primary_gpu(struct x11drv_gpu *gpu) DECLSPEC_HIDDEN;
+extern BOOL get_host_primary_gpu(struct gdi_gpu *gpu) DECLSPEC_HIDDEN;
 extern void release_display_device_init_mutex(HANDLE) DECLSPEC_HIDDEN;
 extern void X11DRV_DisplayDevices_SetHandler(const struct x11drv_display_device_handler *handler) DECLSPEC_HIDDEN;
 extern struct x11drv_display_device_handler X11DRV_DisplayDevices_GetHandler(void) DECLSPEC_HIDDEN;

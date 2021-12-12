@@ -1,7 +1,7 @@
 /*
- * WinMM joystick driver header
+ * Wine X11DRV Xpresent interface
  *
- * Copyright 2015 Ken Thomases for CodeWeavers Inc.
+ * Copyright 2021 Rémi Bernon for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,18 +17,20 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#ifndef __WINE_XPRESENT_H
+#define __WINE_XPRESENT_H
 
+#ifndef __WINE_CONFIG_H
+# error You must include config.h to use this header
+#endif
 
-#include <stdarg.h>
+#ifdef SONAME_LIBXPRESENT
+#include <X11/extensions/Xpresent.h>
+#define MAKE_FUNCPTR(f) extern typeof(f) * p##f DECLSPEC_HIDDEN;
+MAKE_FUNCPTR(XPresentQueryExtension)
+MAKE_FUNCPTR(XPresentQueryVersion)
+MAKE_FUNCPTR(XPresentPixmap)
+#undef MAKE_FUNCPTR
+#endif /* defined(SONAME_LIBXPRESENT) */
 
-#include "windef.h"
-#include "winbase.h"
-#include "mmddk.h"
-#include "winuser.h"
-
-
-LRESULT driver_open(LPSTR str, DWORD index) DECLSPEC_HIDDEN;
-LRESULT driver_close(DWORD_PTR device_id) DECLSPEC_HIDDEN;
-LRESULT driver_joyGetDevCaps(DWORD_PTR device_id, JOYCAPSW* caps, DWORD size) DECLSPEC_HIDDEN;
-LRESULT driver_joyGetPosEx(DWORD_PTR device_id, JOYINFOEX* info) DECLSPEC_HIDDEN;
-LRESULT driver_joyGetPos(DWORD_PTR device_id, JOYINFO* info) DECLSPEC_HIDDEN;
+#endif /* __WINE_XPRESENT_H */

@@ -29,19 +29,14 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
-#ifdef HAVE_POLL_H
-#include <poll.h>
-#endif
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
-#ifdef HAVE_SYS_MMAN_H
-# include <sys/mman.h>
-#endif
-#include <poll.h>
+#include <sys/mman.h>
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
+#include <poll.h>
 #include <sys/types.h>
 #include <unistd.h>
 

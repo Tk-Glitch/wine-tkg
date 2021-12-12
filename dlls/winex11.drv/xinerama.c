@@ -119,10 +119,10 @@ static inline int query_screens(void)
 
 #endif  /* SONAME_LIBXINERAMA */
 
-static BOOL xinerama_get_gpus( struct x11drv_gpu **new_gpus, int *count )
+static BOOL xinerama_get_gpus( struct gdi_gpu **new_gpus, int *count )
 {
     static const WCHAR wine_adapterW[] = {'W','i','n','e',' ','A','d','a','p','t','e','r',0};
-    struct x11drv_gpu *gpus;
+    struct gdi_gpu *gpus;
 
     /* Xinerama has no support for GPU, faking one */
     gpus = heap_calloc( 1, sizeof(*gpus) );
@@ -137,14 +137,14 @@ static BOOL xinerama_get_gpus( struct x11drv_gpu **new_gpus, int *count )
     return TRUE;
 }
 
-static void xinerama_free_gpus( struct x11drv_gpu *gpus )
+static void xinerama_free_gpus( struct gdi_gpu *gpus )
 {
     heap_free( gpus );
 }
 
-static BOOL xinerama_get_adapters( ULONG_PTR gpu_id, struct x11drv_adapter **new_adapters, int *count )
+static BOOL xinerama_get_adapters( ULONG_PTR gpu_id, struct gdi_adapter **new_adapters, int *count )
 {
-    struct x11drv_adapter *adapters = NULL;
+    struct gdi_adapter *adapters = NULL;
     INT index = 0;
     INT i, j;
     INT primary_index;
@@ -193,7 +193,7 @@ static BOOL xinerama_get_adapters( ULONG_PTR gpu_id, struct x11drv_adapter **new
     /* Primary adapter has to be first */
     if (primary_index)
     {
-        struct x11drv_adapter tmp;
+        struct gdi_adapter tmp;
         tmp = adapters[primary_index];
         adapters[primary_index] = adapters[0];
         adapters[0] = tmp;
@@ -204,17 +204,17 @@ static BOOL xinerama_get_adapters( ULONG_PTR gpu_id, struct x11drv_adapter **new
     return TRUE;
 }
 
-static void xinerama_free_adapters( struct x11drv_adapter *adapters )
+static void xinerama_free_adapters( struct gdi_adapter *adapters )
 {
     heap_free( adapters );
 }
 
-static BOOL xinerama_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor **new_monitors, int *count )
+static BOOL xinerama_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **new_monitors, int *count )
 {
     static const WCHAR generic_nonpnp_monitorW[] = {
         'G','e','n','e','r','i','c',' ',
         'N','o','n','-','P','n','P',' ','M','o','n','i','t','o','r',0};
-    struct x11drv_monitor *monitor;
+    struct gdi_monitor *monitor;
     INT first = (INT)adapter_id;
     INT monitor_count = 0;
     INT index = 0;
@@ -243,6 +243,8 @@ static BOOL xinerama_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor *
             monitor[index].rc_work = monitors[i].rcWork;
             /* Xinerama only reports monitors already attached */
             monitor[index].state_flags = DISPLAY_DEVICE_ATTACHED;
+            monitor[index].edid_len = 0;
+            monitor[index].edid = NULL;
             if (!IsRectEmpty( &monitors[i].rcMonitor ))
                 monitor[index].state_flags |= DISPLAY_DEVICE_ACTIVE;
 
@@ -255,7 +257,7 @@ static BOOL xinerama_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor *
     return TRUE;
 }
 
-static void xinerama_free_monitors( struct x11drv_monitor *monitors )
+static void xinerama_free_monitors( struct gdi_monitor *monitors, int count )
 {
     heap_free( monitors );
 }

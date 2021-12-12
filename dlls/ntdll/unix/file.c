@@ -49,12 +49,9 @@
 #ifdef HAVE_SYS_SYSCALL_H
 # include <sys/syscall.h>
 #endif
-#ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
-#endif
-#ifdef HAVE_SYS_TIME_H
-# include <sys/time.h>
-#endif
+#include <sys/time.h>
+#include <sys/ioctl.h>
 #ifdef HAVE_SYS_ATTR_H
 #include <sys/attr.h>
 #endif
@@ -83,9 +80,6 @@
 #undef list_tail
 #undef list_move_tail
 #undef list_remove
-#endif
-#ifdef HAVE_SYS_IOCTL_H
-#include <sys/ioctl.h>
 #endif
 #ifdef HAVE_LINUX_IOCTL_H
 #include <linux/ioctl.h>
@@ -116,9 +110,7 @@
 #include <sys/extattr.h>
 #endif
 #include <time.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include <unistd.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -6013,7 +6005,7 @@ NTSTATUS WINAPI NtDeviceIoControlFile( HANDLE handle, HANDLE event, PIO_APC_ROUT
         return server_ioctl_file( handle, event, apc, apc_context, io, code,
                                   in_buffer, in_size, out_buffer, out_size );
 
-    if (status != STATUS_PENDING) io->u.Status = status;
+    if (status != STATUS_PENDING && !NT_ERROR(status)) io->u.Status = status;
     return status;
 }
 

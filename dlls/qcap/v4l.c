@@ -32,25 +32,17 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <dlfcn.h>
-#ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
-#endif
-#ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
-#endif
 #include <errno.h>
-#ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
-#endif
 #ifdef HAVE_ASM_TYPES_H
 #include <asm/types.h>
 #endif
 #ifdef HAVE_LINUX_VIDEODEV2_H
 #include <linux/videodev2.h>
 #endif
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS

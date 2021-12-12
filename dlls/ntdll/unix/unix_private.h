@@ -277,6 +277,7 @@ extern NTSTATUS open_unix_file( HANDLE *handle, const char *unix_name, ACCESS_MA
                                 ULONG options, void *ea_buffer, ULONG ea_length ) DECLSPEC_HIDDEN;
 extern void init_files(void) DECLSPEC_HIDDEN;
 extern void init_cpu_info(void) DECLSPEC_HIDDEN;
+extern struct cpu_topology_override *get_cpu_topology_override(void) DECLSPEC_HIDDEN;
 extern void add_completion( HANDLE handle, ULONG_PTR value, NTSTATUS status, ULONG info, BOOL async ) DECLSPEC_HIDDEN;
 
 extern void dbg_init(void) DECLSPEC_HIDDEN;
@@ -350,11 +351,19 @@ static inline NTSTATUS wait_async( HANDLE handle, BOOL alertable )
     return NtWaitForSingleObject( handle, alertable, NULL );
 }
 
+static inline BOOL in_wow64_call(void)
+{
+#ifdef _WIN64
+    return !!NtCurrentTeb()->WowTebOffset;
+#endif
+    return FALSE;
+}
+
 static inline void set_async_iosb( client_ptr_t iosb, NTSTATUS status, ULONG_PTR info )
 {
     if (!iosb) return;
-#ifdef _WIN64
-    if (NtCurrentTeb()->WowTebOffset)
+
+    if (in_wow64_call())
     {
         struct iosb32
         {
@@ -365,7 +374,6 @@ static inline void set_async_iosb( client_ptr_t iosb, NTSTATUS status, ULONG_PTR
         io->Information = info;
     }
     else
-#endif
     {
         IO_STATUS_BLOCK *io = wine_server_get_ptr( iosb );
 #ifdef NONAMELESSUNION
@@ -379,12 +387,10 @@ static inline void set_async_iosb( client_ptr_t iosb, NTSTATUS status, ULONG_PTR
 
 static inline client_ptr_t iosb_client_ptr( IO_STATUS_BLOCK *io )
 {
-#ifdef _WIN64
 #ifdef NONAMELESSUNION
-    if (io && NtCurrentTeb()->WowTebOffset) return wine_server_client_ptr( io->u.Pointer );
+    if (io && in_wow64_call()) return wine_server_client_ptr( io->u.Pointer );
 #else
-    if (io && NtCurrentTeb()->WowTebOffset) return wine_server_client_ptr( io->Pointer );
-#endif
+    if (io && in_wow64_call()) return wine_server_client_ptr( io->Pointer );
 #endif
     return wine_server_client_ptr( io );
 }

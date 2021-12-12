@@ -99,6 +99,8 @@ DIGIT	   [0-9]
 HEXDIGIT   [0-9a-fA-F]
 FORMAT     [ubcdgiswxa]
 IDENTIFIER [_a-zA-Z~?][_a-zA-Z0-9~?@]*
+SCOPED_IDENTIFIER [_a-zA-Z~?][_a-zA-Z0-9~?@]*"::"
+MODULE_IDENTIFIER [_a-zA-Z~?\*][_a-zA-Z0-9~?\*@]*"!"
 PATHNAME   [\\/_a-zA-Z0-9\.~@][\\/\-_a-zA-Z0-9\.~@]*
 STRING     \"(\\[^\n]|[^\\"\n])*\"
 
@@ -135,15 +137,14 @@ STRING     \"(\\[^\n]|[^\\"\n])*\"
 "<<"					{ return OP_SHL; }
 ">>"					{ return OP_SHR; }
 "->"					{ return OP_DRF; }
-"::"					{ return OP_SCOPE; }
 "["					{ return *yytext; }
 "]"					{ return *yytext; }
 
-"0x"{HEXDIGIT}+      			{ sscanf(yytext, "%Ix", &dbg_lval.integer); return tNUM; }
-{DIGIT}+             			{ sscanf(yytext, "%Id", &dbg_lval.integer); return tNUM; }
+"0x"{HEXDIGIT}+      			{ sscanf(yytext, "%I64x", &dbg_lval.integer); return tNUM; }
+{DIGIT}+             			{ sscanf(yytext, "%I64d", &dbg_lval.integer); return tNUM; }
 "'\\''"                                 { dbg_lval.integer = '\''; return tNUM;}
-"'\\0"{OCTDIGIT}*"'"                    { sscanf(yytext + 3, "%Io", &dbg_lval.integer); return tNUM;}
-"'\\x"{HEXDIGIT}+"'"                    { sscanf(yytext + 3, "%Ix", &dbg_lval.integer); return tNUM;}
+"'\\0"{OCTDIGIT}*"'"                    { sscanf(yytext + 3, "%I64o", &dbg_lval.integer); return tNUM;}
+"'\\x"{HEXDIGIT}+"'"                    { sscanf(yytext + 3, "%I64x", &dbg_lval.integer); return tNUM;}
 "'\\"[a-z]"'"                           { dbg_lval.integer = yytext[2] - 'a'; return tNUM;}
 "'"."'"                                 { dbg_lval.integer = yytext[1]; return tNUM;}
 
@@ -243,7 +244,7 @@ union					{ return tUNION; }
 enum					{ return tENUM; }
 all                                     { return tALL; }
 
-{IDENTIFIER}				{ dbg_lval.string = lexeme_alloc(yytext); return tIDENTIFIER; }
+{MODULE_IDENTIFIER}?{SCOPED_IDENTIFIER}*{IDENTIFIER}	{ dbg_lval.string = lexeme_alloc(yytext); return tIDENTIFIER; }
 "$"{IDENTIFIER}				{ dbg_lval.string = lexeme_alloc(yytext+1); return tINTVAR; }
 
 <PATH_EXPECTED,PATH_ACCEPTED>{PATHNAME}	{ dbg_lval.string = lexeme_alloc(yytext); return tPATH; }

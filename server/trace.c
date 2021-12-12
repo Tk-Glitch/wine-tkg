@@ -1394,36 +1394,22 @@ static void dump_varargs_handle_infos( const char *prefix, data_size_t size )
     fputc( '}', stderr );
 }
 
-static void dump_varargs_poll_socket_input( const char *prefix, data_size_t size )
+static void dump_varargs_cpu_topology_override( const char *prefix, data_size_t size )
 {
-    const struct poll_socket_input *input;
+    const struct cpu_topology_override *cpu_topology = cur_data;
+    unsigned int i;
 
-    fprintf( stderr, "%s{", prefix );
-    while (size >= sizeof(*input))
+    if (size < sizeof(*cpu_topology))
+        return;
+
+    fprintf( stderr,"%s{", prefix );
+    for (i = 0; i < cpu_topology->cpu_count; ++i)
     {
-        input = cur_data;
-        fprintf( stderr, "{socket=%04x,flags=%08x}", input->socket, input->flags );
-        size -= sizeof(*input);
-        remove_data( sizeof(*input) );
-        if (size) fputc( ',', stderr );
+        if (i) fputc( ',', stderr );
+        fprintf( stderr, "%u", cpu_topology->host_cpu_id[i] );
     }
     fputc( '}', stderr );
-}
-
-static void dump_varargs_poll_socket_output( const char *prefix, data_size_t size )
-{
-    const struct poll_socket_output *output;
-
-    fprintf( stderr, "%s{", prefix );
-    while (size >= sizeof(*output))
-    {
-        output = cur_data;
-        fprintf( stderr, "{flags=%08x,status=%s}", output->flags, get_status_name( output->status ) );
-        size -= sizeof(*output);
-        remove_data( sizeof(*output) );
-        if (size) fputc( ',', stderr );
-    }
-    fputc( '}', stderr );
+    remove_data( size );
 }
 
 typedef void (*dump_func)( const void *req );
@@ -1472,7 +1458,7 @@ static void dump_new_thread_request( const struct new_thread_request *req )
 {
     fprintf( stderr, " process=%04x", req->process );
     fprintf( stderr, ", access=%08x", req->access );
-    fprintf( stderr, ", suspend=%d", req->suspend );
+    fprintf( stderr, ", flags=%08x", req->flags );
     fprintf( stderr, ", request_fd=%d", req->request_fd );
     dump_varargs_object_attributes( ", objattr=", cur_size );
 }
@@ -1496,7 +1482,8 @@ static void dump_get_startup_info_reply( const struct get_startup_info_reply *re
 
 static void dump_init_process_done_request( const struct init_process_done_request *req )
 {
-    dump_uint64( " teb=", &req->teb );
+    dump_varargs_cpu_topology_override( " cpu_override=", cur_size );
+    dump_uint64( ", teb=", &req->teb );
     dump_uint64( ", peb=", &req->peb );
     dump_uint64( ", ldt_copy=", &req->ldt_copy );
 }
@@ -2118,21 +2105,6 @@ static void dump_recv_socket_reply( const struct recv_socket_reply *req )
 {
     fprintf( stderr, " wait=%04x", req->wait );
     fprintf( stderr, ", options=%08x", req->options );
-}
-
-static void dump_poll_socket_request( const struct poll_socket_request *req )
-{
-    fprintf( stderr, " exclusive=%d", req->exclusive );
-    dump_async_data( ", async=", &req->async );
-    dump_timeout( ", timeout=", &req->timeout );
-    dump_varargs_poll_socket_input( ", sockets=", cur_size );
-}
-
-static void dump_poll_socket_reply( const struct poll_socket_reply *req )
-{
-    fprintf( stderr, " wait=%04x", req->wait );
-    fprintf( stderr, ", options=%08x", req->options );
-    dump_varargs_poll_socket_output( ", sockets=", cur_size );
 }
 
 static void dump_send_socket_request( const struct send_socket_request *req )
@@ -4734,7 +4706,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_lock_file_request,
     (dump_func)dump_unlock_file_request,
     (dump_func)dump_recv_socket_request,
-    (dump_func)dump_poll_socket_request,
     (dump_func)dump_send_socket_request,
     (dump_func)dump_get_next_console_request_request,
     (dump_func)dump_read_directory_changes_request,
@@ -5023,7 +4994,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_lock_file_reply,
     NULL,
     (dump_func)dump_recv_socket_reply,
-    (dump_func)dump_poll_socket_reply,
     (dump_func)dump_send_socket_reply,
     (dump_func)dump_get_next_console_request_reply,
     NULL,
@@ -5312,7 +5282,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "lock_file",
     "unlock_file",
     "recv_socket",
-    "poll_socket",
     "send_socket",
     "get_next_console_request",
     "read_directory_changes",

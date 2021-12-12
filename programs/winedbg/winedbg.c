@@ -44,9 +44,9 @@
  * - type management:
  *      + some bits of internal types are missing (like type casts and the address
  *        operator)
- *      + all computations should be made on long long
- *              o expr computations are in int:s
- *              o bitfield size is on a 4-bytes
+ *      + all computations should be made on 64bit
+ *              o bitfield spreading on more bytes than dbg_lgint_t isn't supported
+ *                (can happen on 128bit integers, of an ELF build...)
  * - execution:
  *      + set a better fix for gdb (proxy mode) than the step-mode hack
  *      + implement function call in debuggee
@@ -77,8 +77,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
 struct dbg_process*	dbg_curr_process = NULL;
 struct dbg_thread*	dbg_curr_thread = NULL;
-DWORD_PTR	        dbg_curr_tid = 0;
-DWORD_PTR	        dbg_curr_pid = 0;
+DWORD	                dbg_curr_tid = 0;
+DWORD	                dbg_curr_pid = 0;
 dbg_ctx_t               dbg_context;
 BOOL    	        dbg_interactiveP = FALSE;
 HANDLE                  dbg_houtput = 0;
@@ -240,7 +240,7 @@ const struct dbg_internal_var* dbg_get_internal_var(const char* name)
             struct dbg_internal_var*    ret = (void*)lexeme_alloc_size(sizeof(*ret));
             /* relocate register's field against current context */
             *ret = *div;
-            ret->pval = (DWORD_PTR*)((char*)&dbg_context + (DWORD_PTR)div->pval);
+            ret->pval = (char*)&dbg_context + (DWORD_PTR)div->pval;
             return ret;
         }
     }
@@ -569,7 +569,7 @@ void dbg_start_interactive(const char* filename, HANDLE hFile)
 
     if (dbg_curr_process)
     {
-        dbg_printf("WineDbg starting on pid %04Ix\n", dbg_curr_pid);
+        dbg_printf("WineDbg starting on pid %04x\n", dbg_curr_pid);
         if (dbg_curr_process->active_debuggee) dbg_active_wait_for_first_exception();
     }
 

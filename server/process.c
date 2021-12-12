@@ -31,9 +31,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/time.h>
-#ifdef HAVE_SYS_SOCKET_H
-# include <sys/socket.h>
-#endif
+#include <sys/socket.h>
 #include <unistd.h>
 #include <poll.h>
 #ifdef HAVE_SYS_PARAM_H
@@ -102,6 +100,7 @@ static void process_destroy( struct object *obj );
 static int process_get_esync_fd( struct object *obj, enum esync_type *type );
 static unsigned int process_get_fsync_idx( struct object *obj, enum fsync_type *type );
 static void terminate_process( struct process *process, struct thread *skip, int exit_code );
+static void set_process_affinity( struct process *process, affinity_t affinity );
 
 static const struct object_ops process_ops =
 {
@@ -694,6 +693,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     process->rawinput_kbd    = NULL;
     process->esync_fd        = -1;
     process->fsync_idx       = 0;
+    process->cpu_override.cpu_count = 0;
     list_init( &process->kernel_object );
     list_init( &process->thread_list );
     list_init( &process->locks );
@@ -1456,6 +1456,8 @@ DECL_HANDLER(get_startup_info)
 DECL_HANDLER(init_process_done)
 {
     struct process *process = current->process;
+    const struct cpu_topology_override *cpu_override = get_req_data();
+    unsigned int have_cpu_override = get_req_data_size() / sizeof(*cpu_override);
     struct memory_view *view;
     client_ptr_t base;
     const pe_image_info_t *image_info;
@@ -1488,6 +1490,9 @@ DECL_HANDLER(init_process_done)
     if (process->debug_obj) set_process_debug_flag( process, 1 );
     reply->entry = current->entry_point;
     reply->suspend = (current->suspend || process->suspend);
+
+    if (have_cpu_override)
+        process->cpu_override = *cpu_override;
 }
 
 /* open a handle to a process */
@@ -1561,7 +1566,7 @@ DECL_HANDLER(get_process_debug_info)
 
     reply->debug_children = process->debug_children;
     if (!process->debug_obj) set_error( STATUS_PORT_NOT_SET );
-    else reply->debug = alloc_handle( current->process, process->debug_obj, DEBUG_ALL_ACCESS, 0 );
+    else reply->debug = alloc_handle( current->process, process->debug_obj, MAXIMUM_ALLOWED, 0 );
     release_object( process );
 }
 

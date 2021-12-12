@@ -35,9 +35,7 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <unistd.h>
-#ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
-#endif
 #ifdef HAVE_SYS_TIMES_H
 #include <sys/times.h>
 #endif
@@ -1246,6 +1244,7 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
                                   ULONG flags, ULONG_PTR zero_bits, SIZE_T stack_commit,
                                   SIZE_T stack_reserve, PS_ATTRIBUTE_LIST *attr_list )
 {
+    static const ULONG supported_flags = THREAD_CREATE_FLAGS_CREATE_SUSPENDED | THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER;
     sigset_t sigset;
     pthread_t pthread_id;
     pthread_attr_t pthread_attr;
@@ -1256,6 +1255,9 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
     int request_pipe[2];
     TEB *teb;
     NTSTATUS status;
+
+    if (flags & ~supported_flags)
+        FIXME( "Unsupported flags %#x.\n", flags );
 
     if (zero_bits > 21 && zero_bits < 32) return STATUS_INVALID_PARAMETER_3;
 #ifndef _WIN64
@@ -1306,7 +1308,7 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
     {
         req->process    = wine_server_obj_handle( process );
         req->access     = access;
-        req->suspend    = flags & THREAD_CREATE_FLAGS_CREATE_SUSPENDED;
+        req->flags      = flags;
         req->request_fd = request_pipe[0];
         wine_server_add_data( req, objattr, len );
         if (!(status = wine_server_call( req )))
@@ -2312,7 +2314,20 @@ ULONG WINAPI NtGetCurrentProcessorNumber(void)
 
 #if defined(__linux__) && defined(__NR_getcpu)
     int res = syscall(__NR_getcpu, &processor, NULL, NULL);
-    if (res != -1) return processor;
+    if (res != -1)
+    {
+        struct cpu_topology_override *override = get_cpu_topology_override();
+        unsigned int i;
+
+        if (!override)
+            return processor;
+
+        for (i = 0; i < override->cpu_count; ++i)
+            if (override->host_cpu_id[i] == processor)
+                return i;
+
+        WARN("Thread is running on processor which is not in the defined override.\n");
+    }
 #endif
 
     if (peb->NumberOfProcessors > 1)

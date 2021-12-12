@@ -72,73 +72,7 @@ struct wined3d_command_list
 
     SIZE_T depth_stencil_state_count;
     struct wined3d_depth_stencil_state **depth_stencil_states;
-
-    SIZE_T shader_count;
-    struct wined3d_shader **shaders;
-
-    SIZE_T sampler_count;
-    struct wined3d_sampler **samplers;
 };
-
-static void wined3d_command_list_destroy_object(void *object)
-{
-    struct wined3d_command_list *list = object;
-    SIZE_T i;
-
-    TRACE("list %p.\n", list);
-
-    for (i = 0; i < list->upload_count; ++i)
-        heap_free(list->uploads[i].sysmem);
-
-    heap_free(list);
-}
-
-ULONG CDECL wined3d_command_list_incref(struct wined3d_command_list *list)
-{
-    ULONG refcount = InterlockedIncrement(&list->refcount);
-
-    TRACE("%p increasing refcount to %u.\n", list, refcount);
-
-    return refcount;
-}
-
-ULONG CDECL wined3d_command_list_decref(struct wined3d_command_list *list)
-{
-    ULONG refcount = InterlockedDecrement(&list->refcount);
-    struct wined3d_device *device = list->device;
-
-    TRACE("%p decreasing refcount to %u.\n", list, refcount);
-
-    if (!refcount)
-    {
-        SIZE_T i;
-
-        for (i = 0; i < list->command_list_count; ++i)
-            wined3d_command_list_decref(list->command_lists[i]);
-        for (i = 0; i < list->resource_count; ++i)
-            wined3d_resource_decref(list->resources[i]);
-        for (i = 0; i < list->upload_count; ++i)
-            wined3d_resource_decref(list->uploads[i].resource);
-        for (i = 0; i < list->query_count; ++i)
-            wined3d_query_decref(list->queries[i].query);
-        for (i = 0; i < list->blend_state_count; ++i)
-            wined3d_blend_state_decref(list->blend_states[i]);
-        for (i = 0; i < list->rasterizer_state_count; ++i)
-            wined3d_rasterizer_state_decref(list->rasterizer_states[i]);
-        for (i = 0; i < list->depth_stencil_state_count; ++i)
-            wined3d_depth_stencil_state_decref(list->depth_stencil_states[i]);
-        for (i = 0; i < list->shader_count; ++i)
-            wined3d_shader_decref(list->shaders[i]);
-        for (i = 0; i < list->sampler_count; ++i)
-            wined3d_sampler_decref(list->samplers[i]);
-
-        wined3d_mutex_lock();
-        wined3d_cs_destroy_object(device->cs, wined3d_command_list_destroy_object, list);
-        wined3d_mutex_unlock();
-    }
-
-    return refcount;
-}
 
 static void invalidate_client_address(struct wined3d_resource *resource)
 {
@@ -638,18 +572,6 @@ static inline void wined3d_device_context_acquire_depth_stencil_state(struct win
     context->ops->acquire_depth_stencil_state(context, depth_stencil_state);
 }
 
-static inline void wined3d_device_context_acquire_shader(struct wined3d_device_context *context,
-        struct wined3d_shader *shader)
-{
-    context->ops->acquire_shader(context, shader);
-}
-
-static inline void wined3d_device_context_acquire_samplers(struct wined3d_device_context *context,
-        struct wined3d_sampler * const *samplers, unsigned int count)
-{
-    context->ops->acquire_samplers(context, samplers, count);
-}
-
 static struct wined3d_cs *wined3d_cs_from_context(struct wined3d_device_context *context)
 {
     return CONTAINING_RECORD(context, struct wined3d_cs, c);
@@ -714,6 +636,15 @@ static const char *debug_cs_op(enum wined3d_cs_op op)
 #undef WINED3D_TO_STR
     }
     return wine_dbg_sprintf("UNKNOWN_OP(%#x)", op);
+}
+
+static struct wined3d_cs_packet *wined3d_next_cs_packet(const uint8_t *data, SIZE_T *offset)
+{
+    struct wined3d_cs_packet *packet = (struct wined3d_cs_packet *)&data[*offset];
+
+    *offset += offsetof(struct wined3d_cs_packet, data[packet->size]);
+
+    return packet;
 }
 
 static void wined3d_cs_exec_nop(struct wined3d_cs *cs, const void *data)
@@ -1838,7 +1769,6 @@ void wined3d_device_context_emit_set_samplers(struct wined3d_device_context *con
     op->count = count;
     memcpy(op->samplers, samplers, count * sizeof(*samplers));
 
-    wined3d_device_context_acquire_samplers(context, samplers, count);
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
 }
 
@@ -1864,8 +1794,6 @@ void wined3d_device_context_emit_set_shader(struct wined3d_device_context *conte
     op->type = type;
     op->shader = shader;
 
-    if (shader)
-        wined3d_device_context_acquire_shader(context, shader);
     wined3d_device_context_submit(context, WINED3D_CS_QUEUE_DEFAULT);
 }
 
@@ -3066,16 +2994,6 @@ static void wined3d_cs_acquire_depth_stencil_state(struct wined3d_device_context
 {
 }
 
-static void wined3d_cs_acquire_shader(struct wined3d_device_context *context,
-        struct wined3d_shader *shader)
-{
-}
-
-static void wined3d_cs_acquire_samplers(struct wined3d_device_context *context,
-        struct wined3d_sampler * const *samplers, unsigned int count)
-{
-}
-
 static void wined3d_cs_exec_execute_command_list(struct wined3d_cs *cs, const void *data);
 
 static void (* const wined3d_cs_op_handlers[])(struct wined3d_cs *cs, const void *data) =
@@ -3135,14 +3053,14 @@ static void (* const wined3d_cs_op_handlers[])(struct wined3d_cs *cs, const void
 static void wined3d_cs_exec_execute_command_list(struct wined3d_cs *cs, const void *data)
 {
     const struct wined3d_cs_execute_command_list *op = data;
-    size_t start = 0, end = op->list->data_size;
+    SIZE_T start = 0, end = op->list->data_size;
     const BYTE *cs_data = op->list->data;
 
     TRACE("Executing command list %p.\n", op->list);
 
     while (start < end)
     {
-        const struct wined3d_cs_packet *packet = (const struct wined3d_cs_packet *)&cs_data[start];
+        const struct wined3d_cs_packet *packet = wined3d_next_cs_packet(cs_data, &start);
         enum wined3d_cs_op opcode = *(const enum wined3d_cs_op *)packet->data;
 
         if (opcode >= WINED3D_CS_OP_STOP)
@@ -3150,8 +3068,6 @@ static void wined3d_cs_exec_execute_command_list(struct wined3d_cs *cs, const vo
         else
             wined3d_cs_op_handlers[opcode](cs, packet->data);
         TRACE("%s executed.\n", debug_cs_op(opcode));
-
-        start += offsetof(struct wined3d_cs_packet, data[packet->size]);
     }
 }
 
@@ -3319,8 +3235,6 @@ static const struct wined3d_device_context_ops wined3d_cs_st_ops =
     wined3d_cs_acquire_blend_state,
     wined3d_cs_acquire_rasterizer_state,
     wined3d_cs_acquire_depth_stencil_state,
-    wined3d_cs_acquire_shader,
-    wined3d_cs_acquire_samplers,
 };
 
 static BOOL wined3d_cs_queue_is_empty(const struct wined3d_cs *cs, const struct wined3d_cs_queue *queue)
@@ -3335,6 +3249,7 @@ static void wined3d_cs_queue_submit(struct wined3d_cs_queue *queue, struct wined
     size_t packet_size;
 
     packet = (struct wined3d_cs_packet *)&queue->data[queue->head];
+    TRACE("Queuing op %s at %p.\n", debug_cs_op(*(const enum wined3d_cs_op *)packet->data), packet);
     packet_size = FIELD_OFFSET(struct wined3d_cs_packet, data[packet->size]);
     InterlockedExchange(&queue->head, (queue->head + packet_size) & (WINED3D_CS_QUEUE_SIZE - 1));
 
@@ -3451,8 +3366,6 @@ static const struct wined3d_device_context_ops wined3d_cs_mt_ops =
     wined3d_cs_acquire_blend_state,
     wined3d_cs_acquire_rasterizer_state,
     wined3d_cs_acquire_depth_stencil_state,
-    wined3d_cs_acquire_shader,
-    wined3d_cs_acquire_samplers,
 };
 
 static void poll_queries(struct wined3d_cs *cs)
@@ -3510,7 +3423,7 @@ static DWORD WINAPI wined3d_cs_run(void *ctx)
     enum wined3d_cs_op opcode;
     HMODULE wined3d_module;
     unsigned int poll = 0;
-    LONG tail;
+    SIZE_T tail;
 
     TRACE("Started.\n");
 
@@ -3544,12 +3457,12 @@ static DWORD WINAPI wined3d_cs_run(void *ctx)
         spin_count = 0;
 
         tail = queue->tail;
-        packet = (struct wined3d_cs_packet *)&queue->data[tail];
+        packet = wined3d_next_cs_packet(queue->data, &tail);
         if (packet->size)
         {
             opcode = *(const enum wined3d_cs_op *)packet->data;
 
-            TRACE("Executing %s.\n", debug_cs_op(opcode));
+            TRACE("Executing %s at %p.\n", debug_cs_op(opcode), packet);
             if (opcode >= WINED3D_CS_OP_STOP)
             {
                 if (opcode > WINED3D_CS_OP_STOP)
@@ -3560,10 +3473,9 @@ static DWORD WINAPI wined3d_cs_run(void *ctx)
             wined3d_cs_command_lock(cs);
             wined3d_cs_op_handlers[opcode](cs, packet->data);
             wined3d_cs_command_unlock(cs);
-            TRACE("%s executed.\n", debug_cs_op(opcode));
+            TRACE("%s at %p executed.\n", debug_cs_op(opcode), packet);
         }
 
-        tail += FIELD_OFFSET(struct wined3d_cs_packet, data[packet->size]);
         tail &= (WINED3D_CS_QUEUE_SIZE - 1);
         InterlockedExchange(&queue->tail, tail);
     }
@@ -3658,6 +3570,72 @@ void wined3d_cs_destroy(struct wined3d_cs *cs)
     heap_free(cs);
 }
 
+static void wined3d_cs_packet_decref_objects(const struct wined3d_cs_packet *packet)
+{
+    enum wined3d_cs_op opcode = *(const enum wined3d_cs_op *)packet->data;
+    unsigned int i;
+
+    switch (opcode)
+    {
+        case WINED3D_CS_OP_SET_SAMPLERS:
+        {
+            struct wined3d_cs_set_samplers *op = (struct wined3d_cs_set_samplers *)packet->data;
+
+            for (i = 0; i < op->count; ++i)
+            {
+                if (op->samplers[i])
+                    wined3d_sampler_decref(op->samplers[i]);
+            }
+            break;
+        }
+
+        case WINED3D_CS_OP_SET_SHADER:
+        {
+            struct wined3d_cs_set_shader *op = (struct wined3d_cs_set_shader *)packet->data;
+
+            if (op->shader)
+                wined3d_shader_decref(op->shader);
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+static void wined3d_cs_packet_incref_objects(struct wined3d_cs_packet *packet)
+{
+    enum wined3d_cs_op opcode = *(const enum wined3d_cs_op *)packet->data;
+    unsigned int i;
+
+    switch (opcode)
+    {
+        case WINED3D_CS_OP_SET_SAMPLERS:
+        {
+            struct wined3d_cs_set_samplers *op = (struct wined3d_cs_set_samplers *)packet->data;
+
+            for (i = 0; i < op->count; ++i)
+            {
+                if (op->samplers[i])
+                    wined3d_sampler_incref(op->samplers[i]);
+            }
+            break;
+        }
+
+        case WINED3D_CS_OP_SET_SHADER:
+        {
+            struct wined3d_cs_set_shader *op = (struct wined3d_cs_set_shader *)packet->data;
+
+            if (op->shader)
+                wined3d_shader_incref(op->shader);
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
 struct wined3d_deferred_context
 {
     struct wined3d_device_context c;
@@ -3688,12 +3666,6 @@ struct wined3d_deferred_context
 
     SIZE_T depth_stencil_state_count, depth_stencil_states_capacity;
     struct wined3d_depth_stencil_state **depth_stencil_states;
-
-    SIZE_T shader_count, shaders_capacity;
-    struct wined3d_shader **shaders;
-
-    SIZE_T sampler_count, samplers_capacity;
-    struct wined3d_sampler **samplers;
 };
 
 static struct wined3d_deferred_context *wined3d_deferred_context_from_context(struct wined3d_device_context *context)
@@ -3720,16 +3692,18 @@ static void *wined3d_deferred_context_require_space(struct wined3d_device_contex
 
     packet = (struct wined3d_cs_packet *)((BYTE *)deferred->data + deferred->data_size);
     TRACE("size was %zu, adding %zu\n", (size_t)deferred->data_size, packet_size);
-    deferred->data_size += packet_size;
     packet->size = packet_size - header_size;
     return &packet->data;
 }
 
 static void wined3d_deferred_context_submit(struct wined3d_device_context *context, enum wined3d_cs_queue_id queue_id)
 {
-    assert(queue_id == WINED3D_CS_QUEUE_DEFAULT);
+    struct wined3d_deferred_context *deferred = wined3d_deferred_context_from_context(context);
+    struct wined3d_cs_packet *packet;
 
-    /* Nothing to do. */
+    assert(queue_id == WINED3D_CS_QUEUE_DEFAULT);
+    packet = wined3d_next_cs_packet(deferred->data, &deferred->data_size);
+    wined3d_cs_packet_incref_objects(packet);
 }
 
 static void wined3d_deferred_context_finish(struct wined3d_device_context *context, enum wined3d_cs_queue_id queue_id)
@@ -3928,38 +3902,6 @@ static void wined3d_deferred_context_acquire_depth_stencil_state(struct wined3d_
     wined3d_depth_stencil_state_incref(depth_stencil_state);
 }
 
-static void wined3d_deferred_context_acquire_shader(struct wined3d_device_context *context,
-        struct wined3d_shader *shader)
-{
-    struct wined3d_deferred_context *deferred = wined3d_deferred_context_from_context(context);
-    if (!wined3d_array_reserve((void **)&deferred->shaders, &deferred->shaders_capacity,
-            deferred->shader_count + 1, sizeof(*deferred->shaders)))
-        return;
-
-    deferred->shaders[deferred->shader_count++] = shader;
-    wined3d_shader_incref(shader);
-}
-
-static void wined3d_deferred_context_acquire_samplers(struct wined3d_device_context *context,
-        struct wined3d_sampler * const *samplers, unsigned int count)
-{
-    struct wined3d_deferred_context *deferred = wined3d_deferred_context_from_context(context);
-    unsigned int i;
-
-    if (!wined3d_array_reserve((void **)&deferred->samplers, &deferred->samplers_capacity,
-            deferred->sampler_count + count, sizeof(*deferred->samplers)))
-        return;
-
-    for (i = 0; i < count; ++i)
-    {
-        if (samplers[i])
-        {
-            deferred->samplers[deferred->sampler_count++] = samplers[i];
-            wined3d_sampler_incref(samplers[i]);
-        }
-    }
-}
-
 static const struct wined3d_device_context_ops wined3d_deferred_context_ops =
 {
     wined3d_deferred_context_require_space,
@@ -3975,8 +3917,6 @@ static const struct wined3d_device_context_ops wined3d_deferred_context_ops =
     wined3d_deferred_context_acquire_blend_state,
     wined3d_deferred_context_acquire_rasterizer_state,
     wined3d_deferred_context_acquire_depth_stencil_state,
-    wined3d_deferred_context_acquire_shader,
-    wined3d_deferred_context_acquire_samplers,
 };
 
 HRESULT CDECL wined3d_deferred_context_create(struct wined3d_device *device, struct wined3d_device_context **context)
@@ -4011,7 +3951,8 @@ HRESULT CDECL wined3d_deferred_context_create(struct wined3d_device *device, str
 void CDECL wined3d_deferred_context_destroy(struct wined3d_device_context *context)
 {
     struct wined3d_deferred_context *deferred = wined3d_deferred_context_from_context(context);
-    SIZE_T i;
+    const struct wined3d_cs_packet *packet;
+    SIZE_T i, offset = 0;
 
     TRACE("context %p.\n", context);
 
@@ -4046,13 +3987,11 @@ void CDECL wined3d_deferred_context_destroy(struct wined3d_device_context *conte
         wined3d_depth_stencil_state_decref(deferred->depth_stencil_states[i]);
     heap_free(deferred->depth_stencil_states);
 
-    for (i = 0; i < deferred->shader_count; ++i)
-        wined3d_shader_decref(deferred->shaders[i]);
-    heap_free(deferred->shaders);
-
-    for (i = 0; i < deferred->sampler_count; ++i)
-        wined3d_sampler_decref(deferred->samplers[i]);
-    heap_free(deferred->samplers);
+    while (offset < deferred->data_size)
+    {
+        packet = wined3d_next_cs_packet(deferred->data, &offset);
+        wined3d_cs_packet_decref_objects(packet);
+    }
 
     wined3d_state_destroy(deferred->c.state);
     heap_free(deferred->data);
@@ -4076,8 +4015,6 @@ HRESULT CDECL wined3d_deferred_context_record_command_list(struct wined3d_device
             + deferred->blend_state_count * sizeof(*object->blend_states)
             + deferred->rasterizer_state_count * sizeof(*object->rasterizer_states)
             + deferred->depth_stencil_state_count * sizeof(*object->depth_stencil_states)
-            + deferred->shader_count * sizeof(*object->shaders)
-            + deferred->sampler_count * sizeof(*object->samplers)
             + deferred->data_size);
 
     if (!memory)
@@ -4137,18 +4074,6 @@ HRESULT CDECL wined3d_deferred_context_record_command_list(struct wined3d_device
             deferred->depth_stencil_state_count * sizeof(*object->depth_stencil_states));
     /* Transfer our references to the depth stencil states to the command list. */
 
-    object->shaders = memory;
-    memory = &object->shaders[deferred->shader_count];
-    object->shader_count = deferred->shader_count;
-    memcpy(object->shaders, deferred->shaders, deferred->shader_count * sizeof(*object->shaders));
-    /* Transfer our references to the shaders to the command list. */
-
-    object->samplers = memory;
-    memory = &object->samplers[deferred->sampler_count];
-    object->sampler_count = deferred->sampler_count;
-    memcpy(object->samplers, deferred->samplers, deferred->sampler_count * sizeof(*object->samplers));
-    /* Transfer our references to the samplers to the command list. */
-
     object->data = memory;
     object->data_size = deferred->data_size;
     memcpy(object->data, deferred->data, deferred->data_size);
@@ -4161,8 +4086,6 @@ HRESULT CDECL wined3d_deferred_context_record_command_list(struct wined3d_device
     deferred->blend_state_count = 0;
     deferred->rasterizer_state_count = 0;
     deferred->depth_stencil_state_count = 0;
-    deferred->shader_count = 0;
-    deferred->sampler_count = 0;
 
     /* This is in fact recorded into a subsequent command list. */
     if (restore)
@@ -4175,4 +4098,67 @@ HRESULT CDECL wined3d_deferred_context_record_command_list(struct wined3d_device
     wined3d_device_context_unlock(context);
 
     return S_OK;
+}
+
+static void wined3d_command_list_destroy_object(void *object)
+{
+    struct wined3d_command_list *list = object;
+    SIZE_T i;
+
+    TRACE("list %p.\n", list);
+
+    for (i = 0; i < list->upload_count; ++i)
+        heap_free(list->uploads[i].sysmem);
+
+    heap_free(list);
+}
+
+ULONG CDECL wined3d_command_list_incref(struct wined3d_command_list *list)
+{
+    ULONG refcount = InterlockedIncrement(&list->refcount);
+
+    TRACE("%p increasing refcount to %u.\n", list, refcount);
+
+    return refcount;
+}
+
+ULONG CDECL wined3d_command_list_decref(struct wined3d_command_list *list)
+{
+    ULONG refcount = InterlockedDecrement(&list->refcount);
+    struct wined3d_device *device = list->device;
+    const struct wined3d_cs_packet *packet;
+    SIZE_T i, offset;
+
+    TRACE("%p decreasing refcount to %u.\n", list, refcount);
+
+    if (!refcount)
+    {
+        for (i = 0; i < list->command_list_count; ++i)
+            wined3d_command_list_decref(list->command_lists[i]);
+        for (i = 0; i < list->resource_count; ++i)
+            wined3d_resource_decref(list->resources[i]);
+        for (i = 0; i < list->upload_count; ++i)
+            wined3d_resource_decref(list->uploads[i].resource);
+        for (i = 0; i < list->query_count; ++i)
+            wined3d_query_decref(list->queries[i].query);
+        for (i = 0; i < list->blend_state_count; ++i)
+            wined3d_blend_state_decref(list->blend_states[i]);
+        for (i = 0; i < list->rasterizer_state_count; ++i)
+            wined3d_rasterizer_state_decref(list->rasterizer_states[i]);
+        for (i = 0; i < list->depth_stencil_state_count; ++i)
+            wined3d_depth_stencil_state_decref(list->depth_stencil_states[i]);
+
+        offset = 0;
+        while (offset < list->data_size)
+        {
+            packet = wined3d_next_cs_packet(list->data, &offset);
+            wined3d_cs_packet_decref_objects(packet);
+        }
+
+        wined3d_mutex_lock();
+        wined3d_cs_destroy_object(device->cs, wined3d_command_list_destroy_object, list);
+        wined3d_mutex_unlock();
+    }
+
+    return refcount;
 }

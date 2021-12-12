@@ -78,6 +78,11 @@ enum dbg_internal_types
     dbg_itype_signed_long_int,
     dbg_itype_unsigned_longlong_int,
     dbg_itype_signed_longlong_int,
+
+    /* they represent the dbg_lg(u)int_t types */
+    dbg_itype_lgint,
+    dbg_itype_lguint,
+
     dbg_itype_char,
     dbg_itype_wchar,
     dbg_itype_short_real, /* aka float */
@@ -89,6 +94,14 @@ enum dbg_internal_types
     dbg_itype_m128a,      /* 128-bit (XMM) registers */
     dbg_itype_none              = 0xffffffff
 };
+
+/* Largest integers the debugger's compiler can support.
+ * It's large enough to store a pointer (in debuggee or debugger's address space).
+ * It can be smaller than the largest integer(s) of the debuggee.
+ * (eg. 64 bit on PE build of debugger, vs 128 int in ELF build of a library)
+ */
+typedef LONG64  dbg_lgint_t;
+typedef ULONG64 dbg_lguint_t;
 
 /* type description (in the following order):
  * - if 'id' is dbg_itype_none (whatever 'module' value), the type isn't known
@@ -104,15 +117,34 @@ struct dbg_type
 
 struct dbg_lvalue       /* structure to hold left-values... */
 {
-    int			cookie;	/* DLV_??? */
-/* DLV_TARGET references an address in debuggee's address space, whereas DLV_HOST
- * references the winedbg's address space
- */
-#	define	DLV_TARGET	0xF00D
-#	define	DLV_HOST	0x50DA
+    unsigned            in_debuggee : 1, /* 1 = debuggee address space, 0 = debugger address space */
+                        bitstart : 8, /* in fact, 7 should be sufficient for underlying 128bit integers */
+                        bitlen;
     ADDRESS64           addr;
     struct dbg_type     type;
 };
+
+static inline void init_lvalue(struct dbg_lvalue* lv, BOOL in_debuggee, void* addr)
+{
+    lv->in_debuggee = !!in_debuggee;
+    lv->bitstart = 0;
+    lv->bitlen = 0;
+    lv->addr.Mode = AddrModeFlat;
+    lv->addr.Offset = (DWORD_PTR)addr;
+    lv->type.module = 0;
+    lv->type.id = dbg_itype_none;
+}
+
+static inline void init_lvalue_in_debugger(struct dbg_lvalue* lv, enum dbg_internal_types it, void* addr)
+{
+    lv->in_debuggee = 0;
+    lv->bitstart = 0;
+    lv->bitlen = 0;
+    lv->addr.Mode = AddrModeFlat;
+    lv->addr.Offset = (DWORD_PTR)addr;
+    lv->type.module = 0;
+    lv->type.id = it;
+}
 
 enum dbg_exec_mode
 {
@@ -245,18 +277,18 @@ struct be_process_io
 };
 
 extern	struct dbg_process*	dbg_curr_process;
-extern	DWORD_PTR	        dbg_curr_pid;
+extern	DWORD	                dbg_curr_pid;
 extern	struct dbg_thread*	dbg_curr_thread;
-extern	DWORD_PTR	        dbg_curr_tid;
+extern	DWORD	                dbg_curr_tid;
 extern  dbg_ctx_t               dbg_context;
 extern  BOOL                    dbg_interactiveP;
 extern  HANDLE                  dbg_houtput;
 
 struct dbg_internal_var
 {
-    DWORD_PTR		        val;
-    const char*		        name;
-    DWORD_PTR		        *pval;
+    DWORD                       val;
+    const char*                 name;
+    void*                       pval;
     ULONG                       typeid; /* always internal type */
 };
 
@@ -329,8 +361,8 @@ extern BOOL             display_enable(int displaynum, int enable);
 extern void             expr_free_all(void);
 extern struct expr*     expr_alloc_internal_var(const char* name);
 extern struct expr*     expr_alloc_symbol(const char* name);
-extern struct expr*     expr_alloc_sconstant(INT_PTR val);
-extern struct expr*     expr_alloc_uconstant(UINT_PTR val);
+extern struct expr*     expr_alloc_sconstant(dbg_lgint_t val);
+extern struct expr*     expr_alloc_uconstant(dbg_lguint_t val);
 extern struct expr*     expr_alloc_string(const char* str);
 extern struct expr*     expr_alloc_binary_op(int oper, struct expr*, struct expr*);
 extern struct expr*     expr_alloc_unary_op(int oper, struct expr*);
@@ -360,6 +392,12 @@ extern void             info_wine_dbg_channel(BOOL add, const char* chnl, const 
   /* memory.c */
 extern BOOL             memory_read_value(const struct dbg_lvalue* lvalue, DWORD size, void* result);
 extern BOOL             memory_write_value(const struct dbg_lvalue* val, DWORD size, void* value);
+extern BOOL             memory_transfer_value(const struct dbg_lvalue* to, const struct dbg_lvalue* from);
+extern BOOL             memory_fetch_integer(const struct dbg_lvalue* lvalue, unsigned size,
+                                             BOOL is_signed, dbg_lgint_t* ret);
+extern BOOL             memory_store_integer(const struct dbg_lvalue* lvalue, dbg_lgint_t val);
+extern BOOL             memory_fetch_float(const struct dbg_lvalue* lvalue, double *ret);
+extern BOOL             memory_store_float(const struct dbg_lvalue* lvalue, double *ret);
 extern void             memory_examine(const struct dbg_lvalue *lvalue, int count, char format);
 extern void*            memory_to_linear_addr(const ADDRESS64* address);
 extern BOOL             memory_get_current_pc(ADDRESS64* address);
@@ -448,16 +486,19 @@ extern enum dbg_start   tgt_module_load(const char* name, BOOL keep);
 extern void             print_value(const struct dbg_lvalue* addr, char format, int level);
 extern BOOL             types_print_type(const struct dbg_type*, BOOL details);
 extern BOOL             print_types(void);
-extern INT_PTR          types_extract_as_integer(const struct dbg_lvalue*);
-extern LONGLONG         types_extract_as_longlong(const struct dbg_lvalue*, unsigned* psize, BOOL *pissigned);
+extern dbg_lgint_t      types_extract_as_integer(const struct dbg_lvalue*);
+extern dbg_lgint_t      types_extract_as_lgint(const struct dbg_lvalue*, unsigned* psize, BOOL *pissigned);
 extern void             types_extract_as_address(const struct dbg_lvalue*, ADDRESS64*);
 extern BOOL             types_store_value(struct dbg_lvalue* lvalue_to, const struct dbg_lvalue* lvalue_from);
-extern BOOL             types_udt_find_element(struct dbg_lvalue* value, const char* name, ULONG *tmpbuf);
+extern BOOL             types_udt_find_element(struct dbg_lvalue* value, const char* name);
 extern BOOL             types_array_index(const struct dbg_lvalue* value, int index, struct dbg_lvalue* result);
 extern BOOL             types_get_info(const struct dbg_type*, IMAGEHLP_SYMBOL_TYPE_INFO, void*);
 extern BOOL             types_get_real_type(struct dbg_type* type, DWORD* tag);
 extern struct dbg_type  types_find_pointer(const struct dbg_type* type);
 extern struct dbg_type  types_find_type(DWORD64 linear, const char* name, enum SymTagEnum tag);
+extern BOOL             types_compare(const struct dbg_type, const struct dbg_type, BOOL* equal);
+extern BOOL             types_is_integral_type(const struct dbg_lvalue*);
+extern BOOL             types_is_float_type(const struct dbg_lvalue*);
 
   /* winedbg.c */
 extern void	        dbg_outputW(const WCHAR* buffer, int len);
@@ -509,7 +550,7 @@ extern struct dbg_internal_var          dbg_internal_vars[];
 
 #define  DBG_IVARNAME(_var)	dbg_internal_var_##_var
 #define  DBG_IVARSTRUCT(_var)	dbg_internal_vars[DBG_IVARNAME(_var)]
-#define  DBG_IVAR(_var)		(*(DBG_IVARSTRUCT(_var).pval))
+#define  DBG_IVAR(_var)		(DBG_IVARSTRUCT(_var).val)
 #define  INTERNAL_VAR(_var,_val,_ref,itype) DBG_IVARNAME(_var),
 enum debug_int_var
 {

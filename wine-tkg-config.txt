@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Sun Dec  5 12:42:29 AM CET 2021 :
+# Last wine-tkg-staging-fsync-git configuration - Sun Dec 12 03:08:53 PM CET 2021 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 6.23.r0.g3f6102080e6
-Using wine-staging patchset (version 6.23.r0.g82e4617d)
+Wine (plain) version: 7.0rc1.r0.g533616d23f9
+Using wine-staging patchset (version 7.0rc1.r0.g544f90da)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -11,10 +11,8 @@ Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
 Applied reverting hotfix staging-pulseaudio-reverts.mystagingrevert
-Applied hotfix staging-6dcaff42.mystagingpatch
-Applied hotfix staging-4c51f4f.mystagingpatch
 Applied hotfix staging-reenable-pulse.mystagingpatch
-Applied hotfix protonify_stg_syscall_emu-008.mystagingpatch
+Applied hotfix protonify_stg_syscall_emu-009.mystagingpatch
 Applied hotfix 0001-Revert-winegstreamer-Get-rid-of-the-WMReader-typedef.myearlypatch
 Applied hotfix 0002-Revert-wmvcore-Move-the-async-reader-implementation-.myearlypatch
 Applied hotfix 0003-Revert-winegstreamer-Get-rid-of-the-WMSyncReader-typ.myearlypatch
@@ -91,15 +89,21 @@ LAA-unix-staging.patch -- ( Applied large address aware override support )
 
 proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 2/3 )
 rdr2.patch -- ( Enable Proton's RDR2 fixes from Paul Gofman )
+proton-cpu-topology-overrides.patch -- ( Enable Proton's CPU topology override support )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
 
+Applied hotfix 0004-winevulkan1.mypatch
 Applied hotfix Return_nt_filename_and_resolve_DOS_drive_path.mypatch
+Applied hotfix ef6e33f.mypatch
+Applied hotfix 0001-proton-bcrypt_rdr2_fixes3.mypatch
+Applied hotfix 0002-bcrypt-Add-support-for-calculating-secret-ecc-keys.mypatch
 Applied hotfix a608ef1.mypatch
 Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch amdags.mypatch
 Applied your own patch ntdll_Map_top-down_if_dll_characteristics_include_DYNAMIC_BASE.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
+Applied your own patch x.mypatch
 
 wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

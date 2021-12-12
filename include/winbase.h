@@ -40,6 +40,7 @@ extern "C" {
 #endif
 
 #include <libloaderapi.h>
+#include <processthreadsapi.h>
 #include <synchapi.h>
 #include <threadpoolapiset.h>
 
@@ -239,6 +240,8 @@ typedef struct _SECURITY_ATTRIBUTES
     LPVOID  lpSecurityDescriptor;
     BOOL  bInheritHandle;
 } SECURITY_ATTRIBUTES, *PSECURITY_ATTRIBUTES, *LPSECURITY_ATTRIBUTES;
+
+#include <namespaceapi.h>
 
 #ifndef _FILETIME_
 #define _FILETIME_

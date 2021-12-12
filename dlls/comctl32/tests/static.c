@@ -40,6 +40,10 @@
 static HWND hMainWnd;
 static int g_nReceivedColorStatic;
 
+static HRESULT (WINAPI *pEnableThemeDialogTexture)(HWND, DWORD);
+static HTHEME (WINAPI *pGetWindowTheme)(HWND);
+static BOOL (WINAPI *pIsThemeDialogTextureEnabled)(HWND);
+
 /* try to make sure pending X events have been processed before continuing */
 static void flush_events(void)
 {
@@ -385,7 +389,7 @@ static INT_PTR CALLBACK test_WM_CTLCOLORSTATIC_proc(HWND hwnd, UINT msg, WPARAM 
     switch (msg)
     {
     case WM_INITDIALOG:
-        child = CreateWindowA(WC_STATICA, "child", WS_CHILD | WS_VISIBLE, 0, 0, 50, 50, hwnd,
+        child = CreateWindowA(WC_STATICA, "child", WS_CHILD | WS_VISIBLE, 1, 2, 50, 50, hwnd,
                               (HMENU)100, 0, NULL);
         ok(child != NULL, "CreateWindowA failed, error %d.\n", GetLastError());
         return FALSE;
@@ -401,14 +405,14 @@ static INT_PTR CALLBACK test_WM_CTLCOLORSTATIC_proc(HWND hwnd, UINT msg, WPARAM 
 
 static void test_WM_CTLCOLORSTATIC(void)
 {
-    HTHEME (WINAPI *pGetWindowTheme)(HTHEME) = NULL;
     HWND parent, dialog, child;
     COLORREF color, old_color;
     HDC child_hdc, dialog_hdc;
     int mode, old_mode;
-    BOOL todo = FALSE;
-    HMODULE uxtheme;
     HBRUSH brush;
+    HRESULT hr;
+    POINT org;
+    BOOL ret;
 
     struct
     {
@@ -430,14 +434,6 @@ static void test_WM_CTLCOLORSTATIC(void)
     child = GetDlgItem(dialog, 100);
     ok(child != NULL, "Failed to get child static control, error %d.\n", GetLastError());
 
-    uxtheme = LoadLibraryA("uxtheme.dll");
-    if (uxtheme)
-    {
-        pGetWindowTheme = (void*)GetProcAddress(uxtheme, "GetWindowTheme");
-        if (pGetWindowTheme)
-            todo = !!pGetWindowTheme(dialog);
-    }
-
     dialog_hdc = GetDC(dialog);
     child_hdc = GetDC(child);
     PatBlt(dialog_hdc, 0, 0, 80, 80, BLACKNESS);
@@ -447,24 +443,55 @@ static void test_WM_CTLCOLORSTATIC(void)
     old_color = SetBkColor(child_hdc, 0xaa5511);
     ok(old_color != CLR_INVALID, "SetBkColor failed.\n");
 
+    ret = pIsThemeDialogTextureEnabled(dialog);
+    ok(ret, "Expected theme dialog texture supported.\n");
+    ok(pGetWindowTheme(dialog) == NULL, "Expected NULL theme handle.\n");
+
     brush = (HBRUSH)SendMessageW(dialog, WM_CTLCOLORSTATIC, (WPARAM)child_hdc, (LPARAM)child);
-    todo_wine_if(todo)
     ok(brush == GetSysColorBrush(COLOR_BTNFACE), "Expected brush %p, got %p.\n",
        GetSysColorBrush(COLOR_BTNFACE), brush);
     color = SetBkColor(child_hdc, old_color);
     ok(color == GetSysColor(COLOR_BTNFACE), "Expected background color %#x, got %#x.\n",
        GetSysColor(COLOR_BTNFACE), color);
     mode = SetBkMode(child_hdc, old_mode);
-    todo_wine_if(todo)
     ok(mode == OPAQUE, "Expected mode %#x, got %#x.\n", OPAQUE, mode);
     color = GetPixel(dialog_hdc, 40, 40);
     ok(color == 0, "Expected pixel %#x, got %#x.\n", 0, color);
+
+    /* Test that EnableThemeDialogTexture() doesn't make WM_CTLCOLORSTATIC return a different brush */
+    hr = pEnableThemeDialogTexture(dialog, ETDT_DISABLE);
+    ok(hr == S_OK, "EnableThemeDialogTexture failed, hr %#x.\n", hr);
+    ret = pIsThemeDialogTextureEnabled(dialog);
+    ok(!ret, "Expected theme dialog texture disabled.\n");
+    hr = pEnableThemeDialogTexture(dialog, ETDT_ENABLETAB);
+    ok(hr == S_OK, "EnableThemeDialogTexture failed, hr %#x.\n", hr);
+    ret = pIsThemeDialogTextureEnabled(dialog);
+    ok(ret, "Expected theme dialog texture enabled.\n");
+
+    brush = (HBRUSH)SendMessageW(dialog, WM_CTLCOLORSTATIC, (WPARAM)child_hdc, (LPARAM)child);
+    ok(brush == GetSysColorBrush(COLOR_BTNFACE), "Expected brush %p, got %p.\n",
+       GetSysColorBrush(COLOR_BTNFACE), brush);
+
+    /* Test that WM_CTLCOLORSTATIC doesn't change brush origin */
+    ret = GetBrushOrgEx(child_hdc, &org);
+    ok(ret, "GetBrushOrgEx failed, error %u.\n", GetLastError());
+    ok(org.x == 0 && org.y == 0, "Expected (0,0), got %s.\n", wine_dbgstr_point(&org));
 
     ReleaseDC(child, child_hdc);
     ReleaseDC(dialog, dialog_hdc);
     EndDialog(dialog, 0);
     DestroyWindow(parent);
-    FreeLibrary(uxtheme);
+}
+
+static void init_functions(void)
+{
+    HMODULE uxtheme = LoadLibraryA("uxtheme.dll");
+
+#define X(f) p##f = (void *)GetProcAddress(uxtheme, #f);
+    X(EnableThemeDialogTexture)
+    X(GetWindowTheme)
+    X(IsThemeDialogTextureEnabled)
+#undef X
 }
 
 START_TEST(static)
@@ -476,6 +503,8 @@ START_TEST(static)
 
     if (!load_v6_module(&ctx_cookie, &hCtx))
         return;
+
+    init_functions();
 
     wndclass.cbSize         = sizeof(wndclass);
     wndclass.style          = CS_HREDRAW | CS_VREDRAW;

@@ -212,6 +212,7 @@ NTSTATUS CDECL unwind_builtin_dll( ULONG type, DISPATCHER_CONTEXT *dispatch, CON
         return STATUS_INVALID_DISPOSITION;
     }
     rc = unw_get_proc_info( &cursor, &info );
+    if (UNW_ENOINFO < 0) rc = -rc;  /* LLVM libunwind has negative error codes */
     if (rc != UNW_ESUCCESS && rc != -UNW_ENOINFO)
     {
         WARN( "failed to get info: %d\n", rc );
@@ -365,7 +366,7 @@ static void restore_fpu( const CONTEXT *context, ucontext_t *sigcontext )
 #elif defined(__APPLE__)
     sigcontext->uc_mcontext->__ns.__fpcr = context->Fpcr;
     sigcontext->uc_mcontext->__ns.__fpsr = context->Fpsr;
-    memcpy( sigcontext->uc_mcontext->__ns.__v, context->V, sizeof(context->v) );
+    memcpy( sigcontext->uc_mcontext->__ns.__v, context->V, sizeof(context->V) );
 #endif
 }
 
@@ -738,6 +739,14 @@ NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void 
 {
     struct user_callback_frame callback_frame = { {{ 0 }}, ret_ptr, ret_len };
 
+    /* if we have no syscall frame, call the callback directly */
+    if ((char *)&callback_frame < (char *)ntdll_get_thread_data()->kernel_stack ||
+        (char *)&callback_frame > (char *)arm64_thread_data()->syscall_frame)
+    {
+        NTSTATUS (WINAPI *func)(const void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
+        return func( args, len );
+    }
+
     if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&callback_frame)
         return STATUS_STACK_OVERFLOW;
 
@@ -1068,9 +1077,9 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         }
     }
 #elif defined(__APPLE__)
-    sigcontext->uc_mcontext->__ns.__fpcr = frame->fpcr;
-    sigcontext->uc_mcontext->__ns.__fpsr = frame->fpsr;
-    memcpy( sigcontext->uc_mcontext->__ns.__v, frame->v, sizeof(frame->v) );
+    context->uc_mcontext->__ns.__fpcr = frame->fpcr;
+    context->uc_mcontext->__ns.__fpsr = frame->fpsr;
+    memcpy( context->uc_mcontext->__ns.__v, frame->v, sizeof(frame->v) );
 #endif
 }
 

@@ -25,14 +25,10 @@
 #include "config.h"
 
 #include <stdarg.h>
-
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
-
-#ifdef HAVE_SYS_SOCKET_H
+#include <sys/types.h>
 #include <sys/socket.h>
-#endif
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #ifdef HAVE_NET_IF_H
 #include <net/if.h>
@@ -52,10 +48,6 @@
 
 #ifdef HAVE_NET_ROUTE_H
 #include <net/route.h>
-#endif
-
-#ifdef HAVE_SYS_IOCTL_H
-#include <sys/ioctl.h>
 #endif
 
 #ifdef HAVE_SYS_SYSCTL_H

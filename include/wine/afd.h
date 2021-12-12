@@ -25,6 +25,12 @@
 #include <winioctl.h>
 #include <mswsock.h>
 
+struct afd_wsabuf_32
+{
+    ULONG len;
+    ULONG buf;
+};
+
 #ifdef USE_WS_PREFIX
 # define WS(x)    WS_##x
 #else
@@ -76,6 +82,7 @@ struct afd_bind_params
     int unknown;
     struct WS(sockaddr) addr; /* variable size */
 };
+C_ASSERT( sizeof(struct afd_bind_params) == 20 );
 
 struct afd_listen_params
 {
@@ -83,6 +90,7 @@ struct afd_listen_params
     int backlog;
     int unknown2;
 };
+C_ASSERT( sizeof(struct afd_listen_params) == 12 );
 
 #define AFD_RECV_FORCE_ASYNC    0x2
 
@@ -99,6 +107,14 @@ struct afd_recv_params
     int msg_flags;
 };
 
+struct afd_recv_params_32
+{
+    ULONG buffers;
+    unsigned int count;
+    int recv_flags;
+    int msg_flags;
+};
+
 #include <pshpack4.h>
 struct afd_poll_params
 {
@@ -106,9 +122,37 @@ struct afd_poll_params
     unsigned int count;
     BOOLEAN exclusive;
     BOOLEAN padding[3];
-    struct
+    struct afd_poll_socket
     {
         SOCKET socket;
+        int flags;
+        NTSTATUS status;
+    } sockets[1];
+};
+
+struct afd_poll_params_64
+{
+    LONGLONG timeout;
+    unsigned int count;
+    BOOLEAN exclusive;
+    BOOLEAN padding[3];
+    struct afd_poll_socket_64
+    {
+        ULONGLONG socket;
+        int flags;
+        NTSTATUS status;
+    } sockets[1];
+};
+
+struct afd_poll_params_32
+{
+    LONGLONG timeout;
+    unsigned int count;
+    BOOLEAN exclusive;
+    BOOLEAN padding[3];
+    struct afd_poll_socket_32
+    {
+        ULONG socket;
         int flags;
         NTSTATUS status;
     } sockets[1];
@@ -138,6 +182,7 @@ struct afd_get_events_params
     int flags;
     NTSTATUS status[13];
 };
+C_ASSERT( sizeof(struct afd_get_events_params) == 56 );
 
 #define WINE_AFD_IOC(x) CTL_CODE(FILE_DEVICE_NETWORK, x, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
@@ -239,17 +284,25 @@ struct afd_get_events_params
 #define IOCTL_AFD_WINE_GET_IP_RECVTOS                   WINE_AFD_IOC(295)
 #define IOCTL_AFD_WINE_SET_IP_RECVTOS                   WINE_AFD_IOC(296)
 
+struct afd_iovec
+{
+    ULONGLONG ptr;
+    ULONG len;
+};
+
 struct afd_create_params
 {
     int family, type, protocol;
     unsigned int flags;
 };
+C_ASSERT( sizeof(struct afd_create_params) == 16 );
 
 struct afd_accept_into_params
 {
     ULONG accept_handle;
     unsigned int recv_len, local_len;
 };
+C_ASSERT( sizeof(struct afd_accept_into_params) == 12 );
 
 struct afd_connect_params
 {
@@ -258,37 +311,44 @@ struct afd_connect_params
     /* VARARG(addr, struct WS(sockaddr), addr_len); */
     /* VARARG(data, bytes); */
 };
+C_ASSERT( sizeof(struct afd_connect_params) == 8 );
 
 struct afd_recvmsg_params
 {
-    WSABUF *control;
-    struct WS(sockaddr) *addr;
-    int *addr_len;
-    unsigned int *ws_flags;
+    ULONGLONG control_ptr; /* WSABUF */
+    ULONGLONG addr_ptr; /* WS(sockaddr) */
+    ULONGLONG addr_len_ptr; /* int */
+    ULONGLONG ws_flags_ptr; /* unsigned int */
     int force_async;
     unsigned int count;
-    WSABUF *buffers;
+    ULONGLONG buffers_ptr; /* WSABUF[] */
 };
+C_ASSERT( sizeof(struct afd_recvmsg_params) == 48 );
 
 struct afd_sendmsg_params
 {
-    const struct WS(sockaddr) *addr;
+    ULONGLONG addr_ptr; /* const struct WS(sockaddr) */
     unsigned int addr_len;
     unsigned int ws_flags;
     int force_async;
     unsigned int count;
-    const WSABUF *buffers;
+    ULONGLONG buffers_ptr; /* const WSABUF[] */
 };
+C_ASSERT( sizeof(struct afd_sendmsg_params) == 32 );
 
 struct afd_transmit_params
 {
-    HANDLE file;
+    LARGE_INTEGER offset;
+    ULONGLONG head_ptr;
+    ULONGLONG tail_ptr;
+    DWORD head_len;
+    DWORD tail_len;
+    ULONG file;
     DWORD file_len;
     DWORD buffer_size;
-    LARGE_INTEGER offset;
-    TRANSMIT_FILE_BUFFERS buffers;
     DWORD flags;
 };
+C_ASSERT( sizeof(struct afd_transmit_params) == 48 );
 
 struct afd_message_select_params
 {
@@ -297,10 +357,12 @@ struct afd_message_select_params
     unsigned int message;
     int mask;
 };
+C_ASSERT( sizeof(struct afd_message_select_params) == 16 );
 
 struct afd_get_info_params
 {
     int family, type, protocol;
 };
+C_ASSERT( sizeof(struct afd_get_info_params) == 12 );
 
 #endif

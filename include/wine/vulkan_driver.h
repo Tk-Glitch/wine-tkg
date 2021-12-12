@@ -55,7 +55,7 @@ struct vulkan_funcs
     VkBool32 (*query_fs_hack)(VkSurfaceKHR surface, VkExtent2D *real_sz, VkExtent2D *user_sz, VkRect2D *dst_blit, VkFilter *filter);
 };
 
-extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver(HDC hdc, UINT version);
+extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver(UINT version);
 
 static inline void *get_vulkan_driver_device_proc_addr(
         const struct vulkan_funcs *vulkan_funcs, const char *name)

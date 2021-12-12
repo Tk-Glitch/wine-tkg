@@ -39,10 +39,8 @@ void stack_info(int len)
 
     if(len <= 0)
         len = 24;
-
-    lvalue.cookie = 0;
+    init_lvalue(&lvalue, TRUE, 0);
     lvalue.type.id = dbg_itype_segptr;
-    lvalue.type.module = 0;
 
     /* FIXME: we assume stack grows the same way as on i386 */
     if (!memory_get_current_stack(&lvalue.addr))
@@ -409,7 +407,7 @@ static void backtrace_all(void)
                 dbg_active_wait_for_first_exception();
             }
 
-            dbg_printf("\nBacktracing for thread %04x in process %04Ix (%s):\n",
+            dbg_printf("\nBacktracing for thread %04x in process %04x (%s):\n",
                        entry.th32ThreadID, dbg_curr_pid,
                        dbg_W2A(dbg_curr_process->imageName, -1));
             backtrace_tid(dbg_curr_process, entry.th32ThreadID);

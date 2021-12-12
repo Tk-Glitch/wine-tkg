@@ -1156,7 +1156,10 @@ static void BUTTON_PositionRect(LONG style, const RECT *outerRect, RECT *innerRe
     switch (style & BS_CENTER)
     {
     case BS_CENTER:
-        innerRect->left = outerRect->left + (outerRect->right - outerRect->left - width) / 2;
+        /* The left and right margins are added to the inner rectangle to get a new rectangle. Then
+         * the new rectangle is adjusted to be in the horizontal center */
+        innerRect->left = outerRect->left + (outerRect->right - outerRect->left - width
+                                             + margin->left - margin->right) / 2;
         innerRect->right = innerRect->left + width;
         break;
     case BS_RIGHT:
@@ -1182,7 +1185,10 @@ static void BUTTON_PositionRect(LONG style, const RECT *outerRect, RECT *innerRe
         break;
     case BS_VCENTER:
     default:
-        innerRect->top = outerRect->top + (outerRect->bottom - outerRect->top - height) / 2;
+        /* The top and bottom margins are added to the inner rectangle to get a new rectangle. Then
+         * the new rectangle is adjusted to be in the vertical center */
+        innerRect->top = outerRect->top + (outerRect->bottom - outerRect->top - height
+                                           + margin->top - margin->bottom) / 2;
         innerRect->bottom = innerRect->top + height;
         break;
     }
@@ -2877,12 +2883,13 @@ cleanup:
 
 static void GB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, int state, UINT dtFlags, BOOL focused)
 {
-    RECT clientRect, contentRect, imageRect, textRect, bgRect;
+    RECT clientRect, contentRect, labelRect, imageRect, textRect, bgRect;
     HRGN region, textRegion = NULL;
     LOGFONTW lf;
     HFONT font, hPrevFont = NULL;
     BOOL created_font = FALSE;
     TEXTMETRICW textMetric;
+    LONG style;
     int part;
 
     HRESULT hr = GetThemeFont(theme, hDC, BP_GROUPBOX, state, TMT_FONT, &lf);
@@ -2900,31 +2907,38 @@ static void GB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     }
 
     GetClientRect(infoPtr->hwnd, &clientRect);
-    contentRect = clientRect;
     region = set_control_clipping(hDC, &clientRect);
 
-    bgRect = contentRect;
+    bgRect = clientRect;
     GetTextMetricsW(hDC, &textMetric);
     bgRect.top += (textMetric.tmHeight / 2) - 1;
 
-    InflateRect(&contentRect, -7, 1);
-    dtFlags = BUTTON_CalcLayoutRects(infoPtr, hDC, &contentRect, &imageRect, &textRect);
+    labelRect = clientRect;
+    InflateRect(&labelRect, -7, 1);
+    dtFlags = BUTTON_CalcLayoutRects(infoPtr, hDC, &labelRect, &imageRect, &textRect);
     if (dtFlags != (UINT)-1 && !show_image_only(infoPtr))
     {
         textRegion = CreateRectRgnIndirect(&textRect);
         ExtSelectClipRgn(hDC, textRegion, RGN_DIFF);
     }
 
-    part = GetWindowLongW(infoPtr->hwnd, GWL_STYLE) & BS_PUSHLIKE ? BP_PUSHBUTTON : BP_GROUPBOX;
+    style = GetWindowLongW(infoPtr->hwnd, GWL_STYLE);
+    if (style & BS_PUSHLIKE)
+    {
+        part = BP_PUSHBUTTON;
+    }
+    else
+    {
+        part = BP_GROUPBOX;
+        GetThemeBackgroundContentRect(theme, hDC, part, state, &bgRect, &contentRect);
+        ExcludeClipRect(hDC, contentRect.left, contentRect.top, contentRect.right, contentRect.bottom);
+    }
     if (IsThemeBackgroundPartiallyTransparent(theme, part, state))
         DrawThemeParentBackground(infoPtr->hwnd, hDC, NULL);
     DrawThemeBackground(theme, hDC, part, state, &bgRect, NULL);
 
     if (dtFlags != (UINT)-1)
     {
-        contentRect.left--;
-        contentRect.right++;
-        contentRect.bottom++;
         if (textRegion)
         {
             SelectClipRgn(hDC, textRegion);

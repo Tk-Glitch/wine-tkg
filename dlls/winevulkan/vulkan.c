@@ -24,18 +24,11 @@
 #include "config.h"
 #include <math.h>
 #include <time.h>
-#include <stdarg.h>
 #include <stdlib.h>
 
-#include "ntstatus.h"
-#define WIN32_NO_STATUS
-#include "windef.h"
-#include "winbase.h"
-#include "winreg.h"
-#include "winuser.h"
-#include "winternl.h"
-
 #include "vulkan_private.h"
+#include "winreg.h"
+#include "ntuser.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
@@ -69,7 +62,6 @@ static uint32_t wine_vk_count_struct_(void *s, VkStructureType t)
 }
 
 static const struct vulkan_funcs *vk_funcs;
-static VkResult (*p_vkEnumerateInstanceVersion)(uint32_t *version);
 
 #define WINE_VK_ADD_DISPATCHABLE_MAPPING(instance, object, native_handle) \
     wine_vk_add_handle_mapping((instance), (uint64_t) (uintptr_t) (object), (uint64_t) (uintptr_t) (native_handle), &(object)->mapping)
@@ -123,9 +115,11 @@ static VkBool32 debug_utils_callback_conversion(VkDebugUtilsMessageSeverityFlagB
     const VkDebugUtilsMessengerCallbackDataEXT_host *callback_data,
     void *user_data)
 {
-    struct VkDebugUtilsMessengerCallbackDataEXT wine_callback_data;
+    struct wine_vk_debug_utils_params params;
     VkDebugUtilsObjectNameInfoEXT *object_name_infos;
     struct wine_debug_utils_messenger *object;
+    void *ret_ptr;
+    ULONG ret_len;
     VkBool32 result;
     unsigned int i;
 
@@ -139,12 +133,16 @@ static VkBool32 debug_utils_callback_conversion(VkDebugUtilsMessageSeverityFlagB
         return VK_FALSE;
     }
 
-    wine_callback_data = *((VkDebugUtilsMessengerCallbackDataEXT *) callback_data);
+    /* FIXME: we should pack all referenced structs instead of passing pointers */
+    params.user_callback = object->user_callback;
+    params.user_data = object->user_data;
+    params.severity = severity;
+    params.message_types = message_types;
+    params.data = *((VkDebugUtilsMessengerCallbackDataEXT *) callback_data);
 
-    object_name_infos = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                        wine_callback_data.objectCount * sizeof(*object_name_infos));
+    object_name_infos = calloc(params.data.objectCount, sizeof(*object_name_infos));
 
-    for (i = 0; i < wine_callback_data.objectCount; i++)
+    for (i = 0; i < params.data.objectCount; i++)
     {
         object_name_infos[i].sType = callback_data->pObjects[i].sType;
         object_name_infos[i].pNext = callback_data->pObjects[i].pNext;
@@ -157,7 +155,7 @@ static VkBool32 debug_utils_callback_conversion(VkDebugUtilsMessageSeverityFlagB
             if (!object_name_infos[i].objectHandle)
             {
                 WARN("handle conversion failed 0x%s\n", wine_dbgstr_longlong(callback_data->pObjects[i].objectHandle));
-                RtlFreeHeap(GetProcessHeap(), 0, object_name_infos);
+                free(object_name_infos);
                 return VK_FALSE;
             }
         }
@@ -167,12 +165,13 @@ static VkBool32 debug_utils_callback_conversion(VkDebugUtilsMessageSeverityFlagB
         }
     }
 
-    wine_callback_data.pObjects = object_name_infos;
+    params.data.pObjects = object_name_infos;
 
     /* applications should always return VK_FALSE */
-    result = object->user_callback(severity, message_types, &wine_callback_data, object->user_data);
+    result = KeUserModeCallback( NtUserCallVulkanDebugUtilsCallback, &params, sizeof(params),
+                                 &ret_ptr, &ret_len );
 
-    RtlFreeHeap(GetProcessHeap(), 0, object_name_infos);
+    free(object_name_infos);
 
     return result;
 }
@@ -180,7 +179,10 @@ static VkBool32 debug_utils_callback_conversion(VkDebugUtilsMessageSeverityFlagB
 static VkBool32 debug_report_callback_conversion(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT object_type,
     uint64_t object_handle, size_t location, int32_t code, const char *layer_prefix, const char *message, void *user_data)
 {
+    struct wine_vk_debug_report_params params;
     struct wine_debug_report_callback *object;
+    void *ret_ptr;
+    ULONG ret_len;
 
     TRACE("%#x, %#x, 0x%s, 0x%s, %d, %p, %p, %p\n", flags, object_type, wine_dbgstr_longlong(object_handle),
         wine_dbgstr_longlong(location), code, layer_prefix, message, user_data);
@@ -193,12 +195,22 @@ static VkBool32 debug_report_callback_conversion(VkDebugReportFlagsEXT flags, Vk
         return VK_FALSE;
     }
 
-    object_handle = wine_vk_get_wrapper(object->instance, object_handle);
-    if (!object_handle)
-        object_type = VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT;
+    /* FIXME: we should pack all referenced structs instead of passing pointers */
+    params.user_callback = object->user_callback;
+    params.user_data = object->user_data;
+    params.flags = flags;
+    params.object_type = object_type;
+    params.location = location;
+    params.code = code;
+    params.layer_prefix = layer_prefix;
+    params.message = message;
 
-    return object->user_callback(
-        flags, object_type, object_handle, location, code, layer_prefix, message, object->user_data);
+    params.object_handle = wine_vk_get_wrapper(object->instance, object_handle);
+    if (!params.object_handle)
+        params.object_type = VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT;
+
+    return KeUserModeCallback( NtUserCallVulkanDebugReportCallback, &params, sizeof(params),
+                               &ret_ptr, &ret_len );
 }
 
 static void wine_vk_physical_device_free(struct VkPhysicalDevice_T *phys_dev)
@@ -423,13 +435,10 @@ static void wine_vk_device_free(struct VkDevice_T *device)
     free(device);
 }
 
-NTSTATUS CDECL __wine_init_unix_lib(HMODULE module, DWORD reason, const void *driver, void *ptr_out)
+NTSTATUS init_vulkan(void *args)
 {
-    if (reason != DLL_PROCESS_ATTACH) return STATUS_SUCCESS;
-
-    vk_funcs = driver;
-    p_vkEnumerateInstanceVersion = vk_funcs->p_vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion");
-    *(const struct unix_funcs **)ptr_out = &loader_funcs;
+    vk_funcs = *(const struct vulkan_funcs **)args;
+    *(const struct unix_funcs **)args = &loader_funcs;
     return STATUS_SUCCESS;
 }
 
@@ -963,6 +972,10 @@ VkResult WINAPI wine_vkEnumerateInstanceVersion(uint32_t *version)
 {
     VkResult res;
 
+    static VkResult (*p_vkEnumerateInstanceVersion)(uint32_t *version);
+    if (!p_vkEnumerateInstanceVersion)
+        p_vkEnumerateInstanceVersion = vk_funcs->p_vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion");
+
     if (p_vkEnumerateInstanceVersion)
     {
         res = p_vkEnumerateInstanceVersion(version);
@@ -1236,6 +1249,7 @@ VkResult WINAPI wine_vkGetPhysicalDeviceImageFormatProperties2KHR(VkPhysicalDevi
 
 /* From ntdll/unix/sync.c */
 #define NANOSECONDS_IN_A_SECOND 1000000000
+#define TICKSPERSEC             10000000
 
 static inline VkTimeDomainEXT get_performance_counter_time_domain(void)
 {
@@ -1262,17 +1276,7 @@ static VkTimeDomainEXT map_to_host_time_domain(VkTimeDomainEXT domain)
 
 static inline uint64_t convert_monotonic_timestamp(uint64_t value)
 {
-    static LARGE_INTEGER freq;
-
-    if (!freq.QuadPart)
-    {
-        LARGE_INTEGER temp;
-
-        RtlQueryPerformanceFrequency(&temp);
-        InterlockedCompareExchange64(&freq.QuadPart, temp.QuadPart, 0);
-    }
-
-    return value * freq.QuadPart / NANOSECONDS_IN_A_SECOND;
+    return value / (NANOSECONDS_IN_A_SECOND / TICKSPERSEC);
 }
 
 static inline uint64_t convert_timestamp(VkTimeDomainEXT host_domain, VkTimeDomainEXT target_domain, uint64_t value)

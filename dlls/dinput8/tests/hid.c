@@ -46,6 +46,7 @@
 #include "wingdi.h"
 #include "dinput.h"
 #include "dinputd.h"
+#include "mmsystem.h"
 
 #include "initguid.h"
 #include "ddk/wdm.h"
@@ -9608,6 +9609,363 @@ done:
     winetest_pop_context();
 }
 
+static void test_winmm_joystick(void)
+{
+#include "psh_hid_macros.h"
+    const unsigned char report_desc[] = {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Report),
+                REPORT_ID(1, 1),
+
+                USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                USAGE(1, HID_USAGE_GENERIC_Z),
+                USAGE(1, HID_USAGE_GENERIC_WHEEL),
+                USAGE(1, HID_USAGE_GENERIC_SLIDER),
+                USAGE(1, HID_USAGE_GENERIC_RX),
+                USAGE(1, HID_USAGE_GENERIC_RY),
+                USAGE(1, HID_USAGE_GENERIC_RZ),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(4, 0xffff),
+                PHYSICAL_MINIMUM(1, 1),
+                PHYSICAL_MAXIMUM(4, 0xffff),
+                REPORT_SIZE(1, 16),
+                REPORT_COUNT(1, 8),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, HID_USAGE_GENERIC_HATSWITCH),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 8),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 8),
+                REPORT_SIZE(1, 4),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs|Null),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 4),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 4),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+#include "pop_hid_macros.h"
+
+    static const HIDP_CAPS hid_caps =
+    {
+        .InputReportByteLength = 18,
+    };
+    static const JOYCAPS2W expect_regcaps =
+    {
+        .szRegKey = L"DINPUT.DLL",
+    };
+    static const JOYCAPS2W expect_caps =
+    {
+        .wMid = 0x1209,
+        .wPid = 0x0001,
+        .szPname = L"Microsoft PC-joystick driver",
+        .wXmax = 0xffff,
+        .wYmax = 0xffff,
+        .wZmax = 0xffff,
+        .wNumButtons = 4,
+        .wPeriodMin = 10,
+        .wPeriodMax = 1000,
+        .wRmax = 0xffff,
+        .wUmax = 0xffff,
+        .wVmax = 0xffff,
+        .wCaps = JOYCAPS_HASZ|JOYCAPS_HASR|JOYCAPS_HASU|JOYCAPS_HASV|JOYCAPS_HASPOV|JOYCAPS_POV4DIR,
+        .wMaxAxes = 6,
+        .wNumAxes = 6,
+        .wMaxButtons = 32,
+        .szRegKey = L"DINPUT.DLL",
+    };
+    struct hid_expect injected_input[] =
+    {
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x00,0x00,0x00,0x08,0x00,0x10,0x00,0x18,0x00,0x20,0x00,0x28,0x00,0x30,0x00,0x38,0xf1},
+        },
+        {
+            .code = IOCTL_HID_READ_REPORT,
+            .report_buf = {1,0x00,0x38,0x00,0x30,0x00,0x28,0x00,0x20,0x00,0x18,0x00,0x10,0x00,0x08,0x00,0x00,0x63},
+        },
+    };
+    static const JOYINFOEX expect_infoex[] =
+    {
+        {
+            .dwSize = sizeof(JOYINFOEX), .dwFlags = 0xff,
+            .dwXpos = 0x7fff, .dwYpos = 0x7fff, .dwZpos = 0x7fff, .dwRpos = 0x7fff, .dwUpos = 0x7fff, .dwVpos = 0x7fff,
+            .dwButtons = 0, .dwButtonNumber = 0, .dwPOV = 0xffff,
+            .dwReserved1 = 0xcdcdcdcd, .dwReserved2 = 0xcdcdcdcd,
+        },
+        {
+            .dwSize = sizeof(JOYINFOEX), .dwFlags = 0xff,
+            .dwXpos = 0, .dwYpos = 0x07ff, .dwZpos = 0x17ff, .dwRpos = 0x37ff, .dwUpos = 0x1fff, .dwVpos = 0x27ff,
+            .dwButtons = 0xf, .dwButtonNumber = 0x4, .dwPOV = 0,
+            .dwReserved1 = 0xcdcdcdcd, .dwReserved2 = 0xcdcdcdcd,
+        },
+        {
+            .dwSize = sizeof(JOYINFOEX), .dwFlags = 0xff,
+            .dwXpos = 0x37ff, .dwYpos = 0x2fff, .dwZpos = 0x1fff, .dwRpos = 0, .dwUpos = 0x17ff, .dwVpos = 0x0fff,
+            .dwButtons = 0x6, .dwButtonNumber = 0x2, .dwPOV = 0x2328,
+            .dwReserved1 = 0xcdcdcdcd, .dwReserved2 = 0xcdcdcdcd,
+        },
+    };
+    static const JOYINFO expect_info =
+    {
+        .wXpos = 0x7fff,
+        .wYpos = 0x7fff,
+        .wZpos = 0x7fff,
+        .wButtons = 0,
+    };
+    JOYINFOEX infoex = {.dwSize = sizeof(JOYINFOEX)};
+    DIPROPGUIDANDPATH prop_guid_path =
+    {
+        .diph =
+        {
+            .dwSize = sizeof(DIPROPGUIDANDPATH),
+            .dwHeaderSize = sizeof(DIPROPHEADER),
+            .dwHow = DIPH_DEVICE,
+        },
+    };
+    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
+    DIDEVICEINSTANCEW devinst = {0};
+    IDirectInputDevice8W *device;
+    JOYCAPS2W caps = {0};
+    JOYINFO info = {0};
+    HANDLE event, file;
+    HRESULT hr;
+    UINT ret;
+
+    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
+    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
+    SetCurrentDirectoryW( tempdir );
+
+    cleanup_registry_keys();
+
+    ret = joyGetNumDevs();
+    ok( ret == 16, "joyGetNumDevs returned %u\n", ret );
+
+    ret = joyGetDevCapsW( 0, (JOYCAPSW *)&caps, sizeof(JOYCAPSW) );
+    ok( ret == JOYERR_PARMS, "joyGetDevCapsW returned %u\n", ret );
+
+    memset( &caps, 0xcd, sizeof(caps) );
+    ret = joyGetDevCapsW( -1, (JOYCAPSW *)&caps, sizeof(caps) );
+    ok( ret == 0, "joyGetDevCapsW returned %u\n", ret );
+    check_member( caps, expect_regcaps, "%#x", wMid );
+    check_member( caps, expect_regcaps, "%#x", wPid );
+    check_member_wstr( caps, expect_regcaps, szPname );
+    check_member( caps, expect_regcaps, "%#x", wXmin );
+    check_member( caps, expect_regcaps, "%#x", wXmax );
+    check_member( caps, expect_regcaps, "%#x", wYmin );
+    check_member( caps, expect_regcaps, "%#x", wYmax );
+    check_member( caps, expect_regcaps, "%#x", wZmin );
+    check_member( caps, expect_regcaps, "%#x", wZmax );
+    check_member( caps, expect_regcaps, "%#x", wNumButtons );
+    check_member( caps, expect_regcaps, "%#x", wPeriodMin );
+    check_member( caps, expect_regcaps, "%#x", wPeriodMax );
+    check_member( caps, expect_regcaps, "%#x", wRmin );
+    check_member( caps, expect_regcaps, "%#x", wRmax );
+    check_member( caps, expect_regcaps, "%#x", wUmin );
+    check_member( caps, expect_regcaps, "%#x", wUmax );
+    check_member( caps, expect_regcaps, "%#x", wVmin );
+    check_member( caps, expect_regcaps, "%#x", wVmax );
+    check_member( caps, expect_regcaps, "%#x", wCaps );
+    check_member( caps, expect_regcaps, "%#x", wMaxAxes );
+    check_member( caps, expect_regcaps, "%#x", wNumAxes );
+    check_member( caps, expect_regcaps, "%#x", wMaxButtons );
+    check_member_wstr( caps, expect_regcaps, szRegKey );
+    check_member_wstr( caps, expect_regcaps, szOEMVxD );
+    check_member_guid( caps, expect_regcaps, ManufacturerGuid );
+    check_member_guid( caps, expect_regcaps, ProductGuid );
+    check_member_guid( caps, expect_regcaps, NameGuid );
+
+    if (!dinput_driver_start( report_desc, sizeof(report_desc), &hid_caps, NULL, 0 )) goto done;
+
+    ret = joyGetNumDevs();
+    ok( ret == 16, "joyGetNumDevs returned %u\n", ret );
+
+    ret = joyGetPosEx( 1, &infoex );
+    ok( ret == JOYERR_PARMS, "joyGetPosEx returned %u\n", ret );
+    ret = joyGetPosEx( 0, &infoex );
+    /* first call for an index sometimes fail */
+    if (ret == JOYERR_PARMS) ret = joyGetPosEx( 0, &infoex );
+    ok( ret == 0, "joyGetPosEx returned %u\n", ret );
+
+    ret = joyGetDevCapsW( 1, (JOYCAPSW *)&caps, sizeof(JOYCAPSW) );
+    ok( ret == JOYERR_PARMS, "joyGetDevCapsW returned %u\n", ret );
+
+    memset( &caps, 0xcd, sizeof(caps) );
+    ret = joyGetDevCapsW( 0, (JOYCAPSW *)&caps, sizeof(caps) );
+    ok( ret == 0, "joyGetDevCapsW returned %u\n", ret );
+    check_member( caps, expect_caps, "%#x", wMid );
+    check_member( caps, expect_caps, "%#x", wPid );
+    todo_wine
+    check_member_wstr( caps, expect_caps, szPname );
+    check_member( caps, expect_caps, "%#x", wXmin );
+    check_member( caps, expect_caps, "%#x", wXmax );
+    check_member( caps, expect_caps, "%#x", wYmin );
+    check_member( caps, expect_caps, "%#x", wYmax );
+    check_member( caps, expect_caps, "%#x", wZmin );
+    check_member( caps, expect_caps, "%#x", wZmax );
+    check_member( caps, expect_caps, "%#x", wNumButtons );
+    check_member( caps, expect_caps, "%#x", wPeriodMin );
+    check_member( caps, expect_caps, "%#x", wPeriodMax );
+    check_member( caps, expect_caps, "%#x", wRmin );
+    check_member( caps, expect_caps, "%#x", wRmax );
+    check_member( caps, expect_caps, "%#x", wUmin );
+    check_member( caps, expect_caps, "%#x", wUmax );
+    check_member( caps, expect_caps, "%#x", wVmin );
+    check_member( caps, expect_caps, "%#x", wVmax );
+    check_member( caps, expect_caps, "%#x", wCaps );
+    check_member( caps, expect_caps, "%#x", wMaxAxes );
+    check_member( caps, expect_caps, "%#x", wNumAxes );
+    check_member( caps, expect_caps, "%#x", wMaxButtons );
+    check_member_wstr( caps, expect_caps, szRegKey );
+    check_member_wstr( caps, expect_caps, szOEMVxD );
+    check_member_guid( caps, expect_caps, ManufacturerGuid );
+    check_member_guid( caps, expect_caps, ProductGuid );
+    check_member_guid( caps, expect_caps, NameGuid );
+
+    ret = joyGetDevCapsW( 0, (JOYCAPSW *)&caps, sizeof(JOYCAPSW) );
+    ok( ret == 0, "joyGetDevCapsW returned %u\n", ret );
+    ret = joyGetDevCapsW( 0, NULL, sizeof(JOYCAPSW) );
+    ok( ret == MMSYSERR_INVALPARAM, "joyGetDevCapsW returned %u\n", ret );
+    ret = joyGetDevCapsW( 0, (JOYCAPSW *)&caps, sizeof(JOYCAPSW) + 4 );
+    ok( ret == JOYERR_PARMS, "joyGetDevCapsW returned %u\n", ret );
+    ret = joyGetDevCapsW( 0, (JOYCAPSW *)&caps, sizeof(JOYCAPSW) - 4 );
+    ok( ret == JOYERR_PARMS, "joyGetDevCapsW returned %u\n", ret );
+
+    infoex.dwSize = sizeof(JOYINFOEX);
+    infoex.dwFlags = JOY_RETURNALL;
+    ret = joyGetPosEx( -1, &infoex );
+    ok( ret == JOYERR_PARMS, "joyGetPosEx returned %u\n", ret );
+    ret = joyGetPosEx( 1, &infoex );
+    ok( ret == JOYERR_PARMS, "joyGetPosEx returned %u\n", ret );
+    ret = joyGetPosEx( 16, &infoex );
+    ok( ret == JOYERR_PARMS, "joyGetPosEx returned %u\n", ret );
+
+    memset( &infoex, 0xcd, sizeof(infoex) );
+    infoex.dwSize = sizeof(JOYINFOEX);
+    infoex.dwFlags = JOY_RETURNALL;
+    ret = joyGetPosEx( 0, &infoex );
+    ok( ret == 0, "joyGetPosEx returned %u\n", ret );
+    check_member( infoex, expect_infoex[0], "%#x", dwSize );
+    check_member( infoex, expect_infoex[0], "%#x", dwFlags );
+    check_member( infoex, expect_infoex[0], "%#x", dwXpos );
+    check_member( infoex, expect_infoex[0], "%#x", dwYpos );
+    check_member( infoex, expect_infoex[0], "%#x", dwZpos );
+    check_member( infoex, expect_infoex[0], "%#x", dwRpos );
+    check_member( infoex, expect_infoex[0], "%#x", dwUpos );
+    check_member( infoex, expect_infoex[0], "%#x", dwVpos );
+    check_member( infoex, expect_infoex[0], "%#x", dwButtons );
+    check_member( infoex, expect_infoex[0], "%#x", dwButtonNumber );
+    check_member( infoex, expect_infoex[0], "%#x", dwPOV );
+    check_member( infoex, expect_infoex[0], "%#x", dwReserved1 );
+    check_member( infoex, expect_infoex[0], "%#x", dwReserved2 );
+
+    infoex.dwSize = sizeof(JOYINFOEX) - 4;
+    ret = joyGetPosEx( 0, &infoex );
+    ok( ret == JOYERR_PARMS, "joyGetPosEx returned %u\n", ret );
+
+    ret = joyGetPos( -1, &info );
+    ok( ret == JOYERR_PARMS, "joyGetPos returned %u\n", ret );
+    ret = joyGetPos( 1, &info );
+    ok( ret == JOYERR_PARMS, "joyGetPos returned %u\n", ret );
+    memset( &info, 0xcd, sizeof(info) );
+    ret = joyGetPos( 0, &info );
+    ok( ret == 0, "joyGetPos returned %u\n", ret );
+    check_member( info, expect_info, "%#x", wXpos );
+    check_member( info, expect_info, "%#x", wYpos );
+    check_member( info, expect_info, "%#x", wZpos );
+    check_member( info, expect_info, "%#x", wButtons );
+
+    if (FAILED(hr = create_dinput_device( DIRECTINPUT_VERSION, &devinst, &device ))) goto done;
+
+    event = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( event != NULL, "CreateEventW failed, last error %u\n", GetLastError() );
+    hr = IDirectInputDevice8_SetEventNotification( device, event );
+    ok( hr == DI_OK, "SetEventNotification returned: %#x\n", hr );
+
+    hr = IDirectInputDevice8_GetProperty( device, DIPROP_GUIDANDPATH, &prop_guid_path.diph );
+    ok( hr == DI_OK, "GetProperty DIPROP_GUIDANDPATH returned %#x\n", hr );
+    file = CreateFileW( prop_guid_path.wszPath, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                        FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, NULL );
+    ok( file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError() );
+
+    hr = IDirectInputDevice8_SetDataFormat( device, &c_dfDIJoystick2 );
+    ok( hr == DI_OK, "SetDataFormat returned: %#x\n", hr );
+    hr = IDirectInputDevice8_SetCooperativeLevel( device, NULL, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE );
+    ok( hr == DI_OK, "SetCooperativeLevel returned: %#x\n", hr );
+    hr = IDirectInputDevice8_Acquire( device );
+    ok( hr == DI_OK, "Acquire returned: %#x\n", hr );
+
+    send_hid_input( file, &injected_input[0], sizeof(struct hid_expect) );
+    ret = WaitForSingleObject( event, 100 );
+    ok( ret != WAIT_TIMEOUT, "WaitForSingleObject returned %#x\n", ret );
+    Sleep( 50 ); /* leave some time for winmm to keep up */
+
+    memset( &infoex, 0xcd, sizeof(infoex) );
+    infoex.dwSize = sizeof(JOYINFOEX);
+    infoex.dwFlags = JOY_RETURNALL;
+    ret = joyGetPosEx( 0, &infoex );
+    ok( ret == 0, "joyGetPosEx returned %u\n", ret );
+    check_member( infoex, expect_infoex[1], "%#x", dwSize );
+    check_member( infoex, expect_infoex[1], "%#x", dwFlags );
+    check_member( infoex, expect_infoex[1], "%#x", dwXpos );
+    check_member( infoex, expect_infoex[1], "%#x", dwYpos );
+    check_member( infoex, expect_infoex[1], "%#x", dwZpos );
+    check_member( infoex, expect_infoex[1], "%#x", dwRpos );
+    check_member( infoex, expect_infoex[1], "%#x", dwUpos );
+    check_member( infoex, expect_infoex[1], "%#x", dwVpos );
+    check_member( infoex, expect_infoex[1], "%#x", dwButtons );
+    check_member( infoex, expect_infoex[1], "%#x", dwButtonNumber );
+    check_member( infoex, expect_infoex[1], "%#x", dwPOV );
+
+    send_hid_input( file, &injected_input[1], sizeof(struct hid_expect) );
+    ret = WaitForSingleObject( event, 100 );
+    ok( ret != WAIT_TIMEOUT, "WaitForSingleObject returned %#x\n", ret );
+    Sleep( 50 ); /* leave some time for winmm to keep up */
+
+    memset( &infoex, 0xcd, sizeof(infoex) );
+    infoex.dwSize = sizeof(JOYINFOEX);
+    infoex.dwFlags = JOY_RETURNALL;
+    ret = joyGetPosEx( 0, &infoex );
+    ok( ret == 0, "joyGetPosEx returned %u\n", ret );
+    check_member( infoex, expect_infoex[2], "%#x", dwSize );
+    check_member( infoex, expect_infoex[2], "%#x", dwFlags );
+    check_member( infoex, expect_infoex[2], "%#x", dwXpos );
+    check_member( infoex, expect_infoex[2], "%#x", dwYpos );
+    check_member( infoex, expect_infoex[2], "%#x", dwZpos );
+    check_member( infoex, expect_infoex[2], "%#x", dwRpos );
+    check_member( infoex, expect_infoex[2], "%#x", dwUpos );
+    check_member( infoex, expect_infoex[2], "%#x", dwVpos );
+    check_member( infoex, expect_infoex[2], "%#x", dwButtons );
+    check_member( infoex, expect_infoex[2], "%#x", dwButtonNumber );
+    check_member( infoex, expect_infoex[2], "%#x", dwPOV );
+
+    ret = IDirectInputDevice8_Release( device );
+    ok( ret == 0, "Release returned %d\n", ret );
+
+    CloseHandle( event );
+    CloseHandle( file );
+
+done:
+    pnp_driver_stop();
+    cleanup_registry_keys();
+    SetCurrentDirectoryW( cwd );
+}
+
 START_TEST( hid )
 {
     HANDLE mapping;
@@ -9650,6 +10008,10 @@ START_TEST( hid )
     CoInitialize( NULL );
     if (test_device_types( 0x800 ))
     {
+        /* This needs to be done before doing anything involving dinput.dll
+         * on Windows, or the tests will fail, dinput8.dll is fine though. */
+        test_winmm_joystick();
+
         test_device_types( 0x500 );
         test_device_types( 0x700 );
 

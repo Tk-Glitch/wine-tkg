@@ -1608,10 +1608,9 @@ static HRESULT layout_add_effective_run(struct dwrite_textlayout *layout, const 
     run->width = get_cluster_range_width(layout, first_cluster, first_cluster + cluster_count);
     memset(&run->bbox, 0, sizeof(run->bbox));
 
-    /* Check if run direction matches paragraph direction, if it doesn't adjust by
-       run width */
-    if (is_run_rtl(run) ^ is_rtl)
-        run->origin.x = is_rtl ? origin_x - run->width : origin_x + run->width;
+    /* Adjust by run width if direction differs. */
+    if (is_run_rtl(run) != is_rtl)
+        run->origin.x = origin_x + (is_rtl ? -run->width : run->width);
     else
         run->origin.x = origin_x;
 
@@ -3988,10 +3987,8 @@ static void layout_get_erun_bbox(struct dwrite_textlayout *layout, struct layout
         glyph_run.glyphOffsets = &regular->run.glyphOffsets[start_glyph];
 
         memset(&glyph_bitmap, 0, sizeof(glyph_bitmap));
-        glyph_bitmap.key = glyph_run.fontFace;
         glyph_bitmap.simulations = IDWriteFontFace_GetSimulations(glyph_run.fontFace);
         glyph_bitmap.emsize = glyph_run.fontEmSize;
-        glyph_bitmap.nohint = layout->measuringmode == DWRITE_MEASURING_MODE_NATURAL;
 
         bbox = &glyph_bitmap.bbox;
 
@@ -4010,7 +4007,7 @@ static void layout_get_erun_bbox(struct dwrite_textlayout *layout, struct layout
             D2D1_RECT_F glyph_bbox;
 
             glyph_bitmap.glyph = glyph_run.glyphIndices[i];
-            dwrite_fontface_get_glyph_bbox(&glyph_bitmap);
+            dwrite_fontface_get_glyph_bbox(glyph_run.fontFace, &glyph_bitmap);
 
             glyph_bbox.left = bbox->left;
             glyph_bbox.top = bbox->top;

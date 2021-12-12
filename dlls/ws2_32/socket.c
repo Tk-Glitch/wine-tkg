@@ -35,6 +35,8 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #define TIMEOUT_INFINITE _I64_MAX
 
+#define u64_from_user_ptr(ptr) ((ULONGLONG)(uintptr_t)(ptr))
+
 static const WSAPROTOCOL_INFOW supported_protocols[] =
 {
     {
@@ -817,7 +819,7 @@ static BOOL WINAPI WS2_AcceptEx( SOCKET listener, SOCKET acceptor, void *dest, D
 static BOOL WINAPI WS2_TransmitFile( SOCKET s, HANDLE file, DWORD file_len, DWORD buffer_size,
                                      OVERLAPPED *overlapped, TRANSMIT_FILE_BUFFERS *buffers, DWORD flags )
 {
-    struct afd_transmit_params params = {0};
+    struct afd_transmit_params params = {{{0}}};
     IO_STATUS_BLOCK iosb, *piosb = &iosb;
     HANDLE event = NULL;
     void *cvalue = NULL;
@@ -842,10 +844,16 @@ static BOOL WINAPI WS2_TransmitFile( SOCKET s, HANDLE file, DWORD file_len, DWOR
         params.offset.QuadPart = FILE_USE_FILE_POINTER_POSITION;
     }
 
-    params.file = file;
+    params.file = HandleToULong( file );
     params.file_len = file_len;
     params.buffer_size = buffer_size;
-    if (buffers) params.buffers = *buffers;
+    if (buffers)
+    {
+        params.head_ptr = u64_from_user_ptr(buffers->Head);
+        params.head_len = buffers->HeadLength;
+        params.tail_ptr = u64_from_user_ptr(buffers->Tail);
+        params.tail_len = buffers->TailLength;
+    }
     params.flags = flags;
 
     status = NtDeviceIoControlFile( (HANDLE)s, event, NULL, cvalue, piosb,
@@ -923,13 +931,13 @@ static int WS2_recv_base( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *
         apc = socket_apc;
     }
 
-    params.control = control;
-    params.addr = addr;
-    params.addr_len = addr_len;
-    params.ws_flags = flags;
+    params.control_ptr = u64_from_user_ptr(control);
+    params.addr_ptr = u64_from_user_ptr(addr);
+    params.addr_len_ptr = u64_from_user_ptr(addr_len);
+    params.ws_flags_ptr = u64_from_user_ptr(flags);
     params.force_async = !!overlapped;
     params.count = buffer_count;
-    params.buffers = buffers;
+    params.buffers_ptr = u64_from_user_ptr(buffers);
 
     status = NtDeviceIoControlFile( (HANDLE)s, event, apc, cvalue, piosb,
                                     IOCTL_AFD_WINE_RECVMSG, &params, sizeof(params), NULL, 0 );
@@ -990,12 +998,12 @@ static int WS2_sendto( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *ret
         apc = socket_apc;
     }
 
-    params.addr = addr;
+    params.addr_ptr = u64_from_user_ptr( addr );
     params.addr_len = addr_len;
     params.ws_flags = flags;
     params.force_async = !!overlapped;
     params.count = buffer_count;
-    params.buffers = buffers;
+    params.buffers_ptr = u64_from_user_ptr( buffers );
 
     status = NtDeviceIoControlFile( (HANDLE)s, event, apc, cvalue, piosb,
                                     IOCTL_AFD_WINE_SENDMSG, &params, sizeof(params), NULL, 0 );

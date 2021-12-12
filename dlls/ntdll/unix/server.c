@@ -43,17 +43,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-#ifdef HAVE_SYS_SOCKET_H
-# include <sys/socket.h>
-#endif
-#ifdef HAVE_SYS_WAIT_H
+#include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
-#endif
 #ifdef HAVE_SYS_UN_H
 #include <sys/un.h>
-#endif
-#ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
 #endif
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
@@ -1604,6 +1598,7 @@ size_t server_init_process(void)
 void server_init_process_done(void)
 {
     void *entry, *teb;
+    struct cpu_topology_override *cpu_override = get_cpu_topology_override();
     NTSTATUS status;
     int suspend, needs_close, unixdir;
 
@@ -1633,6 +1628,8 @@ void server_init_process_done(void)
     /* Signal the parent process to continue */
     SERVER_START_REQ( init_process_done )
     {
+        if (cpu_override)
+            wine_server_add_data( req, cpu_override, sizeof(*cpu_override) );
         req->teb      = wine_server_client_ptr( teb );
         req->peb      = NtCurrentTeb64() ? NtCurrentTeb64()->Peb : wine_server_client_ptr( peb );
 #ifdef __i386__

@@ -84,7 +84,7 @@ BOOL memory_read_value(const struct dbg_lvalue* lvalue, DWORD size, void* result
 {
     BOOL ret = FALSE;
 
-    if (lvalue->cookie == DLV_TARGET)
+    if (lvalue->in_debuggee)
     {
         void*   linear = memory_to_linear_addr(&lvalue->addr);
         if (!(ret = dbg_read_memory(linear, result, size)))
@@ -120,7 +120,7 @@ BOOL memory_write_value(const struct dbg_lvalue* lvalue, DWORD size, void* value
     }
 
     /* FIXME: only works on little endian systems */
-    if (lvalue->cookie == DLV_TARGET)
+    if (lvalue->in_debuggee)
     {
         void*       linear = memory_to_linear_addr(&lvalue->addr);
         if (!(ret = dbg_write_memory(linear, value, size)))
@@ -130,6 +130,37 @@ BOOL memory_write_value(const struct dbg_lvalue* lvalue, DWORD size, void* value
     {
         memcpy((void*)(DWORD_PTR)lvalue->addr.Offset, value, size);
     }
+    return ret;
+}
+
+/* transfer a block of memory
+ * the two lvalue:s are expected to be of same size
+ */
+BOOL memory_transfer_value(const struct dbg_lvalue* to, const struct dbg_lvalue* from)
+{
+    DWORD64 size_to, size_from;
+    BYTE tmp[256];
+    BYTE* ptr = tmp;
+    BOOL ret;
+
+    if (to->bitlen || from->bitlen) return FALSE;
+    if (!types_get_info(&to->type, TI_GET_LENGTH, &size_to) ||
+        !types_get_info(&from->type, TI_GET_LENGTH, &size_from) ||
+        size_from != size_to) return FALSE;
+    /* optimize debugger to debugger transfer */
+    if (!to->in_debuggee && !from->in_debuggee)
+    {
+        memcpy(memory_to_linear_addr(&to->addr), memory_to_linear_addr(&from->addr), size_from);
+        return TRUE;
+    }
+    if (size_to > sizeof(tmp))
+    {
+        ptr = malloc(size_from);
+        if (!ptr) return FALSE;
+    }
+    ret = memory_read_value(from, size_from, ptr) &&
+        memory_write_value(to, size_from, ptr);
+    if (size_to > sizeof(tmp)) free(ptr);
     return ret;
 }
 
@@ -231,6 +262,115 @@ void memory_examine(const struct dbg_lvalue *lvalue, int count, char format)
     }
 }
 
+BOOL memory_fetch_integer(const struct dbg_lvalue* lvalue, unsigned size,
+                          BOOL is_signed, dbg_lgint_t* ret)
+{
+    /* size must fit in ret and be a power of two */
+    if (size > sizeof(*ret) || (size & (size - 1))) return FALSE;
+
+    if (lvalue->bitlen)
+    {
+        struct dbg_lvalue alt_lvalue = *lvalue;
+        dbg_lguint_t mask;
+        DWORD bt;
+        /* FIXME: this test isn't sufficient, depending on start of bitfield
+         * (ie a 64 bit field can spread across 9 bytes)
+         */
+        if (lvalue->bitlen > 8 * sizeof(dbg_lgint_t)) return FALSE;
+        alt_lvalue.addr.Offset += lvalue->bitstart >> 3;
+        /*
+         * Bitfield operation.  We have to extract the field.
+         */
+        if (!memory_read_value(&alt_lvalue, sizeof(*ret), ret)) return FALSE;
+        mask = ~(dbg_lguint_t)0 << lvalue->bitlen;
+        *ret >>= lvalue->bitstart & 7;
+        *ret &= ~mask;
+
+        /*
+         * OK, now we have the correct part of the number.
+         * Check to see whether the basic type is signed or not, and if so,
+         * we need to sign extend the number.
+         */
+        if (types_get_info(&lvalue->type, TI_GET_BASETYPE, &bt) &&
+            (bt == btInt || bt == btLong) && (*ret & (1 << (lvalue->bitlen - 1))))
+        {
+            *ret |= mask;
+        }
+    }
+    else
+    {
+        /* we are on little endian CPU */
+        memset(ret, 0, sizeof(*ret)); /* clear unread bytes */
+        if (!memory_read_value(lvalue, size, ret)) return FALSE;
+
+        /* propagate sign information */
+        if (is_signed && size < 8 && (*ret >> (size * 8 - 1)) != 0)
+        {
+            dbg_lguint_t neg = -1;
+            *ret |= neg << (size * 8);
+        }
+    }
+    return TRUE;
+}
+
+BOOL memory_store_integer(const struct dbg_lvalue* lvalue, dbg_lgint_t val)
+{
+    DWORD64 size;
+    if (!types_get_info(&lvalue->type, TI_GET_LENGTH, &size)) return FALSE;
+    if (lvalue->bitlen)
+    {
+        struct dbg_lvalue alt_lvalue = *lvalue;
+        dbg_lguint_t mask, dst;
+
+        /* FIXME: this test isn't sufficient, depending on start of bitfield
+         * (ie a 64 bit field can spread across 9 bytes)
+         */
+        if (lvalue->bitlen > 8 * sizeof(dbg_lgint_t)) return FALSE;
+        /* mask is 1 where bitfield is present, 0 outside */
+        mask = (~(dbg_lguint_t)0 >> (sizeof(val) * 8 - lvalue->bitlen)) << (lvalue->bitstart & 7);
+        alt_lvalue.addr.Offset += lvalue->bitstart >> 3;
+        val <<= lvalue->bitstart & 7;
+        if (!memory_read_value(&alt_lvalue, (unsigned)size, &dst)) return FALSE;
+        val = (dst & ~mask) | (val & mask);
+        return memory_write_value(&alt_lvalue, (unsigned)size, &val);
+    }
+    /* this is simple if we're on a little endian CPU */
+    return memory_write_value(lvalue, (unsigned)size, &val);
+}
+
+BOOL memory_fetch_float(const struct dbg_lvalue* lvalue, double *ret)
+{
+    DWORD64 size;
+    if (!types_get_info(&lvalue->type, TI_GET_LENGTH, &size)) return FALSE;
+    /* FIXME: this assumes that debuggee and debugger use the same
+     * representation for reals
+     */
+    if (size > sizeof(*ret)) return FALSE;
+    if (!memory_read_value(lvalue, size, ret)) return FALSE;
+
+    if (size == sizeof(float)) *ret = *(float*)ret;
+    else if (size != sizeof(double)) return FALSE;
+
+    return TRUE;
+}
+
+BOOL memory_store_float(const struct dbg_lvalue* lvalue, double *ret)
+{
+    DWORD64 size;
+    if (!types_get_info(&lvalue->type, TI_GET_LENGTH, &size)) return FALSE;
+    /* FIXME: this assumes that debuggee and debugger use the same
+     * representation for reals
+     */
+    if (size > sizeof(*ret)) return FALSE;
+    if (size == sizeof(float))
+    {
+        float f = *ret;
+        return memory_write_value(lvalue, size, &f);
+    }
+    if (size != sizeof(double)) return FALSE;
+    return memory_write_value(lvalue, size, ret);
+}
+
 BOOL memory_get_string(struct dbg_process* pcs, void* addr, BOOL in_debuggee,
                        BOOL unicode, char* buffer, int size)
 {
@@ -318,32 +458,23 @@ char* memory_offset_to_string(char *str, DWORD64 offset, unsigned mode)
     return str;
 }
 
-static void dbg_print_longlong(LONGLONG sv, BOOL is_signed)
+static void dbg_print_sdecimal(dbg_lgint_t sv)
 {
-    char      tmp[24], *ptr = tmp + sizeof(tmp) - 1;
-    ULONGLONG uv, div;
-    *ptr = '\0';
-    if (is_signed && sv < 0)    uv = -sv;
-    else                        { uv = sv; is_signed = FALSE; }
-    for (div = 10; uv; div *= 10, uv /= 10)
-        *--ptr = '0' + (uv % 10);
-    if (ptr == tmp + sizeof(tmp) - 1) *--ptr = '0';
-    if (is_signed) *--ptr = '-';
-    dbg_printf("%s", ptr);
+    dbg_printf("%I64d", sv);
 }
 
-static void dbg_print_hex(DWORD size, ULONGLONG sv)
+static void dbg_print_hex(DWORD size, dbg_lgint_t sv)
 {
     if (!sv)
         dbg_printf("0");
     else
         /* clear unneeded high bits, esp. sign extension */
-        dbg_printf("%#I64x", sv & (~0LLU >> (64 - 8 * size)));
+        dbg_printf("%#I64x", sv & (~(dbg_lguint_t)0 >> (8 * (sizeof(dbg_lgint_t) - size))));
 }
 
 static void print_typed_basic(const struct dbg_lvalue* lvalue)
 {
-    LONGLONG            val_int;
+    dbg_lgint_t         val_int;
     void*               val_ptr;
     double              val_real;
     DWORD64             size64;
@@ -369,17 +500,17 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
         {
         case btInt:
         case btLong:
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, size, TRUE, &val_int)) return;
+            if (!memory_fetch_integer(lvalue, size, TRUE, &val_int)) return;
             if (size == 1) goto print_char;
             dbg_print_hex(size, val_int);
             break;
         case btUInt:
         case btULong:
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, size, FALSE, &val_int)) return;
+            if (!memory_fetch_integer(lvalue, size, FALSE, &val_int)) return;
             dbg_print_hex(size, val_int);
             break;
         case btFloat:
-            if (!dbg_curr_process->be_cpu->fetch_float(lvalue, size, &val_real)) return;
+            if (!memory_fetch_float(lvalue, &val_real)) return;
             dbg_printf("%f", val_real);
             break;
         case btChar:
@@ -387,7 +518,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
             /* sometimes WCHAR is defined as btChar with size = 2, so discrimate
              * Ansi/Unicode based on size, not on basetype
              */
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, size, TRUE, &val_int)) return;
+            if (!memory_fetch_integer(lvalue, size, TRUE, &val_int)) return;
         print_char:
             if ((size == 1 && isprint((char)val_int)) ||
                  (size == 2 && val_int < 127 && isprint((char)val_int)))
@@ -396,7 +527,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
                 dbg_printf("%d", (int)val_int);
             break;
         case btBool:
-            if (!dbg_curr_process->be_cpu->fetch_integer(lvalue, size, TRUE, &val_int)) return;
+            if (!memory_fetch_integer(lvalue, size, TRUE, &val_int)) return;
             dbg_printf("%s", val_int ? "true" : "false");
             break;
         default:
@@ -421,7 +552,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
             if (!val_ptr) dbg_printf("0x0");
             else if (((bt == btChar || bt == btInt) && size64 == 1) || (bt == btUInt && size64 == 2))
             {
-                if (memory_get_string(dbg_curr_process, val_ptr, sub_lvalue.cookie == DLV_TARGET,
+                if (memory_get_string(dbg_curr_process, val_ptr, sub_lvalue.in_debuggee,
                                       size64 == 2, buffer, sizeof(buffer)))
                     dbg_printf("\"%s\"", buffer);
                 else
@@ -441,7 +572,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
             BOOL        ok = FALSE;
 
             if (!types_get_info(&type, TI_GET_LENGTH, &size64) ||
-                !dbg_curr_process->be_cpu->fetch_integer(lvalue, size64, TRUE, &val_int)) return;
+                !memory_fetch_integer(lvalue, size64, TRUE, &val_int)) return;
 
             if (types_get_info(&type, TI_GET_CHILDRENCOUNT, &count))
             {
@@ -484,7 +615,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
                     fcp->Start += 256;
                 }
             }
-            if (!ok) dbg_print_longlong(val_int, TRUE);
+            if (!ok) dbg_print_sdecimal(val_int);
         }
         break;
     default:
@@ -509,17 +640,17 @@ void print_basic(const struct dbg_lvalue* lvalue, char format)
     if (format != 0)
     {
         unsigned size;
-        LONGLONG res = types_extract_as_longlong(lvalue, &size, NULL);
+        dbg_lgint_t res = types_extract_as_lgint(lvalue, &size, NULL);
         WCHAR wch;
 
         switch (format)
         {
         case 'x':
-            dbg_print_hex(size, (ULONGLONG)res);
+            dbg_print_hex(size, res);
             return;
 
         case 'd':
-            dbg_print_longlong(res, TRUE);
+            dbg_print_sdecimal(res);
             return;
 
         case 'c':
@@ -542,7 +673,7 @@ void print_basic(const struct dbg_lvalue* lvalue, char format)
     }
     if (lvalue->type.id == dbg_itype_segptr)
     {
-        dbg_print_longlong(types_extract_as_longlong(lvalue, NULL, NULL), TRUE);
+        dbg_print_sdecimal(types_extract_as_lgint(lvalue, NULL, NULL));
     }
     else print_typed_basic(lvalue);
 }

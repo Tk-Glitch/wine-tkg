@@ -1,7 +1,7 @@
 /*
- * Generate resource prototypes
+ * Wine X11DRV Xfixes interface
  *
- * Copyright 1998 Bertho A. Stultiens (BS)
+ * Copyright 2021 Rémi Bernon for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,20 +17,23 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#ifndef __WINE_XFIXES_H
+#define __WINE_XFIXES_H
 
-#ifndef __WRC_GENRES_H
-#define __WRC_GENRES_H
-
-#include "wrctypes.h"
-
-res_t *new_res(void);
-res_t *grow_res(res_t *r, unsigned int add);
-void put_byte(res_t *res, unsigned c);
-void put_word(res_t *res, unsigned w);
-void put_dword(res_t *res, unsigned d);
-void resources2res(resource_t *top);
-const char *get_c_typename(enum res_e type);
-char *make_c_name(const char *base, const name_id_t *nid, const language_t *lan);
-char *prep_nid_for_label(const name_id_t *nid);
-
+#ifndef __WINE_CONFIG_H
+# error You must include config.h to use this header
 #endif
+
+#ifdef SONAME_LIBXFIXES
+#include <X11/extensions/Xfixes.h>
+#define MAKE_FUNCPTR(f) extern typeof(f) * p##f DECLSPEC_HIDDEN;
+MAKE_FUNCPTR(XFixesQueryExtension)
+MAKE_FUNCPTR(XFixesQueryVersion)
+MAKE_FUNCPTR(XFixesCreateRegion)
+MAKE_FUNCPTR(XFixesCreateRegionFromGC)
+MAKE_FUNCPTR(XFixesDestroyRegion)
+MAKE_FUNCPTR(XFixesSelectSelectionInput)
+#undef MAKE_FUNCPTR
+#endif /* defined(SONAME_LIBXFIXES) */
+
+#endif /* __WINE_XFIXES_H */
