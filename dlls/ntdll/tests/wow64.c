@@ -39,6 +39,7 @@ static NTSTATUS (WINAPI *pNtWow64ReadVirtualMemory64)(HANDLE,ULONG64,void*,ULONG
 static NTSTATUS (WINAPI *pNtWow64WriteVirtualMemory64)(HANDLE,ULONG64,const void *,ULONG64,ULONG64*);
 #endif
 
+static BOOL is_win64 = (sizeof(void *) > sizeof(int));
 static BOOL is_wow64;
 static void *code_mem;
 
@@ -234,6 +235,7 @@ static void test_peb_teb(void)
     NTSTATUS status;
     void *redir;
     SIZE_T res;
+    BOOL ret;
     TEB teb;
     PEB peb;
     TEB32 teb32;
@@ -326,15 +328,17 @@ static void test_peb_teb(void)
                 params32.EnvironmentSize, params.EnvironmentSize );
         }
 
-        ok( DebugActiveProcess( pi.dwProcessId ), "debugging failed\n" );
+        ret = DebugActiveProcess( pi.dwProcessId );
+        todo_wine_if( is_win64 )
+        ok( ret, "debugging failed\n" );
         if (!ReadProcessMemory( pi.hProcess, proc_info.PebBaseAddress, &peb, sizeof(peb), &res )) res = 0;
         ok( res == sizeof(peb), "wrong len %lx\n", res );
-        ok( peb.BeingDebugged == 1, "BeingDebugged is %u\n", peb.BeingDebugged );
+        ok( peb.BeingDebugged == !!ret, "BeingDebugged is %u\n", peb.BeingDebugged );
         if (!is_wow64)
         {
             if (!ReadProcessMemory( pi.hProcess, ULongToPtr(teb32.Peb), &peb32, sizeof(peb32), &res )) res = 0;
             ok( res == sizeof(peb32), "wrong len %lx\n", res );
-            ok( peb32.BeingDebugged == 1, "BeingDebugged is %u\n", peb32.BeingDebugged );
+            ok( peb32.BeingDebugged == !!ret, "BeingDebugged is %u\n", peb32.BeingDebugged );
         }
 
         TerminateProcess( pi.hProcess, 0 );
@@ -874,7 +878,7 @@ static void test_nt_wow64(void)
             ok( status == STATUS_PARTIAL_COPY || broken( status == STATUS_ACCESS_VIOLATION ),
                 "NtWow64WriteVirtualMemory64 failed %x\n", status );
             todo_wine
-            ok( !res, "wrong size %s\n", wine_dbgstr_longlong(res) );
+            ok( !res || broken(res) /* win10 1709 */, "wrong size %s\n", wine_dbgstr_longlong(res) );
         }
         ptr = 0x9876543210ull;
         status = pNtWow64AllocateVirtualMemory64( process, &ptr, 0, &size,
@@ -882,7 +886,8 @@ static void test_nt_wow64(void)
         todo_wine
         ok( !status || broken( status == STATUS_CONFLICTING_ADDRESSES ),
             "NtWow64AllocateVirtualMemory64 failed %x\n", status );
-        if (!status) ok( ptr == 0x9876540000ull, "wrong ptr %s\n", wine_dbgstr_longlong(ptr) );
+        if (!status) ok( ptr == 0x9876540000ull || broken(ptr == 0x76540000), /* win 8.1 */
+                         "wrong ptr %s\n", wine_dbgstr_longlong(ptr) );
         ptr = 0;
         status = pNtWow64AllocateVirtualMemory64( GetCurrentProcess(), &ptr, 0, &size,
                                                   MEM_RESERVE | MEM_COMMIT, PAGE_READONLY );
@@ -1027,15 +1032,27 @@ static void test_init_block(void)
             CHECK_FUNC( init_block[5], "KiUserExceptionDispatcher" );
             CHECK_FUNC( init_block[6], "KiUserApcDispatcher" );
             CHECK_FUNC( init_block[7], "KiUserCallbackDispatcher" );
-            CHECK_FUNC( init_block[8], "ExpInterlockedPopEntrySListFault" );
-            CHECK_FUNC( init_block[9], "ExpInterlockedPopEntrySListResume" );
-            CHECK_FUNC( init_block[10], "ExpInterlockedPopEntrySListEnd" );
-            CHECK_FUNC( init_block[11], "RtlUserThreadStart" );
-            CHECK_FUNC( init_block[12], "RtlpQueryProcessDebugInformationRemote" );
-            ok( init_block[13] == (ULONG_PTR)ntdll, "got %p for ntdll %p\n",
-                (void *)(ULONG_PTR)init_block[13], ntdll );
-            CHECK_FUNC( init_block[14], "LdrSystemDllInitBlock" );
-            size = 15 * sizeof(*init_block);
+            if (GetProcAddress( ntdll, "ExpInterlockedPopEntrySListFault" ))
+            {
+                CHECK_FUNC( init_block[8], "ExpInterlockedPopEntrySListFault" );
+                CHECK_FUNC( init_block[9], "ExpInterlockedPopEntrySListResume" );
+                CHECK_FUNC( init_block[10], "ExpInterlockedPopEntrySListEnd" );
+                CHECK_FUNC( init_block[11], "RtlUserThreadStart" );
+                CHECK_FUNC( init_block[12], "RtlpQueryProcessDebugInformationRemote" );
+                ok( init_block[13] == (ULONG_PTR)ntdll, "got %p for ntdll %p\n",
+                    (void *)(ULONG_PTR)init_block[13], ntdll );
+                CHECK_FUNC( init_block[14], "LdrSystemDllInitBlock" );
+                size = 15 * sizeof(*init_block);
+            }
+            else  /* win10 1607 */
+            {
+                CHECK_FUNC( init_block[8], "RtlUserThreadStart" );
+                CHECK_FUNC( init_block[9], "RtlpQueryProcessDebugInformationRemote" );
+                ok( init_block[10] == (ULONG_PTR)ntdll, "got %p for ntdll %p\n",
+                    (void *)(ULONG_PTR)init_block[10], ntdll );
+                CHECK_FUNC( init_block[11], "LdrSystemDllInitBlock" );
+                size = 12 * sizeof(*init_block);
+            }
             break;
         case 0xe0:  /* win10 1809 */
         case 0xf0:  /* win10 2004 */

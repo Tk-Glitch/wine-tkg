@@ -1758,22 +1758,25 @@ static HICON CURSORICON_Load(HINSTANCE hInstance, LPCWSTR name,
 
 static HBITMAP create_masked_bitmap( int width, int height, const void *and, const void *xor )
 {
-    HDC dc = CreateCompatibleDC( 0 );
-    HBITMAP bitmap;
+    HBITMAP and_bitmap, xor_bitmap, bitmap;
+    HDC src_dc, dst_dc;
 
-    const BITMAPINFO bitmap_info =
-    {
-        .bmiHeader.biSize = sizeof(BITMAPINFOHEADER),
-        .bmiHeader.biWidth = width,
-        .bmiHeader.biHeight = height * 2,
-        .bmiHeader.biPlanes = 1,
-        .bmiHeader.biBitCount = 1,
-    };
-
+    and_bitmap = CreateBitmap( width, height, 1, 1, and );
+    xor_bitmap = CreateBitmap( width, height, 1, 1, xor );
     bitmap = CreateBitmap( width, height * 2, 1, 1, NULL );
-    SetDIBits( dc, bitmap, 0, height, and, &bitmap_info, FALSE );
-    SetDIBits( dc, bitmap, height, height, xor, &bitmap_info, FALSE );
-    DeleteDC( dc );
+    src_dc = CreateCompatibleDC( 0 );
+    dst_dc = CreateCompatibleDC( 0 );
+
+    SelectObject( dst_dc, bitmap );
+    SelectObject( src_dc, and_bitmap );
+    BitBlt( dst_dc, 0, 0, width, height, src_dc, 0, 0, SRCCOPY );
+    SelectObject( src_dc, xor_bitmap );
+    BitBlt( dst_dc, 0, height, width, height, src_dc, 0, 0, SRCCOPY );
+
+    DeleteObject( and_bitmap );
+    DeleteObject( xor_bitmap );
+    DeleteDC( src_dc );
+    DeleteDC( dst_dc );
     return bitmap;
 }
 
@@ -3105,6 +3108,7 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
             struct cursoricon_frame *frame;
             struct cursoricon_object *icon;
             int depth = (flags & LR_MONOCHROME) ? 1 : get_display_bpp();
+            HICON resource_icon = NULL;
             ICONINFO info;
             HICON res;
 
@@ -3112,10 +3116,14 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
 
             if (icon->rsrc && (flags & LR_COPYFROMRESOURCE))
             {
-                hnd = CURSORICON_Load( icon->module, icon->resname, desiredx, desiredy, depth,
-                                       !icon->is_icon, flags );
+                resource_icon = CURSORICON_Load( icon->module, icon->resname, desiredx,
+                                                 desiredy, depth, !icon->is_icon, flags );
                 release_user_handle_ptr( icon );
-                if (!(icon = get_icon_ptr( hnd ))) return 0;
+                if (!(icon = get_icon_ptr( resource_icon )))
+                {
+                    if (resource_icon) DestroyIcon( resource_icon );
+                    return 0;
+                }
             }
             frame = get_icon_frame( icon, 0 );
 
@@ -3148,6 +3156,7 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
                     {
                         release_icon_frame( icon, frame );
                         release_user_handle_ptr( icon );
+                        if (resource_icon) DestroyIcon( resource_icon );
                         return 0;
                     }
                     stretch_bitmap( info.hbmColor, frame->color, desiredx, desiredy,
@@ -3158,6 +3167,7 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
                         DeleteObject( info.hbmColor );
                         release_icon_frame( icon, frame );
                         release_user_handle_ptr( icon );
+                        if (resource_icon) DestroyIcon( resource_icon );
                         return 0;
                     }
                     stretch_bitmap( info.hbmMask, frame->mask, desiredx, desiredy,
@@ -3170,6 +3180,7 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
                     if (!(info.hbmMask = CreateBitmap( desiredx, desiredy * 2, 1, 1, NULL )))
                     {
                         release_user_handle_ptr( icon );
+                        if (resource_icon) DestroyIcon( resource_icon );
                         return 0;
                     }
                     stretch_bitmap( info.hbmMask, frame->mask, desiredx, desiredy * 2,
@@ -3185,7 +3196,8 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
             release_icon_frame( icon, frame );
             release_user_handle_ptr( icon );
 
-            if (res && (flags & LR_COPYDELETEORG)) DeleteObject( hnd );
+            if (res && (flags & LR_COPYDELETEORG)) DestroyIcon( hnd );
+            if (resource_icon) DestroyIcon( resource_icon );
             return res;
         }
     }

@@ -296,6 +296,7 @@ static void * const syscalls[] =
     NtSaveKey,
     NtSecureConnectPort,
     NtSetContextThread,
+    NtSetDebugFilterState,
     NtSetDefaultLocale,
     NtSetDefaultUILanguage,
     NtSetEaFile,
