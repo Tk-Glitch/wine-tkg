@@ -3865,7 +3865,7 @@ static void test_process_info(HANDLE hproc)
         sizeof(PROCESS_JOB_MEMORY_INFO) /* ProcessJobMemoryInformation */,
 #endif
     };
-    ULONG i, status, ret_len, size;
+    ULONG i, status, ret_len;
     BOOL is_current = hproc == GetCurrentProcess();
 
     if (!pNtQueryInformationProcess)
@@ -3876,8 +3876,6 @@ static void test_process_info(HANDLE hproc)
 
     for (i = 0; i < MaxProcessInfoClass; i++)
     {
-        size = info_size[i];
-        if (!size) size = sizeof(buf);
         ret_len = 0;
         status = pNtQueryInformationProcess(hproc, i, buf, info_size[i], &ret_len);
         if (status == STATUS_NOT_IMPLEMENTED) continue;

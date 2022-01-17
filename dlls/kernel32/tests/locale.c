@@ -4357,6 +4357,7 @@ static void test_GetCPInfo(void)
             ok( !status, "failed %x\n", status );
             ok( size > 0x1000 && size <= 0x8000 , "wrong size %lx\n", size );
             status = pNtGetNlsSectionPtr( 10, 0, NULL, &ptr2, &size );
+            ok( !status, "failed %x\n", status );
             ok( ptr != ptr2, "got same pointer\n" );
             ret = UnmapViewOfFile( ptr );
             ok( ret, "UnmapViewOfFile failed err %u\n", GetLastError() );
@@ -7361,22 +7362,19 @@ static BOOL CALLBACK calinfo_procA(LPSTR calinfo)
 
 static void test_EnumCalendarInfoA(void)
 {
+    BOOL ret;
     INT i;
 
-    ok( EnumCalendarInfoA( calinfo_procA,
-                           LOCALE_USER_DEFAULT,
-                           ENUM_ALL_CALENDARS,
-                           CAL_RETURN_NUMBER | CAL_ICALINTVALUE ),
-        "EnumCalendarInfoA for user default locale failed: %u\n", GetLastError() );
+    ret = EnumCalendarInfoA( calinfo_procA, LOCALE_USER_DEFAULT, ENUM_ALL_CALENDARS,
+                             CAL_RETURN_NUMBER | CAL_ICALINTVALUE );
+    ok( ret, "EnumCalendarInfoA for user default locale failed: %u\n", GetLastError() );
 
     for (i = 0; i < ARRAY_SIZE( locales_with_optional_calendars ); i++)
     {
         LCID lcid = locales_with_optional_calendars[i];
-        ok( EnumCalendarInfoA( calinfo_procA,
-                               lcid,
-                               ENUM_ALL_CALENDARS,
-                               CAL_RETURN_NUMBER | CAL_ICALINTVALUE ) ||
-            broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
+        ret = EnumCalendarInfoA( calinfo_procA, lcid, ENUM_ALL_CALENDARS,
+                                 CAL_RETURN_NUMBER | CAL_ICALINTVALUE );
+        ok( ret || broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
             "EnumCalendarInfoA for LCID %#06x failed: %u\n", lcid, GetLastError() );
     }
 }
@@ -7389,22 +7387,19 @@ static BOOL CALLBACK calinfo_procW(LPWSTR calinfo)
 
 static void test_EnumCalendarInfoW(void)
 {
+    BOOL ret;
     INT i;
 
-    ok( EnumCalendarInfoW( calinfo_procW,
-                           LOCALE_USER_DEFAULT,
-                           ENUM_ALL_CALENDARS,
-                           CAL_RETURN_NUMBER | CAL_ICALINTVALUE ),
-        "EnumCalendarInfoW for user default locale failed: %u\n", GetLastError() );
+    ret = EnumCalendarInfoW( calinfo_procW, LOCALE_USER_DEFAULT, ENUM_ALL_CALENDARS,
+                             CAL_RETURN_NUMBER | CAL_ICALINTVALUE );
+    ok( ret, "EnumCalendarInfoW for user default locale failed: %u\n", GetLastError() );
 
     for (i = 0; i < ARRAY_SIZE( locales_with_optional_calendars ); i++)
     {
         LCID lcid = locales_with_optional_calendars[i];
-        ok( EnumCalendarInfoW( calinfo_procW,
-                               lcid,
-                               ENUM_ALL_CALENDARS,
-                               CAL_RETURN_NUMBER | CAL_ICALINTVALUE ) ||
-            broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
+        ret = EnumCalendarInfoW( calinfo_procW, lcid, ENUM_ALL_CALENDARS,
+                                 CAL_RETURN_NUMBER | CAL_ICALINTVALUE );
+        ok( ret || broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
             "EnumCalendarInfoW for LCID %#06x failed: %u\n", lcid, GetLastError() );
     }
 }
@@ -7418,22 +7413,19 @@ static BOOL CALLBACK calinfoex_procA(LPSTR calinfo, LCID calid)
 
 static void test_EnumCalendarInfoExA(void)
 {
+    BOOL ret;
     INT i;
 
-    ok( EnumCalendarInfoExA( calinfoex_procA,
-                             LOCALE_USER_DEFAULT,
-                             ENUM_ALL_CALENDARS,
-                             CAL_RETURN_NUMBER | CAL_ICALINTVALUE ),
-        "EnumCalendarInfoExA for user default locale failed: %u\n", GetLastError() );
+    ret = EnumCalendarInfoExA( calinfoex_procA, LOCALE_USER_DEFAULT, ENUM_ALL_CALENDARS,
+                               CAL_RETURN_NUMBER | CAL_ICALINTVALUE );
+    ok( ret, "EnumCalendarInfoExA for user default locale failed: %u\n", GetLastError() );
 
     for (i = 0; i < ARRAY_SIZE( locales_with_optional_calendars ); i++)
     {
         LCID lcid = locales_with_optional_calendars[i];
-        ok( EnumCalendarInfoExA( calinfoex_procA,
-                                 lcid,
-                                 ENUM_ALL_CALENDARS,
-                                 CAL_RETURN_NUMBER | CAL_ICALINTVALUE ) ||
-            broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
+        ret = EnumCalendarInfoExA( calinfoex_procA, lcid, ENUM_ALL_CALENDARS,
+                                   CAL_RETURN_NUMBER | CAL_ICALINTVALUE );
+        ok( ret || broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
             "EnumCalendarInfoExA for LCID %#06x failed: %u\n", lcid, GetLastError() );
     }
 }
@@ -7447,22 +7439,19 @@ static BOOL CALLBACK calinfoex_procW(LPWSTR calinfo, LCID calid)
 
 static void test_EnumCalendarInfoExW(void)
 {
+    BOOL ret;
     INT i;
 
-    ok( EnumCalendarInfoExW( calinfoex_procW,
-                             LOCALE_USER_DEFAULT,
-                             ENUM_ALL_CALENDARS,
-                             CAL_RETURN_NUMBER | CAL_ICALINTVALUE ),
-        "EnumCalendarInfoExW for user default locale failed: %u\n", GetLastError() );
+    ret = EnumCalendarInfoExW( calinfoex_procW, LOCALE_USER_DEFAULT, ENUM_ALL_CALENDARS,
+                               CAL_RETURN_NUMBER | CAL_ICALINTVALUE );
+    ok( ret, "EnumCalendarInfoExW for user default locale failed: %u\n", GetLastError() );
 
     for (i = 0; i < ARRAY_SIZE( locales_with_optional_calendars ); i++)
     {
         LCID lcid = locales_with_optional_calendars[i];
-        ok( EnumCalendarInfoExW( calinfoex_procW,
-                                 lcid,
-                                 ENUM_ALL_CALENDARS,
-                                 CAL_RETURN_NUMBER | CAL_ICALINTVALUE ) ||
-            broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
+        ret = EnumCalendarInfoExW( calinfoex_procW, lcid, ENUM_ALL_CALENDARS,
+                                   CAL_RETURN_NUMBER | CAL_ICALINTVALUE );
+        ok( ret || broken( GetLastError() == ERROR_INVALID_FLAGS ) /* no locale */,
             "EnumCalendarInfoExW for LCID %#06x failed: %u\n", lcid, GetLastError() );
     }
 }

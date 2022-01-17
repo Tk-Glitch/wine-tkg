@@ -3151,9 +3151,8 @@ static void test_select(void)
 {
     static char tmp_buf[1024];
 
-    SOCKET fdListen, fdRead, fdWrite;
-    fd_set readfds, writefds, exceptfds, *alloc_readfds;
-    unsigned int maxfd;
+    fd_set readfds, writefds, exceptfds, *alloc_fds;
+    SOCKET fdListen, fdRead, fdWrite, sockets[200];
     int ret, len;
     char buffer;
     struct timeval select_timeout;
@@ -3161,6 +3160,7 @@ static void test_select(void)
     select_thread_params thread_params;
     HANDLE thread_handle;
     DWORD ticks, id, old_protect;
+    unsigned int maxfd, i;
     char *page_pair;
 
     fdRead = socket(AF_INET, SOCK_STREAM, 0);
@@ -3182,7 +3182,7 @@ static void test_select(void)
     ret = select(maxfd+1, &readfds, &writefds, &exceptfds, &select_timeout);
     ticks = GetTickCount() - ticks;
     ok(ret == 0, "select should not return any socket handles\n");
-    ok(ticks < 10, "select was blocking for %u ms, expected < 10 ms\n", ticks);
+    ok(ticks < 100, "select was blocking for %u ms\n", ticks);
     ok(!FD_ISSET(fdRead, &readfds), "FD should not be set\n");
     ok(!FD_ISSET(fdWrite, &writefds), "FD should not be set\n");
     ok(!FD_ISSET(fdRead, &exceptfds), "FD should not be set\n");
@@ -3272,6 +3272,16 @@ static void test_select(void)
     ok(ret == 1, "select returned %d\n", ret);
     ok(FD_ISSET(fdWrite, &writefds), "fdWrite socket is not in the set\n");
 
+    /* select the same socket twice */
+    writefds.fd_count = 2;
+    writefds.fd_array[0] = fdWrite;
+    writefds.fd_array[1] = fdWrite;
+    ret = select(0, NULL, &writefds, NULL, &select_timeout);
+    ok(ret == 1, "select returned %d\n", ret);
+    ok(writefds.fd_count == 1, "got count %u\n", writefds.fd_count);
+    ok(writefds.fd_array[0] == fdWrite, "got fd %#Ix\n", writefds.fd_array[0]);
+    ok(writefds.fd_array[1] == fdWrite, "got fd %#Ix\n", writefds.fd_array[1]);
+
     /* tests for overlapping fd_set pointers */
     FD_ZERO(&readfds);
     FD_SET(fdWrite, &readfds);
@@ -3329,15 +3339,32 @@ static void test_select(void)
 
     page_pair = VirtualAlloc(NULL, 0x1000 * 2, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     VirtualProtect(page_pair + 0x1000, 0x1000, PAGE_NOACCESS, &old_protect);
-    alloc_readfds = (fd_set *)((page_pair + 0x1000) - offsetof(fd_set, fd_array[1]));
-    alloc_readfds->fd_count = 1;
-    alloc_readfds->fd_array[0] = fdRead;
-    ret = select(fdRead+1, alloc_readfds, NULL, NULL, &select_timeout);
+    alloc_fds = (fd_set *)((page_pair + 0x1000) - offsetof(fd_set, fd_array[1]));
+    alloc_fds->fd_count = 1;
+    alloc_fds->fd_array[0] = fdRead;
+    ret = select(fdRead+1, alloc_fds, NULL, NULL, &select_timeout);
     ok(ret == 1, "select returned %d\n", ret);
     VirtualFree(page_pair, 0, MEM_RELEASE);
 
     closesocket(fdRead);
     closesocket(fdWrite);
+
+    alloc_fds = malloc(offsetof(fd_set, fd_array[ARRAY_SIZE(sockets)]));
+    alloc_fds->fd_count = ARRAY_SIZE(sockets);
+    for (i = 0; i < ARRAY_SIZE(sockets); i += 2)
+    {
+        tcp_socketpair(&sockets[i], &sockets[i + 1]);
+        alloc_fds->fd_array[i] = sockets[i];
+        alloc_fds->fd_array[i + 1] = sockets[i + 1];
+    }
+    ret = select(0, NULL, alloc_fds, NULL, &select_timeout);
+    ok(ret == ARRAY_SIZE(sockets), "got %d\n", ret);
+    for (i = 0; i < ARRAY_SIZE(sockets); ++i)
+    {
+        ok(alloc_fds->fd_array[i] == sockets[i], "got socket %#Ix at index %u\n", alloc_fds->fd_array[i], i);
+        closesocket(sockets[i]);
+    }
+    free(alloc_fds);
 
     /* select() works in 3 distinct states:
      * - to check if a connection attempt ended with success or error;
@@ -5137,6 +5164,37 @@ static void test_accept_events(struct event_test_ctx *ctx)
 
     select_events(ctx, listener, FD_CONNECT | FD_READ | FD_OOB | FD_ACCEPT);
     check_events(ctx, 0, 0, 200);
+
+    closesocket(server);
+    closesocket(client);
+
+    closesocket(listener);
+
+    /* The socket returned from accept() inherits the same parameters. */
+
+    listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ok(listener != -1, "failed to create socket, error %u\n", WSAGetLastError());
+    ret = bind(listener, (const struct sockaddr *)&addr, sizeof(addr));
+    ok(!ret, "failed to bind, error %u\n", WSAGetLastError());
+    len = sizeof(destaddr);
+    ret = getsockname(listener, (struct sockaddr *)&destaddr, &len);
+    ok(!ret, "failed to get address, error %u\n", WSAGetLastError());
+    ret = listen(listener, 2);
+    ok(!ret, "failed to listen, error %u\n", WSAGetLastError());
+
+    client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ok(client != -1, "failed to create socket, error %u\n", WSAGetLastError());
+    ret = connect(client, (struct sockaddr *)&destaddr, sizeof(destaddr));
+    ok(!ret, "failed to connect, error %u\n", WSAGetLastError());
+
+    select_events(ctx, listener, FD_CONNECT | FD_READ | FD_OOB | FD_ACCEPT | FD_WRITE);
+    check_events(ctx, FD_ACCEPT, 0, 200);
+
+    server = accept(listener, NULL, NULL);
+    ok(server != -1, "failed to accept, error %u\n", WSAGetLastError());
+    ctx->socket = server;
+    check_events(ctx, FD_WRITE, 0, 200);
+    check_events(ctx, 0, 0, 0);
 
     closesocket(server);
     closesocket(client);

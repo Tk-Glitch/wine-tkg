@@ -81,6 +81,7 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winnt.h"
+#include "winioctl.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "unix_private.h"
@@ -127,6 +128,7 @@ timeout_t server_start_time = 0;  /* time of server startup */
 
 sigset_t server_block_set;  /* signals to block during server calls */
 static int fd_socket = -1;  /* socket to exchange file descriptors with the server */
+static int initial_cwd = -1;
 static pid_t server_pid;
 pthread_mutex_t fd_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -1270,15 +1272,14 @@ static void server_connect_error( const char *serverdir )
  *           server_connect
  *
  * Attempt to connect to an existing server socket.
- * We need to be in the server directory already.
  */
 static int server_connect(void)
 {
     struct sockaddr_un addr;
     struct stat st;
-    int s, slen, retry, fd_cwd;
+    int s, slen, retry;
 
-    fd_cwd = setup_config_dir();
+    initial_cwd = setup_config_dir();
 
     /* chdir to the server directory */
     if (chdir( server_dir ) == -1)
@@ -1332,12 +1333,7 @@ static int server_connect(void)
 #endif
         if (connect( s, (struct sockaddr *)&addr, slen ) != -1)
         {
-            /* switch back to the starting directory */
-            if (fd_cwd != -1)
-            {
-                fchdir( fd_cwd );
-                close( fd_cwd );
-            }
+            fchdir( initial_cwd );  /* switch back to the starting directory */
             fcntl( s, F_SETFD, FD_CLOEXEC );
             return s;
         }
@@ -1600,16 +1596,12 @@ void server_init_process_done(void)
     void *entry, *teb;
     struct cpu_topology_override *cpu_override = get_cpu_topology_override();
     NTSTATUS status;
-    int suspend, needs_close, unixdir;
+    int suspend;
+    FILE_FS_DEVICE_INFORMATION info;
 
-    if (peb->ProcessParameters->CurrentDirectory.Handle &&
-        !server_get_unix_fd( peb->ProcessParameters->CurrentDirectory.Handle,
-                             FILE_TRAVERSE, &unixdir, &needs_close, NULL, NULL ))
-    {
-        fchdir( unixdir );
-        if (needs_close) close( unixdir );
-    }
-    else chdir( "/" ); /* avoid locking removable devices */
+    if (!get_device_info( initial_cwd, &info ) && (info.Characteristics & FILE_REMOVABLE_MEDIA))
+        chdir( "/" );
+    close( initial_cwd );
 
 #ifdef __APPLE__
     send_server_task_port();

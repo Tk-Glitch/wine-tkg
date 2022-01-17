@@ -3136,7 +3136,7 @@ BOOL CDECL X11DRV_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO 
     RECT rect, src_rect;
     HDC hdc = 0;
     HBITMAP dib;
-    BOOL ret = FALSE;
+    BOOL mapped, ret = FALSE;
 
     if (!(data = get_win_data( hwnd ))) return FALSE;
 
@@ -3161,7 +3161,17 @@ BOOL CDECL X11DRV_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO 
                             (info->dwFlags & ULW_ALPHA) ? info->pblend->SourceConstantAlpha : 0xff );
 
     if (surface) window_surface_add_ref( surface );
+    mapped = data->mapped;
     release_win_data( data );
+
+    /* layered windows are mapped only once their attributes are set */
+    if (!mapped)
+    {
+        DWORD style = GetWindowLongW( hwnd, GWL_STYLE );
+
+        if ((style & WS_VISIBLE) && ((style & WS_MINIMIZE) || is_window_rect_mapped( window_rect )))
+            map_window( hwnd, style );
+    }
 
     if (!surface) return FALSE;
     if (!info->hdcSrc)

@@ -724,6 +724,7 @@ static void complete_async_accept( struct sock *sock, struct accept_req *req )
         handle = alloc_handle_no_access_check( async_get_thread( async )->process, &acceptsock->obj,
                                                GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, OBJ_INHERIT );
         acceptsock->wparam = handle;
+        sock_reselect( acceptsock );
         release_object( acceptsock );
         if (!handle)
         {
@@ -2176,6 +2177,7 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         handle = alloc_handle( current->process, &acceptsock->obj,
                                GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, OBJ_INHERIT );
         acceptsock->wparam = handle;
+        sock_reselect( acceptsock );
         release_object( acceptsock );
         set_reply_data( &handle, sizeof(handle) );
         return;
