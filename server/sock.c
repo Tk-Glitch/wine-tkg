@@ -2545,6 +2545,11 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         sock->nonblocking = 1;
 
         sock_reselect( sock );
+        /* Explicitly wake the socket up if the mask causes it to become
+         * signaled. Note that reselecting isn't enough, since we might already
+         * have had events recorded in sock->reported_events and we don't want
+         * to select for them again. */
+        sock_wake_up( sock );
 
         return;
     }
@@ -2975,6 +2980,9 @@ static int poll_single_socket( struct sock *sock, int mask )
     pollfd.events = poll_flags_from_afd( sock, mask );
     if (pollfd.events < 0 || poll( &pollfd, 1, 0 ) < 0)
         return 0;
+
+    if (sock->state == SOCK_CONNECTING && (pollfd.revents & (POLLERR | POLLHUP)))
+        pollfd.revents &= ~POLLOUT;
 
     if ((mask & AFD_POLL_HUP) && (pollfd.revents & POLLIN) && sock->type == WS_SOCK_STREAM)
     {

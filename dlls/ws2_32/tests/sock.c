@@ -5133,6 +5133,41 @@ static void test_accept_events(struct event_test_ctx *ctx)
     closesocket(server);
     closesocket(client);
 
+    /* As above, but select on a subset containing FD_ACCEPT first. */
+
+    if (!ctx->is_message)
+    {
+        select_events(ctx, listener, FD_CONNECT | FD_READ | FD_OOB | FD_ACCEPT);
+
+        client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        ok(client != -1, "failed to create socket, error %u\n", WSAGetLastError());
+        ret = connect(client, (struct sockaddr *)&destaddr, sizeof(destaddr));
+        ok(!ret, "failed to connect, error %u\n", WSAGetLastError());
+
+        ret = WaitForSingleObject(ctx->event, 200);
+        ok(!ret, "wait timed out\n");
+
+        select_events(ctx, listener, FD_CONNECT | FD_READ | FD_OOB);
+        ret = WaitForSingleObject(ctx->event, 0);
+        ok(!ret, "wait timed out\n");
+
+        ResetEvent(ctx->event);
+
+        select_events(ctx, listener, FD_CONNECT | FD_READ | FD_OOB);
+        ret = WaitForSingleObject(ctx->event, 0);
+        ok(ret == WAIT_TIMEOUT, "expected timeout\n");
+
+        select_events(ctx, listener, FD_CONNECT | FD_READ | FD_OOB | FD_ACCEPT);
+        ret = WaitForSingleObject(ctx->event, 0);
+        ok(!ret, "wait timed out\n");
+        check_events(ctx, FD_ACCEPT, 0, 0);
+
+        server = accept(listener, NULL, NULL);
+        ok(server != -1, "failed to accept, error %u\n", WSAGetLastError());
+        closesocket(server);
+        closesocket(client);
+    }
+
     /* As above, but select on a subset not containing FD_ACCEPT first. */
 
     select_events(ctx, listener, FD_CONNECT | FD_READ | FD_OOB);
@@ -6795,7 +6830,7 @@ static void test_WSAPoll(void)
         fds[0].events = POLLRDNORM | POLLRDBAND | POLLWRNORM;
         fds[0].revents = 0xdead;
         ret = pWSAPoll(fds, 1, 10000);
-        todo_wine ok(ret == 1, "got %d\n", ret);
+        ok(ret == 1, "got %d\n", ret);
         todo_wine ok(fds[0].revents == (POLLWRNORM | POLLHUP | POLLERR), "got events %#x\n", fds[0].revents);
 
         len = sizeof(err);
@@ -11451,6 +11486,57 @@ static void test_nonblocking_async_recv(void)
     CloseHandle(overlapped.hEvent);
 }
 
+static void test_simultaneous_async_recv(void)
+{
+    SOCKET client, server;
+    OVERLAPPED overlappeds[2] = {{0}};
+    HANDLE events[2];
+    WSABUF wsabufs[2];
+    DWORD flags[2] = {0};
+    size_t num_io = 2, stride = 16, i;
+    char resbuf[32] = "";
+    static const char msgstr[32] = "-- Lorem ipsum dolor sit amet -";
+    int ret;
+
+    for (i = 0; i < num_io; i++) events[i] = CreateEventW(NULL, TRUE, FALSE, NULL);
+
+    tcp_socketpair(&client, &server);
+
+    for (i = 0; i < num_io; i++)
+    {
+        wsabufs[i].buf = resbuf + i * stride;
+        wsabufs[i].len = stride;
+        overlappeds[i].hEvent = events[i];
+        ret = WSARecv(client, &wsabufs[i], 1, NULL, &flags[i], &overlappeds[i], NULL);
+        ok(ret == -1, "got %d\n", ret);
+        ok(WSAGetLastError() == ERROR_IO_PENDING, "got error %u\n", WSAGetLastError());
+    }
+
+    ret = send(server, msgstr, sizeof(msgstr), 0);
+    ok(ret == sizeof(msgstr), "got %d\n", ret);
+
+    for (i = 0; i < num_io; i++)
+    {
+        const void *expect = msgstr + i * stride;
+        const void *actual = resbuf + i * stride;
+        DWORD size;
+
+        ret = WaitForSingleObject(events[i], 1000);
+        ok(!ret, "wait timed out\n");
+
+        size = 0;
+        ret = GetOverlappedResult((HANDLE)client, &overlappeds[i], &size, FALSE);
+        ok(ret, "got error %u\n", GetLastError());
+        ok(size == stride, "got size %u\n", size);
+        ok(!memcmp(expect, actual, stride), "expected %s, got %s\n", debugstr_an(expect, stride), debugstr_an(actual, stride));
+    }
+
+    closesocket(client);
+    closesocket(server);
+
+    for (i = 0; i < num_io; i++) CloseHandle(events[i]);
+}
+
 static void test_empty_recv(void)
 {
     OVERLAPPED overlapped = {0};
@@ -12009,6 +12095,7 @@ START_TEST( sock )
     test_connecting_socket();
     test_WSAGetOverlappedResult();
     test_nonblocking_async_recv();
+    test_simultaneous_async_recv();
     test_empty_recv();
     test_timeout();
 

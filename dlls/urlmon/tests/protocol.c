@@ -161,7 +161,7 @@ static DWORD prot_read, filter_state, http_post_test, thread_id;
 static BOOL security_problem, test_async_req, impl_protex;
 static BOOL async_read_pending, mimefilter_test, direct_read, wait_for_switch, emulate_prot, short_read, test_abort;
 static BOOL empty_file, no_mime, bind_from_cache, file_with_hash, reuse_protocol_thread;
-static BOOL no_aggregation;
+static BOOL no_aggregation, result_from_lock;
 
 enum {
     STATE_CONNECTING,
@@ -254,7 +254,7 @@ static ULONG WINAPI HttpSecurity_Release(IHttpSecurity *iface)
 
 static  HRESULT WINAPI HttpSecurity_GetWindow(IHttpSecurity* iface, REFGUID rguidReason, HWND *phwnd)
 {
-    trace("HttpSecurity_GetWindow\n");
+    if(winetest_debug > 1) trace("HttpSecurity_GetWindow\n");
 
     return S_FALSE;
 }
@@ -466,13 +466,13 @@ static HRESULT WINAPI ServiceProvider_QueryService(IServiceProvider *iface, REFG
     }
 
     if(IsEqualGUID(&IID_IGetBindHandle, guidService)) {
-        trace("QueryService(IID_IGetBindHandle)\n");
+        if(winetest_debug > 1) trace("QueryService(IID_IGetBindHandle)\n");
         *ppv = NULL;
         return E_NOINTERFACE;
     }
 
     if(IsEqualGUID(&IID_IWindowForBindingUI, guidService)) {
-        trace("QueryService(IID_IWindowForBindingUI)\n");
+        if(winetest_debug > 1) trace("QueryService(IID_IWindowForBindingUI)\n");
         *ppv = NULL;
         return E_NOINTERFACE;
     }
@@ -642,7 +642,7 @@ static void call_continue(PROTOCOLDATA *protocol_data)
     HRESULT hres;
 
     if (winetest_debug > 1)
-        trace("continue in state %d\n", state);
+        if(winetest_debug > 1) trace("continue in state %d\n", state);
 
     if(state == STATE_CONNECTING) {
         if(tested_protocol == HTTP_TEST || tested_protocol == HTTPS_TEST || tested_protocol == FTP_TEST) {
@@ -949,10 +949,10 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
         ok(!lstrcmpW(szStatusText, pjpegW), "szStatusText = %s\n", wine_dbgstr_w(szStatusText));
         break;
     case BINDSTATUS_RESERVED_7:
-        trace("BINDSTATUS_RESERVED_7\n");
+        if(winetest_debug > 1) trace("BINDSTATUS_RESERVED_7\n");
         break;
     case BINDSTATUS_RESERVED_8:
-        trace("BINDSTATUS_RESERVED_8\n");
+        if(winetest_debug > 1) trace("BINDSTATUS_RESERVED_8\n");
         break;
     default:
         ok(0, "Unexpected status %d (%d)\n", ulStatusCode, ulStatusCode-BINDSTATUS_LAST);
@@ -1166,6 +1166,16 @@ static HRESULT WINAPI ProtocolSink_ReportData(IInternetProtocolSink *iface, DWOR
                     CHECK_CALLED(Read);
             }while(hres == S_OK);
         }
+    }
+
+    if(result_from_lock) {
+        SET_EXPECT(LockRequest);
+        hres = IInternetProtocol_LockRequest(binding_protocol, 0);
+        ok(hres == S_OK, "LockRequest failed: %08x\n", hres);
+        CHECK_CALLED(LockRequest);
+
+        /* ReportResult is called before ReportData returns */
+        SET_EXPECT(ReportResult);
     }
 
     rec_depth--;
@@ -1911,6 +1921,12 @@ static void protocol_start(IInternetProtocolSink *pOIProtSink, IInternetBindInfo
     else
         CHECK_CALLED(ReportData);
 
+    if(result_from_lock) {
+        /* set in ProtocolSink_ReportData */
+        CHECK_CALLED(ReportResult);
+        return;
+    }
+
     if(tested_protocol == ITS_TEST) {
         SET_EXPECT(ReportData);
         hres = IInternetProtocolSink_ReportProgress(pOIProtSink, BINDSTATUS_BEGINDOWNLOADDATA, NULL);
@@ -2202,6 +2218,11 @@ static HRESULT WINAPI ProtocolEmul_LockRequest(IInternetProtocolEx *iface, DWORD
 {
     CHECK_EXPECT(LockRequest);
     ok(dwOptions == 0, "dwOptions=%x\n", dwOptions);
+    if(result_from_lock) {
+        HRESULT hres;
+        hres = IInternetProtocolSink_ReportResult(binding_sink, S_OK, ERROR_SUCCESS, NULL);
+        ok(hres == S_OK, "ReportResult failed: %08x, expected E_FAIL\n", hres);
+    }
     return S_OK;
 }
 
@@ -2249,33 +2270,33 @@ static HRESULT WINAPI ProtocolUnk_QueryInterface(IUnknown *iface, REFIID riid, v
     Protocol *This = impl_from_IUnknown(iface);
 
     if(IsEqualGUID(&IID_IUnknown, riid)) {
-        trace("QI(IUnknown)\n");
+        if(winetest_debug > 1) trace("QI(IUnknown)\n");
         *ppv = &This->IUnknown_inner;
     }else if(IsEqualGUID(&IID_IInternetProtocol, riid)) {
-        trace("QI(InternetProtocol)\n");
+        if(winetest_debug > 1) trace("QI(InternetProtocol)\n");
         *ppv = &This->IInternetProtocolEx_iface;
     }else if(IsEqualGUID(&IID_IInternetProtocolEx, riid)) {
-        trace("QI(InternetProtocolEx)\n");
+        if(winetest_debug > 1) trace("QI(InternetProtocolEx)\n");
         if(!impl_protex) {
             *ppv = NULL;
             return E_NOINTERFACE;
         }
         *ppv = &This->IInternetProtocolEx_iface;
     }else if(IsEqualGUID(&IID_IInternetPriority, riid)) {
-        trace("QI(InternetPriority)\n");
+        if(winetest_debug > 1) trace("QI(InternetPriority)\n");
         *ppv = &This->IInternetPriority_iface;
     }else if(IsEqualGUID(&IID_IWinInetInfo, riid)) {
-        trace("QI(IWinInetInfo)\n");
+        if(winetest_debug > 1) trace("QI(IWinInetInfo)\n");
         CHECK_EXPECT(QueryInterface_IWinInetInfo);
         *ppv = NULL;
         return E_NOINTERFACE;
     }else if(IsEqualGUID(&IID_IWinInetHttpInfo, riid)) {
-        trace("QI(IWinInetHttpInfo)\n");
+        if(winetest_debug > 1) trace("QI(IWinInetHttpInfo)\n");
         CHECK_EXPECT(QueryInterface_IWinInetHttpInfo);
         *ppv = NULL;
         return E_NOINTERFACE;
     }else if(IsEqualGUID(&IID_undocumentedIE10, riid)) {
-        trace("QI(%s)\n", wine_dbgstr_guid(riid));
+        if(winetest_debug > 1) trace("QI(%s)\n", wine_dbgstr_guid(riid));
         *ppv = NULL;
         return E_NOINTERFACE;
     }else {
@@ -2688,6 +2709,7 @@ static IClassFactory mimefilter_cf = { &MimeFilterCFVtbl };
 #define TEST_NOMIME      0x2000
 #define TEST_FROMCACHE   0x4000
 #define TEST_DISABLEAUTOREDIRECT  0x8000
+#define TEST_RESULTFROMLOCK      0x10000
 
 static void register_filter(BOOL do_register)
 {
@@ -2744,6 +2766,7 @@ static void init_test(int prot, DWORD flags)
     impl_protex = (flags & TEST_IMPLPROTEX) != 0;
     empty_file = (flags & TEST_EMPTY) != 0;
     bind_from_cache = (flags & TEST_FROMCACHE) != 0;
+    result_from_lock = (flags & TEST_RESULTFROMLOCK) != 0;
     file_with_hash = FALSE;
     security_problem = FALSE;
     reuse_protocol_thread = FALSE;
@@ -3874,11 +3897,9 @@ static void test_CreateBinding(void)
 
     ok(obj_refcount(protocol) == 4, "wrong protocol refcount %d\n", obj_refcount(protocol));
 
-    trace("Start >\n");
     expect_hrResult = S_OK;
     hres = IInternetProtocol_Start(protocol, test_url, &protocol_sink, &bind_info, 0, 0);
     ok(hres == S_OK, "Start failed: %08x\n", hres);
-    trace("Start <\n");
 
     CHECK_CALLED(QueryService_InternetProtocol);
 
@@ -4133,16 +4154,18 @@ static void test_binding(int prot, DWORD grf_pi, DWORD test_flags)
             CHECK_CALLED(ReportData); /* Set in ReportResult */
         ok( WaitForSingleObject(event_complete, 90000) == WAIT_OBJECT_0, "wait timed out\n" );
     }else {
-        if(mimefilter_test)
-            SET_EXPECT(MimeFilter_LockRequest);
-        else
-            SET_EXPECT(LockRequest);
-        hres = IInternetProtocol_LockRequest(protocol, 0);
-        ok(hres == S_OK, "LockRequest failed: %08x\n", hres);
-        if(mimefilter_test)
-            CHECK_CALLED(MimeFilter_LockRequest);
-        else
-            CHECK_CALLED(LockRequest);
+        if(!result_from_lock) {
+            if(mimefilter_test)
+                SET_EXPECT(MimeFilter_LockRequest);
+            else
+                SET_EXPECT(LockRequest);
+            hres = IInternetProtocol_LockRequest(protocol, 0);
+            ok(hres == S_OK, "LockRequest failed: %08x\n", hres);
+            if(mimefilter_test)
+                CHECK_CALLED(MimeFilter_LockRequest);
+            else
+                CHECK_CALLED(LockRequest);
+        }
 
         if(mimefilter_test)
             SET_EXPECT(MimeFilter_UnlockRequest);
@@ -4286,7 +4309,7 @@ START_TEST(protocol)
     test_CreateBinding();
     no_aggregation = FALSE;
 
-    bindf &= ~BINDF_FROMURLMON;
+    bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_NOWRITECACHE | BINDF_PULLDATA;
     trace("Testing file binding (mime verification, emulate prot)...\n");
     test_binding(FILE_TEST, PI_MIMEVERIFICATION, TEST_EMULATEPROT);
     trace("Testing http binding (mime verification, emulate prot)...\n");
@@ -4309,6 +4332,8 @@ START_TEST(protocol)
     test_binding(HTTP_TEST, PI_MIMEVERIFICATION, TEST_EMULATEPROT|TEST_DIRECT_READ);
     trace("Testing http binding (mime verification, emulate prot, abort)...\n");
     test_binding(HTTP_TEST, PI_MIMEVERIFICATION, TEST_EMULATEPROT|TEST_ABORT);
+    trace("Testing its binding (mime verification, emulate prot, apartment thread)...\n");
+    test_binding(ITS_TEST, PI_MIMEVERIFICATION | PI_APARTMENTTHREADED, TEST_EMULATEPROT | TEST_RESULTFROMLOCK);
     if(pCreateUri) {
         trace("Testing file binding (use IUri, mime verification, emulate prot)...\n");
         test_binding(FILE_TEST, PI_MIMEVERIFICATION, TEST_EMULATEPROT|TEST_USEIURI);

@@ -108,6 +108,7 @@ static const char so_dir[] = "/aarch64-unix";
 static const char so_dir[] = "";
 #endif
 
+void     (WINAPI *pDbgUiRemoteBreakin)( void *arg ) = NULL;
 NTSTATUS (WINAPI *pKiRaiseUserExceptionDispatcher)(void) = NULL;
 NTSTATUS (WINAPI *pKiUserExceptionDispatcher)(EXCEPTION_RECORD*,CONTEXT*) = NULL;
 void     (WINAPI *pKiUserApcDispatcher)(CONTEXT*,ULONG_PTR,ULONG_PTR,ULONG_PTR,PNTAPCFUNC) = NULL;
@@ -1107,6 +1108,7 @@ static void load_ntdll_functions( HMODULE module )
     if (!(p##name = (void *)find_named_export( module, ntdll_exports, #name ))) \
         ERR( "%s not found\n", #name )
 
+    GET_FUNC( DbgUiRemoteBreakin );
     GET_FUNC( KiRaiseUserExceptionDispatcher );
     GET_FUNC( KiUserExceptionDispatcher );
     GET_FUNC( KiUserApcDispatcher );
