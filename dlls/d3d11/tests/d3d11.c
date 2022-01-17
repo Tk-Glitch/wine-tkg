@@ -4050,8 +4050,10 @@ static void test_create_rendertarget_view(void)
 
     if (!enable_debug_layer)
     {
+        rtview = (void *)0xdeadbeef;
         hr = ID3D11Device_CreateRenderTargetView(device, NULL, &rtv_desc, &rtview);
         ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        ok(!rtview, "Unexpected pointer %p.\n", rtview);
     }
 
     expected_refcount = get_refcount(device) + 1;
@@ -4168,8 +4170,10 @@ static void test_create_rendertarget_view(void)
         }
 
         get_rtv_desc(&rtv_desc, &invalid_desc_tests[i].rtv_desc);
+        rtview = (void *)0xdeadbeef;
         hr = ID3D11Device_CreateRenderTargetView(device, texture, &rtv_desc, &rtview);
         ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!rtview, "Unexpected pointer %p.\n", rtview);
 
         ID3D11Resource_Release(texture);
     }
@@ -16525,8 +16529,7 @@ static void test_clear_image_unordered_access_view(void)
     {
         {D3D11_RESOURCE_DIMENSION_TEXTURE2D, D3D11_UAV_DIMENSION_TEXTURE2D,      FALSE},
         {D3D11_RESOURCE_DIMENSION_TEXTURE2D, D3D11_UAV_DIMENSION_TEXTURE2DARRAY, TRUE },
-        /* Expected behaviour with partial layer coverage is unclear. */
-        {D3D11_RESOURCE_DIMENSION_TEXTURE3D, D3D11_UAV_DIMENSION_TEXTURE3D,      FALSE},
+        {D3D11_RESOURCE_DIMENSION_TEXTURE3D, D3D11_UAV_DIMENSION_TEXTURE3D,      TRUE },
     };
 
     if (!init_test_context(&test_context, NULL))
@@ -16545,13 +16548,15 @@ static void test_clear_image_unordered_access_view(void)
     {
         for (i = 0; i < ARRAY_SIZE(tests); ++i)
         {
-            winetest_push_context("Dim %u, Test %u", d, i);
-
             if (tests[i].image_layers > 1 && !uav_dimensions[d].is_layered)
-            {
-                winetest_pop_context();
                 continue;
-            }
+
+            /* Expected behaviour with partial layer coverage is unclear. */
+            if (uav_dimensions[d].view_dim == D3D11_UAV_DIMENSION_TEXTURE3D
+                    && tests[i].image_layers != tests[i].layer_count)
+                continue;
+
+            winetest_push_context("Dim %u, Test %u", d, i);
 
             resource_desc.dimension = uav_dimensions[d].resource_dim;
             resource_desc.depth_or_array_size = tests[i].image_layers;
@@ -33997,7 +34002,6 @@ START_TEST(d3d11)
     queue_test(test_scissor);
     queue_test(test_clear_state);
     queue_test(test_il_append_aligned);
-    queue_test(test_instanced_draw);
     queue_test(test_vertex_id);
     queue_test(test_fragment_coords);
     queue_test(test_initial_texture_data);
@@ -34085,7 +34089,6 @@ START_TEST(d3d11)
             test_compressed_format_compatibility);
     queue_test(test_clip_distance);
     queue_test(test_combined_clip_and_cull_distances);
-    queue_test(test_generate_mips);
     queue_test(test_alpha_to_coverage);
     queue_test(test_unbound_multisample_texture);
     queue_test(test_multiple_viewports);
@@ -34112,4 +34115,10 @@ START_TEST(d3d11)
     queue_test(test_dynamic_map_synchronization);
 
     run_queued_tests();
+
+    /* There should be no reason these tests can't be run in parallel with the
+     * others, yet they randomly fail or crash when doing so.
+     * (Radeon 560, Windows 10) */
+    test_instanced_draw();
+    test_generate_mips();
 }

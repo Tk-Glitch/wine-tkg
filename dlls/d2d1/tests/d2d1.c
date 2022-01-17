@@ -1248,6 +1248,7 @@ static void geometry_sink_check_(unsigned int line, const struct geometry_sink *
     const struct expected_geometry_figure *expected_figure;
     const struct geometry_figure *figure;
     unsigned int i, j;
+    unsigned int segment_count;
     BOOL match;
 
     ok_(__FILE__, line)(sink->fill_mode == fill_mode,
@@ -1276,7 +1277,10 @@ static void geometry_sink_check_(unsigned int line, const struct geometry_sink *
                 "Got unexpected figure %u segment count %u, expected %u.\n",
                 i, figure->segment_count, expected_figure->segment_count);
 
-        for (j = 0; j < figure->segment_count; ++j)
+        segment_count = expected_figure->segment_count < figure->segment_count ?
+            expected_figure->segment_count : figure->segment_count;
+
+        for (j = 0; j < segment_count; ++j)
         {
             expected_segment = &expected_figure->segments[j];
             segment = &figure->segments[j];
@@ -1312,6 +1316,44 @@ static void geometry_sink_check_(unsigned int line, const struct geometry_sink *
                             expected_segment->u.bezier.point1.x, expected_segment->u.bezier.point1.y,
                             expected_segment->u.bezier.point2.x, expected_segment->u.bezier.point2.y,
                             expected_segment->u.bezier.point3.x, expected_segment->u.bezier.point3.y);
+                    break;
+            }
+        }
+
+        for (j = segment_count; j < expected_figure->segment_count; ++j)
+        {
+            segment = &expected_figure->segments[j];
+            switch (segment->type)
+            {
+                case SEGMENT_LINE:
+                    ok_(__FILE__, line)(FALSE, "Missing figure %u segment %u {%.8e, %.8e}.\n",
+                            i, j, segment->u.line.x, segment->u.line.y);
+                    break;
+                case SEGMENT_BEZIER:
+                    ok_(__FILE__, line)(FALSE, "Missing figure %u segment %u "
+                            "{%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}\n",
+                            i, j, segment->u.bezier.point1.x, segment->u.bezier.point1.y,
+                            segment->u.bezier.point2.x, segment->u.bezier.point2.y,
+                            segment->u.bezier.point3.x, segment->u.bezier.point3.y);
+                    break;
+            }
+        }
+
+        for (j = segment_count; j < figure->segment_count; ++j)
+        {
+            segment = &figure->segments[j];
+            switch (segment->type)
+            {
+                case SEGMENT_LINE:
+                    ok_(__FILE__, line)(FALSE, "Got unexpected figure %u segment %u {%.8e, %.8e}.\n",
+                            i, j, segment->u.line.x, segment->u.line.y);
+                    break;
+                case SEGMENT_BEZIER:
+                    ok_(__FILE__, line)(FALSE, "Got unexpected figure %u segment %u "
+                            "{%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}\n",
+                            i, j, segment->u.bezier.point1.x, segment->u.bezier.point1.y,
+                            segment->u.bezier.point2.x, segment->u.bezier.point2.y,
+                            segment->u.bezier.point3.x, segment->u.bezier.point3.y);
                     break;
             }
         }
@@ -3041,6 +3083,23 @@ static void test_path_geometry(BOOL d3d11)
         /* Figure 28. */
         {SEGMENT_LINE,   {{{ 75.0f, 300.0f}}}},
         {SEGMENT_LINE,   {{{  5.0f, 300.0f}}}},
+        /* Figure 29. */
+        {SEGMENT_LINE,   {{{ 40.0f, 100.0f}}}},
+        {SEGMENT_BEZIER, {{{4.00000000e+01f, 7.66666666e+01f},
+                           {3.33333333e+01f, 7.00000000e+01f},
+                           {2.00000000e+01f, 8.00000000e+01f}}}},
+        {SEGMENT_LINE,   {{{ 60.0f,  40.0f}}}},
+        {SEGMENT_BEZIER, {{{8.33333333e+01f, 4.00000000e+01f},
+                           {9.00000000e+01f, 3.33333333e+01f},
+                           {8.00000000e+01f, 2.00000000e+01f}}}},
+        {SEGMENT_LINE,   {{{140.0f, 160.0f}}}},
+        {SEGMENT_BEZIER, {{{1.16666666e+02f, 1.60000000e+02f},
+                           {1.10000000e+02f, 1.66666666e+02f},
+                           {1.20000000e+02f, 1.80000000e+02f}}}},
+        {SEGMENT_LINE,   {{{170.0f, 110.0f}}}},
+        {SEGMENT_BEZIER, {{{1.70000000e+02f, 1.26666666e+02f},
+                           {1.73333333e+02f, 1.30000000e+02f},
+                           {1.80000000e+02f, 1.20000000e+02f}}}},
     };
     static const struct expected_geometry_figure expected_figures[] =
     {
@@ -3084,6 +3143,11 @@ static void test_path_geometry(BOOL d3d11)
         {D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED, { 20.0f, 612.0f},  8, &expected_segments[164]},
         /* 28 */
         {D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_OPEN,   { 40.0f,  20.0f},  2, &expected_segments[172]},
+        /* 29 */
+        {D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_OPEN,   {  20.0f,  80.0f},  2, &expected_segments[174]},
+        {D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_OPEN,   {  80.0f,  20.0f},  2, &expected_segments[176]},
+        {D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED, { 120.0f, 180.0f},  2, &expected_segments[178]},
+        {D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED, { 180.0f, 120.0f},  2, &expected_segments[180]},
     };
 
     if (!init_test_context(&ctx, d3d11))
@@ -3825,6 +3889,55 @@ static void test_path_geometry(BOOL d3d11)
             NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
     ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[28], 1);
+    geometry_sink_cleanup(&simplify_sink);
+
+    ID2D1PathGeometry_Release(geometry);
+
+    hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    set_point(&point, 20.0f,   80.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    line_to(sink, 40.0f, 100.0f);
+    quadratic_to(sink, 40.0f, 65.0f, 20.0f, 80.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
+
+    set_point(&point, 80.0f,   20.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    line_to(sink, 60.0f, 40.0f);
+    quadratic_to(sink, 95.0f, 40.0f, 80.0f, 20.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
+
+    set_point(&point, 120.0f,  180.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    line_to(sink, 140.0f, 160.0f);
+    quadratic_to(sink, 105.0f, 160.0f, 120.0f, 180.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+
+    set_point(&point, 180.0f,  120.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    line_to(sink, 170.0f, 110.0f);
+    quadratic_to(sink, 170.0f, 135.0f, 180.0f, 120.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+
+    set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
+    hr = ID2D1PathGeometry_GetBounds(geometry, NULL, &rect);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    match = compare_rect(&rect, 20.0f, 20.0f, 180.0f, 180.0f, 0);
+    ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
+            rect.left, rect.top, rect.right, rect.bottom);
+
+    geometry_sink_init(&simplify_sink);
+    hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
+            NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 4, &expected_figures[29], 1);
     geometry_sink_cleanup(&simplify_sink);
 
     ID2D1PathGeometry_Release(geometry);
@@ -6877,6 +6990,45 @@ static void test_draw_geometry(BOOL d3d11)
             "AjqGAjmIAjiIAiECFIkCFAIIBBSKAhQNFIsCFAwUjAIUCxSNAhQKFI4CFAkUjwIUBxWQAhQGFZEC"
             "FAUVkQIUBRWRAhQFFZECFQMVkwIUAxWTAhQDFZMCFAIVlAIVARWVAiqVAimWAimWAiiYAiaZAiaZ"
             "AiWaAiScAiKdAiGeAh+hAhyjAhmuAg3GxgEA");
+    ok(match, "Figure does not match.\n");
+
+    hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    set_point(&point, 20.0f, 80.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
+    quadratic_to(sink, 20.0f, 160.0f,  60.0f, 160.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+
+    set_point(&point, 100.0f, 80.0f);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
+    quadratic_to(sink, 100.0f, 160.0f, 140.0f, 160.0f);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
+
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+
+    ID2D1RenderTarget_BeginDraw(rt);
+    ID2D1RenderTarget_Clear(rt, &color);
+    ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, 10.0f, NULL);
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ID2D1PathGeometry_Release(geometry);
+
+    match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 32,
+            "3iUCngEEnAEGmgEImAEKlgEMlAEOkgEQkAESjgEUjAEWigEYiAEahgEchAEeggEggQEhfyN9JXsn"
+            "eih4KnYUAhZ1FAMWcxQFFnIUBhZwFQcWbxQJFm4UChZsFQsWaxUMFmoVDRZpFQ4WaBUPFmcVEBZm"
+            "FREWZhURFmUVEhZkFhIWZBYSFmQXERZkFxEWZBgQFmQaDhZlGwwWZh0JFmchBBZpOWw2bzN0Lnsn"
+            "2mEA");
+    ok(match, "Figure does not match.\n");
+
+    match = compare_figure(&ctx, 160,   0, 160, 160, 0xff652e89, 32,
+            "njIUjAEUjAEUjAEUjAEUjAEUjQEUjAEUjAEUjAEUjQEUjAEUjAEUjQEUjAEUjQEUjAEVjAEUjQEU"
+            "jAEVjAEVjAEVjAEVjAEVjAEVjAEVjQEVjAEVjAEWjAEWjAEXiwEXiwEYigEaiQEbiAEdhgEhgwEz"
+            "ci53KX4ihwEZ6GEA");
     ok(match, "Figure does not match.\n");
 
     ID2D1SolidColorBrush_Release(brush);

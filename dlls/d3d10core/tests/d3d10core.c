@@ -2939,8 +2939,10 @@ static void test_create_rendertarget_view(void)
 
     if (!enable_debug_layer)
     {
+        rtview = (void *)0xdeadbeef;
         hr = ID3D10Device_CreateRenderTargetView(device, NULL, &rtv_desc, &rtview);
         ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        ok(!rtview, "Unexpected pointer %p.\n", rtview);
     }
 
     expected_refcount = get_refcount(device) + 1;
@@ -3057,8 +3059,10 @@ static void test_create_rendertarget_view(void)
         }
 
         get_rtv_desc(&rtv_desc, &invalid_desc_tests[i].rtv_desc);
+        rtview = (void *)0xdeadbeef;
         hr = ID3D10Device_CreateRenderTargetView(device, texture, &rtv_desc, &rtview);
         ok(hr == E_INVALIDARG, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!rtview, "Unexpected pointer %p.\n", rtview);
 
         ID3D10Resource_Release(texture);
     }
@@ -19264,7 +19268,6 @@ START_TEST(d3d10core)
     queue_test(test_private_data);
     queue_test(test_state_refcounting);
     queue_test(test_il_append_aligned);
-    queue_test(test_instanced_draw);
     queue_test(test_fragment_coords);
     queue_test(test_initial_texture_data);
     queue_test(test_update_subresource);
@@ -19316,7 +19319,6 @@ START_TEST(d3d10core)
     queue_test(test_compressed_format_compatibility);
     queue_test(test_clip_distance);
     queue_test(test_combined_clip_and_cull_distances);
-    queue_test(test_generate_mips);
     queue_test(test_alpha_to_coverage);
     queue_test(test_unbound_multisample_texture);
     queue_test(test_multiple_viewports);
@@ -19335,7 +19337,10 @@ START_TEST(d3d10core)
 
     run_queued_tests();
 
-    /* There should be no reason this test can't be run in parallel with the
-     * others, yet it fails when doing so. (AMD Radeon HD 6310, Windows 7) */
+    /* There should be no reason these tests can't be run in parallel with the
+     * others, yet they randomly fail or crash when doing so.
+     * (AMD Radeon HD 6310, Radeon 560, Windows 7 and Windows 10) */
     test_stream_output_vs();
+    test_instanced_draw();
+    test_generate_mips();
 }

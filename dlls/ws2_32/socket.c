@@ -2409,7 +2409,7 @@ int WINAPI select( int count, fd_set *read_ptr, fd_set *write_ptr,
     }
 
     if (timeout)
-        params->timeout = timeout->tv_sec * -10000000 + timeout->tv_usec * -10;
+        params->timeout = (LONGLONG)timeout->tv_sec * -10000000 + (LONGLONG)timeout->tv_usec * -10;
     else
         params->timeout = TIMEOUT_INFINITE;
 
@@ -2574,7 +2574,7 @@ int WINAPI WSAPoll( WSAPOLLFD *fds, ULONG count, int timeout )
         return SOCKET_ERROR;
     }
 
-    params->timeout = (timeout >= 0 ? timeout * -10000 : TIMEOUT_INFINITE);
+    params->timeout = (timeout >= 0 ? (LONGLONG)timeout * -10000 : TIMEOUT_INFINITE);
 
     for (i = 0; i < count; ++i)
     {
