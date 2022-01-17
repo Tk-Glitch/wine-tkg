@@ -150,7 +150,6 @@ static void diactionformat_wtoa( const DIACTIONFORMATW *in, DIACTIONFORMATA *out
         out->rgoAction[i].guidInstance = in->rgoAction[i].guidInstance;
         out->rgoAction[i].dwObjID = in->rgoAction[i].dwObjID;
         out->rgoAction[i].dwHow = in->rgoAction[i].dwHow;
-        out->rgoAction[i].lptszActionName = 0;
     }
 
     out->guidActionMap = in->guidActionMap;
@@ -830,7 +829,6 @@ static HRESULT WINAPI dinput8_a_ConfigureDevices( IDirectInput8A *iface_a, LPDIC
     HRESULT hr;
     DWORD i;
 
-    if (!callback) return DIERR_INVALIDPARAM;
     if (FAILED(hr = diconfiguredevicesparams_atow( params_a, &params_w ))) return hr;
 
     format_w.dwNumActions = format_a->dwNumActions;
@@ -842,6 +840,7 @@ static HRESULT WINAPI dinput8_a_ConfigureDevices( IDirectInput8A *iface_a, LPDIC
         params_w.lprgFormats = &format_w;
 
         if (SUCCEEDED(hr)) hr = IDirectInput8_ConfigureDevices( iface_w, callback, &params_w, flags, ref );
+        if (SUCCEEDED(hr)) diactionformat_wtoa( &format_w, format_a );
 
         if (!format_w.hInstString)
         {

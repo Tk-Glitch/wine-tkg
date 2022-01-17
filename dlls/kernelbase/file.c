@@ -3172,8 +3172,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CancelIo( HANDLE handle )
 {
     IO_STATUS_BLOCK io;
 
-    NtCancelIoFile( handle, &io );
-    return set_ntstatus( io.u.Status );
+    return set_ntstatus( NtCancelIoFile( handle, &io ) );
 }
 
 
@@ -3184,8 +3183,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CancelIoEx( HANDLE handle, LPOVERLAPPED overlapped
 {
     IO_STATUS_BLOCK io;
 
-    NtCancelIoFileEx( handle, (PIO_STATUS_BLOCK)overlapped, &io );
-    return set_ntstatus( io.u.Status );
+    return set_ntstatus( NtCancelIoFileEx( handle, (PIO_STATUS_BLOCK)overlapped, &io ) );
 }
 
 
