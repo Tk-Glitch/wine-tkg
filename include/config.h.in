@@ -65,6 +65,22 @@
 /* Define to 1 if you have the `epoll_create' function. */
 #undef HAVE_EPOLL_CREATE
 
+/* Define to 1 if you have the `F3DAudioInitialize8' function. */
+#undef HAVE_F3DAUDIOINITIALIZE8
+
+/* Define to 1 if you have the `FAudioCreateReverb9WithCustomAllocatorEXT'
+   function. */
+#undef HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
+
+/* Define to 1 if you have the `FAudioLinkedVersion' function. */
+#undef HAVE_FAUDIOLINKEDVERSION
+
+/* Define to 1 if you have the `FAudio_CommitOperationSet' function. */
+#undef HAVE_FAUDIO_COMMITOPERATIONSET
+
+/* Define to 1 if you have the <FAudio.h> header file. */
+#undef HAVE_FAUDIO_H
+
 /* Define to 1 if you have the <float.h> header file. */
 #undef HAVE_FLOAT_H
 
@@ -205,6 +221,9 @@
 
 /* Define to 1 if you have the <linux/filter.h> header file. */
 #undef HAVE_LINUX_FILTER_H
+
+/* Define to 1 if you have the <linux/futex.h> header file. */
+#undef HAVE_LINUX_FUTEX_H
 
 /* Define if Linux-style gethostbyname_r and gethostbyaddr_r are available */
 #undef HAVE_LINUX_GETHOSTBYNAME_R_6
@@ -840,6 +859,9 @@
 
 /* Define to the soname of the libEGL library. */
 #undef SONAME_LIBEGL
+
+/* Define to the soname of the libFAudio library. */
+#undef SONAME_LIBFAUDIO
 
 /* Define to the soname of the libfontconfig library. */
 #undef SONAME_LIBFONTCONFIG

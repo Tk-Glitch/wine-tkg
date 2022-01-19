@@ -44,28 +44,11 @@
 #include "fsync.h"
 
 #include "pshpack4.h"
-struct futex_wait_block
-{
-    int *addr;
-#if __SIZEOF_POINTER__ == 4
-    int pad;
-#endif
-    int val;
-};
 #include "poppack.h"
 
-static inline int futex_wait_multiple( const struct futex_wait_block *futexes,
-        int count, const struct timespec *timeout )
-{
-    return syscall( __NR_futex, futexes, 31, count, timeout, 0, 0 );
-}
-
-/* futex2 experimental interface */
-
-static long nr_futex2_wake;
-
-#define FUTEX_32 2
-#define FUTEX_SHARED_FLAG 8
+#ifndef __NR_futex_waitv
+#define __NR_futex_waitv 449
+#endif
 
 int do_fsync(void)
 {
@@ -74,29 +57,17 @@ int do_fsync(void)
 
     if (do_fsync_cached == -1)
     {
-        int use_futex2 = 1;
         FILE *f;
-
-        if (getenv( "WINEFSYNC_FUTEX2" ))
-            use_futex2 = atoi( getenv( "WINEFSYNC_FUTEX2" ) );
-
-        if (use_futex2 && (f = fopen( "/sys/kernel/futex2/wake", "r" )))
+        if ((f = fopen( "/sys/kernel/futex2/wait", "r" )))
         {
-            char buffer[13];
-
-            fgets( buffer, sizeof(buffer), f );
-            nr_futex2_wake = atoi( buffer );
             fclose(f);
+            do_fsync_cached = 0;
+            fprintf( stderr, "fsync: old futex2 patches detected, disabling.\n" );
+            return do_fsync_cached;
+        }
 
-            do_fsync_cached = 1;
-        }
-        else
-        {
-            static const struct timespec zero;
-            futex_wait_multiple( NULL, 0, &zero );
-            do_fsync_cached = (errno != ENOSYS);
-        }
-        do_fsync_cached = getenv("WINEFSYNC") && atoi(getenv("WINEFSYNC")) && do_fsync_cached;
+        syscall( __NR_futex_waitv, 0, 0, 0, 0, 0);
+        do_fsync_cached = getenv("WINEFSYNC") && atoi(getenv("WINEFSYNC")) && errno != ENOSYS;
     }
 
     return do_fsync_cached;
@@ -151,10 +122,7 @@ void fsync_init(void)
 
     is_fsync_initialized = 1;
 
-    if (nr_futex2_wake)
-        fprintf( stderr, "futex2: up and running.\n" );
-    else
-        fprintf( stderr, "fsync: up and running.\n" );
+    fprintf( stderr, "fsync: up and running.\n" );
 
     atexit( shm_cleanup );
 }
@@ -355,11 +323,9 @@ struct fsync *create_fsync( struct object *root, const struct unicode_str *name,
 #endif
 }
 
-static inline int futex_wake( int *addr, int count )
+static inline int futex_wake( int *addr, int val )
 {
-    if (nr_futex2_wake)
-        return syscall( nr_futex2_wake, addr, count, FUTEX_32 | FUTEX_SHARED_FLAG );
-    return syscall( __NR_futex, addr, 1, count, NULL, 0, 0 );
+    return syscall( __NR_futex, addr, 1, val, NULL, 0, 0 );
 }
 
 /* shm layout for events or event-like objects. */

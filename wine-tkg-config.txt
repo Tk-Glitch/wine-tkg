@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Mon Jan 17 06:37:18 PM CET 2022 :
+# Last wine-tkg-staging-fsync-git configuration - Wed Jan 19 05:18:01 PM CET 2022 :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 7.0rc6.r0.gb2f75a026f1
-Using wine-staging patchset (version 7.0rc6.r0.g0111d074)
+Wine (plain) version: 7.0.r0.gc7c729c0db7
+Using wine-staging patchset (version 7.0.r0.g2fc92f8b)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -11,8 +11,6 @@ Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
 Applied reverting hotfix staging-fa5989b.mystagingrevert
-Applied reverting hotfix staging-pulseaudio-reverts.mystagingrevert
-Applied hotfix staging-reenable-pulse.mystagingpatch
 Applied hotfix protonify_stg_syscall_emu-009.mystagingpatch
 Applied hotfix 0001-Revert-winegstreamer-Get-rid-of-the-WMReader-typedef.myearlypatch
 Applied hotfix 0002-Revert-wmvcore-Move-the-async-reader-implementation-.myearlypatch
@@ -74,7 +72,6 @@ Applied hotfix 0035-winegstreamer-Don-t-rely-on-max_size-in-unseekable-p.myearly
 Applied hotfix 0036-winegstreamer-Implement-MFT_MESSAGE_COMMAND_FLUSH-fo.myearlypatch
 Applied hotfix 0037-winegstreamer-Default-Frame-size-if-one-isn-t-availa.myearlypatch
 Applied hotfix 0038-mfplat-Stub-out-MFCreateDXGIDeviceManager-to-avoid-t.myearlypatch
-Applied hotfix pulse_reverts-6.myearlypatch
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
@@ -83,7 +80,7 @@ Staging overrides, if any: -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIV
 use_clock_monotonic-staging.patch -- ( Applied clock_monotonic patch )
 fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
-fsync_futex2.patch -- ( Add futex2 support to fsync )
+fsync_futex_waitv.patch -- ( Replace all fsync interfaces with futex_waitv )
 
 valve_proton_fullscreen_hack-staging.patch -- ( Applied Proton fullscreen hack patch (staging) )
 LAA-unix-staging.patch -- ( Applied large address aware override support )
@@ -95,6 +92,7 @@ msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then buil
 josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
 
+Applied reverting hotfix d8be858.myrevert
 Applied hotfix 0004-winevulkan1.mypatch
 Applied hotfix Return_nt_filename_and_resolve_DOS_drive_path.mypatch
 Applied hotfix ef6e33f.mypatch
@@ -105,6 +103,5 @@ Applied your own patch FinalFantasyXVHack.mypatch
 Applied your own patch amdags.mypatch
 Applied your own patch ntdll_Map_top-down_if_dll_characteristics_include_DYNAMIC_BASE.mypatch
 Applied your own patch origin_downloads_e4ca5dbe_revert.mypatch
-Applied your own patch x.mypatch
 
 wine-tkg-staging.patch -- ( Please don't report bugs about this wine build on winehq.org and use https://github.com/Frogging-Family/wine-tkg-git/issues instead. )

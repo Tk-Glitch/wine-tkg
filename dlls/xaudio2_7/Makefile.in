@@ -1,7 +1,10 @@
 EXTRADEFS = -DXAUDIO2_VER=7
 MODULE    = xaudio2_7.dll
-IMPORTS   = $(FAUDIO_PE_LIBS) advapi32 ole32 user32 uuid
-EXTRAINCL = $(FAUDIO_PE_CFLAGS)
+IMPORTS   = advapi32 ole32 user32 uuid
+EXTRALIBS = $(FAUDIO_LIBS)
+EXTRAINCL = $(FAUDIO_CFLAGS)
+
+EXTRADLLFLAGS = -mcygwin
 
 C_SRCS = \
 	compat.c \

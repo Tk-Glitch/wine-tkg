@@ -29,6 +29,7 @@ AC_ARG_WITH(coreaudio, AS_HELP_STRING([--without-coreaudio],[do not use the Core
             [if test "x$withval" = "xno"; then ac_cv_header_CoreAudio_CoreAudio_h=no; fi])
 AC_ARG_WITH(cups,      AS_HELP_STRING([--without-cups],[do not use CUPS]))
 AC_ARG_WITH(dbus,      AS_HELP_STRING([--without-dbus],[do not use DBus (dynamic device support)]))
+AC_ARG_WITH(faudio,    AS_HELP_STRING([--without-faudio],[do not use FAudio (XAudio2 support)]))
 AC_ARG_WITH(float-abi, AS_HELP_STRING([--with-float-abi=abi],[specify the ABI (soft|softfp|hard) for ARM platforms]))
 AC_ARG_WITH(fontconfig,AS_HELP_STRING([--without-fontconfig],[do not use fontconfig]))
 AC_ARG_WITH(freetype,  AS_HELP_STRING([--without-freetype],[do not use the FreeType library]))
@@ -451,6 +452,7 @@ AC_CHECK_HEADERS(\
 	link.h \
 	linux/cdrom.h \
 	linux/filter.h \
+	linux/futex.h \
 	linux/hdreg.h \
 	linux/hidraw.h \
 	linux/input.h \
@@ -1682,6 +1684,21 @@ fi
 WINE_NOTICE_WITH(sdl,[test "x$ac_cv_lib_soname_SDL2" = "x"],
                  [libSDL2 ${notice_platform}development files not found, SDL2 won't be supported.])
 
+dnl **** Check for FAudio ****
+if test "x$with_faudio" != "xno"
+then
+    WINE_PACKAGE_FLAGS(FAUDIO,[FAudio],[-lFAudio],,,
+        [AC_CHECK_HEADERS([FAudio.h],
+            [WINE_CHECK_SONAME(FAudio,FAudioCreate,,,[$FAUDIO_LIBS],[[libFAudio*]])])
+             WINE_CHECK_LIB_FUNCS([FAudio_CommitOperationSet \
+                                   F3DAudioInitialize8 \
+                                   FAudioLinkedVersion \
+                                   FAudioCreateReverb9WithCustomAllocatorEXT], [$FAUDIO_LIBS])
+            ])
+fi
+WINE_NOTICE_WITH(faudio,[test "x$ac_cv_lib_soname_FAudio" = "x"],
+                 [libFAudio ${notice_platform}development files not found, XAudio2 won't be supported.])
+
 dnl **** Check for capi4linux ****
 if test "x$with_capi" != "xno"
 then
@@ -1775,6 +1792,45 @@ fi
 WINE_NOTICE_WITH(openal,[test "x$ac_cv_lib_openal" != xyes],
                  [libopenal ${notice_platform}development files not found (or too old), OpenAL won't be supported.],
                  [enable_openal32])
+
+if test "x$ac_cv_lib_soname_FAudio" = "x"
+then
+    enable_x3daudio1_0=${enable_x3daudio1_0:-no}
+    enable_x3daudio1_1=${enable_x3daudio1_1:-no}
+    enable_x3daudio1_2=${enable_x3daudio1_2:-no}
+    enable_x3daudio1_3=${enable_x3daudio1_3:-no}
+    enable_x3daudio1_4=${enable_x3daudio1_4:-no}
+    enable_x3daudio1_5=${enable_x3daudio1_5:-no}
+    enable_x3daudio1_6=${enable_x3daudio1_6:-no}
+    enable_x3daudio1_7=${enable_x3daudio1_7:-no}
+    enable_xactengine2_0=${enable_xactengine2_0:-no}
+    enable_xactengine2_4=${enable_xactengine2_4:-no}
+    enable_xactengine2_7=${enable_xactengine2_7:-no}
+    enable_xactengine2_9=${enable_xactengine2_9:-no}
+    enable_xactengine3_0=${enable_xactengine3_0:-no}
+    enable_xactengine3_1=${enable_xactengine3_1:-no}
+    enable_xactengine3_2=${enable_xactengine3_2:-no}
+    enable_xactengine3_3=${enable_xactengine3_3:-no}
+    enable_xactengine3_4=${enable_xactengine3_4:-no}
+    enable_xactengine3_5=${enable_xactengine3_5:-no}
+    enable_xactengine3_6=${enable_xactengine3_6:-no}
+    enable_xactengine3_7=${enable_xactengine3_7:-no}
+    enable_xapofx1_1=${enable_xapofx1_1:-no}
+    enable_xapofx1_2=${enable_xapofx1_2:-no}
+    enable_xapofx1_3=${enable_xapofx1_3:-no}
+    enable_xapofx1_4=${enable_xapofx1_4:-no}
+    enable_xapofx1_5=${enable_xapofx1_5:-no}
+    enable_xaudio2_0=${enable_xaudio2_0:-no}
+    enable_xaudio2_1=${enable_xaudio2_1:-no}
+    enable_xaudio2_2=${enable_xaudio2_2:-no}
+    enable_xaudio2_3=${enable_xaudio2_3:-no}
+    enable_xaudio2_4=${enable_xaudio2_4:-no}
+    enable_xaudio2_5=${enable_xaudio2_5:-no}
+    enable_xaudio2_6=${enable_xaudio2_6:-no}
+    enable_xaudio2_7=${enable_xaudio2_7:-no}
+    enable_xaudio2_8=${enable_xaudio2_8:-no}
+    enable_xaudio2_9=${enable_xaudio2_9:-no}
+fi
 
 dnl **** Check for libprocstat ****
 if test "$ac_cv_header_libprocstat_h" = "yes"
@@ -3900,7 +3956,7 @@ dnl Rules for generated source files
 
 WINE_APPEND_RULE(
 [dlls/ntdll/unix/version.c: dummy
-	@version=\`(echo \"wine-7.0rc6.r0.g0111d074\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
+	@version=\`(echo \"wine-7.0.r0.g2fc92f8b\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.rc: dummy
 	@build=\"STRINGTABLE { 1 \\\"\`GIT_DIR=${wine_srcdir}.git git rev-parse HEAD 2>/dev/null\`\\\" }\" && (echo \$\$build | cmp -s - \$[@]) || echo \$\$build >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.nfo:
