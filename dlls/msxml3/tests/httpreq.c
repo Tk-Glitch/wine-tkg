@@ -1948,7 +1948,7 @@ static ULONG WINAPI xhr3_callback_AddRef(IXMLHTTPRequest3Callback *iface)
 {
     struct xhr3_callback *This = xhr3_callback_from_IXMLHTTPRequest3Callback(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
-    trace("(%p)->(%u)\n", This, ref);
+    trace("(%p)->(%lu)\n", This, ref);
     return ref;
 }
 
@@ -1956,7 +1956,7 @@ static ULONG WINAPI xhr3_callback_Release(IXMLHTTPRequest3Callback *iface)
 {
     struct xhr3_callback *This = xhr3_callback_from_IXMLHTTPRequest3Callback(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
-    trace("(%p)->(%u)\n", This, ref);
+    trace("(%p)->(%lu)\n", This, ref);
     if (ref == 0) HeapFree(GetProcessHeap(), 0, This);
     return ref;
 }
@@ -1976,11 +1976,11 @@ static HRESULT WINAPI xhr3_callback_OnHeadersAvailable(IXMLHTTPRequest3Callback 
     WCHAR *header = NULL;
     HRESULT hr;
 
-    trace("(%p)->(%p %d %s)\n", This, request, status, debugstr_w(status_str));
+    trace("(%p)->(%p %lu %s)\n", This, request, status, debugstr_w(status_str));
 
     header = (void *)0xdeadbeef;
     hr = IXMLHTTPRequest2_GetResponseHeader(request, L"Content-Length", &header);
-    trace("Content-Length: %p (%s), hr %#x\n", header, debugstr_w(header), hr);
+    trace("Content-Length: %p (%s), hr %#lx\n", header, debugstr_w(header), hr);
 
     return S_OK;
 }
@@ -2009,23 +2009,23 @@ static HRESULT WINAPI xhr3_callback_OnResponseReceived(IXMLHTTPRequest3Callback 
 
     header = (void *)0xdeadbeef;
     hr = IXMLHTTPRequest2_GetResponseHeader(request, L"Cache-Control", &header);
-    trace("Cache-Control: %p (%s), hr %#x\n", header, debugstr_w(header), hr);
+    trace("Cache-Control: %p (%s), hr %#lx\n", header, debugstr_w(header), hr);
 
     header = (void *)0xdeadbeef;
     hr = IXMLHTTPRequest2_GetResponseHeader(request, L"Expires", &header);
-    trace("Expires: %p (%s), hr %#x\n", header, debugstr_w(header), hr);
+    trace("Expires: %p (%s), hr %#lx\n", header, debugstr_w(header), hr);
 
     header = (void *)0xdeadbeef;
     hr = IXMLHTTPRequest2_GetResponseHeader(request, L"Content-Type", &header);
-    trace("Content-Type: %p (%s), hr %#x\n", header, debugstr_w(header), hr);
+    trace("Content-Type: %p (%s), hr %#lx\n", header, debugstr_w(header), hr);
 
     read_size = 0xdeadbeef;
     hr = ISequentialStream_Read(response, buffer, 214, &read_size);
-    trace("Response: (%d) %s, hr %#x\n", read_size, debugstr_a(buffer), hr);
+    trace("Response: (%ld) %s, hr %#lx\n", read_size, debugstr_a(buffer), hr);
 
     read_size = 0xdeadbeef;
     hr = ISequentialStream_Read(response, buffer, 1, &read_size);
-    trace("Response: (%d) %s, hr %#x\n", read_size, debugstr_a(buffer), hr);
+    trace("Response: (%ld) %s, hr %#lx\n", read_size, debugstr_a(buffer), hr);
 
     HeapFree( GetProcessHeap(), 0, buffer );
     SetEvent(This->event);
@@ -2037,7 +2037,7 @@ static HRESULT WINAPI xhr3_callback_OnError(IXMLHTTPRequest3Callback *iface,
         IXMLHTTPRequest2 *request, HRESULT error)
 {
     struct xhr3_callback *This = xhr3_callback_from_IXMLHTTPRequest3Callback(iface);
-    trace("(%p)->(%p %#x)\n", This, request, error);
+    trace("(%p)->(%p %#lx)\n", This, request, error);
     SetEvent(This->event);
     return S_OK;
 }
@@ -2046,7 +2046,7 @@ static HRESULT WINAPI xhr3_callback_OnServerCertificateReceived(IXMLHTTPRequest3
         IXMLHTTPRequest3 *request, DWORD errors, DWORD chain_size, const XHR_CERT *chain)
 {
     struct xhr3_callback *This = xhr3_callback_from_IXMLHTTPRequest3Callback(iface);
-    trace("(%p)->(%p %u %u %p)\n", This, request, errors, chain_size, chain);
+    trace("(%p)->(%p %lu %lu %p)\n", This, request, errors, chain_size, chain);
     return S_OK;
 }
 
@@ -2054,7 +2054,7 @@ static HRESULT WINAPI xhr3_callback_OnClientCertificateRequested(IXMLHTTPRequest
         IXMLHTTPRequest3 *request, DWORD issuers_size, const WCHAR **issuers)
 {
     struct xhr3_callback *This = xhr3_callback_from_IXMLHTTPRequest3Callback(iface);
-    trace("(%p)->(%p %u %p)\n", This, request, issuers_size, issuers);
+    trace("(%p)->(%p %lu %p)\n", This, request, issuers_size, issuers);
     return S_OK;
 }
 
@@ -2119,7 +2119,7 @@ static ULONG WINAPI xhr2_stream_AddRef(IStream *iface)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
-    trace("(%p)->(%u)\n", This, ref);
+    trace("(%p)->(%lu)\n", This, ref);
     return ref;
 }
 
@@ -2127,7 +2127,7 @@ static ULONG WINAPI xhr2_stream_Release(IStream *iface)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
-    trace("(%p)->(%u)\n", This, ref);
+    trace("(%p)->(%lu)\n", This, ref);
     if (ref == 0)
     {
         IStream_Release(This->stream);
@@ -2140,7 +2140,7 @@ static HRESULT WINAPI xhr2_stream_Read(IStream *iface, void *pv, ULONG cb,
         ULONG *pcbRead)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
-    trace("(%p)->(%p %u %p)\n", This, pv, cb, pcbRead);
+    trace("(%p)->(%p %lu %p)\n", This, pv, cb, pcbRead);
     return IStream_Read(This->stream, pv, cb, pcbRead);
 }
 
@@ -2148,7 +2148,7 @@ static HRESULT WINAPI xhr2_stream_Write(IStream *iface, const void *pv,
         ULONG cb, ULONG *pcbWritten)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
-    trace("(%p)->(%p %u %p)\n", This, pv, cb, pcbWritten);
+    trace("(%p)->(%p %lu %p)\n", This, pv, cb, pcbWritten);
     return IStream_Write(This->stream, pv, cb, pcbWritten);
 }
 
@@ -2156,14 +2156,14 @@ static HRESULT WINAPI xhr2_stream_Seek(IStream *iface, LARGE_INTEGER dlibMove,
         DWORD dwOrigin, ULARGE_INTEGER *plibNewPosition)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
-    trace("(%p)->(%lu, %u %p)\n", This, dlibMove.QuadPart, dwOrigin, plibNewPosition);
+    trace("(%p)->(%I64u, %lu %p)\n", This, dlibMove.QuadPart, dwOrigin, plibNewPosition);
     return IStream_Seek(This->stream, dlibMove, dwOrigin, plibNewPosition);
 }
 
 static HRESULT WINAPI xhr2_stream_SetSize(IStream *iface, ULARGE_INTEGER libNewSize)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
-    trace("(%p)->(%lu)\n", This, libNewSize.QuadPart);
+    trace("(%p)->(%I64u)\n", This, libNewSize.QuadPart);
     return IStream_SetSize(This->stream, libNewSize);
 }
 
@@ -2171,14 +2171,14 @@ static HRESULT WINAPI xhr2_stream_CopyTo(IStream *iface, IStream *pstm,
         ULARGE_INTEGER cb, ULARGE_INTEGER *pcbRead, ULARGE_INTEGER *pcbWritten)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
-    trace("(%p)->(%p %lu %p %p)\n", This, pstm, cb.QuadPart, pcbRead, pcbWritten);
+    trace("(%p)->(%p %I64u %p %p)\n", This, pstm, cb.QuadPart, pcbRead, pcbWritten);
     return IStream_CopyTo(This->stream, pstm, cb, pcbRead, pcbWritten);
 }
 
 static HRESULT WINAPI xhr2_stream_Commit(IStream *iface, DWORD grfCommitFlags)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
-    trace("(%p)->(%#x)\n", This, grfCommitFlags);
+    trace("(%p)->(%#lx)\n", This, grfCommitFlags);
     return IStream_Commit(This->stream, grfCommitFlags);
 }
 
@@ -2193,7 +2193,7 @@ static HRESULT WINAPI xhr2_stream_LockRegion(IStream *iface, ULARGE_INTEGER libO
         ULARGE_INTEGER cb, DWORD dwLockType)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
-    trace("(%p)->(%lu %lu %u)\n", This, libOffset.QuadPart, cb.QuadPart, dwLockType);
+    trace("(%p)->(%I64u %I64u %lu)\n", This, libOffset.QuadPart, cb.QuadPart, dwLockType);
     return IStream_LockRegion(This->stream, libOffset, cb, dwLockType);
 }
 
@@ -2201,14 +2201,14 @@ static HRESULT WINAPI xhr2_stream_UnlockRegion(IStream *iface, ULARGE_INTEGER li
         ULARGE_INTEGER cb, DWORD dwLockType)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
-    trace("(%p)->(%lu %lu %u)\n", This, libOffset.QuadPart, cb.QuadPart, dwLockType);
+    trace("(%p)->(%I64u %I64u %lu)\n", This, libOffset.QuadPart, cb.QuadPart, dwLockType);
     return IStream_UnlockRegion(This->stream, libOffset, cb, dwLockType);
 }
 
 static HRESULT WINAPI xhr2_stream_Stat(IStream *iface, STATSTG *pstatstg, DWORD grfStatFlag)
 {
     struct xhr2_stream *This = xhr2_stream_from_IStream(iface);
-    trace("(%p)->(%p %#x)\n", This, pstatstg, grfStatFlag);
+    trace("(%p)->(%p %#lx)\n", This, pstatstg, grfStatFlag);
     return IStream_Stat(This->stream, pstatstg, grfStatFlag);
 }
 
@@ -2270,15 +2270,15 @@ static void test_IXMLHTTPRequest2(void)
     if (!(xhr3_callback = xhr3_callback_create(events[i])))
         return;
 
-    trace("IXMLHTTPRequest2_Open (%p)->(L\"GET\", L\"http://test.winehq.org/\", xhr3_callback, NULL, NULL, NULL, NULL)\n", GetCurrentThreadId(), xhr2[i]);
+    trace("%lu: IXMLHTTPRequest2_Open (%p)->(L\"GET\", L\"http://test.winehq.org/\", xhr3_callback, NULL, NULL, NULL, NULL)\n", GetCurrentThreadId(), xhr2[i]);
     hr = IXMLHTTPRequest2_Open(xhr2[i], L"GET", L"http://test.winehq.org/", xhr3_callback, NULL, NULL, NULL, NULL);
-    ok(SUCCEEDED(hr), "IXMLHTTPRequest2_Send failed %#x\n", hr);
+    ok(SUCCEEDED(hr), "IXMLHTTPRequest2_Send failed %#lx\n", hr);
 
     if ((stream = xhr2_stream_create()))
     {
-        trace("IXMLHTTPRequest2_Send (%p)->(%p 0)\n", GetCurrentThreadId(), xhr2[i], stream);
+        trace("%lu: IXMLHTTPRequest2_Send (%p)->(%p 0)\n", GetCurrentThreadId(), xhr2[i], stream);
         hr = IXMLHTTPRequest2_Send(xhr2[i], stream, 0);
-        ok(SUCCEEDED(hr), "IXMLHTTPRequest2_Send failed %#x\n", hr);
+        ok(SUCCEEDED(hr), "IXMLHTTPRequest2_Send failed %#lx\n", hr);
 
         ISequentialStream_Release(stream);
     }

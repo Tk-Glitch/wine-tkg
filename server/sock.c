@@ -153,6 +153,12 @@ struct connect_req
     unsigned int addr_len, send_len, send_cursor;
 };
 
+struct send_req
+{
+    struct iosb *iosb;
+    struct sock *sock;
+};
+
 enum connection_state
 {
     SOCK_LISTENING,
@@ -464,6 +470,32 @@ static socklen_t sockaddr_to_unix( const struct WS_sockaddr *wsaddr, int wsaddrl
 
     default:
         return 0;
+    }
+}
+
+static socklen_t get_unix_sockaddr_any( union unix_sockaddr *uaddr, int ws_family )
+{
+    memset( uaddr, 0, sizeof(*uaddr) );
+    switch (ws_family)
+    {
+        case WS_AF_INET:
+            uaddr->in.sin_family = AF_INET;
+            return sizeof(uaddr->in);
+        case WS_AF_INET6:
+            uaddr->in6.sin6_family = AF_INET6;
+            return sizeof(uaddr->in6);
+#ifdef HAS_IPX
+        case WS_AF_IPX:
+            uaddr->ipx.sipx_family = AF_IPX;
+            return sizeof(uaddr->ipx);
+#endif
+#ifdef HAS_IRDA
+        case WS_AF_IRDA:
+            uaddr->irda.sir_family = AF_IRDA;
+            return sizeof(uaddr->irda);
+#endif
+        default:
+            return 0;
     }
 }
 
@@ -3460,81 +3492,112 @@ DECL_HANDLER(recv_socket)
     release_object( sock );
 }
 
-DECL_HANDLER(send_socket)
+static void send_socket_completion_callback( void *private )
 {
-    struct sock *sock = (struct sock *)get_handle_obj( current->process, req->async.handle, 0, &sock_ops );
-    unsigned int status = req->status;
-    timeout_t timeout = 0;
-    struct async *async;
-    struct fd *fd;
+    struct send_req *send_req = private;
+    struct iosb *iosb = send_req->iosb;
+    struct sock *sock = send_req->sock;
 
-    if (!sock) return;
-    fd = sock->fd;
-
-    if (sock->type == WS_SOCK_DGRAM)
-    {
-        /* sendto() and sendmsg() implicitly binds a socket */
-        union unix_sockaddr unix_addr;
-        socklen_t unix_len = sizeof(unix_addr);
-
-        if (!sock->bound && !getsockname( get_unix_fd( fd ), &unix_addr.addr, &unix_len ))
-            sock->addr_len = sockaddr_from_unix( &unix_addr, &sock->addr.addr, sizeof(sock->addr) );
-        sock->bound = 1;
-    }
-
-    if (status != STATUS_SUCCESS)
+    if (iosb->status != STATUS_SUCCESS)
     {
         /* send() calls only clear and reselect events if unsuccessful. */
         sock->pending_events &= ~AFD_POLL_WRITE;
         sock->reported_events &= ~AFD_POLL_WRITE;
+        sock_reselect( sock );
     }
 
-    /* If we had a short write and the socket is nonblocking (and the client is
-     * not trying to force the operation to be asynchronous), return success.
-     * Windows actually refuses to send any data in this case, and returns
-     * EWOULDBLOCK, but we have no way of doing that. */
-    if (status == STATUS_DEVICE_NOT_READY && req->total && sock->nonblocking)
-        status = STATUS_SUCCESS;
+    release_object( iosb );
+    release_object( sock );
+    free( send_req );
+}
 
-    /* send() returned EWOULDBLOCK or a short write, i.e. cannot send all data yet */
-    if (status == STATUS_DEVICE_NOT_READY && !sock->nonblocking)
+DECL_HANDLER(send_socket)
+{
+    struct sock *sock = (struct sock *)get_handle_obj( current->process, req->async.handle, 0, &sock_ops );
+    unsigned int status = STATUS_PENDING;
+    timeout_t timeout = 0;
+    struct async *async;
+    struct fd *fd;
+    int bind_errno = 0;
+
+    if (!sock) return;
+    fd = sock->fd;
+
+    if (sock->type == WS_SOCK_DGRAM && !sock->bound)
     {
-        /* Set a timeout on the async if necessary.
-         *
-         * We want to do this *only* if the client gave us STATUS_DEVICE_NOT_READY.
-         * If the client gave us STATUS_PENDING, it expects the async to always
-         * block (it was triggered by WSASend*() with a valid OVERLAPPED
-         * structure) and for the timeout not to be respected. */
-        if (is_fd_overlapped( fd ))
-            timeout = (timeout_t)sock->sndtimeo * -10000;
+        union unix_sockaddr unix_addr;
+        socklen_t unix_len;
+        int unix_fd = get_unix_fd( fd );
 
-        status = STATUS_PENDING;
+        unix_len = get_unix_sockaddr_any( &unix_addr, sock->family );
+        if (bind( unix_fd, &unix_addr.addr, unix_len ) < 0)
+            bind_errno = errno;
+
+        if (getsockname( unix_fd, &unix_addr.addr, &unix_len ) >= 0)
+        {
+            sock->addr_len = sockaddr_from_unix( &unix_addr, &sock->addr.addr, sizeof(sock->addr) );
+            sock->bound = 1;
+        }
+        else if (!bind_errno) bind_errno = errno;
     }
 
-    if ((status == STATUS_PENDING || status == STATUS_DEVICE_NOT_READY) && sock->wr_shutdown)
-        status = STATUS_PIPE_DISCONNECTED;
+    if (!req->force_async && !sock->nonblocking && is_fd_overlapped( fd ))
+        timeout = (timeout_t)sock->sndtimeo * -10000;
+
+    if (bind_errno) status = sock_get_ntstatus( bind_errno );
+    else if (sock->wr_shutdown) status = STATUS_PIPE_DISCONNECTED;
+    else if (!async_queued( &sock->write_q ))
+    {
+        /* If write_q is not empty, we cannot really tell if the already queued
+         * asyncs will not consume all available space; if there's no space
+         * available, the current request won't be immediately satiable.
+         */
+        struct pollfd pollfd;
+        pollfd.fd = get_unix_fd( sock->fd );
+        pollfd.events = POLLOUT;
+        pollfd.revents = 0;
+        if (poll(&pollfd, 1, 0) >= 0 && pollfd.revents)
+        {
+            /* Give the client opportunity to complete synchronously.
+             * If it turns out that the I/O request is not actually immediately satiable,
+             * the client may then choose to re-queue the async (with STATUS_PENDING). */
+            status = STATUS_ALERTED;
+        }
+    }
+
+    if (status == STATUS_PENDING && !req->force_async && sock->nonblocking)
+        status = STATUS_DEVICE_NOT_READY;
 
     if ((async = create_request_async( fd, get_fd_comp_flags( fd ), &req->async )))
     {
-        if (status == STATUS_SUCCESS)
+        struct send_req *send_req;
+        struct iosb *iosb = async_get_iosb( async );
+
+        if ((send_req = mem_alloc( sizeof(*send_req) )))
         {
-            struct iosb *iosb = async_get_iosb( async );
-            iosb->result = req->total;
-            release_object( iosb );
+            send_req->iosb = (struct iosb *)grab_object( iosb );
+            send_req->sock = (struct sock *)grab_object( sock );
+            async_set_completion_callback( async, send_socket_completion_callback, send_req );
         }
+        else if (status == STATUS_PENDING || status == STATUS_DEVICE_NOT_READY)
+            status = STATUS_NO_MEMORY;
+
+        release_object( iosb );
+
         set_error( status );
 
         if (timeout)
             async_set_timeout( async, timeout, STATUS_IO_TIMEOUT );
 
-        if (status == STATUS_PENDING)
+        if (status == STATUS_PENDING || status == STATUS_ALERTED)
+        {
             queue_async( &sock->write_q, async );
-
-        /* always reselect; we changed reported_events above */
-        sock_reselect( sock );
+            sock_reselect( sock );
+        }
 
         reply->wait = async_handoff( async, NULL, 0 );
         reply->options = get_fd_options( fd );
+        reply->nonblocking = sock->nonblocking;
         release_object( async );
     }
     release_object( sock );

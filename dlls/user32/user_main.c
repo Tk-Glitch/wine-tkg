@@ -140,30 +140,43 @@ static void CDECL notify_ime( HWND hwnd, UINT param )
     if (ime_default) SendMessageW( ime_default, WM_IME_INTERNAL, param, HandleToUlong(hwnd) );
 }
 
+void WINAPI unregister_imm( HWND hwnd )
+{
+    imm_unregister_window( hwnd );
+}
+
+static void CDECL free_win_ptr( WND *win )
+{
+    HeapFree( GetProcessHeap(), 0, win->text );
+    HeapFree( GetProcessHeap(), 0, win->pScroll );
+    HeapFree( GetProcessHeap(), 0, win );
+}
+
 static const struct user_callbacks user_funcs =
 {
+    AdjustWindowRectEx,
     CopyImage,
+    DestroyCaret,
+    DestroyMenu,
+    EndMenu,
+    HideCaret,
     PostMessageW,
-    RedrawWindow,
     SendInput,
     SendMessageTimeoutW,
     SendMessageW,
     SendNotifyMessageW,
-    SetWindowPos,
+    ShowCaret,
     WaitForInputIdle,
-    WindowFromDC,
-    free_dce,
+    free_win_ptr,
+    MENU_IsMenuActive,
     notify_ime,
     register_builtin_classes,
     MSG_SendInternalMessageTimeout,
+    SCROLL_SetStandardScrollPainted,
     (void *)__wine_set_user_driver,
     set_window_pos,
+    unregister_imm,
 };
-
-static void WINAPI User32CallFreeIcon( ULONG *param, ULONG size )
-{
-    wow_handlers.free_icon_param( *param );
-}
 
 static BOOL WINAPI User32LoadDriver( const WCHAR *path, ULONG size )
 {
@@ -176,7 +189,6 @@ static const void *kernel_callback_table[NtUserCallCount] =
     User32CallWinEventHook,
     User32CallWindowsHook,
     User32LoadDriver,
-    User32CallFreeIcon,
 };
 
 
@@ -218,12 +230,11 @@ static void thread_detach(void)
     struct user_thread_info *thread_info = get_user_thread_info();
 
     exiting_thread_id = GetCurrentThreadId();
+    NtUserCallNoParam( NtUserExitingThread );
 
     WDML_NotifyThreadDetach();
 
     NtUserCallNoParam( NtUserThreadDetach );
-    destroy_thread_windows();
-    CloseHandle( thread_info->server_queue );
     HeapFree( GetProcessHeap(), 0, thread_info->wmchar_data );
     HeapFree( GetProcessHeap(), 0, thread_info->rawinput );
 

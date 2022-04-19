@@ -530,6 +530,8 @@ BOOL WINAPI CopyFileExW( const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUT
         FIXME("COPY_FILE_RESTARTABLE is not supported\n");
     if (flags & COPY_FILE_COPY_SYMLINK)
         FIXME("COPY_FILE_COPY_SYMLINK is not supported\n");
+    if (flags & COPY_FILE_OPEN_SOURCE_FOR_WRITE)
+        FIXME("COPY_FILE_OPEN_SOURCE_FOR_WRITE is not supported\n");
 
     if (flags & COPY_FILE_OPEN_SOURCE_FOR_WRITE)
         source_access |= GENERIC_WRITE;
@@ -1481,7 +1483,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    status = NtOpenFile( &info->handle, GENERIC_READ | SYNCHRONIZE, &attr, &io,
+    status = NtOpenFile( &info->handle, FILE_LIST_DIRECTORY | SYNCHRONIZE, &attr, &io,
                          FILE_SHARE_READ | FILE_SHARE_WRITE,
                          FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT );
     if (status != STATUS_SUCCESS)
@@ -3921,7 +3923,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetFilePointerEx( HANDLE file, LARGE_INTEGER dista
     LONGLONG pos;
     IO_STATUS_BLOCK io;
     FILE_POSITION_INFORMATION info;
-    FILE_END_OF_FILE_INFORMATION eof;
+    FILE_STANDARD_INFORMATION eof;
 
     switch(method)
     {
@@ -3934,7 +3936,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetFilePointerEx( HANDLE file, LARGE_INTEGER dista
         pos = info.CurrentByteOffset.QuadPart + distance.QuadPart;
         break;
     case FILE_END:
-        if (NtQueryInformationFile( file, &io, &eof, sizeof(eof), FileEndOfFileInformation ))
+        if (NtQueryInformationFile( file, &io, &eof, sizeof(eof), FileStandardInformation ))
             goto error;
         pos = eof.EndOfFile.QuadPart + distance.QuadPart;
         break;
@@ -4174,8 +4176,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH FileTimeToLocalFileTime( const FILETIME *utc, FILE
 BOOL WINAPI DECLSPEC_HOTPATCH FileTimeToSystemTime( const FILETIME *ft, SYSTEMTIME *systime )
 {
     TIME_FIELDS tf;
+    const LARGE_INTEGER *li = (const LARGE_INTEGER *)ft;
 
-    RtlTimeToTimeFields( (const LARGE_INTEGER *)ft, &tf );
+    if (li->QuadPart < 0)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    RtlTimeToTimeFields( li, &tf );
     systime->wYear = tf.Year;
     systime->wMonth = tf.Month;
     systime->wDay = tf.Day;

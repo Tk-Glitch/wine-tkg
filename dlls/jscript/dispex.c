@@ -488,13 +488,18 @@ static HRESULT prop_put(jsdisp_t *This, dispex_prop_t *prop, jsval_t val)
             prop_iter = prototype_iter->props + prop_iter->u.ref;
         } while(prop_iter->type == PROP_PROTREF);
 
-        if(prop_iter->type == PROP_ACCESSOR ||
-           (prop_iter->type == PROP_BUILTIN && prop_iter->u.p->setter))
+        if(prop_iter->type == PROP_ACCESSOR)
             prop = prop_iter;
     }
 
     switch(prop->type) {
     case PROP_BUILTIN:
+        if(prop->u.p->invoke) {
+            prop->type = PROP_JSVAL;
+            prop->flags = PROPF_CONFIGURABLE | PROPF_WRITABLE;
+            prop->u.val = jsval_undefined();
+            break;
+        }
         if(!prop->u.p->setter) {
             TRACE("getter with no setter\n");
             return S_OK;
@@ -550,7 +555,7 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
 
     switch(prop->type) {
     case PROP_BUILTIN: {
-        vdisp_t vthis;
+        jsval_t vthis;
 
         if(flags == DISPATCH_CONSTRUCT && (prop->flags & PROPF_METHOD)) {
             WARN("%s is not a constructor\n", debugstr_w(prop->name));
@@ -560,19 +565,16 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
         if(This->builtin_info->class != JSCLASS_FUNCTION && prop->u.p->invoke != JSGlobal_eval)
             flags &= ~DISPATCH_JSCRIPT_INTERNAL_MASK;
         if(jsthis)
-            set_disp(&vthis, jsthis);
+            vthis = jsval_disp(jsthis);
         else
-            set_jsdisp(&vthis, This);
-        hres = prop->u.p->invoke(This->ctx, &vthis, flags, argc, argv, r);
-        vdisp_release(&vthis);
-
-        return hres;
+            vthis = jsval_obj(This);
+        return prop->u.p->invoke(This->ctx, vthis, flags, argc, argv, r);
     }
     case PROP_PROTREF:
         return invoke_prop_func(This->prototype, jsthis ? jsthis : (IDispatch *)&This->IDispatchEx_iface,
                                 This->prototype->props+prop->u.ref, flags, argc, argv, r, caller);
     case PROP_JSVAL: {
-        if(!is_object_instance(prop->u.val) || !get_object(prop->u.val)) {
+        if(!is_object_instance(prop->u.val)) {
             FIXME("invoke %s\n", debugstr_jsval(prop->u.val));
             return E_FAIL;
         }
@@ -591,7 +593,7 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
         if(FAILED(hres))
             return hres;
 
-        if(is_object_instance(val) && get_object(val)) {
+        if(is_object_instance(val)) {
             hres = disp_call_value(This->ctx, get_object(val),
                                    jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface,
                                    flags, argc, argv, r);
@@ -1925,7 +1927,7 @@ HRESULT init_dispex_from_constr(jsdisp_t *dispex, script_ctx_t *ctx, const built
             return hres;
         }
 
-        if(is_object_instance(val) && get_object(val))
+        if(is_object_instance(val))
             prot = iface_to_jsdisp(get_object(val));
         else
             prot = jsdisp_addref(ctx->object_prototype);
@@ -1979,17 +1981,13 @@ HRESULT jsdisp_call_value(jsdisp_t *jsfunc, IDispatch *jsthis, WORD flags, unsig
     if(is_class(jsfunc, JSCLASS_FUNCTION)) {
         hres = Function_invoke(jsfunc, jsthis, flags, argc, argv, r);
     }else {
-        vdisp_t vdisp;
-
         if(!jsfunc->builtin_info->call) {
             WARN("Not a function\n");
             return JS_E_FUNCTION_EXPECTED;
         }
 
-        set_disp(&vdisp, jsthis);
         flags &= ~DISPATCH_JSCRIPT_INTERNAL_MASK;
-        hres = jsfunc->builtin_info->call(jsfunc->ctx, &vdisp, flags, argc, argv, r);
-        vdisp_release(&vdisp);
+        hres = jsfunc->builtin_info->call(jsfunc->ctx, jsthis ? jsval_disp(jsthis) : jsval_null(), flags, argc, argv, r);
     }
     return hres;
 }
@@ -2013,6 +2011,9 @@ HRESULT jsdisp_call_name(jsdisp_t *disp, const WCHAR *name, WORD flags, unsigned
     hres = find_prop_name_prot(disp, string_hash(name), name, &prop);
     if(FAILED(hres))
         return hres;
+
+    if(!prop || prop->type == PROP_DELETED)
+        return JS_E_INVALID_PROPERTY;
 
     return invoke_prop_func(disp, to_disp(disp), prop, flags, argc, argv, r, NULL);
 }
@@ -2707,10 +2708,17 @@ HRESULT jsdisp_define_data_property(jsdisp_t *obj, const WCHAR *name, unsigned f
 
 HRESULT jsdisp_change_prototype(jsdisp_t *obj, jsdisp_t *proto)
 {
+    jsdisp_t *iter;
     DWORD i;
 
     if(obj->prototype == proto)
         return S_OK;
+    if(!obj->extensible)
+        return JS_E_CANNOT_CREATE_FOR_NONEXTENSIBLE;
+
+    for(iter = proto; iter; iter = iter->prototype)
+        if(iter == obj)
+            return JS_E_CYCLIC_PROTO_VALUE;
 
     if(obj->prototype) {
         for(i = 0; i < obj->prop_cnt; i++)

@@ -3408,13 +3408,13 @@ static void test_header_override(int port)
     ok(ses != NULL, "InternetOpenA failed\n");
 
     con = InternetConnectA(ses, "localhost", port, "test1", "pass", INTERNET_SERVICE_HTTP, 0, 0);
-    ok(con != NULL, "InternetConnectA failed %u\n", GetLastError());
+    ok(con != NULL, "InternetConnectA failed %lu\n", GetLastError());
 
     req = HttpOpenRequestA( con, "HEAD", "/test_auth_host1", NULL, NULL, NULL, 0, 0);
-    ok(req != NULL, "HttpOpenRequestA failed %u\n", GetLastError());
+    ok(req != NULL, "HttpOpenRequestA failed %lu\n", GetLastError());
 
     ret = HttpSendRequestA(req, NULL, 0, NULL, 0);
-    ok(ret, "HttpSendRequestA failed %u\n", GetLastError());
+    ok(ret, "HttpSendRequestA failed %lu\n", GetLastError());
 
     test_status_code(req, 200);
 
@@ -3426,16 +3426,16 @@ static void test_header_override(int port)
     ok(ses != NULL, "InternetOpenA failed\n");
 
     con = InternetConnectA( ses, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
-    ok(con != NULL, "InternetConnectA failed %u\n", GetLastError());
+    ok(con != NULL, "InternetConnectA failed %lu\n", GetLastError());
 
     req = HttpOpenRequestA(con, "HEAD", "/test_auth_host1", NULL, NULL, NULL, 0, 0);
-    ok(req != NULL, "HttpOpenRequestA failed %u\n", GetLastError());
+    ok(req != NULL, "HttpOpenRequestA failed %lu\n", GetLastError());
 
     ret = HttpAddRequestHeadersA(req, host_header_override, ~0u, HTTP_ADDREQ_FLAG_ADD);
     ok(ret, "HttpAddRequestHeaders failed\n");
 
     ret = HttpSendRequestA( req, NULL, 0, NULL, 0 );
-    ok( ret, "HttpSendRequestA failed %u\n", GetLastError() );
+    ok( ret, "HttpSendRequestA failed %lu\n", GetLastError() );
 
     test_status_code(req, 200);
 
@@ -3447,16 +3447,16 @@ static void test_header_override(int port)
     ok(ses != NULL, "InternetOpenA failed\n");
 
     con = InternetConnectA(ses, "localhost", port, "test1", "pass2", INTERNET_SERVICE_HTTP, 0, 0);
-    ok(con != NULL, "InternetConnectA failed %u\n", GetLastError());
+    ok(con != NULL, "InternetConnectA failed %lu\n", GetLastError());
 
     req = HttpOpenRequestA(con, "HEAD", "/test_auth_host2", NULL, NULL, NULL, 0, 0);
-    ok(req != NULL, "HttpOpenRequestA failed %u\n", GetLastError());
+    ok(req != NULL, "HttpOpenRequestA failed %lu\n", GetLastError());
 
     ret = HttpAddRequestHeadersA(req, host_header_override, ~0u, HTTP_ADDREQ_FLAG_ADD);
     ok(ret, "HttpAddRequestHeaders failed\n");
 
     ret = HttpSendRequestA(req, NULL, 0, NULL, 0);
-    ok(ret, "HttpSendRequestA failed %u\n", GetLastError());
+    ok(ret, "HttpSendRequestA failed %lu\n", GetLastError());
 
     test_status_code(req, 200);
 
@@ -3468,13 +3468,13 @@ static void test_header_override(int port)
     ok(ses != NULL, "InternetOpenA failed\n");
 
     con = InternetConnectA(ses, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
-    ok(con != NULL, "InternetConnectA failed %u\n", GetLastError());
+    ok(con != NULL, "InternetConnectA failed %lu\n", GetLastError());
 
     req = HttpOpenRequestA(con, "HEAD", "/test_auth_host2", NULL, NULL, NULL, 0, 0);
-    ok(req != NULL, "HttpOpenRequestA failed %u\n", GetLastError());
+    ok(req != NULL, "HttpOpenRequestA failed %lu\n", GetLastError());
 
     ret = HttpSendRequestA(req, NULL, 0, NULL, 0);
-    ok(ret, "HttpSendRequestA failed %u\n", GetLastError());
+    ok(ret, "HttpSendRequestA failed %lu\n", GetLastError());
 
     test_status_code(req, 200);
 
@@ -4345,7 +4345,7 @@ static void test_cookie_header(int port)
     ok(req != NULL, "HttpOpenRequest failed\n");
 
     ret = HttpAddRequestHeadersA(req, "Cookie: manual_cookie=test\r\n", ~0u, HTTP_ADDREQ_FLAG_ADD);
-    ok(ret, "HttpAddRequestHeaders failed: %u\n", GetLastError());
+    ok(ret, "HttpAddRequestHeaders failed: %lu\n", GetLastError());
 
     ret = HttpSendRequestA(req, NULL, 0, NULL, 0);
     ok(ret, "HttpSendRequest failed\n");

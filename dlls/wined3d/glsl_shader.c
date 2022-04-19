@@ -753,7 +753,7 @@ static BOOL shader_glsl_use_bindless_texture(const struct wined3d_gl_info *gl_in
             && resource_info->type != WINED3D_SHADER_RESOURCE_BUFFER;
 }
 
-static GLuint64 shader_glsl_dummy_sampler_handle(struct wined3d_context *context,
+static GLuint64 shader_glsl_dummy_sampler_handle(const struct wined3d_context *context,
         enum wined3d_shader_resource_type type)
 {
     const struct wined3d_device *device = context->device;

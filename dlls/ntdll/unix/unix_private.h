@@ -282,7 +282,7 @@ extern void init_files(void) DECLSPEC_HIDDEN;
 extern void init_cpu_info(void) DECLSPEC_HIDDEN;
 extern struct cpu_topology_override *get_cpu_topology_override(void) DECLSPEC_HIDDEN;
 extern void add_completion( HANDLE handle, ULONG_PTR value, NTSTATUS status, ULONG info, BOOL async ) DECLSPEC_HIDDEN;
-extern void set_async_direct_result( HANDLE *optional_handle, NTSTATUS status, ULONG_PTR information );
+extern void set_async_direct_result( HANDLE *optional_handle, NTSTATUS status, ULONG_PTR information, BOOL mark_pending );
 
 extern void dbg_init(void) DECLSPEC_HIDDEN;
 
@@ -456,6 +456,14 @@ static inline void init_unicode_string( UNICODE_STRING *str, const WCHAR *data )
     str->Length = wcslen(data) * sizeof(WCHAR);
     str->MaximumLength = str->Length + sizeof(WCHAR);
     str->Buffer = (WCHAR *)data;
+}
+
+static inline NTSTATUS map_section( HANDLE mapping, void **ptr, SIZE_T *size, ULONG protect )
+{
+    *ptr = NULL;
+    *size = 0;
+    return NtMapViewOfSection( mapping, NtCurrentProcess(), ptr, is_win64 && wow_peb ? 0x7fffffff : 0,
+                               0, NULL, size, ViewShare, 0, protect );
 }
 
 BOOL CDECL __wine_needs_override_large_address_aware(void);

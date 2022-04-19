@@ -142,6 +142,7 @@ static void * const syscalls[] =
     NtUserGetWindowRgnEx,
     NtUserInitializeClientPfnArrays,
     NtUserInternalGetWindowText,
+    NtUserKillTimer,
     NtUserNotifyWinEvent,
     NtUserOpenDesktop,
     NtUserOpenInputDesktop,
@@ -153,11 +154,14 @@ static void * const syscalls[] =
     NtUserSetProcessDpiAwarenessContext,
     NtUserSetProcessWindowStation,
     NtUserSetProp,
+    NtUserSetSystemTimer,
     NtUserSetThreadDesktop,
+    NtUserSetTimer,
     NtUserSetWinEventHook,
     NtUserSetWindowsHookEx,
     NtUserUnhookWinEvent,
     NtUserUnhookWindowsHookEx,
+    NtUserWindowFromDC,
 };
 
 static BYTE arguments[ARRAY_SIZE(syscalls)];

@@ -79,15 +79,6 @@ static BOOL CDECL nulldrv_CreateWindow( HWND hwnd )
     return TRUE;
 }
 
-static void CDECL nulldrv_DestroyWindow( HWND hwnd )
-{
-}
-
-static void CDECL nulldrv_GetDC( HDC hdc, HWND hwnd, HWND top_win, const RECT *win_rect,
-                                 const RECT *top_rect, DWORD flags )
-{
-}
-
 static DWORD CDECL nulldrv_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
                                                         DWORD mask, DWORD flags )
 {
@@ -96,29 +87,12 @@ static DWORD CDECL nulldrv_MsgWaitForMultipleObjectsEx( DWORD count, const HANDL
                                      timeout, flags & MWMO_ALERTABLE );
 }
 
-static void CDECL nulldrv_ReleaseDC( HWND hwnd, HDC hdc )
-{
-}
-
-static void CDECL nulldrv_SetParent( HWND hwnd, HWND parent, HWND old_parent )
-{
-}
-
 static void CDECL nulldrv_SetWindowIcon( HWND hwnd, UINT type, HICON icon )
-{
-}
-
-static void CDECL nulldrv_SetWindowStyle( HWND hwnd, INT offset, STYLESTRUCT *style )
 {
 }
 
 static void CDECL nulldrv_SetWindowText( HWND hwnd, LPCWSTR text )
 {
-}
-
-static UINT CDECL nulldrv_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp )
-{
-    return ~0; /* use default implementation */
 }
 
 static LRESULT CDECL nulldrv_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
@@ -163,12 +137,6 @@ static BOOL CDECL loaderdrv_CreateWindow( HWND hwnd )
     return load_driver()->pCreateWindow( hwnd );
 }
 
-static void CDECL loaderdrv_GetDC( HDC hdc, HWND hwnd, HWND top_win, const RECT *win_rect,
-                                   const RECT *top_rect, DWORD flags )
-{
-    load_driver()->pGetDC( hdc, hwnd, top_win, win_rect, top_rect, flags );
-}
-
 static void CDECL loaderdrv_UpdateCandidatePos( HWND hwnd, const RECT *caret_rect )
 {
     load_driver()->pUpdateCandidatePos( hwnd, caret_rect );
@@ -202,21 +170,21 @@ static struct user_driver_funcs lazy_load_driver =
     /* windowing functions */
     NULL,
     loaderdrv_CreateWindow,
-    nulldrv_DestroyWindow,
     NULL,
-    loaderdrv_GetDC,
+    NULL,
+    NULL,
     nulldrv_MsgWaitForMultipleObjectsEx,
-    nulldrv_ReleaseDC,
     NULL,
     NULL,
     NULL,
     NULL,
-    nulldrv_SetParent,
+    NULL,
+    NULL,
     NULL,
     nulldrv_SetWindowIcon,
-    nulldrv_SetWindowStyle,
+    NULL,
     nulldrv_SetWindowText,
-    nulldrv_ShowWindow,
+    NULL,
     nulldrv_SysCommand,
     NULL,
     NULL,
@@ -253,15 +221,9 @@ void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT v
     SET_USER_FUNC(SetCursorPos);
     SET_USER_FUNC(UpdateClipboard);
     SET_USER_FUNC(CreateWindow);
-    SET_USER_FUNC(DestroyWindow);
-    SET_USER_FUNC(GetDC);
     SET_USER_FUNC(MsgWaitForMultipleObjectsEx);
-    SET_USER_FUNC(ReleaseDC);
-    SET_USER_FUNC(SetParent);
     SET_USER_FUNC(SetWindowIcon);
-    SET_USER_FUNC(SetWindowStyle);
     SET_USER_FUNC(SetWindowText);
-    SET_USER_FUNC(ShowWindow);
     SET_USER_FUNC(SysCommand);
     SET_USER_FUNC(WindowPosChanging);
     SET_USER_FUNC(WindowPosChanged);

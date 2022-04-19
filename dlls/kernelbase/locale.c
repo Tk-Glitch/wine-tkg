@@ -571,9 +571,17 @@ struct norm_table
 static NLSTABLEINFO nls_info;
 static UINT unix_cp = CP_UTF8;
 static UINT mac_cp = 10000;
+static LCID system_lcid;
+static LCID user_lcid;
 static HKEY intl_key;
 static HKEY nls_key;
 static HKEY tz_key;
+static const NLS_LOCALE_LCID_INDEX *lcids_index;
+static const NLS_LOCALE_LCNAME_INDEX *lcnames_index;
+static const NLS_LOCALE_HEADER *locale_table;
+static const WCHAR *locale_strings;
+static const NLS_LOCALE_DATA *system_locale;
+static const NLS_LOCALE_DATA *user_locale;
 
 static CPTABLEINFO codepages[128];
 static unsigned int nb_codepages;
@@ -618,6 +626,30 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
       0, 0, { (DWORD_PTR)(__FILE__ ": locale_section") }
 };
 static CRITICAL_SECTION locale_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+
+
+static void load_locale_nls(void)
+{
+    struct
+    {
+        UINT ctypes;
+        UINT unknown1;
+        UINT unknown2;
+        UINT unknown3;
+        UINT locales;
+        UINT charmaps;
+        UINT geoids;
+        UINT scripts;
+    } *header;
+    LCID lcid;
+    LARGE_INTEGER dummy;
+
+    RtlGetLocaleFileMappingAddress( (void **)&header, &lcid, &dummy );
+    locale_table = (const NLS_LOCALE_HEADER *)((char *)header + header->locales);
+    lcids_index = (const NLS_LOCALE_LCID_INDEX *)((char *)locale_table + locale_table->lcids_offset);
+    lcnames_index = (const NLS_LOCALE_LCNAME_INDEX *)((char *)locale_table + locale_table->lcnames_offset);
+    locale_strings = (const WCHAR *)((char *)locale_table + locale_table->strings_offset);
+}
 
 
 static void init_sortkeys( DWORD *ptr )
@@ -699,26 +731,99 @@ done:
 }
 
 
-static LCID locale_to_lcid( WCHAR *win_name )
+static const NLS_LOCALE_DATA *get_locale_data( UINT idx )
 {
-    WCHAR *p;
-    LCID lcid;
-
-    if (!RtlLocaleNameToLcid( win_name, &lcid, 0 )) return lcid;
-
-    /* try neutral name */
-    if ((p = wcsrchr( win_name, '-' )))
-    {
-        *p = 0;
-        if (!RtlLocaleNameToLcid( win_name, &lcid, 2 ))
-        {
-            if (SUBLANGID(lcid) == SUBLANG_NEUTRAL)
-                lcid = MAKELANGID( PRIMARYLANGID(lcid), SUBLANG_DEFAULT );
-            return lcid;
-        }
-    }
-    return 0;
+    ULONG offset = locale_table->locales_offset + idx * locale_table->locale_size;
+    return (const NLS_LOCALE_DATA *)((const char *)locale_table + offset);
 }
+
+
+static int compare_locale_names( const WCHAR *n1, const WCHAR *n2 )
+{
+    for (;;)
+    {
+        WCHAR ch1 = *n1++;
+        WCHAR ch2 = *n2++;
+        if (ch1 >= 'a' && ch1 <= 'z') ch1 -= 'a' - 'A';
+        else if (ch1 == '_') ch1 = '-';
+        if (ch2 >= 'a' && ch2 <= 'z') ch2 -= 'a' - 'A';
+        else if (ch2 == '_') ch2 = '-';
+        if (!ch1 || ch1 != ch2) return ch1 - ch2;
+    }
+}
+
+
+static const NLS_LOCALE_LCNAME_INDEX *find_lcname_entry( const WCHAR *name )
+{
+    int min = 0, max = locale_table->nb_lcnames - 1;
+
+    while (min <= max)
+    {
+        int res, pos = (min + max) / 2;
+        const WCHAR *str = locale_strings + lcnames_index[pos].name;
+        res = compare_locale_names( name, str + 1 );
+        if (res < 0) max = pos - 1;
+        else if (res > 0) min = pos + 1;
+        else return &lcnames_index[pos];
+    }
+    return NULL;
+}
+
+
+static const NLS_LOCALE_LCID_INDEX *find_lcid_entry( LCID lcid )
+{
+    int min = 0, max = locale_table->nb_lcids - 1;
+
+    while (min <= max)
+    {
+        int pos = (min + max) / 2;
+        if (lcid < lcids_index[pos].id) max = pos - 1;
+        else if (lcid > lcids_index[pos].id) min = pos + 1;
+        else return &lcids_index[pos];
+    }
+    return NULL;
+}
+
+
+static const NLS_LOCALE_DATA *get_locale_by_name( const WCHAR *name, LCID *lcid )
+{
+    const NLS_LOCALE_LCNAME_INDEX *entry;
+
+    if (name == LOCALE_NAME_USER_DEFAULT)
+    {
+        *lcid = user_lcid;
+        return user_locale;
+    }
+    if (!(entry = find_lcname_entry( name ))) return NULL;
+    *lcid = entry->id;
+    return get_locale_data( entry->idx );
+}
+
+
+static const NLS_LOCALE_DATA *get_locale_by_id( LCID *lcid, DWORD flags )
+{
+    const NLS_LOCALE_LCID_INDEX *entry;
+    const NLS_LOCALE_DATA *locale;
+
+    switch (*lcid)
+    {
+    case LOCALE_SYSTEM_DEFAULT:
+        *lcid = system_lcid;
+        return system_locale;
+    case LOCALE_NEUTRAL:
+    case LOCALE_USER_DEFAULT:
+    case LOCALE_CUSTOM_DEFAULT:
+        *lcid = user_lcid;
+        return user_locale;
+    default:
+        if (!(entry = find_lcid_entry( *lcid ))) return NULL;
+        locale = get_locale_data( entry->idx );
+        if (!(flags & LOCALE_ALLOW_NEUTRAL_NAMES) && !locale->inotneutral)
+            locale = get_locale_by_name( locale_strings + locale->ssortlocale + 1, lcid );
+        return locale;
+    }
+}
+
 
 /***********************************************************************
  *		init_locale
@@ -728,7 +833,6 @@ void init_locale(void)
     UINT ansi_cp = 0, oem_cp = 0;
     USHORT *ansi_ptr, *oem_ptr;
     void *sort_ptr;
-    LCID user_lcid = 0, system_lcid = 0;
     WCHAR bufferW[LOCALE_NAME_MAX_LENGTH];
     DYNAMIC_TIME_ZONE_INFORMATION timezone;
     GEOID geoid = GEOID_NOT_AVAILABLE;
@@ -736,18 +840,14 @@ void init_locale(void)
     SIZE_T size;
     HKEY hkey;
 
+    load_locale_nls();
+    NtQueryDefaultLocale( FALSE, &system_lcid );
+    NtQueryDefaultLocale( FALSE, &user_lcid );
+    system_locale = get_locale_by_id( &system_lcid, 0 );
+    user_locale = get_locale_by_id( &user_lcid, 0 );
+
     if (GetEnvironmentVariableW( L"WINEUNIXCP", bufferW, ARRAY_SIZE(bufferW) ))
         unix_cp = wcstoul( bufferW, NULL, 10 );
-    if (GetEnvironmentVariableW( L"WINELOCALE", bufferW, ARRAY_SIZE(bufferW) ))
-        system_lcid = locale_to_lcid( bufferW );
-    if (GetEnvironmentVariableW( L"WINEUSERLOCALE", bufferW, ARRAY_SIZE(bufferW) ))
-        user_lcid = locale_to_lcid( bufferW );
-    if (!system_lcid) system_lcid = MAKELCID( MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), SORT_DEFAULT );
-    if (!user_lcid) user_lcid = system_lcid;
-
-    NtSetDefaultUILanguage( LANGIDFROMLCID(user_lcid) );
-    NtSetDefaultLocale( TRUE, user_lcid );
-    NtSetDefaultLocale( FALSE, system_lcid );
 
     kernel32_handle = GetModuleHandleW( L"kernel32.dll" );
 
@@ -3429,38 +3529,58 @@ BOOL WINAPI DECLSPEC_HOTPATCH Internal_EnumTimeFormats( TIMEFMT_ENUMPROCW proc, 
 BOOL WINAPI DECLSPEC_HOTPATCH Internal_EnumUILanguages( UILANGUAGE_ENUMPROCW proc, DWORD flags,
                                                         LONG_PTR param, BOOL unicode )
 {
-    WCHAR name[10];
-    DWORD name_len, type, index = 0;
-    HKEY key;
+    WCHAR nameW[LOCALE_NAME_MAX_LENGTH];
+    char nameA[LOCALE_NAME_MAX_LENGTH];
+    DWORD i;
 
     if (!proc)
     {
 	SetLastError( ERROR_INVALID_PARAMETER );
 	return FALSE;
     }
-    if (flags & ~MUI_LANGUAGE_ID)
+    if (flags & ~(MUI_LANGUAGE_ID | MUI_LANGUAGE_NAME))
     {
 	SetLastError( ERROR_INVALID_FLAGS );
 	return FALSE;
     }
 
-    if (RegOpenKeyExW( nls_key, L"Locale", 0, KEY_READ, &key )) return FALSE;
-
-    for (;;)
+    for (i = 0; i < locale_table->nb_lcnames; i++)
     {
-        name_len = ARRAY_SIZE(name);
-        if (RegEnumValueW( key, index++, name, &name_len, NULL, &type, NULL, NULL )) break;
-        if (type != REG_SZ) continue;
-        if (!wcstoul( name, NULL, 16 )) continue;
-        if (!unicode)
+        if (!lcnames_index[i].name) continue;  /* skip invariant locale */
+        if (lcnames_index[i].id & 0x80000000) continue;  /* skip aliases */
+        if (!get_locale_data( lcnames_index[i].idx )->inotneutral) continue;  /* skip neutral locales */
+        if (!SORTIDFROMLCID( lcnames_index[i].id ) != !(flags & LCID_ALTERNATE_SORTS))
+            continue;  /* skip alternate sorts */
+        if (flags & MUI_LANGUAGE_NAME)
         {
-            char nameA[10];
-            WideCharToMultiByte( CP_ACP, 0, name, -1, nameA, sizeof(nameA), NULL, NULL );
-            if (!((UILANGUAGE_ENUMPROCA)proc)( nameA, param )) break;
+            const WCHAR *str = locale_strings + lcnames_index[i].name;
+
+            if (unicode)
+            {
+                memcpy( nameW, str + 1, (*str + 1) * sizeof(WCHAR) );
+                if (!proc( nameW, param )) break;
+            }
+            else
+            {
+                WideCharToMultiByte( CP_ACP, 0, str + 1, -1, nameA, sizeof(nameA), NULL, NULL );
+                if (!((UILANGUAGE_ENUMPROCA)proc)( nameA, param )) break;
+            }
         }
-        else if (!proc( name, param )) break;
+        else
+        {
+            if (lcnames_index[i].id == LOCALE_CUSTOM_UNSPECIFIED) continue;  /* skip locales with no lcid */
+            if (unicode)
+            {
+                swprintf( nameW, ARRAY_SIZE(nameW), L"%04lx", lcnames_index[i].id );
+                if (!proc( nameW, param )) break;
+            }
+            else
+            {
+                sprintf( nameA, "%04x", lcnames_index[i].id );
+                if (!((UILANGUAGE_ENUMPROCA)proc)( nameA, param )) break;
+            }
+        }
     }
-    RegCloseKey( key );
     return TRUE;
 }
 
@@ -3628,44 +3748,7 @@ INT WINAPI DECLSPEC_HOTPATCH CompareStringOrdinal( const WCHAR *str1, INT len1,
  */
 LCID WINAPI DECLSPEC_HOTPATCH ConvertDefaultLocale( LCID lcid )
 {
-    switch (lcid)
-    {
-    case LOCALE_INVARIANT:
-        return lcid; /* keep as-is */
-    case LOCALE_SYSTEM_DEFAULT:
-        return GetSystemDefaultLCID();
-    case LOCALE_USER_DEFAULT:
-    case LOCALE_NEUTRAL:
-        return GetUserDefaultLCID();
-    case MAKELANGID( LANG_CHINESE, SUBLANG_NEUTRAL ):
-    case MAKELANGID( LANG_CHINESE, 0x1e ):
-        return MAKELANGID( LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED );
-    case MAKELANGID( LANG_CHINESE, 0x1f ):
-        return MAKELANGID( LANG_CHINESE, SUBLANG_CHINESE_HONGKONG );
-    case LANG_SERBIAN_NEUTRAL:
-        return MAKELANGID( LANG_SERBIAN, SUBLANG_SERBIAN_SERBIA_LATIN );
-    case MAKELANGID( LANG_SPANISH, SUBLANG_NEUTRAL ):
-        return MAKELANGID( LANG_SPANISH, SUBLANG_SPANISH_MODERN );
-    case MAKELANGID( LANG_IRISH, SUBLANG_NEUTRAL ):
-        return MAKELANGID( LANG_IRISH, SUBLANG_IRISH_IRELAND );
-    case MAKELANGID( LANG_BENGALI, SUBLANG_NEUTRAL ):
-        return MAKELANGID( LANG_BENGALI, SUBLANG_BENGALI_BANGLADESH );
-    case MAKELANGID( LANG_SINDHI, SUBLANG_NEUTRAL ):
-        return MAKELANGID( LANG_SINDHI, SUBLANG_SINDHI_AFGHANISTAN );
-    case MAKELANGID( LANG_INUKTITUT, SUBLANG_NEUTRAL ):
-        return MAKELANGID( LANG_INUKTITUT, SUBLANG_INUKTITUT_CANADA_LATIN );
-    case MAKELANGID( LANG_TAMAZIGHT, SUBLANG_NEUTRAL ):
-        return MAKELANGID( LANG_TAMAZIGHT, SUBLANG_TAMAZIGHT_ALGERIA_LATIN );
-    case MAKELANGID( LANG_FULAH, SUBLANG_NEUTRAL ):
-        return MAKELANGID( LANG_FULAH, SUBLANG_FULAH_SENEGAL );
-    case MAKELANGID( LANG_TIGRINYA, SUBLANG_NEUTRAL ):
-        return MAKELANGID( LANG_TIGRINYA, SUBLANG_TIGRINYA_ERITREA );
-    default:
-        /* Replace SUBLANG_NEUTRAL with SUBLANG_DEFAULT */
-        if (SUBLANGID(lcid) == SUBLANG_NEUTRAL && SORTIDFROMLCID(lcid) == SORT_DEFAULT)
-            lcid = MAKELANGID( PRIMARYLANGID(lcid), SUBLANG_DEFAULT );
-        break;
-    }
+    get_locale_by_id( &lcid, 0 );
     return lcid;
 }
 
@@ -3833,20 +3916,19 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumSystemLanguageGroupsW( LANGUAGEGROUP_ENUMPROCW
 BOOL WINAPI DECLSPEC_HOTPATCH EnumSystemLocalesA( LOCALE_ENUMPROCA proc, DWORD flags )
 {
     char name[10];
-    DWORD name_len, type, index = 0;
-    HKEY key;
+    DWORD i;
 
-    if (RegOpenKeyExW( nls_key, L"Locale", 0, KEY_READ, &key )) return FALSE;
-
-    for (;;)
+    for (i = 0; i < locale_table->nb_lcnames; i++)
     {
-        name_len = ARRAY_SIZE(name);
-        if (RegEnumValueA( key, index++, name, &name_len, NULL, &type, NULL, NULL )) break;
-        if (type != REG_SZ) continue;
-        if (!strtoul( name, NULL, 16 )) continue;
+        if (!lcnames_index[i].name) continue;  /* skip invariant locale */
+        if (lcnames_index[i].id == LOCALE_CUSTOM_UNSPECIFIED) continue;  /* skip locales with no lcid */
+        if (lcnames_index[i].id & 0x80000000) continue;  /* skip aliases */
+        if (!get_locale_data( lcnames_index[i].idx )->inotneutral) continue;  /* skip neutral locales */
+        if (!SORTIDFROMLCID( lcnames_index[i].id ) != !(flags & LCID_ALTERNATE_SORTS))
+            continue;  /* skip alternate sorts */
+        sprintf( name, "%08x", lcnames_index[i].id );
         if (!proc( name )) break;
     }
-    RegCloseKey( key );
     return TRUE;
 }
 
@@ -3857,20 +3939,19 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumSystemLocalesA( LOCALE_ENUMPROCA proc, DWORD f
 BOOL WINAPI DECLSPEC_HOTPATCH EnumSystemLocalesW( LOCALE_ENUMPROCW proc, DWORD flags )
 {
     WCHAR name[10];
-    DWORD name_len, type, index = 0;
-    HKEY key;
+    DWORD i;
 
-    if (RegOpenKeyExW( nls_key, L"Locale", 0, KEY_READ, &key )) return FALSE;
-
-    for (;;)
+    for (i = 0; i < locale_table->nb_lcnames; i++)
     {
-        name_len = ARRAY_SIZE(name);
-        if (RegEnumValueW( key, index++, name, &name_len, NULL, &type, NULL, NULL )) break;
-        if (type != REG_SZ) continue;
-        if (!wcstoul( name, NULL, 16 )) continue;
+        if (!lcnames_index[i].name) continue;  /* skip invariant locale */
+        if (lcnames_index[i].id == LOCALE_CUSTOM_UNSPECIFIED) continue;  /* skip locales with no lcid */
+        if (lcnames_index[i].id & 0x80000000) continue;  /* skip aliases */
+        if (!get_locale_data( lcnames_index[i].idx )->inotneutral) continue;  /* skip neutral locales */
+        if (!SORTIDFROMLCID( lcnames_index[i].id ) != !(flags & LCID_ALTERNATE_SORTS))
+            continue;  /* skip alternate sorts */
+        swprintf( name, ARRAY_SIZE(name), L"%08lx", lcnames_index[i].id );
         if (!proc( name )) break;
     }
-    RegCloseKey( key );
     return TRUE;
 }
 
@@ -3881,10 +3962,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumSystemLocalesW( LOCALE_ENUMPROCW proc, DWORD f
 BOOL WINAPI DECLSPEC_HOTPATCH EnumSystemLocalesEx( LOCALE_ENUMPROCEX proc, DWORD wanted_flags,
                                                    LPARAM param, void *reserved )
 {
-    WCHAR buffer[256], name[10];
-    DWORD name_len, type, neutral, flags, index = 0, alt = 0;
-    HKEY key, altkey;
-    LCID lcid;
+    WCHAR buffer[LOCALE_NAME_MAX_LENGTH];
+    DWORD i, flags;
 
     if (reserved)
     {
@@ -3892,36 +3971,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumSystemLocalesEx( LOCALE_ENUMPROCEX proc, DWORD
         return FALSE;
     }
 
-    if (RegOpenKeyExW( nls_key, L"Locale", 0, KEY_READ, &key )) return FALSE;
-    if (RegOpenKeyExW( key, L"Alternate Sorts", 0, KEY_READ, &altkey )) altkey = 0;
-
-    for (;;)
+    for (i = 0; i < locale_table->nb_lcnames; i++)
     {
-        name_len = ARRAY_SIZE(name);
-        if (RegEnumValueW( alt ? altkey : key, index++, name, &name_len, NULL, &type, NULL, NULL ))
-        {
-            if (alt++) break;
-            index = 0;
-            continue;
-        }
-        if (type != REG_SZ) continue;
-        if (!(lcid = wcstoul( name, NULL, 16 ))) continue;
+        const NLS_LOCALE_DATA *locale = get_locale_data( lcnames_index[i].idx );
+        const WCHAR *str = locale_strings + lcnames_index[i].name;
 
-        GetLocaleInfoW( lcid, LOCALE_SNAME | LOCALE_NOUSEROVERRIDE, buffer, ARRAY_SIZE( buffer ));
-        if (!GetLocaleInfoW( lcid, LOCALE_INEUTRAL | LOCALE_NOUSEROVERRIDE | LOCALE_RETURN_NUMBER,
-                             (LPWSTR)&neutral, sizeof(neutral) / sizeof(WCHAR) ))
-            neutral = 0;
-
-        if (alt)
+        if (lcnames_index[i].id & 0x80000000) continue;  /* skip aliases */
+        memcpy( buffer, str + 1, (*str + 1) * sizeof(WCHAR) );
+        if (SORTIDFROMLCID( lcnames_index[i].id ) || wcschr( str + 1, '_' ))
             flags = LOCALE_ALTERNATE_SORTS;
         else
-            flags = LOCALE_WINDOWS | (neutral ? LOCALE_NEUTRALDATA : LOCALE_SPECIFICDATA);
-
+            flags = LOCALE_WINDOWS | (locale->inotneutral ? LOCALE_SPECIFICDATA : LOCALE_NEUTRALDATA);
         if (wanted_flags && !(flags & wanted_flags)) continue;
         if (!proc( buffer, flags, param )) break;
     }
-    RegCloseKey( altkey );
-    RegCloseKey( key );
     return TRUE;
 }
 
@@ -5111,9 +5174,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetStringTypeExW( LCID locale, DWORD type, const W
  */
 LCID WINAPI DECLSPEC_HOTPATCH GetSystemDefaultLCID(void)
 {
-    LCID lcid;
-    NtQueryDefaultLocale( FALSE, &lcid );
-    return lcid;
+    return system_lcid;
 }
 
 
@@ -5260,9 +5321,7 @@ done:
  */
 LCID WINAPI DECLSPEC_HOTPATCH GetUserDefaultLCID(void)
 {
-    LCID lcid;
-    NtQueryDefaultLocale( TRUE, &lcid );
-    return lcid;
+    return user_lcid;
 }
 
 
@@ -5591,9 +5650,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsValidLanguageGroup( LGRPID id, DWORD flags )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH IsValidLocale( LCID lcid, DWORD flags )
 {
-    /* check if language is registered in the kernel32 resources */
-    return FindResourceExW( kernel32_handle, (LPWSTR)RT_STRING,
-                            ULongToPtr( (LOCALE_ILANGUAGE >> 4) + 1 ), LANGIDFROMLCID(lcid)) != 0;
+    return !!get_locale_by_id( &lcid, LOCALE_ALLOW_NEUTRAL_NAMES );
 }
 
 
@@ -5602,9 +5659,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsValidLocale( LCID lcid, DWORD flags )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH IsValidLocaleName( const WCHAR *locale )
 {
-    LCID lcid;
-
-    return !RtlLocaleNameToLcid( locale, &lcid, 2 );
+    if (locale == LOCALE_NAME_USER_DEFAULT) return FALSE;
+    return !!find_lcname_entry( locale );
 }
 
 
@@ -5950,10 +6006,15 @@ INT WINAPI DECLSPEC_HOTPATCH LCMapStringW( LCID lcid, DWORD flags, const WCHAR *
 LCID WINAPI DECLSPEC_HOTPATCH LocaleNameToLCID( const WCHAR *name, DWORD flags )
 {
     LCID lcid;
+    const NLS_LOCALE_DATA *locale = get_locale_by_name( name, &lcid );
 
-    if (!name) return GetUserDefaultLCID();
-    if (!set_ntstatus( RtlLocaleNameToLcid( name, &lcid, 2 ))) return 0;
-    if (!(flags & LOCALE_ALLOW_NEUTRAL_NAMES)) lcid = ConvertDefaultLocale( lcid );
+    if (!locale)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+    if (!(flags & LOCALE_ALLOW_NEUTRAL_NAMES) && !locale->inotneutral)
+        lcid = locale->idefaultlanguage;
     return lcid;
 }
 

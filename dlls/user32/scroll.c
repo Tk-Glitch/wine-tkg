@@ -644,7 +644,7 @@ void WINAPI USER_ScrollBarDraw( HWND hwnd, HDC hdc, INT nBar, enum SCROLL_HITTES
     }
 }
 
-void SCROLL_SetStandardScrollPainted( HWND hwnd, INT bar, BOOL painted )
+void WINAPI SCROLL_SetStandardScrollPainted( HWND hwnd, INT bar, BOOL painted )
 {
     LPSCROLLBAR_INFO info;
 
@@ -732,12 +732,11 @@ void SCROLL_DrawNCScrollBar( HWND hwnd, HDC hdc, BOOL draw_horizontal, BOOL draw
 static void SCROLL_RefreshScrollBar( HWND hwnd, INT nBar,
 				     BOOL arrows, BOOL interior )
 {
-    HDC hdc = GetDCEx( hwnd, 0,
-                           DCX_CACHE | ((nBar == SB_CTL) ? 0 : DCX_WINDOW) );
+    HDC hdc = NtUserGetDCEx( hwnd, 0, DCX_CACHE | ((nBar == SB_CTL) ? 0 : DCX_WINDOW) );
     if (!hdc) return;
 
     SCROLL_DrawScrollBar( hwnd, hdc, nBar, g_tracking_info.hit_test, &g_tracking_info, arrows, interior );
-    ReleaseDC( hwnd, hdc );
+    NtUserReleaseDC( hwnd, hdc );
 }
 
 
@@ -836,7 +835,7 @@ void SCROLL_HandleScrollEvent( HWND hwnd, INT nBar, UINT msg, POINT pt )
         return;
     }
 
-    hdc = GetDCEx( hwnd, 0, DCX_CACHE | ((nBar == SB_CTL) ? 0 : DCX_WINDOW));
+    hdc = NtUserGetDCEx( hwnd, 0, DCX_CACHE | ((nBar == SB_CTL) ? 0 : DCX_WINDOW));
     vertical = SCROLL_GetScrollBarRect( hwnd, nBar, &rect,
                                         &arrowSize, &thumbSize, &thumbPos );
     hwndOwner = (nBar == SB_CTL) ? GetParent(hwnd) : hwnd;
@@ -950,8 +949,8 @@ void SCROLL_HandleScrollEvent( HWND hwnd, INT nBar, UINT msg, POINT pt )
                                 SB_LINEUP, (LPARAM)hwndCtl );
 	    }
 
-	    SetSystemTimer( hwnd, SCROLL_TIMER, (msg == WM_LBUTTONDOWN) ?
-                            SCROLL_FIRST_DELAY : SCROLL_REPEAT_DELAY, NULL );
+	    NtUserSetSystemTimer( hwnd, SCROLL_TIMER, (msg == WM_LBUTTONDOWN) ?
+                                  SCROLL_FIRST_DELAY : SCROLL_REPEAT_DELAY, NULL );
         }
         else KillSystemTimer( hwnd, SCROLL_TIMER );
         break;
@@ -965,8 +964,8 @@ void SCROLL_HandleScrollEvent( HWND hwnd, INT nBar, UINT msg, POINT pt )
                 SendMessageW( hwndOwner, vertical ? WM_VSCROLL : WM_HSCROLL,
                                 SB_PAGEUP, (LPARAM)hwndCtl );
             }
-            SetSystemTimer( hwnd, SCROLL_TIMER, (msg == WM_LBUTTONDOWN) ?
-                              SCROLL_FIRST_DELAY : SCROLL_REPEAT_DELAY, NULL );
+            NtUserSetSystemTimer( hwnd, SCROLL_TIMER, (msg == WM_LBUTTONDOWN) ?
+                                  SCROLL_FIRST_DELAY : SCROLL_REPEAT_DELAY, NULL );
         }
         else KillSystemTimer( hwnd, SCROLL_TIMER );
         break;
@@ -1023,8 +1022,8 @@ void SCROLL_HandleScrollEvent( HWND hwnd, INT nBar, UINT msg, POINT pt )
                 SendMessageW( hwndOwner, vertical ? WM_VSCROLL : WM_HSCROLL,
                                 SB_PAGEDOWN, (LPARAM)hwndCtl );
             }
-            SetSystemTimer( hwnd, SCROLL_TIMER, (msg == WM_LBUTTONDOWN) ?
-                              SCROLL_FIRST_DELAY : SCROLL_REPEAT_DELAY, NULL );
+            NtUserSetSystemTimer( hwnd, SCROLL_TIMER, (msg == WM_LBUTTONDOWN) ?
+                                  SCROLL_FIRST_DELAY : SCROLL_REPEAT_DELAY, NULL );
         }
         else KillSystemTimer( hwnd, SCROLL_TIMER );
         break;
@@ -1039,8 +1038,8 @@ void SCROLL_HandleScrollEvent( HWND hwnd, INT nBar, UINT msg, POINT pt )
                                 SB_LINEDOWN, (LPARAM)hwndCtl );
 	    }
 
-	    SetSystemTimer( hwnd, SCROLL_TIMER, (msg == WM_LBUTTONDOWN) ?
-                            SCROLL_FIRST_DELAY : SCROLL_REPEAT_DELAY, NULL );
+	    NtUserSetSystemTimer( hwnd, SCROLL_TIMER, (msg == WM_LBUTTONDOWN) ?
+                                  SCROLL_FIRST_DELAY : SCROLL_REPEAT_DELAY, NULL );
         }
         else KillSystemTimer( hwnd, SCROLL_TIMER );
         break;
@@ -1081,7 +1080,7 @@ void SCROLL_HandleScrollEvent( HWND hwnd, INT nBar, UINT msg, POINT pt )
         SCROLL_DrawScrollBar( hwnd, hdc, nBar, hittest, &g_tracking_info, TRUE, TRUE );
     }
 
-    ReleaseDC( hwnd, hdc );
+    NtUserReleaseDC( hwnd, hdc );
 }
 
 
@@ -1522,9 +1521,9 @@ LRESULT WINAPI USER_ScrollBarProc( HWND hwnd, UINT message, WPARAM wParam, LPARA
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
-            HDC hdc = wParam ? (HDC)wParam : BeginPaint(hwnd, &ps);
+            HDC hdc = wParam ? (HDC)wParam : NtUserBeginPaint( hwnd, &ps );
             SCROLL_DrawScrollBar( hwnd, hdc, SB_CTL, g_tracking_info.hit_test, &g_tracking_info, TRUE, TRUE );
-            if (!wParam) EndPaint(hwnd, &ps);
+            if (!wParam) NtUserEndPaint( hwnd, &ps );
         }
         break;
 
@@ -1974,7 +1973,7 @@ static BOOL SCROLL_ShowScrollBar( HWND hwnd, INT nBar, BOOL fShowH, BOOL fShowV 
     switch(nBar)
     {
     case SB_CTL:
-        ShowWindow( hwnd, fShowH ? SW_SHOW : SW_HIDE );
+        NtUserShowWindow( hwnd, fShowH ? SW_SHOW : SW_HIDE );
         return TRUE;
 
     case SB_BOTH:
@@ -1996,8 +1995,8 @@ static BOOL SCROLL_ShowScrollBar( HWND hwnd, INT nBar, BOOL fShowH, BOOL fShowV 
     if ((old_style & clear_bits) != 0 || (old_style & set_bits) != set_bits)
     {
         /* frame has been changed, let the window redraw itself */
-        SetWindowPos( hwnd, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE
-                    | SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED );
+        NtUserSetWindowPos( hwnd, 0, 0, 0, 0, 0,
+                            SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED );
         return TRUE;
     }
     return FALSE; /* no frame changes */

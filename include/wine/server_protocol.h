@@ -1793,14 +1793,16 @@ struct send_socket_request
     struct request_header __header;
     char __pad_12[4];
     async_data_t async;
-    unsigned int status;
-    unsigned int total;
+    int          force_async;
+    char __pad_60[4];
 };
 struct send_socket_reply
 {
     struct reply_header __header;
     obj_handle_t wait;
     unsigned int options;
+    int          nonblocking;
+    char __pad_20[4];
 };
 
 
@@ -2924,7 +2926,7 @@ struct set_async_direct_result_request
     obj_handle_t   handle;
     apc_param_t    information;
     unsigned int   status;
-    char __pad_28[4];
+    int            mark_pending;
 };
 struct set_async_direct_result_reply
 {
@@ -6511,7 +6513,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 748
+#define SERVER_PROTOCOL_VERSION 751
 
 /* ### protocol_version end ### */
 

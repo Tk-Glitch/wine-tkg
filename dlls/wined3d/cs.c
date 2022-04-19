@@ -49,12 +49,14 @@ struct wined3d_command_list
     SIZE_T data_size;
     void *data;
 
-    HANDLE upload_heap;
     SIZE_T resource_count;
     struct wined3d_resource **resources;
 
     SIZE_T upload_count;
     struct wined3d_deferred_upload *uploads;
+
+    HANDLE upload_heap;
+    LONG *upload_heap_refcount;
 
     /* List of command lists queued for execution on this command list. We might
      * be the only thing holding a pointer to another command list, so we need
@@ -630,9 +632,9 @@ static const char *debug_cs_op(enum wined3d_cs_op op)
     return wine_dbg_sprintf("UNKNOWN_OP(%#x)", op);
 }
 
-static struct wined3d_cs_packet *wined3d_next_cs_packet(const uint8_t *data, SIZE_T *offset)
+static struct wined3d_cs_packet *wined3d_next_cs_packet(const uint8_t *data, SIZE_T *offset, SIZE_T mask)
 {
-    struct wined3d_cs_packet *packet = (struct wined3d_cs_packet *)&data[WINED3D_CS_QUEUE_MASK(*offset)];
+    struct wined3d_cs_packet *packet = (struct wined3d_cs_packet *)&data[*offset & mask];
 
     *offset += offsetof(struct wined3d_cs_packet, data[packet->size]);
 
@@ -2904,27 +2906,6 @@ static void (* const wined3d_cs_op_handlers[])(struct wined3d_cs *cs, const void
     /* WINED3D_CS_OP_EXECUTE_COMMAND_LIST        */ wined3d_cs_exec_execute_command_list,
 };
 
-static void wined3d_cs_exec_execute_command_list(struct wined3d_cs *cs, const void *data)
-{
-    const struct wined3d_cs_execute_command_list *op = data;
-    SIZE_T start = 0, end = op->list->data_size;
-    const BYTE *cs_data = op->list->data;
-
-    TRACE("Executing command list %p.\n", op->list);
-
-    while (start < end)
-    {
-        const struct wined3d_cs_packet *packet = wined3d_next_cs_packet(cs_data, &start);
-        enum wined3d_cs_op opcode = *(const enum wined3d_cs_op *)packet->data;
-
-        if (opcode >= WINED3D_CS_OP_STOP)
-            ERR("Invalid opcode %#x.\n", opcode);
-        else
-            wined3d_cs_op_handlers[opcode](cs, packet->data);
-        TRACE("%s executed.\n", debug_cs_op(opcode));
-    }
-}
-
 void wined3d_device_context_emit_execute_command_list(struct wined3d_device_context *context,
         struct wined3d_command_list *list, bool restore_state)
 {
@@ -3171,7 +3152,7 @@ static void wined3d_cs_queue_submit(struct wined3d_cs_queue *queue, struct wined
     struct wined3d_cs_packet *packet;
     size_t packet_size;
 
-    packet = (struct wined3d_cs_packet *)&queue->data[WINED3D_CS_QUEUE_MASK(queue->head)];
+    packet = (struct wined3d_cs_packet *)&queue->data[queue->head & WINED3D_CS_QUEUE_MASK];
     TRACE("Queuing op %s at %p.\n", debug_cs_op(*(const enum wined3d_cs_op *)packet->data), packet);
     packet_size = FIELD_OFFSET(struct wined3d_cs_packet, data[packet->size]);
     InterlockedExchange((LONG *)&queue->head, queue->head + packet_size);
@@ -3195,7 +3176,7 @@ static void *wined3d_cs_queue_require_space(struct wined3d_cs_queue *queue, size
     size_t queue_size = ARRAY_SIZE(queue->data);
     size_t header_size, packet_size, remaining;
     struct wined3d_cs_packet *packet;
-    ULONG head = WINED3D_CS_QUEUE_MASK(queue->head);
+    ULONG head = queue->head & WINED3D_CS_QUEUE_MASK;
 
     header_size = FIELD_OFFSET(struct wined3d_cs_packet, data[0]);
     packet_size = FIELD_OFFSET(struct wined3d_cs_packet, data[size]);
@@ -3222,19 +3203,19 @@ static void *wined3d_cs_queue_require_space(struct wined3d_cs_queue *queue, size
             nop->opcode = WINED3D_CS_OP_NOP;
 
         wined3d_cs_queue_submit(queue, cs);
-        head = WINED3D_CS_QUEUE_MASK(queue->head);
+        head = queue->head & WINED3D_CS_QUEUE_MASK;
         assert(!head);
     }
 
     for (;;)
     {
-        ULONG tail = WINED3D_CS_QUEUE_MASK(*(volatile ULONG *)&queue->tail);
+        ULONG tail = (*(volatile ULONG *)&queue->tail) & WINED3D_CS_QUEUE_MASK;
         ULONG new_pos;
 
         /* Empty. */
         if (head == tail)
             break;
-        new_pos = WINED3D_CS_QUEUE_MASK(head + packet_size);
+        new_pos = (head + packet_size) & WINED3D_CS_QUEUE_MASK;
         /* Head ahead of tail. We checked the remaining size above, so we only
          * need to make sure we don't make head equal to tail. */
         if (head > tail && (new_pos != tail))
@@ -3335,16 +3316,74 @@ static void wined3d_cs_command_unlock(const struct wined3d_cs *cs)
         LeaveCriticalSection(&wined3d_command_cs);
 }
 
-static DWORD WINAPI wined3d_cs_run(void *ctx)
+static inline bool wined3d_cs_execute_next(struct wined3d_cs *cs, struct wined3d_cs_queue *queue)
 {
     struct wined3d_cs_packet *packet;
+    enum wined3d_cs_op opcode;
+    SIZE_T tail;
+
+    tail = queue->tail;
+    packet = wined3d_next_cs_packet(queue->data, &tail, WINED3D_CS_QUEUE_MASK);
+
+    if (packet->size)
+    {
+        opcode = *(const enum wined3d_cs_op *)packet->data;
+
+        TRACE("Executing %s at %p.\n", debug_cs_op(opcode), packet);
+        if (opcode >= WINED3D_CS_OP_STOP)
+        {
+            if (opcode > WINED3D_CS_OP_STOP)
+                ERR("Invalid opcode %#x.\n", opcode);
+            return false;
+        }
+
+        wined3d_cs_command_lock(cs);
+        wined3d_cs_op_handlers[opcode](cs, packet->data);
+        wined3d_cs_command_unlock(cs);
+        TRACE("%s at %p executed.\n", debug_cs_op(opcode), packet);
+    }
+
+    InterlockedExchange((LONG *)&queue->tail, tail);
+    return true;
+}
+
+static void wined3d_cs_exec_execute_command_list(struct wined3d_cs *cs, const void *data)
+{
+    const struct wined3d_cs_execute_command_list *op = data;
+    SIZE_T start = 0, end = op->list->data_size;
+    const BYTE *cs_data = op->list->data;
+    struct wined3d_cs_queue *queue;
+
+    TRACE("Executing command list %p.\n", op->list);
+
+    queue = &cs->queue[WINED3D_CS_QUEUE_MAP];
+    while (start < end)
+    {
+        const struct wined3d_cs_packet *packet;
+        enum wined3d_cs_op opcode;
+
+        while (!wined3d_cs_queue_is_empty(cs, queue))
+            wined3d_cs_execute_next(cs, queue);
+
+        packet = wined3d_next_cs_packet(cs_data, &start, WINED3D_CS_QUEUE_MASK);
+        opcode = *(const enum wined3d_cs_op *)packet->data;
+
+        if (opcode >= WINED3D_CS_OP_STOP)
+            ERR("Invalid opcode %#x.\n", opcode);
+        else
+            wined3d_cs_op_handlers[opcode](cs, packet->data);
+        TRACE("%s executed.\n", debug_cs_op(opcode));
+    }
+}
+
+static DWORD WINAPI wined3d_cs_run(void *ctx)
+{
     struct wined3d_cs_queue *queue;
     unsigned int spin_count = 0;
     struct wined3d_cs *cs = ctx;
-    enum wined3d_cs_op opcode;
     HMODULE wined3d_module;
     unsigned int poll = 0;
-    SIZE_T tail;
+    bool run = true;
 
     TRACE("Started.\n");
 
@@ -3354,7 +3393,7 @@ static DWORD WINAPI wined3d_cs_run(void *ctx)
 
     list_init(&cs->query_poll_list);
     cs->thread_id = GetCurrentThreadId();
-    for (;;)
+    while (run)
     {
         if (++poll == WINED3D_CS_QUERY_POLL_INTERVAL)
         {
@@ -3377,27 +3416,7 @@ static DWORD WINAPI wined3d_cs_run(void *ctx)
         }
         spin_count = 0;
 
-        tail = queue->tail;
-        packet = wined3d_next_cs_packet(queue->data, &tail);
-        if (packet->size)
-        {
-            opcode = *(const enum wined3d_cs_op *)packet->data;
-
-            TRACE("Executing %s at %p.\n", debug_cs_op(opcode), packet);
-            if (opcode >= WINED3D_CS_OP_STOP)
-            {
-                if (opcode > WINED3D_CS_OP_STOP)
-                    ERR("Invalid opcode %#x.\n", opcode);
-                break;
-            }
-
-            wined3d_cs_command_lock(cs);
-            wined3d_cs_op_handlers[opcode](cs, packet->data);
-            wined3d_cs_command_unlock(cs);
-            TRACE("%s at %p executed.\n", debug_cs_op(opcode), packet);
-        }
-
-        InterlockedExchange((LONG *)&queue->tail, tail);
+        run = wined3d_cs_execute_next(cs, queue);
     }
 
     cs->queue[WINED3D_CS_QUEUE_MAP].tail = cs->queue[WINED3D_CS_QUEUE_MAP].head;
@@ -3975,7 +3994,6 @@ static void wined3d_cs_packet_incref_objects(struct wined3d_cs_packet *packet)
 struct wined3d_deferred_context
 {
     struct wined3d_device_context c;
-    HANDLE upload_heap;
 
     SIZE_T data_size, data_capacity;
     void *data;
@@ -3985,6 +4003,9 @@ struct wined3d_deferred_context
 
     SIZE_T upload_count, uploads_capacity;
     struct wined3d_deferred_upload *uploads;
+
+    HANDLE upload_heap;
+    LONG *upload_heap_refcount;
 
     /* List of command lists queued for execution on this context. A command
      * list can be the only thing holding a pointer to another command list, so
@@ -4030,7 +4051,7 @@ static void wined3d_deferred_context_submit(struct wined3d_device_context *conte
     struct wined3d_cs_packet *packet;
 
     assert(queue_id == WINED3D_CS_QUEUE_DEFAULT);
-    packet = wined3d_next_cs_packet(deferred->data, &deferred->data_size);
+    packet = wined3d_next_cs_packet(deferred->data, &deferred->data_size, ~(SIZE_T)0);
     wined3d_cs_packet_incref_objects(packet);
 }
 
@@ -4106,11 +4127,21 @@ static bool wined3d_deferred_context_map_upload_bo(struct wined3d_device_context
         return false;
 
     if (!deferred->upload_heap)
-        deferred->upload_heap = HeapCreate(HEAP_NO_SERIALIZE, 0, 0);
-    if (!deferred->upload_heap)
     {
-        ERR("Failed to create upload heap.\n");
-        return false;
+        if (!(deferred->upload_heap = HeapCreate(0, 0, 0)))
+        {
+            ERR("Failed to create upload heap.\n");
+            return false;
+        }
+
+        if (!(deferred->upload_heap_refcount = heap_alloc(sizeof(*deferred->upload_heap_refcount))))
+        {
+            HeapDestroy(deferred->upload_heap);
+            deferred->upload_heap = 0;
+            return false;
+        }
+
+        *deferred->upload_heap_refcount = 1;
     }
 
     if (!(sysmem = HeapAlloc(deferred->upload_heap, 0, size + RESOURCE_ALIGNMENT - 1)))
@@ -4258,9 +4289,20 @@ void CDECL wined3d_deferred_context_destroy(struct wined3d_device_context *conte
     heap_free(deferred->resources);
 
     for (i = 0; i < deferred->upload_count; ++i)
+    {
         wined3d_resource_decref(deferred->uploads[i].resource);
+        HeapFree(deferred->upload_heap, 0, deferred->uploads[i].resource);
+    }
+
     if (deferred->upload_heap)
-        HeapDestroy(deferred->upload_heap);
+    {
+        if (!InterlockedDecrement(deferred->upload_heap_refcount))
+        {
+            HeapDestroy(deferred->upload_heap);
+            heap_free(deferred->upload_heap_refcount);
+        }
+    }
+
     heap_free(deferred->uploads);
 
     for (i = 0; i < deferred->command_list_count; ++i)
@@ -4273,7 +4315,7 @@ void CDECL wined3d_deferred_context_destroy(struct wined3d_device_context *conte
 
     while (offset < deferred->data_size)
     {
-        packet = wined3d_next_cs_packet(deferred->data, &offset);
+        packet = wined3d_next_cs_packet(deferred->data, &offset, ~(SIZE_T)0);
         wined3d_cs_packet_decref_objects(packet);
     }
 
@@ -4346,7 +4388,8 @@ HRESULT CDECL wined3d_deferred_context_record_command_list(struct wined3d_device
     deferred->query_count = 0;
 
     object->upload_heap = deferred->upload_heap;
-    deferred->upload_heap = 0;
+    if ((object->upload_heap_refcount = deferred->upload_heap_refcount))
+        InterlockedIncrement(object->upload_heap_refcount);
 
     /* This is in fact recorded into a subsequent command list. */
     if (restore)
@@ -4364,11 +4407,22 @@ HRESULT CDECL wined3d_deferred_context_record_command_list(struct wined3d_device
 static void wined3d_command_list_destroy_object(void *object)
 {
     struct wined3d_command_list *list = object;
+    unsigned int i;
 
     TRACE("list %p.\n", list);
 
+    for (i = 0; i < list->upload_count; ++i)
+        HeapFree(list->upload_heap, 0, list->uploads[i].sysmem);
+
     if (list->upload_heap)
-        HeapDestroy(list->upload_heap);
+    {
+        if (!InterlockedDecrement(list->upload_heap_refcount))
+        {
+            HeapDestroy(list->upload_heap);
+            heap_free(list->upload_heap_refcount);
+        }
+    }
+
     heap_free(list);
 }
 
@@ -4404,7 +4458,7 @@ ULONG CDECL wined3d_command_list_decref(struct wined3d_command_list *list)
         offset = 0;
         while (offset < list->data_size)
         {
-            packet = wined3d_next_cs_packet(list->data, &offset);
+            packet = wined3d_next_cs_packet(list->data, &offset, ~(SIZE_T)0);
             wined3d_cs_packet_decref_objects(packet);
         }
 

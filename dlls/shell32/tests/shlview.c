@@ -1491,11 +1491,11 @@ static void test_newmenu(void)
     IUnknown_Release(unk2);
 
     hr = IUnknown_QueryInterface(unk, &IID_IContextMenu, (void **)&unk2);
-    ok(hr == S_OK, "Failed to get IContextMenu, hr %#x.\n", hr);
+    ok(hr == S_OK, "Failed to get IContextMenu, hr %#lx.\n", hr);
     IUnknown_Release(unk2);
 
     hr = IUnknown_QueryInterface(unk, &IID_IContextMenu2, (void **)&unk2);
-    ok(hr == S_OK, "Failed to get IContextMenu2, hr %#x.\n", hr);
+    ok(hr == S_OK, "Failed to get IContextMenu2, hr %#lx.\n", hr);
     IUnknown_Release(unk2);
 
     hr = IUnknown_QueryInterface(unk, &IID_IContextMenu3, (void **)&unk2);

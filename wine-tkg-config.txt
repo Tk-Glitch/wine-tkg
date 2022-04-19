@@ -1,15 +1,16 @@
-# Last wine-tkg-staging-fsync-git configuration - mar. 19 avril 2022 16:00:45 CEST :
+# Last wine-tkg-staging-fsync-git configuration - mar. 19 avril 2022 16:01:27 CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 7.4.r0.g330dc601978
-Using wine-staging patchset (version 7.4.r0.ge5ddda02)
+Wine (plain) version: 7.5.r0.g4bbb43d6c7e
+Using wine-staging patchset (version 7.5.r0.g1e792e2d)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
 
 Done applying reverting hotfixes (if any) - list available in prepare.log
 
+Applied reverting hotfix win32u_reverts.mystagingrevert
 Applied hotfix protonify_stg_syscall_emu-009.mystagingpatch
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
@@ -22,10 +23,10 @@ fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esy
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
 fsync_futex_waitv.patch -- ( Replace all fsync interfaces with futex_waitv )
 
-valve_proton_fullscreen_hack-staging-a831aa1.patch -- ( Applied Proton fullscreen hack patch (a831aa1) )
+valve_proton_fullscreen_hack-staging.patch -- ( Applied Proton fullscreen hack patch (staging) )
 LAA-unix-staging.patch -- ( Applied large address aware override support )
 
-proton-tkg-staging-ee2ef01.patch -- ( Using Steam-specific Proton-tkg patches (staging-ee2ef01) 2/2 )
+proton-tkg-staging-7ba3c31.patch -- ( Using Steam-specific Proton-tkg patches (staging-7ba3c31) 2/2 )
 rdr2.patch -- ( Enable Proton's RDR2 fixes from Paul Gofman )
 proton-cpu-topology-overrides.patch -- ( Enable Proton's CPU topology override support )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )

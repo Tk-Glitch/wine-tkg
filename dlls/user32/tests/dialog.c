@@ -28,7 +28,6 @@
  * strangeness, especially since most are in situations that would not
  * normally be met.
  */
-#undef WINE_NO_LONG_TYPES /* temporary for migration */
 
 #include <assert.h>
 #include <stdio.h>
@@ -2407,7 +2406,7 @@ static void test_MessageBox(void)
 
     UnhookWindowsHookEx(hook);
 
-    sprintf(params.caption, "pid %08x, tid %08x, time %08x",
+    sprintf(params.caption, "pid %08lx, tid %08lx, time %08lx",
             GetCurrentProcessId(), GetCurrentThreadId(), GetCurrentTime());
 
     params.owner = FALSE;
@@ -2423,7 +2422,7 @@ static void test_MessageBox(void)
 
         hwnd = wait_for_window(params.caption);
         ex_style = GetWindowLongA(hwnd, GWL_EXSTYLE);
-        ok((ex_style & WS_EX_TOPMOST) == test[i].ex_style, "%d: got window ex_style %#x\n", i, ex_style);
+        ok((ex_style & WS_EX_TOPMOST) == test[i].ex_style, "%ld: got window ex_style %#lx\n", i, ex_style);
 
         PostMessageA(hwnd, WM_COMMAND, IDCANCEL, 0);
 
@@ -2444,7 +2443,7 @@ static void test_MessageBox(void)
 
         hwnd = wait_for_window(params.caption);
         ex_style = GetWindowLongA(hwnd, GWL_EXSTYLE);
-        ok((ex_style & WS_EX_TOPMOST) == test[i].ex_style, "%d: got window ex_style %#x\n", i, ex_style);
+        ok((ex_style & WS_EX_TOPMOST) == test[i].ex_style, "%ld: got window ex_style %#lx\n", i, ex_style);
 
         PostMessageA(hwnd, WM_COMMAND, IDCANCEL, 0);
 

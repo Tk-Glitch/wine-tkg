@@ -198,7 +198,8 @@ static void * const syscalls[] =
     NtGetNlsSectionPtr,
     NtGetWriteWatch,
     NtImpersonateAnonymousToken,
-    NtInitiatePowerAction ,
+    NtInitializeNlsFiles,
+    NtInitiatePowerAction,
     NtIsProcessInJob,
     NtListenPort,
     NtLoadDriver,
@@ -2035,11 +2036,7 @@ static void load_apiset_dll(void)
     }
     if (!status)
     {
-        ptr = NULL;
-        size = 0;
-        status = NtMapViewOfSection( mapping, NtCurrentProcess(), &ptr,
-                                     is_win64 && wow_peb ? 0x7fffffff : 0, 0, NULL,
-                                     &size, ViewShare, 0, PAGE_READONLY );
+        status = map_section( mapping, &ptr, &size, PAGE_READONLY );
         NtClose( mapping );
     }
     if (!status)

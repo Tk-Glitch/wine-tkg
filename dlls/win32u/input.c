@@ -1131,7 +1131,7 @@ HWND get_active_window(void)
 }
 
 /* see GetFocus */
-static HWND get_focus(void)
+HWND get_focus(void)
 {
     GUITHREADINFO info;
     info.cbSize = sizeof(info);
@@ -1178,18 +1178,6 @@ static HWND set_focus_window( HWND hwnd )
         send_message( hwnd, WM_SETFOCUS, (WPARAM)previous, 0 );
     }
     return previous;
-}
-
-static UINT win_set_flags( HWND hwnd, UINT set_mask, UINT clear_mask )
-{
-    UINT ret;
-    WND *ptr = get_win_ptr( hwnd );
-
-    if (!ptr || ptr == WND_OTHER_PROCESS || ptr == WND_DESKTOP) return 0;
-    ret = ptr->flags;
-    ptr->flags = (ret & ~clear_mask) | set_mask;
-    release_win_ptr( ptr );
-    return ret;
 }
 
 /*******************************************************************

@@ -313,7 +313,7 @@ static void test_ParseURLFromOutsideSourceW(void)
     WideCharToMultiByte(CP_ACP, 0, bufferW, -1, bufferA, sizeof(bufferA), NULL, NULL);
     ok( res == 1 && len == ParseURL_table[0].len &&
         !lstrcmpA(bufferA, ParseURL_table[0].newurl),
-        "got %ld and %ld with '%s' (expected 1 and %d with '%s')\n",
+        "got %ld and %ld with '%s' (expected 1 and %ld with '%s')\n",
         res, len, bufferA, ParseURL_table[0].len, ParseURL_table[0].newurl);
 
 

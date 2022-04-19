@@ -3817,13 +3817,13 @@
 @ extern _LZero
 @ cdecl _Lock_shared_ptr_spin_lock()
 @ cdecl _Mbrtowc(ptr ptr long ptr ptr)
-@ stub _Mtx_clear_owner
+@ cdecl _Mtx_clear_owner(ptr)
 @ cdecl _Mtx_current_owns(ptr)
 @ cdecl _Mtx_destroy(ptr)
 @ cdecl _Mtx_getconcrtcs(ptr)
 @ cdecl _Mtx_init(ptr long)
 @ cdecl _Mtx_lock(ptr)
-@ stub _Mtx_reset_owner
+@ cdecl _Mtx_reset_owner(ptr)
 @ stub _Mtx_timedlock
 @ cdecl _Mtx_trylock(ptr)
 @ cdecl _Mtx_unlock(ptr)

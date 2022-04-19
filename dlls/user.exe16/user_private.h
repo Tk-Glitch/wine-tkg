@@ -24,8 +24,7 @@
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
-#include "wingdi.h"
-#include "winuser.h"
+#include "ntuser.h"
 #include "winreg.h"
 #include "winternl.h"
 #include "wine/windef16.h"
@@ -46,7 +45,6 @@ struct wow_handlers16
     HWND    (*create_window)(CREATESTRUCTW*,LPCWSTR,HINSTANCE,BOOL);
     LRESULT (*call_window_proc)(HWND,UINT,WPARAM,LPARAM,LRESULT*,void*);
     LRESULT (*call_dialog_proc)(HWND,UINT,WPARAM,LPARAM,LRESULT*,void*);
-    void    (*free_icon_param)(ULONG_PTR);
 };
 
 struct wow_handlers32
@@ -64,8 +62,6 @@ struct wow_handlers32
     WNDPROC (*alloc_winproc)(WNDPROC,BOOL);
     struct tagDIALOGINFO *(*get_dialog_info)(HWND,BOOL);
     INT     (*dialog_box_loop)(HWND,HWND);
-    ULONG_PTR (*get_icon_param)(HICON);
-    ULONG_PTR (*set_icon_param)(HICON,ULONG_PTR);
 };
 
 extern struct wow_handlers32 wow_handlers32 DECLSPEC_HIDDEN;

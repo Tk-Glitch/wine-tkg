@@ -1857,34 +1857,12 @@ static void reply_message( struct received_message_info *info, LRESULT result, B
  */
 LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    switch(msg)
-    {
-    case WM_WINE_DESTROYWINDOW:
-        return WIN_DestroyWindow( hwnd );
-    case WM_WINE_SETWINDOWPOS:
-        if (is_desktop_window( hwnd )) return 0;
-        return USER_SetWindowPos( (WINDOWPOS *)lparam, 0, 0 );
-    case WM_WINE_SHOWWINDOW:
-        if (is_desktop_window( hwnd )) return 0;
-        return ShowWindow( hwnd, wparam );
-    case WM_WINE_SETPARENT:
-        if (is_desktop_window( hwnd )) return 0;
-        return (LRESULT)SetParent( hwnd, (HWND)wparam );
-    case WM_WINE_SETWINDOWLONG:
-        return WIN_SetWindowLong( hwnd, (short)LOWORD(wparam), HIWORD(wparam), lparam, TRUE );
-    case WM_WINE_SETSTYLE:
-        if (is_desktop_window( hwnd )) return 0;
-        return WIN_SetStyle(hwnd, wparam, lparam);
-    default:
-        {
-            MSG m;
-            m.hwnd    = hwnd;
-            m.message = msg;
-            m.wParam  = wparam;
-            m.lParam  = lparam;
-            return NtUserCallOneParam( (UINT_PTR)&m, NtUserHandleInternalMessage );
-        }
-    }
+    MSG m;
+    m.hwnd    = hwnd;
+    m.message = msg;
+    m.wParam  = wparam;
+    m.lParam  = lparam;
+    return NtUserCallOneParam( (UINT_PTR)&m, NtUserHandleInternalMessage );
 }
 
 /* since the WM_DDE_ACK response to a WM_DDE_EXECUTE message should contain the handle
@@ -2770,38 +2748,27 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
         case MSG_WINEVENT:
             if (size >= sizeof(msg_data->winevent))
             {
-                WINEVENTPROC hook_proc;
-                HMODULE free_module = 0;
+                struct win_event_hook_params params;
 
-                hook_proc = wine_server_get_ptr( msg_data->winevent.hook_proc );
+                params.proc = wine_server_get_ptr( msg_data->winevent.hook_proc );
                 size -= sizeof(msg_data->winevent);
                 if (size)
                 {
-                    WCHAR module[MAX_PATH];
-
-                    size = min( size, (MAX_PATH - 1) * sizeof(WCHAR) );
-                    memcpy( module, &msg_data->winevent + 1, size );
-                    module[size / sizeof(WCHAR)] = 0;
-                    if (!(hook_proc = get_hook_proc( hook_proc, module, &free_module )))
-                    {
-                        ERR( "invalid winevent hook module name %s\n", debugstr_w(module) );
-                        continue;
-                    }
+                    size = min( size, sizeof(params.module) - sizeof(WCHAR) );
+                    memcpy( params.module, &msg_data->winevent + 1, size );
                 }
+                params.module[size / sizeof(WCHAR)] = 0;
+                size = FIELD_OFFSET( struct win_hook_params, module[size / sizeof(WCHAR) + 1] );
 
-                TRACE_(relay)( "\1Call winevent proc %p (hook=%04x,event=%x,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04x,time=%x)\n",
-                               hook_proc, msg_data->winevent.hook, info.msg.message, info.msg.hwnd,
-                               info.msg.wParam, info.msg.lParam, msg_data->winevent.tid, info.msg.time);
+                params.handle    = wine_server_ptr_handle( msg_data->winevent.hook );
+                params.event     = info.msg.message;
+                params.hwnd      = info.msg.hwnd;
+                params.object_id = info.msg.wParam;
+                params.child_id  = info.msg.lParam;
+                params.tid       = msg_data->winevent.tid;
+                params.time      = info.msg.time;
 
-                hook_proc( wine_server_ptr_handle( msg_data->winevent.hook ), info.msg.message,
-                           info.msg.hwnd, info.msg.wParam, info.msg.lParam,
-                           msg_data->winevent.tid, info.msg.time );
-
-                TRACE_(relay)( "\1Ret  winevent proc %p (hook=%04x,event=%x,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04x,time=%x)\n",
-                               hook_proc, msg_data->winevent.hook, info.msg.message, info.msg.hwnd,
-                               info.msg.wParam, info.msg.lParam, msg_data->winevent.tid, info.msg.time);
-
-                if (free_module) FreeLibrary(free_module);
+                User32CallWinEventHook( &params, size );
             }
             continue;
         case MSG_HOOK_LL:
@@ -3983,7 +3950,7 @@ LRESULT WINAPI DECLSPEC_HOTPATCH DispatchMessageA( const MSG* msg )
     {
         /* send a WM_NCPAINT and WM_ERASEBKGND if the non-client area is still invalid */
         HRGN hrgn = CreateRectRgn( 0, 0, 0, 0 );
-        GetUpdateRgn( msg->hwnd, hrgn, TRUE );
+        NtUserGetUpdateRgn( msg->hwnd, hrgn, TRUE );
         DeleteObject( hrgn );
     }
     return retval;
@@ -4054,7 +4021,7 @@ LRESULT WINAPI DECLSPEC_HOTPATCH DispatchMessageW( const MSG* msg )
     {
         /* send a WM_NCPAINT and WM_ERASEBKGND if the non-client area is still invalid */
         HRGN hrgn = CreateRectRgn( 0, 0, 0, 0 );
-        GetUpdateRgn( msg->hwnd, hrgn, TRUE );
+        NtUserGetUpdateRgn( msg->hwnd, hrgn, TRUE );
         DeleteObject( hrgn );
     }
     return retval;
@@ -4459,97 +4426,12 @@ BOOL WINAPI MessageBeep( UINT i )
 }
 
 
-/***********************************************************************
- *      SetCoalescableTimer (USER32.@)
- */
-UINT_PTR WINAPI SetCoalescableTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc, ULONG tolerance )
-{
-    UINT_PTR ret;
-    WNDPROC winproc = 0;
-
-    if (proc) winproc = WINPROC_AllocProc( (WNDPROC)proc, FALSE );
-
-    timeout = min( max( USER_TIMER_MINIMUM, timeout ), USER_TIMER_MAXIMUM );
-
-    SERVER_START_REQ( set_win_timer )
-    {
-        req->win    = wine_server_user_handle( hwnd );
-        req->msg    = WM_TIMER;
-        req->id     = id;
-        req->rate   = timeout;
-        req->lparam = (ULONG_PTR)winproc;
-        if (!wine_server_call_err( req ))
-        {
-            ret = reply->id;
-            if (!ret) ret = TRUE;
-        }
-        else ret = 0;
-    }
-    SERVER_END_REQ;
-
-    TRACE("Added %p %lx %p timeout %d\n", hwnd, id, winproc, timeout );
-    return ret;
-}
-
-
 /******************************************************************
  *      SetTimer (USER32.@)
  */
 UINT_PTR WINAPI SetTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc )
 {
-    return SetCoalescableTimer( hwnd, id, timeout, proc, TIMERV_DEFAULT_COALESCING );
-}
-
-
-/***********************************************************************
- *		SetSystemTimer (USER32.@)
- */
-UINT_PTR WINAPI SetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc )
-{
-    UINT_PTR ret;
-    WNDPROC winproc = 0;
-
-    if (proc) winproc = WINPROC_AllocProc( (WNDPROC)proc, FALSE );
-
-    timeout = min( max( 5, timeout ), USER_TIMER_MAXIMUM );
-
-    SERVER_START_REQ( set_win_timer )
-    {
-        req->win    = wine_server_user_handle( hwnd );
-        req->msg    = WM_SYSTIMER;
-        req->id     = id;
-        req->rate   = timeout;
-        req->lparam = (ULONG_PTR)winproc;
-        if (!wine_server_call_err( req ))
-        {
-            ret = reply->id;
-            if (!ret) ret = TRUE;
-        }
-        else ret = 0;
-    }
-    SERVER_END_REQ;
-
-    TRACE("Added %p %lx %p timeout %d\n", hwnd, id, winproc, timeout );
-    return ret;
-}
-
-
-/***********************************************************************
- *		KillTimer (USER32.@)
- */
-BOOL WINAPI KillTimer( HWND hwnd, UINT_PTR id )
-{
-    BOOL ret;
-
-    SERVER_START_REQ( kill_win_timer )
-    {
-        req->win = wine_server_user_handle( hwnd );
-        req->msg = WM_TIMER;
-        req->id  = id;
-        ret = !wine_server_call_err( req );
-    }
-    SERVER_END_REQ;
-    return ret;
+    return NtUserSetTimer( hwnd, id, timeout, proc, TIMERV_DEFAULT_COALESCING );
 }
 
 
@@ -4558,17 +4440,7 @@ BOOL WINAPI KillTimer( HWND hwnd, UINT_PTR id )
  */
 BOOL WINAPI KillSystemTimer( HWND hwnd, UINT_PTR id )
 {
-    BOOL ret;
-
-    SERVER_START_REQ( kill_win_timer )
-    {
-        req->win = wine_server_user_handle( hwnd );
-        req->msg = WM_SYSTIMER;
-        req->id  = id;
-        ret = !wine_server_call_err( req );
-    }
-    SERVER_END_REQ;
-    return ret;
+    return NtUserCallHwndParam( hwnd, id, NtUserKillSystemTimer );
 }
 
 

@@ -5975,7 +5975,7 @@ static void test_put_hash(IHTMLDocument2 *doc, const WCHAR *new_hash)
 
     location = NULL;
     hres = IHTMLDocument2_get_location(doc, &location);
-    ok(hres == S_OK, "get_location failed: %08x\n", hres);
+    ok(hres == S_OK, "get_location failed: %08lx\n", hres);
     ok(location != NULL, "location == NULL\n");
 
     SET_EXPECT(TranslateUrl);
@@ -5994,7 +5994,7 @@ static void test_put_hash(IHTMLDocument2 *doc, const WCHAR *new_hash)
 
     str = SysAllocString(new_hash);
     hres = IHTMLLocation_put_hash(location, str);
-    ok (hres == S_OK, "put_hash failed: %08x\n", hres);
+    ok (hres == S_OK, "put_hash failed: %08lx\n", hres);
     SysFreeString(str);
 
     CHECK_CALLED(TranslateUrl);
@@ -6006,7 +6006,7 @@ static void test_put_hash(IHTMLDocument2 *doc, const WCHAR *new_hash)
 
     /* Check the result */
     hres = IHTMLLocation_get_hash(location, &str);
-    ok(hres == S_OK, "get_hash failed: %08x\n", hres);
+    ok(hres == S_OK, "get_hash failed: %08lx\n", hres);
     ok(!wcscmp(str, new_hash), "expected %s, got %s\n", debugstr_w(new_hash), debugstr_w(str));
     SysFreeString(str);
 

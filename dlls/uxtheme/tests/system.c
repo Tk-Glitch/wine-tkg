@@ -530,7 +530,7 @@ static void test_OpenThemeData(void)
 
     /* Close invalid handle */
     hRes = CloseThemeData((HTHEME)0xdeadbeef);
-    ok( hRes == E_HANDLE, "Expected E_HANDLE, got 0x%08x\n", hRes);
+    ok( hRes == E_HANDLE, "Expected E_HANDLE, got 0x%08lx\n", hRes);
 
     if (!bThemeActive)
     {

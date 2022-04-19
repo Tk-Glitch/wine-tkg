@@ -17,7 +17,6 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-#undef WINE_NO_LONG_TYPES /* temporary for migration */
 
 #include <stdlib.h>
 #include <stdarg.h>
@@ -1049,6 +1048,11 @@ if (0) { /* crashes under XP */
     ok(ret, "GetClassInfoExA() error %ld\n", GetLastError());
     ok(wcx.cbSize == sizeof(wcx) + 1, "expected sizeof(wcx)+1, got %u\n", wcx.cbSize);
     ok(wcx.lpfnWndProc != NULL, "got null proc\n");
+
+    wcx.cbSize = sizeof(wcx);
+    ret = GetClassInfoExA(0, "stati", &wcx);
+    ok(!ret && GetLastError() == ERROR_CLASS_DOES_NOT_EXIST,
+       "GetClassInfoExA() returned %x %ld\n", ret, GetLastError());
 }
 
 static void test_icons(void)
@@ -1545,6 +1549,53 @@ static void test_uxtheme(void)
     UnregisterClassA(class_name, GetModuleHandleA(NULL));
 }
 
+static void test_class_name(void)
+{
+    WCHAR class_name[] = L"ClassNameTest";
+    HINSTANCE hinst = GetModuleHandleW(0);
+    WNDCLASSEXW wcex;
+    const WCHAR *nameW;
+    const char *nameA;
+    UINT_PTR res;
+    HWND hwnd;
+
+    memset(&wcex, 0, sizeof wcex);
+    wcex.cbSize        = sizeof wcex;
+    wcex.lpfnWndProc   = ClassTest_WndProc;
+    wcex.hIcon         = LoadIconW(0, (LPCWSTR)IDI_APPLICATION);
+    wcex.hInstance     = hinst;
+    wcex.lpszClassName = class_name;
+    wcex.lpszMenuName  = L"menu name";
+    ok(RegisterClassExW(&wcex), "RegisterClassExW returned 0\n");
+    hwnd = CreateWindowExW(0, class_name, NULL, WS_OVERLAPPEDWINDOW,
+                           0, 0, 0, 0, NULL, NULL, hinst, 0);
+    ok(hwnd != NULL, "Window was not created\n");
+
+    nameA = (const char *)GetClassLongPtrA(hwnd, GCLP_MENUNAME);
+    ok(!strcmp(nameA, "menu name"), "unexpected class name %s\n", debugstr_a(nameA));
+    nameW = (const WCHAR *)GetClassLongPtrW(hwnd, GCLP_MENUNAME);
+    ok(!wcscmp(nameW, L"menu name"), "unexpected class name %s\n", debugstr_w(nameW));
+
+    res = SetClassLongPtrA(hwnd, GCLP_MENUNAME, (LONG_PTR)"nameA");
+    todo_wine
+    ok(res, "SetClassLongPtrA returned 0\n");
+    nameA = (const char *)GetClassLongPtrA(hwnd, GCLP_MENUNAME);
+    ok(!strcmp(nameA, "nameA"), "unexpected class name %s\n", debugstr_a(nameA));
+    nameW = (const WCHAR *)GetClassLongPtrW(hwnd, GCLP_MENUNAME);
+    ok(!wcscmp(nameW, L"nameA"), "unexpected class name %s\n", debugstr_w(nameW));
+
+    res = SetClassLongPtrW(hwnd, GCLP_MENUNAME, (LONG_PTR)L"nameW");
+    todo_wine
+    ok(res, "SetClassLongPtrW returned 0\n");
+    nameA = (const char *)GetClassLongPtrA(hwnd, GCLP_MENUNAME);
+    ok(!strcmp(nameA, "nameW"), "unexpected class name %s\n", debugstr_a(nameA));
+    nameW = (const WCHAR *)GetClassLongPtrW(hwnd, GCLP_MENUNAME);
+    ok(!wcscmp(nameW, L"nameW"), "unexpected class name %s\n", debugstr_w(nameW));
+
+    DestroyWindow(hwnd);
+    UnregisterClassW(class_name, hinst);
+}
+
 START_TEST(class)
 {
     char **argv;
@@ -1578,6 +1629,7 @@ START_TEST(class)
     test_icons();
     test_comctl32_classes();
     test_actctx_classes();
+    test_class_name();
 
     /* this test unregisters the Button class so it should be executed at the end */
     test_instances();

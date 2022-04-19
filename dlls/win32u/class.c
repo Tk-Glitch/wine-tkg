@@ -152,6 +152,17 @@ WNDPROC get_winproc( WNDPROC proc, BOOL ansi )
     }
 }
 
+/* Return the window procedure type, or the default value if not a winproc handle. */
+BOOL is_winproc_unicode( WNDPROC proc, BOOL def_val )
+{
+    WINDOWPROC *ptr = get_winproc_ptr( proc );
+
+    if (!ptr) return def_val;
+    if (ptr == WINPROC_PROC16) return FALSE;  /* 16-bit is always A */
+    if (ptr->procA && ptr->procW) return def_val;  /* can be both */
+    return ptr->procW != NULL;
+}
+
 /***********************************************************************
  *	     NtUserInitializeClientPfnArrays   (win32u.@)
  */
@@ -259,7 +270,8 @@ static CLASS *find_class( HINSTANCE module, UNICODE_STRING *name )
         }
         else
         {
-            if (wcsnicmp( class->name, name->Buffer, name->Length / sizeof(WCHAR) )) continue;
+            if (wcsnicmp( class->name, name->Buffer, name->Length / sizeof(WCHAR) ) ||
+                class->name[name->Length / sizeof(WCHAR)]) continue;
         }
         if (!class->local || !module || (class->instance & ~0xffff) == instance)
         {
@@ -269,6 +281,24 @@ static CLASS *find_class( HINSTANCE module, UNICODE_STRING *name )
     }
     user_unlock();
     return NULL;
+}
+
+/***********************************************************************
+ *           get_class_dce
+ */
+struct dce *get_class_dce( CLASS *class )
+{
+    return class->dce;
+}
+
+/***********************************************************************
+ *           set_class_dce
+ */
+struct dce *set_class_dce( CLASS *class, struct dce *dce )
+{
+    if (class->dce) return class->dce;  /* already set, don't change it */
+    class->dce = dce;
+    return dce;
 }
 
 /***********************************************************************
@@ -399,7 +429,7 @@ BOOL WINAPI NtUserUnregisterClass( UNICODE_STRING *name, HINSTANCE instance,
     TRACE( "%p\n", class );
 
     user_lock();
-    if (class->dce && user_callbacks) user_callbacks->free_dce( class->dce, 0 );
+    if (class->dce) free_dce( class->dce, 0 );
     list_remove( &class->entry );
     if (class->hbrBackground > (HBRUSH)(COLOR_GRADIENTINACTIVECAPTION + 1))
         NtGdiDeleteObjectApp( class->hbrBackground );

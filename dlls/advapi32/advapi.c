@@ -297,3 +297,19 @@ void WINAPI RegisterWaitChainCOMCallback(PCOGETCALLSTATE call_state_cb,
 {
     FIXME("%p, %p\n", call_state_cb, activation_state_cb);
 }
+
+HWCT WINAPI OpenThreadWaitChainSession(DWORD flags, PWAITCHAINCALLBACK callback)
+{
+    FIXME("flags %ld, callback %p stub!\n", flags, callback);
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return NULL;
+}
+
+BOOL WINAPI GetThreadWaitChain(HWCT handle, DWORD_PTR ctx, DWORD flags, DWORD thread_id, DWORD *node_count,
+    WAITCHAIN_NODE_INFO *node_info_arr, BOOL *is_cycle)
+{
+    FIXME( "handle %p, ctx %Ix, flags %ld, thread_id %ld, node_count %p, node_info_arr %p, is_cycle %p stub!\n",
+           handle, ctx, flags, thread_id, node_count, node_info_arr, is_cycle );
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return FALSE;
+}

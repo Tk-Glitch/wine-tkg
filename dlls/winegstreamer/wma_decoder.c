@@ -515,20 +515,78 @@ static HRESULT WINAPI transform_ProcessEvent(IMFTransform *iface, DWORD id, IMFM
 static HRESULT WINAPI transform_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_TYPE message, ULONG_PTR param)
 {
     FIXME("iface %p, message %#x, param %p stub!\n", iface, message, (void *)param);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFSample *sample, DWORD flags)
 {
-    FIXME("iface %p, id %lu, sample %p, flags %#lx stub!\n", iface, id, sample, flags);
-    return E_NOTIMPL;
+    struct wma_decoder *decoder = impl_from_IMFTransform(iface);
+    struct wg_sample *wg_sample;
+    MFT_INPUT_STREAM_INFO info;
+    HRESULT hr;
+
+    TRACE("iface %p, id %lu, sample %p, flags %#lx.\n", iface, id, sample, flags);
+
+    if (!decoder->wg_transform)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+
+    if (FAILED(hr = IMFTransform_GetInputStreamInfo(iface, 0, &info)))
+        return hr;
+
+    if (FAILED(hr = mf_create_wg_sample(sample, &wg_sample)))
+        return hr;
+
+    /* WMA transform uses fixed size input samples and ignores samples with invalid sizes */
+    if (wg_sample->size % info.cbSize)
+        hr = S_OK;
+    else
+        hr = wg_transform_push_data(decoder->wg_transform, wg_sample);
+
+    mf_destroy_wg_sample(wg_sample);
+    return hr;
 }
 
 static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
         MFT_OUTPUT_DATA_BUFFER *samples, DWORD *status)
 {
-    FIXME("iface %p, flags %#lx, count %lu, samples %p, status %p stub!\n", iface, flags, count, samples, status);
-    return E_NOTIMPL;
+    struct wma_decoder *decoder = impl_from_IMFTransform(iface);
+    MFT_OUTPUT_STREAM_INFO info;
+    struct wg_sample *wg_sample;
+    HRESULT hr;
+
+    TRACE("iface %p, flags %#lx, count %lu, samples %p, status %p.\n", iface, flags, count, samples, status);
+
+    if (count > 1)
+        return E_INVALIDARG;
+
+    if (!decoder->wg_transform)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+
+    if (FAILED(hr = IMFTransform_GetOutputStreamInfo(iface, 0, &info)))
+        return hr;
+
+    *status = 0;
+    samples[0].dwStatus = 0;
+    if (!samples[0].pSample)
+    {
+        samples[0].dwStatus = MFT_OUTPUT_DATA_BUFFER_NO_SAMPLE;
+        return MF_E_TRANSFORM_NEED_MORE_INPUT;
+    }
+
+    if (FAILED(hr = mf_create_wg_sample(samples[0].pSample, &wg_sample)))
+        return hr;
+
+    wg_sample->size = 0;
+    if (wg_sample->max_size < info.cbSize)
+        hr = MF_E_BUFFERTOOSMALL;
+    else if (SUCCEEDED(hr = wg_transform_read_data(decoder->wg_transform, wg_sample)))
+    {
+        if (wg_sample->flags & WG_SAMPLE_FLAG_INCOMPLETE)
+            samples[0].dwStatus |= MFT_OUTPUT_DATA_BUFFER_INCOMPLETE;
+    }
+
+    mf_destroy_wg_sample(wg_sample);
+    return hr;
 }
 
 static const IMFTransformVtbl transform_vtbl =

@@ -898,7 +898,7 @@ static void test_heap_checks( DWORD flags )
     if (flags & HEAP_PAGE_ALLOCS) return;  /* no tests for that case yet */
     trace( "testing heap flags %08lx\n", flags );
 
-    p = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, 17 );
+    p = pHeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, 17 );
     ok( p != NULL, "HeapAlloc failed\n" );
 
     ret = HeapValidate( GetProcessHeap(), 0, p );
@@ -1213,55 +1213,79 @@ static void test_GetPhysicallyInstalledSystemMemory(void)
        "expected total_memory >= memstatus.ullTotalPhys / 1024\n");
 }
 
-static BOOL compare_ulong64(ULONG64 v1, ULONG64 v2, ULONG64 max_diff)
-{
-    ULONG64 diff = v1 > v2 ? v1 - v2 : v2 - v1;
-
-    return diff <= max_diff;
-}
-
 static void test_GlobalMemoryStatus(void)
 {
-    static const ULONG64 max_diff = 0x200000;
-    SIZE_T size, size_broken;
-    MEMORYSTATUSEX memex;
-    MEMORYSTATUS mem;
+    char buffer[sizeof(SYSTEM_PERFORMANCE_INFORMATION) + 16]; /* some Win 7 versions need a larger info */
+    SYSTEM_PERFORMANCE_INFORMATION *perf_info = (void *)buffer;
+    SYSTEM_BASIC_INFORMATION basic_info;
+    MEMORYSTATUSEX memex = {0}, expect;
+    MEMORYSTATUS mem = {0};
+    VM_COUNTERS_EX vmc;
+    NTSTATUS status;
+    BOOL ret;
 
-    mem.dwLength = sizeof(mem);
-    GlobalMemoryStatus(&mem);
-    memex.dwLength = sizeof(memex);
-    GlobalMemoryStatusEx(&memex);
+    SetLastError( 0xdeadbeef );
+    ret = GlobalMemoryStatusEx( &memex );
+    ok( !ret, "GlobalMemoryStatusEx succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got error %lu\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    GlobalMemoryStatus( &mem );
+    ok( GetLastError() == 0xdeadbeef, "got error %lu\n", GetLastError() );
 
-    /* Compare values approximately as the available memory may change between
-     * GlobalMemoryStatus() and GlobalMemoryStatusEx() calls. */
+    do
+    {
+        status = NtQuerySystemInformation( SystemBasicInformation, &basic_info, sizeof(basic_info), NULL );
+        ok( !status, "NtQuerySystemInformation returned %#lx\n", status );
+        status = NtQuerySystemInformation( SystemPerformanceInformation, perf_info, sizeof(buffer), NULL );
+        ok( !status, "NtQuerySystemInformation returned %#lx\n", status );
+        status = NtQueryInformationProcess( GetCurrentProcess(), ProcessVmCounters, &vmc, sizeof(vmc), NULL );
+        ok( !status, "NtQueryInformationProcess returned %#lx\n", status );
+        mem.dwLength = sizeof(MEMORYSTATUS);
+        GlobalMemoryStatus( &mem );
+        memex.dwLength = sizeof(MEMORYSTATUSEX);
+        ret = GlobalMemoryStatusEx( &memex );
+        ok( ret, "GlobalMemoryStatusEx succeeded\n" );
+    } while (memex.ullAvailPhys != (ULONGLONG)perf_info->AvailablePages * basic_info.PageSize ||
+             mem.dwAvailPhys != min( ~(SIZE_T)0 >> 1, memex.ullAvailPhys ));
 
-    size = min(memex.ullTotalPhys, ~(SIZE_T)0 >> 1);
-    size_broken = min(memex.ullTotalPhys, ~(SIZE_T)0);
-    ok(compare_ulong64(mem.dwTotalPhys, size, max_diff)
-            || broken(compare_ulong64(mem.dwTotalPhys, size_broken, max_diff)) /* Win <= 8.1 with RAM size > 4GB */,
-            "Got unexpected dwTotalPhys %s, size %s.\n",
-            wine_dbgstr_longlong(mem.dwTotalPhys), wine_dbgstr_longlong(size));
-    size = min(memex.ullAvailPhys, ~(SIZE_T)0 >> 1);
-    size_broken = min(memex.ullAvailPhys, ~(SIZE_T)0);
-    ok(compare_ulong64(mem.dwAvailPhys, size, max_diff)
-            || broken(compare_ulong64(mem.dwAvailPhys, size_broken, max_diff)) /* Win <= 8.1 with RAM size > 4GB */,
-            "Got unexpected dwAvailPhys %s, size %s.\n",
-            wine_dbgstr_longlong(mem.dwAvailPhys), wine_dbgstr_longlong(size));
+    ok( basic_info.PageSize, "got 0 PageSize\n" );
+    ok( basic_info.MmNumberOfPhysicalPages, "got 0 MmNumberOfPhysicalPages\n" );
+    ok( !!basic_info.HighestUserAddress, "got 0 HighestUserAddress\n" );
+    ok( !!basic_info.LowestUserAddress, "got 0 LowestUserAddress\n" );
+    ok( perf_info->TotalCommittedPages, "got 0 TotalCommittedPages\n" );
+    ok( perf_info->TotalCommitLimit, "got 0 TotalCommitLimit\n" );
+    ok( perf_info->AvailablePages, "got 0 AvailablePages\n" );
 
-    size = min(memex.ullTotalPageFile, ~(SIZE_T)0);
-    ok(compare_ulong64(mem.dwTotalPageFile, size, max_diff),
-            "Got unexpected dwTotalPageFile %s, size %s.\n",
-            wine_dbgstr_longlong(mem.dwTotalPageFile), wine_dbgstr_longlong(size));
-    size = min(memex.ullAvailPageFile, ~(SIZE_T)0);
-    ok(compare_ulong64(mem.dwAvailPageFile, size, max_diff), "Got unexpected dwAvailPageFile %s, size %s.\n",
-            wine_dbgstr_longlong(mem.dwAvailPageFile), wine_dbgstr_longlong(size));
+    expect.dwMemoryLoad = (memex.ullTotalPhys - memex.ullAvailPhys) / (memex.ullTotalPhys / 100);
+    expect.ullTotalPhys = (ULONGLONG)basic_info.MmNumberOfPhysicalPages * basic_info.PageSize;
+    expect.ullAvailPhys = (ULONGLONG)perf_info->AvailablePages * basic_info.PageSize;
+    expect.ullTotalPageFile = (ULONGLONG)perf_info->TotalCommitLimit * basic_info.PageSize;
+    expect.ullAvailPageFile = (ULONGLONG)(perf_info->TotalCommitLimit - perf_info->TotalCommittedPages) * basic_info.PageSize;
+    expect.ullTotalVirtual = (ULONG_PTR)basic_info.HighestUserAddress - (ULONG_PTR)basic_info.LowestUserAddress + 1;
+    expect.ullAvailVirtual = expect.ullTotalVirtual - (ULONGLONG)vmc.WorkingSetSize /* approximate */;
+    expect.ullAvailExtendedVirtual = 0;
 
-    ok(compare_ulong64(mem.dwTotalVirtual, memex.ullTotalVirtual, max_diff),
-            "Got unexpected dwTotalVirtual %s, ullTotalVirtual %s.\n",
-            wine_dbgstr_longlong(mem.dwTotalVirtual), wine_dbgstr_longlong(memex.ullTotalVirtual));
-    ok(compare_ulong64(mem.dwAvailVirtual, memex.ullAvailVirtual, max_diff),
-            "Got unexpected dwAvailVirtual %s, ullAvailVirtual %s.\n",
-            wine_dbgstr_longlong(mem.dwAvailVirtual), wine_dbgstr_longlong(memex.ullAvailVirtual));
+    ok( memex.dwMemoryLoad == expect.dwMemoryLoad, "got dwMemoryLoad %lu\n", memex.dwMemoryLoad );
+    ok( memex.ullTotalPhys == expect.ullTotalPhys, "got ullTotalPhys %#I64x\n", memex.ullTotalPhys );
+    ok( memex.ullAvailPhys == expect.ullAvailPhys, "got ullAvailPhys %#I64x\n", memex.ullAvailPhys );
+    ok( memex.ullTotalPageFile == expect.ullTotalPageFile, "got ullTotalPageFile %#I64x\n", memex.ullTotalPageFile );
+    /* allow some variability, page file is not always in sync on Windows */
+    ok( memex.ullAvailPageFile - expect.ullAvailPageFile + 32 * basic_info.PageSize <= 64 * basic_info.PageSize,
+        "got ullAvailPageFile %#I64x\n", memex.ullAvailPageFile );
+    ok( memex.ullTotalVirtual == expect.ullTotalVirtual, "got ullTotalVirtual %#I64x\n", memex.ullTotalVirtual );
+    ok( memex.ullAvailVirtual <= expect.ullAvailVirtual, "got ullAvailVirtual %#I64x\n", memex.ullAvailVirtual );
+    ok( memex.ullAvailExtendedVirtual == 0, "got ullAvailExtendedVirtual %#I64x\n", memex.ullAvailExtendedVirtual );
+
+    ok( mem.dwMemoryLoad == memex.dwMemoryLoad, "got dwMemoryLoad %lu\n", mem.dwMemoryLoad );
+    ok( mem.dwTotalPhys == min( ~(SIZE_T)0 >> 1, memex.ullTotalPhys ), "got dwTotalPhys %#Ix\n", mem.dwTotalPhys );
+    ok( mem.dwAvailPhys == min( ~(SIZE_T)0 >> 1, memex.ullAvailPhys ), "got dwAvailPhys %#Ix\n", mem.dwAvailPhys );
+#ifndef _WIN64
+    todo_wine_if(memex.ullTotalPageFile > 0xfff7ffff)
+#endif
+    ok( mem.dwTotalPageFile == min( ~(SIZE_T)0, memex.ullTotalPageFile ), "got dwTotalPageFile %#Ix\n", mem.dwTotalPageFile );
+    ok( mem.dwAvailPageFile == min( ~(SIZE_T)0, memex.ullAvailPageFile ), "got dwAvailPageFile %#Ix\n", mem.dwAvailPageFile );
+    ok( mem.dwTotalVirtual == memex.ullTotalVirtual, "got dwTotalVirtual %#Ix\n", mem.dwTotalVirtual );
+    ok( mem.dwAvailVirtual == memex.ullAvailVirtual, "got dwAvailVirtual %#Ix\n", mem.dwAvailVirtual );
 }
 
 START_TEST(heap)

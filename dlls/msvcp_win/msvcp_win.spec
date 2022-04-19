@@ -3672,7 +3672,7 @@
 @ cdecl _Lstat(wstr ptr) msvcp140._Lstat
 @ cdecl _Make_dir(wstr) msvcp140._Make_dir
 @ cdecl _Mbrtowc(ptr ptr long ptr ptr) msvcp140._Mbrtowc
-@ stub _Mtx_clear_owner
+@ cdecl _Mtx_clear_owner(ptr) msvcp140._Mtx_clear_owner
 @ cdecl _Mtx_current_owns(ptr) msvcp140._Mtx_current_owns
 @ cdecl _Mtx_destroy(ptr) msvcp140._Mtx_destroy
 @ cdecl _Mtx_destroy_in_situ(ptr) msvcp140._Mtx_destroy_in_situ
@@ -3680,7 +3680,7 @@
 @ cdecl _Mtx_init(ptr long) msvcp140._Mtx_init
 @ cdecl _Mtx_init_in_situ(ptr long) msvcp140._Mtx_init_in_situ
 @ cdecl _Mtx_lock(ptr) msvcp140._Mtx_lock
-@ stub _Mtx_reset_owner
+@ cdecl _Mtx_reset_owner(ptr) msvcp140._Mtx_reset_owner
 @ stub _Mtx_timedlock
 @ cdecl _Mtx_trylock(ptr) msvcp140._Mtx_trylock
 @ cdecl _Mtx_unlock(ptr) msvcp140._Mtx_unlock

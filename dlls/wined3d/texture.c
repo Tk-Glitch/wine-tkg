@@ -3920,11 +3920,15 @@ static HRESULT wined3d_texture_init(struct wined3d_texture *texture, const struc
             texture->flags |= WINED3D_TEXTURE_GENERATE_MIPMAPS;
     }
 
-    if (flags & WINED3D_TEXTURE_CREATE_RECORD_DIRTY_REGIONS
-            && !(texture->dirty_regions = heap_calloc(texture->layer_count, sizeof(*texture->dirty_regions))))
+    if (flags & WINED3D_TEXTURE_CREATE_RECORD_DIRTY_REGIONS)
     {
-        wined3d_texture_cleanup_sync(texture);
-        return E_OUTOFMEMORY;
+        if (!(texture->dirty_regions = heap_calloc(texture->layer_count, sizeof(*texture->dirty_regions))))
+        {
+            wined3d_texture_cleanup_sync(texture);
+            return E_OUTOFMEMORY;
+        }
+        for (i = 0; i < texture->layer_count; ++i)
+            wined3d_texture_dirty_region_add(texture, i, NULL);
     }
 
     /* Precalculated scaling for 'faked' non power of two texture coords. */
@@ -5188,6 +5192,8 @@ static void wined3d_texture_vk_download_data(struct wined3d_context *context,
 
         VK_CALL(vkCmdPipelineBarrier(vk_command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                 bo_stage_flags, 0, 0, NULL, 1, &vk_barrier, 0, NULL));
+        /* Start the download so we don't stall waiting for the result. */
+        wined3d_context_vk_submit_command_buffer(context_vk, 0, NULL, NULL, 0, NULL);
     }
 }
 

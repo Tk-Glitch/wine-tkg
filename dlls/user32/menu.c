@@ -1258,7 +1258,7 @@ static void MENU_PopupMenuCalcSize( LPPOPUPMENU lppop, UINT max_height )
         lppop->bScrolling = FALSE;
     }
 
-    ReleaseDC( 0, hdc );
+    NtUserReleaseDC( 0, hdc );
 }
 
 
@@ -1966,8 +1966,8 @@ static BOOL MENU_ShowPopup( HWND hwndOwner, HMENU hmenu, UINT id, UINT flags,
     }
     /* Display the window */
 
-    SetWindowPos( menu->hWnd, HWND_TOPMOST, x, y, menu->Width, menu->Height,
-                  SWP_SHOWWINDOW | SWP_NOACTIVATE );
+    NtUserSetWindowPos( menu->hWnd, HWND_TOPMOST, x, y, menu->Width, menu->Height,
+                        SWP_SHOWWINDOW | SWP_NOACTIVATE );
     UpdateWindow( menu->hWnd );
     return TRUE;
 }
@@ -2035,7 +2035,7 @@ static void MENU_SelectItem( HWND hwndOwner, HMENU hmenu, UINT wIndex,
 
     if (lppop->FocusedItem == wIndex) return;
     if (lppop->wFlags & MF_POPUP) hdc = GetDC( lppop->hWnd );
-    else hdc = GetDCEx( lppop->hWnd, 0, DCX_CACHE | DCX_WINDOW);
+    else hdc = NtUserGetDCEx( lppop->hWnd, 0, DCX_CACHE | DCX_WINDOW);
     if (!top_popup) {
         top_popup = lppop->hWnd;
         top_popup_hmenu = hmenu;
@@ -2082,7 +2082,7 @@ static void MENU_SelectItem( HWND hwndOwner, HMENU hmenu, UINT wIndex,
             }
         }
     }
-    ReleaseDC( lppop->hWnd, hdc );
+    NtUserReleaseDC( lppop->hWnd, hdc );
 }
 
 
@@ -2333,7 +2333,7 @@ static void MENU_HideSubPopups( HWND hwndOwner, HMENU hmenu,
 	if (!(submenu = MENU_GetMenu( hsubmenu ))) return;
 	MENU_HideSubPopups( hwndOwner, hsubmenu, FALSE, wFlags );
 	MENU_SelectItem( hwndOwner, hsubmenu, NO_SELECTED_ITEM, sendMenuSelect, 0 );
-        DestroyWindow( submenu->hWnd );
+        NtUserDestroyWindow( submenu->hWnd );
         submenu->hWnd = 0;
 
         if (!(wFlags & TPM_NONOTIFY))
@@ -2382,13 +2382,13 @@ static HMENU MENU_ShowSubPopup( HWND hwndOwner, HMENU hmenu,
     if (!(item->fState & MF_HILITE))
     {
         if (menu->wFlags & MF_POPUP) hdc = GetDC( menu->hWnd );
-        else hdc = GetDCEx( menu->hWnd, 0, DCX_CACHE | DCX_WINDOW);
+        else hdc = NtUserGetDCEx( menu->hWnd, 0, DCX_CACHE | DCX_WINDOW);
 
         SelectObject( hdc, get_menu_font(FALSE));
 
         item->fState |= MF_HILITE;
         MENU_DrawMenuItem( menu->hWnd, menu, hwndOwner, hdc, item, !(menu->wFlags & MF_POPUP), ODA_DRAWENTIRE );
-        ReleaseDC( menu->hWnd, hdc );
+        NtUserReleaseDC( menu->hWnd, hdc );
     }
     if (!item->rect.top && !item->rect.left && !item->rect.bottom && !item->rect.right)
         item->rect = rect;
@@ -3319,7 +3319,7 @@ static BOOL MENU_TrackMenu( HMENU hmenu, UINT wFlags, INT x, INT y,
 
 	    if (menu && (menu->wFlags & MF_POPUP))
 	    {
-                DestroyWindow( menu->hWnd );
+                NtUserDestroyWindow( menu->hWnd );
                 menu->hWnd = 0;
 
                 if (!(wFlags & TPM_NONOTIFY))
@@ -3531,7 +3531,7 @@ BOOL WINAPI TrackPopupMenuEx( HMENU hMenu, UINT wFlags, INT x, INT y,
 
         if (menu->hWnd)
         {
-            DestroyWindow( menu->hWnd );
+            NtUserDestroyWindow( menu->hWnd );
             menu->hWnd = 0;
 
             if (!(wFlags & TPM_NONOTIFY))
@@ -3581,10 +3581,10 @@ LRESULT WINAPI PopupMenuWndProc( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
     case WM_PAINT:
 	{
 	    PAINTSTRUCT ps;
-	    BeginPaint( hwnd, &ps );
+	    NtUserBeginPaint( hwnd, &ps );
 	    MENU_DrawPopupMenu( hwnd, ps.hdc,
                                 (HMENU)GetWindowLongPtrW( hwnd, 0 ) );
-	    EndPaint( hwnd, &ps );
+            NtUserEndPaint( hwnd, &ps );
             return 0;
 	}
 
@@ -3642,11 +3642,11 @@ UINT MENU_GetMenuBarHeight( HWND hwnd, UINT menubarWidth,
 
     if (!(lppop = MENU_GetMenu( GetMenu(hwnd) ))) return 0;
 
-    hdc = GetDCEx( hwnd, 0, DCX_CACHE | DCX_WINDOW );
+    hdc = NtUserGetDCEx( hwnd, 0, DCX_CACHE | DCX_WINDOW );
     SelectObject( hdc, get_menu_font(FALSE));
     SetRect(&rectBar, orgX, orgY, orgX+menubarWidth, orgY+GetSystemMetrics(SM_CYMENU));
     MENU_MenuBarCalcSize( hdc, &rectBar, lppop, hwnd );
-    ReleaseDC( hwnd, hdc );
+    NtUserReleaseDC( hwnd, hdc );
     return lppop->Height;
 }
 
@@ -3751,7 +3751,7 @@ BOOL WINAPI EnableMenuItem( HMENU hMenu, UINT id, UINT wFlags )
         /* Refresh the frame to reflect the change */
         WIN_GetRectangles(hwnd, COORDS_CLIENT, &rc, NULL);
         rc.bottom = 0;
-        RedrawWindow(hwnd, &rc, 0, RDW_FRAME | RDW_INVALIDATE | RDW_NOCHILDREN);
+        NtUserRedrawWindow( hwnd, &rc, 0, RDW_FRAME | RDW_INVALIDATE | RDW_NOCHILDREN );
     }
     else
         release_menu_ptr(menu);
@@ -4269,7 +4269,7 @@ BOOL WINAPI DestroyMenu( HMENU hMenu )
     /* DestroyMenu should not destroy system menu popup owner */
     if ((lppop->wFlags & (MF_POPUP | MF_SYSMENU)) == MF_POPUP && lppop->hWnd)
     {
-        DestroyWindow( lppop->hWnd );
+        NtUserDestroyWindow( lppop->hWnd );
         lppop->hWnd = 0;
     }
 
@@ -4489,8 +4489,8 @@ BOOL WINAPI SetMenu( HWND hWnd, HMENU hMenu )
     if(!MENU_SetMenu(hWnd, hMenu))
         return FALSE;
  
-    SetWindowPos( hWnd, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE |
-                  SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED );
+    NtUserSetWindowPos( hWnd, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE |
+                        SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED );
     return TRUE;
 }
 
@@ -4540,8 +4540,8 @@ BOOL WINAPI DrawMenuBar( HWND hWnd )
         }
     }
 
-    return SetWindowPos( hWnd, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE |
-                         SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED );
+    return NtUserSetWindowPos( hWnd, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE |
+                               SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED );
 }
 
 /***********************************************************************

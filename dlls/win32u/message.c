@@ -41,6 +41,22 @@ LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 {
     switch(msg)
     {
+    case WM_WINE_DESTROYWINDOW:
+        return destroy_window( hwnd );
+    case WM_WINE_SETWINDOWPOS:
+        if (is_desktop_window( hwnd )) return 0;
+        return set_window_pos( (WINDOWPOS *)lparam, 0, 0 );
+    case WM_WINE_SHOWWINDOW:
+        if (is_desktop_window( hwnd )) return 0;
+        return NtUserShowWindow( hwnd, wparam );
+    case WM_WINE_SETPARENT:
+        if (is_desktop_window( hwnd )) return 0;
+        return HandleToUlong( NtUserSetParent( hwnd, UlongToHandle(wparam) ));
+    case WM_WINE_SETWINDOWLONG:
+        return set_window_long( hwnd, (short)LOWORD(wparam), HIWORD(wparam), lparam, FALSE );
+    case WM_WINE_SETSTYLE:
+        if (is_desktop_window( hwnd )) return 0;
+        return set_window_style( hwnd, wparam, lparam );
     case WM_WINE_SETACTIVEWINDOW:
         if (!wparam && NtUserGetForegroundWindow() == hwnd) return 0;
         return (LRESULT)NtUserSetActiveWindow( (HWND)wparam );
@@ -112,6 +128,104 @@ BOOL WINAPI NtUserGetGUIThreadInfo( DWORD id, GUITHREADINFO *info )
             if (reply->move_size) info->flags |= GUI_INMOVESIZE;
             if (reply->caret) info->flags |= GUI_CARETBLINKING;
         }
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserSetTimer (win32u.@)
+ */
+UINT_PTR WINAPI NtUserSetTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc, ULONG tolerance )
+{
+    UINT_PTR ret;
+    WNDPROC winproc = 0;
+
+    if (proc) winproc = alloc_winproc( (WNDPROC)proc, TRUE );
+
+    timeout = min( max( USER_TIMER_MINIMUM, timeout ), USER_TIMER_MAXIMUM );
+
+    SERVER_START_REQ( set_win_timer )
+    {
+        req->win    = wine_server_user_handle( hwnd );
+        req->msg    = WM_TIMER;
+        req->id     = id;
+        req->rate   = timeout;
+        req->lparam = (ULONG_PTR)winproc;
+        if (!wine_server_call_err( req ))
+        {
+            ret = reply->id;
+            if (!ret) ret = TRUE;
+        }
+        else ret = 0;
+    }
+    SERVER_END_REQ;
+
+    TRACE( "Added %p %lx %p timeout %d\n", hwnd, id, winproc, timeout );
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserSetSystemTimer (win32u.@)
+ */
+UINT_PTR WINAPI NtUserSetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc )
+{
+    UINT_PTR ret;
+    WNDPROC winproc = 0;
+
+    if (proc) winproc = alloc_winproc( (WNDPROC)proc, TRUE );
+
+    timeout = min( max( 5, timeout ), USER_TIMER_MAXIMUM );
+
+    SERVER_START_REQ( set_win_timer )
+    {
+        req->win    = wine_server_user_handle( hwnd );
+        req->msg    = WM_SYSTIMER;
+        req->id     = id;
+        req->rate   = timeout;
+        req->lparam = (ULONG_PTR)winproc;
+        if (!wine_server_call_err( req ))
+        {
+            ret = reply->id;
+            if (!ret) ret = TRUE;
+        }
+        else ret = 0;
+    }
+    SERVER_END_REQ;
+
+    TRACE( "Added %p %lx %p timeout %d\n", hwnd, id, winproc, timeout );
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserKillTimer (win32u.@)
+ */
+BOOL WINAPI NtUserKillTimer( HWND hwnd, UINT_PTR id )
+{
+    BOOL ret;
+
+    SERVER_START_REQ( kill_win_timer )
+    {
+        req->win = wine_server_user_handle( hwnd );
+        req->msg = WM_TIMER;
+        req->id  = id;
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/* see KillSystemTimer */
+BOOL kill_system_timer( HWND hwnd, UINT_PTR id )
+{
+    BOOL ret;
+
+    SERVER_START_REQ( kill_win_timer )
+    {
+        req->win = wine_server_user_handle( hwnd );
+        req->msg = WM_SYSTIMER;
+        req->id  = id;
+        ret = !wine_server_call_err( req );
     }
     SERVER_END_REQ;
     return ret;

@@ -48,6 +48,7 @@
 #define WIDL_using_Windows_Gaming_Input
 #define WIDL_using_Windows_Gaming_Input_Custom
 #include "windows.gaming.input.custom.h"
+#undef Size
 
 #define MAKE_FUNC(f) static typeof(f) *p ## f
 MAKE_FUNC( RoGetActivationFactory );
@@ -134,9 +135,11 @@ static BOOL test_input_lost( DWORD version )
     };
 #include "pop_hid_macros.h"
 
-    static const HIDP_CAPS hid_caps =
+    struct hid_device_desc desc =
     {
-        .InputReportByteLength = 1,
+        .use_report_id = TRUE,
+        .caps = { .InputReportByteLength = 1 },
+        .attributes = default_attributes,
     };
     static const DIPROPDWORD buffer_size =
     {
@@ -152,7 +155,6 @@ static BOOL test_input_lost( DWORD version )
 
     DIDEVICEINSTANCEW devinst = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
     DIDEVICEOBJECTDATA objdata[32] = {{0}};
-    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
     IDirectInputDevice8W *device = NULL;
     ULONG ref, count, size;
     DIJOYSTATE2 state;
@@ -160,12 +162,13 @@ static BOOL test_input_lost( DWORD version )
 
     winetest_push_context( "%#lx", version );
 
-    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
-    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
-    SetCurrentDirectoryW( tempdir );
-
     cleanup_registry_keys();
-    if (!dinput_driver_start( report_desc, sizeof(report_desc), &hid_caps, NULL, 0 )) goto done;
+
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+
+    if (!hid_device_start( &desc )) goto done;
     if (FAILED(hr = dinput_test_create_device( version, &devinst, &device ))) goto done;
 
     hr = IDirectInputDevice8_SetDataFormat( device, &c_dfDIJoystick2 );
@@ -185,7 +188,7 @@ static BOOL test_input_lost( DWORD version )
     ok( hr == DI_OK, "GetDeviceData returned %#lx\n", hr );
     ok( count == 0, "got %lu expected 0\n", count );
 
-    pnp_driver_stop();
+    hid_device_stop( &desc );
 
     hr = IDirectInputDevice8_GetDeviceState( device, sizeof(state), &state );
     ok( hr == DIERR_INPUTLOST, "GetDeviceState returned %#lx\n", hr );
@@ -205,22 +208,20 @@ static BOOL test_input_lost( DWORD version )
     hr = IDirectInputDevice8_Unacquire( device );
     ok( hr == DI_NOEFFECT, "Unacquire returned: %#lx\n", hr );
 
-    dinput_driver_start( report_desc, sizeof(report_desc), &hid_caps, NULL, 0 );
+    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
+    hid_device_start( &desc );
 
     hr = IDirectInputDevice8_Acquire( device );
-    todo_wine
-    ok( hr == DIERR_UNPLUGGED, "Acquire returned %#lx\n", hr );
+    ok( hr == S_OK, "Acquire returned %#lx\n", hr );
     hr = IDirectInputDevice8_GetDeviceState( device, sizeof(state), &state );
-    todo_wine
-    ok( hr == DIERR_NOTACQUIRED, "GetDeviceState returned %#lx\n", hr );
+    ok( hr == S_OK, "GetDeviceState returned %#lx\n", hr );
 
     ref = IDirectInputDevice8_Release( device );
     ok( ref == 0, "Release returned %ld\n", ref );
 
 done:
-    pnp_driver_stop();
+    hid_device_stop( &desc );
     cleanup_registry_keys();
-    SetCurrentDirectoryW( cwd );
 
     winetest_pop_context();
     return device != NULL;
@@ -255,7 +256,7 @@ static LRESULT CALLBACK devnotify_wndproc( HWND hwnd, UINT msg, WPARAM wparam, L
         if (device_change_all && (device_change_count == 0 || device_change_count == 3))
         {
             expect_guid = control_class;
-            expect_prefix = L"\\\\?\\ROOT#";
+            expect_prefix = L"\\\\?\\WINETEST#";
         }
         else
         {
@@ -961,6 +962,8 @@ static void test_windows_gaming_input(void)
     EventRegistrationToken controller_removed_token;
     IVectorView_RawGameController *controller_view;
     EventRegistrationToken controller_added_token;
+    IIterable_RawGameController *iterable;
+    IIterator_RawGameController *iterator;
     IRawGameControllerStatics *statics;
     HANDLE hwnd, thread, stop_event;
     IInspectable *tmp_inspectable;
@@ -968,7 +971,8 @@ static void test_windows_gaming_input(void)
     HSTRING str;
     UINT32 size;
     HRESULT hr;
-    DWORD ret;
+    DWORD res;
+    BOOL ret;
     MSG msg;
 
     if (!load_combase_functions()) return;
@@ -1080,6 +1084,27 @@ static void test_windows_gaming_input(void)
     ok( hr == S_OK, "get_Size returned %#lx\n", hr );
     ok( size == 1, "got size %u\n", size );
 
+    hr = IVectorView_RawGameController_QueryInterface( controller_view, &IID_IIterable_RawGameController,
+                                                       (void **)&iterable );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+    hr = IIterable_RawGameController_First( iterable, &iterator );
+    ok( hr == S_OK, "First returned %#lx\n", hr );
+    IIterable_RawGameController_Release( iterable );
+
+    hr = IIterator_RawGameController_get_HasCurrent( iterator, &ret );
+    ok( hr == S_OK, "First returned %#lx\n", hr );
+    ok( ret == TRUE, "got HasCurrent %u\n", ret );
+    hr = IIterator_RawGameController_MoveNext( iterator, &ret );
+    ok( hr == S_OK, "First returned %#lx\n", hr );
+    ok( ret == FALSE, "got MoveNext %u\n", ret );
+    hr = IIterator_RawGameController_get_HasCurrent( iterator, &ret );
+    ok( hr == S_OK, "First returned %#lx\n", hr );
+    ok( ret == FALSE, "got MoveNext %u\n", ret );
+    hr = IIterator_RawGameController_MoveNext( iterator, &ret );
+    ok( hr == S_OK, "First returned %#lx\n", hr );
+    ok( ret == FALSE, "got MoveNext %u\n", ret );
+    IIterator_RawGameController_Release( iterator );
+
     IVectorView_RawGameController_Release( controller_view );
     hr = IRawGameControllerStatics_get_RawGameControllers( statics, &controller_view );
     ok( hr == S_OK, "get_RawGameControllers returned %#lx\n", hr );
@@ -1112,9 +1137,9 @@ static void test_windows_gaming_input(void)
     thread = CreateThread( NULL, 0, dinput_test_device_thread, stop_event, 0, NULL );
     ok( !!thread, "CreateThread failed, error %lu\n", GetLastError() );
     wait_for_events( 1, &controller_added.event, INFINITE );
-    ret = wait_for_events( 1, &custom_factory.added_event, 500 );
+    res = wait_for_events( 1, &custom_factory.added_event, 500 );
     todo_wine
-    ok( !ret, "wait_for_events returned %#lx\n", ret );
+    ok( !res, "wait_for_events returned %#lx\n", res );
     hr = IRawGameControllerStatics_get_RawGameControllers( statics, &controller_view );
     ok( hr == S_OK, "get_RawGameControllers returned %#lx\n", hr );
     hr = IVectorView_RawGameController_GetAt( controller_view, 0, &raw_controller );
@@ -1159,9 +1184,9 @@ next:
     IGameController_Release( game_controller );
     IRawGameController_Release( raw_controller );
     SetEvent( stop_event );
-    ret = wait_for_events( 1, &custom_factory.removed_event, 500 );
+    res = wait_for_events( 1, &custom_factory.removed_event, 500 );
     todo_wine
-    ok( !ret, "wait_for_events returned %#lx\n", ret );
+    ok( !res, "wait_for_events returned %#lx\n", res );
     wait_for_events( 1, &controller_removed.event, INFINITE );
 
     hr = IRawGameControllerStatics_remove_RawGameControllerAdded( statics, controller_added_token );
@@ -1194,6 +1219,7 @@ next:
 START_TEST( hotplug )
 {
     if (!dinput_test_init()) return;
+    if (!bus_device_start()) goto done;
 
     CoInitialize( NULL );
     if (test_input_lost( 0x500 ))
@@ -1206,5 +1232,7 @@ START_TEST( hotplug )
     }
     CoUninitialize();
 
+done:
+    bus_device_stop();
     dinput_test_exit();
 }

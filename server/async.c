@@ -304,12 +304,8 @@ struct async *create_async( struct fd *fd, struct thread *thread, const async_da
  * the initial status may be STATUS_PENDING */
 void async_set_initial_status( struct async *async, unsigned int status )
 {
-    assert( async->unknown_status );
-    if (!async->terminated)
-    {
-        async->initial_status = status;
-        async->unknown_status = 0;
-    }
+    async->initial_status = status;
+    async->unknown_status = 0;
 }
 
 void set_async_pending( struct async *async )
@@ -326,6 +322,13 @@ void async_wake_obj( struct async *async )
         async->signaled = 1;
         wake_up( &async->obj, 0 );
     }
+}
+
+static void async_call_completion_callback( struct async *async )
+{
+    if (async->completion_callback)
+        async->completion_callback( async->completion_callback_private );
+    async->completion_callback = NULL;
 }
 
 /* return async object status and wait handle to client */
@@ -369,6 +372,9 @@ obj_handle_t async_handoff( struct async *async, data_size_t *result, int force_
 
     if (!async->pending && NT_ERROR( get_error() ))
     {
+        async->iosb->status = get_error();
+        async_call_completion_callback( async );
+
         close_handle( async->thread->process, async->wait_handle );
         async->wait_handle = 0;
         return 0;
@@ -487,6 +493,8 @@ void async_set_result( struct object *obj, unsigned int status, apc_param_t tota
 
     assert( async->terminated );  /* it must have been woken up if we get a result */
 
+    if (async->unknown_status) async_set_initial_status( async, status );
+
     if (async->alerted && status == STATUS_PENDING)  /* restart it */
     {
         async->terminated = 0;
@@ -532,9 +540,7 @@ void async_set_result( struct object *obj, unsigned int status, apc_param_t tota
             wake_up( &async->obj, 0 );
         }
 
-        if (async->completion_callback)
-            async->completion_callback( async->completion_callback_private );
-        async->completion_callback = NULL;
+        async_call_completion_callback( async );
 
         if (async->queue)
         {
@@ -773,17 +779,20 @@ DECL_HANDLER(set_async_direct_result)
         return;
     }
 
-    async_set_initial_status( async, status );
-
     if (status == STATUS_PENDING)
     {
         async->direct_result = 0;
         async->pending = 1;
     }
+    else if (req->mark_pending)
+    {
+        async->pending = 1;
+    }
 
-    /* if the I/O has completed successfully, the client would have already
-     * set the IOSB. therefore, we can skip waiting on wait_handle and do
-     * async_set_result() directly.
+    /* if the I/O has completed successfully (or unsuccessfully, and
+     * async->pending is set), the client would have already set the IOSB.
+     * therefore, we can do async_set_result() directly and let the client skip
+     * waiting on wait_handle.
      */
     async_set_result( &async->obj, status, req->information );
 

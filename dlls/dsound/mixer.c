@@ -554,9 +554,9 @@ static void DSOUND_MixToTemporary(IDirectSoundBufferImpl *dsb, DWORD frames)
                     hr = IMediaObjectInPlace_Process(dsb->filters[i].inplace, frames * sizeof(float) * dsb->mix_channels,
                                                      (BYTE *)dsb->device->dsp_buffer, 0, DMO_INPLACE_NORMAL);
                     if (FAILED(hr))
-                        WARN("IMediaObjectInPlace_Process failed for filter %u\n", i);
+                        WARN("IMediaObjectInPlace_Process failed for filter %lu\n", i);
                 } else
-                    WARN("filter %u has no inplace object - unsupported\n", i);
+                    WARN("filter %lu has no inplace object - unsupported\n", i);
             }
         }
 

@@ -114,7 +114,7 @@ NewMenu_ExtInit_AddRef(IShellExtInit *iface)
     NewMenuImpl *This = impl_from_IShellExtInit(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p), refcount=%i\n", iface, ref);
+    TRACE("(%p), refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -125,7 +125,7 @@ NewMenu_ExtInit_Release(IShellExtInit *iface)
     NewMenuImpl *This = impl_from_IShellExtInit(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p), refcount=%i\n", iface, ref);
+    TRACE("(%p), refcount=%lu\n", iface, ref);
 
     if (!ref)
     {
@@ -252,7 +252,7 @@ NewMenu_ContextMenu3_GetCommandString(IContextMenu3 *iface, UINT_PTR cmd, UINT t
 {
     NewMenuImpl *This = impl_from_IContextMenu3(iface);
 
-    FIXME("(%p)->(%lu %u %p %p %u): stub\n", This, cmd, type, reserved, name, max_len);
+    FIXME("(%p)->(%Iu %u %p %p %u): stub\n", This, cmd, type, reserved, name, max_len);
 
     return E_NOTIMPL;
 }
@@ -404,7 +404,7 @@ NewMenu_ContextMenu3_HandleMenuMsg2(IContextMenu3 *iface, UINT uMsg, WPARAM wPar
 {
     NewMenuImpl *This = impl_from_IContextMenu3(iface);
 
-    TRACE("(%p)->(%u, %lx, %lx, %p)\n", This, uMsg, wParam, lParam, result);
+    TRACE("(%p)->(%u, %Ix, %Ix, %p)\n", This, uMsg, wParam, lParam, result);
 
     switch (uMsg)
     {

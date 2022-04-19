@@ -138,71 +138,7 @@ typedef enum {
 
 jsdisp_t *iface_to_jsdisp(IDispatch*) DECLSPEC_HIDDEN;
 
-typedef struct {
-    union {
-        IDispatch *disp;
-        IDispatchEx *dispex;
-        jsdisp_t *jsdisp;
-    } u;
-    DWORD flags;
-} vdisp_t;
-
-#define VDISP_DISPEX  0x0001
-#define VDISP_JSDISP  0x0002
-
-static inline void vdisp_release(vdisp_t *vdisp)
-{
-    IDispatch_Release(vdisp->u.disp);
-}
-
-static inline BOOL is_jsdisp(vdisp_t *vdisp)
-{
-    return (vdisp->flags & VDISP_JSDISP) != 0;
-}
-
-static inline BOOL is_dispex(vdisp_t *vdisp)
-{
-    return (vdisp->flags & VDISP_DISPEX) != 0;
-}
-
-static inline void set_jsdisp(vdisp_t *vdisp, jsdisp_t *jsdisp)
-{
-    vdisp->u.jsdisp = jsdisp;
-    vdisp->flags = VDISP_JSDISP | VDISP_DISPEX;
-    IDispatch_AddRef(vdisp->u.disp);
-}
-
-static inline void set_disp(vdisp_t *vdisp, IDispatch *disp)
-{
-    IDispatchEx *dispex;
-    jsdisp_t *jsdisp;
-    HRESULT hres;
-
-    jsdisp = iface_to_jsdisp(disp);
-    if(jsdisp) {
-        vdisp->u.jsdisp = jsdisp;
-        vdisp->flags = VDISP_JSDISP | VDISP_DISPEX;
-        return;
-    }
-
-    hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
-    if(SUCCEEDED(hres)) {
-        vdisp->u.dispex = dispex;
-        vdisp->flags = VDISP_DISPEX;
-        return;
-    }
-
-    IDispatch_AddRef(disp);
-    vdisp->u.disp = disp;
-    vdisp->flags = 0;
-}
-
-static inline jsdisp_t *get_jsdisp(vdisp_t *vdisp)
-{
-    return is_jsdisp(vdisp) ? vdisp->u.jsdisp : NULL;
-}
-
-typedef HRESULT (*builtin_invoke_t)(script_ctx_t*,vdisp_t*,WORD,unsigned,jsval_t*,jsval_t*);
+typedef HRESULT (*builtin_invoke_t)(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*);
 typedef HRESULT (*builtin_getter_t)(script_ctx_t*,jsdisp_t*,jsval_t*);
 typedef HRESULT (*builtin_setter_t)(script_ctx_t*,jsdisp_t*,jsval_t);
 
@@ -337,7 +273,7 @@ HRESULT create_builtin_constructor(script_ctx_t*,builtin_invoke_t,const WCHAR*,c
         jsdisp_t*,jsdisp_t**) DECLSPEC_HIDDEN;
 HRESULT Function_invoke(jsdisp_t*,IDispatch*,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
 
-HRESULT Function_value(script_ctx_t*,vdisp_t*,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
+HRESULT Function_value(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
 HRESULT Function_get_value(script_ctx_t*,jsdisp_t*,jsval_t*) DECLSPEC_HIDDEN;
 struct _function_code_t *Function_get_code(jsdisp_t*) DECLSPEC_HIDDEN;
 
@@ -514,16 +450,13 @@ HRESULT regexp_string_match(script_ctx_t*,jsdisp_t*,jsstr_t*,jsval_t*) DECLSPEC_
 BOOL bool_obj_value(jsdisp_t*) DECLSPEC_HIDDEN;
 unsigned array_get_length(jsdisp_t*) DECLSPEC_HIDDEN;
 
-HRESULT JSGlobal_eval(script_ctx_t*,vdisp_t*,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
+HRESULT JSGlobal_eval(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
+HRESULT Object_get_proto_(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
+HRESULT Object_set_proto_(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
 
 static inline BOOL is_class(jsdisp_t *jsdisp, jsclass_t class)
 {
     return jsdisp->builtin_info->class == class;
-}
-
-static inline BOOL is_vclass(vdisp_t *vdisp, jsclass_t class)
-{
-    return is_jsdisp(vdisp) && is_class(vdisp->u.jsdisp, class);
 }
 
 static inline BOOL is_int32(double d)
@@ -585,6 +518,8 @@ static inline DWORD make_grfdex(script_ctx_t *ctx, DWORD flags)
 #define JS_E_PRECISION_OUT_OF_RANGE  MAKE_JSERROR(IDS_PRECISION_OUT_OF_RANGE)
 #define JS_E_INVALID_LENGTH          MAKE_JSERROR(IDS_INVALID_LENGTH)
 #define JS_E_ARRAY_EXPECTED          MAKE_JSERROR(IDS_ARRAY_EXPECTED)
+#define JS_E_CYCLIC_PROTO_VALUE      MAKE_JSERROR(IDS_CYCLIC_PROTO_VALUE)
+#define JS_E_CANNOT_CREATE_FOR_NONEXTENSIBLE MAKE_JSERROR(IDS_CREATE_FOR_NONEXTENSIBLE)
 #define JS_E_OBJECT_NONEXTENSIBLE    MAKE_JSERROR(IDS_OBJECT_NONEXTENSIBLE)
 #define JS_E_NONCONFIGURABLE_REDEFINED MAKE_JSERROR(IDS_NONCONFIGURABLE_REDEFINED)
 #define JS_E_NONWRITABLE_MODIFIED    MAKE_JSERROR(IDS_NONWRITABLE_MODIFIED)

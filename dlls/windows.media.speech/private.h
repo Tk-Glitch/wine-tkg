@@ -40,12 +40,15 @@
 #define WIDL_using_Windows_Media_SpeechRecognition
 #include "windows.media.speechrecognition.h"
 
+#include "wine/list.h"
+
 /*
  *
  * Windows.Media.SpeechRecognition
  *
  */
 
+extern IActivationFactory *listconstraint_factory;
 extern IActivationFactory *recognizer_factory;
 
 /*
@@ -57,6 +60,11 @@ extern IActivationFactory *recognizer_factory;
 extern IActivationFactory *synthesizer_factory;
 
 
+
+HRESULT typed_event_handlers_append( struct list *list, ITypedEventHandler_IInspectable_IInspectable *handler, EventRegistrationToken *token );
+HRESULT typed_event_handlers_remove( struct list *list, EventRegistrationToken *token );
+HRESULT typed_event_handlers_notify( struct list *list, IInspectable *sender, IInspectable *args );
+HRESULT typed_event_handlers_clear( struct list* list );
 
 #define DEFINE_IINSPECTABLE_( pfx, iface_type, impl_type, impl_from, iface_mem, expr )             \
     static inline impl_type *impl_from( iface_type *iface )                                        \

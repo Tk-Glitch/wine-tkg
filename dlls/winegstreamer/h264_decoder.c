@@ -28,15 +28,120 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
+static const GUID *const h264_decoder_input_types[] =
+{
+    &MFVideoFormat_H264,
+    &MFVideoFormat_H264_ES,
+};
+static const GUID *const h264_decoder_output_types[] =
+{
+    &MFVideoFormat_NV12,
+    &MFVideoFormat_YV12,
+    &MFVideoFormat_IYUV,
+    &MFVideoFormat_I420,
+    &MFVideoFormat_YUY2,
+};
+
 struct h264_decoder
 {
     IMFTransform IMFTransform_iface;
     LONG refcount;
+    IMFMediaType *input_type;
+    IMFMediaType *output_type;
 };
 
 static struct h264_decoder *impl_from_IMFTransform(IMFTransform *iface)
 {
     return CONTAINING_RECORD(iface, struct h264_decoder, IMFTransform_iface);
+}
+
+static HRESULT fill_output_media_type(IMFMediaType *media_type, IMFMediaType *default_type)
+{
+    UINT32 value, width, height;
+    UINT64 ratio;
+    GUID subtype;
+    HRESULT hr;
+
+    if (FAILED(hr = IMFMediaType_GetGUID(media_type, &MF_MT_SUBTYPE, &subtype)))
+        return hr;
+
+    if (FAILED(hr = IMFMediaType_GetUINT64(media_type, &MF_MT_FRAME_SIZE, &ratio)))
+    {
+        if (!default_type || FAILED(hr = IMFMediaType_GetUINT64(default_type, &MF_MT_FRAME_SIZE, &ratio)))
+            ratio = (UINT64)1920 << 32 | 1080;
+        if (FAILED(hr = IMFMediaType_SetUINT64(media_type, &MF_MT_FRAME_SIZE, ratio)))
+            return hr;
+    }
+    width = ratio >> 32;
+    height = ratio;
+
+    if (FAILED(hr = IMFMediaType_GetItem(media_type, &MF_MT_FRAME_RATE, NULL)))
+    {
+        if (!default_type || FAILED(hr = IMFMediaType_GetUINT64(default_type, &MF_MT_FRAME_RATE, &ratio)))
+            ratio = (UINT64)30000 << 32 | 1001;
+        if (FAILED(hr = IMFMediaType_SetUINT64(media_type, &MF_MT_FRAME_RATE, ratio)))
+            return hr;
+    }
+
+    if (FAILED(hr = IMFMediaType_GetItem(media_type, &MF_MT_PIXEL_ASPECT_RATIO, NULL)))
+    {
+        if (!default_type || FAILED(hr = IMFMediaType_GetUINT64(default_type, &MF_MT_PIXEL_ASPECT_RATIO, &ratio)))
+            ratio = (UINT64)1 << 32 | 1;
+        if (FAILED(hr = IMFMediaType_SetUINT64(media_type, &MF_MT_PIXEL_ASPECT_RATIO, ratio)))
+            return hr;
+    }
+
+    if (FAILED(hr = IMFMediaType_GetItem(media_type, &MF_MT_SAMPLE_SIZE, NULL)))
+    {
+        if ((!default_type || FAILED(hr = IMFMediaType_GetUINT32(default_type, &MF_MT_SAMPLE_SIZE, &value))) &&
+                FAILED(hr = MFCalculateImageSize(&subtype, width, height, &value)))
+            return hr;
+        if (FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_SAMPLE_SIZE, value)))
+            return hr;
+    }
+
+    if (FAILED(hr = IMFMediaType_GetItem(media_type, &MF_MT_DEFAULT_STRIDE, NULL)))
+    {
+        if ((!default_type || FAILED(hr = IMFMediaType_GetUINT32(default_type, &MF_MT_DEFAULT_STRIDE, &value))) &&
+                FAILED(hr = MFGetStrideForBitmapInfoHeader(subtype.Data1, width, (LONG *)&value)))
+            return hr;
+        if (FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_DEFAULT_STRIDE, value)))
+            return hr;
+    }
+
+    if (FAILED(hr = IMFMediaType_GetItem(media_type, &MF_MT_INTERLACE_MODE, NULL)))
+    {
+        if (!default_type || FAILED(hr = IMFMediaType_GetUINT32(default_type, &MF_MT_INTERLACE_MODE, &value)))
+            value = MFVideoInterlace_MixedInterlaceOrProgressive;
+        if (FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_INTERLACE_MODE, value)))
+            return hr;
+    }
+
+    if (FAILED(hr = IMFMediaType_GetItem(media_type, &MF_MT_ALL_SAMPLES_INDEPENDENT, NULL)))
+    {
+        if (!default_type || FAILED(hr = IMFMediaType_GetUINT32(default_type, &MF_MT_ALL_SAMPLES_INDEPENDENT, &value)))
+            value = 1;
+        if (FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_ALL_SAMPLES_INDEPENDENT, value)))
+            return hr;
+    }
+
+    if (FAILED(hr = IMFMediaType_GetItem(media_type, &MF_MT_VIDEO_ROTATION, NULL)))
+    {
+        if (!default_type || FAILED(hr = IMFMediaType_GetUINT32(default_type, &MF_MT_VIDEO_ROTATION, &value)))
+            value = 0;
+        if (FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_VIDEO_ROTATION, value)))
+            return hr;
+    }
+
+    if (FAILED(hr = IMFMediaType_GetItem(media_type, &MF_MT_FIXED_SIZE_SAMPLES, NULL)))
+    {
+        if (!default_type || FAILED(hr = IMFMediaType_GetUINT32(default_type, &MF_MT_FIXED_SIZE_SAMPLES, &value)))
+            value = 1;
+        if (FAILED(hr = IMFMediaType_SetUINT32(media_type, &MF_MT_FIXED_SIZE_SAMPLES, value)))
+            return hr;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_QueryInterface(IMFTransform *iface, REFIID iid, void **out)
@@ -77,7 +182,13 @@ static ULONG WINAPI transform_Release(IMFTransform *iface)
     TRACE("iface %p decreasing refcount to %lu.\n", decoder, refcount);
 
     if (!refcount)
+    {
+        if (decoder->input_type)
+            IMFMediaType_Release(decoder->input_type);
+        if (decoder->output_type)
+            IMFMediaType_Release(decoder->output_type);
         free(decoder);
+    }
 
     return refcount;
 }
@@ -119,7 +230,7 @@ static HRESULT WINAPI transform_GetOutputStreamInfo(IMFTransform *iface, DWORD i
 static HRESULT WINAPI transform_GetAttributes(IMFTransform *iface, IMFAttributes **attributes)
 {
     FIXME("iface %p, attributes %p stub!\n", iface, attributes);
-    return E_NOTIMPL;
+    return MFCreateAttributes(attributes, 0);
 }
 
 static HRESULT WINAPI transform_GetInputStreamAttributes(IMFTransform *iface, DWORD id, IMFAttributes **attributes)
@@ -150,27 +261,131 @@ static HRESULT WINAPI transform_AddInputStreams(IMFTransform *iface, DWORD strea
 static HRESULT WINAPI transform_GetInputAvailableType(IMFTransform *iface, DWORD id, DWORD index,
         IMFMediaType **type)
 {
-    FIXME("iface %p, id %#lx, index %#lx, type %p stub!\n", iface, id, index, type);
-    return E_NOTIMPL;
+    IMFMediaType *media_type;
+    const GUID *subtype;
+    HRESULT hr;
+
+    TRACE("iface %p, id %#lx, index %#lx, type %p.\n", iface, id, index, type);
+
+    *type = NULL;
+
+    if (index >= ARRAY_SIZE(h264_decoder_input_types))
+        return MF_E_NO_MORE_TYPES;
+    subtype = h264_decoder_input_types[index];
+
+    if (FAILED(hr = MFCreateMediaType(&media_type)))
+        return hr;
+
+    if (SUCCEEDED(hr = IMFMediaType_SetGUID(media_type, &MF_MT_MAJOR_TYPE, &MFMediaType_Video)) &&
+            SUCCEEDED(hr = IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, subtype)))
+        IMFMediaType_AddRef((*type = media_type));
+
+    IMFMediaType_Release(media_type);
+    return hr;
 }
 
 static HRESULT WINAPI transform_GetOutputAvailableType(IMFTransform *iface, DWORD id,
         DWORD index, IMFMediaType **type)
 {
-    FIXME("iface %p, id %#lx, index %#lx, type %p stub!\n", iface, id, index, type);
-    return E_NOTIMPL;
+    struct h264_decoder *decoder = impl_from_IMFTransform(iface);
+    IMFMediaType *media_type;
+    const GUID *output_type;
+    HRESULT hr;
+
+    TRACE("iface %p, id %#lx, index %#lx, type %p.\n", iface, id, index, type);
+
+    if (!decoder->input_type)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+
+    *type = NULL;
+
+    if (index >= ARRAY_SIZE(h264_decoder_output_types))
+        return MF_E_NO_MORE_TYPES;
+    output_type = h264_decoder_output_types[index];
+
+    if (FAILED(hr = MFCreateMediaType(&media_type)))
+        return hr;
+
+    if (FAILED(hr = IMFMediaType_SetGUID(media_type, &MF_MT_MAJOR_TYPE, &MFMediaType_Video)))
+        goto done;
+    if (FAILED(hr = IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, output_type)))
+        goto done;
+
+    hr = fill_output_media_type(media_type, NULL);
+
+done:
+    if (SUCCEEDED(hr))
+        IMFMediaType_AddRef((*type = media_type));
+
+    IMFMediaType_Release(media_type);
+    return hr;
 }
 
 static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFMediaType *type, DWORD flags)
 {
-    FIXME("iface %p, id %#lx, type %p, flags %#lx stub!\n", iface, id, type, flags);
-    return E_NOTIMPL;
+    struct h264_decoder *decoder = impl_from_IMFTransform(iface);
+    GUID major, subtype;
+    HRESULT hr;
+    ULONG i;
+
+    TRACE("iface %p, id %#lx, type %p, flags %#lx.\n", iface, id, type, flags);
+
+    if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major)) ||
+            FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype)))
+        return E_INVALIDARG;
+
+    if (!IsEqualGUID(&major, &MFMediaType_Video))
+        return MF_E_INVALIDMEDIATYPE;
+
+    for (i = 0; i < ARRAY_SIZE(h264_decoder_input_types); ++i)
+        if (IsEqualGUID(&subtype, h264_decoder_input_types[i]))
+            break;
+    if (i == ARRAY_SIZE(h264_decoder_input_types))
+        return MF_E_INVALIDMEDIATYPE;
+
+    if (decoder->output_type)
+    {
+        IMFMediaType_Release(decoder->output_type);
+        decoder->output_type = NULL;
+    }
+
+    if (decoder->input_type)
+        IMFMediaType_Release(decoder->input_type);
+    IMFMediaType_AddRef((decoder->input_type = type));
+
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMFMediaType *type, DWORD flags)
 {
-    FIXME("iface %p, id %#lx, type %p, flags %#lx stub!\n", iface, id, type, flags);
-    return E_NOTIMPL;
+    struct h264_decoder *decoder = impl_from_IMFTransform(iface);
+    GUID major, subtype;
+    HRESULT hr;
+    ULONG i;
+
+    TRACE("iface %p, id %#lx, type %p, flags %#lx.\n", iface, id, type, flags);
+
+    if (!decoder->input_type)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+
+    if (FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major)) ||
+            FAILED(hr = IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype)))
+        return hr;
+
+    if (!IsEqualGUID(&major, &MFMediaType_Video))
+        return MF_E_INVALIDMEDIATYPE;
+
+    for (i = 0; i < ARRAY_SIZE(h264_decoder_output_types); ++i)
+        if (IsEqualGUID(&subtype, h264_decoder_output_types[i]))
+            break;
+    if (i == ARRAY_SIZE(h264_decoder_output_types))
+        return MF_E_INVALIDMEDIATYPE;
+
+    if (decoder->output_type)
+        IMFMediaType_Release(decoder->output_type);
+    IMFMediaType_AddRef((decoder->output_type = type));
+
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_GetInputCurrentType(IMFTransform *iface, DWORD id, IMFMediaType **type)

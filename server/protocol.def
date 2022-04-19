@@ -1471,11 +1471,11 @@ enum server_fd_type
 /* Perform a send on a socket */
 @REQ(send_socket)
     async_data_t async;         /* async I/O parameters */
-    unsigned int status;        /* status of initial call */
-    unsigned int total;         /* number of bytes already sent */
+    int          force_async;   /* Force asynchronous mode? */
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking send */
     unsigned int options;       /* device open options */
+    int          nonblocking;   /* is socket non-blocking? */
 @END
 
 
@@ -2178,6 +2178,7 @@ enum message_type
     obj_handle_t   handle;        /* wait handle */
     apc_param_t    information;   /* IO_STATUS_BLOCK Information */
     unsigned int   status;        /* completion status */
+    int            mark_pending;  /* set async to pending before completion? */
 @REPLY
     obj_handle_t   handle;        /* wait handle, or NULL if closed */
 @END

@@ -643,7 +643,7 @@ FILESUBTYPE    VFT2_UNKNOWN
     len = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = VerQueryValueA(preparedbuffer, "StringFileInfo", (LPVOID *)&p, &len);
-    ok(ret, "VerQueryValueA error %u\n", GetLastError());
+    ok(ret, "VerQueryValueA error %lu\n", GetLastError());
     ok(len == 0, "VerQueryValueA returned %u, expected 0\n", len);
     todo_wine
     ok(p == preparedbuffer + 0x7e, "p was %p, expected %p\n", p, preparedbuffer + 0x7e);
@@ -652,7 +652,7 @@ FILESUBTYPE    VFT2_UNKNOWN
     len = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = VerQueryValueA(preparedbuffer, "\\StringFileInfo", (LPVOID *)&p, &len);
-    ok(ret, "VerQueryValueA error %u\n", GetLastError());
+    ok(ret, "VerQueryValueA error %lu\n", GetLastError());
     ok(len == 0, "VerQueryValueA returned %u, expected 0\n", len);
     todo_wine
     ok(p == preparedbuffer + 0x7e, "p was %p, expected %p\n", p, preparedbuffer + 0x7e);
@@ -661,7 +661,7 @@ FILESUBTYPE    VFT2_UNKNOWN
     len = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = VerQueryValueA(preparedbuffer, "\\\\StringFileInfo", (LPVOID *)&p, &len);
-    ok(ret, "VerQueryValueA error %u\n", GetLastError());
+    ok(ret, "VerQueryValueA error %lu\n", GetLastError());
     ok(len == 0, "VerQueryValueA returned %u, expected 0\n", len);
     todo_wine
     ok(p == preparedbuffer + 0x7e, "p was %p, expected %p\n", p, preparedbuffer + 0x7e);
@@ -671,7 +671,7 @@ FILESUBTYPE    VFT2_UNKNOWN
     len = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = VerQueryValueW(preparedbuffer, FileDescriptionW + 2, (LPVOID *)&p, &len);
-    ok(ret, "VerQueryValueW error %u\n", GetLastError());
+    ok(ret, "VerQueryValueW error %lu\n", GetLastError());
     ok(len == 0, "VerQueryValueW returned %u, expected 0\n", len);
     todo_wine
     ok(p == preparedbuffer + 0x7e, "p was %p, expected %p\n", p, preparedbuffer + 0x7e);
@@ -680,7 +680,7 @@ FILESUBTYPE    VFT2_UNKNOWN
     len = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = VerQueryValueW(preparedbuffer, FileDescriptionW + 1, (LPVOID *)&p, &len);
-    ok(ret, "VerQueryValueW error %u\n", GetLastError());
+    ok(ret, "VerQueryValueW error %lu\n", GetLastError());
     ok(len == 0, "VerQueryValueW returned %u, expected 0\n", len);
     todo_wine
     ok(p == preparedbuffer + 0x7e, "p was %p, expected %p\n", p, preparedbuffer + 0x7e);
@@ -689,7 +689,7 @@ FILESUBTYPE    VFT2_UNKNOWN
     len = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = VerQueryValueW(preparedbuffer, FileDescriptionW, (LPVOID *)&p, &len);
-    ok(ret, "VerQueryValueW error %u\n", GetLastError());
+    ok(ret, "VerQueryValueW error %lu\n", GetLastError());
     ok(len == 0, "VerQueryValueW returned %u, expected 0\n", len);
     todo_wine
     ok(p == preparedbuffer + 0x7e, "p was %p, expected %p\n", p, preparedbuffer + 0x7e);

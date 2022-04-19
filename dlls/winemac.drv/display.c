@@ -524,6 +524,13 @@ static int get_default_bpp(void)
 }
 
 
+static BOOL display_mode_is_supported(CGDisplayModeRef display_mode)
+{
+    uint32_t io_flags = CGDisplayModeGetIOFlags(display_mode);
+    return (io_flags & kDisplayModeValidFlag) && (io_flags & kDisplayModeSafeFlag);
+}
+
+
 #if defined(MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_8
 static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_original)
 {
@@ -576,7 +583,119 @@ static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_o
 
     return ret;
 }
+
+
+static BOOL mode_is_preferred(CGDisplayModeRef new_mode, CGDisplayModeRef old_mode,
+                              struct display_mode_descriptor *original_mode_desc,
+                              BOOL include_unsupported)
+{
+    BOOL new_is_supported;
+    CFStringRef pixel_encoding;
+    size_t width_points, height_points;
+    size_t old_width_pixels, old_height_pixels, new_width_pixels, new_height_pixels;
+    BOOL old_size_same, new_size_same;
+
+    /* If a given mode is the user's default, then always list it in preference to any similar
+       modes that may exist. */
+    if (display_mode_matches_descriptor(new_mode, original_mode_desc))
+        return TRUE;
+
+    /* Skip unsupported modes unless told to do otherwise. */
+    new_is_supported = display_mode_is_supported(new_mode);
+    if (!new_is_supported && !include_unsupported)
+        return FALSE;
+
+    pixel_encoding = CGDisplayModeCopyPixelEncoding(new_mode);
+    if (pixel_encoding)
+    {
+        BOOL bpp30 = CFEqual(pixel_encoding, CFSTR(kIO30BitDirectPixels));
+        CFRelease(pixel_encoding);
+        if (bpp30)
+        {
+            /* This is an odd pixel encoding.  It seems it's only returned
+               when using kCGDisplayShowDuplicateLowResolutionModes.  It's
+               32bpp in terms of the actual raster layout, but it's 10
+               bits per component.  I think that no Windows program is
+               likely to need it and they will probably be confused by it.
+               Skip it. */
+            return FALSE;
+        }
+    }
+
+    if (!old_mode)
+        return TRUE;
+
+    /* Prefer the original mode over any similar mode. */
+    if (display_mode_matches_descriptor(old_mode, original_mode_desc))
+        return FALSE;
+
+    /* Prefer supported modes over similar unsupported ones. */
+    if (!new_is_supported && display_mode_is_supported(old_mode))
+        return FALSE;
+
+    /* Otherwise, prefer a mode whose pixel size equals its point size over one which
+       is scaled. */
+    width_points = CGDisplayModeGetWidth(new_mode);
+    height_points = CGDisplayModeGetHeight(new_mode);
+    new_width_pixels = CGDisplayModeGetPixelWidth(new_mode);
+    new_height_pixels = CGDisplayModeGetPixelHeight(new_mode);
+    old_width_pixels = CGDisplayModeGetPixelWidth(old_mode);
+    old_height_pixels = CGDisplayModeGetPixelHeight(old_mode);
+    new_size_same = (new_width_pixels == width_points && new_height_pixels == height_points);
+    old_size_same = (old_width_pixels == width_points && old_height_pixels == height_points);
+
+    if (new_size_same && !old_size_same)
+        return TRUE;
+
+    if (!new_size_same && old_size_same)
+        return FALSE;
+
+    /* Otherwise, prefer the mode with the smaller pixel size. */
+    return new_width_pixels < old_width_pixels && new_height_pixels < old_height_pixels;
+}
 #endif
+
+
+static CFComparisonResult mode_compare(const void *p1, const void *p2, void *context)
+{
+    CGDisplayModeRef a = (CGDisplayModeRef)p1, b = (CGDisplayModeRef)p2;
+    size_t a_val, b_val;
+    double a_refresh_rate, b_refresh_rate;
+
+    /* Sort by bpp descending, */
+    a_val = display_mode_bits_per_pixel(a);
+    b_val = display_mode_bits_per_pixel(b);
+    if (a_val < b_val)
+        return kCFCompareGreaterThan;
+    else if (a_val > b_val)
+        return kCFCompareLessThan;
+
+    /* then width ascending, */
+    a_val = CGDisplayModeGetWidth(a);
+    b_val = CGDisplayModeGetWidth(b);
+    if (a_val < b_val)
+        return kCFCompareLessThan;
+    else if (a_val > b_val)
+        return kCFCompareGreaterThan;
+
+    /* then height ascending, */
+    a_val = CGDisplayModeGetHeight(a);
+    b_val = CGDisplayModeGetHeight(b);
+    if (a_val < b_val)
+        return kCFCompareLessThan;
+    else if (a_val > b_val)
+        return kCFCompareGreaterThan;
+
+    /* then refresh rate descending. */
+    a_refresh_rate = CGDisplayModeGetRefreshRate(a);
+    b_refresh_rate = CGDisplayModeGetRefreshRate(b);
+    if (a_refresh_rate < b_refresh_rate)
+        return kCFCompareGreaterThan;
+    else if (a_refresh_rate > b_refresh_rate)
+        return kCFCompareLessThan;
+
+    return kCFCompareEqualTo;
+}
 
 
 /***********************************************************************
@@ -590,8 +709,11 @@ static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_o
  * returned from CGDisplayCopyAllDisplayModes() without special options.
  * This is especially bad if that's the user's default mode, since then
  * no "available" mode matches the initial settings.
+ *
+ * If include_unsupported is FALSE, display modes with IO flags that
+ * indicate that they are invalid or unsafe are filtered.
  */
-static CFArrayRef copy_display_modes(CGDirectDisplayID display)
+static CFArrayRef copy_display_modes(CGDirectDisplayID display, BOOL include_unsupported)
 {
     CFArrayRef modes = NULL;
 
@@ -620,72 +742,12 @@ static CFArrayRef copy_display_modes(CGDirectDisplayID display)
         count = CFArrayGetCount(modes);
         for (i = 0; i < count; i++)
         {
-            BOOL better = TRUE;
             CGDisplayModeRef new_mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
             BOOL new_is_original = display_mode_matches_descriptor(new_mode, desc);
             CFDictionaryRef key = create_mode_dict(new_mode, new_is_original);
+            CGDisplayModeRef old_mode = (CGDisplayModeRef)CFDictionaryGetValue(modes_by_size, key);
 
-            /* If a given mode is the user's default, then always list it in preference to any similar
-               modes that may exist. */
-            if (new_is_original)
-                better = TRUE;
-            else
-            {
-                CFStringRef pixel_encoding = CGDisplayModeCopyPixelEncoding(new_mode);
-                CGDisplayModeRef old_mode;
-
-                if (pixel_encoding)
-                {
-                    BOOL bpp30 = CFEqual(pixel_encoding, CFSTR(kIO30BitDirectPixels));
-                    CFRelease(pixel_encoding);
-                    if (bpp30)
-                    {
-                        /* This is an odd pixel encoding.  It seems it's only returned
-                           when using kCGDisplayShowDuplicateLowResolutionModes.  It's
-                           32bpp in terms of the actual raster layout, but it's 10
-                           bits per component.  I think that no Windows program is
-                           likely to need it and they will probably be confused by it.
-                           Skip it. */
-                        CFRelease(key);
-                        continue;
-                    }
-                }
-
-                old_mode = (CGDisplayModeRef)CFDictionaryGetValue(modes_by_size, key);
-                if (old_mode)
-                {
-                    BOOL old_is_original = display_mode_matches_descriptor(old_mode, desc);
-
-                    if (old_is_original)
-                        better = FALSE;
-                    else
-                    {
-                        /* Otherwise, prefer a mode whose pixel size equals its point size over one which
-                           is scaled. */
-                        size_t width_points = CGDisplayModeGetWidth(new_mode);
-                        size_t height_points = CGDisplayModeGetHeight(new_mode);
-                        size_t new_width_pixels = CGDisplayModeGetPixelWidth(new_mode);
-                        size_t new_height_pixels = CGDisplayModeGetPixelHeight(new_mode);
-                        size_t old_width_pixels = CGDisplayModeGetPixelWidth(old_mode);
-                        size_t old_height_pixels = CGDisplayModeGetPixelHeight(old_mode);
-                        BOOL new_size_same = (new_width_pixels == width_points && new_height_pixels == height_points);
-                        BOOL old_size_same = (old_width_pixels == width_points && old_height_pixels == height_points);
-
-                        if (new_size_same && !old_size_same)
-                            better = TRUE;
-                        else if (!new_size_same && old_size_same)
-                            better = FALSE;
-                        else
-                        {
-                            /* Otherwise, prefer the mode with the smaller pixel size. */
-                            if (old_width_pixels < new_width_pixels || old_height_pixels < new_height_pixels)
-                                better = FALSE;
-                        }
-                    }
-                }
-            }
-
-            if (better)
+            if (mode_is_preferred(new_mode, old_mode, desc, include_unsupported))
                 CFDictionarySetValue(modes_by_size, key, new_mode);
 
             CFRelease(key);
@@ -705,7 +767,16 @@ static CFArrayRef copy_display_modes(CGDirectDisplayID display)
 #endif
         modes = CGDisplayCopyAllDisplayModes(display, NULL);
 
-    return modes;
+    if (modes)
+    {
+        CFIndex count = CFArrayGetCount(modes);
+        CFMutableArrayRef sorted_modes = CFArrayCreateMutableCopy(NULL, count, modes);
+        CFRelease(modes);
+        CFArraySortValues(sorted_modes, CFRangeMake(0, count), mode_compare, NULL);
+        return sorted_modes;
+    }
+
+    return NULL;
 }
 
 
@@ -767,7 +838,7 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
     int num_displays;
     CFArrayRef display_modes;
     struct display_mode_descriptor* desc;
-    CFIndex count, i, safe, best;
+    CFIndex count, i, best;
     CGDisplayModeRef best_display_mode;
     uint32_t best_io_flags;
     BOOL best_is_original;
@@ -802,7 +873,7 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
     if (macdrv_get_displays(&displays, &num_displays))
         return DISP_CHANGE_FAILED;
 
-    display_modes = copy_display_modes(displays[0].displayID);
+    display_modes = copy_display_modes(displays[0].displayID, FALSE);
     if (!display_modes)
     {
         macdrv_free_displays(displays);
@@ -826,7 +897,6 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
 
     desc = create_original_display_mode_descriptor(displays[0].displayID);
 
-    safe = -1;
     best_display_mode = NULL;
     count = CFArrayGetCount(display_modes);
     for (i = 0; i < count; i++)
@@ -843,11 +913,6 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
             width *= 2;
             height *= 2;
         }
-
-        if (!(io_flags & kDisplayModeValidFlag) || !(io_flags & kDisplayModeSafeFlag))
-            continue;
-
-        safe++;
 
         if (bpp != mode_bpp)
             continue;
@@ -902,7 +967,7 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
 
 better:
         best_display_mode = display_mode;
-        best = safe;
+        best = i;
         best_io_flags = io_flags;
         best_is_original = is_original;
     }
@@ -1014,7 +1079,7 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
         if (mode == 0 || !modes)
         {
             if (modes) CFRelease(modes);
-            modes = copy_display_modes(displays[0].displayID);
+            modes = copy_display_modes(displays[0].displayID, (flags & EDS_RAWMODE) != 0);
             modes_has_8bpp = modes_has_16bpp = FALSE;
 
             if (modes)
@@ -1035,18 +1100,13 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
         display_mode = NULL;
         if (modes)
         {
-            int default_bpp = get_default_bpp();
+            int default_bpp;
             DWORD seen_modes = 0;
 
             count = CFArrayGetCount(modes);
             for (i = 0; i < count; i++)
             {
                 CGDisplayModeRef candidate = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
-
-                io_flags = CGDisplayModeGetIOFlags(candidate);
-                if (!(flags & EDS_RAWMODE) &&
-                    (!(io_flags & kDisplayModeValidFlag) || !(io_flags & kDisplayModeSafeFlag)))
-                    continue;
 
                 seen_modes++;
                 if (seen_modes > mode)
@@ -1055,33 +1115,41 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
                     display_mode_bpp = display_mode_bits_per_pixel(display_mode);
                     break;
                 }
+            }
 
-                /* We only synthesize modes from those having the default bpp. */
-                if (display_mode_bits_per_pixel(candidate) != default_bpp)
-                    continue;
+            default_bpp = get_default_bpp();
 
-                if (!modes_has_8bpp)
+            /* If all the real modes are exhausted, synthesize lower bpp modes. */
+            if (!display_mode && (!modes_has_16bpp || !modes_has_8bpp))
+            {
+                /* We want to synthesize higher depths first. */
+                int synth_bpps[] = { modes_has_16bpp ? 0 : 16, modes_has_8bpp ? 0 : 8 };
+                size_t synth_bpp_idx;
+                for (synth_bpp_idx = 0; synth_bpp_idx < 2; synth_bpp_idx++)
                 {
-                    seen_modes++;
-                    if (seen_modes > mode)
-                    {
-                        display_mode = (CGDisplayModeRef)CFRetain(candidate);
-                        display_mode_bpp = 8;
-                        synthesized = TRUE;
-                        break;
-                    }
-                }
+                    int synth_bpp = synth_bpps[synth_bpp_idx];
+                    if (synth_bpp == 0)
+                        continue;
 
-                if (!modes_has_16bpp)
-                {
-                    seen_modes++;
-                    if (seen_modes > mode)
+                    for (i = 0; i < count; i++)
                     {
-                        display_mode = (CGDisplayModeRef)CFRetain(candidate);
-                        display_mode_bpp = 16;
-                        synthesized = TRUE;
-                        break;
+                        CGDisplayModeRef candidate = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
+                        /* We only synthesize modes from those having the default bpp. */
+                        if (display_mode_bits_per_pixel(candidate) != default_bpp)
+                            continue;
+
+                        seen_modes++;
+                        if (seen_modes > mode)
+                        {
+                            display_mode = (CGDisplayModeRef)CFRetain(candidate);
+                            display_mode_bpp = synth_bpp;
+                            synthesized = TRUE;
+                            break;
+                        }
                     }
+
+                    if (display_mode)
+                        break;
                 }
             }
         }

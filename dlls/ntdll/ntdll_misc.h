@@ -67,6 +67,7 @@ extern const char *debugstr_exception_code( DWORD code ) DECLSPEC_HIDDEN;
 extern void version_init(void) DECLSPEC_HIDDEN;
 extern void debug_init(void) DECLSPEC_HIDDEN;
 extern void actctx_init(void) DECLSPEC_HIDDEN;
+extern void locale_init(void) DECLSPEC_HIDDEN;
 extern void init_user_process_params(void) DECLSPEC_HIDDEN;
 extern void CDECL DECLSPEC_NORETURN signal_start_thread( CONTEXT *ctx ) DECLSPEC_HIDDEN;
 
@@ -80,7 +81,6 @@ extern void RELAY_SetupDLL( HMODULE hmod ) DECLSPEC_HIDDEN;
 extern void SNOOP_SetupDLL( HMODULE hmod ) DECLSPEC_HIDDEN;
 extern const WCHAR windows_dir[] DECLSPEC_HIDDEN;
 extern const WCHAR system_dir[] DECLSPEC_HIDDEN;
-extern HMODULE kernel32_handle DECLSPEC_HIDDEN;
 
 extern void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *) DECLSPEC_HIDDEN;
 extern const struct unix_funcs *unix_funcs DECLSPEC_HIDDEN;

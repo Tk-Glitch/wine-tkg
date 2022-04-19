@@ -107,7 +107,8 @@ struct hid_device_vtbl
     NTSTATUS (*start)(struct unix_device *iface);
     void (*stop)(struct unix_device *iface);
     NTSTATUS (*haptics_start)(struct unix_device *iface, UINT duration_ms,
-                              USHORT rumble_intensity, USHORT buzz_intensity);
+                              USHORT rumble_intensity, USHORT buzz_intensity,
+                              USHORT left_intensity, USHORT right_intensity);
     NTSTATUS (*haptics_stop)(struct unix_device *iface);
     NTSTATUS (*physical_device_control)(struct unix_device *iface, USAGE control);
     NTSTATUS (*physical_device_set_gain)(struct unix_device *iface, BYTE percent);
@@ -123,34 +124,28 @@ struct hid_report_descriptor
     BYTE next_report_id[3];
 };
 
-/* HID spec uses None / Stop names for the first two implicit waveforms,
- * where Windows SDK headers use STOP / NULL for the corresponding HID
- * usage constants. We're not actually using the usages anyway are we
- * stick to the HID spec here.
- */
-enum haptics_waveform_ordinal
+#include "pshpack1.h"
+struct hid_haptics_feature
 {
-    HAPTICS_WAVEFORM_NONE_ORDINAL = 1, /* implicit, not included in waveform_list / duration_list */
-    HAPTICS_WAVEFORM_STOP_ORDINAL = 2, /* implicit, not included in waveform_list / duration_list */
-    HAPTICS_WAVEFORM_RUMBLE_ORDINAL = 3,
-    HAPTICS_WAVEFORM_BUZZ_ORDINAL = 4,
-    HAPTICS_WAVEFORM_FIRST_ORDINAL = HAPTICS_WAVEFORM_RUMBLE_ORDINAL,
-    HAPTICS_WAVEFORM_LAST_ORDINAL = HAPTICS_WAVEFORM_BUZZ_ORDINAL,
+    WORD waveform;
+    WORD duration;
+    UINT cutoff_time_ms;
 };
 
 struct hid_haptics_features
 {
-    WORD waveform_list[HAPTICS_WAVEFORM_LAST_ORDINAL - HAPTICS_WAVEFORM_FIRST_ORDINAL + 1];
-    WORD duration_list[HAPTICS_WAVEFORM_LAST_ORDINAL - HAPTICS_WAVEFORM_FIRST_ORDINAL + 1];
-    UINT waveform_cutoff_time_ms;
+    struct hid_haptics_feature rumble;
+    struct hid_haptics_feature buzz;
+    struct hid_haptics_feature left;
+    struct hid_haptics_feature right;
 };
+#include "poppack.h"
 
 struct hid_haptics
 {
     struct hid_haptics_features features;
-    UINT16 waveform_intensity[HAPTICS_WAVEFORM_LAST_ORDINAL + 1];
     BYTE features_report;
-    BYTE waveform_report;
+    BYTE intensity_report;
 };
 
 /* must match the order and number of usages in the

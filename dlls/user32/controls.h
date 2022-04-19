@@ -73,7 +73,6 @@ struct wow_handlers16
     HWND    (*create_window)(CREATESTRUCTW*,LPCWSTR,HINSTANCE,BOOL);
     LRESULT (*call_window_proc)(HWND,UINT,WPARAM,LPARAM,LRESULT*,void*);
     LRESULT (*call_dialog_proc)(HWND,UINT,WPARAM,LPARAM,LRESULT*,void*);
-    void    (*free_icon_param)(ULONG_PTR);
 };
 
 struct wow_handlers32
@@ -91,8 +90,6 @@ struct wow_handlers32
     WNDPROC (*alloc_winproc)(WNDPROC,BOOL);
     struct tagDIALOGINFO *(*get_dialog_info)(HWND,BOOL);
     INT     (*dialog_box_loop)(HWND,HWND);
-    ULONG_PTR (*get_icon_param)(HICON);
-    ULONG_PTR (*set_icon_param)(HICON,ULONG_PTR);
 };
 
 extern struct wow_handlers16 wow_handlers DECLSPEC_HIDDEN;
@@ -105,9 +102,6 @@ extern LRESULT MDIClientWndProc_common(HWND,UINT,WPARAM,LPARAM,BOOL) DECLSPEC_HI
 extern LRESULT ScrollBarWndProc_common(HWND,UINT,WPARAM,LPARAM,BOOL) DECLSPEC_HIDDEN;
 extern LRESULT StaticWndProc_common(HWND,UINT,WPARAM,LPARAM,BOOL) DECLSPEC_HIDDEN;
 
-extern ULONG_PTR get_icon_param( HICON handle ) DECLSPEC_HIDDEN;
-extern ULONG_PTR set_icon_param( HICON handle, ULONG_PTR param ) DECLSPEC_HIDDEN;
-
 /* Class functions */
 struct tagCLASS;  /* opaque structure */
 struct tagWND;
@@ -115,8 +109,6 @@ extern ATOM get_int_atom_value( UNICODE_STRING *name ) DECLSPEC_HIDDEN;
 extern void register_builtin_classes(void) DECLSPEC_HIDDEN;
 extern void register_desktop_class(void) DECLSPEC_HIDDEN;
 extern WNDPROC get_class_winproc( struct tagCLASS *class ) DECLSPEC_HIDDEN;
-extern struct dce *get_class_dce( struct tagCLASS *class ) DECLSPEC_HIDDEN;
-extern struct dce *set_class_dce( struct tagCLASS *class, struct dce *dce ) DECLSPEC_HIDDEN;
 
 /* defwnd proc */
 extern HBRUSH DEFWND_ControlColor( HDC hDC, UINT ctlType ) DECLSPEC_HIDDEN;

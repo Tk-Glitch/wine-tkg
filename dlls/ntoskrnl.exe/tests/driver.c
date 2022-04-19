@@ -2351,19 +2351,19 @@ static void test_default_security(void)
     PSID sid1, sid2;
 
     status = FltBuildDefaultSecurityDescriptor(&sd, STANDARD_RIGHTS_ALL);
-    ok(status == STATUS_SUCCESS, "got %#x\n", status);
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
     ok(sd != NULL, "Failed to return descriptor\n");
 
     status = RtlGetGroupSecurityDescriptor(sd, &group, &isdefault);
-    ok(status == STATUS_SUCCESS, "got %#x\n", status);
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
     ok(group == NULL, "group isn't NULL\n");
 
     status = RtlGetOwnerSecurityDescriptor(sd, &owner, &isdefault);
-    ok(status == STATUS_SUCCESS, "got %#x\n", status);
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
     ok(owner == NULL, "owner isn't NULL\n");
 
     status = RtlGetDaclSecurityDescriptor(sd, &present, &acl, &isdefault);
-    ok(status == STATUS_SUCCESS, "got %#x\n", status);
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
     ok(acl != NULL, "acl is NULL\n");
     ok(acl->AceCount == 2, "got %d\n", acl->AceCount);
 
@@ -2378,21 +2378,21 @@ static void test_default_security(void)
 
     /* SECURITY_BUILTIN_DOMAIN_RID */
     status = RtlGetAce(acl, 0, (void**)&ace);
-    ok(status == STATUS_SUCCESS, "got %#x\n", status);
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
 
     ok(ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE, "got %#x\n", ace->Header.AceType);
     ok(ace->Header.AceFlags == 0, "got %#x\n", ace->Header.AceFlags);
-    ok(ace->Mask == STANDARD_RIGHTS_ALL, "got %#x\n", ace->Mask);
+    ok(ace->Mask == STANDARD_RIGHTS_ALL, "got %#lx\n", ace->Mask);
 
     ok(RtlEqualSid(sid1, (PSID)&ace->SidStart), "SID not equal\n");
 
     /* SECURITY_LOCAL_SYSTEM_RID */
     status = RtlGetAce(acl, 1, (void**)&ace);
-    ok(status == STATUS_SUCCESS, "got %#x\n", status);
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
 
     ok(ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE, "got %#x\n", ace->Header.AceType);
     ok(ace->Header.AceFlags == 0, "got %#x\n", ace->Header.AceFlags);
-    ok(ace->Mask == STANDARD_RIGHTS_ALL, "got %#x\n", ace->Mask);
+    ok(ace->Mask == STANDARD_RIGHTS_ALL, "got %#lx\n", ace->Mask);
 
     ok(RtlEqualSid(sid2, (PSID)&ace->SidStart), "SID not equal\n");
 

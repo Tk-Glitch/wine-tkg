@@ -2553,16 +2553,16 @@ static void _test_assigned_proc(int line, HANDLE job, int expected_count, ...)
 
     memset(buf, 0, sizeof(buf));
     ret = pQueryInformationJobObject(job, JobObjectBasicProcessIdList, pid_list, sizeof(buf), &ret_len);
-    ok_(__FILE__, line)(ret, "QueryInformationJobObject error %u\n", GetLastError());
+    ok_(__FILE__, line)(ret, "QueryInformationJobObject error %lu\n", GetLastError());
     if (ret)
     {
         todo_wine_if(expected_count)
         ok_(__FILE__, line)(expected_count == pid_list->NumberOfAssignedProcesses,
-                            "Expected NumberOfAssignedProcesses to be %d (expected_count) is %d\n",
+                            "Expected NumberOfAssignedProcesses to be %d (expected_count) is %ld\n",
                             expected_count, pid_list->NumberOfAssignedProcesses);
         todo_wine_if(expected_count)
         ok_(__FILE__, line)(expected_count == pid_list->NumberOfProcessIdsInList,
-                            "Expected NumberOfProcessIdsInList to be %d (expected_count) is %d\n",
+                            "Expected NumberOfProcessIdsInList to be %d (expected_count) is %ld\n",
                             expected_count, pid_list->NumberOfProcessIdsInList);
 
         va_start(valist, expected_count);
@@ -2570,7 +2570,7 @@ static void _test_assigned_proc(int line, HANDLE job, int expected_count, ...)
         {
             pid = va_arg(valist, DWORD);
             ok_(__FILE__, line)(pid == pid_list->ProcessIdList[n],
-                                "Expected pid_list->ProcessIdList[%d] to be %x is %lx\n",
+                                "Expected pid_list->ProcessIdList[%d] to be %lx is %Ix\n",
                                 n, pid, pid_list->ProcessIdList[n]);
         }
         va_end(valist);
@@ -2586,21 +2586,21 @@ static void _test_accounting(int line, HANDLE job, int total_proc, int active_pr
 
     memset(&basic_accounting, 0, sizeof(basic_accounting));
     ret = pQueryInformationJobObject(job, JobObjectBasicAccountingInformation, &basic_accounting, sizeof(basic_accounting), &ret_len);
-    ok_(__FILE__, line)(ret, "QueryInformationJobObject error %u\n", GetLastError());
+    ok_(__FILE__, line)(ret, "QueryInformationJobObject error %lu\n", GetLastError());
     if (ret)
     {
         /* Not going to check process times or page faults */
 
         todo_wine_if(total_proc)
         ok_(__FILE__, line)(total_proc == basic_accounting.TotalProcesses,
-                            "Expected basic_accounting.TotalProcesses to be %d (total_proc) is %d\n",
+                            "Expected basic_accounting.TotalProcesses to be %d (total_proc) is %ld\n",
                             total_proc, basic_accounting.TotalProcesses);
         todo_wine_if(active_proc)
         ok_(__FILE__, line)(active_proc == basic_accounting.ActiveProcesses,
-                            "Expected basic_accounting.ActiveProcesses to be %d (active_proc) is %d\n",
+                            "Expected basic_accounting.ActiveProcesses to be %d (active_proc) is %ld\n",
                             active_proc, basic_accounting.ActiveProcesses);
         ok_(__FILE__, line)(terminated_proc == basic_accounting.TotalTerminatedProcesses,
-                            "Expected basic_accounting.TotalTerminatedProcesses to be %d (terminated_proc) is %d\n",
+                            "Expected basic_accounting.TotalTerminatedProcesses to be %d (terminated_proc) is %ld\n",
                             terminated_proc, basic_accounting.TotalTerminatedProcesses);
     }
 }

@@ -17,6 +17,14 @@
  */
 
 var JS_E_PROP_DESC_MISMATCH = 0x800a01bd;
+var JS_E_NUMBER_EXPECTED = 0x800a1389;
+var JS_E_FUNCTION_EXPECTED = 0x800a138a;
+var JS_E_DATE_EXPECTED = 0x800a138e;
+var JS_E_OBJECT_EXPECTED = 0x800a138f;
+var JS_E_BOOLEAN_EXPECTED = 0x800a1392;
+var JS_E_VBARRAY_EXPECTED = 0x800a1395;
+var JS_E_ENUMERATOR_EXPECTED = 0x800a1397;
+var JS_E_REGEXP_EXPECTED = 0x800a1398;
 var JS_E_INVALID_WRITABLE_PROP_DESC = 0x800a13ac;
 var JS_E_NONCONFIGURABLE_REDEFINED = 0x800a13d6;
 var JS_E_NONWRITABLE_MODIFIED = 0x800a13d7;
@@ -518,6 +526,16 @@ sync_test("defineProperty", function() {
     obj.no_setter = false;
     ok(obj.no_setter === true, "no_setter = " + obj.no_setter);
 
+    ok((delete obj.no_setter) === true, "delete no_setter returned false");
+    ok(!("no_setter" in obj), "no_setter still in obj after delete");
+
+    Object.defineProperty(child.prototype, "no_setter", desc);
+    test_accessor_prop_desc(child.prototype, "no_setter", desc);
+    ok(!obj.hasOwnProperty("no_setter"), "no_setter is a property of obj");
+    obj.no_setter = false;
+    ok(obj.no_setter === true, "no_setter = " + obj.no_setter);
+    ok(!obj.hasOwnProperty("no_setter"), "no_setter is a property of obj");
+
     /* call prop with getter */
     desc = {
         get: function() {
@@ -785,6 +803,8 @@ sync_test("getPrototypeOf", function() {
     obj = Object.create(null);
     ok(!("toString" in obj), "toString is in obj");
     ok(Object.getPrototypeOf(obj) === null, "Object.getPrototypeOf(obj) = " + Object.getPrototypeOf(obj));
+
+    ok(Object.getPrototypeOf(external) === null, "Object.getPrototypeOf(non-JS obj) = " + Object.getPrototypeOf(external));
 });
 
 sync_test("toString", function() {
@@ -797,13 +817,10 @@ sync_test("toString", function() {
     todo_wine.
     ok(tmp === "[object Window]", "toString.call(null) = " + tmp);
     tmp = Object.prototype.toString.call(null);
-    todo_wine.
     ok(tmp === "[object Null]", "toString.call(null) = " + tmp);
     tmp = Object.prototype.toString.call(undefined);
-    todo_wine.
     ok(tmp === "[object Undefined]", "toString.call(undefined) = " + tmp);
     tmp = Object.prototype.toString.call();
-    todo_wine.
     ok(tmp === "[object Undefined]", "toString.call() = " + tmp);
 
     obj = Object.create(null);
@@ -1220,6 +1237,55 @@ sync_test("isFrozen", function() {
     ok(Object.isFrozen(o) === true, "o is not frozen");
     ok(Object.isSealed(o) === true, "o is not sealed");
     ok(Object.isExtensible(o) === false, "o is extensible");
+});
+
+sync_test("builtin_context", function() {
+    var tests = [
+        [ "Array.map",              JS_E_OBJECT_EXPECTED,       function(ctx) { Array.prototype.map.call(ctx, function(a, b) {}); } ],
+        [ "Array.sort",             JS_E_OBJECT_EXPECTED,       function(ctx) { Array.prototype.sort.call(ctx); } ],
+        [ "Boolean.toString",       JS_E_BOOLEAN_EXPECTED,      function(ctx) { Boolean.prototype.toString.call(ctx); } ],
+        [ "Date.getTime",           JS_E_DATE_EXPECTED,         function(ctx) { Date.prototype.getTime.call(ctx); } ],
+        [ "Date.toGMTString",       JS_E_DATE_EXPECTED,         function(ctx) { Date.prototype.toGMTString.call(ctx); } ],
+        [ "Enumerator.item",        JS_E_ENUMERATOR_EXPECTED,   function(ctx) { Enumerator.prototype.item.call(ctx); } ],
+        [ "Error.toString",         JS_E_OBJECT_EXPECTED,       function(ctx) { Error.prototype.toString.call(ctx); } ],
+        [ "Function.call",          JS_E_FUNCTION_EXPECTED,     function(ctx) { Function.prototype.call.call(ctx, function() {}); } ],
+        [ "Map.clear",              JS_E_OBJECT_EXPECTED,       function(ctx) { Map.prototype.clear.call(ctx); } ],
+        [ "Number.toFixed",         JS_E_NUMBER_EXPECTED,       function(ctx) { Number.prototype.toFixed.call(ctx); } ],
+        [ "Object.isPrototypeOf",   JS_E_OBJECT_EXPECTED,       function(ctx) { Object.prototype.isPrototypeOf.call(ctx, Object); } ],
+        [ "RegExp.exec",            JS_E_REGEXP_EXPECTED,       function(ctx) { RegExp.prototype.exec.call(ctx, "foobar"); } ],
+        [ "String.search",          JS_E_OBJECT_EXPECTED,       function(ctx) { String.prototype.search.call(ctx, /foobar/g); } ],
+        [ "String.trim",            JS_E_OBJECT_EXPECTED,       function(ctx) { String.prototype.trim.call(ctx); } ],
+        [ "VBArray.dimensions",     JS_E_VBARRAY_EXPECTED,      function(ctx) { VBArray.prototype.dimensions.call(ctx); } ]
+    ];
+
+    /* make global object suitable for some calls */
+    window[0] = "foo";
+    window[1] = "bar";
+    window.length = 2;
+
+    for(var i = 0; i < tests.length; i++) {
+        try {
+            tests[i][2](null);
+            ok(false, "expected exception calling " + tests[i][0] + " with null context");
+        }catch(ex) {
+            var n = ex.number >>> 0; /* make it unsigned like HRESULT */
+            ok(n === tests[i][1], tests[i][0] + " with null context exception code = " + n);
+        }
+        try {
+            tests[i][2](undefined);
+            ok(false, "expected exception calling " + tests[i][0] + " with undefined context");
+        }catch(ex) {
+            var n = ex.number >>> 0;
+            ok(n === tests[i][1], tests[i][0] + " with undefined context exception code = " + n);
+        }
+    }
+
+    var obj = (function() { return this; }).call(null);
+    ok(obj === window, "obj = " + obj);
+    var obj = (function() { return this; }).call(undefined);
+    ok(obj === window, "obj = " + obj);
+    obj = (function() { return this; }).call(42);
+    ok(obj.valueOf() === 42, "obj = " + obj);
 });
 
 sync_test("head_setter", function() {

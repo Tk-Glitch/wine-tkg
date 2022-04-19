@@ -1138,6 +1138,12 @@ static BOOL CDECL loaderdrv_CreateDesktopWindow( HWND hwnd )
     return load_driver()->pCreateDesktopWindow( hwnd );
 }
 
+static void CDECL loaderdrv_GetDC( HDC hdc, HWND hwnd, HWND top_win, const RECT *win_rect,
+                                   const RECT *top_rect, DWORD flags )
+{
+    load_driver()->pGetDC( hdc, hwnd, top_win, win_rect, top_rect, flags );
+}
+
 static void CDECL loaderdrv_FlashWindowEx( FLASHWINFO *info )
 {
     load_driver()->pFlashWindowEx( info );
@@ -1190,13 +1196,19 @@ static const struct user_driver_funcs lazy_load_driver =
     .pUpdateDisplayDevices = loaderdrv_UpdateDisplayDevices,
     /* windowing functions */
     .pCreateDesktopWindow = loaderdrv_CreateDesktopWindow,
+    .pDestroyWindow = nulldrv_DestroyWindow,
     .pFlashWindowEx = loaderdrv_FlashWindowEx,
+    .pGetDC = loaderdrv_GetDC,
     .pSetCapture = nulldrv_SetCapture,
     .pSetLayeredWindowAttributes = loaderdrv_SetLayeredWindowAttributes,
+    .pSetParent = nulldrv_SetParent,
     .pSetWindowRgn = loaderdrv_SetWindowRgn,
+    .pSetWindowStyle = nulldrv_SetWindowStyle,
     .pMsgWaitForMultipleObjectsEx = nulldrv_MsgWaitForMultipleObjectsEx,
+    .pReleaseDC =  nulldrv_ReleaseDC,
     .pScrollDC = nulldrv_ScrollDC,
     .pSetFocus = nulldrv_SetFocus,
+    .pShowWindow = nulldrv_ShowWindow,
     .pUpdateLayeredWindow = loaderdrv_UpdateLayeredWindow,
     .pWindowMessage = nulldrv_WindowMessage,
     /* system parameters */

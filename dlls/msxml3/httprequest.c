@@ -2114,7 +2114,7 @@ static ULONG WINAPI xml_http_request_2_AddRef(IXMLHTTPRequest3 *iface)
 {
     struct xml_http_request_2 *This = impl_from_IXMLHTTPRequest3(iface);
     ULONG ref = InterlockedIncrement(&This->req.ref);
-    TRACE("(%p)->(%u)\n", This, ref);
+    TRACE("(%p)->(%lu)\n", This, ref);
     return ref;
 }
 
@@ -2123,7 +2123,7 @@ static ULONG WINAPI xml_http_request_2_Release(IXMLHTTPRequest3 *iface)
     struct xml_http_request_2 *This = impl_from_IXMLHTTPRequest3(iface);
     ULONG ref = InterlockedDecrement(&This->req.ref);
 
-    TRACE("(%p)->(%u)\n", This, ref);
+    TRACE("(%p)->(%lu)\n", This, ref);
 
     if (ref == 0)
     {
@@ -2254,7 +2254,7 @@ static HRESULT WINAPI xml_http_request_2_GetCookie(IXMLHTTPRequest3 *iface, cons
                                                    ULONG *cookies_count, XHR_COOKIE **cookies)
 {
     struct xml_http_request_2 *This = impl_from_IXMLHTTPRequest3(iface);
-    FIXME("(%p)->(%s %s %d %p %p) stub!\n", This, debugstr_w(url), debugstr_w(name), flags, cookies_count, cookies);
+    FIXME("(%p)->(%s %s %ld %p %p) stub!\n", This, debugstr_w(url), debugstr_w(name), flags, cookies_count, cookies);
     return E_NOTIMPL;
 }
 
@@ -2283,7 +2283,7 @@ static HRESULT WINAPI xml_http_request_2_GetResponseHeader(IXMLHTTPRequest3 *ifa
 static HRESULT WINAPI xml_http_request_3_SetClientCertificate(IXMLHTTPRequest3 *iface, DWORD count, const BYTE *hashes, const WCHAR *pin)
 {
     struct xml_http_request_2 *This = impl_from_IXMLHTTPRequest3(iface);
-    FIXME("(%p)->(%d %p %s) stub!\n", This, count, hashes, debugstr_w(pin));
+    FIXME("(%p)->(%ld %p %s) stub!\n", This, count, hashes, debugstr_w(pin));
     return E_NOTIMPL;
 }
 
@@ -2370,7 +2370,7 @@ static HRESULT WINAPI xml_http_request_2_IRtwqAsyncCallback_Invoke(IRtwqAsyncCal
         if (FAILED(hr = ISequentialStream_Read(This->request_body, V_BSTR(&body_v), This->request_body_size, &read)) ||
             read < This->request_body_size)
         {
-            ERR("Failed to allocate request body memory, hr %#x\n", hr);
+            ERR("Failed to allocate request body memory, hr %#lx\n", hr);
             CoTaskMemFree(V_BSTR(&body_v));
             goto done;
         }
@@ -2438,7 +2438,7 @@ static HRESULT WINAPI xml_http_request_2_IDispatch_GetTypeInfo(IDispatch *iface,
                                                                LCID lcid, ITypeInfo **value)
 {
     struct xml_http_request_2 *This = xml_http_request_2_from_IDispatch(iface);
-    FIXME("(%p)->(%d %u %p) stub!\n", This, index, lcid, value);
+    FIXME("(%p)->(%d %lu %p) stub!\n", This, index, lcid, value);
     *value = NULL;
     return S_OK;
 }
@@ -2448,7 +2448,7 @@ static HRESULT WINAPI xml_http_request_2_IDispatch_GetIDsOfNames(IDispatch *ifac
                                                                  LCID lcid, DISPID *disp_ids)
 {
     struct xml_http_request_2 *This = xml_http_request_2_from_IDispatch(iface);
-    FIXME("(%p)->(%s %p %d %u %p) stub!\n", This, debugstr_guid(riid), names, names_count, lcid, disp_ids);
+    FIXME("(%p)->(%s %p %d %lu %p) stub!\n", This, debugstr_guid(riid), names, names_count, lcid, disp_ids);
     return S_OK;
 }
 
@@ -2462,7 +2462,7 @@ static HRESULT WINAPI xml_http_request_2_IDispatch_Invoke(IDispatch *iface, DISP
     LONG status;
     BSTR status_str = NULL;
 
-    TRACE("(%p)->(%d %s %u %d %p %p %p %p) stub!\n", This, id, debugstr_guid(riid), lcid, flags,
+    TRACE("(%p)->(%ld %s %lu %d %p %p %p %p) stub!\n", This, id, debugstr_guid(riid), lcid, flags,
           params, result, exception, arg_err);
 
     if (This->req.state == READYSTATE_COMPLETE)
@@ -2481,7 +2481,7 @@ static HRESULT WINAPI xml_http_request_2_IDispatch_Invoke(IDispatch *iface, DISP
         if (FAILED(hr = httprequest_get_status(&This->req, &status)) ||
             FAILED(hr = httprequest_get_statusText(&This->req, &status_str)))
         {
-            WARN("failed to get response status, error %#x\n", hr);
+            WARN("failed to get response status, error %#lx\n", hr);
             IXMLHTTPRequest2Callback_OnError(This->callback, xhr2_iface, hr);
             IXMLHTTPRequest2Callback_Release(This->callback);
             return S_OK;
@@ -2496,7 +2496,7 @@ static HRESULT WINAPI xml_http_request_2_IDispatch_Invoke(IDispatch *iface, DISP
         if (FAILED(hr = httprequest_get_responseStream(&This->req, &body_v)) ||
             FAILED(hr = IUnknown_QueryInterface(V_UNKNOWN(&body_v), &IID_ISequentialStream, (void **)&This->response_body)))
         {
-            WARN("failed to get response stream, error %#x\n", hr);
+            WARN("failed to get response stream, error %#lx\n", hr);
             IXMLHTTPRequest2Callback_OnError(This->callback, xhr2_iface, hr);
             IXMLHTTPRequest2Callback_Release(This->callback);
             return S_OK;

@@ -39,6 +39,7 @@
 #include "setupapi.h"
 #include "cfgmgr32.h"
 #include "newdev.h"
+#include "dbt.h"
 
 #include "objbase.h"
 
@@ -61,12 +62,22 @@
 HINSTANCE instance;
 BOOL localized; /* object names get translated */
 
+const HID_DEVICE_ATTRIBUTES default_attributes =
+{
+    .Size = sizeof(HID_DEVICE_ATTRIBUTES),
+    .VendorID = LOWORD(EXPECT_VIDPID),
+    .ProductID = HIWORD(EXPECT_VIDPID),
+    .VersionNumber = 0x0100,
+};
 const WCHAR expect_vidpid_str[] = L"VID_1209&PID_0001";
 const GUID expect_guid_product = {EXPECT_VIDPID, 0x0000, 0x0000, {0x00, 0x00, 'P', 'I', 'D', 'V', 'I', 'D'}};
-const WCHAR expect_path[] = L"\\\\?\\hid#winetest#1&2fafeb0&";
+const WCHAR expect_path[] = L"\\\\?\\hid#vid_1209&pid_0001#2&";
 const WCHAR expect_path_end[] = L"&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+HANDLE device_added, device_removed;
+static LONG device_added_count;
 
 static struct winetest_shared_data *test_data;
+static HANDLE monitor_thread, monitor_stop;
 static HANDLE test_data_mapping;
 static HANDLE okfile;
 
@@ -314,33 +325,69 @@ static const char inf_text[] =
     "Wine=mfg_section,NT" EXT "\n"
 
     "[mfg_section.NT" EXT "]\n"
-    "Wine test root driver=device_section,test_hardware_id\n"
+    "Wine Test Bus Device=bus_section,WINETEST\\BUS\n"
+    "Wine Test HID Device=hid_section,WINETEST\\WINE_COMP_HID\n"
+    "Wine Test HID Polled Device=hid_poll_section,WINETEST\\WINE_COMP_POLLHID\n"
 
-    "[device_section.NT" EXT "]\n"
+    "[bus_section.NT" EXT "]\n"
     "CopyFiles=file_section\n"
 
-    "[device_section.NT" EXT ".Services]\n"
-    "AddService=winetest,0x2,svc_section\n"
+    "[bus_section.NT" EXT ".Services]\n"
+    "AddService=winetest_bus,0x2,bus_service\n"
+
+    "[hid_section.NT" EXT "]\n"
+    "CopyFiles=file_section\n"
+
+    "[hid_section.NT" EXT ".Services]\n"
+    "AddService=winetest_hid,0x2,hid_service\n"
+
+    "[hid_poll_section.NT" EXT "]\n"
+    "CopyFiles=file_section\n"
+
+    "[hid_poll_section.NT" EXT ".Services]\n"
+    "AddService=winetest_hid_poll,0x2,hid_poll_service\n"
 
     "[file_section]\n"
-    "winetest.sys\n"
+    "winetest_bus.sys\n"
+    "winetest_hid.sys\n"
+    "winetest_hid_poll.sys\n"
 
     "[SourceDisksFiles]\n"
-    "winetest.sys=1\n"
+    "winetest_bus.sys=1\n"
+    "winetest_hid.sys=1\n"
+    "winetest_hid_poll.sys=1\n"
 
     "[SourceDisksNames]\n"
-    "1=,winetest.sys\n"
+    "1=,winetest_bus.sys\n"
+    "1=,winetest_hid.sys\n"
+    "1=,winetest_hid_poll.sys\n"
 
     "[DestinationDirs]\n"
     "DefaultDestDir=12\n"
 
-    "[svc_section]\n"
-    "ServiceBinary=%12%\\winetest.sys\n"
+    "[bus_service]\n"
+    "ServiceBinary=%12%\\winetest_bus.sys\n"
     "ServiceType=1\n"
     "StartType=3\n"
     "ErrorControl=1\n"
     "LoadOrderGroup=WinePlugPlay\n"
-    "DisplayName=\"winetest bus driver\"\n"
+    "DisplayName=\"Wine Test Bus Driver\"\n"
+
+    "[hid_service]\n"
+    "ServiceBinary=%12%\\winetest_hid.sys\n"
+    "ServiceType=1\n"
+    "StartType=3\n"
+    "ErrorControl=1\n"
+    "LoadOrderGroup=WinePlugPlay\n"
+    "DisplayName=\"Wine Test HID Driver\"\n"
+
+    "[hid_poll_service]\n"
+    "ServiceBinary=%12%\\winetest_hid_poll.sys\n"
+    "ServiceType=1\n"
+    "StartType=3\n"
+    "ErrorControl=1\n"
+    "LoadOrderGroup=WinePlugPlay\n"
+    "DisplayName=\"Wine Test HID Polled Driver\"\n"
     "; they don't sleep anymore, on the beach\n";
 
 static void add_file_to_catalog( HANDLE catalog, const WCHAR *file )
@@ -409,16 +456,18 @@ static void unload_driver( SC_HANDLE service )
         ret = QueryServiceStatus( service, &status );
         ok( ret, "QueryServiceStatus failed: %lu\n", GetLastError() );
     }
-    ok( status.dwCurrentState == SERVICE_STOPPED, "expected SERVICE_STOPPED, got %lu\n", status.dwCurrentState );
+    ok( status.dwCurrentState == SERVICE_STOPPED || !status.dwCurrentState,
+        "expected SERVICE_STOPPED, got %lu\n", status.dwCurrentState );
 
     DeleteService( service );
     CloseServiceHandle( service );
 }
 
-void pnp_driver_stop(void)
+void bus_device_stop(void)
 {
     SP_DEVINFO_DATA device = {sizeof(SP_DEVINFO_DATA)};
     WCHAR path[MAX_PATH], dest[MAX_PATH], *filepart;
+    const WCHAR *service_name = L"winetest_bus";
     SC_HANDLE manager, service;
     char buffer[512];
     HDEVINFO set;
@@ -453,7 +502,7 @@ void pnp_driver_stop(void)
     manager = OpenSCManagerW( NULL, NULL, SC_MANAGER_CONNECT );
     ok( !!manager, "failed to open service manager, error %lu\n", GetLastError() );
 
-    service = OpenServiceW( manager, L"winetest", SERVICE_STOP | DELETE );
+    service = OpenServiceW( manager, service_name, SERVICE_STOP | DELETE );
     if (service) unload_driver( service );
     else ok( GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST, "got error %lu\n", GetLastError() );
 
@@ -474,24 +523,74 @@ void pnp_driver_stop(void)
     GetFullPathNameW( L"winetest.inf", ARRAY_SIZE(path), path, NULL );
     ret = SetupCopyOEMInfW( path, NULL, 0, 0, dest, ARRAY_SIZE(dest), NULL, &filepart );
     ok( ret, "Failed to copy INF, error %lu\n", GetLastError() );
-    ret = SetupUninstallOEMInfW( filepart, 0, NULL );
-    ok( ret, "Failed to uninstall INF, error %lu\n", GetLastError() );
+    ret = SetupUninstallOEMInfW( filepart, SUOI_FORCEDELETE, NULL );
+    ok( ret, "Failed to uninstall INF, error %lx\n", GetLastError() );
 
     ret = DeleteFileW( L"winetest.cat" );
     ok( ret, "Failed to delete file, error %lu\n", GetLastError() );
     ret = DeleteFileW( L"winetest.inf" );
     ok( ret, "Failed to delete file, error %lu\n", GetLastError() );
-    ret = DeleteFileW( L"winetest.sys" );
+    ret = DeleteFileW( L"winetest_bus.sys" );
+    ok( ret, "Failed to delete file, error %lu\n", GetLastError() );
+    ret = DeleteFileW( L"winetest_hid.sys" );
+    ok( ret, "Failed to delete file, error %lu\n", GetLastError() );
+    ret = DeleteFileW( L"winetest_hid_poll.sys" );
     ok( ret, "Failed to delete file, error %lu\n", GetLastError() );
     /* Windows 10 apparently deletes the image in SetupUninstallOEMInf(). */
-    ret = DeleteFileW( L"C:/windows/system32/drivers/winetest.sys" );
+    ret = DeleteFileW( L"C:/windows/system32/drivers/winetest_bus.sys" );
+    ok( ret || GetLastError() == ERROR_FILE_NOT_FOUND, "Failed to delete file, error %lu\n", GetLastError() );
+    ret = DeleteFileW( L"C:/windows/system32/drivers/winetest_hid.sys" );
+    todo_wine_if(!ret && GetLastError() == ERROR_ACCESS_DENIED) /* Wine doesn't unload device drivers correctly */
+    ok( ret || GetLastError() == ERROR_FILE_NOT_FOUND, "Failed to delete file, error %lu\n", GetLastError() );
+    ret = DeleteFileW( L"C:/windows/system32/drivers/winetest_hid_poll.sys" );
+    todo_wine_if(!ret && GetLastError() == ERROR_ACCESS_DENIED) /* Wine doesn't unload device drivers correctly */
     ok( ret || GetLastError() == ERROR_FILE_NOT_FOUND, "Failed to delete file, error %lu\n", GetLastError() );
 }
 
-BOOL pnp_driver_start( const WCHAR *resource )
+static BOOL find_hid_device_path( WCHAR *device_path )
 {
-    static const WCHAR hardware_id[] = L"test_hardware_id\0";
+    char buffer[FIELD_OFFSET( SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath[MAX_PATH] )] = {0};
+    SP_DEVICE_INTERFACE_DATA iface = {sizeof(SP_DEVICE_INTERFACE_DATA)};
+    SP_DEVICE_INTERFACE_DETAIL_DATA_W *iface_detail = (void *)buffer;
     SP_DEVINFO_DATA device = {sizeof(SP_DEVINFO_DATA)};
+    ULONG i, len = wcslen( device_path );
+    HDEVINFO set;
+    BOOL ret;
+
+    set = SetupDiGetClassDevsW( &GUID_DEVINTERFACE_HID, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT );
+    ok( set != INVALID_HANDLE_VALUE, "Failed to get device list, error %#lx\n", GetLastError() );
+
+    for (i = 0; SetupDiEnumDeviceInfo( set, i, &device ); ++i)
+    {
+        SetLastError( 0xdeadbeef );
+        ret = SetupDiEnumDeviceInterfaces( set, &device, &GUID_DEVINTERFACE_HID, 0, &iface );
+        todo_wine_if(!ret && GetLastError() == ERROR_NO_MORE_ITEMS) /* Wine doesn't unload device drivers correctly */
+        ok( ret, "Failed to get interface, error %#lx\n", GetLastError() );
+        if (!ret) continue;
+        ok( IsEqualGUID( &iface.InterfaceClassGuid, &GUID_DEVINTERFACE_HID ), "wrong class %s\n",
+            debugstr_guid( &iface.InterfaceClassGuid ) );
+        ok( iface.Flags == SPINT_ACTIVE, "got flags %#lx\n", iface.Flags );
+
+        iface_detail->cbSize = sizeof(*iface_detail);
+        ret = SetupDiGetDeviceInterfaceDetailW( set, &iface, iface_detail, sizeof(buffer), NULL, NULL );
+        ok( ret, "Failed to get interface path, error %#lx\n", GetLastError() );
+
+        if (!wcsncmp( iface_detail->DevicePath, device_path, len )) break;
+    }
+
+    ret = SetupDiDestroyDeviceInfoList( set );
+    ok( ret, "Failed to destroy set, error %lu\n", GetLastError() );
+
+    ret = !wcsncmp( iface_detail->DevicePath, device_path, len );
+    if (ret) wcscpy( device_path, iface_detail->DevicePath );
+    return ret;
+}
+
+BOOL bus_device_start(void)
+{
+    static const WCHAR bus_hardware_id[] = L"WINETEST\\BUS";
+    SP_DEVINFO_DATA device = {sizeof(SP_DEVINFO_DATA)};
+    const WCHAR *service_name = L"winetest_bus";
     WCHAR path[MAX_PATH], filename[MAX_PATH];
     SC_HANDLE manager, service;
     const CERT_CONTEXT *cert;
@@ -504,8 +603,16 @@ BOOL pnp_driver_start( const WCHAR *resource )
     old_mute_threshold = winetest_mute_threshold;
     winetest_mute_threshold = 1;
 
-    load_resource( resource, filename );
-    ret = MoveFileExW( filename, L"winetest.sys", MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING );
+    load_resource( L"driver_bus.dll", filename );
+    ret = MoveFileExW( filename, L"winetest_bus.sys", MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING );
+    ok( ret, "failed to move file, error %lu\n", GetLastError() );
+
+    load_resource( L"driver_hid.dll", filename );
+    ret = MoveFileExW( filename, L"winetest_hid.sys", MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING );
+    ok( ret, "failed to move file, error %lu\n", GetLastError() );
+
+    load_resource( L"driver_hid_poll.dll", filename );
+    ret = MoveFileExW( filename, L"winetest_hid_poll.sys", MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING );
     ok( ret, "failed to move file, error %lu\n", GetLastError() );
 
     f = fopen( "winetest.inf", "w" );
@@ -518,7 +625,9 @@ BOOL pnp_driver_start( const WCHAR *resource )
     catalog = CryptCATOpen( (WCHAR *)L"winetest.cat", CRYPTCAT_OPEN_CREATENEW, 0, CRYPTCAT_VERSION_1, 0 );
     ok( catalog != INVALID_HANDLE_VALUE, "Failed to create catalog, error %lu\n", GetLastError() );
 
-    add_file_to_catalog( catalog, L"winetest.sys" );
+    add_file_to_catalog( catalog, L"winetest_bus.sys" );
+    add_file_to_catalog( catalog, L"winetest_hid.sys" );
+    add_file_to_catalog( catalog, L"winetest_hid_poll.sys" );
     add_file_to_catalog( catalog, L"winetest.inf" );
 
     ret = CryptCATPersistStore( catalog );
@@ -534,7 +643,11 @@ BOOL pnp_driver_start( const WCHAR *resource )
         ok( ret, "Failed to delete file, error %lu\n", GetLastError() );
         ret = DeleteFileW( L"winetest.inf" );
         ok( ret, "Failed to delete file, error %lu\n", GetLastError() );
-        ret = DeleteFileW( L"winetest.sys" );
+        ret = DeleteFileW( L"winetest_bus.sys" );
+        ok( ret, "Failed to delete file, error %lu\n", GetLastError() );
+        ret = DeleteFileW( L"winetest_hid.sys" );
+        ok( ret, "Failed to delete file, error %lu\n", GetLastError() );
+        ret = DeleteFileW( L"winetest_hid_poll.sys" );
         ok( ret, "Failed to delete file, error %lu\n", GetLastError() );
         winetest_mute_threshold = old_mute_threshold;
         return FALSE;
@@ -548,8 +661,7 @@ BOOL pnp_driver_start( const WCHAR *resource )
     ret = SetupDiCreateDeviceInfoW( set, L"root\\winetest\\0", &GUID_NULL, NULL, NULL, 0, &device );
     ok( ret, "failed to create device, error %#lx\n", GetLastError() );
 
-    ret = SetupDiSetDeviceRegistryPropertyW( set, &device, SPDRP_HARDWAREID, (const BYTE *)hardware_id,
-                                             sizeof(hardware_id) );
+    ret = SetupDiSetDeviceRegistryPropertyW( set, &device, SPDRP_HARDWAREID, (const BYTE *)bus_hardware_id, sizeof(bus_hardware_id) );
     ok( ret, "failed to create set hardware ID, error %lu\n", GetLastError() );
 
     ret = SetupDiCallClassInstaller( DIF_REGISTERDEVICE, set, &device );
@@ -560,7 +672,7 @@ BOOL pnp_driver_start( const WCHAR *resource )
 
     GetFullPathNameW( L"winetest.inf", ARRAY_SIZE(path), path, NULL );
 
-    ret = UpdateDriverForPlugAndPlayDevicesW( NULL, hardware_id, path, INSTALLFLAG_FORCE, &need_reboot );
+    ret = UpdateDriverForPlugAndPlayDevicesW( NULL, bus_hardware_id, path, INSTALLFLAG_FORCE, &need_reboot );
     ok( ret, "failed to install device, error %lu\n", GetLastError() );
     ok( !need_reboot, "expected no reboot necessary\n" );
 
@@ -570,7 +682,7 @@ BOOL pnp_driver_start( const WCHAR *resource )
     manager = OpenSCManagerW( NULL, NULL, SC_MANAGER_CONNECT );
     ok( !!manager, "failed to open service manager, error %lu\n", GetLastError() );
 
-    service = OpenServiceW( manager, L"winetest", SERVICE_START );
+    service = OpenServiceW( manager, service_name, SERVICE_START );
     ok( !!service, "failed to open service, error %lu\n", GetLastError() );
 
     ret = StartServiceW( service, 0, NULL );
@@ -588,6 +700,42 @@ BOOL pnp_driver_start( const WCHAR *resource )
 
     winetest_mute_threshold = old_mute_threshold;
     return ret || GetLastError() == ERROR_SERVICE_ALREADY_RUNNING;
+}
+
+void hid_device_stop( struct hid_device_desc *desc )
+{
+    HANDLE control;
+    BOOL ret;
+
+    ResetEvent( device_removed );
+
+    control = CreateFileW( L"\\\\?\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}", 0, 0,
+                           NULL, OPEN_EXISTING, 0, NULL );
+    ok( control != INVALID_HANDLE_VALUE, "CreateFile failed, error %lu\n", GetLastError() );
+    ret = sync_ioctl( control, IOCTL_WINETEST_REMOVE_DEVICE, desc, sizeof(*desc), NULL, 0, INFINITE );
+    ok( ret || GetLastError() == ERROR_FILE_NOT_FOUND, "IOCTL_WINETEST_REMOVE_DEVICE failed, last error %lu\n", GetLastError() );
+    CloseHandle( control );
+
+    if (ret) WaitForSingleObject( device_removed, INFINITE );
+}
+
+BOOL hid_device_start( struct hid_device_desc *desc )
+{
+    HANDLE control;
+    BOOL ret;
+
+    ResetEvent( device_added );
+
+    control = CreateFileW( L"\\\\?\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}", 0, 0,
+                           NULL, OPEN_EXISTING, 0, NULL );
+    ok( control != INVALID_HANDLE_VALUE, "CreateFile failed, error %lu\n", GetLastError() );
+    ret = sync_ioctl( control, IOCTL_WINETEST_CREATE_DEVICE, desc, sizeof(*desc), NULL, 0, INFINITE );
+    ok( ret, "IOCTL_WINETEST_CREATE_DEVICE failed, last error %lu\n", GetLastError() );
+    CloseHandle( control );
+
+    WaitForSingleObject( device_added, INFINITE );
+
+    return TRUE;
 }
 
 #define check_hidp_caps( a, b ) check_hidp_caps_( __LINE__, a, b )
@@ -745,16 +893,6 @@ BOOL sync_ioctl_( const char *file, int line, HANDLE device, DWORD code, void *i
     if (ret_len) *ret_len = out_len;
     return ret;
 }
-
-#define fill_context( line, a, b ) \
-    do { \
-        const char *source_file; \
-        source_file = strrchr( __FILE__, '/' ); \
-        if (!source_file) source_file = strrchr( __FILE__, '\\' ); \
-        if (!source_file) source_file = __FILE__; \
-        else source_file++; \
-        snprintf( a, b, "%s:%d", source_file, line ); \
-    } while (0)
 
 void set_hid_expect_( const char *file, int line, HANDLE device, struct hid_expect *expect, DWORD expect_size )
 {
@@ -2323,52 +2461,25 @@ static void test_hidp( HANDLE file, HANDLE async_file, int report_id, BOOL polle
     HidD_FreePreparsedData( preparsed_data );
 }
 
-static void test_hid_device( DWORD report_id, DWORD polled, const HIDP_CAPS *expect_caps )
+static void test_hid_device( DWORD report_id, DWORD polled, const HIDP_CAPS *expect_caps, WORD vid, WORD pid )
 {
-    char buffer[FIELD_OFFSET( SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath[MAX_PATH] )];
-    SP_DEVICE_INTERFACE_DATA iface = {sizeof(SP_DEVICE_INTERFACE_DATA)};
-    SP_DEVICE_INTERFACE_DETAIL_DATA_W *iface_detail = (void *)buffer;
-    SP_DEVINFO_DATA device = {sizeof(SP_DEVINFO_DATA)};
     ULONG count, poll_freq, out_len;
+    WCHAR device_path[MAX_PATH];
     HANDLE file, async_file;
-    BOOL ret, found = FALSE;
-    OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING string;
-    IO_STATUS_BLOCK io;
-    NTSTATUS status;
-    unsigned int i;
-    HDEVINFO set;
+    BOOL ret;
 
     winetest_push_context( "id %ld%s", report_id, polled ? " poll" : "" );
 
-    set = SetupDiGetClassDevsW( &GUID_DEVINTERFACE_HID, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT );
-    ok( set != INVALID_HANDLE_VALUE, "failed to get device list, error %#lx\n", GetLastError() );
+    /* Win7 has a spurious device removal event with polled HID devices */
+    if (!polled || !strcmp(winetest_platform, "wine")) ret = WAIT_TIMEOUT;
+    else ret = WaitForSingleObject( device_removed, 2000 );
+    if (!ret && InterlockedOr( &device_added_count, 0 ) == 1) WaitForSingleObject( device_added, INFINITE );
 
-    for (i = 0; SetupDiEnumDeviceInfo( set, i, &device ); ++i)
-    {
-        ret = SetupDiEnumDeviceInterfaces( set, &device, &GUID_DEVINTERFACE_HID, 0, &iface );
-        ok( ret, "failed to get interface, error %#lx\n", GetLastError() );
-        ok( IsEqualGUID( &iface.InterfaceClassGuid, &GUID_DEVINTERFACE_HID ), "wrong class %s\n",
-            debugstr_guid( &iface.InterfaceClassGuid ) );
-        ok( iface.Flags == SPINT_ACTIVE, "got flags %#lx\n", iface.Flags );
+    swprintf( device_path, MAX_PATH, L"\\\\?\\hid#vid_%04x&pid_%04x", vid, pid );
+    ret = find_hid_device_path( device_path );
+    ok( ret, "Failed to find HID device matching %s\n", debugstr_w( device_path ) );
 
-        iface_detail->cbSize = sizeof(*iface_detail);
-        ret = SetupDiGetDeviceInterfaceDetailW( set, &iface, iface_detail, sizeof(buffer), NULL, NULL );
-        ok( ret, "failed to get interface path, error %#lx\n", GetLastError() );
-
-        if (wcsstr( iface_detail->DevicePath, L"\\\\?\\hid#winetest#1" ))
-        {
-            found = TRUE;
-            break;
-        }
-    }
-
-    SetupDiDestroyDeviceInfoList( set );
-
-    todo_wine
-    ok( found, "didn't find device\n" );
-
-    file = CreateFileW( iface_detail->DevicePath, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+    file = CreateFileW( device_path, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
                         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL );
     ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
 
@@ -2399,7 +2510,7 @@ static void test_hid_device( DWORD report_id, DWORD polled, const HIDP_CAPS *exp
     ok( ret, "HidD_GetNumInputBuffers failed last error %lu\n", GetLastError() );
     ok( count == 16, "HidD_GetNumInputBuffers returned %lu\n", count );
 
-    async_file = CreateFileW( iface_detail->DevicePath, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+    async_file = CreateFileW( device_path, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
                               FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
                               FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, NULL );
     ok( async_file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
@@ -2482,12 +2593,6 @@ static void test_hid_device( DWORD report_id, DWORD polled, const HIDP_CAPS *exp
 
     CloseHandle( async_file );
     CloseHandle( file );
-
-    RtlInitUnicodeString( &string, L"\\??\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}" );
-    InitializeObjectAttributes( &attr, &string, OBJ_CASE_INSENSITIVE, NULL, NULL );
-    status = NtOpenFile( &file, SYNCHRONIZE, &attr, &io, 0, FILE_SYNCHRONOUS_IO_NONALERT );
-    todo_wine
-    ok( status == STATUS_UNSUCCESSFUL, "got %#lx\n", status );
 
     winetest_pop_context();
 }
@@ -2740,13 +2845,6 @@ static void test_hid_driver( DWORD report_id, DWORD polled )
 #undef REPORT_ID_OR_USAGE_PAGE
 #include "pop_hid_macros.h"
 
-    static const HID_DEVICE_ATTRIBUTES attributes =
-    {
-        .Size = sizeof(HID_DEVICE_ATTRIBUTES),
-        .VendorID = 0x1209,
-        .ProductID = 0x0001,
-        .VersionNumber = 0x0100,
-    };
     const HIDP_CAPS caps =
     {
         .Usage = HID_USAGE_GENERIC_JOYSTICK,
@@ -2770,49 +2868,22 @@ static void test_hid_driver( DWORD report_id, DWORD polled )
         .ret_length = 3,
         .ret_status = STATUS_SUCCESS,
     };
+    struct hid_device_desc desc =
+    {
+        .is_polled = polled,
+        .use_report_id = report_id,
+        .caps = caps,
+        .attributes = default_attributes,
+    };
 
-    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
-    char context[64];
-    LSTATUS status;
-    HKEY hkey;
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    desc.input_size = polled ? sizeof(expect_in) : 0;
+    memcpy( desc.input, &expect_in, sizeof(expect_in) );
+    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
 
-    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
-    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
-    SetCurrentDirectoryW( tempdir );
-
-    status = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\winetest",
-                              0, NULL, REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, NULL );
-    ok( !status, "RegCreateKeyExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"ReportID", 0, REG_DWORD, (void *)&report_id, sizeof(report_id) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"PolledMode", 0, REG_DWORD, (void *)&polled, sizeof(polled) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"Descriptor", 0, REG_BINARY, (void *)report_desc, sizeof(report_desc) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"Attributes", 0, REG_BINARY, (void *)&attributes, sizeof(attributes) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"Caps", 0, REG_BINARY, (void *)&caps, sizeof(caps) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"Expect", 0, REG_BINARY, NULL, 0 );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"Input", 0, REG_BINARY, (void *)&expect_in, polled ? sizeof(expect_in) : 0 );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    fill_context( __LINE__, context, ARRAY_SIZE(context) );
-    status = RegSetValueExW( hkey, L"Context", 0, REG_BINARY, (void *)context, sizeof(context) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    if (pnp_driver_start( L"driver_hid.dll" )) test_hid_device( report_id, polled, &caps );
-
-    pnp_driver_stop();
-    SetCurrentDirectoryW( cwd );
+    if (hid_device_start( &desc )) test_hid_device( report_id, polled, &caps, desc.attributes.VendorID, desc.attributes.ProductID );
+    hid_device_stop( &desc );
 }
 
 /* undocumented HID internal preparsed data structure */
@@ -2982,18 +3053,10 @@ static void test_hidp_kdr(void)
     };
 #include "pop_hid_macros.h"
 
-    static const HIDP_CAPS expect_hidp_caps =
+    struct hid_device_desc desc =
     {
-        .Usage = HID_USAGE_GENERIC_JOYSTICK,
-        .UsagePage = HID_USAGE_PAGE_GENERIC,
-        .InputReportByteLength = 15,
-    };
-    static const HID_DEVICE_ATTRIBUTES attributes =
-    {
-        .Size = sizeof(HID_DEVICE_ATTRIBUTES),
-        .VendorID = 0x1209,
-        .ProductID = 0x0001,
-        .VersionNumber = 0x0100,
+        .caps = { .InputReportByteLength = 15 },
+        .attributes = default_attributes,
     };
     static const struct hidp_kdr expect_kdr =
     {
@@ -3121,75 +3184,25 @@ static void test_hidp_kdr(void)
         },
     };
 
-    char buffer[FIELD_OFFSET( SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath[MAX_PATH] )];
-    SP_DEVICE_INTERFACE_DATA iface = {sizeof(SP_DEVICE_INTERFACE_DATA)};
-    SP_DEVICE_INTERFACE_DETAIL_DATA_W *iface_detail = (void *)buffer;
-    SP_DEVINFO_DATA device = {sizeof(SP_DEVINFO_DATA)};
-    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
     PHIDP_PREPARSED_DATA preparsed_data;
-    DWORD i, report_id = 0, polled = 0;
+    WCHAR device_path[MAX_PATH];
     struct hidp_kdr *kdr;
-    char context[64];
-    LSTATUS status;
-    HDEVINFO set;
     HANDLE file;
-    HKEY hkey;
     BOOL ret;
+    DWORD i;
 
-    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
-    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
-    SetCurrentDirectoryW( tempdir );
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
 
-    status = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\winetest",
-                              0, NULL, REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, NULL );
-    ok( !status, "RegCreateKeyExW returned %#lx\n", status );
+    if (!hid_device_start( &desc )) goto done;
 
-    status = RegSetValueExW( hkey, L"ReportID", 0, REG_DWORD, (void *)&report_id, sizeof(report_id) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
+    swprintf( device_path, MAX_PATH, L"\\\\?\\hid#vid_%04x&pid_%04x", desc.attributes.VendorID,
+              desc.attributes.ProductID );
+    ret = find_hid_device_path( device_path );
+    ok( ret, "Failed to find HID device matching %s\n", debugstr_w( device_path ) );
 
-    status = RegSetValueExW( hkey, L"PolledMode", 0, REG_DWORD, (void *)&polled, sizeof(polled) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"Descriptor", 0, REG_BINARY, (void *)report_desc, sizeof(report_desc) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"Attributes", 0, REG_BINARY, (void *)&attributes, sizeof(attributes) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"Caps", 0, REG_BINARY, (void *)&expect_hidp_caps, sizeof(expect_hidp_caps) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"Expect", 0, REG_BINARY, NULL, 0 );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    status = RegSetValueExW( hkey, L"Input", 0, REG_BINARY, NULL, 0 );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    fill_context( __LINE__, context, ARRAY_SIZE(context) );
-    status = RegSetValueExW( hkey, L"Context", 0, REG_BINARY, (void *)context, sizeof(context) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    if (!pnp_driver_start( L"driver_hid.dll" )) goto done;
-
-    set = SetupDiGetClassDevsW( &GUID_DEVINTERFACE_HID, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT );
-    ok( set != INVALID_HANDLE_VALUE, "failed to get device list, error %#lx\n", GetLastError() );
-    for (i = 0; SetupDiEnumDeviceInfo( set, i, &device ); ++i)
-    {
-        ret = SetupDiEnumDeviceInterfaces( set, &device, &GUID_DEVINTERFACE_HID, 0, &iface );
-        ok( ret, "failed to get interface, error %#lx\n", GetLastError() );
-        ok( IsEqualGUID( &iface.InterfaceClassGuid, &GUID_DEVINTERFACE_HID ), "wrong class %s\n",
-            debugstr_guid( &iface.InterfaceClassGuid ) );
-        ok( iface.Flags == SPINT_ACTIVE, "got flags %#lx\n", iface.Flags );
-
-        iface_detail->cbSize = sizeof(*iface_detail);
-        ret = SetupDiGetDeviceInterfaceDetailW( set, &iface, iface_detail, sizeof(buffer), NULL, NULL );
-        ok( ret, "failed to get interface path, error %#lx\n", GetLastError() );
-
-        if (wcsstr( iface_detail->DevicePath, L"\\\\?\\hid#winetest#1" )) break;
-    }
-    SetupDiDestroyDeviceInfoList( set );
-
-    file = CreateFileW( iface_detail->DevicePath, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
+    file = CreateFileW( device_path, FILE_READ_ACCESS | FILE_WRITE_ACCESS,
                         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL );
     ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
 
@@ -3286,8 +3299,7 @@ static void test_hidp_kdr(void)
     CloseHandle( file );
 
 done:
-    pnp_driver_stop();
-    SetCurrentDirectoryW( cwd );
+    hid_device_stop( &desc );
 }
 
 void cleanup_registry_keys(void)
@@ -3323,49 +3335,76 @@ void cleanup_registry_keys(void)
     RegCloseKey( root_key );
 }
 
-BOOL dinput_driver_start_( const char *file, int line, const BYTE *desc_buf, ULONG desc_len,
-                           const HIDP_CAPS *caps, struct hid_expect *expect, ULONG expect_size )
+static LRESULT CALLBACK monitor_wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
-    static const HID_DEVICE_ATTRIBUTES attributes =
+    if (msg == WM_DEVICECHANGE)
     {
-        .Size = sizeof(HID_DEVICE_ATTRIBUTES),
-        .VendorID = LOWORD( EXPECT_VIDPID ),
-        .ProductID = HIWORD( EXPECT_VIDPID ),
-        .VersionNumber = 0x0100,
+        DEV_BROADCAST_DEVICEINTERFACE_W *iface = (DEV_BROADCAST_DEVICEINTERFACE_W *)lparam;
+        if (wparam == DBT_DEVICEREMOVECOMPLETE && IsEqualGUID( &iface->dbcc_classguid, &control_class ))
+            SetEvent( device_removed );
+        if (wparam == DBT_DEVICEARRIVAL && IsEqualGUID( &iface->dbcc_classguid, &GUID_DEVINTERFACE_HID ))
+        {
+            InterlockedIncrement( &device_added_count );
+            SetEvent( device_added );
+        }
+    }
+
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+DWORD WINAPI monitor_thread_proc( void *stop_event )
+{
+    DEV_BROADCAST_DEVICEINTERFACE_A iface_filter_a =
+    {
+        .dbcc_size = sizeof(DEV_BROADCAST_DEVICEINTERFACE_A),
+        .dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE,
     };
-    DWORD report_id = 1;
-    DWORD polled = 0;
-    char context[64];
-    LSTATUS status;
-    HKEY hkey;
+    WNDCLASSEXW class =
+    {
+        .cbSize = sizeof(WNDCLASSEXW),
+        .hInstance = GetModuleHandleW( NULL ),
+        .lpszClassName = L"device_monitor",
+        .lpfnWndProc = monitor_wndproc,
+    };
+    HDEVNOTIFY devnotify;
+    HANDLE hwnd;
+    MSG msg;
 
-    status = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\winetest",
-                              0, NULL, REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, NULL );
-    ok_(file, line)( !status, "RegCreateKeyExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"ReportID", 0, REG_DWORD, (void *)&report_id, sizeof(report_id) );
-    ok_(file, line)( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"PolledMode", 0, REG_DWORD, (void *)&polled, sizeof(polled) );
-    ok_(file, line)( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"Descriptor", 0, REG_BINARY, (void *)desc_buf, desc_len );
-    ok_(file, line)( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"Attributes", 0, REG_BINARY, (void *)&attributes, sizeof(attributes) );
-    ok_(file, line)( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"Caps", 0, REG_BINARY, (void *)caps, sizeof(*caps) );
-    ok_(file, line)( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"Expect", 0, REG_BINARY, (void *)expect, expect_size );
-    ok_(file, line)( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"Input", 0, REG_BINARY, NULL, 0 );
-    ok_(file, line)( !status, "RegSetValueExW returned %#lx\n", status );
-    fill_context( line, context, ARRAY_SIZE(context) );
-    status = RegSetValueExW( hkey, L"Context", 0, REG_BINARY, (void *)context, sizeof(context) );
-    ok_(file, line)( !status, "RegSetValueExW returned %#lx\n", status );
+    RegisterClassExW( &class );
+    hwnd = CreateWindowW( class.lpszClassName, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL );
+    ok( !!hwnd, "CreateWindowW failed, error %lu\n", GetLastError() );
+    devnotify = RegisterDeviceNotificationA( hwnd, &iface_filter_a, DEVICE_NOTIFY_ALL_INTERFACE_CLASSES );
+    ok( !!devnotify, "RegisterDeviceNotificationA failed, error %lu\n", GetLastError() );
 
-    return pnp_driver_start( L"driver_hid.dll" );
+    do
+    {
+        while (PeekMessageW( &msg, hwnd, 0, 0, PM_REMOVE ))
+        {
+            TranslateMessage( &msg );
+            DispatchMessageW( &msg );
+        }
+    } while (MsgWaitForMultipleObjects( 1, &stop_event, FALSE, INFINITE, QS_ALLINPUT ));
+
+    UnregisterDeviceNotification( devnotify );
+    DestroyWindow( hwnd );
+    UnregisterClassW( class.lpszClassName, class.hInstance );
+
+    CloseHandle( stop_event );
+    return 0;
 }
 
 BOOL dinput_test_init_( const char *file, int line )
 {
     BOOL is_wow64;
+
+    monitor_stop = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!monitor_stop, "CreateEventW failed, error %lu\n", GetLastError() );
+    device_added = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!device_added, "CreateEventW failed, error %lu\n", GetLastError() );
+    device_removed = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( !!device_removed, "CreateEventW failed, error %lu\n", GetLastError() );
+    monitor_thread = CreateThread( NULL, 0, monitor_thread_proc, monitor_stop, 0, NULL );
+    ok( !!monitor_thread, "CreateThread failed, error %lu\n", GetLastError() );
 
     subtest_(file, line)( "hid" );
     instance = GetModuleHandleW( NULL );
@@ -3395,7 +3434,10 @@ BOOL dinput_test_init_( const char *file, int line )
                           FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, 0, NULL );
     ok( okfile != INVALID_HANDLE_VALUE, "failed to create file, error %lu\n", GetLastError() );
 
+    subtest( "driver" );
+    subtest( "driver_bus" );
     subtest( "driver_hid" );
+    subtest( "driver_hid_poll" );
     return TRUE;
 }
 
@@ -3405,6 +3447,13 @@ void dinput_test_exit(void)
     CloseHandle( test_data_mapping );
     CloseHandle( okfile );
     DeleteFileW( L"C:\\windows\\winetest_dinput_okfile" );
+
+    SetEvent( monitor_stop );
+    WaitForSingleObject( monitor_thread, INFINITE );
+    CloseHandle( monitor_thread );
+    CloseHandle( monitor_stop );
+    CloseHandle( device_removed );
+    CloseHandle( device_added );
 }
 
 BOOL CALLBACK find_test_device( const DIDEVICEINSTANCEW *devinst, void *context )
@@ -3523,56 +3572,120 @@ DWORD WINAPI dinput_test_device_thread( void *stop_event )
     {
         .InputReportByteLength = 3,
     };
+    struct hid_device_desc desc =
+    {
+        .use_report_id = TRUE,
+        .caps = caps,
+        .attributes = attributes,
+    };
 
-    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
-    DWORD report_id = 1, polled = 0;
-    char context[64];
-    LSTATUS status;
-    HKEY hkey;
+    desc.report_descriptor_len = sizeof(gamepad_desc);
+    memcpy( desc.report_descriptor_buf, gamepad_desc, sizeof(gamepad_desc) );
+    fill_context( __LINE__, desc.context, ARRAY_SIZE(desc.context) );
 
-    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
-    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
-    SetCurrentDirectoryW( tempdir );
-
-    status = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\winetest",
-                              0, NULL, REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, NULL );
-    ok( !status, "RegCreateKeyExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"ReportID", 0, REG_DWORD, (void *)&report_id, sizeof(report_id) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"PolledMode", 0, REG_DWORD, (void *)&polled, sizeof(polled) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"Descriptor", 0, REG_BINARY, (void *)gamepad_desc, sizeof(gamepad_desc) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"Attributes", 0, REG_BINARY, (void *)&attributes, sizeof(attributes) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"Caps", 0, REG_BINARY, (void *)&caps, sizeof(caps) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"Expect", 0, REG_BINARY, NULL, 0 );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-    status = RegSetValueExW( hkey, L"Input", 0, REG_BINARY, NULL, 0 );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-    fill_context( __LINE__, context, ARRAY_SIZE(context) );
-    status = RegSetValueExW( hkey, L"Context", 0, REG_BINARY, (void *)context, sizeof(context) );
-    ok( !status, "RegSetValueExW returned %#lx\n", status );
-
-    pnp_driver_start( L"driver_hid.dll" );
+    hid_device_start( &desc );
     WaitForSingleObject( stop_event, INFINITE );
-    pnp_driver_stop();
-
-    SetCurrentDirectoryW( cwd );
+    hid_device_stop( &desc );
 
     return 0;
+}
+
+static void test_bus_driver(void)
+{
+#include "psh_hid_macros.h"
+    const unsigned char report_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_X),
+            REPORT_SIZE(1, 8),
+            REPORT_COUNT(1, 1),
+            INPUT(1, Data|Var|Abs),
+        END_COLLECTION,
+    };
+#include "pop_hid_macros.h"
+
+    static const HID_DEVICE_ATTRIBUTES attributes =
+    {
+        .Size = sizeof(HID_DEVICE_ATTRIBUTES),
+        .VendorID = LOWORD(EXPECT_VIDPID),
+        .ProductID = HIWORD(EXPECT_VIDPID),
+        .VersionNumber = 0x0100,
+    };
+    const HIDP_CAPS caps =
+    {
+        .Usage = HID_USAGE_GENERIC_JOYSTICK,
+        .UsagePage = HID_USAGE_PAGE_GENERIC,
+        .InputReportByteLength = 2,
+        .NumberLinkCollectionNodes = 1,
+        .NumberInputValueCaps = 1,
+        .NumberInputDataIndices = 1,
+    };
+    struct hid_device_desc desc = { .caps = caps, .attributes = attributes, };
+
+    WCHAR device_path[MAX_PATH];
+    HANDLE control;
+    BOOL ret;
+
+    if (!bus_device_start()) goto done;
+
+    control = CreateFileW( L"\\\\?\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}", 0, 0,
+                           NULL, OPEN_EXISTING, 0, NULL );
+    ok( control != INVALID_HANDLE_VALUE, "CreateFile failed, error %lu\n", GetLastError() );
+    CloseHandle( control );
+
+    bus_device_stop();
+
+    control = CreateFileW( L"\\\\?\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}", 0, 0,
+                           NULL, OPEN_EXISTING, 0, NULL );
+    ok( control == INVALID_HANDLE_VALUE, "CreateFile succeeded\n" );
+
+    bus_device_start();
+
+    desc.report_descriptor_len = sizeof(report_desc);
+    memcpy( desc.report_descriptor_buf, report_desc, sizeof(report_desc) );
+
+    ResetEvent( device_added );
+
+    control = CreateFileW( L"\\\\?\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}", 0, 0,
+                           NULL, OPEN_EXISTING, 0, NULL );
+    ok( control != INVALID_HANDLE_VALUE, "CreateFile failed, error %lu\n", GetLastError() );
+    ret = sync_ioctl( control, IOCTL_WINETEST_CREATE_DEVICE, &desc, sizeof(desc), NULL, 0, INFINITE );
+    ok( ret, "IOCTL_WINETEST_CREATE_DEVICE failed, last error %lu\n", GetLastError() );
+
+    WaitForSingleObject( device_added, INFINITE );
+
+    swprintf( device_path, MAX_PATH, L"\\\\?\\hid#vid_%04x&pid_%04x", LOWORD(EXPECT_VIDPID), HIWORD(EXPECT_VIDPID) );
+    ret = find_hid_device_path( device_path );
+    ok( ret, "Failed to find HID device matching %s\n", debugstr_w(device_path) );
+
+    ResetEvent( device_removed );
+
+    ret = sync_ioctl( control, IOCTL_WINETEST_REMOVE_DEVICE, &desc, sizeof(desc), NULL, 0, INFINITE );
+    ok( ret, "IOCTL_WINETEST_REMOVE_DEVICE failed, last error %lu\n", GetLastError() );
+    CloseHandle( control );
+
+    WaitForSingleObject( device_removed, INFINITE );
+
+done:
+    bus_device_stop();
 }
 
 START_TEST( hid )
 {
     if (!dinput_test_init()) return;
 
+    test_bus_driver();
+
+    if (!bus_device_start()) goto done;
     test_hidp_kdr();
     test_hid_driver( 0, FALSE );
     test_hid_driver( 1, FALSE );
     test_hid_driver( 0, TRUE );
     test_hid_driver( 1, TRUE );
 
+done:
+    bus_device_stop();
     dinput_test_exit();
 }

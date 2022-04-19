@@ -409,7 +409,7 @@ static inline float float_24_to_32(DWORD in)
 
 static inline unsigned int wined3d_popcount(unsigned int x)
 {
-#if defined(__GNUC__) && (__GNUC__ >= 4)
+#if defined(__MINGW32__)
     return __builtin_popcount(x);
 #else
     x -= x >> 1 & 0x55555555;
@@ -4953,7 +4953,7 @@ enum wined3d_push_constants
 #define WINED3D_CS_QUERY_POLL_INTERVAL  10u
 #define WINED3D_CS_QUEUE_SIZE           0x100000u
 #define WINED3D_CS_SPIN_COUNT           10000000u
-#define WINED3D_CS_QUEUE_MASK(a)        ((a) & (WINED3D_CS_QUEUE_SIZE - 1))
+#define WINED3D_CS_QUEUE_MASK           (WINED3D_CS_QUEUE_SIZE - 1)
 
 struct wined3d_cs_queue
 {

@@ -164,7 +164,7 @@ static inline void paint_button( HWND hwnd, LONG style, UINT action )
     {
         HDC hdc = GetDC( hwnd );
         btnPaintFunc[style]( hwnd, hdc, action );
-        ReleaseDC( hwnd, hdc );
+        NtUserReleaseDC( hwnd, hdc );
     }
 }
 
@@ -246,14 +246,14 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
     case WM_PAINT:
     {
         PAINTSTRUCT ps;
-        HDC hdc = wParam ? (HDC)wParam : BeginPaint( hWnd, &ps );
+        HDC hdc = wParam ? (HDC)wParam : NtUserBeginPaint( hWnd, &ps );
         if (btnPaintFunc[btn_type])
         {
             int nOldMode = SetBkMode( hdc, OPAQUE );
             (btnPaintFunc[btn_type])( hWnd, hdc, ODA_DRAWENTIRE );
             SetBkMode(hdc, nOldMode); /*  reset painting mode */
         }
-        if ( !wParam ) EndPaint( hWnd, &ps );
+        if (!wParam) NtUserEndPaint( hWnd, &ps );
         break;
     }
 
@@ -376,7 +376,7 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
             if (rc.right > client.right) rc.right = client.right;
             if (rc.bottom > client.bottom) rc.bottom = client.bottom;
             FillRect(hdc, &rc, hbrush);
-            ReleaseDC(hWnd, hdc);
+            NtUserReleaseDC( hWnd, hdc );
         }
 
         if (unicode) DefWindowProcW( hWnd, WM_SETTEXT, wParam, lParam );

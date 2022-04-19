@@ -500,9 +500,9 @@ static void LISTBOX_UpdateSize( LB_DESCR *descr )
         {
             TRACE("[%p]: changing height %d -> %d\n",
                   descr->self, descr->height, descr->height - remaining );
-            SetWindowPos( descr->self, 0, 0, 0, rect.right - rect.left,
-                          rect.bottom - rect.top - remaining,
-                          SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE );
+            NtUserSetWindowPos( descr->self, 0, 0, 0, rect.right - rect.left,
+                                rect.bottom - rect.top - remaining,
+                                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE );
             return;
         }
     }
@@ -778,7 +778,7 @@ static void LISTBOX_RepaintItem( LB_DESCR *descr, INT index, UINT action )
         return;
     }
     if (LISTBOX_GetItemRect( descr, index, &rect ) != 1) return;
-    if (!(hdc = GetDCEx( descr->self, 0, DCX_CACHE ))) return;
+    if (!(hdc = NtUserGetDCEx( descr->self, 0, DCX_CACHE ))) return;
     if (descr->font) oldFont = SelectObject( hdc, descr->font );
     hbrush = (HBRUSH)SendMessageW( descr->owner, WM_CTLCOLORLISTBOX,
 				   (WPARAM)hdc, (LPARAM)descr->self );
@@ -789,7 +789,7 @@ static void LISTBOX_RepaintItem( LB_DESCR *descr, INT index, UINT action )
     LISTBOX_PaintItem( descr, hdc, &rect, index, action, TRUE );
     if (oldFont) SelectObject( hdc, oldFont );
     if (oldBrush) SelectObject( hdc, oldBrush );
-    ReleaseDC( descr->self, hdc );
+    NtUserReleaseDC( descr->self, hdc );
 }
 
 
@@ -809,14 +809,14 @@ static void LISTBOX_DrawFocusRect( LB_DESCR *descr, BOOL on )
     if (!descr->caret_on || !descr->in_focus) return;
 
     if (LISTBOX_GetItemRect( descr, descr->focus_item, &rect ) != 1) return;
-    if (!(hdc = GetDCEx( descr->self, 0, DCX_CACHE ))) return;
+    if (!(hdc = NtUserGetDCEx( descr->self, 0, DCX_CACHE ))) return;
     if (descr->font) oldFont = SelectObject( hdc, descr->font );
     if (!IsWindowEnabled(descr->self))
         SetTextColor( hdc, GetSysColor( COLOR_GRAYTEXT ) );
     SetWindowOrgEx( hdc, descr->horz_pos, 0, NULL );
     LISTBOX_PaintItem( descr, hdc, &rect, descr->focus_item, ODA_FOCUS, !on );
     if (oldFont) SelectObject( hdc, oldFont );
-    ReleaseDC( descr->self, hdc );
+    NtUserReleaseDC( descr->self, hdc );
 }
 
 
@@ -1411,7 +1411,7 @@ static INT LISTBOX_SetFont( LB_DESCR *descr, HFONT font )
 
     descr->font = font;
 
-    if (!(hdc = GetDCEx( descr->self, 0, DCX_CACHE )))
+    if (!(hdc = NtUserGetDCEx( descr->self, 0, DCX_CACHE )))
     {
         ERR("unable to get DC.\n" );
         return 16;
@@ -1419,7 +1419,7 @@ static INT LISTBOX_SetFont( LB_DESCR *descr, HFONT font )
     if (font) oldFont = SelectObject( hdc, font );
     GetTextExtentPointA( hdc, alphabet, 52, &sz);
     if (oldFont) SelectObject( hdc, oldFont );
-    ReleaseDC( descr->self, hdc );
+    NtUserReleaseDC( descr->self, hdc );
 
     descr->avg_char_width = (sz.cx / 26 + 1) / 2;
     if (!IS_OWNERDRAW(descr))
@@ -2416,7 +2416,7 @@ static void LISTBOX_HandleMouseMove( LB_DESCR *descr,
     /* Start/stop the system timer */
 
     if (dir != LB_TIMER_NONE)
-        SetSystemTimer( descr->self, LB_TIMER_ID, LB_SCROLL_TIMEOUT, NULL);
+        NtUserSetSystemTimer( descr->self, LB_TIMER_ID, LB_SCROLL_TIMEOUT, NULL);
     else if (LISTBOX_Timer != LB_TIMER_NONE)
         KillSystemTimer( descr->self, LB_TIMER_ID );
     LISTBOX_Timer = dir;
@@ -3093,9 +3093,9 @@ LRESULT ListBoxWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
-            HDC hdc = ( wParam ) ? ((HDC)wParam) :  BeginPaint( descr->self, &ps );
+            HDC hdc = ( wParam ) ? ((HDC)wParam) :  NtUserBeginPaint( descr->self, &ps );
             ret = LISTBOX_Paint( descr, hdc );
-            if( !wParam ) EndPaint( descr->self, &ps );
+            if (!wParam) NtUserEndPaint( descr->self, &ps );
         }
         return ret;
     case WM_SIZE:

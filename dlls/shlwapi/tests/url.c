@@ -611,7 +611,6 @@ static void test_UrlGetPart(void)
         DWORD flags;
         HRESULT hr;
         const char *expect;
-        BOOL todo_hr, todo_result;
     }
     tests[] =
     {
@@ -672,8 +671,8 @@ static void test_UrlGetPart(void)
         {"http://user@host@q", URL_PART_USERNAME, 0, S_OK, "user"},
         {"http://user@host@q", URL_PART_HOSTNAME, 0, S_OK, "host@q"},
 
-        {"http:localhost/index.html", URL_PART_HOSTNAME, 0, E_FAIL, .todo_hr = TRUE},
-        {"http:/localhost/index.html", URL_PART_HOSTNAME, 0, E_FAIL, .todo_hr = TRUE},
+        {"http:localhost/index.html", URL_PART_HOSTNAME, 0, E_FAIL},
+        {"http:/localhost/index.html", URL_PART_HOSTNAME, 0, E_FAIL},
 
         {"http://localhost\\index.html", URL_PART_HOSTNAME, 0, S_OK, "localhost"},
         {"http:/\\localhost/index.html", URL_PART_HOSTNAME, 0, S_OK, "localhost"},
@@ -699,10 +698,10 @@ static void test_UrlGetPart(void)
         {"http:///index.html", URL_PART_HOSTNAME, URL_PARTFLAG_KEEPSCHEME, S_OK, "http:"},
         {"file://h o s t/c:/windows/file", URL_PART_HOSTNAME, 0, S_OK, "h o s t"},
         {"file://h o s t/c:/windows/file", URL_PART_HOSTNAME, URL_PARTFLAG_KEEPSCHEME, S_OK, "h o s t"},
-        {"file://foo:bar@localhost:21/file?query=x", URL_PART_USERNAME, 0, E_FAIL, .todo_hr = TRUE},
-        {"file://foo:bar@localhost:21/file?query=x", URL_PART_PASSWORD, 0, E_FAIL, .todo_hr = TRUE},
-        {"file://foo:bar@localhost:21/file?query=x", URL_PART_HOSTNAME, 0, S_OK, "foo:bar@localhost:21", .todo_result = TRUE},
-        {"file://foo:bar@localhost:21/file?query=x", URL_PART_PORT, 0, E_FAIL, .todo_hr = TRUE},
+        {"file://foo:bar@localhost:21/file?query=x", URL_PART_USERNAME, 0, E_FAIL},
+        {"file://foo:bar@localhost:21/file?query=x", URL_PART_PASSWORD, 0, E_FAIL},
+        {"file://foo:bar@localhost:21/file?query=x", URL_PART_HOSTNAME, 0, S_OK, "foo:bar@localhost:21"},
+        {"file://foo:bar@localhost:21/file?query=x", URL_PART_PORT, 0, E_FAIL},
         {"file://foo:bar@localhost:21/file?query=x", URL_PART_QUERY, 0, S_OK, "query=x"},
         {"http://user:pass 123@www.wine hq.org", URL_PART_HOSTNAME, 0, S_OK, "www.wine hq.org"},
         {"http://user:pass 123@www.wine hq.org", URL_PART_PASSWORD, 0, S_OK, "pass 123"},
@@ -729,8 +728,8 @@ static void test_UrlGetPart(void)
         {"scheme :", URL_PART_SCHEME, 0, S_FALSE, ""},
         {"sch eme:", URL_PART_SCHEME, 0, S_FALSE, ""},
         {":", URL_PART_SCHEME, 0, S_FALSE, ""},
-        {"a:", URL_PART_SCHEME, 0, S_FALSE, "", .todo_hr = TRUE},
-        {"0:", URL_PART_SCHEME, 0, S_FALSE, "", .todo_hr = TRUE},
+        {"a:", URL_PART_SCHEME, 0, S_FALSE, ""},
+        {"0:", URL_PART_SCHEME, 0, S_FALSE, ""},
         {"ab:", URL_PART_SCHEME, 0, S_OK, "ab"},
 
         {"about://hostname/", URL_PART_HOSTNAME, 0, E_FAIL},
@@ -762,8 +761,6 @@ static void test_UrlGetPart(void)
         {"snews://hostname/", URL_PART_HOSTNAME, URL_PARTFLAG_KEEPSCHEME, S_OK, "snews:hostname"},
         {"telnet://hostname/", URL_PART_HOSTNAME, URL_PARTFLAG_KEEPSCHEME, S_OK, "telnet:hostname"},
     };
-
-    winetest_mute_threshold = 5;
 
     hr = UrlGetPartA(NULL, NULL, NULL, URL_PART_SCHEME, 0);
     ok(hr == E_INVALIDARG, "Got hr %#lx.\n", hr);
@@ -797,13 +794,10 @@ static void test_UrlGetPart(void)
         size = 1;
         strcpy(buffer, "x");
         hr = UrlGetPartA(url, buffer, &size, part, flags);
-        todo_wine_if (tests[i].todo_hr)
-        {
-            if (tests[i].hr == S_OK)
-                ok(hr == E_POINTER, "Got hr %#lx.\n", hr);
-            else
-                ok(hr == tests[i].hr, "Got hr %#lx.\n", hr);
-        }
+        if (tests[i].hr == S_OK)
+            ok(hr == E_POINTER, "Got hr %#lx.\n", hr);
+        else
+            ok(hr == tests[i].hr, "Got hr %#lx.\n", hr);
 
         if (hr == S_FALSE)
         {
@@ -813,33 +807,20 @@ static void test_UrlGetPart(void)
         else
         {
             if (hr == E_POINTER)
-            {
-                if (expect)
-                {
-                    todo_wine_if (tests[i].todo_hr || tests[i].todo_result)
-                        ok(size == strlen(expect) + 1, "Got size %lu.\n", size);
-                }
-            }
+                ok(size == strlen(expect) + 1, "Got size %lu.\n", size);
             else
-            {
                 ok(size == 1, "Got size %lu.\n", size);
-            }
             ok(!strcmp(buffer, "x"), "Got result %s.\n", debugstr_a(buffer));
         }
 
         size = sizeof(buffer);
         strcpy(buffer, "x");
         hr = UrlGetPartA(url, buffer, &size, part, flags);
-        todo_wine_if (tests[i].todo_hr)
-            ok(hr == tests[i].hr, "Got hr %#lx.\n", hr);
+        ok(hr == tests[i].hr, "Got hr %#lx.\n", hr);
         if (SUCCEEDED(hr))
         {
             ok(size == strlen(buffer), "Got size %lu.\n", size);
-            if (expect)
-            {
-                todo_wine_if (tests[i].todo_hr || tests[i].todo_result)
-                    ok(!strcmp(buffer, expect), "Got result %s.\n", debugstr_a(buffer));
-            }
+            ok(!strcmp(buffer, expect), "Got result %s.\n", debugstr_a(buffer));
         }
         else
         {
@@ -852,13 +833,10 @@ static void test_UrlGetPart(void)
         size = 1;
         wcscpy(bufferW, L"x");
         hr = UrlGetPartW(urlW, bufferW, &size, part, flags);
-        todo_wine_if (tests[i].todo_hr || tests[i].hr == S_FALSE)
-        {
-            if (tests[i].hr == S_OK)
-                ok(hr == E_POINTER, "Got hr %#lx.\n", hr);
-            else
-                ok(hr == (tests[i].hr == S_FALSE ? S_OK : tests[i].hr), "Got hr %#lx.\n", hr);
-        }
+        if (tests[i].hr == S_OK)
+            ok(hr == E_POINTER, "Got hr %#lx.\n", hr);
+        else
+            ok(hr == (tests[i].hr == S_FALSE ? S_OK : tests[i].hr), "Got hr %#lx.\n", hr);
 
         if (SUCCEEDED(hr))
         {
@@ -868,25 +846,16 @@ static void test_UrlGetPart(void)
         else
         {
             if (hr == E_POINTER)
-            {
-                if (expect)
-                {
-                    todo_wine_if (tests[i].todo_hr || tests[i].todo_result)
-                        ok(size == strlen(expect) + 1, "Got size %lu.\n", size);
-                }
-            }
+                ok(size == strlen(expect) + 1, "Got size %lu.\n", size);
             else
-            {
                 ok(size == 1, "Got size %lu.\n", size);
-            }
             ok(!wcscmp(bufferW, L"x"), "Got result %s.\n", debugstr_w(bufferW));
         }
 
         size = ARRAY_SIZE(bufferW);
         wcscpy(bufferW, L"x");
         hr = UrlGetPartW(urlW, bufferW, &size, part, flags);
-        todo_wine_if ((tests[i].hr == S_FALSE || tests[i].todo_hr) && strcmp(url, "a:") && strcmp(url, "0:"))
-            ok(hr == (tests[i].hr == S_FALSE ? S_OK : tests[i].hr), "Got hr %#lx.\n", hr);
+        ok(hr == (tests[i].hr == S_FALSE ? S_OK : tests[i].hr), "Got hr %#lx.\n", hr);
         if (SUCCEEDED(hr))
         {
             ok(size == wcslen(bufferW), "Got size %lu.\n", size);
@@ -901,8 +870,6 @@ static void test_UrlGetPart(void)
 
         winetest_pop_context();
     }
-
-    winetest_mute_threshold = 42;
 }
 
 /* ########################### */

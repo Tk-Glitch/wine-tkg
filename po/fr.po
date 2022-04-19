@@ -3895,15 +3895,15 @@ msgstr "La compilation conditionnelle est désactivée"
 msgid "Expected '@'"
 msgstr "« @ » attendu"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:82
 msgid "Microsoft JScript compilation error"
 msgstr "Erreur de compilation Microsoft JScript"
 
-#: dlls/jscript/jscript.rc:81
+#: dlls/jscript/jscript.rc:83
 msgid "Microsoft JScript runtime error"
 msgstr "Erreur d'exécution de Microsoft JScript"
 
-#: dlls/jscript/jscript.rc:82 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:84 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "Erreur d'exécution inconnue"
 
@@ -3994,22 +3994,30 @@ msgid ""
 msgstr ""
 
 #: dlls/jscript/jscript.rc:74
-msgid "Cannot define property '|': object is not extensible"
+msgid "Cyclic __proto__ value"
 msgstr ""
 
 #: dlls/jscript/jscript.rc:75
+msgid "Cannot create property for a non-extensible object"
+msgstr ""
+
+#: dlls/jscript/jscript.rc:76
+msgid "Cannot define property '|': object is not extensible"
+msgstr ""
+
+#: dlls/jscript/jscript.rc:77
 msgid "Cannot redefine non-configurable property '|'"
 msgstr "Impossible de redéfinir une propriété qui n'est pas configurable '|'"
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:78
 msgid "Cannot modify non-writable property '|'"
 msgstr "Impossible de modifier une propriété qui est protégée en écriture '|'"
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:79
 msgid "'this' is not a Map object"
 msgstr "« this » n'est pas un objet de type Map"
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:80
 msgid "Property cannot have both accessors and a value"
 msgstr "La propriété ne peut à la fois avoir une valeur et des accesseurs"
 
@@ -14198,11 +14206,11 @@ msgstr ""
 
 #: programs/chcp.com/chcp.rc:28
 msgid "Active code page: %1!u!\n"
-msgstr "Code de pages actif : %1!u!\n"
+msgstr "Page de code active : %1!u!\n"
 
 #: programs/chcp.com/chcp.rc:29
 msgid "Invalid code page\n"
-msgstr "Code de pages invalide.\n"
+msgstr "Page de code invalide\n"
 
 #: programs/chcp.com/chcp.rc:33
 msgid ""
@@ -14217,12 +14225,12 @@ msgid ""
 msgstr ""
 "CHCP [nombre]\n"
 "\n"
-"  Modifie ou affiche le code de pages de la console actif.\n"
+"  Modifie ou affiche la page de code de la console active.\n"
 "\n"
-"  nombre   Le code de pages de la console à activer.\n"
+"  nombre   La page de code de la console à activer.\n"
 "\n"
-"  Lancer CHCP sans nombre en paramètre pour afficher le code de pages actif "
-"de la console.\n"
+"  Lancer CHCP sans nombre en paramètre pour afficher la page de code de la "
+"console active.\n"
 "\n"
 
 #: programs/clock/clock.rc:32
@@ -16854,7 +16862,7 @@ msgstr ""
 "REG IMPORT <fichier>\n"
 "\n"
 "  Importe des clés et leurs valeurs à partir d'un fichier vers le registre.\n"
-"  \n"
+"\n"
 "  <fichier>\n"
 "     Le chemin d'accès et le nom du fichier à importer.\n"
 "\n"
@@ -17000,7 +17008,7 @@ msgid ""
 "The value '%1\\%2' already exists in the destination key. Do you want to "
 "overwrite it?"
 msgstr ""
-"La valeur de registre « %1\\\\%2 » existe déjà. Voulez-vous la remplacer ?"
+"La valeur de registre « %1\\%2 » existe déjà. Voulez-vous la remplacer ?"
 
 #: programs/reg/reg.rc:133
 msgid "Are you sure you want to delete the registry value '%1'?"

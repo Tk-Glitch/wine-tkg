@@ -1625,7 +1625,7 @@ BOOL CDECL dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
     }
 
     if (pdev->brush.style != BS_NULL &&
-        !(interior = NtGdiPolyPolyDraw( ULongToHandle(ALTERNATE), points, (const UINT *)&count, 1, NtGdiPolyPolygonRgn )))
+        !(interior = ULongToHandle(NtGdiPolyPolyDraw( ULongToHandle(ALTERNATE), points, (const UINT *)&count, 1, NtGdiPolyPolygonRgn ))))
     {
         free( points );
         if (outline) NtGdiDeleteObjectApp( outline );

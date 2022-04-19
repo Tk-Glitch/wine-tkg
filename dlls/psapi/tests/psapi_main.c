@@ -815,8 +815,6 @@ static void test_QueryWorkingSetEx(void)
     DWORD prot;
     BOOL ret;
 
-    static char tmp_data[0x2000] = { 0x41 };
-
     if (pQueryWorkingSetEx == NULL)
     {
         win_skip("QueryWorkingSetEx not found, skipping tests\n");

@@ -1243,7 +1243,7 @@ sync_test("elem_attr", function() {
     r = elem.removeAttribute("ondblclick");
     ok(r === (v < 8 ? false : (v < 9 ? true : undefined)), "ondblclick removeAttribute returned " + r);
     r = Object.prototype.toString.call(elem.ondblclick);
-    todo_wine_if(v >= 9).
+    todo_wine_if(v >= 11).
     ok(r === (v < 8 ? "[object Array]" : (v < 9 ? "[object Object]" : (v < 11 ? "[object Null]" : "[object Function]"))),
         "removed ondblclick Object.toString returned " + r);
 
@@ -1275,6 +1275,37 @@ sync_test("elem_attr", function() {
         ok(r === (v < 8 ? style : "opacity: 1.0"), "style attr after setAttribute = " + r);
         r = elem.style;
         ok(r === style, "elem.style after setAttribute = " + r);
+    }
+});
+
+sync_test("builtins_diffs", function() {
+    var v = document.documentMode;
+
+    /* despite what spec says for ES6, IE still throws */
+    var props = [
+        "freeze",
+        "getPrototypeOf",
+        "isExtensible",
+        "isFrozen",
+        "isSealed",
+        "keys",
+        "preventExtensions",
+        "seal"
+    ];
+    for(var i = 0; i < props.length; i++) {
+        try {
+            Object[props[i]]("test");
+            ok(false, "Object." + props[i] + " with non-object: expected exception");
+        }catch(e) {
+            ok(e.number === (v < 9 ? 0xa01b6 : 0xa138f) - 0x80000000, "Object." + props[i] + " with non-object: exception = " + e.number);
+        }
+    }
+
+    try {
+        RegExp.prototype.toString.call({source: "foo", flags: "g"});
+        ok(false, "RegExp.toString with non-regexp: expected exception");
+    }catch(e) {
+        ok(e.number === 0xa1398 - 0x80000000, "RegExp.toString with non-regexp: exception = " + e.number);
     }
 });
 
@@ -1330,6 +1361,272 @@ sync_test("__proto__", function() {
     ok(Object.prototype.hasOwnProperty("__proto__"), "__proto__ is not a property of Object.prototype after delete");
     r = Object.getPrototypeOf(x);
     ok(r === ctor.prototype, "x.__proto__ after delete = " + r);
+
+    var desc = Object.getOwnPropertyDescriptor(Object.prototype, "__proto__");
+    ok(desc.value === undefined, "__proto__ value = " + desc.value);
+    ok(Object.getPrototypeOf(desc.get) === Function.prototype, "__proto__ getter not a function");
+    ok(Object.getPrototypeOf(desc.set) === Function.prototype, "__proto__ setter not a function");
+    ok(desc.get.length === 0, "__proto__ getter length = " + desc.get.length);
+    ok(desc.set.length === 1, "__proto__ setter length = " + desc.set.length);
+
+    r = desc.get.call(x, 1, 2, 3, 4);
+    ok(r === x.__proto__, "calling __proto__ getter on x returned " + r);
+
+    r = desc.set.call(x, obj);
+    ok(r === obj, "calling __proto__ setter(obj) on x returned " + r);
+    check(obj, "after set to obj via calling setter");
+    r = desc.set.call(x, 42);
+    ok(r === 42, "calling __proto__ setter(42) on x returned " + r);
+    check(obj, "after set to obj via calling setter(42)");
+    r = desc.set.call(x, "foo");
+    ok(r === "foo", "calling __proto__ setter('foo') on x returned " + r);
+    check(obj, "after set to obj via calling setter('foo')");
+    r = desc.set.call(x);
+    ok(r === undefined, "calling __proto__ setter() on x returned " + r);
+    r = desc.set.call(true, obj);
+    ok(r === obj, "calling __proto__ setter(obj) on true value returned " + r);
+    x = true;
+    r = desc.set.call(x, obj);
+    ok(r === obj, "calling __proto__ setter(obj) on x set to true returned " + r);
+    ok(x.__proto__ === Boolean.prototype, "true value __proto__ after set to obj = " + x.__proto__);
+    x = new Boolean(true);
+    r = desc.set.call(x, obj);
+    ok(r === obj, "calling __proto__ setter(obj) on x set to Boolean(true) returned " + r);
+    ok(x.__proto__ === obj, "Boolean(true) __proto__ after set to obj = " + x.__proto__);
+
+    r = desc.get.call(13);
+    ok(r === Number.prototype, "calling __proto__ getter on 13 returned " + r);
+    try {
+        r = desc.get.call(undefined);
+        ok(false, "expected exception calling __proto__ getter on undefined");
+    }catch(e) {
+        ok(e.number === 0xa138f - 0x80000000, "calling __proto__ getter on undefined threw exception " + e.number);
+    }
+    try {
+        r = desc.get.call(null);
+        ok(false, "expected exception calling __proto__ getter on null");
+    }catch(e) {
+        ok(e.number === 0xa138f - 0x80000000, "calling __proto__ getter on null threw exception " + e.number);
+    }
+
+    try {
+        r = desc.set.call(undefined, obj);
+        ok(false, "expected exception calling __proto__ setter on undefined");
+    }catch(e) {
+        ok(e.number === 0xa138f - 0x80000000, "calling __proto__ setter on undefined threw exception " + e.number);
+    }
+    try {
+        r = desc.set.call(null, obj);
+        ok(false, "expected exception calling __proto__ setter on null");
+    }catch(e) {
+        ok(e.number === 0xa138f - 0x80000000, "calling __proto__ setter on null threw exception " + e.number);
+    }
+
+    x = {};
+    r = Object.create(x);
+    ok(r.__proto__ === x, "r.__proto__ = " + r.__proto__);
+    r = Object.create(r);
+    ok(r.__proto__.__proto__ === x, "r.__proto__.__proto__ = " + r.__proto__.__proto__);
+    try {
+        x.__proto__ = r;
+        ok(false, "expected exception setting circular proto chain");
+    }catch(e) {
+        ok(e.number === 0xa13b0 - 0x80000000 && e.name === "TypeError",
+            "setting circular proto chain threw exception " + e.number + " (" + e.name + ")");
+    }
+
+    Object.preventExtensions(x);
+    x.__proto__ = Object.prototype;  /* same prototype */
+    try {
+        x.__proto__ = Number.prototype;
+        ok(false, "expected exception changing __proto__ on non-extensible object");
+    }catch(e) {
+        ok(e.number === 0xa13b6 - 0x80000000 && e.name === "TypeError",
+            "changing __proto__ on non-extensible object threw exception " + e.number + " (" + e.name + ")");
+    }
+});
+
+sync_test("__defineGetter__", function() {
+    var v = document.documentMode;
+    var r, x = 42;
+
+    if(v < 11) {
+        ok(x.__defineGetter__ === undefined, "x.__defineGetter__ = " + x.__defineGetter__);
+        ok(!("__defineGetter__" in Object), "Object.__defineGetter__ = " + Object.__defineGetter__);
+        return;
+    }
+    ok(Object.prototype.hasOwnProperty("__defineGetter__"), "__defineGetter__ is not a property of Object.prototype");
+    ok(Object.prototype.__defineGetter__.length === 2, "__defineGetter__.length = " + Object.prototype.__defineGetter__.length);
+
+    function getter() { return "wine"; }
+    function setter(val) { }
+
+    r = x.__defineGetter__("foo", getter);
+    ok(r === undefined, "__defineGetter__ on 42 returned " + r);
+    ok(x.foo === undefined, "42.foo = " + x.foo);
+
+    x = {};
+    r = x.__defineGetter__("foo", getter);
+    ok(r === undefined, "__defineGetter__ returned " + r);
+    ok(x.foo === "wine", "x.foo = " + x.foo);
+    r = Object.getOwnPropertyDescriptor(x, "foo");
+    ok(r.value === undefined, "x.foo value = " + r.value);
+    ok(r.get === getter, "x.foo get = " + r.get);
+    ok(r.set === undefined, "x.foo set = " + r.set);
+    ok(r.writable === undefined, "x.foo writable = " + r.writable);
+    ok(r.enumerable === true, "x.foo enumerable = " + r.enumerable);
+    ok(r.configurable === true, "x.foo configurable = " + r.configurable);
+
+    Object.defineProperty(x, "foo", { get: undefined, set: setter, configurable: false });
+    r = Object.getOwnPropertyDescriptor(x, "foo");
+    ok(r.value === undefined, "x.foo setter value = " + r.value);
+    ok(r.get === undefined, "x.foo setter get = " + r.get);
+    ok(r.set === setter, "x.foo setter set = " + r.set);
+    ok(r.writable === undefined, "x.foo setter writable = " + r.writable);
+    ok(r.enumerable === true, "x.foo setter enumerable = " + r.enumerable);
+    ok(r.configurable === false, "x.foo setter configurable = " + r.configurable);
+    try {
+        x.__defineGetter__("foo", getter);
+        ok(false, "expected exception calling __defineGetter__ on non-configurable property");
+    }catch(e) {
+        ok(e.number === 0xa13d6 - 0x80000000, "__defineGetter__ on non-configurable property threw exception " + e.number);
+    }
+
+    r = Object.prototype.__defineGetter__.call(undefined, "bar", getter);
+    ok(r === undefined, "__defineGetter__ on undefined returned " + r);
+    r = Object.prototype.__defineGetter__.call(null, "bar", getter);
+    ok(r === undefined, "__defineGetter__ on null returned " + r);
+    r = x.__defineGetter__(undefined, getter);
+    ok(r === undefined, "__defineGetter__ undefined prop returned " + r);
+    ok(x["undefined"] === "wine", "x.undefined = " + x["undefined"]);
+    r = x.__defineGetter__(false, getter);
+    ok(r === undefined, "__defineGetter__ undefined prop returned " + r);
+    ok(x["false"] === "wine", "x.false = " + x["false"]);
+
+    try {
+        x.__defineGetter__("bar", "string");
+        ok(false, "expected exception calling __defineGetter__ with string");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineGetter__ with string threw exception " + e.number);
+    }
+    try {
+        x.__defineGetter__("bar", undefined);
+        ok(false, "expected exception calling __defineGetter__ with undefined");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineGetter__ with undefined threw exception " + e.number);
+    }
+    try {
+        x.__defineGetter__("bar", null);
+        ok(false, "expected exception calling __defineGetter__ with null");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineGetter__ with null threw exception " + e.number);
+    }
+    try {
+        Object.prototype.__defineGetter__.call(x, "bar");
+        ok(false, "expected exception calling __defineGetter__ with only one arg");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineGetter__ with only one arg threw exception " + e.number);
+    }
+
+    x.bar = "test";
+    ok(x.bar === "test", "x.bar = " + x.bar);
+    x.__defineGetter__("bar", getter);
+    ok(x.bar === "wine", "x.bar with getter = " + x.bar);
+});
+
+sync_test("__defineSetter__", function() {
+    var v = document.documentMode;
+    var r, x = 42;
+
+    if(v < 11) {
+        ok(x.__defineSetter__ === undefined, "x.__defineSetter__ = " + x.__defineSetter__);
+        ok(!("__defineSetter__" in Object), "Object.__defineSetter__ = " + Object.__defineSetter__);
+        return;
+    }
+    ok(Object.prototype.hasOwnProperty("__defineSetter__"), "__defineSetter__ is not a property of Object.prototype");
+    ok(Object.prototype.__defineSetter__.length === 2, "__defineSetter__.length = " + Object.prototype.__defineSetter__.length);
+
+    function getter() { return "wine"; }
+    function setter(val) { this.setterVal = val - 1; }
+
+    r = x.__defineSetter__("foo", setter);
+    ok(r === undefined, "__defineSetter__ on 42 returned " + r);
+    ok(x.foo === undefined, "42.foo = " + x.foo);
+
+    x = {};
+    r = x.__defineSetter__("foo", setter);
+    ok(r === undefined, "__defineSetter__ returned " + r);
+    ok(x.setterVal === undefined, "x.setterVal = " + x.setterVal);
+    x.foo = 13;
+    ok(x.setterVal === 12, "x.setterVal = " + x.setterVal);
+    r = Object.getOwnPropertyDescriptor(x, "foo");
+    ok(r.value === undefined, "x.foo value = " + r.value);
+    ok(r.get === undefined, "x.foo get = " + r.get);
+    ok(r.set === setter, "x.foo set = " + r.set);
+    ok(r.writable === undefined, "x.foo writable = " + r.writable);
+    ok(r.enumerable === true, "x.foo enumerable = " + r.enumerable);
+    ok(r.configurable === true, "x.foo configurable = " + r.configurable);
+
+    Object.defineProperty(x, "foo", { get: getter, set: undefined, configurable: false });
+    r = Object.getOwnPropertyDescriptor(x, "foo");
+    ok(r.value === undefined, "x.foo getter value = " + r.value);
+    ok(r.get === getter, "x.foo getter get = " + r.get);
+    ok(r.set === undefined, "x.foo getter set = " + r.set);
+    ok(r.writable === undefined, "x.foo getter writable = " + r.writable);
+    ok(r.enumerable === true, "x.foo getter enumerable = " + r.enumerable);
+    ok(r.configurable === false, "x.foo getter configurable = " + r.configurable);
+    try {
+        x.__defineSetter__("foo", setter);
+        ok(false, "expected exception calling __defineSetter__ on non-configurable property");
+    }catch(e) {
+        ok(e.number === 0xa13d6 - 0x80000000, "__defineSetter__ on non-configurable property threw exception " + e.number);
+    }
+
+    r = Object.prototype.__defineSetter__.call(undefined, "bar", setter);
+    ok(r === undefined, "__defineSetter__ on undefined returned " + r);
+    r = Object.prototype.__defineSetter__.call(null, "bar", setter);
+    ok(r === undefined, "__defineSetter__ on null returned " + r);
+    r = x.__defineSetter__(null, setter);
+    ok(r === undefined, "__defineSetter__ null prop returned " + r);
+    x["null"] = 100;
+    ok(x.setterVal === 99, "x.setterVal after setting x.null = " + x.setterVal);
+    r = x.__defineSetter__(50, setter);
+    ok(r === undefined, "__defineSetter__ 50 prop returned " + r);
+    x["50"] = 33;
+    ok(x.setterVal === 32, "x.setterVal after setting x.50 = " + x.setterVal);
+
+    try {
+        x.__defineSetter__("bar", true);
+        ok(false, "expected exception calling __defineSetter__ with bool");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineSetter__ with bool threw exception " + e.number);
+    }
+    try {
+        x.__defineSetter__("bar", undefined);
+        ok(false, "expected exception calling __defineSetter__ with undefined");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineSetter__ with undefined threw exception " + e.number);
+    }
+    try {
+        x.__defineSetter__("bar", null);
+        ok(false, "expected exception calling __defineSetter__ with null");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineSetter__ with null threw exception " + e.number);
+    }
+    try {
+        Object.prototype.__defineSetter__.call(x, "bar");
+        ok(false, "expected exception calling __defineSetter__ with only one arg");
+    }catch(e) {
+        ok(e.number === 0xa138a - 0x80000000, "__defineSetter__ with only one arg threw exception " + e.number);
+    }
+
+    x.bar = "test";
+    ok(x.bar === "test", "x.bar = " + x.bar);
+    x.__defineSetter__("bar", setter);
+    ok(x.bar === undefined, "x.bar with setter = " + x.bar);
+    x.bar = 10;
+    ok(x.bar === undefined, "x.bar with setter = " + x.bar);
+    ok(x.setterVal === 9, "x.setterVal after setting bar = " + x.setterVal);
 });
 
 async_test("postMessage", function() {

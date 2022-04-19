@@ -365,7 +365,7 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
-            HDC hdc = BeginPaint( hwnd, &ps );
+            HDC hdc = NtUserBeginPaint( hwnd, &ps );
             if( hdc )
             {
               HICON hIcon;
@@ -381,26 +381,26 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                         wine_dbgstr_rect(&ps.rcPaint));
                   DrawIcon( hdc, x, y, hIcon );
               }
-              EndPaint( hwnd, &ps );
+              NtUserEndPaint( hwnd, &ps );
             }
             return 0;
         }
 
     case WM_SYNCPAINT:
-        RedrawWindow ( hwnd, NULL, 0, RDW_ERASENOW | RDW_ERASE | RDW_ALLCHILDREN );
+        NtUserRedrawWindow ( hwnd, NULL, 0, RDW_ERASENOW | RDW_ERASE | RDW_ALLCHILDREN );
         return 0;
 
     case WM_SETREDRAW:
         if (wParam) WIN_SetStyle( hwnd, WS_VISIBLE, 0 );
         else
         {
-            RedrawWindow( hwnd, NULL, 0, RDW_ALLCHILDREN | RDW_VALIDATE );
+            NtUserRedrawWindow( hwnd, NULL, 0, RDW_ALLCHILDREN | RDW_VALIDATE );
             WIN_SetStyle( hwnd, 0, WS_VISIBLE );
         }
         return 0;
 
     case WM_CLOSE:
-        DestroyWindow( hwnd );
+        NtUserDestroyWindow( hwnd );
         return 0;
 
     case WM_MOUSEACTIVATE:
@@ -562,7 +562,7 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             }
             else pWnd->flags |= WIN_NEEDS_SHOW_OWNEDPOPUP;
             WIN_ReleasePtr( pWnd );
-            ShowWindow( hwnd, wParam ? SW_SHOWNOACTIVATE : SW_HIDE );
+            NtUserShowWindow( hwnd, wParam ? SW_SHOWNOACTIVATE : SW_HIDE );
             break;
         }
 
@@ -691,8 +691,8 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         {
             STYLESTRUCT *style = (STYLESTRUCT *)lParam;
             if ((style->styleOld ^ style->styleNew) & (WS_CAPTION|WS_THICKFRAME|WS_VSCROLL|WS_HSCROLL))
-                SetWindowPos( hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER |
-                              SWP_NOSIZE | SWP_NOMOVE | SWP_NOCLIENTSIZE | SWP_NOCLIENTMOVE );
+                NtUserSetWindowPos( hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER |
+                                    SWP_NOSIZE | SWP_NOMOVE | SWP_NOCLIENTSIZE | SWP_NOCLIENTMOVE );
         }
         break;
 

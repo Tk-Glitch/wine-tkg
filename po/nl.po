@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2022-03-08 13:40+0100\n"
+"PO-Revision-Date: 2022-03-23 17:00+0100\n"
 "Last-Translator: Floris Renaud <jkfloris@dds.nl>\n"
 "Language-Team: Dutch\n"
 "Language: nl\n"
@@ -3885,15 +3885,15 @@ msgstr "Conditionele compilatie is uitgeschakeld"
 msgid "Expected '@'"
 msgstr "Verwacht '@'"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:82
 msgid "Microsoft JScript compilation error"
 msgstr "Microsoft JScript compilatie fout"
 
-#: dlls/jscript/jscript.rc:81
+#: dlls/jscript/jscript.rc:83
 msgid "Microsoft JScript runtime error"
 msgstr "Microsoft JScript runtime-fout"
 
-#: dlls/jscript/jscript.rc:82 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:84 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "Onbekende runtime-fout"
 
@@ -3986,22 +3986,30 @@ msgstr ""
 "ingesteld voor dit object"
 
 #: dlls/jscript/jscript.rc:74
+msgid "Cyclic __proto__ value"
+msgstr "Cyclische __proto__ waarde"
+
+#: dlls/jscript/jscript.rc:75
+msgid "Cannot create property for a non-extensible object"
+msgstr "Kan geen eigenschap maken voor een niet-uitbreidbaar object"
+
+#: dlls/jscript/jscript.rc:76
 msgid "Cannot define property '|': object is not extensible"
 msgstr "Kan de eigenschap '|' niet definiëren: object is niet uitbreidbaar"
 
-#: dlls/jscript/jscript.rc:75
+#: dlls/jscript/jscript.rc:77
 msgid "Cannot redefine non-configurable property '|'"
 msgstr "Kan onconfigureerbare eigenschap '|' niet herdefiniëren"
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:78
 msgid "Cannot modify non-writable property '|'"
 msgstr "Kan onschrijfbare eigenschap '|' niet veranderen"
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:79
 msgid "'this' is not a Map object"
 msgstr "'this' is geen Map object"
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:80
 msgid "Property cannot have both accessors and a value"
 msgstr "Eigenschap kan niet zowel accessors als een waarde hebben"
 
@@ -16790,7 +16798,7 @@ msgstr "regedit: Kan de registersleutel '%1' niet openen.\n"
 msgid ""
 "regedit: Unsupported registry data type [0x%1!x!] encountered in '%2'.\n"
 msgstr ""
-"regedit: Register gegevenstype [0x%1!x!] aangetroffen in '%2' wordt niet \n"
+"regedit: Register gegevenstype [0x%1!x!] aangetroffen in '%2' wordt niet\n"
 "ondersteund.\n"
 
 #: programs/regedit/regedit.rc:426
@@ -18577,7 +18585,7 @@ msgid ""
 msgstr ""
 "U heeft geen C-schijf. Dit kan tot problemen leiden.\n"
 "\n"
-"Vergeet niet om m.b.v. de knop 'Toevoegen' in het 'Schijven'-tabblad een \n"
+"Vergeet niet om m.b.v. de knop 'Toevoegen' in het 'Schijven'-tabblad een\n"
 "C-schijf aan te maken!\n"
 
 #: programs/winecfg/winecfg.rc:98

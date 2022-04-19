@@ -309,8 +309,12 @@ static HRESULT WINAPI memory_1d_2d_buffer_Lock(IMFMediaBuffer *iface, BYTE **dat
         hr = MF_E_INVALIDREQUEST;
     else if (!buffer->_2d.linear_buffer)
     {
-        if (!(buffer->_2d.linear_buffer = malloc(ALIGN_SIZE(buffer->_2d.plane_size, MF_64_BYTE_ALIGNMENT))))
+        if (!(buffer->_2d.linear_buffer = malloc(buffer->_2d.plane_size)))
             hr = E_OUTOFMEMORY;
+
+        if (SUCCEEDED(hr))
+            copy_image(buffer, buffer->_2d.linear_buffer, buffer->_2d.width, buffer->data, buffer->_2d.pitch,
+                    buffer->_2d.width, buffer->_2d.height);
     }
 
     if (SUCCEEDED(hr))
@@ -380,7 +384,7 @@ static HRESULT WINAPI d3d9_surface_buffer_Lock(IMFMediaBuffer *iface, BYTE **dat
     {
         D3DLOCKED_RECT rect;
 
-        if (!(buffer->_2d.linear_buffer = malloc(ALIGN_SIZE(buffer->_2d.plane_size, MF_64_BYTE_ALIGNMENT))))
+        if (!(buffer->_2d.linear_buffer = malloc(buffer->_2d.plane_size)))
             hr = E_OUTOFMEMORY;
 
         if (SUCCEEDED(hr))
@@ -666,13 +670,14 @@ static HRESULT WINAPI d3d9_surface_buffer_Lock2D(IMF2DBuffer2 *iface, BYTE **sca
 
     if (buffer->_2d.linear_buffer)
         hr = MF_E_UNEXPECTED;
-    else if (!buffer->_2d.locks++)
+    else if (!buffer->_2d.locks)
     {
         hr = IDirect3DSurface9_LockRect(buffer->d3d9_surface.surface, &buffer->d3d9_surface.rect, NULL, 0);
     }
 
     if (SUCCEEDED(hr))
     {
+        buffer->_2d.locks++;
         *scanline0 = buffer->d3d9_surface.rect.pBits;
         *pitch = buffer->d3d9_surface.rect.Pitch;
     }
@@ -751,13 +756,14 @@ static HRESULT WINAPI d3d9_surface_buffer_Lock2DSize(IMF2DBuffer2 *iface, MF2DBu
 
     if (buffer->_2d.linear_buffer)
         hr = MF_E_UNEXPECTED;
-    else if (!buffer->_2d.locks++)
+    else if (!buffer->_2d.locks)
     {
         hr = IDirect3DSurface9_LockRect(buffer->d3d9_surface.surface, &buffer->d3d9_surface.rect, NULL, 0);
     }
 
     if (SUCCEEDED(hr))
     {
+        buffer->_2d.locks++;
         *scanline0 = buffer->d3d9_surface.rect.pBits;
         *pitch = buffer->d3d9_surface.rect.Pitch;
         if (buffer_start)
@@ -959,7 +965,7 @@ static HRESULT WINAPI dxgi_surface_buffer_Lock(IMFMediaBuffer *iface, BYTE **dat
         hr = MF_E_INVALIDREQUEST;
     else if (!buffer->_2d.linear_buffer)
     {
-        if (!(buffer->_2d.linear_buffer = malloc(ALIGN_SIZE(buffer->_2d.plane_size, MF_64_BYTE_ALIGNMENT))))
+        if (!(buffer->_2d.linear_buffer = malloc(buffer->_2d.plane_size)))
             hr = E_OUTOFMEMORY;
 
         if (SUCCEEDED(hr))
@@ -1256,9 +1262,8 @@ static const IMFDXGIBufferVtbl dxgi_buffer_vtbl =
 static HRESULT memory_buffer_init(struct buffer *buffer, DWORD max_length, DWORD alignment,
         const IMFMediaBufferVtbl *vtbl)
 {
-    size_t size;
-
-    if (!alignment) alignment = MF_64_BYTE_ALIGNMENT;
+    if (alignment < MF_16_BYTE_ALIGNMENT)
+        alignment = MF_16_BYTE_ALIGNMENT;
     alignment++;
 
     if (alignment & (alignment - 1))
@@ -1272,10 +1277,9 @@ static HRESULT memory_buffer_init(struct buffer *buffer, DWORD max_length, DWORD
         alignment++;
     }
 
-    size = ALIGN_SIZE(max_length, alignment - 1);
-    if (!(buffer->data = _aligned_malloc(size, alignment)))
+    if (!(buffer->data = _aligned_malloc(max_length, alignment)))
         return E_OUTOFMEMORY;
-    memset(buffer->data, 0, size);
+    memset(buffer->data, 0, max_length);
 
     buffer->IMFMediaBuffer_iface.lpVtbl = vtbl;
     buffer->refcount = 1;
@@ -1385,7 +1389,7 @@ static HRESULT create_2d_buffer(DWORD width, DWORD height, DWORD fourcc, BOOL bo
             max_length = pitch * height;
     }
 
-    if (FAILED(hr = memory_buffer_init(object, max_length, MF_1_BYTE_ALIGNMENT, &memory_1d_2d_buffer_vtbl)))
+    if (FAILED(hr = memory_buffer_init(object, max_length, row_alignment, &memory_1d_2d_buffer_vtbl)))
     {
         free(object);
         return hr;

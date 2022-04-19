@@ -235,6 +235,7 @@
 @ stdcall -syscall NtImpersonateAnonymousToken(long)
 # @ stub NtImpersonateClientOfPort
 # @ stub NtImpersonateThread
+@ stdcall -syscall NtInitializeNlsFiles(ptr ptr ptr)
 # @ stub NtInitializeRegistry
 @ stdcall -syscall NtInitiatePowerAction (long long long long)
 @ stdcall -syscall NtIsProcessInJob(long long)
@@ -725,6 +726,7 @@
 # @ stub RtlGetLengthWithoutLastFullDosOrNtPathElement
 # Yes, Microsoft really misspelled this one!
 # @ stub RtlGetLengthWithoutTrailingPathSeperators
+@ stdcall RtlGetLocaleFileMappingAddress(ptr ptr ptr)
 @ stdcall RtlGetLongestNtPathLength()
 @ stdcall -syscall -arch=win32 RtlGetNativeSystemInformation(long ptr long ptr) NtWow64GetNativeSystemInformation
 @ stdcall -syscall -arch=win64 RtlGetNativeSystemInformation(long ptr long ptr) NtQuerySystemInformation
@@ -832,6 +834,7 @@
 # @ stub RtlIsThreadWithinLoaderCallout
 @ stdcall RtlIsValidHandle(ptr ptr)
 @ stdcall RtlIsValidIndexHandle(ptr long ptr)
+@ stdcall RtlIsValidLocaleName(wstr long)
 @ stdcall -arch=win32 -ret64 RtlLargeIntegerAdd(int64 int64)
 @ stdcall -arch=win32 -ret64 RtlLargeIntegerArithmeticShift(int64 long)
 @ stdcall -arch=win32 -ret64 RtlLargeIntegerDivide(int64 int64 ptr)
@@ -840,6 +843,7 @@
 @ stdcall -arch=win32 -ret64 RtlLargeIntegerShiftRight(int64 long)
 @ stdcall -arch=win32 -ret64 RtlLargeIntegerSubtract(int64 int64)
 @ stdcall RtlLargeIntegerToChar(ptr long long ptr)
+@ stdcall RtlLcidToLocaleName(long ptr long long)
 @ stdcall RtlLeaveCriticalSection(ptr)
 @ stdcall RtlLengthRequiredSid(long)
 @ stdcall RtlLengthSecurityDescriptor(ptr)
@@ -1257,6 +1261,7 @@
 @ stdcall -private -syscall ZwImpersonateAnonymousToken(long) NtImpersonateAnonymousToken
 # @ stub ZwImpersonateClientOfPort
 # @ stub ZwImpersonateThread
+@ stdcall -private -syscall ZwInitializeNlsFiles(ptr ptr ptr) NtInitializeNlsFiles
 # @ stub ZwInitializeRegistry
 @ stdcall -private -syscall ZwInitiatePowerAction(long long long long) NtInitiatePowerAction
 @ stdcall -private -syscall ZwIsProcessInJob(long long) NtIsProcessInJob

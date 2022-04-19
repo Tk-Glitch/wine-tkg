@@ -159,8 +159,9 @@ struct authinfo
 
 struct queue
 {
-    TP_POOL *pool;
-    TP_CALLBACK_ENVIRON env;
+    SRWLOCK lock;
+    struct list queued_tasks;
+    BOOL callback_running;
 };
 
 enum request_flags
@@ -273,9 +274,18 @@ struct socket
     BOOL last_receive_final;
 };
 
+typedef void (*TASK_CALLBACK)( void *ctx );
+
+struct task_header
+{
+    struct list entry;
+    TASK_CALLBACK callback;
+    struct object_header *obj;
+};
+
 struct send_request
 {
-    struct request *request;
+    struct task_header task_hdr;
     WCHAR *headers;
     DWORD headers_len;
     void *optional;
@@ -286,18 +296,18 @@ struct send_request
 
 struct receive_response
 {
-    struct request *request;
+    struct task_header task_hdr;
 };
 
 struct query_data
 {
-    struct request *request;
+    struct task_header task_hdr;
     DWORD *available;
 };
 
 struct read_data
 {
-    struct request *request;
+    struct task_header task_hdr;
     void *buffer;
     DWORD to_read;
     DWORD *read;
@@ -305,7 +315,7 @@ struct read_data
 
 struct write_data
 {
-    struct request *request;
+    struct task_header task_hdr;
     const void *buffer;
     DWORD to_write;
     DWORD *written;
@@ -313,7 +323,7 @@ struct write_data
 
 struct socket_send
 {
-    struct socket *socket;
+    struct task_header task_hdr;
     WINHTTP_WEB_SOCKET_BUFFER_TYPE type;
     const void *buf;
     DWORD len;
@@ -323,14 +333,14 @@ struct socket_send
 
 struct socket_receive
 {
-    struct socket *socket;
+    struct task_header task_hdr;
     void *buf;
     DWORD len;
 };
 
 struct socket_shutdown
 {
-    struct socket *socket;
+    struct task_header task_hdr;
     USHORT status;
     char reason[123];
     DWORD len;
@@ -347,6 +357,7 @@ BOOL free_handle( HINTERNET ) DECLSPEC_HIDDEN;
 
 void send_callback( struct object_header *, DWORD, LPVOID, DWORD ) DECLSPEC_HIDDEN;
 void close_connection( struct request * ) DECLSPEC_HIDDEN;
+void init_queue( struct queue *queue ) DECLSPEC_HIDDEN;
 void stop_queue( struct queue * ) DECLSPEC_HIDDEN;
 
 void netconn_close( struct netconn * ) DECLSPEC_HIDDEN;

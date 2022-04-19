@@ -1347,7 +1347,7 @@ static void unlock_display_devices(void)
     pthread_mutex_unlock( &display_lock );
 }
 
-HDC get_display_dc(void)
+static HDC get_display_dc(void)
 {
     pthread_mutex_lock( &display_dc_lock );
     if (!display_dc)
@@ -1365,7 +1365,7 @@ HDC get_display_dc(void)
     return display_dc;
 }
 
-void release_display_dc( HDC hdc )
+static void release_display_dc( HDC hdc )
 {
     pthread_mutex_unlock( &display_dc_lock );
 }
@@ -4540,8 +4540,7 @@ BOOL WINAPI NtUserSetSysColors( INT count, const INT *colors, const COLORREF *va
     user_callbacks->pSendMessageTimeoutW( HWND_BROADCAST, WM_SYSCOLORCHANGE, 0, 0,
                                           SMTO_ABORTIFHUNG, 2000, NULL );
     /* Repaint affected portions of all visible windows */
-    user_callbacks->pRedrawWindow( 0, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW |
-                                   RDW_ALLCHILDREN );
+    NtUserRedrawWindow( 0, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN );
     return TRUE;
 }
 
@@ -4592,6 +4591,16 @@ static BOOL message_beep( UINT i )
     return TRUE;
 }
 
+static DWORD exiting_thread_id;
+
+/**********************************************************************
+ *           is_exiting_thread
+ */
+BOOL is_exiting_thread( DWORD tid )
+{
+    return tid == exiting_thread_id;
+}
+
 static void thread_detach(void)
 {
     struct user_thread_info *thread_info = get_user_thread_info();
@@ -4600,10 +4609,15 @@ static void thread_detach(void)
 
     free( thread_info->key_state );
     thread_info->key_state = 0;
+
+    destroy_thread_windows();
+    NtClose( thread_info->server_queue );
+
+    exiting_thread_id = 0;
 }
 
 /***********************************************************************
- *	     NtUserCallOneParam    (win32u.@)
+ *	     NtUserCallNoParam    (win32u.@)
  */
 ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
 {
@@ -4616,6 +4630,9 @@ ULONG_PTR WINAPI NtUserCallNoParam( ULONG code )
     case NtUserReleaseCapture:
         return release_capture();
     /* temporary exports */
+    case NtUserExitingThread:
+        exiting_thread_id = GetCurrentThreadId();
+        return 0;
     case NtUserThreadDetach:
         thread_detach();
         return 0;
@@ -4632,8 +4649,12 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
 {
     switch(code)
     {
+    case NtUserBeginDeferWindowPos:
+        return HandleToUlong( begin_defer_window_pos( arg ));
     case NtUserCreateCursorIcon:
         return HandleToUlong( alloc_cursoricon_handle( arg ));
+    case NtUserEnableDC:
+        return set_dce_flags( UlongToHandle(arg), DCHF_ENABLEDC );
     case NtUserGetClipCursor:
         return get_clip_cursor( (RECT *)arg );
     case NtUserGetCursorPos:
@@ -4680,8 +4701,6 @@ ULONG_PTR WINAPI NtUserCallOneParam( ULONG_PTR arg, ULONG code )
         case 1: user_unlock(); return 0;
         default: user_check_not_lock(); return 0;
         }
-    case NtUserNextThreadWindow:
-        return (UINT_PTR)next_thread_window_ptr( (HWND *)arg );
     case NtUserSetCallbacks:
         return (UINT_PTR)InterlockedExchangePointer( (void **)&user_callbacks, (void *)arg );
     default:
@@ -4718,6 +4737,9 @@ ULONG_PTR WINAPI NtUserCallTwoParam( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code 
         return (UINT_PTR)free_user_handle( UlongToHandle(arg1), arg2 );
     case NtUserGetHandlePtr:
         return (UINT_PTR)get_user_handle_ptr( UlongToHandle(arg1), arg2 );
+    case NtUserInvalidateDCE:
+        invalidate_dce( (void *)arg1, (const RECT *)arg2 );
+        return 0;
     case NtUserRegisterWindowSurface:
         register_window_surface( (struct window_surface *)arg1, (struct window_surface *)arg2 );
         return 0;

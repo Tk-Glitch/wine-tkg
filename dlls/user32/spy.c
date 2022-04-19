@@ -1764,6 +1764,7 @@ static const CONTROL_CLASS cc_array[] = {
     {TOOLTIPS_CLASSW,   tooltips_array, ARRAY_SIZE(tooltips_array)},
     {UPDOWN_CLASSW,     updown_array,   ARRAY_SIZE(updown_array)},
     {RICHEDIT_CLASS20W, richedit_array, ARRAY_SIZE(richedit_array)},
+    {MSFTEDIT_CLASS,    richedit_array, ARRAY_SIZE(richedit_array)},
     {0, 0, 0}
 };
 
@@ -2027,14 +2028,12 @@ typedef struct
     WCHAR      wnd_name[16];     /* window name for message            */
 } SPY_INSTANCE;
 
-static LONG indent_tls_index = TLS_OUT_OF_INDEXES;
-
 /***********************************************************************
  *           get_indent_level
  */
 static inline INT_PTR get_indent_level(void)
 {
-    return (INT_PTR)TlsGetValue( indent_tls_index );
+    return get_user_thread_info()->spy_indent;
 }
 
 
@@ -2043,7 +2042,7 @@ static inline INT_PTR get_indent_level(void)
  */
 static inline void set_indent_level( INT_PTR level )
 {
-    TlsSetValue( indent_tls_index, (void *)level );
+    get_user_thread_info()->spy_indent = level;
 }
 
 
@@ -2537,13 +2536,6 @@ static BOOL spy_init(void)
     char *exclude;
 
     if (!TRACE_ON(message)) return FALSE;
-
-    if (indent_tls_index == TLS_OUT_OF_INDEXES)
-    {
-        DWORD index = TlsAlloc();
-        if (InterlockedCompareExchange( &indent_tls_index, index, TLS_OUT_OF_INDEXES ) != TLS_OUT_OF_INDEXES)
-            TlsFree( index );
-    }
 
     if (spy_exclude) return TRUE;
     exclude = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, SPY_MAX_MSGNUM + 2 );

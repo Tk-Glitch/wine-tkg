@@ -122,7 +122,7 @@ static HICON STATIC_SetIcon( HWND hwnd, HICON hicon, DWORD style )
         }
         else */
         {
-            SetWindowPos( hwnd, 0, 0, 0, size.cx, size.cy, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER );
+            NtUserSetWindowPos( hwnd, 0, 0, 0, size.cx, size.cy, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER );
         }
     }
     return prevIcon;
@@ -157,8 +157,8 @@ static HBITMAP STATIC_SetBitmap( HWND hwnd, HBITMAP hBitmap, DWORD style )
         }
         else */
         {
-            SetWindowPos( hwnd, 0, 0, 0, bm.bmWidth, bm.bmHeight,
-                          SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER );
+            NtUserSetWindowPos( hwnd, 0, 0, 0, bm.bmWidth, bm.bmHeight,
+                                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER );
         }
 	
     }
@@ -296,7 +296,7 @@ static VOID STATIC_TryPaintFcn(HWND hwnd, LONG full_style)
             (staticPaintFunc[style])( hwnd, hdc, hbrush, full_style );
         SelectClipRgn( hdc, hrgn );
         if (hrgn) DeleteObject( hrgn );
-        ReleaseDC( hwnd, hdc );
+        NtUserReleaseDC( hwnd, hdc );
     }
 }
 
@@ -374,7 +374,7 @@ LRESULT StaticWndProc_common( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
         {
             PAINTSTRUCT ps;
             RECT rect;
-            HDC hdc = wParam ? (HDC)wParam : BeginPaint(hwnd, &ps);
+            HDC hdc = wParam ? (HDC)wParam : NtUserBeginPaint( hwnd, &ps );
             HRGN hrgn;
             HBRUSH hbrush;
 
@@ -385,7 +385,7 @@ LRESULT StaticWndProc_common( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 (staticPaintFunc[style])( hwnd, hdc, hbrush, full_style );
             SelectClipRgn( hdc, hrgn );
             if (hrgn) DeleteObject( hrgn );
-            if (!wParam) EndPaint(hwnd, &ps);
+            if (!wParam) NtUserEndPaint( hwnd, &ps );
         }
         break;
 
@@ -425,7 +425,8 @@ LRESULT StaticWndProc_common( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 else
                     rc.right = rc.left;
                 AdjustWindowRectEx(&rc, full_style, FALSE, GetWindowLongW(hwnd, GWL_EXSTYLE));
-                SetWindowPos(hwnd, NULL, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
+                NtUserSetWindowPos( hwnd, NULL, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
+                                    SWP_NOMOVE | SWP_NOZORDER );
             }
 
             switch (style) {
@@ -473,7 +474,8 @@ LRESULT StaticWndProc_common( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
         {
             SetWindowLongPtrW( hwnd, HFONT_GWL_OFFSET, wParam );
             if (LOWORD(lParam))
-                RedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN );
+                NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE |
+                                    RDW_UPDATENOW | RDW_ALLCHILDREN );
         }
         break;
 
