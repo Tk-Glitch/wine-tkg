@@ -580,7 +580,7 @@ static BOOL compile_cs(const WCHAR *source, const WCHAR *target, const WCHAR *ty
     swprintf(cmdline, ARRAY_SIZE(cmdline), L"%s /t:%s %s /out:\"%s\" \"%s\"", csc, type, args, target, source);
 
     si.cb = sizeof(si);
-    ret = CreateProcessW(csc, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ret = CreateProcessW(csc, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi);
     ok(ret, "Could not create process: %lu\n", GetLastError());
 
     wait_child_process(pi.hProcess);
@@ -709,7 +709,7 @@ static void test_loadpaths(BOOL neutral)
     ret = write_resource(exe_source, exe_source);
     ok(ret, "Could not write resource: %lu\n", GetLastError());
     DeleteFileW(exe_name);
-    ret = compile_cs(exe_source, exe_name, L"exe", L"/reference:libloadpaths.dll");
+    ret = compile_cs(exe_source, exe_name, L"winexe", L"/reference:libloadpaths.dll");
     if (!ret) return;
     ret = DeleteFileW(exe_source);
     ok(ret, "DeleteFileW failed: %lu\n", GetLastError());

@@ -2611,7 +2611,10 @@ struct wined3d_context_vk
 
     VkFramebuffer vk_framebuffer;
     VkRenderPass vk_render_pass;
-    VkDescriptorPool vk_descriptor_pool;
+
+    SIZE_T vk_descriptor_pools_size;
+    SIZE_T vk_descriptor_pool_count;
+    VkDescriptorPool *vk_descriptor_pools;
 
     VkSampleCountFlagBits sample_count;
     unsigned int rt_count;
@@ -2693,8 +2696,8 @@ void wined3d_context_vk_submit_command_buffer(struct wined3d_context_vk *context
         unsigned int wait_semaphore_count, const VkSemaphore *wait_semaphores, const VkPipelineStageFlags *wait_stages,
         unsigned int signal_semaphore_count, const VkSemaphore *signal_semaphores) DECLSPEC_HIDDEN;
 void wined3d_context_vk_wait_command_buffer(struct wined3d_context_vk *context_vk, uint64_t id) DECLSPEC_HIDDEN;
-VkResult wined3d_context_vk_create_vk_descriptor_set(struct wined3d_context_vk *context_vk,
-        VkDescriptorSetLayout vk_set_layout, VkDescriptorSet *vk_descriptor_set) DECLSPEC_HIDDEN;
+VkDescriptorSet wined3d_context_vk_create_vk_descriptor_set(struct wined3d_context_vk *context_vk,
+        VkDescriptorSetLayout vk_set_layout) DECLSPEC_HIDDEN;
 
 typedef void (*APPLYSTATEFUNC)(struct wined3d_context *ctx, const struct wined3d_state *state, DWORD state_id);
 
@@ -3098,6 +3101,7 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_RTX2070     = 0x1f07,
     CARD_NVIDIA_GEFORCE_RTX2080     = 0x1e87,
     CARD_NVIDIA_GEFORCE_RTX2080TI   = 0x1e07,
+    CARD_NVIDIA_TESLA_T4            = 0x1eb8,
 
     CARD_REDHAT_VIRGL               = 0x1010,
 
@@ -4951,7 +4955,7 @@ enum wined3d_push_constants
 };
 
 #define WINED3D_CS_QUERY_POLL_INTERVAL  10u
-#define WINED3D_CS_QUEUE_SIZE           0x100000u
+#define WINED3D_CS_QUEUE_SIZE           0x400000u
 #define WINED3D_CS_SPIN_COUNT           10000000u
 #define WINED3D_CS_QUEUE_MASK           (WINED3D_CS_QUEUE_SIZE - 1)
 

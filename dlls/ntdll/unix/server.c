@@ -1760,6 +1760,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
     NTSTATUS ret;
     int fd;
 
+    if (HandleToLong( handle ) >= ~5 && HandleToLong( handle ) <= ~0)
+        return STATUS_SUCCESS;
+
     server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
 
     /* always remove the cached fd; if the server request fails we'll just

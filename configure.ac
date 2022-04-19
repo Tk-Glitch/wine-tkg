@@ -2861,6 +2861,7 @@ WINE_CONFIG_MAKEFILE(dlls/msvcr120_app)
 WINE_CONFIG_MAKEFILE(dlls/msvcr70)
 WINE_CONFIG_MAKEFILE(dlls/msvcr71)
 WINE_CONFIG_MAKEFILE(dlls/msvcr80)
+WINE_CONFIG_MAKEFILE(dlls/msvcr80/tests)
 WINE_CONFIG_MAKEFILE(dlls/msvcr90)
 WINE_CONFIG_MAKEFILE(dlls/msvcr90/tests)
 WINE_CONFIG_MAKEFILE(dlls/msvcrt)
@@ -3608,7 +3609,7 @@ dnl Rules for generated source files
 
 WINE_APPEND_RULE(
 [dlls/ntdll/unix/version.c: dummy
-	@version=\`(echo \"wine-7.5.r0.g1e792e2d\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
+	@version=\`(echo \"wine-7.6.r0.g539ecd2f\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.rc: dummy
 	@build=\"STRINGTABLE { 1 \\\"\`GIT_DIR=${wine_srcdir}.git git rev-parse HEAD 2>/dev/null\`\\\" }\" && (echo \$\$build | cmp -s - \$[@]) || echo \$\$build >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.nfo:

@@ -810,16 +810,25 @@ static HRESULT open_module_icon(LPCWSTR szFileName, int nIndex, IStream **ppStre
     GRPICONDIR *pIconDir;
     ENUMRESSTRUCT sEnumRes;
     HRESULT hr = E_FAIL;
+    WCHAR fullPathW[MAX_PATH];
+    DWORD len;
 
-    hModule = LoadLibraryExW(szFileName, 0, LOAD_LIBRARY_AS_DATAFILE);
+    len = SearchPathW(NULL, szFileName, L".exe", MAX_PATH, fullPathW, NULL);
+    if (len == 0 || len > MAX_PATH)
+    {
+        WINE_WARN("SearchPath failed\n");
+        return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    }
+
+    hModule = LoadLibraryExW(fullPathW, 0, LOAD_LIBRARY_AS_DATAFILE);
     if (!hModule)
     {
         if (GetLastError() == ERROR_BAD_EXE_FORMAT)
-            return open_module16_icon(szFileName, nIndex, ppStream);
+            return open_module16_icon(fullPathW, nIndex, ppStream);
         else
         {
             WINE_WARN("LoadLibraryExW (%s) failed, error %ld\n",
-                     wine_dbgstr_w(szFileName), GetLastError());
+                     wine_dbgstr_w(fullPathW), GetLastError());
             return HRESULT_FROM_WIN32(GetLastError());
         }
     }
@@ -828,7 +837,7 @@ static HRESULT open_module_icon(LPCWSTR szFileName, int nIndex, IStream **ppStre
     {
         hResInfo = FindResourceW(hModule, MAKEINTRESOURCEW(-nIndex), (LPCWSTR)RT_GROUP_ICON);
         WINE_TRACE("FindResourceW (%s) called, return %p, error %ld\n",
-                   wine_dbgstr_w(szFileName), hResInfo, GetLastError());
+                   wine_dbgstr_w(fullPathW), hResInfo, GetLastError());
     }
     else
     {
@@ -1145,16 +1154,25 @@ static WCHAR *extract_icon(LPCWSTR icoPathW, int index, const WCHAR *destFilenam
     int numEntries;
     HRESULT hr;
     WCHAR *nativeIdentifier = NULL;
+    WCHAR fullPathW[MAX_PATH];
+    DWORD len;
 
     WINE_TRACE("path=[%s] index=%d destFilename=[%s]\n", wine_dbgstr_w(icoPathW), index, wine_dbgstr_w(destFilename));
 
-    hr = open_icon(icoPathW, index, bWait, &stream, &pIconDirEntries, &numEntries);
+    len = GetFullPathNameW(icoPathW, MAX_PATH, fullPathW, NULL);
+    if (len == 0 || len > MAX_PATH)
+    {
+        WINE_WARN("GetFullPathName failed\n");
+        return NULL;
+    }
+
+    hr = open_icon(fullPathW, index, bWait, &stream, &pIconDirEntries, &numEntries);
     if (FAILED(hr))
     {
-        WINE_WARN("opening icon %s index %d failed, hr=0x%08lX\n", wine_dbgstr_w(icoPathW), index, hr);
+        WINE_WARN("opening icon %s index %d failed, hr=0x%08lX\n", wine_dbgstr_w(fullPathW), index, hr);
         goto end;
     }
-    hr = platform_write_icon(stream, pIconDirEntries, numEntries, index, icoPathW, destFilename, &nativeIdentifier);
+    hr = platform_write_icon(stream, pIconDirEntries, numEntries, index, fullPathW, destFilename, &nativeIdentifier);
     if (FAILED(hr))
         WINE_WARN("writing icon failed, error 0x%08lX\n", hr);
 

@@ -124,7 +124,7 @@ static	DWORD MCI_SendCommandAsync(UINT wDevID, async_cmd cmd, DWORD_PTR dwParam1
 	WARN("Couldn't allocate thread for async command handling, sending synchronously\n");
         if (handles[1]) CloseHandle(handles[1]);
         sca->evt = NULL;
-	return MCI_SCAStarter(&sca);
+        return MCI_SCAStarter(sca);
     }
 
     SetThreadPriority(handles[0], THREAD_PRIORITY_TIME_CRITICAL);
@@ -291,7 +291,7 @@ static	DWORD WAVE_mciReadFmt(WINE_MCIWAVE* wmw, const MMCKINFO* pckMainRIFF)
     if (!pwfx) return MCIERR_OUT_OF_MEMORY;
 
     r = mmioRead(wmw->hFile, (HPSTR)pwfx, mmckInfo.cksize);
-    if (r < sizeof(PCMWAVEFORMAT)) {
+    if (r < 0 || r < sizeof(PCMWAVEFORMAT)) {
 	HeapFree(GetProcessHeap(), 0, pwfx);
 	return MCIERR_INVALID_FILE;
     }

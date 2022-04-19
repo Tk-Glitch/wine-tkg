@@ -36,8 +36,13 @@ static SECURITY_STATUS map_ntstatus(NTSTATUS status)
 {
     switch (status)
     {
-    case STATUS_INVALID_HANDLE: return NTE_INVALID_HANDLE;
-    case NTE_BAD_DATA:          return NTE_BAD_DATA;
+    case STATUS_INVALID_HANDLE:    return NTE_INVALID_HANDLE;
+    case STATUS_INVALID_SIGNATURE: return NTE_BAD_SIGNATURE;
+    case STATUS_SUCCESS:           return ERROR_SUCCESS;
+    case STATUS_INVALID_PARAMETER: return NTE_INVALID_PARAMETER;
+    case STATUS_NO_MEMORY:         return NTE_NO_MEMORY;
+    case STATUS_NOT_SUPPORTED:     return NTE_NOT_SUPPORTED;
+    case NTE_BAD_DATA:             return NTE_BAD_DATA;
     default:
         FIXME("unhandled status %#lx\n", status);
         return NTE_INTERNAL_ERROR;
@@ -370,7 +375,7 @@ SECURITY_STATUS WINAPI NCryptImportKey(NCRYPT_PROV_HANDLE provider, NCRYPT_KEY_H
     }
     else if (flags)
     {
-        ERR("Invalid flags %#lx\n", flags);
+        WARN("Invalid flags %#lx\n", flags);
         return NTE_BAD_FLAGS;
     }
 
@@ -412,8 +417,48 @@ SECURITY_STATUS WINAPI NCryptImportKey(NCRYPT_PROV_HANDLE provider, NCRYPT_KEY_H
 
 SECURITY_STATUS WINAPI NCryptIsAlgSupported(NCRYPT_PROV_HANDLE provider, const WCHAR *algid, DWORD flags)
 {
-    FIXME("(%#Ix, %s, %#lx): stub\n", provider, wine_dbgstr_w(algid), flags);
-    return NTE_NOT_SUPPORTED;
+    static const ULONG supported = BCRYPT_CIPHER_OPERATION |\
+                                   BCRYPT_ASYMMETRIC_ENCRYPTION_OPERATION |\
+                                   BCRYPT_SIGNATURE_OPERATION |\
+                                   BCRYPT_SECRET_AGREEMENT_OPERATION;
+    BCRYPT_ALGORITHM_IDENTIFIER *list;
+    ULONG i, count;
+    NTSTATUS status;
+
+    TRACE("(%#Ix, %s, %#lx)\n", provider, wine_dbgstr_w(algid), flags);
+
+    if (!provider) return NTE_INVALID_HANDLE;
+    if (!algid) return HRESULT_FROM_WIN32(RPC_X_NULL_REF_POINTER);
+    if (flags == NCRYPT_SILENT_FLAG)
+    {
+        FIXME("Silent flag not implemented\n");
+    }
+    else if (flags)
+    {
+        WARN("Invalid flags %#lx\n", flags);
+        return NTE_BAD_FLAGS;
+    }
+    if (!lstrcmpiW(BCRYPT_RSA_SIGN_ALGORITHM, algid)) return NTE_NOT_SUPPORTED;
+
+    status = BCryptEnumAlgorithms(supported, &count, &list, 0);
+    if (status != STATUS_SUCCESS)
+    {
+        ERR("Error retrieving algorithm list %#lx\n", status);
+        return map_ntstatus(status);
+    }
+
+    status = STATUS_NOT_SUPPORTED;
+    for (i = 0; i < count; i++)
+    {
+        if (!lstrcmpiW(list[i].pszName, algid))
+        {
+            status = STATUS_SUCCESS;
+            break;
+        }
+    }
+
+    BCryptFreeBuffer(list);
+    return map_ntstatus(status);
 }
 
 BOOL WINAPI NCryptIsKeyHandle(NCRYPT_KEY_HANDLE hKey)
@@ -458,7 +503,21 @@ SECURITY_STATUS WINAPI NCryptSetProperty(NCRYPT_HANDLE handle, const WCHAR *name
 SECURITY_STATUS WINAPI NCryptVerifySignature(NCRYPT_KEY_HANDLE handle, void *padding, BYTE *hash, DWORD hash_size,
                                              BYTE *signature, DWORD signature_size, DWORD flags)
 {
-    FIXME("(%#Ix, %p, %p, %lu, %p, %lu, %#lx): stub\n", handle, padding, hash, hash_size, signature,
+    struct object *key_object = (struct object *)handle;
+
+    TRACE("(%#Ix, %p, %p, %lu, %p, %lu, %#lx)\n", handle, padding, hash, hash_size, signature,
           signature_size, flags);
-    return ERROR_SUCCESS;
+
+    if (!hash_size || !signature_size) return NTE_INVALID_PARAMETER;
+    if (!hash || !signature) return HRESULT_FROM_WIN32(RPC_X_NULL_REF_POINTER);
+    if (!handle || key_object->type != KEY) return NTE_INVALID_HANDLE;
+
+    if (key_object->key.algid < RSA)
+    {
+        FIXME("Symmetric keys not supported.\n");
+        return NTE_NOT_SUPPORTED;
+    }
+
+    return map_ntstatus(BCryptVerifySignature(key_object->key.bcrypt_key, padding, hash, hash_size, signature,
+                                              signature_size, flags));
 }

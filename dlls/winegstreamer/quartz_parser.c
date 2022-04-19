@@ -328,8 +328,9 @@ unsigned int wg_format_get_max_size(const struct wg_format *format)
             break;
         }
 
+        case WG_MAJOR_TYPE_H264:
         case WG_MAJOR_TYPE_WMA:
-            FIXME("WMA format not implemented!\n");
+            FIXME("Format %u not implemented!\n", format->major_type);
             return 0;
 
         case WG_MAJOR_TYPE_UNKNOWN:
@@ -423,11 +424,11 @@ bool amt_from_wg_format(AM_MEDIA_TYPE *mt, const struct wg_format *format, bool 
 
     switch (format->major_type)
     {
-    case WG_MAJOR_TYPE_UNKNOWN:
-        return false;
-
+    case WG_MAJOR_TYPE_H264:
     case WG_MAJOR_TYPE_WMA:
-        FIXME("WMA format not implemented!\n");
+        FIXME("Format %u not implemented!\n", format->major_type);
+        /* fallthrough */
+    case WG_MAJOR_TYPE_UNKNOWN:
         return false;
 
     case WG_MAJOR_TYPE_AUDIO:
@@ -1628,6 +1629,15 @@ static HRESULT GST_RemoveOutputPins(struct parser *This)
     if (!This->sink_connected)
         return S_OK;
 
+    /* Disconnecting source pins triggers a call to wg_parser_stream_disable().
+     * The stream pointers are no longer valid after wg_parser_disconnect(), so
+     * make sure we disable the streams first. */
+    for (i = 0; i < This->source_count; ++i)
+    {
+        if (This->sources[i])
+            free_source_pin(This->sources[i]);
+    }
+
     wg_parser_disconnect(This->wg_parser);
 
     /* read_thread() needs to stay alive to service any read requests GStreamer
@@ -1635,12 +1645,6 @@ static HRESULT GST_RemoveOutputPins(struct parser *This)
     This->sink_connected = false;
     WaitForSingleObject(This->read_thread, INFINITE);
     CloseHandle(This->read_thread);
-
-    for (i = 0; i < This->source_count; ++i)
-    {
-        if (This->sources[i])
-            free_source_pin(This->sources[i]);
-    }
 
     This->source_count = 0;
     free(This->sources);

@@ -943,7 +943,7 @@
 @ stdcall K32InitializeProcessForWsWatch(long) InitializeProcessForWsWatch
 @ stdcall K32QueryWorkingSet(long ptr long) QueryWorkingSet
 @ stdcall K32QueryWorkingSetEx(long ptr long) QueryWorkingSetEx
-@ stub KernelBaseGetGlobalData
+@ stdcall KernelBaseGetGlobalData()
 @ stdcall LCIDToLocaleName(long ptr long long)
 @ stdcall LCMapStringA(long long str long ptr long)
 @ stdcall LCMapStringEx(wstr long wstr long ptr long ptr ptr long)
@@ -1001,7 +1001,7 @@
 @ stub NlsIsUserDefaultLocale
 @ stub NlsUpdateLocale
 @ stub NlsUpdateSystemLocale
-@ stub NlsValidateLocale
+@ stdcall NlsValidateLocale(ptr long)
 @ stub NlsWriteEtwEvent
 @ stdcall NormalizeString(long wstr long ptr long)
 @ stub NotifyMountMgr

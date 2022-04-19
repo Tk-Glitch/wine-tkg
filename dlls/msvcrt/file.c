@@ -85,22 +85,45 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 #define WX_TTY            0x40
 #define WX_TEXT           0x80
 
-/* values for exflag - it's used differently in msvcr90.dll*/
-#define EF_UTF8           0x01
-#define EF_UTF16          0x02
-#define EF_CRIT_INIT      0x04
-#define EF_UNK_UNICODE    0x08
-
 static char utf8_bom[3] = { 0xef, 0xbb, 0xbf };
 static char utf16_bom[2] = { 0xff, 0xfe };
 
-/* FIXME: this should be allocated dynamically */
+#define MSVCRT_INTERNAL_BUFSIZ 4096
+
+enum textmode
+{
+    TEXTMODE_ANSI,
+    TEXTMODE_UTF8,
+    TEXTMODE_UTF16LE,
+};
+
+#if _MSVCR_VER >= 140
+
+#define MSVCRT_MAX_FILES 8192
+#define MSVCRT_FD_BLOCK_SIZE 64
+
+typedef struct {
+    CRITICAL_SECTION    crit;
+    HANDLE              handle;
+    __int64             startpos;
+    unsigned char       wxflag;
+    char                textmode;
+    char                lookahead[3];
+    char unicode          : 1;
+    char utf8translations : 1;
+    char dbcsBufferUsed   : 1;
+    char dbcsBuffer[MB_LEN_MAX];
+} ioinfo;
+
+/*********************************************************************
+ *		__badioinfo (MSVCRT.@)
+ */
+ioinfo MSVCRT___badioinfo = { {0}, INVALID_HANDLE_VALUE, 0, WX_TEXT };
+#else
+
 #define MSVCRT_MAX_FILES 2048
 #define MSVCRT_FD_BLOCK_SIZE 32
 
-#define MSVCRT_INTERNAL_BUFSIZ 4096
-
-/* ioinfo structure size is different in msvcrXX.dll's */
 typedef struct {
     HANDLE              handle;
     unsigned char       wxflag;
@@ -113,12 +136,16 @@ typedef struct {
     char pipech2[2];
     __int64 startpos;
     BOOL utf8translations;
-#endif
-#if _MSVCR_VER >= 90
-    char dbcsBuffer;
+    char dbcsBuffer[1];
     BOOL dbcsBufferUsed;
 #endif
 } ioinfo;
+
+/*********************************************************************
+ *		__badioinfo (MSVCRT.@)
+ */
+ioinfo MSVCRT___badioinfo = { INVALID_HANDLE_VALUE, WX_TEXT };
+#endif
 
 /*********************************************************************
  *		__pioinfo (MSVCRT.@)
@@ -126,10 +153,93 @@ typedef struct {
  */
 ioinfo * MSVCRT___pioinfo[MSVCRT_MAX_FILES/MSVCRT_FD_BLOCK_SIZE] = { 0 };
 
-/*********************************************************************
- *		__badioinfo (MSVCRT.@)
- */
-ioinfo MSVCRT___badioinfo = { INVALID_HANDLE_VALUE, WX_TEXT };
+#if _MSVCR_VER >= 80
+
+#if _MSVCR_VER >= 140
+static inline BOOL ioinfo_is_crit_init(ioinfo *info)
+{
+    return TRUE;
+}
+
+static inline void ioinfo_set_crit_init(ioinfo *info)
+{
+}
+#else
+static inline BOOL ioinfo_is_crit_init(ioinfo *info)
+{
+    return info->exflag & 1;
+}
+
+static inline void ioinfo_set_crit_init(ioinfo *info)
+{
+    info->exflag |= 1;
+}
+#endif
+
+static inline enum textmode ioinfo_get_textmode(ioinfo *info)
+{
+    return info->textmode;
+}
+
+static inline void ioinfo_set_textmode(ioinfo *info, enum textmode mode)
+{
+    info->textmode = mode;
+}
+
+static inline void ioinfo_set_unicode(ioinfo *info, BOOL unicode)
+{
+    info->unicode = !!unicode;
+}
+#else
+
+#define EF_UTF8           0x01
+#define EF_UTF16          0x02
+#define EF_CRIT_INIT      0x04
+#define EF_UNK_UNICODE    0x08
+
+static inline BOOL ioinfo_is_crit_init(ioinfo *info)
+{
+    return info->exflag & EF_CRIT_INIT;
+}
+
+static inline void ioinfo_set_crit_init(ioinfo *info)
+{
+    info->exflag |= EF_CRIT_INIT;
+}
+
+static inline enum textmode ioinfo_get_textmode(ioinfo *info)
+{
+    if (info->exflag & EF_UTF8)
+        return TEXTMODE_UTF8;
+    if (info->exflag & EF_UTF16)
+        return TEXTMODE_UTF16LE;
+    return TEXTMODE_ANSI;
+}
+
+static inline void ioinfo_set_textmode(ioinfo *info, enum textmode mode)
+{
+    info->exflag &= EF_CRIT_INIT | EF_UNK_UNICODE;
+    switch (mode)
+    {
+        case TEXTMODE_ANSI:
+            break;
+        case TEXTMODE_UTF8:
+            info->exflag |= EF_UTF8;
+            break;
+        case TEXTMODE_UTF16LE:
+            info->exflag |= EF_UTF16;
+            break;
+    }
+}
+
+static inline void ioinfo_set_unicode(ioinfo *info, BOOL unicode)
+{
+    if (unicode)
+        info->exflag |= EF_UNK_UNICODE;
+    else
+        info->exflag &= ~EF_UNK_UNICODE;
+}
+#endif
 
 typedef struct {
     FILE file;
@@ -271,11 +381,11 @@ static inline ioinfo* get_ioinfo_nolock(int fd)
 
 static inline void init_ioinfo_cs(ioinfo *info)
 {
-    if(!(info->exflag & EF_CRIT_INIT)) {
+    if(!ioinfo_is_crit_init(info)) {
         LOCK_FILES();
-        if(!(info->exflag & EF_CRIT_INIT)) {
+        if(!ioinfo_is_crit_init(info)) {
             InitializeCriticalSection(&info->crit);
-            info->exflag |= EF_CRIT_INIT;
+            ioinfo_set_crit_init(info);
         }
         UNLOCK_FILES();
     }
@@ -310,9 +420,24 @@ static inline BOOL alloc_pioinfo_block(int fd)
         return FALSE;
     }
     for(i=0; i<MSVCRT_FD_BLOCK_SIZE; i++)
+    {
         block[i].handle = INVALID_HANDLE_VALUE;
+        if (ioinfo_is_crit_init(&block[i]))
+        {
+            /* Initialize crit section on block allocation for _MSVC_VER >= 140,
+             * ioinfo_is_crit_init() is always TRUE. */
+            InitializeCriticalSection(&block[i].crit);
+        }
+    }
     if(InterlockedCompareExchangePointer((void**)&MSVCRT___pioinfo[fd/MSVCRT_FD_BLOCK_SIZE], block, NULL))
+    {
+        if (ioinfo_is_crit_init(&block[0]))
+        {
+            for(i = 0; i < MSVCRT_FD_BLOCK_SIZE; ++i)
+                DeleteCriticalSection(&block[i].crit);
+        }
         free(block);
+    }
     return TRUE;
 }
 
@@ -365,7 +490,7 @@ static inline ioinfo* get_ioinfo_alloc(int *fd)
 
 static inline void release_ioinfo(ioinfo *info)
 {
-    if(info!=&MSVCRT___badioinfo && info->exflag & EF_CRIT_INIT)
+    if(info!=&MSVCRT___badioinfo && ioinfo_is_crit_init(info))
         LeaveCriticalSection(&info->crit);
 }
 
@@ -432,7 +557,8 @@ static void msvcrt_set_fd(ioinfo *fdinfo, HANDLE hand, int flag)
   fdinfo->lookahead[0] = '\n';
   fdinfo->lookahead[1] = '\n';
   fdinfo->lookahead[2] = '\n';
-  fdinfo->exflag &= EF_CRIT_INIT;
+  ioinfo_set_unicode(fdinfo, FALSE);
+  ioinfo_set_textmode(fdinfo, TEXTMODE_ANSI);
 
   if (hand == MSVCRT_NO_CONSOLE) hand = 0;
   switch (fdinfo-MSVCRT___pioinfo[0])
@@ -1246,7 +1372,7 @@ void msvcrt_free_io(void)
 
         for(j=0; j<MSVCRT_FD_BLOCK_SIZE; j++)
         {
-            if(MSVCRT___pioinfo[i][j].exflag & EF_CRIT_INIT)
+            if(ioinfo_is_crit_init(&MSVCRT___pioinfo[i][j]))
                 DeleteCriticalSection(&MSVCRT___pioinfo[i][j].crit);
         }
         free(MSVCRT___pioinfo[i]);
@@ -2365,12 +2491,12 @@ int CDECL _wsopen_dispatch( const wchar_t* path, int oflags, int shflags, int pm
       return *_errno();
 
   if (oflags & _O_WTEXT)
-      get_ioinfo_nolock(*fd)->exflag |= EF_UNK_UNICODE;
+      ioinfo_set_unicode(get_ioinfo_nolock(*fd), TRUE);
 
   if (oflags & _O_U16TEXT)
-      get_ioinfo_nolock(*fd)->exflag |= EF_UTF16;
+      ioinfo_set_textmode(get_ioinfo_nolock(*fd), TEXTMODE_UTF16LE);
   else if (oflags & _O_U8TEXT)
-      get_ioinfo_nolock(*fd)->exflag |= EF_UTF8;
+      ioinfo_set_textmode(get_ioinfo_nolock(*fd), TEXTMODE_UTF8);
 
   TRACE(":fd (%d) handle (%p)\n", *fd, hand);
   return 0;
@@ -2787,14 +2913,14 @@ static int read_i(int fd, ioinfo *fdinfo, void *buf, unsigned int count)
         return -1;
     }
 
-    utf16 = (fdinfo->exflag & EF_UTF16) != 0;
-    if (((fdinfo->exflag&EF_UTF8) || utf16) && count&1)
+    utf16 = ioinfo_get_textmode(fdinfo) == TEXTMODE_UTF16LE;
+    if (ioinfo_get_textmode(fdinfo) != TEXTMODE_ANSI && count&1)
     {
         *_errno() = EINVAL;
         return -1;
     }
 
-    if((fdinfo->wxflag&WX_TEXT) && (fdinfo->exflag&EF_UTF8))
+    if((fdinfo->wxflag&WX_TEXT) && ioinfo_get_textmode(fdinfo) == TEXTMODE_UTF8)
         return read_utf8(fdinfo, buf, count);
 
     if (fdinfo->lookahead[0]!='\n' || ReadFile(fdinfo->handle, bufstart, count, &num_read, NULL))
@@ -2950,7 +3076,8 @@ int CDECL _setmode(int fd,int mode)
 {
     ioinfo *info = get_ioinfo(fd);
     int ret = info->wxflag & WX_TEXT ? _O_TEXT : _O_BINARY;
-    if(ret==_O_TEXT && (info->exflag & (EF_UTF8|EF_UTF16)))
+
+    if(ret==_O_TEXT && ioinfo_get_textmode(info) != TEXTMODE_ANSI)
         ret = _O_WTEXT;
 
     if(mode!=_O_TEXT && mode!=_O_BINARY && mode!=_O_WTEXT
@@ -2967,18 +3094,18 @@ int CDECL _setmode(int fd,int mode)
 
     if(mode == _O_BINARY) {
         info->wxflag &= ~WX_TEXT;
-        info->exflag &= ~(EF_UTF8|EF_UTF16);
+        ioinfo_set_textmode(info, TEXTMODE_ANSI);
         release_ioinfo(info);
         return ret;
     }
 
     info->wxflag |= WX_TEXT;
     if(mode == _O_TEXT)
-        info->exflag &= ~(EF_UTF8|EF_UTF16);
+        ioinfo_set_textmode(info, TEXTMODE_ANSI);
     else if(mode == _O_U8TEXT)
-        info->exflag = (info->exflag & ~EF_UTF16) | EF_UTF8;
+        ioinfo_set_textmode(info, TEXTMODE_UTF8);
     else
-        info->exflag = (info->exflag & ~EF_UTF8) | EF_UTF16;
+        ioinfo_set_textmode(info, TEXTMODE_UTF16LE);
 
     release_ioinfo(info);
     return ret;
@@ -3438,7 +3565,7 @@ int CDECL _write(int fd, const void* buf, unsigned int count)
         return -1;
     }
 
-    if (((info->exflag&EF_UTF8) || (info->exflag&EF_UTF16)) && count&1)
+    if (ioinfo_get_textmode(info) != TEXTMODE_ANSI && count&1)
     {
         *_errno() = EINVAL;
         release_ioinfo(info);
@@ -3471,15 +3598,15 @@ int CDECL _write(int fd, const void* buf, unsigned int count)
         char lfbuf[2048];
         DWORD j = 0;
 
-        if (!(info->exflag & (EF_UTF8|EF_UTF16)) && console)
+        if (ioinfo_get_textmode(info) == TEXTMODE_ANSI && console)
         {
             char conv[sizeof(lfbuf)];
             size_t len = 0;
 
-#if _MSVCR_VER >= 90
+#if _MSVCR_VER >= 80
             if (info->dbcsBufferUsed)
             {
-                conv[j++] = info->dbcsBuffer;
+                conv[j++] = info->dbcsBuffer[0];
                 info->dbcsBufferUsed = FALSE;
                 conv[j++] = s[i++];
                 len++;
@@ -3495,8 +3622,8 @@ int CDECL _write(int fd, const void* buf, unsigned int count)
 
                     if (i == count)
                     {
-#if _MSVCR_VER >= 90
-                        info->dbcsBuffer = conv[j-1];
+#if _MSVCR_VER >= 80
+                        info->dbcsBuffer[0] = conv[j-1];
                         info->dbcsBufferUsed = TRUE;
                         break;
 #else
@@ -3523,7 +3650,7 @@ int CDECL _write(int fd, const void* buf, unsigned int count)
             }
             j = len * 2;
         }
-        else if (!(info->exflag & (EF_UTF8|EF_UTF16)))
+        else if (ioinfo_get_textmode(info) == TEXTMODE_ANSI)
         {
             for (j = 0; i < count && j < sizeof(lfbuf)-1; i++, j++)
             {
@@ -3532,7 +3659,7 @@ int CDECL _write(int fd, const void* buf, unsigned int count)
                 lfbuf[j] = s[i];
             }
         }
-        else if (info->exflag & EF_UTF16 || console)
+        else if (ioinfo_get_textmode(info) == TEXTMODE_UTF16LE || console)
         {
             for (j = 0; i < count && j < sizeof(lfbuf)-3; i++, j++)
             {
@@ -3813,7 +3940,7 @@ wint_t CDECL _fgetwc_nolock(FILE* file)
     wint_t ret;
     int ch;
 
-    if((get_ioinfo_nolock(file->_file)->exflag & (EF_UTF8 | EF_UTF16))
+    if(ioinfo_get_textmode(get_ioinfo_nolock(file->_file)) != TEXTMODE_ANSI
             || !(get_ioinfo_nolock(file->_file)->wxflag & WX_TEXT)) {
         char *p;
 
@@ -4084,7 +4211,7 @@ wint_t CDECL _fputwc_nolock(wint_t wc, FILE* file)
 
     fdinfo = get_ioinfo_nolock(file->_file);
 
-    if((fdinfo->wxflag&WX_TEXT) && !(fdinfo->exflag&(EF_UTF8|EF_UTF16))) {
+    if((fdinfo->wxflag&WX_TEXT) && ioinfo_get_textmode(fdinfo) == TEXTMODE_ANSI) {
         char buf[MB_LEN_MAX];
         int char_len;
 
@@ -5597,7 +5724,7 @@ wint_t CDECL _ungetwc_nolock(wint_t wc, FILE * file)
     if (wc == WEOF)
         return WEOF;
 
-    if((get_ioinfo_nolock(file->_file)->exflag & (EF_UTF8 | EF_UTF16))
+    if(ioinfo_get_textmode(get_ioinfo_nolock(file->_file)) != TEXTMODE_ANSI
             || !(get_ioinfo_nolock(file->_file)->wxflag & WX_TEXT)) {
         unsigned char * pp = (unsigned char *)&mwc;
         int i;

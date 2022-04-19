@@ -429,15 +429,20 @@ static HRESULT video_presenter_sample_queue_init(struct video_presenter *present
     return S_OK;
 }
 
-static void video_presenter_sample_queue_push(struct video_presenter *presenter, IMFSample *sample)
+static void video_presenter_sample_queue_push(struct video_presenter *presenter, IMFSample *sample,
+        BOOL at_front)
 {
     struct sample_queue *queue = &presenter->thread.queue;
+    unsigned int idx;
 
     EnterCriticalSection(&presenter->cs);
     if (queue->used != queue->size)
     {
-        queue->back = (queue->back + 1) % queue->size;
-        queue->samples[queue->back] = sample;
+        if (at_front)
+            idx = queue->front = (queue->size + queue->front - 1) % queue->size;
+        else
+            idx = queue->back = (queue->back + 1) % queue->size;
+        queue->samples[idx] = sample;
         queue->used++;
         IMFSample_AddRef(sample);
     }
@@ -487,27 +492,28 @@ static void video_presenter_sample_present(struct video_presenter *presenter, IM
     IDirect3DDevice9 *device;
     HRESULT hr;
 
-    if (!presenter->swapchain)
-        return;
-
     if (FAILED(hr = video_presenter_get_sample_surface(sample, &surface)))
     {
         WARN("Failed to get sample surface, hr %#lx.\n", hr);
         return;
     }
 
-    if (FAILED(hr = IDirect3DSwapChain9_GetBackBuffer(presenter->swapchain, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer)))
+    if (presenter->swapchain)
     {
-        WARN("Failed to get a backbuffer, hr %#lx.\n", hr);
-        IDirect3DSurface9_Release(surface);
-        return;
+        if (SUCCEEDED(hr = IDirect3DSwapChain9_GetBackBuffer(presenter->swapchain, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer)))
+        {
+            IDirect3DSwapChain9_GetDevice(presenter->swapchain, &device);
+            IDirect3DDevice9_StretchRect(device, surface, NULL, backbuffer, NULL, D3DTEXF_POINT);
+
+            IDirect3DSwapChain9_Present(presenter->swapchain, NULL, NULL, NULL, NULL, 0);
+            presenter->frame_stats.presented++;
+
+            IDirect3DDevice9_Release(device);
+            IDirect3DSurface9_Release(backbuffer);
+        }
+        else
+            WARN("Failed to get a backbuffer, hr %#lx.\n", hr);
     }
-
-    IDirect3DSwapChain9_GetDevice(presenter->swapchain, &device);
-    IDirect3DDevice9_StretchRect(device, surface, NULL, backbuffer, NULL, D3DTEXF_POINT);
-
-    IDirect3DSwapChain9_Present(presenter->swapchain, NULL, NULL, NULL, NULL, 0);
-    presenter->frame_stats.presented++;
 
     EnterCriticalSection(&presenter->cs);
     if (presenter->thread.queue.last_presented)
@@ -516,8 +522,6 @@ static void video_presenter_sample_present(struct video_presenter *presenter, IM
     IMFSample_AddRef(presenter->thread.queue.last_presented);
     LeaveCriticalSection(&presenter->cs);
 
-    IDirect3DDevice9_Release(device);
-    IDirect3DSurface9_Release(backbuffer);
     IDirect3DSurface9_Release(surface);
 }
 
@@ -548,7 +552,7 @@ static void video_presenter_check_queue(struct video_presenter *presenter,
             if (delta > 3 * presenter->frame_time_threshold)
             {
                 /* Convert 100ns -> msec */
-                wait = (delta - 3 * presenter->frame_time_threshold) / 100000;
+                wait = (delta - 3 * presenter->frame_time_threshold) / 10000;
                 present = FALSE;
             }
         }
@@ -556,7 +560,7 @@ static void video_presenter_check_queue(struct video_presenter *presenter,
         if (present)
             video_presenter_sample_present(presenter, sample);
         else
-            video_presenter_sample_queue_push(presenter, sample);
+            video_presenter_sample_queue_push(presenter, sample, TRUE);
 
         IMFSample_Release(sample);
 
@@ -580,7 +584,7 @@ static void video_presenter_schedule_sample(struct video_presenter *presenter, I
 
     if (presenter->clock)
     {
-        video_presenter_sample_queue_push(presenter, sample);
+        video_presenter_sample_queue_push(presenter, sample, FALSE);
         PostThreadMessageW(presenter->thread.tid, EVRM_PRESENT, 0, 0);
     }
     else
@@ -1488,13 +1492,13 @@ static HRESULT WINAPI video_presenter_control_GetCurrentImage(IMFVideoDisplayCon
     sample = presenter->thread.queue.last_presented;
     presenter->thread.queue.last_presented = NULL;
 
-    if (!presenter->swapchain || !sample)
+    if (!sample)
     {
         hr = MF_E_INVALIDREQUEST;
     }
     else if (SUCCEEDED(hr = video_presenter_get_sample_surface(sample, &surface)))
     {
-        IDirect3DSwapChain9_GetDevice(presenter->swapchain, &device);
+        IDirect3DSurface9_GetDevice(surface, &device);
         IDirect3DSurface9_GetDesc(surface, &surface_desc);
 
         if (surface_desc.Format != D3DFMT_X8R8G8B8)

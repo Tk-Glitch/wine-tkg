@@ -437,8 +437,7 @@ CONFIGRET WINAPI CM_Get_DevNode_Registry_PropertyW(DEVINST dev, ULONG prop, PULO
 CONFIGRET WINAPI CM_Get_DevNode_Status(ULONG *status, ULONG *problem, DEVINST dev,
                                        ULONG flags)
 {
-    FIXME("%p %p 0x%08lx 0x%08lx: stub\n", status, problem, dev, flags);
-    return CR_FAILURE;
+    return CM_Get_DevNode_Status_Ex(status, problem, dev, flags, NULL);
 }
 
 /***********************************************************************
@@ -448,7 +447,7 @@ CONFIGRET WINAPI CM_Get_DevNode_Status_Ex(ULONG *status, ULONG *problem, DEVINST
                                           ULONG flags, HMACHINE machine)
 {
     FIXME("%p %p 0x%08lx 0x%08lx %p: stub\n", status, problem, dev, flags, machine);
-    return CR_FAILURE;
+    return CR_SUCCESS;
 }
 
 /***********************************************************************

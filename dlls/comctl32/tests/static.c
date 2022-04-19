@@ -32,8 +32,6 @@
 
 #include "v6util.h"
 
-#define TODO_COUNT 1
-
 #define CTRL_ID 1995
 
 static HWND hMainWnd;
@@ -79,13 +77,32 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
     return DefWindowProcA(hwnd, msg, wparam, lparam);
 }
 
-static void test_updates(int style, int flags)
+static void test_updates(int style)
 {
     HWND hStatic = create_static(style);
-    RECT r1 = {20, 20, 30, 30};
+    RECT r1 = {5, 5, 30, 30}, rcClient;
     int exp;
+    LONG exstyle;
 
     flush_events();
+    trace("Testing style 0x%x\n", style);
+
+    exstyle = GetWindowLongW(hStatic, GWL_EXSTYLE);
+    if (style == SS_ETCHEDHORZ || style == SS_ETCHEDVERT || style == SS_SUNKEN)
+        ok(exstyle == WS_EX_STATICEDGE, "expected WS_EX_STATICEDGE, got %ld\n", exstyle);
+    else
+        ok(exstyle == 0, "expected 0, got %ld\n", exstyle);
+
+    GetClientRect(hStatic, &rcClient);
+    if (style == SS_ETCHEDVERT)
+        ok(rcClient.right == 0, "expected zero width, got %ld\n", rcClient.right);
+    else
+        ok(rcClient.right > 0, "expected non-zero width, got %ld\n", rcClient.right);
+    if (style == SS_ETCHEDHORZ)
+        ok(rcClient.bottom == 0, "expected zero height, got %ld\n", rcClient.bottom);
+    else
+        ok(rcClient.bottom > 0, "expected non-zero height, got %ld\n", rcClient.bottom);
+
     g_nReceivedColorStatic = 0;
     /* during each update parent WndProc will test the WM_CTLCOLORSTATIC message */
     InvalidateRect(hMainWnd, NULL, FALSE);
@@ -109,15 +126,9 @@ static void test_updates(int style, int flags)
     if (style != SS_ETCHEDHORZ && style != SS_ETCHEDVERT)
         exp = 4;
     else
-        exp = 1; /* SS_ETCHED* seems to send WM_CTLCOLORSTATIC only sometimes */
+        exp = 2; /* SS_ETCHEDHORZ/SS_ETCHEDVERT have empty client rect so WM_CTLCOLORSTATIC is sent only when parent window is invalidated */
 
-    if (flags & TODO_COUNT)
-    todo_wine
-        ok(g_nReceivedColorStatic == exp, "Unexpected WM_CTLCOLORSTATIC value %d\n", g_nReceivedColorStatic);
-    else if ((style & SS_TYPEMASK) == SS_ICON || (style & SS_TYPEMASK) == SS_BITMAP)
-        ok(g_nReceivedColorStatic == exp, "Unexpected %u got %u\n", exp, g_nReceivedColorStatic);
-    else
-        ok(g_nReceivedColorStatic == exp, "Unexpected WM_CTLCOLORSTATIC value %d\n", g_nReceivedColorStatic);
+    ok(g_nReceivedColorStatic == exp, "expected %u, got %u\n", exp, g_nReceivedColorStatic);
     DestroyWindow(hStatic);
 }
 
@@ -403,15 +414,21 @@ START_TEST(static)
         GetModuleHandleA(NULL), NULL);
     ShowWindow(hMainWnd, SW_SHOW);
 
-    test_updates(0, 0);
-    test_updates(SS_SIMPLE, 0);
-    test_updates(SS_ICON, 0);
-    test_updates(SS_BITMAP, 0);
-    test_updates(SS_BITMAP | SS_CENTERIMAGE, 0);
-    test_updates(SS_BLACKRECT, TODO_COUNT);
-    test_updates(SS_WHITERECT, TODO_COUNT);
-    test_updates(SS_ETCHEDHORZ, TODO_COUNT);
-    test_updates(SS_ETCHEDVERT, TODO_COUNT);
+    test_updates(0);
+    test_updates(SS_ICON);
+    test_updates(SS_BLACKRECT);
+    test_updates(SS_WHITERECT);
+    test_updates(SS_BLACKFRAME);
+    test_updates(SS_WHITEFRAME);
+    test_updates(SS_USERITEM);
+    test_updates(SS_SIMPLE);
+    test_updates(SS_OWNERDRAW);
+    test_updates(SS_BITMAP);
+    test_updates(SS_BITMAP | SS_CENTERIMAGE);
+    test_updates(SS_ETCHEDHORZ);
+    test_updates(SS_ETCHEDVERT);
+    test_updates(SS_ETCHEDFRAME);
+    test_updates(SS_SUNKEN);
     test_set_text();
     test_set_image();
     test_STM_SETIMAGE();

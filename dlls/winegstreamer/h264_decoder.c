@@ -48,11 +48,36 @@ struct h264_decoder
     LONG refcount;
     IMFMediaType *input_type;
     IMFMediaType *output_type;
+
+    struct wg_transform *wg_transform;
 };
 
 static struct h264_decoder *impl_from_IMFTransform(IMFTransform *iface)
 {
     return CONTAINING_RECORD(iface, struct h264_decoder, IMFTransform_iface);
+}
+
+static HRESULT try_create_wg_transform(struct h264_decoder *decoder)
+{
+    struct wg_format input_format;
+    struct wg_format output_format;
+
+    if (decoder->wg_transform)
+        wg_transform_destroy(decoder->wg_transform);
+    decoder->wg_transform = NULL;
+
+    mf_media_type_to_wg_format(decoder->input_type, &input_format);
+    if (input_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
+        return MF_E_INVALIDMEDIATYPE;
+
+    mf_media_type_to_wg_format(decoder->output_type, &output_format);
+    if (output_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
+        return MF_E_INVALIDMEDIATYPE;
+
+    if (!(decoder->wg_transform = wg_transform_create(&input_format, &output_format)))
+        return E_FAIL;
+
+    return S_OK;
 }
 
 static HRESULT fill_output_media_type(IMFMediaType *media_type, IMFMediaType *default_type)
@@ -183,6 +208,8 @@ static ULONG WINAPI transform_Release(IMFTransform *iface)
 
     if (!refcount)
     {
+        if (decoder->wg_transform)
+            wg_transform_destroy(decoder->wg_transform);
         if (decoder->input_type)
             IMFMediaType_Release(decoder->input_type);
         if (decoder->output_type)
@@ -217,14 +244,45 @@ static HRESULT WINAPI transform_GetStreamIDs(IMFTransform *iface, DWORD input_si
 
 static HRESULT WINAPI transform_GetInputStreamInfo(IMFTransform *iface, DWORD id, MFT_INPUT_STREAM_INFO *info)
 {
-    FIXME("iface %p, id %#lx, info %p stub!\n", iface, id, info);
-    return E_NOTIMPL;
+    struct h264_decoder *decoder = impl_from_IMFTransform(iface);
+
+    TRACE("iface %p, id %#lx, info %p.\n", iface, id, info);
+
+    if (!decoder->input_type)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+
+    info->hnsMaxLatency = 0;
+    info->dwFlags = MFT_INPUT_STREAM_WHOLE_SAMPLES | MFT_INPUT_STREAM_SINGLE_SAMPLE_PER_BUFFER | MFT_INPUT_STREAM_FIXED_SAMPLE_SIZE;
+    info->cbSize = 0x1000;
+    info->cbMaxLookahead = 0;
+    info->cbAlignment = 0;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_GetOutputStreamInfo(IMFTransform *iface, DWORD id, MFT_OUTPUT_STREAM_INFO *info)
 {
-    FIXME("iface %p, id %#lx, info %p stub!\n", iface, id, info);
-    return E_NOTIMPL;
+    struct h264_decoder *decoder = impl_from_IMFTransform(iface);
+    UINT32 sample_size;
+    UINT64 frame_size;
+
+    TRACE("iface %p, id %#lx, info %p.\n", iface, id, info);
+
+    if (!decoder->output_type)
+        sample_size = 1920 * 1088 * 2;
+    else if (FAILED(IMFMediaType_GetUINT32(decoder->output_type, &MF_MT_SAMPLE_SIZE, &sample_size)))
+    {
+        if (FAILED(IMFMediaType_GetUINT64(decoder->output_type, &MF_MT_FRAME_SIZE, &frame_size)))
+            sample_size = 1920 * 1088 * 2;
+        else
+            sample_size = (frame_size >> 32) * (UINT32)frame_size * 2;
+    }
+
+    info->dwFlags = MFT_OUTPUT_STREAM_WHOLE_SAMPLES | MFT_OUTPUT_STREAM_SINGLE_SAMPLE_PER_BUFFER | MFT_OUTPUT_STREAM_FIXED_SAMPLE_SIZE;
+    info->cbSize = sample_size;
+    info->cbAlignment = 0;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_GetAttributes(IMFTransform *iface, IMFAttributes **attributes)
@@ -385,7 +443,13 @@ static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMF
         IMFMediaType_Release(decoder->output_type);
     IMFMediaType_AddRef((decoder->output_type = type));
 
-    return S_OK;
+    if (FAILED(hr = try_create_wg_transform(decoder)))
+    {
+        IMFMediaType_Release(decoder->output_type);
+        decoder->output_type = NULL;
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI transform_GetInputCurrentType(IMFTransform *iface, DWORD id, IMFMediaType **type)
@@ -427,20 +491,66 @@ static HRESULT WINAPI transform_ProcessEvent(IMFTransform *iface, DWORD id, IMFM
 static HRESULT WINAPI transform_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_TYPE message, ULONG_PTR param)
 {
     FIXME("iface %p, message %#x, param %Ix stub!\n", iface, message, param);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFSample *sample, DWORD flags)
 {
-    FIXME("iface %p, id %#lx, sample %p, flags %#lx stub!\n", iface, id, sample, flags);
-    return E_NOTIMPL;
+    struct h264_decoder *decoder = impl_from_IMFTransform(iface);
+    struct wg_sample *wg_sample;
+    MFT_INPUT_STREAM_INFO info;
+    HRESULT hr;
+
+    TRACE("iface %p, id %#lx, sample %p, flags %#lx.\n", iface, id, sample, flags);
+
+    if (FAILED(hr = IMFTransform_GetInputStreamInfo(iface, 0, &info)))
+        return hr;
+
+    if (!decoder->wg_transform)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+
+    if (FAILED(hr = mf_create_wg_sample(sample, &wg_sample)))
+        return hr;
+
+    hr = wg_transform_push_data(decoder->wg_transform, wg_sample);
+
+    mf_destroy_wg_sample(wg_sample);
+    return hr;
 }
 
 static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
         MFT_OUTPUT_DATA_BUFFER *samples, DWORD *status)
 {
-    FIXME("iface %p, flags %#lx, count %lu, samples %p, status %p stub!\n", iface, flags, count, samples, status);
-    return E_NOTIMPL;
+    struct h264_decoder *decoder = impl_from_IMFTransform(iface);
+    MFT_OUTPUT_STREAM_INFO info;
+    struct wg_sample *wg_sample;
+    HRESULT hr;
+
+    TRACE("iface %p, flags %#lx, count %lu, samples %p, status %p.\n", iface, flags, count, samples, status);
+
+    if (count != 1)
+        return E_INVALIDARG;
+
+    if (FAILED(hr = IMFTransform_GetOutputStreamInfo(iface, 0, &info)))
+        return hr;
+
+    if (!decoder->wg_transform)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+
+    *status = 0;
+    samples[0].dwStatus = 0;
+    if (!samples[0].pSample) return E_INVALIDARG;
+
+    if (FAILED(hr = mf_create_wg_sample(samples[0].pSample, &wg_sample)))
+        return hr;
+
+    if (wg_sample->max_size < info.cbSize)
+        hr = MF_E_BUFFERTOOSMALL;
+    else
+        hr = wg_transform_read_data(decoder->wg_transform, wg_sample);
+
+    mf_destroy_wg_sample(wg_sample);
+    return hr;
 }
 
 static const IMFTransformVtbl transform_vtbl =

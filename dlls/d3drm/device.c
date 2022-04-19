@@ -329,7 +329,7 @@ static ULONG WINAPI d3drm_device3_AddRef(IDirect3DRMDevice3 *iface)
     struct d3drm_device *device = impl_from_IDirect3DRMDevice3(iface);
     ULONG refcount = InterlockedIncrement(&device->obj.ref);
 
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
 
     return refcount;
 }
@@ -357,7 +357,7 @@ static ULONG WINAPI d3drm_device3_Release(IDirect3DRMDevice3 *iface)
     struct d3drm_device *device = impl_from_IDirect3DRMDevice3(iface);
     ULONG refcount = InterlockedDecrement(&device->obj.ref);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
         d3drm_device_destroy(device);
@@ -475,7 +475,7 @@ static HRESULT WINAPI d3drm_device3_SetAppData(IDirect3DRMDevice3 *iface, DWORD 
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice3(iface);
 
-    TRACE("iface %p, data %#x.\n", iface, data);
+    TRACE("iface %p, data %#lx.\n", iface, data);
 
     device->obj.appdata = data;
 
@@ -486,7 +486,7 @@ static HRESULT WINAPI d3drm_device2_SetAppData(IDirect3DRMDevice2 *iface, DWORD 
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice2(iface);
 
-    TRACE("iface %p, data %#x.\n", iface, data);
+    TRACE("iface %p, data %#lx.\n", iface, data);
 
     return d3drm_device3_SetAppData(&device->IDirect3DRMDevice3_iface, data);
 }
@@ -495,7 +495,7 @@ static HRESULT WINAPI d3drm_device1_SetAppData(IDirect3DRMDevice *iface, DWORD d
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice(iface);
 
-    TRACE("iface %p, data %#x.\n", iface, data);
+    TRACE("iface %p, data %#lx.\n", iface, data);
 
     return d3drm_device3_SetAppData(&device->IDirect3DRMDevice3_iface, data);
 }
@@ -612,7 +612,7 @@ static HRESULT WINAPI d3drm_device3_Init(IDirect3DRMDevice3 *iface, ULONG width,
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice3(iface);
 
-    FIXME("iface %p, width %u, height %u stub!\n", iface, width, height);
+    FIXME("iface %p, width %lu, height %lu stub!\n", iface, width, height);
 
     device->height = height;
     device->width = width;
@@ -624,7 +624,7 @@ static HRESULT WINAPI d3drm_device2_Init(IDirect3DRMDevice2 *iface, ULONG width,
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice2(iface);
 
-    TRACE("iface %p, width %u, height %u.\n", iface, width, height);
+    TRACE("iface %p, width %lu, height %lu.\n", iface, width, height);
 
     return d3drm_device3_Init(&device->IDirect3DRMDevice3_iface, width, height);
 }
@@ -633,7 +633,7 @@ static HRESULT WINAPI d3drm_device1_Init(IDirect3DRMDevice *iface, ULONG width, 
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice(iface);
 
-    TRACE("iface %p, width %u, height %u.\n", iface, width, height);
+    TRACE("iface %p, width %lu, height %lu.\n", iface, width, height);
 
     return d3drm_device3_Init(&device->IDirect3DRMDevice3_iface, width, height);
 }
@@ -781,7 +781,7 @@ static HRESULT WINAPI d3drm_device1_DeleteUpdateCallback(IDirect3DRMDevice *ifac
 
 static HRESULT WINAPI d3drm_device3_SetBufferCount(IDirect3DRMDevice3 *iface, DWORD count)
 {
-    FIXME("iface %p, count %u stub!\n", iface, count);
+    FIXME("iface %p, count %lu stub!\n", iface, count);
 
     return E_NOTIMPL;
 }
@@ -790,7 +790,7 @@ static HRESULT WINAPI d3drm_device2_SetBufferCount(IDirect3DRMDevice2 *iface, DW
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice2(iface);
 
-    TRACE("iface %p, count %u.\n", iface, count);
+    TRACE("iface %p, count %lu.\n", iface, count);
 
     return d3drm_device3_SetBufferCount(&device->IDirect3DRMDevice3_iface, count);
 }
@@ -799,7 +799,7 @@ static HRESULT WINAPI d3drm_device1_SetBufferCount(IDirect3DRMDevice *iface, DWO
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice(iface);
 
-    TRACE("iface %p, count %u.\n", iface, count);
+    TRACE("iface %p, count %lu.\n", iface, count);
 
     return d3drm_device3_SetBufferCount(&device->IDirect3DRMDevice3_iface, count);
 }
@@ -860,7 +860,7 @@ static HRESULT WINAPI d3drm_device1_SetDither(IDirect3DRMDevice *iface, BOOL ena
 
 static HRESULT WINAPI d3drm_device3_SetShades(IDirect3DRMDevice3 *iface, DWORD count)
 {
-    FIXME("iface %p, count %u stub!\n", iface, count);
+    FIXME("iface %p, count %lu stub!\n", iface, count);
 
     return E_NOTIMPL;
 }
@@ -869,7 +869,7 @@ static HRESULT WINAPI d3drm_device2_SetShades(IDirect3DRMDevice2 *iface, DWORD c
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice2(iface);
 
-    TRACE("iface %p, count %u.\n", iface, count);
+    TRACE("iface %p, count %lu.\n", iface, count);
 
     return d3drm_device3_SetShades(&device->IDirect3DRMDevice3_iface, count);
 }
@@ -878,7 +878,7 @@ static HRESULT WINAPI d3drm_device1_SetShades(IDirect3DRMDevice *iface, DWORD co
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice(iface);
 
-    TRACE("iface %p, count %u.\n", iface, count);
+    TRACE("iface %p, count %lu.\n", iface, count);
 
     return d3drm_device3_SetShades(&device->IDirect3DRMDevice3_iface, count);
 }
@@ -887,7 +887,7 @@ static HRESULT WINAPI d3drm_device3_SetQuality(IDirect3DRMDevice3 *iface, D3DRMR
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice3(iface);
 
-    TRACE("iface %p, quality %u.\n", iface, quality);
+    TRACE("iface %p, quality %lu.\n", iface, quality);
 
     device->quality = quality;
 
@@ -898,7 +898,7 @@ static HRESULT WINAPI d3drm_device2_SetQuality(IDirect3DRMDevice2 *iface, D3DRMR
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice2(iface);
 
-    TRACE("iface %p, quality %u.\n", iface, quality);
+    TRACE("iface %p, quality %lu.\n", iface, quality);
 
     return d3drm_device3_SetQuality(&device->IDirect3DRMDevice3_iface, quality);
 }
@@ -907,7 +907,7 @@ static HRESULT WINAPI d3drm_device1_SetQuality(IDirect3DRMDevice *iface, D3DRMRE
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice(iface);
 
-    TRACE("iface %p, quality %u.\n", iface, quality);
+    TRACE("iface %p, quality %lu.\n", iface, quality);
 
     return d3drm_device3_SetQuality(&device->IDirect3DRMDevice3_iface, quality);
 }
@@ -1286,7 +1286,7 @@ static HRESULT WINAPI d3drm_device3_SetRenderMode(IDirect3DRMDevice3 *iface, DWO
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice3(iface);
 
-    TRACE("iface %p, flags %#x.\n", iface, flags);
+    TRACE("iface %p, flags %#lx.\n", iface, flags);
 
     device->rendermode = flags;
 
@@ -1297,7 +1297,7 @@ static HRESULT WINAPI d3drm_device2_SetRenderMode(IDirect3DRMDevice2 *iface, DWO
 {
     struct d3drm_device *device = impl_from_IDirect3DRMDevice2(iface);
 
-    TRACE("iface %p, flags %#x.\n", iface, flags);
+    TRACE("iface %p, flags %#lx.\n", iface, flags);
 
     return d3drm_device3_SetRenderMode(&device->IDirect3DRMDevice3_iface, flags);
 }
@@ -1347,7 +1347,7 @@ static HRESULT WINAPI d3drm_device2_GetDirect3DDevice2(IDirect3DRMDevice2 *iface
 static HRESULT WINAPI d3drm_device3_FindPreferredTextureFormat(IDirect3DRMDevice3 *iface,
         DWORD bitdepths, DWORD flags, DDPIXELFORMAT *pf)
 {
-    FIXME("iface %p, bitdepths %u, flags %#x, pf %p stub!\n", iface, bitdepths, flags, pf);
+    FIXME("iface %p, bitdepths %lu, flags %#lx, pf %p stub!\n", iface, bitdepths, flags, pf);
 
     return E_NOTIMPL;
 }
@@ -1355,7 +1355,7 @@ static HRESULT WINAPI d3drm_device3_FindPreferredTextureFormat(IDirect3DRMDevice
 static HRESULT WINAPI d3drm_device3_RenderStateChange(IDirect3DRMDevice3 *iface,
         D3DRENDERSTATETYPE state, DWORD value, DWORD flags)
 {
-    FIXME("iface %p, state %#x, value %#x, flags %#x stub!\n", iface, state, value, flags);
+    FIXME("iface %p, state %#x, value %#lx, flags %#lx stub!\n", iface, state, value, flags);
 
     return E_NOTIMPL;
 }
@@ -1363,7 +1363,7 @@ static HRESULT WINAPI d3drm_device3_RenderStateChange(IDirect3DRMDevice3 *iface,
 static HRESULT WINAPI d3drm_device3_LightStateChange(IDirect3DRMDevice3 *iface,
         D3DLIGHTSTATETYPE state, DWORD value, DWORD flags)
 {
-    FIXME("iface %p, state %#x, value %#x, flags %#x stub!\n", iface, state, value, flags);
+    FIXME("iface %p, state %#x, value %#lx, flags %#lx stub!\n", iface, state, value, flags);
 
     return E_NOTIMPL;
 }
@@ -1371,7 +1371,7 @@ static HRESULT WINAPI d3drm_device3_LightStateChange(IDirect3DRMDevice3 *iface,
 static HRESULT WINAPI d3drm_device3_GetStateChangeOptions(IDirect3DRMDevice3 *iface,
         DWORD state_class, DWORD state_idx, DWORD *flags)
 {
-    FIXME("iface %p, state_class %#x, state_idx %#x, flags %p stub!\n",
+    FIXME("iface %p, state_class %#lx, state_idx %#lx, flags %p stub!\n",
             iface, state_class, state_idx, flags);
 
     return E_NOTIMPL;
@@ -1380,7 +1380,7 @@ static HRESULT WINAPI d3drm_device3_GetStateChangeOptions(IDirect3DRMDevice3 *if
 static HRESULT WINAPI d3drm_device3_SetStateChangeOptions(IDirect3DRMDevice3 *iface,
         DWORD state_class, DWORD state_idx, DWORD flags)
 {
-    FIXME("iface %p, state_class %#x, state_idx %#x, flags %#x stub!\n",
+    FIXME("iface %p, state_class %#lx, state_idx %#lx, flags %#lx stub!\n",
             iface, state_class, state_idx, flags);
 
     return E_NOTIMPL;
@@ -1572,7 +1572,7 @@ static HRESULT WINAPI d3drm_device_win_SetAppData(IDirect3DRMWinDevice *iface, D
 {
     struct d3drm_device *device = impl_from_IDirect3DRMWinDevice(iface);
 
-    TRACE("iface %p, data %#x.\n", iface, data);
+    TRACE("iface %p, data %#lx.\n", iface, data);
 
     return d3drm_device3_SetAppData(&device->IDirect3DRMDevice3_iface, data);
 }

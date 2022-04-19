@@ -1211,7 +1211,7 @@ static void test_debugger(DWORD cont_status)
 
                     if (stage == 10) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
                 }
-                else if (stage == 11 || stage == 12 || stage == 13)
+                else if (stage == 11 || stage == 12)
                 {
                     ok(de.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_INVALID_HANDLE,
                        "unexpected exception code %08lx, expected %08lx\n", de.u.Exception.ExceptionRecord.ExceptionCode,
@@ -1219,7 +1219,12 @@ static void test_debugger(DWORD cont_status)
                     ok(de.u.Exception.ExceptionRecord.NumberParameters == 0,
                        "unexpected number of parameters %ld, expected 0\n", de.u.Exception.ExceptionRecord.NumberParameters);
 
-                    if (stage == 12|| stage == 13) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
+                    if (stage == 12) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
+                }
+                else if (stage == 13)
+                {
+                    ok(FALSE || broken(TRUE) /* < Win10 */, "should not throw exception\n");
+                    continuestatus = DBG_EXCEPTION_NOT_HANDLED;
                 }
                 else if (stage == 14 || stage == 15)
                 {
@@ -3905,7 +3910,7 @@ static void test_debugger(DWORD cont_status)
                        "expected Rip = %p, got %p\n", (char *)code_mem_address + 2, (char *)ctx.Rip);
                     if (stage == 10) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
                 }
-                else if (stage == 11 || stage == 12 || stage == 13)
+                else if (stage == 11 || stage == 12)
                 {
                     ok(de.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_INVALID_HANDLE,
                        "unexpected exception code %08lx, expected %08lx\n", de.u.Exception.ExceptionRecord.ExceptionCode,
@@ -3913,7 +3918,12 @@ static void test_debugger(DWORD cont_status)
                     ok(de.u.Exception.ExceptionRecord.NumberParameters == 0,
                        "unexpected number of parameters %ld, expected 0\n", de.u.Exception.ExceptionRecord.NumberParameters);
 
-                    if (stage == 12|| stage == 13) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
+                    if (stage == 12) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
+                }
+                else if (stage == 13)
+                {
+                    ok(FALSE || broken(TRUE) /* < Win10 */, "should not throw exception\n");
+                    continuestatus = DBG_EXCEPTION_NOT_HANDLED;
                 }
                 else if (stage == 14 || stage == 15)
                 {
@@ -6603,7 +6613,7 @@ static void test_debugger(DWORD cont_status)
                        "expected Pc = %p, got 0x%x\n", (char *)code_mem_address + 3, ctx.Pc);
                     if (stage == 10) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
                 }
-                else if (stage == 11 || stage == 12 || stage == 13)
+                else if (stage == 11 || stage == 12)
                 {
                     ok(de.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_INVALID_HANDLE,
                        "unexpected exception code %08x, expected %08x\n", de.u.Exception.ExceptionRecord.ExceptionCode,
@@ -6611,7 +6621,12 @@ static void test_debugger(DWORD cont_status)
                     ok(de.u.Exception.ExceptionRecord.NumberParameters == 0,
                        "unexpected number of parameters %d, expected 0\n", de.u.Exception.ExceptionRecord.NumberParameters);
 
-                    if (stage == 12|| stage == 13) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
+                    if (stage == 12) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
+                }
+                else if (stage == 13)
+                {
+                    ok(FALSE || broken(TRUE) /* < Win10 */, "should not throw exception\n");
+                    continuestatus = DBG_EXCEPTION_NOT_HANDLED;
                 }
                 else
                     ok(FALSE, "unexpected stage %x\n", stage);
@@ -7851,7 +7866,7 @@ static void test_debugger(DWORD cont_status)
                        "expected Pc = %p, got %p\n", (char *)code_mem_address + 4, (char *)ctx.Pc);
                     if (stage == 10) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
                 }
-                else if (stage == 11 || stage == 12 || stage == 13)
+                else if (stage == 11 || stage == 12)
                 {
                     ok(de.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_INVALID_HANDLE,
                        "unexpected exception code %08x, expected %08x\n", de.u.Exception.ExceptionRecord.ExceptionCode,
@@ -7859,7 +7874,12 @@ static void test_debugger(DWORD cont_status)
                     ok(de.u.Exception.ExceptionRecord.NumberParameters == 0,
                        "unexpected number of parameters %d, expected 0\n", de.u.Exception.ExceptionRecord.NumberParameters);
 
-                    if (stage == 12|| stage == 13) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
+                    if (stage == 12) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
+                }
+                else if (stage == 13)
+                {
+                    ok(FALSE || broken(TRUE) /* < Win10 */, "should not throw exception\n");
+                    continuestatus = DBG_EXCEPTION_NOT_HANDLED;
                 }
                 else
                     ok(FALSE, "unexpected stage %x\n", stage);
@@ -8574,9 +8594,16 @@ static LONG CALLBACK invalid_handle_vectored_handler(EXCEPTION_POINTERS *Excepti
     return (rec->ExceptionCode == EXCEPTION_INVALID_HANDLE) ? EXCEPTION_CONTINUE_EXECUTION : EXCEPTION_CONTINUE_SEARCH;
 }
 
+static inline BOOL is_magic_handle(HANDLE handle)
+{
+    return HandleToLong(handle) >= ~5 && HandleToLong(handle) <= ~0;
+}
+
 static void test_closehandle(DWORD numexc, HANDLE handle)
 {
+    NTSTATUS status, expect;
     PVOID vectored_handler;
+    BOOL ret, expectret;
 
     if (!pRtlAddVectoredExceptionHandler || !pRtlRemoveVectoredExceptionHandler || !pRtlRaiseException)
     {
@@ -8588,14 +8615,24 @@ static void test_closehandle(DWORD numexc, HANDLE handle)
     ok(vectored_handler != 0, "RtlAddVectoredExceptionHandler failed\n");
 
     invalid_handle_exceptions = 0;
-    CloseHandle(handle);
-    ok(invalid_handle_exceptions == numexc, "CloseHandle generated %ld exceptions, expected %ld\n",
-       invalid_handle_exceptions, numexc);
+    expectret = is_magic_handle(handle) || broken(numexc && sizeof(handle) == 4); /* < Win10 */
+    ret = CloseHandle(handle);
+    ok(expectret || (GetLastError() == ERROR_INVALID_HANDLE),
+        "CloseHandle had wrong GetLastError(), got %lu for %p\n", GetLastError(), handle);
+    ok(ret == expectret || broken(HandleToLong(handle) < 0) /* < Win10 */,
+        "CloseHandle expected %d, got %d for %p\n", expectret, ret, handle);
+    ok(invalid_handle_exceptions == numexc || broken(!numexc && is_magic_handle(handle)), /* < Win10 */
+        "CloseHandle generated %ld exceptions, expected %ld for %p\n",
+       invalid_handle_exceptions, numexc, handle);
 
     invalid_handle_exceptions = 0;
-    pNtClose(handle);
-    ok(invalid_handle_exceptions == numexc, "NtClose generated %ld exceptions, expected %ld\n",
-       invalid_handle_exceptions, numexc);
+    expect = expectret ? STATUS_SUCCESS : STATUS_INVALID_HANDLE;
+    status = pNtClose(handle);
+    ok(status == expect || broken(HandleToLong(handle) < 0), /* < Win10 */
+        "NtClose returned unexpected status %#lx, expected %#lx for %p\n", status, expect, handle);
+    ok(invalid_handle_exceptions == numexc || broken(!numexc && is_magic_handle(handle)), /* < Win10 */
+        "CloseHandle generated %ld exceptions, expected %ld for %p\n",
+       invalid_handle_exceptions, numexc, handle);
 
     pRtlRemoveVectoredExceptionHandler(vectored_handler);
 }
@@ -10675,10 +10712,19 @@ START_TEST(exception)
         test_breakpoint(1);
         test_stage = 11;
         test_closehandle(0, (HANDLE)0xdeadbeef);
+        test_closehandle(0, (HANDLE)0x7fffffff);
         test_stage = 12;
         test_closehandle(1, (HANDLE)0xdeadbeef);
-        test_stage = 13;
-        test_closehandle(0, 0); /* Special case. */
+        test_closehandle(1, (HANDLE)~(ULONG_PTR)6);
+        test_stage = 13; /* special cases */
+        test_closehandle(0, 0);
+        test_closehandle(0, INVALID_HANDLE_VALUE);
+        test_closehandle(0, GetCurrentProcess());
+        test_closehandle(0, GetCurrentThread());
+        test_closehandle(0, (HANDLE)~(ULONG_PTR)2);
+        test_closehandle(0, GetCurrentProcessToken());
+        test_closehandle(0, GetCurrentThreadToken());
+        test_closehandle(0, GetCurrentThreadEffectiveToken());
 #if defined(__i386__) || defined(__x86_64__)
         test_stage = 14;
         test_debuggee_xstate();

@@ -34,7 +34,6 @@
 #include "ocidl.h"
 #include "dispex.h"
 
-#include "wine/heap.h"
 #include "wine/test.h"
 
 #define EXPECT_REF(obj,ref) _expect_ref((IUnknown*)obj, ref, __LINE__)
@@ -269,13 +268,13 @@ static void add_call(struct call_sequence **seq, int sequence_index,
     if (!call_seq->sequence)
     {
         call_seq->size = 10;
-        call_seq->sequence = heap_alloc(call_seq->size * sizeof (struct call_entry));
+        call_seq->sequence = malloc(call_seq->size * sizeof (struct call_entry));
     }
 
     if (call_seq->count == call_seq->size)
     {
         call_seq->size *= 2;
-        call_seq->sequence = heap_realloc(call_seq->sequence, call_seq->size * sizeof (struct call_entry));
+        call_seq->sequence = realloc(call_seq->sequence, call_seq->size * sizeof (struct call_entry));
     }
 
     assert(call_seq->sequence);
@@ -310,7 +309,7 @@ static inline void flush_sequence(struct call_sequence **seg, int sequence_index
             SysFreeString(call_seq->sequence[i].attributes[j].qnameW);
             SysFreeString(call_seq->sequence[i].attributes[j].valueW);
         }
-        heap_free(call_seq->sequence[i].attributes);
+        free(call_seq->sequence[i].attributes);
         call_seq->sequence[i].attr_count = 0;
 
         SysFreeString(call_seq->sequence[i].arg1W);
@@ -318,7 +317,7 @@ static inline void flush_sequence(struct call_sequence **seg, int sequence_index
         SysFreeString(call_seq->sequence[i].arg3W);
     }
 
-    heap_free(call_seq->sequence);
+    free(call_seq->sequence);
     call_seq->sequence = NULL;
     call_seq->count = call_seq->size = 0;
 }
@@ -545,7 +544,7 @@ static void init_call_sequences(struct call_sequence **seq, int n)
     int i;
 
     for (i = 0; i < n; i++)
-        seq[i] = heap_alloc_zero(sizeof(struct call_sequence));
+        seq[i] = calloc(1, sizeof(**seq));
 }
 
 static const WCHAR szSimpleXML[] =
@@ -1236,7 +1235,7 @@ static HRESULT WINAPI contentHandler_startElement(
         int i;
 
         struct attribute_entry *attr;
-        attr = heap_alloc_zero(len * sizeof(*attr));
+        attr = calloc(len, sizeof(*attr));
 
         v = VARIANT_TRUE;
         hr = ISAXXMLReader_getFeature(g_reader, _bstr_("http://xml.org/sax/features/namespaces"), &v);
@@ -3375,7 +3374,7 @@ static void test_mxwriter_flush(void)
     ok(pos2.QuadPart == 0, "expected stream beginning\n");
 
     len = 2048;
-    buff = heap_alloc(len + 1);
+    buff = malloc(len + 1);
     memset(buff, 'A', len);
     buff[len] = 0;
     hr = ISAXContentHandler_characters(content, _bstr_(buff), len);
@@ -3458,7 +3457,7 @@ static void test_mxwriter_flush(void)
     ok(SysStringLen(V_BSTR(&dest)) == len, "got len=%d, expected %d\n", SysStringLen(V_BSTR(&dest)), len);
     VariantClear(&dest);
 
-    heap_free(buff);
+    free(buff);
     ISAXContentHandler_Release(content);
     IStream_Release(stream);
     IMXWriter_Release(writer);

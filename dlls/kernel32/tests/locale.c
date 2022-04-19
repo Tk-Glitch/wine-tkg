@@ -86,6 +86,7 @@ static BOOL (WINAPI *pGetUserPreferredUILanguages)(DWORD, ULONG*, WCHAR*, ULONG*
 static WCHAR (WINAPI *pRtlUpcaseUnicodeChar)(WCHAR);
 static INT (WINAPI *pGetNumberFormatEx)(LPCWSTR, DWORD, LPCWSTR, const NUMBERFMTW *, LPWSTR, int);
 static INT (WINAPI *pFindNLSStringEx)(LPCWSTR, DWORD, LPCWSTR, INT, LPCWSTR, INT, LPINT, LPNLSVERSIONINFO, LPVOID, LPARAM);
+static void * (WINAPI *pNlsValidateLocale)(LCID*,ULONG);
 static LANGID (WINAPI *pSetThreadUILanguage)(LANGID);
 static LANGID (WINAPI *pGetThreadUILanguage)(VOID);
 static INT (WINAPI *pNormalizeString)(NORM_FORM, LPCWSTR, INT, LPWSTR, INT);
@@ -143,6 +144,9 @@ static void InitFunctionPointers(void)
   X(GetNLSVersion);
   X(GetNLSVersionEx);
   X(IsValidNLSVersion);
+
+  mod = GetModuleHandleA("kernelbase");
+  X(NlsValidateLocale);
 
   mod = GetModuleHandleA("ntdll");
   X(RtlUpcaseUnicodeChar);
@@ -266,6 +270,20 @@ static void test_GetLocaleInfoA(void)
       "got %d with '%s' (expected %d with '%s')\n",
       ret, buffer, len, expected);
 
+  len = GetLocaleInfoA(GetUserDefaultLCID(), LOCALE_SLANGUAGE, expected, ARRAY_SIZE(expected));
+  ret = GetLocaleInfoA(LOCALE_NEUTRAL, LOCALE_SLANGUAGE, buffer, ARRAY_SIZE(buffer));
+  ok( (ret == len) && !lstrcmpA(buffer, expected), "got %d with '%s' (expected %d with '%s')\n",
+      ret, buffer, len, expected);
+  ret = GetLocaleInfoA(LOCALE_CUSTOM_DEFAULT, LOCALE_SLANGUAGE, buffer, ARRAY_SIZE(buffer));
+  ok( (ret == len) && !lstrcmpA(buffer, expected), "got %d with '%s' (expected %d with '%s')\n",
+      ret, buffer, len, expected);
+  ret = GetLocaleInfoA(LOCALE_CUSTOM_UNSPECIFIED, LOCALE_SLANGUAGE, buffer, ARRAY_SIZE(buffer));
+  ok( (ret == len && !lstrcmpA(buffer, expected)) || broken(!ret), /* <= win8 */
+      "got %d with '%s' (expected %d with '%s')\n", ret, buffer, len, expected);
+  len = GetLocaleInfoA(GetUserDefaultUILanguage(), LOCALE_SLANGUAGE, expected, ARRAY_SIZE(expected));
+  ret = GetLocaleInfoA(LOCALE_CUSTOM_UI_DEFAULT, LOCALE_SLANGUAGE, buffer, ARRAY_SIZE(buffer));
+  if (ret) ok( (ret == len && !lstrcmpA(buffer, expected)),
+               "got %d with '%s' (expected %d with '%s')\n", ret, buffer, len, expected);
 
   /* HTMLKit and "Font xplorer lite" expect GetLocaleInfoA to
    * partially fill the buffer even if it is too short. See bug 637.
@@ -2682,6 +2700,7 @@ static void test_LocaleNameToLCID(void)
     NTSTATUS status;
     INT ret;
     WCHAR buffer[LOCALE_NAME_MAX_LENGTH];
+    WCHAR expbuff[LOCALE_NAME_MAX_LENGTH];
     const struct neutralsublang_name_t *ptr;
 
     if (!pLocaleNameToLCID)
@@ -2716,6 +2735,25 @@ static void test_LocaleNameToLCID(void)
     ret = pLCIDToLocaleName(lcid, buffer, LOCALE_NAME_MAX_LENGTH, 0);
     ok(ret > 0, "Expected ret > 0, got %d, error %ld\n", ret, GetLastError());
     trace("%08lx, %s\n", lcid, wine_dbgstr_w(buffer));
+
+    pLCIDToLocaleName(GetUserDefaultLCID(), expbuff, LOCALE_NAME_MAX_LENGTH, 0);
+    ret = pLCIDToLocaleName(LOCALE_NEUTRAL, buffer, LOCALE_NAME_MAX_LENGTH, 0);
+    ok(ret > 0, "Expected ret > 0, got %d, error %ld\n", ret, GetLastError());
+    ok( !wcscmp( buffer, expbuff ), "got %s / %s\n", debugstr_w(buffer), debugstr_w(expbuff));
+
+    ret = pLCIDToLocaleName(LOCALE_CUSTOM_DEFAULT, buffer, LOCALE_NAME_MAX_LENGTH, 0);
+    ok(ret > 0, "Expected ret > 0, got %d, error %ld\n", ret, GetLastError());
+    ok( !wcscmp( buffer, expbuff ), "got %s / %s\n", debugstr_w(buffer), debugstr_w(expbuff));
+
+    SetLastError( 0xdeadbeef );
+    ret = pLCIDToLocaleName(LOCALE_CUSTOM_UNSPECIFIED, buffer, LOCALE_NAME_MAX_LENGTH, 0);
+    ok(ret > 0 || broken(!ret), /* <= win8 */ "Expected ret > 0, got %d, error %ld\n", ret, GetLastError());
+    if (ret) ok( !wcscmp( buffer, expbuff ), "got %s / %s\n", debugstr_w(buffer), debugstr_w(expbuff));
+
+    SetLastError( 0xdeadbeef );
+    ret = pLCIDToLocaleName(LOCALE_CUSTOM_UI_DEFAULT, buffer, LOCALE_NAME_MAX_LENGTH, 0);
+    if (ret) trace("%08x, %s\n", GetUserDefaultUILanguage(), wine_dbgstr_w(buffer));
+    else ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %lu\n", GetLastError());
 
     /* bad name */
     SetLastError(0xdeadbeef);
@@ -2797,6 +2835,14 @@ static void test_LocaleNameToLCID(void)
         ok(ret > 0, "%s: got %d\n", wine_dbgstr_w(L"zh-hans"), ret);
         ok(!lstrcmpW(L"zh-CN", buffer), "%s: got wrong locale name %s\n",
            wine_dbgstr_w(L"zh-hans"), wine_dbgstr_w(buffer));
+
+        /* de-DE_phoneb */
+        lcid = pLocaleNameToLCID(L"de-DE_phoneb", 0);
+        ok(lcid == MAKELCID(MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT), SORT_GERMAN_PHONE_BOOK),
+           "%s: got wrong lcid 0x%04lx\n", wine_dbgstr_w(L"zh-hans"), lcid);
+        ret = pLCIDToLocaleName(lcid, buffer, ARRAY_SIZE(buffer), 0);
+        ok(!lstrcmpW(L"de-DE_phoneb", buffer), "got wrong locale name %s\n",
+           wine_dbgstr_w(buffer));
     }
 
     if (pRtlLocaleNameToLcid)
@@ -2885,6 +2931,7 @@ static void test_LocaleNameToLCID(void)
         str.MaximumLength = sizeof( buffer );
         memset( buffer, 0xcc, sizeof(buffer) );
 
+        ok( !IsValidLocale( LOCALE_NEUTRAL, 0 ), "expected invalid\n" );
         status = pRtlLcidToLocaleName( LOCALE_NEUTRAL, &str, 0, 0 );
         ok( status == STATUS_INVALID_PARAMETER_1, "wrong error %lx\n", status );
         status = pRtlLcidToLocaleName( LOCALE_NEUTRAL, &str, 2, 0 );
@@ -2908,12 +2955,14 @@ static void test_LocaleNameToLCID(void)
         ok( str.Length == wcslen(buffer) * sizeof(WCHAR), "wrong len %u\n", str.Length );
         ok( !wcscmp( buffer, L"en" ), "wrong name %s\n", debugstr_w(buffer) );
 
+        ok( IsValidLocale( 0x00010407, 0 ), "expected valid\n" );
         memset( buffer, 0xcc, sizeof(buffer) );
         status = pRtlLcidToLocaleName( 0x00010407, &str, 0, 0 );
         ok( status == STATUS_SUCCESS, "wrong error %lx\n", status );
         ok( str.Length == wcslen(buffer) * sizeof(WCHAR), "wrong len %u\n", str.Length );
         ok( !wcscmp( buffer, L"de-DE_phoneb" ), "wrong name %s\n", debugstr_w(buffer) );
 
+        ok( !IsValidLocale( LOCALE_SYSTEM_DEFAULT, 0 ), "expected invalid\n" );
         memset( buffer, 0xcc, sizeof(buffer) );
         status = pRtlLcidToLocaleName( LOCALE_SYSTEM_DEFAULT, &str, 0, 0 );
         ok( status == STATUS_SUCCESS, "wrong error %lx\n", status );
@@ -2921,6 +2970,7 @@ static void test_LocaleNameToLCID(void)
         LCIDToLocaleName( GetSystemDefaultLCID(), expect, ARRAY_SIZE(expect), 0 );
         ok( !wcscmp( buffer, expect ), "wrong name %s / %s\n", debugstr_w(buffer), debugstr_w(expect) );
 
+        ok( !IsValidLocale( LOCALE_USER_DEFAULT, 0 ), "expected invalid\n" );
         memset( buffer, 0xcc, sizeof(buffer) );
         status = pRtlLcidToLocaleName( LOCALE_USER_DEFAULT, &str, 0, 0 );
         ok( status == STATUS_SUCCESS, "wrong error %lx\n", status );
@@ -2928,6 +2978,7 @@ static void test_LocaleNameToLCID(void)
         LCIDToLocaleName( GetUserDefaultLCID(), expect, ARRAY_SIZE(expect), 0 );
         ok( !wcscmp( buffer, expect ), "wrong name %s / %s\n", debugstr_w(buffer), debugstr_w(expect) );
 
+        ok( IsValidLocale( LOCALE_INVARIANT, 0 ), "expected valid\n" );
         memset( buffer, 0xcc, sizeof(buffer) );
         status = pRtlLcidToLocaleName( LOCALE_INVARIANT, &str, 0, 0 );
         ok( status == STATUS_SUCCESS, "wrong error %lx\n", status );
@@ -2965,6 +3016,84 @@ static void test_LocaleNameToLCID(void)
         RtlFreeUnicodeString( &str );
     }
     else win_skip( "RtlLcidToLocaleName not available\n" );
+
+    if (pNlsValidateLocale)
+    {
+        void *ret, *ret2;
+        LCID lcid;
+
+        lcid = LOCALE_NEUTRAL;
+        ret = pNlsValidateLocale( &lcid, 0 );
+        ok( !!ret, "failed for %04lx\n", lcid );
+        ok( lcid == GetUserDefaultLCID(), "wrong lcid %04lx\n", lcid );
+
+        lcid = MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
+        ret = pNlsValidateLocale( &lcid, 0 );
+        ok( !!ret, "failed for %04lx\n", lcid );
+        ok( lcid == MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT), "wrong lcid %04lx\n", lcid );
+
+        lcid = MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL);
+        ret2 = pNlsValidateLocale( &lcid, 0 );
+        ok( !!ret2, "failed for %04lx\n", lcid );
+        ok( ret == ret2, "got different pointer for neutral\n" );
+        ok( lcid == MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL), "wrong lcid %04lx\n", lcid );
+
+        lcid = MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL);
+        ret2 = pNlsValidateLocale( &lcid, LOCALE_ALLOW_NEUTRAL_NAMES );
+        ok( !!ret2, "failed for %04lx\n", lcid );
+        ok( ret != ret2, "got same pointer for neutral\n" );
+        ok( lcid == MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL), "wrong lcid %04lx\n", lcid );
+
+        lcid = 0x00010407;
+        ret = pNlsValidateLocale( &lcid, 0 );
+        ok( !!ret, "failed for %04lx\n", lcid );
+        ok( lcid == 0x00010407, "wrong lcid %04lx\n", lcid );
+
+        lcid = LOCALE_SYSTEM_DEFAULT;
+        ret = pNlsValidateLocale( &lcid, 0 );
+        ok( !!ret, "failed for %04lx\n", lcid );
+        ok( lcid == GetSystemDefaultLCID(), "wrong lcid %04lx\n", lcid );
+        ret2 = pNlsValidateLocale( &lcid, 0 );
+        ok( ret == ret2, "got different pointer for system\n" );
+
+        lcid = LOCALE_USER_DEFAULT;
+        ret = pNlsValidateLocale( &lcid, 0 );
+        ok( !!ret, "failed for %04lx\n", lcid );
+        ok( lcid == GetUserDefaultLCID(), "wrong lcid %04lx\n", lcid );
+        ret2 = pNlsValidateLocale( &lcid, 0 );
+        ok( ret == ret2, "got different pointer for user\n" );
+
+        lcid = LOCALE_INVARIANT;
+        ret = pNlsValidateLocale( &lcid, 0 );
+        ok( !!ret, "failed for %04lx\n", lcid );
+        ok( lcid == LOCALE_INVARIANT, "wrong lcid %04lx\n", lcid );
+        ret2 = pNlsValidateLocale( &lcid, 0 );
+        ok( ret == ret2, "got different pointer for invariant\n" );
+
+        lcid = LOCALE_CUSTOM_DEFAULT;
+        ret = pNlsValidateLocale( &lcid, 0 );
+        ok( !!ret, "failed for %04lx\n", lcid );
+        ok( lcid == GetUserDefaultLCID(), "wrong lcid %04lx\n", lcid );
+        ret2 = pNlsValidateLocale( &lcid, 0 );
+        ok( ret == ret2, "got different pointer for custom default\n" );
+
+        lcid = LOCALE_CUSTOM_UNSPECIFIED;
+        ret = pNlsValidateLocale( &lcid, 0 );
+        ok( ret || broken(!ret), /* <= win8 */ "failed for %04lx\n", lcid );
+        if (ret) ok( lcid == GetUserDefaultLCID(), "wrong lcid %04lx\n", lcid );
+
+        SetLastError( 0xdeadbeef );
+        lcid = LOCALE_CUSTOM_UI_DEFAULT;
+        ret = pNlsValidateLocale( &lcid, 0 );
+        if (!ret) ok( GetLastError() == 0xdeadbeef, "error %lu\n", GetLastError());
+
+        lcid = 0xbeef;
+        ret = pNlsValidateLocale( &lcid, 0 );
+        ok( !ret, "succeeded\n" );
+        ok( lcid == 0xbeef, "wrong lcid %04lx\n", lcid );
+        ok( GetLastError() == 0xdeadbeef, "error %lu\n", GetLastError());
+    }
+    else win_skip( "NlsValidateLocale not available\n" );
 }
 
 /* this requires collation table patch to make it MS compatible */
@@ -3961,6 +4090,12 @@ static void test_ConvertDefaultLocale(void)
   LCID_RES(LOCALE_SYSTEM_DEFAULT, GetSystemDefaultLCID());
   LCID_RES(LOCALE_USER_DEFAULT,   GetUserDefaultLCID());
   LCID_RES(LOCALE_NEUTRAL,        GetUserDefaultLCID());
+  LCID_RES(LOCALE_CUSTOM_DEFAULT, GetUserDefaultLCID());
+  lcid = ConvertDefaultLocale( LOCALE_CUSTOM_UNSPECIFIED );
+  ok( lcid == GetUserDefaultLCID() || broken(lcid == LOCALE_CUSTOM_UNSPECIFIED), /* <= win8 */
+      "wrong lcid %04lx\n", lcid );
+  lcid = ConvertDefaultLocale( LOCALE_CUSTOM_UI_DEFAULT );
+  ok( lcid == GetUserDefaultUILanguage() || lcid == LOCALE_CUSTOM_UI_DEFAULT, "wrong lcid %04lx\n", lcid );
   lcid = ConvertDefaultLocale(LOCALE_INVARIANT);
   ok(lcid == LOCALE_INVARIANT || broken(lcid == 0x47f) /* win2k[3]/winxp */,
      "Expected lcid = %08lx, got %08lx\n", LOCALE_INVARIANT, lcid);
@@ -4102,28 +4237,81 @@ static void test_EnumLanguageGroupLocalesA(void)
   pEnumLanguageGroupLocalesA(lgrplocale_procA, LGRPID_WESTERN_EUROPE, 0, 0);
 }
 
-static void test_SetLocaleInfoA(void)
+static void test_SetLocaleInfo(void)
 {
-  BOOL bRet;
-  LCID lcid = GetUserDefaultLCID();
+    BOOL bRet;
+    LCID lcid = GetUserDefaultLCID();
+    UINT i;
 
-  /* Null data */
-  SetLastError(0);
-  bRet = SetLocaleInfoA(lcid, LOCALE_SDATE, 0);
-  ok( !bRet && GetLastError() == ERROR_INVALID_PARAMETER,
-      "Expected ERROR_INVALID_PARAMETER, got %ld\n", GetLastError());
+    /* Null data */
+    SetLastError(0xdeadbeef);
+    bRet = SetLocaleInfoA(lcid, LOCALE_SSHORTDATE, NULL);
+    ok( !bRet && GetLastError() == ERROR_INVALID_PARAMETER,
+        "Expected ERROR_INVALID_PARAMETER, got %ld\n", GetLastError());
 
-  /* IDATE */
-  SetLastError(0);
-  bRet = SetLocaleInfoA(lcid, LOCALE_IDATE, "test_SetLocaleInfoA");
-  ok(!bRet && GetLastError() == ERROR_INVALID_FLAGS,
-     "Expected ERROR_INVALID_FLAGS, got %ld\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    bRet = SetLocaleInfoW(lcid, LOCALE_SSHORTDATE, NULL);
+    ok( !bRet && GetLastError() == ERROR_INVALID_PARAMETER,
+        "Expected ERROR_INVALID_PARAMETER, got %ld\n", GetLastError());
 
-  /* ILDATE */
-  SetLastError(0);
-  bRet = SetLocaleInfoA(lcid, LOCALE_ILDATE, "test_SetLocaleInfoA");
-  ok(!bRet && GetLastError() == ERROR_INVALID_FLAGS,
-     "Expected ERROR_INVALID_FLAGS, got %ld\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    bRet = SetLocaleInfoW(lcid, LOCALE_SDAYNAME1, NULL);
+    ok( !bRet && GetLastError() == ERROR_INVALID_PARAMETER,
+        "Expected ERROR_INVALID_PARAMETER, got %ld\n", GetLastError());
+
+    for (i = 0; i <= 0x1014; i++)
+    {
+        WCHAR buffer[80];
+        if (!GetLocaleInfoW( LOCALE_USER_DEFAULT, i, buffer, ARRAY_SIZE(buffer) )) continue;
+        SetLastError(0xdeadbeef);
+        bRet = SetLocaleInfoW(lcid, i, buffer);
+        switch (i)
+        {
+        case LOCALE_ICALENDARTYPE:
+        case LOCALE_ICURRDIGITS:
+        case LOCALE_ICURRENCY:
+        case LOCALE_IDIGITS:
+        case LOCALE_IDIGITSUBSTITUTION:
+        case LOCALE_IFIRSTDAYOFWEEK:
+        case LOCALE_IFIRSTWEEKOFYEAR:
+        case LOCALE_ILZERO:
+        case LOCALE_IMEASURE:
+        case LOCALE_INEGCURR:
+        case LOCALE_INEGNUMBER:
+        case LOCALE_IPAPERSIZE:
+        case LOCALE_ITIME:
+        case LOCALE_S1159:
+        case LOCALE_S2359:
+        case LOCALE_SCURRENCY:
+        case LOCALE_SDATE:
+        case LOCALE_SDECIMAL:
+        case LOCALE_SGROUPING:
+        case LOCALE_SLIST:
+        case LOCALE_SLONGDATE:
+        case LOCALE_SMONDECIMALSEP:
+        case LOCALE_SMONGROUPING:
+        case LOCALE_SMONTHOUSANDSEP:
+        case LOCALE_SNATIVEDIGITS:
+        case LOCALE_SNEGATIVESIGN:
+        case LOCALE_SPOSITIVESIGN:
+        case LOCALE_SSHORTDATE:
+        case LOCALE_SSHORTTIME:
+        case LOCALE_STHOUSAND:
+        case LOCALE_STIME:
+        case LOCALE_STIMEFORMAT:
+        case LOCALE_SYEARMONTH:
+            ok( bRet, "%04x: failed err %lu\n", i, GetLastError() );
+            break;
+        case LOCALE_SINTLSYMBOL:
+            ok( bRet || broken(!bRet), /* win10 <= 1507 */
+                "%04x: failed err %lu\n", i, GetLastError() );
+            break;
+        default:
+            ok( !bRet, "%04x: succeeded\n", i );
+            ok( GetLastError() == ERROR_INVALID_FLAGS, "%04x: wrong error %lu\n", i, GetLastError() );
+            break;
+        }
+    }
 }
 
 static BOOL CALLBACK luilocale_proc1A(LPSTR value, LONG_PTR lParam)
@@ -7723,7 +7911,7 @@ START_TEST(locale)
   test_EnumSystemLanguageGroupsA();
   test_EnumSystemLocalesEx();
   test_EnumLanguageGroupLocalesA();
-  test_SetLocaleInfoA();
+  test_SetLocaleInfo();
   test_EnumUILanguageA();
   test_GetCPInfo();
   test_GetStringTypeW();
