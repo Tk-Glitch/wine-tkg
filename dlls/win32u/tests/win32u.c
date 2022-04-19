@@ -33,12 +33,12 @@ static void test_NtUserEnumDisplayDevices(void)
     SetLastError( 0xdeadbeef );
     ret = NtUserEnumDisplayDevices( NULL, 0, &info, 0 );
     ok( !ret && GetLastError() == 0xdeadbeef,
-        "NtUserEnumDisplayDevices returned %x %u\n", ret, GetLastError() );
+        "NtUserEnumDisplayDevices returned %#lx %lu\n", ret, GetLastError() );
 
     SetLastError( 0xdeadbeef );
     ret = NtUserEnumDisplayDevices( NULL, 12345, &info, 0 );
     ok( ret == STATUS_UNSUCCESSFUL && GetLastError() == 0xdeadbeef,
-                  "NtUserEnumDisplayDevices returned %x %u\n", ret,
+                  "NtUserEnumDisplayDevices returned %#lx %lu\n", ret,
                   GetLastError() );
 
     info.cb = 0;
@@ -46,22 +46,22 @@ static void test_NtUserEnumDisplayDevices(void)
     SetLastError( 0xdeadbeef );
     ret = NtUserEnumDisplayDevices( NULL, 0, &info, 0 );
     ok( ret == STATUS_UNSUCCESSFUL && GetLastError() == 0xdeadbeef,
-        "NtUserEnumDisplayDevices returned %x %u\n", ret, GetLastError() );
+        "NtUserEnumDisplayDevices returned %#lx %lu\n", ret, GetLastError() );
 
     SetLastError( 0xdeadbeef );
     ret = NtUserEnumDisplayDevices( NULL, 12345, &info, 0 );
     ok( ret == STATUS_UNSUCCESSFUL && GetLastError() == 0xdeadbeef,
-        "NtUserEnumDisplayDevices returned %x %u\n", ret, GetLastError() );
+        "NtUserEnumDisplayDevices returned %#lx %lu\n", ret, GetLastError() );
 
     SetLastError( 0xdeadbeef );
     ret = NtUserEnumDisplayDevices( NULL, 0, NULL, 0 );
     ok( ret == STATUS_UNSUCCESSFUL && GetLastError() == 0xdeadbeef,
-        "NtUserEnumDisplayDevices returned %x %u\n", ret, GetLastError() );
+        "NtUserEnumDisplayDevices returned %#lx %lu\n", ret, GetLastError() );
 
     SetLastError( 0xdeadbeef );
     ret = NtUserEnumDisplayDevices( NULL, 12345, NULL, 0 );
     ok( ret == STATUS_UNSUCCESSFUL && GetLastError() == 0xdeadbeef,
-        "NtUserEnumDisplayDevices returned %x %u\n", ret, GetLastError() );
+        "NtUserEnumDisplayDevices returned %#lx %lu\n", ret, GetLastError() );
 }
 
 static void test_NtUserCloseWindowStation(void)
@@ -71,7 +71,7 @@ static void test_NtUserCloseWindowStation(void)
     SetLastError( 0xdeadbeef );
     ret = NtUserCloseWindowStation( 0 );
     ok( !ret && GetLastError() == ERROR_INVALID_HANDLE,
-        "NtUserCloseWindowStation returned %x %u\n", ret, GetLastError() );
+        "NtUserCloseWindowStation returned %x %lu\n", ret, GetLastError() );
 }
 
 static void test_window_props(void)
@@ -86,7 +86,7 @@ static void test_window_props(void)
     atom = GlobalAddAtomW( L"test" );
 
     ret = NtUserSetProp( hwnd, UlongToPtr(atom), UlongToHandle(0xdeadbeef) );
-    ok( ret, "NtUserSetProp failed: %u\n", GetLastError() );
+    ok( ret, "NtUserSetProp failed: %lu\n", GetLastError() );
 
     prop = GetPropW( hwnd, L"test" );
     ok( prop == UlongToHandle(0xdeadbeef), "prop = %p\n", prop );
@@ -119,41 +119,41 @@ static void test_NtUserBuildHwndList(void)
 
     size = 0;
     status = NtUserBuildHwndList( 0, 0, 0, 0, GetCurrentThreadId(), ARRAYSIZE(buf), buf, &size );
-    ok( !status, "NtUserBuildHwndList failed: %#x\n", status );
-    ok( size == 1, "size = %u\n", size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 1, "size = %lu\n", size );
     ok( buf[0] == HWND_BOTTOM, "buf[0] = %p\n", buf[0] );
 
     hwnd = CreateWindowExA( 0, "static", NULL, WS_POPUP, 0,0,0,0,GetDesktopWindow(),0,0, NULL );
 
     size = 0;
     status = NtUserBuildHwndList( 0, 0, 0, 0, GetCurrentThreadId(), ARRAYSIZE(buf), buf, &size );
-    ok( !status, "NtUserBuildHwndList failed: %#x\n", status );
-    ok( size == 3, "size = %u\n", size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 3, "size = %lu\n", size );
     ok( buf[0] == hwnd, "buf[0] = %p\n", buf[0] );
     ok( buf[2] == HWND_BOTTOM, "buf[0] = %p\n", buf[2] );
 
     size = 0;
     status = NtUserBuildHwndList( 0, 0, 0, 0, GetCurrentThreadId(), 3, buf, &size );
-    ok( !status, "NtUserBuildHwndList failed: %#x\n", status );
-    ok( size == 3, "size = %u\n", size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 3, "size = %lu\n", size );
 
     size = 0;
     status = NtUserBuildHwndList( 0, 0, 0, 0, GetCurrentThreadId(), 2, buf, &size );
-    ok( status == STATUS_BUFFER_TOO_SMALL, "NtUserBuildHwndList failed: %#x\n", status );
-    ok( size == 3, "size = %u\n", size );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 3, "size = %lu\n", size );
 
     size = 0;
     status = NtUserBuildHwndList( 0, 0, 0, 0, GetCurrentThreadId(), 1, buf, &size );
-    ok( status == STATUS_BUFFER_TOO_SMALL, "NtUserBuildHwndList failed: %#x\n", status );
-    ok( size == 3, "size = %u\n", size );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 3, "size = %lu\n", size );
 
     desktop_windows_cnt = 0;
     EnumDesktopWindows( 0, count_win, (LPARAM)&desktop_windows_cnt );
 
     size = 0;
     status = NtUserBuildHwndList( 0, 0, 0, 1, 0, ARRAYSIZE(buf), buf, &size );
-    ok( !status, "NtUserBuildHwndList failed: %#x\n", status );
-    ok( size == desktop_windows_cnt + 1, "size = %u, expected %u\n", size, desktop_windows_cnt + 1 );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == desktop_windows_cnt + 1, "size = %lu, expected %lu\n", size, desktop_windows_cnt + 1 );
 
     desktop_windows_cnt = 0;
     EnumDesktopWindows( GetThreadDesktop( GetCurrentThreadId() ), count_win, (LPARAM)&desktop_windows_cnt );
@@ -161,23 +161,129 @@ static void test_NtUserBuildHwndList(void)
     size = 0;
     status = NtUserBuildHwndList( GetThreadDesktop(GetCurrentThreadId()), 0, 0, 1, 0,
                                   ARRAYSIZE(buf), buf, &size );
-    ok( !status, "NtUserBuildHwndList failed: %#x\n", status );
-    ok( size == desktop_windows_cnt + 1, "size = %u, expected %u\n", size, desktop_windows_cnt + 1 );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == desktop_windows_cnt + 1, "size = %lu, expected %lu\n", size, desktop_windows_cnt + 1 );
 
     size = 0;
     status = NtUserBuildHwndList( GetThreadDesktop(GetCurrentThreadId()), 0, 0, 0, 0,
                                   ARRAYSIZE(buf), buf, &size );
-    ok( !status, "NtUserBuildHwndList failed: %#x\n", status );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
     todo_wine
-    ok( size > desktop_windows_cnt + 1, "size = %u, expected %u\n", size, desktop_windows_cnt + 1 );
+    ok( size > desktop_windows_cnt + 1, "size = %lu, expected %lu\n", size, desktop_windows_cnt + 1 );
 
     size = 0xdeadbeef;
     status = NtUserBuildHwndList( UlongToHandle(0xdeadbeef), 0, 0, 0, 0,
                                   ARRAYSIZE(buf), buf, &size );
-    ok( status == STATUS_INVALID_HANDLE, "NtUserBuildHwndList failed: %#x\n", status );
-    ok( size == 0xdeadbeef, "size = %u\n", size );
+    ok( status == STATUS_INVALID_HANDLE, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 0xdeadbeef, "size = %lu\n", size );
 
     DestroyWindow( hwnd );
+}
+
+static void test_cursoricon(void)
+{
+    WCHAR module[MAX_PATH], res_buf[MAX_PATH];
+    UNICODE_STRING module_str, res_str;
+    BYTE bmp_bits[1024];
+    LONG width, height;
+    DWORD rate, steps;
+    HCURSOR frame;
+    HANDLE handle;
+    ICONINFO info;
+    unsigned int i;
+    BOOL ret;
+
+    for (i = 0; i < sizeof(bmp_bits); ++i)
+        bmp_bits[i] = 111 * i;
+
+    handle = CreateIcon( 0, 16, 16, 1, 1, bmp_bits, &bmp_bits[16 * 16 / 8] );
+    ok(handle != 0, "CreateIcon failed\n");
+
+    ret = NtUserGetIconSize( handle, 0, &width, &height );
+    ok( ret, "NtUserGetIconSize failed: %lu\n", GetLastError() );
+    ok( width == 16, "width = %ld\n", width );
+    ok( height == 32, "height = %ld\n", height );
+
+    ret = NtUserGetIconSize( handle, 6, &width, &height );
+    ok( ret, "NtUserGetIconSize failed: %lu\n", GetLastError() );
+    ok( width == 16, "width = %ld\n", width );
+    ok( height == 32, "height = %ld\n", height );
+
+    frame = NtUserGetCursorFrameInfo( handle, 0, &rate, &steps );
+    ok( frame != NULL, "NtUserGetCursorFrameInfo failed: %lu\n", GetLastError() );
+    ok( frame == handle, "frame != handle\n" );
+    ok( rate == 0, "rate = %lu\n", rate );
+    ok( steps == 1, "steps = %lu\n", steps );
+
+    ret = NtUserGetIconInfo( handle, &info, NULL, NULL, NULL, 0 );
+    ok( ret, "NtUserGetIconInfo failed: %lu\n", GetLastError() );
+    ok( info.fIcon == TRUE, "fIcon = %x\n", info.fIcon );
+    ok( info.xHotspot == 8, "xHotspot = %lx\n", info.xHotspot );
+    ok( info.yHotspot == 8, "yHotspot = %lx\n", info.yHotspot );
+    DeleteObject( info.hbmColor );
+    DeleteObject( info.hbmMask );
+
+    memset( module, 0xcc, sizeof(module) );
+    module_str.Buffer = module;
+    module_str.Length = 0xdead;
+    module_str.MaximumLength = sizeof(module);
+    memset( res_buf, 0xcc, sizeof(res_buf) );
+    res_str.Buffer = res_buf;
+    res_str.Length = 0xdead;
+    res_str.MaximumLength = sizeof(res_buf);
+    ret = NtUserGetIconInfo( handle, &info, &module_str, &res_str, NULL, 0 );
+    ok( ret, "NtUserGetIconInfo failed: %lu\n", GetLastError() );
+    ok( info.fIcon == TRUE, "fIcon = %x\n", info.fIcon );
+    ok( !module_str.Length, "module_str.Length = %u\n", module_str.Length );
+    ok( !res_str.Length, "res_str.Length = %u\n", res_str.Length );
+    ok( module_str.Buffer == module, "module_str.Buffer = %p\n", module_str.Buffer );
+    ok( !res_str.Buffer, "res_str.Buffer = %p\n", res_str.Buffer );
+    ok( module[0] == 0xcccc, "module[0] = %x\n", module[0] );
+    ok( res_buf[0] == 0xcccc, "res_buf[0] = %x\n", res_buf[0] );
+    DeleteObject( info.hbmColor );
+    DeleteObject( info.hbmMask );
+
+    ret = NtUserDestroyCursor( handle, 0 );
+    ok( ret, "NtUserDestroyIcon failed: %lu\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = NtUserGetIconSize( handle, 0, &width, &height );
+    ok( !ret && GetLastError() == ERROR_INVALID_CURSOR_HANDLE,
+        "NtUserGetIconSize returned %x %lu\n", ret, GetLastError() );
+
+    /* Test a system icon */
+    handle = LoadIconA( 0, (LPCSTR)IDI_HAND );
+    ok( handle != NULL, "LoadIcon icon failed, error %lu\n", GetLastError() );
+
+    ret = NtUserGetIconSize( handle, 0, &width, &height );
+    ok( width == 32, "width = %ld\n", width );
+    ok( height == 64, "height = %ld\n", height );
+    ok( ret, "NtUserGetIconSize failed: %lu\n", GetLastError() );
+
+    memset( module, 0xcc, sizeof(module) );
+    module_str.Buffer = module;
+    module_str.Length = 0xdead;
+    module_str.MaximumLength = sizeof(module);
+    memset( res_buf, 0xcc, sizeof(res_buf) );
+    res_str.Buffer = res_buf;
+    res_str.Length = 0xdead;
+    res_str.MaximumLength = sizeof(res_buf);
+    ret = NtUserGetIconInfo( handle, &info, &module_str, &res_str, NULL, 0 );
+    ok( ret, "NtUserGetIconInfo failed: %lu\n", GetLastError() );
+    ok( info.fIcon == TRUE, "fIcon = %x\n", info.fIcon );
+    ok( module_str.Length, "module_str.Length = 0\n" );
+    ok( !res_str.Length, "res_str.Length = %u\n", res_str.Length );
+    ok( module_str.Buffer == module, "module_str.Buffer = %p\n", module_str.Buffer );
+    ok( res_str.Buffer == (WCHAR *)IDI_HAND, "res_str.Buffer = %p\n", res_str.Buffer );
+    DeleteObject( info.hbmColor );
+    DeleteObject( info.hbmMask );
+
+    module[module_str.Length] = 0;
+    ok( GetModuleHandleW(module) == GetModuleHandleW(L"user32.dll"),
+        "GetIconInfoEx wrong module %s\n", wine_dbgstr_w(module) );
+
+    ret = DestroyIcon(handle);
+    ok(ret, "Destroy icon failed, error %lu.\n", GetLastError());
 }
 
 START_TEST(win32u)
@@ -188,6 +294,7 @@ START_TEST(win32u)
     test_NtUserEnumDisplayDevices();
     test_window_props();
     test_NtUserBuildHwndList();
+    test_cursoricon();
 
     test_NtUserCloseWindowStation();
 }

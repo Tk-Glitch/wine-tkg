@@ -30,15 +30,6 @@
 #include "wine/unixlib.h"
 #include "wine/debug.h"
 
-struct user_callbacks
-{
-    HWND (WINAPI *pGetDesktopWindow)(void);
-    BOOL (WINAPI *pGetWindowRect)( HWND hwnd, LPRECT rect );
-    BOOL (WINAPI *pRedrawWindow)( HWND, const RECT*, HRGN, UINT );
-    LRESULT (WINAPI *pSendMessageTimeoutW)( HWND, UINT, WPARAM, LPARAM, UINT, UINT, PDWORD_PTR );
-    HWND (WINAPI *pWindowFromDC)( HDC );
-};
-
 extern const struct user_callbacks *user_callbacks DECLSPEC_HIDDEN;
 
 struct unix_funcs
@@ -192,27 +183,45 @@ struct unix_funcs
     BOOL     (WINAPI *pNtGdiUpdateColors)( HDC hdc );
     BOOL     (WINAPI *pNtGdiWidenPath)( HDC hdc );
     HKL      (WINAPI *pNtUserActivateKeyboardLayout)( HKL layout, UINT flags );
+    DWORD    (WINAPI *pNtUserCallHwnd)( HWND hwnd, DWORD code );
+    DWORD    (WINAPI *pNtUserCallHwndParam)( HWND hwnd, DWORD_PTR param, DWORD code );
+    LRESULT  (WINAPI *pNtUserCallNextHookEx)( HHOOK hhook, INT code, WPARAM wparam, LPARAM lparam );
+    ULONG_PTR (WINAPI *pNtUserCallNoParam)( ULONG code );
     ULONG_PTR (WINAPI *pNtUserCallOneParam)( ULONG_PTR arg, ULONG code );
     ULONG_PTR (WINAPI *pNtUserCallTwoParam)( ULONG_PTR arg1, ULONG_PTR arg2, ULONG code );
     LONG     (WINAPI *pNtUserChangeDisplaySettings)( UNICODE_STRING *devname, DEVMODEW *devmode, HWND hwnd,
                                                      DWORD flags, void *lparam );
+    BOOL     (WINAPI *pNtUserClipCursor)( const RECT *rect );
     INT      (WINAPI *pNtUserCountClipboardFormats)(void);
+    BOOL     (WINAPI *pNtUserDestroyCursor)( HCURSOR cursor, ULONG arg );
+    BOOL     (WINAPI *pNtUserDrawIconEx)( HDC hdc, INT x0, INT y0, HICON icon, INT width,
+                                          INT height, UINT istep, HBRUSH hbr, UINT flags );
     NTSTATUS (WINAPI *pNtUserEnumDisplayDevices)( UNICODE_STRING *device, DWORD index,
                                                   DISPLAY_DEVICEW *info, DWORD flags );
     BOOL     (WINAPI *pNtUserEnumDisplayMonitors)( HDC hdc, RECT *rect, MONITORENUMPROC proc, LPARAM lp );
     BOOL     (WINAPI *pNtUserEnumDisplaySettings)( UNICODE_STRING *device, DWORD mode,
                                                    DEVMODEW *dev_mode, DWORD flags );
+    SHORT    (WINAPI *pNtUserGetAsyncKeyState)( INT key );
+    BOOL     (WINAPI *pNtUserGetCursorInfo)( CURSORINFO *info );
     LONG     (WINAPI *pNtUserGetDisplayConfigBufferSizes)( UINT32 flags, UINT32 *num_path_info,
                                                            UINT32 *num_mode_info );
+    BOOL     (WINAPI *pNtUserGetIconInfo)( HICON icon, ICONINFO *info, UNICODE_STRING *module,
+                                           UNICODE_STRING *res_name, DWORD *bpp, LONG unk );
     INT      (WINAPI *pNtUserGetKeyNameText)( LONG lparam, WCHAR *buffer, INT size );
     UINT     (WINAPI *pNtUserGetKeyboardLayoutList)( INT size, HKL *layouts );
     INT      (WINAPI *pNtUserGetPriorityClipboardFormat)( UINT *list, INT count );
+    DWORD    (WINAPI *pNtUserGetQueueStatus)( UINT flags );
     BOOL     (WINAPI *pNtUserGetUpdatedClipboardFormats)( UINT *formats, UINT size, UINT *out_size );
     BOOL     (WINAPI *pNtUserIsClipboardFormatAvailable)( UINT format );
     UINT     (WINAPI *pNtUserMapVirtualKeyEx)( UINT code, UINT type, HKL layout );
+    BOOL     (WINAPI *pNtUserRegisterHotKey)( HWND hwnd, INT id, UINT modifiers, UINT vk );
     BOOL     (WINAPI *pNtUserScrollDC)( HDC hdc, INT dx, INT dy, const RECT *scroll, const RECT *clip,
                                         HRGN ret_update_rgn, RECT *update_rect );
     HPALETTE (WINAPI *pNtUserSelectPalette)( HDC hdc, HPALETTE hpal, WORD bkg );
+    HCURSOR  (WINAPI *pNtUserSetCursor)( HCURSOR cursor );
+    BOOL     (WINAPI *pNtUserSetCursorIconData)( HCURSOR cursor, UNICODE_STRING *module,
+                                                 UNICODE_STRING *res_name, struct cursoricon_desc *desc );
+    BOOL     (WINAPI *pNtUserSetCursorPos)( INT x, INT y );
     BOOL     (WINAPI *pNtUserSetSysColors)( INT count, const INT *colors, const COLORREF *values );
     INT      (WINAPI *pNtUserShowCursor)( BOOL show );
     BOOL     (WINAPI *pNtUserSystemParametersInfo)( UINT action, UINT val, PVOID ptr, UINT winini );
@@ -240,10 +249,49 @@ struct unix_funcs
                                       struct window_surface *surface );
 };
 
+/* cursoricon.c */
+extern HICON alloc_cursoricon_handle( BOOL is_icon ) DECLSPEC_HIDDEN;
+extern BOOL get_clip_cursor( RECT *rect ) DECLSPEC_HIDDEN;
+extern ULONG_PTR get_icon_param( HICON handle ) DECLSPEC_HIDDEN;
+extern ULONG_PTR set_icon_param( HICON handle, ULONG_PTR param ) DECLSPEC_HIDDEN;
+
+/* hook.c */
+extern LRESULT call_current_hook( HHOOK hhook, INT code, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
+extern LRESULT call_hooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL unicode ) DECLSPEC_HIDDEN;
+extern BOOL unhook_windows_hook( INT id, HOOKPROC proc ) DECLSPEC_HIDDEN;
+
+/* input.c */
+extern LONG global_key_state_counter DECLSPEC_HIDDEN;
+extern BOOL get_cursor_pos( POINT *pt ) DECLSPEC_HIDDEN;
+extern DWORD get_input_state(void) DECLSPEC_HIDDEN;
+
+/* sysparams.c */
 extern RECT get_display_rect( const WCHAR *display ) DECLSPEC_HIDDEN;
+extern UINT get_monitor_dpi( HMONITOR monitor ) DECLSPEC_HIDDEN;
 extern UINT get_system_dpi(void) DECLSPEC_HIDDEN;
 extern int get_system_metrics( int index ) DECLSPEC_HIDDEN;
+extern UINT get_thread_dpi(void) DECLSPEC_HIDDEN;
 extern RECT get_virtual_screen_rect( UINT dpi ) DECLSPEC_HIDDEN;
+extern POINT map_dpi_point( POINT pt, UINT dpi_from, UINT dpi_to ) DECLSPEC_HIDDEN;
+extern RECT map_dpi_rect( RECT rect, UINT dpi_from, UINT dpi_to ) DECLSPEC_HIDDEN;
+extern HMONITOR monitor_from_point( POINT pt, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
+extern HMONITOR monitor_from_rect( const RECT *rect, DWORD flags, UINT dpi ) DECLSPEC_HIDDEN;
+extern void user_lock(void) DECLSPEC_HIDDEN;
+extern void user_unlock(void) DECLSPEC_HIDDEN;
+extern void user_check_not_lock(void) DECLSPEC_HIDDEN;
+
+/* window.c */
+struct tagWND;
+extern HWND is_current_thread_window( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void flush_window_surfaces( BOOL idle ) DECLSPEC_HIDDEN;
+extern void register_window_surface( struct window_surface *old,
+                                     struct window_surface *new ) DECLSPEC_HIDDEN;
+
+/* to release pointers retrieved by win_get_ptr */
+static inline void release_win_ptr( struct tagWND *ptr )
+{
+    user_unlock();
+}
 
 extern void wrappers_init( unixlib_handle_t handle ) DECLSPEC_HIDDEN;
 extern NTSTATUS gdi_init(void) DECLSPEC_HIDDEN;

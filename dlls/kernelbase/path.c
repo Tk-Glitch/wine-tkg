@@ -74,14 +74,6 @@ struct parsed_url
     DWORD query_len;       /* [out] size of Query (until eos)           */
 };
 
-enum url_scan_type
-{
-    SCHEME,
-    HOST,
-    PORT,
-    USERPASS,
-};
-
 static WCHAR *heap_strdupAtoW(const char *str)
 {
     WCHAR *ret = NULL;
@@ -4163,10 +4155,10 @@ HRESULT WINAPI UrlGetPartA(const char *url, char *out, DWORD *out_len, DWORD par
         return hr;
     }
 
-    len2 = WideCharToMultiByte(CP_ACP, 0, outW, len, NULL, 0, NULL, NULL);
+    len2 = WideCharToMultiByte(CP_ACP, 0, outW, len + 1, NULL, 0, NULL, NULL);
     if (len2 > *out_len)
     {
-        *out_len = len2 + 1;
+        *out_len = len2;
         heap_free(inW);
         return E_POINTER;
     }
@@ -4176,101 +4168,48 @@ HRESULT WINAPI UrlGetPartA(const char *url, char *out, DWORD *out_len, DWORD par
     return hr;
 }
 
-static const WCHAR * scan_url(const WCHAR *start, DWORD *size, enum url_scan_type type)
+static const WCHAR *parse_scheme( const WCHAR *p )
 {
-    *size = 0;
-
-    switch (type)
-    {
-    case SCHEME:
-        while ((isalnum( *start ) && !isupper( *start )) || *start == '+' || *start == '-' || *start == '.')
-        {
-            start++;
-            (*size)++;
-        }
-        if (*start != ':')
-            *size = 0;
-        break;
-
-    case USERPASS:
-        for (;;)
-        {
-            if (isalnum(*start) ||
-                    /* user/password only characters */
-                    (*start == ';') ||
-                    (*start == '?') ||
-                    (*start == '&') ||
-                    (*start == '=') ||
-                    /* *extra* characters */
-                    (*start == '!') ||
-                    (*start == '*') ||
-                    (*start == '\'') ||
-                    (*start == '(') ||
-                    (*start == ')') ||
-                    (*start == ',') ||
-                    /* *safe* characters */
-                    (*start == '$') ||
-                    (*start == '_') ||
-                    (*start == '+') ||
-                    (*start == '-') ||
-                    (*start == '.') ||
-                    (*start == ' '))
-            {
-                start++;
-                (*size)++;
-            }
-            else if (*start == '%' && isxdigit(start[1]) && isxdigit(start[2]))
-            {
-                start += 3;
-                *size += 3;
-            }
-            else break;
-        }
-        break;
-
-    case PORT:
-        while (*start >= '0' && *start <= '9')
-        {
-            start++;
-            (*size)++;
-        }
-        break;
-
-    case HOST:
-        while (isalnum(*start) || *start == '-' || *start == '.' || *start == ' ' || *start == '*')
-        {
-            start++;
-            (*size)++;
-        }
-        break;
-
-    default:
-        FIXME("unknown type %d\n", type);
-        return L"";
-    }
-
-    return start;
+    while (isalnum( *p ) || *p == '+' || *p == '-' || *p == '.')
+        ++p;
+    return p;
 }
 
-static LONG parse_url(const WCHAR *url, struct parsed_url *pl)
+static const WCHAR *parse_url_element( const WCHAR *url, const WCHAR *separators )
+{
+    const WCHAR *p;
+
+    if ((p = wcspbrk( url, separators )))
+        return p;
+    return url + wcslen( url );
+}
+
+static BOOL is_slash( char c )
+{
+    return c == '/' || c == '\\';
+}
+
+static void parse_url( const WCHAR *url, struct parsed_url *pl )
 {
     const WCHAR *work;
 
     memset(pl, 0, sizeof(*pl));
     pl->scheme = url;
-    work = scan_url(pl->scheme, &pl->scheme_len, SCHEME);
-    if (!*work || (*work != ':')) goto ErrorExit;
+    work = parse_scheme( pl->scheme );
+    if (*work != ':') return;
+    pl->scheme_len = work - pl->scheme;
     work++;
-    if ((*work != '/') || (*(work+1) != '/')) goto SuccessExit;
+    if (!is_slash( work[0] ) || !is_slash( work[1] ))
+        return;
 
     pl->username = work + 2;
-    work = scan_url(pl->username, &pl->username_len, USERPASS);
-    if (*work == ':' )
+    work = parse_url_element( pl->username, L":@/\\?#" );
+    pl->username_len = work - pl->username;
+    if (*work == ':')
     {
-        /* parse password */
-        work++;
-        pl->password = work;
-        work = scan_url(pl->password, &pl->password_len, USERPASS);
+        pl->password = work + 1;
+        work = parse_url_element( pl->password, L"@/\\?#" );
+        pl->password_len = work - pl->password;
         if (*work != '@')
         {
             /* what we just parsed must be the hostname and port
@@ -4286,42 +4225,30 @@ static LONG parse_url(const WCHAR *url, struct parsed_url *pl)
         pl->password_len = 0;
         pl->password = 0;
     }
-    else if (!*work || *work == '/' || *work == '.')
+    else
     {
         /* what was parsed was hostname, so reset pointers and let it parse */
         pl->username_len = pl->password_len = 0;
         work = pl->username - 1;
         pl->username = pl->password = 0;
     }
-    else goto ErrorExit;
 
-    /* now start parsing hostname or hostnumber */
-    work++;
-    pl->hostname = work;
-    work = scan_url(pl->hostname, &pl->hostname_len, HOST);
+    pl->hostname = work + 1;
+    work = parse_url_element( pl->hostname, L":/\\?#" );
+    pl->hostname_len = work - pl->hostname;
+
     if (*work == ':')
     {
-        /* parse port */
-        work++;
-        pl->port = work;
-        work = scan_url(pl->port, &pl->port_len, PORT);
+        pl->port = work + 1;
+        work = parse_url_element( pl->port, L"/\\?#" );
+        pl->port_len = work - pl->port;
     }
-    if (*work == '/')
+
+    if ((pl->query = wcschr( work, '?' )))
     {
-        /* see if query string */
-        pl->query = wcschr(work, '?');
-        if (pl->query) pl->query_len = lstrlenW(pl->query);
+        ++pl->query;
+        pl->query_len = lstrlenW(pl->query);
     }
-  SuccessExit:
-    TRACE("parse successful: scheme=%p(%ld), user=%p(%ld), pass=%p(%ld), host=%p(%ld), port=%p(%ld), query=%p(%ld)\n",
-            pl->scheme, pl->scheme_len, pl->username, pl->username_len, pl->password, pl->password_len, pl->hostname,
-            pl->hostname_len, pl->port, pl->port_len, pl->query, pl->query_len);
-
-    return S_OK;
-
-  ErrorExit:
-    FIXME("failed to parse %s\n", debugstr_w(url));
-    return E_INVALIDARG;
 }
 
 HRESULT WINAPI UrlGetPartW(const WCHAR *url, WCHAR *out, DWORD *out_len, DWORD part, DWORD flags)
@@ -4329,14 +4256,11 @@ HRESULT WINAPI UrlGetPartW(const WCHAR *url, WCHAR *out, DWORD *out_len, DWORD p
     DWORD scheme, size, schsize;
     LPCWSTR addr, schaddr;
     struct parsed_url pl;
-    HRESULT hr;
 
     TRACE("%s, %p, %p(%ld), %#lx, %#lx\n", wine_dbgstr_w(url), out, out_len, *out_len, part, flags);
 
     if (!url || !out || !out_len || !*out_len)
         return E_INVALIDARG;
-
-    *out = '\0';
 
     addr = wcschr(url, ':');
     if (!addr)
@@ -4344,102 +4268,82 @@ HRESULT WINAPI UrlGetPartW(const WCHAR *url, WCHAR *out, DWORD *out_len, DWORD p
     else
         scheme = get_scheme_code(url, addr - url);
 
-    hr = parse_url(url, &pl);
+    parse_url(url, &pl);
+
+    switch (scheme)
+    {
+        case URL_SCHEME_FILE:
+        case URL_SCHEME_FTP:
+        case URL_SCHEME_GOPHER:
+        case URL_SCHEME_HTTP:
+        case URL_SCHEME_HTTPS:
+        case URL_SCHEME_TELNET:
+        case URL_SCHEME_NEWS:
+        case URL_SCHEME_NNTP:
+        case URL_SCHEME_SNEWS:
+            break;
+
+        default:
+            if (part != URL_PART_SCHEME && part != URL_PART_QUERY)
+                return E_FAIL;
+    }
 
     switch (part)
     {
     case URL_PART_SCHEME:
-        if (!pl.scheme_len)
-        {
-            *out_len = 0;
-            return S_FALSE;
-        }
+        flags &= ~URL_PARTFLAG_KEEPSCHEME;
         addr = pl.scheme;
         size = pl.scheme_len;
         break;
 
     case URL_PART_HOSTNAME:
-        switch (scheme)
-        {
-            case URL_SCHEME_FTP:
-            case URL_SCHEME_HTTP:
-            case URL_SCHEME_GOPHER:
-            case URL_SCHEME_TELNET:
-            case URL_SCHEME_FILE:
-            case URL_SCHEME_HTTPS:
-                break;
-            default:
-                *out_len = 0;
-                return E_FAIL;
-        }
-
         if (scheme == URL_SCHEME_FILE && (!pl.hostname_len || (pl.hostname_len == 1 && *(pl.hostname + 1) == ':')))
         {
-            *out_len = 0;
-            return S_FALSE;
+            addr = NULL;
+            size = 0;
         }
-
-        if (!pl.hostname_len)
+        else
         {
-            *out_len = 0;
-            return S_FALSE;
+            addr = pl.hostname;
+            size = pl.hostname_len;
         }
-        addr = pl.hostname;
-        size = pl.hostname_len;
         break;
 
     case URL_PART_USERNAME:
-        if (!pl.username_len)
-        {
-            *out_len = 0;
-            return S_FALSE;
-        }
+        if (!pl.username)
+            return E_INVALIDARG;
         addr = pl.username;
         size = pl.username_len;
         break;
 
     case URL_PART_PASSWORD:
-        if (!pl.password_len)
-        {
-            *out_len = 0;
-            return S_FALSE;
-        }
+        if (!pl.password)
+            return E_INVALIDARG;
         addr = pl.password;
         size = pl.password_len;
         break;
 
     case URL_PART_PORT:
-        if (!pl.port_len)
-        {
-            *out_len = 0;
-            return S_FALSE;
-        }
+        if (!pl.port)
+            return E_INVALIDARG;
         addr = pl.port;
         size = pl.port_len;
         break;
 
     case URL_PART_QUERY:
-        if (!pl.query_len)
-        {
-            *out_len = 0;
-            return S_FALSE;
-        }
+        flags &= ~URL_PARTFLAG_KEEPSCHEME;
         addr = pl.query;
         size = pl.query_len;
         break;
 
     default:
-        *out_len = 0;
         return E_INVALIDARG;
     }
 
-    if (flags == URL_PARTFLAG_KEEPSCHEME)
+    if (flags == URL_PARTFLAG_KEEPSCHEME && scheme != URL_SCHEME_FILE)
     {
         if (!pl.scheme || !pl.scheme_len)
-        {
-            *out_len = 0;
             return E_FAIL;
-        }
         schaddr = pl.scheme;
         schsize = pl.scheme_len;
         if (*out_len < schsize + size + 2)
@@ -4460,13 +4364,24 @@ HRESULT WINAPI UrlGetPartW(const WCHAR *url, WCHAR *out, DWORD *out_len, DWORD p
             *out_len = size + 1;
             return E_POINTER;
         }
-        memcpy(out, addr, size*sizeof(WCHAR));
+
+        if (part == URL_PART_SCHEME)
+        {
+            unsigned int i;
+
+            for (i = 0; i < size; ++i)
+                out[i] = tolower( addr[i] );
+        }
+        else
+        {
+            memcpy( out, addr, size * sizeof(WCHAR) );
+        }
         out[size] = 0;
         *out_len = size;
     }
     TRACE("len=%ld %s\n", *out_len, wine_dbgstr_w(out));
 
-    return hr;
+    return *out_len ? S_OK : S_FALSE;
 }
 
 BOOL WINAPI UrlIsA(const char *url, URLIS Urlis)

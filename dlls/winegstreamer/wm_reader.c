@@ -573,7 +573,7 @@ static DWORD CALLBACK read_thread(void *arg)
 
         if (!size)
         {
-            wg_parser_push_data(reader->wg_parser, data, 0);
+            wg_parser_push_data(reader->wg_parser, WG_READ_SUCCESS, data, 0);
             continue;
         }
 
@@ -592,7 +592,7 @@ static DWORD CALLBACK read_thread(void *arg)
                     || !ReadFile(file, data, size, &ret_size, NULL))
             {
                 ERR("Failed to read %u bytes at offset %I64u, error %lu.\n", size, offset, GetLastError());
-                wg_parser_push_data(reader->wg_parser, NULL, 0);
+                wg_parser_push_data(reader->wg_parser, WG_READ_FAILURE, NULL, 0);
                 continue;
             }
         }
@@ -603,14 +603,14 @@ static DWORD CALLBACK read_thread(void *arg)
             if (FAILED(hr))
             {
                 ERR("Failed to read %u bytes at offset %I64u, hr %#lx.\n", size, offset, hr);
-                wg_parser_push_data(reader->wg_parser, NULL, 0);
+                wg_parser_push_data(reader->wg_parser, WG_READ_FAILURE, NULL, 0);
                 continue;
             }
         }
 
         if (ret_size != size)
             ERR("Unexpected short read: requested %u bytes, got %lu.\n", size, ret_size);
-        wg_parser_push_data(reader->wg_parser, data, ret_size);
+        wg_parser_push_data(reader->wg_parser, WG_READ_SUCCESS, data, ret_size);
     }
 
     free(data);
@@ -1455,7 +1455,7 @@ static HRESULT init_stream(struct wm_reader *reader, QWORD file_size)
     HRESULT hr;
     WORD i;
 
-    if (!(wg_parser = wg_parser_create(WG_PARSER_DECODEBIN, false)))
+    if (!(wg_parser = wg_parser_create(WG_PARSER_DECODEBIN, true)))
         return E_OUTOFMEMORY;
 
     reader->wg_parser = wg_parser;
@@ -1484,7 +1484,7 @@ static HRESULT init_stream(struct wm_reader *reader, QWORD file_size)
     {
         struct wm_stream *stream = &reader->streams[i];
 
-        stream->wg_stream = wg_parser_get_stream(reader->wg_parser, i);
+        stream->wg_stream = wg_parser_get_stream(reader->wg_parser, reader->stream_count - i - 1);
         stream->reader = reader;
         stream->index = i;
         stream->selection = WMT_ON;
@@ -1509,7 +1509,7 @@ static HRESULT init_stream(struct wm_reader *reader, QWORD file_size)
              * video type will be BGR. */
             stream->format.u.video.format = WG_VIDEO_FORMAT_BGR;
         }
-        wg_parser_stream_enable(stream->wg_stream, &stream->format);
+        wg_parser_stream_enable(stream->wg_stream, &stream->format, NULL);
     }
 
     wg_parser_end_flush(reader->wg_parser);
@@ -1776,7 +1776,7 @@ HRESULT wm_reader_set_output_props(struct wm_reader *reader, DWORD output,
     }
 
     stream->format = format;
-    wg_parser_stream_enable(stream->wg_stream, &format);
+    wg_parser_stream_enable(stream->wg_stream, &format, NULL);
 
     /* Re-decode any buffers that might have been generated with the old format.
      *
@@ -1989,7 +1989,7 @@ HRESULT wm_reader_set_streams_selected(struct wm_reader *reader, WORD count,
                 FIXME("Ignoring selection %#x for stream %u; treating as enabled.\n",
                         selections[i], stream_numbers[i]);
             TRACE("Enabling stream %u.\n", stream_numbers[i]);
-            wg_parser_stream_enable(stream->wg_stream, &stream->format);
+            wg_parser_stream_enable(stream->wg_stream, &stream->format, NULL);
         }
     }
 

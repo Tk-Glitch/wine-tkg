@@ -1,5 +1,7 @@
 MODULE    = stdole32.tlb
 EXTRAIDLFLAGS = --oldtlb
 
+EXTRADLLFLAGS = -Wb,--data-only
+
 RC_SRCS = rsrc.rc
 IDL_SRCS = std_ole_v1.idl

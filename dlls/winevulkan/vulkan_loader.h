@@ -20,6 +20,9 @@
 #ifndef __WINE_VULKAN_LOADER_H
 #define __WINE_VULKAN_LOADER_H
 
+#include <stdarg.h>
+#include <stdlib.h>
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include <stdarg.h>
@@ -102,5 +105,12 @@ static inline NTSTATUS vk_unix_call(enum unix_call code, void *params)
 {
     return __wine_unix_call(unix_handle, code, params);
 }
+
+struct unix_funcs
+{
+    NTSTATUS (WINAPI *p_vk_call)(enum unix_call, void *);
+    BOOL (WINAPI *p_is_available_instance_function)(VkInstance, const char *);
+    BOOL (WINAPI *p_is_available_device_function)(VkDevice, const char *);
+};
 
 #endif /* __WINE_VULKAN_LOADER_H */

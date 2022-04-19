@@ -83,12 +83,13 @@ typedef struct _ACPacket
 
 typedef struct _PhysDevice {
     struct list entry;
+    WCHAR *name;
     enum phys_device_bus_type bus_type;
     USHORT vendor_id, product_id;
     EndpointFormFactor form;
     DWORD channel_mask;
     UINT index;
-    char device[0];
+    char pulse_name[0];
 } PhysDevice;
 
 static pa_context *pulse_ctx;
@@ -100,7 +101,6 @@ static REFERENCE_TIME pulse_min_period[2], pulse_def_period[2];
 
 static struct list g_phys_speakers = LIST_INIT(g_phys_speakers);
 static struct list g_phys_sources = LIST_INIT(g_phys_sources);
-static HKEY devices_key;
 
 static const REFERENCE_TIME MinimumPeriod = 30000;
 static const REFERENCE_TIME DefaultPeriod = 100000;
@@ -140,6 +140,20 @@ static void dump_attr(const pa_buffer_attr *attr)
     TRACE("prebuf: %u\n", attr->prebuf);
 }
 
+static void free_phys_device_lists(void)
+{
+    static struct list *const lists[] = { &g_phys_speakers, &g_phys_sources, NULL };
+    struct list *const *list = lists;
+    PhysDevice *dev, *dev_next;
+
+    do {
+        LIST_FOR_EACH_ENTRY_SAFE(dev, dev_next, *list, PhysDevice, entry) {
+            free(dev->name);
+            free(dev);
+        }
+    } while (*(++list));
+}
+
 /* copied from kernelbase */
 static int muldiv(int a, int b, int c)
 {
@@ -161,61 +175,6 @@ static int muldiv(int a, int b, int c)
         ret = (((LONGLONG)a * b) - (c / 2)) / c;
 
     if (ret > 2147483647 || ret < -2147483647) return -1;
-    return ret;
-}
-
-/* wrapper for NtCreateKey that creates the key recursively if necessary */
-static HKEY reg_create_key(HKEY root, const WCHAR *name, ULONG name_len)
-{
-    UNICODE_STRING nameW = { name_len, name_len, (WCHAR *)name };
-    OBJECT_ATTRIBUTES attr;
-    NTSTATUS status;
-    HANDLE ret = 0;
-
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = root;
-    attr.ObjectName = &nameW;
-    attr.Attributes = 0;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
-
-    status = NtCreateKey(&ret, KEY_QUERY_VALUE | KEY_WRITE | KEY_WOW64_64KEY, &attr, 0, NULL, 0, NULL);
-    if (status == STATUS_OBJECT_NAME_NOT_FOUND) {
-        DWORD pos = 0, i = 0, len = name_len / sizeof(WCHAR);
-
-        /* don't try to create registry root */
-        if (!root) i += 10;
-
-        while (i < len && name[i] != '\\') i++;
-        if (i == len) return 0;
-        for (;;) {
-            nameW.Buffer = (WCHAR *)name + pos;
-            nameW.Length = (i - pos) * sizeof(WCHAR);
-            status = NtCreateKey(&ret, KEY_QUERY_VALUE | KEY_WRITE | KEY_WOW64_64KEY, &attr, 0, NULL, 0, NULL);
-
-            if (attr.RootDirectory != root) NtClose(attr.RootDirectory);
-            if (!NT_SUCCESS(status)) return 0;
-            if (i == len) break;
-            attr.RootDirectory = ret;
-            while (i < len && name[i] == '\\') i++;
-            pos = i;
-            while (i < len && name[i] != '\\') i++;
-        }
-    }
-    return ret;
-}
-
-static HKEY open_devices_key(void)
-{
-    static const WCHAR drv_key_devicesW[] = {
-        '\\','R','e','g','i','s','t','r','y','\\','M','a','c','h','i','n','e','\\',
-        'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\','D','r','i','v','e','r','s','\\',
-        'w','i','n','e','p','u','l','s','e','.','d','r','v','\\','d','e','v','i','c','e','s'
-    };
-    HANDLE ret;
-
-    if (!(ret = reg_create_key(NULL, drv_key_devicesW, sizeof(drv_key_devicesW))))
-        ERR("Failed to open devices registry key\n");
     return ret;
 }
 
@@ -257,13 +216,7 @@ static NTSTATUS pulse_process_attach(void *args)
 
 static NTSTATUS pulse_process_detach(void *args)
 {
-    PhysDevice *dev, *dev_next;
-
-    LIST_FOR_EACH_ENTRY_SAFE(dev, dev_next, &g_phys_speakers, PhysDevice, entry)
-        free(dev);
-    LIST_FOR_EACH_ENTRY_SAFE(dev, dev_next, &g_phys_sources, PhysDevice, entry)
-        free(dev);
-
+    free_phys_device_lists();
     if (pulse_ctx)
     {
         pa_context_disconnect(pulse_ctx);
@@ -286,6 +239,44 @@ static NTSTATUS pulse_main_loop(void *args)
     pa_mainloop_run(pulse_ml, &ret);
     pa_mainloop_free(pulse_ml);
     pulse_unlock();
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS pulse_get_endpoint_ids(void *args)
+{
+    struct get_endpoint_ids_params *params = args;
+    struct list *list = (params->flow == eRender) ? &g_phys_speakers : &g_phys_sources;
+    struct endpoint *endpoint = params->endpoints;
+    DWORD len, name_len, needed;
+    PhysDevice *dev;
+    char *ptr;
+
+    params->num = list_count(list);
+    needed = params->num * sizeof(*params->endpoints);
+    ptr = (char*)(endpoint + params->num);
+
+    LIST_FOR_EACH_ENTRY(dev, list, PhysDevice, entry) {
+        name_len = lstrlenW(dev->name) + 1;
+        len = strlen(dev->pulse_name) + 1;
+        needed += name_len * sizeof(WCHAR) + ((len + 1) & ~1);
+
+        if (needed <= params->size) {
+            endpoint->name = (WCHAR*)ptr;
+            memcpy(endpoint->name, dev->name, name_len * sizeof(WCHAR));
+            ptr += name_len * sizeof(WCHAR);
+            endpoint->pulse_name = ptr;
+            memcpy(endpoint->pulse_name, dev->pulse_name, len);
+            ptr += (len + 1) & ~1;
+            endpoint++;
+        }
+    }
+    params->default_idx = 0;
+
+    if (needed > params->size) {
+        params->size = needed;
+        params->result = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+    } else
+        params->result = S_OK;
     return STATUS_SUCCESS;
 }
 
@@ -431,43 +422,6 @@ static DWORD pulse_channel_map_to_channel_mask(const pa_channel_map *map)
     return mask;
 }
 
-static void store_device_info(EDataFlow flow, const char *device, const char *name)
-{
-    static const WCHAR nameW[] = { 'n','a','m','e' };
-    UNICODE_STRING name_str = { sizeof(nameW), sizeof(nameW), (WCHAR*)nameW };
-    UINT name_len = strlen(name);
-    WCHAR key_name[258], *wname;
-    DWORD len, key_len;
-    HKEY key;
-
-    if (!devices_key || !(wname = malloc((name_len + 1) * sizeof(WCHAR))))
-        return;
-
-    key_name[0] = (flow == eCapture) ? '1' : '0';
-    key_name[1] = ',';
-
-    key_len = ntdll_umbstowcs(device, strlen(device), key_name + 2, ARRAY_SIZE(key_name) - 2);
-    if (!key_len || key_len >= ARRAY_SIZE(key_name) - 2)
-        goto done;
-    key_len += 2;
-
-    if (!(len = ntdll_umbstowcs(name, name_len, wname, name_len)))
-        goto done;
-    wname[len] = 0;
-
-    if (!(key = reg_create_key(devices_key, key_name, key_len * sizeof(WCHAR)))) {
-        ERR("Failed to open registry key for device %s\n", device);
-        goto done;
-    }
-
-    if (NtSetValueKey(key, &name_str, 0, REG_SZ, wname, (len + 1) * sizeof(WCHAR)))
-        ERR("Failed to store name for %s to registry\n", device);
-    NtClose(key);
-
-done:
-    free(wname);
-}
-
 static void fill_device_info(PhysDevice *dev, pa_proplist *p)
 {
     const char *buffer;
@@ -494,18 +448,32 @@ static void fill_device_info(PhysDevice *dev, pa_proplist *p)
 }
 
 static void pulse_add_device(struct list *list, pa_proplist *proplist, int index, EndpointFormFactor form,
-        DWORD channel_mask, const char *device)
+        DWORD channel_mask, const char *pulse_name, const char *name)
 {
-    DWORD len = strlen(device);
-    PhysDevice *dev = malloc(offsetof(PhysDevice, device[len + 1]));
+    DWORD len = strlen(pulse_name), name_len = strlen(name);
+    PhysDevice *dev = malloc(FIELD_OFFSET(PhysDevice, pulse_name[len + 1]));
+    WCHAR *wname;
 
     if (!dev)
         return;
-    memcpy(dev->device, device, len + 1);
+
+    if (!(wname = malloc((name_len + 1) * sizeof(WCHAR)))) {
+        free(dev);
+        return;
+    }
+
+    if (!(name_len = ntdll_umbstowcs(name, name_len, wname, name_len)) ||
+        !(dev->name = realloc(wname, (name_len + 1) * sizeof(WCHAR)))) {
+        free(wname);
+        free(dev);
+        return;
+    }
+    dev->name[name_len] = 0;
     dev->form = form;
     dev->index = index;
     dev->channel_mask = channel_mask;
     fill_device_info(dev, proplist);
+    memcpy(dev->pulse_name, pulse_name, len + 1);
 
     list_add_tail(list, &dev->entry);
 }
@@ -513,28 +481,27 @@ static void pulse_add_device(struct list *list, pa_proplist *proplist, int index
 static void pulse_phys_speakers_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
 {
     struct list *speaker;
+    DWORD channel_mask;
 
-    if (i && i->name && i->name[0]) {
-        DWORD channel_mask = pulse_channel_map_to_channel_mask(&i->channel_map);
+    if (!i || !i->name || !i->name[0])
+        return;
+    channel_mask = pulse_channel_map_to_channel_mask(&i->channel_map);
 
-        /* For default PulseAudio render device, OR together all of the
-         * PKEY_AudioEndpoint_PhysicalSpeakers values of the sinks. */
-        speaker = list_head(&g_phys_speakers);
-        if (speaker)
-            LIST_ENTRY(speaker, PhysDevice, entry)->channel_mask |= channel_mask;
+    /* For default PulseAudio render device, OR together all of the
+     * PKEY_AudioEndpoint_PhysicalSpeakers values of the sinks. */
+    speaker = list_head(&g_phys_speakers);
+    if (speaker)
+        LIST_ENTRY(speaker, PhysDevice, entry)->channel_mask |= channel_mask;
 
-        store_device_info(eRender, i->name, i->description);
-        pulse_add_device(&g_phys_speakers, i->proplist, i->index, Speakers, channel_mask, i->name);
-    }
+    pulse_add_device(&g_phys_speakers, i->proplist, i->index, Speakers, channel_mask, i->name, i->description);
 }
 
 static void pulse_phys_sources_cb(pa_context *c, const pa_source_info *i, int eol, void *userdata)
 {
-    if (i && i->name && i->name[0]) {
-        store_device_info(eCapture, i->name, i->description);
-        pulse_add_device(&g_phys_sources, i->proplist, i->index,
-                (i->monitor_of_sink == PA_INVALID_INDEX) ? Microphone : LineLevel, 0, i->name);
-    }
+    if (!i || !i->name || !i->name[0])
+        return;
+    pulse_add_device(&g_phys_sources, i->proplist, i->index,
+        (i->monitor_of_sink == PA_INVALID_INDEX) ? Microphone : LineLevel, 0, i->name, i->description);
 }
 
 /* For most hardware on Windows, users must choose a configuration with an even
@@ -712,11 +679,6 @@ static NTSTATUS pulse_test_connect(void *args)
     pa_context *ctx;
 
     pulse_lock();
-
-    /* Make sure we never run twice accidentally */
-    if (!list_empty(&g_phys_speakers))
-        goto success;
-
     ml = pa_mainloop_new();
 
     pa_mainloop_set_poll_func(ml, pulse_poll_func, NULL);
@@ -752,15 +714,17 @@ static NTSTATUS pulse_test_connect(void *args)
 
     TRACE("Test-connected to server %s with protocol version: %i.\n",
         pa_context_get_server(ctx),
-        pa_context_get_server_protocol_version(ctx));
+        pa_context_get_server_protocol_version(pulse_ctx));
 
     pulse_probe_settings(ml, ctx, 1, &pulse_fmt[0]);
     pulse_probe_settings(ml, ctx, 0, &pulse_fmt[1]);
 
-    devices_key = open_devices_key();
+    free_phys_device_lists();
+    list_init(&g_phys_speakers);
+    list_init(&g_phys_sources);
 
-    pulse_add_device(&g_phys_speakers, NULL, 0, Speakers, 0, "");
-    pulse_add_device(&g_phys_sources, NULL, 0, Microphone, 0, "");
+    pulse_add_device(&g_phys_speakers, NULL, 0, Speakers, 0, "", "PulseAudio");
+    pulse_add_device(&g_phys_sources, NULL, 0, Microphone, 0, "", "PulseAudio");
 
     o = pa_context_get_sink_info_list(ctx, &pulse_phys_speakers_cb, NULL);
     if (o) {
@@ -777,7 +741,6 @@ static NTSTATUS pulse_test_connect(void *args)
         {}
         pa_operation_unref(o);
     }
-    NtClose(devices_key);
 
     pa_context_unref(ctx);
     pa_mainloop_free(ml);
@@ -789,7 +752,6 @@ static NTSTATUS pulse_test_connect(void *args)
     config->modes[1].def_period = pulse_def_period[1];
     config->modes[1].min_period = pulse_min_period[1];
 
-success:
     pulse_unlock();
 
     params->result = S_OK;
@@ -799,31 +761,6 @@ fail:
     pa_context_unref(ctx);
     pa_mainloop_free(ml);
     pulse_unlock();
-    params->result = E_FAIL;
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS pulse_get_device_info(void *args)
-{
-    struct get_device_info_params *params = args;
-    const struct list *const list = (params->dataflow == eRender) ? &g_phys_speakers : &g_phys_sources;
-    const char *device = params->device;
-    PhysDevice *dev;
-
-    LIST_FOR_EACH_ENTRY(dev, list, PhysDevice, entry) {
-        if (!strcmp(device, dev->device)) {
-            params->bus_type     = dev->bus_type;
-            params->vendor_id    = dev->vendor_id;
-            params->product_id   = dev->product_id;
-            params->index        = dev->index;
-            params->form         = dev->form;
-            params->channel_mask = dev->channel_mask;
-            params->result       = S_OK;
-            return STATUS_SUCCESS;
-        }
-    }
-
-    WARN("Unknown device %s\n", device);
     params->result = E_FAIL;
     return STATUS_SUCCESS;
 }
@@ -983,13 +920,13 @@ static HRESULT pulse_spec_from_waveformat(struct pulse_stream *stream, const WAV
     return S_OK;
 }
 
-static HRESULT pulse_stream_connect(struct pulse_stream *stream, const char *device, UINT32 period_bytes)
+static HRESULT pulse_stream_connect(struct pulse_stream *stream, const char *pulse_name, UINT32 period_bytes)
 {
+    pa_stream_flags_t flags = PA_STREAM_START_CORKED | PA_STREAM_START_UNMUTED | PA_STREAM_ADJUST_LATENCY;
     int ret;
     char buffer[64];
     static LONG number;
     pa_buffer_attr attr;
-    int moving = 0;
 
     ret = InterlockedIncrement(&number);
     sprintf(buffer, "audio stream #%i", ret);
@@ -1011,16 +948,16 @@ static HRESULT pulse_stream_connect(struct pulse_stream *stream, const char *dev
     attr.prebuf = pa_frame_size(&stream->ss);
     dump_attr(&attr);
 
-    /* If device name is given use exactly the specified device */
-    if (device)
-        moving = PA_STREAM_DONT_MOVE;
+    /* If specific device was requested, use it exactly */
+    if (pulse_name[0])
+        flags |= PA_STREAM_DONT_MOVE;
+    else
+        pulse_name = NULL;  /* use default */
 
     if (stream->dataflow == eRender)
-        ret = pa_stream_connect_playback(stream->stream, device, &attr,
-        PA_STREAM_START_CORKED|PA_STREAM_START_UNMUTED|PA_STREAM_ADJUST_LATENCY|moving, NULL, NULL);
+        ret = pa_stream_connect_playback(stream->stream, pulse_name, &attr, flags, NULL, NULL);
     else
-        ret = pa_stream_connect_record(stream->stream, device, &attr,
-        PA_STREAM_START_CORKED|PA_STREAM_START_UNMUTED|PA_STREAM_ADJUST_LATENCY|moving);
+        ret = pa_stream_connect_record(stream->stream, pulse_name, &attr, flags);
     if (ret < 0) {
         WARN("Returns %i\n", ret);
         return AUDCLNT_E_ENDPOINT_CREATE_FAILED;
@@ -1082,7 +1019,7 @@ static NTSTATUS pulse_create_stream(void *args)
 
     stream->share = params->mode;
     stream->flags = params->flags;
-    hr = pulse_stream_connect(stream, params->device, stream->period_bytes);
+    hr = pulse_stream_connect(stream, params->pulse_name, stream->period_bytes);
     if (SUCCEEDED(hr)) {
         UINT32 unalign;
         const pa_buffer_attr *attr = pa_stream_get_buffer_attr(stream->stream);
@@ -2180,11 +2117,88 @@ static NTSTATUS pulse_is_started(void *args)
     return STATUS_SUCCESS;
 }
 
+static BOOL get_device_path(PhysDevice *dev, struct get_prop_value_params *params)
+{
+    const GUID *guid = params->guid;
+    UINT serial_number;
+    const char *fmt;
+    char path[128];
+    int len;
+
+    switch (dev->bus_type) {
+    case phys_device_bus_pci:
+        fmt = "{1}.HDAUDIO\\FUNC_01&VEN_%04X&DEV_%04X\\%u&%08X";
+        break;
+    case phys_device_bus_usb:
+        fmt = "{1}.USB\\VID_%04X&PID_%04X\\%u&%08X";
+        break;
+    default:
+        return FALSE;
+    }
+
+    /* As hardly any audio devices have serial numbers, Windows instead
+       appears to use a persistent random number. We emulate this here
+       by instead using the last 8 hex digits of the GUID. */
+    serial_number = (guid->Data4[4] << 24) | (guid->Data4[5] << 16) | (guid->Data4[6] << 8) | guid->Data4[7];
+
+    len = sprintf(path, fmt, dev->vendor_id, dev->product_id, dev->index, serial_number);
+    ntdll_umbstowcs(path, len + 1, params->wstr, ARRAY_SIZE(params->wstr));
+
+    params->vt = VT_LPWSTR;
+    return TRUE;
+}
+
+static NTSTATUS pulse_get_prop_value(void *args)
+{
+    static const GUID PKEY_AudioEndpoint_GUID = {
+        0x1da5d803, 0xd492, 0x4edd, {0x8c, 0x23, 0xe0, 0xc0, 0xff, 0xee, 0x7f, 0x0e}
+    };
+    static const PROPERTYKEY devicepath_key = { /* undocumented? - {b3f8fa53-0004-438e-9003-51a46e139bfc},2 */
+        {0xb3f8fa53, 0x0004, 0x438e, {0x90, 0x03, 0x51, 0xa4, 0x6e, 0x13, 0x9b, 0xfc}}, 2
+    };
+    struct get_prop_value_params *params = args;
+    struct list *list = (params->flow == eRender) ? &g_phys_speakers : &g_phys_sources;
+    PhysDevice *dev;
+
+    params->result = S_OK;
+    LIST_FOR_EACH_ENTRY(dev, list, PhysDevice, entry) {
+        if (strcmp(params->pulse_name, dev->pulse_name))
+            continue;
+        if (IsEqualPropertyKey(*params->prop, devicepath_key)) {
+            if (!get_device_path(dev, params))
+                break;
+            return STATUS_SUCCESS;
+        } else if (IsEqualGUID(&params->prop->fmtid, &PKEY_AudioEndpoint_GUID)) {
+            switch (params->prop->pid) {
+            case 0:   /* FormFactor */
+                params->vt = VT_UI4;
+                params->ulVal = dev->form;
+                return STATUS_SUCCESS;
+            case 3:   /* PhysicalSpeakers */
+                if (!dev->channel_mask)
+                    goto fail;
+                params->vt = VT_UI4;
+                params->ulVal = dev->channel_mask;
+                return STATUS_SUCCESS;
+            default:
+                break;
+            }
+        }
+        params->result = E_NOTIMPL;
+        return STATUS_SUCCESS;
+    }
+
+fail:
+    params->result = E_FAIL;
+    return STATUS_SUCCESS;
+}
+
 const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     pulse_process_attach,
     pulse_process_detach,
     pulse_main_loop,
+    pulse_get_endpoint_ids,
     pulse_create_stream,
     pulse_release_stream,
     pulse_start,
@@ -2204,6 +2218,6 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     pulse_set_volumes,
     pulse_set_event_handle,
     pulse_test_connect,
-    pulse_get_device_info,
     pulse_is_started,
+    pulse_get_prop_value,
 };

@@ -31,10 +31,20 @@
 #include "dinputd.h"
 #include "devguid.h"
 #include "mmsystem.h"
+#include "roapi.h"
+#include "unknwn.h"
+#include "winstring.h"
 
 #include "wine/hid.h"
 
 #include "dinput_test.h"
+
+#define WIDL_using_Windows_Foundation
+#define WIDL_using_Windows_Foundation_Collections
+#include "windows.foundation.h"
+#define WIDL_using_Windows_Devices_Haptics
+#define WIDL_using_Windows_Gaming_Input
+#include "windows.gaming.input.h"
 
 struct check_objects_todos
 {
@@ -2590,6 +2600,238 @@ static BOOL test_device_types( DWORD version )
     return success;
 }
 
+static void test_driving_wheel_axes(void)
+{
+#include "psh_hid_macros.h"
+    static const unsigned char report_desc[] =
+    {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_JOYSTICK),
+            COLLECTION(1, Report),
+                REPORT_ID(1, 1),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_SIMULATION),
+                USAGE(1, HID_USAGE_SIMULATION_RUDDER),
+                USAGE(1, HID_USAGE_SIMULATION_THROTTLE),
+                USAGE(1, HID_USAGE_SIMULATION_ACCELERATOR),
+                USAGE(1, HID_USAGE_SIMULATION_BRAKE),
+                USAGE(1, HID_USAGE_SIMULATION_CLUTCH),
+                USAGE(1, HID_USAGE_SIMULATION_STEERING),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 0x7f),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 0x7f),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 6),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+#undef REPORT_ID_OR_USAGE_PAGE
+#include "pop_hid_macros.h"
+
+    static const HIDP_CAPS hid_caps =
+    {
+        .InputReportByteLength = 7,
+    };
+    const DIDEVCAPS expect_caps =
+    {
+        .dwSize = sizeof(DIDEVCAPS),
+        .dwFlags = DIDC_ATTACHED | DIDC_EMULATED,
+        .dwDevType = DIDEVTYPE_HID | (DI8DEVTYPEDRIVING_LIMITED << 8) | DI8DEVTYPE_DRIVING,
+        .dwAxes = 6,
+    };
+    const DIDEVICEINSTANCEW expect_devinst =
+    {
+        .dwSize = sizeof(DIDEVICEINSTANCEW),
+        .guidInstance = expect_guid_product,
+        .guidProduct = expect_guid_product,
+        .dwDevType = DIDEVTYPE_HID | (DI8DEVTYPEDRIVING_LIMITED << 8) | DI8DEVTYPE_DRIVING,
+        .tszInstanceName = L"Wine test root driver",
+        .tszProductName = L"Wine test root driver",
+        .guidFFDriver = GUID_NULL,
+        .wUsagePage = HID_USAGE_PAGE_GENERIC,
+        .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+    };
+    const DIDEVICEOBJECTINSTANCEW expect_objects[] =
+    {
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_XAxis,
+            .dwOfs = 0,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(0),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Steering",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_SIMULATION,
+            .wUsage = HID_USAGE_SIMULATION_STEERING,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Unknown,
+            .dwOfs = 0x4,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(6),
+            .dwFlags = 0,
+            .tszName = L"Clutch",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_SIMULATION,
+            .wUsage = HID_USAGE_SIMULATION_CLUTCH,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_RzAxis,
+            .dwOfs = 0x8,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(5),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Brake",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_SIMULATION,
+            .wUsage = HID_USAGE_SIMULATION_BRAKE,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_YAxis,
+            .dwOfs = 0xc,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(1),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Accelerator",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_SIMULATION,
+            .wUsage = HID_USAGE_SIMULATION_ACCELERATOR,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Slider,
+            .dwOfs = 0x10,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(2),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Throttle",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_SIMULATION,
+            .wUsage = HID_USAGE_SIMULATION_THROTTLE,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_RzAxis,
+            .dwOfs = 0x14,
+            .dwType = DIDFT_ABSAXIS|DIDFT_MAKEINSTANCE(7),
+            .dwFlags = DIDOI_ASPECTPOSITION,
+            .tszName = L"Rudder",
+            .wCollectionNumber = 1,
+            .wUsagePage = HID_USAGE_PAGE_SIMULATION,
+            .wUsage = HID_USAGE_SIMULATION_RUDDER,
+            .wReportId = 1,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Unknown,
+            .dwType = DIDFT_COLLECTION|DIDFT_NODATA|DIDFT_MAKEINSTANCE(0),
+            .tszName = L"Collection 0 - Joystick",
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+        },
+        {
+            .dwSize = sizeof(DIDEVICEOBJECTINSTANCEW),
+            .guidType = GUID_Unknown,
+            .dwType = DIDFT_COLLECTION|DIDFT_NODATA|DIDFT_MAKEINSTANCE(1),
+            .tszName = L"Collection 1 - Joystick",
+            .wUsagePage = HID_USAGE_PAGE_GENERIC,
+            .wUsage = HID_USAGE_GENERIC_JOYSTICK,
+        },
+    };
+    struct check_objects_todos object_todos[ARRAY_SIZE(expect_objects)] =
+    {
+        {.name = TRUE},
+        {.name = TRUE},
+        {.name = TRUE},
+        {.name = TRUE},
+        {.name = TRUE},
+    };
+    struct check_objects_params check_objects_params =
+    {
+        .version = DIRECTINPUT_VERSION,
+        .expect_count = ARRAY_SIZE(expect_objects),
+        .expect_objs = expect_objects,
+        .todo_objs = object_todos,
+    };
+
+    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
+    DIDEVICEINSTANCEW devinst = {0};
+    IDirectInputDevice8W *device;
+    DIDEVCAPS caps = {0};
+    HRESULT hr;
+    ULONG ref;
+
+    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
+    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
+    SetCurrentDirectoryW( tempdir );
+
+    cleanup_registry_keys();
+    if (!dinput_driver_start( report_desc, sizeof(report_desc), &hid_caps, NULL, 0 )) goto done;
+    if (FAILED(hr = dinput_test_create_device( DIRECTINPUT_VERSION, &devinst, &device ))) goto done;
+
+    check_dinput_devices( DIRECTINPUT_VERSION, &devinst );
+
+    memset( &devinst, 0, sizeof(devinst) );
+    devinst.dwSize = sizeof(DIDEVICEINSTANCEW);
+    hr = IDirectInputDevice8_GetDeviceInfo( device, &devinst );
+    ok( hr == DI_OK, "GetDeviceInfo returned %#lx\n", hr );
+    check_member( devinst, expect_devinst, "%lu", dwSize );
+    todo_wine
+    check_member_guid( devinst, expect_devinst, guidInstance );
+    check_member_guid( devinst, expect_devinst, guidProduct );
+    todo_wine
+    check_member( devinst, expect_devinst, "%#lx", dwDevType );
+    todo_wine
+    check_member_wstr( devinst, expect_devinst, tszInstanceName );
+    todo_wine
+    check_member_wstr( devinst, expect_devinst, tszProductName );
+    check_member_guid( devinst, expect_devinst, guidFFDriver );
+    check_member( devinst, expect_devinst, "%04x", wUsagePage );
+    check_member( devinst, expect_devinst, "%04x", wUsage );
+
+    hr = IDirectInputDevice8_GetCapabilities( device, NULL );
+    ok( hr == E_POINTER, "GetCapabilities returned %#lx\n", hr );
+    hr = IDirectInputDevice8_GetCapabilities( device, &caps );
+    ok( hr == DIERR_INVALIDPARAM, "GetCapabilities returned %#lx\n", hr );
+    caps.dwSize = sizeof(DIDEVCAPS);
+    hr = IDirectInputDevice8_GetCapabilities( device, &caps );
+    ok( hr == DI_OK, "GetCapabilities returned %#lx\n", hr );
+    check_member( caps, expect_caps, "%lu", dwSize );
+    check_member( caps, expect_caps, "%#lx", dwFlags );
+    todo_wine
+    check_member( caps, expect_caps, "%#lx", dwDevType );
+    check_member( caps, expect_caps, "%lu", dwAxes );
+    check_member( caps, expect_caps, "%lu", dwButtons );
+    check_member( caps, expect_caps, "%lu", dwPOVs );
+    check_member( caps, expect_caps, "%lu", dwFFSamplePeriod );
+    check_member( caps, expect_caps, "%lu", dwFFMinTimeResolution );
+    check_member( caps, expect_caps, "%lu", dwFirmwareRevision );
+    check_member( caps, expect_caps, "%lu", dwHardwareRevision );
+    check_member( caps, expect_caps, "%lu", dwFFDriverVersion );
+
+    hr = IDirectInputDevice8_EnumObjects( device, check_objects, &check_objects_params, DIDFT_ALL );
+    ok( hr == DI_OK, "EnumObjects returned %#lx\n", hr );
+    ok( check_objects_params.index >= check_objects_params.expect_count, "missing %u objects\n",
+        check_objects_params.expect_count - check_objects_params.index );
+
+    ref = IDirectInputDevice8_Release( device );
+    ok( ref == 0, "Release returned %ld\n", ref );
+
+done:
+    pnp_driver_stop();
+    cleanup_registry_keys();
+    SetCurrentDirectoryW( cwd );
+    winetest_pop_context();
+}
+
 static BOOL test_winmm_joystick(void)
 {
 #include "psh_hid_macros.h"
@@ -2949,6 +3191,203 @@ done:
     return device != NULL;
 }
 
+#define check_interface( a, b, c ) check_interface_( __LINE__, a, b, c )
+static void check_interface_( unsigned int line, void *iface_ptr, REFIID iid, BOOL supported )
+{
+    IUnknown *iface = iface_ptr;
+    HRESULT hr, expected;
+    IUnknown *unk;
+
+    expected = supported ? S_OK : E_NOINTERFACE;
+    hr = IUnknown_QueryInterface( iface, iid, (void **)&unk );
+    ok_ (__FILE__, line)( hr == expected, "got hr %#lx, expected %#lx.\n", hr, expected );
+    if (SUCCEEDED(hr)) IUnknown_Release( unk );
+}
+
+#define check_runtimeclass( a, b ) check_runtimeclass_( __LINE__, (IInspectable *)a, b )
+static void check_runtimeclass_( int line, IInspectable *inspectable, const WCHAR *class_name )
+{
+    const WCHAR *buffer;
+    UINT32 length;
+    HSTRING str;
+    HRESULT hr;
+
+    hr = IInspectable_GetRuntimeClassName( inspectable, &str );
+    ok_ (__FILE__, line)( hr == S_OK, "GetRuntimeClassName returned %#lx\n", hr );
+    buffer = WindowsGetStringRawBuffer( str, &length );
+    ok_ (__FILE__, line)( !wcscmp( buffer, class_name ), "got class name %s\n", debugstr_w(buffer) );
+    WindowsDeleteString( str );
+}
+
+static void test_windows_gaming_input(void)
+{
+#include "psh_hid_macros.h"
+    const unsigned char report_desc[] = {
+        USAGE_PAGE(1, HID_USAGE_PAGE_GENERIC),
+        USAGE(1, HID_USAGE_GENERIC_GAMEPAD),
+        COLLECTION(1, Application),
+            USAGE(1, HID_USAGE_GENERIC_GAMEPAD),
+            COLLECTION(1, Physical),
+                USAGE(1, HID_USAGE_GENERIC_X),
+                USAGE(1, HID_USAGE_GENERIC_Y),
+                USAGE(1, HID_USAGE_GENERIC_RX),
+                USAGE(1, HID_USAGE_GENERIC_RY),
+                USAGE(1, HID_USAGE_GENERIC_Z),
+                USAGE(1, HID_USAGE_GENERIC_RZ),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 127),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 127),
+                REPORT_SIZE(1, 8),
+                REPORT_COUNT(1, 6),
+                INPUT(1, Data|Var|Abs),
+
+                USAGE(1, HID_USAGE_GENERIC_HATSWITCH),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 8),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 8),
+                REPORT_SIZE(1, 4),
+                REPORT_COUNT(1, 1),
+                INPUT(1, Data|Var|Abs|Null),
+
+                USAGE_PAGE(1, HID_USAGE_PAGE_BUTTON),
+                USAGE_MINIMUM(1, 1),
+                USAGE_MAXIMUM(1, 12),
+                LOGICAL_MINIMUM(1, 0),
+                LOGICAL_MAXIMUM(1, 1),
+                PHYSICAL_MINIMUM(1, 0),
+                PHYSICAL_MAXIMUM(1, 1),
+                REPORT_SIZE(1, 1),
+                REPORT_COUNT(1, 12),
+                INPUT(1, Data|Var|Abs),
+            END_COLLECTION,
+        END_COLLECTION,
+    };
+#include "pop_hid_macros.h"
+
+    static const HIDP_CAPS hid_caps =
+    {
+        .InputReportByteLength = 8,
+    };
+    static const WCHAR *controller_class_name = RuntimeClass_Windows_Gaming_Input_RawGameController;
+    static const WCHAR *gamepad_class_name = RuntimeClass_Windows_Gaming_Input_Gamepad;
+
+    IRawGameController *raw_controller, *tmp_raw_controller;
+    IVectorView_RawGameController *controllers_view;
+    IRawGameControllerStatics *controller_statics;
+    WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
+    IVectorView_Gamepad *gamepads_view;
+    IGamepadStatics *gamepad_statics;
+    IGameController *game_controller;
+    UINT32 size;
+    HSTRING str;
+    HRESULT hr;
+
+    GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
+    GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
+    SetCurrentDirectoryW( tempdir );
+
+    cleanup_registry_keys();
+
+    hr = RoInitialize( RO_INIT_MULTITHREADED );
+    ok( hr == RPC_E_CHANGED_MODE, "RoInitialize returned %#lx\n", hr );
+
+    hr = WindowsCreateString( controller_class_name, wcslen( controller_class_name ), &str );
+    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
+    hr = RoGetActivationFactory( str, &IID_IRawGameControllerStatics, (void **)&controller_statics );
+    ok( hr == S_OK || broken( hr == REGDB_E_CLASSNOTREG ), "RoGetActivationFactory returned %#lx\n", hr );
+    WindowsDeleteString( str );
+
+    if (hr == REGDB_E_CLASSNOTREG)
+    {
+        win_skip( "%s runtimeclass not registered, skipping tests.\n", wine_dbgstr_w( controller_class_name ) );
+        goto done;
+    }
+
+    hr = IRawGameControllerStatics_get_RawGameControllers( controller_statics, &controllers_view );
+    ok( hr == S_OK, "get_RawGameControllers returned %#lx\n", hr );
+    hr = IVectorView_RawGameController_get_Size( controllers_view, &size );
+    ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    ok( size == 0, "got size %u\n", size );
+
+    if (!dinput_driver_start( report_desc, sizeof(report_desc), &hid_caps, NULL, 0 )) goto done;
+
+    hr = IVectorView_RawGameController_get_Size( controllers_view, &size );
+    ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    ok( size == 0, "got size %u\n", size );
+    IVectorView_RawGameController_Release( controllers_view );
+
+    hr = IRawGameControllerStatics_get_RawGameControllers( controller_statics, &controllers_view );
+    ok( hr == S_OK, "get_RawGameControllers returned %#lx\n", hr );
+    hr = IVectorView_RawGameController_get_Size( controllers_view, &size );
+    ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    todo_wine
+    ok( size == 1, "got size %u\n", size );
+    hr = IVectorView_RawGameController_GetAt( controllers_view, 0, &raw_controller );
+    todo_wine
+    ok( hr == S_OK, "GetAt returned %#lx\n", hr );
+    IVectorView_RawGameController_Release( controllers_view );
+    if (hr != S_OK)
+    {
+        IRawGameControllerStatics_Release( controller_statics );
+        goto done;
+    }
+
+    /* HID gamepads aren't exposed as WGI gamepads on Windows */
+
+    hr = WindowsCreateString( gamepad_class_name, wcslen( gamepad_class_name ), &str );
+    ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
+    hr = RoGetActivationFactory( str, &IID_IGamepadStatics, (void **)&gamepad_statics );
+    ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
+    WindowsDeleteString( str );
+    hr = IGamepadStatics_get_Gamepads( gamepad_statics, &gamepads_view );
+    ok( hr == S_OK, "get_Gamepads returned %#lx\n", hr );
+    hr = IVectorView_Gamepad_get_Size( gamepads_view, &size );
+    ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    ok( size == 0, "got size %u\n", size );
+    IVectorView_Gamepad_Release( gamepads_view );
+    IGamepadStatics_Release( gamepad_statics );
+
+    check_runtimeclass( raw_controller, RuntimeClass_Windows_Gaming_Input_RawGameController );
+    check_interface( raw_controller, &IID_IUnknown, TRUE );
+    check_interface( raw_controller, &IID_IInspectable, TRUE );
+    check_interface( raw_controller, &IID_IAgileObject, TRUE );
+    check_interface( raw_controller, &IID_IRawGameController, TRUE );
+    check_interface( raw_controller, &IID_IRawGameController2, TRUE );
+    check_interface( raw_controller, &IID_IGameController, TRUE );
+    check_interface( raw_controller, &IID_IGamepad, FALSE );
+
+    hr = IRawGameController_QueryInterface( raw_controller, &IID_IGameController, (void **)&game_controller );
+    ok( hr == S_OK, "QueryInterface returned %#lx\n", hr );
+
+    check_runtimeclass( game_controller, RuntimeClass_Windows_Gaming_Input_RawGameController );
+    check_interface( game_controller, &IID_IUnknown, TRUE );
+    check_interface( game_controller, &IID_IInspectable, TRUE );
+    check_interface( game_controller, &IID_IAgileObject, TRUE );
+    check_interface( game_controller, &IID_IRawGameController, TRUE );
+    check_interface( game_controller, &IID_IRawGameController2, TRUE );
+    check_interface( game_controller, &IID_IGameController, TRUE );
+    check_interface( game_controller, &IID_IGamepad, FALSE );
+
+    hr = IRawGameControllerStatics_FromGameController( controller_statics, game_controller, &tmp_raw_controller );
+    ok( hr == S_OK, "FromGameController returned %#lx\n", hr );
+    ok( tmp_raw_controller == raw_controller, "got unexpected IGameController interface\n" );
+    IRawGameController_Release( tmp_raw_controller );
+
+    IGameController_Release( game_controller );
+    IRawGameController_Release( raw_controller );
+
+    IRawGameControllerStatics_Release( controller_statics );
+
+done:
+    pnp_driver_stop();
+    cleanup_registry_keys();
+    SetCurrentDirectoryW( cwd );
+
+    RoUninitialize();
+}
+
 START_TEST( joystick8 )
 {
     if (!dinput_test_init()) return;
@@ -2966,6 +3405,9 @@ START_TEST( joystick8 )
         test_simple_joystick( 0x500 );
         test_simple_joystick( 0x700 );
         test_simple_joystick( 0x800 );
+
+        test_driving_wheel_axes();
+        test_windows_gaming_input();
     }
     CoUninitialize();
 

@@ -142,6 +142,11 @@ struct media_engine
     BSTR current_source;
     struct
     {
+        IMFMediaSource *source;
+        IMFPresentationDescriptor *pd;
+    } presentation;
+    struct
+    {
         LONGLONG pts;
         SIZE size;
         SIZE ratio;
@@ -1071,6 +1076,18 @@ static HRESULT media_engine_create_video_renderer(struct media_engine *engine, I
     return hr;
 }
 
+static void media_engine_clear_presentation(struct media_engine *engine)
+{
+    if (engine->presentation.source)
+    {
+        IMFMediaSource_Shutdown(engine->presentation.source);
+        IMFMediaSource_Release(engine->presentation.source);
+    }
+    if (engine->presentation.pd)
+        IMFPresentationDescriptor_Release(engine->presentation.pd);
+    memset(&engine->presentation, 0, sizeof(engine->presentation));
+}
+
 static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMediaSource *source)
 {
     IMFStreamDescriptor *sd_audio = NULL, *sd_video = NULL;
@@ -1081,6 +1098,7 @@ static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMedi
     HRESULT hr;
 
     media_engine_release_video_frame_resources(engine);
+    media_engine_clear_presentation(engine);
 
     if (FAILED(hr = IMFMediaSource_CreatePresentationDescriptor(source, &pd)))
         return hr;
@@ -1134,6 +1152,11 @@ static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMedi
         return E_UNEXPECTED;
     }
 
+    engine->presentation.source = source;
+    IMFMediaSource_AddRef(engine->presentation.source);
+    engine->presentation.pd = pd;
+    IMFPresentationDescriptor_AddRef(engine->presentation.pd);
+
     media_engine_set_flag(engine, FLAGS_ENGINE_HAS_VIDEO, !!sd_video);
     media_engine_set_flag(engine, FLAGS_ENGINE_HAS_AUDIO, !!sd_audio);
 
@@ -1150,6 +1173,9 @@ static HRESULT media_engine_create_topology(struct media_engine *engine, IMFMedi
     {
         IMFTopologyNode *sar_node = NULL, *audio_src = NULL;
         IMFTopologyNode *grabber_node = NULL, *video_src = NULL;
+
+        if (engine->flags & MF_MEDIA_ENGINE_REAL_TIME_MODE)
+            IMFTopology_SetUINT32(topology, &MF_LOW_LATENCY, TRUE);
 
         if (sd_audio)
         {
@@ -1340,6 +1366,7 @@ static void free_media_engine(struct media_engine *engine)
     if (engine->resolver)
         IMFSourceResolver_Release(engine->resolver);
     media_engine_release_video_frame_resources(engine);
+    media_engine_clear_presentation(engine);
     if (engine->device_manager)
     {
         IMFDXGIDeviceManager_CloseDeviceHandle(engine->device_manager, engine->device_handle);
@@ -2086,6 +2113,7 @@ static HRESULT WINAPI media_engine_Shutdown(IMFMediaEngineEx *iface)
     else
     {
         media_engine_set_flag(engine, FLAGS_ENGINE_SHUT_DOWN, TRUE);
+        media_engine_clear_presentation(engine);
         IMFMediaSession_Shutdown(engine->session);
     }
     LeaveCriticalSection(&engine->cs);
@@ -2433,17 +2461,37 @@ static HRESULT WINAPI media_engine_FrameStep(IMFMediaEngineEx *iface, BOOL forwa
 
 static HRESULT WINAPI media_engine_GetResourceCharacteristics(IMFMediaEngineEx *iface, DWORD *flags)
 {
-    FIXME("%p, %p stub.\n", iface, flags);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = E_FAIL;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p.\n", iface, flags);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (engine->presentation.source)
+        hr = IMFMediaSource_GetCharacteristics(engine->presentation.source, flags);
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_engine_GetPresentationAttribute(IMFMediaEngineEx *iface, REFGUID attribute,
         PROPVARIANT *value)
 {
-    FIXME("%p, %s, %p stub.\n", iface, debugstr_guid(attribute), value);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = E_FAIL;
 
-    return E_NOTIMPL;
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(attribute), value);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (engine->presentation.pd)
+        hr = IMFPresentationDescriptor_GetItem(engine->presentation.pd, attribute, value);
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_engine_GetNumberOfStreams(IMFMediaEngineEx *iface, DWORD *stream_count)
@@ -2456,9 +2504,28 @@ static HRESULT WINAPI media_engine_GetNumberOfStreams(IMFMediaEngineEx *iface, D
 static HRESULT WINAPI media_engine_GetStreamAttribute(IMFMediaEngineEx *iface, DWORD stream_index, REFGUID attribute,
         PROPVARIANT *value)
 {
-    FIXME("%p, %ld, %s, %p stub.\n", iface, stream_index, debugstr_guid(attribute), value);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    IMFStreamDescriptor *sd;
+    HRESULT hr = E_FAIL;
+    BOOL selected;
 
-    return E_NOTIMPL;
+    TRACE("%p, %ld, %s, %p.\n", iface, stream_index, debugstr_guid(attribute), value);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (engine->presentation.pd)
+    {
+        if (SUCCEEDED(hr = IMFPresentationDescriptor_GetStreamDescriptorByIndex(engine->presentation.pd,
+                stream_index, &selected, &sd)))
+        {
+            hr = IMFStreamDescriptor_GetItem(sd, attribute, value);
+            IMFStreamDescriptor_Release(sd);
+        }
+    }
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_engine_GetStreamSelection(IMFMediaEngineEx *iface, DWORD stream_index, BOOL *enabled)
@@ -2665,16 +2732,36 @@ static HRESULT WINAPI media_engine_SetAudioEndpointRole(IMFMediaEngineEx *iface,
 
 static HRESULT WINAPI media_engine_GetRealTimeMode(IMFMediaEngineEx *iface, BOOL *enabled)
 {
-    FIXME("%p, %p stub.\n", iface, enabled);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = S_OK;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p.\n", iface, enabled);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        *enabled = !!(engine->flags & MF_MEDIA_ENGINE_REAL_TIME_MODE);
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_engine_SetRealTimeMode(IMFMediaEngineEx *iface, BOOL enable)
 {
-    FIXME("%p, %d stub.\n", iface, enable);
+    struct media_engine *engine = impl_from_IMFMediaEngineEx(iface);
+    HRESULT hr = S_OK;
 
-    return E_NOTIMPL;
+    TRACE("%p, %d.\n", iface, enable);
+
+    EnterCriticalSection(&engine->cs);
+    if (engine->flags & FLAGS_ENGINE_SHUT_DOWN)
+        hr = MF_E_SHUTDOWN;
+    else
+        media_engine_set_flag(engine, MF_MEDIA_ENGINE_REAL_TIME_MODE, enable);
+    LeaveCriticalSection(&engine->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_engine_SetCurrentTimeEx(IMFMediaEngineEx *iface, double seektime, MF_MEDIA_ENGINE_SEEK_MODE mode)

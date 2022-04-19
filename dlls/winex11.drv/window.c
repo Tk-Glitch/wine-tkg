@@ -113,6 +113,7 @@ static int detect_wm(Display *dpy)
     int format;
     unsigned long count, remaining;
     char *wm_name;
+    char const *sgi = getenv("SteamGameId");
 
     static int cached = -1;
 
@@ -159,6 +160,11 @@ static int detect_wm(Display *dpy)
             XFree(wm_check);
         }else
             cached = WINE_WM_UNKNOWN;
+
+        /* Street Fighter V expects a certain sequence of window resizes
+           or gets stuck on startup. The AdjustWindowRect / WM_NCCALCSIZE
+           hacks confuse it completely, so let's disable them */
+        if (sgi && !strcmp(sgi, "310950")) cached = WINE_WM_UNKNOWN;
 
         __wine_set_window_manager(cached);
     }
@@ -432,6 +438,12 @@ static unsigned long get_mwm_decorations( struct x11drv_win_data *data,
         if (style & WS_MINIMIZEBOX) ret |= MWM_DECOR_MINIMIZE;
         if (style & WS_MAXIMIZEBOX) ret |= MWM_DECOR_MAXIMIZE;
     }
+    if (ex_style & WS_EX_DLGMODALFRAME) ret |= MWM_DECOR_BORDER;
+    else if (style & WS_THICKFRAME){
+        if((style & WS_CAPTION) == WS_CAPTION)
+             ret |= MWM_DECOR_BORDER | MWM_DECOR_RESIZEH;
+    }
+    else if ((style & (WS_DLGFRAME|WS_BORDER)) == WS_DLGFRAME) ret |= MWM_DECOR_BORDER;
     return ret;
 }
 
@@ -1253,9 +1265,6 @@ void update_net_wm_states( struct x11drv_win_data *data )
     }
     data->net_wm_state = new_state;
 
-    if(new_state & (1 << NET_WM_STATE_FULLSCREEN))
-        XSetInputFocus( data->display, data->whole_window, RevertToParent, CurrentTime );
-
     XChangeProperty( data->display, data->whole_window, x11drv_atom(_NET_WM_BYPASS_COMPOSITOR), XA_CARDINAL,
                      32, PropModeReplace, (unsigned char *)&net_wm_bypass_compositor, 1 );
 }
@@ -1342,6 +1351,9 @@ static void map_window( HWND hwnd, DWORD new_style )
             update_net_wm_states( data );
             sync_window_style( data );
             XMapWindow( data->display, data->whole_window );
+            /* Mutter always unminimizes windows when handling map requests. Restore iconic state */
+            if (new_style & WS_MINIMIZE)
+                XIconifyWindow( data->display, data->whole_window, data->vis.screen );
             XFlush( data->display );
             if (data->surface && data->vis.visualid != default_visual.visualid)
                 data->surface->funcs->flush( data->surface );
@@ -1623,7 +1635,6 @@ static void sync_client_position( struct x11drv_win_data *data,
         TRACE( "setting client win %lx pos %d,%d,%dx%d changes=%x\n",
                data->client_window, changes.x, changes.y, changes.width, changes.height, mask );
         XConfigureWindow( data->display, data->client_window, mask, &changes );
-        resize_vk_surfaces( data->hwnd, data->client_window, mask, &changes );
     }
 }
 
@@ -1725,22 +1736,6 @@ Window get_dummy_parent(void)
         XMapWindow( gdi_display, dummy_parent );
     }
     return dummy_parent;
-}
-
-
-/**********************************************************************
- *		update_client_window
- */
-void update_client_window( HWND hwnd )
-{
-    struct x11drv_win_data *data;
-    if ((data = get_win_data( hwnd )))
-    {
-        data->client_window = wine_vk_active_surface( hwnd );
-        /* make sure any request that could use old client window has been flushed */
-        XFlush( data->display );
-        release_win_data( data );
-    }
 }
 
 
@@ -2086,7 +2081,7 @@ void CDECL X11DRV_DestroyWindow( HWND hwnd )
     release_win_data( data );
     HeapFree( GetProcessHeap(), 0, data );
     destroy_gl_drawable( hwnd );
-    destroy_vk_surface( hwnd );
+    wine_vk_surface_destroy( hwnd );
 }
 
 
@@ -2227,6 +2222,7 @@ BOOL CDECL X11DRV_CreateWindow( HWND hwnd )
                                            InputOnly, default_visual.visual,
                                            CWOverrideRedirect | CWEventMask, &attr );
         x11drv_xinput_enable( data->display, data->clip_window, attr.event_mask );
+        XSelectInput( data->display, DefaultRootWindow( data->display ), PropertyChangeMask );
         XFlush( data->display );
         SetPropA( hwnd, clip_window_prop, (HANDLE)data->clip_window );
         X11DRV_InitClipboard();
@@ -2920,9 +2916,17 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
             data->iconic = (new_style & WS_MINIMIZE) != 0;
             TRACE( "changing win %p iconic state to %u\n", data->hwnd, data->iconic );
             if (data->iconic)
+            {
                 XIconifyWindow( data->display, data->whole_window, data->vis.screen );
+            }
             else if (is_window_rect_mapped( rectWindow ))
+            {
+                /* whole_window could be both iconic and mapped. Since XMapWindow() doesn't do
+                 * anything if the window is already mapped, we need to unmap it first */
+                if (data->mapped)
+                    XUnmapWindow( data->display, data->whole_window );
                 XMapWindow( data->display, data->whole_window );
+            }
             update_net_wm_states( data );
         }
         else
@@ -3292,7 +3296,6 @@ LRESULT CDECL X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
         return 0;
     case WM_X11DRV_ADD_TAB:
         taskbar_add_tab( hwnd );
-        return 0;
     case WM_X11DRV_RELEASE_CURSOR:
         ungrab_clipping_window();
         return 0;

@@ -264,6 +264,41 @@ NTSTATUS WINAPI wow64_NtUserGetCursor( UINT *args )
     return HandleToUlong( NtUserGetCursor() );
 }
 
+NTSTATUS WINAPI wow64_NtUserFindExistingCursorIcon( UINT *args )
+{
+    UNICODE_STRING32 *module32 = get_ptr( &args );
+    UNICODE_STRING32 *res_name32 = get_ptr( &args );
+    void *desc = get_ptr( &args );
+
+    UNICODE_STRING module;
+    UNICODE_STRING res_name;
+    HICON ret;
+
+    ret = NtUserFindExistingCursorIcon( unicode_str_32to64( &module, module32 ),
+                                        unicode_str_32to64( &res_name, res_name32 ), desc );
+    return HandleToUlong( ret );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetIconSize( UINT *args )
+{
+    HICON handle = get_handle( &args );
+    UINT step = get_ulong( &args );
+    LONG *width = get_ptr( &args );
+    LONG *height = get_ptr( &args );
+
+    return NtUserGetIconSize( handle, step, width, height );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetCursorFrameInfo( UINT *args )
+{
+    HCURSOR cursor = get_ptr( &args );
+    DWORD istep = get_ulong( &args );
+    DWORD *rate_jiffies = get_ptr( &args );
+    DWORD *num_steps = get_ptr( &args );
+
+    return HandleToUlong( NtUserGetCursorFrameInfo( cursor, istep, rate_jiffies, num_steps ));
+}
+
 NTSTATUS WINAPI wow64_NtUserAttachThreadInput( UINT *args )
 {
     DWORD from = get_ulong( &args );
@@ -354,4 +389,105 @@ NTSTATUS WINAPI wow64_NtUserGetDpiForMonitor( UINT *args )
 NTSTATUS WINAPI wow64_NtUserGetDoubleClickTime( UINT *args )
 {
     return NtUserGetDoubleClickTime();
+}
+
+NTSTATUS WINAPI wow64_NtUserNotifyWinEvent( UINT *args )
+{
+    DWORD event = get_ulong( &args );
+    HWND hwnd = get_handle( &args );
+    LONG object_id = get_ulong( &args );
+    LONG child_id = get_ulong( &args );
+
+    NtUserNotifyWinEvent( event, hwnd, object_id, child_id );
+    return 0;
+}
+
+NTSTATUS WINAPI wow64_NtUserSetWinEventHook( UINT *args )
+{
+    DWORD event_min = get_ulong( &args );
+    DWORD event_max = get_ulong( &args );
+    HMODULE inst = get_handle( &args );
+    UNICODE_STRING32 *module32 = get_ptr( &args );
+    WINEVENTPROC proc = get_ptr(&args );
+    DWORD pid = get_ulong( &args );
+    DWORD tid = get_ulong( &args );
+    DWORD flags = get_ulong( &args );
+    UNICODE_STRING module;
+    HWINEVENTHOOK ret;
+
+    ret = NtUserSetWinEventHook( event_min, event_max, inst,
+                                 unicode_str_32to64( &module, module32 ),
+                                 proc, pid, tid, flags );
+    return HandleToUlong( ret );
+}
+
+NTSTATUS WINAPI wow64_NtUserUnhookWinEvent( UINT *args )
+{
+    HWINEVENTHOOK handle = get_handle( &args );
+
+    return NtUserUnhookWinEvent( handle );
+}
+
+NTSTATUS WINAPI wow64_NtUserSetWindowsHookEx( UINT *args )
+{
+    HINSTANCE inst = get_handle( &args );
+    UNICODE_STRING32 *module32 = get_ptr( &args );
+    DWORD tid = get_ulong( &args );
+    INT id = get_ulong( &args );
+    HOOKPROC proc = get_ptr( &args );
+    BOOL ansi = get_ulong( &args );
+    UNICODE_STRING module;
+    HHOOK ret;
+
+    ret = NtUserSetWindowsHookEx( inst, unicode_str_32to64( &module, module32 ),
+                                  tid, id, proc, ansi );
+    return HandleToUlong( ret );
+}
+
+NTSTATUS WINAPI wow64_NtUserUnhookWindowsHookEx( UINT *args )
+{
+    HHOOK handle = get_handle( &args );
+
+    return NtUserUnhookWindowsHookEx( handle );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetForegroundWindow( UINT *args )
+{
+    return HandleToUlong( NtUserGetForegroundWindow() );
+}
+
+NTSTATUS WINAPI wow64_NtUserGetGUIThreadInfo( UINT *args )
+{
+    DWORD id = get_ulong( &args );
+    struct
+    {
+        DWORD  cbSize;
+        DWORD  flags;
+        ULONG  hwndActive;
+        ULONG  hwndFocus;
+        ULONG  hwndCapture;
+        ULONG  hwndMenuOwner;
+        ULONG  hwndMoveSize;
+        ULONG  hwndCaret;
+        RECT   rcCaret;
+    } *info32 = get_ptr( &args );
+    GUITHREADINFO info;
+
+    if (info32->cbSize != sizeof(*info32))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    info.cbSize = sizeof(info);
+    if (!NtUserGetGUIThreadInfo( id, &info )) return FALSE;
+    info32->flags         = info.flags;
+    info32->hwndActive    = HandleToUlong( info.hwndActive );
+    info32->hwndFocus     = HandleToUlong( info.hwndFocus );
+    info32->hwndCapture   = HandleToUlong( info.hwndCapture );
+    info32->hwndMenuOwner = HandleToUlong( info.hwndMenuOwner );
+    info32->hwndMoveSize  = HandleToUlong( info.hwndMoveSize );
+    info32->hwndCaret     = HandleToUlong( info.hwndCaret );
+    info32->rcCaret       = info.rcCaret;
+    return TRUE;
 }

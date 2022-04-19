@@ -27,6 +27,7 @@
 #endif
 
 #include "win32u_private.h"
+#include "ntuser_private.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 
@@ -44,6 +45,8 @@ static const WCHAR keyboard_layouts_keyW[] =
 };
 
 
+LONG global_key_state_counter = 0;
+
 /**********************************************************************
  *	     NtUserAttachThreadInput    (win32u.@)
  */
@@ -57,6 +60,203 @@ BOOL WINAPI NtUserAttachThreadInput( DWORD from, DWORD to, BOOL attach )
         req->tid_to   = to;
         req->attach   = attach;
         ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/***********************************************************************
+ *	     NtUserSetCursorPos (win32u.@)
+ */
+BOOL WINAPI NtUserSetCursorPos( INT x, INT y )
+{
+    POINT pt = { x, y };
+    BOOL ret;
+    INT prev_x, prev_y, new_x, new_y;
+    UINT dpi;
+
+    if ((dpi = get_thread_dpi()))
+    {
+        HMONITOR monitor = monitor_from_point( pt, MONITOR_DEFAULTTOPRIMARY, get_thread_dpi() );
+        pt = map_dpi_point( pt, dpi, get_monitor_dpi( monitor ));
+    }
+
+    SERVER_START_REQ( set_cursor )
+    {
+        req->flags = SET_CURSOR_POS;
+        req->x     = pt.x;
+        req->y     = pt.y;
+        if ((ret = !wine_server_call( req )))
+        {
+            prev_x = reply->prev_x;
+            prev_y = reply->prev_y;
+            new_x  = reply->new_x;
+            new_y  = reply->new_y;
+        }
+    }
+    SERVER_END_REQ;
+    if (ret && (prev_x != new_x || prev_y != new_y)) user_driver->pSetCursorPos( new_x, new_y );
+    return ret;
+}
+
+/***********************************************************************
+ *	     get_cursor_pos
+ */
+BOOL get_cursor_pos( POINT *pt )
+{
+    BOOL ret;
+    DWORD last_change;
+    UINT dpi;
+
+    if (!pt) return FALSE;
+
+    SERVER_START_REQ( set_cursor )
+    {
+        if ((ret = !wine_server_call( req )))
+        {
+            pt->x = reply->new_x;
+            pt->y = reply->new_y;
+            last_change = reply->last_change;
+        }
+    }
+    SERVER_END_REQ;
+
+    /* query new position from graphics driver if we haven't updated recently */
+    if (ret && NtGetTickCount() - last_change > 100) ret = user_driver->pGetCursorPos( pt );
+    if (ret && (dpi = get_thread_dpi()))
+    {
+        HMONITOR monitor = monitor_from_point( *pt, MONITOR_DEFAULTTOPRIMARY, 0 );
+        *pt = map_dpi_point( *pt, get_monitor_dpi( monitor ), dpi );
+    }
+    return ret;
+}
+
+/***********************************************************************
+ *	     NtUserGetCursorInfo (win32u.@)
+ */
+BOOL WINAPI NtUserGetCursorInfo( CURSORINFO *info )
+{
+    BOOL ret;
+
+    if (!info) return FALSE;
+
+    SERVER_START_REQ( get_thread_input )
+    {
+        req->tid = 0;
+        if ((ret = !wine_server_call( req )))
+        {
+            info->hCursor = wine_server_ptr_handle( reply->cursor );
+            info->flags = reply->show_count >= 0 ? CURSOR_SHOWING : 0;
+        }
+    }
+    SERVER_END_REQ;
+    get_cursor_pos( &info->ptScreenPos );
+    return ret;
+}
+
+static void check_for_events( UINT flags )
+{
+    if (user_driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, flags, 0 ) == WAIT_TIMEOUT)
+        flush_window_surfaces( TRUE );
+}
+
+/**********************************************************************
+ *           GetAsyncKeyState (win32u.@)
+ */
+SHORT WINAPI NtUserGetAsyncKeyState( INT key )
+{
+    struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
+    INT counter = global_key_state_counter;
+    BYTE prev_key_state;
+    SHORT ret;
+
+    if (key < 0 || key >= 256) return 0;
+
+    check_for_events( QS_INPUT );
+
+    if (key_state_info && !(key_state_info->state[key] & 0xc0) &&
+        key_state_info->counter == counter && NtGetTickCount() - key_state_info->time < 50)
+    {
+        /* use cached value */
+        return 0;
+    }
+    else if (!key_state_info)
+    {
+        key_state_info = calloc( 1, sizeof(*key_state_info) );
+        get_user_thread_info()->key_state = key_state_info;
+    }
+
+    ret = 0;
+    SERVER_START_REQ( get_key_state )
+    {
+        req->async = 1;
+        req->key = key;
+        if (key_state_info)
+        {
+            prev_key_state = key_state_info->state[key];
+            wine_server_set_reply( req, key_state_info->state, sizeof(key_state_info->state) );
+        }
+        if (!wine_server_call( req ))
+        {
+            if (reply->state & 0x40) ret |= 0x0001;
+            if (reply->state & 0x80) ret |= 0x8000;
+            if (key_state_info)
+            {
+                /* force refreshing the key state cache - some multithreaded programs
+                 * (like Adobe Photoshop CS5) expect that changes to the async key state
+                 * are also immediately available in other threads. */
+                if (prev_key_state != key_state_info->state[key])
+                    counter = InterlockedIncrement( &global_key_state_counter );
+
+                key_state_info->time    = NtGetTickCount();
+                key_state_info->counter = counter;
+            }
+        }
+    }
+    SERVER_END_REQ;
+
+    return ret;
+}
+
+/***********************************************************************
+ *           NtUserGetQueueStatus (win32u.@)
+ */
+DWORD WINAPI NtUserGetQueueStatus( UINT flags )
+{
+    DWORD ret;
+
+    if (flags & ~(QS_ALLINPUT | QS_ALLPOSTMESSAGE | QS_SMRESULT))
+    {
+        SetLastError( ERROR_INVALID_FLAGS );
+        return 0;
+    }
+
+    check_for_events( flags );
+
+    SERVER_START_REQ( get_queue_status )
+    {
+        req->clear_bits = flags;
+        wine_server_call( req );
+        ret = MAKELONG( reply->changed_bits & flags, reply->wake_bits & flags );
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+/***********************************************************************
+ *           get_input_state
+ */
+DWORD get_input_state(void)
+{
+    DWORD ret;
+
+    check_for_events( QS_INPUT );
+
+    SERVER_START_REQ( get_queue_status )
+    {
+        req->clear_bits = 0;
+        wine_server_call( req );
+        ret = reply->wake_bits & (QS_KEY | QS_MOUSEBUTTON);
     }
     SERVER_END_REQ;
     return ret;
@@ -706,6 +906,41 @@ BOOL WINAPI NtUserGetKeyboardLayoutName( WCHAR *name )
 }
 
 /***********************************************************************
+ *	     NtUserRegisterHotKey (win32u.@)
+ */
+BOOL WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk )
+{
+    BOOL ret;
+    int replaced = 0;
+
+    TRACE_(keyboard)( "(%p,%d,0x%08x,%X)\n", hwnd, id, modifiers, vk );
+
+    if ((!hwnd || is_current_thread_window( hwnd )) &&
+        !user_driver->pRegisterHotKey( hwnd, modifiers, vk ))
+        return FALSE;
+
+    SERVER_START_REQ( register_hotkey )
+    {
+        req->window = wine_server_user_handle( hwnd );
+        req->id = id;
+        req->flags = modifiers;
+        req->vkey = vk;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            replaced = reply->replaced;
+            modifiers = reply->flags;
+            vk = reply->vkey;
+        }
+    }
+    SERVER_END_REQ;
+
+    if (ret && replaced)
+        user_driver->pUnregisterHotKey(hwnd, modifiers, vk);
+
+    return ret;
+}
+
+/***********************************************************************
  *	     NtUserUnregisterHotKey    (win32u.@)
  */
 BOOL WINAPI NtUserUnregisterHotKey( HWND hwnd, INT id )
@@ -795,4 +1030,20 @@ int WINAPI NtUserGetMouseMovePointsEx( UINT size, MOUSEMOVEPOINT *ptin, MOUSEMOV
     }
 
     return copied;
+}
+
+/*******************************************************************
+ *           NtUserGetForegroundWindow  (win32u.@)
+ */
+HWND WINAPI NtUserGetForegroundWindow(void)
+{
+    HWND ret = 0;
+
+    SERVER_START_REQ( get_thread_input )
+    {
+        req->tid = 0;
+        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->foreground );
+    }
+    SERVER_END_REQ;
+    return ret;
 }

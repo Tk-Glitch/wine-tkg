@@ -47,7 +47,6 @@
 #include "x11drv.h"
 #include "xcomposite.h"
 #include "xfixes.h"
-#include "xpresent.h"
 #include "wine/server.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -68,9 +67,8 @@ BOOL usexvidmode = FALSE;
 BOOL usexrandr = TRUE;
 BOOL usexcomposite = TRUE;
 BOOL use_xfixes = FALSE;
-BOOL use_xpresent = FALSE;
 BOOL use_xkb = TRUE;
-BOOL use_take_focus = TRUE;
+BOOL use_take_focus = FALSE;
 BOOL use_primary_selection = FALSE;
 BOOL use_system_cursors = TRUE;
 BOOL show_systray = TRUE;
@@ -92,6 +90,8 @@ int xfixes_event_base = 0;
 HMODULE x11drv_module = 0;
 char *process_name = NULL;
 HANDLE steam_overlay_event;
+HANDLE steam_keyboard_event;
+BOOL layered_window_client_hack = FALSE;
 
 static x11drv_error_callback err_callback;   /* current callback for error */
 static Display *err_callback_display;        /* display callback is set for */
@@ -229,7 +229,8 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "text/plain",
     "text/rtf",
     "text/richtext",
-    "text/uri-list"
+    "text/uri-list",
+    "GAMESCOPE_FOCUSED_APP"
 };
 
 /***********************************************************************
@@ -535,7 +536,6 @@ MAKE_FUNCPTR(XFixesQueryExtension)
 MAKE_FUNCPTR(XFixesQueryVersion)
 MAKE_FUNCPTR(XFixesCreateRegion)
 MAKE_FUNCPTR(XFixesCreateRegionFromGC)
-MAKE_FUNCPTR(XFixesDestroyRegion)
 MAKE_FUNCPTR(XFixesSelectSelectionInput)
 #undef MAKE_FUNCPTR
 
@@ -561,7 +561,6 @@ static void x11drv_load_xfixes(void)
     LOAD_FUNCPTR(XFixesQueryVersion)
     LOAD_FUNCPTR(XFixesCreateRegion)
     LOAD_FUNCPTR(XFixesCreateRegionFromGC)
-    LOAD_FUNCPTR(XFixesDestroyRegion)
     LOAD_FUNCPTR(XFixesSelectSelectionInput)
 #undef LOAD_FUNCPTR
 
@@ -586,57 +585,6 @@ static void x11drv_load_xfixes(void)
     xfixes_event_base = event;
 }
 #endif /* SONAME_LIBXFIXES */
-
-#ifdef SONAME_LIBXPRESENT
-
-#define MAKE_FUNCPTR(f) typeof(f) * p##f;
-MAKE_FUNCPTR(XPresentQueryExtension)
-MAKE_FUNCPTR(XPresentQueryVersion)
-MAKE_FUNCPTR(XPresentPixmap)
-#undef MAKE_FUNCPTR
-
-static void x11drv_load_xpresent(void)
-{
-    int opcode, event, error, major = 1, minor = 0;
-    void *xpresent;
-
-    if (!(xpresent = dlopen( SONAME_LIBXPRESENT, RTLD_NOW )))
-    {
-        WARN( "Xpresent library %s not found, disabled.\n", SONAME_LIBXPRESENT );
-        return;
-    }
-
-#define LOAD_FUNCPTR(f) \
-    if (!(p##f = dlsym( xpresent, #f )))                          \
-    {                                                             \
-        WARN( "Xpresent function %s not found, disabled\n", #f ); \
-        dlclose( xpresent );                                      \
-        return;                                                   \
-    }
-    LOAD_FUNCPTR(XPresentQueryExtension)
-    LOAD_FUNCPTR(XPresentQueryVersion)
-    LOAD_FUNCPTR(XPresentPixmap)
-#undef LOAD_FUNCPTR
-
-    if (!pXPresentQueryExtension( gdi_display, &opcode, &event, &error ))
-    {
-        WARN("Xpresent extension not found, disabled.\n");
-        dlclose(xpresent);
-        return;
-    }
-
-    if (!pXPresentQueryVersion( gdi_display, &major, &minor ))
-    {
-        WARN("Xpresent version not found, disabled.\n");
-        dlclose(xpresent);
-        return;
-    }
-
-    TRACE( "Xpresent, opcode %d, error %d, event %d, version %d.%d found\n",
-           opcode, error, event, major, minor );
-    use_xpresent = TRUE;
-}
-#endif /* SONAME_LIBXPRESENT */
 
 static void init_visuals( Display *display, int screen )
 {
@@ -754,9 +702,6 @@ static BOOL process_attach(void)
 #ifdef SONAME_LIBXFIXES
     x11drv_load_xfixes();
 #endif
-#ifdef SONAME_LIBXPRESENT
-    x11drv_load_xpresent();
-#endif
 #ifdef SONAME_LIBXCOMPOSITE
     X11DRV_XComposite_Init();
 #endif
@@ -770,6 +715,17 @@ static BOOL process_attach(void)
     if (use_xim) use_xim = X11DRV_InitXIM( input_style );
 
     fs_hack_init();
+
+    {
+        const char *sgi = getenv("SteamGameId");
+        const char *e = getenv("WINE_LAYERED_WINDOW_CLIENT_HACK");
+        layered_window_client_hack =
+            (sgi && (
+                strcmp(sgi, "435150") == 0 || /* Divinity: Original Sin 2 launcher */
+                strcmp(sgi, "227020") == 0 /* Rise of Venice launcher */
+            )) ||
+            (e && *e != '\0' && *e != '0');
+    }
 
     init_user_driver();
     X11DRV_DisplayDevices_Init(FALSE);
@@ -881,9 +837,11 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         x11drv_module = hinst;
         ret = process_attach();
         steam_overlay_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_GameOverlayActivated");
+        steam_keyboard_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_KeyboardActivated");
         break;
     case DLL_PROCESS_DETACH:
         CloseHandle(steam_overlay_event);
+        CloseHandle(steam_keyboard_event);
         break;
     }
     return ret;

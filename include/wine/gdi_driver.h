@@ -22,7 +22,6 @@
 #define __WINE_WINE_GDI_DRIVER_H
 
 #include "winternl.h"
-#include "winuser.h"
 #include "ntuser.h"
 #include "ddk/d3dkmthk.h"
 #include "wine/list.h"

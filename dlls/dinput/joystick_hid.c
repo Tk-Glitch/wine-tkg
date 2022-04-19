@@ -163,6 +163,9 @@ struct pid_effect_state
 {
     BYTE id;
     UINT collection;
+    struct hid_value_caps *safety_switch_caps;
+    struct hid_value_caps *actuator_power_caps;
+    struct hid_value_caps *actuator_override_switch_caps;
 };
 
 struct hid_joystick
@@ -985,7 +988,7 @@ static HRESULT hid_joystick_get_effect_info( IDirectInputDevice8W *iface, DIEFFE
         }
     }
 
-    if ((type & DIEFT_PERIODIC) && (collection = set_periodic->collection))
+    if ((DIEFT_GETTYPE(type) == DIEFT_PERIODIC) && (collection = set_periodic->collection))
     {
         if (set_periodic->magnitude_caps) info->dwDynamicParams |= DIEP_TYPESPECIFICPARAMS;
         if (set_periodic->offset_caps) info->dwDynamicParams |= DIEP_TYPESPECIFICPARAMS;
@@ -993,7 +996,10 @@ static HRESULT hid_joystick_get_effect_info( IDirectInputDevice8W *iface, DIEFFE
         if (set_periodic->phase_caps) info->dwDynamicParams |= DIEP_TYPESPECIFICPARAMS;
     }
 
-    if ((type & (DIEFT_PERIODIC | DIEFT_RAMPFORCE | DIEFT_CONSTANTFORCE)) && (collection = set_envelope->collection))
+    if ((DIEFT_GETTYPE(type) == DIEFT_PERIODIC ||
+         DIEFT_GETTYPE(type) == DIEFT_RAMPFORCE ||
+         DIEFT_GETTYPE(type) == DIEFT_CONSTANTFORCE) &&
+        (collection = set_envelope->collection))
     {
         info->dwDynamicParams |= DIEP_ENVELOPE;
         if (set_envelope->attack_level_caps) type |= DIEFT_FFATTACK;
@@ -1004,7 +1010,7 @@ static HRESULT hid_joystick_get_effect_info( IDirectInputDevice8W *iface, DIEFFE
         if (effect_update->trigger_repeat_interval_caps) info->dwDynamicParams |= DIEP_TRIGGERREPEATINTERVAL;
     }
 
-    if ((type & DIEFT_CONDITION) && (collection = set_condition->collection))
+    if (DIEFT_GETTYPE(type) == DIEFT_CONDITION && (collection = set_condition->collection))
     {
         if (set_condition->center_point_offset_caps)
             info->dwDynamicParams |= DIEP_TYPESPECIFICPARAMS;
@@ -1097,6 +1103,7 @@ struct parse_device_state_params
 {
     BYTE old_state[DEVICE_STATE_MAX_SIZE];
     BYTE buttons[128];
+    BOOL reset_state;
     DWORD time;
     DWORD seq;
 };
@@ -1112,6 +1119,9 @@ static BOOL check_device_state_button( struct hid_joystick *impl, struct hid_val
 
     value = params->buttons[instance->wUsage - 1];
     old_value = params->old_state[instance->dwOfs];
+
+    if (params->reset_state) value = 0;
+
     impl->base.device_state[instance->dwOfs] = value;
     if (old_value != value)
         queue_event( iface, instance->dwType, value, params->time, params->seq );
@@ -1194,6 +1204,16 @@ static BOOL read_device_state_value( struct hid_joystick *impl, struct hid_value
     if (instance->dwType & DIDFT_AXIS) value = scale_axis_value( logical_value, properties );
     else value = scale_value( logical_value, properties );
 
+    if (params->reset_state)
+    {
+        if (instance->dwType & DIDFT_POV) value = -1;
+        else if (instance->dwType & DIDFT_AXIS)
+        {
+            if (!properties->range_min) value = properties->range_max / 2;
+            else value = round( (properties->range_min + properties->range_max) / 2.0 );
+        }
+    }
+
     old_value = *(LONG *)(params->old_state + instance->dwOfs);
     *(LONG *)(impl->base.device_state + instance->dwOfs) = value;
     if (old_value != value)
@@ -1223,24 +1243,29 @@ static HRESULT hid_joystick_read( IDirectInputDevice8W *iface )
     BOOL ret;
 
     ret = GetOverlappedResult( impl->device, &impl->read_ovl, &count, FALSE );
-    if (ret && TRACE_ON(dinput))
-    {
-        TRACE( "read size %lu report:\n", count );
-        for (i = 0; i < count;)
-        {
-            char buffer[256], *buf = buffer;
-            buf += sprintf(buf, "%08lx ", i);
-            do
-            {
-                buf += sprintf(buf, " %02x", (BYTE)report_buf[i] );
-            } while (++i % 16 && i < count);
-            TRACE("%s\n", buffer);
-        }
-    }
+
+    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0 || /* steam overlay is enabled */
+        WaitForSingleObject(steam_keyboard_event, 0) == WAIT_OBJECT_0) /* steam keyboard is enabled */
+        params.reset_state = TRUE;
+    else
+        params.reset_state = FALSE;
 
     EnterCriticalSection( &impl->base.crit );
     while (ret)
     {
+        if (TRACE_ON(dinput))
+        {
+            TRACE( "iface %p, size %lu, report:\n", iface, count );
+            for (i = 0; i < count;)
+            {
+                char buffer[256], *buf = buffer;
+                buf += sprintf(buf, "%08lx ", i);
+                do { buf += sprintf(buf, " %02x", (BYTE)report_buf[i] ); }
+                while (++i % 16 && i < count);
+                TRACE("%s\n", buffer);
+            }
+        }
+
         count = impl->usages_count;
         memset( impl->usages_buf, 0, count * sizeof(*impl->usages_buf) );
         status = HidP_GetUsagesEx( HidP_Input, 0, impl->usages_buf, &count,
@@ -1271,13 +1296,12 @@ static HRESULT hid_joystick_read( IDirectInputDevice8W *iface )
             if (impl->base.hEvent && memcmp( &params.old_state, impl->base.device_state, format->dwDataSize ))
                 SetEvent( impl->base.hEvent );
         }
-        else if (report_buf[0] == impl->pid_effect_state.id)
+        else if (report_buf[0] == impl->pid_effect_state.id && is_exclusively_acquired( impl ))
         {
             status = HidP_GetUsageValue( HidP_Input, HID_USAGE_PAGE_PID, 0, PID_USAGE_EFFECT_BLOCK_INDEX,
                                          &index, impl->preparsed, report_buf, report_len );
             if (status != HIDP_STATUS_SUCCESS) WARN( "HidP_GetUsageValue EFFECT_BLOCK_INDEX returned %#lx\n", status );
 
-            EnterCriticalSection( &impl->base.crit );
             effect_state = 0;
             device_state = impl->base.force_feedback_state & DIGFFS_EMPTY;
             while (count--)
@@ -1297,16 +1321,18 @@ static HRESULT hid_joystick_read( IDirectInputDevice8W *iface )
                 }
             }
             if (!(device_state & DIGFFS_ACTUATORSON)) device_state |= DIGFFS_ACTUATORSOFF;
-            if (!(device_state & DIGFFS_SAFETYSWITCHON)) device_state |= DIGFFS_SAFETYSWITCHOFF;
-            if (!(device_state & DIGFFS_USERFFSWITCHON)) device_state |= DIGFFS_USERFFSWITCHOFF;
-            if (!(device_state & DIGFFS_POWERON)) device_state |= DIGFFS_POWEROFF;
+            if (!(device_state & DIGFFS_SAFETYSWITCHON) && impl->pid_effect_state.safety_switch_caps)
+                device_state |= DIGFFS_SAFETYSWITCHOFF;
+            if (!(device_state & DIGFFS_USERFFSWITCHON) && impl->pid_effect_state.actuator_override_switch_caps)
+                device_state |= DIGFFS_USERFFSWITCHOFF;
+            if (!(device_state & DIGFFS_POWERON) && impl->pid_effect_state.actuator_power_caps)
+                device_state |= DIGFFS_POWEROFF;
 
             TRACE( "effect %lu state %#x, device state %#x\n", index, effect_state, device_state );
 
             LIST_FOR_EACH_ENTRY( effect, &impl->effect_list, struct hid_joystick_effect, entry )
                 if (effect->index == index) effect->status = effect_state;
             impl->base.force_feedback_state = device_state;
-            LeaveCriticalSection( &impl->base.crit );
         }
 
         memset( &impl->read_ovl, 0, sizeof(impl->read_ovl) );
@@ -1577,11 +1603,9 @@ static HRESULT hid_joystick_device_open( int index, DIDEVICEINSTANCEW *filter, W
         if (device_instance_is_disabled( &instance, &override ))
             goto next;
 
-        if (override)
+        if (override && SetupDiGetDeviceInstanceIdW( set, &devinfo, device_id, MAX_PATH, NULL ) &&
+            (tmp = wcsstr( device_id, L"&IG_" )))
         {
-            if (!SetupDiGetDeviceInstanceIdW( set, &devinfo, device_id, MAX_PATH, NULL ) ||
-                !(tmp = wcsstr( device_id, L"&IG_" )))
-                goto next;
             memcpy( tmp, L"&XI_", sizeof(L"&XI_") - sizeof(WCHAR) );
             if (!SetupDiOpenDeviceInfoW( xi_set, device_id, NULL, 0, &devinfo ))
                 goto next;
@@ -1774,7 +1798,15 @@ static BOOL init_pid_caps( struct hid_joystick *impl, struct hid_value_caps *cap
         return DIENUM_CONTINUE;
 
     if (instance->wCollectionNumber == effect_state->collection)
+    {
         SET_REPORT_ID( effect_state );
+        if (instance->wUsage == PID_USAGE_SAFETY_SWITCH)
+            effect_state->safety_switch_caps = caps;
+        if (instance->wUsage == PID_USAGE_ACTUATOR_POWER)
+            effect_state->actuator_power_caps = caps;
+        if (instance->wUsage == PID_USAGE_ACTUATOR_OVERRIDE_SWITCH)
+            effect_state->actuator_override_switch_caps = caps;
+    }
 
     if (!(instance->dwType & DIDFT_OUTPUT)) return DIENUM_CONTINUE;
 
@@ -2013,12 +2045,12 @@ HRESULT hid_joystick_create_device( struct dinput *dinput, const GUID *guid, IDi
     impl->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": hid_joystick.base.crit");
     impl->base.dwCoopLevel = DISCL_NONEXCLUSIVE | DISCL_BACKGROUND;
     impl->base.read_event = CreateEventW( NULL, TRUE, FALSE, NULL );
+    impl->internal_ref = 1;
 
     hr = hid_joystick_device_open( -1, &instance, impl->device_path, &impl->device, &impl->preparsed,
                                    &attrs, &impl->caps, dinput->dwVersion );
     if (hr != DI_OK) goto failed;
 
-    impl->internal_ref = 1;
     impl->base.instance = instance;
     impl->base.caps.dwDevType = instance.dwDevType;
     impl->attrs = attrs;
@@ -2284,7 +2316,7 @@ static void convert_directions_to_spherical( const DIEFFECT *in, DIEFFECT *out )
             tmp = atan2( in->rglDirection[i], tmp );
             out->rglDirection[i - 1] = tmp * 18000 / M_PI;
         }
-        out->rglDirection[in->cAxes - 1] = 0;
+        if (in->cAxes) out->rglDirection[in->cAxes - 1] = 0;
         out->cAxes = in->cAxes;
         break;
     case DIEFF_POLAR:
@@ -2294,7 +2326,8 @@ static void convert_directions_to_spherical( const DIEFFECT *in, DIEFFECT *out )
         out->cAxes = in->cAxes;
         break;
     case DIEFF_SPHERICAL:
-        for (i = 0; i < in->cAxes - 1; ++i)
+        if (!in->cAxes) i = 0;
+        else for (i = 0; i < in->cAxes - 1; ++i)
         {
             out->rglDirection[i] = in->rglDirection[i] % 36000;
             if (out->rglDirection[i] < 0) out->rglDirection[i] += 36000;

@@ -1855,7 +1855,7 @@ static void reply_message( struct received_message_info *info, LRESULT result, B
  *
  * Handle an internal Wine message instead of calling the window proc.
  */
-static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     switch(msg)
     {
@@ -1876,31 +1876,20 @@ static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPAR
         if (is_desktop_window( hwnd )) return 0;
         return WIN_SetStyle(hwnd, wparam, lparam);
     case WM_WINE_SETACTIVEWINDOW:
-        if (!wparam && GetForegroundWindow() == hwnd) return 0;
+        if (!wparam && NtUserGetForegroundWindow() == hwnd) return 0;
         return (LRESULT)SetActiveWindow( (HWND)wparam );
-    case WM_WINE_KEYBOARD_LL_HOOK:
-    case WM_WINE_MOUSE_LL_HOOK:
-    {
-        struct hook_extra_info *h_extra = (struct hook_extra_info *)lparam;
-
-        return call_current_hook( h_extra->handle, HC_ACTION, wparam, h_extra->lparam );
-    }
-    case WM_WINE_CLIPCURSOR:
-        if (wparam)
-        {
-            RECT rect;
-            GetClipCursor( &rect );
-            return USER_Driver->pClipCursor( &rect );
-        }
-        return USER_Driver->pClipCursor( NULL );
     case WM_WINE_UPDATEWINDOWSTATE:
         update_window_state( hwnd );
         return 0;
     default:
-        if (msg >= WM_WINE_FIRST_DRIVER_MSG && msg <= WM_WINE_LAST_DRIVER_MSG)
-            return USER_Driver->pWindowMessage( hwnd, msg, wparam, lparam );
-        FIXME( "unknown internal message %x\n", msg );
-        return 0;
+        {
+            MSG m;
+            m.hwnd    = hwnd;
+            m.message = msg;
+            m.wParam  = wparam;
+            m.lParam  = lparam;
+            return NtUserCallOneParam( (UINT_PTR)&m, NtUserHandleInternalMessage );
+        }
     }
 }
 
@@ -2408,7 +2397,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     /* find the window to dispatch this mouse message to */
 
     info.cbSize = sizeof(info);
-    GetGUIThreadInfo( GetCurrentThreadId(), &info );
+    NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info );
     if (info.hwndCapture)
     {
         hittest = HTCLIENT;
@@ -3271,7 +3260,7 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
     struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
     struct send_message_info info;
     int prev_x, prev_y, new_x, new_y;
-    INT counter = global_key_state_counter;
+    INT counter = NtUserCallOneParam( 0, NtUserIncrementKeyStateCounter );
     USAGE hid_usage_page, hid_usage;
     NTSTATUS ret;
     BOOL wait;
@@ -3394,9 +3383,9 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *r
  * Same as SendMessageTimeoutW but sends the message to a specific thread
  * without requiring a window handle. Only works for internal Wine messages.
  */
-LRESULT MSG_SendInternalMessageTimeout( DWORD dest_pid, DWORD dest_tid,
-                                        UINT msg, WPARAM wparam, LPARAM lparam,
-                                        UINT flags, UINT timeout, PDWORD_PTR res_ptr )
+LRESULT WINAPI MSG_SendInternalMessageTimeout( DWORD dest_pid, DWORD dest_tid,
+                                               UINT msg, WPARAM wparam, LPARAM lparam,
+                                               UINT flags, UINT timeout, PDWORD_PTR res_ptr )
 {
     struct send_message_info info;
     LRESULT ret, result;
@@ -4472,10 +4461,7 @@ BOOL WINAPI SetMessageQueue( INT size )
  */
 BOOL WINAPI MessageBeep( UINT i )
 {
-    BOOL active = TRUE;
-    SystemParametersInfoA( SPI_GETBEEP, 0, &active, FALSE );
-    if (active) USER_Driver->pBeep();
-    return TRUE;
+    return NtUserCallOneParam( i, NtUserMessageBeep );
 }
 
 
@@ -4599,45 +4585,6 @@ BOOL WINAPI IsGUIThread( BOOL convert )
 {
     FIXME( "%u: stub\n", convert );
     return TRUE;
-}
-
-
-/**********************************************************************
- *		GetGUIThreadInfo  (USER32.@)
- */
-BOOL WINAPI GetGUIThreadInfo( DWORD id, GUITHREADINFO *info )
-{
-    BOOL ret;
-
-    if (info->cbSize != sizeof(*info))
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return FALSE;
-    }
-
-    SERVER_START_REQ( get_thread_input )
-    {
-        req->tid = id;
-        if ((ret = !wine_server_call_err( req )))
-        {
-            info->flags          = 0;
-            info->hwndActive     = wine_server_ptr_handle( reply->active );
-            info->hwndFocus      = wine_server_ptr_handle( reply->focus );
-            info->hwndCapture    = wine_server_ptr_handle( reply->capture );
-            info->hwndMenuOwner  = wine_server_ptr_handle( reply->menu_owner );
-            info->hwndMoveSize   = wine_server_ptr_handle( reply->move_size );
-            info->hwndCaret      = wine_server_ptr_handle( reply->caret );
-            info->rcCaret.left   = reply->rect.left;
-            info->rcCaret.top    = reply->rect.top;
-            info->rcCaret.right  = reply->rect.right;
-            info->rcCaret.bottom = reply->rect.bottom;
-            if (reply->menu_owner) info->flags |= GUI_INMENUMODE;
-            if (reply->move_size) info->flags |= GUI_INMOVESIZE;
-            if (reply->caret) info->flags |= GUI_CARETBLINKING;
-        }
-    }
-    SERVER_END_REQ;
-    return ret;
 }
 
 

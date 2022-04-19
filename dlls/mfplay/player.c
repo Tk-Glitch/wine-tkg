@@ -59,11 +59,18 @@ static inline const char *debugstr_normalized_rect(const MFVideoNormalizedRect *
     return wine_dbg_sprintf("(%.8e,%.8e)-(%.8e,%.8e)", rect->left, rect->top, rect->right, rect->bottom);
 }
 
+struct media_player;
+
+enum media_item_flags
+{
+    MEDIA_ITEM_SOURCE_NEEDS_SHUTDOWN = 0x1,
+};
+
 struct media_item
 {
     IMFPMediaItem IMFPMediaItem_iface;
     LONG refcount;
-    IMFPMediaPlayer *player;
+    struct media_player *player;
     IMFMediaSource *source;
     IMFPresentationDescriptor *pd;
     DWORD_PTR user_data;
@@ -71,6 +78,7 @@ struct media_item
     IUnknown *object;
     LONGLONG start_position;
     LONGLONG stop_position;
+    unsigned int flags;
 };
 
 struct media_player
@@ -308,6 +316,16 @@ static void media_player_set_state(struct media_player *player, MFP_MEDIAPLAYER_
     }
 }
 
+static HRESULT media_item_get_pd(const struct media_item *item, IMFPresentationDescriptor **pd)
+{
+    if (item->player->state == MFP_MEDIAPLAYER_STATE_SHUTDOWN)
+        return MF_E_SHUTDOWN;
+
+    *pd = item->pd;
+    IMFPresentationDescriptor_AddRef(*pd);
+    return S_OK;
+}
+
 static HRESULT WINAPI media_item_QueryInterface(IMFPMediaItem *iface, REFIID riid, void **obj)
 {
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
@@ -345,9 +363,13 @@ static ULONG WINAPI media_item_Release(IMFPMediaItem *iface)
     if (!refcount)
     {
         if (item->player)
-            IMFPMediaPlayer_Release(item->player);
+            IMFPMediaPlayer_Release(&item->player->IMFPMediaPlayer_iface);
         if (item->source)
+        {
+            if (item->flags & MEDIA_ITEM_SOURCE_NEEDS_SHUTDOWN)
+                IMFMediaSource_Shutdown(item->source);
             IMFMediaSource_Release(item->source);
+        }
         if (item->pd)
             IMFPresentationDescriptor_Release(item->pd);
         if (item->object)
@@ -363,45 +385,70 @@ static HRESULT WINAPI media_item_GetMediaPlayer(IMFPMediaItem *iface,
         IMFPMediaPlayer **player)
 {
     struct media_item *item = impl_from_IMFPMediaItem(iface);
+    HRESULT hr = S_OK;
 
     TRACE("%p, %p.\n", iface, player);
 
-    *player = item->player;
-    IMFPMediaPlayer_AddRef(*player);
+    EnterCriticalSection(&item->player->cs);
+    if (item->player->state == MFP_MEDIAPLAYER_STATE_SHUTDOWN)
+    {
+        hr = MF_E_SHUTDOWN;
+        *player = NULL;
+    }
+    else
+    {
+        *player = &item->player->IMFPMediaPlayer_iface;
+        IMFPMediaPlayer_AddRef(*player);
+    }
+    LeaveCriticalSection(&item->player->cs);
 
-    return S_OK;
+    return hr;
 }
 
 static HRESULT WINAPI media_item_GetURL(IMFPMediaItem *iface, LPWSTR *url)
 {
     struct media_item *item = impl_from_IMFPMediaItem(iface);
+    HRESULT hr = S_OK;
 
     TRACE("%p, %p.\n", iface, url);
 
-    if (!item->url)
-        return MF_E_NOT_FOUND;
+    EnterCriticalSection(&item->player->cs);
+    if (item->player->state == MFP_MEDIAPLAYER_STATE_SHUTDOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (!item->url)
+        hr = MF_E_NOT_FOUND;
+    else
+    {
+        if (!(*url = CoTaskMemAlloc((wcslen(item->url) + 1) * sizeof(*item->url))))
+            hr = E_OUTOFMEMORY;
+        if (*url)
+            wcscpy(*url, item->url);
+    }
+    LeaveCriticalSection(&item->player->cs);
 
-    if (!(*url = CoTaskMemAlloc((wcslen(item->url) + 1) * sizeof(*item->url))))
-        return E_OUTOFMEMORY;
-
-    wcscpy(*url, item->url);
-
-    return S_OK;
+    return hr;
 }
 
 static HRESULT WINAPI media_item_GetObject(IMFPMediaItem *iface, IUnknown **object)
 {
     struct media_item *item = impl_from_IMFPMediaItem(iface);
+    HRESULT hr = S_OK;
 
     TRACE("%p, %p.\n", iface, object);
 
-    if (!item->object)
-        return MF_E_NOT_FOUND;
+    EnterCriticalSection(&item->player->cs);
+    if (item->player->state == MFP_MEDIAPLAYER_STATE_SHUTDOWN)
+        hr = MF_E_SHUTDOWN;
+    else if (!item->object)
+        hr = MF_E_NOT_FOUND;
+    else
+    {
+        *object = item->object;
+        IUnknown_AddRef(*object);
+    }
+    LeaveCriticalSection(&item->player->cs);
 
-    *object = item->object;
-    IUnknown_AddRef(*object);
-
-    return S_OK;
+    return hr;
 }
 
 static HRESULT WINAPI media_item_GetUserData(IMFPMediaItem *iface, DWORD_PTR *user_data)
@@ -530,28 +577,38 @@ static HRESULT media_item_get_stream_type(IMFStreamDescriptor *sd, GUID *major)
 
 static HRESULT media_item_has_stream(struct media_item *item, const GUID *major, BOOL *has_stream, BOOL *is_selected)
 {
+    IMFPresentationDescriptor *pd;
     IMFStreamDescriptor *sd;
     unsigned int idx = 0;
     BOOL selected;
+    HRESULT hr;
     GUID guid;
 
-    *has_stream = *is_selected = FALSE;
+    EnterCriticalSection(&item->player->cs);
 
-    while (SUCCEEDED(IMFPresentationDescriptor_GetStreamDescriptorByIndex(item->pd, idx++, &selected, &sd)))
+    if (SUCCEEDED(hr = media_item_get_pd(item, &pd)))
     {
-        if (SUCCEEDED(media_item_get_stream_type(sd, &guid)) && IsEqualGUID(&guid, major))
+        *has_stream = *is_selected = FALSE;
+
+        while (SUCCEEDED(IMFPresentationDescriptor_GetStreamDescriptorByIndex(pd, idx++, &selected, &sd)))
         {
-            *has_stream = TRUE;
-            *is_selected = selected;
+            if (SUCCEEDED(media_item_get_stream_type(sd, &guid)) && IsEqualGUID(&guid, major))
+            {
+                *has_stream = TRUE;
+                *is_selected = selected;
+            }
+
+            IMFStreamDescriptor_Release(sd);
+
+            if (*has_stream && *is_selected)
+                break;
         }
-
-        IMFStreamDescriptor_Release(sd);
-
-        if (*has_stream && *is_selected)
-            break;
+        IMFPresentationDescriptor_Release(pd);
     }
 
-    return S_OK;
+    LeaveCriticalSection(&item->player->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_item_HasVideo(IMFPMediaItem *iface, BOOL *has_video, BOOL *selected)
@@ -575,42 +632,80 @@ static HRESULT WINAPI media_item_HasAudio(IMFPMediaItem *iface, BOOL *has_audio,
 static HRESULT WINAPI media_item_IsProtected(IMFPMediaItem *iface, BOOL *protected)
 {
     struct media_item *item = impl_from_IMFPMediaItem(iface);
+    IMFPresentationDescriptor *pd;
+    HRESULT hr;
 
     TRACE("%p, %p.\n", iface, protected);
 
-    *protected = MFRequireProtectedEnvironment(item->pd) == S_OK;
+    if (!protected)
+        return E_POINTER;
 
-    return S_OK;
+    EnterCriticalSection(&item->player->cs);
+    if (SUCCEEDED(hr = media_item_get_pd(item, &pd)))
+    {
+        *protected = (hr = MFRequireProtectedEnvironment(pd)) == S_OK;
+        IMFPresentationDescriptor_Release(pd);
+    }
+    LeaveCriticalSection(&item->player->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_item_GetDuration(IMFPMediaItem *iface, REFGUID format, PROPVARIANT *value)
 {
     struct media_item *item = impl_from_IMFPMediaItem(iface);
+    IMFPresentationDescriptor *pd;
+    HRESULT hr;
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(format), value);
 
-    return IMFPresentationDescriptor_GetItem(item->pd, &MF_PD_DURATION, value);
+    EnterCriticalSection(&item->player->cs);
+    if (SUCCEEDED(hr = media_item_get_pd(item, &pd)))
+    {
+        hr = IMFPresentationDescriptor_GetItem(pd, &MF_PD_DURATION, value);
+        IMFPresentationDescriptor_Release(pd);
+    }
+    LeaveCriticalSection(&item->player->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_item_GetNumberOfStreams(IMFPMediaItem *iface, DWORD *count)
 {
     struct media_item *item = impl_from_IMFPMediaItem(iface);
+    IMFPresentationDescriptor *pd;
+    HRESULT hr;
 
     TRACE("%p, %p.\n", iface, count);
 
-    return IMFPresentationDescriptor_GetStreamDescriptorCount(item->pd, count);
+    EnterCriticalSection(&item->player->cs);
+    if (SUCCEEDED(hr = media_item_get_pd(item, &pd)))
+    {
+        hr = IMFPresentationDescriptor_GetStreamDescriptorCount(pd, count);
+        IMFPresentationDescriptor_Release(pd);
+    }
+    LeaveCriticalSection(&item->player->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_item_GetStreamSelection(IMFPMediaItem *iface, DWORD index, BOOL *selected)
 {
     struct media_item *item = impl_from_IMFPMediaItem(iface);
+    IMFPresentationDescriptor *pd;
     IMFStreamDescriptor *sd;
     HRESULT hr;
 
     TRACE("%p, %lu, %p.\n", iface, index, selected);
 
-    if (SUCCEEDED(hr = IMFPresentationDescriptor_GetStreamDescriptorByIndex(item->pd, index, selected, &sd)))
-        IMFStreamDescriptor_Release(sd);
+    EnterCriticalSection(&item->player->cs);
+    if (SUCCEEDED(hr = media_item_get_pd(item, &pd)))
+    {
+        if (SUCCEEDED(hr = IMFPresentationDescriptor_GetStreamDescriptorByIndex(pd, index, selected, &sd)))
+            IMFStreamDescriptor_Release(sd);
+        IMFPresentationDescriptor_Release(pd);
+    }
+    LeaveCriticalSection(&item->player->cs);
 
     return hr;
 }
@@ -618,28 +713,45 @@ static HRESULT WINAPI media_item_GetStreamSelection(IMFPMediaItem *iface, DWORD 
 static HRESULT WINAPI media_item_SetStreamSelection(IMFPMediaItem *iface, DWORD index, BOOL select)
 {
     struct media_item *item = impl_from_IMFPMediaItem(iface);
+    IMFPresentationDescriptor *pd;
+    HRESULT hr;
 
     TRACE("%p, %lu, %d.\n", iface, index, select);
 
-    return select ? IMFPresentationDescriptor_SelectStream(item->pd, index) :
-            IMFPresentationDescriptor_DeselectStream(item->pd, index);
+    EnterCriticalSection(&item->player->cs);
+    if (SUCCEEDED(hr = media_item_get_pd(item, &pd)))
+    {
+        hr = select ? IMFPresentationDescriptor_SelectStream(pd, index) :
+                IMFPresentationDescriptor_DeselectStream(pd, index);
+        IMFPresentationDescriptor_Release(pd);
+    }
+    LeaveCriticalSection(&item->player->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_item_GetStreamAttribute(IMFPMediaItem *iface, DWORD index, REFGUID key,
         PROPVARIANT *value)
 {
     struct media_item *item = impl_from_IMFPMediaItem(iface);
+    IMFPresentationDescriptor *pd;
     IMFStreamDescriptor *sd;
     BOOL selected;
     HRESULT hr;
 
     TRACE("%p, %lu, %s, %p.\n", iface, index, debugstr_guid(key), value);
 
-    if (SUCCEEDED(hr = IMFPresentationDescriptor_GetStreamDescriptorByIndex(item->pd, index, &selected, &sd)))
+    EnterCriticalSection(&item->player->cs);
+    if (SUCCEEDED(hr = media_item_get_pd(item, &pd)))
     {
-        hr = IMFStreamDescriptor_GetItem(sd, key, value);
-        IMFStreamDescriptor_Release(sd);
+        if (SUCCEEDED(hr = IMFPresentationDescriptor_GetStreamDescriptorByIndex(pd, index, &selected, &sd)))
+        {
+            hr = IMFStreamDescriptor_GetItem(sd, key, value);
+            IMFStreamDescriptor_Release(sd);
+        }
+        IMFPresentationDescriptor_Release(pd);
     }
+    LeaveCriticalSection(&item->player->cs);
 
     return hr;
 }
@@ -648,10 +760,20 @@ static HRESULT WINAPI media_item_GetPresentationAttribute(IMFPMediaItem *iface, 
         PROPVARIANT *value)
 {
     struct media_item *item = impl_from_IMFPMediaItem(iface);
+    IMFPresentationDescriptor *pd;
+    HRESULT hr;
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
-    return IMFPresentationDescriptor_GetItem(item->pd, key, value);
+    EnterCriticalSection(&item->player->cs);
+    if (SUCCEEDED(hr = media_item_get_pd(item, &pd)))
+    {
+        hr = IMFPresentationDescriptor_GetItem(pd, key, value);
+        IMFPresentationDescriptor_Release(pd);
+    }
+    LeaveCriticalSection(&item->player->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_item_GetCharacteristics(IMFPMediaItem *iface, MFP_MEDIAITEM_CHARACTERISTICS *flags)
@@ -664,11 +786,18 @@ static HRESULT WINAPI media_item_GetCharacteristics(IMFPMediaItem *iface, MFP_ME
 
     *flags = 0;
 
-    if (SUCCEEDED(hr = IMFMediaSource_GetCharacteristics(item->source, &value)))
+    EnterCriticalSection(&item->player->cs);
+    if (item->player->state == MFP_MEDIAPLAYER_STATE_SHUTDOWN)
+        hr = MF_E_SHUTDOWN;
+    else
     {
-        *flags = value & (MFP_MEDIAITEM_IS_LIVE | MFP_MEDIAITEM_CAN_SEEK |
-                          MFP_MEDIAITEM_CAN_PAUSE | MFP_MEDIAITEM_HAS_SLOW_SEEK);
+        if (SUCCEEDED(hr = IMFMediaSource_GetCharacteristics(item->source, &value)))
+        {
+            *flags = value & (MFP_MEDIAITEM_IS_LIVE | MFP_MEDIAITEM_CAN_SEEK
+                    | MFP_MEDIAITEM_CAN_PAUSE | MFP_MEDIAITEM_HAS_SLOW_SEEK);
+        }
     }
+    LeaveCriticalSection(&item->player->cs);
 
     return hr;
 }
@@ -749,7 +878,7 @@ static struct media_item *unsafe_impl_from_IMFPMediaItem(IMFPMediaItem *iface)
     return CONTAINING_RECORD(iface, struct media_item, IMFPMediaItem_iface);
 }
 
-static HRESULT create_media_item(IMFPMediaPlayer *player, DWORD_PTR user_data, struct media_item **item)
+static HRESULT create_media_item(struct media_player *player, DWORD_PTR user_data, struct media_item **item)
 {
     struct media_item *object;
 
@@ -760,7 +889,7 @@ static HRESULT create_media_item(IMFPMediaPlayer *player, DWORD_PTR user_data, s
     object->refcount = 1;
     object->user_data = user_data;
     object->player = player;
-    IMFPMediaPlayer_AddRef(object->player);
+    IMFPMediaPlayer_AddRef(&object->player->IMFPMediaPlayer_iface);
 
     *item = object;
 
@@ -975,16 +1104,44 @@ static HRESULT WINAPI media_player_GetDuration(IMFPMediaPlayer *iface, REFGUID p
 
 static HRESULT WINAPI media_player_SetRate(IMFPMediaPlayer *iface, float rate)
 {
-    FIXME("%p, %f.\n", iface, rate);
+    struct media_player *player = impl_from_IMFPMediaPlayer(iface);
+    IMFRateControl *rate_control;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %f.\n", iface, rate);
+
+    if (rate == 0.0f)
+        return MF_E_OUT_OF_RANGE;
+
+    if (SUCCEEDED(hr = MFGetService((IUnknown *)player->session, &MF_RATE_CONTROL_SERVICE, &IID_IMFRateControl,
+            (void **)&rate_control)))
+    {
+        hr = IMFRateControl_SetRate(rate_control, FALSE, rate);
+        IMFRateControl_Release(rate_control);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI media_player_GetRate(IMFPMediaPlayer *iface, float *rate)
 {
-    FIXME("%p, %p.\n", iface, rate);
+    struct media_player *player = impl_from_IMFPMediaPlayer(iface);
+    IMFRateControl *rate_control;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p.\n", iface, rate);
+
+    if (!rate)
+        return E_POINTER;
+
+    if (SUCCEEDED(hr = MFGetService((IUnknown *)player->session, &MF_RATE_CONTROL_SERVICE, &IID_IMFRateControl,
+            (void **)&rate_control)))
+    {
+        hr = IMFRateControl_GetRate(rate_control, NULL, rate);
+        IMFRateControl_Release(rate_control);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI media_player_GetSupportedRates(IMFPMediaPlayer *iface, BOOL forward,
@@ -1034,7 +1191,7 @@ static HRESULT media_player_create_item_from_url(struct media_player *player,
         return MF_E_INVALIDREQUEST;
     }
 
-    if (FAILED(hr = create_media_item(&player->IMFPMediaPlayer_iface, user_data, &item)))
+    if (FAILED(hr = create_media_item(player, user_data, &item)))
         return hr;
 
     if (url && !(item->url = wcsdup(url)))
@@ -1042,6 +1199,7 @@ static HRESULT media_player_create_item_from_url(struct media_player *player,
         IMFPMediaItem_Release(&item->IMFPMediaItem_iface);
         return E_OUTOFMEMORY;
     }
+    item->flags |= MEDIA_ITEM_SOURCE_NEEDS_SHUTDOWN;
 
     if (sync)
     {
@@ -1097,15 +1255,15 @@ static HRESULT WINAPI media_player_CreateMediaItemFromURL(IMFPMediaPlayer *iface
 static HRESULT media_player_create_item_from_object(struct media_player *player,
         IUnknown *object, BOOL sync, DWORD_PTR user_data, IMFPMediaItem **ret)
 {
+    IMFMediaSource *source = NULL;
+    IMFByteStream *stream = NULL;
     struct media_item *item;
     MF_OBJECT_TYPE obj_type;
     HRESULT hr;
-    IMFByteStream *stream = NULL;
-    IMFMediaSource *source = NULL;
 
     *ret = NULL;
 
-    if (FAILED(hr = create_media_item(&player->IMFPMediaPlayer_iface, user_data, &item)))
+    if (FAILED(hr = create_media_item(player, user_data, &item)))
         return hr;
 
     item->object = object;
@@ -1120,6 +1278,9 @@ static HRESULT media_player_create_item_from_object(struct media_player *player,
         IMFPMediaItem_Release(&item->IMFPMediaItem_iface);
         return E_UNEXPECTED;
     }
+
+    if (source)
+        item->flags |= MEDIA_ITEM_SOURCE_NEEDS_SHUTDOWN;
 
     if (sync)
     {
@@ -1302,7 +1463,7 @@ static HRESULT WINAPI media_player_SetMediaItem(IMFPMediaPlayer *iface, IMFPMedi
         return E_POINTER;
 
     item = unsafe_impl_from_IMFPMediaItem(item_iface);
-    if (item->player != iface)
+    if (item->player != player)
         return E_INVALIDARG;
 
     if (FAILED(hr = media_item_create_topology(player, item, &topology)))
@@ -1524,9 +1685,23 @@ static HRESULT WINAPI media_player_GetVideoWindow(IMFPMediaPlayer *iface, HWND *
 
 static HRESULT WINAPI media_player_UpdateVideo(IMFPMediaPlayer *iface)
 {
-    FIXME("%p.\n", iface);
+    struct media_player *player = impl_from_IMFPMediaPlayer(iface);
+    IMFVideoDisplayControl *display_control;
+    HRESULT hr;
+    RECT rect;
 
-    return E_NOTIMPL;
+    TRACE("%p.\n", iface);
+
+    if (SUCCEEDED(hr = media_player_get_display_control(player, &display_control)))
+    {
+        if (GetClientRect(player->output_window, &rect))
+            hr = IMFVideoDisplayControl_SetVideoPosition(display_control, NULL, &rect);
+        if (SUCCEEDED(hr))
+            hr = IMFVideoDisplayControl_RepaintVideo(display_control);
+        IMFVideoDisplayControl_Release(display_control);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI media_player_SetBorderColor(IMFPMediaPlayer *iface, COLORREF color)
@@ -1947,6 +2122,17 @@ static void media_player_playback_ended(struct media_player *player, HRESULT eve
     LeaveCriticalSection(&player->cs);
 }
 
+static void media_player_rate_changed(struct media_player *player, HRESULT event_status,
+        float rate, struct media_event **event)
+{
+    EnterCriticalSection(&player->cs);
+
+    if (SUCCEEDED(media_event_create(player, MFP_EVENT_TYPE_RATE_SET, event_status, player->item, event)))
+        (*event)->u.rate_set.flRate = rate;
+
+    LeaveCriticalSection(&player->cs);
+}
+
 static HRESULT WINAPI media_player_session_events_callback_Invoke(IMFAsyncCallback *iface,
         IMFAsyncResult *result)
 {
@@ -1959,6 +2145,7 @@ static HRESULT WINAPI media_player_session_events_callback_Invoke(IMFAsyncCallba
     IMFTopology *topology;
     unsigned int status;
     PROPVARIANT value;
+    float rate;
 
     if (FAILED(hr = IMFMediaSession_EndGetEvent(player->session, result, &session_event)))
         return S_OK;
@@ -2010,6 +2197,20 @@ static HRESULT WINAPI media_player_session_events_callback_Invoke(IMFAsyncCallba
             {
                 media_player_playback_ended(player, event_status, &event);
             }
+
+            break;
+
+        case MESessionRateChanged:
+
+            rate = 0.0f;
+            if (SUCCEEDED(IMFMediaEvent_GetValue(session_event, &value)))
+            {
+                if (value.vt == VT_R4)
+                    rate = value.fltVal;
+                PropVariantClear(&value);
+            }
+
+            media_player_rate_changed(player, event_status, rate, &event);
 
             break;
 

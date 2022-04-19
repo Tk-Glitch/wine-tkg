@@ -173,7 +173,7 @@ HRESULT WINAPI SHCoCreateInstance(
 		hres = E_ACCESSDENIED;
 	        goto end;
             } else if (FAILED(hres = DllGetClassObject(myclsid, &IID_IClassFactory, (LPVOID*)&pcf))) {
-		    TRACE("GetClassObject failed 0x%08x\n", hres);
+		    TRACE("GetClassObject failed 0x%08lx\n", hres);
 		    goto end;
 	    }
 
@@ -189,7 +189,7 @@ end:
         if (hKey) RegCloseKey(hKey);
 	if(hres!=S_OK)
 	{
-	  ERR("failed (0x%08x) to create CLSID:%s IID:%s\n",
+	  ERR("failed (0x%08lx) to create CLSID:%s IID:%s\n",
               hres, shdebugstr_guid(myclsid), shdebugstr_guid(refiid));
 	  ERR("class not found in registry\n");
 	}
@@ -309,7 +309,7 @@ LPVOID WINAPI SHAlloc(DWORD len)
 	LPVOID ret;
 
 	ret = CoTaskMemAlloc(len);
-	TRACE("%u bytes at %p\n",len, ret);
+	TRACE("%lu bytes at %p\n",len, ret);
 	return ret;
 }
 
@@ -346,7 +346,7 @@ HRESULT WINAPI SHGetDesktopFolder(IShellFolder **psf)
 	*psf = NULL;
 	hres = ISF_Desktop_Constructor(NULL, &IID_IShellFolder, (LPVOID*)psf);
 
-	TRACE("-- %p->(%p) 0x%08x\n", psf, *psf, hres);
+	TRACE("-- %p->(%p) 0x%08lx\n", psf, *psf, hres);
 	return hres;
 }
 /**************************************************************************
@@ -426,7 +426,7 @@ static ULONG WINAPI IDefClF_fnAddRef(LPCLASSFACTORY iface)
 	IDefClFImpl *This = impl_from_IClassFactory(iface);
 	ULONG refCount = InterlockedIncrement(&This->ref);
 
-	TRACE("(%p)->(count=%u)\n", This, refCount - 1);
+	TRACE("(%p)->(count=%lu)\n", This, refCount - 1);
 
 	return refCount;
 }
@@ -438,7 +438,7 @@ static ULONG WINAPI IDefClF_fnRelease(LPCLASSFACTORY iface)
 	IDefClFImpl *This = impl_from_IClassFactory(iface);
 	ULONG refCount = InterlockedDecrement(&This->ref);
 
-	TRACE("(%p)->(count=%u)\n", This, refCount + 1);
+	TRACE("(%p)->(count=%lu)\n", This, refCount + 1);
 
 	if (!refCount)
 	{
@@ -679,7 +679,7 @@ HRESULT WINAPI SHPropStgCreate(IPropertySetStorage *psstg, REFFMTID fmtid,
     PROPVARIANT ret;
     HRESULT hres;
 
-    TRACE("%p %s %s %x %x %x %p %p\n", psstg, debugstr_guid(fmtid), debugstr_guid(pclsid),
+    TRACE("%p %s %s %lx %lx %lx %p %p\n", psstg, debugstr_guid(fmtid), debugstr_guid(pclsid),
             grfFlags, grfMode, dwDisposition, ppstg, puCodePage);
 
     hres = IPropertySetStorage_Open(psstg, fmtid, grfMode, ppstg);
@@ -727,7 +727,7 @@ HRESULT WINAPI SHPropStgReadMultiple(IPropertyStorage *pps, UINT uCodePage,
     STATPROPSETSTG stat;
     HRESULT hres;
 
-    FIXME("%p %u %u %p %p\n", pps, uCodePage, cpspec, rgpspec, rgvar);
+    FIXME("%p %u %lu %p %p\n", pps, uCodePage, cpspec, rgpspec, rgvar);
 
     memset(rgvar, 0, cpspec*sizeof(PROPVARIANT));
     hres = IPropertyStorage_ReadMultiple(pps, cpspec, rgpspec, rgvar);
@@ -765,7 +765,7 @@ HRESULT WINAPI SHPropStgWriteMultiple(IPropertyStorage *pps, UINT *uCodePage,
     UINT codepage;
     HRESULT hres;
 
-    FIXME("%p %p %u %p %p %d\n", pps, uCodePage, cpspec, rgpspec, rgvar, propidNameFirst);
+    FIXME("%p %p %lu %p %p %ld\n", pps, uCodePage, cpspec, rgpspec, rgvar, propidNameFirst);
 
     hres = IPropertyStorage_Stat(pps, &stat);
     if(FAILED(hres))
@@ -861,7 +861,7 @@ static ULONG WINAPI ShellImageData_AddRef(IShellImageData *iface)
     ShellImageData *This = impl_from_IShellImageData(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("%p, %u\n", This, ref);
+    TRACE("%p, %lu\n", This, ref);
 
     return ref;
 }
@@ -871,7 +871,7 @@ static ULONG WINAPI ShellImageData_Release(IShellImageData *iface)
     ShellImageData *This = impl_from_IShellImageData(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("%p, %u\n", This, ref);
+    TRACE("%p, %lu\n", This, ref);
 
     if (!ref)
     {
@@ -889,7 +889,7 @@ static HRESULT WINAPI ShellImageData_Decode(IShellImageData *iface, DWORD flags,
     GpImage *image;
     HRESULT hr;
 
-    TRACE("%p, %#x, %u, %u\n", This, flags, cx_desired, cy_desired);
+    TRACE("%p, %#lx, %lu, %lu\n", This, flags, cx_desired, cy_desired);
 
     if (This->image)
         return S_FALSE;
@@ -1053,7 +1053,7 @@ static HRESULT WINAPI ShellImageDate_SelectPage(IShellImageData *iface, ULONG pa
 {
     ShellImageData *This = impl_from_IShellImageData(iface);
 
-    FIXME("%p, %u: stub\n", This, page);
+    FIXME("%p, %lu: stub\n", This, page);
 
     return E_NOTIMPL;
 }
@@ -1110,7 +1110,7 @@ static HRESULT WINAPI ShellImageData_GetProperties(IShellImageData *iface, DWORD
 {
     ShellImageData *This = impl_from_IShellImageData(iface);
 
-    FIXME("%p, %#x, %p: stub\n", This, mode, props);
+    FIXME("%p, %#lx, %p: stub\n", This, mode, props);
 
     return E_NOTIMPL;
 }
@@ -1119,7 +1119,7 @@ static HRESULT WINAPI ShellImageData_Rotate(IShellImageData *iface, DWORD angle)
 {
     ShellImageData *This = impl_from_IShellImageData(iface);
 
-    FIXME("%p, %u: stub\n", This, angle);
+    FIXME("%p, %lu: stub\n", This, angle);
 
     return E_NOTIMPL;
 }
@@ -1128,7 +1128,7 @@ static HRESULT WINAPI ShellImageData_Scale(IShellImageData *iface, ULONG cx, ULO
 {
     ShellImageData *This = impl_from_IShellImageData(iface);
 
-    FIXME("%p, %u, %u, %#x: stub\n", This, cx, cy, mode);
+    FIXME("%p, %lu, %lu, %#x: stub\n", This, cx, cy, mode);
 
     return E_NOTIMPL;
 }

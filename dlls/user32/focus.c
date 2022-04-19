@@ -74,7 +74,7 @@ static HWND set_focus_window( HWND hwnd )
             SendMessageW( ime_default, WM_IME_INTERNAL, IME_INTERNAL_ACTIVATE, (LPARAM)hwnd );
 
         if (previous)
-            NotifyWinEvent( EVENT_OBJECT_FOCUS, hwnd, OBJID_CLIENT, 0 );
+            NtUserNotifyWinEvent( EVENT_OBJECT_FOCUS, hwnd, OBJID_CLIENT, 0 );
 
         SendMessageW( hwnd, WM_SETFOCUS, (WPARAM)previous, 0 );
     }
@@ -173,12 +173,18 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
 
     if (!(winflags & WIN_IS_IN_ACTIVATION) && IsWindow(hwnd))
     {
-        SendMessageW( hwnd, WM_NCACTIVATE, (hwnd == GetForegroundWindow()), (LPARAM)previous );
+        SendMessageW( hwnd, WM_NCACTIVATE, hwnd == NtUserGetForegroundWindow(), (LPARAM)previous );
         SendMessageW( hwnd, WM_ACTIVATE,
                       MAKEWPARAM( mouse ? WA_CLICKACTIVE : WA_ACTIVE, IsIconic(hwnd) ),
                       (LPARAM)previous );
         if (GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())
             PostMessageW( GetDesktopWindow(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
+
+        if (GetPropW( hwnd, L"__WINE_RESTORE_WINDOW" ))
+        {
+            SetPropW( hwnd, L"__WINE_RESTORE_WINDOW", NULL );
+            SendMessageW( hwnd, WM_SYSCOMMAND, SC_RESTORE, 0 );
+        }
     }
 
     /* now change focus if necessary */
@@ -187,7 +193,7 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         GUITHREADINFO info;
 
         info.cbSize = sizeof(info);
-        GetGUIThreadInfo( GetCurrentThreadId(), &info );
+        NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info );
         /* Do not change focus if the window is no more active */
         if (hwnd == info.hwndActive)
         {
@@ -356,15 +362,9 @@ BOOL WINAPI SetForegroundWindow( HWND hwnd )
  */
 HWND WINAPI GetActiveWindow(void)
 {
-    HWND ret = 0;
-
-    SERVER_START_REQ( get_thread_input )
-    {
-        req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->active );
-    }
-    SERVER_END_REQ;
-    return ret;
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndActive : 0;
 }
 
 
@@ -373,32 +373,9 @@ HWND WINAPI GetActiveWindow(void)
  */
 HWND WINAPI GetFocus(void)
 {
-    HWND ret = 0;
-
-    SERVER_START_REQ( get_thread_input )
-    {
-        req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->focus );
-    }
-    SERVER_END_REQ;
-    return ret;
-}
-
-
-/*******************************************************************
- *		GetForegroundWindow  (USER32.@)
- */
-HWND WINAPI GetForegroundWindow(void)
-{
-    HWND ret = 0;
-
-    SERVER_START_REQ( get_thread_input )
-    {
-        req->tid = 0;
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->foreground );
-    }
-    SERVER_END_REQ;
-    return ret;
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndFocus : 0;
 }
 
 

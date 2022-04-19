@@ -80,6 +80,8 @@ extern BOOL ximInComposeMode;
 #define XEMBED_UNREGISTER_ACCELERATOR 13
 #define XEMBED_ACTIVATE_ACCELERATOR   14
 
+static const WCHAR restore_window_propW[] = {'_','_','W','I','N','E','_','R','E','S','T','O','R','E','_','W','I','N','D','O','W',0};
+
 Bool (*pXGetEventData)( Display *display, XEvent /*XGenericEventCookie*/ *event ) = NULL;
 void (*pXFreeEventData)( Display *display, XEvent /*XGenericEventCookie*/ *event ) = NULL;
 
@@ -436,18 +438,22 @@ static BOOL process_events( Display *display, Bool (*filter)(Display*, XEvent*,X
 {
     XEvent event, prev_event;
     int count = 0;
-    BOOL queued = FALSE, overlay_enabled = FALSE;
+    BOOL queued = FALSE, overlay_enabled = FALSE, steam_keyboard_opened = FALSE;
     enum event_merge_action action = MERGE_DISCARD;
     ULONG_PTR overlay_filter = QS_KEY | QS_MOUSEBUTTON | QS_MOUSEMOVE;
+    ULONG_PTR keyboard_filter = QS_MOUSEBUTTON | QS_MOUSEMOVE;
 
     if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0)
         overlay_enabled = TRUE;
+    if (WaitForSingleObject(steam_keyboard_event, 0) == WAIT_OBJECT_0)
+        steam_keyboard_opened = TRUE;
 
     prev_event.type = 0;
     while (XCheckIfEvent( display, &event, filter, (char *)arg ))
     {
         count++;
         if (overlay_enabled && filter_event( display, &event, (char *)overlay_filter )) continue;
+        if (steam_keyboard_opened && filter_event( display, &event, (char *)keyboard_filter )) continue;
         if (XFilterEvent( &event, None ))
         {
             /*
@@ -582,7 +588,7 @@ static inline BOOL can_activate_window( HWND hwnd )
 
     if (!(style & WS_VISIBLE)) return FALSE;
     if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return FALSE;
-    if (style & WS_MINIMIZE) return FALSE;
+    if ((style & WS_MINIMIZE) && !GetPropW( hwnd, restore_window_propW )) return FALSE;
     if (GetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_NOACTIVATE) return FALSE;
     if (hwnd == GetDesktopWindow()) return FALSE;
     if (GetWindowRect( hwnd, &rect ) && IsRectEmpty( &rect )) return FALSE;
@@ -817,6 +823,8 @@ static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
     if (event->detail == NotifyPointer) return FALSE;
     if (hwnd == GetDesktopWindow()) return FALSE;
 
+    x11drv_thread_data()->keymapnotify_hwnd = hwnd;
+
     /* Focus was just restored but it can be right after super was
      * pressed and gnome-shell needs a bit of time to respond and
      * toggle the activity view. If we grab the cursor right away
@@ -940,8 +948,6 @@ static BOOL X11DRV_FocusOut( HWND hwnd, XEvent *xev )
     }
     if (!hwnd) return FALSE;
 
-    if (hwnd == GetForegroundWindow()) ungrab_clipping_window();
-
     /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
     if (event->mode == NotifyGrab || event->mode == NotifyUngrab) return FALSE;
 
@@ -979,7 +985,10 @@ static BOOL X11DRV_Expose( HWND hwnd, XEvent *xev )
     rect.right  = pos.x + event->width;
     rect.bottom = pos.y + event->height;
 
-    if (event->window != data->client_window)
+    if (layered_window_client_hack && event->window == data->client_window)
+        OffsetRect( &rect, data->client_rect.left - data->whole_rect.left,
+                    data->client_rect.top - data->whole_rect.top );
+    if (layered_window_client_hack || event->window != data->client_window)
     {
         if (data->surface)
         {
@@ -1406,7 +1415,10 @@ static void handle_wm_state_notify( HWND hwnd, XPropertyEvent *event, BOOL updat
             {
                 TRACE( "restoring win %p/%lx\n", data->hwnd, data->whole_window );
                 release_win_data( data );
-                SendMessageW( hwnd, WM_SYSCOMMAND, SC_RESTORE, 0 );
+                if ((style & (WS_MINIMIZE | WS_VISIBLE)) == (WS_MINIMIZE | WS_VISIBLE) && GetActiveWindow() != hwnd)
+                    SetPropW( hwnd, restore_window_propW, (HANDLE) TRUE );
+                else
+                    SendMessageW( hwnd, WM_SYSCOMMAND, SC_RESTORE, 0 );
                 return;
             }
             TRACE( "not restoring win %p/%lx style %08x\n", data->hwnd, data->whole_window, style );
@@ -1448,6 +1460,52 @@ static void handle__net_wm_state_notify( HWND hwnd, XPropertyEvent *event )
     release_win_data( data );
 }
 
+static int handle_gamescope_focused_app_error( Display *dpy, XErrorEvent *event, void *arg )
+{
+    WARN( "Failed to read GAMESCOPE_FOCUSED_APP property, ignoring.\n" );
+    return 1;
+}
+
+static void handle_gamescope_focused_app( XPropertyEvent *event )
+{
+    static const char *sgi = NULL;
+    static BOOL steam_keyboard_opened;
+
+    unsigned long count, remaining, *property;
+    int format, app_id, focused_app_id;
+    BOOL keyboard_opened;
+    Atom type;
+
+    if (!sgi && !(sgi = getenv( "SteamGameId" ))) return;
+    app_id = atoi( sgi );
+
+    X11DRV_expect_error( event->display, handle_gamescope_focused_app_error, NULL );
+    XGetWindowProperty( event->display, DefaultRootWindow( event->display ), x11drv_atom( GAMESCOPE_FOCUSED_APP ),
+                        0, ~0UL, False, XA_CARDINAL, &type, &format, &count, &remaining, (unsigned char **)&property );
+    if (X11DRV_check_error()) focused_app_id = app_id;
+    else
+    {
+        if (!property) focused_app_id = app_id;
+        else focused_app_id = *property;
+        XFree( property );
+    }
+
+    keyboard_opened = app_id != focused_app_id;
+    if (steam_keyboard_opened == keyboard_opened) return;
+    steam_keyboard_opened = keyboard_opened;
+
+    TRACE( "Got app id %u, focused app %u\n", app_id, focused_app_id );
+    if (keyboard_opened)
+    {
+        TRACE( "Steam Keyboard is opened, filtering events.\n" );
+        SetEvent( steam_keyboard_event );
+    }
+    else
+    {
+        TRACE( "Steam Keyboard is closed, stopping events filter.\n" );
+        ResetEvent( steam_keyboard_event );
+    }
+}
 
 /***********************************************************************
  *           X11DRV_PropertyNotify
@@ -1456,6 +1514,8 @@ static BOOL X11DRV_PropertyNotify( HWND hwnd, XEvent *xev )
 {
     XPropertyEvent *event = &xev->xproperty;
     char *name;
+
+    if (event->atom == x11drv_atom( GAMESCOPE_FOCUSED_APP )) handle_gamescope_focused_app( event );
 
     if (!hwnd) return FALSE;
 

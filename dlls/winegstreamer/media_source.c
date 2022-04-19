@@ -105,6 +105,7 @@ struct media_source
         SOURCE_RUNNING,
         SOURCE_SHUTDOWN,
     } state;
+    float rate;
 
     HANDLE read_thread;
     bool read_thread_shutdown;
@@ -357,7 +358,7 @@ static void start_pipeline(struct media_source *source, struct source_async_comm
             IMFMediaTypeHandler_GetCurrentMediaType(mth, &current_mt);
 
             mf_media_type_to_wg_format(current_mt, &format);
-            wg_parser_stream_enable(stream->wg_stream, &format);
+            wg_parser_stream_enable(stream->wg_stream, &format, NULL);
 
             IMFMediaType_Release(current_mt);
             IMFMediaTypeHandler_Release(mth);
@@ -643,7 +644,7 @@ static DWORD CALLBACK read_thread(void *arg)
          * an error when reading past the file size. */
         if (!size)
         {
-            wg_parser_push_data(source->wg_parser, data, 0);
+            wg_parser_push_data(source->wg_parser, WG_READ_SUCCESS, data, 0);
             continue;
         }
 
@@ -661,7 +662,7 @@ static DWORD CALLBACK read_thread(void *arg)
             ERR("Failed to read %u bytes at offset %I64u, hr %#lx.\n", size, offset, hr);
         else if (ret_size != size)
             ERR("Unexpected short read: requested %u bytes, got %lu.\n", size, ret_size);
-        wg_parser_push_data(source->wg_parser, SUCCEEDED(hr) ? data : NULL, ret_size);
+        wg_parser_push_data(source->wg_parser, SUCCEEDED(hr) ? WG_READ_SUCCESS : WG_READ_FAILURE, data, ret_size);
     }
 
     free(data);
@@ -872,7 +873,7 @@ static HRESULT new_media_stream(struct media_source *source,
 static HRESULT media_stream_init_desc(struct media_stream *stream)
 {
     IMFMediaTypeHandler *type_handler = NULL;
-    IMFMediaType *stream_types[6];
+    IMFMediaType *stream_types[7];
     struct wg_format format;
     DWORD type_count = 0;
     unsigned int i;
@@ -891,6 +892,7 @@ static HRESULT media_stream_init_desc(struct media_stream *stream)
             &MFVideoFormat_YUY2,
             &MFVideoFormat_IYUV,
             &MFVideoFormat_I420,
+            &MFVideoFormat_ARGB32,
         };
 
         IMFMediaType *base_type = mf_media_type_from_wg_format(&format);
@@ -1109,6 +1111,9 @@ static ULONG WINAPI media_source_rate_control_Release(IMFRateControl *iface)
 
 static HRESULT WINAPI media_source_rate_control_SetRate(IMFRateControl *iface, BOOL thin, float rate)
 {
+    struct media_source *source = impl_from_IMFRateControl(iface);
+    HRESULT hr;
+
     FIXME("%p, %d, %f.\n", iface, thin, rate);
 
     if (rate < 0.0f)
@@ -1117,20 +1122,24 @@ static HRESULT WINAPI media_source_rate_control_SetRate(IMFRateControl *iface, B
     if (thin)
         return MF_E_THINNING_UNSUPPORTED;
 
-    if (rate != 1.0f)
-        return MF_E_UNSUPPORTED_RATE;
+    if (FAILED(hr = IMFRateSupport_IsRateSupported(&source->IMFRateSupport_iface, thin, rate, NULL)))
+        return hr;
 
-    return S_OK;
+    source->rate = rate;
+
+    return IMFMediaEventQueue_QueueEventParamVar(source->event_queue, MESourceRateChanged, &GUID_NULL, S_OK, NULL);
 }
 
 static HRESULT WINAPI media_source_rate_control_GetRate(IMFRateControl *iface, BOOL *thin, float *rate)
 {
+    struct media_source *source = impl_from_IMFRateControl(iface);
+
     TRACE("%p, %p, %p.\n", iface, thin, rate);
 
     if (thin)
         *thin = FALSE;
 
-    *rate = 1.0f;
+    *rate = source->rate;
 
     return S_OK;
 }
@@ -1389,6 +1398,7 @@ static const IMFMediaSourceVtbl IMFMediaSource_vtbl =
 
 static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_source **out_media_source)
 {
+    BOOL video_selected = FALSE, audio_selected = FALSE;
     IMFStreamDescriptor **descriptors = NULL;
     unsigned int stream_count = UINT_MAX;
     struct media_source *object;
@@ -1425,6 +1435,7 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
     object->ref = 1;
     object->byte_stream = bytestream;
     IMFByteStream_AddRef(bytestream);
+    object->rate = 1.0f;
 
     if (FAILED(hr = MFCreateEventQueue(&object->event_queue)))
         goto fail;
@@ -1482,15 +1493,52 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
     descriptors = malloc(object->stream_count * sizeof(IMFStreamDescriptor *));
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[i]);
+        IMFStreamDescriptor **descriptor = &descriptors[object->stream_count - 1 - i];
+        char language[128];
+        DWORD language_len;
+        WCHAR *languageW;
+
+        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, descriptor);
+
+        if (wg_parser_stream_get_language(object->streams[i]->wg_stream, language, sizeof(language)))
+        {
+            if ((language_len = MultiByteToWideChar(CP_UTF8, 0, language, -1, NULL, 0)))
+            {
+                languageW = malloc(language_len * sizeof(WCHAR));
+                if (MultiByteToWideChar(CP_UTF8, 0, language, -1, languageW, language_len))
+                {
+                    IMFStreamDescriptor_SetString(*descriptor, &MF_SD_LANGUAGE, languageW);
+                }
+                free(languageW);
+            }
+        }
     }
 
     if (FAILED(hr = MFCreatePresentationDescriptor(object->stream_count, descriptors, &object->pres_desc)))
         goto fail;
 
+    /* Select one of each major type. */
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
+        IMFMediaTypeHandler *handler;
+        GUID major_type;
+        BOOL select_stream = FALSE;
+
+        IMFStreamDescriptor_GetMediaTypeHandler(descriptors[i], &handler);
+        IMFMediaTypeHandler_GetMajorType(handler, &major_type);
+        if (IsEqualGUID(&major_type, &MFMediaType_Video) && !video_selected)
+        {
+            select_stream = TRUE;
+            video_selected = TRUE;
+        }
+        if (IsEqualGUID(&major_type, &MFMediaType_Audio) && !audio_selected)
+        {
+            select_stream = TRUE;
+            audio_selected = TRUE;
+        }
+        if (select_stream)
+            IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
+        IMFMediaTypeHandler_Release(handler);
         IMFStreamDescriptor_Release(descriptors[i]);
     }
     free(descriptors);

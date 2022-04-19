@@ -81,8 +81,10 @@ struct xinput_controller
         char *feature_report_buf;
 
         BYTE haptics_report;
-        BYTE haptics_rumble_index;
-        BYTE haptics_buzz_index;
+        BYTE haptics_none_ordinal;
+        BYTE haptics_stop_ordinal;
+        BYTE haptics_rumble_ordinal;
+        BYTE haptics_buzz_ordinal;
     } hid;
 };
 
@@ -124,8 +126,10 @@ static HANDLE start_event;
 static HANDLE stop_event;
 static HANDLE done_event;
 static HANDLE update_event;
+static HANDLE steam_overlay_event;
+static HANDLE steam_keyboard_event;
 
-static BOOL find_opened_device(SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail, int *free_slot)
+static BOOL find_opened_device(const WCHAR *device_path, int *free_slot)
 {
     int i;
 
@@ -133,7 +137,7 @@ static BOOL find_opened_device(SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail, int *f
     for (i = XUSER_MAX_COUNT; i > 0; i--)
     {
         if (!controllers[i - 1].device) *free_slot = i - 1;
-        else if (!wcscmp(detail->DevicePath, controllers[i - 1].device_path)) return TRUE;
+        else if (!wcsicmp(device_path, controllers[i - 1].device_path)) return TRUE;
     }
     return FALSE;
 }
@@ -244,21 +248,23 @@ static BOOL controller_check_caps(struct xinput_controller *controller, HANDLE d
         return TRUE;
     }
 
-    controller->hid.haptics_buzz_index = 0;
-    controller->hid.haptics_rumble_index = 0;
+    controller->hid.haptics_none_ordinal = 1; /* implicit None waveform ordinal, from the HID spec */
+    controller->hid.haptics_stop_ordinal = 2; /* implicit Stop waveform ordinal, from the HID spec */
+    controller->hid.haptics_buzz_ordinal = 0;
+    controller->hid.haptics_rumble_ordinal = 0;
     for (i = 3; status == HIDP_STATUS_SUCCESS; ++i)
     {
         ULONG waveform = 0;
         status = HidP_GetUsageValue(HidP_Feature, HID_USAGE_PAGE_ORDINAL, waveform_list,
                                     i, &waveform, preparsed, report_buf, report_len);
         if (status != HIDP_STATUS_SUCCESS) WARN("HidP_GetUsageValue returned %#lx\n", status);
-        else if (waveform == HID_USAGE_HAPTICS_WAVEFORM_BUZZ) controller->hid.haptics_buzz_index = i;
-        else if (waveform == HID_USAGE_HAPTICS_WAVEFORM_RUMBLE) controller->hid.haptics_rumble_index = i;
+        else if (waveform == HID_USAGE_HAPTICS_WAVEFORM_BUZZ) controller->hid.haptics_buzz_ordinal = i;
+        else if (waveform == HID_USAGE_HAPTICS_WAVEFORM_RUMBLE) controller->hid.haptics_rumble_ordinal = i;
     }
 
-    if (!controller->hid.haptics_buzz_index) WARN("haptics buzz not supported\n");
-    if (!controller->hid.haptics_rumble_index) WARN("haptics rumble not supported\n");
-    if (!controller->hid.haptics_rumble_index && !controller->hid.haptics_buzz_index) return TRUE;
+    if (!controller->hid.haptics_buzz_ordinal) WARN("haptics buzz not supported\n");
+    if (!controller->hid.haptics_rumble_ordinal) WARN("haptics rumble not supported\n");
+    if (!controller->hid.haptics_rumble_ordinal && !controller->hid.haptics_buzz_ordinal) return TRUE;
 
     caps_count = 1;
     status = HidP_GetSpecificValueCaps(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_MANUAL_TRIGGER,
@@ -282,43 +288,92 @@ static DWORD HID_set_state(struct xinput_controller *controller, XINPUT_VIBRATIO
     PHIDP_PREPARSED_DATA preparsed = controller->hid.preparsed;
     char *report_buf = controller->hid.output_report_buf;
     BYTE report_id = controller->hid.haptics_report;
+    BOOL update_rumble, update_buzz;
     NTSTATUS status;
 
     if (!(controller->caps.Flags & XINPUT_CAPS_FFB_SUPPORTED)) return ERROR_SUCCESS;
 
+    update_rumble = (controller->vibration.wLeftMotorSpeed != state->wLeftMotorSpeed);
     controller->vibration.wLeftMotorSpeed = state->wLeftMotorSpeed;
+    update_buzz = (controller->vibration.wRightMotorSpeed != state->wRightMotorSpeed);
     controller->vibration.wRightMotorSpeed = state->wRightMotorSpeed;
 
     if (!controller->enabled) return ERROR_SUCCESS;
 
-    /* send haptics rumble report (left motor) */
-    status = HidP_InitializeReportForID(HidP_Output, report_id, preparsed, report_buf, report_len);
-    if (status != HIDP_STATUS_SUCCESS) WARN("HidP_InitializeReportForID returned %#lx\n", status);
-    status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_INTENSITY,
-                                state->wLeftMotorSpeed, preparsed, report_buf, report_len);
-    if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue INTENSITY returned %#lx\n", status);
-    status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_MANUAL_TRIGGER,
-                                controller->hid.haptics_rumble_index, preparsed, report_buf, report_len);
-    if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue MANUAL_TRIGGER returned %#lx\n", status);
-    if (!HidD_SetOutputReport(controller->device, report_buf, report_len))
+    if (!state->wLeftMotorSpeed && !state->wRightMotorSpeed)
     {
-        WARN("HidD_SetOutputReport failed with error %lu\n", GetLastError());
-        return GetLastError();
+        status = HidP_InitializeReportForID(HidP_Output, report_id, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_InitializeReportForID returned %#lx\n", status);
+        status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_MANUAL_TRIGGER,
+                                    controller->hid.haptics_stop_ordinal, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue MANUAL_TRIGGER returned %#lx\n", status);
+        if (!HidD_SetOutputReport(controller->device, report_buf, report_len))
+        {
+            WARN("HidD_SetOutputReport failed with error %lu\n", GetLastError());
+            return GetLastError();
+        }
+
+        return 0;
     }
 
-    /* send haptics buzz report (right motor) */
-    status = HidP_InitializeReportForID(HidP_Output, report_id, preparsed, report_buf, report_len);
-    if (status != HIDP_STATUS_SUCCESS) WARN("HidP_InitializeReportForID returned %#lx\n", status);
-    status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_INTENSITY,
-                                state->wRightMotorSpeed, preparsed, report_buf, report_len);
-    if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue INTENSITY returned %#lx\n", status);
-    status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_MANUAL_TRIGGER,
-                                controller->hid.haptics_buzz_index, preparsed, report_buf, report_len);
-    if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue MANUAL_TRIGGER returned %#lx\n", status);
-    if (!HidD_SetOutputReport(controller->device, report_buf, report_len))
+    if (update_rumble)
     {
-        WARN("HidD_SetOutputReport failed with error %lu\n", GetLastError());
-        return GetLastError();
+        /* send haptics rumble report (left motor) */
+        status = HidP_InitializeReportForID(HidP_Output, report_id, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_InitializeReportForID returned %#lx\n", status);
+        status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_INTENSITY,
+                                    state->wLeftMotorSpeed, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue INTENSITY returned %#lx\n", status);
+        status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_MANUAL_TRIGGER,
+                                    controller->hid.haptics_rumble_ordinal, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue MANUAL_TRIGGER returned %#lx\n", status);
+        status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_REPEAT_COUNT,
+                                    0, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue REPEAT_COUNT returned %#lx\n", status);
+        if (!HidD_SetOutputReport(controller->device, report_buf, report_len))
+        {
+            WARN("HidD_SetOutputReport failed with error %lu\n", GetLastError());
+            return GetLastError();
+        }
+    }
+
+    if (update_buzz)
+    {
+        /* send haptics buzz report (right motor) */
+        status = HidP_InitializeReportForID(HidP_Output, report_id, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_InitializeReportForID returned %#lx\n", status);
+        status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_INTENSITY,
+                                    state->wRightMotorSpeed, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue INTENSITY returned %#lx\n", status);
+        status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_MANUAL_TRIGGER,
+                                    controller->hid.haptics_buzz_ordinal, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue MANUAL_TRIGGER returned %#lx\n", status);
+        status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_REPEAT_COUNT,
+                                    0, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue REPEAT_COUNT returned %#lx\n", status);
+        if (!HidD_SetOutputReport(controller->device, report_buf, report_len))
+        {
+            WARN("HidD_SetOutputReport failed with error %lu\n", GetLastError());
+            return GetLastError();
+        }
+    }
+
+    if (update_rumble || update_buzz)
+    {
+        /* trigger haptics waveforms */
+        status = HidP_InitializeReportForID(HidP_Output, report_id, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_InitializeReportForID returned %#lx\n", status);
+        status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_MANUAL_TRIGGER,
+                                    controller->hid.haptics_none_ordinal, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue MANUAL_TRIGGER returned %#lx\n", status);
+        status = HidP_SetUsageValue(HidP_Output, HID_USAGE_PAGE_HAPTICS, 0, HID_USAGE_HAPTICS_REPEAT_COUNT,
+                                    1, preparsed, report_buf, report_len);
+        if (status != HIDP_STATUS_SUCCESS) WARN("HidP_SetUsageValue REPEAT_COUNT returned %#lx\n", status);
+        if (!HidD_SetOutputReport(controller->device, report_buf, report_len))
+        {
+            WARN("HidD_SetOutputReport failed with error %lu\n", GetLastError());
+            return GetLastError();
+        }
     }
 
     return ERROR_SUCCESS;
@@ -358,7 +413,7 @@ static void controller_disable(struct xinput_controller *controller)
 }
 
 static BOOL controller_init(struct xinput_controller *controller, PHIDP_PREPARSED_DATA preparsed,
-                            HIDP_CAPS *caps, HANDLE device, WCHAR *device_path)
+                            HIDP_CAPS *caps, HANDLE device, const WCHAR *device_path)
 {
     HANDLE event = NULL;
 
@@ -417,7 +472,7 @@ static void get_registry_keys(HKEY *defkey, HKEY *appkey)
     }
 }
 
-static BOOL device_is_overriden(HANDLE device)
+static BOOL device_is_overridden(HANDLE device)
 {
     WCHAR name[MAX_PATH], buffer[MAX_PATH];
     DWORD size = sizeof(buffer);
@@ -440,19 +495,60 @@ static BOOL device_is_overriden(HANDLE device)
     return disable;
 }
 
+static BOOL try_add_device(const WCHAR *device_path)
+{
+    SP_DEVICE_INTERFACE_DATA iface = {sizeof(iface)};
+    PHIDP_PREPARSED_DATA preparsed;
+    HIDP_CAPS caps;
+    NTSTATUS status;
+    HANDLE device;
+    int i;
+
+    if (find_opened_device(device_path, &i)) return TRUE; /* already opened */
+    if (i == XUSER_MAX_COUNT) return FALSE; /* no more slots */
+
+    device = CreateFileW(device_path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                         NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, NULL);
+    if (device == INVALID_HANDLE_VALUE) return TRUE;
+
+    preparsed = NULL;
+    if (!HidD_GetPreparsedData(device, &preparsed))
+        WARN("ignoring HID device, HidD_GetPreparsedData failed with error %lu\n", GetLastError());
+    else if ((status = HidP_GetCaps(preparsed, &caps)) != HIDP_STATUS_SUCCESS)
+        WARN("ignoring HID device, HidP_GetCaps returned %#lx\n", status);
+    else if (caps.UsagePage != HID_USAGE_PAGE_GENERIC)
+        WARN("ignoring HID device, unsupported usage page %04x\n", caps.UsagePage);
+    else if (caps.Usage != HID_USAGE_GENERIC_GAMEPAD && caps.Usage != HID_USAGE_GENERIC_JOYSTICK &&
+             caps.Usage != HID_USAGE_GENERIC_MULTI_AXIS_CONTROLLER)
+        WARN("ignoring HID device, unsupported usage %04x:%04x\n", caps.UsagePage, caps.Usage);
+    else if (device_is_overridden(device))
+        WARN("ignoring HID device, overridden for dinput\n");
+    else if (!controller_init(&controllers[i], preparsed, &caps, device, device_path))
+        WARN("ignoring HID device, failed to initialize\n");
+    else
+        return TRUE;
+
+    CloseHandle(device);
+    HidD_FreePreparsedData(preparsed);
+    return TRUE;
+}
+
+static void try_remove_device(const WCHAR *device_path)
+{
+    int i;
+
+    if (find_opened_device(device_path, &i))
+        controller_destroy(&controllers[i], TRUE);
+}
+
 static void update_controller_list(void)
 {
     char buffer[sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) + MAX_PATH * sizeof(WCHAR)];
     SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail = (SP_DEVICE_INTERFACE_DETAIL_DATA_W *)buffer;
     SP_DEVICE_INTERFACE_DATA iface = {sizeof(iface)};
-    PHIDP_PREPARSED_DATA preparsed;
-    HIDP_CAPS caps;
-    NTSTATUS status;
     HDEVINFO set;
-    HANDLE device;
     DWORD idx;
     GUID guid;
-    int i;
 
     guid = GUID_DEVINTERFACE_WINEXINPUT;
 
@@ -464,34 +560,8 @@ static void update_controller_list(void)
     {
         if (!SetupDiGetDeviceInterfaceDetailW(set, &iface, detail, sizeof(buffer), NULL, NULL))
             continue;
-
-        if (find_opened_device(detail, &i)) continue; /* already opened */
-        if (i == XUSER_MAX_COUNT) break; /* no more slots */
-
-        device = CreateFileW(detail->DevicePath, GENERIC_READ | GENERIC_WRITE,
-                             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
-                             FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, NULL);
-        if (device == INVALID_HANDLE_VALUE) continue;
-
-        preparsed = NULL;
-        if (!HidD_GetPreparsedData(device, &preparsed))
-            WARN("ignoring HID device, HidD_GetPreparsedData failed with error %lu\n", GetLastError());
-        else if ((status = HidP_GetCaps(preparsed, &caps)) != HIDP_STATUS_SUCCESS)
-            WARN("ignoring HID device, HidP_GetCaps returned %#lx\n", status);
-        else if (caps.UsagePage != HID_USAGE_PAGE_GENERIC)
-            WARN("ignoring HID device, unsupported usage page %04x\n", caps.UsagePage);
-        else if (caps.Usage != HID_USAGE_GENERIC_GAMEPAD && caps.Usage != HID_USAGE_GENERIC_JOYSTICK &&
-                 caps.Usage != HID_USAGE_GENERIC_MULTI_AXIS_CONTROLLER)
-            WARN("ignoring HID device, unsupported usage %04x:%04x\n", caps.UsagePage, caps.Usage);
-        else if (device_is_overriden(device))
-            WARN("ignoring HID device, overriden for dinput\n");
-        else if (!controller_init(&controllers[i], preparsed, &caps, device, detail->DevicePath))
-            WARN("ignoring HID device, failed to initialize\n");
-        else
-            continue;
-
-        CloseHandle(device);
-        HidD_FreePreparsedData(preparsed);
+        if (!try_add_device(detail->DevicePath))
+            break;
     }
 
     SetupDiDestroyDeviceInfoList(set);
@@ -528,6 +598,8 @@ static void stop_update_thread(void)
     CloseHandle(stop_event);
     CloseHandle(done_event);
     CloseHandle(update_event);
+    CloseHandle(steam_overlay_event);
+    CloseHandle(steam_keyboard_event);
 
     for (i = 0; i < XUSER_MAX_COUNT; i++) controller_destroy(&controllers[i], FALSE);
 }
@@ -645,7 +717,13 @@ static void read_controller_state(struct xinput_controller *controller)
 
 static LRESULT CALLBACK xinput_devnotify_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
-    if (msg == WM_DEVICECHANGE && wparam == DBT_DEVICEARRIVAL) update_controller_list();
+    if (msg == WM_DEVICECHANGE)
+    {
+        DEV_BROADCAST_DEVICEINTERFACE_W *iface = (DEV_BROADCAST_DEVICEINTERFACE_W *)lparam;
+        if (wparam == DBT_DEVICEARRIVAL) try_add_device(iface->dbcc_name);
+        if (wparam == DBT_DEVICEREMOVECOMPLETE) try_remove_device(iface->dbcc_name);
+    }
+
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
@@ -716,6 +794,9 @@ static DWORD WINAPI hid_update_thread_proc(void *param)
 static BOOL WINAPI start_update_thread_once( INIT_ONCE *once, void *param, void **context )
 {
     HANDLE thread;
+
+    steam_overlay_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_GameOverlayActivated");
+    steam_keyboard_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_KeyboardActivated");
 
     start_event = CreateEventA(NULL, FALSE, FALSE, NULL);
     if (!start_event) ERR("failed to create start event, error %lu\n", GetLastError());
@@ -813,7 +894,9 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputSetState(DWORD index, XINPUT_VIBRATION *vib
     if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
     if (!controller_lock(&controllers[index])) return ERROR_DEVICE_NOT_CONNECTED;
 
-    ret = HID_set_state(&controllers[index], vibration);
+    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0) ret = ERROR_SUCCESS;
+    else if (WaitForSingleObject(steam_keyboard_event, 0) == WAIT_OBJECT_0) ret = ERROR_SUCCESS;
+    else ret = HID_set_state(&controllers[index], vibration);
 
     controller_unlock(&controllers[index]);
 
@@ -831,7 +914,10 @@ static DWORD xinput_get_state(DWORD index, XINPUT_STATE *state)
     if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
     if (!controller_lock(&controllers[index])) return ERROR_DEVICE_NOT_CONNECTED;
 
-    *state = controllers[index].state;
+    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0) memset(state, 0, sizeof(*state));
+    else if (WaitForSingleObject(steam_keyboard_event, 0) == WAIT_OBJECT_0) memset(state, 0, sizeof(*state));
+    else *state = controllers[index].state;
+
     controller_unlock(&controllers[index]);
 
     return ERROR_SUCCESS;
@@ -1077,7 +1163,6 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetCapabilities(DWORD index, DWORD flags, X
     start_update_thread();
 
     if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
-
     if (!controller_lock(&controllers[index])) return ERROR_DEVICE_NOT_CONNECTED;
 
     if (flags & XINPUT_FLAG_GAMEPAD && controllers[index].caps.SubType != XINPUT_DEVSUBTYPE_GAMEPAD)

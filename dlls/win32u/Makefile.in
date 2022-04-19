@@ -28,9 +28,11 @@ C_SRCS = \
 	font.c \
 	freetype.c \
 	gdiobj.c \
+	hook.c \
 	input.c \
 	main.c \
 	mapping.c \
+	message.c \
 	opentype.c \
 	painting.c \
 	palette.c \

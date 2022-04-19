@@ -91,6 +91,21 @@ HRESULT wg_parser_connect(struct wg_parser *parser, uint64_t file_size)
     return __wine_unix_call(unix_handle, unix_wg_parser_connect, &params);
 }
 
+HRESULT wg_parser_connect_unseekable(struct wg_parser *parser, const struct wg_format *in_format,
+        uint32_t stream_count, const struct wg_format *out_formats, const struct wg_rect *apertures)
+{
+    struct wg_parser_connect_unseekable_params params =
+    {
+        .parser = parser,
+        .in_format = in_format,
+        .stream_count = stream_count,
+        .out_formats = out_formats,
+        .apertures = apertures,
+    };
+
+    return __wine_unix_call(unix_handle, unix_wg_parser_connect_unseekable, &params);
+}
+
 void wg_parser_disconnect(struct wg_parser *parser)
 {
     __wine_unix_call(unix_handle, unix_wg_parser_disconnect, parser);
@@ -120,11 +135,12 @@ bool wg_parser_get_next_read_offset(struct wg_parser *parser, uint64_t *offset, 
     return true;
 }
 
-void wg_parser_push_data(struct wg_parser *parser, const void *data, uint32_t size)
+void wg_parser_push_data(struct wg_parser *parser, enum wg_read_result result, const void *data, uint32_t size)
 {
     struct wg_parser_push_data_params params =
     {
         .parser = parser,
+        .result = result,
         .data = data,
         .size = size,
     };
@@ -166,12 +182,13 @@ void wg_parser_stream_get_preferred_format(struct wg_parser_stream *stream, stru
     __wine_unix_call(unix_handle, unix_wg_parser_stream_get_preferred_format, &params);
 }
 
-void wg_parser_stream_enable(struct wg_parser_stream *stream, const struct wg_format *format)
+void wg_parser_stream_enable(struct wg_parser_stream *stream, const struct wg_format *format, const struct wg_rect *aperture)
 {
     struct wg_parser_stream_enable_params params =
     {
         .stream = stream,
         .format = format,
+        .aperture = aperture,
     };
 
     __wine_unix_call(unix_handle, unix_wg_parser_stream_enable, &params);
@@ -238,6 +255,18 @@ uint64_t wg_parser_stream_get_duration(struct wg_parser_stream *stream)
     return params.duration;
 }
 
+bool wg_parser_stream_get_language(struct wg_parser_stream *stream, char *buffer, uint32_t size)
+{
+    struct wg_parser_stream_get_language_params params =
+    {
+        .stream = stream,
+        .buffer = buffer,
+        .size = size,
+    };
+
+    return !__wine_unix_call(unix_handle, unix_wg_parser_stream_get_language, &params);
+}
+
 void wg_parser_stream_seek(struct wg_parser_stream *stream, double rate,
         uint64_t start_pos, uint64_t stop_pos, DWORD start_flags, DWORD stop_flags)
 {
@@ -252,6 +281,53 @@ void wg_parser_stream_seek(struct wg_parser_stream *stream, double rate,
     };
 
     __wine_unix_call(unix_handle, unix_wg_parser_stream_seek, &params);
+}
+
+bool wg_parser_stream_drain(struct wg_parser_stream *stream)
+{
+    return !__wine_unix_call(unix_handle, unix_wg_parser_stream_drain, stream);
+}
+
+struct wg_transform *wg_transform_create(const struct wg_encoded_format *input_format,
+        const struct wg_format *output_format)
+{
+    struct wg_transform_create_params params =
+    {
+        .input_format = input_format,
+        .output_format = output_format,
+    };
+
+    if (__wine_unix_call(unix_handle, unix_wg_transform_create, &params))
+        return NULL;
+    return params.transform;
+}
+
+void wg_transform_destroy(struct wg_transform *transform)
+{
+    __wine_unix_call(unix_handle, unix_wg_transform_destroy, transform);
+}
+
+HRESULT wg_transform_push_data(struct wg_transform *transform, const void *data, uint32_t size)
+{
+    struct wg_transform_push_data_params params =
+    {
+        .transform = transform,
+        .data = data,
+        .size = size,
+    };
+
+    return __wine_unix_call(unix_handle, unix_wg_transform_push_data, &params);
+}
+
+HRESULT wg_transform_read_data(struct wg_transform *transform, struct wg_sample *sample)
+{
+    struct wg_transform_read_data_params params =
+    {
+        .transform = transform,
+        .sample = sample,
+    };
+
+    return __wine_unix_call(unix_handle, unix_wg_transform_read_data, &params);
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
@@ -544,6 +620,11 @@ HRESULT WINAPI DllRegisterServer(void)
     HRESULT hr;
 
     TRACE(".\n");
+
+    init_gstreamer();
+
+    if (FAILED(hr = mfplat_DllRegisterServer()))
+        return hr;
 
     if (FAILED(hr = __wine_register_resources()))
         return hr;

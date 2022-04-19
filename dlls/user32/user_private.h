@@ -25,7 +25,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "ntuser.h"
+#include "../win32u/ntuser_private.h"
 #include "winreg.h"
 #include "winternl.h"
 #include "hidusage.h"
@@ -49,28 +49,6 @@ extern const struct user_driver_funcs *USER_Driver DECLSPEC_HIDDEN;
 extern void USER_unload_driver(void) DECLSPEC_HIDDEN;
 
 struct received_message_info;
-
-enum user_obj_type
-{
-    USER_WINDOW = 1,  /* window */
-    USER_MENU,        /* menu */
-    USER_ACCEL,       /* accelerator */
-    USER_ICON,        /* icon or cursor */
-    USER_DWP          /* DeferWindowPos structure */
-};
-
-struct user_object
-{
-    HANDLE             handle;
-    enum user_obj_type type;
-};
-
-#define OBJ_OTHER_PROCESS ((void *)1)  /* returned by get_user_handle_ptr on unknown handles */
-
-HANDLE alloc_user_handle( struct user_object *ptr, enum user_obj_type type ) DECLSPEC_HIDDEN;
-void *get_user_handle_ptr( HANDLE handle, enum user_obj_type type ) DECLSPEC_HIDDEN;
-void release_user_handle_ptr( void *ptr ) DECLSPEC_HIDDEN;
-void *free_user_handle( HANDLE handle, enum user_obj_type type ) DECLSPEC_HIDDEN;
 
 /* type of message-sending functions that need special WM_CHAR handling */
 enum wm_char_mapping
@@ -102,25 +80,11 @@ struct rawinput_thread_data
     RAWINPUT buffer[1]; /* rawinput message data buffer */
 };
 
-extern LONG global_key_state_counter DECLSPEC_HIDDEN;
 extern BOOL (WINAPI *imm_register_window)(HWND) DECLSPEC_HIDDEN;
 extern void (WINAPI *imm_unregister_window)(HWND) DECLSPEC_HIDDEN;
 #define WM_IME_INTERNAL 0x287
 #define IME_INTERNAL_ACTIVATE 0x17
 #define IME_INTERNAL_DEACTIVATE 0x18
-
-struct user_key_state_info
-{
-    UINT                          time;                   /* Time of last key state refresh */
-    INT                           counter;                /* Counter to invalidate the key state */
-    BYTE                          state[256];             /* State for each key */
-};
-
-struct hook_extra_info
-{
-    HHOOK handle;
-    LPARAM lparam;
-};
 
 static inline struct user_thread_info *get_user_thread_info(void)
 {
@@ -166,13 +130,12 @@ extern void wait_graphics_driver_ready(void) DECLSPEC_HIDDEN;
 extern void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module ) DECLSPEC_HIDDEN;
 extern RECT get_virtual_screen_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_primary_monitor_rect(void) DECLSPEC_HIDDEN;
-extern LRESULT call_current_hook( HHOOK hhook, INT code, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
 extern DWORD get_input_codepage( void ) DECLSPEC_HIDDEN;
 extern BOOL map_wparam_AtoW( UINT message, WPARAM *wparam, enum wm_char_mapping mapping ) DECLSPEC_HIDDEN;
 extern NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput, UINT flags ) DECLSPEC_HIDDEN;
-extern LRESULT MSG_SendInternalMessageTimeout( DWORD dest_pid, DWORD dest_tid,
-                                               UINT msg, WPARAM wparam, LPARAM lparam,
-                                               UINT flags, UINT timeout, PDWORD_PTR res_ptr ) DECLSPEC_HIDDEN;
+extern LRESULT WINAPI MSG_SendInternalMessageTimeout( DWORD dest_pid, DWORD dest_tid,
+                                                      UINT msg, WPARAM wparam, LPARAM lparam,
+                                                      UINT flags, UINT timeout, PDWORD_PTR res_ptr ) DECLSPEC_HIDDEN;
 extern HPEN SYSCOLOR_GetPen( INT index ) DECLSPEC_HIDDEN;
 extern HBRUSH SYSCOLOR_Get55AABrush(void) DECLSPEC_HIDDEN;
 extern void SYSPARAMS_Init(void) DECLSPEC_HIDDEN;
@@ -203,6 +166,8 @@ extern const WCHAR *CLASS_GetVersionedName(const WCHAR *classname, UINT *basenam
 /* kernel callbacks */
 
 BOOL WINAPI User32CallEnumDisplayMonitor( struct enum_display_monitor_params *params, ULONG size );
+BOOL WINAPI User32CallWinEventHook( const struct win_event_hook_params *params, ULONG size );
+BOOL WINAPI User32CallWindowsHook( const struct win_hook_params *params, ULONG size );
 
 /* message spy definitions */
 

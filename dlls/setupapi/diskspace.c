@@ -89,7 +89,7 @@ HDSKSPC WINAPI SetupCreateDiskSpaceListW(PVOID reserved1, DWORD reserved2, UINT 
 {
     struct space_list *list;
 
-    TRACE("(%p, %u, 0x%08x)\n", reserved1, reserved2, flags);
+    TRACE("(%p, %lu, 0x%08x)\n", reserved1, reserved2, flags);
 
     if (reserved1 || reserved2 || flags & ~SPDSL_IGNORE_DISK)
     {
@@ -124,7 +124,7 @@ HDSKSPC WINAPI SetupDuplicateDiskSpaceListW(HDSKSPC diskspace, PVOID reserved1, 
     struct space_list *list_copy, *list = diskspace;
     struct file_entry *file, *file_copy;
 
-    TRACE("(%p, %p, %u, %u)\n", diskspace, reserved1, reserved2, flags);
+    TRACE("(%p, %p, %lu, %u)\n", diskspace, reserved1, reserved2, flags);
 
     if (reserved1 || reserved2 || flags)
     {
@@ -644,7 +644,7 @@ BOOL WINAPI SetupQueryDrivesInDiskSpaceListW(HDSKSPC diskspace, PWSTR buffer, DW
     DWORD cur_size = 1;
     BOOL used[26];
 
-    TRACE("(%p, %p, %d, %p)\n", diskspace, buffer, size, required_size);
+    TRACE("(%p, %p, %ld, %p)\n", diskspace, buffer, size, required_size);
 
     if (!diskspace)
     {

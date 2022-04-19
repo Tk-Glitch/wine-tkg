@@ -60,7 +60,7 @@ static ULONG WINAPI IDirectSoundNotifyImpl_AddRef(IDirectSoundNotify *iface)
     IDirectSoundBufferImpl *This = impl_from_IDirectSoundNotify(iface);
     ULONG ref = InterlockedIncrement(&This->refn);
 
-    TRACE("(%p) ref %d\n", This, ref);
+    TRACE("(%p) ref %ld\n", This, ref);
 
     if(ref == 1)
         InterlockedIncrement(&This->numIfaces);
@@ -73,7 +73,7 @@ static ULONG WINAPI IDirectSoundNotifyImpl_Release(IDirectSoundNotify *iface)
     IDirectSoundBufferImpl *This = impl_from_IDirectSoundNotify(iface);
     ULONG ref = InterlockedDecrement(&This->refn);
 
-    TRACE("(%p) ref %d\n", This, ref);
+    TRACE("(%p) ref %ld\n", This, ref);
 
     if (!ref && !InterlockedDecrement(&This->numIfaces))
         secondarybuffer_destroy(This);
@@ -120,7 +120,7 @@ static void commit_next_chunk(IDirectSoundBufferImpl *dsb)
 
     dsb->use_committed = TRUE;
     dsb->committed_mixpos = 0;
-    TRACE("committing %u bytes from offset %u\n", dsb->writelead, dsb->sec_mixpos);
+    TRACE("committing %lu bytes from offset %lu\n", dsb->writelead, dsb->sec_mixpos);
 }
 
 static HRESULT WINAPI IDirectSoundNotifyImpl_SetNotificationPositions(IDirectSoundNotify *iface,
@@ -128,7 +128,7 @@ static HRESULT WINAPI IDirectSoundNotifyImpl_SetNotificationPositions(IDirectSou
 {
         IDirectSoundBufferImpl *This = impl_from_IDirectSoundNotify(iface);
 
-	TRACE("(%p,0x%08x,%p)\n",This,howmuch,notify);
+	TRACE("(%p,0x%08lx,%p)\n",This,howmuch,notify);
 
         if (howmuch > 0 && notify == NULL) {
 	    WARN("invalid parameter: notify == NULL\n");
@@ -138,7 +138,7 @@ static HRESULT WINAPI IDirectSoundNotifyImpl_SetNotificationPositions(IDirectSou
 	if (TRACE_ON(dsound)) {
 	    unsigned int	i;
 	    for (i=0;i<howmuch;i++)
-		TRACE("notify at %d to %p\n",
+		TRACE("notify at %ld to %p\n",
 		    notify[i].dwOffset,notify[i].hEventNotify);
 	}
 
@@ -209,15 +209,15 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetVolume(IDirectSoundBuffer8 *ifac
 
 	HRESULT hres = DS_OK;
 
-	TRACE("(%p,%d)\n",This,vol);
+	TRACE("(%p,%ld)\n",This,vol);
 
 	if (!(This->dsbd.dwFlags & DSBCAPS_CTRLVOLUME)) {
-		WARN("control unavailable: This->dsbd.dwFlags = 0x%08x\n", This->dsbd.dwFlags);
+		WARN("control unavailable: This->dsbd.dwFlags = 0x%08lx\n", This->dsbd.dwFlags);
 		return DSERR_CONTROLUNAVAIL;
 	}
 
 	if ((vol > DSBVOLUME_MAX) || (vol < DSBVOLUME_MIN)) {
-		WARN("invalid parameter: vol = %d\n", vol);
+		WARN("invalid parameter: vol = %ld\n", vol);
 		return DSERR_INVALIDPARAM;
 	}
 
@@ -268,7 +268,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFrequency(IDirectSoundBuffer8 *i
 	DWORD oldFreq;
 	void *newcommitted;
 
-	TRACE("(%p,%d)\n",This,freq);
+	TRACE("(%p,%ld)\n",This,freq);
 
         if (is_primary_buffer(This)) {
                 WARN("not available for primary buffers.\n");
@@ -284,7 +284,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFrequency(IDirectSoundBuffer8 *i
 		freq = This->pwfx->nSamplesPerSec;
 
 	if ((freq < DSBFREQUENCY_MIN) || (freq > DSBFREQUENCY_MAX)) {
-		WARN("invalid parameter: freq = %d\n", freq);
+		WARN("invalid parameter: freq = %ld\n", freq);
 		return DSERR_INVALIDPARAM;
 	}
 
@@ -318,7 +318,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_Play(IDirectSoundBuffer8 *iface, DW
 	HRESULT hres = DS_OK;
 	int i;
 
-	TRACE("(%p,%08x,%08x,%08x)\n",This,reserved1,reserved2,flags);
+	TRACE("(%p,%08lx,%08lx,%08lx)\n",This,reserved1,reserved2,flags);
 
 	AcquireSRWLockExclusive(&This->lock);
 
@@ -364,7 +364,7 @@ static ULONG WINAPI IDirectSoundBufferImpl_AddRef(IDirectSoundBuffer8 *iface)
     IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref %d\n", This, ref);
+    TRACE("(%p) ref %ld\n", This, ref);
 
     if(ref == 1)
         InterlockedIncrement(&This->numIfaces);
@@ -381,7 +381,7 @@ static ULONG WINAPI IDirectSoundBufferImpl_Release(IDirectSoundBuffer8 *iface)
         ref = capped_refcount_dec(&This->ref);
         if(!ref)
             capped_refcount_dec(&This->numIfaces);
-        TRACE("(%p) ref %d\n", This, ref);
+        TRACE("(%p) ref %ld\n", This, ref);
         return ref;
     }
 
@@ -389,7 +389,7 @@ static ULONG WINAPI IDirectSoundBufferImpl_Release(IDirectSoundBuffer8 *iface)
     if (!ref && !InterlockedDecrement(&This->numIfaces))
             secondarybuffer_destroy(This);
 
-    TRACE("(%p) ref %d\n", This, ref);
+    TRACE("(%p) ref %ld\n", This, ref);
 
     return ref;
 }
@@ -408,7 +408,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetCurrentPosition(IDirectSoundBuff
 
 	/* sanity */
 	if (pos >= This->buflen){
-		FIXME("Bad play position. playpos: %d, buflen: %d\n", pos, This->buflen);
+		FIXME("Bad play position. playpos: %ld, buflen: %ld\n", pos, This->buflen);
 		pos %= This->buflen;
 	}
 
@@ -425,7 +425,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetCurrentPosition(IDirectSoundBuff
 
 	ReleaseSRWLockShared(&This->lock);
 
-	TRACE("playpos = %d, writepos = %d, buflen=%d (%p, time=%d)\n",
+	TRACE("playpos = %ld, writepos = %ld, buflen=%ld (%p, time=%ld)\n",
 		playpos?*playpos:-1, writepos?*writepos:-1, This->buflen, This, GetTickCount());
 
 	return DS_OK;
@@ -453,7 +453,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetStatus(IDirectSoundBuffer8 *ifac
 		*status |= DSBSTATUS_LOCSOFTWARE;
 	ReleaseSRWLockShared(&This->lock);
 
-	TRACE("status=%x\n", *status);
+	TRACE("status=%lx\n", *status);
 	return DS_OK;
 }
 
@@ -464,7 +464,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetFormat(IDirectSoundBuffer8 *ifac
     IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
     DWORD size;
 
-    TRACE("(%p,%p,%d,%p)\n",This,lpwf,wfsize,wfwritten);
+    TRACE("(%p,%p,%ld,%p)\n",This,lpwf,wfsize,wfwritten);
 
     size = sizeof(WAVEFORMATEX) + This->pwfx->cbSize;
 
@@ -499,7 +499,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_Lock(IDirectSoundBuffer8 *iface, DW
         IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
 	HRESULT hres = DS_OK;
 
-        TRACE("(%p,%d,%d,%p,%p,%p,%p,0x%08x) at %d\n", This, writecursor, writebytes, lplpaudioptr1,
+        TRACE("(%p,%ld,%ld,%p,%p,%p,%p,0x%08lx) at %ld\n", This, writecursor, writebytes, lplpaudioptr1,
                 audiobytes1, lplpaudioptr2, audiobytes2, flags, GetTickCount());
 
         if (!audiobytes1)
@@ -520,13 +520,13 @@ static HRESULT WINAPI IDirectSoundBufferImpl_Lock(IDirectSoundBuffer8 *iface, DW
 		writebytes = This->buflen;
 
 	if (writecursor >= This->buflen) {
-		WARN("Invalid parameter, writecursor: %u >= buflen: %u\n",
+		WARN("Invalid parameter, writecursor: %lu >= buflen: %lu\n",
 		     writecursor, This->buflen);
 		return DSERR_INVALIDPARAM;
         }
 
 	if (writebytes > This->buflen) {
-		WARN("Invalid parameter, writebytes: %u > buflen: %u\n",
+		WARN("Invalid parameter, writebytes: %lu > buflen: %lu\n",
 		     writebytes, This->buflen);
 		return DSERR_INVALIDPARAM;
         }
@@ -544,9 +544,9 @@ static HRESULT WINAPI IDirectSoundBufferImpl_Lock(IDirectSoundBuffer8 *iface, DW
 			*(LPBYTE*)lplpaudioptr2 = NULL;
 		if (audiobytes2)
 			*audiobytes2 = 0;
-		TRACE("Locked %p(%i bytes) and %p(%i bytes) writecursor=%d\n",
+		TRACE("Locked %p(%li bytes) and %p(%li bytes) writecursor=%ld\n",
 		  *(LPBYTE*)lplpaudioptr1, *audiobytes1, lplpaudioptr2 ? *(LPBYTE*)lplpaudioptr2 : NULL, audiobytes2 ? *audiobytes2: 0, writecursor);
-		TRACE("->%d.0\n",writebytes);
+		TRACE("->%ld.0\n",writebytes);
 		This->buffer->lockedbytes += writebytes;
 	} else {
 		DWORD remainder = writebytes + writecursor - This->buflen;
@@ -567,7 +567,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_Lock(IDirectSoundBuffer8 *iface, DW
 			WARN("Overwriting mixing position, case 3\n");
 			commit_next_chunk(This);
 		}
-		TRACE("Locked %p(%i bytes) and %p(%i bytes) writecursor=%d\n", *(LPBYTE*)lplpaudioptr1, *audiobytes1, lplpaudioptr2 ? *(LPBYTE*)lplpaudioptr2 : NULL, audiobytes2 ? *audiobytes2: 0, writecursor);
+		TRACE("Locked %p(%li bytes) and %p(%li bytes) writecursor=%ld\n", *(LPBYTE*)lplpaudioptr1, *audiobytes1, lplpaudioptr2 ? *(LPBYTE*)lplpaudioptr2 : NULL, audiobytes2 ? *audiobytes2: 0, writecursor);
 	}
 
 	ReleaseSRWLockShared(&This->lock);
@@ -581,7 +581,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetCurrentPosition(IDirectSoundBuff
         IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
 	HRESULT hres = DS_OK;
 
-	TRACE("(%p,%d)\n",This,newpos);
+	TRACE("(%p,%ld)\n",This,newpos);
 
 	AcquireSRWLockExclusive(&This->lock);
 
@@ -606,10 +606,10 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetPan(IDirectSoundBuffer8 *iface, 
         IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
 	HRESULT hres = DS_OK;
 
-	TRACE("(%p,%d)\n",This,pan);
+	TRACE("(%p,%ld)\n",This,pan);
 
 	if ((pan > DSBPAN_RIGHT) || (pan < DSBPAN_LEFT)) {
-		WARN("invalid parameter: pan = %d\n", pan);
+		WARN("invalid parameter: pan = %ld\n", pan);
 		return DSERR_INVALIDPARAM;
 	}
 
@@ -657,7 +657,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_Unlock(IDirectSoundBuffer8 *iface, 
         IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface), *iter;
 	HRESULT hres = DS_OK;
 
-	TRACE("(%p,%p,%d,%p,%d)\n", This,p1,x1,p2,x2);
+	TRACE("(%p,%p,%ld,%p,%ld)\n", This,p1,x1,p2,x2);
 
 	if (!p2)
 		x2 = 0;
@@ -715,7 +715,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetFrequency(IDirectSoundBuffer8 *i
 	}
 
 	*freq = This->freq;
-	TRACE("-> %d\n", *freq);
+	TRACE("-> %ld\n", *freq);
 
 	return DS_OK;
 }
@@ -747,7 +747,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFX(IDirectSoundBuffer8 *iface, D
 	DMO_MEDIA_TYPE dmt;
 	WAVEFORMATEX wfx;
 
-	TRACE("(%p,%u,%p,%p)\n", This, dwEffectsCount, pDSFXDesc, pdwResultCodes);
+	TRACE("(%p,%lu,%p,%p)\n", This, dwEffectsCount, pDSFXDesc, pdwResultCodes);
 
 	if (pdwResultCodes)
 		for (u=0; u<dwEffectsCount; u++) pdwResultCodes[u] = DSFXR_UNKNOWN;
@@ -809,7 +809,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFX(IDirectSoundBuffer8 *iface, D
 	dmt.pbFormat = (BYTE*)&wfx;
 
 	for (u = 0; u < dwEffectsCount; u++) {
-		TRACE("%d: 0x%08x, %s\n", u, pDSFXDesc[u].dwFlags, dump_DSFX_guid(&pDSFXDesc[u]));
+		TRACE("%ld: 0x%08lx, %s\n", u, pDSFXDesc[u].dwFlags, dump_DSFX_guid(&pDSFXDesc[u]));
 
 		hr2 = CoCreateInstance(&pDSFXDesc[u].guidDSFXClass, NULL, CLSCTX_INPROC_SERVER, &IID_IMediaObject, (LPVOID*)&filters[u].obj);
 
@@ -875,7 +875,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_AcquireResources(IDirectSoundBuffer
         IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
 	DWORD u;
 
-	FIXME("(%p,%08u,%u,%p): stub, faking success\n",This,dwFlags,dwEffectsCount,pdwResultCodes);
+	FIXME("(%p,%08lu,%lu,%p): stub, faking success\n",This,dwFlags,dwEffectsCount,pdwResultCodes);
 
 	if (pdwResultCodes)
 		for (u=0; u<dwEffectsCount; u++) pdwResultCodes[u] = DSFXR_UNKNOWN;
@@ -890,7 +890,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetObjectInPath(IDirectSoundBuffer8
     IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
     DWORD i, count = 0;
 
-    TRACE("(%p,%s,%u,%s,%p)\n", This, debugstr_guid(clsid), index, debugstr_guid(iid), out);
+    TRACE("(%p,%s,%lu,%s,%p)\n", This, debugstr_guid(clsid), index, debugstr_guid(iid), out);
 
     if (!out)
         return E_INVALIDARG;
@@ -927,7 +927,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetCaps(IDirectSoundBuffer8 *iface,
 	}
 
 	if (caps->dwSize < sizeof(*caps)) {
-		WARN("invalid parameter: caps->dwSize = %d\n",caps->dwSize);
+		WARN("invalid parameter: caps->dwSize = %ld\n",caps->dwSize);
 		return DSERR_INVALIDPARAM;
 	}
 
@@ -1042,7 +1042,7 @@ HRESULT secondarybuffer_create(DirectSoundDevice *device, const DSBUFFERDESC *ds
         TRACE("(%p,%p,%p)\n", device, dsbd, buffer);
 
 	if (dsbd->dwBufferBytes < DSBSIZE_MIN || dsbd->dwBufferBytes > DSBSIZE_MAX) {
-		WARN("invalid parameter: dsbd->dwBufferBytes = %d\n", dsbd->dwBufferBytes);
+		WARN("invalid parameter: dsbd->dwBufferBytes = %ld\n", dsbd->dwBufferBytes);
 		return DSERR_INVALIDPARAM; /* FIXME: which error? */
 	}
 
@@ -1090,7 +1090,7 @@ HRESULT secondarybuffer_create(DirectSoundDevice *device, const DSBUFFERDESC *ds
 	if (wfex->wBitsPerSample==16) capf |= DSCAPS_SECONDARY16BIT;
 	else capf |= DSCAPS_SECONDARY8BIT;
 
-	TRACE("capf = 0x%08x, device->drvcaps.dwFlags = 0x%08x\n", capf, device->drvcaps.dwFlags);
+	TRACE("capf = 0x%08lx, device->drvcaps.dwFlags = 0x%08lx\n", capf, device->drvcaps.dwFlags);
 
 	/* Allocate an empty buffer */
 	bufsize = (sizeof(*(dsb->buffer)) + sizeof(void *) - 1) & ~(sizeof(void *) - 1);
@@ -1172,7 +1172,7 @@ void secondarybuffer_destroy(IDirectSoundBufferImpl *This)
     ULONG ref = InterlockedIncrement(&This->numIfaces);
 
     if (ref > 1)
-        WARN("Destroying buffer with %u in use interfaces\n", ref - 1);
+        WARN("Destroying buffer with %lu in use interfaces\n", ref - 1);
 
     if (This->dsbd.dwFlags & DSBCAPS_LOCHARDWARE)
         This->device->drvcaps.dwFreeHwMixingAllBuffers++;
@@ -1316,7 +1316,7 @@ static ULONG WINAPI IKsPropertySetImpl_AddRef(IKsPropertySet *iface)
     IDirectSoundBufferImpl *This = impl_from_IKsPropertySet(iface);
     ULONG ref = InterlockedIncrement(&This->refiks);
 
-    TRACE("(%p) ref %d\n", This, ref);
+    TRACE("(%p) ref %ld\n", This, ref);
 
     if(ref == 1)
         InterlockedIncrement(&This->numIfaces);
@@ -1333,7 +1333,7 @@ static ULONG WINAPI IKsPropertySetImpl_Release(IKsPropertySet *iface)
         ref = capped_refcount_dec(&This->refiks);
         if(!ref)
             capped_refcount_dec(&This->numIfaces);
-        TRACE("(%p) ref %d\n", This, ref);
+        TRACE("(%p) ref %ld\n", This, ref);
         return ref;
     }
 
@@ -1341,7 +1341,7 @@ static ULONG WINAPI IKsPropertySetImpl_Release(IKsPropertySet *iface)
     if (!ref && !InterlockedDecrement(&This->numIfaces))
         secondarybuffer_destroy(This);
 
-    TRACE("(%p) ref %d\n", This, ref);
+    TRACE("(%p) ref %ld\n", This, ref);
 
     return ref;
 }
@@ -1352,7 +1352,7 @@ static HRESULT WINAPI IKsPropertySetImpl_Get(IKsPropertySet *iface, REFGUID guid
 {
     IDirectSoundBufferImpl *This = impl_from_IKsPropertySet(iface);
 
-    TRACE("(iface=%p,guidPropSet=%s,dwPropID=%d,pInstanceData=%p,cbInstanceData=%d,pPropData=%p,cbPropData=%d,pcbReturned=%p)\n",
+    TRACE("(iface=%p,guidPropSet=%s,dwPropID=%ld,pInstanceData=%p,cbInstanceData=%ld,pPropData=%p,cbPropData=%ld,pcbReturned=%p)\n",
     This,debugstr_guid(guidPropSet),dwPropID,pInstanceData,cbInstanceData,pPropData,cbPropData,pcbReturned);
 
     if (IsEqualGUID(&DSPROPSETID_EAX_ReverbProperties, guidPropSet) || IsEqualGUID(&DSPROPSETID_EAXBUFFER_ReverbProperties, guidPropSet))
@@ -1367,7 +1367,7 @@ static HRESULT WINAPI IKsPropertySetImpl_Set(IKsPropertySet *iface, REFGUID guid
 {
     IDirectSoundBufferImpl *This = impl_from_IKsPropertySet(iface);
 
-    TRACE("(%p,%s,%d,%p,%d,%p,%d)\n",This,debugstr_guid(guidPropSet),dwPropID,pInstanceData,cbInstanceData,pPropData,cbPropData);
+    TRACE("(%p,%s,%ld,%p,%ld,%p,%ld)\n",This,debugstr_guid(guidPropSet),dwPropID,pInstanceData,cbInstanceData,pPropData,cbPropData);
 
     if (IsEqualGUID(&DSPROPSETID_EAX_ReverbProperties, guidPropSet) || IsEqualGUID(&DSPROPSETID_EAXBUFFER_ReverbProperties, guidPropSet) ||
         IsEqualGUID(&DSPROPSETID_EAX20_ListenerProperties, guidPropSet) || IsEqualGUID(&DSPROPSETID_EAX20_BufferProperties, guidPropSet))
@@ -1381,7 +1381,7 @@ static HRESULT WINAPI IKsPropertySetImpl_QuerySupport(IKsPropertySet *iface, REF
 {
     IDirectSoundBufferImpl *This = impl_from_IKsPropertySet(iface);
 
-    TRACE("(%p,%s,%d,%p)\n",This,debugstr_guid(guidPropSet),dwPropID,pTypeSupport);
+    TRACE("(%p,%s,%ld,%p)\n",This,debugstr_guid(guidPropSet),dwPropID,pTypeSupport);
 
     if (EAX_QuerySupport(guidPropSet, dwPropID, pTypeSupport)) {
         static int once;

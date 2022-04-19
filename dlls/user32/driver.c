@@ -119,38 +119,7 @@ void USER_unload_driver(void)
  * These are fallbacks for entry points that are not implemented in the real driver.
  */
 
-static void CDECL nulldrv_Beep(void)
-{
-}
-
-static BOOL CDECL nulldrv_RegisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
-{
-    return TRUE;
-}
-
-static void CDECL nulldrv_UnregisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
-{
-}
-
-static void CDECL nulldrv_DestroyCursorIcon( HCURSOR cursor )
-{
-}
-
-static void CDECL nulldrv_SetCursor( HCURSOR cursor )
-{
-}
-
-static BOOL CDECL nulldrv_GetCursorPos( LPPOINT pt )
-{
-    return TRUE;
-}
-
 static BOOL CDECL nulldrv_SetCursorPos( INT x, INT y )
-{
-    return TRUE;
-}
-
-static BOOL CDECL nulldrv_ClipCursor( LPCRECT clip )
 {
     return TRUE;
 }
@@ -256,11 +225,6 @@ static BOOL CDECL nulldrv_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWIN
     return TRUE;
 }
 
-static LRESULT CDECL nulldrv_WindowMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
-{
-    return 0;
-}
-
 static BOOL CDECL nulldrv_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_flags,
                                              const RECT *window_rect, const RECT *client_rect,
                                              RECT *visible_rect, struct window_surface **surface )
@@ -275,10 +239,6 @@ static void CDECL nulldrv_WindowPosChanged( HWND hwnd, HWND insert_after, UINT s
 {
 }
 
-static void CDECL nulldrv_ThreadDetach( void )
-{
-}
-
 
 /**********************************************************************
  * Lazy loading user driver
@@ -287,39 +247,9 @@ static void CDECL nulldrv_ThreadDetach( void )
  * Each entry point simply loads the real driver and chains to it.
  */
 
-static void CDECL loaderdrv_Beep(void)
-{
-    load_driver()->pBeep();
-}
-
-static BOOL CDECL loaderdrv_RegisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
-{
-    return load_driver()->pRegisterHotKey( hwnd, modifiers, vk );
-}
-
-static void CDECL loaderdrv_UnregisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
-{
-    load_driver()->pUnregisterHotKey( hwnd, modifiers, vk );
-}
-
-static void CDECL loaderdrv_SetCursor( HCURSOR cursor )
-{
-    load_driver()->pSetCursor( cursor );
-}
-
-static BOOL CDECL loaderdrv_GetCursorPos( LPPOINT pt )
-{
-    return load_driver()->pGetCursorPos( pt );
-}
-
 static BOOL CDECL loaderdrv_SetCursorPos( INT x, INT y )
 {
     return load_driver()->pSetCursorPos( x, y );
-}
-
-static BOOL CDECL loaderdrv_ClipCursor( LPCRECT clip )
-{
-    return load_driver()->pClipCursor( clip );
 }
 
 static void CDECL loaderdrv_UpdateClipboard(void)
@@ -374,20 +304,20 @@ static struct user_driver_funcs lazy_load_driver =
     { NULL },
     /* keyboard functions */
     NULL,
-    loaderdrv_Beep,
     NULL,
     NULL,
     NULL,
-    loaderdrv_RegisterHotKey,
     NULL,
-    loaderdrv_UnregisterHotKey,
+    NULL,
+    NULL,
+    NULL,
     NULL,
     /* cursor/icon functions */
-    nulldrv_DestroyCursorIcon,
-    loaderdrv_SetCursor,
-    loaderdrv_GetCursorPos,
+    NULL,
+    NULL,
+    NULL,
     loaderdrv_SetCursorPos,
-    loaderdrv_ClipCursor,
+    NULL,
     /* clipboard functions */
     loaderdrv_UpdateClipboard,
     /* display modes */
@@ -414,7 +344,7 @@ static struct user_driver_funcs lazy_load_driver =
     nulldrv_ShowWindow,
     nulldrv_SysCommand,
     loaderdrv_UpdateLayeredWindow,
-    nulldrv_WindowMessage,
+    NULL,
     nulldrv_WindowPosChanging,
     nulldrv_WindowPosChanged,
     /* system parameters */
@@ -424,7 +354,7 @@ static struct user_driver_funcs lazy_load_driver =
     /* candidate pos functions */
     loaderdrv_UpdateCandidatePos,
     /* thread management */
-    nulldrv_ThreadDetach
+    NULL
 };
 
 void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version )
@@ -443,14 +373,7 @@ void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT v
 #define SET_USER_FUNC(name) \
     do { if (!driver->p##name) driver->p##name = nulldrv_##name; } while(0)
 
-    SET_USER_FUNC(Beep);
-    SET_USER_FUNC(RegisterHotKey);
-    SET_USER_FUNC(UnregisterHotKey);
-    SET_USER_FUNC(DestroyCursorIcon);
-    SET_USER_FUNC(SetCursor);
-    SET_USER_FUNC(GetCursorPos);
     SET_USER_FUNC(SetCursorPos);
-    SET_USER_FUNC(ClipCursor);
     SET_USER_FUNC(UpdateClipboard);
     SET_USER_FUNC(CreateDesktopWindow);
     SET_USER_FUNC(CreateWindow);
@@ -470,10 +393,8 @@ void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT v
     SET_USER_FUNC(ShowWindow);
     SET_USER_FUNC(SysCommand);
     SET_USER_FUNC(UpdateLayeredWindow);
-    SET_USER_FUNC(WindowMessage);
     SET_USER_FUNC(WindowPosChanging);
     SET_USER_FUNC(WindowPosChanged);
-    SET_USER_FUNC(ThreadDetach);
 #undef SET_USER_FUNC
 
     prev = InterlockedCompareExchangePointer( (void **)&USER_Driver, driver, &lazy_load_driver );

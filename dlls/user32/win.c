@@ -36,21 +36,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
-#define NB_USER_HANDLES  ((LAST_USER_HANDLE - FIRST_USER_HANDLE + 1) >> 1)
-#define USER_HANDLE_TO_INDEX(hwnd) ((LOWORD(hwnd) - FIRST_USER_HANDLE) >> 1)
-
 static DWORD process_layout = ~0u;
 
-static struct list window_surfaces = LIST_INIT( window_surfaces );
-
-static CRITICAL_SECTION surfaces_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &surfaces_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": surfaces_section") }
-};
-static CRITICAL_SECTION surfaces_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 /**********************************************************************/
 
@@ -97,56 +84,21 @@ static inline void set_win_data( void *ptr, LONG_PTR val, UINT size )
 }
 
 
-static void *user_handles[NB_USER_HANDLES];
-
 /***********************************************************************
  *           alloc_user_handle
  */
-HANDLE alloc_user_handle( struct user_object *ptr, enum user_obj_type type )
+HANDLE alloc_user_handle( struct user_object *ptr, unsigned int type )
 {
-    HANDLE handle = 0;
-
-    SERVER_START_REQ( alloc_user_handle )
-    {
-        if (!wine_server_call_err( req )) handle = wine_server_ptr_handle( reply->handle );
-    }
-    SERVER_END_REQ;
-
-    if (handle)
-    {
-        UINT index = USER_HANDLE_TO_INDEX( handle );
-
-        assert( index < NB_USER_HANDLES );
-        ptr->handle = handle;
-        ptr->type = type;
-        InterlockedExchangePointer( &user_handles[index], ptr );
-    }
-    return handle;
+    return UlongToHandle( NtUserCallTwoParam( (UINT_PTR)ptr, type, NtUserAllocHandle ));
 }
 
 
 /***********************************************************************
  *           get_user_handle_ptr
  */
-void *get_user_handle_ptr( HANDLE handle, enum user_obj_type type )
+void *get_user_handle_ptr( HANDLE handle, unsigned int type )
 {
-    struct user_object *ptr;
-    WORD index = USER_HANDLE_TO_INDEX( handle );
-
-    if (index >= NB_USER_HANDLES) return NULL;
-
-    USER_Lock();
-    if ((ptr = user_handles[index]))
-    {
-        if (ptr->type == type &&
-            ((UINT)(UINT_PTR)ptr->handle == (UINT)(UINT_PTR)handle ||
-             !HIWORD(handle) || HIWORD(handle) == 0xffff))
-            return ptr;
-        ptr = NULL;
-    }
-    else ptr = OBJ_OTHER_PROCESS;
-    USER_Unlock();
-    return ptr;
+    return (void *)NtUserCallTwoParam( HandleToUlong(handle), type, NtUserGetHandlePtr );
 }
 
 
@@ -163,23 +115,9 @@ void release_user_handle_ptr( void *ptr )
 /***********************************************************************
  *           free_user_handle
  */
-void *free_user_handle( HANDLE handle, enum user_obj_type type )
+void *free_user_handle( HANDLE handle, unsigned int type )
 {
-    struct user_object *ptr;
-    WORD index = USER_HANDLE_TO_INDEX( handle );
-
-    if ((ptr = get_user_handle_ptr( handle, type )) && ptr != OBJ_OTHER_PROCESS)
-    {
-        SERVER_START_REQ( free_user_handle )
-        {
-            req->handle = wine_server_user_handle( handle );
-            if (wine_server_call( req )) ptr = NULL;
-            else InterlockedCompareExchangePointer( &user_handles[index], NULL, ptr );
-        }
-        SERVER_END_REQ;
-        USER_Unlock();
-    }
-    return ptr;
+    return UlongToHandle( NtUserCallTwoParam( HandleToUlong(handle), type, NtUserFreeHandle ));
 }
 
 
@@ -192,7 +130,6 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
                                   HINSTANCE instance, BOOL unicode,
                                   DWORD style, DWORD ex_style )
 {
-    WORD index;
     WND *win;
     HWND handle = 0, full_parent = 0, full_owner = 0;
     struct tagCLASS *class = NULL;
@@ -263,10 +200,8 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
 
     USER_Lock();
 
-    index = USER_HANDLE_TO_INDEX(handle);
-    assert( index < NB_USER_HANDLES );
     win->obj.handle = handle;
-    win->obj.type   = USER_WINDOW;
+    win->obj.type   = NTUSER_OBJ_WINDOW;
     win->parent     = full_parent;
     win->owner      = full_owner;
     win->class      = class;
@@ -274,7 +209,7 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
     win->cbWndExtra = extra_bytes;
     win->dpi        = dpi;
     win->dpi_awareness = awareness;
-    InterlockedExchangePointer( &user_handles[index], win );
+    NtUserCallTwoParam( HandleToUlong(handle), (UINT_PTR)win, NtUserSetHandlePtr );
     if (WINPROC_IsUnicode( win->winproc, unicode )) win->flags |= WIN_ISUNICODE;
     return win;
 }
@@ -288,15 +223,14 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
 static void free_window_handle( HWND hwnd )
 {
     struct user_object *ptr;
-    WORD index = USER_HANDLE_TO_INDEX(hwnd);
 
-    if ((ptr = get_user_handle_ptr( hwnd, USER_WINDOW )) && ptr != OBJ_OTHER_PROCESS)
+    if ((ptr = get_user_handle_ptr( hwnd, NTUSER_OBJ_WINDOW )) && ptr != OBJ_OTHER_PROCESS)
     {
         SERVER_START_REQ( destroy_window )
         {
             req->handle = wine_server_user_handle( hwnd );
             wine_server_call( req );
-            InterlockedCompareExchangePointer( &user_handles[index], NULL, ptr );
+            NtUserCallTwoParam( HandleToUlong(hwnd), 0, NtUserSetHandlePtr );
         }
         SERVER_END_REQ;
         USER_Unlock();
@@ -730,11 +664,9 @@ void create_offscreen_window_surface( const RECT *visible_rect, struct window_su
  */
 void register_window_surface( struct window_surface *old, struct window_surface *new )
 {
-    if (old == new) return;
-    EnterCriticalSection( &surfaces_section );
-    if (old && old != &dummy_surface) list_remove( &old->entry );
-    if (new && new != &dummy_surface) list_add_tail( &window_surfaces, &new->entry );
-    LeaveCriticalSection( &surfaces_section );
+    if (old == &dummy_surface) old = NULL;
+    if (new == &dummy_surface) new = NULL;
+    NtUserCallTwoParam( (UINT_PTR)old, (UINT_PTR)new, NtUserRegisterWindowSurface );
 }
 
 
@@ -745,20 +677,7 @@ void register_window_surface( struct window_surface *old, struct window_surface 
  */
 void flush_window_surfaces( BOOL idle )
 {
-    static DWORD last_idle;
-    DWORD now;
-    struct window_surface *surface;
-
-    EnterCriticalSection( &surfaces_section );
-    now = GetTickCount();
-    if (idle) last_idle = now;
-    /* if not idle, we only flush if there's evidence that the app never goes idle */
-    else if ((int)(now - last_idle) < 50) goto done;
-
-    LIST_FOR_EACH_ENTRY( surface, &window_surfaces, struct window_surface, entry )
-        surface->funcs->flush( surface );
-done:
-    LeaveCriticalSection( &surfaces_section );
+    NtUserCallOneParam( idle, NtUserFlushWindowSurfaces );
 }
 
 
@@ -773,7 +692,7 @@ WND *WIN_GetPtr( HWND hwnd )
 {
     WND *ptr;
 
-    if ((ptr = get_user_handle_ptr( hwnd, USER_WINDOW )) == WND_OTHER_PROCESS)
+    if ((ptr = get_user_handle_ptr( hwnd, NTUSER_OBJ_WINDOW )) == WND_OTHER_PROCESS)
     {
         if (is_desktop_window( hwnd )) ptr = WND_DESKTOP;
     }
@@ -1181,20 +1100,7 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
  */
 static WND *next_thread_window( HWND *hwnd )
 {
-    struct user_object *ptr;
-    WND *win;
-    WORD index = *hwnd ? USER_HANDLE_TO_INDEX( *hwnd ) + 1 : 0;
-
-    while (index < NB_USER_HANDLES)
-    {
-        if (!(ptr = user_handles[index++])) continue;
-        if (ptr->type != USER_WINDOW) continue;
-        win = (WND *)ptr;
-        if (win->tid != GetCurrentThreadId()) continue;
-        *hwnd = ptr->handle;
-        return win;
-    }
-    return NULL;
+    return (WND *)NtUserCallOneParam( (UINT_PTR)hwnd, NtUserNextThreadWindow );
 }
 
 
@@ -1212,7 +1118,7 @@ void destroy_thread_windows(void)
     while ((win = next_thread_window( &hwnd )))
     {
         free_dce( win->dce, win->obj.handle );
-        InterlockedCompareExchangePointer( &user_handles[USER_HANDLE_TO_INDEX(hwnd)], NULL, win );
+        NtUserCallTwoParam( HandleToUlong(hwnd), 0, NtUserSetHandlePtr );
         win->obj.handle = *free_list_ptr;
         free_list_ptr = (WND **)&win->obj.handle;
     }
@@ -1740,8 +1646,18 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     if ((cs->style & WS_THICKFRAME) || !(cs->style & (WS_POPUP | WS_CHILD)))
     {
         MINMAXINFO info = WINPOS_GetMinMaxInfo( hwnd );
-        cx = max( min( cx, info.ptMaxTrackSize.x ), info.ptMinTrackSize.x );
-        cy = max( min( cy, info.ptMaxTrackSize.y ), info.ptMinTrackSize.y );
+
+        /* HACK: This code changes the window's size to fit the display. However,
+         * some games (Bayonetta, Dragon's Dogma) will then have the incorrect
+         * render size. So just let windows be too big to fit the display. */
+        if (__wine_get_window_manager() != WINE_WM_X11_STEAMCOMPMGR)
+        {
+            cx = min( cx, info.ptMaxTrackSize.x );
+            cy = min( cy, info.ptMaxTrackSize.y );
+        }
+
+        cx = max( cx, info.ptMinTrackSize.x );
+        cy = max( cy, info.ptMinTrackSize.y );
     }
 
     if (cx < 0) cx = 0;
@@ -1802,7 +1718,7 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
 
     if (!USER_Driver->pCreateWindow( hwnd )) goto failed;
 
-    NotifyWinEvent(EVENT_OBJECT_CREATE, hwnd, OBJID_WINDOW, 0);
+    NtUserNotifyWinEvent( EVENT_OBJECT_CREATE, hwnd, OBJID_WINDOW, 0 );
 
     /* send the size messages */
 
@@ -1946,7 +1862,7 @@ static void WIN_SendDestroyMsg( HWND hwnd )
     GUITHREADINFO info;
 
     info.cbSize = sizeof(info);
-    if (GetGUIThreadInfo( GetCurrentThreadId(), &info ))
+    if (NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ))
     {
         if (hwnd == info.hwndCaret) DestroyCaret();
         if (hwnd == info.hwndActive) WINPOS_ActivateOtherWindow( hwnd );
@@ -3157,26 +3073,7 @@ INT WINAPI GetWindowTextLengthW( HWND hwnd )
  */
 BOOL WINAPI IsWindow( HWND hwnd )
 {
-    WND *ptr;
-    BOOL ret;
-
-    if (!(ptr = WIN_GetPtr( hwnd ))) return FALSE;
-    if (ptr == WND_DESKTOP) return TRUE;
-
-    if (ptr != WND_OTHER_PROCESS)
-    {
-        WIN_ReleasePtr( ptr );
-        return TRUE;
-    }
-
-    /* check other processes */
-    SERVER_START_REQ( get_window_info )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        ret = !wine_server_call_err( req );
-    }
-    SERVER_END_REQ;
-    return ret;
+    return NtUserCallHwnd( hwnd, NtUserIsWindow );
 }
 
 
@@ -3185,36 +3082,7 @@ BOOL WINAPI IsWindow( HWND hwnd )
  */
 DWORD WINAPI GetWindowThreadProcessId( HWND hwnd, LPDWORD process )
 {
-    WND *ptr;
-    DWORD tid = 0;
-
-    if (!(ptr = WIN_GetPtr( hwnd )))
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE);
-        return 0;
-    }
-
-    if (ptr != WND_OTHER_PROCESS && ptr != WND_DESKTOP)
-    {
-        /* got a valid window */
-        tid = ptr->tid;
-        if (process) *process = GetCurrentProcessId();
-        WIN_ReleasePtr( ptr );
-        return tid;
-    }
-
-    /* check other processes */
-    SERVER_START_REQ( get_window_info )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        if (!wine_server_call_err( req ))
-        {
-            tid = (DWORD)reply->tid;
-            if (process) *process = (DWORD)reply->pid;
-        }
-    }
-    SERVER_END_REQ;
-    return tid;
+    return NtUserCallHwndParam( hwnd, (UINT_PTR)process, NtUserGetWindowThread );
 }
 
 

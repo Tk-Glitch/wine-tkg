@@ -20,6 +20,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
+WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_sync);
 WINE_DECLARE_DEBUG_CHANNEL(fps);
 
@@ -65,6 +66,14 @@ struct wined3d_command_list
     SIZE_T query_count;
     struct wined3d_deferred_query_issue *queries;
 };
+
+static void discard_client_address(struct wined3d_resource *resource)
+{
+    struct wined3d_client_resource *client = &resource->client;
+
+    client->addr.buffer_object = CLIENT_BO_DISCARDED;
+    client->addr.addr = NULL;
+}
 
 static void invalidate_client_address(struct wined3d_resource *resource)
 {
@@ -118,6 +127,7 @@ enum wined3d_cs_op
     WINED3D_CS_OP_UNLOAD_RESOURCE,
     WINED3D_CS_OP_MAP,
     WINED3D_CS_OP_UNMAP,
+    WINED3D_CS_OP_MAP_BO_ADDRESS,
     WINED3D_CS_OP_BLT_SUB_RESOURCE,
     WINED3D_CS_OP_UPDATE_SUB_RESOURCE,
     WINED3D_CS_OP_ADD_DIRTY_TEXTURE_REGION,
@@ -458,6 +468,14 @@ struct wined3d_cs_unmap
     HRESULT *hr;
 };
 
+struct wined3d_cs_map_bo_address
+{
+    enum wined3d_cs_op opcode;
+    struct wined3d_bo_address addr;
+    size_t size;
+    uint32_t flags;
+};
+
 struct wined3d_cs_blt_sub_resource
 {
     enum wined3d_cs_op opcode;
@@ -599,6 +617,7 @@ static const char *debug_cs_op(enum wined3d_cs_op op)
         WINED3D_TO_STR(WINED3D_CS_OP_UNLOAD_RESOURCE);
         WINED3D_TO_STR(WINED3D_CS_OP_MAP);
         WINED3D_TO_STR(WINED3D_CS_OP_UNMAP);
+        WINED3D_TO_STR(WINED3D_CS_OP_MAP_BO_ADDRESS);
         WINED3D_TO_STR(WINED3D_CS_OP_BLT_SUB_RESOURCE);
         WINED3D_TO_STR(WINED3D_CS_OP_UPDATE_SUB_RESOURCE);
         WINED3D_TO_STR(WINED3D_CS_OP_ADD_DIRTY_TEXTURE_REGION);
@@ -2450,7 +2469,7 @@ void wined3d_cs_emit_unload_resource(struct wined3d_cs *cs, struct wined3d_resou
 {
     struct wined3d_cs_unload_resource *op;
 
-    invalidate_client_address(resource);
+    discard_client_address(resource);
 
     op = wined3d_device_context_require_space(&cs->c, sizeof(*op), WINED3D_CS_QUEUE_DEFAULT);
     op->opcode = WINED3D_CS_OP_UNLOAD_RESOURCE;
@@ -2578,6 +2597,31 @@ HRESULT wined3d_device_context_emit_unmap(struct wined3d_device_context *context
     return hr;
 }
 
+static void wined3d_cs_exec_map_bo_address(struct wined3d_cs *cs, const void *data)
+{
+    const struct wined3d_cs_map_bo_address *op = data;
+    struct wined3d_context *context;
+
+    context = context_acquire(cs->c.device, NULL, 0);
+    wined3d_context_map_bo_address(context, &op->addr, op->size, op->flags);
+    context_release(context);
+}
+
+void wined3d_cs_map_bo_address(struct wined3d_cs *cs,
+        struct wined3d_bo_address *addr, size_t size, unsigned int flags)
+{
+    struct wined3d_device_context *context = &cs->c;
+    struct wined3d_cs_map_bo_address *op;
+
+    op = wined3d_device_context_require_space(context, sizeof(*op), WINED3D_CS_QUEUE_MAP);
+    op->opcode = WINED3D_CS_OP_MAP_BO_ADDRESS;
+    op->addr = *addr;
+    op->size = size;
+    op->flags = flags;
+    wined3d_device_context_submit(context, WINED3D_CS_QUEUE_MAP);
+    wined3d_device_context_finish(context, WINED3D_CS_QUEUE_MAP);
+}
+
 static void wined3d_cs_exec_blt_sub_resource(struct wined3d_cs *cs, const void *data)
 {
     const struct wined3d_cs_blt_sub_resource *op = data;
@@ -2658,7 +2702,7 @@ static void wined3d_cs_exec_blt_sub_resource(struct wined3d_cs *cs, const void *
             goto error;
         }
 
-        wined3d_texture_get_memory(src_texture, op->src_sub_resource_idx, &addr, location);
+        wined3d_texture_get_bo_address(src_texture, op->src_sub_resource_idx, &addr, location);
         wined3d_texture_get_pitch(src_texture, op->src_sub_resource_idx % src_texture->level_count,
                 &row_pitch, &slice_pitch);
 
@@ -2726,46 +2770,28 @@ static void wined3d_cs_exec_update_sub_resource(struct wined3d_cs *cs, const voi
     const struct wined3d_cs_update_sub_resource *op = data;
     struct wined3d_resource *resource = op->resource;
     const struct wined3d_box *box = &op->box;
-    unsigned int width, height, depth, level;
     struct wined3d_context *context;
-    struct wined3d_texture *texture;
-    struct wined3d_box src_box;
 
     context = context_acquire(cs->c.device, NULL, 0);
 
     if (resource->type == WINED3D_RTYPE_BUFFER)
-    {
         wined3d_buffer_update_sub_resource(buffer_from_resource(resource),
                 context, &op->bo, box->left, box->right - box->left);
-        goto done;
-    }
-
-    texture = wined3d_texture_from_resource(resource);
-
-    level = op->sub_resource_idx % texture->level_count;
-    width = wined3d_texture_get_level_width(texture, level);
-    height = wined3d_texture_get_level_height(texture, level);
-    depth = wined3d_texture_get_level_depth(texture, level);
-
-    /* Only load the sub-resource for partial updates. */
-    if (!box->left && !box->top && !box->front
-            && box->right == width && box->bottom == height && box->back == depth)
-        wined3d_texture_prepare_location(texture, op->sub_resource_idx, context, WINED3D_LOCATION_TEXTURE_RGB);
     else
-        wined3d_texture_load_location(texture, op->sub_resource_idx, context, WINED3D_LOCATION_TEXTURE_RGB);
+        wined3d_texture_update_sub_resource(texture_from_resource(resource),
+                op->sub_resource_idx, context, &op->bo, box, op->row_pitch, op->slice_pitch);
 
-    wined3d_box_set(&src_box, 0, 0, box->right - box->left, box->bottom - box->top, 0, box->back - box->front);
-    texture->texture_ops->texture_upload_data(context, &op->bo.addr, texture->resource.format, &src_box,
-            op->row_pitch, op->slice_pitch, texture, op->sub_resource_idx,
-            WINED3D_LOCATION_TEXTURE_RGB, box->left, box->top, box->front);
-
-    wined3d_texture_validate_location(texture, op->sub_resource_idx, WINED3D_LOCATION_TEXTURE_RGB);
-    wined3d_texture_invalidate_location(texture, op->sub_resource_idx, ~WINED3D_LOCATION_TEXTURE_RGB);
-
-done:
     context_release(context);
 
     wined3d_resource_release(resource);
+
+    if (op->bo.flags & UPLOAD_BO_FREE_ON_UNMAP)
+    {
+        if (op->bo.addr.buffer_object)
+            FIXME("Free BO address %s.\n", debug_const_bo_address(&op->bo.addr));
+        else
+            heap_free((void *)op->bo.addr.addr);
+    }
 }
 
 void wined3d_device_context_emit_update_sub_resource(struct wined3d_device_context *context,
@@ -2997,6 +3023,7 @@ static void (* const wined3d_cs_op_handlers[])(struct wined3d_cs *cs, const void
     /* WINED3D_CS_OP_UNLOAD_RESOURCE             */ wined3d_cs_exec_unload_resource,
     /* WINED3D_CS_OP_MAP                         */ wined3d_cs_exec_map,
     /* WINED3D_CS_OP_UNMAP                       */ wined3d_cs_exec_unmap,
+    /* WINED3D_CS_OP_MAP_BO_ADDRESS              */ wined3d_cs_exec_map_bo_address,
     /* WINED3D_CS_OP_BLT_SUB_RESOURCE            */ wined3d_cs_exec_blt_sub_resource,
     /* WINED3D_CS_OP_UPDATE_SUB_RESOURCE         */ wined3d_cs_exec_update_sub_resource,
     /* WINED3D_CS_OP_ADD_DIRTY_TEXTURE_REGION    */ wined3d_cs_exec_add_dirty_texture_region,
@@ -3104,22 +3131,43 @@ static void wined3d_cs_st_finish(struct wined3d_device_context *context, enum wi
 static bool wined3d_cs_map_upload_bo(struct wined3d_device_context *context, struct wined3d_resource *resource,
         unsigned int sub_resource_idx, struct wined3d_map_desc *map_desc, const struct wined3d_box *box, uint32_t flags)
 {
-    /* Limit NOOVERWRITE maps to buffers for now; there are too many ways that
-     * a texture can be invalidated to even count. */
-    if (resource->type == WINED3D_RTYPE_BUFFER && (flags & (WINED3D_MAP_DISCARD | WINED3D_MAP_NOOVERWRITE)))
+    struct wined3d_client_resource *client = &resource->client;
+    const struct wined3d_format *format = resource->format;
+    size_t size;
+
+    if (flags & (WINED3D_MAP_DISCARD | WINED3D_MAP_NOOVERWRITE))
     {
-        struct wined3d_client_resource *client = &resource->client;
+        const struct wined3d_d3d_info *d3d_info = &context->device->adapter->d3d_info;
         struct wined3d_device *device = context->device;
         struct wined3d_bo_address addr;
-        const struct wined3d_bo *bo;
+        struct wined3d_bo *bo;
         uint8_t *map_ptr;
+
+        /* We can't use persistent maps if we might need to do vertex attribute
+         * conversion; that will cause the CS thread to invalidate the BO. */
+        if (!d3d_info->xyzrhw || !d3d_info->vertex_bgra || !d3d_info->ffp_generic_attributes)
+        {
+            TRACE("Not returning a persistent buffer because we might need to do vertex attribute conversion.\n");
+            return NULL;
+        }
+
+        if (resource->pin_sysmem)
+        {
+            TRACE("Not allocating an upload buffer because system memory is pinned for this resource.\n");
+            return NULL;
+        }
+
+        if ((flags & WINED3D_MAP_NOOVERWRITE) && client->addr.buffer_object == CLIENT_BO_DISCARDED)
+            flags = (flags & ~WINED3D_MAP_NOOVERWRITE) | WINED3D_MAP_DISCARD;
 
         if (flags & WINED3D_MAP_DISCARD)
         {
             if (!device->adapter->adapter_ops->adapter_alloc_bo(device, resource, sub_resource_idx, &addr))
                 return false;
 
-            if (wined3d_map_persistent())
+            /* Limit NOOVERWRITE maps to buffers for now; there are too many
+             * ways that a texture can be invalidated to even count. */
+            if (resource->type == WINED3D_RTYPE_BUFFER)
                 client->addr = addr;
         }
         else
@@ -3127,13 +3175,29 @@ static bool wined3d_cs_map_upload_bo(struct wined3d_device_context *context, str
             addr = client->addr;
         }
 
-        bo = addr.buffer_object;
-        map_ptr = bo ? bo->map_ptr : NULL;
+        map_ptr = NULL;
+        if ((bo = addr.buffer_object))
+        {
+            wined3d_device_bo_map_lock(device);
+            if ((map_ptr = bo->map_ptr))
+                ++bo->client_map_count;
+            wined3d_device_bo_map_unlock(device);
+
+            if (!map_ptr)
+            {
+                /* adapter_alloc_bo() should have given us a mapped BO if we are
+                 * discarding. */
+                assert(flags & WINED3D_MAP_NOOVERWRITE);
+                WARN_(d3d_perf)("Not accelerating a NOOVERWRITE map because the BO is not mapped.\n");
+                return false;
+            }
+        }
         map_ptr += (uintptr_t)addr.addr;
 
         if (!map_ptr)
         {
-            TRACE("Sub-resource is not mapped.\n");
+            assert(flags & WINED3D_MAP_NOOVERWRITE);
+            WARN_(d3d_perf)("Not accelerating a NOOVERWRITE map because the sub-resource has no valid address.\n");
             return false;
         }
 
@@ -3163,7 +3227,23 @@ static bool wined3d_cs_map_upload_bo(struct wined3d_device_context *context, str
         return true;
     }
 
-    return false;
+    wined3d_format_calculate_pitch(format, 1, box->right - box->left,
+            box->bottom - box->top, &map_desc->row_pitch, &map_desc->slice_pitch);
+
+    size = (box->back - box->front - 1) * map_desc->slice_pitch
+            + ((box->bottom - box->top - 1) / format->block_height) * map_desc->row_pitch
+            + ((box->right - box->left + format->block_width - 1) / format->block_width) * format->block_byte_count;
+
+    if (!(map_desc->data = heap_alloc(size)))
+    {
+        WARN_(d3d_perf)("Failed to allocate a heap memory buffer.\n");
+        return false;
+    }
+    client->mapped_upload.addr.buffer_object = 0;
+    client->mapped_upload.addr.addr = map_desc->data;
+    client->mapped_upload.flags = UPLOAD_BO_UPLOAD_ON_UNMAP | UPLOAD_BO_FREE_ON_UNMAP;
+    client->mapped_box = *box;
+    return true;
 }
 
 static bool wined3d_bo_address_is_null(struct wined3d_const_bo_address *addr)
@@ -3172,14 +3252,23 @@ static bool wined3d_bo_address_is_null(struct wined3d_const_bo_address *addr)
 }
 
 static bool wined3d_cs_unmap_upload_bo(struct wined3d_device_context *context, struct wined3d_resource *resource,
-        unsigned int sub_resource_idx, struct wined3d_box *box, struct upload_bo *bo)
+        unsigned int sub_resource_idx, struct wined3d_box *box, struct upload_bo *upload_bo)
 {
     struct wined3d_client_resource *client = &resource->client;
+    struct wined3d_device *device = context->device;
+    struct wined3d_bo *bo;
 
     if (wined3d_bo_address_is_null(&client->mapped_upload.addr))
         return false;
 
-    *bo = client->mapped_upload;
+    if ((bo = client->mapped_upload.addr.buffer_object))
+    {
+        wined3d_device_bo_map_lock(device);
+        --bo->client_map_count;
+        wined3d_device_bo_map_unlock(device);
+    }
+
+    *upload_bo = client->mapped_upload;
     *box = client->mapped_box;
     memset(&client->mapped_upload, 0, sizeof(client->mapped_upload));
     memset(&client->mapped_box, 0, sizeof(client->mapped_box));

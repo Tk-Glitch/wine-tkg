@@ -100,6 +100,7 @@ static bool amt_from_wg_format_audio(AM_MEDIA_TYPE *mt, const struct wg_format *
     switch (format->u.audio.format)
     {
     case WG_AUDIO_FORMAT_UNKNOWN:
+    case WG_AUDIO_FORMAT_AAC:
         return false;
 
     case WG_AUDIO_FORMAT_MPEG1_LAYER1:
@@ -271,6 +272,7 @@ unsigned int wg_format_get_max_size(const struct wg_format *format)
                      * but as long as every sample fits into our allocator, we're fine. */
                     return width * height * 3;
 
+                case WG_VIDEO_FORMAT_H264:
                 case WG_VIDEO_FORMAT_UNKNOWN:
                     FIXME("Cannot guess maximum sample size for unknown video format.\n");
                     return 0;
@@ -312,6 +314,7 @@ unsigned int wg_format_get_max_size(const struct wg_format *format)
                 case WG_AUDIO_FORMAT_MPEG1_LAYER3:
                     return 40000;
 
+                case WG_AUDIO_FORMAT_AAC:
                 case WG_AUDIO_FORMAT_UNKNOWN:
                     FIXME("Cannot guess maximum sample size for unknown audio format.\n");
                     return 0;
@@ -873,7 +876,7 @@ static DWORD CALLBACK read_thread(void *arg)
         if (FAILED(hr))
             ERR("Failed to read %u bytes at offset %I64u, hr %#lx.\n", size, offset, hr);
 
-        wg_parser_push_data(filter->wg_parser, SUCCEEDED(hr) ? data : NULL, size);
+        wg_parser_push_data(filter->wg_parser, SUCCEEDED(hr) ? WG_READ_SUCCESS : WG_READ_FAILURE, data, size);
     }
 
     free(data);
@@ -1525,7 +1528,7 @@ static HRESULT WINAPI GSTOutPin_DecideBufferSize(struct strmbase_source *iface,
 
     ret = amt_to_wg_format(&pin->pin.pin.mt, &format);
     assert(ret);
-    wg_parser_stream_enable(pin->wg_stream, &format);
+    wg_parser_stream_enable(pin->wg_stream, &format, NULL);
 
     /* We do need to drop any buffers that might have been sent with the old
      * caps, but this will be handled in parser_init_stream(). */

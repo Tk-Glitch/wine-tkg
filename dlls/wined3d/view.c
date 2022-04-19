@@ -1646,6 +1646,7 @@ void wined3d_unordered_access_view_set_counter(struct wined3d_unordered_access_v
 {
     struct wined3d_bo_address dst, src;
     struct wined3d_context *context;
+    struct wined3d_range range;
 
     if (!view->counter_bo)
         return;
@@ -1658,7 +1659,9 @@ void wined3d_unordered_access_view_set_counter(struct wined3d_unordered_access_v
     dst.buffer_object = view->counter_bo;
     dst.addr = NULL;
 
-    wined3d_context_copy_bo_address(context, &dst, &src, sizeof(uint32_t));
+    range.offset = 0;
+    range.size = sizeof(value);
+    wined3d_context_copy_bo_address(context, &dst, &src, 1, &range);
 
     context_release(context);
 }
@@ -1698,10 +1701,11 @@ static void wined3d_unordered_access_view_gl_cs_init(void *object)
 
     if (resource->type == WINED3D_RTYPE_BUFFER)
     {
+        struct wined3d_device_gl *device_gl = wined3d_device_gl(resource->device);
         struct wined3d_buffer *buffer = buffer_from_resource(resource);
         struct wined3d_context_gl *context_gl;
 
-        context_gl = wined3d_context_gl(context_acquire(resource->device, NULL, 0));
+        context_gl = wined3d_context_gl(context_acquire(&device_gl->d, NULL, 0));
         create_buffer_view(&view_gl->gl_view, &context_gl->c, desc, buffer, view_gl->v.format);
         view_gl->bo_user.valid = true;
         list_add_head(&buffer->buffer_object->users, &view_gl->bo_user.entry);
@@ -1710,7 +1714,7 @@ static void wined3d_unordered_access_view_gl_cs_init(void *object)
             struct wined3d_bo_gl *bo = &view_gl->counter_bo;
 
             view_gl->v.counter_bo = &bo->b;
-            wined3d_context_gl_create_bo(context_gl, sizeof(uint32_t), GL_ATOMIC_COUNTER_BUFFER,
+            wined3d_device_gl_create_bo(device_gl, context_gl, sizeof(uint32_t), GL_ATOMIC_COUNTER_BUFFER,
                     GL_STATIC_DRAW, true, GL_MAP_READ_BIT | GL_MAP_WRITE_BIT | GL_CLIENT_STORAGE_BIT, bo);
             wined3d_unordered_access_view_set_counter(&view_gl->v, 0);
         }
@@ -1944,6 +1948,7 @@ void wined3d_unordered_access_view_vk_clear(struct wined3d_unordered_access_view
     struct wined3d_bo_vk constants_bo;
     VkWriteDescriptorSet vk_writes[2];
     VkBufferView vk_buffer_view;
+    struct wined3d_range range;
     VkMemoryBarrier vk_barrier;
     VkPipeline vk_pipeline;
     DWORD uav_location;
@@ -2141,7 +2146,9 @@ void wined3d_unordered_access_view_vk_clear(struct wined3d_unordered_access_view
     cb_destination_address.buffer_object = &constants_bo.b;
     cb_destination_address.addr = 0;
 
-    adapter_vk_copy_bo_address(&context_vk->c, &cb_destination_address, &cb_source_address, sizeof(constants));
+    range.offset = 0;
+    range.size = sizeof(constants);
+    adapter_vk_copy_bo_address(&context_vk->c, &cb_destination_address, &cb_source_address, 1, &range);
 
     buffer_info.buffer = constants_bo.vk_buffer;
     buffer_info.range = constants_bo.size;

@@ -103,7 +103,7 @@ static ULONG WINAPI data_key_AddRef( ISpRegDataKey *iface )
     struct data_key *This = impl_from_ISpRegDataKey( iface );
     ULONG ref = InterlockedIncrement( &This->ref );
 
-    TRACE( "(%p) ref = %u\n", This, ref );
+    TRACE( "(%p) ref = %lu\n", This, ref );
     return ref;
 }
 
@@ -112,7 +112,7 @@ static ULONG WINAPI data_key_Release( ISpRegDataKey *iface )
     struct data_key *This = impl_from_ISpRegDataKey( iface );
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE( "(%p) ref = %u\n", This, ref );
+    TRACE( "(%p) ref = %lu\n", This, ref );
 
     if (!ref)
     {
@@ -341,7 +341,7 @@ static ULONG WINAPI token_category_AddRef( ISpObjectTokenCategory *iface )
     struct token_category *This = impl_from_ISpObjectTokenCategory( iface );
     ULONG ref = InterlockedIncrement( &This->ref );
 
-    TRACE( "(%p) ref = %u\n", This, ref );
+    TRACE( "(%p) ref = %lu\n", This, ref );
     return ref;
 }
 
@@ -350,7 +350,7 @@ static ULONG WINAPI token_category_Release( ISpObjectTokenCategory *iface )
     struct token_category *This = impl_from_ISpObjectTokenCategory( iface );
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE( "(%p) ref = %u\n", This, ref );
+    TRACE( "(%p) ref = %lu\n", This, ref );
 
     if (!ref)
     {
@@ -600,7 +600,7 @@ static HRESULT WINAPI token_category_GetDefaultTokenId( ISpObjectTokenCategory *
         return SPERR_NOT_FOUND;
     } else if (res != ERROR_SUCCESS) {
         /* probably not the correct return value */
-        FIXME( "returning %08x\n", res );
+        FIXME( "returning %08lx\n", res );
         return res;
     }
 
@@ -677,7 +677,7 @@ static ULONG WINAPI token_enum_AddRef( ISpObjectTokenEnumBuilder *iface )
     struct token_enum *This = impl_from_ISpObjectTokenEnumBuilder( iface );
     ULONG ref = InterlockedIncrement( &This->ref );
 
-    TRACE( "(%p) ref = %u\n", This, ref );
+    TRACE( "(%p) ref = %lu\n", This, ref );
     return ref;
 }
 
@@ -686,7 +686,7 @@ static ULONG WINAPI token_enum_Release( ISpObjectTokenEnumBuilder *iface )
     struct token_enum *This = impl_from_ISpObjectTokenEnumBuilder( iface );
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE( "(%p) ref = %u\n", This, ref );
+    TRACE( "(%p) ref = %lu\n", This, ref );
 
     if (!ref)
     {
@@ -707,7 +707,7 @@ static HRESULT WINAPI token_enum_Next( ISpObjectTokenEnumBuilder *iface,
     struct token_enum *This = impl_from_ISpObjectTokenEnumBuilder( iface );
     HRESULT hr;
 
-    TRACE( "(%p)->(%u %p %p)\n", This, num, tokens, fetched );
+    TRACE( "(%p)->(%lu %p %p)\n", This, num, tokens, fetched );
 
     if (!This->init) return SPERR_UNINITIALIZED;
 
@@ -919,7 +919,7 @@ static ULONG WINAPI token_AddRef( ISpObjectToken *iface )
     struct object_token *This = impl_from_ISpObjectToken( iface );
     ULONG ref = InterlockedIncrement( &This->ref );
 
-    TRACE( "(%p) ref = %u\n", This, ref );
+    TRACE( "(%p) ref = %lu\n", This, ref );
     return ref;
 }
 
@@ -928,7 +928,7 @@ static ULONG WINAPI token_Release( ISpObjectToken *iface )
     struct object_token *This = impl_from_ISpObjectToken( iface );
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE( "(%p) ref = %u\n", This, ref );
+    TRACE( "(%p) ref = %lu\n", This, ref );
 
     if (!ref)
     {

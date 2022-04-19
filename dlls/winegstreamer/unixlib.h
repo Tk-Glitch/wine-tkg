@@ -62,9 +62,19 @@ struct wg_format
                 WG_VIDEO_FORMAT_YVYU,
 
                 WG_VIDEO_FORMAT_CINEPAK,
+
+                WG_VIDEO_FORMAT_H264,
             } format;
             int32_t width, height;
             uint32_t fps_n, fps_d;
+            union
+            {
+                struct
+                {
+                    uint32_t profile;
+                    uint32_t level;
+                } h264;
+            } compressed;
         } video;
         struct
         {
@@ -82,12 +92,77 @@ struct wg_format
                 WG_AUDIO_FORMAT_MPEG1_LAYER1,
                 WG_AUDIO_FORMAT_MPEG1_LAYER2,
                 WG_AUDIO_FORMAT_MPEG1_LAYER3,
+
+                WG_AUDIO_FORMAT_AAC,
             } format;
 
             uint32_t channels;
             uint32_t channel_mask; /* In WinMM format. */
             uint32_t rate;
+
+            union
+            {
+                struct
+                {
+                    uint32_t payload_type;
+                    uint32_t indication;
+                    /* The definition of this structure is found in ISO/IEC 14496-3,
+                       which we don't have access to, so we'll just keep
+                       the size set to the largest instance we've seen used. */
+                    unsigned char audio_specifc_config[2];
+                    uint32_t asp_size;
+                } aac;
+            } compressed;
         } audio;
+    } u;
+};
+
+struct wg_rect
+{
+    uint32_t left;
+    uint32_t right;
+    uint32_t top;
+    uint32_t bottom;
+};
+
+struct wg_encoded_format
+{
+    enum wg_encoded_type
+    {
+        WG_ENCODED_TYPE_UNKNOWN,
+        WG_ENCODED_TYPE_WMA,
+        WG_ENCODED_TYPE_XMA,
+        WG_ENCODED_TYPE_AAC,
+        WG_ENCODED_TYPE_H264,
+    } encoded_type;
+
+    union
+    {
+        struct
+        {
+            uint32_t version;
+            uint32_t bitrate;
+            uint32_t rate;
+            uint32_t depth;
+            uint32_t channels;
+            uint32_t block_align;
+            uint32_t codec_data_len;
+            unsigned char codec_data[64];
+        } xwma;
+        struct
+        {
+            uint32_t payload_type;
+            uint32_t profile_level_indication;
+            uint32_t codec_data_len;
+            unsigned char codec_data[64];
+        } aac;
+        struct
+        {
+            int32_t width, height;
+            uint32_t fps_n, fps_d;
+            uint32_t profile;
+            uint32_t level;
+        } h264;
     } u;
 };
 
@@ -97,6 +172,14 @@ enum wg_parser_event_type
     WG_PARSER_EVENT_BUFFER,
     WG_PARSER_EVENT_EOS,
     WG_PARSER_EVENT_SEGMENT,
+};
+
+enum wg_read_result
+{
+    WG_READ_SUCCESS,
+    WG_READ_FAILURE,
+    WG_READ_FLUSHING,
+    WG_READ_EOS,
 };
 
 struct wg_parser_event
@@ -126,6 +209,8 @@ enum wg_parser_type
     WG_PARSER_AVIDEMUX,
     WG_PARSER_MPEGAUDIOPARSE,
     WG_PARSER_WAVPARSE,
+    WG_PARSER_AUDIOCONV,
+    WG_PARSER_VIDEOCONV,
 };
 
 struct wg_parser_create_params
@@ -141,6 +226,15 @@ struct wg_parser_connect_params
     UINT64 file_size;
 };
 
+struct wg_parser_connect_unseekable_params
+{
+    struct wg_parser *parser;
+    const struct wg_format *in_format;
+    UINT32 stream_count;
+    const struct wg_format *out_formats;
+    const struct wg_rect *apertures;
+};
+
 struct wg_parser_get_next_read_offset_params
 {
     struct wg_parser *parser;
@@ -151,6 +245,7 @@ struct wg_parser_get_next_read_offset_params
 struct wg_parser_push_data_params
 {
     struct wg_parser *parser;
+    enum wg_read_result result;
     const void *data;
     UINT32 size;
 };
@@ -178,6 +273,7 @@ struct wg_parser_stream_enable_params
 {
     struct wg_parser_stream *stream;
     const struct wg_format *format;
+    const struct wg_rect *aperture;
 };
 
 struct wg_parser_stream_get_event_params
@@ -209,6 +305,13 @@ struct wg_parser_stream_get_duration_params
     UINT64 duration;
 };
 
+struct wg_parser_stream_get_language_params
+{
+    struct wg_parser_stream *stream;
+    char *buffer;
+    UINT32 size;
+};
+
 struct wg_parser_stream_seek_params
 {
     struct wg_parser_stream *stream;
@@ -217,12 +320,50 @@ struct wg_parser_stream_seek_params
     DWORD start_flags, stop_flags;
 };
 
+struct wg_transform_create_params
+{
+    struct wg_transform *transform;
+    const struct wg_encoded_format *input_format;
+    const struct wg_format *output_format;
+};
+
+struct wg_transform_push_data_params
+{
+    struct wg_transform *transform;
+    const void *data;
+    UINT32 size;
+};
+
+enum wg_sample_flags
+{
+    WG_SAMPLE_FLAG_INCOMPLETE = 1,
+    WG_SAMPLE_FLAG_HAS_PTS = 2,
+    WG_SAMPLE_FLAG_HAS_DURATION = 4,
+};
+
+struct wg_sample
+{
+    UINT32 flags;
+    BYTE *data;
+    UINT32 size;
+    /* pts and duration are in 100-nanosecond units. */
+    ULONGLONG pts, duration;
+    struct wg_format *format;
+};
+
+struct wg_transform_read_data_params
+{
+    struct wg_transform *transform;
+    struct wg_sample *sample;
+};
+
 enum unix_funcs
 {
     unix_wg_parser_create,
     unix_wg_parser_destroy,
 
     unix_wg_parser_connect,
+    unix_wg_parser_connect_unseekable,
     unix_wg_parser_disconnect,
 
     unix_wg_parser_begin_flush,
@@ -244,7 +385,16 @@ enum unix_funcs
     unix_wg_parser_stream_notify_qos,
 
     unix_wg_parser_stream_get_duration,
+    unix_wg_parser_stream_get_language,
     unix_wg_parser_stream_seek,
+
+    unix_wg_transform_create,
+    unix_wg_transform_destroy,
+
+    unix_wg_parser_stream_drain,
+
+    unix_wg_transform_push_data,
+    unix_wg_transform_read_data,
 };
 
 #endif /* __WINE_WINEGSTREAMER_UNIXLIB_H */

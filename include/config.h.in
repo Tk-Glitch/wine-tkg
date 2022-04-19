@@ -776,9 +776,6 @@
 /* Define to 1 if you have the <X11/extensions/XInput.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XINPUT_H
 
-/* Define to 1 if you have the <X11/extensions/Xpresent.h> header file. */
-#undef HAVE_X11_EXTENSIONS_XPRESENT_H
-
 /* Define to 1 if you have the <X11/extensions/Xrandr.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XRANDR_H
 
@@ -940,9 +937,6 @@
 
 /* Define to the soname of the libXinerama library. */
 #undef SONAME_LIBXINERAMA
-
-/* Define to the soname of the libXpresent library. */
-#undef SONAME_LIBXPRESENT
 
 /* Define to the soname of the libXrandr library. */
 #undef SONAME_LIBXRANDR

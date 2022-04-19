@@ -24,21 +24,13 @@
 #endif
 
 #include <assert.h>
-#include <stdarg.h>
-#include <string.h>
-#include <stdio.h>
 #include <pthread.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winreg.h"
-#include "wine/winbase16.h"
-#include "winuser.h"
-
 #include "ntgdi_private.h"
+#include "ntuser_private.h"
+#include "wine/winbase16.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 
@@ -964,6 +956,11 @@ static BOOL CDECL loaderdrv_ActivateKeyboardLayout( HKL layout, UINT flags )
     return load_driver()->pActivateKeyboardLayout( layout, flags );
 }
 
+static void CDECL loaderdrv_Beep(void)
+{
+    load_driver()->pBeep();
+}
+
 static INT CDECL loaderdrv_GetKeyNameText( LONG lparam, LPWSTR buffer, INT size )
 {
     return load_driver()->pGetKeyNameText( lparam, buffer, size );
@@ -983,6 +980,11 @@ static INT CDECL loaderdrv_ToUnicodeEx( UINT virt, UINT scan, const BYTE *state,
                                         int size, UINT flags, HKL layout )
 {
     return load_driver()->pToUnicodeEx( virt, scan, state, str, size, flags, layout );
+}
+
+static BOOL CDECL loaderdrv_RegisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
+{
+    return load_driver()->pRegisterHotKey( hwnd, modifiers, vk );
 }
 
 static void CDECL loaderdrv_UnregisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
@@ -1011,6 +1013,21 @@ static void CDECL loaderdrv_SetCursor( HCURSOR cursor )
     load_driver()->pSetCursor( cursor );
 }
 
+static BOOL CDECL loaderdrv_GetCursorPos( POINT *pt )
+{
+    return load_driver()->pGetCursorPos( pt );
+}
+
+static BOOL CDECL loaderdrv_SetCursorPos( INT x, INT y )
+{
+    return load_driver()->pSetCursorPos( x, y );
+}
+
+static BOOL CDECL loaderdrv_ClipCursor( const RECT *clip )
+{
+    return load_driver()->pClipCursor( clip );
+}
+
 static void CDECL loaderdrv_UpdateClipboard(void)
 {
     load_driver()->pUpdateClipboard();
@@ -1029,21 +1046,38 @@ static const struct vulkan_funcs * CDECL loaderdrv_wine_get_vulkan_driver( UINT 
 
 static const struct user_driver_funcs lazy_load_driver =
 {
+    /* keyboard functions */
     .pActivateKeyboardLayout = loaderdrv_ActivateKeyboardLayout,
+    .pBeep = loaderdrv_Beep,
     .pGetKeyNameText = loaderdrv_GetKeyNameText,
     .pGetKeyboardLayoutList = loaderdrv_GetKeyboardLayoutList,
     .pMapVirtualKeyEx = loaderdrv_MapVirtualKeyEx,
     .pToUnicodeEx = loaderdrv_ToUnicodeEx,
+    .pRegisterHotKey = loaderdrv_RegisterHotKey,
     .pUnregisterHotKey = loaderdrv_UnregisterHotKey,
     .pVkKeyScanEx = loaderdrv_VkKeyScanEx,
+    /* cursor/icon functions */
+    .pDestroyCursorIcon = nulldrv_DestroyCursorIcon,
+    .pSetCursor = loaderdrv_SetCursor,
+    .pGetCursorPos = loaderdrv_GetCursorPos,
+    .pSetCursorPos = loaderdrv_SetCursorPos,
+    .pClipCursor = loaderdrv_ClipCursor,
+    /* clipboard functions */
+    .pUpdateClipboard = loaderdrv_UpdateClipboard,
+    /* display modes */
     .pChangeDisplaySettingsEx = loaderdrv_ChangeDisplaySettingsEx,
     .pEnumDisplaySettingsEx = loaderdrv_EnumDisplaySettingsEx,
     .pUpdateDisplayDevices = loaderdrv_UpdateDisplayDevices,
-    .pSetCursor = loaderdrv_SetCursor,
-    .pUpdateClipboard = loaderdrv_UpdateClipboard,
+    /* windowing functions */
+    .pMsgWaitForMultipleObjectsEx = nulldrv_MsgWaitForMultipleObjectsEx,
     .pScrollDC = nulldrv_ScrollDC,
+    .pWindowMessage = nulldrv_WindowMessage,
+    /* system parameters */
     .pSystemParametersInfo = nulldrv_SystemParametersInfo,
+    /* vulkan support */
     .pwine_get_vulkan_driver = loaderdrv_wine_get_vulkan_driver,
+    /* thread management */
+    .pThreadDetach = nulldrv_ThreadDetach,
 };
 
 const struct user_driver_funcs *user_driver = &lazy_load_driver;

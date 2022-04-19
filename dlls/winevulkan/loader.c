@@ -17,7 +17,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdlib.h>
 #include "vulkan_loader.h"
 #include "winreg.h"
 #include "ntuser.h"
@@ -246,17 +245,24 @@ static BOOL  wine_vk_init_once(void)
 VkResult WINAPI vkCreateInstance(const VkInstanceCreateInfo *create_info,
         const VkAllocationCallbacks *allocator, VkInstance *instance)
 {
+    struct vkCreateInstance_params params;
+
     TRACE("create_info %p, allocator %p, instance %p\n", create_info, allocator, instance);
 
     if(!wine_vk_init_once())
         return VK_ERROR_INITIALIZATION_FAILED;
 
-    return unix_funcs->p_vkCreateInstance(create_info, allocator, instance);
+    params.pCreateInfo = create_info;
+    params.pAllocator = allocator;
+    params.pInstance = instance;
+    return unix_funcs->p_vk_call(unix_vkCreateInstance, &params);
 }
 
 VkResult WINAPI vkEnumerateInstanceExtensionProperties(const char *layer_name,
         uint32_t *count, VkExtensionProperties *properties)
 {
+    struct vkEnumerateInstanceExtensionProperties_params params;
+
     TRACE("%p, %p, %p\n", layer_name, count, properties);
 
     if (layer_name)
@@ -271,11 +277,16 @@ VkResult WINAPI vkEnumerateInstanceExtensionProperties(const char *layer_name,
         return VK_SUCCESS;
     }
 
-    return unix_funcs->p_vkEnumerateInstanceExtensionProperties(layer_name, count, properties);
+    params.pLayerName = layer_name;
+    params.pPropertyCount = count;
+    params.pProperties = properties;
+    return unix_funcs->p_vk_call(unix_vkEnumerateInstanceExtensionProperties, &params);
 }
 
 VkResult WINAPI vkEnumerateInstanceVersion(uint32_t *version)
 {
+    struct vkEnumerateInstanceVersion_params params;
+
     TRACE("%p\n", version);
 
     if (!wine_vk_init_once())
@@ -284,7 +295,8 @@ VkResult WINAPI vkEnumerateInstanceVersion(uint32_t *version)
         return VK_SUCCESS;
     }
 
-    return unix_funcs->p_vkEnumerateInstanceVersion(version);
+    params.pApiVersion = version;
+    return unix_funcs->p_vk_call(unix_vkEnumerateInstanceVersion, &params);
 }
 
 static HANDLE get_display_device_init_mutex(void)
@@ -356,12 +368,25 @@ static void fill_luid_property(VkPhysicalDeviceProperties2 *properties2)
             id->deviceNodeMask);
 }
 
-void WINAPI vkGetPhysicalDeviceProperties(VkPhysicalDevice phys_dev,
+static void update_driver_version( VkPhysicalDeviceProperties *properties )
+{
+    if (properties->vendorID == 0x1002 && properties->deviceID == 0x163f)
+    {
+        /* AMD VANGOGH */
+        properties->driverVersion = VK_MAKE_VERSION(21, 20, 1);
+    }
+}
+
+void WINAPI vkGetPhysicalDeviceProperties(VkPhysicalDevice physical_device,
         VkPhysicalDeviceProperties *properties)
 {
-    TRACE("%p, %p\n", phys_dev, properties);
+    struct vkGetPhysicalDeviceProperties_params params;
 
-    unix_funcs->p_vkGetPhysicalDeviceProperties(phys_dev, properties);
+    TRACE("%p, %p\n", physical_device, properties);
+
+    params.physicalDevice = physical_device;
+    params.pProperties = properties;
+    vk_unix_call(unix_vkGetPhysicalDeviceProperties, &params);
 
     {
         const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
@@ -374,14 +399,19 @@ void WINAPI vkGetPhysicalDeviceProperties(VkPhysicalDevice phys_dev,
             }
         }
     }
+    update_driver_version(properties);
 }
 
 void WINAPI vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
         VkPhysicalDeviceProperties2 *properties2)
 {
+    struct vkGetPhysicalDeviceProperties2_params params;
+
     TRACE("%p, %p\n", phys_dev, properties2);
 
-    unix_funcs->p_vkGetPhysicalDeviceProperties2(phys_dev, properties2);
+    params.physicalDevice = phys_dev;
+    params.pProperties = properties2;
+    vk_unix_call(unix_vkGetPhysicalDeviceProperties2, &params);
     fill_luid_property(properties2);
 
     {
@@ -395,14 +425,19 @@ void WINAPI vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
             }
         }
     }
+    update_driver_version(&properties2->properties);
 }
 
 void WINAPI vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
         VkPhysicalDeviceProperties2 *properties2)
 {
+    struct vkGetPhysicalDeviceProperties2KHR_params params;
+
     TRACE("%p, %p\n", phys_dev, properties2);
 
-    unix_funcs->p_vkGetPhysicalDeviceProperties2KHR(phys_dev, properties2);
+    params.physicalDevice = phys_dev;
+    params.pProperties = properties2;
+    vk_unix_call(unix_vkGetPhysicalDeviceProperties2KHR, &params);
     fill_luid_property(properties2);
 
     {
@@ -416,6 +451,7 @@ void WINAPI vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
             }
         }
     }
+    update_driver_version(&properties2->properties);
 }
 
 static BOOL WINAPI call_vulkan_debug_report_callback( struct wine_vk_debug_report_params *params, ULONG size )

@@ -401,7 +401,7 @@ LRESULT CALLBACK msg_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
         }
     }
 
-    return CallNextHookEx(msghook_handle, nCode, wParam, lParam);
+    return NtUserCallNextHookEx(msghook_handle, nCode, wParam, lParam);
 }
 
 /**************************************************************************
@@ -428,7 +428,7 @@ static INT_PTR CALLBACK MSGBOX_DlgProc( HWND hwnd, UINT message,
         break;
    }
    case WM_DESTROY:
-       UnhookWindowsHookEx(msghook_handle);
+       NtUserUnhookWindowsHookEx(msghook_handle);
        break;
 
    case WM_COMMAND:
@@ -473,6 +473,7 @@ static INT_PTR CALLBACK MSGBOX_DlgProc( HWND hwnd, UINT message,
   }
   return 0;
 }
+
 
 /**************************************************************************
  *		MessageBoxA (USER32.@)

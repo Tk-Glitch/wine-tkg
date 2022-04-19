@@ -314,7 +314,7 @@ error:
     WINTRUST_Free(provData);
 
 done:
-    TRACE("returning %08x\n", err);
+    TRACE("returning %08lx\n", err);
     return err;
 }
 
@@ -337,7 +337,7 @@ static LONG WINTRUST_DefaultClose(HWND hwnd, GUID *actionID,
         WINTRUST_Free(provData);
         data->hWVTStateData = NULL;
     }
-    TRACE("returning %08x\n", err);
+    TRACE("returning %08lx\n", err);
     return err;
 }
 
@@ -350,7 +350,7 @@ static LONG WINTRUST_DefaultVerifyAndClose(HWND hwnd, GUID *actionID,
 
     err = WINTRUST_DefaultVerify(hwnd, actionID, data);
     WINTRUST_DefaultClose(hwnd, actionID, data);
-    TRACE("returning %08x\n", err);
+    TRACE("returning %08lx\n", err);
     return err;
 }
 
@@ -445,7 +445,7 @@ static HRESULT WINAPI WINTRUST_CertVerifyObjTrust(CRYPT_PROVIDER_DATA *data)
         }
         break;
     default:
-        FIXME("unimplemented for %d\n", data->pWintrustData->dwUnionChoice);
+        FIXME("unimplemented for %ld\n", data->pWintrustData->dwUnionChoice);
         SetLastError(ERROR_INVALID_PARAMETER);
         ret = FALSE;
     }
@@ -454,7 +454,7 @@ error:
     if (!ret)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV] =
          GetLastError();
-    TRACE("returning %d (%08x)\n", ret ? S_OK : S_FALSE,
+    TRACE("returning %ld (%08lx)\n", ret ? S_OK : S_FALSE,
      data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV]);
     return ret ? S_OK : S_FALSE;
 }
@@ -505,7 +505,7 @@ error:
     WINTRUST_Free(provData);
 
 done:
-    TRACE("returning %08x\n", err);
+    TRACE("returning %08lx\n", err);
     return err;
 }
 
@@ -518,7 +518,7 @@ static LONG WINTRUST_CertVerifyAndClose(HWND hwnd, GUID *actionID,
 
     err = WINTRUST_CertVerify(hwnd, actionID, data);
     WINTRUST_DefaultClose(hwnd, actionID, data);
-    TRACE("returning %08x\n", err);
+    TRACE("returning %08lx\n", err);
     return err;
 }
 
@@ -547,7 +547,7 @@ static LONG WINTRUST_CertActionVerify(HWND hwnd, GUID *actionID,
         err = WINTRUST_DefaultClose(hwnd, actionID, data);
         break;
     default:
-        FIXME("unimplemented for %d\n", data->dwStateAction);
+        FIXME("unimplemented for %ld\n", data->dwStateAction);
     }
     return err;
 }
@@ -557,7 +557,7 @@ static void dump_file_info(WINTRUST_FILE_INFO *pFile)
     TRACE("%p\n", pFile);
     if (pFile)
     {
-        TRACE("cbStruct: %d\n", pFile->cbStruct);
+        TRACE("cbStruct: %ld\n", pFile->cbStruct);
         TRACE("pcwszFilePath: %s\n", debugstr_w(pFile->pcwszFilePath));
         TRACE("hFile: %p\n", pFile->hFile);
         TRACE("pgKnownSubject: %s\n", debugstr_guid(pFile->pgKnownSubject));
@@ -569,8 +569,8 @@ static void dump_catalog_info(WINTRUST_CATALOG_INFO *catalog)
     TRACE("%p\n", catalog);
     if (catalog)
     {
-        TRACE("cbStruct: %d\n", catalog->cbStruct);
-        TRACE("dwCatalogVersion: %d\n", catalog->dwCatalogVersion);
+        TRACE("cbStruct: %ld\n", catalog->cbStruct);
+        TRACE("dwCatalogVersion: %ld\n", catalog->dwCatalogVersion);
         TRACE("pcwszCatalogFilePath: %s\n",
          debugstr_w(catalog->pcwszCatalogFilePath));
         TRACE("pcwszMemberTag: %s\n", debugstr_w(catalog->pcwszMemberTag));
@@ -578,7 +578,7 @@ static void dump_catalog_info(WINTRUST_CATALOG_INFO *catalog)
          debugstr_w(catalog->pcwszMemberFilePath));
         TRACE("hMemberFile: %p\n", catalog->hMemberFile);
         TRACE("pbCalculatedFileHash: %p\n", catalog->pbCalculatedFileHash);
-        TRACE("cbCalculatedFileHash: %d\n", catalog->cbCalculatedFileHash);
+        TRACE("cbCalculatedFileHash: %ld\n", catalog->cbCalculatedFileHash);
         TRACE("pcCatalogContext: %p\n", catalog->pcCatalogContext);
     }
 }
@@ -588,12 +588,12 @@ static void dump_blob_info(WINTRUST_BLOB_INFO *blob)
     TRACE("%p\n", blob);
     if (blob)
     {
-        TRACE("cbStruct: %d\n", blob->cbStruct);
+        TRACE("cbStruct: %ld\n", blob->cbStruct);
         TRACE("gSubject: %s\n", debugstr_guid(&blob->gSubject));
         TRACE("pcwszDisplayName: %s\n", debugstr_w(blob->pcwszDisplayName));
-        TRACE("cbMemObject: %d\n", blob->cbMemObject);
+        TRACE("cbMemObject: %ld\n", blob->cbMemObject);
         TRACE("pbMemObject: %p\n", blob->pbMemObject);
-        TRACE("cbMemSignedMsg: %d\n", blob->cbMemSignedMsg);
+        TRACE("cbMemSignedMsg: %ld\n", blob->cbMemSignedMsg);
         TRACE("pbMemSignedMsg: %p\n", blob->pbMemSignedMsg);
     }
 }
@@ -603,10 +603,10 @@ static void dump_sgnr_info(WINTRUST_SGNR_INFO *sgnr)
     TRACE("%p\n", sgnr);
     if (sgnr)
     {
-        TRACE("cbStruct: %d\n", sgnr->cbStruct);
+        TRACE("cbStruct: %ld\n", sgnr->cbStruct);
         TRACE("pcwszDisplayName: %s\n", debugstr_w(sgnr->pcwszDisplayName));
         TRACE("psSignerInfo: %p\n", sgnr->psSignerInfo);
-        TRACE("chStores: %d\n", sgnr->chStores);
+        TRACE("chStores: %ld\n", sgnr->chStores);
     }
 }
 
@@ -615,11 +615,11 @@ static void dump_cert_info(WINTRUST_CERT_INFO *cert)
     TRACE("%p\n", cert);
     if (cert)
     {
-        TRACE("cbStruct: %d\n", cert->cbStruct);
+        TRACE("cbStruct: %ld\n", cert->cbStruct);
         TRACE("pcwszDisplayName: %s\n", debugstr_w(cert->pcwszDisplayName));
         TRACE("psCertContext: %p\n", cert->psCertContext);
-        TRACE("chStores: %d\n", cert->chStores);
-        TRACE("dwFlags: %08x\n", cert->dwFlags);
+        TRACE("chStores: %ld\n", cert->chStores);
+        TRACE("dwFlags: %08lx\n", cert->dwFlags);
         TRACE("psftVerifyAsOf: %p\n", cert->psftVerifyAsOf);
     }
 }
@@ -629,12 +629,12 @@ static void dump_wintrust_data(WINTRUST_DATA *data)
     TRACE("%p\n", data);
     if (data)
     {
-        TRACE("cbStruct: %d\n", data->cbStruct);
+        TRACE("cbStruct: %ld\n", data->cbStruct);
         TRACE("pPolicyCallbackData: %p\n", data->pPolicyCallbackData);
         TRACE("pSIPClientData: %p\n", data->pSIPClientData);
-        TRACE("dwUIChoice: %d\n", data->dwUIChoice);
-        TRACE("fdwRevocationChecks: %08x\n", data->fdwRevocationChecks);
-        TRACE("dwUnionChoice: %d\n", data->dwUnionChoice);
+        TRACE("dwUIChoice: %ld\n", data->dwUIChoice);
+        TRACE("fdwRevocationChecks: %08lx\n", data->fdwRevocationChecks);
+        TRACE("dwUnionChoice: %ld\n", data->dwUnionChoice);
         switch (data->dwUnionChoice)
         {
         case WTD_CHOICE_FILE:
@@ -653,11 +653,11 @@ static void dump_wintrust_data(WINTRUST_DATA *data)
             dump_cert_info(data->u.pCert);
             break;
         }
-        TRACE("dwStateAction: %d\n", data->dwStateAction);
+        TRACE("dwStateAction: %ld\n", data->dwStateAction);
         TRACE("hWVTStateData: %p\n", data->hWVTStateData);
         TRACE("pwszURLReference: %s\n", debugstr_w(data->pwszURLReference));
-        TRACE("dwProvFlags: %08x\n", data->dwProvFlags);
-        TRACE("dwUIContext: %d\n", data->dwUIContext);
+        TRACE("dwProvFlags: %08lx\n", data->dwProvFlags);
+        TRACE("dwUIContext: %ld\n", data->dwUIContext);
     }
 }
 
@@ -729,12 +729,12 @@ LONG WINAPI WinVerifyTrust( HWND hwnd, GUID *ActionID, LPVOID ActionData )
             err = WINTRUST_DefaultClose(hwnd, ActionID, ActionData);
             break;
         default:
-            FIXME("unimplemented for %d\n", actionData->dwStateAction);
+            FIXME("unimplemented for %ld\n", actionData->dwStateAction);
         }
     }
 
     if (err) SetLastError(err);
-    TRACE("returning %08x\n", err);
+    TRACE("returning %08lx\n", err);
     return err;
 }
 
@@ -756,7 +756,7 @@ CRYPT_PROVIDER_SGNR * WINAPI WTHelperGetProvSignerFromChain(
 {
     CRYPT_PROVIDER_SGNR *sgnr;
 
-    TRACE("(%p %d %d %d)\n", pProvData, idxSigner, fCounterSigner,
+    TRACE("(%p %ld %d %ld)\n", pProvData, idxSigner, fCounterSigner,
      idxCounterSigner);
 
     if (idxSigner >= pProvData->csSigners || !pProvData->pasSigners)
@@ -781,7 +781,7 @@ CRYPT_PROVIDER_CERT * WINAPI WTHelperGetProvCertFromChain(
 {
     CRYPT_PROVIDER_CERT *cert;
 
-    TRACE("(%p %d)\n", pSgnr, idxCert);
+    TRACE("(%p %ld)\n", pSgnr, idxCert);
 
     if (!pSgnr || idxCert >= pSgnr->csCertChain || !pSgnr->pasCertChain)
         return NULL;
@@ -899,7 +899,7 @@ BOOL WINAPI WTHelperGetKnownUsages(DWORD action, PCCRYPT_OID_INFO **usages)
 {
     BOOL ret;
 
-    TRACE("(%d, %p)\n", action, usages);
+    TRACE("(%ld, %p)\n", action, usages);
 
     if (!usages)
     {
@@ -921,7 +921,7 @@ BOOL WINAPI WTHelperGetKnownUsages(DWORD action, PCCRYPT_OID_INFO **usages)
     }
     else
     {
-        WARN("unknown action %d\n", action);
+        WARN("unknown action %ld\n", action);
         SetLastError(ERROR_INVALID_PARAMETER);
         ret = FALSE;
     }
@@ -980,7 +980,7 @@ BOOL WINAPI WintrustSetRegPolicyFlags( DWORD dwPolicyFlags)
     HKEY key;
     LONG r;
 
-    TRACE("%x\n", dwPolicyFlags);
+    TRACE("%lx\n", dwPolicyFlags);
 
     r = RegCreateKeyExW(HKEY_CURRENT_USER, Software_Publishing, 0,
      NULL, 0, KEY_WRITE, NULL, &key, NULL);
@@ -1025,7 +1025,7 @@ BOOL WINAPI WINTRUST_AddSgnr(CRYPT_PROVIDER_DATA *data,
 {
     BOOL ret = FALSE;
 
-    TRACE("(%p, %d, %d, %p)\n", data, fCounterSigner, idxSigner, sgnr);
+    TRACE("(%p, %d, %ld, %p)\n", data, fCounterSigner, idxSigner, sgnr);
 
     if (sgnr->cbStruct > sizeof(CRYPT_PROVIDER_SGNR))
     {
@@ -1078,7 +1078,7 @@ BOOL WINAPI WINTRUST_AddCert(CRYPT_PROVIDER_DATA *data, DWORD idxSigner,
 {
     BOOL ret = FALSE;
 
-    TRACE("(%p, %d, %d, %d, %p)\n", data, idxSigner, fCounterSigner,
+    TRACE("(%p, %ld, %d, %ld, %p)\n", data, idxSigner, fCounterSigner,
      idxSigner, pCert2Add);
 
     if (fCounterSigner)
@@ -1206,7 +1206,7 @@ HRESULT WINAPI FindCertsByIssuer(PCERT_CHAIN pCertChains, DWORD *pcbCertChains,
  DWORD *pcCertChains, BYTE* pbEncodedIssuerName, DWORD cbEncodedIssuerName,
  LPCWSTR pwszPurpose, DWORD dwKeySpec)
 {
-    FIXME("(%p, %p, %p, %p, %d, %s, %d): stub\n", pCertChains, pcbCertChains,
+    FIXME("(%p, %p, %p, %p, %ld, %s, %ld): stub\n", pCertChains, pcbCertChains,
      pcCertChains, pbEncodedIssuerName, cbEncodedIssuerName,
      debugstr_w(pwszPurpose), dwKeySpec);
     return E_FAIL;

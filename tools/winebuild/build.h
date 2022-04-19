@@ -105,6 +105,34 @@ typedef struct
     } u;
 } ORDDEF;
 
+struct apiset_entry
+{
+    unsigned int name_off;
+    unsigned int name_len;
+    unsigned int hash;
+    unsigned int hash_len;
+    unsigned int val_count;
+    struct apiset_value
+    {
+        unsigned int name_off;
+        unsigned int name_len;
+        unsigned int val_off;
+        unsigned int val_len;
+    } values[4];
+};
+
+struct apiset
+{
+    unsigned int count;
+    unsigned int size;
+    struct apiset_entry *entries;
+    unsigned int str_pos;
+    unsigned int str_size;
+    char *strings;
+};
+
+static const unsigned int apiset_hash_factor = 31;
+
 typedef struct
 {
     char            *src_name;           /* file name of the source spec file */
@@ -133,6 +161,7 @@ typedef struct
     ORDDEF         **names;              /* array of entry point names (points into entry_points) */
     ORDDEF         **ordinals;           /* array of dll ordinals (points into entry_points) */
     struct resource *resources;          /* array of dll resources (format differs between Win16/Win32) */
+    struct apiset    apiset;             /* list of defined api sets */
 } DLLSPEC;
 
 extern char *target_alias;
@@ -283,7 +312,9 @@ extern void output_resources( DLLSPEC *spec );
 extern void output_bin_resources( DLLSPEC *spec, unsigned int start_rva );
 extern void output_spec32_file( DLLSPEC *spec );
 extern void output_fake_module( DLLSPEC *spec );
+extern void output_data_module( DLLSPEC *spec );
 extern void output_def_file( DLLSPEC *spec, int import_only );
+extern void output_apiset_lib( DLLSPEC *spec, const struct apiset *apiset );
 extern void load_res16_file( const char *name, DLLSPEC *spec );
 extern void output_res16_data( DLLSPEC *spec );
 extern void output_bin_res16_data( DLLSPEC *spec );
@@ -329,6 +360,7 @@ extern int use_msvcrt;
 extern int unix_lib;
 extern int safe_seh;
 extern int prefer_native;
+extern int data_only;
 
 extern char *input_file_name;
 extern char *spec_file_name;

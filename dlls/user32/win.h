@@ -33,43 +33,6 @@
 struct tagCLASS;
 struct tagDIALOGINFO;
 
-typedef struct tagWND
-{
-    struct user_object obj;       /* object header */
-    HWND           parent;        /* Window parent */
-    HWND           owner;         /* Window owner */
-    struct tagCLASS *class;       /* Window class */
-    struct dce    *dce;           /* DCE pointer */
-    WNDPROC        winproc;       /* Window procedure */
-    DWORD          tid;           /* Owner thread id */
-    HINSTANCE      hInstance;     /* Window hInstance (from CreateWindow) */
-    RECT           client_rect;   /* Client area rel. to parent client area */
-    RECT           window_rect;   /* Whole window rel. to parent client area */
-    RECT           visible_rect;  /* Visible part of the whole rect, rel. to parent client area */
-    RECT           normal_rect;   /* Normal window rect saved when maximized/minimized */
-    POINT          min_pos;       /* Position for minimized window */
-    POINT          max_pos;       /* Position for maximized window */
-    LPWSTR         text;          /* Window text */
-    void          *pScroll;       /* Scroll-bar info */
-    DWORD          dwStyle;       /* Window style (from CreateWindow) */
-    DWORD          dwExStyle;     /* Extended style (from CreateWindowEx) */
-    UINT_PTR       wIDmenu;       /* ID or hmenu (from CreateWindow) */
-    DWORD          helpContext;   /* Help context ID */
-    UINT           flags;         /* Misc. flags (see below) */
-    HMENU          hSysMenu;      /* window's copy of System Menu */
-    HICON          hIcon;         /* window's icon */
-    HICON          hIconSmall;    /* window's small icon */
-    HICON          hIconSmall2;   /* window's secondary small icon, derived from hIcon */
-    UINT           dpi;           /* window DPI */
-    DPI_AWARENESS  dpi_awareness; /* DPI awareness */
-    struct window_surface *surface; /* Window surface if any */
-    struct tagDIALOGINFO *dlgInfo;/* Dialog additional info (dialogs only) */
-    int            pixel_format;  /* Pixel format set by the graphics driver */
-    int            cbWndExtra;    /* class cbWndExtra at window creation */
-    DWORD_PTR      userdata;      /* User private data */
-    DWORD          wExtra[1];     /* Window extra bytes */
-} WND;
-
   /* WND flags values */
 #define WIN_RESTORE_MAX           0x0001 /* Maximize when restoring */
 #define WIN_NEED_SIZE             0x0002 /* Internal WM_SIZE is needed */
@@ -113,9 +76,6 @@ static inline void WIN_ReleasePtr( WND *ptr )
 {
     USER_Unlock();
 }
-
-#define WND_OTHER_PROCESS ((WND *)1)  /* returned by WIN_GetPtr on unknown window handles */
-#define WND_DESKTOP       ((WND *)2)  /* returned by WIN_GetPtr on the desktop window */
 
 extern LRESULT HOOK_CallHooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL unicode ) DECLSPEC_HIDDEN;
 

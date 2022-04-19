@@ -23,7 +23,6 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <math.h>
 
 #define COBJMACROS
 
@@ -60,7 +59,7 @@ static const char * dumpCooperativeLevel(DWORD level)
         LE(DSSCL_WRITEPRIMARY);
     }
 #undef LE
-    return wine_dbg_sprintf("Unknown(%08x)", level);
+    return wine_dbg_sprintf("Unknown(%08lx)", level);
 }
 
 static void _dump_DSCAPS(DWORD xmask) {
@@ -137,9 +136,9 @@ static HRESULT DirectSoundDevice_Create(DirectSoundDevice ** ppDevice)
     device->ref            = 1;
     device->priolevel      = DSSCL_NORMAL;
     device->stopped        = 1;
-    device->speaker_config = DSSPEAKER_COMBINED(DSSPEAKER_STEREO, DSSPEAKER_GEOMETRY_WIDE);
 
-    DSOUND_ParseSpeakerConfig(device);
+    device->speaker_config = 0;
+    device->num_speakers = 0;
 
     /* 3D listener initial parameters */
     device->ds3dl.dwSize   = sizeof(DS3DLISTENER);
@@ -192,7 +191,7 @@ static HRESULT DirectSoundDevice_Create(DirectSoundDevice ** ppDevice)
 static ULONG DirectSoundDevice_AddRef(DirectSoundDevice * device)
 {
     ULONG ref = InterlockedIncrement(&(device->ref));
-    TRACE("(%p) ref %d\n", device, ref);
+    TRACE("(%p) ref %ld\n", device, ref);
     return ref;
 }
 
@@ -200,7 +199,7 @@ static ULONG DirectSoundDevice_Release(DirectSoundDevice * device)
 {
     HRESULT hr;
     ULONG ref = InterlockedDecrement(&(device->ref));
-    TRACE("(%p) ref %d\n", device, ref);
+    TRACE("(%p) ref %ld\n", device, ref);
     if (!ref) {
         int i;
 
@@ -332,7 +331,7 @@ static HRESULT DirectSoundDevice_Initialize(DirectSoundDevice ** ppDevice, LPCGU
         HeapFree(GetProcessHeap(), 0, device);
         LeaveCriticalSection(&DSOUND_renderers_lock);
         IMMDevice_Release(mmdevice);
-        WARN("DSOUND_ReopenDevice failed: %08x\n", hr);
+        WARN("DSOUND_ReopenDevice failed: %08lx\n", hr);
         return hr;
     }
 
@@ -430,11 +429,11 @@ static HRESULT DirectSoundDevice_CreateSoundBuffer(
     *ppdsb = NULL;
 
     if (TRACE_ON(dsound)) {
-        TRACE("(structsize=%d)\n",dsbd->dwSize);
-        TRACE("(flags=0x%08x:\n",dsbd->dwFlags);
+        TRACE("(structsize=%ld)\n",dsbd->dwSize);
+        TRACE("(flags=0x%08lx:\n",dsbd->dwFlags);
         _dump_DSBCAPS(dsbd->dwFlags);
         TRACE(")\n");
-        TRACE("(bufferbytes=%d)\n",dsbd->dwBufferBytes);
+        TRACE("(bufferbytes=%ld)\n",dsbd->dwBufferBytes);
         TRACE("(lpwfxFormat=%p)\n",dsbd->lpwfxFormat);
     }
 
@@ -530,8 +529,8 @@ static HRESULT DirectSoundDevice_CreateSoundBuffer(
             }
         }
 
-        TRACE("(formattag=0x%04x,chans=%d,samplerate=%d,"
-              "bytespersec=%d,blockalign=%d,bitspersamp=%d,cbSize=%d)\n",
+        TRACE("(formattag=0x%04x,chans=%d,samplerate=%ld,"
+              "bytespersec=%ld,blockalign=%d,bitspersamp=%d,cbSize=%d)\n",
               dsbd->lpwfxFormat->wFormatTag, dsbd->lpwfxFormat->nChannels,
               dsbd->lpwfxFormat->nSamplesPerSec,
               dsbd->lpwfxFormat->nAvgBytesPerSec,
@@ -714,7 +713,7 @@ static ULONG WINAPI IUnknownImpl_AddRef(IUnknown *iface)
     IDirectSoundImpl *This = impl_from_IUnknown(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(ref == 1)
         InterlockedIncrement(&This->numIfaces);
@@ -727,7 +726,7 @@ static ULONG WINAPI IUnknownImpl_Release(IUnknown *iface)
     IDirectSoundImpl *This = impl_from_IUnknown(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if (!ref && !InterlockedDecrement(&This->numIfaces))
         directsound_destroy(This);
@@ -763,7 +762,7 @@ static ULONG WINAPI IDirectSound8Impl_AddRef(IDirectSound8 *iface)
     IDirectSoundImpl *This = impl_from_IDirectSound8(iface);
     ULONG ref = InterlockedIncrement(&This->refds);
 
-    TRACE("(%p) refds=%d\n", This, ref);
+    TRACE("(%p) refds=%ld\n", This, ref);
 
     if(ref == 1)
         InterlockedIncrement(&This->numIfaces);
@@ -776,7 +775,7 @@ static ULONG WINAPI IDirectSound8Impl_Release(IDirectSound8 *iface)
     IDirectSoundImpl *This = impl_from_IDirectSound8(iface);
     ULONG ref = InterlockedDecrement(&(This->refds));
 
-    TRACE("(%p) refds=%d\n", This, ref);
+    TRACE("(%p) refds=%ld\n", This, ref);
 
     if (!ref && !InterlockedDecrement(&This->numIfaces))
         directsound_destroy(This);
@@ -807,7 +806,7 @@ static HRESULT WINAPI IDirectSound8Impl_GetCaps(IDirectSound8 *iface, DSCAPS *ds
         return DSERR_INVALIDPARAM;
     }
     if (dscaps->dwSize < sizeof(*dscaps)) {
-        WARN("invalid parameter: dscaps->dwSize = %d\n", dscaps->dwSize);
+        WARN("invalid parameter: dscaps->dwSize = %ld\n", dscaps->dwSize);
         return DSERR_INVALIDPARAM;
     }
 
@@ -835,7 +834,7 @@ static HRESULT WINAPI IDirectSound8Impl_GetCaps(IDirectSound8 *iface, DSCAPS *ds
     dscaps->dwPlayCpuOverheadSwBuffers     = This->device->drvcaps.dwPlayCpuOverheadSwBuffers;
 
     if (TRACE_ON(dsound)) {
-        TRACE("(flags=0x%08x:\n", dscaps->dwFlags);
+        TRACE("(flags=0x%08lx:\n", dscaps->dwFlags);
         _dump_DSCAPS(dscaps->dwFlags);
         TRACE(")\n");
     }
@@ -923,7 +922,7 @@ static HRESULT WINAPI IDirectSound8Impl_SetSpeakerConfig(IDirectSound8 *iface, D
 {
     IDirectSoundImpl *This = impl_from_IDirectSound8(iface);
 
-    TRACE("(%p,0x%08x)\n", This, config);
+    TRACE("(%p,0x%08lx)\n", This, config);
 
     if (!This->device) {
         WARN("not initialized\n");
@@ -1127,76 +1126,4 @@ HRESULT WINAPI DirectSoundCreate8(
     *ppDS = pDS;
 
     return hr;
-}
-
-void DSOUND_ParseSpeakerConfig(DirectSoundDevice *device)
-{
-    switch (DSSPEAKER_CONFIG(device->speaker_config)) {
-        case DSSPEAKER_MONO:
-            device->speaker_angles[0] = M_PI/180.0f * 0.0f;
-            device->speaker_num[0] = 0;
-            device->num_speakers = 1;
-            device->lfe_channel = -1;
-        break;
-
-        case DSSPEAKER_STEREO:
-        case DSSPEAKER_HEADPHONE:
-            device->speaker_angles[0] = M_PI/180.0f * -90.0f;
-            device->speaker_angles[1] = M_PI/180.0f *  90.0f;
-            device->speaker_num[0] = 0; /* Left */
-            device->speaker_num[1] = 1; /* Right */
-            device->num_speakers = 2;
-            device->lfe_channel = -1;
-        break;
-
-        case DSSPEAKER_QUAD:
-            device->speaker_angles[0] = M_PI/180.0f * -135.0f;
-            device->speaker_angles[1] = M_PI/180.0f *  -45.0f;
-            device->speaker_angles[2] = M_PI/180.0f *   45.0f;
-            device->speaker_angles[3] = M_PI/180.0f *  135.0f;
-            device->speaker_num[0] = 2; /* Rear left */
-            device->speaker_num[1] = 0; /* Front left */
-            device->speaker_num[2] = 1; /* Front right */
-            device->speaker_num[3] = 3; /* Rear right */
-            device->num_speakers = 4;
-            device->lfe_channel = -1;
-        break;
-
-        case DSSPEAKER_5POINT1_BACK:
-            device->speaker_angles[0] = M_PI/180.0f * -135.0f;
-            device->speaker_angles[1] = M_PI/180.0f *  -45.0f;
-            device->speaker_angles[2] = M_PI/180.0f *    0.0f;
-            device->speaker_angles[3] = M_PI/180.0f *   45.0f;
-            device->speaker_angles[4] = M_PI/180.0f *  135.0f;
-            device->speaker_angles[5] = 9999.0f;
-            device->speaker_num[0] = 4; /* Rear left */
-            device->speaker_num[1] = 0; /* Front left */
-            device->speaker_num[2] = 2; /* Front centre */
-            device->speaker_num[3] = 1; /* Front right */
-            device->speaker_num[4] = 5; /* Rear right */
-            device->speaker_num[5] = 3; /* LFE */
-            device->num_speakers = 6;
-            device->lfe_channel = 3;
-        break;
-
-        case DSSPEAKER_5POINT1_SURROUND:
-            device->speaker_angles[0] = M_PI/180.0f *  -90.0f;
-            device->speaker_angles[1] = M_PI/180.0f *  -30.0f;
-            device->speaker_angles[2] = M_PI/180.0f *    0.0f;
-            device->speaker_angles[3] = M_PI/180.0f *   30.0f;
-            device->speaker_angles[4] = M_PI/180.0f *   90.0f;
-            device->speaker_angles[5] = 9999.0f;
-            device->speaker_num[0] = 4; /* Rear left */
-            device->speaker_num[1] = 0; /* Front left */
-            device->speaker_num[2] = 2; /* Front centre */
-            device->speaker_num[3] = 1; /* Front right */
-            device->speaker_num[4] = 5; /* Rear right */
-            device->speaker_num[5] = 3; /* LFE */
-            device->num_speakers = 6;
-            device->lfe_channel = 3;
-        break;
-
-        default:
-            WARN("unknown speaker_config %u\n", device->speaker_config);
-    }
 }

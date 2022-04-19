@@ -49,8 +49,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
 
-LONG global_key_state_counter = 0;
-
 /***********************************************************************
  *           get_key_state
  */
@@ -60,19 +58,19 @@ static WORD get_key_state(void)
 
     if (GetSystemMetrics( SM_SWAPBUTTON ))
     {
-        if (GetAsyncKeyState(VK_RBUTTON) & 0x80) ret |= MK_LBUTTON;
-        if (GetAsyncKeyState(VK_LBUTTON) & 0x80) ret |= MK_RBUTTON;
+        if (NtUserGetAsyncKeyState(VK_RBUTTON) & 0x80) ret |= MK_LBUTTON;
+        if (NtUserGetAsyncKeyState(VK_LBUTTON) & 0x80) ret |= MK_RBUTTON;
     }
     else
     {
-        if (GetAsyncKeyState(VK_LBUTTON) & 0x80) ret |= MK_LBUTTON;
-        if (GetAsyncKeyState(VK_RBUTTON) & 0x80) ret |= MK_RBUTTON;
+        if (NtUserGetAsyncKeyState(VK_LBUTTON) & 0x80) ret |= MK_LBUTTON;
+        if (NtUserGetAsyncKeyState(VK_RBUTTON) & 0x80) ret |= MK_RBUTTON;
     }
-    if (GetAsyncKeyState(VK_MBUTTON) & 0x80)  ret |= MK_MBUTTON;
-    if (GetAsyncKeyState(VK_SHIFT) & 0x80)    ret |= MK_SHIFT;
-    if (GetAsyncKeyState(VK_CONTROL) & 0x80)  ret |= MK_CONTROL;
-    if (GetAsyncKeyState(VK_XBUTTON1) & 0x80) ret |= MK_XBUTTON1;
-    if (GetAsyncKeyState(VK_XBUTTON2) & 0x80) ret |= MK_XBUTTON2;
+    if (NtUserGetAsyncKeyState(VK_MBUTTON) & 0x80)  ret |= MK_MBUTTON;
+    if (NtUserGetAsyncKeyState(VK_SHIFT) & 0x80)    ret |= MK_SHIFT;
+    if (NtUserGetAsyncKeyState(VK_CONTROL) & 0x80)  ret |= MK_CONTROL;
+    if (NtUserGetAsyncKeyState(VK_XBUTTON1) & 0x80) ret |= MK_XBUTTON1;
+    if (NtUserGetAsyncKeyState(VK_XBUTTON2) & 0x80) ret |= MK_XBUTTON2;
     return ret;
 }
 
@@ -306,90 +304,9 @@ void WINAPI mouse_event( DWORD dwFlags, DWORD dx, DWORD dy,
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetCursorPos( POINT *pt )
 {
-    BOOL ret;
-    DWORD last_change;
-    UINT dpi;
-
-    if (!pt) return FALSE;
-
-    SERVER_START_REQ( set_cursor )
-    {
-        if ((ret = !wine_server_call( req )))
-        {
-            pt->x = reply->new_x;
-            pt->y = reply->new_y;
-            last_change = reply->last_change;
-        }
-    }
-    SERVER_END_REQ;
-
-    /* query new position from graphics driver if we haven't updated recently */
-    if (ret && GetTickCount() - last_change > 100) ret = USER_Driver->pGetCursorPos( pt );
-    if (ret && (dpi = get_thread_dpi()))
-    {
-        DPI_AWARENESS_CONTEXT context;
-        context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
-        *pt = map_dpi_point( *pt, get_monitor_dpi( MonitorFromPoint( *pt, MONITOR_DEFAULTTOPRIMARY )), dpi );
-        SetThreadDpiAwarenessContext( context );
-    }
-    return ret;
+    return NtUserCallOneParam( (UINT_PTR)pt, NtUserGetCursorPos );
 }
 
-
-/***********************************************************************
- *		GetCursorInfo (USER32.@)
- */
-BOOL WINAPI GetCursorInfo( PCURSORINFO pci )
-{
-    BOOL ret;
-
-    if (!pci) return FALSE;
-
-    SERVER_START_REQ( get_thread_input )
-    {
-        req->tid = 0;
-        if ((ret = !wine_server_call( req )))
-        {
-            pci->hCursor = wine_server_ptr_handle( reply->cursor );
-            pci->flags = (reply->show_count >= 0) ? CURSOR_SHOWING : 0;
-        }
-    }
-    SERVER_END_REQ;
-    GetCursorPos(&pci->ptScreenPos);
-    return ret;
-}
-
-
-/***********************************************************************
- *		SetCursorPos (USER32.@)
- */
-BOOL WINAPI DECLSPEC_HOTPATCH SetCursorPos( INT x, INT y )
-{
-    POINT pt = { x, y };
-    BOOL ret;
-    INT prev_x, prev_y, new_x, new_y;
-    UINT dpi;
-
-    if ((dpi = get_thread_dpi()))
-        pt = map_dpi_point( pt, dpi, get_monitor_dpi( MonitorFromPoint( pt, MONITOR_DEFAULTTOPRIMARY )));
-
-    SERVER_START_REQ( set_cursor )
-    {
-        req->flags = SET_CURSOR_POS;
-        req->x     = pt.x;
-        req->y     = pt.y;
-        if ((ret = !wine_server_call( req )))
-        {
-            prev_x = reply->prev_x;
-            prev_y = reply->prev_y;
-            new_x  = reply->new_x;
-            new_y  = reply->new_y;
-        }
-    }
-    SERVER_END_REQ;
-    if (ret && (prev_x != new_x || prev_y != new_y)) USER_Driver->pSetCursorPos( new_x, new_y );
-    return ret;
-}
 
 /**********************************************************************
  *		SetCapture (USER32.@)
@@ -434,118 +351,12 @@ HWND WINAPI GetCapture(void)
 }
 
 
-static void check_for_events( UINT flags )
-{
-    if (USER_Driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, flags, 0 ) == WAIT_TIMEOUT)
-        flush_window_surfaces( TRUE );
-}
-
-/**********************************************************************
- *		GetAsyncKeyState (USER32.@)
- *
- *	Determine if a key is or was pressed.  retval has high-order
- * bit set to 1 if currently pressed, low-order bit set to 1 if key has
- * been pressed.
- */
-SHORT WINAPI DECLSPEC_HOTPATCH GetAsyncKeyState( INT key )
-{
-    struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
-    INT counter = global_key_state_counter;
-    BYTE prev_key_state;
-    SHORT ret;
-
-    if (key < 0 || key >= 256) return 0;
-
-    check_for_events( QS_INPUT );
-
-    if (key_state_info && !(key_state_info->state[key] & 0xc0) &&
-        key_state_info->counter == counter && GetTickCount() - key_state_info->time < 50)
-    {
-        /* use cached value */
-        return 0;
-    }
-    else if (!key_state_info)
-    {
-        key_state_info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*key_state_info) );
-        get_user_thread_info()->key_state = key_state_info;
-    }
-
-    ret = 0;
-    SERVER_START_REQ( get_key_state )
-    {
-        req->async = 1;
-        req->key = key;
-        if (key_state_info)
-        {
-            prev_key_state = key_state_info->state[key];
-            wine_server_set_reply( req, key_state_info->state, sizeof(key_state_info->state) );
-        }
-        if (!wine_server_call( req ))
-        {
-            if (reply->state & 0x40) ret |= 0x0001;
-            if (reply->state & 0x80) ret |= 0x8000;
-            if (key_state_info)
-            {
-                /* force refreshing the key state cache - some multithreaded programs
-                 * (like Adobe Photoshop CS5) expect that changes to the async key state
-                 * are also immediately available in other threads. */
-                if (prev_key_state != key_state_info->state[key])
-                    counter = InterlockedIncrement( &global_key_state_counter );
-
-                key_state_info->time    = GetTickCount();
-                key_state_info->counter = counter;
-            }
-        }
-    }
-    SERVER_END_REQ;
-
-    return ret;
-}
-
-
-/***********************************************************************
- *		GetQueueStatus (USER32.@)
- */
-DWORD WINAPI GetQueueStatus( UINT flags )
-{
-    DWORD ret;
-
-    if (flags & ~(QS_ALLINPUT | QS_ALLPOSTMESSAGE | QS_SMRESULT))
-    {
-        SetLastError( ERROR_INVALID_FLAGS );
-        return 0;
-    }
-
-    check_for_events( flags );
-
-    SERVER_START_REQ( get_queue_status )
-    {
-        req->clear_bits = flags;
-        wine_server_call( req );
-        ret = MAKELONG( reply->changed_bits & flags, reply->wake_bits & flags );
-    }
-    SERVER_END_REQ;
-    return ret;
-}
-
-
 /***********************************************************************
  *		GetInputState   (USER32.@)
  */
 BOOL WINAPI GetInputState(void)
 {
-    DWORD ret;
-
-    check_for_events( QS_INPUT );
-
-    SERVER_START_REQ( get_queue_status )
-    {
-        req->clear_bits = 0;
-        wine_server_call( req );
-        ret = reply->wake_bits & (QS_KEY | QS_MOUSEBUTTON);
-    }
-    SERVER_END_REQ;
-    return ret;
+    return NtUserCallNoParam( NtUserGetInputState );
 }
 
 
@@ -810,40 +621,6 @@ BOOL WINAPI BlockInput(BOOL fBlockIt)
     return FALSE;
 }
 
-/***********************************************************************
- *		RegisterHotKey (USER32.@)
- */
-BOOL WINAPI RegisterHotKey(HWND hwnd,INT id,UINT modifiers,UINT vk)
-{
-    BOOL ret;
-    int replaced=0;
-
-    TRACE_(keyboard)("(%p,%d,0x%08x,%X)\n",hwnd,id,modifiers,vk);
-
-    if ((hwnd == NULL || WIN_IsCurrentThread(hwnd)) &&
-        !USER_Driver->pRegisterHotKey(hwnd, modifiers, vk))
-        return FALSE;
-
-    SERVER_START_REQ( register_hotkey )
-    {
-        req->window = wine_server_user_handle( hwnd );
-        req->id = id;
-        req->flags = modifiers;
-        req->vkey = vk;
-        if ((ret = !wine_server_call_err( req )))
-        {
-            replaced = reply->replaced;
-            modifiers = reply->flags;
-            vk = reply->vkey;
-        }
-    }
-    SERVER_END_REQ;
-
-    if (ret && replaced)
-        USER_Driver->pUnregisterHotKey(hwnd, modifiers, vk);
-
-    return ret;
-}
 
 /***********************************************************************
  *		LoadKeyboardLayoutW (USER32.@)
@@ -1034,7 +811,6 @@ static void CALLBACK TrackMouseEventProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent,
         tracking_info.tme.dwHoverTime = 0;
     }
 }
-
 
 /***********************************************************************
  * TrackMouseEvent [USER32]

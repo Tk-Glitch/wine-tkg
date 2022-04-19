@@ -37,12 +37,16 @@ static BOOL (WINAPI *pSetDefaultDllDirectories)(DWORD);
 static BOOL (WINAPI *pK32GetModuleInformation)(HANDLE process, HMODULE module,
                                                MODULEINFO *modinfo, DWORD cb);
 
+static NTSTATUS (WINAPI *pApiSetQueryApiSetPresence)(const UNICODE_STRING*,BOOLEAN*);
+static NTSTATUS (WINAPI *pApiSetQueryApiSetPresenceEx)(const UNICODE_STRING*,BOOLEAN*,BOOLEAN*);
 static NTSTATUS (WINAPI *pLdrGetDllDirectory)(UNICODE_STRING*);
 static NTSTATUS (WINAPI *pLdrSetDllDirectory)(UNICODE_STRING*);
 static NTSTATUS (WINAPI *pLdrGetDllHandle)( LPCWSTR load_path, ULONG flags, const UNICODE_STRING *name, HMODULE *base );
 static NTSTATUS (WINAPI *pLdrGetDllHandleEx)( ULONG flags, LPCWSTR load_path, ULONG *dll_characteristics,
                                               const UNICODE_STRING *name, HMODULE *base );
 static NTSTATUS (WINAPI *pLdrGetDllFullName)( HMODULE module, UNICODE_STRING *name );
+
+static BOOL (WINAPI *pIsApiSetImplemented)(LPCSTR);
 
 static BOOL is_unicode_enabled = TRUE;
 
@@ -692,21 +696,95 @@ static void test_LoadLibraryEx_search_flags(void)
     }
     else
     {
+        LoadLibraryA( "ole32.dll" ); /* FIXME: make sure the dependencies are loaded */
         mod = LoadLibraryA( apiset_dll );
         if (mod)
         {
+            HMODULE shcore;
+            char buffer[MAX_PATH];
+
             FreeLibrary(mod);
             mod = LoadLibraryExA( apiset_dll, NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
             ok( !!mod, "Got NULL module, error %u.\n", GetLastError() );
             ok( !!GetModuleHandleA( apiset_dll ), "Got NULL handle.\n" );
+            shcore = GetModuleHandleA( "shcore.dll" );
+            todo_wine
+            ok( mod == shcore, "wrong module %p/%p\n", mod, shcore );
             ret = FreeLibrary( mod );
             ok( ret, "FreeLibrary failed, error %u.\n", GetLastError() );
+            shcore = GetModuleHandleA( "shcore.dll" );
+            ok( !shcore, "shcore not unloaded\n" );
+
+            /* api set without .dll */
+            strcpy( buffer, apiset_dll );
+            buffer[strlen(buffer) - 4] = 0;
+            mod = LoadLibraryExA( buffer, NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
+            ok( !!mod, "Got NULL module, error %u.\n", GetLastError() );
+            ok( !!GetModuleHandleA( apiset_dll ), "Got NULL handle.\n" );
+            shcore = GetModuleHandleA( "shcore.dll" );
+            todo_wine
+            ok( mod == shcore, "wrong module %p/%p\n", mod, shcore );
+            ret = FreeLibrary( mod );
+            ok( ret, "FreeLibrary failed, error %u.\n", GetLastError() );
+            shcore = GetModuleHandleA( "shcore.dll" );
+            ok( !shcore, "shcore not unloaded\n" );
+
+            /* api set with different version */
+            strcpy( buffer, apiset_dll );
+            buffer[strlen(buffer) - 5] = '9';
+            mod = LoadLibraryExA( buffer, NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
+            todo_wine
+            ok( !!mod || broken(!mod) /* win8 */, "Got NULL module, error %u.\n", GetLastError() );
+            if (mod)
+            {
+                ok( !!GetModuleHandleA( apiset_dll ), "Got NULL handle.\n" );
+                shcore = GetModuleHandleA( "shcore.dll" );
+                ok( mod == shcore, "wrong module %p/%p\n", mod, shcore );
+                ret = FreeLibrary( mod );
+                ok( ret, "FreeLibrary failed, error %u.\n", GetLastError() );
+            }
+            shcore = GetModuleHandleA( "shcore.dll" );
+            ok( !shcore, "shcore not unloaded\n" );
+
+            /* api set with full path */
+            GetWindowsDirectoryA( buffer, MAX_PATH );
+            strcat( buffer, "\\" );
+            strcat( buffer, apiset_dll );
+            SetLastError( 0xdeadbeef );
+            mod = LoadLibraryExA( buffer, NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
+            ok( !mod, "Loaded %s\n", debugstr_a(buffer) );
+            ok( GetLastError() == ERROR_MOD_NOT_FOUND, "wrong error %u\n", GetLastError() );
+            SetLastError( 0xdeadbeef );
+            mod = LoadLibraryA( buffer );
+            ok( !mod, "Loaded %s\n", debugstr_a(buffer) );
+            ok( GetLastError() == ERROR_MOD_NOT_FOUND, "wrong error %u\n", GetLastError() );
         }
         else
         {
             win_skip( "%s not found, skipping test.\n", apiset_dll );
         }
-    }
+
+        /* try a library with dependencies */
+        mod = GetModuleHandleA( "rasapi32.dll" );
+        ok( !mod, "rasapi32 already loaded\n" );
+        mod = LoadLibraryA( "rasapi32.dll" );
+        ok( !!mod, "rasapi32 not found %u\n", GetLastError() );
+        FreeLibrary( mod );
+        SetLastError( 0xdeadbeef );
+        mod = LoadLibraryExA( "rasapi32.dll", NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
+        ok( !mod, "rasapi32 loaded\n" );
+        ok( GetLastError() == ERROR_MOD_NOT_FOUND, "wrong error %u\n", GetLastError() );
+        SetLastError( 0xdeadbeef );
+        mod = LoadLibraryExA( "ext-ms-win-ras-rasapi32-l1-1-0.dll", NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
+        ok( !mod, "rasapi32 loaded\n" );
+        ok( GetLastError() == ERROR_MOD_NOT_FOUND, "wrong error %u\n", GetLastError() );
+        if (mod) FreeLibrary( mod );
+        mod = LoadLibraryA( "ext-ms-win-ras-rasapi32-l1-1-0.dll" );
+        ok( !!mod || broken(!mod) /* win7 */, "rasapi32 not found %u\n", GetLastError() );
+        if (mod) FreeLibrary( mod );
+        mod = GetModuleHandleA( "rasapi32.dll" );
+        ok( !mod, "rasapi32 still loaded\n" );
+     }
 done:
     for (i = 1; i <= 6; i++)
     {
@@ -856,11 +934,15 @@ static void init_pointers(void)
     MAKEFUNC(SetDefaultDllDirectories);
     MAKEFUNC(K32GetModuleInformation);
     mod = GetModuleHandleA( "ntdll.dll" );
+    MAKEFUNC(ApiSetQueryApiSetPresence);
+    MAKEFUNC(ApiSetQueryApiSetPresenceEx);
     MAKEFUNC(LdrGetDllDirectory);
     MAKEFUNC(LdrSetDllDirectory);
     MAKEFUNC(LdrGetDllHandle);
     MAKEFUNC(LdrGetDllHandleEx);
     MAKEFUNC(LdrGetDllFullName);
+    mod = GetModuleHandleA( "kernelbase.dll" );
+    MAKEFUNC(IsApiSetImplemented);
 #undef MAKEFUNC
 
     /* before Windows 7 this was not exported in kernel32 */
@@ -1352,6 +1434,81 @@ static void test_LdrGetDllFullName(void)
             wine_dbgstr_w(expected_path), wine_dbgstr_w(path_buffer) );
 }
 
+static void test_apisets(void)
+{
+    static const struct
+    {
+        const char *name;
+        BOOLEAN present;
+        NTSTATUS status;
+        BOOLEAN present_ex, in_schema, broken;
+    }
+    tests[] =
+    {
+        { "api-ms-win-core-console-l1-1-0", TRUE, STATUS_SUCCESS, TRUE, TRUE },
+        { "api-ms-win-core-console-l1-1-0.dll", TRUE, STATUS_INVALID_PARAMETER },
+        { "api-ms-win-core-console-l1-1-9", TRUE, STATUS_SUCCESS, FALSE, FALSE, TRUE },
+        { "api-ms-win-core-console-l1-1-9.dll", TRUE, STATUS_INVALID_PARAMETER, FALSE, FALSE, TRUE },
+        { "api-ms-win-core-console-l1-1", FALSE, STATUS_SUCCESS },
+        { "api-ms-win-core-console-l1-1-0.fake", TRUE, STATUS_INVALID_PARAMETER, FALSE, FALSE, TRUE },
+        { "api-ms-win-foo-bar-l1-1-0", FALSE, STATUS_SUCCESS },
+        { "api-ms-win-foo-bar-l1-1-0.dll", FALSE, STATUS_INVALID_PARAMETER },
+        { "ext-ms-win-gdi-draw-l1-1-1", TRUE, STATUS_SUCCESS, TRUE, TRUE },
+        { "ext-ms-win-gdi-draw-l1-1-1.dll", TRUE, STATUS_INVALID_PARAMETER },
+        { "api-ms-win-deprecated-apis-advapi-l1-1-0", FALSE, STATUS_SUCCESS, FALSE, TRUE },
+        { "foo", FALSE, STATUS_INVALID_PARAMETER },
+        { "foo.dll", FALSE, STATUS_INVALID_PARAMETER },
+        { "", FALSE, STATUS_INVALID_PARAMETER },
+    };
+    unsigned int i;
+    NTSTATUS status;
+    BOOLEAN present, in_schema;
+    UNICODE_STRING name;
+
+    if (!pApiSetQueryApiSetPresence)
+    {
+        win_skip( "ApiSetQueryApiSetPresence not implemented\n" );
+        return;
+    }
+    if (!pApiSetQueryApiSetPresenceEx) win_skip( "ApiSetQueryApiSetPresenceEx not implemented\n" );
+    if (!pIsApiSetImplemented) win_skip( "IsApiSetImplemented not implemented\n" );
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
+        RtlCreateUnicodeStringFromAsciiz( &name, tests[i].name );
+        name.Buffer[name.Length / sizeof(WCHAR)] = 0xcccc;  /* test without null termination */
+        winetest_push_context( "%u:%s", i, tests[i].name );
+        present = 0xff;
+        status = pApiSetQueryApiSetPresence( &name, &present );
+        ok( status == STATUS_SUCCESS, "wrong ret %x\n", status );
+        ok( present == tests[i].present || broken(!present && tests[i].broken) /* win8 */,
+            "wrong present %u\n", present );
+        if (pApiSetQueryApiSetPresenceEx)
+        {
+            present = in_schema = 0xff;
+            status = pApiSetQueryApiSetPresenceEx( &name, &in_schema, &present );
+            ok( status == tests[i].status, "wrong ret %x\n", status );
+            if (!status)
+            {
+                ok( in_schema == tests[i].in_schema, "wrong in_schema %u\n", in_schema );
+                ok( present == tests[i].present_ex, "wrong present %u\n", present );
+            }
+            else
+            {
+                ok( in_schema == 0xff, "wrong in_schema %u\n", in_schema );
+                ok( present == 0xff, "wrong present %u\n", present );
+            }
+        }
+        if (pIsApiSetImplemented)
+        {
+            BOOL ret = pIsApiSetImplemented( tests[i].name );
+            ok( ret == (!tests[i].status && tests[i].present_ex), "wrong result %u\n", ret );
+        }
+        winetest_pop_context();
+        RtlFreeUnicodeString( &name );
+    }
+}
+
 static void test_ddag_node(void)
 {
     static const struct
@@ -1488,5 +1645,6 @@ START_TEST(module)
     test_SetDefaultDllDirectories();
     test_LdrGetDllHandleEx();
     test_LdrGetDllFullName();
+    test_apisets();
     test_ddag_node();
 }

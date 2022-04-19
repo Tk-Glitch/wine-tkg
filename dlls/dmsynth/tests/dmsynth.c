@@ -51,6 +51,30 @@ static ULONG get_refcount(void *iface)
     return IUnknown_Release(unknown);
 }
 
+static void test_synth_getformat(IDirectMusicSynth *synth, DMUS_PORTPARAMS *params, const char *context)
+{
+    WAVEFORMATEX format;
+    DWORD size;
+    HRESULT hr;
+
+    winetest_push_context(context);
+
+    size = sizeof(format);
+    hr = IDirectMusicSynth_GetFormat(synth, &format, &size);
+    ok(hr == S_OK, "GetFormat failed: %#lx\n", hr);
+    ok(format.wFormatTag == WAVE_FORMAT_PCM, "wFormatTag: %#x\n", format.wFormatTag);
+    ok(format.nChannels == params->dwAudioChannels, "nChannels: %d\n", format.nChannels);
+    ok(format.nSamplesPerSec == params->dwSampleRate, "nSamplesPerSec: %ld\n", format.nSamplesPerSec);
+    ok(format.wBitsPerSample == 16, "wBitsPerSample: %d\n", format.wBitsPerSample);
+    ok(format.nBlockAlign == params->dwAudioChannels * format.wBitsPerSample / 8, "nBlockAlign: %d\n",
+            format.nBlockAlign);
+    ok(format.nAvgBytesPerSec == params->dwSampleRate * format.nBlockAlign, "nAvgBytesPerSec: %ld\n",
+            format.nAvgBytesPerSec);
+    ok(format.cbSize == 0, "cbSize: %d\n", format.cbSize);
+
+    winetest_pop_context();
+}
+
 static void test_dmsynth(void)
 {
     IDirectMusicSynth *dmsynth = NULL;
@@ -68,6 +92,8 @@ static void test_dmsynth(void)
     DMUS_PORTPARAMS params;
     const DWORD all_params = DMUS_PORTPARAMS_VOICES|DMUS_PORTPARAMS_CHANNELGROUPS|DMUS_PORTPARAMS_AUDIOCHANNELS|
             DMUS_PORTPARAMS_SAMPLERATE|DMUS_PORTPARAMS_EFFECTS|DMUS_PORTPARAMS_SHARE|DMUS_PORTPARAMS_FEATURES;
+    WAVEFORMATEX format;
+    DWORD size;
 
     hr = CoCreateInstance(&CLSID_DirectMusicSynth, NULL, CLSCTX_INPROC_SERVER, &IID_IDirectMusicSynth, (LPVOID*)&dmsynth);
     ok(hr == S_OK, "CoCreateInstance returned: %#lx\n", hr);
@@ -123,6 +149,8 @@ static void test_dmsynth(void)
     /* Synth isn't fully initialized yet */
     hr = IDirectMusicSynth_Activate(dmsynth, TRUE);
     ok(hr == DMUS_E_NOSYNTHSINK, "IDirectMusicSynth_Activate returned: %#lx\n", hr);
+    hr = IDirectMusicSynthSink_GetDesiredBufferSize(dmsynth_sink, &size);
+    ok(hr == DMUS_E_SYNTHNOTCONFIGURED, "IDirectMusicSynthSink_GetDesiredBufferSize returned: %#lx\n", hr);
 
     /* Open / Close */
     hr = IDirectMusicSynth_Open(dmsynth, NULL);
@@ -154,6 +182,7 @@ static void test_dmsynth(void)
     ok(params.dwEffectFlags == DMUS_EFFECT_REVERB, "params.dwEffectFlags: %#lx\n", params.dwEffectFlags);
     ok(params.fShare == FALSE, "fShare: %d\n", params.fShare);
     ok(params.dwFeatures == 0, "dwFeatures: %#lx\n", params.dwFeatures);
+    test_synth_getformat(dmsynth, &params, "defaults");
     IDirectMusicSynth_Close(dmsynth);
     /* Requesting more than supported */
     params.dwValidParams = DMUS_PORTPARAMS_SAMPLERATE;
@@ -162,6 +191,7 @@ static void test_dmsynth(void)
     ok(hr == S_FALSE, "Open failed: %#lx\n", hr);
     ok(params.dwValidParams == all_params, "dwValidParams: %#lx\n", params.dwValidParams);
     ok(params.dwSampleRate == 96000, "dwSampleRate: %ld\n", params.dwSampleRate);
+    test_synth_getformat(dmsynth, &params, "max");
     IDirectMusicSynth_Close(dmsynth);
     /* Minimums */
     params.dwValidParams = DMUS_PORTPARAMS_VOICES|DMUS_PORTPARAMS_CHANNELGROUPS|DMUS_PORTPARAMS_AUDIOCHANNELS|
@@ -177,6 +207,7 @@ static void test_dmsynth(void)
     ok(params.dwChannelGroups == 1, "dwChannelGroups: %ld\n", params.dwChannelGroups);
     ok(params.dwAudioChannels == 1, "dwAudioChannels: %ld\n", params.dwAudioChannels);
     ok(params.dwSampleRate == 11025, "dwSampleRate: %ld\n", params.dwSampleRate);
+    test_synth_getformat(dmsynth, &params, "min");
     IDirectMusicSynth_Close(dmsynth);
     /* Test share and features */
     params.dwValidParams = DMUS_PORTPARAMS_SHARE|DMUS_PORTPARAMS_FEATURES;
@@ -188,6 +219,7 @@ static void test_dmsynth(void)
     ok(params.fShare == FALSE, "fShare: %d\n", params.fShare);
     ok(params.dwFeatures == (DMUS_PORT_FEATURE_AUDIOPATH|DMUS_PORT_FEATURE_STREAMING),
             "dwFeatures: %#lx\n", params.dwFeatures);
+    test_synth_getformat(dmsynth, &params, "features");
     IDirectMusicSynth_Close(dmsynth);
 
     /* Synth has no default clock */
@@ -225,6 +257,47 @@ static void test_dmsynth(void)
     caps.dwSize = sizeof(caps) + 1;
     hr = IDirectMusicSynth_GetPortCaps(dmsynth, &caps);
     ok(hr == S_OK, "GetPortCaps failed: %#lx\n", hr);
+
+    /* GetFormat */
+    hr = IDirectMusicSynth_GetFormat(dmsynth, NULL, NULL);
+    ok(hr == E_POINTER, "GetFormat failed: %#lx\n", hr);
+    hr = IDirectMusicSynth_GetFormat(dmsynth, NULL, &size);
+    ok(hr == DMUS_E_SYNTHNOTCONFIGURED, "GetFormat failed: %#lx\n", hr);
+    hr = IDirectMusicSynth_Open(dmsynth, NULL);
+    ok(hr == S_OK, "Open failed: %#lx\n", hr);
+    hr = IDirectMusicSynth_GetFormat(dmsynth, NULL, &size);
+    ok(hr == S_OK, "GetFormat failed: %#lx\n", hr);
+    ok(size == sizeof(format), "GetFormat size mismatch, got %ld\n", size);
+    size = 1;
+    hr = IDirectMusicSynth_GetFormat(dmsynth, &format, &size);
+    ok(hr == S_OK, "GetFormat failed: %#lx\n", hr);
+    ok(size == sizeof(format), "GetFormat size mismatch, got %ld\n", size);
+    size = sizeof(format) + 1;
+    hr = IDirectMusicSynth_GetFormat(dmsynth, &format, &size);
+    ok(hr == S_OK, "GetFormat failed: %#lx\n", hr);
+    ok(size == sizeof(format), "GetFormat size mismatch, got %ld\n", size);
+    IDirectMusicSynth_Close(dmsynth);
+
+    /* GetDesiredBufferSize */
+    hr = IDirectMusicSynthSink_GetDesiredBufferSize(dmsynth_sink, NULL);
+    ok(hr == E_POINTER, "IDirectMusicSynthSink_GetDesiredBufferSize returned: %#lx\n", hr);
+    hr = IDirectMusicSynthSink_GetDesiredBufferSize(dmsynth_sink, &size);
+    ok(hr == E_UNEXPECTED, "IDirectMusicSynthSink_GetDesiredBufferSize returned: %#lx\n", hr);
+    params.dwValidParams = 0;
+    hr = IDirectMusicSynth_Open(dmsynth, &params);
+    ok(hr == S_OK, "Open failed: %#lx\n", hr);
+    hr = IDirectMusicSynthSink_GetDesiredBufferSize(dmsynth_sink, &size);
+    ok(hr == S_OK, "IDirectMusicSynthSink_GetDesiredBufferSize returned: %#lx\n", hr);
+    ok(size == params.dwSampleRate * params.dwAudioChannels * 4, "size: %ld\n", size);
+    IDirectMusicSynth_Close(dmsynth);
+    params.dwValidParams = DMUS_PORTPARAMS_AUDIOCHANNELS;
+    params.dwAudioChannels = 1;
+    hr = IDirectMusicSynth_Open(dmsynth, &params);
+    ok(hr == S_OK, "Open failed: %#lx\n", hr);
+    hr = IDirectMusicSynthSink_GetDesiredBufferSize(dmsynth_sink, &size);
+    ok(hr == S_OK, "IDirectMusicSynthSink_GetDesiredBufferSize returned: %#lx\n", hr);
+    ok(size == params.dwSampleRate * params.dwAudioChannels * 4, "size: %ld\n", size);
+    IDirectMusicSynth_Close(dmsynth);
 
     if (control_synth)
         IDirectMusicSynth_Release(control_synth);

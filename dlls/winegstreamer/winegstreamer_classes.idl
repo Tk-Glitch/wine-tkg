@@ -73,3 +73,21 @@ coclass WINEAudioConverter { }
     uuid(2eeb4adf-4578-4d10-bca7-bb955f56320a)
 ]
 coclass CWMADecMediaObject {};
+
+[
+    threading(both),
+    uuid(62ce7e72-4c71-4d20-b15d-452831a87d9d)
+]
+coclass CMSH264DecoderMFT { }
+
+[
+    threading(both),
+    uuid(32d186a7-218f-4c75-8876-dd77273a8999)
+]
+coclass CMSAACDecMFT { }
+
+[
+    threading(both),
+    uuid(98230571-0087-4204-b020-3282538e57d3)
+]
+coclass CColorConvertDMO { }

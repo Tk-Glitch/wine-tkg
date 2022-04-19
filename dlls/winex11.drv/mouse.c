@@ -352,7 +352,6 @@ static void update_relative_valuators( XIAnyClassInfo **classes, int num_classes
     thread_data->x_valuator.value = 0;
     thread_data->y_valuator.value = 0;
 }
-#endif
 
 
 /***********************************************************************
@@ -386,7 +385,6 @@ void x11drv_xinput_init(void)
  */
 void x11drv_xinput_enable( Display *display, Window window, long event_mask )
 {
-#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
     struct x11drv_thread_data *data = x11drv_thread_data();
     XIEventMask mask;
     XIDeviceInfo *pointer_info;
@@ -437,8 +435,9 @@ void x11drv_xinput_enable( Display *display, Window window, long event_mask )
     pXIFreeDeviceInfo( pointer_info );
 
     data->xi2_state = xi_enabled;
-#endif
 }
+
+#endif
 
 /***********************************************************************
  *              x11drv_xinput_disable
@@ -489,6 +488,7 @@ void x11drv_xinput_disable( Display *display, Window window, long event_mask )
  */
 static BOOL grab_clipping_window( const RECT *clip )
 {
+#if HAVE_X11_EXTENSIONS_XINPUT2_H
     static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
     struct x11drv_thread_data *data = x11drv_thread_data();
     Window clip_window;
@@ -559,6 +559,10 @@ static BOOL grab_clipping_window( const RECT *clip )
     data->clip_hwnd = msg_hwnd;
     SendNotifyMessageW( GetDesktopWindow(), WM_X11DRV_CLIP_CURSOR_NOTIFY, 0, (LPARAM)msg_hwnd );
     return TRUE;
+#else
+    WARN( "XInput2 was not available at compile time\n" );
+    return FALSE;
+#endif
 }
 
 /***********************************************************************
@@ -709,19 +713,22 @@ static void map_event_coords( HWND hwnd, Window window, Window event_root, int x
         thread_data = x11drv_thread_data();
         if (!thread_data->clip_hwnd) return;
         if (thread_data->clip_window != window) return;
-        pt.x += clip_rect.left;
-        pt.y += clip_rect.top;
+        pt.x = clip_rect.left;
+        pt.y = clip_rect.top;
+        fs_hack_point_user_to_real(&pt);
+
+        pt.x += input->u.mi.dx;
+        pt.y += input->u.mi.dy;
+        fs_hack_point_real_to_user(&pt);
     }
     else if ((data = get_win_data( hwnd )))
     {
+        if (data->fs_hack) fs_hack_point_real_to_user(&pt);
         if (window == root_window) pt = root_to_virtual_screen( pt.x, pt.y );
         else if (event_root == root_window) pt = root_to_virtual_screen( x_root, y_root );
         else
         {
-            if(data->fs_hack)
-                fs_hack_point_real_to_user(&pt);
-
-            if (window == data->whole_window && !data->fs_hack)
+            if (window == data->whole_window)
             {
                 pt.x += data->whole_rect.left - data->client_rect.left;
                 pt.y += data->whole_rect.top - data->client_rect.top;
@@ -740,82 +747,6 @@ static void map_event_coords( HWND hwnd, Window window, Window event_root, int x
     input->u.mi.dy = pt.y;
 }
 
-static BOOL map_raw_event_coords( XIRawEvent *event, INPUT *input, RAWINPUT *rawinput )
-{
-    struct x11drv_thread_data *thread_data = x11drv_thread_data();
-    XIValuatorClassInfo *x = &thread_data->x_valuator, *y = &thread_data->y_valuator;
-    const double *values = event->valuators.values, *raw_values = event->raw_values;
-    double x_raw = 0, y_raw = 0, x_value = 0, y_value = 0, x_scale, y_scale;
-    RECT virtual_rect;
-    int i;
-    POINT pt;
-    HMONITOR monitor;
-    double user_to_real_scale;
-
-    if (x->number < 0 || y->number < 0) return FALSE;
-    if (!event->valuators.mask_len) return FALSE;
-    if (thread_data->xi2_state != xi_enabled) return FALSE;
-    if (event->deviceid != thread_data->xi2_core_pointer) return FALSE;
-
-    if (x->mode == XIModeRelative && y->mode == XIModeRelative)
-        input->u.mi.dwFlags &= ~(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK);
-    else if (x->mode == XIModeAbsolute && y->mode == XIModeAbsolute)
-        input->u.mi.dwFlags |= MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-    else
-        FIXME( "Unsupported relative/absolute X/Y axis mismatch\n." );
-
-    GetCursorPos(&pt);
-    monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONULL);
-    user_to_real_scale = fs_hack_get_user_to_real_scale(monitor);
-    input->u.mi.dx = lround((double)input->u.mi.dx / user_to_real_scale);
-    input->u.mi.dy = lround((double)input->u.mi.dy / user_to_real_scale);
-
-    if (input->u.mi.dwFlags & MOUSEEVENTF_VIRTUALDESK) SetRect( &virtual_rect, 0, 0, 65535, 65535 );
-    else virtual_rect = get_virtual_screen_rect();
-
-    if (x->max <= x->min) x_scale = 1;
-    else x_scale = (virtual_rect.right - virtual_rect.left) / (x->max - x->min);
-    if (y->max <= y->min) y_scale = 1;
-    else y_scale = (virtual_rect.bottom - virtual_rect.top) / (y->max - y->min);
-
-    for (i = 0; i <= max( x->number, y->number ); i++)
-    {
-        if (!XIMaskIsSet( event->valuators.mask, i )) continue;
-        if (i == x->number)
-        {
-            x_raw = *raw_values;
-            x_value = *values;
-            if (x->mode == XIModeRelative) x->value += x_value * x_scale;
-            else x->value = (x_value - x->min) * x_scale;
-        }
-        if (i == y->number)
-        {
-            y_raw = *raw_values;
-            y_value = *values;
-            if (y->mode == XIModeRelative) y->value += y_value * y_scale;
-            else y->value = (y_value - y->min) * y_scale;
-        }
-        raw_values++;
-        values++;
-    }
-
-    input->u.mi.dx = round( x->value );
-    input->u.mi.dy = round( y->value );
-
-    if (x->mode != XIModeAbsolute) rawinput->data.mouse.lLastX = x_raw;
-    else rawinput->data.mouse.lLastX = input->u.mi.dx;
-    if (y->mode != XIModeAbsolute) rawinput->data.mouse.lLastY = y_raw;
-    else rawinput->data.mouse.lLastY = input->u.mi.dy;
-
-    TRACE( "event %f,%f value %f,%f input %d,%d\n", x_value, y_value, x->value, y->value, input->u.mi.dx, input->u.mi.dy );
-
-    x->value -= input->u.mi.dx;
-    y->value -= input->u.mi.dy;
-
-    return TRUE;
-}
-
-
 /***********************************************************************
  *		send_mouse_input
  *
@@ -831,7 +762,6 @@ static void send_mouse_input( HWND hwnd, Window window, unsigned int state, INPU
     {
         struct x11drv_thread_data *thread_data = x11drv_thread_data();
         HWND clip_hwnd = thread_data->clip_hwnd;
-        POINT pt;
 
         if (!clip_hwnd) return;
         if (thread_data->clip_window != window) return;
@@ -841,18 +771,6 @@ static void send_mouse_input( HWND hwnd, Window window, unsigned int state, INPU
             sync_window_cursor( window );
             last_cursor_change = input->u.mi.time;
         }
-
-        pt.x = clip_rect.left;
-        pt.y = clip_rect.top;
-        fs_hack_point_user_to_real(&pt);
-
-        pt.x += input->u.mi.dx;
-        pt.y += input->u.mi.dy;
-        fs_hack_point_real_to_user(&pt);
-
-        input->u.mi.dx = pt.x;
-        input->u.mi.dy = pt.y;
-
         __wine_send_input( hwnd, input, NULL );
         return;
     }
@@ -1681,8 +1599,7 @@ BOOL CDECL X11DRV_SetCursorPos( INT x, INT y )
     struct x11drv_thread_data *data = x11drv_init_thread_data();
     POINT pos = virtual_screen_to_root( x, y );
 
-    TRACE("real setting to %u, %u\n",
-            pos.x, pos.y);
+    TRACE("real setting to %u, %u\n", pos.x, pos.y);
 
     XWarpPointer( data->display, root_window, root_window, 0, 0, 0, 0, pos.x, pos.y );
     data->warp_serial = NextRequest( data->display );
@@ -1702,6 +1619,9 @@ BOOL CDECL X11DRV_GetCursorPos(LPPOINT pos)
     int rootX, rootY, winX, winY;
     unsigned int xstate;
     BOOL ret;
+
+    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0) return FALSE;
+    if (WaitForSingleObject(steam_keyboard_event, 0) == WAIT_OBJECT_0) return FALSE;
 
     ret = XQueryPointer( display, root_window, &root, &child, &rootX, &rootY, &winX, &winY, &xstate );
     if (ret)
@@ -1967,6 +1887,8 @@ BOOL X11DRV_EnterNotify( HWND hwnd, XEvent *xev )
 
     TRACE( "hwnd %p/%lx pos %d,%d detail %d\n", hwnd, event->window, event->x, event->y, event->detail );
 
+    x11drv_thread_data()->keymapnotify_hwnd = hwnd;
+
     if (event->detail == NotifyVirtual) return FALSE;
     if (hwnd == x11drv_thread_data()->grab_hwnd) return FALSE;
 
@@ -2003,6 +1925,81 @@ static BOOL X11DRV_DeviceChanged( XGenericEventCookie *xev )
 
     update_relative_valuators( event->classes, event->num_classes );
     update_device_mapping( event->display, event->sourceid );
+
+    return TRUE;
+}
+
+static BOOL map_raw_event_coords( XIRawEvent *event, INPUT *input, RAWINPUT *rawinput )
+{
+    struct x11drv_thread_data *thread_data = x11drv_thread_data();
+    XIValuatorClassInfo *x = &thread_data->x_valuator, *y = &thread_data->y_valuator;
+    const double *values = event->valuators.values, *raw_values = event->raw_values;
+    double x_raw = 0, y_raw = 0, x_value = 0, y_value = 0, x_scale, y_scale, user_to_real_scale;
+    RECT virtual_rect;
+    int i;
+    POINT pt;
+    HMONITOR monitor;
+
+    if (x->number < 0 || y->number < 0) return FALSE;
+    if (!event->valuators.mask_len) return FALSE;
+    if (thread_data->xi2_state != xi_enabled) return FALSE;
+    if (event->deviceid != thread_data->xi2_core_pointer) return FALSE;
+
+    if (x->mode == XIModeRelative && y->mode == XIModeRelative)
+        input->u.mi.dwFlags &= ~(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK);
+    else if (x->mode == XIModeAbsolute && y->mode == XIModeAbsolute)
+        input->u.mi.dwFlags |= MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+    else
+        FIXME( "Unsupported relative/absolute X/Y axis mismatch\n." );
+
+    GetCursorPos(&pt);
+    monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONULL);
+    user_to_real_scale = fs_hack_get_user_to_real_scale(monitor);
+    input->u.mi.dx = lround((double)input->u.mi.dx / user_to_real_scale);
+    input->u.mi.dy = lround((double)input->u.mi.dy / user_to_real_scale);
+
+    if (input->u.mi.dwFlags & MOUSEEVENTF_VIRTUALDESK) SetRect( &virtual_rect, 0, 0, 65535, 65535 );
+    else if (wm_is_steamcompmgr( event->display )) virtual_rect = get_native_screen_rect();
+    else virtual_rect = get_virtual_screen_rect();
+
+    if (x->max <= x->min) x_scale = 1;
+    else x_scale = (virtual_rect.right - virtual_rect.left) / (x->max - x->min);
+    if (y->max <= y->min) y_scale = 1;
+    else y_scale = (virtual_rect.bottom - virtual_rect.top) / (y->max - y->min);
+
+    for (i = 0; i <= max( x->number, y->number ); i++)
+    {
+        if (!XIMaskIsSet( event->valuators.mask, i )) continue;
+        if (i == x->number)
+        {
+            x_raw = *raw_values;
+            x_value = *values;
+            if (x->mode == XIModeRelative) x->value += x_value * x_scale;
+            else x->value = (x_value - x->min) * x_scale;
+        }
+        if (i == y->number)
+        {
+            y_raw = *raw_values;
+            y_value = *values;
+            if (y->mode == XIModeRelative) y->value += y_value * y_scale;
+            else y->value = (y_value - y->min) * y_scale;
+        }
+        raw_values++;
+        values++;
+    }
+
+    input->u.mi.dx = round( x->value );
+    input->u.mi.dy = round( y->value );
+
+    if (x->mode != XIModeAbsolute) rawinput->data.mouse.lLastX = x_raw;
+    else rawinput->data.mouse.lLastX = input->u.mi.dx;
+    if (y->mode != XIModeAbsolute) rawinput->data.mouse.lLastY = y_raw;
+    else rawinput->data.mouse.lLastY = input->u.mi.dy;
+
+    TRACE( "event %f,%f value %f,%f input %d,%d\n", x_value, y_value, x->value, y->value, input->u.mi.dx, input->u.mi.dy );
+
+    x->value -= input->u.mi.dx;
+    y->value -= input->u.mi.dy;
 
     return TRUE;
 }

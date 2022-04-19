@@ -187,7 +187,7 @@ static HRESULT get_mmdevenum(IMMDeviceEnumerator **devenum)
         if(SUCCEEDED(init_hr))
             CoUninitialize();
         *devenum = NULL;
-        ERR("CoCreateInstance failed: %08x\n", hr);
+        ERR("CoCreateInstance failed: %08lx\n", hr);
         return hr;
     }
 
@@ -210,7 +210,7 @@ static HRESULT get_mmdevice_guid(IMMDevice *device, IPropertyStore *ps,
     if(!ps){
         hr = IMMDevice_OpenPropertyStore(device, STGM_READ, &ps);
         if(FAILED(hr)){
-            WARN("OpenPropertyStore failed: %08x\n", hr);
+            WARN("OpenPropertyStore failed: %08lx\n", hr);
             return hr;
         }
     }else
@@ -221,7 +221,7 @@ static HRESULT get_mmdevice_guid(IMMDevice *device, IPropertyStore *ps,
     hr = IPropertyStore_GetValue(ps, &PKEY_AudioEndpoint_GUID, &pv);
     if(FAILED(hr)){
         IPropertyStore_Release(ps);
-        WARN("GetValue(GUID) failed: %08x\n", hr);
+        WARN("GetValue(GUID) failed: %08lx\n", hr);
         return hr;
     }
 
@@ -289,7 +289,7 @@ HRESULT WINAPI GetDeviceID(LPCGUID pGuidSrc, LPGUID pGuidDest)
         hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(devenum,
                 flow, role, &device);
         if(FAILED(hr)){
-            WARN("GetDefaultAudioEndpoint failed: %08x\n", hr);
+            WARN("GetDefaultAudioEndpoint failed: %08lx\n", hr);
             release_mmdevenum(devenum, init_hr);
             return DSERR_NODRIVER;
         }
@@ -370,7 +370,7 @@ HRESULT get_mmdevice(EDataFlow flow, const GUID *tgt, IMMDevice **device)
     hr = IMMDeviceEnumerator_EnumAudioEndpoints(devenum, flow,
             DEVICE_STATE_ACTIVE, &coll);
     if(FAILED(hr)){
-        WARN("EnumAudioEndpoints failed: %08x\n", hr);
+        WARN("EnumAudioEndpoints failed: %08lx\n", hr);
         release_mmdevenum(devenum, init_hr);
         return hr;
     }
@@ -379,7 +379,7 @@ HRESULT get_mmdevice(EDataFlow flow, const GUID *tgt, IMMDevice **device)
     if(FAILED(hr)){
         IMMDeviceCollection_Release(coll);
         release_mmdevenum(devenum, init_hr);
-        WARN("GetCount failed: %08x\n", hr);
+        WARN("GetCount failed: %08lx\n", hr);
         return hr;
     }
 
@@ -425,7 +425,7 @@ static BOOL send_device(IMMDevice *device, GUID *guid,
 
     hr = IMMDevice_OpenPropertyStore(device, STGM_READ, &ps);
     if(FAILED(hr)){
-        WARN("OpenPropertyStore failed: %08x\n", hr);
+        WARN("OpenPropertyStore failed: %08lx\n", hr);
         return TRUE;
     }
 
@@ -439,7 +439,7 @@ static BOOL send_device(IMMDevice *device, GUID *guid,
             (const PROPERTYKEY *)&DEVPKEY_Device_FriendlyName, &pv);
     if(FAILED(hr)){
         IPropertyStore_Release(ps);
-        WARN("GetValue(FriendlyName) failed: %08x\n", hr);
+        WARN("GetValue(FriendlyName) failed: %08lx\n", hr);
         return TRUE;
     }
 
@@ -474,7 +474,7 @@ HRESULT enumerate_mmdevices(EDataFlow flow, GUID *guids,
             DEVICE_STATE_ACTIVE, &coll);
     if(FAILED(hr)){
         release_mmdevenum(devenum, init_hr);
-        WARN("EnumAudioEndpoints failed: %08x\n", hr);
+        WARN("EnumAudioEndpoints failed: %08lx\n", hr);
         return DS_OK;
     }
 
@@ -482,7 +482,7 @@ HRESULT enumerate_mmdevices(EDataFlow flow, GUID *guids,
     if(FAILED(hr)){
         IMMDeviceCollection_Release(coll);
         release_mmdevenum(devenum, init_hr);
-        WARN("GetCount failed: %08x\n", hr);
+        WARN("GetCount failed: %08lx\n", hr);
         return DS_OK;
     }
 
@@ -513,7 +513,7 @@ HRESULT enumerate_mmdevices(EDataFlow flow, GUID *guids,
 
         hr = IMMDeviceCollection_Item(coll, i, &device);
         if(FAILED(hr)){
-            WARN("Item failed: %08x\n", hr);
+            WARN("Item failed: %08lx\n", hr);
             continue;
         }
 
@@ -783,7 +783,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
  */
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("(%p %d %p)\n", hInstDLL, fdwReason, lpvReserved);
+    TRACE("(%p %ld %p)\n", hInstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason) {
     case DLL_PROCESS_ATTACH:

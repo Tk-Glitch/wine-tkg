@@ -28,6 +28,7 @@
 #include "user_private.h"
 #include "controls.h"
 #include "wine/debug.h"
+#include "wine/gdi_driver.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nonclient);
 
@@ -59,6 +60,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(nonclient);
 static void adjust_window_rect( RECT *rect, DWORD style, BOOL menu, DWORD exStyle, NONCLIENTMETRICSW *ncm )
 {
     int adjust = 0;
+
+    if (__wine_get_window_manager() == WINE_WM_X11_STEAMCOMPMGR && !((style & WS_POPUP) && (exStyle & WS_EX_TOOLWINDOW)))
+        return;
 
     if ((exStyle & (WS_EX_STATICEDGE|WS_EX_DLGMODALFRAME)) == WS_EX_STATICEDGE)
         adjust = 1; /* for the outer frame always present */
@@ -243,8 +247,8 @@ BOOL WINAPI DrawCaptionTempW (HWND hwnd, HDC hdc, const RECT *rect, HFONT hFont,
         pt.y = (rc.bottom + rc.top - GetSystemMetrics(SM_CYSMICON)) / 2;
 
         if (!hIcon) hIcon = NC_IconForWindow(hwnd);
-        DrawIconEx (hdc, pt.x, pt.y, hIcon, GetSystemMetrics(SM_CXSMICON),
-                    GetSystemMetrics(SM_CYSMICON), 0, 0, DI_NORMAL);
+        NtUserDrawIconEx( hdc, pt.x, pt.y, hIcon, GetSystemMetrics(SM_CXSMICON),
+                          GetSystemMetrics(SM_CYSMICON), 0, 0, DI_NORMAL );
         rc.left = pt.x + GetSystemMetrics( SM_CXSMICON );
     }
 
@@ -354,6 +358,9 @@ void NC_HandleNCCalcSize( HWND hwnd, WPARAM wparam, RECT *winRect )
 
     if (winRect == NULL)
         return;
+
+    if (__wine_get_window_manager() == WINE_WM_X11_STEAMCOMPMGR && !((style & WS_POPUP) && (exStyle & WS_EX_TOOLWINDOW)))
+        return 0;
 
     if (!(style & WS_MINIMIZE))
     {
@@ -686,9 +693,9 @@ BOOL NC_DrawSysButton (HWND hwnd, HDC hdc, BOOL down)
         NC_GetInsideRect( hwnd, COORDS_WINDOW, &rect, style, ex_style );
         pt.x = rect.left + 2;
         pt.y = rect.top + (GetSystemMetrics(SM_CYCAPTION) - GetSystemMetrics(SM_CYSMICON)) / 2;
-        DrawIconEx (hdc, pt.x, pt.y, hIcon,
-                    GetSystemMetrics(SM_CXSMICON),
-                    GetSystemMetrics(SM_CYSMICON), 0, 0, DI_NORMAL);
+        NtUserDrawIconEx( hdc, pt.x, pt.y, hIcon,
+                          GetSystemMetrics(SM_CXSMICON),
+                          GetSystemMetrics(SM_CYSMICON), 0, 0, DI_NORMAL );
     }
     return (hIcon != 0);
 }
@@ -1151,7 +1158,7 @@ LRESULT NC_HandleSetCursor( HWND hwnd, WPARAM wParam, LPARAM lParam )
         {
             HCURSOR hCursor = (HCURSOR)GetClassLongPtrW(hwnd, GCLP_HCURSOR);
             if(hCursor) {
-                SetCursor(hCursor);
+                NtUserSetCursor(hCursor);
                 return TRUE;
             }
             return FALSE;
@@ -1159,23 +1166,23 @@ LRESULT NC_HandleSetCursor( HWND hwnd, WPARAM wParam, LPARAM lParam )
 
     case HTLEFT:
     case HTRIGHT:
-        return (LRESULT)SetCursor( LoadCursorA( 0, (LPSTR)IDC_SIZEWE ) );
+        return (LRESULT)NtUserSetCursor( LoadCursorA( 0, (LPSTR)IDC_SIZEWE ) );
 
     case HTTOP:
     case HTBOTTOM:
-        return (LRESULT)SetCursor( LoadCursorA( 0, (LPSTR)IDC_SIZENS ) );
+        return (LRESULT)NtUserSetCursor( LoadCursorA( 0, (LPSTR)IDC_SIZENS ) );
 
     case HTTOPLEFT:
     case HTBOTTOMRIGHT:
-        return (LRESULT)SetCursor( LoadCursorA( 0, (LPSTR)IDC_SIZENWSE ) );
+        return (LRESULT)NtUserSetCursor( LoadCursorA( 0, (LPSTR)IDC_SIZENWSE ) );
 
     case HTTOPRIGHT:
     case HTBOTTOMLEFT:
-        return (LRESULT)SetCursor( LoadCursorA( 0, (LPSTR)IDC_SIZENESW ) );
+        return (LRESULT)NtUserSetCursor( LoadCursorA( 0, (LPSTR)IDC_SIZENESW ) );
     }
 
     /* Default cursor: arrow */
-    return (LRESULT)SetCursor( LoadCursorA( 0, (LPSTR)IDC_ARROW ) );
+    return (LRESULT)NtUserSetCursor( LoadCursorA( 0, (LPSTR)IDC_ARROW ) );
 }
 
 /***********************************************************************

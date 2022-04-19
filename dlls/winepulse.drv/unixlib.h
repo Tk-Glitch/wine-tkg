@@ -19,7 +19,15 @@
 #include "wine/list.h"
 #include "wine/unixlib.h"
 
+#define MAX_PULSE_NAME_LEN 256
+
 struct pulse_stream;
+
+enum phys_device_bus_type {
+    phys_device_bus_invalid = -1,
+    phys_device_bus_pci,
+    phys_device_bus_usb
+};
 
 struct pulse_config
 {
@@ -31,15 +39,31 @@ struct pulse_config
     } modes[2];
 };
 
+struct endpoint
+{
+    WCHAR *name;
+    char *pulse_name;
+};
+
 struct main_loop_params
 {
     HANDLE event;
 };
 
+struct get_endpoint_ids_params
+{
+    EDataFlow flow;
+    struct endpoint *endpoints;
+    unsigned int size;
+    HRESULT result;
+    unsigned int num;
+    unsigned int default_idx;
+};
+
 struct create_stream_params
 {
     const char *name;
-    const char *device;
+    const char *pulse_name;
     EDataFlow dataflow;
     AUDCLNT_SHAREMODE mode;
     DWORD flags;
@@ -180,28 +204,25 @@ struct test_connect_params
     struct pulse_config *config;
 };
 
-enum phys_device_bus_type {
-    phys_device_bus_invalid = -1,
-    phys_device_bus_pci,
-    phys_device_bus_usb
-};
-
-struct get_device_info_params
-{
-    char device[256];
-    EDataFlow dataflow;
-    enum phys_device_bus_type bus_type;
-    USHORT vendor_id, product_id;
-    EndpointFormFactor form;
-    DWORD channel_mask;
-    UINT index;
-    HRESULT result;
-};
-
 struct is_started_params
 {
     struct pulse_stream *stream;
     BOOL started;
+};
+
+struct get_prop_value_params
+{
+    const char *pulse_name;
+    const GUID *guid;
+    const PROPERTYKEY *prop;
+    EDataFlow flow;
+    HRESULT result;
+    VARTYPE vt;
+    union
+    {
+        WCHAR wstr[128];
+        ULONG ulVal;
+    };
 };
 
 enum unix_funcs
@@ -209,6 +230,7 @@ enum unix_funcs
     process_attach,
     process_detach,
     main_loop,
+    get_endpoint_ids,
     create_stream,
     release_stream,
     start,
@@ -228,6 +250,6 @@ enum unix_funcs
     set_volumes,
     set_event_handle,
     test_connect,
-    get_device_info,
     is_started,
+    get_prop_value,
 };
