@@ -28,74 +28,20 @@
 #include "controls.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(user);
-WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 static struct user_driver_funcs null_driver, lazy_load_driver;
 
 const struct user_driver_funcs *USER_Driver = &lazy_load_driver;
-static char driver_load_error[80];
-
-static BOOL CDECL nodrv_CreateWindow( HWND hwnd );
-
-static BOOL load_desktop_driver( HWND hwnd )
-{
-    BOOL ret = FALSE;
-    HKEY hkey;
-    DWORD size;
-    WCHAR path[MAX_PATH];
-    WCHAR key[ARRAY_SIZE(L"System\\CurrentControlSet\\Control\\Video\\{}\\0000") + 40];
-    UINT guid_atom;
-
-    USER_CheckNotLock();
-
-    strcpy( driver_load_error, "The explorer process failed to start." );  /* default error */
-    wait_graphics_driver_ready();
-
-    guid_atom = HandleToULong( GetPropW( hwnd, L"__wine_display_device_guid" ));
-    lstrcpyW( key, L"System\\CurrentControlSet\\Control\\Video\\{" );
-    if (!GlobalGetAtomNameW( guid_atom, key + lstrlenW(key), 40 )) return 0;
-    lstrcatW( key, L"}\\0000" );
-    if (RegOpenKeyW( HKEY_LOCAL_MACHINE, key, &hkey )) return 0;
-    size = sizeof(path);
-    if (!RegQueryValueExW( hkey, L"GraphicsDriver", NULL, NULL, (BYTE *)path, &size ))
-    {
-        if (wcscmp( path, L"null" ))
-        {
-            ret = LoadLibraryW( path ) != NULL;
-            if (!ret) ERR( "failed to load %s\n", debugstr_w(path) );
-        }
-        else
-        {
-            __wine_set_user_driver( &null_driver, WINE_GDI_DRIVER_VERSION );
-            ret = TRUE;
-        }
-        TRACE( "%s\n", debugstr_w(path) );
-    }
-    else
-    {
-        size = sizeof(driver_load_error);
-        RegQueryValueExA( hkey, "DriverError", NULL, NULL, (BYTE *)driver_load_error, &size );
-    }
-    RegCloseKey( hkey );
-    return ret;
-}
 
 /* load the graphics driver */
 static const struct user_driver_funcs *load_driver(void)
 {
-    struct user_driver_funcs driver;
-    USEROBJECTFLAGS flags;
-    HWINSTA winstation;
-
-    if (!load_desktop_driver( GetDesktopWindow() ) || USER_Driver == &lazy_load_driver)
+    wait_graphics_driver_ready();
+    if (USER_Driver == &lazy_load_driver)
     {
-        memset( &driver, 0, sizeof(driver) );
-        winstation = NtUserGetProcessWindowStation();
-        if (!NtUserGetObjectInformation( winstation, UOI_FLAGS, &flags, sizeof(flags), NULL )
-            || (flags.dwFlags & WSF_VISIBLE))
-            driver.pCreateWindow = nodrv_CreateWindow;
-
-        __wine_set_user_driver( &driver, WINE_GDI_DRIVER_VERSION );
+        static struct user_driver_funcs empty_funcs;
+        WARN( "failed to load the display driver, falling back to null driver\n" );
+        __wine_set_user_driver( &empty_funcs, WINE_GDI_DRIVER_VERSION );
     }
 
     return USER_Driver;
@@ -128,35 +74,12 @@ static void CDECL nulldrv_UpdateClipboard(void)
 {
 }
 
-static BOOL CDECL nodrv_CreateWindow( HWND hwnd )
-{
-    static int warned;
-    HWND parent = GetAncestor( hwnd, GA_PARENT );
-
-    /* HWND_MESSAGE windows don't need a graphics driver */
-    if (!parent || parent == get_user_thread_info()->msg_window) return TRUE;
-    if (warned++) return FALSE;
-
-    ERR_(winediag)( "Application tried to create a window, but no driver could be loaded.\n" );
-    if (driver_load_error[0]) ERR_(winediag)( "%s\n", driver_load_error );
-    return FALSE;
-}
-
-static BOOL CDECL nulldrv_CreateDesktopWindow( HWND hwnd )
-{
-    return TRUE;
-}
-
 static BOOL CDECL nulldrv_CreateWindow( HWND hwnd )
 {
     return TRUE;
 }
 
 static void CDECL nulldrv_DestroyWindow( HWND hwnd )
-{
-}
-
-static void CDECL nulldrv_FlashWindowEx( FLASHWINFO *info )
 {
 }
 
@@ -177,23 +100,7 @@ static void CDECL nulldrv_ReleaseDC( HWND hwnd, HDC hdc )
 {
 }
 
-static void CDECL nulldrv_SetCapture( HWND hwnd, UINT flags )
-{
-}
-
-static void CDECL nulldrv_SetFocus( HWND hwnd )
-{
-}
-
-static void CDECL nulldrv_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags )
-{
-}
-
 static void CDECL nulldrv_SetParent( HWND hwnd, HWND parent, HWND old_parent )
-{
-}
-
-static void CDECL nulldrv_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw )
 {
 }
 
@@ -217,12 +124,6 @@ static UINT CDECL nulldrv_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp )
 static LRESULT CDECL nulldrv_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
 {
     return -1;
-}
-
-static BOOL CDECL nulldrv_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
-                                               const RECT *window_rect )
-{
-    return TRUE;
 }
 
 static BOOL CDECL nulldrv_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_flags,
@@ -257,41 +158,15 @@ static void CDECL loaderdrv_UpdateClipboard(void)
     load_driver()->pUpdateClipboard();
 }
 
-static BOOL CDECL loaderdrv_CreateDesktopWindow( HWND hwnd )
-{
-    return load_driver()->pCreateDesktopWindow( hwnd );
-}
-
 static BOOL CDECL loaderdrv_CreateWindow( HWND hwnd )
 {
     return load_driver()->pCreateWindow( hwnd );
-}
-
-static void CDECL loaderdrv_FlashWindowEx( FLASHWINFO *info )
-{
-    load_driver()->pFlashWindowEx( info );
 }
 
 static void CDECL loaderdrv_GetDC( HDC hdc, HWND hwnd, HWND top_win, const RECT *win_rect,
                                    const RECT *top_rect, DWORD flags )
 {
     load_driver()->pGetDC( hdc, hwnd, top_win, win_rect, top_rect, flags );
-}
-
-static void CDECL loaderdrv_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags )
-{
-    load_driver()->pSetLayeredWindowAttributes( hwnd, key, alpha, flags );
-}
-
-static void CDECL loaderdrv_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw )
-{
-    load_driver()->pSetWindowRgn( hwnd, hrgn, redraw );
-}
-
-static BOOL CDECL loaderdrv_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
-                                                 const RECT *window_rect )
-{
-    return load_driver()->pUpdateLayeredWindow( hwnd, info, window_rect );
 }
 
 static void CDECL loaderdrv_UpdateCandidatePos( HWND hwnd, const RECT *caret_rect )
@@ -325,25 +200,25 @@ static struct user_driver_funcs lazy_load_driver =
     NULL,
     NULL,
     /* windowing functions */
-    loaderdrv_CreateDesktopWindow,
+    NULL,
     loaderdrv_CreateWindow,
     nulldrv_DestroyWindow,
-    loaderdrv_FlashWindowEx,
+    NULL,
     loaderdrv_GetDC,
     nulldrv_MsgWaitForMultipleObjectsEx,
     nulldrv_ReleaseDC,
     NULL,
-    nulldrv_SetCapture,
-    nulldrv_SetFocus,
-    loaderdrv_SetLayeredWindowAttributes,
+    NULL,
+    NULL,
+    NULL,
     nulldrv_SetParent,
-    loaderdrv_SetWindowRgn,
+    NULL,
     nulldrv_SetWindowIcon,
     nulldrv_SetWindowStyle,
     nulldrv_SetWindowText,
     nulldrv_ShowWindow,
     nulldrv_SysCommand,
-    loaderdrv_UpdateLayeredWindow,
+    NULL,
     NULL,
     nulldrv_WindowPosChanging,
     nulldrv_WindowPosChanged,
@@ -351,10 +226,12 @@ static struct user_driver_funcs lazy_load_driver =
     NULL,
     /* vulkan support */
     NULL,
+    /* opengl support */
+    NULL,
     /* candidate pos functions */
     loaderdrv_UpdateCandidatePos,
     /* thread management */
-    NULL
+    NULL,
 };
 
 void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version )
@@ -375,24 +252,17 @@ void CDECL __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT v
 
     SET_USER_FUNC(SetCursorPos);
     SET_USER_FUNC(UpdateClipboard);
-    SET_USER_FUNC(CreateDesktopWindow);
     SET_USER_FUNC(CreateWindow);
     SET_USER_FUNC(DestroyWindow);
-    SET_USER_FUNC(FlashWindowEx);
     SET_USER_FUNC(GetDC);
     SET_USER_FUNC(MsgWaitForMultipleObjectsEx);
     SET_USER_FUNC(ReleaseDC);
-    SET_USER_FUNC(SetCapture);
-    SET_USER_FUNC(SetFocus);
-    SET_USER_FUNC(SetLayeredWindowAttributes);
     SET_USER_FUNC(SetParent);
-    SET_USER_FUNC(SetWindowRgn);
     SET_USER_FUNC(SetWindowIcon);
     SET_USER_FUNC(SetWindowStyle);
     SET_USER_FUNC(SetWindowText);
     SET_USER_FUNC(ShowWindow);
     SET_USER_FUNC(SysCommand);
-    SET_USER_FUNC(UpdateLayeredWindow);
     SET_USER_FUNC(WindowPosChanging);
     SET_USER_FUNC(WindowPosChanged);
 #undef SET_USER_FUNC

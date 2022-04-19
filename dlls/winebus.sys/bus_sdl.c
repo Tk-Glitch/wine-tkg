@@ -117,6 +117,7 @@ static int (*pSDL_JoystickRumble)(SDL_Joystick *joystick, Uint16 low_frequency_r
 static Uint16 (*pSDL_JoystickGetProduct)(SDL_Joystick * joystick);
 static Uint16 (*pSDL_JoystickGetProductVersion)(SDL_Joystick * joystick);
 static Uint16 (*pSDL_JoystickGetVendor)(SDL_Joystick * joystick);
+static SDL_JoystickType (*pSDL_JoystickGetType)(SDL_Joystick * joystick);
 
 /* internal bits for extended rumble support, SDL_Haptic types are 16-bits */
 #define WINE_SDL_JOYSTICK_RUMBLE  0x40000000 /* using SDL_JoystickRumble API */
@@ -229,6 +230,7 @@ static BOOL descriptor_add_haptic(struct sdl_device *impl)
 
 static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
 {
+    const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_JOYSTICK};
     static const USAGE_AND_PAGE absolute_usages[] =
     {
         {.UsagePage = HID_USAGE_PAGE_GENERIC,    .Usage = HID_USAGE_GENERIC_X},
@@ -257,6 +259,7 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
     };
     struct sdl_device *impl = impl_from_unix_device(iface);
     int i, button_count, axis_count, ball_count, hat_count;
+    USAGE_AND_PAGE physical_usage;
 
     axis_count = pSDL_JoystickNumAxes(impl->sdl_joystick);
     if (axis_count > ARRAY_SIZE(absolute_usages))
@@ -275,10 +278,37 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
     hat_count = pSDL_JoystickNumHats(impl->sdl_joystick);
     button_count = pSDL_JoystickNumButtons(impl->sdl_joystick);
 
-    if (!hid_device_begin_report_descriptor(iface, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_JOYSTICK))
+    if (!pSDL_JoystickGetType) physical_usage = device_usage;
+    else switch (pSDL_JoystickGetType(impl->sdl_joystick))
+    {
+    case SDL_JOYSTICK_TYPE_ARCADE_PAD:
+    case SDL_JOYSTICK_TYPE_ARCADE_STICK:
+    case SDL_JOYSTICK_TYPE_DANCE_PAD:
+    case SDL_JOYSTICK_TYPE_DRUM_KIT:
+    case SDL_JOYSTICK_TYPE_GUITAR:
+    case SDL_JOYSTICK_TYPE_UNKNOWN:
+        physical_usage.UsagePage = HID_USAGE_PAGE_GENERIC;
+        physical_usage.Usage = HID_USAGE_GENERIC_JOYSTICK;
+        break;
+    case SDL_JOYSTICK_TYPE_GAMECONTROLLER:
+        physical_usage.UsagePage = HID_USAGE_PAGE_GENERIC;
+        physical_usage.Usage = HID_USAGE_GENERIC_GAMEPAD;
+        break;
+    case SDL_JOYSTICK_TYPE_WHEEL:
+        physical_usage.UsagePage = HID_USAGE_PAGE_SIMULATION;
+        physical_usage.Usage = HID_USAGE_SIMULATION_AUTOMOBILE_SIMULATION_DEVICE;
+        break;
+    case SDL_JOYSTICK_TYPE_FLIGHT_STICK:
+    case SDL_JOYSTICK_TYPE_THROTTLE:
+        physical_usage.UsagePage = HID_USAGE_PAGE_SIMULATION;
+        physical_usage.Usage = HID_USAGE_SIMULATION_FLIGHT_SIMULATION_DEVICE;
+        break;
+    }
+
+    if (!hid_device_begin_report_descriptor(iface, &device_usage))
         return STATUS_NO_MEMORY;
 
-    if (!hid_device_begin_input_report(iface))
+    if (!hid_device_begin_input_report(iface, &physical_usage))
         return STATUS_NO_MEMORY;
 
     for (i = 0; i < axis_count; i++)
@@ -321,6 +351,7 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
 
 static NTSTATUS build_controller_report_descriptor(struct unix_device *iface)
 {
+    const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_GAMEPAD};
     static const USAGE left_axis_usages[] = {HID_USAGE_GENERIC_X, HID_USAGE_GENERIC_Y};
     static const USAGE right_axis_usages[] = {HID_USAGE_GENERIC_RX, HID_USAGE_GENERIC_RY};
     static const USAGE trigger_axis_usages[] = {HID_USAGE_GENERIC_Z, HID_USAGE_GENERIC_RZ};
@@ -328,10 +359,10 @@ static NTSTATUS build_controller_report_descriptor(struct unix_device *iface)
     ULONG i, button_count = SDL_CONTROLLER_BUTTON_MAX - 1;
     C_ASSERT(SDL_CONTROLLER_AXIS_MAX == 6);
 
-    if (!hid_device_begin_report_descriptor(iface, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_GAMEPAD))
+    if (!hid_device_begin_report_descriptor(iface, &device_usage))
         return STATUS_NO_MEMORY;
 
-    if (!hid_device_begin_input_report(iface))
+    if (!hid_device_begin_input_report(iface, &device_usage))
         return STATUS_NO_MEMORY;
 
     if (!hid_device_add_axes(iface, 2, HID_USAGE_PAGE_GENERIC, left_axis_usages,
@@ -1024,6 +1055,7 @@ NTSTATUS sdl_bus_init(void *args)
     pSDL_JoystickGetProduct = dlsym(sdl_handle, "SDL_JoystickGetProduct");
     pSDL_JoystickGetProductVersion = dlsym(sdl_handle, "SDL_JoystickGetProductVersion");
     pSDL_JoystickGetVendor = dlsym(sdl_handle, "SDL_JoystickGetVendor");
+    pSDL_JoystickGetType = dlsym(sdl_handle, "SDL_JoystickGetType");
 
     if (pSDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC) < 0)
     {

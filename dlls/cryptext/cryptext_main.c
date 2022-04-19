@@ -71,7 +71,7 @@ HRESULT WINAPI CryptExtOpenCERW(HWND hwnd, HINSTANCE hinst, LPCWSTR filename, DW
     PCCERT_CONTEXT ctx;
     CRYPTUI_VIEWCERTIFICATE_STRUCTW info;
 
-    TRACE("(%p, %p, %s, %u)\n", hwnd, hinst, debugstr_w(filename), showcmd);
+    TRACE("(%p, %p, %s, %lu)\n", hwnd, hinst, debugstr_w(filename), showcmd);
 
     if (!CryptQueryObject(CERT_QUERY_OBJECT_FILE, filename, CERT_QUERY_CONTENT_FLAG_CERT,
                           CERT_QUERY_FORMAT_FLAG_ALL, 0, NULL, NULL, NULL, NULL, NULL,
@@ -100,7 +100,7 @@ HRESULT WINAPI CryptExtOpenCER(HWND hwnd, HINSTANCE hinst, LPCSTR filename, DWOR
     HRESULT hr;
     LPWSTR filenameW;
 
-    TRACE("(%p, %p, %s, %u)\n", hwnd, hinst, debugstr_a(filename), showcmd);
+    TRACE("(%p, %p, %s, %lu)\n", hwnd, hinst, debugstr_a(filename), showcmd);
 
     filenameW = heap_strdupAtoW(filename);
     hr = CryptExtOpenCERW(hwnd, hinst, filenameW, showcmd);

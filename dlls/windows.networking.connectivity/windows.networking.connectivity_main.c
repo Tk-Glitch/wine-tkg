@@ -61,7 +61,7 @@ static ULONG STDMETHODCALLTYPE vector_view_AddRef(IVectorView_ConnectionProfile 
 {
     struct windows_networking_connectivity *impl = impl_from_IVectorView_ConnectionProfile(iface);
     ULONG rc = InterlockedIncrement(&impl->refcount);
-    TRACE("%p increasing refcount to %u.\n", impl, rc);
+    TRACE("%p increasing refcount to %lu.\n", impl, rc);
     return rc;
 }
 
@@ -69,7 +69,7 @@ static ULONG STDMETHODCALLTYPE vector_view_Release(IVectorView_ConnectionProfile
 {
     struct windows_networking_connectivity *impl = impl_from_IVectorView_ConnectionProfile(iface);
     ULONG rc = InterlockedDecrement(&impl->refcount);
-    TRACE("%p decreasing refcount to %u.\n", impl, rc);
+    TRACE("%p decreasing refcount to %lu.\n", impl, rc);
     return rc;
 }
 
@@ -91,14 +91,14 @@ static HRESULT STDMETHODCALLTYPE vector_view_GetTrustLevel(IVectorView_Connectio
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE vector_view_GetAt(IVectorView_ConnectionProfile *iface, ULONG index, IConnectionProfile **out_value)
+static HRESULT STDMETHODCALLTYPE vector_view_GetAt(IVectorView_ConnectionProfile *iface, UINT32 index, IConnectionProfile **out_value)
 {
     FIXME("iface %p, index %#x, out_value %p stub!\n", iface, index, out_value);
     return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE vector_view_get_Size(
-    IVectorView_ConnectionProfile *iface, ULONG *out_value)
+    IVectorView_ConnectionProfile *iface, UINT32 *out_value)
 {
     FIXME("iface %p, out_value %p stub!\n", iface, out_value);
     *out_value = 0;
@@ -106,7 +106,7 @@ static HRESULT STDMETHODCALLTYPE vector_view_get_Size(
 }
 
 static HRESULT STDMETHODCALLTYPE vector_view_IndexOf(
-    IVectorView_ConnectionProfile *iface, IConnectionProfile *value, ULONG *index, BOOLEAN *out_value)
+    IVectorView_ConnectionProfile *iface, IConnectionProfile *value, UINT32 *index, BOOLEAN *out_value)
 {
     FIXME("iface %p, value %p, index %p, out_value %p stub!\n", iface, value, index, out_value);
     *out_value = FALSE;
@@ -160,7 +160,7 @@ static ULONG STDMETHODCALLTYPE network_information_statics_AddRef(
 {
     struct windows_networking_connectivity *impl = impl_from_INetworkInformationStatics(iface);
     ULONG rc = InterlockedIncrement(&impl->refcount);
-    TRACE("%p increasing refcount to %u.\n", impl, rc);
+    TRACE("%p increasing refcount to %lu.\n", impl, rc);
     return rc;
 }
 
@@ -169,7 +169,7 @@ static ULONG STDMETHODCALLTYPE network_information_statics_Release(
 {
     struct windows_networking_connectivity *impl = impl_from_INetworkInformationStatics(iface);
     ULONG rc = InterlockedDecrement(&impl->refcount);
-    TRACE("%p decreasing refcount to %u.\n", impl, rc);
+    TRACE("%p decreasing refcount to %lu.\n", impl, rc);
     return rc;
 }
 
@@ -235,7 +235,7 @@ static ULONG WINAPI connection_profile_AddRef(IConnectionProfile *iface)
 {
     struct connection_profile *impl = impl_from_IConnectionProfile(iface);
     ULONG rc = InterlockedIncrement(&impl->ref);
-    TRACE("%p increasing refcount to %u.\n", impl, rc);
+    TRACE("%p increasing refcount to %lu.\n", impl, rc);
     return rc;
 }
 
@@ -243,7 +243,7 @@ static ULONG WINAPI connection_profile_Release(IConnectionProfile *iface)
 {
     struct connection_profile *impl = impl_from_IConnectionProfile(iface);
     ULONG rc = InterlockedIncrement(&impl->ref);
-    TRACE("%p increasing refcount to %u.\n", impl, rc);
+    TRACE("%p increasing refcount to %lu.\n", impl, rc);
     return rc;
 }
 
@@ -459,7 +459,7 @@ static ULONG STDMETHODCALLTYPE windows_networking_connectivity_AddRef(
 {
     struct windows_networking_connectivity *impl = impl_from_IActivationFactory(iface);
     ULONG rc = InterlockedIncrement(&impl->refcount);
-    TRACE("%p increasing refcount to %u.\n", impl, rc);
+    TRACE("%p increasing refcount to %lu.\n", impl, rc);
     return rc;
 }
 
@@ -468,7 +468,7 @@ static ULONG STDMETHODCALLTYPE windows_networking_connectivity_Release(
 {
     struct windows_networking_connectivity *impl = impl_from_IActivationFactory(iface);
     ULONG rc = InterlockedDecrement(&impl->refcount);
-    TRACE("%p decreasing refcount to %u.\n", impl, rc);
+    TRACE("%p decreasing refcount to %lu.\n", impl, rc);
     return rc;
 }
 

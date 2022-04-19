@@ -1,7 +1,15 @@
 MODULE = windows.gaming.input.dll
-IMPORTS = combase uuid
+IMPORTS = combase uuid user32 dinput8 setupapi hid
 
 C_SRCS = \
-	main.c
+	controller.c \
+	event_handlers.c \
+	gamepad.c \
+	main.c \
+	manager.c \
+	provider.c \
+	vector.c
 
-IDL_SRCS = classes.idl
+IDL_SRCS = \
+	classes.idl \
+	provider.idl

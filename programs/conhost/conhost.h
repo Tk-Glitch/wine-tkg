@@ -69,6 +69,7 @@ struct edit_line
     unsigned int           end_offset;          /* offset of the last written char */
     unsigned int           home_x;              /* home position */
     unsigned int           home_y;
+    unsigned int           ctrl_mask;           /* mask for ctrl characters for completion */
 };
 
 struct console
@@ -87,6 +88,7 @@ struct console
     unsigned int           read_ioctl;          /* current read ioctl */
     size_t                 pending_read;        /* size of pending read buffer */
     struct edit_line       edit_line;           /* edit line context */
+    unsigned int           key_state;
     struct console_window *window;
     WCHAR                 *title;               /* console title */
     struct history_line  **history;             /* lines history */

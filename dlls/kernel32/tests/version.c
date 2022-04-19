@@ -23,11 +23,8 @@
 #include "winternl.h"
 #include "appmodel.h"
 
-static LONG (WINAPI * pGetPackagePath)(const PACKAGE_ID *, const UINT32, UINT32 *, WCHAR *);
-static LONG (WINAPI * pGetPackagesByPackageFamily)(const WCHAR *, UINT32 *, WCHAR **, UINT32 *, WCHAR *);
 static BOOL (WINAPI * pGetProductInfo)(DWORD, DWORD, DWORD, DWORD, DWORD *);
 static UINT (WINAPI * pGetSystemFirmwareTable)(DWORD, DWORD, void *, DWORD);
-static LONG (WINAPI * pPackageFullNameFromId)(const PACKAGE_ID *, UINT32 *, WCHAR *);
 static LONG (WINAPI * pPackageIdFromFullName)(const WCHAR *, UINT32, UINT32 *, BYTE *);
 static NTSTATUS (WINAPI * pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, void *, ULONG, ULONG *);
 static NTSTATUS (WINAPI * pRtlGetVersion)(RTL_OSVERSIONINFOEXW *);
@@ -46,11 +43,8 @@ static void init_function_pointers(void)
 
     hmod = GetModuleHandleA("kernel32.dll");
 
-    GET_PROC(GetPackagePath);
-    GET_PROC(GetPackagesByPackageFamily);
     GET_PROC(GetProductInfo);
     GET_PROC(GetSystemFirmwareTable);
-    GET_PROC(PackageFullNameFromId);
     GET_PROC(PackageIdFromFullName);
 
     hmod = GetModuleHandleA("ntdll.dll");
@@ -99,10 +93,10 @@ static void test_GetProductInfo(void)
 
         if (entry[0] >= 6)
             ok(res && (product > PRODUCT_UNDEFINED) && (product <= PRODUCT_ENTERPRISE_S_N_EVALUATION),
-               "got %d and 0x%x (expected TRUE and a valid PRODUCT_* value)\n", res, product);
+               "got %ld and 0x%lx (expected TRUE and a valid PRODUCT_* value)\n", res, product);
         else
             ok(!res && !product && (GetLastError() == 0xdeadbeef),
-               "got %d and 0x%x with 0x%x (expected FALSE and PRODUCT_UNDEFINED with LastError untouched)\n",
+               "got %ld and 0x%lx with 0x%lx (expected FALSE and PRODUCT_UNDEFINED with LastError untouched)\n",
                res, product, GetLastError());
 
         entry+= 4;
@@ -112,7 +106,7 @@ static void test_GetProductInfo(void)
     SetLastError(0xdeadbeef);
     res = pGetProductInfo(6, 1, 0, 0, NULL);
     ok( (!res) && (GetLastError() == 0xdeadbeef),
-        "got %d with 0x%x (expected FALSE with LastError untouched\n", res, GetLastError());
+        "got %ld with 0x%lx (expected FALSE with LastError untouched\n", res, GetLastError());
 }
 
 static void test_GetVersionEx(void)
@@ -133,7 +127,7 @@ static void test_GetVersionEx(void)
     ok(!ret, "Expected GetVersionExA to fail\n");
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER ||
         GetLastError() == 0xdeadbeef /* Win9x */,
-        "Expected ERROR_INSUFFICIENT_BUFFER or 0xdeadbeef (Win9x), got %d\n",
+        "Expected ERROR_INSUFFICIENT_BUFFER or 0xdeadbeef (Win9x), got %ld\n",
         GetLastError());
 
     SetLastError(0xdeadbeef);
@@ -142,7 +136,7 @@ static void test_GetVersionEx(void)
     ok(!ret, "Expected GetVersionExA to fail\n");
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER ||
         GetLastError() == 0xdeadbeef /* Win9x */,
-        "Expected ERROR_INSUFFICIENT_BUFFER or 0xdeadbeef (Win9x), got %d\n",
+        "Expected ERROR_INSUFFICIENT_BUFFER or 0xdeadbeef (Win9x), got %ld\n",
         GetLastError());
 
     SetLastError(0xdeadbeef);
@@ -151,7 +145,7 @@ static void test_GetVersionEx(void)
     ok(!ret, "Expected GetVersionExA to fail\n");
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER ||
         GetLastError() == 0xdeadbeef /* Win9x */,
-        "Expected ERROR_INSUFFICIENT_BUFFER or 0xdeadbeef (Win9x), got %d\n",
+        "Expected ERROR_INSUFFICIENT_BUFFER or 0xdeadbeef (Win9x), got %ld\n",
         GetLastError());
 
     SetLastError(0xdeadbeef);
@@ -159,7 +153,7 @@ static void test_GetVersionEx(void)
     ret = GetVersionExA(&infoA);
     ok(ret, "Expected GetVersionExA to succeed\n");
     ok(GetLastError() == 0xdeadbeef,
-        "Expected 0xdeadbeef, got %d\n", GetLastError());
+        "Expected 0xdeadbeef, got %ld\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     infoExA.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
@@ -671,7 +665,7 @@ static void test_VerifyVersionInfo(void)
         ret = VerifyVersionInfoA(&info, test->verifymask, mask);
         ok(test->err ? !ret : ret, "%u: unexpected return value %d.\n", i, ret);
         if (!ret)
-            ok(GetLastError() == test->err, "%u: unexpected error code %d, expected %d.\n", i, GetLastError(), test->err);
+            ok(GetLastError() == test->err, "%u: unexpected error code %ld, expected %ld.\n", i, GetLastError(), test->err);
     }
 
     /* test handling of version numbers */
@@ -682,21 +676,21 @@ static void test_VerifyVersionInfo(void)
     ret = VerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
         VerSetConditionMask(VerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL),
             VER_MAJORVERSION, VER_GREATER_EQUAL));
-    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+    ok(ret, "VerifyVersionInfoA failed with error %ld\n", GetLastError());
 
     info.dwMinorVersion = 0;
     info.wServicePackMajor = 10;
     ret = VerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
         VerSetConditionMask(VerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL),
             VER_MAJORVERSION, VER_GREATER_EQUAL));
-    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+    ok(ret, "VerifyVersionInfoA failed with error %ld\n", GetLastError());
 
     info.wServicePackMajor = 0;
     info.wServicePackMinor = 10;
     ret = VerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
         VerSetConditionMask(VerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL),
             VER_MAJORVERSION, VER_GREATER_EQUAL));
-    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+    ok(ret, "VerifyVersionInfoA failed with error %ld\n", GetLastError());
 
     /* test bad dwOSVersionInfoSize */
     info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
@@ -704,7 +698,7 @@ static void test_VerifyVersionInfo(void)
     info.dwOSVersionInfoSize = 0;
     ret = VerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
         VerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL));
-    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+    ok(ret, "VerifyVersionInfoA failed with error %ld\n", GetLastError());
 }
 
 static void test_GetSystemFirmwareTable(void)
@@ -739,11 +733,11 @@ static void test_GetSystemFirmwareTable(void)
 
     expected_len -= min_sfti_len;
     len = pGetSystemFirmwareTable(RSMB, 0, NULL, 0);
-    ok(len == expected_len, "Expected length %u, got %u\n", expected_len, len);
+    ok(len == expected_len, "Expected length %lu, got %u\n", expected_len, len);
 
     smbios_table = HeapAlloc(GetProcessHeap(), 0, expected_len);
     len = pGetSystemFirmwareTable(RSMB, 0, smbios_table, expected_len);
-    ok(len == expected_len, "Expected length %u, got %u\n", expected_len, len);
+    ok(len == expected_len, "Expected length %lu, got %u\n", expected_len, len);
     ok(len == 0 || !memcmp(smbios_table, sfti->TableBuffer, 6),
        "Expected prologue %02x %02x %02x %02x %02x %02x, got %02x %02x %02x %02x %02x %02x\n",
        sfti->TableBuffer[0], sfti->TableBuffer[1], sfti->TableBuffer[2],
@@ -807,11 +801,9 @@ static void test_PackageIdFromFullName(void)
     {
         0, PROCESSOR_ARCHITECTURE_INTEL,
                 {{.Major = 1, .Minor = 2, .Build = 3, .Revision = 4}},
-                (WCHAR *)L"TestPackage", (WCHAR *)L"TestResource",
+                (WCHAR *)L"TestPackage", NULL,
                 (WCHAR *)L"TestResourceId", (WCHAR *)L"0abcdefghjkme"
     };
-    static const WCHAR test_package_fullname[] =
-            L"TestPackage_1.2.3.4_x86_TestResourceId_0abcdefghjkme";
     UINT32 size, expected_size;
     PACKAGE_ID test_id;
     WCHAR fullname[512];
@@ -834,7 +826,7 @@ static void test_PackageIdFromFullName(void)
     expected_size = get_package_id_size(&test_package_id);
     size = sizeof(id_buffer);
     ret = pPackageIdFromFullName(fullname, 0, &size, id_buffer);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
+    ok(ret == ERROR_SUCCESS, "Got unexpected ret %lu.\n", ret);
     ok(size == expected_size, "Got unexpected length %u, expected %u.\n", size, expected_size);
     ok(!lstrcmpW(id->name, test_package_id.name), "Got unexpected name %s.\n", debugstr_w(id->name));
     ok(!lstrcmpW(id->resourceId, test_package_id.resourceId), "Got unexpected resourceId %s.\n",
@@ -853,31 +845,31 @@ static void test_PackageIdFromFullName(void)
             "Got unexpected publisherId %p, buffer %p.\n", id->resourceId, id_buffer);
 
     ret = pPackageIdFromFullName(fullname, 0, NULL, id_buffer);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %d.\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %ld.\n", ret);
 
     size = sizeof(id_buffer);
     ret = pPackageIdFromFullName(NULL, 0, &size, id_buffer);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %d.\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %ld.\n", ret);
     ok(size == sizeof(id_buffer), "Got unexpected size %u.\n", size);
 
     size = sizeof(id_buffer);
     ret = pPackageIdFromFullName(fullname, 0, &size, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %d.\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %ld.\n", ret);
     ok(size == sizeof(id_buffer), "Got unexpected size %u.\n", size);
 
     size = expected_size - 1;
     ret = pPackageIdFromFullName(fullname, 0, &size, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %d.\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %ld.\n", ret);
     ok(size == expected_size - 1, "Got unexpected size %u.\n", size);
 
     size = expected_size - 1;
     ret = pPackageIdFromFullName(fullname, 0, &size, id_buffer);
-    ok(ret == ERROR_INSUFFICIENT_BUFFER, "Got unexpected ret %d.\n", ret);
+    ok(ret == ERROR_INSUFFICIENT_BUFFER, "Got unexpected ret %ld.\n", ret);
     ok(size == expected_size, "Got unexpected size %u.\n", size);
 
     size = 0;
     ret = pPackageIdFromFullName(fullname, 0, &size, NULL);
-    ok(ret == ERROR_INSUFFICIENT_BUFFER, "Got unexpected ret %d.\n", ret);
+    ok(ret == ERROR_INSUFFICIENT_BUFFER, "Got unexpected ret %ld.\n", ret);
     ok(size == expected_size, "Got unexpected size %u.\n", size);
 
     for (i = 0; i < ARRAY_SIZE(arch_data); ++i)
@@ -888,7 +880,7 @@ static void test_PackageIdFromFullName(void)
         size = expected_size;
         ret = pPackageIdFromFullName(fullname, 0, &size, id_buffer);
         ok(ret == ERROR_SUCCESS || broken(arch_data[i].broken && ret == ERROR_INVALID_PARAMETER),
-                "Got unexpected ret %u.\n", ret);
+                "Got unexpected ret %lu.\n", ret);
         if (ret != ERROR_SUCCESS)
             continue;
         ok(size == expected_size, "Got unexpected length %u, expected %u.\n", size, expected_size);
@@ -898,48 +890,32 @@ static void test_PackageIdFromFullName(void)
 
     size = sizeof(id_buffer);
     ret = pPackageIdFromFullName(L"TestPackage_1.2.3.4_X86_TestResourceId_0abcdefghjkme", 0, &size, id_buffer);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
+    ok(ret == ERROR_SUCCESS, "Got unexpected ret %lu.\n", ret);
 
     size = sizeof(id_buffer);
     ret = pPackageIdFromFullName(L"TestPackage_1.2.3.4_X86_TestResourceId_abcdefghjkme", 0, &size, id_buffer);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
 
     size = sizeof(id_buffer);
     ret = pPackageIdFromFullName(L"TestPackage_1.2.3.4_X86_TestResourceId_0abcdefghjkmee", 0, &size, id_buffer);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
 
     size = sizeof(id_buffer);
     ret = pPackageIdFromFullName(L"TestPackage_1.2.3_X86_TestResourceId_0abcdefghjkme", 0, &size, id_buffer);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
 
     size = sizeof(id_buffer);
     ret = pPackageIdFromFullName(L"TestPackage_1.2.3.4_X86_TestResourceId_0abcdefghjkme_", 0, &size, id_buffer);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
 
     size = sizeof(id_buffer);
     ret = pPackageIdFromFullName(L"TestPackage_1.2.3.4_X86__0abcdefghjkme", 0, &size, id_buffer);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
+    ok(ret == ERROR_SUCCESS, "Got unexpected ret %lu.\n", ret);
     ok(!lstrcmpW(id->resourceId, L""), "Got unexpected resourceId %s.\n", debugstr_w(id->resourceId));
 
     size = sizeof(id_buffer);
     ret = pPackageIdFromFullName(L"TestPackage_1.2.3.4_X86_0abcdefghjkme", 0, &size, id_buffer);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-
-    ret = pPackageFullNameFromId(&test_package_id, NULL, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-
-    size = sizeof(fullname);
-    ret = pPackageFullNameFromId(&test_package_id, &size, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-
-    size = 0;
-    ret = pPackageFullNameFromId(&test_package_id, &size, NULL);
-    ok(ret == ERROR_INSUFFICIENT_BUFFER, "Got unexpected ret %u.\n", ret);
-    ok(size == lstrlenW(test_package_fullname) + 1, "Got unexpected size %u.\n", size);
-
-    ret = pPackageFullNameFromId(&test_package_id, &size, fullname);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
-    ok(!lstrcmpW(fullname, test_package_fullname), "Got unexpected fullname %s.\n", debugstr_w(fullname));
+    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %lu.\n", ret);
 }
 
 #define TEST_VERSION_WIN7   1
@@ -975,12 +951,12 @@ static void test_pe_os_version_child(unsigned int test)
 
     info.dwOSVersionInfoSize = sizeof(info);
     ret = GetVersionExA((OSVERSIONINFOA *)&info);
-    ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+    ok(ret, "Got unexpected ret %#x, GetLastError() %lu.\n", ret, GetLastError());
     ok(info.dwMajorVersion == test_pe_os_version_tests[test].expected_major,
-            "Test %u, expected major version %u, got %u.\n", test, test_pe_os_version_tests[test].expected_major,
+            "Test %u, expected major version %u, got %lu.\n", test, test_pe_os_version_tests[test].expected_major,
             info.dwMajorVersion);
     ok(info.dwMinorVersion == test_pe_os_version_tests[test].expected_minor,
-            "Test %u, expected minor version %u, got %u.\n", test, test_pe_os_version_tests[test].expected_minor,
+            "Test %u, expected minor version %u, got %lu.\n", test, test_pe_os_version_tests[test].expected_minor,
             info.dwMinorVersion);
 }
 
@@ -1027,12 +1003,12 @@ static void test_pe_os_version(void)
     ok(!pRtlGetVersion(&rtlinfo), "RtlGetVersion failed.\n");
     if (rtlinfo.dwMajorVersion < 10)
     {
-        skip("Too old Windows version %u.%u, skipping tests.\n", rtlinfo.dwMajorVersion, rtlinfo.dwMinorVersion);
+        skip("Too old Windows version %lu.%lu, skipping tests.\n", rtlinfo.dwMajorVersion, rtlinfo.dwMinorVersion);
         return;
     }
 
     file = CreateFileA(argv[0], GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-    ok(file != INVALID_HANDLE_VALUE, "CreateFile failed, GetLastError() %u.\n", GetLastError());
+    ok(file != INVALID_HANDLE_VALUE, "CreateFile failed, GetLastError() %lu.\n", GetLastError());
     SetFilePointer(file, 0x3c, NULL, FILE_BEGIN);
     ReadFile(file, &hdr_offset, sizeof(hdr_offset), &size, NULL);
     CloseHandle(file);
@@ -1048,10 +1024,10 @@ static void test_pe_os_version(void)
     {
         sprintf(tmp_exe_name, "tmp%u.exe", i);
         ret = CopyFileA(argv[0], tmp_exe_name, FALSE);
-        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        ok(ret, "Got unexpected ret %#x, GetLastError() %lu.\n", ret, GetLastError());
 
         file = CreateFileA(tmp_exe_name, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
-        ok(file != INVALID_HANDLE_VALUE, "CreateFile failed, GetLastError() %u.\n", GetLastError());
+        ok(file != INVALID_HANDLE_VALUE, "CreateFile failed, GetLastError() %lu.\n", GetLastError());
 
         SetFilePointer(file, offset_major, NULL, FILE_BEGIN);
         WriteFile(file, &test_pe_os_version_tests[i].pe_version_major,
@@ -1064,7 +1040,7 @@ static void test_pe_os_version(void)
 
         sprintf(str, "%s.manifest", tmp_exe_name);
         file = CreateFileA(str, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        ok(file != INVALID_HANDLE_VALUE, "CreateFile failed, GetLastError() %u.\n", GetLastError());
+        ok(file != INVALID_HANDLE_VALUE, "CreateFile failed, GetLastError() %lu.\n", GetLastError());
 
         WriteFile(file, manifest_header, strlen(manifest_header), &size, NULL);
         for (j = 0; j < ARRAY_SIZE(version_guids); ++j)
@@ -1082,13 +1058,13 @@ static void test_pe_os_version(void)
         sprintf(str, "%s version pe_os_version %u", tmp_exe_name, i);
 
         ret = CreateProcessA(NULL, str, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        ok(ret, "Got unexpected ret %#x, GetLastError() %lu.\n", ret, GetLastError());
         CloseHandle(pi.hThread);
         result = WaitForSingleObject(pi.hProcess, 10000);
-        ok(result == WAIT_OBJECT_0, "Got unexpected result %#x.\n", result);
+        ok(result == WAIT_OBJECT_0, "Got unexpected result %#lx.\n", result);
 
         ret = GetExitCodeProcess(pi.hProcess, &code);
-        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        ok(ret, "Got unexpected ret %#x, GetLastError() %lu.\n", ret, GetLastError());
         ok(!code, "Test %u failed.\n", i);
 
         CloseHandle(pi.hProcess);
@@ -1097,186 +1073,6 @@ static void test_pe_os_version(void)
         sprintf(str, "%s.manifest", tmp_exe_name);
         DeleteFileA(str);
     }
-}
-
-static void test_package_info(void)
-{
-    static const WCHAR package_family_msvc140[] = L"Microsoft.VCLibs.140.00_8wekyb3d8bbwe";
-    UINT32 count, length, curr_length, size, path_length, total_length;
-    WCHAR buffer[2048], path[MAX_PATH];
-    PACKAGE_ID *id, saved_id;
-    WCHAR *full_names[32];
-    BYTE id_buffer[512];
-    DWORD arch, attrib;
-    BOOL arch_found;
-    SYSTEM_INFO si;
-    unsigned int i;
-    LONG ret;
-
-    if (!pGetPackagesByPackageFamily)
-    {
-        win_skip("GetPackagesByPackageFamily not available.\n");
-        return;
-    }
-
-    GetSystemInfo(&si);
-    arch = si.wProcessorArchitecture;
-
-    count = 0;
-    length = 0;
-    ret = pGetPackagesByPackageFamily(L"Unknown_8wekyb3d8bbwe", &count, NULL, &length, NULL);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
-    ok(!count, "Got unexpected count %u.\n", count);
-    ok(!length, "Got unexpected length %u.\n", length);
-
-    count = 0;
-    length = 0;
-    ret = pGetPackagesByPackageFamily(L"Unknown_iekyb3d8bbwe", &count, NULL, &length, NULL);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
-    ok(!count, "Got unexpected count %u.\n", count);
-    ok(!length, "Got unexpected length %u.\n", length);
-
-    count = 0xdeadbeef;
-    length = 0xdeadbeef;
-    ret = pGetPackagesByPackageFamily(L"Unknown", &count, NULL, &length, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-    ok(count == 0xdeadbeef, "Got unexpected count %u.\n", count);
-    ok(length == 0xdeadbeef, "Got unexpected length %u.\n", length);
-
-    count = 0;
-    length = 0;
-    ret = pGetPackagesByPackageFamily(L"Unknown", &count, NULL, &length, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-    ok(!count, "Got unexpected count %u.\n", count);
-    ok(!length, "Got unexpected length %u.\n", length);
-
-    count = 0;
-    length = 0;
-    ret = pGetPackagesByPackageFamily(L"Unknown_8wekyb3d8bbwe_b", &count, NULL, &length, NULL);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
-    ok(!count, "Got unexpected count %u.\n", count);
-    ok(!length, "Got unexpected length %u.\n", length);
-
-    count = 0;
-    length = 0;
-    ret = pGetPackagesByPackageFamily(L"Unknown_", &count, NULL, &length, NULL);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
-    ok(!count, "Got unexpected count %u.\n", count);
-    ok(!length, "Got unexpected length %u.\n", length);
-
-    length = 0;
-    ret = pGetPackagesByPackageFamily(package_family_msvc140, NULL, NULL, &length, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-    ok(!length, "Got unexpected length %u.\n", length);
-
-    count = 0;
-    ret = pGetPackagesByPackageFamily(package_family_msvc140, &count, NULL, NULL, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-    ok(!count, "Got unexpected count %u.\n", count);
-
-    count = ARRAY_SIZE(full_names);
-    length = ARRAY_SIZE(buffer);
-    ret = pGetPackagesByPackageFamily(package_family_msvc140, &count, NULL, &length, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-    ok(count == ARRAY_SIZE(full_names), "Got unexpected count %u.\n", count);
-    ok(length == ARRAY_SIZE(buffer), "Got unexpected length %u.\n", length);
-
-    ret = pGetPackagesByPackageFamily(package_family_msvc140, &count, full_names, &length, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-    ok(count == ARRAY_SIZE(full_names), "Got unexpected count %u.\n", count);
-    ok(length == ARRAY_SIZE(buffer), "Got unexpected length %u.\n", length);
-
-    ret = pGetPackagesByPackageFamily(package_family_msvc140, &count, NULL, &length, buffer);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-    ok(count == ARRAY_SIZE(full_names), "Got unexpected count %u.\n", count);
-    ok(length == ARRAY_SIZE(buffer), "Got unexpected length %u.\n", length);
-
-    length = 0;
-    ret = pGetPackagePath(NULL, 0, &length, NULL);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-
-    count = 0;
-    length = 0;
-    ret = pGetPackagesByPackageFamily(package_family_msvc140, &count, NULL, &length, NULL);
-    if (!ret && !count && !length)
-    {
-        win_skip("Package VCLibs.140.00 is not installed.\n");
-        return;
-    }
-
-    ok(ret == ERROR_INSUFFICIENT_BUFFER, "Got unexpected ret %u.\n", ret);
-    ok(count >= 1, "Got unexpected count %u.\n", count);
-    ok(length > 1, "Got unexpected length %u.\n", length);
-
-    ret = pGetPackagesByPackageFamily(package_family_msvc140, &count, full_names, &length, buffer);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
-    ok(count >= 1, "Got unexpected count %u.\n", count);
-    ok(length > 1, "Got unexpected length %u.\n", length);
-
-    total_length = length;
-    id = (PACKAGE_ID *)id_buffer;
-    curr_length = 0;
-    arch_found = FALSE;
-    for (i = 0; i < count; ++i)
-    {
-        curr_length += lstrlenW(full_names[i]) + 1;
-
-        size = sizeof(id_buffer);
-        ret = pPackageIdFromFullName(full_names[i], 0, &size, id_buffer);
-        ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
-
-        if (id->processorArchitecture == arch)
-            arch_found = TRUE;
-
-        path_length = 0;
-        ret = pGetPackagePath(id, 0, &path_length, NULL);
-        ok(ret == ERROR_INSUFFICIENT_BUFFER, "Got unexpected ret %u.\n", ret);
-        ok(path_length > 1, "Got unexpected path_length %u.\n", path_length);
-
-        length = path_length;
-        ret = pGetPackagePath(id, 0, &length, path);
-        ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
-        ok(length == path_length, "Got unexpected length %u.\n", length);
-        attrib = GetFileAttributesW(path);
-        ok(attrib != INVALID_FILE_ATTRIBUTES && attrib & FILE_ATTRIBUTE_DIRECTORY,
-                "Got unexpected attrib %#x, GetLastError() %u.\n", attrib, GetLastError());
-    }
-    ok(curr_length == total_length, "Got unexpected length %u.\n", length);
-    ok(arch_found, "Did not find package for current arch.\n");
-
-    size = sizeof(id_buffer);
-    ret = pPackageIdFromFullName(full_names[0], 0, &size, id_buffer);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
-    saved_id = *id;
-
-    id->publisherId = NULL;
-    length = ARRAY_SIZE(path);
-    ret = pGetPackagePath(id, 0, &length, path);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-
-    *id = saved_id;
-    id->name = NULL;
-    length = ARRAY_SIZE(path);
-    ret = pGetPackagePath(id, 0, &length, path);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-
-    *id = saved_id;
-    id->publisher = NULL;
-    length = ARRAY_SIZE(path);
-    ret = pGetPackagePath(id, 0, &length, path);
-    ok(ret == ERROR_SUCCESS, "Got unexpected ret %u.\n", ret);
-
-    *id = saved_id;
-    id->processorArchitecture = ~0u;
-    length = ARRAY_SIZE(path);
-    ret = pGetPackagePath(id, 0, &length, path);
-    ok(ret == ERROR_INVALID_PARAMETER, "Got unexpected ret %u.\n", ret);
-
-    *id = saved_id;
-    id->name[0] = L'X';
-    length = ARRAY_SIZE(path);
-    ret = pGetPackagePath(id, 0, &length, path);
-    ok(ret == ERROR_NOT_FOUND, "Got unexpected ret %u.\n", ret);
 }
 
 START_TEST(version)
@@ -1306,5 +1102,4 @@ START_TEST(version)
     test_pe_os_version();
     test_GetSystemFirmwareTable();
     test_PackageIdFromFullName();
-    test_package_info();
 }

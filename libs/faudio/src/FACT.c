@@ -1177,6 +1177,9 @@ uint32_t FACTSoundBank_Prepare(
 	(*ppCue)->notifyOnDestroy = 0;
 	(*ppCue)->usercontext = NULL;
 
+	/* User data */
+	(*ppCue)->privatecontext = NULL;
+
 	/* Sound data */
 	(*ppCue)->data = &pSoundBank->cues[nCueIndex];
 	if ((*ppCue)->data->flags & 0x04)
@@ -1798,6 +1801,9 @@ uint32_t FACTWaveBank_Prepare(
 	(*ppWave)->pitch = 0;
 	(*ppWave)->loopCount = nLoopCount;
 
+	/* User data */
+	(*ppWave)->privatecontext = NULL;
+
 	/* TODO: Convert dwPlayOffset to a byte offset */
 	FAudio_assert(dwPlayOffset == 0);
 #if 0
@@ -2175,11 +2181,14 @@ uint32_t FACTWave_Stop(FACTWave *pWave, uint32_t dwFlags)
 	{
 		FACTNotification note;
 		note.type = FACTNOTIFICATIONTYPE_WAVESTOP;
+		note.wave.cueIndex = pWave->parentCue->index;
+		note.wave.pCue = pWave->parentCue;
+		note.wave.pSoundBank = pWave->parentCue->parentBank;
 		note.wave.pWave = pWave;
-		if (pWave->parentBank->parentEngine->notifications & NOTIFY_WAVESTOP)
-		{
-			note.pvContext = pWave->parentBank->parentEngine->wave_context;
-		}
+		note.wave.pWaveBank = pWave->parentBank;
+
+		note.pvContext = pWave->parentBank->parentEngine->wave_context;
+
 		pWave->parentBank->parentEngine->notificationCallback(&note);
 	}
 
@@ -2735,6 +2744,8 @@ uint32_t FACTCue_SetMatrixCoefficients(
 		}
 	}
 
+	FACT_INTERNAL_SendCueNotification(pCue, NOTIFY_CUESTOP, FACTNOTIFICATIONTYPE_CUESTOP);
+
 	FAudio_PlatformUnlockMutex(pCue->parentBank->parentEngine->apiLock);
 	return 0;
 }
@@ -3005,6 +3016,44 @@ uint32_t FACTCue_SetOutputVoiceMatrix(
 ) {
 	/* TODO */
 	return 0;
+}
+
+void FACTWave_SetPrivateContext(FACTWave *pWave, void *context)
+{
+    pWave->privatecontext = context;
+}
+void* FACTWave_GetPrivateContext(FACTWave *pWave)
+{
+    return pWave->privatecontext;
+}
+
+FACTAPI void FACTWaveBank_SetPrivateContext(FACTWaveBank *pWaveBank, void *context)
+{
+    pWaveBank->privatecontext = context;
+}
+
+FACTAPI void* FACTWaveBank_GetPrivateContext(FACTWaveBank *pWaveBank)
+{
+    return pWaveBank->privatecontext;
+}
+
+FACTAPI void FACTSoundBank_SetPrivateContext(FACTSoundBank *pSoundBank, void *context)
+{
+    pSoundBank->privatecontext = context;
+}
+FACTAPI void* FACTSoundBank_GetPrivateContext(FACTSoundBank *pSoundBank)
+{
+    return pSoundBank->privatecontext;
+}
+
+FACTAPI void FACTCue_SetPrivateContext(FACTCue *pCue, void *context)
+{
+    pCue->privatecontext = context;
+}
+
+FACTAPI void* FACTCue_GetPrivateContext(FACTCue *pCue)
+{
+    return pCue->privatecontext;
 }
 
 /* vim: set noexpandtab shiftwidth=8 tabstop=8: */

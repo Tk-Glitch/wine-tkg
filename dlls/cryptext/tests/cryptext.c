@@ -45,10 +45,10 @@ static void test_CryptExtOpenCER(void)
 
     SetLastError(0xdeadbeef);
     hr = pCryptExtOpenCER(0, 0, "dead.beef", SW_HIDE);
-    ok(hr == S_OK, "got %#x\n", hr);
+    ok(hr == S_OK, "got %#lx\n", hr);
 
     hr = pCryptExtOpenCER(0, 0, "VeriSign Class 3 Public Primary Certification Authority - G4.txt", SW_SHOW);
-    ok(hr == S_OK, "got %#x\n", hr);
+    ok(hr == S_OK, "got %#lx\n", hr);
 }
 
 START_TEST(cryptext)

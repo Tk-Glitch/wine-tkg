@@ -50,6 +50,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dinput);
 
 DEFINE_GUID( GUID_DEVINTERFACE_WINEXINPUT,0x6c53d5fd,0x6480,0x440f,0xb6,0x18,0x47,0x67,0x50,0xc5,0xe1,0xa6 );
 DEFINE_GUID( hid_joystick_guid, 0x9e573edb, 0x7734, 0x11d2, 0x8d, 0x4a, 0x23, 0x90, 0x3f, 0xb6, 0xbd, 0xf7 );
+DEFINE_GUID( device_path_guid, 0x00000000, 0x0000, 0x0000, 0x8d, 0x4a, 0x23, 0x90, 0x3f, 0xb6, 0xbd, 0xf8 );
 DEFINE_DEVPROPKEY( DEVPROPKEY_HID_HANDLE, 0xbc62e415, 0xf4fe, 0x405c, 0x8e, 0xda, 0x63, 0x6f, 0xb5, 0x9f, 0x08, 0x98, 2 );
 
 struct pid_control_report
@@ -414,6 +415,11 @@ static const WCHAR *object_usage_to_string( DIDEVICEOBJECTINSTANCEW *instance )
     case MAKELONG(PID_USAGE_TRIGGER_BUTTON, HID_USAGE_PAGE_PID): return L"Trigger Button";
 
     case MAKELONG(HID_USAGE_SIMULATION_RUDDER, HID_USAGE_PAGE_SIMULATION): return L"Rudder";
+    case MAKELONG(HID_USAGE_SIMULATION_THROTTLE, HID_USAGE_PAGE_SIMULATION): return L"Throttle";
+    case MAKELONG(HID_USAGE_SIMULATION_ACCELERATOR, HID_USAGE_PAGE_SIMULATION): return L"Accelerator";
+    case MAKELONG(HID_USAGE_SIMULATION_BRAKE, HID_USAGE_PAGE_SIMULATION): return L"Brake";
+    case MAKELONG(HID_USAGE_SIMULATION_CLUTCH, HID_USAGE_PAGE_SIMULATION): return L"Clutch";
+    case MAKELONG(HID_USAGE_SIMULATION_STEERING, HID_USAGE_PAGE_SIMULATION): return L"Steering";
     default: return NULL;
     }
 }
@@ -1431,12 +1437,14 @@ static BOOL hid_joystick_device_try_open( UINT32 handle, const WCHAR *path, HAND
                                           PHIDP_PREPARSED_DATA *preparsed, HIDD_ATTRIBUTES *attrs,
                                           HIDP_CAPS *caps, DIDEVICEINSTANCEW *instance, DWORD version )
 {
-    BOOL has_accelerator, has_brake, has_clutch;
+    BOOL has_accelerator, has_brake, has_clutch, has_z, has_pov;
     PHIDP_PREPARSED_DATA preparsed_data = NULL;
-    DWORD type = 0, button_count = 0;
+    HIDP_LINK_COLLECTION_NODE nodes[256];
+    DWORD type, button_count = 0;
     HIDP_BUTTON_CAPS buttons[10];
     HIDP_VALUE_CAPS value;
     HANDLE device_file;
+    ULONG node_count;
     NTSTATUS status;
     USHORT count;
 
@@ -1448,10 +1456,14 @@ static BOOL hid_joystick_device_try_open( UINT32 handle, const WCHAR *path, HAND
     if (!HidD_GetAttributes( device_file, attrs )) goto failed;
     if (HidP_GetCaps( preparsed_data, caps ) != HIDP_STATUS_SUCCESS) goto failed;
 
-    if (caps->UsagePage == HID_USAGE_PAGE_GAME) FIXME( "game usage page not implemented!\n" );
-    if (caps->UsagePage == HID_USAGE_PAGE_SIMULATION) FIXME( "simulation usage page not implemented!\n" );
-    if (caps->UsagePage != HID_USAGE_PAGE_GENERIC) goto failed;
-    if (caps->Usage != HID_USAGE_GENERIC_GAMEPAD && caps->Usage != HID_USAGE_GENERIC_JOYSTICK) goto failed;
+    switch (MAKELONG( caps->Usage, caps->UsagePage ))
+    {
+    case MAKELONG( HID_USAGE_GENERIC_MOUSE, HID_USAGE_PAGE_GENERIC ):  goto failed;
+    case MAKELONG( HID_USAGE_GENERIC_KEYBOARD, HID_USAGE_PAGE_GENERIC ):  goto failed;
+    case MAKELONG( HID_USAGE_GENERIC_GAMEPAD, HID_USAGE_PAGE_GENERIC ): type = DI8DEVTYPE_GAMEPAD; break;
+    case MAKELONG( HID_USAGE_GENERIC_JOYSTICK, HID_USAGE_PAGE_GENERIC ): type = DI8DEVTYPE_JOYSTICK; break;
+    default: FIXME( "device usage %04x:%04x not implemented!\n", caps->UsagePage, caps->Usage); goto failed;
+    }
 
     if (!HidD_GetProductString( device_file, instance->tszInstanceName, MAX_PATH * sizeof(WCHAR) )) goto failed;
     if (!HidD_GetProductString( device_file, instance->tszProductName, MAX_PATH * sizeof(WCHAR) )) goto failed;
@@ -1463,6 +1475,16 @@ static BOOL hid_joystick_device_try_open( UINT32 handle, const WCHAR *path, HAND
     instance->guidFFDriver = GUID_NULL;
     instance->wUsagePage = caps->UsagePage;
     instance->wUsage = caps->Usage;
+
+    node_count = ARRAY_SIZE(nodes);
+    status = HidP_GetLinkCollectionNodes( nodes, &node_count, preparsed_data );
+    if (status != HIDP_STATUS_SUCCESS) node_count = 0;
+    while (node_count--)
+    {
+        if (nodes[node_count].LinkUsagePage != HID_USAGE_PAGE_SIMULATION) continue;
+        if (nodes[node_count].LinkUsage == HID_USAGE_SIMULATION_AUTOMOBILE_SIMULATION_DEVICE) type = DI8DEVTYPE_DRIVING;
+        if (nodes[node_count].LinkUsage == HID_USAGE_SIMULATION_FLIGHT_SIMULATION_DEVICE) type = DI8DEVTYPE_FLIGHT;
+    }
 
     count = ARRAY_SIZE(buttons);
     status = HidP_GetSpecificButtonCaps( HidP_Output, HID_USAGE_PAGE_PID, 0,
@@ -1479,52 +1501,47 @@ static BOOL hid_joystick_device_try_open( UINT32 handle, const WCHAR *path, HAND
         else button_count += buttons[count].Range.UsageMax - buttons[count].Range.UsageMin + 1;
     }
 
-    switch (caps->Usage)
-    {
-    case HID_USAGE_GENERIC_GAMEPAD:
-        type = DI8DEVTYPE_GAMEPAD | DIDEVTYPE_HID;
-        if (button_count < 6) type |= DI8DEVTYPEGAMEPAD_LIMITED << 8;
-        else type |= DI8DEVTYPEGAMEPAD_STANDARD << 8;
-        break;
-    case HID_USAGE_GENERIC_JOYSTICK:
-        type = DI8DEVTYPE_JOYSTICK | DIDEVTYPE_HID;
-        if (button_count < 5) type |= DI8DEVTYPEJOYSTICK_LIMITED << 8;
-        else type |= DI8DEVTYPEJOYSTICK_STANDARD << 8;
-
-        count = 1;
-        status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_GENERIC, 0,
-                                            HID_USAGE_GENERIC_Z, &value, &count, preparsed_data );
-        if (status != HIDP_STATUS_SUCCESS || !count)
-            type = DI8DEVTYPE_JOYSTICK | (DI8DEVTYPEJOYSTICK_LIMITED << 8) | DIDEVTYPE_HID;
-
-        count = 1;
-        status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_GENERIC, 0,
-                                            HID_USAGE_GENERIC_HATSWITCH, &value, &count, preparsed_data );
-        if (status != HIDP_STATUS_SUCCESS || !count)
-            type = DI8DEVTYPE_JOYSTICK | (DI8DEVTYPEJOYSTICK_LIMITED << 8) | DIDEVTYPE_HID;
-
-        break;
-    }
-
     count = 1;
     status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_GENERIC, 0, HID_USAGE_GENERIC_X,
                                         &value, &count, preparsed_data );
-    if (status != HIDP_STATUS_SUCCESS || !count)
-        type = DI8DEVTYPE_SUPPLEMENTAL | (DI8DEVTYPESUPPLEMENTAL_UNKNOWN << 8) | DIDEVTYPE_HID;
+    if (status != HIDP_STATUS_SUCCESS || !count) type = DI8DEVTYPE_SUPPLEMENTAL;
 
     count = 1;
     status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_GENERIC, 0, HID_USAGE_GENERIC_Y,
                                         &value, &count, preparsed_data );
-    if (status != HIDP_STATUS_SUCCESS || !count)
-        type = DI8DEVTYPE_SUPPLEMENTAL | (DI8DEVTYPESUPPLEMENTAL_UNKNOWN << 8) | DIDEVTYPE_HID;
+    if (status != HIDP_STATUS_SUCCESS || !count) type = DI8DEVTYPE_SUPPLEMENTAL;
 
     count = 1;
     status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_SIMULATION, 0, HID_USAGE_SIMULATION_STEERING,
                                         &value, &count, preparsed_data );
-    if (status == HIDP_STATUS_SUCCESS && count)
-    {
-        type = DI8DEVTYPE_DRIVING | DIDEVTYPE_HID;
+    if (status == HIDP_STATUS_SUCCESS && count) type = DI8DEVTYPE_DRIVING;
 
+    switch (GET_DIDEVICE_TYPE(type))
+    {
+    case DI8DEVTYPE_SUPPLEMENTAL:
+        type |= (DI8DEVTYPESUPPLEMENTAL_UNKNOWN << 8);
+        break;
+    case DI8DEVTYPE_GAMEPAD:
+        if (button_count < 6) type |= (DI8DEVTYPEGAMEPAD_LIMITED << 8);
+        else type |= (DI8DEVTYPEGAMEPAD_STANDARD << 8);
+        break;
+    case DI8DEVTYPE_JOYSTICK:
+        count = 1;
+        status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_GENERIC, 0,
+                                            HID_USAGE_GENERIC_Z, &value, &count, preparsed_data );
+        has_z = (status == HIDP_STATUS_SUCCESS && count);
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_GENERIC, 0,
+                                            HID_USAGE_GENERIC_HATSWITCH, &value, &count, preparsed_data );
+        has_pov = (status == HIDP_STATUS_SUCCESS && count);
+
+        if (button_count < 5 || !has_z || !has_pov)
+            type |= (DI8DEVTYPEJOYSTICK_LIMITED << 8);
+        else
+            type |= (DI8DEVTYPEJOYSTICK_STANDARD << 8);
+        break;
+    case DI8DEVTYPE_DRIVING:
         count = 1;
         status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_SIMULATION, 0, HID_USAGE_SIMULATION_ACCELERATOR,
                                             &value, &count, preparsed_data );
@@ -1540,15 +1557,22 @@ static BOOL hid_joystick_device_try_open( UINT32 handle, const WCHAR *path, HAND
                                             &value, &count, preparsed_data );
         has_clutch = (status == HIDP_STATUS_SUCCESS && count);
 
-        if (has_accelerator && has_brake && has_clutch)
+        if (button_count < 4)
+            type |= (DI8DEVTYPEDRIVING_LIMITED << 8);
+        else if (has_accelerator && has_brake && has_clutch)
             type |= (DI8DEVTYPEDRIVING_THREEPEDALS << 8);
         else if (has_accelerator && has_brake)
             type |= (DI8DEVTYPEDRIVING_DUALPEDALS << 8);
         else
             type |= (DI8DEVTYPEDRIVING_LIMITED << 8);
+        break;
+    case DI8DEVTYPE_FLIGHT:
+        type |= (DI8DEVTYPEFLIGHT_STICK << 8);
+        break;
     }
 
-    instance->dwDevType = device_type_for_version( type, version );
+    instance->dwDevType = device_type_for_version( type, version ) | DIDEVTYPE_HID;
+    TRACE("detected device type %#lx\n", instance->dwDevType);
 
     *device = device_file;
     *preparsed = preparsed_data;
@@ -2038,7 +2062,12 @@ HRESULT hid_joystick_create_device( struct dinput *dinput, const GUID *guid, IDi
     else if (IsEqualGUID( &hid_joystick_guid, &instance.guidInstance ))
         instance.guidInstance = *guid;
     else
-        return DIERR_DEVICENOTREG;
+    {
+        instance.guidInstance.Data1 = device_path_guid.Data1;
+        instance.guidInstance.Data2 = device_path_guid.Data2;
+        instance.guidInstance.Data3 = device_path_guid.Data3;
+        if (!IsEqualGUID( &device_path_guid, &instance.guidInstance )) return DIERR_DEVICENOTREG;
+    }
 
     hr = dinput_device_alloc( sizeof(struct hid_joystick), &hid_joystick_vtbl, guid, dinput, (void **)&impl );
     if (FAILED(hr)) return hr;
@@ -2047,8 +2076,16 @@ HRESULT hid_joystick_create_device( struct dinput *dinput, const GUID *guid, IDi
     impl->base.read_event = CreateEventW( NULL, TRUE, FALSE, NULL );
     impl->internal_ref = 1;
 
-    hr = hid_joystick_device_open( -1, &instance, impl->device_path, &impl->device, &impl->preparsed,
-                                   &attrs, &impl->caps, dinput->dwVersion );
+    if (!IsEqualGUID( &device_path_guid, &instance.guidInstance ))
+        hr = hid_joystick_device_open( -1, &instance, impl->device_path, &impl->device, &impl->preparsed,
+                                       &attrs, &impl->caps, dinput->dwVersion );
+    else
+    {
+        wcscpy( impl->device_path, *(const WCHAR **)guid );
+        if (!hid_joystick_device_try_open( 0, impl->device_path, &impl->device, &impl->preparsed, &attrs,
+                                           &impl->caps, &instance, dinput->dwVersion ))
+            hr = DIERR_DEVICENOTREG;
+    }
     if (hr != DI_OK) goto failed;
 
     impl->base.instance = instance;

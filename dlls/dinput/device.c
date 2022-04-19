@@ -2126,7 +2126,7 @@ static HRESULT WINAPI dinput_device_SetActionMap( IDirectInputDevice8W *iface, D
             else if (type == DIDFT_RELAXIS) type = DIDFT_AXIS;
 
             obj = dataformat_to_odf_by_type(df, inst, type);
-            TRACE("obj %p, inst 0x%08x, type 0x%08x\n", obj, inst, type);
+            TRACE("obj %p, inst 0x%08lx, type 0x%08lx\n", obj, inst, type);
             if(obj)
             {
                 memcpy(&obj_df[action], obj, df->dwObjSize);

@@ -122,7 +122,7 @@ static void test_global_properties(void)
     xparams.pGlobalSettingsBuffer = ptr;
     hr = IXACT3Engine_Initialize(engine, &xparams);
     ok(hr == S_OK ||
-        hr == XAUDIO2_E_INVALID_CALL /* Vista */, "got 0x%08x\n", hr);
+        hr == XAUDIO2_E_INVALID_CALL /* Vista */, "got 0x%08lx\n", hr);
     if (FAILED(hr))
         goto end;
 
@@ -131,18 +131,18 @@ static void test_global_properties(void)
 
     value = 0.1f;
     hr = IXACT3Engine_GetGlobalVariable(engine, index, &value);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "got 0x%08lx\n", hr);
     ok(value == 0.0f, "got %f\n", value);
 
     hr = IXACT3Engine_GetFinalMixFormat(engine, &format);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "got 0x%08lx\n", hr);
 
     /* Invalid SpeedOfSound value  */
     X3DAudioInitialize(format.dwChannelMask, value, instance);
     ok(instance[0] != 0, "got 0x%08x\n", instance[0]);
 
     hr = IXACT3Engine_GetGlobalVariable(engine, index, &value);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "got 0x%08lx\n", hr);
     ok(value == 0.0f, "got %f\n", value);
 
 end:

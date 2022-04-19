@@ -55,7 +55,7 @@ void cuda_process_tls_callbacks(DWORD reason)
 {
     struct list *ptr;
 
-    TRACE("(%d)\n", reason);
+    TRACE("(%u)\n", reason);
 
     if (reason != DLL_THREAD_DETACH)
         return;

@@ -24,8 +24,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
@@ -1017,7 +1015,7 @@ static struct wined3d_allocator_chunk *wined3d_allocator_gl_create_chunk(struct 
     struct wined3d_allocator_chunk_gl *chunk_gl;
     struct wined3d_context_gl *context_gl;
 
-    TRACE("allocator %p, context %p, memory_type %u, chunk_size %zu.\n", allocator, context, memory_type, chunk_size);
+    TRACE("allocator %p, context %p, memory_type %u, chunk_size %Iu.\n", allocator, context, memory_type, chunk_size);
 
     if (!context)
         return NULL;
@@ -1135,6 +1133,7 @@ static struct wined3d_allocator_block *wined3d_device_gl_allocate_memory(struct 
     *id = wined3d_allocator_chunk_gl(block->chunk)->gl_buffer;
 
     wined3d_device_gl_allocator_unlock(device_gl);
+    TRACE("Allocated offset %Iu from buffer object %u.\n", block->offset, *id);
     return block;
 }
 
@@ -1199,6 +1198,7 @@ bool wined3d_device_gl_create_bo(struct wined3d_device_gl *device_gl, struct win
             checkGLcall("buffer object creation");
             return false;
         }
+        TRACE("Created buffer object %u.\n", id);
         wined3d_context_gl_bind_bo(context_gl, binding, id);
 
         if (!coherent && gl_info->supported[APPLE_FLUSH_BUFFER_RANGE])
@@ -1213,7 +1213,6 @@ bool wined3d_device_gl_create_bo(struct wined3d_device_gl *device_gl, struct win
         checkGLcall("buffer object creation");
     }
 
-    TRACE("Created buffer object %u.\n", id);
     bo->id = id;
     bo->memory = memory;
     bo->size = size;

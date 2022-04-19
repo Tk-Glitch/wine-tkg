@@ -173,7 +173,7 @@ static inline WCHAR *get_button_text( HWND hwnd )
 {
     static const INT len = 512;
     WCHAR *buffer = HeapAlloc( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) );
-    if (buffer) InternalGetWindowText( hwnd, buffer, len + 1 );
+    if (buffer) NtUserInternalGetWindowText( hwnd, buffer, len + 1 );
     return buffer;
 }
 
@@ -262,7 +262,7 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 	{
 	    SendMessageW( hWnd, BM_SETSTATE, TRUE, 0 );
             set_button_state( hWnd, get_button_state( hWnd ) | BUTTON_BTNPRESSED );
-            SetCapture( hWnd );
+            NtUserSetCapture( hWnd );
 	}
 	break;
 
@@ -277,8 +277,8 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         }
         /* fall through */
     case WM_LBUTTONDOWN:
-        SetCapture( hWnd );
-        SetFocus( hWnd );
+        NtUserSetCapture( hWnd );
+        NtUserSetFocus( hWnd );
         set_button_state( hWnd, get_button_state( hWnd ) | BUTTON_BTNPRESSED );
         SendMessageW( hWnd, BM_SETSTATE, TRUE, 0 );
         break;

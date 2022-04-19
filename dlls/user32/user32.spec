@@ -79,13 +79,13 @@
 @ stdcall CloseWindow(long)
 @ stdcall CloseWindowStation(long) NtUserCloseWindowStation
 @ stdcall CopyAcceleratorTableA(long ptr long)
-@ stdcall CopyAcceleratorTableW(long ptr long)
+@ stdcall CopyAcceleratorTableW(long ptr long) NtUserCopyAcceleratorTable
 @ stdcall CopyIcon(long)
 @ stdcall CopyImage(long long long long long)
 @ stdcall CopyRect(ptr ptr)
 @ stdcall CountClipboardFormats() NtUserCountClipboardFormats
 @ stdcall CreateAcceleratorTableA(ptr long)
-@ stdcall CreateAcceleratorTableW(ptr long)
+@ stdcall CreateAcceleratorTableW(ptr long) NtUserCreateAcceleratorTable
 @ stdcall CreateCaret(long long long long)
 @ stdcall CreateCursor(long long long long long ptr ptr)
 @ stdcall CreateDesktopA(str str ptr long long ptr)
@@ -155,7 +155,7 @@
 @ stdcall DeferWindowPos(long long long long long long long long)
 @ stdcall DeleteMenu(long long long)
 @ stdcall DeregisterShellHookWindow (long)
-@ stdcall DestroyAcceleratorTable(long)
+@ stdcall DestroyAcceleratorTable(long) NtUserDestroyAcceleratorTable
 @ stdcall DestroyCaret()
 @ stdcall DestroyCursor(long)
 @ stdcall DestroyIcon(long)
@@ -245,14 +245,14 @@
 @ stdcall FindWindowExW(long long wstr wstr)
 @ stdcall FindWindowW(wstr wstr)
 @ stdcall FlashWindow(long long)
-@ stdcall FlashWindowEx(ptr)
+@ stdcall FlashWindowEx(ptr) NtUserFlashWindowEx
 @ stdcall FrameRect(long ptr long)
 @ stdcall FreeDDElParam(long long)
 @ stdcall GetActiveWindow()
 @ stdcall GetAltTabInfo(long long ptr ptr long) GetAltTabInfoA
 @ stdcall GetAltTabInfoA(long long ptr ptr long)
 @ stdcall GetAltTabInfoW(long long ptr ptr long)
-@ stdcall GetAncestor(long long)
+@ stdcall GetAncestor(long long) NtUserGetAncestor
 @ stdcall GetAppCompatFlags(long)
 @ stdcall GetAppCompatFlags2(long)
 @ stdcall -import GetAsyncKeyState(long) NtUserGetAsyncKeyState
@@ -446,7 +446,7 @@
 @ stdcall InsertMenuItemW(long long long ptr)
 @ stdcall InsertMenuW(long long long long ptr)
 @ stdcall InternalGetWindowIcon(ptr long)
-@ stdcall InternalGetWindowText(long ptr long)
+@ stdcall InternalGetWindowText(long ptr long) NtUserInternalGetWindowText
 @ stdcall IntersectRect(ptr ptr ptr)
 @ stdcall InvalidateRect(long ptr long)
 @ stdcall InvalidateRgn(long long long)
@@ -542,7 +542,7 @@
 @ stdcall MonitorFromPoint(int64 long)
 @ stdcall MonitorFromRect(ptr long)
 @ stdcall MonitorFromWindow(long long)
-@ stdcall MoveWindow(long long long long long long)
+@ stdcall MoveWindow(long long long long long long) NtUserMoveWindow
 @ stdcall MsgWaitForMultipleObjects(long ptr long long long)
 @ stdcall MsgWaitForMultipleObjectsEx(long ptr long long long)
 @ stdcall NotifyWinEvent(long long long long) NtUserNotifyWinEvent
@@ -644,15 +644,15 @@
 @ stdcall SendNotifyMessageA(long long long long)
 @ stdcall SendNotifyMessageW(long long long long)
 @ stub ServerSetFunctionPointers
-@ stdcall SetActiveWindow(long)
-@ stdcall SetCapture(long)
+@ stdcall SetActiveWindow(long) NtUserSetActiveWindow
+@ stdcall -import SetCapture(long) NtUserSetCapture
 @ stdcall SetCaretBlinkTime(long)
 @ stdcall SetCaretPos(long long)
 @ stdcall SetClassLongA(long long long)
 @ stdcall -arch=win64 SetClassLongPtrA(long long long)
 @ stdcall -arch=win64 SetClassLongPtrW(long long long)
 @ stdcall SetClassLongW(long long long)
-@ stdcall SetClassWord(long long long)
+@ stdcall SetClassWord(long long long) NtUserSetClassWord
 @ stdcall SetClipboardData(long long)
 @ stdcall SetClipboardViewer(long)
 @ stdcall SetCoalescableTimer(long long long ptr long)
@@ -669,13 +669,13 @@
 @ stdcall SetDlgItemTextA(long long str)
 @ stdcall SetDlgItemTextW(long long wstr)
 @ stdcall SetDoubleClickTime(long)
-@ stdcall SetFocus(long)
+@ stdcall SetFocus(long) NtUserSetFocus
 @ stdcall SetForegroundWindow(long)
 @ stdcall SetGestureConfig(ptr long long ptr long)
 @ stdcall SetInternalWindowPos(long long ptr ptr)
 @ stdcall SetKeyboardState(ptr) NtUserSetKeyboardState
 @ stdcall SetLastErrorEx(long long)
-@ stdcall SetLayeredWindowAttributes(ptr long long long)
+@ stdcall SetLayeredWindowAttributes(ptr long long long) NtUserSetLayeredWindowAttributes
 @ stdcall SetLogonNotifyWindow(long long)
 @ stdcall SetMenu(long long)
 @ stdcall SetMenuContextHelpId(long long)
@@ -726,7 +726,7 @@
 @ stdcall SetWindowLongW(long long long)
 @ stdcall SetWindowPlacement(long ptr)
 @ stdcall SetWindowPos(long long long long long long long)
-@ stdcall SetWindowRgn(long long long)
+@ stdcall SetWindowRgn(long long long) NtUserSetWindowRgn
 @ stdcall SetWindowStationUser(long long)
 @ stdcall SetWindowTextA(long str)
 @ stdcall SetWindowTextW(long wstr)

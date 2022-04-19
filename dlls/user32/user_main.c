@@ -25,6 +25,7 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
+#include "imm.h"
 
 #include "controls.h"
 #include "user_private.h"
@@ -133,15 +134,30 @@ static void dpiaware_init(void)
     }
 }
 
+static void CDECL notify_ime( HWND hwnd, UINT param )
+{
+    HWND ime_default = ImmGetDefaultIMEWnd( hwnd );
+    if (ime_default) SendMessageW( ime_default, WM_IME_INTERNAL, param, HandleToUlong(hwnd) );
+}
+
 static const struct user_callbacks user_funcs =
 {
-    GetDesktopWindow,
-    GetWindowRect,
-    IsChild,
+    CopyImage,
+    PostMessageW,
     RedrawWindow,
+    SendInput,
     SendMessageTimeoutW,
+    SendMessageW,
+    SendNotifyMessageW,
+    SetWindowPos,
+    WaitForInputIdle,
     WindowFromDC,
+    free_dce,
+    notify_ime,
+    register_builtin_classes,
     MSG_SendInternalMessageTimeout,
+    (void *)__wine_set_user_driver,
+    set_window_pos,
 };
 
 static void WINAPI User32CallFreeIcon( ULONG *param, ULONG size )
@@ -149,11 +165,17 @@ static void WINAPI User32CallFreeIcon( ULONG *param, ULONG size )
     wow_handlers.free_icon_param( *param );
 }
 
+static BOOL WINAPI User32LoadDriver( const WCHAR *path, ULONG size )
+{
+    return LoadLibraryW( path ) != NULL;
+}
+
 static const void *kernel_callback_table[NtUserCallCount] =
 {
     User32CallEnumDisplayMonitor,
     User32CallWinEventHook,
     User32CallWindowsHook,
+    User32LoadDriver,
     User32CallFreeIcon,
 };
 
@@ -169,6 +191,7 @@ static BOOL process_attach(void)
     NtUserCallOneParam( (UINT_PTR)&user_funcs, NtUserSetCallbacks );
 
     dpiaware_init();
+    winproc_init();
     register_desktop_class();
 
     /* Initialize system colors and metrics */

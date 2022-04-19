@@ -328,7 +328,7 @@ static struct dce *get_window_dce( HWND hwnd )
  *
  * Free a class or window DCE.
  */
-void free_dce( struct dce *dce, HWND hwnd )
+void WINAPI free_dce( struct dce *dce, HWND hwnd )
 {
     struct dce *dce_to_free = NULL;
 
@@ -841,7 +841,7 @@ void move_window_bits_parent( HWND hwnd, HWND parent, const RECT *window_rect, c
     }
 
     TRACE( "copying %s -> %s\n", wine_dbgstr_rect( &src ), wine_dbgstr_rect( &dst ));
-    MapWindowPoints( GetAncestor( hwnd, GA_PARENT ), parent, (POINT *)&src, 2 );
+    MapWindowPoints( NtUserGetAncestor( hwnd, GA_PARENT ), parent, (POINT *)&src, 2 );
     OffsetRect( &src, win->client_rect.left - win->visible_rect.left,
                 win->client_rect.top - win->visible_rect.top );
     OffsetRect( &dst, -window_rect->left, -window_rect->top );
@@ -1018,7 +1018,7 @@ HDC WINAPI GetDCEx( HWND hwnd, HRGN hrgnClip, DWORD flags )
 
     if (flags & DCX_WINDOW) flags &= ~DCX_CLIPCHILDREN;
 
-    parent = GetAncestor( hwnd, GA_PARENT );
+    parent = NtUserGetAncestor( hwnd, GA_PARENT );
     if (!parent || (parent == GetDesktopWindow()))
         flags = (flags & ~DCX_PARENTCLIP) | DCX_CLIPSIBLINGS;
 

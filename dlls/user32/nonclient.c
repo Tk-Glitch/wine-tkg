@@ -1090,7 +1090,7 @@ static void  NC_DoNCPaint( HWND  hwnd, HRGN  clip )
  */
 LRESULT NC_HandleNCPaint( HWND hwnd , HRGN clip)
 {
-    HWND parent = GetAncestor( hwnd, GA_PARENT );
+    HWND parent = NtUserGetAncestor( hwnd, GA_PARENT );
     DWORD dwStyle = GetWindowLongW( hwnd, GWL_STYLE );
 
     if( dwStyle & WS_VISIBLE )
@@ -1126,7 +1126,7 @@ LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam, LPARAM lParam )
     {
         NC_DoNCPaint( hwnd, (HRGN)1 );
 
-        if (GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())
+        if (NtUserGetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())
             PostMessageW( GetDesktopWindow(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
     }
 
@@ -1247,7 +1247,7 @@ static void NC_TrackMinMaxBox( HWND hwnd, WORD wParam )
         paintButton = NC_DrawMaxButton;
     }
 
-    SetCapture( hwnd );
+    NtUserSetCapture( hwnd );
 
     (*paintButton)( hwnd, hdc, TRUE, FALSE);
 
@@ -1312,7 +1312,7 @@ static void NC_TrackCloseButton (HWND hwnd, WPARAM wParam, LPARAM lParam)
 
     hdc = GetWindowDC( hwnd );
 
-    SetCapture( hwnd );
+    NtUserSetCapture( hwnd );
 
     NC_DrawCloseButton (hwnd, hdc, TRUE, FALSE);
 
@@ -1386,7 +1386,7 @@ LRESULT NC_HandleNCLButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam )
             {
                 if ((GetWindowLongW( top, GWL_STYLE ) & (WS_POPUP|WS_CHILD)) != WS_CHILD)
                     break;
-                parent = GetAncestor( top, GA_PARENT );
+                parent = NtUserGetAncestor( top, GA_PARENT );
                 if (!parent || parent == GetDesktopWindow()) break;
                 top = parent;
             }
@@ -1467,7 +1467,7 @@ LRESULT NC_HandleNCRButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam )
     {
     case HTCAPTION:
     case HTSYSMENU:
-        SetCapture( hwnd );
+        NtUserSetCapture( hwnd );
         for (;;)
         {
             if (!GetMessageW( &msg, 0, WM_MOUSEFIRST, WM_MOUSELAST )) break;

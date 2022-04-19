@@ -73,7 +73,7 @@ namespace Windows
             HRESULT Compare([in] HSTRING value1, [in] HSTRING value2, [out, retval] INT32* result);
         }
 
-        /*[activatable(Windows.Networking.IHostNameFactory, Windows.Foundation.UniversalApiContract, 1.0)]*/
+        [activatable(Windows.Networking.IHostNameFactory, Windows.Foundation.UniversalApiContract, 1.0)]
         [contract(Windows.Foundation.UniversalApiContract, 1.0)]
         [marshaling_behavior(agile)]
         [static(Windows.Networking.IHostNameStatics, Windows.Foundation.UniversalApiContract, 1.0)]
@@ -85,3 +85,4 @@ namespace Windows
         }
     }
 }
+

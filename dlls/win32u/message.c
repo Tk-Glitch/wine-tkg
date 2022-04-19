@@ -41,6 +41,9 @@ LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 {
     switch(msg)
     {
+    case WM_WINE_SETACTIVEWINDOW:
+        if (!wparam && NtUserGetForegroundWindow() == hwnd) return 0;
+        return (LRESULT)NtUserSetActiveWindow( (HWND)wparam );
     case WM_WINE_KEYBOARD_LL_HOOK:
     case WM_WINE_MOUSE_LL_HOOK:
     {
@@ -56,12 +59,24 @@ LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             return user_driver->pClipCursor( &rect );
         }
         return user_driver->pClipCursor( NULL );
+    case WM_WINE_UPDATEWINDOWSTATE:
+        update_window_state( hwnd );
+        return 0;
     default:
         if (msg >= WM_WINE_FIRST_DRIVER_MSG && msg <= WM_WINE_LAST_DRIVER_MSG)
             return user_driver->pWindowMessage( hwnd, msg, wparam, lparam );
         FIXME( "unknown internal message %x\n", msg );
         return 0;
     }
+}
+
+/***********************************************************************
+ *           NtUserWaitForInputIdle (win32u.@)
+ */
+DWORD WINAPI NtUserWaitForInputIdle( HANDLE process, DWORD timeout, BOOL wow )
+{
+    if (!user_callbacks) return 0;
+    return user_callbacks->pWaitForInputIdle( process, timeout );
 }
 
 /**********************************************************************
@@ -100,4 +115,39 @@ BOOL WINAPI NtUserGetGUIThreadInfo( DWORD id, GUITHREADINFO *info )
     }
     SERVER_END_REQ;
     return ret;
+}
+
+/* see SendMessageW */
+LRESULT send_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    /* FIXME: move implementation from user32 */
+    if (!user_callbacks) return 0;
+    return user_callbacks->pSendMessageW( hwnd, msg, wparam, lparam );
+}
+
+/* see SendNotifyMessageW */
+static BOOL send_notify_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, BOOL ansi )
+{
+    return user_callbacks && user_callbacks->pSendNotifyMessageW( hwnd, msg, wparam, lparam );
+}
+
+/* see PostMessageW */
+LRESULT post_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    /* FIXME: move implementation from user32 */
+    if (!user_callbacks) return 0;
+    return user_callbacks->pPostMessageW( hwnd, msg, wparam, lparam );
+}
+
+BOOL WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
+                               ULONG_PTR result_info, DWORD type, BOOL ansi )
+{
+    switch (type)
+    {
+    case FNID_SENDNOTIFYMESSAGE:
+        return send_notify_message( hwnd, msg, wparam, lparam, ansi );
+    default:
+        FIXME( "%p %x %lx %lx %lx %x %x\n", hwnd, msg, wparam, lparam, result_info, type, ansi );
+    }
+    return 0;
 }

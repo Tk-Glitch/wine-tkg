@@ -64,7 +64,7 @@ static inline VkCommandBufferInheritanceInfo_host *convert_VkCommandBufferInheri
     VkCommandBufferInheritanceInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -117,7 +117,7 @@ static inline VkBindAccelerationStructureMemoryInfoNV_host *convert_VkBindAccele
     VkBindAccelerationStructureMemoryInfoNV_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -150,7 +150,7 @@ static inline VkBindBufferMemoryInfo_host *convert_VkBindBufferMemoryInfo_array_
     VkBindBufferMemoryInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -181,7 +181,7 @@ static inline VkBindImageMemoryInfo_host *convert_VkBindImageMemoryInfo_array_wi
     VkBindImageMemoryInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -212,7 +212,7 @@ static inline VkAccelerationStructureBuildGeometryInfoKHR_host *convert_VkAccele
     VkAccelerationStructureBuildGeometryInfoKHR_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -277,7 +277,7 @@ static inline VkRenderingAttachmentInfo_host *convert_VkRenderingAttachmentInfo_
     VkRenderingAttachmentInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -402,7 +402,7 @@ static inline VkGeometryNV_host *convert_VkGeometryNV_array_win_to_host(const Vk
     VkGeometryNV_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -481,7 +481,7 @@ static inline VkBufferCopy_host *convert_VkBufferCopy_array_win_to_host(const Vk
     VkBufferCopy_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -510,7 +510,7 @@ static inline VkBufferCopy2_host *convert_VkBufferCopy2_array_win_to_host(const 
     VkBufferCopy2_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -562,7 +562,7 @@ static inline VkBufferImageCopy_host *convert_VkBufferImageCopy_array_win_to_hos
     VkBufferImageCopy_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -594,7 +594,7 @@ static inline VkBufferImageCopy2_host *convert_VkBufferImageCopy2_array_win_to_h
     VkBufferImageCopy2_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -722,7 +722,7 @@ static inline VkCommandBuffer *convert_VkCommandBuffer_array_win_to_host(const V
     VkCommandBuffer *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -746,7 +746,7 @@ static inline VkIndirectCommandsStreamNV_host *convert_VkIndirectCommandsStreamN
     VkIndirectCommandsStreamNV_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -804,7 +804,7 @@ static inline VkBufferMemoryBarrier_host *convert_VkBufferMemoryBarrier_array_wi
     VkBufferMemoryBarrier_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -839,7 +839,7 @@ static inline VkImageMemoryBarrier_host *convert_VkImageMemoryBarrier_array_win_
     VkImageMemoryBarrier_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -875,7 +875,7 @@ static inline VkBufferMemoryBarrier2_host *convert_VkBufferMemoryBarrier2_array_
     VkBufferMemoryBarrier2_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -912,7 +912,7 @@ static inline VkImageMemoryBarrier2_host *convert_VkImageMemoryBarrier2_array_wi
     VkImageMemoryBarrier2_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -975,7 +975,7 @@ static inline VkDescriptorImageInfo_host *convert_VkDescriptorImageInfo_array_wi
     VkDescriptorImageInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1004,7 +1004,7 @@ static inline VkDescriptorBufferInfo_host *convert_VkDescriptorBufferInfo_array_
     VkDescriptorBufferInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1033,7 +1033,7 @@ static inline VkWriteDescriptorSet_host *convert_VkWriteDescriptorSet_array_win_
     VkWriteDescriptorSet_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1127,7 +1127,7 @@ static inline VkDependencyInfo_host *convert_VkDependencyInfo_array_win_to_host(
     VkDependencyInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1243,7 +1243,7 @@ static inline VkComputePipelineCreateInfo_host *convert_VkComputePipelineCreateI
     VkComputePipelineCreateInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1323,7 +1323,7 @@ static inline VkPipelineShaderStageCreateInfo_host *convert_VkPipelineShaderStag
     VkPipelineShaderStageCreateInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1356,7 +1356,7 @@ static inline VkGraphicsPipelineCreateInfo_host *convert_VkGraphicsPipelineCreat
     VkGraphicsPipelineCreateInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1423,7 +1423,7 @@ static inline VkIndirectCommandsLayoutTokenNV_host *convert_VkIndirectCommandsLa
     VkIndirectCommandsLayoutTokenNV_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1487,7 +1487,7 @@ static inline VkRayTracingPipelineCreateInfoKHR_host *convert_VkRayTracingPipeli
     VkRayTracingPipelineCreateInfoKHR_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1533,7 +1533,7 @@ static inline VkRayTracingPipelineCreateInfoNV_host *convert_VkRayTracingPipelin
     VkRayTracingPipelineCreateInfoNV_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1608,7 +1608,7 @@ static inline VkMappedMemoryRange_host *convert_VkMappedMemoryRange_array_win_to
     VkMappedMemoryRange_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -1764,12 +1764,24 @@ static inline void convert_VkMemoryRequirements2_host_to_win(const VkMemoryRequi
 #endif /* USE_STRUCT_CONVERSION */
 
 #if defined(USE_STRUCT_CONVERSION)
+static inline void convert_VkDescriptorSetBindingReferenceVALVE_win_to_host(const VkDescriptorSetBindingReferenceVALVE *in, VkDescriptorSetBindingReferenceVALVE_host *out)
+{
+    if (!in) return;
+
+    out->sType = in->sType;
+    out->pNext = in->pNext;
+    out->descriptorSetLayout = in->descriptorSetLayout;
+    out->binding = in->binding;
+}
+#endif /* USE_STRUCT_CONVERSION */
+
+#if defined(USE_STRUCT_CONVERSION)
 static inline VkBufferCreateInfo_host *convert_VkBufferCreateInfo_array_win_to_host(const VkBufferCreateInfo *in, uint32_t count)
 {
     VkBufferCreateInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2198,7 +2210,7 @@ static inline VkSparseMemoryBind_host *convert_VkSparseMemoryBind_array_win_to_h
     VkSparseMemoryBind_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2229,7 +2241,7 @@ static inline VkSparseBufferMemoryBindInfo_host *convert_VkSparseBufferMemoryBin
     VkSparseBufferMemoryBindInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2264,7 +2276,7 @@ static inline VkSparseImageOpaqueMemoryBindInfo_host *convert_VkSparseImageOpaqu
     VkSparseImageOpaqueMemoryBindInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2299,7 +2311,7 @@ static inline VkSparseImageMemoryBind_host *convert_VkSparseImageMemoryBind_arra
     VkSparseImageMemoryBind_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2331,7 +2343,7 @@ static inline VkSparseImageMemoryBindInfo_host *convert_VkSparseImageMemoryBindI
     VkSparseImageMemoryBindInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2366,7 +2378,7 @@ static inline VkBindSparseInfo_host *convert_VkBindSparseInfo_array_win_to_host(
     VkBindSparseInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2411,7 +2423,7 @@ static inline VkSubmitInfo *convert_VkSubmitInfo_array_win_to_host(const VkSubmi
     VkSubmitInfo *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2449,7 +2461,7 @@ static inline VkSemaphoreSubmitInfo_host *convert_VkSemaphoreSubmitInfo_array_wi
     VkSemaphoreSubmitInfo_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2480,7 +2492,7 @@ static inline VkCommandBufferSubmitInfo *convert_VkCommandBufferSubmitInfo_array
     VkCommandBufferSubmitInfo *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2512,7 +2524,7 @@ static inline VkSubmitInfo2 *convert_VkSubmitInfo2_array_win_to_host(const VkSub
 #endif /* USE_STRUCT_CONVERSION */
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2617,7 +2629,7 @@ static inline VkDebugUtilsObjectNameInfoEXT *convert_VkDebugUtilsObjectNameInfoE
 #endif /* USE_STRUCT_CONVERSION */
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2684,7 +2696,7 @@ static inline VkCopyDescriptorSet_host *convert_VkCopyDescriptorSet_array_win_to
     VkCopyDescriptorSet_host *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -2718,7 +2730,7 @@ static inline VkPhysicalDevice *convert_VkPhysicalDevice_array_win_to_host(const
     VkPhysicalDevice *out;
     unsigned int i;
 
-    if (!in) return NULL;
+    if (!in || !count) return NULL;
 
     out = malloc(count * sizeof(*out));
     for (i = 0; i < count; i++)
@@ -4697,6 +4709,22 @@ VkResult convert_VkDeviceCreateInfo_struct_chain(const void *pNext, VkDeviceCrea
             out->sType = in->sType;
             out->pNext = NULL;
             out->linearColorAttachment = in->linearColorAttachment;
+
+            out_header->pNext = (VkBaseOutStructure *)out;
+            out_header = out_header->pNext;
+            break;
+        }
+
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_SET_HOST_MAPPING_FEATURES_VALVE:
+        {
+            const VkPhysicalDeviceDescriptorSetHostMappingFeaturesVALVE *in = (const VkPhysicalDeviceDescriptorSetHostMappingFeaturesVALVE *)in_header;
+            VkPhysicalDeviceDescriptorSetHostMappingFeaturesVALVE *out;
+
+            if (!(out = malloc(sizeof(*out)))) goto out_of_memory;
+
+            out->sType = in->sType;
+            out->pNext = NULL;
+            out->descriptorSetHostMapping = in->descriptorSetHostMapping;
 
             out_header->pNext = (VkBaseOutStructure *)out;
             out_header = out_header->pNext;
@@ -7094,22 +7122,18 @@ static NTSTATUS wine_vkCreateBufferView(void *args)
 #endif
 }
 
-static NTSTATUS wine_vkCreateComputePipelines(void *args)
+VkResult thunk_vkCreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache, uint32_t createInfoCount, const VkComputePipelineCreateInfo *pCreateInfos, const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines)
 {
-    struct vkCreateComputePipelines_params *params = args;
 #if defined(USE_STRUCT_CONVERSION)
     VkResult result;
     VkComputePipelineCreateInfo_host *pCreateInfos_host;
-    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache), params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+    pCreateInfos_host = convert_VkComputePipelineCreateInfo_array_win_to_host(pCreateInfos, createInfoCount);
+    result = device->funcs.p_vkCreateComputePipelines(device->device, pipelineCache, createInfoCount, pCreateInfos_host, NULL, pPipelines);
 
-    pCreateInfos_host = convert_VkComputePipelineCreateInfo_array_win_to_host(params->pCreateInfos, params->createInfoCount);
-    result = params->device->funcs.p_vkCreateComputePipelines(params->device->device, params->pipelineCache, params->createInfoCount, pCreateInfos_host, NULL, params->pPipelines);
-
-    free_VkComputePipelineCreateInfo_array(pCreateInfos_host, params->createInfoCount);
+    free_VkComputePipelineCreateInfo_array(pCreateInfos_host, createInfoCount);
     return result;
 #else
-    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache), params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-    return params->device->funcs.p_vkCreateComputePipelines(params->device->device, params->pipelineCache, params->createInfoCount, params->pCreateInfos, NULL, params->pPipelines);
+    return device->funcs.p_vkCreateComputePipelines(device->device, pipelineCache, createInfoCount, pCreateInfos, NULL, pPipelines);
 #endif
 }
 
@@ -7227,22 +7251,18 @@ static NTSTATUS wine_vkCreateFramebuffer(void *args)
 #endif
 }
 
-static NTSTATUS wine_vkCreateGraphicsPipelines(void *args)
+VkResult thunk_vkCreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache, uint32_t createInfoCount, const VkGraphicsPipelineCreateInfo *pCreateInfos, const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines)
 {
-    struct vkCreateGraphicsPipelines_params *params = args;
 #if defined(USE_STRUCT_CONVERSION)
     VkResult result;
     VkGraphicsPipelineCreateInfo_host *pCreateInfos_host;
-    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache), params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+    pCreateInfos_host = convert_VkGraphicsPipelineCreateInfo_array_win_to_host(pCreateInfos, createInfoCount);
+    result = device->funcs.p_vkCreateGraphicsPipelines(device->device, pipelineCache, createInfoCount, pCreateInfos_host, NULL, pPipelines);
 
-    pCreateInfos_host = convert_VkGraphicsPipelineCreateInfo_array_win_to_host(params->pCreateInfos, params->createInfoCount);
-    result = params->device->funcs.p_vkCreateGraphicsPipelines(params->device->device, params->pipelineCache, params->createInfoCount, pCreateInfos_host, NULL, params->pPipelines);
-
-    free_VkGraphicsPipelineCreateInfo_array(pCreateInfos_host, params->createInfoCount);
+    free_VkGraphicsPipelineCreateInfo_array(pCreateInfos_host, createInfoCount);
     return result;
 #else
-    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache), params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-    return params->device->funcs.p_vkCreateGraphicsPipelines(params->device->device, params->pipelineCache, params->createInfoCount, params->pCreateInfos, NULL, params->pPipelines);
+    return device->funcs.p_vkCreateGraphicsPipelines(device->device, pipelineCache, createInfoCount, pCreateInfos, NULL, pPipelines);
 #endif
 }
 
@@ -7325,41 +7345,33 @@ static NTSTATUS wine_vkCreateQueryPool(void *args)
     return params->device->funcs.p_vkCreateQueryPool(params->device->device, params->pCreateInfo, NULL, params->pQueryPool);
 }
 
-static NTSTATUS wine_vkCreateRayTracingPipelinesKHR(void *args)
+VkResult thunk_vkCreateRayTracingPipelinesKHR(VkDevice device, VkDeferredOperationKHR deferredOperation, VkPipelineCache pipelineCache, uint32_t createInfoCount, const VkRayTracingPipelineCreateInfoKHR *pCreateInfos, const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines)
 {
-    struct vkCreateRayTracingPipelinesKHR_params *params = args;
 #if defined(USE_STRUCT_CONVERSION)
     VkResult result;
     VkRayTracingPipelineCreateInfoKHR_host *pCreateInfos_host;
-    TRACE("%p, 0x%s, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->deferredOperation), wine_dbgstr_longlong(params->pipelineCache), params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+    pCreateInfos_host = convert_VkRayTracingPipelineCreateInfoKHR_array_win_to_host(pCreateInfos, createInfoCount);
+    result = device->funcs.p_vkCreateRayTracingPipelinesKHR(device->device, deferredOperation, pipelineCache, createInfoCount, pCreateInfos_host, NULL, pPipelines);
 
-    pCreateInfos_host = convert_VkRayTracingPipelineCreateInfoKHR_array_win_to_host(params->pCreateInfos, params->createInfoCount);
-    result = params->device->funcs.p_vkCreateRayTracingPipelinesKHR(params->device->device, params->deferredOperation, params->pipelineCache, params->createInfoCount, pCreateInfos_host, NULL, params->pPipelines);
-
-    free_VkRayTracingPipelineCreateInfoKHR_array(pCreateInfos_host, params->createInfoCount);
+    free_VkRayTracingPipelineCreateInfoKHR_array(pCreateInfos_host, createInfoCount);
     return result;
 #else
-    TRACE("%p, 0x%s, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->deferredOperation), wine_dbgstr_longlong(params->pipelineCache), params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-    return params->device->funcs.p_vkCreateRayTracingPipelinesKHR(params->device->device, params->deferredOperation, params->pipelineCache, params->createInfoCount, params->pCreateInfos, NULL, params->pPipelines);
+    return device->funcs.p_vkCreateRayTracingPipelinesKHR(device->device, deferredOperation, pipelineCache, createInfoCount, pCreateInfos, NULL, pPipelines);
 #endif
 }
 
-static NTSTATUS wine_vkCreateRayTracingPipelinesNV(void *args)
+VkResult thunk_vkCreateRayTracingPipelinesNV(VkDevice device, VkPipelineCache pipelineCache, uint32_t createInfoCount, const VkRayTracingPipelineCreateInfoNV *pCreateInfos, const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines)
 {
-    struct vkCreateRayTracingPipelinesNV_params *params = args;
 #if defined(USE_STRUCT_CONVERSION)
     VkResult result;
     VkRayTracingPipelineCreateInfoNV_host *pCreateInfos_host;
-    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache), params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+    pCreateInfos_host = convert_VkRayTracingPipelineCreateInfoNV_array_win_to_host(pCreateInfos, createInfoCount);
+    result = device->funcs.p_vkCreateRayTracingPipelinesNV(device->device, pipelineCache, createInfoCount, pCreateInfos_host, NULL, pPipelines);
 
-    pCreateInfos_host = convert_VkRayTracingPipelineCreateInfoNV_array_win_to_host(params->pCreateInfos, params->createInfoCount);
-    result = params->device->funcs.p_vkCreateRayTracingPipelinesNV(params->device->device, params->pipelineCache, params->createInfoCount, pCreateInfos_host, NULL, params->pPipelines);
-
-    free_VkRayTracingPipelineCreateInfoNV_array(pCreateInfos_host, params->createInfoCount);
+    free_VkRayTracingPipelineCreateInfoNV_array(pCreateInfos_host, createInfoCount);
     return result;
 #else
-    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache), params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-    return params->device->funcs.p_vkCreateRayTracingPipelinesNV(params->device->device, params->pipelineCache, params->createInfoCount, params->pCreateInfos, NULL, params->pPipelines);
+    return device->funcs.p_vkCreateRayTracingPipelinesNV(device->device, pipelineCache, createInfoCount, pCreateInfos, NULL, pPipelines);
 #endif
 }
 
@@ -8012,6 +8024,32 @@ static NTSTATUS wine_vkGetDeferredOperationResultKHR(void *args)
     struct vkGetDeferredOperationResultKHR_params *params = args;
     TRACE("%p, 0x%s\n", params->device, wine_dbgstr_longlong(params->operation));
     return params->device->funcs.p_vkGetDeferredOperationResultKHR(params->device->device, params->operation);
+}
+
+static NTSTATUS wine_vkGetDescriptorSetHostMappingVALVE(void *args)
+{
+    struct vkGetDescriptorSetHostMappingVALVE_params *params = args;
+    TRACE("%p, 0x%s, %p\n", params->device, wine_dbgstr_longlong(params->descriptorSet), params->ppData);
+    params->device->funcs.p_vkGetDescriptorSetHostMappingVALVE(params->device->device, params->descriptorSet, params->ppData);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS wine_vkGetDescriptorSetLayoutHostMappingInfoVALVE(void *args)
+{
+    struct vkGetDescriptorSetLayoutHostMappingInfoVALVE_params *params = args;
+#if defined(USE_STRUCT_CONVERSION)
+    VkDescriptorSetBindingReferenceVALVE_host pBindingReference_host;
+    TRACE("%p, %p, %p\n", params->device, params->pBindingReference, params->pHostMapping);
+
+    convert_VkDescriptorSetBindingReferenceVALVE_win_to_host(params->pBindingReference, &pBindingReference_host);
+    params->device->funcs.p_vkGetDescriptorSetLayoutHostMappingInfoVALVE(params->device->device, &pBindingReference_host, params->pHostMapping);
+
+    return STATUS_SUCCESS;
+#else
+    TRACE("%p, %p, %p\n", params->device, params->pBindingReference, params->pHostMapping);
+    params->device->funcs.p_vkGetDescriptorSetLayoutHostMappingInfoVALVE(params->device->device, params->pBindingReference, params->pHostMapping);
+    return STATUS_SUCCESS;
+#endif
 }
 
 static NTSTATUS wine_vkGetDescriptorSetLayoutSupport(void *args)
@@ -9518,6 +9556,7 @@ static const char * const vk_device_extensions[] =
     "VK_EXT_pageable_device_local_memory",
     "VK_EXT_pci_bus_info",
     "VK_EXT_pipeline_creation_cache_control",
+    "VK_EXT_pipeline_creation_feedback",
     "VK_EXT_post_depth_coverage",
     "VK_EXT_primitive_topology_list_restart",
     "VK_EXT_private_data",
@@ -9657,6 +9696,7 @@ static const char * const vk_device_extensions[] =
     "VK_QCOM_render_pass_store_ops",
     "VK_QCOM_render_pass_transform",
     "VK_QCOM_rotated_copy_commands",
+    "VK_VALVE_descriptor_set_host_mapping",
     "VK_VALVE_mutable_descriptor_type",
 };
 
@@ -10054,6 +10094,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     wine_vkGetCalibratedTimestampsEXT,
     wine_vkGetDeferredOperationMaxConcurrencyKHR,
     wine_vkGetDeferredOperationResultKHR,
+    wine_vkGetDescriptorSetHostMappingVALVE,
+    wine_vkGetDescriptorSetLayoutHostMappingInfoVALVE,
     wine_vkGetDescriptorSetLayoutSupport,
     wine_vkGetDescriptorSetLayoutSupportKHR,
     wine_vkGetDeviceAccelerationStructureCompatibilityKHR,

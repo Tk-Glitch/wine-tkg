@@ -914,7 +914,7 @@ static HRESULT WINAPI filesecurity_GetSecurity(ISecurityInformation *iface, SECU
 {
     struct FileSecurity *This = impl_from_ISecurityInformation(iface);
 
-    TRACE("(%p, %u, %p, %u)\n", This, info, sd, default_sd);
+    TRACE("(%p, %lu, %p, %u)\n", This, info, sd, default_sd);
 
     if (default_sd)
         FIXME("Returning a default sd is not implemented\n");
@@ -932,7 +932,7 @@ static HRESULT WINAPI filesecurity_SetSecurity(ISecurityInformation *iface, SECU
     PSID owner, group;
     ACL *dacl, *sacl;
 
-    TRACE("(%p, %u, %p)\n", This, info, sd);
+    TRACE("(%p, %lu, %p)\n", This, info, sd);
 
     if (!GetSecurityDescriptorOwner(sd, &owner, &defaulted))
         return E_FAIL;
@@ -959,7 +959,7 @@ static HRESULT WINAPI filesecurity_GetAccessRights(ISecurityInformation *iface, 
 {
     struct FileSecurity *This = impl_from_ISecurityInformation(iface);
 
-    TRACE("(%p, %s, %x, %p, %p, %p)\n", This, debugstr_guid(type), flags, access, count, default_access);
+    TRACE("(%p, %s, %lx, %p, %p, %p)\n", This, debugstr_guid(type), flags, access, count, default_access);
 
     if (This->directory)
     {

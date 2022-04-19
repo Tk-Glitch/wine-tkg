@@ -333,6 +333,26 @@ DWORD WINAPI PowerEnumerate(HKEY key, const GUID *scheme, const GUID *subgroup, 
 DWORD WINAPI PowerRegisterSuspendResumeNotification(DWORD flags, HANDLE recipient, PHPOWERNOTIFY handle)
 {
     FIXME("(0x%08lx,%p,%p) stub!\n", flags, recipient, handle);
+    *handle = (HPOWERNOTIFY)0xdeadbeef;
+    return ERROR_SUCCESS;
+}
+
+DWORD WINAPI PowerUnregisterSuspendResumeNotification(HPOWERNOTIFY handle)
+{
+    FIXME("(%p) stub!\n", handle);
+    return ERROR_SUCCESS;
+}
+
+DWORD WINAPI PowerSettingRegisterNotification(const GUID *setting, DWORD flags, HANDLE recipient, PHPOWERNOTIFY handle)
+{
+    FIXME("(%s,0x%08lx,%p,%p) stub!\n", debugstr_guid(setting), flags, recipient, handle);
+    *handle = (PHPOWERNOTIFY)0xdeadbeef;
+    return ERROR_SUCCESS;
+}
+
+DWORD WINAPI PowerSettingUnregisterNotification(HPOWERNOTIFY handle)
+{
+    FIXME("(%p) stub!\n", handle);
     return ERROR_SUCCESS;
 }
 

@@ -6118,13 +6118,13 @@ static LPWSTR * HTTP_InterpretHttpHeader(LPCWSTR buffer)
 static DWORD HTTP_ProcessHeader(http_request_t *request, LPCWSTR field, LPCWSTR value, DWORD dwModifier)
 {
     LPHTTPHEADERW lphttpHdr;
-     INT index;
-     BOOL request_only = !!(dwModifier & HTTP_ADDHDR_FLAG_REQ);
+    INT index;
+    BOOL request_only = !!(dwModifier & HTTP_ADDHDR_FLAG_REQ);
     DWORD res = ERROR_SUCCESS;
 
-     TRACE("--> %s: %s - 0x%08x\n", debugstr_w(field), debugstr_w(value), dwModifier);
+    TRACE("--> %s: %s - 0x%08lx\n", debugstr_w(field), debugstr_w(value), dwModifier);
 
-     EnterCriticalSection( &request->headers_section );
+    EnterCriticalSection( &request->headers_section );
 
     index = HTTP_GetCustomHeaderIndex(request, field, 0, request_only);
      if (index >= 0)

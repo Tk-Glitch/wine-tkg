@@ -3436,7 +3436,7 @@ void MENU_TrackKbdMenuBar( HWND hwnd, UINT wParam, WCHAR wChar)
     /* find window that has a menu */
 
     while (is_win_menu_disallowed(hwnd))
-        if (!(hwnd = GetAncestor( hwnd, GA_PARENT ))) return;
+        if (!(hwnd = NtUserGetAncestor( hwnd, GA_PARENT ))) return;
 
     /* check if we have to track a system menu */
 
@@ -5705,12 +5705,12 @@ INT WINAPI TranslateAcceleratorW( HWND hWnd, HACCEL hAccel, LPMSG msg )
     TRACE_(accel)("hAccel %p, hWnd %p, msg->hwnd %p, msg->message %04x, wParam %08lx, lParam %08lx\n",
                   hAccel,hWnd,msg->hwnd,msg->message,msg->wParam,msg->lParam);
 
-    if (!(count = CopyAcceleratorTableW( hAccel, NULL, 0 ))) return 0;
+    if (!(count = NtUserCopyAcceleratorTable( hAccel, NULL, 0 ))) return 0;
     if (count > ARRAY_SIZE( data ))
     {
         if (!(ptr = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*ptr) ))) return 0;
     }
-    count = CopyAcceleratorTableW( hAccel, ptr, count );
+    count = NtUserCopyAcceleratorTable( hAccel, ptr, count );
     for (i = 0; i < count; i++)
     {
         if (translate_accelerator( hWnd, msg->message, msg->wParam, msg->lParam,

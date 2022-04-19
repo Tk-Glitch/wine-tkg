@@ -417,7 +417,7 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         /* The default action in Windows is to set the keyboard focus to
          * the window, if it's being activated and not minimized */
         if (LOWORD(wParam) != WA_INACTIVE) {
-            if (!IsIconic(hwnd)) SetFocus(hwnd);
+            if (!IsIconic(hwnd)) NtUserSetFocus( hwnd );
         }
         break;
 
@@ -496,7 +496,7 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
 
             if( wParam == VK_F4 )       /* try to close the window */
             {
-                HWND top = GetAncestor( hwnd, GA_ROOT );
+                HWND top = NtUserGetAncestor( hwnd, GA_ROOT );
                 if (!(GetClassLongW( top, GCL_STYLE ) & CS_NOCLOSE))
                     PostMessageW( top, WM_SYSCOMMAND, SC_CLOSE, 0 );
             }
@@ -516,7 +516,7 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         /* Press and release F10 or ALT */
         if (((wParam == VK_MENU || wParam == VK_LMENU || wParam == VK_RMENU)
              && iMenuSysKey) || ((wParam == VK_F10) && iF10Key))
-              SendMessageW( GetAncestor( hwnd, GA_ROOT ), WM_SYSCOMMAND, SC_KEYMENU, 0L );
+              SendMessageW( NtUserGetAncestor( hwnd, GA_ROOT ), WM_SYSCOMMAND, SC_KEYMENU, 0L );
         iMenuSysKey = iF10Key = 0;
         break;
 

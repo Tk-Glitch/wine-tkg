@@ -358,7 +358,7 @@ static void start_pipeline(struct media_source *source, struct source_async_comm
             IMFMediaTypeHandler_GetCurrentMediaType(mth, &current_mt);
 
             mf_media_type_to_wg_format(current_mt, &format);
-            wg_parser_stream_enable(stream->wg_stream, &format, NULL);
+            wg_parser_stream_enable(stream->wg_stream, &format);
 
             IMFMediaType_Release(current_mt);
             IMFMediaTypeHandler_Release(mth);
@@ -388,7 +388,6 @@ static void start_pipeline(struct media_source *source, struct source_async_comm
     if (position->vt == VT_I8)
         wg_parser_stream_seek(source->streams[0]->wg_stream, 1.0, position->hVal.QuadPart, 0,
                 AM_SEEKING_AbsolutePositioning, AM_SEEKING_NoPositioning);
-    wg_parser_end_flush(source->wg_parser);
 
     for (i = 0; i < source->stream_count; i++)
         flush_token_queue(source->streams[i], position->vt == VT_EMPTY);
@@ -415,8 +414,6 @@ static void pause_pipeline(struct media_source *source)
 static void stop_pipeline(struct media_source *source)
 {
     unsigned int i;
-
-    wg_parser_begin_flush(source->wg_parser);
 
     for (i = 0; i < source->stream_count; i++)
     {
@@ -453,7 +450,7 @@ static void dispatch_end_of_presentation(struct media_source *source)
     IMFMediaEventQueue_QueueEventParamVar(source->event_queue, MEEndOfPresentation, &GUID_NULL, S_OK, &empty);
 }
 
-static void send_buffer(struct media_stream *stream, const struct wg_parser_event *event, IUnknown *token)
+static void send_buffer(struct media_stream *stream, const struct wg_parser_buffer *wg_buffer, IUnknown *token)
 {
     IMFMediaBuffer *buffer;
     IMFSample *sample;
@@ -466,7 +463,7 @@ static void send_buffer(struct media_stream *stream, const struct wg_parser_even
         return;
     }
 
-    if (FAILED(hr = MFCreateMemoryBuffer(event->u.buffer.size, &buffer)))
+    if (FAILED(hr = MFCreateMemoryBuffer(wg_buffer->size, &buffer)))
     {
         ERR("Failed to create buffer, hr %#lx.\n", hr);
         IMFSample_Release(sample);
@@ -479,7 +476,7 @@ static void send_buffer(struct media_stream *stream, const struct wg_parser_even
         goto out;
     }
 
-    if (FAILED(hr = IMFMediaBuffer_SetCurrentLength(buffer, event->u.buffer.size)))
+    if (FAILED(hr = IMFMediaBuffer_SetCurrentLength(buffer, wg_buffer->size)))
     {
         ERR("Failed to set size, hr %#lx.\n", hr);
         goto out;
@@ -491,7 +488,7 @@ static void send_buffer(struct media_stream *stream, const struct wg_parser_even
         goto out;
     }
 
-    if (!wg_parser_stream_copy_buffer(stream->wg_stream, data, 0, event->u.buffer.size))
+    if (!wg_parser_stream_copy_buffer(stream->wg_stream, data, 0, wg_buffer->size))
     {
         wg_parser_stream_release_buffer(stream->wg_stream);
         IMFMediaBuffer_Unlock(buffer);
@@ -505,13 +502,13 @@ static void send_buffer(struct media_stream *stream, const struct wg_parser_even
         goto out;
     }
 
-    if (FAILED(hr = IMFSample_SetSampleTime(sample, event->u.buffer.pts)))
+    if (FAILED(hr = IMFSample_SetSampleTime(sample, wg_buffer->pts)))
     {
         ERR("Failed to set sample time, hr %#lx.\n", hr);
         goto out;
     }
 
-    if (FAILED(hr = IMFSample_SetSampleDuration(sample, event->u.buffer.duration)))
+    if (FAILED(hr = IMFSample_SetSampleDuration(sample, wg_buffer->duration)))
     {
         ERR("Failed to set sample duration, hr %#lx.\n", hr);
         goto out;
@@ -531,35 +528,19 @@ out:
 static void wait_on_sample(struct media_stream *stream, IUnknown *token)
 {
     PROPVARIANT empty_var = {.vt = VT_EMPTY};
-    struct wg_parser_event event;
+    struct wg_parser_buffer buffer;
 
     TRACE("%p, %p\n", stream, token);
 
-    for (;;)
+    if (wg_parser_stream_get_buffer(stream->wg_stream, &buffer))
     {
-        if (!wg_parser_stream_get_event(stream->wg_stream, &event))
-            return;
-
-        TRACE("Got event of type %#x.\n", event.type);
-
-        switch (event.type)
-        {
-            case WG_PARSER_EVENT_BUFFER:
-                send_buffer(stream, &event, token);
-                return;
-
-            case WG_PARSER_EVENT_EOS:
-                stream->eos = TRUE;
-                IMFMediaEventQueue_QueueEventParamVar(stream->event_queue, MEEndOfStream, &GUID_NULL, S_OK, &empty_var);
-                dispatch_end_of_presentation(stream->parent_source);
-                return;
-
-            case WG_PARSER_EVENT_SEGMENT:
-                break;
-
-            case WG_PARSER_EVENT_NONE:
-                assert(0);
-        }
+        send_buffer(stream, &buffer, token);
+    }
+    else
+    {
+        stream->eos = TRUE;
+        IMFMediaEventQueue_QueueEventParamVar(stream->event_queue, MEEndOfStream, &GUID_NULL, S_OK, &empty_var);
+        dispatch_end_of_presentation(stream->parent_source);
     }
 }
 
@@ -644,7 +625,7 @@ static DWORD CALLBACK read_thread(void *arg)
          * an error when reading past the file size. */
         if (!size)
         {
-            wg_parser_push_data(source->wg_parser, WG_READ_SUCCESS, data, 0);
+            wg_parser_push_data(source->wg_parser, data, 0);
             continue;
         }
 
@@ -662,7 +643,7 @@ static DWORD CALLBACK read_thread(void *arg)
             ERR("Failed to read %u bytes at offset %I64u, hr %#lx.\n", size, offset, hr);
         else if (ret_size != size)
             ERR("Unexpected short read: requested %u bytes, got %lu.\n", size, ret_size);
-        wg_parser_push_data(source->wg_parser, SUCCEEDED(hr) ? WG_READ_SUCCESS : WG_READ_FAILURE, data, ret_size);
+        wg_parser_push_data(source->wg_parser, SUCCEEDED(hr) ? data : NULL, ret_size);
     }
 
     free(data);
@@ -873,7 +854,7 @@ static HRESULT new_media_stream(struct media_source *source,
 static HRESULT media_stream_init_desc(struct media_stream *stream)
 {
     IMFMediaTypeHandler *type_handler = NULL;
-    IMFMediaType *stream_types[7];
+    IMFMediaType *stream_types[6];
     struct wg_format format;
     DWORD type_count = 0;
     unsigned int i;
@@ -892,7 +873,6 @@ static HRESULT media_stream_init_desc(struct media_stream *stream)
             &MFVideoFormat_YUY2,
             &MFVideoFormat_IYUV,
             &MFVideoFormat_I420,
-            &MFVideoFormat_ARGB32,
         };
 
         IMFMediaType *base_type = mf_media_type_from_wg_format(&format);
@@ -1398,7 +1378,6 @@ static const IMFMediaSourceVtbl IMFMediaSource_vtbl =
 
 static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_source **out_media_source)
 {
-    BOOL video_selected = FALSE, audio_selected = FALSE;
     IMFStreamDescriptor **descriptors = NULL;
     unsigned int stream_count = UINT_MAX;
     struct media_source *object;
@@ -1493,52 +1472,15 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
     descriptors = malloc(object->stream_count * sizeof(IMFStreamDescriptor *));
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFStreamDescriptor **descriptor = &descriptors[object->stream_count - 1 - i];
-        char language[128];
-        DWORD language_len;
-        WCHAR *languageW;
-
-        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, descriptor);
-
-        if (wg_parser_stream_get_language(object->streams[i]->wg_stream, language, sizeof(language)))
-        {
-            if ((language_len = MultiByteToWideChar(CP_UTF8, 0, language, -1, NULL, 0)))
-            {
-                languageW = malloc(language_len * sizeof(WCHAR));
-                if (MultiByteToWideChar(CP_UTF8, 0, language, -1, languageW, language_len))
-                {
-                    IMFStreamDescriptor_SetString(*descriptor, &MF_SD_LANGUAGE, languageW);
-                }
-                free(languageW);
-            }
-        }
+        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[i]);
     }
 
     if (FAILED(hr = MFCreatePresentationDescriptor(object->stream_count, descriptors, &object->pres_desc)))
         goto fail;
 
-    /* Select one of each major type. */
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFMediaTypeHandler *handler;
-        GUID major_type;
-        BOOL select_stream = FALSE;
-
-        IMFStreamDescriptor_GetMediaTypeHandler(descriptors[i], &handler);
-        IMFMediaTypeHandler_GetMajorType(handler, &major_type);
-        if (IsEqualGUID(&major_type, &MFMediaType_Video) && !video_selected)
-        {
-            select_stream = TRUE;
-            video_selected = TRUE;
-        }
-        if (IsEqualGUID(&major_type, &MFMediaType_Audio) && !audio_selected)
-        {
-            select_stream = TRUE;
-            audio_selected = TRUE;
-        }
-        if (select_stream)
-            IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
-        IMFMediaTypeHandler_Release(handler);
+        IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
         IMFStreamDescriptor_Release(descriptors[i]);
     }
     free(descriptors);

@@ -4341,18 +4341,22 @@ static void test_bitmap_formats(BOOL d3d11)
 static void test_alpha_mode(BOOL d3d11)
 {
     D2D1_RENDER_TARGET_PROPERTIES rt_desc;
+    D2D1_BITMAP_PROPERTIES1 bitmap_desc1;
     D2D1_BITMAP_PROPERTIES bitmap_desc;
     ID2D1SolidColorBrush *color_brush;
     ID2D1BitmapBrush *bitmap_brush;
     struct d2d1_test_context ctx;
+    ID2D1DeviceContext *context;
+    ID2D1Bitmap1 *bitmap1;
     ID2D1RenderTarget *rt;
+    IDXGISurface *surface;
     ID2D1Bitmap *bitmap;
     D2D1_COLOR_F color;
+    BOOL match, match2;
     D2D1_RECT_F rect;
     D2D1_SIZE_U size;
     ULONG refcount;
     HRESULT hr;
-    BOOL match;
 
     static const DWORD bitmap_data[] =
     {
@@ -4546,8 +4550,49 @@ static void test_alpha_mode(BOOL d3d11)
 
     refcount = ID2D1Bitmap_Release(bitmap);
     ok(refcount == 1, "Bitmap has %lu references left.\n", refcount);
-    ID2D1SolidColorBrush_Release(color_brush);
     ID2D1BitmapBrush_Release(bitmap_brush);
+
+    hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1DeviceContext, (void **)&context);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    set_size_u(&size, 4, 4);
+    memset(&bitmap_desc1, 0, sizeof(bitmap_desc1));
+    bitmap_desc1.dpiX = 96.0f;
+    bitmap_desc1.dpiY = 96.0f;
+    bitmap_desc1.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    bitmap_desc1.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    bitmap_desc1.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+    hr = ID2D1DeviceContext_CreateBitmap(context, size, bitmap_data, 4 * sizeof(*bitmap_data),
+            &bitmap_desc1, &bitmap1);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    ID2D1DeviceContext_BeginDraw(context);
+    ID2D1DeviceContext_SetTarget(context, (ID2D1Image *)bitmap1);
+    set_rect(&rect, 0.0f, 2.0f, 1.0f, 2.0f);
+    ID2D1SolidColorBrush_SetOpacity(color_brush, 1.0f);
+    ID2D1DeviceContext_FillRectangle(context, &rect, (ID2D1Brush *)color_brush);
+    set_rect(&rect, 1.0f, 2.0f, 3.0f, 3.0f);
+    ID2D1SolidColorBrush_SetOpacity(color_brush, 0.75f);
+    ID2D1DeviceContext_FillRectangle(context, &rect, (ID2D1Brush *)color_brush);
+    set_rect(&rect, 3.0f, 2.0f, 3.0f, 3.0f);
+    ID2D1SolidColorBrush_SetOpacity(color_brush, 0.25f);
+    ID2D1DeviceContext_FillRectangle(context, &rect, (ID2D1Brush *)color_brush);
+    hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    surface = ctx.surface;
+    hr = ID2D1Bitmap1_GetSurface(bitmap1, &ctx.surface);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    match = compare_surface(&ctx, "e7ee77e89745fa5d195fd78bd398738330cfcde8");
+    match2 = compare_surface(&ctx, "4855c7c082c8ede364cf6e2dcde83f95b88aecbe");
+    ok(match || broken(match2) /* Win7 TestBots */, "Surface does not match.\n");
+    IDXGISurface_Release(ctx.surface);
+    ctx.surface = surface;
+    ID2D1DeviceContext_SetTarget(context, NULL);
+
+    ID2D1Bitmap1_Release(bitmap1);
+    ID2D1DeviceContext_Release(context);
+    ID2D1SolidColorBrush_Release(color_brush);
     ID2D1RenderTarget_Release(rt);
     release_test_context(&ctx);
 }
@@ -9908,6 +9953,7 @@ static void test_effect(BOOL d3d11)
         {&CLSID_D2D13DPerspectiveTransform,  1, 1, 1},
         {&CLSID_D2D1Composite,               2, 1, 0xffffffff},
         {&CLSID_D2D1Crop,                    1, 1, 1},
+        {&CLSID_D2D1Shadow,                  1, 1, 1},
     };
 
     if (!init_test_context(&ctx, d3d11))
@@ -10306,7 +10352,9 @@ static void test_effect_crop(BOOL d3d11)
 
 static void test_stroke_contains_point(BOOL d3d11)
 {
+    ID2D1TransformedGeometry *transformed_geometry;
     ID2D1RectangleGeometry *rectangle;
+    D2D1_MATRIX_3X2_F matrix;
     ID2D1GeometrySink *sink;
     ID2D1PathGeometry *path;
     ID2D1Factory *factory;
@@ -10481,6 +10529,24 @@ static void test_stroke_contains_point(BOOL d3d11)
         {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1425.0f, 827.6f}, 0.1f, 5.0f, TRUE, FALSE},
         {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1620.1f, 800.0f}, 0.1f, 5.0f, TRUE, FALSE},
         {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1620.4f, 800.0f}, 0.1f, 5.0f, TRUE, TRUE},
+    },
+    transformed_tests[] =
+    {
+        /* 0. Stroked area hittesting. Edge. Tolerance is 0.0f */
+        {{{{0.0f}}}, {0.74f,  2.5f},  0.0f,   1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {0.75f,  2.5f},  0.0f,   1.0f, FALSE, FALSE},
+
+        /* 2. Stroked area hittesting. Edge. Tolerance is negative */
+        {{{{0.0f}}}, {0.74f,  2.5f}, -1.0f,   1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {0.75f,  2.5f}, -1.0f,   1.0f, FALSE, FALSE},
+
+        /* 4. Stroked area hittesting. Edge. Tolerance is close to zero */
+        {{{{0.0f}}}, {0.501f, 2.5f},  0.001f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {0.502f, 2.5f},  0.001f, 1.0f, FALSE, FALSE},
+
+        /* 6. Stroked area hittesting. Edge. Tolerance is D2D1_DEFAULT_FLATTENING_TOLERANCE */
+        {{{{0.0f}}}, {0.74f,  2.5f},  0.25f,  1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {0.75f,  2.5f},  0.25f,  1.0f, FALSE, FALSE},
     };
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
@@ -10569,6 +10635,33 @@ static void test_stroke_contains_point(BOOL d3d11)
     }
 
     ID2D1PathGeometry_Release(path);
+
+    set_rect(&rect, 0.0f, 0.0f, 5.0f, 5.0f);
+    hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &rectangle);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    set_matrix_identity(&matrix);
+    scale_matrix(&matrix, 2.0f, 4.0f);
+    hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)rectangle, &matrix,
+                &transformed_geometry);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(transformed_tests); ++i)
+    {
+        const struct contains_point_test *test = &transformed_tests[i];
+
+        winetest_push_context("Test %u", i);
+
+        contains = !test->contains;
+        hr = ID2D1TransformedGeometry_StrokeContainsPoint(transformed_geometry, test->point,
+                test->stroke_width, NULL, test->matrix ? &test->transform : NULL, test->tolerance,
+                &contains);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(contains == test->contains, "Got unexpected result %#x.\n", contains);
+
+        winetest_pop_context();
+    }
+    ID2D1TransformedGeometry_Release(transformed_geometry);
+    ID2D1RectangleGeometry_Release(rectangle);
 
     ID2D1Factory_Release(factory);
 }

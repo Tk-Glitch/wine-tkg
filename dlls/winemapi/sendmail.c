@@ -300,7 +300,7 @@ exit:
 ULONG WINAPI MAPISendMail(LHANDLE session, ULONG_PTR uiparam,
     lpMapiMessage message, FLAGS flags, ULONG reserved)
 {
-    TRACE("(0x%08lx 0x%08lx %p 0x%08x 0x%08x)\n", session, uiparam,
+    TRACE("(0x%I64xx 0x%I64xx %p 0x%08x 0x%08lx)\n", session, uiparam,
            message, flags, reserved);
 
     if (XDGMailAvailable())

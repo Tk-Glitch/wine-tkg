@@ -26,7 +26,15 @@
 #include "winbase.h"
 #include "ntuser.h"
 #include "wow64win_private.h"
+#include "wine/debug.h"
 
+WINE_DEFAULT_DEBUG_CHANNEL(wow);
+
+NTSTATUS WINAPI wow64_NtUserInitializeClientPfnArrays( UINT *args )
+{
+    FIXME( "\n" );
+    return STATUS_NOT_SUPPORTED;
+}
 
 NTSTATUS WINAPI wow64_NtUserCreateWindowStation( UINT *args )
 {
@@ -181,6 +189,23 @@ NTSTATUS WINAPI wow64_NtUserRemoveProp( UINT *args )
     return HandleToUlong( NtUserRemoveProp( hwnd, str ));
 }
 
+NTSTATUS WINAPI wow64_NtUserGetAncestor( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    UINT type = get_ulong( &args );
+
+    return HandleToUlong( NtUserGetAncestor( hwnd, type ));
+}
+
+NTSTATUS WINAPI wow64_NtUserGetWindowRgnEx( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    HRGN hrgn = get_handle( &args );
+    UINT unk = get_ulong( &args );
+
+    return NtUserGetWindowRgnEx( hwnd, hrgn, unk );
+}
+
 NTSTATUS WINAPI wow64_NtUserBuildHwndList( UINT *args )
 {
     HDESK desktop = get_handle( &args );
@@ -204,6 +229,15 @@ NTSTATUS WINAPI wow64_NtUserBuildHwndList( UINT *args )
     for (i = 0; i < *size; i++)
         buffer32[i] = HandleToUlong( buffer[i] );
     return status;
+}
+
+NTSTATUS WINAPI wow64_NtUserInternalGetWindowText( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+    WCHAR *text = get_ptr( &args );
+    INT count = get_ulong( &args );
+
+    return NtUserInternalGetWindowText( hwnd, text, count );
 }
 
 NTSTATUS WINAPI wow64_NtUserGetLayeredWindowAttributes( UINT *args )
@@ -490,4 +524,28 @@ NTSTATUS WINAPI wow64_NtUserGetGUIThreadInfo( UINT *args )
     info32->hwndCaret     = HandleToUlong( info.hwndCaret );
     info32->rcCaret       = info.rcCaret;
     return TRUE;
+}
+
+NTSTATUS WINAPI wow64_NtUserCopyAcceleratorTable( UINT *args )
+{
+    HACCEL src = get_handle( &args );
+    ACCEL *dst = get_ptr( &args );
+    INT count = get_ulong( &args );
+
+    return NtUserCopyAcceleratorTable( src, dst, count );
+}
+
+NTSTATUS WINAPI wow64_NtUserCreateAcceleratorTable( UINT *args )
+{
+    ACCEL *table = get_ptr( &args );
+    INT count = get_ulong( &args );
+
+    return HandleToUlong( NtUserCreateAcceleratorTable( table, count ));
+}
+
+NTSTATUS WINAPI wow64_NtUserDestroyAcceleratorTable( UINT *args )
+{
+    HACCEL handle = get_handle( &args );
+
+    return NtUserDestroyAcceleratorTable( handle );
 }

@@ -16,13 +16,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
 #include "wined3d_private.h"
 
 #include "wine/vulkan_driver.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
 
 static const struct wined3d_state_entry_template misc_state_template_vk[] =
 {
@@ -1289,9 +1287,6 @@ static bool adapter_vk_alloc_bo(struct wined3d_device *device, struct wined3d_re
 
     if (!bo_vk->b.map_ptr)
     {
-        WARN_(d3d_perf)("BO %p (chunk %p, slab %p) is not mapped.\n",
-                bo_vk, bo_vk->memory ? bo_vk->memory->chunk : NULL, bo_vk->slab);
-
         if (!wined3d_bo_vk_map(bo_vk, context_vk))
             ERR("Failed to map bo.\n");
     }
@@ -1985,9 +1980,14 @@ static const struct wined3d_adapter_ops wined3d_adapter_vk_ops =
 
 static unsigned int wined3d_get_wine_vk_version(void)
 {
-    const char *ptr = PACKAGE_VERSION;
+    const char * (CDECL *wine_get_version)(void) = (void *)GetProcAddress( GetModuleHandleW(L"ntdll.dll"),
+                                                                           "wine_get_version" );
+    const char *ptr;
     int major, minor;
 
+    if (!wine_get_version) return VK_MAKE_VERSION(1, 0, 0);
+
+    ptr = wine_get_version();
     major = atoi(ptr);
 
     while (isdigit(*ptr))

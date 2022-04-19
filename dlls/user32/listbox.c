@@ -2134,8 +2134,8 @@ static LRESULT LISTBOX_HandleLButtonDown( LB_DESCR *descr, DWORD keys, INT x, IN
 
     if (!descr->in_focus)
     {
-        if( !descr->lphc ) SetFocus( descr->self );
-        else SetFocus( (descr->lphc->hWndEdit) ? descr->lphc->hWndEdit : descr->lphc->self );
+        if( !descr->lphc ) NtUserSetFocus( descr->self );
+        else NtUserSetFocus( (descr->lphc->hWndEdit) ? descr->lphc->hWndEdit : descr->lphc->self );
     }
 
     if (index == -1) return 0;
@@ -2148,7 +2148,7 @@ static LRESULT LISTBOX_HandleLButtonDown( LB_DESCR *descr, DWORD keys, INT x, IN
     }
 
     descr->captured = TRUE;
-    SetCapture( descr->self );
+    NtUserSetCapture( descr->self );
 
     if (descr->style & (LBS_EXTENDEDSEL | LBS_MULTIPLESEL))
     {
@@ -2297,7 +2297,7 @@ static LRESULT LISTBOX_HandleLButtonDownCombo( LB_DESCR *descr, UINT msg, DWORD 
             /* Resume the Capture after scrolling is complete
              */
             if(hWndOldCapture != 0)
-                SetCapture(hWndOldCapture);
+                NtUserSetCapture(hWndOldCapture);
         }
     }
     return 0;

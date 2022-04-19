@@ -126,7 +126,7 @@ void *free_user_handle( HANDLE handle, unsigned int type )
  *
  * Create a window handle with the server.
  */
-static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
+static WND *create_window_handle( HWND parent, HWND owner, UNICODE_STRING *name,
                                   HINSTANCE instance, BOOL unicode,
                                   DWORD style, DWORD ex_style )
 {
@@ -146,8 +146,8 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
         req->awareness = awareness;
         req->style    = style;
         req->ex_style = ex_style;
-        if (!(req->atom = get_int_atom_value( name )) && name)
-            wine_server_add_data( req, name, lstrlenW(name)*sizeof(WCHAR) );
+        if (!(req->atom = get_int_atom_value( name )) && name->Length)
+            wine_server_add_data( req, name->Buffer, name->Length );
         if (!wine_server_call_err( req ))
         {
             handle      = wine_server_ptr_handle( reply->handle );
@@ -184,11 +184,11 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
     {
         struct user_thread_info *thread_info = get_user_thread_info();
 
-        if (name == (LPCWSTR)DESKTOP_CLASS_ATOM)
+        if (name->Buffer == (LPCWSTR)DESKTOP_CLASS_ATOM)
         {
             if (!thread_info->top_window) thread_info->top_window = full_parent ? full_parent : handle;
             else assert( full_parent == thread_info->top_window );
-            if (full_parent && !USER_Driver->pCreateDesktopWindow( thread_info->top_window ))
+            if (full_parent && !NtUserCallHwnd( thread_info->top_window, NtUserCreateDesktopWindow ))
                 ERR( "failed to create desktop window\n" );
             register_builtin_classes();
         }
@@ -245,14 +245,14 @@ static void free_window_handle( HWND hwnd )
  * Build an array of the children of a given window. The array must be
  * freed with HeapFree. Returns NULL when no windows are found.
  */
-static HWND *list_window_children( HDESK desktop, HWND hwnd, LPCWSTR class, DWORD tid )
+static HWND *list_window_children( HDESK desktop, HWND hwnd, UNICODE_STRING *class, DWORD tid )
 {
     HWND *list;
     int i, size = 128;
-    ATOM atom = get_int_atom_value( class );
+    ATOM atom = class ? get_int_atom_value( class ) : 0;
 
     /* empty class is not the same as NULL class */
-    if (!atom && class && !class[0]) return NULL;
+    if (!atom && class && !class->Length) return NULL;
 
     for (;;)
     {
@@ -266,7 +266,7 @@ static HWND *list_window_children( HDESK desktop, HWND hwnd, LPCWSTR class, DWOR
             req->parent = wine_server_user_handle( hwnd );
             req->tid = tid;
             req->atom = atom;
-            if (!atom && class) wine_server_add_data( req, class, lstrlenW(class)*sizeof(WCHAR) );
+            if (!atom && class) wine_server_add_data( req, class->Buffer, class->Length );
             wine_server_set_reply( req, list, (size-1) * sizeof(user_handle_t) );
             if (!wine_server_call( req )) count = reply->count;
         }
@@ -283,76 +283,6 @@ static HWND *list_window_children( HDESK desktop, HWND hwnd, LPCWSTR class, DWOR
         if (!count) break;
         size = count + 1;  /* restart with a large enough buffer */
     }
-    return NULL;
-}
-
-
-/*******************************************************************
- *           list_window_parents
- *
- * Build an array of all parents of a given window, starting with
- * the immediate parent. The array must be freed with HeapFree.
- */
-static HWND *list_window_parents( HWND hwnd )
-{
-    WND *win;
-    HWND current, *list;
-    int i, pos = 0, size = 16, count;
-
-    if (!(list = HeapAlloc( GetProcessHeap(), 0, size * sizeof(HWND) ))) return NULL;
-
-    current = hwnd;
-    for (;;)
-    {
-        if (!(win = WIN_GetPtr( current ))) goto empty;
-        if (win == WND_OTHER_PROCESS) break;  /* need to do it the hard way */
-        if (win == WND_DESKTOP)
-        {
-            if (!pos) goto empty;
-            list[pos] = 0;
-            return list;
-        }
-        list[pos] = current = win->parent;
-        WIN_ReleasePtr( win );
-        if (!current) return list;
-        if (++pos == size - 1)
-        {
-            /* need to grow the list */
-            HWND *new_list = HeapReAlloc( GetProcessHeap(), 0, list, (size+16) * sizeof(HWND) );
-            if (!new_list) goto empty;
-            list = new_list;
-            size += 16;
-        }
-    }
-
-    /* at least one parent belongs to another process, have to query the server */
-
-    for (;;)
-    {
-        count = 0;
-        SERVER_START_REQ( get_window_parents )
-        {
-            req->handle = wine_server_user_handle( hwnd );
-            wine_server_set_reply( req, list, (size-1) * sizeof(user_handle_t) );
-            if (!wine_server_call( req )) count = reply->count;
-        }
-        SERVER_END_REQ;
-        if (!count) goto empty;
-        if (size > count)
-        {
-            /* start from the end since HWND is potentially larger than user_handle_t */
-            for (i = count - 1; i >= 0; i--)
-                list[i] = wine_server_ptr_handle( ((user_handle_t *)list)[i] );
-            list[count] = 0;
-            return list;
-        }
-        HeapFree( GetProcessHeap(), 0, list );
-        size = count + 1;
-        if (!(list = HeapAlloc( GetProcessHeap(), 0, size * sizeof(HWND) ))) return NULL;
-    }
-
- empty:
-    HeapFree( GetProcessHeap(), 0, list );
     return NULL;
 }
 
@@ -378,7 +308,7 @@ static void send_parent_notify( HWND hwnd, UINT msg )
  *
  * Trigger an update of the window's driver state and surface.
  */
-void update_window_state( HWND hwnd )
+static void update_window_state( HWND hwnd )
 {
     DPI_AWARENESS_CONTEXT context;
     RECT window_rect, client_rect, valid_rects[2];
@@ -396,31 +326,6 @@ void update_window_state( HWND hwnd )
                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW,
                     &window_rect, &client_rect, valid_rects );
     SetThreadDpiAwarenessContext( context );
-}
-
-
-/*******************************************************************
- *		get_server_window_text
- *
- * Retrieve the window text from the server.
- */
-static data_size_t get_server_window_text( HWND hwnd, WCHAR *text, data_size_t count )
-{
-    data_size_t len = 0, needed = 0;
-
-    SERVER_START_REQ( get_window_text )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        if (count) wine_server_set_reply( req, text, (count - 1) * sizeof(WCHAR) );
-        if (!wine_server_call_err( req ))
-        {
-            needed = reply->length;
-            len = wine_server_reply_size(reply);
-        }
-    }
-    SERVER_END_REQ;
-    if (text) text[len / sizeof(WCHAR)] = 0;
-    return needed;
 }
 
 
@@ -1395,18 +1300,19 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     RECT rect;
     WND *wndPtr;
     HWND hwnd, parent, owner, top_child = 0;
-    const WCHAR *p = className;
     UINT win_dpi, thread_dpi = get_thread_dpi();
     DPI_AWARENESS_CONTEXT context;
     MDICREATESTRUCTW mdi_cs;
+    UNICODE_STRING class;
     CBT_CREATEWNDW cbtc;
     CREATESTRUCTW cbcs;
 
-    className = CLASS_GetVersionedName(className, NULL, NULL, TRUE);
+    if (!get_class_info( module, className, NULL, &class, FALSE )) return FALSE;
 
     TRACE("%s %s%s%s ex=%08x style=%08x %d,%d %dx%d parent=%p menu=%p inst=%p params=%p\n",
           unicode ? debugstr_w(cs->lpszName) : debugstr_a((LPCSTR)cs->lpszName),
-          debugstr_w(p), p != className ? "->" : "", p != className ? debugstr_w(className) : "",
+          debugstr_w(className), class.Buffer != className ? "->" : "",
+          class.Buffer != className ? debugstr_wn(class.Buffer, class.Length / sizeof(WCHAR)) : "",
           cs->dwExStyle, cs->style, cs->x, cs->y, cs->cx, cs->cy,
           cs->hwndParent, cs->hMenu, cs->hInstance, cs->lpCreateParams );
     if(TRACE_ON(win)) dump_window_styles( cs->style, cs->dwExStyle );
@@ -1524,17 +1430,9 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
 
     style = cs->style & ~WS_VISIBLE;
     ex_style = cs->dwExStyle & ~WS_EX_LAYERED;
-    if (!(wndPtr = create_window_handle( parent, owner, className, module,
-                    unicode, style, ex_style )))
-    {
-        WNDCLASSW wc;
-        /* if it's a comctl32 class, GetClassInfo will load it, then we can retry */
-        if (GetLastError() != ERROR_INVALID_HANDLE ||
-            !GetClassInfoW( 0, className, &wc ) ||
-            !(wndPtr = create_window_handle( parent, owner, className, module,
-                    unicode, style, ex_style )))
-            return 0;
-    }
+    if (!(wndPtr = create_window_handle( parent, owner, &class, module,
+                                         unicode, style, ex_style )))
+        return 0;
     hwnd = wndPtr->obj.handle;
 
     /* Fill the window structure */
@@ -2028,7 +1926,19 @@ HWND WINAPI FindWindowExW( HWND parent, HWND child, LPCWSTR className, LPCWSTR t
         if (!(buffer = HeapAlloc( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) ))) return 0;
     }
 
-    if (!(list = list_window_children( 0, parent, className, 0 ))) goto done;
+    if (className)
+    {
+        UNICODE_STRING str;
+        if (IS_INTRESOURCE(className))
+        {
+            str.Buffer = (WCHAR *)className;
+            str.Length = str.MaximumLength = 0;
+        }
+        else RtlInitUnicodeString( &str, className );
+        list = list_window_children( 0, parent, &str, 0 );
+    }
+    else list = list_window_children( 0, parent, NULL, 0 );
+    if (!list) goto done;
 
     if (child)
     {
@@ -2042,7 +1952,7 @@ HWND WINAPI FindWindowExW( HWND parent, HWND child, LPCWSTR className, LPCWSTR t
     {
         while (list[i])
         {
-            if (InternalGetWindowText( list[i], buffer, len + 1 ))
+            if (NtUserInternalGetWindowText( list[i], buffer, len + 1 ))
             {
                 if (!wcsicmp( buffer, title )) break;
             }
@@ -2122,87 +2032,7 @@ HWND WINAPI GetDesktopWindow(void)
     struct user_thread_info *thread_info = get_user_thread_info();
 
     if (thread_info->top_window) return thread_info->top_window;
-
-    SERVER_START_REQ( get_desktop_window )
-    {
-        req->force = 0;
-        if (!wine_server_call( req ))
-        {
-            thread_info->top_window = wine_server_ptr_handle( reply->top_window );
-            thread_info->msg_window = wine_server_ptr_handle( reply->msg_window );
-        }
-    }
-    SERVER_END_REQ;
-
-    if (!thread_info->top_window)
-    {
-        STARTUPINFOW si;
-        PROCESS_INFORMATION pi;
-        WCHAR windir[MAX_PATH];
-        WCHAR app[MAX_PATH + ARRAY_SIZE( L"\\explorer.exe" )];
-        WCHAR cmdline[MAX_PATH + ARRAY_SIZE( L"\\explorer.exe /desktop" )];
-        WCHAR desktop[MAX_PATH];
-        void *redir;
-
-        SERVER_START_REQ( set_user_object_info )
-        {
-            req->handle = wine_server_obj_handle( NtUserGetThreadDesktop(GetCurrentThreadId()) );
-            req->flags  = SET_USER_OBJECT_GET_FULL_NAME;
-            wine_server_set_reply( req, desktop, sizeof(desktop) - sizeof(WCHAR) );
-            if (!wine_server_call( req ))
-            {
-                size_t size = wine_server_reply_size( reply );
-                desktop[size / sizeof(WCHAR)] = 0;
-                TRACE( "starting explorer for desktop %s\n", debugstr_w(desktop) );
-            }
-            else
-                desktop[0] = 0;
-        }
-        SERVER_END_REQ;
-
-        memset( &si, 0, sizeof(si) );
-        si.cb = sizeof(si);
-        si.lpDesktop = *desktop ? desktop : NULL;
-        si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdInput  = 0;
-        si.hStdOutput = 0;
-        si.hStdError  = GetStdHandle( STD_ERROR_HANDLE );
-
-        GetSystemDirectoryW( windir, MAX_PATH );
-        lstrcpyW( app, windir );
-        lstrcatW( app, L"\\explorer.exe" );
-        lstrcpyW( cmdline, app );
-        lstrcatW( cmdline, L" /desktop" );
-
-        Wow64DisableWow64FsRedirection( &redir );
-        if (CreateProcessW( app, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS,
-                            NULL, windir, &si, &pi ))
-        {
-            TRACE( "started explorer pid %04x tid %04x\n", pi.dwProcessId, pi.dwThreadId );
-            WaitForInputIdle( pi.hProcess, 10000 );
-            CloseHandle( pi.hThread );
-            CloseHandle( pi.hProcess );
-        }
-        else WARN( "failed to start explorer, err %d\n", GetLastError() );
-        Wow64RevertWow64FsRedirection( redir );
-
-        SERVER_START_REQ( get_desktop_window )
-        {
-            req->force = 1;
-            if (!wine_server_call( req ))
-            {
-                thread_info->top_window = wine_server_ptr_handle( reply->top_window );
-                thread_info->msg_window = wine_server_ptr_handle( reply->msg_window );
-            }
-        }
-        SERVER_END_REQ;
-    }
-
-    if (!thread_info->top_window || !USER_Driver->pCreateDesktopWindow( thread_info->top_window ))
-        ERR( "failed to create desktop window\n" );
-
-    register_builtin_classes();
-    return thread_info->top_window;
+    return UlongToHandle( NtUserCallNoParam( NtUserGetDesktopWindow ));
 }
 
 
@@ -2234,7 +2064,7 @@ BOOL WINAPI EnableWindow( HWND hwnd, BOOL enable )
         if (!retvalue)
         {
             if (hwnd == GetFocus())
-                SetFocus( 0 ); /* A disabled window can't have the focus */
+                NtUserSetFocus( 0 ); /* A disabled window can't have the focus */
 
             SendMessageW( hwnd, WM_ENABLE, FALSE, 0 );
         }
@@ -2261,28 +2091,7 @@ BOOL WINAPI IsWindowEnabled(HWND hWnd)
  */
 BOOL WINAPI IsWindowUnicode( HWND hwnd )
 {
-    WND * wndPtr;
-    BOOL retvalue = FALSE;
-
-    if (!(wndPtr = WIN_GetPtr(hwnd))) return FALSE;
-
-    if (wndPtr == WND_DESKTOP) return TRUE;
-
-    if (wndPtr != WND_OTHER_PROCESS)
-    {
-        retvalue = (wndPtr->flags & WIN_ISUNICODE) != 0;
-        WIN_ReleasePtr( wndPtr );
-    }
-    else
-    {
-        SERVER_START_REQ( get_window_info )
-        {
-            req->handle = wine_server_user_handle( hwnd );
-            if (!wine_server_call_err( req )) retvalue = reply->is_unicode;
-        }
-        SERVER_END_REQ;
-    }
-    return retvalue;
+    return NtUserCallHwnd( hwnd, NtUserIsWindowUnicode );
 }
 
 
@@ -2291,30 +2100,7 @@ BOOL WINAPI IsWindowUnicode( HWND hwnd )
  */
 DPI_AWARENESS_CONTEXT WINAPI GetWindowDpiAwarenessContext( HWND hwnd )
 {
-    WND *win;
-    DPI_AWARENESS_CONTEXT ret = 0;
-
-    if (!(win = WIN_GetPtr( hwnd )))
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return 0;
-    }
-    if (win == WND_DESKTOP) return DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE;
-    if (win != WND_OTHER_PROCESS)
-    {
-        ret = ULongToHandle( win->dpi_awareness | 0x10 );
-        WIN_ReleasePtr( win );
-    }
-    else
-    {
-        SERVER_START_REQ( get_window_info )
-        {
-            req->handle = wine_server_user_handle( hwnd );
-            if (!wine_server_call_err( req )) ret = ULongToHandle( reply->awareness | 0x10 );
-        }
-        SERVER_END_REQ;
-    }
-    return ret;
+    return (DPI_AWARENESS_CONTEXT)NtUserCallHwnd( hwnd, NtUserGetWindowDpiAwarenessContext );
 }
 
 
@@ -2323,160 +2109,7 @@ DPI_AWARENESS_CONTEXT WINAPI GetWindowDpiAwarenessContext( HWND hwnd )
  */
 UINT WINAPI GetDpiForWindow( HWND hwnd )
 {
-    WND *win;
-    UINT ret = 0;
-
-    if (!(win = WIN_GetPtr( hwnd )))
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return 0;
-    }
-    if (win == WND_DESKTOP)
-    {
-        POINT pt = { 0, 0 };
-        return get_monitor_dpi( MonitorFromPoint( pt, MONITOR_DEFAULTTOPRIMARY ));
-    }
-    if (win != WND_OTHER_PROCESS)
-    {
-        ret = win->dpi;
-        if (!ret) ret = get_win_monitor_dpi( hwnd );
-        WIN_ReleasePtr( win );
-    }
-    else
-    {
-        SERVER_START_REQ( get_window_info )
-        {
-            req->handle = wine_server_user_handle( hwnd );
-            if (!wine_server_call_err( req )) ret = reply->dpi;
-        }
-        SERVER_END_REQ;
-    }
-    return ret;
-}
-
-
-/**********************************************************************
- *	     WIN_GetWindowLong
- *
- * Helper function for GetWindowLong().
- */
-static LONG_PTR WIN_GetWindowLong( HWND hwnd, INT offset, UINT size, BOOL unicode )
-{
-    LONG_PTR retvalue = 0;
-    WND *wndPtr;
-
-    if (offset == GWLP_HWNDPARENT)
-    {
-        HWND parent = GetAncestor( hwnd, GA_PARENT );
-        if (parent == GetDesktopWindow()) parent = GetWindow( hwnd, GW_OWNER );
-        return (ULONG_PTR)parent;
-    }
-
-    if (!(wndPtr = WIN_GetPtr( hwnd )))
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return 0;
-    }
-
-    if (wndPtr == WND_DESKTOP)
-    {
-        switch (offset)
-        {
-        case GWL_STYLE:
-            retvalue = WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN; /* message parent is not visible */
-            if (WIN_GetFullHandle( hwnd ) == GetDesktopWindow())
-                retvalue |= WS_VISIBLE;
-            return retvalue;
-        case GWL_EXSTYLE:
-        case GWLP_USERDATA:
-        case GWLP_ID:
-        case GWLP_HINSTANCE:
-            return 0;
-        case GWLP_WNDPROC:
-            SetLastError( ERROR_ACCESS_DENIED );
-            return 0;
-        }
-        SetLastError( ERROR_INVALID_INDEX );
-        return 0;
-    }
-
-    if (wndPtr == WND_OTHER_PROCESS)
-    {
-        if (offset == GWLP_WNDPROC)
-        {
-            SetLastError( ERROR_ACCESS_DENIED );
-            return 0;
-        }
-        SERVER_START_REQ( set_window_info )
-        {
-            req->handle = wine_server_user_handle( hwnd );
-            req->flags  = 0;  /* don't set anything, just retrieve */
-            req->extra_offset = (offset >= 0) ? offset : -1;
-            req->extra_size = (offset >= 0) ? size : 0;
-            if (!wine_server_call_err( req ))
-            {
-                switch(offset)
-                {
-                case GWL_STYLE:      retvalue = reply->old_style; break;
-                case GWL_EXSTYLE:    retvalue = reply->old_ex_style; break;
-                case GWLP_ID:        retvalue = reply->old_id; break;
-                case GWLP_HINSTANCE: retvalue = (ULONG_PTR)wine_server_get_ptr( reply->old_instance ); break;
-                case GWLP_USERDATA:  retvalue = reply->old_user_data; break;
-                default:
-                    if (offset >= 0) retvalue = get_win_data( &reply->old_extra_value, size );
-                    else SetLastError( ERROR_INVALID_INDEX );
-                    break;
-                }
-            }
-        }
-        SERVER_END_REQ;
-        return retvalue;
-    }
-
-    /* now we have a valid wndPtr */
-
-    if (offset >= 0)
-    {
-        if (offset > (int)(wndPtr->cbWndExtra - size))
-        {
-            WARN("Invalid offset %d\n", offset );
-            WIN_ReleasePtr( wndPtr );
-            SetLastError( ERROR_INVALID_INDEX );
-            return 0;
-        }
-        retvalue = get_win_data( (char *)wndPtr->wExtra + offset, size );
-
-        /* Special case for dialog window procedure */
-        if ((offset == DWLP_DLGPROC) && (size == sizeof(LONG_PTR)) && wndPtr->dlgInfo)
-            retvalue = (LONG_PTR)WINPROC_GetProc( (WNDPROC)retvalue, unicode );
-        WIN_ReleasePtr( wndPtr );
-        return retvalue;
-    }
-
-    switch(offset)
-    {
-    case GWLP_USERDATA:  retvalue = wndPtr->userdata; break;
-    case GWL_STYLE:      retvalue = wndPtr->dwStyle; break;
-    case GWL_EXSTYLE:    retvalue = wndPtr->dwExStyle; break;
-    case GWLP_ID:        retvalue = wndPtr->wIDmenu; break;
-    case GWLP_HINSTANCE: retvalue = (ULONG_PTR)wndPtr->hInstance; break;
-    case GWLP_WNDPROC:
-        /* This looks like a hack only for the edit control (see tests). This makes these controls
-         * more tolerant to A/W mismatches. The lack of W->A->W conversion for such a mismatch suggests
-         * that the hack is in GetWindowLongPtr[AW], not in winprocs.
-         */
-        if (wndPtr->winproc == BUILTIN_WINPROC(WINPROC_EDIT) && (!unicode != !(wndPtr->flags & WIN_ISUNICODE)))
-            retvalue = (ULONG_PTR)wndPtr->winproc;
-        else
-            retvalue = (ULONG_PTR)WINPROC_GetProc( wndPtr->winproc, unicode );
-        break;
-    default:
-        WARN("Unknown offset %d\n", offset );
-        SetLastError( ERROR_INVALID_INDEX );
-        break;
-    }
-    WIN_ReleasePtr(wndPtr);
-    return retvalue;
+    return NtUserCallHwnd( hwnd, NtUserGetDpiForWindow );
 }
 
 
@@ -2569,7 +2202,7 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
     {
         WNDPROC proc;
         UINT old_flags = wndPtr->flags;
-        retval = WIN_GetWindowLong( hwnd, offset, size, unicode );
+        retval = unicode ? GetWindowLongPtrW( hwnd, offset ) : GetWindowLongPtrA( hwnd, offset );
         proc = WINPROC_AllocProc( (WNDPROC)newval, unicode );
         if (proc) wndPtr->winproc = proc;
         if (WINPROC_IsUnicode( proc, unicode )) wndPtr->flags |= WIN_ISUNICODE;
@@ -2715,22 +2348,7 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
  */
 WORD WINAPI GetWindowWord( HWND hwnd, INT offset )
 {
-    switch(offset)
-    {
-    case GWLP_ID:
-    case GWLP_HINSTANCE:
-    case GWLP_HWNDPARENT:
-        break;
-    default:
-        if (offset < 0)
-        {
-            WARN("Invalid offset %d\n", offset );
-            SetLastError( ERROR_INVALID_INDEX );
-            return 0;
-        }
-        break;
-    }
-    return WIN_GetWindowLong( hwnd, offset, sizeof(WORD), FALSE );
+    return NtUserCallHwndParam( hwnd, offset, NtUserGetWindowWord );
 }
 
 
@@ -2750,7 +2368,7 @@ LONG WINAPI GetWindowLongA( HWND hwnd, INT offset )
         return 0;
 #endif
     default:
-        return WIN_GetWindowLong( hwnd, offset, sizeof(LONG), FALSE );
+        return NtUserCallHwndParam( hwnd, offset, NtUserGetWindowLongA );
     }
 }
 
@@ -2771,7 +2389,7 @@ LONG WINAPI GetWindowLongW( HWND hwnd, INT offset )
         return 0;
 #endif
     default:
-        return WIN_GetWindowLong( hwnd, offset, sizeof(LONG), TRUE );
+        return NtUserCallHwndParam( hwnd, offset, NtUserGetWindowLongW );
     }
 }
 
@@ -2932,7 +2550,7 @@ INT WINAPI GetWindowTextA( HWND hwnd, LPSTR lpString, INT nMaxCount )
         else if ((buffer = HeapAlloc( GetProcessHeap(), 0, nMaxCount * sizeof(WCHAR) )))
         {
             /* when window belongs to other process, don't send a message */
-            get_server_window_text( hwnd, buffer, nMaxCount );
+            NtUserInternalGetWindowText( hwnd, buffer, nMaxCount );
             if (!WideCharToMultiByte( CP_ACP, 0, buffer, -1, lpString, nMaxCount, NULL, NULL ))
                 lpString[nMaxCount-1] = 0;
             HeapFree( GetProcessHeap(), 0, buffer );
@@ -2946,30 +2564,6 @@ INT WINAPI GetWindowTextA( HWND hwnd, LPSTR lpString, INT nMaxCount )
     __ENDTRY
 
     return ret;
-}
-
-
-/*******************************************************************
- *		InternalGetWindowText (USER32.@)
- */
-INT WINAPI InternalGetWindowText(HWND hwnd,LPWSTR lpString,INT nMaxCount )
-{
-    WND *win;
-
-    if (nMaxCount <= 0) return 0;
-    if (!(win = WIN_GetPtr( hwnd ))) return 0;
-    if (win == WND_DESKTOP) lpString[0] = 0;
-    else if (win != WND_OTHER_PROCESS)
-    {
-        if (win->text) lstrcpynW( lpString, win->text, nMaxCount );
-        else lpString[0] = 0;
-        WIN_ReleasePtr( win );
-    }
-    else
-    {
-        get_server_window_text( hwnd, lpString, nMaxCount );
-    }
-    return lstrlenW(lpString);
 }
 
 
@@ -2993,8 +2587,7 @@ INT WINAPI GetWindowTextW( HWND hwnd, LPWSTR lpString, INT nMaxCount )
         else
         {
             /* when window belongs to other process, don't send a message */
-            get_server_window_text( hwnd, lpString, nMaxCount );
-            ret = lstrlenW(lpString);
+            ret = NtUserInternalGetWindowText( hwnd, lpString, nMaxCount );
         }
     }
     __EXCEPT_PAGE_FAULT
@@ -3053,7 +2646,7 @@ INT WINAPI GetWindowTextLengthA( HWND hwnd )
 
     /* when window belongs to other process, don't send a message */
     GetCPInfo( CP_ACP, &info );
-    return get_server_window_text( hwnd, NULL, 0 ) * info.MaxCharSize;
+    return NtUserCallHwnd( hwnd, NtUserGetWindowTextLength ) * info.MaxCharSize;
 }
 
 /*******************************************************************
@@ -3064,7 +2657,7 @@ INT WINAPI GetWindowTextLengthW( HWND hwnd )
     if (WIN_IsCurrentProcess( hwnd )) return SendMessageW( hwnd, WM_GETTEXTLENGTH, 0, 0 );
 
     /* when window belongs to other process, don't send a message */
-    return get_server_window_text( hwnd, NULL, 0 );
+    return NtUserCallHwnd( hwnd, NtUserGetWindowTextLength );
 }
 
 
@@ -3091,100 +2684,7 @@ DWORD WINAPI GetWindowThreadProcessId( HWND hwnd, LPDWORD process )
  */
 HWND WINAPI GetParent( HWND hwnd )
 {
-    WND *wndPtr;
-    HWND retvalue = 0;
-
-    if (!(wndPtr = WIN_GetPtr( hwnd )))
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return 0;
-    }
-    if (wndPtr == WND_DESKTOP) return 0;
-    if (wndPtr == WND_OTHER_PROCESS)
-    {
-        LONG style = GetWindowLongW( hwnd, GWL_STYLE );
-        if (style & (WS_POPUP | WS_CHILD))
-        {
-            SERVER_START_REQ( get_window_tree )
-            {
-                req->handle = wine_server_user_handle( hwnd );
-                if (!wine_server_call_err( req ))
-                {
-                    if (style & WS_POPUP) retvalue = wine_server_ptr_handle( reply->owner );
-                    else if (style & WS_CHILD) retvalue = wine_server_ptr_handle( reply->parent );
-                }
-            }
-            SERVER_END_REQ;
-        }
-    }
-    else
-    {
-        if (wndPtr->dwStyle & WS_POPUP) retvalue = wndPtr->owner;
-        else if (wndPtr->dwStyle & WS_CHILD) retvalue = wndPtr->parent;
-        WIN_ReleasePtr( wndPtr );
-    }
-    return retvalue;
-}
-
-
-/*****************************************************************
- *		GetAncestor (USER32.@)
- */
-HWND WINAPI GetAncestor( HWND hwnd, UINT type )
-{
-    WND *win;
-    HWND *list, ret = 0;
-
-    switch(type)
-    {
-    case GA_PARENT:
-        if (!(win = WIN_GetPtr( hwnd )))
-        {
-            SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-            return 0;
-        }
-        if (win == WND_DESKTOP) return 0;
-        if (win != WND_OTHER_PROCESS)
-        {
-            ret = win->parent;
-            WIN_ReleasePtr( win );
-        }
-        else /* need to query the server */
-        {
-            SERVER_START_REQ( get_window_tree )
-            {
-                req->handle = wine_server_user_handle( hwnd );
-                if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->parent );
-            }
-            SERVER_END_REQ;
-        }
-        break;
-
-    case GA_ROOT:
-        if (!(list = list_window_parents( hwnd ))) return 0;
-
-        if (!list[0] || !list[1]) ret = WIN_GetFullHandle( hwnd );  /* top-level window */
-        else
-        {
-            int count = 2;
-            while (list[count]) count++;
-            ret = list[count - 2];  /* get the one before the desktop */
-        }
-        HeapFree( GetProcessHeap(), 0, list );
-        break;
-
-    case GA_ROOTOWNER:
-        if (is_desktop_window( hwnd )) return 0;
-        ret = WIN_GetFullHandle( hwnd );
-        for (;;)
-        {
-            HWND parent = GetParent( ret );
-            if (!parent) break;
-            ret = parent;
-        }
-        break;
-    }
-    return ret;
+    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserGetParent ));
 }
 
 
@@ -3295,24 +2795,7 @@ HWND WINAPI SetParent( HWND hwnd, HWND parent )
  */
 BOOL WINAPI IsChild( HWND parent, HWND child )
 {
-    HWND *list;
-    int i;
-    BOOL ret = FALSE;
-
-    if (!(GetWindowLongW( child, GWL_STYLE ) & WS_CHILD)) return FALSE;
-    if (!(list = list_window_parents( child ))) return FALSE;
-    parent = WIN_GetFullHandle( parent );
-    for (i = 0; list[i]; i++)
-    {
-        if (list[i] == parent)
-        {
-            ret = list[i] && list[i+1];
-            break;
-        }
-        if (!(GetWindowLongW( list[i], GWL_STYLE ) & WS_CHILD)) break;
-    }
-    HeapFree( GetProcessHeap(), 0, list );
-    return ret;
+    return NtUserCallHwndParam( parent, HandleToUlong(child), NtUserIsChild );
 }
 
 
@@ -3321,20 +2804,7 @@ BOOL WINAPI IsChild( HWND parent, HWND child )
  */
 BOOL WINAPI IsWindowVisible( HWND hwnd )
 {
-    HWND *list;
-    BOOL retval = TRUE;
-    int i;
-
-    if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE)) return FALSE;
-    if (!(list = list_window_parents( hwnd ))) return TRUE;
-    if (list[0])
-    {
-        for (i = 0; list[i+1]; i++)
-            if (!(GetWindowLongW( list[i], GWL_STYLE ) & WS_VISIBLE)) break;
-        retval = !list[i+1] && (list[i] == GetDesktopWindow());  /* top message window isn't visible */
-    }
-    HeapFree( GetProcessHeap(), 0, list );
-    return retval;
+    return NtUserCallHwnd( hwnd, NtUserIsWindowVisible );
 }
 
 
@@ -3347,24 +2817,8 @@ BOOL WINAPI IsWindowVisible( HWND hwnd )
  */
 BOOL WIN_IsWindowDrawable( HWND hwnd, BOOL icon )
 {
-    HWND *list;
-    BOOL retval = TRUE;
-    int i;
-    LONG style = GetWindowLongW( hwnd, GWL_STYLE );
-
-    if (!(style & WS_VISIBLE)) return FALSE;
-    if ((style & WS_MINIMIZE) && icon && GetClassLongPtrW( hwnd, GCLP_HICON ))  return FALSE;
-
-    if (!(list = list_window_parents( hwnd ))) return TRUE;
-    if (list[0])
-    {
-        for (i = 0; list[i+1]; i++)
-            if ((GetWindowLongW( list[i], GWL_STYLE ) & (WS_VISIBLE|WS_MINIMIZE)) != WS_VISIBLE)
-                break;
-        retval = !list[i+1] && (list[i] == GetDesktopWindow());  /* top message window isn't visible */
-    }
-    HeapFree( GetProcessHeap(), 0, list );
-    return retval;
+    /* FIXME: move callers to win32u */
+    return NtUserCallHwndParam( hwnd, icon, NtUserIsWindowDrawable );
 }
 
 
@@ -3383,56 +2837,7 @@ HWND WINAPI GetTopWindow( HWND hwnd )
  */
 HWND WINAPI GetWindow( HWND hwnd, UINT rel )
 {
-    HWND retval = 0;
-
-    if (rel == GW_OWNER)  /* this one may be available locally */
-    {
-        WND *wndPtr = WIN_GetPtr( hwnd );
-        if (!wndPtr)
-        {
-            SetLastError( ERROR_INVALID_HANDLE );
-            return 0;
-        }
-        if (wndPtr == WND_DESKTOP) return 0;
-        if (wndPtr != WND_OTHER_PROCESS)
-        {
-            retval = wndPtr->owner;
-            WIN_ReleasePtr( wndPtr );
-            return retval;
-        }
-        /* else fall through to server call */
-    }
-
-    SERVER_START_REQ( get_window_tree )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        if (!wine_server_call_err( req ))
-        {
-            switch(rel)
-            {
-            case GW_HWNDFIRST:
-                retval = wine_server_ptr_handle( reply->first_sibling );
-                break;
-            case GW_HWNDLAST:
-                retval = wine_server_ptr_handle( reply->last_sibling );
-                break;
-            case GW_HWNDNEXT:
-                retval = wine_server_ptr_handle( reply->next_sibling );
-                break;
-            case GW_HWNDPREV:
-                retval = wine_server_ptr_handle( reply->prev_sibling );
-                break;
-            case GW_OWNER:
-                retval = wine_server_ptr_handle( reply->owner );
-                break;
-            case GW_CHILD:
-                retval = wine_server_ptr_handle( reply->first_child );
-                break;
-            }
-        }
-    }
-    SERVER_END_REQ;
-    return retval;
+    return UlongToHandle( NtUserCallHwndParam( hwnd, rel, NtUserGetWindowRelative ));
 }
 
 
@@ -3683,66 +3088,9 @@ BOOL WINAPI FlashWindow( HWND hWnd, BOOL bInvert )
     finfo.uCount = 1;
     finfo.dwTimeout = 0;
     finfo.hwnd = hWnd;
-    return FlashWindowEx( &finfo );
+    return NtUserFlashWindowEx( &finfo );
 }
 
-/*******************************************************************
- *		FlashWindowEx (USER32.@)
- */
-BOOL WINAPI FlashWindowEx( PFLASHWINFO pfinfo )
-{
-    WND *wndPtr;
-
-    TRACE( "%p\n", pfinfo );
-
-    if (!pfinfo)
-    {
-        SetLastError( ERROR_NOACCESS );
-        return FALSE;
-    }
-
-    if (!pfinfo->hwnd || pfinfo->cbSize != sizeof(FLASHWINFO) || !IsWindow( pfinfo->hwnd ))
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return FALSE;
-    }
-    FIXME( "%p - semi-stub\n", pfinfo );
-
-    if (IsIconic( pfinfo->hwnd ))
-    {
-        RedrawWindow( pfinfo->hwnd, 0, 0, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_FRAME );
-
-        wndPtr = WIN_GetPtr( pfinfo->hwnd );
-        if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return FALSE;
-        if (pfinfo->dwFlags && !(wndPtr->flags & WIN_NCACTIVATED))
-        {
-            wndPtr->flags |= WIN_NCACTIVATED;
-        }
-        else
-        {
-            wndPtr->flags &= ~WIN_NCACTIVATED;
-        }
-        WIN_ReleasePtr( wndPtr );
-        USER_Driver->pFlashWindowEx( pfinfo );
-        return TRUE;
-    }
-    else
-    {
-        WPARAM wparam;
-        HWND hwnd = pfinfo->hwnd;
-
-        wndPtr = WIN_GetPtr( hwnd );
-        if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return FALSE;
-        hwnd = wndPtr->obj.handle;  /* make it a full handle */
-
-        wparam = (wndPtr->flags & WIN_NCACTIVATED) != 0;
-
-        WIN_ReleasePtr( wndPtr );
-        SendMessageW( hwnd, WM_NCACTIVATE, wparam, 0 );
-        USER_Driver->pFlashWindowEx( pfinfo );
-        return (pfinfo->dwFlags & FLASHW_CAPTION) ? TRUE : wparam;
-    }
-}
 
 /*******************************************************************
  *		GetWindowContextHelpId (USER32.@)
@@ -3799,7 +3147,7 @@ BOOL WINAPI DragDetect( HWND hWnd, POINT pt )
     wDragHeight= GetSystemMetrics(SM_CYDRAG);
     SetRect(&rect, pt.x - wDragWidth, pt.y - wDragHeight, pt.x + wDragWidth, pt.y + wDragHeight);
 
-    SetCapture(hWnd);
+    NtUserSetCapture( hWnd );
 
     while(1)
     {
@@ -3876,26 +3224,9 @@ UINT WINAPI GetWindowModuleFileNameW( HWND hwnd, LPWSTR module, UINT size )
  *
  * Note: tests show that Windows doesn't check cbSize of the structure.
  */
-BOOL WINAPI DECLSPEC_HOTPATCH GetWindowInfo( HWND hwnd, PWINDOWINFO pwi)
+BOOL WINAPI DECLSPEC_HOTPATCH GetWindowInfo( HWND hwnd, WINDOWINFO *info )
 {
-    RECT rcWindow, rcClient;
-
-    if (!WIN_GetRectangles( hwnd, COORDS_SCREEN, &rcWindow, &rcClient )) return FALSE;
-    if (!pwi) return FALSE;
-
-    pwi->rcWindow = rcWindow;
-    pwi->rcClient = rcClient;
-    pwi->dwStyle = GetWindowLongW(hwnd, GWL_STYLE);
-    pwi->dwExStyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
-    pwi->dwWindowStatus = ((GetActiveWindow() == hwnd) ? WS_ACTIVECAPTION : 0);
-
-    pwi->cxWindowBorders = pwi->rcClient.left - pwi->rcWindow.left;
-    pwi->cyWindowBorders = pwi->rcWindow.bottom - pwi->rcClient.bottom;
-
-    pwi->atomWindowType = GetClassLongW( hwnd, GCW_ATOM );
-    pwi->wCreatorVersion = 0x0400;
-
-    return TRUE;
+    return NtUserCallHwndParam( hwnd, (UINT_PTR)info, NtUserGetWindowInfo );
 }
 
 /******************************************************************************
@@ -3931,89 +3262,19 @@ BOOL CDECL __wine_set_pixel_format( HWND hwnd, int format )
 
 
 /*****************************************************************************
- *              SetLayeredWindowAttributes (USER32.@)
- */
-BOOL WINAPI SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags )
-{
-    BOOL ret;
-
-    TRACE("(%p,%08x,%d,%x)\n", hwnd, key, alpha, flags);
-
-    SERVER_START_REQ( set_window_layered_info )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        req->color_key = key;
-        req->alpha = alpha;
-        req->flags = flags;
-        ret = !wine_server_call_err( req );
-    }
-    SERVER_END_REQ;
-
-    if (ret)
-    {
-        USER_Driver->pSetLayeredWindowAttributes( hwnd, key, alpha, flags );
-        update_window_state( hwnd );
-    }
-
-    return ret;
-}
-
-
-/*****************************************************************************
  *              UpdateLayeredWindowIndirect  (USER32.@)
  */
 BOOL WINAPI UpdateLayeredWindowIndirect( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info )
 {
-    DWORD flags = SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW;
-    RECT window_rect, client_rect;
-    SIZE offset;
-
-    if (!info ||
-        info->cbSize != sizeof(*info) ||
-        info->dwFlags & ~(ULW_COLORKEY | ULW_ALPHA | ULW_OPAQUE | ULW_EX_NORESIZE) ||
-        !(GetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_LAYERED) ||
-        NtUserGetLayeredWindowAttributes( hwnd, NULL, NULL, NULL ))
+    if (!info || info->cbSize != sizeof(*info))
     {
         SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
 
-    WIN_GetRectangles( hwnd, COORDS_PARENT, &window_rect, &client_rect );
-
-    if (info->pptDst)
-    {
-        offset.cx = info->pptDst->x - window_rect.left;
-        offset.cy = info->pptDst->y - window_rect.top;
-        OffsetRect( &client_rect, offset.cx, offset.cy );
-        OffsetRect( &window_rect, offset.cx, offset.cy );
-        flags &= ~SWP_NOMOVE;
-    }
-    if (info->psize)
-    {
-        offset.cx = info->psize->cx - (window_rect.right - window_rect.left);
-        offset.cy = info->psize->cy - (window_rect.bottom - window_rect.top);
-        if (info->psize->cx <= 0 || info->psize->cy <= 0)
-        {
-            SetLastError( ERROR_INVALID_PARAMETER );
-            return FALSE;
-        }
-        if ((info->dwFlags & ULW_EX_NORESIZE) && (offset.cx || offset.cy))
-        {
-            SetLastError( ERROR_INCORRECT_SIZE );
-            return FALSE;
-        }
-        client_rect.right  += offset.cx;
-        client_rect.bottom += offset.cy;
-        window_rect.right  += offset.cx;
-        window_rect.bottom += offset.cy;
-        flags &= ~SWP_NOSIZE;
-    }
-
-    TRACE( "window %p win %s client %s\n", hwnd,
-           wine_dbgstr_rect(&window_rect), wine_dbgstr_rect(&client_rect) );
-
-    set_window_pos( hwnd, 0, flags, &window_rect, &client_rect, NULL );
-    return USER_Driver->pUpdateLayeredWindow( hwnd, info, &window_rect );
+    return NtUserUpdateLayeredWindow( hwnd, info->hdcDst, info->pptDst, info->psize,
+                                      info->hdcSrc, info->pptSrc, info->crKey,
+                                      info->pblend, info->dwFlags, info->prcDirty );
 }
 
 
@@ -4129,7 +3390,7 @@ BOOL WINAPI SetProcessDefaultLayout( DWORD layout )
  */
 LONG_PTR WINAPI GetWindowLongPtrW( HWND hwnd, INT offset )
 {
-    return WIN_GetWindowLong( hwnd, offset, sizeof(LONG_PTR), TRUE );
+    return NtUserCallHwndParam( hwnd, offset, NtUserGetWindowLongPtrW );
 }
 
 /*****************************************************************************
@@ -4137,7 +3398,7 @@ LONG_PTR WINAPI GetWindowLongPtrW( HWND hwnd, INT offset )
  */
 LONG_PTR WINAPI GetWindowLongPtrA( HWND hwnd, INT offset )
 {
-    return WIN_GetWindowLong( hwnd, offset, sizeof(LONG_PTR), FALSE );
+    return NtUserCallHwndParam( hwnd, offset, NtUserGetWindowLongPtrA );
 }
 
 /*****************************************************************************

@@ -802,9 +802,9 @@
 @ stub NtUserConfirmResizeCommit
 @ stub NtUserConsoleControl
 @ stub NtUserConvertMemHandle
-@ stub NtUserCopyAcceleratorTable
+@ stdcall -syscall NtUserCopyAcceleratorTable(long ptr long)
 @ stdcall NtUserCountClipboardFormats()
-@ stub NtUserCreateAcceleratorTable
+@ stdcall -syscall NtUserCreateAcceleratorTable(ptr long)
 @ stub NtUserCreateActivationGroup
 @ stub NtUserCreateActivationObject
 @ stub NtUserCreateCaret
@@ -826,7 +826,7 @@
 @ stub NtUserDelegateInput
 @ stub NtUserDeleteMenu
 @ stub NtUserDeleteWindowGroup
-@ stub NtUserDestroyAcceleratorTable
+@ stdcall -syscall NtUserDestroyAcceleratorTable(long)
 @ stub NtUserDestroyActivationGroup
 @ stub NtUserDestroyActivationObject
 @ stdcall NtUserDestroyCursor(long long)
@@ -883,23 +883,23 @@
 @ stub NtUserFillWindow
 @ stdcall -syscall NtUserFindExistingCursorIcon(ptr ptr ptr)
 @ stub NtUserFindWindowEx
-@ stub NtUserFlashWindowEx
+@ stdcall NtUserFlashWindowEx(ptr)
 @ stub NtUserForceWindowToDpiForTest
 @ stub NtUserFrostCrashedWindow
 @ stub NtUserFunctionalizeDisplayConfig
 @ stub NtUserGetActiveProcessesDpis
 @ stub NtUserGetAltTabInfo
-@ stub NtUserGetAncestor
+@ stdcall -syscall NtUserGetAncestor(long long)
 @ stub NtUserGetAppImeLevel
 @ stdcall NtUserGetAsyncKeyState(long)
-@ stub NtUserGetAtomName
+@ stdcall -syscall NtUserGetAtomName(long ptr)
 @ stub NtUserGetAutoRotationState
 @ stub NtUserGetCIMSSM
 @ stub NtUserGetCPD
 @ stub NtUserGetCaretBlinkTime
 @ stub NtUserGetCaretPos
-@ stub NtUserGetClassInfoEx
-@ stub NtUserGetClassName
+@ stdcall NtUserGetClassInfoEx(ptr ptr ptr ptr long)
+@ stdcall -syscall NtUserGetClassName(long long ptr)
 @ stub NtUserGetClipCursor
 @ stub NtUserGetClipboardAccessToken
 @ stub NtUserGetClipboardData
@@ -1016,7 +1016,7 @@
 @ stub NtUserGetWindowMinimizeRect
 @ stub NtUserGetWindowPlacement
 @ stub NtUserGetWindowProcessHandle
-@ stub NtUserGetWindowRgnEx
+@ stdcall -syscall NtUserGetWindowRgnEx(long long long)
 @ stub NtUserGhostWindowFromHungWindow
 @ stub NtUserHandleDelegatedInput
 @ stub NtUserHardErrorControl
@@ -1030,7 +1030,7 @@
 @ stub NtUserInheritWindowMonitor
 @ stub NtUserInitTask
 @ stub NtUserInitialize
-@ stub NtUserInitializeClientPfnArrays
+@ stdcall -syscall NtUserInitializeClientPfnArrays(ptr ptr ptr ptr)
 @ stub NtUserInitializeGenericHidInjection
 @ stub NtUserInitializeInputDeviceInjection
 @ stub NtUserInitializePointerDeviceInjection
@@ -1045,7 +1045,7 @@
 @ stub NtUserInjectTouchInput
 @ stub NtUserInteractiveControlQueryUsage
 @ stub NtUserInternalGetWindowIcon
-@ stub NtUserInternalGetWindowText
+@ stdcall -syscall NtUserInternalGetWindowText(long ptr long)
 @ stub NtUserInternalToUnicode
 @ stub NtUserInvalidateRect
 @ stub NtUserInvalidateRgn
@@ -1084,7 +1084,7 @@
 @ stub NtUserMinMaximize
 @ stub NtUserModifyUserStartupInfoFlags
 @ stub NtUserModifyWindowTouchCapability
-@ stub NtUserMoveWindow
+@ stdcall NtUserMoveWindow(long long long long long long)
 @ stub NtUserMsgWaitForMultipleObjectsEx
 @ stub NtUserNavigateFocus
 @ stub NtUserNotifyIMEStatus
@@ -1122,7 +1122,7 @@
 @ stub NtUserRealWaitMessageEx
 @ stub NtUserRedrawWindow
 @ stub NtUserRegisterBSDRWindow
-@ stub NtUserRegisterClassExWOW
+@ stdcall NtUserRegisterClassExWOW(ptr ptr ptr ptr long long long)
 @ stub NtUserRegisterDManipHook
 @ stub NtUserRegisterEdgy
 @ stub NtUserRegisterErrorReportingDialog
@@ -1163,17 +1163,17 @@
 @ stub NtUserSendInteractiveControlHapticsReport
 @ stub NtUserSetActivationFilter
 @ stub NtUserSetActiveProcessForMonitor
-@ stub NtUserSetActiveWindow
+@ stdcall NtUserSetActiveWindow(long)
 @ stub NtUserSetAppImeLevel
 @ stub NtUserSetAutoRotation
 @ stub NtUserSetBridgeWindowChild
 @ stub NtUserSetBrokeredForeground
 @ stub NtUserSetCalibrationData
-@ stub NtUserSetCapture
+@ stdcall NtUserSetCapture(long)
 @ stub NtUserSetChildWindowNoActivate
-@ stub NtUserSetClassLong
-@ stub NtUserSetClassLongPtr
-@ stub NtUserSetClassWord
+@ stdcall NtUserSetClassLong(long long long long)
+@ stdcall NtUserSetClassLongPtr(long long long long)
+@ stdcall NtUserSetClassWord(long long long)
 @ stub NtUserSetClipboardData
 @ stub NtUserSetClipboardViewer
 @ stub NtUserSetCoreWindow
@@ -1190,7 +1190,7 @@
 @ stub NtUserSetDisplayMapping
 @ stub NtUserSetFallbackForeground
 @ stub NtUserSetFeatureReportResponse
-@ stub NtUserSetFocus
+@ stdcall NtUserSetFocus(long)
 @ stub NtUserSetForegroundWindowForApplication
 @ stub NtUserSetFullscreenMagnifierOffsetsDWMUpdated
 @ stub NtUserSetGestureConfig
@@ -1203,7 +1203,7 @@
 @ stub NtUserSetInteractiveCtrlRotationAngle
 @ stub NtUserSetInternalWindowPos
 @ stdcall -syscall NtUserSetKeyboardState(ptr)
-@ stub NtUserSetLayeredWindowAttributes
+@ stdcall NtUserSetLayeredWindowAttributes(ptr long long long)
 @ stub NtUserSetMagnificationDesktopMagnifierOffsetsDWMUpdated
 @ stub NtUserSetManipulationInputTarget
 @ stub NtUserSetMenu
@@ -1249,8 +1249,8 @@
 @ stub NtUserSetWindowLong
 @ stub NtUserSetWindowLongPtr
 @ stub NtUserSetWindowPlacement
-@ stub NtUserSetWindowPos
-@ stub NtUserSetWindowRgn
+@ stdcall NtUserSetWindowPos(long long long long long long long)
+@ stdcall NtUserSetWindowRgn(long long long)
 @ stub NtUserSetWindowRgnEx
 @ stub NtUserSetWindowShowState
 @ stub NtUserSetWindowStationUser
@@ -1288,14 +1288,14 @@
 @ stdcall -syscall NtUserUnhookWindowsHookEx(long)
 @ stub NtUserUnloadKeyboardLayout
 @ stub NtUserUnlockWindowStation
-@ stub NtUserUnregisterClass
+@ stdcall NtUserUnregisterClass(ptr ptr ptr)
 @ stdcall NtUserUnregisterHotKey(long long)
 @ stub NtUserUnregisterSessionPort
 @ stub NtUserUnregisterUserApiHook
 @ stub NtUserUpdateDefaultDesktopThumbnail
 @ stub NtUserUpdateInputContext
 @ stub NtUserUpdateInstance
-@ stub NtUserUpdateLayeredWindow
+@ stdcall NtUserUpdateLayeredWindow(long long ptr ptr long ptr long ptr long ptr)
 @ stub NtUserUpdatePerUserSystemParameters
 @ stub NtUserUpdateWindowInputSinkHints
 @ stub NtUserUpdateWindowTrackingInfo
@@ -1311,7 +1311,7 @@
 @ stub NtUserWaitMessage
 @ stub NtUserWindowFromDC
 @ stub NtUserWindowFromPhysicalPoint
-@ stub NtUserWindowFromPoint
+@ stdcall NtUserWindowFromPoint(long long)
 @ stub NtUserYieldTask
 @ stub NtValidateCompositionSurfaceHandle
 @ stub NtVisualCaptureBits

@@ -293,7 +293,7 @@ static void set_xattr_sd( int fd, const struct security_descriptor *sd )
 {
     char buffer[XATTR_SIZE_MAX];
     int present, len;
-    const ACL *dacl;
+    const struct acl *dacl;
 
     /* there's no point in storing the security descriptor if there's no DACL */
     if (!sd) return;
@@ -495,16 +495,16 @@ struct security_descriptor *mode_to_sd( mode_t mode, const struct sid *user, con
 /* Convert generic rights into standard access rights */
 static void convert_generic_sd( struct security_descriptor *sd )
 {
-    const ACL *dacl;
+    const struct acl *dacl;
     int present;
 
     dacl = sd_get_dacl( sd, &present );
     if (present && dacl)
     {
-        const ACE_HEADER *ace = (const ACE_HEADER *)(dacl + 1);
+        const struct ace *ace = (const struct ace *)(dacl + 1);
         ULONG i;
 
-        for (i = 0; i < dacl->AceCount; i++, ace = ace_next( ace ))
+        for (i = 0; i < dacl->count; i++, ace = ace_next( ace ))
         {
             DWORD *mask = (DWORD *)(ace + 1);
             *mask = map_access( *mask, &file_type.mapping );

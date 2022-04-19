@@ -94,7 +94,7 @@ struct tls_test_data
 static void CDECL tls_callback_test(DWORD reason, void *data)
 {
     struct tls_test_data *test_data = data;
-    trace("reason: %d, data: %p\n", reason, data);
+    trace("reason: %ld, data: %p\n", reason, data);
 
     test_data->count++;
     test_data->reason = reason;
@@ -144,12 +144,12 @@ static void test_TlsNotifyInterface(void)
     res = iface->Set(&handle, &tls_callback_test, &test_data);
     ok(!res, "Failed to set TLS callback, got error %d\n", res);
     thread = CreateThread(NULL, 0, test_thread, &test_data, 0, &threadid);
-    ok(thread != NULL, "Failed to create Thread, error: %d\n", GetLastError());
+    ok(thread != NULL, "Failed to create Thread, error: %ld\n", GetLastError());
     thread_res = WaitForSingleObject(thread, 2000);
-    ok(thread_res == WAIT_OBJECT_0, "Waiting for thread failed: %d\n", thread_res);
+    ok(thread_res == WAIT_OBJECT_0, "Waiting for thread failed: %ld\n", thread_res);
     ok(test_data.count == 1, "Expected 1 callback execution, got %d\n", test_data.count);
-    ok(test_data.reason == 0, "Expected reason 0, got %d\n", test_data.reason);
-    ok(test_data.threadid == threadid, "Expected thread id %d, got %d\n", threadid, test_data.threadid);
+    ok(test_data.reason == 0, "Expected reason 0, got %lu\n", test_data.reason);
+    ok(test_data.threadid == threadid, "Expected thread id %lu, got %lu\n", threadid, test_data.threadid);
     res = iface->Remove(handle, NULL);
     ok(!res, "Failed to remove TLS callback, got error %d\n", res);
 

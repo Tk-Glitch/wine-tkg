@@ -4292,7 +4292,7 @@ NTSTATUS WINAPI NtQueryAttributesFile( const OBJECT_ATTRIBUTES *attr, FILE_BASIC
  *              NtQueryInformationFile   (NTDLL.@)
  */
 NTSTATUS WINAPI NtQueryInformationFile( HANDLE handle, IO_STATUS_BLOCK *io,
-                                        void *ptr, LONG len, FILE_INFORMATION_CLASS class )
+                                        void *ptr, ULONG len, FILE_INFORMATION_CLASS class )
 {
     static const size_t info_sizes[] =
     {
@@ -6372,7 +6372,7 @@ NTSTATUS create_reparse_point(HANDLE handle, REPARSE_DATA_BUFFER *buffer)
 
     if (flags == SYMLINK_FLAG_RELATIVE)
     {
-        SIZE_T nt_path_len = PATH_MAX, unix_path_len = PATH_MAX;
+        ULONG nt_path_len = PATH_MAX, unix_path_len = PATH_MAX;
         WCHAR *nt_path;
 
         /* resolve the NT path of the source */
@@ -6400,16 +6400,14 @@ NTSTATUS create_reparse_point(HANDLE handle, REPARSE_DATA_BUFFER *buffer)
         /* re-resolve the unix path for the source */
         for (;;)
         {
-            UNICODE_STRING nt_path_tmp;
+            OBJECT_ATTRIBUTES attr;
             unix_path = malloc( unix_path_len );
             if (!unix_path)
             {
                 status = STATUS_NO_MEMORY;
                 goto cleanup;
             }
-            nt_path_tmp.Buffer = nt_path;
-            nt_path_tmp.Length = wcslen(nt_path) * sizeof(WCHAR);
-            status = wine_nt_to_unix_file_name( &nt_path_tmp, unix_path, &unix_path_len, FALSE );
+            status = wine_nt_to_unix_file_name( &attr, unix_path, &unix_path_len, FILE_OPEN_IF );
             if (status != STATUS_BUFFER_TOO_SMALL) break;
             free( unix_path );
         }
@@ -6432,13 +6430,15 @@ NTSTATUS create_reparse_point(HANDLE handle, REPARSE_DATA_BUFFER *buffer)
     /* resolve the NT path of the destination */
     for (;;)
     {
+        OBJECT_ATTRIBUTES attr;
+        ULONG len = unix_dest_len;
         unix_dest = malloc( unix_dest_len );
         if (!unix_dest)
         {
             status = STATUS_NO_MEMORY;
             goto cleanup;
         }
-        status = wine_nt_to_unix_file_name( &nt_dest, unix_dest, &unix_dest_len, FILE_WINE_PATH );
+        status = wine_nt_to_unix_file_name( &attr, unix_dest, &len, FILE_WINE_PATH );
         if (status != STATUS_BUFFER_TOO_SMALL) break;
         free( unix_dest );
     }
@@ -6697,13 +6697,15 @@ NTSTATUS get_reparse_point(HANDLE handle, REPARSE_DATA_BUFFER *buffer, ULONG *si
         /* resolve the NT path */
         for (;;)
         {
+            ULONG len;
             nt_dest = malloc( nt_dest_len * sizeof(WCHAR) );
             if (!nt_dest)
             {
                 status = STATUS_NO_MEMORY;
                 goto cleanup;
             }
-            status = wine_unix_to_nt_file_name( unix_dest, nt_dest, &nt_dest_len );
+            status = wine_unix_to_nt_file_name( unix_dest, nt_dest, &len );
+            nt_dest_len = len;
             if (status != STATUS_BUFFER_TOO_SMALL) break;
             free( nt_dest );
         }

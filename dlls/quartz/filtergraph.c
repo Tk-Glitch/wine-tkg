@@ -61,7 +61,6 @@ struct filter
     struct list entry;
     IBaseFilter *filter;
     IMediaSeeking *seeking;
-    IMediaPosition *position;
     WCHAR *name;
     BOOL sorting;
 };
@@ -543,7 +542,6 @@ static BOOL has_output_pins(IBaseFilter *filter)
 
 static void update_seeking(struct filter *filter)
 {
-    IMediaPosition *position;
     IMediaSeeking *seeking;
 
     if (!filter->seeking)
@@ -562,19 +560,11 @@ static void update_seeking(struct filter *filter)
                 IMediaSeeking_Release(seeking);
         }
     }
-
-    if (!filter->position)
-    {
-        /* Tokyo Xanadu eX+, same as above, same developer, destroys its filter when
-         * its IMediaPosition interface is released, so cache the interface instead
-         * of querying for it every time. */
-        if (SUCCEEDED(IBaseFilter_QueryInterface(filter->filter, &IID_IMediaPosition, (void **)&position)))
-            filter->position = position;
-    }
 }
 
 static BOOL is_renderer(struct filter *filter)
 {
+    IMediaPosition *media_position;
     IAMFilterMiscFlags *flags;
     BOOL ret = FALSE;
 
@@ -584,11 +574,16 @@ static BOOL is_renderer(struct filter *filter)
             ret = TRUE;
         IAMFilterMiscFlags_Release(flags);
     }
+    else if (SUCCEEDED(IBaseFilter_QueryInterface(filter->filter, &IID_IMediaPosition, (void **)&media_position)))
+    {
+        if (!has_output_pins(filter->filter))
+            ret = TRUE;
+        IMediaPosition_Release(media_position);
+    }
     else
     {
         update_seeking(filter);
-        if ((filter->seeking || filter->position) &&
-            !has_output_pins(filter->filter))
+        if (filter->seeking && !has_output_pins(filter->filter))
             ret = TRUE;
     }
     return ret;
@@ -659,7 +654,6 @@ static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface,
     list_add_head(&graph->filters, &entry->entry);
     entry->sorting = FALSE;
     entry->seeking = NULL;
-    entry->position = NULL;
     ++graph->version;
 
     return duplicate_name ? VFW_S_DUPLICATE_NAME : hr;
@@ -727,8 +721,6 @@ static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilte
             {
                 IBaseFilter_SetSyncSource(pFilter, NULL);
                 IBaseFilter_Release(pFilter);
-                if (entry->position)
-                    IMediaPosition_Release(entry->position);
                 if (entry->seeking)
                     IMediaSeeking_Release(entry->seeking);
                 list_remove(&entry->entry);
@@ -5608,27 +5600,10 @@ static const IUnknownVtbl IInner_VTable =
     FilterGraphInner_Release
 };
 
-static BOOL CALLBACK register_winegstreamer_proc(INIT_ONCE *once, void *param, void **ctx)
-{
-    HMODULE mod = LoadLibraryW(L"winegstreamer.dll");
-    if (mod)
-    {
-        HRESULT (WINAPI *proc)(void) = (void *)GetProcAddress(mod, "DllRegisterServer");
-        proc();
-        FreeLibrary(mod);
-    }
-    return TRUE;
-}
-
 static HRESULT filter_graph_common_create(IUnknown *outer, IUnknown **out, BOOL threaded)
 {
-    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
     struct filter_graph *object;
     HRESULT hr;
-
-    /* HACK: our build system makes it difficult to load gstreamer on prefix
-     * creation, so it won't get registered. Do that here instead. */
-    InitOnceExecuteOnce(&once, register_winegstreamer_proc, NULL, NULL);
 
     *out = NULL;
 

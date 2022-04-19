@@ -245,6 +245,9 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
         break;
     case EXCEPTION_WINE_NAME_THREAD:
         pThreadName = (const THREADNAME_INFO*)(rec->ExceptionInformation);
+
+        if (pThreadName->dwType != 0x1000)
+            return DBG_EXCEPTION_NOT_HANDLED;
         if (pThreadName->dwThreadID == -1)
             pThread = dbg_curr_thread;
         else
@@ -254,9 +257,12 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
             dbg_printf("Thread ID=%04lx not in our list of threads -> can't rename\n", pThreadName->dwThreadID);
             return DBG_CONTINUE;
         }
-        if (dbg_read_memory(pThreadName->szName, pThread->name, 9))
-            dbg_printf("Thread ID=%04lx renamed using MS VC6 extension (name==\"%.9s\")\n",
+        if (dbg_read_memory(pThreadName->szName, pThread->name, sizeof(pThread->name)))
+        {
+            pThread->name[sizeof(pThread->name) - 1] = '\0';
+            dbg_printf("Thread ID=%04lx renamed using MSVC extension (name==\"%s\")\n",
                        pThread->tid, pThread->name);
+        }
         return DBG_CONTINUE;
     case EXCEPTION_INVALID_HANDLE:
         return DBG_CONTINUE;

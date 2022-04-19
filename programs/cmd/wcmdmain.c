@@ -1257,7 +1257,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
             WINE_TRACE("Process still running, but returning anyway\n");
             errorlevel = 0;
           } else {
-            WINE_TRACE("Process ended, errorlevel %d\n", errorlevel);
+            WINE_TRACE("Process ended, errorlevel %ld\n", errorlevel);
           }
 
           CloseHandle(pe.hProcess);
@@ -1288,7 +1288,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
       }
 
       if (!status) {
-        WINE_TRACE("Failed to launch via CreateProcess, rc %d (%d)\n",
+        WINE_TRACE("Failed to launch via CreateProcess, rc %d (%ld)\n",
                    status, GetLastError());
         break;
       }
@@ -1305,7 +1305,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
         WINE_TRACE("Process still running, but returning anyway\n");
         errorlevel = 0;
       } else {
-        WINE_TRACE("Process ended, errorlevel %d\n", errorlevel);
+        WINE_TRACE("Process ended, errorlevel %ld\n", errorlevel);
       }
 
       CloseHandle(pe.hProcess);

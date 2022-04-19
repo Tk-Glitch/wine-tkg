@@ -23,15 +23,16 @@
 
 #include "unixlib.h"
 
+#include <gst/gst.h>
+
 extern bool init_gstreamer(void) DECLSPEC_HIDDEN;
 extern GstElement *create_element(const char *name, const char *plugin_set) DECLSPEC_HIDDEN;
-extern GstCaps *wg_format_to_caps(const struct wg_format *format) DECLSPEC_HIDDEN;
+
 extern void wg_format_from_caps(struct wg_format *format, const GstCaps *caps) DECLSPEC_HIDDEN;
 extern bool wg_format_compare(const struct wg_format *a, const struct wg_format *b) DECLSPEC_HIDDEN;
+extern GstCaps *wg_format_to_caps(const struct wg_format *format) DECLSPEC_HIDDEN;
 
 extern NTSTATUS wg_transform_create(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS wg_transform_destroy(void *args) DECLSPEC_HIDDEN;
-extern NTSTATUS wg_transform_push_data(void *args) DECLSPEC_HIDDEN;
-extern NTSTATUS wg_transform_read_data(void *args) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_WINEGSTREAMER_UNIX_PRIVATE_H */

@@ -45,6 +45,43 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(alsa);
 
+struct alsa_stream
+{
+    snd_pcm_t *pcm_handle;
+    snd_pcm_uframes_t alsa_bufsize_frames, alsa_period_frames, safe_rewind_frames;
+    snd_pcm_hw_params_t *hw_params; /* does not hold state between calls */
+    snd_pcm_format_t alsa_format;
+
+    LARGE_INTEGER last_period_time;
+
+    WAVEFORMATEX *fmt;
+    DWORD flags;
+    AUDCLNT_SHAREMODE share;
+    EDataFlow flow;
+    HANDLE event;
+
+    BOOL need_remapping;
+    int alsa_channels;
+    int alsa_channel_map[32];
+
+    BOOL started, please_quit;
+    REFERENCE_TIME mmdev_period_rt;
+    UINT64 written_frames, last_pos_frames;
+    UINT32 bufsize_frames, held_frames, tmp_buffer_frames, mmdev_period_frames;
+    snd_pcm_uframes_t remapping_buf_frames;
+    UINT32 lcl_offs_frames; /* offs into local_buffer where valid data starts */
+    UINT32 wri_offs_frames; /* where to write fresh data in local_buffer */
+    UINT32 hidden_frames;   /* ALSA reserve to ensure continuous rendering */
+    UINT32 vol_adjusted_frames; /* Frames we've already adjusted the volume of but didn't write yet */
+    UINT32 data_in_alsa_frames;
+
+    BYTE *local_buffer, *tmp_buffer, *remapping_buf, *silence_buf;
+    LONG32 getbuf_last; /* <0 when using tmp_buffer */
+    float *vols;
+
+    pthread_mutex_t lock;
+};
+
 #define                     EXTRA_SAFE_RT   40000
 
 static const WCHAR drv_keyW[] = {'S','o','f','t','w','a','r','e','\\',
@@ -960,6 +997,12 @@ static NTSTATUS release_stream(void *args)
     struct alsa_stream *stream = params->stream;
     SIZE_T size;
 
+    if(params->timer_thread){
+        stream->please_quit = TRUE;
+        NtWaitForSingleObject(params->timer_thread, FALSE, NULL);
+        NtClose(params->timer_thread);
+    }
+
     snd_pcm_drop(stream->pcm_handle);
     snd_pcm_close(stream->pcm_handle);
     if(stream->local_buffer){
@@ -970,7 +1013,7 @@ static NTSTATUS release_stream(void *args)
         size = 0;
         NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, &size, MEM_RELEASE);
     }
-    /* free(stream->remapping_buf); */
+    free(stream->remapping_buf);
     free(stream->silence_buf);
     free(stream->hw_params);
     free(stream->fmt);
@@ -980,6 +1023,798 @@ static NTSTATUS release_stream(void *args)
 
     params->result = S_OK;
     return STATUS_SUCCESS;
+}
+
+static BYTE *remap_channels(struct alsa_stream *stream, BYTE *buf, snd_pcm_uframes_t frames)
+{
+    snd_pcm_uframes_t i;
+    UINT c;
+    UINT bytes_per_sample = stream->fmt->wBitsPerSample / 8;
+
+    if(!stream->need_remapping)
+        return buf;
+
+    if(stream->remapping_buf_frames < frames){
+        stream->remapping_buf = realloc(stream->remapping_buf,
+                                        bytes_per_sample * stream->alsa_channels * frames);
+        stream->remapping_buf_frames = frames;
+    }
+
+    snd_pcm_format_set_silence(stream->alsa_format, stream->remapping_buf,
+            frames * stream->alsa_channels);
+
+    switch(stream->fmt->wBitsPerSample){
+    case 8: {
+            UINT8 *tgt_buf, *src_buf;
+            tgt_buf = stream->remapping_buf;
+            src_buf = buf;
+            for(i = 0; i < frames; ++i){
+                for(c = 0; c < stream->fmt->nChannels; ++c)
+                    tgt_buf[stream->alsa_channel_map[c]] = src_buf[c];
+                tgt_buf += stream->alsa_channels;
+                src_buf += stream->fmt->nChannels;
+            }
+            break;
+        }
+    case 16: {
+            UINT16 *tgt_buf, *src_buf;
+            tgt_buf = (UINT16*)stream->remapping_buf;
+            src_buf = (UINT16*)buf;
+            for(i = 0; i < frames; ++i){
+                for(c = 0; c < stream->fmt->nChannels; ++c)
+                    tgt_buf[stream->alsa_channel_map[c]] = src_buf[c];
+                tgt_buf += stream->alsa_channels;
+                src_buf += stream->fmt->nChannels;
+            }
+        }
+        break;
+    case 32: {
+            UINT32 *tgt_buf, *src_buf;
+            tgt_buf = (UINT32*)stream->remapping_buf;
+            src_buf = (UINT32*)buf;
+            for(i = 0; i < frames; ++i){
+                for(c = 0; c < stream->fmt->nChannels; ++c)
+                    tgt_buf[stream->alsa_channel_map[c]] = src_buf[c];
+                tgt_buf += stream->alsa_channels;
+                src_buf += stream->fmt->nChannels;
+            }
+        }
+        break;
+    default: {
+            BYTE *tgt_buf, *src_buf;
+            tgt_buf = stream->remapping_buf;
+            src_buf = buf;
+            for(i = 0; i < frames; ++i){
+                for(c = 0; c < stream->fmt->nChannels; ++c)
+                    memcpy(&tgt_buf[stream->alsa_channel_map[c] * bytes_per_sample],
+                            &src_buf[c * bytes_per_sample], bytes_per_sample);
+                tgt_buf += stream->alsa_channels * bytes_per_sample;
+                src_buf += stream->fmt->nChannels * bytes_per_sample;
+            }
+        }
+        break;
+    }
+
+    return stream->remapping_buf;
+}
+
+static void adjust_buffer_volume(const struct alsa_stream *stream, BYTE *buf, snd_pcm_uframes_t frames)
+{
+    BOOL adjust = FALSE;
+    UINT32 i, channels, mute = 0;
+    BYTE *end;
+
+    if (stream->vol_adjusted_frames >= frames)
+        return;
+    channels = stream->fmt->nChannels;
+
+    /* Adjust the buffer based on the volume for each channel */
+    for (i = 0; i < channels; i++)
+    {
+        adjust |= stream->vols[i] != 1.0f;
+        if (stream->vols[i] == 0.0f)
+            mute++;
+    }
+
+    if (mute == channels)
+    {
+        int err = snd_pcm_format_set_silence(stream->alsa_format, buf, frames * channels);
+        if (err < 0)
+            WARN("Setting buffer to silence failed: %d (%s)\n", err, snd_strerror(err));
+        return;
+    }
+    if (!adjust) return;
+
+    /* Skip the frames we've already adjusted before */
+    end = buf + frames * stream->fmt->nBlockAlign;
+    buf += stream->vol_adjusted_frames * stream->fmt->nBlockAlign;
+
+    switch (stream->alsa_format)
+    {
+#ifndef WORDS_BIGENDIAN
+#define PROCESS_BUFFER(type) do         \
+{                                       \
+    type *p = (type*)buf;               \
+    do                                  \
+    {                                   \
+        for (i = 0; i < channels; i++)  \
+            p[i] = p[i] * stream->vols[i];       \
+        p += i;                         \
+    } while ((BYTE*)p != end);          \
+} while (0)
+    case SND_PCM_FORMAT_S16_LE:
+        PROCESS_BUFFER(INT16);
+        break;
+    case SND_PCM_FORMAT_S32_LE:
+        PROCESS_BUFFER(INT32);
+        break;
+    case SND_PCM_FORMAT_FLOAT_LE:
+        PROCESS_BUFFER(float);
+        break;
+    case SND_PCM_FORMAT_FLOAT64_LE:
+        PROCESS_BUFFER(double);
+        break;
+#undef PROCESS_BUFFER
+    case SND_PCM_FORMAT_S20_3LE:
+    case SND_PCM_FORMAT_S24_3LE:
+    {
+        /* Do it 12 bytes at a time until it is no longer possible */
+        UINT32 *q = (UINT32*)buf, mask = ~0xff;
+        BYTE *p;
+
+        /* After we adjust the volume, we need to mask out low bits */
+        if (stream->alsa_format == SND_PCM_FORMAT_S20_3LE)
+            mask = ~0x0fff;
+
+        i = 0;
+        while (end - (BYTE*)q >= 12)
+        {
+            UINT32 v[4], k;
+            v[0] = q[0] << 8;
+            v[1] = q[1] << 16 | (q[0] >> 16 & ~0xff);
+            v[2] = q[2] << 24 | (q[1] >> 8  & ~0xff);
+            v[3] = q[2] & ~0xff;
+            for (k = 0; k < 4; k++)
+            {
+                v[k] = (INT32)((INT32)v[k] * stream->vols[i]);
+                v[k] &= mask;
+                if (++i == channels) i = 0;
+            }
+            *q++ = v[0] >> 8  | v[1] << 16;
+            *q++ = v[1] >> 16 | v[2] << 8;
+            *q++ = v[2] >> 24 | v[3];
+        }
+        p = (BYTE*)q;
+        while (p != end)
+        {
+            UINT32 v = (INT32)((INT32)(p[0] << 8 | p[1] << 16 | p[2] << 24) * stream->vols[i]);
+            v &= mask;
+            *p++ = v >> 8  & 0xff;
+            *p++ = v >> 16 & 0xff;
+            *p++ = v >> 24;
+            if (++i == channels) i = 0;
+        }
+        break;
+    }
+#endif
+    case SND_PCM_FORMAT_U8:
+    {
+        UINT8 *p = (UINT8*)buf;
+        do
+        {
+            for (i = 0; i < channels; i++)
+                p[i] = (int)((p[i] - 128) * stream->vols[i]) + 128;
+            p += i;
+        } while ((BYTE*)p != end);
+        break;
+    }
+    default:
+        TRACE("Unhandled format %i, not adjusting volume.\n", stream->alsa_format);
+        break;
+    }
+}
+
+static snd_pcm_sframes_t alsa_write_best_effort(struct alsa_stream *stream, BYTE *buf, snd_pcm_uframes_t frames)
+{
+    snd_pcm_sframes_t written;
+
+    adjust_buffer_volume(stream, buf, frames);
+
+    /* Mark the frames we've already adjusted */
+    if (stream->vol_adjusted_frames < frames)
+        stream->vol_adjusted_frames = frames;
+
+    buf = remap_channels(stream, buf, frames);
+
+    written = snd_pcm_writei(stream->pcm_handle, buf, frames);
+    if(written < 0){
+        int ret;
+
+        if(written == -EAGAIN)
+            /* buffer full */
+            return 0;
+
+        WARN("writei failed, recovering: %ld (%s)\n", written,
+                snd_strerror(written));
+
+        ret = snd_pcm_recover(stream->pcm_handle, written, 0);
+        if(ret < 0){
+            WARN("Could not recover: %d (%s)\n", ret, snd_strerror(ret));
+            return ret;
+        }
+
+        written = snd_pcm_writei(stream->pcm_handle, buf, frames);
+    }
+
+    if (written > 0)
+        stream->vol_adjusted_frames -= written;
+    return written;
+}
+
+static snd_pcm_sframes_t alsa_write_buffer_wrap(struct alsa_stream *stream, BYTE *buf,
+        snd_pcm_uframes_t buflen, snd_pcm_uframes_t offs,
+        snd_pcm_uframes_t to_write)
+{
+    snd_pcm_sframes_t ret = 0;
+
+    while(to_write){
+        snd_pcm_uframes_t chunk;
+        snd_pcm_sframes_t tmp;
+
+        if(offs + to_write > buflen)
+            chunk = buflen - offs;
+        else
+            chunk = to_write;
+
+        tmp = alsa_write_best_effort(stream, buf + offs * stream->fmt->nBlockAlign, chunk);
+        if(tmp < 0)
+            return ret;
+        if(!tmp)
+            break;
+
+        ret += tmp;
+        to_write -= tmp;
+        offs += tmp;
+        offs %= buflen;
+    }
+
+    return ret;
+}
+
+static UINT buf_ptr_diff(UINT left, UINT right, UINT bufsize)
+{
+    if(left <= right)
+        return right - left;
+    return bufsize - (left - right);
+}
+
+static UINT data_not_in_alsa(struct alsa_stream *stream)
+{
+    UINT32 diff;
+
+    diff = buf_ptr_diff(stream->lcl_offs_frames, stream->wri_offs_frames, stream->bufsize_frames);
+    if(diff)
+        return diff;
+
+    return stream->held_frames - stream->data_in_alsa_frames;
+}
+
+/* Here's the buffer setup:
+ *
+ *  vvvvvvvv sent to HW already
+ *          vvvvvvvv in ALSA buffer but rewindable
+ * [dddddddddddddddd] ALSA buffer
+ *         [dddddddddddddddd--------] mmdevapi buffer
+ *          ^^^^^^^^ data_in_alsa_frames
+ *          ^^^^^^^^^^^^^^^^ held_frames
+ *                  ^ lcl_offs_frames
+ *                          ^ wri_offs_frames
+ *
+ * GetCurrentPadding is held_frames
+ *
+ * During period callback, we decrement held_frames, fill ALSA buffer, and move
+ *   lcl_offs forward
+ *
+ * During Stop, we rewind the ALSA buffer
+ */
+static void alsa_write_data(struct alsa_stream *stream)
+{
+    snd_pcm_sframes_t written;
+    snd_pcm_uframes_t avail, max_copy_frames, data_frames_played;
+    int err;
+
+    /* this call seems to be required to get an accurate snd_pcm_state() */
+    avail = snd_pcm_avail_update(stream->pcm_handle);
+
+    if(snd_pcm_state(stream->pcm_handle) == SND_PCM_STATE_XRUN){
+        TRACE("XRun state, recovering\n");
+
+        avail = stream->alsa_bufsize_frames;
+
+        if((err = snd_pcm_recover(stream->pcm_handle, -EPIPE, 1)) < 0)
+            WARN("snd_pcm_recover failed: %d (%s)\n", err, snd_strerror(err));
+
+        if((err = snd_pcm_reset(stream->pcm_handle)) < 0)
+            WARN("snd_pcm_reset failed: %d (%s)\n", err, snd_strerror(err));
+
+        if((err = snd_pcm_prepare(stream->pcm_handle)) < 0)
+            WARN("snd_pcm_prepare failed: %d (%s)\n", err, snd_strerror(err));
+    }
+
+    TRACE("avail: %ld\n", avail);
+
+    /* Add a lead-in when starting with too few frames to ensure
+     * continuous rendering.  Additional benefit: Force ALSA to start. */
+    if(stream->data_in_alsa_frames == 0 && stream->held_frames < stream->alsa_period_frames)
+    {
+        alsa_write_best_effort(stream, stream->silence_buf,
+                               stream->alsa_period_frames - stream->held_frames);
+        stream->vol_adjusted_frames = 0;
+    }
+
+    if(stream->started)
+        max_copy_frames = data_not_in_alsa(stream);
+    else
+        max_copy_frames = 0;
+
+    data_frames_played = min(stream->data_in_alsa_frames, avail);
+    stream->data_in_alsa_frames -= data_frames_played;
+
+    if(stream->held_frames > data_frames_played){
+        if(stream->started)
+            stream->held_frames -= data_frames_played;
+    }else
+        stream->held_frames = 0;
+
+    while(avail && max_copy_frames){
+        snd_pcm_uframes_t to_write;
+
+        to_write = min(avail, max_copy_frames);
+
+        written = alsa_write_buffer_wrap(stream, stream->local_buffer,
+                stream->bufsize_frames, stream->lcl_offs_frames, to_write);
+        if(written <= 0)
+            break;
+
+        avail -= written;
+        stream->lcl_offs_frames += written;
+        stream->lcl_offs_frames %= stream->bufsize_frames;
+        stream->data_in_alsa_frames += written;
+        max_copy_frames -= written;
+    }
+
+    if(stream->event)
+        NtSetEvent(stream->event, NULL);
+}
+
+static void alsa_read_data(struct alsa_stream *stream)
+{
+    snd_pcm_sframes_t nread;
+    UINT32 pos = stream->wri_offs_frames, limit = stream->held_frames;
+    unsigned int i;
+
+    if(!stream->started)
+        goto exit;
+
+    /* FIXME: Detect overrun and signal DATA_DISCONTINUITY
+     * How to count overrun frames and report them as position increase? */
+    limit = stream->bufsize_frames - max(limit, pos);
+
+    nread = snd_pcm_readi(stream->pcm_handle,
+            stream->local_buffer + pos * stream->fmt->nBlockAlign, limit);
+    TRACE("read %ld from %u limit %u\n", nread, pos, limit);
+    if(nread < 0){
+        int ret;
+
+        if(nread == -EAGAIN) /* no data yet */
+            return;
+
+        WARN("read failed, recovering: %ld (%s)\n", nread, snd_strerror(nread));
+
+        ret = snd_pcm_recover(stream->pcm_handle, nread, 0);
+        if(ret < 0){
+            WARN("Recover failed: %d (%s)\n", ret, snd_strerror(ret));
+            return;
+        }
+
+        nread = snd_pcm_readi(stream->pcm_handle,
+                stream->local_buffer + pos * stream->fmt->nBlockAlign, limit);
+        if(nread < 0){
+            WARN("read failed: %ld (%s)\n", nread, snd_strerror(nread));
+            return;
+        }
+    }
+
+    for(i = 0; i < stream->fmt->nChannels; i++)
+        if(stream->vols[i] != 0.0f)
+            break;
+    if(i == stream->fmt->nChannels){ /* mute */
+        int err;
+        if((err = snd_pcm_format_set_silence(stream->alsa_format,
+                        stream->local_buffer + pos * stream->fmt->nBlockAlign,
+                        nread)) < 0)
+            WARN("Setting buffer to silence failed: %d (%s)\n", err,
+                    snd_strerror(err));
+    }
+
+    stream->wri_offs_frames += nread;
+    stream->wri_offs_frames %= stream->bufsize_frames;
+    stream->held_frames += nread;
+
+exit:
+    if(stream->event)
+        NtSetEvent(stream->event, NULL);
+}
+
+static snd_pcm_uframes_t interp_elapsed_frames(struct alsa_stream *stream)
+{
+    LARGE_INTEGER time_freq, current_time, time_diff;
+
+    NtQueryPerformanceCounter(&current_time, &time_freq);
+    time_diff.QuadPart = current_time.QuadPart - stream->last_period_time.QuadPart;
+    return muldiv(time_diff.QuadPart, stream->fmt->nSamplesPerSec, time_freq.QuadPart);
+}
+
+static int alsa_rewind_best_effort(struct alsa_stream *stream)
+{
+    snd_pcm_uframes_t len, leave;
+
+    /* we can't use snd_pcm_rewindable, some PCM devices crash. so follow
+     * PulseAudio's example and rewind as much data as we believe is in the
+     * buffer, minus 1.33ms for safety. */
+
+    /* amount of data to leave in ALSA buffer */
+    leave = interp_elapsed_frames(stream) + stream->safe_rewind_frames;
+
+    if(stream->held_frames < leave)
+        stream->held_frames = 0;
+    else
+        stream->held_frames -= leave;
+
+    if(stream->data_in_alsa_frames < leave)
+        len = 0;
+    else
+        len = stream->data_in_alsa_frames - leave;
+
+    TRACE("rewinding %lu frames, now held %u\n", len, stream->held_frames);
+
+    if(len)
+        /* snd_pcm_rewind return value is often broken, assume it succeeded */
+        snd_pcm_rewind(stream->pcm_handle, len);
+
+    stream->data_in_alsa_frames = 0;
+
+    return len;
+}
+
+static NTSTATUS start(void *args)
+{
+    struct start_params *params = args;
+    struct alsa_stream *stream = params->stream;
+
+    alsa_lock(stream);
+
+    if((stream->flags & AUDCLNT_STREAMFLAGS_EVENTCALLBACK) && !stream->event)
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_EVENTHANDLE_NOT_SET);
+
+    if(stream->started)
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_NOT_STOPPED);
+
+    if(stream->flow == eCapture){
+        /* dump any data that might be leftover in the ALSA capture buffer */
+        snd_pcm_readi(stream->pcm_handle, stream->local_buffer,
+                stream->bufsize_frames);
+    }else{
+        snd_pcm_sframes_t avail, written;
+        snd_pcm_uframes_t offs;
+
+        avail = snd_pcm_avail_update(stream->pcm_handle);
+        avail = min(avail, stream->held_frames);
+
+        if(stream->wri_offs_frames < stream->held_frames)
+            offs = stream->bufsize_frames - stream->held_frames + stream->wri_offs_frames;
+        else
+            offs = stream->wri_offs_frames - stream->held_frames;
+
+        /* fill it with data */
+        written = alsa_write_buffer_wrap(stream, stream->local_buffer,
+                stream->bufsize_frames, offs, avail);
+
+        if(written > 0){
+            stream->lcl_offs_frames = (offs + written) % stream->bufsize_frames;
+            stream->data_in_alsa_frames = written;
+        }else{
+            stream->lcl_offs_frames = offs;
+            stream->data_in_alsa_frames = 0;
+        }
+    }
+    stream->started = TRUE;
+
+    return alsa_unlock_result(stream, &params->result, S_OK);
+}
+
+static NTSTATUS stop(void *args)
+{
+    struct stop_params *params = args;
+    struct alsa_stream *stream = params->stream;
+
+    alsa_lock(stream);
+
+    if(!stream->started)
+        return alsa_unlock_result(stream, &params->result, S_FALSE);
+
+    if(stream->flow == eRender)
+        alsa_rewind_best_effort(stream);
+
+    stream->started = FALSE;
+
+    return alsa_unlock_result(stream, &params->result, S_OK);
+}
+
+static NTSTATUS reset(void *args)
+{
+    struct reset_params *params = args;
+    struct alsa_stream *stream = params->stream;
+
+    alsa_lock(stream);
+
+    if(stream->started)
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_NOT_STOPPED);
+
+    if(stream->getbuf_last)
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_BUFFER_OPERATION_PENDING);
+
+    if(snd_pcm_drop(stream->pcm_handle) < 0)
+        WARN("snd_pcm_drop failed\n");
+
+    if(snd_pcm_reset(stream->pcm_handle) < 0)
+        WARN("snd_pcm_reset failed\n");
+
+    if(snd_pcm_prepare(stream->pcm_handle) < 0)
+        WARN("snd_pcm_prepare failed\n");
+
+    if(stream->flow == eRender){
+        stream->written_frames = 0;
+        stream->last_pos_frames = 0;
+    }else{
+        stream->written_frames += stream->held_frames;
+    }
+    stream->held_frames = 0;
+    stream->lcl_offs_frames = 0;
+    stream->wri_offs_frames = 0;
+
+    return alsa_unlock_result(stream, &params->result, S_OK);
+}
+
+static NTSTATUS timer_loop(void *args)
+{
+    struct timer_loop_params *params = args;
+    struct alsa_stream *stream = params->stream;
+    LARGE_INTEGER delay, next;
+    int adjust;
+
+    alsa_lock(stream);
+
+    delay.QuadPart = -stream->mmdev_period_rt;
+    NtQueryPerformanceCounter(&stream->last_period_time, NULL);
+    next.QuadPart = stream->last_period_time.QuadPart + stream->mmdev_period_rt;
+
+    while(!stream->please_quit){
+        if(stream->flow == eRender)
+            alsa_write_data(stream);
+        else if(stream->flow == eCapture)
+            alsa_read_data(stream);
+        alsa_unlock(stream);
+
+        NtDelayExecution(FALSE, &delay);
+
+        alsa_lock(stream);
+        NtQueryPerformanceCounter(&stream->last_period_time, NULL);
+        adjust = next.QuadPart - stream->last_period_time.QuadPart;
+        if(adjust > stream->mmdev_period_rt / 2)
+            adjust = stream->mmdev_period_rt / 2;
+        else if(adjust < -stream->mmdev_period_rt / 2)
+            adjust = -stream->mmdev_period_rt / 2;
+        delay.QuadPart = -(stream->mmdev_period_rt + adjust);
+        next.QuadPart += stream->mmdev_period_rt;
+    }
+
+    alsa_unlock(stream);
+
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS get_render_buffer(void *args)
+{
+    struct get_render_buffer_params *params = args;
+    struct alsa_stream *stream = params->stream;
+    UINT32 write_pos, frames = params->frames;
+    SIZE_T size;
+
+    alsa_lock(stream);
+
+    if(stream->getbuf_last)
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_OUT_OF_ORDER);
+
+    if(!frames)
+        return alsa_unlock_result(stream, &params->result, S_OK);
+
+    /* held_frames == GetCurrentPadding_nolock(); */
+    if(stream->held_frames + frames > stream->bufsize_frames)
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_BUFFER_TOO_LARGE);
+
+    write_pos = stream->wri_offs_frames;
+    if(write_pos + frames > stream->bufsize_frames){
+        if(stream->tmp_buffer_frames < frames){
+            if(stream->tmp_buffer){
+                size = 0;
+                NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, &size, MEM_RELEASE);
+                stream->tmp_buffer = NULL;
+            }
+            size = frames * stream->fmt->nBlockAlign;
+            if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, 0, &size,
+                                       MEM_COMMIT, PAGE_READWRITE)){
+                stream->tmp_buffer_frames = 0;
+                return alsa_unlock_result(stream, &params->result, E_OUTOFMEMORY);
+            }
+            stream->tmp_buffer_frames = frames;
+        }
+        *params->data = stream->tmp_buffer;
+        stream->getbuf_last = -frames;
+    }else{
+        *params->data = stream->local_buffer + write_pos * stream->fmt->nBlockAlign;
+        stream->getbuf_last = frames;
+    }
+
+    silence_buffer(stream, *params->data, frames);
+
+    return alsa_unlock_result(stream, &params->result, S_OK);
+}
+
+static void alsa_wrap_buffer(struct alsa_stream *stream, BYTE *buffer, UINT32 written_frames)
+{
+    snd_pcm_uframes_t write_offs_frames = stream->wri_offs_frames;
+    UINT32 write_offs_bytes = write_offs_frames * stream->fmt->nBlockAlign;
+    snd_pcm_uframes_t chunk_frames = stream->bufsize_frames - write_offs_frames;
+    UINT32 chunk_bytes = chunk_frames * stream->fmt->nBlockAlign;
+    UINT32 written_bytes = written_frames * stream->fmt->nBlockAlign;
+
+    if(written_bytes <= chunk_bytes){
+        memcpy(stream->local_buffer + write_offs_bytes, buffer, written_bytes);
+    }else{
+        memcpy(stream->local_buffer + write_offs_bytes, buffer, chunk_bytes);
+        memcpy(stream->local_buffer, buffer + chunk_bytes,
+                written_bytes - chunk_bytes);
+    }
+}
+
+static NTSTATUS release_render_buffer(void *args)
+{
+    struct release_render_buffer_params *params = args;
+    struct alsa_stream *stream = params->stream;
+    UINT32 written_frames = params->written_frames;
+    BYTE *buffer;
+
+    alsa_lock(stream);
+
+    if(!written_frames){
+        stream->getbuf_last = 0;
+        return alsa_unlock_result(stream, &params->result, S_OK);
+    }
+
+    if(!stream->getbuf_last)
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_OUT_OF_ORDER);
+
+    if(written_frames > (stream->getbuf_last >= 0 ? stream->getbuf_last : -stream->getbuf_last))
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_INVALID_SIZE);
+
+    if(stream->getbuf_last >= 0)
+        buffer = stream->local_buffer + stream->wri_offs_frames * stream->fmt->nBlockAlign;
+    else
+        buffer = stream->tmp_buffer;
+
+    if(params->flags & AUDCLNT_BUFFERFLAGS_SILENT)
+        silence_buffer(stream, buffer, written_frames);
+
+    if(stream->getbuf_last < 0)
+        alsa_wrap_buffer(stream, buffer, written_frames);
+
+    stream->wri_offs_frames += written_frames;
+    stream->wri_offs_frames %= stream->bufsize_frames;
+    stream->held_frames += written_frames;
+    stream->written_frames += written_frames;
+    stream->getbuf_last = 0;
+
+    return alsa_unlock_result(stream, &params->result, S_OK);
+}
+
+static NTSTATUS get_capture_buffer(void *args)
+{
+    struct get_capture_buffer_params *params = args;
+    struct alsa_stream *stream = params->stream;
+    UINT32 *frames = params->frames;
+    SIZE_T size;
+
+    alsa_lock(stream);
+
+    if(stream->getbuf_last)
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_OUT_OF_ORDER);
+
+    if(stream->held_frames < stream->mmdev_period_frames){
+        *frames = 0;
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_S_BUFFER_EMPTY);
+    }
+    *frames = stream->mmdev_period_frames;
+
+    if(stream->lcl_offs_frames + *frames > stream->bufsize_frames){
+        UINT32 chunk_bytes, offs_bytes, frames_bytes;
+        if(stream->tmp_buffer_frames < *frames){
+            if(stream->tmp_buffer){
+                size = 0;
+                NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, &size, MEM_RELEASE);
+                stream->tmp_buffer = NULL;
+            }
+            size = *frames * stream->fmt->nBlockAlign;
+            if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, 0, &size,
+                                       MEM_COMMIT, PAGE_READWRITE)){
+                stream->tmp_buffer_frames = 0;
+                return alsa_unlock_result(stream, &params->result, E_OUTOFMEMORY);
+            }
+            stream->tmp_buffer_frames = *frames;
+        }
+
+        *params->data = stream->tmp_buffer;
+        chunk_bytes = (stream->bufsize_frames - stream->lcl_offs_frames) *
+            stream->fmt->nBlockAlign;
+        offs_bytes = stream->lcl_offs_frames * stream->fmt->nBlockAlign;
+        frames_bytes = *frames * stream->fmt->nBlockAlign;
+        memcpy(stream->tmp_buffer, stream->local_buffer + offs_bytes, chunk_bytes);
+        memcpy(stream->tmp_buffer + chunk_bytes, stream->local_buffer,
+                frames_bytes - chunk_bytes);
+    }else
+        *params->data = stream->local_buffer +
+            stream->lcl_offs_frames * stream->fmt->nBlockAlign;
+
+    stream->getbuf_last = *frames;
+    *params->flags = 0;
+
+    if(params->devpos)
+      *params->devpos = stream->written_frames;
+    if(params->qpcpos){ /* fixme: qpc of recording time */
+        LARGE_INTEGER stamp, freq;
+        NtQueryPerformanceCounter(&stamp, &freq);
+        *params->qpcpos = (stamp.QuadPart * (INT64)10000000) / freq.QuadPart;
+    }
+
+    return alsa_unlock_result(stream, &params->result, *frames ? S_OK : AUDCLNT_S_BUFFER_EMPTY);
+}
+
+static NTSTATUS release_capture_buffer(void *args)
+{
+    struct release_capture_buffer_params *params = args;
+    struct alsa_stream *stream = params->stream;
+    UINT32 done = params->done;
+
+    alsa_lock(stream);
+
+    if(!done){
+        stream->getbuf_last = 0;
+        return alsa_unlock_result(stream, &params->result, S_OK);
+    }
+
+    if(!stream->getbuf_last)
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_OUT_OF_ORDER);
+
+    if(stream->getbuf_last != done)
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_INVALID_SIZE);
+
+    stream->written_frames += done;
+    stream->held_frames -= done;
+    stream->lcl_offs_frames += done;
+    stream->lcl_offs_frames %= stream->bufsize_frames;
+    stream->getbuf_last = 0;
+
+    return alsa_unlock_result(stream, &params->result, S_OK);
 }
 
 static NTSTATUS is_format_supported(void *args)
@@ -1284,14 +2119,150 @@ static NTSTATUS get_current_padding(void *args)
     return alsa_unlock_result(stream, &params->result, S_OK);
 }
 
+static NTSTATUS get_next_packet_size(void *args)
+{
+    struct get_next_packet_size_params *params = args;
+    struct alsa_stream *stream = params->stream;
+
+    alsa_lock(stream);
+
+    *params->frames = stream->held_frames < stream->mmdev_period_frames ? 0 : stream->mmdev_period_frames;
+
+    return alsa_unlock_result(stream, &params->result, S_OK);
+}
+
+static NTSTATUS get_frequency(void *args)
+{
+    struct get_frequency_params *params = args;
+    struct alsa_stream *stream = params->stream;
+    UINT64 *freq = params->freq;
+
+    alsa_lock(stream);
+
+    if(stream->share == AUDCLNT_SHAREMODE_SHARED)
+        *freq = (UINT64)stream->fmt->nSamplesPerSec * stream->fmt->nBlockAlign;
+    else
+        *freq = stream->fmt->nSamplesPerSec;
+
+    return alsa_unlock_result(stream, &params->result, S_OK);
+}
+
+static NTSTATUS get_position(void *args)
+{
+    struct get_position_params *params = args;
+    struct alsa_stream *stream = params->stream;
+    UINT64 position;
+    snd_pcm_state_t alsa_state;
+
+    alsa_lock(stream);
+
+    /* avail_update required to get accurate snd_pcm_state() */
+    snd_pcm_avail_update(stream->pcm_handle);
+    alsa_state = snd_pcm_state(stream->pcm_handle);
+
+    if(stream->flow == eRender){
+        position = stream->written_frames - stream->held_frames;
+
+        if(stream->started && alsa_state == SND_PCM_STATE_RUNNING && stream->held_frames)
+            /* we should be using snd_pcm_delay here, but it is broken
+             * especially during ALSA device underrun. instead, let's just
+             * interpolate between periods with the system timer. */
+            position += interp_elapsed_frames(stream);
+
+        position = min(position, stream->written_frames - stream->held_frames + stream->mmdev_period_frames);
+
+        position = min(position, stream->written_frames);
+    }else
+        position = stream->written_frames + stream->held_frames;
+
+    /* ensure monotic growth */
+    if(position < stream->last_pos_frames)
+        position = stream->last_pos_frames;
+    else
+        stream->last_pos_frames = position;
+
+    TRACE("frames written: %u, held: %u, state: 0x%x, position: %u\n",
+            (UINT32)(stream->written_frames%1000000000), stream->held_frames,
+            alsa_state, (UINT32)(position%1000000000));
+
+    if(stream->share == AUDCLNT_SHAREMODE_SHARED)
+        *params->pos = position * stream->fmt->nBlockAlign;
+    else
+        *params->pos = position;
+
+    if(params->qpctime){
+        LARGE_INTEGER stamp, freq;
+        NtQueryPerformanceCounter(&stamp, &freq);
+        *params->qpctime = (stamp.QuadPart * (INT64)10000000) / freq.QuadPart;
+    }
+
+    return alsa_unlock_result(stream, &params->result, S_OK);
+}
+
+static NTSTATUS set_volumes(void *args)
+{
+    struct set_volumes_params *params = args;
+    struct alsa_stream *stream = params->stream;
+    unsigned int i;
+
+    for(i = 0; i < stream->fmt->nChannels; i++)
+        stream->vols[i] = params->volumes[i] * params->session_volumes[i] * params->master_volume;
+
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS set_event_handle(void *args)
+{
+    struct set_event_handle_params *params = args;
+    struct alsa_stream *stream = params->stream;
+
+    alsa_lock(stream);
+
+    if(!(stream->flags & AUDCLNT_STREAMFLAGS_EVENTCALLBACK))
+        return alsa_unlock_result(stream, &params->result, AUDCLNT_E_EVENTHANDLE_NOT_EXPECTED);
+
+    if (stream->event){
+        FIXME("called twice\n");
+        return alsa_unlock_result(stream, &params->result, HRESULT_FROM_WIN32(ERROR_INVALID_NAME));
+    }
+
+    stream->event = params->event;
+
+    return alsa_unlock_result(stream, &params->result, S_OK);
+}
+
+static NTSTATUS is_started(void *args)
+{
+    struct is_started_params *params = args;
+    struct alsa_stream *stream = params->stream;
+
+    alsa_lock(stream);
+
+    return alsa_unlock_result(stream, &params->result, stream->started ? S_OK : S_FALSE);
+}
+
 unixlib_entry_t __wine_unix_call_funcs[] =
 {
     get_endpoint_ids,
     create_stream,
     release_stream,
+    start,
+    stop,
+    reset,
+    timer_loop,
+    get_render_buffer,
+    release_render_buffer,
+    get_capture_buffer,
+    release_capture_buffer,
     is_format_supported,
     get_mix_format,
     get_buffer_size,
     get_latency,
     get_current_padding,
+    get_next_packet_size,
+    get_frequency,
+    get_position,
+    set_volumes,
+    set_event_handle,
+    is_started,
 };

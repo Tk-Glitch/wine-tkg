@@ -82,9 +82,6 @@ struct rawinput_thread_data
 
 extern BOOL (WINAPI *imm_register_window)(HWND) DECLSPEC_HIDDEN;
 extern void (WINAPI *imm_unregister_window)(HWND) DECLSPEC_HIDDEN;
-#define WM_IME_INTERNAL 0x287
-#define IME_INTERNAL_ACTIVATE 0x17
-#define IME_INTERNAL_DEACTIVATE 0x18
 
 static inline struct user_thread_info *get_user_thread_info(void)
 {
@@ -114,7 +111,7 @@ extern void create_offscreen_window_surface( const RECT *visible_rect, struct wi
 extern void CLIPBOARD_ReleaseOwner( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL FOCUS_MouseActivate( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL set_capture_window( HWND hwnd, UINT gui_flags, HWND *prev_ret ) DECLSPEC_HIDDEN;
-extern void free_dce( struct dce *dce, HWND hwnd ) DECLSPEC_HIDDEN;
+extern void WINAPI free_dce( struct dce *dce, HWND hwnd ) DECLSPEC_HIDDEN;
 extern void invalidate_dce( struct tagWND *win, const RECT *rect ) DECLSPEC_HIDDEN;
 extern HDC get_display_dc(void) DECLSPEC_HIDDEN;
 extern void release_display_dc( HDC hdc ) DECLSPEC_HIDDEN;
@@ -125,7 +122,6 @@ extern void move_window_bits( HWND hwnd, struct window_surface *old_surface,
                               const RECT *window_rect, const RECT *valid_rects ) DECLSPEC_HIDDEN;
 extern void move_window_bits_parent( HWND hwnd, HWND parent, const RECT *window_rect,
                                      const RECT *valid_rects ) DECLSPEC_HIDDEN;
-extern void update_window_state( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void wait_graphics_driver_ready(void) DECLSPEC_HIDDEN;
 extern void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module ) DECLSPEC_HIDDEN;
 extern RECT get_virtual_screen_rect(void) DECLSPEC_HIDDEN;
@@ -159,9 +155,10 @@ extern INT_PTR WINPROC_CallDlgProcA( DLGPROC func, HWND hwnd, UINT msg, WPARAM w
 extern INT_PTR WINPROC_CallDlgProcW( DLGPROC func, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
 extern BOOL WINPROC_call_window( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                  LRESULT *result, BOOL unicode, enum wm_char_mapping mapping ) DECLSPEC_HIDDEN;
+extern void winproc_init(void) DECLSPEC_HIDDEN;
 
-extern const WCHAR *CLASS_GetVersionedName(const WCHAR *classname, UINT *basename_offset,
-        WCHAR *combined, BOOL register_class) DECLSPEC_HIDDEN;
+extern ATOM get_class_info( HINSTANCE instance, const WCHAR *name, WNDCLASSEXW *info,
+                            UNICODE_STRING *name_str, BOOL ansi ) DECLSPEC_HIDDEN;
 
 /* kernel callbacks */
 
@@ -178,7 +175,6 @@ BOOL WINAPI User32CallWindowsHook( const struct win_hook_params *params, ULONG s
 #define SPY_RESULT_OK             0x0001
 #define SPY_RESULT_DEFWND         0x0002
 
-extern const char *SPY_GetClassLongOffsetName( INT offset ) DECLSPEC_HIDDEN;
 extern const char *SPY_GetMsgName( UINT msg, HWND hWnd ) DECLSPEC_HIDDEN;
 extern const char *SPY_GetVKeyName(WPARAM wParam) DECLSPEC_HIDDEN;
 extern void SPY_EnterMessage( INT iFlag, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;

@@ -46,6 +46,33 @@
 #define WIDL_using_Windows_Gaming_Input
 #include "windows.gaming.input.h"
 
+#define MAKE_FUNC(f) static typeof(f) *p ## f
+MAKE_FUNC( RoGetActivationFactory );
+MAKE_FUNC( RoInitialize );
+MAKE_FUNC( WindowsCreateString );
+MAKE_FUNC( WindowsDeleteString );
+MAKE_FUNC( WindowsGetStringRawBuffer );
+#undef MAKE_FUNC
+
+static BOOL load_combase_functions(void)
+{
+    HMODULE combase = GetModuleHandleW( L"combase.dll" );
+
+#define LOAD_FUNC(m, f) if (!(p ## f = (void *)GetProcAddress( m, #f ))) goto failed;
+    LOAD_FUNC( combase, RoGetActivationFactory );
+    LOAD_FUNC( combase, RoInitialize );
+    LOAD_FUNC( combase, WindowsCreateString );
+    LOAD_FUNC( combase, WindowsDeleteString );
+    LOAD_FUNC( combase, WindowsGetStringRawBuffer );
+#undef LOAD_FUNC
+
+    return TRUE;
+
+failed:
+    win_skip("Failed to load combase.dll functions, skipping tests\n");
+    return FALSE;
+}
+
 struct check_objects_todos
 {
     BOOL type;
@@ -2746,20 +2773,11 @@ static void test_driving_wheel_axes(void)
             .wUsage = HID_USAGE_GENERIC_JOYSTICK,
         },
     };
-    struct check_objects_todos object_todos[ARRAY_SIZE(expect_objects)] =
-    {
-        {.name = TRUE},
-        {.name = TRUE},
-        {.name = TRUE},
-        {.name = TRUE},
-        {.name = TRUE},
-    };
     struct check_objects_params check_objects_params =
     {
         .version = DIRECTINPUT_VERSION,
         .expect_count = ARRAY_SIZE(expect_objects),
         .expect_objs = expect_objects,
-        .todo_objs = object_todos,
     };
 
     WCHAR cwd[MAX_PATH], tempdir[MAX_PATH];
@@ -2787,7 +2805,6 @@ static void test_driving_wheel_axes(void)
     todo_wine
     check_member_guid( devinst, expect_devinst, guidInstance );
     check_member_guid( devinst, expect_devinst, guidProduct );
-    todo_wine
     check_member( devinst, expect_devinst, "%#lx", dwDevType );
     todo_wine
     check_member_wstr( devinst, expect_devinst, tszInstanceName );
@@ -2806,7 +2823,6 @@ static void test_driving_wheel_axes(void)
     ok( hr == DI_OK, "GetCapabilities returned %#lx\n", hr );
     check_member( caps, expect_caps, "%lu", dwSize );
     check_member( caps, expect_caps, "%#lx", dwFlags );
-    todo_wine
     check_member( caps, expect_caps, "%#lx", dwDevType );
     check_member( caps, expect_caps, "%lu", dwAxes );
     check_member( caps, expect_caps, "%lu", dwButtons );
@@ -3214,9 +3230,9 @@ static void check_runtimeclass_( int line, IInspectable *inspectable, const WCHA
 
     hr = IInspectable_GetRuntimeClassName( inspectable, &str );
     ok_ (__FILE__, line)( hr == S_OK, "GetRuntimeClassName returned %#lx\n", hr );
-    buffer = WindowsGetStringRawBuffer( str, &length );
+    buffer = pWindowsGetStringRawBuffer( str, &length );
     ok_ (__FILE__, line)( !wcscmp( buffer, class_name ), "got class name %s\n", debugstr_w(buffer) );
-    WindowsDeleteString( str );
+    pWindowsDeleteString( str );
 }
 
 static void test_windows_gaming_input(void)
@@ -3284,20 +3300,22 @@ static void test_windows_gaming_input(void)
     HSTRING str;
     HRESULT hr;
 
+    if (!load_combase_functions()) return;
+
     GetCurrentDirectoryW( ARRAY_SIZE(cwd), cwd );
     GetTempPathW( ARRAY_SIZE(tempdir), tempdir );
     SetCurrentDirectoryW( tempdir );
 
     cleanup_registry_keys();
 
-    hr = RoInitialize( RO_INIT_MULTITHREADED );
+    hr = pRoInitialize( RO_INIT_MULTITHREADED );
     ok( hr == RPC_E_CHANGED_MODE, "RoInitialize returned %#lx\n", hr );
 
-    hr = WindowsCreateString( controller_class_name, wcslen( controller_class_name ), &str );
+    hr = pWindowsCreateString( controller_class_name, wcslen( controller_class_name ), &str );
     ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
-    hr = RoGetActivationFactory( str, &IID_IRawGameControllerStatics, (void **)&controller_statics );
+    hr = pRoGetActivationFactory( str, &IID_IRawGameControllerStatics, (void **)&controller_statics );
     ok( hr == S_OK || broken( hr == REGDB_E_CLASSNOTREG ), "RoGetActivationFactory returned %#lx\n", hr );
-    WindowsDeleteString( str );
+    pWindowsDeleteString( str );
 
     if (hr == REGDB_E_CLASSNOTREG)
     {
@@ -3322,29 +3340,23 @@ static void test_windows_gaming_input(void)
     ok( hr == S_OK, "get_RawGameControllers returned %#lx\n", hr );
     hr = IVectorView_RawGameController_get_Size( controllers_view, &size );
     ok( hr == S_OK, "get_Size returned %#lx\n", hr );
-    todo_wine
     ok( size == 1, "got size %u\n", size );
     hr = IVectorView_RawGameController_GetAt( controllers_view, 0, &raw_controller );
-    todo_wine
     ok( hr == S_OK, "GetAt returned %#lx\n", hr );
     IVectorView_RawGameController_Release( controllers_view );
-    if (hr != S_OK)
-    {
-        IRawGameControllerStatics_Release( controller_statics );
-        goto done;
-    }
 
     /* HID gamepads aren't exposed as WGI gamepads on Windows */
 
-    hr = WindowsCreateString( gamepad_class_name, wcslen( gamepad_class_name ), &str );
+    hr = pWindowsCreateString( gamepad_class_name, wcslen( gamepad_class_name ), &str );
     ok( hr == S_OK, "WindowsCreateString returned %#lx\n", hr );
-    hr = RoGetActivationFactory( str, &IID_IGamepadStatics, (void **)&gamepad_statics );
+    hr = pRoGetActivationFactory( str, &IID_IGamepadStatics, (void **)&gamepad_statics );
     ok( hr == S_OK, "RoGetActivationFactory returned %#lx\n", hr );
-    WindowsDeleteString( str );
+    pWindowsDeleteString( str );
     hr = IGamepadStatics_get_Gamepads( gamepad_statics, &gamepads_view );
     ok( hr == S_OK, "get_Gamepads returned %#lx\n", hr );
     hr = IVectorView_Gamepad_get_Size( gamepads_view, &size );
     ok( hr == S_OK, "get_Size returned %#lx\n", hr );
+    todo_wine /* but Wine currently intentionally does */
     ok( size == 0, "got size %u\n", size );
     IVectorView_Gamepad_Release( gamepads_view );
     IGamepadStatics_Release( gamepad_statics );
@@ -3354,6 +3366,7 @@ static void test_windows_gaming_input(void)
     check_interface( raw_controller, &IID_IInspectable, TRUE );
     check_interface( raw_controller, &IID_IAgileObject, TRUE );
     check_interface( raw_controller, &IID_IRawGameController, TRUE );
+    todo_wine
     check_interface( raw_controller, &IID_IRawGameController2, TRUE );
     check_interface( raw_controller, &IID_IGameController, TRUE );
     check_interface( raw_controller, &IID_IGamepad, FALSE );
@@ -3366,6 +3379,7 @@ static void test_windows_gaming_input(void)
     check_interface( game_controller, &IID_IInspectable, TRUE );
     check_interface( game_controller, &IID_IAgileObject, TRUE );
     check_interface( game_controller, &IID_IRawGameController, TRUE );
+    todo_wine
     check_interface( game_controller, &IID_IRawGameController2, TRUE );
     check_interface( game_controller, &IID_IGameController, TRUE );
     check_interface( game_controller, &IID_IGamepad, FALSE );
@@ -3384,8 +3398,6 @@ done:
     pnp_driver_stop();
     cleanup_registry_keys();
     SetCurrentDirectoryW( cwd );
-
-    RoUninitialize();
 }
 
 START_TEST( joystick8 )

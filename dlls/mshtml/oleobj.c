@@ -1035,7 +1035,7 @@ static HRESULT WINAPI OleInPlaceActiveObject_TranslateAccelerator(IOleInPlaceAct
             break;
         case WM_KEYUP:
         {
-            TRACE("Processing key %ld\n", lpmsg->wParam);
+            TRACE("Processing key %I64d\n", lpmsg->wParam);
             if (lpmsg->wParam == VK_F5)
                 hres = IOleCommandTarget_Exec(&This->IOleCommandTarget_iface, NULL, OLECMDID_REFRESH, 0, NULL, NULL);
 
@@ -1045,7 +1045,7 @@ static HRESULT WINAPI OleInPlaceActiveObject_TranslateAccelerator(IOleInPlaceAct
             FIXME("Unsupported message %04x\n", lpmsg->message);
     }
 
-    TRACE("result 0x%08x\n", hres);
+    TRACE("result 0x%08lx\n", hres);
     return hres;
 }
 

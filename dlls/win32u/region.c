@@ -866,8 +866,8 @@ static void translate( POINT *pt, UINT count, const XFORM *xform )
     {
         double x = pt->x;
         double y = pt->y;
-        pt->x = floor( x * xform->eM11 + y * xform->eM21 + xform->eDx + 0.5 );
-        pt->y = floor( x * xform->eM12 + y * xform->eM22 + xform->eDy + 0.5 );
+        pt->x = GDI_ROUND( x * xform->eM11 + y * xform->eM21 + xform->eDx );
+        pt->y = GDI_ROUND( x * xform->eM12 + y * xform->eM22 + xform->eDy );
         pt++;
     }
 }
@@ -1376,8 +1376,7 @@ BOOL mirror_window_region( HWND hwnd, HRGN hrgn )
 {
     RECT rect;
 
-    if (!user_callbacks) return FALSE;
-    user_callbacks->pGetWindowRect( hwnd, &rect );
+    if (!get_window_rect( hwnd, &rect, get_thread_dpi() )) return FALSE;
     return mirror_region( hrgn, hrgn, rect.right - rect.left ) != ERROR;
 }
 

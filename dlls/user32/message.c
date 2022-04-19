@@ -1875,12 +1875,6 @@ LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     case WM_WINE_SETSTYLE:
         if (is_desktop_window( hwnd )) return 0;
         return WIN_SetStyle(hwnd, wparam, lparam);
-    case WM_WINE_SETACTIVEWINDOW:
-        if (!wparam && NtUserGetForegroundWindow() == hwnd) return 0;
-        return (LRESULT)SetActiveWindow( (HWND)wparam );
-    case WM_WINE_UPDATEWINDOWSTATE:
-        update_window_state( hwnd );
-        return 0;
     default:
         {
             MSG m;
@@ -2552,7 +2546,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
 
         if (msg->hwnd != info.hwndActive)
         {
-            HWND hwndTop = GetAncestor( msg->hwnd, GA_ROOT );
+            HWND hwndTop = NtUserGetAncestor( msg->hwnd, GA_ROOT );
 
             if ((GetWindowLongW( hwndTop, GWL_STYLE ) & (WS_POPUP|WS_CHILD)) != WS_CHILD)
             {

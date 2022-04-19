@@ -573,7 +573,7 @@ static DWORD CALLBACK read_thread(void *arg)
 
         if (!size)
         {
-            wg_parser_push_data(reader->wg_parser, WG_READ_SUCCESS, data, 0);
+            wg_parser_push_data(reader->wg_parser, data, 0);
             continue;
         }
 
@@ -592,7 +592,7 @@ static DWORD CALLBACK read_thread(void *arg)
                     || !ReadFile(file, data, size, &ret_size, NULL))
             {
                 ERR("Failed to read %u bytes at offset %I64u, error %lu.\n", size, offset, GetLastError());
-                wg_parser_push_data(reader->wg_parser, WG_READ_FAILURE, NULL, 0);
+                wg_parser_push_data(reader->wg_parser, NULL, 0);
                 continue;
             }
         }
@@ -603,14 +603,14 @@ static DWORD CALLBACK read_thread(void *arg)
             if (FAILED(hr))
             {
                 ERR("Failed to read %u bytes at offset %I64u, hr %#lx.\n", size, offset, hr);
-                wg_parser_push_data(reader->wg_parser, WG_READ_FAILURE, NULL, 0);
+                wg_parser_push_data(reader->wg_parser, NULL, 0);
                 continue;
             }
         }
 
         if (ret_size != size)
             ERR("Unexpected short read: requested %u bytes, got %lu.\n", size, ret_size);
-        wg_parser_push_data(reader->wg_parser, WG_READ_SUCCESS, data, ret_size);
+        wg_parser_push_data(reader->wg_parser, data, ret_size);
     }
 
     free(data);
@@ -1455,7 +1455,7 @@ static HRESULT init_stream(struct wm_reader *reader, QWORD file_size)
     HRESULT hr;
     WORD i;
 
-    if (!(wg_parser = wg_parser_create(WG_PARSER_DECODEBIN, true)))
+    if (!(wg_parser = wg_parser_create(WG_PARSER_DECODEBIN, false)))
         return E_OUTOFMEMORY;
 
     reader->wg_parser = wg_parser;
@@ -1484,7 +1484,7 @@ static HRESULT init_stream(struct wm_reader *reader, QWORD file_size)
     {
         struct wm_stream *stream = &reader->streams[i];
 
-        stream->wg_stream = wg_parser_get_stream(reader->wg_parser, reader->stream_count - i - 1);
+        stream->wg_stream = wg_parser_get_stream(reader->wg_parser, i);
         stream->reader = reader;
         stream->index = i;
         stream->selection = WMT_ON;
@@ -1509,10 +1509,9 @@ static HRESULT init_stream(struct wm_reader *reader, QWORD file_size)
              * video type will be BGR. */
             stream->format.u.video.format = WG_VIDEO_FORMAT_BGR;
         }
-        wg_parser_stream_enable(stream->wg_stream, &stream->format, NULL);
+        wg_parser_stream_enable(stream->wg_stream, &stream->format);
     }
 
-    wg_parser_end_flush(reader->wg_parser);
     /* We probably discarded events because streams weren't enabled yet.
      * Now that they're all enabled seek back to the start again. */
     wg_parser_stream_seek(reader->streams[0].wg_stream, 1.0, 0, 0,
@@ -1687,6 +1686,9 @@ HRESULT wm_reader_get_output_format_count(struct wm_reader *reader, DWORD output
             *count = ARRAY_SIZE(video_formats);
             break;
 
+        case WG_MAJOR_TYPE_WMA:
+            FIXME("WMA format not implemented!\n");
+            /* fallthrough */
         case WG_MAJOR_TYPE_AUDIO:
         case WG_MAJOR_TYPE_UNKNOWN:
             *count = 1;
@@ -1733,6 +1735,9 @@ HRESULT wm_reader_get_output_format(struct wm_reader *reader, DWORD output,
             format.u.audio.format = WG_AUDIO_FORMAT_S16LE;
             break;
 
+        case WG_MAJOR_TYPE_WMA:
+            FIXME("WMA format not implemented!\n");
+            break;
         case WG_MAJOR_TYPE_UNKNOWN:
             break;
     }
@@ -1776,7 +1781,7 @@ HRESULT wm_reader_set_output_props(struct wm_reader *reader, DWORD output,
     }
 
     stream->format = format;
-    wg_parser_stream_enable(stream->wg_stream, &format, NULL);
+    wg_parser_stream_enable(stream->wg_stream, &format);
 
     /* Re-decode any buffers that might have been generated with the old format.
      *
@@ -1808,131 +1813,183 @@ static const char *get_major_type_string(enum wg_major_type type)
             return "video";
         case WG_MAJOR_TYPE_UNKNOWN:
             return "unknown";
+        case WG_MAJOR_TYPE_WMA:
+            return "wma";
     }
     assert(0);
     return NULL;
 }
 
-HRESULT wm_reader_get_stream_sample(struct wm_stream *stream,
-        INSSBuffer **ret_sample, QWORD *pts, QWORD *duration, DWORD *flags)
+/* Find the earliest buffer by PTS.
+ *
+ * Native seems to behave similarly to this with the async reader, although our
+ * unit tests show that it's not entirely consistent—some frames are received
+ * slightly out of order. It's possible that one stream is being manually offset
+ * to account for decoding latency.
+ *
+ * The behaviour with the synchronous reader, when stream 0 is requested, seems
+ * consistent with this hypothesis, but with a much larger offset—the video
+ * stream seems to be "behind" by about 150 ms.
+ *
+ * The main reason for doing this is that the video and audio stream probably
+ * don't have quite the same "frame rate", and we don't want to force one stream
+ * to decode faster just to keep up with the other. Delivering samples in PTS
+ * order should avoid that problem. */
+static WORD get_earliest_buffer(struct wm_reader *reader, struct wg_parser_buffer *ret_buffer)
 {
-    IWMReaderCallbackAdvanced *callback_advanced = stream->reader->callback_advanced;
-    struct wg_parser_stream *wg_stream = stream->wg_stream;
-    struct wg_parser_event event;
+    struct wg_parser_buffer buffer;
+    QWORD earliest_pts = UI64_MAX;
+    WORD stream_number = 0;
+    WORD i;
 
-    if (stream->selection == WMT_OFF)
-        return NS_E_INVALID_REQUEST;
+    for (i = 0; i < reader->stream_count; ++i)
+    {
+        struct wm_stream *stream = &reader->streams[i];
 
-    if (stream->eos)
-        return NS_E_NO_MORE_SAMPLES;
+        if (stream->selection == WMT_OFF)
+            continue;
+
+        if (!wg_parser_stream_get_buffer(stream->wg_stream, &buffer))
+            continue;
+
+        if (buffer.has_pts && buffer.pts < earliest_pts)
+        {
+            stream_number = i + 1;
+            earliest_pts = buffer.pts;
+            *ret_buffer = buffer;
+        }
+    }
+
+    return stream_number;
+}
+
+HRESULT wm_reader_get_stream_sample(struct wm_reader *reader, WORD stream_number,
+        INSSBuffer **ret_sample, QWORD *pts, QWORD *duration, DWORD *flags, WORD *ret_stream_number)
+{
+    IWMReaderCallbackAdvanced *callback_advanced = reader->callback_advanced;
+    struct wg_parser_stream *wg_stream;
+    struct wg_parser_buffer wg_buffer;
+    struct wm_stream *stream;
+    DWORD size, capacity;
+    INSSBuffer *sample;
+    HRESULT hr;
+    BYTE *data;
 
     for (;;)
     {
-        if (!wg_parser_stream_get_event(wg_stream, &event))
+        if (!stream_number)
         {
-            FIXME("Stream is flushing.\n");
-            return E_NOTIMPL;
-        }
-
-        TRACE("Got event of type %#x for %s stream %p.\n", event.type,
-                get_major_type_string(stream->format.major_type), stream);
-
-        switch (event.type)
-        {
-            case WG_PARSER_EVENT_BUFFER:
+            if (!(stream_number = get_earliest_buffer(reader, &wg_buffer)))
             {
-                DWORD size, capacity;
-                INSSBuffer *sample;
-                HRESULT hr;
-                BYTE *data;
-
-                if (callback_advanced && stream->read_compressed && stream->allocate_stream)
-                {
-                    if (FAILED(hr = IWMReaderCallbackAdvanced_AllocateForStream(callback_advanced,
-                            stream->index + 1, event.u.buffer.size, &sample, NULL)))
-                    {
-                        ERR("Failed to allocate stream sample of %u bytes, hr %#lx.\n", event.u.buffer.size, hr);
-                        wg_parser_stream_release_buffer(wg_stream);
-                        return hr;
-                    }
-                }
-                else if (callback_advanced && !stream->read_compressed && stream->allocate_output)
-                {
-                    if (FAILED(hr = IWMReaderCallbackAdvanced_AllocateForOutput(callback_advanced,
-                            stream->index, event.u.buffer.size, &sample, NULL)))
-                    {
-                        ERR("Failed to allocate output sample of %u bytes, hr %#lx.\n", event.u.buffer.size, hr);
-                        wg_parser_stream_release_buffer(wg_stream);
-                        return hr;
-                    }
-                }
-                else
-                {
-                    struct buffer *object;
-
-                    /* FIXME: Should these be pooled? */
-                    if (!(object = calloc(1, offsetof(struct buffer, data[event.u.buffer.size]))))
-                    {
-                        wg_parser_stream_release_buffer(wg_stream);
-                        return E_OUTOFMEMORY;
-                    }
-
-                    object->INSSBuffer_iface.lpVtbl = &buffer_vtbl;
-                    object->refcount = 1;
-                    object->capacity = event.u.buffer.size;
-
-                    TRACE("Created buffer %p.\n", object);
-                    sample = &object->INSSBuffer_iface;
-                }
-
-                if (FAILED(hr = INSSBuffer_GetBufferAndLength(sample, &data, &size)))
-                    ERR("Failed to get data pointer, hr %#lx.\n", hr);
-                if (FAILED(hr = INSSBuffer_GetMaxLength(sample, &capacity)))
-                    ERR("Failed to get capacity, hr %#lx.\n", hr);
-                if (event.u.buffer.size > capacity)
-                    ERR("Returned capacity %lu is less than requested capacity %u.\n",
-                            capacity, event.u.buffer.size);
-
-                if (!wg_parser_stream_copy_buffer(wg_stream, data, 0, event.u.buffer.size))
-                {
-                    /* The GStreamer pin has been flushed. */
-                    INSSBuffer_Release(sample);
-                    break;
-                }
-
-                if (FAILED(hr = INSSBuffer_SetLength(sample, event.u.buffer.size)))
-                    ERR("Failed to set size %u, hr %#lx.\n", event.u.buffer.size, hr);
-
-                wg_parser_stream_release_buffer(wg_stream);
-
-                if (!event.u.buffer.has_pts)
-                    FIXME("Missing PTS.\n");
-                if (!event.u.buffer.has_duration)
-                    FIXME("Missing duration.\n");
-
-                *pts = event.u.buffer.pts;
-                *duration = event.u.buffer.duration;
-                *flags = 0;
-                if (event.u.buffer.discontinuity)
-                    *flags |= WM_SF_DISCONTINUITY;
-                if (!event.u.buffer.delta)
-                    *flags |= WM_SF_CLEANPOINT;
-
-                *ret_sample = sample;
-                return S_OK;
+                /* All streams are disabled or EOS. */
+                return NS_E_NO_MORE_SAMPLES;
             }
 
-            case WG_PARSER_EVENT_EOS:
+            stream = wm_reader_get_stream_by_stream_number(reader, stream_number);
+            wg_stream = stream->wg_stream;
+        }
+        else
+        {
+            if (!(stream = wm_reader_get_stream_by_stream_number(reader, stream_number)))
+            {
+                WARN("Invalid stream number %u; returning E_INVALIDARG.\n", stream_number);
+                return E_INVALIDARG;
+            }
+            wg_stream = stream->wg_stream;
+
+            if (stream->selection == WMT_OFF)
+            {
+                WARN("Stream %u is deselected; returning NS_E_INVALID_REQUEST.\n", stream_number);
+                return NS_E_INVALID_REQUEST;
+            }
+
+            if (stream->eos)
+                return NS_E_NO_MORE_SAMPLES;
+
+            if (!wg_parser_stream_get_buffer(wg_stream, &wg_buffer))
+            {
                 stream->eos = true;
                 TRACE("End of stream.\n");
                 return NS_E_NO_MORE_SAMPLES;
-
-            case WG_PARSER_EVENT_SEGMENT:
-                break;
-
-            case WG_PARSER_EVENT_NONE:
-                assert(0);
+            }
         }
+
+        TRACE("Got buffer for '%s' stream %p.\n", get_major_type_string(stream->format.major_type), stream);
+
+        if (callback_advanced && stream->read_compressed && stream->allocate_stream)
+        {
+            if (FAILED(hr = IWMReaderCallbackAdvanced_AllocateForStream(callback_advanced,
+                    stream->index + 1, wg_buffer.size, &sample, NULL)))
+            {
+                ERR("Failed to allocate stream sample of %u bytes, hr %#lx.\n", wg_buffer.size, hr);
+                wg_parser_stream_release_buffer(wg_stream);
+                return hr;
+            }
+        }
+        else if (callback_advanced && !stream->read_compressed && stream->allocate_output)
+        {
+            if (FAILED(hr = IWMReaderCallbackAdvanced_AllocateForOutput(callback_advanced,
+                    stream->index, wg_buffer.size, &sample, NULL)))
+            {
+                ERR("Failed to allocate output sample of %u bytes, hr %#lx.\n", wg_buffer.size, hr);
+                wg_parser_stream_release_buffer(wg_stream);
+                return hr;
+            }
+        }
+        else
+        {
+            struct buffer *object;
+
+            /* FIXME: Should these be pooled? */
+            if (!(object = calloc(1, offsetof(struct buffer, data[wg_buffer.size]))))
+            {
+                wg_parser_stream_release_buffer(wg_stream);
+                return E_OUTOFMEMORY;
+            }
+
+            object->INSSBuffer_iface.lpVtbl = &buffer_vtbl;
+            object->refcount = 1;
+            object->capacity = wg_buffer.size;
+
+            TRACE("Created buffer %p.\n", object);
+            sample = &object->INSSBuffer_iface;
+        }
+
+        if (FAILED(hr = INSSBuffer_GetBufferAndLength(sample, &data, &size)))
+            ERR("Failed to get data pointer, hr %#lx.\n", hr);
+        if (FAILED(hr = INSSBuffer_GetMaxLength(sample, &capacity)))
+            ERR("Failed to get capacity, hr %#lx.\n", hr);
+        if (wg_buffer.size > capacity)
+            ERR("Returned capacity %lu is less than requested capacity %u.\n", capacity, wg_buffer.size);
+
+        if (!wg_parser_stream_copy_buffer(wg_stream, data, 0, wg_buffer.size))
+        {
+            /* The GStreamer pin has been flushed. */
+            INSSBuffer_Release(sample);
+            continue;
+        }
+
+        if (FAILED(hr = INSSBuffer_SetLength(sample, wg_buffer.size)))
+            ERR("Failed to set size %u, hr %#lx.\n", wg_buffer.size, hr);
+
+        wg_parser_stream_release_buffer(wg_stream);
+
+        if (!wg_buffer.has_pts)
+            FIXME("Missing PTS.\n");
+        if (!wg_buffer.has_duration)
+            FIXME("Missing duration.\n");
+
+        *pts = wg_buffer.pts;
+        *duration = wg_buffer.duration;
+        *flags = 0;
+        if (wg_buffer.discontinuity)
+            *flags |= WM_SF_DISCONTINUITY;
+        if (!wg_buffer.delta)
+            *flags |= WM_SF_CLEANPOINT;
+
+        *ret_sample = sample;
+        *ret_stream_number = stream_number;
+        return S_OK;
     }
 }
 
@@ -1989,7 +2046,7 @@ HRESULT wm_reader_set_streams_selected(struct wm_reader *reader, WORD count,
                 FIXME("Ignoring selection %#x for stream %u; treating as enabled.\n",
                         selections[i], stream_numbers[i]);
             TRACE("Enabling stream %u.\n", stream_numbers[i]);
-            wg_parser_stream_enable(stream->wg_stream, &stream->format, NULL);
+            wg_parser_stream_enable(stream->wg_stream, &stream->format);
         }
     }
 

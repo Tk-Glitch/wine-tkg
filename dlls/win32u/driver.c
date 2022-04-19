@@ -35,6 +35,7 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(driver);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 struct d3dkmt_adapter
 {
@@ -49,31 +50,13 @@ struct d3dkmt_device
 };
 
 static const struct user_driver_funcs lazy_load_driver;
+static struct user_driver_funcs null_user_driver;
 
 static struct list d3dkmt_adapters = LIST_INIT( d3dkmt_adapters );
 static struct list d3dkmt_devices = LIST_INIT( d3dkmt_devices );
 
 static pthread_mutex_t driver_lock = PTHREAD_MUTEX_INITIALIZER;
-
-/**********************************************************************
- *	     get_display_driver
- *
- * Special case for loading the display driver: get the name from the config file
- */
-const struct gdi_dc_funcs *get_display_driver(void)
-{
-    if (user_driver == &lazy_load_driver)
-    {
-        if (!user_callbacks || !user_callbacks->pGetDesktopWindow() ||
-            user_driver == &lazy_load_driver)
-        {
-            static struct user_driver_funcs empty_funcs;
-            WARN( "failed to load the display driver, falling back to null driver\n" );
-            __wine_set_display_driver( &empty_funcs, WINE_GDI_DRIVER_VERSION );
-        }
-    }
-    return &user_driver->dc_funcs;
-}
+static WCHAR driver_load_error[80];
 
 static INT CDECL nulldrv_AbortDoc( PHYSDEV dev )
 {
@@ -571,11 +554,6 @@ static NTSTATUS CDECL nulldrv_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSO
     return STATUS_PROCEDURE_NOT_FOUND;
 }
 
-static struct opengl_funcs * CDECL nulldrv_wine_get_wgl_driver( PHYSDEV dev, UINT version )
-{
-    return (void *)-1;
-}
-
 const struct gdi_dc_funcs null_driver =
 {
     nulldrv_AbortDoc,                   /* pAbortDoc */
@@ -669,7 +647,6 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_UnrealizePalette,           /* pUnrealizePalette */
     nulldrv_D3DKMTCheckVidPnExclusiveOwnership, /* pD3DKMTCheckVidPnExclusiveOwnership */
     nulldrv_D3DKMTSetVidPnSourceOwner,  /* pD3DKMTSetVidPnSourceOwner */
-    nulldrv_wine_get_wgl_driver,        /* wine_get_wgl_driver */
 
     GDI_PRIORITY_NULL_DRV               /* priority */
 };
@@ -772,6 +749,20 @@ static void CDECL nulldrv_UpdateDisplayDevices( const struct gdi_device_manager 
 static BOOL CDECL nulldrv_CreateDesktopWindow( HWND hwnd )
 {
     return TRUE;
+}
+
+static BOOL CDECL nodrv_CreateWindow( HWND hwnd )
+{
+    static int warned;
+    HWND parent = NtUserGetAncestor( hwnd, GA_PARENT );
+
+    /* HWND_MESSAGE windows don't need a graphics driver */
+    if (!parent || parent == get_user_thread_info()->msg_window) return TRUE;
+    if (warned++) return FALSE;
+
+    ERR_(winediag)( "Application tried to create a window, but no driver could be loaded.\n" );
+    if (driver_load_error[0]) ERR_(winediag)( "%s\n", debugstr_w(driver_load_error) );
+    return FALSE;
 }
 
 static BOOL CDECL nulldrv_CreateWindow( HWND hwnd )
@@ -929,6 +920,11 @@ static const struct vulkan_funcs * CDECL nulldrv_wine_get_vulkan_driver( UINT ve
     return NULL;
 }
 
+static struct opengl_funcs * CDECL nulldrv_wine_get_wgl_driver( UINT version )
+{
+    return (void *)-1;
+}
+
 static void CDECL nulldrv_UpdateCandidatePos( HWND hwnd, const RECT *caret_rect )
 {
 
@@ -936,6 +932,83 @@ static void CDECL nulldrv_UpdateCandidatePos( HWND hwnd, const RECT *caret_rect 
 
 static void CDECL nulldrv_ThreadDetach( void )
 {
+}
+
+static BOOL setup_null_driver(void)
+{
+    if (user_callbacks)
+        user_callbacks->set_user_driver( &null_user_driver, WINE_GDI_DRIVER_VERSION );
+    else
+        __wine_set_display_driver( &null_user_driver, WINE_GDI_DRIVER_VERSION );
+    return TRUE;
+}
+
+static const WCHAR guid_key_prefixW[] =
+{
+    '\\','R','e','g','i','s','t','r','y',
+    '\\','M','a','c','h','i','n','e',
+    '\\','S','y','s','t','e','m',
+    '\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t',
+    '\\','C','o','n','t','r','o','l',
+    '\\','V','i','d','e','o','\\','{'
+};
+static const WCHAR guid_key_suffixW[] = {'}','\\','0','0','0','0'};
+
+static BOOL load_desktop_driver( HWND hwnd )
+{
+    WCHAR key[ARRAYSIZE(guid_key_prefixW) + 40 + ARRAYSIZE(guid_key_suffixW)], *ptr;
+    char buf[4096];
+    KEY_VALUE_PARTIAL_INFORMATION *info = (void *)buf;
+    ATOM_BASIC_INFORMATION *abi = (ATOM_BASIC_INFORMATION *)buf;
+    BOOL ret = FALSE;
+    HKEY hkey;
+    DWORD size;
+    UINT guid_atom;
+
+    static const WCHAR prop_nameW[] =
+        {'_','_','w','i','n','e','_','d','i','s','p','l','a','y','_','d','e','v','i','c','e',
+         '_','g','u','i','d',0};
+
+    user_check_not_lock();
+
+    asciiz_to_unicode( driver_load_error, "The explorer process failed to start." );  /* default error */
+    /* wait for graphics driver to be ready */
+    send_message( hwnd, WM_NULL, 0, 0 );
+
+    guid_atom = HandleToULong( NtUserGetProp( hwnd, prop_nameW ));
+    memcpy( key, guid_key_prefixW, sizeof(guid_key_prefixW) );
+    ptr = key + ARRAYSIZE(guid_key_prefixW);
+    if (NtQueryInformationAtom( guid_atom, AtomBasicInformation, buf, sizeof(buf), NULL ))
+        return FALSE;
+    memcpy( ptr, abi->Name, abi->NameLength );
+    ptr += abi->NameLength / sizeof(WCHAR);
+    memcpy( ptr, guid_key_suffixW, sizeof(guid_key_suffixW) );
+    ptr += ARRAY_SIZE(guid_key_suffixW);
+
+    if (!(hkey = reg_open_key( NULL, key, (ptr - key) * sizeof(WCHAR) ))) return FALSE;
+
+    if ((size = query_reg_ascii_value( hkey, "GraphicsDriver", info, sizeof(buf) )))
+    {
+        static const WCHAR nullW[] = {'n','u','l','l',0};
+        TRACE( "trying driver %s\n", debugstr_wn( (const WCHAR *)info->Data,
+                                                  info->DataLength / sizeof(WCHAR) ));
+        if (info->DataLength != sizeof(nullW) || memcmp( info->Data, nullW, sizeof(nullW) ))
+        {
+            void *ret_ptr;
+            ULONG ret_len;
+            ret = KeUserModeCallback( NtUserLoadDriver, info->Data, info->DataLength,
+                                      &ret_ptr, &ret_len );
+        }
+        else ret = setup_null_driver();
+    }
+    else if ((size = query_reg_ascii_value( hkey, "DriverError", info, sizeof(buf) )))
+    {
+        memcpy( driver_load_error, info->Data, min( info->DataLength, sizeof(driver_load_error) ));
+        driver_load_error[ARRAYSIZE(driver_load_error) - 1] = 0;
+    }
+
+    NtClose( hkey );
+    return ret;
 }
 
 /**********************************************************************
@@ -947,8 +1020,29 @@ static void CDECL nulldrv_ThreadDetach( void )
 
 static const struct user_driver_funcs *load_driver(void)
 {
-    get_display_driver();
+    USEROBJECTFLAGS flags;
+    HWINSTA winstation;
+
+    if (!load_desktop_driver( get_desktop_window() ) || user_driver == &lazy_load_driver)
+    {
+        winstation = NtUserGetProcessWindowStation();
+        if (!NtUserGetObjectInformation( winstation, UOI_FLAGS, &flags, sizeof(flags), NULL )
+            || (flags.dwFlags & WSF_VISIBLE))
+            null_user_driver.pCreateWindow = nodrv_CreateWindow;
+
+        setup_null_driver();
+    }
+
     return user_driver;
+}
+
+/**********************************************************************
+ *           get_display_driver
+ */
+const struct gdi_dc_funcs *get_display_driver(void)
+{
+    if (user_driver == &lazy_load_driver) load_driver();
+    return &user_driver->dc_funcs;
 }
 
 static BOOL CDECL loaderdrv_ActivateKeyboardLayout( HKL layout, UINT flags )
@@ -1039,6 +1133,32 @@ static void CDECL loaderdrv_UpdateDisplayDevices( const struct gdi_device_manage
     load_driver()->pUpdateDisplayDevices( manager, force, param );
 }
 
+static BOOL CDECL loaderdrv_CreateDesktopWindow( HWND hwnd )
+{
+    return load_driver()->pCreateDesktopWindow( hwnd );
+}
+
+static void CDECL loaderdrv_FlashWindowEx( FLASHWINFO *info )
+{
+    load_driver()->pFlashWindowEx( info );
+}
+
+static void CDECL loaderdrv_SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags )
+{
+    load_driver()->pSetLayeredWindowAttributes( hwnd, key, alpha, flags );
+}
+
+static void CDECL loaderdrv_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw )
+{
+    load_driver()->pSetWindowRgn( hwnd, hrgn, redraw );
+}
+
+static BOOL CDECL loaderdrv_UpdateLayeredWindow( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
+                                                 const RECT *window_rect )
+{
+    return load_driver()->pUpdateLayeredWindow( hwnd, info, window_rect );
+}
+
 static const struct vulkan_funcs * CDECL loaderdrv_wine_get_vulkan_driver( UINT version )
 {
     return load_driver()->pwine_get_vulkan_driver( version );
@@ -1069,13 +1189,22 @@ static const struct user_driver_funcs lazy_load_driver =
     .pEnumDisplaySettingsEx = loaderdrv_EnumDisplaySettingsEx,
     .pUpdateDisplayDevices = loaderdrv_UpdateDisplayDevices,
     /* windowing functions */
+    .pCreateDesktopWindow = loaderdrv_CreateDesktopWindow,
+    .pFlashWindowEx = loaderdrv_FlashWindowEx,
+    .pSetCapture = nulldrv_SetCapture,
+    .pSetLayeredWindowAttributes = loaderdrv_SetLayeredWindowAttributes,
+    .pSetWindowRgn = loaderdrv_SetWindowRgn,
     .pMsgWaitForMultipleObjectsEx = nulldrv_MsgWaitForMultipleObjectsEx,
     .pScrollDC = nulldrv_ScrollDC,
+    .pSetFocus = nulldrv_SetFocus,
+    .pUpdateLayeredWindow = loaderdrv_UpdateLayeredWindow,
     .pWindowMessage = nulldrv_WindowMessage,
     /* system parameters */
     .pSystemParametersInfo = nulldrv_SystemParametersInfo,
     /* vulkan support */
     .pwine_get_vulkan_driver = loaderdrv_wine_get_vulkan_driver,
+    /* opengl support */
+    .pwine_get_wgl_driver = nulldrv_wine_get_wgl_driver,
     /* thread management */
     .pThreadDetach = nulldrv_ThreadDetach,
 };
@@ -1139,6 +1268,7 @@ void CDECL __wine_set_display_driver( struct user_driver_funcs *driver, UINT ver
     SET_USER_FUNC(WindowPosChanged);
     SET_USER_FUNC(SystemParametersInfo);
     SET_USER_FUNC(wine_get_vulkan_driver);
+    SET_USER_FUNC(wine_get_wgl_driver);
     SET_USER_FUNC(UpdateCandidatePos);
     SET_USER_FUNC(ThreadDetach);
 #undef SET_USER_FUNC
@@ -1381,21 +1511,4 @@ NTSTATUS WINAPI NtGdiDdDDICheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNE
         return STATUS_INVALID_PARAMETER;
 
     return get_display_driver()->pD3DKMTCheckVidPnExclusiveOwnership( desc );
-}
-
-/***********************************************************************
- *      __wine_get_wgl_driver  (win32u.@)
- */
-struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version )
-{
-    struct opengl_funcs *ret = NULL;
-    DC * dc = get_dc_ptr( hdc );
-
-    if (dc)
-    {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, wine_get_wgl_driver );
-        ret = physdev->funcs->wine_get_wgl_driver( physdev, version );
-        release_dc_ptr( dc );
-    }
-    return ret;
 }

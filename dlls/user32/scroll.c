@@ -816,7 +816,7 @@ void SCROLL_HandleScrollEvent( HWND hwnd, INT nBar, UINT msg, POINT pt )
         {
             case WM_LBUTTONDOWN:  /* Initialise mouse tracking */
                 HideCaret(hwnd);  /* hide caret while holding down LBUTTON */
-                SetCapture( hwnd );
+                NtUserSetCapture( hwnd );
                 prevPt = pt;
                 g_tracking_info.hit_test = hittest = SCROLL_THUMB;
                 break;
@@ -852,8 +852,8 @@ void SCROLL_HandleScrollEvent( HWND hwnd, INT nBar, UINT msg, POINT pt )
           lastMousePos  = lastClickPos;
           trackThumbPos = thumbPos;
           prevPt = pt;
-          if (nBar == SB_CTL && (GetWindowLongW(hwnd, GWL_STYLE) & WS_TABSTOP)) SetFocus( hwnd );
-          SetCapture( hwnd );
+          if (nBar == SB_CTL && (GetWindowLongW(hwnd, GWL_STYLE) & WS_TABSTOP)) NtUserSetFocus( hwnd );
+          NtUserSetCapture( hwnd );
           break;
 
       case WM_MOUSEMOVE:
@@ -1173,35 +1173,35 @@ static void SCROLL_CreateScrollBar(HWND hwnd, LPCREATESTRUCTW lpCreate)
     if (lpCreate->style & (SBS_SIZEGRIP | SBS_SIZEBOX))
     {
         if (lpCreate->style & SBS_SIZEBOXTOPLEFTALIGN)
-            MoveWindow( hwnd, lpCreate->x, lpCreate->y, GetSystemMetrics(SM_CXVSCROLL)+1,
-                        GetSystemMetrics(SM_CYHSCROLL)+1, FALSE );
+            NtUserMoveWindow( hwnd, lpCreate->x, lpCreate->y, GetSystemMetrics(SM_CXVSCROLL)+1,
+                              GetSystemMetrics(SM_CYHSCROLL)+1, FALSE );
         else if(lpCreate->style & SBS_SIZEBOXBOTTOMRIGHTALIGN)
-            MoveWindow( hwnd, lpCreate->x+lpCreate->cx-GetSystemMetrics(SM_CXVSCROLL)-1, 
-                        lpCreate->y+lpCreate->cy-GetSystemMetrics(SM_CYHSCROLL)-1,
-                        GetSystemMetrics(SM_CXVSCROLL)+1,
-                        GetSystemMetrics(SM_CYHSCROLL)+1, FALSE );
+            NtUserMoveWindow( hwnd, lpCreate->x+lpCreate->cx-GetSystemMetrics(SM_CXVSCROLL)-1,
+                              lpCreate->y+lpCreate->cy-GetSystemMetrics(SM_CYHSCROLL)-1,
+                              GetSystemMetrics(SM_CXVSCROLL)+1,
+                              GetSystemMetrics(SM_CYHSCROLL)+1, FALSE );
     }
     else if (lpCreate->style & SBS_VERT)
     {
         if (lpCreate->style & SBS_LEFTALIGN)
-            MoveWindow( hwnd, lpCreate->x, lpCreate->y,
-                        GetSystemMetrics(SM_CXVSCROLL)+1, lpCreate->cy, FALSE );
+            NtUserMoveWindow( hwnd, lpCreate->x, lpCreate->y,
+                              GetSystemMetrics(SM_CXVSCROLL)+1, lpCreate->cy, FALSE );
         else if (lpCreate->style & SBS_RIGHTALIGN)
-            MoveWindow( hwnd,
-                        lpCreate->x+lpCreate->cx-GetSystemMetrics(SM_CXVSCROLL)-1,
-                        lpCreate->y,
-                        GetSystemMetrics(SM_CXVSCROLL)+1, lpCreate->cy, FALSE );
+            NtUserMoveWindow( hwnd,
+                              lpCreate->x+lpCreate->cx-GetSystemMetrics(SM_CXVSCROLL)-1,
+                              lpCreate->y,
+                              GetSystemMetrics(SM_CXVSCROLL)+1, lpCreate->cy, FALSE );
     }
     else  /* SBS_HORZ */
     {
         if (lpCreate->style & SBS_TOPALIGN)
-            MoveWindow( hwnd, lpCreate->x, lpCreate->y,
-                        lpCreate->cx, GetSystemMetrics(SM_CYHSCROLL)+1, FALSE );
+            NtUserMoveWindow( hwnd, lpCreate->x, lpCreate->y,
+                              lpCreate->cx, GetSystemMetrics(SM_CYHSCROLL)+1, FALSE );
         else if (lpCreate->style & SBS_BOTTOMALIGN)
-            MoveWindow( hwnd,
-                        lpCreate->x,
-                        lpCreate->y+lpCreate->cy-GetSystemMetrics(SM_CYHSCROLL)-1,
-                        lpCreate->cx, GetSystemMetrics(SM_CYHSCROLL)+1, FALSE );
+            NtUserMoveWindow( hwnd,
+                              lpCreate->x,
+                              lpCreate->y+lpCreate->cy-GetSystemMetrics(SM_CYHSCROLL)-1,
+                              lpCreate->cx, GetSystemMetrics(SM_CYHSCROLL)+1, FALSE );
     }
 }
 

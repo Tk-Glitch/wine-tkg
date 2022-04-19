@@ -703,6 +703,12 @@ static NTSTATUS set_key_property( struct key *key, const WCHAR *prop, UCHAR *val
             return STATUS_NOT_IMPLEMENTED;
         }
     }
+    else if (!wcscmp( prop, BCRYPT_KEY_LENGTH ))
+    {
+        if (size < sizeof(DWORD)) return STATUS_INVALID_PARAMETER;
+        key->u.a.bitlen = *(DWORD*)value;
+        return STATUS_SUCCESS;
+    }
 
     FIXME( "unsupported key property %s\n", debugstr_w(prop) );
     return STATUS_NOT_IMPLEMENTED;
@@ -1488,6 +1494,7 @@ static NTSTATUS key_import_pair( struct algorithm *alg, const WCHAR *type, BCRYP
             return STATUS_NOT_SUPPORTED;
 
         size = sizeof(*rsa_blob) + rsa_blob->cbPublicExp + rsa_blob->cbModulus;
+        if (size != input_len) return NTE_BAD_DATA;
         return key_asymmetric_create( (struct key **)ret_key, alg, rsa_blob->BitLength, (BYTE *)rsa_blob, size );
     }
     else if (!wcscmp( type, BCRYPT_RSAPRIVATE_BLOB ) || !wcscmp( type, BCRYPT_RSAFULLPRIVATE_BLOB ))
@@ -1890,6 +1897,34 @@ NTSTATUS WINAPI BCryptImportKeyPair( BCRYPT_ALG_HANDLE algorithm, BCRYPT_KEY_HAN
     {
         FIXME( "decryption of key not yet supported\n" );
         return STATUS_NOT_IMPLEMENTED;
+    }
+
+    if (!wcscmp( type, BCRYPT_PUBLIC_KEY_BLOB ))
+    {
+        BCRYPT_KEY_BLOB *key_blob = (BCRYPT_KEY_BLOB *)input;
+
+        if (input_len < sizeof(*key_blob)) return STATUS_INVALID_PARAMETER;
+
+        switch (key_blob->Magic)
+        {
+        case BCRYPT_ECDH_PUBLIC_P256_MAGIC:
+        case BCRYPT_ECDSA_PUBLIC_P256_MAGIC:
+        case BCRYPT_ECDSA_PUBLIC_P384_MAGIC:
+            type = BCRYPT_ECCPUBLIC_BLOB;
+            break;
+
+        case BCRYPT_RSAPUBLIC_MAGIC:
+            type = BCRYPT_RSAPUBLIC_BLOB;
+            break;
+
+        case BCRYPT_DSA_PUBLIC_MAGIC:
+            type = BCRYPT_DSA_PUBLIC_BLOB;
+            break;
+
+        default:
+            FIXME( "unsupported key magic %#lx\n", key_blob->Magic );
+            return STATUS_NOT_SUPPORTED;
+        }
     }
 
     if (!(status = key_import_pair( alg, type, ret_key, input, input_len )))

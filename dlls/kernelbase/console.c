@@ -2021,8 +2021,40 @@ BOOL WINAPI ReadConsoleW( HANDLE handle, void *buffer, DWORD length, DWORD *coun
         return FALSE;
     }
 
-    ret = console_ioctl( handle, IOCTL_CONDRV_READ_CONSOLE, NULL, 0, buffer,
-                         length * sizeof(WCHAR), count );
+    if (reserved)
+    {
+        CONSOLE_READCONSOLE_CONTROL* crc = reserved;
+        char *tmp;
+
+        if (crc->nLength != sizeof(*crc) || crc->nInitialChars >= length)
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
+        if (!(tmp = HeapAlloc( GetProcessHeap(), 0, sizeof(DWORD) + length * sizeof(WCHAR) )))
+        {
+            SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+            return FALSE;
+        }
+
+        memcpy( tmp, &crc->dwCtrlWakeupMask, sizeof(DWORD) );
+        memcpy( tmp + sizeof(DWORD), buffer, crc->nInitialChars * sizeof(WCHAR) );
+        ret = console_ioctl( handle, IOCTL_CONDRV_READ_CONSOLE_CONTROL,
+                             tmp, sizeof(DWORD) + crc->nInitialChars * sizeof(WCHAR),
+                             tmp, sizeof(DWORD) + length * sizeof(WCHAR), count );
+        if (ret)
+        {
+            memcpy( &crc->dwConsoleKeyState, tmp, sizeof(DWORD) );
+            *count -= sizeof(DWORD);
+            memcpy( buffer, tmp + sizeof(DWORD), *count );
+        }
+        HeapFree( GetProcessHeap(), 0, tmp );
+    }
+    else
+    {
+        ret = console_ioctl( handle, IOCTL_CONDRV_READ_CONSOLE, NULL, 0, buffer,
+                             length * sizeof(WCHAR), count );
+    }
     if (ret) *count /= sizeof(WCHAR);
     return ret;
 }

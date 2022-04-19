@@ -20,6 +20,7 @@
 #pragma winrt ns_prefix
 #endif
 
+#ifndef DO_NO_IMPORTS
 import "inspectable.idl";
 import "asyncinfo.idl";
 import "eventtoken.idl";
@@ -28,6 +29,8 @@ import "windows.foundation.idl";
 import "windows.devices.haptics.idl";
 import "windows.gaming.input.forcefeedback.idl";
 import "windows.system.idl";
+import "windows.devices.power.idl";
+#endif
 
 namespace Windows.Gaming.Input {
     typedef enum GamepadButtons GamepadButtons;
@@ -53,8 +56,14 @@ namespace Windows.Gaming.Input {
         interface Windows.Foundation.EventHandler<Windows.Gaming.Input.RawGameController *>;
         interface Windows.Foundation.TypedEventHandler<Windows.Gaming.Input.IGameController *, Windows.Gaming.Input.Headset *>;
         interface Windows.Foundation.TypedEventHandler<Windows.Gaming.Input.IGameController *, Windows.System.UserChangedEventArgs *>;
-        interface Windows.Foundation.Collections.IVectorView<Gamepad *>;
+        interface Windows.Foundation.Collections.IIterator<Windows.Gaming.Input.Gamepad *>;
+        interface Windows.Foundation.Collections.IIterable<Windows.Gaming.Input.Gamepad *>;
+        interface Windows.Foundation.Collections.IVectorView<Windows.Gaming.Input.Gamepad *>;
+        interface Windows.Foundation.Collections.IVector<Windows.Gaming.Input.Gamepad *>;
+        interface Windows.Foundation.Collections.IIterator<Windows.Gaming.Input.RawGameController *>;
+        interface Windows.Foundation.Collections.IIterable<Windows.Gaming.Input.RawGameController *>;
         interface Windows.Foundation.Collections.IVectorView<Windows.Gaming.Input.RawGameController *>;
+        interface Windows.Foundation.Collections.IVector<Windows.Gaming.Input.RawGameController *>;
     }
 
     [
@@ -289,6 +298,18 @@ namespace Windows.Gaming.Input {
     }
 
     [
+        contract(Windows.Foundation.UniversalApiContract, 4.0),
+        exclusiveto(Windows.Gaming.Input.Gamepad),
+        uuid(42676dc5-0856-47c4-9213-b395504c3a3c)
+    ]
+    interface IGamepadStatics2 : IInspectable
+        requires Windows.Gaming.Input.IGamepadStatics
+    {
+        HRESULT FromGameController([in] Windows.Gaming.Input.IGameController *controller,
+                                   [out, retval] Windows.Gaming.Input.Gamepad **value);
+    }
+
+    [
         contract(Windows.Foundation.UniversalApiContract, 1.0),
         exclusiveto(Windows.Gaming.Input.Headset),
         uuid(3fd156ef-6925-3fa8-9181-029c5223ae3b)
@@ -313,6 +334,15 @@ namespace Windows.Gaming.Input {
         [eventremove] HRESULT RawGameControllerRemoved([in] EventRegistrationToken token);
         [propget] HRESULT RawGameControllers([out, retval] Windows.Foundation.Collections.IVectorView<Windows.Gaming.Input.RawGameController *> **value);
         HRESULT FromGameController([in] Windows.Gaming.Input.IGameController *game_controller, [out, retval] Windows.Gaming.Input.RawGameController **value);
+    }
+
+    [
+        contract(Windows.Foundation.UniversalApiContract, 4.0),
+        uuid(dcecc681-3963-4da6-955d-553f3b6f6161)
+    ]
+    interface IGameControllerBatteryInfo : IInspectable
+    {
+        HRESULT TryGetBatteryReport([out, retval] Windows.Devices.Power.BatteryReport **value);
     }
 
     [

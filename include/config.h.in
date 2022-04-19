@@ -65,22 +65,6 @@
 /* Define to 1 if you have the `epoll_create' function. */
 #undef HAVE_EPOLL_CREATE
 
-/* Define to 1 if you have the `F3DAudioInitialize8' function. */
-#undef HAVE_F3DAUDIOINITIALIZE8
-
-/* Define to 1 if you have the `FAudioCreateReverb9WithCustomAllocatorEXT'
-   function. */
-#undef HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
-
-/* Define to 1 if you have the `FAudioLinkedVersion' function. */
-#undef HAVE_FAUDIOLINKEDVERSION
-
-/* Define to 1 if you have the `FAudio_CommitOperationSet' function. */
-#undef HAVE_FAUDIO_COMMITOPERATIONSET
-
-/* Define to 1 if you have the <FAudio.h> header file. */
-#undef HAVE_FAUDIO_H
-
 /* Define to 1 if you have the <float.h> header file. */
 #undef HAVE_FLOAT_H
 
@@ -144,9 +128,6 @@
 /* Define to 1 if you have the <gssapi/gssapi.h> header file. */
 #undef HAVE_GSSAPI_GSSAPI_H
 
-/* Define to 1 if you have the <ieeefp.h> header file. */
-#undef HAVE_IEEEFP_H
-
 /* Define to 1 if you have the <ifaddrs.h> header file. */
 #undef HAVE_IFADDRS_H
 
@@ -161,15 +142,6 @@
 
 /* Define to 1 if you have the <IOKit/IOKitLib.h> header file. */
 #undef HAVE_IOKIT_IOKITLIB_H
-
-/* Define to 1 if you have the `isfinite' function. */
-#undef HAVE_ISFINITE
-
-/* Define to 1 if you have the `isinf' function. */
-#undef HAVE_ISINF
-
-/* Define to 1 if you have the `isnan' function. */
-#undef HAVE_ISNAN
 
 /* Define to 1 if you have the `kqueue' function. */
 #undef HAVE_KQUEUE
@@ -857,9 +829,6 @@
 /* Define to the soname of the libEGL library. */
 #undef SONAME_LIBEGL
 
-/* Define to the soname of the libFAudio library. */
-#undef SONAME_LIBFAUDIO
-
 /* Define to the soname of the libfontconfig library. */
 #undef SONAME_LIBFONTCONFIG
 
@@ -907,12 +876,6 @@
 
 /* Define to the soname of the libv4l2 library. */
 #undef SONAME_LIBV4L2
-
-/* Define to the soname of the libvkd3d library. */
-#undef SONAME_LIBVKD3D
-
-/* Define to the soname of the libvkd3d-shader library. */
-#undef SONAME_LIBVKD3D_SHADER
 
 /* Define to the soname of the libvulkan library. */
 #undef SONAME_LIBVULKAN

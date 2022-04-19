@@ -18,42 +18,7 @@
 
 #include "audioclient.h"
 
-struct alsa_stream
-{
-    snd_pcm_t *pcm_handle;
-    snd_pcm_uframes_t alsa_bufsize_frames, alsa_period_frames, safe_rewind_frames;
-    snd_pcm_hw_params_t *hw_params; /* does not hold state between calls */
-    snd_pcm_format_t alsa_format;
-
-    LARGE_INTEGER last_period_time;
-
-    WAVEFORMATEX *fmt;
-    DWORD flags;
-    AUDCLNT_SHAREMODE share;
-    EDataFlow flow;
-    HANDLE event;
-
-    BOOL need_remapping;
-    int alsa_channels;
-    int alsa_channel_map[32];
-
-    BOOL started;
-    REFERENCE_TIME mmdev_period_rt;
-    UINT64 written_frames, last_pos_frames;
-    UINT32 bufsize_frames, held_frames, tmp_buffer_frames, mmdev_period_frames;
-    snd_pcm_uframes_t remapping_buf_frames;
-    UINT32 lcl_offs_frames; /* offs into local_buffer where valid data starts */
-    UINT32 wri_offs_frames; /* where to write fresh data in local_buffer */
-    UINT32 hidden_frames;   /* ALSA reserve to ensure continuous rendering */
-    UINT32 vol_adjusted_frames; /* Frames we've already adjusted the volume of but didn't write yet */
-    UINT32 data_in_alsa_frames;
-
-    BYTE *local_buffer, *tmp_buffer, *remapping_buf, *silence_buf;
-    LONG32 getbuf_last; /* <0 when using tmp_buffer */
-    float *vols;
-
-    pthread_mutex_t lock;
-};
+struct alsa_stream;
 
 struct endpoint
 {
@@ -87,6 +52,64 @@ struct create_stream_params
 struct release_stream_params
 {
     struct alsa_stream *stream;
+    HANDLE timer_thread;
+    HRESULT result;
+};
+
+struct start_params
+{
+    struct alsa_stream *stream;
+    HRESULT result;
+};
+
+struct stop_params
+{
+    struct alsa_stream *stream;
+    HRESULT result;
+};
+
+struct reset_params
+{
+    struct alsa_stream *stream;
+    HRESULT result;
+};
+
+struct timer_loop_params
+{
+    struct alsa_stream *stream;
+};
+
+struct get_render_buffer_params
+{
+    struct alsa_stream *stream;
+    UINT32 frames;
+    HRESULT result;
+    BYTE **data;
+};
+
+struct release_render_buffer_params
+{
+    struct alsa_stream *stream;
+    UINT32 written_frames;
+    UINT flags;
+    HRESULT result;
+};
+
+struct get_capture_buffer_params
+{
+    struct alsa_stream *stream;
+    HRESULT result;
+    BYTE **data;
+    UINT32 *frames;
+    UINT *flags;
+    UINT64 *devpos;
+    UINT64 *qpcpos;
+};
+
+struct release_capture_buffer_params
+{
+    struct alsa_stream *stream;
+    UINT32 done;
     HRESULT result;
 };
 
@@ -129,16 +152,73 @@ struct get_current_padding_params
     UINT32 *padding;
 };
 
+struct get_next_packet_size_params
+{
+    struct alsa_stream *stream;
+    HRESULT result;
+    UINT32 *frames;
+};
+
+struct get_frequency_params
+{
+    struct alsa_stream *stream;
+    HRESULT result;
+    UINT64 *freq;
+};
+
+struct get_position_params
+{
+    struct alsa_stream *stream;
+    HRESULT result;
+    UINT64 *pos;
+    UINT64 *qpctime;
+};
+
+struct set_volumes_params
+{
+    struct alsa_stream *stream;
+    float master_volume;
+    const float *volumes;
+    const float *session_volumes;
+};
+
+struct set_event_handle_params
+{
+    struct alsa_stream *stream;
+    HANDLE event;
+    HRESULT result;
+};
+
+struct is_started_params
+{
+    struct alsa_stream *stream;
+    HRESULT result;
+};
+
 enum alsa_funcs
 {
     alsa_get_endpoint_ids,
     alsa_create_stream,
     alsa_release_stream,
+    alsa_start,
+    alsa_stop,
+    alsa_reset,
+    alsa_timer_loop,
+    alsa_get_render_buffer,
+    alsa_release_render_buffer,
+    alsa_get_capture_buffer,
+    alsa_release_capture_buffer,
     alsa_is_format_supported,
     alsa_get_mix_format,
     alsa_get_buffer_size,
     alsa_get_latency,
     alsa_get_current_padding,
+    alsa_get_next_packet_size,
+    alsa_get_frequency,
+    alsa_get_position,
+    alsa_set_volumes,
+    alsa_set_event_handle,
+    alsa_is_started,
 };
 
 extern unixlib_handle_t alsa_handle;

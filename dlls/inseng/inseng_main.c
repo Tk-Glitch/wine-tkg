@@ -257,7 +257,7 @@ static HRESULT WINAPI downloadcb_OnStopBinding(IBindStatusCallback *iface, HRESU
         This->hr = S_OK;
     else
     {
-        ERR("CopyFile failed: %u\n", GetLastError());
+        ERR("CopyFile failed: %lu\n", GetLastError());
         This->hr = E_FAIL;
     }
 
@@ -849,7 +849,7 @@ static HRESULT WINAPI InstallEngine_EnumInstallIDs(IInstallEngine2 *iface, UINT 
 {
     InstallEngine *This = impl_from_IInstallEngine2(iface);
 
-    FIXME("(%p)->(%lu %p): stub\n", This, index, id);
+    FIXME("(%p)->(%u %p): stub\n", This, index, id);
 
     return E_NOTIMPL;
 }
@@ -861,7 +861,7 @@ static HRESULT WINAPI InstallEngine_EnumDownloadIDs(IInstallEngine2 *iface, UINT
     ICifComponent *comp;
     HRESULT hr;
 
-    TRACE("(%p)->(%lu %p)\n", This, index, id);
+    TRACE("(%p)->(%u %p)\n", This, index, id);
 
     if (!This->icif || !id)
         return E_FAIL;

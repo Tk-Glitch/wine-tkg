@@ -30,15 +30,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wmadec);
 
-DEFINE_MEDIATYPE_GUID(MFAudioFormat_XMAudio2, 0x0166);
-
 static const GUID *const wma_decoder_input_types[] =
 {
     &MEDIASUBTYPE_MSAUDIO1,
     &MFAudioFormat_WMAudioV8,
     &MFAudioFormat_WMAudioV9,
     &MFAudioFormat_WMAudio_Lossless,
-    &MFAudioFormat_XMAudio2,
 };
 static const GUID *const wma_decoder_output_types[] =
 {
@@ -57,7 +54,6 @@ struct wma_decoder
     IMFMediaType *input_type;
     IMFMediaType *output_type;
 
-    IMFSample *input_sample;
     struct wg_transform *wg_transform;
 };
 
@@ -68,27 +64,24 @@ static inline struct wma_decoder *impl_from_IUnknown(IUnknown *iface)
 
 static HRESULT try_create_wg_transform(struct wma_decoder *decoder)
 {
-    struct wg_encoded_format input_format;
-    struct wg_format output_format;
+    struct wg_format input_format, output_format;
 
     if (decoder->wg_transform)
         wg_transform_destroy(decoder->wg_transform);
     decoder->wg_transform = NULL;
 
-    mf_media_type_to_wg_encoded_format(decoder->input_type, &input_format);
-    if (input_format.encoded_type == WG_ENCODED_TYPE_UNKNOWN)
+    mf_media_type_to_wg_format(decoder->input_type, &input_format);
+    if (input_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
         return MF_E_INVALIDMEDIATYPE;
 
     mf_media_type_to_wg_format(decoder->output_type, &output_format);
     if (output_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
         return MF_E_INVALIDMEDIATYPE;
 
-    decoder->wg_transform = wg_transform_create(&input_format, &output_format);
-    if (decoder->wg_transform)
-        return S_OK;
+    if (!(decoder->wg_transform = wg_transform_create(&input_format, &output_format)))
+        return E_FAIL;
 
-    WARN("Failed to create wg_transform.\n");
-    return E_FAIL;
+    return S_OK;
 }
 
 static HRESULT WINAPI unknown_QueryInterface(IUnknown *iface, REFIID iid, void **out)
@@ -135,8 +128,6 @@ static ULONG WINAPI unknown_Release(IUnknown *iface)
 
     if (!refcount)
     {
-        if (decoder->input_sample)
-            IMFSample_Release(decoder->input_sample);
         if (decoder->wg_transform)
             wg_transform_destroy(decoder->wg_transform);
         if (decoder->input_type)
@@ -524,111 +515,20 @@ static HRESULT WINAPI transform_ProcessEvent(IMFTransform *iface, DWORD id, IMFM
 static HRESULT WINAPI transform_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_TYPE message, ULONG_PTR param)
 {
     FIXME("iface %p, message %#x, param %p stub!\n", iface, message, (void *)param);
-    return S_OK;
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFSample *sample, DWORD flags)
 {
-    struct wma_decoder *decoder = impl_from_IMFTransform(iface);
-    IMFMediaBuffer *media_buffer;
-    MFT_INPUT_STREAM_INFO info;
-    DWORD buffer_size;
-    BYTE *buffer;
-    HRESULT hr;
-
-    TRACE("iface %p, id %lu, sample %p, flags %#lx.\n", iface, id, sample, flags);
-
-    if (FAILED(hr = IMFTransform_GetInputStreamInfo(iface, 0, &info)))
-        return hr;
-
-    if (!decoder->wg_transform)
-        return MF_E_TRANSFORM_TYPE_NOT_SET;
-
-    if (decoder->input_sample)
-        return MF_E_NOTACCEPTING;
-
-    if (FAILED(hr = IMFSample_ConvertToContiguousBuffer(sample, &media_buffer)))
-        return hr;
-
-    if (FAILED(hr = IMFMediaBuffer_GetCurrentLength(media_buffer, &buffer_size)))
-        return hr;
-
-    if (!(buffer_size = (buffer_size / info.cbSize) * info.cbSize))
-        return S_OK;
-
-    if (FAILED(hr = IMFMediaBuffer_Lock(media_buffer, &buffer, NULL, NULL)))
-        goto done;
-
-    if (SUCCEEDED(hr = wg_transform_push_data(decoder->wg_transform, buffer, buffer_size)))
-        IMFSample_AddRef((decoder->input_sample = sample));
-
-    IMFMediaBuffer_Unlock(media_buffer);
-
-done:
-    IMFMediaBuffer_Release(media_buffer);
-    return hr;
+    FIXME("iface %p, id %lu, sample %p, flags %#lx stub!\n", iface, id, sample, flags);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, DWORD count,
         MFT_OUTPUT_DATA_BUFFER *samples, DWORD *status)
 {
-    struct wma_decoder *decoder = impl_from_IMFTransform(iface);
-    struct wg_sample wg_sample = {0};
-    IMFMediaBuffer *media_buffer;
-    MFT_OUTPUT_STREAM_INFO info;
-    DWORD buffer_size;
-    HRESULT hr;
-
-    TRACE("iface %p, flags %#lx, count %lu, samples %p, status %p.\n", iface, flags, count, samples, status);
-
-    if (count > 1)
-    {
-        FIXME("Not implemented count %lu\n", count);
-        return E_NOTIMPL;
-    }
-
-    if (FAILED(hr = IMFTransform_GetOutputStreamInfo(iface, 0, &info)))
-        return hr;
-
-    if (!decoder->wg_transform)
-        return MF_E_TRANSFORM_TYPE_NOT_SET;
-
-    *status = 0;
-    samples[0].dwStatus = 0;
-    if (!samples[0].pSample)
-    {
-        samples[0].dwStatus = MFT_OUTPUT_DATA_BUFFER_NO_SAMPLE;
-        return MF_E_TRANSFORM_NEED_MORE_INPUT;
-    }
-
-    if (FAILED(hr = IMFSample_ConvertToContiguousBuffer(samples[0].pSample, &media_buffer)))
-        return hr;
-
-    if (FAILED(hr = IMFMediaBuffer_Lock(media_buffer, &wg_sample.data, &buffer_size, NULL)))
-        goto done;
-    wg_sample.size = buffer_size;
-
-    if (wg_sample.size < info.cbSize)
-        hr = MF_E_BUFFERTOOSMALL;
-    else if (SUCCEEDED(hr = wg_transform_read_data(decoder->wg_transform, &wg_sample)))
-    {
-        if (wg_sample.flags & WG_SAMPLE_FLAG_INCOMPLETE)
-            samples[0].dwStatus |= MFT_OUTPUT_DATA_BUFFER_INCOMPLETE;
-    }
-    else
-    {
-        if (decoder->input_sample)
-            IMFSample_Release(decoder->input_sample);
-        decoder->input_sample = NULL;
-        wg_sample.size = 0;
-    }
-
-    IMFMediaBuffer_Unlock(media_buffer);
-
-done:
-    IMFMediaBuffer_SetCurrentLength(media_buffer, wg_sample.size);
-    IMFMediaBuffer_Release(media_buffer);
-    return hr;
+    FIXME("iface %p, flags %#lx, count %lu, samples %p, status %p stub!\n", iface, flags, count, samples, status);
+    return E_NOTIMPL;
 }
 
 static const IMFTransformVtbl transform_vtbl =

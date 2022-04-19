@@ -485,6 +485,8 @@ static BOOL handle_exception(struct gdb_context* gdbctx, EXCEPTION_DEBUG_INFO* e
         char name[9];
         SIZE_T read;
 
+        if (threadname->dwType != 0x1000)
+            return FALSE;
         if (threadname->dwThreadID == -1)
             thread = dbg_get_thread(gdbctx->process, gdbctx->de.dwThreadId);
         else
@@ -1788,7 +1790,16 @@ static enum packet_return packet_query_threads(struct gdb_context* gdbctx)
         reply_buffer_append_str(reply, "id=\"");
         reply_buffer_append_uinthex(reply, thread->tid, 4);
         reply_buffer_append_str(reply, "\" name=\"");
-        reply_buffer_append_str(reply, thread->name);
+        if (strlen(thread->name))
+        {
+            reply_buffer_append_str(reply, thread->name);
+        }
+        else
+        {
+            char tid[5];
+            snprintf(tid, sizeof(tid), "%04lx", thread->tid);
+            reply_buffer_append_str(reply, tid);
+        }
         reply_buffer_append_str(reply, "\"/>");
     }
     reply_buffer_append_str(reply, "</threads>");

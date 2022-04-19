@@ -1007,7 +1007,7 @@ static void CBDropDown( LPHEADCOMBO lphc )
 
    EnableWindow( lphc->hWndLBox, TRUE );
    if (GetCapture() != lphc->self)
-      SetCapture(lphc->hWndLBox);
+      NtUserSetCapture(lphc->hWndLBox);
 }
 
 /***********************************************************************
@@ -1605,7 +1605,7 @@ static void COMBO_LButtonDown( LPHEADCOMBO lphc, LPARAM lParam )
 	   /* drop down the listbox and start tracking */
 
            lphc->wState |= CBF_CAPTURE;
-           SetCapture( hWnd );
+           NtUserSetCapture( hWnd );
            CBDropDown( lphc );
        }
        if( bButton ) CBRepaintButton( lphc );
@@ -1634,7 +1634,7 @@ static void COMBO_LButtonUp( LPHEADCOMBO lphc )
 	   }
        }
        ReleaseCapture();
-       SetCapture(lphc->hWndLBox);
+       NtUserSetCapture(lphc->hWndLBox);
    }
 
    if( lphc->wState & CBF_BUTTONDOWN )
@@ -1792,7 +1792,7 @@ LRESULT ComboWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
 		return  (LRESULT)lphc->hFont;
 	case WM_SETFOCUS:
                if( lphc->wState & CBF_EDIT ) {
-                   SetFocus( lphc->hWndEdit );
+                   NtUserSetFocus( lphc->hWndEdit );
                    /* The first time focus is received, select all the text */
                    if( !(lphc->wState & CBF_BEENFOCUSED) ) {
                        SendMessageW(lphc->hWndEdit, EM_SETSEL, 0, -1);
@@ -1901,8 +1901,8 @@ LRESULT ComboWndProc_common( HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
 				 SendMessageA(hwndTarget, message, wParam, lParam);
 	}
 	case WM_LBUTTONDOWN:
-		if( !(lphc->wState & CBF_FOCUSED) ) SetFocus( lphc->self );
-		if( lphc->wState & CBF_FOCUSED ) COMBO_LButtonDown( lphc, lParam );
+		if (!(lphc->wState & CBF_FOCUSED)) NtUserSetFocus( lphc->self );
+		if (lphc->wState & CBF_FOCUSED) COMBO_LButtonDown( lphc, lParam );
 		return  TRUE;
 	case WM_LBUTTONUP:
 		COMBO_LButtonUp( lphc );

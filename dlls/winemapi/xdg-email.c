@@ -91,7 +91,7 @@ static void add_target(char **argv, int *argc, ULONG class, const char *address)
             break;
 
         default:
-            TRACE("Unknown recipient class: %d\n", class);
+            TRACE("Unknown recipient class: %ld\n", class);
     }
 }
 

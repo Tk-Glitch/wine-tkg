@@ -805,6 +805,18 @@ FACTAPI uint32_t FACTCue_SetOutputVoiceMatrix(
 	const float *pLevelMatrix /* SourceChannels * DestinationChannels */
 );
 
+FACTAPI void FACTWave_SetPrivateContext(FACTWave *pWave, void *context);
+FACTAPI void* FACTWave_GetPrivateContext(FACTWave *pWave);
+
+FACTAPI void FACTWaveBank_SetPrivateContext(FACTWaveBank *pWaveBank, void *context);
+FACTAPI void* FACTWaveBank_GetPrivateContext(FACTWaveBank *pWaveBank);
+
+FACTAPI void FACTSoundBank_SetPrivateContext(FACTSoundBank *pSoundBank, void *context);
+FACTAPI void* FACTSoundBank_GetPrivateContext(FACTSoundBank *pSoundBank);
+
+FACTAPI void FACTCue_SetPrivateContext(FACTCue *pCue, void *context);
+FACTAPI void* FACTCue_GetPrivateContext(FACTCue *pCue);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

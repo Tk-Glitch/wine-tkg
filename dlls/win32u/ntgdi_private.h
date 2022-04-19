@@ -23,7 +23,6 @@
 
 #include <limits.h>
 #include <math.h>
-#include <stdlib.h>
 #include "win32u_private.h"
 
 /* extra stock object: default 1x1 bitmap for memory DCs */
@@ -59,6 +58,7 @@ typedef struct tagDC
     DCHOOKPROC   hookProc;         /* DC hook */
     BOOL         bounds_enabled:1; /* bounds tracking is enabled */
     BOOL         path_open:1;      /* path is currently open (only for saved DCs) */
+    BOOL         is_display:1;     /* DC is for display device */
 
     RECT         device_rect;      /* rectangle for the whole device */
     int          pixel_format;     /* pixel format (for memory DCs) */
@@ -88,10 +88,6 @@ typedef struct tagDC
     BOOL          vport2WorldValid;  /* Is xformVport2World valid? */
     RECT          bounds;            /* Current bounding rect */
 } DC;
-
-/* Certain functions will do no further processing if the driver returns this.
-   Used by mfdrv for example. */
-#define GDI_NO_MORE_WORK 2
 
 /* Rounds a floating point number to integer. The world-to-viewport
  * transformation process is done in floating point internally. This function
@@ -207,6 +203,7 @@ extern UINT get_dib_dc_color_table( HDC hdc, UINT startpos, UINT entries,
 extern UINT set_dib_dc_color_table( HDC hdc, UINT startpos, UINT entries,
                                     const RGBQUAD *colors ) DECLSPEC_HIDDEN;
 extern void dibdrv_set_window_surface( DC *dc, struct window_surface *surface ) DECLSPEC_HIDDEN;
+extern struct opengl_funcs *dibdrv_get_wgl_driver(void) DECLSPEC_HIDDEN;
 
 /* driver.c */
 extern const struct gdi_dc_funcs null_driver DECLSPEC_HIDDEN;

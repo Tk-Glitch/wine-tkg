@@ -66,6 +66,15 @@ BOOL WINAPI NtUserAttachThreadInput( DWORD from, DWORD to, BOOL attach )
 }
 
 /***********************************************************************
+ *           NtUserSendInput  (win32u.@)
+ */
+UINT WINAPI NtUserSendInput( UINT count, INPUT *inputs, int size )
+{
+    if (!user_callbacks) return 0;
+    return user_callbacks->pSendInput( count, inputs, size );
+}
+
+/***********************************************************************
  *	     NtUserSetCursorPos (win32u.@)
  */
 BOOL WINAPI NtUserSetCursorPos( INT x, INT y )
@@ -1032,6 +1041,71 @@ int WINAPI NtUserGetMouseMovePointsEx( UINT size, MOUSEMOVEPOINT *ptin, MOUSEMOV
     return copied;
 }
 
+/**********************************************************************
+ *		set_capture_window
+ */
+BOOL set_capture_window( HWND hwnd, UINT gui_flags, HWND *prev_ret )
+{
+    HWND previous = 0;
+    UINT flags = 0;
+    BOOL ret;
+
+    if (gui_flags & GUI_INMENUMODE) flags |= CAPTURE_MENU;
+    if (gui_flags & GUI_INMOVESIZE) flags |= CAPTURE_MOVESIZE;
+
+    SERVER_START_REQ( set_capture_window )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        req->flags  = flags;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            previous = wine_server_ptr_handle( reply->previous );
+            hwnd = wine_server_ptr_handle( reply->full_handle );
+        }
+    }
+    SERVER_END_REQ;
+
+    if (ret)
+    {
+        user_driver->pSetCapture( hwnd, gui_flags );
+
+        if (previous)
+            send_message( previous, WM_CAPTURECHANGED, 0, (LPARAM)hwnd );
+
+        if (prev_ret) *prev_ret = previous;
+    }
+    return ret;
+}
+
+/**********************************************************************
+ *           NtUserSetCapture (win32u.@)
+ */
+HWND WINAPI NtUserSetCapture( HWND hwnd )
+{
+    HWND previous = 0;
+
+    set_capture_window( hwnd, 0, &previous );
+    return previous;
+}
+
+/**********************************************************************
+ *           release_capture
+ */
+BOOL WINAPI release_capture(void)
+{
+    BOOL ret = set_capture_window( 0, 0, NULL );
+
+    /* Somebody may have missed some mouse movements */
+    if (ret)
+    {
+        INPUT input = { .type = INPUT_MOUSE };
+        input.mi.dwFlags = MOUSEEVENTF_MOVE;
+        NtUserSendInput( 1, &input, sizeof(input) );
+    }
+
+    return ret;
+}
+
 /*******************************************************************
  *           NtUserGetForegroundWindow  (win32u.@)
  */
@@ -1045,5 +1119,327 @@ HWND WINAPI NtUserGetForegroundWindow(void)
         if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->foreground );
     }
     SERVER_END_REQ;
+    return ret;
+}
+
+/* see GetActiveWindow */
+HWND get_active_window(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndActive : 0;
+}
+
+/* see GetFocus */
+static HWND get_focus(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndFocus : 0;
+}
+
+/*****************************************************************
+ *		set_focus_window
+ *
+ * Change the focus window, sending the WM_SETFOCUS and WM_KILLFOCUS messages
+ */
+static HWND set_focus_window( HWND hwnd )
+{
+    HWND previous = 0;
+    BOOL ret;
+
+    SERVER_START_REQ( set_focus_window )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        if ((ret = !wine_server_call_err( req )))
+            previous = wine_server_ptr_handle( reply->previous );
+    }
+    SERVER_END_REQ;
+    if (!ret) return 0;
+    if (previous == hwnd) return previous;
+
+    if (previous)
+    {
+        send_message( previous, WM_KILLFOCUS, (WPARAM)hwnd, 0 );
+
+        if (user_callbacks) user_callbacks->notify_ime( previous, IME_INTERNAL_DEACTIVATE );
+
+        if (hwnd != get_focus()) return previous;  /* changed by the message */
+    }
+    if (is_window(hwnd))
+    {
+        user_driver->pSetFocus(hwnd);
+
+        if (user_callbacks) user_callbacks->notify_ime( hwnd, IME_INTERNAL_ACTIVATE );
+
+        if (previous)
+            NtUserNotifyWinEvent( EVENT_OBJECT_FOCUS, hwnd, OBJID_CLIENT, 0 );
+
+        send_message( hwnd, WM_SETFOCUS, (WPARAM)previous, 0 );
+    }
+    return previous;
+}
+
+static UINT win_set_flags( HWND hwnd, UINT set_mask, UINT clear_mask )
+{
+    UINT ret;
+    WND *ptr = get_win_ptr( hwnd );
+
+    if (!ptr || ptr == WND_OTHER_PROCESS || ptr == WND_DESKTOP) return 0;
+    ret = ptr->flags;
+    ptr->flags = (ret & ~clear_mask) | set_mask;
+    release_win_ptr( ptr );
+    return ret;
+}
+
+/*******************************************************************
+ *		set_active_window
+ */
+static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
+{
+    HWND previous = get_active_window();
+    BOOL ret;
+    DWORD winflags, old_thread, new_thread;
+    CBTACTIVATESTRUCT cbt;
+
+    if (previous == hwnd)
+    {
+        if (prev) *prev = hwnd;
+        return TRUE;
+    }
+
+    /* Prevent a recursive activation loop with the activation messages */
+    winflags = win_set_flags(hwnd, WIN_IS_IN_ACTIVATION, 0);
+    if (!(winflags & WIN_IS_IN_ACTIVATION))
+    {
+        ret = FALSE;
+
+        /* call CBT hook chain */
+        cbt.fMouse     = mouse;
+        cbt.hWndActive = previous;
+        if (call_hooks( WH_CBT, HCBT_ACTIVATE, (WPARAM)hwnd, (LPARAM)&cbt, TRUE ))
+            goto clear_flags;
+
+        if (is_window(previous))
+        {
+            send_message( previous, WM_NCACTIVATE, FALSE, (LPARAM)hwnd );
+            send_message( previous, WM_ACTIVATE,
+                          MAKEWPARAM( WA_INACTIVE, is_iconic(previous) ), (LPARAM)hwnd );
+        }
+    }
+
+    SERVER_START_REQ( set_active_window )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        if ((ret = !wine_server_call_err( req )))
+            previous = wine_server_ptr_handle( reply->previous );
+    }
+    SERVER_END_REQ;
+    if (!ret) return FALSE;
+    if (prev) *prev = previous;
+    if (previous == hwnd) return TRUE;
+
+    if (hwnd)
+    {
+        /* send palette messages */
+        if (send_message( hwnd, WM_QUERYNEWPALETTE, 0, 0 ) && user_callbacks)
+            user_callbacks->pSendMessageTimeoutW( HWND_BROADCAST, WM_PALETTEISCHANGING, (WPARAM)hwnd, 0,
+                                                  SMTO_ABORTIFHUNG, 2000, NULL );
+        if (!is_window(hwnd))
+        {
+            ret = FALSE;
+            goto clear_flags;
+        }
+    }
+
+    old_thread = previous ? get_window_thread( previous, NULL ) : 0;
+    new_thread = hwnd ? get_window_thread( hwnd, NULL ) : 0;
+
+    if (old_thread != new_thread)
+    {
+        HWND *list, *phwnd;
+
+        if ((list = list_window_children( NULL, get_desktop_window(), NULL, 0 )))
+        {
+            if (old_thread)
+            {
+                for (phwnd = list; *phwnd; phwnd++)
+                {
+                    if (get_window_thread( *phwnd, NULL ) == old_thread)
+                        send_message( *phwnd, WM_ACTIVATEAPP, 0, new_thread );
+                }
+            }
+            if (new_thread)
+            {
+                for (phwnd = list; *phwnd; phwnd++)
+                {
+                    if (get_window_thread( *phwnd, NULL ) == new_thread)
+                        send_message( *phwnd, WM_ACTIVATEAPP, 1, old_thread );
+                }
+            }
+            free( list );
+        }
+    }
+
+    if (!(winflags & WIN_IS_IN_ACTIVATION) && is_window(hwnd))
+    {
+        send_message( hwnd, WM_NCACTIVATE, hwnd == NtUserGetForegroundWindow(), (LPARAM)previous );
+        send_message( hwnd, WM_ACTIVATE,
+                      MAKEWPARAM( mouse ? WA_CLICKACTIVE : WA_ACTIVE, is_iconic(hwnd) ),
+                      (LPARAM)previous );
+        if (NtUserGetAncestor( hwnd, GA_PARENT ) == get_desktop_window())
+            post_message( get_desktop_window(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
+
+        if (NtUserGetProp( hwnd, L"__WINE_RESTORE_WINDOW" ))
+        {
+            NtUserSetProp( hwnd, L"__WINE_RESTORE_WINDOW", NULL );
+            send_message( hwnd, WM_SYSCOMMAND, SC_RESTORE, 0 );
+        }
+    }
+
+    /* now change focus if necessary */
+    if (focus)
+    {
+        GUITHREADINFO info;
+
+        info.cbSize = sizeof(info);
+        NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info );
+        /* Do not change focus if the window is no more active */
+        if (hwnd == info.hwndActive)
+        {
+            if (!info.hwndFocus || !hwnd || NtUserGetAncestor( info.hwndFocus, GA_ROOT ) != hwnd)
+                set_focus_window( hwnd );
+        }
+    }
+
+clear_flags:
+    win_set_flags(hwnd, 0, WIN_IS_IN_ACTIVATION);
+    return ret;
+}
+
+/**********************************************************************
+ *           NtUserSetActiveWindow    (win32u.@)
+ */
+HWND WINAPI NtUserSetActiveWindow( HWND hwnd )
+{
+    HWND prev;
+
+    TRACE( "%p\n", hwnd );
+
+    if (hwnd)
+    {
+        LONG style;
+
+        hwnd = get_full_window_handle( hwnd );
+        if (!is_window( hwnd ))
+        {
+            SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+            return 0;
+        }
+
+        style = get_window_long( hwnd, GWL_STYLE );
+        if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD)
+            return get_active_window();  /* Windows doesn't seem to return an error here */
+    }
+
+    if (!set_active_window( hwnd, &prev, FALSE, TRUE )) return 0;
+    return prev;
+}
+
+/*****************************************************************
+ *           NtUserSetFocus  (win32u.@)
+ */
+HWND WINAPI NtUserSetFocus( HWND hwnd )
+{
+    HWND hwndTop = hwnd;
+    HWND previous = get_focus();
+
+    TRACE( "%p prev %p\n", hwnd, previous );
+
+    if (hwnd)
+    {
+        /* Check if we can set the focus to this window */
+        hwnd = get_full_window_handle( hwnd );
+        if (!is_window( hwnd ))
+        {
+            SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+            return 0;
+        }
+        if (hwnd == previous) return previous;  /* nothing to do */
+        for (;;)
+        {
+            HWND parent;
+            LONG style = get_window_long( hwndTop, GWL_STYLE );
+            if (style & (WS_MINIMIZE | WS_DISABLED)) return 0;
+            if (!(style & WS_CHILD)) break;
+            parent = NtUserGetAncestor( hwndTop, GA_PARENT );
+            if (!parent || parent == get_desktop_window())
+            {
+                if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return 0;
+                break;
+            }
+            if (parent == get_hwnd_message_parent()) return 0;
+            hwndTop = parent;
+        }
+
+        /* call hooks */
+        if (call_hooks( WH_CBT, HCBT_SETFOCUS, (WPARAM)hwnd, (LPARAM)previous, TRUE )) return 0;
+
+        /* activate hwndTop if needed. */
+        if (hwndTop != get_active_window())
+        {
+            if (!set_active_window( hwndTop, NULL, FALSE, FALSE )) return 0;
+            if (!is_window( hwnd )) return 0;  /* Abort if window destroyed */
+
+            /* Do not change focus if the window is no longer active */
+            if (hwndTop != get_active_window()) return 0;
+        }
+    }
+    else /* NULL hwnd passed in */
+    {
+        if (!previous) return 0;  /* nothing to do */
+        if (call_hooks( WH_CBT, HCBT_SETFOCUS, 0, (LPARAM)previous, TRUE )) return 0;
+    }
+
+    /* change focus and send messages */
+    return set_focus_window( hwnd );
+}
+
+/*******************************************************************
+ *		set_foreground_window
+ */
+BOOL set_foreground_window( HWND hwnd, BOOL mouse )
+{
+    BOOL ret, send_msg_old = FALSE, send_msg_new = FALSE;
+    HWND previous = 0;
+
+    if (mouse) hwnd = get_full_window_handle( hwnd );
+
+    SERVER_START_REQ( set_foreground_window )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        if ((ret = !wine_server_call_err( req )))
+        {
+            previous = wine_server_ptr_handle( reply->previous );
+            send_msg_old = reply->send_msg_old;
+            send_msg_new = reply->send_msg_new;
+        }
+    }
+    SERVER_END_REQ;
+
+    if (ret && previous != hwnd)
+    {
+        if (send_msg_old)  /* old window belongs to other thread */
+            NtUserMessageCall( previous, WM_WINE_SETACTIVEWINDOW, 0, 0,
+                               0, FNID_SENDNOTIFYMESSAGE, FALSE );
+        else if (send_msg_new)  /* old window belongs to us but new one to other thread */
+            ret = set_active_window( 0, NULL, mouse, TRUE );
+
+        if (send_msg_new)  /* new window belongs to other thread */
+            NtUserMessageCall( hwnd, WM_WINE_SETACTIVEWINDOW, (WPARAM)hwnd, 0,
+                               0, FNID_SENDNOTIFYMESSAGE, FALSE );
+        else  /* new window belongs to us */
+            ret = set_active_window( hwnd, NULL, mouse, TRUE );
+    }
     return ret;
 }

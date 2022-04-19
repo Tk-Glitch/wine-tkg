@@ -29,8 +29,6 @@
  * mask for the destination parameter into account.
  */
 
-#include "config.h"
-
 #include <limits.h>
 #include <stdio.h>
 
@@ -11266,7 +11264,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
 
     TRACE("Deleting linked programs.\n");
     linked_programs = &shader->linked_programs;
-    if (linked_programs->next)
+    if (!list_empty(linked_programs))
     {
         struct glsl_shader_prog_link *entry, *entry2;
         UINT i;
