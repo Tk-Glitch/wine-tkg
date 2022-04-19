@@ -31,7 +31,7 @@
 #include "winedump.h"
 
 void *dump_base = NULL;
-unsigned long dump_total_len = 0;
+size_t dump_total_len = 0;
 
 void dump_data( const unsigned char *ptr, unsigned int size, const char *prefix )
 {
@@ -191,7 +191,7 @@ const char* get_guid_str(const GUID* guid)
     str = dump_want_n(39);
     if (str)
         sprintf(str, "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
-                guid->Data1, guid->Data2, guid->Data3,
+                (unsigned int)guid->Data1, guid->Data2, guid->Data3,
                 guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
                 guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
     return str;
@@ -264,23 +264,14 @@ dumpers[] =
 
 BOOL dump_analysis(const char *name, file_dumper fn, enum FileSig wanted_sig)
 {
-    int			fd;
     BOOL                ret = TRUE;
-    struct stat		s;
     const struct dumper *dpr;
 
     setbuf(stdout, NULL);
 
-    fd = open(name, O_RDONLY | O_BINARY);
-    if (fd == -1) fatal("Can't open file");
+    if (!(dump_base = read_file( name, &dump_total_len ))) fatal( "Cannot read file" );
 
-    if (fstat(fd, &s) < 0) fatal("Can't get size");
-    dump_total_len = s.st_size;
-
-    dump_base = xmalloc( dump_total_len );
-    if ((unsigned long)read( fd, dump_base, dump_total_len ) != dump_total_len) fatal( "Cannot read file" );
-
-    printf("Contents of %s: %ld bytes\n\n", name, dump_total_len);
+    printf("Contents of %s: %zu bytes\n\n", name, dump_total_len);
 
     for (dpr = dumpers; dpr->kind != SIG_UNKNOWN; dpr++)
     {
@@ -299,7 +290,6 @@ BOOL dump_analysis(const char *name, file_dumper fn, enum FileSig wanted_sig)
 
     if (ret) printf("Done dumping %s\n", name);
     free( dump_base );
-    close(fd);
 
     return ret;
 }

@@ -127,6 +127,7 @@ struct d3d10_effect_state_object_variable
         ID3D10SamplerState *sampler;
         IUnknown *object;
     } object;
+    unsigned int index;
     struct d3d10_effect_prop_dependencies dependencies;
 };
 
@@ -263,6 +264,13 @@ enum d3d10_effect_flags
     D3D10_EFFECT_IS_POOL   = 0x2,
 };
 
+struct d3d10_effect_var_array
+{
+    struct d3d10_effect_variable **v;
+    unsigned int current;
+    unsigned int count;
+};
+
 /* ID3D10Effect */
 struct d3d10_effect
 {
@@ -281,24 +289,22 @@ struct d3d10_effect
     DWORD technique_count;
     DWORD index_offset;
     DWORD texture_count;
-    DWORD depthstencilstate_count;
-    DWORD blendstate_count;
-    DWORD rasterizerstate_count;
-    DWORD samplerstate_count;
-    DWORD rendertargetview_count;
-    DWORD depthstencilview_count;
-    DWORD used_shader_count;
     DWORD anonymous_shader_count;
     DWORD flags;
 
-    DWORD used_shader_current;
     DWORD anonymous_shader_current;
 
     struct wine_rb_tree types;
     struct d3d10_effect_variable *local_buffers;
     struct d3d10_effect_variable *local_variables;
     struct d3d10_effect_anonymous_shader *anonymous_shaders;
-    struct d3d10_effect_variable **used_shaders;
+    struct d3d10_effect_var_array shaders;
+    struct d3d10_effect_var_array samplers;
+    struct d3d10_effect_var_array rtvs;
+    struct d3d10_effect_var_array dsvs;
+    struct d3d10_effect_var_array blend_states;
+    struct d3d10_effect_var_array ds_states;
+    struct d3d10_effect_var_array rs_states;
     struct d3d10_effect_technique *techniques;
 };
 

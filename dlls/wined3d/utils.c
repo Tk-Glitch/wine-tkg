@@ -345,8 +345,9 @@ static const struct wined3d_format_base_flags format_base_flags[] =
     {WINED3DFMT_R32G32_SINT,           WINED3DFMT_FLAG_CAST_TO_BLOCK},
     {WINED3DFMT_R32_TYPELESS,          WINED3DFMT_FLAG_CAST_TO_BLOCK},
     {WINED3DFMT_R32_FLOAT,             WINED3DFMT_FLAG_CAST_TO_BLOCK},
-    {WINED3DFMT_R32_UINT,              WINED3DFMT_FLAG_CAST_TO_BLOCK},
+    {WINED3DFMT_R32_UINT,              WINED3DFMT_FLAG_CAST_TO_BLOCK | WINED3DFMT_FLAG_INDEX_BUFFER},
     {WINED3DFMT_R32_SINT,              WINED3DFMT_FLAG_CAST_TO_BLOCK},
+    {WINED3DFMT_R16_UINT,              WINED3DFMT_FLAG_INDEX_BUFFER},
 };
 
 static void rgb888_from_rgb565(WORD rgb565, BYTE *r, BYTE *g, BYTE *b)
@@ -6549,7 +6550,7 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_context *context, const st
     }
     else
     {
-        settings->texcoords_initialized = (1u << WINED3D_MAX_TEXTURES) - 1;
+        settings->texcoords_initialized = wined3d_mask_from_size(WINED3D_MAX_TEXTURES);
     }
 
     settings->pointsprite = state->render_states[WINED3D_RS_POINTSPRITEENABLE]
@@ -6734,7 +6735,7 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_context *context,
             settings->texgen[i] = state->texture_states[i][WINED3D_TSS_TEXCOORD_INDEX];
         }
         if (d3d_info->full_ffp_varyings)
-            settings->texcoords = (1u << WINED3D_MAX_TEXTURES) - 1;
+            settings->texcoords = wined3d_mask_from_size(WINED3D_MAX_TEXTURES);
 
         if (d3d_info->emulated_flatshading)
             settings->flatshading = state->render_states[WINED3D_RS_SHADEMODE] == WINED3D_SHADE_FLAT;
@@ -6783,7 +6784,7 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_context *context,
         settings->texgen[i] = state->texture_states[i][WINED3D_TSS_TEXCOORD_INDEX];
     }
     if (d3d_info->full_ffp_varyings)
-        settings->texcoords = (1u << WINED3D_MAX_TEXTURES) - 1;
+        settings->texcoords = wined3d_mask_from_size(WINED3D_MAX_TEXTURES);
 
     for (i = 0; i < WINED3D_MAX_ACTIVE_LIGHTS; ++i)
     {
@@ -6864,6 +6865,7 @@ const char *wined3d_debug_location(DWORD location)
 #define LOCATION_TO_STR(x) if (location & x) { debug_append(&buffer, #x, " | "); location &= ~x; }
     LOCATION_TO_STR(WINED3D_LOCATION_DISCARDED);
     LOCATION_TO_STR(WINED3D_LOCATION_SYSMEM);
+    LOCATION_TO_STR(WINED3D_LOCATION_CLEARED);
     LOCATION_TO_STR(WINED3D_LOCATION_BUFFER);
     LOCATION_TO_STR(WINED3D_LOCATION_TEXTURE_RGB);
     LOCATION_TO_STR(WINED3D_LOCATION_TEXTURE_SRGB);

@@ -117,6 +117,7 @@ static inline struct base_device *impl_from_unix_device(struct unix_device *ifac
 }
 
 #define QUIRK_DS4_BT 0x1
+#define QUIRK_DUALSENSE_BT 0x2
 
 struct hidraw_device
 {
@@ -356,7 +357,58 @@ static void hidraw_device_read_report(struct unix_device *iface)
             buff[0] = 1;
         }
 
+        /* The behavior of DualSense is very similar to DS4 described above with a few exceptions.
+         *
+         * The report number #41 is used for the extended bluetooth input report. The report comes
+         * with only one extra byte in front and the format is not exactly the same as the one used
+         * for the report #1 so we need to shuffle a few bytes around.
+         *
+         * Basic #1 report:
+         *   X  Y  Z  RZ  Buttons[3]  TriggerLeft  TriggerRight
+         *
+         * Extended #41 report:
+         *   Prefix X  Y  Z  Rz  TriggerLeft  TriggerRight  Counter  Buttons[3] ...
+         */
+        if ((impl->quirks & QUIRK_DUALSENSE_BT) && report_buffer[0] == 0x31 && size >= 11)
+        {
+            BYTE trigger[2];
+            size = 10;
+            buff += 1;
+
+            buff[0] = 1; /* fake report #1 */
+
+            trigger[0] = buff[5]; /* TriggerLeft*/
+            trigger[1] = buff[6]; /* TriggerRight */
+
+            buff[5] = buff[8];    /* Buttons[0] */
+            buff[6] = buff[9];    /* Buttons[1] */
+            buff[7] = buff[10];   /* Buttons[2] */
+            buff[8] = trigger[0]; /* TriggerLeft */
+            buff[9] = trigger[1]; /* TirggerRight */
+        }
+
         bus_event_queue_input_report(&event_queue, iface, buff, size);
+    }
+}
+
+static void hidraw_disable_sony_quirks(struct unix_device *iface)
+{
+    struct hidraw_device *impl = hidraw_impl_from_unix_device(iface);
+
+    /* FIXME: we may want to validate CRC at the end of the outbound HID reports,
+     * as controllers do not switch modes if it is incorrect.
+     */
+
+    if ((impl->quirks & QUIRK_DS4_BT))
+    {
+        TRACE("Disabling report quirk for Bluetooth DualShock4 controller iface %p\n", iface);
+        impl->quirks &= ~QUIRK_DS4_BT;
+    }
+
+    if ((impl->quirks & QUIRK_DUALSENSE_BT))
+    {
+        TRACE("Disabling report quirk for Bluetooth DualSense controller iface %p\n", iface);
+        impl->quirks &= ~QUIRK_DUALSENSE_BT;
     }
 }
 
@@ -379,6 +431,7 @@ static void hidraw_device_set_output_report(struct unix_device *iface, HID_XFER_
 
     if (count > 0)
     {
+        hidraw_disable_sony_quirks(iface);
         io->Information = count;
         io->Status = STATUS_SUCCESS;
     }
@@ -411,6 +464,7 @@ static void hidraw_device_get_feature_report(struct unix_device *iface, HID_XFER
 
     if (count > 0)
     {
+        hidraw_disable_sony_quirks(iface);
         io->Information = count;
         io->Status = STATUS_SUCCESS;
     }
@@ -447,6 +501,7 @@ static void hidraw_device_set_feature_report(struct unix_device *iface, HID_XFER
 
     if (count > 0)
     {
+        hidraw_disable_sony_quirks(iface);
         io->Information = count;
         io->Status = STATUS_SUCCESS;
     }
@@ -1201,6 +1256,9 @@ static void hidraw_set_quirks(struct hidraw_device *impl, DWORD bus_type, WORD v
 {
     if (bus_type == BUS_BLUETOOTH && is_dualshock4_gamepad(vid, pid))
         impl->quirks |= QUIRK_DS4_BT;
+
+    if (bus_type == BUS_BLUETOOTH && is_dualsense_gamepad(vid, pid))
+        impl->quirks |= QUIRK_DUALSENSE_BT;
 }
 
 static void udev_add_device(struct udev_device *dev, int fd)

@@ -467,7 +467,7 @@ typedef VOID           *PVOID64;
 typedef BYTE            BOOLEAN,    *PBOOLEAN;
 typedef char            CHAR,       *PCHAR;
 typedef short           SHORT,      *PSHORT;
-#ifdef WINE_USE_LONG
+#if !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES)
 typedef long            LONG,       *PLONG;
 #else
 typedef int             LONG,       *PLONG;
@@ -6269,60 +6269,12 @@ typedef enum _PROCESS_MITIGATION_POLICY
     MaxProcessMitigationPolicy
 } PROCESS_MITIGATION_POLICY, *PPROCESS_MITIGATION_POLICY;
 
-#ifdef _MSC_VER
 
-BOOLEAN _BitScanForward(unsigned long*,unsigned long);
-BOOLEAN _BitScanReverse(unsigned long*,unsigned long);
+/* Intrinsic functions */
 
-#pragma intrinsic(_BitScanForward)
-#pragma intrinsic(_BitScanReverse)
-
-static inline BOOLEAN BitScanForward(DWORD *index, DWORD mask)
-{
-    return _BitScanForward((unsigned long*)index, mask);
-}
-
-static inline BOOLEAN BitScanReverse(DWORD *index, DWORD mask)
-{
-    return _BitScanReverse((unsigned long*)index, mask);
-}
-
-#elif defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
-
-static inline BOOLEAN BitScanForward(DWORD *index, DWORD mask)
-{
-    *index = __builtin_ctz(mask);
-    return mask != 0;
-}
-
-static inline BOOLEAN BitScanReverse(DWORD *index, DWORD mask)
-{
-    *index = 31 - __builtin_clz(mask);
-    return mask != 0;
-}
-
-#else
-
-static inline BOOLEAN BitScanForward(DWORD *index, DWORD mask)
-{
-    unsigned int r = 0;
-    while (r < 31 && !(mask & (1 << r))) r++;
-    *index = r;
-    return mask != 0;
-}
-
-static inline BOOLEAN BitScanReverse(DWORD *index, DWORD mask)
-{
-    unsigned int r = 31;
-    while (r > 0 && !(mask & (1 << r))) r--;
-    *index = r;
-    return mask != 0;
-}
-
-#endif
-
-/* Interlocked functions */
-
+#define BitScanForward _BitScanForward
+#define BitScanReverse _BitScanReverse
+#define InterlockedAdd _InlineInterlockedAdd
 #define InterlockedAnd _InterlockedAnd
 #define InterlockedCompareExchange _InterlockedCompareExchange
 #define InterlockedCompareExchange64 _InterlockedCompareExchange64
@@ -6331,24 +6283,32 @@ static inline BOOLEAN BitScanReverse(DWORD *index, DWORD mask)
 #define InterlockedDecrement16 _InterlockedDecrement16
 #define InterlockedExchange _InterlockedExchange
 #define InterlockedExchangeAdd _InterlockedExchangeAdd
+#define InterlockedExchangeAdd64 _InterlockedExchangeAdd64
 #define InterlockedExchangePointer _InterlockedExchangePointer
 #define InterlockedIncrement _InterlockedIncrement
 #define InterlockedIncrement16 _InterlockedIncrement16
 #define InterlockedOr _InterlockedOr
+#define InterlockedXor _InterlockedXor
 
 #ifdef _MSC_VER
 
+#pragma intrinsic(_BitScanForward)
+#pragma intrinsic(_BitScanReverse)
 #pragma intrinsic(_InterlockedAnd)
 #pragma intrinsic(_InterlockedCompareExchange)
 #pragma intrinsic(_InterlockedCompareExchange64)
 #pragma intrinsic(_InterlockedExchange)
 #pragma intrinsic(_InterlockedExchangeAdd)
+#pragma intrinsic(_InterlockedExchangeAdd64)
 #pragma intrinsic(_InterlockedIncrement)
 #pragma intrinsic(_InterlockedIncrement16)
 #pragma intrinsic(_InterlockedDecrement)
 #pragma intrinsic(_InterlockedDecrement16)
 #pragma intrinsic(_InterlockedOr)
+#pragma intrinsic(_InterlockedXor)
 
+BOOLEAN   _BitScanForward(unsigned long*,unsigned long);
+BOOLEAN   _BitScanReverse(unsigned long*,unsigned long);
 long      _InterlockedAnd(long volatile *,long);
 long      _InterlockedCompareExchange(long volatile*,long,long);
 long long _InterlockedCompareExchange64(long long volatile*,long long,long long);
@@ -6356,9 +6316,16 @@ long      _InterlockedDecrement(long volatile*);
 short     _InterlockedDecrement16(short volatile*);
 long      _InterlockedExchange(long volatile*,long);
 long      _InterlockedExchangeAdd(long volatile*,long);
+long long _InterlockedExchangeAdd64(long long volatile*,long long);
 long      _InterlockedIncrement(long volatile*);
 short     _InterlockedIncrement16(short volatile*);
 long      _InterlockedOr(long volatile *,long);
+long      _InterlockedXor(long volatile *,long);
+
+static FORCEINLINE long InterlockedAdd( long volatile *dest, long val )
+{
+    return InterlockedExchangeAdd( dest, val ) + val;
+}
 
 #if !defined(__i386__) || _MSC_VER >= 1600
 
@@ -6419,6 +6386,23 @@ static FORCEINLINE void MemoryBarrier(void)
 
 #elif defined(__GNUC__)
 
+static FORCEINLINE BOOLEAN WINAPI BitScanForward(DWORD *index, DWORD mask)
+{
+    *index = __builtin_ctz( mask );
+    return mask != 0;
+}
+
+static FORCEINLINE BOOLEAN WINAPI BitScanReverse(DWORD *index, DWORD mask)
+{
+    *index = 31 - __builtin_clz( mask );
+    return mask != 0;
+}
+
+static FORCEINLINE LONG WINAPI InterlockedAdd( LONG volatile *dest, LONG val )
+{
+    return __sync_add_and_fetch( dest, val );
+}
+
 static FORCEINLINE LONG WINAPI InterlockedAnd( LONG volatile *dest, LONG val )
 {
     return __sync_fetch_and_and( dest, val );
@@ -6454,6 +6438,11 @@ static FORCEINLINE LONG WINAPI InterlockedExchange( LONG volatile *dest, LONG va
 }
 
 static FORCEINLINE LONG WINAPI InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
+{
+    return __sync_fetch_and_add( dest, incr );
+}
+
+static FORCEINLINE LONGLONG WINAPI InterlockedExchangeAdd64( LONGLONG volatile *dest, LONGLONG incr )
 {
     return __sync_fetch_and_add( dest, incr );
 }
@@ -6498,6 +6487,11 @@ static FORCEINLINE LONG WINAPI InterlockedOr( LONG volatile *dest, LONG val )
     return __sync_fetch_and_or( dest, val );
 }
 
+static FORCEINLINE LONG WINAPI InterlockedXor( LONG volatile *dest, LONG val )
+{
+    return __sync_fetch_and_xor( dest, val );
+}
+
 static FORCEINLINE void MemoryBarrier(void)
 {
     __sync_synchronize();
@@ -6536,7 +6530,14 @@ static FORCEINLINE unsigned char InterlockedCompareExchange128( volatile __int64
 }
 
 #endif
-#endif
+
+#define InterlockedExchangeAddSizeT(a, b) InterlockedExchangeAdd64((LONGLONG *)(a), (b))
+
+#else /* _WIN64 */
+
+#define InterlockedExchangeAddSizeT(a, b) InterlockedExchangeAdd((LONG *)(a), (b))
+
+#endif /* _WIN64 */
 
 static FORCEINLINE void YieldProcessor(void)
 {

@@ -1,3 +1,4 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = dwrite.dll
 IMPORTLIB = dwrite
 UNIXLIB   = dwrite.so
@@ -10,6 +11,7 @@ C_SRCS = \
 	bracket.c \
 	direction.c \
 	font.c \
+	format.c \
 	freetype.c \
 	gdiinterop.c \
 	layout.c \

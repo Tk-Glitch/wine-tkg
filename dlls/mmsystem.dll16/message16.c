@@ -51,7 +51,7 @@ struct mihdrWrap
 /**************************************************************************
  * 				MMSYSTDRV_Mixer_Map16To32W		[internal]
  */
-static  MMSYSTEM_MapType	MMSYSTDRV_Mixer_Map16To32W  (UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
+static  MMSYSTEM_MapType	MMSYSTDRV_Mixer_Map16To32W  (DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
 {
     return MMSYSTEM_MAP_MSGERROR;
 }
@@ -59,7 +59,7 @@ static  MMSYSTEM_MapType	MMSYSTDRV_Mixer_Map16To32W  (UINT wMsg, DWORD_PTR* lpPa
 /**************************************************************************
  * 				MMSYSTDRV_Mixer_UnMap16To32W	[internal]
  */
-static  MMSYSTEM_MapType	MMSYSTDRV_Mixer_UnMap16To32W(UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
+static  MMSYSTEM_MapType	MMSYSTDRV_Mixer_UnMap16To32W(DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
 {
 #if 0
     MIXERCAPSA	micA;
@@ -93,7 +93,7 @@ static  void	                MMSYSTDRV_Mixer_MapCB(DWORD uMsg, DWORD_PTR* dwUser
 /**************************************************************************
  * 				MMSYSTDRV_MidiIn_Map16To32W		[internal]
  */
-static  MMSYSTEM_MapType	MMSYSTDRV_MidiIn_Map16To32W  (UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
+static  MMSYSTEM_MapType	MMSYSTDRV_MidiIn_Map16To32W  (DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
 {
     MMSYSTEM_MapType ret = MMSYSTEM_MAP_MSGERROR;
 
@@ -172,7 +172,7 @@ static  MMSYSTEM_MapType	MMSYSTDRV_MidiIn_Map16To32W  (UINT wMsg, DWORD_PTR* lpP
 /**************************************************************************
  * 				MMSYSTDRV_MidiIn_UnMap16To32W	[internal]
  */
-static  MMSYSTEM_MapType	MMSYSTDRV_MidiIn_UnMap16To32W(UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
+static  MMSYSTEM_MapType	MMSYSTDRV_MidiIn_UnMap16To32W(DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
 {
     MMSYSTEM_MapType    ret = MMSYSTEM_MAP_MSGERROR;
 
@@ -233,7 +233,7 @@ static  MMSYSTEM_MapType	MMSYSTDRV_MidiIn_UnMap16To32W(UINT wMsg, DWORD_PTR* lpP
 /**************************************************************************
  * 				MMSYSTDRV_MidiIn_MapCB		[internal]
  */
-static  void            	MMSYSTDRV_MidiIn_MapCB(UINT uMsg, DWORD_PTR* dwUser, DWORD_PTR* dwParam1, DWORD_PTR* dwParam2)
+static  void            	MMSYSTDRV_MidiIn_MapCB(DWORD uMsg, DWORD_PTR* dwUser, DWORD_PTR* dwParam1, DWORD_PTR* dwParam2)
 {
     switch (uMsg) {
     case MIM_OPEN:
@@ -269,7 +269,7 @@ static  void            	MMSYSTDRV_MidiIn_MapCB(UINT uMsg, DWORD_PTR* dwUser, DW
 /**************************************************************************
  * 				MMSYSTDRV_MidiOut_Map16To32W	[internal]
  */
-static MMSYSTEM_MapType	MMSYSTDRV_MidiOut_Map16To32W  (UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
+static MMSYSTEM_MapType	MMSYSTDRV_MidiOut_Map16To32W  (DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
 {
     MMSYSTEM_MapType	ret = MMSYSTEM_MAP_MSGERROR;
 
@@ -364,7 +364,7 @@ static MMSYSTEM_MapType	MMSYSTDRV_MidiOut_Map16To32W  (UINT wMsg, DWORD_PTR* lpP
 /**************************************************************************
  * 				MMSYSTDRV_MidiOut_UnMap16To32W	[internal]
  */
-static  MMSYSTEM_MapType	MMSYSTDRV_MidiOut_UnMap16To32W(UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
+static  MMSYSTEM_MapType	MMSYSTDRV_MidiOut_UnMap16To32W(DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
 {
     MMSYSTEM_MapType	ret = MMSYSTEM_MAP_MSGERROR;
 
@@ -442,7 +442,7 @@ static  MMSYSTEM_MapType	MMSYSTDRV_MidiOut_UnMap16To32W(UINT wMsg, DWORD_PTR* lp
 /******************************************************************
  *		                        MMSYSTDRV_MidiOut_MapCB
  */
-static  void MMSYSTDRV_MidiOut_MapCB(UINT uMsg, DWORD_PTR* dwUser, DWORD_PTR* dwParam1, DWORD_PTR* dwParam2)
+static  void MMSYSTDRV_MidiOut_MapCB(DWORD uMsg, DWORD_PTR* dwUser, DWORD_PTR* dwParam1, DWORD_PTR* dwParam2)
 {
     switch (uMsg) {
     case MOM_OPEN:
@@ -476,7 +476,7 @@ static  void MMSYSTDRV_MidiOut_MapCB(UINT uMsg, DWORD_PTR* dwUser, DWORD_PTR* dw
 /**************************************************************************
  * 				MMSYSTDRV_WaveIn_Map16To32W		[internal]
  */
-static  MMSYSTEM_MapType	MMSYSTDRV_WaveIn_Map16To32W  (UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
+static  MMSYSTEM_MapType	MMSYSTDRV_WaveIn_Map16To32W  (DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
 {
     MMSYSTEM_MapType	ret = MMSYSTEM_MAP_MSGERROR;
 
@@ -585,7 +585,7 @@ static  MMSYSTEM_MapType	MMSYSTDRV_WaveIn_Map16To32W  (UINT wMsg, DWORD_PTR* lpP
 /**************************************************************************
  * 				MMSYSTDRV_WaveIn_UnMap16To32W	[internal]
  */
-static  MMSYSTEM_MapType	MMSYSTDRV_WaveIn_UnMap16To32W(UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
+static  MMSYSTEM_MapType	MMSYSTDRV_WaveIn_UnMap16To32W(DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
 {
     MMSYSTEM_MapType	ret = MMSYSTEM_MAP_MSGERROR;
 
@@ -655,7 +655,7 @@ static  MMSYSTEM_MapType	MMSYSTDRV_WaveIn_UnMap16To32W(UINT wMsg, DWORD_PTR* lpP
 /**************************************************************************
  * 				MMSYSTDRV_WaveIn_MapCB		[internal]
  */
-static  void    MMSYSTDRV_WaveIn_MapCB(UINT uMsg, DWORD_PTR* dwUser, DWORD_PTR* dwParam1, DWORD_PTR* dwParam2)
+static  void    MMSYSTDRV_WaveIn_MapCB(DWORD uMsg, DWORD_PTR* dwUser, DWORD_PTR* dwParam1, DWORD_PTR* dwParam2)
 {
     switch (uMsg) {
     case WIM_OPEN:
@@ -686,7 +686,7 @@ static  void    MMSYSTDRV_WaveIn_MapCB(UINT uMsg, DWORD_PTR* dwUser, DWORD_PTR* 
 /**************************************************************************
  * 				MMSYSTDRV_WaveOut_Map16To32W	[internal]
  */
-static  MMSYSTEM_MapType	MMSYSTDRV_WaveOut_Map16To32W  (UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
+static  MMSYSTEM_MapType	MMSYSTDRV_WaveOut_Map16To32W  (DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2)
 {
     MMSYSTEM_MapType	ret = MMSYSTEM_MAP_MSGERROR;
 
@@ -804,7 +804,7 @@ static  MMSYSTEM_MapType	MMSYSTDRV_WaveOut_Map16To32W  (UINT wMsg, DWORD_PTR* lp
 /**************************************************************************
  * 				MMSYSTDRV_WaveOut_UnMap16To32W	[internal]
  */
-static  MMSYSTEM_MapType	MMSYSTDRV_WaveOut_UnMap16To32W(UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
+static  MMSYSTEM_MapType	MMSYSTDRV_WaveOut_UnMap16To32W(DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT fn_ret)
 {
     MMSYSTEM_MapType	ret = MMSYSTEM_MAP_MSGERROR;
 
@@ -884,7 +884,7 @@ static  MMSYSTEM_MapType	MMSYSTDRV_WaveOut_UnMap16To32W(UINT wMsg, DWORD_PTR* lp
 /**************************************************************************
  * 				MMDRV_WaveOut_Callback		[internal]
  */
-static  void	MMSYSTDRV_WaveOut_MapCB(UINT uMsg, DWORD_PTR* dwUser, DWORD_PTR* dwParam1, DWORD_PTR* dwParam2)
+static  void	MMSYSTDRV_WaveOut_MapCB(DWORD uMsg, DWORD_PTR* dwUser, DWORD_PTR* dwParam1, DWORD_PTR* dwParam2)
 {
     switch (uMsg) {
     case WOM_OPEN:
@@ -911,8 +911,8 @@ static  void	MMSYSTDRV_WaveOut_MapCB(UINT uMsg, DWORD_PTR* dwUser, DWORD_PTR* dw
  * #                DRIVER THUNKING                  #
  * ###################################################
  */
-typedef	MMSYSTEM_MapType        (*MMSYSTDRV_MAPMSG)(UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2);
-typedef	MMSYSTEM_MapType        (*MMSYSTDRV_UNMAPMSG)(UINT wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT ret);
+typedef	MMSYSTEM_MapType        (*MMSYSTDRV_MAPMSG)(DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2);
+typedef	MMSYSTEM_MapType        (*MMSYSTDRV_UNMAPMSG)(DWORD wMsg, DWORD_PTR* lpParam1, DWORD_PTR* lpParam2, MMRESULT ret);
 typedef void                    (*MMSYSTDRV_MAPCB)(DWORD wMsg, DWORD_PTR* dwUser, DWORD_PTR* dwParam1, DWORD_PTR* dwParam2);
 
 #include <pshpack1.h>

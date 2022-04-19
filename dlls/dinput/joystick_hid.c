@@ -241,6 +241,11 @@ static inline struct hid_joystick_effect *impl_from_IDirectInputEffect( IDirectI
     return CONTAINING_RECORD( iface, struct hid_joystick_effect, IDirectInputEffect_iface );
 }
 
+static inline BOOL is_exclusively_acquired( struct hid_joystick *joystick )
+{
+    return joystick->base.status == STATUS_ACQUIRED && (joystick->base.dwCoopLevel & DISCL_EXCLUSIVE);
+}
+
 static const GUID *object_usage_to_guid( USAGE usage_page, USAGE usage )
 {
     switch (usage_page)
@@ -827,7 +832,7 @@ static HRESULT hid_joystick_get_property( IDirectInputDevice8W *iface, DWORD pro
     {
         DIPROPDWORD *value = (DIPROPDWORD *)header;
         if (!(impl->base.caps.dwFlags & DIDC_FORCEFEEDBACK)) return DIERR_UNSUPPORTED;
-        if (!impl->base.acquired || !(impl->base.dwCoopLevel & DISCL_EXCLUSIVE)) return DIERR_NOTEXCLUSIVEACQUIRED;
+        if (!is_exclusively_acquired( impl )) return DIERR_NOTEXCLUSIVEACQUIRED;
         value->dwData = 0;
         return DI_OK;
     }
@@ -867,7 +872,7 @@ static HRESULT hid_joystick_acquire( IDirectInputDevice8W *iface )
     {
         impl->device = CreateFileW( impl->device_path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                     NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, 0 );
-        if (impl->device == INVALID_HANDLE_VALUE) return DIERR_INVALIDPARAM;
+        if (impl->device == INVALID_HANDLE_VALUE) return DIERR_UNPLUGGED;
     }
 
     memset( &impl->read_ovl, 0, sizeof(impl->read_ovl) );
@@ -877,7 +882,7 @@ static HRESULT hid_joystick_acquire( IDirectInputDevice8W *iface )
     {
         CloseHandle( impl->device );
         impl->device = INVALID_HANDLE_VALUE;
-        return DIERR_INVALIDPARAM;
+        return DIERR_UNPLUGGED;
     }
 
     IDirectInputDevice8_SendForceFeedbackCommand( iface, DISFFC_RESET );
@@ -898,7 +903,7 @@ static HRESULT hid_joystick_unacquire( IDirectInputDevice8W *iface )
     else WaitForSingleObject( impl->base.read_event, INFINITE );
 
     if (!(impl->base.caps.dwFlags & DIDC_FORCEFEEDBACK)) return DI_OK;
-    if (!impl->base.acquired || !(impl->base.dwCoopLevel & DISCL_EXCLUSIVE)) return DI_OK;
+    if (!is_exclusively_acquired( impl )) return DI_OK;
     hid_joystick_send_force_feedback_command( iface, DISFFC_RESET, TRUE );
     return DI_OK;
 }
@@ -1400,6 +1405,7 @@ static BOOL hid_joystick_device_try_open( UINT32 handle, const WCHAR *path, HAND
                                           PHIDP_PREPARSED_DATA *preparsed, HIDD_ATTRIBUTES *attrs,
                                           HIDP_CAPS *caps, DIDEVICEINSTANCEW *instance, DWORD version )
 {
+    BOOL has_accelerator, has_brake, has_clutch;
     PHIDP_PREPARSED_DATA preparsed_data = NULL;
     DWORD type = 0, button_count = 0;
     HIDP_BUTTON_CAPS buttons[10];
@@ -1485,6 +1491,36 @@ static BOOL hid_joystick_device_try_open( UINT32 handle, const WCHAR *path, HAND
                                         &value, &count, preparsed_data );
     if (status != HIDP_STATUS_SUCCESS || !count)
         type = DI8DEVTYPE_SUPPLEMENTAL | (DI8DEVTYPESUPPLEMENTAL_UNKNOWN << 8) | DIDEVTYPE_HID;
+
+    count = 1;
+    status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_SIMULATION, 0, HID_USAGE_SIMULATION_STEERING,
+                                        &value, &count, preparsed_data );
+    if (status == HIDP_STATUS_SUCCESS && count)
+    {
+        type = DI8DEVTYPE_DRIVING | DIDEVTYPE_HID;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_SIMULATION, 0, HID_USAGE_SIMULATION_ACCELERATOR,
+                                            &value, &count, preparsed_data );
+        has_accelerator = (status == HIDP_STATUS_SUCCESS && count);
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_SIMULATION, 0, HID_USAGE_SIMULATION_BRAKE,
+                                            &value, &count, preparsed_data );
+        has_brake = (status == HIDP_STATUS_SUCCESS && count);
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( HidP_Input, HID_USAGE_PAGE_SIMULATION, 0, HID_USAGE_SIMULATION_CLUTCH,
+                                            &value, &count, preparsed_data );
+        has_clutch = (status == HIDP_STATUS_SUCCESS && count);
+
+        if (has_accelerator && has_brake && has_clutch)
+            type |= (DI8DEVTYPEDRIVING_THREEPEDALS << 8);
+        else if (has_accelerator && has_brake)
+            type |= (DI8DEVTYPEDRIVING_DUALPEDALS << 8);
+        else
+            type |= (DI8DEVTYPEDRIVING_LIMITED << 8);
+    }
 
     instance->dwDevType = device_type_for_version( type, version );
 
@@ -2651,7 +2687,7 @@ static HRESULT WINAPI hid_joystick_effect_Start( IDirectInputEffect *iface, DWOR
     else control = PID_USAGE_OP_EFFECT_START;
 
     EnterCriticalSection( &impl->joystick->base.crit );
-    if (!impl->joystick->base.acquired || !(impl->joystick->base.dwCoopLevel & DISCL_EXCLUSIVE))
+    if (!is_exclusively_acquired( impl->joystick ))
         hr = DIERR_NOTEXCLUSIVEACQUIRED;
     else if ((flags & DIES_NODOWNLOAD) && !impl->index)
         hr = DIERR_NOTDOWNLOADED;
@@ -2699,7 +2735,7 @@ static HRESULT WINAPI hid_joystick_effect_Stop( IDirectInputEffect *iface )
     TRACE( "iface %p.\n", iface );
 
     EnterCriticalSection( &impl->joystick->base.crit );
-    if (!impl->joystick->base.acquired || !(impl->joystick->base.dwCoopLevel & DISCL_EXCLUSIVE))
+    if (!is_exclusively_acquired( impl->joystick ))
         hr = DIERR_NOTEXCLUSIVEACQUIRED;
     else if (!impl->index)
         hr = DIERR_NOTDOWNLOADED;
@@ -2744,7 +2780,7 @@ static HRESULT WINAPI hid_joystick_effect_GetEffectStatus( IDirectInputEffect *i
     *status = 0;
 
     EnterCriticalSection( &impl->joystick->base.crit );
-    if (!impl->joystick->base.acquired || !(impl->joystick->base.dwCoopLevel & DISCL_EXCLUSIVE))
+    if (!is_exclusively_acquired( impl->joystick ))
         hr = DIERR_NOTEXCLUSIVEACQUIRED;
     else if (!impl->index)
         hr = DIERR_NOTDOWNLOADED;
@@ -2819,7 +2855,7 @@ static HRESULT WINAPI hid_joystick_effect_Download( IDirectInputEffect *iface )
     if (impl->modified) hr = DI_OK;
     else hr = DI_NOEFFECT;
 
-    if (!impl->joystick->base.acquired || !(impl->joystick->base.dwCoopLevel & DISCL_EXCLUSIVE))
+    if (!is_exclusively_acquired( impl->joystick ))
         hr = DIERR_NOTEXCLUSIVEACQUIRED;
     else if ((impl->flags & complete_mask) != complete_mask)
         hr = DIERR_INCOMPLETEEFFECT;

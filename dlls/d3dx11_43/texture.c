@@ -304,7 +304,7 @@ HRESULT WINAPI D3DX11GetImageInfoFromMemory(const void *src_data, SIZE_T src_dat
     GUID container_format;
     HRESULT hr;
 
-    TRACE("src_data %p, src_data_size %lu, pump %p, img_info %p, hresult %p.\n",
+    TRACE("src_data %p, src_data_size %Iu, pump %p, img_info %p, hresult %p.\n",
             src_data, src_data_size, pump, img_info, hresult);
 
     if (!src_data || !src_data_size || !img_info)
@@ -399,7 +399,7 @@ HRESULT WINAPI D3DX11CreateShaderResourceViewFromMemory(ID3D11Device *device, co
         SIZE_T data_size, D3DX11_IMAGE_LOAD_INFO *load_info, ID3DX11ThreadPump *pump,
         ID3D11ShaderResourceView **view, HRESULT *hresult)
 {
-    FIXME("device %p, data %p, data_size %lu, load_info %p, pump %p, view %p, hresult %p stub!\n",
+    FIXME("device %p, data %p, data_size %Iu, load_info %p, pump %p, view %p, hresult %p stub!\n",
             device, data, data_size, load_info, pump, view, hresult);
 
     return E_NOTIMPL;
@@ -446,7 +446,7 @@ HRESULT WINAPI D3DX11CreateTextureFromMemory(ID3D11Device *device, const void *s
     GUID src_format;
     HRESULT hr;
 
-    TRACE("device %p, src_data %p, src_data_size %lu, load_info %p, pump %p, texture %p, hresult %p.\n",
+    TRACE("device %p, data %p, data_size %Iu, load_info %p, pump %p, texture %p, hresult %p.\n",
             device, src_data, src_data_size, load_info, pump, texture, hresult);
 
     if (!src_data || !src_data_size || !texture)

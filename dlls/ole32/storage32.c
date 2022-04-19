@@ -6971,7 +6971,7 @@ void StorageUtl_WriteULargeInteger(void *buffer, ULONG offset, const ULARGE_INTE
 
 void StorageUtl_ReadGUID(const BYTE* buffer, ULONG offset, GUID* value)
 {
-  StorageUtl_ReadDWord(buffer, offset,   &(value->Data1));
+  StorageUtl_ReadDWord(buffer, offset, (DWORD *)&value->Data1);
   StorageUtl_ReadWord(buffer,  offset+4, &(value->Data2));
   StorageUtl_ReadWord(buffer,  offset+6, &(value->Data3));
 
@@ -10569,6 +10569,17 @@ enum stream_1ole_flags {
     OleStream_LinkedObject = 0x00000001,
     OleStream_Convert      = 0x00000004
 };
+
+/*************************************************************************
+ * OleConvertIStorageToOLESTREAMEx [OLE32.@]
+ */
+HRESULT WINAPI OleConvertIStorageToOLESTREAMEx ( LPSTORAGE stg, CLIPFORMAT cf, LONG width, LONG height,
+                                                 DWORD size, LPSTGMEDIUM medium, LPOLESTREAM olestream )
+{
+    FIXME("%p %x %d %d %d %p %p stub\n", stg, cf, width, height, size, medium, olestream);
+
+    return E_NOTIMPL;
+}
 
 /***********************************************************************
  *		GetConvertStg (OLE32.@)

@@ -54,7 +54,7 @@ static ULONG get_refcount(void *iface)
 static void test_dmsynth(void)
 {
     IDirectMusicSynth *dmsynth = NULL;
-    IDirectMusicSynthSink *dmsynth_sink = NULL;
+    IDirectMusicSynthSink *dmsynth_sink = NULL, *dmsynth_sink2 = NULL;
     IReferenceClock* clock_synth = NULL;
     IReferenceClock* clock_sink = NULL;
     IKsControl* control_synth = NULL;
@@ -64,11 +64,16 @@ static void test_dmsynth(void)
     KSPROPERTY property;
     ULONG value;
     ULONG bytes;
+    DMUS_PORTCAPS caps;
 
     hr = CoCreateInstance(&CLSID_DirectMusicSynth, NULL, CLSCTX_INPROC_SERVER, &IID_IDirectMusicSynth, (LPVOID*)&dmsynth);
     ok(hr == S_OK, "CoCreateInstance returned: %x\n", hr);
 
-    hr = CoCreateInstance(&CLSID_DirectMusicSynthSink, NULL, CLSCTX_INPROC_SERVER, &IID_IDirectMusicSynthSink, (LPVOID*)&dmsynth_sink);
+    hr = CoCreateInstance(&CLSID_DirectMusicSynthSink, NULL, CLSCTX_INPROC_SERVER, &IID_IDirectMusicSynthSink,
+            (void **)&dmsynth_sink);
+    ok(hr == S_OK, "CoCreateInstance returned: %x\n", hr);
+    hr = CoCreateInstance(&CLSID_DirectMusicSynthSink, NULL, CLSCTX_INPROC_SERVER, &IID_IDirectMusicSynthSink,
+            (void **)&dmsynth_sink2);
     ok(hr == S_OK, "CoCreateInstance returned: %x\n", hr);
 
     hr = IDirectMusicSynth_QueryInterface(dmsynth, &IID_IKsControl, (LPVOID*)&control_synth);
@@ -114,7 +119,7 @@ static void test_dmsynth(void)
 
     /* Synth isn't fully initialized yet */
     hr = IDirectMusicSynth_Activate(dmsynth, TRUE);
-    todo_wine ok(hr == DMUS_E_NOSYNTHSINK, "IDirectMusicSynth_Activate returned: %x\n", hr);
+    ok(hr == DMUS_E_NOSYNTHSINK, "IDirectMusicSynth_Activate returned: %x\n", hr);
 
     /* Synth has no default clock */
     hr = IDirectMusicSynth_GetLatencyClock(dmsynth, &clock_synth);
@@ -127,6 +132,10 @@ static void test_dmsynth(void)
     ref_clock_sink = get_refcount(clock_sink);
 
     /* This will Init() the SynthSink and finish initializing the Synth */
+    hr = IDirectMusicSynthSink_Init(dmsynth_sink2, NULL);
+    ok(hr == S_OK, "IDirectMusicSynthSink_Init returned: %x\n", hr);
+    hr = IDirectMusicSynth_SetSynthSink(dmsynth, dmsynth_sink2);
+    ok(hr == S_OK, "IDirectMusicSynth_SetSynthSink returned: %x\n", hr);
     hr = IDirectMusicSynth_SetSynthSink(dmsynth, dmsynth_sink);
     ok(hr == S_OK, "IDirectMusicSynth_SetSynthSink returned: %x\n", hr);
 
@@ -138,6 +147,16 @@ static void test_dmsynth(void)
     ref_clock_synth = get_refcount(clock_synth);
     ok(ref_clock_synth > ref_clock_sink + 1, "Latency clock refcount didn't increase\n");
 
+    /* GetPortCaps */
+    hr = IDirectMusicSynth_GetPortCaps(dmsynth, NULL);
+    ok(hr == E_INVALIDARG, "GetPortCaps failed: %#x\n", hr);
+    memset(&caps, 0, sizeof(caps));
+    hr = IDirectMusicSynth_GetPortCaps(dmsynth, &caps);
+    ok(hr == E_INVALIDARG, "GetPortCaps failed: %#x\n", hr);
+    caps.dwSize = sizeof(caps) + 1;
+    hr = IDirectMusicSynth_GetPortCaps(dmsynth, &caps);
+    ok(hr == S_OK, "GetPortCaps failed: %#x\n", hr);
+
     if (control_synth)
         IDirectMusicSynth_Release(control_synth);
     if (control_sink)
@@ -148,6 +167,8 @@ static void test_dmsynth(void)
         IReferenceClock_Release(clock_sink);
     if (dmsynth_sink)
         IDirectMusicSynthSink_Release(dmsynth_sink);
+    if (dmsynth_sink2)
+        IDirectMusicSynthSink_Release(dmsynth_sink2);
     IDirectMusicSynth_Release(dmsynth);
 }
 

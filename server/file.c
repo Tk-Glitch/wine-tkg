@@ -347,7 +347,7 @@ static struct object *create_file( struct fd *root, const char *nameptr, data_si
 
     if (sd)
     {
-        const SID *owner = sd_get_owner( sd );
+        const struct sid *owner = sd_get_owner( sd );
         if (!owner)
             owner = token_get_user( current->process->token );
         mode = sd_to_mode( sd, owner );
@@ -411,37 +411,29 @@ static struct fd *file_get_fd( struct object *obj )
     return (struct fd *)grab_object( file->fd );
 }
 
-struct security_descriptor *mode_to_sd( mode_t mode, const SID *user, const SID *group )
+struct security_descriptor *mode_to_sd( mode_t mode, const struct sid *user, const struct sid *group )
 {
     struct security_descriptor *sd;
+    unsigned char flags;
     size_t dacl_size;
-    ACE_HEADER *current_ace;
-    ACCESS_ALLOWED_ACE *aaa;
-    ACL *dacl;
-    SID *sid;
+    struct ace *ace;
+    struct acl *dacl;
     char *ptr;
-    const SID *world_sid = security_world_sid;
-    const SID *local_system_sid = security_local_system_sid;
 
-    dacl_size = sizeof(ACL) + FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) +
-        security_sid_len( local_system_sid );
-    if (mode & S_IRWXU)
-        dacl_size += FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) + security_sid_len( user );
+    dacl_size = sizeof(*dacl) + sizeof(*ace) + sid_len( &local_system_sid );
+    if (mode & S_IRWXU) dacl_size += sizeof(*ace) + sid_len( user );
     if ((!(mode & S_IRUSR) && (mode & (S_IRGRP|S_IROTH))) ||
         (!(mode & S_IWUSR) && (mode & (S_IWGRP|S_IWOTH))) ||
         (!(mode & S_IXUSR) && (mode & (S_IXGRP|S_IXOTH))))
-        dacl_size += FIELD_OFFSET(ACCESS_DENIED_ACE, SidStart) + security_sid_len( user );
-    if (mode & S_IRWXO)
-        dacl_size += FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) + security_sid_len( world_sid );
+        dacl_size += sizeof(*ace) + sid_len( user );
+    if (mode & S_IRWXO) dacl_size += sizeof(*ace) + sid_len( &world_sid );
 
-    sd = mem_alloc( sizeof(struct security_descriptor) +
-                    security_sid_len( user ) + security_sid_len( group ) +
-                    dacl_size );
+    sd = mem_alloc( sizeof(*sd) + sid_len( user ) + sid_len( group ) + dacl_size );
     if (!sd) return sd;
 
     sd->control = SE_DACL_PRESENT;
-    sd->owner_len = security_sid_len( user );
-    sd->group_len = security_sid_len( group );
+    sd->owner_len = sid_len( user );
+    sd->group_len = sid_len( group );
     sd->sacl_len = 0;
     sd->dacl_len = dacl_size;
 
@@ -451,77 +443,50 @@ struct security_descriptor *mode_to_sd( mode_t mode, const SID *user, const SID 
     memcpy( ptr, group, sd->group_len );
     ptr += sd->group_len;
 
-    dacl = (ACL *)ptr;
-    dacl->AclRevision = ACL_REVISION;
-    dacl->Sbz1 = 0;
-    dacl->AclSize = dacl_size;
-    dacl->AceCount = 1 + (mode & S_IRWXU ? 1 : 0) + (mode & S_IRWXO ? 1 : 0);
+    dacl = (struct acl *)ptr;
+    dacl->revision = ACL_REVISION;
+    dacl->pad1     = 0;
+    dacl->size     = dacl_size;
+    dacl->count    = 1;
+    dacl->pad2     = 0;
+    if (mode & S_IRWXU) dacl->count++;
     if ((!(mode & S_IRUSR) && (mode & (S_IRGRP|S_IROTH))) ||
         (!(mode & S_IWUSR) && (mode & (S_IWGRP|S_IWOTH))) ||
         (!(mode & S_IXUSR) && (mode & (S_IXGRP|S_IXOTH))))
-        dacl->AceCount++;
-    dacl->Sbz2 = 0;
+        dacl->count++;
+    if (mode & S_IRWXO) dacl->count++;
+
+    flags = (mode & S_IFDIR) ? OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE : 0;
 
     /* always give FILE_ALL_ACCESS for Local System */
-    aaa = (ACCESS_ALLOWED_ACE *)(dacl + 1);
-    current_ace = &aaa->Header;
-    aaa->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
-    aaa->Header.AceFlags = (mode & S_IFDIR) ? OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE : 0;
-    aaa->Header.AceSize = FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) + security_sid_len( local_system_sid );
-    aaa->Mask = FILE_ALL_ACCESS;
-    sid = (SID *)&aaa->SidStart;
-    memcpy( sid, local_system_sid, security_sid_len( local_system_sid ));
+    ace = set_ace( (struct ace *)(dacl + 1), &local_system_sid,
+                   ACCESS_ALLOWED_ACE_TYPE, flags, FILE_ALL_ACCESS );
 
     if (mode & S_IRWXU)
     {
         /* appropriate access rights for the user */
-        aaa = (ACCESS_ALLOWED_ACE *)ace_next( current_ace );
-        current_ace = &aaa->Header;
-        aaa->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
-        aaa->Header.AceFlags = (mode & S_IFDIR) ? OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE : 0;
-        aaa->Header.AceSize = FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) + security_sid_len( user );
-        aaa->Mask = WRITE_DAC | WRITE_OWNER;
-        if (mode & S_IRUSR)
-            aaa->Mask |= FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
-        if (mode & S_IWUSR)
-            aaa->Mask |= FILE_GENERIC_WRITE | DELETE | FILE_DELETE_CHILD;
-        sid = (SID *)&aaa->SidStart;
-        memcpy( sid, user, security_sid_len( user ));
+        ace = set_ace( ace_next( ace ), user, ACCESS_ALLOWED_ACE_TYPE, flags, WRITE_DAC | WRITE_OWNER );
+        if (mode & S_IRUSR) ace->mask |= FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+        if (mode & S_IWUSR) ace->mask |= FILE_GENERIC_WRITE | DELETE | FILE_DELETE_CHILD;
     }
     if ((!(mode & S_IRUSR) && (mode & (S_IRGRP|S_IROTH))) ||
         (!(mode & S_IWUSR) && (mode & (S_IWGRP|S_IWOTH))) ||
         (!(mode & S_IXUSR) && (mode & (S_IXGRP|S_IXOTH))))
     {
         /* deny just in case the user is a member of the group */
-        ACCESS_DENIED_ACE *ada = (ACCESS_DENIED_ACE *)ace_next( current_ace );
-        current_ace = &ada->Header;
-        ada->Header.AceType = ACCESS_DENIED_ACE_TYPE;
-        ada->Header.AceFlags = (mode & S_IFDIR) ? OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE : 0;
-        ada->Header.AceSize = FIELD_OFFSET(ACCESS_DENIED_ACE, SidStart) + security_sid_len( user );
-        ada->Mask = 0;
+        ace = set_ace( ace_next( ace ), user, ACCESS_DENIED_ACE_TYPE, flags, 0 );
         if (!(mode & S_IRUSR) && (mode & (S_IRGRP|S_IROTH)))
-            ada->Mask |= FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+            ace->mask |= FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
         if (!(mode & S_IWUSR) && (mode & (S_IWGRP|S_IROTH)))
-            ada->Mask |= FILE_GENERIC_WRITE | DELETE | FILE_DELETE_CHILD;
-        ada->Mask &= ~STANDARD_RIGHTS_ALL; /* never deny standard rights */
-        sid = (SID *)&ada->SidStart;
-        memcpy( sid, user, security_sid_len( user ));
+            ace->mask |= FILE_GENERIC_WRITE | DELETE | FILE_DELETE_CHILD;
+        ace->mask &= ~STANDARD_RIGHTS_ALL; /* never deny standard rights */
     }
     if (mode & S_IRWXO)
     {
         /* appropriate access rights for Everyone */
-        aaa = (ACCESS_ALLOWED_ACE *)ace_next( current_ace );
-        current_ace = &aaa->Header;
-        aaa->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
-        aaa->Header.AceFlags = (mode & S_IFDIR) ? OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE : 0;
-        aaa->Header.AceSize = FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) + security_sid_len( world_sid );
-        aaa->Mask = 0;
-        if (mode & S_IROTH)
-            aaa->Mask |= FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
-        if (mode & S_IWOTH)
-            aaa->Mask |= FILE_GENERIC_WRITE | DELETE | FILE_DELETE_CHILD;
-        sid = (SID *)&aaa->SidStart;
-        memcpy( sid, world_sid, security_sid_len( world_sid ));
+        ace = set_ace( ace_next( ace ), &world_sid, ACCESS_ALLOWED_ACE_TYPE, flags, 0 );
+        if (mode & S_IROTH) ace->mask |= FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+        if (mode & S_IWOTH) ace->mask |= FILE_GENERIC_WRITE | DELETE | FILE_DELETE_CHILD;
     }
 
     return sd;
@@ -623,32 +588,30 @@ static mode_t file_access_to_mode( unsigned int access )
     return mode;
 }
 
-mode_t sd_to_mode( const struct security_descriptor *sd, const SID *owner )
+mode_t sd_to_mode( const struct security_descriptor *sd, const struct sid *owner )
 {
     mode_t new_mode = 0;
     mode_t bits_to_set = ~0;
     mode_t mode;
     int present;
-    const ACL *dacl = sd_get_dacl( sd, &present );
+    const struct acl *dacl = sd_get_dacl( sd, &present );
+
     if (present && dacl)
     {
-        const ACE_HEADER *ace = (const ACE_HEADER *)(dacl + 1);
-        ULONG i;
-        for (i = 0; i < dacl->AceCount; i++, ace = ace_next( ace ))
+        const struct ace *ace = (const struct ace *)(dacl + 1);
+        unsigned int i;
+
+        for (i = 0; i < dacl->count; i++, ace = ace_next( ace ))
         {
-            const ACCESS_ALLOWED_ACE *aa_ace;
-            const ACCESS_DENIED_ACE *ad_ace;
-            const SID *sid;
+            const struct sid *sid = (const struct sid *)(ace + 1);
 
-            if (ace->AceFlags & INHERIT_ONLY_ACE) continue;
+            if (ace->flags & INHERIT_ONLY_ACE) continue;
 
-            switch (ace->AceType)
+            mode = file_access_to_mode( ace->mask );
+            switch (ace->type)
             {
                 case ACCESS_DENIED_ACE_TYPE:
-                    ad_ace = (const ACCESS_DENIED_ACE *)ace;
-                    sid = (const SID *)&ad_ace->SidStart;
-                    mode = file_access_to_mode( ad_ace->Mask );
-                    if (security_equal_sid( sid, security_world_sid ))
+                    if (equal_sid( sid, &world_sid ))
                     {
                         bits_to_set &= ~((mode << 6) | (mode << 3) | mode); /* all */
                     }
@@ -657,16 +620,13 @@ mode_t sd_to_mode( const struct security_descriptor *sd, const SID *owner )
                     {
                         bits_to_set &= ~((mode << 6) | (mode << 3));  /* user + group */
                     }
-                    else if (security_equal_sid( sid, owner ))
+                    else if (equal_sid( sid, owner ))
                     {
                         bits_to_set &= ~(mode << 6);  /* user only */
                     }
                     break;
                 case ACCESS_ALLOWED_ACE_TYPE:
-                    aa_ace = (const ACCESS_ALLOWED_ACE *)ace;
-                    sid = (const SID *)&aa_ace->SidStart;
-                    mode = file_access_to_mode( aa_ace->Mask );
-                    if (security_equal_sid( sid, security_world_sid ))
+                    if (equal_sid( sid, &world_sid ))
                     {
                         mode = (mode << 6) | (mode << 3) | mode;  /* all */
                         new_mode |= mode & bits_to_set;
@@ -679,7 +639,7 @@ mode_t sd_to_mode( const struct security_descriptor *sd, const SID *owner )
                         new_mode |= mode & bits_to_set;
                         bits_to_set &= ~mode;
                     }
-                    else if (security_equal_sid( sid, owner ))
+                    else if (equal_sid( sid, owner ))
                     {
                         mode = (mode << 6);  /* user only */
                         new_mode |= mode & bits_to_set;
@@ -701,7 +661,7 @@ int set_file_sd( struct object *obj, struct fd *fd, mode_t *mode, uid_t *uid,
 {
     struct security_descriptor *new_sd;
     int unix_fd = get_unix_fd( fd );
-    const SID *owner, *group;
+    const struct sid *owner, *group;
     struct stat st;
     mode_t new_mode;
 
@@ -711,31 +671,31 @@ int set_file_sd( struct object *obj, struct fd *fd, mode_t *mode, uid_t *uid,
     /* calculate the new sd, save to a temporary variable before assigning */
     new_sd = set_sd_from_token_internal( sd, obj->sd, set_info, current->process->token );
     if (new_sd)
-    {
+     {
         /* convert generic rights into standard access rights */
         convert_generic_sd( new_sd );
 
         if (set_info & OWNER_SECURITY_INFORMATION)
-        {
+         {
             owner = sd_get_owner( new_sd );
             assert( owner );
 
-            if (!obj->sd || !security_equal_sid( owner, sd_get_owner( obj->sd ) ))
+            if (!obj->sd || !equal_sid( owner, sd_get_owner( obj->sd ) ))
             {
                 /* FIXME: get Unix uid and call fchown */
             }
-        }
+         }
 
         if (set_info & GROUP_SECURITY_INFORMATION)
-        {
+         {
             group = sd_get_group( new_sd );
             assert( group );
 
-            if (!obj->sd || !security_equal_sid( group, sd_get_group( obj->sd ) ))
+            if (!obj->sd || !equal_sid( group, sd_get_group( obj->sd ) ))
             {
                 /* FIXME: get Unix uid and call fchown */
             }
-        }
+         }
 
         if (set_info & DACL_SECURITY_INFORMATION)
         {
@@ -754,7 +714,7 @@ int set_file_sd( struct object *obj, struct fd *fd, mode_t *mode, uid_t *uid,
             }
 
             *mode = (*mode & S_IFMT) | new_mode;
-        }
+         }
 
         /* extended attributes are set after the file mode, to ensure it stays in sync */
         set_xattr_sd( unix_fd, new_sd );
@@ -762,7 +722,7 @@ int set_file_sd( struct object *obj, struct fd *fd, mode_t *mode, uid_t *uid,
         free( obj->sd );
         obj->sd = new_sd;
         return 1;
-    }
+     }
 
     return 0;
 }

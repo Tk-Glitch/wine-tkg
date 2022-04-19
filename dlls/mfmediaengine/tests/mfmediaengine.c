@@ -29,6 +29,8 @@
 #include "mferror.h"
 #include "dxgi.h"
 #include "initguid.h"
+#include "mmdeviceapi.h"
+#include "audiosessiontypes.h"
 
 #include "wine/heap.h"
 #include "wine/test.h"
@@ -44,6 +46,21 @@ static void _expect_ref(IUnknown *obj, ULONG ref, int line)
     IUnknown_AddRef(obj);
     rc = IUnknown_Release(obj);
     ok_(__FILE__,line)(rc == ref, "Unexpected refcount %d, expected %d.\n", rc, ref);
+}
+
+#define check_interface(a, b, c) check_interface_(__LINE__, a, b, c)
+static void check_interface_(unsigned int line, void *iface_ptr, REFIID iid, BOOL supported)
+{
+    IUnknown *iface = iface_ptr;
+    HRESULT hr, expected_hr;
+    IUnknown *unk;
+
+    expected_hr = supported ? S_OK : E_NOINTERFACE;
+
+    hr = IUnknown_QueryInterface(iface, iid, (void **)&unk);
+    ok_(__FILE__, line)(hr == expected_hr, "Got hr %#x, expected %#x.\n", hr, expected_hr);
+    if (SUCCEEDED(hr))
+        IUnknown_Release(unk);
 }
 
 static void init_functions(void)
@@ -89,7 +106,12 @@ static ULONG WINAPI media_engine_notify_AddRef(IMFMediaEngineNotify *iface)
 static ULONG WINAPI media_engine_notify_Release(IMFMediaEngineNotify *iface)
 {
     struct media_engine_notify *notify = impl_from_IMFMediaEngineNotify(iface);
-    return InterlockedDecrement(&notify->refcount);
+    ULONG refcount = InterlockedDecrement(&notify->refcount);
+
+    if (!refcount)
+        free(notify);
+
+    return refcount;
 }
 
 static HRESULT WINAPI media_engine_notify_EventNotify(IMFMediaEngineNotify *iface, DWORD event, DWORD_PTR param1, DWORD param2)
@@ -104,6 +126,18 @@ static IMFMediaEngineNotifyVtbl media_engine_notify_vtbl =
     media_engine_notify_Release,
     media_engine_notify_EventNotify,
 };
+
+static struct media_engine_notify *create_callback(void)
+{
+    struct media_engine_notify *object;
+
+    object = calloc(1, sizeof(*object));
+
+    object->IMFMediaEngineNotify_iface.lpVtbl = &media_engine_notify_vtbl;
+    object->refcount = 1;
+
+    return object;
+}
 
 static IMFMediaEngine *create_media_engine(IMFMediaEngineNotify *callback)
 {
@@ -133,11 +167,24 @@ static IMFMediaEngine *create_media_engine(IMFMediaEngineNotify *callback)
     return media_engine;
 }
 
+static IMFMediaEngineEx *create_media_engine_ex(IMFMediaEngineNotify *callback)
+{
+    IMFMediaEngine *engine = create_media_engine(callback);
+    IMFMediaEngineEx *engine_ex = NULL;
+
+    if (engine)
+    {
+        IMFMediaEngine_QueryInterface(engine, &IID_IMFMediaEngineEx, (void **)&engine_ex);
+        IMFMediaEngine_Release(engine);
+    }
+
+    return engine_ex;
+}
+
 static void test_factory(void)
 {
-    struct media_engine_notify notify_impl = {{&media_engine_notify_vtbl}, 1};
-    IMFMediaEngineNotify *notify = &notify_impl.IMFMediaEngineNotify_iface;
     IMFMediaEngineClassFactory *factory, *factory2;
+    struct media_engine_notify *notify;
     IMFDXGIDeviceManager *manager;
     IMFMediaEngine *media_engine;
     IMFAttributes *attributes;
@@ -152,6 +199,8 @@ static void test_factory(void)
         win_skip("Media Engine is not supported.\n");
         return;
     }
+
+    notify = create_callback();
 
     /* Aggregation is not supported. */
     hr = CoCreateInstance(&CLSID_MFMediaEngineClassFactory, (IUnknown *)factory, CLSCTX_INPROC_SERVER,
@@ -174,7 +223,7 @@ static void test_factory(void)
     ok(hr == MF_E_ATTRIBUTENOTFOUND, "IMFMediaEngineClassFactory_CreateInstance got %#x.\n", hr);
 
     IMFAttributes_DeleteAllItems(attributes);
-    hr = IMFAttributes_SetUnknown(attributes, &MF_MEDIA_ENGINE_CALLBACK, (IUnknown *)notify);
+    hr = IMFAttributes_SetUnknown(attributes, &MF_MEDIA_ENGINE_CALLBACK, (IUnknown *)&notify->IMFMediaEngineNotify_iface);
     ok(hr == S_OK, "IMFAttributes_SetUnknown failed: %#x.\n", hr);
     hr = IMFAttributes_SetUINT32(attributes, &MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT, DXGI_FORMAT_UNKNOWN);
     ok(hr == S_OK, "IMFAttributes_SetUINT32 failed: %#x.\n", hr);
@@ -188,17 +237,20 @@ static void test_factory(void)
     IMFAttributes_Release(attributes);
     IMFDXGIDeviceManager_Release(manager);
     IMFMediaEngineClassFactory_Release(factory);
+    IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
 }
 
 static void test_CreateInstance(void)
 {
-    struct media_engine_notify notify_impl = {{&media_engine_notify_vtbl}, 1};
-    IMFMediaEngineNotify *notify = &notify_impl.IMFMediaEngineNotify_iface;
+    struct media_engine_notify *notify;
     IMFDXGIDeviceManager *manager;
     IMFMediaEngine *media_engine;
     IMFAttributes *attributes;
+    IUnknown *unk;
     UINT token;
     HRESULT hr;
+
+    notify = create_callback();
 
     hr = pMFCreateDXGIDeviceManager(&token, &manager);
     ok(hr == S_OK, "Failed to create dxgi device manager, hr %#x.\n", hr);
@@ -219,7 +271,7 @@ static void test_CreateInstance(void)
 
     IMFAttributes_DeleteAllItems(attributes);
 
-    hr = IMFAttributes_SetUnknown(attributes, &MF_MEDIA_ENGINE_CALLBACK, (IUnknown *)notify);
+    hr = IMFAttributes_SetUnknown(attributes, &MF_MEDIA_ENGINE_CALLBACK, (IUnknown *)&notify->IMFMediaEngineNotify_iface);
     ok(hr == S_OK, "Failed to set attribute, hr %#x.\n", hr);
     hr = IMFAttributes_SetUINT32(attributes, &MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT, DXGI_FORMAT_UNKNOWN);
     ok(hr == S_OK, "Failed to set attribute, hr %#x.\n", hr);
@@ -227,24 +279,35 @@ static void test_CreateInstance(void)
     hr = IMFMediaEngineClassFactory_CreateInstance(factory, MF_MEDIA_ENGINE_WAITFORSTABLE_STATE, attributes, &media_engine);
     ok(hr == S_OK, "Failed to create media engine, hr %#x.\n", hr);
 
+    check_interface(media_engine, &IID_IMFMediaEngine, TRUE);
+
+    hr = IMFMediaEngine_QueryInterface(media_engine, &IID_IMFGetService, (void **)&unk);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE) /* supported since win10 */, "Unexpected hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+        IUnknown_Release(unk);
+
     IMFMediaEngine_Release(media_engine);
     IMFAttributes_Release(attributes);
     IMFDXGIDeviceManager_Release(manager);
+    IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
 }
 
 static void test_Shutdown(void)
 {
-    struct media_engine_notify notify_impl = {{&media_engine_notify_vtbl}, 1};
-    IMFMediaEngineNotify *callback = &notify_impl.IMFMediaEngineNotify_iface;
+    struct media_engine_notify *notify;
+    IMFMediaEngineEx *media_engine_ex;
     IMFMediaTimeRange *time_range;
     IMFMediaEngine *media_engine;
     unsigned int state;
+    UINT32 value;
     DWORD cx, cy;
     double val;
     HRESULT hr;
     BSTR str;
 
-    media_engine = create_media_engine(callback);
+    notify = create_callback();
+
+    media_engine = create_media_engine(&notify->IMFMediaEngineNotify_iface);
 
     hr = IMFMediaEngine_Shutdown(media_engine);
     ok(hr == S_OK, "Failed to shut down, hr %#x.\n", hr);
@@ -256,7 +319,6 @@ static void test_Shutdown(void)
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     hr = IMFMediaEngine_GetCurrentSource(media_engine, &str);
-todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     state = IMFMediaEngine_GetNetworkState(media_engine);
@@ -279,16 +341,13 @@ todo_wine
     ok(state == 100, "Unexpected state %d.\n", state);
 
     hr = IMFMediaEngine_GetBuffered(media_engine, &time_range);
-todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     hr = IMFMediaEngine_Load(media_engine);
-todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     str = SysAllocString(L"video/mp4");
     hr = IMFMediaEngine_CanPlayType(media_engine, str, &state);
-todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
     SysFreeString(str);
 
@@ -302,7 +361,6 @@ todo_wine
     ok(val == 0.0, "Unexpected time %f.\n", val);
 
     hr = IMFMediaEngine_SetCurrentTime(media_engine, 1.0);
-todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     val = IMFMediaEngine_GetStartTime(media_engine);
@@ -321,11 +379,9 @@ todo_wine
     ok(val == 1.0, "Unexpected rate %f.\n", val);
 
     hr = IMFMediaEngine_GetPlayed(media_engine, &time_range);
-todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     hr = IMFMediaEngine_GetSeekable(media_engine, &time_range);
-todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     state = IMFMediaEngine_IsEnded(media_engine);
@@ -352,11 +408,9 @@ todo_wine
     ok(!!state, "Unexpected state.\n");
 
     hr = IMFMediaEngine_Play(media_engine);
-todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     hr = IMFMediaEngine_Pause(media_engine);
-todo_wine
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
     state = IMFMediaEngine_GetMuted(media_engine);
@@ -383,13 +437,33 @@ todo_wine
     hr = IMFMediaEngine_GetVideoAspectRatio(media_engine, &cx, &cy);
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
 
+    if (SUCCEEDED(IMFMediaEngine_QueryInterface(media_engine, &IID_IMFMediaEngineEx, (void **)&media_engine_ex)))
+    {
+        hr = IMFMediaEngineEx_SetSourceFromByteStream(media_engine_ex, NULL, NULL);
+        ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+        hr = IMFMediaEngineEx_GetAudioStreamCategory(media_engine_ex, &value);
+        ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+        hr = IMFMediaEngineEx_GetAudioEndpointRole(media_engine_ex, &value);
+        ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+        hr = IMFMediaEngineEx_SetAudioStreamCategory(media_engine_ex, AudioCategory_ForegroundOnlyMedia);
+        ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+        hr = IMFMediaEngineEx_SetAudioEndpointRole(media_engine_ex, eConsole);
+        ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#x.\n", hr);
+
+        IMFMediaEngineEx_Release(media_engine_ex);
+    }
+
     IMFMediaEngine_Release(media_engine);
+    IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
 }
 
 static void test_Play(void)
 {
-    struct media_engine_notify notify_impl = {{&media_engine_notify_vtbl}, 1};
-    IMFMediaEngineNotify *callback = &notify_impl.IMFMediaEngineNotify_iface;
+    struct media_engine_notify *notify;
     IMFMediaTimeRange *range, *range1;
     IMFMediaEngine *media_engine;
     LONGLONG pts;
@@ -397,7 +471,9 @@ static void test_Play(void)
     HRESULT hr;
     BOOL ret;
 
-    media_engine = create_media_engine(callback);
+    notify = create_callback();
+
+    media_engine = create_media_engine(&notify->IMFMediaEngineNotify_iface);
 
     hr = IMFMediaEngine_GetBuffered(media_engine, &range);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
@@ -446,7 +522,7 @@ static void test_Play(void)
     IMFMediaEngine_Release(media_engine);
 
     /* Play -> Pause */
-    media_engine = create_media_engine(callback);
+    media_engine = create_media_engine(&notify->IMFMediaEngineNotify_iface);
 
     hr = IMFMediaEngine_Play(media_engine);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
@@ -461,17 +537,19 @@ static void test_Play(void)
     ok(!!ret, "Unexpected state %d.\n", ret);
 
     IMFMediaEngine_Release(media_engine);
+    IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
 }
 
 static void test_playback_rate(void)
 {
-    struct media_engine_notify notify_impl = {{&media_engine_notify_vtbl}, 1};
-    IMFMediaEngineNotify *callback = &notify_impl.IMFMediaEngineNotify_iface;
+    struct media_engine_notify *notify;
     IMFMediaEngine *media_engine;
     double rate;
     HRESULT hr;
 
-    media_engine = create_media_engine(callback);
+    notify = create_callback();
+
+    media_engine = create_media_engine(&notify->IMFMediaEngineNotify_iface);
 
     rate = IMFMediaEngine_GetDefaultPlaybackRate(media_engine);
     ok(rate == 1.0, "Unexpected default rate.\n");
@@ -489,17 +567,19 @@ static void test_playback_rate(void)
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     IMFMediaEngine_Release(media_engine);
+    IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
 }
 
 static void test_mute(void)
 {
-    struct media_engine_notify notify_impl = {{&media_engine_notify_vtbl}, 1};
-    IMFMediaEngineNotify *callback = &notify_impl.IMFMediaEngineNotify_iface;
+    struct media_engine_notify *notify;
     IMFMediaEngine *media_engine;
     HRESULT hr;
     BOOL ret;
 
-    media_engine = create_media_engine(callback);
+    notify = create_callback();
+
+    media_engine = create_media_engine(&notify->IMFMediaEngineNotify_iface);
 
     ret = IMFMediaEngine_GetMuted(media_engine);
     ok(!ret, "Unexpected state.\n");
@@ -517,18 +597,20 @@ static void test_mute(void)
     ok(ret, "Unexpected state.\n");
 
     IMFMediaEngine_Release(media_engine);
+    IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
 }
 
 static void test_error(void)
 {
-    struct media_engine_notify notify_impl = {{&media_engine_notify_vtbl}, 1};
-    IMFMediaEngineNotify *callback = &notify_impl.IMFMediaEngineNotify_iface;
+    struct media_engine_notify *notify;
     IMFMediaEngine *media_engine;
     IMFMediaError *eo, *eo2;
     unsigned int code;
     HRESULT hr;
 
-    media_engine = create_media_engine(callback);
+    notify = create_callback();
+
+    media_engine = create_media_engine(&notify->IMFMediaEngineNotify_iface);
 
     eo = (void *)0xdeadbeef;
     hr = IMFMediaEngine_GetError(media_engine, &eo);
@@ -601,6 +683,7 @@ static void test_error(void)
     ok(hr == E_FAIL, "Unexpected code %#x.\n", hr);
 
     IMFMediaError_Release(eo);
+    IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
 }
 
 static void test_time_range(void)
@@ -646,7 +729,6 @@ static void test_time_range(void)
     ok(end == 1.0, "Unexpected end %.e.\n", end);
 
     hr = IMFMediaTimeRange_AddRange(range, 2.0, 3.0);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     count = IMFMediaTimeRange_GetLength(range);
@@ -654,50 +736,181 @@ todo_wine
 
     hr = IMFMediaTimeRange_GetStart(range, 0, &start);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-todo_wine
     ok(start == 2.0, "Unexpected start %.8e.\n", start);
 
     hr = IMFMediaTimeRange_GetEnd(range, 0, &end);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-todo_wine
     ok(end == 3.0, "Unexpected end %.8e.\n", end);
 
     hr = IMFMediaTimeRange_AddRange(range, 10.0, 9.0);
-todo_wine
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     count = IMFMediaTimeRange_GetLength(range);
-todo_wine
     ok(count == 2, "Unexpected range count.\n");
 
     hr = IMFMediaTimeRange_GetStart(range, 0, &start);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-todo_wine
     ok(start == 2.0, "Unexpected start %.8e.\n", start);
 
     hr = IMFMediaTimeRange_GetEnd(range, 0, &end);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-todo_wine
     ok(end == 3.0, "Unexpected end %.8e.\n", end);
 
     start = 0.0;
     hr = IMFMediaTimeRange_GetStart(range, 1, &start);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     ok(start == 10.0, "Unexpected start %.8e.\n", start);
-}
+
     hr = IMFMediaTimeRange_GetEnd(range, 1, &end);
-todo_wine {
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
     ok(end == 9.0, "Unexpected end %.8e.\n", end);
-}
+
+    hr = IMFMediaTimeRange_AddRange(range, 2.0, 9.1);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    count = IMFMediaTimeRange_GetLength(range);
+    ok(count == 2, "Unexpected range count.\n");
+
+    hr = IMFMediaTimeRange_GetStart(range, 0, &start);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(start == 2.0, "Unexpected start %.8e.\n", start);
+
+    hr = IMFMediaTimeRange_GetEnd(range, 0, &end);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(end == 9.1, "Unexpected end %.8e.\n", end);
+
+    hr = IMFMediaTimeRange_GetStart(range, 1, &start);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(start == 10.0, "Unexpected start %.8e.\n", start);
+
+    hr = IMFMediaTimeRange_GetEnd(range, 1, &end);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(end == 9.0, "Unexpected end %.8e.\n", end);
+
+    hr = IMFMediaTimeRange_AddRange(range, 8.5, 2.5);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    count = IMFMediaTimeRange_GetLength(range);
+    ok(count == 2, "Unexpected range count.\n");
+
+    hr = IMFMediaTimeRange_GetStart(range, 0, &start);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(start == 2.0, "Unexpected start %.8e.\n", start);
+
+    hr = IMFMediaTimeRange_GetEnd(range, 0, &end);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(end == 9.1, "Unexpected end %.8e.\n", end);
+
+    hr = IMFMediaTimeRange_AddRange(range, 20.0, 20.0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    count = IMFMediaTimeRange_GetLength(range);
+    ok(count == 3, "Unexpected range count.\n");
+
     hr = IMFMediaTimeRange_Clear(range);
     ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     count = IMFMediaTimeRange_GetLength(range);
     ok(!count, "Unexpected range count.\n");
 
+    /* Intersect */
+    hr = IMFMediaTimeRange_AddRange(range, 5.0, 10.0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaTimeRange_AddRange(range, 6.0, 12.0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IMFMediaTimeRange_GetStart(range, 0, &start);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(start == 5.0, "Unexpected start %.8e.\n", start);
+
+    hr = IMFMediaTimeRange_GetEnd(range, 0, &end);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(end == 12.0, "Unexpected end %.8e.\n", end);
+
+    count = IMFMediaTimeRange_GetLength(range);
+    ok(count == 1, "Unexpected range count.\n");
+
+    hr = IMFMediaTimeRange_AddRange(range, 4.0, 6.0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    count = IMFMediaTimeRange_GetLength(range);
+    ok(count == 1, "Unexpected range count.\n");
+
+    hr = IMFMediaTimeRange_GetStart(range, 0, &start);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(start == 4.0, "Unexpected start %.8e.\n", start);
+
+    hr = IMFMediaTimeRange_GetEnd(range, 0, &end);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(end == 12.0, "Unexpected end %.8e.\n", end);
+
+    hr = IMFMediaTimeRange_AddRange(range, 5.0, 3.0);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    count = IMFMediaTimeRange_GetLength(range);
+    ok(count == 1, "Unexpected range count.\n");
+
+    hr = IMFMediaTimeRange_GetStart(range, 0, &start);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(start == 4.0, "Unexpected start %.8e.\n", start);
+
+    hr = IMFMediaTimeRange_GetEnd(range, 0, &end);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(end == 12.0, "Unexpected end %.8e.\n", end);
+
     IMFMediaTimeRange_Release(range);
+}
+
+static void test_SetSourceFromByteStream(void)
+{
+    struct media_engine_notify *notify;
+    IMFMediaEngineEx *media_engine;
+    HRESULT hr;
+
+    notify = create_callback();
+
+    media_engine = create_media_engine_ex(&notify->IMFMediaEngineNotify_iface);
+    if (!media_engine)
+    {
+        win_skip("IMFMediaEngineEx is not supported.\n");
+        IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
+        return;
+    }
+
+    hr = IMFMediaEngineEx_SetSourceFromByteStream(media_engine, NULL, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#x.\n", hr);
+
+    IMFMediaEngineEx_Release(media_engine);
+    IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
+}
+
+static void test_audio_configuration(void)
+{
+    struct media_engine_notify *notify;
+    IMFMediaEngineEx *media_engine;
+    UINT32 value;
+    HRESULT hr;
+
+    notify = create_callback();
+
+    media_engine = create_media_engine_ex(&notify->IMFMediaEngineNotify_iface);
+    if (!media_engine)
+    {
+        IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
+        return;
+    }
+
+    hr = IMFMediaEngineEx_GetAudioStreamCategory(media_engine, &value);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(value == AudioCategory_Other, "Unexpected value %u.\n", value);
+
+    hr = IMFMediaEngineEx_GetAudioEndpointRole(media_engine, &value);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(value == eMultimedia, "Unexpected value %u.\n", value);
+
+    IMFMediaEngineEx_Release(media_engine);
+    IMFMediaEngineNotify_Release(&notify->IMFMediaEngineNotify_iface);
 }
 
 START_TEST(mfmediaengine)
@@ -728,6 +941,8 @@ START_TEST(mfmediaengine)
     test_mute();
     test_error();
     test_time_range();
+    test_SetSourceFromByteStream();
+    test_audio_configuration();
 
     IMFMediaEngineClassFactory_Release(factory);
 

@@ -1324,7 +1324,7 @@ BOOL CDECL dibdrv_PaintRgn( PHYSDEV dev, HRGN rgn )
 /***********************************************************************
  *           dibdrv_PolyPolygon
  */
-BOOL CDECL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, DWORD polygons )
+BOOL CDECL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, UINT polygons )
 {
     dibdrv_physdev *pdev = get_dibdrv_pdev(dev);
     DC *dc = get_physdev_dc( dev );

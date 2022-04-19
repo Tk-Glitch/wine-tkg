@@ -162,6 +162,7 @@ extern int right_option_is_alt DECLSPEC_HIDDEN;
 extern int left_command_is_ctrl DECLSPEC_HIDDEN;
 extern int right_command_is_ctrl DECLSPEC_HIDDEN;
 extern int allow_immovable_windows DECLSPEC_HIDDEN;
+extern int use_confinement_cursor_clipping DECLSPEC_HIDDEN;
 extern int cursor_clipping_locks_windows DECLSPEC_HIDDEN;
 extern int use_precise_scrolling DECLSPEC_HIDDEN;
 extern int gl_surface_mode DECLSPEC_HIDDEN;
@@ -538,11 +539,12 @@ struct macdrv_window_features {
     unsigned int    maximize_button:1;
     unsigned int    utility:1;
     unsigned int    shadow:1;
+    unsigned int    prevents_app_activation:1;
 };
 
 struct macdrv_window_state {
     unsigned int    disabled:1;
-    unsigned int    no_activate:1;
+    unsigned int    no_foreground:1;
     unsigned int    floating:1;
     unsigned int    excluded_by_expose:1;
     unsigned int    excluded_by_cycle:1;

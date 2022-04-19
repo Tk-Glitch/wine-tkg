@@ -380,11 +380,34 @@ struct filesystem_event
     char        name[1];
 };
 
-typedef struct
+struct luid
 {
     unsigned int low_part;
     int          high_part;
-} luid_t;
+};
+
+struct luid_attr
+{
+    struct luid  luid;
+    unsigned int attrs;
+};
+
+struct acl
+{
+    unsigned char  revision;
+    unsigned char  pad1;
+    unsigned short size;
+    unsigned short count;
+    unsigned short pad2;
+};
+
+struct sid
+{
+    unsigned char revision;
+    unsigned char sub_count;
+    unsigned char id_auth[6];
+    unsigned int  sub_auth[15];
+};
 
 typedef struct
 {
@@ -403,10 +426,10 @@ struct security_descriptor
     data_size_t  group_len;
     data_size_t  sacl_len;
     data_size_t  dacl_len;
-    /* VARARG(owner,SID); */
-    /* VARARG(group,SID); */
-    /* VARARG(sacl,ACL); */
-    /* VARARG(dacl,ACL); */
+    /* VARARG(owner,sid); */
+    /* VARARG(group,sid); */
+    /* VARARG(sacl,acl); */
+    /* VARARG(dacl,acl); */
 };
 
 struct object_attributes
@@ -430,13 +453,6 @@ struct object_type_info
     unsigned int  valid_access;  /* mask for valid access bits */
     generic_map_t mapping;       /* generic access mappings */
     /* VARARG(name,unicode_str); */
-};
-
-struct token_groups
-{
-    unsigned int count;
-    /* unsigned int attributes[count]; */
-    /* VARARG(sids,SID); */
 };
 
 enum select_op
@@ -3101,10 +3117,10 @@ enum caret_state
     obj_handle_t  handle; /* handle to the token */
     int           disable_all; /* disable all privileges? */
     int           get_modified_state; /* get modified privileges? */
-    VARARG(privileges,LUID_AND_ATTRIBUTES); /* privileges to enable/disable/remove */
+    VARARG(privileges,luid_attr); /* privileges to enable/disable/remove */
 @REPLY
     unsigned int  len; /* total length in bytes required to store token privileges */
-    VARARG(privileges,LUID_AND_ATTRIBUTES); /* modified privileges */
+    VARARG(privileges,luid_attr); /* modified privileges */
 @END
 
 /* Retrieves the set of privileges held by or available to a token */
@@ -3112,17 +3128,17 @@ enum caret_state
     obj_handle_t  handle; /* handle to the token */
 @REPLY
     unsigned int  len; /* total length in bytes required to store token privileges */
-    VARARG(privileges,LUID_AND_ATTRIBUTES); /* privileges held by or available to a token */
+    VARARG(privileges,luid_attr); /* privileges held by or available to a token */
 @END
 
 /* Check the token has the required privileges */
 @REQ(check_token_privileges)
     obj_handle_t  handle; /* handle to the token */
     int           all_required; /* are all the privileges required for the check to succeed? */
-    VARARG(privileges,LUID_AND_ATTRIBUTES); /* privileges to check */
+    VARARG(privileges,luid_attr); /* privileges to check */
 @REPLY
     int           has_privileges; /* does the token have the required privileges? */
-    VARARG(privileges,LUID_AND_ATTRIBUTES); /* privileges held by or available to a token */
+    VARARG(privileges,luid_attr); /* privileges held by or available to a token */
 @END
 
 @REQ(duplicate_token)
@@ -3139,8 +3155,8 @@ enum caret_state
     obj_handle_t  handle;          /* handle to the token to duplicate */
     unsigned int  flags;           /* flags */
     data_size_t   privileges_size; /* size of privileges */
-    VARARG(privileges,LUID_AND_ATTRIBUTES,privileges_size); /* privileges to remove from new token */
-    VARARG(disable_sids,SID);      /* array of groups to remove from new token */
+    VARARG(privileges,luid_attr,privileges_size); /* privileges to remove from new token */
+    VARARG(disable_sids,sid);      /* array of groups to remove from new token */
 @REPLY
     obj_handle_t  new_handle;      /* filtered handle */
 @END
@@ -3154,7 +3170,7 @@ enum caret_state
     unsigned int    access_granted; /* access rights actually granted */
     unsigned int    access_status; /* was access granted? */
     unsigned int    privileges_len; /* length needed to store privileges */
-    VARARG(privileges,LUID_AND_ATTRIBUTES); /* privileges used during access check */
+    VARARG(privileges,luid_attr); /* privileges used during access check */
 @END
 
 @REQ(get_token_sid)
@@ -3162,26 +3178,28 @@ enum caret_state
     unsigned int    which_sid;    /* which SID to retrieve from the token */
 @REPLY
     data_size_t     sid_len;      /* length needed to store sid */
-    VARARG(sid,SID);              /* the sid specified by which_sid from the token */
+    VARARG(sid,sid);              /* the sid specified by which_sid from the token */
 @END
 
 @REQ(get_token_groups)
     obj_handle_t    handle;       /* handle to the token */
 @REPLY
-    data_size_t     user_len;     /* length needed to store user */
-    VARARG(user,token_groups);    /* groups the token's user belongs to */
+    data_size_t     attr_len;     /* length needed to store attrs */
+    data_size_t     sid_len;      /* length needed to store sids */
+    VARARG(attrs,uints,attr_len); /* group attributes */
+    VARARG(sids,sids);            /* group sids */
 @END
 
 @REQ(get_token_default_dacl)
     obj_handle_t    handle;     /* handle to the token */
 @REPLY
     data_size_t     acl_len;    /* length needed to store access control list */
-    VARARG(acl,ACL);            /* access control list */
+    VARARG(acl,acl);            /* access control list */
 @END
 
 @REQ(set_token_default_dacl)
     obj_handle_t    handle;     /* handle to the token */
-    VARARG(acl,ACL);            /* default dacl to set */
+    VARARG(acl,acl);            /* default dacl to set */
 @END
 
 @REQ(set_security_object)
@@ -3338,7 +3356,7 @@ struct handle_info
 /* Allocate a locally-unique identifier */
 @REQ(allocate_locally_unique_id)
 @REPLY
-    luid_t         luid;
+    struct luid    luid;
 @END
 
 
@@ -3440,8 +3458,8 @@ struct handle_info
 @REQ(get_token_info)
     obj_handle_t   handle;        /* handle to the object */
 @REPLY
-    luid_t         token_id;      /* locally-unique identifier of the token */
-    luid_t         modified_id;   /* locally-unique identifier of the modified version of the token */
+    struct luid    token_id;      /* locally-unique identifier of the token */
+    struct luid    modified_id;   /* locally-unique identifier of the modified version of the token */
     unsigned int   session_id;    /* token session id */
     int            primary;       /* is the token primary or impersonation? */
     int            impersonation_level; /* level of impersonation */

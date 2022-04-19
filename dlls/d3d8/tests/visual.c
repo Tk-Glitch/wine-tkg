@@ -459,15 +459,22 @@ static void lighting_test(void)
         const D3DMATRIX *world_matrix;
         const void *quad;
         unsigned int size;
-        DWORD expected;
+        DWORD expected, broken;
         const char *message;
     }
     tests[] =
     {
-        {&mat, nquad, sizeof(nquad[0]), 0x000000ff, "Lit quad with light"},
-        {&mat_singular, nquad, sizeof(nquad[0]), 0x000000ff, "Lit quad with singular world matrix"},
-        {&mat_transf, rotatedquad, sizeof(rotatedquad[0]), 0x000000ff, "Lit quad with transformation matrix"},
-        {&mat_nonaffine, translatedquad, sizeof(translatedquad[0]), 0x00000000, "Lit quad with non-affine matrix"},
+        {&mat, nquad, sizeof(nquad[0]), 0x000000ff, 0xdeadbeef,
+                "Lit quad with light"},
+        /* Starting around Win10 20H? this test returns 0x00000000, but only
+         * in d3d8. In ddraw and d3d9 it works like in older windows versions.
+         * The behavior is GPU independent. */
+        {&mat_singular, nquad, sizeof(nquad[0]), 0x000000ff, 0x00000000,
+                "Lit quad with singular world matrix"},
+        {&mat_transf, rotatedquad, sizeof(rotatedquad[0]), 0x000000ff, 0xdeadbeef,
+                "Lit quad with transformation matrix"},
+        {&mat_nonaffine, translatedquad, sizeof(translatedquad[0]), 0x00000000, 0xdeadbeef,
+                "Lit quad with non-affine matrix"},
     };
 
     window = create_window();
@@ -569,7 +576,8 @@ static void lighting_test(void)
         ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
 
         color = getPixelColor(device, 320, 240);
-        ok(color == tests[i].expected, "%s has color 0x%08x.\n", tests[i].message, color);
+        ok(color == tests[i].expected || broken(color == tests[i].broken),
+                "%s has color 0x%08x.\n", tests[i].message, color);
     }
 
     refcount = IDirect3DDevice8_Release(device);
@@ -6767,7 +6775,7 @@ static void test_updatetexture(void)
         UINT dst_width, dst_height;
         UINT src_levels, dst_levels;
         D3DFORMAT src_format, dst_format;
-        BOOL broken;
+        BOOL broken_result, broken_updatetex;
     }
     tests[] =
     {
@@ -6785,7 +6793,8 @@ static void test_updatetexture(void)
          * one or something like that). */
         /* {8, 8, 7, 7, 4, 2, D3DFMT_A8R8G8B8, D3DFMT_A8R8G8B8, FALSE}, */
         {8, 8, 8, 8, 1, 4, D3DFMT_A8R8G8B8, D3DFMT_A8R8G8B8, FALSE}, /* 8 */
-        {4, 4, 8, 8, 1, 1, D3DFMT_A8R8G8B8, D3DFMT_A8R8G8B8, FALSE}, /* 9 */
+        /* For this one UpdateTexture() returns failure on WARP on > Win 10 1709. */
+        {4, 4, 8, 8, 1, 1, D3DFMT_A8R8G8B8, D3DFMT_A8R8G8B8, FALSE, TRUE}, /* 9 */
         /* This one causes weird behavior on Windows (it probably writes out
          * of the texture memory). */
         /* {8, 8, 4, 4, 1, 1, D3DFMT_A8R8G8B8, D3DFMT_A8R8G8B8, FALSE}, */
@@ -7012,7 +7021,8 @@ static void test_updatetexture(void)
             hr = IDirect3DDevice8_UpdateTexture(device, src, dst);
             if (FAILED(hr))
             {
-                todo_wine ok(SUCCEEDED(hr), "Failed to update texture, hr %#x, case %u, %u.\n", hr, t, i);
+                todo_wine ok(SUCCEEDED(hr) || broken(tests[i].broken_updatetex),
+                        "Failed to update texture, hr %#x, case %u, %u.\n", hr, t, i);
                 IDirect3DBaseTexture8_Release(src);
                 IDirect3DBaseTexture8_Release(dst);
                 continue;
@@ -7036,7 +7046,7 @@ static void test_updatetexture(void)
                 ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
 
                 color = getPixelColor(device, 320, 240);
-                ok (color_match(color, 0x007f7f00, 3) || broken(tests[i].broken)
+                ok (color_match(color, 0x007f7f00, 3) || broken(tests[i].broken_result)
                         || broken(color == 0x00adbeef), /* WARP device often just breaks down. */
                         "Got unexpected color 0x%08x, case %u, %u.\n", color, t, i);
             }
@@ -11171,7 +11181,15 @@ static void test_sample_mask(void)
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
     get_rt_readback(rt, &rb);
     colour = get_readback_color(&rb, 64, 64);
-    ok(color_match(colour, 0xffff8080, 1), "Got unexpected colour %08x.\n", colour);
+    /* Multiple generations of Nvidia cards return broken results.
+     * A mask with no bits or all bits set produce the expected results (0x00 / 0xff),
+     * but any other mask behaves almost as if the result is 0.5 + (enabled / total)
+     * samples. It's not quite that though (you'd expect 0xbf or 0xc0 instead of 0xbc).
+     *
+     * I looked at a few other possible problems: Incorrectly enabled Z test, alpha test,
+     * culling, the multisample mask affecting CopyRects. Neither of these make a difference. */
+    ok(color_match(colour, 0xffff8080, 1) || broken(color_match(colour, 0xffffbcbc, 1)),
+            "Got unexpected colour %08x.\n", colour);
     release_surface_readback(&rb);
 
     hr = IDirect3DDevice8_EndScene(device);

@@ -128,10 +128,10 @@ static void dinput_device_internal_unacquire( IDirectInputDevice8W *iface )
     TRACE( "iface %p.\n", iface );
 
     EnterCriticalSection( &impl->crit );
-    if (impl->acquired)
+    if (impl->status == STATUS_ACQUIRED)
     {
         impl->vtbl->unacquire( iface );
-        impl->acquired = FALSE;
+        impl->status = STATUS_UNACQUIRED;
         list_remove( &impl->entry );
     }
     LeaveCriticalSection( &impl->crit );
@@ -1261,7 +1261,6 @@ static DWORD WINAPI dinput_thread_proc( void *params )
     struct dinput_device *impl, *next;
     SIZE_T events_count = 0;
     HANDLE finished_event;
-    HRESULT hr;
     DWORD ret;
     MSG msg;
 
@@ -1282,8 +1281,11 @@ static DWORD WINAPI dinput_thread_proc( void *params )
             {
                 if (impl->read_event == events[ret])
                 {
-                    hr = impl->vtbl->read( &impl->IDirectInputDevice8W_iface );
-                    if (FAILED( hr )) dinput_device_internal_unacquire( &impl->IDirectInputDevice8W_iface );
+                    if (FAILED( impl->vtbl->read( &impl->IDirectInputDevice8W_iface ) ))
+                    {
+                        dinput_device_internal_unacquire( &impl->IDirectInputDevice8W_iface );
+                        impl->status = STATUS_UNPLUGGED;
+                    }
                     break;
                 }
             }

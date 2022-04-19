@@ -484,6 +484,10 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_context_QueryInterface(ID3D11Devic
     {
         *out = &context->ID3D11Multithread_iface;
     }
+    else if (IsEqualGUID(iid, &IID_ID3DUserDefinedAnnotation))
+    {
+        *out = &context->ID3DUserDefinedAnnotation_iface;
+    }
     else
     {
         WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
@@ -2283,7 +2287,8 @@ static void STDMETHODCALLTYPE d3d11_device_context_RSGetState(ID3D11DeviceContex
     if ((wined3d_state = wined3d_device_context_get_rasterizer_state(context->wined3d_context)))
     {
         rasterizer_state_impl = wined3d_rasterizer_state_get_parent(wined3d_state);
-        ID3D11RasterizerState_AddRef(*rasterizer_state = &rasterizer_state_impl->ID3D11RasterizerState_iface);
+        *rasterizer_state = (ID3D11RasterizerState *)&rasterizer_state_impl->ID3D11RasterizerState1_iface;
+        ID3D11RasterizerState_AddRef(*rasterizer_state);
     }
     else
     {
@@ -3241,11 +3246,86 @@ static const struct IWineD3DDeviceContextVtbl context_d3d_device_context_vtbl =
     context_d3d_device_context_get_wined3d_device_context,
 };
 
+/* ID3DUserDefinedAnnotation methods */
+
+static inline struct d3d11_device_context *impl_from_ID3DUserDefinedAnnotation(ID3DUserDefinedAnnotation *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d11_device_context, ID3DUserDefinedAnnotation_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_user_defined_annotation_QueryInterface(ID3DUserDefinedAnnotation *iface,
+        REFIID iid, void **out)
+{
+    struct d3d11_device_context *context = impl_from_ID3DUserDefinedAnnotation(iface);
+
+    TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
+
+    return d3d11_device_context_QueryInterface(&context->ID3D11DeviceContext1_iface, iid, out);
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_user_defined_annotation_AddRef(ID3DUserDefinedAnnotation *iface)
+{
+    struct d3d11_device_context *context = impl_from_ID3DUserDefinedAnnotation(iface);
+
+    TRACE("iface %p.\n", iface);
+
+    return d3d11_device_context_AddRef(&context->ID3D11DeviceContext1_iface);
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_user_defined_annotation_Release(ID3DUserDefinedAnnotation *iface)
+{
+    struct d3d11_device_context *context = impl_from_ID3DUserDefinedAnnotation(iface);
+
+    TRACE("iface %p.\n", iface);
+
+    return d3d11_device_context_Release(&context->ID3D11DeviceContext1_iface);
+}
+
+static int STDMETHODCALLTYPE d3d11_user_defined_annotation_BeginEvent(ID3DUserDefinedAnnotation *iface,
+        const WCHAR *name)
+{
+    TRACE("iface %p, name %s.\n", iface, debugstr_w(name));
+
+    return -1;
+}
+
+static int STDMETHODCALLTYPE d3d11_user_defined_annotation_EndEvent(ID3DUserDefinedAnnotation *iface)
+{
+    TRACE("iface %p.\n", iface);
+
+    return -1;
+}
+
+static void STDMETHODCALLTYPE d3d11_user_defined_annotation_SetMarker(ID3DUserDefinedAnnotation *iface,
+        const WCHAR *name)
+{
+    TRACE("iface %p, name %s.\n", iface, debugstr_w(name));
+}
+
+static BOOL STDMETHODCALLTYPE d3d11_user_defined_annotation_GetStatus(ID3DUserDefinedAnnotation *iface)
+{
+    TRACE("iface %p.\n", iface);
+
+    return FALSE;
+}
+
+static const struct ID3DUserDefinedAnnotationVtbl d3d11_user_defined_annotation_vtbl =
+{
+    d3d11_user_defined_annotation_QueryInterface,
+    d3d11_user_defined_annotation_AddRef,
+    d3d11_user_defined_annotation_Release,
+    d3d11_user_defined_annotation_BeginEvent,
+    d3d11_user_defined_annotation_EndEvent,
+    d3d11_user_defined_annotation_SetMarker,
+    d3d11_user_defined_annotation_GetStatus,
+};
+
 static void d3d11_device_context_init(struct d3d11_device_context *context, struct d3d_device *device,
         D3D11_DEVICE_CONTEXT_TYPE type)
 {
     context->ID3D11DeviceContext1_iface.lpVtbl = &d3d11_device_context_vtbl;
     context->ID3D11Multithread_iface.lpVtbl = &d3d11_multithread_vtbl;
+    context->ID3DUserDefinedAnnotation_iface.lpVtbl = &d3d11_user_defined_annotation_vtbl;
     context->IWineD3DDeviceContext_iface.lpVtbl = &context_d3d_device_context_vtbl;
     context->refcount = 1;
     context->type = type;
@@ -3653,14 +3733,21 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateRasterizerState(ID3D11Device
 {
     struct d3d_device *device = impl_from_ID3D11Device2(iface);
     struct d3d_rasterizer_state *object;
+    D3D11_RASTERIZER_DESC1 desc1;
     HRESULT hr;
 
     TRACE("iface %p, desc %p, rasterizer_state %p.\n", iface, desc, rasterizer_state);
 
-    if (FAILED(hr = d3d_rasterizer_state_create(device, desc, &object)))
+    if (!desc)
+        return E_INVALIDARG;
+
+    memcpy(&desc1, desc, sizeof(*desc));
+    desc1.ForcedSampleCount = 0;
+
+    if (FAILED(hr = d3d_rasterizer_state_create(device, &desc1, &object)))
         return hr;
 
-    *rasterizer_state = &object->ID3D11RasterizerState_iface;
+    *rasterizer_state = (ID3D11RasterizerState *)&object->ID3D11RasterizerState1_iface;
 
     return S_OK;
 }
@@ -3805,6 +3892,8 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFormatSupport(ID3D11Device2 *
     flag_mapping[] =
     {
         {WINED3D_RTYPE_BUFFER,     WINED3D_BIND_SHADER_RESOURCE, 0, D3D11_FORMAT_SUPPORT_BUFFER},
+        {WINED3D_RTYPE_BUFFER,     WINED3D_BIND_VERTEX_BUFFER,   0, D3D11_FORMAT_SUPPORT_IA_VERTEX_BUFFER},
+        {WINED3D_RTYPE_BUFFER,     WINED3D_BIND_INDEX_BUFFER,    0, D3D11_FORMAT_SUPPORT_IA_INDEX_BUFFER},
         {WINED3D_RTYPE_TEXTURE_1D, WINED3D_BIND_SHADER_RESOURCE, 0, D3D11_FORMAT_SUPPORT_TEXTURE1D},
         {WINED3D_RTYPE_TEXTURE_2D, WINED3D_BIND_SHADER_RESOURCE, 0, D3D11_FORMAT_SUPPORT_TEXTURE2D},
         {WINED3D_RTYPE_TEXTURE_3D, WINED3D_BIND_SHADER_RESOURCE, 0, D3D11_FORMAT_SUPPORT_TEXTURE3D},
@@ -4265,9 +4354,21 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateBlendState1(ID3D11Device2 *i
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateRasterizerState1(ID3D11Device2 *iface,
         const D3D11_RASTERIZER_DESC1 *desc, ID3D11RasterizerState1 **state)
 {
-    FIXME("iface %p, desc %p, state %p stub!\n", iface, desc, state);
+    struct d3d_device *device = impl_from_ID3D11Device2(iface);
+    struct d3d_rasterizer_state *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, desc %p, state %p.\n", iface, desc, state);
+
+    if (!desc)
+        return E_INVALIDARG;
+
+    if (FAILED(hr = d3d_rasterizer_state_create(device, desc, &object)))
+        return hr;
+
+    *state = &object->ID3D11RasterizerState1_iface;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDeviceContextState(ID3D11Device2 *iface, UINT flags,
@@ -5006,7 +5107,7 @@ static void STDMETHODCALLTYPE d3d10_device_RSSetState(ID3D10Device1 *iface, ID3D
 
     rasterizer_state_object = unsafe_impl_from_ID3D10RasterizerState(rasterizer_state);
     d3d11_device_context_RSSetState(&device->immediate_context.ID3D11DeviceContext1_iface,
-            rasterizer_state_object ? &rasterizer_state_object->ID3D11RasterizerState_iface : NULL);
+            rasterizer_state_object ? (ID3D11RasterizerState *)&rasterizer_state_object->ID3D11RasterizerState1_iface : NULL);
 }
 
 static void STDMETHODCALLTYPE d3d10_device_RSSetViewports(ID3D10Device1 *iface,
@@ -6294,11 +6395,18 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRasterizerState(ID3D10Device
 {
     struct d3d_device *device = impl_from_ID3D10Device(iface);
     struct d3d_rasterizer_state *object;
+    D3D11_RASTERIZER_DESC1 desc1;
     HRESULT hr;
 
     TRACE("iface %p, desc %p, rasterizer_state %p.\n", iface, desc, rasterizer_state);
 
-    if (FAILED(hr = d3d_rasterizer_state_create(device, (const D3D11_RASTERIZER_DESC *)desc, &object)))
+    if (!desc)
+        return E_INVALIDARG;
+
+    memcpy(&desc1, desc, sizeof(*desc));
+    desc1.ForcedSampleCount = 0;
+
+    if (FAILED(hr = d3d_rasterizer_state_create(device, &desc1, &object)))
         return hr;
 
     *rasterizer_state = &object->ID3D10RasterizerState_iface;
@@ -6877,8 +6985,8 @@ static int d3d_depthstencil_state_compare(const void *key, const struct wine_rb_
 
 static int d3d_rasterizer_state_compare(const void *key, const struct wine_rb_entry *entry)
 {
-    const D3D11_RASTERIZER_DESC *ka = key;
-    const D3D11_RASTERIZER_DESC *kb = &WINE_RB_ENTRY_VALUE(entry, const struct d3d_rasterizer_state, entry)->desc;
+    const D3D11_RASTERIZER_DESC1 *ka = key;
+    const D3D11_RASTERIZER_DESC1 *kb = &WINE_RB_ENTRY_VALUE(entry, const struct d3d_rasterizer_state, entry)->desc;
 
     return memcmp(ka, kb, sizeof(*ka));
 }

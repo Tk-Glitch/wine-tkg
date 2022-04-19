@@ -429,8 +429,9 @@ static int convert_control_headers(struct msghdr *hdr, WSABUF *control)
 #if defined(IP_TOS)
                     case IP_TOS:
                     {
+                        INT tos = *(unsigned char *)CMSG_DATA(cmsg_unix);
                         ptr = fill_control_message( WS_IPPROTO_IP, WS_IP_TOS, ptr, &ctlsize,
-                                                    CMSG_DATA(cmsg_unix), sizeof(INT) );
+                                                    &tos, sizeof(INT) );
                         if (!ptr) goto error;
                         break;
                     }
@@ -1419,6 +1420,28 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             if (needs_close) close( fd );
             complete_async( handle, event, apc, apc_user, io, STATUS_SUCCESS, 0 );
             return STATUS_SUCCESS;
+        }
+
+        case IOCTL_AFD_WINE_SEND_BACKLOG_QUERY:
+        {
+            if ((status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL, NULL )))
+                return status;
+
+            if (out_size < sizeof(DWORD))
+            {
+                status = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+
+            if(get_sock_type( handle ) != SOCK_STREAM)
+            {
+                status = STATUS_NOT_SUPPORTED;
+                break;
+            }
+
+            *(DWORD*)out_buffer = 0x10000; /* 64k */
+
+            break;
         }
 
         case IOCTL_AFD_WINE_SIOCATMARK:

@@ -397,8 +397,7 @@ struct dwrite_colorglyphenum
     IDWriteColorGlyphRunEnumerator1 IDWriteColorGlyphRunEnumerator1_iface;
     LONG refcount;
 
-    FLOAT origin_x;                   /* original run origin */
-    FLOAT origin_y;
+    D2D1_POINT_2F origin;             /* original run origin */
 
     IDWriteFontFace5 *fontface;       /* for convenience */
     DWRITE_COLOR_GLYPH_RUN1 colorrun; /* returned with GetCurrentRun() */
@@ -6432,8 +6431,8 @@ static BOOL colorglyphenum_build_color_run(struct dwrite_colorglyphenum *glyphen
                 glyphenum->color_offsets[g] = glyphenum->offsets[g];
         }
 
-        colorrun->baselineOriginX = glyphenum->origin_x + get_glyph_origin(glyphenum, first_glyph);
-        colorrun->baselineOriginY = glyphenum->origin_y;
+        colorrun->baselineOriginX = glyphenum->origin.x + get_glyph_origin(glyphenum, first_glyph);
+        colorrun->baselineOriginY = glyphenum->origin.y;
         colorrun->glyphRun.glyphCount = glyphenum->run.glyphCount;
         colorrun->paletteIndex = 0xffff;
         memset(&colorrun->runColor, 0, sizeof(colorrun->runColor));
@@ -6471,8 +6470,8 @@ static BOOL colorglyphenum_build_color_run(struct dwrite_colorglyphenum *glyphen
                             glyphenum->palette, colorrun->paletteIndex, hr);
                 }
                 /* found a glyph position new color run starts from, origin is "original origin + distance to this glyph" */
-                colorrun->baselineOriginX = glyphenum->origin_x + get_glyph_origin(glyphenum, g);
-                colorrun->baselineOriginY = glyphenum->origin_y;
+                colorrun->baselineOriginX = glyphenum->origin.x + get_glyph_origin(glyphenum, g);
+                colorrun->baselineOriginY = glyphenum->origin.y;
                 glyphenum->color_advances[index] = glyphenum->advances[g];
                 got_palette_index = TRUE;
             }
@@ -6563,9 +6562,9 @@ static const IDWriteColorGlyphRunEnumerator1Vtbl colorglyphenumvtbl =
     colorglyphenum1_GetCurrentRun,
 };
 
-HRESULT create_colorglyphenum(float originX, float originY, const DWRITE_GLYPH_RUN *run,
-        const DWRITE_GLYPH_RUN_DESCRIPTION *rundescr, DWRITE_MEASURING_MODE measuring_mode,
-        const DWRITE_MATRIX *transform, unsigned int palette, IDWriteColorGlyphRunEnumerator **ret)
+HRESULT create_colorglyphenum(D2D1_POINT_2F origin, const DWRITE_GLYPH_RUN *run,
+        const DWRITE_GLYPH_RUN_DESCRIPTION *rundescr, DWRITE_GLYPH_IMAGE_FORMATS formats, DWRITE_MEASURING_MODE measuring_mode,
+        const DWRITE_MATRIX *transform, unsigned int palette, IDWriteColorGlyphRunEnumerator1 **ret)
 {
     struct dwrite_colorglyphenum *colorglyphenum;
     BOOL colorfont, has_colored_glyph;
@@ -6581,13 +6580,28 @@ HRESULT create_colorglyphenum(float originX, float originY, const DWRITE_GLYPH_R
     if (!colorfont)
         return DWRITE_E_NOCOLOR;
 
+    if (!(formats & (DWRITE_GLYPH_IMAGE_FORMATS_COLR |
+                     DWRITE_GLYPH_IMAGE_FORMATS_SVG |
+                     DWRITE_GLYPH_IMAGE_FORMATS_PNG |
+                     DWRITE_GLYPH_IMAGE_FORMATS_JPEG |
+                     DWRITE_GLYPH_IMAGE_FORMATS_TIFF |
+                     DWRITE_GLYPH_IMAGE_FORMATS_PREMULTIPLIED_B8G8R8A8)))
+    {
+        return DWRITE_E_NOCOLOR;
+    }
+
+    if (formats & ~(DWRITE_GLYPH_IMAGE_FORMATS_TRUETYPE | DWRITE_GLYPH_IMAGE_FORMATS_CFF | DWRITE_GLYPH_IMAGE_FORMATS_COLR))
+    {
+        FIXME("Unimplemented formats requested %#x.\n", formats);
+        return E_NOTIMPL;
+    }
+
     if (!(colorglyphenum = calloc(1, sizeof(*colorglyphenum))))
         return E_OUTOFMEMORY;
 
     colorglyphenum->IDWriteColorGlyphRunEnumerator1_iface.lpVtbl = &colorglyphenumvtbl;
     colorglyphenum->refcount = 1;
-    colorglyphenum->origin_x = originX;
-    colorglyphenum->origin_y = originY;
+    colorglyphenum->origin = origin;
     colorglyphenum->fontface = &fontface->IDWriteFontFace5_iface;
     IDWriteFontFace5_AddRef(colorglyphenum->fontface);
     colorglyphenum->glyphs = NULL;
@@ -6649,7 +6663,7 @@ HRESULT create_colorglyphenum(float originX, float originY, const DWRITE_GLYPH_R
                     run->fontEmSize, 1.0f, transform, run->glyphIndices[i], run->isSideways);
     }
 
-    *ret = (IDWriteColorGlyphRunEnumerator *)&colorglyphenum->IDWriteColorGlyphRunEnumerator1_iface;
+    *ret = &colorglyphenum->IDWriteColorGlyphRunEnumerator1_iface;
 
     return S_OK;
 }
@@ -7502,6 +7516,8 @@ static IDWriteLocalizedStrings * fontset_entry_get_property(struct dwrite_fontse
         opentype_get_font_info_strings(&stream_desc, DWRITE_INFORMATIONAL_STRING_DESIGN_SCRIPT_LANGUAGE_TAG, &value);
     else if (property == DWRITE_FONT_PROPERTY_ID_SUPPORTED_SCRIPT_LANGUAGE_TAG)
         opentype_get_font_info_strings(&stream_desc, DWRITE_INFORMATIONAL_STRING_SUPPORTED_SCRIPT_LANGUAGE_TAG, &value);
+    else if (property == DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME)
+        opentype_get_font_info_strings(&stream_desc, DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES, &value);
     else
         WARN("Unsupported property %u.\n", property);
 
@@ -7643,6 +7659,7 @@ static BOOL fontset_entry_is_matching(struct dwrite_fontset_entry *entry, DWRITE
             case DWRITE_FONT_PROPERTY_ID_FULL_NAME:
             case DWRITE_FONT_PROPERTY_ID_DESIGN_SCRIPT_LANGUAGE_TAG:
             case DWRITE_FONT_PROPERTY_ID_SUPPORTED_SCRIPT_LANGUAGE_TAG:
+            case DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME:
                 if (!(value = fontset_entry_get_property(entry, props[i].propertyId)))
                     return FALSE;
 
@@ -7653,7 +7670,6 @@ static BOOL fontset_entry_is_matching(struct dwrite_fontset_entry *entry, DWRITE
             case DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME:
             case DWRITE_FONT_PROPERTY_ID_TYPOGRAPHIC_FAMILY_NAME:
             case DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FACE_NAME:
-            case DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME:
             case DWRITE_FONT_PROPERTY_ID_SEMANTIC_TAG:
             case DWRITE_FONT_PROPERTY_ID_WEIGHT:
             case DWRITE_FONT_PROPERTY_ID_STRETCH:

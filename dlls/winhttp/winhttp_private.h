@@ -51,6 +51,8 @@ struct object_header
     DWORD notify_mask;
     LONG recursion_count;
     struct list entry;
+    volatile LONG pending_sends;
+    volatile LONG pending_receives;
 };
 
 struct hostdata
@@ -108,7 +110,7 @@ struct netconn
     ULONGLONG keep_until;
     CtxtHandle ssl_ctx;
     SecPkgContext_StreamSizes ssl_sizes;
-    char *ssl_buf;
+    char *ssl_read_buf, *ssl_write_buf;
     char *extra_buf;
     size_t extra_len;
     char *peek_msg;
@@ -245,9 +247,18 @@ struct socket
     struct queue recv_q;
     enum socket_opcode opcode;
     DWORD read_size;
+    char mask[4];
+    unsigned int mask_index;
+    BOOL close_frame_received;
+    DWORD close_frame_receive_err;
     USHORT status;
     char reason[123];
     DWORD reason_len;
+    char *send_frame_buffer;
+    unsigned int send_frame_buffer_size;
+    unsigned int send_remaining_size;
+    unsigned int bytes_in_send_frame_buffer;
+    unsigned int client_buffer_offset;
 };
 
 struct send_request
@@ -294,6 +305,8 @@ struct socket_send
     WINHTTP_WEB_SOCKET_BUFFER_TYPE type;
     const void *buf;
     DWORD len;
+    WSAOVERLAPPED ovr;
+    BOOL complete_async;
 };
 
 struct socket_receive
@@ -309,6 +322,9 @@ struct socket_shutdown
     USHORT status;
     char reason[123];
     DWORD len;
+    BOOL send_callback;
+    WSAOVERLAPPED ovr;
+    BOOL complete_async;
 };
 
 struct object_header *addref_object( struct object_header * ) DECLSPEC_HIDDEN;
@@ -328,7 +344,7 @@ ULONG netconn_query_data_available( struct netconn * ) DECLSPEC_HIDDEN;
 DWORD netconn_recv( struct netconn *, void *, size_t, int, int * ) DECLSPEC_HIDDEN;
 DWORD netconn_resolve( WCHAR *, INTERNET_PORT, struct sockaddr_storage *, int ) DECLSPEC_HIDDEN;
 DWORD netconn_secure_connect( struct netconn *, WCHAR *, DWORD, CredHandle *, BOOL ) DECLSPEC_HIDDEN;
-DWORD netconn_send( struct netconn *, const void *, size_t, int * ) DECLSPEC_HIDDEN;
+DWORD netconn_send( struct netconn *, const void *, size_t, int *, WSAOVERLAPPED * ) DECLSPEC_HIDDEN;
 DWORD netconn_set_timeout( struct netconn *, BOOL, int ) DECLSPEC_HIDDEN;
 BOOL netconn_is_alive( struct netconn * ) DECLSPEC_HIDDEN;
 const void *netconn_get_certificate( struct netconn * ) DECLSPEC_HIDDEN;
@@ -397,5 +413,7 @@ static inline char *strdupWA_sized( const WCHAR *src, DWORD size )
 }
 
 extern HINSTANCE winhttp_instance DECLSPEC_HIDDEN;
+
+#define MAX_FRAME_BUFFER_SIZE 65536
 
 #endif /* _WINE_WINHTTP_PRIVATE_H_ */

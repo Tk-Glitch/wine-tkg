@@ -1769,3 +1769,44 @@ HRESULT CALLBACK ITransactionJoin_JoinTransaction_Proxy(ITransactionJoin* This, 
     FIXME("(%p)->(%p, %d, 0x%08x, %p): stub\n", This, unk, level, flags, options);
     return E_NOTIMPL;
 }
+
+HRESULT __RPC_STUB ITransactionLocal_GetOptionsObject_Stub(ITransactionLocal* This,
+    ITransactionOptions **options, IErrorInfo **info)
+{
+    FIXME("(%p)->(%p, %p): stub\n", This, options, info);
+    return E_NOTIMPL;
+}
+
+HRESULT CALLBACK ITransactionLocal_GetOptionsObject_Proxy(ITransactionLocal* This, ITransactionOptions **options)
+{
+    FIXME("(%p)->(%p): stub\n", This, options);
+    return E_NOTIMPL;
+}
+
+HRESULT CALLBACK ITransactionLocal_StartTransaction_Proxy(ITransactionLocal* This, ISOLEVEL level,
+    ULONG flags, ITransactionOptions *options, ULONG *trans_level)
+{
+    FIXME("(%p)->(%d, 0x%08x, %p, %p): stub\n", This, level, flags, options, trans_level);
+    return E_NOTIMPL;
+}
+
+HRESULT __RPC_STUB ITransactionLocal_StartTransaction_Stub(ITransactionLocal* This, ISOLEVEL level,
+    ULONG flags, ITransactionOptions *options, ULONG *trans_level, IErrorInfo **info)
+{
+    FIXME("(%p)->(%d, 0x%08x, %p, %p, %p): stub\n", This, level, flags, options, trans_level, info);
+    return E_NOTIMPL;
+}
+
+HRESULT CALLBACK ITransactionObject_GetTransactionObject_Proxy(ITransactionObject* This,
+    ULONG level, ITransaction **transaction)
+{
+    FIXME("(%p)->(%d, %p): stub\n", This, level, transaction);
+    return E_NOTIMPL;
+}
+
+HRESULT __RPC_STUB ITransactionObject_GetTransactionObject_Stub(ITransactionObject* This,
+    ULONG level, ITransaction **transaction, IErrorInfo **info)
+{
+    FIXME("(%p)->(%d, %p, %p): stub\n", This, level, transaction, info);
+    return E_NOTIMPL;
+}

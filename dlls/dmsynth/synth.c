@@ -84,8 +84,8 @@ static ULONG WINAPI IDirectMusicSynth8Impl_Release(IDirectMusicSynth8 *iface)
     TRACE("(%p)->(): new ref = %u\n", This, ref);
 
     if (!ref) {
-        if (This->pLatencyClock)
-            IReferenceClock_Release(This->pLatencyClock);
+        if (This->latency_clock)
+            IReferenceClock_Release(This->latency_clock);
         HeapFree(GetProcessHeap(), 0, This);
         DMSYNTH_UnlockModule();
     }
@@ -295,7 +295,10 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_GetPortCaps(IDirectMusicSynth8 *ifa
 
     TRACE("(%p)->(%p)\n", This, caps);
 
-    *caps = This->pCaps;
+    if (!caps || caps->dwSize < sizeof(*caps))
+        return E_INVALIDARG;
+
+    *caps = This->caps;
 
     return S_OK;
 }
@@ -305,9 +308,12 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_SetMasterClock(IDirectMusicSynth8 *
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, clock);
+    TRACE("(%p)->(%p)\n", This, clock);
 
-    return S_OK;
+    if (!This->sink)
+        return DMUS_E_NOSYNTHSINK;
+
+    return IDirectMusicSynthSink_SetMasterClock(This->sink, clock);
 }
 
 static HRESULT WINAPI IDirectMusicSynth8Impl_GetLatencyClock(IDirectMusicSynth8 *iface,
@@ -320,11 +326,11 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_GetLatencyClock(IDirectMusicSynth8 
     if (!clock)
         return E_POINTER;
 
-    if (!This->synth_sink)
+    if (!This->sink)
         return DMUS_E_NOSYNTHSINK;
 
-    *clock = This->pLatencyClock;
-    IReferenceClock_AddRef(This->pLatencyClock);
+    *clock = This->latency_clock;
+    IReferenceClock_AddRef(This->latency_clock);
 
     return S_OK;
 }
@@ -332,27 +338,58 @@ static HRESULT WINAPI IDirectMusicSynth8Impl_GetLatencyClock(IDirectMusicSynth8 
 static HRESULT WINAPI IDirectMusicSynth8Impl_Activate(IDirectMusicSynth8 *iface, BOOL enable)
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
+    HRESULT hr;
 
     TRACE("(%p)->(%d)\n", This, enable);
 
-    This->fActive = enable;
+    if (!This->sink)
+        return DMUS_E_NOSYNTHSINK;
+
+    if (enable == This->active) {
+        if (enable)
+            return DMUS_E_SYNTHACTIVE;
+        else
+            return S_FALSE;
+    }
+
+    if ((hr = IDirectMusicSynthSink_Activate(This->sink, enable)) != S_OK) {
+        if (hr == DMUS_E_SYNTHACTIVE || hr == S_FALSE)
+            WARN("Synth and sink active state out of sync. Fixing.\n");
+        else
+            return hr;
+    }
+
+    This->active = enable;
 
     return S_OK;
 }
 
 static HRESULT WINAPI IDirectMusicSynth8Impl_SetSynthSink(IDirectMusicSynth8 *iface,
-        IDirectMusicSynthSink *synth_sink)
+        IDirectMusicSynthSink *sink)
 {
     IDirectMusicSynth8Impl *This = impl_from_IDirectMusicSynth8(iface);
+    HRESULT hr;
 
-    TRACE("(%p)->(%p)\n", iface, synth_sink);
+    TRACE("(%p)->(%p)\n", iface, sink);
 
-    This->synth_sink = synth_sink;
+    if (sink == This->sink)
+        return S_OK;
 
-    if (synth_sink)
-        return IDirectMusicSynthSink_GetLatencyClock(synth_sink, &This->pLatencyClock);
+    if (!sink || This->sink) {
+        /* Disconnect the sink */
+        if (This->latency_clock)
+            IReferenceClock_Release(This->latency_clock);
+        IDirectMusicSynthSink_Release(This->sink);
+    }
 
-    return S_OK;
+    This->sink = sink;
+    if (!sink)
+        return S_OK;
+
+    IDirectMusicSynthSink_AddRef(This->sink);
+    if (FAILED(hr = IDirectMusicSynthSink_Init(sink, (IDirectMusicSynth *)iface)))
+        return hr;
+    return IDirectMusicSynthSink_GetLatencyClock(sink, &This->latency_clock);
 }
 
 static HRESULT WINAPI IDirectMusicSynth8Impl_Render(IDirectMusicSynth8 *iface, short *buffer,
@@ -609,17 +646,17 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicSynthImpl(REFIID riid, void **ppobj)
     obj->IKsControl_iface.lpVtbl = &DMSynthImpl_IKsControl_Vtbl;
     obj->ref = 1;
     /* fill in caps */
-    obj->pCaps.dwSize = sizeof(DMUS_PORTCAPS);
-    obj->pCaps.dwFlags = DMUS_PC_DLS | DMUS_PC_SOFTWARESYNTH | DMUS_PC_DIRECTSOUND | DMUS_PC_DLS2 | DMUS_PC_AUDIOPATH | DMUS_PC_WAVE;
-    obj->pCaps.guidPort = CLSID_DirectMusicSynth;
-    obj->pCaps.dwClass = DMUS_PC_OUTPUTCLASS;
-    obj->pCaps.dwType = DMUS_PORT_USER_MODE_SYNTH;
-    obj->pCaps.dwMemorySize = DMUS_PC_SYSTEMMEMORY;
-    obj->pCaps.dwMaxChannelGroups = 1000;
-    obj->pCaps.dwMaxVoices = 1000;
-    obj->pCaps.dwMaxAudioChannels = 2;
-    obj->pCaps.dwEffectFlags = DMUS_EFFECT_REVERB;
-    lstrcpyW(obj->pCaps.wszDescription, L"Microsoft Synthesizer");
+    obj->caps.dwSize = sizeof(DMUS_PORTCAPS);
+    obj->caps.dwFlags = DMUS_PC_DLS | DMUS_PC_SOFTWARESYNTH | DMUS_PC_DIRECTSOUND | DMUS_PC_DLS2 | DMUS_PC_AUDIOPATH | DMUS_PC_WAVE;
+    obj->caps.guidPort = CLSID_DirectMusicSynth;
+    obj->caps.dwClass = DMUS_PC_OUTPUTCLASS;
+    obj->caps.dwType = DMUS_PORT_USER_MODE_SYNTH;
+    obj->caps.dwMemorySize = DMUS_PC_SYSTEMMEMORY;
+    obj->caps.dwMaxChannelGroups = 1000;
+    obj->caps.dwMaxVoices = 1000;
+    obj->caps.dwMaxAudioChannels = 2;
+    obj->caps.dwEffectFlags = DMUS_EFFECT_REVERB;
+    lstrcpyW(obj->caps.wszDescription, L"Microsoft Synthesizer");
 
     DMSYNTH_LockModule();
     hr = IDirectMusicSynth8_QueryInterface(&obj->IDirectMusicSynth8_iface, riid, ppobj);

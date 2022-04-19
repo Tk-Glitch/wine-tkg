@@ -261,7 +261,6 @@ AC_SUBST(toolsdir,[$wine_cv_toolsdir])
 AC_SUBST(MAKEDEP,[$wine_makedep])
 AC_SUBST(RUNTESTFLAGS,["-q -P wine"])
 AC_SUBST(SED_CMD,["LC_ALL=C sed -e 's,@bindir@,\${bindir},g' -e 's,@dlldir@,\${dlldir},g' -e 's,@PACKAGE_STRING@,$PACKAGE_STRING,g' -e 's,@PACKAGE_VERSION@,$PACKAGE_VERSION,g'"])
-AC_SUBST(api_manext,[3w])
 
 if test -n "$host_alias" -a "$host_alias" != "$build_alias"
 then
@@ -701,7 +700,6 @@ case $host_os in
                                      [LDDLLFLAGS="-Wl,--disable-stdcall-fixup"]) ;;
     esac
     dnl Disable modules that can't be used on Windows
-    enable_mountmgr_sys=${enable_mountmgr_sys:-no}
     enable_loader=${enable_loader:-no}
     enable_server=${enable_server:-no}
     dnl Disable dependencies that are not useful on Windows
@@ -1996,7 +1994,8 @@ char*f(const char *h,char n) {return strchr(h,n);}]])],[ac_cv_c_logicalop_noisy=
        WINE_TRY_CFLAGS([-Wl,-delayload,autoconftest.dll],[AC_SUBST(DELAYLOADFLAG,["-Wl,-delayload,"])]) ;;
     *) MSVCRTFLAGS="-D_WIN32"
        WINE_TRY_CFLAGS([-fno-builtin],[MSVCRTFLAGS="$MSVCRTFLAGS -fno-builtin"])
-       WINE_TRY_CFLAGS([-fshort-wchar],[MSVCRTFLAGS="$MSVCRTFLAGS -fshort-wchar"]) ;;
+       WINE_TRY_CFLAGS([-fshort-wchar],[MSVCRTFLAGS="$MSVCRTFLAGS -fshort-wchar"])
+       WINE_TRY_CFLAGS([-Wno-format],[MSVCRTFLAGS="$MSVCRTFLAGS -Wno-format"]) ;;
   esac
 
   case $host_cpu in
@@ -3188,6 +3187,8 @@ WINE_CONFIG_MAKEFILE(dlls/msvcp140)
 WINE_CONFIG_MAKEFILE(dlls/msvcp140/tests)
 WINE_CONFIG_MAKEFILE(dlls/msvcp140_1)
 WINE_CONFIG_MAKEFILE(dlls/msvcp140_1/tests)
+WINE_CONFIG_MAKEFILE(dlls/msvcp140_atomic_wait)
+WINE_CONFIG_MAKEFILE(dlls/msvcp140_atomic_wait/tests)
 WINE_CONFIG_MAKEFILE(dlls/msvcp60)
 WINE_CONFIG_MAKEFILE(dlls/msvcp60/tests)
 WINE_CONFIG_MAKEFILE(dlls/msvcp70)
@@ -3562,6 +3563,8 @@ WINE_CONFIG_MAKEFILE(dlls/wlanapi/tests)
 WINE_CONFIG_MAKEFILE(dlls/wlanui)
 WINE_CONFIG_MAKEFILE(dlls/wldap32)
 WINE_CONFIG_MAKEFILE(dlls/wldap32/tests)
+WINE_CONFIG_MAKEFILE(dlls/wmadmod)
+WINE_CONFIG_MAKEFILE(dlls/wmadmod/tests)
 WINE_CONFIG_MAKEFILE(dlls/wmasf)
 WINE_CONFIG_MAKEFILE(dlls/wmi)
 WINE_CONFIG_MAKEFILE(dlls/wmiutils)
@@ -3835,10 +3838,6 @@ AC_CONFIG_COMMANDS([Makefile], [wine_fn_output_makefile Makefile],
 # uninstall:       uninstall everything
 # ctags:           create a tags file for vim and others.
 # etags:           create a TAGS file for Emacs.
-# manpages:        compile manpages for Wine API
-# htmlpages:       compile html pages for Wine API
-# sgmlpages:       compile sgml source for the Wine API Guide
-# xmlpages:        compile xml source for the Wine API Guide
 
 m4_set_foreach([_AC_SUBST_VARS],[var],[var = $var
 ])$SET_MAKE
@@ -3944,19 +3943,15 @@ dnl Rules for cleaning
 
 WINE_APPEND_RULE(
 [distclean:: clean
-	rm -rf autom4te.cache documentation/html documentation/api-guide documentation/api-guide-xml documentation/man\$(api_manext)])
-
-dnl Rules for API documentation
-
-WINE_APPEND_RULE(
-[install-manpages:: manpages
-	for i in documentation/man\$(api_manext)/*.\$(api_manext); do ${wine_srcdir}tools/install-sh -m 644 \$(INSTALL_DATA_FLAGS) \$\$i \$(DESTDIR)\$(mandir)/\$\$i; done])
+	rm -rf autom4te.cache
+maintainer-clean::
+	rm -f configure include/config.h.in])
 
 dnl Rules for generated source files
 
 WINE_APPEND_RULE(
 [dlls/ntdll/unix/version.c: dummy
-	@version=\`(echo \"wine-7.0.r0.g2fc92f8b\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
+	@version=\`(echo \"wine-7.1.r0.gf5ca8f5a\") | sed -n -e '\$\$s/\(.*\)/const char wine_build[[]] = \"\\1  ( TkG Staging Esync Fsync )\";/p'\` && (echo \$\$version | cmp -s - \$[@]) || echo \$\$version >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.rc: dummy
 	@build=\"STRINGTABLE { 1 \\\"\`GIT_DIR=${wine_srcdir}.git git rev-parse HEAD 2>/dev/null\`\\\" }\" && (echo \$\$build | cmp -s - \$[@]) || echo \$\$build >\$[@] || (rm -f \$[@] && exit 1)
 programs/winetest/build.nfo:

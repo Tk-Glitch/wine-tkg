@@ -552,21 +552,21 @@ static void test_CLSIDFromString(void)
     memset(&clsid, 0xcc, sizeof(CLSID));
     hr = CLSIDFromString(wszCLSID_Broken, &clsid);
     ok(hr == CO_E_CLASSSTRING, "Got %08x\n", hr);
-    ok(clsid.Data1 == CLSID_StdFont.Data1, "Got %08x\n", clsid.Data1);
+    ok(clsid.Data1 == CLSID_StdFont.Data1, "Got %s\n", debugstr_guid(&clsid));
     ok(clsid.Data2 == 0xcccc, "Got %04x\n", clsid.Data2);
 
     wszCLSID_Broken[3] = '*';
     memset(&clsid, 0xcc, sizeof(CLSID));
     hr = CLSIDFromString(wszCLSID_Broken, &clsid);
     ok(hr == CO_E_CLASSSTRING, "Got %08x\n", hr);
-    ok(clsid.Data1 == 0xb, "Got %08x\n", clsid.Data1);
+    ok(clsid.Data1 == 0xb, "Got %s\n", debugstr_guid(&clsid));
     ok(clsid.Data2 == 0xcccc, "Got %04x\n", clsid.Data2);
 
     wszCLSID_Broken[3] = '\0';
     memset(&clsid, 0xcc, sizeof(CLSID));
     hr = CLSIDFromString(wszCLSID_Broken, &clsid);
     ok(hr == CO_E_CLASSSTRING, "Got %08x\n", hr);
-    ok(clsid.Data1 == 0xb, "Got %08x\n", clsid.Data1);
+    ok(clsid.Data1 == 0xb, "Got %s\n", debugstr_guid(&clsid));
     ok(clsid.Data2 == 0xcccc, "Got %04x\n", clsid.Data2);
 }
 
@@ -600,36 +600,36 @@ static void test_IIDFromString(void)
     memset(&iid, 0xab, sizeof(iid));
     hr = IIDFromString(cf_brokenW, &iid);
     ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
-    ok(iid.Data1 == 0xabababab, "Got %08x\n", iid.Data1);
+    ok(iid.Data1 == 0xabababab, "Got %s\n", debugstr_guid(&iid));
 
     /* invalid IID in a valid format */
     memset(&iid, 0xab, sizeof(iid));
     hr = IIDFromString(brokenW, &iid);
     ok(hr == CO_E_IIDSTRING, "got 0x%08x\n", hr);
-    ok(iid.Data1 == 0x00000001, "Got %08x\n", iid.Data1);
+    ok(iid.Data1 == 0x00000001, "Got %s\n", debugstr_guid(&iid));
 
     memset(&iid, 0xab, sizeof(iid));
     hr = IIDFromString(broken2W, &iid);
     ok(hr == CO_E_IIDSTRING, "got 0x%08x\n", hr);
-    ok(iid.Data1 == 0x00000001, "Got %08x\n", iid.Data1);
+    ok(iid.Data1 == 0x00000001, "Got %s\n", debugstr_guid(&iid));
 
     /* format is broken, but string length is okay */
     memset(&iid, 0xab, sizeof(iid));
     hr = IIDFromString(broken3W, &iid);
     ok(hr == CO_E_IIDSTRING, "got 0x%08x\n", hr);
-    ok(iid.Data1 == 0xabababab, "Got %08x\n", iid.Data1);
+    ok(iid.Data1 == 0xabababab, "Got %s\n", debugstr_guid(&iid));
 
     /* invalid string */
     memset(&iid, 0xab, sizeof(iid));
     hr = IIDFromString(wszNonExistent, &iid);
     ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
-    ok(iid.Data1 == 0xabababab, "Got %08x\n", iid.Data1);
+    ok(iid.Data1 == 0xabababab, "Got %s\n", debugstr_guid(&iid));
 
     /* valid ProgID */
     memset(&iid, 0xab, sizeof(iid));
     hr = IIDFromString(stdfont, &iid);
     ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
-    ok(iid.Data1 == 0xabababab, "Got %08x\n", iid.Data1);
+    ok(iid.Data1 == 0xabababab, "Got %s\n", debugstr_guid(&iid));
 }
 
 static void test_StringFromGUID2(void)
@@ -3817,7 +3817,7 @@ static void test_CoGetInstanceFromFile(void)
     mqi[0].pItf = NULL;
     mqi[0].hr = E_NOTIMPL;
     hr = CoGetInstanceFromFile(NULL, NULL, NULL, CLSCTX_INPROC_SERVER, STGM_READ, (OLECHAR*)filenameW, 1, mqi);
-todo_wine
+    todo_wine
     ok(hr == MK_E_CANTOPENFILE, "got 0x%08x\n", hr);
     ok(mqi[0].pItf == NULL, "got %p\n", mqi[0].pItf);
     ok(mqi[0].hr == E_NOINTERFACE, "got 0x%08x\n", mqi[0].hr);
@@ -4186,7 +4186,7 @@ static void test_CoCreateInstanceFromApp(void)
 
     hr = CoGetClassObject(&CLSID_WineOOPTest, CLSCTX_INPROC_SERVER | CLSCTX_APPCONTAINER, NULL,
             &IID_IClassFactory, (void **)&unk);
-todo_wine
+    todo_wine
     ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
 
     hr = CoCreateInstance(&CLSID_WineOOPTest, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&unk);

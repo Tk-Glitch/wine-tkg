@@ -81,6 +81,8 @@ static ULONG WINAPI IDirectMusicSynthSinkImpl_Release(IDirectMusicSynthSink *ifa
     if (!ref) {
         if (This->latency_clock)
             IReferenceClock_Release(This->latency_clock);
+        if (This->master_clock)
+            IReferenceClock_Release(This->master_clock);
         HeapFree(GetProcessHeap(), 0, This);
         DMSYNTH_UnlockModule();
     }
@@ -94,7 +96,11 @@ static HRESULT WINAPI IDirectMusicSynthSinkImpl_Init(IDirectMusicSynthSink *ifac
 {
     IDirectMusicSynthSinkImpl *This = impl_from_IDirectMusicSynthSink(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, synth);
+    TRACE("(%p)->(%p)\n", This, synth);
+
+    /* Not holding a reference to avoid circular dependencies.
+       The synth will release the sink during the synth's destruction. */
+    This->synth = synth;
 
     return S_OK;
 }
@@ -104,7 +110,15 @@ static HRESULT WINAPI IDirectMusicSynthSinkImpl_SetMasterClock(IDirectMusicSynth
 {
     IDirectMusicSynthSinkImpl *This = impl_from_IDirectMusicSynthSink(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, clock);
+    TRACE("(%p)->(%p)\n", This, clock);
+
+    if (!clock)
+        return E_POINTER;
+    if (This->active)
+        return E_FAIL;
+
+    IReferenceClock_AddRef(clock);
+    This->master_clock = clock;
 
     return S_OK;
 }

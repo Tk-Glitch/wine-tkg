@@ -139,21 +139,16 @@ STATUSBAR_DrawSizeGrip (HTHEME theme, HDC hdc, LPRECT lpRect)
     DrawFrameControl( hdc, &rc, DFC_SCROLL, DFCS_SCROLLSIZEGRIP );
 }
 
-
 static void
 STATUSBAR_DrawPart (const STATUS_INFO *infoPtr, HDC hdc, const STATUSWINDOWPART *part, int itemID)
 {
     RECT r = part->bound;
-    UINT border = BDR_SUNKENOUTER;
+    UINT border;
     HTHEME theme = GetWindowTheme (infoPtr->Self);
     int themePart = SP_PANE;
     int x = 0;
 
     TRACE("part bound %s\n", wine_dbgstr_rect(&r));
-    if (part->style & SBT_POPOUT)
-        border = BDR_RAISEDOUTER;
-    else if (part->style & SBT_NOBORDERS)
-        border = 0;
 
     if (theme)
     {
@@ -163,7 +158,15 @@ STATUSBAR_DrawPart (const STATUS_INFO *infoPtr, HDC hdc, const STATUSWINDOWPART 
         DrawThemeBackground(theme, hdc, themePart, 0, &r, NULL);
     }
     else
+    {
+        if (part->style & SBT_POPOUT)
+            border = BDR_RAISEDOUTER;
+        else if (part->style & SBT_NOBORDERS)
+            border = 0;
+        else
+            border = BDR_SUNKENOUTER;
         DrawEdge(hdc, &r, border, BF_RECT|BF_ADJUST);
+    }
 
     if (part->hIcon) {
         INT cy = r.bottom - r.top;
@@ -183,7 +186,7 @@ STATUSBAR_DrawPart (const STATUS_INFO *infoPtr, HDC hdc, const STATUSWINDOWPART 
         SendMessageW (infoPtr->Notify, WM_DRAWITEM, dis.CtlID, (LPARAM)&dis);
     } else {
         r.left += x;
-        DrawStatusTextW (hdc, &r, part->text, SBT_NOBORDERS);
+        COMCTL32_DrawStatusText(hdc, &r, part->text, 0, FALSE);
     }
 }
 
@@ -191,32 +194,12 @@ STATUSBAR_DrawPart (const STATUS_INFO *infoPtr, HDC hdc, const STATUSWINDOWPART 
 static void
 STATUSBAR_RefreshPart (const STATUS_INFO *infoPtr, HDC hdc, const STATUSWINDOWPART *part, int itemID)
 {
-    HBRUSH hbrBk;
-    HTHEME theme;
-
     TRACE("item %d\n", itemID);
 
     if (part->bound.right < part->bound.left) return;
 
     if (!RectVisible(hdc, &part->bound))
         return;
-
-    if ((theme = GetWindowTheme (infoPtr->Self)))
-    {
-        RECT cr;
-        GetClientRect (infoPtr->Self, &cr);
-        DrawThemeBackground(theme, hdc, 0, 0, &cr, &part->bound);
-    }
-    else
-    {
-        if (infoPtr->clrBk != CLR_DEFAULT)
-                hbrBk = CreateSolidBrush (infoPtr->clrBk);
-        else
-                hbrBk = GetSysColorBrush (COLOR_3DFACE);
-        FillRect(hdc, &part->bound, hbrBk);
-        if (infoPtr->clrBk != CLR_DEFAULT)
-                DeleteObject (hbrBk);
-    }
 
     STATUSBAR_DrawPart (infoPtr, hdc, part, itemID);
 }

@@ -2007,6 +2007,23 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
         return ret ? -1 : 0;
     }
 
+    case SIO_IDEAL_SEND_BACKLOG_QUERY:
+    {
+        DWORD ret;
+
+        if (!out_buff)
+        {
+            SetLastError(WSAEFAULT);
+            return SOCKET_ERROR;
+        }
+
+        ret = server_ioctl_sock( s, IOCTL_AFD_WINE_SEND_BACKLOG_QUERY, in_buff, in_size,
+                                 out_buff, out_size, ret_size, overlapped, completion );
+        SetLastError( ret );
+        if (!ret) *ret_size = sizeof(u_long);
+        return ret ? -1 : 0;
+    }
+
     case SIOCATMARK:
     {
         DWORD ret;

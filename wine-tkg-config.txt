@@ -1,9 +1,9 @@
-# Last wine-tkg-staging-fsync-git configuration - Wed Jan 19 05:18:01 PM CET 2022 :
+# Last wine-tkg-staging-fsync-git configuration - mar. 19 avril 2022 15:54:06 CEST :
 
 External configuration file ~/.config/frogminer/wine-tkg.cfg used
 
-Wine (plain) version: 7.0.r0.gc7c729c0db7
-Using wine-staging patchset (version 7.0.r0.g2fc92f8b)
+Wine (plain) version: 7.1.r0.g594e431e36d
+Using wine-staging patchset (version 7.1.r0.gf5ca8f5a)
 
 Disabled the local Esync patchset to use Staging impl instead.
 Not using vkd3d native library for d3d12 translation (allows using vkd3d-proton)
@@ -75,23 +75,26 @@ Applied hotfix 0038-mfplat-Stub-out-MFCreateDXGIDeviceManager-to-avoid-t.myearly
 steam.patch -- ( Applied steam crossover hack )
 CSMT-toggle.patch -- ( Applied CSMT toggle logic patch )
 
-Staging overrides, if any: -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW
+Staging overrides, if any: -W xactengine3_7-callbacks -W winex11-WM_WINDOWPOSCHANGING -W winex11-_NET_ACTIVE_WINDOW
 
 use_clock_monotonic-staging.patch -- ( Applied clock_monotonic patch )
-fsync-unix-staging.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
+leagueoflolfix.patch -- ( Applied LoL 9.20+ fix - Requires vdso32 disabled (echo 0 > /proc/sys/abi/vsyscall32 and disabling libglesv2 dll) )
+fsync-unix-staging-5b56bad.patch -- ( Applied fsync, an experimental replacement for esync (unix, staging) )
 server_Abort_waiting_on_a_completion_port_when_closing_it.patch -- ( Added Abort waiting on a completion port when closing it Proton patch )
-fsync_futex_waitv.patch -- ( Replace all fsync interfaces with futex_waitv )
+fsync_futex_waitv-5b56bad.patch -- ( Replace all fsync interfaces with futex_waitv )
 
-valve_proton_fullscreen_hack-staging.patch -- ( Applied Proton fullscreen hack patch (staging) )
+valve_proton_fullscreen_hack-staging-656edbb.patch -- ( Applied Proton fullscreen hack patch (656edbb) )
 LAA-unix-staging.patch -- ( Applied large address aware override support )
 
-proton-tkg-staging.patch -- ( Using Steam-specific Proton-tkg patches (staging) 2/3 )
+proton-tkg-staging-96aa7bc.patch -- ( Using Steam-specific Proton-tkg patches (staging-96aa7bc) 2/2 )
 rdr2.patch -- ( Enable Proton's RDR2 fixes from Paul Gofman )
 proton-cpu-topology-overrides.patch -- ( Enable Proton's CPU topology override support )
 msvcrt_nativebuiltin_mainline.patch -- ( Enforce msvcrt Dlls to native then builtin (from Proton) )
 josh-flat-theme.patch -- ( Add Josh's better-theme )
 proton-win10-default-staging.patch -- ( Enforce win10 as default wine version (staging) )
 
+Applied reverting hotfix f0cd33c.myrevert
+Applied reverting hotfix f0cd33c-1.myrevert
 Applied reverting hotfix d8be858.myrevert
 Applied hotfix 0004-winevulkan1.mypatch
 Applied hotfix Return_nt_filename_and_resolve_DOS_drive_path.mypatch

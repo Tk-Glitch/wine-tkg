@@ -1203,6 +1203,36 @@ void wined3d_shader_resource_view_gl_bind(struct wined3d_shader_resource_view_gl
     wined3d_sampler_gl_bind(sampler_gl, unit, texture_gl, context_gl);
 }
 
+GLuint64 wined3d_shader_resource_view_handle(struct wined3d_shader_resource_view *view,
+        struct wined3d_sampler *sampler, struct wined3d_context_gl *context_gl)
+{
+    struct wined3d_shader_resource_view_gl *view_gl = wined3d_shader_resource_view_gl(view);
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
+    GLuint name;
+    GLuint64 handle;
+
+    if (view_gl->gl_view.name)
+    {
+        name = view_gl->gl_view.name;
+    }
+    else if (view->resource->type == WINED3D_RTYPE_BUFFER)
+    {
+        FIXME("Buffer shader resources not supported.\n");
+        return 0;
+    }
+    else
+    {
+        struct wined3d_texture_gl *texture_gl = wined3d_texture_gl(wined3d_texture_from_resource(view->resource));
+        name = wined3d_texture_get_name(texture_gl, context_gl, FALSE);
+    }
+
+    handle = GL_EXTCALL(glGetTextureSamplerHandleARB(name, wined3d_sampler_gl(sampler)->name));
+    checkGLcall("glGetTextureSamplerHandleARB");
+    GL_EXTCALL(glMakeTextureHandleResidentARB(handle));
+    checkGLcall("glMakeTextureHandleResidentARB");
+    return handle;
+}
+
 /* Context activation is done by the caller. */
 static void shader_resource_view_gl_bind_and_dirtify(struct wined3d_shader_resource_view_gl *view_gl,
         struct wined3d_context_gl *context_gl)
@@ -1985,11 +2015,16 @@ void wined3d_unordered_access_view_vk_clear(struct wined3d_unordered_access_view
 
     if (resource->type == WINED3D_RTYPE_BUFFER)
     {
+        struct wined3d_buffer *buffer = buffer_from_resource(resource);
+
         uav_location = WINED3D_LOCATION_BUFFER;
         layout = state->buffer_layout;
         vk_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
 
-        constants.extent.width  = view_desc->u.buffer.count;
+        if (buffer->structure_byte_stride)
+            constants.extent.width = view_desc->u.buffer.count * buffer->structure_byte_stride / 4;
+        else
+            constants.extent.width = view_desc->u.buffer.count;
         constants.extent.height = 1;
     }
     else

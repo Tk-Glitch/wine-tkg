@@ -354,6 +354,7 @@ static void test_rowset_interfaces(IRowset *rowset, ICommandText *commandtext)
 static void test_command_rowset(IUnknown *cmd)
 {
     ICommandText *command_text;
+    ICommandPrepare *commandprepare;
     HRESULT hr;
     IUnknown *unk = NULL;
     IRowset *rowset;
@@ -362,8 +363,21 @@ static void test_command_rowset(IUnknown *cmd)
     hr = IUnknown_QueryInterface(cmd, &IID_ICommandText, (void**)&command_text);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
+    hr = IUnknown_QueryInterface(cmd, &IID_ICommandPrepare, (void**)&commandprepare);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = ICommandText_SetCommandText(command_text, &DBGUID_DEFAULT, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = ICommandPrepare_Prepare(commandprepare, 1);
+    ok(hr == DB_E_NOCOMMAND, "got 0x%08x\n", hr);
+
     hr = ICommandText_SetCommandText(command_text, &DBGUID_DEFAULT, L"CREATE TABLE testing (col1 INT, col2 SHORT)");
     ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = ICommandPrepare_Prepare(commandprepare, 1);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ICommandPrepare_Release(commandprepare);
 
     affected = 9999;
     hr = ICommandText_Execute(command_text, NULL, &IID_IRowset, NULL, &affected, &unk);
@@ -409,6 +423,9 @@ static void test_sessions(void)
     IGetDataSource *datasource = NULL;
     ISessionProperties *session_props = NULL;
     IUnknown *unimplemented = NULL;
+    ITransaction *transaction = NULL;
+    ITransactionLocal *local = NULL;
+    ITransactionObject *object = NULL;
     ITransactionJoin *join = NULL;
     IUnknown *cmd = NULL;
     HRESULT hr;
@@ -463,10 +480,22 @@ static void test_sessions(void)
     IDBProperties_Release(dsource);
     IGetDataSource_Release(datasource);
 
-    hr = IUnknown_QueryInterface(session, &IID_ITransactionJoin, (void**)&join);
+    hr = IUnknown_QueryInterface(session, &IID_ITransaction, (void**)&transaction);
     todo_wine ok(hr == S_OK, "got 0x%08x\n", hr);
     if(hr == S_OK)
-        ITransactionJoin_Release(join);
+        ITransaction_Release(transaction);
+
+    hr = IUnknown_QueryInterface(session, &IID_ITransactionLocal, (void**)&local);
+    todo_wine ok(hr == S_OK, "got 0x%08x\n", hr);
+    if(hr == S_OK)
+        ITransactionLocal_Release(local);
+
+    hr = IUnknown_QueryInterface(session, &IID_ITransactionObject, (void**)&object);
+    ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+    hr = IUnknown_QueryInterface(session, &IID_ITransactionJoin, (void**)&join);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ITransactionJoin_Release(join);
 
     hr = IUnknown_QueryInterface(session, &IID_IBindResource, (void**)&unimplemented);
     ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);

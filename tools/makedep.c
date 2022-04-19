@@ -146,7 +146,6 @@ static const char *tools_dir;
 static const char *tools_ext;
 static const char *exe_ext;
 static const char *dll_ext;
-static const char *man_ext;
 static const char *host_cpu;
 static const char *pe_dir;
 static const char *so_dir;
@@ -209,13 +208,13 @@ struct makefile
     struct strarray test_files;
     struct strarray clean_files;
     struct strarray distclean_files;
+    struct strarray maintainerclean_files;
     struct strarray uninstall_files;
     struct strarray object_files;
     struct strarray crossobj_files;
     struct strarray unixobj_files;
     struct strarray res_files;
     struct strarray font_files;
-    struct strarray c2man_files;
     struct strarray debug_files;
     struct strarray dlldata_files;
     struct strarray implib_files;
@@ -758,7 +757,16 @@ static struct incl_file *find_include_file( const struct makefile *make, const c
     struct incl_file *file;
 
     LIST_FOR_EACH_ENTRY( file, &make->includes, struct incl_file, entry )
-        if (!strcmp( name, file->name )) return file;
+    {
+        const char *filename = file->filename;
+        if (!filename) continue;
+        if (make->obj_dir && strlen(make->obj_dir) < strlen(filename))
+        {
+            filename += strlen(make->obj_dir);
+            while (*filename == '/') filename++;
+        }
+        if (!strcmp( name, filename )) return file;
+    }
     return NULL;
 }
 
@@ -1206,6 +1214,28 @@ static struct file *open_file_same_dir( const struct incl_file *parent, const ch
 
 
 /*******************************************************************
+ *         open_same_dir_generated_file
+ *
+ * Open a generated_file in the same directory as the parent.
+ */
+static struct file *open_same_dir_generated_file( const struct makefile *make,
+                                                  const struct incl_file *parent, struct incl_file *file,
+                                                  const char *ext, const char *src_ext )
+{
+    char *filename;
+    struct file *ret = NULL;
+
+    if (strendswith( file->name, ext ) &&
+        (ret = open_file_same_dir( parent, replace_extension( file->name, ext, src_ext ), &filename )))
+    {
+        file->sourcename = filename;
+        file->filename = obj_dir_path( make, replace_filename( parent->name, file->name ));
+    }
+    return ret;
+}
+
+
+/*******************************************************************
  *         open_local_file
  *
  * Open a file in the source directory of the makefile.
@@ -1225,6 +1255,27 @@ static struct file *open_local_file( const struct makefile *make, const char *pa
     }
 
     if (ret) *filename = src_path;
+    return ret;
+}
+
+
+/*******************************************************************
+ *         open_local_generated_file
+ *
+ * Open a generated file in the directory of the makefile.
+ */
+static struct file *open_local_generated_file( const struct makefile *make, struct incl_file *file,
+                                               const char *ext, const char *src_ext )
+{
+    char *filename;
+    struct file *ret = NULL;
+
+    if (strendswith( file->name, ext ) &&
+        (ret = open_local_file( make, replace_extension( file->name, ext, src_ext ), &filename )))
+    {
+        file->sourcename = filename;
+        file->filename = obj_dir_path( make, file->name );
+    }
     return ret;
 }
 
@@ -1253,6 +1304,27 @@ static struct file *open_global_header( const struct makefile *make, const char 
 {
     if (!strncmp( path, "../", 3 )) return NULL;
     return open_global_file( make, strmake( "include/%s", path ), filename );
+}
+
+
+/*******************************************************************
+ *         open_global_generated_file
+ *
+ * Open a generated file in the top-level source directory.
+ */
+static struct file *open_global_generated_file( const struct makefile *make, struct incl_file *file,
+                                                const char *ext, const char *src_ext )
+{
+    char *filename;
+    struct file *ret = NULL;
+
+    if (strendswith( file->name, ext ) &&
+        (ret = open_global_header( make, replace_extension( file->name, ext, src_ext ), &filename )))
+    {
+        file->sourcename = filename;
+        file->filename = strmake( "include/%s", file->name );
+    }
+    return ret;
 }
 
 
@@ -1308,29 +1380,19 @@ static int has_external_import( const struct makefile *make )
 static struct file *open_include_file( const struct makefile *make, struct incl_file *pFile )
 {
     struct file *file = NULL;
-    char *filename;
     unsigned int i, len;
 
     errno = ENOENT;
 
-    /* check for generated bison header */
-
-    if (strendswith( pFile->name, ".tab.h" ) &&
-        (file = open_local_file( make, replace_extension( pFile->name, ".tab.h", ".y" ), &filename )))
+    /* check for generated files */
+    if ((file = open_local_generated_file( make, pFile, ".tab.h", ".y" ))) return file;
+    if ((file = open_local_generated_file( make, pFile, ".h", ".idl" ))) return file;
+    if (fontforge && (file = open_local_generated_file( make, pFile, ".ttf", ".sfd" ))) return file;
+    if (convert && rsvg && icotool)
     {
-        pFile->sourcename = filename;
-        pFile->filename = obj_dir_path( make, pFile->name );
-        return file;
-    }
-
-    /* check for corresponding idl file in source dir */
-
-    if (strendswith( pFile->name, ".h" ) &&
-        (file = open_local_file( make, replace_extension( pFile->name, ".h", ".idl" ), &filename )))
-    {
-        pFile->sourcename = filename;
-        pFile->filename = obj_dir_path( make, pFile->name );
-        return file;
+        if ((file = open_local_generated_file( make, pFile, ".bmp", ".svg" ))) return file;
+        if ((file = open_local_generated_file( make, pFile, ".cur", ".svg" ))) return file;
+        if ((file = open_local_generated_file( make, pFile, ".ico", ".svg" ))) return file;
     }
 
     /* check for extra targets */
@@ -1345,45 +1407,19 @@ static struct file *open_include_file( const struct makefile *make, struct incl_
     if ((file = open_local_file( make, pFile->name, &pFile->filename ))) return file;
 
     /* check for global importlib (module dependency) */
-
     if (pFile->type == INCL_IMPORTLIB && find_importlib_module( pFile->name ))
     {
         pFile->filename = pFile->name;
         return NULL;
     }
 
-    /* check for corresponding idl file in global includes */
-
-    if (strendswith( pFile->name, ".h" ) &&
-        (file = open_global_header( make, replace_extension( pFile->name, ".h", ".idl" ), &filename )))
-    {
-        pFile->sourcename = filename;
-        pFile->filename = strmake( "include/%s", pFile->name );
-        return file;
-    }
-
-    /* check for corresponding .in file in global includes (for config.h.in) */
-
-    if (strendswith( pFile->name, ".h" ) &&
-        (file = open_global_header( make, replace_extension( pFile->name, ".h", ".h.in" ), &filename )))
-    {
-        pFile->sourcename = filename;
-        pFile->filename = strmake( "include/%s", pFile->name );
-        return file;
-    }
-
-    /* check for corresponding .x file in global includes */
-
+    /* check for generated files in global includes */
+    if ((file = open_global_generated_file( make, pFile, ".h", ".idl" ))) return file;
+    if ((file = open_global_generated_file( make, pFile, ".h", ".h.in" ))) return file;
     if (strendswith( pFile->name, "tmpl.h" ) &&
-        (file = open_global_header( make, replace_extension( pFile->name, ".h", ".x" ), &filename )))
-    {
-        pFile->sourcename = filename;
-        pFile->filename = strmake( "include/%s", pFile->name );
-        return file;
-    }
+        (file = open_global_generated_file( make, pFile, ".h", ".x" ))) return file;
 
     /* check in global includes source dir */
-
     if ((file = open_global_header( make, pFile->name, &pFile->filename ))) return file;
 
     /* check in global msvcrt includes */
@@ -1429,7 +1465,9 @@ static struct file *open_include_file( const struct makefile *make, struct incl_
     if (pFile->type == INCL_SYSTEM) return NULL;  /* ignore system files we cannot find */
 
     /* try in src file directory */
-    if ((file = open_file_same_dir( pFile->included_by, pFile->name, &pFile->filename )))
+    if ((file = open_same_dir_generated_file( make, pFile->included_by, pFile, ".tab.h", ".y" )) ||
+        (file = open_same_dir_generated_file( make, pFile->included_by, pFile, ".h", ".idl" )) ||
+        (file = open_file_same_dir( pFile->included_by, pFile->name, &pFile->filename )))
     {
         pFile->is_external = pFile->included_by->is_external;
         return file;
@@ -2546,7 +2584,7 @@ static void output_uninstall_rules( struct makefile *make )
 /*******************************************************************
  *         output_po_files
  */
-static void output_po_files( const struct makefile *make )
+static void output_po_files( struct makefile *make )
 {
     const char *po_dir = src_dir_path( make, "po" );
     unsigned int i;
@@ -2558,7 +2596,7 @@ static void output_po_files( const struct makefile *make )
         output( ": %s/wine.pot\n", po_dir );
         output( "\t%smsgmerge --previous -q $@ %s/wine.pot | msgattrib --no-obsolete -o $@.new && mv $@.new $@\n",
                 cmd_prefix( "MSG" ), po_dir );
-        output( "po:" );
+        output( "po/all:" );
         for (i = 0; i < linguas.count; i++)
             output_filename( strmake( "%s/%s.po", po_dir, linguas.str[i] ));
         output( "\n" );
@@ -2569,6 +2607,7 @@ static void output_po_files( const struct makefile *make )
     output( "\t%smsgcat -o $@", cmd_prefix( "MSG" ));
     output_filenames( make->pot_files );
     output( "\n" );
+    strarray_add( &make->maintainerclean_files, strmake( "%s/wine.pot", po_dir ));
 }
 
 
@@ -2583,15 +2622,15 @@ static void output_source_y( struct makefile *make, struct incl_file *source, co
     if (find_include_file( make, header ))
     {
         output( "%s: %s\n", obj_dir_path( make, header ), source->filename );
-        output( "\t%s%s -p %s_ -o %s.tab.c -d %s\n",
-                cmd_prefix( "BISON" ), bison, obj, obj_dir_path( make, obj ), source->filename );
+        output( "\t%s%s -o %s.tab.c -d %s\n",
+                cmd_prefix( "BISON" ), bison, obj_dir_path( make, obj ), source->filename );
         output( "%s.tab.c: %s %s\n", obj_dir_path( make, obj ),
                 source->filename, obj_dir_path( make, header ));
         strarray_add( &make->clean_files, header );
     }
     else output( "%s.tab.c: %s\n", obj_dir_path( make, obj ), source->filename );
 
-    output( "\t%s%s -p %s_ -o $@ %s\n", cmd_prefix( "BISON" ), bison, obj, source->filename );
+    output( "\t%s%s -o $@ %s\n", cmd_prefix( "BISON" ), bison, source->filename );
 }
 
 
@@ -2780,6 +2819,7 @@ static void output_source_sfd( struct makefile *make, struct incl_file *source, 
         output( "\t%s%s -script %s %s $@\n", cmd_prefix( "GEN" ),
                 fontforge, root_src_dir_path( "fonts/genttf.ff" ), source->filename );
         if (!(source->file->flags & FLAG_SFD_FONTS)) strarray_add( &make->font_files, ttf_obj );
+        strarray_add( &make->maintainerclean_files, ttf_obj );
     }
     if (source->file->flags & FLAG_INSTALL)
     {
@@ -2815,7 +2855,7 @@ static void output_source_svg( struct makefile *make, struct incl_file *source, 
     static const char * const images[] = { "bmp", "cur", "ico", NULL };
     unsigned int i;
 
-    if (convert && rsvg && icotool && !make->src_dir)
+    if (convert && rsvg && icotool)
     {
         for (i = 0; images[i]; i++)
             if (find_include_file( make, strmake( "%s.%s", obj, images[i] ))) break;
@@ -2826,6 +2866,7 @@ static void output_source_svg( struct makefile *make, struct incl_file *source, 
             output( "\t%sCONVERT=\"%s\" ICOTOOL=\"%s\" RSVG=\"%s\" %s %s $@\n",
                     cmd_prefix( "GEN" ), convert, icotool, rsvg,
                     root_src_dir_path( "tools/buildimage" ), source->filename );
+            strarray_add( &make->maintainerclean_files, strmake( "%s.%s", obj, images[i] ));
         }
     }
 }
@@ -2986,6 +3027,7 @@ static void output_source_default( struct makefile *make, struct incl_file *sour
         output( "%s.o: %s\n", obj_dir_path( make, obj ), source->filename );
         output( "\t%s$(CC) -c -o $@ %s", cmd_prefix( "CC" ), source->filename );
         output_filenames( defines );
+        output_filenames( make->extlib ? extra_cflags_extlib : extra_cflags );
         if (make->sharedlib || (source->file->flags & FLAG_C_UNIX))
         {
             output_filenames( unix_dllflags );
@@ -2997,7 +3039,6 @@ static void output_source_default( struct makefile *make, struct incl_file *sour
             if (!*dll_ext && make->module && is_crt_module( make->module ))
                 output_filename( "-fno-builtin" );
         }
-        output_filenames( make->extlib ? extra_cflags_extlib : extra_cflags );
         output_filenames( cpp_flags );
         output_filename( "$(CFLAGS)" );
         output( "\n" );
@@ -3016,24 +3057,26 @@ static void output_source_default( struct makefile *make, struct incl_file *sour
         output_filenames( make->extlib ? extra_cross_cflags_extlib : extra_cross_cflags );
         if (make->module && is_crt_module( make->module ))
             output_filename( "-fno-builtin" );
+        /* force -Wformat when using 'long' types, until all modules have been converted
+         * and we can remove -Wno-format */
+        if (!make->extlib && strarray_exists( &extra_cross_cflags, "-Wno-format" ) &&
+            !strarray_exists( &defines, "-DWINE_NO_LONG_TYPES" ))
+            output_filename( "-Wformat" );
         output_filenames( cpp_flags );
         output_filename( "$(CROSSCFLAGS)" );
         output( "\n" );
     }
-    if (strendswith( source->name, ".c" ) && !(source->file->flags & FLAG_GENERATED))
+    if (make->testdll && !is_dll_src && strendswith( source->name, ".c" ) &&
+        !(source->file->flags & FLAG_GENERATED))
     {
-        strarray_add( &make->c2man_files, source->filename );
-        if (make->testdll && !is_dll_src)
-        {
-            strarray_add( &make->test_files, obj );
-            strarray_add( &make->ok_files, strmake( "%s.ok", obj ));
-            output( "%s.ok:\n", obj_dir_path( make, obj ));
-            output( "\t%s%s $(RUNTESTFLAGS) -T . -M %s -p %s%s %s && touch $@\n",
-                    cmd_prefix( "TEST" ),
-                    root_src_dir_path( "tools/runtest" ), make->testdll,
-                    obj_dir_path( make, replace_extension( make->testdll, ".dll", "_test.exe" )),
-                    make->is_cross ? "" : dll_ext, obj );
-        }
+        strarray_add( &make->test_files, obj );
+        strarray_add( &make->ok_files, strmake( "%s.ok", obj ));
+        output( "%s.ok:\n", obj_dir_path( make, obj ));
+        output( "\t%s%s $(RUNTESTFLAGS) -T . -M %s -p %s%s %s && touch $@\n",
+                cmd_prefix( "TEST" ),
+                root_src_dir_path( "tools/runtest" ), make->testdll,
+                obj_dir_path( make, replace_extension( make->testdll, ".dll", "_test.exe" )),
+                make->is_cross ? "" : dll_ext, obj );
     }
     if (need_obj) output_filename( strmake( "%s.o", obj_dir_path( make, obj )));
     if (need_cross) output_filename( strmake( "%s.cross.o", obj_dir_path( make, obj )));
@@ -3085,51 +3128,6 @@ static char *get_unix_lib_name( struct makefile *make )
         return strmake( "%s%s", get_base_name( make->module ), dll_ext );
     }
     return NULL;
-}
-
-
-/*******************************************************************
- *         output_man_pages
- */
-static void output_man_pages( struct makefile *make )
-{
-    if (make->c2man_files.count)
-    {
-        char *spec_file = src_dir_path( make, replace_extension( make->module, ".dll", ".spec" ));
-
-        output( "manpages::\n" );
-        output( "\t%s -w %s", root_src_dir_path( "tools/c2man.pl" ), spec_file );
-        output_filename( strmake( "-R%s", root_src_dir_path( "" )));
-        output_filename( strmake( "-I%s", root_src_dir_path( "include" )));
-        output_filename( strmake( "-o documentation/man%s", man_ext ));
-        output_filenames( make->c2man_files );
-        output( "\n" );
-        output( "htmlpages::\n" );
-        output( "\t%s -Th -w %s", root_src_dir_path( "tools/c2man.pl" ), spec_file );
-        output_filename( strmake( "-R%s", root_src_dir_path( "" )));
-        output_filename( strmake( "-I%s", root_src_dir_path( "include" )));
-        output_filename( "-o documentation/html" );
-        output_filenames( make->c2man_files );
-        output( "\n" );
-        output( "sgmlpages::\n" );
-        output( "\t%s -Ts -w %s", root_src_dir_path( "tools/c2man.pl" ), spec_file );
-        output_filename( strmake( "-R%s", root_src_dir_path( "" )));
-        output_filename( strmake( "-I%s", root_src_dir_path( "include" )));
-        output_filename( "-o documentation/api-guide" );
-        output_filenames( make->c2man_files );
-        output( "\n" );
-        output( "xmlpages::\n" );
-        output( "\t%s -Tx -w %s", root_src_dir_path( "tools/c2man.pl" ), spec_file );
-        output_filename( strmake( "-R%s", root_src_dir_path( "" )));
-        output_filename( strmake( "-I%s", root_src_dir_path( "include" )));
-        output_filename( "-o documentation/api-guide-xml" );
-        output_filenames( make->c2man_files );
-        output( "\n" );
-        strarray_add( &make->phony_targets, "manpages" );
-        strarray_add( &make->phony_targets, "htmlpages" );
-        strarray_add( &make->phony_targets, "sgmlpages" );
-        strarray_add( &make->phony_targets, "xmlpages" );
-    }
 }
 
 
@@ -3202,9 +3200,7 @@ static void output_module( struct makefile *make )
     output_filename( make->is_cross ? "-Wl,--file-alignment,4096" : "" );
     output( "\n" );
 
-    if (spec_file)
-        output_man_pages( make );
-    else if (*dll_ext && !make->is_win16 && strendswith( make->module, ".exe" ))
+    if (*dll_ext && make->is_exe && !make->is_win16 && strendswith( make->module, ".exe" ))
     {
         char *binary = replace_extension( make->module, ".exe", "" );
         add_install_rule( make, binary, "wineapploader", strmake( "t$(bindir)/%s", binary ));
@@ -3580,12 +3576,14 @@ static void output_subdirs( struct makefile *make )
         strarray_addall_uniq( &dependencies, submakes[i]->dependencies );
         strarray_addall_path( &clean_files, submakes[i]->obj_dir, submakes[i]->clean_files );
         strarray_addall_path( &distclean_files, submakes[i]->obj_dir, submakes[i]->distclean_files );
+        strarray_addall_path( &make->maintainerclean_files, submakes[i]->obj_dir, submakes[i]->maintainerclean_files );
         strarray_addall_path( &testclean_files, submakes[i]->obj_dir, submakes[i]->ok_files );
         strarray_addall_path( &make->pot_files, submakes[i]->obj_dir, submakes[i]->pot_files );
 
         if (submakes[i]->disabled) continue;
 
         strarray_addall_path( &all_targets, submakes[i]->obj_dir, submakes[i]->all_targets );
+        strarray_addall_path( &all_targets, submakes[i]->obj_dir, submakes[i]->font_files );
         if (!strcmp( submakes[i]->obj_dir, "tools" ) || !strncmp( submakes[i]->obj_dir, "tools/", 6 ))
             strarray_add( &tooldeps_deps, obj_dir_path( submakes[i], "all" ));
         if (submakes[i]->testdll)
@@ -3634,14 +3632,19 @@ static void output_subdirs( struct makefile *make )
     strarray_add_uniq( &make->phony_targets, "check" );
     strarray_add_uniq( &make->phony_targets, "test" );
 
+    if (get_expanded_make_variable( make, "GETTEXTPO_LIBS" )) output_po_files( make );
+
     output( "clean::\n");
     output_rm_filenames( clean_files );
     output( "testclean::\n");
     output_rm_filenames( testclean_files );
     output( "distclean::\n");
     output_rm_filenames( distclean_files );
+    output( "maintainer-clean::\n");
+    output_rm_filenames( make->maintainerclean_files );
     strarray_add_uniq( &make->phony_targets, "distclean" );
     strarray_add_uniq( &make->phony_targets, "testclean" );
+    strarray_add_uniq( &make->phony_targets, "maintainer-clean" );
 
     if (tooldeps_deps.count)
     {
@@ -3650,8 +3653,6 @@ static void output_subdirs( struct makefile *make )
         output( "\n" );
         strarray_add_uniq( &make->phony_targets, "__tooldeps__" );
     }
-
-    if (get_expanded_make_variable( make, "GETTEXTPO_LIBS" )) output_po_files( make );
 
     if (make->phony_targets.count)
     {
@@ -4319,7 +4320,6 @@ int main( int argc, char *argv[] )
     tools_dir          = get_expanded_make_variable( top_makefile, "toolsdir" );
     tools_ext          = get_expanded_make_variable( top_makefile, "toolsext" );
     exe_ext            = get_expanded_make_variable( top_makefile, "EXEEXT" );
-    man_ext            = get_expanded_make_variable( top_makefile, "api_manext" );
     dll_ext            = (exe_ext && !strcmp( exe_ext, ".exe" )) ? "" : ".so";
     host_cpu           = get_expanded_make_variable( top_makefile, "host_cpu" );
     crosstarget        = get_expanded_make_variable( top_makefile, "CROSSTARGET" );
@@ -4341,7 +4341,6 @@ int main( int argc, char *argv[] )
     if (tools_dir && !strcmp( tools_dir, "." )) tools_dir = NULL;
     if (!exe_ext) exe_ext = "";
     if (!tools_ext) tools_ext = "";
-    if (!man_ext) man_ext = "3w";
     if (host_cpu && (host_cpu = normalize_arch( host_cpu )))
     {
         so_dir = strmake( "$(dlldir)/%s-unix", host_cpu );

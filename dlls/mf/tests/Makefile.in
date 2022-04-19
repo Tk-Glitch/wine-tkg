@@ -1,5 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
 TESTDLL   = mf.dll
-IMPORTS   = mf mfplat mfuuid ole32 user32
+IMPORTS   = mf mfplat mfuuid ole32 user32 propsys
 
 C_SRCS = \
 	mf.c

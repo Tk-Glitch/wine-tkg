@@ -56,6 +56,7 @@
 #define NSWindowStyleMaskResizable          NSResizableWindowMask
 #define NSWindowStyleMaskTitled             NSTitledWindowMask
 #define NSWindowStyleMaskUtilityWindow      NSUtilityWindowMask
+#define NSWindowStyleMaskNonactivatingPanel NSNonactivatingPanelMask
 #endif
 
 #define ERR(...) do { if (macdrv_err_on) LogError(__func__, __VA_ARGS__); } while (false)
@@ -68,6 +69,7 @@ enum {
 
 @class WineEventQueue;
 @class WineWindow;
+@protocol WineClipCursorHandler;
 
 
 @interface WineApplicationController : NSObject <NSApplicationDelegate>
@@ -118,13 +120,9 @@ enum {
     BOOL        cursorHidden;
     BOOL        clientWantsCursorHidden;
 
-    BOOL clippingCursor;
-    CGRect cursorClipRect;
-    CFMachPortRef cursorClippingEventTap;
-    NSMutableArray* warpRecords;
-    CGPoint synthesizedLocation;
     NSTimeInterval lastSetCursorPositionTime;
-    NSTimeInterval lastEventTapEventTime;
+
+    id<WineClipCursorHandler> clipCursorHandler;
 
     NSImage* applicationIcon;
 
@@ -139,10 +137,11 @@ enum {
 @property (readonly, nonatomic) BOOL areDisplaysCaptured;
 
 @property (readonly) BOOL clippingCursor;
+@property (nonatomic) NSTimeInterval lastSetCursorPositionTime;
 
     + (WineApplicationController*) sharedController;
 
-    - (void) transformProcessToForeground;
+    - (void) transformProcessToForeground:(BOOL)activateIfTransformed;
 
     - (BOOL) registerEventQueue:(WineEventQueue*)queue;
     - (void) unregisterEventQueue:(WineEventQueue*)queue;
@@ -160,6 +159,7 @@ enum {
     - (void) windowWillOrderOut:(WineWindow*)window;
 
     - (void) flipRect:(NSRect*)rect;
+    - (NSPoint) flippedMouseLocation:(NSPoint)point;
 
     - (WineWindow*) frontWineWindow;
     - (void) adjustWindowLevels;

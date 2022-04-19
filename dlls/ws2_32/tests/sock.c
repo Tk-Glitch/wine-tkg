@@ -6065,8 +6065,9 @@ static void test_WSASendTo(void)
     struct sockaddr_in addr, ret_addr;
     char buf[12] = "hello world";
     WSABUF data_buf;
-    DWORD bytesSent;
+    DWORD bytesSent, size;
     int ret, len;
+    ULONG backlog = 0;
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(139);
@@ -6102,6 +6103,11 @@ static void test_WSASendTo(void)
     ok(!ret, "got error %u\n", WSAGetLastError());
     ok(ret_addr.sin_family == AF_INET, "got family %u\n", ret_addr.sin_family);
     ok(ret_addr.sin_port, "expected nonzero port\n");
+
+    ret = WSAIoctl(s, SIO_IDEAL_SEND_BACKLOG_QUERY, NULL, 0, &backlog, sizeof(backlog), &size, NULL, NULL);
+    ok(ret == SOCKET_ERROR && WSAGetLastError() == WSAEOPNOTSUPP,
+       "WSAIoctl() failed: %d/%d\n", ret, WSAGetLastError());
+    closesocket(s);
 }
 
 static DWORD WINAPI recv_thread(LPVOID arg)
@@ -6142,6 +6148,7 @@ static void test_WSARecv(void)
     DWORD dwret;
     BOOL bret;
     HANDLE thread, event = NULL, io_port;
+    ULONG backlog = 0, size;
 
     tcp_socketpair(&src, &dest);
 
@@ -6289,6 +6296,10 @@ static void test_WSARecv(void)
     ok(!completion_called, "completion called\n");
 
     CloseHandle(io_port);
+
+    iret = WSAIoctl(src, SIO_IDEAL_SEND_BACKLOG_QUERY, NULL, 0, &backlog, sizeof(backlog), &size, NULL, NULL);
+    ok(!iret, "WSAIoctl() failed: %d/%d\n", iret, WSAGetLastError());
+    ok(backlog == 0x10000, "got %08x\n", backlog);
 
 end:
     if (server != INVALID_SOCKET)

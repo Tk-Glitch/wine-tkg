@@ -1,3 +1,4 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = winemac.drv
 IMPORTS   = uuid rpcrt4 user32 gdi32 advapi32 win32u
 DELAYIMPORTS = ole32 shell32 imm32
@@ -25,6 +26,7 @@ C_SRCS = \
 OBJC_SRCS = \
 	cocoa_app.m \
 	cocoa_clipboard.m \
+	cocoa_cursorclipping.m \
 	cocoa_display.m \
 	cocoa_event.m \
 	cocoa_main.m \
